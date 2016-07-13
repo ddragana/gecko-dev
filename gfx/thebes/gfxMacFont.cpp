@@ -61,10 +61,11 @@ gfxMacFont::gfxMacFont(MacOSFontEntry *aFontEntry, const gfxFontStyle *aFontStyl
     cairo_matrix_init_scale(&sizeMatrix, mAdjustedSize, mAdjustedSize);
 
     // synthetic oblique by skewing via the font matrix
-    bool needsOblique = mFontEntry != nullptr &&
-                        mFontEntry->IsUpright() &&
-                        mStyle.style != NS_FONT_STYLE_NORMAL &&
-                        mStyle.allowSyntheticStyle;
+    bool needsOblique =
+        (mFontEntry != nullptr) &&
+        (!mFontEntry->IsItalic() &&
+         (mStyle.style & (NS_FONT_STYLE_ITALIC | NS_FONT_STYLE_OBLIQUE))) &&
+        mStyle.allowSyntheticStyle;
 
     if (needsOblique) {
         cairo_matrix_t style;
@@ -120,11 +121,11 @@ gfxMacFont::~gfxMacFont()
 }
 
 bool
-gfxMacFont::ShapeText(DrawTarget     *aDrawTarget,
+gfxMacFont::ShapeText(gfxContext     *aContext,
                       const char16_t *aText,
                       uint32_t        aOffset,
                       uint32_t        aLength,
-                      Script          aScript,
+                      int32_t         aScript,
                       bool            aVertical,
                       gfxShapedText  *aShapedText)
 {
@@ -138,43 +139,43 @@ gfxMacFont::ShapeText(DrawTarget     *aDrawTarget,
     if (static_cast<MacOSFontEntry*>(GetFontEntry())->RequiresAATLayout() &&
         !aVertical) {
         if (!mCoreTextShaper) {
-            mCoreTextShaper = MakeUnique<gfxCoreTextShaper>(this);
+            mCoreTextShaper = new gfxCoreTextShaper(this);
         }
-        if (mCoreTextShaper->ShapeText(aDrawTarget, aText, aOffset, aLength,
+        if (mCoreTextShaper->ShapeText(aContext, aText, aOffset, aLength,
                                        aScript, aVertical, aShapedText)) {
-            PostShapingFixup(aDrawTarget, aText, aOffset,
-                             aLength, aVertical, aShapedText);
+            PostShapingFixup(aContext, aText, aOffset, aLength, aVertical,
+                             aShapedText);
             return true;
         }
     }
 
-    return gfxFont::ShapeText(aDrawTarget, aText, aOffset, aLength, aScript,
+    return gfxFont::ShapeText(aContext, aText, aOffset, aLength, aScript,
                               aVertical, aShapedText);
 }
 
 bool
-gfxMacFont::SetupCairoFont(DrawTarget* aDrawTarget)
+gfxMacFont::SetupCairoFont(gfxContext *aContext)
 {
     if (cairo_scaled_font_status(mScaledFont) != CAIRO_STATUS_SUCCESS) {
         // Don't cairo_set_scaled_font as that would propagate the error to
         // the cairo_t, precluding any further drawing.
         return false;
     }
-    cairo_set_scaled_font(gfxFont::RefCairo(aDrawTarget), mScaledFont);
+    cairo_set_scaled_font(aContext->GetCairo(), mScaledFont);
     return true;
 }
 
 gfxFont::RunMetrics
-gfxMacFont::Measure(const gfxTextRun *aTextRun,
+gfxMacFont::Measure(gfxTextRun *aTextRun,
                     uint32_t aStart, uint32_t aEnd,
                     BoundingBoxType aBoundingBoxType,
-                    DrawTarget *aRefDrawTarget,
+                    gfxContext *aRefContext,
                     Spacing *aSpacing,
                     uint16_t aOrientation)
 {
     gfxFont::RunMetrics metrics =
         gfxFont::Measure(aTextRun, aStart, aEnd,
-                         aBoundingBoxType, aRefDrawTarget, aSpacing,
+                         aBoundingBoxType, aRefContext, aSpacing,
                          aOrientation);
 
     // if aBoundingBoxType is not TIGHT_HINTED_OUTLINE_EXTENTS then we need to add

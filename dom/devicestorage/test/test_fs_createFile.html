@@ -21,7 +21,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=910412
 <pre id="test">
 <script class="testbody" type="application/javascript;version=1.7">
 
-devicestorage_setup(function () {
+devicestorage_setup();
 
 let gTestCount = 0;
 let gFileReader = new FileReader();
@@ -84,7 +84,7 @@ let gTestCases = [
 
 function next() {
   if (gTestCount >= gTestCases.length) {
-    SimpleTest.finish();
+    devicestorage_cleanup();
     return;
   }
   let c = gTestCases[gTestCount++];
@@ -122,12 +122,11 @@ storage.getRoot().then(function(dir) {
   next();
 }, function(e) {
   ok(false, e.name + " error should not arrive here!");
-  SimpleTest.finish();
-});
-
+  devicestorage_cleanup();
 });
 
 </script>
 </pre>
 </body>
 </html>
+

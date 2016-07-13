@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_indexeddb_fileinfo_h__
 #define mozilla_dom_indexeddb_fileinfo_h__
 
+#include "nsAutoPtr.h"
 #include "nsISupportsImpl.h"
 
 namespace mozilla {
@@ -23,11 +24,9 @@ class FileInfo
   ThreadSafeAutoRefCnt mDBRefCnt;
   ThreadSafeAutoRefCnt mSliceRefCnt;
 
-  RefPtr<FileManager> mFileManager;
+  nsRefPtr<FileManager> mFileManager;
 
 public:
-  class CustomCleanupCallback;
-
   static
   FileInfo* Create(FileManager* aFileManager, int64_t aId);
 
@@ -40,9 +39,9 @@ public:
   }
 
   void
-  Release(CustomCleanupCallback* aCustomCleanupCallback = nullptr)
+  Release()
   {
-    UpdateReferences(mRefCnt, -1, aCustomCleanupCallback);
+    UpdateReferences(mRefCnt, -1);
   }
 
   void
@@ -75,25 +74,13 @@ protected:
 private:
   void
   UpdateReferences(ThreadSafeAutoRefCnt& aRefCount,
-                   int32_t aDelta,
-                   CustomCleanupCallback* aCustomCleanupCallback = nullptr);
+                   int32_t aDelta);
 
   bool
   LockedClearDBRefs();
 
   void
   Cleanup();
-};
-
-class NS_NO_VTABLE FileInfo::CustomCleanupCallback
-{
-public:
-  virtual nsresult
-  Cleanup(FileManager* aFileManager, int64_t aId) = 0;
-
-protected:
-  CustomCleanupCallback()
-  { }
 };
 
 } // namespace indexedDB

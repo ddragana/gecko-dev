@@ -6,17 +6,16 @@
 #include "nsHtml5ViewSourceUtils.h"
 #include "nsHtml5AttributeName.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/UniquePtr.h"
 
 // static
 nsHtml5HtmlAttributes*
 nsHtml5ViewSourceUtils::NewBodyAttributes()
 {
   nsHtml5HtmlAttributes* bodyAttrs = new nsHtml5HtmlAttributes(0);
-  auto id = MakeUnique<nsString>(NS_LITERAL_STRING("viewsource"));
-  bodyAttrs->addAttribute(nsHtml5AttributeName::ATTR_ID, id.release());
+  nsString* id = new nsString(NS_LITERAL_STRING("viewsource"));
+  bodyAttrs->addAttribute(nsHtml5AttributeName::ATTR_ID, id);
 
-  auto klass = MakeUnique<nsString>();
+  nsString* klass = new nsString();
   if (mozilla::Preferences::GetBool("view_source.wrap_long_lines", true)) {
     klass->Append(NS_LITERAL_STRING("wrap "));
   }
@@ -24,14 +23,14 @@ nsHtml5ViewSourceUtils::NewBodyAttributes()
     klass->Append(NS_LITERAL_STRING("highlight"));
   }
   if (!klass->IsEmpty()) {
-    bodyAttrs->addAttribute(nsHtml5AttributeName::ATTR_CLASS, klass.release());
+    bodyAttrs->addAttribute(nsHtml5AttributeName::ATTR_CLASS, klass);
   }
 
   int32_t tabSize = mozilla::Preferences::GetInt("view_source.tab_size", 4);
   if (tabSize > 0) {
-    auto style = MakeUnique<nsString>(NS_LITERAL_STRING("-moz-tab-size: "));
+    nsString* style = new nsString(NS_LITERAL_STRING("-moz-tab-size: "));
     style->AppendInt(tabSize);
-    bodyAttrs->addAttribute(nsHtml5AttributeName::ATTR_STYLE, style.release());
+    bodyAttrs->addAttribute(nsHtml5AttributeName::ATTR_STYLE, style);
   }
 
   return bodyAttrs;

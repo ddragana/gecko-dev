@@ -408,14 +408,14 @@ IsBadExecPtr(uintptr_t aPtr)
 {
   BOOL ret = false;
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
   __try {
     JumpTo(aPtr);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     ret = true;
   }
 #else
-  printf("INFO | exec test not supported on MinGW build\n");
+  printf("INFO | exec test not supported on MinGW or clang-cl builds\n");
   // We do our best
   ret = IsBadReadPtr((const void*)aPtr, 1);
 #endif

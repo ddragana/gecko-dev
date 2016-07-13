@@ -20,10 +20,8 @@
 # include "jit/arm/MacroAssembler-arm.h"
 #elif defined(JS_CODEGEN_ARM64)
 # include "jit/arm64/MacroAssembler-arm64.h"
-#elif defined(JS_CODEGEN_MIPS32)
-# include "jit/mips32/MacroAssembler-mips32.h"
-#elif defined(JS_CODEGEN_MIPS64)
-# include "jit/mips64/MacroAssembler-mips64.h"
+#elif defined(JS_CODEGEN_MIPS)
+# include "jit/mips/MacroAssembler-mips.h"
 #elif defined(JS_CODEGEN_NONE)
 # include "jit/none/MacroAssembler-none.h"
 #else
@@ -64,15 +62,15 @@
 // architectures on each method declaration, such as PER_ARCH and
 // PER_SHARED_ARCH.
 
-# define ALL_ARCH mips32, mips64, arm, arm64, x86, x64
-# define ALL_SHARED_ARCH arm, arm64, x86_shared, mips_shared
+# define ALL_ARCH mips, arm, arm64, x86, x64
+# define ALL_SHARED_ARCH mips, arm, arm64, x86_shared
 
 // * How this macro works:
 //
 // DEFINED_ON is a macro which check if, for the current architecture, the
 // method is defined on the macro assembler or not.
 //
-// For each architecture, we have a macro named DEFINED_ON_arch.  This macro is
+// For each architecutre, we have a macro named DEFINED_ON_arch.  This macro is
 // empty if this is not the current architecture.  Otherwise it must be either
 // set to "define" or "crash" (only use for the none target so-far).
 //
@@ -94,7 +92,7 @@
 //
 //   crash
 //
-// or to nothing, if the current architecture is not listed in the list of
+// or to nothing, if the current architecture is not lsited in the list of
 // arguments of DEFINED_ON.  Note, only one of the DEFINED_ON_arch macro
 // contributes to the non-empty result, which is the macro of the current
 // architecture if it is listed in the arguments of DEFINED_ON.
@@ -108,9 +106,7 @@
 # define DEFINED_ON_x86_shared
 # define DEFINED_ON_arm
 # define DEFINED_ON_arm64
-# define DEFINED_ON_mips32
-# define DEFINED_ON_mips64
-# define DEFINED_ON_mips_shared
+# define DEFINED_ON_mips
 # define DEFINED_ON_none
 
 // Specialize for each architecture.
@@ -130,16 +126,9 @@
 #elif defined(JS_CODEGEN_ARM64)
 # undef DEFINED_ON_arm64
 # define DEFINED_ON_arm64 define
-#elif defined(JS_CODEGEN_MIPS32)
-# undef DEFINED_ON_mips32
-# define DEFINED_ON_mips32 define
-# undef DEFINED_ON_mips_shared
-# define DEFINED_ON_mips_shared define
-#elif defined(JS_CODEGEN_MIPS64)
-# undef DEFINED_ON_mips64
-# define DEFINED_ON_mips64 define
-# undef DEFINED_ON_mips_shared
-# define DEFINED_ON_mips_shared define
+#elif defined(JS_CODEGEN_MIPS)
+# undef DEFINED_ON_mips
+# define DEFINED_ON_mips define
 #elif defined(JS_CODEGEN_NONE)
 # undef DEFINED_ON_none
 # define DEFINED_ON_none crash
@@ -151,10 +140,8 @@
 # define DEFINED_ON_RESULT_define
 # define DEFINED_ON_RESULT_        = delete
 
-# define DEFINED_ON_DISPATCH_RESULT_2(Macro, Result) \
-    Macro ## Result
-# define DEFINED_ON_DISPATCH_RESULT(...)     \
-    DEFINED_ON_DISPATCH_RESULT_2(DEFINED_ON_RESULT_, __VA_ARGS__)
+# define DEFINED_ON_DISPATCH_RESULT(Result)     \
+    DEFINED_ON_RESULT_ ## Result
 
 // We need to let the evaluation of MOZ_FOR_EACH terminates.
 # define DEFINED_ON_EXPAND_ARCH_RESULTS_3(ParenResult)  \
@@ -184,9 +171,6 @@
 
 namespace js {
 namespace jit {
-
-// Defined in JitFrames.h
-enum ExitFrameTokenValues;
 
 // The public entrypoint for emitting assembly. Note that a MacroAssembler can
 // use cx->lifoAlloc, so take care not to interleave masm use with other
@@ -284,7 +268,27 @@ class MacroAssembler : public MacroAssemblerSpecific
             type_(type)
         { }
 
-        void emit(MacroAssembler& masm);
+        void emit(MacroAssembler& masm) {
+            MOZ_ASSERT(isInitialized());
+            MIRType mirType = MIRType_None;
+
+            if (type_.isPrimitive()) {
+                if (type_.isMagicArguments())
+                    mirType = MIRType_MagicOptimizedArguments;
+                else
+                    mirType = MIRTypeFromValueType(type_.primitive());
+            } else if (type_.isAnyObject()) {
+                mirType = MIRType_Object;
+            } else {
+                MOZ_CRASH("Unknown conversion to mirtype");
+            }
+
+            if (mirType == MIRType_Double)
+                masm.branchTestNumber(cond(), reg(), jump());
+            else
+                masm.branchTestMIRType(cond(), reg(), mirType, jump());
+        }
+
     };
 
     /*
@@ -305,7 +309,10 @@ class MacroAssembler : public MacroAssemblerSpecific
             ptr_(ptr)
         { }
 
-        void emit(MacroAssembler& masm);
+        void emit(MacroAssembler& masm) {
+            MOZ_ASSERT(isInitialized());
+            masm.branchPtr(cond(), reg(), ptr_, jump());
+        }
     };
 
     mozilla::Maybe<AutoRooter> autoRooter_;
@@ -313,16 +320,18 @@ class MacroAssembler : public MacroAssemblerSpecific
     mozilla::Maybe<AutoJitContextAlloc> alloc_;
 
   private:
+    // This field is used to manage profiling instrumentation output. If
+    // provided and enabled, then instrumentation will be emitted around call
+    // sites.
+    bool emitProfilingInstrumentation_;
+
     // Labels for handling exceptions and failures.
     NonAssertingLabel failureLabel_;
 
   public:
     MacroAssembler()
-      : framePushed_(0),
-#ifdef DEBUG
-        inCall_(false),
-#endif
-        emitProfilingInstrumentation_(false)
+      : emitProfilingInstrumentation_(false),
+        framePushed_(0)
     {
         JitContext* jcx = GetJitContext();
         JSContext* cx = jcx->cx;
@@ -352,15 +361,10 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // asm.js compilation handles its own JitContext-pushing
     struct AsmJSToken {};
-    explicit MacroAssembler(AsmJSToken, TempAllocator& alloc)
-      : framePushed_(0),
-#ifdef DEBUG
-        inCall_(false),
-#endif
-        emitProfilingInstrumentation_(false)
+    explicit MacroAssembler(AsmJSToken)
+      : emitProfilingInstrumentation_(false),
+        framePushed_(0)
     {
-        moveResolver_.setAllocator(alloc);
-
 #if defined(JS_CODEGEN_ARM)
         initWithAllocator();
         m_buffer.id = 0;
@@ -369,6 +373,12 @@ class MacroAssembler : public MacroAssemblerSpecific
         armbuffer_.id = 0;
 #endif
     }
+
+    void enableProfilingInstrumentation() {
+        emitProfilingInstrumentation_ = true;
+    }
+
+    void resetForNewCodeGenerator(TempAllocator& alloc);
 
     void constructRoot(JSContext* cx) {
         autoRooter_.emplace(cx, this);
@@ -384,12 +394,6 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     //{{{ check_macroassembler_style
   public:
-    // ===============================================================
-    // MacroAssembler high-level usage.
-
-    // Flushes the assembly buffer, on platforms that need it.
-    void flush() PER_SHARED_ARCH;
-
     // ===============================================================
     // Frame manipulation functions.
 
@@ -413,18 +417,15 @@ class MacroAssembler : public MacroAssemblerSpecific
     // ===============================================================
     // Stack manipulation functions.
 
-    void PushRegsInMask(LiveRegisterSet set)
-                            DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
+    void PushRegsInMask(LiveRegisterSet set) PER_SHARED_ARCH;
     void PushRegsInMask(LiveGeneralRegisterSet set);
 
     void PopRegsInMask(LiveRegisterSet set);
     void PopRegsInMask(LiveGeneralRegisterSet set);
-    void PopRegsInMaskIgnore(LiveRegisterSet set, LiveRegisterSet ignore)
-                                 DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
+    void PopRegsInMaskIgnore(LiveRegisterSet set, LiveRegisterSet ignore) PER_SHARED_ARCH;
 
     void Push(const Operand op) DEFINED_ON(x86_shared);
     void Push(Register reg) PER_SHARED_ARCH;
-    void Push(Register reg1, Register reg2, Register reg3, Register reg4) DEFINED_ON(arm64);
     void Push(const Imm32 imm) PER_SHARED_ARCH;
     void Push(const ImmWord imm) PER_SHARED_ARCH;
     void Push(const ImmPtr imm) PER_SHARED_ARCH;
@@ -438,12 +439,12 @@ class MacroAssembler : public MacroAssemblerSpecific
     void Push(JSValueType type, Register reg);
     void PushValue(const Address& addr);
     void PushEmptyRooted(VMFunction::RootType rootType);
-    inline CodeOffset PushWithPatch(ImmWord word);
-    inline CodeOffset PushWithPatch(ImmPtr imm);
+    inline CodeOffsetLabel PushWithPatch(ImmWord word);
+    inline CodeOffsetLabel PushWithPatch(ImmPtr imm);
 
     void Pop(const Operand op) DEFINED_ON(x86_shared);
     void Pop(Register reg) PER_SHARED_ARCH;
-    void Pop(FloatRegister t) DEFINED_ON(x86_shared, arm, arm64);
+    void Pop(FloatRegister t) DEFINED_ON(x86_shared);
     void Pop(const ValueOperand& val) PER_SHARED_ARCH;
     void popRooted(VMFunction::RootType rootType, Register cellReg, const ValueOperand& valueReg);
 
@@ -455,766 +456,22 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Warning: This method does not update the framePushed() counter.
     void freeStack(Register amount);
 
-  private:
-    // ===============================================================
-    // Register allocation fields.
-#ifdef DEBUG
-    friend AutoRegisterScope;
-    friend AutoFloatRegisterScope;
-    // Used to track register scopes for debug builds.
-    // Manipulated by the AutoGenericRegisterScope class.
-    AllocatableRegisterSet debugTrackedRegisters_;
-#endif // DEBUG
-
   public:
     // ===============================================================
     // Simple call functions.
 
-    CodeOffset call(Register reg) PER_SHARED_ARCH;
-    CodeOffset call(Label* label) PER_SHARED_ARCH;
+    void call(Register reg) PER_SHARED_ARCH;
     void call(const Address& addr) DEFINED_ON(x86_shared);
+    void call(Label* label) PER_SHARED_ARCH;
     void call(ImmWord imm) PER_SHARED_ARCH;
     // Call a target native function, which is neither traceable nor movable.
     void call(ImmPtr imm) PER_SHARED_ARCH;
-    void call(wasm::SymbolicAddress imm) PER_SHARED_ARCH;
+    void call(AsmJSImmPtr imm) PER_SHARED_ARCH;
     // Call a target JitCode, which must be traceable, and may be movable.
     void call(JitCode* c) PER_SHARED_ARCH;
 
-    inline void call(const wasm::CallSiteDesc& desc, const Register reg);
-    inline void call(const wasm::CallSiteDesc& desc, uint32_t callee);
-
-    CodeOffset callWithPatch() PER_SHARED_ARCH;
-    void patchCall(uint32_t callerOffset, uint32_t calleeOffset) PER_SHARED_ARCH;
-
-    // Thunks provide the ability to jump to any uint32_t offset from any other
-    // uint32_t offset without using a constant pool (thus returning a simple
-    // CodeOffset instead of a CodeOffsetJump).
-    CodeOffset thunkWithPatch() PER_SHARED_ARCH;
-    void patchThunk(uint32_t thunkOffset, uint32_t targetOffset) PER_SHARED_ARCH;
-    static void repatchThunk(uint8_t* code, uint32_t thunkOffset, uint32_t targetOffset) PER_SHARED_ARCH;
-
-    // Emit a nop that can be patched to and from a nop and a jump with an int8
-    // relative displacement.
-    CodeOffset nopPatchableToNearJump() PER_SHARED_ARCH;
-    static void patchNopToNearJump(uint8_t* jump, uint8_t* target) PER_SHARED_ARCH;
-    static void patchNearJumpToNop(uint8_t* jump) PER_SHARED_ARCH;
-
-    // Push the return address and make a call. On platforms where this function
-    // is not defined, push the link register (pushReturnAddress) at the entry
-    // point of the callee.
-    void callAndPushReturnAddress(Register reg) DEFINED_ON(x86_shared);
-    void callAndPushReturnAddress(Label* label) DEFINED_ON(x86_shared);
-
-    void pushReturnAddress() DEFINED_ON(mips_shared, arm, arm64);
-    void popReturnAddress() DEFINED_ON(mips_shared, arm, arm64);
-
-  public:
-    // ===============================================================
-    // ABI function calls.
-
-    // Setup a call to C/C++ code, given the assumption that the framePushed
-    // accruately define the state of the stack, and that the top of the stack
-    // was properly aligned. Note that this only supports cdecl.
-    void setupAlignedABICall(); // CRASH_ON(arm64)
-
-    // Setup an ABI call for when the alignment is not known. This may need a
-    // scratch register.
-    void setupUnalignedABICall(Register scratch) PER_ARCH;
-
-    // Arguments must be assigned to a C/C++ call in order. They are moved
-    // in parallel immediately before performing the call. This process may
-    // temporarily use more stack, in which case esp-relative addresses will be
-    // automatically adjusted. It is extremely important that esp-relative
-    // addresses are computed *after* setupABICall(). Furthermore, no
-    // operations should be emitted while setting arguments.
-    void passABIArg(const MoveOperand& from, MoveOp::Type type);
-    inline void passABIArg(Register reg);
-    inline void passABIArg(FloatRegister reg, MoveOp::Type type);
-
-    template <typename T>
-    inline void callWithABI(const T& fun, MoveOp::Type result = MoveOp::GENERAL);
-
-  private:
-    // Reinitialize the variables which have to be cleared before making a call
-    // with callWithABI.
-    void setupABICall();
-
-    // Reserve the stack and resolve the arguments move.
-    void callWithABIPre(uint32_t* stackAdjust, bool callFromAsmJS = false) PER_ARCH;
-
-    // Emits a call to a C/C++ function, resolving all argument moves.
-    void callWithABINoProfiler(void* fun, MoveOp::Type result);
-    void callWithABINoProfiler(wasm::SymbolicAddress imm, MoveOp::Type result);
-    void callWithABINoProfiler(Register fun, MoveOp::Type result) PER_ARCH;
-    void callWithABINoProfiler(const Address& fun, MoveOp::Type result) PER_ARCH;
-
-    // Restore the stack to its state before the setup function call.
-    void callWithABIPost(uint32_t stackAdjust, MoveOp::Type result) PER_ARCH;
-
-    // Create the signature to be able to decode the arguments of a native
-    // function, when calling a function within the simulator.
-    inline void appendSignatureType(MoveOp::Type type);
-    inline ABIFunctionType signature() const;
-
-    // Private variables used to handle moves between registers given as
-    // arguments to passABIArg and the list of ABI registers expected for the
-    // signature of the function.
-    MoveResolver moveResolver_;
-
-    // Architecture specific implementation which specify how registers & stack
-    // offsets are used for calling a function.
-    ABIArgGenerator abiArgs_;
-
-#ifdef DEBUG
-    // Flag use to assert that we use ABI function in the right context.
-    bool inCall_;
-#endif
-
-    // If set by setupUnalignedABICall then callWithABI will pop the stack
-    // register which is on the stack.
-    bool dynamicAlignment_;
-
-#ifdef JS_SIMULATOR
-    // The signature is used to accumulate all types of arguments which are used
-    // by the caller. This is used by the simulators to decode the arguments
-    // properly, and cast the function pointer to the right type.
-    uint32_t signature_;
-#endif
-
-  public:
-    // ===============================================================
-    // Jit Frames.
-    //
-    // These functions are used to build the content of the Jit frames.  See
-    // CommonFrameLayout class, and all its derivatives. The content should be
-    // pushed in the opposite order as the fields of the structures, such that
-    // the structures can be used to interpret the content of the stack.
-
-    // Call the Jit function, and push the return address (or let the callee
-    // push the return address).
-    //
-    // These functions return the offset of the return address, in order to use
-    // the return address to index the safepoints, which are used to list all
-    // live registers.
-    inline uint32_t callJitNoProfiler(Register callee);
-    inline uint32_t callJit(Register callee);
-    inline uint32_t callJit(JitCode* code);
-
-    // The frame descriptor is the second field of all Jit frames, pushed before
-    // calling the Jit function.  It is a composite value defined in JitFrames.h
-    inline void makeFrameDescriptor(Register frameSizeReg, FrameType type, uint32_t headerSize);
-
-    // Push the frame descriptor, based on the statically known framePushed.
-    inline void pushStaticFrameDescriptor(FrameType type, uint32_t headerSize);
-
-    // Push the callee token of a JSFunction which pointer is stored in the
-    // |callee| register. The callee token is packed with a |constructing| flag
-    // which correspond to the fact that the JS function is called with "new" or
-    // not.
-    inline void PushCalleeToken(Register callee, bool constructing);
-
-    // Unpack a callee token located at the |token| address, and return the
-    // JSFunction pointer in the |dest| register.
-    inline void loadFunctionFromCalleeToken(Address token, Register dest);
-
-    // This function emulates a call by pushing an exit frame on the stack,
-    // except that the fake-function is inlined within the body of the caller.
-    //
-    // This function assumes that the current frame is an IonJS frame.
-    //
-    // This function returns the offset of the /fake/ return address, in order to use
-    // the return address to index the safepoints, which are used to list all
-    // live registers.
-    //
-    // This function should be balanced with a call to adjustStack, to pop the
-    // exit frame and emulate the return statement of the inlined function.
-    inline uint32_t buildFakeExitFrame(Register scratch);
-
-  private:
-    // This function is used by buildFakeExitFrame to push a fake return address
-    // on the stack. This fake return address should never be used for resuming
-    // any execution, and can even be an invalid pointer into the instruction
-    // stream, as long as it does not alias any other.
-    uint32_t pushFakeReturnAddress(Register scratch) PER_SHARED_ARCH;
-
-  public:
-    // ===============================================================
-    // Exit frame footer.
-    //
-    // When calling outside the Jit we push an exit frame. To mark the stack
-    // correctly, we have to push additional information, called the Exit frame
-    // footer, which is used to identify how the stack is marked.
-    //
-    // See JitFrames.h, and MarkJitExitFrame in JitFrames.cpp.
-
-    // If the current piece of code might be garbage collected, then the exit
-    // frame footer must contain a pointer to the current JitCode, such that the
-    // garbage collector can keep the code alive as long this code is on the
-    // stack. This function pushes a placeholder which is replaced when the code
-    // is linked.
-    inline void PushStubCode();
-
-    // Return true if the code contains a self-reference which needs to be
-    // patched when the code is linked.
-    inline bool hasSelfReference() const;
-
-    // Push stub code and the VMFunction pointer.
-    inline void enterExitFrame(const VMFunction* f = nullptr);
-
-    // Push an exit frame token to identify which fake exit frame this footer
-    // corresponds to.
-    inline void enterFakeExitFrame(enum ExitFrameTokenValues token);
-
-    // Push an exit frame token for a native call.
-    inline void enterFakeExitFrameForNative(bool isConstructing);
-
-    // Pop ExitFrame footer in addition to the extra frame.
-    inline void leaveExitFrame(size_t extraFrame = 0);
-
-  private:
-    // Save the top of the stack into PerThreadData::jitTop of the main thread,
-    // which should be the location of the latest exit frame.
-    void linkExitFrame();
-
-    // Patch the value of PushStubCode with the pointer to the finalized code.
-    void linkSelfReference(JitCode* code);
-
-    // If the JitCode that created this assembler needs to transition into the VM,
-    // we want to store the JitCode on the stack in order to mark it during a GC.
-    // This is a reference to a patch location where the JitCode* will be written.
-    CodeOffset selfReferencePatch_;
-
-  public:
-    // ===============================================================
-    // Move instructions
-
-    inline void move64(Imm64 imm, Register64 dest) PER_ARCH;
-    inline void move64(Register64 src, Register64 dest) PER_ARCH;
-
-    inline void moveFloat32ToGPR(FloatRegister src, Register dest) DEFINED_ON(arm, arm64, x86_shared);
-    inline void moveGPRToFloat32(Register src, FloatRegister dest) DEFINED_ON(arm, arm64, x86_shared);
-
-    // ===============================================================
-    // Logical instructions
-
-    inline void not32(Register reg) PER_SHARED_ARCH;
-
-    inline void and32(Register src, Register dest) PER_SHARED_ARCH;
-    inline void and32(Imm32 imm, Register dest) PER_SHARED_ARCH;
-    inline void and32(Imm32 imm, Register src, Register dest) DEFINED_ON(arm64);
-    inline void and32(Imm32 imm, const Address& dest) PER_SHARED_ARCH;
-    inline void and32(const Address& src, Register dest) PER_SHARED_ARCH;
-
-    inline void andPtr(Register src, Register dest) PER_ARCH;
-    inline void andPtr(Imm32 imm, Register dest) PER_ARCH;
-
-    inline void and64(Imm64 imm, Register64 dest) PER_ARCH;
-    inline void or64(Imm64 imm, Register64 dest) PER_ARCH;
-    inline void xor64(Imm64 imm, Register64 dest) PER_ARCH;
-
-    inline void or32(Register src, Register dest) PER_SHARED_ARCH;
-    inline void or32(Imm32 imm, Register dest) PER_SHARED_ARCH;
-    inline void or32(Imm32 imm, const Address& dest) PER_SHARED_ARCH;
-
-    inline void orPtr(Register src, Register dest) PER_ARCH;
-    inline void orPtr(Imm32 imm, Register dest) PER_ARCH;
-
-    inline void or64(Register64 src, Register64 dest) PER_ARCH;
-    inline void xor64(Register64 src, Register64 dest) PER_ARCH;
-
-    inline void xor32(Register src, Register dest) DEFINED_ON(x86_shared, arm, arm64);
-    inline void xor32(Imm32 imm, Register dest) PER_SHARED_ARCH;
-
-    inline void xorPtr(Register src, Register dest) PER_ARCH;
-    inline void xorPtr(Imm32 imm, Register dest) PER_ARCH;
-
-    // ===============================================================
-    // Arithmetic functions
-
-    inline void add32(Register src, Register dest) PER_SHARED_ARCH;
-    inline void add32(Imm32 imm, Register dest) PER_SHARED_ARCH;
-    inline void add32(Imm32 imm, const Address& dest) PER_SHARED_ARCH;
-    inline void add32(Imm32 imm, const AbsoluteAddress& dest) DEFINED_ON(x86_shared);
-
-    inline void addPtr(Register src, Register dest) PER_ARCH;
-    inline void addPtr(Register src1, Register src2, Register dest) DEFINED_ON(arm64);
-    inline void addPtr(Imm32 imm, Register dest) PER_ARCH;
-    inline void addPtr(Imm32 imm, Register src, Register dest) DEFINED_ON(arm64);
-    inline void addPtr(ImmWord imm, Register dest) PER_ARCH;
-    inline void addPtr(ImmPtr imm, Register dest);
-    inline void addPtr(Imm32 imm, const Address& dest) DEFINED_ON(mips_shared, arm, arm64, x86, x64);
-    inline void addPtr(Imm32 imm, const AbsoluteAddress& dest) DEFINED_ON(x86, x64);
-    inline void addPtr(const Address& src, Register dest) DEFINED_ON(mips_shared, arm, arm64, x86, x64);
-
-    inline void add64(Register64 src, Register64 dest) PER_ARCH;
-    inline void add64(Imm32 imm, Register64 dest) PER_ARCH;
-
-    inline void addFloat32(FloatRegister src, FloatRegister dest) DEFINED_ON(x86_shared, arm, arm64);
-
-    inline void addDouble(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
-    inline void addConstantDouble(double d, FloatRegister dest) DEFINED_ON(x86);
-
-    inline void sub32(const Address& src, Register dest) PER_SHARED_ARCH;
-    inline void sub32(Register src, Register dest) PER_SHARED_ARCH;
-    inline void sub32(Imm32 imm, Register dest) PER_SHARED_ARCH;
-
-    inline void subPtr(Register src, Register dest) PER_ARCH;
-    inline void subPtr(Register src, const Address& dest) DEFINED_ON(mips_shared, arm, arm64, x86, x64);
-    inline void subPtr(Imm32 imm, Register dest) PER_ARCH;
-    inline void subPtr(ImmWord imm, Register dest) DEFINED_ON(x64);
-    inline void subPtr(const Address& addr, Register dest) DEFINED_ON(mips_shared, arm, arm64, x86, x64);
-
-    inline void subFloat32(FloatRegister src, FloatRegister dest) DEFINED_ON(x86_shared, arm, arm64);
-
-    inline void subDouble(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
-
-    // On x86-shared, srcDest must be eax and edx will be clobbered.
-    inline void mul32(Register rhs, Register srcDest) DEFINED_ON(arm, arm64, x86_shared);
-
-    inline void mul32(Register src1, Register src2, Register dest, Label* onOver, Label* onZero) DEFINED_ON(arm64);
-
-    inline void mul64(Imm64 imm, const Register64& dest) PER_ARCH;
-
-    inline void mulBy3(Register src, Register dest) PER_ARCH;
-
-    inline void mulFloat32(FloatRegister src, FloatRegister dest) DEFINED_ON(x86_shared, arm, arm64);
-    inline void mulDouble(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
-
-    inline void mulDoublePtr(ImmPtr imm, Register temp, FloatRegister dest) DEFINED_ON(mips_shared, arm, arm64, x86, x64);
-
-    // Perform an integer division, returning the integer part rounded toward zero.
-    // rhs must not be zero, and the division must not overflow.
-    //
-    // On x86_shared, srcDest must be eax and edx will be clobbered.
-    // On ARM, the chip must have hardware division instructions.
-    inline void quotient32(Register rhs, Register srcDest, bool isUnsigned) DEFINED_ON(x86_shared, arm, arm64);
-
-    // Perform an integer division, returning the remainder part.
-    // rhs must not be zero, and the division must not overflow.
-    //
-    // On x86_shared, srcDest must be eax and edx will be clobbered.
-    // On ARM, the chip must have hardware division instructions.
-    inline void remainder32(Register rhs, Register srcDest, bool isUnsigned) DEFINED_ON(x86_shared, arm, arm64);
-
-    inline void divFloat32(FloatRegister src, FloatRegister dest) DEFINED_ON(x86_shared, arm, arm64);
-    inline void divDouble(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
-
-    inline void inc32(RegisterOrInt32Constant* key);
-    inline void inc64(AbsoluteAddress dest) PER_ARCH;
-
-    inline void dec32(RegisterOrInt32Constant* key);
-
-    inline void neg32(Register reg) PER_SHARED_ARCH;
-
-    inline void negateFloat(FloatRegister reg) DEFINED_ON(arm, arm64, x86_shared);
-
-    inline void negateDouble(FloatRegister reg) PER_SHARED_ARCH;
-
-    inline void absFloat32(FloatRegister src, FloatRegister dest) DEFINED_ON(arm, arm64, x86_shared);
-    inline void absDouble(FloatRegister src, FloatRegister dest) DEFINED_ON(arm, arm64, x86_shared);
-
-    inline void sqrtFloat32(FloatRegister src, FloatRegister dest) DEFINED_ON(arm, arm64, x86_shared);
-    inline void sqrtDouble(FloatRegister src, FloatRegister dest) DEFINED_ON(arm, arm64, x86_shared);
-
-    // srcDest = {min,max}{Float32,Double}(srcDest, other)
-    // For min and max, handle NaN specially if handleNaN is true.
-
-    inline void minFloat32(FloatRegister other, FloatRegister srcDest, bool handleNaN) DEFINED_ON(arm, arm64, x86_shared);
-    inline void minDouble(FloatRegister other, FloatRegister srcDest, bool handleNaN) DEFINED_ON(arm, arm64, x86_shared);
-
-    inline void maxFloat32(FloatRegister other, FloatRegister srcDest, bool handleNaN) DEFINED_ON(arm, arm64, x86_shared);
-    inline void maxDouble(FloatRegister other, FloatRegister srcDest, bool handleNaN) DEFINED_ON(arm, arm64, x86_shared);
-
-    // ===============================================================
-    // Shift functions
-
-    // For shift-by-register there may be platform-specific
-    // variations, for example, x86 will perform the shift mod 32 but
-    // ARM will perform the shift mod 256.
-    //
-    // For shift-by-immediate the platform assembler may restrict the
-    // immediate, for example, the ARM assembler requires the count
-    // for 32-bit shifts to be in the range [0,31].
-
-    inline void lshiftPtr(Imm32 imm, Register dest) PER_ARCH;
-
-    inline void lshift64(Imm32 imm, Register64 dest) PER_ARCH;
-
-    inline void rshiftPtr(Imm32 imm, Register dest) PER_ARCH;
-    inline void rshiftPtr(Imm32 imm, Register src, Register dest) DEFINED_ON(arm64);
-
-    inline void rshiftPtrArithmetic(Imm32 imm, Register dest) PER_ARCH;
-
-    inline void rshift64(Imm32 imm, Register64 dest) PER_ARCH;
-
-    // On x86_shared these have the constraint that shift must be in CL.
-    inline void lshift32(Register shift, Register srcDest) DEFINED_ON(x86_shared, arm, arm64);
-    inline void rshift32(Register shift, Register srcDest) DEFINED_ON(x86_shared, arm, arm64);
-    inline void rshift32Arithmetic(Register shift, Register srcDest) DEFINED_ON(x86_shared, arm, arm64);
-
-    inline void lshift32(Imm32 shift, Register srcDest) DEFINED_ON(x86_shared, arm, arm64);
-    inline void rshift32(Imm32 shift, Register srcDest) DEFINED_ON(x86_shared, arm, arm64);
-    inline void rshift32Arithmetic(Imm32 shift, Register srcDest) DEFINED_ON(x86_shared, arm, arm64);
-
-    // ===============================================================
-    // Rotation functions
-    inline void rotateLeft(Imm32 count, Register input, Register dest) PER_SHARED_ARCH;
-    inline void rotateLeft(Register count, Register input, Register dest) PER_SHARED_ARCH;
-    inline void rotateRight(Imm32 count, Register input, Register dest) PER_SHARED_ARCH;
-    inline void rotateRight(Register count, Register input, Register dest) PER_SHARED_ARCH;
-
-    // ===============================================================
-    // Bit counting functions
-
-    // knownNotZero may be true only if the src is known not to be zero.
-    inline void clz32(Register src, Register dest, bool knownNotZero) DEFINED_ON(x86_shared, arm, arm64);
-    inline void ctz32(Register src, Register dest, bool knownNotZero) DEFINED_ON(x86_shared, arm, arm64);
-
-    inline void clz64(Register64 src, Register64 dest) DEFINED_ON(x64);
-    inline void ctz64(Register64 src, Register64 dest) DEFINED_ON(x64);
-
-    // On x86_shared, temp may be Invalid only if the chip has the POPCNT instruction.
-    // On ARM, temp may never be Invalid.
-    inline void popcnt32(Register src, Register dest, Register temp) DEFINED_ON(arm, x86_shared);
-
-    // temp may be invalid only if the chip has the POPCNT instruction.
-    inline void popcnt64(Register64 src, Register64 dest, Register64 temp) DEFINED_ON(x64);
-
-    // ===============================================================
-    // Branch functions
-
-    inline void branch32(Condition cond, Register lhs, Register rhs, Label* label) PER_SHARED_ARCH;
-    template <class L>
-    inline void branch32(Condition cond, Register lhs, Imm32 rhs, L label) PER_SHARED_ARCH;
-    inline void branch32(Condition cond, Register length, const RegisterOrInt32Constant& key,
-                         Label* label);
-
-    inline void branch32(Condition cond, const Address& lhs, Register rhs, Label* label) PER_SHARED_ARCH;
-    inline void branch32(Condition cond, const Address& lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
-    inline void branch32(Condition cond, const Address& length, const RegisterOrInt32Constant& key,
-                         Label* label);
-
-    inline void branch32(Condition cond, const AbsoluteAddress& lhs, Register rhs, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-    inline void branch32(Condition cond, const AbsoluteAddress& lhs, Imm32 rhs, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-
-    inline void branch32(Condition cond, const BaseIndex& lhs, Register rhs, Label* label)
-        DEFINED_ON(x86_shared);
-    inline void branch32(Condition cond, const BaseIndex& lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
-
-    inline void branch32(Condition cond, const Operand& lhs, Register rhs, Label* label) DEFINED_ON(x86_shared);
-    inline void branch32(Condition cond, const Operand& lhs, Imm32 rhs, Label* label) DEFINED_ON(x86_shared);
-
-    inline void branch32(Condition cond, wasm::SymbolicAddress lhs, Imm32 rhs, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-
-    inline void branch64(Condition cond, const Address& lhs, Imm64 val, Label* label) PER_ARCH;
-
-    // Compare the value at |lhs| with the value at |rhs|.  The scratch
-    // register *must not* be the base of |lhs| or |rhs|.
-    inline void branch64(Condition cond, const Address& lhs, const Address& rhs, Register scratch,
-                         Label* label) PER_ARCH;
-
-    inline void branchPtr(Condition cond, Register lhs, Register rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchPtr(Condition cond, Register lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchPtr(Condition cond, Register lhs, ImmPtr rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchPtr(Condition cond, Register lhs, ImmGCPtr rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchPtr(Condition cond, Register lhs, ImmWord rhs, Label* label) PER_SHARED_ARCH;
-
-    inline void branchPtr(Condition cond, const Address& lhs, Register rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchPtr(Condition cond, const Address& lhs, ImmPtr rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchPtr(Condition cond, const Address& lhs, ImmGCPtr rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchPtr(Condition cond, const Address& lhs, ImmWord rhs, Label* label) PER_SHARED_ARCH;
-
-    inline void branchPtr(Condition cond, const AbsoluteAddress& lhs, Register rhs, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-    inline void branchPtr(Condition cond, const AbsoluteAddress& lhs, ImmWord rhs, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-
-    inline void branchPtr(Condition cond, wasm::SymbolicAddress lhs, Register rhs, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-
-    template <typename T>
-    inline CodeOffsetJump branchPtrWithPatch(Condition cond, Register lhs, T rhs, RepatchLabel* label) PER_SHARED_ARCH;
-    template <typename T>
-    inline CodeOffsetJump branchPtrWithPatch(Condition cond, Address lhs, T rhs, RepatchLabel* label) PER_SHARED_ARCH;
-
-    void branchPtrInNurseryRange(Condition cond, Register ptr, Register temp, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-    void branchPtrInNurseryRange(Condition cond, const Address& address, Register temp, Label* label)
-        DEFINED_ON(x86);
-    void branchValueIsNurseryObject(Condition cond, const Address& address, Register temp, Label* label) PER_ARCH;
-    void branchValueIsNurseryObject(Condition cond, ValueOperand value, Register temp, Label* label) PER_ARCH;
-
-    // This function compares a Value (lhs) which is having a private pointer
-    // boxed inside a js::Value, with a raw pointer (rhs).
-    inline void branchPrivatePtr(Condition cond, const Address& lhs, Register rhs, Label* label) PER_ARCH;
-
-    inline void branchFloat(DoubleCondition cond, FloatRegister lhs, FloatRegister rhs,
-                            Label* label) PER_SHARED_ARCH;
-    inline void branchTruncateFloat32(FloatRegister src, Register dest, Label* fail)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-
-    inline void branchDouble(DoubleCondition cond, FloatRegister lhs, FloatRegister rhs,
-                             Label* label) PER_SHARED_ARCH;
-    inline void branchTruncateDouble(FloatRegister src, Register dest, Label* fail)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-
-    template <typename T>
-    inline void branchAdd32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
-    template <typename T>
-    inline void branchSub32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
-
-    inline void decBranchPtr(Condition cond, Register lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
-
-    template <class L>
-    inline void branchTest32(Condition cond, Register lhs, Register rhs, L label) PER_SHARED_ARCH;
-    template <class L>
-    inline void branchTest32(Condition cond, Register lhs, Imm32 rhs, L label) PER_SHARED_ARCH;
-    inline void branchTest32(Condition cond, const Address& lhs, Imm32 rhh, Label* label) PER_SHARED_ARCH;
-    inline void branchTest32(Condition cond, const AbsoluteAddress& lhs, Imm32 rhs, Label* label)
-        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
-
-    inline void branchTestPtr(Condition cond, Register lhs, Register rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchTestPtr(Condition cond, Register lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
-    inline void branchTestPtr(Condition cond, const Address& lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
-
-    inline void branchTest64(Condition cond, Register64 lhs, Register64 rhs, Register temp,
-                             Label* label) PER_ARCH;
-
-    // Branches to |label| if |reg| is false. |reg| should be a C++ bool.
-    template <class L>
-    inline void branchIfFalseBool(Register reg, L label);
-
-    // Branches to |label| if |reg| is true. |reg| should be a C++ bool.
-    inline void branchIfTrueBool(Register reg, Label* label);
-
-    inline void branchIfRope(Register str, Label* label);
-
-    inline void branchLatin1String(Register string, Label* label);
-    inline void branchTwoByteString(Register string, Label* label);
-
-    inline void branchIfFunctionHasNoScript(Register fun, Label* label);
-    inline void branchIfInterpreted(Register fun, Label* label);
-
-    inline void branchFunctionKind(Condition cond, JSFunction::FunctionKind kind, Register fun,
-                                   Register scratch, Label* label);
-
-    void branchIfNotInterpretedConstructor(Register fun, Register scratch, Label* label);
-
-    inline void branchTestObjClass(Condition cond, Register obj, Register scratch, const js::Class* clasp,
-                                   Label* label);
-    inline void branchTestObjShape(Condition cond, Register obj, const Shape* shape, Label* label);
-    inline void branchTestObjShape(Condition cond, Register obj, Register shape, Label* label);
-    inline void branchTestObjGroup(Condition cond, Register obj, ObjectGroup* group, Label* label);
-    inline void branchTestObjGroup(Condition cond, Register obj, Register group, Label* label);
-
-    inline void branchTestObjectTruthy(bool truthy, Register objReg, Register scratch,
-                                       Label* slowCheck, Label* checked);
-
-    inline void branchTestClassIsProxy(bool proxy, Register clasp, Label* label);
-
-    inline void branchTestObjectIsProxy(bool proxy, Register object, Register scratch, Label* label);
-
-    inline void branchTestProxyHandlerFamily(Condition cond, Register proxy, Register scratch,
-                                             const void* handlerp, Label* label);
-
-    template <typename Value>
-    inline void branchTestMIRType(Condition cond, const Value& val, MIRType type, Label* label);
-
-    // Emit type case branch on tag matching if the type tag in the definition
-    // might actually be that type.
-    void maybeBranchTestType(MIRType type, MDefinition* maybeDef, Register tag, Label* label);
-
-    inline void branchTestNeedsIncrementalBarrier(Condition cond, Label* label);
-
-    // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
-    // value (64bits boxing).
-    inline void branchTestUndefined(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestInt32(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestDouble(Condition cond, Register tag, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-    inline void branchTestNumber(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestBoolean(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestString(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestSymbol(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestNull(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestObject(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestPrimitive(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-    inline void branchTestMagic(Condition cond, Register tag, Label* label) PER_SHARED_ARCH;
-
-    // Perform a type-test on a Value, addressed by Address or BaseIndex, or
-    // loaded into ValueOperand.
-    // BaseIndex and ValueOperand variants clobber the ScratchReg on x64.
-    // All Variants clobber the ScratchReg on arm64.
-    inline void branchTestUndefined(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestUndefined(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestUndefined(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestInt32(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestInt32(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestInt32(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestDouble(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestDouble(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestDouble(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestNumber(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestBoolean(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestBoolean(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestBoolean(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestString(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestString(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestSymbol(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestSymbol(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestNull(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestNull(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestNull(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    // Clobbers the ScratchReg on x64.
-    inline void branchTestObject(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestObject(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestObject(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestGCThing(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestGCThing(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-
-    inline void branchTestPrimitive(Condition cond, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestMagic(Condition cond, const Address& address, Label* label) PER_SHARED_ARCH;
-    inline void branchTestMagic(Condition cond, const BaseIndex& address, Label* label) PER_SHARED_ARCH;
-    template <class L>
-    inline void branchTestMagic(Condition cond, const ValueOperand& value, L label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-    inline void branchTestMagic(Condition cond, const Address& valaddr, JSWhyMagic why, Label* label) PER_ARCH;
-
-    inline void branchTestMagicValue(Condition cond, const ValueOperand& val, JSWhyMagic why,
-                                     Label* label);
-
-    void branchTestValue(Condition cond, const ValueOperand& lhs,
-                         const Value& rhs, Label* label) PER_ARCH;
-
-    // Checks if given Value is evaluated to true or false in a condition.
-    // The type of the value should match the type of the method.
-    inline void branchTestInt32Truthy(bool truthy, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-    inline void branchTestDoubleTruthy(bool truthy, FloatRegister reg, Label* label) PER_SHARED_ARCH;
-    inline void branchTestBooleanTruthy(bool truthy, const ValueOperand& value, Label* label) PER_ARCH;
-    inline void branchTestStringTruthy(bool truthy, const ValueOperand& value, Label* label)
-        DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
-
-  private:
-
-    // Implementation for branch* methods.
-    template <typename T>
-    inline void branch32Impl(Condition cond, const T& length, const RegisterOrInt32Constant& key,
-                             Label* label);
-
-    template <typename T, typename S>
-    inline void branchPtrImpl(Condition cond, const T& lhs, const S& rhs, Label* label)
-        DEFINED_ON(x86_shared);
-
-    template <typename T>
-    void branchPtrInNurseryRangeImpl(Condition cond, const T& ptr, Register temp, Label* label)
-        DEFINED_ON(x86);
-    template <typename T>
-    void branchValueIsNurseryObjectImpl(Condition cond, const T& value, Register temp, Label* label)
-        DEFINED_ON(arm64, mips64, x64);
-
-    template <typename T>
-    inline void branchTestUndefinedImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestInt32Impl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestDoubleImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestNumberImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestBooleanImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestStringImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestSymbolImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestNullImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestObjectImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestGCThingImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T>
-    inline void branchTestPrimitiveImpl(Condition cond, const T& t, Label* label)
-        DEFINED_ON(arm, arm64, x86_shared);
-    template <typename T, class L>
-    inline void branchTestMagicImpl(Condition cond, const T& t, L label)
-        DEFINED_ON(arm, arm64, x86_shared);
-
-  public:
-    // ========================================================================
-    // Canonicalization primitives.
-    inline void canonicalizeDouble(FloatRegister reg);
-    inline void canonicalizeDoubleIfDeterministic(FloatRegister reg);
-
-    inline void canonicalizeFloat(FloatRegister reg);
-    inline void canonicalizeFloatIfDeterministic(FloatRegister reg);
-
-    inline void canonicalizeFloat32x4(FloatRegister reg, FloatRegister scratch)
-        DEFINED_ON(x86_shared);
-
-  public:
-    // ========================================================================
-    // Memory access primitives.
-    inline void storeUncanonicalizedDouble(FloatRegister src, const Address& dest)
-        DEFINED_ON(x86_shared, arm, arm64, mips32, mips64);
-    inline void storeUncanonicalizedDouble(FloatRegister src, const BaseIndex& dest)
-        DEFINED_ON(x86_shared, arm, arm64, mips32, mips64);
-    inline void storeUncanonicalizedDouble(FloatRegister src, const Operand& dest)
-        DEFINED_ON(x86_shared);
-
-    template<class T>
-    inline void storeDouble(FloatRegister src, const T& dest);
-
-    inline void storeUncanonicalizedFloat32(FloatRegister src, const Address& dest)
-        DEFINED_ON(x86_shared, arm, arm64, mips32, mips64);
-    inline void storeUncanonicalizedFloat32(FloatRegister src, const BaseIndex& dest)
-        DEFINED_ON(x86_shared, arm, arm64, mips32, mips64);
-    inline void storeUncanonicalizedFloat32(FloatRegister src, const Operand& dest)
-        DEFINED_ON(x86_shared);
-
-    template<class T>
-    inline void storeFloat32(FloatRegister src, const T& dest);
-
-    inline void storeFloat32x3(FloatRegister src, const Address& dest) PER_SHARED_ARCH;
-    inline void storeFloat32x3(FloatRegister src, const BaseIndex& dest) PER_SHARED_ARCH;
-
-    template <typename T>
-    void storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const T& dest,
-                           MIRType slotType) PER_ARCH;
+    inline void call(const CallSiteDesc& desc, const Register reg);
+    inline void call(const CallSiteDesc& desc, Label* label);
 
     //}}} check_macroassembler_style
   public:
@@ -1230,7 +487,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void guardTypeSetMightBeIncomplete(TypeSet* types, Register obj, Register scratch, Label* label);
 
     void loadObjShape(Register objReg, Register dest) {
-        loadPtr(Address(objReg, ShapedObject::offsetOfShape()), dest);
+        loadPtr(Address(objReg, JSObject::offsetOfShape()), dest);
     }
     void loadObjGroup(Register objReg, Register dest) {
         loadPtr(Address(objReg, JSObject::offsetOfGroup()), dest);
@@ -1242,6 +499,61 @@ class MacroAssembler : public MacroAssemblerSpecific
     void loadObjClass(Register objReg, Register dest) {
         loadObjGroup(objReg, dest);
         loadPtr(Address(dest, ObjectGroup::offsetOfClasp()), dest);
+    }
+    void branchTestObjClass(Condition cond, Register obj, Register scratch, const js::Class* clasp,
+                            Label* label) {
+        loadObjGroup(obj, scratch);
+        branchPtr(cond, Address(scratch, ObjectGroup::offsetOfClasp()), ImmPtr(clasp), label);
+    }
+    void branchTestObjShape(Condition cond, Register obj, const Shape* shape, Label* label) {
+        branchPtr(cond, Address(obj, JSObject::offsetOfShape()), ImmGCPtr(shape), label);
+    }
+    void branchTestObjShape(Condition cond, Register obj, Register shape, Label* label) {
+        branchPtr(cond, Address(obj, JSObject::offsetOfShape()), shape, label);
+    }
+    void branchTestObjGroup(Condition cond, Register obj, ObjectGroup* group, Label* label) {
+        branchPtr(cond, Address(obj, JSObject::offsetOfGroup()), ImmGCPtr(group), label);
+    }
+    void branchTestObjGroup(Condition cond, Register obj, Register group, Label* label) {
+        branchPtr(cond, Address(obj, JSObject::offsetOfGroup()), group, label);
+    }
+    void branchTestProxyHandlerFamily(Condition cond, Register proxy, Register scratch,
+                                      const void* handlerp, Label* label) {
+        Address handlerAddr(proxy, ProxyObject::offsetOfHandler());
+        loadPtr(handlerAddr, scratch);
+        Address familyAddr(scratch, BaseProxyHandler::offsetOfFamily());
+        branchPtr(cond, familyAddr, ImmPtr(handlerp), label);
+    }
+
+    template <typename Value>
+    void branchTestMIRType(Condition cond, const Value& val, MIRType type, Label* label) {
+        switch (type) {
+          case MIRType_Null:      return branchTestNull(cond, val, label);
+          case MIRType_Undefined: return branchTestUndefined(cond, val, label);
+          case MIRType_Boolean:   return branchTestBoolean(cond, val, label);
+          case MIRType_Int32:     return branchTestInt32(cond, val, label);
+          case MIRType_String:    return branchTestString(cond, val, label);
+          case MIRType_Symbol:    return branchTestSymbol(cond, val, label);
+          case MIRType_Object:    return branchTestObject(cond, val, label);
+          case MIRType_Double:    return branchTestDouble(cond, val, label);
+          case MIRType_MagicOptimizedArguments: // Fall through.
+          case MIRType_MagicIsConstructing:
+          case MIRType_MagicHole: return branchTestMagic(cond, val, label);
+          default:
+            MOZ_CRASH("Bad MIRType");
+        }
+    }
+
+    // Branches to |label| if |reg| is false. |reg| should be a C++ bool.
+    void branchIfFalseBool(Register reg, Label* label) {
+        // Note that C++ bool is only 1 byte, so ignore the higher-order bits.
+        branchTest32(Assembler::Zero, reg, Imm32(0xFF), label);
+    }
+
+    // Branches to |label| if |reg| is true. |reg| should be a C++ bool.
+    void branchIfTrueBool(Register reg, Label* label) {
+        // Note that C++ bool is only 1 byte, so ignore the higher-order bits.
+        branchTest32(Assembler::NonZero, reg, Imm32(0xFF), label);
     }
 
     void loadObjPrivate(Register obj, uint32_t nfixed, Register dest) {
@@ -1257,11 +569,32 @@ class MacroAssembler : public MacroAssemblerSpecific
         load32(Address(str, JSString::offsetOfLength()), dest);
     }
 
+    void loadFunctionFromCalleeToken(Address token, Register dest) {
+        loadPtr(token, dest);
+        andPtr(Imm32(uint32_t(CalleeTokenMask)), dest);
+    }
+    void PushCalleeToken(Register callee, bool constructing) {
+        if (constructing) {
+            orPtr(Imm32(CalleeToken_FunctionConstructing), callee);
+            Push(callee);
+            andPtr(Imm32(uint32_t(CalleeTokenMask)), callee);
+        } else {
+            static_assert(CalleeToken_Function == 0, "Non-constructing call requires no tagging");
+            Push(callee);
+        }
+    }
+
     void loadStringChars(Register str, Register dest);
     void loadStringChar(Register str, Register index, Register output);
 
+    void branchIfRope(Register str, Label* label) {
+        Address flags(str, JSString::offsetOfFlags());
+        static_assert(JSString::ROPE_FLAGS == 0, "Rope type flags must be 0");
+        branchTest32(Assembler::Zero, flags, Imm32(JSString::TYPE_FLAGS_MASK), label);
+    }
+
     void loadJSContext(Register dest) {
-        movePtr(ImmPtr(GetJitContext()->runtime->getJSContext()), dest);
+        loadPtr(AbsoluteAddress(GetJitContext()->runtime->addressOfJSContext()), dest);
     }
     void loadJitActivation(Register dest) {
         loadPtr(AbsoluteAddress(GetJitContext()->runtime->addressOfActivation()), dest);
@@ -1295,7 +628,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             storeValue(src.valueReg(), dest);
         } else if (IsFloatingPointType(src.type())) {
             FloatRegister reg = src.typedReg().fpu();
-            if (src.type() == MIRType::Float32) {
+            if (src.type() == MIRType_Float32) {
                 convertFloat32ToDouble(reg, ScratchDoubleReg);
                 reg = ScratchDoubleReg;
             }
@@ -1306,7 +639,15 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     template <typename T>
-    inline void storeObjectOrNull(Register src, const T& dest);
+    void storeObjectOrNull(Register src, const T& dest) {
+        Label notNull, done;
+        branchTestPtr(Assembler::NonZero, src, src, &notNull);
+        storeValue(NullValue(), dest);
+        jump(&done);
+        bind(&notNull);
+        storeValue(JSVAL_TYPE_OBJECT, src, dest);
+        bind(&done);
+    }
 
     template <typename T>
     void storeConstantOrRegister(ConstantOrRegister src, const T& dest) {
@@ -1326,7 +667,15 @@ class MacroAssembler : public MacroAssemblerSpecific
             moveDouble(ReturnDoubleReg, reg);
     }
 
-    inline void storeCallResultValue(AnyRegister dest);
+    void storeCallResultValue(AnyRegister dest) {
+#if defined(JS_NUNBOX32)
+        unboxValue(ValueOperand(JSReturnReg_Type, JSReturnReg_Data), dest);
+#elif defined(JS_PUNBOX64)
+        unboxValue(ValueOperand(JSReturnReg), dest);
+#else
+#error "Bad architecture"
+#endif
+    }
 
     void storeCallResultValue(ValueOperand dest) {
 #if defined(JS_NUNBOX32)
@@ -1357,25 +706,73 @@ class MacroAssembler : public MacroAssemblerSpecific
 #endif
     }
 
-    inline void storeCallResultValue(TypedOrValueRegister dest);
+    void storeCallResultValue(TypedOrValueRegister dest) {
+        if (dest.hasValue())
+            storeCallResultValue(dest.valueReg());
+        else
+            storeCallResultValue(dest.typedReg());
+    }
 
     template <typename T>
     Register extractString(const T& source, Register scratch) {
         return extractObject(source, scratch);
     }
-    using MacroAssemblerSpecific::store32;
-    void store32(const RegisterOrInt32Constant& key, const Address& dest) {
+
+    void branchIfFunctionHasNoScript(Register fun, Label* label) {
+        // 16-bit loads are slow and unaligned 32-bit loads may be too so
+        // perform an aligned 32-bit load and adjust the bitmask accordingly.
+        MOZ_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
+        MOZ_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
+        Address address(fun, JSFunction::offsetOfNargs());
+        int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
+        branchTest32(Assembler::Zero, address, Imm32(bit), label);
+    }
+    void branchIfInterpreted(Register fun, Label* label) {
+        // 16-bit loads are slow and unaligned 32-bit loads may be too so
+        // perform an aligned 32-bit load and adjust the bitmask accordingly.
+        MOZ_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
+        MOZ_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
+        Address address(fun, JSFunction::offsetOfNargs());
+        int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
+        branchTest32(Assembler::NonZero, address, Imm32(bit), label);
+    }
+
+    void branchIfNotInterpretedConstructor(Register fun, Register scratch, Label* label);
+
+    void bumpKey(Int32Key* key, int diff) {
+        if (key->isRegister())
+            add32(Imm32(diff), key->reg());
+        else
+            key->bumpConstant(diff);
+    }
+
+    void storeKey(const Int32Key& key, const Address& dest) {
         if (key.isRegister())
             store32(key.reg(), dest);
         else
             store32(Imm32(key.constant()), dest);
     }
 
+    template<typename T>
+    void branchKey(Condition cond, const T& length, const Int32Key& key, Label* label) {
+        if (key.isRegister())
+            branch32(cond, length, key.reg(), label);
+        else
+            branch32(cond, length, Imm32(key.constant()), label);
+    }
+
+    void branchTestNeedsIncrementalBarrier(Condition cond, Label* label) {
+        MOZ_ASSERT(cond == Zero || cond == NonZero);
+        CompileZone* zone = GetJitContext()->compartment->zone();
+        AbsoluteAddress needsBarrierAddr(zone->addressOfNeedsIncrementalBarrier());
+        branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
+    }
+
     template <typename T>
     void callPreBarrier(const T& address, MIRType type) {
         Label done;
 
-        if (type == MIRType::Value)
+        if (type == MIRType_Value)
             branchTestGCThing(Assembler::NotEqual, address, &done);
 
         Push(PreBarrierReg);
@@ -1396,7 +793,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
         // All barriers are off by default.
         // They are enabled if necessary at the end of CodeGenerator::generate().
-        CodeOffset nopJump = toggledJump(&done);
+        CodeOffsetLabel nopJump = toggledJump(&done);
         writePrebarrierOffset(nopJump);
 
         callPreBarrier(address, type);
@@ -1404,6 +801,20 @@ class MacroAssembler : public MacroAssemblerSpecific
 
         haltingAlign(8);
         bind(&done);
+    }
+
+    void canonicalizeDouble(FloatRegister reg) {
+        Label notNaN;
+        branchDouble(DoubleOrdered, reg, reg, &notNaN);
+        loadConstantDouble(JS::GenericNaN(), reg);
+        bind(&notNaN);
+    }
+
+    void canonicalizeFloat(FloatRegister reg) {
+        Label notNaN;
+        branchFloat(DoubleOrdered, reg, reg, &notNaN);
+        loadConstantFloat32(float(JS::GenericNaN()), reg);
+        bind(&notNaN);
     }
 
     template<typename T>
@@ -1435,6 +846,23 @@ class MacroAssembler : public MacroAssemblerSpecific
         }
     }
 
+    template<typename T>
+    void compareExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem, Register oldval, Register newval,
+                                        Register temp, AnyRegister output);
+
+    template<typename T>
+    void atomicExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem, Register value,
+                                       Register temp, AnyRegister output);
+
+    // Generating a result.
+    template<typename S, typename T>
+    void atomicBinopToTypedIntArray(AtomicOp op, Scalar::Type arrayType, const S& value,
+                                    const T& mem, Register temp1, Register temp2, AnyRegister output);
+
+    // Generating no result.
+    template<typename S, typename T>
+    void atomicBinopToTypedIntArray(AtomicOp op, Scalar::Type arrayType, const S& value, const T& mem);
+
     void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const BaseIndex& dest,
                                 unsigned numElems = 0);
     void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const Address& dest,
@@ -1451,8 +879,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void storeUnboxedProperty(T address, JSValueType type,
                               ConstantOrRegister value, Label* failure);
 
-    void checkUnboxedArrayCapacity(Register obj, const RegisterOrInt32Constant& index,
-                                   Register temp, Label* failure);
+    void checkUnboxedArrayCapacity(Register obj, const Int32Key& index, Register temp,
+                                   Label* failure);
 
     Register extractString(const Address& address, Register scratch) {
         return extractObject(address, scratch);
@@ -1473,7 +901,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     Register extractObject(const TypedOrValueRegister& reg, Register scratch) {
         if (reg.hasValue())
             return extractObject(reg.valueReg(), scratch);
-        MOZ_ASSERT(reg.type() == MIRType::Object);
+        MOZ_ASSERT(reg.type() == MIRType_Object);
         return reg.typedReg().gpr();
     }
 
@@ -1497,6 +925,10 @@ class MacroAssembler : public MacroAssemblerSpecific
 
         bind(&done);
     }
+
+    // Emit type case branch on tag matching if the type tag in the definition
+    // might actually be that type.
+    void branchEqualTypeIfNeeded(MIRType type, MDefinition* maybeDef, Register tag, Label* label);
 
     // Inline allocation.
   private:
@@ -1536,17 +968,135 @@ class MacroAssembler : public MacroAssemblerSpecific
     void compareStrings(JSOp op, Register left, Register right, Register result,
                         Label* fail);
 
+    // If the JitCode that created this assembler needs to transition into the VM,
+    // we want to store the JitCode on the stack in order to mark it during a GC.
+    // This is a reference to a patch location where the JitCode* will be written.
+  private:
+    CodeOffsetLabel exitCodePatch_;
+
+  private:
+    void linkExitFrame();
+
   public:
+    inline void PushStubCode();
+
+    // Push stub code, and the VMFunction pointer.
+    inline void enterExitFrame(const VMFunction* f = nullptr);
+
+    // The JitCode * argument here is one of the tokens defined in the various
+    // exit frame layout classes, e.g. NativeExitFrameLayout::Token().
+    inline void enterFakeExitFrame(JitCode* codeVal);
+
+    // Pop ExitFrame footer in addition to the extra frame.
+    inline void leaveExitFrame(size_t extraFrame = 0);
+
+    inline bool hasEnteredExitFrame() const;
+
     // Generates code used to complete a bailout.
     void generateBailoutTail(Register scratch, Register bailoutInfo);
+
+    // These functions exist as small wrappers around sites where execution can
+    // leave the currently running stream of instructions. They exist so that
+    // instrumentation may be put in place around them if necessary and the
+    // instrumentation is enabled. For the functions that return a uint32_t,
+    // they are returning the offset of the assembler just after the call has
+    // been made so that a safepoint can be made at that location.
+
+    template <typename T>
+    void callWithABI(const T& fun, MoveOp::Type result = MoveOp::GENERAL) {
+        profilerPreCall();
+        MacroAssemblerSpecific::callWithABI(fun, result);
+        profilerPostReturn();
+    }
+
+    // see above comment for what is returned
+    uint32_t callJit(Register callee) {
+        profilerPreCall();
+        MacroAssemblerSpecific::callJit(callee);
+        uint32_t ret = currentOffset();
+        profilerPostReturn();
+        return ret;
+    }
+
+    // see above comment for what is returned
+    uint32_t callWithExitFrame(Label* target) {
+        profilerPreCall();
+        MacroAssemblerSpecific::callWithExitFrame(target);
+        uint32_t ret = currentOffset();
+        profilerPostReturn();
+        return ret;
+    }
+
+    // see above comment for what is returned
+    uint32_t callWithExitFrame(JitCode* target) {
+        profilerPreCall();
+        MacroAssemblerSpecific::callWithExitFrame(target);
+        uint32_t ret = currentOffset();
+        profilerPostReturn();
+        return ret;
+    }
+
+    // see above comment for what is returned
+    uint32_t callWithExitFrame(JitCode* target, Register dynStack) {
+        profilerPreCall();
+        MacroAssemblerSpecific::callWithExitFrame(target, dynStack);
+        uint32_t ret = currentOffset();
+        profilerPostReturn();
+        return ret;
+    }
+
+    void branchTestObjectTruthy(bool truthy, Register objReg, Register scratch,
+                                Label* slowCheck, Label* checked)
+    {
+        // The branches to out-of-line code here implement a conservative version
+        // of the JSObject::isWrapper test performed in EmulatesUndefined.  If none
+        // of the branches are taken, we can check class flags directly.
+        loadObjClass(objReg, scratch);
+        Address flags(scratch, Class::offsetOfFlags());
+
+        branchTestClassIsProxy(true, scratch, slowCheck);
+
+        Condition cond = truthy ? Assembler::Zero : Assembler::NonZero;
+        branchTest32(cond, flags, Imm32(JSCLASS_EMULATES_UNDEFINED), checked);
+    }
+
+    void branchTestClassIsProxy(bool proxy, Register clasp, Label* label)
+    {
+        branchTest32(proxy ? Assembler::NonZero : Assembler::Zero,
+                     Address(clasp, Class::offsetOfFlags()),
+                     Imm32(JSCLASS_IS_PROXY), label);
+    }
+
+    void branchTestObjectIsProxy(bool proxy, Register object, Register scratch, Label* label)
+    {
+        loadObjClass(object, scratch);
+        branchTestClassIsProxy(proxy, scratch, label);
+    }
+
+    void branchFunctionKind(Condition cond, JSFunction::FunctionKind kind, Register fun,
+                            Register scratch, Label* label)
+    {
+        // 16-bit loads are slow and unaligned 32-bit loads may be too so
+        // perform an aligned 32-bit load and adjust the bitmask accordingly.
+        MOZ_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
+        MOZ_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
+        Address address(fun, JSFunction::offsetOfNargs());
+        int32_t mask = IMM32_16ADJ(JSFunction::FUNCTION_KIND_MASK);
+        int32_t bit = IMM32_16ADJ(kind << JSFunction::FUNCTION_KIND_SHIFT);
+        load32(address, scratch);
+        and32(Imm32(mask), scratch);
+        branch32(cond, scratch, Imm32(bit), label);
+    }
 
   public:
 #ifndef JS_CODEGEN_ARM64
     // StackPointer manipulation functions.
     // On ARM64, the StackPointer is implemented as two synchronized registers.
     // Code shared across platforms must use these functions to be valid.
-    template <typename T> inline void addToStackPtr(T t);
-    template <typename T> inline void addStackPtrTo(T t);
+    template <typename T>
+    void addToStackPtr(T t) { addPtr(t, getStackPointer()); }
+    template <typename T>
+    void addStackPtrTo(T t) { addPtr(getStackPointer(), t); }
 
     template <typename T>
     void subFromStackPtr(T t) { subPtr(t, getStackPointer()); }
@@ -1572,47 +1122,34 @@ class MacroAssembler : public MacroAssemblerSpecific
     // On ARM64, sp can function as the zero register depending on context.
     // Code shared across platforms must use these functions to be valid.
     template <typename T>
-    inline void branchTestStackPtr(Condition cond, T t, Label* label);
+    void branchTestStackPtr(Condition cond, T t, Label* label) {
+        branchTestPtr(cond, getStackPointer(), t, label);
+    }
     template <typename T>
-    inline void branchStackPtr(Condition cond, T rhs, Label* label);
+    void branchStackPtr(Condition cond, T rhs, Label* label) {
+        branchPtr(cond, getStackPointer(), rhs, label);
+    }
     template <typename T>
-    inline void branchStackPtrRhs(Condition cond, T lhs, Label* label);
+    void branchStackPtrRhs(Condition cond, T lhs, Label* label) {
+        branchPtr(cond, lhs, getStackPointer(), label);
+    }
 #endif // !JS_CODEGEN_ARM64
 
-  public:
-    void enableProfilingInstrumentation() {
-        emitProfilingInstrumentation_ = true;
-    }
-
   private:
-    // This class is used to surround call sites throughout the assembler. This
-    // is used by callWithABI, and callJit functions, except if suffixed by
-    // NoProfiler.
-    class AutoProfilerCallInstrumentation {
-        MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
-
-      public:
-        explicit AutoProfilerCallInstrumentation(MacroAssembler& masm
-                                                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-        ~AutoProfilerCallInstrumentation() {}
-    };
-    friend class AutoProfilerCallInstrumentation;
-
-    void appendProfilerCallSite(CodeOffset label) {
-        propagateOOM(profilerCallSites_.append(label));
+    // These two functions are helpers used around call sites throughout the
+    // assembler. They are called from the above call wrappers to emit the
+    // necessary instrumentation.
+    void profilerPreCall() {
+        if (!emitProfilingInstrumentation_)
+            return;
+        profilerPreCallImpl();
     }
 
-    // Fix up the code pointers to be written for locations where profilerCallSite
-    // emitted moves of RIP to a register.
-    void linkProfilerCallSites(JitCode* code);
-
-    // This field is used to manage profiling instrumentation output. If
-    // provided and enabled, then instrumentation will be emitted around call
-    // sites.
-    bool emitProfilingInstrumentation_;
-
-    // Record locations of the call sites.
-    Vector<CodeOffset, 0, SystemAllocPolicy> profilerCallSites_;
+    void profilerPostReturn() {
+        if (!emitProfilingInstrumentation_)
+            return;
+        profilerPostReturnImpl();
+    }
 
   public:
     void loadBaselineOrIonRaw(Register script, Register dest, Label* failure);
@@ -1623,11 +1160,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     void pushBaselineFramePtr(Register framePtr, Register scratch) {
         loadBaselineFramePtr(framePtr, scratch);
         push(scratch);
-    }
-
-    void PushBaselineFramePtr(Register framePtr, Register scratch) {
-        loadBaselineFramePtr(framePtr, scratch);
-        Push(scratch);
     }
 
   private:
@@ -1664,7 +1196,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
 #define DISPATCH_FLOATING_POINT_OP(method, type, arg1d, arg1f, arg2)    \
     MOZ_ASSERT(IsFloatingPointType(type));                              \
-    if (type == MIRType::Double)                                        \
+    if (type == MIRType_Double)                                         \
         method##Double(arg1d, arg2);                                    \
     else                                                                \
         method##Float32(arg1f, arg2);                                   \
@@ -1686,50 +1218,43 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void convertValueToFloatingPoint(ValueOperand value, FloatRegister output, Label* fail,
                                      MIRType outputType);
-    MOZ_MUST_USE bool convertValueToFloatingPoint(JSContext* cx, const Value& v,
+    bool convertValueToFloatingPoint(JSContext* cx, const Value& v, FloatRegister output,
+                                     Label* fail, MIRType outputType);
+    bool convertConstantOrRegisterToFloatingPoint(JSContext* cx, ConstantOrRegister src,
                                                   FloatRegister output, Label* fail,
                                                   MIRType outputType);
-    MOZ_MUST_USE bool convertConstantOrRegisterToFloatingPoint(JSContext* cx,
-                                                               ConstantOrRegister src,
-                                                               FloatRegister output, Label* fail,
-                                                               MIRType outputType);
     void convertTypedOrValueToFloatingPoint(TypedOrValueRegister src, FloatRegister output,
                                             Label* fail, MIRType outputType);
 
-    void outOfLineTruncateSlow(FloatRegister src, Register dest, bool widenFloatToDouble,
-                               bool compilingAsmJS);
-
     void convertInt32ValueToDouble(const Address& address, Register scratch, Label* done);
     void convertValueToDouble(ValueOperand value, FloatRegister output, Label* fail) {
-        convertValueToFloatingPoint(value, output, fail, MIRType::Double);
+        convertValueToFloatingPoint(value, output, fail, MIRType_Double);
     }
-    MOZ_MUST_USE bool convertValueToDouble(JSContext* cx, const Value& v, FloatRegister output,
-                                           Label* fail) {
-        return convertValueToFloatingPoint(cx, v, output, fail, MIRType::Double);
+    bool convertValueToDouble(JSContext* cx, const Value& v, FloatRegister output, Label* fail) {
+        return convertValueToFloatingPoint(cx, v, output, fail, MIRType_Double);
     }
-    MOZ_MUST_USE bool convertConstantOrRegisterToDouble(JSContext* cx, ConstantOrRegister src,
-                                                        FloatRegister output, Label* fail)
+    bool convertConstantOrRegisterToDouble(JSContext* cx, ConstantOrRegister src,
+                                           FloatRegister output, Label* fail)
     {
-        return convertConstantOrRegisterToFloatingPoint(cx, src, output, fail, MIRType::Double);
+        return convertConstantOrRegisterToFloatingPoint(cx, src, output, fail, MIRType_Double);
     }
     void convertTypedOrValueToDouble(TypedOrValueRegister src, FloatRegister output, Label* fail) {
-        convertTypedOrValueToFloatingPoint(src, output, fail, MIRType::Double);
+        convertTypedOrValueToFloatingPoint(src, output, fail, MIRType_Double);
     }
 
     void convertValueToFloat(ValueOperand value, FloatRegister output, Label* fail) {
-        convertValueToFloatingPoint(value, output, fail, MIRType::Float32);
+        convertValueToFloatingPoint(value, output, fail, MIRType_Float32);
     }
-    MOZ_MUST_USE bool convertValueToFloat(JSContext* cx, const Value& v, FloatRegister output,
-                                          Label* fail) {
-        return convertValueToFloatingPoint(cx, v, output, fail, MIRType::Float32);
+    bool convertValueToFloat(JSContext* cx, const Value& v, FloatRegister output, Label* fail) {
+        return convertValueToFloatingPoint(cx, v, output, fail, MIRType_Float32);
     }
-    MOZ_MUST_USE bool convertConstantOrRegisterToFloat(JSContext* cx, ConstantOrRegister src,
-                                                       FloatRegister output, Label* fail)
+    bool convertConstantOrRegisterToFloat(JSContext* cx, ConstantOrRegister src,
+                                          FloatRegister output, Label* fail)
     {
-        return convertConstantOrRegisterToFloatingPoint(cx, src, output, fail, MIRType::Float32);
+        return convertConstantOrRegisterToFloatingPoint(cx, src, output, fail, MIRType_Float32);
     }
     void convertTypedOrValueToFloat(TypedOrValueRegister src, FloatRegister output, Label* fail) {
-        convertTypedOrValueToFloatingPoint(src, output, fail, MIRType::Float32);
+        convertTypedOrValueToFloatingPoint(src, output, fail, MIRType_Float32);
     }
 
     enum IntConversionBehavior {
@@ -1767,11 +1292,10 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, nullptr, nullptr, nullptr, nullptr, InvalidReg, temp, output,
                           fail, behavior);
     }
-    MOZ_MUST_USE bool convertValueToInt(JSContext* cx, const Value& v, Register output, Label* fail,
-                                        IntConversionBehavior behavior);
-    MOZ_MUST_USE bool convertConstantOrRegisterToInt(JSContext* cx, ConstantOrRegister src,
-                                                     FloatRegister temp, Register output,
-                                                     Label* fail, IntConversionBehavior behavior);
+    bool convertValueToInt(JSContext* cx, const Value& v, Register output, Label* fail,
+                           IntConversionBehavior behavior);
+    bool convertConstantOrRegisterToInt(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
+                                        Register output, Label* fail, IntConversionBehavior behavior);
     void convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister temp, Register output,
                                   Label* fail, IntConversionBehavior behavior);
 
@@ -1795,16 +1319,15 @@ class MacroAssembler : public MacroAssemblerSpecific
                           : IntConversion_Normal,
                           conversion);
     }
-    MOZ_MUST_USE bool convertValueToInt32(JSContext* cx, const Value& v, Register output,
-                                          Label* fail, bool negativeZeroCheck)
+    bool convertValueToInt32(JSContext* cx, const Value& v, Register output, Label* fail,
+                             bool negativeZeroCheck)
     {
         return convertValueToInt(cx, v, output, fail, negativeZeroCheck
                                  ? IntConversion_NegativeZeroCheck
                                  : IntConversion_Normal);
     }
-    MOZ_MUST_USE bool convertConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src,
-                                                       FloatRegister temp, Register output,
-                                                       Label* fail, bool negativeZeroCheck)
+    bool convertConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
+                                          Register output, Label* fail, bool negativeZeroCheck)
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail, negativeZeroCheck
                                               ? IntConversion_NegativeZeroCheck
@@ -1838,13 +1361,11 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           IntConversion_Truncate);
     }
-    MOZ_MUST_USE bool truncateValueToInt32(JSContext* cx, const Value& v, Register output,
-                                           Label* fail) {
+    bool truncateValueToInt32(JSContext* cx, const Value& v, Register output, Label* fail) {
         return convertValueToInt(cx, v, output, fail, IntConversion_Truncate);
     }
-    MOZ_MUST_USE bool truncateConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src,
-                                                        FloatRegister temp, Register output,
-                                                        Label* fail)
+    bool truncateConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
+                                           Register output, Label* fail)
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail, IntConversion_Truncate);
     }
@@ -1871,13 +1392,11 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           IntConversion_ClampToUint8);
     }
-    MOZ_MUST_USE bool clampValueToUint8(JSContext* cx, const Value& v, Register output,
-                                        Label* fail) {
+    bool clampValueToUint8(JSContext* cx, const Value& v, Register output, Label* fail) {
         return convertValueToInt(cx, v, output, fail, IntConversion_ClampToUint8);
     }
-    MOZ_MUST_USE bool clampConstantOrRegisterToUint8(JSContext* cx, ConstantOrRegister src,
-                                                     FloatRegister temp, Register output,
-                                                     Label* fail)
+    bool clampConstantOrRegisterToUint8(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
+                                        Register output, Label* fail)
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail,
                                               IntConversion_ClampToUint8);
@@ -1908,7 +1427,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void restoreFrameAlignmentForICArguments(AfterICSaveLive& aic) PER_ARCH;
 
     AfterICSaveLive icSaveLive(LiveRegisterSet& liveRegs);
-    MOZ_MUST_USE bool icBuildOOLFakeExitFrame(void* fakeReturnAddr, AfterICSaveLive& aic);
+    bool icBuildOOLFakeExitFrame(void* fakeReturnAddr, AfterICSaveLive& aic);
     void icRestoreLive(LiveRegisterSet& liveRegs, AfterICSaveLive& aic);
 
     // Align the stack pointer based on the number of arguments which are pushed
@@ -1917,7 +1436,36 @@ class MacroAssembler : public MacroAssemblerSpecific
     void alignJitStackBasedOnNArgs(Register nargs);
     void alignJitStackBasedOnNArgs(uint32_t nargs);
 
-    inline void assertStackAlignment(uint32_t alignment, int32_t offset = 0);
+    void assertStackAlignment(uint32_t alignment, int32_t offset = 0) {
+#ifdef DEBUG
+        Label ok, bad;
+        MOZ_ASSERT(IsPowerOfTwo(alignment));
+
+        // Wrap around the offset to be a non-negative number.
+        offset %= alignment;
+        if (offset < 0)
+            offset += alignment;
+
+        // Test if each bit from offset is set.
+        uint32_t off = offset;
+        while (off) {
+            uint32_t lowestBit = 1 << mozilla::CountTrailingZeroes32(off);
+            branchTestStackPtr(Assembler::Zero, Imm32(lowestBit), &bad);
+            off ^= lowestBit;
+        }
+
+        // Check that all remaining bits are zero.
+        branchTestStackPtr(Assembler::Zero, Imm32((alignment - 1) ^ offset), &ok);
+
+        bind(&bad);
+        breakpoint();
+        bind(&ok);
+#endif
+    }
+
+    void profilerPreCallImpl();
+    void profilerPreCallImpl(Register reg, Register reg2);
+    void profilerPostReturnImpl() {}
 };
 
 static inline Assembler::DoubleCondition
@@ -1996,34 +1544,6 @@ StackDecrementForCall(uint32_t alignment, size_t bytesAlreadyPushed, size_t byte
     return bytesToPush +
            ComputeByteAlignment(bytesAlreadyPushed + bytesToPush, alignment);
 }
-
-static inline MIRType
-ToMIRType(MIRType t)
-{
-    return t;
-}
-
-template <class VecT>
-class ABIArgIter
-{
-    ABIArgGenerator gen_;
-    const VecT& types_;
-    unsigned i_;
-
-    void settle() { if (!done()) gen_.next(ToMIRType(types_[i_])); }
-
-  public:
-    explicit ABIArgIter(const VecT& types) : types_(types), i_(0) { settle(); }
-    void operator++(int) { MOZ_ASSERT(!done()); i_++; settle(); }
-    bool done() const { return i_ == types_.length(); }
-
-    ABIArg* operator->() { MOZ_ASSERT(!done()); return &gen_.current(); }
-    ABIArg& operator*() { MOZ_ASSERT(!done()); return gen_.current(); }
-
-    unsigned index() const { MOZ_ASSERT(!done()); return i_; }
-    MIRType mirType() const { MOZ_ASSERT(!done()); return ToMIRType(types_[i_]); }
-    uint32_t stackBytesConsumedSoFar() const { return gen_.stackBytesConsumedSoFar(); }
-};
 
 } // namespace jit
 } // namespace js

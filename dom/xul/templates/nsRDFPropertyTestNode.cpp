@@ -11,7 +11,7 @@
 
 using mozilla::LogLevel;
 
-extern mozilla::LazyLogModule gXULTemplateLog;
+extern PRLogModuleInfo* gXULTemplateLog;
 #include "nsIRDFLiteral.h"
 
 nsRDFPropertyTestNode::nsRDFPropertyTestNode(TestNode* aParent,
@@ -180,6 +180,10 @@ nsRDFPropertyTestNode::FilterInstantiations(InstantiationSet& aInstantiations,
                 Element* element =
                     new nsRDFPropertyTestNode::Element(sourceRes, mProperty,
                                                        targetValue);
+
+                if (! element)
+                    return NS_ERROR_OUT_OF_MEMORY;
+
                 inst->AddSupportingElement(element);
             }
             else {
@@ -270,6 +274,10 @@ nsRDFPropertyTestNode::FilterInstantiations(InstantiationSet& aInstantiations,
                 Element* element =
                     new nsRDFPropertyTestNode::Element(sourceRes, mProperty,
                                                        targetValue);
+
+                if (! element)
+                    return NS_ERROR_OUT_OF_MEMORY;
+
                 newinst.AddSupportingElement(element);
 
                 aInstantiations.Insert(inst, newinst);

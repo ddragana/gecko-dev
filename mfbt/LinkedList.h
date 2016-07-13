@@ -299,38 +299,13 @@ private:
   LinkedListElement<T> sentinel;
 
 public:
-  class Iterator {
-    T* mCurrent;
-
-  public:
-    explicit Iterator(T* aCurrent) : mCurrent(aCurrent) {}
-
-    T* operator *() const {
-      return mCurrent;
-    }
-
-    const Iterator& operator++() {
-      mCurrent = mCurrent->getNext();
-      return *this;
-    }
-
-    bool operator!=(Iterator& aOther) const {
-      return mCurrent != aOther.mCurrent;
-    }
-  };
-
   LinkedList() : sentinel(LinkedListElement<T>::NODE_KIND_SENTINEL) { }
 
   LinkedList(LinkedList<T>&& aOther)
     : sentinel(mozilla::Move(aOther.sentinel))
   { }
 
-  ~LinkedList() {
-    MOZ_ASSERT(isEmpty(),
-               "failing this assertion means this LinkedList's creator is "
-               "buggy: it should have removed all this list's elements before "
-               "the list's destruction");
-  }
+  ~LinkedList() { MOZ_ASSERT(isEmpty()); }
 
   /*
    * Add aElem to the front of the list.
@@ -406,18 +381,6 @@ public:
     while (popFirst()) {
       continue;
     }
-  }
-
-  /*
-   * Allow range-based iteration:
-   *
-   *     for (MyElementType* elt : myList) { ... }
-   */
-  Iterator begin() {
-    return Iterator(getFirst());
-  }
-  Iterator end() {
-    return Iterator(nullptr);
   }
 
   /*

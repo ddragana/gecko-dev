@@ -22,8 +22,10 @@ function test()
   actual += 'iI\u0130'.replace(/[\u0130]/gi, '#');
   actual += ',' + 'iI\u0130'.replace(/\u0130/gi, '#');
 
+  jit(true);
   actual += ';' + 'iI\u0130'.replace(/[\u0130]/gi, '#');
   actual += ',' + 'iI\u0130'.replace(/\u0130/gi, '#');
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

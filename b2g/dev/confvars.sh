@@ -9,4 +9,3 @@ MOZ_MULET=1
 . ${srcdir}/browser/confvars.sh
 
 MOZ_BUNDLED_FONTS=1
-MOZ_UA_OS_AGNOSTIC=1

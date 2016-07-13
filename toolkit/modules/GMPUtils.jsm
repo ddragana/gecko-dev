@@ -11,28 +11,15 @@ this.EXPORTED_SYMBOLS = [ "EME_ADOBE_ID",
                           "GMP_PLUGIN_IDS",
                           "GMPPrefs",
                           "GMPUtils",
-                          "OPEN_H264_ID",
-                          "WIDEVINE_ID" ];
+                          "OPEN_H264_ID" ];
 
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
 
 // GMP IDs
 const OPEN_H264_ID  = "gmp-gmpopenh264";
 const EME_ADOBE_ID  = "gmp-eme-adobe";
-const WIDEVINE_ID   = "gmp-widevinecdm";
-const GMP_PLUGIN_IDS = [ OPEN_H264_ID, EME_ADOBE_ID, WIDEVINE_ID ];
-
-var GMPPluginUnsupportedReason = {
-  NOT_WINDOWS: 1,
-  WINDOWS_VERSION: 2,
-};
-
-var GMPPluginHiddenReason = {
-  UNSUPPORTED: 1,
-  EME_DISABLED: 2,
-};
+const GMP_PLUGIN_IDS = [ OPEN_H264_ID, EME_ADOBE_ID ];
 
 this.GMPUtils = {
   /**
@@ -42,25 +29,14 @@ this.GMPUtils = {
    *          The plugin to check.
    */
   isPluginHidden: function(aPlugin) {
-    if (!aPlugin.isEME) {
-      return false;
+    if (aPlugin.isEME) {
+      if (this._isPluginSupported(aPlugin) ||
+          this._isPluginForcedVisible(aPlugin)) {
+        return !GMPPrefs.get(GMPPrefs.KEY_EME_ENABLED, true);
+      } else {
+        return true;
+      }
     }
-
-    if (!this._isPluginSupported(aPlugin) ||
-        !this._isPluginVisible(aPlugin)) {
-      this.maybeReportTelemetry(aPlugin.id,
-                                "VIDEO_EME_ADOBE_HIDDEN_REASON",
-                                GMPPluginHiddenReason.UNSUPPORTED);
-      return true;
-    }
-
-    if (!GMPPrefs.get(GMPPrefs.KEY_EME_ENABLED, true)) {
-      this.maybeReportTelemetry(aPlugin.id,
-                                "VIDEO_EME_ADOBE_HIDDEN_REASON",
-                                GMPPluginHiddenReason.EME_DISABLED);
-      return true;
-    }
-
     return false;
   },
 
@@ -70,75 +46,24 @@ this.GMPUtils = {
    *          The plugin to check.
    */
   _isPluginSupported: function(aPlugin) {
-    if (this._isPluginForceSupported(aPlugin)) {
-      return true;
-    }
     if (aPlugin.id == EME_ADOBE_ID) {
-      if (Services.appinfo.OS != "WINNT") {
-        // Non-Windows OSes currently unsupported by Adobe EME
-        this.maybeReportTelemetry(aPlugin.id,
-                                  "VIDEO_EME_ADOBE_UNSUPPORTED_REASON",
-                                  GMPPluginUnsupportedReason.NOT_WINDOWS);
+      if (Services.appinfo.OS == "WINNT") {
+        return Services.sysinfo.getPropertyAsInt32("version") >= 6;
+      } else {
         return false;
       }
-    } else if (aPlugin.id == WIDEVINE_ID) {
-      // The Widevine plugin is available for Windows versions Vista and later
-      // and Mac OSX 10.7 and later.
-      if (AppConstants.isPlatformAndVersionAtLeast("win", "6") ||
-          AppConstants.isPlatformAndVersionAtLeast("macosx", "10.7")) {
-        return true;
-      }
-      return false;
     }
-
     return true;
   },
 
   /**
-   * Checks whether or not a given plugin is visible in the addons manager
-   * UI and the "enable DRM" notification box. This can be used to test
-   * plugins that aren't yet turned on in the mozconfig.
+   * Checks whether or not a given plugin is forced visible. This can be used
+   * to test plugins that aren't yet supported by default on a particular OS.
    * @param   aPlugin
    *          The plugin to check.
    */
-  _isPluginVisible: function(aPlugin) {
-    return GMPPrefs.get(GMPPrefs.KEY_PLUGIN_VISIBLE, false, aPlugin.id);
-  },
-
-  /**
-   * Checks whether or not a given plugin is forced-supported. This is used
-   * in automated tests to override the checks that prevent GMPs running on an
-   * unsupported platform.
-   * @param   aPlugin
-   *          The plugin to check.
-   */
-  _isPluginForceSupported: function(aPlugin) {
-    return GMPPrefs.get(GMPPrefs.KEY_PLUGIN_FORCE_SUPPORTED, false, aPlugin.id);
-  },
-
-  /**
-   * Report telemetry value, but only for Adobe CDM and only once per key
-   * per session.
-   */
-  maybeReportTelemetry: function(aPluginId, key, value) {
-    if (aPluginId != EME_ADOBE_ID) {
-      // Only report for Adobe CDM.
-      return;
-    }
-
-    if (!this.reportedKeys) {
-      this.reportedKeys = [];
-    }
-    if (this.reportedKeys.indexOf(key) >= 0) {
-      // Only report each key once per session.
-      return;
-    }
-    this.reportedKeys.push(key);
-
-    let hist = Services.telemetry.getHistogramById(key);
-    if (hist) {
-      hist.add(value);
-    }
+  _isPluginForcedVisible: function(aPlugin) {
+    return GMPPrefs.get(GMPPrefs.KEY_PLUGIN_FORCEVISIBLE, false, aPlugin.id);
   },
 };
 
@@ -151,9 +76,8 @@ this.GMPPrefs = {
   KEY_PLUGIN_LAST_UPDATE:       "media.{0}.lastUpdate",
   KEY_PLUGIN_VERSION:           "media.{0}.version",
   KEY_PLUGIN_AUTOUPDATE:        "media.{0}.autoupdate",
-  KEY_PLUGIN_VISIBLE:           "media.{0}.visible",
-  KEY_PLUGIN_ABI:               "media.{0}.abi",
-  KEY_PLUGIN_FORCE_SUPPORTED:   "media.{0}.forceSupported",
+  KEY_PLUGIN_FORCEVISIBLE:      "media.{0}.forcevisible",
+  KEY_PLUGIN_TRIAL_CREATE:      "media.{0}.trial-create",
   KEY_URL:                      "media.gmp-manager.url",
   KEY_URL_OVERRIDE:             "media.gmp-manager.url.override",
   KEY_CERT_CHECKATTRS:          "media.gmp-manager.cert.checkAttributes",

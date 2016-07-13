@@ -60,39 +60,52 @@ int NoiseSuppressionImpl::AnalyzeCaptureAudio(AudioBuffer* audio) {
   if (!is_component_enabled()) {
     return apm_->kNoError;
   }
-  assert(audio->num_frames_per_band() <= 160);
+  assert(audio->samples_per_split_channel() <= 160);
   assert(audio->num_channels() == num_handles());
 
   for (int i = 0; i < num_handles(); ++i) {
     Handle* my_handle = static_cast<Handle*>(handle(i));
 
-    WebRtcNs_Analyze(my_handle, audio->split_bands_const_f(i)[kBand0To8kHz]);
+    int err = WebRtcNs_Analyze(my_handle,
+                               audio->low_pass_split_data_f(i));
+    if (err != apm_->kNoError) {
+      return GetHandleError(my_handle);
+    }
   }
 #endif
   return apm_->kNoError;
 }
 
 int NoiseSuppressionImpl::ProcessCaptureAudio(AudioBuffer* audio) {
+  int err = apm_->kNoError;
+
   if (!is_component_enabled()) {
     return apm_->kNoError;
   }
-  assert(audio->num_frames_per_band() <= 160);
+  assert(audio->samples_per_split_channel() <= 160);
   assert(audio->num_channels() == num_handles());
 
   for (int i = 0; i < num_handles(); ++i) {
     Handle* my_handle = static_cast<Handle*>(handle(i));
 #if defined(WEBRTC_NS_FLOAT)
-    WebRtcNs_Process(my_handle,
-                     audio->split_bands_const_f(i),
-                     audio->num_bands(),
-                     audio->split_bands_f(i));
+    err = WebRtcNs_Process(my_handle,
+                           audio->low_pass_split_data_f(i),
+                           audio->high_pass_split_data_f(i),
+                           audio->low_pass_split_data_f(i),
+                           audio->high_pass_split_data_f(i));
 #elif defined(WEBRTC_NS_FIXED)
-    WebRtcNsx_Process(my_handle,
-                      audio->split_bands_const(i),
-                      audio->num_bands(),
-                      audio->split_bands(i));
+    err = WebRtcNsx_Process(my_handle,
+                            audio->low_pass_split_data(i),
+                            audio->high_pass_split_data(i),
+                            audio->low_pass_split_data(i),
+                            audio->high_pass_split_data(i));
 #endif
+
+    if (err != apm_->kNoError) {
+      return GetHandleError(my_handle);
+    }
   }
+
   return apm_->kNoError;
 }
 

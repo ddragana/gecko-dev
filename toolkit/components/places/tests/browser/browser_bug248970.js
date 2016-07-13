@@ -6,7 +6,7 @@
 // https://wiki.mozilla.org/Firefox3.1/PrivateBrowsing/TestPlan#History
 // http://developer.mozilla.org/en/Using_the_Places_history_service
 
-var visitedURIs = [
+let visitedURIs = [
   "http://www.test-link.com/",
   "http://www.test-typed.com/",
   "http://www.test-bookmark.com/",
@@ -17,7 +17,7 @@ var visitedURIs = [
   "http://www.test-download.com/"
 ].map(NetUtil.newURI.bind(NetUtil));
 
-add_task(function* () {
+add_task(function () {
   let windowsToClose = [];
   let placeItemsCount = 0;
 
@@ -30,12 +30,12 @@ add_task(function* () {
   yield PlacesTestUtils.clearHistory();
 
    // Ensure we wait for the default bookmarks import.
-  yield new Promise(resolve => {
-    waitForCondition(() => {
-      placeItemsCount = getPlacesItemsCount();
-      return placeItemsCount > 0
-    }, resolve, "Should have default bookmarks")
-  });
+  let bookmarksDeferred = Promise.defer();
+  waitForCondition(() => {
+    placeItemsCount = getPlacesItemsCount();
+    return placeItemsCount > 0
+  }, bookmarksDeferred.resolve, "Should have default bookmarks");
+  yield bookmarksDeferred.promise;
 
   // Create a handful of history items with various visit types
   yield PlacesTestUtils.addVisits([
@@ -55,9 +55,9 @@ add_task(function* () {
      "Check the total items count");
 
   function* testOnWindow(aIsPrivate, aCount) {
-    let win = yield new Promise(resolve => {
-      whenNewWindowLoaded({ private: aIsPrivate }, resolve);
-    });
+    let deferred = Promise.defer();
+    whenNewWindowLoaded({ private: aIsPrivate }, deferred.resolve);
+    let win = yield deferred.promise;
     windowsToClose.push(win);
 
     // History items should be retrievable by query
@@ -120,10 +120,31 @@ function* checkHistoryItems() {
     let visitedUri = visitedURIs[i];
     ok((yield promiseIsURIVisited(visitedUri)), "");
     if (/embed/.test(visitedUri.spec)) {
-      is((yield PlacesTestUtils.isPageInDB(visitedUri)), false, "Check if URI is in database");
+      is(!!pageInDatabase(visitedUri), false, "Check if URI is in database");
     } else {
-      ok((yield PlacesTestUtils.isPageInDB(visitedUri)), "Check if URI is in database");
+      ok(!!pageInDatabase(visitedUri), "Check if URI is in database");
     }
+  }
+}
+
+/**
+ * Checks if an address is found in the database.
+ * @param aURI
+ *        nsIURI or address to look for.
+ * @return place id of the page or 0 if not found
+ */
+function pageInDatabase(aURI) {
+  let url = (aURI instanceof Ci.nsIURI ? aURI.spec : aURI);
+  let stmt = DBConn().createStatement(
+    "SELECT id FROM moz_places WHERE url = :url"
+  );
+  stmt.params.url = url;
+  try {
+    if (!stmt.executeStep())
+      return 0;
+    return stmt.getInt64(0);
+  } finally {
+    stmt.finalize();
   }
 }
 

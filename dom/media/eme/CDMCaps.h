@@ -8,6 +8,7 @@
 #define CDMCaps_h_
 
 #include "nsString.h"
+#include "nsAutoPtr.h"
 #include "mozilla/Monitor.h"
 #include "nsIThread.h"
 #include "nsTArray.h"
@@ -17,8 +18,8 @@
 
 namespace mozilla {
 
-// CDM capabilities; what keys a CDMProxy can use.
-// Must be locked to access state.
+// CDM capabilities; what keys a CDMProxy can use, and whether it can decrypt, or
+// decrypt-and-decode on a per stream basis. Must be locked to access state.
 class CDMCaps {
 public:
   CDMCaps();
@@ -54,6 +55,10 @@ public:
     explicit AutoLock(CDMCaps& aKeyCaps);
     ~AutoLock();
 
+    // Returns true if the capabilities of the CDM are known, i.e. they have
+    // been reported by the CDM to Gecko.
+    bool AreCapsKnown();
+
     bool IsKeyUsable(const CencKeyId& aKeyId);
 
     // Returns true if key status changed,
@@ -66,9 +71,17 @@ public:
     void GetSessionIdsForKeyId(const CencKeyId& aKeyId,
                                nsTArray<nsCString>& aOutSessionIds);
 
-    // Ensures all keys for a session are marked as 'unknown', i.e. removed.
-    // Returns true if a key status was changed.
-    bool RemoveKeysForSession(const nsString& aSessionId);
+    // Sets the capabilities of the CDM. aCaps is the logical OR of the
+    // GMP_EME_CAP_* flags from gmp-decryption.h.
+    void SetCaps(uint64_t aCaps);
+
+    bool CanDecryptAndDecodeAudio();
+    bool CanDecryptAndDecodeVideo();
+
+    bool CanDecryptAudio();
+    bool CanDecryptVideo();
+
+    void CallOnMainThreadWhenCapsAvailable(nsIRunnable* aContinuation);
 
     // Notifies the SamplesWaitingForKey when key become usable.
     void NotifyWhenKeyIdUsable(const CencKeyId& aKey,
@@ -81,6 +94,7 @@ public:
 private:
   void Lock();
   void Unlock();
+  bool HasCap(uint64_t);
 
   struct WaitForKeys {
     WaitForKeys(const CencKeyId& aKeyId,
@@ -89,7 +103,7 @@ private:
       , mListener(aListener)
     {}
     CencKeyId mKeyId;
-    RefPtr<SamplesWaitingForKey> mListener;
+    nsRefPtr<SamplesWaitingForKey> mListener;
   };
 
   Monitor mMonitor;
@@ -97,6 +111,9 @@ private:
   nsTArray<KeyStatus> mKeyStatuses;
 
   nsTArray<WaitForKeys> mWaitForKeys;
+
+  nsTArray<nsCOMPtr<nsIRunnable>> mWaitForCaps;
+  uint64_t mCaps;
 
   // It is not safe to copy this object.
   CDMCaps(const CDMCaps&) = delete;

@@ -17,6 +17,7 @@ config = {
     ],
     'debug_build': True,
     'stage_platform': 'linux-debug',
+    'purge_minsize': 15,
     'enable_signing': False,
     'enable_talos_sendchange': False,
     #### 32 bit build specific #####

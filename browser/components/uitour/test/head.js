@@ -1,5 +1,3 @@
-"use strict";
-
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "UITour",
@@ -27,7 +25,6 @@ function waitForConditionPromise(condition, timeoutMsg, tryCount=NUMBER_OF_TRIES
     }
     tries++;
     setTimeout(checkCondition, SINGLE_TRY_TIMEOUT);
-    return undefined;
   }
   setTimeout(checkCondition, SINGLE_TRY_TIMEOUT);
   return defer.promise;
@@ -35,22 +32,20 @@ function waitForConditionPromise(condition, timeoutMsg, tryCount=NUMBER_OF_TRIES
 
 function waitForCondition(condition, nextTest, errorMsg) {
   waitForConditionPromise(condition, errorMsg).then(nextTest, (reason) => {
-    ok(false, reason + (reason.stack ? "\n" + reason.stack : ""));
+    ok(false, reason + (reason.stack ? "\n" + e.stack : ""));
   });
 }
 
 /**
- * Wrapper to partially transition tests to Task. Use `add_UITour_task` instead for new tests.
+ * Wrapper to partially transition tests to Task.
  */
 function taskify(fun) {
   return (done) => {
-    // Output the inner function name otherwise no name will be output.
-    info("\t" + fun.name);
     return Task.spawn(fun).then(done, (reason) => {
       ok(false, reason);
       done();
     });
-  };
+  }
 }
 
 function is_hidden(element) {
@@ -127,11 +122,8 @@ function waitForPopupAtAnchor(popup, anchorNode, nextTest, msg) {
 }
 
 function getConfigurationPromise(configName) {
-  return ContentTask.spawn(gTestTab.linkedBrowser, configName, configName => {
-    return new Promise((resolve) => {
-      let contentWin = Components.utils.waiveXrays(content);
-      contentWin.Mozilla.UITour.getConfiguration(configName, resolve);
-    });
+  return new Promise(resolve => {
+    gContentAPI.getConfiguration(configName, data => resolve(data));
   });
 }
 
@@ -141,49 +133,22 @@ function hideInfoPromise(...args) {
   return promisePanelElementHidden(window, popup);
 }
 
-/**
- * `buttons` and `options` require functions from the content scope so we take a
- * function name to call to generate the buttons/options instead of the
- * buttons/options themselves. This makes the signature differ from the content one.
- */
-function showInfoPromise(target, title, text, icon, buttonsFunctionName, optionsFunctionName) {
+function showInfoPromise(...args) {
   let popup = document.getElementById("UITourTooltip");
-  let shownPromise = promisePanelElementShown(window, popup);
-  return ContentTask.spawn(gTestTab.linkedBrowser, [...arguments], args => {
-    let contentWin = Components.utils.waiveXrays(content);
-    let [target, title, text, icon, buttonsFunctionName, optionsFunctionName] = args;
-    let buttons = buttonsFunctionName ? contentWin[buttonsFunctionName]() : null;
-    let options = optionsFunctionName ? contentWin[optionsFunctionName]() : null;
-    contentWin.Mozilla.UITour.showInfo(target, title, text, icon, buttons, options);
-  }).then(() => shownPromise);
-}
-
-function showHighlightPromise(...args) {
-  let popup = document.getElementById("UITourHighlightContainer");
-  gContentAPI.showHighlight.apply(gContentAPI, args);
+  gContentAPI.showInfo.apply(gContentAPI, args);
   return promisePanelElementShown(window, popup);
 }
 
 function showMenuPromise(name) {
-  return ContentTask.spawn(gTestTab.linkedBrowser, name, name => {
-    return new Promise((resolve) => {
-      let contentWin = Components.utils.waiveXrays(content);
-      contentWin.Mozilla.UITour.showMenu(name, resolve);
-    });
+  return new Promise(resolve => {
+    gContentAPI.showMenu(name, () => resolve());
   });
 }
 
 function waitForCallbackResultPromise() {
-  return ContentTask.spawn(gTestTab.linkedBrowser, null, function*() {
-    let contentWin = Components.utils.waiveXrays(content);
-    yield ContentTaskUtils.waitForCondition(() => {
-      return contentWin.callbackResult;
-    }, "callback should be called");
-    return {
-      data: contentWin.callbackData,
-      result: contentWin.callbackResult,
-    };
-  });
+  return waitForConditionPromise(() => {
+    return gContentWindow.callbackResult;
+  }, "callback should be called");
 }
 
 function promisePanelShown(win) {
@@ -192,21 +157,17 @@ function promisePanelShown(win) {
 }
 
 function promisePanelElementEvent(win, aPanel, aEvent) {
-  return new Promise((resolve, reject) => {
-    let timeoutId = win.setTimeout(() => {
-      aPanel.removeEventListener(aEvent, onPanelEvent);
-      reject(aEvent + " event did not happen within 5 seconds.");
-    }, 5000);
-
-    function onPanelEvent(e) {
-      aPanel.removeEventListener(aEvent, onPanelEvent);
-      win.clearTimeout(timeoutId);
-      // Wait one tick to let UITour.jsm process the event as well.
-      executeSoon(resolve);
-    }
-
-    aPanel.addEventListener(aEvent, onPanelEvent);
+  let deferred = Promise.defer();
+  let timeoutId = win.setTimeout(() => {
+    deferred.reject("Event did not happen within 5 seconds.");
+  }, 5000);
+  aPanel.addEventListener(aEvent, function onPanelEvent(e) {
+    aPanel.removeEventListener(aEvent, onPanelEvent);
+    win.clearTimeout(timeoutId);
+    // Wait one tick to let UITour.jsm process the event as well.
+    executeSoon(deferred.resolve);
   });
+  return deferred.promise;
 }
 
 function promisePanelElementShown(win, aPanel) {
@@ -222,21 +183,6 @@ function is_element_hidden(element, msg) {
   ok(is_hidden(element), msg);
 }
 
-function isTourBrowser(aBrowser) {
-  let chromeWindow = aBrowser.ownerDocument.defaultView;
-  return UITour.tourBrowsersByWindow.has(chromeWindow) &&
-         UITour.tourBrowsersByWindow.get(chromeWindow).has(aBrowser);
-}
-
-function promisePageEvent() {
-  return new Promise((resolve) => {
-    Services.mm.addMessageListener("UITour:onPageEvent", function onPageEvent(aMessage) {
-      Services.mm.removeMessageListener("UITour:onPageEvent", onPageEvent);
-      SimpleTest.executeSoon(resolve);
-    });
-  });
-}
-
 function loadUITourTestPage(callback, host = "https://example.org/") {
   if (gTestTab)
     gBrowser.removeTab(gTestTab);
@@ -250,115 +196,21 @@ function loadUITourTestPage(callback, host = "https://example.org/") {
   gTestTab.linkedBrowser.addEventListener("load", function onLoad() {
     gTestTab.linkedBrowser.removeEventListener("load", onLoad, true);
 
-    if (gMultiProcessBrowser) {
-      // When e10s is enabled, make gContentAPI and gContentWindow proxies which has every property
-      // return a function which calls the method of the same name on
-      // contentWin.Mozilla.UITour/contentWin in a ContentTask.
-      let contentWinHandler = {
-        get(target, prop, receiver) {
-          return (...args) => {
-            let taskArgs = {
-              methodName: prop,
-              args,
-            };
-            return ContentTask.spawn(gTestTab.linkedBrowser, taskArgs, args => {
-              let contentWin = Components.utils.waiveXrays(content);
-              return contentWin[args.methodName].apply(contentWin, args.args);
-            });
-          };
-        },
-      };
-      gContentWindow = new Proxy({}, contentWinHandler);
+    gContentWindow = Components.utils.waiveXrays(gTestTab.linkedBrowser.contentDocument.defaultView);
+    gContentAPI = gContentWindow.Mozilla.UITour;
 
-      let UITourHandler = {
-        get(target, prop, receiver) {
-          return (...args) => {
-            let browser = gTestTab.linkedBrowser;
-            const proxyFunctionName = "UITourHandler:proxiedfunction-";
-            // We need to proxy any callback functions using messages:
-            let callbackMap = new Map();
-            let fnIndices = [];
-            args = args.map((arg, index) => {
-              // Replace function arguments with "", and add them to the list of
-              // forwarded functions. We'll construct a function on the content-side
-              // that forwards all its arguments to a message, and we'll listen for
-              // those messages on our side and call the corresponding function with
-              // the arguments we got from the content side.
-              if (typeof arg == "function") {
-                callbackMap.set(index, arg);
-                fnIndices.push(index);
-                let handler = function(msg) {
-                  // Please note that this handler assumes that the callback is used only once.
-                  // That means that a single gContentAPI.observer() call can't be used to observe
-                  // multiple events.
-                  browser.messageManager.removeMessageListener(proxyFunctionName + index, handler);
-                  callbackMap.get(index).apply(null, msg.data);
-                };
-                browser.messageManager.addMessageListener(proxyFunctionName + index, handler);
-                return "";
-              }
-              return arg;
-            });
-            let taskArgs = {
-              methodName: prop,
-              args,
-              fnIndices,
-            };
-            return ContentTask.spawn(browser, taskArgs, function*(args) {
-              let contentWin = Components.utils.waiveXrays(content);
-              let callbacksCalled = 0;
-              let resolveCallbackPromise;
-              let allCallbacksCalledPromise = new Promise(resolve => resolveCallbackPromise = resolve);
-              let argumentsWithFunctions = args.args.map((arg, index) => {
-                if (arg === "" && args.fnIndices.includes(index)) {
-                  return function() {
-                    callbacksCalled++;
-                    sendAsyncMessage("UITourHandler:proxiedfunction-" + index, Array.from(arguments));
-                    if (callbacksCalled >= args.fnIndices.length) {
-                      resolveCallbackPromise();
-                    }
-                  };
-                }
-                return arg;
-              });
-              let rv = contentWin.Mozilla.UITour[args.methodName].apply(contentWin.Mozilla.UITour,
-                                                                        argumentsWithFunctions);
-              if (args.fnIndices.length) {
-                yield allCallbacksCalledPromise;
-              }
-              return rv;
-            });
-          };
-        },
-      };
-      gContentAPI = new Proxy({}, UITourHandler);
-    } else {
-      gContentWindow = Components.utils.waiveXrays(gTestTab.linkedBrowser.contentDocument.defaultView);
-      gContentAPI = gContentWindow.Mozilla.UITour;
-    }
-
-    waitForFocus(callback, gTestTab.linkedBrowser);
+    waitForFocus(callback, gContentWindow);
   }, true);
 }
 
-// Wrapper for UITourTest to be used by add_task tests.
-function* setup_UITourTest() {
-  return UITourTest(true);
-}
-
-// Use `add_task(setup_UITourTest);` instead as we will fold this into `setup_UITourTest` once all tests are using `add_UITour_task`.
-function UITourTest(usingAddTask = false) {
+function UITourTest() {
   Services.prefs.setBoolPref("browser.uitour.enabled", true);
   let testHttpsUri = Services.io.newURI("https://example.org", null, null);
   let testHttpUri = Services.io.newURI("http://example.org", null, null);
   Services.perms.add(testHttpsUri, "uitour", Services.perms.ALLOW_ACTION);
   Services.perms.add(testHttpUri, "uitour", Services.perms.ALLOW_ACTION);
 
-  // If a test file is using add_task, we don't need to have a test function or
-  // call `waitForExplicitFinish`.
-  if (!usingAddTask) {
-    waitForExplicitFinish();
-  }
+  waitForExplicitFinish();
 
   registerCleanupFunction(function() {
     delete window.gContentWindow;
@@ -366,20 +218,12 @@ function UITourTest(usingAddTask = false) {
     if (gTestTab)
       gBrowser.removeTab(gTestTab);
     delete window.gTestTab;
-    Services.prefs.clearUserPref("browser.uitour.enabled");
+    Services.prefs.clearUserPref("browser.uitour.enabled", true);
     Services.perms.remove(testHttpsUri, "uitour");
     Services.perms.remove(testHttpUri, "uitour");
   });
 
-  // When using tasks, the harness will call the next added task for us.
-  if (!usingAddTask) {
-    nextTest();
-  }
-}
-
-function done(usingAddTask = false) {
-  info("== Done test, doing shared checks before teardown ==");
-  return new Promise((resolve) => {
+  function done() {
     executeSoon(() => {
       if (gTestTab)
         gBrowser.removeTab(gTestTab);
@@ -396,54 +240,22 @@ function done(usingAddTask = false) {
       isnot(PanelUI.panel.state, "open", "The panel shouldn't be open");
       is(document.getElementById("PanelUI-menu-button").hasAttribute("open"), false, "Menu button should know that the menu is closed");
 
-      info("Done shared checks");
-      if (usingAddTask) {
-        executeSoon(resolve);
-      } else {
-        executeSoon(nextTest);
-      }
+      executeSoon(nextTest);
     });
-  });
-}
-
-function nextTest() {
-  if (tests.length == 0) {
-    info("finished tests in this file");
-    finish();
-    return;
   }
-  let test = tests.shift();
-  info("Starting " + test.name);
-  waitForFocus(function() {
-    loadUITourTestPage(function() {
-      test(done);
-    });
-  });
-}
 
-/**
- * All new tests that need the help of `loadUITourTestPage` should use this
- * wrapper around their test's generator function to reduce boilerplate.
- */
-function add_UITour_task(func) {
-  let genFun = function*() {
-    yield new Promise((resolve) => {
-      waitForFocus(function() {
-        loadUITourTestPage(function() {
-          let funcPromise = Task.spawn(func)
-                                .then(() => done(true),
-                                      (reason) => {
-                                        ok(false, reason);
-                                        return done(true);
-                                      });
-          resolve(funcPromise);
-        });
+  function nextTest() {
+    if (tests.length == 0) {
+      finish();
+      return;
+    }
+    let test = tests.shift();
+    info("Starting " + test.name);
+    waitForFocus(function() {
+      loadUITourTestPage(function() {
+        test(done);
       });
     });
-  };
-  Object.defineProperty(genFun, "name", {
-    configurable: true,
-    value: func.name,
-  });
-  add_task(genFun);
+  }
+  nextTest();
 }

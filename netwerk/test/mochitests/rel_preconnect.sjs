@@ -5,10 +5,10 @@ function handleRequest(request, response)
 {
     response.setHeader("Cache-Control", "no-cache", false);
     response.setHeader("Link", "<" + 
-                       request.queryString +
+                       request.getHeader('X-Link') +
                        ">; rel=preconnect" + ", " +
                         "<" + 
-                       request.queryString +
+                       request.getHeader('X-Link') +
                        ">; rel=preconnect; crossOrigin=anonymous");
     response.write("check that header");
 }

@@ -12,6 +12,7 @@
 #include "nsIFileURL.h"
 #include "nsEscape.h"
 #include "nsIDirIndex.h"
+#include "nsDateTimeFormatCID.h"
 #include "nsURLHelper.h"
 #include "nsIPlatformCharset.h"
 #include "nsIPrefService.h"
@@ -23,7 +24,6 @@
 #include "nsITextToSubURI.h"
 #include "nsXPIDLString.h"
 #include <algorithm>
-#include "nsIChannel.h"
 
 NS_IMPL_ISUPPORTS(nsIndexedToHTML,
                   nsIDirIndexListener,
@@ -69,9 +69,9 @@ nsIndexedToHTML::Init(nsIStreamListener* aListener) {
 
     mListener = aListener;
 
-    mDateTime = nsIDateTimeFormat::Create();
-    if (!mDateTime)
-      return NS_ERROR_FAILURE;
+    mDateTime = do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+    if (NS_FAILED(rv))
+      return rv;
 
     nsCOMPtr<nsIStringBundleService> sbs =
         do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv);
@@ -267,7 +267,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
                          "table[order] > thead > tr > th::after {\n"
                          "  display: none;\n"
                          "  width: .8em;\n"
-                         "  margin-inline-end: -.8em;\n"
+                         "  -moz-margin-end: -.8em;\n"
                          "  text-align: end;\n"
                          "}\n"
                          "table[order=\"asc\"] > thead > tr > th::after {\n"
@@ -305,24 +305,24 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
                          "/* name */\n"
                          "/* name */\n"
                          "th:first-child {\n"
-                         "  padding-inline-end: 2em;\n"
+                         "  -moz-padding-end: 2em;\n"
                          "}\n"
                          "/* size */\n"
                          "th:first-child + th {\n"
-                         "  padding-inline-end: 1em;\n"
+                         "  -moz-padding-end: 1em;\n"
                          "}\n"
                          "td:first-child + td {\n"
                          "  text-align: end;\n"
-                         "  padding-inline-end: 1em;\n"
+                         "  -moz-padding-end: 1em;\n"
                          "}\n"
                          "/* date */\n"
                          "td:first-child + td + td {\n"
-                         "  padding-inline-start: 1em;\n"
-                         "  padding-inline-end: .5em;\n"
+                         "  -moz-padding-start: 1em;\n"
+                         "  -moz-padding-end: .5em;\n"
                          "}\n"
                          "/* time */\n"
                          "td:first-child + td + td + td {\n"
-                         "  padding-inline-start: .5em;\n"
+                         "  -moz-padding-start: .5em;\n"
                          "}\n"
                          ".symlink {\n"
                          "  font-style: italic;\n"
@@ -330,12 +330,12 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
                          ".dir ,\n"
                          ".symlink ,\n"
                          ".file {\n"
-                         "  margin-inline-start: 20px;\n"
+                         "  -moz-margin-start: 20px;\n"
                          "}\n"
                          ".dir::before ,\n"
                          ".file > img {\n"
-                         "  margin-inline-end: 4px;\n"
-                         "  margin-inline-start: -20px;\n"
+                         "  -moz-margin-end: 4px;\n"
+                         "  -moz-margin-start: -20px;\n"
                          "  max-width: 16px;\n"
                          "  max-height: 16px;\n"
                          "  vertical-align: middle;\n"
@@ -542,23 +542,15 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
     // trying to play nice and escaping the quotes.  See bug
     // 358128.
 
-    if (!baseUri.Contains('"'))
+    if (baseUri.FindChar('"') == kNotFound)
     {
         // Great, the baseUri does not contain a char that
         // will prematurely close the string.  Go ahead an
-        // add a base href, but only do so if we're not
-        // dealing with a resource URI.
-        nsCOMPtr<nsIURI> originalUri;
-        rv = channel->GetOriginalURI(getter_AddRefs(originalUri));
-        bool wasResource = false;
-        if (NS_FAILED(rv) ||
-            NS_FAILED(originalUri->SchemeIs("resource", &wasResource)) ||
-            !wasResource) {
-            buffer.AppendLiteral("<base href=\"");
-            nsAdoptingCString htmlEscapedUri(nsEscapeHTML(baseUri.get()));
-            buffer.Append(htmlEscapedUri);
-            buffer.AppendLiteral("\" />\n");
-        }
+        // add a base href.
+        buffer.AppendLiteral("<base href=\"");
+        nsAdoptingCString htmlEscapedUri(nsEscapeHTML(baseUri.get()));
+        buffer.Append(htmlEscapedUri);
+        buffer.AppendLiteral("\" />\n");
     }
     else
     {
@@ -707,7 +699,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
 
     // Adjust the length in case unescaping shortened the string.
     loc.Truncate(nsUnescapeCount(loc.BeginWriting()));
-    if (loc.First() == char16_t('.'))
+    if (loc.First() == PRUnichar('.'))
         pushBuffer.AppendLiteral(" class=\"hidden-object\"");
 
     pushBuffer.AppendLiteral(">\n <td sortable-data=\"");
@@ -759,10 +751,8 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
     // for some protocols, we expect the location to be absolute.
     // if so, and if the location indeed appears to be a valid URI, then go
     // ahead and treat it like one.
-
-    nsAutoCString scheme;
     if (mExpectAbsLoc &&
-        NS_SUCCEEDED(net_ExtractURLScheme(loc, scheme))) {
+        NS_SUCCEEDED(net_ExtractURLScheme(loc, nullptr, nullptr, nullptr))) {
         // escape as absolute 
         escFlags = esc_Forced | esc_AlwaysCopy | esc_Minimal;
     }
@@ -828,7 +818,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
     PRTime t;
     aIndex->GetLastModified(&t);
 
-    if (t == -1LL) {
+    if (t == -1) {
         pushBuffer.AppendLiteral("></td>\n <td>");
     } else {
         pushBuffer.AppendLiteral(" sortable-data=\"");

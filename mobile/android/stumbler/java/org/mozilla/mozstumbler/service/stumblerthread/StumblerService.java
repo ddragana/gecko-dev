@@ -4,13 +4,10 @@
 
 package org.mozilla.mozstumbler.service.stumblerthread;
 
-import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.AsyncTask;
-import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -180,11 +177,6 @@ public class StumblerService extends PersistentIntentService
         // Post-init(), set the mode to passive.
         mScanManager.setPassiveMode(true);
 
-        if (!hasLocationPermission()) {
-            Log.d(LOG_TAG, "Location permission not granted. Aborting.");
-            return;
-        }
-
         if (intent == null) {
             return;
         }
@@ -246,9 +238,5 @@ public class StumblerService extends PersistentIntentService
         } else if (!mScanManager.isPassiveMode()) {
             UploadAlarmReceiver.scheduleAlarm(this, FREQUENCY_IN_SEC_OF_UPLOAD_IN_ACTIVE_MODE, true /* repeating */);
         }
-    }
-
-    private boolean hasLocationPermission() {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 }

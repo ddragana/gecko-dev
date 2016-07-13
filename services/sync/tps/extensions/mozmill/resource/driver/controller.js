@@ -5,9 +5,9 @@
 var EXPORTED_SYMBOLS = ["MozMillController", "globalEventRegistry",
                         "sleep", "windowMap"];
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 
 var EventUtils = {}; Cu.import('resource://mozmill/stdlib/EventUtils.js', EventUtils);
 
@@ -44,11 +44,7 @@ waitForEvents.prototype = {
     node.firedEvents = {};
     this.registry = {};
 
-    if (!events) {
-      return;
-    }
-    for (var key in events) {
-      var e = events[key];
+    for each (var e in events) {
       var listener = function (event) {
         this.firedEvents[event.type] = true;
       }
@@ -977,10 +973,7 @@ function browserAdditions (controller) {
         return windows.map.hasPageLoaded(utils.getWindowId(win));
       }, "Timeout", timeout, aInterval);
     }
-    catch (ex) {
-      if (!ex instanceof errors.TimeoutError) {
-        throw ex;
-      }
+    catch (ex if ex instanceof errors.TimeoutError) {
       timed_out = true;
     }
     finally {

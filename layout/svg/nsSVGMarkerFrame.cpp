@@ -44,8 +44,8 @@ nsSVGMarkerFrame::AttributeChanged(int32_t  aNameSpaceID,
     nsSVGEffects::InvalidateDirectRenderingObservers(this);
   }
 
-  return nsSVGContainerFrame::AttributeChanged(aNameSpaceID,
-                                               aAttribute, aModType);
+  return nsSVGMarkerFrameBase::AttributeChanged(aNameSpaceID,
+                                                aAttribute, aModType);
 }
 
 #ifdef DEBUG
@@ -56,7 +56,7 @@ nsSVGMarkerFrame::Init(nsIContent*       aContent,
 {
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::marker), "Content is not an SVG marker");
 
-  nsSVGContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGMarkerFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -95,7 +95,7 @@ nsSVGMarkerFrame::GetCanvasTM()
 static nsIFrame*
 GetAnonymousChildFrame(nsIFrame* aFrame)
 {
-  nsIFrame* kid = aFrame->PrincipalChildList().FirstChild();
+  nsIFrame* kid = aFrame->GetFirstPrincipalChild();
   MOZ_ASSERT(kid && kid->GetType() == nsGkAtoms::svgMarkerAnonChildFrame,
              "expected to find anonymous child of marker frame");
   return kid;
@@ -267,7 +267,7 @@ nsSVGMarkerAnonChildFrame::Init(nsIContent*       aContent,
 {
   MOZ_ASSERT(aParent->GetType() == nsGkAtoms::svgMarkerFrame,
              "Unexpected parent");
-  nsSVGDisplayContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGMarkerAnonChildFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif
 

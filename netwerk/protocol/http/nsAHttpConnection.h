@@ -70,15 +70,7 @@ public:
         // by default do nothing - only multiplexed protocols need to overload
         return;
     }
-
-    // This is the companion to *HasDataToWrite() for the case
-    // when a gecko caller has called ResumeRecv() after being paused
-    virtual void TransactionHasDataToRecv(nsAHttpTransaction *)
-    {
-        // by default do nothing - only multiplexed protocols need to overload
-        return;
-    }
-
+    //
     // called by the connection manager to close a transaction being processed
     // by this connection.
     //
@@ -127,7 +119,7 @@ public:
 
     // Transfer the base http connection object along with a
     // reference to it to the caller.
-    virtual already_AddRefed<nsHttpConnection> TakeHttpConnection() = 0;
+    virtual nsHttpConnection *TakeHttpConnection() = 0;
 
     // Get the nsISocketTransport used by the connection without changing
     //  references or ownership.
@@ -165,7 +157,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpConnection, NS_AHTTPCONNECTION_IID)
     bool IsReused() override;                             \
     void DontReuse() override;                            \
     nsresult PushBack(const char *, uint32_t) override;   \
-    already_AddRefed<nsHttpConnection> TakeHttpConnection() override; \
+    nsHttpConnection *TakeHttpConnection() override;      \
     uint32_t CancelPipeline(nsresult originalReason) override; \
     nsAHttpTransaction::Classifier Classification() override; \
     /*                                                    \

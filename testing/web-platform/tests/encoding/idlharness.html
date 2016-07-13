@@ -38,7 +38,7 @@ interface TextDecoder {
 
 // 8.2 Interface TextDecoder
 
-[Constructor,
+[Constructor(optional DOMString utfLabel = "utf-8"),
  Exposed=Window,Worker]
 interface TextEncoder {
   readonly attribute DOMString encoding;

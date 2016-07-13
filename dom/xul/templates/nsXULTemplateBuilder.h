@@ -26,7 +26,7 @@
 #include "nsCycleCollectionParticipant.h"
 
 #include "mozilla/Logging.h"
-extern mozilla::LazyLogModule gXULTemplateLog;
+extern PRLogModuleInfo* gXULTemplateLog;
 
 class nsIContent;
 class nsIObserverService;
@@ -41,7 +41,6 @@ class nsXULTemplateBuilder : public nsIXULTemplateBuilder,
                              public nsStubDocumentObserver
 {
     void CleanUp(bool aIsFinal);
-    void DestroyMatchMap();
 
 public:
     nsXULTemplateBuilder();

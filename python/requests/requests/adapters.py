@@ -8,24 +8,20 @@ This module contains the transport adapters that Requests uses to define
 and maintain connections.
 """
 
-import os.path
 import socket
 
 from .models import Response
+from .packages.urllib3 import Retry
 from .packages.urllib3.poolmanager import PoolManager, proxy_from_url
 from .packages.urllib3.response import HTTPResponse
 from .packages.urllib3.util import Timeout as TimeoutSauce
-from .packages.urllib3.util.retry import Retry
 from .compat import urlparse, basestring
 from .utils import (DEFAULT_CA_BUNDLE_PATH, get_encoding_from_headers,
-                    prepend_scheme_if_needed, get_auth_from_url, urldefragauth,
-                    select_proxy)
+                    prepend_scheme_if_needed, get_auth_from_url, urldefragauth)
 from .structures import CaseInsensitiveDict
-from .packages.urllib3.exceptions import ClosedPoolError
 from .packages.urllib3.exceptions import ConnectTimeoutError
 from .packages.urllib3.exceptions import HTTPError as _HTTPError
 from .packages.urllib3.exceptions import MaxRetryError
-from .packages.urllib3.exceptions import NewConnectionError
 from .packages.urllib3.exceptions import ProxyError as _ProxyError
 from .packages.urllib3.exceptions import ProtocolError
 from .packages.urllib3.exceptions import ReadTimeoutError
@@ -39,7 +35,6 @@ from .auth import _basic_auth_str
 DEFAULT_POOLBLOCK = False
 DEFAULT_POOLSIZE = 10
 DEFAULT_RETRIES = 0
-DEFAULT_POOL_TIMEOUT = None
 
 
 class BaseAdapter(object):
@@ -108,7 +103,7 @@ class HTTPAdapter(BaseAdapter):
 
     def __setstate__(self, state):
         # Can't handle by adding 'proxy_manager' to self.__attrs__ because
-        # self.poolmanager uses a lambda function, which isn't pickleable.
+        # because self.poolmanager uses a lambda function, which isn't pickleable.
         self.proxy_manager = {}
         self.config = {}
 
@@ -186,15 +181,10 @@ class HTTPAdapter(BaseAdapter):
                 raise Exception("Could not find a suitable SSL CA certificate bundle.")
 
             conn.cert_reqs = 'CERT_REQUIRED'
-
-            if not os.path.isdir(cert_loc):
-                conn.ca_certs = cert_loc
-            else:
-                conn.ca_cert_dir = cert_loc
+            conn.ca_certs = cert_loc
         else:
             conn.cert_reqs = 'CERT_NONE'
             conn.ca_certs = None
-            conn.ca_cert_dir = None
 
         if cert:
             if not isinstance(cert, basestring):
@@ -247,7 +237,8 @@ class HTTPAdapter(BaseAdapter):
         :param url: The URL to connect to.
         :param proxies: (optional) A Requests-style dictionary of proxies used on this request.
         """
-        proxy = select_proxy(url, proxies)
+        proxies = proxies or {}
+        proxy = proxies.get(urlparse(url.lower()).scheme)
 
         if proxy:
             proxy = prepend_scheme_if_needed(proxy, 'http')
@@ -280,10 +271,12 @@ class HTTPAdapter(BaseAdapter):
         :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.
 
         :param request: The :class:`PreparedRequest <PreparedRequest>` being sent.
-        :param proxies: A dictionary of schemes or schemes and hosts to proxy URLs.
+        :param proxies: A dictionary of schemes to proxy URLs.
         """
-        proxy = select_proxy(request.url, proxies)
+        proxies = proxies or {}
         scheme = urlparse(request.url).scheme
+        proxy = proxies.get(scheme)
+
         if proxy and scheme != 'https':
             url = urldefragauth(request.url)
         else:
@@ -316,6 +309,7 @@ class HTTPAdapter(BaseAdapter):
         :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.
 
         :param proxies: The url of the proxy being used for this request.
+        :param kwargs: Optional additional keyword arguments.
         """
         headers = {}
         username, password = get_auth_from_url(proxy)
@@ -332,8 +326,8 @@ class HTTPAdapter(BaseAdapter):
         :param request: The :class:`PreparedRequest <PreparedRequest>` being sent.
         :param stream: (optional) Whether to stream the request content.
         :param timeout: (optional) How long to wait for the server to send
-            data before giving up, as a float, or a :ref:`(connect timeout,
-            read timeout) <timeouts>` tuple.
+            data before giving up, as a float, or a (`connect timeout, read
+            timeout <user/advanced.html#timeouts>`_) tuple.
         :type timeout: float or tuple
         :param verify: (optional) Whether to verify SSL certificates.
         :param cert: (optional) Any user-provided SSL certificate to be trusted.
@@ -381,7 +375,7 @@ class HTTPAdapter(BaseAdapter):
                 if hasattr(conn, 'proxy_pool'):
                     conn = conn.proxy_pool
 
-                low_conn = conn._get_conn(timeout=DEFAULT_POOL_TIMEOUT)
+                low_conn = conn._get_conn(timeout=timeout)
 
                 try:
                     low_conn.putrequest(request.method,
@@ -400,15 +394,7 @@ class HTTPAdapter(BaseAdapter):
                         low_conn.send(b'\r\n')
                     low_conn.send(b'0\r\n\r\n')
 
-                    # Receive the response from the server
-                    try:
-                        # For Python 2.7+ versions, use buffering of HTTP
-                        # responses
-                        r = low_conn.getresponse(buffering=True)
-                    except TypeError:
-                        # For compatibility with Python 2.6 versions and back
-                        r = low_conn.getresponse()
-
+                    r = low_conn.getresponse()
                     resp = HTTPResponse.from_httplib(
                         r,
                         pool=conn,
@@ -421,22 +407,20 @@ class HTTPAdapter(BaseAdapter):
                     # Then, reraise so that we can handle the actual exception.
                     low_conn.close()
                     raise
+                else:
+                    # All is well, return the connection to the pool.
+                    conn._put_conn(low_conn)
 
         except (ProtocolError, socket.error) as err:
             raise ConnectionError(err, request=request)
 
         except MaxRetryError as e:
             if isinstance(e.reason, ConnectTimeoutError):
-                # TODO: Remove this in 3.0.0: see #2811
-                if not isinstance(e.reason, NewConnectionError):
-                    raise ConnectTimeout(e, request=request)
+                raise ConnectTimeout(e, request=request)
 
             if isinstance(e.reason, ResponseError):
                 raise RetryError(e, request=request)
 
-            raise ConnectionError(e, request=request)
-
-        except ClosedPoolError as e:
             raise ConnectionError(e, request=request)
 
         except _ProxyError as e:

@@ -7,8 +7,6 @@
 
 #include "domstubs.idl"
 
-interface mozIDOMWindowProxy;
-
 /* THIS IS A PUBLIC EMBEDDING API */
 
 
@@ -26,7 +24,7 @@ interface mozIDOMWindowProxy;
  * QueryInterface to nsIWebBrowserFindInFrames.
  */
 
-[scriptable, uuid(e4920136-b3e0-49e0-b1cd-6c783d2591a8)]
+[scriptable, uuid(2f977d44-5485-11d4-87e2-0010a4e75ef2)]
 interface nsIWebBrowserFind : nsISupports
 {
     /**
@@ -112,7 +110,7 @@ interface nsIWebBrowserFindInFrames : nsISupports
      * be set to be the last frame searched, whether or not a result was found.
      * Has to be equal to or contained within the rootSearchFrame.
      */
-    attribute mozIDOMWindowProxy  currentSearchFrame;
+    attribute nsIDOMWindow  currentSearchFrame;
 
     /**
      * rootSearchFrame
@@ -120,7 +118,7 @@ interface nsIWebBrowserFindInFrames : nsISupports
      * Frame within which to confine the search (normally the content area frame).
      * Set this to only search a subtree of the frame hierarchy.
      */
-    attribute mozIDOMWindowProxy  rootSearchFrame;
+    attribute nsIDOMWindow  rootSearchFrame;
         
     /**
      * searchSubframes

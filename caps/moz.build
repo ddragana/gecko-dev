@@ -32,13 +32,8 @@ EXPORTS.mozilla = [
     'BasePrincipal.h'
 ]
 
-SOURCES += [
-    # Compile this separately since nsExceptionHandler.h conflicts
-    # with something from nsNullPrincipal.cpp.
-    'BasePrincipal.cpp',
-]
-
 UNIFIED_SOURCES += [
+    'BasePrincipal.cpp',
     'DomainPolicy.cpp',
     'nsJSPrincipals.cpp',
     'nsNullPrincipal.cpp',
@@ -49,14 +44,12 @@ UNIFIED_SOURCES += [
 ]
 
 LOCAL_INCLUDES += [
-    '/docshell/base',
     '/dom/base',
     '/js/xpconnect/src',
 ]
 
-if CONFIG['ENABLE_TESTS']:
-    DIRS += ['tests/gtest']
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
+
+FAIL_ON_WARNINGS = True

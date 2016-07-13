@@ -23,13 +23,13 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TVManager, DOMEventTargetHelper)
 
-  static already_AddRefed<TVManager> Create(nsPIDOMWindowInner* aWindow);
+  static already_AddRefed<TVManager> Create(nsPIDOMWindow* aWindow);
 
   // WebIDL (internal functions)
 
   virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  nsresult SetTuners(const nsTArray<RefPtr<TVTuner>>& aTuners);
+  nsresult SetTuners(const nsTArray<nsRefPtr<TVTuner>>& aTuners);
 
   void RejectPendingGetTunersPromises(nsresult aRv);
 
@@ -40,16 +40,16 @@ public:
   already_AddRefed<Promise> GetTuners(ErrorResult& aRv);
 
 private:
-  explicit TVManager(nsPIDOMWindowInner* aWindow);
+  explicit TVManager(nsPIDOMWindow* aWindow);
 
   ~TVManager();
 
   bool Init();
 
   nsCOMPtr<nsITVService> mTVService;
-  nsTArray<RefPtr<TVTuner>> mTuners;
+  nsTArray<nsRefPtr<TVTuner>> mTuners;
   bool mIsReady;
-  nsTArray<RefPtr<Promise>> mPendingGetTunersPromises;
+  nsTArray<nsRefPtr<Promise>> mPendingGetTunersPromises;
 };
 
 } // namespace dom

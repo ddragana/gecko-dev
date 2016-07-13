@@ -12,8 +12,6 @@
 #define WEBRTC_BASE_OPENSSLADAPTER_H__
 
 #include <string>
-#include "webrtc/base/messagehandler.h"
-#include "webrtc/base/messagequeue.h"
 #include "webrtc/base/ssladapter.h"
 
 typedef struct ssl_st SSL;
@@ -24,45 +22,38 @@ namespace rtc {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class OpenSSLAdapter : public SSLAdapter, public MessageHandler {
+class OpenSSLAdapter : public SSLAdapter {
 public:
   static bool InitializeSSL(VerificationCallback callback);
   static bool InitializeSSLThread();
   static bool CleanupSSL();
 
   OpenSSLAdapter(AsyncSocket* socket);
-  ~OpenSSLAdapter() override;
+  virtual ~OpenSSLAdapter();
 
-  void SetMode(SSLMode mode) override;
-  int StartSSL(const char* hostname, bool restartable) override;
-  int Send(const void* pv, size_t cb) override;
-  int SendTo(const void* pv, size_t cb, const SocketAddress& addr) override;
-  int Recv(void* pv, size_t cb) override;
-  int RecvFrom(void* pv, size_t cb, SocketAddress* paddr) override;
-  int Close() override;
+  virtual int StartSSL(const char* hostname, bool restartable);
+  virtual int Send(const void* pv, size_t cb);
+  virtual int Recv(void* pv, size_t cb);
+  virtual int Close();
 
   // Note that the socket returns ST_CONNECTING while SSL is being negotiated.
-  ConnState GetState() const override;
+  virtual ConnState GetState() const;
 
 protected:
- void OnConnectEvent(AsyncSocket* socket) override;
- void OnReadEvent(AsyncSocket* socket) override;
- void OnWriteEvent(AsyncSocket* socket) override;
- void OnCloseEvent(AsyncSocket* socket, int err) override;
+  virtual void OnConnectEvent(AsyncSocket* socket);
+  virtual void OnReadEvent(AsyncSocket* socket);
+  virtual void OnWriteEvent(AsyncSocket* socket);
+  virtual void OnCloseEvent(AsyncSocket* socket, int err);
 
 private:
   enum SSLState {
     SSL_NONE, SSL_WAIT, SSL_CONNECTING, SSL_CONNECTED, SSL_ERROR
   };
 
-  enum { MSG_TIMEOUT };
-
   int BeginSSL();
   int ContinueSSL();
   void Error(const char* context, int err, bool signal = true);
   void Cleanup();
-
-  void OnMessage(Message* msg) override;
 
   static bool VerifyServerName(SSL* ssl, const char* host,
                                bool ignore_bad_cert);
@@ -75,7 +66,7 @@ private:
   friend class OpenSSLStreamAdapter;  // for custom_verify_callback_;
 
   static bool ConfigureTrustedRootCertificates(SSL_CTX* ctx);
-  SSL_CTX* SetupSSLContext();
+  static SSL_CTX* SetupSSLContext();
 
   SSLState state_;
   bool ssl_read_needs_write_;
@@ -86,8 +77,6 @@ private:
   SSL* ssl_;
   SSL_CTX* ssl_ctx_;
   std::string ssl_host_name_;
-  // Do DTLS or not
-  SSLMode ssl_mode_;
 
   bool custom_verification_succeeded_;
 };

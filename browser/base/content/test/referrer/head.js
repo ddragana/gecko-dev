@@ -10,13 +10,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "ContentTask",
 const REFERRER_URL_BASE = "/browser/browser/base/content/test/referrer/";
 const REFERRER_POLICYSERVER_URL =
   "test1.example.com" + REFERRER_URL_BASE + "file_referrer_policyserver.sjs";
-const REFERRER_POLICYSERVER_URL_ATTRIBUTE =
-  "test1.example.com" + REFERRER_URL_BASE + "file_referrer_policyserver_attr.sjs";
 
-SpecialPowers.pushPrefEnv({"set": [['network.http.enablePerElementReferrer', true]]});
-
-var gTestWindow = null;
-var rounds = 0;
+let gTestWindow = null;
 
 // We test that the UI code propagates three pieces of state - the referrer URI
 // itself, the referrer policy, and the triggering principal. After that, we
@@ -26,7 +21,7 @@ var rounds = 0;
 // would break when the UI code drops either of these pieces; we don't try to
 // duplicate the entire cross-product test in bug 704320 - that would be slow,
 // especially when we're opening a new window for each case.
-var _referrerTests = [
+let _referrerTests = [
   // 1. Normal cases - no referrer policy, no special attributes.
   //    We expect a full referrer normally, and no referrer on downgrade.
   {
@@ -45,7 +40,7 @@ var _referrerTests = [
     fromScheme: "https://",
     toScheme: "http://",
     policy: "origin",
-    result: "https://test1.example.com/"  // origin, even on downgrade
+    result: "https://test1.example.com"  // origin, even on downgrade
   },
   {
     fromScheme: "https://",
@@ -54,21 +49,20 @@ var _referrerTests = [
     rel: "noreferrer",
     result: ""  // rel=noreferrer trumps meta-referrer
   },
-  // 3. XXX: using no-referrer here until we support all attribute values (bug 1178337)
-  //    Origin-when-cross-origin policy - this depends on the triggering
+  // 3. Origin-when-cross-origin policy - this depends on the triggering
   //    principal.  We expect full referrer for same-origin requests,
   //    and origin referrer for cross-origin requests.
   {
     fromScheme: "https://",
     toScheme: "https://",
-    policy: "no-referrer",
-    result: ""  // same origin https://test1.example.com/browser
+    policy: "origin-when-cross-origin",
+    result: "https://test1.example.com/browser"  // same origin
   },
   {
     fromScheme: "http://",
     toScheme: "https://",
-    policy: "no-referrer",
-    result: ""  // cross origin http://test1.example.com
+    policy: "origin-when-cross-origin",
+    result: "http://test1.example.com"  // cross origin
   },
 ];
 
@@ -195,16 +189,14 @@ function doContextMenuCommand(aWindow, aMenu, aItemId) {
  * @return {Promise}
  * @resolves When the source url for this test case is loaded.
  */
-function referrerTestCaseLoaded(aTestNumber, aParams) {
+function referrerTestCaseLoaded(aTestNumber) {
   let test = getReferrerTest(aTestNumber);
-  let server = rounds == 0 ? REFERRER_POLICYSERVER_URL :
-                             REFERRER_POLICYSERVER_URL_ATTRIBUTE;
-  let url = test.fromScheme + server +
+  let url = test.fromScheme + REFERRER_POLICYSERVER_URL +
             "?scheme=" + escape(test.toScheme) +
             "&policy=" + escape(test.policy || "") +
             "&rel=" + escape(test.rel || "");
   var browser = gTestWindow.gBrowser;
-  browser.selectedTab = browser.addTab(url, aParams);
+  browser.selectedTab = browser.addTab(url);
   return BrowserTestUtils.browserLoaded(browser.selectedBrowser);
 }
 
@@ -216,7 +208,7 @@ function referrerTestCaseLoaded(aTestNumber, aParams) {
  * @param aStartTestCase The callback to start the next test, aTestNumber + 1.
  */
 function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
-                                       aStartTestCase, aParams = {}) {
+                                       aStartTestCase) {
   referrerResultExtracted(aNewWindow || gTestWindow).then(function(result) {
     // Compare the actual result against the expected one.
     let test = getReferrerTest(aTestNumber);
@@ -232,13 +224,7 @@ function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
     // Move on to the next test.  Or finish if we're done.
     var nextTestNumber = aTestNumber + 1;
     if (getReferrerTest(nextTestNumber)) {
-      referrerTestCaseLoaded(nextTestNumber, aParams).then(function() {
-        aStartTestCase(nextTestNumber);
-      });
-    } else if (rounds == 0) {
-      nextTestNumber = 0;
-      rounds = 1;
-      referrerTestCaseLoaded(nextTestNumber, aParams).then(function() {
+      referrerTestCaseLoaded(nextTestNumber).then(function() {
         aStartTestCase(nextTestNumber);
       });
     } else {
@@ -253,7 +239,7 @@ function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
  * the test number - 0, 1, 2... Needs to trigger the navigation from the source
  * page, and call checkReferrerAndStartNextTest() when the target is loaded.
  */
-function startReferrerTest(aStartTestCase, params = {}) {
+function startReferrerTest(aStartTestCase) {
   waitForExplicitFinish();
 
   // Open the window where we'll load the source URLs.
@@ -264,7 +250,7 @@ function startReferrerTest(aStartTestCase, params = {}) {
 
   // Load and start the first test.
   delayedStartupFinished(gTestWindow).then(function() {
-    referrerTestCaseLoaded(0, params).then(function() {
+    referrerTestCaseLoaded(0).then(function() {
       aStartTestCase(0);
     });
   });

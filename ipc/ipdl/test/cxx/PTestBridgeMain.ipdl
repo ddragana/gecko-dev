@@ -10,10 +10,10 @@ protocol PTestBridgeMain {
     child opens PTestBridgeMainSub;
 
 child:
-    async Start();
+    Start();
 
 parent:
-    async __delete__();
+    __delete__();
 
 state START:
     send Start goto DEAD;

@@ -39,8 +39,6 @@ class CompositingRenderTargetOGL : public CompositingRenderTarget
 {
   typedef mozilla::gl::GLContext GLContext;
 
-  friend class CompositorOGL;
-
   // For lazy initialisation of the GL stuff
   struct InitParams
   {
@@ -73,13 +71,9 @@ public:
     , mGL(aCompositor->gl())
     , mTextureHandle(aTexure)
     , mFBO(aFBO)
-  {
-    MOZ_ASSERT(mGL);
-  }
+  {}
 
   ~CompositingRenderTargetOGL();
-
-  virtual const char* Name() const override { return "CompositingRenderTargetOGL"; }
 
   /**
    * Create a render target around the default FBO, for rendering straight to

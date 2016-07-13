@@ -31,8 +31,7 @@ int LevelEstimatorImpl::ProcessStream(AudioBuffer* audio) {
 
   RMSLevel* rms_level = static_cast<RMSLevel*>(handle(0));
   for (int i = 0; i < audio->num_channels(); ++i) {
-    rms_level->Process(audio->channels_const()[i],
-                       audio->num_frames());
+    rms_level->Process(audio->data(i), audio->samples_per_channel());
   }
 
   return AudioProcessing::kNoError;

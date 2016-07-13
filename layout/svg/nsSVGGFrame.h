@@ -8,16 +8,17 @@
 
 #include "mozilla/Attributes.h"
 #include "gfxMatrix.h"
-#include "nsAutoPtr.h"
 #include "nsSVGContainerFrame.h"
 
-class nsSVGGFrame : public nsSVGDisplayContainerFrame
+typedef nsSVGDisplayContainerFrame nsSVGGFrameBase;
+
+class nsSVGGFrame : public nsSVGGFrameBase
 {
   friend nsIFrame*
   NS_NewSVGGFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
-  explicit nsSVGGFrame(nsStyleContext* aContext)
-    : nsSVGDisplayContainerFrame(aContext) {}
+  explicit nsSVGGFrame(nsStyleContext* aContext) :
+    nsSVGGFrameBase(aContext) {}
 
 public:
   NS_DECL_FRAMEARENA_HELPERS

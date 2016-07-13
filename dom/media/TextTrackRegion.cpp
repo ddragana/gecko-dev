@@ -27,13 +27,13 @@ TextTrackRegion::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 already_AddRefed<TextTrackRegion>
 TextTrackRegion::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  RefPtr<TextTrackRegion> region = new TextTrackRegion(aGlobal.GetAsSupports());
+  nsRefPtr<TextTrackRegion> region = new TextTrackRegion(aGlobal.GetAsSupports());
   return region.forget();
 }
 

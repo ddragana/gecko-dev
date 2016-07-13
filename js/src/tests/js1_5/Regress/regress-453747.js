@@ -19,6 +19,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(true);
 
   (function(){
     var a = [];
@@ -30,6 +31,7 @@ function test()
       typeof a[i];
   })();
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

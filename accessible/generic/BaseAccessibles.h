@@ -38,10 +38,11 @@ public:
   virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) override final;
   virtual bool RemoveChild(Accessible* aChild) override final;
 
-  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
-
 protected:
   virtual ~LeafAccessible() {}
+
+  // Accessible
+  virtual void CacheChildren() override;
 };
 
 /**
@@ -55,14 +56,12 @@ class LinkableAccessible : public AccessibleWrap
 public:
   enum { eAction_Jump = 0 };
 
-  LinkableAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-    AccessibleWrap(aContent, aDoc)
-  {
-  }
+  LinkableAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   NS_DECL_ISUPPORTS_INHERITED
 
   // Accessible
+  virtual void Shutdown() override;
   virtual void Value(nsString& aValue) override;
   virtual uint64_t NativeLinkState() const override;
   virtual void TakeFocus() override;
@@ -73,16 +72,22 @@ public:
   virtual bool DoAction(uint8_t index) override;
   virtual KeyBinding AccessKey() const override;
 
-  // ActionAccessible helpers
-  Accessible* ActionWalk(bool* aIsLink = nullptr,
-                         bool* aIsOnclick = nullptr,
-                         bool* aIsLabelWithControl = nullptr);
   // HyperLinkAccessible
   virtual already_AddRefed<nsIURI> AnchorURIAt(uint32_t aAnchorIndex) override;
 
 protected:
   virtual ~LinkableAccessible() {}
 
+  // Accessible
+  virtual void BindToParent(Accessible* aParent, uint32_t aIndexInParent) override;
+  virtual void UnbindFromParent() override;
+
+  /**
+   * Parent accessible that provides an action for this linkable accessible.
+   */
+  Accessible* mActionAcc;
+  bool mIsLink;
+  bool mIsOnclick;
 };
 
 /**

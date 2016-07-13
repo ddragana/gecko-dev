@@ -5,12 +5,13 @@
 
 #include "nsWSRunObject.h"
 
-#include "mozilla/OwningNonNull.h"
+#include "mozilla/dom/OwningNonNull.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
 #include "mozilla/mozalloc.h"
 
 #include "nsAString.h"
+#include "nsAutoPtr.h"
 #include "nsCRT.h"
 #include "nsContentUtils.h"
 #include "nsDebug.h"
@@ -192,7 +193,7 @@ nsWSRunObject::PrepareToSplitAcrossBlocks(nsHTMLEditor* aHTMLEd,
 //   public instance methods
 //--------------------------------------------------------------------------------------------
 
-Element*
+already_AddRefed<Element>
 nsWSRunObject::InsertBreak(nsCOMPtr<nsINode>* aInOutParent,
                            int32_t* aInOutOffset,
                            nsIEditor::EDirection aSelect)
@@ -405,7 +406,7 @@ nsWSRunObject::DeleteWSBackward()
   // Caller's job to ensure that previous char is really ws.  If it is normal
   // ws, we need to delete the whole run.
   if (nsCRT::IsAsciiSpace(point.mChar)) {
-    RefPtr<Text> startNodeText, endNodeText;
+    nsRefPtr<Text> startNodeText, endNodeText;
     int32_t startOffset, endOffset;
     GetAsciiWSBounds(eBoth, point.mTextNode, point.mOffset + 1,
                      getter_AddRefs(startNodeText), &startOffset,
@@ -456,7 +457,7 @@ nsWSRunObject::DeleteWSForward()
   // Caller's job to ensure that next char is really ws.  If it is normal ws,
   // we need to delete the whole run.
   if (nsCRT::IsAsciiSpace(point.mChar)) {
-    RefPtr<Text> startNodeText, endNodeText;
+    nsRefPtr<Text> startNodeText, endNodeText;
     int32_t startOffset, endOffset;
     GetAsciiWSBounds(eBoth, point.mTextNode, point.mOffset + 1,
                      getter_AddRefs(startNodeText), &startOffset,
@@ -601,7 +602,7 @@ nsWSRunObject::AdjustWhitespace()
 //   protected methods
 //--------------------------------------------------------------------------------------------
 
-nsINode*
+already_AddRefed<nsINode>
 nsWSRunObject::GetWSBoundingParent()
 {
   NS_ENSURE_TRUE(mNode, nullptr);
@@ -613,7 +614,7 @@ nsWSRunObject::GetWSBoundingParent()
     }
     wsBoundingParent = parent;
   }
-  return wsBoundingParent;
+  return wsBoundingParent.forget();
 }
 
 nsresult
@@ -626,7 +627,7 @@ nsWSRunObject::GetWSNodes()
   nsCOMPtr<nsINode> wsBoundingParent = GetWSBoundingParent();
 
   // first look backwards to find preceding ws nodes
-  if (RefPtr<Text> textNode = mNode->GetAsText()) {
+  if (nsRefPtr<Text> textNode = mNode->GetAsText()) {
     const nsTextFragment* textFrag = textNode->GetText();
 
     mNodeArray.InsertElementAt(0, textNode);
@@ -670,7 +671,7 @@ nsWSRunObject::GetWSNodes()
         mStartOffset = start.offset;
         mStartReason = WSType::otherBlock;
         mStartReasonNode = priorNode;
-      } else if (RefPtr<Text> textNode = priorNode->GetAsText()) {
+      } else if (nsRefPtr<Text> textNode = priorNode->GetAsText()) {
         mNodeArray.InsertElementAt(0, textNode);
         const nsTextFragment *textFrag;
         if (!textNode || !(textFrag = textNode->GetText())) {
@@ -732,7 +733,7 @@ nsWSRunObject::GetWSNodes()
   }
 
   // then look ahead to find following ws nodes
-  if (RefPtr<Text> textNode = mNode->GetAsText()) {
+  if (nsRefPtr<Text> textNode = mNode->GetAsText()) {
     // don't need to put it on list. it already is from code above
     const nsTextFragment *textFrag = textNode->GetText();
 
@@ -777,7 +778,7 @@ nsWSRunObject::GetWSNodes()
         mEndOffset = end.offset;
         mEndReason = WSType::otherBlock;
         mEndReasonNode = nextNode;
-      } else if (RefPtr<Text> textNode = nextNode->GetAsText()) {
+      } else if (nsRefPtr<Text> textNode = nextNode->GetAsText()) {
         mNodeArray.AppendElement(textNode);
         const nsTextFragment *textFrag;
         if (!textNode || !(textFrag = textNode->GetText())) {
@@ -1223,7 +1224,7 @@ nsWSRunObject::PrepareToDeleteRangePriv(nsWSRunObject* aEndObject)
       WSPoint point = GetCharBefore(mNode, mOffset);
       if (point.mTextNode && nsCRT::IsAsciiSpace(point.mChar))
       {
-        RefPtr<Text> wsStartNode, wsEndNode;
+        nsRefPtr<Text> wsStartNode, wsEndNode;
         int32_t wsStartOffset, wsEndOffset;
         GetAsciiWSBounds(eBoth, mNode, mOffset,
                          getter_AddRefs(wsStartNode), &wsStartOffset,
@@ -1268,7 +1269,7 @@ nsWSRunObject::PrepareToSplitAcrossBlocksPriv()
     WSPoint point = GetCharBefore(mNode, mOffset);
     if (point.mTextNode && nsCRT::IsAsciiSpace(point.mChar))
     {
-      RefPtr<Text> wsStartNode, wsEndNode;
+      nsRefPtr<Text> wsStartNode, wsEndNode;
       int32_t wsStartOffset, wsEndOffset;
       GetAsciiWSBounds(eBoth, mNode, mOffset,
                        getter_AddRefs(wsStartNode), &wsStartOffset,
@@ -1325,10 +1326,10 @@ nsWSRunObject::DeleteChars(nsINode* aStartNode, int32_t aStartOffset,
   }
 
   nsresult res;
-  RefPtr<nsRange> range;
+  nsRefPtr<nsRange> range;
   int32_t count = mNodeArray.Length();
   for (; idx < count; idx++) {
-    RefPtr<Text> node = mNodeArray[idx];
+    nsRefPtr<Text> node = mNodeArray[idx];
     if (!node) {
       // We ran out of ws nodes; must have been deleting to end
       return NS_OK;
@@ -1488,7 +1489,7 @@ nsWSRunObject::ConvertToNBSP(WSPoint aPoint, AreaRestriction aAR)
   NS_ENSURE_SUCCESS(res, res);
 
   // Next, find range of ws it will replace
-  RefPtr<Text> startNode, endNode;
+  nsRefPtr<Text> startNode, endNode;
   int32_t startOffset = 0, endOffset = 0;
 
   GetAsciiWSBounds(eAfter, aPoint.mTextNode, aPoint.mOffset + 1,
@@ -1512,7 +1513,7 @@ nsWSRunObject::GetAsciiWSBounds(int16_t aDir, nsINode* aNode, int32_t aOffset,
   MOZ_ASSERT(aNode && outStartNode && outStartOffset && outEndNode &&
              outEndOffset);
 
-  RefPtr<Text> startNode, endNode;
+  nsRefPtr<Text> startNode, endNode;
   int32_t startOffset = 0, endOffset = 0;
 
   if (aDir & eAfter) {
@@ -1637,7 +1638,7 @@ nsWSRunObject::GetWSPointAfter(nsINode* aNode, int32_t aOffset)
 
   uint32_t firstNum = 0, curNum = numNodes/2, lastNum = numNodes;
   int16_t cmp = 0;
-  RefPtr<Text> curNode;
+  nsRefPtr<Text> curNode;
 
   // Begin binary search.  We do this because we need to minimize calls to
   // ComparePoints(), which is expensive.
@@ -1659,12 +1660,12 @@ nsWSRunObject::GetWSPointAfter(nsINode* aNode, int32_t aOffset)
   if (curNum == mNodeArray.Length()) {
     // hey asked for past our range (it's after the last node). GetCharAfter
     // will do the work for us when we pass it the last index of the last node.
-    RefPtr<Text> textNode(mNodeArray[curNum - 1]);
+    nsRefPtr<Text> textNode(mNodeArray[curNum - 1]);
     WSPoint point(textNode, textNode->TextLength(), 0);
     return GetCharAfter(point);
   } else {
     // The char after the point is the first character of our range.
-    RefPtr<Text> textNode(mNodeArray[curNum]);
+    nsRefPtr<Text> textNode(mNodeArray[curNum]);
     WSPoint point(textNode, 0, 0);
     return GetCharAfter(point);
   }
@@ -1686,7 +1687,7 @@ nsWSRunObject::GetWSPointBefore(nsINode* aNode, int32_t aOffset)
 
   uint32_t firstNum = 0, curNum = numNodes/2, lastNum = numNodes;
   int16_t cmp = 0;
-  RefPtr<Text>  curNode;
+  nsRefPtr<Text>  curNode;
 
   // Begin binary search.  We do this because we need to minimize calls to
   // ComparePoints(), which is expensive.
@@ -1708,14 +1709,14 @@ nsWSRunObject::GetWSPointBefore(nsINode* aNode, int32_t aOffset)
   if (curNum == mNodeArray.Length()) {
     // Get the point before the end of the last node, we can pass the length of
     // the node into GetCharBefore, and it will return the last character.
-    RefPtr<Text> textNode(mNodeArray[curNum - 1]);
+    nsRefPtr<Text> textNode(mNodeArray[curNum - 1]);
     WSPoint point(textNode, textNode->TextLength(), 0);
     return GetCharBefore(point);
   } else {
     // We can just ask the current node for the point immediately before it,
     // it will handle moving to the previous node (if any) and returning the
     // appropriate character
-    RefPtr<Text> textNode(mNodeArray[curNum]);
+    nsRefPtr<Text> textNode(mNodeArray[curNum]);
     WSPoint point(textNode, 0, 0);
     return GetCharBefore(point);
   }
@@ -1762,7 +1763,7 @@ nsWSRunObject::CheckTrailingNBSPOfRun(WSFragment *aRun)
         rightCheck = true;
       }
       if ((aRun->mRightType & WSType::block) &&
-          IsBlockNode(GetWSBoundingParent())) {
+          IsBlockNode(nsCOMPtr<nsINode>(GetWSBoundingParent()))) {
         // We are at a block boundary.  Insert a <br>.  Why?  Well, first note
         // that the br will have no visible effect since it is up against a
         // block boundary.  |foo<br><p>bar| renders like |foo<p>bar| and
@@ -1815,7 +1816,7 @@ nsWSRunObject::CheckTrailingNBSPOfRun(WSFragment *aRun)
       // editor softwraps at this point, the spaces won't be split across lines,
       // which looks ugly and is bad for the moose.
 
-      RefPtr<Text> startNode, endNode;
+      nsRefPtr<Text> startNode, endNode;
       int32_t startOffset, endOffset;
       GetAsciiWSBounds(eBoth, prevPoint.mTextNode, prevPoint.mOffset + 1,
                        getter_AddRefs(startNode), &startOffset,

@@ -25,14 +25,16 @@ config = {
         'MOZ_AUTOMATION': '1',
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'MOZ_OBJDIR': 'obj-horizon',
-        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/python27;'
+        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/nsis-2.46u;C:/mozilla-build/python27;'
                 'C:/mozilla-build/buildbotve/scripts;'
                 '%s' % (os.environ.get('path')),
         'PROPERTIES_FILE': os.path.join(os.getcwd(), 'buildprops.json'),
         'TINDERBOX_OUTPUT': '1',
         'XPCOM_DEBUG_BREAK': 'stack-and-abort',
-        'TOOLTOOL_CACHE': '/c/builds/tooltool_cache',
-        'TOOLTOOL_HOME': '/c/builds',
+        "SYMBOL_SERVER_HOST": "%(symbol_server_host)s",
+        "SYMBOL_SERVER_SSH_KEY": "/c/Users/cltbld/.ssh/ffxbld_rsa",
+        "SYMBOL_SERVER_USER": "ffxbld",
+        "SYMBOL_SERVER_PATH": "/mnt/netapp/breakpad/symbols_ffx",
     },
     'src_mozconfig': 'b2g/graphene/config/horizon-mozconfigs/win64/nightly',
     'balrog_platform': 'win64',

@@ -1,14 +1,11 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const LOGGER_NAME = "Toolkit.Telemetry";
-const LOGGER_PREFIX = "DataNotificationInfoBar::";
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /**
  * Represents an info bar that shows a data submission notification.
  */
-var gDataNotificationInfoBar = {
+let gDataNotificationInfoBar = {
   _OBSERVERS: [
     "datareporting:notify-data-policy:request",
     "datareporting:notify-data-policy:close",
@@ -24,7 +21,7 @@ var gDataNotificationInfoBar = {
   get _log() {
     let Log = Cu.import("resource://gre/modules/Log.jsm", {}).Log;
     delete this._log;
-    return this._log = Log.repository.getLoggerWithMessagePrefix(LOGGER_NAME, LOGGER_PREFIX);
+    return this._log = Log.repository.getLogger("Services.DataReporting.InfoBar");
   },
 
   init: function() {

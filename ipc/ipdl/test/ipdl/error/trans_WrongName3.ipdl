@@ -2,7 +2,7 @@ sync protocol trans_WrongName3 {
 
 parent:
     sync Msg();
-    async __delete__();
+    __delete__();
 
 state S1:
     answer Msg goto S1;

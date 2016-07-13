@@ -4,6 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsIAppStartup.h"
+#include "nsIDOMWindow.h"
 #include "nsIFile.h"
 #include "nsIStringBundle.h"
 #include "nsIToolkitProfile.h"
@@ -13,7 +14,6 @@
 
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
-#include "nsPIDOMWindow.h"
 #include "nsPrintfCString.h"
 #include "nsToolkitCompsCID.h"
 #include "nsXPCOMCIDInternal.h"
@@ -134,7 +134,7 @@ ProfileResetCleanup(nsIToolkitProfile* aOldProfile)
   nsCOMPtr<nsIAppStartup> appStartup(do_GetService(NS_APPSTARTUP_CONTRACTID));
   if (!appStartup) return NS_ERROR_FAILURE;
 
-  nsCOMPtr<mozIDOMWindowProxy> progressWindow;
+  nsCOMPtr<nsIDOMWindow> progressWindow;
   rv = windowWatcher->OpenWindow(nullptr,
                                  kResetProgressURL,
                                  "_blank",
@@ -164,8 +164,7 @@ ProfileResetCleanup(nsIToolkitProfile* aOldProfile)
     return rv;
   }
   // Close the progress window now that the cleanup thread is done.
-  auto* piWindow = nsPIDOMWindowOuter::From(progressWindow);
-  piWindow->Close();
+  progressWindow->Close();
 
   // Delete the old profile from profiles.ini. The folder was already deleted by the thread above.
   rv = aOldProfile->Remove(false);

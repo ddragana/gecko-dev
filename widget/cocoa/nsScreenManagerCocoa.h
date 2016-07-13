@@ -8,8 +8,8 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "mozilla/RefPtr.h"
 #include "nsTArray.h"
+#include "nsAutoPtr.h"
 #include "nsIScreenManager.h"
 #include "nsScreenCocoa.h"
 
@@ -27,7 +27,7 @@ protected:
 private:
 
     nsScreenCocoa *ScreenForCocoaScreen(NSScreen *screen);
-    nsTArray< RefPtr<nsScreenCocoa> > mScreenList;
+    nsTArray< nsRefPtr<nsScreenCocoa> > mScreenList;
 };
 
 #endif // nsScreenManagerCocoa_h_

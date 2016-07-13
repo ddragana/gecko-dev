@@ -10,6 +10,7 @@
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/Effects.h"
 #include "mozilla/TimeStamp.h"
+#include "gfxColor.h"
 #include "gfxPrefs.h"
 #include <math.h>
 #include "GeckoProfiler.h"
@@ -95,11 +96,15 @@ public:
   {}
 
   void DrawFrame(Compositor* aCompositor, const gfx::Rect& aScreenRect, size_t aStep) {
+    float red;
     float tmp;
-    float red = modff(aStep * 0.03f, &tmp);
+    red = modf(aStep * 0.03f, &tmp);
     EffectChain effects;
-    effects.mPrimaryEffect =
-        new EffectSolidColor(gfx::Color(red, 0.4f, 0.4f, 1.0f));
+    gfxRGBA color(red, 0.4f, 0.4f, 1.0f);
+    effects.mPrimaryEffect = new EffectSolidColor(gfx::Color(color.r,
+                                                             color.g,
+                                                             color.b,
+                                                             color.a));
 
     const gfx::Rect& rect = aScreenRect;
     const gfx::Rect& clipRect = aScreenRect;
@@ -125,10 +130,15 @@ public:
   }
 
   already_AddRefed<Effect> CreateEffect(size_t i) {
+      float red;
       float tmp;
-      float red = modff(i * 0.03f, &tmp);
+      red = modf(i * 0.03f, &tmp);
       EffectChain effects;
-      return MakeAndAddRef<EffectSolidColor>(gfx::Color(red, 0.4f, 0.4f, 1.0f));
+      gfxRGBA color(red, 0.4f, 0.4f, 1.0f);
+      return MakeAndAddRef<EffectSolidColor>(gfx::Color(color.r,
+                                                        color.g,
+                                                        color.b,
+                                                        color.a));
   }
 };
 
@@ -146,10 +156,15 @@ public:
   }
 
   already_AddRefed<Effect> CreateEffect(size_t i) {
+      float red;
       float tmp;
-      float red = modff(i * 0.03f, &tmp);
+      red = modf(i * 0.03f, &tmp);
       EffectChain effects;
-      return MakeAndAddRef<EffectSolidColor>(gfx::Color(red, 0.4f, 0.4f, 1.0f));
+      gfxRGBA color(red, 0.4f, 0.4f, 1.0f);
+      return MakeAndAddRef<EffectSolidColor>(gfx::Color(color.r,
+                                                        color.g,
+                                                        color.b,
+                                                        color.a));
   }
 };
 
@@ -226,8 +241,7 @@ public:
   }
 
   already_AddRefed<Effect> CreateEffect(size_t i) {
-    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture,
-                                SamplingFilter::POINT, true);
+    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture, Filter::POINT, true);
   }
 };
 
@@ -270,8 +284,7 @@ public:
   }
 
   virtual already_AddRefed<Effect> CreateEffect(size_t i) {
-    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture,
-                                SamplingFilter::POINT, true);
+    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture, Filter::POINT, true);
   }
 };
 
@@ -313,8 +326,7 @@ public:
   }
 
   virtual already_AddRefed<Effect> CreateEffect(size_t i) {
-    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture,
-                                SamplingFilter::POINT);
+    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture, Filter::POINT);
   }
 };
 
@@ -355,8 +367,7 @@ public:
   }
 
   virtual already_AddRefed<Effect> CreateEffect(size_t i) {
-    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture,
-                                SamplingFilter::POINT);
+    return CreateTexturedEffect(SurfaceFormat::B8G8R8A8, mTexture, Filter::POINT);
   }
 };
 #endif
@@ -422,7 +433,7 @@ static void RunCompositorBench(Compositor* aCompositor, const gfx::Rect& aScreen
   }
 }
 
-void CompositorBench(Compositor* aCompositor, const gfx::IntRect& aScreenRect)
+void CompositorBench(Compositor* aCompositor, const gfx::Rect& aScreenRect)
 {
   static bool sRanBenchmark = false;
   bool wantBenchmark = gfxPrefs::LayersBenchEnabled();

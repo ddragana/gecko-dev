@@ -6,6 +6,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsComputedDOMStyle.h"
 #include "nsDebug.h"
@@ -147,8 +148,8 @@ nsHTMLEditor::CreateAnonymousElement(const nsAString & aTag, nsIDOMNode *  aPare
   NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
 
   // Create a new node through the element factory
-  nsCOMPtr<nsIAtom> tagAtom = NS_Atomize(aTag);
-  nsCOMPtr<Element> newContent = CreateHTMLContent(tagAtom);
+  nsCOMPtr<Element> newContent =
+    CreateHTMLContent(nsCOMPtr<nsIAtom>(do_GetAtom(aTag)));
   NS_ENSURE_STATE(newContent);
 
   nsCOMPtr<nsIDOMElement> newElement = do_QueryInterface(newContent);
@@ -249,7 +250,7 @@ nsHTMLEditor::DeleteRefToAnonymousNode(nsIDOMElement* aElement,
           // XXX This is wrong (bug 439258).  Once it's fixed, the NS_WARNING
           // in RestyleManager::RestyleForRemove should be changed back
           // to an assertion.
-          docObserver->ContentRemoved(content->GetUncomposedDoc(),
+          docObserver->ContentRemoved(content->GetCurrentDoc(),
                                       aParentContent, content, -1,
                                       content->GetPreviousSibling());
           if (document)
@@ -289,7 +290,7 @@ nsHTMLEditor::CheckSelectionStateForAnonymousButtons(nsISelection * aSelection)
   // If we're not in a document, don't try to add resizers
   nsCOMPtr<dom::Element> focusElementNode = do_QueryInterface(focusElement);
   NS_ENSURE_STATE(focusElementNode);
-  if (!focusElementNode->IsInUncomposedDoc()) {
+  if (!focusElementNode->IsInDoc()) {
     return NS_OK;
   }
 
@@ -298,7 +299,7 @@ nsHTMLEditor::CheckSelectionStateForAnonymousButtons(nsISelection * aSelection)
   res = focusElement->GetTagName(focusTagName);
   NS_ENSURE_SUCCESS(res, res);
   ToLowerCase(focusTagName);
-  nsCOMPtr<nsIAtom> focusTagAtom = NS_Atomize(focusTagName);
+  nsCOMPtr<nsIAtom> focusTagAtom = do_GetAtom(focusTagName);
 
   nsCOMPtr<nsIDOMElement> absPosElement;
   if (mIsAbsolutelyPositioningEnabled) {
@@ -434,7 +435,7 @@ nsHTMLEditor::GetPositionAndDimensions(nsIDOMElement * aElement,
     mResizedObjectIsAbsolutelyPositioned = true;
 
     // Get the all the computed css styles attached to the element node
-    RefPtr<nsComputedDOMStyle> cssDecl =
+    nsRefPtr<nsComputedDOMStyle> cssDecl =
       mHTMLCSSUtils->GetComputedStyle(element);
     NS_ENSURE_STATE(cssDecl);
 

@@ -25,13 +25,14 @@ interfaces = [
     'storage',
     'json',
     'offline',
+    'push',
     'geolocation',
     'notification',
     'permission',
     'svg',
     'smil',
     'apps',
-    'push',
+    'gamepad',
 ]
 
 DIRS += ['interfaces/' + i for i in interfaces]
@@ -41,7 +42,9 @@ DIRS += [
     'apps',
     'base',
     'bluetooth',
+    'activities',
     'archivereader',
+    'requestsync',
     'bindings',
     'battery',
     'browser-element',
@@ -52,17 +55,15 @@ DIRS += [
     'crypto',
     'phonenumberutils',
     'alarm',
+    'datastore',
     'devicestorage',
     'encoding',
     'events',
     'fetch',
     'filehandle',
     'filesystem',
-    'flyweb',
     'fmradio',
-    'gamepad',
     'geolocation',
-    'grid',
     'html',
     'icc',
     'inputport',
@@ -71,6 +72,7 @@ DIRS += [
     'asmjscache',
     'mathml',
     'media',
+    'messages',
     'mobileconnection',
     'notification',
     'offline',
@@ -99,7 +101,6 @@ DIRS += [
     'smil',
     'telephony',
     'tv',
-    'url',
     'voicemail',
     'inputmethod',
     'webidl',
@@ -110,11 +111,6 @@ DIRS += [
     'resourcestats',
     'manifest',
     'vr',
-    'newapps',
-    'u2f',
-    'console',
-    'performance',
-    'xhr',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
@@ -135,6 +131,9 @@ if CONFIG['MOZ_B2G_RIL']:
 if CONFIG['MOZ_PAY']:
     DIRS += ['payment']
 
+if CONFIG['MOZ_GAMEPAD']:
+    DIRS += ['gamepad']
+
 if CONFIG['MOZ_NFC']:
     DIRS += ['nfc']
 
@@ -150,7 +149,8 @@ if CONFIG['MOZ_B2G']:
     DIRS += [
         'downloads',
         'identity',
-        'mobileid'
+        'mobileid',
+        'engineeringmode'
     ]
 
 DIRS += ['presentation']

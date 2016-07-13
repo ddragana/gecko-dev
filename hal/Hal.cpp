@@ -5,28 +5,26 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Hal.h"
-
 #include "HalImpl.h"
 #include "HalLog.h"
 #include "HalSandbox.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMWindow.h"
-#include "nsIDocument.h"
-#include "nsIDocShell.h"
-#include "nsITabChild.h"
-#include "nsIWebNavigation.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
-#include "nsPIDOMWindow.h"
-#include "nsJSUtils.h"
-#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Observer.h"
+#include "nsIDocument.h"
+#include "nsIDOMDocument.h"
+#include "nsPIDOMWindow.h"
+#include "nsIDOMWindow.h"
 #include "mozilla/Services.h"
+#include "nsIWebNavigation.h"
+#include "nsITabChild.h"
+#include "nsIDocShell.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/ClearOnShutdown.h"
+#include "WindowIdentifier.h"
+#include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/ScreenOrientation.h"
-#include "WindowIdentifier.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -62,10 +60,13 @@ using namespace mozilla::dom;
 namespace mozilla {
 namespace hal {
 
-mozilla::LogModule *
+PRLogModuleInfo *
 GetHalLog()
 {
-  static mozilla::LazyLogModule sHalLog("hal");
+  static PRLogModuleInfo *sHalLog;
+  if (!sHalLog) {
+    sHalLog = PR_NewLogModule("hal");
+  }
   return sHalLog;
 }
 
@@ -89,18 +90,17 @@ AssertMainProcess()
   MOZ_ASSERT(GeckoProcessType_Default == XRE_GetProcessType());
 }
 
-#if !defined(MOZ_WIDGET_GONK)
-
 bool
-WindowIsActive(nsPIDOMWindowInner* aWindow)
+WindowIsActive(nsIDOMWindow* aWindow)
 {
-  nsIDocument* document = aWindow->GetDoc();
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aWindow);
+  NS_ENSURE_TRUE(window, false);
+
+  nsIDocument* document = window->GetDoc();
   NS_ENSURE_TRUE(document, false);
 
   return !document->Hidden();
 }
-
-#endif // !defined(MOZ_WIDGET_GONK)
 
 StaticAutoPtr<WindowIdentifier::IDArrayType> gLastIDToVibrate;
 
@@ -113,7 +113,7 @@ void InitLastIDToVibrate()
 } // namespace
 
 void
-Vibrate(const nsTArray<uint32_t>& pattern, nsPIDOMWindowInner* window)
+Vibrate(const nsTArray<uint32_t>& pattern, nsIDOMWindow* window)
 {
   Vibrate(pattern, WindowIdentifier(window));
 }
@@ -123,7 +123,6 @@ Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier &id)
 {
   AssertMainThread();
 
-#if !defined(MOZ_WIDGET_GONK)
   // Only active windows may start vibrations.  If |id| hasn't gone
   // through the IPC layer -- that is, if our caller is the outside
   // world, not hal_proxy -- check whether the window is active.  If
@@ -134,7 +133,6 @@ Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier &id)
     HAL_LOG("Vibrate: Window is inactive, dropping vibrate.");
     return;
   }
-#endif // !defined(MOZ_WIDGET_GONK)
 
   if (!InSandbox()) {
     if (!gLastIDToVibrate) {
@@ -143,14 +141,14 @@ Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier &id)
     *gLastIDToVibrate = id.AsArray();
   }
 
-  // Don't forward our ID if we are not in the sandbox, because hal_impl
+  // Don't forward our ID if we are not in the sandbox, because hal_impl 
   // doesn't need it, and we don't want it to be tempted to read it.  The
   // empty identifier will assert if it's used.
   PROXY_IF_SANDBOXED(Vibrate(pattern, InSandbox() ? id : WindowIdentifier()));
 }
 
 void
-CancelVibrate(nsPIDOMWindowInner* window)
+CancelVibrate(nsIDOMWindow* window)
 {
   CancelVibrate(WindowIdentifier(window));
 }
@@ -178,7 +176,7 @@ CancelVibrate(const WindowIdentifier &id)
   // the same window.  All other cancellation requests are ignored.
 
   if (InSandbox() || (gLastIDToVibrate && *gLastIDToVibrate == id.AsArray())) {
-    // Don't forward our ID if we are not in the sandbox, because hal_impl
+    // Don't forward our ID if we are not in the sandbox, because hal_impl 
     // doesn't need it, and we don't want it to be tempted to read it.  The
     // empty identifier will assert if it's used.
     PROXY_IF_SANDBOXED(CancelVibrate(InSandbox() ? id : WindowIdentifier()));
@@ -204,6 +202,7 @@ public:
   void RemoveObserver(Observer<InfoType>* aObserver) {
     bool removed = mObservers && mObservers->RemoveObserver(aObserver);
     if (!removed) {
+      NS_WARNING("RemoveObserver() called for unregistered observer");
       return;
     }
 
@@ -289,13 +288,7 @@ protected:
   }
 };
 
-static BatteryObserversManager&
-BatteryObservers()
-{
-  static BatteryObserversManager sBatteryObservers;
-  AssertMainThread();
-  return sBatteryObservers;
-}
+static BatteryObserversManager sBatteryObservers;
 
 class NetworkObserversManager : public CachingObserversManager<NetworkInformation>
 {
@@ -313,13 +306,7 @@ protected:
   }
 };
 
-static NetworkObserversManager&
-NetworkObservers()
-{
-  static NetworkObserversManager sNetworkObservers;
-  AssertMainThread();
-  return sNetworkObservers;
-}
+static NetworkObserversManager sNetworkObservers;
 
 class WakeLockObserversManager : public ObserversManager<WakeLockInformation>
 {
@@ -333,13 +320,7 @@ protected:
   }
 };
 
-static WakeLockObserversManager&
-WakeLockObservers()
-{
-  static WakeLockObserversManager sWakeLockObservers;
-  AssertMainThread();
-  return sWakeLockObservers;
-}
+static WakeLockObserversManager sWakeLockObservers;
 
 class ScreenConfigurationObserversManager : public CachingObserversManager<ScreenConfiguration>
 {
@@ -357,41 +338,35 @@ protected:
   }
 };
 
-static ScreenConfigurationObserversManager&
-ScreenConfigurationObservers()
-{
-  AssertMainThread();
-  static ScreenConfigurationObserversManager sScreenConfigurationObservers;
-  return sScreenConfigurationObservers;
-}
+static ScreenConfigurationObserversManager sScreenConfigurationObservers;
 
 void
 RegisterBatteryObserver(BatteryObserver* aObserver)
 {
   AssertMainThread();
-  BatteryObservers().AddObserver(aObserver);
+  sBatteryObservers.AddObserver(aObserver);
 }
 
 void
 UnregisterBatteryObserver(BatteryObserver* aObserver)
 {
   AssertMainThread();
-  BatteryObservers().RemoveObserver(aObserver);
+  sBatteryObservers.RemoveObserver(aObserver);
 }
 
 void
 GetCurrentBatteryInformation(BatteryInformation* aInfo)
 {
   AssertMainThread();
-  *aInfo = BatteryObservers().GetCurrentInformation();
+  *aInfo = sBatteryObservers.GetCurrentInformation();
 }
 
 void
 NotifyBatteryChange(const BatteryInformation& aInfo)
 {
   AssertMainThread();
-  BatteryObservers().CacheInformation(aInfo);
-  BatteryObservers().BroadcastCachedInformation();
+  sBatteryObservers.CacheInformation(aInfo);
+  sBatteryObservers.BroadcastCachedInformation();
 }
 
 bool GetScreenEnabled()
@@ -458,32 +433,26 @@ protected:
   }
 };
 
-static SystemClockChangeObserversManager&
-SystemClockChangeObservers()
-{
-  static SystemClockChangeObserversManager sSystemClockChangeObservers;
-  AssertMainThread();
-  return sSystemClockChangeObservers;
-}
+static SystemClockChangeObserversManager sSystemClockChangeObservers;
 
 void
 RegisterSystemClockChangeObserver(SystemClockChangeObserver* aObserver)
 {
   AssertMainThread();
-  SystemClockChangeObservers().AddObserver(aObserver);
+  sSystemClockChangeObservers.AddObserver(aObserver);
 }
 
 void
 UnregisterSystemClockChangeObserver(SystemClockChangeObserver* aObserver)
 {
   AssertMainThread();
-  SystemClockChangeObservers().RemoveObserver(aObserver);
+  sSystemClockChangeObservers.RemoveObserver(aObserver);
 }
 
 void
 NotifySystemClockChange(const int64_t& aClockDeltaMS)
 {
-  SystemClockChangeObservers().BroadcastInformation(aClockDeltaMS);
+  sSystemClockChangeObservers.BroadcastInformation(aClockDeltaMS);
 }
 
 class SystemTimezoneChangeObserversManager : public ObserversManager<SystemTimezoneChangeInformation>
@@ -498,42 +467,36 @@ protected:
   }
 };
 
-static SystemTimezoneChangeObserversManager&
-SystemTimezoneChangeObservers()
-{
-  static SystemTimezoneChangeObserversManager sSystemTimezoneChangeObservers;
-  return sSystemTimezoneChangeObservers;
-}
+static SystemTimezoneChangeObserversManager sSystemTimezoneChangeObservers;
 
 void
 RegisterSystemTimezoneChangeObserver(SystemTimezoneChangeObserver* aObserver)
 {
   AssertMainThread();
-  SystemTimezoneChangeObservers().AddObserver(aObserver);
+  sSystemTimezoneChangeObservers.AddObserver(aObserver);
 }
 
 void
 UnregisterSystemTimezoneChangeObserver(SystemTimezoneChangeObserver* aObserver)
 {
   AssertMainThread();
-  SystemTimezoneChangeObservers().RemoveObserver(aObserver);
+  sSystemTimezoneChangeObservers.RemoveObserver(aObserver);
 }
 
 void
 NotifySystemTimezoneChange(const SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo)
 {
-  nsJSUtils::ResetTimeZone();
-  SystemTimezoneChangeObservers().BroadcastInformation(aSystemTimezoneChangeInfo);
+  sSystemTimezoneChangeObservers.BroadcastInformation(aSystemTimezoneChangeInfo);
 }
 
-void
+void 
 AdjustSystemClock(int64_t aDeltaMilliseconds)
 {
   AssertMainThread();
   PROXY_IF_SANDBOXED(AdjustSystemClock(aDeltaMilliseconds));
 }
 
-void
+void 
 SetTimezone(const nsCString& aTimezoneSpec)
 {
   AssertMainThread();
@@ -572,7 +535,7 @@ static SensorObserverList* gSensorObservers = nullptr;
 static SensorObserverList &
 GetSensorObservers(SensorType sensor_type) {
   MOZ_ASSERT(sensor_type < NUM_SENSOR_TYPE);
-
+  
   if(!gSensorObservers) {
     gSensorObservers = new SensorObserverList[NUM_SENSOR_TYPE];
   }
@@ -584,7 +547,7 @@ RegisterSensorObserver(SensorType aSensor, ISensorObserver *aObserver) {
   SensorObserverList &observers = GetSensorObservers(aSensor);
 
   AssertMainThread();
-
+  
   observers.AddObserver(aObserver);
   if(observers.Length() == 1) {
     EnableSensorNotifications(aSensor);
@@ -620,7 +583,7 @@ NotifySensorChange(const SensorData &aSensorData) {
   SensorObserverList &observers = GetSensorObservers(aSensorData.sensor());
 
   AssertMainThread();
-
+  
   observers.Broadcast(aSensorData);
 }
 
@@ -628,28 +591,28 @@ void
 RegisterNetworkObserver(NetworkObserver* aObserver)
 {
   AssertMainThread();
-  NetworkObservers().AddObserver(aObserver);
+  sNetworkObservers.AddObserver(aObserver);
 }
 
 void
 UnregisterNetworkObserver(NetworkObserver* aObserver)
 {
   AssertMainThread();
-  NetworkObservers().RemoveObserver(aObserver);
+  sNetworkObservers.RemoveObserver(aObserver);
 }
 
 void
 GetCurrentNetworkInformation(NetworkInformation* aInfo)
 {
   AssertMainThread();
-  *aInfo = NetworkObservers().GetCurrentInformation();
+  *aInfo = sNetworkObservers.GetCurrentInformation();
 }
 
 void
 NotifyNetworkChange(const NetworkInformation& aInfo)
 {
-  NetworkObservers().CacheInformation(aInfo);
-  NetworkObservers().BroadcastCachedInformation();
+  sNetworkObservers.CacheInformation(aInfo);
+  sNetworkObservers.BroadcastCachedInformation();
 }
 
 void Reboot()
@@ -677,14 +640,14 @@ void
 RegisterWakeLockObserver(WakeLockObserver* aObserver)
 {
   AssertMainThread();
-  WakeLockObservers().AddObserver(aObserver);
+  sWakeLockObservers.AddObserver(aObserver);
 }
 
 void
 UnregisterWakeLockObserver(WakeLockObserver* aObserver)
 {
   AssertMainThread();
-  WakeLockObservers().RemoveObserver(aObserver);
+  sWakeLockObservers.RemoveObserver(aObserver);
 }
 
 void
@@ -715,39 +678,39 @@ void
 NotifyWakeLockChange(const WakeLockInformation& aInfo)
 {
   AssertMainThread();
-  WakeLockObservers().BroadcastInformation(aInfo);
+  sWakeLockObservers.BroadcastInformation(aInfo);
 }
 
 void
 RegisterScreenConfigurationObserver(ScreenConfigurationObserver* aObserver)
 {
   AssertMainThread();
-  ScreenConfigurationObservers().AddObserver(aObserver);
+  sScreenConfigurationObservers.AddObserver(aObserver);
 }
 
 void
 UnregisterScreenConfigurationObserver(ScreenConfigurationObserver* aObserver)
 {
   AssertMainThread();
-  ScreenConfigurationObservers().RemoveObserver(aObserver);
+  sScreenConfigurationObservers.RemoveObserver(aObserver);
 }
 
 void
 GetCurrentScreenConfiguration(ScreenConfiguration* aScreenConfiguration)
 {
   AssertMainThread();
-  *aScreenConfiguration = ScreenConfigurationObservers().GetCurrentInformation();
+  *aScreenConfiguration = sScreenConfigurationObservers.GetCurrentInformation();
 }
 
 void
 NotifyScreenConfigurationChange(const ScreenConfiguration& aScreenConfiguration)
 {
-  ScreenConfigurationObservers().CacheInformation(aScreenConfiguration);
-  ScreenConfigurationObservers().BroadcastCachedInformation();
+  sScreenConfigurationObservers.CacheInformation(aScreenConfiguration);
+  sScreenConfigurationObservers.BroadcastCachedInformation();
 }
 
 bool
-LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation)
+LockScreenOrientation(const dom::ScreenOrientation& aOrientation)
 {
   AssertMainThread();
   RETURN_PROXY_IF_SANDBOXED(LockScreenOrientation(aOrientation), false);
@@ -790,7 +753,7 @@ static SwitchObserverList *sSwitchObserverLists = nullptr;
 
 static SwitchObserverList&
 GetSwitchObserverList(SwitchDevice aDevice) {
-  MOZ_ASSERT(0 <= aDevice && aDevice < NUM_SWITCH_DEVICE);
+  MOZ_ASSERT(0 <= aDevice && aDevice < NUM_SWITCH_DEVICE); 
   if (sSwitchObserverLists == nullptr) {
     sSwitchObserverLists = new SwitchObserverList[NUM_SWITCH_DEVICE];
   }
@@ -1180,7 +1143,7 @@ GetFMBandSettings(FMRadioCountry aCountry) {
     default:
       MOZ_ASSERT(0);
       break;
-    }
+    };
     return settings;
 }
 
@@ -1222,24 +1185,6 @@ bool IsHeadphoneEventFromInputDev()
 {
   AssertMainThread();
   RETURN_PROXY_IF_SANDBOXED(IsHeadphoneEventFromInputDev(), false);
-}
-
-nsresult StartSystemService(const char* aSvcName, const char* aArgs)
-{
-  AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(StartSystemService(aSvcName, aArgs), NS_ERROR_FAILURE);
-}
-
-void StopSystemService(const char* aSvcName)
-{
-  AssertMainThread();
-  PROXY_IF_SANDBOXED(StopSystemService(aSvcName));
-}
-
-bool SystemServiceIsRunning(const char* aSvcName)
-{
-  AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(SystemServiceIsRunning(aSvcName), false);
 }
 
 } // namespace hal

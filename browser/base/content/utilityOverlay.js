@@ -1,32 +1,24 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+# -*- indent-tabs-mode: nil; js-indent-level: 4 -*-
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 // Services = object with smart getters for common XPCOM services
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 Components.utils.import("resource:///modules/RecentWindow.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ShellService",
-                                  "resource:///modules/ShellService.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-                                  "resource:///modules/ContextualIdentityService.jsm");
-
-XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
-                                   "@mozilla.org/browser/aboutnewtab-service;1",
-                                   "nsIAboutNewTabService");
+XPCOMUtils.defineLazyModuleGetter(this, "NewTabURL",
+  "resource:///modules/NewTabURL.jsm");
 
 this.__defineGetter__("BROWSER_NEW_TAB_URL", () => {
   if (PrivateBrowsingUtils.isWindowPrivate(window) &&
       !PrivateBrowsingUtils.permanentPrivateBrowsing &&
-      !aboutNewTabService.overridden) {
+      !NewTabURL.overridden) {
     return "about:privatebrowsing";
   }
-  return aboutNewTabService.newTabURL;
+  return NewTabURL.get();
 });
 
 var TAB_DROP_TYPE = "application/x-moz-tabbrowser-tab";
@@ -117,8 +109,8 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
  *
  * Middle-clicking is the same as Ctrl+clicking (it opens a new tab).
  *
- * Exceptions:
- * - Alt is ignored for menu items selected using the keyboard so you don't accidentally save stuff.
+ * Exceptions: 
+ * - Alt is ignored for menu items selected using the keyboard so you don't accidentally save stuff.  
  *    (Currently, the Alt isn't sent here at all for menu items, but that will change in bug 126189.)
  * - Alt is hard to use in context menus, because pressing Alt closes the menu.
  * - Alt can't be used on the bookmarks toolbar because Alt is used for "treat this as something draggable".
@@ -143,8 +135,11 @@ function whereToOpenLink( e, ignoreButton, ignoreAlt )
 
   // Don't do anything special with right-mouse clicks.  They're probably clicks on context menu items.
 
-  var metaKey = AppConstants.platform == "macosx" ? meta : ctrl;
-  if (metaKey || (middle && middleUsesTabs))
+#ifdef XP_MACOSX
+  if (meta || (middle && middleUsesTabs))
+#else
+  if (ctrl || (middle && middleUsesTabs))
+#endif
     return shift ? "tabshifted" : "tab";
 
   if (alt && getBoolPref("browser.altClickSave", false))
@@ -178,7 +173,6 @@ function whereToOpenLink( e, ignoreButton, ignoreAlt )
  *   skipTabAnimation     (boolean)
  *   allowPinnedTabHostChange (boolean)
  *   allowPopups          (boolean)
- *   userContextId        (unsigned int)
  */
 function openUILinkIn(url, where, aAllowThirdPartyFixup, aPostData, aReferrerURI) {
   var params;
@@ -222,8 +216,6 @@ function openLinkIn(url, where, params) {
   var aAllowPinnedTabHostChange = !!params.allowPinnedTabHostChange;
   var aNoReferrer           = params.noReferrer;
   var aAllowPopups          = !!params.allowPopups;
-  var aUserContextId        = params.userContextId;
-  var aIndicateErrorPageLoad = params.indicateErrorPageLoad;
 
   if (where == "save") {
     if (!aInitiatingDoc) {
@@ -274,17 +266,12 @@ function openLinkIn(url, where, params) {
                                  createInstance(Ci.nsISupportsPRUint32);
     referrerPolicySupports.data = aReferrerPolicy;
 
-    var userContextIdSupports = Cc["@mozilla.org/supports-PRUint32;1"].
-                                 createInstance(Ci.nsISupportsPRUint32);
-    userContextIdSupports.data = aUserContextId;
-
     sa.AppendElement(wuri);
     sa.AppendElement(charset);
     sa.AppendElement(referrerURISupports);
     sa.AppendElement(aPostData);
     sa.AppendElement(allowThirdPartyFixupSupports);
     sa.AppendElement(referrerPolicySupports);
-    sa.AppendElement(userContextIdSupports);
 
     let features = "chrome,dialog=no,all";
     if (aIsPrivate) {
@@ -348,16 +335,12 @@ function openLinkIn(url, where, params) {
     if (aAllowPopups) {
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_POPUPS;
     }
-    if (aIndicateErrorPageLoad) {
-      flags |= Ci.nsIWebNavigation.LOAD_FLAGS_ERROR_LOAD_CHANGES_RV;
-    }
 
     w.gBrowser.loadURIWithFlags(url, {
       flags: flags,
       referrerURI: aNoReferrer ? null : aReferrerURI,
       referrerPolicy: aReferrerPolicy,
       postData: aPostData,
-      userContextId: aUserContextId
     });
     break;
   case "tabshifted":
@@ -374,8 +357,7 @@ function openLinkIn(url, where, params) {
       relatedToCurrent: aRelatedToCurrent,
       skipAnimation: aSkipTabAnimation,
       allowMixedContent: aAllowMixedContent,
-      noReferrer: aNoReferrer,
-      userContextId: aUserContextId
+      noReferrer: aNoReferrer
     });
     break;
   }
@@ -412,58 +394,6 @@ function checkForMiddleClick(node, event) {
   }
 }
 
-// Populate a menu with user-context menu items. This method should be called
-// by onpopupshowing passing the event as first argument. addCommandAttribute
-// param is used to set the 'command' attribute in the new menuitem elements.
-function createUserContextMenu(event, addCommandAttribute = true, excludeUserContextId = 0) {
-  while (event.target.hasChildNodes()) {
-    event.target.removeChild(event.target.firstChild);
-  }
-
-  let bundle = document.getElementById("bundle_browser");
-  let docfrag = document.createDocumentFragment();
-
-  // If we are excluding a userContextId, we want to add a 'no-container' item.
-  if (excludeUserContextId) {
-    let menuitem = document.createElement("menuitem");
-    menuitem.setAttribute("usercontextid", "0");
-    menuitem.setAttribute("label", bundle.getString("userContextNone.label"));
-    menuitem.setAttribute("accesskey", bundle.getString("userContextNone.accesskey"));
-
-    // We don't set an oncommand/command attribute attribute because if we have
-    // to exclude a userContextId we are generating the contextMenu and
-    // addCommandAttribute will be false.
-
-    docfrag.appendChild(menuitem);
-
-    let menuseparator = document.createElement("menuseparator");
-    docfrag.appendChild(menuseparator);
-  }
-
-  ContextualIdentityService.getIdentities().forEach(identity => {
-    if (identity.userContextId == excludeUserContextId) {
-      return;
-    }
-
-    let menuitem = document.createElement("menuitem");
-    menuitem.setAttribute("usercontextid", identity.userContextId);
-    menuitem.setAttribute("label", bundle.getString(identity.label));
-    menuitem.setAttribute("accesskey", bundle.getString(identity.accessKey));
-    menuitem.classList.add("menuitem-iconic");
-
-    if (addCommandAttribute) {
-      menuitem.setAttribute("command", "Browser:NewUserContextTab");
-    }
-
-    menuitem.setAttribute("image", identity.icon);
-
-    docfrag.appendChild(menuitem);
-  });
-
-  event.target.appendChild(docfrag);
-  return true;
-}
-
 // Closes all popups that are ancestors of the node.
 function closeMenus(node)
 {
@@ -477,7 +407,7 @@ function closeMenus(node)
 }
 
 // Gather all descendent text under given document node.
-function gatherTextUnder ( root )
+function gatherTextUnder ( root ) 
 {
   var text = "";
   var node = root.firstChild;
@@ -518,10 +448,15 @@ function gatherTextUnder ( root )
   return text;
 }
 
-// This function exists for legacy reasons.
 function getShellService()
 {
-  return ShellService;
+  var shell = null;
+  try {
+    shell = Components.classes["@mozilla.org/browser/shell-service;1"]
+      .getService(Components.interfaces.nsIShellService);
+  } catch (e) {
+  }
+  return shell;
 }
 
 function isBidiEnabled() {
@@ -570,15 +505,13 @@ function openAboutDialog() {
     return;
   }
 
-  var features = "chrome,";
-  if (AppConstants.platform == "win") {
-    features += "centerscreen,dependent";
-  } else if (AppConstants.platform == "macosx") {
-    features += "resizable=no,minimizable=no";
-  } else {
-    features += "centerscreen,dependent,dialog=no";
-  }
-
+#ifdef XP_WIN
+  var features = "chrome,centerscreen,dependent";
+#elifdef XP_MACOSX
+  var features = "chrome,resizable=no,minimizable=no";
+#else
+  var features = "chrome,centerscreen,dependent,dialog=no";
+#endif
   window.openDialog("chrome://browser/content/aboutDialog.xul", "", features);
 }
 
@@ -596,55 +529,64 @@ function openPreferences(paneID, extraArgs)
     return (aName || "").replace(/^pane./, function(toReplace) { return toReplace[4].toLowerCase(); });
   }
 
-  let win = Services.wm.getMostRecentWindow("navigator:browser");
-  let friendlyCategoryName = internalPrefCategoryNameToFriendlyName(paneID);
-  let params;
-  if (extraArgs && extraArgs["urlParams"]) {
-    params = new URLSearchParams();
-    let urlParams = extraArgs["urlParams"];
-    for (let name in urlParams) {
-      if (urlParams[name] !== undefined) {
-        params.set(name, urlParams[name]);
-      }
+  if (getBoolPref("browser.preferences.inContent")) {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    let friendlyCategoryName = internalPrefCategoryNameToFriendlyName(paneID);
+    let preferencesURL = "about:preferences" +
+                         (friendlyCategoryName ? "#" + friendlyCategoryName : "");
+    let newLoad = true;
+    let browser = null;
+    if (!win) {
+      const Cc = Components.classes;
+      const Ci = Components.interfaces;
+      let windowArguments = Cc["@mozilla.org/supports-array;1"]
+                              .createInstance(Ci.nsISupportsArray);
+      let supportsStringPrefURL = Cc["@mozilla.org/supports-string;1"]
+                                    .createInstance(Ci.nsISupportsString);
+      supportsStringPrefURL.data = preferencesURL;
+      windowArguments.AppendElement(supportsStringPrefURL);
+
+      win = Services.ww.openWindow(null, Services.prefs.getCharPref("browser.chromeURL"),
+                                   "_blank", "chrome,dialog=no,all", windowArguments);
+    } else {
+      newLoad = !win.switchToTabHavingURI(preferencesURL, true, {ignoreFragment: true});
+      browser = win.gBrowser.selectedBrowser;
     }
-  }
-  let preferencesURL = "about:preferences" + (params ? "?" + params : "") +
-                       (friendlyCategoryName ? "#" + friendlyCategoryName : "");
-  let newLoad = true;
-  let browser = null;
-  if (!win) {
-    const Cc = Components.classes;
-    const Ci = Components.interfaces;
-    let windowArguments = Cc["@mozilla.org/supports-array;1"]
-                            .createInstance(Ci.nsISupportsArray);
-    let supportsStringPrefURL = Cc["@mozilla.org/supports-string;1"]
-                                  .createInstance(Ci.nsISupportsString);
-    supportsStringPrefURL.data = preferencesURL;
-    windowArguments.AppendElement(supportsStringPrefURL);
 
-    win = Services.ww.openWindow(null, Services.prefs.getCharPref("browser.chromeURL"),
-                                 "_blank", "chrome,dialog=no,all", windowArguments);
-  } else {
-    newLoad = !win.switchToTabHavingURI(preferencesURL, true, {ignoreFragment: true});
-    browser = win.gBrowser.selectedBrowser;
-  }
-
-  if (newLoad) {
-    Services.obs.addObserver(function advancedPaneLoadedObs(prefWin, topic, data) {
-      if (!browser) {
-        browser = win.gBrowser.selectedBrowser;
+    if (newLoad) {
+      Services.obs.addObserver(function advancedPaneLoadedObs(prefWin, topic, data) {
+        if (!browser) {
+          browser = win.gBrowser.selectedBrowser;
+        }
+        if (prefWin != browser.contentWindow) {
+          return;
+        }
+        Services.obs.removeObserver(advancedPaneLoadedObs, "advanced-pane-loaded");
+        switchToAdvancedSubPane(browser.contentDocument);
+      }, "advanced-pane-loaded", false);
+    } else {
+      if (paneID) {
+        browser.contentWindow.gotoPref(paneID);
       }
-      if (prefWin != browser.contentWindow) {
-        return;
-      }
-      Services.obs.removeObserver(advancedPaneLoadedObs, "advanced-pane-loaded");
       switchToAdvancedSubPane(browser.contentDocument);
-    }, "advanced-pane-loaded", false);
-  } else {
-    if (paneID) {
-      browser.contentWindow.gotoPref(paneID);
     }
-    switchToAdvancedSubPane(browser.contentDocument);
+  } else {
+    var instantApply = getBoolPref("browser.preferences.instantApply", false);
+    var features = "chrome,titlebar,toolbar,centerscreen" + (instantApply ? ",dialog=no" : ",modal");
+
+    var win = Services.wm.getMostRecentWindow("Browser:Preferences");
+    if (win) {
+      win.focus();
+      if (paneID) {
+        var pane = win.document.getElementById(paneID);
+        win.document.documentElement.showPane(pane);
+      }
+
+      switchToAdvancedSubPane(win.document);
+    } else {
+      openDialog("chrome://browser/content/preferences/preferences.xul",
+                 "Preferences", features, paneID, extraArgs);
+    }
   }
 }
 
@@ -662,6 +604,7 @@ function openTroubleshootingPage()
   openUILinkIn("about:support", "tab");
 }
 
+#ifdef MOZ_SERVICES_HEALTHREPORT
 /**
  * Opens the troubleshooting information (about:support) page for this version
  * of the application.
@@ -670,6 +613,7 @@ function openHealthReport()
 {
   openUILinkIn("about:healthreport", "tab");
 }
+#endif
 
 /**
  * Opens the feedback page for this version of the application.
@@ -692,7 +636,7 @@ function openTourPage()
 function buildHelpMenu()
 {
   // Enable/disable the "Report Web Forgery" menu item.
-  if (typeof gSafeBrowsing != "undefined" && AppConstants.MOZ_SAFE_BROWSING)
+  if (typeof gSafeBrowsing != "undefined")
     gSafeBrowsing.setReportPhishingMenu();
 }
 
@@ -734,7 +678,7 @@ function makeURLAbsolute(aBase, aUrl)
  *        This will be used as the referrer. There will be no security check.
  * @param [optional] aReferrerPolicy
  *        Referrer policy - Ci.nsIHttpChannel.REFERRER_POLICY_*.
- */
+ */ 
 function openNewTabWith(aURL, aDocument, aPostData, aEvent,
                         aAllowThirdPartyFixup, aReferrer, aReferrerPolicy) {
 
@@ -789,7 +733,7 @@ function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
 }
 
 function openPrefsHelp() {
-  // non-instant apply prefwindows are usually modal, so we can't open in the topmost window,
+  // non-instant apply prefwindows are usually modal, so we can't open in the topmost window, 
   // since its probably behind the window.
   var instantApply = getBoolPref("browser.preferences.instantApply");
 
@@ -812,9 +756,9 @@ function trimURL(aURL) {
 
   let flags = Services.uriFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP |
               Services.uriFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS;
-  let fixedUpURL, expectedURLSpec;
+  let fixedUpURL = Services.uriFixup.createFixupURI(urlWithoutProtocol, flags);
+  let expectedURLSpec;
   try {
-    fixedUpURL = Services.uriFixup.createFixupURI(urlWithoutProtocol, flags);
     expectedURLSpec = makeURI(aURL).spec;
   } catch (ex) {
     return url;

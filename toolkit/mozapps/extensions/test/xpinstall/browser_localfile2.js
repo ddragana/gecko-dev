@@ -6,15 +6,14 @@ function test() {
 
   var cr = Components.classes["@mozilla.org/chrome/chrome-registry;1"]
                      .getService(Components.interfaces.nsIChromeRegistry);
-
-  var chromeroot = getChromeRoot(gTestPath);
-  var xpipath = chromeroot + "amosigned.xpi";
+  
+  var chromeroot = getChromeRoot(gTestPath);              
   try {
-    xpipath = cr.convertChromeURL(makeURI(xpipath)).spec;
+    var xpipath = cr.convertChromeURL(makeURI(chromeroot + "unsigned.xpi")).spec;
   } catch (ex) {
-    //scenario where we are running from a .jar and already extracted
+    var xpipath = chromeroot + "unsigned.xpi"; //scenario where we are running from a .jar and already extracted
   }
-
+  
   var triggers = encodeURIComponent(JSON.stringify({
     "Unsigned XPI": xpipath
   }));

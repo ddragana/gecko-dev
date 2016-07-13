@@ -7,7 +7,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id={900533}
   <title>Test for Bug {900533} Packaged app update tests</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="common.js"></script>
   <script type="text/javascript" src="test_packaged_app_common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
@@ -142,6 +141,7 @@ function validatePermissions(aList, aDontFail) {
 var steps = [
   function() {
     // Set up
+    SpecialPowers.setAllAppsLaunchable(true);
     SpecialPowers.addPermission("webapps-manage", true, document);
     info("Set up");
     // Note that without useCurrentProfile the permissions just aren't added.
@@ -150,11 +150,7 @@ var steps = [
       function() {
         SpecialPowers.pushPrefEnv(
            {"set": [["dom.mozPermissionSettings.enabled", true],
-                    ["dom.webapps.useCurrentProfile", true],
-                    // This test resets a conection to simulate network error,
-                    // so we need to set the following pref to 0 that we do not
-                    // retry it in necko.
-                    ["network.http.request.max-attempts", 0]]},
+                    ["dom.webapps.useCurrentProfile", true]]},
            PackagedTestHelper.next);
       }
     );
@@ -350,7 +346,7 @@ PackagedTestHelper.setSteps(steps);
 // install tests
 miniManifestURL = PackagedTestHelper.gSJS + "?getManifest=true&appToUpdate&testNameChange";
 
-addLoadEvent(() => prepareEnv(() => PackagedTestHelper.start()));
+addLoadEvent(PackagedTestHelper.start);
 
 </script>
 </pre>

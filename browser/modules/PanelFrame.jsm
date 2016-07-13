@@ -20,7 +20,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "DynamicResizeWatcher", "resource:///mod
 const PANEL_MIN_HEIGHT = 100;
 const PANEL_MIN_WIDTH = 330;
 
-var PanelFrameInternal = {
+let PanelFrameInternal = {
   /**
    * Helper function to get and hold a single instance of a DynamicResizeWatcher.
    */
@@ -81,11 +81,6 @@ var PanelFrameInternal = {
         attrs["message"] = "true";
         attrs["messagemanagergroup"] = aType;
       }
-      if (aType == "loop") {
-        attrs.message = true;
-        attrs.messagemanagergroup = "social";
-        attrs.autocompletepopup = "PopupAutoComplete";
-      }
       for (let [k, v] of Iterator(attrs)) {
         frame.setAttribute(k, v);
       }
@@ -101,7 +96,7 @@ var PanelFrameInternal = {
 /**
  * The exported PanelFrame object
  */
-var PanelFrame = {
+let PanelFrame = {
   /**
    * Shows a popup in a pop-up panel, or in a sliding panel view in the application menu.
    * It will move the iframe to different DOM locations depending on where it needs to be
@@ -132,9 +127,6 @@ var PanelFrame = {
     let notificationFrameId = aToolbarButton.getAttribute("notificationFrameId");
     let notificationFrame = aWindow.document.getElementById(notificationFrameId);
 
-    // the xbl bindings for the iframe probably don't exist yet, so we can't
-    // access iframe.messageManager directly - but can get at it with this dance.
-    let mm = notificationFrame.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader.messageManager;
 
     // Clear dimensions on all browsers so the panel size will
     // only use the selected browser.
@@ -145,7 +137,9 @@ var PanelFrame = {
     }
 
     function dispatchPanelEvent(name) {
-      mm.sendAsyncMessage("Social:CustomEvent", { name: name });
+      let evt = notificationFrame.contentDocument.createEvent("CustomEvent");
+      evt.initCustomEvent(name, true, true, {});
+      notificationFrame.contentDocument.documentElement.dispatchEvent(evt);
     }
 
     // we only use a dynamic resizer when we're located the toolbar.
@@ -158,32 +152,35 @@ var PanelFrame = {
       anchorBtn.removeAttribute("open");
       if (dynamicResizer)
         dynamicResizer.stop();
-      notificationFrame.docShellIsActive = false;
+      notificationFrame.docShell.isActive = false;
       dispatchPanelEvent(aType + "FrameHide");
     });
 
-    panel.addEventListener("popupshowing", function onpopupshowing() {
-      panel.removeEventListener("popupshowning", onpopupshowing);
+    panel.addEventListener("popupshown", function onpopupshown() {
+      panel.removeEventListener("popupshown", onpopupshown);
+      let initFrameShow = () => {
+        notificationFrame.docShell.isActive = true;
+        notificationFrame.docShell.isAppTab = true;
+        if (dynamicResizer)
+          dynamicResizer.start(panel, notificationFrame);
+        dispatchPanelEvent(aType + "FrameShow");
+      };
       // This attribute is needed on both the button and the
       // containing toolbaritem since the buttons on OS X have
       // moz-appearance:none, while their container gets
       // moz-appearance:toolbarbutton due to the way that toolbar buttons
       // get combined on OS X.
       anchorBtn.setAttribute("open", "true");
-    });
-
-    panel.addEventListener("popupshown", function onpopupshown() {
-      panel.removeEventListener("popupshown", onpopupshown);
-
-      mm.sendAsyncMessage("WaitForDOMContentLoaded");
-      mm.addMessageListener("DOMContentLoaded", function onloaded() {
-        mm.removeMessageListener("DOMContentLoaded", onloaded);
-        mm = notificationFrame.messageManager;
-        notificationFrame.docShellIsActive = true;
-        if (dynamicResizer)
-          dynamicResizer.start(panel, notificationFrame);
-        dispatchPanelEvent(aType + "FrameShow");
-      });
+      if (notificationFrame.contentDocument &&
+          notificationFrame.contentDocument.readyState == "complete") {
+        initFrameShow();
+      } else {
+        // first time load, wait for load and dispatch after load
+        notificationFrame.addEventListener("load", function panelBrowserOnload(e) {
+          notificationFrame.removeEventListener("load", panelBrowserOnload, true);
+          initFrameShow();
+        }, true);
+      }
     });
 
     let anchor = aWindow.document.getAnonymousElementByAttribute(anchorBtn, "class", "toolbarbutton-icon");

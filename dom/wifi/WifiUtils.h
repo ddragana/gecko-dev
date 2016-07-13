@@ -13,8 +13,8 @@
 #define WifiUtils_h
 
 #include "nsString.h"
+#include "nsAutoPtr.h"
 #include "mozilla/dom/WifiOptionsBinding.h"
-#include "mozilla/UniquePtr.h"
 #include "WifiHotspotUtils.h"
 
 // Needed to add a copy constructor to WifiCommandOptions.
@@ -51,7 +51,7 @@ public:
 class WpaSupplicantImpl
 {
 public:
-  // Suppress warning from |UniquePtr|
+  // Suppress warning from nsAutoPtr
   virtual ~WpaSupplicantImpl() {}
 
   virtual int32_t
@@ -94,8 +94,8 @@ public:
                       const nsCString& aInterface);
 
 private:
-  UniquePtr<WpaSupplicantImpl> mImpl;
-  UniquePtr<WifiHotspotUtils> mWifiHotspotUtils;
+  nsAutoPtr<WpaSupplicantImpl> mImpl;
+  nsAutoPtr<WifiHotspotUtils> mWifiHotspotUtils;
 
   uint32_t mSdkVersion;
 

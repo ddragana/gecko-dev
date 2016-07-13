@@ -13,7 +13,7 @@
 #include "nsCacheMetaData.h"
 
 #include "nspr.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "nsAutoPtr.h"
 #include "nscore.h"
 #include "nsCOMPtr.h"
@@ -195,7 +195,7 @@ public:
     bool     RemoveDescriptor( nsCacheEntryDescriptor * descriptor,
                                bool                   * doomEntry);
 
-    void     GetDescriptors(nsTArray<RefPtr<nsCacheEntryDescriptor> > &outDescriptors);
+    void     GetDescriptors(nsTArray<nsRefPtr<nsCacheEntryDescriptor> > &outDescriptors);
 
 private:
     friend class nsCacheEntryHashTable;
@@ -278,10 +278,11 @@ public:
 
 private:
     // PLDHashTable operation callbacks
-    static PLDHashNumber  HashKey(const void *key);
+    static PLDHashNumber  HashKey( PLDHashTable *table, const void *key);
 
-    static bool           MatchEntry(const PLDHashEntryHdr *  entry,
-                                     const void *             key);
+    static bool           MatchEntry( PLDHashTable *           table,
+                                      const PLDHashEntryHdr *  entry,
+                                      const void *             key);
 
     static void           MoveEntry( PLDHashTable *table,
                                      const PLDHashEntryHdr *from,

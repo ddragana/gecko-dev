@@ -1,3 +1,6 @@
+/* Any copyright is dedicated to the Public Domain.
+   http://creativecommons.org/publicdomain/zero/1.0/ */
+
 /**
  * This file tests the async history API exposed by mozIAsyncHistory.
  */
@@ -105,7 +108,7 @@ VisitObserver.prototype = {
   {
     do_print("onVisit(" + aURI.spec + ", " + aVisitId + ", " + aTime +
              ", " + aSessionId + ", " + aReferringId + ", " +
-             aTransitionType + ", " + aGUID + ")");
+             aTransitionType + ", " + aGUID + ")"); 
     if (!this.uri.equals(aURI) || this.guid != aGUID) {
       return;
     }
@@ -128,7 +131,7 @@ function do_check_title_for_uri(aURI,
   let stmt = DBConn().createStatement(
     `SELECT title
      FROM moz_places
-     WHERE url_hash = hash(:url) AND url = :url`
+     WHERE url = :url`
   );
   stmt.params.url = aURI.spec;
   do_check_true(stmt.executeStep(), stack);
@@ -330,7 +333,7 @@ add_task(function* test_add_visit_invalid_transitionType_throws() {
   }
 
   // Now, test something that has a transition type greater than the last one.
-  place.visits[0] = new VisitInfo(TRANSITION_RELOAD + 1);
+  place.visits[0] = new VisitInfo(TRANSITION_FRAMED_LINK + 1);
   try {
     yield promiseUpdatePlaces(place);
     do_throw("Should have thrown!");
@@ -368,10 +371,7 @@ add_task(function* test_non_addable_uri_errors() {
       };
       places.push(place);
     }
-    catch (e) {
-      if (e.result != Cr.NS_ERROR_FAILURE) {
-        throw e;
-      }
+    catch (e if e.result === Cr.NS_ERROR_FAILURE) {
       // NetUtil.newURI() can throw if e.g. our app knows about imap://
       // but the account is not set up and so the URL is invalid for us.
       // Note this in the log but ignore as it's not the subject of this test.
@@ -545,8 +545,7 @@ add_task(function* test_old_referrer_ignored() {
   let stmt = DBConn().createStatement(
     `SELECT COUNT(1) AS count
      FROM moz_historyvisits
-     JOIN moz_places h ON h.id = place_id
-     WHERE url_hash = hash(:page_url) AND url = :page_url
+     WHERE place_id = (SELECT id FROM moz_places WHERE url = :page_url)
      AND from_visit = 0`
   );
   stmt.params.page_url = place.uri.spec;
@@ -645,8 +644,9 @@ add_task(function* test_add_visit() {
     title: "test_add_visit title",
     visits: [],
   };
-  for (let t in PlacesUtils.history.TRANSITIONS) {
-    let transitionType = PlacesUtils.history.TRANSITIONS[t];
+  for (let transitionType = TRANSITION_LINK;
+       transitionType <= TRANSITION_FRAMED_LINK;
+       transitionType++) {
     place.visits.push(new VisitInfo(transitionType, VISIT_TIME));
   }
   do_check_false(yield promiseIsURIVisited(place.uri));
@@ -669,8 +669,8 @@ add_task(function* test_add_visit() {
     do_check_eq(visits.length, 1);
     let visit = visits[0];
     do_check_eq(visit.visitDate, VISIT_TIME);
-    let transitions =
-    do_check_true(Object.values(PlacesUtils.history.TRANSITIONS).includes(visit.transitionType));
+    do_check_true(visit.transitionType >= TRANSITION_LINK &&
+                    visit.transitionType <= TRANSITION_FRAMED_LINK);
     do_check_true(visit.referrerURI === null);
 
     // For TRANSITION_EMBED visits, many properties will always be zero or
@@ -703,8 +703,9 @@ add_task(function* test_add_visit() {
 add_task(function* test_properties_saved() {
   // Check each transition type to make sure it is saved properly.
   let places = [];
-  for (let t in PlacesUtils.history.TRANSITIONS) {
-    let transitionType = PlacesUtils.history.TRANSITIONS[t];
+  for (let transitionType = TRANSITION_LINK;
+       transitionType <= TRANSITION_FRAMED_LINK;
+       transitionType++) {
     let place = {
       uri: NetUtil.newURI(TEST_DOMAIN + "test_properties_saved/" +
                           transitionType),
@@ -738,7 +739,7 @@ add_task(function* test_properties_saved() {
        FROM moz_places h
        JOIN moz_historyvisits v
        ON h.id = v.place_id
-       WHERE h.url_hash = hash(:page_url) AND h.url = :page_url
+       WHERE h.url = :page_url
        AND v.visit_date = :visit_date`
     );
     stmt.params.page_url = uri.spec;
@@ -753,7 +754,7 @@ add_task(function* test_properties_saved() {
        FROM moz_places h
        JOIN moz_historyvisits v
        ON h.id = v.place_id
-       WHERE h.url_hash = hash(:page_url) AND h.url = :page_url
+       WHERE h.url = :page_url
        AND v.visit_type = :transition_type`
     );
     stmt.params.page_url = uri.spec;
@@ -766,7 +767,7 @@ add_task(function* test_properties_saved() {
     stmt = DBConn().createStatement(
       `SELECT COUNT(1) AS count
        FROM moz_places h
-       WHERE h.url_hash = hash(:page_url) AND h.url = :page_url
+       WHERE h.url = :page_url
        AND h.title = :title`
     );
     stmt.params.page_url = uri.spec;
@@ -839,13 +840,11 @@ add_task(function* test_referrer_saved() {
       let stmt = DBConn().createStatement(
         `SELECT COUNT(1) AS count
          FROM moz_historyvisits
-         JOIN moz_places h ON h.id = place_id
-         WHERE url_hash = hash(:page_url) AND url = :page_url
+         WHERE place_id = (SELECT id FROM moz_places WHERE url = :page_url)
          AND from_visit = (
-           SELECT v.id
-           FROM moz_historyvisits v
-           JOIN moz_places h ON h.id = place_id
-           WHERE url_hash = hash(:referrer) AND url = :referrer
+           SELECT id
+           FROM moz_historyvisits
+           WHERE place_id = (SELECT id FROM moz_places WHERE url = :referrer)
          )`
       );
       stmt.params.page_url = uri.spec;
@@ -1003,7 +1002,7 @@ add_task(function* test_title_change_notifies() {
             PlacesUtils.history.removeObserver(observer);
             resolve();
             break;
-        }
+        };
       });
 
       PlacesUtils.history.addObserver(observer, false);
@@ -1081,10 +1080,7 @@ add_task(function* test_callbacks_not_supplied() {
       };
       places.push(place);
     }
-    catch (e) {
-      if (e.result != Cr.NS_ERROR_FAILURE) {
-        throw e;
-      }
+    catch (e if e.result === Cr.NS_ERROR_FAILURE) {
       // NetUtil.newURI() can throw if e.g. our app knows about imap://
       // but the account is not set up and so the URL is invalid for us.
       // Note this in the log but ignore as it's not the subject of this test.
@@ -1117,9 +1113,8 @@ add_task(function* test_typed_hidden_not_overwritten() {
   yield promiseUpdatePlaces(places);
 
   let db = yield PlacesUtils.promiseDBConnection();
-  let rows = yield db.execute(
-    "SELECT hidden, typed FROM moz_places WHERE url_hash = hash(:url) AND url = :url",
-    { url: "http://mozilla.org/" });
+  let rows = yield db.execute("SELECT hidden, typed FROM moz_places WHERE url = :url",
+                              { url: "http://mozilla.org/" });
   Assert.equal(rows[0].getResultByName("typed"), 1,
                "The page should be marked as typed");
   Assert.equal(rows[0].getResultByName("hidden"), 0,

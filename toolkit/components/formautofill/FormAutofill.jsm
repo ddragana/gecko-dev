@@ -14,13 +14,31 @@ this.EXPORTED_SYMBOLS = [
 
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/Integration.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillIntegration",
+                                  "resource://gre/modules/FormAutofillIntegration.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+                                  "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
 
 /**
  * Main module handling references to objects living in the main process.
  */
 this.FormAutofill = {
+  /**
+   * Dynamically generated object implementing the FormAutofillIntegration
+   * methods.  Platform-specific code and add-ons can override methods of this
+   * object using the registerIntegration method.
+   */
+  get integration() {
+    // This lazy getter is only called if registerIntegration was never called.
+    this._refreshIntegrations();
+    return this.integration;
+  },
+
   /**
    * Registers new overrides for the FormAutofillIntegration methods.  Example:
    *
@@ -39,8 +57,9 @@ this.FormAutofill = {
    *       integration functions changes.  Thus, it should not have any side
    *       effects or do any other initialization.
    */
-  registerIntegration(aIntegrationFn) {
-    Integration.formAutofill.register(aIntegrationFn);
+  registerIntegration: function (aIntegrationFn) {
+    this._integrationFns.add(aIntegrationFn);
+    this._refreshIntegrations();
   },
 
   /**
@@ -53,8 +72,45 @@ this.FormAutofill = {
    * @param aIntegrationFn
    *        This must be the same function object passed to registerIntegration.
    */
-  unregisterIntegration(aIntegrationFn) {
-    Integration.formAutofill.unregister(aIntegrationFn);
+  unregisterIntegration: function (aIntegrationFn) {
+    this._integrationFns.delete(aIntegrationFn);
+    this._refreshIntegrations();
+  },
+
+  /**
+   * Ordered list of registered functions defining integration overrides.
+   */
+  _integrationFns: new Set(),
+
+  /**
+   * Updates the "integration" getter with the object resulting from combining
+   * all the registered integration overrides with the default implementation.
+   */
+  _refreshIntegrations: function () {
+    delete this.integration;
+
+    let combined = FormAutofillIntegration;
+    for (let integrationFn of this._integrationFns) {
+      try {
+        // Obtain a new set of methods from the next integration function in the
+        // list, specifying the current combined object as the base argument.
+        let integration = integrationFn.call(null, combined);
+
+        // Retrieve a list of property descriptors from the returned object, and
+        // use them to build a new combined object whose prototype points to the
+        // previous combined object.
+        let descriptors = {};
+        for (let name of Object.getOwnPropertyNames(integration)) {
+          descriptors[name] = Object.getOwnPropertyDescriptor(integration, name);
+        }
+        combined = Object.create(combined, descriptors);
+      } catch (ex) {
+        // Any error will result in the current integration being skipped.
+        Cu.reportError(ex);
+      }
+    }
+
+    this.integration = combined;
   },
 
   /**
@@ -71,15 +127,3 @@ this.FormAutofill = {
     return yield ui.show();
   }),
 };
-
-/**
- * Dynamically generated object implementing the FormAutofillIntegration
- * methods.  Platform-specific code and add-ons can override methods of this
- * object using the registerIntegration method.
- */
-Integration.formAutofill.defineModuleGetter(
-  this.FormAutofill,
-  "integration",
-  "resource://gre/modules/FormAutofillIntegration.jsm",
-  "FormAutofillIntegration"
-);

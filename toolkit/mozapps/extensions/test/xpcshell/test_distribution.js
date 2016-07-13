@@ -68,7 +68,7 @@ function setOldModificationTime() {
     extension.append("addon1@tests.mozilla.org");
   else
     extension.append("addon1@tests.mozilla.org.xpi");
-  setExtensionModifiedTime(extension, Date.now() - MAKE_FILE_OLD_DIFFERENCE);
+  setExtensionModifiedTime(extension, Date.now - 10000);
   startupManager(false);
 }
 
@@ -78,11 +78,9 @@ function run_test() {
   run_test_1();
 }
 
-// Tests that on the first startup the add-on gets installed, with now as the
-// profile modifiedTime.
+// Tests that on the first startup the add-on gets installed
 function run_test_1() {
-  let extension = writeInstallRDFForExtension(addon1_1, distroDir);
-  setExtensionModifiedTime(extension, Date.now() - MAKE_FILE_OLD_DIFFERENCE);
+  writeInstallRDFForExtension(addon1_1, distroDir);
 
   startupManager();
 
@@ -92,15 +90,6 @@ function run_test_1() {
     do_check_true(a1.isActive);
     do_check_eq(a1.scope, AddonManager.SCOPE_PROFILE);
     do_check_false(a1.foreignInstall);
-
-    // Modification time should be updated when the addon is copied to the
-    // profile.
-    let testURI = a1.getResourceURI(TEST_UNPACKED ? "install.rdf" : "");
-    let testFile = testURI.QueryInterface(Components.interfaces.nsIFileURL).file;
-
-    do_check_true(testFile.exists());
-    let difference = testFile.lastModifiedTime - Date.now();
-    do_check_true(Math.abs(difference) < MAX_TIME_DIFFERENCE);
 
     do_execute_soon(run_test_2);
   });

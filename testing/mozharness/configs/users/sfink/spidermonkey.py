@@ -7,6 +7,10 @@ REPO = HOME + "/src/MI-GC"
 
 config = {
     "hgurl": "https://hg.mozilla.org/",
+    "hgtool_base_bundle_urls": [
+        "https://ftp-ssl.mozilla.org/pub/mozilla.org/firefox/bundles"
+    ],
+
     "python": "python",
     "sixgill": HOME + "/src/sixgill",
     "sixgill_bin": HOME + "/src/sixgill/bin",
@@ -14,11 +18,11 @@ config = {
     "repo": REPO,
     "repos": [{
         "repo": REPO,
-        "branch": "default",
+        "revision": "default",
         "dest": BRANCH,
     }, {
         "repo": "https://hg.mozilla.org/build/tools",
-        "branch": "default",
+        "revision": "default",
         "dest": "tools"
     }],
 

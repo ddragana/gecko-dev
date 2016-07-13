@@ -27,7 +27,7 @@ public:
   GonkAutoMounter();
   ~GonkAutoMounter();
 
-  MountAccess GetAccess() const
+  const MountAccess GetAccess()
   {
     return mAccess;
   }

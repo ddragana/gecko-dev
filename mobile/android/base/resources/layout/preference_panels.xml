@@ -9,8 +9,7 @@
               android:minHeight="?android:attr/listPreferredItemHeight"
               android:gravity="center_vertical"
               android:orientation="vertical"
-              android:paddingLeft="?android:attr/listPreferredItemPaddingLeft"
-              android:paddingStart="?android:attr/listPreferredItemPaddingStart"
+              android:paddingLeft="15dp"
               android:paddingRight="?android:attr/scrollbarSize">
 
        <TextView android:id="@+android:id/title"

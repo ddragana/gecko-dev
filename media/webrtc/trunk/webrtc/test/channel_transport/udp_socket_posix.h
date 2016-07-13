@@ -33,37 +33,37 @@ public:
 
     virtual ~UdpSocketPosix();
 
-    bool SetCallback(CallbackObj obj, IncomingSocketCallback cb) override;
+    virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE;
 
-    bool Bind(const SocketAddress& name) override;
+    virtual bool SetCallback(CallbackObj obj,
+                             IncomingSocketCallback cb) OVERRIDE;
 
-    bool SetSockopt(int32_t level,
-                    int32_t optname,
-                    const int8_t* optval,
-                    int32_t optlen) override;
+    virtual bool Bind(const SocketAddress& name) OVERRIDE;
 
-    int32_t SetTOS(const int32_t serviceType) override;
+    virtual bool SetSockopt(int32_t level, int32_t optname,
+                            const int8_t* optval, int32_t optlen) OVERRIDE;
 
-    int32_t SendTo(const int8_t* buf,
-                   size_t len,
-                   const SocketAddress& to) override;
+    virtual int32_t SetTOS(const int32_t serviceType) OVERRIDE;
+
+    virtual int32_t SendTo(const int8_t* buf, int32_t len,
+                           const SocketAddress& to) OVERRIDE;
 
     // Deletes socket in addition to closing it.
     // TODO (hellner): make destructor protected.
-    void CloseBlocking() override;
+    virtual void CloseBlocking() OVERRIDE;
 
     SOCKET GetFd();
 
-    bool ValidHandle() override;
+    virtual bool ValidHandle() OVERRIDE;
 
-    bool SetQos(int32_t /*serviceType*/,
-                int32_t /*tokenRate*/,
-                int32_t /*bucketSize*/,
-                int32_t /*peekBandwith*/,
-                int32_t /*minPolicedSize*/,
-                int32_t /*maxSduSize*/,
-                const SocketAddress& /*stRemName*/,
-                int32_t /*overrideDSCP*/) override;
+    virtual bool SetQos(int32_t /*serviceType*/,
+                        int32_t /*tokenRate*/,
+                        int32_t /*bucketSize*/,
+                        int32_t /*peekBandwith*/,
+                        int32_t /*minPolicedSize*/,
+                        int32_t /*maxSduSize*/,
+                        const SocketAddress& /*stRemName*/,
+                        int32_t /*overrideDSCP*/) OVERRIDE;
 
     bool CleanUp();
     void HasIncoming();
@@ -72,7 +72,7 @@ public:
 private:
     friend class UdpSocketManagerPosix;
 
-    const int32_t _id;
+    int32_t _id;
     IncomingSocketCallback _incomingCb;
     CallbackObj _obj;
 

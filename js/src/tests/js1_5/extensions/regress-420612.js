@@ -12,8 +12,8 @@ var expect = 'No Crash';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
-var obj = Object.create([]);
-obj.unwatch("x");
+this.__proto__ = []; 
+this.unwatch("x");
 
 if (typeof reportCompare === "function")
   reportCompare(true, true);

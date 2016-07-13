@@ -16,14 +16,14 @@ class DirectShowDecoder : public MediaDecoder
 {
 public:
 
-  explicit DirectShowDecoder(MediaDecoderOwner* aOwner);
+  DirectShowDecoder();
   virtual ~DirectShowDecoder();
 
-  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override {
+  MediaDecoder* Clone() override {
     if (!IsEnabled()) {
       return nullptr;
     }
-    return new DirectShowDecoder(aOwner);
+    return new DirectShowDecoder();
   }
 
   MediaDecoderStateMachine* CreateStateMachine() override;

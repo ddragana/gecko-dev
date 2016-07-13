@@ -37,7 +37,7 @@ HTMLPreElement::ParseAttribute(int32_t aNamespaceID,
 {
   if (aNamespaceID == kNameSpaceID_None) {
     if (aAttribute == nsGkAtoms::width) {
-      return aResult.ParseIntValue(aValue);
+      return aResult.ParseIntWithBounds(aValue, 0);
     }
   }
 
@@ -64,10 +64,6 @@ HTMLPreElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
 NS_IMETHODIMP_(bool)
 HTMLPreElement::IsAttributeMapped(const nsIAtom* aAttribute) const
 {
-  if (!mNodeInfo->Equals(nsGkAtoms::pre)) {
-    return nsGenericHTMLElement::IsAttributeMapped(aAttribute);
-  }
-
   static const MappedAttributeEntry attributes[] = {
     { &nsGkAtoms::wrap },
     { nullptr },
@@ -84,10 +80,6 @@ HTMLPreElement::IsAttributeMapped(const nsIAtom* aAttribute) const
 nsMapRuleToAttributesFunc
 HTMLPreElement::GetAttributeMappingFunction() const
 {
-  if (!mNodeInfo->Equals(nsGkAtoms::pre)) {
-    return nsGenericHTMLElement::GetAttributeMappingFunction();
-  }
-
   return &MapAttributesIntoRule;
 }
 

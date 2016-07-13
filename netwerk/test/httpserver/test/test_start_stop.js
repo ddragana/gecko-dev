@@ -20,7 +20,7 @@ var srv, srv2;
 
 function run_test()
 {
-  if (mozinfo.os == "win")
+  if ("@mozilla.org/windows-registry-key;1" in Components.classes)
   {
     dumpn("*** not running test_start_stop.js on Windows for now, because " +
           "Windows is dumb");

@@ -102,7 +102,6 @@ LifoAlloc::getOrCreateChunk(size_t n)
     }
 
     // If we get here, we couldn't find an existing BumpChunk to fill the request.
-    MOZ_ASSERT(fallibleScope_, "[OOM] Cannot allocate a new chunk in an infallible scope.");
     BumpChunk* newChunk = BumpChunk::new_(chunkSize);
     if (!newChunk)
         return nullptr;

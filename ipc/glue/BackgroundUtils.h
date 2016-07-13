@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -18,11 +16,10 @@ class nsIPrincipal;
 
 namespace IPC {
 
-namespace detail {
-template<class ParamType>
-struct OriginAttributesParamTraits
+template<>
+struct ParamTraits<mozilla::OriginAttributes>
 {
-  typedef ParamType paramType;
+  typedef mozilla::OriginAttributes paramType;
 
   static void Write(Message* aMsg, const paramType& aParam)
   {
@@ -31,30 +28,13 @@ struct OriginAttributesParamTraits
     WriteParam(aMsg, suffix);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     nsAutoCString suffix;
     return ReadParam(aMsg, aIter, &suffix) &&
            aResult->PopulateFromSuffix(suffix);
   }
 };
-} // namespace detail
-
-template<>
-struct ParamTraits<mozilla::PrincipalOriginAttributes>
-  : public detail::OriginAttributesParamTraits<mozilla::PrincipalOriginAttributes> {};
-
-template<>
-struct ParamTraits<mozilla::DocShellOriginAttributes>
-  : public detail::OriginAttributesParamTraits<mozilla::DocShellOriginAttributes> {};
-
-template<>
-struct ParamTraits<mozilla::NeckoOriginAttributes>
-  : public detail::OriginAttributesParamTraits<mozilla::NeckoOriginAttributes> {};
-
-template<>
-struct ParamTraits<mozilla::GenericOriginAttributes>
-  : public detail::OriginAttributesParamTraits<mozilla::GenericOriginAttributes> {};
 
 } // namespace IPC
 

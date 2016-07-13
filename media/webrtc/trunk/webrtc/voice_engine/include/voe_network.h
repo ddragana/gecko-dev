@@ -69,10 +69,10 @@ public:
     // including the RTP-header must also be given to the VoiceEngine.
     virtual int ReceivedRTPPacket(int channel,
                                   const void* data,
-                                  size_t length) = 0;
+                                  unsigned int length) = 0;
     virtual int ReceivedRTPPacket(int channel,
                                   const void* data,
-                                  size_t length,
+                                  unsigned int length,
                                   const PacketTime& packet_time) {
       return 0;
     }
@@ -80,9 +80,8 @@ public:
     // The packets received from the network should be passed to this
     // function when external transport is enabled. Note that the data
     // including the RTCP-header must also be given to the VoiceEngine.
-    virtual int ReceivedRTCPPacket(int channel,
-                                   const void* data,
-                                   size_t length) = 0;
+    virtual int ReceivedRTCPPacket(
+        int channel, const void* data, unsigned int length) = 0;
 
 protected:
     VoENetwork() {}

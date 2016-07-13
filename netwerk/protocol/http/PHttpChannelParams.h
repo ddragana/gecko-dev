@@ -24,13 +24,11 @@ struct RequestHeaderTuple {
   nsCString mHeader;
   nsCString mValue;
   bool      mMerge;
-  bool      mEmpty;
 
   bool operator ==(const RequestHeaderTuple &other) const {
     return mHeader.Equals(other.mHeader) &&
            mValue.Equals(other.mValue) &&
-           mMerge == other.mMerge &&
-           mEmpty == other.mEmpty;
+           mMerge == other.mMerge;
   }
 };
 
@@ -51,15 +49,13 @@ struct ParamTraits<mozilla::net::RequestHeaderTuple>
     WriteParam(aMsg, aParam.mHeader);
     WriteParam(aMsg, aParam.mValue);
     WriteParam(aMsg, aParam.mMerge);
-    WriteParam(aMsg, aParam.mEmpty);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &aResult->mHeader) ||
         !ReadParam(aMsg, aIter, &aResult->mValue)  ||
-        !ReadParam(aMsg, aIter, &aResult->mMerge)  ||
-        !ReadParam(aMsg, aIter, &aResult->mEmpty))
+        !ReadParam(aMsg, aIter, &aResult->mMerge))
       return false;
 
     return true;
@@ -79,7 +75,7 @@ struct ParamTraits<mozilla::net::nsHttpAtom>
     WriteParam(aMsg, value);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     nsAutoCString value;
     if (!ReadParam(aMsg, aIter, &value))
@@ -100,57 +96,13 @@ struct ParamTraits<mozilla::net::nsHttpHeaderArray::nsEntry>
   {
     WriteParam(aMsg, aParam.header);
     WriteParam(aMsg, aParam.value);
-    switch (aParam.variety) {
-      case mozilla::net::nsHttpHeaderArray::eVarietyUnknown:
-        WriteParam(aMsg, (uint8_t)0);
-        break;
-      case mozilla::net::nsHttpHeaderArray::eVarietyRequestOverride:
-        WriteParam(aMsg, (uint8_t)1);
-        break;
-      case mozilla::net::nsHttpHeaderArray::eVarietyRequestDefault:
-        WriteParam(aMsg, (uint8_t)2);
-        break;
-      case mozilla::net::nsHttpHeaderArray::eVarietyResponseNetOriginalAndResponse:
-        WriteParam(aMsg, (uint8_t)3);
-        break;
-      case mozilla::net::nsHttpHeaderArray::eVarietyResponseNetOriginal:
-        WriteParam(aMsg, (uint8_t)4);
-        break;
-      case mozilla::net::nsHttpHeaderArray::eVarietyResponse:
-        WriteParam(aMsg, (uint8_t)5);
-    }
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    uint8_t variety;
     if (!ReadParam(aMsg, aIter, &aResult->header) ||
-        !ReadParam(aMsg, aIter, &aResult->value)  ||
-        !ReadParam(aMsg, aIter, &variety))
+        !ReadParam(aMsg, aIter, &aResult->value))
       return false;
-
-    switch (variety) {
-      case 0:
-        aResult->variety = mozilla::net::nsHttpHeaderArray::eVarietyUnknown;
-        break;
-      case 1:
-        aResult->variety = mozilla::net::nsHttpHeaderArray::eVarietyRequestOverride;
-        break;
-      case 2:
-        aResult->variety = mozilla::net::nsHttpHeaderArray::eVarietyRequestDefault;
-        break;
-      case 3:
-        aResult->variety = mozilla::net::nsHttpHeaderArray::eVarietyResponseNetOriginalAndResponse;
-        break;
-      case 4:
-        aResult->variety = mozilla::net::nsHttpHeaderArray::eVarietyResponseNetOriginal;
-        break;
-      case 5:
-        aResult->variety = mozilla::net::nsHttpHeaderArray::eVarietyResponse;
-        break;
-      default:
-        return false;
-    }
 
     return true;
   }
@@ -169,7 +121,7 @@ struct ParamTraits<mozilla::net::nsHttpHeaderArray>
     WriteParam(aMsg, p.mHeaders);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &aResult->mHeaders))
       return false;
@@ -198,7 +150,7 @@ struct ParamTraits<mozilla::net::nsHttpResponseHead>
     WriteParam(aMsg, aParam.mPragmaNoCache);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &aResult->mHeaders)             ||
         !ReadParam(aMsg, aIter, &aResult->mVersion)             ||

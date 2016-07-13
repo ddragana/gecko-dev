@@ -3,10 +3,9 @@
 
 "use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
-var GMPScope = Cu.import("resource://gre/modules/addons/GMPProvider.jsm");
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+let GMPScope = Cu.import("resource://gre/modules/addons/GMPProvider.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/UpdateUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "pluginsBundle",
   () => Services.strings.createBundle("chrome://global/locale/plugins.properties"));
@@ -14,8 +13,8 @@ XPCOMUtils.defineLazyGetter(this, "pluginsBundle",
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 
-var gMockAddons = new Map();
-var gMockEmeAddons = new Map();
+let gMockAddons = new Map();
+let gMockEmeAddons = new Map();
 
 for (let plugin of GMPScope.GMP_PLUGINS) {
   let mockAddon = Object.freeze({
@@ -28,15 +27,14 @@ for (let plugin of GMPScope.GMP_PLUGINS) {
       missingFilesKey: plugin.missingFilesKey,
   });
   gMockAddons.set(mockAddon.id, mockAddon);
-  if (mockAddon.id == "gmp-widevinecdm" ||
-      mockAddon.id.indexOf("gmp-eme-") == 0) {
+  if (mockAddon.id.indexOf("gmp-eme-") == 0) {
     gMockEmeAddons.set(mockAddon.id, mockAddon);
   }
 }
 
-var gInstalledAddonId = "";
-var gPrefs = Services.prefs;
-var gGetKey = GMPScope.GMPPrefs.getPrefKey;
+let gInstalledAddonId = "";
+let gPrefs = Services.prefs;
+let gGetKey = GMPScope.GMPPrefs.getPrefKey;
 
 function MockGMPInstallManager() {
 }
@@ -59,9 +57,7 @@ function run_test() {
   gPrefs.setIntPref(GMPScope.GMPPrefs.KEY_LOGGING_LEVEL, 0);
   gPrefs.setBoolPref(GMPScope.GMPPrefs.KEY_EME_ENABLED, true);
   for (let addon of gMockAddons.values()) {
-    gPrefs.setBoolPref(gGetKey(GMPScope.GMPPrefs.KEY_PLUGIN_VISIBLE, addon.id),
-                       true);
-    gPrefs.setBoolPref(gGetKey(GMPScope.GMPPrefs.KEY_PLUGIN_FORCE_SUPPORTED, addon.id),
+    gPrefs.setBoolPref(gGetKey(GMPScope.GMPPrefs.KEY_PLUGIN_FORCEVISIBLE, addon.id),
                        true);
   }
   GMPScope.GMPProvider.shutdown();
@@ -233,17 +229,13 @@ function createMockPluginFilesIfNeeded(aFile, aPluginId) {
     if (!f.exists()) {
       f.create(Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
     }
-  }
+  };
 
   let id = aPluginId.substring(4);
   let libName = AppConstants.DLL_PREFIX + id + AppConstants.DLL_SUFFIX;
 
   createFile(libName);
-  if (aPluginId == "gmp-widevinecdm") {
-    createFile("manifest.json");
-  } else {
-    createFile(id + ".info");
-  }
+  createFile(id + ".info");
   if (aPluginId == "gmp-eme-adobe")
     createFile(id + ".voucher");
 }
@@ -314,14 +306,10 @@ add_task(function* test_pluginRegistration() {
 
     // Test that the GMPProvider tried to report via telemetry that the
     // addon's lib files are missing.
-    if (addon.missingKey) {
-      Assert.strictEqual(reportedKeys[addon.missingKey], true);
-    }
-    if (addon.missingFilesKey) {
-      Assert.strictEqual(reportedKeys[addon.missingFilesKey],
-                         addon.missingFilesKey != "VIDEO_ADOBE_GMP_MISSING_FILES"
-                         ? (1+2) : (1+2+4));
-    }
+    Assert.strictEqual(reportedKeys[addon.missingKey], true);
+    Assert.strictEqual(reportedKeys[addon.missingFilesKey],
+                       addon.missingFilesKey != "VIDEO_ADOBE_GMP_MISSING_FILES"
+                       ? (1+2) : (1+2+4));
     reportedKeys = {};
 
     // Create dummy GMP library/info files, and test that plugin registration
@@ -337,25 +325,7 @@ add_task(function* test_pluginRegistration() {
 
     // Test that the GMPProvider tried to report via telemetry that the
     // addon's lib files are NOT missing.
-    if (addon.missingFilesKey) {
-      Assert.strictEqual(reportedKeys[addon.missingFilesKey], 0);
-    }
-
-    // Setting the ABI to something invalid should cause plugin to be removed at startup.
-    clearPaths();
-    gPrefs.setCharPref(gGetKey(GMPScope.GMPPrefs.KEY_PLUGIN_ABI, addon.id), "invalid-ABI");
-    yield promiseRestartManager();
-    Assert.equal(addedPaths.indexOf(file.path), -1);
-    Assert.deepEqual(removedPaths, [file.path]);
-
-    // Setting the ABI to expected ABI should cause registration at startup.
-    clearPaths();
-    gPrefs.setCharPref(gGetKey(GMPScope.GMPPrefs.KEY_PLUGIN_VERSION, addon.id),
-                       TEST_VERSION);
-    gPrefs.setCharPref(gGetKey(GMPScope.GMPPrefs.KEY_PLUGIN_ABI, addon.id), UpdateUtils.ABI);
-    yield promiseRestartManager();
-    Assert.notEqual(addedPaths.indexOf(file.path), -1);
-    Assert.deepEqual(removedPaths, []);
+    Assert.strictEqual(reportedKeys[addon.missingFilesKey], 0);
 
     // Check that clearing the version doesn't trigger registration.
     clearPaths();

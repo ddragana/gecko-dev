@@ -11,7 +11,6 @@
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/jsipc/PJavaScript.h"
-#include "js/GCHashTable.h"
 #include "nsJSUtils.h"
 
 namespace mozilla {
@@ -51,10 +50,6 @@ class ObjectId {
     static ObjectId deserialize(uint64_t data) {
         return ObjectId(data >> FLAG_BITS, data & 1);
     }
-
-    // For use with StructGCPolicy.
-    void trace(JSTracer*) const {}
-    bool needsSweep() const { return false; }
 
   private:
     ObjectId() : serialNumber_(0), hasXrayWaiver_(false) {}
@@ -108,10 +103,13 @@ class IdToObjectMap
 // Map JSObjects -> ids
 class ObjectToIdMap
 {
-    using Hasher = js::MovableCellHasher<JS::Heap<JSObject*>>;
-    using Table = JS::GCHashMap<JS::Heap<JSObject*>, ObjectId, Hasher, js::SystemAllocPolicy>;
+    typedef js::PointerHasher<JSObject*, 3> Hasher;
+    typedef js::HashMap<JSObject*, ObjectId, Hasher, js::SystemAllocPolicy> Table;
 
   public:
+    explicit ObjectToIdMap(JSRuntime* rt);
+    ~ObjectToIdMap();
+
     bool init();
     void trace(JSTracer* trc);
     void sweep();
@@ -122,6 +120,9 @@ class ObjectToIdMap
     void clear();
 
   private:
+    static void keyMarkCallback(JSTracer* trc, JSObject* key, void* data);
+
+    JSRuntime* rt_;
     Table table_;
 };
 
@@ -151,10 +152,10 @@ class JavaScriptShared : public CPOWManager
     bool toSymbolVariant(JSContext* cx, JS::Symbol* sym, SymbolVariant* symVarp);
     JS::Symbol* fromSymbolVariant(JSContext* cx, SymbolVariant symVar);
 
-    bool fromDescriptor(JSContext* cx, JS::Handle<JS::PropertyDescriptor> desc,
+    bool fromDescriptor(JSContext* cx, JS::Handle<JSPropertyDescriptor> desc,
                         PPropertyDescriptor* out);
     bool toDescriptor(JSContext* cx, const PPropertyDescriptor& in,
-                      JS::MutableHandle<JS::PropertyDescriptor> out);
+                      JS::MutableHandle<JSPropertyDescriptor> out);
 
     bool toObjectOrNullVariant(JSContext* cx, JSObject* obj, ObjectOrNullVariant* objVarp);
     JSObject* fromObjectOrNullVariant(JSContext* cx, ObjectOrNullVariant objVar);

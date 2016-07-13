@@ -13,21 +13,18 @@
 #include <assert.h>
 #include <iostream>
 
-#include "webrtc/base/format_macros.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 
 namespace webrtc {
 
-int32_t Channel::SendData(FrameType frameType,
-                          uint8_t payloadType,
-                          uint32_t timeStamp,
-                          const uint8_t* payloadData,
-                          size_t payloadSize,
+int32_t Channel::SendData(const FrameType frameType, const uint8_t payloadType,
+                          const uint32_t timeStamp, const uint8_t* payloadData,
+                          const uint16_t payloadSize,
                           const RTPFragmentationHeader* fragmentation) {
   WebRtcRTPHeader rtpInfo;
   int32_t status;
-  size_t payloadDataSize = payloadSize;
+  uint16_t payloadDataSize = payloadSize;
 
   rtpInfo.header.markerBit = false;
   rtpInfo.header.ssrc = 0;
@@ -43,9 +40,7 @@ int32_t Channel::SendData(FrameType frameType,
     rtpInfo.type.Audio.isCNG = false;
   }
   if (frameType == kFrameEmpty) {
-    // When frame is empty, we should not transmit it. The frame size of the
-    // next non-empty frame will be based on the previous frame size.
-    _useLastFrameSize = _lastFrameSizeSample > 0;
+    // Skip this frame
     return 0;
   }
 
@@ -53,12 +48,12 @@ int32_t Channel::SendData(FrameType frameType,
   // Treat fragmentation separately
   if (fragmentation != NULL) {
     // If silence for too long, send only new data.
-    if ((fragmentation->fragmentationVectorSize == 2) &&
-        (fragmentation->fragmentationTimeDiff[1] <= 0x3fff)) {
+    if ((fragmentation->fragmentationTimeDiff[1] <= 0x3fff) &&
+        (fragmentation->fragmentationVectorSize == 2)) {
       // only 0x80 if we have multiple blocks
       _payloadData[0] = 0x80 + fragmentation->fragmentationPlType[1];
-      size_t REDheader = (fragmentation->fragmentationTimeDiff[1] << 10) +
-          fragmentation->fragmentationLength[1];
+      uint32_t REDheader = (((uint32_t) fragmentation->fragmentationTimeDiff[1])
+          << 10) + fragmentation->fragmentationLength[1];
       _payloadData[1] = uint8_t((REDheader >> 16) & 0x000000FF);
       _payloadData[2] = uint8_t((REDheader >> 8) & 0x000000FF);
       _payloadData[3] = uint8_t(REDheader & 0x000000FF);
@@ -77,7 +72,7 @@ int32_t Channel::SendData(FrameType frameType,
       // single block (newest one)
       memcpy(_payloadData, payloadData + fragmentation->fragmentationOffset[0],
              fragmentation->fragmentationLength[0]);
-      payloadDataSize = fragmentation->fragmentationLength[0];
+      payloadDataSize = uint16_t(fragmentation->fragmentationLength[0]);
       rtpInfo.header.payloadType = fragmentation->fragmentationPlType[0];
     }
   } else {
@@ -103,7 +98,6 @@ int32_t Channel::SendData(FrameType frameType,
   if (!_isStereo) {
     CalcStatistics(rtpInfo, payloadSize);
   }
-  _useLastFrameSize = false;
   _lastInTimestamp = timeStamp;
   _totalBytes += payloadDataSize;
   _channelCritSect->Leave();
@@ -127,7 +121,7 @@ int32_t Channel::SendData(FrameType frameType,
 }
 
 // TODO(turajs): rewite this method.
-void Channel::CalcStatistics(WebRtcRTPHeader& rtpInfo, size_t payloadSize) {
+void Channel::CalcStatistics(WebRtcRTPHeader& rtpInfo, uint16_t payloadSize) {
   int n;
   if ((rtpInfo.header.payloadType != _lastPayloadType)
       && (_lastPayloadType != -1)) {
@@ -156,31 +150,22 @@ void Channel::CalcStatistics(WebRtcRTPHeader& rtpInfo, size_t payloadSize) {
 
   if (!newPayload) {
     if (!currentPayloadStr->newPacket) {
-      if (!_useLastFrameSize) {
-        _lastFrameSizeSample = (uint32_t) ((uint32_t) rtpInfo.header.timestamp -
-            (uint32_t) currentPayloadStr->lastTimestamp);
-      }
-      assert(_lastFrameSizeSample > 0);
+      uint32_t lastFrameSizeSample = (uint32_t)(
+          (uint32_t) rtpInfo.header.timestamp
+              - (uint32_t) currentPayloadStr->lastTimestamp);
+      assert(lastFrameSizeSample > 0);
       int k = 0;
-      for (; k < MAX_NUM_FRAMESIZES; ++k) {
-        if ((currentPayloadStr->frameSizeStats[k].frameSizeSample ==
-            _lastFrameSizeSample) ||
-            (currentPayloadStr->frameSizeStats[k].frameSizeSample == 0)) {
-          break;
-        }
-      }
-      if (k == MAX_NUM_FRAMESIZES) {
-        // New frame size found but no space to count statistics on it. Skip it.
-        printf("No memory to store statistics for payload %d : frame size %d\n",
-               _lastPayloadType, _lastFrameSizeSample);
-        return;
+      while ((currentPayloadStr->frameSizeStats[k].frameSizeSample
+          != lastFrameSizeSample)
+          && (currentPayloadStr->frameSizeStats[k].frameSizeSample != 0)) {
+        k++;
       }
       ACMTestFrameSizeStats* currentFrameSizeStats = &(currentPayloadStr
           ->frameSizeStats[k]);
-      currentFrameSizeStats->frameSizeSample = (int16_t) _lastFrameSizeSample;
+      currentFrameSizeStats->frameSizeSample = (int16_t) lastFrameSizeSample;
 
       // increment the number of encoded samples.
-      currentFrameSizeStats->totalEncodedSamples += _lastFrameSizeSample;
+      currentFrameSizeStats->totalEncodedSamples += lastFrameSizeSample;
       // increment the number of recveived packets
       currentFrameSizeStats->numPackets++;
       // increment the total number of bytes (this is based on
@@ -232,8 +217,6 @@ Channel::Channel(int16_t chID)
       _isStereo(false),
       _leftChannel(true),
       _lastInTimestamp(0),
-      _useLastFrameSize(false),
-      _lastFrameSizeSample(0),
       _packetLoss(0),
       _useFECTestWithPacketLoss(false),
       _beginTime(TickTime::MillisecondTimestamp()),
@@ -388,7 +371,7 @@ void Channel::PrintStats(CodecInst& codecInst) {
            payloadStats.frameSizeStats[k].frameSizeSample);
     printf("Average Rate.................. %.0f bits/sec\n",
            payloadStats.frameSizeStats[k].rateBitPerSec);
-    printf("Maximum Payload-Size.......... %" PRIuS " Bytes\n",
+    printf("Maximum Payload-Size.......... %d Bytes\n",
            payloadStats.frameSizeStats[k].maxPayloadLen);
     printf(
         "Maximum Instantaneous Rate.... %.0f bits/sec\n",

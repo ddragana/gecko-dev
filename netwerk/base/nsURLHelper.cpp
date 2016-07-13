@@ -6,18 +6,13 @@
 
 #include "mozilla/RangedPtr.h"
 
-#include <algorithm>
-#include <iterator>
-
 #include "nsURLHelper.h"
 #include "nsIFile.h"
 #include "nsIURLParser.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
 #include "nsNetCID.h"
-#include "mozilla/Preferences.h"
 #include "prnetdb.h"
-#include "mozilla/Tokenizer.h"
 
 using namespace mozilla;
 
@@ -58,8 +53,10 @@ InitGlobals()
     }
 
     gInitialized = true;
+#if !defined(MOZILLA_XPCOMRT_API)
     Preferences::AddIntVarCache(&gMaxLength,
                                 "network.standard-url.max-length", 1048576);
+#endif
 }
 
 void
@@ -112,6 +109,10 @@ net_GetStdURLParser()
 nsresult
 net_GetURLSpecFromDir(nsIFile *aFile, nsACString &result)
 {
+#if defined(MOZILLA_XPCOMRT_API)
+    NS_WARNING("net_GetURLSpecFromDir not implemented");
+    return NS_ERROR_NOT_IMPLEMENTED;
+#else
     nsAutoCString escPath;
     nsresult rv = net_GetURLSpecFromActualFile(aFile, escPath);
     if (NS_FAILED(rv))
@@ -120,14 +121,19 @@ net_GetURLSpecFromDir(nsIFile *aFile, nsACString &result)
     if (escPath.Last() != '/') {
         escPath += '/';
     }
-
+    
     result = escPath;
     return NS_OK;
+#endif // defined(MOZILLA_XPCOMRT_API)
 }
 
 nsresult
 net_GetURLSpecFromFile(nsIFile *aFile, nsACString &result)
 {
+#if defined(MOZILLA_XPCOMRT_API)
+    NS_WARNING("net_GetURLSpecFromFile not implemented");
+    return NS_ERROR_NOT_IMPLEMENTED;
+#else
     nsAutoCString escPath;
     nsresult rv = net_GetURLSpecFromActualFile(aFile, escPath);
     if (NS_FAILED(rv))
@@ -144,9 +150,10 @@ net_GetURLSpecFromFile(nsIFile *aFile, nsACString &result)
         if (NS_SUCCEEDED(rv) && dir)
             escPath += '/';
     }
-
+    
     result = escPath;
     return NS_OK;
+#endif // defined(MOZILLA_XPCOMRT_API)
 }
 
 //----------------------------------------------------------------------------
@@ -171,12 +178,12 @@ net_ParseFileURL(const nsACString &inURL,
 
     const nsPromiseFlatCString &flatURL = PromiseFlatCString(inURL);
     const char *url = flatURL.get();
-
-    nsAutoCString scheme;
-    rv = net_ExtractURLScheme(flatURL, scheme);
+    
+    uint32_t schemeBeg, schemeEnd;
+    rv = net_ExtractURLScheme(flatURL, &schemeBeg, &schemeEnd, nullptr);
     if (NS_FAILED(rv)) return rv;
 
-    if (!scheme.EqualsLiteral("file")) {
+    if (strncmp(url + schemeBeg, "file", schemeEnd - schemeBeg) != 0) {
         NS_ERROR("must be a file:// url");
         return NS_ERROR_UNEXPECTED;
     }
@@ -239,7 +246,7 @@ net_CoalesceDirs(netCoalesceFlags flags, char* path)
      */
     char *fwdPtr = path;
     char *urlPtr = path;
-    char *endPath = path;
+    char *lastslash = path;
     uint32_t traversal = 0;
     uint32_t special_ftp_len = 0;
 
@@ -256,18 +263,34 @@ net_CoalesceDirs(netCoalesceFlags flags, char* path)
             special_ftp_len = 2; 
     }
 
-    /* find the end of the path - places the cursor on \0, ? or # */
-    for(; (*fwdPtr != '\0') &&
-            (*fwdPtr != '?') &&
+    /* find the last slash before # or ? */
+    for(; (*fwdPtr != '\0') && 
+            (*fwdPtr != '?') && 
             (*fwdPtr != '#'); ++fwdPtr)
     {
     }
 
-    endPath = fwdPtr;
+    /* found nothing, but go back one only */
+    /* if there is something to go back to */
+    if (fwdPtr != path && *fwdPtr == '\0')
+    {
+        --fwdPtr;
+    }
+
+    /* search the slash */
+    for(; (fwdPtr != path) && 
+            (*fwdPtr != '/'); --fwdPtr)
+    {
+    }
+    lastslash = fwdPtr;
     fwdPtr = path;
 
     /* replace all %2E or %2e with . in the path */
-    for(; fwdPtr != endPath; ++fwdPtr)
+    /* but stop at lastchar if non null */
+    for(; (*fwdPtr != '\0') && 
+            (*fwdPtr != '?') && 
+            (*fwdPtr != '#') &&
+            (*lastslash == '\0' || fwdPtr != lastslash); ++fwdPtr)
     {
         if (*fwdPtr == '%' && *(fwdPtr+1) == '2' && 
             (*(fwdPtr+2) == 'E' || *(fwdPtr+2) == 'e'))
@@ -412,7 +435,7 @@ net_ResolveRelativePath(const nsACString &relativePath,
           case '#':
           case '?':
             stop = true;
-            MOZ_FALLTHROUGH;
+            // fall through...
           case '/':
             // delimiter found
             if (name.EqualsLiteral("..")) {
@@ -459,55 +482,57 @@ net_ResolveRelativePath(const nsACString &relativePath,
 // scheme fu
 //----------------------------------------------------------------------------
 
-static bool isAsciiAlpha(char c) {
-    return nsCRT::IsAsciiAlpha(c);
-}
-
-static bool
-net_IsValidSchemeChar(const char aChar)
-{
-    if (nsCRT::IsAsciiAlpha(aChar) || nsCRT::IsAsciiDigit(aChar) ||
-        aChar == '+' || aChar == '.' || aChar == '-') {
-        return true;
-    }
-    return false;
-}
-
 /* Extract URI-Scheme if possible */
 nsresult
 net_ExtractURLScheme(const nsACString &inURI,
-                     nsACString& scheme)
+                     uint32_t *startPos, 
+                     uint32_t *endPos,
+                     nsACString *scheme)
 {
-    nsACString::const_iterator start, end;
-    inURI.BeginReading(start);
-    inURI.EndReading(end);
+    // search for something up to a colon, and call it the scheme
+    const nsPromiseFlatCString &flatURI = PromiseFlatCString(inURI);
+    const char* uri_start = flatURI.get();
+    const char* uri = uri_start;
 
-    // Strip C0 and space from begining
-    while (start != end) {
-        if ((uint8_t) *start > 0x20) {
-            break;
+    if (!uri)
+        return NS_ERROR_MALFORMED_URI;
+
+    // skip leading white space
+    while (nsCRT::IsAsciiSpace(*uri))
+        uri++;
+
+    uint32_t start = uri - uri_start;
+    if (startPos) {
+        *startPos = start;
+    }
+
+    uint32_t length = 0;
+    char c;
+    while ((c = *uri++) != '\0') {
+        // First char must be Alpha
+        if (length == 0 && nsCRT::IsAsciiAlpha(c)) {
+            length++;
+        } 
+        // Next chars can be alpha + digit + some special chars
+        else if (length > 0 && (nsCRT::IsAsciiAlpha(c) || 
+                 nsCRT::IsAsciiDigit(c) || c == '+' || 
+                 c == '.' || c == '-')) {
+            length++;
         }
-        start++;
-    }
+        // stop if colon reached but not as first char
+        else if (c == ':' && length > 0) {
+            if (endPos) {
+                *endPos = start + length;
+            }
 
-    Tokenizer p(Substring(start, end), "\r\n\t");
-    p.Record();
-    if (!p.CheckChar(isAsciiAlpha)) {
-        // First char must be alpha
-        return NS_ERROR_MALFORMED_URI;
+            if (scheme)
+                scheme->Assign(Substring(inURI, start, length));
+            return NS_OK;
+        }
+        else 
+            break;
     }
-
-    while (p.CheckChar(net_IsValidSchemeChar) || p.CheckWhite()) {
-        // Skip valid scheme characters or \r\n\t
-    }
-
-    if (!p.CheckChar(':')) {
-        return NS_ERROR_MALFORMED_URI;
-    }
-
-    p.Claim(scheme);
-    scheme.StripChars("\r\n\t");
-    return NS_OK;
+    return NS_ERROR_MALFORMED_URI;
 }
 
 bool
@@ -531,83 +556,87 @@ net_IsValidScheme(const char *scheme, uint32_t schemeLen)
 }
 
 bool
-net_IsAbsoluteURL(const nsACString& uri)
+net_FilterURIString(const char *str, nsACString& result)
 {
-    nsACString::const_iterator start, end;
-    uri.BeginReading(start);
-    uri.EndReading(end);
-
-    // Strip C0 and space from begining
-    while (start != end) {
-        if ((uint8_t) *start > 0x20) {
-            break;
-        }
-        start++;
-    }
-
-    Tokenizer p(Substring(start, end), "\r\n\t");
-
-    // First char must be alpha
-    if (!p.CheckChar(isAsciiAlpha)) {
-        return false;
-    }
-
-    while (p.CheckChar(net_IsValidSchemeChar) || p.CheckWhite()) {
-        // Skip valid scheme characters or \r\n\t
-    }
-    if (!p.CheckChar(':')) {
-        return false;
-    }
-    p.SkipWhites();
-
-    if (!p.CheckChar('/')) {
-        return false;
-    }
-    p.SkipWhites();
-
-    if (p.CheckChar('/')) {
-        // aSpec is really absolute. Ignore aBaseURI in this case
-        return true;
-    }
-    return false;
-}
-
-void
-net_FilterURIString(const nsACString& input, nsACString& result)
-{
-    const char kCharsToStrip[] = "\r\n\t";
-
+    NS_PRECONDITION(str, "Must have a non-null string!");
+    bool writing = false;
     result.Truncate();
+    const char *p = str;
 
-    auto start = input.BeginReading();
-    auto end = input.EndReading();
-
-    // Trim off leading and trailing invalid chars.
-    auto charFilter = [](char c) { return static_cast<uint8_t>(c) > 0x20; };
-    auto newStart = std::find_if(start, end, charFilter);
-    auto newEnd = std::find_if(
-        std::reverse_iterator<decltype(end)>(end),
-        std::reverse_iterator<decltype(newStart)>(newStart),
-        charFilter).base();
-
-    // Check if chars need to be stripped.
-    auto itr = std::find_first_of(
-        newStart, newEnd, std::begin(kCharsToStrip), std::end(kCharsToStrip));
-    const bool needsStrip = itr != newEnd;
-
-    // Just use the passed in string rather than creating new copies if no
-    // changes are necessary.
-    if (newStart == start && newEnd == end && !needsStrip) {
-        result = input;
-        return;
+    // Remove leading spaces, tabs, CR, LF if any.
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        writing = true;
+        str = p + 1;
+        p++;
     }
 
-    result.Assign(Substring(newStart, newEnd));
-    if (needsStrip) {
-        result.StripChars(kCharsToStrip);
+    // Don't strip from the scheme, because other code assumes everything
+    // up to the ':' is the scheme, and it's bad not to have it match.
+    // If there's no ':', strip.
+    bool found_colon = false;
+    const char *first = nullptr;
+    while (*p) {
+        switch (*p) {
+            case '\t': 
+            case '\r': 
+            case '\n':
+                if (found_colon) {
+                    writing = true;
+                    // append chars up to but not including *p
+                    if (p > str)
+                        result.Append(str, p - str);
+                    str = p + 1;
+                } else {
+                    // remember where the first \t\r\n was in case we find no scheme
+                    if (!first)
+                        first = p;
+                }
+                break;
+
+            case ':':
+                found_colon = true;
+                break;
+
+            case '/':
+            case '@':
+                if (!found_colon) {
+                    // colon also has to precede / or @ to be a scheme
+                    found_colon = true; // not really, but means ok to strip
+                    if (first) {
+                        // go back and replace
+                        p = first;
+                        continue; // process *p again
+                    }
+                }
+                break;
+
+            default:
+                break;
+        }
+        p++;
+
+        // At end, if there was no scheme, and we hit a control char, fix
+        // it up now.
+        if (!*p && first != nullptr && !found_colon) {
+            // TRICKY - to avoid duplicating code, we reset the loop back
+            // to the point we found something to do
+            p = first;
+            // This also stops us from looping after we finish
+            found_colon = true; // so we'll replace \t\r\n
+        }
     }
+
+    // Remove trailing spaces if any
+    while (((p-1) >= str) && (*(p-1) == ' ')) {
+        writing = true;
+        p--;
+    }
+
+    if (writing && p > str)
+        result.Append(str, p - str);
+
+    return writing;
 }
-
 
 #if defined(XP_WIN)
 bool
@@ -798,8 +827,7 @@ net_ParseMediaType(const nsACString &aMediaTypeStr,
                    int32_t          aOffset,
                    bool             *aHadCharset,
                    int32_t          *aCharsetStart,
-                   int32_t          *aCharsetEnd,
-                   bool             aStrict)
+                   int32_t          *aCharsetEnd)
 {
     const nsCString& flatStr = PromiseFlatCString(aMediaTypeStr);
     const char* start = flatStr.get();
@@ -815,8 +843,6 @@ net_ParseMediaType(const nsACString &aMediaTypeStr,
     const char* charsetEnd = charset;
     int32_t charsetParamStart = 0;
     int32_t charsetParamEnd = 0;
-
-    uint32_t consumed = typeEnd - type;
 
     // Iterate over parameters
     bool typeHasCharset = false;
@@ -841,7 +867,6 @@ net_ParseMediaType(const nsACString &aMediaTypeStr,
                 charsetParamEnd = curParamEnd;
             }
 
-            consumed = curParamEnd;
             curParamStart = curParamEnd + 1;
         } while (curParamStart < flatStr.Length());
     }
@@ -871,10 +896,8 @@ net_ParseMediaType(const nsACString &aMediaTypeStr,
     // some servers give junk after the charset parameter, which may
     // include a comma, so this check makes us a bit more tolerant.
 
-    if (type != typeEnd &&
-        memchr(type, '/', typeEnd - type) != nullptr &&
-        (aStrict ? (net_FindCharNotInSet(start + consumed, end, HTTP_LWS) == end) :
-                   (strncmp(type, "*/*", typeEnd - type) != 0))) {
+    if (type != typeEnd && strncmp(type, "*/*", typeEnd - type) != 0 &&
+        memchr(type, '/', typeEnd - type) != nullptr) {
         // Common case here is that aContentType is empty
         bool eq = !aContentType.IsEmpty() &&
             aContentType.Equals(Substring(type, typeEnd),
@@ -981,57 +1004,11 @@ net_ParseContentType(const nsACString &aHeaderStr,
         net_ParseMediaType(Substring(flatStr, curTypeStart,
                                      curTypeEnd - curTypeStart),
                            aContentType, aContentCharset, curTypeStart,
-                           aHadCharset, aCharsetStart, aCharsetEnd, false);
+                           aHadCharset, aCharsetStart, aCharsetEnd);
 
         // And let's move on to the next media-type
         curTypeStart = curTypeEnd + 1;
     } while (curTypeStart < flatStr.Length());
-}
-
-void
-net_ParseRequestContentType(const nsACString &aHeaderStr,
-                            nsACString       &aContentType,
-                            nsACString       &aContentCharset,
-                            bool             *aHadCharset)
-{
-    //
-    // Augmented BNF (from RFC 7231 section 3.1.1.1):
-    //
-    //   media-type   = type "/" subtype *( OWS ";" OWS parameter )
-    //   type         = token
-    //   subtype      = token
-    //   parameter    = token "=" ( token / quoted-string )
-    //
-    // Examples:
-    //
-    //   text/html
-    //   text/html; charset=ISO-8859-1
-    //   text/html; charset="ISO-8859-1"
-    //   application/octet-stream
-    //
-
-    aContentType.Truncate();
-    aContentCharset.Truncate();
-    *aHadCharset = false;
-    const nsCString& flatStr = PromiseFlatCString(aHeaderStr);
-
-    // At this point curTypeEnd points to the spot where the media-type
-    // starting at curTypeEnd ends.  Time to parse that!
-    nsAutoCString contentType, contentCharset;
-    bool hadCharset = false;
-    int32_t dummy1, dummy2;
-    uint32_t typeEnd = net_FindMediaDelimiter(flatStr, 0, ',');
-    if (typeEnd != flatStr.Length()) {
-        // We have some stuff left at the end, so this is not a valid
-        // request Content-Type header.
-        return;
-    }
-    net_ParseMediaType(flatStr, contentType, contentCharset, 0,
-                       &hadCharset, &dummy1, &dummy2, true);
-
-    aContentType = contentType;
-    aContentCharset = contentCharset;
-    *aHadCharset = hadCharset;
 }
 
 bool

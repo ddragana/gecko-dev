@@ -43,7 +43,7 @@ protected:
 
     already_AddRefed<nsPIWindowRoot> GetWindowRoot();
 
-    nsIContent* GetRootFocusedContentAndWindow(nsPIDOMWindowOuter** aWindow);
+    nsIContent* GetRootFocusedContentAndWindow(nsPIDOMWindow** aWindow);
 
     nsCOMPtr<nsIDocument> mDocument;
 

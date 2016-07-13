@@ -8,7 +8,7 @@
 // locally) with and without OCSP stapling enabled to determine that good
 // things happen and bad things don't.
 
-var gExpectOCSPRequest;
+let gExpectOCSPRequest;
 
 function add_ocsp_test(aHost, aExpectedResult, aStaplingEnabled) {
   add_connection_test(aHost, aExpectedResult,
@@ -21,7 +21,7 @@ function add_ocsp_test(aHost, aExpectedResult, aStaplingEnabled) {
     });
 }
 
-function add_tests() {
+function add_tests(certDB, otherTestCA) {
   // In the absence of OCSP stapling, these should actually all work.
   add_ocsp_test("ocsp-stapling-good.example.com",
                 PRErrorCodeSuccess, false);
@@ -73,9 +73,6 @@ function add_tests() {
 
   // This stapled response is from a CA that is untrusted and did not issue
   // the server's certificate.
-  let certDB = Cc["@mozilla.org/security/x509certdb;1"]
-                  .getService(Ci.nsIX509CertDB);
-  let otherTestCA = constructCertFromFile("ocsp_certs/other-test-ca.pem");
   add_test(function() {
     certDB.setCertTrust(otherTestCA, Ci.nsIX509Cert.CA_CERT,
                         Ci.nsIX509CertDB.UNTRUSTED);
@@ -189,6 +186,12 @@ function check_ocsp_stapling_telemetry() {
 function run_test() {
   do_get_profile();
 
+  let certDB = Cc["@mozilla.org/security/x509certdb;1"]
+                  .getService(Ci.nsIX509CertDB);
+  let otherTestCAFile = do_get_file("tlsserver/other-test-ca.der", false);
+  let otherTestCADER = readFile(otherTestCAFile);
+  let otherTestCA = certDB.constructX509(otherTestCADER, otherTestCADER.length);
+
   let fakeOCSPResponder = new HttpServer();
   fakeOCSPResponder.registerPrefixHandler("/", function (request, response) {
     response.setStatusLine(request.httpVersion, 500, "Internal Server Error");
@@ -197,9 +200,9 @@ function run_test() {
   });
   fakeOCSPResponder.start(8888);
 
-  add_tls_server_setup("OCSPStaplingServer", "ocsp_certs");
+  add_tls_server_setup("OCSPStaplingServer");
 
-  add_tests();
+  add_tests(certDB, otherTestCA);
 
   add_test(function () {
     fakeOCSPResponder.stop(check_ocsp_stapling_telemetry);

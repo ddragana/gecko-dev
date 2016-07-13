@@ -17,16 +17,12 @@
 
 .actionsMenu > .menulist-label-box > .menulist-icon {
   margin-top: 1px;
-  margin-inline-start: 1px;
-  margin-inline-end: 6px;
+  -moz-margin-start: 1px;
+  -moz-margin-end: 6px;
 }
 
 .actionsMenu > .menulist-label-box > .menulist-label {
   margin-top: 2px !important;
-}
-
-#fxaProfileImage {
-  -moz-user-focus: normal;
 }
 
 menulist.actionsMenu > .menulist-dropmarker {
@@ -36,7 +32,7 @@ menulist.actionsMenu > .menulist-dropmarker {
 
 textbox + button,
 filefield + button {
-  margin-inline-start: -4px;
+  -moz-margin-start: -4px;
 }
 
 /**

@@ -39,7 +39,7 @@ public:
                       nsBoxLayout* aLayoutManager):
     nsBoxFrame(aContext, false, aLayoutManager) {}
 
-  virtual nscoord GetXULFlex() override;
+  virtual nscoord GetFlex(nsBoxLayoutState& aBoxLayoutState) override;
 
 }; // class nsGridRowGroupFrame
 

@@ -9,7 +9,7 @@
  * made with nsIXMLHttpRequest objects.
  *
  * testViaAsyncOpen() checks that internal redirects occur correctly when made
- * with nsIHTTPChannel.asyncOpen2().
+ * with nsIHTTPChannel.asyncOpen().
  *
  * Both of the above functions tests four requests:
  *
@@ -24,7 +24,7 @@
  */
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 // the topic we observe to use the API.  http-on-opening-request might also
 // work for some purposes.
@@ -84,7 +84,16 @@ var testHeaderVal = "Success";
 var testHeaderVal2 = "Success on server 2";
 
 function make_channel(url, callback, ctx) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true});
+  var ios = Cc["@mozilla.org/network/io-service;1"].
+            getService(Ci.nsIIOService);
+  return ios.newChannel2(url,
+                         "",
+                         null,
+                         null,      // aLoadingNode
+                         Services.scriptSecurityManager.getSystemPrincipal(),
+                         null,      // aTriggeringPrincipal
+                         Ci.nsILoadInfo.SEC_NORMAL,
+                         Ci.nsIContentPolicy.TYPE_OTHER);
 }
 
 function baitHandler(metadata, response)
@@ -166,7 +175,7 @@ Redirector.prototype = {
 
 function makeAsyncTest(uri, headerValue, nextTask)
 {
-  // Make a test to check a redirect that is created with channel.asyncOpen2()
+  // Make a test to check a redirect that is created with channel.asyncOpen()
 
   // Produce a callback function which checks for the presence of headerValue,
   // and then continues to the next async test task
@@ -181,11 +190,11 @@ function makeAsyncTest(uri, headerValue, nextTask)
     nextTask();
   };
 
-  // Produce a function to run an asyncOpen2 test using the above verifier
+  // Produce a function to run an asyncOpen test using the above verifier
   var test = function()
   {
     var chan = make_channel(uri);
-    chan.asyncOpen2(new ChannelListener(verifier));
+    chan.asyncOpen(new ChannelListener(verifier), null);
   };
   return test;
 }

@@ -7,18 +7,16 @@
 #include "nsISupports.idl"
 
 %{C++
-#include "DrawResult.h"
 #include "gfxContext.h"
 #include "gfxMatrix.h"
 #include "gfxRect.h"
+#include "GraphicsFilter.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "nsRect.h"
 #include "nsSize.h"
 #include "limits.h"
-
-class nsIDocument;
 
 namespace mozilla {
 namespace layers {
@@ -40,6 +38,50 @@ namespace image {
 class ImageRegion;
 struct Orientation;
 
+/**
+ * An enumeration representing the result of a drawing operation.
+ *
+ * Most users of DrawResult will only be interested in whether the value is
+ * SUCCESS or not. The other values are primarily useful for debugging and error
+ * handling.
+ *
+ * SUCCESS: We successfully drew a completely decoded frame of the requested
+ * size. Drawing again with FLAG_SYNC_DECODE would not change the result.
+ *
+ * INCOMPLETE: We successfully drew a frame that was partially decoded. (Note
+ * that successfully drawing a partially decoded frame may not actually draw any
+ * pixels!) Drawing again with FLAG_SYNC_DECODE would improve the result.
+ *
+ * WRONG_SIZE: We successfully drew a wrongly-sized frame that had to be scaled.
+ * This is only returned if drawing again with FLAG_SYNC_DECODE would improve
+ * the result; if the size requested was larger than the intrinsic size of the
+ * image, for example, we would generally have to scale whether FLAG_SYNC_DECODE
+ * was specified or not, and therefore we would not return WRONG_SIZE.
+ *
+ * NOT_READY: We failed to draw because no decoded version of the image was
+ * available. Drawing again with FLAG_SYNC_DECODE would improve the result.
+ * (Though FLAG_SYNC_DECODE will not necessarily work until after the image's
+ * load event!)
+ *
+ * TEMPORARY_ERROR: We failed to draw due to a temporary error. Drawing may
+ * succeed at a later time.
+ *
+ * BAD_IMAGE: We failed to draw because the image has an error. This is a
+ * permanent condition.
+ *
+ * BAD_ARGS: We failed to draw because bad arguments were passed to draw().
+ */
+enum class DrawResult : uint8_t
+{
+  SUCCESS,
+  INCOMPLETE,
+  WRONG_SIZE,
+  NOT_READY,
+  TEMPORARY_ERROR,
+  BAD_IMAGE,
+  BAD_ARGS
+};
+
 }
 }
 
@@ -50,7 +92,7 @@ native DrawResult(mozilla::image::DrawResult);
 [ref] native gfxMatrix(gfxMatrix);
 [ref] native gfxRect(gfxRect);
 [ref] native gfxSize(gfxSize);
-native SamplingFilter(mozilla::gfx::SamplingFilter);
+native gfxGraphicsFilter(GraphicsFilter);
 [ref] native nsIntRect(nsIntRect);
 native nsIntRectByVal(nsIntRect);
 [ref] native nsIntSize(nsIntSize);
@@ -65,7 +107,6 @@ native Orientation(mozilla::image::Orientation);
 native TempRefSourceSurface(already_AddRefed<mozilla::gfx::SourceSurface>);
 native TempRefImgIContainer(already_AddRefed<imgIContainer>);
 native nsIntSizeByVal(nsIntSize);
-[ptr] native nsIDocument(nsIDocument);
 
 
 /**
@@ -75,7 +116,7 @@ native nsIntSizeByVal(nsIntSize);
  *
  * Internally, imgIContainer also manages animation of images.
  */
-[scriptable, builtinclass, uuid(a8dbee24-ff86-4755-b40e-51175caf31af)]
+[scriptable, builtinclass, uuid(f3596ad3-4238-4bc4-8093-90bc2d002ab6)]
 interface imgIContainer : nsISupports
 {
   /**
@@ -116,12 +157,12 @@ interface imgIContainer : nsISupports
    * @param aDest The size of the destination rect into which this image will be
    *              drawn, in device pixels.
    * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aSamplingFilter The filter to be used if we're scaling the image.
+   * @param aFilter The filter to be used if we're scaling the image.
    * @param aFlags Flags of the FLAG_* variety
    */
   [notxpcom, nostdcall] nsIntSizeByVal
   optimalImageSizeForDest([const] in gfxSize aDest, in uint32_t aWhichFrame,
-                          in SamplingFilter aSamplingFilter, in uint32_t aFlags);
+                          in gfxGraphicsFilter aFilter, in uint32_t aFlags);
 
   /**
     * Enumerated values for the 'type' attribute (below).
@@ -170,11 +211,7 @@ interface imgIContainer : nsISupports
    *
    * FLAG_HIGH_QUALITY_SCALING: A hint as to whether this image should be
    * scaled using the high quality scaler. Do not set this if not drawing to
-   * a window or not listening to invalidations. Passing this flag will do two
-   * things: 1) request a decode of the image at the size asked for by the
-   * caller if one isn't already started or complete, and 2) allows a decoded
-   * frame of any size (it could be neither the requested size, nor the
-   * intrinsic size) to be substituted.
+   * a window or not listening to invalidations.
    *
    * FLAG_WANT_DATA_SURFACE: Can be passed to GetFrame when the caller wants a
    * DataSourceSurface instead of a hardware accelerated surface. This can be
@@ -185,16 +222,6 @@ interface imgIContainer : nsISupports
    * cached rendering from the surface cache. This is used when we are printing,
    * for example, where we want the vector commands from VectorImages to end up
    * in the PDF output rather than a cached rendering at screen resolution.
-   *
-   * FLAG_FORCE_PRESERVEASPECTRATIO_NONE: Force scaling this image
-   * non-uniformly if necessary. This flag is for vector image only. A raster
-   * image should ignore this flag. While drawing a vector image with this
-   * flag, do not force uniform scaling even if its root <svg> node has a
-   * preserveAspectRatio attribute that would otherwise require uniform
-   * scaling , such as xMinYMin/ xMidYMin. Always scale the graphic content of
-   * the given image non-uniformly if necessary such that the image's
-   * viewBox (if specified or implied by height/width attributes) exactly
-   * matches the viewport rectangle.
    */
   const unsigned long FLAG_NONE                            = 0x0;
   const unsigned long FLAG_SYNC_DECODE                     = 0x1;
@@ -206,8 +233,6 @@ interface imgIContainer : nsISupports
   const unsigned long FLAG_HIGH_QUALITY_SCALING            = 0x40;
   const unsigned long FLAG_WANT_DATA_SURFACE               = 0x80;
   const unsigned long FLAG_BYPASS_SURFACE_CACHE            = 0x100;
-  const unsigned long FLAG_FORCE_PRESERVEASPECTRATIO_NONE  = 0x200;
-  const unsigned long FLAG_FORCE_UNIFORM_SCALING           = 0x400;
 
   /**
    * A constant specifying the default set of decode flags (i.e., the default
@@ -238,21 +263,6 @@ interface imgIContainer : nsISupports
    */
   [noscript, notxpcom] TempRefSourceSurface getFrame(in uint32_t aWhichFrame,
                                                      in uint32_t aFlags);
-
-  /**
-   * Get a surface for the given frame at the specified size. Matching the
-   * requested size is best effort; it's not guaranteed that the surface you get
-   * will be a perfect match. (Some reasons you may get a surface of a different
-   * size include: if you requested upscaling, if downscale-during-decode is
-   * disabled, or if you didn't request the first frame.)
-   *
-   * @param aSize The desired size.
-   * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aFlags Flags of the FLAG_* variety
-   */
-  [noscript, notxpcom] TempRefSourceSurface getFrameAtSize([const] in nsIntSize aSize,
-                                                           in uint32_t aWhichFrame,
-                                                           in uint32_t aFlags);
 
   /**
    * Whether this image is opaque (i.e., needs a background painted behind it).
@@ -379,7 +389,7 @@ interface imgIContainer : nsISupports
    *                is only of use to callers which need to draw with pixel
    *                snapping.
    * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aSamplingFilter The filter to be used if we're scaling the image.
+   * @param aFilter The filter to be used if we're scaling the image.
    * @param aSVGContext If specified, SVG-related rendering context, such as
    *                    overridden attributes on the image document's root <svg>
    *                    node, and the size of the viewport that the full image
@@ -393,22 +403,28 @@ interface imgIContainer : nsISupports
        [const] in nsIntSize aSize,
        [const] in ImageRegion aRegion,
        in uint32_t aWhichFrame,
-       in SamplingFilter aSamplingFilter,
+       in gfxGraphicsFilter aFilter,
        [const] in MaybeSVGImageContext aSVGContext,
        in uint32_t aFlags);
 
   /*
    * Ensures that an image is decoding. Calling this function guarantees that
-   * the image will at some point fire off decode notifications. Images that
-   * can be decoded "quickly" according to some heuristic will be decoded
-   * synchronously.
+   * the image will at some point fire off decode notifications. Calling draw()
+   * or getFrame() triggers the same mechanism internally. Thus, if you want to
+   * be sure that the image will be decoded but don't want to access it until
+   * then, you must call requestDecode().
+   */
+  void requestDecode();
+
+  /*
+   * This is equivalent to requestDecode() but it also synchronously decodes
+   * images that can be decoded "quickly" according to some heuristic.
    */
   [noscript] void startDecoding();
 
   /*
-   * This method triggers decoding for an image, but unlike startDecoding() it
-   * enables the caller to provide more detailed information about the decode
-   * request.
+   * This method is equivalent to requestDecode(), but enables the caller to
+   * provide more detailed information about the decode request.
    *
    * @param aSize The size to which the image should be scaled while decoding,
    *              if possible. If the image cannot be scaled to this size while
@@ -528,10 +544,4 @@ interface imgIContainer : nsISupports
    * Removes any ImageWrappers and returns the unwrapped base image.
    */
   [notxpcom, nostdcall] TempRefImgIContainer unwrap();
-
-  /*
-   * Propagate the use counters (if any) from this container to the passed in
-   * document.
-   */
-  [noscript, notxpcom] void propagateUseCounters(in nsIDocument aDocument);
 };

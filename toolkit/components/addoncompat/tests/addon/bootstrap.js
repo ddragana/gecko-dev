@@ -10,9 +10,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 const baseURL = "http://mochi.test:8888/browser/" +
   "toolkit/components/addoncompat/tests/browser/";
 
-var contentSecManager = Cc["@mozilla.org/contentsecuritymanager;1"]
-                          .getService(Ci.nsIContentSecurityManager);
-
 function forEachWindow(f)
 {
   let wins = Services.ww.getWindowEnumerator("navigator:browser");
@@ -32,20 +29,9 @@ function addLoadListener(target, listener)
   }, true);
 }
 
-var gWin;
-var gBrowser;
-var ok, is, info;
-
-function removeTab(tab, done)
-{
-  // Remove the tab in a different turn of the event loop. This way
-  // the nested event loop in removeTab doesn't conflict with the
-  // event listener shims.
-  gWin.setTimeout(() => {
-    gBrowser.removeTab(tab);
-    done();
-  }, 0);
-}
+let gWin;
+let gBrowser;
+let ok, is, info;
 
 // Make sure that the shims for window.content, browser.contentWindow,
 // and browser.contentDocument are working.
@@ -61,14 +47,14 @@ function testContentWindow()
       ok(browser.contentWindow, "contentWindow is defined");
       ok(browser.contentDocument, "contentWindow is defined");
       is(gWin.content, browser.contentWindow, "content === contentWindow");
-      ok(browser.webNavigation.sessionHistory, "sessionHistory is defined");
 
       ok(browser.contentDocument.getElementById("link"), "link present in document");
 
       // FIXME: Waiting on bug 1073631.
       //is(browser.contentWindow.wrappedJSObject.global, 3, "global available on document");
 
-      removeTab(tab, resolve);
+      gBrowser.removeTab(tab);
+      resolve();
     });
   });
 }
@@ -119,7 +105,8 @@ function testListeners()
           is(event.target.documentURI, url2, "second load is for second page loaded");
           is(loadWithRemoveCount, 1, "load handler is only called once");
 
-          removeTab(tab, resolve);
+          gBrowser.removeTab(tab);
+          resolve();
         }
       }, true);
 
@@ -172,7 +159,8 @@ function testCapturing()
       gBrowser.removeEventListener("mousedown", capturingHandler, true);
       gBrowser.removeEventListener("mousedown", nonCapturingHandler, false);
 
-      removeTab(tab, resolve);
+      gBrowser.removeTab(tab);
+      resolve();
     });
   });
 }
@@ -203,7 +191,8 @@ function testObserver()
 
         is(observerFired, 1, "got observer notification");
 
-        removeTab(tab, resolve);
+        gBrowser.removeTab(tab);
+        resolve();
       }
     }, true);
   });
@@ -240,7 +229,8 @@ function testSandbox()
       is(browser.contentDocument.getElementById("output").innerHTML, "hello2",
          "EP sandbox code ran successfully");
 
-      removeTab(tab, resolve);
+      gBrowser.removeTab(tab);
+      resolve();
     }, true);
   });
 }
@@ -262,8 +252,10 @@ function testAddonContent()
     let tab = gBrowser.addTab(url);
     let browser = tab.linkedBrowser;
     addLoadListener(browser, function handler() {
+      gBrowser.removeTab(tab);
       res.setSubstitution("addonshim1", null);
-      removeTab(tab, resolve);
+
+      resolve();
     });
   });
 }
@@ -303,12 +295,6 @@ function testAboutModuleRegistration()
       Services.tm.currentThread.dispatch(runnable, Ci.nsIEventTarget.DISPATCH_NORMAL);
     },
 
-    asyncOpen2: function(listener) {
-      // throws an error if security checks fail
-      var outListener = contentSecManager.performSecurityCheck(this, listener);
-      return this.asyncOpen(outListener, null);
-    },
-
     open: function() {
       function getWindow(channel) {
         try
@@ -334,12 +320,6 @@ function testAboutModuleRegistration()
       let stream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(Ci.nsIStringInputStream);
       stream.setData(data, data.length);
       return stream;
-    },
-
-    open2: function() {
-      // throws an error if security checks fail
-      contentSecManager.performSecurityCheck(this, null);
-      return this.open();
     },
 
     isPending: function() {
@@ -506,8 +486,9 @@ function testAboutModuleRegistration()
 
     addLoadListener(browser, function() {
       testAboutModulesWork(browser).then(() => {
+        gBrowser.removeTab(newTab);
         unregisterModules();
-        removeTab(newTab, resolve);
+        resolve();
       });
     });
   });
@@ -549,9 +530,10 @@ function testProgressListener()
       ok(sawGlobalLocChange, "Saw global onLocationChange");
       ok(sawTabsLocChange, "Saw tabs onLocationChange");
 
+      gBrowser.removeTab(tab);
       gBrowser.removeProgressListener(globalListener);
       gBrowser.removeTabsProgressListener(tabsListener);
-      removeTab(tab, resolve);
+      resolve();
     });
   });
 }
@@ -575,7 +557,8 @@ function testRootTreeItem()
                     .getInterface(Components.interfaces.nsIDOMWindow);
       is(root, gWin, "got correct chrome window");
 
-      removeTab(tab, resolve);
+      gBrowser.removeTab(tab);
+      resolve();
     });
   });
 }
@@ -600,7 +583,8 @@ function testImportNode()
         is(result, node, "got expected import result");
       }
 
-      removeTab(tab, resolve);
+      gBrowser.removeTab(tab);
+      resolve();
     });
   });
 }

@@ -129,7 +129,7 @@ function run_test() {
 
       // test resetting a pref [since there is no default value, the pref should disappear]
       inspector.prefs.get(testdata.dummy).reset();
-      itemValue = inspector.prefs.getValue(testdata.dummy, "default");
+      var itemValue = inspector.prefs.getValue(testdata.dummy, "default");
       do_check_eq(itemValue, "default");
 
       // test to see if a non-existant property exists
@@ -141,7 +141,6 @@ function run_test() {
   });
 }
 
-var gLastEvent;
 function onGenericEvent(event) {
   gLastEvent = event.type;
 }

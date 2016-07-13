@@ -4,7 +4,11 @@ dbg.onDebuggerStatement = function (frame) {
     try {
         frame.arguments[0].deleteProperty("x");
     } catch (exc) {
-        assertEq(exc instanceof Debugger.DebuggeeWouldRun, true);
+        assertEq(exc instanceof ReferenceError, true);
+        assertEq(exc.message, "diaf");
+        assertEq(exc.fileName, "fail");
+        assertEq(exc.lineNumber, 4);
+        assertEq(exc.columnNumber, 25);
         return;
     }
     throw new Error("deleteProperty should throw");

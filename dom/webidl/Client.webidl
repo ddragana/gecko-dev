@@ -10,9 +10,8 @@
 
 [Exposed=ServiceWorker]
 interface Client {
-  readonly attribute USVString url;
-  readonly attribute FrameType frameType;
   readonly attribute DOMString id;
+  readonly attribute USVString url;
 
   [Throws]
   void postMessage(any message, optional sequence<Transferable> transfer);
@@ -22,12 +21,10 @@ interface Client {
 interface WindowClient : Client {
   readonly attribute VisibilityState visibilityState;
   readonly attribute boolean focused;
+  readonly attribute FrameType frameType;
 
-  [Throws, NewObject]
+  [Throws]
   Promise<WindowClient> focus();
-
-  [Throws, NewObject]
-  Promise<WindowClient> navigate(USVString url);
 };
 
 enum FrameType {

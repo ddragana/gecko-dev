@@ -20,7 +20,7 @@ using namespace mozilla::dom;
  ****************** nsAutoWindowStateHelper *********************
  ****************************************************************/
 
-nsAutoWindowStateHelper::nsAutoWindowStateHelper(nsPIDOMWindowOuter* aWindow)
+nsAutoWindowStateHelper::nsAutoWindowStateHelper(nsPIDOMWindow* aWindow)
   : mWindow(aWindow)
   , mDefaultEnabled(DispatchEventToChrome("DOMWillOpenModalDialog"))
 {
@@ -57,13 +57,15 @@ nsAutoWindowStateHelper::DispatchEventToChrome(const char* aEventName)
   }
 
   ErrorResult rv;
-  RefPtr<Event> event = doc->CreateEvent(NS_LITERAL_STRING("Events"), rv);
+  nsRefPtr<Event> event = doc->CreateEvent(NS_LITERAL_STRING("Events"), rv);
   if (rv.Failed()) {
     return false;
   }
-  event->InitEvent(NS_ConvertASCIItoUTF16(aEventName), true, true);
+  NS_ENSURE_TRUE(NS_SUCCEEDED(event->InitEvent(
+                   NS_ConvertASCIItoUTF16(aEventName), true, true)),
+                 false);
   event->SetTrusted(true);
-  event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
+  event->GetInternalNSEvent()->mFlags.mOnlyChromeDispatch = true;
 
   nsCOMPtr<EventTarget> target = do_QueryInterface(mWindow);
   bool defaultActionEnabled;

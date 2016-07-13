@@ -16,15 +16,13 @@
 #include "nsTableFrame.h"
 #include "celldata.h"
 
-#include "mozilla/RestyleManagerHandle.h"
-#include "mozilla/RestyleManagerHandleInlines.h"
+#include "RestyleManager.h"
 #include <algorithm>
 
 #include "nsIScriptError.h"
 #include "nsContentUtils.h"
 
 using namespace mozilla;
-using namespace mozilla::image;
 
 //
 // <mtable> -- table or matrix - implementation
@@ -65,8 +63,7 @@ ParseStyleValue(nsIAtom* aAttribute, const nsAString& aAttributeValue)
 }
 
 static nsTArray<int8_t>*
-ExtractStyleValues(const nsAString& aString,
-                   nsIAtom* aAttribute,
+ExtractStyleValues(const nsAString& aString, nsIAtom* aAttribute,
                    bool aAllowMultiValues)
 {
   nsTArray<int8_t>* styleArray = nullptr;
@@ -113,10 +110,8 @@ ExtractStyleValues(const nsAString& aString,
   return styleArray;
 }
 
-static nsresult
-ReportParseError(nsIFrame* aFrame,
-                 const char16_t* aAttribute,
-                 const char16_t* aValue)
+static nsresult ReportParseError(nsIFrame* aFrame, const char16_t* aAttribute,
+                                 const char16_t* aValue)
 {
   nsIContent* content = aFrame->GetContent();
 
@@ -135,12 +130,12 @@ ReportParseError(nsIFrame* aFrame,
 // stored in the property table. Row/Cell frames query the property table
 // to see what values apply to them.
 
-NS_DECLARE_FRAME_PROPERTY_DELETABLE(RowAlignProperty, nsTArray<int8_t>)
-NS_DECLARE_FRAME_PROPERTY_DELETABLE(RowLinesProperty, nsTArray<int8_t>)
-NS_DECLARE_FRAME_PROPERTY_DELETABLE(ColumnAlignProperty, nsTArray<int8_t>)
-NS_DECLARE_FRAME_PROPERTY_DELETABLE(ColumnLinesProperty, nsTArray<int8_t>)
+NS_DECLARE_FRAME_PROPERTY(RowAlignProperty, DeleteValue<nsTArray<int8_t>>)
+NS_DECLARE_FRAME_PROPERTY(RowLinesProperty, DeleteValue<nsTArray<int8_t>>)
+NS_DECLARE_FRAME_PROPERTY(ColumnAlignProperty, DeleteValue<nsTArray<int8_t>>)
+NS_DECLARE_FRAME_PROPERTY(ColumnLinesProperty, DeleteValue<nsTArray<int8_t>>)
 
-static const FramePropertyDescriptor<nsTArray<int8_t>>*
+static const FramePropertyDescriptor*
 AttributeToProperty(nsIAtom* aAttribute)
 {
   if (aAttribute == nsGkAtoms::rowalign_)
@@ -155,20 +150,20 @@ AttributeToProperty(nsIAtom* aAttribute)
 
 /* This method looks for a property that applies to a cell, but it looks
  * recursively because some cell properties can come from the cell, a row,
- * a table, etc. This function searches through the hierarchy for a property
+ * a table, etc. This function searches through the heirarchy for a property
  * and returns its value. The function stops searching after checking a <mtable>
  * frame.
  */
 static nsTArray<int8_t>*
 FindCellProperty(const nsIFrame* aCellFrame,
-                 const FramePropertyDescriptor<nsTArray<int8_t>>* aFrameProperty)
+                 const FramePropertyDescriptor* aFrameProperty)
 {
   const nsIFrame* currentFrame = aCellFrame;
   nsTArray<int8_t>* propertyData = nullptr;
 
   while (currentFrame) {
     FrameProperties props = currentFrame->Properties();
-    propertyData = props.Get(aFrameProperty);
+    propertyData = static_cast<nsTArray<int8_t>*>(props.Get(aFrameProperty));
     bool frameIsTable = (currentFrame->GetType() == nsGkAtoms::tableFrame);
 
     if (propertyData || frameIsTable)
@@ -230,8 +225,7 @@ ApplyBorderToStyle(const nsMathMLmtdFrame* aFrame,
 }
 
 static nsMargin
-ComputeBorderOverflow(nsMathMLmtdFrame* aFrame,
-                      const nsStyleBorder& aStyleBorder)
+ComputeBorderOverflow(nsMathMLmtdFrame* aFrame, nsStyleBorder aStyleBorder)
 {
   nsMargin overflow;
   int32_t rowIndex;
@@ -266,33 +260,11 @@ ComputeBorderOverflow(nsMathMLmtdFrame* aFrame,
  * around a nsMathMLmtdFrame based on the rowline and columnline properties
  * set on the cell frame.
  */
-class nsDisplaymtdBorder : public nsDisplayBorder
-{
+class nsDisplaymtdBorder : public nsDisplayBorder {
 public:
   nsDisplaymtdBorder(nsDisplayListBuilder* aBuilder, nsMathMLmtdFrame* aFrame)
     : nsDisplayBorder(aBuilder, aFrame)
   {
-  }
-
-  nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
-  {
-    return new nsDisplayItemGenericImageGeometry(this, aBuilder);
-  }
-
-  void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
-                                 const nsDisplayItemGeometry* aGeometry,
-                                 nsRegion* aInvalidRegion) override
-  {
-    auto geometry =
-      static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
-  
-    if (aBuilder->ShouldSyncDecodeImages() &&
-        geometry->ShouldInvalidateToSyncDecodeImages()) {
-      bool snap;
-      aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
-    }
-  
-    nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
   }
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override
@@ -317,20 +289,12 @@ public:
     nsMargin overflow = ComputeBorderOverflow(frame, styleBorder);
     bounds.Inflate(overflow);
 
-    PaintBorderFlags flags = aBuilder->ShouldSyncDecodeImages()
-                           ? PaintBorderFlags::SYNC_DECODE_IMAGES
-                           : PaintBorderFlags();
-
-    DrawResult result =
-      nsCSSRendering::PaintBorderWithStyleBorder(mFrame->PresContext(), *aCtx,
-                                                 mFrame, mVisibleRect,
-                                                 bounds,
-                                                 styleBorder,
-                                                 mFrame->StyleContext(),
-                                                 flags,
-                                                 mFrame->GetSkipSides());
-
-    nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
+    nsCSSRendering::PaintBorderWithStyleBorder(mFrame->PresContext(), *aCtx,
+                                               mFrame, mVisibleRect,
+                                               bounds,
+                                               styleBorder,
+                                               mFrame->StyleContext(),
+                                               mFrame->GetSkipSides());
   }
 };
 
@@ -342,8 +306,7 @@ public:
 #endif
 
 static void
-ParseFrameAttribute(nsIFrame* aFrame,
-                    nsIAtom* aAttribute,
+ParseFrameAttribute(nsIFrame* aFrame, nsIAtom* aAttribute,
                     bool aAllowMultiValues)
 {
   nsAutoString attrValue;
@@ -512,8 +475,9 @@ ParseSpacingAttribute(nsMathMLmtableFrame* aFrame, nsIAtom* aAttribute)
   nscoord value2;
   // Set defaults
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(aFrame);
-  RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForFrame(aFrame, fontSizeInflation);
+  nsRefPtr<nsFontMetrics> fm;
+  nsLayoutUtils::GetFontMetricsForFrame(aFrame, getter_AddRefs(fm),
+                                        fontSizeInflation);
   if (nsGkAtoms::rowspacing_ == aAttribute) {
     value = kDefaultRowspacingEx * fm->XHeight();
     value2 = 0;
@@ -566,7 +530,7 @@ static void ParseSpacingAttributes(nsMathMLmtableFrame* aTableFrame)
   aTableFrame->SetUseCSSSpacing();
 }
 
-// map all attributes within a table -- requires the indices of rows and cells.
+// map all attribues within a table -- requires the indices of rows and cells.
 // so it can only happen after they are made ready by the table base class.
 static void
 MapAllAttributesIntoCSS(nsMathMLmtableFrame* aTableFrame)
@@ -583,11 +547,12 @@ MapAllAttributesIntoCSS(nsMathMLmtableFrame* aTableFrame)
   ParseSpacingAttributes(aTableFrame);
 
   // mtable is simple and only has one (pseudo) row-group
-  nsIFrame* rgFrame = aTableFrame->PrincipalChildList().FirstChild();
+  nsIFrame* rgFrame = aTableFrame->GetFirstPrincipalChild();
   if (!rgFrame || rgFrame->GetType() != nsGkAtoms::tableRowGroupFrame)
     return;
 
-  for (nsIFrame* rowFrame : rgFrame->PrincipalChildList()) {
+  nsIFrame* rowFrame = rgFrame->GetFirstPrincipalChild();
+  for ( ; rowFrame; rowFrame = rowFrame->GetNextSibling()) {
     DEBUG_VERIFY_THAT_FRAME_IS(rowFrame, TABLE_ROW);
     if (rowFrame->GetType() == nsGkAtoms::tableRowFrame) {
       // Map row rowalign.
@@ -595,7 +560,8 @@ MapAllAttributesIntoCSS(nsMathMLmtableFrame* aTableFrame)
       // Map row columnalign.
       ParseFrameAttribute(rowFrame, nsGkAtoms::columnalign_, true);
 
-      for (nsIFrame* cellFrame : rowFrame->PrincipalChildList()) {
+      nsIFrame* cellFrame = rowFrame->GetFirstPrincipalChild();
+      for ( ; cellFrame; cellFrame = cellFrame->GetNextSibling()) {
         DEBUG_VERIFY_THAT_FRAME_IS(cellFrame, TABLE_CELL);
         if (IS_TABLE_CELL(cellFrame->GetType())) {
           // Map cell rowalign.
@@ -687,28 +653,28 @@ ListMathMLTree(nsIFrame* atLeast)
 #endif
 
 // --------
-// implementation of nsMathMLmtableWrapperFrame
+// implementation of nsMathMLmtableOuterFrame
 
-NS_QUERYFRAME_HEAD(nsMathMLmtableWrapperFrame)
+NS_QUERYFRAME_HEAD(nsMathMLmtableOuterFrame)
   NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsTableWrapperFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsTableOuterFrame)
 
 nsContainerFrame*
 NS_NewMathMLmtableOuterFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsMathMLmtableWrapperFrame(aContext);
+  return new (aPresShell) nsMathMLmtableOuterFrame(aContext);
 }
 
-NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtableWrapperFrame)
+NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtableOuterFrame)
  
-nsMathMLmtableWrapperFrame::~nsMathMLmtableWrapperFrame()
+nsMathMLmtableOuterFrame::~nsMathMLmtableOuterFrame()
 {
 }
 
 nsresult
-nsMathMLmtableWrapperFrame::AttributeChanged(int32_t  aNameSpaceID,
-                                             nsIAtom* aAttribute,
-                                             int32_t  aModType)
+nsMathMLmtableOuterFrame::AttributeChanged(int32_t  aNameSpaceID,
+                                           nsIAtom* aAttribute,
+                                           int32_t  aModType)
 {
   // Attributes specific to <mtable>:
   // frame         : in mathml.css
@@ -729,7 +695,7 @@ nsMathMLmtableWrapperFrame::AttributeChanged(int32_t  aNameSpaceID,
   nsIFrame* tableFrame = mFrames.FirstChild();
   NS_ASSERTION(tableFrame && tableFrame->GetType() == nsGkAtoms::tableFrame,
                "should always have an inner table frame");
-  nsIFrame* rgFrame = tableFrame->PrincipalChildList().FirstChild();
+  nsIFrame* rgFrame = tableFrame->GetFirstPrincipalChild();
   if (!rgFrame || rgFrame->GetType() != nsGkAtoms::tableRowGroupFrame)
     return NS_OK;
 
@@ -785,7 +751,8 @@ nsMathMLmtableWrapperFrame::AttributeChanged(int32_t  aNameSpaceID,
 }
 
 nsIFrame*
-nsMathMLmtableWrapperFrame::GetRowFrameAt(int32_t aRowIndex)
+nsMathMLmtableOuterFrame::GetRowFrameAt(nsPresContext* aPresContext,
+                                        int32_t         aRowIndex)
 {
   int32_t rowCount = GetRowCount();
 
@@ -802,7 +769,7 @@ nsMathMLmtableWrapperFrame::GetRowFrameAt(int32_t aRowIndex)
     nsIFrame* tableFrame = mFrames.FirstChild();
     NS_ASSERTION(tableFrame && tableFrame->GetType() == nsGkAtoms::tableFrame,
                  "should always have an inner table frame");
-    nsIFrame* rgFrame = tableFrame->PrincipalChildList().FirstChild();
+    nsIFrame* rgFrame = tableFrame->GetFirstPrincipalChild();
     if (!rgFrame || rgFrame->GetType() != nsGkAtoms::tableRowGroupFrame)
       return nullptr;
     for (nsIFrame* rowFrame : rgFrame->PrincipalChildList()) {
@@ -820,15 +787,15 @@ nsMathMLmtableWrapperFrame::GetRowFrameAt(int32_t aRowIndex)
 }
 
 void
-nsMathMLmtableWrapperFrame::Reflow(nsPresContext*           aPresContext,
-                                   nsHTMLReflowMetrics&     aDesiredSize,
-                                   const nsHTMLReflowState& aReflowState,
-                                   nsReflowStatus&          aStatus)
+nsMathMLmtableOuterFrame::Reflow(nsPresContext*          aPresContext,
+                                 nsHTMLReflowMetrics&     aDesiredSize,
+                                 const nsHTMLReflowState& aReflowState,
+                                 nsReflowStatus&          aStatus)
 {
   nsAutoString value;
   // we want to return a table that is anchored according to the align attribute
 
-  nsTableWrapperFrame::Reflow(aPresContext, aDesiredSize, aReflowState, aStatus);
+  nsTableOuterFrame::Reflow(aPresContext, aDesiredSize, aReflowState, aStatus);
   NS_ASSERTION(aDesiredSize.Height() >= 0, "illegal height for mtable");
   NS_ASSERTION(aDesiredSize.Width() >= 0, "illegal width for mtable");
 
@@ -849,7 +816,7 @@ nsMathMLmtableWrapperFrame::Reflow(nsPresContext*           aPresContext,
   nscoord blockSize = aDesiredSize.BSize(wm);
   nsIFrame* rowFrame = nullptr;
   if (rowIndex) {
-    rowFrame = GetRowFrameAt(rowIndex);
+    rowFrame = GetRowFrameAt(aPresContext, rowIndex);
     if (rowFrame) {
       // translate the coordinates to be relative to us and in our writing mode
       nsIFrame* frame = rowFrame;
@@ -887,10 +854,12 @@ nsMathMLmtableWrapperFrame::Reflow(nsPresContext*           aPresContext,
     case eAlign_axis:
     default: {
       // XXX should instead use style data from the row of reference here ?
-      RefPtr<nsFontMetrics> fm =
-        nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
+      nsRefPtr<nsFontMetrics> fm;
+      nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
+                                            nsLayoutUtils::
+                                            FontSizeInflationFor(this));
       nscoord axisHeight;
-      GetAxisHeight(aReflowState.rendContext->GetDrawTarget(), fm, axisHeight);
+      GetAxisHeight(*aReflowState.rendContext, fm, axisHeight);
       if (rowFrame) {
         // anchor the table on the axis of the row of reference
         // XXX fallback to baseline because it is a hard problem
@@ -977,7 +946,7 @@ nsMathMLmtableFrame::GetColSpacing(int32_t aColIndex)
 
 nscoord
 nsMathMLmtableFrame::GetColSpacing(int32_t aStartColIndex,
-                                  int32_t aEndColIndex)
+                                     int32_t aEndColIndex)
 {
   if (mUseCSSSpacing) {
     return nsTableFrame::GetColSpacing(aStartColIndex, aEndColIndex);
@@ -1037,7 +1006,7 @@ nsMathMLmtableFrame::GetRowSpacing(int32_t aRowIndex)
 
 nscoord
 nsMathMLmtableFrame::GetRowSpacing(int32_t aStartRowIndex,
-                                   int32_t aEndRowIndex)
+                                     int32_t aEndRowIndex)
 {
   if (mUseCSSSpacing) {
     return nsTableFrame::GetRowSpacing(aStartRowIndex, aEndRowIndex);
@@ -1137,9 +1106,8 @@ nsMathMLmtrFrame::AttributeChanged(int32_t  aNameSpaceID,
 // implementation of nsMathMLmtdFrame
 
 nsContainerFrame*
-NS_NewMathMLmtdFrame(nsIPresShell*   aPresShell,
-                     nsStyleContext* aContext,
-                     nsTableFrame*   aTableFrame)
+NS_NewMathMLmtdFrame(nsIPresShell* aPresShell, nsStyleContext* aContext,
+                     nsTableFrame* aTableFrame)
 {
   return new (aPresShell) nsMathMLmtdFrame(aContext, aTableFrame);
 }
@@ -1196,7 +1164,7 @@ nsMathMLmtdFrame::GetColSpan()
     if (!value.IsEmpty()) {
       nsresult error;
       colspan = value.ToInteger(&error);
-      if (NS_FAILED(error) || colspan <= 0 || colspan > MAX_COLSPAN)
+      if (NS_FAILED(error) || colspan < 0 || colspan > MAX_COLSPAN)
         colspan = 1;
     }
   }
@@ -1305,7 +1273,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtdInnerFrame)
 nsMathMLmtdInnerFrame::nsMathMLmtdInnerFrame(nsStyleContext* aContext)
   : nsBlockFrame(aContext)
 {
-  // Make a copy of the parent nsStyleText for later modification.
+  // Make a copy of the parent nsStyleText for later modificaiton.
   mUniqueStyleText = new (PresContext()) nsStyleText(*StyleText());
 }
 
@@ -1315,7 +1283,7 @@ nsMathMLmtdInnerFrame::~nsMathMLmtdInnerFrame()
 }
 
 void
-nsMathMLmtdInnerFrame::Reflow(nsPresContext*           aPresContext,
+nsMathMLmtdInnerFrame::Reflow(nsPresContext*          aPresContext,
                               nsHTMLReflowMetrics&     aDesiredSize,
                               const nsHTMLReflowState& aReflowState,
                               nsReflowStatus&          aStatus)

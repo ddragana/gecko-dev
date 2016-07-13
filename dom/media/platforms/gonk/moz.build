@@ -33,7 +33,9 @@ if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
 
 FINAL_LIBRARY = 'xul'
 
-LOCAL_INCLUDES += [
-    '%' + '%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
+FAIL_ON_WARNINGS = True
+
+CXXFLAGS += [
+    '-I%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
         'frameworks/native/opengl/include',]
 ]

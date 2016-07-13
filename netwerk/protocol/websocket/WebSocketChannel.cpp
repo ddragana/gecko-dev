@@ -4,15 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "WebSocketFrame.h"
 #include "WebSocketLog.h"
 #include "WebSocketChannel.h"
 
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/net/WebSocketEventService.h"
 
 #include "nsIURI.h"
 #include "nsIChannel.h"
@@ -40,8 +38,6 @@
 #include "nsThreadUtils.h"
 #include "nsINetworkLinkService.h"
 #include "nsIObserverService.h"
-#include "nsITransportProvider.h"
-#include "nsCharSeparatedTokenizer.h"
 
 #include "nsAutoPtr.h"
 #include "nsNetCID.h"
@@ -57,7 +53,6 @@
 #include "mozilla/StaticMutex.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
-#include "nsSocketTransportService2.h"
 
 #include "plbase64.h"
 #include "prmem.h"
@@ -72,6 +67,8 @@
 // rather than slurp up all of nsIWebSocket.idl, which lives outside necko, just
 // dupe one constant we need from it
 #define CLOSE_GOING_AWAY 1001
+
+extern PRThread *gSocketThread;
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -607,8 +604,8 @@ public:
 private:
   ~CallOnMessageAvailable() {}
 
-  RefPtr<WebSocketChannel> mChannel;
-  RefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
+  nsRefPtr<WebSocketChannel> mChannel;
+  nsRefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
   nsCString mData;
   int32_t mLen;
 };
@@ -645,8 +642,8 @@ public:
 private:
   ~CallOnStop() {}
 
-  RefPtr<WebSocketChannel> mChannel;
-  RefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
+  nsRefPtr<WebSocketChannel> mChannel;
+  nsRefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
   nsresult mReason;
 };
 NS_IMPL_ISUPPORTS(CallOnStop, nsIRunnable)
@@ -682,8 +679,8 @@ public:
 private:
   ~CallOnServerClose() {}
 
-  RefPtr<WebSocketChannel> mChannel;
-  RefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
+  nsRefPtr<WebSocketChannel> mChannel;
+  nsRefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
   uint16_t mCode;
   nsCString mReason;
 };
@@ -693,7 +690,7 @@ NS_IMPL_ISUPPORTS(CallOnServerClose, nsIRunnable)
 // CallAcknowledge
 //-----------------------------------------------------------------------------
 
-class CallAcknowledge final : public CancelableRunnable
+class CallAcknowledge final : public nsCancelableRunnable
 {
 public:
   CallAcknowledge(WebSocketChannel* aChannel,
@@ -716,8 +713,8 @@ public:
 private:
   ~CallAcknowledge() {}
 
-  RefPtr<WebSocketChannel> mChannel;
-  RefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
+  nsRefPtr<WebSocketChannel> mChannel;
+  nsRefPtr<BaseWebSocketChannel::ListenerAndContextContainer> mListenerMT;
   uint32_t mSize;
 };
 
@@ -748,7 +745,7 @@ public:
 private:
   ~CallOnTransportAvailable() {}
 
-  RefPtr<WebSocketChannel>     mChannel;
+  nsRefPtr<WebSocketChannel>     mChannel;
   nsCOMPtr<nsISocketTransport>   mTransport;
   nsCOMPtr<nsIAsyncInputStream>  mSocketIn;
   nsCOMPtr<nsIAsyncOutputStream> mSocketOut;
@@ -762,9 +759,7 @@ NS_IMPL_ISUPPORTS(CallOnTransportAvailable, nsIRunnable)
 class PMCECompression
 {
 public:
-  PMCECompression(bool aNoContextTakeover,
-                  int32_t aLocalMaxWindowBits,
-                  int32_t aRemoteMaxWindowBits)
+  explicit PMCECompression(bool aNoContextTakeover)
     : mActive(false)
     , mNoContextTakeover(aNoContextTakeover)
     , mResetDeflater(false)
@@ -776,9 +771,9 @@ public:
     mDeflater.zfree  = mInflater.zfree  = Z_NULL;
     mDeflater.opaque = mInflater.opaque = Z_NULL;
 
-    if (deflateInit2(&mDeflater, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
-                     -aLocalMaxWindowBits, 8, Z_DEFAULT_STRATEGY) == Z_OK) {
-      if (inflateInit2(&mInflater, -aRemoteMaxWindowBits) == Z_OK) {
+    if (deflateInit2(&mDeflater, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15,
+                     8, Z_DEFAULT_STRATEGY) == Z_OK) {
+      if (inflateInit2(&mInflater, -15) == Z_OK) {
         mActive = true;
       } else {
         deflateEnd(&mDeflater);
@@ -966,8 +961,7 @@ public:
     : mMsgType(type), mDeflated(false), mOrigLength(0)
   {
     MOZ_COUNT_CTOR(OutboundMessage);
-    mMsg.pString.mValue = str;
-    mMsg.pString.mOrigValue = nullptr;
+    mMsg.pString = str;
     mLength = str ? str->Length() : 0;
   }
 
@@ -987,9 +981,7 @@ public:
       case kMsgTypeBinaryString:
       case kMsgTypePing:
       case kMsgTypePong:
-        delete mMsg.pString.mValue;
-        if (mMsg.pString.mOrigValue)
-          delete mMsg.pString.mOrigValue;
+        delete mMsg.pString;
         break;
       case kMsgTypeStream:
         // for now this only gets hit if msg deleted w/o being sent
@@ -1010,21 +1002,13 @@ public:
   uint8_t* BeginWriting() {
     MOZ_ASSERT(mMsgType != kMsgTypeStream,
                "Stream should have been converted to string by now");
-    return (uint8_t *)(mMsg.pString.mValue ? mMsg.pString.mValue->BeginWriting() : nullptr);
+    return (uint8_t *)(mMsg.pString ? mMsg.pString->BeginWriting() : nullptr);
   }
 
   uint8_t* BeginReading() {
     MOZ_ASSERT(mMsgType != kMsgTypeStream,
                "Stream should have been converted to string by now");
-    return (uint8_t *)(mMsg.pString.mValue ? mMsg.pString.mValue->BeginReading() : nullptr);
-  }
-
-  uint8_t* BeginOrigReading() {
-    MOZ_ASSERT(mMsgType != kMsgTypeStream,
-               "Stream should have been converted to string by now");
-    if (!mDeflated)
-      return BeginReading();
-    return (uint8_t *)(mMsg.pString.mOrigValue ? mMsg.pString.mOrigValue->BeginReading() : nullptr);
+    return (uint8_t *)(mMsg.pString ? mMsg.pString->BeginReading() : nullptr);
   }
 
   nsresult ConvertStreamToString()
@@ -1045,8 +1029,7 @@ public:
 
     mMsg.pStream->Close();
     mMsg.pStream->Release();
-    mMsg.pString.mValue = temp.forget();
-    mMsg.pString.mOrigValue = nullptr;
+    mMsg.pString = temp.forget();
     mMsgType = kMsgTypeBinaryString;
 
     return NS_OK;
@@ -1074,7 +1057,7 @@ public:
     }
 
     if (!aCompressor->UsingContextTakeover() && temp->Length() > mLength) {
-      // When "<local>_no_context_takeover" was negotiated, do not send deflated
+      // When "client_no_context_takeover" was negotiated, do not send deflated
       // payload if it's larger that the original one. OTOH, it makes sense
       // to send the larger deflated payload when the sliding window is not
       // reset between messages because if we would skip some deflated block
@@ -1089,17 +1072,14 @@ public:
     mOrigLength = mLength;
     mDeflated = true;
     mLength = temp->Length();
-    mMsg.pString.mOrigValue = mMsg.pString.mValue;
-    mMsg.pString.mValue = temp.forget();
+    delete mMsg.pString;
+    mMsg.pString = temp.forget();
     return true;
   }
 
 private:
   union {
-    struct {
-      nsCString *mValue;
-      nsCString *mOrigValue;
-    } pString;
+    nsCString      *pString;
     nsIInputStream *pStream;
   }                           mMsg;
   WsMsgType                   mMsgType;
@@ -1129,7 +1109,7 @@ public:
 private:
   ~OutboundEnqueuer() {}
 
-  RefPtr<WebSocketChannel>  mChannel;
+  nsRefPtr<WebSocketChannel>  mChannel;
   OutboundMessage            *mMessage;
 };
 NS_IMPL_ISUPPORTS(OutboundEnqueuer, nsIRunnable)
@@ -1138,6 +1118,8 @@ NS_IMPL_ISUPPORTS(OutboundEnqueuer, nsIRunnable)
 //-----------------------------------------------------------------------------
 // WebSocketChannel
 //-----------------------------------------------------------------------------
+
+uint32_t WebSocketChannel::sSerialSeed = 0;
 
 WebSocketChannel::WebSocketChannel() :
   mPort(0),
@@ -1165,7 +1147,7 @@ WebSocketChannel::WebSocketChannel() :
   mStopOnClose(NS_OK),
   mServerCloseCode(CLOSE_ABNORMAL),
   mScriptCloseCode(0),
-  mFragmentOpcode(nsIWebSocketFrame::OPCODE_CONTINUATION),
+  mFragmentOpcode(kContinuation),
   mFragmentAccumulator(0),
   mBuffered(0),
   mBufferSize(kIncomingBufferInitialSize),
@@ -1178,7 +1160,7 @@ WebSocketChannel::WebSocketChannel() :
   mCountRecv(0),
   mCountSent(0),
   mAppId(NECKO_NO_APP_ID),
-  mIsInIsolatedMozBrowser(false)
+  mIsInBrowser(false)
 {
   MOZ_ASSERT(NS_IsMainThread(), "not main thread");
 
@@ -1193,7 +1175,7 @@ WebSocketChannel::WebSocketChannel() :
   if (NS_FAILED(rv))
     LOG(("Failed to initiate dashboard service."));
 
-  mService = WebSocketEventService::GetOrCreate();
+  mSerial = sSerialSeed++;
 }
 
 WebSocketChannel::~WebSocketChannel()
@@ -1218,14 +1200,13 @@ WebSocketChannel::~WebSocketChannel()
   while ((mCurrentOut = (OutboundMessage *) mOutgoingMessages.PopFront()))
     delete mCurrentOut;
 
-  NS_ReleaseOnMainThread(mURI.forget());
-  NS_ReleaseOnMainThread(mOriginalURI.forget());
+  NS_ReleaseOnMainThread(mURI);
+  NS_ReleaseOnMainThread(mOriginalURI);
 
   mListenerMT = nullptr;
 
-  NS_ReleaseOnMainThread(mLoadGroup.forget());
-  NS_ReleaseOnMainThread(mLoadInfo.forget());
-  NS_ReleaseOnMainThread(mService.forget());
+  NS_ReleaseOnMainThread(mLoadGroup);
+  NS_ReleaseOnMainThread(mLoadInfo);
 }
 
 NS_IMETHODIMP
@@ -1250,7 +1231,7 @@ WebSocketChannel::Observe(nsISupports *subject,
         // Next we check mDataStarted, which we need to do on mTargetThread.
         if (!IsOnTargetThread()) {
           mTargetThread->Dispatch(
-            NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
+            NS_NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
             NS_DISPATCH_NORMAL);
         } else {
           OnNetworkChanged();
@@ -1274,7 +1255,7 @@ WebSocketChannel::OnNetworkChanged()
     }
 
     return mSocketThread->Dispatch(
-      NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
+      NS_NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
       NS_DISPATCH_NORMAL);
   }
 
@@ -1361,7 +1342,7 @@ WebSocketChannel::BeginOpen(bool aCalledFromAdmissionManager)
     // When called from nsWSAdmissionManager post an event to avoid potential
     // re-entering of nsWSAdmissionManager and its lock.
     NS_DispatchToMainThread(
-      NewRunnableMethod(this, &WebSocketChannel::BeginOpenInternal),
+      NS_NewRunnableMethod(this, &WebSocketChannel::BeginOpenInternal),
                            NS_DISPATCH_NORMAL);
   } else {
     BeginOpenInternal();
@@ -1390,20 +1371,19 @@ WebSocketChannel::BeginOpenInternal()
   }
 
   if (localChannel) {
-    NS_GetAppInfo(localChannel, &mAppId, &mIsInIsolatedMozBrowser);
+    NS_GetAppInfo(localChannel, &mAppId, &mIsInBrowser);
   }
 
 #ifdef MOZ_WIDGET_GONK
   if (mAppId != NECKO_NO_APP_ID) {
-    nsCOMPtr<nsINetworkInfo> activeNetworkInfo;
-    GetActiveNetworkInfo(activeNetworkInfo);
-    mActiveNetworkInfo =
-      new nsMainThreadPtrHolder<nsINetworkInfo>(activeNetworkInfo);
+    nsCOMPtr<nsINetworkInterface> activeNetwork;
+    GetActiveNetworkInterface(activeNetwork);
+    mActiveNetwork =
+      new nsMainThreadPtrHolder<nsINetworkInterface>(activeNetwork);
   }
 #endif
 
-  rv = NS_MaybeOpenChannelUsingAsyncOpen2(localChannel, this);
-
+  rv = localChannel->AsyncOpen(this, mHttpChannel);
   if (NS_FAILED(rv)) {
     LOG(("WebSocketChannel::BeginOpenInternal: cannot async open\n"));
     AbortSession(NS_ERROR_CONNECTION_REFUSED);
@@ -1519,15 +1499,11 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
   uint32_t totalAvail = avail;
 
   while (avail >= 2) {
-    int64_t payloadLength64 = mFramePtr[1] & kPayloadLengthBitsMask;
+    int64_t payloadLength64 = mFramePtr[1] & 0x7F;
     uint8_t finBit  = mFramePtr[0] & kFinalFragBit;
     uint8_t rsvBits = mFramePtr[0] & kRsvBitsMask;
-    uint8_t rsvBit1 = mFramePtr[0] & kRsv1Bit;
-    uint8_t rsvBit2 = mFramePtr[0] & kRsv2Bit;
-    uint8_t rsvBit3 = mFramePtr[0] & kRsv3Bit;
-    uint8_t opcode  = mFramePtr[0] & kOpcodeBitsMask;
     uint8_t maskBit = mFramePtr[1] & kMaskBit;
-    uint32_t mask = 0;
+    uint8_t opcode  = mFramePtr[0] & 0x0F;
 
     uint32_t framingLength = 2;
     if (maskBit)
@@ -1577,31 +1553,14 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
     LOG(("WebSocketChannel::ProcessInput: Frame accumulated - opcode %d\n",
          opcode));
 
-    if (!maskBit && mIsServerSide) {
-      LOG(("WebSocketChannel::ProcessInput: unmasked frame received "
-           "from client\n"));
-      return NS_ERROR_ILLEGAL_VALUE;
-    }
-
     if (maskBit) {
-      if (!mIsServerSide) {
-        // The server should not be allowed to send masked frames to clients.
-        // But we've been allowing it for some time, so this should be
-        // deprecated with care.
-        LOG(("WebSocketChannel:: Client RECEIVING masked frame."));
-      }
+      // This is unexpected - the server does not generally send masked
+      // frames to the client, but it is allowed
+      LOG(("WebSocketChannel:: Client RECEIVING masked frame."));
 
-      mask = NetworkEndian::readUint32(payload - 4);
-    }
-
-    if (mask) {
+      uint32_t mask = NetworkEndian::readUint32(payload - 4);
       ApplyMask(mask, payload, payloadLength);
-    } else if (mIsServerSide) {
-      LOG(("WebSocketChannel::ProcessInput: masked frame with mask 0 received"
-           "from client\n"));
-      return NS_ERROR_ILLEGAL_VALUE;
     }
-
 
     // Control codes are required to have the fin bit set
     if (!finBit && (opcode & kControlFrameMask)) {
@@ -1623,23 +1582,22 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
       }
     }
 
-    if (!finBit || opcode == nsIWebSocketFrame::OPCODE_CONTINUATION) {
+    if (!finBit || opcode == kContinuation) {
       // This is part of a fragment response
 
       // Only the first frame has a non zero op code: Make sure we don't see a
       // first frame while some old fragments are open
-      if ((mFragmentAccumulator != 0) &&
-          (opcode != nsIWebSocketFrame::OPCODE_CONTINUATION)) {
+      if ((mFragmentAccumulator != 0) && (opcode != kContinuation)) {
         LOG(("WebSocketChannel:: nested fragments\n"));
         return NS_ERROR_ILLEGAL_VALUE;
       }
 
       LOG(("WebSocketChannel:: Accumulating Fragment %ld\n", payloadLength));
 
-      if (opcode == nsIWebSocketFrame::OPCODE_CONTINUATION) {
+      if (opcode == kContinuation) {
 
         // Make sure this continuation fragment isn't the first fragment
-        if (mFragmentOpcode == nsIWebSocketFrame::OPCODE_CONTINUATION) {
+        if (mFragmentOpcode == kContinuation) {
           LOG(("WebSocketHeandler:: continuation code in first fragment\n"));
           return NS_ERROR_ILLEGAL_VALUE;
         }
@@ -1664,9 +1622,9 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
         mFragmentAccumulator = 0;
         opcode = mFragmentOpcode;
         // reset to detect if next message illegally starts with continuation
-        mFragmentOpcode = nsIWebSocketFrame::OPCODE_CONTINUATION;
+        mFragmentOpcode = kContinuation;
       } else {
-        opcode = nsIWebSocketFrame::OPCODE_CONTINUATION;
+        opcode = kContinuation;
         mFragmentAccumulator += payloadLength;
       }
     } else if (mFragmentAccumulator != 0 && !(opcode & kControlFrameMask)) {
@@ -1684,7 +1642,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
     } else if (mStopped) {
       LOG(("WebSocketChannel:: ignoring read frame code %d after completion\n",
            opcode));
-    } else if (opcode == nsIWebSocketFrame::OPCODE_TEXT) {
+    } else if (opcode == kText) {
       bool isDeflated = mPMCECompressor && mPMCECompressor->IsMessageDeflated();
       LOG(("WebSocketChannel:: %stext frame received\n",
            isDeflated ? "deflated " : ""));
@@ -1713,14 +1671,6 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
           return NS_ERROR_CANNOT_CONVERT_DATA;
         }
 
-        RefPtr<WebSocketFrame> frame =
-          mService->CreateFrameIfNeeded(finBit, rsvBit1, rsvBit2, rsvBit3,
-                                        opcode, maskBit, mask, utf8Data);
-
-        if (frame) {
-          mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
-        }
-
         mTargetThread->Dispatch(new CallOnMessageAvailable(this, utf8Data, -1),
                                 NS_DISPATCH_NORMAL);
         if (mConnectionLogService && !mPrivateBrowsing) {
@@ -1736,12 +1686,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
         return NS_ERROR_ILLEGAL_VALUE;
       }
 
-      RefPtr<WebSocketFrame> frame =
-        mService->CreateFrameIfNeeded(finBit, rsvBit1, rsvBit2, rsvBit3,
-                                      opcode, maskBit, mask, payload,
-                                      payloadLength);
-
-      if (opcode == nsIWebSocketFrame::OPCODE_CLOSE) {
+      if (opcode == kClose) {
         LOG(("WebSocketChannel:: close received\n"));
         mServerClosed = 1;
 
@@ -1773,14 +1718,6 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
           mCloseTimer->Cancel();
           mCloseTimer = nullptr;
         }
-
-        if (frame) {
-          // We send the frame immediately becuase we want to have it dispatched
-          // before the CallOnServerClose.
-          mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
-          frame = nullptr;
-        }
-
         if (mListenerMT) {
           mTargetThread->Dispatch(new CallOnServerClose(this, mServerCloseCode,
                                                         mServerCloseReason),
@@ -1789,12 +1726,12 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
 
         if (mClientClosed)
           ReleaseSession();
-      } else if (opcode == nsIWebSocketFrame::OPCODE_PING) {
+      } else if (opcode == kPing) {
         LOG(("WebSocketChannel:: ping received\n"));
         GeneratePong(payload, payloadLength);
-      } else if (opcode == nsIWebSocketFrame::OPCODE_PONG) {
-        // opcode OPCODE_PONG: the mere act of receiving the packet is all we
-        // need to do for the pong to trigger the activity timers
+      } else if (opcode == kPong) {
+        // opcode kPong: the mere act of receiving the packet is all we need
+        // to do for the pong to trigger the activity timers
         LOG(("WebSocketChannel:: pong received\n"));
       } else {
         /* unknown control frame opcode */
@@ -1815,11 +1752,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
           mBuffered -= framingLength + payloadLength;
         payloadLength = 0;
       }
-
-      if (frame) {
-        mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
-      }
-    } else if (opcode == nsIWebSocketFrame::OPCODE_BINARY) {
+    } else if (opcode == kBinary) {
       bool isDeflated = mPMCECompressor && mPMCECompressor->IsMessageDeflated();
       LOG(("WebSocketChannel:: %sbinary frame received\n",
            isDeflated ? "deflated " : ""));
@@ -1842,13 +1775,6 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
           }
         }
 
-        RefPtr<WebSocketFrame> frame =
-          mService->CreateFrameIfNeeded(finBit, rsvBit1, rsvBit2, rsvBit3,
-                                        opcode, maskBit, mask, binaryData);
-        if (frame) {
-          mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
-        }
-
         mTargetThread->Dispatch(
           new CallOnMessageAvailable(this, binaryData, binaryData.Length()),
           NS_DISPATCH_NORMAL);
@@ -1858,7 +1784,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
           LOG(("Added new received msg for %s", mHost.get()));
         }
       }
-    } else if (opcode != nsIWebSocketFrame::OPCODE_CONTINUATION) {
+    } else if (opcode != kContinuation) {
       /* unknown opcode */
       LOG(("WebSocketChannel:: unknown op code %d\n", opcode));
       return NS_ERROR_ILLEGAL_VALUE;
@@ -1909,7 +1835,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
   return NS_OK;
 }
 
-/* static */ void
+void
 WebSocketChannel::ApplyMask(uint32_t mask, uint8_t *data, uint64_t len)
 {
   if (!data || len == 0)
@@ -2041,9 +1967,6 @@ WebSocketChannel::PrimeNewOutgoingMessage()
   mCurrentOutSent = 0;
   mHdrOut = mOutHeader;
 
-  uint8_t maskBit = mIsServerSide ? 0 : kMaskBit;
-  uint8_t maskSize = mIsServerSide ? 0 : 4;
-
   uint8_t *payload = nullptr;
 
   if (msgType == kMsgTypeFin) {
@@ -2055,11 +1978,11 @@ WebSocketChannel::PrimeNewOutgoingMessage()
     }
 
     mClientClosed = 1;
-    mOutHeader[0] = kFinalFragBit | nsIWebSocketFrame::OPCODE_CLOSE;
-    mOutHeader[1] = maskBit;
+    mOutHeader[0] = kFinalFragBit | kClose;
+    mOutHeader[1] = kMaskBit;
 
-    // payload is offset 2 plus size of the mask
-    payload = mOutHeader + 2 + maskSize;
+    // payload is offset 6 including 4 for the mask
+    payload = mOutHeader + 6;
 
     // The close reason code sits in the first 2 bytes of payload
     // If the channel user provided a code and reason during Close()
@@ -2068,7 +1991,7 @@ WebSocketChannel::PrimeNewOutgoingMessage()
       if (mScriptCloseCode) {
         NetworkEndian::writeUint16(payload, mScriptCloseCode);
         mOutHeader[1] += 2;
-        mHdrOutToSend = 4 + maskSize;
+        mHdrOutToSend = 8;
         if (!mScriptCloseReason.IsEmpty()) {
           MOZ_ASSERT(mScriptCloseReason.Length() <= 123,
                      "Close Reason Too Long");
@@ -2082,12 +2005,12 @@ WebSocketChannel::PrimeNewOutgoingMessage()
         // No close code/reason, so payload length = 0.  We must still send mask
         // even though it's not used.  Keep payload offset so we write mask
         // below.
-        mHdrOutToSend = 2 + maskSize;
+        mHdrOutToSend = 6;
       }
     } else {
       NetworkEndian::writeUint16(payload, ResultToCloseCode(mStopOnClose));
       mOutHeader[1] += 2;
-      mHdrOutToSend = 4 + maskSize;
+      mHdrOutToSend = 8;
     }
 
     if (mServerClosed) {
@@ -2109,13 +2032,13 @@ WebSocketChannel::PrimeNewOutgoingMessage()
   } else {
     switch (msgType) {
     case kMsgTypePong:
-      mOutHeader[0] = kFinalFragBit | nsIWebSocketFrame::OPCODE_PONG;
+      mOutHeader[0] = kFinalFragBit | kPong;
       break;
     case kMsgTypePing:
-      mOutHeader[0] = kFinalFragBit | nsIWebSocketFrame::OPCODE_PING;
+      mOutHeader[0] = kFinalFragBit | kPing;
       break;
     case kMsgTypeString:
-      mOutHeader[0] = kFinalFragBit | nsIWebSocketFrame::OPCODE_TEXT;
+      mOutHeader[0] = kFinalFragBit | kText;
       break;
     case kMsgTypeStream:
       // HACK ALERT:  read in entire stream into string.
@@ -2130,10 +2053,9 @@ WebSocketChannel::PrimeNewOutgoingMessage()
       msgType = kMsgTypeBinaryString;
 
       // no break: fall down into binary string case
-      MOZ_FALLTHROUGH;
 
     case kMsgTypeBinaryString:
-      mOutHeader[0] = kFinalFragBit | nsIWebSocketFrame::OPCODE_BINARY;
+      mOutHeader[0] = kFinalFragBit | kBinary;
       break;
     case kMsgTypeFin:
       MOZ_ASSERT(false, "unreachable");  // avoid compiler warning
@@ -2154,40 +2076,38 @@ WebSocketChannel::PrimeNewOutgoingMessage()
     }
 
     if (mCurrentOut->Length() < 126) {
-      mOutHeader[1] = mCurrentOut->Length() | maskBit;
-      mHdrOutToSend = 2 + maskSize;
+      mOutHeader[1] = mCurrentOut->Length() | kMaskBit;
+      mHdrOutToSend = 6;
     } else if (mCurrentOut->Length() <= 0xffff) {
-      mOutHeader[1] = 126 | maskBit;
+      mOutHeader[1] = 126 | kMaskBit;
       NetworkEndian::writeUint16(mOutHeader + sizeof(uint16_t),
                                  mCurrentOut->Length());
-      mHdrOutToSend = 4 + maskSize;
+      mHdrOutToSend = 8;
     } else {
-      mOutHeader[1] = 127 | maskBit;
+      mOutHeader[1] = 127 | kMaskBit;
       NetworkEndian::writeUint64(mOutHeader + 2, mCurrentOut->Length());
-      mHdrOutToSend = 10 + maskSize;
+      mHdrOutToSend = 14;
     }
     payload = mOutHeader + mHdrOutToSend;
   }
 
   MOZ_ASSERT(payload, "payload offset not found");
 
-  uint32_t mask = 0;
-  if (!mIsServerSide) {
-    // Perform the sending mask. Never use a zero mask
-    do {
-      uint8_t *buffer;
-      nsresult rv = mRandomGenerator->GenerateRandomBytes(4, &buffer);
-      if (NS_FAILED(rv)) {
-        LOG(("WebSocketChannel::PrimeNewOutgoingMessage(): "
-             "GenerateRandomBytes failure %x\n", rv));
-        StopSession(rv);
-        return;
-      }
-      mask = * reinterpret_cast<uint32_t *>(buffer);
-      free(buffer);
-    } while (!mask);
-    NetworkEndian::writeUint32(payload - sizeof(uint32_t), mask);
-  }
+  // Perform the sending mask. Never use a zero mask
+  uint32_t mask;
+  do {
+    uint8_t *buffer;
+    nsresult rv = mRandomGenerator->GenerateRandomBytes(4, &buffer);
+    if (NS_FAILED(rv)) {
+      LOG(("WebSocketChannel::PrimeNewOutgoingMessage(): "
+           "GenerateRandomBytes failure %x\n", rv));
+      StopSession(rv);
+      return;
+    }
+    mask = * reinterpret_cast<uint32_t *>(buffer);
+    free(buffer);
+  } while (!mask);
+  NetworkEndian::writeUint32(payload - sizeof(uint32_t), mask);
 
   LOG(("WebSocketChannel::PrimeNewOutgoingMessage() using mask %08x\n", mask));
 
@@ -2197,33 +2117,15 @@ WebSocketChannel::PrimeNewOutgoingMessage()
   // handful of bytes and might rotate the mask, so we can just do it locally.
   // For real data frames we ship the bulk of the payload off to ApplyMask()
 
-   RefPtr<WebSocketFrame> frame =
-     mService->CreateFrameIfNeeded(
-                           mOutHeader[0] & WebSocketChannel::kFinalFragBit,
-                           mOutHeader[0] & WebSocketChannel::kRsv1Bit,
-                           mOutHeader[0] & WebSocketChannel::kRsv2Bit,
-                           mOutHeader[0] & WebSocketChannel::kRsv3Bit,
-                           mOutHeader[0] & WebSocketChannel::kOpcodeBitsMask,
-                           mOutHeader[1] & WebSocketChannel::kMaskBit,
-                           mask,
-                           payload, mHdrOutToSend - (payload - mOutHeader),
-                           mCurrentOut->BeginOrigReading(),
-                           mCurrentOut->OrigLength());
-
-  if (frame) {
-    mService->FrameSent(mSerial, mInnerWindowID, frame.forget());
+  while (payload < (mOutHeader + mHdrOutToSend)) {
+    *payload ^= mask >> 24;
+    mask = RotateLeft(mask, 8);
+    payload++;
   }
 
-  if (mask) {
-    while (payload < (mOutHeader + mHdrOutToSend)) {
-      *payload ^= mask >> 24;
-      mask = RotateLeft(mask, 8);
-      payload++;
-    }
+  // Mask the real message payloads
 
-    // Mask the real message payloads
-    ApplyMask(mask, mCurrentOut->BeginWriting(), mCurrentOut->Length());
-  }
+  ApplyMask(mask, mCurrentOut->BeginWriting(), mCurrentOut->Length());
 
   int32_t len = mCurrentOut->Length();
 
@@ -2237,7 +2139,7 @@ WebSocketChannel::PrimeNewOutgoingMessage()
   // Transmitting begins - mHdrOutToSend bytes from mOutHeader and
   // mCurrentOut->Length() bytes from mCurrentOut. The latter may be
   // coaleseced into the former for small messages or as the result of the
-  // compression process.
+  // compression process,
 }
 
 void
@@ -2264,9 +2166,9 @@ WebSocketChannel::EnsureHdrOut(uint32_t size)
 
 namespace {
 
-class RemoveObserverRunnable : public Runnable
+class RemoveObserverRunnable : public nsRunnable
 {
-  RefPtr<WebSocketChannel> mChannel;
+  nsRefPtr<WebSocketChannel> mChannel;
 
 public:
   explicit RemoveObserverRunnable(WebSocketChannel* aChannel)
@@ -2339,10 +2241,10 @@ WebSocketChannel::StopSession(nsresult reason)
 
   if (!mOpenedHttpChannel) {
     // The HTTP channel information will never be used in this case
-    NS_ReleaseOnMainThread(mChannel.forget());
-    NS_ReleaseOnMainThread(mHttpChannel.forget());
-    NS_ReleaseOnMainThread(mLoadGroup.forget());
-    NS_ReleaseOnMainThread(mCallbacks.forget());
+    mChannel = nullptr;
+    mHttpChannel = nullptr;
+    mLoadGroup = nullptr;
+    mCallbacks = nullptr;
   }
 
   if (mCloseTimer) {
@@ -2427,7 +2329,7 @@ WebSocketChannel::StopSession(nsresult reason)
 
     nsWSAdmissionManager::OnStopSession(this, reason);
 
-    RefPtr<CallOnStop> runnable = new CallOnStop(this, reason);
+    nsRefPtr<CallOnStop> runnable = new CallOnStop(this, reason);
     mTargetThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
   }
 }
@@ -2456,8 +2358,8 @@ WebSocketChannel::AbortSession(nsresult reason)
     return;
   mStopped = 1;
 
-  if (mTransport && reason != NS_BASE_STREAM_CLOSED && !mRequestedClose &&
-      !mClientClosed && !mServerClosed && mConnecting == NOT_CONNECTING) {
+  if (mTransport && reason != NS_BASE_STREAM_CLOSED &&
+      !mRequestedClose && !mClientClosed && !mServerClosed) {
     mRequestedClose = 1;
     mStopOnClose = reason;
     mSocketThread->Dispatch(
@@ -2503,128 +2405,6 @@ WebSocketChannel::DecrementSessionCount()
   }
 }
 
-namespace {
-enum ExtensionParseMode { eParseServerSide, eParseClientSide };
-}
-
-static nsresult
-ParseWebSocketExtension(const nsACString& aExtension,
-                        ExtensionParseMode aMode,
-                        bool& aClientNoContextTakeover,
-                        bool& aServerNoContextTakeover,
-                        int32_t& aClientMaxWindowBits,
-                        int32_t& aServerMaxWindowBits)
-{
-  nsCCharSeparatedTokenizer tokens(aExtension, ';');
-
-  if (!tokens.hasMoreTokens() ||
-      !tokens.nextToken().Equals(NS_LITERAL_CSTRING("permessage-deflate"))) {
-    LOG(("WebSocketChannel::ParseWebSocketExtension: "
-         "HTTP Sec-WebSocket-Extensions negotiated unknown value %s\n",
-         PromiseFlatCString(aExtension).get()));
-    return NS_ERROR_ILLEGAL_VALUE;
-  }
-
-  aClientNoContextTakeover = aServerNoContextTakeover = false;
-  aClientMaxWindowBits = aServerMaxWindowBits = -1;
-
-  while (tokens.hasMoreTokens()) {
-    auto token = tokens.nextToken();
-
-    int32_t nameEnd, valueStart;
-    int32_t delimPos = token.FindChar('=');
-    if (delimPos == kNotFound) {
-      nameEnd = token.Length();
-      valueStart = token.Length();
-    } else {
-      nameEnd = delimPos;
-      valueStart = delimPos + 1;
-    }
-
-    auto paramName = Substring(token, 0, nameEnd);
-    auto paramValue = Substring(token, valueStart);
-
-    if (paramName.EqualsLiteral("client_no_context_takeover")) {
-      if (!paramValue.IsEmpty()) {
-        LOG(("WebSocketChannel::ParseWebSocketExtension: parameter "
-             "client_no_context_takeover must not have value, found %s\n",
-             PromiseFlatCString(paramValue).get()));
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-      if (aClientNoContextTakeover) {
-        LOG(("WebSocketChannel::ParseWebSocketExtension: found multiple "
-             "parameters client_no_context_takeover\n"));
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-      aClientNoContextTakeover = true;
-    } else if (paramName.EqualsLiteral("server_no_context_takeover")) {
-      if (!paramValue.IsEmpty()) {
-        LOG(("WebSocketChannel::ParseWebSocketExtension: parameter "
-             "server_no_context_takeover must not have value, found %s\n",
-             PromiseFlatCString(paramValue).get()));
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-      if (aServerNoContextTakeover) {
-        LOG(("WebSocketChannel::ParseWebSocketExtension: found multiple "
-             "parameters server_no_context_takeover\n"));
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-      aServerNoContextTakeover = true;
-    } else if (paramName.EqualsLiteral("client_max_window_bits")) {
-      if (aClientMaxWindowBits != -1) {
-        LOG(("WebSocketChannel::ParseWebSocketExtension: found multiple "
-             "parameters client_max_window_bits\n"));
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-
-      if (aMode == eParseServerSide && paramValue.IsEmpty()) {
-        // Use -2 to indicate that "client_max_window_bits" has been parsed,
-        // but had no value.
-        aClientMaxWindowBits = -2;
-      }
-      else {
-        nsresult errcode;
-        aClientMaxWindowBits =
-          PromiseFlatCString(paramValue).ToInteger(&errcode);
-        if (NS_FAILED(errcode) || aClientMaxWindowBits < 8 ||
-            aClientMaxWindowBits > 15) {
-          LOG(("WebSocketChannel::ParseWebSocketExtension: found invalid "
-               "parameter client_max_window_bits %s\n",
-               PromiseFlatCString(paramValue).get()));
-          return NS_ERROR_ILLEGAL_VALUE;
-        }
-      }
-    } else if (paramName.EqualsLiteral("server_max_window_bits")) {
-      if (aServerMaxWindowBits != -1) {
-        LOG(("WebSocketChannel::ParseWebSocketExtension: found multiple "
-             "parameters server_max_window_bits\n"));
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-
-      nsresult errcode;
-      aServerMaxWindowBits =
-        PromiseFlatCString(paramValue).ToInteger(&errcode);
-      if (NS_FAILED(errcode) || aServerMaxWindowBits < 8 ||
-          aServerMaxWindowBits > 15) {
-        LOG(("WebSocketChannel::ParseWebSocketExtension: found invalid "
-             "parameter server_max_window_bits %s\n",
-             PromiseFlatCString(paramValue).get()));
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-    } else {
-      LOG(("WebSocketChannel::ParseWebSocketExtension: found unknown "
-           "parameter %s\n", PromiseFlatCString(paramName).get()));
-      return NS_ERROR_ILLEGAL_VALUE;
-    }
-  }
-
-  if (aClientMaxWindowBits == -2) {
-    aClientMaxWindowBits = -1;
-  }
-
-  return NS_OK;
-}
-
 nsresult
 WebSocketChannel::HandleExtensions()
 {
@@ -2637,135 +2417,77 @@ WebSocketChannel::HandleExtensions()
 
   rv = mHttpChannel->GetResponseHeader(
     NS_LITERAL_CSTRING("Sec-WebSocket-Extensions"), extensions);
-  extensions.CompressWhitespace();
-  if (extensions.IsEmpty()) {
-    return NS_OK;
-  }
+  if (NS_SUCCEEDED(rv)) {
+    LOG(("WebSocketChannel::HandleExtensions: received "
+         "Sec-WebSocket-Extensions header: %s\n", extensions.get()));
 
-  LOG(("WebSocketChannel::HandleExtensions: received "
-       "Sec-WebSocket-Extensions header: %s\n", extensions.get()));
+    extensions.CompressWhitespace();
 
-  bool clientNoContextTakeover;
-  bool serverNoContextTakeover;
-  int32_t clientMaxWindowBits;
-  int32_t serverMaxWindowBits;
+    if (!extensions.IsEmpty()) {
+      if (StringBeginsWith(extensions,
+                           NS_LITERAL_CSTRING("permessage-deflate"))) {
+        if (!mAllowPMCE) {
+          LOG(("WebSocketChannel::HandleExtensions: "
+               "Recvd permessage-deflate which wasn't offered\n"));
+          AbortSession(NS_ERROR_ILLEGAL_VALUE);
+          return NS_ERROR_ILLEGAL_VALUE;
+        }
 
-  rv = ParseWebSocketExtension(extensions,
-                               eParseClientSide,
-                               clientNoContextTakeover,
-                               serverNoContextTakeover,
-                               clientMaxWindowBits,
-                               serverMaxWindowBits);
-  if (NS_FAILED(rv)) {
-    AbortSession(rv);
-    return rv;
-  }
+        nsAutoCString param;
 
-  if (!mAllowPMCE) {
-    LOG(("WebSocketChannel::HandleExtensions: "
-         "Recvd permessage-deflate which wasn't offered\n"));
-    AbortSession(NS_ERROR_ILLEGAL_VALUE);
-    return NS_ERROR_ILLEGAL_VALUE;
-  }
+        int32_t delimPos = extensions.FindChar(';');
+        if (delimPos != kNotFound) {
+          param = Substring(extensions, delimPos + 1);
+          param.CompressWhitespace(true, false);
+          extensions.Truncate(delimPos);
+          extensions.CompressWhitespace(false, true);
+        }
+ 
+        if (!extensions.EqualsLiteral("permessage-deflate")) {
+          LOG(("WebSocketChannel::HandleExtensions: "
+               "HTTP Sec-WebSocket-Extensions negotiated unknown value %s\n",
+               extensions.get()));
+          AbortSession(NS_ERROR_ILLEGAL_VALUE);
+          return NS_ERROR_ILLEGAL_VALUE;
+        }
 
-  if (clientMaxWindowBits == -1) {
-    clientMaxWindowBits = 15;
-  }
-  if (serverMaxWindowBits == -1) {
-    serverMaxWindowBits = 15;
-  }
+        bool noContextTakeover = false;
+        if (!param.IsEmpty()) {
+          if (param.EqualsLiteral("client_no_context_takeover")) {
+            noContextTakeover = true;
+          } else {
+            LOG(("WebSocketChannel::HandleExtensions: "
+                 "HTTP permessage-deflate extension negotiated unknown "
+                 "parameter %s\n", param.get()));
+            AbortSession(NS_ERROR_ILLEGAL_VALUE);
+            return NS_ERROR_ILLEGAL_VALUE;
+          }
+        }
 
-  mPMCECompressor = new PMCECompression(clientNoContextTakeover,
-                                        clientMaxWindowBits,
-                                        serverMaxWindowBits);
-  if (mPMCECompressor->Active()) {
-    LOG(("WebSocketChannel::HandleExtensions: PMCE negotiated, %susing "
-         "context takeover, clientMaxWindowBits=%d, "
-         "serverMaxWindowBits=%d\n",
-         clientNoContextTakeover ? "NOT " : "", clientMaxWindowBits,
-         serverMaxWindowBits));
+        mPMCECompressor = new PMCECompression(noContextTakeover);
+        if (mPMCECompressor->Active()) {
+          LOG(("WebSocketChannel::HandleExtensions: PMCE negotiated, %susing "
+               "context takeover\n", noContextTakeover ? "NOT " : ""));
+        } else {
+          LOG(("WebSocketChannel::HandleExtensions: Cannot init PMCE "
+               "compression object\n"));
+          mPMCECompressor = nullptr;
+          AbortSession(NS_ERROR_UNEXPECTED);
+          return NS_ERROR_UNEXPECTED;
+        }
+      } else {
+        LOG(("WebSocketChannel::HandleExtensions: "
+             "HTTP Sec-WebSocket-Extensions negotiated unknown value %s\n",
+             extensions.get()));
+        AbortSession(NS_ERROR_ILLEGAL_VALUE);
+        return NS_ERROR_ILLEGAL_VALUE;
+      }
 
-    mNegotiatedExtensions = "permessage-deflate";
-  } else {
-    LOG(("WebSocketChannel::HandleExtensions: Cannot init PMCE "
-         "compression object\n"));
-    mPMCECompressor = nullptr;
-    AbortSession(NS_ERROR_UNEXPECTED);
-    return NS_ERROR_UNEXPECTED;
+      mNegotiatedExtensions = extensions;
+    }
   }
 
   return NS_OK;
-}
-
-void
-ProcessServerWebSocketExtensions(const nsACString& aExtensions,
-                                 nsACString& aNegotiatedExtensions)
-{
-  aNegotiatedExtensions.Truncate();
-
-  nsCOMPtr<nsIPrefBranch> prefService =
-    do_GetService(NS_PREFSERVICE_CONTRACTID);
-  if (prefService) {
-    bool boolpref;
-    nsresult rv = prefService->
-      GetBoolPref("network.websocket.extensions.permessage-deflate", &boolpref);
-    if (NS_SUCCEEDED(rv) && !boolpref) {
-      return;
-    }
-  }
-
-  nsCCharSeparatedTokenizer extList(aExtensions, ',');
-  while (extList.hasMoreTokens()) {
-    bool clientNoContextTakeover;
-    bool serverNoContextTakeover;
-    int32_t clientMaxWindowBits;
-    int32_t serverMaxWindowBits;
-
-    nsresult rv = ParseWebSocketExtension(extList.nextToken(),
-                                          eParseServerSide,
-                                          clientNoContextTakeover,
-                                          serverNoContextTakeover,
-                                          clientMaxWindowBits,
-                                          serverMaxWindowBits);
-    if (NS_FAILED(rv)) {
-      // Ignore extensions that we can't parse
-      continue;
-    }
-
-    aNegotiatedExtensions.AssignLiteral("permessage-deflate");
-    if (clientNoContextTakeover) {
-      aNegotiatedExtensions.AppendLiteral(";client_no_context_takeover");
-    }
-    if (serverNoContextTakeover) {
-      aNegotiatedExtensions.AppendLiteral(";server_no_context_takeover");
-    }
-    if (clientMaxWindowBits != -1) {
-      aNegotiatedExtensions.AppendLiteral(";client_max_window_bits=");
-      aNegotiatedExtensions.AppendInt(clientMaxWindowBits);
-    }
-    if (serverMaxWindowBits != -1) {
-      aNegotiatedExtensions.AppendLiteral(";server_max_window_bits=");
-      aNegotiatedExtensions.AppendInt(serverMaxWindowBits);
-    }
-
-    return;
-  }
-}
-
-nsresult
-CalculateWebSocketHashedSecret(const nsACString& aKey, nsACString& aHash)
-{
-  nsresult rv;
-  nsCString key =
-    aKey + NS_LITERAL_CSTRING("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-  nsCOMPtr<nsICryptoHash> hasher =
-    do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = hasher->Init(nsICryptoHash::SHA1);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = hasher->Update((const uint8_t *)key.BeginWriting(), key.Length());
-  NS_ENSURE_SUCCESS(rv, rv);
-  return hasher->Finish(true, aHash);
 }
 
 nsresult
@@ -2782,8 +2504,7 @@ WebSocketChannel::SetupRequest()
 
   rv = mHttpChannel->SetLoadFlags(nsIRequest::LOAD_BACKGROUND |
                                   nsIRequest::INHIBIT_CACHING |
-                                  nsIRequest::LOAD_BYPASS_CACHE |
-                                  nsIChannel::LOAD_BYPASS_SERVICE_WORKER);
+                                  nsIRequest::LOAD_BYPASS_CACHE);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // we never let websockets be blocked by head CSS/JS loads to avoid
@@ -2833,7 +2554,16 @@ WebSocketChannel::SetupRequest()
 
   // prepare the value we expect to see in
   // the sec-websocket-accept response header
-  rv = CalculateWebSocketHashedSecret(secKeyString, mHashedSecret);
+  secKeyString.AppendLiteral("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+  nsCOMPtr<nsICryptoHash> hasher =
+    do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = hasher->Init(nsICryptoHash::SHA1);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = hasher->Update((const uint8_t *) secKeyString.BeginWriting(),
+                      secKeyString.Length());
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = hasher->Finish(true, mHashedSecret);
   NS_ENSURE_SUCCESS(rv, rv);
   LOG(("WebSocketChannel::SetupRequest: expected server key %s\n",
        mHashedSecret.get()));
@@ -2883,15 +2613,10 @@ WebSocketChannel::ApplyForAdmission()
 
   MOZ_ASSERT(!mCancelable);
 
-  nsresult rv;
-  rv = pps->AsyncResolve(mHttpChannel,
-                         nsIProtocolProxyService::RESOLVE_PREFER_HTTPS_PROXY |
-                         nsIProtocolProxyService::RESOLVE_ALWAYS_TUNNEL,
-                         this, getter_AddRefs(mCancelable));
-  NS_ASSERTION(NS_FAILED(rv) || mCancelable,
-               "nsIProtocolProxyService::AsyncResolve succeeded but didn't "
-               "return a cancelable object!");
-  return rv;
+  return pps->AsyncResolve(mHttpChannel,
+                           nsIProtocolProxyService::RESOLVE_PREFER_HTTPS_PROXY |
+                           nsIProtocolProxyService::RESOLVE_ALWAYS_TUNNEL,
+                           this, getter_AddRefs(mCancelable));
 }
 
 // Called after both OnStartRequest and OnTransportAvailable have
@@ -2904,7 +2629,7 @@ WebSocketChannel::StartWebsocketData()
 
   if (!IsOnTargetThread()) {
     return mTargetThread->Dispatch(
-      NewRunnableMethod(this, &WebSocketChannel::StartWebsocketData),
+      NS_NewRunnableMethod(this, &WebSocketChannel::StartWebsocketData),
       NS_DISPATCH_NORMAL);
   }
 
@@ -2912,33 +2637,27 @@ WebSocketChannel::StartWebsocketData()
   MOZ_ASSERT(!mDataStarted, "StartWebsocketData twice");
   mDataStarted = 1;
 
-  rv = mSocketIn->AsyncWait(this, 0, 0, mSocketThread);
-  if (NS_FAILED(rv)) {
-    LOG(("WebSocketChannel::StartWebsocketData mSocketIn->AsyncWait() failed "
-         "with error 0x%08x", rv));
-    return mSocketThread->Dispatch(
-      NewRunnableMethod<nsresult>(this,
-                                  &WebSocketChannel::AbortSession,
-                                  rv),
-      NS_DISPATCH_NORMAL);
-  }
-
-  if (mPingInterval) {
-    rv = mSocketThread->Dispatch(
-      NewRunnableMethod(this, &WebSocketChannel::StartPinging),
-      NS_DISPATCH_NORMAL);
-    if (NS_FAILED(rv)) {
-      LOG(("WebSocketChannel::StartWebsocketData Could not start pinging, "
-           "rv=0x%08x", rv));
-      return rv;
-    }
-  }
-
-  LOG(("WebSocketChannel::StartWebsocketData Notifying Listener %p",
+  LOG(("WebSocketChannel::StartWebsocketData Notifying Listener %p\n",
        mListenerMT ? mListenerMT->mListener.get() : nullptr));
 
   if (mListenerMT) {
     mListenerMT->mListener->OnStart(mListenerMT->mContext);
+  }
+
+  rv = mSocketIn->AsyncWait(this, 0, 0, mSocketThread);
+  if (NS_FAILED(rv)) {
+    LOG(("WebSocketChannel::StartWebsocketData mSocketIn->AsyncWait() failed "
+         "with error %0x%08x\n", rv));
+    return rv;
+  }
+
+  if (mPingInterval) {
+    rv = mSocketThread->Dispatch(
+      NS_NewRunnableMethod(this, &WebSocketChannel::StartPinging),
+      NS_DISPATCH_NORMAL);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
   }
 
   return NS_OK;
@@ -3045,7 +2764,7 @@ WebSocketChannel::OnProxyAvailable(nsICancelable *aRequest, nsIChannel *aChannel
     return NS_OK;
   }
 
-  MOZ_ASSERT(!mCancelable || (aRequest == mCancelable));
+  MOZ_ASSERT(aRequest == mCancelable);
   mCancelable = nullptr;
 
   nsAutoCString type;
@@ -3112,8 +2831,29 @@ WebSocketChannel::AsyncOnChannelRedirect(
     // Even if redirects configured off, still allow them for HTTP Strict
     // Transport Security (from ws://FOO to https://FOO (mapped to wss://FOO)
 
-    if (!(flags & (nsIChannelEventSink::REDIRECT_INTERNAL |
-                   nsIChannelEventSink::REDIRECT_STS_UPGRADE))) {
+    nsCOMPtr<nsIURI> clonedNewURI;
+    rv = newuri->Clone(getter_AddRefs(clonedNewURI));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = clonedNewURI->SetScheme(NS_LITERAL_CSTRING("ws"));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIURI> currentURI;
+    rv = GetURI(getter_AddRefs(currentURI));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    // currentURI is expected to be ws or wss
+    bool currentIsHttps = false;
+    rv = currentURI->SchemeIs("wss", &currentIsHttps);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    bool uriEqual = false;
+    rv = clonedNewURI->Equals(currentURI, &uriEqual);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    // It's only a HSTS redirect if we started with non-secure, are going to
+    // secure, and the new URI is otherwise the same as the old one.
+    if (!(!currentIsHttps && newuriIsHttps && uriEqual)) {
       nsAutoCString newSpec;
       rv = newuri->GetSpec(newSpec);
       NS_ENSURE_SUCCESS(rv, rv);
@@ -3236,14 +2976,16 @@ WebSocketChannel::Notify(nsITimer *timer)
     }
 
     if (!mPingOutstanding) {
-      // Ping interval must be non-null or PING was forced by OnNetworkChanged()
-      MOZ_ASSERT(mPingInterval || mPingForced);
-      LOG(("nsWebSocketChannel:: Generating Ping\n"));
-      mPingOutstanding = 1;
-      mPingForced = 0;
-      mPingTimer->InitWithCallback(this, mPingResponseTimeout,
-                                   nsITimer::TYPE_ONE_SHOT);
-      GeneratePing();
+      // Allow for the case where a PING was force-sent even though ping
+      // interval isn't enabled. Only issue a new PING if it truly is enabled.
+      if (mPingInterval || mPingForced) {
+        LOG(("nsWebSocketChannel:: Generating Ping\n"));
+        mPingOutstanding = 1;
+        mPingForced = 0;
+        GeneratePing();
+        mPingTimer->InitWithCallback(this, mPingResponseTimeout,
+                                     nsITimer::TYPE_ONE_SHOT);
+      }
     } else {
       LOG(("nsWebSocketChannel:: Timed out Ping\n"));
       mPingTimer = nullptr;
@@ -3278,19 +3020,14 @@ WebSocketChannel::GetSecurityInfo(nsISupports **aSecurityInfo)
 NS_IMETHODIMP
 WebSocketChannel::AsyncOpen(nsIURI *aURI,
                             const nsACString &aOrigin,
-                            uint64_t aInnerWindowID,
                             nsIWebSocketListener *aListener,
                             nsISupports *aContext)
 {
   LOG(("WebSocketChannel::AsyncOpen() %p\n", this));
 
-  if (!NS_IsMainThread()) {
-    MOZ_ASSERT(false, "not main thread");
-    LOG(("WebSocketChannel::AsyncOpen() called off the main thread"));
-    return NS_ERROR_UNEXPECTED;
-  }
+  MOZ_ASSERT(NS_IsMainThread(), "not main thread");
 
-  if ((!aURI && !mIsServerSide) || !aListener) {
+  if (!aURI || !aListener) {
     LOG(("WebSocketChannel::AsyncOpen() Uri or Listener null"));
     return NS_ERROR_UNEXPECTED;
   }
@@ -3308,6 +3045,13 @@ WebSocketChannel::AsyncOpen(nsIURI *aURI,
   mSocketThread = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
   if (NS_FAILED(rv)) {
     NS_WARNING("unable to continue without socket transport service");
+    return rv;
+  }
+
+  mRandomGenerator =
+    do_GetService("@mozilla.org/security/random-generator;1", &rv);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("unable to continue without random number generator");
     return rv;
   }
 
@@ -3374,29 +3118,10 @@ WebSocketChannel::AsyncOpen(nsIURI *aURI,
     return NS_ERROR_SOCKET_CREATE_FAILED;
   }
 
-  mInnerWindowID = aInnerWindowID;
   mOriginalURI = aURI;
   mURI = mOriginalURI;
-  mOrigin = aOrigin;
-
-  if (mIsServerSide) {
-    //IncrementSessionCount();
-    mWasOpened = 1;
-    mListenerMT = new ListenerAndContextContainer(aListener, aContext);
-    mServerTransportProvider->SetListener(this);
-    mServerTransportProvider = nullptr;
-
-    return NS_OK;
-  }
-
   mURI->GetHostPort(mHost);
-
-  mRandomGenerator =
-    do_GetService("@mozilla.org/security/random-generator;1", &rv);
-  if (NS_FAILED(rv)) {
-    NS_WARNING("unable to continue without random number generator");
-    return rv;
-  }
+  mOrigin = aOrigin;
 
   nsCOMPtr<nsIURI> localURI;
   nsCOMPtr<nsIChannel> localChannel;
@@ -3421,8 +3146,6 @@ WebSocketChannel::AsyncOpen(nsIURI *aURI,
     return rv;
   }
 
-  // Ideally we'd call newChannelFromURIWithLoadInfo here, but that doesn't
-  // allow setting proxy uri/flags
   rv = io2->NewChannelFromURIWithProxyFlags2(
               localURI,
               mURI,
@@ -3433,7 +3156,7 @@ WebSocketChannel::AsyncOpen(nsIURI *aURI,
               mLoadInfo->LoadingPrincipal(),
               mLoadInfo->TriggeringPrincipal(),
               mLoadInfo->GetSecurityFlags(),
-              mLoadInfo->InternalContentPolicyType(),
+              mLoadInfo->GetContentPolicyType(),
               getter_AddRefs(localChannel));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -3445,26 +3168,6 @@ WebSocketChannel::AsyncOpen(nsIURI *aURI,
   // Pass most GetInterface() requests through to our instantiator, but handle
   // nsIChannelEventSink in this object in order to deal with redirects
   localChannel->SetNotificationCallbacks(this);
-
-  class MOZ_STACK_CLASS CleanUpOnFailure
-  {
-  public:
-    explicit CleanUpOnFailure(WebSocketChannel* aWebSocketChannel)
-      : mWebSocketChannel(aWebSocketChannel)
-    {}
-
-    ~CleanUpOnFailure()
-    {
-      if (!mWebSocketChannel->mWasOpened) {
-        mWebSocketChannel->mChannel = nullptr;
-        mWebSocketChannel->mHttpChannel = nullptr;
-      }
-    }
-
-    WebSocketChannel *mWebSocketChannel;
-  };
-
-  CleanUpOnFailure cuof(this);
 
   mChannel = do_QueryInterface(localChannel, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -3530,7 +3233,7 @@ WebSocketChannel::Close(uint16_t code, const nsACString & reason)
   mScriptCloseReason = reason;
   mScriptCloseCode = code;
 
-  if (!mTransport || mConnecting != NOT_CONNECTING) {
+  if (!mTransport) {
     nsresult rv;
     if (code == CLOSE_GOING_AWAY) {
       // Not an error: for example, tab has closed or navigated away
@@ -3577,11 +3280,6 @@ WebSocketChannel::SendMsgCommon(const nsACString *aMsg, bool aIsBinary,
                                 uint32_t aLength, nsIInputStream *aStream)
 {
   MOZ_ASSERT(IsOnTargetThread(), "not target thread");
-
-  if (!mDataStarted) {
-    LOG(("WebSocketChannel:: Error: data not started yet\n"));
-    return NS_ERROR_UNEXPECTED;
-  }
 
   if (mRequestedClose) {
     LOG(("WebSocketChannel:: Error: send when closed\n"));
@@ -3659,51 +3357,6 @@ WebSocketChannel::OnTransportAvailable(nsISocketTransport *aTransport,
     return StartWebsocketData();
   }
 
-  if (mIsServerSide) {
-    if (!mNegotiatedExtensions.IsEmpty()) {
-      bool clientNoContextTakeover;
-      bool serverNoContextTakeover;
-      int32_t clientMaxWindowBits;
-      int32_t serverMaxWindowBits;
-
-      rv = ParseWebSocketExtension(mNegotiatedExtensions,
-                                   eParseServerSide,
-                                   clientNoContextTakeover,
-                                   serverNoContextTakeover,
-                                   clientMaxWindowBits,
-                                   serverMaxWindowBits);
-      MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv), "illegal value provided by server");
-
-      if (clientMaxWindowBits == -1) {
-        clientMaxWindowBits = 15;
-      }
-      if (serverMaxWindowBits == -1) {
-        serverMaxWindowBits = 15;
-      }
-
-      mPMCECompressor = new PMCECompression(serverNoContextTakeover,
-                                            serverMaxWindowBits,
-                                            clientMaxWindowBits);
-      if (mPMCECompressor->Active()) {
-        LOG(("WebSocketChannel::OnTransportAvailable: PMCE negotiated, %susing "
-             "context takeover, serverMaxWindowBits=%d, "
-             "clientMaxWindowBits=%d\n",
-             serverNoContextTakeover ? "NOT " : "", serverMaxWindowBits,
-             clientMaxWindowBits));
-
-        mNegotiatedExtensions = "permessage-deflate";
-      } else {
-        LOG(("WebSocketChannel::OnTransportAvailable: Cannot init PMCE "
-             "compression object\n"));
-        mPMCECompressor = nullptr;
-        AbortSession(NS_ERROR_UNEXPECTED);
-        return NS_ERROR_UNEXPECTED;
-      }
-    }
-
-    return StartWebsocketData();
-  }
-
   return NS_OK;
 }
 
@@ -3714,7 +3367,7 @@ WebSocketChannel::OnStartRequest(nsIRequest *aRequest,
                                  nsISupports *aContext)
 {
   LOG(("WebSocketChannel::OnStartRequest(): %p [%p %p] recvdhttpupgrade=%d\n",
-       this, aRequest, mHttpChannel.get(), mRecvdHttpUpgradeTransport));
+       this, aRequest, aContext, mRecvdHttpUpgradeTransport));
   MOZ_ASSERT(NS_IsMainThread(), "not main thread");
   MOZ_ASSERT(!mGotUpgradeOK, "OTA duplicated");
 
@@ -3875,7 +3528,7 @@ WebSocketChannel::OnStopRequest(nsIRequest *aRequest,
                                 nsresult aStatusCode)
 {
   LOG(("WebSocketChannel::OnStopRequest() %p [%p %p %x]\n",
-       this, aRequest, mHttpChannel.get(), aStatusCode));
+       this, aRequest, aContext, aStatusCode));
   MOZ_ASSERT(NS_IsMainThread(), "not main thread");
 
   ReportConnectionTelemetry();
@@ -4038,7 +3691,7 @@ WebSocketChannel::OnDataAvailable(nsIRequest *aRequest,
                                     uint32_t aCount)
 {
   LOG(("WebSocketChannel::OnDataAvailable() %p [%p %p %p %llu %u]\n",
-         this, aRequest, mHttpChannel.get(), aInputStream, aOffset, aCount));
+         this, aRequest, aContext, aInputStream, aOffset, aCount));
 
   // This is the HTTP OnDataAvailable Method, which means this is http data in
   // response to the upgrade request and there should be no http response body
@@ -4056,7 +3709,7 @@ WebSocketChannel::SaveNetworkStats(bool enforce)
 {
 #ifdef MOZ_WIDGET_GONK
   // Check if the active network and app id are valid.
-  if(!mActiveNetworkInfo || mAppId == NECKO_NO_APP_ID) {
+  if(!mActiveNetwork || mAppId == NECKO_NO_APP_ID) {
     return NS_OK;
   }
 
@@ -4080,9 +3733,9 @@ WebSocketChannel::SaveNetworkStats(bool enforce)
   }
 
   // Create the event to save the network statistics.
-  // the event is then dispatched to the main thread.
-  RefPtr<Runnable> event =
-    new SaveNetworkStatsEvent(mAppId, mIsInIsolatedMozBrowser, mActiveNetworkInfo,
+  // the event is then dispathed to the main thread.
+  nsRefPtr<nsRunnable> event =
+    new SaveNetworkStatsEvent(mAppId, mIsInBrowser, mActiveNetwork,
                               countRecv, countSent, false);
   NS_DispatchToMainThread(event);
 

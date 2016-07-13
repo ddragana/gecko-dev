@@ -4,14 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-dictionary TouchEventInit : EventModifierInit {
-  sequence<Touch> touches = [];
-  sequence<Touch> targetTouches = [];
-  sequence<Touch> changedTouches = [];
-};
-
-[Constructor(DOMString type, optional TouchEventInit eventInitDict),
- Func="mozilla::dom::TouchEvent::PrefEnabled"]
+[Func="mozilla::dom::TouchEvent::PrefEnabled"]
 interface TouchEvent : UIEvent {
   readonly attribute TouchList touches;
   readonly attribute TouchList targetTouches;
@@ -22,6 +15,7 @@ interface TouchEvent : UIEvent {
   readonly attribute boolean ctrlKey;
   readonly attribute boolean shiftKey;
 
+  [Throws]
   void initTouchEvent(DOMString type,
                       boolean canBubble,
                       boolean cancelable,

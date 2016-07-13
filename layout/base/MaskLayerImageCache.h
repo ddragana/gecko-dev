@@ -7,7 +7,6 @@
 #define MASKLAYERIMAGECACHE_H_
 
 #include "DisplayItemClip.h"
-#include "nsAutoPtr.h"
 #include "nsPresContext.h"
 #include "mozilla/gfx/Matrix.h"
 
@@ -15,7 +14,6 @@ namespace mozilla {
 
 namespace layers {
 class ImageContainer;
-class ShadowLayerForwarder;
 } // namespace layers
 
 /**
@@ -34,7 +32,6 @@ class ShadowLayerForwarder;
 class MaskLayerImageCache
 {
   typedef mozilla::layers::ImageContainer ImageContainer;
-  typedef mozilla::layers::ShadowLayerForwarder ShadowLayerForwarder;
 public:
   MaskLayerImageCache();
   ~MaskLayerImageCache();
@@ -154,19 +151,16 @@ public:
       for (uint32_t i = 0; i < mRoundedClipRects.Length(); ++i) {
         hash = AddToHash(hash, mRoundedClipRects[i].Hash());
       }
-      hash = AddToHash(hash, mForwarder.get());
 
       return hash;
     }
 
     bool operator==(const MaskLayerImageKey& aOther) const
     {
-      return mForwarder == aOther.mForwarder &&
-             mRoundedClipRects == aOther.mRoundedClipRects;
+      return mRoundedClipRects == aOther.mRoundedClipRects;
     }
 
     nsTArray<PixelRoundedRect> mRoundedClipRects;
-    RefPtr<ShadowLayerForwarder> mForwarder;
   private:
     void IncLayerCount() const { ++mLayerCount; }
     void DecLayerCount() const
@@ -276,7 +270,7 @@ protected:
     }
 
     nsAutoPtr<const MaskLayerImageKey> mKey;
-    RefPtr<ImageContainer> mContainer;
+    nsRefPtr<ImageContainer> mContainer;
   };
 
   nsTHashtable<MaskLayerImageEntry> mMaskImageContainers;

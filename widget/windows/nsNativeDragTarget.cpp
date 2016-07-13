@@ -152,11 +152,10 @@ IsKeyDown(char key)
 }
 
 void
-nsNativeDragTarget::DispatchDragDropEvent(EventMessage aEventMessage,
-                                          const POINTL& aPT)
+nsNativeDragTarget::DispatchDragDropEvent(uint32_t aEventType, POINTL aPT)
 {
   nsEventStatus status;
-  WidgetDragEvent event(true, aEventMessage, mWidget);
+  WidgetDragEvent event(true, aEventType, mWidget);
 
   nsWindow * win = static_cast<nsWindow *>(mWidget);
   win->InitEvent(event);
@@ -167,9 +166,11 @@ nsNativeDragTarget::DispatchDragDropEvent(EventMessage aEventMessage,
 
   if (mHWnd != nullptr) {
     ::ScreenToClient(mHWnd, &cpos);
-    event.mRefPoint = LayoutDeviceIntPoint(cpos.x, cpos.y);
+    event.refPoint.x = cpos.x;
+    event.refPoint.y = cpos.y;
   } else {
-    event.mRefPoint = LayoutDeviceIntPoint(0, 0);
+    event.refPoint.x = 0;
+    event.refPoint.y = 0;
   }
 
   ModifierKeyState modifierKeyState;
@@ -181,7 +182,7 @@ nsNativeDragTarget::DispatchDragDropEvent(EventMessage aEventMessage,
 }
 
 void
-nsNativeDragTarget::ProcessDrag(EventMessage aEventMessage,
+nsNativeDragTarget::ProcessDrag(uint32_t     aEventType,
                                 DWORD        grfKeyState,
                                 POINTL       ptl,
                                 DWORD*       pdwEffect)
@@ -200,7 +201,7 @@ nsNativeDragTarget::ProcessDrag(EventMessage aEventMessage,
   currSession->SetDragAction(geckoAction);
 
   // Dispatch the event into Gecko
-  DispatchDragDropEvent(aEventMessage, ptl);
+  DispatchDragDropEvent(aEventType, ptl);
 
   // If TakeChildProcessDragAction returns something other than
   // DRAGDROP_ACTION_UNINITIALIZED, it means that the last event was sent
@@ -227,7 +228,7 @@ nsNativeDragTarget::ProcessDrag(EventMessage aEventMessage,
     *pdwEffect = DROPEFFECT_NONE;
   }
 
-  if (aEventMessage != eDrop) {
+  if (aEventType != NS_DRAGDROP_DROP) {
     // Get the cached drag effect from the drag service, the data member should
     // have been set by whoever handled the WidgetGUIEvent or nsIDOMEvent on
     // drags.
@@ -293,7 +294,7 @@ nsNativeDragTarget::DragEnter(LPDATAOBJECT pIDataSource,
   winDragService->SetIDataObject(pIDataSource);
 
   // Now process the native drag state and then dispatch the event
-  ProcessDrag(eDragEnter, grfKeyState, ptl, pdwEffect);
+  ProcessDrag(NS_DRAGDROP_ENTER, grfKeyState, ptl, pdwEffect);
 
   return S_OK;
 }
@@ -338,9 +339,9 @@ nsNativeDragTarget::DragOver(DWORD   grfKeyState,
     GetDropTargetHelper()->DragOver(&pt, *pdwEffect);
   }
 
-  mDragService->FireDragEventAtSource(eDrag);
+  mDragService->FireDragEventAtSource(NS_DRAGDROP_DRAG);
   // Now process the native drag state and then dispatch the event
-  ProcessDrag(eDragOver, grfKeyState, ptl, pdwEffect);
+  ProcessDrag(NS_DRAGDROP_OVER, grfKeyState, ptl, pdwEffect);
 
   this->Release();
 
@@ -360,7 +361,7 @@ nsNativeDragTarget::DragLeave()
   }
 
   // dispatch the event into Gecko
-  DispatchDragDropEvent(eDragExit, gDragLastPoint);
+  DispatchDragDropEvent(NS_DRAGDROP_EXIT, gDragLastPoint);
 
   nsCOMPtr<nsIDragSession> currentDragSession;
   mDragService->GetCurrentSession(getter_AddRefs(currentDragSession));
@@ -433,11 +434,11 @@ nsNativeDragTarget::Drop(LPDATAOBJECT pData,
 
   // NOTE: ProcessDrag spins the event loop which may destroy arbitrary objects.
   // We use strong refs to prevent it from destroying these:
-  RefPtr<nsNativeDragTarget> kungFuDeathGrip = this;
+  nsRefPtr<nsNativeDragTarget> kungFuDeathGrip = this;
   nsCOMPtr<nsIDragService> serv = mDragService;
 
   // Now process the native drag state and then dispatch the event
-  ProcessDrag(eDrop, grfKeyState, aPT, pdwEffect);
+  ProcessDrag(NS_DRAGDROP_DROP, grfKeyState, aPT, pdwEffect);
 
   nsCOMPtr<nsIDragSession> currentDragSession;
   serv->GetCurrentSession(getter_AddRefs(currentDragSession));

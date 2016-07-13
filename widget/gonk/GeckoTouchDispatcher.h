@@ -22,7 +22,7 @@
 #include "Units.h"
 #include "mozilla/Mutex.h"
 #include <vector>
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 class nsIWidget;
 
@@ -79,7 +79,6 @@ private:
   // All times below are in nanoseconds
   TimeDuration mVsyncAdjust;     // Time from vsync we create sample times from
   TimeDuration mMaxPredict;      // How far into the future we're allowed to extrapolate
-  TimeDuration mMinDelta;        // Minimal time difference between touches for resampling
 
   // Amount of time between vsync and the last event that is required before we
   // resample
@@ -91,7 +90,7 @@ private:
   // How far ahead can vsync events get ahead of touch events.
   TimeDuration mOldTouchThreshold;
 
-  RefPtr<layers::CompositorVsyncScheduler> mCompositorVsyncScheduler;
+  nsRefPtr<layers::CompositorVsyncScheduler> mCompositorVsyncScheduler;
 };
 
 } // namespace mozilla

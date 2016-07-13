@@ -27,7 +27,7 @@
  *---------------------------------------------------------------*/
 
 void WebRtcIlbcfix_AbsQuant(
-    IlbcEncoder *iLBCenc_inst,
+    iLBC_Enc_Inst_t *iLBCenc_inst,
     /* (i) Encoder instance */
     iLBC_bits *iLBC_encbits, /* (i/o) Encoded bits (outputs idxForMax
                                    and idxVec, uses state_first as

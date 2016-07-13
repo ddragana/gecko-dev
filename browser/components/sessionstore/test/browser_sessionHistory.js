@@ -3,8 +3,6 @@
 
 "use strict";
 
-requestLongerTimeout(2);
-
 /**
  * Ensure that starting a load invalidates shistory.
  */

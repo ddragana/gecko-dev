@@ -10,8 +10,7 @@
  * liability, trademark and document use rules apply.
  */
 
-[Constructor,
- Exposed=(Window,Worker,System)]
+[Constructor]
 interface FileReader : EventTarget {
   // async read methods
   [Throws]

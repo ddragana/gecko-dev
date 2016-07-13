@@ -4,18 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_bluetooth_bluedroid_BluetoothDaemonAvrcpInterface_h
-#define mozilla_dom_bluetooth_bluedroid_BluetoothDaemonAvrcpInterface_h
+#ifndef mozilla_dom_bluetooth_bluetoothdaemonavrcpinterface_h
+#define mozilla_dom_bluetooth_bluetoothdaemonavrcpinterface_h
 
 #include "BluetoothDaemonHelpers.h"
 #include "BluetoothInterface.h"
-#include "mozilla/ipc/DaemonRunnables.h"
+#include "BluetoothInterfaceHelpers.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
-using mozilla::ipc::DaemonSocketPDU;
-using mozilla::ipc::DaemonSocketPDUHeader;
-using mozilla::ipc::DaemonSocketResultHandler;
+class BluetoothSetupResultHandler;
 
 class BluetoothDaemonAvrcpModule
 {
@@ -62,8 +60,16 @@ public:
 #endif
   };
 
-  virtual nsresult Send(DaemonSocketPDU* aPDU,
-                        DaemonSocketResultHandler* aRes) = 0;
+  static const int MAX_NUM_CLIENTS;
+
+  virtual nsresult Send(DaemonSocketPDU* aPDU, void* aUserData) = 0;
+
+  virtual nsresult RegisterModule(uint8_t aId, uint8_t aMode,
+                                  uint32_t aMaxNumClients,
+                                  BluetoothSetupResultHandler* aRes) = 0;
+
+  virtual nsresult UnregisterModule(uint8_t aId,
+                                    BluetoothSetupResultHandler* aRes) = 0;
 
   void SetNotificationHandler(
     BluetoothAvrcpNotificationHandler* aNotificationHandler);
@@ -110,19 +116,21 @@ public:
   nsresult SetVolumeCmd(uint8_t aVolume, BluetoothAvrcpResultHandler* aRes);
 
 protected:
+  nsresult Send(DaemonSocketPDU* aPDU,
+                BluetoothAvrcpResultHandler* aRes);
+
   void HandleSvc(const DaemonSocketPDUHeader& aHeader,
-                 DaemonSocketPDU& aPDU, DaemonSocketResultHandler* aRes);
+                 DaemonSocketPDU& aPDU, void* aUserData);
 
   //
   // Responses
   //
 
-  typedef mozilla::ipc::DaemonResultRunnable0<
-    BluetoothAvrcpResultHandler, void>
+  typedef BluetoothResultRunnable0<BluetoothAvrcpResultHandler, void>
     ResultRunnable;
 
-  typedef mozilla::ipc::DaemonResultRunnable1<
-    BluetoothAvrcpResultHandler, void, BluetoothStatus, BluetoothStatus>
+  typedef BluetoothResultRunnable1<BluetoothAvrcpResultHandler, void,
+                                   BluetoothStatus, BluetoothStatus>
     ErrorRunnable;
 
   void ErrorRsp(const DaemonSocketPDUHeader& aHeader,
@@ -171,7 +179,7 @@ protected:
 
   void HandleRsp(const DaemonSocketPDUHeader& aHeader,
                  DaemonSocketPDU& aPDU,
-                 DaemonSocketResultHandler* aRes);
+                 void* aUserData);
 
   //
   // Notifications
@@ -179,68 +187,64 @@ protected:
 
   class NotificationHandlerWrapper;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable2<
-    NotificationHandlerWrapper, void,
-    BluetoothAddress, unsigned long,
-    const BluetoothAddress&>
+  typedef BluetoothNotificationRunnable2<NotificationHandlerWrapper, void,
+                                         nsString, unsigned long,
+                                         const nsAString&>
     RemoteFeatureNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable0<
-    NotificationHandlerWrapper, void>
+  typedef BluetoothNotificationRunnable0<NotificationHandlerWrapper, void>
     GetPlayStatusNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable0<
-    NotificationHandlerWrapper, void>
+  typedef BluetoothNotificationRunnable0<NotificationHandlerWrapper, void>
     ListPlayerAppAttrNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable1<
-    NotificationHandlerWrapper, void, BluetoothAvrcpPlayerAttribute>
+  typedef BluetoothNotificationRunnable1<NotificationHandlerWrapper, void,
+                                         BluetoothAvrcpPlayerAttribute>
     ListPlayerAppValuesNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable2<
-    NotificationHandlerWrapper, void, uint8_t,
-    UniquePtr<BluetoothAvrcpPlayerAttribute[]>,
+  typedef BluetoothNotificationRunnable2<NotificationHandlerWrapper, void,
+    uint8_t, nsAutoArrayPtr<BluetoothAvrcpPlayerAttribute>,
     uint8_t, const BluetoothAvrcpPlayerAttribute*>
     GetPlayerAppValueNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable2<
-    NotificationHandlerWrapper, void, uint8_t,
-    UniquePtr<BluetoothAvrcpPlayerAttribute[]>,
+  typedef BluetoothNotificationRunnable2<NotificationHandlerWrapper, void,
+    uint8_t, nsAutoArrayPtr<BluetoothAvrcpPlayerAttribute>,
     uint8_t, const BluetoothAvrcpPlayerAttribute*>
     GetPlayerAppAttrsTextNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable3<
-    NotificationHandlerWrapper, void, uint8_t, uint8_t,
-    UniquePtr<uint8_t[]>, uint8_t, uint8_t, const uint8_t*>
+  typedef BluetoothNotificationRunnable3<NotificationHandlerWrapper, void,
+                                         uint8_t, uint8_t,
+                                         nsAutoArrayPtr<uint8_t>, uint8_t,
+                                         uint8_t, const uint8_t*>
     GetPlayerAppValuesTextNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable1<
-    NotificationHandlerWrapper, void, BluetoothAvrcpPlayerSettings,
-    const BluetoothAvrcpPlayerSettings&>
+  typedef BluetoothNotificationRunnable1<NotificationHandlerWrapper, void,
+                                         BluetoothAvrcpPlayerSettings,
+                                         const BluetoothAvrcpPlayerSettings&>
     SetPlayerAppValueNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable2<
-    NotificationHandlerWrapper, void, uint8_t,
-    UniquePtr<BluetoothAvrcpMediaAttribute[]>,
+  typedef BluetoothNotificationRunnable2<NotificationHandlerWrapper, void,
+    uint8_t, nsAutoArrayPtr<BluetoothAvrcpMediaAttribute>,
     uint8_t, const BluetoothAvrcpMediaAttribute*>
     GetElementAttrNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable2<
-    NotificationHandlerWrapper, void, BluetoothAvrcpEvent, uint32_t>
+  typedef BluetoothNotificationRunnable2<NotificationHandlerWrapper, void,
+                                         BluetoothAvrcpEvent, uint32_t>
     RegisterNotificationNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable2<
-    NotificationHandlerWrapper, void, uint8_t, uint8_t>
+  typedef BluetoothNotificationRunnable2<NotificationHandlerWrapper, void,
+                                         uint8_t, uint8_t>
     VolumeChangeNotification;
 
-  typedef mozilla::ipc::DaemonNotificationRunnable2<
-    NotificationHandlerWrapper, void, uint8_t, uint8_t, uint8_t, uint8_t>
+  typedef BluetoothNotificationRunnable2<NotificationHandlerWrapper, void,
+                                         int, int>
     PassthroughCmdNotification;
 
   class GetElementAttrInitOp;
   class GetPlayerAppAttrsTextInitOp;
   class GetPlayerAppValueInitOp;
   class GetPlayerAppValuesTextInitOp;
+  class PassthroughCmdInitOp;
   class RemoteFeatureInitOp;
 
   void RemoteFeatureNtf(const DaemonSocketPDUHeader& aHeader,
@@ -281,7 +285,7 @@ protected:
 
   void HandleNtf(const DaemonSocketPDUHeader& aHeader,
                  DaemonSocketPDU& aPDU,
-                 DaemonSocketResultHandler* aRes);
+                 void* aUserData);
 
   static BluetoothAvrcpNotificationHandler* sNotificationHandler;
 };
@@ -296,8 +300,10 @@ public:
   BluetoothDaemonAvrcpInterface(BluetoothDaemonAvrcpModule* aModule);
   ~BluetoothDaemonAvrcpInterface();
 
-  void SetNotificationHandler(
-    BluetoothAvrcpNotificationHandler* aNotificationHandler) override;
+  void Init(BluetoothAvrcpNotificationHandler* aNotificationHandler,
+            BluetoothAvrcpResultHandler* aRes) override;
+
+  void Cleanup(BluetoothAvrcpResultHandler* aRes) override;
 
   void GetPlayStatusRsp(ControlPlayStatus aPlayStatus,
                         uint32_t aSongLen, uint32_t aSongPos,
@@ -347,4 +353,4 @@ private:
 
 END_BLUETOOTH_NAMESPACE
 
-#endif // mozilla_dom_bluetooth_bluedroid_BluetoothDaemonAvrcpInterface_h
+#endif

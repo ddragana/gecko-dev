@@ -11,6 +11,7 @@
 #include "gfxRect.h"                    // for gfxRect
 #include "gfx2DGlue.h"
 #include "mozilla/mozalloc.h"           // for operator new
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
@@ -38,7 +39,7 @@ protected:
   }
 
 public:
-  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
+  virtual void SetVisibleRegion(const nsIntRegion& aRegion) override
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -58,7 +59,7 @@ public:
 
     // Clip drawing in case we're using (unbounded) operator source.
     aDT->PushClipRect(snapped);
-    FillRectWithMask(aDT, aDeviceOffset, snapped, mColor,
+    FillRectWithMask(aDT, aDeviceOffset, snapped, ToColor(mColor),
                      DrawOptions(GetEffectiveOpacity(), GetEffectiveOperator(this)),
                      aMaskLayer);
     aDT->PopClip();
@@ -75,7 +76,7 @@ already_AddRefed<ColorLayer>
 BasicLayerManager::CreateColorLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  RefPtr<ColorLayer> layer = new BasicColorLayer(this);
+  nsRefPtr<ColorLayer> layer = new BasicColorLayer(this);
   return layer.forget();
 }
 

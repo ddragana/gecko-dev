@@ -20,34 +20,34 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamAudioDestinationNode, AudioNode)
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  uint16_t NumberOfOutputs() const final override
+  virtual uint16_t NumberOfOutputs() const final override
   {
     return 0;
   }
 
-  void DestroyMediaStream() override;
+  virtual void DestroyMediaStream() override;
 
   DOMMediaStream* DOMStream() const
   {
     return mDOMStream;
   }
 
-  const char* NodeType() const override
+  virtual const char* NodeType() const override
   {
     return "MediaStreamAudioDestinationNode";
   }
 
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
 protected:
   virtual ~MediaStreamAudioDestinationNode();
 
 private:
-  RefPtr<DOMMediaStream> mDOMStream;
-  RefPtr<MediaInputPort> mPort;
+  nsRefPtr<DOMMediaStream> mDOMStream;
+  nsRefPtr<MediaInputPort> mPort;
 };
 
 } // namespace dom

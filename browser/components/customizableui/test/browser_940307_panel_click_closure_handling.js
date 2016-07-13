@@ -4,9 +4,9 @@
 
 "use strict";
 
-var button, menuButton;
+let button, menuButton;
 /* Clicking a button should close the panel */
-add_task(function*() {
+add_task(function() {
   button = document.createElement("toolbarbutton");
   button.id = "browser_940307_button";
   button.setAttribute("label", "Button");
@@ -19,7 +19,7 @@ add_task(function*() {
 });
 
 /* Clicking a menu button should close the panel, opening the popup shouldn't.  */
-add_task(function*() {
+add_task(function() {
   menuButton = document.createElement("toolbarbutton");
   menuButton.setAttribute("type", "menu-button");
   menuButton.id = "browser_940307_menubutton";
@@ -70,7 +70,9 @@ add_task(function*() {
   // Focusing a non-empty searchbox will cause us to open the
   // autocomplete panel and search for suggestions, which would
   // trigger network requests. Temporarily disable suggestions.
-  yield SpecialPowers.pushPrefEnv({set: [["browser.search.suggest.enabled", false]]});
+  let suggestEnabled =
+    Services.prefs.getBoolPref("browser.search.suggest.enabled");
+  Services.prefs.setBoolPref("browser.search.suggest.enabled", false);
 
   searchbar.value = "foo";
   searchbar.focus();
@@ -98,9 +100,7 @@ add_task(function*() {
   yield hiddenPanelPromise;
   ok(!isPanelUIOpen(), "Panel should no longer be open");
 
-  // We focused the search bar earlier - ensure we don't keep doing that.
-  gURLBar.select();
-
+  Services.prefs.setBoolPref("browser.search.suggest.enabled", suggestEnabled);
   CustomizableUI.reset();
 });
 

@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -73,8 +71,7 @@ enum ProcessArchitecture {
   PROCESS_ARCH_I386 = 0x1,
   PROCESS_ARCH_X86_64 = 0x2,
   PROCESS_ARCH_PPC = 0x4,
-  PROCESS_ARCH_ARM = 0x8,
-  PROCESS_ARCH_MIPS = 0x10
+  PROCESS_ARCH_ARM = 0x8
 };
 
 inline ProcessArchitecture GetCurrentProcessArchitecture()
@@ -88,8 +85,6 @@ inline ProcessArchitecture GetCurrentProcessArchitecture()
   currentArchitecture = base::PROCESS_ARCH_PPC;
 #elif defined(ARCH_CPU_ARMEL)
   currentArchitecture = base::PROCESS_ARCH_ARM;
-#elif defined(ARCH_CPU_MIPS)
-  currentArchitecture = base::PROCESS_ARCH_MIPS;
 #endif
   return currentArchitecture;
 }
@@ -114,13 +109,10 @@ ProcessHandle GetCurrentProcessHandle();
 bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Converts a PID to a process handle. On Windows the handle is opened
-// with more access rights and must only be used by trusted code. Parameter
-// error can be used to get the error code in opening the process handle.
+// with more access rights and must only be used by trusted code.
 // You have to close returned handle using CloseProcessHandle. Returns true
 // on success.
-bool OpenPrivilegedProcessHandle(ProcessId pid,
-                                 ProcessHandle* handle,
-                                 int64_t* error = nullptr);
+bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Closes the process handle opened by OpenProcessHandle.
 void CloseProcessHandle(ProcessHandle process);

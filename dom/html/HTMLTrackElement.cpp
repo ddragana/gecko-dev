@@ -40,7 +40,7 @@
 #include "nsThreadUtils.h"
 #include "nsVideoFrame.h"
 
-static mozilla::LazyLogModule gTrackElementLog("nsTrackElement");
+static PRLogModuleInfo* gTrackElementLog;
 #define LOG(type, msg) MOZ_LOG(gTrackElementLog, type, msg)
 
 // Replace the usual NS_IMPL_NS_NEW_HTML_ELEMENT(Track) so
@@ -69,14 +69,16 @@ static MOZ_CONSTEXPR nsAttrValue::EnumTable kKindTable[] = {
   { 0 }
 };
 
-// Invalid values are treated as "metadata" in ParseAttribute, but if no value
-// at all is specified, it's treated as "subtitles" in GetKind
-static MOZ_CONSTEXPR const nsAttrValue::EnumTable* kKindTableInvalidValueDefault = &kKindTable[4];
+// The default value for kKindTable is "subtitles"
+static MOZ_CONSTEXPR const char* kKindTableDefaultString = kKindTable->tag;
 
 /** HTMLTrackElement */
 HTMLTrackElement::HTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
+  if (!gTrackElementLog) {
+    gTrackElementLog = PR_NewLogModule("nsTrackElement");
+  }
 }
 
 HTMLTrackElement::~HTMLTrackElement()
@@ -97,7 +99,7 @@ NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 void
 HTMLTrackElement::GetKind(DOMString& aKind) const
 {
-  GetEnumAttr(nsGkAtoms::kind, kKindTable[0].tag, aKind);
+  GetEnumAttr(nsGkAtoms::kind, kKindTableDefaultString, aKind);
 }
 
 void
@@ -151,7 +153,7 @@ HTMLTrackElement::CreateTextTrack()
 
   NS_ENSURE_TRUE_VOID(parentObject);
 
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(parentObject);
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(parentObject);
   mTrack = new TextTrack(window, kind, label, srcLang,
                          TextTrackMode::Disabled,
                          TextTrackReadyState::NotLoaded,
@@ -171,8 +173,7 @@ HTMLTrackElement::ParseAttribute(int32_t aNamespaceID,
 {
   if (aNamespaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::kind) {
     // Case-insensitive lookup, with the first element as the default.
-    return aResult.ParseEnumValue(aValue, kKindTable, false,
-                                  kKindTableInvalidValueDefault);
+    return aResult.ParseEnumValue(aValue, kKindTable, false, kKindTable);
   }
 
   // Otherwise call the generic implementation.
@@ -202,16 +203,41 @@ HTMLTrackElement::LoadResource()
     mChannel = nullptr;
   }
 
+  rv = nsContentUtils::GetSecurityManager()->
+    CheckLoadURIWithPrincipal(NodePrincipal(), uri,
+                              nsIScriptSecurityManager::STANDARD);
+  NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
+
+  int16_t shouldLoad = nsIContentPolicy::ACCEPT;
+  rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_INTERNAL_TRACK,
+                                 uri,
+                                 NodePrincipal(),
+                                 static_cast<Element*>(this),
+                                 NS_LITERAL_CSTRING("text/vtt"), // mime type
+                                 nullptr, // extra
+                                 &shouldLoad,
+                                 nsContentUtils::GetContentPolicy(),
+                                 nsContentUtils::GetSecurityManager());
+  NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
+  if (NS_CP_REJECTED(shouldLoad)) {
+    return;
+  }
+
+  // We may already have a TextTrack at this point if GetTrack() has already
+  // been called. This happens, for instance, if script tries to get the
+  // TextTrack before its mTrackElement has been bound to the DOM tree.
+  if (!mTrack) {
+    CreateTextTrack();
+  }
+
   nsCOMPtr<nsIChannel> channel;
   nsCOMPtr<nsILoadGroup> loadGroup = OwnerDoc()->GetDocumentLoadGroup();
   rv = NS_NewChannel(getter_AddRefs(channel),
                      uri,
                      static_cast<Element*>(this),
-                     nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
+                     nsILoadInfo::SEC_NORMAL,
                      nsIContentPolicy::TYPE_INTERNAL_TRACK,
-                     loadGroup,
-                     nullptr,   // aCallbacks
-                     nsIRequest::LOAD_NORMAL | nsIChannel::LOAD_CLASSIFY_URI);
+                     loadGroup);
 
   NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
 
@@ -221,7 +247,7 @@ HTMLTrackElement::LoadResource()
   channel->SetNotificationCallbacks(mListener);
 
   LOG(LogLevel::Debug, ("opening webvtt channel"));
-  rv = channel->AsyncOpen2(mListener);
+  rv = channel->AsyncOpen(mListener, nullptr);
   NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
 
   mChannel = channel;
@@ -252,18 +278,13 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
   if (!mMediaParent) {
     mMediaParent = static_cast<HTMLMediaElement*>(aParent);
 
+    HTMLMediaElement* media = static_cast<HTMLMediaElement*>(aParent);
     // TODO: separate notification for 'alternate' tracks?
-    mMediaParent->NotifyAddedSource();
+    media->NotifyAddedSource();
     LOG(LogLevel::Debug, ("Track element sent notification to parent."));
 
-    // We may already have a TextTrack at this point if GetTrack() has already
-    // been called. This happens, for instance, if script tries to get the
-    // TextTrack before its mTrackElement has been bound to the DOM tree.
-    if (!mTrack) {
-      CreateTextTrack();
-    }
-    RefPtr<Runnable> r = NewRunnableMethod(this, &HTMLTrackElement::LoadResource);
-    mMediaParent->RunInStableState(r);
+    mMediaParent->RunInStableState(
+      NS_NewRunnableMethod(this, &HTMLTrackElement::LoadResource));
   }
 
   return NS_OK;
@@ -272,13 +293,15 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
 void
 HTMLTrackElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
-  if (mMediaParent && aNullParent) {
+  if (mMediaParent) {
     // mTrack can be null if HTMLTrackElement::LoadResource has never been
     // called.
     if (mTrack) {
       mMediaParent->RemoveTextTrack(mTrack);
     }
-    mMediaParent = nullptr;
+    if (aNullParent) {
+      mMediaParent = nullptr;
+    }
   }
 
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
@@ -314,7 +337,7 @@ void
 HTMLTrackElement::DispatchTrackRunnable(const nsString& aEventName)
 {
   nsCOMPtr<nsIRunnable> runnable =
-    NewRunnableMethod
+    NS_NewRunnableMethodWithArg
       <const nsString>(this,
                        &HTMLTrackElement::DispatchTrustedEvent,
                        aEventName);

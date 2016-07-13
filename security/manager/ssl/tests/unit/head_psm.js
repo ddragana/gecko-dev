@@ -4,19 +4,16 @@
  */
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+const { 'classes': Cc, 'interfaces': Ci, 'utils': Cu, 'results': Cr } = Components;
 
-const { AppConstants } =
-  Cu.import("resource://gre/modules/AppConstants.jsm", {});
-const { ctypes } = Cu.import("resource://gre/modules/ctypes.jsm", {});
-const { FileUtils } = Cu.import("resource://gre/modules/FileUtils.jsm", {});
-const { HttpServer } = Cu.import("resource://testing-common/httpd.js", {});
-const { MockRegistrar } =
-  Cu.import("resource://testing-common/MockRegistrar.jsm", {});
-const { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
-const { Promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
-const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-const { XPCOMUtils } = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {});
+let { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
+let { FileUtils } = Cu.import("resource://gre/modules/FileUtils.jsm", {});
+let { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
+let { Promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
+let { HttpServer } = Cu.import("resource://testing-common/httpd.js", {});
+let { ctypes } = Cu.import("resource://gre/modules/ctypes.jsm");
+
+let gIsWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
 
 const isDebugBuild = Cc["@mozilla.org/xpcom/debug;1"]
                        .getService(Ci.nsIDebug2).isDebugBuild;
@@ -38,49 +35,46 @@ const MOZILLA_PKIX_ERROR_BASE = Ci.nsINSSErrorsService.MOZILLA_PKIX_ERROR_BASE;
 const PRErrorCodeSuccess = 0;
 
 // Sort in numerical order
-const SEC_ERROR_INVALID_TIME                            = SEC_ERROR_BASE + 8;
-const SEC_ERROR_BAD_DER                                 = SEC_ERROR_BASE + 9;
-const SEC_ERROR_BAD_SIGNATURE                           = SEC_ERROR_BASE + 10;
-const SEC_ERROR_EXPIRED_CERTIFICATE                     = SEC_ERROR_BASE + 11;
-const SEC_ERROR_REVOKED_CERTIFICATE                     = SEC_ERROR_BASE + 12;
-const SEC_ERROR_UNKNOWN_ISSUER                          = SEC_ERROR_BASE + 13;
-const SEC_ERROR_UNTRUSTED_ISSUER                        = SEC_ERROR_BASE + 20;
-const SEC_ERROR_UNTRUSTED_CERT                          = SEC_ERROR_BASE + 21;
-const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE              = SEC_ERROR_BASE + 30;
-const SEC_ERROR_CA_CERT_INVALID                         = SEC_ERROR_BASE + 36;
-const SEC_ERROR_UNKNOWN_CRITICAL_EXTENSION              = SEC_ERROR_BASE + 41;
-const SEC_ERROR_INADEQUATE_KEY_USAGE                    = SEC_ERROR_BASE + 90;
-const SEC_ERROR_INADEQUATE_CERT_TYPE                    = SEC_ERROR_BASE + 91;
-const SEC_ERROR_CERT_NOT_IN_NAME_SPACE                  = SEC_ERROR_BASE + 112;
-const SEC_ERROR_CERT_BAD_ACCESS_LOCATION                = SEC_ERROR_BASE + 117;
+const SEC_ERROR_INVALID_TIME                            = SEC_ERROR_BASE +   8;
+const SEC_ERROR_BAD_DER                                 = SEC_ERROR_BASE +   9;
+const SEC_ERROR_EXPIRED_CERTIFICATE                     = SEC_ERROR_BASE +  11;
+const SEC_ERROR_REVOKED_CERTIFICATE                     = SEC_ERROR_BASE +  12; // -8180
+const SEC_ERROR_UNKNOWN_ISSUER                          = SEC_ERROR_BASE +  13;
+const SEC_ERROR_UNTRUSTED_ISSUER                        = SEC_ERROR_BASE +  20; // -8172
+const SEC_ERROR_UNTRUSTED_CERT                          = SEC_ERROR_BASE +  21; // -8171
+const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE              = SEC_ERROR_BASE +  30; // -8162
+const SEC_ERROR_CA_CERT_INVALID                         = SEC_ERROR_BASE +  36;
+const SEC_ERROR_UNKNOWN_CRITICAL_EXTENSION              = SEC_ERROR_BASE +  41;
+const SEC_ERROR_INADEQUATE_KEY_USAGE                    = SEC_ERROR_BASE +  90; // -8102
+const SEC_ERROR_INADEQUATE_CERT_TYPE                    = SEC_ERROR_BASE +  91; // -8101
+const SEC_ERROR_CERT_NOT_IN_NAME_SPACE                  = SEC_ERROR_BASE + 112; // -8080
+const SEC_ERROR_CERT_BAD_ACCESS_LOCATION                = SEC_ERROR_BASE + 117; // -8075
 const SEC_ERROR_OCSP_MALFORMED_REQUEST                  = SEC_ERROR_BASE + 120;
-const SEC_ERROR_OCSP_SERVER_ERROR                       = SEC_ERROR_BASE + 121;
+const SEC_ERROR_OCSP_SERVER_ERROR                       = SEC_ERROR_BASE + 121; // -8071
 const SEC_ERROR_OCSP_TRY_SERVER_LATER                   = SEC_ERROR_BASE + 122;
 const SEC_ERROR_OCSP_REQUEST_NEEDS_SIG                  = SEC_ERROR_BASE + 123;
 const SEC_ERROR_OCSP_UNAUTHORIZED_REQUEST               = SEC_ERROR_BASE + 124;
-const SEC_ERROR_OCSP_UNKNOWN_CERT                       = SEC_ERROR_BASE + 126;
+const SEC_ERROR_OCSP_UNKNOWN_CERT                       = SEC_ERROR_BASE + 126; // -8066
 const SEC_ERROR_OCSP_MALFORMED_RESPONSE                 = SEC_ERROR_BASE + 129;
 const SEC_ERROR_OCSP_UNAUTHORIZED_RESPONSE              = SEC_ERROR_BASE + 130;
 const SEC_ERROR_OCSP_OLD_RESPONSE                       = SEC_ERROR_BASE + 132;
-const SEC_ERROR_UNSUPPORTED_ELLIPTIC_CURVE              = SEC_ERROR_BASE + 141;
+const SEC_ERROR_UNSUPPORTED_ELLIPTIC_CURVE              = SEC_ERROR_BASE + 141; // -8051
 const SEC_ERROR_OCSP_INVALID_SIGNING_CERT               = SEC_ERROR_BASE + 144;
-const SEC_ERROR_POLICY_VALIDATION_FAILED                = SEC_ERROR_BASE + 160;
+const SEC_ERROR_POLICY_VALIDATION_FAILED                = SEC_ERROR_BASE + 160; // -8032
 const SEC_ERROR_OCSP_BAD_SIGNATURE                      = SEC_ERROR_BASE + 157;
 const SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED       = SEC_ERROR_BASE + 176;
 
-const SSL_ERROR_NO_CYPHER_OVERLAP                       = SSL_ERROR_BASE + 2;
-const SSL_ERROR_BAD_CERT_DOMAIN                         = SSL_ERROR_BASE + 12;
-const SSL_ERROR_BAD_CERT_ALERT                          = SSL_ERROR_BASE + 17;
+const SSL_ERROR_BAD_CERT_DOMAIN                         = SSL_ERROR_BASE +  12;
+const SSL_ERROR_BAD_CERT_ALERT                          = SSL_ERROR_BASE +  17;
 const SSL_ERROR_WEAK_SERVER_CERT_KEY                    = SSL_ERROR_BASE + 132;
 
-const MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE            = MOZILLA_PKIX_ERROR_BASE + 0;
-const MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY     = MOZILLA_PKIX_ERROR_BASE + 1;
-const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE            = MOZILLA_PKIX_ERROR_BASE + 2;
-const MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA             = MOZILLA_PKIX_ERROR_BASE + 3;
-const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE      = MOZILLA_PKIX_ERROR_BASE + 5;
+const MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE            = MOZILLA_PKIX_ERROR_BASE +   0;
+const MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY     = MOZILLA_PKIX_ERROR_BASE +   1;
+const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE            = MOZILLA_PKIX_ERROR_BASE +   2; // -16382
+const MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA             = MOZILLA_PKIX_ERROR_BASE +   3;
+const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE      = MOZILLA_PKIX_ERROR_BASE +   5;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 6;
-const MOZILLA_PKIX_ERROR_OCSP_RESPONSE_FOR_CERT_MISSING = MOZILLA_PKIX_ERROR_BASE + 8;
-const MOZILLA_PKIX_ERROR_REQUIRED_TLS_FEATURE_MISSING   = MOZILLA_PKIX_ERROR_BASE + 10;
+const MOZILLA_PKIX_ERROR_OCSP_RESPONSE_FOR_CERT_MISSING = MOZILLA_PKIX_ERROR_BASE +   8;
 
 // Supported Certificate Usages
 const certificateUsageSSLClient              = 0x0001;
@@ -91,20 +85,6 @@ const certificateUsageEmailRecipient         = 0x0020;
 const certificateUsageObjectSigner           = 0x0040;
 const certificateUsageVerifyCA               = 0x0100;
 const certificateUsageStatusResponder        = 0x0400;
-
-// A map from the name of a certificate usage to the value of the usage.
-// Useful for printing debugging information and for enumerating all supported
-// usages.
-const allCertificateUsages = {
-  certificateUsageSSLClient,
-  certificateUsageSSLServer,
-  certificateUsageSSLCA,
-  certificateUsageEmailSigner,
-  certificateUsageEmailRecipient,
-  certificateUsageObjectSigner,
-  certificateUsageVerifyCA,
-  certificateUsageStatusResponder
-};
 
 const NO_FLAGS = 0;
 
@@ -174,20 +154,6 @@ function getXPCOMStatusFromNSS(statusNSS) {
 
 // certdb implements nsIX509CertDB. See nsIX509CertDB.idl for documentation.
 // In particular, hostname is optional.
-function checkCertErrorGenericAtTime(certdb, cert, expectedError, usage, time,
-                                     /*optional*/ hasEVPolicy,
-                                     /*optional*/ hostname) {
-  do_print(`cert cn=${cert.commonName}`);
-  do_print(`cert issuer cn=${cert.issuerCommonName}`);
-  let verifiedChain = {};
-  let error = certdb.verifyCertAtTime(cert, usage, NO_FLAGS, hostname, time,
-                                      verifiedChain, hasEVPolicy || {});
-  Assert.equal(error, expectedError,
-               "Actual and expected error should match");
-}
-
-// certdb implements nsIX509CertDB. See nsIX509CertDB.idl for documentation.
-// In particular, hostname is optional.
 function checkCertErrorGeneric(certdb, cert, expectedError, usage,
                                /*optional*/ hasEVPolicy,
                                /*optional*/ hostname) {
@@ -201,6 +167,8 @@ function checkCertErrorGeneric(certdb, cert, expectedError, usage,
 }
 
 function checkEVStatus(certDB, cert, usage, isEVExpected) {
+  do_print(`cert o=${cert.organization}`);
+  do_print(`cert issuer o=${cert.issuerOrganization}`);
   let hasEVPolicy = {};
   checkCertErrorGeneric(certDB, cert, PRErrorCodeSuccess, usage, hasEVPolicy);
   Assert.equal(hasEVPolicy.value, isEVExpected,
@@ -215,7 +183,7 @@ function _getLibraryFunctionWithNoArguments(functionName, libraryName) {
   let nsslib;
   try {
     nsslib = ctypes.open(path);
-  } catch (e) {
+  } catch(e) {
     // In case opening the library without a full path fails,
     // try again with a full path.
     let file = Services.dirsvc.get("GreBinD", Ci.nsILocalFile);
@@ -245,7 +213,7 @@ function clearSessionCache() {
       _getLibraryFunctionWithNoArguments("SSL_ClearSessionCache", "nss3");
   }
   if (!SSL_ClearSessionCache || SSL_ClearSessionCache() != 0) {
-    throw new Error("Failed to clear SSL session cache");
+    throw "Failed to clear SSL session cache";
   }
 }
 
@@ -284,7 +252,7 @@ function clearSessionCache() {
 
 function run_test() {
   do_get_profile();
-  add_tls_server_setup("<test-server-name>", "<path-to-certificate-directory>");
+  add_tls_server_setup("<test-server-name>");
 
   add_connection_test("<test-name-1>.example.com",
                       SEC_ERROR_xxx,
@@ -296,11 +264,11 @@ function run_test() {
 
   run_next_test();
 }
-*/
 
-function add_tls_server_setup(serverBinName, certsPath) {
+*/
+function add_tls_server_setup(serverBinName) {
   add_test(function() {
-    _setupTLSServerTest(serverBinName, certsPath);
+    _setupTLSServerTest(serverBinName);
   });
 }
 
@@ -426,7 +394,7 @@ function _getBinaryUtil(binaryUtilName) {
                            .getService(Ci.nsIProperties);
 
   let utilBin = directoryService.get("CurProcD", Ci.nsILocalFile);
-  utilBin.append(binaryUtilName + mozinfo.bin_suffix);
+  utilBin.append(binaryUtilName + (gIsWindows ? ".exe" : ""));
   // If we're testing locally, the above works. If not, the server executable
   // is in another location.
   if (!utilBin.exists()) {
@@ -435,7 +403,7 @@ function _getBinaryUtil(binaryUtilName) {
       utilBin = utilBin.parent;
     }
     utilBin.append("bin");
-    utilBin.append(binaryUtilName + mozinfo.bin_suffix);
+    utilBin.append(binaryUtilName + (gIsWindows ? ".exe" : ""));
   }
   // But maybe we're on Android or B2G, where binaries are in /data/local/xpcb.
   if (!utilBin.exists()) {
@@ -447,12 +415,12 @@ function _getBinaryUtil(binaryUtilName) {
 }
 
 // Do not call this directly; use add_tls_server_setup
-function _setupTLSServerTest(serverBinName, certsPath)
+function _setupTLSServerTest(serverBinName)
 {
   let certdb = Cc["@mozilla.org/security/x509certdb;1"]
                   .getService(Ci.nsIX509CertDB);
   // The trusted CA that is typically used for "good" certificates.
-  addCertFromFile(certdb, `${certsPath}/test-ca.pem`, "CTu,u,u");
+  addCertFromFile(certdb, "tlsserver/test-ca.der", "CTu,u,u");
 
   const CALLBACK_PORT = 8444;
 
@@ -485,8 +453,8 @@ function _setupTLSServerTest(serverBinName, certsPath)
   let process = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
   process.init(serverBin);
   let certDir = directoryService.get("CurWorkD", Ci.nsILocalFile);
-  certDir.append(`${certsPath}`);
-  Assert.ok(certDir.exists(), `certificate folder (${certsPath}) should exist`);
+  certDir.append("tlsserver");
+  Assert.ok(certDir.exists(), "tlsserver folder should exist");
   // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
   process.run(false, [ "sql:" + certDir.path ], 1);
 
@@ -501,12 +469,12 @@ function _setupTLSServerTest(serverBinName, certsPath)
 // [ [typeOfResponse, certnick, extracertnick]...]
 function generateOCSPResponses(ocspRespArray, nssDBlocation)
 {
-  let utilBinName = "GenerateOCSPResponse";
+  let utilBinName =  "GenerateOCSPResponse";
   let ocspGenBin = _getBinaryUtil(utilBinName);
-  let retArray = [];
+  let retArray = new Array();
 
   for (let i = 0; i < ocspRespArray.length; i++) {
-    let argArray = [];
+    let argArray = new Array();
     let ocspFilepre = do_get_file(i.toString() + ".ocsp", true);
     let filename = ocspFilepre.path;
     // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
@@ -515,7 +483,7 @@ function generateOCSPResponses(ocspRespArray, nssDBlocation)
     argArray.push(ocspRespArray[i][1]); // nick;
     argArray.push(ocspRespArray[i][2]); // extranickname
     argArray.push(filename);
-    do_print("argArray = " + argArray);
+    do_print("arg_array ="+argArray);
 
     let process = Cc["@mozilla.org/process/util;1"]
                     .createInstance(Ci.nsIProcess);
@@ -584,7 +552,7 @@ function startOCSPResponder(serverPort, identity, invalidIdentities,
     function handleServerCallback(aRequest, aResponse) {
       invalidIdentities.forEach(function(identity) {
         Assert.notEqual(aRequest.host, identity,
-                        "Request host and invalid identity should not match");
+                        "Request host and invalid identity should not match")
       });
       do_print("got request for: " + aRequest.path);
       let basePath = aRequest.path.slice(1).split("/")[0];
@@ -630,7 +598,7 @@ function startOCSPResponder(serverPort, identity, invalidIdentities,
 }
 
 // A prototype for a fake, error-free sslstatus
-var FakeSSLStatus = function(certificate) {
+let FakeSSLStatus = function(certificate) {
   this.serverCert = certificate;
 };
 
@@ -650,21 +618,16 @@ FakeSSLStatus.prototype = {
         aIID.equals(Ci.nsISupports)) {
       return this;
     }
-    throw new Error(Cr.NS_ERROR_NO_INTERFACE);
+    throw Components.results.NS_ERROR_NO_INTERFACE;
   },
-};
+}
 
 // Utility functions for adding tests relating to certificate error overrides
 
-// Helper function for add_cert_override_test. Probably doesn't need to be
-// called directly.
-function add_cert_override(aHost, aExpectedBits, aExpectedErrorRegexp,
-                           aSecurityInfo) {
-  if (aExpectedErrorRegexp) {
-    do_print(aSecurityInfo.errorMessage);
-    Assert.ok(aExpectedErrorRegexp.test(aSecurityInfo.errorMessage),
-              "Actual error message should match expected error regexp");
-  }
+// Helper function for add_cert_override_test and
+// add_prevented_cert_override_test. Probably doesn't need to be called
+// directly.
+function add_cert_override(aHost, aExpectedBits, aSecurityInfo) {
   let sslstatus = aSecurityInfo.QueryInterface(Ci.nsISSLStatusProvider)
                                .SSLStatus;
   let bits =
@@ -680,43 +643,14 @@ function add_cert_override(aHost, aExpectedBits, aExpectedErrorRegexp,
                                                true);
 }
 
-// Given a host, expected error bits (see nsICertOverrideService.idl), an
-// expected error code, and optionally a regular expression that the resulting
-// error message must match, tests that an initial connection to the host fails
+// Given a host, expected error bits (see nsICertOverrideService.idl), and
+// an expected error code, tests that an initial connection to the host fails
 // with the expected errors and that adding an override results in a subsequent
 // connection succeeding.
-function add_cert_override_test(aHost, aExpectedBits, aExpectedError,
-                                aExpectedErrorRegexp = undefined) {
+function add_cert_override_test(aHost, aExpectedBits, aExpectedError) {
   add_connection_test(aHost, aExpectedError, null,
-                      add_cert_override.bind(this, aHost, aExpectedBits,
-                                             aExpectedErrorRegexp));
-  add_connection_test(aHost, PRErrorCodeSuccess, null, aSecurityInfo => {
-    Assert.ok(aSecurityInfo.securityState &
-              Ci.nsIWebProgressListener.STATE_CERT_USER_OVERRIDDEN,
-              "Cert override flag should be set on the security state");
-  });
-}
-
-// Helper function for add_prevented_cert_override_test. This is much like
-// add_cert_override except it may not be the case that the connection has an
-// SSLStatus set on it. In this case, the error was not overridable anyway, so
-// we consider it a success.
-function attempt_adding_cert_override(aHost, aExpectedBits, aSecurityInfo) {
-  let sslstatus = aSecurityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                               .SSLStatus;
-  if (sslstatus) {
-    let bits =
-      (sslstatus.isUntrusted ? Ci.nsICertOverrideService.ERROR_UNTRUSTED : 0) |
-      (sslstatus.isDomainMismatch ? Ci.nsICertOverrideService.ERROR_MISMATCH : 0) |
-      (sslstatus.isNotValidAtThisTime ? Ci.nsICertOverrideService.ERROR_TIME : 0);
-    Assert.equal(bits, aExpectedBits,
-                 "Actual and expected override bits should match");
-    let cert = sslstatus.serverCert;
-    let certOverrideService = Cc["@mozilla.org/security/certoverride;1"]
-                                .getService(Ci.nsICertOverrideService);
-    certOverrideService.rememberValidityOverride(aHost, 8443, cert, aExpectedBits,
-                                                 true);
-  }
+                      add_cert_override.bind(this, aHost, aExpectedBits));
+  add_connection_test(aHost, PRErrorCodeSuccess);
 }
 
 // Given a host, expected error bits (see nsICertOverrideService.idl), and
@@ -727,69 +661,6 @@ function attempt_adding_cert_override(aHost, aExpectedBits, aSecurityInfo) {
 // overridable, even if an entry is added to the override service.
 function add_prevented_cert_override_test(aHost, aExpectedBits, aExpectedError) {
   add_connection_test(aHost, aExpectedError, null,
-                      attempt_adding_cert_override.bind(this, aHost, aExpectedBits));
+                      add_cert_override.bind(this, aHost, aExpectedBits));
   add_connection_test(aHost, aExpectedError);
-}
-
-function loginToDBWithDefaultPassword() {
-  let tokenDB = Cc["@mozilla.org/security/pk11tokendb;1"]
-                  .getService(Ci.nsIPK11TokenDB);
-  let token = tokenDB.getInternalKeyToken();
-  token.initPassword("");
-  token.login(/*force*/ false);
-}
-
-// Helper for asyncTestCertificateUsages.
-class CertVerificationResult {
-  constructor(certName, usageString, successExpected, resolve) {
-    this.certName = certName;
-    this.usageString = usageString;
-    this.successExpected = successExpected;
-    this.resolve = resolve;
-  }
-
-  verifyCertFinished(aPRErrorCode, aVerifiedChain, aHasEVPolicy) {
-    if (this.successExpected) {
-      equal(aPRErrorCode, PRErrorCodeSuccess,
-            `verifying ${this.certName} for ${this.usageString} should succeed`);
-    } else {
-      notEqual(aPRErrorCode, PRErrorCodeSuccess,
-               `verifying ${this.certName} for ${this.usageString} should fail`);
-    }
-    this.resolve();
-  }
-}
-
-/**
- * Asynchronously attempts to verify the given certificate for all supported
- * usages (see allCertificateUsages). Verifies that the results match the
- * expected successful usages. Returns a promise that will resolve when all
- * verifications have been performed.
- * Verification happens "now" with no specified flags or hostname.
- *
- * @param {nsIX509CertDB} certdb
- *   The certificate database to use to verify the certificate.
- * @param {nsIX509Cert} cert
- *   The certificate to be verified.
- * @param {Number[]} expectedUsages
- *   A list of usages (as their integer values) that are expected to verify
- *   successfully.
- * @return {Promise}
- *   A promise that will resolve with no value when all asynchronous operations
- *   have completed.
- */
-function asyncTestCertificateUsages(certdb, cert, expectedUsages) {
-  let now = (new Date()).getTime() / 1000;
-  let promises = [];
-  Object.keys(allCertificateUsages).forEach(usageString => {
-    let promise = new Promise((resolve, reject) => {
-      let usage = allCertificateUsages[usageString];
-      let successExpected = expectedUsages.includes(usage);
-      let result = new CertVerificationResult(cert.commonName, usageString,
-                                              successExpected, resolve);
-      certdb.asyncVerifyCertAtTime(cert, usage, 0, null, now, result);
-    });
-    promises.push(promise);
-  });
-  return Promise.all(promises);
 }

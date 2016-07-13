@@ -45,7 +45,7 @@ public:
   // Delayed-task handling
   //
 
-  void SetDelayedConnectTask(CancelableRunnable* aTask);
+  void SetDelayedConnectTask(CancelableTask* aTask);
   void ClearDelayedConnectTask();
   void CancelDelayedConnectTask();
 
@@ -84,12 +84,12 @@ private:
    * Task member for delayed connect task. Should only be access on consumer
    * thread.
    */
-  CancelableRunnable* mDelayedConnectTask;
+  CancelableTask* mDelayedConnectTask;
 
   /**
    * I/O buffer for received data
    */
-  UniquePtr<UnixSocketRawData> mBuffer;
+  nsAutoPtr<UnixSocketRawData> mBuffer;
 };
 
 StreamSocketIO::StreamSocketIO(MessageLoop* aConsumerLoop,
@@ -146,7 +146,7 @@ StreamSocketIO::GetDataSocket()
 }
 
 void
-StreamSocketIO::SetDelayedConnectTask(CancelableRunnable* aTask)
+StreamSocketIO::SetDelayedConnectTask(CancelableTask* aTask)
 {
   MOZ_ASSERT(IsConsumerThread());
 
@@ -182,7 +182,7 @@ StreamSocketIO::QueryReceiveBuffer(UnixSocketIOBuffer** aBuffer)
   MOZ_ASSERT(aBuffer);
 
   if (!mBuffer) {
-    mBuffer = MakeUnique<UnixSocketRawData>(MAX_READ_SIZE);
+    mBuffer = new UnixSocketRawData(MAX_READ_SIZE);
   }
   *aBuffer = mBuffer.get();
 
@@ -208,7 +208,7 @@ public:
     MOZ_COUNT_DTOR(ReceiveTask);
   }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     StreamSocketIO* io = SocketTask<StreamSocketIO>::GetIO();
 
@@ -217,26 +217,24 @@ public:
     if (NS_WARN_IF(io->IsShutdownOnConsumerThread())) {
       // Since we've already explicitly closed and the close
       // happened before this, this isn't really an error.
-      return NS_OK;
+      return;
     }
 
     StreamSocket* streamSocket = io->GetStreamSocket();
     MOZ_ASSERT(streamSocket);
 
     streamSocket->ReceiveSocketData(mBuffer);
-
-    return NS_OK;
   }
 
 private:
-  UniquePtr<UnixSocketBuffer> mBuffer;
+  nsAutoPtr<UnixSocketBuffer> mBuffer;
 };
 
 void
 StreamSocketIO::ConsumeBuffer()
 {
-  GetConsumerThread()->PostTask(
-    MakeAndAddRef<ReceiveTask>(this, mBuffer.release()));
+  GetConsumerThread()->PostTask(FROM_HERE,
+                                new ReceiveTask(this, mBuffer.forget()));
 }
 
 void
@@ -304,14 +302,12 @@ public:
     MOZ_COUNT_DTOR(ReceiveTask);
   }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(!GetIO()->IsConsumerThread());
     MOZ_ASSERT(!IsCanceled());
 
     GetIO()->Connect();
-
-    return NS_OK;
   }
 };
 
@@ -330,23 +326,21 @@ public:
     MOZ_COUNT_DTOR(DelayedConnectTask);
   }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(GetIO()->IsConsumerThread());
 
     if (IsCanceled()) {
-      return NS_OK;
+      return;
     }
 
     StreamSocketIO* io = GetIO();
     if (io->IsShutdownOnConsumerThread()) {
-      return NS_OK;
+      return;
     }
 
     io->ClearDelayedConnectTask();
-    io->GetIOLoop()->PostTask(MakeAndAddRef<ConnectTask>(io));
-
-    return NS_OK;
+    io->GetIOLoop()->PostTask(FROM_HERE, new ConnectTask(io));
   }
 };
 
@@ -372,7 +366,7 @@ StreamSocket::~StreamSocket()
 }
 
 void
-StreamSocket::ReceiveSocketData(UniquePtr<UnixSocketBuffer>& aBuffer)
+StreamSocket::ReceiveSocketData(nsAutoPtr<UnixSocketBuffer>& aBuffer)
 {
   mConsumer->ReceiveSocketData(mIndex, aBuffer);
 }
@@ -387,12 +381,12 @@ StreamSocket::Connect(UnixSocketConnector* aConnector, int aDelayMs,
   SetConnectionStatus(SOCKET_CONNECTING);
 
   if (aDelayMs > 0) {
-    RefPtr<StreamSocketIO::DelayedConnectTask> connectTask =
-      MakeAndAddRef<StreamSocketIO::DelayedConnectTask>(mIO);
+    StreamSocketIO::DelayedConnectTask* connectTask =
+      new StreamSocketIO::DelayedConnectTask(mIO);
     mIO->SetDelayedConnectTask(connectTask);
-    MessageLoop::current()->PostDelayedTask(connectTask.forget(), aDelayMs);
+    MessageLoop::current()->PostDelayedTask(FROM_HERE, connectTask, aDelayMs);
   } else {
-    aIOLoop->PostTask(MakeAndAddRef<StreamSocketIO::ConnectTask>(mIO));
+    aIOLoop->PostTask(FROM_HERE, new StreamSocketIO::ConnectTask(mIO));
   }
 
   return NS_OK;
@@ -436,8 +430,8 @@ StreamSocket::SendSocketData(UnixSocketIOBuffer* aBuffer)
   MOZ_ASSERT(!mIO->IsShutdownOnConsumerThread());
 
   mIO->GetIOLoop()->PostTask(
-    MakeAndAddRef<SocketIOSendTask<StreamSocketIO, UnixSocketIOBuffer>>(
-      mIO, aBuffer));
+    FROM_HERE,
+    new SocketIOSendTask<StreamSocketIO, UnixSocketIOBuffer>(mIO, aBuffer));
 }
 
 // |SocketBase|
@@ -454,7 +448,7 @@ StreamSocket::Close()
   // the relationship here so any future calls to |Connect| will create
   // a new I/O object.
   mIO->ShutdownOnConsumerThread();
-  mIO->GetIOLoop()->PostTask(MakeAndAddRef<SocketIOShutdownTask>(mIO));
+  mIO->GetIOLoop()->PostTask(FROM_HERE, new SocketIOShutdownTask(mIO));
   mIO = nullptr;
 
   NotifyDisconnect();

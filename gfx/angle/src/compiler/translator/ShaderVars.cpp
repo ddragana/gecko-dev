@@ -9,27 +9,10 @@
 
 #include <GLSLANG/ShaderLang.h>
 
-#include "common/debug.h"
+#include "compiler/translator/compilerdebug.h"
 
 namespace sh
 {
-
-namespace
-{
-
-InterpolationType GetNonAuxiliaryInterpolationType(InterpolationType interpolation)
-{
-    return (interpolation == INTERPOLATION_CENTROID ? INTERPOLATION_SMOOTH : interpolation);
-}
-
-}
-// The ES 3.0 spec is not clear on this point, but the ES 3.1 spec, and discussion
-// on Khronos.org, clarifies that a smooth/flat mismatch produces a link error,
-// but auxiliary qualifier mismatch (centroid) does not.
-bool InterpolationTypesMatch(InterpolationType a, InterpolationType b)
-{
-    return (GetNonAuxiliaryInterpolationType(a) == GetNonAuxiliaryInterpolationType(b));
-}
 
 ShaderVariable::ShaderVariable()
     : type(0),
@@ -103,6 +86,7 @@ bool ShaderVariable::findInfoByMappedName(
     // 2) the top variable is an array;
     // 3) otherwise.
     size_t pos = mappedFullName.find_first_of(".[");
+    std::string topName;
 
     if (pos == std::string::npos)
     {
@@ -217,73 +201,29 @@ bool Uniform::isSameUniformAtLinkTime(const Uniform &other) const
     return ShaderVariable::isSameVariableAtLinkTime(other, true);
 }
 
-InterfaceVariable::InterfaceVariable() : location(-1)
+Attribute::Attribute()
+    : location(-1)
 {}
 
-InterfaceVariable::~InterfaceVariable()
+Attribute::~Attribute()
 {}
 
-InterfaceVariable::InterfaceVariable(const InterfaceVariable &other)
-    : ShaderVariable(other), location(other.location)
+Attribute::Attribute(const Attribute &other)
+    : ShaderVariable(other),
+      location(other.location)
 {}
 
-InterfaceVariable &InterfaceVariable::operator=(const InterfaceVariable &other)
+Attribute &Attribute::operator=(const Attribute &other)
 {
     ShaderVariable::operator=(other);
     location = other.location;
     return *this;
 }
 
-bool InterfaceVariable::operator==(const InterfaceVariable &other) const
+bool Attribute::operator==(const Attribute &other) const
 {
     return (ShaderVariable::operator==(other) &&
             location == other.location);
-}
-
-Attribute::Attribute()
-{
-}
-
-Attribute::~Attribute()
-{
-}
-
-Attribute::Attribute(const Attribute &other) : InterfaceVariable(other)
-{
-}
-
-Attribute &Attribute::operator=(const Attribute &other)
-{
-    InterfaceVariable::operator=(other);
-    return *this;
-}
-
-bool Attribute::operator==(const Attribute &other) const
-{
-    return InterfaceVariable::operator==(other);
-}
-
-OutputVariable::OutputVariable()
-{
-}
-
-OutputVariable::~OutputVariable()
-{
-}
-
-OutputVariable::OutputVariable(const OutputVariable &other) : InterfaceVariable(other)
-{
-}
-
-OutputVariable &OutputVariable::operator=(const OutputVariable &other)
-{
-    InterfaceVariable::operator=(other);
-    return *this;
-}
-
-bool OutputVariable::operator==(const OutputVariable &other) const
-{
-    return InterfaceVariable::operator==(other);
 }
 
 InterfaceBlockField::InterfaceBlockField()
@@ -349,14 +289,9 @@ bool Varying::operator==(const Varying &other) const
 
 bool Varying::isSameVaryingAtLinkTime(const Varying &other) const
 {
-    return isSameVaryingAtLinkTime(other, 100);
-}
-
-bool Varying::isSameVaryingAtLinkTime(const Varying &other, int shaderVersion) const
-{
     return (ShaderVariable::isSameVariableAtLinkTime(other, false) &&
             interpolation == other.interpolation &&
-            (shaderVersion >= 300 || isInvariant == other.isInvariant));
+            isInvariant == other.isInvariant);
 }
 
 InterfaceBlock::InterfaceBlock()
@@ -393,9 +328,4 @@ InterfaceBlock &InterfaceBlock::operator=(const InterfaceBlock &other)
     return *this;
 }
 
-std::string InterfaceBlock::fieldPrefix() const
-{
-    return instanceName.empty() ? "" : name;
 }
-
-}  // namespace sh

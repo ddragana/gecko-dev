@@ -10,7 +10,6 @@
 #include <psapi.h>
 
 #include "nsWindowsHelpers.h"
-#include "GeckoProfiler.h"
 
 namespace {
 
@@ -37,8 +36,6 @@ bool
 HandleToFilename(HANDLE aHandle, const LARGE_INTEGER& aOffset,
                  nsAString& aFilename)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::NETWORK);
-
   aFilename.Truncate();
   // This implementation is nice because it uses fully documented APIs that
   // are available on all Windows versions that we support.

@@ -8,7 +8,7 @@
 #include "VsyncSource.h"
 #include "gfxPlatform.h"
 #include "mozilla/layers/Compositor.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/CompositorParent.h"
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
 #include "GeckoProfiler.h"
@@ -44,7 +44,7 @@ CompositorVsyncDispatcher::NotifyVsync(TimeStamp aVsyncTimestamp)
 {
   // In vsync thread
 #ifdef MOZ_ENABLE_PROFILER_SPS
-  layers::CompositorBridgeParent::PostInsertVsyncProfilerMarker(aVsyncTimestamp);
+  layers::CompositorParent::PostInsertVsyncProfilerMarker(aVsyncTimestamp);
 #endif
 
   MutexAutoLock lock(mCompositorObserverLock);
@@ -89,7 +89,7 @@ CompositorVsyncDispatcher::SetCompositorVsyncObserver(VsyncObserver* aVsyncObser
   }
 
   bool observeVsync = aVsyncObserver != nullptr;
-  nsCOMPtr<nsIRunnable> vsyncControl = NewRunnableMethod<bool>(this,
+  nsCOMPtr<nsIRunnable> vsyncControl = NS_NewRunnableMethodWithArg<bool>(this,
                                         &CompositorVsyncDispatcher::ObserveVsync,
                                         observeVsync);
   NS_DispatchToMainThread(vsyncControl);
@@ -100,7 +100,7 @@ CompositorVsyncDispatcher::Shutdown()
 {
   // Need to explicitly remove CompositorVsyncDispatcher when the nsBaseWidget shuts down.
   // Otherwise, we would get dead vsync notifications between when the nsBaseWidget
-  // shuts down and the CompositorBridgeParent shuts down.
+  // shuts down and the CompositorParent shuts down.
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
   ObserveVsync(false);
@@ -180,8 +180,9 @@ void
 RefreshTimerVsyncDispatcher::UpdateVsyncStatus()
 {
   if (!NS_IsMainThread()) {
-    NS_DispatchToMainThread(NewRunnableMethod(this,
-                                              &RefreshTimerVsyncDispatcher::UpdateVsyncStatus));
+    nsCOMPtr<nsIRunnable> vsyncControl = NS_NewRunnableMethod(this,
+                                           &RefreshTimerVsyncDispatcher::UpdateVsyncStatus);
+    NS_DispatchToMainThread(vsyncControl);
     return;
   }
 

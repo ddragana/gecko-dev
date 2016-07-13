@@ -85,25 +85,14 @@ var gPermissionManager = {
     var input_url = textbox.value.replace(/^\s*/, ""); // trim any leading space
     let principal;
     try {
-      // The origin accessor on the principal object will throw if the
-      // principal doesn't have a canonical origin representation. This will
-      // help catch cases where the URI parser parsed something like
-      // `localhost:8080` as having the scheme `localhost`, rather than being
-      // an invalid URI. A canonical origin representation is required by the
-      // permission manager for storage, so this won't prevent any valid
-      // permissions from being entered by the user.
+      // If the uri doesn't successfully parse, try adding a http:// and parsing again
       let uri;
       try {
         uri = Services.io.newURI(input_url, null, null);
-        principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
-        // If we have ended up with an unknown scheme, the following will throw.
-        principal.origin;
       } catch(ex) {
         uri = Services.io.newURI("http://" + input_url, null, null);
-        principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
-        // If we have ended up with an unknown scheme, the following will throw.
-        principal.origin;
       }
+      principal = Services.scriptSecurityManager.getNoAppCodebasePrincipal(uri);
     } catch(ex) {
       var message = this._bundle.getString("invalidURI");
       var title = this._bundle.getString("invalidURITitle");
@@ -248,10 +237,6 @@ var gPermissionManager = {
 
     var urlLabel = document.getElementById("urlLabel");
     urlLabel.hidden = !urlFieldVisible;
-
-    if (aParams.hideStatusColumn) {
-      document.getElementById("statusCol").hidden = true;
-    }
 
     let treecols = document.getElementsByTagName("treecols")[0];
     treecols.addEventListener("click", event => {

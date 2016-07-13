@@ -46,14 +46,6 @@ public:
     
     NodeOffset(nsINode* aNode, int32_t aOffset) :
       mNode(aNode), mOffset(aOffset) {}
-
-    bool operator==(const NodeOffset& aOther) const {
-      return mNode == aOther.mNode && mOffset == aOther.mOffset;
-    }
-
-    bool operator!=(const NodeOffset& aOther) const {
-      return !(*this == aOther);
-    }
   };
 
   mozInlineSpellWordUtil()
@@ -125,16 +117,11 @@ private:
   // A list of the "real words" in mSoftText, ordered by mSoftTextOffset
   struct RealWord {
     int32_t      mSoftTextOffset;
-    uint32_t      mLength : 31;
-    uint32_t mCheckableWord : 1;
+    int32_t      mLength;
+    bool mCheckableWord;
     
-    RealWord(int32_t aOffset, uint32_t aLength, bool aCheckable)
-      : mSoftTextOffset(aOffset), mLength(aLength), mCheckableWord(aCheckable)
-    {
-      static_assert(sizeof(RealWord) == 8, "RealWord should be limited to 8 bytes");
-      MOZ_ASSERT(aLength < INT32_MAX, "Word length is too large to fit in the bitfield");
-    }
-
+    RealWord(int32_t aOffset, int32_t aLength, bool aCheckable)
+      : mSoftTextOffset(aOffset), mLength(aLength), mCheckableWord(aCheckable) {}
     int32_t EndOffset() const { return mSoftTextOffset + mLength; }
   };
   nsTArray<RealWord> mRealWords;
@@ -143,7 +130,7 @@ private:
   bool mSoftTextValid;
 
   void InvalidateWords() { mSoftTextValid = false; }
-  nsresult EnsureWords();
+  void EnsureWords();
   
   int32_t MapDOMPositionToSoftTextOffset(NodeOffset aNodeOffset);
   // Map an offset into mSoftText to a DOM position. Note that two DOM positions
@@ -167,9 +154,9 @@ private:
   // build mSoftText and mSoftTextDOMMapping
   void BuildSoftText();
   // Build mRealWords array
-  nsresult BuildRealWords();
+  void BuildRealWords();
 
-  nsresult SplitDOMWord(int32_t aStart, int32_t aEnd);
+  void SplitDOMWord(int32_t aStart, int32_t aEnd);
 
   // Convenience functions, object must be initialized
   nsresult MakeRange(NodeOffset aBegin, NodeOffset aEnd, nsRange** aRange);

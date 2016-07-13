@@ -23,26 +23,29 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(GainNode, AudioNode)
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   AudioParam* Gain() const
   {
     return mGain;
   }
 
-  const char* NodeType() const override
+  virtual const char* NodeType() const override
   {
     return "GainNode";
   }
 
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
 protected:
   virtual ~GainNode();
 
 private:
-  RefPtr<AudioParam> mGain;
+  static void SendGainToStream(AudioNode* aNode);
+
+private:
+  nsRefPtr<AudioParam> mGain;
 };
 
 } // namespace dom

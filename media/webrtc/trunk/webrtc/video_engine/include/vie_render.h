@@ -20,7 +20,6 @@
 
 namespace webrtc {
 
-class I420VideoFrame;
 class VideoEngine;
 class VideoRender;
 class VideoRenderCallback;
@@ -37,7 +36,7 @@ class ExternalRenderer {
 
   // This method is called when a new frame should be rendered.
   virtual int DeliverFrame(unsigned char* buffer,
-                           size_t buffer_size,
+                           int buffer_size,
                            // RTP timestamp in 90kHz.
                            uint32_t timestamp,
                            // NTP time of the capture time in local timebase
@@ -47,9 +46,6 @@ class ExternalRenderer {
                            int64_t render_time_ms,
                            // Handle of the underlying video frame.
                            void* handle) = 0;
-
-  // Alternative interface for I420 frames.
-  virtual int DeliverI420Frame(const webrtc::I420VideoFrame& webrtc_frame) = 0;
 
   // Returns true if the renderer supports textures. DeliverFrame can be called
   // with NULL |buffer| and non-NULL |handle|.
@@ -108,10 +104,23 @@ class ViERender {
                               const float right,
                               const float bottom) = 0;
 
+  // This function mirrors the rendered stream left and right or up and down.
+  virtual int MirrorRenderStream(const int render_id,
+                                 const bool enable,
+                                 const bool mirror_xaxis,
+                                 const bool mirror_yaxis) = 0;
+
   // External render.
   virtual int AddRenderer(const int render_id,
                           RawVideoType video_input_format,
                           ExternalRenderer* renderer) = 0;
+
+  // Propagating VideoRenderCallback down to the VideoRender module for new API.
+  // Contains default-implementation not to break code mocking this interface.
+  // (Ugly, but temporary.)
+  virtual int AddRenderCallback(int render_id, VideoRenderCallback* callback) {
+    return 0;
+  }
 
  protected:
   ViERender() {}

@@ -16,6 +16,7 @@ nsXPCTestReturnCodeParent::~nsXPCTestReturnCodeParent()
 {
 }
 
+/* unsigned long callChild (in long childBehavior); */
 NS_IMETHODIMP nsXPCTestReturnCodeParent::CallChild(int32_t childBehavior, nsresult* _retval)
 {
     nsresult rv;

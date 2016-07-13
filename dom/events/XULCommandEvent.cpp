@@ -14,15 +14,14 @@ XULCommandEvent::XULCommandEvent(EventTarget* aOwner,
                                  nsPresContext* aPresContext,
                                  WidgetInputEvent* aEvent)
   : UIEvent(aOwner, aPresContext,
-            aEvent ? aEvent :
-                     new WidgetInputEvent(false, eVoidEvent, nullptr))
+            aEvent ? aEvent : new WidgetInputEvent(false, 0, nullptr))
 {
   if (aEvent) {
     mEventIsInternal = false;
   }
   else {
     mEventIsInternal = true;
-    mEvent->mTime = PR_Now();
+    mEvent->time = PR_Now();
   }
 }
 
@@ -105,7 +104,7 @@ NS_IMETHODIMP
 XULCommandEvent::InitCommandEvent(const nsAString& aType,
                                   bool aCanBubble,
                                   bool aCancelable,
-                                  mozIDOMWindow* aView,
+                                  nsIDOMWindow* aView,
                                   int32_t aDetail,
                                   bool aCtrlKey,
                                   bool aAltKey,
@@ -113,8 +112,9 @@ XULCommandEvent::InitCommandEvent(const nsAString& aType,
                                   bool aMetaKey,
                                   nsIDOMEvent* aSourceEvent)
 {
-  auto* view = nsGlobalWindow::Cast(nsPIDOMWindowInner::From(aView));
-  UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, view, aDetail);
+  nsresult rv = UIEvent::InitUIEvent(aType, aCanBubble, aCancelable,
+                                     aView, aDetail);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   mEvent->AsInputEvent()->InitBasicModifiers(aCtrlKey, aAltKey,
                                              aShiftKey, aMetaKey);
@@ -129,12 +129,14 @@ XULCommandEvent::InitCommandEvent(const nsAString& aType,
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<XULCommandEvent>
-NS_NewDOMXULCommandEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMXULCommandEvent(nsIDOMEvent** aInstancePtrResult,
+                         EventTarget* aOwner,
                          nsPresContext* aPresContext,
                          WidgetInputEvent* aEvent) 
 {
-  RefPtr<XULCommandEvent> it =
-    new XULCommandEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  XULCommandEvent* it = new XULCommandEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

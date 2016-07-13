@@ -14,53 +14,32 @@ MacIOSurfaceTextureHostOGL::MacIOSurfaceTextureHostOGL(TextureFlags aFlags,
                                                        const SurfaceDescriptorMacIOSurface& aDescriptor)
   : TextureHost(aFlags)
 {
-  MOZ_COUNT_CTOR(MacIOSurfaceTextureHostOGL);
   mSurface = MacIOSurface::LookupSurface(aDescriptor.surfaceId(),
                                          aDescriptor.scaleFactor(),
                                          !aDescriptor.isOpaque());
 }
 
-MacIOSurfaceTextureHostOGL::~MacIOSurfaceTextureHostOGL()
-{
-  MOZ_COUNT_DTOR(MacIOSurfaceTextureHostOGL);
-}
-
-GLTextureSource*
-MacIOSurfaceTextureHostOGL::CreateTextureSourceForPlane(size_t aPlane)
-{
-  GLuint textureHandle;
-  gl::GLContext* gl = mCompositor->gl();
-  gl->fGenTextures(1, &textureHandle);
-  gl->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, textureHandle);
-  gl->fTexParameteri(LOCAL_GL_TEXTURE_RECTANGLE_ARB, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
-  gl->fTexParameteri(LOCAL_GL_TEXTURE_RECTANGLE_ARB, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
-
-  mSurface->CGLTexImageIOSurface2D(gl::GLContextCGL::Cast(gl)->GetCGLContext(), aPlane);
-
-  return new GLTextureSource(mCompositor, textureHandle, LOCAL_GL_TEXTURE_RECTANGLE_ARB,
-                             gfx::IntSize(mSurface->GetDevicePixelWidth(aPlane),
-                                          mSurface->GetDevicePixelHeight(aPlane)),
-                             // XXX: This isn't really correct (but isn't used), we should be using the
-                             // format of the individual plane, not of the whole buffer.
-                             mSurface->GetFormat());
-}
-
 bool
 MacIOSurfaceTextureHostOGL::Lock()
 {
-  if (!gl() || !gl()->MakeCurrent() || !mSurface) {
+  if (!mCompositor || !mSurface) {
     return false;
   }
 
   if (!mTextureSource) {
-    mTextureSource = CreateTextureSourceForPlane(0);
+    GLuint textureHandle;
+    gl::GLContext* gl = mCompositor->gl();
+    gl->fGenTextures(1, &textureHandle);
+    gl->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, textureHandle);
+    gl->fTexParameteri(LOCAL_GL_TEXTURE_RECTANGLE_ARB, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
+    gl->fTexParameteri(LOCAL_GL_TEXTURE_RECTANGLE_ARB, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
+    mSurface->CGLTexImageIOSurface2D(gl::GLContextCGL::Cast(gl)->GetCGLContext());
 
-    RefPtr<TextureSource> prev = mTextureSource;
-    for (size_t i = 1; i < mSurface->GetPlaneCount(); i++) {
-      RefPtr<TextureSource> next = CreateTextureSourceForPlane(i);
-      prev->SetNextSibling(next);
-      prev = next;
-    }
+    mTextureSource = new GLTextureSource(mCompositor, textureHandle, LOCAL_GL_TEXTURE_RECTANGLE_ARB,
+                                         gfx::IntSize(mSurface->GetDevicePixelWidth(),
+                                                      mSurface->GetDevicePixelHeight()),
+                                         mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8:
+                                                                gfx::SurfaceFormat::R8G8B8X8);
   }
   return true;
 }
@@ -68,28 +47,20 @@ MacIOSurfaceTextureHostOGL::Lock()
 void
 MacIOSurfaceTextureHostOGL::SetCompositor(Compositor* aCompositor)
 {
-  CompositorOGL* glCompositor = AssertGLCompositor(aCompositor);
-  if (!glCompositor) {
-    mTextureSource = nullptr;
-    mCompositor = nullptr;
-    return;
-  }
-
-  if (mCompositor != glCompositor) {
-    // Cannot share GL texture identifiers across compositors.
-    mTextureSource = nullptr;
-  }
+  CompositorOGL* glCompositor = static_cast<CompositorOGL*>(aCompositor);
   mCompositor = glCompositor;
+  if (mTextureSource) {
+    mTextureSource->SetCompositor(glCompositor);
+  }
 }
 
 gfx::SurfaceFormat
 MacIOSurfaceTextureHostOGL::GetFormat() const {
-  return mSurface->GetFormat();
-}
-
-gfx::SurfaceFormat
-MacIOSurfaceTextureHostOGL::GetReadFormat() const {
-  return mSurface->GetReadFormat();
+  if (!mSurface) {
+    return gfx::SurfaceFormat::UNKNOWN;
+  }
+  return mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8
+                              : gfx::SurfaceFormat::R8G8B8X8;
 }
 
 gfx::IntSize
@@ -101,26 +72,15 @@ MacIOSurfaceTextureHostOGL::GetSize() const {
                       mSurface->GetDevicePixelHeight());
 }
 
-gl::GLContext*
-MacIOSurfaceTextureHostOGL::gl() const
-{
-  return mCompositor ? mCompositor->gl() : nullptr;
-}
-
 MacIOSurfaceTextureSourceOGL::MacIOSurfaceTextureSourceOGL(
                                 CompositorOGL* aCompositor,
                                 MacIOSurface* aSurface)
   : mCompositor(aCompositor)
   , mSurface(aSurface)
-{
-  MOZ_ASSERT(aCompositor);
-  MOZ_COUNT_CTOR(MacIOSurfaceTextureSourceOGL);
-}
+{}
 
 MacIOSurfaceTextureSourceOGL::~MacIOSurfaceTextureSourceOGL()
-{
-  MOZ_COUNT_DTOR(MacIOSurfaceTextureSourceOGL);
-}
+{}
 
 gfx::IntSize
 MacIOSurfaceTextureSourceOGL::GetSize() const
@@ -137,29 +97,24 @@ MacIOSurfaceTextureSourceOGL::GetFormat() const
 }
 
 void
-MacIOSurfaceTextureSourceOGL::BindTexture(GLenum aTextureUnit,
-                                          gfx::SamplingFilter aSamplingFilter)
+MacIOSurfaceTextureSourceOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
 {
-  gl::GLContext* gl = this->gl();
-  if (!gl || !gl->MakeCurrent()) {
-    NS_WARNING("Trying to bind a texture without a working GLContext");
+  if (!gl()) {
+    NS_WARNING("Trying to bind a texture without a GLContext");
     return;
   }
   GLuint tex = mCompositor->GetTemporaryTexture(GetTextureTarget(), aTextureUnit);
 
-  gl->fActiveTexture(aTextureUnit);
-  gl->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, tex);
-  mSurface->CGLTexImageIOSurface2D(gl::GLContextCGL::Cast(gl)->GetCGLContext());
-  ApplySamplingFilterToBoundTexture(gl, aSamplingFilter, LOCAL_GL_TEXTURE_RECTANGLE_ARB);
+  gl()->fActiveTexture(aTextureUnit);
+  gl()->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, tex);
+  mSurface->CGLTexImageIOSurface2D(gl::GLContextCGL::Cast(gl())->GetCGLContext());
+  ApplyFilterToBoundTexture(gl(), aFilter, LOCAL_GL_TEXTURE_RECTANGLE_ARB);
 }
 
 void
 MacIOSurfaceTextureSourceOGL::SetCompositor(Compositor* aCompositor)
 {
-  mCompositor = AssertGLCompositor(aCompositor);
-  if (mCompositor && mNextSibling) {
-    mNextSibling->SetCompositor(aCompositor);
-  }
+  mCompositor = static_cast<CompositorOGL*>(aCompositor);
 }
 
 gl::GLContext*

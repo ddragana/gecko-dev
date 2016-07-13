@@ -25,7 +25,7 @@ public:
   enum Parameters {
     ENABLE
   };
-  void SetInt32Parameter(uint32_t aIndex, int32_t aValue) override
+  virtual void SetInt32Parameter(uint32_t aIndex, int32_t aValue) override
   {
     switch (aIndex) {
     case ENABLE:
@@ -41,63 +41,36 @@ private:
 };
 
 class MediaStreamAudioSourceNode : public AudioNode,
-                                   public DOMMediaStream::TrackListener,
-                                   public PrincipalChangeObserver<MediaStreamTrack>
+                                   public DOMMediaStream::PrincipalChangeObserver
 {
 public:
-  static already_AddRefed<MediaStreamAudioSourceNode>
-  Create(AudioContext* aContext, DOMMediaStream* aStream, ErrorResult& aRv);
+  MediaStreamAudioSourceNode(AudioContext* aContext, DOMMediaStream* aMediaStream);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamAudioSourceNode, AudioNode)
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  void DestroyMediaStream() override;
+  virtual void DestroyMediaStream() override;
 
-  uint16_t NumberOfInputs() const override { return 0; }
+  virtual uint16_t NumberOfInputs() const override { return 0; }
 
-  const char* NodeType() const override
+  virtual const char* NodeType() const override
   {
     return "MediaStreamAudioSourceNode";
   }
 
-  virtual const char* CrossOriginErrorString() const
-  {
-    return "MediaStreamAudioSourceNodeCrossOrigin";
-  }
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
-
-  // Attaches to aTrack so that its audio content will be used as input.
-  void AttachToTrack(const RefPtr<MediaStreamTrack>& aTrack);
-
-  // Detaches from the currently attached track if there is one.
-  void DetachFromTrack();
-
-  // Attaches to the first available audio track in aMediaStream.
-  void AttachToFirstTrack(const RefPtr<DOMMediaStream>& aMediaStream);
-
-  // From DOMMediaStream::TrackListener.
-  void NotifyTrackAdded(const RefPtr<MediaStreamTrack>& aTrack) override;
-  void NotifyTrackRemoved(const RefPtr<MediaStreamTrack>& aTrack) override;
-
-  // From PrincipalChangeObserver<MediaStreamTrack>.
-  void PrincipalChanged(MediaStreamTrack* aMediaStreamTrack) override;
+  virtual void PrincipalChanged(DOMMediaStream* aMediaStream) override;
 
 protected:
-  explicit MediaStreamAudioSourceNode(AudioContext* aContext);
-  void Init(DOMMediaStream* aMediaStream, ErrorResult& aRv);
-  void Destroy();
   virtual ~MediaStreamAudioSourceNode();
 
 private:
-  RefPtr<MediaInputPort> mInputPort;
-  RefPtr<DOMMediaStream> mInputStream;
-
-  // On construction we set this to the first audio track of mInputStream.
-  RefPtr<MediaStreamTrack> mInputTrack;
+  nsRefPtr<MediaInputPort> mInputPort;
+  nsRefPtr<DOMMediaStream> mInputStream;
 };
 
 } // namespace dom

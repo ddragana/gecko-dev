@@ -73,14 +73,10 @@ document_resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* res
     return true;
 }
 
-static const JSClassOps document_classOps = {
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, document_resolve, nullptr
-};
-
 static const JSClass document_class = {
     "document", 0,
-    &document_classOps
+    nullptr, nullptr, nullptr, nullptr,
+    nullptr, document_resolve, nullptr
 };
 
 BEGIN_TEST(testLookup_bug570195)

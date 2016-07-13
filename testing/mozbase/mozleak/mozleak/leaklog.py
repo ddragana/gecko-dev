@@ -5,25 +5,15 @@
 
 import os
 import re
-import sys
-
-import mozinfo
-import mozrunner.utils
 
 
-def _get_default_logger():
-    from mozlog import get_default_logger
-    log = get_default_logger(component='mozleak')
-
-    if not log:
-        import logging
-        log = logging.getLogger(__name__)
-    return log
+def _raw_log():
+    import logging
+    return logging.getLogger(__name__)
 
 
 def process_single_leak_file(leakLogFileName, processType, leakThreshold,
-                             ignoreMissingLeaks, log=None,
-                             stackFixer=None):
+                             ignoreMissingLeaks, log=None):
     """Process a single leak log.
     """
 
@@ -37,7 +27,7 @@ def process_single_leak_file(leakLogFileName, processType, leakThreshold,
                         r"\s*-?\d+\s+(?P<numLeaked>-?\d+)")
     # The class name can contain spaces. We remove trailing whitespace later.
 
-    log = log or _get_default_logger()
+    log = log or _raw_log()
 
     processString = "%s process:" % processType
     crashedOnPurpose = False
@@ -54,8 +44,7 @@ def process_single_leak_file(leakLogFileName, processType, leakThreshold,
             matches = lineRe.match(line)
             if not matches:
                 # eg: the leak table header row
-                strippedLine = line.rstrip()
-                log.info(stackFixer(strippedLine) if stackFixer else strippedLine)
+                log.info(line.rstrip())
                 continue
             name = matches.group("name").rstrip()
             size = int(matches.group("size"))
@@ -92,8 +81,8 @@ def process_single_leak_file(leakLogFileName, processType, leakThreshold,
                 continue
             if name != "TOTAL" and numLeaked != 0 and recordLeakedObjects:
                 leakedObjectNames.append(name)
-                leakedObjectAnalysis.append("TEST-INFO | leakcheck | %s leaked %d %s"
-                                            % (processString, numLeaked, name))
+                leakedObjectAnalysis.append("TEST-INFO | leakcheck | %s leaked %d %s (%s bytes)"
+                                            % (processString, numLeaked, name, bytesLeaked))
 
     leakAnalysis.extend(leakedObjectAnalysis)
     if logAsWarning:
@@ -123,6 +112,7 @@ def process_single_leak_file(leakLogFileName, processType, leakThreshold,
                  processString)
         return
 
+    # totalBytesLeaked was seen and is non-zero.
     if totalBytesLeaked > leakThreshold:
         logAsWarning = True
         # Fail the run if we're over the threshold (which defaults to 0)
@@ -137,8 +127,6 @@ def process_single_leak_file(leakLogFileName, processType, leakThreshold,
     if len(leakedObjectNames) > maxSummaryObjects:
         leakedObjectSummary += ', ...'
 
-    # totalBytesLeaked will include any expected leaks, so it can be off
-    # by a few thousand bytes.
     if logAsWarning:
         log.warning("%s | leakcheck | %s %d bytes leaked (%s)"
                     % (prefix, processString, totalBytesLeaked, leakedObjectSummary))
@@ -148,8 +136,7 @@ def process_single_leak_file(leakLogFileName, processType, leakThreshold,
 
 
 def process_leak_log(leak_log_file, leak_thresholds=None,
-                     ignore_missing_leaks=None, log=None,
-                     stack_fixer=None):
+                     ignore_missing_leaks=None, log=None):
     """Process the leak log, including separate leak logs created
     by child processes.
 
@@ -174,7 +161,7 @@ def process_leak_log(leak_log_file, leak_thresholds=None,
     in the list ignore_missing_leaks.
     """
 
-    log = log or _get_default_logger()
+    log = log or _raw_log()
 
     leakLogFile = leak_log_file
     if not os.path.exists(leakLogFile):
@@ -219,4 +206,4 @@ def process_leak_log(leak_log_file, leak_thresholds=None,
             leakThreshold = leakThresholds.get(processType, 0)
             process_single_leak_file(thisFile, processType, leakThreshold,
                                      processType in ignoreMissingLeaks,
-                                     log=log, stackFixer=stack_fixer)
+                                     log=log)

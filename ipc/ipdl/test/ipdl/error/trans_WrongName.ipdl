@@ -1,8 +1,8 @@
 protocol trans_WrongName {
 
 child:
-    async Msg();
-    async __delete__();
+    Msg();
+    __delete__();
 
 state S1:
     call Msg goto S1;

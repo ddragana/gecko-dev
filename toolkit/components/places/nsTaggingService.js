@@ -66,7 +66,7 @@ TaggingService.prototype = {
     let stmt = db.createStatement(
       `SELECT id FROM moz_bookmarks
        WHERE parent = :tag_id
-       AND fk = (SELECT id FROM moz_places WHERE url_hash = hash(:page_url) AND url = :page_url)`
+       AND fk = (SELECT id FROM moz_places WHERE url = :page_url)`
     );
     stmt.params.tag_id = tagId;
     stmt.params.page_url = aURI.spec;
@@ -308,7 +308,7 @@ TaggingService.prototype = {
     return tags;
   },
 
-  __tagFolders: null,
+  __tagFolders: null, 
   get _tagFolders() {
     if (!this.__tagFolders) {
       this.__tagFolders = [];
@@ -380,7 +380,7 @@ TaggingService.prototype = {
     let stmt = db.createStatement(
       `SELECT id, parent
        FROM moz_bookmarks
-       WHERE fk = (SELECT id FROM moz_places WHERE url_hash = hash(:page_url) AND url = :page_url)`
+       WHERE fk = (SELECT id FROM moz_places WHERE url = :page_url)`
     );
     stmt.params.page_url = aURI.spec;
     try {
@@ -482,7 +482,7 @@ function TagAutoCompleteResult(searchString, searchResult,
 }
 
 TagAutoCompleteResult.prototype = {
-
+  
   /**
    * The original search string
    */
@@ -522,9 +522,7 @@ TagAutoCompleteResult.prototype = {
     return this._results.length;
   },
 
-  get typeAheadResult() {
-    return false;
-  },
+  get typeAheadResult() false,
 
   /**
    * Get the value of the result at the given index
@@ -595,7 +593,7 @@ function TagAutoCompleteSearch() {
 }
 
 TagAutoCompleteSearch.prototype = {
-  _stopped : false,
+  _stopped : false, 
 
   /*
    * Search for a given string and notify a listener (either synchronously
@@ -613,10 +611,10 @@ TagAutoCompleteSearch.prototype = {
     this._stopped = false;
 
     // only search on characters for the last tag
-    var index = Math.max(searchString.lastIndexOf(","),
+    var index = Math.max(searchString.lastIndexOf(","), 
       searchString.lastIndexOf(";"));
-    var before = '';
-    if (index != -1) {
+    var before = ''; 
+    if (index != -1) {  
       before = searchString.slice(0, index+1);
       searchString = searchString.slice(index+1);
       // skip past whitespace
@@ -633,10 +631,10 @@ TagAutoCompleteSearch.prototype = {
       listener.onSearchResult(self, newResult);
       return;
     }
-
+    
     var self = this;
     // generator: if yields true, not done
-    function* doSearch() {
+    function doSearch() {
       var i = 0;
       while (i < searchResults.length) {
         if (self._stopped)
@@ -644,11 +642,11 @@ TagAutoCompleteSearch.prototype = {
         // for each match, prepend what the user has typed so far
         if (searchResults[i].toLowerCase()
                             .indexOf(searchString.toLowerCase()) == 0 &&
-            !comments.includes(searchResults[i])) {
+            comments.indexOf(searchResults[i]) == -1) {
           results.push(before + searchResults[i]);
           comments.push(searchResults[i]);
         }
-
+    
         ++i;
 
         /* TODO: bug 481451
@@ -679,10 +677,11 @@ TagAutoCompleteSearch.prototype = {
       listener.onSearchResult(self, newResult);
       yield false;
     }
-
+    
     // chunk the search results via the generator
     var gen = doSearch();
-    while (gen.next().value);
+    while (gen.next());
+    gen.close();
   },
 
   /**
@@ -704,5 +703,5 @@ TagAutoCompleteSearch.prototype = {
   ])
 };
 
-var component = [TaggingService, TagAutoCompleteSearch];
+let component = [TaggingService, TagAutoCompleteSearch];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

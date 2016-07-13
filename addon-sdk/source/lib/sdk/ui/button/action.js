@@ -71,9 +71,7 @@ const ActionButton = Class({
     unregister(this);
   },
 
-  get id() {
-    return this.state().id;
-  },
+  get id() this.state().id,
 
   click: function click() { view.click(toWidgetId(this.id)) }
 });
@@ -85,14 +83,14 @@ getNodeView.define(ActionButton, button =>
   view.nodeFor(toWidgetId(button.id))
 );
 
-var actionButtonStateEvents = events.filter(stateEvents,
+let actionButtonStateEvents = events.filter(stateEvents,
   e => e.target instanceof ActionButton);
 
-var actionButtonViewEvents = events.filter(viewEvents,
+let actionButtonViewEvents = events.filter(viewEvents,
   e => buttons.has(e.target));
 
-var clickEvents = events.filter(actionButtonViewEvents, e => e.type === 'click');
-var updateEvents = events.filter(actionButtonViewEvents, e => e.type === 'update');
+let clickEvents = events.filter(actionButtonViewEvents, e => e.type === 'click');
+let updateEvents = events.filter(actionButtonViewEvents, e => e.type === 'update');
 
 on(clickEvents, 'data', ({target: id, window}) => {
   let button = buttons.get(id);

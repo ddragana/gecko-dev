@@ -22,7 +22,7 @@
 #include "nsContentUtils.h"
 #include "mozilla/Attributes.h"
 
-class nsReflowFrameRunnable : public mozilla::Runnable
+class nsReflowFrameRunnable : public nsRunnable
 {
 public:
   nsReflowFrameRunnable(nsIFrame* aFrame,
@@ -104,7 +104,7 @@ public:
 };
 
 NS_IMETHODIMP
-nsProgressMeterFrame::DoXULLayout(nsBoxLayoutState& aState)
+nsProgressMeterFrame::DoLayout(nsBoxLayoutState& aState)
 {
   if (mNeedsReflowCallback) {
     nsIReflowCallback* cb = new nsAsyncProgressMeterInit(this);
@@ -113,7 +113,7 @@ nsProgressMeterFrame::DoXULLayout(nsBoxLayoutState& aState)
     }
     mNeedsReflowCallback = false;
   }
-  return nsBoxFrame::DoXULLayout(aState);
+  return nsBoxFrame::DoLayout(aState);
 }
 
 nsresult
@@ -135,7 +135,7 @@ nsProgressMeterFrame::AttributeChanged(int32_t aNameSpaceID,
   if (nsGkAtoms::mode == aAttribute ||
       (!undetermined &&
        (nsGkAtoms::value == aAttribute || nsGkAtoms::max == aAttribute))) {
-    nsIFrame* barChild = PrincipalChildList().FirstChild();
+    nsIFrame* barChild = GetFirstPrincipalChild();
     if (!barChild) return NS_OK;
     nsIFrame* remainderChild = barChild->GetNextSibling();
     if (!remainderChild) return NS_OK;

@@ -21,13 +21,12 @@ public:
 
   PuppetBidiKeyboard();
 
-  void SetBidiKeyboardInfo(bool aIsLangRTL, bool aHaveBidiKeyboards);
+  void SetIsLangRTL(bool aIsLangRTL);
 
 private:
   ~PuppetBidiKeyboard();
 
   bool mIsLangRTL;
-  bool mHaveBidiKeyboards;
 };
 
 } // namespace widget

@@ -67,7 +67,7 @@ void* nsFloatManager::operator new(size_t aSize) CPP_THROW_NEW
     return sCachedFloatManagers[--sCachedFloatManagerCount];
   }
 
-  // The cache is empty, this means we have to create a new instance using
+  // The cache is empty, this means we haveto create a new instance using
   // the global |operator new|.
   return moz_xmalloc(aSize);
 }
@@ -115,7 +115,7 @@ void nsFloatManager::Shutdown()
 }
 
 #define CHECK_BLOCK_DIR(aWM) \
-  NS_ASSERTION((aWM).GetBlockDir() == mWritingMode.GetBlockDir(), \
+  NS_ASSERTION(aWM.GetBlockDir() == mWritingMode.value.GetBlockDir(), \
   "incompatible writing modes")
 
 nsFlowAreaRect
@@ -216,8 +216,7 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBOffset,
       }
 
       // Shrink our band's width if needed.
-      uint8_t floatStyle = fi.mFrame->StyleDisplay()->PhysicalFloats(aWM);
-      if (floatStyle == NS_STYLE_FLOAT_LEFT) {
+      if (fi.mFrame->StyleDisplay()->mFloats == NS_STYLE_FLOAT_LEFT) {
         // A left float
         nscoord lineRightEdge = fi.LineRight();
         if (lineRightEdge > lineLeft) {
@@ -275,7 +274,7 @@ nsFloatManager::AddFloat(nsIFrame* aFloatFrame, const LogicalRect& aMarginRect,
     info.mLeftBEnd = nscoord_MIN;
     info.mRightBEnd = nscoord_MIN;
   }
-  uint8_t floatStyle = aFloatFrame->StyleDisplay()->PhysicalFloats(aWM);
+  uint8_t floatStyle = aFloatFrame->StyleDisplay()->mFloats;
   NS_ASSERTION(floatStyle == NS_STYLE_FLOAT_LEFT ||
                floatStyle == NS_STYLE_FLOAT_RIGHT, "unexpected float");
   nscoord& sideBEnd = floatStyle == NS_STYLE_FLOAT_LEFT ? info.mLeftBEnd
@@ -311,8 +310,7 @@ nsFloatManager::CalculateRegionFor(WritingMode          aWM,
     // Preserve the right margin-edge for left floats and the left
     // margin-edge for right floats
     const nsStyleDisplay* display = aFloat->StyleDisplay();
-    uint8_t floatStyle = display->PhysicalFloats(aWM);
-    if ((NS_STYLE_FLOAT_LEFT == floatStyle) == aWM.IsBidiLTR()) {
+    if ((NS_STYLE_FLOAT_LEFT == display->mFloats) == aWM.IsBidiLTR()) {
       region.IStart(aWM) = region.IEnd(aWM);
     }
     region.ISize(aWM) = 0;
@@ -323,7 +321,7 @@ nsFloatManager::CalculateRegionFor(WritingMode          aWM,
   return region;
 }
 
-NS_DECLARE_FRAME_PROPERTY_DELETABLE(FloatRegionProperty, nsMargin)
+NS_DECLARE_FRAME_PROPERTY(FloatRegionProperty, DeleteValue<nsMargin>)
 
 LogicalRect
 nsFloatManager::GetRegionFor(WritingMode aWM, nsIFrame* aFloat,
@@ -350,7 +348,8 @@ nsFloatManager::StoreRegionFor(WritingMode aWM, nsIFrame* aFloat,
     props.Delete(FloatRegionProperty());
   }
   else {
-    nsMargin* storedMargin = props.Get(FloatRegionProperty());
+    nsMargin* storedMargin = static_cast<nsMargin*>
+      (props.Get(FloatRegionProperty()));
     if (!storedMargin) {
       storedMargin = new nsMargin();
       props.Set(FloatRegionProperty(), storedMargin);

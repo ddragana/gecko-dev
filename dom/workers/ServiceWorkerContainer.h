@@ -9,7 +9,7 @@
 
 #include "mozilla/DOMEventTargetHelper.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
@@ -29,12 +29,13 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServiceWorkerContainer, DOMEventTargetHelper)
 
   IMPL_EVENT_HANDLER(controllerchange)
+  IMPL_EVENT_HANDLER(reloadpage)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(message)
 
   static bool IsEnabled(JSContext* aCx, JSObject* aGlobal);
 
-  explicit ServiceWorkerContainer(nsPIDOMWindowInner* aWindow);
+  explicit ServiceWorkerContainer(nsPIDOMWindow* aWindow);
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -76,9 +77,9 @@ private:
 
   // This only changes when a worker hijacks everything in its scope by calling
   // claim.
-  RefPtr<workers::ServiceWorker> mControllerWorker;
+  nsRefPtr<workers::ServiceWorker> mControllerWorker;
 
-  RefPtr<Promise> mReadyPromise;
+  nsRefPtr<Promise> mReadyPromise;
 };
 
 } // namespace dom

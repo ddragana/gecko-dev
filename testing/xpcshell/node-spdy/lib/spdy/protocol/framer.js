@@ -4,8 +4,6 @@ var Buffer = require('buffer').Buffer;
 var EventEmitter = require('events').EventEmitter;
 var constants = require('./').constants;
 
-var empty = new Buffer(0);
-
 function Framer() {
   EventEmitter.call(this);
 
@@ -312,7 +310,7 @@ Framer.prototype.dataFrame = function dataFrame(id, fin, data, callback) {
   }
 
   if (!fin && !data.length)
-    return callback(null, empty);
+    return callback(null, []);
 
   var frame = new Buffer(8 + data.length);
 

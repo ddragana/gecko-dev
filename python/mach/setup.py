@@ -8,7 +8,7 @@ except:
     from distutils.core import setup
 
 
-VERSION = '0.6'
+VERSION = '0.3'
 
 README = open('README.rst').read()
 

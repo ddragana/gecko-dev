@@ -138,7 +138,9 @@ intel_AES_GCMContext *intel_AES_GCM_CreateContext(void *context,
     return gcm;
 
 loser:
-    PORT_Free(gcm);
+    if (gcm) {
+        PORT_Free(gcm);
+    }
     return NULL;
 }
 

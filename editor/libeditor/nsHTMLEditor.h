@@ -13,7 +13,6 @@
 #include "nsITableEditor.h"
 #include "nsIEditorMailSupport.h"
 #include "nsIEditorStyleSheets.h"
-#include "nsIEditorUtils.h"
 
 #include "nsEditor.h"
 #include "nsIDOMElement.h"
@@ -40,7 +39,6 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/StyleSheetHandle.h"
 
 class nsDocumentFragment;
 class nsIDOMKeyEvent;
@@ -49,16 +47,15 @@ class nsIClipboard;
 class TypeInState;
 class nsIContentFilter;
 class nsILinkHandler;
-class nsTableWrapperFrame;
+class nsTableOuterFrame;
 class nsIDOMRange;
 class nsRange;
 struct PropItem;
 
 namespace mozilla {
-template<class T> class OwningNonNull;
 namespace dom {
-class BlobImpl;
 class DocumentFragment;
+template<class T> class OwningNonNull;
 } // namespace dom
 namespace widget {
 struct IMEState;
@@ -103,7 +100,6 @@ public:
   nsHTMLEditor();
 
   bool GetReturnInParagraphCreatesNewParagraph();
-  Element* GetSelectionContainer();
 
   /* ------------ nsPlaintextEditor overrides -------------- */
   NS_IMETHOD GetIsDocumentEditable(bool *aIsDocumentEditable) override;
@@ -113,7 +109,7 @@ public:
   virtual already_AddRefed<nsIContent> GetFocusedContentForIME() override;
   virtual bool IsActiveInDOMWindow() override;
   virtual already_AddRefed<mozilla::dom::EventTarget> GetDOMEventTarget() override;
-  virtual Element* GetEditorRoot() override;
+  virtual mozilla::dom::Element* GetEditorRoot() override;
   virtual already_AddRefed<nsIContent> FindSelectionRoot(nsINode *aNode) override;
   virtual bool IsAcceptableInputEvent(nsIDOMEvent* aEvent) override;
   virtual already_AddRefed<nsIContent> GetInputEventTargetContent() override;
@@ -146,7 +142,7 @@ public:
 
   /* ------------ nsIHTMLEditor methods -------------- */
   nsresult CopyLastEditableChildStyles(nsIDOMNode *aPreviousBlock, nsIDOMNode *aNewBlock,
-                                       Element** aOutBrNode);
+                                         nsIDOMNode **aOutBrNode);
 
   nsresult LoadHTML(const nsAString &aInputString);
 
@@ -235,9 +231,8 @@ public:
   nsresult SetHTMLBackgroundColor(const nsAString& aColor);
 
   /* ------------ Block methods moved from nsEditor -------------- */
-  static Element* GetBlockNodeParent(nsINode* aNode);
-  static nsIDOMNode* GetBlockNodeParent(nsIDOMNode* aNode);
-  static Element* GetBlock(nsINode& aNode);
+  static already_AddRefed<mozilla::dom::Element> GetBlockNodeParent(nsINode* aNode);
+  static already_AddRefed<nsIDOMNode> GetBlockNodeParent(nsIDOMNode *aNode);
 
   void IsNextCharInNodeWhitespace(nsIContent* aContent,
                                   int32_t aOffset,
@@ -301,7 +296,7 @@ public:
   virtual bool IsContainer(nsIDOMNode* aNode) override;
 
   /** make the given selection span the entire document */
-  virtual nsresult SelectEntireDocument(Selection* aSelection) override;
+  virtual nsresult SelectEntireDocument(mozilla::dom::Selection* aSelection) override;
 
   NS_IMETHOD SetAttributeOrEquivalent(nsIDOMElement * aElement,
                                       const nsAString & aAttribute,
@@ -337,7 +332,7 @@ public:
   NS_IMETHOD GetRootElement(nsIDOMElement **aRootElement) override;
 
   /* ------------ nsICSSLoaderObserver -------------- */
-  NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheetHandle aSheet,
+  NS_IMETHOD StyleSheetLoaded(mozilla::CSSStyleSheet* aSheet,
                               bool aWasAlternate, nsresult aStatus) override;
 
   /* ------------ Utility Routines, not part of public API -------------- */
@@ -353,8 +348,8 @@ public:
   // This will stop at a table, however, since we don't want to
   //  "drill down" into nested tables.
   // aSelection is optional -- if null, we get current seletion
-  void CollapseSelectionToDeepestNonTableFirstChild(Selection* aSelection,
-                                                    nsINode* aNode);
+  void CollapseSelectionToDeepestNonTableFirstChild(
+                          mozilla::dom::Selection* aSelection, nsINode* aNode);
 
   /**
    * aNode must be a non-null text node.
@@ -382,13 +377,14 @@ public:
   bool     EnableExistingStyleSheet(const nsAString& aURL);
 
   // Dealing with the internal style sheet lists:
-  mozilla::StyleSheetHandle GetStyleSheetForURL(const nsAString& aURL);
-  void GetURLForStyleSheet(mozilla::StyleSheetHandle aStyleSheet,
-                           nsAString& aURL);
+  NS_IMETHOD GetStyleSheetForURL(const nsAString &aURL,
+                                 mozilla::CSSStyleSheet** _retval) override;
+  NS_IMETHOD GetURLForStyleSheet(mozilla::CSSStyleSheet* aStyleSheet,
+                                 nsAString& aURL) override;
 
   // Add a url + known style sheet to the internal lists:
   nsresult AddNewStyleSheetToList(const nsAString &aURL,
-                                  mozilla::StyleSheetHandle aStyleSheet);
+                                  mozilla::CSSStyleSheet* aStyleSheet);
 
   nsresult RemoveStyleSheetFromList(const nsAString &aURL);
 
@@ -398,7 +394,7 @@ public:
     return mCSSAware && mHTMLCSSUtils && mHTMLCSSUtils->IsCSSPrefChecked();
   }
 
-  static bool HasAttributes(Element* aElement)
+  static bool HasAttributes(mozilla::dom::Element* aElement)
   {
     MOZ_ASSERT(aElement);
     uint32_t attrCount = aElement->GetAttrCount();
@@ -407,30 +403,6 @@ public:
   }
 
 protected:
-  class BlobReader final : public nsIEditorBlobListener
-  {
-  public:
-    BlobReader(mozilla::dom::BlobImpl* aBlob, nsHTMLEditor* aEditor,
-               bool aIsSafe, nsIDOMDocument* aSourceDoc,
-               nsIDOMNode* aDestinationNode, int32_t aDestOffset,
-               bool aDoDeleteSelection);
-
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIEDITORBLOBLISTENER
-
-  private:
-    ~BlobReader()
-    {
-    }
-
-    RefPtr<mozilla::dom::BlobImpl> mBlob;
-    RefPtr<nsHTMLEditor> mEditor;
-    bool mIsSafe;
-    nsCOMPtr<nsIDOMDocument> mSourceDoc;
-    nsCOMPtr<nsIDOMNode> mDestinationNode;
-    int32_t mDestOffset;
-    bool mDoDeleteSelection;
-  };
 
   NS_IMETHOD  InitRules() override;
 
@@ -453,8 +425,8 @@ protected:
 
   // key event helpers
   NS_IMETHOD TabInTable(bool inIsShift, bool *outHandled);
-  Element* CreateBR(nsINode* aNode, int32_t aOffset,
-                    EDirection aSelect = eNone);
+  already_AddRefed<mozilla::dom::Element> CreateBR(nsINode* aNode,
+      int32_t aOffset, EDirection aSelect = eNone);
   NS_IMETHOD CreateBR(nsIDOMNode *aNode, int32_t aOffset,
                       nsCOMPtr<nsIDOMNode> *outBRNode, nsIEditor::EDirection aSelect = nsIEditor::eNone) override;
 
@@ -476,12 +448,13 @@ protected:
   // Move all contents from aCellToMerge into aTargetCell (append at end)
   NS_IMETHOD MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell, nsCOMPtr<nsIDOMElement> aCellToMerge, bool aDeleteCellToMerge);
 
-  nsresult DeleteTable2(nsIDOMElement* aTable, Selection* aSelection);
+  nsresult DeleteTable2(nsIDOMElement* aTable,
+                        mozilla::dom::Selection* aSelection);
   NS_IMETHOD SetColSpan(nsIDOMElement *aCell, int32_t aColSpan);
   NS_IMETHOD SetRowSpan(nsIDOMElement *aCell, int32_t aRowSpan);
 
-  // Helper used to get nsTableWrapperFrame for a table.
-  nsTableWrapperFrame* GetTableFrame(nsIDOMElement* aTable);
+  // Helper used to get nsTableOuterFrame for a table.
+  nsTableOuterFrame* GetTableFrame(nsIDOMElement* aTable);
   // Needed to do appropriate deleting when last cell or row is about to be deleted
   // This doesn't count cells that don't start in the given row (are spanning from row above)
   int32_t  GetNumberOfCellsInRow(nsIDOMElement* aTable, int32_t rowIndex);
@@ -489,17 +462,17 @@ protected:
   bool AllCellsInRowSelected(nsIDOMElement *aTable, int32_t aRowIndex, int32_t aNumberOfColumns);
   bool AllCellsInColumnSelected(nsIDOMElement *aTable, int32_t aColIndex, int32_t aNumberOfRows);
 
-  bool IsEmptyCell(Element* aCell);
+  bool IsEmptyCell(mozilla::dom::Element* aCell);
 
   // Most insert methods need to get the same basic context data
   // Any of the pointers may be null if you don't need that datum (for more efficiency)
   // Input: *aCell is a known cell,
   //        if null, cell is obtained from the anchor node of the selection
   // Returns NS_EDITOR_ELEMENT_NOT_FOUND if cell is not found even if aCell is null
-  nsresult GetCellContext(Selection** aSelection, nsIDOMElement** aTable,
-                          nsIDOMElement** aCell, nsIDOMNode** aCellParent,
-                          int32_t* aCellOffset, int32_t* aRowIndex,
-                          int32_t* aColIndex);
+  nsresult GetCellContext(mozilla::dom::Selection** aSelection,
+                          nsIDOMElement** aTable, nsIDOMElement** aCell,
+                          nsIDOMNode** aCellParent, int32_t* aCellOffset,
+                          int32_t* aRowIndex, int32_t* aColIndex);
 
   NS_IMETHOD GetCellSpansAt(nsIDOMElement* aTable, int32_t aRowIndex, int32_t aColIndex,
                             int32_t& aActualRowSpan, int32_t& aActualColSpan);
@@ -518,12 +491,13 @@ protected:
 
   // Fallback method: Call this after using ClearSelection() and you
   //  failed to set selection to some other content in the document
-  nsresult SetSelectionAtDocumentStart(Selection* aSelection);
+  nsresult SetSelectionAtDocumentStart(mozilla::dom::Selection* aSelection);
 
 // End of Table Editing utilities
 
-  static Element* GetEnclosingTable(nsINode* aNode);
-  static nsIDOMNode* GetEnclosingTable(nsIDOMNode *aNode);
+  static already_AddRefed<mozilla::dom::Element>
+    GetEnclosingTable(nsINode* aNode);
+  static nsCOMPtr<nsIDOMNode> GetEnclosingTable(nsIDOMNode *aNode);
 
   /** content-based query returns true if <aProperty aAttribute=aValue> effects aNode
     * If <aProperty aAttribute=aValue> contains aNode,
@@ -578,12 +552,11 @@ protected:
 
   // factored methods for handling insertion of data from transferables (drag&drop or clipboard)
   NS_IMETHOD PrepareTransferable(nsITransferable **transferable) override;
-  nsresult PrepareHTMLTransferable(nsITransferable **transferable);
+  nsresult PrepareHTMLTransferable(nsITransferable **transferable, bool havePrivFlavor);
   nsresult InsertFromTransferable(nsITransferable *transferable,
                                     nsIDOMDocument *aSourceDoc,
                                     const nsAString & aContextStr,
                                     const nsAString & aInfoStr,
-                                    bool havePrivateHTMLFlavor,
                                     nsIDOMNode *aDestinationNode,
                                     int32_t aDestinationOffset,
                                     bool aDoDeleteSelection);
@@ -623,7 +596,7 @@ protected:
                            mozilla::dom::DocumentFragment** aFragment,
                            bool aTrustedInput);
   void       CreateListOfNodesToPaste(mozilla::dom::DocumentFragment& aFragment,
-                                      nsTArray<OwningNonNull<nsINode>>& outNodeList,
+                                      nsTArray<mozilla::dom::OwningNonNull<nsINode>>& outNodeList,
                                       nsINode* aStartNode,
                                       int32_t aStartOffset,
                                       nsINode* aEndNode,
@@ -632,24 +605,25 @@ protected:
                           nsIDOMNode *aNode);
   enum class StartOrEnd { start, end };
   void GetListAndTableParents(StartOrEnd aStartOrEnd,
-                              nsTArray<OwningNonNull<nsINode>>& aNodeList,
-                              nsTArray<OwningNonNull<Element>>& outArray);
-  int32_t DiscoverPartialListsAndTables(nsTArray<OwningNonNull<nsINode>>& aPasteNodes,
-                                        nsTArray<OwningNonNull<Element>>& aListsAndTables);
+                              nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodeList,
+                              nsTArray<mozilla::dom::OwningNonNull<mozilla::dom::Element>>& outArray);
+  int32_t DiscoverPartialListsAndTables(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aPasteNodes,
+                                        nsTArray<mozilla::dom::OwningNonNull<mozilla::dom::Element>>& aListsAndTables);
   nsINode* ScanForListAndTableStructure(StartOrEnd aStartOrEnd,
-                                        nsTArray<OwningNonNull<nsINode>>& aNodes,
-                                        Element& aListOrTable);
+                                        nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodes,
+                                        mozilla::dom::Element& aListOrTable);
   void ReplaceOrphanedStructure(StartOrEnd aStartOrEnd,
-                                nsTArray<OwningNonNull<nsINode>>& aNodeArray,
-                                nsTArray<OwningNonNull<Element>>& aListAndTableArray,
+                                nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodeArray,
+                                nsTArray<mozilla::dom::OwningNonNull<mozilla::dom::Element>>& aListAndTableArray,
                                 int32_t aHighWaterMark);
 
   /* small utility routine to test if a break node is visible to user */
   bool     IsVisBreak(nsINode* aNode);
+  bool     IsVisBreak(nsIDOMNode *aNode);
 
   /* utility routine to possibly adjust the insertion position when
      inserting a block level element */
-  void NormalizeEOLInsertPosition(nsINode* firstNodeToInsert,
+  void NormalizeEOLInsertPosition(nsIDOMNode *firstNodeToInsert,
                                   nsCOMPtr<nsIDOMNode> *insertParentNode,
                                   int32_t *insertOffset);
 
@@ -665,15 +639,15 @@ protected:
   nsresult RelativeFontChange(FontSize aDir);
 
   /* helper routines for font size changing */
-  nsresult RelativeFontChangeOnTextNode(FontSize aDir,
-                                        Text& aTextNode,
-                                        int32_t aStartOffset,
-                                        int32_t aEndOffset);
+  nsresult RelativeFontChangeOnTextNode( int32_t aSizeChange,
+                                         nsIDOMCharacterData *aTextNode,
+                                         int32_t aStartOffset,
+                                         int32_t aEndOffset);
   nsresult RelativeFontChangeOnNode(int32_t aSizeChange, nsIContent* aNode);
   nsresult RelativeFontChangeHelper(int32_t aSizeChange, nsINode* aNode);
 
   /* helper routines for inline style */
-  nsresult SetInlinePropertyOnTextNode(Text& aData,
+  nsresult SetInlinePropertyOnTextNode(mozilla::dom::Text& aData,
                                        int32_t aStartOffset,
                                        int32_t aEndOffset,
                                        nsIAtom& aProperty,
@@ -684,17 +658,22 @@ protected:
                                    const nsAString* aAttribute,
                                    const nsAString& aValue);
 
-  nsresult PromoteInlineRange(nsRange& aRange);
-  nsresult PromoteRangeIfStartsOrEndsInNamedAnchor(nsRange& aRange);
+  nsresult PromoteInlineRange(nsRange* aRange);
+  nsresult PromoteRangeIfStartsOrEndsInNamedAnchor(nsRange* aRange);
   nsresult SplitStyleAboveRange(nsRange* aRange,
                                 nsIAtom *aProperty,
                                 const nsAString *aAttribute);
-  nsresult SplitStyleAbovePoint(nsCOMPtr<nsINode>* aNode, int32_t* aOffset,
-                                nsIAtom* aProperty,
-                                const nsAString* aAttribute,
-                                nsIContent** aOutLeftNode = nullptr,
-                                nsIContent** aOutRightNode = nullptr);
+  nsresult SplitStyleAbovePoint(nsCOMPtr<nsIDOMNode> *aNode,
+                                int32_t *aOffset,
+                                nsIAtom *aProperty,
+                                const nsAString *aAttribute,
+                                nsCOMPtr<nsIDOMNode> *outLeftNode = nullptr,
+                                nsCOMPtr<nsIDOMNode> *outRightNode = nullptr);
   nsresult ApplyDefaultProperties();
+  nsresult RemoveStyleInside(nsIDOMNode *aNode,
+                             nsIAtom *aProperty,
+                             const nsAString *aAttribute,
+                             const bool aChildrenOnly = false);
   nsresult RemoveStyleInside(nsIContent& aNode,
                              nsIAtom* aProperty,
                              const nsAString* aAttribute,
@@ -702,12 +681,14 @@ protected:
   nsresult RemoveInlinePropertyImpl(nsIAtom* aProperty,
                                     const nsAString* aAttribute);
 
-  bool NodeIsProperty(nsINode& aNode);
-  bool IsAtFrontOfNode(nsINode& aNode, int32_t aOffset);
-  bool IsAtEndOfNode(nsINode& aNode, int32_t aOffset);
+  bool NodeIsProperty(nsIDOMNode *aNode);
+  bool HasAttr(nsIDOMNode *aNode, const nsAString *aAttribute);
+  bool IsAtFrontOfNode(nsIDOMNode *aNode, int32_t aOffset);
+  bool IsAtEndOfNode(nsIDOMNode *aNode, int32_t aOffset);
+  bool IsOnlyAttribute(nsIDOMNode *aElement, const nsAString *aAttribute);
   bool IsOnlyAttribute(const nsIContent* aElement, const nsAString& aAttribute);
 
-  nsresult RemoveBlockContainer(nsIContent& aNode);
+  nsresult RemoveBlockContainer(nsIDOMNode *inNode);
 
   nsIContent* GetPriorHTMLSibling(nsINode* aNode);
   nsresult GetPriorHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
@@ -747,8 +728,8 @@ protected:
                                  bool* aAll,
                                  nsAString* outValue,
                                  bool aCheckDefaults = true);
-  bool HasStyleOrIdOrClass(Element* aElement);
-  nsresult RemoveElementIfNoStyleOrIdOrClass(Element& aElement);
+  bool HasStyleOrIdOrClass(mozilla::dom::Element* aElement);
+  nsresult RemoveElementIfNoStyleOrIdOrClass(mozilla::dom::Element& aElement);
 
   // Whether the outer window of the DOM event target has focus or not.
   bool     OurWindowHasFocus();
@@ -774,17 +755,18 @@ protected:
                                    bool aTrustedInput,
                                    bool aClearStyle = true);
 
-  nsresult ClearStyle(nsCOMPtr<nsINode>* aNode, int32_t* aOffset,
+  nsresult ClearStyle(nsCOMPtr<nsIDOMNode>* aNode, int32_t* aOffset,
                       nsIAtom* aProperty, const nsAString* aAttribute);
 
-  void SetElementPosition(Element& aElement, int32_t aX, int32_t aY);
+  void SetElementPosition(mozilla::dom::Element& aElement,
+                          int32_t aX, int32_t aY);
 
 // Data members
 protected:
 
-  nsTArray<OwningNonNull<nsIContentFilter>> mContentFilters;
+  nsTArray<mozilla::dom::OwningNonNull<nsIContentFilter>> mContentFilters;
 
-  RefPtr<TypeInState>        mTypeInState;
+  nsRefPtr<TypeInState>        mTypeInState;
 
   bool mCRInParagraphCreatesParagraph;
 
@@ -799,7 +781,7 @@ protected:
 
   // Maintain a list of associated style sheets and their urls.
   nsTArray<nsString> mStyleSheetURLs;
-  nsTArray<mozilla::StyleSheetHandle::RefPtr> mStyleSheets;
+  nsTArray<nsRefPtr<mozilla::CSSStyleSheet>> mStyleSheets;
 
   // an array for holding default style settings
   nsTArray<PropItem*> mDefaultStyles;
@@ -810,7 +792,7 @@ protected:
   void     RemoveListenerAndDeleteRef(const nsAString& aEvent,
                                       nsIDOMEventListener* aListener,
                                       bool aUseCapture,
-                                      Element* aElement,
+                                      mozilla::dom::Element* aElement,
                                       nsIContent* aParentContent,
                                       nsIPresShell* aShell);
   void     DeleteRefToAnonymousNode(nsIDOMElement* aElement,
@@ -852,27 +834,27 @@ protected:
 
   /* RESIZING */
 
-  nsCOMPtr<Element> mTopLeftHandle;
-  nsCOMPtr<Element> mTopHandle;
-  nsCOMPtr<Element> mTopRightHandle;
-  nsCOMPtr<Element> mLeftHandle;
-  nsCOMPtr<Element> mRightHandle;
-  nsCOMPtr<Element> mBottomLeftHandle;
-  nsCOMPtr<Element> mBottomHandle;
-  nsCOMPtr<Element> mBottomRightHandle;
+  nsCOMPtr<mozilla::dom::Element> mTopLeftHandle;
+  nsCOMPtr<mozilla::dom::Element> mTopHandle;
+  nsCOMPtr<mozilla::dom::Element> mTopRightHandle;
+  nsCOMPtr<mozilla::dom::Element> mLeftHandle;
+  nsCOMPtr<mozilla::dom::Element> mRightHandle;
+  nsCOMPtr<mozilla::dom::Element> mBottomLeftHandle;
+  nsCOMPtr<mozilla::dom::Element> mBottomHandle;
+  nsCOMPtr<mozilla::dom::Element> mBottomRightHandle;
 
-  nsCOMPtr<Element> mActivatedHandle;
+  nsCOMPtr<mozilla::dom::Element> mActivatedHandle;
 
-  nsCOMPtr<Element> mResizingShadow;
-  nsCOMPtr<Element> mResizingInfo;
+  nsCOMPtr<mozilla::dom::Element> mResizingShadow;
+  nsCOMPtr<mozilla::dom::Element> mResizingInfo;
 
-  nsCOMPtr<Element> mResizedObject;
+  nsCOMPtr<mozilla::dom::Element> mResizedObject;
 
   nsCOMPtr<nsIDOMEventListener>  mMouseMotionListenerP;
   nsCOMPtr<nsISelectionListener> mSelectionListenerP;
   nsCOMPtr<nsIDOMEventListener>  mResizeEventListenerP;
 
-  nsTArray<OwningNonNull<nsIHTMLObjectResizeListener>> mObjectResizeEventListeners;
+  nsTArray<mozilla::dom::OwningNonNull<nsIHTMLObjectResizeListener>> mObjectResizeEventListeners;
 
   int32_t mOriginalX;
   int32_t mOriginalY;
@@ -897,17 +879,18 @@ protected:
 
   nsresult SetAllResizersPosition();
 
-  already_AddRefed<Element> CreateResizer(int16_t aLocation,
-                                          nsIDOMNode* aParentNode);
+  already_AddRefed<mozilla::dom::Element>
+    CreateResizer(int16_t aLocation, nsIDOMNode* aParentNode);
   void     SetAnonymousElementPosition(int32_t aX, int32_t aY, nsIDOMElement *aResizer);
 
-  already_AddRefed<Element> CreateShadow(nsIDOMNode* aParentNode,
-                                         nsIDOMElement* aOriginalObject);
-  nsresult SetShadowPosition(Element* aShadow, Element* aOriginalObject,
+  already_AddRefed<mozilla::dom::Element>
+    CreateShadow(nsIDOMNode* aParentNode, nsIDOMElement* aOriginalObject);
+  nsresult SetShadowPosition(mozilla::dom::Element* aShadow,
+                             mozilla::dom::Element* aOriginalObject,
                              int32_t aOriginalObjectX,
                              int32_t aOriginalObjectY);
 
-  already_AddRefed<Element> CreateResizingInfo(nsIDOMNode* aParentNode);
+  already_AddRefed<mozilla::dom::Element> CreateResizingInfo(nsIDOMNode* aParentNode);
   nsresult SetResizingInfoPosition(int32_t aX, int32_t aY,
                                    int32_t aW, int32_t aH);
 
@@ -935,13 +918,13 @@ protected:
   int32_t mPositionedObjectBorderLeft;
   int32_t mPositionedObjectBorderTop;
 
-  nsCOMPtr<Element> mAbsolutelyPositionedObject;
-  nsCOMPtr<Element> mGrabber;
-  nsCOMPtr<Element> mPositioningShadow;
+  nsCOMPtr<mozilla::dom::Element> mAbsolutelyPositionedObject;
+  nsCOMPtr<mozilla::dom::Element> mGrabber;
+  nsCOMPtr<mozilla::dom::Element> mPositioningShadow;
 
   int32_t      mGridSize;
 
-  already_AddRefed<Element> CreateGrabber(nsINode* aParentNode);
+  already_AddRefed<mozilla::dom::Element> CreateGrabber(nsINode* aParentNode);
   nsresult StartMoving(nsIDOMElement * aHandle);
   nsresult SetFinalPosition(int32_t aX, int32_t aY);
   void     AddPositioningOffset(int32_t & aX, int32_t & aY);
@@ -990,9 +973,9 @@ private:
   void DoContentInserted(nsIDocument* aDocument, nsIContent* aContainer,
                          nsIContent* aChild, int32_t aIndexInContainer,
                          InsertedOrAppended aInsertedOrAppended);
-  already_AddRefed<Element> GetElementOrParentByTagName(
+  already_AddRefed<mozilla::dom::Element> GetElementOrParentByTagName(
       const nsAString& aTagName, nsINode* aNode);
-  already_AddRefed<Element> CreateElementWithDefaults(
+  already_AddRefed<mozilla::dom::Element> CreateElementWithDefaults(
       const nsAString& aTagName);
 };
 #endif //nsHTMLEditor_h__

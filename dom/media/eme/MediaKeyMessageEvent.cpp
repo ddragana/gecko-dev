@@ -32,7 +32,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MediaKeyMessageEvent, Event)
   tmp->mMessage = nullptr;
-  mozilla::DropJSObjects(this);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaKeyMessageEvent)
@@ -67,7 +66,7 @@ MediaKeyMessageEvent::Constructor(EventTarget* aOwner,
                                   MediaKeyMessageType aMessageType,
                                   const nsTArray<uint8_t>& aMessage)
 {
-  RefPtr<MediaKeyMessageEvent> e = new MediaKeyMessageEvent(aOwner);
+  nsRefPtr<MediaKeyMessageEvent> e = new MediaKeyMessageEvent(aOwner);
   e->InitEvent(NS_LITERAL_STRING("message"), false, false);
   e->mMessageType = aMessageType;
   e->mRawMessage = aMessage;
@@ -82,7 +81,7 @@ MediaKeyMessageEvent::Constructor(const GlobalObject& aGlobal,
                                   ErrorResult& aRv)
 {
   nsCOMPtr<EventTarget> owner = do_QueryInterface(aGlobal.GetAsSupports());
-  RefPtr<MediaKeyMessageEvent> e = new MediaKeyMessageEvent(owner);
+  nsRefPtr<MediaKeyMessageEvent> e = new MediaKeyMessageEvent(owner);
   bool trusted = e->Init(owner);
   e->InitEvent(aType, aEventInitDict.mBubbles, aEventInitDict.mCancelable);
   const uint8_t* data = nullptr;
@@ -110,7 +109,6 @@ MediaKeyMessageEvent::GetMessage(JSContext* cx,
 {
   if (!mMessage) {
     mMessage = ArrayBuffer::Create(cx,
-                                   this,
                                    mRawMessage.Length(),
                                    mRawMessage.Elements());
     if (!mMessage) {

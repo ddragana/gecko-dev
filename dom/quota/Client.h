@@ -111,7 +111,7 @@ public:
   virtual void
   ReleaseIOThreadObjects() = 0;
 
-  // Methods which are called on the background thred.
+  // Methods which are called on the main thred.
   virtual void
   AbortOperations(const nsACString& aOrigin) = 0;
 
@@ -119,10 +119,7 @@ public:
   AbortOperationsForProcess(ContentParentId aContentParentId) = 0;
 
   virtual void
-  StartIdleMaintenance() = 0;
-
-  virtual void
-  StopIdleMaintenance() = 0;
+  PerformIdleMaintenance() = 0;
 
   virtual void
   ShutdownWorkThreads() = 0;

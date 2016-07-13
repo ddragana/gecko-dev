@@ -20,7 +20,7 @@ function run_test() {
 
   // Test fixtures
   Service.identity.username = "johndoe";
-  do_check_true(xps.enabled);
+  do_check_false(xps.enabled);
 
   Cu.import("resource://services-sync/service.js");
 
@@ -29,7 +29,7 @@ function run_test() {
 
   _("Engines are registered.");
   let engines = Service.engineManager.getAll();
-  do_check_true(Utils.deepEquals(engines.map(engine => engine.name),
+  do_check_true(Utils.deepEquals([engine.name for each (engine in engines)],
                                  ['tabs', 'bookmarks', 'forms', 'history']));
 
   _("Observers are notified of startup");
@@ -45,4 +45,10 @@ function run_test() {
     Svc.Prefs.resetBranch("");
     do_test_finished();
   });
+
+  do_check_false(xps.enabled);
+
+  Service.identity.account = "johndoe";
+  Service.clusterURL = "http://localhost/";
+  do_check_true(xps.enabled);
 }

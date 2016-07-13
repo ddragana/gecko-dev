@@ -11,16 +11,10 @@
 # include <io.h>
   typedef WCHAR NS_tchar;
 # define NS_main wmain
-# ifndef F_OK
-#   define F_OK 00
-# endif
-# ifndef W_OK
-#   define W_OK 02
-# endif
-# ifndef R_OK
-#   define R_OK 04
-# endif
-# if defined(_MSC_VER) && _MSC_VER < 1900
+# define F_OK 00
+# define W_OK 02
+# define R_OK 04
+# if _MSC_VER < 1900
 #  define stat _stat
 # endif
 # define NS_T(str) L ## str
@@ -40,7 +34,6 @@
 # define LOG_S "%S"
 
 #include "../common/updatehelper.h"
-#include "../common/certificatecheck.h"
 
 #else
 # include <unistd.h>
@@ -139,6 +132,45 @@ CheckMsg(const NS_tchar *path, const char *expected)
   return isMatch;
 }
 
+#ifdef XP_WIN
+/**
+ * Verifies the trust of the specified file path.
+ *
+ * @param  filePath  The file path to check.
+ * @return ERROR_SUCCESS if successful, or the last error code otherwise.
+ */
+DWORD
+VerifyCertificateTrustForFile(LPCWSTR filePath)
+{
+  // Setup the file to check.
+  WINTRUST_FILE_INFO fileToCheck;
+  ZeroMemory(&fileToCheck, sizeof(fileToCheck));
+  fileToCheck.cbStruct = sizeof(WINTRUST_FILE_INFO);
+  fileToCheck.pcwszFilePath = filePath;
+
+  // Setup what to check, we want to check it is signed and trusted.
+  WINTRUST_DATA trustData;
+  ZeroMemory(&trustData, sizeof(trustData));
+  trustData.cbStruct = sizeof(trustData);
+  trustData.pPolicyCallbackData = nullptr;
+  trustData.pSIPClientData = nullptr;
+  trustData.dwUIChoice = WTD_UI_NONE;
+  trustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+  trustData.dwUnionChoice = WTD_CHOICE_FILE;
+  trustData.dwStateAction = 0;
+  trustData.hWVTStateData = nullptr;
+  trustData.pwszURLReference = nullptr;
+  // no UI
+  trustData.dwUIContext = 0;
+  trustData.pFile = &fileToCheck;
+
+  GUID policyGUID = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+  // Check if the file is signed by something that is trusted.
+  return WinVerifyTrust(nullptr, &policyGUID, &trustData);
+}
+
+#endif
+
 int NS_main(int argc, NS_tchar **argv)
 {
   if (argc == 2) {
@@ -155,16 +187,6 @@ int NS_main(int argc, NS_tchar **argv)
       NS_tchar runFilePath[MAXPATHLEN];
       NS_tsnprintf(runFilePath, sizeof(runFilePath)/sizeof(runFilePath[0]),
                    NS_T("%s.running"), exePath);
-#ifdef XP_WIN
-      if (!NS_taccess(runFilePath, F_OK)) {
-        // This makes it possible to check if the post update process was
-        // launched twice which happens when the service performs an update.
-        NS_tchar runFilePathBak[MAXPATHLEN];
-        NS_tsnprintf(runFilePathBak, sizeof(runFilePathBak)/sizeof(runFilePathBak[0]),
-                     NS_T("%s.bak"), runFilePath);
-        MoveFileExW(runFilePath, runFilePathBak, MOVEFILE_REPLACE_EXISTING);
-      }
-#endif
       WriteMsg(runFilePath, "running");
 
       if (!NS_tstrcmp(argv[1], NS_T("post-update-sync"))) {
@@ -217,7 +239,7 @@ int NS_main(int argc, NS_tchar **argv)
   }
 
   if (!NS_tstrcmp(argv[1], NS_T("check-signature"))) {
-#if defined(XP_WIN) && defined(MOZ_MAINTENANCE_SERVICE)
+#ifdef XP_WIN
     if (ERROR_SUCCESS == VerifyCertificateTrustForFile(argv[2])) {
       return 0;
     } else {
@@ -245,9 +267,7 @@ int NS_main(int argc, NS_tchar **argv)
       NS_tfputs(NS_T("test"), file);
       fclose(file);
     }
-    if (symlink(path, argv[5]) != 0) {
-      return 1;
-    }
+    symlink(path, argv[5]);
     NS_tsnprintf(path, sizeof(path)/sizeof(path[0]),
                  NS_T("%s/%s"), NS_T("/tmp"), argv[2]);
     if (argc > 6 && !NS_tstrcmp(argv[6], NS_T("change-perm"))) {
@@ -321,16 +341,6 @@ int NS_main(int argc, NS_tchar **argv)
     } else {
       return 2;
     }
-#else
-    // Not implemented on non-Windows platforms
-    return 1;
-#endif
-  }
-
-  if (!NS_tstrcmp(argv[1], NS_T("is-process-running"))) {
-#ifdef XP_WIN
-    LPCWSTR application = argv[2];
-    return (ERROR_NOT_FOUND == IsProcessRunning(application)) ? 0 : 1;
 #else
     // Not implemented on non-Windows platforms
     return 1;

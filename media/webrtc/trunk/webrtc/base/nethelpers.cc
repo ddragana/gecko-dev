@@ -60,8 +60,6 @@ int ResolveHostname(const std::string& hostname, int family,
 AsyncResolver::AsyncResolver() : error_(-1) {
 }
 
-AsyncResolver::~AsyncResolver() = default;
-
 void AsyncResolver::Start(const SocketAddress& addr) {
   addr_ = addr;
   // SignalThred Start will kickoff the resolve process.
@@ -80,14 +78,6 @@ bool AsyncResolver::GetResolvedAddress(int family, SocketAddress* addr) const {
     }
   }
   return false;
-}
-
-int AsyncResolver::GetError() const {
-  return error_;
-}
-
-void AsyncResolver::Destroy(bool wait) {
-  SignalThread::Destroy(wait);
 }
 
 void AsyncResolver::DoWork() {

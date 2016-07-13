@@ -8,7 +8,6 @@ var evalInFrame = (function (global) {
   };
 })(this);
 var x = 5;
-{
-  let x = eval("this.x++");
+let (x = eval("x++")) {
   evalInFrame(0, ("for (var x = 0; x < 3; ++x) { (function(){})() } "))
 }

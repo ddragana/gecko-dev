@@ -4,12 +4,11 @@ config = {
     "default_vcs": "tc-vcs",
     "default_actions": [
         'checkout-sources',
-        'get-blobs',
         'build',
         'build-symbols',
         'make-updates',
         'prep-upload',
-        #'submit-to-balrog'
+        'submit-to-balrog'
     ],
     "balrog_credentials_file": "balrog_credentials",
     "nightly_build": True,
@@ -39,7 +38,6 @@ config = {
         "GAIA_OPTIMIZE": "1",
         "WGET_OPTS": "-c -q"
     },
-    "update_types": [ "ota" ],
     "is_automation": True,
     "repo_remote_mappings": {
         'https://android.googlesource.com/': 'https://git.mozilla.org/external/aosp',
@@ -51,5 +49,4 @@ config = {
         'http://android.git.linaro.org/git-ro/': 'https://git.mozilla.org/external/linaro',
         'git://github.com/apitrace/': 'https://git.mozilla.org/external/apitrace',
     },
-    "download_tooltool": True,
 }

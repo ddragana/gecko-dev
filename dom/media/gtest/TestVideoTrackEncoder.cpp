@@ -9,7 +9,6 @@
 #include "VP8TrackEncoder.h"
 #include "ImageContainer.h"
 #include "MediaStreamGraph.h"
-#include "MediaStreamListener.h"
 #include "WebMWriter.h" // TODO: it's weird to include muxer header to get the class definition of VP8 METADATA
 
 using ::testing::TestWithParam;
@@ -46,7 +45,7 @@ public:
     return mImageSize;
   }
 
-  void Generate(nsTArray<RefPtr<Image> > &aImages)
+  void Generate(nsTArray<nsRefPtr<Image> > &aImages)
   {
     aImages.AppendElement(CreateI420Image());
     aImages.AppendElement(CreateNV12Image());
@@ -56,9 +55,8 @@ public:
 private:
   Image *CreateI420Image()
   {
-    PlanarYCbCrImage *image = new RecyclingPlanarYCbCrImage(new BufferRecycleBin());
+    PlanarYCbCrImage *image = new PlanarYCbCrImage(new BufferRecycleBin());
     PlanarYCbCrData data;
-    data.mPicSize = mImageSize;
 
     const uint32_t yPlaneSize = mImageSize.width * mImageSize.height;
     const uint32_t halfWidth = (mImageSize.width + 1) / 2;
@@ -88,15 +86,14 @@ private:
     data.mCbCrSize.width = halfWidth;
     data.mCbCrSize.height = halfHeight;
 
-    image->CopyData(data);
+    image->SetData(data);
     return image;
   }
 
   Image *CreateNV12Image()
   {
-    PlanarYCbCrImage *image = new RecyclingPlanarYCbCrImage(new BufferRecycleBin());
+    PlanarYCbCrImage *image = new PlanarYCbCrImage(new BufferRecycleBin());
     PlanarYCbCrData data;
-    data.mPicSize = mImageSize;
 
     const uint32_t yPlaneSize = mImageSize.width * mImageSize.height;
     const uint32_t halfWidth = (mImageSize.width + 1) / 2;
@@ -125,15 +122,14 @@ private:
     data.mCbCrSize.width = halfWidth;
     data.mCbCrSize.height = halfHeight;
 
-    image->CopyData(data);
+    image->SetData(data);
     return image;
   }
 
   Image *CreateNV21Image()
   {
-    PlanarYCbCrImage *image = new RecyclingPlanarYCbCrImage(new BufferRecycleBin());
+    PlanarYCbCrImage *image = new PlanarYCbCrImage(new BufferRecycleBin());
     PlanarYCbCrData data;
-    data.mPicSize = mImageSize;
 
     const uint32_t yPlaneSize = mImageSize.width * mImageSize.height;
     const uint32_t halfWidth = (mImageSize.width + 1) / 2;
@@ -162,7 +158,7 @@ private:
     data.mCbCrSize.width = halfWidth;
     data.mCbCrSize.height = halfHeight;
 
-    image->CopyData(data);
+    image->SetData(data);
     return image;
   }
 
@@ -240,8 +236,8 @@ TEST(VP8VideoTrackEncoder, FetchMetaData)
     TestVP8TrackEncoder encoder;
     EXPECT_TRUE(encoder.TestInit(params[i]));
 
-    RefPtr<TrackMetadataBase> meta = encoder.GetMetadata();
-    RefPtr<VP8Metadata> vp8Meta(static_cast<VP8Metadata*>(meta.get()));
+    nsRefPtr<TrackMetadataBase> meta = encoder.GetMetadata();
+    nsRefPtr<VP8Metadata> vp8Meta(static_cast<VP8Metadata*>(meta.get()));
 
     // METADATA should be depend on how to initiate encoder.
     EXPECT_TRUE(vp8Meta->mWidth == params[i].mWidth);
@@ -261,7 +257,7 @@ TEST(VP8VideoTrackEncoder, FrameEncode)
   encoder.TestInit(param);
 
   // Create YUV images as source.
-  nsTArray<RefPtr<Image>> images;
+  nsTArray<nsRefPtr<Image>> images;
   YUVBufferGenerator generator;
   generator.Init(mozilla::gfx::IntSize(640, 480));
   generator.Generate(images);
@@ -269,13 +265,10 @@ TEST(VP8VideoTrackEncoder, FrameEncode)
   // Put generated YUV frame into video segment.
   // Duration of each frame is 1 second.
   VideoSegment segment;
-  for (nsTArray<RefPtr<Image>>::size_type i = 0; i < images.Length(); i++)
+  for (nsTArray<nsRefPtr<Image>>::size_type i = 0; i < images.Length(); i++)
   {
-    RefPtr<Image> image = images[i];
-    segment.AppendFrame(image.forget(),
-                        mozilla::StreamTime(90000),
-                        generator.GetSize(),
-                        PRINCIPAL_HANDLE_NONE);
+    nsRefPtr<Image> image = images[i];
+    segment.AppendFrame(image.forget(), mozilla::StreamTime(90000), generator.GetSize());
   }
 
   // track change notification.
@@ -297,7 +290,7 @@ TEST(VP8VideoTrackEncoder, EncodeComplete)
 
   // track end notification.
   VideoSegment segment;
-  encoder.NotifyQueuedTrackChanges(nullptr, 0, 0, TrackEventCommand::TRACK_EVENT_ENDED, segment);
+  encoder.NotifyQueuedTrackChanges(nullptr, 0, 0, MediaStreamListener::TRACK_EVENT_ENDED, segment);
 
   // Pull Encoded Data back from encoder. Since we have sent
   // EOS to encoder, encoder.GetEncodedTrack should return

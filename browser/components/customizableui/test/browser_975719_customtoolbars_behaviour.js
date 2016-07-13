@@ -4,16 +4,7 @@
 
 "use strict";
 
-requestLongerTimeout(2);
-
-const kXULWidgetId = "a-test-button"; // we'll create a button with this ID.
-
-add_task(function setup() {
-  // create a XUL button and add it to the palette.
-  createDummyXULButton(kXULWidgetId, "test-button");
-});
-
-add_task(function* customizeToolbarAndKeepIt() {
+add_task(function customizeToolbarAndKeepIt() {
   ok(gNavToolbox.toolbarset, "There should be a toolbarset");
   let toolbarID = "testAustralisCustomToolbar";
   gNavToolbox.appendCustomToolbar(toolbarID, "");
@@ -84,7 +75,7 @@ add_task(function* customizeToolbarAndKeepIt() {
   is(cuiAreaType, null, "CustomizableUI should have forgotten all about the area");
 });
 
-add_task(function* resetShouldDealWithCustomToolbars() {
+add_task(function resetShouldDealWithCustomToolbars() {
   ok(gNavToolbox.toolbarset, "There should be a toolbarset");
   let toolbarID = "testAustralisCustomToolbar";
   gNavToolbox.appendCustomToolbar(toolbarID, "");
@@ -106,11 +97,11 @@ add_task(function* resetShouldDealWithCustomToolbars() {
     return;
   }
   ok(!CustomizableUI.getWidgetIdsInArea(toolbarDOMID).length, "There should be no widgets in the area yet.");
-  CustomizableUI.addWidgetToArea(kXULWidgetId, toolbarDOMID, 0);
+  CustomizableUI.addWidgetToArea("sync-button", toolbarDOMID, 0);
   ok(toolbarElement.hasChildNodes(), "Toolbar should now have a button.");
-  assertAreaPlacements(toolbarDOMID, [kXULWidgetId]);
+  assertAreaPlacements(toolbarDOMID, ["sync-button"]);
 
-  gNavToolbox.toolbarset.setAttribute("toolbar2", `${toolbarID}:${kXULWidgetId}`);
+  gNavToolbox.toolbarset.setAttribute("toolbar2", toolbarID + ":sync-button");
   document.persist(gNavToolbox.toolbarset.id, "toolbar2");
 
   let newWindow = yield openAndLoadWindow({}, true);
@@ -127,9 +118,9 @@ add_task(function* resetShouldDealWithCustomToolbars() {
   yield promiseWindowClosed(newWindow);
 
   ok(CustomizableUI.inDefaultState, "Should be in default state after reset.");
-  let xulButton = document.getElementById(kXULWidgetId);
-  ok(!xulButton, "XUL button shouldn't be in the document anymore.");
-  ok(gNavToolbox.palette.querySelector(`#${kXULWidgetId}`), "XUL button should be in the palette");
+  let syncButton = document.getElementById("sync-button");
+  ok(!syncButton, "Sync button shouldn't be in the document anymore.");
+  ok(gNavToolbox.palette.querySelector("#sync-button"), "Sync button should be in the palette");
   ok(!toolbarElement.hasChildNodes(), "Toolbar should have no more child nodes.");
   ok(!toolbarElement.parentNode, "Toolbar should no longer be in the DOM.");
   cuiAreaType = CustomizableUI.getAreaType(toolbarDOMID);
@@ -137,7 +128,7 @@ add_task(function* resetShouldDealWithCustomToolbars() {
 });
 
 
-add_task(function*() {
+add_task(function() {
   let newWin = yield openAndLoadWindow({}, true);
   ok(!newWin.gNavToolbox.toolbarset.hasAttribute("toolbar1"), "New window shouldn't have attribute toolbar1");
   ok(!newWin.gNavToolbox.toolbarset.hasAttribute("toolbar2"), "New window shouldn't have attribute toolbar2");

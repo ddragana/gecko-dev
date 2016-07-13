@@ -26,10 +26,9 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TVChannel, DOMEventTargetHelper)
 
-  static already_AddRefed<TVChannel>
-  Create(nsPIDOMWindowInner* aWindow,
-         TVSource* aSource,
-         nsITVChannelData* aData);
+  static already_AddRefed<TVChannel> Create(nsPIDOMWindow* aWindow,
+                                            TVSource* aSource,
+                                            nsITVChannelData* aData);
 
   // WebIDL (internal functions)
 
@@ -63,7 +62,7 @@ public:
   bool IsFree() const;
 
 private:
-  TVChannel(nsPIDOMWindowInner* aWindow,
+  TVChannel(nsPIDOMWindow* aWindow,
             TVSource* aSource);
 
   ~TVChannel();
@@ -71,7 +70,7 @@ private:
   bool Init(nsITVChannelData* aData);
 
   nsCOMPtr<nsITVService> mTVService;
-  RefPtr<TVSource> mSource;
+  nsRefPtr<TVSource> mSource;
   nsString mNetworkId;
   nsString mTransportStreamId;
   nsString mServiceId;

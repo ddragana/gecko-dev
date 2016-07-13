@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,6 +13,7 @@
 #include "base/time.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Mutex.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIThreadInternal.h"
 
@@ -31,7 +30,7 @@ class MessagePump : public base::MessagePumpDefault
   friend class DoWorkRunnable;
 
 public:
-  explicit MessagePump(nsIThread* aThread);
+  MessagePump();
 
   // From base::MessagePump.
   virtual void
@@ -49,9 +48,6 @@ public:
   virtual void
   ScheduleDelayedWork(const base::TimeTicks& aDelayedWorkTime) override;
 
-  virtual nsIEventTarget*
-  GetXPCOMThread() override;
-
 protected:
   virtual ~MessagePump();
 
@@ -60,23 +56,21 @@ private:
   void DoDelayedWork(base::MessagePump::Delegate* aDelegate);
 
 protected:
-  nsIThread* mThread;
-
   // mDelayedWorkTimer and mThread are set in Run() by this class or its
   // subclasses.
   nsCOMPtr<nsITimer> mDelayedWorkTimer;
+  nsIThread* mThread;
 
 private:
   // Only accessed by this class.
-  RefPtr<DoWorkRunnable> mDoWorkEvent;
+  nsRefPtr<DoWorkRunnable> mDoWorkEvent;
 };
 
 class MessagePumpForChildProcess final: public MessagePump
 {
 public:
   MessagePumpForChildProcess()
-    : MessagePump(nullptr),
-      mFirstRun(true)
+  : mFirstRun(true)
   { }
 
   virtual void Run(base::MessagePump::Delegate* aDelegate) override;
@@ -91,8 +85,7 @@ private:
 class MessagePumpForNonMainThreads final : public MessagePump
 {
 public:
-  explicit MessagePumpForNonMainThreads(nsIThread* aThread)
-    : MessagePump(aThread)
+  MessagePumpForNonMainThreads()
   { }
 
   virtual void Run(base::MessagePump::Delegate* aDelegate) override;
@@ -112,33 +105,30 @@ class MessagePumpForNonMainUIThreads final:
 public:
   // We don't want xpcom refing, chromium controls our lifetime via
   // RefCountedThreadSafe.
-  NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override {
+  NS_IMETHOD_(MozExternalRefCountType) AddRef(void) {
     return 2;
   }
-  NS_IMETHOD_(MozExternalRefCountType) Release(void) override  {
+  NS_IMETHOD_(MozExternalRefCountType) Release(void) {
     return 1;
   }
-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override;
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
 
   NS_DECL_NSITHREADOBSERVER
 
 public:
-  explicit MessagePumpForNonMainUIThreads(nsIThread* aThread) :
+  MessagePumpForNonMainUIThreads() :
+    mThread(nullptr),
     mInWait(false),
     mWaitLock("mInWait")
   {
   }
 
   // The main run loop for this thread.
-  virtual void DoRunLoop() override;
-
-  virtual nsIEventTarget*
-  GetXPCOMThread() override
-  {
-    return nullptr; // not sure what to do with this one
-  }
+  virtual void DoRunLoop();
 
 protected:
+  nsIThread* mThread;
+
   void SetInWait() {
     MutexAutoLock lock(mWaitLock);
     mInWait = true;

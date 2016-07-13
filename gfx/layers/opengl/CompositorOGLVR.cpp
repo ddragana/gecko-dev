@@ -18,8 +18,10 @@
 #include "GLUploadHelpers.h"
 #include "Layers.h"                     // for WriteSnapshotToDumpFile
 #include "LayerScope.h"                 // for LayerScope
+#include "gfx2DGlue.h"                  // for ThebesFilter
 #include "gfxCrashReporterUtils.h"      // for ScopedGfxFeatureReporter
 #include "gfxMatrix.h"                  // for gfxMatrix
+#include "GraphicsFilter.h"             // for GraphicsFilter
 #include "gfxPlatform.h"                // for gfxPlatform
 #include "gfxPrefs.h"                   // for gfxPrefs
 #include "gfxRect.h"                    // for gfxRect
@@ -204,7 +206,7 @@ CompositorOGL::DestroyVR(GLContext *gl)
 
 void
 CompositorOGL::DrawVRDistortion(const gfx::Rect& aRect,
-                                const gfx::IntRect& aClipRect,
+                                const gfx::Rect& aClipRect,
                                 const EffectChain& aEffectChain,
                                 gfx::Float aOpacity,
                                 const gfx::Matrix4x4& aTransform)
@@ -227,6 +229,8 @@ CompositorOGL::DrawVRDistortion(const gfx::Rect& aRect,
 
   RefPtr<CompositingRenderTargetOGL> surface =
     static_cast<CompositingRenderTargetOGL*>(vrEffect->mRenderTarget.get());
+
+  gfx::IntSize size = surface->GetInitSize(); // XXX source->GetSize()
 
   VRHMDInfo* hmdInfo = vrEffect->mHMD;
   VRDistortionConstants shaderConstants;
@@ -278,20 +282,19 @@ CompositorOGL::DrawVRDistortion(const gfx::Rect& aRect,
   surface->BindTexture(LOCAL_GL_TEXTURE0, mFBOTextureTarget);
   gl()->fUniform1i(mVR.mUTexture[programIndex], 0);
 
-  Rect destRect = aTransform.TransformBounds(aRect);
-  gfx::IntSize preDistortionSize = surface->GetInitSize(); // XXX source->GetSize()
-  gfx::Size vpSize = destRect.Size();
+  gfx::IntSize vpSizeInt = mCurrentRenderTarget->GetInitSize();
+  gfx::Size vpSize(vpSizeInt.width, vpSizeInt.height);
 
   for (uint32_t eye = 0; eye < 2; eye++) {
     gfx::IntRect eyeViewport;
-    eyeViewport.x = eye * preDistortionSize.width / 2;
+    eyeViewport.x = eye * size.width / 2;
     eyeViewport.y = 0;
-    eyeViewport.width = preDistortionSize.width / 2;
-    eyeViewport.height = preDistortionSize.height;
+    eyeViewport.width = size.width / 2;
+    eyeViewport.height = size.height;
 
     hmdInfo->FillDistortionConstants(eye,
-                                     preDistortionSize, eyeViewport,
-                                     vpSize, destRect,
+                                     size, eyeViewport,
+                                     vpSize, aRect,
                                      shaderConstants);
 
     float height = 1.0f;
@@ -300,11 +303,11 @@ CompositorOGL::DrawVRDistortion(const gfx::Rect& aRect,
                                    shaderConstants.eyeToSourceScaleAndOffset[2],
                                    shaderConstants.eyeToSourceScaleAndOffset[3] };
     if (textureTarget == LOCAL_GL_TEXTURE_RECTANGLE_ARB) {
-      texScaleAndOffset[0] *= preDistortionSize.width;
-      texScaleAndOffset[1] *= preDistortionSize.height;
-      texScaleAndOffset[2] *= preDistortionSize.width;
-      texScaleAndOffset[3] *= preDistortionSize.height;
-      height = preDistortionSize.height;
+      texScaleAndOffset[0] *= size.width;
+      texScaleAndOffset[1] *= size.height;
+      texScaleAndOffset[2] *= size.width;
+      texScaleAndOffset[3] *= size.height;
+      height = size.height;
     }
 
     gl()->fUniform4fv(mVR.mUVRDestionatinScaleAndOffset[programIndex], 1, shaderConstants.destinationScaleAndOffset);

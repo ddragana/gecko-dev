@@ -59,25 +59,25 @@ public:
 
 #define SET_COORD(aX, aY, coord, isHorizontal) if (isHorizontal) { aX = (coord); } else { aY  = (coord); }
 
-nsresult NS_NewSprocketLayout(nsCOMPtr<nsBoxLayout>& aNewLayout);
+nsresult NS_NewSprocketLayout(nsIPresShell* aPresShell, nsCOMPtr<nsBoxLayout>& aNewLayout);
 
 class nsSprocketLayout : public nsBoxLayout {
 
 public:
 
-  friend nsresult NS_NewSprocketLayout(nsCOMPtr<nsBoxLayout>& aNewLayout);
+  friend nsresult NS_NewSprocketLayout(nsIPresShell* aPresShell, nsCOMPtr<nsBoxLayout>& aNewLayout);
   static void Shutdown();
 
-  NS_IMETHOD XULLayout(nsIFrame* aBox, nsBoxLayoutState& aState) override;
+  NS_IMETHOD Layout(nsIFrame* aBox, nsBoxLayoutState& aState) override;
 
-  virtual nsSize GetXULPrefSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetXULMinSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetXULMaxSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
   virtual nscoord GetAscent(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
 
   nsSprocketLayout();
 
-  static bool IsXULHorizontal(nsIFrame* aBox);
+  static bool IsHorizontal(nsIFrame* aBox);
 
   static void SetLargestSize(nsSize& aSize1, const nsSize& aSize2, bool aIsHorizontal);
   static void SetSmallestSize(nsSize& aSize1, const nsSize& aSize2, bool aIsHorizontal);

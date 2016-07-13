@@ -14,6 +14,7 @@
 @class UIWindow;
 @class UIView;
 @class ChildView;
+class gfxASurface;
 
 class nsWindow :
     public nsBaseWidget
@@ -29,10 +30,10 @@ public:
     // nsIWidget
     //
 
-    NS_IMETHOD Create(nsIWidget* aParent,
+    NS_IMETHOD Create(nsIWidget *aParent,
                       nsNativeWidget aNativeParent,
-                      const LayoutDeviceIntRect& aRect,
-                      nsWidgetInitData* aInitData = nullptr) override;
+                      const nsIntRect &aRect,
+                      nsWidgetInitData *aInitData = nullptr) override;
     NS_IMETHOD Destroy() override;
     NS_IMETHOD Show(bool aState) override;
     NS_IMETHOD              Enable(bool aState) override {
@@ -46,7 +47,7 @@ public:
         return mVisible;
     }
     NS_IMETHOD              SetFocus(bool aState=false) override;
-    virtual LayoutDeviceIntPoint WidgetToScreenOffset() override;
+    virtual mozilla::LayoutDeviceIntPoint WidgetToScreenOffset() override;
 
     virtual void SetBackgroundColor(const nscolor &aColor) override;
     virtual void* GetNativeData(uint32_t aDataType) override;
@@ -56,14 +57,14 @@ public:
     NS_IMETHOD              Move(double aX, double aY) override;
     NS_IMETHOD              PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
                                         nsIWidget *aWidget, bool aActivate) override;
-    NS_IMETHOD              SetSizeMode(nsSizeMode aMode) override;
+    NS_IMETHOD              SetSizeMode(int32_t aMode) override;
     void                    EnteredFullScreen(bool aFullScreen);
     NS_IMETHOD              Resize(double aWidth, double aHeight, bool aRepaint) override;
     NS_IMETHOD              Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
-    NS_IMETHOD              GetScreenBounds(LayoutDeviceIntRect& aRect) override;
+    NS_IMETHOD              GetScreenBounds(nsIntRect &aRect) override;
     void                    ReportMoveEvent();
     void                    ReportSizeEvent();
-    void                    ReportSizeModeEvent(nsSizeMode aMode);
+    void                    ReportSizeModeEvent(int32_t aMode);
 
     CGFloat                 BackingScaleFactor();
     void                    BackingScaleFactorChanged();
@@ -80,7 +81,7 @@ public:
         return NS_OK;
     }
 
-    NS_IMETHOD Invalidate(const LayoutDeviceIntRect& aRect) override;
+    NS_IMETHOD Invalidate(const nsIntRect &aRect) override;
     virtual nsresult ConfigureChildren(const nsTArray<Configuration>& aConfigurations) override;
     NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
                              nsEventStatus& aStatus) override;
@@ -90,7 +91,7 @@ public:
     }
 
     void WillPaintWindow();
-    bool PaintWindow(LayoutDeviceIntRegion aRegion);
+    bool PaintWindow(nsIntRegion aRegion);
 
     bool HasModalDescendents() { return false; }
 
@@ -125,7 +126,7 @@ protected:
     nsWindow* mParent;
     InputContext         mInputContext;
 
-    void OnSizeChanged(const mozilla::gfx::IntSize& aSize);
+    void OnSizeChanged(const gfxIntSize& aSize);
 
     static void DumpWindows();
     static void DumpWindows(const nsTArray<nsWindow*>& wins, int indent = 0);

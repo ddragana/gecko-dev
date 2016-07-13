@@ -65,8 +65,8 @@ public:
 protected:
   virtual ~HTMLMetaElement();
 
-private:
-  nsresult SetMetaReferrer(nsIDocument* aDocument);
+  virtual void GetItemValueText(DOMString& text) override;
+  virtual void SetItemValueText(const nsAString& text) override;
 };
 
 } // namespace dom

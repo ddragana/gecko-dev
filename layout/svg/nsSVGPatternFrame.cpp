@@ -23,6 +23,7 @@
 #include "nsSVGUtils.h"
 #include "nsSVGAnimatedTransformList.h"
 #include "SVGContentUtils.h"
+#include "gfxColor.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -31,7 +32,7 @@ using namespace mozilla::gfx;
 //----------------------------------------------------------------------
 // Helper classes
 
-class MOZ_RAII nsSVGPatternFrame::AutoPatternReferencer
+class MOZ_STACK_CLASS nsSVGPatternFrame::AutoPatternReferencer
 {
 public:
   explicit AutoPatternReferencer(nsSVGPatternFrame *aFrame
@@ -55,10 +56,10 @@ private:
 //----------------------------------------------------------------------
 // Implementation
 
-nsSVGPatternFrame::nsSVGPatternFrame(nsStyleContext* aContext)
-  : nsSVGPaintServerFrame(aContext)
-  , mLoopFlag(false)
-  , mNoHRefURI(false)
+nsSVGPatternFrame::nsSVGPatternFrame(nsStyleContext* aContext) :
+  nsSVGPatternFrameBase(aContext),
+  mLoopFlag(false),
+  mNoHRefURI(false)
 {
 }
 
@@ -88,13 +89,13 @@ nsSVGPatternFrame::AttributeChanged(int32_t         aNameSpaceID,
   if (aNameSpaceID == kNameSpaceID_XLink &&
       aAttribute == nsGkAtoms::href) {
     // Blow away our reference, if any
-    Properties().Delete(nsSVGEffects::HrefAsPaintingProperty());
+    Properties().Delete(nsSVGEffects::HrefProperty());
     mNoHRefURI = false;
     // And update whoever references us
     nsSVGEffects::InvalidateDirectRenderingObservers(this);
   }
 
-  return nsSVGPaintServerFrame::AttributeChanged(aNameSpaceID,
+  return nsSVGPatternFrameBase::AttributeChanged(aNameSpaceID,
                                                  aAttribute, aModType);
 }
 
@@ -106,7 +107,7 @@ nsSVGPatternFrame::Init(nsIContent*       aContent,
 {
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::pattern), "Content is not an SVG pattern");
 
-  nsSVGPaintServerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGPatternFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -372,17 +373,16 @@ nsSVGPatternFrame::PaintPattern(const DrawTarget* aDrawTarget,
 
   RefPtr<DrawTarget> dt =
     aDrawTarget->CreateSimilarDrawTarget(surfaceSize, SurfaceFormat::B8G8R8A8);
-  if (!dt || !dt->IsValid()) {
+  if (!dt) {
     return nullptr;
   }
   dt->ClearRect(Rect(0, 0, surfaceSize.width, surfaceSize.height));
 
-  RefPtr<gfxContext> gfx = gfxContext::CreateOrNull(dt);
-  MOZ_ASSERT(gfx); // already checked the draw target above
+  nsRefPtr<gfxContext> gfx = new gfxContext(dt);
 
   if (aGraphicOpacity != 1.0f) {
     gfx->Save();
-    gfx->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, aGraphicOpacity);
+    gfx->PushGroup(gfxContentType::COLOR_ALPHA);
   }
 
   // OK, now render -- note that we use "firstKid", which
@@ -408,7 +408,7 @@ nsSVGPatternFrame::PaintPattern(const DrawTarget* aDrawTarget,
       gfxMatrix tm = *(patternWithChildren->mCTM);
       if (kid->GetContent()->IsSVGElement()) {
         tm = static_cast<nsSVGElement*>(kid->GetContent())->
-               PrependLocalTransformsTo(tm, eUserSpaceToParent);
+              PrependLocalTransformsTo(tm, nsSVGElement::eUserSpaceToParent);
       }
       nsSVGUtils::PaintFrameWithEffects(kid, *gfx, tm);
     }
@@ -418,7 +418,8 @@ nsSVGPatternFrame::PaintPattern(const DrawTarget* aDrawTarget,
   patternWithChildren->mSource = nullptr;
 
   if (aGraphicOpacity != 1.0f) {
-    gfx->PopGroupAndBlend();
+    gfx->PopGroupToSource();
+    gfx->Paint(aGraphicOpacity);
     gfx->Restore();
   }
 
@@ -546,8 +547,8 @@ nsSVGPatternFrame::GetReferencedPattern()
   if (mNoHRefURI)
     return nullptr;
 
-  nsSVGPaintingProperty *property =
-    Properties().Get(nsSVGEffects::HrefAsPaintingProperty());
+  nsSVGPaintingProperty *property = static_cast<nsSVGPaintingProperty*>
+    (Properties().Get(nsSVGEffects::HrefProperty()));
 
   if (!property) {
     // Fetch our pattern element's xlink:href attribute
@@ -563,11 +564,10 @@ nsSVGPatternFrame::GetReferencedPattern()
     nsCOMPtr<nsIURI> targetURI;
     nsCOMPtr<nsIURI> base = mContent->GetBaseURI();
     nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
-                                              mContent->GetUncomposedDoc(), base);
+                                              mContent->GetCurrentDoc(), base);
 
     property =
-      nsSVGEffects::GetPaintingProperty(targetURI, this,
-                                        nsSVGEffects::HrefAsPaintingProperty());
+      nsSVGEffects::GetPaintingProperty(targetURI, this, nsSVGEffects::HrefProperty());
     if (!property)
       return nullptr;
   }
@@ -705,7 +705,7 @@ nsSVGPatternFrame::GetPaintServerPattern(nsIFrame *aSource,
                                          const gfxRect *aOverrideBounds)
 {
   if (aGraphicOpacity == 0.0f) {
-    RefPtr<gfxPattern> pattern = new gfxPattern(Color());
+    nsRefPtr<gfxPattern> pattern = new gfxPattern(gfxRGBA(0, 0, 0, 0));
     return pattern.forget();
   }
 
@@ -719,12 +719,12 @@ nsSVGPatternFrame::GetPaintServerPattern(nsIFrame *aSource,
     return nullptr;
   }
 
-  RefPtr<gfxPattern> pattern = new gfxPattern(surface, pMatrix);
+  nsRefPtr<gfxPattern> pattern = new gfxPattern(surface, pMatrix);
 
   if (!pattern || pattern->CairoStatus())
     return nullptr;
 
-  pattern->SetExtend(ExtendMode::REPEAT);
+  pattern->SetExtend(gfxPattern::EXTEND_REPEAT);
   return pattern.forget();
 }
 

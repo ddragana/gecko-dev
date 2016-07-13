@@ -17,20 +17,18 @@
 #ifndef nsScreenManagerGonk_h___
 #define nsScreenManagerGonk_h___
 
+#include "mozilla/Hal.h"
+
 #include "cutils/properties.h"
 #include "hardware/hwcomposer.h"
-
 #include "libdisplay/GonkDisplay.h"
-#include "mozilla/Atomics.h"
-#include "mozilla/Hal.h"
-#include "mozilla/Mutex.h"
 #include "nsBaseScreen.h"
 #include "nsCOMPtr.h"
 #include "nsIScreenManager.h"
-#include "nsProxyRelease.h"
 
 #include <android/native_window.h>
 
+class nsRunnable;
 class nsWindow;
 
 namespace android {
@@ -39,34 +37,20 @@ namespace android {
 };
 
 namespace mozilla {
-    class Runnable;
 namespace gl {
     class GLContext;
 }
-namespace layers {
-class CompositorVsyncScheduler;
-class CompositorBridgeParent;
 }
-}
-
-enum class NotifyDisplayChangedEvent : int8_t {
-  Observable,
-  Suppressed
-};
 
 class nsScreenGonk : public nsBaseScreen
 {
     typedef mozilla::hal::ScreenConfiguration ScreenConfiguration;
     typedef mozilla::GonkDisplay GonkDisplay;
-    typedef mozilla::LayoutDeviceIntRect LayoutDeviceIntRect;
-    typedef mozilla::layers::CompositorBridgeParent CompositorBridgeParent;
-    typedef mozilla::gfx::DrawTarget DrawTarget;
 
 public:
     nsScreenGonk(uint32_t aId,
                  GonkDisplay::DisplayType aDisplayType,
-                 const GonkDisplay::NativeData& aNativeData,
-                 NotifyDisplayChangedEvent aEventVisibility);
+                 const GonkDisplay::NativeData& aNativeData);
 
     ~nsScreenGonk();
 
@@ -79,21 +63,14 @@ public:
     NS_IMETHOD SetRotation(uint32_t  aRotation);
 
     uint32_t GetId();
-    NotifyDisplayChangedEvent GetEventVisibility();
-    LayoutDeviceIntRect GetRect();
+    nsIntRect GetRect();
     float GetDpi();
     int32_t GetSurfaceFormat();
     ANativeWindow* GetNativeWindow();
-    LayoutDeviceIntRect GetNaturalBounds();
+    nsIntRect GetNaturalBounds();
     uint32_t EffectiveScreenRotation();
     ScreenConfiguration GetConfiguration();
     bool IsPrimaryScreen();
-
-    already_AddRefed<DrawTarget> StartRemoteDrawing();
-    void EndRemoteDrawing();
-
-    nsresult MakeSnapshot(ANativeWindowBuffer* aBuffer);
-    void SetCompositorBridgeParent(CompositorBridgeParent* aCompositorBridgeParent);
 
 #if ANDROID_VERSION >= 17
     android::DisplaySurface* GetDisplaySurface();
@@ -110,75 +87,30 @@ public:
         return mTopWindows;
     }
 
-    // Non-primary screen only
-    bool EnableMirroring();
-    bool DisableMirroring();
-    bool IsMirroring()
-    {
-        return mIsMirroring;
-    }
-
-    // Primary screen only
-    bool SetMirroringScreen(nsScreenGonk* aScreen);
-    bool ClearMirroringScreen(nsScreenGonk* aScreen);
-
-    // Called only on compositor thread
+    // Set EGL info of primary display. Used for BLIT Composition.
     void SetEGLInfo(hwc_display_t aDisplay, hwc_surface_t aSurface,
                     mozilla::gl::GLContext* aGLContext);
-    hwc_display_t GetEGLDisplay();
-    hwc_surface_t GetEGLSurface();
-    already_AddRefed<mozilla::gl::GLContext> GetGLContext();
-    void UpdateMirroringWidget(already_AddRefed<nsWindow>& aWindow); // Primary screen only
-    nsWindow* GetMirroringWidget(); // Primary screen only
+    hwc_display_t GetDpy();
+    hwc_surface_t GetSur();
 
 protected:
-    ANativeWindowBuffer* DequeueBuffer();
-    bool QueueBuffer(ANativeWindowBuffer* buf);
-
     uint32_t mId;
-    NotifyDisplayChangedEvent mEventVisibility;
     int32_t mColorDepth;
     android::sp<ANativeWindow> mNativeWindow;
     float mDpi;
     int32_t mSurfaceFormat;
-    LayoutDeviceIntRect mNaturalBounds; // Screen bounds w/o rotation taken into account.
-    LayoutDeviceIntRect mVirtualBounds; // Screen bounds w/ rotation taken into account.
+    nsIntRect mNaturalBounds; // Screen bounds w/o rotation taken into account.
+    nsIntRect mVirtualBounds; // Screen bounds w/ rotation taken into account.
     uint32_t mScreenRotation;
     uint32_t mPhysicalScreenRotation;
     nsTArray<nsWindow*> mTopWindows;
 #if ANDROID_VERSION >= 17
     android::sp<android::DisplaySurface> mDisplaySurface;
 #endif
-    bool mIsMirroring; // Non-primary screen only
-    RefPtr<nsScreenGonk> mMirroringScreen; // Primary screen only
-    mozilla::Atomic<CompositorBridgeParent*> mCompositorBridgeParent;
-
-    // Accessed and updated only on compositor thread
     GonkDisplay::DisplayType mDisplayType;
-    hwc_display_t mEGLDisplay;
-    hwc_surface_t mEGLSurface;
-    RefPtr<mozilla::gl::GLContext> mGLContext;
-    RefPtr<nsWindow> mMirroringWidget; // Primary screen only
-
-    // If we're using a BasicCompositor, these fields are temporarily
-    // set during frame composition.  They wrap the hardware
-    // framebuffer.
-    RefPtr<DrawTarget> mFramebufferTarget;
-    ANativeWindowBuffer* mFramebuffer;
-    /**
-     * Points to a mapped gralloc buffer between calls to lock and unlock.
-     * Should be null outside of the lock-unlock pair.
-     */
-    uint8_t* mMappedBuffer;
-    // If we're using a BasicCompositor, this is our window back
-    // buffer.  The gralloc framebuffer driver expects us to draw the
-    // entire framebuffer on every frame, but gecko expects the
-    // windowing system to be tracking buffer updates for invalidated
-    // regions.  We get stuck holding that bag.
-    //
-    // Only accessed on the compositor thread, except during
-    // destruction.
-    RefPtr<DrawTarget> mBackBuffer;
+    hwc_display_t mDpy; // Store for BLIT Composition and GonkDisplayICS
+    hwc_surface_t mSur; // Store for BLIT Composition and GonkDisplayICS
+    mozilla::gl::GLContext* mGLContext; // Store for BLIT Composition
 };
 
 class nsScreenManagerGonk final : public nsIScreenManager
@@ -199,14 +131,9 @@ public:
     void DisplayEnabled(bool aEnabled);
 
     nsresult AddScreen(GonkDisplay::DisplayType aDisplayType,
-                       android::IGraphicBufferProducer* aSink = nullptr,
-                       NotifyDisplayChangedEvent aEventVisibility = NotifyDisplayChangedEvent::Observable);
+                       android::IGraphicBufferProducer* aProducer = nullptr);
 
     nsresult RemoveScreen(GonkDisplay::DisplayType aDisplayType);
-
-#if ANDROID_VERSION >= 19
-    void SetCompositorVsyncScheduler(mozilla::layers::CompositorVsyncScheduler* aObserver);
-#endif
 
 protected:
     ~nsScreenManagerGonk();
@@ -215,14 +142,9 @@ protected:
     bool IsScreenConnected(uint32_t aId);
 
     bool mInitialized;
-    nsTArray<RefPtr<nsScreenGonk>> mScreens;
-    RefPtr<mozilla::Runnable> mScreenOnEvent;
-    RefPtr<mozilla::Runnable> mScreenOffEvent;
-
-#if ANDROID_VERSION >= 19
-    bool mDisplayEnabled;
-    RefPtr<mozilla::layers::CompositorVsyncScheduler> mCompositorVsyncScheduler;
-#endif
+    nsTArray<nsRefPtr<nsScreenGonk>> mScreens;
+    nsRefPtr<nsRunnable> mScreenOnEvent;
+    nsRefPtr<nsRunnable> mScreenOffEvent;
 };
 
 #endif /* nsScreenManagerGonk_h___ */

@@ -23,7 +23,7 @@ namespace mozilla {
 #undef LOG
 #endif
 
-extern LogModule* GetGMPLog();
+extern PRLogModuleInfo* GetGMPLog();
 
 #define LOGD(msg) MOZ_LOG(GetGMPLog(), mozilla::LogLevel::Debug, msg)
 #define LOG(level, msg) MOZ_LOG(GetGMPLog(), (level), msg)
@@ -88,7 +88,7 @@ GMPVideoEncoderParent::Close()
   // Let Shutdown mark us as dead so it knows if we had been alive
 
   // In case this is the last reference
-  RefPtr<GMPVideoEncoderParent> kungfudeathgrip(this);
+  nsRefPtr<GMPVideoEncoderParent> kungfudeathgrip(this);
   Release();
   Shutdown();
 }
@@ -229,10 +229,11 @@ GMPVideoEncoderParent::Shutdown()
     mCallback->Terminated();
     mCallback = nullptr;
   }
+  mVideoHost.DoneWithAPI();
 
   mIsOpen = false;
   if (!mActorDestroyed) {
-    Unused << SendEncodingComplete();
+    unused << SendEncodingComplete();
   }
 }
 
@@ -268,8 +269,7 @@ GMPVideoEncoderParent::ActorDestroy(ActorDestroyReason aWhy)
     mPlugin->VideoEncoderDestroyed(this);
     mPlugin = nullptr;
   }
-  mVideoHost.ActorDestroyed(); // same as DoneWithAPI
-  MaybeDisconnect(aWhy == AbnormalShutdown);
+  mVideoHost.ActorDestroyed();
 }
 
 static void
@@ -331,15 +331,8 @@ bool
 GMPVideoEncoderParent::RecvParentShmemForPool(Shmem&& aFrameBuffer)
 {
   if (aFrameBuffer.IsWritable()) {
-    // This test may be paranoia now that we don't shut down the VideoHost
-    // in ::Shutdown, but doesn't hurt
-    if (mVideoHost.SharedMemMgr()) {
-      mVideoHost.SharedMemMgr()->MgrDeallocShmem(GMPSharedMem::kGMPFrameData,
-                                                 aFrameBuffer);
-    } else {
-      LOGD(("%s::%s: %p Called in shutdown, ignoring and freeing directly", __CLASS__, __FUNCTION__, this));
-      DeallocShmem(aFrameBuffer);
-    }
+    mVideoHost.SharedMemMgr()->MgrDeallocShmem(GMPSharedMem::kGMPFrameData,
+                                               aFrameBuffer);
   }
   return true;
 }
@@ -350,10 +343,7 @@ GMPVideoEncoderParent::AnswerNeedShmem(const uint32_t& aEncodedBufferSize,
 {
   ipc::Shmem mem;
 
-  // This test may be paranoia now that we don't shut down the VideoHost
-  // in ::Shutdown, but doesn't hurt
-  if (!mVideoHost.SharedMemMgr() ||
-      !mVideoHost.SharedMemMgr()->MgrAllocShmem(GMPSharedMem::kGMPEncodedData,
+  if (!mVideoHost.SharedMemMgr()->MgrAllocShmem(GMPSharedMem::kGMPEncodedData,
                                                 aEncodedBufferSize,
                                                 ipc::SharedMemory::TYPE_BASIC, &mem))
   {

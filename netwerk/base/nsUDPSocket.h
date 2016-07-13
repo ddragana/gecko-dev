@@ -13,14 +13,11 @@
 #include "nsCycleCollectionParticipant.h"
 
 #ifdef MOZ_WIDGET_GONK
-#include "nsINetworkInterface.h"
+#include "nsINetworkManager.h"
 #include "nsProxyRelease.h"
 #endif
 
 //-----------------------------------------------------------------------------
-
-namespace mozilla {
-namespace net {
 
 class nsUDPSocket final : public nsASocketHandler
                         , public nsIUDPSocket
@@ -60,24 +57,22 @@ private:
 
   void SaveNetworkStats(bool aEnforce);
 
-  void CloseSocket();
-
   // lock protects access to mListener;
   // so mListener is not cleared while being used/locked.
-  Mutex                                mLock;
-  PRFileDesc                          *mFD;
-  NetAddr                              mAddr;
+  mozilla::Mutex                       mLock;
+  PRFileDesc                           *mFD;
+  mozilla::net::NetAddr                mAddr;
   uint32_t                             mAppId;
-  bool                                 mIsInIsolatedMozBrowserElement;
+  bool                                 mIsInBrowserElement;
   nsCOMPtr<nsIUDPSocketListener>       mListener;
   nsCOMPtr<nsIEventTarget>             mListenerTarget;
   bool                                 mAttached;
-  RefPtr<nsSocketTransportService>     mSts;
+  nsRefPtr<nsSocketTransportService>   mSts;
 
   uint64_t   mByteReadCount;
   uint64_t   mByteWriteCount;
 #ifdef MOZ_WIDGET_GONK
-  nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
+  nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
 #endif
 };
 
@@ -90,14 +85,14 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsUDPMessage)
   NS_DECL_NSIUDPMESSAGE
 
-  nsUDPMessage(NetAddr* aAddr,
+  nsUDPMessage(mozilla::net::NetAddr* aAddr,
                nsIOutputStream* aOutputStream,
                FallibleTArray<uint8_t>& aData);
 
 private:
   virtual ~nsUDPMessage();
 
-  NetAddr mAddr;
+  mozilla::net::NetAddr mAddr;
   nsCOMPtr<nsIOutputStream> mOutputStream;
   FallibleTArray<uint8_t> mData;
   JS::Heap<JSObject*> mJsobj;
@@ -119,13 +114,10 @@ public:
 private:
   virtual ~nsUDPOutputStream();
 
-  RefPtr<nsUDPSocket>       mSocket;
+  nsRefPtr<nsUDPSocket>       mSocket;
   PRFileDesc                  *mFD;
   PRNetAddr                   mPrClientAddr;
   bool                        mIsClosed;
 };
-
-} // namespace net
-} // namespace mozilla
 
 #endif // nsUDPSocket_h__

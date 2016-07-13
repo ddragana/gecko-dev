@@ -42,22 +42,51 @@ function* testLinkOpensUrl({ win, tab, elementId, expectedUrl }) {
 }
 
 /**
- * Tests the links in "about:privatebrowsing".
+ * Tests the Learn More action in the classic "about:privatebrowsing" window.
  */
-add_task(function* test_links() {
-  // Use full version and change the remote URLs to prevent network access.
+add_task(function* test_classicActions() {
+  // Use classic version and change the remote URL to prevent network access.
+  Services.prefs.setBoolPref("privacy.trackingprotection.ui.enabled", false);
   Services.prefs.setCharPref("app.support.baseURL", "https://example.com/");
-  Services.prefs.setCharPref("privacy.trackingprotection.introURL",
-                             "https://example.com/tour");
   registerCleanupFunction(function () {
-    Services.prefs.clearUserPref("privacy.trackingprotection.introURL");
     Services.prefs.clearUserPref("app.support.baseURL");
+    Services.prefs.clearUserPref("privacy.trackingprotection.ui.enabled");
   });
 
   let { win, tab } = yield openAboutPrivateBrowsing();
 
   yield testLinkOpensTab({ win, tab,
     elementId: "learnMore",
+    expectedUrl: "https://example.com/private-browsing",
+  });
+
+  yield BrowserTestUtils.closeWindow(win);
+});
+
+/**
+ * Tests the Tracking Protection tour actions in "about:privatebrowsing".
+ */
+add_task(function* test_tourActions() {
+  // Use tour version and change the remote URLs to prevent network access.
+  Services.prefs.setBoolPref("privacy.trackingprotection.ui.enabled", true);
+  Services.prefs.setCharPref("app.support.baseURL", "https://example.com/");
+  Services.prefs.setCharPref("privacy.trackingprotection.introURL",
+                             "https://example.com/tour");
+  registerCleanupFunction(function () {
+    Services.prefs.clearUserPref("privacy.trackingprotection.introURL");
+    Services.prefs.clearUserPref("app.support.baseURL");
+    Services.prefs.clearUserPref("privacy.trackingprotection.ui.enabled");
+  });
+
+  let { win, tab } = yield openAboutPrivateBrowsing();
+
+  yield testLinkOpensTab({ win, tab,
+    elementId: "showPreferences",
+    expectedUrl: "about:preferences#privacy",
+  });
+
+  yield testLinkOpensTab({ win, tab,
+    elementId: "tourLearnMore",
     expectedUrl: "https://example.com/private-browsing",
   });
 
@@ -70,15 +99,17 @@ add_task(function* test_links() {
 });
 
 /**
- * Tests the action to disable and re-enable Tracking Protection in
- * "about:privatebrowsing".
+ * Tests the action to re-enable Tracking Protection in "about:privatebrowsing"
+ * when it has been disabled from the preferences.
  */
-add_task(function* test_toggleTrackingProtection() {
+add_task(function* test_enableTrackingProtection() {
   // Use tour version but disable Tracking Protection.
+  Services.prefs.setBoolPref("privacy.trackingprotection.ui.enabled", true);
   Services.prefs.setBoolPref("privacy.trackingprotection.pbmode.enabled",
-                             true);
+                             false);
   registerCleanupFunction(function () {
     Services.prefs.clearUserPref("privacy.trackingprotection.pbmode.enabled");
+    Services.prefs.clearUserPref("privacy.trackingprotection.ui.enabled");
   });
 
   let { win, tab } = yield openAboutPrivateBrowsing();
@@ -86,7 +117,7 @@ add_task(function* test_toggleTrackingProtection() {
   // Set up the observer for the preference change before triggering the action.
   let prefBranch =
       Services.prefs.getBranch("privacy.trackingprotection.pbmode.");
-  let waitForPrefChanged = () => new Promise(resolve => {
+  let promisePrefChanged = new Promise(resolve => {
     let prefObserver = {
       QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
       observe: function () {
@@ -97,17 +128,10 @@ add_task(function* test_toggleTrackingProtection() {
     prefBranch.addObserver("enabled", prefObserver, false);
   });
 
-  let promisePrefChanged = waitForPrefChanged();
   yield ContentTask.spawn(tab, {}, function* () {
-    content.document.getElementById("tpButton").click();
+    content.document.getElementById("enableTrackingProtection").click();
   });
-  yield promisePrefChanged;
-  ok(!prefBranch.getBoolPref("enabled"), "Tracking Protection is disabled.");
 
-  promisePrefChanged = waitForPrefChanged();
-  yield ContentTask.spawn(tab, {}, function* () {
-    content.document.getElementById("tpButton").click();
-  });
   yield promisePrefChanged;
   ok(prefBranch.getBoolPref("enabled"), "Tracking Protection is enabled.");
 

@@ -131,11 +131,11 @@ nsAccUtils::GetLevelForXULContainerItem(nsIContent *aContent)
 
 void
 nsAccUtils::SetLiveContainerAttributes(nsIPersistentProperties *aAttributes,
-                                       nsIContent* aStartContent,
-                                       dom::Element* aTopEl)
+                                       nsIContent *aStartContent,
+                                       nsIContent *aTopContent)
 {
   nsAutoString live, relevant, busy;
-  nsIContent* ancestor = aStartContent;
+  nsIContent *ancestor = aStartContent;
   while (ancestor) {
 
     // container-relevant attribute
@@ -146,12 +146,10 @@ nsAccUtils::SetLiveContainerAttributes(nsIPersistentProperties *aAttributes,
 
     // container-live, and container-live-role attributes
     if (live.IsEmpty()) {
-      const nsRoleMapEntry* role = nullptr;
-      if (ancestor->IsElement()) {
-        role = aria::GetRoleMap(ancestor->AsElement());
-      }
+      nsRoleMapEntry* role = aria::GetRoleMap(ancestor);
       if (HasDefinedARIAToken(ancestor, nsGkAtoms::aria_live)) {
-        ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_live, live);
+        ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_live,
+                          live);
       } else if (role) {
         GetLiveAttrValue(role->liveAttRule, live);
       }
@@ -177,12 +175,12 @@ nsAccUtils::SetLiveContainerAttributes(nsIPersistentProperties *aAttributes,
         ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_busy, busy))
       SetAccAttr(aAttributes, nsGkAtoms::containerBusy, busy);
 
-    if (ancestor == aTopEl)
+    if (ancestor == aTopContent)
       break;
 
     ancestor = ancestor->GetParent();
     if (!ancestor)
-      ancestor = aTopEl; // Use <body>/<frameset>
+      ancestor = aTopContent; // Use <body>/<frameset>
   }
 }
 
@@ -392,7 +390,7 @@ nsAccUtils::IsTextInterfaceSupportCorrect(Accessible* aAccessible)
   uint32_t childCount = aAccessible->ChildCount();
   for (uint32_t childIdx = 0; childIdx < childCount; childIdx++) {
     Accessible* child = aAccessible->GetChildAt(childIdx);
-    if (child->IsText()) {
+    if (!IsEmbeddedObject(child)) {
       foundText = true;
       break;
     }
@@ -405,9 +403,8 @@ nsAccUtils::IsTextInterfaceSupportCorrect(Accessible* aAccessible)
 uint32_t
 nsAccUtils::TextLength(Accessible* aAccessible)
 {
-  if (!aAccessible->IsText()) {
+  if (IsEmbeddedObject(aAccessible))
     return 1;
-  }
 
   TextLeafAccessible* textLeaf = aAccessible->AsTextLeaf();
   if (textLeaf)

@@ -7,7 +7,7 @@ protocol opensSubprotocol {
 
 child:
     subprotocolOpens();
-    async __delete__();
+    __delete__();
 
 state DEAD: send __delete__;
 };

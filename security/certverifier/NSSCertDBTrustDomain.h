@@ -4,13 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef NSSCertDBTrustDomain_h
-#define NSSCertDBTrustDomain_h
+#ifndef mozilla_psm__NSSCertDBTrustDomain_h
+#define mozilla_psm__NSSCertDBTrustDomain_h
 
 #include "CertVerifier.h"
-#include "ScopedNSSTypes.h"
 #include "nsICertBlocklist.h"
-#include "nsString.h"
 #include "pkix/pkixtypes.h"
 #include "secmodt.h"
 
@@ -21,21 +19,7 @@ enum class ValidityCheckingMode {
   CheckForEV = 1,
 };
 
-// Policy options for matching id-Netscape-stepUp with id-kp-serverAuth (for CA
-// certificates only):
-// * Always match: the step-up OID is considered equivalent to serverAuth
-// * Match before 23 August 2016: the OID is considered equivalent if the
-//   certificate's notBefore is before 23 August 2016
-// * Match before 23 August 2015: similarly, but for 23 August 2015
-// * Never match: the OID is never considered equivalent to serverAuth
-enum class NetscapeStepUpPolicy : uint32_t {
-  AlwaysMatch = 0,
-  MatchBefore23August2016 = 1,
-  MatchBefore23August2015 = 2,
-  NeverMatch = 3,
-};
-
-SECStatus InitializeNSS(const char* dir, bool readOnly, bool loadPKCS11Modules);
+SECStatus InitializeNSS(const char* dir, bool readOnly);
 
 void DisableMD5();
 
@@ -52,10 +36,17 @@ SECStatus LoadLoadableRoots(/*optional*/ const char* dir,
 
 void UnloadLoadableRoots(const char* modNameUTF8);
 
-nsresult DefaultServerNicknameForCert(const CERTCertificate* cert,
-                              /*out*/ nsCString& nickname);
+// Caller must free the result with PR_Free
+char* DefaultServerNicknameForCert(CERTCertificate* cert);
 
-void SaveIntermediateCerts(const UniqueCERTCertList& certList);
+void SaveIntermediateCerts(const ScopedCERTCertList& certList);
+
+enum SignatureDigestOption {
+  AcceptAllAlgorithms,
+  DisableSHA1ForEE,
+  DisableSHA1ForCA,
+  DisableSHA1Everywhere,
+};
 
 class NSSCertDBTrustDomain : public mozilla::pkix::TrustDomain
 {
@@ -78,11 +69,9 @@ public:
                        CertVerifier::PinningMode pinningMode,
                        unsigned int minRSABits,
                        ValidityCheckingMode validityCheckingMode,
-                       CertVerifier::SHA1Mode sha1Mode,
-                       NetscapeStepUpPolicy netscapeStepUpPolicy,
-                       UniqueCERTCertList& builtChain,
-          /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
-          /*optional*/ const char* hostname = nullptr);
+                       SignatureDigestOption,
+          /*optional*/ const char* hostname = nullptr,
+      /*optional out*/ ScopedCERTCertList* builtChain = nullptr);
 
   virtual Result FindIssuer(mozilla::pkix::Input encodedIssuerName,
                             IssuerChecker& checker,
@@ -96,8 +85,7 @@ public:
 
   virtual Result CheckSignatureDigestAlgorithm(
                    mozilla::pkix::DigestAlgorithm digestAlg,
-                   mozilla::pkix::EndEntityOrCA endEntityOrCA,
-                   mozilla::pkix::Time notBefore) override;
+                   mozilla::pkix::EndEntityOrCA endEntityOrCA) override;
 
   virtual Result CheckRSAPublicKeyModulusSizeInBits(
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
@@ -125,10 +113,6 @@ public:
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    mozilla::pkix::KeyPurposeId keyPurpose) override;
 
-  virtual Result NetscapeStepUpMatchesServerAuth(
-                   mozilla::pkix::Time notBefore,
-                   /*out*/ bool& matches) override;
-
   virtual Result CheckRevocation(
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    const mozilla::pkix::CertID& certID,
@@ -140,10 +124,6 @@ public:
 
   virtual Result IsChainValid(const mozilla::pkix::DERArray& certChain,
                               mozilla::pkix::Time time) override;
-
-  virtual void NoteAuxiliaryExtension(
-                   mozilla::pkix::AuxiliaryExtension extension,
-                   mozilla::pkix::Input extensionData) override;
 
   CertVerifier::OCSPStaplingStatus GetOCSPStaplingStatus() const
   {
@@ -173,15 +153,13 @@ private:
   CertVerifier::PinningMode mPinningMode;
   const unsigned int mMinRSABits;
   ValidityCheckingMode mValidityCheckingMode;
-  CertVerifier::SHA1Mode mSHA1Mode;
-  NetscapeStepUpPolicy mNetscapeStepUpPolicy;
-  UniqueCERTCertList& mBuiltChain; // non-owning
-  PinningTelemetryInfo* mPinningTelemetryInfo;
+  SignatureDigestOption mSignatureDigestOption;
   const char* mHostname; // non-owning - only used for pinning checks
+  ScopedCERTCertList* mBuiltChain; // non-owning
   nsCOMPtr<nsICertBlocklist> mCertBlocklist;
   CertVerifier::OCSPStaplingStatus mOCSPStaplingStatus;
 };
 
 } } // namespace mozilla::psm
 
-#endif // NSSCertDBTrustDomain_h
+#endif // mozilla_psm__NSSCertDBTrustDomain_h

@@ -7,55 +7,40 @@
 #define GFX_VR_OCULUS_H
 
 #include "nsTArray.h"
-#include "mozilla/RefPtr.h"
+#include "nsIScreen.h"
+#include "nsCOMPtr.h"
+#include "nsRefPtr.h"
 
 #include "mozilla/gfx/2D.h"
 #include "mozilla/EnumeratedArray.h"
 
 #include "gfxVR.h"
-//#include <OVR_CAPI.h>
-//#include <OVR_CAPI_D3D.h>
 #include "ovr_capi_dynamic.h"
 
 namespace mozilla {
 namespace gfx {
 namespace impl {
 
-class HMDInfoOculus : public VRHMDInfo, public VRHMDRenderingSupport {
+class HMDInfoOculus : public VRHMDInfo {
 public:
-  explicit HMDInfoOculus(ovrSession aSession);
+  explicit HMDInfoOculus(ovrHmd aHMD);
 
   bool SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFOVRight,
               double zNear, double zFar) override;
 
-  virtual VRHMDSensorState GetSensorState() override;
-  virtual VRHMDSensorState GetImmediateSensorState() override;
+  bool StartSensorTracking() override;
+  VRHMDSensorState GetSensorState(double timeOffset) override;
+  void StopSensorTracking() override;
   void ZeroSensor() override;
-  bool KeepSensorTracking() override;
-  void NotifyVsync(const TimeStamp& aVsyncTimestamp) override;
 
   void FillDistortionConstants(uint32_t whichEye,
                                const IntSize& textureSize, const IntRect& eyeViewport,
                                const Size& destViewport, const Rect& destRect,
                                VRDistortionConstants& values) override;
 
-  VRHMDRenderingSupport* GetRenderingSupport() override { return this; }
-  
   void Destroy();
 
-  /* VRHMDRenderingSupport */
-  already_AddRefed<RenderTargetSet> CreateRenderTargetSet(layers::Compositor *aCompositor, const IntSize& aSize) override;
-  void DestroyRenderTargetSet(RenderTargetSet *aRTSet) override;
-  void SubmitFrame(RenderTargetSet *aRTSet, int32_t aInputFrameID) override;
-
-  ovrSession GetOculusSession() const { return mSession; }
-
 protected:
-  virtual ~HMDInfoOculus() {
-      Destroy();
-      MOZ_COUNT_DTOR_INHERITED(HMDInfoOculus, VRHMDInfo);
-  }
-
   // must match the size of VRDistortionVertex
   struct DistortionVertex {
     float pos[2];
@@ -65,22 +50,14 @@ protected:
     float genericAttribs[4];
   };
 
-  ovrSession mSession;
-  ovrHmdDesc mDesc;
+  virtual ~HMDInfoOculus() {
+      Destroy();
+      MOZ_COUNT_DTOR_INHERITED(HMDInfoOculus, VRHMDInfo);
+  }
+
+  ovrHmd mHMD;
   ovrFovPort mFOVPort[2];
-
-  VRHMDSensorState GetSensorState(double timeOffset);
-
-  // The maximum number of frames of latency that we would expect before we
-  // should give up applying pose prediction.
-  // If latency is greater than one second, then the experience is not likely
-  // to be corrected by pose prediction.  Setting this value too
-  // high may result in unnecessary memory allocation.
-  // As the current fastest refresh rate is 90hz, 100 is selected as a
-  // conservative value.
-  static const int kMaxLatencyFrames = 100;
-  VRHMDSensorState mLastSensorState[kMaxLatencyFrames];
-  int32_t mInputFrameID;
+  uint32_t mStartCount;
 };
 
 } // namespace impl
@@ -88,18 +65,18 @@ protected:
 class VRHMDManagerOculus : public VRHMDManager
 {
 public:
-  static already_AddRefed<VRHMDManagerOculus> Create();
-  virtual bool Init() override;
-  virtual void Destroy() override;
-  virtual void GetHMDs(nsTArray<RefPtr<VRHMDInfo> >& aHMDResult) override;
-protected:
   VRHMDManagerOculus()
-    : mOculusInitialized(false)
+    : mOculusInitialized(false), mOculusPlatformInitialized(false)
   { }
 
-  RefPtr<impl::HMDInfoOculus> mHMDInfo;
+  virtual bool PlatformInit() override;
+  virtual bool Init() override;
+  virtual void Destroy() override;
+  virtual void GetHMDs(nsTArray<nsRefPtr<VRHMDInfo> >& aHMDResult) override;
+protected:
+  nsTArray<nsRefPtr<impl::HMDInfoOculus>> mOculusHMDs;
   bool mOculusInitialized;
-  RefPtr<nsIThread> mOculusThread;
+  bool mOculusPlatformInitialized;
 };
 
 } // namespace gfx

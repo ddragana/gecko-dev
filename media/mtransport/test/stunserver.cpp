@@ -78,8 +78,7 @@ nrappkit copyright:
    ekr@rtfm.com  Thu Dec 20 20:14:49 2001
 */
 #include "logging.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Scoped.h"
 #include "databuffer.h"
 
 extern "C" {
@@ -93,7 +92,7 @@ extern "C" {
 #include "local_addr.h"
 #include "stun_util.h"
 #include "registry.h"
-#include "nr_socket_buffered_stun.h"
+#include "nr_socket_multi_tcp.h"
 }
 
 #include "stunserver.h"
@@ -132,15 +131,11 @@ static int nr_socket_wrapped_sendto(void *obj, const void *msg, size_t len, int 
 
 static int nr_socket_wrapped_recvfrom(void *obj, void * restrict buf, size_t maxlen,
     size_t *len, int flags, nr_transport_addr *addr) {
-  nr_socket_wrapped *wrapped = static_cast<nr_socket_wrapped *>(obj);
-
-  return nr_socket_recvfrom(wrapped->sock_, buf, maxlen, len, flags, addr);
+  MOZ_CRASH();
 }
 
 static int nr_socket_wrapped_getfd(void *obj, NR_SOCKET *fd) {
-  nr_socket_wrapped *wrapped = static_cast<nr_socket_wrapped *>(obj);
-
-  return nr_socket_getfd(wrapped->sock_, fd);
+  MOZ_CRASH();
 }
 
 static int nr_socket_wrapped_getaddr(void *obj, nr_transport_addr *addrp) {
@@ -175,7 +170,7 @@ static nr_socket_vtbl nr_socket_wrapped_vtbl = {
 };
 
 int nr_socket_wrapped_create(nr_socket *inner, nr_socket **outp) {
-  auto wrapped = MakeUnique<nr_socket_wrapped>();
+  ScopedDeletePtr<nr_socket_wrapped> wrapped(new nr_socket_wrapped());
 
   wrapped->sock_ = inner;
 
@@ -183,7 +178,7 @@ int nr_socket_wrapped_create(nr_socket *inner, nr_socket **outp) {
   if (r)
     return r;
 
-  Unused << wrapped.release();
+  wrapped.forget();
   return 0;
 }
 
@@ -191,10 +186,10 @@ int nr_socket_wrapped_create(nr_socket *inner, nr_socket **outp) {
 // Instance static.
 // Note: Calling Create() at static init time is not going to be safe, since
 // we have no reason to expect this will be initted to a nullptr yet.
-TestStunServer *TestStunServer::instance;
-TestStunTcpServer *TestStunTcpServer::instance;
-TestStunServer *TestStunServer::instance6;
-TestStunTcpServer *TestStunTcpServer::instance6;
+TestStunServer* TestStunServer::instance;
+TestStunTcpServer* TestStunTcpServer::instance;
+TestStunServer* TestStunServer::instance6;
+TestStunTcpServer* TestStunTcpServer::instance6;
 uint16_t TestStunServer::instance_port = 3478;
 uint16_t TestStunTcpServer::instance_port = 3478;
 
@@ -221,7 +216,7 @@ TestStunServer::~TestStunServer() {
   delete response_addr_;
 }
 
-int TestStunServer::SetInternalPort(nr_local_addr *addr, uint16_t port) {
+int TestStunServer::SetInternalPort(nr_local_addr* addr, uint16_t port) {
   if (nr_transport_addr_set_port(&addr->addr, port)) {
     MOZ_MTLOG(ML_ERROR, "Couldn't set port");
     return R_INTERNAL;
@@ -235,7 +230,7 @@ int TestStunServer::SetInternalPort(nr_local_addr *addr, uint16_t port) {
   return 0;
 }
 
-int TestStunServer::TryOpenListenSocket(nr_local_addr *addr, uint16_t port) {
+int TestStunServer::TryOpenListenSocket(nr_local_addr* addr, uint16_t port) {
 
   int r = SetInternalPort(addr, port);
 
@@ -324,10 +319,10 @@ int TestStunServer::Initialize(int address_family) {
   return 0;
 }
 
-UniquePtr<TestStunServer> TestStunServer::Create(int address_family) {
+TestStunServer* TestStunServer::Create(int address_family) {
   NR_reg_init(NR_REG_MODE_LOCAL);
 
-  UniquePtr<TestStunServer> server(new TestStunServer());
+  ScopedDeletePtr<TestStunServer> server(new TestStunServer());
 
   if (server->Initialize(address_family))
     return nullptr;
@@ -341,7 +336,7 @@ UniquePtr<TestStunServer> TestStunServer::Create(int address_family) {
 
   NR_ASYNC_WAIT(fd, NR_ASYNC_WAIT_READ, &TestStunServer::readable_cb, server.get());
 
-  return server;
+  return server.forget();
 }
 
 void TestStunServer::ConfigurePort(uint16_t port) {
@@ -352,13 +347,13 @@ TestStunServer* TestStunServer::GetInstance(int address_family) {
   switch (address_family) {
     case AF_INET:
       if (!instance)
-        instance = Create(address_family).release();
+        instance = Create(address_family);
 
       MOZ_ASSERT(instance);
       return instance;
     case AF_INET6:
       if (!instance6)
-        instance6 = Create(address_family).release();
+        instance6 = Create(address_family);
 
       return instance6;
     default:
@@ -377,30 +372,21 @@ void TestStunServer::ShutdownInstance() {
 struct DeferredStunOperation {
   DeferredStunOperation(TestStunServer *server,
                         const char *data, size_t len,
-                        nr_transport_addr *addr,
-                        nr_socket *sock) :
+                        nr_transport_addr *addr) :
       server_(server),
-      buffer_(reinterpret_cast<const uint8_t *>(data), len),
-      sock_(sock) {
+      buffer_(reinterpret_cast<const uint8_t *>(data), len) {
     nr_transport_addr_copy(&addr_, addr);
   }
 
   TestStunServer *server_;
   DataBuffer buffer_;
   nr_transport_addr addr_;
-  nr_socket *sock_;
 };
 
-void TestStunServer::Process(const uint8_t *msg, size_t len, nr_transport_addr *addr, nr_socket *sock) {
-
-  if (!sock) {
-    sock = send_sock_;
-  }
-
+void TestStunServer::Process(const uint8_t *msg, size_t len, nr_transport_addr *addr) {
   // Set the wrapped address so that the response goes to the right place.
-  nr_socket_wrapped_set_send_addr(sock, addr);
-
-  nr_stun_server_process_request(stun_server_, sock,
+  nr_socket_wrapped_set_send_addr(send_sock_, addr);
+  nr_stun_server_process_request(stun_server_, send_sock_,
                                  const_cast<char *>(reinterpret_cast<const char *>(msg)),
                                  len,
                                  response_addr_ ?
@@ -411,42 +397,31 @@ void TestStunServer::Process(const uint8_t *msg, size_t len, nr_transport_addr *
 void TestStunServer::process_cb(NR_SOCKET s, int how, void *cb_arg) {
   DeferredStunOperation *op = static_cast<DeferredStunOperation *>(cb_arg);
   op->server_->timer_handle_ = nullptr;
-  op->server_->Process(op->buffer_.data(), op->buffer_.len(), &op->addr_, op->sock_);
+  op->server_->Process(op->buffer_.data(), op->buffer_.len(), &op->addr_);
 
   delete op;
 }
 
-nr_socket* TestStunServer::GetReceivingSocket(NR_SOCKET s) {
-  return listen_sock_;
-}
-
-nr_socket* TestStunServer::GetSendingSocket(nr_socket *sock) {
-  return send_sock_;
-}
-
 void TestStunServer::readable_cb(NR_SOCKET s, int how, void *cb_arg) {
-  TestStunServer *server = static_cast<TestStunServer*>(cb_arg);
+  TestStunServer* server = static_cast<TestStunServer*>(cb_arg);
 
-  char message[max_stun_message_size];
+  char message[4096];
   size_t message_len;
   nr_transport_addr addr;
-  nr_socket *recv_sock = server->GetReceivingSocket(s);
-  if (!recv_sock) {
-    MOZ_MTLOG(ML_ERROR, "Failed to lookup receiving socket");
-    return;
-  }
-  nr_socket *send_sock = server->GetSendingSocket(recv_sock);
 
-  /* Re-arm. */
-  NR_ASYNC_WAIT(s, NR_ASYNC_WAIT_READ, &TestStunServer::readable_cb, server);
+  int r = nr_socket_recvfrom(server->listen_sock_, message, sizeof(message),
+    &message_len, 0, &addr);
 
-  if (nr_socket_recvfrom(recv_sock, message, sizeof(message),
-      &message_len, 0, &addr)) {
+  if (r) {
     MOZ_MTLOG(ML_ERROR, "Couldn't read STUN message");
     return;
   }
 
   MOZ_MTLOG(ML_DEBUG, "Received data of length " << message_len);
+
+  // Re-arm.
+  NR_ASYNC_WAIT(s, NR_ASYNC_WAIT_READ, &TestStunServer::readable_cb, server);
+
 
   // If we have initial dropping set, check at this point.
   std::string key(addr.as_string);
@@ -469,11 +444,10 @@ void TestStunServer::readable_cb(NR_SOCKET s, int how, void *cb_arg) {
                        new DeferredStunOperation(
                            server,
                            message, message_len,
-                           &addr, send_sock),
+                           &addr),
                        &server->timer_handle_);
   } else {
-    server->Process(reinterpret_cast<const uint8_t *>(message), message_len,
-                    &addr, send_sock);
+    server->Process(reinterpret_cast<const uint8_t *>(message), message_len, &addr);
   }
 }
 
@@ -522,7 +496,6 @@ void TestStunServer::Reset() {
   }
   delete response_addr_;
   response_addr_ = nullptr;
-  received_ct_.clear();
 }
 
 
@@ -536,13 +509,13 @@ TestStunTcpServer* TestStunTcpServer::GetInstance(int address_family) {
   switch (address_family) {
     case AF_INET:
       if (!instance)
-        instance = Create(address_family).release();
+        instance = Create(address_family);
 
       MOZ_ASSERT(instance);
       return instance;
     case AF_INET6:
       if (!instance6)
-        instance6 = Create(address_family).release();
+        instance6 = Create(address_family);
 
       return instance6;
     default:
@@ -552,12 +525,11 @@ TestStunTcpServer* TestStunTcpServer::GetInstance(int address_family) {
 
 void TestStunTcpServer::ShutdownInstance() {
   delete instance;
+
   instance = nullptr;
-  delete instance6;
-  instance6 = nullptr;
 }
 
-int TestStunTcpServer::TryOpenListenSocket(nr_local_addr *addr, uint16_t port) {
+int TestStunTcpServer::TryOpenListenSocket(nr_local_addr* addr, uint16_t port) {
 
   addr->addr.protocol=IPPROTO_TCP;
 
@@ -566,15 +538,17 @@ int TestStunTcpServer::TryOpenListenSocket(nr_local_addr *addr, uint16_t port) {
   if (r)
     return r;
 
-  nr_socket *sock;
-  if (nr_socket_local_create(nullptr, &addr->addr, &sock)) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't create listen tcp socket");
-    return R_ALREADY;
-  }
+  if (ice_ctx_ == NULL)
+    ice_ctx_ = NrIceCtx::Create("stun", true);
 
-  if (nr_socket_buffered_stun_create(sock, 2048, TURN_TCP_FRAMING, &listen_sock_)) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't create listen tcp socket");
-    return R_ALREADY;
+  //TODO (nils@mozilla.com) can we replace this with a more basic TCP socket
+  // alternative which would allow us to remove the framing argument from the
+  // nr_socket_multi_tcp_create() call?
+  if(nr_socket_multi_tcp_create(ice_ctx_->ctx(),
+     &addr->addr, TCP_TYPE_PASSIVE, 0, 0, 2048,
+     &listen_sock_)) {
+     MOZ_MTLOG(ML_ERROR, "Couldn't create listen socket");
+     return R_ALREADY;
   }
 
   if(nr_socket_listen(listen_sock_, 10)) {
@@ -585,80 +559,24 @@ int TestStunTcpServer::TryOpenListenSocket(nr_local_addr *addr, uint16_t port) {
   return 0;
 }
 
-nr_socket* TestStunTcpServer::GetReceivingSocket(NR_SOCKET s) {
-  return connections_[s];
-}
-
-nr_socket* TestStunTcpServer::GetSendingSocket(nr_socket *sock) {
-  return sock;
-}
-
-void TestStunTcpServer::accept_cb(NR_SOCKET s, int how, void *cb_arg) {
-  TestStunTcpServer *server = static_cast<TestStunTcpServer*>(cb_arg);
-  nr_socket *newsock, *bufsock, *wrapsock;
-  nr_transport_addr remote_addr;
-  NR_SOCKET fd;
-
-  /* rearm */
-  NR_ASYNC_WAIT(s, NR_ASYNC_WAIT_READ, &TestStunTcpServer::accept_cb, cb_arg);
-
-  /* accept */
-  if (nr_socket_accept(server->listen_sock_, &remote_addr, &newsock)) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't accept incoming tcp connection");
-    return;
-  }
-
-  if(nr_socket_buffered_stun_create(newsock, 2048, TURN_TCP_FRAMING, &bufsock)) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't create connected tcp socket");
-    nr_socket_destroy(&newsock);
-    return;
-  }
-
-  nr_socket_buffered_set_connected_to(bufsock, &remote_addr);
-
-  if(nr_socket_wrapped_create(bufsock, &wrapsock)) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't wrap connected tcp socket");
-    nr_socket_destroy(&bufsock);
-    return;
-  }
-
-  if(nr_socket_getfd(wrapsock, &fd)) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't get fd from connected tcp socket");
-    nr_socket_destroy(&wrapsock);
-    return;
-  }
-
-  server->connections_[fd] = wrapsock;
-
-  NR_ASYNC_WAIT(fd, NR_ASYNC_WAIT_READ, &TestStunServer::readable_cb, server);
-}
-
-  UniquePtr<TestStunTcpServer> TestStunTcpServer::Create(int address_family) {
+TestStunTcpServer* TestStunTcpServer::Create(int address_family) {
   NR_reg_init(NR_REG_MODE_LOCAL);
 
-  UniquePtr<TestStunTcpServer> server(new TestStunTcpServer());
+  ScopedDeletePtr<TestStunTcpServer> server(new TestStunTcpServer());
 
   if (server->Initialize(address_family)) {
     return nullptr;
   }
 
-  NR_SOCKET fd;
-  if(nr_socket_getfd(server->listen_sock_, &fd)) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't get tcp fd");
-    return nullptr;
-  }
+  nr_socket_multi_tcp_set_readable_cb(server->listen_sock_,
+    &TestStunServer::readable_cb, server.get());
 
-  NR_ASYNC_WAIT(fd, NR_ASYNC_WAIT_READ, &TestStunTcpServer::accept_cb, server.get());
-
-  return server;
+  return server.forget();
 }
 
 TestStunTcpServer::~TestStunTcpServer() {
-  for (auto it = connections_.begin(); it != connections_.end();) {
-    NR_ASYNC_CANCEL(it->first, NR_ASYNC_WAIT_READ);
-    nr_socket_destroy(&it->second);
-    connections_.erase(it++);
-  }
+  ice_ctx_ = nullptr;
+  nr_socket_destroy(&listen_sock_);
 }
 
 }  // close namespace

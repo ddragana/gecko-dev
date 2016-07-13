@@ -47,6 +47,8 @@ public:
   void SetTrustedServerCA();
   /* equivalent to "CT,CT,CT" */
   void SetTrustedCA();
+  /* equivalent to "p,," */
+  void SetValidServerPeer();
   /* equivalent to "p,p,p" */
   void SetValidPeer();
   /* equivalent to "P,P,P" */

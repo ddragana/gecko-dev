@@ -226,7 +226,24 @@ nsChromeRegistryChrome::IsLocaleRTL(const nsACString& package, bool *aResult)
   if (locale.Length() < 2)
     return NS_OK;
 
-  *aResult = GetDirectionForLocale(locale);
+  // first check the intl.uidirection.<locale> preference, and if that is not
+  // set, check the same preference but with just the first two characters of
+  // the locale. If that isn't set, default to left-to-right.
+  nsAutoCString prefString = NS_LITERAL_CSTRING("intl.uidirection.") + locale;
+  nsCOMPtr<nsIPrefBranch> prefBranch (do_GetService(NS_PREFSERVICE_CONTRACTID));
+  if (!prefBranch)
+    return NS_OK;
+
+  nsXPIDLCString dir;
+  prefBranch->GetCharPref(prefString.get(), getter_Copies(dir));
+  if (dir.IsEmpty()) {
+    int32_t hyphen = prefString.FindChar('-');
+    if (hyphen >= 1) {
+      nsAutoCString shortPref(Substring(prefString, 0, hyphen));
+      prefBranch->GetCharPref(shortPref.get(), getter_Copies(dir));
+    }
+  }
+  *aResult = dir.EqualsLiteral("rtl");
   return NS_OK;
 }
 
@@ -396,6 +413,33 @@ SerializeURI(nsIURI* aURI,
   aURI->GetOriginCharset(aSerializedURI.charset);
 }
 
+static PLDHashOperator
+EnumerateOverride(nsIURI* aURIKey,
+                  nsIURI* aURI,
+                  void* aArg)
+{
+  nsTArray<OverrideMapping>* overrides =
+      static_cast<nsTArray<OverrideMapping>*>(aArg);
+
+  SerializedURI chromeURI, overrideURI;
+
+  SerializeURI(aURIKey, chromeURI);
+  SerializeURI(aURI, overrideURI);
+
+  OverrideMapping override = {
+    chromeURI, overrideURI
+  };
+  overrides->AppendElement(override);
+  return (PLDHashOperator)PL_DHASH_NEXT;
+}
+
+struct EnumerationArgs
+{
+  InfallibleTArray<ChromePackage>& packages;
+  const nsCString& selectedLocale;
+  const nsCString& selectedSkin;
+};
+
 void
 nsChromeRegistryChrome::SendRegisteredChrome(
     mozilla::dom::PContentParent* aParent)
@@ -404,12 +448,10 @@ nsChromeRegistryChrome::SendRegisteredChrome(
   InfallibleTArray<SubstitutionMapping> resources;
   InfallibleTArray<OverrideMapping> overrides;
 
-  for (auto iter = mPackagesHash.Iter(); !iter.Done(); iter.Next()) {
-    ChromePackage chromePackage;
-    ChromePackageFromPackageEntry(iter.Key(), iter.UserData(), &chromePackage,
-                                  mSelectedLocale, mSelectedSkin);
-    packages.AppendElement(chromePackage);
-  }
+  EnumerationArgs args = {
+    packages, mSelectedLocale, mSelectedSkin
+  };
+  mPackagesHash.EnumerateRead(CollectPackages, &args);
 
   // If we were passed a parent then a new child process has been created and
   // has requested all of the chrome so send it the resources too. Otherwise
@@ -427,15 +469,7 @@ nsChromeRegistryChrome::SendRegisteredChrome(
     rph->CollectSubstitutions(resources);
   }
 
-  for (auto iter = mOverrideTable.Iter(); !iter.Done(); iter.Next()) {
-    SerializedURI chromeURI, overrideURI;
-
-    SerializeURI(iter.Key(), chromeURI);
-    SerializeURI(iter.UserData(), overrideURI);
-
-    OverrideMapping override = { chromeURI, overrideURI };
-    overrides.AppendElement(override);
-  }
+  mOverrideTable.EnumerateRead(&EnumerateOverride, &overrides);
 
   if (aParent) {
     bool success = aParent->SendRegisterChrome(packages, resources, overrides,
@@ -471,6 +505,20 @@ nsChromeRegistryChrome::ChromePackageFromPackageEntry(const nsACString& aPackage
                aChromePackage->skinBaseURI);
   aChromePackage->package = aPackageName;
   aChromePackage->flags = aPackage->flags;
+}
+
+PLDHashOperator
+nsChromeRegistryChrome::CollectPackages(const nsACString &aKey,
+                                        PackageEntry *package,
+                                        void *arg)
+{
+  EnumerationArgs* args = static_cast<EnumerationArgs*>(arg);
+
+  ChromePackage chromePackage;
+  ChromePackageFromPackageEntry(aKey, package, &chromePackage,
+                                args->selectedLocale, args->selectedSkin);
+  args->packages.AppendElement(chromePackage);
+  return PL_DHASH_NEXT;
 }
 
 static bool
@@ -718,7 +766,7 @@ SendManifestEntry(const ChromeRegistryItem &aItem)
     return;
 
   for (uint32_t i = 0; i < parents.Length(); i++) {
-    Unused << parents[i]->SendRegisterChromeItem(aItem);
+    unused << parents[i]->SendRegisterChromeItem(aItem);
   }
 }
 

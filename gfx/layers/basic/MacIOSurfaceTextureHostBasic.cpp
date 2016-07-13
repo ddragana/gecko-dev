@@ -5,7 +5,6 @@
 
 #include "MacIOSurfaceTextureHostBasic.h"
 #include "mozilla/gfx/MacIOSurface.h"
-#include "MacIOSurfaceHelpers.h"
 
 namespace mozilla {
 namespace layers {
@@ -15,13 +14,10 @@ MacIOSurfaceTextureSourceBasic::MacIOSurfaceTextureSourceBasic(
                                 MacIOSurface* aSurface)
   : mCompositor(aCompositor)
   , mSurface(aSurface)
-{
-  MOZ_COUNT_CTOR(MacIOSurfaceTextureSourceBasic);
-}
+{}
 
 MacIOSurfaceTextureSourceBasic::~MacIOSurfaceTextureSourceBasic()
 {
-  MOZ_COUNT_DTOR(MacIOSurfaceTextureSourceBasic);
 }
 
 gfx::IntSize
@@ -34,9 +30,7 @@ MacIOSurfaceTextureSourceBasic::GetSize() const
 gfx::SurfaceFormat
 MacIOSurfaceTextureSourceBasic::GetFormat() const
 {
-  // Set the format the same way as CreateSourceSurfaceFromMacIOSurface.
-  return mSurface->GetFormat() == gfx::SurfaceFormat::NV12
-    ? gfx::SurfaceFormat::B8G8R8X8 : gfx::SurfaceFormat::B8G8R8A8;
+  return mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8 : gfx::SurfaceFormat::B8G8R8X8;
 }
 
 MacIOSurfaceTextureHostBasic::MacIOSurfaceTextureHostBasic(
@@ -54,7 +48,7 @@ gfx::SourceSurface*
 MacIOSurfaceTextureSourceBasic::GetSurface(gfx::DrawTarget* aTarget)
 {
   if (!mSourceSurface) {
-    mSourceSurface = CreateSourceSurfaceFromMacIOSurface(mSurface);
+    mSourceSurface = mSurface->GetAsSurface();
   }
   return mSourceSurface;
 }
@@ -62,7 +56,7 @@ MacIOSurfaceTextureSourceBasic::GetSurface(gfx::DrawTarget* aTarget)
 void
 MacIOSurfaceTextureSourceBasic::SetCompositor(Compositor* aCompositor)
 {
-  mCompositor = AssertBasicCompositor(aCompositor);
+  mCompositor = static_cast<BasicCompositor*>(aCompositor);
 }
 
 bool
@@ -81,11 +75,7 @@ MacIOSurfaceTextureHostBasic::Lock()
 void
 MacIOSurfaceTextureHostBasic::SetCompositor(Compositor* aCompositor)
 {
-  BasicCompositor* compositor = AssertBasicCompositor(aCompositor);
-  if (!compositor) {
-    mTextureSource = nullptr;
-    return;
-  }
+  BasicCompositor* compositor = static_cast<BasicCompositor*>(aCompositor);
   mCompositor = compositor;
   if (mTextureSource) {
     mTextureSource->SetCompositor(compositor);

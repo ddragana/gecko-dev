@@ -138,9 +138,10 @@ public:
   virtual bool TextIsOnlyWhitespace() override;
   virtual bool HasTextForTranslation() override;
   virtual void AppendTextTo(nsAString& aResult) override;
-  MOZ_MUST_USE
+  MOZ_WARN_UNUSED_RESULT
   virtual bool AppendTextTo(nsAString& aResult,
                             const mozilla::fallible_t&) override;
+  virtual void DestroyContent() override;
   virtual void SaveSubtreeState() override;
 
 #ifdef DEBUG
@@ -261,7 +262,7 @@ protected:
     /**
      * @see nsIContent::GetContainingShadow
      */
-    RefPtr<mozilla::dom::ShadowRoot> mContainingShadow;
+    nsRefPtr<mozilla::dom::ShadowRoot> mContainingShadow;
 
     /**
      * @see nsIContent::GetDestInsertionPoints

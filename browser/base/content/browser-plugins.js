@@ -1,7 +1,7 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+# -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 var gPluginHandler = {
   PREF_SESSION_PERSIST_MINUTES: "plugin.sessionPermissionNow.intervalInMinutes",
@@ -11,6 +11,7 @@ var gPluginHandler = {
     "PluginContent:RemoveNotification",
     "PluginContent:UpdateHiddenPluginUI",
     "PluginContent:HideNotificationBar",
+    "PluginContent:ShowInstallNotification",
     "PluginContent:InstallSinglePlugin",
     "PluginContent:ShowPluginCrashedNotification",
     "PluginContent:SubmitReport",
@@ -55,6 +56,8 @@ var gPluginHandler = {
       case "PluginContent:HideNotificationBar":
         this.hideNotificationBar(msg.target, msg.data.name);
         break;
+      case "PluginContent:ShowInstallNotification":
+        return this.showInstallNotification(msg.target, msg.data.pluginInfo);
       case "PluginContent:InstallSinglePlugin":
         this.installSinglePlugin(msg.data.pluginInfo);
         break;
@@ -81,6 +84,14 @@ var gPluginHandler = {
         break;
     }
   },
+
+#ifdef MOZ_CRASHREPORTER
+  get CrashSubmit() {
+    delete this.CrashSubmit;
+    Cu.import("resource://gre/modules/CrashSubmit.jsm", this);
+    return this.CrashSubmit;
+  },
+#endif
 
   // Callback for user clicking on a disabled plugin
   managePlugins: function () {

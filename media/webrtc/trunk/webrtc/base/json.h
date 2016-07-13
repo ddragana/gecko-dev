@@ -20,7 +20,7 @@
 #include "third_party/jsoncpp/json.h"
 #endif
 
-namespace rtc {
+// TODO: Move to rtc namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // JSON Helpers
@@ -85,7 +85,5 @@ bool GetDoubleFromJsonObject(const Json::Value& in, const std::string& k,
 
 // Writes out a Json value as a string.
 std::string JsonValueToString(const Json::Value& json);
-
-}  // namespace rtc
 
 #endif  // WEBRTC_BASE_JSON_H_

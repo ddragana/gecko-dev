@@ -8,7 +8,7 @@ intr protocol PTestNestedLoops {
 child:
     async Start();
     intr R();
-    async __delete__();
+    __delete__();
 
 parent:
     async Nonce();

@@ -20,7 +20,7 @@ using namespace mozilla::gfx;
 
 static void
 PaintCheckMark(nsIFrame* aFrame,
-               DrawTarget* aDrawTarget,
+               nsRenderingContext* aCtx,
                const nsRect& aDirtyRect,
                nsPoint aPt)
 {
@@ -39,7 +39,8 @@ PaintCheckMark(nsIFrame* aFrame,
   nsPoint paintCenter(rect.x + rect.width  / 2,
                       rect.y + rect.height / 2);
 
-  RefPtr<PathBuilder> builder = aDrawTarget->CreatePathBuilder();
+  DrawTarget* drawTarget = aCtx->GetDrawTarget();
+  RefPtr<PathBuilder> builder = drawTarget->CreatePathBuilder();
   nsPoint p = paintCenter + nsPoint(checkPolygonX[0] * paintScale,
                                     checkPolygonY[0] * paintScale);
 
@@ -51,16 +52,17 @@ PaintCheckMark(nsIFrame* aFrame,
     builder->LineTo(NSPointToPoint(p, appUnitsPerDevPixel));
   }
   RefPtr<Path> path = builder->Finish();
-  aDrawTarget->Fill(path,
-                    ColorPattern(ToDeviceColor(aFrame->StyleColor()->mColor)));
+  drawTarget->Fill(path,
+                   ColorPattern(ToDeviceColor(aFrame->StyleColor()->mColor)));
 }
 
 static void
 PaintIndeterminateMark(nsIFrame* aFrame,
-                       DrawTarget* aDrawTarget,
+                       nsRenderingContext* aCtx,
                        const nsRect& aDirtyRect,
                        nsPoint aPt)
 {
+  DrawTarget* drawTarget = aCtx->GetDrawTarget();
   int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
 
   nsRect rect(aPt, aFrame->GetSize());
@@ -68,10 +70,10 @@ PaintIndeterminateMark(nsIFrame* aFrame,
   rect.y += (rect.height - rect.height/4) / 2;
   rect.height /= 4;
 
-  Rect devPxRect = NSRectToSnappedRect(rect, appUnitsPerDevPixel, *aDrawTarget);
+  Rect devPxRect = NSRectToSnappedRect(rect, appUnitsPerDevPixel, *drawTarget);
 
-  aDrawTarget->FillRect(
-    devPxRect, ColorPattern(ToDeviceColor(aFrame->StyleColor()->mColor)));
+  drawTarget->FillRect(devPxRect,
+                    ColorPattern(ToDeviceColor(aFrame->StyleColor()->mColor)));
 }
 
 //------------------------------------------------------------

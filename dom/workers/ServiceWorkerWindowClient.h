@@ -24,7 +24,8 @@ public:
                             const ServiceWorkerClientInfo& aClientInfo)
     : ServiceWorkerClient(aOwner, aClientInfo),
       mVisibilityState(aClientInfo.mVisibilityState),
-      mFocused(aClientInfo.mFocused)
+      mFocused(aClientInfo.mFocused),
+      mFrameType(aClientInfo.mFrameType)
   {
   }
 
@@ -43,11 +44,14 @@ public:
     return mFocused;
   }
 
-  already_AddRefed<Promise>
-  Focus(ErrorResult& aRv) const;
+  mozilla::dom::FrameType
+  FrameType() const
+  {
+    return mFrameType;
+  }
 
   already_AddRefed<Promise>
-  Navigate(const nsAString& aUrl,  ErrorResult& aRv);
+  Focus(ErrorResult& aRv) const;
 
 private:
   ~ServiceWorkerWindowClient()
@@ -55,6 +59,7 @@ private:
 
   mozilla::dom::VisibilityState mVisibilityState;
   bool mFocused;
+  mozilla::dom::FrameType mFrameType;
 };
 
 } // namespace workers

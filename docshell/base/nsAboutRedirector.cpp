@@ -9,7 +9,6 @@
 #include "nsAboutProtocolUtils.h"
 #include "mozilla/ArrayUtils.h"
 #include "nsDOMString.h"
-#include "nsIProtocolHandler.h"
 
 NS_IMPL_ISUPPORTS(nsAboutRedirector, nsIAboutModule)
 
@@ -37,48 +36,31 @@ static RedirEntry kRedirMap[] = {
   },
   { "about", "chrome://global/content/aboutAbout.xhtml", 0 },
   {
-    "addons", "chrome://mozapps/content/extensions/extensions.xul",
-    nsIAboutModule::ALLOW_SCRIPT
-  },
-  {
-    "buildconfig", "chrome://global/content/buildconfig.html",
+    "credits", "http://www.mozilla.org/credits/",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
   {
-    "checkerboard", "chrome://global/content/aboutCheckerboard.xhtml",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
-      nsIAboutModule::ALLOW_SCRIPT
+    "mozilla", "chrome://global/content/mozilla.xhtml",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
+  },
+  {
+    "plugins", "chrome://global/content/plugins.html",
+    nsIAboutModule::URI_MUST_LOAD_IN_CHILD
   },
   { "config", "chrome://global/content/config.xul", 0 },
 #ifdef MOZ_CRASHREPORTER
   { "crashes", "chrome://global/content/crashes.xhtml", 0 },
 #endif
   {
-    "credits", "https://www.mozilla.org/credits/",
+    "logo", "chrome://branding/content/about.png",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
-#ifdef MOZ_DEVTOOLS_ALL
   {
-    "debugging", "chrome://devtools/content/aboutdebugging/aboutdebugging.xhtml",
-    nsIAboutModule::ALLOW_SCRIPT
+    "buildconfig", "chrome://global/content/buildconfig.html",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
-#endif
   {
     "license", "chrome://global/content/license.html",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
-  },
-  {
-    "logo", "chrome://branding/content/about.png",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
-    // Linkable for testing reasons.
-    nsIAboutModule::MAKE_LINKABLE
-  },
-  {
-    "memory", "chrome://global/content/aboutMemory.xhtml",
-    nsIAboutModule::ALLOW_SCRIPT
-  },
-  {
-    "mozilla", "chrome://global/content/mozilla.xhtml",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
   {
@@ -89,43 +71,21 @@ static RedirEntry kRedirMap[] = {
       nsIAboutModule::HIDE_FROM_ABOUTABOUT
   },
   {
-    "networking", "chrome://global/content/aboutNetworking.xhtml",
+    "memory", "chrome://global/content/aboutMemory.xhtml",
     nsIAboutModule::ALLOW_SCRIPT
-  },
-  {
-    "newaddon", "chrome://mozapps/content/extensions/newaddon.xul",
-    nsIAboutModule::ALLOW_SCRIPT |
-      nsIAboutModule::HIDE_FROM_ABOUTABOUT
   },
   {
     "performance", "chrome://global/content/aboutPerformance.xhtml",
     nsIAboutModule::ALLOW_SCRIPT
   },
   {
-    "plugins", "chrome://global/content/plugins.html",
-    nsIAboutModule::URI_MUST_LOAD_IN_CHILD
-  },
-  {
-    "serviceworkers", "chrome://global/content/aboutServiceWorkers.xhtml",
-    nsIAboutModule::URI_CAN_LOAD_IN_CHILD |
-    nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+    "addons", "chrome://mozapps/content/extensions/extensions.xul",
     nsIAboutModule::ALLOW_SCRIPT
   },
-#ifndef ANDROID
   {
-    "profiles", "chrome://global/content/aboutProfiles.xhtml",
-    nsIAboutModule::ALLOW_SCRIPT
-  },
-#endif
-  // about:srcdoc is unresolvable by specification.  It is included here
-  // because the security manager would disallow srcdoc iframes otherwise.
-  {
-    "srcdoc", "about:blank",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
-      nsIAboutModule::HIDE_FROM_ABOUTABOUT |
-      // Needs to be linkable so content can touch its own srcdoc frames
-      nsIAboutModule::MAKE_LINKABLE |
-      nsIAboutModule::URI_CAN_LOAD_IN_CHILD
+    "newaddon", "chrome://mozapps/content/extensions/newaddon.xul",
+    nsIAboutModule::ALLOW_SCRIPT |
+      nsIAboutModule::HIDE_FROM_ABOUTABOUT
   },
   {
     "support", "chrome://global/content/aboutSupport.xhtml",
@@ -136,8 +96,25 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT
   },
   {
-    "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.html",
+    "networking", "chrome://global/content/aboutNetworking.xhtml",
     nsIAboutModule::ALLOW_SCRIPT
+  },
+  {
+    "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT
+  },
+  {
+    "serviceworkers", "chrome://global/content/aboutServiceWorkers.xhtml",
+    nsIAboutModule::URI_CAN_LOAD_IN_CHILD |
+    nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+    nsIAboutModule::ALLOW_SCRIPT
+  },
+  // about:srcdoc is unresolvable by specification.  It is included here
+  // because the security manager would disallow srcdoc iframes otherwise.
+  {
+    "srcdoc", "about:blank",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+      nsIAboutModule::HIDE_FROM_ABOUTABOUT
   }
 };
 static const int kRedirTotal = mozilla::ArrayLength(kRedirMap);
@@ -163,27 +140,12 @@ nsAboutRedirector::NewChannel(nsIURI* aURI,
       nsCOMPtr<nsIURI> tempURI;
       rv = NS_NewURI(getter_AddRefs(tempURI), kRedirMap[i].url);
       NS_ENSURE_SUCCESS(rv, rv);
-
-      // If tempURI links to an external URI (i.e. something other than
-      // chrome:// or resource://) then set the LOAD_REPLACE flag on the
-      // channel which forces the channel owner to reflect the displayed
-      // URL rather then being the systemPrincipal.
-      bool isUIResource = false;
-      rv = NS_URIChainHasFlags(tempURI, nsIProtocolHandler::URI_IS_UI_RESOURCE,
-                               &isUIResource);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      nsLoadFlags loadFlags =
-        isUIResource ? static_cast<nsLoadFlags>(nsIChannel::LOAD_NORMAL)
-                     : static_cast<nsLoadFlags>(nsIChannel::LOAD_REPLACE);
-
       rv = NS_NewChannelInternal(getter_AddRefs(tempChannel),
                                  tempURI,
-                                 aLoadInfo,
-                                 nullptr, // aLoadGroup
-                                 nullptr, // aCallbacks
-                                 loadFlags);
-      NS_ENSURE_SUCCESS(rv, rv);
+                                 aLoadInfo);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
 
       tempChannel->SetOriginalURI(aURI);
 
@@ -226,6 +188,6 @@ nsAboutRedirector::GetIndexedDBOriginPostfix(nsIURI* aURI, nsAString& aResult)
 nsresult
 nsAboutRedirector::Create(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 {
-  RefPtr<nsAboutRedirector> about = new nsAboutRedirector();
+  nsRefPtr<nsAboutRedirector> about = new nsAboutRedirector();
   return about->QueryInterface(aIID, aResult);
 }

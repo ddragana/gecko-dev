@@ -107,7 +107,9 @@ class nsCertOverrideEntry final : public PLDHashEntryHdr
 
     static PLDHashNumber HashKey(KeyTypePointer aKey)
     {
-      return PLDHashTable::HashStringKey(aKey);
+      // PL_DHashStringKey doesn't use the table parameter, so we can safely
+      // pass nullptr
+      return PL_DHashStringKey(nullptr, aKey);
     }
 
     enum { ALLOW_MEMMOVE = false };

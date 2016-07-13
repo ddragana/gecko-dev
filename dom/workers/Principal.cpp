@@ -11,18 +11,10 @@
 
 BEGIN_WORKERS_NAMESPACE
 
-struct WorkerPrincipal final : public JSPrincipals
-{
-  bool write(JSContext* aCx, JSStructuredCloneWriter* aWriter) override {
-    MOZ_CRASH("WorkerPrincipal::write not implemented");
-    return false;
-  }
-};
-
 JSPrincipals*
 GetWorkerPrincipal()
 {
-  static WorkerPrincipal sPrincipal;
+  static JSPrincipals sPrincipal;
 
   /*
    * To make sure the the principals refcount is initialized to one, atomically

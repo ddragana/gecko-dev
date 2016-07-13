@@ -6,60 +6,29 @@
 var SelectHelper = {
   _uiBusy: false,
 
-  handleEvent: function(event) {
-    this.handleClick(event.target);
+  handleEvent: function(aEvent) {
+    this.handleClick(aEvent.target);
   },
 
-  handleClick: function(target) {
+  handleClick: function(aTarget) {
     // if we're busy looking at a select we want to eat any clicks that
     // come to us, but not to process them
-    if (this._uiBusy || !this._isMenu(target) || this._isDisabledElement(target)) {
-      return;
-    }
+    if (this._uiBusy || !this._isMenu(aTarget) || this._isDisabledElement(aTarget))
+        return;
 
     this._uiBusy = true;
-    this.show(target);
+    this.show(aTarget);
     this._uiBusy = false;
   },
 
-  // This is a callback function to be provided to prompt.show(callBack).
-  // It will update which Option elements in a Select have been selected
-  // or unselected and fire the onChange event.
-  _promptCallBack: function(data, element) {
-    let selected = data.list;
+  show: function(aElement) {
+    let list = this.getListForElement(aElement);
 
-    if (element instanceof Ci.nsIDOMXULMenuListElement) {
-      if (element.selectedIndex != selected[0]) {
-        element.selectedIndex = selected[0];
-        this.fireOnCommand(element);
-      }
-    } else if (element instanceof HTMLSelectElement) {
-      let changed = false;
-      let i = 0; // The index for the element from `data.list` that we are currently examining.
-      this.forVisibleOptions(element, function(node) {
-        if (node.selected && selected.indexOf(i) == -1) {
-          changed = true;
-          node.selected = false;
-        } else if (!node.selected && selected.indexOf(i) != -1) {
-          changed = true;
-          node.selected = true;
-        }
-        i++;
-      });
-
-      if (changed) {
-        this.fireOnChange(element);
-      }
-    }
-  },
-
-  show: function(element) {
-    let list = this.getListForElement(element);
     let p = new Prompt({
-      window: element.ownerDocument.defaultView
+      window: aElement.contentDocument
     });
 
-    if (element.multiple) {
+    if (aElement.multiple) {
       p.addButton({
         label: Strings.browser.GetStringFromName("selectHelper.closeMultipleSelectDialog")
       }).setMultiChoiceItems(list);
@@ -67,93 +36,112 @@ var SelectHelper = {
       p.setSingleChoiceItems(list);
     }
 
-    p.show((data) => {
-      this._promptCallBack(data,element)
-    });
+    p.show((function(data) {
+      let selected = data.list;
+
+      if (aElement instanceof Ci.nsIDOMXULMenuListElement) {
+        if (aElement.selectedIndex != selected[0]) {
+          aElement.selectedIndex = selected[0];
+          this.fireOnCommand(aElement);
+        }
+      } else if (aElement instanceof HTMLSelectElement) {
+        let changed = false;
+        let i = 0;
+        this.forOptions(aElement, function(aNode) {
+          if (aNode.selected && selected.indexOf(i) == -1) {
+            changed = true;
+            aNode.selected = false;
+          } else if (!aNode.selected && selected.indexOf(i) != -1) {
+            changed = true;
+            aNode.selected = true;
+          }
+          i++;
+        });
+
+        if (changed)
+          this.fireOnChange(aElement);
+      }
+    }).bind(this));
   },
 
-  _isMenu: function(element) {
-    return (element instanceof HTMLSelectElement || element instanceof Ci.nsIDOMXULMenuListElement);
+  _isMenu: function(aElement) {
+    return (aElement instanceof HTMLSelectElement ||
+            aElement instanceof Ci.nsIDOMXULMenuListElement);
   },
 
-  // Return a list of Option elements within a Select excluding
-  // any that were not visible.
-  getListForElement: function(element) {
+  getListForElement: function(aElement) {
     let index = 0;
     let items = [];
-    this.forVisibleOptions(element, function(node, options,parent) {
+    this.forOptions(aElement, function(aNode, aOptions, aParent) {
       let item = {
-        label: node.text || node.label,
-        header: options.isGroup,
-        disabled: node.disabled,
+        label: aNode.text || aNode.label,
+        header: aOptions.isGroup,
+        disabled: aNode.disabled,
         id: index,
-        selected: node.selected,
-      };
+        selected: aNode.selected
+      }
 
-      if (parent) {
+      if (aParent) {
         item.child = true;
-        item.disabled = item.disabled || parent.disabled;
+        item.disabled = item.disabled || aParent.disabled;
       }
       items.push(item);
+
       index++;
     });
     return items;
   },
 
-  // Apply a function to all visible Option elements in a Select
-  forVisibleOptions: function(element, aFunction, parent = null) {
-    if (element instanceof Ci.nsIDOMXULMenuListElement) {
-      element = element.menupopup;
-    }
+  forOptions: function(aElement, aFunction, aParent = null) {
+    let element = aElement;
+    if (aElement instanceof Ci.nsIDOMXULMenuListElement)
+      element = aElement.menupopup;
     let children = element.children;
     let numChildren = children.length;
 
-
     // if there are no children in this select, we add a dummy row so that at least something appears
-    if (numChildren == 0) {
-      aFunction.call(this, {label: ""}, {isGroup: false}, parent);
-    }
+    if (numChildren == 0)
+      aFunction.call(this, { label: "" }, { isGroup: false }, aParent);
 
     for (let i = 0; i < numChildren; i++) {
       let child = children[i];
-      let style = window.getComputedStyle(child, null);
-      if (style.display !== "none") {
-        if (child instanceof HTMLOptionElement ||
-            child instanceof Ci.nsIDOMXULSelectControlItemElement) {
-          aFunction.call(this, child, {isGroup: false}, parent);
-        } else if (child instanceof HTMLOptGroupElement) {
-          aFunction.call(this, child, {isGroup: true});
-          this.forVisibleOptions(child, aFunction, child);
-        }
+      if (child instanceof HTMLOptionElement ||
+          child instanceof Ci.nsIDOMXULSelectControlItemElement) {
+        aFunction.call(this, child, { isGroup: false }, aParent);
+      } else if (child instanceof HTMLOptGroupElement) {
+        aFunction.call(this, child, { isGroup: true });
+        this.forOptions(child, aFunction, child);
+
       }
     }
   },
 
-  fireOnChange: function(element) {
-    let event = element.ownerDocument.createEvent("Events");
-    event.initEvent("change", true, true, element.defaultView, 0,
-        false, false, false, false, null);
+  fireOnChange: function(aElement) {
+    let evt = aElement.ownerDocument.createEvent("Events");
+    evt.initEvent("change", true, true, aElement.defaultView, 0,
+                  false, false,
+                  false, false, null);
     setTimeout(function() {
-      element.dispatchEvent(event);
+      aElement.dispatchEvent(evt);
     }, 0);
   },
 
-  fireOnCommand: function(element) {
-    let event = element.ownerDocument.createEvent("XULCommandEvent");
-    event.initCommandEvent("command", true, true, element.defaultView, 0,
-        false, false, false, false, null);
+  fireOnCommand: function(aElement) {
+    let evt = aElement.ownerDocument.createEvent("XULCommandEvent");
+    evt.initCommandEvent("command", true, true, aElement.defaultView, 0,
+                  false, false,
+                  false, false, null);
     setTimeout(function() {
-      element.dispatchEvent(event);
+      aElement.dispatchEvent(evt);
     }, 0);
   },
 
-  _isDisabledElement : function(element) {
-    let currentElement = element;
+  _isDisabledElement : function(aElement) {
+    let currentElement = aElement;
     while (currentElement) {
-      // Must test with === in case a form has a field named "disabled". See bug 1263589.
-      if (currentElement.disabled === true) {
-        return true;
-      }
+      if (currentElement.disabled)
+	return true;
+
       currentElement = currentElement.parentElement;
     }
     return false;

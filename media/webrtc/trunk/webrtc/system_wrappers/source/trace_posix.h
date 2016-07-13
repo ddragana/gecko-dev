@@ -19,13 +19,14 @@ namespace webrtc {
 class TracePosix : public TraceImpl {
  public:
   TracePosix();
-  ~TracePosix() override;
+  virtual ~TracePosix();
 
   // This method can be called on several different threads different from
   // the creating thread.
-  int32_t AddTime(char* trace_message, const TraceLevel level) const override;
+  virtual int32_t AddTime(char* trace_message, const TraceLevel level) const
+      OVERRIDE;
 
-  int32_t AddDateTimeInfo(char* trace_message) const override;
+  virtual int32_t AddDateTimeInfo(char* trace_message) const OVERRIDE;
 
  private:
   volatile mutable uint32_t  prev_api_tick_count_;

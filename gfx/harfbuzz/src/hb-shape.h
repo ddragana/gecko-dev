@@ -47,29 +47,32 @@ typedef struct hb_feature_t {
   unsigned int  end;
 } hb_feature_t;
 
-HB_EXTERN hb_bool_t
+/* len=-1 means str is NUL-terminated */
+hb_bool_t
 hb_feature_from_string (const char *str, int len,
 			hb_feature_t *feature);
 
-HB_EXTERN void
+/* Something like 128 bytes is more than enough.
+ * nul-terminates. */
+void
 hb_feature_to_string (hb_feature_t *feature,
 		      char *buf, unsigned int size);
 
 
-HB_EXTERN void
+void
 hb_shape (hb_font_t           *font,
 	  hb_buffer_t         *buffer,
 	  const hb_feature_t  *features,
 	  unsigned int         num_features);
 
-HB_EXTERN hb_bool_t
+hb_bool_t
 hb_shape_full (hb_font_t          *font,
 	       hb_buffer_t        *buffer,
 	       const hb_feature_t *features,
 	       unsigned int        num_features,
 	       const char * const *shaper_list);
 
-HB_EXTERN const char **
+const char **
 hb_shape_list_shapers (void);
 
 

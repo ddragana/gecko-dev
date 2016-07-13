@@ -23,7 +23,7 @@ XULSliderAccessible::
   XULSliderAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
-  mStateFlags |= eHasNumericValue | eNoXBLKids;
+  mStateFlags |= eHasNumericValue;
 }
 
 // Accessible
@@ -125,6 +125,13 @@ XULSliderAccessible::SetCurValue(double aValue)
     return true;
 
   return SetSliderAttr(nsGkAtoms::curpos, aValue);
+}
+
+bool
+XULSliderAccessible::CanHaveAnonChildren()
+{
+  // Do not allow anonymous xul:slider be accessible.
+  return false;
 }
 
 // Utils

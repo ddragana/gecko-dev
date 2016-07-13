@@ -13,13 +13,15 @@
 
 class nsLineLayout;
 
+typedef nsContainerFrame nsInlineFrameBase;
+
 /**
  * Inline frame class.
  *
  * This class manages a list of child frames that are inline frames. Working with
  * nsLineLayout, the class will reflow and place inline frames on a line.
  */
-class nsInlineFrame : public nsContainerFrame
+class nsInlineFrame : public nsInlineFrameBase
 {
 public:
   NS_DECL_QUERYFRAME_TARGET(nsInlineFrame)
@@ -62,7 +64,7 @@ public:
                                      bool aRespectClusters = true) override;
   
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
-  virtual nsresult StealFrame(nsIFrame* aChild) override;
+  virtual nsresult StealFrame(nsIFrame* aChild, bool aForceNormal) override;
 
   // nsIHTMLReflow overrides
   virtual void AddInlineMinISize(nsRenderingContext *aRenderingContext,
@@ -78,7 +80,7 @@ public:
               const mozilla::LogicalSize& aBorder,
               const mozilla::LogicalSize& aPadding,
               ComputeSizeFlags aFlags) override;
-  virtual nsRect ComputeTightBounds(DrawTarget* aDrawTarget) const override;
+  virtual nsRect ComputeTightBounds(gfxContext* aContext) const override;
   virtual void Reflow(nsPresContext* aPresContext,
                       nsHTMLReflowMetrics& aDesiredSize,
                       const nsHTMLReflowState& aReflowState,

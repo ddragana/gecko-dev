@@ -11,13 +11,13 @@
 #include "webrtc/modules/desktop_capture/desktop_and_cursor_composer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/mouse_cursor.h"
 #include "webrtc/modules/desktop_capture/shared_desktop_frame.h"
 #include "webrtc/modules/desktop_capture/window_capturer.h"
 #include "webrtc/system_wrappers/interface/logging.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
@@ -74,9 +74,11 @@ class FakeScreenCapturer : public DesktopCapturer {
  public:
   FakeScreenCapturer() {}
 
-  void Start(Callback* callback) override { callback_ = callback; }
+  virtual void Start(Callback* callback) OVERRIDE {
+    callback_ = callback;
+  }
 
-  void Capture(const DesktopRegion& region) override {
+  virtual void Capture(const DesktopRegion& region) OVERRIDE {
     callback_->OnCaptureCompleted(next_frame_.release());
   }
 
@@ -87,7 +89,7 @@ class FakeScreenCapturer : public DesktopCapturer {
  private:
   Callback* callback_;
 
-  rtc::scoped_ptr<DesktopFrame> next_frame_;
+  scoped_ptr<DesktopFrame> next_frame_;
 };
 
 class FakeMouseMonitor : public MouseCursorMonitor {
@@ -105,11 +107,13 @@ class FakeMouseMonitor : public MouseCursorMonitor {
     hotspot_ = hotspot;
   }
 
-  void Init(Callback* callback, Mode mode) override { callback_ = callback; }
+  virtual void Init(Callback* callback, Mode mode) OVERRIDE {
+    callback_ = callback;
+  }
 
-  void Capture() override {
+  virtual void Capture() OVERRIDE {
     if (changed_) {
-      rtc::scoped_ptr<DesktopFrame> image(
+      scoped_ptr<DesktopFrame> image(
           new BasicDesktopFrame(DesktopSize(kCursorWidth, kCursorHeight)));
       uint32_t* data = reinterpret_cast<uint32_t*>(image->data());
       memset(data, 0, image->stride() * kCursorHeight);
@@ -168,9 +172,13 @@ class DesktopAndCursorComposerTest : public testing::Test,
   }
 
   // DesktopCapturer::Callback interface
-  SharedMemory* CreateSharedMemory(size_t size) override { return NULL; }
+  virtual SharedMemory* CreateSharedMemory(size_t size) OVERRIDE {
+    return NULL;
+  }
 
-  void OnCaptureCompleted(DesktopFrame* frame) override { frame_.reset(frame); }
+  virtual void OnCaptureCompleted(DesktopFrame* frame) OVERRIDE {
+    frame_.reset(frame);
+  }
 
  protected:
   // Owned by |blender_|.
@@ -178,7 +186,7 @@ class DesktopAndCursorComposerTest : public testing::Test,
   FakeMouseMonitor* fake_cursor_;
 
   DesktopAndCursorComposer blender_;
-  rtc::scoped_ptr<DesktopFrame> frame_;
+  scoped_ptr<DesktopFrame> frame_;
 };
 
 // Verify DesktopAndCursorComposer can handle the case when the screen capturer
@@ -230,7 +238,7 @@ TEST_F(DesktopAndCursorComposerTest, Blend) {
     DesktopVector pos(tests[i].x, tests[i].y);
     fake_cursor_->SetState(state, pos);
 
-    rtc::scoped_ptr<SharedDesktopFrame> frame(
+    scoped_ptr<SharedDesktopFrame> frame(
         SharedDesktopFrame::Wrap(CreateTestFrame()));
     fake_screen_->SetNextFrame(frame->Share());
 

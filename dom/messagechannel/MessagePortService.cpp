@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +9,7 @@
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/unused.h"
+#include "nsDataHashtable.h"
 #include "nsTArray.h"
 
 using mozilla::ipc::AssertIsOnBackgroundThread;
@@ -36,9 +36,6 @@ public:
     : mDestinationUUID(aDestinationUUID)
     , mSequenceID(1)
     , mParent(nullptr)
-    // By default we don't know the next parent.
-    , mWaitingForNewParent(true)
-    , mNextStepCloseAll(false)
   {
     MOZ_COUNT_CTOR(MessagePortServiceData);
   }
@@ -64,10 +61,7 @@ public:
   };
 
   FallibleTArray<NextParent> mNextParents;
-  FallibleTArray<RefPtr<SharedMessagePortMessage>> mMessages;
-
-  bool mWaitingForNewParent;
-  bool mNextStepCloseAll;
+  FallibleTArray<nsRefPtr<SharedMessagePortMessage>> mMessages;
 };
 
 /* static */ MessagePortService*
@@ -119,49 +113,31 @@ MessagePortService::RequestEntangling(MessagePortParent* aParent,
   // This is a security check.
   if (!data->mDestinationUUID.Equals(aDestinationUUID)) {
     MOZ_ASSERT(false, "DestinationUUIDs do not match!");
-    CloseAll(aParent->ID());
     return false;
   }
 
   if (aSequenceID < data->mSequenceID) {
     MOZ_ASSERT(false, "Invalid sequence ID!");
-    CloseAll(aParent->ID());
     return false;
   }
 
   if (aSequenceID == data->mSequenceID) {
     if (data->mParent) {
       MOZ_ASSERT(false, "Two ports cannot have the same sequenceID.");
-      CloseAll(aParent->ID());
       return false;
     }
 
     // We activate this port, sending all the messages.
     data->mParent = aParent;
-    data->mWaitingForNewParent = false;
     FallibleTArray<MessagePortMessage> array;
     if (!SharedMessagePortMessage::FromSharedToMessagesParent(aParent,
                                                               data->mMessages,
                                                               array)) {
-      CloseAll(aParent->ID());
       return false;
     }
 
     data->mMessages.Clear();
-
-    // We can entangle the port.
-    if (!aParent->Entangled(array)) {
-      CloseAll(aParent->ID());
-      return false;
-    }
-
-    // If we were waiting for this parent in order to close this channel, this
-    // is the time to do it.
-    if (data->mNextStepCloseAll) {
-      CloseAll(aParent->ID());
-    }
-
-    return true;
+    return aParent->Entangled(array);
   }
 
   // This new parent will be the next one when a Disentangle request is
@@ -169,7 +145,6 @@ MessagePortService::RequestEntangling(MessagePortParent* aParent,
   MessagePortServiceData::NextParent* nextParent =
     data->mNextParents.AppendElement(mozilla::fallible);
   if (!nextParent) {
-    CloseAll(aParent->ID());
     return false;
   }
 
@@ -182,7 +157,7 @@ MessagePortService::RequestEntangling(MessagePortParent* aParent,
 bool
 MessagePortService::DisentanglePort(
                   MessagePortParent* aParent,
-                  FallibleTArray<RefPtr<SharedMessagePortMessage>>& aMessages)
+                  FallibleTArray<nsRefPtr<SharedMessagePortMessage>>& aMessages)
 {
   MessagePortServiceData* data;
   if (!mPorts.Get(aParent->ID(), &data)) {
@@ -218,7 +193,6 @@ MessagePortService::DisentanglePort(
   // We didn't find the parent.
   if (!nextParent) {
     data->mMessages.SwapElements(aMessages);
-    data->mWaitingForNewParent = true;
     data->mParent = nullptr;
     return true;
   }
@@ -233,7 +207,7 @@ MessagePortService::DisentanglePort(
     return false;
   }
 
-  Unused << data->mParent->Entangled(array);
+  unused << data->mParent->Entangled(array);
   return true;
 }
 
@@ -263,8 +237,20 @@ MessagePortService::ClosePort(MessagePortParent* aParent)
   return true;
 }
 
+#ifdef DEBUG
+PLDHashOperator
+MessagePortService::CloseAllDebugCheck(const nsID& aID,
+                                       MessagePortServiceData* aData,
+                                       void* aPtr)
+{
+  nsID* id = static_cast<nsID*>(aPtr);
+  MOZ_ASSERT(!id->Equals(aID));
+  return PL_DHASH_NEXT;
+}
+#endif
+
 void
-MessagePortService::CloseAll(const nsID& aUUID, bool aForced)
+MessagePortService::CloseAll(const nsID& aUUID)
 {
   MessagePortServiceData* data;
   if (!mPorts.Get(aUUID, &data)) {
@@ -281,24 +267,9 @@ MessagePortService::CloseAll(const nsID& aUUID, bool aForced)
   }
 
   nsID destinationUUID = data->mDestinationUUID;
-
-  // If we have informations about the other port and that port has some
-  // pending messages to deliver but the parent has not processed them yet,
-  // because its entangling request didn't arrive yet), we cannot close this
-  // channel.
-  MessagePortServiceData* destinationData;
-  if (!aForced &&
-      mPorts.Get(destinationUUID, &destinationData) &&
-      !destinationData->mMessages.IsEmpty() &&
-      destinationData->mWaitingForNewParent) {
-    MOZ_ASSERT(!destinationData->mNextStepCloseAll);
-    destinationData->mNextStepCloseAll = true;
-    return;
-  }
-
   mPorts.Remove(aUUID);
 
-  CloseAll(destinationUUID, aForced);
+  CloseAll(destinationUUID);
 
   // CloseAll calls itself recursively and it can happen that it deletes
   // itself. Before continuing we must check if we are still alive.
@@ -307,9 +278,7 @@ MessagePortService::CloseAll(const nsID& aUUID, bool aForced)
   }
 
 #ifdef DEBUG
-  for (auto iter = mPorts.Iter(); !iter.Done(); iter.Next()) {
-    MOZ_ASSERT(!aUUID.Equals(iter.Key()));
-  }
+  mPorts.EnumerateRead(CloseAllDebugCheck, const_cast<nsID*>(&aUUID));
 #endif
 
   MaybeShutdown();
@@ -327,7 +296,7 @@ MessagePortService::MaybeShutdown()
 bool
 MessagePortService::PostMessages(
                   MessagePortParent* aParent,
-                  FallibleTArray<RefPtr<SharedMessagePortMessage>>& aMessages)
+                  FallibleTArray<nsRefPtr<SharedMessagePortMessage>>& aMessages)
 {
   MessagePortServiceData* data;
   if (!mPorts.Get(aParent->ID(), &data)) {
@@ -356,7 +325,7 @@ MessagePortService::PostMessages(
     }
 
     data->mMessages.Clear();
-    Unused << data->mParent->SendReceiveData(messages);
+    unused << data->mParent->SendReceiveData(messages);
   }
 
   return true;
@@ -401,7 +370,7 @@ MessagePortService::ForceClose(const nsID& aUUID,
     return false;
   }
 
-  CloseAll(aUUID, true);
+  CloseAll(aUUID);
   return true;
 }
 

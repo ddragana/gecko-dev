@@ -14,8 +14,6 @@
 #include "States.h"
 
 #include "mozilla/dom/HTMLLabelElement.h"
-#include "mozilla/dom/HTMLDetailsElement.h"
-#include "mozilla/dom/HTMLSummaryElement.h"
 
 using namespace mozilla::a11y;
 
@@ -70,38 +68,12 @@ HTMLLabelAccessible::RelationByType(RelationType aType)
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
   if (aType == RelationType::LABEL_FOR) {
-    dom::HTMLLabelElement* label = dom::HTMLLabelElement::FromContent(mContent);
+    nsRefPtr<dom::HTMLLabelElement> label = dom::HTMLLabelElement::FromContent(mContent);
     rel.AppendTarget(mDoc, label->GetControl());
   }
 
   return rel;
 }
-
-uint8_t
-HTMLLabelAccessible::ActionCount()
-{
-  return nsCoreUtils::IsLabelWithControl(mContent) ? 1 : 0;
-}
-
-void
-HTMLLabelAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
-{
-  if (aIndex == 0) {
-    if (nsCoreUtils::IsLabelWithControl(mContent))
-      aName.AssignLiteral("click");
-  }
-}
-
-bool
-HTMLLabelAccessible::DoAction(uint8_t aIndex)
-{
-  if (aIndex != 0)
-    return false;
-
-  DoCommand();
-  return true;
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsHTMLOuputAccessible
@@ -117,88 +89,4 @@ HTMLOutputAccessible::RelationByType(RelationType aType)
     rel.AppendIter(new IDRefsIterator(mDoc, mContent, nsGkAtoms::_for));
 
   return rel;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// HTMLSummaryAccessible
-////////////////////////////////////////////////////////////////////////////////
-
-HTMLSummaryAccessible::
-  HTMLSummaryAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-  HyperTextAccessibleWrap(aContent, aDoc)
-{
-  mGenericTypes |= eButton;
-}
-
-uint8_t
-HTMLSummaryAccessible::ActionCount()
-{
-  return 1;
-}
-
-void
-HTMLSummaryAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
-{
-  if (aIndex != eAction_Click) {
-    return;
-  }
-
-  dom::HTMLSummaryElement* summary = dom::HTMLSummaryElement::FromContent(mContent);
-  if (!summary) {
-    return;
-  }
-
-  dom::HTMLDetailsElement* details = summary->GetDetails();
-  if (!details) {
-    return;
-  }
-
-  if (details->Open()) {
-    aName.AssignLiteral("collapse");
-  } else {
-    aName.AssignLiteral("expand");
-  }
-}
-
-bool
-HTMLSummaryAccessible::DoAction(uint8_t aIndex)
-{
-  if (aIndex != eAction_Click)
-    return false;
-
-  DoCommand();
-  return true;
-}
-
-uint64_t
-HTMLSummaryAccessible::NativeState()
-{
-  uint64_t state = HyperTextAccessibleWrap::NativeState();
-
-  dom::HTMLSummaryElement* summary = dom::HTMLSummaryElement::FromContent(mContent);
-  if (!summary) {
-    return state;
-  }
-
-  dom::HTMLDetailsElement* details = summary->GetDetails();
-  if (!details) {
-    return state;
-  }
-
-  if (details->Open()) {
-    state |= states::EXPANDED;
-  } else {
-    state |= states::COLLAPSED;
-  }
-
-  return state;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// HTMLSummaryAccessible: Widgets
-
-bool
-HTMLSummaryAccessible::IsWidget() const
-{
-  return true;
 }

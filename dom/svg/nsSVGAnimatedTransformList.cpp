@@ -46,9 +46,6 @@ nsSVGAnimatedTransformList::SetBaseValue(const SVGTransformList& aValue)
     domWrapper->InternalBaseValListWillChangeLengthTo(aValue.Length());
   }
 
-  // (This bool will be copied to our member-var, if attr-change succeeds.)
-  bool hadTransform = HasTransform();
-
   // We don't need to call DidChange* here - we're only called by
   // nsSVGElement::ParseAttribute under Element::SetAttr,
   // which takes care of notifying.
@@ -60,7 +57,6 @@ nsSVGAnimatedTransformList::SetBaseValue(const SVGTransformList& aValue)
     domWrapper->InternalBaseValListWillChangeLengthTo(mBaseVal.Length());
   } else {
     mIsAttrSet = true;
-    mHadTransformBeforeLastBaseValChange = hadTransform;
   }
   return rv;
 }
@@ -68,8 +64,6 @@ nsSVGAnimatedTransformList::SetBaseValue(const SVGTransformList& aValue)
 void
 nsSVGAnimatedTransformList::ClearBaseValue()
 {
-  mHadTransformBeforeLastBaseValChange = HasTransform();
-
   SVGAnimatedTransformList *domWrapper =
     SVGAnimatedTransformList::GetDOMWrapperIfExists(this);
   if (domWrapper) {

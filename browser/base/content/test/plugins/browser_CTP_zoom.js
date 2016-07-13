@@ -1,9 +1,9 @@
 "use strict";
 
-var rootDir = getRootDirectory(gTestPath);
+let rootDir = getRootDirectory(gTestPath);
 const gTestRoot = rootDir.replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
 
-var gTestBrowser = null;
+let gTestBrowser = null;
 
 add_task(function* () {
   registerCleanupFunction(function () {
@@ -49,13 +49,13 @@ add_task(function* () {
     // Reload the page
     yield promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_zoom.html");
     yield promiseUpdatePluginBindings(gTestBrowser);
-    yield ContentTask.spawn(gTestBrowser, { count }, function* (args) {
+    let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
       let doc = content.document;
       let plugin = doc.getElementById("test");
       let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
-      Assert.ok(overlay && overlay.classList.contains("visible"),
-        "Overlay should be visible for zoom change count " + args.count);
+      return overlay && overlay.classList.contains("visible");
     });
+    ok(result, "Overlay should be visible for zoom change count " + count);
   }
 });
 

@@ -12,7 +12,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 const kEntities = {
   "contacts": "contacts",
-  "desktop-notification": "desktopNotification2",
+  "desktop-notification": "desktopNotification",
   "device-storage:music": "deviceStorageMusic",
   "device-storage:pictures": "deviceStoragePictures",
   "device-storage:sdcard": "deviceStorageSdcard",
@@ -101,8 +101,8 @@ ContentPermissionPrompt.prototype = {
     let buttons = [{
       label: browserBundle.GetStringFromName(entityName + ".dontAllow"),
       callback: function(aChecked) {
-        // If the user checked "Don't ask again" or this is a desktopNotification, make a permanent exception
-        if (aChecked || entityName == "desktopNotification2")
+        // If the user checked "Don't ask again", make a permanent exception
+        if (aChecked)
           Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.DENY_ACTION);
 
         request.cancel();
@@ -111,11 +111,11 @@ ContentPermissionPrompt.prototype = {
     {
       label: browserBundle.GetStringFromName(entityName + ".allow"),
       callback: function(aChecked) {
-        // If the user checked "Don't ask again" or this is a desktopNotification, make a permanent exception
-        if (aChecked || entityName == "desktopNotification2") {
+        // If the user checked "Don't ask again", make a permanent exception
+        if (aChecked) {
           Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.ALLOW_ACTION);
-        } else if (isApp) {
-          // Otherwise allow the permission for the current session if the request comes from an app
+        } else if (isApp || entityName == "desktopNotification") {
+          // Otherwise allow the permission for the current session (if the request comes from an app or if it's a desktop-notification request)
           Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION);
         }
 
@@ -126,18 +126,7 @@ ContentPermissionPrompt.prototype = {
 
     let requestor = chromeWin.BrowserApp.manifest ? "'" + chromeWin.BrowserApp.manifest.name + "'" : request.principal.URI.host;
     let message = browserBundle.formatStringFromName(entityName + ".ask", [requestor], 1);
-    // desktopNotification doesn't have a checkbox
-    let options;
-    if (entityName == "desktopNotification2") {
-      options = {
-        link: {
-          label: browserBundle.GetStringFromName("doorhanger.learnMore"),
-          url: "https://www.mozilla.org/firefox/push/"
-        }
-      };
-    } else {
-      options = { checkbox: browserBundle.GetStringFromName(entityName + ".dontAskAgain") };
-    }
+    let options = { checkbox: browserBundle.GetStringFromName(entityName + ".dontAskAgain") };
 
     chromeWin.NativeWindow.doorhanger.show(message, entityName + request.principal.URI.host, buttons, tab.id, options, entityName.toUpperCase());
   }

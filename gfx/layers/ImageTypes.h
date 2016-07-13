@@ -17,12 +17,6 @@ enum class ImageFormat {
   PLANAR_YCBCR,
 
   /**
-   * The NV_IMAGE format creates a NVImage. The PLANAR_YCBCR together with this
-   * complete the YUV format family.
-   */
-  NV_IMAGE,
-
-  /**
    * The GRALLOC_PLANAR_YCBCR format creates a GrallocImage, a subtype of
    * PlanarYCbCrImage. It takes a PlanarYCbCrImage data or the raw gralloc
    * data and can be used as a texture by Gonk backend directly.
@@ -47,7 +41,7 @@ enum class ImageFormat {
   SHARED_RGB,
 
   /**
-   * The CAIRO_SURFACE format creates a SourceSurfaceImage. All backends should
+   * The CAIRO_SURFACE format creates a CairoImage. All backends should
    * support this format, because video rendering sometimes requires it.
    *
    * This format is useful even though a PaintedLayer could be used.
@@ -92,12 +86,7 @@ enum class ImageFormat {
   /**
    * A share handle to a ID3D11Texture2D.
    */
-  D3D11_SHARE_HANDLE_TEXTURE,
-
-  /**
-   * A wrapper around a drawable TextureClient.
-   */
-  TEXTURE_WRAPPER
+  D3D11_SHARE_HANDLE_TEXTURE
 };
 
 enum class StereoMode {
@@ -105,8 +94,7 @@ enum class StereoMode {
   LEFT_RIGHT,
   RIGHT_LEFT,
   BOTTOM_TOP,
-  TOP_BOTTOM,
-  MAX,
+  TOP_BOTTOM
 };
 
 } // namespace mozilla

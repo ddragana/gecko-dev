@@ -18,9 +18,9 @@ http://wiki.mozilla.org/Gecko:Effective_TLD_Service
 
 def getEffectiveTLDs(path):
   file = codecs.open(path, "r", "UTF-8")
-  entries = []
   domains = set()
-  for line in file:
+  while True:
+    line = file.readline()
     # line always contains a line terminator unless the file is empty
     if len(line) == 0:
       raise StopIteration
@@ -34,12 +34,7 @@ def getEffectiveTLDs(path):
     assert domain not in domains, \
            "repeating domain %s makes no sense" % domain
     domains.add(domain)
-    entries.append(entry)
-
-  # Sort the entries so we can use binary search on them.
-  entries.sort(key=EffectiveTLDEntry.domain)
-
-  return entries
+    yield entry
 
 def _normalizeHostname(domain):
   """

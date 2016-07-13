@@ -22,8 +22,9 @@ typeTests.forEach((type) => {
     orientation: type
   });
   var result = processor.process(data);
-  is(result.orientation, undefined, expected);
+  is(result.orientation, '', expected);
 });
+
 
 var validOrientations = [
   'any',
@@ -33,28 +34,22 @@ var validOrientations = [
   'portrait-primary',
   'portrait-secondary',
   'landscape-primary',
-  'landscape-secondary',
-  'aNy',
-  'NaTuRal',
-  'LANDsCAPE',
-  'PORTRAIT',
-  'portrait-PRIMARY',
-  'portrait-SECONDARY',
-  'LANDSCAPE-primary',
-  'LANDSCAPE-secondary',
+  'landscape-secondary'
 ];
 
 validOrientations.forEach((orientation) => {
   var expected = `Expect orientation to be returned: ${orientation}.`;
-  data.jsonText = JSON.stringify({ orientation });
+  data.jsonText = JSON.stringify({
+    orientation: orientation
+  });
   var result = processor.process(data);
-  is(result.orientation, orientation.toLowerCase(), expected);
+  is(result.orientation, orientation, expected);
 });
 
 var invalidOrientations = [
   'all',
-  'ANYMany',
-  'NaTuRalle',
+  'ANY',
+  'NaTuRal',
   'portrait-primary portrait-secondary',
   'portrait-primary,portrait-secondary',
   'any-natural',
@@ -63,13 +58,15 @@ var invalidOrientations = [
   'secondary-portrait',
   'landscape-landscape',
   'secondary-primary'
-];
+]
 
 invalidOrientations.forEach((orientation) => {
   var expected = `Expect orientation to be empty string: ${orientation}.`;
-  data.jsonText = JSON.stringify({ orientation });
+  data.jsonText = JSON.stringify({
+    orientation: orientation
+  });
   var result = processor.process(data);
-  is(result.orientation, undefined, expected);
+  is(result.orientation, "", expected);
 });
 
 //Trim tests
@@ -80,7 +77,7 @@ validOrientations.forEach((orientation) => {
     orientation: expandedOrientation
   });
   var result = processor.process(data);
-  is(result.orientation, orientation.toLowerCase(), expected);
+  is(result.orientation, orientation, expected);
 });
   </script>
 </head>

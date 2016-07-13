@@ -13,12 +13,13 @@
 
 #include <math.h>
 
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_opus.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_resampler.h"
 #include "webrtc/modules/audio_coding/main/test/ACMTest.h"
 #include "webrtc/modules/audio_coding/main/test/Channel.h"
 #include "webrtc/modules/audio_coding/main/test/PCMFile.h"
 #include "webrtc/modules/audio_coding/main/test/TestStereo.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
@@ -35,7 +36,7 @@ class OpusTest : public ACMTest {
 
   void OpenOutFile(int test_number);
 
-  rtc::scoped_ptr<AudioCodingModule> acm_receiver_;
+  scoped_ptr<AudioCodingModule> acm_receiver_;
   TestPackStereo* channel_a2b_;
   PCMFile in_file_stereo_;
   PCMFile in_file_mono_;

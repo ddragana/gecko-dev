@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsISupportsPrimitives.h"
 #include "nsSpeechTask.h"
 #include "mozilla/Logging.h"
 
@@ -17,10 +16,14 @@
 #include "nsIDocument.h"
 
 #undef LOG
-mozilla::LogModule*
+PRLogModuleInfo*
 GetSpeechSynthLog()
 {
-  static mozilla::LazyLogModule sLog("SpeechSynthesis");
+  static PRLogModuleInfo* sLog = nullptr;
+
+  if (!sLog) {
+    sLog = PR_NewLogModule("SpeechSynthesis");
+  }
 
   return sLog;
 }
@@ -29,45 +32,48 @@ GetSpeechSynthLog()
 namespace mozilla {
 namespace dom {
 
+static PLDHashOperator
+TraverseCachedVoices(const nsAString& aKey, SpeechSynthesisVoice* aEntry, void* aData)
+{
+  nsCycleCollectionTraversalCallback* cb = static_cast<nsCycleCollectionTraversalCallback*>(aData);
+  cb->NoteXPCOMChild(aEntry);
+  return PL_DHASH_NEXT;
+}
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(SpeechSynthesis)
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SpeechSynthesis, DOMEventTargetHelper)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(SpeechSynthesis)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCurrentTask)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSpeechQueue)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   tmp->mVoiceCache.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SpeechSynthesis, DOMEventTargetHelper)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(SpeechSynthesis)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCurrentTask)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSpeechQueue)
-  for (auto iter = tmp->mVoiceCache.Iter(); !iter.Done(); iter.Next()) {
-    SpeechSynthesisVoice* voice = iter.UserData();
-    cb.NoteXPCOMChild(voice);
-  }
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+  tmp->mVoiceCache.EnumerateRead(TraverseCachedVoices, &cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(SpeechSynthesis)
-  NS_INTERFACE_MAP_ENTRY(nsIObserver)
-  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(SpeechSynthesis)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-NS_IMPL_ADDREF_INHERITED(SpeechSynthesis, DOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(SpeechSynthesis, DOMEventTargetHelper)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SpeechSynthesis)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
 
-SpeechSynthesis::SpeechSynthesis(nsPIDOMWindowInner* aParent)
-  : DOMEventTargetHelper(aParent)
-  , mHoldQueue(false)
-  , mInnerID(aParent->WindowID())
+NS_IMPL_CYCLE_COLLECTING_ADDREF(SpeechSynthesis)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(SpeechSynthesis)
+
+SpeechSynthesis::SpeechSynthesis(nsPIDOMWindow* aParent)
+  : mParent(aParent)
 {
   MOZ_ASSERT(aParent->IsInnerWindow());
-  MOZ_ASSERT(NS_IsMainThread());
-
-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  if (obs) {
-    obs->AddObserver(this, "inner-window-destroyed", true);
-    obs->AddObserver(this, "synth-voices-changed", true);
-  }
-
 }
 
 SpeechSynthesis::~SpeechSynthesis()
@@ -78,6 +84,12 @@ JSObject*
 SpeechSynthesis::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   return SpeechSynthesisBinding::Wrap(aCx, this, aGivenProto);
+}
+
+nsIDOMWindow*
+SpeechSynthesis::GetParentObject() const
+{
+  return mParent;
 }
 
 bool
@@ -98,39 +110,21 @@ SpeechSynthesis::Pending() const
 bool
 SpeechSynthesis::Speaking() const
 {
-  if (!mSpeechQueue.IsEmpty() &&
-      mSpeechQueue.ElementAt(0)->GetState() == SpeechSynthesisUtterance::STATE_SPEAKING) {
-    return true;
+  if (mSpeechQueue.IsEmpty()) {
+    return false;
   }
 
-  // Returns global speaking state if global queue is enabled. Or false.
-  return nsSynthVoiceRegistry::GetInstance()->IsSpeaking();
+  return mSpeechQueue.ElementAt(0)->GetState() == SpeechSynthesisUtterance::STATE_SPEAKING;
 }
 
 bool
 SpeechSynthesis::Paused() const
 {
-  return mHoldQueue || (mCurrentTask && mCurrentTask->IsPrePaused()) ||
-         (!mSpeechQueue.IsEmpty() && mSpeechQueue.ElementAt(0)->IsPaused());
-}
-
-bool
-SpeechSynthesis::HasEmptyQueue() const
-{
-  return mSpeechQueue.Length() == 0;
-}
-
-bool SpeechSynthesis::HasVoices() const
-{
-  uint32_t voiceCount = mVoiceCache.Count();
-  if (voiceCount == 0) {
-    nsresult rv = nsSynthVoiceRegistry::GetInstance()->GetVoiceCount(&voiceCount);
-    if(NS_WARN_IF(NS_FAILED(rv))) {
-      return false;
-    }
+  if (mSpeechQueue.IsEmpty()) {
+    return false;
   }
 
-  return voiceCount != 0;
+  return mSpeechQueue.ElementAt(0)->IsPaused();
 }
 
 void
@@ -144,9 +138,7 @@ SpeechSynthesis::Speak(SpeechSynthesisUtterance& aUtterance)
   mSpeechQueue.AppendElement(&aUtterance);
   aUtterance.mState = SpeechSynthesisUtterance::STATE_PENDING;
 
-  // If we only have one item in the queue, we aren't pre-paused, and
-  // we have voices available, speak it.
-  if (mSpeechQueue.Length() == 1 && !mCurrentTask && !mHoldQueue && HasVoices()) {
+  if (mSpeechQueue.Length() == 1 && !mCurrentTask) {
     AdvanceQueue();
   }
 }
@@ -161,11 +153,11 @@ SpeechSynthesis::AdvanceQueue()
     return;
   }
 
-  RefPtr<SpeechSynthesisUtterance> utterance = mSpeechQueue.ElementAt(0);
+  nsRefPtr<SpeechSynthesisUtterance> utterance = mSpeechQueue.ElementAt(0);
 
   nsAutoString docLang;
-  nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
-  nsIDocument* doc = window ? window->GetExtantDoc() : nullptr;
+  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(mParent);
+  nsIDocument* doc = win->GetExtantDoc();
 
   if (doc) {
     Element* elm = doc->GetHtmlElement();
@@ -188,47 +180,29 @@ SpeechSynthesis::AdvanceQueue()
 void
 SpeechSynthesis::Cancel()
 {
-  if (!mSpeechQueue.IsEmpty() &&
-      mSpeechQueue.ElementAt(0)->GetState() == SpeechSynthesisUtterance::STATE_SPEAKING) {
-    // Remove all queued utterances except for current one, we will remove it
-    // in OnEnd
-    mSpeechQueue.RemoveElementsAt(1, mSpeechQueue.Length() - 1);
-  } else {
-    mSpeechQueue.Clear();
-  }
-
   if (mCurrentTask) {
-    mCurrentTask->Cancel();
+   if (mSpeechQueue.Length() > 1) {
+      // Remove all queued utterances except for current one.
+      mSpeechQueue.RemoveElementsAt(1, mSpeechQueue.Length() - 1);
+    }
+
+   mCurrentTask->Cancel();
   }
 }
 
 void
 SpeechSynthesis::Pause()
 {
-  if (Paused()) {
-    return;
-  }
-
-  if (mCurrentTask && !mSpeechQueue.IsEmpty() &&
-      mSpeechQueue.ElementAt(0)->GetState() != SpeechSynthesisUtterance::STATE_ENDED) {
+  if (mCurrentTask && !Paused() && (Speaking() || Pending())) {
     mCurrentTask->Pause();
-  } else {
-    mHoldQueue = true;
   }
 }
 
 void
 SpeechSynthesis::Resume()
 {
-  if (!Paused()) {
-    return;
-  }
-
-  if (mCurrentTask) {
+  if (mCurrentTask && Paused()) {
     mCurrentTask->Resume();
-  } else {
-    mHoldQueue = false;
-    AdvanceQueue();
   }
 }
 
@@ -246,7 +220,7 @@ SpeechSynthesis::OnEnd(const nsSpeechTask* aTask)
 }
 
 void
-SpeechSynthesis::GetVoices(nsTArray< RefPtr<SpeechSynthesisVoice> >& aResult)
+SpeechSynthesis::GetVoices(nsTArray< nsRefPtr<SpeechSynthesisVoice> >& aResult)
 {
   aResult.Clear();
   uint32_t voiceCount = 0;
@@ -255,8 +229,6 @@ SpeechSynthesis::GetVoices(nsTArray< RefPtr<SpeechSynthesisVoice> >& aResult)
   if(NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
-
-  nsISupports* voiceParent = NS_ISUPPORTS_CAST(nsIObserver*, this);
 
   for (uint32_t i = 0; i < voiceCount; i++) {
     nsAutoString uri;
@@ -270,7 +242,7 @@ SpeechSynthesis::GetVoices(nsTArray< RefPtr<SpeechSynthesisVoice> >& aResult)
     SpeechSynthesisVoice* voice = mVoiceCache.GetWeak(uri);
 
     if (!voice) {
-      voice = new SpeechSynthesisVoice(voiceParent, uri);
+      voice = new SpeechSynthesisVoice(this, uri);
     }
 
     aResult.AppendElement(voice);
@@ -282,51 +254,6 @@ SpeechSynthesis::GetVoices(nsTArray< RefPtr<SpeechSynthesisVoice> >& aResult)
     SpeechSynthesisVoice* voice = aResult[i];
     mVoiceCache.Put(voice->mUri, voice);
   }
-}
-
-// For testing purposes, allows us to cancel the current task that is
-// misbehaving, and flush the queue.
-void
-SpeechSynthesis::ForceEnd()
-{
-  if (mCurrentTask) {
-    mCurrentTask->ForceEnd();
-  }
-}
-
-NS_IMETHODIMP
-SpeechSynthesis::Observe(nsISupports* aSubject, const char* aTopic,
-                         const char16_t* aData)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-
-  if (strcmp(aTopic, "inner-window-destroyed") == 0) {
-    nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
-    NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
-
-    uint64_t innerID;
-    nsresult rv = wrapper->GetData(&innerID);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (innerID == mInnerID) {
-      Cancel();
-
-      nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-      if (obs) {
-        obs->RemoveObserver(this, "inner-window-destroyed");
-      }
-    }
-  } else if (strcmp(aTopic, "synth-voices-changed") == 0) {
-    LOG(LogLevel::Debug, ("SpeechSynthesis::onvoiceschanged"));
-    DispatchTrustedEvent(NS_LITERAL_STRING("voiceschanged"));
-    // If we have a pending item, and voices become available, speak it.
-    if (!mCurrentTask && !mHoldQueue && HasVoices()) {
-      AdvanceQueue();
-    }
-  }
-
-  return NS_OK;
 }
 
 } // namespace dom

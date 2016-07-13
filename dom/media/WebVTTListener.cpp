@@ -28,13 +28,16 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(WebVTTListener)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(WebVTTListener)
 
-LazyLogModule gTextTrackLog("TextTrack");
+PRLogModuleInfo* gTextTrackLog;
 # define VTT_LOG(...) MOZ_LOG(gTextTrackLog, LogLevel::Debug, (__VA_ARGS__))
 
 WebVTTListener::WebVTTListener(HTMLTrackElement* aElement)
   : mElement(aElement)
 {
   MOZ_ASSERT(mElement, "Must pass an element to the callback");
+  if (!gTextTrackLog) {
+    gTextTrackLog = PR_NewLogModule("TextTrack");
+  }
   VTT_LOG("WebVTTListener created.");
 }
 
@@ -62,7 +65,7 @@ WebVTTListener::LoadResource()
   mParserWrapper = do_CreateInstance(NS_WEBVTTPARSERWRAPPER_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsPIDOMWindowInner* window = mElement->OwnerDoc()->GetInnerWindow();
+  nsPIDOMWindow* window = mElement->OwnerDoc()->GetWindow();
   rv = mParserWrapper->LoadParser(window);
   NS_ENSURE_SUCCESS(rv, rv);
 

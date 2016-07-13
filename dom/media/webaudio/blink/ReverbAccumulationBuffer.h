@@ -29,10 +29,12 @@
 #ifndef ReverbAccumulationBuffer_h
 #define ReverbAccumulationBuffer_h
 
-#include "AlignedTArray.h"
+#include "nsTArray.h"
 #include "mozilla/MemoryReporting.h"
 
 namespace WebCore {
+
+typedef nsTArray<float> AudioFloatArray;
 
 // ReverbAccumulationBuffer is a circular delay buffer with one client reading from it and multiple clients
 // writing/accumulating to it at different delay offsets from the read position.  The read operation will zero the memory
@@ -48,7 +50,7 @@ public:
     // We need to pass in and update readIndex here, since each ReverbConvolverStage may be running in
     // a different thread than the realtime thread calling ReadAndClear() and maintaining m_readIndex
     // Returns the writeIndex where the accumulation took place
-    int accumulate(const float* source, size_t numberOfFrames, int* readIndex, size_t delayFrames);
+    int accumulate(float* source, size_t numberOfFrames, int* readIndex, size_t delayFrames);
 
     size_t readIndex() const { return m_readIndex; }
     void updateReadIndex(int* readIndex, size_t numberOfFrames) const;
@@ -59,11 +61,11 @@ public:
 
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     {
-        return m_buffer.ShallowSizeOfExcludingThis(aMallocSizeOf);
+        return m_buffer.SizeOfExcludingThis(aMallocSizeOf);
     }
 
 private:
-    AlignedTArray<float, 16> m_buffer;
+    AudioFloatArray m_buffer;
     size_t m_readIndex;
     size_t m_readTimeFrame; // for debugging (frame on continuous timeline)
 };

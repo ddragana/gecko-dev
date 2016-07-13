@@ -13,10 +13,8 @@
 #include "mozilla/dom/TVUtils.h"
 #include "nsISupportsPrimitives.h"
 #include "nsITVService.h"
-#include "nsITVSimulatorService.h"
 #include "nsServiceManagerUtils.h"
 #include "TVTuner.h"
-#include "mozilla/dom/HTMLVideoElement.h"
 
 namespace mozilla {
 namespace dom {
@@ -30,9 +28,8 @@ NS_IMPL_RELEASE_INHERITED(TVTuner, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TVTuner)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-TVTuner::TVTuner(nsPIDOMWindowInner* aWindow)
+TVTuner::TVTuner(nsPIDOMWindow* aWindow)
   : DOMEventTargetHelper(aWindow)
-  , mStreamType(0)
 {
 }
 
@@ -41,10 +38,10 @@ TVTuner::~TVTuner()
 }
 
 /* static */ already_AddRefed<TVTuner>
-TVTuner::Create(nsPIDOMWindowInner* aWindow,
+TVTuner::Create(nsPIDOMWindow* aWindow,
                 nsITVTunerData* aData)
 {
-  RefPtr<TVTuner> tuner = new TVTuner(aWindow);
+  nsRefPtr<TVTuner> tuner = new TVTuner(aWindow);
   return (tuner->Init(aData)) ? tuner.forget() : nullptr;
 }
 
@@ -71,7 +68,7 @@ TVTuner::Init(nsITVTunerData* aData)
     }
 
     // Generate the source instance based on the supported source type.
-    RefPtr<TVSource> source = TVSource::Create(GetOwner(), sourceType, this);
+    nsRefPtr<TVSource> source = TVSource::Create(GetOwner(), sourceType, this);
     if (NS_WARN_IF(!source)) {
       continue;
     }
@@ -83,9 +80,6 @@ TVTuner::Init(nsITVTunerData* aData)
 
   mTVService = TVServiceFactory::AutoCreateTVService();
   NS_ENSURE_TRUE(mTVService, false);
-
-  rv = aData->GetStreamType(&mStreamType);
-  NS_ENSURE_SUCCESS(rv, false);
 
   return true;
 }
@@ -147,7 +141,7 @@ TVTuner::GetSources(ErrorResult& aRv)
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetOwner());
   MOZ_ASSERT(global);
 
-  RefPtr<Promise> promise = Promise::Create(global, aRv);
+  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -163,7 +157,7 @@ TVTuner::SetCurrentSource(const TVSourceType aSourceType, ErrorResult& aRv)
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetOwner());
   MOZ_ASSERT(global);
 
-  RefPtr<Promise> promise = Promise::Create(global, aRv);
+  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -189,120 +183,25 @@ TVTuner::GetId(nsAString& aId) const
 already_AddRefed<TVSource>
 TVTuner::GetCurrentSource() const
 {
-  RefPtr<TVSource> currentSource = mCurrentSource;
+  nsRefPtr<TVSource> currentSource = mCurrentSource;
   return currentSource.forget();
 }
 
 already_AddRefed<DOMMediaStream>
 TVTuner::GetStream() const
 {
-  RefPtr<DOMMediaStream> stream = mStream;
+  nsRefPtr<DOMMediaStream> stream = mStream;
   return stream.forget();
-}
-
-nsresult
-TVTuner::ReloadMediaStream()
-{
-  return InitMediaStream();
 }
 
 nsresult
 TVTuner::InitMediaStream()
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
-  RefPtr<DOMMediaStream> stream = nullptr;
-  if (mStreamType == nsITVTunerData::TV_STREAM_TYPE_HW) {
-    stream = DOMHwMediaStream::CreateHwStream(window);
-  } else if (mStreamType == nsITVTunerData::TV_STREAM_TYPE_SIMULATOR) {
-    stream = CreateSimulatedMediaStream();
-  }
+  nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(GetOwner());
+  nsRefPtr<DOMHwMediaStream> stream = DOMHwMediaStream::CreateHwStream(window);
 
   mStream = stream.forget();
   return NS_OK;
-}
-
-already_AddRefed<DOMMediaStream>
-TVTuner::CreateSimulatedMediaStream()
-{
-  nsCOMPtr<nsPIDOMWindowInner> domWin = GetOwner();
-  if (NS_WARN_IF(!domWin)) {
-    return nullptr;
-  }
-
-  nsIDocument* doc = domWin->GetExtantDoc();
-  if (NS_WARN_IF(!doc)) {
-    return nullptr;
-  }
-
-  ErrorResult error;
-  RefPtr<Element> element = doc->CreateElement(VIDEO_TAG, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return nullptr;
-  }
-
-  nsCOMPtr<nsIContent> content(do_QueryInterface(element));
-  if (NS_WARN_IF(!content)) {
-    return nullptr;
-  }
-
-  HTMLMediaElement* mediaElement = static_cast<HTMLMediaElement*>(content.get());
-  if (NS_WARN_IF(!mediaElement)) {
-    return nullptr;
-  }
-
-  mediaElement->SetAutoplay(true, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return nullptr;
-  }
-
-  mediaElement->SetLoop(true, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return nullptr;
-  }
-
-  nsCOMPtr<nsITVSimulatorService> simService(do_QueryInterface(mTVService));
-  if (NS_WARN_IF(!simService)) {
-    return nullptr;
-  }
-
-  if (NS_WARN_IF(!mCurrentSource)) {
-    return nullptr;
-  }
-
-  RefPtr<TVChannel> currentChannel = mCurrentSource->GetCurrentChannel();
-  if (NS_WARN_IF(!currentChannel)) {
-    return nullptr;
-  }
-
-  nsString currentChannelNumber;
-  currentChannel->GetNumber(currentChannelNumber);
-  if (currentChannelNumber.IsEmpty()) {
-    return nullptr;
-  }
-
-  nsString currentVideoBlobUrl;
-  nsresult rv = simService->GetSimulatorVideoBlobURL(mId,
-                                                     ToTVSourceTypeStr(mCurrentSource->Type()),
-                                                     currentChannelNumber,
-                                                     domWin,
-                                                     currentVideoBlobUrl);
-  if (NS_WARN_IF(NS_FAILED(rv) || currentVideoBlobUrl.IsEmpty())) {
-    return nullptr;
-  }
-
-  mediaElement->SetSrc(currentVideoBlobUrl, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return nullptr;
-  }
-
-  // See Media Capture from DOM Elements spec.
-  // http://www.w3.org/TR/mediacapture-fromelement/
-  RefPtr<DOMMediaStream> stream = mediaElement->MozCaptureStream(error);
-  if (NS_WARN_IF(error.Failed())) {
-    return nullptr;
-  }
-
-  return stream.forget();
 }
 
 nsresult
@@ -315,9 +214,9 @@ TVTuner::DispatchCurrentSourceChangedEvent(TVSource* aSource)
                                              NS_LITERAL_STRING("currentsourcechanged"),
                                              init);
   nsCOMPtr<nsIRunnable> runnable =
-    NewRunnableMethod<nsCOMPtr<nsIDOMEvent>>(this,
-                                             &TVTuner::DispatchTVEvent,
-                                             event);
+    NS_NewRunnableMethodWithArg<nsCOMPtr<nsIDOMEvent>>(this,
+                                                       &TVTuner::DispatchTVEvent,
+                                                       event);
   return NS_DispatchToCurrentThread(runnable);
 }
 

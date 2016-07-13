@@ -58,7 +58,7 @@ static const uint32_t OLStackSize = 100;
 nsresult
 NS_NewPlainTextSerializer(nsIContentSerializer** aSerializer)
 {
-  RefPtr<nsPlainTextSerializer> it = new nsPlainTextSerializer();
+  nsRefPtr<nsPlainTextSerializer> it = new nsPlainTextSerializer();
   it.forget(aSerializer);
   return NS_OK;
 }
@@ -74,6 +74,7 @@ nsPlainTextSerializer::nsPlainTextSerializer()
   mCiteQuoteLevel = 0;
   mStructs = true;       // will be read from prefs later
   mHeaderStrategy = 1 /*indent increasingly*/;   // ditto
+  mDontWrapAnyQuotes = false;                 // ditto
   mHasWrittenCiteBlockquote = false;
   mSpanLevel = 0;
   for (int32_t i = 0; i <= 6; i++) {
@@ -143,7 +144,7 @@ nsPlainTextSerializer::Init(uint32_t aFlags, uint32_t aWrapColumn,
   mWrapColumn = aWrapColumn;
 
   // Only create a linebreaker if we will handle wrapping.
-  if (MayWrap() && MayBreakLines()) {
+  if (MayWrap()) {
     mLineBreaker = nsContentUtils::LineBreaker();
   }
 
@@ -177,6 +178,15 @@ nsPlainTextSerializer::Init(uint32_t aFlags, uint32_t aWrapColumn,
 
     mHeaderStrategy =
       Preferences::GetInt(PREF_HEADER_STRATEGY, mHeaderStrategy);
+
+    // DontWrapAnyQuotes is set according to whether plaintext mail
+    // is wrapping to window width -- see bug 134439.
+    // We'll only want this if we're wrapping and formatted.
+    if (mFlags & nsIDocumentEncoder::OutputWrap || mWrapColumn > 0) {
+      mDontWrapAnyQuotes =
+        Preferences::GetBool("mail.compose.wrap_to_window_width",
+                             mDontWrapAnyQuotes);
+    }
   }
 
   // The pref is default inited to false in libpref, but we use true
@@ -1319,20 +1329,16 @@ nsPlainTextSerializer::AddToLine(const char16_t * aLineFragment,
       }
       // fallback if the line breaker is unavailable or failed
       if (!mLineBreaker) {
-        if (mCurrentLine.IsEmpty() || mWrapColumn < prefixwidth) {
-          goodSpace = NS_LINEBREAKER_NEED_MORE_TEXT;
-        } else {
-          goodSpace = std::min(mWrapColumn - prefixwidth, mCurrentLine.Length() - 1);
-          while (goodSpace >= 0 &&
-                 !nsCRT::IsAsciiSpace(mCurrentLine.CharAt(goodSpace))) {
-            goodSpace--;
-          }
+        goodSpace = mWrapColumn-prefixwidth;
+        while (goodSpace >= 0 &&
+               !nsCRT::IsAsciiSpace(mCurrentLine.CharAt(goodSpace))) {
+          goodSpace--;
         }
       }
       
       nsAutoString restOfLine;
       if (goodSpace == NS_LINEBREAKER_NEED_MORE_TEXT) {
-        // If we didn't find a good place to break, accept long line and
+        // If we don't found a good place to break, accept long line and
         // try to find another place to break
         goodSpace=(prefixwidth>mWrapColumn+1)?1:mWrapColumn-prefixwidth+1;
         if (mLineBreaker) {
@@ -1582,7 +1588,8 @@ nsPlainTextSerializer::Write(const nsAString& aStr)
   // that does normal formatted text. The one for preformatted text calls
   // Output directly while the other code path goes through AddToLine.
   if ((mPreFormattedMail && !mWrapColumn) || (IsInPre() && !mPreFormattedMail)
-      || (mSpanLevel > 0 && mEmptyLines >= 0 && str.First() == char16_t('>'))) {
+      || ((mSpanLevel > 0 || mDontWrapAnyQuotes)
+          && mEmptyLines >= 0 && str.First() == char16_t('>'))) {
     // No intelligent wrapping.
 
     // This mustn't be mixed with intelligent wrapping without clearing
@@ -1814,7 +1821,7 @@ nsPlainTextSerializer::IsInPre()
 bool
 nsPlainTextSerializer::IsElementPreformatted(Element* aElement)
 {
-  RefPtr<nsStyleContext> styleContext =
+  nsRefPtr<nsStyleContext> styleContext =
     nsComputedDOMStyle::GetStyleContextForElementNoFlush(aElement, nullptr,
                                                          nullptr);
   if (styleContext) {
@@ -1828,7 +1835,7 @@ nsPlainTextSerializer::IsElementPreformatted(Element* aElement)
 bool
 nsPlainTextSerializer::IsElementBlock(Element* aElement)
 {
-  RefPtr<nsStyleContext> styleContext =
+  nsRefPtr<nsStyleContext> styleContext =
     nsComputedDOMStyle::GetStyleContextForElementNoFlush(aElement, nullptr,
                                                          nullptr);
   if (styleContext) {

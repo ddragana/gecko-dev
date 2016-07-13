@@ -35,7 +35,7 @@ class RTPSenderVideo {
 
   virtual RtpVideoCodecTypes VideoCodecType() const;
 
-  size_t FECPacketOverhead() const;
+  uint16_t FECPacketOverhead() const;
 
   int32_t RegisterVideoPayload(const char payloadName[RTP_PAYLOAD_NAME_SIZE],
                                const int8_t payloadType,
@@ -48,10 +48,10 @@ class RTPSenderVideo {
                     const uint32_t captureTimeStamp,
                     int64_t capture_time_ms,
                     const uint8_t* payloadData,
-                    const size_t payloadSize,
+                    const uint32_t payloadSize,
                     const RTPFragmentationHeader* fragmentation,
                     VideoCodecInformation* codecInfo,
-                    const RTPVideoHeader* rtpHdr);
+                    const RTPVideoTypeHeader* rtpTypeHdr);
 
   int32_t SendRTPIntraRequest();
 
@@ -85,8 +85,8 @@ class RTPSenderVideo {
 
  protected:
   virtual int32_t SendVideoPacket(uint8_t* dataBuffer,
-                                  const size_t payloadLength,
-                                  const size_t rtpHeaderLength,
+                                  const uint16_t payloadLength,
+                                  const uint16_t rtpHeaderLength,
                                   const uint32_t capture_timestamp,
                                   int64_t capture_time_ms,
                                   StorageType storage,
@@ -99,13 +99,14 @@ class RTPSenderVideo {
             const uint32_t captureTimeStamp,
             int64_t capture_time_ms,
             const uint8_t* payloadData,
-            const size_t payloadSize,
+            const uint32_t payloadSize,
             const RTPFragmentationHeader* fragmentation,
-            const RTPVideoHeader* rtpHdr);
+            const RTPVideoTypeHeader* rtpTypeHdr);
 
  private:
   RTPSenderInterface& _rtpSender;
 
+  CriticalSectionWrapper* _sendVideoCritsect;
   RtpVideoCodecTypes _videoType;
   VideoCodecInformation* _videoCodecInformation;
   uint32_t _maxBitrate;

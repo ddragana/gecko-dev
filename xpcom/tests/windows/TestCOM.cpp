@@ -54,7 +54,7 @@ MozExternalRefCountType nsTestCom::AddRef()
 {
   nsrefcnt res = ++mRefCnt;
   NS_LOG_ADDREF(this, mRefCnt, "nsTestCom", sizeof(*this));
-  printf("nsTestCom: Adding ref = %p\n", (void *)res);
+  printf("nsTestCom: Adding ref = %d\n", res);
   return res;
 }
 
@@ -62,7 +62,7 @@ MozExternalRefCountType nsTestCom::Release()
 {
   nsrefcnt res = --mRefCnt;
   NS_LOG_RELEASE(this, mRefCnt, "nsTestCom");
-  printf("nsTestCom: Releasing = %p\n", (void *)res);
+  printf("nsTestCom: Releasing = %d\n", res);
   if (res == 0) {
     delete this;
   }

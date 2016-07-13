@@ -25,10 +25,10 @@
 #include "imgIScriptedNotificationObserver.h"
 #include "gfxPlatform.h"
 
+using namespace mozilla;
+using namespace mozilla::image;
 using namespace mozilla::gfx;
 
-namespace mozilla {
-namespace image {
 /* ========== imgITools implementation ========== */
 
 
@@ -61,16 +61,14 @@ imgTools::DecodeImage(nsIInputStream* aInStr,
                       const nsACString& aMimeType,
                       imgIContainer** aContainer)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   nsresult rv;
 
   NS_ENSURE_ARG_POINTER(aInStr);
 
   // Create a new image container to hold the decoded data.
   nsAutoCString mimeType(aMimeType);
-  RefPtr<image::Image> image = ImageFactory::CreateAnonymousImage(mimeType);
-  RefPtr<ProgressTracker> tracker = image->GetProgressTracker();
+  nsRefPtr<image::Image> image = ImageFactory::CreateAnonymousImage(mimeType);
+  nsRefPtr<ProgressTracker> tracker = image->GetProgressTracker();
 
   if (image->HasError()) {
     return NS_ERROR_FAILURE;
@@ -198,27 +196,26 @@ imgTools::EncodeScaledImage(imgIContainer* aContainer,
     return EncodeImage(aContainer, aMimeType, aOutputOptions, aStream);
   }
 
-  // Retrieve the image's size.
-  int32_t imageWidth = 0;
-  int32_t imageHeight = 0;
-  aContainer->GetWidth(&imageWidth);
-  aContainer->GetHeight(&imageHeight);
+  // Use frame 0 from the image container.
+  RefPtr<SourceSurface> frame =
+    aContainer->GetFrame(imgIContainer::FRAME_FIRST,
+                         imgIContainer::FLAG_SYNC_DECODE);
+  NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
+
+  int32_t frameWidth = frame->GetSize().width;
+  int32_t frameHeight = frame->GetSize().height;
 
   // If the given width or height is zero we'll replace it with the image's
   // original dimensions.
-  IntSize scaledSize(aScaledWidth == 0 ? imageWidth : aScaledWidth,
-                     aScaledHeight == 0 ? imageHeight : aScaledHeight);
-
-  // Use frame 0 from the image container.
-  RefPtr<SourceSurface> frame =
-    aContainer->GetFrameAtSize(scaledSize,
-                               imgIContainer::FRAME_FIRST,
-                               imgIContainer::FLAG_HIGH_QUALITY_SCALING |
-                               imgIContainer::FLAG_SYNC_DECODE);
-  NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
+  if (aScaledWidth == 0) {
+    aScaledWidth = frameWidth;
+  } else if (aScaledHeight == 0) {
+    aScaledHeight = frameHeight;
+  }
 
   RefPtr<DataSourceSurface> dataSurface =
-    Factory::CreateDataSourceSurface(scaledSize, SurfaceFormat::B8G8R8A8);
+    Factory::CreateDataSourceSurface(IntSize(aScaledWidth, aScaledHeight),
+                                     SurfaceFormat::B8G8R8A8);
   if (NS_WARN_IF(!dataSurface)) {
     return NS_ERROR_FAILURE;
   }
@@ -239,10 +236,9 @@ imgTools::EncodeScaledImage(imgIContainer* aContainer,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  IntSize frameSize = frame->GetSize();
   dt->DrawSurface(frame,
-                  Rect(0, 0, scaledSize.width, scaledSize.height),
-                  Rect(0, 0, frameSize.width, frameSize.height),
+                  Rect(0, 0, aScaledWidth, aScaledHeight),
+                  Rect(0, 0, frameWidth, frameHeight),
                   DrawSurfaceOptions(),
                   DrawOptions(1.0f, CompositionOp::OP_SOURCE));
 
@@ -351,6 +347,3 @@ imgTools::GetImgCacheForDocument(nsIDOMDocument* aDoc, imgICache** aCache)
   NS_ENSURE_SUCCESS(rv, rv);
   return CallQueryInterface(loader, aCache);
 }
-
-} // namespace image
-} // namespace mozilla

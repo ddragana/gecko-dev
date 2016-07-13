@@ -12,14 +12,18 @@ var expect = '';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+var save__proto__ = __proto__;
+
 try
 {
   Function.prototype.prototype;
-  var obj = Object.create(Function());
-  obj.prototype = obj.prototype;
+  __proto__ = Function();
+  prototype = prototype;
 }
 catch(ex)
 {
 }
+
+__proto__ = save__proto__;
 
 reportCompare(expect, actual, summary);

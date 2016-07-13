@@ -9,15 +9,13 @@
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="48dp"
-    android:layout_height="match_parent"
-    android:clickable="true"
-    android:background="@color/pressed_about_page_header_grey">
+    android:layout_height="match_parent">
 
     <ImageView
         android:id="@+id/search_engine_label"
         android:layout_width="16dp"
         android:layout_height="16dp"
         android:layout_gravity="center"
-        android:scaleType="fitXY"/>
+        android:scaleType="fitCenter"/>
 
 </FrameLayout>

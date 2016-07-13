@@ -37,9 +37,9 @@ public:
   virtual void MessageReceived(NetdCommand* aMessage) = 0;
 };
 
-class NetdWriteTask : public Runnable
+class NetdWriteTask : public Task
 {
-  NS_IMETHOD Run();
+  virtual void Run();
 };
 
 class NetdClient : public MessageLoopForIO::LineWatcher

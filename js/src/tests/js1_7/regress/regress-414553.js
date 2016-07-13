@@ -16,8 +16,7 @@ var actual = String([a,b,c,d]);
 reportCompare(expected, actual, 'destructuring assignment in let');
 
 function f() {
-  {
-    let a = 1, [b,c] = [2,3], d = 4;
+  let (a = 1, [b,c] = [2,3], d = 4) {
     return String([a,b,c,d]);
   }
 }

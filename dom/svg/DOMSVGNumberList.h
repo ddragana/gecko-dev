@@ -8,6 +8,7 @@
 #define MOZILLA_DOMSVGNUMBERLIST_H__
 
 #include "DOMSVGAnimatedNumberList.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
 #include "nsTArray.h"
@@ -97,12 +98,6 @@ public:
   bool IsAnimating() const {
     return mAList->IsAnimating();
   }
-  /**
-   * Returns true if there is an animated list mirroring the base list.
-   */
-  bool AnimListMirrorsBaseList() const {
-    return mAList->mAnimVal && !mAList->IsAnimating();
-  }
 
   uint32_t NumberOfItems() const
   {
@@ -170,7 +165,7 @@ private:
   // of clearing our pointer to them when they die.
   FallibleTArray<DOMSVGNumber*> mItems;
 
-  RefPtr<DOMSVGAnimatedNumberList> mAList;
+  nsRefPtr<DOMSVGAnimatedNumberList> mAList;
 };
 
 } // namespace mozilla

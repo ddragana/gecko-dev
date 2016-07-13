@@ -8,13 +8,12 @@
 #define NS_SMILCOMPOSITOR_H_
 
 #include "mozilla/Move.h"
-#include "nsAutoPtr.h"
 #include "nsTHashtable.h"
 #include "nsString.h"
 #include "nsSMILAnimationFunction.h"
 #include "nsSMILTargetIdentifier.h"
 #include "nsSMILCompositorTable.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 
 //----------------------------------------------------------------------
 // nsSMILCompositor
@@ -53,9 +52,8 @@ public:
 
   // Composes the attribute's current value with the list of animation
   // functions, and assigns the resulting value to this compositor's target
-  // attribute. If a change is made that might produce style updates,
-  // aMightHavePendingStyleUpdates is set to true. Otherwise it is not modified.
-  void ComposeAttribute(bool& aMightHavePendingStyleUpdates);
+  // attribute
+  void ComposeAttribute();
 
   // Clears animation effects on my target attribute
   void ClearAnimationEffects();
@@ -76,7 +74,7 @@ public:
   // Create a nsISMILAttr for my target, on the heap.  Caller is responsible
   // for deallocating the returned object.
   nsISMILAttr* CreateSMILAttr();
-
+  
   // Finds the index of the first function that will affect our animation
   // sandwich. Also toggles the 'mForceCompositing' flag if it finds that any
   // (used) functions have changed.
@@ -85,6 +83,10 @@ public:
   // If the passed-in base value differs from our cached base value, this
   // method updates the cached value (and toggles the 'mForceCompositing' flag)
   void UpdateCachedBaseValue(const nsSMILValue& aBaseValue);
+
+  // Static callback methods
+  static PLDHashOperator DoComposeAttribute(
+      nsSMILCompositor* aCompositor, void *aData);
 
   // The hash key (tuple of element/attributeName/attributeType)
   KeyType mKey;

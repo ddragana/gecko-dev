@@ -38,9 +38,7 @@ add_task(function* test_query_result_favicon_changed_on_child() {
         PlacesUtils.favicons.setAndFetchFaviconForPage(PAGE_URI,
                                                        SMALLPNG_DATA_URI,
                                                        false,
-                                                       PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
-                                                       null,
-                                                       Services.scriptSecurityManager.getSystemPrincipal());
+                                                       PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
       }
     },
     nodeIconChanged(aNode) {

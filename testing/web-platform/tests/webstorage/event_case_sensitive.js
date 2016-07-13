@@ -4,14 +4,11 @@ testStorages(function(storageString) {
         var storage = window[storageString];
         t.add_cleanup(function() { storage.clear() });
 
-        clearStorage(storageString, t.step_func(step0));
+        storage.clear();
         assert_equals(storage.length, 0, "storage.length");
+        storage.foo = "test";
 
-        function step0(msg)
-        {
-            storage.foo = "test";
-            runAfterNStorageEvents(t.step_func(step1), 1);
-        }
+        runAfterNStorageEvents(t.step_func(step1), 1);
 
         function step1(msg)
         {

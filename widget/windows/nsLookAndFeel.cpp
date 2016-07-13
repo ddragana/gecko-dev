@@ -10,7 +10,7 @@
 #include "nsUXThemeData.h"
 #include "nsUXThemeConstants.h"
 #include "gfxFont.h"
-#include "WinUtils.h"
+#include "gfxWindowsPlatform.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/WindowsVersion.h"
 #include "gfxFontConstants.h"
@@ -65,9 +65,7 @@ static int32_t GetSystemParam(long flag, int32_t def)
     return ::SystemParametersInfo(flag, 0, &value, 0) ? value : def;
 }
 
-nsLookAndFeel::nsLookAndFeel()
-  : nsXPLookAndFeel()
-  , mUseAccessibilityTheme(0)
+nsLookAndFeel::nsLookAndFeel() : nsXPLookAndFeel()
 {
   mozilla::Telemetry::Accumulate(mozilla::Telemetry::TOUCH_ENABLED_DEVICE,
                                  WinUtils::IsTouchDeviceSupportPresent());
@@ -361,16 +359,7 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         // High contrast is a misnomer under Win32 -- any theme can be used with it,
         // e.g. normal contrast with large fonts, low contrast, etc.
         // The high contrast flag really means -- use this theme and don't override it.
-        if (XRE_IsContentProcess()) {
-          // If we're running in the content process, then the parent should
-          // have sent us the accessibility state when nsLookAndFeel
-          // initialized, and stashed it in the mUseAccessibilityTheme cache.
-          aResult = mUseAccessibilityTheme;
-        } else {
-          // Otherwise, we can ask the OS to see if we're using High Contrast
-          // mode.
-          aResult = nsUXThemeData::IsHighContrastOn();
-        }
+        aResult = nsUXThemeData::IsHighContrastOn();
         break;
     case eIntID_ScrollArrowStyle:
         aResult = eScrollArrowStyle_Single;
@@ -498,10 +487,6 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_ScrollbarFadeDuration:
         aResult = 350;
         break;
-    case eIntID_ContextMenuOffsetVertical:
-    case eIntID_ContextMenuOffsetHorizontal:
-        aResult = 2;
-        break;
     default:
         aResult = 0;
         res = NS_ERROR_FAILURE;
@@ -577,8 +562,6 @@ GetSysFontInfo(HDC aHDC, LookAndFeel::FontID anID,
     case LookAndFeel::eFont_Widget:
     case LookAndFeel::eFont_Dialog:
     case LookAndFeel::eFont_Button:
-    case LookAndFeel::eFont_Field:
-    case LookAndFeel::eFont_List:
       // XXX It's not clear to me whether this is exactly the right
       // set of LookAndFeel values to map to the dialog font; we may
       // want to add or remove cases here after reviewing the visual
@@ -595,7 +578,7 @@ GetSysFontInfo(HDC aHDC, LookAndFeel::FontID anID,
   }
 
   // Get scaling factor from physical to logical pixels
-  double pixelScale = 1.0 / WinUtils::SystemScaleFactor();
+  float pixelScale = 1.0f / gfxWindowsPlatform::GetPlatform()->GetDPIScale();
 
   // The lfHeight is in pixels, and it needs to be adjusted for the
   // device it will be displayed on.
@@ -674,29 +657,3 @@ nsLookAndFeel::GetPasswordCharacterImpl()
 #define UNICODE_BLACK_CIRCLE_CHAR 0x25cf
   return UNICODE_BLACK_CIRCLE_CHAR;
 }
-
-nsTArray<LookAndFeelInt>
-nsLookAndFeel::GetIntCacheImpl()
-{
-  nsTArray<LookAndFeelInt> lookAndFeelIntCache =
-    nsXPLookAndFeel::GetIntCacheImpl();
-
-  LookAndFeelInt useAccessibilityTheme;
-  useAccessibilityTheme.id = eIntID_UseAccessibilityTheme;
-  useAccessibilityTheme.value = GetInt(eIntID_UseAccessibilityTheme);
-  lookAndFeelIntCache.AppendElement(useAccessibilityTheme);
-
-  return lookAndFeelIntCache;
-}
-
-void
-nsLookAndFeel::SetIntCacheImpl(const nsTArray<LookAndFeelInt>& aLookAndFeelIntCache)
-{
-  for (auto entry : aLookAndFeelIntCache) {
-    if (entry.id == eIntID_UseAccessibilityTheme) {
-      mUseAccessibilityTheme = entry.value;
-      break;
-    }
-  }
-}
-

@@ -7,8 +7,8 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/ContentEvents.h"
-#include "mozilla/EventForwards.h"
 #include "AnimationCommon.h"
+#include "nsCSSPseudoElements.h"
 #include "mozilla/dom/Animation.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TimeStamp.h"
@@ -21,48 +21,36 @@ namespace css {
 class Declaration;
 } /* namespace css */
 namespace dom {
-class KeyframeEffectReadOnly;
 class Promise;
 } /* namespace dom */
 
-enum class CSSPseudoElementType : uint8_t;
-
 struct AnimationEventInfo {
-  RefPtr<dom::Element> mElement;
-  RefPtr<dom::Animation> mAnimation;
-  InternalAnimationEvent mEvent;
-  TimeStamp mTimeStamp;
+  nsRefPtr<mozilla::dom::Element> mElement;
+  mozilla::InternalAnimationEvent mEvent;
 
-  AnimationEventInfo(dom::Element* aElement,
-                     CSSPseudoElementType aPseudoType,
-                     EventMessage aMessage,
+  AnimationEventInfo(mozilla::dom::Element *aElement,
                      const nsSubstring& aAnimationName,
-                     const StickyTimeDuration& aElapsedTime,
-                     const TimeStamp& aTimeStamp,
-                     dom::Animation* aAnimation)
-    : mElement(aElement)
-    , mAnimation(aAnimation)
-    , mEvent(true, aMessage)
-    , mTimeStamp(aTimeStamp)
+                     uint32_t aMessage,
+                     const mozilla::StickyTimeDuration& aElapsedTime,
+                     const nsAString& aPseudoElement)
+    : mElement(aElement), mEvent(true, aMessage)
   {
     // XXX Looks like nobody initialize WidgetEvent::time
-    mEvent.mAnimationName = aAnimationName;
-    mEvent.mElapsedTime = aElapsedTime.ToSeconds();
-    mEvent.mPseudoElement =
-      AnimationCollection<dom::CSSAnimation>::PseudoTypeAsString(aPseudoType);
+    mEvent.animationName = aAnimationName;
+    mEvent.elapsedTime = aElapsedTime.ToSeconds();
+    mEvent.pseudoElement = aPseudoElement;
   }
 
   // InternalAnimationEvent doesn't support copy-construction, so we need
   // to ourselves in order to work with nsTArray
-  AnimationEventInfo(const AnimationEventInfo& aOther)
-    : mElement(aOther.mElement)
-    , mAnimation(aOther.mAnimation)
-    , mEvent(true, aOther.mEvent.mMessage)
-    , mTimeStamp(aOther.mTimeStamp)
+  AnimationEventInfo(const AnimationEventInfo &aOther)
+    : mElement(aOther.mElement), mEvent(true, aOther.mEvent.message)
   {
     mEvent.AssignAnimationEventData(aOther.mEvent, false);
   }
 };
+
+typedef InfallibleTArray<AnimationEventInfo> EventArray;
 
 namespace dom {
 
@@ -75,7 +63,6 @@ public:
     , mAnimationName(aAnimationName)
     , mIsStylePaused(false)
     , mPauseShouldStick(false)
-    , mNeedsNewAnimationIndexWhenRun(false)
     , mPreviousPhaseOrIteration(PREVIOUS_PHASE_BEFORE)
   {
     // We might need to drop this assertion once we add a script-accessible
@@ -110,81 +97,35 @@ public:
   void CancelFromStyle() override
   {
     mOwningElement = OwningElementRef();
-
-    // When an animation is disassociated with style it enters an odd state
-    // where its composite order is undefined until it first transitions
-    // out of the idle state.
-    //
-    // Even if the composite order isn't defined we don't want it to be random
-    // in case we need to determine the order to dispatch events associated
-    // with an animation in this state. To solve this we treat the animation as
-    // if it had been added to the end of the global animation list so that
-    // its sort order is defined. We'll update this index again once the
-    // animation leaves the idle state.
-    mAnimationIndex = sNextAnimationIndex++;
-    mNeedsNewAnimationIndexWhenRun = true;
-
     Animation::CancelFromStyle();
+    MOZ_ASSERT(mSequenceNum == kUnsequenced);
   }
-
-  void Tick() override;
-  void QueueEvents();
 
   bool IsStylePaused() const { return mIsStylePaused; }
 
-  bool HasLowerCompositeOrderThan(const CSSAnimation& aOther) const;
+  bool HasLowerCompositeOrderThan(const Animation& aOther) const override;
+  bool IsUsingCustomCompositeOrder() const override
+  {
+    return mOwningElement.IsSet();
+  }
 
   void SetAnimationIndex(uint64_t aIndex)
   {
-    MOZ_ASSERT(IsTiedToMarkup());
-    mAnimationIndex = aIndex;
+    MOZ_ASSERT(IsUsingCustomCompositeOrder());
+    mSequenceNum = aIndex;
   }
-
-  // Sets the owning element which is used for determining the composite
-  // order of CSSAnimation objects generated from CSS markup.
-  //
-  // @see mOwningElement
-  void SetOwningElement(const OwningElementRef& aElement)
+  void CopyAnimationIndex(const CSSAnimation& aOther)
   {
-    mOwningElement = aElement;
-  }
-  // True for animations that are generated from CSS markup and continue to
-  // reflect changes to that markup.
-  bool IsTiedToMarkup() const { return mOwningElement.IsSet(); }
-
-protected:
-  virtual ~CSSAnimation()
-  {
-    MOZ_ASSERT(!mOwningElement.IsSet(), "Owning element should be cleared "
-                                        "before a CSS animation is destroyed");
+    MOZ_ASSERT(IsUsingCustomCompositeOrder() &&
+               aOther.IsUsingCustomCompositeOrder());
+    mSequenceNum = aOther.mSequenceNum;
   }
 
-  // Animation overrides
-  void UpdateTiming(SeekFlag aSeekFlag,
-                    SyncNotifyFlag aSyncNotifyFlag) override;
+  void QueueEvents(EventArray& aEventsToDispatch);
 
-  // Returns the duration from the start of the animation's source effect's
-  // active interval to the point where the animation actually begins playback.
-  // This is zero unless the animation's source effect has a negative delay in
-  // which case it is the absolute value of that delay.
-  // This is used for setting the elapsedTime member of CSS AnimationEvents.
-  TimeDuration InitialAdvance() const {
-    return mEffect ?
-           std::max(TimeDuration(), mEffect->SpecifiedTiming().mDelay * -1) :
-           TimeDuration();
-  }
-  // Converts an AnimationEvent's elapsedTime value to an equivalent TimeStamp
-  // that can be used to sort events by when they occurred.
-  TimeStamp ElapsedTimeToTimeStamp(const StickyTimeDuration& aElapsedTime)
-    const;
-
-  nsString mAnimationName;
-
-  // The (pseudo-)element whose computed animation-name refers to this
-  // animation (if any).
-  //
-  // This is used for determining the relative composite order of animations
-  // generated from CSS markup.
+  // Returns the element or pseudo-element whose animation-name property
+  // this CSSAnimation corresponds to (if any). This is used for determining
+  // the relative composite order of animations generated from CSS markup.
   //
   // Typically this will be the same as the target element of the keyframe
   // effect associated with this animation. However, it can differ in the
@@ -197,7 +138,39 @@ protected:
   // c) If this object is generated from script using the CSSAnimation
   //    constructor.
   //
-  // For (b) and (c) the owning element will return !IsSet().
+  // For (b) and (c) the returned owning element will return !IsSet().
+  const OwningElementRef& OwningElement() const { return mOwningElement; }
+
+  // Sets the owning element which is used for determining the composite
+  // order of CSSAnimation objects generated from CSS markup.
+  //
+  // @see OwningElement()
+  void SetOwningElement(const OwningElementRef& aElement)
+  {
+    mOwningElement = aElement;
+  }
+
+  // Is this animation currently in effect for the purposes of computing
+  // mWinsInCascade.  (In general, this can be computed from the timing
+  // function.  This boolean remembers the state as of the last time we
+  // called UpdateCascadeResults so we know if it changes and we need to
+  // call UpdateCascadeResults again.)
+  bool mInEffectForCascadeResults;
+
+protected:
+  virtual ~CSSAnimation()
+  {
+    MOZ_ASSERT(!mOwningElement.IsSet(), "Owning element should be cleared "
+                                        "before a CSS animation is destroyed");
+  }
+  virtual css::CommonAnimationManager* GetAnimationManager() const override;
+
+  static nsString PseudoTypeAsString(nsCSSPseudoElements::Type aPseudoType);
+
+  nsString mAnimationName;
+
+  // The (pseudo-)element whose computed animation-name refers to this
+  // animation (if any).
   OwningElementRef mOwningElement;
 
   // When combining animation-play-state with play() / pause() the following
@@ -252,10 +225,6 @@ protected:
   bool mIsStylePaused;
   bool mPauseShouldStick;
 
-  // When true, indicates that when this animation next leaves the idle state,
-  // its animation index should be updated.
-  bool mNeedsNewAnimationIndexWhenRun;
-
   enum {
     PREVIOUS_PHASE_BEFORE = uint64_t(-1),
     PREVIOUS_PHASE_AFTER = uint64_t(-2)
@@ -266,62 +235,49 @@ protected:
 };
 
 } /* namespace dom */
-
-template <>
-struct AnimationTypeTraits<dom::CSSAnimation>
-{
-  static nsIAtom* ElementPropertyAtom()
-  {
-    return nsGkAtoms::animationsProperty;
-  }
-  static nsIAtom* BeforePropertyAtom()
-  {
-    return nsGkAtoms::animationsOfBeforeProperty;
-  }
-  static nsIAtom* AfterPropertyAtom()
-  {
-    return nsGkAtoms::animationsOfAfterProperty;
-  }
-};
-
 } /* namespace mozilla */
 
 class nsAnimationManager final
-  : public mozilla::CommonAnimationManager<mozilla::dom::CSSAnimation>
+  : public mozilla::css::CommonAnimationManager
 {
 public:
   explicit nsAnimationManager(nsPresContext *aPresContext)
-    : mozilla::CommonAnimationManager<mozilla::dom::CSSAnimation>(aPresContext)
+    : mozilla::css::CommonAnimationManager(aPresContext)
   {
   }
 
-  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsAnimationManager)
-  NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(nsAnimationManager)
+  void UpdateStyleAndEvents(mozilla::AnimationCollection* aEA,
+                            mozilla::TimeStamp aRefreshTime,
+                            mozilla::EnsureStyleRuleFlags aFlags);
+  void QueueEvents(mozilla::AnimationCollection* aEA,
+                   mozilla::EventArray &aEventsToDispatch);
 
-  typedef mozilla::AnimationCollection<mozilla::dom::CSSAnimation>
-    CSSAnimationCollection;
-  typedef nsTArray<RefPtr<mozilla::dom::CSSAnimation>>
-    OwningCSSAnimationPtrArray;
+  void MaybeUpdateCascadeResults(mozilla::AnimationCollection* aCollection);
+
+  // nsIStyleRuleProcessor (parts)
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+    const MOZ_MUST_OVERRIDE override;
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+    const MOZ_MUST_OVERRIDE override;
+
+  // nsARefreshObserver
+  virtual void WillRefresh(mozilla::TimeStamp aTime) override;
+
+  void FlushAnimations(FlushFlags aFlags);
 
   /**
-   * Update the set of animations on |aElement| based on |aStyleContext|.
-   * If necessary, this will notify the corresponding EffectCompositor so
-   * that it can update its animation rule.
+   * Return the style rule that RulesMatching should add for
+   * aStyleContext.  This might be different from what RulesMatching
+   * actually added during aStyleContext's construction because the
+   * element's animation-name may have changed.  (However, this does
+   * return null during the non-animation restyling phase, as
+   * RulesMatching does.)
    *
    * aStyleContext may be a style context for aElement or for its
    * :before or :after pseudo-element.
    */
-  void UpdateAnimations(nsStyleContext* aStyleContext,
-                        mozilla::dom::Element* aElement);
-
-  /**
-   * Add a pending event.
-   */
-  void QueueEvent(mozilla::AnimationEventInfo&& aEventInfo)
-  {
-    mEventDispatcher.QueueEvent(
-      mozilla::Forward<mozilla::AnimationEventInfo>(aEventInfo));
-  }
+  nsIStyleRule* CheckAnimationRule(nsStyleContext* aStyleContext,
+                                   mozilla::dom::Element* aElement);
 
   /**
    * Dispatch any pending events.  We accumulate animationend and
@@ -330,31 +286,48 @@ public:
    * accumulate animationstart events at other points when style
    * contexts are created.
    */
-  void DispatchEvents()
-  {
-    RefPtr<nsAnimationManager> kungFuDeathGrip(this);
-    mEventDispatcher.DispatchEvents(mPresContext);
+  void DispatchEvents() {
+    // Fast-path the common case: no events
+    if (!mPendingEvents.IsEmpty()) {
+      DoDispatchEvents();
+    }
   }
-  void SortEvents()      { mEventDispatcher.SortEvents(); }
-  void ClearEventQueue() { mEventDispatcher.ClearEventQueue(); }
-
-  // Stop animations on the element. This method takes the real element
-  // rather than the element for the generated content for animations on
-  // ::before and ::after.
-  void StopAnimationsForElement(mozilla::dom::Element* aElement,
-                                mozilla::CSSPseudoElementType aPseudoType);
 
 protected:
-  ~nsAnimationManager() override = default;
+  virtual nsIAtom* GetAnimationsAtom() override {
+    return nsGkAtoms::animationsProperty;
+  }
+  virtual nsIAtom* GetAnimationsBeforeAtom() override {
+    return nsGkAtoms::animationsOfBeforeProperty;
+  }
+  virtual nsIAtom* GetAnimationsAfterAtom() override {
+    return nsGkAtoms::animationsOfAfterProperty;
+  }
+  virtual bool IsAnimationManager() override {
+    return true;
+  }
 
 private:
-
   void BuildAnimations(nsStyleContext* aStyleContext,
                        mozilla::dom::Element* aTarget,
-                       CSSAnimationCollection* aCollection,
-                       OwningCSSAnimationPtrArray& aAnimations);
+                       mozilla::dom::AnimationTimeline* aTimeline,
+                       mozilla::AnimationPtrArray& aAnimations);
+  bool BuildSegment(InfallibleTArray<mozilla::AnimationPropertySegment>&
+                      aSegments,
+                    nsCSSProperty aProperty,
+                    const mozilla::StyleAnimation& aAnimation,
+                    float aFromKey, nsStyleContext* aFromContext,
+                    mozilla::css::Declaration* aFromDeclaration,
+                    float aToKey, nsStyleContext* aToContext);
 
-  mozilla::DelayedEventDispatcher<mozilla::AnimationEventInfo> mEventDispatcher;
+  static void UpdateCascadeResults(nsStyleContext* aStyleContext,
+                                   mozilla::AnimationCollection*
+                                     aElementAnimations);
+
+  // The guts of DispatchEvents
+  void DoDispatchEvents();
+
+  mozilla::EventArray mPendingEvents;
 };
 
 #endif /* !defined(nsAnimationManager_h_) */

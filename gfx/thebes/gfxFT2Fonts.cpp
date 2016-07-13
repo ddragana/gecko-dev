@@ -43,20 +43,20 @@
  */
 
 bool
-gfxFT2Font::ShapeText(DrawTarget     *aDrawTarget,
+gfxFT2Font::ShapeText(gfxContext     *aContext,
                       const char16_t *aText,
                       uint32_t        aOffset,
                       uint32_t        aLength,
-                      Script          aScript,
+                      int32_t         aScript,
                       bool            aVertical,
                       gfxShapedText  *aShapedText)
 {
-    if (!gfxFont::ShapeText(aDrawTarget, aText, aOffset, aLength, aScript,
+    if (!gfxFont::ShapeText(aContext, aText, aOffset, aLength, aScript,
                             aVertical, aShapedText)) {
         // harfbuzz must have failed(?!), just render raw glyphs
         AddRange(aText, aOffset, aLength, aShapedText);
-        PostShapingFixup(aDrawTarget, aText, aOffset, aLength,
-                         aVertical, aShapedText);
+        PostShapingFixup(aContext, aText, aOffset, aLength, aVertical,
+                         aShapedText);
     }
 
     return true;
@@ -218,7 +218,7 @@ gfxFT2Font::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
 {
     gfxFont::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
     aSizes->mFontInstances +=
-        mCharGlyphCache.ShallowSizeOfExcludingThis(aMallocSizeOf);
+        mCharGlyphCache.SizeOfExcludingThis(nullptr, aMallocSizeOf);
 }
 
 void

@@ -6,52 +6,56 @@
 "use strict";
 
 do_get_profile(); // must be called before getting nsIX509CertDB
-var certdb = Cc["@mozilla.org/security/x509certdb;1"]
+let certdb = Cc["@mozilla.org/security/x509certdb;1"]
                .getService(Ci.nsIX509CertDB);
 
-const caList = [ "ca-no-keyUsage-extension", "ca-missing-keyCertSign",
-                 "ca-all-usages" ];
-const eeList = [ "ee-no-keyUsage-extension", "ee-keyCertSign-only",
-                 "ee-keyEncipherment-only", "ee-keyCertSign-and-keyEncipherment" ];
+let caList = ["ca-no-keyUsage-extension", "ca-missing-keyCertSign",
+              "ca-all-usages"];
+let eeList = ["ee-no-keyUsage-extension", "ee-keyCertSign-only",
+              "ee-keyEncipherment-only", "ee-keyCertSign-and-keyEncipherment"];
 
-const caUsage = [ certificateUsageSSLCA, certificateUsageVerifyCA ];
-const allEEUsages = [ certificateUsageSSLClient, certificateUsageSSLServer,
-                      certificateUsageEmailSigner, certificateUsageEmailRecipient,
-                      certificateUsageObjectSigner ];
-const serverEEUsages = [ certificateUsageSSLServer,
-                         certificateUsageEmailRecipient ];
+let caUsage = "SSL CA";
+let allEEUsages = "Client,Server,Sign,Encrypt,Object Signer";
+let serverEEUsages = "Server,Encrypt";
 
-const expectedUsagesMap = {
+let expectedUsagesMap = {
   "ca-no-keyUsage-extension": caUsage,
-  "ca-missing-keyCertSign": [],
+  "ca-missing-keyCertSign": "",
   "ca-all-usages": caUsage,
 
   "ee-no-keyUsage-extension-ca-no-keyUsage-extension": allEEUsages,
-  "ee-no-keyUsage-extension-ca-missing-keyCertSign": [],
+  "ee-no-keyUsage-extension-ca-missing-keyCertSign": "",
   "ee-no-keyUsage-extension-ca-all-usages": allEEUsages,
 
-  "ee-keyCertSign-only-ca-no-keyUsage-extension": [],
-  "ee-keyCertSign-only-ca-missing-keyCertSign": [],
-  "ee-keyCertSign-only-ca-all-usages": [],
+  "ee-keyCertSign-only-ca-no-keyUsage-extension": "",
+  "ee-keyCertSign-only-ca-missing-keyCertSign": "",
+  "ee-keyCertSign-only-ca-all-usages": "",
 
   "ee-keyEncipherment-only-ca-no-keyUsage-extension": serverEEUsages,
-  "ee-keyEncipherment-only-ca-missing-keyCertSign": [],
+  "ee-keyEncipherment-only-ca-missing-keyCertSign": "",
   "ee-keyEncipherment-only-ca-all-usages": serverEEUsages,
 
   "ee-keyCertSign-and-keyEncipherment-ca-no-keyUsage-extension": serverEEUsages,
-  "ee-keyCertSign-and-keyEncipherment-ca-missing-keyCertSign": [],
+  "ee-keyCertSign-and-keyEncipherment-ca-missing-keyCertSign": "",
   "ee-keyCertSign-and-keyEncipherment-ca-all-usages": serverEEUsages,
 };
 
-add_task(function* () {
-  for (let ca of caList) {
-    addCertFromFile(certdb, "test_cert_keyUsage/" + ca + ".pem", "CTu,CTu,CTu");
-    let cert = constructCertFromFile("test_cert_keyUsage/" + ca + ".pem");
-    yield asyncTestCertificateUsages(certdb, cert, expectedUsagesMap[ca]);
-    for (let ee of eeList) {
+function run_test() {
+  caList.forEach(function(ca) {
+    addCertFromFile(certdb, "test_cert_keyUsage/" + ca + ".pem",
+                    "CTu,CTu,CTu");
+    let caCert = certdb.findCertByNickname(null, ca);
+    let usages = {};
+    caCert.getUsagesString(true, {}, usages); // true indicates local-only
+    equal(usages.value, expectedUsagesMap[ca],
+          "Actual and expected CA usages should match");
+    eeList.forEach(function(ee) {
       let eeFullName = ee + "-" + ca;
-      let cert = constructCertFromFile("test_cert_keyUsage/" + eeFullName + ".pem");
-      yield asyncTestCertificateUsages(certdb, cert, expectedUsagesMap[eeFullName]);
-    }
-  }
-});
+      let cert = constructCertFromFile(
+        "test_cert_keyUsage/" + eeFullName + ".pem");
+      cert.getUsagesString(true, {}, usages); // true indicates local-only
+      equal(usages.value, expectedUsagesMap[eeFullName],
+            "Actual and expected EE usages should match");
+    });
+  });
+}

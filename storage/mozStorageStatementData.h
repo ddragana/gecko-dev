@@ -44,7 +44,6 @@ public:
     NS_PRECONDITION(mStatementOwner, "Must have a statement owner!");
   }
   StatementData()
-  : mStatement(nullptr)
   {
   }
   ~StatementData()
@@ -52,7 +51,8 @@ public:
     // We need to ensure that mParamsArray is released on the main thread,
     // as the binding arguments may be XPConnect values, which are safe
     // to release only on the main thread.
-    NS_ReleaseOnMainThread(mParamsArray.forget());
+    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+    (void)NS_ProxyRelease(mainThread, mParamsArray);
   }
 
   /**
@@ -135,7 +135,7 @@ public:
 
 private:
   sqlite3_stmt *mStatement;
-  RefPtr<BindingParamsArray> mParamsArray;
+  nsRefPtr<BindingParamsArray> mParamsArray;
 
   /**
    * We hold onto a reference of the statement's owner so it doesn't get

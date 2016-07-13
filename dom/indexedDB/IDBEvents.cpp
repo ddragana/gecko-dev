@@ -33,18 +33,17 @@ CreateGenericEvent(EventTarget* aOwner,
                    Bubbles aBubbles,
                    Cancelable aCancelable)
 {
-  RefPtr<Event> event = new Event(aOwner, nullptr, nullptr);
+  nsRefPtr<Event> event = new Event(aOwner, nullptr, nullptr);
 
-  event->InitEvent(aType,
-                   aBubbles == eDoesBubble ? true : false,
-                   aCancelable == eCancelable ? true : false);
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+    event->InitEvent(aType,
+                     aBubbles == eDoesBubble ? true : false,
+                     aCancelable == eCancelable ? true : false)));
 
   event->SetTrusted(true);
 
   return event.forget();
 }
-
-} // namespace indexedDB
 
 // static
 already_AddRefed<IDBVersionChangeEvent>
@@ -53,13 +52,13 @@ IDBVersionChangeEvent::CreateInternal(EventTarget* aOwner,
                                       uint64_t aOldVersion,
                                       Nullable<uint64_t> aNewVersion)
 {
-  RefPtr<IDBVersionChangeEvent> event =
+  nsRefPtr<IDBVersionChangeEvent> event =
     new IDBVersionChangeEvent(aOwner, aOldVersion);
   if (!aNewVersion.IsNull()) {
     event->mNewVersion.SetValue(aNewVersion.Value());
   }
 
-  event->InitEvent(aType, false, false);
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(event->InitEvent(aType, false, false)));
 
   event->SetTrusted(true);
 
@@ -93,5 +92,6 @@ IDBVersionChangeEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> 
   return IDBVersionChangeEventBinding::Wrap(aCx, this, aGivenProto);
 }
 
+} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla

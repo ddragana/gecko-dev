@@ -6,17 +6,18 @@
 
 #ifdef MOZ_WIDGET_ANDROID
 
+#include <set>
 #include <map>
 #include <android/log.h>
 #include "AndroidSurfaceTexture.h"
 #include "gfxImageSurface.h"
-#include "gfxPrefs.h"
 #include "AndroidBridge.h"
 #include "nsThreadUtils.h"
 #include "mozilla/gfx/Matrix.h"
 #include "GeneratedJNIWrappers.h"
 #include "SurfaceTexture.h"
 #include "GLContext.h"
+#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using namespace mozilla::jni;
@@ -26,57 +27,9 @@ using namespace mozilla::widget::sdk;
 namespace mozilla {
 namespace gl {
 
-// Maintains a mapping between AndroidSurfaceTexture instances and their
-// unique numerical IDs. [thread-safe]
-class InstanceMap
-{
-  typedef AndroidSurfaceTexture* InstancePtr;
-  typedef std::map<int, InstancePtr> MapType;
-
-public:
-  InstanceMap()
-    : mNextId(0)
-    , mMonitor("AndroidSurfaceTexture::InstanceMap::mMonitor")
-  {}
-
-  int Add(InstancePtr aInstance)
-  {
-    MonitorAutoLock lock(mMonitor);
-    mInstances.insert({++mNextId, aInstance});
-    return mNextId;
-  }
-
-  void Remove(int aId)
-  {
-    MonitorAutoLock lock(mMonitor);
-    mInstances.erase(aId);
-  }
-
-  InstancePtr Get(int aId) const
-  {
-    MonitorAutoLock lock(mMonitor);
-
-    auto it = mInstances.find(aId);
-    if (it == mInstances.end()) {
-      return nullptr;
-    }
-    return it->second;
-  }
-
-private:
-  MapType mInstances;
-  int mNextId;
-
-  mutable Monitor mMonitor;
-};
-
-static InstanceMap sInstances;
-
-AndroidSurfaceTexture*
-AndroidSurfaceTexture::Find(int aId)
-{
-  return sInstances.Get(aId);
-}
+// UGH
+static std::map<int, AndroidSurfaceTexture*> sInstances;
+static int sNextID = 0;
 
 static bool
 IsSTSupported()
@@ -106,6 +59,19 @@ AndroidSurfaceTexture::Create(GLContext* aContext, GLuint aTexture)
   return st.forget();
 }
 
+AndroidSurfaceTexture*
+AndroidSurfaceTexture::Find(int id)
+{
+  std::map<int, AndroidSurfaceTexture*>::iterator it;
+
+  it = sInstances.find(id);
+  if (it == sInstances.end())
+    return nullptr;
+
+  return it->second;
+}
+
+
 nsresult
 AndroidSurfaceTexture::Attach(GLContext* aContext, PRIntervalTime aTimeout)
 {
@@ -129,15 +95,13 @@ AndroidSurfaceTexture::Attach(GLContext* aContext, PRIntervalTime aTimeout)
 
   MOZ_ASSERT(aContext->IsOwningThreadCurrent(), "Trying to attach GLContext from different thread");
 
-  aContext->fGenTextures(1, &mTexture);
-
-  if (NS_FAILED(mSurfaceTexture->AttachToGLContext(mTexture))) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
   mAttachedContext = aContext;
   mAttachedContext->MakeCurrent();
+  aContext->fGenTextures(1, &mTexture);
 
-  return NS_OK;
+  UpdateCanDetach();
+
+  return mSurfaceTexture->AttachToGLContext(mTexture);
 }
 
 nsresult
@@ -162,21 +126,24 @@ AndroidSurfaceTexture::Detach()
   return NS_OK;
 }
 
-bool
-AndroidSurfaceTexture::CanDetach() const
+void
+AndroidSurfaceTexture::UpdateCanDetach()
 {
   // The API for attach/detach only exists on 16+, and PowerVR has some sort of
-  // fencing issue. Additionally, attach/detach seems to be busted on at least
-  // some Mali adapters (400MP2 for sure, bug 1131793)
-  return AndroidBridge::Bridge()->GetAPIVersion() >= 16 &&
+  // fencing issue. Additionally, attach/detach seems to be busted on at least some
+  // Mali adapters (400MP2 for sure, bug 1131793)
+  bool canDetach = Preferences::GetBool("gfx.SurfaceTexture.detach.enabled", true);
+
+  mCanDetach = AndroidBridge::Bridge()->GetAPIVersion() >= 16 &&
     (!mAttachedContext || mAttachedContext->Vendor() != GLVendor::Imagination) &&
     (!mAttachedContext || mAttachedContext->Vendor() != GLVendor::ARM /* Mali */) &&
-    gfxPrefs::SurfaceTextureDetachEnabled();
+    canDetach;
 }
 
 bool
 AndroidSurfaceTexture::Init(GLContext* aContext, GLuint aTexture)
 {
+  UpdateCanDetach();
 
   if (!aTexture && !CanDetach()) {
     // We have no texture and cannot initialize detached, bail out
@@ -199,11 +166,12 @@ AndroidSurfaceTexture::Init(GLContext* aContext, GLuint aTexture)
     return false;
   }
 
-  mNativeWindow = AndroidNativeWindow::CreateFromSurface(jni::GetEnvForThread(),
+  mNativeWindow = AndroidNativeWindow::CreateFromSurface(GetJNIForThread(),
                                                          mSurface.Get());
   MOZ_ASSERT(mNativeWindow, "Failed to create native window from surface");
 
-  mID = sInstances.Add(this);
+  mID = ++sNextID;
+  sInstances.insert(std::pair<int, AndroidSurfaceTexture*>(mID, this));
 
   return true;
 }
@@ -212,14 +180,15 @@ AndroidSurfaceTexture::AndroidSurfaceTexture()
   : mTexture(0)
   , mSurfaceTexture()
   , mSurface()
-  , mAttachedContext(nullptr)
   , mMonitor("AndroidSurfaceTexture::mContextMonitor")
+  , mAttachedContext(nullptr)
+  , mCanDetach(false)
 {
 }
 
 AndroidSurfaceTexture::~AndroidSurfaceTexture()
 {
-  sInstances.Remove(mID);
+  sInstances.erase(mID);
 
   mFrameAvailableCallback = nullptr;
 
@@ -236,9 +205,9 @@ AndroidSurfaceTexture::UpdateTexImage()
 }
 
 void
-AndroidSurfaceTexture::GetTransformMatrix(gfx::Matrix4x4& aMatrix) const
+AndroidSurfaceTexture::GetTransformMatrix(gfx::Matrix4x4& aMatrix)
 {
-  JNIEnv* const env = jni::GetEnvForThread();
+  JNIEnv* env = GetJNIForThread();
 
   auto jarray = FloatArray::LocalRef::Adopt(env, env->NewFloatArray(16));
   mSurfaceTexture->GetTransformMatrix(jarray);
@@ -293,7 +262,8 @@ AndroidSurfaceTexture::NotifyFrameAvailable()
     // Proxy to main thread if we aren't on it
     if (!NS_IsMainThread()) {
       // Proxy to main thread
-      NS_DispatchToCurrentThread(NewRunnableMethod(this, &AndroidSurfaceTexture::NotifyFrameAvailable));
+      nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this, &AndroidSurfaceTexture::NotifyFrameAvailable);
+      NS_DispatchToCurrentThread(event);
     } else {
       mFrameAvailableCallback->Run();
     }

@@ -106,7 +106,7 @@ nsXULTooltipListener::MouseOut(nsIDOMEvent* aEvent)
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm) {
       nsCOMPtr<nsIDOMNode> tooltipNode =
-        pm->GetLastTriggerTooltipNode(currentTooltip->GetUncomposedDoc());
+        pm->GetLastTriggerTooltipNode(currentTooltip->GetCurrentDoc());
       if (tooltipNode == targetNode) {
         // if the target node is the current tooltip target node, the mouse
         // left the node the tooltip appeared on, so close the tooltip.
@@ -358,12 +358,7 @@ nsXULTooltipListener::CheckTreeBodyMove(nsIDOMMouseEvent* aMouseEvent)
     // determine if we are going to need a titletip
     // XXX check the disabletitletips attribute on the tree content
     mNeedTitletip = false;
-    int16_t colType = -1;
-    if (col) {
-      col->GetType(&colType);
-    }
-    if (row >= 0 && obj.EqualsLiteral("text") &&
-        colType != nsITreeColumn::TYPE_PASSWORD) {
+    if (row >= 0 && obj.EqualsLiteral("text")) {
       obx->IsCellCropped(row, col, &mNeedTitletip);
     }
 
@@ -564,12 +559,15 @@ nsXULTooltipListener::FindTooltip(nsIContent* aTarget, nsIContent** aTooltip)
     NS_WARNING("Unable to retrieve the tooltip node document.");
     return NS_ERROR_FAILURE;
   }
-  nsPIDOMWindowOuter *window = document->GetWindow();
+  nsPIDOMWindow *window = document->GetWindow();
   if (!window) {
     return NS_OK;
   }
 
-  if (window->Closed()) {
+  bool closed;
+  window->GetClosed(&closed);
+
+  if (closed) {
     return NS_OK;
   }
 
@@ -699,7 +697,7 @@ nsXULTooltipListener::KillTooltipTimer()
 void
 nsXULTooltipListener::sTooltipCallback(nsITimer *aTimer, void *aListener)
 {
-  RefPtr<nsXULTooltipListener> instance = mInstance;
+  nsRefPtr<nsXULTooltipListener> instance = mInstance;
   if (instance)
     instance->ShowTooltip();
 }

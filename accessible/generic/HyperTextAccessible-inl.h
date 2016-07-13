@@ -153,7 +153,7 @@ HyperTextAccessible::AdjustCaretOffset(uint32_t aOffset) const
 inline bool
 HyperTextAccessible::IsCaretAtEndOfLine() const
 {
-  RefPtr<nsFrameSelection> frameSelection = FrameSelection();
+  nsRefPtr<nsFrameSelection> frameSelection = FrameSelection();
   return frameSelection &&
     frameSelection->GetHint() == CARET_ASSOCIATE_BEFORE;
 }
@@ -168,9 +168,10 @@ HyperTextAccessible::FrameSelection() const
 inline dom::Selection*
 HyperTextAccessible::DOMSelection() const
 {
-  RefPtr<nsFrameSelection> frameSelection = FrameSelection();
-  return frameSelection ? frameSelection->GetSelection(SelectionType::eNormal) :
-                          nullptr;
+  nsRefPtr<nsFrameSelection> frameSelection = FrameSelection();
+  return frameSelection ?
+    frameSelection->GetSelection(nsISelectionController::SELECTION_NORMAL) :
+    nullptr;
 }
 
 } // namespace a11y

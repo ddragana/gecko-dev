@@ -15,11 +15,6 @@
 
 namespace mozilla {
 
-namespace dom {
-  class PBrowserParent;
-  class PBrowserChild;
-} // namespace dom
-
 /******************************************************************************
  * mozilla::WidgetContentCommandEvent
  ******************************************************************************/
@@ -32,7 +27,7 @@ public:
     return this;
   }
 
-  WidgetContentCommandEvent(bool aIsTrusted, EventMessage aMessage,
+  WidgetContentCommandEvent(bool aIsTrusted, uint32_t aMessage,
                             nsIWidget* aWidget,
                             bool aOnlyEnabledCheck = false)
     : WidgetGUIEvent(aIsTrusted, aMessage, aWidget, eContentCommandEventClass)
@@ -51,10 +46,10 @@ public:
     return nullptr;
   }
 
-  // eContentCommandPasteTransferable
+  // NS_CONTENT_COMMAND_PASTE_TRANSFERABLE
   nsCOMPtr<nsITransferable> mTransferable; // [in]
 
-  // eContentCommandScroll
+  // NS_CONTENT_COMMAND_SCROLL
   // for mScroll.mUnit
   enum
   {
@@ -108,11 +103,11 @@ public:
 
   WidgetCommandEvent(bool aIsTrusted, nsIAtom* aEventType,
                      nsIAtom* aCommand, nsIWidget* aWidget)
-    : WidgetGUIEvent(aIsTrusted, eUnidentifiedEvent, aWidget,
+    : WidgetGUIEvent(aIsTrusted, NS_USER_DEFINED_EVENT, aWidget,
                      eCommandEventClass)
-    , mCommand(aCommand)
+    , command(aCommand)
   {
-    mSpecifiedEventType = aEventType;
+    userType = aEventType;
   }
 
   virtual WidgetEvent* Duplicate() const override
@@ -121,13 +116,13 @@ public:
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     WidgetCommandEvent* result =
-      new WidgetCommandEvent(false, mSpecifiedEventType, mCommand, nullptr);
+      new WidgetCommandEvent(false, userType, command, nullptr);
     result->AssignCommandEventData(*this, true);
     result->mFlags = mFlags;
     return result;
   }
 
-  nsCOMPtr<nsIAtom> mCommand;
+  nsCOMPtr<nsIAtom> command;
 
   // XXX Not tested by test_assign_event_data.html
   void AssignCommandEventData(const WidgetCommandEvent& aEvent,
@@ -135,7 +130,7 @@ public:
   {
     AssignGUIEventData(aEvent, aCopyTargets);
 
-    // mCommand must have been initialized with the constructor.
+    // command must have been initialized with the constructor.
   }
 };
 
@@ -147,16 +142,12 @@ public:
 
 class WidgetPluginEvent : public WidgetGUIEvent
 {
-private:
-  friend class dom::PBrowserParent;
-  friend class dom::PBrowserChild;
-
 public:
   virtual WidgetPluginEvent* AsPluginEvent() override { return this; }
 
-  WidgetPluginEvent(bool aIsTrusted, EventMessage aMessage, nsIWidget* aWidget)
+  WidgetPluginEvent(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget)
     : WidgetGUIEvent(aIsTrusted, aMessage, aWidget, ePluginEventClass)
-    , mRetargetToFocusedDocument(false)
+    , retargetToFocusedDocument(false)
   {
   }
 
@@ -167,7 +158,7 @@ public:
     MOZ_ASSERT(mClass == ePluginEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
-    WidgetPluginEvent* result = new WidgetPluginEvent(false, mMessage, nullptr);
+    WidgetPluginEvent* result = new WidgetPluginEvent(false, message, nullptr);
     result->AssignPluginEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -175,19 +166,14 @@ public:
 
   // If true, this event needs to be retargeted to focused document.
   // Otherwise, never retargeted. Defaults to false.
-  bool mRetargetToFocusedDocument;
+  bool retargetToFocusedDocument;
 
   void AssignPluginEventData(const WidgetPluginEvent& aEvent,
                              bool aCopyTargets)
   {
     AssignGUIEventData(aEvent, aCopyTargets);
 
-    mRetargetToFocusedDocument = aEvent.mRetargetToFocusedDocument;
-  }
-
-protected:
-  WidgetPluginEvent()
-  {
+    retargetToFocusedDocument = aEvent.retargetToFocusedDocument;
   }
 };
 

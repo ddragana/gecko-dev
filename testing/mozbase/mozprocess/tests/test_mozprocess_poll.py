@@ -34,7 +34,12 @@ class ProcTestPoll(proctest.ProcTest):
 
         self.assertEqual(returncode, None)
 
-        self.determine_status(p, True)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              returncode,
+                              p.didTimeout,
+                              True)
         p.kill()
 
     def test_poll_after_kill(self):
@@ -50,7 +55,11 @@ class ProcTestPoll(proctest.ProcTest):
         self.assertLess(returncode, 0)
         self.assertEqual(returncode, p.poll())
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              returncode,
+                              p.didTimeout)
 
     def test_poll_after_kill_no_process_group(self):
         """Process (no group) is killed, and poll() is called"""
@@ -67,7 +76,11 @@ class ProcTestPoll(proctest.ProcTest):
         self.assertLess(returncode, 0)
         self.assertEqual(returncode, p.poll())
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              returncode,
+                              p.didTimeout)
 
     def test_poll_after_double_kill(self):
         """Process is killed twice, and poll() is called"""
@@ -83,7 +96,11 @@ class ProcTestPoll(proctest.ProcTest):
         self.assertLess(returncode, 0)
         self.assertEqual(returncode, p.poll())
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              returncode,
+                              p.didTimeout)
 
     def test_poll_after_external_kill(self):
         """Process is killed externally, and poll() is called"""
@@ -99,7 +116,11 @@ class ProcTestPoll(proctest.ProcTest):
         self.assertEqual(returncode, -signal.SIGTERM)
         self.assertEqual(returncode, p.poll())
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              returncode,
+                              p.didTimeout)
 
 
 if __name__ == '__main__':

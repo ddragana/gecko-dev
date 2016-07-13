@@ -14,7 +14,7 @@ Cu.import("resource://gre/modules/PlacesUtils.jsm");
 Cu.import("resource:///modules/PlacesUIUtils.jsm");
 Cu.import("resource://services-common/utils.js");
 
-var PlacesQueries = function () {
+let PlacesQueries = function () {
 }
 
 PlacesQueries.prototype = {
@@ -30,7 +30,7 @@ PlacesQueries.prototype = {
   }
 };
 
-var PlacesWrapper = function () {
+let PlacesWrapper = function () {
 }
 
 PlacesWrapper.prototype = {
@@ -140,7 +140,7 @@ PlacesWrapper.prototype = {
       function (items) {
         let previousIds = folderCache.getChildren(folder);
         let currentIds = new Set();
-        for (let item of items) {
+        for each (let item in items) {
           currentIds.add(item.id);
         }
         let newIds = new Set();
@@ -188,7 +188,7 @@ PlacesWrapper.prototype = {
     this.asyncQuery(query, ["item_id"])
         .then(function (items) {
                 let results = [];
-                for (let item of items) {
+                for each(let item in items) {
                   results.push(item.item_id);
                 }
                 deferred.resolve(results);
@@ -211,7 +211,7 @@ PlacesWrapper.prototype = {
     this.asyncQuery(query, ["name", "content"])
         .then(function (results) {
                 let annos = {};
-                for (let result of results) {
+                for each(let result in results) {
                   annos[result.name] = result.content;
                 }
                 deferred.resolve(annos);
@@ -347,7 +347,7 @@ PlacesWrapper.prototype = {
         let row;
         while ((row = results.getNextRow()) != null) {
           let item = {};
-          for (let name of names) {
+          for each (let name in names) {
             item[name] = row.getResultByName(name);
           }
           this.results.push(item);

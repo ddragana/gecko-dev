@@ -22,30 +22,28 @@ function test() {
   let tab = gBrowser.addTab(doc);
   let tabBrowser = tab.linkedBrowser;
 
-  BrowserTestUtils.browserLoaded(tab.linkedBrowser).then(() => {
-    return ContentTask.spawn(tab.linkedBrowser, null, () => {
-      return new Promise(resolve => {
-        // The main page has loaded.  Now wait for the iframe to load.
-        let iframe = content.document.getElementById('iframe');
-        iframe.addEventListener('load', function listener(aEvent) {
+  tabBrowser.addEventListener('load', function(aEvent) {
+    tabBrowser.removeEventListener('load', arguments.callee, true);
 
-          // Wait for the iframe to load the new document, not about:blank.
-          if (!iframe.src)
-            return;
+    // The main page has loaded.  Now wait for the iframe to load.
+    let iframe = tabBrowser.contentWindow.document.getElementById('iframe');
+    iframe.addEventListener('load', function(aEvent) {
 
-          iframe.removeEventListener('load', listener, true);
-          let shistory = content
-                          .QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIWebNavigation)
-                          .sessionHistory;
+      // Wait for the iframe to load the new document, not about:blank.
+      if (!iframe.src)
+        return;
 
-          Assert.equal(shistory.count, 1, "shistory count should be 1.");
-          resolve();
-        }, true);
-      });
-    });
-  }).then(() => {
-    gBrowser.removeTab(tab);
-    finish();
-  });
+      iframe.removeEventListener('load', arguments.callee, true);
+      let shistory = tabBrowser.contentWindow
+                      .QueryInterface(Ci.nsIInterfaceRequestor)
+                      .getInterface(Ci.nsIWebNavigation)
+                      .sessionHistory;
+
+      is(shistory.count, 1, 'shistory count should be 1.');
+
+      gBrowser.removeTab(tab);
+      finish();
+
+    }, true);
+  }, true);
 }

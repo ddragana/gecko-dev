@@ -12,7 +12,6 @@
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundParent.h"
 #include "mozilla/ipc/BackgroundUtils.h"
-#include "nsContentUtils.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsNetUtil.h"
@@ -37,11 +36,11 @@ PrincipalVerifier::CreateAndDispatch(Listener* aListener,
   // only works on the PBackground thread.
   AssertIsOnBackgroundThread();
 
-  RefPtr<PrincipalVerifier> verifier = new PrincipalVerifier(aListener,
+  nsRefPtr<PrincipalVerifier> verifier = new PrincipalVerifier(aListener,
                                                                aActor,
                                                                aPrincipalInfo);
 
-  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(verifier));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(verifier)));
 
   return verifier.forget();
 }
@@ -113,11 +112,11 @@ PrincipalVerifier::VerifyOnMainThread()
 
   // No matter what happens, we need to release the actor before leaving
   // this method.
-  RefPtr<ContentParent> actor;
+  nsRefPtr<ContentParent> actor;
   actor.swap(mActor);
 
   nsresult rv;
-  RefPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo,
+  nsRefPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo,
                                                               &rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     DispatchToInitiatingThread(rv);
@@ -132,25 +131,18 @@ PrincipalVerifier::VerifyOnMainThread()
     return;
   }
 
-  nsCOMPtr<nsIScriptSecurityManager> ssm = nsContentUtils::GetSecurityManager();
-  if (NS_WARN_IF(!ssm)) {
-    DispatchToInitiatingThread(NS_ERROR_ILLEGAL_DURING_SHUTDOWN);
-    return;
-  }
-
-  // Verify if a child process uses system principal, which is not allowed
-  // to prevent system principal is spoofed.
-  if (NS_WARN_IF(actor && ssm->IsSystemPrincipal(principal))) {
-    DispatchToInitiatingThread(NS_ERROR_FAILURE);
-    return;
-  }
-
   // Verify that a child process claims to own the app for this principal
   if (NS_WARN_IF(actor && !AssertAppPrincipal(actor, principal))) {
     DispatchToInitiatingThread(NS_ERROR_FAILURE);
     return;
   }
   actor = nullptr;
+
+  nsCOMPtr<nsIScriptSecurityManager> ssm = nsContentUtils::GetSecurityManager();
+  if (NS_WARN_IF(!ssm)) {
+    DispatchToInitiatingThread(NS_ERROR_ILLEGAL_DURING_SHUTDOWN);
+    return;
+  }
 
 #ifdef DEBUG
   // Sanity check principal origin by using it to construct a URI and security

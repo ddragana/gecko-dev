@@ -13,7 +13,6 @@
 #include "MP4ESDS.h"
 #include "AMRBox.h"
 #include "AVCBox.h"
-#include "EVRCBox.h"
 #include "VideoUtils.h"
 
 namespace mozilla {
@@ -82,7 +81,7 @@ MediaDataBox::Write()
   for (uint32_t l = 0; l < types.Length(); l++) {
     if (mTrackType & types[l]) {
       FragmentBuffer* frag = mControl->GetFragment(types[l]);
-      nsTArray<RefPtr<EncodedFrame>> frames;
+      nsTArray<nsRefPtr<EncodedFrame>> frames;
 
       // Here is the last time we get fragment frames, flush it!
       rv = frag->GetFirstFragment(frames, true);
@@ -119,7 +118,7 @@ TrackRunBox::fillSampleTable()
 {
   uint32_t table_size = 0;
   nsresult rv;
-  nsTArray<RefPtr<EncodedFrame>> frames;
+  nsTArray<nsRefPtr<EncodedFrame>> frames;
   FragmentBuffer* frag = mControl->GetFragment(mTrackType);
 
   rv = frag->GetFirstFragment(frames);
@@ -127,7 +126,7 @@ TrackRunBox::fillSampleTable()
     return 0;
   }
   uint32_t len = frames.Length();
-  sample_info_table = MakeUnique<tbl[]>(len);
+  sample_info_table = new tbl[len];
   // Create sample table according to 14496-12 8.8.8.2.
   for (uint32_t i = 0; i < len; i++) {
     // Sample size.
@@ -419,7 +418,7 @@ MovieFragmentBox::Generate(uint32_t* aBoxSize)
   // Correct data_offset if there are both audio and video track in
   // this fragment. This offset means the offset in the MediaDataBox.
   if (mTrackType & (Audio_Track | Video_Track)) {
-    nsTArray<RefPtr<MuxerOperation>> truns;
+    nsTArray<nsRefPtr<MuxerOperation>> truns;
     rv = Find(NS_LITERAL_CSTRING("trun"), truns);
     NS_ENSURE_SUCCESS(rv, rv);
     uint32_t len = truns.Length();
@@ -661,14 +660,12 @@ SampleDescriptionBox::SampleDescriptionBox(uint32_t aType, ISOControl* aControl)
 }
 
 nsresult
-SampleDescriptionBox::CreateAudioSampleEntry(RefPtr<SampleEntryBox>& aSampleEntry)
+SampleDescriptionBox::CreateAudioSampleEntry(nsRefPtr<SampleEntryBox>& aSampleEntry)
 {
   if (mAudioMeta->GetKind() == TrackMetadataBase::METADATA_AMR) {
     aSampleEntry = new AMRSampleEntry(mControl);
   } else if (mAudioMeta->GetKind() == TrackMetadataBase::METADATA_AAC) {
     aSampleEntry = new MP4AudioSampleEntry(mControl);
-  } else if (mAudioMeta->GetKind() == TrackMetadataBase::METADATA_EVRC) {
-    aSampleEntry = new EVRCSampleEntry(mControl);
   } else {
     MOZ_ASSERT(0);
   }
@@ -676,7 +673,7 @@ SampleDescriptionBox::CreateAudioSampleEntry(RefPtr<SampleEntryBox>& aSampleEntr
 }
 
 nsresult
-SampleDescriptionBox::CreateVideoSampleEntry(RefPtr<SampleEntryBox>& aSampleEntry)
+SampleDescriptionBox::CreateVideoSampleEntry(nsRefPtr<SampleEntryBox>& aSampleEntry)
 {
   if (mVideoMeta->GetKind() == TrackMetadataBase::METADATA_AVC) {
     aSampleEntry = new AVCSampleEntry(mControl);
@@ -1253,17 +1250,6 @@ FileTypeBox::Generate(uint32_t* aBoxSize)
     compatible_brands.AppendElement("3gp7");
     compatible_brands.AppendElement("3gp6");
     compatible_brands.AppendElement("isom");
-  } else if (mControl->GetMuxingType() == ISOMediaWriter::TYPE_FRAG_3G2) {
-    major_brand = "3g2a";
-    // 3GPP2 Release 0 and A and 3GPP Release 6 allow movie fragmentation
-    compatible_brands.AppendElement("3gp9");
-    compatible_brands.AppendElement("3gp8");
-    compatible_brands.AppendElement("3gp7");
-    compatible_brands.AppendElement("3gp6");
-    compatible_brands.AppendElement("isom");
-    compatible_brands.AppendElement("3g2c");
-    compatible_brands.AppendElement("3g2b");
-    compatible_brands.AppendElement("3g2a");
   } else {
     MOZ_ASSERT(0);
   }
@@ -1336,7 +1322,7 @@ DefaultContainerImpl::Generate(uint32_t* aBoxSize)
 
 nsresult
 DefaultContainerImpl::Find(const nsACString& aType,
-                           nsTArray<RefPtr<MuxerOperation>>& aOperations)
+                           nsTArray<nsRefPtr<MuxerOperation>>& aOperations)
 {
   nsresult rv = Box::Find(aType, aOperations);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1380,7 +1366,7 @@ Box::Write()
 }
 
 nsresult
-Box::Find(const nsACString& aType, nsTArray<RefPtr<MuxerOperation>>& aOperations)
+Box::Find(const nsACString& aType, nsTArray<nsRefPtr<MuxerOperation>>& aOperations)
 {
   if (boxType == aType) {
     aOperations.AppendElement(this);

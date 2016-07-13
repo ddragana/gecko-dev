@@ -18,7 +18,6 @@ X11TextureSourceOGL::X11TextureSourceOGL(CompositorOGL* aCompositor, gfxXlibSurf
   : mCompositor(aCompositor)
   , mSurface(aSurface)
   , mTexture(0)
-  , mUpdated(false)
 {
 }
 
@@ -40,8 +39,7 @@ X11TextureSourceOGL::DeallocateDeviceData()
 }
 
 void
-X11TextureSourceOGL::BindTexture(GLenum aTextureUnit,
-                                 gfx::SamplingFilter aSamplingFilter)
+X11TextureSourceOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
 {
   gl()->fActiveTexture(aTextureUnit);
 
@@ -53,13 +51,10 @@ X11TextureSourceOGL::BindTexture(GLenum aTextureUnit,
     gl::sGLXLibrary.BindTexImage(mSurface->XDisplay(), mSurface->GetGLXPixmap());
   } else {
     gl()->fBindTexture(LOCAL_GL_TEXTURE_2D, mTexture);
-    if (mUpdated) {
-      gl::sGLXLibrary.UpdateTexImage(mSurface->XDisplay(), mSurface->GetGLXPixmap());
-      mUpdated = false;
-    }
+    gl::sGLXLibrary.UpdateTexImage(mSurface->XDisplay(), mSurface->GetGLXPixmap());
   }
 
-  ApplySamplingFilterToBoundTexture(gl(), aSamplingFilter, LOCAL_GL_TEXTURE_2D);
+  ApplyFilterToBoundTexture(gl(), aFilter, LOCAL_GL_TEXTURE_2D);
 }
 
 IntSize
@@ -77,14 +72,12 @@ X11TextureSourceOGL::GetFormat() const {
 void
 X11TextureSourceOGL::SetCompositor(Compositor* aCompositor)
 {
-  CompositorOGL* glCompositor = AssertGLCompositor(aCompositor);
-  if (mCompositor == glCompositor) {
+  MOZ_ASSERT(!aCompositor || aCompositor->GetBackendType() == LayersBackend::LAYERS_OPENGL);
+  if (mCompositor == aCompositor) {
     return;
   }
   DeallocateDeviceData();
-  if (glCompositor) {
-    mCompositor = glCompositor;
-  }
+  mCompositor = static_cast<CompositorOGL*>(aCompositor);
 }
 
 gl::GLContext*

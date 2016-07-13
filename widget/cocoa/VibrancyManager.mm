@@ -11,8 +11,7 @@
 using namespace mozilla;
 
 void
-VibrancyManager::UpdateVibrantRegion(VibrancyType aType,
-                                     const LayoutDeviceIntRegion& aRegion)
+VibrancyManager::UpdateVibrantRegion(VibrancyType aType, const nsIntRegion& aRegion)
 {
   auto& vr = *mVibrantRegions.LookupOrAdd(uint32_t(aType));
   if (vr.region == aRegion) {
@@ -28,17 +27,15 @@ VibrancyManager::UpdateVibrantRegion(VibrancyType aType,
   vr.effectViews.SwapElements(viewsToRecycle);
   // vr.effectViews is now empty.
 
-  size_t i = 0;
-  for (auto iter = aRegion.RectIter();
-       !iter.Done() || i < viewsToRecycle.Length();
-       i++) {
-    if (!iter.Done()) {
+  nsIntRegionRectIterator iter(aRegion);
+  const nsIntRect* iterRect = nullptr;
+  for (size_t i = 0; (iterRect = iter.Next()) || i < viewsToRecycle.Length(); ++i) {
+    if (iterRect) {
       NSView* view = nil;
-      NSRect rect = mCoordinateConverter.DevPixelsToCocoaPoints(iter.Get());
+      NSRect rect = mCoordinateConverter.DevPixelsToCocoaPoints(*iterRect);
       if (i < viewsToRecycle.Length()) {
         view = viewsToRecycle[i];
         [view setFrame:rect];
-        [view setNeedsDisplay:YES];
       } else {
         view = CreateEffectView(aType, rect);
         [mContainerView addSubview:view];
@@ -48,7 +45,6 @@ VibrancyManager::UpdateVibrantRegion(VibrancyType aType,
         [view release];
       }
       vr.effectViews.AppendElement(view);
-      iter.Next();
     } else {
       // Our new region is made of less rects than the old region, so we can
       // remove this view. We only have a weak reference to it, so removing it
@@ -60,12 +56,20 @@ VibrancyManager::UpdateVibrantRegion(VibrancyType aType,
   vr.region = aRegion;
 }
 
+static PLDHashOperator
+ClearVibrantRegionFunc(const uint32_t& aVibrancyType,
+                       VibrancyManager::VibrantRegion* aVibrantRegion,
+                       void* aVM)
+{
+  static_cast<VibrancyManager*>(aVM)->ClearVibrantRegion(*aVibrantRegion);
+  return PL_DHASH_NEXT;
+}
+
 void
 VibrancyManager::ClearVibrantAreas() const
 {
-  for (auto iter = mVibrantRegions.ConstIter(); !iter.Done(); iter.Next()) {
-    ClearVibrantRegion(*iter.UserData());
-  }
+  mVibrantRegions.EnumerateRead(ClearVibrantRegionFunc,
+                                const_cast<VibrancyManager*>(this));
 }
 
 void
@@ -73,8 +77,9 @@ VibrancyManager::ClearVibrantRegion(const VibrantRegion& aVibrantRegion) const
 {
   [[NSColor clearColor] set];
 
-  for (auto iter = aVibrantRegion.region.RectIter(); !iter.Done(); iter.Next()) {
-    NSRectFill(mCoordinateConverter.DevPixelsToCocoaPoints(iter.Get()));
+  nsIntRegionRectIterator iter(aVibrantRegion.region);
+  while (const nsIntRect* rect = iter.Next()) {
+    NSRectFill(mCoordinateConverter.DevPixelsToCocoaPoints(*rect));
   }
 }
 
@@ -186,7 +191,6 @@ AppearanceForVibrancyType(VibrancyType aType)
     case VibrancyType::MENU:
     case VibrancyType::HIGHLIGHTED_MENUITEM:
     case VibrancyType::SHEET:
-    case VibrancyType::SOURCE_LIST:
       return [NSAppearanceClass performSelector:@selector(appearanceNamed:)
                                      withObject:@"NSAppearanceNameVibrantLight"];
     case VibrancyType::DARK:
@@ -204,13 +208,6 @@ enum {
 
 enum {
   NSVisualEffectMaterialTitlebar = 3
-};
-#endif
-
-#if !defined(MAC_OS_X_VERSION_10_11) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_11
-enum {
-  NSVisualEffectMaterialMenu = 5,
-  NSVisualEffectMaterialSidebar = 7
 };
 #endif
 
@@ -265,15 +262,14 @@ VibrancyManager::CreateEffectView(VibrancyType aType, NSRect aRect)
                    withObject:AppearanceForVibrancyType(aType)];
   [effectView setState:VisualEffectStateForVibrancyType(aType)];
 
-  BOOL canUseElCapitanMaterials = nsCocoaFeatures::OnElCapitanOrLater();
   if (aType == VibrancyType::MENU) {
-    // Before 10.11 there is no material that perfectly matches the menu
-    // look. Of all available material types, NSVisualEffectMaterialTitlebar
-    // is the one that comes closest.
-    [effectView setMaterial:canUseElCapitanMaterials ? NSVisualEffectMaterialMenu
-                                                     : NSVisualEffectMaterialTitlebar];
-  } else if (aType == VibrancyType::SOURCE_LIST && canUseElCapitanMaterials) {
-    [effectView setMaterial:NSVisualEffectMaterialSidebar];
+    // NSVisualEffectMaterialTitlebar doesn't match the native menu look
+    // perfectly but comes pretty close. Ideally we'd use a material with
+    // materialTypeName "MacLight", since that's what menus use, but there's
+    // no entry with that material in the internalMaterialType-to-
+    // CGSWindowBackdropViewSpec table which NSVisualEffectView consults when
+    // setting up the effect.
+    [effectView setMaterial:NSVisualEffectMaterialTitlebar];
   } else if (aType == VibrancyType::HIGHLIGHTED_MENUITEM) {
     [effectView setMaterial:NSVisualEffectMaterialMenuItem];
     if ([effectView respondsToSelector:@selector(setEmphasized:)]) {

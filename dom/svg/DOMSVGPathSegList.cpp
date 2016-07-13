@@ -55,7 +55,7 @@ NS_INTERFACE_MAP_END
 // Helper class: AutoChangePathSegListNotifier
 // Stack-based helper class to pair calls to WillChangePathSegList and
 // DidChangePathSegList.
-class MOZ_RAII AutoChangePathSegListNotifier
+class MOZ_STACK_CLASS AutoChangePathSegListNotifier
 {
 public:
   explicit AutoChangePathSegListNotifier(DOMSVGPathSegList* aPathSegList MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -86,7 +86,7 @@ DOMSVGPathSegList::GetDOMWrapper(void *aList,
                                  nsSVGElement *aElement,
                                  bool aIsAnimValList)
 {
-  RefPtr<DOMSVGPathSegList> wrapper =
+  nsRefPtr<DOMSVGPathSegList> wrapper =
     SVGPathSegListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
     wrapper = new DOMSVGPathSegList(aElement, aIsAnimValList);
@@ -161,7 +161,7 @@ DOMSVGPathSegList::InternalListWillChangeTo(const SVGPathData& aNewValue)
 
   uint32_t newSegType;
 
-  RefPtr<DOMSVGPathSegList> kungFuDeathGrip;
+  nsRefPtr<DOMSVGPathSegList> kungFuDeathGrip;
   if (length) {
     // RemovingFromList() might clear last reference to |this|.
     // Retain a temporary reference to keep from dying before returning.
@@ -242,13 +242,6 @@ DOMSVGPathSegList::AttrIsAnimating() const
   return InternalAList().IsAnimating();
 }
 
-bool
-DOMSVGPathSegList::AnimListMirrorsBaseList() const
-{
-  return GetDOMWrapperIfExists(InternalAList().GetAnimValKey()) &&
-           !AttrIsAnimating();
-}
- 
 SVGPathData&
 DOMSVGPathSegList::InternalList() const
 {
@@ -311,7 +304,7 @@ DOMSVGPathSegList::Initialize(DOMSVGPathSeg& aNewItem, ErrorResult& aError)
   // clone of aNewItem, it would actually insert aNewItem. To prevent that
   // from happening we have to do the clone here, if necessary.
 
-  RefPtr<DOMSVGPathSeg> domItem = &aNewItem;
+  nsRefPtr<DOMSVGPathSeg> domItem = &aNewItem;
   if (aNewItem.HasOwner()) {
     domItem = aNewItem.Clone();
   }
@@ -325,7 +318,7 @@ already_AddRefed<DOMSVGPathSeg>
 DOMSVGPathSegList::GetItem(uint32_t index, ErrorResult& error)
 {
   bool found;
-  RefPtr<DOMSVGPathSeg> item = IndexedGetter(index, found, error);
+  nsRefPtr<DOMSVGPathSeg> item = IndexedGetter(index, found, error);
   if (!found) {
     error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
   }
@@ -368,7 +361,7 @@ DOMSVGPathSegList::InsertItemBefore(DOMSVGPathSeg& aNewItem,
     return nullptr;
   }
 
-  RefPtr<DOMSVGPathSeg> domItem = &aNewItem;
+  nsRefPtr<DOMSVGPathSeg> domItem = &aNewItem;
   if (domItem->HasOwner()) {
     domItem = domItem->Clone(); // must do this before changing anything!
   }
@@ -381,16 +374,6 @@ DOMSVGPathSegList::InsertItemBefore(DOMSVGPathSeg& aNewItem,
                                         fallible)) {
     aError.Throw(NS_ERROR_OUT_OF_MEMORY);
     return nullptr;
-  }
-  if (AnimListMirrorsBaseList()) {
-    DOMSVGPathSegList *animVal =
-      GetDOMWrapperIfExists(InternalAList().GetAnimValKey());
-    MOZ_ASSERT(animVal, "animVal should be a valid pointer");
-    if (!animVal->mItems.SetCapacity(
-          animVal->mItems.Length() + 1, fallible)) {
-      aError.Throw(NS_ERROR_OUT_OF_MEMORY);
-      return nullptr;
-    }
   }
 
   AutoChangePathSegListNotifier notifier(this);
@@ -434,7 +417,7 @@ DOMSVGPathSegList::ReplaceItem(DOMSVGPathSeg& aNewItem,
     return nullptr;
   }
 
-  RefPtr<DOMSVGPathSeg> domItem = &aNewItem;
+  nsRefPtr<DOMSVGPathSeg> domItem = &aNewItem;
   if (domItem->HasOwner()) {
     domItem = domItem->Clone(); // must do this before changing anything!
   }
@@ -496,7 +479,7 @@ DOMSVGPathSegList::RemoveItem(uint32_t aIndex,
     return nullptr;
   }
   // We have to return the removed item, so get it, creating it if necessary:
-  RefPtr<DOMSVGPathSeg> result = GetItemAt(aIndex);
+  nsRefPtr<DOMSVGPathSeg> result = GetItemAt(aIndex);
 
   AutoChangePathSegListNotifier notifier(this);
   // Notify the DOM item of removal *before* modifying the lists so that the
@@ -531,7 +514,7 @@ DOMSVGPathSegList::GetItemAt(uint32_t aIndex)
   if (!ItemAt(aIndex)) {
     ItemAt(aIndex) = DOMSVGPathSeg::CreateFor(this, aIndex, IsAnimValList());
   }
-  RefPtr<DOMSVGPathSeg> result = ItemAt(aIndex);
+  nsRefPtr<DOMSVGPathSeg> result = ItemAt(aIndex);
   return result.forget();
 }
 
@@ -543,17 +526,22 @@ DOMSVGPathSegList::
 {
   MOZ_ASSERT(!IsAnimValList(), "call from baseVal to animVal");
 
-  if (!AnimListMirrorsBaseList()) {
+  if (AttrIsAnimating()) {
+    // animVal not a clone of baseVal
     return;
   }
 
   // The anim val list is in sync with the base val list
   DOMSVGPathSegList *animVal =
     GetDOMWrapperIfExists(InternalAList().GetAnimValKey());
+  if (!animVal) {
+    // No animVal list wrapper
+    return;
+  }
 
-  MOZ_ASSERT(animVal, "AnimListMirrorsBaseList() promised a non-null animVal");
   MOZ_ASSERT(animVal->mItems.Length() == mItems.Length(),
              "animVal list not in sync!");
+
   MOZ_ALWAYS_TRUE(animVal->mItems.InsertElementAt(aIndex,
                                                   ItemProxy(nullptr,
                                                             aInternalIndex),
@@ -569,16 +557,20 @@ DOMSVGPathSegList::
 {
   MOZ_ASSERT(!IsAnimValList(), "call from baseVal to animVal");
 
-  if (!AnimListMirrorsBaseList()) {
+  if (AttrIsAnimating()) {
+    // animVal not a clone of baseVal
     return;
   }
 
   // This needs to be a strong reference; otherwise, the RemovingFromList call
   // below might drop the last reference to animVal before we're done with it.
-  RefPtr<DOMSVGPathSegList> animVal =
+  nsRefPtr<DOMSVGPathSegList> animVal =
     GetDOMWrapperIfExists(InternalAList().GetAnimValKey());
+  if (!animVal) {
+    // No animVal list wrapper
+    return;
+  }
 
-  MOZ_ASSERT(animVal, "AnimListMirrorsBaseList() promised a non-null animVal");
   MOZ_ASSERT(animVal->mItems.Length() == mItems.Length(),
              "animVal list not in sync!");
 

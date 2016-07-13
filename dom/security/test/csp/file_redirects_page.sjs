@@ -14,8 +14,9 @@ function handleRequest(request, response)
   var resource = "/tests/dom/security/test/csp/file_redirects_resource.sjs";
 
   // CSP header value
-  response.setHeader("Content-Security-Policy",
-      "default-src 'self' blob: ; style-src 'self' 'unsafe-inline'", false);
+  if (query["csp"] == 1) {
+    response.setHeader("Content-Security-Policy", "default-src 'self' ; style-src 'self' 'unsafe-inline'", false);
+  }
 
   // downloadable font that redirects to another site
   if (query["testid"] == "font-src") {
@@ -60,7 +61,13 @@ function handleRequest(request, response)
 
   // external stylesheet that redirects to another site
   if (query["testid"] == "style-src") {
-    response.write('<link rel="stylesheet" type="text/css" href="'+resource+'?res=style&redir=other&id=style-src-redir"></link>');
+    response.write('<link rel="stylesheet" type="text/css" href="'+resource+'?res=style&redir=other&id=style-src-redir"></script>');
+    return;
+  }
+
+  // worker script resource that redirects to another site
+  if (query["testid"] == "worker") {
+    response.write('<script src="'+resource+'?res=worker&redir=other&id=worker-redir"></script>');
     return;
   }
 
@@ -77,27 +84,13 @@ function handleRequest(request, response)
     return;
   }
 
-  if (query["testid"] == "from-worker") {
+  if (query["testid"] == "script-src-from-worker") {
     // loads a script; launches a worker; that worker uses importscript; which then gets redirected
     // So it's:
-    // <script src="res=loadWorkerThatMakesRequests">
-    //   .. loads Worker("res=makeRequestsWorker")
+    // <script "res=loadWorkerThatImports">
+    //   .. loads Worker("res=importScriptWorker")
     //         .. calls importScript("res=script")
-    //         .. calls xhr("res=xhr-resp")
-    //         .. calls fetch("res=xhr-resp")
-    response.write('<script src="'+resource+'?res=loadWorkerThatMakesRequests&id=from-worker"></script>');
-    return;
-  }
-
-  if (query["testid"] == "from-blob-worker") {
-    // loads a script; launches a worker; that worker uses importscript; which then gets redirected
-    // So it's:
-    // <script src="res=loadBlobWorkerThatMakesRequests">
-    //   .. loads Worker("res=makeRequestsWorker")
-    //         .. calls importScript("res=script")
-    //         .. calls xhr("res=xhr-resp")
-    //         .. calls fetch("res=xhr-resp")
-    response.write('<script src="'+resource+'?res=loadBlobWorkerThatMakesRequests&id=from-blob-worker"></script>');
+    response.write('<script src="'+resource+'?res=loadWorkerThatImports&id=script-src-redir-from-worker"></script>');
     return;
   }
 }

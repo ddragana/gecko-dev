@@ -15,27 +15,20 @@ namespace dom {
 class MediaElementAudioSourceNode final : public MediaStreamAudioSourceNode
 {
 public:
-  static already_AddRefed<MediaElementAudioSourceNode>
-  Create(AudioContext* aContext, DOMMediaStream* aStream, ErrorResult& aRv);
+  MediaElementAudioSourceNode(AudioContext* aContext,
+                              DOMMediaStream* aStream);
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  const char* NodeType() const override
+  virtual const char* NodeType() const override
   {
     return "MediaElementAudioSourceNode";
   }
 
-  const char* CrossOriginErrorString() const override
-  {
-    return "MediaElementAudioSourceNodeCrossOrigin";
-  }
-
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
-private:
-  explicit MediaElementAudioSourceNode(AudioContext* aContext);
 };
 
 } // namespace dom

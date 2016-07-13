@@ -11,11 +11,11 @@
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/MessageEvent.h"
 #include "mozilla/dom/MessageEventBinding.h"
+#include "mozilla/dom/StructuredCloneUtils.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/ipc/PBackgroundChild.h"
-#include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "WorkerPrivate.h"
 
 namespace mozilla {
@@ -27,8 +27,7 @@ namespace dom {
 using namespace workers;
 
 BroadcastChannelChild::BroadcastChannelChild(const nsACString& aOrigin)
-  : mBC(nullptr)
-  , mActorDestroyed(false)
+  : mActorDestroyed(false)
 {
   CopyUTF8toUTF16(aOrigin, mOrigin);
 }
@@ -43,12 +42,12 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
 {
   // Make sure to retrieve all blobs from the message before returning to avoid
   // leaking their actors.
-  nsTArray<RefPtr<BlobImpl>> blobs;
+  nsTArray<nsRefPtr<BlobImpl>> blobs;
   if (!aData.blobsChild().IsEmpty()) {
     blobs.SetCapacity(aData.blobsChild().Length());
 
     for (uint32_t i = 0, len = aData.blobsChild().Length(); i < len; ++i) {
-      RefPtr<BlobImpl> impl =
+      nsRefPtr<BlobImpl> impl =
         static_cast<BlobChild*>(aData.blobsChild()[i])->GetBlobImpl();
 
       blobs.AppendElement(impl);
@@ -58,8 +57,9 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
   nsCOMPtr<DOMEventTargetHelper> helper = mBC;
   nsCOMPtr<EventTarget> eventTarget = do_QueryInterface(helper);
 
-  // The object is going to be deleted soon. No notify is required.
-  if (!eventTarget) {
+  // This object has been already closed by content or is going to be deleted
+  // soon. No notify is required.
+  if (!eventTarget || mBC->IsClosed()) {
     return true;
   }
 
@@ -68,8 +68,6 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
   if (NS_FAILED(mBC->CheckInnerWindowCorrectness())) {
     return true;
   }
-
-  mBC->RemoveDocFromBFCache();
 
   AutoJSAPI jsapi;
   nsCOMPtr<nsIGlobalObject> globalObject;
@@ -87,20 +85,18 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
     return true;
   }
 
-  ipc::StructuredCloneData cloneData;
-  cloneData.BlobImpls().AppendElements(blobs);
+  JSContext* cx = jsapi.cx();
 
   const SerializedStructuredCloneBuffer& buffer = aData.data();
-  cloneData.UseExternalData(buffer.data, buffer.dataLength);
+  StructuredCloneData cloneData;
+  cloneData.mData = buffer.data;
+  cloneData.mDataLength = buffer.dataLength;
+  cloneData.mClosure.mBlobImpls.SwapElements(blobs);
 
-  JSContext* cx = jsapi.cx();
   JS::Rooted<JS::Value> value(cx, JS::NullValue());
-  if (buffer.dataLength) {
-    ErrorResult rv;
-    cloneData.Read(cx, &value, rv);
-    if (NS_WARN_IF(rv.Failed())) {
-      return true;
-    }
+  if (cloneData.mDataLength && !ReadStructuredClone(cx, cloneData, &value)) {
+    JS_ClearPendingException(cx);
+    return false;
   }
 
   RootedDictionary<MessageEventInit> init(cx);
@@ -110,7 +106,7 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
   init.mData = value;
 
   ErrorResult rv;
-  RefPtr<MessageEvent> event =
+  nsRefPtr<MessageEvent> event =
     MessageEvent::Constructor(mBC, NS_LITERAL_STRING("message"), init, rv);
   if (rv.Failed()) {
     NS_WARNING("Failed to create a MessageEvent object.");

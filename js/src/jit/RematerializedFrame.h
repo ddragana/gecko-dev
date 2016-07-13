@@ -7,8 +7,6 @@
 #ifndef jit_RematerializedFrame_h
 #define jit_RematerializedFrame_h
 
-#include <algorithm>
-
 #include "jsfun.h"
 
 #include "jit/JitFrameIterator.h"
@@ -37,11 +35,6 @@ class RematerializedFrame
     // Is this frame constructing?
     bool isConstructing_;
 
-    // If true, this frame has been on the stack when
-    // |js::SavedStacks::saveCurrentStack| was called, and so there is a
-    // |js::SavedFrame| object cached for this frame.
-    bool hasCachedSavedFrame_;
-
     // The fp of the top frame associated with this possibly inlined frame.
     uint8_t* top_;
 
@@ -57,7 +50,7 @@ class RematerializedFrame
     ArgumentsObject* argsObj_;
 
     Value returnValue_;
-    Value thisArgument_;
+    Value thisValue_;
     Value slots_[1];
 
     RematerializedFrame(JSContext* cx, uint8_t* top, unsigned numActualArgs,
@@ -69,10 +62,10 @@ class RematerializedFrame
 
     // Rematerialize all remaining frames pointed to by |iter| into |frames|
     // in older-to-younger order, e.g., frames[0] is the oldest frame.
-    static MOZ_MUST_USE bool RematerializeInlineFrames(JSContext* cx, uint8_t* top,
-                                                       InlineFrameIterator& iter,
-                                                       MaybeReadFallback& fallback,
-                                                       Vector<RematerializedFrame*>& frames);
+    static bool RematerializeInlineFrames(JSContext* cx, uint8_t* top,
+                                          InlineFrameIterator& iter,
+                                          MaybeReadFallback& fallback,
+                                          Vector<RematerializedFrame*>& frames);
 
     // Free a vector of RematerializedFrames; takes care to call the
     // destructor. Also clears the vector.
@@ -123,10 +116,10 @@ class RematerializedFrame
         return scopeChain_;
     }
     void pushOnScopeChain(ScopeObject& scope);
-    MOZ_MUST_USE bool initFunctionScopeObjects(JSContext* cx);
+    bool initFunctionScopeObjects(JSContext* cx);
 
     bool hasCallObj() const {
-        MOZ_ASSERT(callee()->needsCallObject());
+        MOZ_ASSERT(fun()->isHeavyweight());
         return hasCallObj_;
     }
     CallObject& callObj() const;
@@ -144,14 +137,22 @@ class RematerializedFrame
         return !!script_->functionNonDelazifying();
     }
     bool isGlobalFrame() const {
-        return script_->isGlobalCode();
+        return !isFunctionFrame();
     }
-    bool isModuleFrame() const {
-        return script_->module();
+    bool isNonEvalFunctionFrame() const {
+        // Ion doesn't support eval frames.
+        return isFunctionFrame();
     }
 
     JSScript* script() const {
         return script_;
+    }
+    JSFunction* fun() const {
+        MOZ_ASSERT(isFunctionFrame());
+        return script_->functionNonDelazifying();
+    }
+    JSFunction* maybeFun() const {
+        return isFunctionFrame() ? fun() : nullptr;
     }
     JSFunction* callee() const {
         MOZ_ASSERT(isFunctionFrame());
@@ -160,37 +161,26 @@ class RematerializedFrame
     Value calleev() const {
         return ObjectValue(*callee());
     }
-    Value& thisArgument() {
-        return thisArgument_;
+    Value& thisValue() {
+        return thisValue_;
     }
 
     bool isConstructing() const {
         return isConstructing_;
     }
 
-    bool hasCachedSavedFrame() const {
-        return hasCachedSavedFrame_;
-    }
-
-    void setHasCachedSavedFrame() {
-        hasCachedSavedFrame_ = true;
-    }
-
     unsigned numFormalArgs() const {
-        return isFunctionFrame() ? callee()->nargs() : 0;
+        return maybeFun() ? fun()->nargs() : 0;
     }
     unsigned numActualArgs() const {
         return numActualArgs_;
-    }
-    unsigned numArgSlots() const {
-        return (std::max)(numFormalArgs(), numActualArgs());
     }
 
     Value* argv() {
         return slots_;
     }
     Value* locals() {
-        return slots_ + numArgSlots() + isConstructing_;
+        return slots_ + numActualArgs_ + isConstructing_;
     }
 
     Value& unaliasedLocal(unsigned i) {

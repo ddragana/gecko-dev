@@ -8,27 +8,24 @@
 #include "WMFDecoderModule.h"
 #include "WMFVideoMFTManager.h"
 #include "WMFAudioMFTManager.h"
-#include "MFTDecoder.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Services.h"
 #include "WMFMediaDataDecoder.h"
-#include "nsAutoPtr.h"
 #include "nsIWindowsRegKey.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIGfxInfo.h"
-#include "nsWindowsHelpers.h"
 #include "GfxDriverInfo.h"
 #include "gfxWindowsPlatform.h"
 #include "MediaInfo.h"
-#include "MediaPrefs.h"
 #include "prsystem.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/StaticMutex.h"
 
 namespace mozilla {
 
-static Atomic<bool> sDXVAEnabled(false);
+static bool sDXVAEnabled = false;
+static int  sNumDecoderThreads = -1;
+static bool sIsIntelDecoderEnabled = false;
 
 WMFDecoderModule::WMFDecoderModule()
   : mWMFInitialized(false)
@@ -43,29 +40,47 @@ WMFDecoderModule::~WMFDecoderModule()
   }
 }
 
+void
+WMFDecoderModule::DisableHardwareAcceleration()
+{
+  sDXVAEnabled = false;
+  sIsIntelDecoderEnabled = false;
+}
+
+static void
+SetNumOfDecoderThreads()
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Preferences can only be read on main thread");
+  int32_t numCores = PR_GetNumberOfProcessors();
+
+  // If we have more than 4 cores, let the decoder decide how many threads.
+  // On an 8 core machine, WMF chooses 4 decoder threads
+  const int WMF_DECODER_DEFAULT = -1;
+  int32_t prefThreadCount = Preferences::GetInt("media.wmf.decoder.thread-count", -1);
+  if (prefThreadCount != WMF_DECODER_DEFAULT) {
+    sNumDecoderThreads = std::max(prefThreadCount, 1);
+  } else if (numCores > 4) {
+    sNumDecoderThreads = WMF_DECODER_DEFAULT;
+  } else {
+    sNumDecoderThreads = std::max(numCores - 1, 1);
+  }
+}
+
 /* static */
 void
 WMFDecoderModule::Init()
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
   sDXVAEnabled = gfxPlatform::GetPlatform()->CanUseHardwareVideoDecoding();
+  sIsIntelDecoderEnabled = Preferences::GetBool("media.webm.intel_decoder.enabled", false);
+  SetNumOfDecoderThreads();
 }
 
 /* static */
 int
 WMFDecoderModule::GetNumDecoderThreads()
 {
-  int32_t numCores = PR_GetNumberOfProcessors();
-
-  // If we have more than 4 cores, let the decoder decide how many threads.
-  // On an 8 core machine, WMF chooses 4 decoder threads
-  const int WMF_DECODER_DEFAULT = -1;
-  int32_t prefThreadCount = MediaPrefs::PDMWMFThreadCount();
-  if (prefThreadCount != WMF_DECODER_DEFAULT) {
-    return std::max(prefThreadCount, 1);
-  } else if (numCores > 4) {
-    return WMF_DECODER_DEFAULT;
-  }
-  return std::max(numCores - 1, 1);
+  return sNumDecoderThreads;
 }
 
 nsresult
@@ -76,145 +91,73 @@ WMFDecoderModule::Startup()
 }
 
 already_AddRefed<MediaDataDecoder>
-WMFDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
+WMFDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
+                                     layers::LayersBackend aLayersBackend,
+                                     layers::ImageContainer* aImageContainer,
+                                     FlushableTaskQueue* aVideoTaskQueue,
+                                     MediaDataDecoderCallback* aCallback)
 {
-  nsAutoPtr<WMFVideoMFTManager> manager(
-    new WMFVideoMFTManager(aParams.VideoConfig(),
-                           aParams.mLayersBackend,
-                           aParams.mImageContainer,
-                           sDXVAEnabled));
-
-  if (!manager->Init()) {
-    return nullptr;
-  }
-
-  RefPtr<MediaDataDecoder> decoder =
-    new WMFMediaDataDecoder(manager.forget(), aParams.mTaskQueue, aParams.mCallback);
-
+  nsRefPtr<MediaDataDecoder> decoder =
+    new WMFMediaDataDecoder(new WMFVideoMFTManager(aConfig,
+                                                   aLayersBackend,
+                                                   aImageContainer,
+                                                   sDXVAEnabled && ShouldUseDXVA(aConfig)),
+                            aVideoTaskQueue,
+                            aCallback);
   return decoder.forget();
 }
 
 already_AddRefed<MediaDataDecoder>
-WMFDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
+WMFDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
+                                     FlushableTaskQueue* aAudioTaskQueue,
+                                     MediaDataDecoderCallback* aCallback)
 {
-  nsAutoPtr<WMFAudioMFTManager> manager(new WMFAudioMFTManager(aParams.AudioConfig()));
-
-  if (!manager->Init()) {
-    return nullptr;
-  }
-
-  RefPtr<MediaDataDecoder> decoder =
-    new WMFMediaDataDecoder(manager.forget(), aParams.mTaskQueue, aParams.mCallback);
+  nsRefPtr<MediaDataDecoder> decoder =
+    new WMFMediaDataDecoder(new WMFAudioMFTManager(aConfig),
+                            aAudioTaskQueue,
+                            aCallback);
   return decoder.forget();
 }
 
-static bool
-CanCreateMFTDecoder(const GUID& aGuid)
+bool
+WMFDecoderModule::ShouldUseDXVA(const VideoInfo& aConfig) const
 {
-  if (FAILED(wmf::MFStartup())) {
-    return false;
+  static bool isAMD = false;
+  static bool initialized = false;
+  if (!initialized) {
+    nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+    nsAutoString vendor;
+    gfxInfo->GetAdapterVendorID(vendor);
+    isAMD = vendor.Equals(widget::GfxDriverInfo::GetDeviceVendor(widget::VendorAMD), nsCaseInsensitiveStringComparator()) ||
+            vendor.Equals(widget::GfxDriverInfo::GetDeviceVendor(widget::VendorATI), nsCaseInsensitiveStringComparator());
+    initialized = true;
   }
-  bool hasdecoder = false;
-  {
-    RefPtr<MFTDecoder> decoder(new MFTDecoder());
-    hasdecoder = SUCCEEDED(decoder->Create(aGuid));
+  if (!isAMD) {
+    return true;
   }
-  wmf::MFShutdown();
-  return hasdecoder;
-}
-
-template<const GUID& aGuid>
-static bool
-CanCreateWMFDecoder()
-{
-  static StaticMutex sMutex;
-  StaticMutexAutoLock lock(sMutex);
-  static Maybe<bool> result;
-  if (result.isNothing()) {
-    result.emplace(CanCreateMFTDecoder(aGuid));
-  }
-  return result.value();
-}
-
-static bool
-IsH264DecoderBlacklisted()
-{
-#ifdef BLACKLIST_CRASHY_H264_DECODERS
-  WCHAR systemPath[MAX_PATH + 1];
-  if (!ConstructSystem32Path(L"msmpeg2vdec.dll", systemPath, MAX_PATH + 1)) {
-    // Cannot build path -> Assume it's not the blacklisted DLL.
-    return false;
-  }
-
-  DWORD zero;
-  DWORD infoSize = GetFileVersionInfoSizeW(systemPath, &zero);
-  if (infoSize == 0) {
-    // Can't get file info -> Assume we don't have the blacklisted DLL.
-    return false;
-  }
-  auto infoData = MakeUnique<unsigned char[]>(infoSize);
-  VS_FIXEDFILEINFO *vInfo;
-  UINT vInfoLen;
-  if (GetFileVersionInfoW(systemPath, 0, infoSize, infoData.get()) &&
-    VerQueryValueW(infoData.get(), L"\\", (LPVOID*)&vInfo, &vInfoLen))
-  {
-    if ((vInfo->dwFileVersionMS == ((12u << 16) | 0u))
-        && ((vInfo->dwFileVersionLS == ((9200u << 16) | 16426u))
-            || (vInfo->dwFileVersionLS == ((9200u << 16) | 17037u)))) {
-      // 12.0.9200.16426 & .17037 are blacklisted on Win64, see bug 1242343.
-      return true;
-    }
-  }
-#endif // BLACKLIST_CRASHY_H264_DECODERS
-  return false;
-}
-
-/* static */ bool
-WMFDecoderModule::HasH264()
-{
-  if (IsH264DecoderBlacklisted()) {
-    return false;
-  }
-  return CanCreateWMFDecoder<CLSID_CMSH264DecoderMFT>();
-}
-
-/* static */ bool
-WMFDecoderModule::HasAAC()
-{
-  return CanCreateWMFDecoder<CLSID_CMSAACDecMFT>();
+  // Don't use DXVA for 4k videos or above, since it seems to perform poorly.
+  return aConfig.mDisplay.width <= 1920 && aConfig.mDisplay.height <= 1200;
 }
 
 bool
-WMFDecoderModule::SupportsMimeType(const nsACString& aMimeType,
-                                   DecoderDoctorDiagnostics* aDiagnostics) const
+WMFDecoderModule::SupportsSharedDecoders(const VideoInfo& aConfig) const
 {
-  if ((aMimeType.EqualsLiteral("audio/mp4a-latm") ||
-       aMimeType.EqualsLiteral("audio/mp4")) &&
-       WMFDecoderModule::HasAAC()) {
-    return true;
-  }
-  if ((aMimeType.EqualsLiteral("video/avc") ||
-       aMimeType.EqualsLiteral("video/mp4")) &&
-       WMFDecoderModule::HasH264()) {
-    return true;
-  }
-  if (aMimeType.EqualsLiteral("audio/mpeg") &&
-      CanCreateWMFDecoder<CLSID_CMP3DecMediaObject>()) {
-    return true;
-  }
-  if (MediaPrefs::PDMWMFIntelDecoderEnabled() && sDXVAEnabled) {
-    if (aMimeType.EqualsLiteral("video/webm; codecs=vp8") &&
-        CanCreateWMFDecoder<CLSID_WebmMfVp8Dec>()) {
-      return true;
-    }
-    if (aMimeType.EqualsLiteral("video/webm; codecs=vp9") &&
-        CanCreateWMFDecoder<CLSID_WebmMfVp9Dec>()) {
-      return true;
-    }
-  }
+  // If DXVA is enabled, but we're not going to use it for this specific config, then
+  // we can't use the shared decoder.
+  return !AgnosticMimeType(aConfig.mMimeType) &&
+    (!sDXVAEnabled || ShouldUseDXVA(aConfig));
+}
 
-  // Some unsupported codec.
-  return false;
+bool
+WMFDecoderModule::SupportsMimeType(const nsACString& aMimeType)
+{
+  return aMimeType.EqualsLiteral("video/mp4") ||
+         aMimeType.EqualsLiteral("video/avc") ||
+         aMimeType.EqualsLiteral("audio/mp4a-latm") ||
+         aMimeType.EqualsLiteral("audio/mpeg") ||
+         (sIsIntelDecoderEnabled &&
+          (aMimeType.EqualsLiteral("video/webm; codecs=vp8") ||
+           aMimeType.EqualsLiteral("video/webm; codecs=vp9")));
 }
 
 PlatformDecoderModule::ConversionRequired
@@ -227,6 +170,45 @@ WMFDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
   } else {
     return kNeedNone;
   }
+}
+
+static bool
+ClassesRootRegKeyExists(const nsAString& aRegKeyPath)
+{
+  nsresult rv;
+
+  nsCOMPtr<nsIWindowsRegKey> regKey =
+    do_CreateInstance("@mozilla.org/windows-registry-key;1", &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CLASSES_ROOT,
+                    aRegKeyPath,
+                    nsIWindowsRegKey::ACCESS_READ);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  regKey->Close();
+
+  return true;
+}
+
+/* static */ bool
+WMFDecoderModule::HasH264()
+{
+  // CLSID_CMSH264DecoderMFT
+  return ClassesRootRegKeyExists(
+    NS_LITERAL_STRING("CLSID\\{32D186A7-218F-4C75-8876-DD77273A8999}"));
+}
+
+/* static */ bool
+WMFDecoderModule::HasAAC()
+{
+  // CLSID_CMSAACDecMFT
+  return ClassesRootRegKeyExists(
+    NS_LITERAL_STRING("CLSID\\{62CE7E72-4C71-4D20-B15D-452831A87D9D}"));
 }
 
 } // namespace mozilla

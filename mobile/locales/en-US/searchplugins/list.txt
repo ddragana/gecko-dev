@@ -1,6 +1,5 @@
 amazondotcom
-google:hidden
-google-nocodes
+google
 twitter
 wikipedia
 yahoo

@@ -12,10 +12,12 @@ var expect = 'No Crash';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+jit(true);
 
 this.__proto__.a = 3; for (var j = 0; j < 4; ++j) { [a]; }
 
 this.a = 3; for (var j = 0; j < 4; ++j) { [a]; }
 
+jit(false);
 
 reportCompare(expect, actual, summary);

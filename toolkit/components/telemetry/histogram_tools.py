@@ -2,7 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import collections
 import json
 import math
 import os
@@ -37,7 +36,16 @@ def table_dispatch(kind, table, body):
 class DefinitionException(BaseException):
     pass
 
+def check_numeric_limits(dmin, dmax, n_buckets):
+    if type(dmin) != int:
+        raise DefinitionException, "minimum is not a number"
+    if type(dmax) != int:
+        raise DefinitionException, "maximum is not a number"
+    if type(n_buckets) != int:
+        raise DefinitionException, "number of buckets is not a number"
+
 def linear_buckets(dmin, dmax, n_buckets):
+    check_numeric_limits(dmin, dmax, n_buckets)
     ret_array = [0] * n_buckets
     dmin = float(dmin)
     dmax = float(dmax)
@@ -47,6 +55,7 @@ def linear_buckets(dmin, dmax, n_buckets):
     return ret_array
 
 def exponential_buckets(dmin, dmax, n_buckets):
+    check_numeric_limits(dmin, dmax, n_buckets)
     log_max = math.log(dmax);
     bucket_index = 2;
     ret_array = [0] * n_buckets
@@ -65,47 +74,29 @@ def exponential_buckets(dmin, dmax, n_buckets):
     return ret_array
 
 always_allowed_keys = ['kind', 'description', 'cpp_guard', 'expires_in_version',
-                       'alert_emails', 'keyed', 'releaseChannelCollection',
-                       'bug_numbers']
-
-whitelists = None;
-try:
-    whitelist_path = os.path.join(os.path.abspath(os.path.realpath(os.path.dirname(__file__))), 'histogram-whitelists.json')
-    with open(whitelist_path, 'r') as f:
-        try:
-            whitelists = json.load(f)
-            for name, whitelist in whitelists.iteritems():
-              whitelists[name] = set(whitelist)
-        except ValueError, e:
-            raise BaseException, 'error parsing whitelist (%s)' % whitelist_path
-except IOError:
-    whitelists = None
-    print 'Unable to parse whitelist (%s). Assuming all histograms are acceptable.' % whitelist_path
+                       'alert_emails', 'keyed', 'releaseChannelCollection']
 
 class Histogram:
     """A class for representing a histogram definition."""
 
-    def __init__(self, name, definition, strict_type_checks=False):
+    def __init__(self, name, definition):
         """Initialize a histogram named name with the given definition.
 definition is a dict-like object that must contain at least the keys:
 
  - 'kind': The kind of histogram.  Must be one of 'boolean', 'flag',
    'count', 'enumerated', 'linear', or 'exponential'.
  - 'description': A textual description of the histogram.
- - 'strict_type_checks': A boolean indicating whether to use the new, stricter type checks.
-                         The server-side still has to deal with old, oddly typed submissions,
-                         so we have to skip them there by default.
 
 The key 'cpp_guard' is optional; if present, it denotes a preprocessor
 symbol that should guard C/C++ definitions associated with the histogram."""
-        self._strict_type_checks = strict_type_checks
-        self._is_use_counter = name.startswith("USE_COUNTER2_")
+        self.check_name(name)
         self.verify_attributes(name, definition)
         self._name = name
         self._description = definition['description']
         self._kind = definition['kind']
         self._cpp_guard = definition.get('cpp_guard')
         self._keyed = definition.get('keyed', False)
+        self._extended_statistics_ok = definition.get('extended_statistics_ok', False)
         self._expiration = definition.get('expires_in_version')
         self.compute_bucket_parameters(definition)
         table = { 'boolean': 'BOOLEAN',
@@ -149,15 +140,15 @@ the histogram."""
         self._nsITelemetry_kind = "nsITelemetry::HISTOGRAM_%s" % kind
 
     def low(self):
-        """Return the lower bound of the histogram."""
+        """Return the lower bound of the histogram.  May be a string."""
         return self._low
 
     def high(self):
-        """Return the high bound of the histogram."""
+        """Return the high bound of the histogram.  May be a string."""
         return self._high
 
     def n_buckets(self):
-        """Return the number of buckets in the histogram."""
+        """Return the number of buckets in the histogram.  May be a string."""
         return self._n_buckets
 
     def cpp_guard(self):
@@ -172,6 +163,11 @@ associated with the histogram.  Returns None if no guarding is necessary."""
     def dataset(self):
         """Returns the dataset this histogram belongs into."""
         return self._dataset
+
+    def extended_statistics_ok(self):
+        """Return True if gathering extended statistics for this histogram
+is enabled."""
+        return self._extended_statistics_ok
 
     def ranges(self):
         """Return an array of lower bounds for each bucket in the histogram."""
@@ -206,32 +202,14 @@ associated with the histogram.  Returns None if no guarding is necessary."""
             'count': always_allowed_keys,
             'enumerated': always_allowed_keys + ['n_values'],
             'linear': general_keys,
-            'exponential': general_keys
+            'exponential': general_keys + ['extended_statistics_ok']
             }
-        # We removed extended_statistics_ok on the client, but the server-side,
-        # where _strict_type_checks==False, has to deal with historical data.
-        if not self._strict_type_checks:
-            table['exponential'].append('extended_statistics_ok')
-
         table_dispatch(definition['kind'], table,
                        lambda allowed_keys: Histogram.check_keys(name, definition, allowed_keys))
 
-        # Check for the alert_emails field. Use counters don't have any mechanism
-        # to add them, so skip the check for them.
-        if not self._is_use_counter:
-            if 'alert_emails' not in definition:
-                if whitelists is not None and name not in whitelists['alert_emails']:
-                    raise KeyError, 'New histogram "%s" must have an alert_emails field.' % name
-            elif not isinstance(definition['alert_emails'], list):
-                raise KeyError, 'alert_emails must be an array (in histogram "%s")' % name
-
-        Histogram.check_name(name)
-        self.check_field_types(name, definition)
         Histogram.check_expiration(name, definition)
-        self.check_bug_numbers(name, definition)
 
-    @staticmethod
-    def check_name(name):
+    def check_name(self, name):
         if '#' in name:
             raise ValueError, '"#" not permitted for %s' % (name)
 
@@ -249,65 +227,6 @@ associated with the histogram.  Returns None if no guarding is necessary."""
 
         definition['expires_in_version'] = expiration
 
-    def check_bug_numbers(self, name, definition):
-        # Use counters don't have any mechanism to add the bug numbers field.
-        if self._is_use_counter:
-            return
-        bug_numbers = definition.get('bug_numbers')
-        if not bug_numbers:
-            if whitelists is None or name in whitelists['bug_numbers']:
-                return
-            else:
-                raise KeyError, 'New histogram "%s" must have a bug_numbers field.' % name
-
-        if not isinstance(bug_numbers, list):
-            raise ValueError, 'bug_numbers field for "%s" should be an array' % (name)
-
-        if not all(type(num) is int for num in bug_numbers):
-            raise ValueError, 'bug_numbers array for "%s" should only contain integers' % (name)
-
-    def check_field_types(self, name, definition):
-        # Define expected types for the histogram properties.
-        type_checked_fields = {
-                "n_buckets": int,
-                "n_values": int,
-                "low": int,
-                "high": int,
-                "keyed": bool,
-                "expires_in_version": basestring,
-                "kind": basestring,
-                "description": basestring,
-                "cpp_guard": basestring,
-                "releaseChannelCollection": basestring
-            }
-
-        # For the server-side, where _strict_type_checks==False, we want to
-        # skip the stricter type checks for these fields for dealing with
-        # historical data.
-        coerce_fields = ["low", "high", "n_values", "n_buckets"]
-        if not self._strict_type_checks:
-            def try_to_coerce_to_number(v):
-                try:
-                    return eval(v, {})
-                except:
-                    return v
-            for key in [k for k in coerce_fields if k in definition]:
-                definition[key] = try_to_coerce_to_number(definition[key])
-            # This handles old "keyed":"true" definitions (bug 1271986).
-            if definition.get("keyed", None) == "true":
-                definition["keyed"] = True
-
-        for key, key_type in type_checked_fields.iteritems():
-            if not key in definition:
-                continue
-            if not isinstance(definition[key], key_type):
-                if key_type is basestring:
-                    type_name = "string"
-                else:
-                    type_name = key_type.__name__
-                raise ValueError, ('value for key "{0}" in Histogram "{1}" '
-                        'should be {2}').format(key, name, type_name)
-
     @staticmethod
     def check_keys(name, definition, allowed_keys):
         for key in definition.iterkeys():
@@ -315,14 +234,14 @@ associated with the histogram.  Returns None if no guarding is necessary."""
                 raise KeyError, '%s not permitted for %s' % (key, name)
 
     def set_bucket_parameters(self, low, high, n_buckets):
-        self._low = low
-        self._high = high
-        self._n_buckets = n_buckets
-        if whitelists is not None and self._n_buckets > 100 and type(self._n_buckets) is int:
-            if self._name not in whitelists['n_buckets']:
-                raise KeyError, ('New histogram "%s" is not permitted to have more than 100 buckets. '
-                                'Histograms with large numbers of buckets use disproportionately high amounts of resources. '
-                                'Contact the Telemetry team (e.g. in #telemetry) if you think an exception ought to be made.' % self._name)
+        def try_to_coerce_to_number(v):
+            try:
+                return eval(v, {})
+            except:
+                return v
+        self._low = try_to_coerce_to_number(low)
+        self._high = try_to_coerce_to_number(high)
+        self._n_buckets = try_to_coerce_to_number(n_buckets)
 
     @staticmethod
     def boolean_flag_bucket_parameters(definition):
@@ -337,7 +256,7 @@ associated with the histogram.  Returns None if no guarding is necessary."""
     @staticmethod
     def enumerated_bucket_parameters(definition):
         n_values = definition['n_values']
-        return (1, n_values, n_values + 1)
+        return (1, n_values, "%s+1" % n_values)
 
     @staticmethod
     def exponential_bucket_parameters(definition):
@@ -360,33 +279,8 @@ def from_Histograms_json(filename):
 def from_UseCounters_conf(filename):
     return usecounters.generate_histograms(filename)
 
-def from_nsDeprecatedOperationList(filename):
-    operation_regex = re.compile('^DEPRECATED_OPERATION\\(([^)]+)\\)')
-    histograms = collections.OrderedDict()
-
-    with open(filename, 'r') as f:
-        for line in f:
-            match = operation_regex.search(line)
-            if not match:
-                continue
-
-            op = match.group(1)
-
-            def add_counter(context):
-                name = 'USE_COUNTER2_DEPRECATED_%s_%s' % (op, context.upper())
-                histograms[name] = {
-                    'expires_in_version': 'never',
-                    'kind': 'boolean',
-                    'description': 'Whether a %s used %s' % (context, op)
-                }
-            add_counter('document')
-            add_counter('page')
-
-    return histograms
-
 FILENAME_PARSERS = {
     'Histograms.json': from_Histograms_json,
-    'nsDeprecatedOperationList.h': from_nsDeprecatedOperationList,
 }
 
 # Similarly to the dance above with buildconfig, usecounters may not be
@@ -419,9 +313,9 @@ the histograms defined in filenames.
                 raise DefinitionException, "duplicate histogram name %s" % name
             all_histograms[name] = definition
 
-    # We require that all USE_COUNTER2_* histograms be defined in a contiguous
+    # We require that all USE_COUNTER_* histograms be defined in a contiguous
     # block.
-    use_counter_indices = filter(lambda x: x[1].startswith("USE_COUNTER2_"),
+    use_counter_indices = filter(lambda x: x[1].startswith("USE_COUNTER_"),
                                  enumerate(all_histograms.iterkeys()));
     if use_counter_indices:
         lower_bound = use_counter_indices[0][0]
@@ -431,4 +325,4 @@ the histograms defined in filenames.
             raise DefinitionException, "use counter histograms must be defined in a contiguous block"
 
     for (name, definition) in all_histograms.iteritems():
-        yield Histogram(name, definition, strict_type_checks=True)
+        yield Histogram(name, definition)

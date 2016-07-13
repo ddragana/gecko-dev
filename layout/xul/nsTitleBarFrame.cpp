@@ -66,9 +66,9 @@ nsTitleBarFrame::HandleEvent(nsPresContext* aPresContext,
 
   bool doDefault = true;
 
-  switch (aEvent->mMessage) {
+  switch (aEvent->message) {
 
-   case eMouseDown: {
+   case NS_MOUSE_BUTTON_DOWN:  {
        if (aEvent->AsMouseEvent()->button == WidgetMouseEvent::eLeftButton) {
          // titlebar has no effect in non-chrome shells
          nsCOMPtr<nsIDocShellTreeItem> dsti = aPresContext->GetDocShell();
@@ -81,7 +81,7 @@ nsTitleBarFrame::HandleEvent(nsPresContext* aPresContext,
              nsIPresShell::SetCapturingContent(GetContent(), CAPTURE_IGNOREALLOWED);
 
              // remember current mouse coordinates.
-             mLastPoint = aEvent->mRefPoint;
+             mLastPoint = aEvent->refPoint;
            }
          }
 
@@ -92,7 +92,7 @@ nsTitleBarFrame::HandleEvent(nsPresContext* aPresContext,
      break;
 
 
-   case eMouseUp: {
+   case NS_MOUSE_BUTTON_UP: {
        if (mTrackingMouseMove &&
            aEvent->AsMouseEvent()->button == WidgetMouseEvent::eLeftButton) {
          // we're done tracking.
@@ -107,10 +107,10 @@ nsTitleBarFrame::HandleEvent(nsPresContext* aPresContext,
      }
      break;
 
-   case eMouseMove: {
+   case NS_MOUSE_MOVE: {
        if(mTrackingMouseMove)
        {
-         LayoutDeviceIntPoint nsMoveBy = aEvent->mRefPoint - mLastPoint;
+         LayoutDeviceIntPoint nsMoveBy = aEvent->refPoint - mLastPoint;
 
          nsIFrame* parent = GetParent();
          while (parent) {
@@ -125,16 +125,16 @@ nsTitleBarFrame::HandleEvent(nsPresContext* aPresContext,
          if (parent) {
            nsMenuPopupFrame* menuPopupFrame = static_cast<nsMenuPopupFrame*>(parent);
            nsCOMPtr<nsIWidget> widget = menuPopupFrame->GetWidget();
-           LayoutDeviceIntRect bounds;
+           nsIntRect bounds;
            widget->GetScreenBounds(bounds);
 
-           CSSPoint cssPos = (bounds.TopLeft() + nsMoveBy)
-                           / aPresContext->CSSToDevPixelScale();
-           menuPopupFrame->MoveTo(RoundedToInt(cssPos), false);
+           int32_t newx = aPresContext->DevPixelsToIntCSSPixels(bounds.x + nsMoveBy.x);
+           int32_t newy = aPresContext->DevPixelsToIntCSSPixels(bounds.y + nsMoveBy.y);
+           menuPopupFrame->MoveTo(newx, newy, false);
          }
          else {
            nsIPresShell* presShell = aPresContext->PresShell();
-           nsPIDOMWindowOuter *window = presShell->GetDocument()->GetWindow();
+           nsPIDOMWindow *window = presShell->GetDocument()->GetWindow();
            if (window) {
              window->MoveBy(nsMoveBy.x, nsMoveBy.y);
            }
@@ -147,16 +147,13 @@ nsTitleBarFrame::HandleEvent(nsPresContext* aPresContext,
      }
      break;
 
-    case eMouseClick: {
+    case NS_MOUSE_CLICK: {
       WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
       if (mouseEvent->IsLeftClickEvent()) {
-        MouseClicked(mouseEvent);
+        MouseClicked(aPresContext, mouseEvent);
       }
       break;
     }
-
-    default:
-      break;
   }
 
   if ( doDefault )
@@ -166,8 +163,10 @@ nsTitleBarFrame::HandleEvent(nsPresContext* aPresContext,
 }
 
 void
-nsTitleBarFrame::MouseClicked(WidgetMouseEvent* aEvent)
+nsTitleBarFrame::MouseClicked(nsPresContext* aPresContext,
+                              WidgetMouseEvent* aEvent)
 {
   // Execute the oncommand event handler.
-  nsContentUtils::DispatchXULCommand(mContent, aEvent && aEvent->IsTrusted());
+  nsContentUtils::DispatchXULCommand(mContent,
+                                     aEvent && aEvent->mFlags.mIsTrusted);
 }

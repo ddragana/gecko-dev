@@ -45,7 +45,7 @@
 #include "mozilla/Logging.h"
 #include "prprf.h"
 #include <stdio.h>
-mozilla::LazyLogModule nsRDFLog("RDF");
+PRLogModuleInfo* nsRDFLog = nullptr;
 
 //----------------------------------------------------------------------
 //
@@ -129,7 +129,7 @@ protected:
     nsISimpleEnumerator* mCurrent;
     nsIRDFNode*  mResult;
     int32_t      mNext;
-    AutoTArray<nsCOMPtr<nsIRDFNode>, 8>  mAlreadyReturned;
+    nsAutoTArray<nsCOMPtr<nsIRDFNode>, 8>  mAlreadyReturned;
     bool mAllowNegativeAssertions;
     bool mCoalesceDuplicateArcs;
 };
@@ -490,6 +490,8 @@ CompositeDataSourceImpl::CompositeDataSourceImpl(void)
 	  mCoalesceDuplicateArcs(true),
       mUpdateBatchNest(0)
 {
+    if (nsRDFLog == nullptr) 
+        nsRDFLog = PR_NewLogModule("RDF");
 }
 
 //----------------------------------------------------------------------

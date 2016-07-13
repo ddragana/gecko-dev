@@ -24,7 +24,7 @@
 #include "nsWeakReference.h"
 #include "nsIFactory.h"
 #include "nsCOMPtr.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "nsString.h"
 
 struct PLHashTable;
@@ -44,7 +44,7 @@ protected:
     PLDHashTable mDates;
     PLDHashTable mBlobs;
 
-    nsCString mLastURIPrefix;
+    nsAutoCString mLastURIPrefix;
     nsCOMPtr<nsIFactory> mLastFactory;
     nsCOMPtr<nsIFactory> mDefaultResourceFactory;
 

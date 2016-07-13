@@ -25,6 +25,8 @@ WyciwygChannelParent::WyciwygChannelParent()
  : mIPCClosed(false)
  , mReceivedAppData(false)
 {
+  if (!gWyciwygLog)
+    gWyciwygLog = PR_NewLogModule("nsWyciwygChannel");
 }
 
 WyciwygChannelParent::~WyciwygChannelParent()
@@ -184,14 +186,7 @@ WyciwygChannelParent::RecvAsyncOpen(const URIParams& aOriginal,
   if (NS_FAILED(rv))
     return SendCancelEarly(rv);
 
-  nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-  if (loadInfo && loadInfo->GetEnforceSecurity()) {
-    rv = mChannel->AsyncOpen2(this);
-  }
-  else {
-    rv = mChannel->AsyncOpen(this, nullptr);
-  }
-
+  rv = mChannel->AsyncOpen(this, nullptr);
   if (NS_FAILED(rv))
     return SendCancelEarly(rv);
 

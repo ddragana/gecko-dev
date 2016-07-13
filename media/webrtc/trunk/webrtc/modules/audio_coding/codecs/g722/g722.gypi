@@ -10,9 +10,6 @@
     {
       'target_name': 'G722',
       'type': 'static_library',
-      'dependencies': [
-        'audio_encoder_interface',
-      ],
       'include_dirs': [
         'include',
         '<(webrtc_root)',
@@ -24,8 +21,6 @@
         ],
       },
       'sources': [
-        'audio_encoder_g722.cc',
-        'include/audio_encoder_g722.h',
         'include/g722_interface.h',
         'g722_interface.c',
         'g722_encode.c',

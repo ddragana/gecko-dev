@@ -89,12 +89,6 @@ interface GlobalEventHandlers {
            attribute EventHandler onvolumechange;
            attribute EventHandler onwaiting;
 
-           [Pref="dom.select_events.enabled"]
-           attribute EventHandler onselectstart;
-
-           [Pref="dom.details_element.enabled"]
-           attribute EventHandler ontoggle;
-
            // Pointer events handlers
            [Pref="dom.w3c_pointer_events.enabled"]
            attribute EventHandler onpointercancel;
@@ -117,8 +111,7 @@ interface GlobalEventHandlers {
            [Pref="dom.w3c_pointer_events.enabled"]
            attribute EventHandler onlostpointercapture;
 
-           // Mozilla-specific handlers. Unprefixed handlers live in
-           // Document rather than here.
+           // Mozilla-specific handlers
            attribute EventHandler onmozfullscreenchange;
            attribute EventHandler onmozfullscreenerror;
            attribute EventHandler onmozpointerlockchange;
@@ -138,7 +131,7 @@ interface WindowEventHandlers {
            attribute EventHandler onpagehide;
            attribute EventHandler onpageshow;
            attribute EventHandler onpopstate;
-           attribute EventHandler onstorage;
+           //(Not implemented)attribute EventHandler onstorage;
            attribute EventHandler onunload;
 };
 

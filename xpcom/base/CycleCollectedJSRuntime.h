@@ -10,23 +10,17 @@
 #include <queue>
 
 #include "mozilla/DeferredFinalize.h"
-#include "mozilla/mozalloc.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/SegmentedVector.h"
 #include "jsapi.h"
-#include "jsfriendapi.h"
 
 #include "nsCycleCollectionParticipant.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsTArray.h"
-#include "nsTHashtable.h"
 
 class nsCycleCollectionNoteRootCallback;
 class nsIException;
 class nsIRunnable;
-class nsThread;
-class nsWrapperCache;
 
 namespace js {
 struct Class;
@@ -59,8 +53,6 @@ public:
 
   NS_IMETHOD Traverse(void* aPtr, nsCycleCollectionTraversalCallback& aCb)
     override;
-
-  NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(JSGCThingParticipant)
 };
 
 class JSZoneParticipant : public nsCycleCollectionParticipant
@@ -92,8 +84,6 @@ public:
 
   NS_IMETHOD Traverse(void* aPtr, nsCycleCollectionTraversalCallback& aCb)
     override;
-
-  NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(JSZoneParticipant)
 };
 
 class IncrementalFinalizeRunnable;
@@ -140,12 +130,10 @@ class CycleCollectedJSRuntime
   friend class JSZoneParticipant;
   friend class IncrementalFinalizeRunnable;
 protected:
-  CycleCollectedJSRuntime();
+  CycleCollectedJSRuntime(JSRuntime* aParentRuntime,
+                          uint32_t aMaxBytes,
+                          uint32_t aMaxNurseryBytes);
   virtual ~CycleCollectedJSRuntime();
-
-  nsresult Initialize(JSRuntime* aParentRuntime,
-                      uint32_t aMaxBytes,
-                      uint32_t aMaxNurseryBytes);
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
   void UnmarkSkippableJSHolders();
@@ -157,11 +145,13 @@ protected:
   virtual void CustomGCCallback(JSGCStatus aStatus) {}
   virtual void CustomOutOfMemoryCallback() {}
   virtual void CustomLargeAllocationFailureCallback() {}
-
-  std::queue<nsCOMPtr<nsIRunnable>> mPromiseMicroTaskQueue;
-  std::queue<nsCOMPtr<nsIRunnable>> mDebuggerPromiseMicroTaskQueue;
+  virtual bool CustomContextCallback(JSContext* aCx, unsigned aOperation)
+  {
+    return true; // Don't block context creation.
+  }
 
 private:
+
   void
   DescribeGCThing(bool aIsMarked, JS::GCCellPtr aThing,
                   nsCycleCollectionTraversalCallback& aCb) const;
@@ -210,34 +200,13 @@ private:
   static void GCCallback(JSRuntime* aRuntime, JSGCStatus aStatus, void* aData);
   static void GCSliceCallback(JSRuntime* aRuntime, JS::GCProgress aProgress,
                               const JS::GCDescription& aDesc);
-  static void GCNurseryCollectionCallback(JSRuntime* aRuntime,
-                                          JS::GCNurseryProgress aProgress,
-                                          JS::gcreason::Reason aReason);
   static void OutOfMemoryCallback(JSContext* aContext, void* aData);
   static void LargeAllocationFailureCallback(void* aData);
   static bool ContextCallback(JSContext* aCx, unsigned aOperation,
                               void* aData);
-  static JSObject* GetIncumbentGlobalCallback(JSContext* aCx);
-  static bool EnqueuePromiseJobCallback(JSContext* aCx,
-                                        JS::HandleObject aJob,
-                                        JS::HandleObject aAllocationSite,
-                                        JS::HandleObject aIncumbentGlobal,
-                                        void* aData);
-#ifdef SPIDERMONKEY_PROMISE
-  static void PromiseRejectionTrackerCallback(JSContext* aCx,
-                                              JS::HandleObject aPromise,
-                                              PromiseRejectionHandlingState state,
-                                              void* aData);
-#endif // SPIDERMONKEY_PROMISE
 
   virtual void TraceNativeBlackRoots(JSTracer* aTracer) { };
   void TraceNativeGrayRoots(JSTracer* aTracer);
-
-  void AfterProcessMicrotask(uint32_t aRecursionDepth);
-public:
-  void ProcessStableStateQueue();
-private:
-  void ProcessMetastableStateQueue(uint32_t aRecursionDepth);
 
 public:
   enum DeferredFinalizeType {
@@ -297,20 +266,15 @@ public:
   void SetPendingException(nsIException* aException);
 
   std::queue<nsCOMPtr<nsIRunnable>>& GetPromiseMicroTaskQueue();
-  std::queue<nsCOMPtr<nsIRunnable>>& GetDebuggerPromiseMicroTaskQueue();
 
   nsCycleCollectionParticipant* GCThingParticipant();
   nsCycleCollectionParticipant* ZoneParticipant();
 
   nsresult TraverseRoots(nsCycleCollectionNoteRootCallback& aCb);
-  virtual bool UsefulToMergeZones() const;
+  bool UsefulToMergeZones() const;
   void FixWeakMappingGrayBits() const;
   bool AreGCGrayBitsValid() const;
   void GarbageCollect(uint32_t aReason) const;
-
-  void NurseryWrapperAdded(nsWrapperCache* aCache);
-  void NurseryWrapperPreserved(JSObject* aWrapper);
-  void JSObjectsTenured();
 
   void DeferredFinalize(DeferredFinalizeAppendFunction aAppendFunc,
                         DeferredFinalizeFunction aFunc,
@@ -322,7 +286,7 @@ public:
   virtual void PrepareForForgetSkippable() = 0;
   virtual void BeginCycleCollectionCallback() = 0;
   virtual void EndCycleCollectionCallback(CycleCollectorResults& aResults) = 0;
-  virtual void DispatchDeferredDeletion(bool aContinuation, bool aPurge = false) = 0;
+  virtual void DispatchDeferredDeletion(bool aContinuation) = 0;
 
   JSRuntime* Runtime() const
   {
@@ -330,70 +294,17 @@ public:
     return mJSRuntime;
   }
 
-  JSContext* Context() const
-  {
-    MOZ_ASSERT(mJSContext);
-    return mJSContext;
-  }
-
-protected:
-  JSRuntime* MaybeRuntime() const { return mJSRuntime; }
-
-public:
-  // nsThread entrypoints
-  virtual void BeforeProcessTask(bool aMightBlock) { };
-  virtual void AfterProcessTask(uint32_t aRecursionDepth);
-
-  // microtask processor entry point
-  void AfterProcessMicrotask();
-
-  uint32_t RecursionDepth();
-
-  // Run in stable state (call through nsContentUtils)
-  void RunInStableState(already_AddRefed<nsIRunnable>&& aRunnable);
-  // This isn't in the spec at all yet, but this gets the behavior we want for IDB.
-  // Runs after the current microtask completes.
-  void RunInMetastableState(already_AddRefed<nsIRunnable>&& aRunnable);
-
   // Get the current thread's CycleCollectedJSRuntime.  Returns null if there
   // isn't one.
   static CycleCollectedJSRuntime* Get();
 
-  // Add aZone to the set of zones waiting for a GC.
-  void AddZoneWaitingForGC(JS::Zone* aZone)
-  {
-    mZonesWaitingForGC.PutEntry(aZone);
-  }
-
-  // Prepare any zones for GC that have been passed to AddZoneWaitingForGC()
-  // since the last GC or since the last call to PrepareWaitingZonesForGC(),
-  // whichever was most recent. If there were no such zones, prepare for a
-  // full GC.
-  void PrepareWaitingZonesForGC();
-
-  // Queue an async microtask to the current main or worker thread.
-  virtual void DispatchToMicroTask(already_AddRefed<nsIRunnable> aRunnable);
-
   // Storage for watching rejected promises waiting for some client to
   // consume their rejection.
-#ifdef SPIDERMONKEY_PROMISE
-  // Promises in this list have been rejected in the last turn of the
-  // event loop without the rejection being handled.
-  // Note that this can contain nullptrs in place of promises removed because
-  // they're consumed before it'd be reported.
-  JS::PersistentRooted<JS::GCVector<JSObject*, 0, js::SystemAllocPolicy>> mUncaughtRejections;
-
-  // Promises in this list have previously been reported as rejected
-  // (because they were in the above list), but the rejection was handled
-  // in the last turn of the event loop.
-  JS::PersistentRooted<JS::GCVector<JSObject*, 0, js::SystemAllocPolicy>> mConsumedRejections;
-#else
   // We store values as `nsISupports` to avoid adding compile-time dependencies
   // from xpcom to dom/promise, but they can really only have a single concrete
   // type.
   nsTArray<nsCOMPtr<nsISupports /* Promise */>> mUncaughtRejections;
   nsTArray<nsCOMPtr<nsISupports /* Promise */ >> mConsumedRejections;
-#endif // SPIDERMONKEY_PROMISE
   nsTArray<nsCOMPtr<nsISupports /* UncaughtRejectionObserver */ >> mUncaughtRejectionObservers;
 
 private:
@@ -402,10 +313,8 @@ private:
   JSZoneParticipant mJSZoneCycleCollectorGlobal;
 
   JSRuntime* mJSRuntime;
-  JSContext* mJSContext;
 
   JS::GCSliceCallback mPrevGCSliceCallback;
-  JS::GCNurseryCollectionCallback mPrevGCNurseryCollectionCallback;
 
   nsDataHashtable<nsPtrHashKey<void>, nsScriptObjectTracer*> mJSHolders;
 
@@ -413,38 +322,14 @@ private:
     DeferredFinalizerTable;
   DeferredFinalizerTable mDeferredFinalizerTable;
 
-  RefPtr<IncrementalFinalizeRunnable> mFinalizeRunnable;
+  nsRefPtr<IncrementalFinalizeRunnable> mFinalizeRunnable;
 
   nsCOMPtr<nsIException> mPendingException;
-  nsThread* mOwningThread; // Manual refcounting to avoid include hell.
 
-  struct RunInMetastableStateData
-  {
-    nsCOMPtr<nsIRunnable> mRunnable;
-    uint32_t mRecursionDepth;
-  };
-
-  nsTArray<nsCOMPtr<nsIRunnable>> mStableStateEvents;
-  nsTArray<RunInMetastableStateData> mMetastableStateEvents;
-  uint32_t mBaseRecursionDepth;
-  bool mDoingStableStates;
+  std::queue<nsCOMPtr<nsIRunnable>> mPromiseMicroTaskQueue;
 
   OOMState mOutOfMemoryState;
   OOMState mLargeAllocationFailureState;
-
-  static const size_t kSegmentSize = 512;
-  SegmentedVector<nsWrapperCache*, kSegmentSize, InfallibleAllocPolicy>
-    mNurseryObjects;
-  SegmentedVector<JS::PersistentRooted<JSObject*>, kSegmentSize,
-                  InfallibleAllocPolicy>
-    mPreservedNurseryObjects;
-
-  nsTHashtable<nsPtrHashKey<JS::Zone>> mZonesWaitingForGC;
-
-  struct EnvironmentPreparer : public js::ScriptEnvironmentPreparer {
-    void invoke(JS::HandleObject scope, Closure& closure) override;
-  };
-  EnvironmentPreparer mEnvironmentPreparer;
 };
 
 void TraceScriptHolder(nsISupports* aHolder, JSTracer* aTracer);
@@ -454,9 +339,6 @@ inline bool AddToCCKind(JS::TraceKind aKind)
 {
   return aKind == JS::TraceKind::Object || aKind == JS::TraceKind::Script;
 }
-
-bool
-GetBuildId(JS::BuildIdCharVector* aBuildID);
 
 } // namespace mozilla
 

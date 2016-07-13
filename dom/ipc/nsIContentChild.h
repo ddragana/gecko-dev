@@ -12,8 +12,6 @@
 #include "nsISupports.h"
 #include "nsTArrayForwardDeclare.h"
 #include "mozilla/dom/CPOWManagerGetter.h"
-#include "mozilla/ipc/Shmem.h"
-#include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 
 #define NS_ICONTENTCHILD_IID                                    \
   { 0x4eed2e73, 0x94ba, 0x48a8,                                 \
@@ -26,9 +24,6 @@ class Principal;
 } // namespace IPC
 
 namespace mozilla {
-namespace ipc {
-class Shmem;
-} // namespace ipc
 
 namespace jsipc {
 class PJavaScriptChild;
@@ -48,7 +43,6 @@ class PBrowserChild;
 
 class nsIContentChild : public nsISupports
                       , public CPOWManagerGetter
-                      , public mozilla::ipc::IShmemAllocator
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICONTENTCHILD_IID)
@@ -56,9 +50,9 @@ public:
   BlobChild* GetOrCreateActorForBlob(Blob* aBlob);
   BlobChild* GetOrCreateActorForBlobImpl(BlobImpl* aImpl);
 
-  virtual PBlobChild*
-  SendPBlobConstructor(PBlobChild* aActor,
-                       const BlobConstructorParams& aParams) = 0;
+  virtual PBlobChild* SendPBlobConstructor(
+    PBlobChild* aActor,
+    const BlobConstructorParams& aParams) = 0;
 
   virtual bool
   SendPBrowserConstructor(PBrowserChild* aActor,
@@ -68,7 +62,6 @@ public:
                           const ContentParentId& aCpID,
                           const bool& aIsForApp,
                           const bool& aIsForBrowser) = 0;
-
 protected:
   virtual jsipc::PJavaScriptChild* AllocPJavaScriptChild();
   virtual bool DeallocPJavaScriptChild(jsipc::PJavaScriptChild*);
@@ -86,9 +79,9 @@ protected:
   virtual bool DeallocPBlobChild(PBlobChild* aActor);
 
   virtual bool RecvAsyncMessage(const nsString& aMsg,
+                                const ClonedMessageData& aData,
                                 InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal,
-                                const ClonedMessageData& aData);
+                                const IPC::Principal& aPrincipal);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIContentChild, NS_ICONTENTCHILD_IID)

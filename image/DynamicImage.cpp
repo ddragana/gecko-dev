@@ -130,7 +130,7 @@ DynamicImage::GetHeight(int32_t* aHeight)
 NS_IMETHODIMP
 DynamicImage::GetIntrinsicSize(nsSize* aSize)
 {
-  IntSize intSize(mDrawable->Size());
+  gfxIntSize intSize(mDrawable->Size());
   *aSize = nsSize(intSize.width, intSize.height);
   return NS_OK;
 }
@@ -138,7 +138,7 @@ DynamicImage::GetIntrinsicSize(nsSize* aSize)
 NS_IMETHODIMP
 DynamicImage::GetIntrinsicRatio(nsSize* aSize)
 {
-  IntSize intSize(mDrawable->Size());
+  gfxIntSize intSize(mDrawable->Size());
   *aSize = nsSize(intSize.width, intSize.height);
   return NS_OK;
 }
@@ -167,29 +167,21 @@ NS_IMETHODIMP_(already_AddRefed<SourceSurface>)
 DynamicImage::GetFrame(uint32_t aWhichFrame,
                        uint32_t aFlags)
 {
-  IntSize size(mDrawable->Size());
-  return GetFrameAtSize(IntSize(size.width, size.height),
-                        aWhichFrame,
-                        aFlags);
-}
+  gfxIntSize size(mDrawable->Size());
 
-NS_IMETHODIMP_(already_AddRefed<SourceSurface>)
-DynamicImage::GetFrameAtSize(const IntSize& aSize,
-                             uint32_t aWhichFrame,
-                             uint32_t aFlags)
-{
   RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
-    CreateOffscreenContentDrawTarget(aSize, SurfaceFormat::B8G8R8A8);
-  if (!dt || !dt->IsValid()) {
+    CreateOffscreenContentDrawTarget(IntSize(size.width, size.height),
+                                     SurfaceFormat::B8G8R8A8);
+  if (!dt) {
     gfxWarning() <<
       "DynamicImage::GetFrame failed in CreateOffscreenContentDrawTarget";
     return nullptr;
   }
-  RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
-  MOZ_ASSERT(context); // already checked the draw target above
+  nsRefPtr<gfxContext> context = new gfxContext(dt);
 
-  auto result = Draw(context, aSize, ImageRegion::Create(aSize),
-                     aWhichFrame, SamplingFilter::POINT, Nothing(), aFlags);
+  auto result = Draw(context, size, ImageRegion::Create(size),
+                     aWhichFrame, GraphicsFilter::FILTER_NEAREST,
+                     Nothing(), aFlags);
 
   return result == DrawResult::SUCCESS ? dt->Snapshot() : nullptr;
 }
@@ -219,17 +211,17 @@ DynamicImage::Draw(gfxContext* aContext,
                    const nsIntSize& aSize,
                    const ImageRegion& aRegion,
                    uint32_t aWhichFrame,
-                   SamplingFilter aSamplingFilter,
+                   GraphicsFilter aFilter,
                    const Maybe<SVGImageContext>& aSVGContext,
                    uint32_t aFlags)
 {
   MOZ_ASSERT(!aSize.IsEmpty(), "Unexpected empty size");
 
-  IntSize drawableSize(mDrawable->Size());
+  gfxIntSize drawableSize(mDrawable->Size());
 
   if (aSize == drawableSize) {
     gfxUtils::DrawPixelSnapped(aContext, mDrawable, drawableSize, aRegion,
-                               SurfaceFormat::B8G8R8A8, aSamplingFilter);
+                               SurfaceFormat::B8G8R8A8, aFilter);
     return DrawResult::SUCCESS;
   }
 
@@ -243,8 +235,14 @@ DynamicImage::Draw(gfxContext* aContext,
   aContext->Multiply(gfxMatrix::Scaling(scale.width, scale.height));
 
   gfxUtils::DrawPixelSnapped(aContext, mDrawable, drawableSize, region,
-                             SurfaceFormat::B8G8R8A8, aSamplingFilter);
+                             SurfaceFormat::B8G8R8A8, aFilter);
   return DrawResult::SUCCESS;
+}
+
+NS_IMETHODIMP
+DynamicImage::RequestDecode()
+{
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -319,10 +317,9 @@ DynamicImage::SetAnimationStartTime(const mozilla::TimeStamp& aTime)
 nsIntSize
 DynamicImage::OptimalImageSizeForDest(const gfxSize& aDest,
                                       uint32_t aWhichFrame,
-                                      SamplingFilter aSamplingFilter,
-                                      uint32_t aFlags)
+                                      GraphicsFilter aFilter, uint32_t aFlags)
 {
-  IntSize size(mDrawable->Size());
+  gfxIntSize size(mDrawable->Size());
   return nsIntSize(size.width, size.height);
 }
 
@@ -337,12 +334,6 @@ DynamicImage::Unwrap()
 {
   nsCOMPtr<imgIContainer> self(this);
   return self.forget();
-}
-
-void
-DynamicImage::PropagateUseCounters(nsIDocument*)
-{
-  // No use counters.
 }
 
 } // namespace image

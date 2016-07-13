@@ -11,6 +11,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 const kPrefCustomizationDebug = "browser.uiCustomization.debug";
 const kPrefCustomizationAnimation = "browser.uiCustomization.disableAnimation";
 const kPaletteId = "customization-palette";
+const kAboutURI = "about:customizing";
 const kDragDataTypePrefix = "text/toolbarwrapper-id/";
 const kPlaceholderClass = "panel-customization-placeholder";
 const kSkipSourceNodePref = "browser.uiCustomization.skipSourceNodeCheck";
@@ -27,7 +28,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "DragPositionManager",
                                   "resource:///modules/DragPositionManager.jsm");
@@ -35,45 +35,14 @@ XPCOMUtils.defineLazyModuleGetter(this, "BrowserUITelemetry",
                                   "resource:///modules/BrowserUITelemetry.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SessionStore",
-                                  "resource:///modules/sessionstore/SessionStore.jsm");
 
-let gDebug;
-XPCOMUtils.defineLazyGetter(this, "log", () => {
-  let scope = {};
-  Cu.import("resource://gre/modules/Console.jsm", scope);
-  let ConsoleAPI = scope.ConsoleAPI;
-  try {
-    gDebug = Services.prefs.getBoolPref(kPrefCustomizationDebug);
-  } catch (ex) {}
-  let consoleOptions = {
-    maxLogLevel: gDebug ? "all" : "log",
-    prefix: "CustomizeMode",
-  };
-  return new scope.ConsoleAPI(consoleOptions);
-});
 
-var gDisableAnimation = null;
+let gModuleName = "[CustomizeMode]";
+#include logging.js
 
-var gDraggingInToolbars;
+let gDisableAnimation = null;
 
-var gTab;
-
-function closeGlobalTab() {
-  let win = gTab.ownerGlobal;
-  if (win.gBrowser.browsers.length == 1) {
-    win.BrowserOpenTab();
-  }
-  win.gBrowser.removeTab(gTab);
-  gTab = null;
-}
-
-function unregisterGlobalTab() {
-  gTab.removeEventListener("TabClose", unregisterGlobalTab);
-  gTab.ownerGlobal.removeEventListener("unload", unregisterGlobalTab);
-  gTab.removeAttribute("customizemode");
-  gTab = null;
-}
+let gDraggingInToolbars;
 
 function CustomizeMode(aWindow) {
   if (gDisableAnimation === null) {
@@ -91,17 +60,18 @@ function CustomizeMode(aWindow) {
   // to the user when in customizing mode.
   this.visiblePalette = this.document.getElementById(kPaletteId);
   this.paletteEmptyNotice = this.document.getElementById("customization-empty");
+  this.paletteSpacer = this.document.getElementById("customization-spacer");
   this.tipPanel = this.document.getElementById("customization-tipPanel");
   if (Services.prefs.getCharPref("general.skins.selectedSkin") != "classic/1.0") {
     let lwthemeButton = this.document.getElementById("customization-lwtheme-button");
     lwthemeButton.setAttribute("hidden", "true");
   }
-  if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
-    this._updateTitlebarButton();
-    Services.prefs.addObserver(kDrawInTitlebarPref, this, false);
-  }
+#ifdef CAN_DRAW_IN_TITLEBAR
+  this._updateTitlebarButton();
+  Services.prefs.addObserver(kDrawInTitlebarPref, this, false);
+#endif
   this.window.addEventListener("unload", this);
-}
+};
 
 CustomizeMode.prototype = {
   _changed: false,
@@ -132,9 +102,9 @@ CustomizeMode.prototype = {
   },
 
   uninit: function() {
-    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      Services.prefs.removeObserver(kDrawInTitlebarPref, this);
-    }
+#ifdef CAN_DRAW_IN_TITLEBAR
+    Services.prefs.removeObserver(kDrawInTitlebarPref, this);
+#endif
   },
 
   toggle: function() {
@@ -159,36 +129,6 @@ CustomizeMode.prototype = {
     lwthemeIcon.style.backgroundImage = "url(" + imageURL + ")";
   },
 
-  setTab: function(aTab) {
-    if (gTab == aTab) {
-      return;
-    }
-
-    if (gTab) {
-      closeGlobalTab();
-    }
-
-    gTab = aTab;
-
-    gTab.setAttribute("customizemode", "true");
-    SessionStore.persistTabAttribute("customizemode");
-
-    gTab.linkedBrowser.stop();
-
-    let win = gTab.ownerGlobal;
-
-    win.gBrowser.setTabTitle(gTab);
-    win.gBrowser.setIcon(gTab,
-                         "chrome://browser/skin/customizableui/customizeFavicon.ico");
-
-    gTab.addEventListener("TabClose", unregisterGlobalTab);
-    win.addEventListener("unload", unregisterGlobalTab);
-
-    if (gTab.selected) {
-      win.gCustomizeMode.enter();
-    }
-  },
-
   enter: function() {
     this._wantToBeInCustomizeMode = true;
 
@@ -198,26 +138,18 @@ CustomizeMode.prototype = {
 
     // Exiting; want to re-enter once we've done that.
     if (this._handler.isExitingCustomizeMode) {
-      log.debug("Attempted to enter while we're in the middle of exiting. " +
-                "We'll exit after we've entered");
+      LOG("Attempted to enter while we're in the middle of exiting. " +
+          "We'll exit after we've entered");
       return;
     }
 
-    if (!gTab) {
-      this.setTab(this.browser.loadOneTab("about:blank",
-                                          { inBackground: false,
-                                            forceNotRemote: true,
-                                            skipAnimation: true }));
-      return;
-    }
-    if (!gTab.selected) {
-      // This will force another .enter() to be called via the
-      // onlocationchange handler of the tabbrowser, so we return early.
-      gTab.ownerGlobal.gBrowser.selectedTab = gTab;
-      return;
-    }
-    gTab.ownerGlobal.focus();
-    if (gTab.ownerDocument != this.document) {
+
+    // We don't need to switch to kAboutURI, or open a new tab at
+    // kAboutURI if we're already on it.
+    if (this.browser.selectedBrowser.currentURI.spec != kAboutURI) {
+      this.window.switchToTabHavingURI(kAboutURI, true, {
+        skipTabAnimation: true,
+      });
       return;
     }
 
@@ -231,19 +163,18 @@ CustomizeMode.prototype = {
     let resetButton = this.document.getElementById("customization-reset-button");
     resetButton.setAttribute("disabled", "true");
 
-    Task.spawn(function*() {
+    Task.spawn(function() {
       // We shouldn't start customize mode until after browser-delayed-startup has finished:
       if (!this.window.gBrowserInit.delayedStartupFinished) {
-        yield new Promise(resolve => {
-          let delayedStartupObserver = aSubject => {
-            if (aSubject == this.window) {
-              Services.obs.removeObserver(delayedStartupObserver, "browser-delayed-startup-finished");
-              resolve();
-            }
-          };
-
-          Services.obs.addObserver(delayedStartupObserver, "browser-delayed-startup-finished", false);
-        });
+        let delayedStartupDeferred = Promise.defer();
+        let delayedStartupObserver = function(aSubject) {
+          if (aSubject == this.window) {
+            Services.obs.removeObserver(delayedStartupObserver, "browser-delayed-startup-finished");
+            delayedStartupDeferred.resolve();
+          }
+        }.bind(this);
+        Services.obs.addObserver(delayedStartupObserver, "browser-delayed-startup-finished", false);
+        yield delayedStartupDeferred.promise;
       }
 
       let toolbarVisibilityBtn = document.getElementById(kToolbarVisibilityBtn);
@@ -356,6 +287,7 @@ CustomizeMode.prototype = {
         this.visiblePalette.clientTop;
         this.visiblePalette.setAttribute("showing", "true");
       }, 0);
+      this.paletteSpacer.hidden = true;
       this._updateEmptyPaletteNotice();
 
       this.swatchForTheme(document);
@@ -371,16 +303,18 @@ CustomizeMode.prototype = {
         delete this._enableOutlinesTimeout;
       }, 0);
 
+      // It's possible that we didn't enter customize mode via the menu panel,
+      // meaning we didn't kick off about:customizing preloading. If that's
+      // the case, let's kick it off for the next time we load this mode.
+      window.gCustomizationTabPreloader.ensurePreloading();
       if (!this._wantToBeInCustomizeMode) {
         this.exit();
       }
     }.bind(this)).then(null, function(e) {
-      log.error("Error entering customize mode", e);
+      ERROR(e);
       // We should ensure this has been called, and calling it again doesn't hurt:
       window.PanelUI.endBatchUpdate();
       this._handler.isEnteringCustomizeMode = false;
-      // Exit customize mode to ensure proper clean-up when entering failed.
-      this.exit();
     }.bind(this));
   },
 
@@ -393,14 +327,14 @@ CustomizeMode.prototype = {
 
     // Entering; want to exit once we've done that.
     if (this._handler.isEnteringCustomizeMode) {
-      log.debug("Attempted to exit while we're in the middle of entering. " +
-                "We'll exit after we've entered");
+      LOG("Attempted to exit while we're in the middle of entering. " +
+          "We'll exit after we've entered");
       return;
     }
 
     if (this.resetting) {
-      log.debug("Attempted to exit while we're resetting. " +
-                "We'll exit after resetting has finished.");
+      LOG("Attempted to exit while we're resetting. " +
+          "We'll exit after resetting has finished.");
       return;
     }
 
@@ -432,6 +366,7 @@ CustomizeMode.prototype = {
     let documentElement = document.documentElement;
 
     // Hide the palette before starting the transition for increased perf.
+    this.paletteSpacer.hidden = false;
     this.visiblePalette.hidden = true;
     this.visiblePalette.removeAttribute("showing");
     this.paletteEmptyNotice.hidden = true;
@@ -448,7 +383,7 @@ CustomizeMode.prototype = {
 
     this._transitioning = true;
 
-    Task.spawn(function*() {
+    Task.spawn(function() {
       yield this.depopulatePalette();
 
       yield this._doTransition(false);
@@ -456,14 +391,31 @@ CustomizeMode.prototype = {
 
       Services.obs.removeObserver(this, "lightweight-theme-window-updated", false);
 
-      if (this.browser.selectedTab == gTab) {
-        if (gTab.linkedBrowser.currentURI.spec == "about:blank") {
-          closeGlobalTab();
+      let browser = document.getElementById("browser");
+      if (this.browser.selectedBrowser.currentURI.spec == kAboutURI) {
+        let custBrowser = this.browser.selectedBrowser;
+        if (custBrowser.canGoBack) {
+          // If there's history to this tab, just go back.
+          // Note that this throws an exception if the previous document has a
+          // problematic URL (e.g. about:idontexist)
+          try {
+            custBrowser.goBack();
+          } catch (ex) {
+            ERROR(ex);
+          }
         } else {
-          unregisterGlobalTab();
+          // If we can't go back, we're removing the about:customization tab.
+          // We only do this if we're the top window for this window (so not
+          // a dialog window, for example).
+          if (window.getTopWin(true) == window) {
+            let customizationTab = this.browser.selectedTab;
+            if (this.browser.browsers.length == 1) {
+              window.BrowserOpenTab();
+            }
+            this.browser.removeTab(customizationTab);
+          }
         }
       }
-      let browser = document.getElementById("browser");
       browser.parentNode.selectedPanel = browser;
       let customizer = document.getElementById("customization-container");
       customizer.hidden = true;
@@ -533,7 +485,7 @@ CustomizeMode.prototype = {
         this.enter();
       }
     }.bind(this)).then(null, function(e) {
-      log.error("Error exiting customize mode", e);
+      ERROR(e);
       // We should ensure this has been called, and calling it again doesn't hurt:
       window.PanelUI.endBatchUpdate();
       this._handler.isExitingCustomizeMode = false;
@@ -563,35 +515,33 @@ CustomizeMode.prototype = {
    * excluding certain styles while in any phase of customize mode.
    */
   _doTransition: function(aEntering) {
+    let deferred = Promise.defer();
     let deck = this.document.getElementById("content-deck");
-    let customizeTransitionEndPromise = new Promise(resolve => {
-      let customizeTransitionEnd = (aEvent) => {
-        if (aEvent != "timedout" &&
-            (aEvent.originalTarget != deck || aEvent.propertyName != "margin-left")) {
-          return;
+
+    let customizeTransitionEnd = (aEvent) => {
+      if (aEvent != "timedout" &&
+          (aEvent.originalTarget != deck || aEvent.propertyName != "margin-left")) {
+        return;
+      }
+      this.window.clearTimeout(catchAllTimeout);
+      // We request an animation frame to do the final stage of the transition
+      // to improve perceived performance. (bug 962677)
+      this.window.requestAnimationFrame(() => {
+        deck.removeEventListener("transitionend", customizeTransitionEnd);
+
+        if (!aEntering) {
+          this.document.documentElement.removeAttribute("customize-exiting");
+          this.document.documentElement.removeAttribute("customizing");
+        } else {
+          this.document.documentElement.setAttribute("customize-entered", true);
+          this.document.documentElement.removeAttribute("customize-entering");
         }
-        this.window.clearTimeout(catchAllTimeout);
-        // We request an animation frame to do the final stage of the transition
-        // to improve perceived performance. (bug 962677)
-        this.window.requestAnimationFrame(() => {
-          deck.removeEventListener("transitionend", customizeTransitionEnd);
+        CustomizableUI.dispatchToolboxEvent("customization-transitionend", aEntering, this.window);
 
-          if (!aEntering) {
-            this.document.documentElement.removeAttribute("customize-exiting");
-            this.document.documentElement.removeAttribute("customizing");
-          } else {
-            this.document.documentElement.setAttribute("customize-entered", true);
-            this.document.documentElement.removeAttribute("customize-entering");
-          }
-          CustomizableUI.dispatchToolboxEvent("customization-transitionend", aEntering, this.window);
-
-          resolve();
-        });
-      };
-      deck.addEventListener("transitionend", customizeTransitionEnd);
-      let catchAll = () => customizeTransitionEnd("timedout");
-      let catchAllTimeout = this.window.setTimeout(catchAll, kMaxTransitionDurationMs);
-    });
+        deferred.resolve();
+      });
+    };
+    deck.addEventListener("transitionend", customizeTransitionEnd);
 
     if (gDisableAnimation) {
       this.document.getElementById("tab-view-deck").setAttribute("fastcustomizeanimation", true);
@@ -605,7 +555,9 @@ CustomizeMode.prototype = {
       this.document.documentElement.removeAttribute("customize-entered");
     }
 
-    return customizeTransitionEndPromise;
+    let catchAll = () => customizeTransitionEnd("timedout");
+    let catchAllTimeout = this.window.setTimeout(catchAll, kMaxTransitionDurationMs);
+    return deferred.promise;
   },
 
   updateLWTStyling: function(aData) {
@@ -627,15 +579,15 @@ CustomizeMode.prototype = {
     let toolboxRect = this.window.gNavToolbox.getBoundingClientRect();
     let height = toolboxRect.bottom;
 
-    if (AppConstants.platform == "macosx") {
-      let drawingInTitlebar = !docElement.hasAttribute("drawtitle");
-      let titlebar = this.document.getElementById("titlebar");
-      if (drawingInTitlebar) {
-        titlebar.style.backgroundImage = headerImageRef;
-      } else {
-        titlebar.style.removeProperty("background-image");
-      }
+#ifdef XP_MACOSX
+    let drawingInTitlebar = !docElement.hasAttribute("drawtitle");
+    let titlebar = this.document.getElementById("titlebar");
+    if (drawingInTitlebar) {
+      titlebar.style.backgroundImage = headerImageRef;
+    } else {
+      titlebar.style.removeProperty("background-image");
     }
+#endif
 
     let limitedBG = "-moz-image-rect(" + headerImageRef + ", 0, 100%, " +
                     height + ", 0)";
@@ -660,9 +612,11 @@ CustomizeMode.prototype = {
   },
 
   removeLWTStyling: function() {
-    let affectedNodes = AppConstants.platform == "macosx" ?
-                          ["tab-view-deck", "titlebar"] :
-                          ["tab-view-deck"];
+#ifdef XP_MACOSX
+    let affectedNodes = ["tab-view-deck", "titlebar"];
+#else
+    let affectedNodes = ["tab-view-deck"];
+#endif
     for (let id of affectedNodes) {
       let node = this.document.getElementById(id);
       node.style.removeProperty("background-image");
@@ -802,7 +756,7 @@ CustomizeMode.prototype = {
       this._stowedPalette = this.window.gNavToolbox.palette;
       this.window.gNavToolbox.palette = this.visiblePalette;
     } catch (ex) {
-      log.error(ex);
+      ERROR(ex);
     }
   },
 
@@ -813,7 +767,7 @@ CustomizeMode.prototype = {
   makePaletteItem: function(aWidget, aPlace) {
     let widgetNode = aWidget.forWindow(this.window).node;
     if (!widgetNode) {
-      log.error("Widget with id " + aWidget.id + " does not return a valid node");
+      ERROR("Widget with id " + aWidget.id + " does not return a valid node");
       return null;
     }
     // Do not build a palette item for hidden widgets; there's not much to show.
@@ -827,7 +781,7 @@ CustomizeMode.prototype = {
   },
 
   depopulatePalette: function() {
-    return Task.spawn(function*() {
+    return Task.spawn(function() {
       this.visiblePalette.hidden = true;
       let paletteChild = this.visiblePalette.firstChild;
       let nextChild;
@@ -853,7 +807,7 @@ CustomizeMode.prototype = {
       }
       this.visiblePalette.hidden = false;
       this.window.gNavToolbox.palette = this._stowedPalette;
-    }.bind(this)).then(null, log.error);
+    }.bind(this)).then(null, ERROR);
   },
 
   isCustomizableItem: function(aNode) {
@@ -869,12 +823,14 @@ CustomizeMode.prototype = {
   },
 
   deferredWrapToolbarItem: function(aNode, aPlace) {
-    return new Promise(resolve => {
-      dispatchFunction(() => {
-        let wrapper = this.wrapToolbarItem(aNode, aPlace);
-        resolve(wrapper);
-      });
-    });
+    let deferred = Promise.defer();
+
+    dispatchFunction(function() {
+      let wrapper = this.wrapToolbarItem(aNode, aPlace);
+      deferred.resolve(wrapper);
+    }.bind(this));
+
+    return deferred.promise;
   },
 
   wrapToolbarItem: function(aNode, aPlace) {
@@ -932,10 +888,8 @@ CustomizeMode.prototype = {
 
     if (aNode.hasAttribute("label")) {
       wrapper.setAttribute("title", aNode.getAttribute("label"));
-      wrapper.setAttribute("tooltiptext", aNode.getAttribute("label"));
     } else if (aNode.hasAttribute("title")) {
       wrapper.setAttribute("title", aNode.getAttribute("title"));
-      wrapper.setAttribute("tooltiptext", aNode.getAttribute("title"));
     }
 
     if (aNode.hasAttribute("flex")) {
@@ -953,12 +907,8 @@ CustomizeMode.prototype = {
     let removable = aPlace == "palette" || CustomizableUI.isWidgetRemovable(aNode);
     wrapper.setAttribute("removable", removable);
 
-    let contextMenuAttrName = "";
-    if (aNode.getAttribute("context")) {
-      contextMenuAttrName = "context";
-    } else if (aNode.getAttribute("contextmenu")) {
-      contextMenuAttrName = "contextmenu";
-    }
+    let contextMenuAttrName = aNode.getAttribute("context") ? "context" :
+                                aNode.getAttribute("contextmenu") ? "contextmenu" : "";
     let currentContextMenu = aNode.getAttribute(contextMenuAttrName);
     let contextMenuForPlace = aPlace == "panel" ?
                                 kPanelItemContextMenu :
@@ -986,17 +936,17 @@ CustomizeMode.prototype = {
   },
 
   deferredUnwrapToolbarItem: function(aWrapper) {
-    return new Promise(resolve => {
-      dispatchFunction(() => {
-        let item = null;
-        try {
-          item = this.unwrapToolbarItem(aWrapper);
-        } catch (ex) {
-          Cu.reportError(ex);
-        }
-        resolve(item);
-      });
-    });
+    let deferred = Promise.defer();
+    dispatchFunction(function() {
+      let item = null;
+      try {
+        item = this.unwrapToolbarItem(aWrapper);
+      } catch (ex) {
+        Cu.reportError(ex);
+      }
+      deferred.resolve(item);
+    }.bind(this));
+    return deferred.promise;
   },
 
   unwrapToolbarItem: function(aWrapper) {
@@ -1010,7 +960,7 @@ CustomizeMode.prototype = {
 
     let toolbarItem = aWrapper.firstChild;
     if (!toolbarItem) {
-      log.error("no toolbarItem child for " + aWrapper.tagName + "#" + aWrapper.id);
+      ERROR("no toolbarItem child for " + aWrapper.tagName + "#" + aWrapper.id);
       aWrapper.remove();
       return null;
     }
@@ -1059,7 +1009,7 @@ CustomizeMode.prototype = {
     this._addDragHandlers(target);
     for (let child of target.children) {
       if (this.isCustomizableItem(child) && !this.isWrappedToolbarItem(child)) {
-        yield this.deferredWrapToolbarItem(child, CustomizableUI.getPlaceForItem(child)).then(null, log.error);
+        yield this.deferredWrapToolbarItem(child, CustomizableUI.getPlaceForItem(child)).then(null, ERROR);
       }
     }
     this.areas.add(target);
@@ -1080,7 +1030,7 @@ CustomizeMode.prototype = {
         }
       }
     } catch (ex) {
-      log.error(ex, ex.stack);
+      ERROR(ex, ex.stack);
     }
 
     this.areas.add(target);
@@ -1126,7 +1076,7 @@ CustomizeMode.prototype = {
   },
 
   _unwrapToolbarItems: function() {
-    return Task.spawn(function*() {
+    return Task.spawn(function() {
       for (let target of this.areas) {
         for (let toolbarItem of target.children) {
           if (this.isWrappedToolbarItem(toolbarItem)) {
@@ -1136,7 +1086,7 @@ CustomizeMode.prototype = {
         this._removeDragHandlers(target);
       }
       this.areas.clear();
-    }.bind(this)).then(null, log.error);
+    }.bind(this)).then(null, ERROR);
   },
 
   _removeExtraToolbarsIfEmpty: function() {
@@ -1170,14 +1120,12 @@ CustomizeMode.prototype = {
     let btn = this.document.getElementById("customization-reset-button");
     BrowserUITelemetry.countCustomizationEvent("reset");
     btn.disabled = true;
-    return Task.spawn(function*() {
+    return Task.spawn(function() {
       this._removePanelCustomizationPlaceholders();
       yield this.depopulatePalette();
       yield this._unwrapToolbarItems();
 
       CustomizableUI.reset();
-
-      this.swatchForTheme(this.document);
 
       yield this._wrapToolbarItems();
       this.populatePalette();
@@ -1192,20 +1140,18 @@ CustomizeMode.prototype = {
       if (!this._wantToBeInCustomizeMode) {
         this.exit();
       }
-    }.bind(this)).then(null, log.error);
+    }.bind(this)).then(null, ERROR);
   },
 
   undoReset: function() {
     this.resetting = true;
 
-    return Task.spawn(function*() {
+    return Task.spawn(function() {
       this._removePanelCustomizationPlaceholders();
       yield this.depopulatePalette();
       yield this._unwrapToolbarItems();
 
       CustomizableUI.undoReset();
-
-      this.swatchForTheme(this.document);
 
       yield this._wrapToolbarItems();
       this.populatePalette();
@@ -1216,7 +1162,7 @@ CustomizeMode.prototype = {
       this._updateUndoResetButton();
       this._updateEmptyPaletteNotice();
       this.resetting = false;
-    }.bind(this)).then(null, log.error);
+    }.bind(this)).then(null, ERROR);
   },
 
   _onToolbarVisibilityChange: function(aEvent) {
@@ -1347,8 +1293,6 @@ CustomizeMode.prototype = {
     const DEFAULT_THEME_ID = "{972ce4c6-7e08-4474-a285-3208198ce6fd}";
     const RECENT_LWT_COUNT = 5;
 
-    this.resetLWThemesMenu(aEvent.target);
-
     function previewTheme(aEvent) {
       LightweightThemeManager.previewTheme(aEvent.target.theme.id != DEFAULT_THEME_ID ?
                                            aEvent.target.theme : null);
@@ -1440,11 +1384,22 @@ CustomizeMode.prototype = {
       }
       let hideRecommendedLabel = (footer.previousSibling == recommendedLabel);
       recommendedLabel.hidden = hideRecommendedLabel;
+
+      let hideMyThemesSection = themesInMyThemesSection < 2 && hideRecommendedLabel;
+      let headerLabel = doc.getElementById("customization-lwtheme-menu-header");
+      if (hideMyThemesSection) {
+        let element = recommendedLabel.previousSibling;
+        while (element && element != headerLabel) {
+          element.hidden = true;
+          element = element.previousSibling;
+        }
+      }
+      headerLabel.hidden = hideMyThemesSection;
     }.bind(this));
   },
 
-  resetLWThemesMenu: function(target) {
-    let doc = target.ownerDocument;
+  onLWThemesMenuHidden: function(aEvent) {
+    let doc = aEvent.target.ownerDocument;
     let footer = doc.getElementById("customization-lwtheme-menu-footer");
     let recommendedLabel = doc.getElementById("customization-lwtheme-menu-recommended");
     this.swatchForTheme(doc);
@@ -1454,11 +1409,7 @@ CustomizeMode.prototype = {
         element.previousSibling.remove();
       }
     }
-    target.removeAttribute("height");
-
-    if (LightweightThemeManager.currentTheme) {
-      this._onUIChange();
-    }
+    aEvent.target.removeAttribute("height");
   },
 
   _onUIChange: function() {
@@ -1534,9 +1485,9 @@ CustomizeMode.prototype = {
       case "nsPref:changed":
         this._updateResetButton();
         this._updateUndoResetButton();
-        if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
-          this._updateTitlebarButton();
-        }
+#ifdef CAN_DRAW_IN_TITLEBAR
+        this._updateTitlebarButton();
+#endif
         break;
       case "lightweight-theme-window-updated":
         if (aSubject == this.window) {
@@ -1551,10 +1502,8 @@ CustomizeMode.prototype = {
     }
   },
 
+#ifdef CAN_DRAW_IN_TITLEBAR
   _updateTitlebarButton: function() {
-    if (!AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      return;
-    }
     let drawInTitlebar = true;
     try {
       drawInTitlebar = Services.prefs.getBoolPref(kDrawInTitlebarPref);
@@ -1569,12 +1518,10 @@ CustomizeMode.prototype = {
   },
 
   toggleTitlebar: function(aShouldShowTitlebar) {
-    if (!AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      return;
-    }
     // Drawing in the titlebar means not showing the titlebar, hence the negation:
     Services.prefs.setBoolPref(kDrawInTitlebarPref, !aShouldShowTitlebar);
   },
+#endif
 
   _onDragStart: function(aEvent) {
     __dumpDragData(aEvent);
@@ -1747,7 +1694,7 @@ CustomizeMode.prototype = {
     let draggedWrapper = document.getElementById("wrapper-" + draggedItemId);
     let originArea = this._getCustomizableParent(draggedWrapper);
     if (this._dragSizeMap) {
-      this._dragSizeMap = new WeakMap();
+      this._dragSizeMap.clear();
     }
     // Do nothing if the target area or origin area are not customizable.
     if (!targetArea || !originArea) {
@@ -1777,7 +1724,7 @@ CustomizeMode.prototype = {
     try {
       this._applyDrop(aEvent, targetArea, originArea, draggedItemId, targetNode);
     } catch (ex) {
-      log.error(ex, ex.stack);
+      ERROR(ex, ex.stack);
     }
 
     this._showPanelCustomizationPlaceholders();
@@ -1884,7 +1831,7 @@ CustomizeMode.prototype = {
       placement = CustomizableUI.getPlacementOfWidget(targetNodeId);
     }
     if (!placement) {
-      log.debug("Could not get a position for " + aTargetNode.nodeName + "#" + aTargetNode.id + "." + aTargetNode.className);
+      LOG("Could not get a position for " + aTargetNode.nodeName + "#" + aTargetNode.id + "." + aTargetNode.className);
     }
     let position = placement ? placement.position : null;
 
@@ -2205,7 +2152,7 @@ CustomizeMode.prototype = {
   },
 
   _onMouseDown: function(aEvent) {
-    log.debug("_onMouseDown");
+    LOG("_onMouseDown");
     if (aEvent.button != 0) {
       return;
     }
@@ -2219,7 +2166,7 @@ CustomizeMode.prototype = {
   },
 
   _onMouseUp: function(aEvent) {
-    log.debug("_onMouseUp");
+    LOG("_onMouseUp");
     if (aEvent.button != 0) {
       return;
     }
@@ -2338,7 +2285,7 @@ function __dumpDragData(aEvent, caller) {
     }
   }
   str += "}";
-  log.debug(str);
+  LOG(str);
 }
 
 function dispatchFunction(aFunc) {

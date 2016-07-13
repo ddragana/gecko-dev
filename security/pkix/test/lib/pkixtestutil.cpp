@@ -69,7 +69,7 @@ OpenFile(const string& dir, const string& filename, const string& mode)
   return file.release();
 }
 
-} // namespace
+} // unnamed namespace
 
 bool
 InputEqualsByteString(Input input, const ByteString& bs)
@@ -144,21 +144,12 @@ TLV(uint8_t tag, size_t length, const ByteString& value)
   return result;
 }
 
-OCSPResponseExtension::OCSPResponseExtension()
-  : id()
-  , critical(false)
-  , value()
-  , next(nullptr)
-{
-}
-
 OCSPResponseContext::OCSPResponseContext(const CertID& certID, time_t time)
   : certID(certID)
   , responseStatus(successful)
   , skipResponseBytes(false)
   , producedAt(time)
-  , singleExtensions(nullptr)
-  , responseExtensions(nullptr)
+  , extensions(nullptr)
   , includeEmptyExtensions(false)
   , signatureAlgorithm(sha256WithRSAEncryption())
   , badSignature(false)
@@ -906,10 +897,10 @@ OCSPExtension(OCSPResponseExtension& extension)
 //   SEQUENCE OF Extension
 // }
 static ByteString
-OCSPExtensions(OCSPResponseExtension* extensions)
+Extensions(OCSPResponseContext& context)
 {
   ByteString value;
-  for (OCSPResponseExtension* extension = extensions;
+  for (OCSPResponseExtension* extension = context.extensions;
        extension; extension = extension->next) {
     ByteString extensionEncoded(OCSPExtension(*extension));
     if (ENCODING_FAILED(extensionEncoded)) {
@@ -944,8 +935,8 @@ ResponseData(OCSPResponseContext& context)
   }
   ByteString responses(TLV(der::SEQUENCE, response));
   ByteString responseExtensions;
-  if (context.responseExtensions || context.includeEmptyExtensions) {
-    responseExtensions = OCSPExtensions(context.responseExtensions);
+  if (context.extensions || context.includeEmptyExtensions) {
+    responseExtensions = Extensions(context);
   }
 
   ByteString value;
@@ -1024,17 +1015,12 @@ SingleResponse(OCSPResponseContext& context)
     nextUpdateEncodedNested = TLV(der::CONSTRUCTED | der::CONTEXT_SPECIFIC | 0,
                                   nextUpdateEncoded);
   }
-  ByteString singleExtensions;
-  if (context.singleExtensions || context.includeEmptyExtensions) {
-    singleExtensions = OCSPExtensions(context.singleExtensions);
-  }
 
   ByteString value;
   value.append(certID);
   value.append(certStatus);
   value.append(thisUpdateEncoded);
   value.append(nextUpdateEncodedNested);
-  value.append(singleExtensions);
   return TLV(der::SEQUENCE, value);
 }
 

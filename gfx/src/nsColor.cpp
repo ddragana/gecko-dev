@@ -75,66 +75,53 @@ static int ComponentValue(const char16_t* aColorSpec, int aLen, int color, int d
   return component;
 }
 
-bool
-NS_HexToRGBA(const nsAString& aColorSpec, nsHexColorType aType,
-             nscolor* aResult)
+NS_GFX_(bool) NS_HexToRGB(const nsAString& aColorSpec,
+                                       nscolor* aResult)
 {
   const char16_t* buffer = aColorSpec.BeginReading();
 
   int nameLen = aColorSpec.Length();
-  bool hasAlpha = false;
-  if (nameLen != 3 && nameLen != 6) {
-    if ((nameLen != 4 && nameLen != 8) || aType == nsHexColorType::NoAlpha) {
-      // Improperly formatted color value
+  if ((nameLen == 3) || (nameLen == 6)) {
+    // Make sure the digits are legal
+    for (int i = 0; i < nameLen; i++) {
+      char16_t ch = buffer[i];
+      if (((ch >= '0') && (ch <= '9')) ||
+          ((ch >= 'a') && (ch <= 'f')) ||
+          ((ch >= 'A') && (ch <= 'F'))) {
+        // Legal character
+        continue;
+      }
+      // Whoops. Illegal character.
       return false;
     }
-    hasAlpha = true;
-  }
 
-  // Make sure the digits are legal
-  for (int i = 0; i < nameLen; i++) {
-    char16_t ch = buffer[i];
-    if (((ch >= '0') && (ch <= '9')) ||
-        ((ch >= 'a') && (ch <= 'f')) ||
-        ((ch >= 'A') && (ch <= 'F'))) {
-      // Legal character
-      continue;
+    // Convert the ascii to binary
+    int dpc = ((3 == nameLen) ? 1 : 2);
+    // Translate components from hex to binary
+    int r = ComponentValue(buffer, nameLen, 0, dpc);
+    int g = ComponentValue(buffer, nameLen, 1, dpc);
+    int b = ComponentValue(buffer, nameLen, 2, dpc);
+    if (dpc == 1) {
+      // Scale single digit component to an 8 bit value. Replicate the
+      // single digit to compute the new value.
+      r = (r << 4) | r;
+      g = (g << 4) | g;
+      b = (b << 4) | b;
     }
-    // Whoops. Illegal character.
-    return false;
+    NS_ASSERTION((r >= 0) && (r <= 255), "bad r");
+    NS_ASSERTION((g >= 0) && (g <= 255), "bad g");
+    NS_ASSERTION((b >= 0) && (b <= 255), "bad b");
+    *aResult = NS_RGB(r, g, b);
+    return true;
   }
 
-  // Convert the ascii to binary
-  int dpc = ((nameLen <= 4) ? 1 : 2);
-  // Translate components from hex to binary
-  int r = ComponentValue(buffer, nameLen, 0, dpc);
-  int g = ComponentValue(buffer, nameLen, 1, dpc);
-  int b = ComponentValue(buffer, nameLen, 2, dpc);
-  int a;
-  if (hasAlpha) {
-    a = ComponentValue(buffer, nameLen, 3, dpc);
-  } else {
-    a = (dpc == 1) ? 0xf : 0xff;
-  }
-  if (dpc == 1) {
-    // Scale single digit component to an 8 bit value. Replicate the
-    // single digit to compute the new value.
-    r = (r << 4) | r;
-    g = (g << 4) | g;
-    b = (b << 4) | b;
-    a = (a << 4) | a;
-  }
-  NS_ASSERTION((r >= 0) && (r <= 255), "bad r");
-  NS_ASSERTION((g >= 0) && (g <= 255), "bad g");
-  NS_ASSERTION((b >= 0) && (b <= 255), "bad b");
-  NS_ASSERTION((a >= 0) && (a <= 255), "bad a");
-  *aResult = NS_RGBA(r, g, b, a);
-  return true;
+  // Improperly formatted color value
+  return false;
 }
 
 // This implements part of the algorithm for legacy behavior described in
 // http://www.whatwg.org/specs/web-apps/current-work/complete/common-microsyntaxes.html#rules-for-parsing-a-legacy-color-value
-bool NS_LooseHexToRGB(const nsString& aColorSpec, nscolor* aResult)
+NS_GFX_(bool) NS_LooseHexToRGB(const nsString& aColorSpec, nscolor* aResult)
 {
   if (aColorSpec.EqualsLiteral("transparent")) {
     return false;
@@ -198,7 +185,7 @@ bool NS_LooseHexToRGB(const nsString& aColorSpec, nscolor* aResult)
   return true;
 }
 
-bool NS_ColorNameToRGB(const nsAString& aColorName, nscolor* aResult)
+NS_GFX_(bool) NS_ColorNameToRGB(const nsAString& aColorName, nscolor* aResult)
 {
   if (!gColorTable) return false;
 
@@ -216,7 +203,7 @@ bool NS_ColorNameToRGB(const nsAString& aColorName, nscolor* aResult)
 
 // Returns kColorNames, an array of all possible color names, and sets
 // *aSizeArray to the size of that array. Do NOT call free() on this array.
-const char * const * NS_AllColorNames(size_t *aSizeArray)
+NS_GFX_(const char * const *) NS_AllColorNames(size_t *aSizeArray)
 {
   *aSizeArray = ArrayLength(kColorNames);
   return kColorNames;
@@ -228,7 +215,7 @@ const char * const * NS_AllColorNames(size_t *aSizeArray)
 #define MOZ_BLEND(target, bg, fg, fgalpha)       \
   FAST_DIVIDE_BY_255(target, (bg)*(255-fgalpha) + (fg)*(fgalpha))
 
-nscolor
+NS_GFX_(nscolor)
 NS_ComposeColors(nscolor aBG, nscolor aFG)
 {
   // This function uses colors that are non premultiplied alpha.
@@ -277,7 +264,7 @@ HSL_HueToRGB(float m1, float m2, float h)
 }
 
 // The float parameters are all expected to be in the range 0-1
-nscolor
+NS_GFX_(nscolor)
 NS_HSL2RGB(float h, float s, float l)
 {
   uint8_t r, g, b;
@@ -294,7 +281,7 @@ NS_HSL2RGB(float h, float s, float l)
   return NS_RGB(r, g, b);  
 }
 
-const char*
+NS_GFX_(const char*)
 NS_RGBToColorName(nscolor aColor)
 {
   for (size_t idx = 0; idx < ArrayLength(kColors); ++idx) {

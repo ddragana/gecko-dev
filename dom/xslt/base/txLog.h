@@ -11,14 +11,16 @@
 class txLog
 {
 public:
-    static mozilla::LazyLogModule xpath;
-    static mozilla::LazyLogModule xslt;
+    static PRLogModuleInfo *xpath;
+    static PRLogModuleInfo *xslt;
 };
 
 #define TX_LG_IMPL \
-    mozilla::LazyLogModule txLog::xpath("xpath"); \
-    mozilla::LazyLogModule txLog::xslt("xslt");
+    PRLogModuleInfo * txLog::xpath = 0; \
+    PRLogModuleInfo * txLog::xslt = 0;
 
-#define TX_LG_CREATE
+#define TX_LG_CREATE \
+    txLog::xpath = PR_NewLogModule("xpath"); \
+    txLog::xslt  = PR_NewLogModule("xslt")
 
 #endif

@@ -21,12 +21,11 @@ namespace layers {
 class CompositorD3D9 : public Compositor
 {
 public:
-  CompositorD3D9(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget);
+  CompositorD3D9(PCompositorParent* aParent, nsIWidget *aWidget);
   ~CompositorD3D9();
 
-  virtual CompositorD3D9* AsCompositorD3D9() override { return this; }
-
-  virtual bool Initialize(nsCString* const out_failureReason) override;
+  virtual bool Initialize() override;
+  virtual void Destroy() override {}
 
   virtual TextureFactoryIdentifier
     GetTextureFactoryIdentifier() override;
@@ -45,7 +44,7 @@ public:
                                  const CompositingRenderTarget *aSource,
                                  const gfx::IntPoint &aSourcePoint) override;
 
-  virtual void SetRenderTarget(CompositingRenderTarget *aSurface) override;
+  virtual void SetRenderTarget(CompositingRenderTarget *aSurface);
   virtual CompositingRenderTarget* GetCurrentRenderTarget() const override
   {
     return mCurrentRT;
@@ -56,24 +55,23 @@ public:
   virtual void ClearRect(const gfx::Rect& aRect) override;
 
   virtual void DrawQuad(const gfx::Rect &aRect,
-                        const gfx::IntRect &aClipRect,
+                        const gfx::Rect &aClipRect,
                         const EffectChain &aEffectChain,
                         gfx::Float aOpacity,
                         const gfx::Matrix4x4& aTransform,
                         const gfx::Rect& aVisibleRect) override;
 
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
-                          const gfx::IntRect *aClipRectIn,
-                          const gfx::IntRect& aRenderBounds,
-                          const nsIntRegion& aOpaqueRegion,
-                          gfx::IntRect *aClipRectOut = nullptr,
-                          gfx::IntRect *aRenderBoundsOut = nullptr) override;
+                          const gfx::Rect *aClipRectIn,
+                          const gfx::Rect& aRenderBounds,
+                          gfx::Rect *aClipRectOut = nullptr,
+                          gfx::Rect *aRenderBoundsOut = nullptr) override;
 
   virtual void EndFrame() override;
 
   virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) override {}
 
-  virtual void PrepareViewport(const gfx::IntSize& aSize);
+  virtual void PrepareViewport(const gfx::IntSize& aSize) override;
 
   virtual bool SupportsPartialTextureUpdate() override{ return true; }
 
@@ -84,6 +82,8 @@ public:
   virtual LayersBackend GetBackendType() const override {
     return LayersBackend::LAYERS_D3D9;
   }
+
+  virtual nsIWidget* GetWidget() const override { return mWidget; }
 
   IDirect3DDevice9* device() const
   {
@@ -123,7 +123,7 @@ public:
 private:
   // ensure mSize is up to date with respect to mWidget
   void EnsureSize();
-  void SetSamplerForSamplingFilter(gfx::SamplingFilter aSamplingFilter);
+  void SetSamplerForFilter(gfx::Filter aFilter);
   void PaintToTarget();
   void SetMask(const EffectChain &aEffectChain, uint32_t aMaskTexture);
   /**
@@ -136,20 +136,6 @@ private:
    * recreate the device.
    */
   bool EnsureSwapChain();
-
-  already_AddRefed<IDirect3DTexture9>
-  CreateTexture(const gfx::IntRect& aRect,
-                const CompositingRenderTarget* aSource,
-                const gfx::IntPoint& aSourcePoint);
-
-  /**
-   * Complete a mix-blend step at the end of DrawQuad().
-   */
-  void FinishMixBlend(const gfx::IntRect& aBackdropRect,
-                      const gfx::Rect& aBackdropDest,
-                      const gfx::Matrix4x4& aBackdropTransform,
-                      RefPtr<IDirect3DTexture9> aBackdrop,
-                      gfx::CompositionOp aBlendMode);
 
   /**
    * DeviceManagerD3D9 keeps a count of the number of times its device is
@@ -166,16 +152,24 @@ private:
 
   void ReportFailure(const nsACString &aMsg, HRESULT aCode);
 
+  virtual gfx::IntSize GetWidgetSize() const override
+  {
+    return mSize;
+  }
+
   /* Device manager instance for this compositor */
-  RefPtr<DeviceManagerD3D9> mDeviceManager;
+  nsRefPtr<DeviceManagerD3D9> mDeviceManager;
 
   /* Swap chain associated with this compositor */
-  RefPtr<SwapChainD3D9> mSwapChain;
+  nsRefPtr<SwapChainD3D9> mSwapChain;
+
+  /* Widget associated with this layer manager */
+  nsIWidget *mWidget;
 
   RefPtr<CompositingRenderTargetD3D9> mDefaultRT;
   RefPtr<CompositingRenderTargetD3D9> mCurrentRT;
 
-  LayoutDeviceIntSize mSize;
+  gfx::IntSize mSize;
 
   uint32_t mDeviceResetCount;
   uint32_t mFailedResetAttempts;

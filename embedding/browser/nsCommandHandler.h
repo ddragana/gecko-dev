@@ -9,8 +9,7 @@
 
 #include "nsISupports.h"
 #include "nsICommandHandler.h"
-
-class nsPIDOMWindowOuter;
+#include "nsIDOMWindow.h"
 
 class nsCommandHandler
   : public nsICommandHandlerInit
@@ -29,7 +28,7 @@ protected:
 private:
   nsresult GetCommandHandler(nsICommandHandler** aCommandHandler);
 
-  nsPIDOMWindowOuter* mWindow;
+  nsIDOMWindow* mWindow;
 };
 
 #endif

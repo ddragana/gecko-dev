@@ -8,24 +8,30 @@
 do_get_profile(); // must be called before getting nsIX509CertDB
 const certdb  = Cc["@mozilla.org/security/x509certdb;1"]
                   .getService(Ci.nsIX509CertDB);
-// This is the list of certificates needed for the test.
-var certList = [
+// This is the list of certificates needed for the test
+// The certificates prefixed by 'int-' are intermediates
+let certList = [
   'ee',
   'ca-1',
   'ca-2',
 ];
 
+function load_cert(cert_name, trust_string) {
+  var cert_filename = cert_name + ".der";
+  addCertFromFile(certdb, "test_getchain/" + cert_filename, trust_string);
+}
+
 // Since all the ca's are identical expect for the serial number
 // I have to grab them by enumerating all the certs and then finding
 // the ones that I am interested in.
 function get_ca_array() {
-  let ret_array = [];
+  let ret_array = new Array();
   let allCerts = certdb.getCerts();
   let enumerator = allCerts.getEnumerator();
   while (enumerator.hasMoreElements()) {
     let cert = enumerator.getNext().QueryInterface(Ci.nsIX509Cert);
     if (cert.commonName == 'ca') {
-      ret_array[parseInt(cert.serialNumber, 16)] = cert;
+      ret_array[parseInt(cert.serialNumber)] = cert;
     }
   }
   return ret_array;
@@ -44,10 +50,10 @@ function check_matching_issuer_and_getchain(expected_issuer_serial, cert) {
         "Serial numbers via cert.issuer and via getChain() should match");
 }
 
-function check_getchain(ee_cert, ssl_ca, email_ca) {
+function check_getchain(ee_cert, ssl_ca, email_ca){
   // A certificate should first build a chain/issuer to
   // a SSL trust domain, then an EMAIL trust domain and then
-  // an object signer trust domain.
+  // and object signer trust domain
 
   const nsIX509Cert = Components.interfaces.nsIX509Cert;
   certdb.setCertTrust(ssl_ca, nsIX509Cert.CA_CERT,
@@ -67,11 +73,11 @@ function run_test() {
   clearOCSPCache();
   clearSessionCache();
 
-  for (let cert of certList) {
-    addCertFromFile(certdb, `test_getchain/${cert}.pem`, ",,");
+  for (let i = 0 ; i < certList.length; i++) {
+    load_cert(certList[i], ',,');
   }
 
-  let ee_cert = certdb.findCertByNickname('ee');
+  let ee_cert = certdb.findCertByNickname(null, 'ee');
   notEqual(ee_cert, null, "EE cert should be in the cert DB");
 
   let ca = get_ca_array();

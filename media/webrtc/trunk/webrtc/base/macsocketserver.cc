@@ -29,14 +29,6 @@ MacBaseSocketServer::MacBaseSocketServer() {
 MacBaseSocketServer::~MacBaseSocketServer() {
 }
 
-Socket* MacBaseSocketServer::CreateSocket(int type) {
-  return NULL;
-}
-
-Socket* MacBaseSocketServer::CreateSocket(int family, int type) {
-  return NULL;
-}
-
 AsyncSocket* MacBaseSocketServer::CreateAsyncSocket(int type) {
   return CreateAsyncSocket(AF_INET, type);
 }

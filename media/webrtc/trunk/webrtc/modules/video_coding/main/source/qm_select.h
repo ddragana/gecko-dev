@@ -221,7 +221,8 @@ class VCMQmResolution : public VCMQmMethod {
 
   // Update with actual bit rate (size of the latest encoded frame)
   // and frame type, after every encoded frame.
-  void UpdateEncodedSize(size_t encoded_size);
+  void UpdateEncodedSize(int encoded_size,
+                         FrameType encoded_frame_type);
 
   // Update with new target bitrate, actual encoder sent rate, frame_rate,
   // loss rate: every ~1 sec from SetTargetRates in media_opt.
@@ -358,7 +359,7 @@ class VCMQmRobustness : public VCMQmMethod {
   float AdjustFecFactor(uint8_t code_rate_delta,
                         float total_rate,
                         float framerate,
-                        int64_t rtt_time,
+                        uint32_t rtt_time,
                         uint8_t packet_loss);
 
   // Set the UEP protection on/off.
@@ -370,7 +371,7 @@ class VCMQmRobustness : public VCMQmMethod {
  private:
   // Previous state of network parameters.
   float prev_total_rate_;
-  int64_t prev_rtt_time_;
+  uint32_t prev_rtt_time_;
   uint8_t prev_packet_loss_;
   uint8_t prev_code_rate_delta_;
 };

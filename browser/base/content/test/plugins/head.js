@@ -1,11 +1,11 @@
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
-  "resource://gre/modules/PromiseUtils.jsm");
 
 // The blocklist shim running in the content process does not initialize at
 // start up, so it's not active until we load content that needs to do a
@@ -35,14 +35,18 @@ function promiseInitContentBlocklistSvc(aBrowser)
   * @returns a Promise that resolves to true after the time has elapsed
   */
 function waitForMs(aMs) {
-  return new Promise((resolve) => {
-    setTimeout(done, aMs);
-    function done() {
-      resolve(true);
-    }
-  });
+  let deferred = Promise.defer();
+  let startTime = Date.now();
+  setTimeout(done, aMs);
+  function done() {
+    deferred.resolve(true);
+  }
+  return deferred.promise;
 }
 
+
+// DOM Promise fails for unknown reasons here, so we're using
+// resource://gre/modules/Promise.jsm.
 function waitForEvent(subject, eventName, checkFn, useCapture, useUntrusted) {
   return new Promise((resolve, reject) => {
     subject.addEventListener(eventName, function listener(event) {
@@ -73,44 +77,40 @@ function waitForEvent(subject, eventName, checkFn, useCapture, useUntrusted) {
  *        The tab to load into.
  * @param [optional] url
  *        The url to load, or the current url.
+ * @param [optional] event
+ *        The load event type to wait for.  Defaults to "load".
  * @return {Promise} resolved when the event is handled.
  * @resolves to the received event
  * @rejects if a valid load event is not received within a meaningful interval
  */
-function promiseTabLoadEvent(tab, url) {
-  let deferred = PromiseUtils.defer();
-  info("Wait tab event: load");
+function promiseTabLoadEvent(tab, url, eventType="load") {
+  let deferred = Promise.defer();
+  info("Wait tab event: " + eventType);
 
-  function handle(loadedUrl) {
-    if (loadedUrl === "about:blank" || (url && loadedUrl !== url)) {
-      info(`Skipping spurious load event for ${loadedUrl}`);
-      return false;
+  function handle(event) {
+    if (event.originalTarget != tab.linkedBrowser.contentDocument ||
+        event.target.location.href == "about:blank" ||
+        (url && event.target.location.href != url)) {
+      info("Skipping spurious '" + eventType + "'' event" +
+            " for " + event.target.location.href);
+      return;
     }
-
-    info("Tab event received: load");
-    return true;
+    clearTimeout(timeout);
+    tab.linkedBrowser.removeEventListener(eventType, handle, true);
+    info("Tab event received: " + eventType);
+    deferred.resolve(event);
   }
 
-  // Create two promises: one resolved from the content process when the page
-  // loads and one that is rejected if we take too long to load the url.
-  let loaded = BrowserTestUtils.browserLoaded(tab.linkedBrowser, false, handle);
-
   let timeout = setTimeout(() => {
-    deferred.reject(new Error("Timed out while waiting for a 'load' event"));
+    tab.linkedBrowser.removeEventListener(eventType, handle, true);
+    deferred.reject(new Error("Timed out while waiting for a '" + eventType + "'' event"));
   }, 30000);
 
-  loaded.then(() => {
-    clearTimeout(timeout);
-    deferred.resolve()
-  });
-
-  if (url)
-    BrowserTestUtils.loadURI(tab.linkedBrowser, url);
-
-  // Promise.all rejects if either promise rejects (i.e. if we time out) and
-  // if our loaded promise resolves before the timeout, then we resolve the
-  // timeout promise as well, causing the all promise to resolve.
-  return Promise.all([deferred.promise, loaded]);
+  tab.linkedBrowser.addEventListener(eventType, handle, true, true);
+  if (url) {
+    tab.linkedBrowser.loadURI(url);
+  }
+  return deferred.promise;
 }
 
 function waitForCondition(condition, nextTest, errorMsg, aTries, aWait) {
@@ -139,11 +139,11 @@ function waitForCondition(condition, nextTest, errorMsg, aTries, aWait) {
 
 // Waits for a conditional function defined by the caller to return true.
 function promiseForCondition(aConditionFn, aMessage, aTries, aWait) {
-  return new Promise((resolve) => {
-    waitForCondition(aConditionFn, resolve,
-                     (aMessage || "Condition didn't pass."),
-                     aTries, aWait);
-  });
+  let deferred = Promise.defer();
+  waitForCondition(aConditionFn, deferred.resolve,
+                   (aMessage || "Condition didn't pass."),
+                   aTries, aWait);
+  return deferred.promise;
 }
 
 // Returns the chrome side nsIPluginTag for this plugin
@@ -255,7 +255,7 @@ function updateBlocklist(aCallback) {
   blocklistNotifier.notify(null);
 }
 
-var _originalTestBlocklistURL = null;
+let _originalTestBlocklistURL = null;
 function setAndUpdateBlocklist(aURL, aCallback) {
   if (!_originalTestBlocklistURL) {
     _originalTestBlocklistURL = Services.prefs.getCharPref("extensions.blocklist.url");
@@ -298,15 +298,17 @@ function resetBlocklist() {
 // Insure there's a popup notification present. This test does not indicate
 // open state. aBrowser can be undefined.
 function promisePopupNotification(aName, aBrowser) {
-  return new Promise((resolve) => {
-    waitForCondition(() => PopupNotifications.getNotification(aName, aBrowser),
-                     () => {
-      ok(!!PopupNotifications.getNotification(aName, aBrowser),
-         aName + " notification appeared");
+  let deferred = Promise.defer();
 
-      resolve();
-    }, "timeout waiting for popup notification " + aName);
-  });
+  waitForCondition(() => PopupNotifications.getNotification(aName, aBrowser),
+                   () => {
+    ok(!!PopupNotifications.getNotification(aName, aBrowser),
+       aName + " notification appeared");
+
+    deferred.resolve();
+  }, "timeout waiting for popup notification " + aName);
+
+  return deferred.promise;
 }
 
 /**
@@ -359,9 +361,9 @@ function waitForNotificationBar(notificationID, browser, callback) {
 }
 
 function promiseForNotificationBar(notificationID, browser) {
-  return new Promise((resolve) => {
-    waitForNotificationBar(notificationID, browser, resolve);
-  });
+  let deferred = Promise.defer();
+  waitForNotificationBar(notificationID, browser, deferred.resolve);
+  return deferred.promise;
 }
 
 /**
@@ -384,9 +386,9 @@ function waitForNotificationShown(notification, callback) {
 }
 
 function promiseForNotificationShown(notification) {
-  return new Promise((resolve) => {
-    waitForNotificationShown(notification, resolve);
-  });
+  let deferred = Promise.defer();
+  waitForNotificationShown(notification, deferred.resolve);
+  return deferred.promise;
 }
 
 /**

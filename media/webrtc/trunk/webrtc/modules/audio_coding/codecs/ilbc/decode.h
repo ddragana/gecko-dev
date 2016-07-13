@@ -28,7 +28,7 @@
 void WebRtcIlbcfix_DecodeImpl(
     int16_t *decblock,    /* (o) decoded signal block */
     const uint16_t *bytes, /* (i) encoded signal bits */
-    IlbcDecoder *iLBCdec_inst, /* (i/o) the decoder state
+    iLBC_Dec_Inst_t *iLBCdec_inst, /* (i/o) the decoder state
                                            structure */
     int16_t mode      /* (i) 0: bad packet, PLC,
                                                                    1: normal */

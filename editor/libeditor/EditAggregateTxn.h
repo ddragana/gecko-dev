@@ -7,6 +7,7 @@
 #define EditAggregateTxn_h__
 
 #include "EditTxn.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIAtom.h"
@@ -42,7 +43,7 @@ public:
 protected:
   virtual ~EditAggregateTxn();
 
-  nsTArray< RefPtr<EditTxn> > mChildren;
+  nsTArray< nsRefPtr<EditTxn> > mChildren;
   nsCOMPtr<nsIAtom> mName;
 };
 

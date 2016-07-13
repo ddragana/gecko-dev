@@ -6,12 +6,14 @@
 #include "GLManager.h"
 #include "CompositorOGL.h"              // for CompositorOGL
 #include "GLContext.h"                  // for GLContext
+#include "mozilla/Assertions.h"         // for MOZ_CRASH
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr
 
 using namespace mozilla::gl;
 
@@ -60,8 +62,10 @@ private:
 /* static */ GLManager*
 GLManager::CreateGLManager(LayerManagerComposite* aManager)
 {
-  if (aManager && aManager->GetCompositor()->GetBackendType() == LayersBackend::LAYERS_OPENGL) {
-    return new GLManagerCompositor(aManager->GetCompositor()->AsCompositorOGL());
+  if (aManager &&
+      Compositor::GetBackend() == LayersBackend::LAYERS_OPENGL) {
+    return new GLManagerCompositor(static_cast<CompositorOGL*>(
+      aManager->GetCompositor()));
   }
   return nullptr;
 }

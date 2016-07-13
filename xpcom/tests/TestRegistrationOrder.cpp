@@ -170,13 +170,12 @@ int main(int argc, char** argv)
   const char *regPath = argv[1];
 #endif
 
-  nsCOMPtr<nsIFile> file =
-    GetRegDirectory(regPath, "core", "component.manifest");
-  XRE_AddManifestLocation(NS_EXTENSION_LOCATION, file);
-  file = GetRegDirectory(regPath, "extension", "extComponent.manifest");
-  XRE_AddManifestLocation(NS_EXTENSION_LOCATION, file);
-  file = GetRegDirectory(regPath, "extension2.jar", nullptr);
-  XRE_AddJarManifestLocation(NS_EXTENSION_LOCATION, file);
+  XRE_AddManifestLocation(NS_EXTENSION_LOCATION,
+                          nsCOMPtr<nsIFile>(GetRegDirectory(regPath, "core", "component.manifest")));
+  XRE_AddManifestLocation(NS_EXTENSION_LOCATION,
+                          nsCOMPtr<nsIFile>(GetRegDirectory(regPath, "extension", "extComponent.manifest")));
+  XRE_AddJarManifestLocation(NS_EXTENSION_LOCATION,
+                          nsCOMPtr<nsIFile>(GetRegDirectory(regPath, "extension2.jar", nullptr)));
   ScopedXPCOM xpcom("RegistrationOrder");
   if (xpcom.failed())
     return 1;

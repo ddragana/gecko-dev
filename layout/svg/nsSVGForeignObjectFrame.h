@@ -7,7 +7,6 @@
 #define NSSVGFOREIGNOBJECTFRAME_H__
 
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "nsContainerFrame.h"
 #include "nsIPresShell.h"
 #include "nsISVGChildFrame.h"
@@ -16,8 +15,10 @@
 
 class gfxContext;
 
-class nsSVGForeignObjectFrame : public nsContainerFrame
-                              , public nsISVGChildFrame
+typedef nsContainerFrame nsSVGForeignObjectFrameBase;
+
+class nsSVGForeignObjectFrame : public nsSVGForeignObjectFrameBase,
+                                public nsISVGChildFrame
 {
   friend nsContainerFrame*
   NS_NewSVGForeignObjectFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -38,7 +39,7 @@ public:
                                      int32_t         aModType) override;
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
-    return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
+    return GetFirstPrincipalChild()->GetContentInsertionFrame();
   }
 
   virtual void Reflow(nsPresContext*           aPresContext,
@@ -59,7 +60,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsContainerFrame::IsFrameOfType(aFlags &
+    return nsSVGForeignObjectFrameBase::IsFrameOfType(aFlags &
       ~(nsIFrame::eSVG | nsIFrame::eSVGForeignObject));
   }
 

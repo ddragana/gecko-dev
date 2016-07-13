@@ -12,33 +12,22 @@
 <script type="application/javascript" src="./head.js"></script>
 <script type="application/javascript">
 
-function runTest() {
-  ok('tv' in navigator, "navigator.tv should exist.");
+var tests = [
+  // Setup preferences and permissions
+  setupPrefsAndPermissions,
 
-  navigator.tv.getTuners().then(
-    function(aTuners) {
-      ok(aTuners.length > 0, "Got at least 1 tuner.");
+  // Installing the app
+  installApp.bind(this, "file_tv_set_invalid_current_source.html", "file_app.template.webapp"),
 
-      aTuners[0].setCurrentSource("InvalidSourceType").then(
-        function() {
-          ok(false, "Setting an invalid current source should get error.");
-          SimpleTest.finish();
-        },
-        function(aError) {
-          is(aError.name, "TypeError", "TypeError should be expected.");
-          SimpleTest.finish();
-        }
-      );
-    },
-    function(aError) {
-      ok(false, "Error occurred when getting tuners: " + aError);
-      SimpleTest.finish();
-    }
-  );
-}
+  // Run tests in app
+  testApp,
+
+  // Uninstall the app
+  uninstallApp
+];
 
 SimpleTest.waitForExplicitFinish();
-prepareTest(runTest);
+runTest();
 
 </script>
 </pre>

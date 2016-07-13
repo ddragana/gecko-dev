@@ -1,11 +1,14 @@
-Cu.import("resource://gre/modules/NetUtil.jsm");
+const isWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
+const isLinux = ("@mozilla.org/gnome-gconf-service;1" in Cc);
+
+Cu.import("resource://gre/modules/Services.jsm");
 
 function getLinkFile()
 {
-  if (mozinfo.os == "win") {
+  if (isWindows) {
     return do_get_file("test_link.url");
   }
-  if (mozinfo.os == "linux") {
+  if (isLinux) {
     return do_get_file("test_link.desktop");
   }
   do_throw("Unexpected platform");
@@ -94,13 +97,15 @@ RequestObserver.prototype = {
 
 function test_cancel()
 {
-  var chan = NetUtil.newChannel({
-    uri: linkURI,
-    loadUsingSystemPrincipal: true
-  });
+  var chan = ios.newChannelFromURI2(linkURI,
+                                    null,      // aLoadingNode
+                                    Services.scriptSecurityManager.getSystemPrincipal(),
+                                    null,      // aTriggeringPrincipal
+                                    Ci.nsILoadInfo.SEC_NORMAL,
+                                    Ci.nsIContentPolicy.TYPE_OTHER);
   do_check_eq(chan.URI, linkURI);
   do_check_eq(chan.originalURI, linkURI);
-  chan.asyncOpen2(new RequestObserver(linkURI, newURI, do_test_finished));
+  chan.asyncOpen(new RequestObserver(linkURI, newURI, do_test_finished), null);
   do_check_true(chan.isPending());
   chan.cancel(Cr.NS_ERROR_ABORT);
   do_check_true(chan.isPending());
@@ -108,7 +113,7 @@ function test_cancel()
 
 function run_test()
 {
-  if (mozinfo.os != "win" && mozinfo.os != "linux") {
+  if (!isWindows && !isLinux) {
     return;
   }
 
@@ -116,13 +121,16 @@ function run_test()
   linkURI = ios.newFileURI(link);
 
   do_test_pending();
-  var chan = NetUtil.newChannel({
-    uri: linkURI,
-    loadUsingSystemPrincipal: true
-  });
+
+  var chan = ios.newChannelFromURI2(linkURI,
+                                    null,      // aLoadingNode
+                                    Services.scriptSecurityManager.getSystemPrincipal(),
+                                    null,      // aTriggeringPrincipal
+                                    Ci.nsILoadInfo.SEC_NORMAL,
+                                    Ci.nsIContentPolicy.TYPE_OTHER);
   do_check_eq(chan.URI, linkURI);
   do_check_eq(chan.originalURI, linkURI);
   chan.notificationCallbacks = new NotificationCallbacks(linkURI, newURI);
-  chan.asyncOpen2(new RequestObserver(linkURI, newURI, test_cancel));
+  chan.asyncOpen(new RequestObserver(linkURI, newURI, test_cancel), null);
   do_check_true(chan.isPending());
 }

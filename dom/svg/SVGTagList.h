@@ -29,6 +29,7 @@
  ******/
 
 SVG_TAG(a, A)
+SVG_TAG(altGlyph, AltGlyph)
 SVG_TAG(animate, Animate)
 SVG_TAG(animateMotion, AnimateMotion)
 SVG_TAG(animateTransform, AnimateTransform)

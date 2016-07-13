@@ -6,7 +6,7 @@
 #ifndef ctypes_CTypes_h
 #define ctypes_CTypes_h
 
-#include "mozilla/Vector.h"
+#include "mozilla/UniquePtr.h"
 
 #include "ffi.h"
 #include "jsalloc.h"
@@ -14,8 +14,7 @@
 #include "prlink.h"
 
 #include "ctypes/typedefs.h"
-#include "js/GCHashTable.h"
-#include "js/UniquePtr.h"
+#include "js/TraceableHashTable.h"
 #include "js/Vector.h"
 #include "vm/String.h"
 
@@ -26,6 +25,14 @@ namespace ctypes {
 ** Utility classes
 *******************************************************************************/
 
+// Container class for Vector, using SystemAllocPolicy.
+template<class T, size_t N = 0>
+class Array : public Vector<T, N, SystemAllocPolicy>
+{
+  static_assert(!mozilla::IsSame<T, JS::Value>::value,
+                "use JS::AutoValueVector instead");
+};
+
 // String and AutoString classes, based on Vector.
 typedef Vector<char16_t,  0, SystemAllocPolicy> String;
 typedef Vector<char16_t, 64, SystemAllocPolicy> AutoString;
@@ -35,7 +42,7 @@ typedef Vector<char,     64, SystemAllocPolicy> AutoCString;
 // Convenience functions to append, insert, and compare Strings.
 template <class T, size_t N, class AP, size_t ArrayLength>
 void
-AppendString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
+AppendString(Vector<T, N, AP>& v, const char (&array)[ArrayLength])
 {
   // Don't include the trailing '\0'.
   size_t alen = ArrayLength - 1;
@@ -49,7 +56,7 @@ AppendString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
 
 template <class T, size_t N, class AP>
 void
-AppendChars(mozilla::Vector<T, N, AP>& v, const char c, size_t count)
+AppendChars(Vector<T, N, AP>& v, const char c, size_t count)
 {
   size_t vlen = v.length();
   if (!v.resize(vlen + count))
@@ -61,7 +68,7 @@ AppendChars(mozilla::Vector<T, N, AP>& v, const char c, size_t count)
 
 template <class T, size_t N, class AP>
 void
-AppendUInt(mozilla::Vector<T, N, AP>& v, unsigned n)
+AppendUInt(Vector<T, N, AP>& v, unsigned n)
 {
   char array[16];
   size_t alen = JS_snprintf(array, 16, "%u", n);
@@ -75,33 +82,29 @@ AppendUInt(mozilla::Vector<T, N, AP>& v, unsigned n)
 
 template <class T, size_t N, size_t M, class AP>
 void
-AppendString(mozilla::Vector<T, N, AP>& v, mozilla::Vector<T, M, AP>& w)
+AppendString(Vector<T, N, AP>& v, Vector<T, M, AP>& w)
 {
-  if (!v.append(w.begin(), w.length()))
-    return;
+  v.append(w.begin(), w.length());
 }
 
 template <size_t N, class AP>
 void
-AppendString(mozilla::Vector<char16_t, N, AP>& v, JSString* str)
+AppendString(Vector<char16_t, N, AP>& v, JSString* str)
 {
   MOZ_ASSERT(str);
   JSLinearString* linear = str->ensureLinear(nullptr);
   if (!linear)
     return;
   JS::AutoCheckCannotGC nogc;
-  if (linear->hasLatin1Chars()) {
-    if (!v.append(linear->latin1Chars(nogc), linear->length()))
-      return;
-  } else {
-    if (!v.append(linear->twoByteChars(nogc), linear->length()))
-      return;
-  }
+  if (linear->hasLatin1Chars())
+    v.append(linear->latin1Chars(nogc), linear->length());
+  else
+    v.append(linear->twoByteChars(nogc), linear->length());
 }
 
 template <size_t N, class AP>
 void
-AppendString(mozilla::Vector<char, N, AP>& v, JSString* str)
+AppendString(Vector<char, N, AP>& v, JSString* str)
 {
   MOZ_ASSERT(str);
   size_t vlen = v.length();
@@ -127,7 +130,7 @@ AppendString(mozilla::Vector<char, N, AP>& v, JSString* str)
 
 template <class T, size_t N, class AP, size_t ArrayLength>
 void
-PrependString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
+PrependString(Vector<T, N, AP>& v, const char (&array)[ArrayLength])
 {
   // Don't include the trailing '\0'.
   size_t alen = ArrayLength - 1;
@@ -145,7 +148,7 @@ PrependString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
 
 template <size_t N, class AP>
 void
-PrependString(mozilla::Vector<char16_t, N, AP>& v, JSString* str)
+PrependString(Vector<char16_t, N, AP>& v, JSString* str)
 {
   MOZ_ASSERT(str);
   size_t vlen = v.length();
@@ -177,7 +180,7 @@ GetDeflatedUTF8StringLength(JSContext* maybecx, const CharT* chars,
                             size_t charsLength);
 
 template <typename CharT>
-MOZ_MUST_USE bool
+bool
 DeflateStringToUTF8Buffer(JSContext* maybecx, const CharT* src, size_t srclen,
                           char* dst, size_t* dstlenp);
 
@@ -211,7 +214,6 @@ enum ErrorNum {
 enum ABICode {
   ABI_DEFAULT,
   ABI_STDCALL,
-  ABI_THISCALL,
   ABI_WINAPI,
   INVALID_ABI
 };
@@ -234,10 +236,6 @@ struct FieldInfo
   JS::Heap<JSObject*> mType;    // CType of the field
   size_t              mIndex;   // index of the field in the struct (first is 0)
   size_t              mOffset;  // offset of the field in the struct, in bytes
-
-  void trace(JSTracer* trc) {
-    JS::TraceEdge(trc, &mType, "fieldType");
-  }
 };
 
 struct UnbarrieredFieldInfo
@@ -281,8 +279,11 @@ struct FieldHashPolicy : DefaultHasher<JSFlatString*>
   }
 };
 
-using FieldInfoHash = GCHashMap<js::HeapPtr<JSFlatString*>, FieldInfo,
-                                FieldHashPolicy, SystemAllocPolicy>;
+typedef TraceableHashMap<JSFlatString*, FieldInfo, FieldHashPolicy, SystemAllocPolicy>
+    FieldInfoHash;
+
+void
+TraceFieldInfoHash(JSTracer* trc, FieldInfoHash* fields);
 
 // Descriptor of ABI, return type, argument types, and variadicity for a
 // FunctionType.
@@ -302,12 +303,12 @@ struct FunctionInfo
 
   // A fixed array of known parameter types, excluding any variadic
   // parameters (if mIsVariadic).
-  Vector<JS::Heap<JSObject*>, 0, SystemAllocPolicy> mArgTypes;
+  Array<JS::Heap<JSObject*> > mArgTypes;
 
   // A variable array of ffi_type*s corresponding to both known parameter
   // types and dynamic (variadic) parameter types. Longer than mArgTypes
   // only if mIsVariadic.
-  Vector<ffi_type*, 0, SystemAllocPolicy> mFFITypes;
+  Array<ffi_type*> mFFITypes;
 
   // Flag indicating whether the function behaves like a C function with
   // ... as the final formal parameter.
@@ -454,7 +455,7 @@ namespace CType {
   TypeCode GetTypeCode(JSObject* typeObj);
   bool TypesEqual(JSObject* t1, JSObject* t2);
   size_t GetSize(JSObject* obj);
-  MOZ_MUST_USE bool GetSafeSize(JSObject* obj, size_t* result);
+  bool GetSafeSize(JSObject* obj, size_t* result);
   bool IsSizeDefined(JSObject* obj);
   size_t GetAlignment(JSObject* obj);
   ffi_type* GetFFIType(JSContext* cx, JSObject* obj);
@@ -470,7 +471,7 @@ namespace PointerType {
   JSObject* GetBaseType(JSObject* obj);
 } // namespace PointerType
 
-typedef UniquePtr<ffi_type> UniquePtrFFIType;
+typedef mozilla::UniquePtr<ffi_type, JS::DeletePolicy<ffi_type>> UniquePtrFFIType;
 
 namespace ArrayType {
   JSObject* CreateInternal(JSContext* cx, HandleObject baseType, size_t length,
@@ -478,12 +479,12 @@ namespace ArrayType {
 
   JSObject* GetBaseType(JSObject* obj);
   size_t GetLength(JSObject* obj);
-  MOZ_MUST_USE bool GetSafeLength(JSObject* obj, size_t* result);
+  bool GetSafeLength(JSObject* obj, size_t* result);
   UniquePtrFFIType BuildFFIType(JSContext* cx, JSObject* obj);
 } // namespace ArrayType
 
 namespace StructType {
-  MOZ_MUST_USE bool DefineInternal(JSContext* cx, JSObject* typeObj, JSObject* fieldsObj);
+  bool DefineInternal(JSContext* cx, JSObject* typeObj, JSObject* fieldsObj);
 
   const FieldInfoHash* GetFieldInfo(JSObject* obj);
   const FieldInfo* LookupField(JSContext* cx, JSObject* obj, JSFlatString* name);
@@ -519,9 +520,9 @@ namespace CData {
   bool IsCDataProto(JSObject* obj);
 
   // Attached by JSAPI as the function 'ctypes.cast'
-  MOZ_MUST_USE bool Cast(JSContext* cx, unsigned argc, Value* vp);
+  bool Cast(JSContext* cx, unsigned argc, Value* vp);
   // Attached by JSAPI as the function 'ctypes.getRuntime'
-  MOZ_MUST_USE bool GetRuntime(JSContext* cx, unsigned argc, Value* vp);
+  bool GetRuntime(JSContext* cx, unsigned argc, Value* vp);
 } // namespace CData
 
 namespace Int64 {
@@ -533,6 +534,13 @@ namespace UInt64 {
 } // namespace UInt64
 
 } // namespace ctypes
+
+template <> struct DefaultTracer<ctypes::FieldInfo> {
+    static void trace(JSTracer* trc, ctypes::FieldInfo* t, const char* name) {
+        JS_CallObjectTracer(trc, &t->mType, "fieldType");
+    }
+};
+
 } // namespace js
 
 #endif /* ctypes_CTypes_h */

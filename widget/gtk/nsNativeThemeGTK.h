@@ -50,8 +50,7 @@ public:
 
   NS_IMETHOD WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType, 
                                 nsIAtom* aAttribute,
-                                bool* aShouldRepaint,
-                                const nsAttrValue* aOldValue) override;
+                                bool* aShouldRepaint) override;
 
   NS_IMETHOD ThemeChanged() override;
 
@@ -76,8 +75,8 @@ protected:
 private:
   gint GetTabMarginPixels(nsIFrame* aFrame);
   bool GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
-                            WidgetNodeType& aGtkWidgetType,
-                            GtkWidgetState* aState, gint* aWidgetFlags);
+                              GtkThemeWidgetType& aGtkWidgetType,
+                              GtkWidgetState* aState, gint* aWidgetFlags);
   bool GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
                                nsIntMargin* aExtra);
 

@@ -28,7 +28,6 @@ public:
 
   // nsIStyleRule interface
   virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
-  virtual bool MightMapInheritedStyleData() override;
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
@@ -138,7 +137,7 @@ protected:
 
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  RefPtr<BodyRule> mContentStyleRule;
+  nsRefPtr<BodyRule> mContentStyleRule;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,

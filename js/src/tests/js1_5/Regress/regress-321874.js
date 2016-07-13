@@ -174,7 +174,7 @@ catch(ex)
 reportCompare(expect, actual, summary + section);
 
 const c = 0;
-expect = 'error';
+expect = 0;
 section = ': for(c in b);';
 printStatus(section);
 try
@@ -190,7 +190,7 @@ catch(ex)
 } 
 reportCompare(expect, actual, summary + section);
 
-expect = 'error';
+expect = 0;
 section = ': function foo(){for(c in b);};foo();';
 printStatus(section);
 try

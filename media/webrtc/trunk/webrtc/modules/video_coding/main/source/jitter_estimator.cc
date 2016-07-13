@@ -406,7 +406,7 @@ VCMJitterEstimator::PostProcessEstimate()
 }
 
 void
-VCMJitterEstimator::UpdateRtt(int64_t rttMs)
+VCMJitterEstimator::UpdateRtt(uint32_t rttMs)
 {
     _rttFilter.Update(rttMs);
 }

@@ -18,7 +18,7 @@ GfxDeviceFamily* GfxDriverInfo::mDeviceFamilies[DeviceFamilyMax];
 nsAString* GfxDriverInfo::mDeviceVendors[DeviceVendorMax];
 
 GfxDriverInfo::GfxDriverInfo()
-  : mOperatingSystem(OperatingSystem::Unknown),
+  : mOperatingSystem(DRIVER_OS_UNKNOWN),
     mOperatingSystemVersion(0),
     mAdapterVendor(GfxDriverInfo::GetDeviceVendor(VendorAll)),
     mDevices(allDevices),
@@ -29,7 +29,6 @@ GfxDriverInfo::GfxDriverInfo()
     mDriverVersion(0),
     mDriverVersionMax(0),
     mSuggestedVersion(nullptr),
-    mRuleId(nullptr),
     mGpu2(false)
 {}
 
@@ -38,7 +37,6 @@ GfxDriverInfo::GfxDriverInfo(OperatingSystem os, nsAString& vendor,
                              int32_t feature, int32_t featureStatus,
                              VersionComparisonOp op,
                              uint64_t driverVersion,
-                             const char *ruleId,
                              const char *suggestedVersion /* = nullptr */,
                              bool ownDevices /* = false */,
                              bool gpu2 /* = false */)
@@ -53,7 +51,6 @@ GfxDriverInfo::GfxDriverInfo(OperatingSystem os, nsAString& vendor,
     mDriverVersion(driverVersion),
     mDriverVersionMax(0),
     mSuggestedVersion(suggestedVersion),
-    mRuleId(ruleId),
     mGpu2(gpu2)
 {}
 
@@ -67,7 +64,6 @@ GfxDriverInfo::GfxDriverInfo(const GfxDriverInfo& aOrig)
     mDriverVersion(aOrig.mDriverVersion),
     mDriverVersionMax(aOrig.mDriverVersionMax),
     mSuggestedVersion(aOrig.mSuggestedVersion),
-    mRuleId(aOrig.mRuleId),
     mGpu2(aOrig.mGpu2)
 {
   // If we're managing the lifetime of the device family, we have to make a
@@ -163,7 +159,7 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id)
       APPEND_DEVICE(0x2e12); /* IntelQ45_1 */
       APPEND_DEVICE(0x2e13); /* IntelQ45_2 */
       break;
-    case IntelHDGraphicsToSandyBridge:
+    case IntelHDGraphicsToIvyBridge:
       APPEND_DEVICE(0x0042); /* IntelHDGraphics */
       APPEND_DEVICE(0x0046); /* IntelMobileHDGraphics */
       APPEND_DEVICE(0x0102); /* IntelSandyBridge_1 */
@@ -173,6 +169,7 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id)
       APPEND_DEVICE(0x0122); /* IntelSandyBridge_5 */
       APPEND_DEVICE(0x0126); /* IntelSandyBridge_6 */
       APPEND_DEVICE(0x010a); /* IntelSandyBridge_7 */
+      APPEND_DEVICE(0x0080); /* IntelIvyBridge */
       break;
     case IntelHD3000:
       APPEND_DEVICE(0x0126);
@@ -269,11 +266,8 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id)
     case Bug1155608:
       APPEND_DEVICE(0x2e22); /* IntelG45_1 */
       break;
-    case Bug1207665:
-      APPEND_DEVICE(0xa001); /* Intel Media Accelerator 3150 */
-      APPEND_DEVICE(0xa002);
-      APPEND_DEVICE(0xa011);
-      APPEND_DEVICE(0xa012);
+    case AMDRadeonHD5800:
+      APPEND_DEVICE(0x6899);
       break;
     // This should never happen, but we get a warning if we don't handle this.
     case DeviceFamilyMax:

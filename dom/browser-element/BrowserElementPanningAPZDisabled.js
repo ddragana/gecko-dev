@@ -8,7 +8,7 @@
 "use strict";
 dump("############################### browserElementPanningAPZDisabled.js loaded\n");
 
-var { classes: Cc, interfaces: Ci, results: Cr, utils: Cu }  = Components;
+let { classes: Cc, interfaces: Ci, results: Cr, utils: Cu }  = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Geometry.jsm");
 
@@ -348,10 +348,8 @@ const ContentPanningAPZDisabled = {
       let isScrollableTextarea = (node.tagName == 'TEXTAREA' &&
           (node.scrollHeight > node.clientHeight ||
            node.scrollWidth > node.clientWidth ||
-           ('scrollLeftMin' in node && 'scrollLeftMax' in node &&
-            node.scrollLeftMin != node.scrollLeftMax) ||
-           ('scrollTopMin' in node && 'scrollTopMax' in node &&
-            node.scrollTopMin != node.scrollTopMax)));
+           ('scrollLeftMax' in node && node.scrollLeftMax > 0) ||
+           ('scrollTopMax' in node && node.scrollTopMax > 0)));
       if (isScroll || isAuto || isScrollableTextarea) {
         return node;
       }
@@ -359,8 +357,7 @@ const ContentPanningAPZDisabled = {
       node = node.parentNode;
     }
 
-    if (nodeContent.scrollMaxX != nodeContent.scrollMinX ||
-        nodeContent.scrollMaxY != nodeContent.scrollMinY) {
+    if (nodeContent.scrollMaxX || nodeContent.scrollMaxY) {
       return nodeContent;
     }
 

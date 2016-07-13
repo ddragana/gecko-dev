@@ -41,7 +41,7 @@ const sidebarNS = ns();
 
 const WEB_PANEL_BROWSER_ID = 'web-panels-browser';
 
-var sidebars = {};
+let sidebars = {};
 
 const Sidebar = Class({
   implements: [ Disposable ],
@@ -212,12 +212,8 @@ const Sidebar = Class({
 
     add(sidebars, this);
   },
-  get id() {
-    return (modelFor(this) || {}).id;
-  },
-  get title() {
-    return (modelFor(this) || {}).title;
-  },
+  get id() (modelFor(this) || {}).id,
+  get title() (modelFor(this) || {}).title,
   set title(v) {
     // destroyed?
     if (!modelFor(this))
@@ -230,9 +226,7 @@ const Sidebar = Class({
     updateTitle(this, v);
     return modelFor(this).title = v;
   },
-  get url() {
-    return (modelFor(this) || {}).url;
-  },
+  get url() (modelFor(this) || {}).url,
   set url(v) {
     // destroyed?
     if (!modelFor(this))
@@ -248,12 +242,8 @@ const Sidebar = Class({
     updateURL(this, v);
     modelFor(this).url = v;
   },
-  show: function(window) {
-    return showSidebar(viewFor(window), this);
-  },
-  hide: function(window) {
-    return hideSidebar(viewFor(window), this);
-  },
+  show: function(window) showSidebar(viewFor(window), this),
+  hide: function(window) hideSidebar(viewFor(window), this),
   dispose: function() {
     const internals = sidebarNS(this);
 

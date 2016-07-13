@@ -26,10 +26,11 @@ add_task(function*() {
   EventUtils.synthesizeKey("g", { accelKey: true });
   yield scrollPromise;
 
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
-    Assert.ok(content.document.getElementById("s").getBoundingClientRect().left >= 0,
-      "scroll should include find result");
+  let scrollLeftPos = yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
+    return content.document.getElementById("s").getBoundingClientRect().left;
   });
+
+  ok(scrollLeftPos >= 0, "scroll should include find result");
 
   // clear the find bar
   EventUtils.synthesizeKey("a", { accelKey: true });

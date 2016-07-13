@@ -13,13 +13,22 @@
 
 using namespace mozilla;
 
-NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(ReservedISize, nscoord)
+NS_DECLARE_FRAME_PROPERTY(ReservedISize, nullptr);
+
+union NSCoordValue
+{
+  nscoord mCoord;
+  void* mPointer;
+  static_assert(sizeof(nscoord) <= sizeof(void*),
+                "Cannot store nscoord in pointer");
+};
 
 /* static */ void
 RubyUtils::SetReservedISize(nsIFrame* aFrame, nscoord aISize)
 {
   MOZ_ASSERT(IsExpandableRubyBox(aFrame));
-  aFrame->Properties().Set(ReservedISize(), aISize);
+  NSCoordValue value = { aISize };
+  aFrame->Properties().Set(ReservedISize(), value.mPointer);
 }
 
 /* static */ void
@@ -33,7 +42,9 @@ RubyUtils::ClearReservedISize(nsIFrame* aFrame)
 RubyUtils::GetReservedISize(nsIFrame* aFrame)
 {
   MOZ_ASSERT(IsExpandableRubyBox(aFrame));
-  return aFrame->Properties().Get(ReservedISize());
+  NSCoordValue value;
+  value.mPointer = aFrame->Properties().Get(ReservedISize());
+  return value.mCoord;
 }
 
 AutoRubyTextContainerArray::AutoRubyTextContainerArray(
@@ -46,39 +57,9 @@ AutoRubyTextContainerArray::AutoRubyTextContainerArray(
   }
 }
 
-nsIFrame*
-RubyColumn::Iterator::operator*() const
-{
-  nsIFrame* frame;
-  if (mIndex == -1) {
-    frame = mColumn.mBaseFrame;
-  } else {
-    frame = mColumn.mTextFrames[mIndex];
-  }
-  MOZ_ASSERT(frame, "Frame here cannot be null");
-  return frame;
-}
-
-void
-RubyColumn::Iterator::SkipUntilExistingFrame()
-{
-  if (mIndex == -1) {
-    if (mColumn.mBaseFrame) {
-      return;
-    }
-    ++mIndex;
-  }
-  int32_t numTextFrames = mColumn.mTextFrames.Length();
-  for (; mIndex < numTextFrames; ++mIndex) {
-    if (mColumn.mTextFrames[mIndex]) {
-      break;
-    }
-  }
-}
-
 RubySegmentEnumerator::RubySegmentEnumerator(nsRubyFrame* aRubyFrame)
 {
-  nsIFrame* frame = aRubyFrame->PrincipalChildList().FirstChild();
+  nsIFrame* frame = aRubyFrame->GetFirstPrincipalChild();
   MOZ_ASSERT(!frame ||
              frame->GetType() == nsGkAtoms::rubyBaseContainerFrame);
   mBaseContainer = static_cast<nsRubyBaseContainerFrame*>(frame);
@@ -103,7 +84,7 @@ RubyColumnEnumerator::RubyColumnEnumerator(
   const uint32_t rtcCount = aTextContainers.Length();
   mFrames.SetCapacity(rtcCount + 1);
 
-  nsIFrame* rbFrame = aBaseContainer->PrincipalChildList().FirstChild();
+  nsIFrame* rbFrame = aBaseContainer->GetFirstPrincipalChild();
   MOZ_ASSERT(!rbFrame || rbFrame->GetType() == nsGkAtoms::rubyBaseFrame);
   mFrames.AppendElement(static_cast<nsRubyContentFrame*>(rbFrame));
   for (uint32_t i = 0; i < rtcCount; i++) {
@@ -111,7 +92,7 @@ RubyColumnEnumerator::RubyColumnEnumerator(
     // If the container is for span, leave a nullptr here.
     // Spans do not take part in pairing.
     nsIFrame* rtFrame = !container->IsSpanContainer() ?
-      container->PrincipalChildList().FirstChild() : nullptr;
+      container->GetFirstPrincipalChild() : nullptr;
     MOZ_ASSERT(!rtFrame || rtFrame->GetType() == nsGkAtoms::rubyTextFrame);
     mFrames.AppendElement(static_cast<nsRubyContentFrame*>(rtFrame));
   }

@@ -23,7 +23,6 @@ const Cu = Components.utils;
 const Cr = Components.results;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
@@ -109,12 +108,12 @@ XPCOMUtils.defineLazyGetter(DownloadUIHelper, "strings", function () {
  */
 this.DownloadPrompter = function (aParent)
 {
-  if (AppConstants.MOZ_B2G) {
-    // On B2G there is no prompter implementation.
-    this._prompter = null;
-  } else {
-    this._prompter = Services.ww.getNewPrompter(aParent);
-  }
+#ifdef MOZ_B2G
+  // On B2G there is no prompter implementation.
+  this._prompter = null;
+#else
+  this._prompter = Services.ww.getNewPrompter(aParent);
+#endif
 }
 
 this.DownloadPrompter.prototype = {
@@ -211,17 +210,17 @@ this.DownloadPrompter.prototype = {
     switch (aPromptType) {
       case this.ON_QUIT:
         title = s.quitCancelDownloadsAlertTitle;
-        if (AppConstants.platform != "macosx") {
-          message = aDownloadsCount > 1
-                    ? s.quitCancelDownloadsAlertMsgMultiple(aDownloadsCount)
-                    : s.quitCancelDownloadsAlertMsg;
-          cancelButton = s.dontQuitButtonWin;
-        } else {
-          message = aDownloadsCount > 1
-                    ? s.quitCancelDownloadsAlertMsgMacMultiple(aDownloadsCount)
-                    : s.quitCancelDownloadsAlertMsgMac;
-          cancelButton = s.dontQuitButtonMac;
-        }
+#ifndef XP_MACOSX
+        message = aDownloadsCount > 1
+                  ? s.quitCancelDownloadsAlertMsgMultiple(aDownloadsCount)
+                  : s.quitCancelDownloadsAlertMsg;
+        cancelButton = s.dontQuitButtonWin;
+#else
+        message = aDownloadsCount > 1
+                  ? s.quitCancelDownloadsAlertMsgMacMultiple(aDownloadsCount)
+                  : s.quitCancelDownloadsAlertMsgMac;
+        cancelButton = s.dontQuitButtonMac;
+#endif
         break;
       case this.ON_OFFLINE:
         title = s.offlineCancelDownloadsAlertTitle;

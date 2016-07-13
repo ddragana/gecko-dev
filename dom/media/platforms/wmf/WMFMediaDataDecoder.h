@@ -11,7 +11,6 @@
 #include "WMF.h"
 #include "MFTDecoder.h"
 #include "mozilla/RefPtr.h"
-#include "nsAutoPtr.h"
 #include "PlatformDecoderModule.h"
 
 namespace mozilla {
@@ -22,6 +21,10 @@ namespace mozilla {
 class MFTManager {
 public:
   virtual ~MFTManager() {}
+
+  // Creates an initializs the MFTDecoder.
+  // Returns nullptr on failure.
+  virtual already_AddRefed<MFTDecoder> Init() = 0;
 
   // Submit a compressed sample for decoding.
   // This should forward to the MFTDecoder after performing
@@ -35,40 +38,13 @@ public:
   // than MF_E_TRANSFORM_NEED_MORE_INPUT, an error will be reported to the
   // MP4Reader.
   virtual HRESULT Output(int64_t aStreamOffset,
-                         RefPtr<MediaData>& aOutput) = 0;
-
-  void Flush() {
-    mDecoder->Flush();
-    mSeekTargetThreshold.reset();
-  }
-
-  void Drain()
-  {
-    if (FAILED(mDecoder->SendMFTMessage(MFT_MESSAGE_COMMAND_DRAIN, 0))) {
-      NS_WARNING("Failed to send DRAIN command to MFT");
-    }
-  }
+                         nsRefPtr<MediaData>& aOutput) = 0;
 
   // Destroys all resources.
   virtual void Shutdown() = 0;
 
-  virtual bool IsHardwareAccelerated(nsACString& aFailureReason) const { return false; }
+  virtual bool IsHardwareAccelerated() const { return false; }
 
-  virtual TrackInfo::TrackType GetType() = 0;
-
-  virtual void ConfigurationChanged(const TrackInfo& aConfig) {}
-
-  virtual const char* GetDescriptionName() const = 0;
-
-  virtual void SetSeekThreshold(const media::TimeUnit& aTime) {
-    mSeekTargetThreshold = Some(aTime);
-  }
-
-protected:
-  // IMFTransform wrapper that performs the decoding.
-  RefPtr<MFTDecoder> mDecoder;
-
-  Maybe<media::TimeUnit> mSeekTargetThreshold;
 };
 
 // Decodes audio and video using Windows Media Foundation. Samples are decoded
@@ -79,30 +55,21 @@ protected:
 class WMFMediaDataDecoder : public MediaDataDecoder {
 public:
   WMFMediaDataDecoder(MFTManager* aOutputSource,
-                      TaskQueue* aTaskQueue,
+                      FlushableTaskQueue* aAudioTaskQueue,
                       MediaDataDecoderCallback* aCallback);
   ~WMFMediaDataDecoder();
 
-  RefPtr<MediaDataDecoder::InitPromise> Init() override;
+  virtual nsresult Init() override;
 
-  nsresult Input(MediaRawData* aSample);
+  virtual nsresult Input(MediaRawData* aSample);
 
-  nsresult Flush() override;
+  virtual nsresult Flush() override;
 
-  nsresult Drain() override;
+  virtual nsresult Drain() override;
 
-  nsresult Shutdown() override;
+  virtual nsresult Shutdown() override;
 
-  bool IsHardwareAccelerated(nsACString& aFailureReason) const override;
-
-  nsresult ConfigurationChanged(const TrackInfo& aConfig) override;
-
-  const char* GetDescriptionName() const override
-  {
-    return mMFTManager ? mMFTManager->GetDescriptionName() : "";
-  }
-
-  virtual void SetSeekThreshold(const media::TimeUnit& aTime) override;
+  virtual bool IsHardwareAccelerated() const override;
 
 private:
 
@@ -124,23 +91,22 @@ private:
 
   void ProcessShutdown();
 
-  // Called on the task queue. Tell the MFT that the next Input will have a
-  // different configuration (typically resolution change).
-  void ProcessConfigurationChanged(UniquePtr<TrackInfo>&& aConfig);
-
-  const RefPtr<TaskQueue> mTaskQueue;
+  RefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
 
+  RefPtr<MFTDecoder> mDecoder;
   nsAutoPtr<MFTManager> mMFTManager;
 
   // The last offset into the media resource that was passed into Input().
   // This is used to approximate the decoder's position in the media resource.
   int64_t mLastStreamOffset;
 
+  // For access to and waiting on mIsFlushing
+  Monitor mMonitor;
   // Set on reader/decode thread calling Flush() to indicate that output is
   // not required and so input samples on mTaskQueue need not be processed.
   // Cleared on mTaskQueue.
-  Atomic<bool> mIsFlushing;
+  bool mIsFlushing;
 
   bool mIsShutDown;
 

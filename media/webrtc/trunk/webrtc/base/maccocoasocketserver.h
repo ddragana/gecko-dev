@@ -29,10 +29,10 @@ namespace rtc {
 class MacCocoaSocketServer : public MacBaseSocketServer {
  public:
   explicit MacCocoaSocketServer();
-  ~MacCocoaSocketServer() override;
+  virtual ~MacCocoaSocketServer();
 
-  bool Wait(int cms, bool process_io) override;
-  void WakeUp() override;
+  virtual bool Wait(int cms, bool process_io);
+  virtual void WakeUp();
 
  private:
   MacCocoaSocketServerHelperRtc* helper_;

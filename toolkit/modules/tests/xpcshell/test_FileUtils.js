@@ -91,7 +91,7 @@ add_test(function test_getDir_shouldCreate() {
   run_next_test();
 });
 
-var openFileOutputStream_defaultFlags = function (aKind, aFileName) {
+let openFileOutputStream_defaultFlags = function (aKind, aFileName) {
   let file = FileUtils.getFile("ProfD", [aFileName]);
   let fos;
   do_check_true(aKind == "atomic" || aKind == "safe" || aKind == "");
@@ -119,7 +119,7 @@ var openFileOutputStream_defaultFlags = function (aKind, aFileName) {
   // No nsIXULRuntime in xpcshell, so use this trick to determine whether we're
   // on Windows.
   if ("@mozilla.org/windows-registry-key;1" in Components.classes) {
-    do_check_eq(file.permissions, 0o666);
+    do_check_eq(file.permissions, 0666);
   } else {
     do_check_eq(file.permissions, FileUtils.PERMS_FILE);
   }
@@ -127,7 +127,7 @@ var openFileOutputStream_defaultFlags = function (aKind, aFileName) {
   run_next_test();
 };
 
-var openFileOutputStream_modeFlags = function(aKind, aFileName) {
+let openFileOutputStream_modeFlags = function(aKind, aFileName) {
   let file = FileUtils.getFile("ProfD", [aFileName]);
   let fos;
   do_check_true(aKind == "atomic" || aKind == "safe" || aKind == "");
@@ -147,7 +147,7 @@ var openFileOutputStream_modeFlags = function(aKind, aFileName) {
   run_next_test();
 };
 
-var closeFileOutputStream = function(aKind, aFileName) {
+let closeFileOutputStream = function(aKind, aFileName) {
   let file = FileUtils.getFile("ProfD", [aFileName]);
   let fos;
   do_check_true(aKind == "atomic" || aKind == "safe");

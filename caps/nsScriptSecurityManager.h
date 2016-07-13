@@ -14,6 +14,7 @@
 #include "nsIAddonPolicyService.h"
 #include "nsIPrincipal.h"
 #include "nsCOMPtr.h"
+#include "nsIChannelEventSink.h"
 #include "nsIObserver.h"
 #include "nsServiceManagerUtils.h"
 #include "plstr.h"
@@ -27,7 +28,7 @@ class nsIStringBundle;
 class nsSystemPrincipal;
 
 namespace mozilla {
-class PrincipalOriginAttributes;
+class OriginAttributes;
 } // namespace mozilla
 
 /////////////////////////////
@@ -38,6 +39,7 @@ class PrincipalOriginAttributes;
 { 0xba, 0x18, 0x00, 0x60, 0xb0, 0xf1, 0x99, 0xa2 }}
 
 class nsScriptSecurityManager final : public nsIScriptSecurityManager,
+                                      public nsIChannelEventSink,
                                       public nsIObserver
 {
 public:
@@ -47,6 +49,7 @@ public:
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSISCRIPTSECURITYMANAGER
+    NS_DECL_NSICHANNELEVENTSINK
     NS_DECL_NSIOBSERVER
 
     static nsScriptSecurityManager*
@@ -57,6 +60,10 @@ public:
 
     static nsSystemPrincipal*
     SystemPrincipalSingletonConstructor();
+
+    JSContext* GetCurrentJSContext();
+
+    JSContext* GetSafeJSContext();
 
     /**
      * Utility method for comparing two URIs.  For security purposes, two URIs
@@ -114,11 +121,7 @@ private:
     AddSitesToFileURIWhitelist(const nsCString& aSiteList);
 
     // If aURI is a moz-extension:// URI, set mAddonId to the associated addon.
-    nsresult MaybeSetAddonIdFromURI(mozilla::PrincipalOriginAttributes& aAttrs, nsIURI* aURI);
-
-    nsresult GetChannelResultPrincipal(nsIChannel* aChannel,
-                                       nsIPrincipal** aPrincipal,
-                                       bool aIgnoreSandboxing);
+    nsresult MaybeSetAddonIdFromURI(mozilla::OriginAttributes& aAttrs, nsIURI* aURI);
 
     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
     bool mPrefInitialized;
@@ -151,7 +154,7 @@ namespace mozilla {
 
 void
 GetJarPrefix(uint32_t aAppid,
-             bool aInIsolatedMozBrowser,
+             bool aInMozBrowser,
              nsACString& aJarPrefix);
 
 } // namespace mozilla

@@ -25,7 +25,6 @@
 #include "nsNetCID.h"
 #include "jswrapper.h"
 
-#include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/HashFunctions.h"
@@ -77,15 +76,10 @@ nsPrincipal::nsPrincipal()
 { }
 
 nsPrincipal::~nsPrincipal()
-{ 
-  // let's clear the principal within the csp to avoid a tangling pointer
-  if (mCSP) {
-    static_cast<nsCSPContext*>(mCSP.get())->clearLoadingPrincipal();
-  }
-}
+{ }
 
 nsresult
-nsPrincipal::Init(nsIURI *aCodebase, const PrincipalOriginAttributes& aOriginAttributes)
+nsPrincipal::Init(nsIURI *aCodebase, const OriginAttributes& aOriginAttributes)
 {
   NS_ENSURE_STATE(!mInitialized);
   NS_ENSURE_ARG(aCodebase);
@@ -126,7 +120,7 @@ nsPrincipal::GetOriginForURI(nsIURI* aURI, nsACString& aOrigin)
   bool isChrome;
   nsresult rv = origin->SchemeIs("chrome", &isChrome);
   if (NS_SUCCEEDED(rv) && !isChrome) {
-    rv = origin->GetAsciiHostPort(hostPort);
+    rv = origin->GetAsciiHost(hostPort);
     // Some implementations return an empty string, treat it as no support
     // for asciiHost by that implementation.
     if (hostPort.IsEmpty()) {
@@ -159,7 +153,17 @@ nsPrincipal::GetOriginForURI(nsIURI* aURI, nsACString& aOrigin)
     return NS_OK;
   }
 
+  int32_t port;
   if (NS_SUCCEEDED(rv) && !isChrome) {
+    rv = origin->GetPort(&port);
+  }
+
+  if (NS_SUCCEEDED(rv) && !isChrome) {
+    if (port != -1) {
+      hostPort.Append(':');
+      hostPort.AppendInt(port, 10);
+    }
+
     rv = origin->GetScheme(aOrigin);
     NS_ENSURE_SUCCESS(rv, rv);
     aOrigin.AppendLiteral("://");
@@ -244,9 +248,17 @@ nsPrincipal::GetURI(nsIURI** aURI)
   return NS_EnsureSafeToReturn(mCodebase, aURI);
 }
 
-bool
-nsPrincipal::MayLoadInternal(nsIURI* aURI)
+NS_IMETHODIMP
+nsPrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsPrincipal)
 {
+   if (aAllowIfInheritsPrincipal) {
+    // If the caller specified to allow loads of URIs that inherit
+    // our principal, allow the load if this URI inherits its principal
+    if (nsPrincipal::IsPrincipalInherited(aURI)) {
+      return NS_OK;
+    }
+  }
+
   // See if aURI is something like a Blob URI that is actually associated with
   // a principal.
   nsCOMPtr<nsIURIWithPrincipal> uriWithPrin = do_QueryInterface(aURI);
@@ -254,18 +266,18 @@ nsPrincipal::MayLoadInternal(nsIURI* aURI)
   if (uriWithPrin) {
     uriWithPrin->GetPrincipal(getter_AddRefs(uriPrin));
   }
-  if (uriPrin) {
-    return nsIPrincipal::Subsumes(uriPrin);
+  if (uriPrin && nsIPrincipal::Subsumes(uriPrin)) {
+      return NS_OK;
   }
 
   // If this principal is associated with an addon, check whether that addon
   // has been given permission to load from this domain.
   if (AddonAllowsLoad(aURI)) {
-    return true;
+    return NS_OK;
   }
 
   if (nsScriptSecurityManager::SecurityCompareURIs(mCodebase, aURI)) {
-    return true;
+    return NS_OK;
   }
 
   // If strict file origin policy is in effect, local files will always fail
@@ -274,10 +286,13 @@ nsPrincipal::MayLoadInternal(nsIURI* aURI)
   if (nsScriptSecurityManager::GetStrictFileOriginPolicy() &&
       NS_URIIsLocalFile(aURI) &&
       NS_RelaxStrictFileOriginPolicy(aURI, mCodebase)) {
-    return true;
+    return NS_OK;
   }
 
-  return false;
+  if (aReport) {
+    nsScriptSecurityManager::ReportError(nullptr, NS_LITERAL_STRING("CheckSameOriginError"), mCodebase, aURI);
+  }
+  return NS_ERROR_DOM_BAD_URI;
 }
 
 void
@@ -391,21 +406,26 @@ nsPrincipal::Read(nsIObjectInputStream* aStream)
   rv = aStream->ReadCString(suffix);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  PrincipalOriginAttributes attrs;
+  OriginAttributes attrs;
   bool ok = attrs.PopulateFromSuffix(suffix);
   NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
 
   rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // This may be null.
+  nsCOMPtr<nsIContentSecurityPolicy> csp = do_QueryInterface(supports, &rv);
+
   rv = Init(codebase, attrs);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mCSP = do_QueryInterface(supports, &rv);
-  // make sure setRequestContext is called after Init(),
-  // to make sure  the principals URI been initalized.
-  if (mCSP) {
-    mCSP->SetRequestContext(nullptr, this);
+  rv = SetCsp(csp);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // need to link in the CSP context here (link in the URI of the protected
+  // resource).
+  if (csp) {
+    csp->SetRequestContext(codebase, nullptr, nullptr);
   }
 
   SetDomain(domain);
@@ -417,6 +437,7 @@ NS_IMETHODIMP
 nsPrincipal::Write(nsIObjectOutputStream* aStream)
 {
   NS_ENSURE_STATE(mCodebase);
+
   nsresult rv = NS_WriteOptionalCompoundObject(aStream, mCodebase, NS_GET_IID(nsIURI),
                                                true);
   if (NS_FAILED(rv)) {
@@ -748,16 +769,17 @@ nsExpandedPrincipal::SubsumesInternal(nsIPrincipal* aOther,
   return false;
 }
 
-bool
-nsExpandedPrincipal::MayLoadInternal(nsIURI* uri)
+NS_IMETHODIMP
+nsExpandedPrincipal::CheckMayLoad(nsIURI* uri, bool aReport, bool aAllowIfInheritsPrincipal)
 {
+  nsresult rv;
   for (uint32_t i = 0; i < mPrincipals.Length(); ++i){
-    if (BasePrincipal::Cast(mPrincipals[i])->MayLoadInternal(uri)) {
-      return true;
-    }
+    rv = mPrincipals[i]->CheckMayLoad(uri, aReport, aAllowIfInheritsPrincipal);
+    if (NS_SUCCEEDED(rv))
+      return rv;
   }
 
-  return false;
+  return NS_ERROR_DOM_BAD_URI;
 }
 
 NS_IMETHODIMP

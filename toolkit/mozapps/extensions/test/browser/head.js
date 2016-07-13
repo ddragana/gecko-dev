@@ -1,16 +1,15 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
-/*globals end_test*/
 
 Components.utils.import("resource://gre/modules/NetUtil.jsm");
 
-var tmp = {};
+let tmp = {};
 Components.utils.import("resource://gre/modules/AddonManager.jsm", tmp);
 Components.utils.import("resource://gre/modules/Log.jsm", tmp);
-var AddonManager = tmp.AddonManager;
-var AddonManagerPrivate = tmp.AddonManagerPrivate;
-var Log = tmp.Log;
+let AddonManager = tmp.AddonManager;
+let AddonManagerPrivate = tmp.AddonManagerPrivate;
+let Log = tmp.Log;
 
 var pathParts = gTestPath.split("/");
 // Drop the test filename
@@ -26,9 +25,7 @@ if (gTestInWindow) {
 const RELATIVE_DIR = pathParts.slice(4).join("/") + "/";
 
 const TESTROOT = "http://example.com/" + RELATIVE_DIR;
-const SECURE_TESTROOT = "https://example.com/" + RELATIVE_DIR;
 const TESTROOT2 = "http://example.org/" + RELATIVE_DIR;
-const SECURE_TESTROOT2 = "https://example.org/" + RELATIVE_DIR;
 const CHROMEROOT = pathParts.join("/") + "/";
 const PREF_DISCOVERURL = "extensions.webservice.discoverURL";
 const PREF_DISCOVER_ENABLED = "extensions.getAddons.showPane";
@@ -52,8 +49,7 @@ var PREF_CHECK_COMPATIBILITY;
   } catch (e) { }
   if (channel != "aurora" &&
     channel != "beta" &&
-    channel != "release" &&
-    channel != "esr") {
+    channel != "release") {
     var version = "nightly";
   } else {
     version = Services.appinfo.version.replace(/^([^\.]+\.[0-9]+[a-z]*).*/gi, "$1");
@@ -80,6 +76,7 @@ var gRestorePrefs = [{name: PREF_LOGGING_ENABLED},
                      {name: "extensions.getAddons.search.url"},
                      {name: "extensions.getAddons.cache.enabled"},
                      {name: "devtools.chrome.enabled"},
+                     {name: "devtools.debugger.remote-enabled"},
                      {name: PREF_SEARCH_MAXRESULTS},
                      {name: PREF_STRICT_COMPAT},
                      {name: PREF_CHECK_COMPATIBILITY}];
@@ -120,16 +117,16 @@ function checkOpenWindows(aWindowID) {
 
 // Tools to disable and re-enable the background update and blocklist timers
 // so that tests can protect themselves from unwanted timer events.
-var gCatMan = Components.classes["@mozilla.org/categorymanager;1"]
+let gCatMan = Components.classes["@mozilla.org/categorymanager;1"]
                            .getService(Components.interfaces.nsICategoryManager);
 // Default values from toolkit/mozapps/extensions/extensions.manifest, but disable*UpdateTimer()
 // records the actual value so we can put it back in enable*UpdateTimer()
-var backgroundUpdateConfig = "@mozilla.org/addons/integration;1,getService,addon-background-update-timer,extensions.update.interval,86400";
-var blocklistUpdateConfig = "@mozilla.org/extensions/blocklist;1,getService,blocklist-background-update-timer,extensions.blocklist.interval,86400";
+let backgroundUpdateConfig = "@mozilla.org/addons/integration;1,getService,addon-background-update-timer,extensions.update.interval,86400";
+let blocklistUpdateConfig = "@mozilla.org/extensions/blocklist;1,getService,blocklist-background-update-timer,extensions.blocklist.interval,86400";
 
-var UTIMER = "update-timer";
-var AMANAGER = "addonManager";
-var BLOCKLIST = "nsBlocklistService";
+let UTIMER = "update-timer";
+let AMANAGER = "addonManager";
+let BLOCKLIST = "nsBlocklistService";
 
 function disableBackgroundUpdateTimer() {
   info("Disabling " + UTIMER + " " + AMANAGER);
@@ -230,7 +227,7 @@ function run_next_test() {
   executeSoon(() => log_exceptions(test));
 }
 
-var get_tooltip_info = Task.async(function*(addon) {
+let get_tooltip_info = Task.async(function*(addon) {
   let managerWindow = addon.ownerDocument.defaultView;
 
   // The popup code uses a triggering event's target to set the
@@ -284,19 +281,10 @@ function get_addon_file_url(aFilename) {
   }
 }
 
-function get_current_view(aManager) {
-  let view = aManager.document.getElementById("view-port").selectedPanel;
-  if (view.id == "headered-views") {
-    view = aManager.document.getElementById("headered-views-content").selectedPanel;
-  }
-  is(view, aManager.gViewController.displayedView, "view controller is tracking the displayed view correctly");
-  return view;
-}
-
 function get_test_items_in_list(aManager) {
   var tests = "@tests.mozilla.org";
 
-  let view = get_current_view(aManager);
+  let view = aManager.document.getElementById("view-port").selectedPanel;
   let listid = view.id == "search-view" ? "search-list" : "addon-list";
   let item = aManager.document.getElementById(listid).firstChild;
   let items = [];
@@ -317,7 +305,7 @@ function get_test_items_in_list(aManager) {
 
 function check_all_in_list(aManager, aIds, aIgnoreExtras) {
   var doc = aManager.document;
-  var view = get_current_view(aManager);
+  var view = doc.getElementById("view-port").selectedPanel;
   var listid = view.id == "search-view" ? "search-list" : "addon-list";
   var list = doc.getElementById(listid);
 
@@ -345,7 +333,7 @@ function check_all_in_list(aManager, aIds, aIgnoreExtras) {
 
 function get_addon_element(aManager, aId) {
   var doc = aManager.document;
-  var view = get_current_view(aManager);
+  var view = doc.getElementById("view-port").selectedPanel;
   var listid = "addon-list";
   if (view.id == "search-view")
     listid = "search-list";
@@ -540,12 +528,6 @@ function is_element_hidden(aElement, aMsg) {
   ok(is_hidden(aElement), aMsg || (aElement + " should be hidden"));
 }
 
-function promiseAddonByID(aId) {
-  return new Promise(resolve => {
-    AddonManager.getAddonByID(aId, resolve);
-  });
-}
-
 function promiseAddonsByIDs(aIDs) {
   return new Promise(resolve => {
     AddonManager.getAddonsByIDs(aIDs, resolve);
@@ -701,8 +683,7 @@ function MockProvider(aUseAsyncCallbacks, aTypes) {
     id: "extension",
     name: "Extensions",
     uiPriority: 4000,
-    flags: AddonManager.TYPE_UI_VIEW_LIST |
-           AddonManager.TYPE_SUPPORTS_UNDO_RESTARTLESS_UNINSTALL,
+    flags: AddonManager.TYPE_UI_VIEW_LIST
   }] : aTypes;
 
   var self = this;
@@ -750,10 +731,10 @@ MockProvider.prototype = {
    *         The add-on to add
    */
   addAddon: function MP_addAddon(aAddon) {
-    var oldAddons = this.addons.filter(aOldAddon => aOldAddon.id == aAddon.id);
+    var oldAddons = this.addons.filter(function(aOldAddon) aOldAddon.id == aAddon.id);
     var oldAddon = oldAddons.length > 0 ? oldAddons[0] : null;
 
-    this.addons = this.addons.filter(aOldAddon => aOldAddon.id != aAddon.id);
+    this.addons = this.addons.filter(function(aOldAddon) aOldAddon.id != aAddon.id);
 
     this.addons.push(aAddon);
     aAddon._provider = this;
@@ -1132,6 +1113,7 @@ function MockAddon(aId, aName, aType, aOperationsRequiringRestart) {
   this.type = aType || "extension";
   this.version = "";
   this.isCompatible = true;
+  this.isDebuggable = false;
   this.providesUpdatesSecurely = true;
   this.blocklistState = 0;
   this._appDisabled = false;
@@ -1145,8 +1127,7 @@ function MockAddon(aId, aName, aType, aOperationsRequiringRestart) {
                       AddonManager.PERM_CAN_ENABLE |
                       AddonManager.PERM_CAN_DISABLE |
                       AddonManager.PERM_CAN_UPGRADE;
-  this.operationsRequiringRestart = (aOperationsRequiringRestart != undefined) ?
-    aOperationsRequiringRestart :
+  this.operationsRequiringRestart = aOperationsRequiringRestart ||
     (AddonManager.OP_NEEDS_RESTART_INSTALL |
      AddonManager.OP_NEEDS_RESTART_UNINSTALL |
      AddonManager.OP_NEEDS_RESTART_ENABLE |
@@ -1155,8 +1136,7 @@ function MockAddon(aId, aName, aType, aOperationsRequiringRestart) {
 
 MockAddon.prototype = {
   get shouldBeActive() {
-    return !this.appDisabled && !this._userDisabled &&
-           !(this.pendingOperations & AddonManager.PENDING_UNINSTALL);
+    return !this.appDisabled && !this._userDisabled;
   },
 
   get appDisabled() {
@@ -1228,19 +1208,16 @@ MockAddon.prototype = {
     // Tests can implement this if they need to
   },
 
-  uninstall: function(aAlwaysAllowUndo = false) {
-    if ((this.operationsRequiringRestart & AddonManager.OP_NEED_RESTART_UNINSTALL)
-        && this.pendingOperations & AddonManager.PENDING_UNINSTALL)
+  uninstall: function() {
+    if (this.pendingOperations & AddonManager.PENDING_UNINSTALL)
       throw Components.Exception("Add-on is already pending uninstall");
 
-    var needsRestart = aAlwaysAllowUndo || !!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_UNINSTALL);
+    var needsRestart = !!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_UNINSTALL);
     this.pendingOperations |= AddonManager.PENDING_UNINSTALL;
     AddonManagerPrivate.callAddonListeners("onUninstalling", this, needsRestart);
     if (!needsRestart) {
       this.pendingOperations -= AddonManager.PENDING_UNINSTALL;
       this._provider.removeAddon(this);
-    } else if (!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_DISABLE)) {
-      this.isActive = false;
     }
   },
 
@@ -1249,12 +1226,7 @@ MockAddon.prototype = {
       throw Components.Exception("Add-on is not pending uninstall");
 
     this.pendingOperations -= AddonManager.PENDING_UNINSTALL;
-    this.isActive = this.shouldBeActive;
     AddonManagerPrivate.callAddonListeners("onOperationCancelled", this);
-  },
-
-  markAsSeen: function() {
-    this.seen = true;
   },
 
   _updateActiveState: function(currentActive, newActive) {
@@ -1266,7 +1238,7 @@ MockAddon.prototype = {
       AddonManagerPrivate.callAddonListeners("onOperationCancelled", this);
     }
     else if (newActive) {
-      let needsRestart = !!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_ENABLE);
+      var needsRestart = !!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_ENABLE);
       this.pendingOperations |= AddonManager.PENDING_ENABLE;
       AddonManagerPrivate.callAddonListeners("onEnabling", this, needsRestart);
       if (!needsRestart) {
@@ -1276,7 +1248,7 @@ MockAddon.prototype = {
       }
     }
     else {
-      let needsRestart = !!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_DISABLE);
+      var needsRestart = !!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_DISABLE);
       this.pendingOperations |= AddonManager.PENDING_DISABLE;
       AddonManagerPrivate.callAddonListeners("onDisabling", this, needsRestart);
       if (!needsRestart) {
@@ -1356,18 +1328,14 @@ MockInstall.prototype = {
           return;
         }
 
-        let needsRestart = (this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_INSTALL);
-        AddonManagerPrivate.callAddonListeners("onInstalling", this.addon, needsRestart);
-        if (!needsRestart) {
-          AddonManagerPrivate.callAddonListeners("onInstalled", this.addon);
-        }
+        AddonManagerPrivate.callAddonListeners("onInstalling", this.addon);
 
         this.state = AddonManager.STATE_INSTALLED;
         this.callListeners("onInstallEnded");
         break;
       case AddonManager.STATE_DOWNLOADING:
       case AddonManager.STATE_CHECKING:
-      case AddonManager.STATE_INSTALLING:
+      case AddonManger.STATE_INSTALLING:
         // Installation is already running
         return;
       default:
@@ -1393,21 +1361,21 @@ MockInstall.prototype = {
 
 
   addListener: function(aListener) {
-    if (!this.listeners.some(i => i == aListener))
+    if (!this.listeners.some(function(i) i == aListener))
       this.listeners.push(aListener);
   },
 
   removeListener: function(aListener) {
-    this.listeners = this.listeners.filter(i => i != aListener);
+    this.listeners = this.listeners.filter(function(i) i != aListener);
   },
 
   addTestListener: function(aListener) {
-    if (!this.testListeners.some(i => i == aListener))
+    if (!this.testListeners.some(function(i) i == aListener))
       this.testListeners.push(aListener);
   },
 
   removeTestListener: function(aListener) {
-    this.testListeners = this.testListeners.filter(i => i != aListener);
+    this.testListeners = this.testListeners.filter(function(i) i != aListener);
   },
 
   callListeners: function(aMethod) {

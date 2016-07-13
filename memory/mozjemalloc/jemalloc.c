@@ -435,9 +435,7 @@ static const bool isthreaded = true;
 #define JEMALLOC_USES_MAP_ALIGN	 /* Required on Solaris 10. Might improve performance elsewhere. */
 #endif
 
-#ifndef __DECONST
 #define __DECONST(type, var) ((type)(uintptr_t)(const void *)(var))
-#endif
 
 #ifdef MOZ_MEMORY_WINDOWS
    /* MSVC++ does not support C99 variable-length arrays. */
@@ -536,7 +534,7 @@ static const bool isthreaded = true;
  */
 #define	CHUNK_2POW_DEFAULT	20
 /* Maximum number of dirty pages per arena. */
-#define	DIRTY_MAX_DEFAULT	(1U << 8)
+#define	DIRTY_MAX_DEFAULT	(1U << 10)
 
 /*
  * Maximum size of L1 cache line.  This is used to avoid cache line aliasing,
@@ -547,12 +545,11 @@ static const bool isthreaded = true;
 #define	CACHELINE		((size_t)(1U << CACHELINE_2POW))
 
 /*
- * Smallest size class to support.  On Windows the smallest allocation size
- * must be 8 bytes on 32-bit, 16 bytes on 64-bit.  On Linux and Mac, even
- * malloc(1) must reserve a word's worth of memory (see Mozilla bug 691003).
+ * Smallest size class to support.  On Linux and Mac, even malloc(1) must
+ * reserve a word's worth of memory (see Mozilla bug 691003).
  */
 #ifdef MOZ_MEMORY_WINDOWS
-#define TINY_MIN_2POW           (sizeof(void*) == 8 ? 4 : 3)
+#define	TINY_MIN_2POW		1
 #else
 #define TINY_MIN_2POW           (sizeof(void*) == 8 ? 3 : 2)
 #endif
@@ -1090,7 +1087,7 @@ static const bool config_recycle = false;
  * controlling the malloc behavior are defined as compile-time constants
  * for best performance and cannot be altered at runtime.
  */
-#if !defined(__ia64__) && !defined(__sparc__) && !defined(__mips__) && !defined(__aarch64__)
+#if !defined(__ia64__) && !defined(__sparc__) && !defined(__mips__)
 #define MALLOC_STATIC_SIZES 1
 #endif
 
@@ -1104,7 +1101,7 @@ static const bool config_recycle = false;
 #if (defined(SOLARIS) || defined(__FreeBSD__)) && \
     (defined(__sparc) || defined(__sparcv9) || defined(__ia64))
 #define pagesize_2pow			((size_t) 13)
-#elif defined(__powerpc64__)
+#elif defined(__powerpc64__) || defined(__aarch64__)
 #define pagesize_2pow			((size_t) 16)
 #else
 #define pagesize_2pow			((size_t) 12)
@@ -1574,16 +1571,10 @@ wrtmessage(const char *p1, const char *p2, const char *p3, const char *p4)
 #if defined(MOZ_MEMORY) && !defined(MOZ_MEMORY_WINDOWS)
 #define	_write	write
 #endif
-	// Pretend to check _write() errors to suppress gcc warnings about
-	// warn_unused_result annotations in some versions of glibc headers.
-	if (_write(STDERR_FILENO, p1, (unsigned int) strlen(p1)) < 0)
-		return;
-	if (_write(STDERR_FILENO, p2, (unsigned int) strlen(p2)) < 0)
-		return;
-	if (_write(STDERR_FILENO, p3, (unsigned int) strlen(p3)) < 0)
-		return;
-	if (_write(STDERR_FILENO, p4, (unsigned int) strlen(p4)) < 0)
-		return;
+	_write(STDERR_FILENO, p1, (unsigned int) strlen(p1));
+	_write(STDERR_FILENO, p2, (unsigned int) strlen(p2));
+	_write(STDERR_FILENO, p3, (unsigned int) strlen(p3));
+	_write(STDERR_FILENO, p4, (unsigned int) strlen(p4));
 }
 
 MOZ_JEMALLOC_API
@@ -1609,12 +1600,6 @@ void	(*_malloc_message)(const char *p1, const char *p2, const char *p3,
 #include "mozilla/TaggedAnonymousMemory.h"
 // Note: MozTaggedAnonymousMmap() could call an LD_PRELOADed mmap
 // instead of the one defined here; use only MozTagAnonymousMemory().
-
-#ifdef MOZ_MEMORY_ANDROID
-// Android's pthread.h does not declare pthread_atfork() until SDK 21.
-extern MOZ_EXPORT
-int pthread_atfork(void (*)(void), void (*)(void), void(*)(void));
-#endif
 
 /* RELEASE_ASSERT calls jemalloc_crash() instead of calling MOZ_CRASH()
  * directly because we want crashing to add a frame to the stack.  This makes
@@ -1704,9 +1689,6 @@ malloc_mutex_unlock(malloc_mutex_t *mutex)
 #endif
 }
 
-#if (defined(__GNUC__))
-__attribute__((unused))
-#  endif
 static bool
 malloc_spin_init(malloc_spinlock_t *lock)
 {
@@ -2464,10 +2446,9 @@ pages_map(void *addr, size_t size)
 		if (munmap(ret, size) == -1) {
 			char buf[STRERROR_BUF];
 
-			if (strerror_r(errno, buf, sizeof(buf)) == 0) {
-				_malloc_message(_getprogname(),
-					": (malloc) Error in munmap(): ", buf, "\n");
-			}
+			strerror_r(errno, buf, sizeof(buf));
+			_malloc_message(_getprogname(),
+			    ": (malloc) Error in munmap(): ", buf, "\n");
 			if (opt_abort)
 				abort();
 		}
@@ -2494,10 +2475,9 @@ pages_unmap(void *addr, size_t size)
 	if (munmap(addr, size) == -1) {
 		char buf[STRERROR_BUF];
 
-		if (strerror_r(errno, buf, sizeof(buf)) == 0) {
-			_malloc_message(_getprogname(),
-				": (malloc) Error in munmap(): ", buf, "\n");
-		}
+		strerror_r(errno, buf, sizeof(buf));
+		_malloc_message(_getprogname(),
+		    ": (malloc) Error in munmap(): ", buf, "\n");
 		if (opt_abort)
 			abort();
 	}
@@ -4247,7 +4227,7 @@ arena_malloc_small(arena_t *arena, size_t size, bool zero)
 	if (zero == false) {
 #ifdef MALLOC_FILL
 		if (opt_junk)
-			memset(ret, 0xe4, size);
+			memset(ret, 0xa5, size);
 		else if (opt_zero)
 			memset(ret, 0, size);
 #endif
@@ -4283,7 +4263,7 @@ arena_malloc_large(arena_t *arena, size_t size, bool zero)
 	if (zero == false) {
 #ifdef MALLOC_FILL
 		if (opt_junk)
-			memset(ret, 0xe4, size);
+			memset(ret, 0xa5, size);
 		else if (opt_zero)
 			memset(ret, 0, size);
 #endif
@@ -4385,7 +4365,7 @@ arena_palloc(arena_t *arena, size_t alignment, size_t size, size_t alloc_size)
 
 #ifdef MALLOC_FILL
 	if (opt_junk)
-		memset(ret, 0xe4, size);
+		memset(ret, 0xa5, size);
 	else if (opt_zero)
 		memset(ret, 0, size);
 #endif
@@ -4606,7 +4586,7 @@ arena_dalloc_small(arena_t *arena, arena_chunk_t *chunk, void *ptr,
 
 #ifdef MALLOC_FILL
 	if (opt_poison)
-		memset(ptr, 0xe5, size);
+		memset(ptr, 0x5a, size);
 #endif
 
 	arena_run_reg_dalloc(run, bin, ptr, size);
@@ -4699,7 +4679,7 @@ arena_dalloc_large(arena_t *arena, arena_chunk_t *chunk, void *ptr)
 #ifdef MALLOC_STATS
 		if (opt_poison)
 #endif
-			memset(ptr, 0xe5, size);
+			memset(ptr, 0x5a, size);
 #endif
 #ifdef MALLOC_STATS
 		arena->stats.allocated_large -= size;
@@ -4838,7 +4818,7 @@ arena_ralloc_large(void *ptr, size_t size, size_t oldsize)
 		/* Same size class. */
 #ifdef MALLOC_FILL
 		if (opt_poison && size < oldsize) {
-			memset((void *)((uintptr_t)ptr + size), 0xe5, oldsize -
+			memset((void *)((uintptr_t)ptr + size), 0x5a, oldsize -
 			    size);
 		}
 #endif
@@ -4855,7 +4835,7 @@ arena_ralloc_large(void *ptr, size_t size, size_t oldsize)
 #ifdef MALLOC_FILL
 			/* Fill before shrinking in order avoid a race. */
 			if (opt_poison) {
-				memset((void *)((uintptr_t)ptr + size), 0xe5,
+				memset((void *)((uintptr_t)ptr + size), 0x5a,
 				    oldsize - size);
 			}
 #endif
@@ -4925,7 +4905,7 @@ arena_ralloc(void *ptr, size_t size, size_t oldsize)
 IN_PLACE:
 #ifdef MALLOC_FILL
 	if (opt_poison && size < oldsize)
-		memset((void *)((uintptr_t)ptr + size), 0xe5, oldsize - size);
+		memset((void *)((uintptr_t)ptr + size), 0x5a, oldsize - size);
 	else if (opt_zero && size > oldsize)
 		memset((void *)((uintptr_t)ptr + oldsize), 0, size - oldsize);
 #endif
@@ -4986,7 +4966,7 @@ arena_new(arena_t *arena)
 		bin->runcur = NULL;
 		arena_run_tree_new(&bin->runs);
 
-		bin->reg_size = (1ULL << (TINY_MIN_2POW + i));
+		bin->reg_size = (1U << (TINY_MIN_2POW + i));
 
 		prev_run_size = arena_bin_run_size_calc(bin, prev_run_size);
 
@@ -5145,9 +5125,9 @@ huge_palloc(size_t size, size_t alignment, bool zero)
 	if (zero == false) {
 		if (opt_junk)
 #  ifdef MALLOC_DECOMMIT
-			memset(ret, 0xe4, psize);
+			memset(ret, 0xa5, psize);
 #  else
-			memset(ret, 0xe4, csize);
+			memset(ret, 0xa5, csize);
 #  endif
 		else if (opt_zero)
 #  ifdef MALLOC_DECOMMIT
@@ -5174,7 +5154,7 @@ huge_ralloc(void *ptr, size_t size, size_t oldsize)
 		size_t psize = PAGE_CEILING(size);
 #ifdef MALLOC_FILL
 		if (opt_poison && size < oldsize) {
-			memset((void *)((uintptr_t)ptr + size), 0xe5, oldsize
+			memset((void *)((uintptr_t)ptr + size), 0x5a, oldsize
 			    - size);
 		}
 #endif
@@ -6659,6 +6639,8 @@ jemalloc_stats_impl(jemalloc_stats_t *stats)
 		for (j = 0; j < ntbins + nqbins + nsbins; j++) {
 			arena_bin_t* bin = &arena->bins[j];
 			size_t bin_unused = 0;
+			const size_t run_header_size = sizeof(arena_run_t) +
+			    (sizeof(unsigned) * (bin->regs_mask_nelms - 1));
 
 			rb_foreach_begin(arena_chunk_map_t, link, &bin->runs, mapelm) {
 				run = (arena_run_t *)(mapelm->bits & ~pagesize_mask);
@@ -6800,7 +6782,7 @@ _recalloc(void *ptr, size_t count, size_t size)
 	 * trailing bytes.
 	 */
 
-	ptr = realloc_impl(ptr, newsize);
+	ptr = realloc(ptr, newsize);
 	if (ptr != NULL && oldsize < newsize) {
 		memset((void *)((uintptr_t)ptr + oldsize), 0, newsize -
 		    oldsize);

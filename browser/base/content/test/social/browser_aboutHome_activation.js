@@ -2,14 +2,16 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-var SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
+let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
 
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AboutHomeUtils",
   "resource:///modules/AboutHome.jsm");
 
-var snippet =
+let snippet =
 '     <script>' +
 '       var manifest = {' +
 '         "name": "Demo Social Service",' +
@@ -31,7 +33,7 @@ var snippet =
 '     </div>';
 
 // enable one-click activation
-var snippet2 =
+let snippet2 =
 '     <script>' +
 '       var manifest = {' +
 '         "name": "Demo Social Service",' +
@@ -53,18 +55,60 @@ var snippet2 =
 '     <img src="chrome://branding/content/icon32.png"></img>' +
 '     </div>';
 
-var gTests = [
+let gTests = [
 
 {
   desc: "Test activation with enable panel",
   snippet: snippet,
-  panel: true
+  run: function (aSnippetsMap)
+  {
+    let deferred = Promise.defer();
+    let doc = gBrowser.selectedBrowser.contentDocument;
+
+    let snippetsElt = doc.getElementById("snippets");
+    ok(snippetsElt, "Found snippets element");
+    ok(!!doc.getElementById("activationSnippet"),
+       "The snippet is present.");
+
+    activateProvider(gBrowser.selectedTab, true, function() {
+      ok(SocialSidebar.provider, "provider activated");
+      checkSocialUI();
+      is(gBrowser.contentDocument.location.href, SocialSidebar.provider.manifest.postActivationURL);
+      gBrowser.removeTab(gBrowser.selectedTab);
+      SocialService.uninstallProvider(SocialSidebar.provider.origin, function () {
+        info("provider uninstalled");
+        deferred.resolve(true);
+      });
+    });
+    return deferred.promise;
+  }
 },
 
 {
   desc: "Test activation bypassing enable panel",
   snippet: snippet2,
-  panel: false
+  run: function (aSnippetsMap)
+  {
+    let deferred = Promise.defer();
+    let doc = gBrowser.selectedBrowser.contentDocument;
+
+    let snippetsElt = doc.getElementById("snippets");
+    ok(snippetsElt, "Found snippets element");
+    ok(!!doc.getElementById("activationSnippet"),
+       "The snippet is present.");
+
+    activateProvider(gBrowser.selectedTab, false, function() {
+      ok(SocialSidebar.provider, "provider activated");
+      checkSocialUI();
+      is(gBrowser.contentDocument.location.href, SocialSidebar.provider.manifest.postActivationURL);
+      gBrowser.removeTab(gBrowser.selectedTab);
+      SocialService.uninstallProvider(SocialSidebar.provider.origin, function () {
+        info("provider uninstalled");
+        deferred.resolve(true);
+      });
+    });
+    return deferred.promise;
+  }
 }
 ];
 
@@ -73,10 +117,6 @@ function test()
   waitForExplicitFinish();
   requestLongerTimeout(2);
   ignoreAllUncaughtExceptions();
-  PopupNotifications.panel.setAttribute("animate", "false");
-  registerCleanupFunction(function () {
-    PopupNotifications.panel.removeAttribute("animate");
-  });
 
   Task.spawn(function () {
     for (let test of gTests) {
@@ -88,32 +128,18 @@ function test()
       // Add an event handler to modify the snippets map once it's ready.
       let snippetsPromise = promiseSetupSnippetsMap(tab, test.snippet);
 
-      // Start loading about:home and wait for it to complete, snippets should be loaded
+      // Start loading about:home and wait for it to complete.
       yield promiseTabLoadEvent(tab, "about:home", "AboutHomeLoadSnippetsCompleted");
 
-      yield snippetsPromise;
+      // This promise should already be resolved since the page is done,
+      // but we still want to get the snippets map out of it.
+      let snippetsMap = yield snippetsPromise;
 
-      // ensure our activation snippet is indeed available
-      yield ContentTask.spawn(tab.linkedBrowser, {}, function*(arg) {
-        ok(!!content.document.getElementById("snippets"), "Found snippets element");
-        ok(!!content.document.getElementById("activationSnippet"), "The snippet is present.");
-      });
-
-      yield new Promise(resolve => {
-        activateProvider(tab, test.panel).then(() => {
-          ok(SocialSidebar.provider, "provider activated");
-          checkSocialUI();
-          is(gBrowser.currentURI.spec, SocialSidebar.provider.manifest.postActivationURL, "postActivationURL was loaded");
-          SocialService.uninstallProvider(SocialSidebar.provider.origin, function () {
-            info("provider uninstalled");
-            resolve();
-          });
-        });
-      });
-
-      // activation opened a post-activation info tab, close it.
-      yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
-      yield BrowserTestUtils.removeTab(tab);
+      info("Running test");
+      let testPromise = test.run(snippetsMap);
+      yield testPromise;
+      info("Cleanup");
+      gBrowser.removeCurrentTab();
     }
   }).then(finish, ex => {
     ok(false, "Unexpected Exception: " + ex);
@@ -134,20 +160,20 @@ function test()
  */
 function promiseTabLoadEvent(aTab, aURL, aEventType="load")
 {
-  return new Promise(resolve => {
-    info("Wait tab event: " + aEventType);
-    aTab.linkedBrowser.addEventListener(aEventType, function load(event) {
-      if (event.originalTarget != aTab.linkedBrowser.contentDocument ||
-          event.target.location.href == "about:blank") {
-        info("skipping spurious load event");
-        return;
-      }
-      aTab.linkedBrowser.removeEventListener(aEventType, load, true);
-      info("Tab event received: " + aEventType);
-      resolve();
-    }, true, true);
-    aTab.linkedBrowser.loadURI(aURL);
-  });
+  let deferred = Promise.defer();
+  info("Wait tab event: " + aEventType);
+  aTab.linkedBrowser.addEventListener(aEventType, function load(event) {
+    if (event.originalTarget != aTab.linkedBrowser.contentDocument ||
+        event.target.location.href == "about:blank") {
+      info("skipping spurious load event");
+      return;
+    }
+    aTab.linkedBrowser.removeEventListener(aEventType, load, true);
+    info("Tab event received: " + aEventType);
+    deferred.resolve();
+  }, true, true);
+  aTab.linkedBrowser.loadURI(aURL);
+  return deferred.promise;
 }
 
 /**
@@ -168,35 +194,41 @@ function promiseSetupSnippetsMap(aTab, aSnippet)
                     {snippetsVersion: AboutHomeUtils.snippetsVersion,
                      snippet: aSnippet},
                     function*(arg) {
-    return new Promise(resolve => {
-      addEventListener("AboutHomeLoadSnippets", function load(event) {
-        removeEventListener("AboutHomeLoadSnippets", load, true);
 
-        let cw = content.window.wrappedJSObject;
+    let obj = {};
+    Cu.import("resource://gre/modules/Promise.jsm", obj);
+    let deferred = obj.Promise.defer();
 
-        // The snippets should already be ready by this point. Here we're
-        // just obtaining a reference to the snippets map.
-        cw.ensureSnippetsMapThen(function (aSnippetsMap) {
-          aSnippetsMap = Cu.waiveXrays(aSnippetsMap);
-          console.log("Got snippets map: " +
-               "{ last-update: " + aSnippetsMap.get("snippets-last-update") +
-               ", cached-version: " + aSnippetsMap.get("snippets-cached-version") +
-               " }");
-          // Don't try to update.
-          aSnippetsMap.set("snippets-last-update", Date.now());
-          aSnippetsMap.set("snippets-cached-version", arg.snippetsVersion);
-          // Clear snippets.
-          aSnippetsMap.delete("snippets");
-          aSnippetsMap.set("snippets", arg.snippet);
-          resolve();
-        });
-      }, true, true);
-    });
+    addEventListener("AboutHomeLoadSnippets", function load(event) {
+      removeEventListener("AboutHomeLoadSnippets", load, true);
+
+      let cw = content.window.wrappedJSObject;
+
+      // The snippets should already be ready by this point. Here we're
+      // just obtaining a reference to the snippets map.
+      cw.ensureSnippetsMapThen(function (aSnippetsMap) {
+        aSnippetsMap = Cu.waiveXrays(aSnippetsMap);
+        console.log("Got snippets map: " +
+             "{ last-update: " + aSnippetsMap.get("snippets-last-update") +
+             ", cached-version: " + aSnippetsMap.get("snippets-cached-version") +
+             " }");
+        // Don't try to update.
+        aSnippetsMap.set("snippets-last-update", Date.now());
+        aSnippetsMap.set("snippets-cached-version", arg.snippetsVersion);
+        // Clear snippets.
+        aSnippetsMap.delete("snippets");
+        aSnippetsMap.set("snippets", arg.snippet);
+        deferred.resolve();
+      });
+    }, true, true);
+
+    return deferred.promise;
+
   });
 }
 
 
-function sendActivationEvent(tab) {
+function sendActivationEvent(tab, callback) {
   // hack Social.lastEventReceived so we don't hit the "too many events" check.
   Social.lastEventReceived = 0;
   let doc = tab.linkedBrowser.contentDocument;
@@ -205,30 +237,43 @@ function sendActivationEvent(tab) {
     doc = doc.defaultView.frames[0].document;
   let button = doc.getElementById("activationSnippet");
   BrowserTestUtils.synthesizeMouseAtCenter(button, {}, tab.linkedBrowser);
+  executeSoon(callback);
 }
 
 function activateProvider(tab, expectPanel, aCallback) {
-  return new Promise(resolve => {
-    if (expectPanel) {
-      ensureEventFired(PopupNotifications.panel, "popupshown").then(() => {
-        let panel = document.getElementById("servicesInstall-notification");
-        panel.button.click();
-      });
-    }
-    waitForProviderLoad().then(() => {
+  if (expectPanel) {
+    let panel = document.getElementById("servicesInstall-notification");
+    PopupNotifications.panel.addEventListener("popupshown", function onpopupshown() {
+      PopupNotifications.panel.removeEventListener("popupshown", onpopupshown);
+      panel.button.click();
+    });
+  }
+  sendActivationEvent(tab, function() {
+    waitForProviderLoad(function() {
       ok(SocialSidebar.provider, "new provider is active");
       ok(SocialSidebar.opened, "sidebar is open");
       checkSocialUI();
-      resolve();
+      executeSoon(aCallback);
     });
-    sendActivationEvent(tab);
   });
 }
 
 function waitForProviderLoad(cb) {
-  return Promise.all([
-    promiseObserverNotified("social:provider-enabled"),
-    ensureFrameLoaded(gBrowser, "https://example.com/browser/browser/base/content/test/social/social_postActivation.html"),
-    ensureFrameLoaded(SocialSidebar.browser)
-  ]);
+  Services.obs.addObserver(function providerSet(subject, topic, data) {
+    Services.obs.removeObserver(providerSet, "social:provider-enabled");
+    info("social:provider-enabled observer was notified");
+    waitForCondition(function() {
+      let sbrowser = document.getElementById("social-sidebar-browser");
+      let provider = SocialSidebar.provider;
+      let postActivation = provider && gBrowser.contentDocument.location.href == provider.origin + "/browser/browser/base/content/test/social/social_postActivation.html";
+
+      return provider &&
+             postActivation &&
+             sbrowser.docShellIsActive;
+    }, function() {
+      // executeSoon to let the browser UI observers run first
+      executeSoon(cb);
+    },
+    "waitForProviderLoad: provider profile was not set");
+  }, "social:provider-enabled", false);
 }

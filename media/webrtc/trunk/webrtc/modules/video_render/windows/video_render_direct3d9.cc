@@ -18,6 +18,7 @@
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 
 namespace webrtc {
@@ -142,7 +143,7 @@ int D3D9Channel::FrameSizeChange(int width, int height, int numberOfStreams)
 }
 
 int32_t D3D9Channel::RenderFrame(const uint32_t streamId,
-                                 const I420VideoFrame& videoFrame)
+                                 I420VideoFrame& videoFrame)
 {
     CriticalSectionScoped cs(_critSect);
     if (_width != videoFrame.width() || _height != videoFrame.height())
@@ -286,6 +287,7 @@ VideoRenderDirect3D9::VideoRenderDirect3D9(Trace* trace,
     _pD3D(NULL),
     _d3dChannels(),
     _d3dZorder(),
+    _screenUpdateThread(NULL),
     _screenUpdateEvent(NULL),
     _logoLeft(0),
     _logoTop(0),
@@ -295,8 +297,8 @@ VideoRenderDirect3D9::VideoRenderDirect3D9(Trace* trace,
     _totalMemory(0),
     _availableMemory(0)
 {
-    _screenUpdateThread = ThreadWrapper::CreateThread(
-        ScreenUpdateThreadProc, this, "ScreenUpdateThread");
+    _screenUpdateThread = ThreadWrapper::CreateThread(ScreenUpdateThreadProc,
+                                                      this, kRealtimePriority);
     _screenUpdateEvent = EventWrapper::Create();
     SetRect(&_originalHwndRect, 0, 0, 0, 0);
 }
@@ -306,14 +308,18 @@ VideoRenderDirect3D9::~VideoRenderDirect3D9()
     //NOTE: we should not enter CriticalSection in here!
 
     // Signal event to exit thread, then delete it
-    ThreadWrapper* tmpPtr = _screenUpdateThread.release();
+    ThreadWrapper* tmpPtr = _screenUpdateThread;
+    _screenUpdateThread = NULL;
     if (tmpPtr)
     {
+        tmpPtr->SetNotAlive();
         _screenUpdateEvent->Set();
         _screenUpdateEvent->StopTimer();
 
-        tmpPtr->Stop();
-        delete tmpPtr;
+        if (tmpPtr->Stop())
+        {
+            delete tmpPtr;
+        }
     }
     delete _screenUpdateEvent;
 
@@ -509,7 +515,7 @@ int VideoRenderDirect3D9::InitDevice()
             { 1.0f, -1.0f, 0.0f, 0xffffffff, 1, 1 }, { 1.0f, 1.0f, 0.0f,
                     0xffffffff, 1, 0 } };
 
-    // Create the vertex buffer.
+    // Create the vertex buffer. 
     if (FAILED(_pd3dDevice->CreateVertexBuffer(sizeof(Vertices), 0,
                                                D3DFVF_CUSTOMVERTEX,
                                                D3DPOOL_DEFAULT, &_pVB, NULL )))
@@ -546,8 +552,8 @@ int32_t VideoRenderDirect3D9::Init()
         WEBRTC_TRACE(kTraceError, kTraceVideo, -1, "Thread not created");
         return -1;
     }
-    _screenUpdateThread->Start();
-    _screenUpdateThread->SetPriority(kRealtimePriority);
+    unsigned int threadId;
+    _screenUpdateThread->Start(threadId);
 
     // Start the event triggering the render process
     unsigned int monitorFreq = 60;
@@ -831,7 +837,7 @@ int32_t VideoRenderDirect3D9::DeleteChannel(const uint32_t streamId)
     if (ddIt != _d3dChannels.end())
     {
         delete ddIt->second;
-        _d3dChannels.erase(ddIt);
+        _d3dChannels.erase(ddIt);        
         return 0;
     }
     return -1;
@@ -847,7 +853,7 @@ VideoRenderCallback* VideoRenderDirect3D9::CreateChannel(const uint32_t channel,
     CriticalSectionScoped cs(&_refD3DCritsect);
 
     //FIXME this should be done in VideoAPIWindows? stop the frame deliver first
-    //remove the old channel
+    //remove the old channel	
     DeleteChannel(channel);
 
     D3D9Channel* d3dChannel = new D3D9Channel(_pd3dDevice,
@@ -884,8 +890,9 @@ int32_t VideoRenderDirect3D9::GetStreamSettings(const uint32_t channel,
                      "Direct3D render failed to find channel");
         return -1;
     }
-    // Only allow one stream per channel, demuxing is
+    // Only allow one stream per channel, demuxing is 
     return ddobj->GetStreamSettings(0, zOrder, left, top, right, bottom);
+    //return ddobj->GetStreamSettings(streamId, zOrder, left, top, right, bottom);    
 }
 
 int VideoRenderDirect3D9::UpdateVerticeBuffer(LPDIRECT3DVERTEXBUFFER9 pVB,
@@ -1085,7 +1092,7 @@ int32_t VideoRenderDirect3D9::SetBitmap(const void* bitMap,
     int pitch = bmap.bmWidth * 4;
 
     if (pbi.bmiHeader.biBitCount == 24)
-    {
+    {       
         ConvertRGB24ToARGB(srcPtr, dstPtr, bmap.bmWidth, bmap.bmHeight, 0);
     }
     else
@@ -1161,7 +1168,7 @@ int32_t VideoRenderDirect3D9::ConfigureRenderer(const uint32_t channel,
                      "Direct3D render failed to find channel");
         return -1;
     }
-    // Only allow one stream per channel, demuxing is
+    // Only allow one stream per channel, demuxing is 
     ddobj->SetStreamSettings(0, zOrder, left, top, right, bottom);
 
     return 0;

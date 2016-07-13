@@ -15,7 +15,6 @@ import time
 import random
 import urlparse
 import os.path
-import re
 from external_tools.detect_repo import detect_git, detect_hg, detect_local
 
 try:
@@ -41,7 +40,6 @@ from mozharness.mozilla.repo_manifest import (load_manifest, rewrite_remotes,
 B2GMakefileErrorList = MakefileErrorList + [
     {'substr': r'''NS_ERROR_FILE_ALREADY_EXISTS: Component returned failure code''', 'level': ERROR},
     {'substr': r'''no version information available''', 'level': DEBUG},
-    {'regex': re.compile(r'''\[/build_stage/.*\] \[l10n\] \[\S+\]: \d+ missing compared to en-US:'''), 'level': DEBUG},
 ]
 B2GMakefileErrorList.insert(0, {'substr': r'/bin/bash: java: command not found', 'level': WARNING})
 
@@ -131,6 +129,23 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
         if 'target' not in self.config:
             self.fatal("Must specify --target!")
 
+        # Override target for things with weird names
+        if self.config['target'] == 'mako':
+            self.info("Using target nexus-4 instead of mako")
+            self.config['target'] = 'nexus-4'
+            if self.config.get('b2g_config_dir') is None:
+                self.config['b2g_config_dir'] = 'mako'
+        elif self.config['target'] == 'generic':
+            if self.config.get('b2g_config_dir') == 'emulator':
+                self.info("Using target emulator instead of generic")
+                self.config['target'] = 'emulator'
+            elif self.config.get('b2g_config_dir') == 'emulator-jb':
+                self.info("Using target emulator-jb instead of generic")
+                self.config['target'] = 'emulator-jb'
+            elif self.config.get('b2g_config_dir') == 'emulator-kk':
+                self.info("Using target emulator-kk instead of generic")
+                self.config['target'] = 'emulator-kk'
+
         if not (self.buildbot_config and 'properties' in self.buildbot_config) and 'repo' not in self.config:
             self.fatal("Must specify --repo")
 
@@ -144,8 +159,6 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
             'work_dir': abs_dirs['abs_work_dir'],
             'b2g_src': abs_dirs['abs_work_dir'],
             'abs_tools_dir': os.path.join(abs_dirs['abs_work_dir'], 'build-tools'),
-            'b2g_repo': self.config['repo'],
-            'b2g_target': self.config['target'],
         }
 
         abs_dirs.update(dirs)
@@ -171,7 +184,7 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
             if repo_type == 'hg':
                 hg = self.query_exe('hg', return_type='list')
                 revision = self.get_output_from_command(
-                    hg + ['parent', '--template', '{node}'], cwd=repo
+                    hg + ['parent', '--template', '{node|short}'], cwd=repo
                 )
             elif repo_type == 'git':
                 git = self.query_exe('git', return_type='list')
@@ -180,7 +193,7 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
                 )
             else:
                 return None
-        return revision
+        return revision[0:12] if revision else None
 
     def query_gecko_config_path(self):
         conf_file = self.config.get('gecko_config')
@@ -251,18 +264,6 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
         self.gecko_config = self.query_remote_gecko_config()
         return self.gecko_config
 
-    def symlink_gtk3(self):
-        dirs = self.query_abs_dirs()
-        gtk3_path = os.path.join(dirs['abs_work_dir'], 'gtk3')
-        gtk3_symlink_path = os.path.join(dirs['abs_work_dir'], 'gecko', 'gtk3')
-
-        if os.path.isdir(gtk3_path) and not os.path.isdir(gtk3_symlink_path):
-            cmd = ["ln", "-sf", gtk3_path, gtk3_symlink_path]
-            retval = self.run_command(cmd)
-            if retval != 0:
-                self.error("failed to create symlink")
-                self.return_code = 2
-
     def query_build_env(self):
         """Retrieves the environment for building"""
         dirs = self.query_abs_dirs()
@@ -283,13 +284,6 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
         # If we get a buildid from buildbot, pass that in as MOZ_BUILD_DATE
         if self.buildbot_config and 'buildid' in self.buildbot_config.get('properties', {}):
             env['MOZ_BUILD_DATE'] = self.buildbot_config['properties']['buildid']
-
-        self.symlink_gtk3()
-        env['LD_LIBRARY_PATH'] = os.environ.get('LD_LIBRARY_PATH')
-        if env['LD_LIBRARY_PATH'] is None:
-            env['LD_LIBRARY_PATH'] = os.path.join(dirs['abs_work_dir'], 'gecko', 'gtk3', 'usr', 'local', 'lib')
-        else:
-            env['LD_LIBRARY_PATH'] += ':%s' % os.path.join(dirs['abs_work_dir'], 'gecko', 'gtk3', 'usr', 'local', 'lib')
 
         return env
 
@@ -372,12 +366,10 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
         dirs = self.query_abs_dirs()
         gecko_config = self.load_gecko_config()
         b2g_manifest_intree = gecko_config.get('b2g_manifest_intree')
-        b2g_repo = gecko_config.get('b2g_repo','https://git.mozilla.org/b2g/B2G.git')
-        b2g_branch = gecko_config.get('b2g_branch','master')
 
         if gecko_config.get('config_version') >= 2:
             repos = [
-                {'vcs': 'gittool', 'repo': b2g_repo, 'branch': b2g_branch, 'dest': dirs['work_dir']},
+                {'vcs': 'gittool', 'repo': 'https://git.mozilla.org/b2g/B2G.git', 'dest': dirs['work_dir']},
             ]
 
             if b2g_manifest_intree:
@@ -502,6 +494,13 @@ class B2GBuildBaseScript(BuildbotMixin, MockMixin,
                     sleep_time = min(sleep_time * 1.5, max_sleep_time) + random.randint(1, 60)
             else:
                 self.fatal("failed to run config.sh")
+
+            # Workaround bug 985837
+            if self.config['target'] == 'emulator-kk':
+                self.info("Forcing -j4 for emulator-kk")
+                dotconfig_file = os.path.join(dirs['abs_work_dir'], '.config')
+                with open(dotconfig_file, "a+") as f:
+                    f.write("\nMAKE_FLAGS=-j1\n")
 
             # output our sources.xml, make a copy for update_sources_xml()
             self.run_command(

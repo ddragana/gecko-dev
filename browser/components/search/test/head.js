@@ -1,7 +1,42 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+  "resource://gre/modules/Promise.jsm");
+
+function whenNewWindowLoaded(aOptions, aCallback) {
+  let win = OpenBrowserWindow(aOptions);
+  let gotLoad = false;
+  let gotActivate = Services.focus.activeWindow == win;
+
+  function maybeRunCallback() {
+    if (gotLoad && gotActivate) {
+      executeSoon(function() { aCallback(win); });
+    }
+  }
+
+  if (!gotActivate) {
+    win.addEventListener("activate", function onActivate() {
+      info("Got activate.");
+      win.removeEventListener("activate", onActivate, false);
+      gotActivate = true;
+      maybeRunCallback();
+    }, false);
+  } else {
+    info("Was activated.");
+  }
+
+  Services.obs.addObserver(function observer(aSubject, aTopic) {
+    if (win == aSubject) {
+      info("Delayed startup finished");
+      Services.obs.removeObserver(observer, aTopic);
+      gotLoad = true;
+      maybeRunCallback();
+    }
+  }, "browser-delayed-startup-finished", false);
+
+  return win;
+}
 
 /**
  * Recursively compare two objects and check that every property of expectedObj has the same value
@@ -41,16 +76,64 @@ function getLocalizedPref(aPrefName, aDefault) {
   return aDefault;
 }
 
-function promiseEvent(aTarget, aEventName, aPreventDefault) {
-  function cancelEvent(event) {
-    if (aPreventDefault) {
-      event.preventDefault();
-    }
-
-    return true;
+function waitForPopupShown(aPopupId, aCallback) {
+  let popup = document.getElementById(aPopupId);
+  info("waitForPopupShown: got popup: " + popup.id);
+  function onPopupShown() {
+    info("onPopupShown");
+    removePopupShownListener();
+    SimpleTest.executeSoon(aCallback);
   }
+  function removePopupShownListener() {
+    popup.removeEventListener("popupshown", onPopupShown);
+  }
+  popup.addEventListener("popupshown", onPopupShown);
+  registerCleanupFunction(removePopupShownListener);
+}
 
-  return BrowserTestUtils.waitForEvent(aTarget, aEventName, false, cancelEvent);
+function promiseEvent(aTarget, aEventName, aPreventDefault) {
+  let deferred = Promise.defer();
+  aTarget.addEventListener(aEventName, function onEvent(aEvent) {
+    aTarget.removeEventListener(aEventName, onEvent, true);
+    if (aPreventDefault) {
+      aEvent.preventDefault();
+    }
+    deferred.resolve();
+  }, true);
+  return deferred.promise;
+}
+
+function waitForBrowserContextMenu(aCallback) {
+  waitForPopupShown(gBrowser.selectedBrowser.contextMenu, aCallback);
+}
+
+function doOnloadOnce(aCallback) {
+  function doOnloadOnceListener(aEvent) {
+    info("doOnloadOnce: " + aEvent.originalTarget.location);
+    removeDoOnloadOnceListener();
+    SimpleTest.executeSoon(function doOnloadOnceCallback() {
+      aCallback(aEvent);
+    });
+  }
+  function removeDoOnloadOnceListener() {
+    gBrowser.removeEventListener("load", doOnloadOnceListener, true);
+  }
+  gBrowser.addEventListener("load", doOnloadOnceListener, true);
+  registerCleanupFunction(removeDoOnloadOnceListener);
+}
+
+function* promiseOnLoad() {
+  return new Promise(resolve => {
+    gBrowser.addEventListener("load", function onLoadListener(aEvent) {
+      let cw = aEvent.target.defaultView;
+      let tab = gBrowser._getTabForContentWindow(cw);
+      if (tab) {
+        info("onLoadListener: " + aEvent.originalTarget.location);
+        gBrowser.removeEventListener("load", onLoadListener, true);
+        resolve(aEvent);
+      }
+    }, true);
+  });
 }
 
 function promiseNewEngine(basename, options = {}) {
@@ -63,7 +146,7 @@ function promiseNewEngine(basename, options = {}) {
       onInitComplete: function() {
         let url = getRootDirectory(gTestPath) + basename;
         let current = Services.search.currentEngine;
-        Services.search.addEngine(url, null, options.iconURL || "", false, {
+        Services.search.addEngine(url, Ci.nsISearchEngine.TYPE_MOZSEARCH, "", false, {
           onSuccess: function (engine) {
             info("Search engine added: " + basename);
             if (setAsCurrent) {
@@ -86,53 +169,4 @@ function promiseNewEngine(basename, options = {}) {
       }
     });
   });
-}
-
-/**
- * Waits for a load (or custom) event to finish in a given tab. If provided
- * load an uri into the tab.
- *
- * @param tab
- *        The tab to load into.
- * @param [optional] url
- *        The url to load, or the current url.
- * @return {Promise} resolved when the event is handled.
- * @resolves to the received event
- * @rejects if a valid load event is not received within a meaningful interval
- */
-function promiseTabLoadEvent(tab, url)
-{
-  let deferred = Promise.defer();
-  info("Wait tab event: load");
-
-  function handle(loadedUrl) {
-    if (loadedUrl === "about:blank" || (url && loadedUrl !== url)) {
-      info(`Skipping spurious load event for ${loadedUrl}`);
-      return false;
-    }
-
-    info("Tab event received: load");
-    return true;
-  }
-
-  // Create two promises: one resolved from the content process when the page
-  // loads and one that is rejected if we take too long to load the url.
-  let loaded = BrowserTestUtils.browserLoaded(tab.linkedBrowser, false, handle);
-
-  let timeout = setTimeout(() => {
-    deferred.reject(new Error("Timed out while waiting for a 'load' event"));
-  }, 30000);
-
-  loaded.then(() => {
-    clearTimeout(timeout);
-    deferred.resolve()
-  });
-
-  if (url)
-    BrowserTestUtils.loadURI(tab.linkedBrowser, url);
-
-  // Promise.all rejects if either promise rejects (i.e. if we time out) and
-  // if our loaded promise resolves before the timeout, then we resolve the
-  // timeout promise as well, causing the all promise to resolve.
-  return Promise.all([deferred.promise, loaded]);
 }

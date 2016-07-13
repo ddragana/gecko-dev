@@ -24,7 +24,7 @@
 "use strict";
 
 
-add_task(function* testBUIT() {
+function generatorTest() {
   let s = {};
   Components.utils.import("resource:///modules/BrowserUITelemetry.jsm", s);
   let BUIT = s.BrowserUITelemetry;
@@ -58,13 +58,15 @@ add_task(function* testBUIT() {
   is(BUIT.currentBucket, BUIT.BUCKET_PREFIX + "walrus" + BUIT.BUCKET_SEPARATOR + "1s1ms",
      "Bucket should be expiring and have time step of 1s1ms");
 
-  yield waitForConditionPromise(function() {
+  waitForCondition(function() {
     return BUIT.currentBucket == (BUIT.BUCKET_PREFIX + "walrus" + BUIT.BUCKET_SEPARATOR + "2s1ms");
-  }, "Bucket should be expiring and have time step of 2s1ms");
+  }, nextStep, "Bucket should be expiring and have time step of 2s1ms");
+  yield undefined;
 
-  yield waitForConditionPromise(function() {
+  waitForCondition(function() {
     return BUIT.currentBucket == (BUIT.BUCKET_PREFIX + "walrus" + BUIT.BUCKET_SEPARATOR + "3s1ms");
-  }, "Bucket should be expiring and have time step of 3s1ms");
+  }, nextStep, "Bucket should be expiring and have time step of 3s1ms");
+  yield undefined;
 
 
   // Interupt previous expiring bucket
@@ -72,15 +74,17 @@ add_task(function* testBUIT() {
   is(BUIT.currentBucket, BUIT.BUCKET_PREFIX + "walrus2" + BUIT.BUCKET_SEPARATOR + "1s2ms",
      "Should be new expiring bucket, with time step of 1s2ms");
 
-  yield waitForConditionPromise(function() {
+  waitForCondition(function() {
     return BUIT.currentBucket == (BUIT.BUCKET_PREFIX + "walrus2" + BUIT.BUCKET_SEPARATOR + "2s2ms");
-  }, "Should be new expiring bucket, with time step of 2s2ms");
+  }, nextStep, "Should be new expiring bucket, with time step of 2s2ms");
+  yield undefined;
 
 
   // Let expiring bucket expire
-  yield waitForConditionPromise(function() {
+  waitForCondition(function() {
     return BUIT.currentBucket == BUIT.BUCKET_DEFAULT;
-  }, "Bucket should have expired, default bucket should now be active");
+  }, nextStep, "Bucket should have expired, default bucket should now be active");
+  yield undefined;
 
 
   // Interupt expiring bucket with normal bucket
@@ -91,7 +95,8 @@ add_task(function* testBUIT() {
   BUIT.setBucket("mah-bucket");
   is(BUIT.currentBucket, BUIT.BUCKET_PREFIX + "mah-bucket", "Bucket should have correct name");
 
-  yield waitForConditionPromise(function() {
+  waitForCondition(function() {
     return BUIT.currentBucket == (BUIT.BUCKET_PREFIX + "mah-bucket");
-  }, "Next step of old expiring bucket shouldn't have progressed");
-});
+  }, nextStep, "Next step of old expiring bucket shouldn't have progressed");
+  yield undefined;
+}

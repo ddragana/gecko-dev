@@ -11,7 +11,7 @@
 #include "mozilla/dom/EventTarget.h"
 #include "nsWeakReference.h"
 
-class nsPIDOMWindowOuter;
+class nsPIDOMWindow;
 class nsIControllers;
 class nsIController;
 
@@ -22,15 +22,15 @@ class TabParent;
 } // namespace mozilla
 
 #define NS_IWINDOWROOT_IID \
-{ 0xb8724c49, 0xc398, 0x4f9b, \
-  { 0x82, 0x59, 0x87, 0x27, 0xa6, 0x47, 0xdd, 0x0f } }
+{ 0x238edca0, 0xb30d, 0x46d3, \
+ { 0xb2, 0x6a, 0x17, 0xb6, 0x21, 0x28, 0x89, 0x7e } }
 
 class nsPIWindowRoot : public mozilla::dom::EventTarget
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IWINDOWROOT_IID)
 
-  virtual nsPIDOMWindowOuter* GetWindow()=0;
+  virtual nsPIDOMWindow* GetWindow()=0;
 
   // get and set the node that is the context of a popup menu
   virtual nsIDOMNode* GetPopupNode() = 0;
@@ -54,11 +54,6 @@ public:
 
   // Enumerate all stored browsers that for which the weak reference is valid.
   virtual void EnumerateBrowsers(BrowserEnumerator aEnumFunc, void* aArg) = 0;
-
-  virtual bool ShowAccelerators() = 0;
-  virtual bool ShowFocusRings() = 0;
-  virtual void SetShowAccelerators(bool aEnable) = 0;
-  virtual void SetShowFocusRings(bool aEnable) = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIWindowRoot, NS_IWINDOWROOT_IID)

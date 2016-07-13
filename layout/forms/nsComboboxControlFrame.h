@@ -204,9 +204,6 @@ public:
   //nsIStatefulFrame
   NS_IMETHOD SaveState(nsPresState** aState) override;
   NS_IMETHOD RestoreState(nsPresState* aState) override;
-  NS_IMETHOD GenerateStateKey(nsIContent* aContent,
-                              nsIDocument* aDocument,
-                              nsACString& aKey) override;
 
   static bool ToolkitHasNativePopup();
 
@@ -233,7 +230,7 @@ protected:
   nscoord GetIntrinsicISize(nsRenderingContext* aRenderingContext,
                             nsLayoutUtils::IntrinsicISizeType aType);
 
-  class RedisplayTextEvent : public mozilla::Runnable {
+  class RedisplayTextEvent : public nsRunnable {
   public:
     NS_DECL_NSIRUNNABLE
     explicit RedisplayTextEvent(nsComboboxControlFrame *c) : mControlFrame(c) {}

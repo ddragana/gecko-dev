@@ -6,20 +6,12 @@
 
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
 #include "WebGLContext.h"
-#include "WebGLFormats.h"
 
 namespace mozilla {
 
 WebGLExtensionTextureHalfFloatLinear::WebGLExtensionTextureHalfFloatLinear(WebGLContext* webgl)
     : WebGLExtensionBase(webgl)
 {
-    auto& fua = webgl->mFormatUsage;
-
-    fua->EditUsage(webgl::EffectiveFormat::RGBA16F)->isFilterable = true;
-    fua->EditUsage(webgl::EffectiveFormat::RGB16F)->isFilterable = true;
-    fua->EditUsage(webgl::EffectiveFormat::Luminance16FAlpha16F)->isFilterable = true;
-    fua->EditUsage(webgl::EffectiveFormat::Luminance16F)->isFilterable = true;
-    fua->EditUsage(webgl::EffectiveFormat::Alpha16F)->isFilterable = true;
 }
 
 WebGLExtensionTextureHalfFloatLinear::~WebGLExtensionTextureHalfFloatLinear()

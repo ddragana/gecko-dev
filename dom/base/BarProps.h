@@ -16,6 +16,7 @@
 #include "mozilla/Attributes.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
+#include "nsAutoPtr.h"
 #include "nsPIDOMWindow.h"
 
 class nsGlobalWindow;
@@ -37,7 +38,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BarProp)
 
-  nsPIDOMWindowInner* GetParentObject() const;
+  nsPIDOMWindow* GetParentObject() const;
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -53,7 +54,7 @@ protected:
 
   already_AddRefed<nsIWebBrowserChrome> GetBrowserChrome();
 
-  RefPtr<nsGlobalWindow> mDOMWindow;
+  nsRefPtr<nsGlobalWindow> mDOMWindow;
 };
 
 // Script "menubar" object

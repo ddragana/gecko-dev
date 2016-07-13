@@ -12,14 +12,12 @@
  */
 
 #include "mozilla/Assertions.h"
-#include "mozilla/EnumeratedArray.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/PodOperations.h"
 
 #include "jsprototypes.h"
 #include "jstypes.h"
 
-#include "js/TraceKind.h"
 #include "js/TypeDecls.h"
 
 #if defined(JS_GC_ZEAL) || defined(DEBUG)
@@ -39,7 +37,6 @@ class Rooted;
 class JS_FRIEND_API(CompileOptions);
 class JS_FRIEND_API(ReadOnlyCompileOptions);
 class JS_FRIEND_API(OwningCompileOptions);
-class JS_FRIEND_API(TransitiveCompileOptions);
 class JS_PUBLIC_API(CompartmentOptions);
 
 class Value;
@@ -49,7 +46,7 @@ struct Zone;
 
 namespace js {
 struct ContextFriendFields;
-class RootLists;
+class Shape;
 } // namespace js
 
 /*
@@ -96,9 +93,11 @@ struct JSCrossCompartmentCall;
 class JSErrorReport;
 struct JSExceptionState;
 struct JSFunctionSpec;
+struct JSIdArray;
 struct JSLocaleCallbacks;
 struct JSObjectMap;
 struct JSPrincipals;
+struct JSPropertyDescriptor;
 struct JSPropertyName;
 struct JSPropertySpec;
 struct JSRuntime;
@@ -125,15 +124,18 @@ typedef void
 (* JSTraceDataOp)(JSTracer* trc, void* data);
 
 namespace js {
+
+void FinishGC(JSRuntime* rt);
+
 namespace gc {
 class AutoTraceSession;
 class StoreBuffer;
+void MarkPersistentRootedChains(JSTracer*);
+void FinishPersistentRootedChains(JSRuntime*);
 } // namespace gc
 } // namespace js
 
 namespace JS {
-
-struct PropertyDescriptor;
 
 typedef void (*OffThreadCompileCallback)(void* token, void* callbackData);
 
@@ -162,9 +164,6 @@ struct Runtime
     {}
 
     bool isHeapBusy() const { return heapState_ != JS::HeapState::Idle; }
-    bool isHeapMajorCollecting() const { return heapState_ == JS::HeapState::MajorCollecting; }
-    bool isHeapMinorCollecting() const { return heapState_ == JS::HeapState::MinorCollecting; }
-    bool isHeapCollecting() const { return isHeapMinorCollecting() || isHeapMajorCollecting(); }
 
     js::gc::StoreBuffer* gcStoreBufferPtr() { return gcStoreBufferPtr_; }
 
@@ -176,7 +175,48 @@ struct Runtime
     void setGCStoreBufferPtr(js::gc::StoreBuffer* storeBuffer) {
         gcStoreBufferPtr_ = storeBuffer;
     }
+
+    /* Allow inlining of PersistentRooted constructors and destructors. */
+  private:
+    template <typename Referent> friend class JS::PersistentRooted;
+    friend void js::gc::MarkPersistentRootedChains(JSTracer*);
+    friend void js::gc::FinishPersistentRootedChains(JSRuntime* rt);
+
+    mozilla::LinkedList<PersistentRootedFunction> functionPersistentRooteds;
+    mozilla::LinkedList<PersistentRootedId>       idPersistentRooteds;
+    mozilla::LinkedList<PersistentRootedObject>   objectPersistentRooteds;
+    mozilla::LinkedList<PersistentRootedScript>   scriptPersistentRooteds;
+    mozilla::LinkedList<PersistentRootedString>   stringPersistentRooteds;
+    mozilla::LinkedList<PersistentRootedValue>    valuePersistentRooteds;
+
+    /* Specializations of this return references to the appropriate list. */
+    template<typename Referent>
+    inline mozilla::LinkedList<PersistentRooted<Referent> >& getPersistentRootedList();
 };
+
+template<>
+inline mozilla::LinkedList<PersistentRootedFunction>
+&Runtime::getPersistentRootedList<JSFunction*>() { return functionPersistentRooteds; }
+
+template<>
+inline mozilla::LinkedList<PersistentRootedId>
+&Runtime::getPersistentRootedList<jsid>() { return idPersistentRooteds; }
+
+template<>
+inline mozilla::LinkedList<PersistentRootedObject>
+&Runtime::getPersistentRootedList<JSObject*>() { return objectPersistentRooteds; }
+
+template<>
+inline mozilla::LinkedList<PersistentRootedScript>
+&Runtime::getPersistentRootedList<JSScript*>() { return scriptPersistentRooteds; }
+
+template<>
+inline mozilla::LinkedList<PersistentRootedString>
+&Runtime::getPersistentRootedList<JSString*>() { return stringPersistentRooteds; }
+
+template<>
+inline mozilla::LinkedList<PersistentRootedValue>
+&Runtime::getPersistentRootedList<Value>() { return valuePersistentRooteds; }
 
 } /* namespace shadow */
 
@@ -218,18 +258,31 @@ class JS_PUBLIC_API(AutoGCRooter)
     enum {
         VALARRAY =     -2, /* js::AutoValueArray */
         PARSER =       -3, /* js::frontend::Parser */
+        SHAPEVECTOR =  -4, /* js::AutoShapeVector */
+        IDARRAY =      -6, /* js::AutoIdArray */
+        DESCVECTOR =   -7, /* js::AutoPropertyDescriptorVector */
         VALVECTOR =   -10, /* js::AutoValueVector */
         IDVECTOR =    -11, /* js::AutoIdVector */
+        IDVALVECTOR = -12, /* js::AutoIdValueVector */
         OBJVECTOR =   -14, /* js::AutoObjectVector */
+        STRINGVECTOR =-15, /* js::AutoStringVector */
+        SCRIPTVECTOR =-16, /* js::AutoScriptVector */
+        NAMEVECTOR =  -17, /* js::AutoNameVector */
+        HASHABLEVALUE=-18, /* js::HashableValue */
         IONMASM =     -19, /* js::jit::MacroAssembler */
         WRAPVECTOR =  -20, /* js::AutoWrapperVector */
         WRAPPER =     -21, /* js::AutoWrapperRooter */
+        JSONPARSER =  -25, /* js::JSONParser */
         CUSTOM =      -26  /* js::CustomAutoRooter */
     };
 
     static ptrdiff_t GetTag(const Value& value) { return VALVECTOR; }
     static ptrdiff_t GetTag(const jsid& id) { return IDVECTOR; }
     static ptrdiff_t GetTag(JSObject* obj) { return OBJVECTOR; }
+    static ptrdiff_t GetTag(JSScript* script) { return SCRIPTVECTOR; }
+    static ptrdiff_t GetTag(JSString* string) { return STRINGVECTOR; }
+    static ptrdiff_t GetTag(js::Shape* shape) { return SHAPEVECTOR; }
+    static ptrdiff_t GetTag(const JSPropertyDescriptor& pd) { return DESCVECTOR; }
 
   private:
     AutoGCRooter ** const stackTop;
@@ -237,13 +290,6 @@ class JS_PUBLIC_API(AutoGCRooter)
     /* No copy or assignment semantics. */
     AutoGCRooter(AutoGCRooter& ida) = delete;
     void operator=(AutoGCRooter& ida) = delete;
-};
-
-// Our instantiations of Rooted<void*> and PersistentRooted<void*> require an
-// instantiation of MapTypeToRootKind.
-template <>
-struct MapTypeToRootKind<void*> {
-    static const RootKind kind = RootKind::Traceable;
 };
 
 } /* namespace JS */
@@ -265,61 +311,71 @@ enum StackKind
     StackKindCount
 };
 
-using RootedListHeads = mozilla::EnumeratedArray<JS::RootKind, JS::RootKind::Limit,
-                                                 JS::Rooted<void*>*>;
+enum ThingRootKind
+{
+    THING_ROOT_OBJECT,
+    THING_ROOT_SHAPE,
+    THING_ROOT_BASE_SHAPE,
+    THING_ROOT_OBJECT_GROUP,
+    THING_ROOT_STRING,
+    THING_ROOT_SYMBOL,
+    THING_ROOT_JIT_CODE,
+    THING_ROOT_SCRIPT,
+    THING_ROOT_LAZY_SCRIPT,
+    THING_ROOT_ID,
+    THING_ROOT_VALUE,
+    THING_ROOT_STATIC_TRACEABLE,
+    THING_ROOT_DYNAMIC_TRACEABLE,
+    THING_ROOT_LIMIT
+};
+
+template <typename T>
+struct RootKind;
+
+/*
+ * Specifically mark the ThingRootKind of externally visible types, so that
+ * JSAPI users may use JSRooted... types without having the class definition
+ * available.
+ */
+template<typename T, ThingRootKind Kind>
+struct SpecificRootKind
+{
+    static ThingRootKind rootKind() { return Kind; }
+};
+
+template <> struct RootKind<JSObject*> : SpecificRootKind<JSObject*, THING_ROOT_OBJECT> {};
+template <> struct RootKind<JSFlatString*> : SpecificRootKind<JSFlatString*, THING_ROOT_STRING> {};
+template <> struct RootKind<JSFunction*> : SpecificRootKind<JSFunction*, THING_ROOT_OBJECT> {};
+template <> struct RootKind<JSString*> : SpecificRootKind<JSString*, THING_ROOT_STRING> {};
+template <> struct RootKind<JS::Symbol*> : SpecificRootKind<JS::Symbol*, THING_ROOT_SYMBOL> {};
+template <> struct RootKind<JSScript*> : SpecificRootKind<JSScript*, THING_ROOT_SCRIPT> {};
+template <> struct RootKind<jsid> : SpecificRootKind<jsid, THING_ROOT_ID> {};
+template <> struct RootKind<JS::Value> : SpecificRootKind<JS::Value, THING_ROOT_VALUE> {};
 
 // Abstracts JS rooting mechanisms so they can be shared between the JSContext
 // and JSRuntime.
 class RootLists
 {
-    // Stack GC roots for Rooted GC heap pointers.
-    RootedListHeads stackRoots_;
+    // Stack GC roots for stack-allocated GC heap pointers.
+    JS::Rooted<void*>* stackRoots_[THING_ROOT_LIMIT];
     template <typename T> friend class JS::Rooted;
 
-    // Stack GC roots for AutoFooRooter classes.
+    // Stack GC roots for stack-allocated AutoFooRooter classes.
     JS::AutoGCRooter* autoGCRooters_;
     friend class JS::AutoGCRooter;
 
-    // Heap GC roots for PersistentRooted pointers.
-    mozilla::EnumeratedArray<JS::RootKind, JS::RootKind::Limit,
-                             mozilla::LinkedList<JS::PersistentRooted<void*>>> heapRoots_;
-    template <typename T> friend class JS::PersistentRooted;
-
   public:
     RootLists() : autoGCRooters_(nullptr) {
-        for (auto& stackRootPtr : stackRoots_) {
-            stackRootPtr = nullptr;
-        }
+        mozilla::PodArrayZero(stackRoots_);
     }
 
-    ~RootLists() {
-        // The semantics of PersistentRooted containing pointers and tagged
-        // pointers are somewhat different from those of PersistentRooted
-        // containing a structure with a trace method. PersistentRooted
-        // containing pointers are allowed to outlive the owning RootLists,
-        // whereas those containing a traceable structure are not.
-        //
-        // The purpose of this feature is to support lazy initialization of
-        // global references for the several places in Gecko that do not have
-        // access to a tighter context, but that still need to refer to GC
-        // pointers. For such pointers, FinishPersistentRootedChains ensures
-        // that the contained references are nulled out when the owning
-        // RootLists dies to prevent UAF errors.
-        //
-        // However, for RootKind::Traceable, we do not know the concrete type
-        // of the held thing, so we simply cannot do this without accruing
-        // extra overhead and complexity for all users for a case that is
-        // unlikely to ever be used in practice. For this reason, the following
-        // assertion disallows usage of PersistentRooted<Traceable> that
-        // outlives the RootLists.
-        MOZ_ASSERT(heapRoots_[JS::RootKind::Traceable].isEmpty());
+    template <class T>
+    inline JS::Rooted<T>* gcRooters() {
+        js::ThingRootKind kind = RootKind<T>::rootKind();
+        return reinterpret_cast<JS::Rooted<T>*>(stackRoots_[kind]);
     }
 
-    void traceStackRoots(JSTracer* trc);
     void checkNoGCRooters();
-
-    void tracePersistentRoots(JSTracer* trc);
-    void finishPersistentRoots();
 };
 
 struct ContextFriendFields

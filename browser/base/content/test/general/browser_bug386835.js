@@ -79,11 +79,11 @@ function finishTest() {
     ok(!finishTestStarted, "finishTest called more than once");
     finishTestStarted = true;
     yield FullZoomHelper.selectTabAndWaitForLocationChange(gTab1);
-    yield FullZoom.reset();
+    FullZoom.reset();
     yield FullZoomHelper.removeTabAndWaitForLocationChange(gTab1);
-    yield FullZoom.reset();
+    FullZoom.reset();
     yield FullZoomHelper.removeTabAndWaitForLocationChange(gTab2);
-    yield FullZoom.reset();
+    FullZoom.reset();
     yield FullZoomHelper.removeTabAndWaitForLocationChange(gTab3);
   }).then(finish, FullZoomHelper.failAndContinue(finish));
 }

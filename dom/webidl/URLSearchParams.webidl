@@ -15,7 +15,7 @@
 
 [Constructor(optional USVString init = ""),
  Constructor(URLSearchParams init),
- Exposed=(Window,Worker,WorkerDebugger,System)]
+ Exposed=(Window,Worker,System)]
 interface URLSearchParams {
   void append(USVString name, USVString value);
   void delete(USVString name);
@@ -23,6 +23,6 @@ interface URLSearchParams {
   sequence<USVString> getAll(USVString name);
   boolean has(USVString name);
   void set(USVString name, USVString value);
-  iterable<USVString, USVString>;
+  // iterable<USVString, USVString>; - Bug 1085284
   stringifier;
 };

@@ -7,7 +7,7 @@
 
 #include "CompositableTransactionParent.h"
 #include "CompositableHost.h"           // for CompositableParent, etc
-#include "CompositorBridgeParent.h"     // for CompositorBridgeParent
+#include "CompositorParent.h"           // for CompositorParent
 #include "GLContext.h"                  // for GLContext
 #include "Layers.h"                     // for Layer
 #include "RenderTrace.h"                // for RenderTraceInvalidateEnd, etc
@@ -35,6 +35,12 @@ namespace layers {
 class ClientTiledLayerBuffer;
 class Compositor;
 
+template<typename Op>
+CompositableHost* AsCompositable(const Op& op)
+{
+  return CompositableHost::FromIPDLActor(op.compositableParent());
+}
+
 // This function can in some cases fail and return false without it being a bug.
 // This can theoretically happen if the ImageBridge sends frames before
 // we created the layer tree. Since we can't enforce that the layer
@@ -46,14 +52,15 @@ class Compositor;
 // big deal.
 // Note that Layers transactions do not need to call this because they always
 // schedule the composition, in LayerManagerComposite::EndTransaction.
-static bool
-ScheduleComposition(CompositableHost* aCompositable)
+template<typename T>
+bool ScheduleComposition(const T& op)
 {
-  uint64_t id = aCompositable->GetCompositorID();
-  if (!id) {
+  CompositableHost* comp = AsCompositable(op);
+  uint64_t id = comp->GetCompositorID();
+  if (!comp || !id) {
     return false;
   }
-  CompositorBridgeParent* cp = CompositorBridgeParent::GetCompositorBridgeParent(id);
+  CompositorParent* cp = CompositorParent::GetCompositor(id);
   if (!cp) {
     return false;
   }
@@ -74,18 +81,12 @@ bool
 CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation& aEdit,
                                                      EditReplyVector& replyv)
 {
-  // Ignore all operations on compositables created on stale compositors. We
-  // return true because the child is unable to handle errors.
-  CompositableHost* compositable = CompositableHost::FromIPDLActor(aEdit.compositableParent());
-  if (compositable->GetCompositor() && compositable->GetCompositor()->IsValid()) {
-    return true;
-  }
-
-  switch (aEdit.detail().type()) {
-    case CompositableOperationDetail::TOpPaintTextureRegion: {
+  switch (aEdit.type()) {
+    case CompositableOperation::TOpPaintTextureRegion: {
       MOZ_LAYERS_LOG(("[ParentSide] Paint PaintedLayer"));
 
-      const OpPaintTextureRegion& op = aEdit.detail().get_OpPaintTextureRegion();
+      const OpPaintTextureRegion& op = aEdit.get_OpPaintTextureRegion();
+      CompositableHost* compositable = AsCompositable(op);
       Layer* layer = compositable->GetLayer();
       if (!layer || layer->GetType() != Layer::TYPE_PAINTED) {
         return false;
@@ -105,79 +106,73 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
         return false;
       }
       replyv.push_back(
-        OpContentBufferSwap(aEdit.compositableParent(), nullptr, frontUpdatedRegion));
+        OpContentBufferSwap(op.compositableParent(), nullptr, frontUpdatedRegion));
 
       RenderTraceInvalidateEnd(thebes, "FF00FF");
       break;
     }
-    case CompositableOperationDetail::TOpUseTiledLayerBuffer: {
+    case CompositableOperation::TOpUseTiledLayerBuffer: {
       MOZ_LAYERS_LOG(("[ParentSide] Paint TiledLayerBuffer"));
-      const OpUseTiledLayerBuffer& op = aEdit.detail().get_OpUseTiledLayerBuffer();
-      TiledContentHost* tiledHost = compositable->AsTiledContentHost();
+      const OpUseTiledLayerBuffer& op = aEdit.get_OpUseTiledLayerBuffer();
+      TiledContentHost* compositable = AsCompositable(op)->AsTiledContentHost();
 
-      NS_ASSERTION(tiledHost, "The compositable is not tiled");
+      NS_ASSERTION(compositable, "The compositable is not tiled");
 
       const SurfaceDescriptorTiles& tileDesc = op.tileLayerDescriptor();
-
-      bool success = tiledHost->UseTiledLayerBuffer(this, tileDesc);
-
-      const InfallibleTArray<TileDescriptor>& tileDescriptors = tileDesc.tiles();
-      for (size_t i = 0; i < tileDescriptors.Length(); i++) {
-        const TileDescriptor& tileDesc = tileDescriptors[i];
-        if (tileDesc.type() != TileDescriptor::TTexturedTileDescriptor) {
-          continue;
-        }
-        const TexturedTileDescriptor& texturedDesc = tileDesc.get_TexturedTileDescriptor();
-        RefPtr<TextureHost> texture = TextureHost::AsTextureHost(texturedDesc.textureParent());
-        if (texture) {
-          texture->SetLastFwdTransactionId(mFwdTransactionId);
-          // Make sure that each texture was handled by the compositable
-          // because the recycling logic depends on it.
-          MOZ_ASSERT(texture->NumCompositableRefs() > 0);
-        }
-        if (texturedDesc.textureOnWhite().type() == MaybeTexture::TPTextureParent) {
-          texture = TextureHost::AsTextureHost(texturedDesc.textureOnWhite().get_PTextureParent());
-          if (texture) {
-            texture->SetLastFwdTransactionId(mFwdTransactionId);
-            // Make sure that each texture was handled by the compositable
-            // because the recycling logic depends on it.
-            MOZ_ASSERT(texture->NumCompositableRefs() > 0);
-          }
-        }
-      }
+      bool success = compositable->UseTiledLayerBuffer(this, tileDesc);
       if (!success) {
         return false;
       }
       break;
     }
-    case CompositableOperationDetail::TOpRemoveTexture: {
-      const OpRemoveTexture& op = aEdit.detail().get_OpRemoveTexture();
-
+    case CompositableOperation::TOpRemoveTexture: {
+      const OpRemoveTexture& op = aEdit.get_OpRemoveTexture();
+      CompositableHost* compositable = AsCompositable(op);
       RefPtr<TextureHost> tex = TextureHost::AsTextureHost(op.textureParent());
 
       MOZ_ASSERT(tex.get());
       compositable->RemoveTextureHost(tex);
+      // send FenceHandle if present.
+      SendFenceHandleIfPresent(op.textureParent(), compositable);
       break;
     }
-    case CompositableOperationDetail::TOpRemoveTextureAsync: {
-      const OpRemoveTextureAsync& op = aEdit.detail().get_OpRemoveTextureAsync();
+    case CompositableOperation::TOpRemoveTextureAsync: {
+      const OpRemoveTextureAsync& op = aEdit.get_OpRemoveTextureAsync();
+      CompositableHost* compositable = AsCompositable(op);
       RefPtr<TextureHost> tex = TextureHost::AsTextureHost(op.textureParent());
 
       MOZ_ASSERT(tex.get());
       compositable->RemoveTextureHost(tex);
 
-      // Only ImageBridge child sends it.
-      MOZ_ASSERT(UsesImageBridge());
-      if (UsesImageBridge()) {
+      if (!IsAsync() && ImageBridgeParent::GetInstance(GetChildProcessId())) {
+        // send FenceHandle if present via ImageBridge.
+        ImageBridgeParent::AppendDeliverFenceMessage(
+                             GetChildProcessId(),
+                             op.holderId(),
+                             op.transactionId(),
+                             op.textureParent(),
+                             compositable);
+
+        // If the message is recievied via PLayerTransaction,
+        // Send message back via PImageBridge.
+        ImageBridgeParent::ReplyRemoveTexture(
+                             GetChildProcessId(),
+                             OpReplyRemoveTexture(op.holderId(),
+                                                  op.transactionId()));
+      } else {
+        // send FenceHandle if present.
+        SendFenceHandleIfPresent(op.textureParent(), compositable);
+
         ReplyRemoveTexture(OpReplyRemoveTexture(op.holderId(),
                                                 op.transactionId()));
       }
       break;
     }
-    case CompositableOperationDetail::TOpUseTexture: {
-      const OpUseTexture& op = aEdit.detail().get_OpUseTexture();
+    case CompositableOperation::TOpUseTexture: {
+      const OpUseTexture& op = aEdit.get_OpUseTexture();
+      CompositableHost* compositable = AsCompositable(op);
 
-      AutoTArray<CompositableHost::TimedTexture,4> textures;
+      nsAutoTArray<CompositableHost::TimedTexture,4> textures;
       for (auto& timedTexture : op.textures()) {
         CompositableHost::TimedTexture* t = textures.AppendElement();
         t->mTexture =
@@ -187,8 +182,6 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
         t->mPictureRect = timedTexture.picture();
         t->mFrameID = timedTexture.frameID();
         t->mProducerID = timedTexture.producerID();
-        t->mInputFrameID = timedTexture.inputFrameID();
-        t->mTexture->DeserializeReadLock(timedTexture.sharedLock(), this);
         MOZ_ASSERT(ValidatePictureRect(t->mTexture->GetSize(), t->mPictureRect));
 
         MaybeFence maybeFence = timedTexture.fence();
@@ -199,57 +192,32 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
           }
         }
       }
-      if (textures.Length() > 0) {
-        compositable->UseTextureHost(textures);
+      compositable->UseTextureHost(textures);
 
-        for (auto& timedTexture : op.textures()) {
-          RefPtr<TextureHost> texture = TextureHost::AsTextureHost(timedTexture.textureParent());
-          if (texture) {
-            texture->SetLastFwdTransactionId(mFwdTransactionId);
-            // Make sure that each texture was handled by the compositable
-            // because the recycling logic depends on it.
-            MOZ_ASSERT(texture->NumCompositableRefs() > 0);
-          }
-        }
-      }
-
-      if (UsesImageBridge() && compositable->GetLayer()) {
-        ScheduleComposition(compositable);
+      if (IsAsync() && compositable->GetLayer()) {
+        ScheduleComposition(op);
       }
       break;
     }
-    case CompositableOperationDetail::TOpUseComponentAlphaTextures: {
-      const OpUseComponentAlphaTextures& op = aEdit.detail().get_OpUseComponentAlphaTextures();
+    case CompositableOperation::TOpUseComponentAlphaTextures: {
+      const OpUseComponentAlphaTextures& op = aEdit.get_OpUseComponentAlphaTextures();
+      CompositableHost* compositable = AsCompositable(op);
       RefPtr<TextureHost> texOnBlack = TextureHost::AsTextureHost(op.textureOnBlackParent());
       RefPtr<TextureHost> texOnWhite = TextureHost::AsTextureHost(op.textureOnWhiteParent());
-      texOnBlack->DeserializeReadLock(op.sharedLockBlack(), this);
-      texOnWhite->DeserializeReadLock(op.sharedLockWhite(), this);
 
       MOZ_ASSERT(texOnBlack && texOnWhite);
       compositable->UseComponentAlphaTextures(texOnBlack, texOnWhite);
 
-      if (texOnBlack) {
-        texOnBlack->SetLastFwdTransactionId(mFwdTransactionId);
-        // Make sure that each texture was handled by the compositable
-        // because the recycling logic depends on it.
-        MOZ_ASSERT(texOnBlack->NumCompositableRefs() > 0);
-      }
-
-      if (texOnWhite) {
-        texOnWhite->SetLastFwdTransactionId(mFwdTransactionId);
-        // Make sure that each texture was handled by the compositable
-        // because the recycling logic depends on it.
-        MOZ_ASSERT(texOnWhite->NumCompositableRefs() > 0);
-      }
-
-      if (UsesImageBridge()) {
-        ScheduleComposition(compositable);
+      if (IsAsync()) {
+        ScheduleComposition(op);
       }
       break;
     }
 #ifdef MOZ_WIDGET_GONK
-    case CompositableOperationDetail::TOpUseOverlaySource: {
-      const OpUseOverlaySource& op = aEdit.detail().get_OpUseOverlaySource();
+    case CompositableOperation::TOpUseOverlaySource: {
+      const OpUseOverlaySource& op = aEdit.get_OpUseOverlaySource();
+      CompositableHost* compositable = AsCompositable(op);
+      MOZ_ASSERT(compositable->GetType() == CompositableType::IMAGE_OVERLAY, "Invalid operation!");
       if (!ValidatePictureRect(op.overlay().size(), op.picture())) {
         return false;
       }
@@ -266,23 +234,39 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
 }
 
 void
-CompositableParentManager::DestroyActor(const OpDestroy& aOp)
+CompositableParentManager::SendPendingAsyncMessages()
 {
-  switch (aOp.type()) {
-    case OpDestroy::TPTextureParent: {
-      auto actor = aOp.get_PTextureParent();
-      TextureHost::ReceivedDestroy(actor);
-      break;
-    }
-    case OpDestroy::TPCompositableParent: {
-      auto actor = aOp.get_PCompositableParent();
-      CompositableHost::ReceivedDestroy(actor);
-      break;
-    }
-    default: {
-      MOZ_ASSERT(false, "unsupported type");
+  if (mPendingAsyncMessage.empty()) {
+    return;
+  }
+
+  // Some type of AsyncParentMessageData message could have
+  // one file descriptor (e.g. OpDeliverFence).
+  // A number of file descriptors per gecko ipc message have a limitation
+  // on OS_POSIX (MACOSX or LINUX).
+#if defined(OS_POSIX)
+  static const uint32_t kMaxMessageNumber = FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE;
+#else
+  // default number that works everywhere else
+  static const uint32_t kMaxMessageNumber = 250;
+#endif
+
+  InfallibleTArray<AsyncParentMessageData> messages;
+  messages.SetCapacity(mPendingAsyncMessage.size());
+  for (size_t i = 0; i < mPendingAsyncMessage.size(); i++) {
+    messages.AppendElement(mPendingAsyncMessage[i]);
+    // Limit maximum number of messages.
+    if (messages.Length() >= kMaxMessageNumber) {
+      SendAsyncMessage(messages);
+      // Initialize Messages.
+      messages.Clear();
     }
   }
+
+  if (messages.Length() > 0) {
+    SendAsyncMessage(messages);
+  }
+  mPendingAsyncMessage.clear();
 }
 
 } // namespace layers

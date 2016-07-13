@@ -4,12 +4,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# Temporarily disabled. See bug 1256495.
-#test_certificates = (
-#    'ca.pem',
-#    'ee.pem',
-#    'int.pem',
-#)
-#
-#for test_certificate in test_certificates:
-#    GeneratedTestCertificate(test_certificate)
+test_certificates = (
+    'ca.pem',
+    'ee.pem',
+    'int.pem',
+)
+
+for test_certificate in test_certificates:
+    input_file = test_certificate + '.certspec'
+    GENERATED_FILES += [test_certificate]
+    props = GENERATED_FILES[test_certificate]
+    props.script = '../pycert.py'
+    props.inputs = [input_file, '!/config/buildid']
+    TEST_HARNESS_FILES.xpcshell.security.manager.ssl.tests.unit.test_cert_trust += ['!%s' % test_certificate]

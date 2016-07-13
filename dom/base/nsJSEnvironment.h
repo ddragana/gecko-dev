@@ -15,6 +15,7 @@
 #include "nsIXPConnect.h"
 #include "nsIArray.h"
 #include "mozilla/Attributes.h"
+#include "nsPIDOMWindow.h"
 #include "nsThreadUtils.h"
 #include "xpcpublic.h"
 
@@ -50,6 +51,7 @@ public:
   virtual nsIScriptGlobalObject *GetGlobalObject() override;
   inline nsIScriptGlobalObject *GetGlobalObjectRef() { return mGlobalObjectRef; }
 
+  virtual JSContext* GetNativeContext() override;
   virtual nsresult InitContext() override;
   virtual bool IsContextInitialized() override;
 
@@ -149,8 +151,11 @@ protected:
   nsresult AddSupportsPrimitiveTojsvals(nsISupports *aArg, JS::Value *aArgv);
 
 private:
-  void Destroy();
+  void DestroyJSContext();
 
+  nsrefcnt GetCCRefcnt();
+
+  JSContext *mContext;
   JS::Heap<JSObject*> mWindowProxy;
 
   bool mIsInitialized;
@@ -164,8 +169,12 @@ private:
   // context does. It is eventually collected by the cycle collector.
   nsCOMPtr<nsIScriptGlobalObject> mGlobalObjectRef;
 
+  static void JSOptionChangedCallback(const char *pref, void *data);
+
   static bool DOMOperationCallback(JSContext *cx);
 };
+
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
@@ -180,11 +189,11 @@ nsScriptNameSpaceManager* GetNameSpaceManager();
 nsScriptNameSpaceManager* PeekNameSpaceManager();
 
 // Runnable that's used to do async error reporting
-class AsyncErrorReporter final : public mozilla::Runnable
+class AsyncErrorReporter : public nsRunnable
 {
 public:
   // aWindow may be null if this error report is not associated with a window
-  explicit AsyncErrorReporter(xpc::ErrorReport* aReport)
+  AsyncErrorReporter(JSRuntime* aRuntime, xpc::ErrorReport* aReport)
     : mReport(aReport)
   {}
 
@@ -195,7 +204,7 @@ public:
   }
 
 protected:
-  RefPtr<xpc::ErrorReport> mReport;
+  nsRefPtr<xpc::ErrorReport> mReport;
 };
 
 } // namespace dom
@@ -220,5 +229,15 @@ public:
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIJSArgArray, NS_IJSARGARRAY_IID)
+
+JSObject* NS_DOMReadStructuredClone(JSContext* cx,
+                                    JSStructuredCloneReader* reader, uint32_t tag,
+                                    uint32_t data, void* closure);
+
+bool NS_DOMWriteStructuredClone(JSContext* cx,
+                                JSStructuredCloneWriter* writer,
+                                JS::Handle<JSObject*> obj, void *closure);
+
+void NS_DOMStructuredCloneError(JSContext* cx, uint32_t errorid);
 
 #endif /* nsJSEnvironment_h */

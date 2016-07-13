@@ -31,10 +31,9 @@ namespace mozilla {
 struct ProfileConfig {
   const char* name;
   int quality;
-  uint32_t priority;
 };
 
-#define DEF_GONK_RECORDER_PROFILE(e, n, p) { n, e, p },
+#define DEF_GONK_RECORDER_PROFILE(e, n) { n, e },
 static const ProfileConfig ProfileList[] = {
   #include "GonkRecorderProfiles.def"
 };
@@ -45,10 +44,9 @@ struct ProfileConfigDetect {
   const char* name;
   uint32_t width;
   uint32_t height;
-  uint32_t priority;
 };
 
-#define DEF_GONK_RECORDER_PROFILE_DETECT(n, w, h, p) { n, w, h, p },
+#define DEF_GONK_RECORDER_PROFILE_DETECT(n, w, h) { n, w, h },
 static const ProfileConfigDetect ProfileListDetect[] = {
   #include "GonkRecorderProfiles.def"
 };
@@ -269,6 +267,18 @@ GonkRecorderProfile::GonkRecorderProfile(uint32_t aCameraId,
   mIsValid = isValid && mAudio.IsValid() && mVideo.IsValid();
 }
 
+/* static */ PLDHashOperator
+GonkRecorderProfile::Enumerate(const nsAString& aProfileName,
+                               GonkRecorderProfile* aProfile,
+                               void* aUserArg)
+{
+  nsTArray<nsRefPtr<ICameraControl::RecorderProfile>>* profiles =
+    static_cast<nsTArray<nsRefPtr<ICameraControl::RecorderProfile>>*>(aUserArg);
+  MOZ_ASSERT(profiles);
+  profiles->AppendElement(aProfile);
+  return PL_DHASH_NEXT;
+}
+
 /* static */
 already_AddRefed<GonkRecorderProfile>
 GonkRecorderProfile::CreateProfile(uint32_t aCameraId, int aQuality)
@@ -278,7 +288,7 @@ GonkRecorderProfile::CreateProfile(uint32_t aCameraId, int aQuality)
     return nullptr;
   }
 
-  RefPtr<GonkRecorderProfile> profile = new GonkRecorderProfile(aCameraId, aQuality);
+  nsRefPtr<GonkRecorderProfile> profile = new GonkRecorderProfile(aCameraId, aQuality);
   if (!profile->IsValid()) {
     DOM_CAMERA_LOGE("Profile %d is not valid\n", aQuality);
     return nullptr;
@@ -305,14 +315,13 @@ GonkRecorderProfile::GetProfileHashtable(uint32_t aCameraId)
         highestKnownQuality = p.quality;
       }
 
-      RefPtr<GonkRecorderProfile> profile = CreateProfile(aCameraId, p.quality);
+      nsRefPtr<GonkRecorderProfile> profile = CreateProfile(aCameraId, p.quality);
       if (!profile) {
         continue;
       }
 
       DOM_CAMERA_LOGI("Profile %d '%s' supported by platform\n", p.quality, p.name);
       profile->mName.AssignASCII(p.name);
-      profile->mPriority = p.priority;
       profiles->Put(profile->GetName(), profile);
     }
 
@@ -330,7 +339,7 @@ GonkRecorderProfile::GetProfileHashtable(uint32_t aCameraId)
        situation there is a collision, it will merely select the last
        detected profile. */
     for (int q = highestKnownQuality + 1; q <= CAMCORDER_QUALITY_LIST_END; ++q) {
-      RefPtr<GonkRecorderProfile> profile = CreateProfile(aCameraId, q);
+      nsRefPtr<GonkRecorderProfile> profile = CreateProfile(aCameraId, q);
       if (!profile) {
         continue;
       }
@@ -342,7 +351,6 @@ GonkRecorderProfile::GetProfileHashtable(uint32_t aCameraId)
         if (s.width == p.width && s.height == p.height) {
           DOM_CAMERA_LOGI("Profile %d '%s' supported by platform\n", q, p.name);
           profile->mName.AssignASCII(p.name);
-          profile->mPriority = p.priority;
           profiles->Put(profile->GetName(), profile);
           break;
         }
@@ -359,7 +367,7 @@ GonkRecorderProfile::GetProfileHashtable(uint32_t aCameraId)
 
 /* static */ nsresult
 GonkRecorderProfile::GetAll(uint32_t aCameraId,
-                            nsTArray<RefPtr<ICameraControl::RecorderProfile>>& aProfiles)
+                            nsTArray<nsRefPtr<ICameraControl::RecorderProfile>>& aProfiles)
 {
   ProfileHashtable* profiles = GetProfileHashtable(aCameraId);
   if (!profiles) {
@@ -367,9 +375,7 @@ GonkRecorderProfile::GetAll(uint32_t aCameraId,
   }
 
   aProfiles.Clear();
-  for (auto iter = profiles->Iter(); !iter.Done(); iter.Next()) {
-    aProfiles.AppendElement(iter.UserData());
-  }
+  profiles->EnumerateRead(Enumerate, static_cast<void*>(&aProfiles));
 
   return NS_OK;
 }

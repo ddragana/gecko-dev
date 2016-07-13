@@ -23,6 +23,7 @@ function test()
  
   var results;
 
+  jit(true);
 
   function f() {
     for (var i = 0; i != 1000; ++i) {
@@ -38,6 +39,7 @@ function test()
     print('Test skipped due to lack of scatter threadsafe function');
   }
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

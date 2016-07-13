@@ -22,16 +22,16 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  uint16_t NumberOfInputs() const override { return mInputCount; }
+  virtual uint16_t NumberOfInputs() const override { return mInputCount; }
 
-  const char* NodeType() const override
+  virtual const char* NodeType() const override
   {
     return "ChannelMergerNode";
   }
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }

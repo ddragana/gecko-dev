@@ -6,16 +6,14 @@
 
 this.EXPORTED_SYMBOLS = ["RemoteFinder", "RemoteFinderListener"];
 
-const { interfaces: Ci, classes: Cc, utils: Cu } = Components;
+const Ci = Components.interfaces;
+const Cc = Components.classes;
+const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Geometry.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "GetClipboardSearchString",
   () => Cu.import("resource://gre/modules/Finder.jsm", {}).GetClipboardSearchString
-);
-XPCOMUtils.defineLazyGetter(this, "Rect",
-  () => Cu.import("resource://gre/modules/Geometry.jsm", {}).Rect
 );
 
 function RemoteFinder(browser) {
@@ -26,24 +24,11 @@ function RemoteFinder(browser) {
 }
 
 RemoteFinder.prototype = {
-  destroy() {
-    this._browser.messageManager.sendAsyncMessage("Finder:Destroy");
-    if (this._messageManager) {
-      this._messageManager.removeMessageListener("Finder:Result", this);
-      this._messageManager.removeMessageListener("Finder:MatchesResult", this);
-      this._messageManager.removeMessageListener("Finder:CurrentSelectionResult",this);
-      this._messageManager.removeMessageListener("Finder:HighlightFinished",this);
-    }
-    this._listeners.clear();
-    this._browser = this._messageManager = null;
-  },
-
   swapBrowser: function(aBrowser) {
     if (this._messageManager) {
       this._messageManager.removeMessageListener("Finder:Result", this);
       this._messageManager.removeMessageListener("Finder:MatchesResult", this);
       this._messageManager.removeMessageListener("Finder:CurrentSelectionResult",this);
-      this._messageManager.removeMessageListener("Finder:HighlightFinished",this);
     }
     else {
       aBrowser.messageManager.sendAsyncMessage("Finder:Initialize");
@@ -54,7 +39,6 @@ RemoteFinder.prototype = {
     this._messageManager.addMessageListener("Finder:Result", this);
     this._messageManager.addMessageListener("Finder:MatchesResult", this);
     this._messageManager.addMessageListener("Finder:CurrentSelectionResult", this);
-    this._messageManager.addMessageListener("Finder:HighlightFinished", this);
 
     // Ideally listeners would have removed themselves but that doesn't happen
     // right now
@@ -76,10 +60,6 @@ RemoteFinder.prototype = {
     switch (aMessage.name) {
       case "Finder:Result":
         this._searchString = aMessage.data.searchString;
-        // The rect stops being a Geometry.jsm:Rect over IPC.
-        if (aMessage.data.rect) {
-          aMessage.data.rect = Rect.fromRect(aMessage.data.rect);
-        }
         callback = "onFindResult";
         params = [ aMessage.data ];
         break;
@@ -91,20 +71,14 @@ RemoteFinder.prototype = {
         callback = "onCurrentSelection";
         params = [ aMessage.data.selection, aMessage.data.initial ];
         break;
-      case "Finder:HighlightFinished":
-        callback = "onHighlightFinished";
-        params = [ aMessage.data ];
-        break;
     }
 
     for (let l of this._listeners) {
       // Don't let one callback throwing stop us calling the rest
       try {
         l[callback].apply(l, params);
-      } catch (e) {
-        if (!l[callback]) {
-          Cu.reportError(`Missing ${callback} callback on RemoteFinderListener`);
-        }
+      }
+      catch (e) {
         Cu.reportError(e);
       }
     }
@@ -125,11 +99,6 @@ RemoteFinder.prototype = {
   set caseSensitive(aSensitive) {
     this._browser.messageManager.sendAsyncMessage("Finder:CaseSensitive",
                                                   { caseSensitive: aSensitive });
-  },
-
-  set entireWord(aEntireWord) {
-    this._browser.messageManager.sendAsyncMessage("Finder:EntireWord",
-                                                  { entireWord: aEntireWord });
   },
 
   getInitialSelection: function() {
@@ -180,16 +149,6 @@ RemoteFinder.prototype = {
     this._browser.messageManager.sendAsyncMessage("Finder:FocusContent");
   },
 
-  onFindbarClose: function () {
-    this._browser.messageManager.sendAsyncMessage("Finder:FindbarClose");
-  },
-
-  onModalHighlightChange: function(aUseModalHighlight) {
-    this._browser.messageManager.sendAsyncMessage("Finder:ModalHighlightChange", {
-      useModalHighlight: aUseModalHighlight
-    });
-  },
-
   keyPress: function (aEvent) {
     this._browser.messageManager.sendAsyncMessage("Finder:KeyPress",
                                                   { keyCode: aEvent.keyCode,
@@ -221,8 +180,6 @@ function RemoteFinderListener(global) {
 RemoteFinderListener.prototype = {
   MESSAGES: [
     "Finder:CaseSensitive",
-    "Finder:Destroy",
-    "Finder:EntireWord",
     "Finder:FastFind",
     "Finder:FindAgain",
     "Finder:SetSearchStringToSelection",
@@ -231,10 +188,8 @@ RemoteFinderListener.prototype = {
     "Finder:EnableSelection",
     "Finder:RemoveSelection",
     "Finder:FocusContent",
-    "Finder:FindbarClose",
     "Finder:KeyPress",
-    "Finder:MatchesCount",
-    "Finder:ModalHighlightChange"
+    "Finder:MatchesCount"
   ],
 
   onFindResult: function (aData) {
@@ -247,24 +202,12 @@ RemoteFinderListener.prototype = {
     this._global.sendAsyncMessage("Finder:MatchesResult", aData);
   },
 
-  onHighlightFinished: function(aData) {
-    this._global.sendAsyncMessage("Finder:HighlightFinished", aData);
-  },
-
   receiveMessage: function (aMessage) {
     let data = aMessage.data;
 
     switch (aMessage.name) {
-      case "Finder:Destroy":
-        this._finder.destroy();
-        break;
-
       case "Finder:CaseSensitive":
         this._finder.caseSensitive = data.caseSensitive;
-        break;
-
-      case "Finder:EntireWord":
-        this._finder.entireWord = data.entireWord;
         break;
 
       case "Finder:SetSearchStringToSelection": {
@@ -307,20 +250,12 @@ RemoteFinderListener.prototype = {
         this._finder.focusContent();
         break;
 
-      case "Finder:FindbarClose":
-        this._finder.onFindbarClose();
-        break;
-
       case "Finder:KeyPress":
         this._finder.keyPress(data);
         break;
 
       case "Finder:MatchesCount":
         this._finder.requestMatchesCount(data.searchString, data.matchLimit, data.linksOnly);
-        break;
-
-      case "Finder:ModalHighlightChange":
-        this._finder.onModalHighlightChange(data.useModalHighlight);
         break;
     }
   }

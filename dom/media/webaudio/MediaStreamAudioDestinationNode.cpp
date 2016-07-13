@@ -10,7 +10,6 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "DOMMediaStream.h"
-#include "MediaStreamTrack.h"
 #include "TrackUnionStream.h"
 
 namespace mozilla {
@@ -30,24 +29,23 @@ MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(AudioContext* a
               ChannelCountMode::Explicit,
               ChannelInterpretation::Speakers)
   , mDOMStream(
-      DOMAudioNodeMediaStream::CreateTrackUnionStreamAsInput(GetOwner(),
-                                                             this,
-                                                             aContext->Graph()))
+      DOMAudioNodeMediaStream::CreateTrackUnionStream(GetOwner(),
+                                                      this,
+                                                      aContext->Graph()))
 {
   // Ensure an audio track with the correct ID is exposed to JS
-  nsIDocument* doc = aContext->GetParentObject()->GetExtantDoc();
-  RefPtr<MediaStreamTrackSource> source =
-    new BasicUnstoppableTrackSource(doc->NodePrincipal(),
-                                    MediaSourceEnum::AudioCapture);
-  mDOMStream->CreateDOMTrack(AudioNodeStream::AUDIO_TRACK,
-                             MediaSegment::AUDIO, source);
+  mDOMStream->CreateDOMTrack(AudioNodeStream::AUDIO_TRACK, MediaSegment::AUDIO);
 
-  ProcessedMediaStream* outputStream = mDOMStream->GetInputStream()->AsProcessedStream();
+  ProcessedMediaStream* outputStream = mDOMStream->GetStream()->AsProcessedStream();
   MOZ_ASSERT(!!outputStream);
   AudioNodeEngine* engine = new AudioNodeEngine(this);
-  mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::EXTERNAL_OUTPUT);
-  mPort = outputStream->AllocateInputPort(mStream, AudioNodeStream::AUDIO_TRACK);
+  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::EXTERNAL_STREAM);
+  mPort = outputStream->AllocateInputPort(mStream);
+
+  nsIDocument* doc = aContext->GetParentObject()->GetExtantDoc();
+  if (doc) {
+    mDOMStream->CombineWithPrincipal(doc->NodePrincipal());
+  }
 }
 
 MediaStreamAudioDestinationNode::~MediaStreamAudioDestinationNode()

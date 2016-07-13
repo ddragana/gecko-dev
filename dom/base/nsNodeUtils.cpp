@@ -6,7 +6,6 @@
 
 #include "nsNodeUtils.h"
 #include "nsContentUtils.h"
-#include "nsCSSPseudoElements.h"
 #include "nsINode.h"
 #include "nsIContent.h"
 #include "mozilla/dom/Element.h"
@@ -14,7 +13,7 @@
 #include "nsIDocument.h"
 #include "mozilla/EventListenerManager.h"
 #include "nsIXPConnect.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "nsIDOMAttr.h"
 #include "nsCOMArray.h"
 #include "nsPIDOMWindow.h"
@@ -24,7 +23,6 @@
 #endif
 #include "nsBindingManager.h"
 #include "nsGenericHTMLElement.h"
-#include "mozilla/AnimationTarget.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/HTMLImageElement.h"
@@ -125,26 +123,24 @@ void
 nsNodeUtils::AttributeWillChange(Element* aElement,
                                  int32_t aNameSpaceID,
                                  nsIAtom* aAttribute,
-                                 int32_t aModType,
-                                 const nsAttrValue* aNewValue)
+                                 int32_t aModType)
 {
   nsIDocument* doc = aElement->OwnerDoc();
   IMPL_MUTATION_NOTIFICATION(AttributeWillChange, aElement,
                              (doc, aElement, aNameSpaceID, aAttribute,
-                              aModType, aNewValue));
+                              aModType));
 }
 
 void
 nsNodeUtils::AttributeChanged(Element* aElement,
                               int32_t aNameSpaceID,
                               nsIAtom* aAttribute,
-                              int32_t aModType,
-                              const nsAttrValue* aOldValue)
+                              int32_t aModType)
 {
   nsIDocument* doc = aElement->OwnerDoc();
   IMPL_MUTATION_NOTIFICATION(AttributeChanged, aElement,
                              (doc, aElement, aNameSpaceID, aAttribute,
-                              aModType, aOldValue));
+                              aModType));
 }
 
 void
@@ -167,15 +163,6 @@ nsNodeUtils::ContentAppended(nsIContent* aContainer,
   IMPL_MUTATION_NOTIFICATION(ContentAppended, aContainer,
                              (doc, aContainer, aFirstNewContent,
                               aNewIndexInContainer));
-}
-
-void
-nsNodeUtils::NativeAnonymousChildListChange(nsIContent* aContent,
-                                            bool aIsRemove)
-{
-  nsIDocument* doc = aContent->OwnerDoc();
-  IMPL_MUTATION_NOTIFICATION(NativeAnonymousChildListChange, aContent,
-                            (doc, aContent, aIsRemove));
 }
 
 void
@@ -228,59 +215,68 @@ nsNodeUtils::ContentRemoved(nsINode* aContainer,
                               aPreviousSibling));
 }
 
-Maybe<NonOwningAnimationTarget>
-nsNodeUtils::GetTargetForAnimation(const Animation* aAnimation)
+static inline Element*
+GetTarget(Animation* aAnimation)
 {
   KeyframeEffectReadOnly* effect = aAnimation->GetEffect();
-  return effect ? effect->GetTarget() : Nothing();
-}
-
-void
-nsNodeUtils::AnimationMutated(Animation* aAnimation,
-                              AnimationMutationType aMutatedType)
-{
-  Maybe<NonOwningAnimationTarget> target = GetTargetForAnimation(aAnimation);
-  if (!target) {
-    return;
+  if (!effect) {
+    return nullptr;
   }
 
-  // A pseudo element and its parent element use the same owner doc.
-  nsIDocument* doc = target->mElement->OwnerDoc();
-  if (doc->MayHaveAnimationObservers()) {
-    // we use the its parent element as the subject in DOM Mutation Observer.
-    Element* elem = target->mElement;
-    switch (aMutatedType) {
-      case AnimationMutationType::Added:
-        IMPL_ANIMATION_NOTIFICATION(AnimationAdded, elem, (aAnimation));
-        break;
-      case AnimationMutationType::Changed:
-        IMPL_ANIMATION_NOTIFICATION(AnimationChanged, elem, (aAnimation));
-        break;
-      case AnimationMutationType::Removed:
-        IMPL_ANIMATION_NOTIFICATION(AnimationRemoved, elem, (aAnimation));
-        break;
-      default:
-        MOZ_ASSERT_UNREACHABLE("unexpected mutation type");
-    }
+  Element* target;
+  nsCSSPseudoElements::Type pseudoType;
+  effect->GetTarget(target, pseudoType);
+
+  // If the animation targets a pseudo-element, we don't dispatch
+  // notifications for it.  (In the future we will have PseudoElement
+  // objects we can use as the target of the notifications.)
+  if (pseudoType != nsCSSPseudoElements::ePseudo_NotPseudoElement) {
+    return nullptr;
   }
+
+  return effect->GetTarget();
 }
 
 void
 nsNodeUtils::AnimationAdded(Animation* aAnimation)
 {
-  AnimationMutated(aAnimation, AnimationMutationType::Added);
+  Element* target = GetTarget(aAnimation);
+  if (!target) {
+    return;
+  }
+  nsIDocument* doc = target->OwnerDoc();
+
+  if (doc->MayHaveAnimationObservers()) {
+    IMPL_ANIMATION_NOTIFICATION(AnimationAdded, target, (aAnimation));
+  }
 }
 
 void
 nsNodeUtils::AnimationChanged(Animation* aAnimation)
 {
-  AnimationMutated(aAnimation, AnimationMutationType::Changed);
+  Element* target = GetTarget(aAnimation);
+  if (!target) {
+    return;
+  }
+  nsIDocument* doc = target->OwnerDoc();
+
+  if (doc->MayHaveAnimationObservers()) {
+    IMPL_ANIMATION_NOTIFICATION(AnimationChanged, target, (aAnimation));
+  }
 }
 
 void
 nsNodeUtils::AnimationRemoved(Animation* aAnimation)
 {
-  AnimationMutated(aAnimation, AnimationMutationType::Removed);
+  Element* target = GetTarget(aAnimation);
+  if (!target) {
+    return;
+  }
+  nsIDocument* doc = target->OwnerDoc();
+
+  if (doc->MayHaveAnimationObservers()) {
+    IMPL_ANIMATION_NOTIFICATION(AnimationRemoved, target, (aAnimation));
+  }
 }
 
 void
@@ -360,8 +356,7 @@ nsNodeUtils::LastRelease(nsINode* aNode)
     // attached
     if (aNode->HasFlag(NODE_FORCE_XBL_BINDINGS) &&
         ownerDoc->BindingManager()) {
-      ownerDoc->BindingManager()->RemovedFromDocument(elem, ownerDoc,
-                                                      nsBindingManager::eRunDtor);
+      ownerDoc->BindingManager()->RemovedFromDocument(elem, ownerDoc);
     }
   }
 
@@ -425,13 +420,14 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
   // attributes and children).
 
   nsAutoScriptBlocker scriptBlocker;
+  AutoJSContext cx;
   nsresult rv;
 
   nsNodeInfoManager *nodeInfoManager = aNewNodeInfoManager;
 
   // aNode.
   NodeInfo *nodeInfo = aNode->mNodeInfo;
-  RefPtr<NodeInfo> newNodeInfo;
+  nsRefPtr<NodeInfo> newNodeInfo;
   if (nodeInfoManager) {
 
     // Don't allow importing/adopting nodes from non-privileged "scriptable"
@@ -517,7 +513,8 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
         newDoc->RegisterActivityObserver(aNode->AsElement());
       }
 
-      if (nsPIDOMWindowInner* window = newDoc->GetInnerWindow()) {
+      nsPIDOMWindow* window = newDoc->GetInnerWindow();
+      if (window) {
         EventListenerManager* elm = aNode->GetExistingListenerManager();
         if (elm) {
           window->SetMutationListeners(elm->MutationListenerBits());
@@ -563,7 +560,6 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
     }
 
     if (aReparentScope) {
-      AutoJSContext cx;
       JS::Rooted<JSObject*> wrapper(cx);
       if ((wrapper = aNode->GetWrapper())) {
         MOZ_ASSERT(IsDOMObject(wrapper));

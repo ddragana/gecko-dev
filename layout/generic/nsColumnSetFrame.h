@@ -12,13 +12,7 @@
 #include "nsContainerFrame.h"
 #include "nsIFrameInlines.h" // for methods used by IS_TRUE_OVERFLOW_CONTAINER
 
-/**
- * nsColumnSetFrame implements CSS multi-column layout.
- * @note nsColumnSetFrame keeps true overflow containers in the normal flow
- * child lists (i.e. the principal and overflow lists).
- */
-class nsColumnSetFrame final : public nsContainerFrame
-{
+class nsColumnSetFrame final : public nsContainerFrame {
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
@@ -51,13 +45,21 @@ public:
   virtual nscoord GetAvailableContentBSize(const nsHTMLReflowState& aReflowState);
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
-    nsIFrame* frame = PrincipalChildList().FirstChild();
+    nsIFrame* frame = GetFirstPrincipalChild();
 
     // if no children return nullptr
     if (!frame)
       return nullptr;
 
     return frame->GetContentInsertionFrame();
+  }
+
+  virtual nsresult StealFrame(nsIFrame* aChild, bool aForceNormal) override
+  {
+    // nsColumnSetFrame keeps true overflow containers in the normal flow
+    // child lists (i.e. the principal and overflow lists).
+    return nsContainerFrame::StealFrame(aChild,
+                                        IS_TRUE_OVERFLOW_CONTAINER(aChild));
   }
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override

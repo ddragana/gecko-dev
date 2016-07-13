@@ -26,7 +26,7 @@
 
 already_AddRefed<nsBoxLayout> NS_NewGridRowGroupLayout()
 {
-  RefPtr<nsBoxLayout> layout = new nsGridRowGroupLayout();
+  nsRefPtr<nsBoxLayout> layout = new nsGridRowGroupLayout();
   return layout.forget();
 } 
 
@@ -43,7 +43,7 @@ nsGridRowGroupLayout::ChildAddedOrRemoved(nsIFrame* aBox, nsBoxLayoutState& aSta
 {
   int32_t index = 0;
   nsGrid* grid = GetGrid(aBox, &index);
-  bool isHorizontal = IsXULHorizontal(aBox);
+  bool isHorizontal = IsHorizontal(aBox);
 
   if (grid)
     grid->RowAddedOrRemoved(aState, index, isHorizontal);
@@ -61,9 +61,9 @@ nsGridRowGroupLayout::AddWidth(nsSize& aSize, nscoord aSize2, bool aIsHorizontal
 }
 
 nsSize
-nsGridRowGroupLayout::GetXULPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
+nsGridRowGroupLayout::GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 { 
-  nsSize vpref = nsGridRowLayout::GetXULPrefSize(aBox, aState); 
+  nsSize vpref = nsGridRowLayout::GetPrefSize(aBox, aState); 
 
 
  /* It is possible that we could have some extra columns. This is when less columns in XUL were 
@@ -79,7 +79,7 @@ nsGridRowGroupLayout::GetXULPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
   if (grid) 
   {
     // make sure we add in extra columns sizes as well
-    bool isHorizontal = IsXULHorizontal(aBox);
+    bool isHorizontal = IsHorizontal(aBox);
     int32_t extraColumns = grid->GetExtraColumnCount(isHorizontal);
     int32_t start = grid->GetColumnCount(isHorizontal) - grid->GetExtraColumnCount(isHorizontal);
     for (int32_t i=0; i < extraColumns; i++)
@@ -95,9 +95,9 @@ nsGridRowGroupLayout::GetXULPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 }
 
 nsSize
-nsGridRowGroupLayout::GetXULMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
+nsGridRowGroupLayout::GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 {
- nsSize maxSize = nsGridRowLayout::GetXULMaxSize(aBox, aState); 
+ nsSize maxSize = nsGridRowLayout::GetMaxSize(aBox, aState); 
 
   int32_t index = 0;
   nsGrid* grid = GetGrid(aBox, &index);
@@ -105,7 +105,7 @@ nsGridRowGroupLayout::GetXULMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
   if (grid) 
   {
     // make sure we add in extra columns sizes as well
-    bool isHorizontal = IsXULHorizontal(aBox);
+    bool isHorizontal = IsHorizontal(aBox);
     int32_t extraColumns = grid->GetExtraColumnCount(isHorizontal);
     int32_t start = grid->GetColumnCount(isHorizontal) - grid->GetExtraColumnCount(isHorizontal);
     for (int32_t i=0; i < extraColumns; i++)
@@ -121,9 +121,9 @@ nsGridRowGroupLayout::GetXULMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 }
 
 nsSize
-nsGridRowGroupLayout::GetXULMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
+nsGridRowGroupLayout::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 {
-  nsSize minSize = nsGridRowLayout::GetXULMinSize(aBox, aState); 
+  nsSize minSize = nsGridRowLayout::GetMinSize(aBox, aState); 
 
   int32_t index = 0;
   nsGrid* grid = GetGrid(aBox, &index);
@@ -131,7 +131,7 @@ nsGridRowGroupLayout::GetXULMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
   if (grid) 
   {
     // make sure we add in extra columns sizes as well
-    bool isHorizontal = IsXULHorizontal(aBox);
+    bool isHorizontal = IsHorizontal(aBox);
     int32_t extraColumns = grid->GetExtraColumnCount(isHorizontal);
     int32_t start = grid->GetColumnCount(isHorizontal) - grid->GetExtraColumnCount(isHorizontal);
     for (int32_t i=0; i < extraColumns; i++)
@@ -157,7 +157,7 @@ nsGridRowGroupLayout::DirtyRows(nsIFrame* aBox, nsBoxLayoutState& aState)
     // calling MarkIntrinsicISizesDirty for every row group.
     aState.PresShell()->FrameNeedsReflow(aBox, nsIPresShell::eTreeChange,
                                          NS_FRAME_IS_DIRTY);
-    nsIFrame* child = nsBox::GetChildXULBox(aBox);
+    nsIFrame* child = nsBox::GetChildBox(aBox);
 
     while(child) {
 
@@ -169,7 +169,7 @@ nsGridRowGroupLayout::DirtyRows(nsIFrame* aBox, nsBoxLayoutState& aState)
       if (monument) 
         monument->DirtyRows(deepChild, aState);
 
-      child = nsBox::GetNextXULBox(child);
+      child = nsBox::GetNextBox(child);
     }
   }
 }
@@ -181,7 +181,7 @@ nsGridRowGroupLayout::CountRowsColumns(nsIFrame* aBox, int32_t& aRowCount, int32
   if (aBox) {
     int32_t startCount = aRowCount;
 
-    nsIFrame* child = nsBox::GetChildXULBox(aBox);
+    nsIFrame* child = nsBox::GetChildBox(aBox);
 
     while(child) {
       
@@ -191,12 +191,12 @@ nsGridRowGroupLayout::CountRowsColumns(nsIFrame* aBox, int32_t& aRowCount, int32
       nsIGridPart* monument = nsGrid::GetPartFromBox(deepChild);
       if (monument) {
         monument->CountRowsColumns(deepChild, aRowCount, aComputedColumnCount);
-        child = nsBox::GetNextXULBox(child);
+        child = nsBox::GetNextBox(child);
         deepChild = child;
         continue;
       }
 
-      child = nsBox::GetNextXULBox(child);
+      child = nsBox::GetNextBox(child);
 
       // if not a monument. Then count it. It will be a bogus row
       aRowCount++;
@@ -216,7 +216,7 @@ nsGridRowGroupLayout::BuildRows(nsIFrame* aBox, nsGridRow* aRows)
   int32_t rowCount = 0;
 
   if (aBox) {
-    nsIFrame* child = nsBox::GetChildXULBox(aBox);
+    nsIFrame* child = nsBox::GetChildBox(aBox);
 
     while(child) {
       
@@ -226,14 +226,14 @@ nsGridRowGroupLayout::BuildRows(nsIFrame* aBox, nsGridRow* aRows)
       nsIGridPart* monument = nsGrid::GetPartFromBox(deepChild);
       if (monument) {
         rowCount += monument->BuildRows(deepChild, &aRows[rowCount]);
-        child = nsBox::GetNextXULBox(child);
+        child = nsBox::GetNextBox(child);
         deepChild = child;
         continue;
       }
 
       aRows[rowCount].Init(child, true);
 
-      child = nsBox::GetNextXULBox(child);
+      child = nsBox::GetNextBox(child);
 
       // if not a monument. Then count it. It will be a bogus row
       rowCount++;
@@ -256,7 +256,7 @@ nsGridRowGroupLayout::GetTotalMargin(nsIFrame* aBox, bool aIsHorizontal)
 
   // add our border/padding to it
   nsMargin borderPadding(0,0,0,0);
-  aBox->GetXULBorderAndPadding(borderPadding);
+  aBox->GetBorderAndPadding(borderPadding);
   margin += borderPadding;
 
   return margin;

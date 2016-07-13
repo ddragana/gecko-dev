@@ -5,7 +5,6 @@
 
 #include "SVGDocumentWrapper.h"
 
-#include "mozilla/dom/DocumentTimeline.h"
 #include "mozilla/dom/Element.h"
 #include "nsICategoryManager.h"
 #include "nsIChannel.h"
@@ -29,7 +28,6 @@
 #include "mozilla/dom/SVGAnimatedLength.h"
 #include "nsMimeTypes.h"
 #include "DOMSVGLength.h"
-#include "nsDocument.h"
 
 // undef the GetCurrentTime macro defined in WinBase.h from the MS Platform SDK
 #undef GetCurrentTime
@@ -115,28 +113,9 @@ SVGDocumentWrapper::FlushImageTransformInvalidation()
 bool
 SVGDocumentWrapper::IsAnimated()
 {
-  // Can be called for animated images during shutdown, after we've
-  // already Observe()'d XPCOM shutdown and cleared out our mViewer pointer.
-  if (!mViewer) {
-    return false;
-  }
-
   nsIDocument* doc = mViewer->GetDocument();
-  if (!doc) {
-    return false;
-  }
-  if (doc->Timeline()->HasAnimations()) {
-    // CSS animations (technically HasAnimations() also checks for CSS
-    // transitions and Web animations but since SVG-as-an-image doesn't run
-    // script they will never run in the document that we wrap).
-    return true;
-  }
-  if (doc->HasAnimationController() &&
-      doc->GetAnimationController()->HasRegisteredAnimations()) {
-    // SMIL animations
-    return true;
-  }
-  return false;
+  return doc && doc->HasAnimationController() &&
+    doc->GetAnimationController()->HasRegisteredAnimations();
 }
 
 void
@@ -220,6 +199,9 @@ SVGDocumentWrapper::TickRefreshDriver()
 
 /** nsIStreamListener methods **/
 
+/* void onDataAvailable (in nsIRequest request, in nsISupports ctxt,
+                         in nsIInputStream inStr, in unsigned long sourceOffset,
+                         in unsigned long count); */
 NS_IMETHODIMP
 SVGDocumentWrapper::OnDataAvailable(nsIRequest* aRequest, nsISupports* ctxt,
                                     nsIInputStream* inStr,
@@ -232,6 +214,7 @@ SVGDocumentWrapper::OnDataAvailable(nsIRequest* aRequest, nsISupports* ctxt,
 
 /** nsIRequestObserver methods **/
 
+/* void onStartRequest (in nsIRequest request, in nsISupports ctxt); */
 NS_IMETHODIMP
 SVGDocumentWrapper::OnStartRequest(nsIRequest* aRequest, nsISupports* ctxt)
 {
@@ -253,6 +236,8 @@ SVGDocumentWrapper::OnStartRequest(nsIRequest* aRequest, nsISupports* ctxt)
 }
 
 
+/* void onStopRequest (in nsIRequest request, in nsISupports ctxt,
+                       in nsresult status); */
 NS_IMETHODIMP
 SVGDocumentWrapper::OnStopRequest(nsIRequest* aRequest, nsISupports* ctxt,
                                   nsresult status)

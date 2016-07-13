@@ -92,7 +92,7 @@ function createWorker(assert, xrayWindow, contentScript, done) {
 
 /* Examples for the `createProxyTest` uses */
 
-var html = "<script>var documentGlobal = true</script>";
+let html = "<script>var documentGlobal = true</script>";
 
 exports["test Create Proxy Test"] = createProxyTest(html, function (helper, assert) {
   // You can get access to regular `test` object in second argument of
@@ -169,7 +169,7 @@ exports["test Shared To String Proxies"] = createProxyTest("", function(helper) 
 */
 
 // Ensure that postMessage is working correctly across documents with an iframe
-var html = '<iframe id="iframe" name="test" src="data:text/html;charset=utf-8," />';
+let html = '<iframe id="iframe" name="test" src="data:text/html;charset=utf-8," />';
 exports["test postMessage"] = createProxyTest(html, function (helper, assert) {
   let ifWindow = helper.xrayWindow.document.getElementById("iframe").contentWindow;
   // Listen without proxies, to check that it will work in regular case
@@ -199,7 +199,7 @@ exports["test postMessage"] = createProxyTest(html, function (helper, assert) {
   );
 });
 
-var html = '<input id="input2" type="checkbox" />';
+let html = '<input id="input2" type="checkbox" />';
 exports["test Object Listener"] = createProxyTest(html, function (helper) {
 
   helper.createWorker(
@@ -255,10 +255,26 @@ exports["test Object Listener 2"] = createProxyTest("", function (helper) {
 
 });
 
-var html = '<input id="input" type="text" /><input id="input3" type="checkbox" />' +
+let html = '<input id="input" type="text" /><input id="input3" type="checkbox" />' +
              '<input id="input2" type="checkbox" />';
 
 exports.testStringOverload = createProxyTest(html, function (helper, assert) {
+  // Proxy - toString error
+  let originalString = "string";
+  let p = Proxy.create({
+    get: function(receiver, name) {
+      if (name == "binded")
+        return originalString.toString.bind(originalString);
+      return originalString[name];
+    }
+  });
+  assert.throws(function () {
+    p.toString();
+  },
+  /toString method called on incompatible Proxy/,
+  "toString can't be called with this being the proxy");
+  assert.equal(p.binded(), "string", "but it works if we bind this to the original string");
+
   helper.createWorker(
     'new ' + function ContentScriptScope() {
       // RightJS is hacking around String.prototype, and do similar thing:
@@ -278,21 +294,21 @@ exports.testStringOverload = createProxyTest(html, function (helper, assert) {
   );
 });
 
-exports["test Element.matches()"] = createProxyTest("", function (helper) {
+exports["test MozMatchedSelector"] = createProxyTest("", function (helper) {
   helper.createWorker(
     'new ' + function ContentScriptScope() {
-      // Check matches XrayWrappers bug (Bug 658909):
-      // Test that Element.matches() does not return bad results when we are
-      // not calling it from the node itself.
-      assert(document.createElement( "div" ).matches("div"),
-             "matches works while being called from the node");
-      assert(document.documentElement.matches.call(
+      // Check mozMatchesSelector XrayWrappers bug:
+      // mozMatchesSelector returns bad results when we are not calling it from the node itself
+      // SEE BUG 658909: mozMatchesSelector returns incorrect results with XrayWrappers
+      assert(document.createElement( "div" ).mozMatchesSelector("div"),
+             "mozMatchesSelector works while being called from the node");
+      assert(document.documentElement.mozMatchesSelector.call(
                document.createElement( "div" ),
                "div"
              ),
-             "matches works while being called from a " +
+             "mozMatchesSelector works while being called from a " +
              "function reference to " +
-             "document.documentElement.matches.call");
+             "document.documentElement.mozMatchesSelector.call");
       done();
     }
   );
@@ -488,7 +504,7 @@ exports["test Document TagName"] = createProxyTest("", function (helper) {
 
 });
 
-var html = '<iframe id="iframe" name="test" src="data:text/html;charset=utf-8," />';
+let html = '<iframe id="iframe" name="test" src="data:text/html;charset=utf-8," />';
 exports["test Window Frames"] = createProxyTest(html, function (helper) {
 
   helper.createWorker(
@@ -523,7 +539,7 @@ exports["test Collections"] = createProxyTest("", function (helper) {
 
 });
 
-var html = '<input id="input" type="text" /><input id="input3" type="checkbox" />' +
+let html = '<input id="input" type="text" /><input id="input3" type="checkbox" />' +
              '<input id="input2" type="checkbox" />';
 exports["test Collections 2"] = createProxyTest(html, function (helper) {
 
@@ -618,12 +634,8 @@ exports["test Prototype Inheritance"] = createProxyTest("", function (helper) {
 
 exports["test Functions"] = createProxyTest("", function (helper) {
 
-  helper.rawWindow.callFunction = function callFunction(f) {
-    return f();
-  };
-  helper.rawWindow.isEqual = function isEqual(a, b) {
-    return a == b;
-  };
+  helper.rawWindow.callFunction = function callFunction(f) f();
+  helper.rawWindow.isEqual = function isEqual(a, b) a == b;
   // bug 784116: workaround in order to allow proxy code to cache proxies on
   // these functions:
   helper.rawWindow.callFunction.__exposedProps__ = {__proxy: 'rw'};
@@ -644,7 +656,7 @@ exports["test Functions"] = createProxyTest("", function (helper) {
 
 });
 
-var html = '<input id="input2" type="checkbox" />';
+let html = '<input id="input2" type="checkbox" />';
 exports["test Listeners"] = createProxyTest(html, function (helper) {
 
   helper.createWorker(
@@ -715,7 +727,7 @@ exports["test requestAnimationFrame"] = createProxyTest("", function (helper) {
 exports["testGlobalScope"] = createProxyTest("", function (helper) {
 
   helper.createWorker(
-    'var toplevelScope = true;' +
+    'let toplevelScope = true;' +
     'assert(window.toplevelScope, "variables in toplevel scope are set to `window` object");' +
     'assert(this.toplevelScope, "variables in toplevel scope are set to `this` object");' +
     'done();'
@@ -778,7 +790,7 @@ exports["test Cross Domain Iframe"] = createProxyTest("", function (helper) {
 });
 
 // Bug 769006: Ensure that MutationObserver works fine with proxies
-var html = '<a href="foo">link</a>';
+let html = '<a href="foo">link</a>';
 exports["test MutationObvserver"] = createProxyTest(html, function (helper) {
 
   helper.createWorker(
@@ -816,7 +828,7 @@ exports["test MutationObvserver"] = createProxyTest(html, function (helper) {
 
 });
 
-var html = '<script>' +
+let html = '<script>' +
   'var accessCheck = function() {' +
   '  assert(true, "exporting function works");' +
   '  try{' +

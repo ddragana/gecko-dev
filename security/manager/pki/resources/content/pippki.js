@@ -3,7 +3,6 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-"use strict";
 
 /*
  * These are helper functions to be included
@@ -11,23 +10,20 @@
  */
 
 function setText(id, value) {
-  let element = document.getElementById(id);
-  if (!element) {
-    return;
-  }
-  if (element.hasChildNodes()) {
-    element.removeChild(element.firstChild);
-  }
-  element.appendChild(document.createTextNode(value));
+  var element = document.getElementById(id);
+  if (!element) return;
+     if (element.hasChildNodes())
+       element.removeChild(element.firstChild);
+  var textNode = document.createTextNode(value);
+  element.appendChild(textNode);
 }
 
 const nsICertificateDialogs = Components.interfaces.nsICertificateDialogs;
-const nsCertificateDialogs = "@mozilla.org/nsCertificateDialogs;1";
+const nsCertificateDialogs = "@mozilla.org/nsCertificateDialogs;1"
 
 function viewCertHelper(parent, cert) {
-  if (!cert) {
+  if (!cert)
     return;
-  }
 
   var cd = Components.classes[nsCertificateDialogs].getService(nsICertificateDialogs);
   cd.viewCert(parent, cert);
@@ -58,16 +54,17 @@ function getPKCS7String(cert, chainMode)
 function getPEMString(cert)
 {
   var derb64 = btoa(getDERString(cert));
-  // Wrap the Base64 string into lines of 64 characters with CRLF line breaks
-  // (as specified in RFC 1421).
+  // Wrap the Base64 string into lines of 64 characters, 
+  // with CRLF line breaks (as specified in RFC 1421).
   var wrapped = derb64.replace(/(\S{64}(?!$))/g, "$1\r\n");
   return "-----BEGIN CERTIFICATE-----\r\n"
          + wrapped
          + "\r\n-----END CERTIFICATE-----\r\n";
 }
-
+ 
 function alertPromptService(title, message)
 {
+  var ps = null;
   var ps = Components.classes["@mozilla.org/embedcomp/prompt-service;1"].
            getService(Components.interfaces.nsIPromptService);
   ps.alert(window, title, message);
@@ -76,25 +73,19 @@ function alertPromptService(title, message)
 function exportToFile(parent, cert)
 {
   var bundle = document.getElementById("pippki_bundle");
-  if (!cert) {
+  if (!cert)
     return;
-  }
 
   var nsIFilePicker = Components.interfaces.nsIFilePicker;
   var fp = Components.classes["@mozilla.org/filepicker;1"].
            createInstance(nsIFilePicker);
   fp.init(parent, bundle.getString("SaveCertAs"),
           nsIFilePicker.modeSave);
-  let filename = cert.commonName;
-  if (filename.length == 0) {
+  var filename = cert.commonName;
+  if (!filename.length)
     filename = cert.windowTitle;
-  }
-  // Remove all whitespace from the default filename, and try and ensure that
-  // an extension is included by default.
-  // Note: defaultExtension is more of a suggestion to some file picker
-  //       implementations, so we include the extension in the default file name
-  //       as well.
-  fp.defaultString = filename.replace(/\s*/g, "") + ".crt";
+  // remove all whitespace from the default filename
+  fp.defaultString = filename.replace(/\s*/g,'');
   fp.defaultExtension = "crt";
   fp.appendFilter(bundle.getString("CertFormatBase64"), "*.crt; *.pem");
   fp.appendFilter(bundle.getString("CertFormatBase64Chain"), "*.crt; *.pem");
@@ -103,18 +94,16 @@ function exportToFile(parent, cert)
   fp.appendFilter(bundle.getString("CertFormatPKCS7Chain"), "*.p7c");
   fp.appendFilters(nsIFilePicker.filterAll);
   var res = fp.show();
-  if (res != nsIFilePicker.returnOK && res != nsIFilePicker.returnReplace) {
+  if (res != nsIFilePicker.returnOK && res != nsIFilePicker.returnReplace)
     return;
-  }
 
   var content = '';
   switch (fp.filterIndex) {
     case 1:
       content = getPEMString(cert);
       var chain = cert.getChain();
-      for (let i = 1; i < chain.length; i++) {
+      for (var i = 1; i < chain.length; i++)
         content += getPEMString(chain.queryElementAt(i, Components.interfaces.nsIX509Cert));
-      }
       break;
     case 2:
       content = getDERString(cert);
@@ -139,10 +128,11 @@ function exportToFile(parent, cert)
     var fos = Components.classes["@mozilla.org/network/file-output-stream;1"].
               createInstance(Components.interfaces.nsIFileOutputStream);
     // flags: PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE
-    fos.init(file, 0x02 | 0x08 | 0x20, 0o0644, 0);
+    fos.init(file, 0x02 | 0x08 | 0x20, 00644, 0);
     written = fos.write(content, content.length);
     fos.close();
-  } catch (e) {
+  }
+  catch(e) {
     switch (e.result) {
       case Components.results.NS_ERROR_FILE_ACCESS_DENIED:
         msg = bundle.getString("writeFileAccessDenied");
@@ -160,9 +150,8 @@ function exportToFile(parent, cert)
     }
   }
   if (written != content.length) {
-    if (msg.length == 0) {
+    if (!msg.length)
       msg = bundle.getString("writeFileUnknownError");
-    }
     alertPromptService(bundle.getString("writeFileFailure"),
                        bundle.getFormattedString("writeFileFailed",
                        [fp.file.path, msg]));

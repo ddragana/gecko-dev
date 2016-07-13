@@ -110,12 +110,6 @@ private:
   bool
   DoRequest(const GetServiceStateEnabledRequest& aRequest);
 
-  bool
-  DoRequest(const ReadContactsRequest& aRequest);
-
-  bool
-  DoRequest(const UpdateContactRequest& aRequest);
-
   nsresult
   SendReply(const IccReply& aReply);
 

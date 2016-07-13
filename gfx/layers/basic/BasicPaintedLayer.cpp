@@ -19,6 +19,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float, etc
 #include "mozilla/layers/LayersTypes.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for gfxContext::Release, etc
 #include "nsPoint.h"                    // for nsIntPoint
@@ -62,7 +63,7 @@ BasicPaintedLayer::PaintThebes(gfxContext* aContext,
     mValidRegion.SetEmpty();
     mContentClient->Clear();
 
-    nsIntRegion toDraw = IntersectWithClip(GetLocalVisibleRegion().ToUnknownRegion(), aContext);
+    nsIntRegion toDraw = IntersectWithClip(GetEffectiveVisibleRegion(), aContext);
 
     RenderTraceInvalidateStart(this, "FFFF00", toDraw.GetBounds());
 
@@ -74,29 +75,31 @@ BasicPaintedLayer::PaintThebes(gfxContext* aContext,
 
       aContext->Save();
 
+      bool needsClipToVisibleRegion = GetClipToVisibleRegion();
       bool needsGroup = opacity != 1.0 ||
                         effectiveOperator != CompositionOp::OP_OVER ||
                         aMaskLayer;
-      RefPtr<gfxContext> context = nullptr;
-      BasicLayerManager::PushedGroup group;
-      bool availableGroup = false;
-
+      nsRefPtr<gfxContext> groupContext;
       if (needsGroup) {
-        availableGroup =
-            BasicManager()->PushGroupForLayer(aContext, this, toDraw, group);
-        if (availableGroup) {
-          context = group.mGroupTarget;
+        groupContext =
+          BasicManager()->PushGroupForLayer(aContext, this, toDraw,
+                                            &needsClipToVisibleRegion);
+        if (effectiveOperator != CompositionOp::OP_OVER) {
+          needsClipToVisibleRegion = true;
         }
       } else {
-        context = aContext;
+        groupContext = aContext;
       }
-      if (context) {
-        SetAntialiasingFlags(this, context->GetDrawTarget());
-        aCallback(this, context, toDraw, toDraw, DrawRegionClip::NONE,
-                  nsIntRegion(), aCallbackData);
-      }
-      if (needsGroup && availableGroup) {
-        BasicManager()->PopGroupForLayer(group);
+      SetAntialiasingFlags(this, groupContext->GetDrawTarget());
+      aCallback(this, groupContext, toDraw, toDraw,
+                DrawRegionClip::NONE, nsIntRegion(), aCallbackData);
+      if (needsGroup) {
+        aContext->PopGroupToSource();
+        if (needsClipToVisibleRegion) {
+          gfxUtils::ClipToRegion(aContext, toDraw);
+        }
+        AutoSetOperator setOptimizedOperator(aContext, ThebesOp(effectiveOperator));
+        PaintWithMask(aContext, opacity, aMaskLayer);
       }
 
       aContext->Restore();
@@ -167,21 +170,18 @@ BasicPaintedLayer::Validate(LayerManager::DrawPaintedLayerCallback aCallback,
     mContentClient->BeginPaintBuffer(this, flags);
   mValidRegion.Sub(mValidRegion, state.mRegionToInvalidate);
 
-  DrawTarget* target = mContentClient->BorrowDrawTargetForPainting(state);
-  if (target && target->IsValid()) {
+  if (DrawTarget* target = mContentClient->BorrowDrawTargetForPainting(state)) {
     // The area that became invalid and is visible needs to be repainted
     // (this could be the whole visible area if our buffer switched
     // from RGB to RGBA, because we might need to repaint with
     // subpixel AA)
     state.mRegionToInvalidate.And(state.mRegionToInvalidate,
-                                  GetLocalVisibleRegion().ToUnknownRegion());
+                                  GetEffectiveVisibleRegion());
     SetAntialiasingFlags(this, target);
 
     RenderTraceInvalidateStart(this, "FFFF00", state.mRegionToDraw.GetBounds());
 
-    RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
-    MOZ_ASSERT(ctx); // already checked the target above
-
+    nsRefPtr<gfxContext> ctx = gfxContext::ContextForDrawTarget(target);
     PaintBuffer(ctx,
                 state.mRegionToDraw, state.mRegionToDraw, state.mRegionToInvalidate,
                 state.mDidSelfCopy,
@@ -191,35 +191,30 @@ BasicPaintedLayer::Validate(LayerManager::DrawPaintedLayerCallback aCallback,
     Mutated();
     ctx = nullptr;
     mContentClient->ReturnDrawTargetToBuffer(target);
-    target = nullptr;
 
     RenderTraceInvalidateEnd(this, "FFFF00");
   } else {
-    if (target) {
-      mContentClient->ReturnDrawTargetToBuffer(target);
-      target = nullptr;
-    }
-
     // It's possible that state.mRegionToInvalidate is nonempty here,
     // if we are shrinking the valid region to nothing. So use mRegionToDraw
     // instead.
     NS_WARN_IF_FALSE(state.mRegionToDraw.IsEmpty(),
                      "No context when we have something to draw, resource exhaustion?");
   }
-
+  
   for (uint32_t i = 0; i < readbackUpdates.Length(); ++i) {
     ReadbackProcessor::Update& update = readbackUpdates[i];
     nsIntPoint offset = update.mLayer->GetBackgroundLayerOffset();
-    RefPtr<DrawTarget> dt =
+    nsRefPtr<gfxContext> ctx =
       update.mLayer->GetSink()->BeginUpdate(update.mUpdateRect + offset,
                                             update.mSequenceCounter);
-    if (dt) {
+    if (ctx) {
       NS_ASSERTION(GetEffectiveOpacity() == 1.0, "Should only read back opaque layers");
       NS_ASSERTION(!GetMaskLayer(), "Should only read back layers without masks");
-      dt->SetTransform(dt->GetTransform().PreTranslate(offset.x, offset.y));
-      mContentClient->DrawTo(this, dt, 1.0, CompositionOp::OP_OVER,
+      ctx->SetMatrix(ctx->CurrentMatrix().Translate(offset.x, offset.y));
+      mContentClient->DrawTo(this, ctx->GetDrawTarget(), 1.0,
+                             CompositionOpForOp(ctx->CurrentOperator()),
                              nullptr, nullptr);
-      update.mLayer->GetSink()->EndUpdate(update.mUpdateRect + offset);
+      update.mLayer->GetSink()->EndUpdate(ctx, update.mUpdateRect + offset);
     }
   }
 }
@@ -228,7 +223,7 @@ already_AddRefed<PaintedLayer>
 BasicLayerManager::CreatePaintedLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  RefPtr<PaintedLayer> layer = new BasicPaintedLayer(this);
+  nsRefPtr<PaintedLayer> layer = new BasicPaintedLayer(this);
   return layer.forget();
 }
 

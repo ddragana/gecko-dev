@@ -2,11 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 const PATH = "/file.meh";
 var httpserver = new HttpServer();
@@ -69,13 +69,18 @@ var listener = {
 
 function setupChannel(url, flags)
 {
+  var ios = Components.classes["@mozilla.org/network/io-service;1"].
+                       getService(Ci.nsIIOService);
   let uri = "http://localhost:" +
              httpserver.identity.primaryPort + url;
-  var chan = NetUtil.newChannel({
-    uri: uri,
-    loadUsingSystemPrincipal: true,
-    contentPolicyType: Ci.nsIContentPolicy.TYPE_MEDIA
-  });
+  var chan = ios.newChannel2(uri,
+                             "",
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_MEDIA);
   chan.loadFlags |= flags;
   var httpChan = chan.QueryInterface(Components.interfaces.nsIHttpChannel);
   return httpChan;
@@ -91,7 +96,7 @@ function runNext() {
     response.setHeader("Content-Type", tests[testRan].contentType, false);
     response.bodyOutputStream.write(data, data.length);
   });
-  channel.asyncOpen2(listener);
+  channel.asyncOpen(listener, channel, null);
 }
 
 function run_test() {

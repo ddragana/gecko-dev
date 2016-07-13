@@ -12,7 +12,7 @@ function test() {
   goNext();
 }
 
-var tests = [
+let tests = [
   // Test optional params
   { id: "Test#1",
     run: function () {
@@ -237,30 +237,6 @@ var tests = [
       this.notification.remove();
       ok(this.notifyObj.removedCallbackTriggered, "removed callback triggered");
       window.locationbar.visible = true;
-    }
-  },
-  // Test that dismissed popupnotifications can be opened on about:blank
-  // (where the rest of the identity block is disabled)
-  { id: "Test#11",
-    run: function() {
-      this.oldSelectedTab = gBrowser.selectedTab;
-      gBrowser.selectedTab = gBrowser.addTab("about:blank");
-
-      this.notifyObj = new BasicNotification(this.id);
-      this.notifyObj.anchorID = "geo-notification-icon";
-      this.notifyObj.addOptions({dismissed: true});
-      this.notification = showNotification(this.notifyObj);
-
-      EventUtils.synthesizeMouse(document.getElementById("geo-notification-icon"), 0, 0, {});
-    },
-    onShown: function(popup) {
-      checkPopup(popup, this.notifyObj);
-      dismissNotification(popup);
-    },
-    onHidden: function(popup) {
-      this.notification.remove();
-      gBrowser.removeTab(gBrowser.selectedTab);
-      gBrowser.selectedTab = this.oldSelectedTab;
     }
   }
 ];

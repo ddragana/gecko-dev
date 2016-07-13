@@ -93,12 +93,12 @@ inCSSValueSearch::SearchSync()
 
   nsCOMPtr<nsIURI> baseURI = document->GetBaseURI();
 
-  RefPtr<dom::StyleSheetList> sheets = document->StyleSheets();
+  nsRefPtr<dom::StyleSheetList> sheets = document->StyleSheets();
   MOZ_ASSERT(sheets);
 
   uint32_t length = sheets->Length();
   for (uint32_t i = 0; i < length; ++i) {
-    RefPtr<CSSStyleSheet> sheet = sheets->Item(i);
+    nsRefPtr<CSSStyleSheet> sheet = sheets->Item(i);
     SearchStyleSheet(sheet, baseURI);
   }
 
@@ -224,7 +224,7 @@ inCSSValueSearch::AddPropertyCriteria(const char16_t *aPropName)
 {
   nsCSSProperty prop =
     nsCSSProps::LookupProperty(nsDependentString(aPropName),
-                               CSSEnabledState::eIgnoreEnabledState);
+                               nsCSSProps::eIgnoreEnabledState);
   mProperties[mPropertyCount] = prop;
   mPropertyCount++;
   return NS_OK;

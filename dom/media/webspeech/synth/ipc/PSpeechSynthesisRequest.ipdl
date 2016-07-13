@@ -15,31 +15,25 @@ async protocol PSpeechSynthesisRequest
 
  parent:
 
-  async __delete__();
+  Pause();
 
-  async Pause();
+  Resume();
 
-  async Resume();
-
-  async Cancel();
-
-  async ForceEnd();
-
-  async SetAudioOutputVolume(float aVolume);
+  Cancel();
 
  child:
 
-  async OnEnd(bool aIsError, float aElapsedTime, uint32_t aCharIndex);
+  __delete__(bool aIsError, float aElapsedTime, uint32_t aCharIndex);
 
-  async OnStart(nsString aUri);
+  OnStart(nsString aUri);
 
-  async OnPause(float aElapsedTime, uint32_t aCharIndex);
+  OnPause(float aElapsedTime, uint32_t aCharIndex);
 
-  async OnResume(float aElapsedTime, uint32_t aCharIndex);
+  OnResume(float aElapsedTime, uint32_t aCharIndex);
 
-  async OnBoundary(nsString aName, float aElapsedTime, uint32_t aCharIndex);
+  OnBoundary(nsString aName, float aElapsedTime, uint32_t aCharIndex);
 
-  async OnMark(nsString aName, float aElapsedTime, uint32_t aCharIndex);
+  OnMark(nsString aName, float aElapsedTime, uint32_t aCharIndex);
 };
 
 } // namespace dom

@@ -43,10 +43,10 @@ public:
   Constructor(const GlobalObject& aGlobal, Blob& aBlob,
               const ArchiveReaderOptions& aOptions, ErrorResult& aError);
 
-  ArchiveReader(Blob& aBlob, nsPIDOMWindowInner* aWindow,
+  ArchiveReader(Blob& aBlob, nsPIDOMWindow* aWindow,
                 const nsACString& aEncoding);
 
-  nsPIDOMWindowInner* GetParentObject() const
+  nsIDOMWindow* GetParentObject() const
   {
     return mWindow;
   }
@@ -69,7 +69,7 @@ public: // For events:
     return mBlobImpl;
   }
 
-  void Ready(nsTArray<RefPtr<File>>& aFileList, nsresult aStatus);
+  void Ready(nsTArray<nsRefPtr<File>>& aFileList, nsresult aStatus);
 
 private:
   ~ArchiveReader();
@@ -82,10 +82,10 @@ private:
 
 protected:
   // The archive blob/file
-  RefPtr<BlobImpl> mBlobImpl;
+  nsRefPtr<BlobImpl> mBlobImpl;
 
   // The window is needed by the requests
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
 
   // Are we ready to return data?
   enum {
@@ -103,11 +103,11 @@ protected:
   } mReadStatus;
 
   // List of requests to be processed
-  nsTArray<RefPtr<ArchiveRequest> > mRequests;
+  nsTArray<nsRefPtr<ArchiveRequest> > mRequests;
 
   // Everything related to the blobs and the status:
   struct {
-    nsTArray<RefPtr<File>> fileList;
+    nsTArray<nsRefPtr<File>> fileList;
     nsresult status;
   } mData;
 

@@ -35,7 +35,7 @@ Comment::IsNodeOfType(uint32_t aFlags) const
 nsGenericDOMDataNode*
 Comment::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo, bool aCloneText) const
 {
-  RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
   Comment *it = new Comment(ni.forget());
   if (it && aCloneText) {
     it->mText = mText;
@@ -65,7 +65,7 @@ Comment::List(FILE* out, int32_t aIndent) const
 Comment::Constructor(const GlobalObject& aGlobal,
                      const nsAString& aData, ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window || !window->GetDoc()) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;

@@ -26,7 +26,7 @@
 #include "nsDeque.h"
 #include "nsIUnicodeDecoder.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 
@@ -34,6 +34,7 @@ class ErrorResult;
 
 namespace dom {
 
+class AsyncVerifyRedirectCallbackFwr;
 struct EventSourceInit;
 
 class EventSource final : public DOMEventTargetHelper
@@ -43,8 +44,10 @@ class EventSource final : public DOMEventTargetHelper
                         , public nsIInterfaceRequestor
                         , public nsSupportsWeakReference
 {
+friend class AsyncVerifyRedirectCallbackFwr;
+
 public:
-  explicit EventSource(nsPIDOMWindowInner* aOwnerWindow);
+  explicit EventSource(nsPIDOMWindow* aOwnerWindow);
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(
     EventSource, DOMEventTargetHelper)
@@ -59,7 +62,7 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // WebIDL
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return GetOwner();
@@ -93,6 +96,9 @@ public:
   IMPL_EVENT_HANDLER(error)
   void Close();
 
+  // Determine if preferences allow EventSource
+  static bool PrefEnabled(JSContext* aCx = nullptr, JSObject* aGlobal = nullptr);
+
   virtual void DisconnectFromOwner() override;
 
 protected:
@@ -104,8 +110,9 @@ protected:
 
   nsresult GetBaseURI(nsIURI **aBaseURI);
 
-  void SetupHttpChannel();
-  nsresult SetupReferrerPolicy();
+  net::ReferrerPolicy GetReferrerPolicy();
+
+  nsresult SetupHttpChannel();
   nsresult InitChannelAndRequestEventSource();
   nsresult ResetConnection();
   nsresult DispatchFailConnection();
@@ -138,6 +145,7 @@ protected:
   nsresult ResetEvent();
   nsresult DispatchCurrentMessageEvent();
   nsresult ParseCharacter(char16_t aChr);
+  bool CheckCanRequestSrc(nsIURI* aSrc = nullptr);  // if null, it tests mSrc
   nsresult CheckHealthOfRequestCallback(nsIRequest *aRequestCallback);
   nsresult OnRedirectVerifyCallback(nsresult result);
 
@@ -225,6 +233,13 @@ protected:
 
   nsCOMPtr<nsILoadGroup> mLoadGroup;
 
+  /**
+   * The notification callbacks the channel had initially.
+   * We want to forward things here as needed.
+   */
+  nsCOMPtr<nsIInterfaceRequestor> mNotificationCallbacks;
+  nsCOMPtr<nsIChannelEventSink>   mChannelEventSink;
+
   nsCOMPtr<nsIHttpChannel> mHttpChannel;
 
   nsCOMPtr<nsITimer> mTimer;
@@ -235,16 +250,18 @@ protected:
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsString mOrigin;
 
+  uint32_t mRedirectFlags;
+  nsCOMPtr<nsIAsyncVerifyRedirectCallback> mRedirectCallback;
+  nsCOMPtr<nsIChannel> mNewRedirectChannel;
+
   // Event Source owner information:
   // - the script file name
-  // - source code line number and column number where the Event Source object
-  //   was constructed.
+  // - source code line number where the Event Source object was constructed.
   // - the ID of the inner window where the script lives. Note that this may not
   //   be the same as the Event Source owner window.
   // These attributes are used for error reporting.
   nsString mScriptFile;
   uint32_t mScriptLine;
-  uint32_t mScriptColumn;
   uint64_t mInnerWindowID;
 
 private:

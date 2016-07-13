@@ -8,20 +8,18 @@
 #include "gfx2DGlue.h"
 #include "ImageContainer.h"
 #include "Layers.h"
-#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 
 using namespace layers;
 
 VideoFrame::VideoFrame(already_AddRefed<Image>& aImage,
-                       const gfx::IntSize& aIntrinsicSize)
-  : mImage(aImage), mIntrinsicSize(aIntrinsicSize), mForceBlack(false),
-    mPrincipalHandle(PRINCIPAL_HANDLE_NONE)
+                       const gfxIntSize& aIntrinsicSize)
+  : mImage(aImage), mIntrinsicSize(aIntrinsicSize), mForceBlack(false)
 {}
 
 VideoFrame::VideoFrame()
-  : mIntrinsicSize(0, 0), mForceBlack(false), mPrincipalHandle(PRINCIPAL_HANDLE_NONE)
+  : mIntrinsicSize(0, 0), mForceBlack(false)
 {}
 
 VideoFrame::~VideoFrame()
@@ -30,8 +28,7 @@ VideoFrame::~VideoFrame()
 void
 VideoFrame::SetNull() {
   mImage = nullptr;
-  mIntrinsicSize = gfx::IntSize(0, 0);
-  mPrincipalHandle = PRINCIPAL_HANDLE_NONE;
+  mIntrinsicSize = gfxIntSize(0, 0);
 }
 
 void
@@ -40,39 +37,41 @@ VideoFrame::TakeFrom(VideoFrame* aFrame)
   mImage = aFrame->mImage.forget();
   mIntrinsicSize = aFrame->mIntrinsicSize;
   mForceBlack = aFrame->GetForceBlack();
-  mPrincipalHandle = aFrame->mPrincipalHandle;
 }
 
+#if !defined(MOZILLA_XPCOMRT_API)
 /* static */ already_AddRefed<Image>
-VideoFrame::CreateBlackImage(const gfx::IntSize& aSize)
+VideoFrame::CreateBlackImage(const gfxIntSize& aSize)
 {
-  RefPtr<ImageContainer> container =
-    LayerManager::CreateImageContainer(ImageContainer::ASYNCHRONOUS);
-  RefPtr<PlanarYCbCrImage> image = container->CreatePlanarYCbCrImage();
+  nsRefPtr<ImageContainer> container;
+  nsRefPtr<Image> image;
+  container = LayerManager::CreateImageContainer();
+  image = container->CreateImage(ImageFormat::PLANAR_YCBCR);
   if (!image) {
     MOZ_ASSERT(false);
     return nullptr;
   }
 
   int len = ((aSize.width * aSize.height) * 3 / 2);
+  PlanarYCbCrImage* planar = static_cast<PlanarYCbCrImage*>(image.get());
 
   // Generate a black image.
-  auto frame = MakeUnique<uint8_t[]>(len);
+  ScopedDeletePtr<uint8_t> frame(new uint8_t[len]);
   int y = aSize.width * aSize.height;
   // Fill Y plane.
-  memset(frame.get(), 0x10, y);
+  memset(frame.rwget(), 0x10, y);
   // Fill Cb/Cr planes.
-  memset(frame.get() + y, 0x80, (len - y));
+  memset(frame.rwget() + y, 0x80, (len - y));
 
   const uint8_t lumaBpp = 8;
   const uint8_t chromaBpp = 4;
 
   layers::PlanarYCbCrData data;
-  data.mYChannel = frame.get();
+  data.mYChannel = frame.rwget();
   data.mYSize = gfx::IntSize(aSize.width, aSize.height);
   data.mYStride = (int32_t) (aSize.width * lumaBpp / 8.0);
   data.mCbCrStride = (int32_t) (aSize.width * chromaBpp / 8.0);
-  data.mCbChannel = frame.get() + aSize.height * data.mYStride;
+  data.mCbChannel = frame.rwget() + aSize.height * data.mYStride;
   data.mCrChannel = data.mCbChannel + aSize.height * data.mCbCrStride / 2;
   data.mCbCrSize = gfx::IntSize(aSize.width / 2, aSize.height / 2);
   data.mPicX = 0;
@@ -80,14 +79,12 @@ VideoFrame::CreateBlackImage(const gfx::IntSize& aSize)
   data.mPicSize = gfx::IntSize(aSize.width, aSize.height);
   data.mStereoMode = StereoMode::MONO;
 
-  // Copies data, so we can free data.
-  if (!image->CopyData(data)) {
-    MOZ_ASSERT(false);
-    return nullptr;
-  }
+  // SetData copies data, so we can free data.
+  planar->SetData(data);
 
   return image.forget();
 }
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
 VideoChunk::VideoChunk()
 {}
@@ -99,13 +96,11 @@ void
 VideoSegment::AppendFrame(already_AddRefed<Image>&& aImage,
                           StreamTime aDuration,
                           const IntSize& aIntrinsicSize,
-                          const PrincipalHandle& aPrincipalHandle,
                           bool aForceBlack)
 {
   VideoChunk* chunk = AppendChunk(aDuration);
   VideoFrame frame(aImage, aIntrinsicSize);
   frame.SetForceBlack(aForceBlack);
-  frame.SetPrincipalHandle(aPrincipalHandle);
   chunk->mFrame.TakeFrom(&frame);
 }
 

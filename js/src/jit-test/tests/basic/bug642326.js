@@ -1,8 +1,4 @@
-load(libdir + "immutable-prototype.js");
-
-if (globalPrototypeChainIsMutable())
-  this.__proto__ = null;
-
+this.__proto__ = []; 
 gczeal(2);
 gc();
 var box = evalcx('lazy');

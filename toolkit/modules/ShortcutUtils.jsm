@@ -20,7 +20,7 @@ XPCOMUtils.defineLazyGetter(this, "Keys", function() {
     "chrome://global/locale/keys.properties");
 });
 
-var ShortcutUtils = {
+let ShortcutUtils = {
   /**
     * Prettifies the modifier keys for an element.
     *
@@ -109,5 +109,3 @@ var ShortcutUtils = {
 };
 
 Object.freeze(ShortcutUtils);
-
-this.ShortcutUtils = ShortcutUtils;

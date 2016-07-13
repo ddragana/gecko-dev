@@ -400,7 +400,6 @@ PK11_NewSlotInfo(SECMODModule *mod)
     slot->minPassword = 0;
     slot->maxPassword = 0;
     slot->hasRootCerts = PR_FALSE;
-    slot->hasRootTrust = PR_FALSE;
     slot->nssToken = NULL;
     return slot;
 }
@@ -556,12 +555,14 @@ PK11_FindSlotsByNames(const char *dllName, const char* slotName,
                     break;
                 }
                 if ((PR_FALSE == presentOnly || PK11_IsPresent(tmpSlot)) &&
-                    ( (!tokenName) ||
-                      (0==PORT_Strcmp(tmpSlot->token_name, tokenName)) ) &&
-                    ( (!slotName) ||
-                      (0==PORT_Strcmp(tmpSlot->slot_name, slotName)) ) ) {
-                    PK11_AddSlotToList(slotList, tmpSlot, PR_TRUE);
-                    slotcount++;
+                    ( (!tokenName) || (tmpSlot->token_name &&
+                    (0==PORT_Strcmp(tmpSlot->token_name, tokenName)))) &&
+                    ( (!slotName) || (tmpSlot->slot_name &&
+                    (0==PORT_Strcmp(tmpSlot->slot_name, slotName)))) ) {
+                    if (tmpSlot) {
+                        PK11_AddSlotToList(slotList, tmpSlot, PR_TRUE);
+                        slotcount++;
+                    }
                 }
             }
         }
@@ -1104,6 +1105,7 @@ PK11_InitToken(PK11SlotInfo *slot, PRBool loadCerts)
 {
     CK_TOKEN_INFO tokenInfo;
     CK_RV crv;
+    char *tmp;
     SECStatus rv;
     PRStatus status;
 
@@ -1137,8 +1139,8 @@ PK11_InitToken(PK11SlotInfo *slot, PRBool loadCerts)
     if (slot->isActiveCard) {
 	slot->protectedAuthPath = PR_FALSE;
     }
-    (void)PK11_MakeString(NULL,slot->token_name,
-			  (char *)tokenInfo.label, sizeof(tokenInfo.label));
+    tmp = PK11_MakeString(NULL,slot->token_name,
+			(char *)tokenInfo.label, sizeof(tokenInfo.label));
     slot->minPassword = tokenInfo.ulMinPinLen;
     slot->maxPassword = tokenInfo.ulMaxPinLen;
     PORT_Memcpy(slot->serial,tokenInfo.serialNumber,sizeof(slot->serial));
@@ -1347,6 +1349,7 @@ void
 PK11_InitSlot(SECMODModule *mod, CK_SLOT_ID slotID, PK11SlotInfo *slot)
 {
     SECStatus rv;
+    char *tmp;
     CK_SLOT_INFO slotInfo;
 
     slot->functionList = mod->functionList;
@@ -1368,7 +1371,7 @@ PK11_InitSlot(SECMODModule *mod, CK_SLOT_ID slotID, PK11SlotInfo *slot)
 			 * works because modules keep implicit references
 			 * from their slots, and won't unload and disappear
 			 * until all their slots have been freed */
-    (void)PK11_MakeString(NULL,slot->slot_name,
+    tmp = PK11_MakeString(NULL,slot->slot_name,
 	 (char *)slotInfo.slotDescription, sizeof(slotInfo.slotDescription));
     slot->isHW = (PRBool)((slotInfo.flags & CKF_HW_SLOT) == CKF_HW_SLOT);
 #define ACTIVE_CARD "ActivCard SA"
@@ -2049,7 +2052,7 @@ PK11_GetBestSlotMultipleWithAttributes(CK_MECHANISM_TYPE *type,
     PK11SlotInfo *slot = NULL;
     PRBool freeit = PR_FALSE;
     PRBool listNeedLogin = PR_FALSE;
-    unsigned int i;
+    int i;
     SECStatus rv;
 
     list = PK11_GetSlotList(type[0]);

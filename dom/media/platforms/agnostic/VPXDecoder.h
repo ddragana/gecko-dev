@@ -16,48 +16,50 @@
 
 namespace mozilla {
 
-using namespace layers;
+  using namespace layers;
 
 class VPXDecoder : public MediaDataDecoder
 {
 public:
-  explicit VPXDecoder(const CreateDecoderParams& aParams);
+  VPXDecoder(const VideoInfo& aConfig,
+             ImageContainer* aImageContainer,
+             FlushableTaskQueue* aTaskQueue,
+             MediaDataDecoderCallback* aCallback);
+
   ~VPXDecoder();
 
-  RefPtr<InitPromise> Init() override;
+  nsresult Init() override;
   nsresult Input(MediaRawData* aSample) override;
   nsresult Flush() override;
   nsresult Drain() override;
   nsresult Shutdown() override;
-  const char* GetDescriptionName() const override
-  {
-    return "libvpx video decoder";
-  }
 
-  enum Codec: uint8_t {
-    VP8 = 1 << 0,
-    VP9 = 1 << 1
+  // Return true if mimetype is a VPX codec
+  static bool IsVPX(const nsACString& aMimeType);
+
+  enum Codec {
+    VP8,
+    VP9
   };
 
-  // Return true if mimetype is a VPX codec of given types.
-  static bool IsVPX(const nsACString& aMimeType, uint8_t aCodecMask=VP8|VP9);
-
 private:
-  void ProcessDecode(MediaRawData* aSample);
-  int DoDecode(MediaRawData* aSample);
-  void ProcessDrain();
+  void DecodeFrame (MediaRawData* aSample);
+  int DoDecodeFrame (MediaRawData* aSample);
+  void DoDrain ();
+  void OutputDelayedFrames ();
 
-  const RefPtr<ImageContainer> mImageContainer;
-  const RefPtr<TaskQueue> mTaskQueue;
+  nsRefPtr<ImageContainer> mImageContainer;
+  RefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
-  Atomic<bool> mIsFlushing;
 
   // VPx decoder state
   vpx_codec_ctx_t mVPX;
+  vpx_codec_iter_t mIter;
 
-  const VideoInfo& mInfo;
+  uint32_t mDisplayWidth;
+  uint32_t mDisplayHeight;
 
-  const int mCodec;
+  int mCodec;
 };
 
 } // namespace mozilla

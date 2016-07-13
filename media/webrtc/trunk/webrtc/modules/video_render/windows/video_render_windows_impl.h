@@ -42,6 +42,8 @@ public:
 
     virtual int32_t Init();
 
+    virtual int32_t ChangeUniqueId(const int32_t id);
+
     virtual int32_t ChangeWindow(void* window);
 
     /**************************************************************************
@@ -123,6 +125,7 @@ public:
                               const float right, const float bottom);
 
 private:
+    int32_t _id;
     CriticalSectionWrapper& _renderWindowsCritsect;
 
     void* _prtWindow;

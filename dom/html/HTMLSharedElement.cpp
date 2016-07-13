@@ -17,7 +17,6 @@
 #include "nsRuleData.h"
 #include "nsMappedAttributes.h"
 #include "nsContentUtils.h"
-#include "nsIContentSecurityPolicy.h"
 #include "nsIURI.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Shared)
@@ -62,15 +61,13 @@ NS_IMPL_STRING_ATTR(HTMLSharedElement, Target, target)
 NS_IMETHODIMP
 HTMLSharedElement::GetHref(nsAString& aValue)
 {
-  MOZ_ASSERT(mNodeInfo->Equals(nsGkAtoms::base),
-             "This should only get called for <base> elements");
   nsAutoString href;
   GetAttr(kNameSpaceID_None, nsGkAtoms::href, href);
 
   nsCOMPtr<nsIURI> uri;
   nsIDocument* doc = OwnerDoc();
   nsContentUtils::NewURIWithDocumentCharset(
-    getter_AddRefs(uri), href, doc, doc->GetFallbackBaseURI());
+    getter_AddRefs(uri), href, doc, doc->GetDocumentURI());
 
   if (!uri) {
     aValue = href;
@@ -167,38 +164,21 @@ SetBaseURIUsingFirstBaseWithHref(nsIDocument* aDocument, nsIContent* aMustMatch)
         return;
       }
 
-      // Resolve the <base> element's href relative to our document's
-      // fallback base URI.
+      // Resolve the <base> element's href relative to our document URI
       nsAutoString href;
       child->GetAttr(kNameSpaceID_None, nsGkAtoms::href, href);
 
       nsCOMPtr<nsIURI> newBaseURI;
       nsContentUtils::NewURIWithDocumentCharset(
         getter_AddRefs(newBaseURI), href, aDocument,
-        aDocument->GetFallbackBaseURI());
+        aDocument->GetDocumentURI());
 
-      // Check if CSP allows this base-uri
-      nsCOMPtr<nsIContentSecurityPolicy> csp;
-      nsresult rv = aDocument->NodePrincipal()->GetCsp(getter_AddRefs(csp));
-      NS_ASSERTION(NS_SUCCEEDED(rv), "Getting CSP Failed");
-      // For all the different error cases we assign a nullptr to
-      // newBaseURI, so we basically call aDocument->SetBaseURI(nullptr);
-      if (NS_FAILED(rv)) {
-        newBaseURI = nullptr;
-      }
-      if (csp && newBaseURI) {
-        // base-uri is only enforced if explicitly defined in the
-        // policy - do *not* consult default-src, see:
-        // http://www.w3.org/TR/CSP2/#directive-default-src
-        bool cspPermitsBaseURI = true;
-        rv = csp->Permits(newBaseURI, nsIContentSecurityPolicy::BASE_URI_DIRECTIVE,
-                          true, &cspPermitsBaseURI);
-        if (NS_FAILED(rv) || !cspPermitsBaseURI) {
-          newBaseURI = nullptr;
-        }
-      }
-      aDocument->SetBaseURI(newBaseURI);
+      // Try to set our base URI.  If that fails, try to set base URI to null
+      nsresult rv = aDocument->SetBaseURI(newBaseURI);
       aDocument->SetChromeXHRDocBaseURI(nullptr);
+      if (NS_FAILED(rv)) {
+        aDocument->SetBaseURI(nullptr);
+      }
       return;
     }
   }
@@ -245,7 +225,7 @@ HTMLSharedElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
   // similarly need to change the base target.
   if (mNodeInfo->Equals(nsGkAtoms::base) &&
       aNameSpaceID == kNameSpaceID_None &&
-      IsInUncomposedDoc()) {
+      IsInDoc()) {
     if (aName == nsGkAtoms::href) {
       SetBaseURIUsingFirstBaseWithHref(GetUncomposedDoc(), this);
     } else if (aName == nsGkAtoms::target) {
@@ -268,7 +248,7 @@ HTMLSharedElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
   // find the new one.  Similar for target.
   if (mNodeInfo->Equals(nsGkAtoms::base) &&
       aNameSpaceID == kNameSpaceID_None &&
-      IsInUncomposedDoc()) {
+      IsInDoc()) {
     if (aName == nsGkAtoms::href) {
       SetBaseURIUsingFirstBaseWithHref(GetUncomposedDoc(), nullptr);
     } else if (aName == nsGkAtoms::target) {

@@ -33,19 +33,10 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsWindowRoot::nsWindowRoot(nsPIDOMWindowOuter* aWindow)
+nsWindowRoot::nsWindowRoot(nsPIDOMWindow* aWindow)
 {
   mWindow = aWindow;
   MOZ_ASSERT(mWindow->IsOuterWindow());
-
-  // Keyboard indicators are not shown on Mac by default.
-#if defined(XP_MACOSX)
-  mShowAccelerators = false;
-  mShowFocusRings = false;
-#else
-  mShowAccelerators = true;
-  mShowFocusRings = true;
-#endif
 }
 
 nsWindowRoot::~nsWindowRoot()
@@ -58,6 +49,7 @@ nsWindowRoot::~nsWindowRoot()
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsWindowRoot,
                                       mWindow,
                                       mListenerManager,
+                                      mPopupNode,
                                       mParent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsWindowRoot)
@@ -76,7 +68,7 @@ NS_IMPL_DOMTARGET_DEFAULTS(nsWindowRoot)
 NS_IMETHODIMP
 nsWindowRoot::RemoveEventListener(const nsAString& aType, nsIDOMEventListener* aListener, bool aUseCapture)
 {
-  if (RefPtr<EventListenerManager> elm = GetExistingListenerManager()) {
+  if (nsRefPtr<EventListenerManager> elm = GetExistingListenerManager()) {
     elm->RemoveEventListener(aType, aListener, aUseCapture);
   }
   return NS_OK;
@@ -125,7 +117,7 @@ nsWindowRoot::AddEventListener(const nsAString& aType,
 void
 nsWindowRoot::AddEventListener(const nsAString& aType,
                                 EventListener* aListener,
-                                const AddEventListenerOptionsOrBoolean& aOptions,
+                                bool aUseCapture,
                                 const Nullable<bool>& aWantsUntrusted,
                                 ErrorResult& aRv)
 {
@@ -135,7 +127,7 @@ nsWindowRoot::AddEventListener(const nsAString& aType,
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return;
   }
-  elm->AddEventListener(aType, aListener, aOptions, wantsUntrusted);
+  elm->AddEventListener(aType, aListener, aUseCapture, wantsUntrusted);
 }
 
 
@@ -196,7 +188,7 @@ nsWindowRoot::PostHandleEvent(EventChainPostVisitor& aVisitor)
   return NS_OK;
 }
 
-nsPIDOMWindowOuter*
+nsIDOMWindow*
 nsWindowRoot::GetOwnerGlobalForBindings()
 {
   return GetWindow();
@@ -211,7 +203,7 @@ nsWindowRoot::GetOwnerGlobal() const
   return global;
 }
 
-nsPIDOMWindowOuter*
+nsPIDOMWindow*
 nsWindowRoot::GetWindow()
 {
   return mWindow;
@@ -226,7 +218,7 @@ nsWindowRoot::GetControllers(nsIControllers** aResult)
   // describes controllers, so this code would have no special
   // knowledge of what object might have controllers.
 
-  nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+  nsCOMPtr<nsPIDOMWindow> focusedWindow;
   nsIContent* focusedContent =
     nsFocusManager::GetFocusedDescendant(mWindow, true, getter_AddRefs(focusedWindow));
   if (focusedContent) {
@@ -250,7 +242,9 @@ nsWindowRoot::GetControllers(nsIControllers** aResult)
       return focusedWindow->GetControllers(aResult);
   }
   else {
-    return focusedWindow->GetControllers(aResult);
+    nsCOMPtr<nsIDOMWindow> domWindow = do_QueryInterface(focusedWindow);
+    if (domWindow)
+      return domWindow->GetControllers(aResult);
   }
 
   return NS_OK;
@@ -276,7 +270,7 @@ nsWindowRoot::GetControllerForCommand(const char * aCommand,
     }
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+  nsCOMPtr<nsPIDOMWindow> focusedWindow;
   nsFocusManager::GetFocusedDescendant(mWindow, true, getter_AddRefs(focusedWindow));
   while (focusedWindow) {
     nsCOMPtr<nsIControllers> controllers;
@@ -292,10 +286,10 @@ nsWindowRoot::GetControllerForCommand(const char * aCommand,
     }
 
     // XXXndeakin P3 is this casting safe?
-    nsGlobalWindow *win = nsGlobalWindow::Cast(focusedWindow);
+    nsGlobalWindow *win = static_cast<nsGlobalWindow*>(focusedWindow.get());
     focusedWindow = win->GetPrivateParent();
   }
-
+  
   return NS_OK;
 }
 
@@ -354,7 +348,7 @@ nsWindowRoot::GetEnabledDisabledCommands(nsTArray<nsCString>& aEnabledCommands,
                                              aEnabledCommands, aDisabledCommands);
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+  nsCOMPtr<nsPIDOMWindow> focusedWindow;
   nsFocusManager::GetFocusedDescendant(mWindow, true, getter_AddRefs(focusedWindow));
   while (focusedWindow) {
     focusedWindow->GetControllers(getter_AddRefs(controllers));
@@ -363,7 +357,7 @@ nsWindowRoot::GetEnabledDisabledCommands(nsTArray<nsCString>& aEnabledCommands,
                                                aEnabledCommands, aDisabledCommands);
     }
 
-    nsGlobalWindow* win = nsGlobalWindow::Cast(focusedWindow);
+    nsGlobalWindow* win = static_cast<nsGlobalWindow*>(focusedWindow.get());
     focusedWindow = win->GetPrivateParent();
   }
 }
@@ -371,14 +365,13 @@ nsWindowRoot::GetEnabledDisabledCommands(nsTArray<nsCString>& aEnabledCommands,
 nsIDOMNode*
 nsWindowRoot::GetPopupNode()
 {
-  nsCOMPtr<nsIDOMNode> popupNode = do_QueryReferent(mPopupNode);
-  return popupNode;
+  return mPopupNode;
 }
 
 void
 nsWindowRoot::SetPopupNode(nsIDOMNode* aNode)
 {
-  mPopupNode = do_GetWeakReference(aNode);
+  mPopupNode = aNode;
 }
 
 nsIGlobalObject*
@@ -412,7 +405,7 @@ nsWindowRoot::EnumerateBrowsers(BrowserEnumerator aEnumFunc, void* aArg)
 {
   // Collect strong references to all browsers in a separate array in
   // case aEnumFunc alters mWeakBrowsers.
-  nsTArray<RefPtr<TabParent>> tabParents;
+  nsTArray<nsRefPtr<TabParent>> tabParents;
   for (auto iter = mWeakBrowsers.ConstIter(); !iter.Done(); iter.Next()) {
     nsCOMPtr<nsITabParent> tabParent(do_QueryReferent(iter.Get()->GetKey()));
     if (TabParent* tab = TabParent::GetFrom(tabParent)) {
@@ -428,7 +421,7 @@ nsWindowRoot::EnumerateBrowsers(BrowserEnumerator aEnumFunc, void* aArg)
 ///////////////////////////////////////////////////////////////////////////////////
 
 already_AddRefed<EventTarget>
-NS_NewWindowRoot(nsPIDOMWindowOuter* aWindow)
+NS_NewWindowRoot(nsPIDOMWindow* aWindow)
 {
   nsCOMPtr<EventTarget> result = new nsWindowRoot(aWindow);
   return result.forget();

@@ -6,6 +6,7 @@
 
 #include "nsHostObjectURI.h"
 
+#include "nsAutoPtr.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 
@@ -17,8 +18,8 @@ static NS_DEFINE_CID(kHOSTOBJECTURICID, NS_HOSTOBJECTURI_CID);
 static NS_DEFINE_CID(kThisSimpleURIImplementationCID,
                      NS_THIS_SIMPLEURI_IMPLEMENTATION_CID);
 
-NS_IMPL_ADDREF_INHERITED(nsHostObjectURI, mozilla::net::nsSimpleURI)
-NS_IMPL_RELEASE_INHERITED(nsHostObjectURI, mozilla::net::nsSimpleURI)
+NS_IMPL_ADDREF_INHERITED(nsHostObjectURI, nsSimpleURI)
+NS_IMPL_RELEASE_INHERITED(nsHostObjectURI, nsSimpleURI)
 
 NS_INTERFACE_MAP_BEGIN(nsHostObjectURI)
   NS_INTERFACE_MAP_ENTRY(nsIURIWithPrincipal)
@@ -32,7 +33,7 @@ NS_INTERFACE_MAP_BEGIN(nsHostObjectURI)
     return NS_NOINTERFACE;
   }
   else
-NS_INTERFACE_MAP_END_INHERITING(mozilla::net::nsSimpleURI)
+NS_INTERFACE_MAP_END_INHERITING(nsSimpleURI)
 
 // nsIURIWithPrincipal methods:
 
@@ -62,7 +63,7 @@ nsHostObjectURI::GetPrincipalUri(nsIURI** aUri)
 NS_IMETHODIMP
 nsHostObjectURI::Read(nsIObjectInputStream* aStream)
 {
-  nsresult rv = mozilla::net::nsSimpleURI::Read(aStream);
+  nsresult rv = nsSimpleURI::Read(aStream);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsISupports> supports;
@@ -76,7 +77,7 @@ nsHostObjectURI::Read(nsIObjectInputStream* aStream)
 NS_IMETHODIMP
 nsHostObjectURI::Write(nsIObjectOutputStream* aStream)
 {
-  nsresult rv = mozilla::net::nsSimpleURI::Write(aStream);
+  nsresult rv = nsSimpleURI::Write(aStream);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_WriteOptionalCompoundObject(aStream, mPrincipal,
@@ -93,7 +94,7 @@ nsHostObjectURI::Serialize(mozilla::ipc::URIParams& aParams)
   HostObjectURIParams hostParams;
   URIParams simpleParams;
 
-  mozilla::net::nsSimpleURI::Serialize(simpleParams);
+  nsSimpleURI::Serialize(simpleParams);
   hostParams.simpleParams() = simpleParams;
 
   if (mPrincipal) {
@@ -123,7 +124,7 @@ nsHostObjectURI::Deserialize(const mozilla::ipc::URIParams& aParams)
 
   const HostObjectURIParams& hostParams = aParams.get_HostObjectURIParams();
 
-  if (!mozilla::net::nsSimpleURI::Deserialize(hostParams.simpleParams())) {
+  if (!nsSimpleURI::Deserialize(hostParams.simpleParams())) {
     return false;
   }
   if (hostParams.principal().type() == OptionalPrincipalInfo::Tvoid_t) {
@@ -134,27 +135,18 @@ nsHostObjectURI::Deserialize(const mozilla::ipc::URIParams& aParams)
   return mPrincipal != nullptr;
 }
 
-NS_IMETHODIMP
-nsHostObjectURI::SetScheme(const nsACString& aScheme)
-{
-  // Disallow setting the scheme, since that could cause us to be associated
-  // with a different protocol handler that doesn't expect us to be carrying
-  // around a principal with nsIURIWithPrincipal.
-  return NS_ERROR_FAILURE;
-}
-
 // nsIURI methods:
 nsresult
-nsHostObjectURI::CloneInternal(mozilla::net::nsSimpleURI::RefHandlingEnum aRefHandlingMode,
+nsHostObjectURI::CloneInternal(nsSimpleURI::RefHandlingEnum aRefHandlingMode,
                                nsIURI** aClone)
 {
   nsCOMPtr<nsIURI> simpleClone;
   nsresult rv =
-    mozilla::net::nsSimpleURI::CloneInternal(aRefHandlingMode, getter_AddRefs(simpleClone));
+    nsSimpleURI::CloneInternal(aRefHandlingMode, getter_AddRefs(simpleClone));
   NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef DEBUG
-  RefPtr<nsHostObjectURI> uriCheck;
+  nsRefPtr<nsHostObjectURI> uriCheck;
   rv = simpleClone->QueryInterface(kHOSTOBJECTURICID, getter_AddRefs(uriCheck));
   MOZ_ASSERT(NS_SUCCEEDED(rv) && uriCheck);
 #endif
@@ -169,7 +161,7 @@ nsHostObjectURI::CloneInternal(mozilla::net::nsSimpleURI::RefHandlingEnum aRefHa
 
 /* virtual */ nsresult
 nsHostObjectURI::EqualsInternal(nsIURI* aOther,
-                                mozilla::net::nsSimpleURI::RefHandlingEnum aRefHandlingMode,
+                                nsSimpleURI::RefHandlingEnum aRefHandlingMode,
                                 bool* aResult)
 {
   if (!aOther) {
@@ -177,7 +169,7 @@ nsHostObjectURI::EqualsInternal(nsIURI* aOther,
     return NS_OK;
   }
   
-  RefPtr<nsHostObjectURI> otherUri;
+  nsRefPtr<nsHostObjectURI> otherUri;
   aOther->QueryInterface(kHOSTOBJECTURICID, getter_AddRefs(otherUri));
   if (!otherUri) {
     *aResult = false;
@@ -185,7 +177,7 @@ nsHostObjectURI::EqualsInternal(nsIURI* aOther,
   }
 
   // Compare the member data that our base class knows about.
-  if (!mozilla::net::nsSimpleURI::EqualsInternal(otherUri, aRefHandlingMode)) {
+  if (!nsSimpleURI::EqualsInternal(otherUri, aRefHandlingMode)) {
     *aResult = false;
     return NS_OK;
   }

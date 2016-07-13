@@ -22,7 +22,6 @@ namespace rtc {
 class OptionsFile {
  public:
   OptionsFile(const std::string &path);
-  ~OptionsFile();
 
   // Loads the file from disk, overwriting the in-memory values.
   bool Load();

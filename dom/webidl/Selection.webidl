@@ -76,7 +76,7 @@ partial interface Selection {
   [ChromeOnly,Throws]
   void  removeSelectionListener(nsISelectionListener listenerToRemove);
 
-  [ChromeOnly,BinaryName="rawType"]
+  [ChromeOnly]
   readonly attribute short type;
 
   [ChromeOnly,Throws,Pref="dom.testing.selection.GetRangesForInterval"]

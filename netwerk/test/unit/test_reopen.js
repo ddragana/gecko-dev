@@ -2,7 +2,7 @@
 // See https://bugzilla.mozilla.org/show_bug.cgi?id=372486
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 const NS_ERROR_IN_PROGRESS = 0x804b000f;
 const NS_ERROR_ALREADY_OPENED = 0x804b0049;
@@ -22,17 +22,28 @@ var httpserv = null;
 // Utility functions
 
 function makeChan(url) {
-  return chan = NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true})
-                       .QueryInterface(Ci.nsIChannel);
+  var ios = Cc["@mozilla.org/network/io-service;1"]
+              .getService(Ci.nsIIOService);
+  return chan = ios.newChannel2(url,
+                                null,
+                                null,
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER)
+                   .QueryInterface(Ci.nsIChannel);
 }
 
 function new_file_channel(file) {
   var ios = Cc["@mozilla.org/network/io-service;1"]
               .getService(Ci.nsIIOService);
-  return NetUtil.newChannel({
-    uri: ios.newFileURI(file),
-    loadUsingSystemPrincipal: true
-  });
+  return ios.newChannelFromURI2(ios.newFileURI(file),
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER);
 }
 
 
@@ -53,13 +64,13 @@ function check_throws(closure, error) {
 
 function check_open_throws(error) {
   check_throws(function() {
-    chan.open2(listener);
+    chan.open(listener, null);
   }, error);
 }
 
 function check_async_open_throws(error) {
   check_throws(function() {
-    chan.asyncOpen2(listener);
+    chan.asyncOpen(listener, null);
   }, error);
 }
 
@@ -91,13 +102,13 @@ function after_channel_closed() {
 function test_channel(createChanClosure) {
   // First, synchronous reopening test
   chan = createChanClosure();
-  var inputStream = chan.open2();
+  var inputStream = chan.open();
   check_open_throws(NS_ERROR_IN_PROGRESS);
   check_async_open_throws([NS_ERROR_IN_PROGRESS, NS_ERROR_ALREADY_OPENED]);
   
   // Then, asynchronous one
   chan = createChanClosure();
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener, null);
   check_open_throws(NS_ERROR_IN_PROGRESS);
   check_async_open_throws(NS_ERROR_IN_PROGRESS);
 }

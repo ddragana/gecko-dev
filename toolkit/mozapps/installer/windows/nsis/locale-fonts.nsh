@@ -458,7 +458,7 @@
 !define FONT_FILE1 "segoeui.ttf"
 !endif
 
-; Odia
+; Oriya
 !if "${AB_CD}" == "or"
 !define FONT_NAME1 "Kalinga"
 !define FONT_FILE1 "kalinga.ttf"

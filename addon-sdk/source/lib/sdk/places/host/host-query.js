@@ -47,32 +47,18 @@ function execute (queries, options) {
   return new Promise(resolve => {
     let root = historyService
         .executeQueries(queries, queries.length, options).root;
-    // Let's extract an eventual uri wildcard, if both domain and uri are set.
-    // See utils.js::urlQueryParser() for more details.
-    // In case of multiple queries, we only retain the first found wildcard.
-    let uriWildcard = queries.reduce((prev, query) => {
-      if (query.uri && query.domain) {
-        if (!prev)
-          prev = query.uri.spec;
-        query.uri = null;
-      }
-      return prev;
-    }, "");
-    resolve(collect([], root, uriWildcard));
+    resolve(collect([], root));
   });
 }
 
-function collect (acc, node, uriWildcard) {
+function collect (acc, node) {
   node.containerOpen = true;
   for (let i = 0; i < node.childCount; i++) {
     let child = node.getChild(i);
-
-    if (!uriWildcard || child.uri.startsWith(uriWildcard)) {
-      acc.push(child);
-    }
+    acc.push(child);
     if (child.type === child.RESULT_TYPE_FOLDER) {
       let container = child.QueryInterface(Ci.nsINavHistoryContainerResultNode);
-      collect(acc, container, uriWildcard);
+      collect(acc, container);
     }
   }
   node.containerOpen = false;
@@ -169,7 +155,7 @@ function normalize (historyObj) {
  * Hook into host
  */
 
-var reqStream = filter(request, data => /sdk-places-query/.test(data.event));
+let reqStream = filter(request, function (data) /sdk-places-query/.test(data.event));
 on(reqStream, 'data', function (e) {
   if (EVENT_MAP[e.event]) EVENT_MAP[e.event](e);
 });

@@ -41,7 +41,7 @@ namespace gl {
 }
 
 namespace layers {
-class CompositorBridgeParent;
+class CompositorParent;
 class Layer;
 }
 
@@ -74,8 +74,7 @@ public:
     // by this composer so nothing was rendered at all
     virtual bool TryRenderWithHwc(layers::Layer* aRoot,
                                   nsIWidget* aWidget,
-                                  bool aGeometryChanged,
-                                  bool aHasImageHostOverlays) override;
+                                  bool aGeometryChanged) override;
 
     virtual bool Render(nsIWidget* aWidget) override;
 
@@ -86,7 +85,7 @@ public:
     void Vsync(int aDisplay, int64_t aTimestamp);
     void Invalidate();
     void Hotplug(int aDisplay, int aConnected);
-    void SetCompositorBridgeParent(layers::CompositorBridgeParent* aCompositorBridgeParent);
+    void SetCompositorParent(layers::CompositorParent* aCompositorParent);
 
 private:
     void Reset();
@@ -95,8 +94,7 @@ private:
     bool TryHwComposition(nsScreenGonk* aScreen);
     bool ReallocLayerList();
     bool PrepareLayerList(layers::Layer* aContainer, const nsIntRect& aClip,
-          const gfx::Matrix& aParentTransform,
-          bool aFindSidebandStreams);
+          const gfx::Matrix& aParentTransform);
     void SendtoLayerScope();
 
     UniquePtr<HwcHALBase>   mHal;
@@ -110,11 +108,10 @@ private:
     std::list<HwcUtils::RectVector>   mVisibleRegions;
     layers::FenceHandle mPrevRetireFence;
     layers::FenceHandle mPrevDisplayFence;
-    nsTArray<HwcLayer>      mCachedSidebandLayers;
     nsTArray<layers::LayerComposite*> mHwcLayerMap;
     bool                    mPrepared;
     bool                    mHasHWVsync;
-    layers::CompositorBridgeParent* mCompositorBridgeParent;
+    nsRefPtr<layers::CompositorParent> mCompositorParent;
     Mutex mLock;
 };
 

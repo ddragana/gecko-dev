@@ -8,6 +8,7 @@
 #define nsHTMLDNSPrefetch_h___
 
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsString.h"
 
 #include "nsIDNSListener.h"

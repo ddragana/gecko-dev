@@ -22,9 +22,15 @@
 #endif
 
 /*
- * Version information
+ * Version information for the 'ident' and 'what commands
+ *
+ * NOTE: the first component of the concatenated rcsid string
+ * must not end in a '$' to prevent rcs keyword substitution.
  */
-const char __nss_dbm_version[] = "Version: NSS " SOFTOKEN_VERSION _DEBUG_STRING;
+const char __nss_dbm_rcsid[] = "$Header: NSS " SOFTOKEN_VERSION _DEBUG_STRING
+        "  " __DATE__ " " __TIME__ " $";
+const char __nss_dbm_sccsid[] = "@(#)NSS " SOFTOKEN_VERSION _DEBUG_STRING
+        "  " __DATE__ " " __TIME__;
 
 typedef struct LGPrivateStr {
     NSSLOWCERTCertDBHandle *certDB;
@@ -168,7 +174,7 @@ DB * rdbopen(const char *appName, const char *prefix,
     }
 
     /* couldn't find the entry point, unload the library and fail */
-    disableUnload = PR_GetEnvSecure("NSS_DISABLE_UNLOAD");
+    disableUnload = PR_GetEnv("NSS_DISABLE_UNLOAD");
     if (!disableUnload) {
         PR_UnloadLibrary(lib);
     }
@@ -476,7 +482,15 @@ lg_Close(SDB *sdb)
 static PLHashNumber
 lg_HashNumber(const void *key)
 {
-    return (PLHashNumber)((char *)key - (char *)NULL);
+    return (PLHashNumber) key;
+}
+
+PRIntn
+lg_CompareValues(const void *v1, const void *v2)
+{
+    PLHashNumber value1 = (PLHashNumber) v1;
+    PLHashNumber value2 = (PLHashNumber) v2;
+    return (value1 == value2);
 }
 
 /*
@@ -490,7 +504,6 @@ lg_init(SDB **pSdb, int flags, NSSLOWCERTCertDBHandle *certdbPtr,
     SDB *sdb = NULL;
     LGPrivate *lgdb_p = NULL;
     CK_RV error = CKR_HOST_MEMORY;
-
 
     *pSdb = NULL;
     sdb = (SDB *) PORT_Alloc(sizeof(SDB));
@@ -508,7 +521,7 @@ lg_init(SDB **pSdb, int flags, NSSLOWCERTCertDBHandle *certdbPtr,
     if (lgdb_p->dbLock == NULL) {
 	goto loser;
     }
-    lgdb_p->hashTable = PL_NewHashTable(64, lg_HashNumber, PL_CompareValues,
+    lgdb_p->hashTable = PL_NewHashTable(64, lg_HashNumber, lg_CompareValues,
 			SECITEM_HashCompare, NULL, 0);
     if (lgdb_p->hashTable == NULL) {
 	goto loser;
@@ -516,6 +529,7 @@ lg_init(SDB **pSdb, int flags, NSSLOWCERTCertDBHandle *certdbPtr,
 
     sdb->private = lgdb_p;
     sdb->version = 0;
+    /*sdb->sdb_type = SDB_LEGACY; */
     sdb->sdb_flags = flags;
     sdb->app_private = NULL;
     sdb->sdb_FindObjectsInit = lg_FindObjectsInit;
@@ -578,16 +592,10 @@ legacy_Open(const char *configdir, const char *certPrefix,
 {
     CK_RV crv = CKR_OK;
     SECStatus rv;
-    PRBool readOnly = ((flags & 0x7) == SDB_RDONLY)? PR_TRUE: PR_FALSE;
+    PRBool readOnly = (flags == SDB_RDONLY)? PR_TRUE: PR_FALSE;
+    volatile char c; /* force a reference that won't get optimized away */
 
-#define NSS_VERSION_VARIABLE __nss_dbm_version
-#include "verref.h"
-
-    if (flags & SDB_FIPS) {
-	if (!lg_FIPSEntryOK()) {
-	    return CKR_DEVICE_ERROR;
-	}
-    }
+    c = __nss_dbm_rcsid[0] + __nss_dbm_sccsid[0];
 
     rv = SECOID_Init();
     if (SECSuccess != rv) {
@@ -599,7 +607,7 @@ legacy_Open(const char *configdir, const char *certPrefix,
     if (certDB) *certDB = NULL;
 
     if (certDB) {
-	NSSLOWCERTCertDBHandle *certdbPtr = NULL;
+	NSSLOWCERTCertDBHandle *certdbPtr;
 
 	crv = lg_OpenCertDB(configdir, certPrefix, readOnly, &certdbPtr);
 	if (crv != CKR_OK) {

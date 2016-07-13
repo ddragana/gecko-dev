@@ -8,16 +8,13 @@ import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
 
-import android.support.v4.content.ContextCompat;
 import org.mozilla.gecko.AppConstants;
-import org.mozilla.gecko.GeckoApplication;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.search.SearchEngine;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
+import org.mozilla.search.providers.SearchEngine;
 
 import android.annotation.SuppressLint;
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
@@ -73,13 +70,6 @@ public class PostSearchFragment extends Fragment {
         webview.setWebViewClient(null);
         webview = null;
         progressBar = null;
-    }
-
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
-
-        GeckoApplication.watchReference(getActivity(), this);
     }
 
     public void startSearch(SearchEngine engine, String query) {
@@ -142,7 +132,7 @@ public class PostSearchFragment extends Fragment {
 
                 // If the intent URI didn't specify a package, open this in Fennec.
                 if (i.getPackage() == null) {
-                    i.setClassName(view.getContext().getPackageName(), AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
+                    i.setClassName(AppConstants.ANDROID_PACKAGE_NAME, AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
                     Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL,
                             TelemetryContract.Method.CONTENT, "search-result");
                 } else {
@@ -150,28 +140,15 @@ public class PostSearchFragment extends Fragment {
                             TelemetryContract.Method.INTENT, "search-result");
                 }
 
-                i.addCategory(Intent.CATEGORY_BROWSABLE);
-                i.setComponent(null);
-                if (AppConstants.Versions.feature15Plus) {
-                    i.setSelector(null);
-                }
-
                 startActivity(i);
                 return true;
             } catch (URISyntaxException e) {
                 Log.e(LOG_TAG, "Error parsing intent URI", e);
-            } catch (SecurityException e) {
-                Log.e(LOG_TAG, "SecurityException handling arbitrary intent content");
-            } catch (ActivityNotFoundException e) {
-                Log.e(LOG_TAG, "Intent not actionable");
             }
 
             return false;
         }
 
-        // We are suppressing the 'deprecation' warning because the new method is only available starting with API
-        // level 23 and that's much higher than our current minSdkLevel (1208580).
-        @SuppressWarnings("deprecation")
         @Override
         public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
             Log.e(LOG_TAG, "Error loading search results: " + description);
@@ -187,7 +164,7 @@ public class PostSearchFragment extends Fragment {
 
                 final TextView message = (TextView) errorView.findViewById(R.id.empty_message);
                 message.setText(R.string.network_error_message);
-                message.setTextColor(ContextCompat.getColor(view.getContext(), R.color.network_error_link));
+                message.setTextColor(getResources().getColor(R.color.network_error_link));
                 message.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {

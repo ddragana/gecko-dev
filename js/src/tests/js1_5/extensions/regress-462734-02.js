@@ -12,15 +12,19 @@ var expect = '';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+var save__proto__ = __proto__;
+
 try
 {
   for (x in function(){}) ([]);
   this.__defineGetter__("x", Function);
-  var obj = Object.create(x);
-  obj.prototype += [];
+  __proto__ = x;
+  prototype += [];
 }
 catch(ex)
 {
 }
+
+__proto__ = save__proto__;
 
 reportCompare(expect, actual, summary);

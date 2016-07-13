@@ -21,7 +21,12 @@
 #include "mozilla/storage.h"
 #include "mozilla/Attributes.h"
 
-#include "FaviconHelpers.h"
+#include "AsyncFaviconHelpers.h"
+
+// Favicons bigger than this size should not be saved to the db to avoid
+// bloating it with large image blobs.
+// This still allows us to accept a favicon even if we cannot optimize it.
+#define MAX_FAVICON_SIZE 10240
 
 // Most icons will be smaller than this rough estimate of the size of an
 // uncompressed 16x16 RGBA image of the same dimensions.
@@ -121,7 +126,7 @@ public:
 private:
   ~nsFaviconService();
 
-  RefPtr<mozilla::places::Database> mDB;
+  nsRefPtr<mozilla::places::Database> mDB;
 
   nsCOMPtr<nsITimer> mExpireUnassociatedIconsTimer;
 
@@ -144,8 +149,9 @@ private:
   uint32_t mFailedFaviconSerial;
   nsDataHashtable<nsCStringHashKey, uint32_t> mFailedFavicons;
 
-  // This class needs access to the icons cache.
-  friend class mozilla::places::AsyncReplaceFaviconData;
+  // AsyncFetchAndSetIconForPage needs access to the icon cache
+  friend class mozilla::places::AsyncFetchAndSetIconForPage;
+  friend class mozilla::places::RemoveIconDataCacheEntry;
   nsTHashtable<UnassociatedIconHashKey> mUnassociatedIcons;
 };
 

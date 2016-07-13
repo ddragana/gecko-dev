@@ -16,7 +16,6 @@
 #include <map>
 
 #include "webrtc/modules/video_render/i_video_render.h"
-#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 
 
 namespace webrtc {
@@ -25,6 +24,7 @@ namespace webrtc {
 
 class CriticalSectionWrapper;
 class EventWrapper;
+class ThreadWrapper;
 
 // The object a module user uses to send new frames to the java renderer
 // Base class for android render streams.
@@ -48,6 +48,8 @@ class VideoRenderAndroid: IVideoRender {
   virtual ~VideoRenderAndroid();
 
   virtual int32_t Init()=0;
+
+  virtual int32_t ChangeUniqueId(const int32_t id);
 
   virtual int32_t ChangeWindow(void* window);
 
@@ -144,7 +146,7 @@ class VideoRenderAndroid: IVideoRender {
   EventWrapper& _javaRenderEvent;
   int64_t _lastJavaRenderEvent;
   JNIEnv* _javaRenderJniEnv; // JNIEnv for the java render thread.
-  rtc::scoped_ptr<ThreadWrapper> _javaRenderThread;
+  ThreadWrapper* _javaRenderThread;
 };
 
 }  // namespace webrtc

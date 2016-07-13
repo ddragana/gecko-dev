@@ -4,5 +4,5 @@ protocol managedProtocol {
     manager managerProtocol;
 
 child:
-    async __delete__();
+    __delete__();
 };

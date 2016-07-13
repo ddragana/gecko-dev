@@ -39,7 +39,7 @@ struct WindowTitleData {
 
 nsresult
 nsWindowMediator::GetDOMWindow(nsIXULWindow* inWindow,
-                               nsCOMPtr<nsPIDOMWindowOuter>& outDOMWindow)
+                               nsCOMPtr<nsIDOMWindow>& outDOMWindow)
 {
   nsCOMPtr<nsIDocShell> docShell;
 
@@ -90,6 +90,8 @@ NS_IMETHODIMP nsWindowMediator::RegisterWindow(nsIXULWindow* inWindow)
 
   // Create window info struct and add to list of windows
   nsWindowInfo* windowInfo = new nsWindowInfo(inWindow, mTimeStamp);
+  if (!windowInfo)
+    return NS_ERROR_OUT_OF_MEMORY;
 
   WindowTitleData winData = { inWindow, nullptr };
   mListeners.EnumerateForwards(notifyOpenWindow, &winData);
@@ -193,7 +195,7 @@ nsWindowMediator::GetEnumerator(const char16_t* inType, nsISimpleEnumerator** ou
   NS_ENSURE_ARG_POINTER(outEnumerator);
   NS_ENSURE_STATE(mReady);
 
-  RefPtr<nsAppShellWindowEnumerator> enumerator = new nsASDOMWindowEarlyToLateEnumerator(inType, *this);
+  nsRefPtr<nsAppShellWindowEnumerator> enumerator = new nsASDOMWindowEarlyToLateEnumerator(inType, *this);
   enumerator.forget(outEnumerator);
   return NS_OK;
 }
@@ -205,7 +207,7 @@ nsWindowMediator::GetXULWindowEnumerator(const char16_t* inType, nsISimpleEnumer
   NS_ENSURE_ARG_POINTER(outEnumerator);
   NS_ENSURE_STATE(mReady);
 
-  RefPtr<nsAppShellWindowEnumerator> enumerator = new nsASXULWindowEarlyToLateEnumerator(inType, *this);
+  nsRefPtr<nsAppShellWindowEnumerator> enumerator = new nsASXULWindowEarlyToLateEnumerator(inType, *this);
   enumerator.forget(outEnumerator);
   return NS_OK;
 }
@@ -219,7 +221,7 @@ nsWindowMediator::GetZOrderDOMWindowEnumerator(
   NS_ENSURE_ARG_POINTER(_retval);
   NS_ENSURE_STATE(mReady);
 
-  RefPtr<nsAppShellWindowEnumerator> enumerator;
+  nsRefPtr<nsAppShellWindowEnumerator> enumerator;
   if (aFrontToBack)
     enumerator = new nsASDOMWindowFrontToBackEnumerator(aWindowType, *this);
   else
@@ -238,7 +240,7 @@ nsWindowMediator::GetZOrderXULWindowEnumerator(
   NS_ENSURE_ARG_POINTER(_retval);
   NS_ENSURE_STATE(mReady);
 
-  RefPtr<nsAppShellWindowEnumerator> enumerator;
+  nsRefPtr<nsAppShellWindowEnumerator> enumerator;
   if (aFrontToBack)
     enumerator = new nsASXULWindowFrontToBackEnumerator(aWindowType, *this);
   else
@@ -263,8 +265,7 @@ nsWindowMediator::RemoveEnumerator(nsAppShellWindowEnumerator * inEnumerator)
 // Returns the window of type inType ( if null return any window type ) which has the most recent
 // time stamp
 NS_IMETHODIMP
-nsWindowMediator::GetMostRecentWindow(const char16_t* inType,
-                                      mozIDOMWindowProxy** outWindow)
+nsWindowMediator::GetMostRecentWindow(const char16_t* inType, nsIDOMWindow** outWindow)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   NS_ENSURE_ARG_POINTER(outWindow);
@@ -274,11 +275,12 @@ nsWindowMediator::GetMostRecentWindow(const char16_t* inType,
 
   // Find the most window with the highest time stamp that matches
   // the requested type
-  nsWindowInfo* info = MostRecentWindowInfo(inType, false);
+  nsWindowInfo *info = MostRecentWindowInfo(inType);
   if (info && info->mWindow) {
-    nsCOMPtr<nsPIDOMWindowOuter> DOMWindow;
+    nsCOMPtr<nsIDOMWindow> DOMWindow;
     if (NS_SUCCEEDED(GetDOMWindow(info->mWindow, DOMWindow))) {  
-      DOMWindow.forget(outWindow);
+      *outWindow = DOMWindow;
+      NS_ADDREF(*outWindow);
       return NS_OK;
     }
     return NS_ERROR_FAILURE;
@@ -287,102 +289,62 @@ nsWindowMediator::GetMostRecentWindow(const char16_t* inType,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsWindowMediator::GetMostRecentNonPBWindow(const char16_t* aType, mozIDOMWindowProxy** aWindow)
-{
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  NS_ENSURE_ARG_POINTER(aWindow);
-  *aWindow = nullptr;
-
-  nsWindowInfo *info = MostRecentWindowInfo(aType, true);
-  nsCOMPtr<nsPIDOMWindowOuter> domWindow;
-  if (info && info->mWindow) {
-    GetDOMWindow(info->mWindow, domWindow);
-  }
-
-  if (!domWindow) {
-    return NS_ERROR_FAILURE;
-  }
-
-  domWindow.forget(aWindow);
-  return NS_OK;
-}
-
 nsWindowInfo*
-nsWindowMediator::MostRecentWindowInfo(const char16_t* inType,
-                                       bool aSkipPrivateBrowsingOrClosed)
+nsWindowMediator::MostRecentWindowInfo(const char16_t* inType)
 {
   int32_t       lastTimeStamp = -1;
   nsAutoString  typeString(inType);
   bool          allWindows = !inType || typeString.IsEmpty();
 
-  // Find the most recent window with the highest time stamp that matches
-  // the requested type and has the correct browsing mode.
-  nsWindowInfo* searchInfo = mOldestWindow;
-  nsWindowInfo* listEnd = nullptr;
-  nsWindowInfo* foundInfo = nullptr;
-  for (; searchInfo != listEnd; searchInfo = searchInfo->mYounger) {
+  // Find the most window with the highest time stamp that matches
+  // the requested type
+  nsWindowInfo *searchInfo,
+               *listEnd,
+               *foundInfo = nullptr;
+
+  searchInfo = mOldestWindow;
+  listEnd = nullptr;
+  while (searchInfo != listEnd) {
+    if ((allWindows || searchInfo->TypeEquals(typeString)) &&
+        searchInfo->mTimeStamp >= lastTimeStamp) {
+
+      foundInfo = searchInfo;
+      lastTimeStamp = searchInfo->mTimeStamp;
+    }
+    searchInfo = searchInfo->mYounger;
     listEnd = mOldestWindow;
-
-    if (!allWindows && !searchInfo->TypeEquals(typeString)) {
-      continue;
-    }
-    if (searchInfo->mTimeStamp < lastTimeStamp) {
-      continue;
-    }
-    if (!searchInfo->mWindow) {
-      continue;
-    }
-    if (aSkipPrivateBrowsingOrClosed) {
-      nsCOMPtr<nsIDocShell> docShell;
-      searchInfo->mWindow->GetDocShell(getter_AddRefs(docShell));
-      nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
-      if (!loadContext || loadContext->UsePrivateBrowsing()) {
-        continue;
-      }
-
-      nsCOMPtr<nsPIDOMWindowOuter> piwindow = docShell->GetWindow();
-      if (!piwindow || piwindow->Closed()) {
-        continue;
-      }
-    }
-
-    foundInfo = searchInfo;
-    lastTimeStamp = searchInfo->mTimeStamp;
   }
-
   return foundInfo;
 }
 
 NS_IMETHODIMP
 nsWindowMediator::GetOuterWindowWithId(uint64_t aWindowID,
-                                       mozIDOMWindowProxy** aWindow)
+                                       nsIDOMWindow** aWindow)
 {
-  RefPtr<nsGlobalWindow> window = nsGlobalWindow::GetOuterWindowWithId(aWindowID);
-  nsCOMPtr<nsPIDOMWindowOuter> outer = window ? window->AsOuter() : nullptr;
-  outer.forget(aWindow);
+  *aWindow = nsGlobalWindow::GetOuterWindowWithId(aWindowID);
+  NS_IF_ADDREF(*aWindow);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsWindowMediator::GetCurrentInnerWindowWithId(uint64_t aWindowID,
-                                              mozIDOMWindow** aWindow)
+                                              nsIDOMWindow** aWindow)
 {
-  RefPtr<nsGlobalWindow> window = nsGlobalWindow::GetInnerWindowWithId(aWindowID);
+  nsCOMPtr<nsPIDOMWindow> inner = nsGlobalWindow::GetInnerWindowWithId(aWindowID);
 
   // not found
-  if (!window)
+  if (!inner)
     return NS_OK;
 
-  nsCOMPtr<nsPIDOMWindowInner> inner = window->AsInner();
-  nsCOMPtr<nsPIDOMWindowOuter> outer = inner->GetOuterWindow();
+  nsCOMPtr<nsPIDOMWindow> outer = inner->GetOuterWindow();
   NS_ENSURE_TRUE(outer, NS_ERROR_UNEXPECTED);
 
   // outer is already using another inner, so it's same as not found
   if (outer->GetCurrentInnerWindow() != inner)
     return NS_OK;
 
-  inner.forget(aWindow);
+  nsCOMPtr<nsIDOMWindow> ret = do_QueryInterface(outer);
+  ret.forget(aWindow);
   return NS_OK;
 }
 
@@ -779,7 +741,6 @@ nsWindowMediator::SortZOrderBackToFront()
 }
 
 NS_IMPL_ISUPPORTS(nsWindowMediator,
-  nsIWindowMediator_44,
   nsIWindowMediator,
   nsIObserver,
   nsISupportsWeakReference)

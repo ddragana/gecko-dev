@@ -5,13 +5,13 @@
 
 #include "nsNSSCertificateFakeTransport.h"
 
-#include "mozilla/Assertions.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsISupportsPrimitives.h"
 #include "nsNSSCertificate.h"
 #include "nsString.h"
+#include "nsXPIDLString.h"
 
 NS_IMPL_ISUPPORTS(nsNSSCertificateFakeTransport,
                   nsIX509Cert,
@@ -31,7 +31,7 @@ nsNSSCertificateFakeTransport::~nsNSSCertificateFakeTransport()
 }
 
 NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetDbKey(nsACString&)
+nsNSSCertificateFakeTransport::GetDbKey(char**)
 {
   NS_NOTREACHED("Unimplemented on content process");
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -200,13 +200,6 @@ nsNSSCertificateFakeTransport::GetUsagesString(bool, uint32_t*, nsAString&)
 }
 
 NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetKeyUsages(nsAString&)
-{
-  MOZ_ASSERT_UNREACHABLE("Unimplemented on content process");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 nsNSSCertificateFakeTransport::GetASN1Structure(nsIASN1Object**)
 {
   NS_NOTREACHED("Unimplemented on content process");
@@ -356,13 +349,6 @@ nsNSSCertificateFakeTransport::GetIsSelfSigned(bool*)
 }
 
 NS_IMETHODIMP
-nsNSSCertificateFakeTransport::GetIsBuiltInRoot(bool* aIsBuiltInRoot)
-{
-  NS_NOTREACHED("Unimplemented on content process");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 nsNSSCertificateFakeTransport::RequestUsagesArrayAsync(
   nsICertVerificationListener*)
 {
@@ -432,7 +418,7 @@ nsNSSCertListFakeTransport::DeleteCert(nsIX509Cert* aCert)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-CERTCertList*
+void*
 nsNSSCertListFakeTransport::GetRawCertList()
 {
   NS_NOTREACHED("Unimplemented on content process");
@@ -494,9 +480,7 @@ nsNSSCertListFakeTransport::Read(nsIObjectInputStream* aStream)
     }
 
     nsCOMPtr<nsIX509Cert> cert = do_QueryInterface(certSupports);
-    if (!mFakeCertList.append(cert)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    mFakeCertList.append(cert);
   }
 
   return rv;

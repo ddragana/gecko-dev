@@ -7,12 +7,12 @@ protocol PTestManyChildAllocs {
     manages PTestManyChildAllocsSub;
 
 child:
-    async Go();                       // start allocating
+    Go();                       // start allocating
 
 parent:
-    async Done();
+    Done();
 
-    async PTestManyChildAllocsSub();
+    PTestManyChildAllocsSub();
 };
 
 } // namespace _ipdltest

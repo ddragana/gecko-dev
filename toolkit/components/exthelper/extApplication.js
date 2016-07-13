@@ -569,7 +569,7 @@ Extensions.prototype = {
   // minVersion: "1.0"
   // maxVersion: "2.0"
   find: function exts_find(aOptions) {
-    return Object.keys(this._cache).map(id => this._cache[id]);
+    return [e for each (e in this._cache)];
   },
 
   has: function exts_has(aId) {
@@ -647,19 +647,19 @@ extApplication.prototype = {
 
   get console() {
     let console = new Console();
-    this.__defineGetter__("console", () => console);
+    this.__defineGetter__("console", function () console);
     return this.console;
   },
 
   get storage() {
     let storage = new SessionStorage();
-    this.__defineGetter__("storage", () => storage);
+    this.__defineGetter__("storage", function () storage);
     return this.storage;
   },
 
   get prefs() {
     let prefs = new PreferenceBranch("");
-    this.__defineGetter__("prefs", () => prefs);
+    this.__defineGetter__("prefs", function () prefs);
     return this.prefs;
   },
 
@@ -687,7 +687,7 @@ extApplication.prototype = {
     }
 
     let events = new Events(registerCheck);
-    this.__defineGetter__("events", () => events);
+    this.__defineGetter__("events", function () events);
     return this.events;
   },
 

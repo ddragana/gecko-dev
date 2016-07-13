@@ -340,7 +340,7 @@ CountPopulation32(uint32_t aValue)
   return detail::CountPopulation32(aValue);
 }
 
-/** Analogous to CountPopulation32, but for 64-bit numbers */
+/** Analogous to CoutPopulation32, but for 64-bit numbers */
 inline uint_fast8_t
 CountPopulation64(uint64_t aValue)
 {
@@ -484,11 +484,6 @@ inline T
 RotateLeft(const T aValue, uint_fast8_t aShift)
 {
   MOZ_ASSERT(aShift < sizeof(T) * CHAR_BIT, "Shift value is too large!");
-  MOZ_ASSERT(aShift > 0,
-             "Rotation by value length is undefined behavior, but compilers "
-             "do not currently fold a test into the rotate instruction. "
-             "Please remove this restriction when compilers optimize the "
-             "zero case (http://blog.regehr.org/archives/1063).");
   static_assert(IsUnsigned<T>::value, "Rotates require unsigned values");
   return (aValue << aShift) | (aValue >> (sizeof(T) * CHAR_BIT - aShift));
 }
@@ -501,45 +496,8 @@ inline T
 RotateRight(const T aValue, uint_fast8_t aShift)
 {
   MOZ_ASSERT(aShift < sizeof(T) * CHAR_BIT, "Shift value is too large!");
-  MOZ_ASSERT(aShift > 0,
-             "Rotation by value length is undefined behavior, but compilers "
-             "do not currently fold a test into the rotate instruction. "
-             "Please remove this restriction when compilers optimize the "
-             "zero case (http://blog.regehr.org/archives/1063).");
   static_assert(IsUnsigned<T>::value, "Rotates require unsigned values");
   return (aValue >> aShift) | (aValue << (sizeof(T) * CHAR_BIT - aShift));
-}
-
-/**
- * Returns true if |x| is a power of two.
- * Zero is not an integer power of two. (-Inf is not an integer)
- */
-template<typename T>
-inline bool
-IsPowerOfTwo(T x)
-{
-    static_assert(IsUnsigned<T>::value,
-                  "IsPowerOfTwo requires unsigned values");
-    return x && (x & (x - 1)) == 0;
-}
-
-template<typename T>
-inline T
-Clamp(const T aValue, const T aMin, const T aMax)
-{
-    static_assert(IsIntegral<T>::value,
-                  "Clamp accepts only integral types, so that it doesn't have"
-                  " to distinguish differently-signed zeroes (which users may"
-                  " or may not care to distinguish, likely at a perf cost) or"
-                  " to decide how to clamp NaN or a range with a NaN"
-                  " endpoint.");
-    MOZ_ASSERT(aMin <= aMax);
-
-    if (aValue <= aMin)
-        return aMin;
-    if (aValue >= aMax)
-        return aMax;
-    return aValue;
 }
 
 } /* namespace mozilla */

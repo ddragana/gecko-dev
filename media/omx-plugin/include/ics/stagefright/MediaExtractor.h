@@ -23,7 +23,7 @@
 namespace android {
 
 class DataSource;
-struct MediaSource;
+class MediaSource;
 class MetaData;
 
 class MediaExtractor : public RefBase {

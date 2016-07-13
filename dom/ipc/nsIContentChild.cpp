@@ -10,9 +10,9 @@
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
+#include "mozilla/dom/StructuredCloneUtils.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
-#include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 
 #include "nsPrintfCString.h"
@@ -57,7 +57,7 @@ nsIContentChild::AllocPBrowserChild(const TabId& aTabId,
     MOZ_CRASH("Invalid TabContext received from the parent process.");
   }
 
-  RefPtr<TabChild> child =
+  nsRefPtr<TabChild> child =
     TabChild::Create(this, aTabId, tc.GetTabContext(), aChromeFlags);
 
   // The ref here is released in DeallocPBrowserChild.
@@ -91,7 +91,7 @@ nsIContentChild::GetOrCreateActorForBlob(Blob* aBlob)
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aBlob);
 
-  RefPtr<BlobImpl> blobImpl = aBlob->Impl();
+  nsRefPtr<BlobImpl> blobImpl = aBlob->Impl();
   MOZ_ASSERT(blobImpl);
 
   return GetOrCreateActorForBlobImpl(blobImpl);
@@ -111,18 +111,16 @@ nsIContentChild::GetOrCreateActorForBlobImpl(BlobImpl* aImpl)
 
 bool
 nsIContentChild::RecvAsyncMessage(const nsString& aMsg,
+                                  const ClonedMessageData& aData,
                                   InfallibleTArray<CpowEntry>&& aCpows,
-                                  const IPC::Principal& aPrincipal,
-                                  const ClonedMessageData& aData)
+                                  const IPC::Principal& aPrincipal)
 {
-  RefPtr<nsFrameMessageManager> cpm = nsFrameMessageManager::GetChildProcessManager();
+  nsRefPtr<nsFrameMessageManager> cpm = nsFrameMessageManager::GetChildProcessManager();
   if (cpm) {
-    ipc::StructuredCloneData data;
-    ipc::UnpackClonedMessageDataForChild(aData, data);
-
+    StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForChild(aData);
     CrossProcessCpowHolder cpows(this, aCpows);
     cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()), nullptr,
-                        aMsg, false, &data, &cpows, aPrincipal, nullptr);
+                        aMsg, false, &cloneData, &cpows, aPrincipal, nullptr);
   }
   return true;
 }

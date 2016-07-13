@@ -40,9 +40,8 @@ const DownloadsButton = {
   /**
    * Location of the indicator overlay.
    */
-  get kIndicatorOverlay() {
-    return "chrome://browser/content/downloads/indicatorOverlay.xul";
-  },
+  get kIndicatorOverlay()
+      "chrome://browser/content/downloads/indicatorOverlay.xul",
 
   /**
    * Returns a reference to the downloads button position placeholder, or null
@@ -181,12 +180,6 @@ const DownloadsButton = {
   }
 };
 
-Object.defineProperty(this, "DownloadsButton", {
-  value: DownloadsButton,
-  enumerable: true,
-  writable: false
-});
-
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsIndicatorView
 
@@ -238,7 +231,7 @@ const DownloadsIndicatorView = {
     this.counter = "";
     this.percentComplete = 0;
     this.paused = false;
-    this.attention = DownloadsCommon.ATTENTION_NONE;
+    this.attention = false;
   },
 
   /**
@@ -466,28 +459,15 @@ const DownloadsIndicatorView = {
 
     if (this._attention != aValue) {
       this._attention = aValue;
-
-      // Check if the downloads button is in the menu panel, to determine which
-      // button needs to get a badge.
-      let widgetGroup = CustomizableUI.getWidget("downloads-button");
-      let inMenu = widgetGroup.areaType == CustomizableUI.TYPE_MENU_PANEL;
-
-      if (aValue == DownloadsCommon.ATTENTION_NONE) {
-        this.indicator.removeAttribute("attention");
-        if (inMenu) {
-          gMenuButtonBadgeManager.removeBadge(gMenuButtonBadgeManager.BADGEID_DOWNLOAD);
-        }
+      if (aValue) {
+        this.indicator.setAttribute("attention", "true");
       } else {
-        this.indicator.setAttribute("attention", aValue);
-        if (inMenu) {
-          let badgeClass = "download-" + aValue;
-          gMenuButtonBadgeManager.addBadge(gMenuButtonBadgeManager.BADGEID_DOWNLOAD, badgeClass);
-        }
+        this.indicator.removeAttribute("attention");
       }
     }
     return aValue;
   },
-  _attention: DownloadsCommon.ATTENTION_NONE,
+  _attention: false,
 
   //////////////////////////////////////////////////////////////////////////////
   //// User interface event functions
@@ -596,8 +576,3 @@ const DownloadsIndicatorView = {
   },
 };
 
-Object.defineProperty(this, "DownloadsIndicatorView", {
-  value: DownloadsIndicatorView,
-  enumerable: true,
-  writable: false
-});

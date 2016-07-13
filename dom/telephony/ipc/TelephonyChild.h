@@ -42,6 +42,9 @@ protected:
                             const IPCCdmaWaitingCallData& aData) override;
 
   virtual bool
+  RecvNotifyConferenceCallStateChanged(const uint16_t& aCallState) override;
+
+  virtual bool
   RecvNotifyConferenceError(const nsString& aName,
                             const nsString& aMessage) override;
 
@@ -51,7 +54,7 @@ protected:
                                  const uint16_t& aNotification) override;
 
 private:
-  RefPtr<TelephonyIPCService> mService;
+  nsRefPtr<TelephonyIPCService> mService;
 };
 
 class TelephonyRequestChild : public PTelephonyRequestChild

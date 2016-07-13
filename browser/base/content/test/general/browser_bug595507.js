@@ -22,11 +22,11 @@ add_task(function* () {
   });
   yield popupShownPromise;
 
-  yield ContentTask.spawn(browser, {}, function* () {
+  let activeElement = yield ContentTask.spawn(browser, {}, function* () {
     let childdoc = content.document.getElementsByTagName('iframe')[0].contentDocument;
-    Assert.equal(childdoc.activeElement, childdoc.getElementById("i"),
-      "First invalid element should be focused");
+    return childdoc.activeElement == childdoc.getElementById('i');
   });
+  is(activeElement, true, "First invalid element should be focused");
 
   ok(gInvalidFormPopup.state == 'showing' || gInvalidFormPopup.state == 'open',
      "The invalid form popup should be shown");

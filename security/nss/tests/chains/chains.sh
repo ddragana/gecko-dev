@@ -1212,11 +1212,9 @@ parse_config()
                 ENTITY=
             fi
 
-            if [ -n "${VERIFY}" ] && \
-               [ -z "$NSS_DISABLE_LIBPKIX" ]; then
+            if [ -n "${VERIFY}" ]; then
                 verify_cert "-pp"
-		if [ -n "${VERIFY_CLASSIC_ENGINE_TOO}" ] && \
-		   [ -z "$NSS_DISABLE_LIBPKIX" ]; then
+		if [ -n "${VERIFY_CLASSIC_ENGINE_TOO}" ]; then
 		    verify_cert ""
 		    verify_cert "-p"
 		fi

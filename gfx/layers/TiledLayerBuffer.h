@@ -15,7 +15,6 @@
 #include "gfxPlatform.h"                // for GetTileWidth/GetTileHeight
 #include "LayersLogging.h"              // for print_stderr
 #include "mozilla/gfx/Logging.h"        // for gfxCriticalError
-#include "mozilla/layers/LayersTypes.h" // for TextureDumpMode
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
@@ -151,7 +150,7 @@ public:
   gfx::IntPoint GetTileOffset(TileIntPoint aPosition) const {
     gfx::IntSize scaledTileSize = GetScaledTileSize();
     return gfx::IntPoint(aPosition.x * scaledTileSize.width,
-                         aPosition.y * scaledTileSize.height) + mTileOrigin;
+                         aPosition.y * scaledTileSize.height);
   }
 
   const TilesPlacement& GetPlacement() const { return mTiles; }
@@ -176,8 +175,7 @@ public:
   float GetResolution() const { return mResolution; }
   bool IsLowPrecision() const { return mResolution < 1; }
 
-  void Dump(std::stringstream& aStream, const char* aPrefix, bool aDumpHtml,
-            TextureDumpMode aCompress);
+  void Dump(std::stringstream& aStream, const char* aPrefix, bool aDumpHtml);
 
 protected:
 
@@ -196,14 +194,12 @@ protected:
   TilesPlacement  mTiles;
   float           mResolution;
   gfx::IntSize    mTileSize;
-  gfx::IntPoint   mTileOrigin;
 };
 
 template<typename Derived, typename Tile> void
 TiledLayerBuffer<Derived, Tile>::Dump(std::stringstream& aStream,
                                       const char* aPrefix,
-                                      bool aDumpHtml,
-                                      TextureDumpMode aCompress)
+                                      bool aDumpHtml)
 {
   for (size_t i = 0; i < mRetainedTiles.Length(); ++i) {
     const TileIntPoint tilePosition = mTiles.TilePosition(i);
@@ -212,7 +208,7 @@ TiledLayerBuffer<Derived, Tile>::Dump(std::stringstream& aStream,
     aStream << "\n" << aPrefix << "Tile (x=" <<
       tileOffset.x << ", y=" << tileOffset.y << "): ";
     if (!mRetainedTiles[i].IsPlaceholderTile()) {
-      mRetainedTiles[i].DumpTexture(aStream, aCompress);
+      mRetainedTiles[i].DumpTexture(aStream);
     } else {
       aStream << "empty tile";
     }

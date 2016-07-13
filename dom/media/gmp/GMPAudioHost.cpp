@@ -40,7 +40,7 @@ GMPAudioSamplesImpl::GMPAudioSamplesImpl(MediaRawData* aSample,
  , mChannels(aChannels)
  , mRate(aRate)
 {
-  mBuffer.AppendElements(aSample->Data(), aSample->Size());
+  mBuffer.AppendElements(aSample->mData, aSample->mSize);
   if (aSample->mCrypto.mValid) {
     mCrypto = new GMPEncryptedBufferDataImpl(aSample->mCrypto);
   }

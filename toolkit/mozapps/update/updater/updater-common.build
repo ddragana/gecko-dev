@@ -27,6 +27,7 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     RCINCLUDE = '%supdater.rc' % updater_rel_path
     DEFINES['UNICODE'] = True
     DEFINES['_UNICODE'] = True
+    DEFINES['NOMINMAX'] = True
     USE_STATIC_LIBS = True
 
     # Pick up nsWindowsRestart.cpp
@@ -60,14 +61,14 @@ USE_LIBS += [
     'mar',
 ]
 
-if CONFIG['MOZ_SYSTEM_BZ2']:
+if CONFIG['MOZ_NATIVE_BZ2']:
     OS_LIBS += CONFIG['MOZ_BZ2_LIBS']
 else:
     USE_LIBS += [
         'bz2',
     ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_ENABLE_GTK']:
     have_progressui = 1
     srcs += [
         'progressui_gtk.cpp',
@@ -82,13 +83,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     OS_LIBS += [
         '-framework Cocoa',
         '-framework Security',
-        '-framework SystemConfiguration',
-    ]
-    UNIFIED_SOURCES += [
-        '/toolkit/xre/updaterfileutils_osx.mm',
-    ]
-    LOCAL_INCLUDES += [
-        '/toolkit/xre',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     have_progressui = 1
@@ -131,6 +125,6 @@ if CONFIG['_MSC_VER']:
 elif CONFIG['OS_ARCH'] == 'WINNT':
     WIN32_EXE_LDFLAGS += ['-municode']
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_WIDGET_GTK']:
     CXXFLAGS += CONFIG['TK_CFLAGS']
     OS_LIBS += CONFIG['TK_LIBS']

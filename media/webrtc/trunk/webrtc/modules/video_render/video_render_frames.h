@@ -21,12 +21,16 @@ namespace webrtc {
 class VideoRenderFrames {
  public:
   VideoRenderFrames();
+  ~VideoRenderFrames();
 
   // Add a frame to the render queue
-  int32_t AddFrame(const I420VideoFrame& new_frame);
+  int32_t AddFrame(I420VideoFrame* new_frame);
 
-  // Get a frame for rendering, or a zero-size frame if it's not time to render.
-  I420VideoFrame FrameToRender();
+  // Get a frame for rendering, if it's time to render.
+  I420VideoFrame* FrameToRender();
+
+  // Return an old frame
+  int32_t ReturnFrame(I420VideoFrame* old_frame);
 
   // Releases all frames
   int32_t ReleaseAllFrames();
@@ -38,6 +42,8 @@ class VideoRenderFrames {
   int32_t SetRenderDelay(const uint32_t render_delay);
 
  private:
+  typedef std::list<I420VideoFrame*> FrameList;
+
   // 10 seconds for 30 fps.
   enum { KMaxNumberOfFrames = 300 };
   // Don't render frames with timestamp older than 500ms from now.
@@ -46,7 +52,9 @@ class VideoRenderFrames {
   enum { KFutureRenderTimestampMS = 10000 };
 
   // Sorted list with framed to be rendered, oldest first.
-  std::list<I420VideoFrame> incoming_frames_;
+  FrameList incoming_frames_;
+  // Empty frames.
+  FrameList empty_frames_;
 
   // Estimated delay from a frame is released until it's rendered.
   uint32_t render_delay_ms_;

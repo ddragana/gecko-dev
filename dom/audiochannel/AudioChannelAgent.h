@@ -17,13 +17,10 @@
 #define NS_AUDIOCHANNELAGENT_CID {0xf27688e2, 0x3dd7, 0x11e2, \
       {0x90, 0x4e, 0x10, 0xbf, 0x48, 0xd6, 0x4b, 0xd4}}
 
-class nsPIDOMWindowInner;
-class nsPIDOMWindowOuter;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
-
-class AudioPlaybackConfig;
 
 /* Header file */
 class AudioChannelAgent : public nsIAudioChannelAgent
@@ -37,42 +34,33 @@ public:
   AudioChannelAgent();
 
   void WindowVolumeChanged();
-  void WindowSuspendChanged(nsSuspendedTypes aSuspend);
-  void WindowAudioCaptureChanged(uint64_t aInnerWindowID, bool aCapture);
 
-  nsPIDOMWindowOuter* Window() const
+  nsPIDOMWindow* Window() const
   {
     return mWindow;
   }
 
   uint64_t WindowID() const;
-  uint64_t InnerWindowID() const;
 
 private:
   virtual ~AudioChannelAgent();
-
-  AudioPlaybackConfig GetMediaConfig();
-  bool IsDisposableSuspend(nsSuspendedTypes aSuspend) const;
 
   // Returns mCallback if that's non-null, or otherwise tries to get an
   // nsIAudioChannelAgentCallback out of mWeakCallback.
   already_AddRefed<nsIAudioChannelAgentCallback> GetCallback();
 
-  nsresult InitInternal(nsPIDOMWindowInner* aWindow, int32_t aAudioAgentType,
+  nsresult InitInternal(nsIDOMWindow* aWindow, int32_t aAudioAgentType,
                         nsIAudioChannelAgentCallback* aCallback,
                         bool aUseWeakRef);
 
   void Shutdown();
 
-  nsresult FindCorrectWindow(nsPIDOMWindowInner* aWindow);
-
-  nsCOMPtr<nsPIDOMWindowOuter> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   nsCOMPtr<nsIAudioChannelAgentCallback> mCallback;
 
   nsWeakPtr mWeakCallback;
 
   int32_t mAudioChannelType;
-  uint64_t mInnerWindowID;
   bool mIsRegToService;
 };
 

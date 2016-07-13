@@ -2,7 +2,7 @@ intr protocol trans_WrongDirection5 {
 
 parent:
     intr Msg();
-    async __delete__()
+    __delete__()
 
 state S1:
     call Msg goto S1;

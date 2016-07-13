@@ -13,7 +13,7 @@ function testVarPatternCombinations(makePattSrc, makePattPatt) {
         // variable declarations in blocks
         assertDecl("var " + pattSrcs[i].join(",") + ";", varDecl(pattPatts[i]));
 
-        assertGlobalDecl("let " + pattSrcs[i].join(",") + ";", letDecl(pattPatts[i]));
+        assertGlobalDecl("let " + pattSrcs[i].join(",") + ";", varDecl(pattPatts[i]));
         assertLocalDecl("let " + pattSrcs[i].join(",") + ";", letDecl(pattPatts[i]));
         assertBlockDecl("let " + pattSrcs[i].join(",") + ";", letDecl(pattPatts[i]));
 
@@ -23,9 +23,9 @@ function testVarPatternCombinations(makePattSrc, makePattPatt) {
         assertStmt("for (var " + pattSrcs[i].join(",") + "; foo; bar);",
                    forStmt(varDecl(pattPatts[i]), ident("foo"), ident("bar"), emptyStmt));
         assertStmt("for (let " + pattSrcs[i].join(",") + "; foo; bar);",
-                   forStmt(letDecl(pattPatts[i]), ident("foo"), ident("bar"), emptyStmt));
+                   letStmt(pattPatts[i], forStmt(null, ident("foo"), ident("bar"), emptyStmt)));
         assertStmt("for (const " + constSrcs[i].join(",") + "; foo; bar);",
-                   forStmt(constDecl(constPatts[i]), ident("foo"), ident("bar"), emptyStmt));
+                   letStmt(constPatts[i], forStmt(null, ident("foo"), ident("bar"), emptyStmt)));
     }
 }
 

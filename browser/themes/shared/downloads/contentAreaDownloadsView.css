@@ -8,9 +8,8 @@
   padding: 18px;
 }
 
-#downloadsRichListBox:empty {
+#downloadsRichListBox:not(:-moz-focusring) {
   border-color: transparent;
-  background-color: transparent;
 }
 
 .downloadButton:not([disabled="true"]):hover,

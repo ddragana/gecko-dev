@@ -41,7 +41,6 @@ SerializedLoadContext::SerializedLoadContext(nsIChannel* aChannel)
       mUsePrivateBrowsing = isPrivate;
       mIsPrivateBitValid = true;
     }
-    mOriginAttributes.SyncAttributesWithPrivateBrowsing(mUsePrivateBrowsing);
   }
 }
 
@@ -62,11 +61,9 @@ SerializedLoadContext::Init(nsILoadContext* aLoadContext)
     mIsPrivateBitValid = true;
     aLoadContext->GetIsContent(&mIsContent);
     aLoadContext->GetUsePrivateBrowsing(&mUsePrivateBrowsing);
-    mOriginAttributes.SyncAttributesWithPrivateBrowsing(mUsePrivateBrowsing);
     aLoadContext->GetUseRemoteTabs(&mUseRemoteTabs);
-    if (!aLoadContext->GetOriginAttributes(mOriginAttributes)) {
-      NS_WARNING("GetOriginAttributes failed");
-    }
+    aLoadContext->GetAppId(&mAppId);
+    aLoadContext->GetIsInBrowserElement(&mIsInBrowserElement);
   } else {
     mIsNotNull = false;
     mIsPrivateBitValid = false;
@@ -75,6 +72,8 @@ SerializedLoadContext::Init(nsILoadContext* aLoadContext)
     mIsContent = true;
     mUsePrivateBrowsing = false;
     mUseRemoteTabs = false;
+    mAppId = 0;
+    mIsInBrowserElement = false;
   }
 }
 

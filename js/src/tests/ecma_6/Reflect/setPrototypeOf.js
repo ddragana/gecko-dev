@@ -22,12 +22,12 @@ for (proto of [undefined, false, 0, 1.6, "that", Symbol.iterator]) {
     assertThrowsInstanceOf(() => Reflect.setPrototypeOf(obj, proto), TypeError);
 }
 
-// Return false if the target isn't extensible.
+// Return false if the target is inextensible.
 proto = {};
 obj = Object.preventExtensions(Object.create(proto));
 assertEq(Reflect.setPrototypeOf(obj, {}), false);
 assertEq(Reflect.setPrototypeOf(obj, null), false);
-assertEq(Reflect.setPrototypeOf(obj, proto), true);  // except if not changing anything
+assertEq(Reflect.setPrototypeOf(obj, proto), false);  // even if not changing anything
 
 // Return false rather than create a [[Prototype]] cycle.
 obj = {};
@@ -46,10 +46,14 @@ assertEq(Reflect.setPrototypeOf(proto, obj), false);
 // cycle check quietly exits on encountering the proxy.)
 obj = {};
 var proxy = new Proxy(Object.create(obj), {});
-
-assertEq(Reflect.setPrototypeOf(obj, proxy), true);
-assertEq(Reflect.getPrototypeOf(obj), proxy);
-assertEq(Reflect.getPrototypeOf(proxy), obj);
+if (Reflect.setPrototypeOf(obj, proxy) !== false) {
+    throw new Error("Congratulations on implementing ES6 [[SetPrototype]]! " +
+                    "Update this test for 1 karma point!");
+    // ...by deleting this if-block and uncommenting the three assertions below.
+}
+// assertEq(Reflect.setPrototypeOf(obj, proxy), true);
+// assertEq(Reflect.getPrototypeOf(obj), proxy);
+// assertEq(Reflect.getPrototypeOf(proxy), obj);
 
 // If a proxy handler returns a false-y value, return false.
 var hits = 0;
@@ -63,9 +67,14 @@ proxy = new Proxy(obj, {
         return 0;
     }
 });
-
-assertEq(Reflect.setPrototypeOf(proxy, proto), false);
-assertEq(hits, 1);
+if (Reflect.setPrototypeOf(proxy, proto) !== true) {
+    throw new Error("Congratulations on implementing the setPrototypeOf trap for proxies! " +
+                    "Please update this test.");
+    // ...by deleting this if-block and uncommenting the two assertions below.
+    // As of this writing, the setPrototypeOf hook is never called; see bug 888969.
+}
+// assertEq(Reflect.setPrototypeOf(proxy, proto), false);
+// assertEq(hits, 1);
 
 // For more Reflect.setPrototypeOf tests, see target.js.
 

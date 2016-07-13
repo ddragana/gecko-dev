@@ -1,4 +1,5 @@
 {
+  "WeakMap.prototype.clear.length": true,
   "WeakMap.prototype.delete.length": true,
   "WeakMap.prototype.get.length": true,
   "WeakMap.prototype.has.length": true,

@@ -36,7 +36,7 @@ LOCAL_INCLUDES += [
     '/layout/xul',
 ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_ENABLE_GTK']:
     LOCAL_INCLUDES += [
         '/accessible/atk',
     ]
@@ -58,5 +58,4 @@ FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']
+FAIL_ON_WARNINGS = True

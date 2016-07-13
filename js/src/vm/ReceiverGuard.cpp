@@ -8,7 +8,6 @@
 
 #include "builtin/TypedObject.h"
 #include "vm/UnboxedObject.h"
-#include "jsobjinlines.h"
 
 using namespace js;
 
@@ -61,6 +60,8 @@ HeapReceiverGuard::keyBits(JSObject* obj)
 void
 HeapReceiverGuard::trace(JSTracer* trc)
 {
-    TraceNullableEdge(trc, &shape_, "receiver_guard_shape");
-    TraceNullableEdge(trc, &group_, "receiver_guard_group");
+    if (shape_)
+        TraceEdge(trc, &shape_, "receiver_guard_shape");
+    if (group_)
+        TraceEdge(trc, &group_, "receiver_guard_group");
 }

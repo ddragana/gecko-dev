@@ -90,7 +90,10 @@ public:
     SetHTMLAttr(nsGkAtoms::shape, aShape, aError);
   }
 
-  // The XPCOM GetHref is OK for us
+  void GetHref(nsAString& aHref, ErrorResult& aError)
+  {
+    aError = GetHref(aHref);
+  }
   void SetHref(const nsAString& aHref, ErrorResult& aError)
   {
     aError = SetHref(aHref);
@@ -125,19 +128,19 @@ public:
   } 
   nsDOMTokenList* RelList();
 
-  void SetReferrerPolicy(const nsAString& aValue, mozilla::ErrorResult& rv)
+  void SetReferrer(const nsAString& aValue, mozilla::ErrorResult& rv)
   {
-    SetHTMLAttr(nsGkAtoms::referrerpolicy, aValue, rv);
+    SetHTMLAttr(nsGkAtoms::referrer, aValue, rv);
   }
-  void GetReferrerPolicy(nsAString& aReferrer)
+  void GetReferrer(nsAString& aReferrer)
   {
-    GetEnumAttr(nsGkAtoms::referrerpolicy, EmptyCString().get(), aReferrer);
+    GetHTMLAttr(nsGkAtoms::referrer, aReferrer);
   }
 
   // The Link::GetOrigin is OK for us
 
-  // Link::Link::GetProtocol is OK for us
-  // Link::Link::SetProtocol is OK for us
+  using Link::GetProtocol;
+  using Link::SetProtocol;
 
   // The Link::GetUsername is OK for us
   // The Link::SetUsername is OK for us
@@ -145,23 +148,23 @@ public:
   // The Link::GetPassword is OK for us
   // The Link::SetPassword is OK for us
 
-  // Link::Link::GetHost is OK for us
-  // Link::Link::SetHost is OK for us
+  using Link::GetHost;
+  using Link::SetHost;
 
-  // Link::Link::GetHostname is OK for us
-  // Link::Link::SetHostname is OK for us
+  using Link::GetHostname;
+  using Link::SetHostname;
 
-  // Link::Link::GetPort is OK for us
-  // Link::Link::SetPort is OK for us
+  using Link::GetPort;
+  using Link::SetPort;
 
-  // Link::Link::GetPathname is OK for us
-  // Link::Link::SetPathname is OK for us
+  using Link::GetPathname;
+  using Link::SetPathname;
 
-  // Link::Link::GetSearch is OK for us
-  // Link::Link::SetSearch is OK for us
+  using Link::GetSearch;
+  using Link::SetSearch;
 
-  // Link::Link::GetHash is OK for us
-  // Link::Link::SetHash is OK for us
+  using Link::GetHash;
+  using Link::SetHash;
 
   // The Link::GetSearchParams is OK for us
 
@@ -175,9 +178,9 @@ public:
     SetHTMLBoolAttr(nsGkAtoms::nohref, aValue, aError);
   }
 
-  void Stringify(nsAString& aResult)
+  void Stringify(nsAString& aResult, ErrorResult& aError)
   {
-    GetHref(aResult);
+    GetHref(aResult, aError);
   }
 
 protected:
@@ -185,7 +188,9 @@ protected:
 
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  RefPtr<nsDOMTokenList > mRelList;
+  virtual void GetItemValueText(DOMString& text) override;
+  virtual void SetItemValueText(const nsAString& text) override;
+  nsRefPtr<nsDOMTokenList > mRelList;
 };
 
 } // namespace dom

@@ -18,9 +18,12 @@
 
 namespace mozilla {
 
-LogModule* GetICLog()
+PRLogModuleInfo* GetICLog()
 {
-  static LazyLogModule log("ImageCapture");
+  static PRLogModuleInfo* log = nullptr;
+  if (!log) {
+    log = PR_NewLogModule("ImageCapture");
+  }
   return log;
 }
 
@@ -36,7 +39,7 @@ NS_IMPL_ADDREF_INHERITED(ImageCapture, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(ImageCapture, DOMEventTargetHelper)
 
 ImageCapture::ImageCapture(VideoStreamTrack* aVideoStreamTrack,
-                           nsPIDOMWindowInner* aOwnerWindow)
+                           nsPIDOMWindow* aOwnerWindow)
   : DOMEventTargetHelper(aOwnerWindow)
 {
   MOZ_ASSERT(aOwnerWindow);
@@ -55,13 +58,13 @@ ImageCapture::Constructor(const GlobalObject& aGlobal,
                           VideoStreamTrack& aTrack,
                           ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
   if (!win) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  RefPtr<ImageCapture> object = new ImageCapture(&aTrack, win);
+  nsRefPtr<ImageCapture> object = new ImageCapture(&aTrack, win);
 
   return object.forget();
 }
@@ -77,27 +80,27 @@ ImageCapture::TakePhotoByMediaEngine()
 {
   // Callback for TakPhoto(), it also monitor the principal. If principal
   // changes, it returns PHOTO_ERROR with security error.
-  class TakePhotoCallback : public MediaEnginePhotoCallback,
-                            public PrincipalChangeObserver<MediaStreamTrack>
+  class TakePhotoCallback : public MediaEngineSource::PhotoCallback,
+                            public DOMMediaStream::PrincipalChangeObserver
   {
   public:
-    TakePhotoCallback(VideoStreamTrack* aVideoTrack, ImageCapture* aImageCapture)
-      : mVideoTrack(aVideoTrack)
+    TakePhotoCallback(DOMMediaStream* aStream, ImageCapture* aImageCapture)
+      : mStream(aStream)
       , mImageCapture(aImageCapture)
       , mPrincipalChanged(false)
     {
       MOZ_ASSERT(NS_IsMainThread());
-      mVideoTrack->AddPrincipalChangeObserver(this);
+      mStream->AddPrincipalChangeObserver(this);
     }
 
-    void PrincipalChanged(MediaStreamTrack* aMediaStream) override
+    void PrincipalChanged(DOMMediaStream* aMediaStream) override
     {
       mPrincipalChanged = true;
     }
 
     nsresult PhotoComplete(already_AddRefed<Blob> aBlob) override
     {
-      RefPtr<Blob> blob = aBlob;
+      nsRefPtr<Blob> blob = aBlob;
 
       if (mPrincipalChanged) {
         return PhotoError(NS_ERROR_DOM_SECURITY_ERR);
@@ -114,17 +117,25 @@ ImageCapture::TakePhotoByMediaEngine()
     ~TakePhotoCallback()
     {
       MOZ_ASSERT(NS_IsMainThread());
-      mVideoTrack->RemovePrincipalChangeObserver(this);
+      mStream->RemovePrincipalChangeObserver(this);
     }
 
-    RefPtr<VideoStreamTrack> mVideoTrack;
-    RefPtr<ImageCapture> mImageCapture;
+    nsRefPtr<DOMMediaStream> mStream;
+    nsRefPtr<ImageCapture> mImageCapture;
     bool mPrincipalChanged;
   };
 
-  RefPtr<MediaEnginePhotoCallback> callback =
-    new TakePhotoCallback(mVideoStreamTrack, this);
-  return mVideoStreamTrack->GetSource().TakePhoto(callback);
+  nsRefPtr<DOMMediaStream> domStream = mVideoStreamTrack->GetStream();
+  DOMLocalMediaStream* domLocalStream = domStream->AsDOMLocalMediaStream();
+  if (domLocalStream) {
+    nsRefPtr<MediaEngineSource> mediaEngine =
+      domLocalStream->GetMediaEngine(mVideoStreamTrack->GetTrackID());
+    nsRefPtr<MediaEngineSource::PhotoCallback> callback =
+      new TakePhotoCallback(domStream, this);
+    return mediaEngine->TakePhoto(callback);
+  }
+
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 void
@@ -147,12 +158,12 @@ ImageCapture::TakePhoto(ErrorResult& aResult)
   // support TakePhoto().
   if (rv == NS_ERROR_NOT_IMPLEMENTED) {
     IC_LOG("MediaEngine doesn't support TakePhoto(), it falls back to MediaStreamGraph.");
-    RefPtr<CaptureTask> task =
-      new CaptureTask(this);
+    nsRefPtr<CaptureTask> task =
+      new CaptureTask(this, mVideoStreamTrack->GetTrackID());
 
     // It adds itself into MediaStreamGraph, so ImageCapture doesn't need to hold
     // the reference.
-    task->AttachTrack();
+    task->AttachStream();
   }
 }
 
@@ -170,7 +181,7 @@ ImageCapture::PostBlobEvent(Blob* aBlob)
   init.mCancelable = false;
   init.mData = aBlob;
 
-  RefPtr<BlobEvent> blob_event =
+  nsRefPtr<BlobEvent> blob_event =
     BlobEvent::Constructor(this, NS_LITERAL_STRING("photo"), init);
 
   return DispatchTrustedEvent(blob_event);
@@ -192,7 +203,7 @@ ImageCapture::PostErrorEvent(uint16_t aErrorCode, nsresult aReason)
     }
   }
 
-  RefPtr<ImageCaptureError> error =
+  nsRefPtr<ImageCaptureError> error =
     new ImageCaptureError(this, aErrorCode, errorMsg);
 
   ImageCaptureErrorEventInit init;
@@ -211,7 +222,11 @@ ImageCapture::CheckPrincipal()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsCOMPtr<nsIPrincipal> principal = mVideoStreamTrack->GetPrincipal();
+  nsRefPtr<DOMMediaStream> ms = mVideoStreamTrack->GetStream();
+  if (!ms) {
+    return false;
+  }
+  nsCOMPtr<nsIPrincipal> principal = ms->GetPrincipal();
 
   if (!GetOwner()) {
     return false;

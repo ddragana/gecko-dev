@@ -26,12 +26,10 @@ nsApplicationChooser::~nsApplicationChooser()
 }
 
 NS_IMETHODIMP
-nsApplicationChooser::Init(mozIDOMWindowProxy* aParent,
-                           const nsACString& aTitle)
+nsApplicationChooser::Init(nsIDOMWindow* aParent, const nsACString& aTitle)
 {
   NS_ENSURE_TRUE(aParent, NS_ERROR_FAILURE);
-  auto* parent = nsPIDOMWindowOuter::From(aParent);
-  mParentWidget = widget::WidgetUtils::DOMWindowToWidget(parent);
+  mParentWidget = widget::WidgetUtils::DOMWindowToWidget(aParent);
   mWindowTitle.Assign(aTitle);
   return NS_OK;
 }

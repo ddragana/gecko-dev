@@ -1,4 +1,4 @@
-add_task(function * ()
+function test()
 {
   const kPrefName_AutoScroll = "general.autoScroll";
   Services.prefs.setBoolPref(kPrefName_AutoScroll, true);
@@ -21,7 +21,7 @@ add_task(function * ()
   {
     key = aChar;
     dispatchedKeyEvents = kNoKeyEvents;
-    EventUtils.sendChar(key);
+    EventUtils.sendChar(key, gBrowser.contentWindow);
     is(dispatchedKeyEvents, expectedKeyEvents,
        "unexpected key events were dispatched or not dispatched: " + key);
   }
@@ -33,17 +33,17 @@ add_task(function * ()
   {
     key = aKey;
     dispatchedKeyEvents = kNoKeyEvents;
-    EventUtils.sendKey(key);
+    EventUtils.sendKey(key, gBrowser.contentWindow);
     is(dispatchedKeyEvents, expectedKeyEvents,
        "unexpected key events were dispatched or not dispatched: " + key);
   }
 
   function onKey(aEvent)
   {
-//    if (aEvent.target != root && aEvent.target != root.ownerDocument.body) {
-//      ok(false, "unknown target: " + aEvent.target.tagName);
-//      return;
-//    }
+    if (aEvent.target != root && aEvent.target != root.ownerDocument.body) {
+      ok(false, "unknown target: " + aEvent.target.tagName);
+      return;
+    }
 
     var keyFlag;
     switch (aEvent.type) {
@@ -64,57 +64,67 @@ add_task(function * ()
     is(keyFlag, expectedKeyEvents & keyFlag, aEvent.type + " fired: " + key);
   }
 
+  waitForExplicitFinish();
+  gBrowser.selectedBrowser.addEventListener("pageshow", onLoad, false);
   var dataUri = 'data:text/html,<body style="height:10000px;"></body>';
-
-  let loadedPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
   gBrowser.loadURI(dataUri);
-  yield loadedPromise;
 
-  yield SimpleTest.promiseFocus(gBrowser.selectedBrowser);
+  function onLoad() {
+    gBrowser.selectedBrowser.removeEventListener("pageshow", onLoad, false);
+    waitForFocus(onFocus, content);
+  }
 
-  window.addEventListener("keydown", onKey, false);
-  window.addEventListener("keypress", onKey, false);
-  window.addEventListener("keyup", onKey, false);
+  function onFocus() {
+    var doc = gBrowser.contentDocument;
 
-  // Test whether the key events are handled correctly under normal condition
-  expectedKeyEvents = kAllKeyEvents;
-  sendChar("A");
+    root = doc.documentElement;
+    root.addEventListener("keydown", onKey, true);
+    root.addEventListener("keypress", onKey, true);
+    root.addEventListener("keyup", onKey, true);
 
-  // Start autoscrolling by middle button click on the page
-  let shownPromise = BrowserTestUtils.waitForEvent(window, "popupshown", false,
-                       event => event.originalTarget.className == "autoscroller");
-  yield BrowserTestUtils.synthesizeMouseAtPoint(10, 10, { button: 1 },
-                                                gBrowser.selectedBrowser);
-  yield shownPromise;
+    // Test whether the key events are handled correctly under normal condition
+    expectedKeyEvents = kAllKeyEvents;
+    sendChar("A");
 
-  // Most key events should be eaten by the browser.
-  expectedKeyEvents = kNoKeyEvents;
-  sendChar("A");
-  sendKey("DOWN");
-  sendKey("RETURN");
-  sendKey("RETURN");
-  sendKey("HOME");
-  sendKey("END");
-  sendKey("TAB");
-  sendKey("RETURN");
+    // Start autoscrolling by middle button lick on the page
+    EventUtils.synthesizeMouse(root, 10, 10, { button: 1 },
+                               gBrowser.contentWindow);
 
-  // Finish autoscrolling by ESC key.  Note that only keydown and keypress
-  // events are eaten because keyup event is fired *after* the autoscrolling
-  // is finished.
-  expectedKeyEvents = kKeyUpEvent;
-  sendKey("ESCAPE");
+    // Before continuing the test, we need to ensure that the IPC
+    // message that starts autoscrolling has had time to arrive.
+    executeSoon(continueTest);
+  }
 
-  // Test whether the key events are handled correctly under normal condition
-  expectedKeyEvents = kAllKeyEvents;
-  sendChar("A");
+  function continueTest() {
+    // Most key events should be eaten by the browser.
+    expectedKeyEvents = kNoKeyEvents;
+    sendChar("A");
+    sendKey("DOWN");
+    sendKey("RETURN");
+    sendKey("RETURN");
+    sendKey("HOME");
+    sendKey("END");
+    sendKey("TAB");
+    sendKey("RETURN");
 
-  window.removeEventListener("keydown", onKey, false);
-  window.removeEventListener("keypress", onKey, false);
-  window.removeEventListener("keyup", onKey, false);
+    // Finish autoscrolling by ESC key.  Note that only keydown and keypress
+    // events are eaten because keyup event is fired *after* the autoscrolling
+    // is finished.
+    expectedKeyEvents = kKeyUpEvent;
+    sendKey("ESCAPE");
 
-  // restore the changed prefs
-  if (Services.prefs.prefHasUserValue(kPrefName_AutoScroll))
-    Services.prefs.clearUserPref(kPrefName_AutoScroll);
+    // Test whether the key events are handled correctly under normal condition
+    expectedKeyEvents = kAllKeyEvents;
+    sendChar("A");
 
-  finish();
-});
+    root.removeEventListener("keydown", onKey, true);
+    root.removeEventListener("keypress", onKey, true);
+    root.removeEventListener("keyup", onKey, true);
+
+    // restore the changed prefs
+    if (Services.prefs.prefHasUserValue(kPrefName_AutoScroll))
+      Services.prefs.clearUserPref(kPrefName_AutoScroll);
+
+    finish();
+  }
+}

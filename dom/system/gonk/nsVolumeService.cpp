@@ -8,6 +8,7 @@
 #include "VolumeManager.h"
 #include "VolumeServiceIOThread.h"
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDependentSubstring.h"
 #include "nsIDOMWakeLockListener.h"
@@ -28,7 +29,6 @@
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/Services.h"
-#include "base/task.h"
 
 #undef VOLUME_MANAGER_LOG_TAG
 #define VOLUME_MANAGER_LOG_TAG  "nsVolumeService"
@@ -57,7 +57,7 @@ nsVolumeService::GetSingleton()
   if (!sSingleton) {
     sSingleton = new nsVolumeService();
   }
-  RefPtr<nsVolumeService> volumeService = sSingleton.get();
+  nsRefPtr<nsVolumeService> volumeService = sSingleton.get();
   return volumeService.forget();
 }
 
@@ -80,6 +80,7 @@ nsVolumeService::Shutdown()
   }
 
   XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(ShutdownVolumeServiceIOThread));
 
   sSingleton = nullptr;
@@ -100,6 +101,7 @@ nsVolumeService::nsVolumeService()
   // Startup the IOThread side of things. The actual volume changes
   // are captured by the IOThread and forwarded to main thread.
   XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(InitVolumeServiceIOThread, this));
 
   nsCOMPtr<nsIPowerManagerService> pmService =
@@ -134,7 +136,7 @@ void nsVolumeService::DumpNoLock(const char* aLabel)
   }
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
-    RefPtr<nsVolume> vol = mVolumeArray[volIndex];
+    nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     vol->Dump(aLabel);
   }
 }
@@ -151,7 +153,7 @@ NS_IMETHODIMP nsVolumeService::GetVolumeByName(const nsAString& aVolName, nsIVol
 {
   MonitorAutoLock autoLock(mArrayMonitor);
 
-  RefPtr<nsVolume> vol = FindVolumeByName(aVolName);
+  nsRefPtr<nsVolume> vol = FindVolumeByName(aVolName);
   if (!vol) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -198,7 +200,7 @@ nsVolumeService::GetVolumeByPath(const nsAString& aPath, nsIVolume **aResult)
   nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
-    RefPtr<nsVolume> vol = mVolumeArray[volIndex];
+    nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     NS_ConvertUTF16toUTF8 volMountPointSlash(vol->MountPoint());
     volMountPointSlash.Append('/');
     nsDependentCSubstring testStr(realPathBuf, volMountPointSlash.Length());
@@ -250,7 +252,7 @@ nsVolumeService::GetVolumeNames(nsIArray** aVolNames)
   nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
-    RefPtr<nsVolume> vol = mVolumeArray[volIndex];
+    nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     nsCOMPtr<nsISupportsString> isupportsString =
       do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -277,7 +279,7 @@ nsVolumeService::GetVolumesForIPC(nsTArray<VolumeInfo>* aResult)
   nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
-    RefPtr<nsVolume> vol = mVolumeArray[volIndex];
+    nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     VolumeInfo* volInfo = aResult->AppendElement();
 
     volInfo->name()             = vol->mName;
@@ -308,7 +310,7 @@ nsVolumeService::RecvVolumesFromParent(const nsTArray<VolumeInfo>& aVolumes)
 
   for (uint32_t i = 0; i < aVolumes.Length(); i++) {
     const VolumeInfo& volInfo(aVolumes[i]);
-    RefPtr<nsVolume> vol = new nsVolume(volInfo.name(),
+    nsRefPtr<nsVolume> vol = new nsVolume(volInfo.name(),
                                           volInfo.mountPoint(),
                                           volInfo.volState(),
                                           volInfo.mountGeneration(),
@@ -341,7 +343,7 @@ nsVolumeService::CheckMountLock(const nsAString& aMountLockName,
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<nsVolume> vol = FindVolumeByMountLockName(aMountLockName);
+  nsRefPtr<nsVolume> vol = FindVolumeByMountLockName(aMountLockName);
   if (vol) {
     vol->UpdateMountLock(aMountLockState);
   }
@@ -355,7 +357,7 @@ nsVolumeService::FindVolumeByMountLockName(const nsAString& aMountLockName)
   nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
-    RefPtr<nsVolume> vol = mVolumeArray[volIndex];
+    nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     nsString mountLockName;
     vol->GetMountLockName(mountLockName);
     if (mountLockName.Equals(aMountLockName)) {
@@ -366,43 +368,60 @@ nsVolumeService::FindVolumeByMountLockName(const nsAString& aMountLockName)
 }
 
 already_AddRefed<nsVolume>
-nsVolumeService::FindVolumeByName(const nsAString& aName, nsVolume::Array::index_type* aIndex)
+nsVolumeService::FindVolumeByName(const nsAString& aName)
 {
   mArrayMonitor.AssertCurrentThreadOwns();
 
   nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
-    RefPtr<nsVolume> vol = mVolumeArray[volIndex];
+    nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     if (vol->Name().Equals(aName)) {
-      if (aIndex) {
-        *aIndex = volIndex;
-      }
       return vol.forget();
     }
   }
   return nullptr;
 }
 
+//static
+already_AddRefed<nsVolume>
+nsVolumeService::CreateOrFindVolumeByName(const nsAString& aName, bool aIsFake /*= false*/)
+{
+  MonitorAutoLock autoLock(mArrayMonitor);
+
+  nsRefPtr<nsVolume> vol;
+  vol = FindVolumeByName(aName);
+  if (vol) {
+    return vol.forget();
+  }
+  // Volume not found - add a new one
+  vol = new nsVolume(aName);
+  vol->SetIsFake(aIsFake);
+  mVolumeArray.AppendElement(vol);
+  return vol.forget();
+}
+
 void
-nsVolumeService::UpdateVolume(nsVolume* aVolume, bool aNotifyObservers)
+nsVolumeService::UpdateVolume(nsIVolume* aVolume, bool aNotifyObservers)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  {
-    MonitorAutoLock autoLock(mArrayMonitor);
-    nsVolume::Array::index_type volIndex;
-    RefPtr<nsVolume> vol = FindVolumeByName(aVolume->Name(), &volIndex);
-    if (!vol) {
-      mVolumeArray.AppendElement(aVolume);
-    } else if (vol->Equals(aVolume) || (!vol->IsFake() && aVolume->IsFake())) {
-      // Ignore if nothing changed or if a fake tries to override a real volume.
-      return;
-    } else {
-      mVolumeArray.ReplaceElementAt(volIndex, aVolume);
-    }
-    aVolume->UpdateMountLock(vol);
+  nsString volName;
+  aVolume->GetName(volName);
+  bool aIsFake;
+  aVolume->GetIsFake(&aIsFake);
+  nsRefPtr<nsVolume> vol = CreateOrFindVolumeByName(volName, aIsFake);
+  if (vol->Equals(aVolume)) {
+    // Nothing has really changed. Don't bother telling anybody.
+    return;
   }
+
+  if (!vol->IsFake() && aIsFake) {
+    // Prevent an incoming fake volume from overriding an existing real volume.
+    return;
+  }
+
+  vol->Set(aVolume);
 
   if (!aNotifyObservers) {
     return;
@@ -412,15 +431,15 @@ nsVolumeService::UpdateVolume(nsVolume* aVolume, bool aNotifyObservers)
   if (!obs) {
     return;
   }
-  NS_ConvertUTF8toUTF16 stateStr(aVolume->StateStr());
-  obs->NotifyObservers(aVolume, NS_VOLUME_STATE_CHANGED, stateStr.get());
+  NS_ConvertUTF8toUTF16 stateStr(vol->StateStr());
+  obs->NotifyObservers(vol, NS_VOLUME_STATE_CHANGED, stateStr.get());
 }
 
 NS_IMETHODIMP
 nsVolumeService::CreateFakeVolume(const nsAString& name, const nsAString& path)
 {
   if (XRE_IsParentProcess()) {
-    RefPtr<nsVolume> vol = new nsVolume(name, path, nsIVolume::STATE_INIT,
+    nsRefPtr<nsVolume> vol = new nsVolume(name, path, nsIVolume::STATE_INIT,
                                           -1    /* mountGeneration */,
                                           true  /* isMediaPresent */,
                                           false /* isSharing */,
@@ -443,7 +462,7 @@ NS_IMETHODIMP
 nsVolumeService::SetFakeVolumeState(const nsAString& name, int32_t state)
 {
   if (XRE_IsParentProcess()) {
-    RefPtr<nsVolume> vol;
+    nsRefPtr<nsVolume> vol;
     {
       MonitorAutoLock autoLock(mArrayMonitor);
       vol = FindVolumeByName(name);
@@ -452,8 +471,11 @@ nsVolumeService::SetFakeVolumeState(const nsAString& name, int32_t state)
       return NS_ERROR_NOT_AVAILABLE;
     }
 
-    // Clone the existing volume so we can replace it
-    RefPtr<nsVolume> volume = new nsVolume(vol);
+    // UpdateVolume expects the volume passed in to NOT be the
+    // same pointer as what CreateOrFindVolumeByName would return,
+    // which is why we allocate a temporary volume here.
+    nsRefPtr<nsVolume> volume = new nsVolume(name);
+    volume->Set(vol);
     volume->SetState(state);
     volume->LogState();
     UpdateVolume(volume.get());
@@ -480,15 +502,15 @@ nsVolumeService::RemoveFakeVolume(const nsAString& name)
 void
 nsVolumeService::RemoveVolumeByName(const nsAString& aName)
 {
+  nsRefPtr<nsVolume> vol;
   {
     MonitorAutoLock autoLock(mArrayMonitor);
-    nsVolume::Array::index_type volIndex;
-    RefPtr<nsVolume> vol = FindVolumeByName(aName, &volIndex);
-    if (!vol) {
-      return;
-    }
-    mVolumeArray.RemoveElementAt(volIndex);
+    vol = FindVolumeByName(aName);
   }
+  if (!vol) {
+    return;
+  }
+  mVolumeArray.RemoveElement(vol);
 
   if (XRE_IsParentProcess()) {
     nsCOMPtr<nsIObserverService> obs = GetObserverService();
@@ -503,7 +525,7 @@ nsVolumeService::RemoveVolumeByName(const nsAString& aName)
 * The UpdateVolumeRunnable creates an nsVolume and updates the main thread
 * data structure while running on the main thread.
 */
-class UpdateVolumeRunnable : public Runnable
+class UpdateVolumeRunnable : public nsRunnable
 {
 public:
   UpdateVolumeRunnable(nsVolumeService* aVolumeService, const Volume* aVolume)
@@ -531,8 +553,8 @@ public:
   }
 
 private:
-  RefPtr<nsVolumeService> mVolumeService;
-  RefPtr<nsVolume>        mVolume;
+  nsRefPtr<nsVolumeService> mVolumeService;
+  nsRefPtr<nsVolume>        mVolume;
 };
 
 void

@@ -79,9 +79,7 @@ public:
   void
   FinalizeStatements()
   {
-    for (auto iter = mCachedStatements.Iter(); !iter.Done(); iter.Next()) {
-      (void)iter.Data()->Finalize();
-    }
+    (void)mCachedStatements.Enumerate(FinalizeCachedStatements, nullptr);
 
     // Clear the cache at this time too!
     (void)mCachedStatements.Clear();
@@ -91,6 +89,15 @@ private:
   inline
   already_AddRefed<StatementType>
   CreateStatement(const nsACString& aQuery);
+  static
+  PLDHashOperator
+  FinalizeCachedStatements(const nsACString& aKey,
+                           nsCOMPtr<StatementType>& aStatement,
+                           void*)
+  {
+    (void)aStatement->Finalize();
+    return PL_DHASH_NEXT;
+  }
 
   nsInterfaceHashtable<nsCStringHashKey, StatementType> mCachedStatements;
   nsCOMPtr<mozIStorageConnection>& mConnection;

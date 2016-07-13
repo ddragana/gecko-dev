@@ -10,9 +10,7 @@
 #ifndef WEBRTC_VIDEO_ENGINE_TEST_COMMON_FRAME_GENERATOR_CAPTURER_H_
 #define WEBRTC_VIDEO_ENGINE_TEST_COMMON_FRAME_GENERATOR_CAPTURER_H_
 
-#include <string>
-
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/test/video_capturer.h"
 #include "webrtc/typedefs.h"
 
@@ -35,35 +33,34 @@ class FrameGeneratorCapturer : public VideoCapturer {
                                         Clock* clock);
 
   static FrameGeneratorCapturer* CreateFromYuvFile(VideoSendStreamInput* input,
-                                                   const std::string& file_name,
+                                                   const char* file_name,
                                                    size_t width,
                                                    size_t height,
                                                    int target_fps,
                                                    Clock* clock);
   virtual ~FrameGeneratorCapturer();
 
-  void Start() override;
-  void Stop() override;
+  virtual void Start() OVERRIDE;
+  virtual void Stop() OVERRIDE;
 
   int64_t first_frame_capture_time() const { return first_frame_capture_time_; }
 
+ private:
   FrameGeneratorCapturer(Clock* clock,
                          VideoSendStreamInput* input,
                          FrameGenerator* frame_generator,
                          int target_fps);
   bool Init();
-
- private:
   void InsertFrame();
   static bool Run(void* obj);
 
   Clock* const clock_;
   bool sending_;
 
-  rtc::scoped_ptr<EventWrapper> tick_;
-  rtc::scoped_ptr<CriticalSectionWrapper> lock_;
-  rtc::scoped_ptr<ThreadWrapper> thread_;
-  rtc::scoped_ptr<FrameGenerator> frame_generator_;
+  scoped_ptr<EventWrapper> tick_;
+  scoped_ptr<CriticalSectionWrapper> lock_;
+  scoped_ptr<ThreadWrapper> thread_;
+  scoped_ptr<FrameGenerator> frame_generator_;
 
   int target_fps_;
 

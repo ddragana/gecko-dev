@@ -1,3 +1,5 @@
+var test = `
+
 class base {
     constructor() { }
     test() {
@@ -8,7 +10,7 @@ class base {
 let standin = { test() { return true; } };
 
 class derived extends base {
-    constructor() { super(); }
+    constructor() { }
     test() {
         assertEq(super.test(), false);
         Object.setPrototypeOf(derived.prototype, standin);
@@ -17,6 +19,11 @@ class derived extends base {
 }
 
 new derived().test();
+
+`;
+
+if (classesEnabled())
+    eval(test);
 
 if (typeof reportCompare === 'function')
     reportCompare(0,0,"OK");

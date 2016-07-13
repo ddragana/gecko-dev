@@ -7,6 +7,13 @@
 #include <windows.h>
 #endif
 
+template<>
+struct RunnableMethodTraits<mozilla::_ipdltest::TestUrgencyParent>
+{
+    static void RetainCallee(mozilla::_ipdltest::TestUrgencyParent* obj) { }
+    static void ReleaseCallee(mozilla::_ipdltest::TestUrgencyParent* obj) { }
+};
+
 namespace mozilla {
 namespace _ipdltest {
 

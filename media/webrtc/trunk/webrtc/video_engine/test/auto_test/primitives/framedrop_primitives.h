@@ -222,20 +222,14 @@ class FrameDropMonitoringRemoteFileRenderer : public ViEToFileRenderer {
   virtual ~FrameDropMonitoringRemoteFileRenderer() {}
 
   // Implementation of ExternalRenderer:
-  int FrameSizeChange(unsigned int width,
-                      unsigned int height,
-                      unsigned int number_of_streams) override;
-  int DeliverFrame(unsigned char* buffer,
-                   size_t buffer_size,
+  int FrameSizeChange(unsigned int width, unsigned int height,
+                      unsigned int number_of_streams) OVERRIDE;
+  int DeliverFrame(unsigned char* buffer, int buffer_size,
                    uint32_t time_stamp,
                    int64_t ntp_time_ms,
                    int64_t render_time,
-                   void* handle) override;
-  int DeliverI420Frame(const webrtc::I420VideoFrame& webrtc_frame) override;
-
+                   void* handle) OVERRIDE;
  private:
-  void ReportFrameStats(uint32_t time_stamp, int64_t render_time);
-
   FrameDropDetector* frame_drop_detector_;
 };
 

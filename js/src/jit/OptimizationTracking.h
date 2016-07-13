@@ -75,8 +75,8 @@ class OptimizationTypeInfo
         types_(alloc)
     { }
 
-    MOZ_MUST_USE bool trackTypeSet(TemporaryTypeSet* typeSet);
-    MOZ_MUST_USE bool trackType(TypeSet::Type type);
+    bool trackTypeSet(TemporaryTypeSet* typeSet);
+    bool trackType(TypeSet::Type type);
 
     JS::TrackedTypeSite site() const { return site_; }
     MIRType mirType() const { return mirType_; }
@@ -87,8 +87,8 @@ class OptimizationTypeInfo
 
     HashNumber hash() const;
 
-    MOZ_MUST_USE bool writeCompact(JSContext* cx, CompactBufferWriter& writer,
-                                   UniqueTrackedTypes& uniqueTypes) const;
+    bool writeCompact(JSContext* cx, CompactBufferWriter& writer,
+                      UniqueTrackedTypes& uniqueTypes) const;
 };
 
 typedef Vector<OptimizationTypeInfo, 1, JitAllocPolicy> TempOptimizationTypeInfoVector;
@@ -114,9 +114,9 @@ class TrackedOptimizations : public TempObject
         currentAttempt_ = UINT32_MAX;
     }
 
-    MOZ_MUST_USE bool trackTypeInfo(OptimizationTypeInfo&& ty);
+    bool trackTypeInfo(OptimizationTypeInfo&& ty);
 
-    MOZ_MUST_USE bool trackAttempt(JS::TrackedStrategy strategy);
+    bool trackAttempt(JS::TrackedStrategy strategy);
     void amendAttempt(uint32_t index);
     void trackOutcome(JS::TrackedOutcome outcome);
     void trackSuccess();
@@ -174,10 +174,10 @@ class UniqueTrackedOptimizations
         sorted_(cx)
     { }
 
-    MOZ_MUST_USE bool init() { return map_.init(); }
-    MOZ_MUST_USE bool add(const TrackedOptimizations* optimizations);
+    bool init() { return map_.init(); }
+    bool add(const TrackedOptimizations* optimizations);
 
-    MOZ_MUST_USE bool sortByFrequency(JSContext* cx);
+    bool sortByFrequency(JSContext* cx);
     bool sorted() const { return !sorted_.empty(); }
     uint32_t count() const { MOZ_ASSERT(sorted()); return sorted_.length(); }
     const SortedVector& sortedVector() const { MOZ_ASSERT(sorted()); return sorted_; }
@@ -407,10 +407,10 @@ class IonTrackedOptimizationsRegion
                           uint8_t* index);
     static void WriteDelta(CompactBufferWriter& writer, uint32_t startDelta, uint32_t length,
                            uint8_t index);
-    static MOZ_MUST_USE bool WriteRun(CompactBufferWriter& writer,
-                                      const NativeToTrackedOptimizations* start,
-                                      const NativeToTrackedOptimizations* end,
-                                      const UniqueTrackedOptimizations& unique);
+    static bool WriteRun(CompactBufferWriter& writer,
+                         const NativeToTrackedOptimizations* start,
+                         const NativeToTrackedOptimizations* end,
+                         const UniqueTrackedOptimizations& unique);
 };
 
 class IonTrackedOptimizationsAttempts
@@ -560,7 +560,7 @@ typedef IonTrackedOptimizationsOffsetsTable<IonTrackedOptimizationsAttempts>
 typedef IonTrackedOptimizationsOffsetsTable<IonTrackedOptimizationsTypeInfo>
     IonTrackedOptimizationsTypesTable;
 
-MOZ_MUST_USE bool
+bool
 WriteIonTrackedOptimizationsTable(JSContext* cx, CompactBufferWriter& writer,
                                   const NativeToTrackedOptimizations* start,
                                   const NativeToTrackedOptimizations* end,

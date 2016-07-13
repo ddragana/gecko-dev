@@ -64,7 +64,7 @@ typedef enum {
 
 typedef struct hb_blob_t hb_blob_t;
 
-HB_EXTERN hb_blob_t *
+hb_blob_t *
 hb_blob_create (const char        *data,
 		unsigned int       length,
 		hb_memory_mode_t   mode,
@@ -77,21 +77,21 @@ hb_blob_create (const char        *data,
  * modify the parent data as that data may be
  * shared among multiple sub-blobs.
  */
-HB_EXTERN hb_blob_t *
+hb_blob_t *
 hb_blob_create_sub_blob (hb_blob_t    *parent,
 			 unsigned int  offset,
 			 unsigned int  length);
 
-HB_EXTERN hb_blob_t *
+hb_blob_t *
 hb_blob_get_empty (void);
 
-HB_EXTERN hb_blob_t *
+hb_blob_t *
 hb_blob_reference (hb_blob_t *blob);
 
-HB_EXTERN void
+void
 hb_blob_destroy (hb_blob_t *blob);
 
-HB_EXTERN hb_bool_t
+hb_bool_t
 hb_blob_set_user_data (hb_blob_t          *blob,
 		       hb_user_data_key_t *key,
 		       void *              data,
@@ -99,25 +99,25 @@ hb_blob_set_user_data (hb_blob_t          *blob,
 		       hb_bool_t           replace);
 
 
-HB_EXTERN void *
+void *
 hb_blob_get_user_data (hb_blob_t          *blob,
 		       hb_user_data_key_t *key);
 
 
-HB_EXTERN void
+void
 hb_blob_make_immutable (hb_blob_t *blob);
 
-HB_EXTERN hb_bool_t
+hb_bool_t
 hb_blob_is_immutable (hb_blob_t *blob);
 
 
-HB_EXTERN unsigned int
+unsigned int
 hb_blob_get_length (hb_blob_t *blob);
 
-HB_EXTERN const char *
+const char *
 hb_blob_get_data (hb_blob_t *blob, unsigned int *length);
 
-HB_EXTERN char *
+char *
 hb_blob_get_data_writable (hb_blob_t *blob, unsigned int *length);
 
 

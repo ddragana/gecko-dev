@@ -11,15 +11,13 @@
 #include "nsCOMPtr.h"
 #include "nsHashKeys.h"
 #include "nsTHashtable.h"
-#include "Intervals.h"
-#include "mozilla/UniquePtr.h"
 
 class nsIPrincipal;
 
 namespace mozilla {
 // defined in MediaResource.h
 class ChannelMediaResource;
-typedef media::IntervalSet<int64_t> MediaByteRangeSet;
+class MediaByteRange;
 class MediaResource;
 class ReentrantMonitorAutoEnter;
 
@@ -185,9 +183,10 @@ class MediaCache;
  */
 class MediaCacheStream {
 public:
-  // This needs to be a power of two
-  static const int64_t BLOCK_SIZE = 32768;
-
+  enum {
+    // This needs to be a power of two
+    BLOCK_SIZE = 32768
+  };
   enum ReadMode {
     MODE_METADATA,
     MODE_PLAYBACK
@@ -302,7 +301,7 @@ public:
   // cached. Locks the media cache while running, to prevent any ranges
   // growing. The stream should be pinned while this runs and while its results
   // are used, to ensure no data is evicted.
-  nsresult GetCachedRanges(MediaByteRangeSet& aRanges);
+  nsresult GetCachedRanges(nsTArray<MediaByteRange>& aRanges);
 
   // Reads from buffered data only. Will fail if not all data to be read is
   // in the cache. Will not mark blocks as read. Can be called from the main
@@ -426,7 +425,7 @@ private:
   // Used by |NotifyDataEnded| and |FlushPartialBlock|.
   // If |aNotifyAll| is true, this function will wake up readers who may be
   // waiting on the media cache monitor. Called on the main thread only.
-  void FlushPartialBlockInternal(bool aNotify, ReentrantMonitorAutoEnter& aReentrantMonitor);
+  void FlushPartialBlockInternal(bool aNotify);
   // A helper function to do the work of closing the stream. Assumes
   // that the cache monitor is held. Main thread only.
   // aReentrantMonitor is the nsAutoReentrantMonitor wrapper holding the cache monitor.
@@ -511,7 +510,7 @@ private:
   // Use int64_t so that the data is well-aligned.
   // Heap allocate this buffer since the exact power-of-2 will cause allocation
   // slop when combined with the rest of the object members.
-  UniquePtr<int64_t[]> mPartialBlockBuffer;
+  nsAutoArrayPtr<int64_t> mPartialBlockBuffer;
 };
 
 } // namespace mozilla

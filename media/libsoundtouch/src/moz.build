@@ -37,13 +37,10 @@ if CONFIG['INTEL_ARCHITECTURE']:
 if CONFIG['OS_ARCH'] != 'WINNT':
     # GCC/Clang require permissions to be explicitly set for the soundtouch
     # header.
-    CXXFLAGS += ['-include', SRCDIR + '/soundtouch_perms.h']
+    CXXFLAGS += ['-include', 'soundtouch_perms.h']
 else:
     # Windows need alloca renamed to _alloca
     DEFINES['alloca'] = '_alloca'
-
-# We allow warnings for third-party code that can be updated from upstream.
-ALLOW_COMPILER_WARNINGS = True
 
 FINAL_LIBRARY = 'lgpllibs'
 

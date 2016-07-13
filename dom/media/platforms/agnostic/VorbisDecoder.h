@@ -7,8 +7,6 @@
 #define VorbisDecoder_h_
 
 #include "PlatformDecoderModule.h"
-#include "mozilla/Maybe.h"
-#include "AudioConverter.h"
 
 #ifdef MOZ_TREMOR
 #include "tremor/ivorbiscodec.h"
@@ -21,32 +19,29 @@ namespace mozilla {
 class VorbisDataDecoder : public MediaDataDecoder
 {
 public:
-  explicit VorbisDataDecoder(const CreateDecoderParams& aParams);
+  VorbisDataDecoder(const AudioInfo& aConfig,
+                FlushableTaskQueue* aTaskQueue,
+                MediaDataDecoderCallback* aCallback);
   ~VorbisDataDecoder();
 
-  RefPtr<InitPromise> Init() override;
+  nsresult Init() override;
   nsresult Input(MediaRawData* aSample) override;
   nsresult Flush() override;
   nsresult Drain() override;
   nsresult Shutdown() override;
-  const char* GetDescriptionName() const override
-  {
-    return "vorbis audio decoder";
-  }
 
   // Return true if mimetype is Vorbis
   static bool IsVorbis(const nsACString& aMimeType);
-  static const AudioConfig::Channel* VorbisLayout(uint32_t aChannels);
 
 private:
   nsresult DecodeHeader(const unsigned char* aData, size_t aLength);
 
-  void ProcessDecode(MediaRawData* aSample);
-  int DoDecode(MediaRawData* aSample);
-  void ProcessDrain();
+  void Decode (MediaRawData* aSample);
+  int DoDecode (MediaRawData* aSample);
+  void DoDrain ();
 
   const AudioInfo& mInfo;
-  const RefPtr<TaskQueue> mTaskQueue;
+  RefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
 
   // Vorbis decoder state
@@ -57,9 +52,6 @@ private:
 
   int64_t mPacketCount;
   int64_t mFrames;
-  Maybe<int64_t> mLastFrameTime;
-  UniquePtr<AudioConverter> mAudioConverter;
-  Atomic<bool> mIsFlushing;
 };
 
 } // namespace mozilla

@@ -164,25 +164,14 @@ nsMathMLmfracFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 }
 
-
-nsresult
-nsMathMLmfracFrame::AttributeChanged(int32_t  aNameSpaceID,
-                                     nsIAtom* aAttribute,
-                                     int32_t  aModType)
-{
-  if (nsGkAtoms::linethickness_ == aAttribute) {
-    InvalidateFrame();
-  }
-  return
-    nsMathMLContainerFrame::AttributeChanged(aNameSpaceID, aAttribute,
-                                             aModType);
-}
-
 /* virtual */ nsresult
-nsMathMLmfracFrame::MeasureForWidth(DrawTarget* aDrawTarget,
+nsMathMLmfracFrame::MeasureForWidth(nsRenderingContext& aRenderingContext,
                                     nsHTMLReflowMetrics& aDesiredSize)
 {
-  return PlaceInternal(aDrawTarget, false, aDesiredSize, true);
+  return PlaceInternal(aRenderingContext,
+                       false,
+                       aDesiredSize,
+                       true);
 }
 
 nscoord
@@ -196,15 +185,18 @@ nsMathMLmfracFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
 }
 
 /* virtual */ nsresult
-nsMathMLmfracFrame::Place(DrawTarget*          aDrawTarget,
+nsMathMLmfracFrame::Place(nsRenderingContext& aRenderingContext,
                           bool                 aPlaceOrigin,
                           nsHTMLReflowMetrics& aDesiredSize)
 {
-  return PlaceInternal(aDrawTarget, aPlaceOrigin, aDesiredSize, false);
+  return PlaceInternal(aRenderingContext,
+                       aPlaceOrigin,
+                       aDesiredSize,
+                       false);
 }
 
 nsresult
-nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
+nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
                                   bool                 aPlaceOrigin,
                                   nsHTMLReflowMetrics& aDesiredSize,
                                   bool                 aWidthOnly)
@@ -223,7 +215,7 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
     if (aPlaceOrigin) {
       ReportChildCountError();
     }
-    return ReflowError(aDrawTarget, aDesiredSize);
+    return ReflowError(aRenderingContext, aDesiredSize);
   }
   GetReflowAndBoundingMetricsFor(frameNum, sizeNum, bmNum);
   GetReflowAndBoundingMetricsFor(frameDen, sizeDen, bmDen);
@@ -232,8 +224,9 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
   nscoord onePixel = nsPresContext::CSSPixelsToAppUnits(1);
 
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
-  RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
+  nsRefPtr<nsFontMetrics> fm;
+  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
+                                        fontSizeInflation);
 
   nscoord defaultRuleThickness, axisHeight;
   nscoord oneDevPixel = fm->AppUnitsPerDevPixel();
@@ -243,9 +236,9 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       mathFont->GetMathConstant(gfxFontEntry::FractionRuleThickness,
                                 oneDevPixel);
   } else {
-    GetRuleThickness(aDrawTarget, fm, defaultRuleThickness);
+    GetRuleThickness(aRenderingContext, fm, defaultRuleThickness);
   }
-  GetAxisHeight(aDrawTarget, fm, axisHeight);
+  GetAxisHeight(aRenderingContext, fm, axisHeight);
 
   bool outermostEmbellished = false;
   if (mEmbellishData.coreFrame) {
@@ -346,11 +339,6 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
                                     gfxFontEntry::StackGapMin,
                                     oneDevPixel);
       }
-      // Factor in axis height
-      // http://www.mathml-association.org/MathMLinHTML5/S3.html#SS3.SSS2
-      numShift += axisHeight;
-      denShift += axisHeight;
-
       nscoord actualClearance =
         (numShift - bmNum.descent) - (bmDen.ascent - denShift);
       // actualClearance should be >= minClearance
@@ -629,9 +617,8 @@ void nsDisplayMathMLSlash::Paint(nsDisplayListBuilder* aBuilder,
   Rect rect = NSRectToRect(mRect + ToReferenceFrame(),
                            presContext->AppUnitsPerDevPixel());
   
-  nsCSSProperty colorProp = mFrame->StyleContext()->GetTextFillColorProp();
   ColorPattern color(ToDeviceColor(
-                                 mFrame->GetVisitedDependentColor(colorProp)));
+                       mFrame->GetVisitedDependentColor(eCSSProperty_color)));
  
   // draw the slash as a parallelogram 
   Point delta = Point(presContext->AppUnitsToGfxUnits(mThickness), 0);

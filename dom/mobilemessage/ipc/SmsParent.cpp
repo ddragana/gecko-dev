@@ -5,24 +5,21 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SmsParent.h"
-
 #include "nsISmsService.h"
 #include "nsIMmsService.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
-#include "nsISmsMessage.h"
-#include "nsIMmsMessage.h"
+#include "nsIDOMMozSmsMessage.h"
+#include "nsIDOMMozMmsMessage.h"
 #include "mozilla/unused.h"
-#include "SmsMessageInternal.h"
-#include "MmsMessageInternal.h"
+#include "SmsMessage.h"
+#include "MmsMessage.h"
 #include "nsIMobileMessageDatabaseService.h"
-#include "MobileMessageThreadInternal.h"
+#include "MobileMessageThread.h"
 #include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
-#include "mozilla/UniquePtr.h"
 #include "nsContentUtils.h"
 #include "nsTArrayHelpers.h"
 #include "xpcpublic.h"
@@ -56,9 +53,9 @@ MmsAttachmentDataToJSObject(JSContext* aContext,
     return nullptr;
   }
 
-  RefPtr<BlobImpl> blobImpl = static_cast<BlobParent*>(aAttachment.contentParent())->GetBlobImpl();
+  nsRefPtr<BlobImpl> blobImpl = static_cast<BlobParent*>(aAttachment.contentParent())->GetBlobImpl();
 
-  // RefPtr<File> needs to go out of scope before toObjectOrNull() is
+  // nsRefPtr<File> needs to go out of scope before toObjectOrNull() is
   // called because the static analysis thinks dereferencing XPCOM objects
   // can GC (because in some cases it can!), and a return statement with a
   // JSObject* type means that JSObject* is on the stack as a raw pointer
@@ -68,7 +65,7 @@ MmsAttachmentDataToJSObject(JSContext* aContext,
     nsIGlobalObject *global = xpc::NativeGlobal(JS::CurrentGlobalOrNull(aContext));
     MOZ_ASSERT(global);
 
-    RefPtr<Blob> blob = Blob::Create(global, blobImpl);
+    nsRefPtr<Blob> blob = Blob::Create(global, blobImpl);
     if (!ToJSValue(aContext, blob, &content)) {
       return nullptr;
     }
@@ -147,23 +144,23 @@ GetMobileMessageDataFromMessage(ContentParent* aParent,
     return false;
   }
 
-  nsCOMPtr<nsIMmsMessage> mmsMsg = do_QueryInterface(aMsg);
+  nsCOMPtr<nsIDOMMozMmsMessage> mmsMsg = do_QueryInterface(aMsg);
   if (mmsMsg) {
     if (!aParent) {
       NS_ERROR("Invalid ContentParent to convert MMS Message!");
       return false;
     }
     MmsMessageData data;
-    if (!static_cast<MmsMessageInternal*>(mmsMsg.get())->GetData(aParent, data)) {
+    if (!static_cast<MmsMessage*>(mmsMsg.get())->GetData(aParent, data)) {
       return false;
     }
     aData = data;
     return true;
   }
 
-  nsCOMPtr<nsISmsMessage> smsMsg = do_QueryInterface(aMsg);
+  nsCOMPtr<nsIDOMMozSmsMessage> smsMsg = do_QueryInterface(aMsg);
   if (smsMsg) {
-    aData = static_cast<SmsMessageInternal*>(smsMsg.get())->GetData();
+    aData = static_cast<SmsMessage*>(smsMsg.get())->GetData();
     return true;
   }
 
@@ -228,7 +225,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyReceivedMessage(msgData);
+    unused << SendNotifyReceivedMessage(msgData);
     return NS_OK;
   }
 
@@ -239,7 +236,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyRetrievingMessage(msgData);
+    unused << SendNotifyRetrievingMessage(msgData);
     return NS_OK;
   }
 
@@ -250,7 +247,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifySendingMessage(msgData);
+    unused << SendNotifySendingMessage(msgData);
     return NS_OK;
   }
 
@@ -261,7 +258,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifySentMessage(msgData);
+    unused << SendNotifySentMessage(msgData);
     return NS_OK;
   }
 
@@ -272,7 +269,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyFailedMessage(msgData);
+    unused << SendNotifyFailedMessage(msgData);
     return NS_OK;
   }
 
@@ -283,7 +280,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyDeliverySuccessMessage(msgData);
+    unused << SendNotifyDeliverySuccessMessage(msgData);
     return NS_OK;
   }
 
@@ -294,12 +291,12 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyDeliveryErrorMessage(msgData);
+    unused << SendNotifyDeliveryErrorMessage(msgData);
     return NS_OK;
   }
 
   if (!strcmp(aTopic, kSilentSmsReceivedObserverTopic)) {
-    nsCOMPtr<nsISmsMessage> smsMsg = do_QueryInterface(aSubject);
+    nsCOMPtr<nsIDOMMozSmsMessage> smsMsg = do_QueryInterface(aSubject);
     if (!smsMsg) {
       return NS_OK;
     }
@@ -311,8 +308,8 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
     }
 
     MobileMessageData msgData =
-      static_cast<SmsMessageInternal*>(smsMsg.get())->GetData();
-    Unused << SendNotifyReceivedSilentMessage(msgData);
+      static_cast<SmsMessage*>(smsMsg.get())->GetData();
+    unused << SendNotifyReceivedSilentMessage(msgData);
     return NS_OK;
   }
 
@@ -323,7 +320,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyReadSuccessMessage(msgData);
+    unused << SendNotifyReadSuccessMessage(msgData);
     return NS_OK;
   }
 
@@ -334,7 +331,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyReadErrorMessage(msgData);
+    unused << SendNotifyReadErrorMessage(msgData);
     return NS_OK;
   }
 
@@ -345,7 +342,7 @@ SmsParent::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_OK;
     }
 
-    Unused << SendNotifyDeletedMessageInfo(
+    unused << SendNotifyDeletedMessageInfo(
       static_cast<DeletedMessageInfo*>(deletedInfo.get())->GetData());
     return NS_OK;
   }
@@ -764,13 +761,9 @@ SmsRequestParent::NotifyGetSegmentInfoForTextFailed(int32_t aError)
 }
 
 NS_IMETHODIMP
-SmsRequestParent::NotifyGetSmscAddress(const nsAString& aSmscAddress,
-                                       uint32_t aTypeOfNumber,
-                                       uint32_t aNumberPlanIdentification)
+SmsRequestParent::NotifyGetSmscAddress(const nsAString& aSmscAddress)
 {
-  return SendReply(ReplyGetSmscAddress(nsString(aSmscAddress),
-                                       aTypeOfNumber,
-                                       aNumberPlanIdentification));
+  return SendReply(ReplyGetSmscAddress(nsString(aSmscAddress)));
 }
 
 NS_IMETHODIMP
@@ -831,12 +824,12 @@ MobileMessageCursorParent::DoRequest(const CreateMessageCursorRequest& aRequest)
     const SmsFilterData& filter = aRequest.filter();
 
     const nsTArray<nsString>& numbers = filter.numbers();
-    UniquePtr<const char16_t*[]> ptrNumbers;
+    nsAutoArrayPtr<const char16_t*> ptrNumbers;
     uint32_t numbersCount = numbers.Length();
     if (numbersCount) {
       uint32_t index;
 
-      ptrNumbers = MakeUnique<const char16_t*[]>(numbersCount);
+      ptrNumbers = new const char16_t* [numbersCount];
       for (index = 0; index < numbersCount; index++) {
         ptrNumbers[index] = numbers[index].get();
       }
@@ -846,11 +839,10 @@ MobileMessageCursorParent::DoRequest(const CreateMessageCursorRequest& aRequest)
                                         filter.startDate(),
                                         filter.hasEndDate(),
                                         filter.endDate(),
-                                        ptrNumbers.get(), numbersCount,
+                                        ptrNumbers, numbersCount,
                                         filter.delivery(),
                                         filter.hasRead(),
                                         filter.read(),
-                                        filter.hasThreadId(),
                                         filter.threadId(),
                                         aRequest.reverse(),
                                         this,
@@ -909,18 +901,18 @@ MobileMessageCursorParent::NotifyCursorResult(nsISupports** aResults,
   // error here to avoid sending a message to the dead process.
   NS_ENSURE_TRUE(mContinueCallback, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIMobileMessageThread> iThread =
+  nsCOMPtr<nsIDOMMozMobileMessageThread> iThread =
     do_QueryInterface(aResults[0]);
   if (iThread) {
     nsTArray<ThreadData> threads;
 
     for (uint32_t i = 0; i < aSize; i++) {
-      nsCOMPtr<nsIMobileMessageThread> iThread =
+      nsCOMPtr<nsIDOMMozMobileMessageThread> iThread =
         do_QueryInterface(aResults[i]);
       NS_ENSURE_TRUE(iThread, NS_ERROR_FAILURE);
 
-      MobileMessageThreadInternal* thread =
-        static_cast<MobileMessageThreadInternal*>(iThread.get());
+      MobileMessageThread* thread =
+        static_cast<MobileMessageThread*>(iThread.get());
       threads.AppendElement(thread->GetData());
     }
 
@@ -931,20 +923,18 @@ MobileMessageCursorParent::NotifyCursorResult(nsISupports** aResults,
   ContentParent* parent = static_cast<ContentParent*>(Manager()->Manager());
   nsTArray<MobileMessageData> messages;
   for (uint32_t i = 0; i < aSize; i++) {
-    nsCOMPtr<nsISmsMessage> sms = do_QueryInterface(aResults[i]);
-    if (sms) {
-      messages.AppendElement(
-        static_cast<SmsMessageInternal*>(sms.get())->GetData());
+    nsCOMPtr<nsIDOMMozSmsMessage> iSms = do_QueryInterface(aResults[i]);
+    if (iSms) {
+      SmsMessage* sms = static_cast<SmsMessage*>(iSms.get());
+      messages.AppendElement(sms->GetData());
       continue;
     }
 
-    nsCOMPtr<nsIMmsMessage> mms = do_QueryInterface(aResults[i]);
-    if (mms) {
+    nsCOMPtr<nsIDOMMozMmsMessage> iMms = do_QueryInterface(aResults[i]);
+    if (iMms) {
+      MmsMessage* mms = static_cast<MmsMessage*>(iMms.get());
       MmsMessageData mmsData;
-      NS_ENSURE_TRUE(
-        static_cast<MmsMessageInternal*>(mms.get())->GetData(parent, mmsData),
-        NS_ERROR_FAILURE
-      );
+      NS_ENSURE_TRUE(mms->GetData(parent, mmsData), NS_ERROR_FAILURE);
       messages.AppendElement(mmsData);
       continue;
     }

@@ -51,18 +51,16 @@ public:
 
     nsOfflineCacheUpdateItem(nsIURI *aURI,
                              nsIURI *aReferrerURI,
-                             nsIPrincipal* aLoadingPrincipal,
                              nsIApplicationCache *aApplicationCache,
                              nsIApplicationCache *aPreviousApplicationCache,
                              uint32_t aType);
 
-    nsCOMPtr<nsIURI>              mURI;
-    nsCOMPtr<nsIURI>              mReferrerURI;
-    nsCOMPtr<nsIPrincipal>        mLoadingPrincipal;
+    nsCOMPtr<nsIURI>           mURI;
+    nsCOMPtr<nsIURI>           mReferrerURI;
     nsCOMPtr<nsIApplicationCache> mApplicationCache;
     nsCOMPtr<nsIApplicationCache> mPreviousApplicationCache;
-    nsCString                     mCacheKey;
-    uint32_t                      mItemType;
+    nsCString                  mCacheKey;
+    uint32_t                   mItemType;
 
     nsresult OpenChannel(nsOfflineCacheUpdate *aUpdate);
     nsresult Cancel();
@@ -82,7 +80,7 @@ private:
       LOADED = 3U
     };
 
-    RefPtr<nsOfflineCacheUpdate> mUpdate;
+    nsRefPtr<nsOfflineCacheUpdate> mUpdate;
     nsCOMPtr<nsIChannel>           mChannel;
     uint16_t                       mState;
 
@@ -101,7 +99,6 @@ public:
 
     nsOfflineManifestItem(nsIURI *aURI,
                           nsIURI *aReferrerURI,
-                          nsIPrincipal* aLoadingPrincipal,
                           nsIApplicationCache *aApplicationCache,
                           nsIApplicationCache *aPreviousApplicationCache);
     virtual ~nsOfflineManifestItem();
@@ -231,7 +228,7 @@ protected:
     void OnByteProgress(uint64_t byteIncrement);
 
 private:
-    nsresult InitInternal(nsIURI *aManifestURI, nsIPrincipal* aPrincipal);
+    nsresult InitInternal(nsIURI *aManifestURI);
     nsresult HandleManifest(bool *aDoUpdate);
     nsresult AddURI(nsIURI *aURI, uint32_t aItemType);
 
@@ -278,8 +275,10 @@ private:
     nsCString mGroupID;
     nsCOMPtr<nsIURI> mManifestURI;
     nsCOMPtr<nsIURI> mDocumentURI;
-    nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
     nsCOMPtr<nsIFile> mCustomProfileDir;
+
+    uint32_t mAppID;
+    bool mInBrowser;
 
     nsCOMPtr<nsIObserver> mUpdateAvailableObserver;
 
@@ -288,11 +287,11 @@ private:
 
     nsCOMPtr<nsIObserverService> mObserverService;
 
-    RefPtr<nsOfflineManifestItem> mManifestItem;
+    nsRefPtr<nsOfflineManifestItem> mManifestItem;
 
     /* Items being updated */
     uint32_t mItemsInProgress;
-    nsTArray<RefPtr<nsOfflineCacheUpdateItem> > mItems;
+    nsTArray<nsRefPtr<nsOfflineCacheUpdateItem> > mItems;
 
     /* Clients watching this update for changes */
     nsCOMArray<nsIWeakReference> mWeakObservers;
@@ -309,7 +308,7 @@ private:
      * increaded. */
     uint32_t mPinnedEntryRetriesCount;
 
-    RefPtr<nsOfflineCacheUpdate> mImplicitUpdate;
+    nsRefPtr<nsOfflineCacheUpdate> mImplicitUpdate;
 
     bool                           mPinned;
 
@@ -332,16 +331,18 @@ public:
 
     nsresult ScheduleUpdate(nsOfflineCacheUpdate *aUpdate);
     nsresult FindUpdate(nsIURI *aManifestURI,
-                        nsACString const &aOriginSuffix,
+                        uint32_t aAppID,
+                        bool aInBrowser,
                         nsIFile *aCustomProfileDir,
                         nsOfflineCacheUpdate **aUpdate);
 
     nsresult Schedule(nsIURI *aManifestURI,
                       nsIURI *aDocumentURI,
-                      nsIPrincipal* aLoadingPrincipal,
                       nsIDOMDocument *aDocument,
-                      nsPIDOMWindowInner* aWindow,
+                      nsIDOMWindow* aWindow,
                       nsIFile* aCustomProfileDir,
+                      uint32_t aAppID,
+                      bool aInBrowser,
                       nsIOfflineCacheUpdate **aUpdate);
 
     virtual nsresult UpdateFinished(nsOfflineCacheUpdate *aUpdate) override;
@@ -366,7 +367,7 @@ private:
 
     nsresult ProcessNextUpdate();
 
-    nsTArray<RefPtr<nsOfflineCacheUpdate> > mUpdates;
+    nsTArray<nsRefPtr<nsOfflineCacheUpdate> > mUpdates;
     static nsTHashtable<nsCStringHashKey>* mAllowedDomains;
 
     bool mDisabled;

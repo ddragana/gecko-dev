@@ -103,12 +103,13 @@ nsslowcert_LockDB(NSSLOWCERTCertDBHandle *handle)
 static void
 nsslowcert_UnlockDB(NSSLOWCERTCertDBHandle *handle)
 {
-#ifdef DEBUG
-    PRStatus prstat = PZ_ExitMonitor(handle->dbMon);
+    PRStatus prstat;
+    
+    prstat = PZ_ExitMonitor(handle->dbMon);
+    
     PORT_Assert(prstat == PR_SUCCESS);
-#else
-    PZ_ExitMonitor(handle->dbMon);
-#endif
+    
+    return;
 }
 
 
@@ -133,16 +134,15 @@ nsslowcert_LockCertRefCount(NSSLOWCERTCertificate *cert)
 static void
 nsslowcert_UnlockCertRefCount(NSSLOWCERTCertificate *cert)
 {
+    PRStatus prstat;
+
     PORT_Assert(certRefCountLock != NULL);
     
-#ifdef DEBUG
-    {
-        PRStatus prstat = PZ_Unlock(certRefCountLock);
-        PORT_Assert(prstat == PR_SUCCESS);
-    }
-#else
-    PZ_Unlock(certRefCountLock);
-#endif
+    prstat = PZ_Unlock(certRefCountLock);
+    
+    PORT_Assert(prstat == PR_SUCCESS);
+
+    return;
 }
 
 /*
@@ -166,16 +166,15 @@ nsslowcert_LockCertTrust(NSSLOWCERTCertificate *cert)
 static void
 nsslowcert_UnlockCertTrust(NSSLOWCERTCertificate *cert)
 {
+    PRStatus prstat;
+
     PORT_Assert(certTrustLock != NULL);
     
-#ifdef DEBUG
-    {
-        PRStatus prstat = PZ_Unlock(certTrustLock);
-        PORT_Assert(prstat == PR_SUCCESS);
-    }
-#else
-    PZ_Unlock(certTrustLock);
-#endif
+    prstat = PZ_Unlock(certTrustLock);
+    
+    PORT_Assert(prstat == PR_SUCCESS);
+
+    return;
 }
 
 
@@ -200,17 +199,15 @@ nsslowcert_LockFreeList(void)
 static void
 nsslowcert_UnlockFreeList(void)
 {
+    PRStatus prstat = PR_SUCCESS;
+
     PORT_Assert(freeListLock != NULL);
     
-#ifdef DEBUG
-    {
-        PRStatus prstat = PR_SUCCESS;
-        SKIP_AFTER_FORK(prstat = PZ_Unlock(freeListLock));
-        PORT_Assert(prstat == PR_SUCCESS);
-    }
-#else
-    SKIP_AFTER_FORK(PZ_Unlock(freeListLock));
-#endif
+    SKIP_AFTER_FORK(prstat = PZ_Unlock(freeListLock));
+    
+    PORT_Assert(prstat == PR_SUCCESS);
+
+    return;
 }
 
 NSSLOWCERTCertificate *
@@ -227,6 +224,7 @@ nsslowcert_DupCertificate(NSSLOWCERTCertificate *c)
 static int
 certdb_Get(DB *db, DBT *key, DBT *data, unsigned int flags)
 {
+    PRStatus prstat;
     int ret;
     
     PORT_Assert(dbLock != NULL);
@@ -234,7 +232,7 @@ certdb_Get(DB *db, DBT *key, DBT *data, unsigned int flags)
 
     ret = (* db->get)(db, key, data, flags);
 
-    (void)PZ_Unlock(dbLock);
+    prstat = PZ_Unlock(dbLock);
 
     return(ret);
 }
@@ -242,6 +240,7 @@ certdb_Get(DB *db, DBT *key, DBT *data, unsigned int flags)
 static int
 certdb_Put(DB *db, DBT *key, DBT *data, unsigned int flags)
 {
+    PRStatus prstat;
     int ret = 0;
 
     PORT_Assert(dbLock != NULL);
@@ -249,7 +248,7 @@ certdb_Put(DB *db, DBT *key, DBT *data, unsigned int flags)
 
     ret = (* db->put)(db, key, data, flags);
     
-    (void)PZ_Unlock(dbLock);
+    prstat = PZ_Unlock(dbLock);
 
     return(ret);
 }
@@ -257,6 +256,7 @@ certdb_Put(DB *db, DBT *key, DBT *data, unsigned int flags)
 static int
 certdb_Sync(DB *db, unsigned int flags)
 {
+    PRStatus prstat;
     int ret;
 
     PORT_Assert(dbLock != NULL);
@@ -264,7 +264,7 @@ certdb_Sync(DB *db, unsigned int flags)
 
     ret = (* db->sync)(db, flags);
     
-    (void)PZ_Unlock(dbLock);
+    prstat = PZ_Unlock(dbLock);
 
     return(ret);
 }
@@ -273,6 +273,7 @@ certdb_Sync(DB *db, unsigned int flags)
 static int
 certdb_Del(DB *db, DBT *key, unsigned int flags)
 {
+    PRStatus prstat;
     int ret;
 
     PORT_Assert(dbLock != NULL);
@@ -280,7 +281,7 @@ certdb_Del(DB *db, DBT *key, unsigned int flags)
 
     ret = (* db->del)(db, key, flags);
     
-    (void)PZ_Unlock(dbLock);
+    prstat = PZ_Unlock(dbLock);
 
     /* don't fail if the record is already deleted */
     if (ret == DB_NOT_FOUND) {
@@ -293,6 +294,7 @@ certdb_Del(DB *db, DBT *key, unsigned int flags)
 static int
 certdb_Seq(DB *db, DBT *key, DBT *data, unsigned int flags)
 {
+    PRStatus prstat;
     int ret;
     
     PORT_Assert(dbLock != NULL);
@@ -300,7 +302,7 @@ certdb_Seq(DB *db, DBT *key, DBT *data, unsigned int flags)
     
     ret = (* db->seq)(db, key, data, flags);
 
-    (void)PZ_Unlock(dbLock);
+    prstat = PZ_Unlock(dbLock);
 
     return(ret);
 }
@@ -308,12 +310,14 @@ certdb_Seq(DB *db, DBT *key, DBT *data, unsigned int flags)
 static void
 certdb_Close(DB *db)
 {
+    PRStatus prstat = PR_SUCCESS;
+
     PORT_Assert(dbLock != NULL);
     SKIP_AFTER_FORK(PZ_Lock(dbLock));
 
     (* db->close)(db);
     
-    SKIP_AFTER_FORK(PZ_Unlock(dbLock));
+    SKIP_AFTER_FORK(prstat = PZ_Unlock(dbLock));
 
     return;
 }
@@ -2426,6 +2430,7 @@ NewDBSubjectEntry(SECItem *derSubject, SECItem *certKey,
     certDBEntrySubject *entry;
     SECStatus rv;
     unsigned int nnlen;
+    unsigned int eaddrlen;
     
     arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
     if ( arena == NULL ) {
@@ -2475,6 +2480,7 @@ NewDBSubjectEntry(SECItem *derSubject, SECItem *certKey,
 	    goto loser;
 	}
 	
+	eaddrlen = PORT_Strlen(emailAddr) + 1;
 	entry->emailAddrs = (char **)PORT_ArenaAlloc(arena, sizeof(char *));
 	if ( entry->emailAddrs == NULL ) {
 	    PORT_Free(emailAddr);
@@ -2558,10 +2564,8 @@ loser:
 static certDBEntrySubject *
 ReadDBSubjectEntry(NSSLOWCERTCertDBHandle *handle, SECItem *derSubject)
 {
-    /* |arena| isn't function-bounded, so cannot be a PORTCheapArenaPool. */
     PLArenaPool *arena = NULL;
-    PORTCheapArenaPool tmpArena;
-
+    PLArenaPool *tmparena = NULL;
     certDBEntrySubject *entry;
     SECItem dbkey;
     SECItem dbentry;
@@ -2573,8 +2577,12 @@ ReadDBSubjectEntry(NSSLOWCERTCertDBHandle *handle, SECItem *derSubject)
 	goto loser;
     }
 
-    PORT_InitCheapArena(&tmpArena, DER_DEFAULT_CHUNKSIZE);
-
+    tmparena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+    if ( tmparena == NULL ) {
+	PORT_SetError(SEC_ERROR_NO_MEMORY);
+	goto loser;
+    }
+    
     entry = (certDBEntrySubject *)PORT_ArenaAlloc(arena,
 						sizeof(certDBEntrySubject));
     if ( entry == NULL ) {
@@ -2584,12 +2592,12 @@ ReadDBSubjectEntry(NSSLOWCERTCertDBHandle *handle, SECItem *derSubject)
     entry->common.arena = arena;
     entry->common.type = certDBEntryTypeSubject;
 
-    rv = EncodeDBSubjectKey(derSubject, &tmpArena.arena, &dbkey);
+    rv = EncodeDBSubjectKey(derSubject, tmparena, &dbkey);
     if ( rv != SECSuccess ) {
 	goto loser;
     }
     
-    rv = ReadDBEntry(handle, &entry->common, &dbkey, &dbentry, &tmpArena.arena);
+    rv = ReadDBEntry(handle, &entry->common, &dbkey, &dbentry, tmparena);
     if ( rv == SECFailure ) {
 	goto loser;
     }
@@ -2599,11 +2607,13 @@ ReadDBSubjectEntry(NSSLOWCERTCertDBHandle *handle, SECItem *derSubject)
 	goto loser;
     }
     
-    PORT_DestroyCheapArena(&tmpArena);
+    PORT_FreeArena(tmparena, PR_FALSE);
     return(entry);
     
 loser:
-    PORT_DestroyCheapArena(&tmpArena);
+    if ( tmparena ) {
+	PORT_FreeArena(tmparena, PR_FALSE);
+    }
     if ( arena ) {
 	PORT_FreeArena(arena, PR_FALSE);
     }
@@ -2773,11 +2783,9 @@ AddNicknameToSubject(NSSLOWCERTCertDBHandle *dbhandle,
 	goto loser;
     }
 
-    DestroyDBEntry((certDBEntry *)entry);
     return(SECSuccess);
 
 loser:
-    DestroyDBEntry((certDBEntry *)entry);
     return(SECFailure);
 }
 
@@ -3379,10 +3387,13 @@ AddCertToPermDB(NSSLOWCERTCertDBHandle *handle, NSSLOWCERTCertificate *cert,
 loser:
     /* don't leave partial entry in the database */
     if ( state > 0 ) {
-	DeleteDBCertEntry(handle, &cert->certKey);
+	rv = DeleteDBCertEntry(handle, &cert->certKey);
     }
     if ( ( state > 1 ) && donnentry ) {
-	DeleteDBNicknameEntry(handle, nickname);
+	rv = DeleteDBNicknameEntry(handle, nickname);
+    }
+    if ( state > 2 ) {
+	rv = DeleteDBSubjectEntry(handle, &cert->derSubject);
     }
     if ( certEntry ) {
 	DestroyDBEntry((certDBEntry *)certEntry);
@@ -3575,6 +3586,7 @@ UpdateV6DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
     certDBEntrySMime *emailEntry = NULL;
     char *nickname;
     char *emailAddr;
+    SECStatus rv;
     
     /*
      * Sequence through the old database and copy all of the entries
@@ -3649,17 +3661,11 @@ UpdateV6DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
 		    PORT_Free(tmpbuf);
 		    tmpbuf = NULL;
 		}
-		if (ret) {
-		    return SECFailure;
-		}
 	    }
 	}
     } while ( (* updatedb->seq)(updatedb, &key, &data, R_NEXT) == 0 );
 
     ret = certdb_Sync(handle->permCertDB, 0);
-    if (ret) {
-	return SECFailure;
-    }
 
     ret = (* updatedb->seq)(updatedb, &key, &data, R_FIRST);
     if ( ret ) {
@@ -3694,7 +3700,7 @@ UpdateV6DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
 		    if ( subjectEntry->nickname ) {
 			PORT_Memcpy(subjectEntry->nickname, nickname,
 				    key.size - 1);
-			(void)WriteDBSubjectEntry(handle, subjectEntry);
+			rv = WriteDBSubjectEntry(handle, subjectEntry);
 		    }
 		} else if ( type == certDBEntryTypeSMimeProfile ) {
 		    emailAddr = &((char *)key.data)[1];
@@ -3723,7 +3729,7 @@ UpdateV6DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
 			    PORT_Memcpy(subjectEntry->emailAddrs[0], emailAddr,
 				    key.size - 1);
 			    subjectEntry->nemailAddrs = 1;
-			    (void)WriteDBSubjectEntry(handle, subjectEntry);
+			    rv = WriteDBSubjectEntry(handle, subjectEntry);
 			}
 		    }
 		}
@@ -3746,9 +3752,6 @@ endloop:
     } while ( (* updatedb->seq)(updatedb, &key, &data, R_NEXT) == 0 );
 
     ret = certdb_Sync(handle->permCertDB, 0);
-    if (ret) {
-	return SECFailure;
-    }
 
     (* updatedb->close)(updatedb);
     return(SECSuccess);
@@ -3788,13 +3791,14 @@ static SECStatus
 UpdateV5DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
 {
     NSSLOWCERTCertDBHandle updatehandle;
+    SECStatus rv;
     
     updatehandle.permCertDB = updatedb;
     updatehandle.dbMon = PZ_NewMonitor(nssILockCertDB);
     updatehandle.dbVerify = 0;
     updatehandle.ref      = 1; /* prevent premature close */
     
-    (void)nsslowcert_TraversePermCerts(&updatehandle, updateV5Callback,
+    rv = nsslowcert_TraversePermCerts(&updatehandle, updateV5Callback,
 			       (void *)handle);
     
     PZ_DestroyMonitor(updatehandle.dbMon);
@@ -3829,6 +3833,7 @@ UpdateV4DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
     DBT key, data;
     certDBEntryCert *entry, *entry2;
     int ret;
+    PLArenaPool *arena = NULL;
     NSSLOWCERTCertificate *cert;
 
     ret = (* updatedb->seq)(updatedb, &key, &data, R_FIRST);
@@ -3837,6 +3842,11 @@ UpdateV4DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
 	return(SECFailure);
     }
 
+    arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+    if (arena == NULL) {
+	return(SECFailure);
+    }
+    
     do {
 	if ( data.size != 1 ) { /* skip version number */
 
@@ -3863,6 +3873,7 @@ UpdateV4DB(NSSLOWCERTCertDBHandle *handle, DB *updatedb)
 	}
     } while ( (* updatedb->seq)(updatedb, &key, &data, R_NEXT) == 0 );
 
+    PORT_FreeArena(arena, PR_FALSE);
     (* updatedb->close)(updatedb);
     return(SECSuccess);
 }
@@ -4347,10 +4358,6 @@ certcallback(SECItem *dbdata, SECItem *dbkey, certDBEntryType type, void *data)
     }
     
     entry = (certDBEntryCert *)PORT_ArenaAlloc(arena, sizeof(certDBEntryCert));
-    if (!entry) {
-	PORT_SetError(SEC_ERROR_NO_MEMORY);
-	goto loser;
-    }
     mystate = (PermCertCallbackState *)data;
     entry->common.version = (unsigned int)dbdata->data[0];
     entry->common.type = (certDBEntryType)dbdata->data[1];
@@ -5064,6 +5071,7 @@ nsslowcert_FindCrlByKey(NSSLOWCERTCertDBHandle *handle,
 						SECItem *crlKey, PRBool isKRL)
 {
     SECItem keyitem;
+    DBT key;
     SECStatus rv;
     PLArenaPool *arena = NULL;
     certDBEntryRevocation *entry = NULL;
@@ -5080,6 +5088,9 @@ nsslowcert_FindCrlByKey(NSSLOWCERTCertDBHandle *handle,
 	goto loser;
     }
     
+    key.data = keyitem.data;
+    key.size = keyitem.len;
+
     /* find in perm database */
     entry = ReadDBCrlEntry(handle, crlKey, crlType);
 	

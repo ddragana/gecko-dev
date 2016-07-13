@@ -6,95 +6,100 @@
 
 #include "compiler/translator/OutputHLSL.h"
 
+#include "common/angleutils.h"
+#include "common/utilities.h"
+#include "common/blocklayout.h"
+#include "compiler/translator/compilerdebug.h"
+#include "compiler/translator/InfoSink.h"
+#include "compiler/translator/DetectDiscontinuity.h"
+#include "compiler/translator/SearchSymbol.h"
+#include "compiler/translator/UnfoldShortCircuit.h"
+#include "compiler/translator/FlagStd140Structs.h"
+#include "compiler/translator/NodeSearch.h"
+#include "compiler/translator/RewriteElseBlocks.h"
+#include "compiler/translator/UtilsHLSL.h"
+#include "compiler/translator/util.h"
+#include "compiler/translator/UniformHLSL.h"
+#include "compiler/translator/StructureHLSL.h"
+#include "compiler/translator/TranslatorHLSL.h"
+
 #include <algorithm>
 #include <cfloat>
 #include <stdio.h>
 
-#include "common/angleutils.h"
-#include "common/debug.h"
-#include "common/utilities.h"
-#include "compiler/translator/BuiltInFunctionEmulator.h"
-#include "compiler/translator/BuiltInFunctionEmulatorHLSL.h"
-#include "compiler/translator/FlagStd140Structs.h"
-#include "compiler/translator/InfoSink.h"
-#include "compiler/translator/NodeSearch.h"
-#include "compiler/translator/RemoveSwitchFallThrough.h"
-#include "compiler/translator/SearchSymbol.h"
-#include "compiler/translator/StructureHLSL.h"
-#include "compiler/translator/TextureFunctionHLSL.h"
-#include "compiler/translator/TranslatorHLSL.h"
-#include "compiler/translator/UniformHLSL.h"
-#include "compiler/translator/UtilsHLSL.h"
-#include "compiler/translator/blocklayout.h"
-#include "compiler/translator/util.h"
-
-namespace
-{
-
-bool IsSequence(TIntermNode *node)
-{
-    return node->getAsAggregate() != nullptr && node->getAsAggregate()->getOp() == EOpSequence;
-}
-
-void WriteSingleConstant(TInfoSinkBase &out, const TConstantUnion *const constUnion)
-{
-    ASSERT(constUnion != nullptr);
-    switch (constUnion->getType())
-    {
-        case EbtFloat:
-            out << std::min(FLT_MAX, std::max(-FLT_MAX, constUnion->getFConst()));
-            break;
-        case EbtInt:
-            out << constUnion->getIConst();
-            break;
-        case EbtUInt:
-            out << constUnion->getUConst();
-            break;
-        case EbtBool:
-            out << constUnion->getBConst();
-            break;
-        default:
-            UNREACHABLE();
-    }
-}
-
-const TConstantUnion *WriteConstantUnionArray(TInfoSinkBase &out,
-                                              const TConstantUnion *const constUnion,
-                                              const size_t size)
-{
-    const TConstantUnion *constUnionIterated = constUnion;
-    for (size_t i = 0; i < size; i++, constUnionIterated++)
-    {
-        WriteSingleConstant(out, constUnionIterated);
-
-        if (i != size - 1)
-        {
-            out << ", ";
-        }
-    }
-    return constUnionIterated;
-}
-
-} // namespace
-
 namespace sh
 {
 
-OutputHLSL::OutputHLSL(sh::GLenum shaderType, int shaderVersion,
-    const TExtensionBehavior &extensionBehavior,
-    const char *sourcePath, ShShaderOutput outputType,
-    int numRenderTargets, const std::vector<Uniform> &uniforms,
-    int compileOptions)
-    : TIntermTraverser(true, true, true),
-      mShaderType(shaderType),
-      mShaderVersion(shaderVersion),
-      mExtensionBehavior(extensionBehavior),
-      mSourcePath(sourcePath),
-      mOutputType(outputType),
-      mCompileOptions(compileOptions),
-      mNumRenderTargets(numRenderTargets),
-      mCurrentFunctionMetadata(nullptr)
+TString OutputHLSL::TextureFunction::name() const
 {
+    TString name = "gl_texture";
+
+    if (IsSampler2D(sampler))
+    {
+        name += "2D";
+    }
+    else if (IsSampler3D(sampler))
+    {
+        name += "3D";
+    }
+    else if (IsSamplerCube(sampler))
+    {
+        name += "Cube";
+    }
+    else UNREACHABLE();
+
+    if (proj)
+    {
+        name += "Proj";
+    }
+
+    if (offset)
+    {
+        name += "Offset";
+    }
+
+    switch(method)
+    {
+      case IMPLICIT:                  break;
+      case BIAS:                      break;   // Extra parameter makes the signature unique
+      case LOD:      name += "Lod";   break;
+      case LOD0:     name += "Lod0";  break;
+      case LOD0BIAS: name += "Lod0";  break;   // Extra parameter makes the signature unique
+      case SIZE:     name += "Size";  break;
+      case FETCH:    name += "Fetch"; break;
+      case GRAD:     name += "Grad";  break;
+      default: UNREACHABLE();
+    }
+
+    return name + "(";
+}
+
+bool OutputHLSL::TextureFunction::operator<(const TextureFunction &rhs) const
+{
+    if (sampler < rhs.sampler) return true;
+    if (sampler > rhs.sampler) return false;
+
+    if (coords < rhs.coords)   return true;
+    if (coords > rhs.coords)   return false;
+
+    if (!proj && rhs.proj)     return true;
+    if (proj && !rhs.proj)     return false;
+
+    if (!offset && rhs.offset) return true;
+    if (offset && !rhs.offset) return false;
+
+    if (method < rhs.method)   return true;
+    if (method > rhs.method)   return false;
+
+    return false;
+}
+
+OutputHLSL::OutputHLSL(TParseContext &context, TranslatorHLSL *parentTranslator)
+    : TIntermTraverser(true, true, true),
+      mContext(context),
+      mOutputType(parentTranslator->getOutputType())
+{
+    mUnfoldShortCircuit = new UnfoldShortCircuit(context, this);
     mInsideFunction = false;
 
     mUsesFragColor = false;
@@ -104,16 +109,32 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType, int shaderVersion,
     mUsesPointCoord = false;
     mUsesFrontFacing = false;
     mUsesPointSize = false;
-    mUsesInstanceID = false;
-    mUsesVertexID                = false;
     mUsesFragDepth = false;
     mUsesXor = false;
+    mUsesMod1 = false;
+    mUsesMod2v = false;
+    mUsesMod2f = false;
+    mUsesMod3v = false;
+    mUsesMod3f = false;
+    mUsesMod4v = false;
+    mUsesMod4f = false;
+    mUsesFaceforward1 = false;
+    mUsesFaceforward2 = false;
+    mUsesFaceforward3 = false;
+    mUsesFaceforward4 = false;
+    mUsesAtan2_1 = false;
+    mUsesAtan2_2 = false;
+    mUsesAtan2_3 = false;
+    mUsesAtan2_4 = false;
     mUsesDiscardRewriting = false;
     mUsesNestedBreak = false;
-    mRequiresIEEEStrictCompiling = false;
+
+    const ShBuiltInResources &resources = parentTranslator->getResources();
+    mNumRenderTargets = resources.EXT_draw_buffers ? resources.MaxDrawBuffers : 1;
 
     mUniqueIndex = 0;
 
+    mContainsLoopDiscontinuity = false;
     mOutputLod0Function = false;
     mInsideDiscontinuousLoop = false;
     mNestedLoopDepth = 0;
@@ -121,15 +142,20 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType, int shaderVersion,
     mExcessiveLoopIndex = NULL;
 
     mStructureHLSL = new StructureHLSL;
-    mUniformHLSL = new UniformHLSL(mStructureHLSL, outputType, uniforms);
-    mTextureFunctionHLSL = new TextureFunctionHLSL;
+    mUniformHLSL = new UniformHLSL(mStructureHLSL, parentTranslator);
 
-    if (mOutputType == SH_HLSL_3_0_OUTPUT)
+    if (mOutputType == SH_HLSL9_OUTPUT)
     {
-        // Fragment shaders need dx_DepthRange, dx_ViewCoords and dx_DepthFront.
-        // Vertex shaders need a slightly different set: dx_DepthRange, dx_ViewCoords and dx_ViewAdjust.
-        // In both cases total 3 uniform registers need to be reserved.
-        mUniformHLSL->reserveUniformRegisters(3);
+        if (mContext.shaderType == GL_FRAGMENT_SHADER)
+        {
+            // Reserve registers for dx_DepthRange, dx_ViewCoords and dx_DepthFront
+            mUniformHLSL->reserveUniformRegisters(3);
+        }
+        else
+        {
+            // Reserve registers for dx_DepthRange and dx_ViewAdjust
+            mUniformHLSL->reserveUniformRegisters(2);
+        }
     }
 
     // Reserve registers for the default uniform block and driver constants
@@ -138,51 +164,29 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType, int shaderVersion,
 
 OutputHLSL::~OutputHLSL()
 {
+    SafeDelete(mUnfoldShortCircuit);
     SafeDelete(mStructureHLSL);
     SafeDelete(mUniformHLSL);
-    SafeDelete(mTextureFunctionHLSL);
-    for (auto &eqFunction : mStructEqualityFunctions)
-    {
-        SafeDelete(eqFunction);
-    }
-    for (auto &eqFunction : mArrayEqualityFunctions)
-    {
-        SafeDelete(eqFunction);
-    }
 }
 
-void OutputHLSL::output(TIntermNode *treeRoot, TInfoSinkBase &objSink)
+void OutputHLSL::output()
 {
-    const std::vector<TIntermTyped*> &flaggedStructs = FlagStd140ValueStructs(treeRoot);
+    mContainsLoopDiscontinuity = mContext.shaderType == GL_FRAGMENT_SHADER && containsLoopDiscontinuity(mContext.treeRoot);
+    const std::vector<TIntermTyped*> &flaggedStructs = FlagStd140ValueStructs(mContext.treeRoot);
     makeFlaggedStructMaps(flaggedStructs);
 
-    BuiltInFunctionEmulator builtInFunctionEmulator;
-    InitBuiltInFunctionEmulatorForHLSL(&builtInFunctionEmulator);
-    builtInFunctionEmulator.MarkBuiltInFunctionsForEmulation(treeRoot);
+    // Work around D3D9 bug that would manifest in vertex shaders with selection blocks which
+    // use a vertex attribute as a condition, and some related computation in the else block.
+    if (mOutputType == SH_HLSL9_OUTPUT && mContext.shaderType == GL_VERTEX_SHADER)
+    {
+        RewriteElseBlocks(mContext.treeRoot);
+    }
 
-    // Now that we are done changing the AST, do the analyses need for HLSL generation
-    CallDAG::InitResult success = mCallDag.init(treeRoot, &objSink);
-    ASSERT(success == CallDAG::INITDAG_SUCCESS);
-    UNUSED_ASSERTION_VARIABLE(success);
-    mASTMetadataList = CreateASTMetadataHLSL(treeRoot, mCallDag);
+    mContext.treeRoot->traverse(this);   // Output the body first to determine what has to go in the header
+    header();
 
-    // Output the body and footer first to determine what has to go in the header
-    mInfoSinkStack.push(&mBody);
-    treeRoot->traverse(this);
-    mInfoSinkStack.pop();
-
-    mInfoSinkStack.push(&mFooter);
-    mInfoSinkStack.pop();
-
-    mInfoSinkStack.push(&mHeader);
-    header(mHeader, &builtInFunctionEmulator);
-    mInfoSinkStack.pop();
-
-    objSink << mHeader.c_str();
-    objSink << mBody.c_str();
-    objSink << mFooter.c_str();
-
-    builtInFunctionEmulator.Cleanup();
+    mContext.infoSink().obj << mHeader.c_str();
+    mContext.infoSink().obj << mBody.c_str();
 }
 
 void OutputHLSL::makeFlaggedStructMaps(const std::vector<TIntermTyped *> &flaggedStructs)
@@ -191,14 +195,10 @@ void OutputHLSL::makeFlaggedStructMaps(const std::vector<TIntermTyped *> &flagge
     {
         TIntermTyped *flaggedNode = flaggedStructs[structIndex];
 
-        TInfoSinkBase structInfoSink;
-        mInfoSinkStack.push(&structInfoSink);
-
         // This will mark the necessary block elements as referenced
         flaggedNode->traverse(this);
-
-        TString structName(structInfoSink.c_str());
-        mInfoSinkStack.pop();
+        TString structName(mBody.c_str());
+        mBody.erase();
 
         mFlaggedStructOriginalNames[flaggedNode] = structName;
 
@@ -209,6 +209,11 @@ void OutputHLSL::makeFlaggedStructMaps(const std::vector<TIntermTyped *> &flagge
 
         mFlaggedStructMappedNames[flaggedNode] = "map" + structName;
     }
+}
+
+TInfoSinkBase &OutputHLSL::getBodyStream()
+{
+    return mBody;
 }
 
 const std::map<std::string, unsigned int> &OutputHLSL::getInterfaceBlockRegisterMap() const
@@ -270,8 +275,10 @@ TString OutputHLSL::structInitializerString(int indent, const TStructure &struct
     return init;
 }
 
-void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *builtInFunctionEmulator)
+void OutputHLSL::header()
 {
+    TInfoSinkBase &out = mHeader;
+
     TString varyings;
     TString attributes;
     TString flaggedStructs;
@@ -308,33 +315,8 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
 
     out << mStructureHLSL->structsHeader();
 
-    mUniformHLSL->uniformsHeader(out, mOutputType, mReferencedUniforms);
+    out << mUniformHLSL->uniformsHeader(mOutputType, mReferencedUniforms);
     out << mUniformHLSL->interfaceBlocksHeader(mReferencedInterfaceBlocks);
-
-    if (!mEqualityFunctions.empty())
-    {
-        out << "\n// Equality functions\n\n";
-        for (const auto &eqFunction : mEqualityFunctions)
-        {
-            out << eqFunction->functionDefinition << "\n";
-        }
-    }
-    if (!mArrayAssignmentFunctions.empty())
-    {
-        out << "\n// Assignment functions\n\n";
-        for (const auto &assignmentFunction : mArrayAssignmentFunctions)
-        {
-            out << assignmentFunction.functionDefinition << "\n";
-        }
-    }
-    if (!mArrayConstructIntoFunctions.empty())
-    {
-        out << "\n// Array constructor functions\n\n";
-        for (const auto &constructIntoFunction : mArrayConstructIntoFunctions)
-        {
-            out << constructIntoFunction.functionDefinition << "\n";
-        }
-    }
 
     if (mUsesDiscardRewriting)
     {
@@ -346,11 +328,6 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
         out << "#define ANGLE_USES_NESTED_BREAK\n";
     }
 
-    if (mRequiresIEEEStrictCompiling)
-    {
-        out << "#define ANGLE_REQUIRES_IEEE_STRICT_COMPILING\n";
-    }
-
     out << "#ifdef ANGLE_ENABLE_LOOP_FLATTEN\n"
            "#define LOOP [loop]\n"
            "#define FLATTEN [flatten]\n"
@@ -359,16 +336,16 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
            "#define FLATTEN\n"
            "#endif\n";
 
-    if (mShaderType == GL_FRAGMENT_SHADER)
+    if (mContext.shaderType == GL_FRAGMENT_SHADER)
     {
-        TExtensionBehavior::const_iterator iter = mExtensionBehavior.find("GL_EXT_draw_buffers");
-        const bool usingMRTExtension = (iter != mExtensionBehavior.end() && (iter->second == EBhEnable || iter->second == EBhRequire));
+        TExtensionBehavior::const_iterator iter = mContext.extensionBehavior().find("GL_EXT_draw_buffers");
+        const bool usingMRTExtension = (iter != mContext.extensionBehavior().end() && (iter->second == EBhEnable || iter->second == EBhRequire));
 
         out << "// Varyings\n";
         out <<  varyings;
         out << "\n";
 
-        if (mShaderVersion >= 300)
+        if (mContext.getShaderVersion() >= 300)
         {
             for (ReferencedSymbols::const_iterator outputVariableIt = mReferencedOutputVariables.begin(); outputVariableIt != mReferencedOutputVariables.end(); outputVariableIt++)
             {
@@ -431,7 +408,7 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
                    "\n";
         }
 
-        if (mOutputType == SH_HLSL_4_1_OUTPUT || mOutputType == SH_HLSL_4_0_FL9_3_OUTPUT)
+        if (mOutputType == SH_HLSL11_OUTPUT)
         {
             out << "cbuffer DriverConstants : register(b1)\n"
                    "{\n";
@@ -449,18 +426,6 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
             if (mUsesFragCoord || mUsesFrontFacing)
             {
                 out << "    float3 dx_DepthFront : packoffset(c2);\n";
-            }
-
-            if (mUsesFragCoord)
-            {
-                // dx_ViewScale is only used in the fragment shader to correct
-                // the value for glFragCoord if necessary
-                out << "    float2 dx_ViewScale : packoffset(c3);\n";
-            }
-
-            if (mOutputType == SH_HLSL_4_1_OUTPUT)
-            {
-                mUniformHLSL->samplerMetadataUniforms(out, "c4");
             }
 
             out << "};\n";
@@ -526,16 +491,6 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
             out << "static float gl_PointSize = float(1);\n";
         }
 
-        if (mUsesInstanceID)
-        {
-            out << "static int gl_InstanceID;";
-        }
-
-        if (mUsesVertexID)
-        {
-            out << "static int gl_VertexID;";
-        }
-
         out << "\n"
                "// Varyings\n";
         out <<  varyings;
@@ -552,31 +507,16 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
                    "\n";
         }
 
-        if (mOutputType == SH_HLSL_4_1_OUTPUT || mOutputType == SH_HLSL_4_0_FL9_3_OUTPUT)
+        if (mOutputType == SH_HLSL11_OUTPUT)
         {
-            out << "cbuffer DriverConstants : register(b1)\n"
-                    "{\n";
-
             if (mUsesDepthRange)
             {
-                out << "    float3 dx_DepthRange : packoffset(c0);\n";
+                out << "cbuffer DriverConstants : register(b1)\n"
+                       "{\n"
+                       "    float3 dx_DepthRange : packoffset(c0);\n"
+                       "};\n"
+                       "\n";
             }
-
-            // dx_ViewAdjust and dx_ViewCoords will only be used in Feature Level 9
-            // shaders. However, we declare it for all shaders (including Feature Level 10+).
-            // The bytecode is the same whether we declare it or not, since D3DCompiler removes it
-            // if it's unused.
-            out << "    float4 dx_ViewAdjust : packoffset(c1);\n";
-            out << "    float2 dx_ViewCoords : packoffset(c2);\n";
-            out << "    float2 dx_ViewScale  : packoffset(c3);\n";
-
-            if (mOutputType == SH_HLSL_4_1_OUTPUT)
-            {
-                mUniformHLSL->samplerMetadataUniforms(out, "c4");
-            }
-
-            out << "};\n"
-                   "\n";
         }
         else
         {
@@ -585,8 +525,7 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
                 out << "uniform float3 dx_DepthRange : register(c0);\n";
             }
 
-            out << "uniform float4 dx_ViewAdjust : register(c1);\n";
-            out << "uniform float2 dx_ViewCoords : register(c2);\n"
+            out << "uniform float4 dx_ViewAdjust : register(c1);\n"
                    "\n";
         }
 
@@ -605,7 +544,625 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
         }
     }
 
-    mTextureFunctionHLSL->textureFunctionHeader(out, mOutputType);
+    for (TextureFunctionSet::const_iterator textureFunction = mUsesTexture.begin(); textureFunction != mUsesTexture.end(); textureFunction++)
+    {
+        // Return type
+        if (textureFunction->method == TextureFunction::SIZE)
+        {
+            switch(textureFunction->sampler)
+            {
+              case EbtSampler2D:            out << "int2 "; break;
+              case EbtSampler3D:            out << "int3 "; break;
+              case EbtSamplerCube:          out << "int2 "; break;
+              case EbtSampler2DArray:       out << "int3 "; break;
+              case EbtISampler2D:           out << "int2 "; break;
+              case EbtISampler3D:           out << "int3 "; break;
+              case EbtISamplerCube:         out << "int2 "; break;
+              case EbtISampler2DArray:      out << "int3 "; break;
+              case EbtUSampler2D:           out << "int2 "; break;
+              case EbtUSampler3D:           out << "int3 "; break;
+              case EbtUSamplerCube:         out << "int2 "; break;
+              case EbtUSampler2DArray:      out << "int3 "; break;
+              case EbtSampler2DShadow:      out << "int2 "; break;
+              case EbtSamplerCubeShadow:    out << "int2 "; break;
+              case EbtSampler2DArrayShadow: out << "int3 "; break;
+              default: UNREACHABLE();
+            }
+        }
+        else   // Sampling function
+        {
+            switch(textureFunction->sampler)
+            {
+              case EbtSampler2D:            out << "float4 "; break;
+              case EbtSampler3D:            out << "float4 "; break;
+              case EbtSamplerCube:          out << "float4 "; break;
+              case EbtSampler2DArray:       out << "float4 "; break;
+              case EbtISampler2D:           out << "int4 ";   break;
+              case EbtISampler3D:           out << "int4 ";   break;
+              case EbtISamplerCube:         out << "int4 ";   break;
+              case EbtISampler2DArray:      out << "int4 ";   break;
+              case EbtUSampler2D:           out << "uint4 ";  break;
+              case EbtUSampler3D:           out << "uint4 ";  break;
+              case EbtUSamplerCube:         out << "uint4 ";  break;
+              case EbtUSampler2DArray:      out << "uint4 ";  break;
+              case EbtSampler2DShadow:      out << "float ";  break;
+              case EbtSamplerCubeShadow:    out << "float ";  break;
+              case EbtSampler2DArrayShadow: out << "float ";  break;
+              default: UNREACHABLE();
+            }
+        }
+
+        // Function name
+        out << textureFunction->name();
+
+        // Argument list
+        int hlslCoords = 4;
+
+        if (mOutputType == SH_HLSL9_OUTPUT)
+        {
+            switch(textureFunction->sampler)
+            {
+              case EbtSampler2D:   out << "sampler2D s";   hlslCoords = 2; break;
+              case EbtSamplerCube: out << "samplerCUBE s"; hlslCoords = 3; break;
+              default: UNREACHABLE();
+            }
+
+            switch(textureFunction->method)
+            {
+              case TextureFunction::IMPLICIT:                 break;
+              case TextureFunction::BIAS:     hlslCoords = 4; break;
+              case TextureFunction::LOD:      hlslCoords = 4; break;
+              case TextureFunction::LOD0:     hlslCoords = 4; break;
+              case TextureFunction::LOD0BIAS: hlslCoords = 4; break;
+              default: UNREACHABLE();
+            }
+        }
+        else if (mOutputType == SH_HLSL11_OUTPUT)
+        {
+            switch(textureFunction->sampler)
+            {
+              case EbtSampler2D:            out << "Texture2D x, SamplerState s";                hlslCoords = 2; break;
+              case EbtSampler3D:            out << "Texture3D x, SamplerState s";                hlslCoords = 3; break;
+              case EbtSamplerCube:          out << "TextureCube x, SamplerState s";              hlslCoords = 3; break;
+              case EbtSampler2DArray:       out << "Texture2DArray x, SamplerState s";           hlslCoords = 3; break;
+              case EbtISampler2D:           out << "Texture2D<int4> x, SamplerState s";          hlslCoords = 2; break;
+              case EbtISampler3D:           out << "Texture3D<int4> x, SamplerState s";          hlslCoords = 3; break;
+              case EbtISamplerCube:         out << "Texture2DArray<int4> x, SamplerState s";     hlslCoords = 3; break;
+              case EbtISampler2DArray:      out << "Texture2DArray<int4> x, SamplerState s";     hlslCoords = 3; break;
+              case EbtUSampler2D:           out << "Texture2D<uint4> x, SamplerState s";         hlslCoords = 2; break;
+              case EbtUSampler3D:           out << "Texture3D<uint4> x, SamplerState s";         hlslCoords = 3; break;
+              case EbtUSamplerCube:         out << "Texture2DArray<uint4> x, SamplerState s";    hlslCoords = 3; break;
+              case EbtUSampler2DArray:      out << "Texture2DArray<uint4> x, SamplerState s";    hlslCoords = 3; break;
+              case EbtSampler2DShadow:      out << "Texture2D x, SamplerComparisonState s";      hlslCoords = 2; break;
+              case EbtSamplerCubeShadow:    out << "TextureCube x, SamplerComparisonState s";    hlslCoords = 3; break;
+              case EbtSampler2DArrayShadow: out << "Texture2DArray x, SamplerComparisonState s"; hlslCoords = 3; break;
+              default: UNREACHABLE();
+            }
+        }
+        else UNREACHABLE();
+
+        if (textureFunction->method == TextureFunction::FETCH)   // Integer coordinates
+        {
+            switch(textureFunction->coords)
+            {
+              case 2: out << ", int2 t"; break;
+              case 3: out << ", int3 t"; break;
+              default: UNREACHABLE();
+            }
+        }
+        else   // Floating-point coordinates (except textureSize)
+        {
+            switch(textureFunction->coords)
+            {
+              case 1: out << ", int lod";  break;   // textureSize()
+              case 2: out << ", float2 t"; break;
+              case 3: out << ", float3 t"; break;
+              case 4: out << ", float4 t"; break;
+              default: UNREACHABLE();
+            }
+        }
+
+        if (textureFunction->method == TextureFunction::GRAD)
+        {
+            switch(textureFunction->sampler)
+            {
+              case EbtSampler2D:
+              case EbtISampler2D:
+              case EbtUSampler2D:
+              case EbtSampler2DArray:
+              case EbtISampler2DArray:
+              case EbtUSampler2DArray:
+              case EbtSampler2DShadow:
+              case EbtSampler2DArrayShadow:
+                out << ", float2 ddx, float2 ddy";
+                break;
+              case EbtSampler3D:
+              case EbtISampler3D:
+              case EbtUSampler3D:
+              case EbtSamplerCube:
+              case EbtISamplerCube:
+              case EbtUSamplerCube:
+              case EbtSamplerCubeShadow:
+                out << ", float3 ddx, float3 ddy";
+                break;
+              default: UNREACHABLE();
+            }
+        }
+
+        switch(textureFunction->method)
+        {
+          case TextureFunction::IMPLICIT:                        break;
+          case TextureFunction::BIAS:                            break;   // Comes after the offset parameter
+          case TextureFunction::LOD:      out << ", float lod";  break;
+          case TextureFunction::LOD0:                            break;
+          case TextureFunction::LOD0BIAS:                        break;   // Comes after the offset parameter
+          case TextureFunction::SIZE:                            break;
+          case TextureFunction::FETCH:    out << ", int mip";    break;
+          case TextureFunction::GRAD:                            break;
+          default: UNREACHABLE();
+        }
+
+        if (textureFunction->offset)
+        {
+            switch(textureFunction->sampler)
+            {
+              case EbtSampler2D:            out << ", int2 offset"; break;
+              case EbtSampler3D:            out << ", int3 offset"; break;
+              case EbtSampler2DArray:       out << ", int2 offset"; break;
+              case EbtISampler2D:           out << ", int2 offset"; break;
+              case EbtISampler3D:           out << ", int3 offset"; break;
+              case EbtISampler2DArray:      out << ", int2 offset"; break;
+              case EbtUSampler2D:           out << ", int2 offset"; break;
+              case EbtUSampler3D:           out << ", int3 offset"; break;
+              case EbtUSampler2DArray:      out << ", int2 offset"; break;
+              case EbtSampler2DShadow:      out << ", int2 offset"; break;
+              case EbtSampler2DArrayShadow: out << ", int2 offset"; break;
+              default: UNREACHABLE();
+            }
+        }
+
+        if (textureFunction->method == TextureFunction::BIAS ||
+            textureFunction->method == TextureFunction::LOD0BIAS)
+        {
+            out << ", float bias";
+        }
+
+        out << ")\n"
+               "{\n";
+
+        if (textureFunction->method == TextureFunction::SIZE)
+        {
+            if (IsSampler2D(textureFunction->sampler) || IsSamplerCube(textureFunction->sampler))
+            {
+                if (IsSamplerArray(textureFunction->sampler))
+                {
+                    out << "    uint width; uint height; uint layers; uint numberOfLevels;\n"
+                           "    x.GetDimensions(lod, width, height, layers, numberOfLevels);\n";
+                }
+                else
+                {
+                    out << "    uint width; uint height; uint numberOfLevels;\n"
+                           "    x.GetDimensions(lod, width, height, numberOfLevels);\n";
+                }
+            }
+            else if (IsSampler3D(textureFunction->sampler))
+            {
+                out << "    uint width; uint height; uint depth; uint numberOfLevels;\n"
+                       "    x.GetDimensions(lod, width, height, depth, numberOfLevels);\n";
+            }
+            else UNREACHABLE();
+
+            switch(textureFunction->sampler)
+            {
+              case EbtSampler2D:            out << "    return int2(width, height);";         break;
+              case EbtSampler3D:            out << "    return int3(width, height, depth);";  break;
+              case EbtSamplerCube:          out << "    return int2(width, height);";         break;
+              case EbtSampler2DArray:       out << "    return int3(width, height, layers);"; break;
+              case EbtISampler2D:           out << "    return int2(width, height);";         break;
+              case EbtISampler3D:           out << "    return int3(width, height, depth);";  break;
+              case EbtISamplerCube:         out << "    return int2(width, height);";         break;
+              case EbtISampler2DArray:      out << "    return int3(width, height, layers);"; break;
+              case EbtUSampler2D:           out << "    return int2(width, height);";         break;
+              case EbtUSampler3D:           out << "    return int3(width, height, depth);";  break;
+              case EbtUSamplerCube:         out << "    return int2(width, height);";         break;
+              case EbtUSampler2DArray:      out << "    return int3(width, height, layers);"; break;
+              case EbtSampler2DShadow:      out << "    return int2(width, height);";         break;
+              case EbtSamplerCubeShadow:    out << "    return int2(width, height);";         break;
+              case EbtSampler2DArrayShadow: out << "    return int3(width, height, layers);"; break;
+              default: UNREACHABLE();
+            }
+        }
+        else
+        {
+            if (IsIntegerSampler(textureFunction->sampler) && IsSamplerCube(textureFunction->sampler))
+            {
+                out << "    float width; float height; float layers; float levels;\n";
+
+                out << "    uint mip = 0;\n";
+
+                out << "    x.GetDimensions(mip, width, height, layers, levels);\n";
+
+                out << "    bool xMajor = abs(t.x) > abs(t.y) && abs(t.x) > abs(t.z);\n";
+                out << "    bool yMajor = abs(t.y) > abs(t.z) && abs(t.y) > abs(t.x);\n";
+                out << "    bool zMajor = abs(t.z) > abs(t.x) && abs(t.z) > abs(t.y);\n";
+                out << "    bool negative = (xMajor && t.x < 0.0f) || (yMajor && t.y < 0.0f) || (zMajor && t.z < 0.0f);\n";
+
+                // FACE_POSITIVE_X = 000b
+                // FACE_NEGATIVE_X = 001b
+                // FACE_POSITIVE_Y = 010b
+                // FACE_NEGATIVE_Y = 011b
+                // FACE_POSITIVE_Z = 100b
+                // FACE_NEGATIVE_Z = 101b
+                out << "    int face = (int)negative + (int)yMajor * 2 + (int)zMajor * 4;\n";
+
+                out << "    float u = xMajor ? -t.z : (yMajor && t.y < 0.0f ? -t.x : t.x);\n";
+                out << "    float v = yMajor ? t.z : (negative ? t.y : -t.y);\n";
+                out << "    float m = xMajor ? t.x : (yMajor ? t.y : t.z);\n";
+
+                out << "    t.x = (u * 0.5f / m) + 0.5f;\n";
+                out << "    t.y = (v * 0.5f / m) + 0.5f;\n";
+            }
+            else if (IsIntegerSampler(textureFunction->sampler) &&
+                     textureFunction->method != TextureFunction::FETCH)
+            {
+                if (IsSampler2D(textureFunction->sampler))
+                {
+                    if (IsSamplerArray(textureFunction->sampler))
+                    {
+                        out << "    float width; float height; float layers; float levels;\n";
+
+                        if (textureFunction->method == TextureFunction::LOD0)
+                        {
+                            out << "    uint mip = 0;\n";
+                        }
+                        else if (textureFunction->method == TextureFunction::LOD0BIAS)
+                        {
+                            out << "    uint mip = bias;\n";
+                        }
+                        else
+                        {
+                            if (textureFunction->method == TextureFunction::IMPLICIT ||
+                                textureFunction->method == TextureFunction::BIAS)
+                            {
+                                out << "    x.GetDimensions(0, width, height, layers, levels);\n"
+                                       "    float2 tSized = float2(t.x * width, t.y * height);\n"
+                                       "    float dx = length(ddx(tSized));\n"
+                                       "    float dy = length(ddy(tSized));\n"
+                                       "    float lod = log2(max(dx, dy));\n";
+
+                                if (textureFunction->method == TextureFunction::BIAS)
+                                {
+                                    out << "    lod += bias;\n";
+                                }
+                            }
+                            else if (textureFunction->method == TextureFunction::GRAD)
+                            {
+                                out << "    x.GetDimensions(0, width, height, layers, levels);\n"
+                                       "    float lod = log2(max(length(ddx), length(ddy)));\n";
+                            }
+
+                            out << "    uint mip = uint(min(max(round(lod), 0), levels - 1));\n";
+                        }
+
+                        out << "    x.GetDimensions(mip, width, height, layers, levels);\n";
+                    }
+                    else
+                    {
+                        out << "    float width; float height; float levels;\n";
+
+                        if (textureFunction->method == TextureFunction::LOD0)
+                        {
+                            out << "    uint mip = 0;\n";
+                        }
+                        else if (textureFunction->method == TextureFunction::LOD0BIAS)
+                        {
+                            out << "    uint mip = bias;\n";
+                        }
+                        else
+                        {
+                            if (textureFunction->method == TextureFunction::IMPLICIT ||
+                                textureFunction->method == TextureFunction::BIAS)
+                            {
+                                out << "    x.GetDimensions(0, width, height, levels);\n"
+                                       "    float2 tSized = float2(t.x * width, t.y * height);\n"
+                                       "    float dx = length(ddx(tSized));\n"
+                                       "    float dy = length(ddy(tSized));\n"
+                                       "    float lod = log2(max(dx, dy));\n";
+
+                                if (textureFunction->method == TextureFunction::BIAS)
+                                {
+                                    out << "    lod += bias;\n";
+                                }
+                            }
+                            else if (textureFunction->method == TextureFunction::LOD)
+                            {
+                                out << "    x.GetDimensions(0, width, height, levels);\n";
+                            }
+                            else if (textureFunction->method == TextureFunction::GRAD)
+                            {
+                                out << "    x.GetDimensions(0, width, height, levels);\n"
+                                       "    float lod = log2(max(length(ddx), length(ddy)));\n";
+                            }
+
+                            out << "    uint mip = uint(min(max(round(lod), 0), levels - 1));\n";
+                        }
+
+                        out << "    x.GetDimensions(mip, width, height, levels);\n";
+                    }
+                }
+                else if (IsSampler3D(textureFunction->sampler))
+                {
+                    out << "    float width; float height; float depth; float levels;\n";
+
+                    if (textureFunction->method == TextureFunction::LOD0)
+                    {
+                        out << "    uint mip = 0;\n";
+                    }
+                    else if (textureFunction->method == TextureFunction::LOD0BIAS)
+                    {
+                        out << "    uint mip = bias;\n";
+                    }
+                    else
+                    {
+                        if (textureFunction->method == TextureFunction::IMPLICIT ||
+                            textureFunction->method == TextureFunction::BIAS)
+                        {
+                            out << "    x.GetDimensions(0, width, height, depth, levels);\n"
+                                   "    float3 tSized = float3(t.x * width, t.y * height, t.z * depth);\n"
+                                   "    float dx = length(ddx(tSized));\n"
+                                   "    float dy = length(ddy(tSized));\n"
+                                   "    float lod = log2(max(dx, dy));\n";
+
+                            if (textureFunction->method == TextureFunction::BIAS)
+                            {
+                                out << "    lod += bias;\n";
+                            }
+                        }
+                        else if (textureFunction->method == TextureFunction::GRAD)
+                        {
+                            out << "    x.GetDimensions(0, width, height, depth, levels);\n"
+                                   "    float lod = log2(max(length(ddx), length(ddy)));\n";
+                        }
+
+                        out << "    uint mip = uint(min(max(round(lod), 0), levels - 1));\n";
+                    }
+
+                    out << "    x.GetDimensions(mip, width, height, depth, levels);\n";
+                }
+                else UNREACHABLE();
+            }
+
+            out << "    return ";
+
+            // HLSL intrinsic
+            if (mOutputType == SH_HLSL9_OUTPUT)
+            {
+                switch(textureFunction->sampler)
+                {
+                  case EbtSampler2D:   out << "tex2D";   break;
+                  case EbtSamplerCube: out << "texCUBE"; break;
+                  default: UNREACHABLE();
+                }
+
+                switch(textureFunction->method)
+                {
+                  case TextureFunction::IMPLICIT: out << "(s, ";     break;
+                  case TextureFunction::BIAS:     out << "bias(s, "; break;
+                  case TextureFunction::LOD:      out << "lod(s, ";  break;
+                  case TextureFunction::LOD0:     out << "lod(s, ";  break;
+                  case TextureFunction::LOD0BIAS: out << "lod(s, ";  break;
+                  default: UNREACHABLE();
+                }
+            }
+            else if (mOutputType == SH_HLSL11_OUTPUT)
+            {
+                if (textureFunction->method == TextureFunction::GRAD)
+                {
+                    if (IsIntegerSampler(textureFunction->sampler))
+                    {
+                        out << "x.Load(";
+                    }
+                    else if (IsShadowSampler(textureFunction->sampler))
+                    {
+                        out << "x.SampleCmpLevelZero(s, ";
+                    }
+                    else
+                    {
+                        out << "x.SampleGrad(s, ";
+                    }
+                }
+                else if (IsIntegerSampler(textureFunction->sampler) ||
+                         textureFunction->method == TextureFunction::FETCH)
+                {
+                    out << "x.Load(";
+                }
+                else if (IsShadowSampler(textureFunction->sampler))
+                {
+                    out << "x.SampleCmp(s, ";
+                }
+                else
+                {
+                    switch(textureFunction->method)
+                    {
+                      case TextureFunction::IMPLICIT: out << "x.Sample(s, ";      break;
+                      case TextureFunction::BIAS:     out << "x.SampleBias(s, ";  break;
+                      case TextureFunction::LOD:      out << "x.SampleLevel(s, "; break;
+                      case TextureFunction::LOD0:     out << "x.SampleLevel(s, "; break;
+                      case TextureFunction::LOD0BIAS: out << "x.SampleLevel(s, "; break;
+                      default: UNREACHABLE();
+                    }
+                }
+            }
+            else UNREACHABLE();
+
+            // Integer sampling requires integer addresses
+            TString addressx = "";
+            TString addressy = "";
+            TString addressz = "";
+            TString close = "";
+
+            if (IsIntegerSampler(textureFunction->sampler) ||
+                textureFunction->method == TextureFunction::FETCH)
+            {
+                switch(hlslCoords)
+                {
+                  case 2: out << "int3("; break;
+                  case 3: out << "int4("; break;
+                  default: UNREACHABLE();
+                }
+
+                // Convert from normalized floating-point to integer
+                if (textureFunction->method != TextureFunction::FETCH)
+                {
+                    addressx = "int(floor(width * frac((";
+                    addressy = "int(floor(height * frac((";
+
+                    if (IsSamplerArray(textureFunction->sampler))
+                    {
+                        addressz = "int(max(0, min(layers - 1, floor(0.5 + ";
+                    }
+                    else if (IsSamplerCube(textureFunction->sampler))
+                    {
+                        addressz = "((((";
+                    }
+                    else
+                    {
+                        addressz = "int(floor(depth * frac((";
+                    }
+
+                    close = "))))";
+                }
+            }
+            else
+            {
+                switch(hlslCoords)
+                {
+                  case 2: out << "float2("; break;
+                  case 3: out << "float3("; break;
+                  case 4: out << "float4("; break;
+                  default: UNREACHABLE();
+                }
+            }
+
+            TString proj = "";   // Only used for projected textures
+
+            if (textureFunction->proj)
+            {
+                switch(textureFunction->coords)
+                {
+                  case 3: proj = " / t.z"; break;
+                  case 4: proj = " / t.w"; break;
+                  default: UNREACHABLE();
+                }
+            }
+
+            out << addressx + ("t.x" + proj) + close + ", " + addressy + ("t.y" + proj) + close;
+
+            if (mOutputType == SH_HLSL9_OUTPUT)
+            {
+                if (hlslCoords >= 3)
+                {
+                    if (textureFunction->coords < 3)
+                    {
+                        out << ", 0";
+                    }
+                    else
+                    {
+                        out << ", t.z" + proj;
+                    }
+                }
+
+                if (hlslCoords == 4)
+                {
+                    switch(textureFunction->method)
+                    {
+                      case TextureFunction::BIAS:     out << ", bias"; break;
+                      case TextureFunction::LOD:      out << ", lod";  break;
+                      case TextureFunction::LOD0:     out << ", 0";    break;
+                      case TextureFunction::LOD0BIAS: out << ", bias"; break;
+                      default: UNREACHABLE();
+                    }
+                }
+
+                out << "));\n";
+            }
+            else if (mOutputType == SH_HLSL11_OUTPUT)
+            {
+                if (hlslCoords >= 3)
+                {
+                    if (IsIntegerSampler(textureFunction->sampler) && IsSamplerCube(textureFunction->sampler))
+                    {
+                        out << ", face";
+                    }
+                    else
+                    {
+                        out << ", " + addressz + ("t.z" + proj) + close;
+                    }
+                }
+
+                if (textureFunction->method == TextureFunction::GRAD)
+                {
+                    if (IsIntegerSampler(textureFunction->sampler))
+                    {
+                        out << ", mip)";
+                    }
+                    else if (IsShadowSampler(textureFunction->sampler))
+                    {
+                        // Compare value
+                        switch(textureFunction->coords)
+                        {
+                          case 3: out << "), t.z"; break;
+                          case 4: out << "), t.w"; break;
+                          default: UNREACHABLE();
+                        }
+                    }
+                    else
+                    {
+                        out << "), ddx, ddy";
+                    }
+                }
+                else if (IsIntegerSampler(textureFunction->sampler) ||
+                         textureFunction->method == TextureFunction::FETCH)
+                {
+                    out << ", mip)";
+                }
+                else if (IsShadowSampler(textureFunction->sampler))
+                {
+                    // Compare value
+                    switch(textureFunction->coords)
+                    {
+                      case 3: out << "), t.z"; break;
+                      case 4: out << "), t.w"; break;
+                      default: UNREACHABLE();
+                    }
+                }
+                else
+                {
+                    switch(textureFunction->method)
+                    {
+                      case TextureFunction::IMPLICIT: out << ")";       break;
+                      case TextureFunction::BIAS:     out << "), bias"; break;
+                      case TextureFunction::LOD:      out << "), lod";  break;
+                      case TextureFunction::LOD0:     out << "), 0";    break;
+                      case TextureFunction::LOD0BIAS: out << "), bias"; break;
+                      default: UNREACHABLE();
+                    }
+                }
+
+                if (textureFunction->offset)
+                {
+                    out << ", offset";
+                }
+
+                out << ");";
+            }
+            else UNREACHABLE();
+        }
+
+        out << "\n"
+               "}\n"
+               "\n";
+    }
 
     if (mUsesFragCoord)
     {
@@ -646,12 +1203,179 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
                "\n";
     }
 
-    builtInFunctionEmulator->OutputEmulatedFunctions(out);
+    if (mUsesMod1)
+    {
+        out << "float mod(float x, float y)\n"
+               "{\n"
+               "    return x - y * floor(x / y);\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesMod2v)
+    {
+        out << "float2 mod(float2 x, float2 y)\n"
+               "{\n"
+               "    return x - y * floor(x / y);\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesMod2f)
+    {
+        out << "float2 mod(float2 x, float y)\n"
+               "{\n"
+               "    return x - y * floor(x / y);\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesMod3v)
+    {
+        out << "float3 mod(float3 x, float3 y)\n"
+               "{\n"
+               "    return x - y * floor(x / y);\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesMod3f)
+    {
+        out << "float3 mod(float3 x, float y)\n"
+               "{\n"
+               "    return x - y * floor(x / y);\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesMod4v)
+    {
+        out << "float4 mod(float4 x, float4 y)\n"
+               "{\n"
+               "    return x - y * floor(x / y);\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesMod4f)
+    {
+        out << "float4 mod(float4 x, float y)\n"
+               "{\n"
+               "    return x - y * floor(x / y);\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesFaceforward1)
+    {
+        out << "float faceforward(float N, float I, float Nref)\n"
+               "{\n"
+               "    if(dot(Nref, I) >= 0)\n"
+               "    {\n"
+               "        return -N;\n"
+               "    }\n"
+               "    else\n"
+               "    {\n"
+               "        return N;\n"
+               "    }\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesFaceforward2)
+    {
+        out << "float2 faceforward(float2 N, float2 I, float2 Nref)\n"
+               "{\n"
+               "    if(dot(Nref, I) >= 0)\n"
+               "    {\n"
+               "        return -N;\n"
+               "    }\n"
+               "    else\n"
+               "    {\n"
+               "        return N;\n"
+               "    }\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesFaceforward3)
+    {
+        out << "float3 faceforward(float3 N, float3 I, float3 Nref)\n"
+               "{\n"
+               "    if(dot(Nref, I) >= 0)\n"
+               "    {\n"
+               "        return -N;\n"
+               "    }\n"
+               "    else\n"
+               "    {\n"
+               "        return N;\n"
+               "    }\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesFaceforward4)
+    {
+        out << "float4 faceforward(float4 N, float4 I, float4 Nref)\n"
+               "{\n"
+               "    if(dot(Nref, I) >= 0)\n"
+               "    {\n"
+               "        return -N;\n"
+               "    }\n"
+               "    else\n"
+               "    {\n"
+               "        return N;\n"
+               "    }\n"
+               "}\n"
+               "\n";
+    }
+
+    if (mUsesAtan2_1)
+    {
+        out << "float atanyx(float y, float x)\n"
+               "{\n"
+               "    if(x == 0 && y == 0) x = 1;\n"   // Avoid producing a NaN
+               "    return atan2(y, x);\n"
+               "}\n";
+    }
+
+    if (mUsesAtan2_2)
+    {
+        out << "float2 atanyx(float2 y, float2 x)\n"
+               "{\n"
+               "    if(x[0] == 0 && y[0] == 0) x[0] = 1;\n"
+               "    if(x[1] == 0 && y[1] == 0) x[1] = 1;\n"
+               "    return float2(atan2(y[0], x[0]), atan2(y[1], x[1]));\n"
+               "}\n";
+    }
+
+    if (mUsesAtan2_3)
+    {
+        out << "float3 atanyx(float3 y, float3 x)\n"
+               "{\n"
+               "    if(x[0] == 0 && y[0] == 0) x[0] = 1;\n"
+               "    if(x[1] == 0 && y[1] == 0) x[1] = 1;\n"
+               "    if(x[2] == 0 && y[2] == 0) x[2] = 1;\n"
+               "    return float3(atan2(y[0], x[0]), atan2(y[1], x[1]), atan2(y[2], x[2]));\n"
+               "}\n";
+    }
+
+    if (mUsesAtan2_4)
+    {
+        out << "float4 atanyx(float4 y, float4 x)\n"
+               "{\n"
+               "    if(x[0] == 0 && y[0] == 0) x[0] = 1;\n"
+               "    if(x[1] == 0 && y[1] == 0) x[1] = 1;\n"
+               "    if(x[2] == 0 && y[2] == 0) x[2] = 1;\n"
+               "    if(x[3] == 0 && y[3] == 0) x[3] = 1;\n"
+               "    return float4(atan2(y[0], x[0]), atan2(y[1], x[1]), atan2(y[2], x[2]), atan2(y[3], x[3]));\n"
+               "}\n";
+    }
 }
 
 void OutputHLSL::visitSymbol(TIntermSymbol *node)
 {
-    TInfoSinkBase &out = getInfoSink();
+    TInfoSinkBase &out = mBody;
 
     // Handle accessing std140 structs by value
     if (mFlaggedStructMappedNames.count(node) > 0)
@@ -673,8 +1397,8 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
 
         if (qualifier == EvqUniform)
         {
-            const TType &nodeType = node->getType();
-            const TInterfaceBlock *interfaceBlock = nodeType.getInterfaceBlock();
+            const TType& nodeType = node->getType();
+            const TInterfaceBlock* interfaceBlock = nodeType.getInterfaceBlock();
 
             if (interfaceBlock)
             {
@@ -685,10 +1409,7 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
                 mReferencedUniforms[name] = node;
             }
 
-            ensureStructDefined(nodeType);
-
-            const TName &nameWithMetadata = node->getName();
-            out << DecorateUniform(nameWithMetadata, nodeType);
+            out << DecorateUniform(name, nodeType);
         }
         else if (qualifier == EvqAttribute || qualifier == EvqVertexIn)
         {
@@ -735,111 +1456,30 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
             mUsesPointSize = true;
             out << name;
         }
-        else if (qualifier == EvqInstanceID)
-        {
-            mUsesInstanceID = true;
-            out << name;
-        }
-        else if (qualifier == EvqVertexID)
-        {
-            mUsesVertexID = true;
-            out << name;
-        }
-        else if (name == "gl_FragDepthEXT" || name == "gl_FragDepth")
+        else if (name == "gl_FragDepthEXT")
         {
             mUsesFragDepth = true;
             out << "gl_Depth";
         }
+        else if (qualifier == EvqInternal)
+        {
+            out << name;
+        }
         else
         {
-            out << DecorateIfNeeded(node->getName());
+            out << Decorate(name);
         }
     }
 }
 
 void OutputHLSL::visitRaw(TIntermRaw *node)
 {
-    getInfoSink() << node->getRawText();
-}
-
-void OutputHLSL::outputEqual(Visit visit, const TType &type, TOperator op, TInfoSinkBase &out)
-{
-    if (type.isScalar() && !type.isArray())
-    {
-        if (op == EOpEqual)
-        {
-            outputTriplet(out, visit, "(", " == ", ")");
-        }
-        else
-        {
-            outputTriplet(out, visit, "(", " != ", ")");
-        }
-    }
-    else
-    {
-        if (visit == PreVisit && op == EOpNotEqual)
-        {
-            out << "!";
-        }
-
-        if (type.isArray())
-        {
-            const TString &functionName = addArrayEqualityFunction(type);
-            outputTriplet(out, visit, (functionName + "(").c_str(), ", ", ")");
-        }
-        else if (type.getBasicType() == EbtStruct)
-        {
-            const TStructure &structure = *type.getStruct();
-            const TString &functionName = addStructEqualityFunction(structure);
-            outputTriplet(out, visit, (functionName + "(").c_str(), ", ", ")");
-        }
-        else
-        {
-            ASSERT(type.isMatrix() || type.isVector());
-            outputTriplet(out, visit, "all(", " == ", ")");
-        }
-    }
-}
-
-bool OutputHLSL::ancestorEvaluatesToSamplerInStruct(Visit visit)
-{
-    // Inside InVisit the current node is already in the path.
-    const unsigned int initialN = visit == InVisit ? 1u : 0u;
-    for (unsigned int n = initialN; getAncestorNode(n) != nullptr; ++n)
-    {
-        TIntermNode *ancestor               = getAncestorNode(n);
-        const TIntermBinary *ancestorBinary = ancestor->getAsBinaryNode();
-        if (ancestorBinary == nullptr)
-        {
-            return false;
-        }
-        switch (ancestorBinary->getOp())
-        {
-            case EOpIndexDirectStruct:
-            {
-                const TStructure *structure = ancestorBinary->getLeft()->getType().getStruct();
-                const TIntermConstantUnion *index =
-                    ancestorBinary->getRight()->getAsConstantUnion();
-                const TField *field = structure->fields()[index->getIConst(0)];
-                if (IsSampler(field->type()->getBasicType()))
-                {
-                    return true;
-                }
-                break;
-            }
-            case EOpIndexDirect:
-                break;
-            default:
-                // Returning a sampler from indirect indexing is not supported.
-                return false;
-        }
-    }
-    return false;
+    mBody << node->getRawText();
 }
 
 bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
 {
-    TInfoSinkBase &out = getInfoSink();
+    TInfoSinkBase &out = mBody;
 
     // Handle accessing std140 structs by value
     if (mFlaggedStructMappedNames.count(node) > 0)
@@ -850,56 +1490,32 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
 
     switch (node->getOp())
     {
-      case EOpAssign:
-        if (node->getLeft()->isArray())
-        {
-            TIntermAggregate *rightAgg = node->getRight()->getAsAggregate();
-            if (rightAgg != nullptr && rightAgg->isConstructor())
-            {
-                const TString &functionName = addArrayConstructIntoFunction(node->getType());
-                out << functionName << "(";
-                node->getLeft()->traverse(this);
-                TIntermSequence *seq = rightAgg->getSequence();
-                for (auto &arrayElement : *seq)
-                {
-                    out << ", ";
-                    arrayElement->traverse(this);
-                }
-                out << ")";
-                return false;
-            }
-            // ArrayReturnValueToOutParameter should have eliminated expressions where a function call is assigned.
-            ASSERT(rightAgg == nullptr || rightAgg->getOp() != EOpFunctionCall);
-
-            const TString &functionName = addArrayAssignmentFunction(node->getType());
-            outputTriplet(out, visit, (functionName + "(").c_str(), ", ", ")");
-        }
-        else
-        {
-            outputTriplet(out, visit, "(", " = ", ")");
-        }
-        break;
+      case EOpAssign:                  outputTriplet(visit, "(", " = ", ")");           break;
       case EOpInitialize:
         if (visit == PreVisit)
         {
-            TIntermSymbol *symbolNode = node->getLeft()->getAsSymbolNode();
-            ASSERT(symbolNode);
-            TIntermTyped *expression = node->getRight();
-
-            // Global initializers must be constant at this point.
-            ASSERT(symbolNode->getQualifier() != EvqGlobal || canWriteAsHLSLLiteral(expression));
-
             // GLSL allows to write things like "float x = x;" where a new variable x is defined
             // and the value of an existing variable x is assigned. HLSL uses C semantics (the
             // new variable is created before the assignment is evaluated), so we need to convert
             // this to "float t = x, x = t;".
-            if (writeSameSymbolInitializer(out, symbolNode, expression))
+
+            TIntermSymbol *symbolNode = node->getLeft()->getAsSymbolNode();
+            TIntermTyped *expression = node->getRight();
+
+            sh::SearchSymbol searchSymbol(symbolNode->getSymbol());
+            expression->traverse(&searchSymbol);
+            bool sameSymbol = searchSymbol.foundMatch();
+
+            if (sameSymbol)
             {
-                // Skip initializing the rest of the expression
-                return false;
-            }
-            else if (writeConstantInitialization(out, symbolNode, expression))
-            {
+                // Type already printed
+                out << "t" + str(mUniqueIndex) + " = ";
+                expression->traverse(this);
+                out << ", ";
+                symbolNode->traverse(this);
+                out << " = t" + str(mUniqueIndex);
+
+                mUniqueIndex++;
                 return false;
             }
         }
@@ -908,21 +1524,11 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
             out << " = ";
         }
         break;
-      case EOpAddAssign:
-          outputTriplet(out, visit, "(", " += ", ")");
-          break;
-      case EOpSubAssign:
-          outputTriplet(out, visit, "(", " -= ", ")");
-          break;
-      case EOpMulAssign:
-          outputTriplet(out, visit, "(", " *= ", ")");
-          break;
-      case EOpVectorTimesScalarAssign:
-          outputTriplet(out, visit, "(", " *= ", ")");
-          break;
-      case EOpMatrixTimesScalarAssign:
-          outputTriplet(out, visit, "(", " *= ", ")");
-          break;
+      case EOpAddAssign:               outputTriplet(visit, "(", " += ", ")");          break;
+      case EOpSubAssign:               outputTriplet(visit, "(", " -= ", ")");          break;
+      case EOpMulAssign:               outputTriplet(visit, "(", " *= ", ")");          break;
+      case EOpVectorTimesScalarAssign: outputTriplet(visit, "(", " *= ", ")");          break;
+      case EOpMatrixTimesScalarAssign: outputTriplet(visit, "(", " *= ", ")");          break;
       case EOpVectorTimesMatrixAssign:
         if (visit == PreVisit)
         {
@@ -946,36 +1552,16 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
         }
         else if (visit == InVisit)
         {
-            out << " = transpose(mul(transpose(";
+            out << " = mul(";
             node->getLeft()->traverse(this);
-            out << "), transpose(";
+            out << ", ";
         }
         else
         {
-            out << "))))";
+            out << "))";
         }
         break;
-      case EOpDivAssign:
-          outputTriplet(out, visit, "(", " /= ", ")");
-          break;
-      case EOpIModAssign:
-          outputTriplet(out, visit, "(", " %= ", ")");
-          break;
-      case EOpBitShiftLeftAssign:
-          outputTriplet(out, visit, "(", " <<= ", ")");
-          break;
-      case EOpBitShiftRightAssign:
-          outputTriplet(out, visit, "(", " >>= ", ")");
-          break;
-      case EOpBitwiseAndAssign:
-          outputTriplet(out, visit, "(", " &= ", ")");
-          break;
-      case EOpBitwiseXorAssign:
-          outputTriplet(out, visit, "(", " ^= ", ")");
-          break;
-      case EOpBitwiseOrAssign:
-          outputTriplet(out, visit, "(", " |= ", ")");
-          break;
+      case EOpDivAssign:               outputTriplet(visit, "(", " /= ", ")");          break;
       case EOpIndexDirect:
         {
             const TType& leftType = node->getLeft()->getType();
@@ -990,58 +1576,26 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
                     return false;
                 }
             }
-            else if (ancestorEvaluatesToSamplerInStruct(visit))
-            {
-                // All parts of an expression that access a sampler in a struct need to use _ as
-                // separator to access the sampler variable that has been moved out of the struct.
-                outputTriplet(out, visit, "", "_", "");
-            }
             else
             {
-                outputTriplet(out, visit, "", "[", "]");
+                outputTriplet(visit, "", "[", "]");
             }
         }
         break;
       case EOpIndexIndirect:
         // We do not currently support indirect references to interface blocks
         ASSERT(node->getLeft()->getBasicType() != EbtInterfaceBlock);
-        outputTriplet(out, visit, "", "[", "]");
+        outputTriplet(visit, "", "[", "]");
         break;
       case EOpIndexDirectStruct:
+        if (visit == InVisit)
         {
             const TStructure* structure = node->getLeft()->getType().getStruct();
             const TIntermConstantUnion* index = node->getRight()->getAsConstantUnion();
             const TField* field = structure->fields()[index->getIConst(0)];
+            out << "." + DecorateField(field->name(), *structure);
 
-            // In cases where indexing returns a sampler, we need to access the sampler variable
-            // that has been moved out of the struct.
-            bool indexingReturnsSampler = IsSampler(field->type()->getBasicType());
-            if (visit == PreVisit && indexingReturnsSampler)
-            {
-                // Samplers extracted from structs have "angle" prefix to avoid name conflicts.
-                // This prefix is only output at the beginning of the indexing expression, which
-                // may have multiple parts.
-                out << "angle";
-            }
-            if (!indexingReturnsSampler)
-            {
-                // All parts of an expression that access a sampler in a struct need to use _ as
-                // separator to access the sampler variable that has been moved out of the struct.
-                indexingReturnsSampler = ancestorEvaluatesToSamplerInStruct(visit);
-            }
-            if (visit == InVisit)
-            {
-                if (indexingReturnsSampler)
-                {
-                    out << "_" + field->name();
-                }
-                else
-                {
-                    out << "." + DecorateField(field->name(), *structure);
-                }
-
-                return false;
-            }
+            return false;
         }
         break;
       case EOpIndexDirectInterfaceBlock:
@@ -1091,81 +1645,105 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
             return false;   // Fully processed
         }
         break;
-      case EOpAdd:
-          outputTriplet(out, visit, "(", " + ", ")");
-          break;
-      case EOpSub:
-          outputTriplet(out, visit, "(", " - ", ")");
-          break;
-      case EOpMul:
-          outputTriplet(out, visit, "(", " * ", ")");
-          break;
-      case EOpDiv:
-          outputTriplet(out, visit, "(", " / ", ")");
-          break;
-      case EOpIMod:
-          outputTriplet(out, visit, "(", " % ", ")");
-          break;
-      case EOpBitShiftLeft:
-          outputTriplet(out, visit, "(", " << ", ")");
-          break;
-      case EOpBitShiftRight:
-          outputTriplet(out, visit, "(", " >> ", ")");
-          break;
-      case EOpBitwiseAnd:
-          outputTriplet(out, visit, "(", " & ", ")");
-          break;
-      case EOpBitwiseXor:
-          outputTriplet(out, visit, "(", " ^ ", ")");
-          break;
-      case EOpBitwiseOr:
-          outputTriplet(out, visit, "(", " | ", ")");
-          break;
+      case EOpAdd:               outputTriplet(visit, "(", " + ", ")"); break;
+      case EOpSub:               outputTriplet(visit, "(", " - ", ")"); break;
+      case EOpMul:               outputTriplet(visit, "(", " * ", ")"); break;
+      case EOpDiv:               outputTriplet(visit, "(", " / ", ")"); break;
       case EOpEqual:
       case EOpNotEqual:
-        outputEqual(visit, node->getLeft()->getType(), node->getOp(), out);
+        if (node->getLeft()->isScalar())
+        {
+            if (node->getOp() == EOpEqual)
+            {
+                outputTriplet(visit, "(", " == ", ")");
+            }
+            else
+            {
+                outputTriplet(visit, "(", " != ", ")");
+            }
+        }
+        else if (node->getLeft()->getBasicType() == EbtStruct)
+        {
+            if (node->getOp() == EOpEqual)
+            {
+                out << "(";
+            }
+            else
+            {
+                out << "!(";
+            }
+
+            const TStructure &structure = *node->getLeft()->getType().getStruct();
+            const TFieldList &fields = structure.fields();
+
+            for (size_t i = 0; i < fields.size(); i++)
+            {
+                const TField *field = fields[i];
+
+                node->getLeft()->traverse(this);
+                out << "." + DecorateField(field->name(), structure) + " == ";
+                node->getRight()->traverse(this);
+                out << "." + DecorateField(field->name(), structure);
+
+                if (i < fields.size() - 1)
+                {
+                    out << " && ";
+                }
+            }
+
+            out << ")";
+
+            return false;
+        }
+        else
+        {
+            ASSERT(node->getLeft()->isMatrix() || node->getLeft()->isVector());
+
+            if (node->getOp() == EOpEqual)
+            {
+                outputTriplet(visit, "all(", " == ", ")");
+            }
+            else
+            {
+                outputTriplet(visit, "!all(", " == ", ")");
+            }
+        }
         break;
-      case EOpLessThan:
-          outputTriplet(out, visit, "(", " < ", ")");
-          break;
-      case EOpGreaterThan:
-          outputTriplet(out, visit, "(", " > ", ")");
-          break;
-      case EOpLessThanEqual:
-          outputTriplet(out, visit, "(", " <= ", ")");
-          break;
-      case EOpGreaterThanEqual:
-          outputTriplet(out, visit, "(", " >= ", ")");
-          break;
-      case EOpVectorTimesScalar:
-          outputTriplet(out, visit, "(", " * ", ")");
-          break;
-      case EOpMatrixTimesScalar:
-          outputTriplet(out, visit, "(", " * ", ")");
-          break;
-      case EOpVectorTimesMatrix:
-          outputTriplet(out, visit, "mul(", ", transpose(", "))");
-          break;
-      case EOpMatrixTimesVector:
-          outputTriplet(out, visit, "mul(transpose(", "), ", ")");
-          break;
-      case EOpMatrixTimesMatrix:
-          outputTriplet(out, visit, "transpose(mul(transpose(", "), transpose(", ")))");
-          break;
+      case EOpLessThan:          outputTriplet(visit, "(", " < ", ")");   break;
+      case EOpGreaterThan:       outputTriplet(visit, "(", " > ", ")");   break;
+      case EOpLessThanEqual:     outputTriplet(visit, "(", " <= ", ")");  break;
+      case EOpGreaterThanEqual:  outputTriplet(visit, "(", " >= ", ")");  break;
+      case EOpVectorTimesScalar: outputTriplet(visit, "(", " * ", ")");   break;
+      case EOpMatrixTimesScalar: outputTriplet(visit, "(", " * ", ")");   break;
+      case EOpVectorTimesMatrix: outputTriplet(visit, "mul(", ", transpose(", "))"); break;
+      case EOpMatrixTimesVector: outputTriplet(visit, "mul(transpose(", "), ", ")"); break;
+      case EOpMatrixTimesMatrix: outputTriplet(visit, "transpose(mul(transpose(", "), transpose(", ")))"); break;
       case EOpLogicalOr:
-        // HLSL doesn't short-circuit ||, so we assume that || affected by short-circuiting have been unfolded.
-        ASSERT(!node->getRight()->hasSideEffects());
-        outputTriplet(out, visit, "(", " || ", ")");
-        return true;
+        if (node->getRight()->hasSideEffects())
+        {
+            out << "s" << mUnfoldShortCircuit->getNextTemporaryIndex();
+            return false;
+        }
+        else
+        {
+           outputTriplet(visit, "(", " || ", ")");
+           return true;
+        }
       case EOpLogicalXor:
         mUsesXor = true;
-        outputTriplet(out, visit, "xor(", ", ", ")");
+        outputTriplet(visit, "xor(", ", ", ")");
         break;
       case EOpLogicalAnd:
-        // HLSL doesn't short-circuit &&, so we assume that && affected by short-circuiting have been unfolded.
-        ASSERT(!node->getRight()->hasSideEffects());
-        outputTriplet(out, visit, "(", " && ", ")");
-        return true;
+        if (node->getRight()->hasSideEffects())
+        {
+            out << "s" << mUnfoldShortCircuit->getNextTemporaryIndex();
+            return false;
+        }
+        else
+        {
+           outputTriplet(visit, "(", " && ", ")");
+           return true;
+        }
       default: UNREACHABLE();
     }
 
@@ -1174,264 +1752,78 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
 
 bool OutputHLSL::visitUnary(Visit visit, TIntermUnary *node)
 {
-    TInfoSinkBase &out = getInfoSink();
-
     switch (node->getOp())
     {
-        case EOpNegative:
-            outputTriplet(out, visit, "(-", "", ")");
-            break;
-        case EOpPositive:
-            outputTriplet(out, visit, "(+", "", ")");
-            break;
-        case EOpVectorLogicalNot:
-            outputTriplet(out, visit, "(!", "", ")");
-            break;
-        case EOpLogicalNot:
-            outputTriplet(out, visit, "(!", "", ")");
-            break;
-        case EOpBitwiseNot:
-            outputTriplet(out, visit, "(~", "", ")");
-            break;
-        case EOpPostIncrement:
-            outputTriplet(out, visit, "(", "", "++)");
-            break;
-        case EOpPostDecrement:
-            outputTriplet(out, visit, "(", "", "--)");
-            break;
-        case EOpPreIncrement:
-            outputTriplet(out, visit, "(++", "", ")");
-            break;
-        case EOpPreDecrement:
-            outputTriplet(out, visit, "(--", "", ")");
-            break;
-        case EOpRadians:
-            outputTriplet(out, visit, "radians(", "", ")");
-            break;
-        case EOpDegrees:
-            outputTriplet(out, visit, "degrees(", "", ")");
-            break;
-        case EOpSin:
-            outputTriplet(out, visit, "sin(", "", ")");
-            break;
-        case EOpCos:
-            outputTriplet(out, visit, "cos(", "", ")");
-            break;
-        case EOpTan:
-            outputTriplet(out, visit, "tan(", "", ")");
-            break;
-        case EOpAsin:
-            outputTriplet(out, visit, "asin(", "", ")");
-            break;
-        case EOpAcos:
-            outputTriplet(out, visit, "acos(", "", ")");
-            break;
-        case EOpAtan:
-            outputTriplet(out, visit, "atan(", "", ")");
-            break;
-        case EOpSinh:
-            outputTriplet(out, visit, "sinh(", "", ")");
-            break;
-        case EOpCosh:
-            outputTriplet(out, visit, "cosh(", "", ")");
-            break;
-        case EOpTanh:
-            outputTriplet(out, visit, "tanh(", "", ")");
-            break;
-      case EOpAsinh:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "asinh(");
-        break;
-      case EOpAcosh:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "acosh(");
-        break;
-      case EOpAtanh:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "atanh(");
-        break;
-      case EOpExp:
-          outputTriplet(out, visit, "exp(", "", ")");
-          break;
-      case EOpLog:
-          outputTriplet(out, visit, "log(", "", ")");
-          break;
-      case EOpExp2:
-          outputTriplet(out, visit, "exp2(", "", ")");
-          break;
-      case EOpLog2:
-          outputTriplet(out, visit, "log2(", "", ")");
-          break;
-      case EOpSqrt:
-          outputTriplet(out, visit, "sqrt(", "", ")");
-          break;
-      case EOpInverseSqrt:
-          outputTriplet(out, visit, "rsqrt(", "", ")");
-          break;
-      case EOpAbs:
-          outputTriplet(out, visit, "abs(", "", ")");
-          break;
-      case EOpSign:
-          outputTriplet(out, visit, "sign(", "", ")");
-          break;
-      case EOpFloor:
-          outputTriplet(out, visit, "floor(", "", ")");
-          break;
-      case EOpTrunc:
-          outputTriplet(out, visit, "trunc(", "", ")");
-          break;
-      case EOpRound:
-          outputTriplet(out, visit, "round(", "", ")");
-          break;
-      case EOpRoundEven:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "roundEven(");
-        break;
-      case EOpCeil:
-          outputTriplet(out, visit, "ceil(", "", ")");
-          break;
-      case EOpFract:
-          outputTriplet(out, visit, "frac(", "", ")");
-          break;
-      case EOpIsNan:
-          outputTriplet(out, visit, "isnan(", "", ")");
-        mRequiresIEEEStrictCompiling = true;
-        break;
-      case EOpIsInf:
-          outputTriplet(out, visit, "isinf(", "", ")");
-          break;
-      case EOpFloatBitsToInt:
-          outputTriplet(out, visit, "asint(", "", ")");
-          break;
-      case EOpFloatBitsToUint:
-          outputTriplet(out, visit, "asuint(", "", ")");
-          break;
-      case EOpIntBitsToFloat:
-          outputTriplet(out, visit, "asfloat(", "", ")");
-          break;
-      case EOpUintBitsToFloat:
-          outputTriplet(out, visit, "asfloat(", "", ")");
-          break;
-      case EOpPackSnorm2x16:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "packSnorm2x16(");
-        break;
-      case EOpPackUnorm2x16:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "packUnorm2x16(");
-        break;
-      case EOpPackHalf2x16:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "packHalf2x16(");
-        break;
-      case EOpUnpackSnorm2x16:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "unpackSnorm2x16(");
-        break;
-      case EOpUnpackUnorm2x16:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "unpackUnorm2x16(");
-        break;
-      case EOpUnpackHalf2x16:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "unpackHalf2x16(");
-        break;
-      case EOpLength:
-          outputTriplet(out, visit, "length(", "", ")");
-          break;
-      case EOpNormalize:
-          outputTriplet(out, visit, "normalize(", "", ")");
-          break;
+      case EOpNegative:         outputTriplet(visit, "(-", "", ")");         break;
+      case EOpPositive:         outputTriplet(visit, "(+", "", ")");         break;
+      case EOpVectorLogicalNot: outputTriplet(visit, "(!", "", ")");         break;
+      case EOpLogicalNot:       outputTriplet(visit, "(!", "", ")");         break;
+      case EOpPostIncrement:    outputTriplet(visit, "(", "", "++)");        break;
+      case EOpPostDecrement:    outputTriplet(visit, "(", "", "--)");        break;
+      case EOpPreIncrement:     outputTriplet(visit, "(++", "", ")");        break;
+      case EOpPreDecrement:     outputTriplet(visit, "(--", "", ")");        break;
+      case EOpRadians:          outputTriplet(visit, "radians(", "", ")");   break;
+      case EOpDegrees:          outputTriplet(visit, "degrees(", "", ")");   break;
+      case EOpSin:              outputTriplet(visit, "sin(", "", ")");       break;
+      case EOpCos:              outputTriplet(visit, "cos(", "", ")");       break;
+      case EOpTan:              outputTriplet(visit, "tan(", "", ")");       break;
+      case EOpAsin:             outputTriplet(visit, "asin(", "", ")");      break;
+      case EOpAcos:             outputTriplet(visit, "acos(", "", ")");      break;
+      case EOpAtan:             outputTriplet(visit, "atan(", "", ")");      break;
+      case EOpExp:              outputTriplet(visit, "exp(", "", ")");       break;
+      case EOpLog:              outputTriplet(visit, "log(", "", ")");       break;
+      case EOpExp2:             outputTriplet(visit, "exp2(", "", ")");      break;
+      case EOpLog2:             outputTriplet(visit, "log2(", "", ")");      break;
+      case EOpSqrt:             outputTriplet(visit, "sqrt(", "", ")");      break;
+      case EOpInverseSqrt:      outputTriplet(visit, "rsqrt(", "", ")");     break;
+      case EOpAbs:              outputTriplet(visit, "abs(", "", ")");       break;
+      case EOpSign:             outputTriplet(visit, "sign(", "", ")");      break;
+      case EOpFloor:            outputTriplet(visit, "floor(", "", ")");     break;
+      case EOpCeil:             outputTriplet(visit, "ceil(", "", ")");      break;
+      case EOpFract:            outputTriplet(visit, "frac(", "", ")");      break;
+      case EOpLength:           outputTriplet(visit, "length(", "", ")");    break;
+      case EOpNormalize:        outputTriplet(visit, "normalize(", "", ")"); break;
       case EOpDFdx:
         if(mInsideDiscontinuousLoop || mOutputLod0Function)
         {
-            outputTriplet(out, visit, "(", "", ", 0.0)");
+            outputTriplet(visit, "(", "", ", 0.0)");
         }
         else
         {
-            outputTriplet(out, visit, "ddx(", "", ")");
+            outputTriplet(visit, "ddx(", "", ")");
         }
         break;
       case EOpDFdy:
         if(mInsideDiscontinuousLoop || mOutputLod0Function)
         {
-            outputTriplet(out, visit, "(", "", ", 0.0)");
+            outputTriplet(visit, "(", "", ", 0.0)");
         }
         else
         {
-            outputTriplet(out, visit, "ddy(", "", ")");
+           outputTriplet(visit, "ddy(", "", ")");
         }
         break;
       case EOpFwidth:
         if(mInsideDiscontinuousLoop || mOutputLod0Function)
         {
-            outputTriplet(out, visit, "(", "", ", 0.0)");
+            outputTriplet(visit, "(", "", ", 0.0)");
         }
         else
         {
-            outputTriplet(out, visit, "fwidth(", "", ")");
+            outputTriplet(visit, "fwidth(", "", ")");
         }
         break;
-      case EOpTranspose:
-          outputTriplet(out, visit, "transpose(", "", ")");
-          break;
-      case EOpDeterminant:
-          outputTriplet(out, visit, "determinant(transpose(", "", "))");
-          break;
-      case EOpInverse:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "inverse(");
-        break;
-
-      case EOpAny:
-          outputTriplet(out, visit, "any(", "", ")");
-          break;
-      case EOpAll:
-          outputTriplet(out, visit, "all(", "", ")");
-          break;
+      case EOpAny:              outputTriplet(visit, "any(", "", ")");       break;
+      case EOpAll:              outputTriplet(visit, "all(", "", ")");       break;
       default: UNREACHABLE();
     }
 
     return true;
 }
 
-TString OutputHLSL::samplerNamePrefixFromStruct(TIntermTyped *node)
-{
-    if (node->getAsSymbolNode())
-    {
-        return node->getAsSymbolNode()->getSymbol();
-    }
-    TIntermBinary *nodeBinary = node->getAsBinaryNode();
-    switch (nodeBinary->getOp())
-    {
-        case EOpIndexDirect:
-        {
-            int index = nodeBinary->getRight()->getAsConstantUnion()->getIConst(0);
-
-            TInfoSinkBase prefixSink;
-            prefixSink << samplerNamePrefixFromStruct(nodeBinary->getLeft()) << "_" << index;
-            return TString(prefixSink.c_str());
-        }
-        case EOpIndexDirectStruct:
-        {
-            TStructure *s       = nodeBinary->getLeft()->getAsTyped()->getType().getStruct();
-            int index           = nodeBinary->getRight()->getAsConstantUnion()->getIConst(0);
-            const TField *field = s->fields()[index];
-
-            TInfoSinkBase prefixSink;
-            prefixSink << samplerNamePrefixFromStruct(nodeBinary->getLeft()) << "_"
-                       << field->name();
-            return TString(prefixSink.c_str());
-        }
-        default:
-            UNREACHABLE();
-            return TString("");
-    }
-}
-
 bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
 {
-    TInfoSinkBase &out = getInfoSink();
+    TInfoSinkBase &out = mBody;
 
     switch (node->getOp())
     {
@@ -1439,30 +1831,22 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
         {
             if (mInsideFunction)
             {
-                outputLineDirective(out, node->getLine().first_line);
+                outputLineDirective(node->getLine().first_line);
                 out << "{\n";
             }
 
             for (TIntermSequence::iterator sit = node->getSequence()->begin(); sit != node->getSequence()->end(); sit++)
             {
-                outputLineDirective(out, (*sit)->getLine().first_line);
+                outputLineDirective((*sit)->getLine().first_line);
 
-                (*sit)->traverse(this);
+                traverseStatements(*sit);
 
-                // Don't output ; after case labels, they're terminated by :
-                // This is needed especially since outputting a ; after a case statement would turn empty
-                // case statements into non-empty case statements, disallowing fall-through from them.
-                // Also no need to output ; after selection (if) statements or sequences. This is done just
-                // for code clarity.
-                TIntermSelection *asSelection = (*sit)->getAsSelectionNode();
-                ASSERT(asSelection == nullptr || !asSelection->usesTernaryOperator());
-                if ((*sit)->getAsCaseNode() == nullptr && asSelection == nullptr && !IsSequence(*sit))
-                    out << ";\n";
+                out << ";\n";
             }
 
             if (mInsideFunction)
             {
-                outputLineDirective(out, node->getLine().last_line);
+                outputLineDirective(node->getLine().last_line);
                 out << "}\n";
             }
 
@@ -1473,34 +1857,49 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
         {
             TIntermSequence *sequence = node->getSequence();
             TIntermTyped *variable = (*sequence)[0]->getAsTyped();
-            ASSERT(sequence->size() == 1);
 
-            if (variable &&
-                (variable->getQualifier() == EvqTemporary ||
-                 variable->getQualifier() == EvqGlobal || variable->getQualifier() == EvqConst))
+            if (variable && (variable->getQualifier() == EvqTemporary || variable->getQualifier() == EvqGlobal))
             {
-                ensureStructDefined(variable->getType());
+                TStructure *structure = variable->getType().getStruct();
+
+                if (structure)
+                {
+                    mStructureHLSL->addConstructor(variable->getType(), StructNameString(*structure), NULL);
+                }
 
                 if (!variable->getAsSymbolNode() || variable->getAsSymbolNode()->getSymbol() != "")   // Variable declaration
                 {
-                    if (!mInsideFunction)
+                    for (TIntermSequence::iterator sit = sequence->begin(); sit != sequence->end(); sit++)
                     {
-                        out << "static ";
-                    }
+                        if (isSingleStatement(*sit))
+                        {
+                            mUnfoldShortCircuit->traverse(*sit);
+                        }
 
-                    out << TypeString(variable->getType()) + " ";
+                        if (!mInsideFunction)
+                        {
+                            out << "static ";
+                        }
 
-                    TIntermSymbol *symbol = variable->getAsSymbolNode();
+                        out << TypeString(variable->getType()) + " ";
 
-                    if (symbol)
-                    {
-                        symbol->traverse(this);
-                        out << ArrayString(symbol->getType());
-                        out << " = " + initializer(symbol->getType());
-                    }
-                    else
-                    {
-                        variable->traverse(this);
+                        TIntermSymbol *symbol = (*sit)->getAsSymbolNode();
+
+                        if (symbol)
+                        {
+                            symbol->traverse(this);
+                            out << ArrayString(symbol->getType());
+                            out << " = " + initializer(symbol->getType());
+                        }
+                        else
+                        {
+                            (*sit)->traverse(this);
+                        }
+
+                        if (*sit != sequence->back())
+                        {
+                            out << ";\n";
+                        }
                     }
                 }
                 else if (variable->getAsSymbolNode() && variable->getAsSymbolNode()->getSymbol() == "")   // Type (struct) declaration
@@ -1540,18 +1939,9 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpPrototype:
         if (visit == PreVisit)
         {
-            size_t index = mCallDag.findIndex(node);
-            // Skip the prototype if it is not implemented (and thus not used)
-            if (index == CallDAG::InvalidIndex)
-            {
-                return false;
-            }
+            out << TypeString(node->getType()) << " " << Decorate(node->getName()) << (mOutputLod0Function ? "Lod0(" : "(");
 
             TIntermSequence *arguments = node->getSequence();
-
-            TString name = DecorateFunctionIfNeeded(node->getNameObj());
-            out << TypeString(node->getType()) << " " << name << DisambiguateFunctionName(arguments)
-                << (mOutputLod0Function ? "Lod0(" : "(");
 
             for (unsigned int i = 0; i < arguments->size(); i++)
             {
@@ -1572,8 +1962,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
             out << ");\n";
 
             // Also prototype the Lod0 variant if needed
-            bool needsLod0 = mASTMetadataList[index].mNeedsLod0;
-            if (needsLod0 && !mOutputLod0Function && mShaderType == GL_FRAGMENT_SHADER)
+            if (mContainsLoopDiscontinuity && !mOutputLod0Function)
             {
                 mOutputLod0Function = true;
                 node->traverse(this);
@@ -1583,22 +1972,12 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
             return false;
         }
         break;
-      case EOpComma:
-          outputTriplet(out, visit, "(", ", ", ")");
-          break;
+      case EOpComma:            outputTriplet(visit, "(", ", ", ")");                break;
       case EOpFunction:
         {
-            ASSERT(mCurrentFunctionMetadata == nullptr);
-            TString name = TFunction::unmangleName(node->getNameObj().getString());
-
-            size_t index = mCallDag.findIndex(node);
-            ASSERT(index != CallDAG::InvalidIndex);
-            mCurrentFunctionMetadata = &mASTMetadataList[index];
+            TString name = TFunction::unmangleName(node->getName());
 
             out << TypeString(node->getType()) << " ";
-
-            TIntermSequence *sequence  = node->getSequence();
-            TIntermSequence *arguments = (*sequence)[0]->getAsAggregate()->getSequence();
 
             if (name == "main")
             {
@@ -1606,9 +1985,11 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
             }
             else
             {
-                out << DecorateFunctionIfNeeded(node->getNameObj())
-                    << DisambiguateFunctionName(arguments) << (mOutputLod0Function ? "Lod0(" : "(");
+                out << Decorate(name) << (mOutputLod0Function ? "Lod0(" : "(");
             }
+
+            TIntermSequence *sequence = node->getSequence();
+            TIntermSequence *arguments = (*sequence)[0]->getAsAggregate()->getSequence();
 
             for (unsigned int i = 0; i < arguments->size(); i++)
             {
@@ -1616,7 +1997,12 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
 
                 if (symbol)
                 {
-                    ensureStructDefined(symbol->getType());
+                    TStructure *structure = symbol->getType().getStruct();
+
+                    if (structure)
+                    {
+                        mStructureHLSL->addConstructor(symbol->getType(), StructNameString(*structure), NULL);
+                    }
 
                     out << argumentString(symbol);
 
@@ -1628,31 +2014,26 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
                 else UNREACHABLE();
             }
 
-            out << ")\n";
+            out << ")\n"
+                "{\n";
 
             if (sequence->size() > 1)
             {
                 mInsideFunction = true;
-                TIntermNode *body = (*sequence)[1];
-                // The function body node will output braces.
-                ASSERT(IsSequence(body));
-                body->traverse(this);
+                (*sequence)[1]->traverse(this);
                 mInsideFunction = false;
             }
-            else
-            {
-                out << "{}\n";
-            }
 
-            mCurrentFunctionMetadata = nullptr;
+            out << "}\n";
 
-            bool needsLod0 = mASTMetadataList[index].mNeedsLod0;
-            if (needsLod0 && !mOutputLod0Function && mShaderType == GL_FRAGMENT_SHADER)
+            if (mContainsLoopDiscontinuity && !mOutputLod0Function)
             {
-                ASSERT(name != "main");
-                mOutputLod0Function = true;
-                node->traverse(this);
-                mOutputLod0Function = false;
+                if (name != "main")
+                {
+                    mOutputLod0Function = true;
+                    node->traverse(this);
+                    mOutputLod0Function = false;
+                }
             }
 
             return false;
@@ -1660,37 +2041,137 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
         break;
       case EOpFunctionCall:
         {
+            TString name = TFunction::unmangleName(node->getName());
+            bool lod0 = mInsideDiscontinuousLoop || mOutputLod0Function;
             TIntermSequence *arguments = node->getSequence();
 
-            bool lod0 = mInsideDiscontinuousLoop || mOutputLod0Function;
             if (node->isUserDefined())
             {
-                if (node->isArray())
-                {
-                    UNIMPLEMENTED();
-                }
-                size_t index = mCallDag.findIndex(node);
-                ASSERT(index != CallDAG::InvalidIndex);
-                lod0 &= mASTMetadataList[index].mNeedsLod0;
-
-                out << DecorateFunctionIfNeeded(node->getNameObj());
-                out << DisambiguateFunctionName(node->getSequence());
-                out << (lod0 ? "Lod0(" : "(");
+                out << Decorate(name) << (lod0 ? "Lod0(" : "(");
             }
             else
             {
-                TString name           = TFunction::unmangleName(node->getNameObj().getString());
                 TBasicType samplerType = (*arguments)[0]->getAsTyped()->getType().getBasicType();
-                int coords                  = (*arguments)[1]->getAsTyped()->getNominalSize();
-                TString textureFunctionName = mTextureFunctionHLSL->useTextureFunction(
-                    name, samplerType, coords, arguments->size(), lod0, mShaderType);
-                out << textureFunctionName << "(";
+
+                TextureFunction textureFunction;
+                textureFunction.sampler = samplerType;
+                textureFunction.coords = (*arguments)[1]->getAsTyped()->getNominalSize();
+                textureFunction.method = TextureFunction::IMPLICIT;
+                textureFunction.proj = false;
+                textureFunction.offset = false;
+
+                if (name == "texture2D" || name == "textureCube" || name == "texture")
+                {
+                    textureFunction.method = TextureFunction::IMPLICIT;
+                }
+                else if (name == "texture2DProj" || name == "textureProj")
+                {
+                    textureFunction.method = TextureFunction::IMPLICIT;
+                    textureFunction.proj = true;
+                }
+                else if (name == "texture2DLod" || name == "textureCubeLod" || name == "textureLod" ||
+                         name == "texture2DLodEXT" || name == "textureCubeLodEXT")
+                {
+                    textureFunction.method = TextureFunction::LOD;
+                }
+                else if (name == "texture2DProjLod" || name == "textureProjLod" || name == "texture2DProjLodEXT")
+                {
+                    textureFunction.method = TextureFunction::LOD;
+                    textureFunction.proj = true;
+                }
+                else if (name == "textureSize")
+                {
+                    textureFunction.method = TextureFunction::SIZE;
+                }
+                else if (name == "textureOffset")
+                {
+                    textureFunction.method = TextureFunction::IMPLICIT;
+                    textureFunction.offset = true;
+                }
+                else if (name == "textureProjOffset")
+                {
+                    textureFunction.method = TextureFunction::IMPLICIT;
+                    textureFunction.offset = true;
+                    textureFunction.proj = true;
+                }
+                else if (name == "textureLodOffset")
+                {
+                    textureFunction.method = TextureFunction::LOD;
+                    textureFunction.offset = true;
+                }
+                else if (name == "textureProjLodOffset")
+                {
+                    textureFunction.method = TextureFunction::LOD;
+                    textureFunction.proj = true;
+                    textureFunction.offset = true;
+                }
+                else if (name == "texelFetch")
+                {
+                    textureFunction.method = TextureFunction::FETCH;
+                }
+                else if (name == "texelFetchOffset")
+                {
+                    textureFunction.method = TextureFunction::FETCH;
+                    textureFunction.offset = true;
+                }
+                else if (name == "textureGrad" || name == "texture2DGradEXT")
+                {
+                    textureFunction.method = TextureFunction::GRAD;
+                }
+                else if (name == "textureGradOffset")
+                {
+                    textureFunction.method = TextureFunction::GRAD;
+                    textureFunction.offset = true;
+                }
+                else if (name == "textureProjGrad" || name == "texture2DProjGradEXT" || name == "textureCubeGradEXT")
+                {
+                    textureFunction.method = TextureFunction::GRAD;
+                    textureFunction.proj = true;
+                }
+                else if (name == "textureProjGradOffset")
+                {
+                    textureFunction.method = TextureFunction::GRAD;
+                    textureFunction.proj = true;
+                    textureFunction.offset = true;
+                }
+                else UNREACHABLE();
+
+                if (textureFunction.method == TextureFunction::IMPLICIT)   // Could require lod 0 or have a bias argument
+                {
+                    unsigned int mandatoryArgumentCount = 2;   // All functions have sampler and coordinate arguments
+
+                    if (textureFunction.offset)
+                    {
+                        mandatoryArgumentCount++;
+                    }
+
+                    bool bias = (arguments->size() > mandatoryArgumentCount);   // Bias argument is optional
+
+                    if (lod0 || mContext.shaderType == GL_VERTEX_SHADER)
+                    {
+                        if (bias)
+                        {
+                            textureFunction.method = TextureFunction::LOD0BIAS;
+                        }
+                        else
+                        {
+                            textureFunction.method = TextureFunction::LOD0;
+                        }
+                    }
+                    else if (bias)
+                    {
+                        textureFunction.method = TextureFunction::BIAS;
+                    }
+                }
+
+                mUsesTexture.insert(textureFunction);
+
+                out << textureFunction.name();
             }
 
             for (TIntermSequence::iterator arg = arguments->begin(); arg != arguments->end(); arg++)
             {
-                TIntermTyped *typedArg = (*arg)->getAsTyped();
-                if (mOutputType == SH_HLSL_4_0_FL9_3_OUTPUT && IsSampler(typedArg->getBasicType()))
+                if (mOutputType == SH_HLSL11_OUTPUT && IsSampler((*arg)->getAsTyped()->getBasicType()))
                 {
                     out << "texture_";
                     (*arg)->traverse(this);
@@ -1698,30 +2179,6 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
                 }
 
                 (*arg)->traverse(this);
-
-                if (typedArg->getType().isStructureContainingSamplers())
-                {
-                    const TType &argType = typedArg->getType();
-                    TVector<TIntermSymbol *> samplerSymbols;
-                    TString structName = samplerNamePrefixFromStruct(typedArg);
-                    argType.createSamplerSymbols("angle_" + structName, "",
-                                                 argType.isArray() ? argType.getArraySize() : 0,
-                                                 &samplerSymbols, nullptr);
-                    for (const TIntermSymbol *sampler : samplerSymbols)
-                    {
-                        if (mOutputType == SH_HLSL_4_0_FL9_3_OUTPUT)
-                        {
-                            out << ", texture_" << sampler->getSymbol();
-                            out << ", sampler_" << sampler->getSymbol();
-                        }
-                        else
-                        {
-                            // In case of HLSL 4.1+, this symbol is the sampler index, and in case
-                            // of D3D9, it's the sampler variable.
-                            out << ", " + sampler->getSymbol();
-                        }
-                    }
-                }
 
                 if (arg < arguments->end() - 1)
                 {
@@ -1734,302 +2191,168 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
             return false;
         }
         break;
-        case EOpParameters:
-            outputTriplet(out, visit, "(", ", ", ")\n{\n");
-            break;
-        case EOpConstructFloat:
-            outputConstructor(out, visit, node->getType(), "vec1", node->getSequence());
-            break;
-        case EOpConstructVec2:
-            outputConstructor(out, visit, node->getType(), "vec2", node->getSequence());
-            break;
-        case EOpConstructVec3:
-            outputConstructor(out, visit, node->getType(), "vec3", node->getSequence());
-            break;
-        case EOpConstructVec4:
-            outputConstructor(out, visit, node->getType(), "vec4", node->getSequence());
-            break;
-        case EOpConstructBool:
-            outputConstructor(out, visit, node->getType(), "bvec1", node->getSequence());
-            break;
-        case EOpConstructBVec2:
-            outputConstructor(out, visit, node->getType(), "bvec2", node->getSequence());
-            break;
-        case EOpConstructBVec3:
-            outputConstructor(out, visit, node->getType(), "bvec3", node->getSequence());
-            break;
-        case EOpConstructBVec4:
-            outputConstructor(out, visit, node->getType(), "bvec4", node->getSequence());
-            break;
-        case EOpConstructInt:
-            outputConstructor(out, visit, node->getType(), "ivec1", node->getSequence());
-            break;
-        case EOpConstructIVec2:
-            outputConstructor(out, visit, node->getType(), "ivec2", node->getSequence());
-            break;
-        case EOpConstructIVec3:
-            outputConstructor(out, visit, node->getType(), "ivec3", node->getSequence());
-            break;
-        case EOpConstructIVec4:
-            outputConstructor(out, visit, node->getType(), "ivec4", node->getSequence());
-            break;
-        case EOpConstructUInt:
-            outputConstructor(out, visit, node->getType(), "uvec1", node->getSequence());
-            break;
-        case EOpConstructUVec2:
-            outputConstructor(out, visit, node->getType(), "uvec2", node->getSequence());
-            break;
-        case EOpConstructUVec3:
-            outputConstructor(out, visit, node->getType(), "uvec3", node->getSequence());
-            break;
-        case EOpConstructUVec4:
-            outputConstructor(out, visit, node->getType(), "uvec4", node->getSequence());
-            break;
-        case EOpConstructMat2:
-            outputConstructor(out, visit, node->getType(), "mat2", node->getSequence());
-            break;
-        case EOpConstructMat2x3:
-            outputConstructor(out, visit, node->getType(), "mat2x3", node->getSequence());
-            break;
-        case EOpConstructMat2x4:
-            outputConstructor(out, visit, node->getType(), "mat2x4", node->getSequence());
-            break;
-        case EOpConstructMat3x2:
-            outputConstructor(out, visit, node->getType(), "mat3x2", node->getSequence());
-            break;
-        case EOpConstructMat3:
-            outputConstructor(out, visit, node->getType(), "mat3", node->getSequence());
-            break;
-        case EOpConstructMat3x4:
-            outputConstructor(out, visit, node->getType(), "mat3x4", node->getSequence());
-            break;
-        case EOpConstructMat4x2:
-            outputConstructor(out, visit, node->getType(), "mat4x2", node->getSequence());
-            break;
-        case EOpConstructMat4x3:
-            outputConstructor(out, visit, node->getType(), "mat4x3", node->getSequence());
-            break;
-        case EOpConstructMat4:
-            outputConstructor(out, visit, node->getType(), "mat4", node->getSequence());
-            break;
+      case EOpParameters:       outputTriplet(visit, "(", ", ", ")\n{\n");                                break;
+      case EOpConstructFloat:   outputConstructor(visit, node->getType(), "vec1", node->getSequence());  break;
+      case EOpConstructVec2:    outputConstructor(visit, node->getType(), "vec2", node->getSequence());  break;
+      case EOpConstructVec3:    outputConstructor(visit, node->getType(), "vec3", node->getSequence());  break;
+      case EOpConstructVec4:    outputConstructor(visit, node->getType(), "vec4", node->getSequence());  break;
+      case EOpConstructBool:    outputConstructor(visit, node->getType(), "bvec1", node->getSequence()); break;
+      case EOpConstructBVec2:   outputConstructor(visit, node->getType(), "bvec2", node->getSequence()); break;
+      case EOpConstructBVec3:   outputConstructor(visit, node->getType(), "bvec3", node->getSequence()); break;
+      case EOpConstructBVec4:   outputConstructor(visit, node->getType(), "bvec4", node->getSequence()); break;
+      case EOpConstructInt:     outputConstructor(visit, node->getType(), "ivec1", node->getSequence()); break;
+      case EOpConstructIVec2:   outputConstructor(visit, node->getType(), "ivec2", node->getSequence()); break;
+      case EOpConstructIVec3:   outputConstructor(visit, node->getType(), "ivec3", node->getSequence()); break;
+      case EOpConstructIVec4:   outputConstructor(visit, node->getType(), "ivec4", node->getSequence()); break;
+      case EOpConstructUInt:    outputConstructor(visit, node->getType(), "uvec1", node->getSequence()); break;
+      case EOpConstructUVec2:   outputConstructor(visit, node->getType(), "uvec2", node->getSequence()); break;
+      case EOpConstructUVec3:   outputConstructor(visit, node->getType(), "uvec3", node->getSequence()); break;
+      case EOpConstructUVec4:   outputConstructor(visit, node->getType(), "uvec4", node->getSequence()); break;
+      case EOpConstructMat2:    outputConstructor(visit, node->getType(), "mat2", node->getSequence());  break;
+      case EOpConstructMat3:    outputConstructor(visit, node->getType(), "mat3", node->getSequence());  break;
+      case EOpConstructMat4:    outputConstructor(visit, node->getType(), "mat4", node->getSequence());  break;
       case EOpConstructStruct:
         {
-            if (node->getType().isArray())
-            {
-                UNIMPLEMENTED();
-            }
             const TString &structName = StructNameString(*node->getType().getStruct());
             mStructureHLSL->addConstructor(node->getType(), structName, node->getSequence());
-            outputTriplet(out, visit, (structName + "_ctor(").c_str(), ", ", ")");
+            outputTriplet(visit, structName + "_ctor(", ", ", ")");
         }
         break;
-        case EOpLessThan:
-            outputTriplet(out, visit, "(", " < ", ")");
-            break;
-        case EOpGreaterThan:
-            outputTriplet(out, visit, "(", " > ", ")");
-            break;
-        case EOpLessThanEqual:
-            outputTriplet(out, visit, "(", " <= ", ")");
-            break;
-        case EOpGreaterThanEqual:
-            outputTriplet(out, visit, "(", " >= ", ")");
-            break;
-        case EOpVectorEqual:
-            outputTriplet(out, visit, "(", " == ", ")");
-            break;
-        case EOpVectorNotEqual:
-            outputTriplet(out, visit, "(", " != ", ")");
-            break;
+      case EOpLessThan:         outputTriplet(visit, "(", " < ", ")");                 break;
+      case EOpGreaterThan:      outputTriplet(visit, "(", " > ", ")");                 break;
+      case EOpLessThanEqual:    outputTriplet(visit, "(", " <= ", ")");                break;
+      case EOpGreaterThanEqual: outputTriplet(visit, "(", " >= ", ")");                break;
+      case EOpVectorEqual:      outputTriplet(visit, "(", " == ", ")");                break;
+      case EOpVectorNotEqual:   outputTriplet(visit, "(", " != ", ")");                break;
       case EOpMod:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "mod(");
+        {
+            // We need to look at the number of components in both arguments
+            const int modValue = (*node->getSequence())[0]->getAsTyped()->getNominalSize() * 10 +
+                (*node->getSequence())[1]->getAsTyped()->getNominalSize();
+            switch (modValue)
+            {
+              case 11: mUsesMod1 = true; break;
+              case 22: mUsesMod2v = true; break;
+              case 21: mUsesMod2f = true; break;
+              case 33: mUsesMod3v = true; break;
+              case 31: mUsesMod3f = true; break;
+              case 44: mUsesMod4v = true; break;
+              case 41: mUsesMod4f = true; break;
+              default: UNREACHABLE();
+            }
+
+            outputTriplet(visit, "mod(", ", ", ")");
+        }
         break;
-      case EOpModf:
-          outputTriplet(out, visit, "modf(", ", ", ")");
-          break;
-      case EOpPow:
-          outputTriplet(out, visit, "pow(", ", ", ")");
-          break;
+      case EOpPow:              outputTriplet(visit, "pow(", ", ", ")");               break;
       case EOpAtan:
         ASSERT(node->getSequence()->size() == 2);   // atan(x) is a unary operator
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "atan(");
-        break;
-      case EOpMin:
-          outputTriplet(out, visit, "min(", ", ", ")");
-          break;
-      case EOpMax:
-          outputTriplet(out, visit, "max(", ", ", ")");
-          break;
-      case EOpClamp:
-          outputTriplet(out, visit, "clamp(", ", ", ")");
-          break;
-      case EOpMix:
+        switch ((*node->getSequence())[0]->getAsTyped()->getNominalSize())
         {
-            TIntermTyped *lastParamNode = (*(node->getSequence()))[2]->getAsTyped();
-            if (lastParamNode->getType().getBasicType() == EbtBool)
+          case 1: mUsesAtan2_1 = true; break;
+          case 2: mUsesAtan2_2 = true; break;
+          case 3: mUsesAtan2_3 = true; break;
+          case 4: mUsesAtan2_4 = true; break;
+          default: UNREACHABLE();
+        }
+        outputTriplet(visit, "atanyx(", ", ", ")");
+        break;
+      case EOpMin:           outputTriplet(visit, "min(", ", ", ")");           break;
+      case EOpMax:           outputTriplet(visit, "max(", ", ", ")");           break;
+      case EOpClamp:         outputTriplet(visit, "clamp(", ", ", ")");         break;
+      case EOpMix:           outputTriplet(visit, "lerp(", ", ", ")");          break;
+      case EOpStep:          outputTriplet(visit, "step(", ", ", ")");          break;
+      case EOpSmoothStep:    outputTriplet(visit, "smoothstep(", ", ", ")");    break;
+      case EOpDistance:      outputTriplet(visit, "distance(", ", ", ")");      break;
+      case EOpDot:           outputTriplet(visit, "dot(", ", ", ")");           break;
+      case EOpCross:         outputTriplet(visit, "cross(", ", ", ")");         break;
+      case EOpFaceForward:
+        {
+            switch ((*node->getSequence())[0]->getAsTyped()->getNominalSize())   // Number of components in the first argument
             {
-                // There is no HLSL equivalent for ESSL3 built-in "genType mix (genType x, genType y, genBType a)",
-                // so use emulated version.
-                ASSERT(node->getUseEmulatedFunction());
-                writeEmulatedFunctionTriplet(out, visit, "mix(");
+            case 1: mUsesFaceforward1 = true; break;
+            case 2: mUsesFaceforward2 = true; break;
+            case 3: mUsesFaceforward3 = true; break;
+            case 4: mUsesFaceforward4 = true; break;
+            default: UNREACHABLE();
             }
-            else
-            {
-                outputTriplet(out, visit, "lerp(", ", ", ")");
-            }
+
+            outputTriplet(visit, "faceforward(", ", ", ")");
         }
         break;
-        case EOpStep:
-            outputTriplet(out, visit, "step(", ", ", ")");
-            break;
-        case EOpSmoothStep:
-            outputTriplet(out, visit, "smoothstep(", ", ", ")");
-            break;
-        case EOpDistance:
-            outputTriplet(out, visit, "distance(", ", ", ")");
-            break;
-        case EOpDot:
-            outputTriplet(out, visit, "dot(", ", ", ")");
-            break;
-        case EOpCross:
-            outputTriplet(out, visit, "cross(", ", ", ")");
-            break;
-      case EOpFaceForward:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "faceforward(");
-        break;
-      case EOpReflect:
-          outputTriplet(out, visit, "reflect(", ", ", ")");
-          break;
-      case EOpRefract:
-          outputTriplet(out, visit, "refract(", ", ", ")");
-          break;
-      case EOpOuterProduct:
-        ASSERT(node->getUseEmulatedFunction());
-        writeEmulatedFunctionTriplet(out, visit, "outerProduct(");
-        break;
-      case EOpMul:
-          outputTriplet(out, visit, "(", " * ", ")");
-          break;
+      case EOpReflect:       outputTriplet(visit, "reflect(", ", ", ")");       break;
+      case EOpRefract:       outputTriplet(visit, "refract(", ", ", ")");       break;
+      case EOpMul:           outputTriplet(visit, "(", " * ", ")");             break;
       default: UNREACHABLE();
     }
 
     return true;
 }
 
-void OutputHLSL::writeSelection(TInfoSinkBase &out, TIntermSelection *node)
-{
-    out << "if (";
-
-    node->getCondition()->traverse(this);
-
-    out << ")\n";
-
-    outputLineDirective(out, node->getLine().first_line);
-
-    bool discard = false;
-
-    if (node->getTrueBlock())
-    {
-        // The trueBlock child node will output braces.
-        ASSERT(IsSequence(node->getTrueBlock()));
-
-        node->getTrueBlock()->traverse(this);
-
-        // Detect true discard
-        discard = (discard || FindDiscard::search(node->getTrueBlock()));
-    }
-    else
-    {
-        // TODO(oetuaho): Check if the semicolon inside is necessary.
-        // It's there as a result of conservative refactoring of the output.
-        out << "{;}\n";
-    }
-
-    outputLineDirective(out, node->getLine().first_line);
-
-    if (node->getFalseBlock())
-    {
-        out << "else\n";
-
-        outputLineDirective(out, node->getFalseBlock()->getLine().first_line);
-
-        // Either this is "else if" or the falseBlock child node will output braces.
-        ASSERT(IsSequence(node->getFalseBlock()) || node->getFalseBlock()->getAsSelectionNode() != nullptr);
-
-        node->getFalseBlock()->traverse(this);
-
-        outputLineDirective(out, node->getFalseBlock()->getLine().first_line);
-
-        // Detect false discard
-        discard = (discard || FindDiscard::search(node->getFalseBlock()));
-    }
-
-    // ANGLE issue 486: Detect problematic conditional discard
-    if (discard)
-    {
-        mUsesDiscardRewriting = true;
-    }
-}
-
 bool OutputHLSL::visitSelection(Visit visit, TIntermSelection *node)
 {
-    TInfoSinkBase &out = getInfoSink();
+    TInfoSinkBase &out = mBody;
 
-    ASSERT(!node->usesTernaryOperator());
-    ASSERT(mInsideFunction);
-
-    // D3D errors when there is a gradient operation in a loop in an unflattened if.
-    if (mShaderType == GL_FRAGMENT_SHADER && mCurrentFunctionMetadata->hasGradientLoop(node))
+    if (node->usesTernaryOperator())
     {
-        out << "FLATTEN ";
+        out << "s" << mUnfoldShortCircuit->getNextTemporaryIndex();
     }
+    else  // if/else statement
+    {
+        mUnfoldShortCircuit->traverse(node->getCondition());
 
-    writeSelection(out, node);
+        out << "FLATTEN if (";
+
+        node->getCondition()->traverse(this);
+
+        out << ")\n";
+
+        outputLineDirective(node->getLine().first_line);
+        out << "{\n";
+
+        bool discard = false;
+
+        if (node->getTrueBlock())
+        {
+            traverseStatements(node->getTrueBlock());
+
+            // Detect true discard
+            discard = (discard || FindDiscard::search(node->getTrueBlock()));
+        }
+
+        outputLineDirective(node->getLine().first_line);
+        out << ";\n}\n";
+
+        if (node->getFalseBlock())
+        {
+            out << "else\n";
+
+            outputLineDirective(node->getFalseBlock()->getLine().first_line);
+            out << "{\n";
+
+            outputLineDirective(node->getFalseBlock()->getLine().first_line);
+            traverseStatements(node->getFalseBlock());
+
+            outputLineDirective(node->getFalseBlock()->getLine().first_line);
+            out << ";\n}\n";
+
+            // Detect false discard
+            discard = (discard || FindDiscard::search(node->getFalseBlock()));
+        }
+
+        // ANGLE issue 486: Detect problematic conditional discard
+        if (discard && FindSideEffectRewriting::search(node))
+        {
+            mUsesDiscardRewriting = true;
+        }
+    }
 
     return false;
 }
 
-bool OutputHLSL::visitSwitch(Visit visit, TIntermSwitch *node)
-{
-    TInfoSinkBase &out = getInfoSink();
-
-    if (node->getStatementList())
-    {
-        node->setStatementList(RemoveSwitchFallThrough::removeFallThrough(node->getStatementList()));
-        outputTriplet(out, visit, "switch (", ") ", "");
-        // The curly braces get written when visiting the statementList aggregate
-    }
-    else
-    {
-        // No statementList, so it won't output curly braces
-        outputTriplet(out, visit, "switch (", ") {", "}\n");
-    }
-    return true;
-}
-
-bool OutputHLSL::visitCase(Visit visit, TIntermCase *node)
-{
-    TInfoSinkBase &out = getInfoSink();
-
-    if (node->hasCondition())
-    {
-        outputTriplet(out, visit, "case (", "", "):\n");
-        return true;
-    }
-    else
-    {
-        out << "default:\n";
-        return false;
-    }
-}
-
 void OutputHLSL::visitConstantUnion(TIntermConstantUnion *node)
 {
-    TInfoSinkBase &out = getInfoSink();
-    writeConstantUnion(out, node->getType(), node->getUnionArrayPointer());
+    writeConstantUnion(node->getType(), node->getUnionArrayPointer());
 }
 
 bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
@@ -2037,14 +2360,15 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
     mNestedLoopDepth++;
 
     bool wasDiscontinuous = mInsideDiscontinuousLoop;
-    mInsideDiscontinuousLoop = mInsideDiscontinuousLoop ||
-    mCurrentFunctionMetadata->mDiscontinuousLoops.count(node) > 0;
 
-    TInfoSinkBase &out = getInfoSink();
-
-    if (mOutputType == SH_HLSL_3_0_OUTPUT)
+    if (mContainsLoopDiscontinuity && !mInsideDiscontinuousLoop)
     {
-        if (handleExcessiveLoop(out, node))
+        mInsideDiscontinuousLoop = containsLoopDiscontinuity(node);
+    }
+
+    if (mOutputType == SH_HLSL9_OUTPUT)
+    {
+        if (handleExcessiveLoop(node))
         {
             mInsideDiscontinuousLoop = wasDiscontinuous;
             mNestedLoopDepth--;
@@ -2053,16 +2377,18 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
         }
     }
 
-    const char *unroll = mCurrentFunctionMetadata->hasGradientInCallGraph(node) ? "LOOP" : "";
+    TInfoSinkBase &out = mBody;
+
     if (node->getType() == ELoopDoWhile)
     {
-        out << "{" << unroll << " do\n";
+        out << "{LOOP do\n";
 
-        outputLineDirective(out, node->getLine().first_line);
+        outputLineDirective(node->getLine().first_line);
+        out << "{\n";
     }
     else
     {
-        out << "{" << unroll << " for(";
+        out << "{LOOP for(";
 
         if (node->getInit())
         {
@@ -2085,27 +2411,21 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
 
         out << ")\n";
 
-        outputLineDirective(out, node->getLine().first_line);
+        outputLineDirective(node->getLine().first_line);
+        out << "{\n";
     }
 
     if (node->getBody())
     {
-        // The loop body node will output braces.
-        ASSERT(IsSequence(node->getBody()));
-        node->getBody()->traverse(this);
-    }
-    else
-    {
-        // TODO(oetuaho): Check if the semicolon inside is necessary.
-        // It's there as a result of conservative refactoring of the output.
-        out << "{;}\n";
+        traverseStatements(node->getBody());
     }
 
-    outputLineDirective(out, node->getLine().first_line);
+    outputLineDirective(node->getLine().first_line);
+    out << ";}\n";
 
     if (node->getType() == ELoopDoWhile)
     {
-        outputLineDirective(out, node->getCondition()->getLine().first_line);
+        outputLineDirective(node->getCondition()->getLine().first_line);
         out << "while(\n";
 
         node->getCondition()->traverse(this);
@@ -2123,12 +2443,12 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
 
 bool OutputHLSL::visitBranch(Visit visit, TIntermBranch *node)
 {
-    TInfoSinkBase &out = getInfoSink();
+    TInfoSinkBase &out = mBody;
 
     switch (node->getFlowOp())
     {
       case EOpKill:
-          outputTriplet(out, visit, "discard;\n", "", "");
+        outputTriplet(visit, "discard;\n", "", "");
         break;
       case EOpBreak:
         if (visit == PreVisit)
@@ -2150,9 +2470,7 @@ bool OutputHLSL::visitBranch(Visit visit, TIntermBranch *node)
             }
         }
         break;
-      case EOpContinue:
-          outputTriplet(out, visit, "continue;\n", "", "");
-          break;
+      case EOpContinue: outputTriplet(visit, "continue;\n", "", ""); break;
       case EOpReturn:
         if (visit == PreVisit)
         {
@@ -2177,6 +2495,16 @@ bool OutputHLSL::visitBranch(Visit visit, TIntermBranch *node)
     }
 
     return true;
+}
+
+void OutputHLSL::traverseStatements(TIntermNode *node)
+{
+    if (isSingleStatement(node))
+    {
+        mUnfoldShortCircuit->traverse(node);
+    }
+
+    node->traverse(this);
 }
 
 bool OutputHLSL::isSingleStatement(TIntermNode *node)
@@ -2214,9 +2542,10 @@ bool OutputHLSL::isSingleStatement(TIntermNode *node)
 
 // Handle loops with more than 254 iterations (unsupported by D3D9) by splitting them
 // (The D3D documentation says 255 iterations, but the compiler complains at anything more than 254).
-bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
+bool OutputHLSL::handleExcessiveLoop(TIntermLoop *node)
 {
     const int MAX_LOOP_ITERATIONS = 254;
+    TInfoSinkBase &out = mBody;
 
     // Parse loops of the form:
     // for(int index = initial; index [comparator] limit; index += increment)
@@ -2365,9 +2694,8 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
                 }
 
                 // for(int index = initial; index < clampedLimit; index += increment)
-                const char *unroll = mCurrentFunctionMetadata->hasGradientInCallGraph(node) ? "LOOP" : "";
 
-                out << unroll << " for(";
+                out << "LOOP for(";
                 index->traverse(this);
                 out << " = ";
                 out << initial;
@@ -2383,7 +2711,7 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
                 out << increment;
                 out << ")\n";
 
-                outputLineDirective(out, node->getLine().first_line);
+                outputLineDirective(node->getLine().first_line);
                 out << "{\n";
 
                 if (node->getBody())
@@ -2391,7 +2719,7 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
                     node->getBody()->traverse(this);
                 }
 
-                outputLineDirective(out, node->getLine().first_line);
+                outputLineDirective(node->getLine().first_line);
                 out << ";}\n";
 
                 if (!firstLoopFragment)
@@ -2417,12 +2745,10 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
     return false;   // Not handled as an excessive loop
 }
 
-void OutputHLSL::outputTriplet(TInfoSinkBase &out,
-                               Visit visit,
-                               const char *preString,
-                               const char *inString,
-                               const char *postString)
+void OutputHLSL::outputTriplet(Visit visit, const TString &preString, const TString &inString, const TString &postString)
 {
+    TInfoSinkBase &out = mBody;
+
     if (visit == PreVisit)
     {
         out << preString;
@@ -2437,98 +2763,44 @@ void OutputHLSL::outputTriplet(TInfoSinkBase &out,
     }
 }
 
-void OutputHLSL::outputLineDirective(TInfoSinkBase &out, int line)
+void OutputHLSL::outputLineDirective(int line)
 {
-    if ((mCompileOptions & SH_LINE_DIRECTIVES) && (line > 0))
+    if ((mContext.compileOptions & SH_LINE_DIRECTIVES) && (line > 0))
     {
-        out << "\n";
-        out << "#line " << line;
+        mBody << "\n";
+        mBody << "#line " << line;
 
-        if (mSourcePath)
+        if (mContext.sourcePath)
         {
-            out << " \"" << mSourcePath << "\"";
+            mBody << " \"" << mContext.sourcePath << "\"";
         }
 
-        out << "\n";
+        mBody << "\n";
     }
 }
 
 TString OutputHLSL::argumentString(const TIntermSymbol *symbol)
 {
     TQualifier qualifier = symbol->getQualifier();
-    const TType &type    = symbol->getType();
-    const TName &name    = symbol->getName();
-    TString nameStr;
+    const TType &type = symbol->getType();
+    TString name = symbol->getSymbol();
 
-    if (name.getString().empty())  // HLSL demands named arguments, also for prototypes
+    if (name.empty())   // HLSL demands named arguments, also for prototypes
     {
-        nameStr = "x" + str(mUniqueIndex++);
+        name = "x" + str(mUniqueIndex++);
     }
     else
     {
-        nameStr = DecorateIfNeeded(name);
+        name = Decorate(name);
     }
 
-    if (IsSampler(type.getBasicType()))
+    if (mOutputType == SH_HLSL11_OUTPUT && IsSampler(type.getBasicType()))
     {
-        if (mOutputType == SH_HLSL_4_1_OUTPUT)
-        {
-            // Samplers are passed as indices to the sampler array.
-            ASSERT(qualifier != EvqOut && qualifier != EvqInOut);
-            return "const uint " + nameStr + ArrayString(type);
-        }
-        if (mOutputType == SH_HLSL_4_0_FL9_3_OUTPUT)
-        {
-            return QualifierString(qualifier) + " " + TextureString(type.getBasicType()) +
-                   " texture_" + nameStr + ArrayString(type) + ", " + QualifierString(qualifier) +
-                   " " + SamplerString(type.getBasicType()) + " sampler_" + nameStr +
-                   ArrayString(type);
-        }
+        return QualifierString(qualifier) + " " + TextureString(type) + " texture_" + name + ArrayString(type) + ", " +
+               QualifierString(qualifier) + " " + SamplerString(type) + " sampler_" + name + ArrayString(type);
     }
 
-    TStringStream argString;
-    argString << QualifierString(qualifier) << " " << TypeString(type) << " " << nameStr
-              << ArrayString(type);
-
-    // If the structure parameter contains samplers, they need to be passed into the function as
-    // separate parameters. HLSL doesn't natively support samplers in structs.
-    if (type.isStructureContainingSamplers())
-    {
-        ASSERT(qualifier != EvqOut && qualifier != EvqInOut);
-        TVector<TIntermSymbol *> samplerSymbols;
-        type.createSamplerSymbols("angle" + nameStr, "", 0, &samplerSymbols, nullptr);
-        for (const TIntermSymbol *sampler : samplerSymbols)
-        {
-            if (mOutputType == SH_HLSL_4_1_OUTPUT)
-            {
-                argString << ", const uint " << sampler->getSymbol() << ArrayString(type);
-            }
-            else if (mOutputType == SH_HLSL_4_0_FL9_3_OUTPUT)
-            {
-                const TType &samplerType = sampler->getType();
-                ASSERT((!type.isArray() && !samplerType.isArray()) ||
-                       type.getArraySize() == samplerType.getArraySize());
-                ASSERT(IsSampler(samplerType.getBasicType()));
-                argString << ", " << QualifierString(qualifier) << " "
-                          << TextureString(samplerType.getBasicType()) << " texture_"
-                          << sampler->getSymbol() << ArrayString(type) << ", "
-                          << QualifierString(qualifier) << " "
-                          << SamplerString(samplerType.getBasicType()) << " sampler_"
-                          << sampler->getSymbol() << ArrayString(type);
-            }
-            else
-            {
-                const TType &samplerType = sampler->getType();
-                ASSERT((!type.isArray() && !samplerType.isArray()) ||
-                       type.getArraySize() == samplerType.getArraySize());
-                ASSERT(IsSampler(samplerType.getBasicType()));
-                argString << ", " << QualifierString(qualifier) << " " << TypeString(samplerType)
-                          << " " << sampler->getSymbol() << ArrayString(type);
-            }
-        }
-    }
-
-    return argString.str();
+    return QualifierString(qualifier) + " " + TypeString(type) + " " + name + ArrayString(type);
 }
 
 TString OutputHLSL::initializer(const TType &type)
@@ -2549,22 +2821,15 @@ TString OutputHLSL::initializer(const TType &type)
     return "{" + string + "}";
 }
 
-void OutputHLSL::outputConstructor(TInfoSinkBase &out,
-                                   Visit visit,
-                                   const TType &type,
-                                   const char *name,
-                                   const TIntermSequence *parameters)
+void OutputHLSL::outputConstructor(Visit visit, const TType &type, const TString &name, const TIntermSequence *parameters)
 {
-    if (type.isArray())
-    {
-        UNIMPLEMENTED();
-    }
+    TInfoSinkBase &out = mBody;
 
     if (visit == PreVisit)
     {
-        TString constructorName = mStructureHLSL->addConstructor(type, name, parameters);
+        mStructureHLSL->addConstructor(type, name, parameters);
 
-        out << constructorName << "(";
+        out << name + "(";
     }
     else if (visit == InVisit)
     {
@@ -2576,11 +2841,9 @@ void OutputHLSL::outputConstructor(TInfoSinkBase &out,
     }
 }
 
-const TConstantUnion *OutputHLSL::writeConstantUnion(TInfoSinkBase &out,
-                                                     const TType &type,
-                                                     const TConstantUnion *const constUnion)
+const ConstantUnion *OutputHLSL::writeConstantUnion(const TType &type, const ConstantUnion *constUnion)
 {
-    const TConstantUnion *constUnionIterated = constUnion;
+    TInfoSinkBase &out = mBody;
 
     const TStructure* structure = type.getStruct();
     if (structure)
@@ -2592,7 +2855,7 @@ const TConstantUnion *OutputHLSL::writeConstantUnion(TInfoSinkBase &out,
         for (size_t i = 0; i < fields.size(); i++)
         {
             const TType *fieldType = fields[i]->type();
-            constUnionIterated     = writeConstantUnion(out, *fieldType, constUnionIterated);
+            constUnion = writeConstantUnion(*fieldType, constUnion);
 
             if (i != fields.size() - 1)
             {
@@ -2611,289 +2874,31 @@ const TConstantUnion *OutputHLSL::writeConstantUnion(TInfoSinkBase &out,
         {
             out << TypeString(type) << "(";
         }
-        constUnionIterated = WriteConstantUnionArray(out, constUnionIterated, size);
+
+        for (size_t i = 0; i < size; i++, constUnion++)
+        {
+            switch (constUnion->getType())
+            {
+              case EbtFloat: out << std::min(FLT_MAX, std::max(-FLT_MAX, constUnion->getFConst())); break;
+              case EbtInt:   out << constUnion->getIConst(); break;
+              case EbtUInt:  out << constUnion->getUConst(); break;
+              case EbtBool:  out << constUnion->getBConst(); break;
+              default: UNREACHABLE();
+            }
+
+            if (i != size - 1)
+            {
+                out << ", ";
+            }
+        }
+
         if (writeType)
         {
             out << ")";
         }
     }
 
-    return constUnionIterated;
+    return constUnion;
 }
-
-void OutputHLSL::writeEmulatedFunctionTriplet(TInfoSinkBase &out, Visit visit, const char *preStr)
-{
-    TString preString = BuiltInFunctionEmulator::GetEmulatedFunctionName(preStr);
-    outputTriplet(out, visit, preString.c_str(), ", ", ")");
-}
-
-bool OutputHLSL::writeSameSymbolInitializer(TInfoSinkBase &out, TIntermSymbol *symbolNode, TIntermTyped *expression)
-{
-    sh::SearchSymbol searchSymbol(symbolNode->getSymbol());
-    expression->traverse(&searchSymbol);
-
-    if (searchSymbol.foundMatch())
-    {
-        // Type already printed
-        out << "t" + str(mUniqueIndex) + " = ";
-        expression->traverse(this);
-        out << ", ";
-        symbolNode->traverse(this);
-        out << " = t" + str(mUniqueIndex);
-
-        mUniqueIndex++;
-        return true;
-    }
-
-    return false;
-}
-
-bool OutputHLSL::canWriteAsHLSLLiteral(TIntermTyped *expression)
-{
-    // We support writing constant unions and constructors that only take constant unions as
-    // parameters as HLSL literals.
-    return expression->getAsConstantUnion() ||
-           expression->isConstructorWithOnlyConstantUnionParameters();
-}
-
-bool OutputHLSL::writeConstantInitialization(TInfoSinkBase &out,
-                                             TIntermSymbol *symbolNode,
-                                             TIntermTyped *expression)
-{
-    if (canWriteAsHLSLLiteral(expression))
-    {
-        symbolNode->traverse(this);
-        if (expression->getType().isArray())
-        {
-            out << "[" << expression->getType().getArraySize() << "]";
-        }
-        out << " = {";
-        if (expression->getAsConstantUnion())
-        {
-            TIntermConstantUnion *nodeConst  = expression->getAsConstantUnion();
-            const TConstantUnion *constUnion = nodeConst->getUnionArrayPointer();
-            WriteConstantUnionArray(out, constUnion, nodeConst->getType().getObjectSize());
-        }
-        else
-        {
-            TIntermAggregate *constructor = expression->getAsAggregate();
-            ASSERT(constructor != nullptr);
-            for (TIntermNode *&node : *constructor->getSequence())
-            {
-                TIntermConstantUnion *nodeConst = node->getAsConstantUnion();
-                ASSERT(nodeConst);
-                const TConstantUnion *constUnion = nodeConst->getUnionArrayPointer();
-                WriteConstantUnionArray(out, constUnion, nodeConst->getType().getObjectSize());
-                if (node != constructor->getSequence()->back())
-                {
-                    out << ", ";
-                }
-            }
-        }
-        out << "}";
-        return true;
-    }
-    return false;
-}
-
-TString OutputHLSL::addStructEqualityFunction(const TStructure &structure)
-{
-    const TFieldList &fields = structure.fields();
-
-    for (const auto &eqFunction : mStructEqualityFunctions)
-    {
-        if (eqFunction->structure == &structure)
-        {
-            return eqFunction->functionName;
-        }
-    }
-
-    const TString &structNameString = StructNameString(structure);
-
-    StructEqualityFunction *function = new StructEqualityFunction();
-    function->structure = &structure;
-    function->functionName = "angle_eq_" + structNameString;
-
-    TInfoSinkBase fnOut;
-
-    fnOut << "bool " << function->functionName << "(" << structNameString << " a, " << structNameString + " b)\n"
-          << "{\n"
-             "    return ";
-
-    for (size_t i = 0; i < fields.size(); i++)
-    {
-        const TField *field = fields[i];
-        const TType *fieldType = field->type();
-
-        const TString &fieldNameA = "a." + Decorate(field->name());
-        const TString &fieldNameB = "b." + Decorate(field->name());
-
-        if (i > 0)
-        {
-            fnOut << " && ";
-        }
-
-        fnOut << "(";
-        outputEqual(PreVisit, *fieldType, EOpEqual, fnOut);
-        fnOut << fieldNameA;
-        outputEqual(InVisit, *fieldType, EOpEqual, fnOut);
-        fnOut << fieldNameB;
-        outputEqual(PostVisit, *fieldType, EOpEqual, fnOut);
-        fnOut << ")";
-    }
-
-    fnOut << ";\n" << "}\n";
-
-    function->functionDefinition = fnOut.c_str();
-
-    mStructEqualityFunctions.push_back(function);
-    mEqualityFunctions.push_back(function);
-
-    return function->functionName;
-}
-
-TString OutputHLSL::addArrayEqualityFunction(const TType& type)
-{
-    for (const auto &eqFunction : mArrayEqualityFunctions)
-    {
-        if (eqFunction->type == type)
-        {
-            return eqFunction->functionName;
-        }
-    }
-
-    const TString &typeName = TypeString(type);
-
-    ArrayHelperFunction *function = new ArrayHelperFunction();
-    function->type = type;
-
-    TInfoSinkBase fnNameOut;
-    fnNameOut << "angle_eq_" << type.getArraySize() << "_" << typeName;
-    function->functionName = fnNameOut.c_str();
-
-    TType nonArrayType = type;
-    nonArrayType.clearArrayness();
-
-    TInfoSinkBase fnOut;
-
-    fnOut << "bool " << function->functionName << "("
-          << typeName << " a[" << type.getArraySize() << "], "
-          << typeName << " b[" << type.getArraySize() << "])\n"
-          << "{\n"
-             "    for (int i = 0; i < " << type.getArraySize() << "; ++i)\n"
-             "    {\n"
-             "        if (";
-
-    outputEqual(PreVisit, nonArrayType, EOpNotEqual, fnOut);
-    fnOut << "a[i]";
-    outputEqual(InVisit, nonArrayType, EOpNotEqual, fnOut);
-    fnOut << "b[i]";
-    outputEqual(PostVisit, nonArrayType, EOpNotEqual, fnOut);
-
-    fnOut << ") { return false; }\n"
-             "    }\n"
-             "    return true;\n"
-             "}\n";
-
-    function->functionDefinition = fnOut.c_str();
-
-    mArrayEqualityFunctions.push_back(function);
-    mEqualityFunctions.push_back(function);
-
-    return function->functionName;
-}
-
-TString OutputHLSL::addArrayAssignmentFunction(const TType& type)
-{
-    for (const auto &assignFunction : mArrayAssignmentFunctions)
-    {
-        if (assignFunction.type == type)
-        {
-            return assignFunction.functionName;
-        }
-    }
-
-    const TString &typeName = TypeString(type);
-
-    ArrayHelperFunction function;
-    function.type = type;
-
-    TInfoSinkBase fnNameOut;
-    fnNameOut << "angle_assign_" << type.getArraySize() << "_" << typeName;
-    function.functionName = fnNameOut.c_str();
-
-    TInfoSinkBase fnOut;
-
-    fnOut << "void " << function.functionName << "(out "
-        << typeName << " a[" << type.getArraySize() << "], "
-        << typeName << " b[" << type.getArraySize() << "])\n"
-        << "{\n"
-           "    for (int i = 0; i < " << type.getArraySize() << "; ++i)\n"
-           "    {\n"
-           "        a[i] = b[i];\n"
-           "    }\n"
-           "}\n";
-
-    function.functionDefinition = fnOut.c_str();
-
-    mArrayAssignmentFunctions.push_back(function);
-
-    return function.functionName;
-}
-
-TString OutputHLSL::addArrayConstructIntoFunction(const TType& type)
-{
-    for (const auto &constructIntoFunction : mArrayConstructIntoFunctions)
-    {
-        if (constructIntoFunction.type == type)
-        {
-            return constructIntoFunction.functionName;
-        }
-    }
-
-    const TString &typeName = TypeString(type);
-
-    ArrayHelperFunction function;
-    function.type = type;
-
-    TInfoSinkBase fnNameOut;
-    fnNameOut << "angle_construct_into_" << type.getArraySize() << "_" << typeName;
-    function.functionName = fnNameOut.c_str();
-
-    TInfoSinkBase fnOut;
-
-    fnOut << "void " << function.functionName << "(out "
-          << typeName << " a[" << type.getArraySize() << "]";
-    for (int i = 0; i < type.getArraySize(); ++i)
-    {
-        fnOut << ", " << typeName << " b" << i;
-    }
-    fnOut << ")\n"
-             "{\n";
-
-    for (int i = 0; i < type.getArraySize(); ++i)
-    {
-        fnOut << "    a[" << i << "] = b" << i << ";\n";
-    }
-    fnOut << "}\n";
-
-    function.functionDefinition = fnOut.c_str();
-
-    mArrayConstructIntoFunctions.push_back(function);
-
-    return function.functionName;
-}
-
-void OutputHLSL::ensureStructDefined(const TType &type)
-{
-    TStructure *structure = type.getStruct();
-
-    if (structure)
-    {
-        mStructureHLSL->addConstructor(type, StructNameString(*structure), nullptr);
-    }
-}
-
-
 
 }

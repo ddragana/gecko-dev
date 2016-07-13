@@ -104,7 +104,7 @@ public:
 
   /* Equivalent to RangedPtr(aArr, aArr, N). */
   template<size_t N>
-  explicit RangedPtr(T (&aArr)[N])
+  RangedPtr(T (&aArr)[N])
     : mPtr(aArr)
 #ifdef DEBUG
     , mRangeStart(aArr), mRangeEnd(aArr + N)
@@ -136,14 +136,14 @@ public:
     return *this;
   }
 
-  RangedPtr<T> operator+(size_t aInc) const
+  RangedPtr<T> operator+(size_t aInc)
   {
     MOZ_ASSERT(aInc <= size_t(-1) / sizeof(T));
     MOZ_ASSERT(asUintptr() + aInc * sizeof(T) >= asUintptr());
     return create(mPtr + aInc);
   }
 
-  RangedPtr<T> operator-(size_t aDec) const
+  RangedPtr<T> operator-(size_t aDec)
   {
     MOZ_ASSERT(aDec <= size_t(-1) / sizeof(T));
     MOZ_ASSERT(asUintptr() - aDec * sizeof(T) <= asUintptr());
@@ -218,13 +218,6 @@ public:
     MOZ_ASSERT(mPtr >= mRangeStart);
     MOZ_ASSERT(mPtr < mRangeEnd);
     return *mPtr;
-  }
-
-  T* operator->() const
-  {
-    MOZ_ASSERT(mPtr >= mRangeStart);
-    MOZ_ASSERT(mPtr < mRangeEnd);
-    return mPtr;
   }
 
   template <typename U>

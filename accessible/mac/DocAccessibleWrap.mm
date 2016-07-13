@@ -10,8 +10,9 @@
 using namespace mozilla::a11y;
 
 DocAccessibleWrap::
-  DocAccessibleWrap(nsIDocument* aDocument, nsIPresShell* aPresShell) :
-  DocAccessible(aDocument, aPresShell)
+  DocAccessibleWrap(nsIDocument* aDocument, nsIContent* aRootContent,
+                    nsIPresShell* aPresShell) :
+  DocAccessible(aDocument, aRootContent, aPresShell)
 {
 }
 

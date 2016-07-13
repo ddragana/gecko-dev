@@ -3,7 +3,7 @@
  */
 
 // This should eventually be moved to head_addons.js
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 // Test whether a machine which differs only on vendor, but otherwise
 // exactly matches the blacklist entry, is not blocked.
@@ -58,7 +58,7 @@ function run_test() {
     case "Darwin":
       gfxInfo.spoofVendorID("0xdcba");
       gfxInfo.spoofDeviceID("0x1234");
-      gfxInfo.spoofOSVersion(0x1090);
+      gfxInfo.spoofOSVersion(0x1060);
       break;
     case "Android":
       gfxInfo.spoofVendorID("dcba");

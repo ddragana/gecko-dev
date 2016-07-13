@@ -9,7 +9,6 @@
 #define prefapi_private_data_h
 
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/UniquePtr.h"
 
 extern PLDHashTable* gHashTable;
 extern bool gDirty;
@@ -20,17 +19,14 @@ class PrefSetting;
 } // namespace dom
 } // namespace mozilla
 
-mozilla::UniquePtr<char*[]>
-pref_savePrefs(PLDHashTable* aTable);
+void
+pref_savePrefs(PLDHashTable* aTable, char** aPrefArray);
 
 nsresult
 pref_SetPref(const mozilla::dom::PrefSetting& aPref);
 
 int pref_CompareStrings(const void *v1, const void *v2, void* unused);
-PrefHashEntry* pref_HashTableLookup(const char *key);
-
-bool
-pref_EntryHasAdvisablySizedValues(PrefHashEntry* aHashEntry);
+PrefHashEntry* pref_HashTableLookup(const void *key);
 
 void pref_GetPrefFromEntry(PrefHashEntry *aHashEntry,
                            mozilla::dom::PrefSetting* aPref);

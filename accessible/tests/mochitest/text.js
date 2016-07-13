@@ -473,10 +473,6 @@ function testTextRange(aRange, aRangeDescr, aStartContainer, aStartOffset,
   is(aRange.endOffset, aEndOffset,
      "Wrong end offset of " + aRangeDescr);
 
-  if (aText === undefined) {
-    return;
-  }
-
   is(aRange.text, aText, "Wrong text of " + aRangeDescr);
 
   var children = aRange.embeddedChildren;

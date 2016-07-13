@@ -8,6 +8,9 @@
 #include "mozmemory_wrap.h"
 
 #ifdef _WIN32
+/* windef.h, which windows.h includes, #defines min and max, which
+ * breaks std::min. Defining NOMINMAX prevents those #defines. */
+#define NOMINMAX
 #include <windows.h>
 #include <io.h>
 typedef int ssize_t;
@@ -123,7 +126,7 @@ public:
 
   /* Constructor for string literals. */
   template <size_t Size>
-  explicit Buffer(const char (&aStr)[Size])
+  Buffer(const char (&aStr)[Size])
     : mBuf(aStr), mLength(Size - 1)
   {}
 
@@ -286,7 +289,7 @@ MOZ_BEGIN_EXTERN_C
 
 /* mozjemalloc relies on DllMain to initialize, but DllMain is not invoked
  * for executables, so manually invoke mozjemalloc initialization. */
-#if defined(_WIN32) && !defined(MOZ_JEMALLOC4)
+#if defined(_WIN32) && !defined(MOZ_JEMALLOC3)
 void malloc_init_hard(void);
 #endif
 
@@ -487,7 +490,7 @@ main()
   FdReader reader(0);
   Replay replay;
 
-#if defined(_WIN32) && !defined(MOZ_JEMALLOC4)
+#if defined(_WIN32) && !defined(MOZ_JEMALLOC3)
   malloc_init_hard();
 #endif
 

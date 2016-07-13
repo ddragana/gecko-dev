@@ -144,22 +144,7 @@ this.NetUtil = {
         }
 
         try {
-            // Open the channel using asyncOpen2() if the loadinfo contains one
-            // of the security mode flags, otherwise fall back to use asyncOpen().
-            if (channel.loadInfo &&
-                channel.loadInfo.securityMode != 0) {
-                channel.asyncOpen2(listener);
-            }
-            else {
-                // Log deprecation warning to console to make sure all channels
-                // are created providing the correct security flags in the loadinfo.
-                // See nsILoadInfo for all available security flags and also the API
-                // of NetUtil.newChannel() for details above.
-                Cu.reportError("NetUtil.jsm: asyncFetch() requires the channel to have " +
-                    "one of the security flags set in the loadinfo (see nsILoadInfo). " +
-                    "Please create channel using NetUtil.newChannel()");
-                channel.asyncOpen(listener, null);
-            }
+            channel.asyncOpen(listener, null);
         }
         catch (e) {
             let exception = new Components.Exception(
@@ -218,9 +203,8 @@ this.NetUtil = {
      *        the following properties:
      *        {
      *          uri:
-     *            The full URI spec string, nsIURI or nsIFile to create the
-     *            channel for.
-     *            Note that this cannot be an nsIFile if you have to specify a
+     *            The full URI spec string or nsIURI to create the channel for.
+     *            Note that this cannot be an nsIFile and you cannot specify a
      *            non-default charset or base URI.  Call NetUtil.newURI first if
      *            you need to construct an URI using those options.
      *          loadingNode:
@@ -290,9 +274,11 @@ this.NetUtil = {
      *        The base URI for the spec.  Only used if aWhatToLoad is a string,
      *        which is a deprecated API.  Must be undefined otherwise.  Use
      *        NetUtil.newURI if you need to use this option.
+     *
      * @return an nsIChannel object.
      */
-    newChannel: function NetUtil_newChannel(aWhatToLoad, aOriginCharset, aBaseURI)
+    newChannel: function NetUtil_newChannel(aWhatToLoad, aOriginCharset,
+                                            aBaseURI)
     {
         // Check for the deprecated API first.
         if (typeof aWhatToLoad == "string" ||
@@ -303,27 +289,14 @@ this.NetUtil = {
                       ? aWhatToLoad
                       : this.newURI(aWhatToLoad, aOriginCharset, aBaseURI);
 
-            // log deprecation warning for developers.
-            Services.console.logStringMessage(
-              "Warning: NetUtil.newChannel(uri) deprecated, please provide argument 'aWhatToLoad'");
-
-            // Provide default loadinfo arguments and call the new API.
-            let systemPrincipal =
-              Services.scriptSecurityManager.getSystemPrincipal();
-
-            return this.ioService.newChannelFromURI2(
-                     uri,
-                     null, // loadingNode
-                     systemPrincipal, // loadingPrincipal
-                     null, // triggeringPrincipal
-                     Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-                     Ci.nsIContentPolicy.TYPE_OTHER);
+            return this.ioService.newChannelFromURI(uri);
         }
 
         // We are using the updated API, that requires only the options object.
         if (typeof aWhatToLoad != "object" ||
-             aOriginCharset !== undefined ||
-             aBaseURI !== undefined) {
+            aOriginCharset !== undefined ||
+            aBaseURI !== undefined) {
+
             throw new Components.Exception(
                 "newChannel requires a single object argument",
                 Cr.NS_ERROR_INVALID_ARG,
@@ -347,7 +320,7 @@ this.NetUtil = {
             );
         }
 
-        if (typeof uri == "string" || uri instanceof Ci.nsIFile) {
+        if (typeof uri == "string") {
             uri = this.newURI(uri);
         }
 
@@ -383,9 +356,7 @@ this.NetUtil = {
         }
 
         if (securityFlags === undefined) {
-            securityFlags = loadUsingSystemPrincipal
-                            ? Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL
-                            : Ci.nsILoadInfo.SEC_NORMAL;
+            securityFlags = Ci.nsILoadInfo.SEC_NORMAL;
         }
 
         if (contentPolicyType === undefined) {

@@ -20,6 +20,7 @@
 #include "cairo.h"
 
 #include "gfxImageSurface.h"
+#include "gfxQPainterSurface.h"
 #include "nsUnicodeProperties.h"
 
 #include "gfxFontconfigFonts.h"
@@ -45,16 +46,16 @@ using namespace mozilla::gfx;
 
 gfxFontconfigUtils *gfxQtPlatform::sFontconfigUtils = nullptr;
 
-static gfxImageFormat sOffscreenFormat = SurfaceFormat::X8R8G8B8_UINT32;
+static gfxImageFormat sOffscreenFormat = gfxImageFormat::RGB24;
 
 gfxQtPlatform::gfxQtPlatform()
 {
     if (!sFontconfigUtils)
         sFontconfigUtils = gfxFontconfigUtils::GetFontconfigUtils();
 
-    int32_t depth = GetScreenDepth();
-    if (depth == 16) {
-        sOffscreenFormat = SurfaceFormat::R5G6B5_UINT16;
+    mScreenDepth = qApp->primaryScreen()->depth();
+    if (mScreenDepth == 16) {
+        sOffscreenFormat = gfxImageFormat::RGB16_565;
     }
     uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
     uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
@@ -91,7 +92,7 @@ already_AddRefed<gfxASurface>
 gfxQtPlatform::CreateOffscreenSurface(const IntSize& aSize,
                                       gfxImageFormat aFormat)
 {
-    RefPtr<gfxASurface> newSurface =
+    nsRefPtr<gfxASurface> newSurface =
         new gfxImageSurface(aSize, aFormat);
 
     return newSurface.forget();
@@ -121,35 +122,32 @@ gfxQtPlatform::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFam
 gfxFontGroup *
 gfxQtPlatform::CreateFontGroup(const FontFamilyList& aFontFamilyList,
                                const gfxFontStyle *aStyle,
-                               gfxTextPerfMetrics* aTextPerf,
-                               gfxUserFontSet* aUserFontSet,
-                               gfxFloat aDevToCssSize)
+                               gfxUserFontSet* aUserFontSet)
 {
-    return new gfxPangoFontGroup(aFontFamilyList, aStyle,
-                                 aUserFontSet, aDevToCssSize);
+    return new gfxPangoFontGroup(aFontFamilyList, aStyle, aUserFontSet);
 }
 
 gfxFontEntry*
 gfxQtPlatform::LookupLocalFont(const nsAString& aFontName,
                                uint16_t aWeight,
                                int16_t aStretch,
-                               uint8_t aStyle)
+                               bool aItalic)
 {
     return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
-                                           aStretch, aStyle);
+                                           aStretch, aItalic);
 }
 
 gfxFontEntry*
 gfxQtPlatform::MakePlatformFont(const nsAString& aFontName,
                                 uint16_t aWeight,
                                 int16_t aStretch,
-                                uint8_t aStyle,
+                                bool aItalic,
                                 const uint8_t* aFontData,
                                 uint32_t aLength)
 {
     // passing ownership of the font data to the new font entry
     return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
-                                           aStretch, aStyle,
+                                           aStretch, aItalic,
                                            aFontData, aLength);
 }
 
@@ -194,6 +192,12 @@ gfxImageFormat
 gfxQtPlatform::GetOffscreenFormat()
 {
     return sOffscreenFormat;
+}
+
+int
+gfxQtPlatform::GetScreenDepth() const
+{
+    return mScreenDepth;
 }
 
 already_AddRefed<ScaledFont>

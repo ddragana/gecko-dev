@@ -6,11 +6,19 @@
 
 DIRS += ['profile/extensions']
 
-GeckoProgram(CONFIG['MOZ_APP_NAME'])
+if CONFIG['OS_ARCH'] == 'WINNT' and CONFIG['MOZ_ASAN']:
+    GeckoProgram(CONFIG['MOZ_APP_NAME'])
+else:
+    GeckoProgram(CONFIG['MOZ_APP_NAME'], msvcrt='static')
 
-JS_PREFERENCE_PP_FILES += [
+JS_PREFERENCE_FILES += [
     'profile/firefox.js',
 ]
+
+if CONFIG['LIBXUL_SDK']:
+    PREF_JS_EXPORTS += [
+        'profile/channel-prefs.js',
+    ]
 
 SOURCES += [
     'nsBrowserApp.cpp',
@@ -18,15 +26,25 @@ SOURCES += [
 
 FINAL_TARGET_FILES += ['blocklist.xml']
 FINAL_TARGET_FILES.defaults.profile += ['profile/prefs.js']
-FINAL_TARGET_FILES.defaults += ['permissions']
 
 DEFINES['APP_VERSION'] = CONFIG['MOZ_APP_VERSION']
 
+for var in ('MOZILLA_OFFICIAL', 'LIBXUL_SDK'):
+    if CONFIG[var]:
+        DEFINES[var] = True
+
+GENERATED_INCLUDES += [
+    '/build',
+]
+
 LOCAL_INCLUDES += [
-    '!/build',
     '/toolkit/xre',
     '/xpcom/base',
     '/xpcom/build',
+]
+
+DELAYLOAD_DLLS += [
+    'mozglue.dll',
 ]
 
 USE_LIBS += [
@@ -44,17 +62,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 
 for cdm in CONFIG['MOZ_EME_MODULES']:
     DEFINES['MOZ_%s_EME' % cdm.upper()] = True
-
-if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
-    # For sandbox includes and the include dependencies those have
-    LOCAL_INCLUDES += [
-        '/security/sandbox/chromium',
-        '/security/sandbox/chromium-shim',
-    ]
-
-    USE_LIBS += [
-        'sandbox_s',
-    ]
 
 # Control the default heap size.
 # This is the heap returned by GetProcessHeap().
@@ -75,6 +82,6 @@ if CONFIG['MOZ_LINKER']:
 if CONFIG['HAVE_CLOCK_MONOTONIC']:
     OS_LIBS += CONFIG['REALTIME_LIBS']
 
-for icon in ('firefox', 'document', 'newwindow', 'newtab', 'pbmode'):
-    DEFINES[icon.upper() + '_ICO'] = '"%s/dist/branding/%s.ico"' % (
-        TOPOBJDIR, icon)
+JAR_MANIFESTS += ['jar.mn']
+
+FAIL_ON_WARNINGS = True

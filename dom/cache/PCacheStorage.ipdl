@@ -8,7 +8,6 @@ include protocol PCache;
 include protocol PCacheOp;
 include protocol PCacheStreamControl;
 include protocol PFileDescriptorSet;
-include protocol PSendStream;
 
 include CacheTypes;
 
@@ -22,11 +21,11 @@ protocol PCacheStorage
   manages PCacheOp;
 
 parent:
-  async PCacheOp(CacheOpArgs aOpArgs);
-  async Teardown();
+  PCacheOp(CacheOpArgs aOpArgs);
+  Teardown();
 
 child:
-  async __delete__();
+  __delete__();
 };
 
 } // namespace cache

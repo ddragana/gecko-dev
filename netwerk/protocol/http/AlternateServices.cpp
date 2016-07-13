@@ -67,10 +67,9 @@ AltSvcMapping::ProcessHeader(const nsCString &buf, const nsCString &originScheme
 
   for (uint32_t index = 0; index < parsedAltSvc.mValues.Length(); ++index) {
     uint32_t maxage = 86400; // default
-    nsAutoCString hostname;
+    nsAutoCString hostname; // Always empty in the header form
     nsAutoCString npnToken;
     int32_t portno = originPort;
-    bool clearEntry = false;
 
     for (uint32_t pairIndex = 0;
          pairIndex < parsedAltSvc.mValues[index].mValues.Length();
@@ -81,12 +80,7 @@ AltSvcMapping::ProcessHeader(const nsCString &buf, const nsCString &originScheme
         parsedAltSvc.mValues[index].mValues[pairIndex].mValue;
 
       if (!pairIndex) {
-        if (currentName.Equals(NS_LITERAL_CSTRING("clear"))) {
-          clearEntry = true;
-          break;
-        }
-
-        // h2=[hostname]:443
+        // h2=:443
         npnToken = currentName;
         int32_t colonIndex = currentValue.FindChar(':');
         if (colonIndex >= 0) {
@@ -99,15 +93,7 @@ AltSvcMapping::ProcessHeader(const nsCString &buf, const nsCString &originScheme
       } else if (currentName.Equals(NS_LITERAL_CSTRING("ma"))) {
         maxage = atoi(PromiseFlatCString(currentValue).get());
         break;
-      } else {
-        LOG(("Alt Svc ignoring parameter %s", currentName.BeginReading()));
       }
-    }
-
-    if (clearEntry) {
-      LOG(("Alt Svc clearing mapping for %s:%d", originHost.get(), originPort));
-      gHttpHandler->ConnMgr()->ClearHostMapping(originHost, originPort);
-      continue;
     }
 
     // unescape modifies a c string in place, so afterwards
@@ -123,7 +109,7 @@ AltSvcMapping::ProcessHeader(const nsCString &buf, const nsCString &originScheme
       continue;
     }
 
-    RefPtr<AltSvcMapping> mapping = new AltSvcMapping(originScheme,
+    nsRefPtr<AltSvcMapping> mapping = new AltSvcMapping(originScheme,
                                                         originHost, originPort,
                                                         username, privateBrowsing,
                                                         NowInSeconds() + maxage,
@@ -239,7 +225,7 @@ void
 AltSvcMapping::GetConnectionInfo(nsHttpConnectionInfo **outCI,
                                  nsProxyInfo *pi)
 {
-  RefPtr<nsHttpConnectionInfo> ci =
+  nsRefPtr<nsHttpConnectionInfo> ci =
     new nsHttpConnectionInfo(mOriginHost, mOriginPort, mNPNToken,
                              mUsername, pi, mAlternateHost, mAlternatePort);
   ci->SetInsecureScheme(!mHttps);
@@ -385,7 +371,7 @@ public:
   }
 
 private:
-  RefPtr<AltSvcMapping> mMapping;
+  nsRefPtr<AltSvcMapping> mMapping;
   uint32_t                mRunning : 1;
   uint32_t                mTriedToValidate : 1;
   uint32_t                mTriedToWrite : 1;
@@ -431,13 +417,13 @@ AltSvcCache::UpdateAltServiceMapping(AltSvcMapping *map, nsProxyInfo *pi,
 
   mHash.Put(map->mHashKey, map);
 
-  RefPtr<nsHttpConnectionInfo> ci;
+  nsRefPtr<nsHttpConnectionInfo> ci;
   map->GetConnectionInfo(getter_AddRefs(ci), pi);
   caps |= ci->GetAnonymous() ? NS_HTTP_LOAD_ANONYMOUS : 0;
 
   nsCOMPtr<nsIInterfaceRequestor> callbacks = new AltSvcOverride(aCallbacks);
 
-  RefPtr<AltSvcTransaction> nullTransaction =
+  nsRefPtr<AltSvcTransaction> nullTransaction =
     new AltSvcTransaction(map, ci, aCallbacks, caps);
   nullTransaction->StartTransaction();
   gHttpHandler->ConnMgr()->SpeculativeConnect(ci, callbacks, caps, nullTransaction);
@@ -477,7 +463,7 @@ AltSvcCache::GetAltServiceMapping(const nsACString &scheme, const nsACString &ho
   return nullptr;
 }
 
-class ProxyClearHostMapping : public Runnable {
+class ProxyClearHostMapping : public nsRunnable {
 public:
   explicit ProxyClearHostMapping(const nsACString &host, int32_t port)
     : mHost(host)
@@ -561,6 +547,13 @@ NS_IMETHODIMP
 AltSvcOverride::GetIgnoreIdle(bool *ignoreIdle)
 {
   *ignoreIdle = true;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+AltSvcOverride::GetIgnorePossibleSpdyConnections(bool *ignorePossibleSpdyConnections)
+{
+  *ignorePossibleSpdyConnections = true;
   return NS_OK;
 }
 

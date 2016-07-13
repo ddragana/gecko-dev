@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -52,26 +50,11 @@ protected:
   DeallocPBackgroundIDBFactoryParent(PBackgroundIDBFactoryParent* aActor)
                                      override;
 
-  virtual PBackgroundIndexedDBUtilsParent*
-  AllocPBackgroundIndexedDBUtilsParent() override;
-
-  virtual bool
-  DeallocPBackgroundIndexedDBUtilsParent(
-                                        PBackgroundIndexedDBUtilsParent* aActor)
-                                        override;
-
-  virtual bool
-  RecvFlushPendingFileDeletions() override;
-
   virtual PBlobParent*
   AllocPBlobParent(const BlobConstructorParams& aParams) override;
 
   virtual bool
   DeallocPBlobParent(PBlobParent* aActor) override;
-
-  virtual bool
-  RecvPBlobConstructor(PBlobParent* aActor,
-                       const BlobConstructorParams& params) override;
 
   virtual PFileDescriptorSetParent*
   AllocPFileDescriptorSetParent(const FileDescriptor& aFileDescriptor)
@@ -90,43 +73,24 @@ protected:
   virtual PBroadcastChannelParent*
   AllocPBroadcastChannelParent(const PrincipalInfo& aPrincipalInfo,
                                const nsCString& aOrigin,
-                               const nsString& aChannel) override;
+                               const nsString& aChannel,
+                               const bool& aPrivateBrowsing) override;
 
   virtual bool
   RecvPBroadcastChannelConstructor(PBroadcastChannelParent* actor,
                                    const PrincipalInfo& aPrincipalInfo,
                                    const nsCString& origin,
-                                   const nsString& channel) override;
+                                   const nsString& channel,
+                                   const bool& aPrivateBrowsing) override;
 
   virtual bool
   DeallocPBroadcastChannelParent(PBroadcastChannelParent* aActor) override;
-
-  virtual PNuwaParent*
-  AllocPNuwaParent() override;
-
-  virtual bool
-  RecvPNuwaConstructor(PNuwaParent* aActor) override;
-
-  virtual bool
-  DeallocPNuwaParent(PNuwaParent* aActor) override;
-
-  virtual PSendStreamParent*
-  AllocPSendStreamParent() override;
-
-  virtual bool
-  DeallocPSendStreamParent(PSendStreamParent* aActor) override;
 
   virtual PServiceWorkerManagerParent*
   AllocPServiceWorkerManagerParent() override;
 
   virtual bool
   DeallocPServiceWorkerManagerParent(PServiceWorkerManagerParent* aActor) override;
-
-  virtual PCamerasParent*
-  AllocPCamerasParent() override;
-
-  virtual bool
-  DeallocPCamerasParent(PCamerasParent* aActor) override;
 
   virtual bool
   RecvShutdownServiceWorkerRegistrar() override;
@@ -178,43 +142,6 @@ protected:
   RecvMessagePortForceClose(const nsID& aUUID,
                             const nsID& aDestinationUUID,
                             const uint32_t& aSequenceID) override;
-
-  virtual PAsmJSCacheEntryParent*
-  AllocPAsmJSCacheEntryParent(const dom::asmjscache::OpenMode& aOpenMode,
-                              const dom::asmjscache::WriteParams& aWriteParams,
-                              const PrincipalInfo& aPrincipalInfo) override;
-
-  virtual bool
-  DeallocPAsmJSCacheEntryParent(PAsmJSCacheEntryParent* aActor) override;
-
-  virtual PQuotaParent*
-  AllocPQuotaParent() override;
-
-  virtual bool
-  DeallocPQuotaParent(PQuotaParent* aActor) override;
-
-  virtual PFileSystemRequestParent*
-  AllocPFileSystemRequestParent(const FileSystemParams&) override;
-
-  virtual bool
-  RecvPFileSystemRequestConstructor(PFileSystemRequestParent* aActor,
-                                    const FileSystemParams& aParams) override;
-
-  virtual bool
-  DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
-
-  // Gamepad API Background IPC
-  virtual PGamepadEventChannelParent*
-  AllocPGamepadEventChannelParent() override;
-
-  virtual bool
-  DeallocPGamepadEventChannelParent(PGamepadEventChannelParent *aActor) override;
-
-  virtual PGamepadTestChannelParent*
-  AllocPGamepadTestChannelParent() override;
-
-  virtual bool
-  DeallocPGamepadTestChannelParent(PGamepadTestChannelParent* aActor) override;
 };
 
 } // namespace ipc

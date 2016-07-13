@@ -7,6 +7,7 @@
 #ifndef MOZILLA_DOMSVGPATHSEGLIST_H__
 #define MOZILLA_DOMSVGPATHSEGLIST_H__
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
@@ -127,10 +128,6 @@ public:
    * not simply a mirror of our baseVal).
    */
   bool AttrIsAnimating() const;
-  /**
-   * Returns true if there is an animated list mirroring the base list.
-   */
-  bool AnimListMirrorsBaseList() const;
 
   uint32_t NumberOfItems() const
   {
@@ -246,7 +243,7 @@ private:
 
   // Strong ref to our element to keep it alive. We hold this not only for
   // ourself, but also for our DOMSVGPathSeg items too.
-  RefPtr<nsSVGElement> mElement;
+  nsRefPtr<nsSVGElement> mElement;
 
   bool mIsAnimValList;
 };

@@ -9,7 +9,6 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/ToJSValue.h"
-#include "nsAutoPtr.h"
 #include "nsXULAppAPI.h"
 
 #define NS_NETWORKWORKER_CID \
@@ -30,7 +29,7 @@ StaticRefPtr<NetworkWorker> gNetworkWorker;
 static nsAutoPtr<NetworkUtils> gNetworkUtils;
 
 // Runnable used dispatch command result on the main thread.
-class NetworkResultDispatcher : public Runnable
+class NetworkResultDispatcher : public nsRunnable
 {
 public:
   NetworkResultDispatcher(const NetworkResultOptions& aResult)
@@ -53,7 +52,7 @@ private:
 };
 
 // Runnable used dispatch netd command on the worker thread.
-class NetworkCommandDispatcher : public Runnable
+class NetworkCommandDispatcher : public nsRunnable
 {
 public:
   NetworkCommandDispatcher(const NetworkParams& aParams)
@@ -76,7 +75,7 @@ private:
 };
 
 // Runnable used dispatch netd result on the worker thread.
-class NetdEventRunnable : public Runnable
+class NetdEventRunnable : public nsRunnable
 {
 public:
   NetdEventRunnable(NetdCommand* aCommand)
@@ -149,7 +148,7 @@ NetworkWorker::FactoryCreate()
     ClearOnShutdown(&gNetworkUtils);
   }
 
-  RefPtr<NetworkWorker> worker = gNetworkWorker.get();
+  nsRefPtr<NetworkWorker> worker = gNetworkWorker.get();
   return worker.forget();
 }
 

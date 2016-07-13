@@ -43,7 +43,7 @@ add_task(function* test_javascript_match() {
   yield check_autocomplete({
     search: "foo",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch("foo", { heuristic: true }),
+    matches: [ makeSearchMatch("foo"),
                { uri: uri1, title: "title" },
                { uri: uri2, title: "title", style: ["bookmark"] },
                { uri: uri3, title: "title" },
@@ -87,6 +87,7 @@ add_task(function* test_javascript_match() {
     search: "",
     searchParam: "enable-actions",
     matches: [
+               makeSearchMatch(""),
                makeSwitchToTabMatch("http://t.foo/6", { title: "title" }),
              ]
   });

@@ -12,14 +12,17 @@ var expect = '';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+jit(true);
 
 if (!this.tracemonkey || this.tracemonkey.adaptive)
 {
+  jit(false);
   expect = actual = 'Test skipped due to lack of tracemonkey jitstats';
   reportCompare(expect, actual, summary);
 }
 else
 {
+  jit(true);
 
   expect = 'recorder started, recorder not aborted, trace completed';
   actual = '';
@@ -33,6 +36,7 @@ else
     Array(1);
   }
 
+  jit(false);
 
   var recorderStartedEnd = this.tracemonkey.recorderStarted;
   var recorderAbortedEnd = this.tracemonkey.recorderAborted;

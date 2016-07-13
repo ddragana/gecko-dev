@@ -19,9 +19,6 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
-// Arbitrary number
-#define MAX_SVG_CLIP_PATH_REFERENCE_CHAIN_LENGTH int16_t(512)
-
 //----------------------------------------------------------------------
 // Implementation
 
@@ -33,249 +30,163 @@ NS_NewSVGClipPathFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGClipPathFrame)
 
-void
-nsSVGClipPathFrame::ApplyClipPath(gfxContext& aContext,
-                                  nsIFrame* aClippedFrame,
-                                  const gfxMatrix& aMatrix)
+nsresult
+nsSVGClipPathFrame::ApplyClipOrPaintClipMask(gfxContext& aContext,
+                                             nsIFrame* aClippedFrame,
+                                             const gfxMatrix& aMatrix)
 {
-  MOZ_ASSERT(IsTrivial(), "Caller needs to use GetClipMask");
-
   DrawTarget& aDrawTarget = *aContext.GetDrawTarget();
 
-  // No need for AutoReferenceLimiter since simple clip paths can't create
-  // a reference loop (they don't reference other clip paths).
+  // If the flag is set when we get here, it means this clipPath frame
+  // has already been used painting the current clip, and the document
+  // has a clip reference loop.
+  if (mInUse) {
+    NS_WARNING("Clip loop detected!");
+    return NS_OK;
+  }
+  AutoClipPathReferencer clipRef(this);
 
-  // Restore current transform after applying clip path:
-  gfxContextMatrixAutoSaveRestore autoRestore(&aContext);
-
-  RefPtr<Path> clipPath;
+  mMatrixForChildren = GetClipPathTransform(aClippedFrame) * aMatrix;
 
   nsISVGChildFrame* singleClipPathChild = nullptr;
-  IsTrivial(&singleClipPathChild);
 
-  if (singleClipPathChild) {
-    nsSVGPathGeometryFrame* pathFrame = do_QueryFrame(singleClipPathChild);
-    if (pathFrame) {
-      nsSVGPathGeometryElement* pathElement =
-        static_cast<nsSVGPathGeometryElement*>(pathFrame->GetContent());
-      gfxMatrix toChildsUserSpace = pathElement->
-        PrependLocalTransformsTo(GetClipPathTransform(aClippedFrame) * aMatrix,
-                                 eUserSpaceToParent);
-      gfxMatrix newMatrix =
-        aContext.CurrentMatrix().PreMultiply(toChildsUserSpace).NudgeToIntegers();
-      if (!newMatrix.IsSingular()) {
-        aContext.SetMatrix(newMatrix);
-        FillRule clipRule =
-          nsSVGUtils::ToFillRule(pathFrame->StyleSVG()->mClipRule);
-        clipPath = pathElement->GetOrBuildPath(aDrawTarget, clipRule);
-      }
-    }
-  }
-
-  if (clipPath) {
-    aContext.Clip(clipPath);
-  } else {
-    // The spec says clip away everything if we have no children or the
-    // clipping path otherwise can't be resolved:
-    aContext.Clip(Rect());
-  }
-}
-
-already_AddRefed<SourceSurface>
-nsSVGClipPathFrame::GetClipMask(gfxContext& aReferenceContext,
-                                nsIFrame* aClippedFrame,
-                                const gfxMatrix& aMatrix,
-                                Matrix* aMaskTransform,
-                                SourceSurface* aExtraMask,
-                                const Matrix& aExtraMasksTransform)
-{
-  MOZ_ASSERT(!IsTrivial(), "Caller needs to use ApplyClipPath");
-
-  DrawTarget& aReferenceDT = *aReferenceContext.GetDrawTarget();
-
-  // A clipPath can reference another clipPath.  We re-enter this method for
-  // each clipPath in a reference chain, so here we limit chain length:
-  static int16_t sRefChainLengthCounter = AutoReferenceLimiter::notReferencing;
-  AutoReferenceLimiter
-    refChainLengthLimiter(&sRefChainLengthCounter,
-                          MAX_SVG_CLIP_PATH_REFERENCE_CHAIN_LENGTH);
-  if (!refChainLengthLimiter.Reference()) {
-    return nullptr; // Reference chain is too long!
-  }
-
-  // And to prevent reference loops we check that this clipPath only appears
-  // once in the reference chain (if any) that we're currently processing:
-  AutoReferenceLimiter refLoopDetector(&mReferencing, 1);
-  if (!refLoopDetector.Reference()) {
-    return nullptr; // Reference loop!
-  }
-
-  IntRect devSpaceClipExtents;
-  {
-    gfxContextMatrixAutoSaveRestore autoRestoreMatrix(&aReferenceContext);
-
-    aReferenceContext.SetMatrix(gfxMatrix());
-    gfxRect rect = aReferenceContext.GetClipExtents();
-    devSpaceClipExtents = RoundedOut(ToRect(rect));
-    if (devSpaceClipExtents.IsEmpty()) {
-      // We don't need to create a mask surface, all drawing is clipped anyway.
-      return nullptr;
-    }
-  }
-
-  RefPtr<DrawTarget> maskDT =
-    aReferenceDT.CreateSimilarDrawTarget(devSpaceClipExtents.Size(),
-                                         SurfaceFormat::A8);
-
-  gfxMatrix mat = aReferenceContext.CurrentMatrix() *
-                    gfxMatrix::Translation(-devSpaceClipExtents.TopLeft());
-
-  // Paint this clipPath's contents into maskDT:
-  {
-    RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(maskDT);
-    if (!ctx) {
-      gfxCriticalError() << "SVGClipPath context problem " << gfx::hexa(maskDT);
-      return nullptr;
-    }
-    ctx->SetMatrix(mat);
-
-    // We need to set mMatrixForChildren here so that under the PaintSVG calls
-    // on our children (below) our GetCanvasTM() method will return the correct
-    // transform.
-    mMatrixForChildren = GetClipPathTransform(aClippedFrame) * aMatrix;
-
-    // Check if this clipPath is itself clipped by another clipPath:
-    nsSVGClipPathFrame* clipPathThatClipsClipPath =
-      nsSVGEffects::GetEffectProperties(this).GetClipPathFrame(nullptr);
-    bool clippingOfClipPathRequiredMasking;
-    if (clipPathThatClipsClipPath) {
-      ctx->Save();
-      clippingOfClipPathRequiredMasking = !clipPathThatClipsClipPath->IsTrivial();
-      if (!clippingOfClipPathRequiredMasking) {
-        clipPathThatClipsClipPath->ApplyClipPath(*ctx, aClippedFrame, aMatrix);
-      } else {
-        Matrix maskTransform;
-        RefPtr<SourceSurface> mask =
-          clipPathThatClipsClipPath->GetClipMask(*ctx, aClippedFrame,
-                                                 aMatrix, &maskTransform);
-        ctx->PushGroupForBlendBack(gfxContentType::ALPHA, 1.0,
-                                   mask, maskTransform);
-        // The corresponding PopGroupAndBlend call below will mask the
-        // blend using |mask|.
-      }
-    }
-
-    // Paint our children into the mask:
-    for (nsIFrame* kid = mFrames.FirstChild(); kid;
-         kid = kid->GetNextSibling()) {
-      nsISVGChildFrame* SVGFrame = do_QueryFrame(kid);
-      if (SVGFrame) {
-        // The CTM of each frame referencing us can be different.
-        SVGFrame->NotifySVGChanged(nsISVGChildFrame::TRANSFORM_CHANGED);
-
-        bool isOK = true;
-        // Children of this clipPath may themselves be clipped.
-        nsSVGClipPathFrame *clipPathThatClipsChild =
-          nsSVGEffects::GetEffectProperties(kid).GetClipPathFrame(&isOK);
-        if (!isOK) {
-          continue;
+  if (IsTrivial(&singleClipPathChild)) {
+    gfxContextMatrixAutoSaveRestore autoRestore(&aContext);
+    RefPtr<Path> clipPath;
+    if (singleClipPathChild) {
+      nsSVGPathGeometryFrame* pathFrame = do_QueryFrame(singleClipPathChild);
+      if (pathFrame) {
+        nsSVGPathGeometryElement* pathElement =
+          static_cast<nsSVGPathGeometryElement*>(pathFrame->GetContent());
+        gfxMatrix toChildsUserSpace = pathElement->
+          PrependLocalTransformsTo(mMatrixForChildren,
+                                   nsSVGElement::eUserSpaceToParent);
+        gfxMatrix newMatrix =
+          aContext.CurrentMatrix().PreMultiply(toChildsUserSpace).NudgeToIntegers();
+        if (!newMatrix.IsSingular()) {
+          aContext.SetMatrix(newMatrix);
+          clipPath = pathElement->GetOrBuildPath(aDrawTarget,
+                                                 nsSVGUtils::ToFillRule(pathFrame->StyleSVG()->mClipRule));
         }
+      }
+    }
+    if (clipPath) {
+      aContext.Clip(clipPath);
+    } else {
+      // The spec says clip away everything if we have no children or the
+      // clipping path otherwise can't be resolved:
+      aContext.Clip(Rect());
+    }
+    return NS_OK;
+  }
 
-        bool childsClipPathRequiresMasking;
+  // This is a non-trivial clipPath, so we need to paint its contents into a
+  // temporary surface and use that to mask the clipped content.  Note that
+  // nsSVGPathGeometryFrame::Render checks for the NS_STATE_SVG_CLIPPATH_CHILD
+  // state bit and paints into our mask surface using opaque black in that case.
 
-        if (clipPathThatClipsChild) {
-          childsClipPathRequiresMasking = !clipPathThatClipsChild->IsTrivial();
-          ctx->Save();
-          if (!childsClipPathRequiresMasking) {
-            clipPathThatClipsChild->ApplyClipPath(*ctx, aClippedFrame, aMatrix);
-          } else {
-            Matrix maskTransform;
-            RefPtr<SourceSurface> mask =
-              clipPathThatClipsChild->GetClipMask(*ctx, aClippedFrame,
-                                                  aMatrix, &maskTransform);
-            ctx->PushGroupForBlendBack(gfxContentType::ALPHA, 1.0,
-                                       mask, maskTransform);
-            // The corresponding PopGroupAndBlend call below will mask the
-            // blend using |mask|.
+  // Check if this clipPath is itself clipped by another clipPath:
+  nsSVGClipPathFrame *clipPathFrame =
+    nsSVGEffects::GetEffectProperties(this).GetClipPathFrame(nullptr);
+  bool referencedClipIsTrivial;
+  if (clipPathFrame) {
+    referencedClipIsTrivial = clipPathFrame->IsTrivial();
+    aContext.Save();
+    if (referencedClipIsTrivial) {
+      clipPathFrame->ApplyClipOrPaintClipMask(aContext, aClippedFrame, aMatrix);
+    } else {
+      aContext.PushGroup(gfxContentType::ALPHA);
+    }
+  }
+
+  for (nsIFrame* kid = mFrames.FirstChild(); kid;
+       kid = kid->GetNextSibling()) {
+    nsISVGChildFrame* SVGFrame = do_QueryFrame(kid);
+    if (SVGFrame) {
+      // The CTM of each frame referencing us can be different.
+      SVGFrame->NotifySVGChanged(nsISVGChildFrame::TRANSFORM_CHANGED);
+
+      bool isOK = true;
+      nsSVGClipPathFrame *clipPathFrame =
+        nsSVGEffects::GetEffectProperties(kid).GetClipPathFrame(&isOK);
+      if (!isOK) {
+        continue;
+      }
+
+      bool isTrivial;
+
+      if (clipPathFrame) {
+        isTrivial = clipPathFrame->IsTrivial();
+        aContext.Save();
+        if (isTrivial) {
+          clipPathFrame->ApplyClipOrPaintClipMask(aContext, aClippedFrame, aMatrix);
+        } else {
+          aContext.PushGroup(gfxContentType::ALPHA);
+        }
+      }
+
+      gfxMatrix toChildsUserSpace = mMatrixForChildren;
+      nsIFrame* child = do_QueryFrame(SVGFrame);
+      nsIContent* childContent = child->GetContent();
+      if (childContent->IsSVGElement()) {
+        toChildsUserSpace =
+          static_cast<const nsSVGElement*>(childContent)->
+            PrependLocalTransformsTo(mMatrixForChildren,
+                                     nsSVGElement::eUserSpaceToParent);
+      }
+      SVGFrame->PaintSVG(aContext, toChildsUserSpace);
+
+      if (clipPathFrame) {
+        if (!isTrivial) {
+          aContext.PopGroupToSource();
+
+          aContext.PushGroup(gfxContentType::ALPHA);
+
+          clipPathFrame->ApplyClipOrPaintClipMask(aContext, aClippedFrame, aMatrix);
+          Matrix maskTransform;
+          RefPtr<SourceSurface> clipMaskSurface = aContext.PopGroupToSurface(&maskTransform);
+
+          if (clipMaskSurface) {
+            aContext.Mask(clipMaskSurface, maskTransform);
           }
         }
-
-        gfxMatrix toChildsUserSpace = mMatrixForChildren;
-        nsIFrame* child = do_QueryFrame(SVGFrame);
-        nsIContent* childContent = child->GetContent();
-        if (childContent->IsSVGElement()) {
-          toChildsUserSpace =
-            static_cast<const nsSVGElement*>(childContent)->
-              PrependLocalTransformsTo(mMatrixForChildren, eUserSpaceToParent);
-        }
-
-        // Our children have NS_STATE_SVG_CLIPPATH_CHILD set on them, and
-        // nsSVGPathGeometryFrame::Render checks for that state bit and paints
-        // only the geometry (opaque black) if set.
-        SVGFrame->PaintSVG(*ctx, toChildsUserSpace);
-
-        if (clipPathThatClipsChild) {
-          if (childsClipPathRequiresMasking) {
-            ctx->PopGroupAndBlend();
-          }
-          ctx->Restore();
-        }
+        aContext.Restore();
       }
-    }
-
-
-    if (clipPathThatClipsClipPath) {
-      if (clippingOfClipPathRequiredMasking) {
-        ctx->PopGroupAndBlend();
-      }
-      ctx->Restore();
     }
   }
 
-  // Moz2D transforms in the opposite direction to Thebes
-  mat.Invert();
+  if (clipPathFrame) {
+    if (!referencedClipIsTrivial) {
+      aContext.PopGroupToSource();
 
-  if (aExtraMask) {
-    // We could potentially due this more efficiently with OPERATOR_IN
-    // but that operator does not work well on CG or D2D
-    RefPtr<SourceSurface> currentMask = maskDT->Snapshot();
-    Matrix transform = maskDT->GetTransform();
-    maskDT->SetTransform(Matrix());
-    maskDT->ClearRect(Rect(0, 0,
-                           devSpaceClipExtents.width,
-                           devSpaceClipExtents.height));
-    maskDT->SetTransform(aExtraMasksTransform * transform);
-    // draw currentMask with the inverse of the transform that we just so that
-    // it ends up in the same spot with aExtraMask transformed by aExtraMasksTransform
-    maskDT->MaskSurface(SurfacePattern(currentMask, ExtendMode::CLAMP, aExtraMasksTransform.Inverse() * ToMatrix(mat)),
-                        aExtraMask,
-                        Point(0, 0));
+      aContext.PushGroup(gfxContentType::ALPHA);
+
+      clipPathFrame->ApplyClipOrPaintClipMask(aContext, aClippedFrame, aMatrix);
+      Matrix maskTransform;
+      RefPtr<SourceSurface> clipMaskSurface = aContext.PopGroupToSurface(&maskTransform);
+
+      if (clipMaskSurface) {
+        aContext.Mask(clipMaskSurface, maskTransform);
+      }
+    }
+    aContext.Restore();
   }
 
-  *aMaskTransform = ToMatrix(mat);
-  return maskDT->Snapshot();
+  return NS_OK;
 }
 
 bool
 nsSVGClipPathFrame::PointIsInsideClipPath(nsIFrame* aClippedFrame,
                                           const gfxPoint &aPoint)
 {
-  // A clipPath can reference another clipPath.  We re-enter this method for
-  // each clipPath in a reference chain, so here we limit chain length:
-  static int16_t sRefChainLengthCounter = AutoReferenceLimiter::notReferencing;
-  AutoReferenceLimiter
-    refChainLengthLimiter(&sRefChainLengthCounter,
-                          MAX_SVG_CLIP_PATH_REFERENCE_CHAIN_LENGTH);
-  if (!refChainLengthLimiter.Reference()) {
-    return false; // Reference chain is too long!
+  // If the flag is set when we get here, it means this clipPath frame
+  // has already been used in hit testing against the current clip,
+  // and the document has a clip reference loop.
+  if (mInUse) {
+    NS_WARNING("Clip loop detected!");
+    return false;
   }
-
-  // And to prevent reference loops we check that this clipPath only appears
-  // once in the reference chain (if any) that we're currently processing:
-  AutoReferenceLimiter refLoopDetector(&mReferencing, 1);
-  if (!refLoopDetector.Reference()) {
-    return true; // Reference loop!
-  }
+  AutoClipPathReferencer clipRef(this);
 
   gfxMatrix matrix = GetClipPathTransform(aClippedFrame);
   if (!matrix.Invert()) {
@@ -301,7 +212,7 @@ nsSVGClipPathFrame::PointIsInsideClipPath(nsIFrame* aClippedFrame,
     if (SVGFrame) {
       gfxPoint pointForChild = point;
       gfxMatrix m = static_cast<nsSVGElement*>(kid->GetContent())->
-        PrependLocalTransformsTo(gfxMatrix(), eUserSpaceToParent);
+        PrependLocalTransformsTo(gfxMatrix(), nsSVGElement::eUserSpaceToParent);
       if (!m.IsIdentity()) {
         if (!m.Invert()) {
           return false;
@@ -354,22 +265,11 @@ nsSVGClipPathFrame::IsTrivial(nsISVGChildFrame **aSingleChild)
 bool
 nsSVGClipPathFrame::IsValid()
 {
-  // A clipPath can reference another clipPath.  We re-enter this method for
-  // each clipPath in a reference chain, so here we limit chain length:
-  static int16_t sRefChainLengthCounter = AutoReferenceLimiter::notReferencing;
-  AutoReferenceLimiter
-    refChainLengthLimiter(&sRefChainLengthCounter,
-                          MAX_SVG_CLIP_PATH_REFERENCE_CHAIN_LENGTH);
-  if (!refChainLengthLimiter.Reference()) {
-    return false; // Reference chain is too long!
+  if (mInUse) {
+    NS_WARNING("Clip loop detected!");
+    return false;
   }
-
-  // And to prevent reference loops we check that this clipPath only appears
-  // once in the reference chain (if any) that we're currently processing:
-  AutoReferenceLimiter refLoopDetector(&mReferencing, 1);
-  if (!refLoopDetector.Reference()) {
-    return false; // Reference loop!
-  }
+  AutoClipPathReferencer clipRef(this);
 
   bool isOK = true;
   nsSVGEffects::GetEffectProperties(this).GetClipPathFrame(&isOK);
@@ -380,27 +280,26 @@ nsSVGClipPathFrame::IsValid()
   for (nsIFrame* kid = mFrames.FirstChild(); kid;
        kid = kid->GetNextSibling()) {
 
-    nsIAtom* kidType = kid->GetType();
+    nsIAtom *type = kid->GetType();
 
-    if (kidType == nsGkAtoms::svgUseFrame) {
-      for (nsIFrame* grandKid : kid->PrincipalChildList()) {
+    if (type == nsGkAtoms::svgUseFrame) {
+      for (nsIFrame* grandKid = kid->GetFirstPrincipalChild(); grandKid;
+           grandKid = grandKid->GetNextSibling()) {
 
-        nsIAtom* grandKidType = grandKid->GetType();
+        nsIAtom *type = grandKid->GetType();
 
-        if (grandKidType != nsGkAtoms::svgPathGeometryFrame &&
-            grandKidType != nsGkAtoms::svgTextFrame) {
+        if (type != nsGkAtoms::svgPathGeometryFrame &&
+            type != nsGkAtoms::svgTextFrame) {
           return false;
         }
       }
       continue;
     }
-
-    if (kidType != nsGkAtoms::svgPathGeometryFrame &&
-        kidType != nsGkAtoms::svgTextFrame) {
+    if (type != nsGkAtoms::svgPathGeometryFrame &&
+        type != nsGkAtoms::svgTextFrame) {
       return false;
     }
   }
-
   return true;
 }
 
@@ -420,8 +319,8 @@ nsSVGClipPathFrame::AttributeChanged(int32_t         aNameSpaceID,
     }
   }
 
-  return nsSVGContainerFrame::AttributeChanged(aNameSpaceID,
-                                               aAttribute, aModType);
+  return nsSVGClipPathFrameBase::AttributeChanged(aNameSpaceID,
+                                                  aAttribute, aModType);
 }
 
 void
@@ -433,7 +332,7 @@ nsSVGClipPathFrame::Init(nsIContent*       aContent,
                "Content is not an SVG clipPath!");
 
   AddStateBits(NS_STATE_SVG_CLIPPATH_CHILD);
-  nsSVGContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGClipPathFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 
 nsIAtom *

@@ -139,6 +139,7 @@ thai_pua_shape (hb_codepoint_t u, thai_action_t action, hb_font_t *font)
   };
 
   switch (action) {
+    default: assert (false); /* Fallthrough */
     case NOP: return u;
     case SD:  pua_mappings = SD_mappings; break;
     case SDL: pua_mappings = SDL_mappings; break;
@@ -314,7 +315,7 @@ preprocess_text_thai (const hb_ot_shape_plan_t *plan,
 
   buffer->clear_output ();
   unsigned int count = buffer->len;
-  for (buffer->idx = 0; buffer->idx < count && !buffer->in_error;)
+  for (buffer->idx = 0; buffer->idx < count;)
   {
     hb_codepoint_t u = buffer->cur().codepoint;
     if (likely (!IS_SARA_AM (u))) {
@@ -329,7 +330,7 @@ preprocess_text_thai (const hb_ot_shape_plan_t *plan,
     if (unlikely (buffer->in_error))
       return;
 
-    /* Make Nikhahit be recognized as a ccc=0 mark when zeroing widths. */
+    /* Make Nikhahit be recognized as a mark when zeroing widths. */
     unsigned int end = buffer->out_len;
     _hb_glyph_info_set_general_category (&buffer->out_info[end - 2], HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK);
 
@@ -352,7 +353,7 @@ preprocess_text_thai (const hb_ot_shape_plan_t *plan,
     {
       /* Since we decomposed, and NIKHAHIT is combining, merge clusters with the
        * previous cluster. */
-      if (start && buffer->cluster_level == HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES)
+      if (start)
 	buffer->merge_out_clusters (start - 1, end);
     }
   }
@@ -371,11 +372,10 @@ const hb_ot_complex_shaper_t _hb_ot_complex_shaper_thai =
   NULL, /* data_create */
   NULL, /* data_destroy */
   preprocess_text_thai,
-  NULL, /* postprocess_glyphs */
   HB_OT_SHAPE_NORMALIZATION_MODE_DEFAULT,
   NULL, /* decompose */
   NULL, /* compose */
   NULL, /* setup_masks */
-  HB_OT_SHAPE_ZERO_WIDTH_MARKS_BY_GDEF_LATE,
+  HB_OT_SHAPE_ZERO_WIDTH_MARKS_DEFAULT,
   false,/* fallback_position */
 };

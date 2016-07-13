@@ -55,11 +55,6 @@ nsIWidgetListener::SizeModeChanged(nsSizeMode aSizeMode)
 }
 
 void
-nsIWidgetListener::UIResolutionChanged()
-{
-}
-
-void
 nsIWidgetListener::FullscreenChanged(bool aInFullscreen)
 {
 }
@@ -101,7 +96,7 @@ nsIWidgetListener::WillPaintWindow(nsIWidget* aWidget)
 
 bool
 nsIWidgetListener::PaintWindow(nsIWidget* aWidget,
-                               LayoutDeviceIntRegion aRegion)
+                               nsIntRegion aRegion)
 {
   return false;
 }
@@ -112,9 +107,7 @@ nsIWidgetListener::DidPaintWindow()
 }
 
 void
-nsIWidgetListener::DidCompositeWindow(uint64_t aTransactionId,
-                                      const TimeStamp& aCompositeStart,
-                                      const TimeStamp& aCompositeEnd)
+nsIWidgetListener::DidCompositeWindow()
 {
 }
 

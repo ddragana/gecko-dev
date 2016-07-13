@@ -66,12 +66,6 @@ Object.defineProperty(this, "gCrashReporter", {
   configurable: true
 });
 
-// `true` if this is a content process, `false` otherwise.
-// It would be nicer to go through `Services.appInfo`, but some tests need to be
-// able to replace that field with a custom implementation before it is first
-// called.
-const isContent = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
-
 // Display timeout warnings after 10 seconds
 const DELAY_WARNING_MS = 10 * 1000;
 
@@ -79,7 +73,7 @@ const DELAY_WARNING_MS = 10 * 1000;
 // Crash the process if shutdown is really too long
 // (allowing for sleep).
 const PREF_DELAY_CRASH_MS = "toolkit.asyncshutdown.crash_timeout";
-var DELAY_CRASH_MS = 60 * 1000; // One minute
+let DELAY_CRASH_MS = 60 * 1000; // One minute
 try {
   DELAY_CRASH_MS = Services.prefs.getIntPref(PREF_DELAY_CRASH_MS);
 } catch (ex) {
@@ -178,7 +172,7 @@ PromiseSet.prototype = {
     if (!key || typeof key != "object") {
       throw new Error("Expected an object");
     }
-    if ((!("then" in key)) || typeof key.then != "function") {
+    if ((!"then" in key) || typeof key.then != "function") {
       throw new Error("Expected a Promise");
     }
   },
@@ -194,20 +188,16 @@ PromiseSet.prototype = {
  * console. We therefore use dump() rather than Cu.reportError().
  */
 function log(msg, prefix = "", error = null) {
-  try {
-    dump(prefix + msg + "\n");
-    if (error) {
-      dump(prefix + error + "\n");
-      if (typeof error == "object" && "stack" in error) {
-        dump(prefix + error.stack + "\n");
-      }
+  dump(prefix + msg + "\n");
+  if (error) {
+    dump(prefix + error + "\n");
+    if (typeof error == "object" && "stack" in error) {
+      dump(prefix + error.stack + "\n");
     }
-  } catch (ex) {
-    dump("INTERNAL ERROR in AsyncShutdown: cannot log message.\n");
   }
 }
 const PREF_DEBUG_LOG = "toolkit.asyncshutdown.log";
-var DEBUG_LOG = false;
+let DEBUG_LOG = false;
 try {
   DEBUG_LOG = Services.prefs.getBoolPref(PREF_DEBUG_LOG);
 } catch (ex) {
@@ -219,14 +209,14 @@ Services.prefs.addObserver(PREF_DEBUG_LOG, function() {
 
 function debug(msg, error=null) {
   if (DEBUG_LOG) {
-    log(msg, "DEBUG: ", error);
+    return log(msg, "DEBUG: ", error);
   }
 }
 function warn(msg, error = null) {
-  log(msg, "WARNING: ", error);
+  return log(msg, "WARNING: ", error);
 }
 function fatalerr(msg, error = null) {
-  log(msg, "FATAL ERROR: ", error);
+  return log(msg, "FATAL ERROR: ", error);
 }
 
 // Utility function designed to get the current state of execution
@@ -309,43 +299,35 @@ function looseTimer(delay) {
  * @return object
  */
 function getOrigin(topFrame, filename = null, lineNumber = null, stack = null) {
-  try {
-    // Determine the filename and line number of the caller.
-    let frame = topFrame;
+  // Determine the filename and line number of the caller.
+  let frame = topFrame;
 
-    for (; frame && frame.filename == topFrame.filename; frame = frame.caller) {
-      // Climb up the stack
-    }
-
-    if (filename == null) {
-      filename = frame ? frame.filename : "?";
-    }
-    if (lineNumber == null) {
-      lineNumber = frame ? frame.lineNumber : 0;
-    }
-    if (stack == null) {
-      // Now build the rest of the stack as a string, using Task.jsm's rewriting
-      // to ensure that we do not lose information at each call to `Task.spawn`.
-      let frames = [];
-      while (frame != null) {
-        frames.push(frame.filename + ":" + frame.name + ":" + frame.lineNumber);
-        frame = frame.caller;
-      }
-      stack = Task.Debugging.generateReadableStack(frames.join("\n")).split("\n");
-    }
-
-    return {
-      filename: filename,
-      lineNumber: lineNumber,
-      stack: stack,
-    };
-  } catch (ex) {
-    return {
-      filename: "<internal error: could not get origin>",
-      lineNumber: -1,
-      stack: "<internal error: could not get origin>",
-    }
+  for (; frame && frame.filename == topFrame.filename; frame = frame.caller) {
+    // Climb up the stack
   }
+
+  if (filename == null) {
+    filename = frame ? frame.filename : "?";
+  }
+  if (lineNumber == null) {
+    lineNumber = frame ? frame.lineNumber : 0;
+  }
+  if (stack == null) {
+    // Now build the rest of the stack as a string, using Task.jsm's rewriting
+    // to ensure that we do not lose information at each call to `Task.spawn`.
+    let frames = [];
+    while (frame != null) {
+      frames.push(frame.filename + ":" + frame.name + ":" + frame.lineNumber);
+      frame = frame.caller;
+    }
+    stack = Task.Debugging.generateReadableStack(frames.join("\n")).split("\n");
+  }
+
+  return {
+    filename: filename,
+    lineNumber: lineNumber,
+    stack: stack,
+  };
 }
 
 this.EXPORTED_SYMBOLS = ["AsyncShutdown"];
@@ -353,7 +335,7 @@ this.EXPORTED_SYMBOLS = ["AsyncShutdown"];
 /**
  * {string} topic -> phase
  */
-var gPhases = new Map();
+let gPhases = new Map();
 
 this.AsyncShutdown = {
   /**
@@ -478,7 +460,7 @@ function getPhase(topic) {
   });
   gPhases.set(topic, phase);
   return phase;
-}
+};
 
 /**
  * Utility class used to spin the event loop until all blockers for a
@@ -524,26 +506,16 @@ Spinner.prototype = {
   // nsIObserver.observe
   observe: function() {
     let topic = this._topic;
-    debug(`Starting phase ${ topic }`);
     let barrier = this._barrier;
     Services.obs.removeObserver(this, topic);
 
     let satisfied = false; // |true| once we have satisfied all conditions
-    let promise;
-    try {
-      promise = this._barrier.wait({
-        warnAfterMS: DELAY_WARNING_MS,
-        crashAfterMS: DELAY_CRASH_MS
-      }).catch(
-        // Additional precaution to be entirely sure that we cannot reject.
-      );
-    } catch (ex) {
-      debug("Error waiting for notification");
-      throw ex;
-    }
+    let promise = this._barrier.wait({
+      warnAfterMS: DELAY_WARNING_MS,
+      crashAfterMS: DELAY_CRASH_MS
+    });
 
     // Now, spin the event loop
-    debug("Spinning the event loop");
     promise.then(() => satisfied = true); // This promise cannot reject
     let thread = Services.tm.mainThread;
     while (!satisfied) {
@@ -619,9 +591,6 @@ function Barrier(name) {
   /**
    * The name of the barrier.
    */
-  if (typeof name != "string") {
-    throw new TypeError("The name of the barrier must be a string");
-  }
   this._name = name;
 
   /**
@@ -690,16 +659,13 @@ function Barrier(name) {
         throw new TypeError("Expected an object as third argument to `addBlocker`, got " + details);
       }
       if (!this._waitForMe) {
-        throw new Error(`Phase "${ this._name }" is finished, it is too late to register completion condition "${ name }"`);
+        throw new Error(`Phase "${ this._name } is finished, it is too late to register completion condition "${ name }"`);
       }
       debug(`Adding blocker ${ name } for phase ${ this._name }`);
 
       // Normalize the details
 
       let fetchState = details.fetchState || null;
-      if (fetchState != null && typeof fetchState != "function") {
-        throw new TypeError("Expected a function for option `fetchState`");
-      }
       let filename = details.filename || null;
       let lineNumber = details.lineNumber || null;
       let stack = details.stack || null;
@@ -741,10 +707,7 @@ function Barrier(name) {
         // The error should remain uncaught, to ensure that it
         // still causes tests to fail.
         Promise.reject(error);
-      }).catch(
-        // Added as a last line of defense, in case `warn`, `this._name` or
-        // `safeGetState` somehow throws an error.
-      );
+      });
 
       let topFrame = null;
       if (filename == null || lineNumber == null || stack == null) {
@@ -1016,26 +979,11 @@ Barrier.prototype = Object.freeze({
 // when they start/stop. For compatibility with existing startup/shutdown
 // mechanisms, we register a few phases here.
 
-// Parent process
-if (!isContent) {
-  this.AsyncShutdown.profileChangeTeardown = getPhase("profile-change-teardown");
-  this.AsyncShutdown.profileBeforeChange = getPhase("profile-before-change");
-  this.AsyncShutdown.placesClosingInternalConnection = getPhase("places-will-close-connection");
-  this.AsyncShutdown.sendTelemetry = getPhase("profile-before-change-telemetry");
-}
-
-// Notifications that fire in the parent and content process, but should
-// only have phases in the parent process.
-if (!isContent) {
-  this.AsyncShutdown.quitApplicationGranted = getPhase("quit-application-granted");
-}
-
-// Don't add a barrier for content-child-shutdown because this
-// makes it easier to cause shutdown hangs.
-
-// All processes
+this.AsyncShutdown.profileChangeTeardown = getPhase("profile-change-teardown");
+this.AsyncShutdown.profileBeforeChange = getPhase("profile-before-change");
+this.AsyncShutdown.sendTelemetry = getPhase("profile-before-change2");
 this.AsyncShutdown.webWorkersShutdown = getPhase("web-workers-shutdown");
-this.AsyncShutdown.xpcomWillShutdown = getPhase("xpcom-will-shutdown");
+this.AsyncShutdown.xpcomThreadsShutdown = getPhase("xpcom-threads-shutdown");
 
 this.AsyncShutdown.Barrier = Barrier;
 

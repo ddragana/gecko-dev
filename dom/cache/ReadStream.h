@@ -12,13 +12,10 @@
 #include "nsID.h"
 #include "nsIInputStream.h"
 #include "nsISupportsImpl.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsTArrayForwardDeclare.h"
 
 namespace mozilla {
-namespace ipc {
-class AutoIPCStream;
-} // namespace ipc
 namespace dom {
 namespace cache {
 
@@ -84,12 +81,8 @@ public:
   Create(PCacheStreamControlParent* aControl, const nsID& aId,
          nsIInputStream* aStream);
 
-  void Serialize(CacheReadStreamOrVoid* aReadStreamOut,
-                 nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList,
-                 ErrorResult& aRv);
-  void Serialize(CacheReadStream* aReadStreamOut,
-                 nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList,
-                 ErrorResult& aRv);
+  void Serialize(CacheReadStreamOrVoid* aReadStreamOut);
+  void Serialize(CacheReadStream* aReadStreamOut);
 
 private:
   class Inner;
@@ -102,7 +95,7 @@ private:
   // ReadStream guarantees it will call Close() on the inner stream.
   // This is essential for the inner stream to avoid dealing with the
   // implicit close that can happen when a stream is destroyed.
-  RefPtr<Inner> mInner;
+  nsRefPtr<Inner> mInner;
 
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_DOM_CACHE_READSTREAM_IID);

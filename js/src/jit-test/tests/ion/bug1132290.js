@@ -1,6 +1,6 @@
 
 f = function() {
-    v = new Uint8Array()
+    v = Uint8Array()
         function f(x) {
             return x + v[0] | 0
         }

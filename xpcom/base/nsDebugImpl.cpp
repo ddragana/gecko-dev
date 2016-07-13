@@ -17,6 +17,7 @@
 #include "nsString.h"
 #include "nsXULAppAPI.h"
 #include "prprf.h"
+#include "mozilla/Logging.h"
 #include "nsError.h"
 #include "prerror.h"
 #include "prerr.h"
@@ -216,6 +217,16 @@ nsDebugImpl::SetMultiprocessMode(const char* aDesc)
  * always compiled in, in case some other module that uses it is
  * compiled with debugging even if this library is not.
  */
+static PRLogModuleInfo* gDebugLog;
+
+static void
+InitLog()
+{
+  if (0 == gDebugLog) {
+    gDebugLog = PR_NewLogModule("nsDebug");
+  }
+}
+
 enum nsAssertBehavior
 {
   NS_ASSERT_UNINITIALIZED,
@@ -306,25 +317,31 @@ EXPORT_XPCOM_API(void)
 NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
               const char* aFile, int32_t aLine)
 {
+  InitLog();
+
   FixedBuffer buf;
+  mozilla::LogLevel ll = LogLevel::Warning;
   const char* sevString = "WARNING";
 
   switch (aSeverity) {
     case NS_DEBUG_ASSERTION:
       sevString = "###!!! ASSERTION";
+      ll = LogLevel::Error;
       break;
 
     case NS_DEBUG_BREAK:
       sevString = "###!!! BREAK";
+      ll = LogLevel::Error;
       break;
 
     case NS_DEBUG_ABORT:
       sevString = "###!!! ABORT";
+      ll = LogLevel::Error;
       break;
 
     default:
       aSeverity = NS_DEBUG_WARNING;
-  }
+  };
 
 #  define PrintToBuffer(...) PR_sxprintf(StuffFixedBuffer, &buf, __VA_ARGS__)
 
@@ -333,8 +350,9 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
   if (sMultiprocessDescription) {
     PrintToBuffer("%s ", sMultiprocessDescription);
   }
-
+#if !defined(MOZILLA_XPCOMRT_API)
   PrintToBuffer("%d] ", base::GetCurrentProcId());
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
   PrintToBuffer("%s: ", sevString);
 
@@ -353,9 +371,13 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
 
 #  undef PrintToBuffer
 
+  // Write out the message to the debug log
+  MOZ_LOG(gDebugLog, ll, ("%s", buf.buffer));
+  PR_LogFlush();
+
   // errors on platforms without a debugdlg ring a bell on stderr
 #if !defined(XP_WIN)
-  if (aSeverity != NS_DEBUG_WARNING) {
+  if (ll != LogLevel::Warning) {
     fprintf(stderr, "\07");
   }
 #endif
@@ -380,7 +402,7 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
       return;
 
     case NS_DEBUG_ABORT: {
-#if defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_CRASHREPORTER) && !defined(MOZILLA_XPCOMRT_API)
       // Updating crash annotations in the child causes us to do IPC. This can
       // really cause trouble if we're asserting from within IPC code. So we
       // have to do without the annotations in that case.
@@ -397,7 +419,7 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
 #if defined(DEBUG) && defined(_WIN32)
       RealBreak();
 #endif
-#if defined(DEBUG)
+#if defined(DEBUG) && !defined(MOZILLA_XPCOMRT_API)
       nsTraceRefcnt::WalkTheStack(stderr);
 #endif
       Abort(buf.buffer);
@@ -422,13 +444,16 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
       return;
 
     case NS_ASSERT_STACK:
+#if !defined(MOZILLA_XPCOMRT_API)
       nsTraceRefcnt::WalkTheStack(stderr);
+#endif // !defined(MOZILLA_XPCOMRT_API)
       return;
 
     case NS_ASSERT_STACK_AND_ABORT:
+#if !defined(MOZILLA_XPCOMRT_API)
       nsTraceRefcnt::WalkTheStack(stderr);
+#endif // !defined(MOZILLA_XPCOMRT_API)
       // Fall through to abort
-      MOZ_FALLTHROUGH;
 
     case NS_ASSERT_ABORT:
       Abort(buf.buffer);
@@ -598,8 +623,9 @@ NS_ErrorAccordingToNSPR()
 void
 NS_ABORT_OOM(size_t aSize)
 {
-#if defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_CRASHREPORTER) && !defined(MOZILLA_XPCOMRT_API)
   CrashReporter::AnnotateOOMAllocationSize(aSize);
 #endif
-  MOZ_CRASH("OOM");
+  MOZ_CRASH();
 }
+

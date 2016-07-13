@@ -13,17 +13,19 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/RefPtr.h"
 
-#include "nsAutoPtr.h"
 #include "nsIThread.h"
 #include "nsSize.h"
 #include "nsRect.h"
 
+#if !(defined(XP_WIN) || defined(XP_MACOSX) || defined(LINUX)) || \
+    defined(MOZ_ASAN)
+// For MEDIA_THREAD_STACK_SIZE
+#include "nsIThreadManager.h"
+#endif
 #include "nsThreadUtils.h"
 #include "prtime.h"
 #include "AudioSampleFormat.h"
 #include "TimeUnits.h"
-#include "nsITimer.h"
-#include "nsCOMPtr.h"
 
 using mozilla::CheckedInt64;
 using mozilla::CheckedUint64;
@@ -79,7 +81,7 @@ private:
 };
 
 // Shuts down a thread asynchronously.
-class ShutdownThreadEvent : public Runnable
+class ShutdownThreadEvent : public nsRunnable
 {
 public:
   explicit ShutdownThreadEvent(nsIThread* aThread) : mThread(aThread) {}
@@ -94,7 +96,7 @@ private:
 };
 
 template<class T>
-class DeleteObjectTask: public Runnable {
+class DeleteObjectTask: public nsRunnable {
 public:
   explicit DeleteObjectTask(nsAutoPtr<T>& aObject)
     : mObject(aObject)
@@ -131,9 +133,6 @@ CheckedInt64 FramesToUsecs(int64_t aFrames, uint32_t aRate);
 // Converts from number of audio frames (aFrames) TimeUnit, given
 // the specified audio rate (aRate).
 media::TimeUnit FramesToTimeUnit(int64_t aFrames, uint32_t aRate);
-// Perform aValue * aMul / aDiv, reducing the possibility of overflow due to
-// aValue * aMul overflowing.
-CheckedInt64 SaferMultDiv(int64_t aValue, uint32_t aMul, uint32_t aDiv);
 
 // Converts from microseconds (aUsecs) to number of audio frames, given the
 // specified audio rate (aRate). Stores the result in aOutFrames. Returns
@@ -157,19 +156,33 @@ nsresult SecondsToUsecs(double aSeconds, int64_t& aOutUsecs);
 // The maximum height and width of the video. Used for
 // sanitizing the memory allocation of the RGB buffer.
 // The maximum resolution we anticipate encountering in the
-// wild is 2160p (UHD "4K") or 4320p - 7680x4320 pixels for VR.
-static const int32_t MAX_VIDEO_WIDTH = 8192;
-static const int32_t MAX_VIDEO_HEIGHT = 4608;
+// wild is 2160p - 3840x2160 pixels.
+static const int32_t MAX_VIDEO_WIDTH = 4000;
+static const int32_t MAX_VIDEO_HEIGHT = 3000;
 
 // Scales the display rect aDisplay by aspect ratio aAspectRatio.
 // Note that aDisplay must be validated by IsValidVideoRegion()
 // before being used!
 void ScaleDisplayByAspectRatio(nsIntSize& aDisplay, float aAspectRatio);
 
-// Downmix Stereo audio samples to Mono.
-// Input are the buffer contains stereo data and the number of frames.
-void DownmixStereoToMono(mozilla::AudioDataValue* aBuffer,
-                         uint32_t aFrames);
+// The amount of virtual memory reserved for thread stacks.
+#if defined(MOZ_ASAN)
+// Use the system default in ASAN builds, because the default is assumed to be
+// larger than the size we want to use and is hopefully sufficient for ASAN.
+#define MEDIA_THREAD_STACK_SIZE nsIThreadManager::DEFAULT_STACK_SIZE
+#elif defined(XP_WIN) || defined(XP_MACOSX) || defined(LINUX)
+#define MEDIA_THREAD_STACK_SIZE (256 * 1024)
+#else
+// All other platforms use their system defaults.
+#define MEDIA_THREAD_STACK_SIZE nsIThreadManager::DEFAULT_STACK_SIZE
+#endif
+
+// Downmix multichannel Audio samples to Stereo.
+// Input are the buffer contains multichannel data,
+// the number of channels and the number of frames.
+int DownmixAudioToStereo(mozilla::AudioDataValue* buffer,
+                         int channels,
+                         uint32_t frames);
 
 bool IsVideoContentType(const nsCString& aContentType);
 
@@ -265,28 +278,34 @@ GenerateRandomName(nsCString& aOutSalt, uint32_t aLength);
 nsresult
 GenerateRandomPathName(nsCString& aOutSalt, uint32_t aLength);
 
+class TaskQueue;
+class FlushableTaskQueue;
+
 already_AddRefed<TaskQueue>
 CreateMediaDecodeTaskQueue();
+
+already_AddRefed<FlushableTaskQueue>
+CreateFlushableMediaDecodeTaskQueue();
 
 // Iteratively invokes aWork until aCondition returns true, or aWork returns false.
 // Use this rather than a while loop to avoid bogarting the task queue.
 template<class Work, class Condition>
-RefPtr<GenericPromise> InvokeUntil(Work aWork, Condition aCondition) {
-  RefPtr<GenericPromise::Private> p = new GenericPromise::Private(__func__);
+nsRefPtr<GenericPromise> InvokeUntil(Work aWork, Condition aCondition) {
+  nsRefPtr<GenericPromise::Private> p = new GenericPromise::Private(__func__);
 
   if (aCondition()) {
     p->Resolve(true, __func__);
   }
 
   struct Helper {
-    static void Iteration(RefPtr<GenericPromise::Private> aPromise, Work aLocalWork, Condition aLocalCondition) {
-      if (!aLocalWork()) {
+    static void Iteration(nsRefPtr<GenericPromise::Private> aPromise, Work aWork, Condition aCondition) {
+      if (!aWork()) {
         aPromise->Reject(NS_ERROR_FAILURE, __func__);
-      } else if (aLocalCondition()) {
+      } else if (aCondition()) {
         aPromise->Resolve(true, __func__);
       } else {
         nsCOMPtr<nsIRunnable> r =
-          NS_NewRunnableFunction([aPromise, aLocalWork, aLocalCondition] () { Iteration(aPromise, aLocalWork, aLocalCondition); });
+          NS_NewRunnableFunction([aPromise, aWork, aCondition] () { Iteration(aPromise, aWork, aCondition); });
         AbstractThread::GetCurrent()->Dispatch(r.forget());
       }
     }
@@ -295,166 +314,6 @@ RefPtr<GenericPromise> InvokeUntil(Work aWork, Condition aCondition) {
   Helper::Iteration(p, aWork, aCondition);
   return p.forget();
 }
-
-// Simple timer to run a runnable after a timeout.
-class SimpleTimer : public nsITimerCallback
-{
-public:
-  NS_DECL_ISUPPORTS
-
-  // Create a new timer to run aTask after aTimeoutMs milliseconds
-  // on thread aTarget. If aTarget is null, task is run on the main thread.
-  static already_AddRefed<SimpleTimer> Create(nsIRunnable* aTask,
-                                              uint32_t aTimeoutMs,
-                                              nsIThread* aTarget = nullptr);
-  void Cancel();
-
-  NS_IMETHOD Notify(nsITimer *timer) override;
-
-private:
-  virtual ~SimpleTimer() {}
-  nsresult Init(nsIRunnable* aTask, uint32_t aTimeoutMs, nsIThread* aTarget);
-
-  RefPtr<nsIRunnable> mTask;
-  nsCOMPtr<nsITimer> mTimer;
-};
-
-void
-LogToBrowserConsole(const nsAString& aMsg);
-
-bool
-ParseCodecsString(const nsAString& aCodecs, nsTArray<nsString>& aOutCodecs);
-
-bool
-IsH264ContentType(const nsAString& aContentType);
-
-bool
-IsAACContentType(const nsAString& aContentType);
-
-bool
-IsAACCodecString(const nsAString& aCodec);
-
-template <typename String>
-class StringListRange
-{
-  typedef typename String::char_type CharType;
-  typedef const CharType* Pointer;
-
-public:
-  // Iterator into range, trims items and skips empty items.
-  class Iterator
-  {
-  public:
-    bool operator!=(const Iterator& a) const
-    {
-      return mStart != a.mStart || mEnd != a.mEnd;
-    }
-    Iterator& operator++()
-    {
-      SearchItemAt(mComma + 1);
-      return *this;
-    }
-    typedef decltype(Substring(Pointer(), Pointer())) DereferencedType;
-    DereferencedType operator*()
-    {
-      return Substring(mStart, mEnd);
-    }
-  private:
-    friend class StringListRange;
-    Iterator(const CharType* aRangeStart, uint32_t aLength)
-      : mRangeEnd(aRangeStart + aLength)
-    {
-      SearchItemAt(aRangeStart);
-    }
-    void SearchItemAt(Pointer start)
-    {
-      // First, skip leading whitespace.
-      for (Pointer p = start; ; ++p) {
-        if (p >= mRangeEnd) {
-          mStart = mEnd = mComma = mRangeEnd;
-          return;
-        }
-        auto c = *p;
-        if (c == CharType(',')) {
-          // Comma -> Empty item -> Skip.
-        } else if (c != CharType(' ')) {
-          mStart = p;
-          break;
-        }
-      }
-      // Find comma, recording start of trailing space.
-      Pointer trailingWhitespace = nullptr;
-      for (Pointer p = mStart + 1; ; ++p) {
-        if (p >= mRangeEnd) {
-          mEnd = trailingWhitespace ? trailingWhitespace : p;
-          mComma = p;
-          return;
-        }
-        auto c = *p;
-        if (c == CharType(',')) {
-          mEnd = trailingWhitespace ? trailingWhitespace : p;
-          mComma = p;
-          return;
-        }
-        if (c == CharType(' ')) {
-          // Found a whitespace -> Record as trailing if not first one.
-          if (!trailingWhitespace) {
-            trailingWhitespace = p;
-          }
-        } else {
-          // Found a non-whitespace -> Reset trailing whitespace if needed.
-          if (trailingWhitespace) {
-            trailingWhitespace = nullptr;
-          }
-        }
-      }
-    }
-    const Pointer mRangeEnd;
-    Pointer mStart;
-    Pointer mEnd;
-    Pointer mComma;
-  };
-
-  explicit StringListRange(const String& aList) : mList(aList) {}
-  Iterator begin()
-  {
-    return Iterator(mList.Data(), mList.Length());
-  }
-  Iterator end()
-  {
-    return Iterator(mList.Data() + mList.Length(), 0);
-  }
-private:
-  const String& mList;
-};
-
-template <typename String>
-StringListRange<String>
-MakeStringListRange(const String& aList)
-{
-  return StringListRange<String>(aList);
-}
-
-template <typename ListString, typename ItemString>
-static bool
-StringListContains(const ListString& aList, const ItemString& aItem)
-{
-  for (const auto& listItem : MakeStringListRange(aList)) {
-    if (listItem.Equals(aItem)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool
-IsVorbisContentType(const nsAString& aContentType);
-
-bool
-IsVP8ContentType(const nsAString& aContentType);
-
-bool
-IsVP9ContentType(const nsAString& aContentType);
 
 } // end namespace mozilla
 

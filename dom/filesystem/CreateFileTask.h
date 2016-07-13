@@ -8,6 +8,7 @@
 #define mozilla_dom_CreateFileTask_h
 
 #include "mozilla/dom/FileSystemTaskBase.h"
+#include "nsAutoPtr.h"
 #include "mozilla/ErrorResult.h"
 
 class nsIInputStream;
@@ -19,19 +20,22 @@ class Blob;
 class BlobImpl;
 class Promise;
 
-class CreateFileTaskChild final : public FileSystemTaskChildBase
+class CreateFileTask final
+  : public FileSystemTaskBase
 {
 public:
-  static already_AddRefed<CreateFileTaskChild>
-  Create(FileSystemBase* aFileSystem,
-         nsIFile* aFile,
-         Blob* aBlobData,
-         InfallibleTArray<uint8_t>& aArrayData,
-         bool replace,
-         ErrorResult& aRv);
+  CreateFileTask(FileSystemBase* aFileSystem,
+                 const nsAString& aPath,
+                 Blob* aBlobData,
+                 InfallibleTArray<uint8_t>& aArrayData,
+                 bool replace,
+                 ErrorResult& aRv);
+  CreateFileTask(FileSystemBase* aFileSystem,
+                 const FileSystemCreateFileParams& aParam,
+                 FileSystemRequestParent* aParent);
 
   virtual
-  ~CreateFileTaskChild();
+  ~CreateFileTask();
 
   already_AddRefed<Promise>
   GetPromise();
@@ -41,74 +45,38 @@ public:
 
 protected:
   virtual FileSystemParams
-  GetRequestParams(const nsString& aSerializedDOMPath,
-                   ErrorResult& aRv) const override;
+  GetRequestParams(const nsString& aFileSystem) const override;
+
+  virtual FileSystemResponseValue
+  GetSuccessRequestResult() const override;
 
   virtual void
-  SetSuccessRequestResult(const FileSystemResponseValue& aValue,
-                          ErrorResult& aRv) override;
+  SetSuccessRequestResult(const FileSystemResponseValue& aValue) override;
+
+  virtual nsresult
+  Work() override;
 
   virtual void
   HandlerCallback() override;
 
 private:
-  CreateFileTaskChild(FileSystemBase* aFileSystem,
-                      nsIFile* aFile,
-                      bool aReplace);
-
-  RefPtr<Promise> mPromise;
-  nsCOMPtr<nsIFile> mTargetPath;
-
-  RefPtr<BlobImpl> mBlobImpl;
-
-  // This is going to be the content of the file, received by createFile()
-  // params.
-  InfallibleTArray<uint8_t> mArrayData;
-
-  bool mReplace;
-};
-
-class CreateFileTaskParent final : public FileSystemTaskParentBase
-{
-public:
-  static already_AddRefed<CreateFileTaskParent>
-  Create(FileSystemBase* aFileSystem,
-         const FileSystemCreateFileParams& aParam,
-         FileSystemRequestParent* aParent,
-         ErrorResult& aRv);
-
-  virtual bool
-  NeedToGoToMainThread() const override { return true; }
-
-  virtual nsresult
-  MainThreadWork() override;
-
-  virtual void
-  GetPermissionAccessType(nsCString& aAccess) const override;
-
-protected:
-  virtual FileSystemResponseValue
-  GetSuccessRequestResult(ErrorResult& aRv) const override;
-
-  virtual nsresult
-  IOWork() override;
-
-private:
-  CreateFileTaskParent(FileSystemBase* aFileSystem,
-                       const FileSystemCreateFileParams& aParam,
-                       FileSystemRequestParent* aParent);
+  void
+  GetOutputBufferSize() const;
 
   static uint32_t sOutputBufferSize;
+  nsRefPtr<Promise> mPromise;
+  nsString mTargetRealPath;
 
-  nsCOMPtr<nsIFile> mTargetPath;
+  // Not thread-safe and should be released on main thread.
+  nsRefPtr<Blob> mBlobData;
 
-  RefPtr<BlobImpl> mBlobImpl;
-
-  // This is going to be the content of the file, received by createFile()
-  // params.
+  nsCOMPtr<nsIInputStream> mBlobStream;
   InfallibleTArray<uint8_t> mArrayData;
-
   bool mReplace;
+
+  // This cannot be a File because this object is created on a different
+  // thread and File is not thread-safe. Let's use the BlobImpl instead.
+  nsRefPtr<BlobImpl> mTargetBlobImpl;
 };
 
 } // namespace dom

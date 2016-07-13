@@ -10,7 +10,8 @@
 #include "mozilla/dom/cache/CacheStreamControlChild.h"
 #include "mozilla/dom/cache/CacheStreamControlParent.h"
 #include "mozilla/dom/cache/CacheTypes.h"
-#include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/ipc/FileDescriptor.h"
+#include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/SnappyUncompressInputStream.h"
 #include "nsIAsyncInputStream.h"
 #include "nsTArray.h"
@@ -19,9 +20,8 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
-using mozilla::Unused;
-using mozilla::ipc::AutoIPCStream;
-using mozilla::ipc::IPCStream;
+using mozilla::unused;
+using mozilla::ipc::FileDescriptor;
 
 // ----------------------------------------------------------------------------
 
@@ -35,14 +35,10 @@ public:
         nsIInputStream* aStream);
 
   void
-  Serialize(CacheReadStreamOrVoid* aReadStreamOut,
-            nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
-            ErrorResult& aRv);
+  Serialize(CacheReadStreamOrVoid* aReadStreamOut);
 
   void
-  Serialize(CacheReadStream* aReadStreamOut,
-            nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
-            ErrorResult& aRv);
+  Serialize(CacheReadStream* aReadStreamOut);
 
   // ReadStream::Controllable methods
   virtual void
@@ -121,7 +117,7 @@ private:
 // be done on the thread associated with the PBackground actor.  Must be
 // cancelable to execute on Worker threads (which can occur when the
 // ReadStream is constructed on a child process Worker thread).
-class ReadStream::Inner::NoteClosedRunnable final : public CancelableRunnable
+class ReadStream::Inner::NoteClosedRunnable final : public nsCancelableRunnable
 {
 public:
   explicit NoteClosedRunnable(ReadStream::Inner* aStream)
@@ -137,7 +133,7 @@ public:
 
   // Note, we must proceed with the Run() method since our actor will not
   // clean itself up until we note that the stream is closed.
-  nsresult Cancel()
+  NS_IMETHOD Cancel()
   {
     Run();
     return NS_OK;
@@ -146,7 +142,7 @@ public:
 private:
   ~NoteClosedRunnable() { }
 
-  RefPtr<ReadStream::Inner> mStream;
+  nsRefPtr<ReadStream::Inner> mStream;
 };
 
 // ----------------------------------------------------------------------------
@@ -156,7 +152,7 @@ private:
 // it on the thread associated with the PBackground actor.  Must be
 // cancelable to execute on Worker threads (which can occur when the
 // ReadStream is constructed on a child process Worker thread).
-class ReadStream::Inner::ForgetRunnable final : public CancelableRunnable
+class ReadStream::Inner::ForgetRunnable final : public nsCancelableRunnable
 {
 public:
   explicit ForgetRunnable(ReadStream::Inner* aStream)
@@ -172,7 +168,7 @@ public:
 
   // Note, we must proceed with the Run() method so that we properly
   // call RemoveListener on the actor.
-  nsresult Cancel()
+  NS_IMETHOD Cancel()
   {
     Run();
     return NS_OK;
@@ -181,7 +177,7 @@ public:
 private:
   ~ForgetRunnable() { }
 
-  RefPtr<ReadStream::Inner> mStream;
+  nsRefPtr<ReadStream::Inner> mStream;
 };
 
 // ----------------------------------------------------------------------------
@@ -201,37 +197,35 @@ ReadStream::Inner::Inner(StreamControl* aControl, const nsID& aId,
 }
 
 void
-ReadStream::Inner::Serialize(CacheReadStreamOrVoid* aReadStreamOut,
-                             nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
-                             ErrorResult& aRv)
+ReadStream::Inner::Serialize(CacheReadStreamOrVoid* aReadStreamOut)
 {
   MOZ_ASSERT(NS_GetCurrentThread() == mOwningThread);
   MOZ_ASSERT(aReadStreamOut);
-  *aReadStreamOut = CacheReadStream();
-  Serialize(&aReadStreamOut->get_CacheReadStream(), aStreamCleanupList, aRv);
+  CacheReadStream stream;
+  Serialize(&stream);
+  *aReadStreamOut = stream;
 }
 
 void
-ReadStream::Inner::Serialize(CacheReadStream* aReadStreamOut,
-                             nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
-                             ErrorResult& aRv)
+ReadStream::Inner::Serialize(CacheReadStream* aReadStreamOut)
 {
   MOZ_ASSERT(NS_GetCurrentThread() == mOwningThread);
   MOZ_ASSERT(aReadStreamOut);
-
-  if (mState != Open) {
-    aRv.ThrowTypeError<MSG_CACHE_STREAM_CLOSED>();
-    return;
-  }
-
+  MOZ_ASSERT(mState == Open);
   MOZ_ASSERT(mControl);
+
+  // If we are sending a ReadStream, then we never want to set the
+  // pushStream actors at the same time.
+  aReadStreamOut->pushStreamChild() = nullptr;
+  aReadStreamOut->pushStreamParent() = nullptr;
 
   aReadStreamOut->id() = mId;
   mControl->SerializeControl(aReadStreamOut);
-  mControl->SerializeStream(aReadStreamOut, mStream, aStreamCleanupList);
 
-  MOZ_ASSERT(aReadStreamOut->stream().type() ==
-             IPCStream::TInputStreamParamsWithFds);
+  nsAutoTArray<FileDescriptor, 4> fds;
+  SerializeInputStream(mStream, aReadStreamOut->params(), fds);
+
+  mControl->SerializeFds(aReadStreamOut, fds);
 
   // We're passing ownership across the IPC barrier with the control, so
   // do not signal that the stream is closed here.
@@ -364,8 +358,8 @@ ReadStream::Inner::NoteClosed()
   }
 
   nsCOMPtr<nsIRunnable> runnable = new NoteClosedRunnable(this);
-  MOZ_ALWAYS_SUCCEEDS(
-    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL)));
 }
 
 void
@@ -382,8 +376,8 @@ ReadStream::Inner::Forget()
   }
 
   nsCOMPtr<nsIRunnable> runnable = new ForgetRunnable(this);
-  MOZ_ALWAYS_SUCCEEDS(
-    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL)));
 }
 
 void
@@ -442,8 +436,8 @@ ReadStream::Create(const CacheReadStream& aReadStream)
     return nullptr;
   }
 
-  MOZ_ASSERT(aReadStream.stream().type() ==
-             IPCStream::TInputStreamParamsWithFds);
+  MOZ_ASSERT(!aReadStream.pushStreamChild());
+  MOZ_ASSERT(!aReadStream.pushStreamParent());
 
   // Control is guaranteed to survive this method as ActorDestroy() cannot
   // run on this thread until we complete.
@@ -457,7 +451,11 @@ ReadStream::Create(const CacheReadStream& aReadStream)
   }
   MOZ_ASSERT(control);
 
-  nsCOMPtr<nsIInputStream> stream = DeserializeIPCStream(aReadStream.stream());
+  nsAutoTArray<FileDescriptor, 4> fds;
+  control->DeserializeFds(aReadStream, fds);
+
+  nsCOMPtr<nsIInputStream> stream =
+    DeserializeInputStream(aReadStream.params(), fds);
   MOZ_ASSERT(stream);
 
   // Currently we expect all cache read streams to be blocking file streams.
@@ -466,8 +464,8 @@ ReadStream::Create(const CacheReadStream& aReadStream)
   MOZ_ASSERT(!asyncStream);
 #endif
 
-  RefPtr<Inner> inner = new Inner(control, aReadStream.id(), stream);
-  RefPtr<ReadStream> ref = new ReadStream(inner);
+  nsRefPtr<Inner> inner = new Inner(control, aReadStream.id(), stream);
+  nsRefPtr<ReadStream> ref = new ReadStream(inner);
   return ref.forget();
 }
 
@@ -478,25 +476,21 @@ ReadStream::Create(PCacheStreamControlParent* aControl, const nsID& aId,
 {
   MOZ_ASSERT(aControl);
   auto actor = static_cast<CacheStreamControlParent*>(aControl);
-  RefPtr<Inner> inner = new Inner(actor, aId, aStream);
-  RefPtr<ReadStream> ref = new ReadStream(inner);
+  nsRefPtr<Inner> inner = new Inner(actor, aId, aStream);
+  nsRefPtr<ReadStream> ref = new ReadStream(inner);
   return ref.forget();
 }
 
 void
-ReadStream::Serialize(CacheReadStreamOrVoid* aReadStreamOut,
-                      nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
-                      ErrorResult& aRv)
+ReadStream::Serialize(CacheReadStreamOrVoid* aReadStreamOut)
 {
-  mInner->Serialize(aReadStreamOut, aStreamCleanupList, aRv);
+  mInner->Serialize(aReadStreamOut);
 }
 
 void
-ReadStream::Serialize(CacheReadStream* aReadStreamOut,
-                      nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
-                      ErrorResult& aRv)
+ReadStream::Serialize(CacheReadStream* aReadStreamOut)
 {
-  mInner->Serialize(aReadStreamOut, aStreamCleanupList, aRv);
+  mInner->Serialize(aReadStreamOut);
 }
 
 ReadStream::ReadStream(ReadStream::Inner* aInner)

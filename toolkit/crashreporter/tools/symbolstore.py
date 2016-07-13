@@ -21,7 +21,6 @@
 #     -s <srcdir>  : Use <srcdir> as the top source directory to
 #                    generate relative filenames.
 
-import buildconfig
 import errno
 import sys
 import platform
@@ -31,12 +30,10 @@ import shutil
 import textwrap
 import fnmatch
 import subprocess
-import time
 import ctypes
 import urlparse
-import concurrent.futures
 import multiprocessing
-
+import collections
 from optparse import OptionParser
 from xml.dom.minidom import parse
 
@@ -327,9 +324,13 @@ def make_file_mapping(install_manifests):
 def GetPlatformSpecificDumper(**kwargs):
     """This function simply returns a instance of a subclass of Dumper
     that is appropriate for the current platform."""
-    return {'WINNT': Dumper_Win32,
+    # Python 2.5 has a bug where platform.system() returns 'Microsoft'.
+    # Remove this when we no longer support Python 2.5.
+    return {'Windows': Dumper_Win32,
+            'Microsoft': Dumper_Win32,
             'Linux': Dumper_Linux,
-            'Darwin': Dumper_Mac}[buildconfig.substs['OS_ARCH']](**kwargs)
+            'Sunos5': Dumper_Solaris,
+            'Darwin': Dumper_Mac}[platform.system()](**kwargs)
 
 def SourceIndex(fileStream, outputPath, vcs_root):
     """Takes a list of files, writes info to a data block in a .stream file"""
@@ -345,43 +346,17 @@ def SourceIndex(fileStream, outputPath, vcs_root):
     pdbStreamFile.close()
     return result
 
-def StartJob(dumper, lock, srcdirRepoInfo, func_name, args):
-    # Windows worker processes won't have run GlobalInit,
-    # and due to a lack of fork(), won't inherit the class
-    # variables from the parent, so set them here.
-    Dumper.lock = lock
-    Dumper.srcdirRepoInfo = srcdirRepoInfo
-    return getattr(dumper, func_name)(*args)
+def WorkerInitializer(cls, lock, srcdirRepoInfo):
+    """Windows worker processes won't have run GlobalInit, and due to a lack of fork(),
+    won't inherit the class variables from the parent. They only need a few variables,
+    so we run an initializer to set them. Redundant but harmless on other platforms."""
+    cls.lock = lock
+    cls.srcdirRepoInfo = srcdirRepoInfo
 
-class JobPool(object):
-    jobs = {}
-    executor = None
-
-    @classmethod
-    def init(cls, executor):
-        cls.executor = executor
-
-    @classmethod
-    def shutdown(cls):
-        cls.executor.shutdown()
-
-    @classmethod
-    def submit(cls, args, callback):
-        cls.jobs[cls.executor.submit(StartJob, *args)] = callback
-
-    @classmethod
-    def as_completed(cls):
-        '''Like concurrent.futures.as_completed, but allows adding new futures
-        between generator steps. Iteration will end when the generator has
-        yielded all completed futures and JobQueue.jobs is empty.
-        Yields (future, callback) pairs.
-        '''
-        while cls.jobs:
-            completed, _ = concurrent.futures.wait(cls.jobs.keys(), return_when=concurrent.futures.FIRST_COMPLETED)
-            for f in completed:
-                callback = cls.jobs[f]
-                del cls.jobs[f]
-                yield f, callback
+def StartProcessFilesWork(dumper, files, arch_num, arch, vcs_root, after, after_arg):
+    """multiprocessing can't handle methods as Process targets, so we define
+    a simple wrapper function around the work method."""
+    return dumper.ProcessFilesWork(files, arch_num, arch, vcs_root, after, after_arg)
 
 class Dumper:
     """This class can dump symbols from a file with debug info, and
@@ -395,13 +370,13 @@ class Dumper:
     symbol files--|copy_debug|, mostly useful for creating a
     Microsoft Symbol Server from the resulting output.
 
-    You don't want to use this directly if you intend to process files.
-    Instead, call GetPlatformSpecificDumper to get an instance of a
-    subclass.
-
+    You don't want to use this directly if you intend to call
+    ProcessDir.  Instead, call GetPlatformSpecificDumper to
+    get an instance of a subclass.
+ 
     Processing is performed asynchronously via worker processes; in
     order to wait for processing to finish and cleanup correctly, you
-    must call Finish after all ProcessFiles calls have been made.
+    must call Finish after all Process/ProcessDir calls have been made.
     You must also call Dumper.GlobalInit before creating or using any
     instances."""
     def __init__(self, dump_syms, symbol_path,
@@ -430,26 +405,49 @@ class Dumper:
             self.parse_repo_manifest(repo_manifest)
         self.file_mapping = file_mapping or {}
 
-        # book-keeping to keep track of the cleanup work per file tuple
+        # book-keeping to keep track of our jobs and the cleanup work per file tuple
         self.files_record = {}
+        self.jobs_record = collections.defaultdict(int)
 
     @classmethod
-    def GlobalInit(cls, executor=concurrent.futures.ProcessPoolExecutor):
+    def GlobalInit(cls, module=multiprocessing):
         """Initialize the class globals for the multiprocessing setup; must
         be called before any Dumper instances are created and used. Test cases
-        may pass in a different executor to use, usually
-        concurrent.futures.ThreadPoolExecutor."""
-        num_cpus = multiprocessing.cpu_count()
+        may pass in a different module to supply Manager and Pool objects,
+        usually multiprocessing.dummy."""
+        num_cpus = module.cpu_count()
         if num_cpus is None:
             # assume a dual core machine if we can't find out for some reason
             # probably better on single core anyway due to I/O constraints
             num_cpus = 2
 
         # have to create any locks etc before the pool
-        manager = multiprocessing.Manager()
-        cls.lock = manager.RLock()
-        cls.srcdirRepoInfo = manager.dict()
-        JobPool.init(executor(max_workers=num_cpus))
+        cls.manager = module.Manager()
+        cls.jobs_condition = Dumper.manager.Condition()
+        cls.lock = Dumper.manager.RLock()
+        cls.srcdirRepoInfo = Dumper.manager.dict()
+        cls.pool = module.Pool(num_cpus, WorkerInitializer,
+                               (cls, cls.lock, cls.srcdirRepoInfo))
+
+    def JobStarted(self, file_key):
+        """Increments the number of submitted jobs for the specified key file,
+        defined as the original file we processed; note that a single key file
+        can generate up to 1 + len(self.archs) jobs in the Mac case."""
+        with Dumper.jobs_condition:
+            self.jobs_record[file_key] += 1
+            Dumper.jobs_condition.notify_all()
+
+    def JobFinished(self, file_key):
+        """Decrements the number of submitted jobs for the specified key file,
+        defined as the original file we processed; once the count is back to 0,
+        remove the entry from our record."""
+        with Dumper.jobs_condition:
+            self.jobs_record[file_key] -= 1
+
+            if self.jobs_record[file_key] == 0:
+                del self.jobs_record[file_key]
+
+            Dumper.jobs_condition.notify_all()
 
     def output(self, dest, output_str):
         """Writes |output_str| to |dest|, holding |lock|;
@@ -542,61 +540,47 @@ class Dumper:
         pass
 
     def Finish(self, stop_pool=True):
-        '''Process all pending jobs and any jobs their callbacks submit.
-        By default, will shutdown the executor, but for testcases that
-        need multiple runs, pass stop_pool = False.'''
-        for job, callback in JobPool.as_completed():
-            try:
-                res = job.result()
-            except Exception as e:
-                self.output(sys.stderr, 'Job raised exception: %s' % e)
-                continue
-            callback(res)
+        """Wait for the expected number of jobs to be submitted, and then
+        wait for the pool to finish processing them. By default, will close
+        and clear the pool, but for testcases that need multiple runs, pass
+        stop_pool = False."""
+        with Dumper.jobs_condition:
+            while len(self.jobs_record) != 0:
+                Dumper.jobs_condition.wait()
         if stop_pool:
-            JobPool.shutdown()
+            Dumper.pool.close()
+            Dumper.pool.join()
 
-    def Process(self, *args):
-        """Process files recursively in args."""
-        # We collect all files to process first then sort by size to schedule
-        # larger files first because larger files tend to take longer and we
-        # don't like long pole stragglers.
-        files = set()
-        for arg in args:
-            for f in self.get_files_to_process(arg):
-                files.add(f)
-
-        for f in sorted(files, key=os.path.getsize, reverse=True):
-            self.ProcessFiles((f,))
-
-    def get_files_to_process(self, file_or_dir):
-        """Generate the files to process from an input."""
+    def Process(self, file_or_dir):
+        """Process a file or all the (valid) files in a directory; processing is performed
+        asynchronously, and Finish must be called to wait for it complete and cleanup."""
         if os.path.isdir(file_or_dir) and not self.ShouldSkipDir(file_or_dir):
-            for f in self.get_files_to_process_in_dir(file_or_dir):
-                yield f
+            self.ProcessDir(file_or_dir)
         elif os.path.isfile(file_or_dir):
-            yield file_or_dir
+            self.ProcessFiles((file_or_dir,))
 
-    def get_files_to_process_in_dir(self, path):
-        """Generate the files to process in a directory.
-
-        Valid files are are determined by calling ShouldProcess.
-        """
-        for root, dirs, files in os.walk(path):
+    def ProcessDir(self, dir):
+        """Process all the valid files in this directory.  Valid files
+        are determined by calling ShouldProcess; processing is performed
+        asynchronously, and Finish must be called to wait for it complete and cleanup."""
+        for root, dirs, files in os.walk(dir):
             for d in dirs[:]:
                 if self.ShouldSkipDir(d):
                     dirs.remove(d)
             for f in files:
                 fullpath = os.path.join(root, f)
                 if self.ShouldProcess(fullpath):
-                    yield fullpath
+                    self.ProcessFiles((fullpath,))
 
-    def SubmitJob(self, file_key, func_name, args, callback):
-        """Submits a job to the pool of workers"""
-        JobPool.submit((self, Dumper.lock, Dumper.srcdirRepoInfo, func_name, args), callback)
+    def SubmitJob(self, file_key, func, args, callback):
+        """Submits a job to the pool of workers; increments the number of submitted jobs."""
+        self.JobStarted(file_key)
+        res = Dumper.pool.apply_async(func, args=args, callback=callback)
 
     def ProcessFilesFinished(self, res):
         """Callback from multiprocesing when ProcessFilesWork finishes;
         run the cleanup work, if any"""
+        self.JobFinished(res['files'][-1])
         # only run the cleanup function once per tuple of files
         self.files_record[res['files']] += 1
         if self.files_record[res['files']] == len(self.archs):
@@ -617,17 +601,9 @@ class Dumper:
         vcs_root = os.environ.get("SRCSRV_ROOT")
         for arch_num, arch in enumerate(self.archs):
             self.files_record[files] = 0 # record that we submitted jobs for this tuple of files
-            self.SubmitJob(files[-1], 'ProcessFilesWork', args=(files, arch_num, arch, vcs_root, after, after_arg), callback=self.ProcessFilesFinished)
-
-    def dump_syms_cmdline(self, file, arch, files):
-        '''
-        Get the commandline used to invoke dump_syms.
-        '''
-        # The Mac dumper overrides this.
-        return [self.dump_syms, file]
+            self.SubmitJob(files[-1], StartProcessFilesWork, args=(self, files, arch_num, arch, vcs_root, after, after_arg), callback=self.ProcessFilesFinished)
 
     def ProcessFilesWork(self, files, arch_num, arch, vcs_root, after, after_arg):
-        t_start = time.time()
         self.output_pid(sys.stderr, "Worker processing files: %s" % (files,))
 
         # our result is a status, a cleanup function, an argument to that function, and the tuple of files we were called on
@@ -638,10 +614,8 @@ class Dumper:
         for file in files:
             # files is a tuple of files, containing fallbacks in case the first file doesn't process successfully
             try:
-                cmd = self.dump_syms_cmdline(file, arch, files)
-                self.output_pid(sys.stderr, ' '.join(cmd))
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                        stderr=open(os.devnull, 'wb'))
+                proc = subprocess.Popen([self.dump_syms] + arch.split() + [file],
+                                        stdout=subprocess.PIPE)
                 module_line = proc.stdout.next()
                 if module_line.startswith("MODULE"):
                     # MODULE os cpu guid debug_file
@@ -714,10 +688,6 @@ class Dumper:
             if result['status']:
                 # we only need 1 file to work
                 break
-
-        elapsed = time.time() - t_start
-        self.output_pid(sys.stderr, 'Worker finished processing %s in %.2fs' %
-                        (files, elapsed))
         return result
 
 # Platform-specific subclasses.  For the most part, these just have
@@ -749,32 +719,13 @@ class Dumper_Win32(Dumper):
         result = file
 
         ctypes.windll.kernel32.SetErrorMode(ctypes.c_uint(1))
-        if not isinstance(file, unicode):
-            file = unicode(file, sys.getfilesystemencoding())
-        handle = ctypes.windll.kernel32.CreateFileW(file,
-                                                    # GENERIC_READ
-                                                    0x80000000,
-                                                    # FILE_SHARE_READ
-                                                    1,
-                                                    None,
-                                                    # OPEN_EXISTING
-                                                    3,
-                                                    0,
-                                                    None)
-        if handle != -1:
-            size = ctypes.windll.kernel32.GetFinalPathNameByHandleW(handle,
-                                                                    None,
-                                                                    0,
-                                                                    0)
-            buf = ctypes.create_unicode_buffer(size)
-            if ctypes.windll.kernel32.GetFinalPathNameByHandleW(handle,
-                                                                buf,
-                                                                size,
-                                                                0) > 0:
-                # The return value of GetFinalPathNameByHandleW uses the
-                # '\\?\' prefix.
-                result = buf.value.encode(sys.getfilesystemencoding())[4:]
-            ctypes.windll.kernel32.CloseHandle(handle)
+        (path, filename) = os.path.split(file)
+        if os.path.isdir(path):
+            lc_filename = filename.lower()
+            for f in os.listdir(path):
+                if f.lower() == lc_filename:
+                    result = os.path.join(path, f)
+                    break
 
         # Cache the corrected version to avoid future filesystem hits.
         self.fixedFilenameCaseCache[file] = result
@@ -785,9 +736,10 @@ class Dumper_Win32(Dumper):
             compressed_file = path[:-1] + '_'
             # ignore makecab's output
             success = subprocess.call(["makecab.exe", "/D",
-                                       "CompressionType=MSZIP",
+                                       "CompressionType=LZX", "/D",
+                                       "CompressionMemory=21",
                                        path, compressed_file],
-                                      stdout=open(os.devnull, 'w'),
+                                      stdout=open("NUL:","w"),
                                       stderr=subprocess.STDOUT)
             if success == 0 and os.path.exists(compressed_file):
                 os.unlink(path)
@@ -896,6 +848,11 @@ class Dumper_Solaris(Dumper):
             return self.RunFileCommand(file).startswith("ELF")
         return False
 
+def StartProcessFilesWorkMac(dumper, file):
+    """multiprocessing can't handle methods as Process targets, so we define
+    a simple wrapper function around the work method."""
+    return dumper.ProcessFilesWorkMac(file)
+
 def AfterMac(status, dsymbundle):
     """Cleanup function to run on Macs after we process the file(s)."""
     # CopyDebug will already have been run from Dumper.ProcessFiles
@@ -926,29 +883,19 @@ class Dumper_Mac(Dumper):
         # also note, files must be len 1 here, since we're the only ones
         # that ever add more than one file to the list
         self.output_pid(sys.stderr, "Submitting job for Mac pre-processing on file: %s" % (files[0]))
-        self.SubmitJob(files[0], 'ProcessFilesWorkMac', args=(files[0],), callback=self.ProcessFilesMacFinished)
+        self.SubmitJob(files[0], StartProcessFilesWorkMac, args=(self, files[0]), callback=self.ProcessFilesMacFinished)
 
     def ProcessFilesMacFinished(self, result):
         if result['status']:
             # kick off new jobs per-arch with our new list of files
             Dumper.ProcessFiles(self, result['files'], after=AfterMac, after_arg=result['files'][0])
-
-    def dump_syms_cmdline(self, file, arch, files):
-        '''
-        Get the commandline used to invoke dump_syms.
-        '''
-        # dump_syms wants the path to the original binary and the .dSYM
-        # in order to dump all the symbols.
-        if len(files) == 2 and file == files[0] and file.endswith('.dSYM'):
-            # This is the .dSYM bundle.
-            return [self.dump_syms] + arch.split() + ['-g', file, files[1]]
-        return Dumper.dump_syms_cmdline(self, file, arch, files)
+        # only decrement jobs *after* that, since otherwise we'll remove the record for this file
+        self.JobFinished(result['files'][-1])
 
     def ProcessFilesWorkMac(self, file):
         """dump_syms on Mac needs to be run on a dSYM bundle produced
         by dsymutil(1), so run dsymutil here and pass the bundle name
         down to the superclass method instead."""
-        t_start = time.time()
         self.output_pid(sys.stderr, "Worker running Mac pre-processing on file: %s" % (file,))
 
         # our return is a status and a tuple of files to dump symbols for
@@ -957,17 +904,10 @@ class Dumper_Mac(Dumper):
         dsymbundle = file + ".dSYM"
         if os.path.exists(dsymbundle):
             shutil.rmtree(dsymbundle)
-        dsymutil = buildconfig.substs['DSYMUTIL']
         # dsymutil takes --arch=foo instead of -a foo like everything else
-        try:
-            cmd = ([dsymutil] +
-                   [a.replace('-a ', '--arch=') for a in self.archs if a] +
-                   [file])
-            self.output_pid(sys.stderr, ' '.join(cmd))
-            subprocess.check_call(cmd, stdout=open(os.devnull, 'w'))
-        except subprocess.CalledProcessError as e:
-            self.output_pid(sys.stderr, 'Error running dsymutil: %s' % str(e))
-
+        subprocess.call(["dsymutil"] + [a.replace('-a ', '--arch=') for a in self.archs if a]
+                        + [file],
+                        stdout=open("/dev/null","w"))
         if not os.path.exists(dsymbundle):
             # dsymutil won't produce a .dSYM for files without symbols
             self.output_pid(sys.stderr, "No symbols found in file: %s" % (file,))
@@ -977,9 +917,6 @@ class Dumper_Mac(Dumper):
 
         result['status'] = True
         result['files'] = (dsymbundle, file)
-        elapsed = time.time() - t_start
-        self.output_pid(sys.stderr, 'Worker finished processing %s in %.2fs' %
-                        (file, elapsed))
         return result
 
     def CopyDebug(self, file, debug_file, guid, code_file, code_id):
@@ -995,7 +932,7 @@ class Dumper_Mac(Dumper):
                                                   rel_path))
         success = subprocess.call(["tar", "cjf", full_path, os.path.basename(file)],
                                   cwd=os.path.dirname(file),
-                                  stdout=open(os.devnull, 'w'), stderr=subprocess.STDOUT)
+                                  stdout=open("/dev/null","w"), stderr=subprocess.STDOUT)
         if success == 0 and os.path.exists(full_path):
             self.output(sys.stdout, rel_path)
 
@@ -1061,8 +998,8 @@ to canonical locations in the source repository. Specify
                                        exclude=options.exclude,
                                        repo_manifest=options.repo_manifest,
                                        file_mapping=file_mapping)
-
-    dumper.Process(*args[2:])
+    for arg in args[2:]:
+        dumper.Process(arg)
     dumper.Finish()
 
 # run main if run directly

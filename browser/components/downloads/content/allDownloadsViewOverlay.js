@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+let { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -33,6 +33,12 @@ const nsIDM = Ci.nsIDownloadManager;
 
 const DESTINATION_FILE_URI_ANNO  = "downloads/destinationFileURI";
 const DOWNLOAD_META_DATA_ANNO    = "downloads/metaData";
+
+const DOWNLOAD_VIEW_SUPPORTED_COMMANDS =
+ ["cmd_delete", "cmd_copy", "cmd_paste", "cmd_selectAll",
+  "downloadsCmd_pauseResume", "downloadsCmd_cancel", "downloadsCmd_unblock",
+  "downloadsCmd_confirmBlock", "downloadsCmd_open", "downloadsCmd_show",
+  "downloadsCmd_retry", "downloadsCmd_openReferrer", "downloadsCmd_clearDownloads"];
 
 /**
  * Represents a download from the browser history. It implements part of the
@@ -72,23 +78,16 @@ HistoryDownload.prototype = {
 
     if ("state" in metaData) {
       this.succeeded = metaData.state == nsIDM.DOWNLOAD_FINISHED;
+      this.error = metaData.state == nsIDM.DOWNLOAD_FAILED
+                   ? { message: "History download failed." }
+                   : metaData.state == nsIDM.DOWNLOAD_BLOCKED_PARENTAL
+                   ? { becauseBlockedByParentalControls: true }
+                   : metaData.state == nsIDM.DOWNLOAD_DIRTY
+                   ? { becauseBlockedByReputationCheck: true }
+                   : null;
       this.canceled = metaData.state == nsIDM.DOWNLOAD_CANCELED ||
                       metaData.state == nsIDM.DOWNLOAD_PAUSED;
       this.endTime = metaData.endTime;
-
-      // Recreate partial error information from the state saved in history.
-      if (metaData.state == nsIDM.DOWNLOAD_FAILED) {
-        this.error = { message: "History download failed." };
-      } else if (metaData.state == nsIDM.DOWNLOAD_BLOCKED_PARENTAL) {
-        this.error = { becauseBlockedByParentalControls: true };
-      } else if (metaData.state == nsIDM.DOWNLOAD_DIRTY) {
-        this.error = {
-          becauseBlockedByReputationCheck: true,
-          reputationCheckVerdict: metaData.reputationCheckVerdict || "",
-        };
-      } else {
-        this.error = null;
-      }
 
       // Normal history downloads are assumed to exist until the user interface
       // is refreshed, at which point these values may be updated.
@@ -110,7 +109,7 @@ HistoryDownload.prototype = {
       this.canceled = false;
 
       // These properties may be updated if the user interface is refreshed.
-      this.target.exists = false;
+      this.exists = false;
       this.target.size = undefined;
     }
   },
@@ -221,22 +220,16 @@ HistoryDownloadElementShell.prototype = {
       this._updateUI();
     }
   },
-  get active() {
-    return !!this._active;
-  },
+  get active() !!this._active,
 
   /**
    * Overrides the base getter to return the Download or HistoryDownload object
    * for displaying information and executing commands in the user interface.
    */
-  get download() {
-    return this._sessionDownload || this._historyDownload;
-  },
+  get download() this._sessionDownload || this._historyDownload,
 
   _sessionDownload: null,
-  get sessionDownload() {
-    return this._sessionDownload;
-  },
+  get sessionDownload() this._sessionDownload,
   set sessionDownload(aValue) {
     if (this._sessionDownload != aValue) {
       if (!aValue && !this._historyDownload) {
@@ -252,9 +245,7 @@ HistoryDownloadElementShell.prototype = {
   },
 
   _historyDownload: null,
-  get historyDownload() {
-    return this._historyDownload;
-  },
+  get historyDownload() this._historyDownload,
   set historyDownload(aValue) {
     if (this._historyDownload != aValue) {
       if (!aValue && !this._sessionDownload) {
@@ -298,12 +289,15 @@ HistoryDownloadElementShell.prototype = {
   },
 
   onStateChanged() {
-    this._updateState();
+    this.element.setAttribute("image", this.image);
+    this.element.setAttribute("state",
+                              DownloadsCommon.stateOfDownload(this.download));
 
     if (this.element.selected) {
       goUpdateDownloadCommands();
+    } else {
+      goUpdateCommand("downloadsCmd_clearDownloads");
     }
-    goUpdateCommand("downloadsCmd_clearDownloads");
   },
 
   onChanged() {
@@ -315,6 +309,7 @@ HistoryDownloadElementShell.prototype = {
     this._updateProgress();
   },
 
+  /* nsIController */
   isCommandEnabled(aCommand) {
     // The only valid command for inactive elements is cmd_delete.
     if (!this.active && aCommand != "cmd_delete") {
@@ -335,56 +330,84 @@ HistoryDownloadElementShell.prototype = {
 
         // This property is false if the download did not succeed.
         return this.download.target.exists;
+      case "downloadsCmd_pauseResume":
+        return this.download.hasPartialData && !this.download.error;
+      case "downloadsCmd_retry":
+        return this.download.canceled || this.download.error;
+      case "downloadsCmd_openReferrer":
+        return !!this.download.source.referrer;
       case "cmd_delete":
         // We don't want in-progress downloads to be removed accidentally.
         return this.download.stopped;
       case "downloadsCmd_cancel":
         return !!this._sessionDownload;
+      case "downloadsCmd_confirmBlock":
+      case "downloadsCmd_unblock":
+        return this.download.hasBlockedData;
     }
-    return DownloadsViewUI.DownloadElementShell.prototype
-                          .isCommandEnabled.call(this, aCommand);
+    return false;
   },
 
+  /* nsIController */
   doCommand(aCommand) {
-    if (DownloadsViewUI.isCommandName(aCommand)) {
-      this[aCommand]();
+    switch (aCommand) {
+      case "downloadsCmd_open": {
+        let file = new FileUtils.File(this.download.target.path);
+        DownloadsCommon.openDownloadedFile(file, null, window);
+        break;
+      }
+      case "downloadsCmd_show": {
+        let file = new FileUtils.File(this.download.target.path);
+        DownloadsCommon.showDownloadedFile(file);
+        break;
+      }
+      case "downloadsCmd_openReferrer": {
+        openURL(this.download.source.referrer);
+        break;
+      }
+      case "downloadsCmd_cancel": {
+        this.download.cancel().catch(() => {});
+        this.download.removePartialData().catch(Cu.reportError);
+        break;
+      }
+      case "cmd_delete": {
+        if (this._sessionDownload) {
+          DownloadsCommon.removeAndFinalizeDownload(this.download);
+        }
+        if (this._historyDownload) {
+          let uri = NetUtil.newURI(this.download.source.url);
+          PlacesUtils.bhistory.removePage(uri);
+        }
+        break;
+      }
+      case "downloadsCmd_retry": {
+        // Errors when retrying are already reported as download failures.
+        this.download.start().catch(() => {});
+        break;
+      }
+      case "downloadsCmd_pauseResume": {
+        // This command is only enabled for session downloads.
+        if (this.download.stopped) {
+          this.download.start();
+        } else {
+          this.download.cancel();
+        }
+        break;
+      }
+      case "downloadsCmd_unblock": {
+        DownloadsCommon.confirmUnblockDownload(DownloadsCommon.BLOCK_VERDICT_MALWARE,
+                                               window).then((confirmed) => {
+          if (confirmed) {
+            return this.download.unblock();
+          }
+        }).catch(Cu.reportError);
+        break;
+      }
+      case "downloadsCmd_confirmBlock": {
+        this.download.confirmBlock().catch(Cu.reportError);
+        break;
+      }
     }
-  },
-
-  downloadsCmd_open() {
-    let file = new FileUtils.File(this.download.target.path);
-    DownloadsCommon.openDownloadedFile(file, null, window);
-  },
-
-  downloadsCmd_show() {
-    let file = new FileUtils.File(this.download.target.path);
-    DownloadsCommon.showDownloadedFile(file);
-  },
-
-  downloadsCmd_openReferrer() {
-    openURL(this.download.source.referrer);
-  },
-
-  cmd_delete() {
-    if (this._sessionDownload) {
-      DownloadsCommon.removeAndFinalizeDownload(this.download);
-    }
-    if (this._historyDownload) {
-      let uri = NetUtil.newURI(this.download.source.url);
-      PlacesUtils.bhistory.removePage(uri);
-    }
-  },
-
-  downloadsCmd_unblock() {
-    this.confirmUnblock(window, "unblock");
-  },
-
-  downloadsCmd_chooseUnblock() {
-    this.confirmUnblock(window, "chooseUnblock");
-  },
-
-  downloadsCmd_chooseOpen() {
-    this.confirmUnblock(window, "chooseOpen");
   },
 
   // Returns whether or not the download handled by this shell should
@@ -402,7 +425,29 @@ HistoryDownloadElementShell.prototype = {
   // Handles return keypress on the element (the keypress listener is
   // set in the DownloadsPlacesView object).
   doDefaultCommand() {
-    let command = this.currentDefaultCommandName;
+    function getDefaultCommandForState(aState) {
+      switch (aState) {
+        case nsIDM.DOWNLOAD_FINISHED:
+          return "downloadsCmd_open";
+        case nsIDM.DOWNLOAD_PAUSED:
+          return "downloadsCmd_pauseResume";
+        case nsIDM.DOWNLOAD_NOTSTARTED:
+        case nsIDM.DOWNLOAD_QUEUED:
+          return "downloadsCmd_cancel";
+        case nsIDM.DOWNLOAD_FAILED:
+        case nsIDM.DOWNLOAD_CANCELED:
+          return "downloadsCmd_retry";
+        case nsIDM.DOWNLOAD_SCANNING:
+          return "downloadsCmd_show";
+        case nsIDM.DOWNLOAD_BLOCKED_PARENTAL:
+        case nsIDM.DOWNLOAD_DIRTY:
+        case nsIDM.DOWNLOAD_BLOCKED_POLICY:
+          return "downloadsCmd_openReferrer";
+      }
+      return "";
+    }
+    let state = DownloadsCommon.stateOfDownload(this.download);
+    let command = getDefaultCommandForState(state);
     if (command && this.isCommandEnabled(command)) {
       this.doCommand(command);
     }
@@ -452,17 +497,6 @@ HistoryDownloadElementShell.prototype = {
 };
 
 /**
- * Relays commands from the download.xml binding to the selected items.
- */
-const DownloadsView = {
-  onDownloadCommand(event, command) {
-    goDoCommand(command);
-  },
-
-  onDownloadClick() {},
-};
-
-/**
  * A Downloads Places View is a places view designed to show a places query
  * for history downloads alongside the session downloads.
  *
@@ -501,7 +535,7 @@ function DownloadsPlacesView(aRichListBox, aActive = true) {
 
   // Get the Download button out of the attention state since we're about to
   // view all downloads.
-  DownloadsCommon.getIndicatorData(window).attention = DownloadsCommon.ATTENTION_NONE;
+  DownloadsCommon.getIndicatorData(window).attention = false;
 
   // Make sure to unregister the view if the window is closed.
   window.addEventListener("unload", () => {
@@ -516,13 +550,9 @@ function DownloadsPlacesView(aRichListBox, aActive = true) {
 }
 
 DownloadsPlacesView.prototype = {
-  get associatedElement() {
-    return this._richlistbox;
-  },
+  get associatedElement() this._richlistbox,
 
-  get active() {
-    return this._active;
-  },
+  get active() this._active,
   set active(val) {
     this._active = val;
     if (this._active)
@@ -900,9 +930,7 @@ DownloadsPlacesView.prototype = {
   },
 
   _place: "",
-  get place() {
-    return this._place;
-  },
+  get place() this._place,
   set place(val) {
     // Don't reload everything if we don't have to.
     if (this._place == val) {
@@ -927,9 +955,7 @@ DownloadsPlacesView.prototype = {
   },
 
   _result: null,
-  get result() {
-    return this._result;
-  },
+  get result() this._result,
   set result(val) {
     if (this._result == val) {
       return val;
@@ -964,9 +990,7 @@ DownloadsPlacesView.prototype = {
     return selectedNodes.length == 1 ? selectedNodes[0] : null;
   },
 
-  get hasSelection() {
-    return this.selectedNodes.length > 0;
-  },
+  get hasSelection() this.selectedNodes.length > 0,
 
   containerStateChanged(aNode, aOldState, aNewState) {
     this.invalidateContainer(aNode)
@@ -1061,13 +1085,9 @@ DownloadsPlacesView.prototype = {
   nodeURIChanged() {},
   batching() {},
 
-  get controller() {
-    return this._richlistbox.controller;
-  },
+  get controller() this._richlistbox.controller,
 
-  get searchTerm() {
-    return this._searchTerm;
-  },
+  get searchTerm() this._searchTerm,
   set searchTerm(aValue) {
     if (this._searchTerm != aValue) {
       for (let element of this._richlistbox.childNodes) {
@@ -1133,28 +1153,24 @@ DownloadsPlacesView.prototype = {
     this._removeSessionDownloadFromView(download);
   },
 
-  // nsIController
   supportsCommand(aCommand) {
-    // Firstly, determine if this is a command that we can handle.
-    if (!aCommand.startsWith("cmd_") &&
-        !aCommand.startsWith("downloadsCmd_")) {
-      return false;
+    if (DOWNLOAD_VIEW_SUPPORTED_COMMANDS.indexOf(aCommand) != -1) {
+      // The clear-downloads command may be performed by the toolbar-button,
+      // which can be focused on OS X.  Thus enable this command even if the
+      // richlistbox is not focused.
+      // For other commands, be prudent and disable them unless the richlistview
+      // is focused. It's important to make the decision here rather than in
+      // isCommandEnabled.  Otherwise our controller may "steal" commands from
+      // other controls in the window (see goUpdateCommand &
+      // getControllerForCommand).
+      if (document.activeElement == this._richlistbox ||
+          aCommand == "downloadsCmd_clearDownloads") {
+        return true;
+      }
     }
-    if (!(aCommand in this) &&
-        !(aCommand in HistoryDownloadElementShell.prototype)) {
-      return false;
-    }
-    // If this function returns true, other controllers won't get a chance to
-    // process the command even if isCommandEnabled returns false, so it's
-    // important to check if the list is focused here to handle common commands
-    // like copy and paste correctly. The clear downloads command, instead, is
-    // specific to the downloads list but can be invoked from the toolbar, so we
-    // can just return true unconditionally.
-    return aCommand == "downloadsCmd_clearDownloads" ||
-           document.activeElement == this._richlistbox;
+    return false;
   },
 
-  // nsIController
   isCommandEnabled(aCommand) {
     switch (aCommand) {
       case "cmd_copy":
@@ -1231,50 +1247,42 @@ DownloadsPlacesView.prototype = {
     DownloadURL(url, name, initiatingDoc);
   },
 
-  // nsIController
   doCommand(aCommand) {
-    // If this command is not selection-specific, execute it.
-    if (aCommand in this) {
-      this[aCommand]();
-      return;
-    }
-
-    // Cloning the nodelist into an array to get a frozen list of selected items.
-    // Otherwise, the selectedItems nodelist is live and doCommand may alter the
-    // selection while we are trying to do one particular action, like removing
-    // items from history.
-    let selectedElements = [...this._richlistbox.selectedItems];
-    for (let element of selectedElements) {
-      element._shell.doCommand(aCommand);
+    switch (aCommand) {
+      case "cmd_copy":
+        this._copySelectedDownloadsToClipboard();
+        break;
+      case "cmd_selectAll":
+        this._richlistbox.selectAll();
+        break;
+      case "cmd_paste":
+        this._downloadURLFromClipboard();
+        break;
+      case "downloadsCmd_clearDownloads":
+        this._downloadsData.removeFinished();
+        if (this.result) {
+          Cc["@mozilla.org/browser/download-history;1"]
+            .getService(Ci.nsIDownloadHistory)
+            .removeAllDownloads();
+        }
+        // There may be no selection or focus change as a result
+        // of these change, and we want the command updated immediately.
+        goUpdateCommand("downloadsCmd_clearDownloads");
+        break;
+      default: {
+        // Slicing the array to get a freezed list of selected items. Otherwise,
+        // the selectedItems array is live and doCommand may alter the selection
+        // while we are trying to do one particular action, like removing items
+        // from history.
+        let selectedElements = this._richlistbox.selectedItems.slice();
+        for (let element of selectedElements) {
+          element._shell.doCommand(aCommand);
+        }
+      }
     }
   },
 
-  // nsIController
   onEvent() {},
-
-  cmd_copy() {
-    this._copySelectedDownloadsToClipboard();
-  },
-
-  cmd_selectAll() {
-    this._richlistbox.selectAll();
-  },
-
-  cmd_paste() {
-    this._downloadURLFromClipboard();
-  },
-
-  downloadsCmd_clearDownloads() {
-    this._downloadsData.removeFinished();
-    if (this.result) {
-      Cc["@mozilla.org/browser/download-history;1"]
-        .getService(Ci.nsIDownloadHistory)
-        .removeAllDownloads();
-    }
-    // There may be no selection or focus change as a result
-    // of these change, and we want the command updated immediately.
-    goUpdateCommand("downloadsCmd_clearDownloads");
-  },
 
   onContextMenu(aEvent) {
     let element = this._richlistbox.selectedItem;
@@ -1416,13 +1424,7 @@ for (let methodName of ["load", "applyFilter", "selectNode", "selectItems"]) {
 }
 
 function goUpdateDownloadCommands() {
-  function updateCommandsForObject(object) {
-    for (let name in object) {
-      if (name.startsWith("cmd_") || name.startsWith("downloadsCmd_")) {
-        goUpdateCommand(name);
-      }
-    }
+  for (let command of DOWNLOAD_VIEW_SUPPORTED_COMMANDS) {
+    goUpdateCommand(command);
   }
-  updateCommandsForObject(this);
-  updateCommandsForObject(HistoryDownloadElementShell.prototype);
 }

@@ -8,13 +8,13 @@ var supportedProps = [
   "appCodeName",
   "appName",
   "appVersion",
+  { name: "getDataStores", b2g: true },
   "platform",
   "product",
   "userAgent",
   "onLine",
   "language",
   "languages",
-  "hardwareConcurrency",
 ];
 
 self.onmessage = function(event) {
@@ -64,7 +64,12 @@ function startTest(isB2G) {
     }
 
     obj = { name:  prop };
-    obj.value = navigator[prop];
+
+    if (prop === "getDataStores") {
+      obj.value = typeof navigator[prop];
+    } else {
+      obj.value = navigator[prop];
+    }
 
     postMessage(JSON.stringify(obj));
   }

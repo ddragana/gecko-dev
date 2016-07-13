@@ -47,7 +47,10 @@
   }
 
   var cl = new consoleListener();
-  new SharedWorker('sharedWorker_console.js');
+
+  SpecialPowers.pushPrefEnv({ set: [["dom.workers.sharedWorkers.enabled", true]] }, function() {
+    new SharedWorker('sharedWorker_console.js');
+  });
 
   SimpleTest.waitForExplicitFinish();
 

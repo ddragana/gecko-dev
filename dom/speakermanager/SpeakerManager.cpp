@@ -5,18 +5,15 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SpeakerManager.h"
-
-#include "mozilla/Services.h"
-
-#include "mozilla/dom/Event.h"
-
-#include "AudioChannelService.h"
-#include "nsIDocShell.h"
 #include "nsIDOMClassInfo.h"
+#include "nsIDOMEvent.h"
 #include "nsIDOMEventListener.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsIPermissionManager.h"
 #include "SpeakerManagerService.h"
+#include "nsIPermissionManager.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "nsIDocShell.h"
+#include "AudioChannelService.h"
+#include "mozilla/Services.h"
 
 namespace mozilla {
 namespace dom {
@@ -89,8 +86,19 @@ SpeakerManager::DispatchSimpleEvent(const nsAString& aStr)
     return;
   }
 
-  RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
-  event->InitEvent(aStr, false, false);
+  nsCOMPtr<nsIDOMEvent> event;
+  rv = NS_NewDOMEvent(getter_AddRefs(event), this, nullptr, nullptr);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to create the error event!!!");
+    return;
+  }
+  rv = event->InitEvent(aStr, false, false);
+
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to init the error event!!!");
+    return;
+  }
+
   event->SetTrusted(true);
 
   rv = DispatchDOMEvent(nullptr, event, nullptr, nullptr);
@@ -101,11 +109,11 @@ SpeakerManager::DispatchSimpleEvent(const nsAString& aStr)
 }
 
 void
-SpeakerManager::Init(nsPIDOMWindowInner* aWindow)
+SpeakerManager::Init(nsPIDOMWindow* aWindow)
 {
   BindToOwner(aWindow);
 
-  nsCOMPtr<nsIDocShell> docshell = GetOwner()->GetDocShell();
+  nsCOMPtr<nsIDocShell> docshell = do_GetInterface(GetOwner());
   NS_ENSURE_TRUE_VOID(docshell);
   docshell->GetIsActive(&mVisible);
 
@@ -118,7 +126,7 @@ SpeakerManager::Init(nsPIDOMWindowInner* aWindow)
                                  /* wantsUntrusted = */ false);
 }
 
-nsPIDOMWindowInner*
+nsPIDOMWindow*
 SpeakerManager::GetParentObject() const
 {
   return GetOwner();
@@ -133,7 +141,7 @@ SpeakerManager::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindowInner> ownerWindow = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> ownerWindow = do_QueryInterface(aGlobal.GetAsSupports());
   if (!ownerWindow) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -153,7 +161,7 @@ SpeakerManager::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<SpeakerManager> object = new SpeakerManager();
+  nsRefPtr<SpeakerManager> object = new SpeakerManager();
   object->Init(ownerWindow);
   return object.forget();
 }
@@ -193,7 +201,7 @@ SpeakerManager::HandleEvent(nsIDOMEvent* aEvent)
   // currently playing in the app itself, if application switch to
   // the background, we switch 'speakerforced' to false.
   if (!mVisible && mForcespeaker) {
-    RefPtr<AudioChannelService> audioChannelService =
+    nsRefPtr<AudioChannelService> audioChannelService =
       AudioChannelService::GetOrCreate();
     if (audioChannelService && !audioChannelService->AnyAudioChannelIsActive()) {
       service->ForceSpeaker(false, mVisible);

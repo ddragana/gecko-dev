@@ -24,8 +24,8 @@ body {
 }
 
 button {
-  margin-inline-start: 0;
-  margin-inline-end: 8px;
+  -moz-margin-start: 0;
+  -moz-margin-end: 8px;
 }
 
 table {
@@ -51,12 +51,6 @@ th {
   text-align: start;
   background-color: var(--in-content-table-header-background);
   color: var(--in-content-selected-text);
-}
-
-th.title-column {
-  white-space: nowrap;
-  width: 0px;
-  font-size: medium;
 }
 
 th.column {
@@ -93,8 +87,8 @@ td {
   float: right;
   margin-top: 2em;
   margin-bottom: 20px;
-  margin-inline-start: 20px;
-  margin-inline-end: 0;
+  -moz-margin-start: 20px;
+  -moz-margin-end: 0;
   padding: 16px;
   width: 30%;
 }
@@ -105,7 +99,7 @@ td {
   display: none;
 }
 
-#action-box:dir(rtl) {
+#action-box:-moz-dir(rtl) {
   float: left;
 }
 
@@ -115,11 +109,6 @@ td {
 
 #action-box button {
   display: block;
-}
-
-#verify-place-result {
-  max-height: 200px;
-  overflow: auto;
 }
 
 .block {

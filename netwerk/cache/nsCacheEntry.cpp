@@ -249,7 +249,7 @@ nsCacheEntry::DetachDescriptors()
 
 void
 nsCacheEntry::GetDescriptors(
-    nsTArray<RefPtr<nsCacheEntryDescriptor> > &outDescriptors)
+    nsTArray<nsRefPtr<nsCacheEntryDescriptor> > &outDescriptors)
 {
     nsCacheEntryDescriptor * descriptor =
         (nsCacheEntryDescriptor *)PR_LIST_HEAD(&mDescriptorQ);
@@ -420,7 +420,7 @@ nsCacheEntryHashTable::GetEntry( const nsCString * key)
     NS_ASSERTION(initialized, "nsCacheEntryHashTable not initialized");
     if (!initialized)  return nullptr;
 
-    PLDHashEntryHdr *hashEntry = table.Search(key);
+    PLDHashEntryHdr *hashEntry = PL_DHashTableSearch(&table, key);
     return hashEntry ? ((nsCacheEntryHashTableEntry *)hashEntry)->cacheEntry
                      : nullptr;
 }
@@ -435,12 +435,11 @@ nsCacheEntryHashTable::AddEntry( nsCacheEntry *cacheEntry)
     if (!initialized)  return NS_ERROR_NOT_INITIALIZED;
     if (!cacheEntry)   return NS_ERROR_NULL_POINTER;
 
-    hashEntry = table.Add(&(cacheEntry->mKey), fallible);
-
-    if (!hashEntry)
-        return NS_ERROR_FAILURE;
+    hashEntry = PL_DHashTableAdd(&table, &(cacheEntry->mKey), fallible);
+#ifndef DEBUG_dougt
     NS_ASSERTION(((nsCacheEntryHashTableEntry *)hashEntry)->cacheEntry == 0,
                  "### nsCacheEntryHashTable::AddEntry - entry already used");
+#endif
     ((nsCacheEntryHashTableEntry *)hashEntry)->cacheEntry = cacheEntry;
 
     return NS_OK;
@@ -460,7 +459,7 @@ nsCacheEntryHashTable::RemoveEntry( nsCacheEntry *cacheEntry)
     nsCacheEntry *check = GetEntry(&(cacheEntry->mKey));
     NS_ASSERTION(check == cacheEntry, "### Attempting to remove unknown cache entry!!!");
 #endif
-    table.Remove(&(cacheEntry->mKey));
+    PL_DHashTableRemove(&table, &(cacheEntry->mKey));
 }
 
 PLDHashTable::Iterator
@@ -474,13 +473,14 @@ nsCacheEntryHashTable::Iter()
  */
 
 PLDHashNumber
-nsCacheEntryHashTable::HashKey(const void *key)
+nsCacheEntryHashTable::HashKey( PLDHashTable *table, const void *key)
 {
     return HashString(*static_cast<const nsCString *>(key));
 }
 
 bool
-nsCacheEntryHashTable::MatchEntry(const PLDHashEntryHdr * hashEntry,
+nsCacheEntryHashTable::MatchEntry(PLDHashTable *       /* table */,
+                                  const PLDHashEntryHdr * hashEntry,
                                   const void *            key)
 {
     NS_ASSERTION(key !=  nullptr, "### nsCacheEntryHashTable::MatchEntry : null key");

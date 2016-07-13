@@ -26,7 +26,7 @@ updateheader {
   -moz-box-orient: horizontal;
 }
 
-/* Remote content displayed in the billboard page. */
+/* Remote content displayed in the billboard and license pages. */
 remotecontent {
   -moz-binding: url("chrome://mozapps/content/update/updates.xml#remotecontent");
   display: -moz-deck;

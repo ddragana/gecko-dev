@@ -1,6 +1,6 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 var gToolboxDocument = null;
 var gToolbox = null;
@@ -10,7 +10,6 @@ var gToolboxSheet = false;
 var gPaletteBox = null;
 
 Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
 
 function onLoad()
 {
@@ -200,10 +199,10 @@ function wrapToolbarItems()
 {
   forEachCustomizableToolbar(function (toolbar) {
     Array.forEach(toolbar.childNodes, function (item) {
-      if (AppConstants.platform == "macosx") {
-        if (item.firstChild && item.firstChild.localName == "menubar")
-          return;
-      }
+#ifdef XP_MACOSX
+      if (item.firstChild && item.firstChild.localName == "menubar")
+        return;
+#endif
       if (isToolbarItem(item)) {
         let wrapper = wrapToolbarItem(item);
         cleanupItemForToolbar(item, wrapper);
@@ -729,7 +728,7 @@ function onToolbarDrop(aEvent)
     // The wrapper has been dragged from the toolbar.
     // Get the wrapper from the toolbar document and make sure that
     // it isn't being dropped on itself.
-    let wrapper = gToolboxDocument.getElementById("wrapper-"+draggedItemId);
+    var wrapper = gToolboxDocument.getElementById("wrapper-"+draggedItemId);
     if (wrapper == gCurrentDragOverItem)
        return;
 
@@ -756,7 +755,7 @@ function onToolbarDrop(aEvent)
     // The item has been dragged from the palette
 
     // Create a new wrapper for the item. We don't know the id yet.
-    let wrapper = createWrapper("", gToolboxDocument);
+    var wrapper = createWrapper("", gToolboxDocument);
 
     // Ask the toolbar to clone the item's template, place it inside the wrapper, and insert it in the toolbar.
     var newItem = toolbar.insertItem(draggedItemId, gCurrentDragOverItem == toolbar ? null : gCurrentDragOverItem, wrapper);
@@ -776,7 +775,7 @@ function onToolbarDrop(aEvent)
   gCurrentDragOverItem = null;
 
   toolboxChanged();
-}
+};
 
 function onPaletteDragOver(aEvent)
 {

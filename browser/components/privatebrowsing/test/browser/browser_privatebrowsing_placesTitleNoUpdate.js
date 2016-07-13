@@ -51,7 +51,7 @@ add_task(function* test() {
     }]
   };
   PlacesUtils.asyncHistory.updatePlaces(place, {
-    handleError: () => ok(false, "Unexpected error in adding visit."),
+    handleError: function () ok(false, "Unexpected error in adding visit."),
     handleResult: function () { },
     handleCompletion: function () {}
   });

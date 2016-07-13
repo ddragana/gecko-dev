@@ -10,7 +10,6 @@
 
 #include "webrtc/modules/rtp_rtcp/source/producer_fec.h"
 
-#include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/forward_error_correction.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_utility.h"
 
@@ -37,7 +36,7 @@ struct RtpPacket {
   ForwardErrorCorrection::Packet* pkt;
 };
 
-RedPacket::RedPacket(size_t length)
+RedPacket::RedPacket(int length)
     : data_(new uint8_t[length]),
       length_(length),
       header_length_(0) {
@@ -47,7 +46,7 @@ RedPacket::~RedPacket() {
   delete [] data_;
 }
 
-void RedPacket::CreateHeader(const uint8_t* rtp_header, size_t header_length,
+void RedPacket::CreateHeader(const uint8_t* rtp_header, int header_length,
                              int red_pl_type, int pl_type) {
   assert(header_length + kREDForFECHeaderLength <= length_);
   memcpy(data_, rtp_header, header_length);
@@ -56,17 +55,16 @@ void RedPacket::CreateHeader(const uint8_t* rtp_header, size_t header_length,
   data_[1] += red_pl_type;
   // Add RED header
   // f-bit always 0
-  data_[header_length] = static_cast<uint8_t>(pl_type);
+  data_[header_length] = pl_type;
   header_length_ = header_length + kREDForFECHeaderLength;
 }
 
 void RedPacket::SetSeqNum(int seq_num) {
   assert(seq_num >= 0 && seq_num < (1<<16));
-
-  ByteWriter<uint16_t>::WriteBigEndian(&data_[2], seq_num);
+  RtpUtility::AssignUWord16ToBuffer(&data_[2], seq_num);
 }
 
-void RedPacket::AssignPayload(const uint8_t* payload, size_t length) {
+void RedPacket::AssignPayload(const uint8_t* payload, int length) {
   assert(header_length_ + length <= length_);
   memcpy(data_ + header_length_, payload, length);
 }
@@ -79,7 +77,7 @@ uint8_t* RedPacket::data() const {
   return data_;
 }
 
-size_t RedPacket::length() const {
+int RedPacket::length() const {
   return length_;
 }
 
@@ -122,8 +120,8 @@ void ProducerFec::SetFecParameters(const FecProtectionParams* params,
 }
 
 RedPacket* ProducerFec::BuildRedPacket(const uint8_t* data_buffer,
-                                       size_t payload_length,
-                                       size_t rtp_header_length,
+                                       int payload_length,
+                                       int rtp_header_length,
                                        int red_pl_type) {
   RedPacket* red_packet = new RedPacket(payload_length +
                                         kREDForFECHeaderLength +
@@ -136,8 +134,8 @@ RedPacket* ProducerFec::BuildRedPacket(const uint8_t* data_buffer,
 }
 
 int ProducerFec::AddRtpPacketAndGenerateFec(const uint8_t* data_buffer,
-                                            size_t payload_length,
-                                            size_t rtp_header_length) {
+                                            int payload_length,
+                                            int rtp_header_length) {
   assert(fec_packets_.empty());
   if (media_packets_fec_.empty()) {
     params_ = new_params_;
@@ -212,7 +210,7 @@ bool ProducerFec::FecAvailable() const {
 RedPacket* ProducerFec::GetFecPacket(int red_pl_type,
                                      int fec_pl_type,
                                      uint16_t seq_num,
-                                     size_t rtp_header_length) {
+                                     int rtp_header_length) {
   if (fec_packets_.empty())
     return NULL;
   // Build FEC packet. The FEC packets in |fec_packets_| doesn't

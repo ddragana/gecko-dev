@@ -16,8 +16,8 @@
 #include "nsThreadUtils.h"
 #include "nsWeakReference.h"
 #include "mozilla/SHA1.h"
-#include "mozilla/StaticMutex.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Mutex.h"
+#include "mozilla/Endian.h"
 #include "mozilla/TimeStamp.h"
 
 class nsIFile;
@@ -64,7 +64,7 @@ struct CacheIndexRecord {
   /*
    *    1000 0000 0000 0000 0000 0000 0000 0000 : initialized
    *    0100 0000 0000 0000 0000 0000 0000 0000 : anonymous
-   *    0010 0000 0000 0000 0000 0000 0000 0000 : inIsolatedMozBrowser
+   *    0010 0000 0000 0000 0000 0000 0000 0000 : inBrowser
    *    0001 0000 0000 0000 0000 0000 0000 0000 : removed
    *    0000 1000 0000 0000 0000 0000 0000 0000 : dirty
    *    0000 0100 0000 0000 0000 0000 0000 0000 : fresh
@@ -148,7 +148,7 @@ public:
     mRec->mFlags = 0;
   }
 
-  void Init(uint32_t aAppId, bool aAnonymous, bool aInIsolatedMozBrowser, bool aPinned)
+  void Init(uint32_t aAppId, bool aAnonymous, bool aInBrowser)
   {
     MOZ_ASSERT(mRec->mFrecency == 0);
     MOZ_ASSERT(mRec->mExpirationTime == nsICacheEntry::NO_EXPIRATION_TIME);
@@ -161,11 +161,8 @@ public:
     if (aAnonymous) {
       mRec->mFlags |= kAnonymousMask;
     }
-    if (aInIsolatedMozBrowser) {
-      mRec->mFlags |= kInIsolatedMozBrowserMask;
-    }
-    if (aPinned) {
-      mRec->mFlags |= kPinnedMask;
+    if (aInBrowser) {
+      mRec->mFlags |= kInBrowserMask;
     }
   }
 
@@ -175,10 +172,7 @@ public:
 
   uint32_t AppId() const { return mRec->mAppId; }
   bool     Anonymous() const { return !!(mRec->mFlags & kAnonymousMask); }
-  bool     InIsolatedMozBrowser() const
-  {
-    return !!(mRec->mFlags & kInIsolatedMozBrowserMask);
-  }
+  bool     InBrowser() const { return !!(mRec->mFlags & kInBrowserMask); }
 
   bool IsRemoved() const { return !!(mRec->mFlags & kRemovedMask); }
   void MarkRemoved() { mRec->mFlags |= kRemovedMask; }
@@ -189,8 +183,6 @@ public:
 
   bool IsFresh() const { return !!(mRec->mFlags & kFreshMask); }
   void MarkFresh() { mRec->mFlags |= kFreshMask; }
-
-  bool IsPinned() const { return !!(mRec->mFlags & kPinnedMask); }
 
   void     SetFrecency(uint32_t aFrecency) { mRec->mFrecency = aFrecency; }
   uint32_t GetFrecency() const { return mRec->mFrecency; }
@@ -217,10 +209,6 @@ public:
   static uint32_t GetFileSize(CacheIndexRecord *aRec)
   {
     return aRec->mFlags & kFileSizeMask;
-  }
-  static uint32_t IsPinned(CacheIndexRecord *aRec)
-  {
-    return aRec->mFlags & kPinnedMask;
   }
   bool     IsFileEmpty() const { return GetFileSize() == 0; }
 
@@ -259,12 +247,11 @@ public:
   }
 
   void Log() const {
-    LOG(("CacheIndexEntry::Log() [this=%p, hash=%08x%08x%08x%08x%08x, "
-         "fresh=%u, initialized=%u, removed=%u, dirty=%u, anonymous=%u, "
-         "inIsolatedMozBrowser=%u, appId=%u, frecency=%u, expirationTime=%u, "
-         "size=%u]",
+    LOG(("CacheIndexEntry::Log() [this=%p, hash=%08x%08x%08x%08x%08x, fresh=%u,"
+         " initialized=%u, removed=%u, dirty=%u, anonymous=%u, inBrowser=%u, "
+         "appId=%u, frecency=%u, expirationTime=%u, size=%u]",
          this, LOGSHA1(mRec->mHash), IsFresh(), IsInitialized(), IsRemoved(),
-         IsDirty(), Anonymous(), InIsolatedMozBrowser(), AppId(), GetFrecency(),
+         IsDirty(), Anonymous(), InBrowser(), AppId(), GetFrecency(),
          GetExpirationTime(), GetFileSize()));
   }
 
@@ -272,9 +259,9 @@ public:
                                            nsILoadContextInfo *aInfo)
   {
     if (!aInfo->IsPrivate() &&
-        aInfo->OriginAttributesPtr()->mAppId == aRec->mAppId &&
+        aInfo->AppId() == aRec->mAppId &&
         aInfo->IsAnonymous() == !!(aRec->mFlags & kAnonymousMask) &&
-        aInfo->OriginAttributesPtr()->mInIsolatedMozBrowser == !!(aRec->mFlags & kInIsolatedMozBrowserMask)) {
+        aInfo->IsInBrowserElement() == !!(aRec->mFlags & kInBrowserMask)) {
       return true;
     }
 
@@ -299,7 +286,7 @@ private:
 
   static const uint32_t kInitializedMask = 0x80000000;
   static const uint32_t kAnonymousMask   = 0x40000000;
-  static const uint32_t kInIsolatedMozBrowserMask   = 0x20000000;
+  static const uint32_t kInBrowserMask   = 0x20000000;
 
   // This flag is set when the entry was removed. We need to keep this
   // information in memory until we write the index file.
@@ -314,10 +301,7 @@ private:
   // this entry during update or build process.
   static const uint32_t kFreshMask       = 0x04000000;
 
-  // Indicates a pinned entry.
-  static const uint32_t kPinnedMask      = 0x02000000;
-
-  static const uint32_t kReservedMask    = 0x01000000;
+  static const uint32_t kReservedMask    = 0x03000000;
 
   // FileSize in kilobytes
   static const uint32_t kFileSizeMask    = 0x00FFFFFF;
@@ -626,8 +610,7 @@ public:
   static nsresult InitEntry(const SHA1Sum::Hash *aHash,
                             uint32_t             aAppId,
                             bool                 aAnonymous,
-                            bool                 aInIsolatedMozBrowser,
-                            bool                 aPinned);
+                            bool                 aInBrowser);
 
   // Remove entry from index. The entry should be present in index.
   static nsresult RemoveEntry(const SHA1Sum::Hash *aHash);
@@ -652,16 +635,12 @@ public:
 
   // Returns status of the entry in index for the given key. It can be called
   // on any thread.
-  // If _pinned is non-null, it's filled with pinning status of the entry.
-  static nsresult HasEntry(const nsACString &aKey, EntryStatus *_retval,
-                           bool *_pinned = nullptr);
-  static nsresult HasEntry(const SHA1Sum::Hash &hash, EntryStatus *_retval,
-                           bool *_pinned = nullptr);
+  static nsresult HasEntry(const nsACString &aKey, EntryStatus *_retval);
 
   // Returns a hash of the least important entry that should be evicted if the
   // cache size is over limit and also returns a total number of all entries in
-  // the index minus the number of forced valid entries and unpinned entries
-  // that we encounter when searching (see below)
+  // the index minus the number of forced valid entries that we encounter
+  // when searching (see below)
   static nsresult GetEntryForEviction(bool aIgnoreEmptyEntries, SHA1Sum::Hash *aHash, uint32_t *aCnt);
 
   // Checks if a cache entry is currently forced valid. Used to prevent an entry
@@ -694,16 +673,14 @@ public:
   // READY or WRITING and mIndexNeedsUpdate as well as mShuttingDown is false.
   static nsresult IsUpToDate(bool *_retval);
 
-  // Called from CacheStorageService::Clear() and CacheFileContextEvictor::EvictEntries(),
-  // sets a flag that blocks notification to AsyncGetDiskConsumption.
-  static void OnAsyncEviction(bool aEvicting);
-
   // Memory reporting
   static size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);
   static size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
 private:
   friend class CacheIndexEntryAutoManage;
+  friend class CacheIndexAutoLock;
+  friend class CacheIndexAutoUnlock;
   friend class FileOpenHelper;
   friend class CacheIndexIterator;
 
@@ -719,6 +696,10 @@ private:
   NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult) override;
 
+  void     Lock();
+  void     Unlock();
+  void     AssertOwnsLock();
+
   nsresult InitInternal(nsIFile *aCacheDirectory);
   void     PreShutdownInternal();
 
@@ -732,7 +713,7 @@ private:
   static bool IsCollision(CacheIndexEntry *aEntry,
                           uint32_t         aAppId,
                           bool             aAnonymous,
-                          bool             aInIsolatedMozBrowser);
+                          bool             aInBrowser);
 
   // Checks whether any of the information about the entry has changed.
   static bool HasEntryChanged(CacheIndexEntry *aEntry,
@@ -742,6 +723,8 @@ private:
 
   // Merge all pending operations from mPendingUpdates into mIndex.
   void ProcessPendingOperations();
+  static PLDHashOperator UpdateEntryInIndex(CacheIndexEntryUpdate *aEntry,
+                                            void* aClosure);
 
   // Following methods perform writing of the index file.
   //
@@ -762,6 +745,11 @@ private:
   // Finalizes writing process.
   void FinishWrite(bool aSucceeded);
 
+  static PLDHashOperator CopyRecordsToRWBuf(CacheIndexEntry *aEntry,
+                                            void* aClosure);
+  static PLDHashOperator ApplyIndexChanges(CacheIndexEntry *aEntry,
+                                           void* aClosure);
+
   // Following methods perform writing of the journal during shutdown. All these
   // methods must be called only during shutdown since they write/delete files
   // directly on the main thread instead of using CacheFileIOManager that does
@@ -774,6 +762,9 @@ private:
   void     RemoveIndexFromDisk();
   // Writes journal to the disk and clears dirty flag in index header.
   nsresult WriteLogToDisk();
+
+  static PLDHashOperator WriteEntryToLog(CacheIndexEntry *aEntry,
+                                         void* aClosure);
 
   // Following methods perform reading of the index from the disk.
   //
@@ -829,13 +820,16 @@ private:
   // In debug build this method is called after processing pending operations
   // to make sure mIndexStats contains correct information.
   void EnsureCorrectStats();
+  static PLDHashOperator SumIndexStats(CacheIndexEntry *aEntry, void* aClosure);
   // Finalizes reading process.
   void FinishRead(bool aSucceeded);
+
+  static PLDHashOperator ProcessJournalEntry(CacheIndexEntry *aEntry,
+                                             void* aClosure);
 
   // Following methods perform updating and building of the index.
   // Timer callback that starts update or build process.
   static void DelayedUpdate(nsITimer *aTimer, void *aClosure);
-  void DelayedUpdateLocked();
   // Posts timer event that start update or build process.
   nsresult ScheduleUpdateTimer(uint32_t aDelay);
   nsresult SetupDirectoryEnumerator();
@@ -859,7 +853,8 @@ private:
   // Finalizes update or build process.
   void FinishUpdate(bool aSucceeded);
 
-  void RemoveNonFreshEntries();
+  static PLDHashOperator RemoveNonFreshEntries(CacheIndexEntry *aEntry,
+                                               void* aClosure);
 
   enum EState {
     // Initial state in which the index is not usable
@@ -913,7 +908,6 @@ private:
 
   static char const * StateString(EState aState);
   void ChangeState(EState aNewState);
-  void NotifyAsyncGetDiskConsumptionCallbacks();
 
   // Allocates and releases buffer used for reading and writing index.
   void AllocBuffer();
@@ -935,10 +929,10 @@ private:
   void ReportHashStats();
 
   static CacheIndex *gInstance;
-  static StaticMutex sLock;
 
   nsCOMPtr<nsIFile> mCacheDirectory;
 
+  mozilla::Mutex mLock;
   EState         mState;
   // Timestamp of time when the index was initialized. We use it to delay
   // initial update or build of index.
@@ -990,25 +984,21 @@ private:
   char                     *mRWBuf;
   uint32_t                  mRWBufSize;
   uint32_t                  mRWBufPos;
-  RefPtr<CacheHash>         mRWHash;
-
-  // True if read or write operation is pending. It is used to ensure that
-  // mRWBuf is not freed until OnDataRead or OnDataWritten is called.
-  bool                      mRWPending;
+  nsRefPtr<CacheHash>       mRWHash;
 
   // Reading of journal succeeded if true.
   bool                      mJournalReadSuccessfully;
 
   // Handle used for writing and reading index file.
-  RefPtr<CacheFileHandle> mIndexHandle;
+  nsRefPtr<CacheFileHandle> mIndexHandle;
   // Handle used for reading journal file.
-  RefPtr<CacheFileHandle> mJournalHandle;
+  nsRefPtr<CacheFileHandle> mJournalHandle;
   // Used to check the existence of the file during reading process.
-  RefPtr<CacheFileHandle> mTmpHandle;
+  nsRefPtr<CacheFileHandle> mTmpHandle;
 
-  RefPtr<FileOpenHelper>    mIndexFileOpener;
-  RefPtr<FileOpenHelper>    mJournalFileOpener;
-  RefPtr<FileOpenHelper>    mTmpFileOpener;
+  nsRefPtr<FileOpenHelper>  mIndexFileOpener;
+  nsRefPtr<FileOpenHelper>  mJournalFileOpener;
+  nsRefPtr<FileOpenHelper>  mTmpFileOpener;
 
   // Directory enumerator used when building and updating index.
   nsCOMPtr<nsIDirectoryEnumerator> mDirEnumerator;
@@ -1034,16 +1024,10 @@ private:
   // and such entries are stored at the end of the array. Uninitialized entries
   // and entries marked as deleted are not present in this array.
   nsTArray<CacheIndexRecord *>  mFrecencyArray;
-  bool                          mFrecencyArraySorted;
 
   nsTArray<CacheIndexIterator *> mIterators;
 
-  // This flag is true iff we are between CacheStorageService:Clear() and processing
-  // all contexts to be evicted.  It will make UI to show "calculating" instead of
-  // any intermediate cache size.
-  bool mAsyncGetDiskConsumptionBlocked;
-
-  class DiskConsumptionObserver : public Runnable
+  class DiskConsumptionObserver : public nsRunnable
   {
   public:
     static DiskConsumptionObserver* Init(nsICacheStorageConsumptionObserver* aObserver)
@@ -1066,7 +1050,16 @@ private:
       : mObserver(aWeakObserver) { }
     virtual ~DiskConsumptionObserver() {
       if (mObserver && !NS_IsMainThread()) {
-        NS_ReleaseOnMainThread(mObserver.forget());
+        nsIWeakReference *obs;
+        mObserver.forget(&obs);
+
+        nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+        if (mainThread) {
+          NS_ProxyRelease(mainThread, obs);
+        } else {
+          NS_WARNING("Cannot get main thread, leaking weak reference to "
+                     "CacheStorageConsumptionObserver.");
+        }
       }
     }
 
@@ -1091,7 +1084,71 @@ private:
   };
 
   // List of async observers that want to get disk consumption information
-  nsTArray<RefPtr<DiskConsumptionObserver> > mDiskConsumptionObservers;
+  nsTArray<nsRefPtr<DiskConsumptionObserver> > mDiskConsumptionObservers;
+};
+
+class CacheIndexAutoLock {
+public:
+  explicit CacheIndexAutoLock(CacheIndex *aIndex)
+    : mIndex(aIndex)
+    , mLocked(true)
+  {
+    mIndex->Lock();
+  }
+  ~CacheIndexAutoLock()
+  {
+    if (mLocked) {
+      mIndex->Unlock();
+    }
+  }
+  void Lock()
+  {
+    MOZ_ASSERT(!mLocked);
+    mIndex->Lock();
+    mLocked = true;
+  }
+  void Unlock()
+  {
+    MOZ_ASSERT(mLocked);
+    mIndex->Unlock();
+    mLocked = false;
+  }
+
+private:
+  nsRefPtr<CacheIndex> mIndex;
+  bool mLocked;
+};
+
+class CacheIndexAutoUnlock {
+public:
+  explicit CacheIndexAutoUnlock(CacheIndex *aIndex)
+    : mIndex(aIndex)
+    , mLocked(false)
+  {
+    mIndex->Unlock();
+  }
+  ~CacheIndexAutoUnlock()
+  {
+    if (!mLocked) {
+      mIndex->Lock();
+    }
+  }
+  void Lock()
+  {
+    MOZ_ASSERT(!mLocked);
+    mIndex->Lock();
+    mLocked = true;
+  }
+  void Unlock()
+  {
+    MOZ_ASSERT(mLocked);
+    mIndex->Unlock();
+    mLocked = false;
+  }
+
+private:
+  nsRefPtr<CacheIndex> mIndex;
+  bool mLocked;
 };
 
 } // namespace net

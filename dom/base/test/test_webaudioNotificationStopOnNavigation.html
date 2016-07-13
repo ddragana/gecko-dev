@@ -19,7 +19,7 @@ var iframe = null;
 
 var observer = {
   observe: function(subject, topic, data) {
-    is(topic, "audio-playback", "audio-playback received");
+    is(topic, "media-playback", "media-playback received");
     is(data, expectedNotification, "This is the right notification");
     runTest();
   }
@@ -31,7 +31,11 @@ var observerService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
 var tests = [
   function() {
     iframe = document.querySelector("iframe");
-    observerService.addObserver(observer, "audio-playback", false);
+    SpecialPowers.pushPrefEnv({"set": [["media.useAudioChannelService", true]]}, runTest);
+  },
+
+  function() {
+    observerService.addObserver(observer, "media-playback", false);
     ok(true, "Observer set");
     runTest();
   },
@@ -42,12 +46,12 @@ var tests = [
   },
 
   function() {
-    expectedNotification = 'inactive-pause';
+    expectedNotification = 'inactive';
     iframe.src = "data:text/html,page without audio";
   },
 
   function() {
-    observerService.removeObserver(observer, "audio-playback");
+    observerService.removeObserver(observer, "media-playback");
     ok(true, "Observer removed");
     runTest();
   }

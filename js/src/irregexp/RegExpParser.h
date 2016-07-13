@@ -43,12 +43,11 @@ namespace irregexp {
 
 bool
 ParsePattern(frontend::TokenStream& ts, LifoAlloc& alloc, JSAtom* str,
-             bool multiline, bool match_only, bool unicode, bool ignore_case,
+             bool multiline, bool match_only,
              RegExpCompileData* data);
 
 bool
-ParsePatternSyntax(frontend::TokenStream& ts, LifoAlloc& alloc, JSAtom* str,
-                   bool unicode);
+ParsePatternSyntax(frontend::TokenStream& ts, LifoAlloc& alloc, JSAtom* str);
 
 // A BufferedVector is an automatically growing list, just like (and backed
 // by) a Vector, that is optimized for the case of adding and removing
@@ -60,7 +59,7 @@ template <typename T, int initial_size>
 class BufferedVector
 {
   public:
-    typedef InfallibleVector<T*, 1> VectorType;
+    typedef Vector<T*, 1, LifoAllocPolicy<Infallible> > VectorType;
 
     BufferedVector() : list_(nullptr), last_(nullptr) {}
 
@@ -164,9 +163,7 @@ class RegExpBuilder
     enum LastAdded {
         ADD_NONE, ADD_CHAR, ADD_TERM, ADD_ASSERT, ADD_ATOM
     };
-#ifdef DEBUG
-    LastAdded last_added_;
-#endif
+    mozilla::DebugOnly<LastAdded> last_added_;
 };
 
 // Characters parsed by RegExpParser can be either char16_t or kEndMarker.
@@ -177,8 +174,7 @@ class RegExpParser
 {
   public:
     RegExpParser(frontend::TokenStream& ts, LifoAlloc* alloc,
-                 const CharT* chars, const CharT* end, bool multiline_mode, bool unicode,
-                 bool ignore_case);
+                 const CharT* chars, const CharT* end, bool multiline_mode);
 
     RegExpTree* ParsePattern();
     RegExpTree* ParseDisjunction();
@@ -188,19 +184,13 @@ class RegExpParser
     // out parameters.
     bool ParseIntervalQuantifier(int* min_out, int* max_out);
 
-    // Tries to parse the input as a single escaped character.  If successful
-    // it stores the result in the output parameter and returns true.
-    // Otherwise it throws an error and returns false.  The character must not
-    // be 'b' or 'B' since they are usually handled specially.
-    bool ParseClassCharacterEscape(widechar* code);
+    // Parses and returns a single escaped character.  The character
+    // must not be 'b' or 'B' since they are usually handled specially.
+    widechar ParseClassCharacterEscape();
 
     // Checks whether the following is a length-digit hexadecimal number,
     // and sets the value if it is.
     bool ParseHexEscape(int length, size_t* value);
-
-    bool ParseBracedHexEscape(size_t* value);
-    bool ParseTrailSurrogate(size_t* value);
-    bool ParseRawSurrogatePair(char16_t* lead, char16_t* trail);
 
     size_t ParseOctalLiteral();
 
@@ -210,7 +200,7 @@ class RegExpParser
     // can be reparsed.
     bool ParseBackReferenceIndex(int* index_out);
 
-    bool ParseClassAtom(char16_t* char_class, widechar *value);
+    bool ParseClassAtom(char16_t* char_class, CharacterRange* char_range);
     RegExpTree* ReportError(unsigned errorNumber);
     void Advance();
     void Advance(int dist) {
@@ -298,8 +288,6 @@ class RegExpParser
     int capture_count_;
     bool has_more_;
     bool multiline_;
-    bool unicode_;
-    bool ignore_case_;
     bool simple_;
     bool contains_anchor_;
     bool is_scanned_for_captures_;

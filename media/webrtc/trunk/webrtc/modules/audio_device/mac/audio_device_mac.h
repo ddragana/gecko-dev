@@ -11,8 +11,6 @@
 #ifndef WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_MAC_H
 #define WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_MAC_H
 
-#include "webrtc/base/scoped_ptr.h"
-#include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/audio_device/audio_device_generic.h"
 #include "webrtc/modules/audio_device/mac/audio_mixer_manager_mac.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
@@ -182,6 +180,21 @@ private:
     virtual int32_t MicrophoneIsAvailable(bool& available);
     virtual int32_t SpeakerIsAvailable(bool& available);
 
+    void Lock()
+    {
+        _critSect.Enter();
+    }
+    ;
+    void UnLock()
+    {
+        _critSect.Leave();
+    }
+    ;
+    int32_t Id()
+    {
+        return _id;
+    }
+
     static void AtomicSet32(int32_t* theValue, int32_t newValue);
     static int32_t AtomicGet32(int32_t* theValue);
 
@@ -199,10 +212,6 @@ private:
 
     int32_t InitDevice(uint16_t userDeviceIndex,
                        AudioDeviceID& deviceId, bool isInput);
-
-    // Always work with our preferred playout format inside VoE.
-    // Then convert the output to the OS setting using an AudioConverter.
-    OSStatus SetDesiredPlayoutFormat();
 
     static OSStatus
         objectListenerProc(AudioObjectID objectId, UInt32 numberAddresses,
@@ -282,11 +291,10 @@ private:
     EventWrapper& _stopEventRec;
     EventWrapper& _stopEvent;
 
-    // Only valid/running between calls to StartRecording and StopRecording.
-    rtc::scoped_ptr<ThreadWrapper> capture_worker_thread_;
-
-    // Only valid/running between calls to StartPlayout and StopPlayout.
-    rtc::scoped_ptr<ThreadWrapper> render_worker_thread_;
+    ThreadWrapper* _captureWorkerThread;
+    ThreadWrapper* _renderWorkerThread;
+    uint32_t _captureWorkerThreadId;
+    uint32_t _renderWorkerThreadId;
 
     int32_t _id;
 

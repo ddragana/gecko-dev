@@ -15,5 +15,3 @@ LOCAL_INCLUDES += [
     '../../..',
 ]
 
-if CONFIG['CLANG_CXX']:
-    CXXFLAGS += ['-Wno-shadow']

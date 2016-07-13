@@ -2,14 +2,9 @@
  * vim: set ts=8 sts=4 et sw=4 tw=99:
  */
 
-#include "jscompartment.h"
 #include "jsfriendapi.h"
 
 #include "jsapi-tests/tests.h"
-
-#include "jscompartmentinlines.h"
-
-using namespace js;
 
 BEGIN_TEST(testArrayBufferView_type)
 {
@@ -91,10 +86,23 @@ BEGIN_TEST(testArrayBufferView_type)
 static JSObject*
 CreateDataView(JSContext* cx)
 {
-    JS::Rooted<JSObject*> buffer(cx, JS_NewArrayBuffer(cx, 8));
-    if (!buffer)
+    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
+    if (!global)
         return nullptr;
-    return JS_NewDataView(cx, buffer, 0, 8);
+
+    static const char code[] = "new DataView(new ArrayBuffer(8))";
+
+    JS::Rooted<JS::Value> val(cx);
+    JS::CompileOptions opts(cx);
+    if (!JS::Evaluate(cx, opts.setFileAndLine(__FILE__, __LINE__),
+                      code, strlen(code), &val))
+        return nullptr;
+
+    JS::Rooted<JSObject*> dv(cx, &val.toObject());
+    if (!JS_IsDataViewObject(dv))
+        return nullptr;
+
+    return dv;
 }
 
 template<JSObject * CreateTypedArray(JSContext* cx, uint32_t length),
@@ -107,7 +115,7 @@ Create(JSContext* cx)
 
 template<typename T,
          JSObject * CreateViewType(JSContext* cx),
-         JSObject * GetObjectAs(JSObject* obj, uint32_t* length, bool* isSharedMemory, T** data),
+         JSObject * GetObjectAs(JSObject* obj, uint32_t* length, T** data),
          js::Scalar::Type ExpectedType,
          uint32_t ExpectedLength,
          uint32_t ExpectedByteLength>
@@ -124,54 +132,14 @@ bool TestViewType(JSContext* cx)
 
     {
         JS::AutoCheckCannotGC nogc;
-        bool shared1;
-        T* data1 = static_cast<T*>(JS_GetArrayBufferViewData(obj, &shared1, nogc));
+        T* data1 = static_cast<T*>(JS_GetArrayBufferViewData(obj, nogc));
 
         T* data2;
-        bool shared2;
         uint32_t len;
-        CHECK(obj == GetObjectAs(obj, &len, &shared2, &data2));
+        CHECK(obj == GetObjectAs(obj, &len, &data2));
         CHECK(data1 == data2);
-        CHECK(shared1 == shared2);
         CHECK(len == ExpectedLength);
     }
-
-    JS::CompartmentOptions options;
-    JS::RootedObject otherGlobal(cx, JS_NewGlobalObject(cx, basicGlobalClass(), nullptr,
-                                                        JS::DontFireOnNewGlobalHook, options));
-    CHECK(otherGlobal);
-
-    JS::Rooted<JSObject*> buffer(cx);
-    {
-        AutoCompartment ac(cx, otherGlobal);
-        buffer = JS_NewArrayBuffer(cx, 8);
-        CHECK(buffer);
-        CHECK(buffer->as<ArrayBufferObject>().byteLength() == 8);
-    }
-    CHECK(buffer->compartment() == otherGlobal->compartment());
-    CHECK(JS_WrapObject(cx, &buffer));
-    CHECK(buffer->compartment() == global->compartment());
-
-    JS::Rooted<JSObject*> dataview(cx, JS_NewDataView(cx, buffer, 4, 4));
-    CHECK(dataview);
-    CHECK(dataview->is<ProxyObject>());
-
-    JS::Rooted<JS::Value> val(cx);
-
-    val = ObjectValue(*dataview);
-    CHECK(JS_SetProperty(cx, global, "view", val));
-
-    EVAL("view.buffer", &val);
-    CHECK(val.toObject().is<ProxyObject>());
-
-    CHECK(dataview->compartment() == global->compartment());
-    JS::Rooted<JSObject*> otherView(cx, js::UncheckedUnwrap(dataview));
-    CHECK(otherView->compartment() == otherGlobal->compartment());
-    JS::Rooted<JSObject*> otherBuffer(cx, js::UncheckedUnwrap(&val.toObject()));
-    CHECK(otherBuffer->compartment() == otherGlobal->compartment());
-
-    EVAL("Object.getPrototypeOf(view) === DataView.prototype", &val);
-    CHECK(val.toBoolean() == true);
 
     return true;
 }

@@ -28,7 +28,7 @@ TraceArray(JSTracer* trc, void* data)
 {
   ArrayT* array = static_cast<ArrayT *>(data);
   for (unsigned i = 0; i < array->Length(); ++i)
-    JS::TraceEdge(trc, &array->ElementAt(i), "array-element");
+    JS_CallObjectTracer(trc, &array->ElementAt(i), "array-element");
 }
 
 /*
@@ -40,12 +40,12 @@ const size_t InitialElements = ElementCount / 10;
 
 template<class ArrayT>
 static void
-RunTest(JSContext* cx, ArrayT* array)
+RunTest(JSRuntime* rt, JSContext* cx, ArrayT* array)
 {
-  JS_GC(cx);
+  JS_GC(rt);
 
   ASSERT_TRUE(array != nullptr);
-  JS_AddExtraGCRootsTracer(cx, TraceArray<ArrayT>, array);
+  JS_AddExtraGCRootsTracer(rt, TraceArray<ArrayT>, array);
 
   /*
    * Create the array and fill it with new JS objects. With GGC these will be
@@ -65,7 +65,7 @@ RunTest(JSContext* cx, ArrayT* array)
    * If postbarriers are not working, we will crash here when we try to mark
    * objects that have been moved to the tenured heap.
    */
-  JS_GC(cx);
+  JS_GC(rt);
 
   /*
    * Sanity check that our array contains what we expect.
@@ -78,26 +78,22 @@ RunTest(JSContext* cx, ArrayT* array)
     ASSERT_EQ(static_cast<int32_t>(i), value.toInt32());
   }
 
-  JS_RemoveExtraGCRootsTracer(cx, TraceArray<ArrayT>, array);
+  JS_RemoveExtraGCRootsTracer(rt, TraceArray<ArrayT>, array);
 }
 
 static void
-CreateGlobalAndRunTest(JSContext* cx)
+CreateGlobalAndRunTest(JSRuntime* rt, JSContext* cx)
 {
-  static const JSClassOps GlobalClassOps = {
+  static const JSClass GlobalClass = {
+    "global", JSCLASS_GLOBAL_FLAGS,
     nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
   };
 
-  static const JSClass GlobalClass = {
-    "global", JSCLASS_GLOBAL_FLAGS,
-    &GlobalClassOps
-  };
-
   JS::CompartmentOptions options;
-  options.behaviors().setVersion(JSVERSION_LATEST);
+  options.setVersion(JSVERSION_LATEST);
   JS::PersistentRootedObject global(cx);
   global = JS_NewGlobalObject(cx, &GlobalClass, nullptr, JS::FireOnNewGlobalHook, options);
   ASSERT_TRUE(global != nullptr);
@@ -108,19 +104,24 @@ CreateGlobalAndRunTest(JSContext* cx)
 
   {
     nsTArray<ElementT>* array = new nsTArray<ElementT>(InitialElements);
-    RunTest(cx, array);
+    RunTest(rt, cx, array);
     delete array;
   }
 
   {
     FallibleTArray<ElementT>* array = new FallibleTArray<ElementT>(InitialElements);
-    RunTest(cx, array);
+    RunTest(rt, cx, array);
     delete array;
   }
 
   {
-    AutoTArray<ElementT, InitialElements> array;
-    RunTest(cx, &array);
+    nsAutoTArray<ElementT, InitialElements> array;
+    RunTest(rt, cx, &array);
+  }
+
+  {
+    AutoFallibleTArray<ElementT, InitialElements> array;
+    RunTest(rt, cx, &array);
   }
 
   JS_LeaveCompartment(cx, oldCompartment);
@@ -132,11 +133,12 @@ TEST(GCPostBarriers, nsTArray) {
   JSRuntime* rt = ccrt->Runtime();
   ASSERT_TRUE(rt != nullptr);
 
-  JSContext* cx = JS_GetContext(rt);
-
+  JSContext *cx = JS_NewContext(rt, 8192);
+  ASSERT_TRUE(cx != nullptr);
   JS_BeginRequest(cx);
 
-  CreateGlobalAndRunTest(cx);
+  CreateGlobalAndRunTest(rt, cx);
 
   JS_EndRequest(cx);
+  JS_DestroyContext(cx);
 }

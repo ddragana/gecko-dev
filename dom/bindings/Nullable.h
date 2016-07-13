@@ -29,23 +29,13 @@ public:
     : mValue()
   {}
 
-  MOZ_IMPLICIT Nullable(const decltype(nullptr)&)
-    : mValue()
-  {}
-
-  explicit Nullable(const T& aValue)
+  explicit Nullable(T aValue)
     : mValue()
   {
     mValue.emplace(aValue);
   }
 
-  MOZ_IMPLICIT Nullable(T&& aValue)
-    : mValue()
-  {
-    mValue.emplace(mozilla::Move(aValue));
-  }
-
-  Nullable(Nullable<T>&& aOther)
+  explicit Nullable(Nullable<T>&& aOther)
     : mValue(mozilla::Move(aOther.mValue))
   {}
 
@@ -58,16 +48,9 @@ public:
     mValue = aOther.mValue;
   }
 
-  void SetValue(const T& aArgs)
-  {
+  void SetValue(T aValue) {
     mValue.reset();
-    mValue.emplace(aArgs);
-  }
-
-  void SetValue(T&& aArgs)
-  {
-    mValue.reset();
-    mValue.emplace(mozilla::Move(aArgs));
+    mValue.emplace(aValue);
   }
 
   // For cases when |T| is some type with nontrivial copy behavior, we may want

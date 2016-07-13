@@ -11,8 +11,6 @@
 #include "nsCOMPtr.h"
 
 class nsIChannel;
-class nsIDocument;
-class nsIGlobalObject;
 class nsIURI;
 
 namespace mozilla {
@@ -46,12 +44,15 @@ public:
 
   ChannelInfo()
     : mInited(false)
+    , mRedirected(false)
   {
   }
 
   ChannelInfo(const ChannelInfo& aRHS)
     : mSecurityInfo(aRHS.mSecurityInfo)
+    , mRedirectedURISpec(aRHS.mRedirectedURISpec)
     , mInited(aRHS.mInited)
+    , mRedirected(aRHS.mRedirected)
   {
   }
 
@@ -59,13 +60,13 @@ public:
   operator=(const ChannelInfo& aRHS)
   {
     mSecurityInfo = aRHS.mSecurityInfo;
+    mRedirectedURISpec = aRHS.mRedirectedURISpec;
     mInited = aRHS.mInited;
+    mRedirected = aRHS.mRedirected;
     return *this;
   }
 
-  void InitFromDocument(nsIDocument* aDoc);
   void InitFromChannel(nsIChannel* aChannel);
-  void InitFromChromeGlobal(nsIGlobalObject* aGlobal);
   void InitFromIPCChannelInfo(const IPCChannelInfo& aChannelInfo);
 
   // This restores every possible information stored from a previous channel
@@ -84,7 +85,9 @@ private:
 
 private:
   nsCString mSecurityInfo;
+  nsCString mRedirectedURISpec;
   bool mInited;
+  bool mRedirected;
 };
 
 } // namespace dom

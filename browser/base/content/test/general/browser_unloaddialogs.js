@@ -28,14 +28,46 @@ var testUrls =
       "window.addEventListener('unload', handle, true);" +
       "</script><body>Testing confirm during pagehide/beforeunload/unload</body>",
   ];
+var testsDone = 0;
 
-add_task(function*() {
-  for (let url of testUrls) {
-    let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, url);
-    ok(true, "Loaded page " + url);
-    // Wait one turn of the event loop before closing, so everything settles.
-    yield new Promise(resolve => setTimeout(resolve, 0));
-    yield BrowserTestUtils.removeTab(tab);
-    ok(true, "Closed page " + url + " without timeout");
+function test()
+{
+  waitForExplicitFinish();
+  runTest();
+}
+
+function runTest()
+{
+  whenNewTabLoaded(window, function() {
+    gBrowser.selectedBrowser.addEventListener("load", onLoad, true);
+    executeSoon(function() {
+      info("Loading page with pagehide, beforeunload, and unload handlers that attempt to create dialogs");
+      gBrowser.selectedBrowser.loadURI(testUrls[testsDone]);
+    });
+  });
+}
+
+function onLoad(event)
+{
+  info("Page loaded");
+
+  event.target.removeEventListener("load", onLoad, true);
+  gBrowser.selectedBrowser.addEventListener("unload", done, true);
+
+  executeSoon(function () {
+    info("Closing page");
+    gBrowser.removeCurrentTab();
+  });
+}
+
+function done() {
+  ok(true, "Page closed (hopefully) without timeout");
+
+  testsDone++;
+  if (testsDone == testUrls.length) {
+    finish();
+    return;
   }
-});
+
+  executeSoon(runTest);
+}

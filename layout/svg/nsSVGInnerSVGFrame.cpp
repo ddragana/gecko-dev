@@ -33,7 +33,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGInnerSVGFrame)
 NS_QUERYFRAME_HEAD(nsSVGInnerSVGFrame)
   NS_QUERYFRAME_ENTRY(nsSVGInnerSVGFrame)
   NS_QUERYFRAME_ENTRY(nsISVGSVGFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsSVGDisplayContainerFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsSVGInnerSVGFrameBase)
 
 #ifdef DEBUG
 void
@@ -44,7 +44,7 @@ nsSVGInnerSVGFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::svg),
                "Content is not an SVG 'svg' element!");
 
-  nsSVGDisplayContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGInnerSVGFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -84,7 +84,7 @@ nsSVGInnerSVGFrame::PaintSVG(gfxContext& aContext,
     nsSVGUtils::SetClipRect(&aContext, aTransform, clipRect);
   }
 
-  return nsSVGDisplayContainerFrame::PaintSVG(aContext, aTransform, aDirtyRect);
+  return nsSVGInnerSVGFrameBase::PaintSVG(aContext, aTransform, aDirtyRect);
 }
 
 nsRect
@@ -120,11 +120,11 @@ nsSVGInnerSVGFrame::ReflowSVG()
 
   // If we have a filter, we need to invalidate ourselves because filter
   // output can change even if none of our descendants need repainting.
-  if (StyleEffects()->HasFilters()) {
+  if (StyleSVGReset()->HasFilters()) {
     InvalidateFrame();
   }
 
-  nsSVGDisplayContainerFrame::ReflowSVG();
+  nsSVGInnerSVGFrameBase::ReflowSVG();
 }
 
 void
@@ -181,7 +181,7 @@ nsSVGInnerSVGFrame::NotifySVGChanged(uint32_t aFlags)
     mCanvasTM = nullptr;
   }
 
-  nsSVGDisplayContainerFrame::NotifySVGChanged(aFlags);
+  nsSVGInnerSVGFrameBase::NotifySVGChanged(aFlags);
 }
 
 nsresult
@@ -269,7 +269,7 @@ nsSVGInnerSVGFrame::GetFrameForPoint(const gfxPoint& aPoint)
     }
   }
 
-  return nsSVGDisplayContainerFrame::GetFrameForPoint(aPoint);
+  return nsSVGInnerSVGFrameBase::GetFrameForPoint(aPoint);
 }
 
 //----------------------------------------------------------------------

@@ -28,10 +28,10 @@ BarProp::~BarProp()
 {
 }
 
-nsPIDOMWindowInner*
+nsPIDOMWindow*
 BarProp::GetParentObject() const
 {
-  return mDOMWindow->AsInner();
+  return mDOMWindow;
 }
 
 JSObject*
@@ -276,7 +276,7 @@ ScrollbarsProp::GetVisible(ErrorResult& aRv)
 void
 ScrollbarsProp::SetVisible(bool aVisible, ErrorResult& aRv)
 {
-  if (!nsContentUtils::LegacyIsCallerChromeOrNativeCode()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     return;
   }
 
@@ -287,7 +287,23 @@ ScrollbarsProp::SetVisible(bool aVisible, ErrorResult& aRv)
      and because embedding apps have no interface for implementing this
      themselves, and therefore the implementation must be internal. */
 
-  nsContentUtils::SetScrollbarsVisibility(mDOMWindow->GetDocShell(), aVisible);
+  nsCOMPtr<nsIScrollable> scroller =
+    do_QueryInterface(mDOMWindow->GetDocShell());
+
+  if (scroller) {
+    int32_t prefValue;
+
+    if (aVisible) {
+      prefValue = nsIScrollable::Scrollbar_Auto;
+    } else {
+      prefValue = nsIScrollable::Scrollbar_Never;
+    }
+
+    scroller->SetDefaultScrollbarPreferences(
+                nsIScrollable::ScrollOrientation_Y, prefValue);
+    scroller->SetDefaultScrollbarPreferences(
+                nsIScrollable::ScrollOrientation_X, prefValue);
+  }
 
   /* Notably absent is the part where we notify the chrome window using
      GetBrowserChrome()->SetChromeFlags(). Given the possibility of multiple

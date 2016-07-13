@@ -35,17 +35,25 @@ using mozilla::ipc::StringInputStreamParams;
 //
 // To enable logging (see prlog.h for full details):
 //
-//    set MOZ_LOG=StorageStreamLog:5
-//    set MOZ_LOG_FILE=storage.log
+//    set NSPR_LOG_MODULES=StorageStreamLog:5
+//    set NSPR_LOG_FILE=nspr.log
 //
-// This enables LogLevel::Debug level information and places all output in
-// the file storage.log.
+// this enables LogLevel::Debug level information and places all output in
+// the file nspr.log
 //
-static LazyLogModule sStorageStreamLog("nsStorageStream");
+static PRLogModuleInfo*
+GetStorageStreamLog()
+{
+  static PRLogModuleInfo* sLog;
+  if (!sLog) {
+    sLog = PR_NewLogModule("nsStorageStream");
+  }
+  return sLog;
+}
 #ifdef LOG
 #undef LOG
 #endif
-#define LOG(args) MOZ_LOG(sStorageStreamLog, mozilla::LogLevel::Debug, args)
+#define LOG(args) MOZ_LOG(GetStorageStreamLog(), mozilla::LogLevel::Debug, args)
 
 nsStorageStream::nsStorageStream()
   : mSegmentedBuffer(0), mSegmentSize(0), mWriteInProgress(false),
@@ -199,7 +207,7 @@ nsStorageStream::Write(const char* aBuffer, uint32_t aCount,
     mWriteCursor += count;
     LOG(("nsStorageStream [%p] Writing mWriteCursor=%x mSegmentEnd=%x count=%d\n",
          this, mWriteCursor, mSegmentEnd, count));
-  }
+  };
 
 out:
   *aNumWritten = aCount - remaining;
@@ -360,7 +368,7 @@ protected:
   friend class nsStorageStream;
 
 private:
-  RefPtr<nsStorageStream> mStorageStream;
+  nsRefPtr<nsStorageStream> mStorageStream;
   uint32_t         mReadCursor;    // Next memory location to read byte, or 0
   uint32_t         mSegmentEnd;    // One byte past end of current buffer segment
   uint32_t         mSegmentNum;    // Segment number containing read cursor
@@ -392,15 +400,17 @@ nsStorageStream::NewInputStream(int32_t aStartingOffset,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  RefPtr<nsStorageInputStream> inputStream =
+  nsStorageInputStream* inputStream =
     new nsStorageInputStream(this, mSegmentSize);
+  NS_ADDREF(inputStream);
 
   nsresult rv = inputStream->Seek(aStartingOffset);
   if (NS_FAILED(rv)) {
+    NS_RELEASE(inputStream);
     return rv;
   }
 
-  inputStream.forget(aInputStream);
+  *aInputStream = inputStream;
   return NS_OK;
 }
 
@@ -452,15 +462,7 @@ nsStorageInputStream::ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
         goto out;
       }
 
-      // We have data in the stream, but if mSegmentEnd is zero, then we
-      // were likely constructed prior to any data being written into
-      // the stream.  Therefore, if mSegmentEnd is non-zero, we should
-      // move into the next segment; otherwise, we should stay in this
-      // segment so our input state can be updated and we can properly
-      // perform the initial read.
-      if (mSegmentEnd > 0) {
-        mSegmentNum++;
-      }
+      mSegmentNum++;
       mReadCursor = 0;
       mSegmentEnd = XPCOM_MIN(mSegmentSize, available);
       availableInSegment = mSegmentEnd;
@@ -476,7 +478,7 @@ nsStorageInputStream::ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
     remainingCapacity -= bytesConsumed;
     mReadCursor += bytesConsumed;
     mLogicalCursor += bytesConsumed;
-  }
+  };
 
 out:
   *aNumRead = aCount - remainingCapacity;
@@ -623,12 +625,14 @@ nsresult
 NS_NewStorageStream(uint32_t aSegmentSize, uint32_t aMaxSize,
                     nsIStorageStream** aResult)
 {
-  RefPtr<nsStorageStream> storageStream = new nsStorageStream();
+  nsStorageStream* storageStream = new nsStorageStream();
+  NS_ADDREF(storageStream);
   nsresult rv = storageStream->Init(aSegmentSize, aMaxSize);
   if (NS_FAILED(rv)) {
+    NS_RELEASE(storageStream);
     return rv;
   }
-  storageStream.forget(aResult);
+  *aResult = storageStream;
   return NS_OK;
 }
 

@@ -24,8 +24,10 @@ f(w);
 c = 2;
 try {
   eval('"use strict"; function g(x) { const y = x; y = 1 + x; } c = 3');
-} catch (e) {
   assertEq(0, 1);
+} catch (e) {
+  assertEq(e.name, 'SyntaxError');
+  assertEq(2, c);
 }
 
 c = 4;
@@ -33,7 +35,7 @@ try {
   eval('"use strict"; const z = w; z = 1 + w; c = 5');
   assertEq(0, 1);
 } catch (e) {
-  assertEq(e.name, 'TypeError');
+  assertEq(e.name, 'SyntaxError');
   assertEq(4, c);
   assertEq('z' in this, false);
 }

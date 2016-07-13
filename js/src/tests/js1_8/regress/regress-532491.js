@@ -20,6 +20,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(false);
   function f(foo) {
     if (a % 2 == 1) {
       try {

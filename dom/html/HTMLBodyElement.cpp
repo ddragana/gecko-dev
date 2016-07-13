@@ -168,12 +168,6 @@ BodyRule::MapRuleInfoInto(nsRuleData* aData)
   }
 }
 
-/* virtual */ bool
-BodyRule::MightMapInheritedStyleData()
-{
-  return false;
-}
-
 #ifdef DEBUG
 /* virtual */ void
 BodyRule::List(FILE* out, int32_t aIndent) const
@@ -410,7 +404,7 @@ HTMLBodyElement::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
 {
   nsGenericHTMLElement::WalkContentStyleRules(aRuleWalker);
 
-  if (!mContentStyleRule && IsInUncomposedDoc()) {
+  if (!mContentStyleRule && IsInDoc()) {
     // XXXbz should this use OwnerDoc() or GetComposedDoc()?
     // sXBL/XBL2 issue!
     mContentStyleRule = new BodyRule(this);
@@ -491,8 +485,10 @@ HTMLBodyElement::IsEventAttributeName(nsIAtom *aName)
   type_*                                                                       \
   HTMLBodyElement::GetOn##name_()                                              \
   {                                                                            \
-    if (nsPIDOMWindowInner* win = OwnerDoc()->GetInnerWindow()) {              \
-      nsGlobalWindow* globalWin = nsGlobalWindow::Cast(win);                   \
+    nsPIDOMWindow* win = OwnerDoc()->GetInnerWindow();                         \
+    if (win) {                                                                 \
+      nsCOMPtr<nsISupports> supports = do_QueryInterface(win);                 \
+      nsGlobalWindow* globalWin = nsGlobalWindow::FromSupports(supports);      \
       return globalWin->GetOn##name_();                                        \
     }                                                                          \
     return nullptr;                                                            \
@@ -500,12 +496,13 @@ HTMLBodyElement::IsEventAttributeName(nsIAtom *aName)
   void                                                                         \
   HTMLBodyElement::SetOn##name_(type_* handler)                                \
   {                                                                            \
-    nsPIDOMWindowInner* win = OwnerDoc()->GetInnerWindow();                    \
+    nsPIDOMWindow* win = OwnerDoc()->GetInnerWindow();                         \
     if (!win) {                                                                \
       return;                                                                  \
     }                                                                          \
                                                                                \
-    nsGlobalWindow* globalWin = nsGlobalWindow::Cast(win);                     \
+    nsCOMPtr<nsISupports> supports = do_QueryInterface(win);                   \
+    nsGlobalWindow* globalWin = nsGlobalWindow::FromSupports(supports);        \
     return globalWin->SetOn##name_(handler);                                   \
   }
 #define WINDOW_EVENT(name_, id_, type_, struct_)                               \

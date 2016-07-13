@@ -10,11 +10,7 @@
 #include <memory>
 #include <cstdint>
 #include <cstring>
-#if defined(WIN32) || defined(WIN64)
-#include <winsock2.h>
-#else
 #include <arpa/inet.h>
-#endif
 #include "databuffer.h"
 
 namespace nss_test {
@@ -22,29 +18,21 @@ namespace nss_test {
 const uint8_t kTlsChangeCipherSpecType = 20;
 const uint8_t kTlsAlertType = 21;
 const uint8_t kTlsHandshakeType = 22;
-const uint8_t kTlsApplicationDataType = 23;
 
 const uint8_t kTlsHandshakeClientHello = 1;
 const uint8_t kTlsHandshakeServerHello = 2;
-const uint8_t kTlsHandshakeEncryptedExtensions = 8;
 const uint8_t kTlsHandshakeCertificate = 11;
 const uint8_t kTlsHandshakeServerKeyExchange = 12;
-const uint8_t kTlsHandshakeCertificateVerify = 15;
-const uint8_t kTlsHandshakeClientKeyExchange = 16;
-const uint8_t kTlsHandshakeFinished = 20;
 
 const uint8_t kTlsAlertWarning = 1;
 const uint8_t kTlsAlertFatal = 2;
 
 const uint8_t kTlsAlertUnexpectedMessage = 10;
-const uint8_t kTlsAlertBadRecordMac = 20;
 const uint8_t kTlsAlertHandshakeFailure = 40;
 const uint8_t kTlsAlertIllegalParameter = 47;
 const uint8_t kTlsAlertDecodeError = 50;
 const uint8_t kTlsAlertUnsupportedExtension = 110;
 const uint8_t kTlsAlertNoApplicationProtocol = 120;
-
-const uint8_t kTlsExtensionPreSharedKey = 41;
 
 const uint8_t kTlsFakeChangeCipherSpec[] = {
     kTlsChangeCipherSpecType,        // Type
@@ -67,13 +55,6 @@ inline uint16_t NormalizeTlsVersion(uint16_t version) {
     return (version ^ 0xffff) + 0x0201;
   }
   return version;
-}
-
-inline uint16_t TlsVersionToDtlsVersion(uint16_t version ) {
-  if (version == 0x0302) {
-    return 0xfeff;
-  }
-  return 0xffff - version + 0x0201;
 }
 
 inline void WriteVariable(DataBuffer* target, size_t index,

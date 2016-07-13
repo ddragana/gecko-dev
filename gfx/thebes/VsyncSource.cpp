@@ -31,7 +31,7 @@ VsyncSource::RemoveCompositorVsyncDispatcher(CompositorVsyncDispatcher* aComposi
   GetGlobalDisplay().RemoveCompositorVsyncDispatcher(aCompositorVsyncDispatcher);
 }
 
-RefPtr<RefreshTimerVsyncDispatcher>
+nsRefPtr<RefreshTimerVsyncDispatcher>
 VsyncSource::GetRefreshTimerVsyncDispatcher()
 {
   MOZ_ASSERT(XRE_IsParentProcess());
@@ -66,13 +66,6 @@ VsyncSource::Display::NotifyVsync(TimeStamp aVsyncTimestamp)
   }
 
   mRefreshTimerVsyncDispatcher->NotifyVsync(aVsyncTimestamp);
-}
-
-TimeDuration
-VsyncSource::Display::GetVsyncRate()
-{
-  // If hardware queries fail / are unsupported, we have to just guess.
-  return TimeDuration::FromMilliseconds(1000.0 / 60.0);
 }
 
 void
@@ -137,16 +130,10 @@ VsyncSource::Display::UpdateVsyncStatus()
   }
 }
 
-RefPtr<RefreshTimerVsyncDispatcher>
+nsRefPtr<RefreshTimerVsyncDispatcher>
 VsyncSource::Display::GetRefreshTimerVsyncDispatcher()
 {
   return mRefreshTimerVsyncDispatcher;
-}
-
-void
-VsyncSource::Shutdown()
-{
-  GetGlobalDisplay().Shutdown();
 }
 
 } //namespace gfx

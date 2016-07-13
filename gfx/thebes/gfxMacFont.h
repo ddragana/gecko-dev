@@ -28,13 +28,13 @@ public:
         return mSpaceGlyph;
     }
 
-    virtual bool SetupCairoFont(DrawTarget* aDrawTarget) override;
+    virtual bool SetupCairoFont(gfxContext *aContext) override;
 
     /* override Measure to add padding for antialiasing */
-    virtual RunMetrics Measure(const gfxTextRun *aTextRun,
+    virtual RunMetrics Measure(gfxTextRun *aTextRun,
                                uint32_t aStart, uint32_t aEnd,
                                BoundingBoxType aBoundingBoxType,
-                               DrawTarget *aDrawTargetForTightBoundingBox,
+                               gfxContext *aContextForTightBoundingBox,
                                Spacing *aSpacing,
                                uint16_t aOrientation) override;
 
@@ -67,11 +67,11 @@ protected:
     }
 
     // override to prefer CoreText shaping with fonts that depend on AAT
-    virtual bool ShapeText(DrawTarget     *aDrawTarget,
+    virtual bool ShapeText(gfxContext     *aContext,
                            const char16_t *aText,
                            uint32_t        aOffset,
                            uint32_t        aLength,
-                           Script          aScript,
+                           int32_t         aScript,
                            bool            aVertical,
                            gfxShapedText  *aShapedText) override;
 
@@ -93,7 +93,7 @@ protected:
 
     cairo_font_face_t    *mFontFace;
 
-    mozilla::UniquePtr<gfxFontShaper> mCoreTextShaper;
+    nsAutoPtr<gfxFontShaper> mCoreTextShaper;
 
     Metrics               mMetrics;
     uint32_t              mSpaceGlyph;

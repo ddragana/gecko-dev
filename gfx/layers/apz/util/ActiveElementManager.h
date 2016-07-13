@@ -9,10 +9,9 @@
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 
+class CancelableTask;
+
 namespace mozilla {
-
-class CancelableRunnable;
-
 namespace dom {
 class Element;
 class EventTarget;
@@ -46,9 +45,9 @@ public:
    */
   void HandleTouchStart(bool aCanBePan);
   /**
-   * Clear the active element.
+   * Handle the start of panning.
    */
-  void ClearActivation();
+  void HandlePanStart();
   /**
    * Handle a touch-end or touch-cancel event.
    * @param aWasClick whether the touch was a click
@@ -83,7 +82,7 @@ private:
   /**
    * A task for calling SetActive() after a timeout.
    */
-  RefPtr<CancelableRunnable> mSetActiveTask;
+  CancelableTask* mSetActiveTask;
   /**
    * See ActiveElementUsesStyle() documentation.
    */
@@ -94,7 +93,7 @@ private:
   void SetActive(dom::Element* aTarget);
   void ResetActive();
   void ResetTouchBlockState();
-  void SetActiveTask(const nsCOMPtr<dom::Element>& aTarget);
+  void SetActiveTask(dom::Element* aTarget);
   void CancelTask();
 };
 

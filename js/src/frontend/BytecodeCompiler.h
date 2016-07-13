@@ -9,62 +9,42 @@
 
 #include "NamespaceImports.h"
 
-#include "vm/String.h"
-
 class JSLinearString;
 
 namespace js {
 
+class AutoNameVector;
 class LazyScript;
 class LifoAlloc;
-class ModuleObject;
 class ScriptSourceObject;
-class StaticScope;
+class ScopeObject;
 struct SourceCompressionTask;
 
 namespace frontend {
 
 JSScript*
 CompileScript(ExclusiveContext* cx, LifoAlloc* alloc,
-              HandleObject scopeChain, Handle<StaticScope*> enclosingStaticScope,
+              HandleObject scopeChain, Handle<ScopeObject*> enclosingStaticScope,
               HandleScript evalCaller, const ReadOnlyCompileOptions& options,
               SourceBufferHolder& srcBuf, JSString* source_ = nullptr,
-              SourceCompressionTask* extraSct = nullptr,
-              ScriptSourceObject** sourceObjectOut = nullptr);
+              unsigned staticLevel = 0, SourceCompressionTask* extraSct = nullptr);
 
-ModuleObject*
-CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
-              SourceBufferHolder& srcBuf);
-
-ModuleObject*
-CompileModule(ExclusiveContext* cx, const ReadOnlyCompileOptions& options,
-              SourceBufferHolder& srcBuf, LifoAlloc* alloc,
-              ScriptSourceObject** sourceObjectOut = nullptr);
-
-MOZ_MUST_USE bool
+bool
 CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length);
 
 /*
- * enclosingStaticScope is a static enclosing scope (e.g. a StaticWithScope).
+ * enclosingStaticScope is a static enclosing scope (e.g. a StaticWithObject).
  * Must be null if the enclosing scope is a global.
  */
-MOZ_MUST_USE bool
+bool
 CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
                     const ReadOnlyCompileOptions& options,
-                    Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf,
-                    Handle<StaticScope*> enclosingStaticScope);
-
-// As above, but defaults to the global lexical scope as the enclosing static
-// scope.
-MOZ_MUST_USE bool
-CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
-                    const ReadOnlyCompileOptions& options,
-                    Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf);
-
-MOZ_MUST_USE bool
+                    const AutoNameVector& formals, JS::SourceBufferHolder& srcBuf,
+                    HandleObject enclosingStaticScope);
+bool
 CompileStarGeneratorBody(JSContext* cx, MutableHandleFunction fun,
                          const ReadOnlyCompileOptions& options,
-                         Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf);
+                         const AutoNameVector& formals, JS::SourceBufferHolder& srcBuf);
 
 ScriptSourceObject*
 CreateScriptSourceObject(ExclusiveContext* cx, const ReadOnlyCompileOptions& options);

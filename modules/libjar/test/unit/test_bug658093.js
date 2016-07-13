@@ -2,10 +2,10 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-Cu.import("resource://gre/modules/NetUtil.jsm");
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
+Cu.import("resource://gre/modules/Services.jsm");
 
 // Check that we don't crash on reading a directory entry signature
 var ios = Cc["@mozilla.org/network/io-service;1"].
@@ -14,10 +14,17 @@ var ios = Cc["@mozilla.org/network/io-service;1"].
 function run_test() {
   var file = do_get_file("data/test_bug658093.zip");
   var spec = "jar:" + ios.newFileURI(file).spec + "!/0000";
-  var channel = NetUtil.newChannel({uri: spec, loadUsingSystemPrincipal: true});
+  var channel = ios.newChannel2(spec,
+                                null,
+                                null,
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER);
   var failed = false;
   try {
-    var stream = channel.open2();
+    var stream = channel.open();
   } catch (e) {
     failed = true;
   }

@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef SharedCertVerifier_h
-#define SharedCertVerifier_h
+#ifndef mozilla_psm__SharedCertVerifier_h
+#define mozilla_psm__SharedCertVerifier_h
 
+#include "certt.h"
 #include "CertVerifier.h"
 #include "mozilla/RefPtr.h"
 
@@ -20,16 +21,13 @@ public:
 
   SharedCertVerifier(OcspDownloadConfig odc, OcspStrictConfig osc,
                      OcspGetConfig ogc, uint32_t certShortLifetimeInDays,
-                     PinningMode pinningMode, SHA1Mode sha1Mode,
-                     BRNameMatchingPolicy::Mode nameMatchingMode,
-                     NetscapeStepUpPolicy netscapeStepUpPolicy)
+                     PinningMode pinningMode)
     : mozilla::psm::CertVerifier(odc, osc, ogc, certShortLifetimeInDays,
-                                 pinningMode, sha1Mode, nameMatchingMode,
-                                 netscapeStepUpPolicy)
+                                 pinningMode)
   {
   }
 };
 
 } } // namespace mozilla::psm
 
-#endif // SharedCertVerifier_h
+#endif // mozilla_psm__SharedCertVerifier_h

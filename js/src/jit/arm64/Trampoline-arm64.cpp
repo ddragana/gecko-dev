@@ -14,8 +14,6 @@
 #include "jit/arm64/SharedICHelpers-arm64.h"
 #include "jit/VMFunctions.h"
 
-#include "jit/MacroAssembler-inl.h"
-
 using namespace js;
 using namespace js::jit;
 
@@ -163,7 +161,7 @@ JitRuntime::generateEnterJIT(JSContext* cx, EnterJitType type)
     masm.subStackPtrFrom(r19);
 
     // Push the frameDescriptor.
-    masm.makeFrameDescriptor(r19, JitFrame_Entry, JitFrameLayout::Size());
+    masm.makeFrameDescriptor(r19, JitFrame_Entry);
     masm.Push(r19);
 
     Label osrReturnPoint;
@@ -186,15 +184,15 @@ JitRuntime::generateEnterJIT(JSContext* cx, EnterJitType type)
 
         // Enter exit frame.
         masm.addPtr(Imm32(BaselineFrame::Size() + BaselineFrame::FramePointerOffset), r19);
-        masm.makeFrameDescriptor(r19, JitFrame_BaselineJS, ExitFrameLayout::Size());
+        masm.makeFrameDescriptor(r19, JitFrame_BaselineJS);
         masm.asVIXL().Push(x19, xzr); // Push xzr for a fake return address.
         // No GC things to mark: push a bare token.
-        masm.enterFakeExitFrame(ExitFrameLayoutBareToken);
+        masm.enterFakeExitFrame(ExitFrameLayout::BareToken());
 
         masm.push(BaselineFrameReg, reg_code);
 
         // Initialize the frame, including filling in the slots.
-        masm.setupUnalignedABICall(r19);
+        masm.setupUnalignedABICall(3, r19);
         masm.passABIArg(BaselineFrameReg); // BaselineFrame.
         masm.passABIArg(reg_osrFrame); // InterpreterFrame.
         masm.passABIArg(reg_osrNStack);
@@ -225,7 +223,7 @@ JitRuntime::generateEnterJIT(JSContext* cx, EnterJitType type)
 
     // Call function.
     // Since AArch64 doesn't have the pc register available, the callee must push lr.
-    masm.callJitNoProfiler(reg_code);
+    masm.call(reg_code);
 
     // Baseline OSR will return here.
     if (type == EnterJitBaseline)
@@ -295,7 +293,7 @@ JitRuntime::generateInvalidator(JSContext* cx)
     masm.Sub(x2, masm.GetStackPointer64(), Operand(sizeof(size_t) + sizeof(void*)));
     masm.moveToStackPtr(r2);
 
-    masm.setupUnalignedABICall(r10);
+    masm.setupUnalignedABICall(3, r10);
     masm.passABIArg(r0);
     masm.passABIArg(r1);
     masm.passABIArg(r2);
@@ -396,7 +394,7 @@ JitRuntime::generateArgumentsRectifier(JSContext* cx, void** returnAddrOut)
     masm.Lsl(x6, x6, 3);
 
     // Make that into a frame descriptor.
-    masm.makeFrameDescriptor(r6, JitFrame_Rectifier, JitFrameLayout::Size());
+    masm.makeFrameDescriptor(r6, JitFrame_Rectifier);
 
     masm.push(r0,  // Number of actual arguments.
               r1,  // Callee token.
@@ -405,7 +403,8 @@ JitRuntime::generateArgumentsRectifier(JSContext* cx, void** returnAddrOut)
     // Load the address of the code that is getting called.
     masm.Ldr(x3, MemOperand(x5, JSFunction::offsetOfNativeOrScript()));
     masm.loadBaselineOrIonRaw(r3, r3, nullptr);
-    uint32_t returnOffset = masm.callJitNoProfiler(r3);
+    masm.call(r3);
+    uint32_t returnOffset = masm.currentOffset();
 
     // Clean up!
     // Get the size of the stack frame, and clean up the later fixed frame.
@@ -422,8 +421,11 @@ JitRuntime::generateArgumentsRectifier(JSContext* cx, void** returnAddrOut)
     Linker linker(masm);
     JitCode* code = linker.newCode<NoGC>(cx, OTHER_CODE);
 
-    if (returnAddrOut)
-        *returnAddrOut = (void*) (code->raw() + returnOffset);
+    if (returnAddrOut) {
+        CodeOffsetLabel returnLabel(returnOffset);
+        returnLabel.fixup(&masm);
+        *returnAddrOut = (void*) (code->raw() + returnLabel.offset());
+    }
 
     return code;
 }
@@ -492,7 +494,7 @@ GenerateBailoutThunk(JSContext* cx, MacroAssembler& masm, uint32_t frameClass)
     masm.reserveStack(sizeOfBailoutInfo);
     masm.moveStackPtrTo(r1);
 
-    masm.setupUnalignedABICall(r2);
+    masm.setupUnalignedABICall(2, r2);
     masm.passABIArg(r0);
     masm.passABIArg(r1);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, Bailout));
@@ -632,7 +634,7 @@ JitRuntime::generateVMWrapper(JSContext* cx, const VMFunction& f)
         break;
     }
 
-    masm.setupUnalignedABICall(regs.getAny());
+    masm.setupUnalignedABICall(f.argc(), regs.getAny());
     masm.passABIArg(reg_cx);
 
     size_t argDisp = 0;
@@ -759,7 +761,7 @@ JitRuntime::generatePreBarrier(JSContext* cx, MIRType type)
     MOZ_ASSERT(PreBarrierReg == r1);
     masm.movePtr(ImmPtr(cx->runtime()), r3);
 
-    masm.setupUnalignedABICall(r0);
+    masm.setupUnalignedABICall(2, r0);
     masm.passABIArg(r3);
     masm.passABIArg(PreBarrierReg);
     masm.callWithABI(IonMarkFunction(type));
@@ -780,11 +782,6 @@ JitCode*
 JitRuntime::generateDebugTrapHandler(JSContext* cx)
 {
     MacroAssembler masm(cx);
-#ifndef JS_USE_LINK_REGISTER
-    // The first value contains the return addres,
-    // which we pull into ICTailCallReg for tail calls.
-    masm.setFramePushed(sizeof(intptr_t));
-#endif
 
     Register scratch1 = r0;
     Register scratch2 = r1;
@@ -796,16 +793,16 @@ JitRuntime::generateDebugTrapHandler(JSContext* cx)
     // stub frame has a nullptr ICStub pointer, since this pointer is marked
     // during GC.
     masm.movePtr(ImmPtr(nullptr), ICStubReg);
-    EmitBaselineEnterStubFrame(masm, scratch2);
+    EmitEnterStubFrame(masm, scratch2);
 
     JitCode* code = cx->runtime()->jitRuntime()->getVMWrapper(HandleDebugTrapInfo);
     if (!code)
         return nullptr;
 
     masm.asVIXL().Push(vixl::lr, ARMRegister(scratch1, 64));
-    EmitBaselineCallVM(code, masm);
+    EmitCallVM(code, masm);
 
-    EmitBaselineLeaveStubFrame(masm);
+    EmitLeaveStubFrame(masm);
 
     // If the stub returns |true|, we have to perform a forced return (return
     // from the JS frame). If the stub returns |false|, just return from the
@@ -948,7 +945,7 @@ JitRuntime::generateProfilerExitFrameTailStub(JSContext* cx)
     // Going into the conditionals, we will have:
     //      FrameDescriptor.size in scratch1
     //      FrameDescriptor.type in scratch2
-    masm.and32(Imm32((1 << FRAMETYPE_BITS) - 1), scratch1, scratch2);
+    masm.and32(Imm32((1 << FRAMESIZE_SHIFT) - 1), scratch1, scratch2);
     masm.rshiftPtr(Imm32(FRAMESIZE_SHIFT), scratch1);
 
     // Handling of each case is dependent on FrameDescriptor.type

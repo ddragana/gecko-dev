@@ -17,7 +17,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
-var gLooksLikeUUIDRegex = /^\{\w{8}-\w{4}-\w{4}-\w{4}-\w{12}\}$/;
+let gLooksLikeUUIDRegex = /^\{\w{8}-\w{4}-\w{4}-\w{4}-\w{12}\}$/;
 
 /**
  * Retrieves the only login among the current data that matches the hostname of
@@ -53,17 +53,17 @@ function assertMetaInfoEqual(aActual, aExpected)
 /**
  * nsILoginInfo instances with or without nsILoginMetaInfo properties.
  */
-var gLoginInfo1;
-var gLoginInfo2;
-var gLoginInfo3;
+let gLoginInfo1;
+let gLoginInfo2;
+let gLoginInfo3;
 
 /**
  * nsILoginInfo instances reloaded with all the nsILoginMetaInfo properties.
  * These are often used to provide the reference values to test against.
  */
-var gLoginMetaInfo1;
-var gLoginMetaInfo2;
-var gLoginMetaInfo3;
+let gLoginMetaInfo1;
+let gLoginMetaInfo2;
+let gLoginMetaInfo3;
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Tests
@@ -275,9 +275,9 @@ add_task(function test_searchLogins_metainfo()
  * Tests that the default nsILoginManagerStorage module attached to the Login
  * Manager service is able to save and reload nsILoginMetaInfo properties.
  */
-add_task(function* test_storage_metainfo()
+add_task(function test_storage_metainfo()
 {
-  yield* LoginTestUtils.reloadData();
+  yield LoginTestUtils.reloadData();
   LoginTestUtils.checkLogins([gLoginInfo1, gLoginInfo2, gLoginInfo3]);
 
   assertMetaInfoEqual(retrieveLoginMatching(gLoginInfo1), gLoginMetaInfo1);

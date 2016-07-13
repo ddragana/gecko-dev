@@ -13,8 +13,7 @@
 #endif
 #endif
 
-// Expands to all the defines from configure.
-#undef ALLDEFINES
+@ALLDEFINES@
 
 /*
  * The c99 defining the limit macros (UINT32_MAX for example), says:

@@ -7,7 +7,6 @@
 #include "FileReaderSync.h"
 
 #include "jsfriendapi.h"
-#include "mozilla/unused.h"
 #include "mozilla/Base64.h"
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/File.h"
@@ -27,6 +26,7 @@
 
 #include "RuntimeService.h"
 
+USING_WORKERS_NAMESPACE
 using namespace mozilla;
 using namespace mozilla::dom;
 using mozilla::dom::Optional;
@@ -36,7 +36,7 @@ using mozilla::dom::GlobalObject;
 already_AddRefed<FileReaderSync>
 FileReaderSync::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
 {
-  RefPtr<FileReaderSync> frs = new FileReaderSync();
+  nsRefPtr<FileReaderSync> frs = new FileReaderSync();
 
   return frs.forget();
 }
@@ -46,7 +46,7 @@ FileReaderSync::WrapObject(JSContext* aCx,
                            JS::Handle<JSObject*> aGivenProto,
                            JS::MutableHandle<JSObject*> aReflector)
 {
-  return FileReaderSyncBinding::Wrap(aCx, this, aGivenProto, aReflector);
+  return FileReaderSyncBinding_workers::Wrap(aCx, this, aGivenProto, aReflector);
 }
 
 void
@@ -85,9 +85,7 @@ FileReaderSync::ReadAsArrayBuffer(JSContext* aCx,
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
-  // arrayBuffer takes the ownership when it is not null. Otherwise we
-  // need to release it explicitly.
-  mozilla::Unused << bufferData.release();
+  bufferData.release();
 
   aRetval.set(arrayBuffer);
 }

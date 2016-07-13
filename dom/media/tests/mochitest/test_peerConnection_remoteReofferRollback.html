@@ -27,7 +27,7 @@
       [
         function PC_LOCAL_SETUP_ICE_HANDLER(test) {
           test.pcLocal.setupIceCandidateHandler(test);
-          if (test.testOptions.steeplechase) {
+          if (test.steeplechase) {
             test.pcLocal.endOfTrickleIce.then(() => {
               send_message({"type": "end_of_trickle_ice"});
             });
@@ -37,17 +37,14 @@
         function PC_REMOTE_ROLLBACK(test) {
           return test.setRemoteDescription(
               test.pcRemote,
-              new RTCSessionDescription({ type: "rollback" }),
-              STABLE)
-            .then(() => test.pcRemote.rollbackRemoteTracksIfNotNegotiated());
+              new mozRTCSessionDescription({ type: "rollback" }),
+              STABLE);
         },
 
         function PC_LOCAL_ROLLBACK(test) {
-          // We haven't negotiated the new stream yet.
-          test.pcLocal.expectNegotiationNeeded();
           return test.setLocalDescription(
               test.pcLocal,
-              new RTCSessionDescription({ type: "rollback", sdp: ""}),
+              new mozRTCSessionDescription({ type: "rollback", sdp: ""}),
               STABLE);
         },
 

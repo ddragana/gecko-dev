@@ -16,38 +16,35 @@ function nsSidebar() {
 nsSidebar.prototype = {
   init: function(window) {
     this.window = window;
-    try {
-      this.mm = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDocShell)
-                      .QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIContentFrameMessageManager);
-    } catch(e) {
-      Cu.reportError(e);
-    }
+    this.mm = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                    .getInterface(Ci.nsIDocShell)
+                    .QueryInterface(Ci.nsIInterfaceRequestor)
+                    .getInterface(Ci.nsIContentFrameMessageManager);
   },
 
-  // Deprecated, only left here to avoid breaking old browser-detection scripts.
+  // The suggestedTitle and suggestedCategory parameters are ignored, but remain
+  // for backward compatibility.
   addSearchEngine: function(engineURL, iconURL, suggestedTitle, suggestedCategory) {
-    if (SHERLOCK_FILE_EXT_REGEXP.test(engineURL)) {
-      Cu.reportError("Installing Sherlock search plugins is no longer supported.");
-      return;
-    }
-
-    this.AddSearchProvider(engineURL);
-  },
-
-  // This function implements window.external.AddSearchProvider().
-  // The capitalization, although nonstandard here, is to match other browsers'
-  // APIs and is therefore important.
-  AddSearchProvider: function(engineURL) {
-    if (!this.mm) {
-      Cu.reportError(`Installing a search provider from this context is not currently supported: ${Error().stack}.`);
-      return;
-    }
+    let dataType = SHERLOCK_FILE_EXT_REGEXP.test(engineURL) ?
+                   Ci.nsISearchEngine.DATA_TEXT :
+                   Ci.nsISearchEngine.DATA_XML;
 
     this.mm.sendAsyncMessage("Search:AddEngine", {
       pageURL: this.window.document.documentURIObject.spec,
-      engineURL
+      engineURL,
+      type: dataType,
+      iconURL
+    });
+  },
+
+  // This function exists largely to implement window.external.AddSearchProvider(),
+  // to match other browsers' APIs.  The capitalization, although nonstandard here,
+  // is therefore important.
+  AddSearchProvider: function(engineURL) {
+    this.mm.sendAsyncMessage("Search:AddEngine", {
+      pageURL: this.window.document.documentURIObject.spec,
+      engineURL,
+      type: Ci.nsISearchEngine.DATA_XML
     });
   },
 

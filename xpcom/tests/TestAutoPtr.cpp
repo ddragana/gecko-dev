@@ -13,12 +13,6 @@ class TestObjectBaseA {
     public:
         // Virtual dtor for deleting through base class pointer
         virtual ~TestObjectBaseA() { }
-        void MemberFunction( int, int*, int& )
-        {
-          printf("member function is invoked.\n");
-        }
-        virtual void VirtualMemberFunction(int, int*, int&) { };
-        virtual void VirtualConstMemberFunction(int, int*, int&) const { };
         int fooA;
 };
 
@@ -42,15 +36,6 @@ class TestObject : public TestObjectBaseA, public TestObjectBaseB {
         {
             printf("  Destroying TestObject %p.\n",
                    static_cast<void*>(this));
-        }
-
-        virtual void VirtualMemberFunction(int, int*, int&) override
-        {
-          printf("override virtual member function is invoked.\n");
-        }
-        virtual void VirtualConstMemberFunction(int, int*, int&) const override
-        {
-          printf("override virtual const member function is invoked.\n");
         }
 };
 
@@ -184,14 +169,22 @@ int main()
     }
 
     {
+        printf("Should create 3 |TestObject|s:\n");
+        nsAutoArrayPtr<TestObject> pobj( new TestObject[3] );
+        printf("Should create 5 |TestObject|s and then destroy 3:\n");
+        pobj = new TestObject[5];
+        printf("Should destroy 5 |TestObject|s:\n");
+    }
+
+    {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        RefPtr<TestRefObject> pobj( new TestRefObject() );
+        nsRefPtr<TestRefObject> pobj( new TestRefObject() );
         printf("Should Release and destroy one |TestRefObject|:\n");
     }
 
     {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        RefPtr<TestRefObject> pobj( new TestRefObject() );
+        nsRefPtr<TestRefObject> pobj( new TestRefObject() );
         printf("Should create and AddRef one |TestRefObject| and then Release and destroy one:\n");
         pobj = new TestRefObject();
         printf("Should Release and destroy one |TestRefObject|:\n");
@@ -199,51 +192,51 @@ int main()
 
     {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        RefPtr<TestRefObject> p1( new TestRefObject() );
+        nsRefPtr<TestRefObject> p1( new TestRefObject() );
         printf("Should AddRef one |TestRefObject|:\n");
-        RefPtr<TestRefObject> p2( p1 );
+        nsRefPtr<TestRefObject> p2( p1 );
         printf("Should Release twice and destroy one |TestRefObject|:\n");
     }
 
     printf("\nTesting equality (with all const-ness combinations):\n");
 
     {
-        RefPtr<TestRefObject> p1( new TestRefObject() );
-        RefPtr<TestRefObject> p2( p1 );
+        nsRefPtr<TestRefObject> p1( new TestRefObject() );
+        nsRefPtr<TestRefObject> p2( p1 );
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2)) ? "OK" : "broken");
     }
 
     {
-        const RefPtr<TestRefObject> p1( new TestRefObject() );
-        RefPtr<TestRefObject> p2( p1 );
+        const nsRefPtr<TestRefObject> p1( new TestRefObject() );
+        nsRefPtr<TestRefObject> p2( p1 );
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2)) ? "OK" : "broken");
     }
 
     {
-        RefPtr<TestRefObject> p1( new TestRefObject() );
-        const RefPtr<TestRefObject> p2( p1 );
+        nsRefPtr<TestRefObject> p1( new TestRefObject() );
+        const nsRefPtr<TestRefObject> p2( p1 );
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2)) ? "OK" : "broken");
     }
 
     {
-        const RefPtr<TestRefObject> p1( new TestRefObject() );
-        const RefPtr<TestRefObject> p2( p1 );
+        const nsRefPtr<TestRefObject> p1( new TestRefObject() );
+        const nsRefPtr<TestRefObject> p2( p1 );
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2)) ? "OK" : "broken");
     }
 
     {
-        RefPtr<TestRefObject> p1( new TestRefObject() );
+        nsRefPtr<TestRefObject> p1( new TestRefObject() );
         TestRefObject * p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
     }
 
     {
-        const RefPtr<TestRefObject> p1( new TestRefObject() );
+        const nsRefPtr<TestRefObject> p1( new TestRefObject() );
         TestRefObject * p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
@@ -251,14 +244,14 @@ int main()
 
 #if 0 /* MSVC++ 6.0 can't be coaxed to accept this */
     {
-        RefPtr<TestRefObject> p1( new TestRefObject() );
+        nsRefPtr<TestRefObject> p1( new TestRefObject() );
         TestRefObject * const p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
     }
 
     {
-        const RefPtr<TestRefObject> p1( new TestRefObject() );
+        const nsRefPtr<TestRefObject> p1( new TestRefObject() );
         TestRefObject * const p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
@@ -266,28 +259,28 @@ int main()
 #endif /* Things that MSVC++ 6.0 can't be coaxed to accept */
 
     {
-        RefPtr<TestRefObject> p1( new TestRefObject() );
+        nsRefPtr<TestRefObject> p1( new TestRefObject() );
         const TestRefObject * p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
     }
 
     {
-        const RefPtr<TestRefObject> p1( new TestRefObject() );
+        const nsRefPtr<TestRefObject> p1( new TestRefObject() );
         const TestRefObject * p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
     }
 
     {
-        RefPtr<TestRefObject> p1( new TestRefObject() );
+        nsRefPtr<TestRefObject> p1( new TestRefObject() );
         const TestRefObject * const p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
     }
 
     {
-        const RefPtr<TestRefObject> p1( new TestRefObject() );
+        const nsRefPtr<TestRefObject> p1( new TestRefObject() );
         const TestRefObject * const p2 = p1;
         printf("equality %s.\n",
                ((p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1)) ? "OK" : "broken");
@@ -303,7 +296,7 @@ int main()
     }
 
     {
-        RefPtr<TestRefObject> ptr;
+        nsRefPtr<TestRefObject> ptr;
         printf("Should create and AddRef one |TestRefObject|:\n");
         CreateTestRefObject(getter_AddRefs(ptr));
         printf("Should Release and destroy one |TestRefObject|:\n");
@@ -311,10 +304,8 @@ int main()
 
     printf("\nTesting casts and equality tests.\n");
 
-    // This comparison is always false, as it should be. The extra parens
-    // suppress a -Wunreachable-code warning about printf being unreachable.
-    if (((void*)(TestObject*)0x1000) ==
-        ((void*)(TestObjectBaseB*)(TestObject*)0x1000))
+    if ((void*)(TestObject*)0x1000 ==
+        (void*)(TestObjectBaseB*)(TestObject*)0x1000)
         printf("\n\nAll these tests are meaningless!\n\n\n");
 
     {
@@ -336,9 +327,9 @@ int main()
     }
 
     {
-        RefPtr<TestRefObject> p1 = new TestRefObject();
+        nsRefPtr<TestRefObject> p1 = new TestRefObject();
         // nsCOMPtr requires a |get| for something like this as well
-        RefPtr<TestRefObjectBaseB> p2 = p1.get();
+        nsRefPtr<TestRefObjectBaseB> p2 = p1.get();
         printf("equality %s.\n",
                ((static_cast<void*>(p1) != static_cast<void*>(p2)) &&
                 (p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1))
@@ -346,7 +337,7 @@ int main()
     }
 
     {
-        RefPtr<TestRefObject> p1 = new TestRefObject();
+        nsRefPtr<TestRefObject> p1 = new TestRefObject();
         TestRefObjectBaseB *p2 = p1;
         printf("equality %s.\n",
                ((static_cast<void*>(p1) != static_cast<void*>(p2)) &&
@@ -356,7 +347,7 @@ int main()
 
     {
         TestRefObject *p1 = new TestRefObject();
-        RefPtr<TestRefObjectBaseB> p2 = p1;
+        nsRefPtr<TestRefObjectBaseB> p2 = p1;
         printf("equality %s.\n",
                ((static_cast<void*>(p1) != static_cast<void*>(p2)) &&
                 (p1 == p2) && !(p1 != p2) && (p2 == p1) && !(p2 != p1))
@@ -374,12 +365,21 @@ int main()
     }
 
     {
-        printf("Should create one |TestRefObject|:\n");
-        RefPtr<TestRefObject> pobj( new TestRefObject() );
+        printf("Should create 3 |TestObject|s:\n");
+        nsAutoArrayPtr<TestObject> pobj( new TestObject[3] );
         printf("Should do nothing:\n");
-        RefPtr<TestRefObject> pobj2( pobj.forget() );
+        nsAutoArrayPtr<TestObject> pobj2( pobj.forget() );
+        printf("Should destroy 3 |TestObject|s:\n");
+    }
+
+    {
+        printf("Should create one |TestRefObject|:\n");
+        nsRefPtr<TestRefObject> pobj( new TestRefObject() );
+        printf("Should do nothing:\n");
+        nsRefPtr<TestRefObject> pobj2( pobj.forget() );
         printf("Should destroy one |TestRefObject|:\n");
     }
+
 
     printf("\nTesting construction.\n");
 
@@ -390,8 +390,14 @@ int main()
     }
 
     {
+        printf("Should create 3 |TestObject|s:\n");
+        nsAutoArrayPtr<TestObject> pobj(new TestObject[3]);
+        printf("Should destroy 3 |TestObject|s:\n");
+    }
+
+    {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        RefPtr<TestRefObject> pobj = new TestRefObject();
+        nsRefPtr<TestRefObject> pobj = new TestRefObject();
         printf("Should Release and destroy one |TestRefObject|:\n");
     }
 
@@ -408,8 +414,22 @@ int main()
     }
 
     {
+        printf("Should create 3 |TestObject|s:\n");
+        nsAutoArrayPtr<TestObject> pobj(new TestObject[3]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObject(&pobj[2]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObject(&pobj[1]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObject(pobj + 2);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObject(pobj + 1);
+        printf("Should destroy 3 |TestObject|s:\n");
+    }
+
+    {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        RefPtr<TestRefObject> pobj = new TestRefObject();
+        nsRefPtr<TestRefObject> pobj = new TestRefObject();
         printf("Should do something with one |TestRefObject|:\n");
         DoSomethingWithTestRefObject(pobj);
         printf("Should do something with one |TestRefObject|:\n");
@@ -428,8 +448,22 @@ int main()
     }
 
     {
+        printf("Should create 3 |TestObject|s:\n");
+        nsAutoArrayPtr<TestObject> pobj(new TestObject[3]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObjectBaseB(&pobj[2]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObjectBaseB(&pobj[1]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObjectBaseB(pobj + 2);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObjectBaseB(pobj + 1);
+        printf("Should destroy 3 |TestObject|s:\n");
+    }
+
+    {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        RefPtr<TestRefObject> pobj = new TestRefObject();
+        nsRefPtr<TestRefObject> pobj = new TestRefObject();
         printf("Should do something with one |TestRefObject|:\n");
         DoSomethingWithTestRefObjectBaseB(pobj);
         printf("Should do something with one |TestRefObject|:\n");
@@ -448,8 +482,22 @@ int main()
     }
 
     {
+        printf("Should create 3 |TestObject|s:\n");
+        const nsAutoArrayPtr<TestObject> pobj(new TestObject[3]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObject(&pobj[2]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObject(&pobj[1]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObject(pobj + 2);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObject(pobj + 1);
+        printf("Should destroy 3 |TestObject|s:\n");
+    }
+
+    {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        const RefPtr<TestRefObject> pobj = new TestRefObject();
+        const nsRefPtr<TestRefObject> pobj = new TestRefObject();
         printf("Should do something with one |TestRefObject|:\n");
         DoSomethingWithTestRefObject(pobj);
         printf("Should do something with one |TestRefObject|:\n");
@@ -468,27 +516,27 @@ int main()
     }
 
     {
+        printf("Should create 3 |TestObject|s:\n");
+        const nsAutoArrayPtr<TestObject> pobj(new TestObject[3]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObjectBaseB(&pobj[2]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObjectBaseB(&pobj[1]);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithTestObjectBaseB(pobj + 2);
+        printf("Should do something with one |TestObject|:\n");
+        DoSomethingWithConstTestObjectBaseB(pobj + 1);
+        printf("Should destroy 3 |TestObject|s:\n");
+    }
+
+    {
         printf("Should create and AddRef one |TestRefObject|:\n");
-        const RefPtr<TestRefObject> pobj = new TestRefObject();
+        const nsRefPtr<TestRefObject> pobj = new TestRefObject();
         printf("Should do something with one |TestRefObject|:\n");
         DoSomethingWithTestRefObjectBaseB(pobj);
         printf("Should do something with one |TestRefObject|:\n");
         DoSomethingWithConstTestRefObjectBaseB(pobj);
         printf("Should Release and destroy one |TestRefObject|:\n");
-    }
-
-    {
-        int test = 1;
-        void (TestObjectBaseA::*fPtr)( int, int*, int& ) = &TestObjectBaseA::MemberFunction;
-        void (TestObjectBaseA::*fVPtr)( int, int*, int& ) = &TestObjectBaseA::VirtualMemberFunction;
-        void (TestObjectBaseA::*fVCPtr)( int, int*, int& ) const = &TestObjectBaseA::VirtualConstMemberFunction;
-        printf("Should create one |TestObject|:\n");
-        nsAutoPtr<TestObjectBaseA> pobj(new TestObject());
-        printf("Should do something with operator->*:\n");
-        (pobj->*fPtr)(test, &test, test);
-        (pobj->*fVPtr)(test, &test, test);
-        (pobj->*fVCPtr)(test, &test, test);
-        printf("Should destroy one |TestObject|:\n");
     }
 
     return 0;

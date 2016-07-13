@@ -7,7 +7,6 @@
 #ifndef __NS_SVGSTRING_H__
 #define __NS_SVGSTRING_H__
 
-#include "nsAutoPtr.h"
 #include "nsError.h"
 #include "nsSVGElement.h"
 #include "mozilla/Attributes.h"

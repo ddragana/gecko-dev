@@ -56,11 +56,10 @@ public:
 protected:
   ~GfxInfo() {}
 
-  virtual nsresult GetFeatureStatusImpl(int32_t aFeature,
-                                        int32_t *aStatus,
-                                        nsAString & aSuggestedDriverVersion,
-                                        const nsTArray<GfxDriverInfo>& aDriverInfo,
-                                        nsACString& aFailureId,
+  virtual nsresult GetFeatureStatusImpl(int32_t aFeature, 
+                                        int32_t *aStatus, 
+                                        nsAString & aSuggestedDriverVersion, 
+                                        const nsTArray<GfxDriverInfo>& aDriverInfo, 
                                         OperatingSystem* aOS = nullptr) override;
   virtual const nsTArray<GfxDriverInfo>& GetGfxDriverInfo() override;
 

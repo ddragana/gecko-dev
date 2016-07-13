@@ -25,7 +25,7 @@ struct MediaTrackSupportedConstraints;
 class MediaDevices final : public DOMEventTargetHelper
 {
 public:
-  explicit MediaDevices(nsPIDOMWindowInner* aWindow) :
+  explicit MediaDevices(nsPIDOMWindow* aWindow) :
     DOMEventTargetHelper(aWindow) {}
 
   NS_DECL_ISUPPORTS_INHERITED

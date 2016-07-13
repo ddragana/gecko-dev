@@ -6,10 +6,6 @@
 
 #include "mozilla/BasePrincipal.h"
 
-#include "nsDocShell.h"
-#ifdef MOZ_CRASHREPORTER
-#include "nsExceptionHandler.h"
-#endif
 #include "nsIAddonPolicyService.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIObjectInputStream.h"
@@ -23,7 +19,6 @@
 #include "nsServiceManagerUtils.h"
 
 #include "mozilla/dom/CSPDictionariesBinding.h"
-#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/URLSearchParams.h"
 
@@ -32,133 +27,24 @@ namespace mozilla {
 using dom::URLParams;
 
 void
-PrincipalOriginAttributes::InheritFromDocShellToDoc(const DocShellOriginAttributes& aAttrs,
-                                                    const nsIURI* aURI)
-{
-  mAppId = aAttrs.mAppId;
-  mInIsolatedMozBrowser = aAttrs.mInIsolatedMozBrowser;
-
-  // addonId is computed from the principal URI and never propagated
-  mUserContextId = aAttrs.mUserContextId;
-
-  // TODO:
-  // Bug 1225349 - PrincipalOriginAttributes should inherit mSignedPkg
-  // accordingly by URI
-  mSignedPkg = aAttrs.mSignedPkg;
-
-  mPrivateBrowsingId = aAttrs.mPrivateBrowsingId;
-}
-
-void
-PrincipalOriginAttributes::InheritFromNecko(const NeckoOriginAttributes& aAttrs)
-{
-  mAppId = aAttrs.mAppId;
-  mInIsolatedMozBrowser = aAttrs.mInIsolatedMozBrowser;
-
-  // addonId is computed from the principal URI and never propagated
-  mUserContextId = aAttrs.mUserContextId;
-  mSignedPkg = aAttrs.mSignedPkg;
-
-  mPrivateBrowsingId = aAttrs.mPrivateBrowsingId;
-}
-
-void
-DocShellOriginAttributes::InheritFromDocToChildDocShell(const PrincipalOriginAttributes& aAttrs)
-{
-  mAppId = aAttrs.mAppId;
-  mInIsolatedMozBrowser = aAttrs.mInIsolatedMozBrowser;
-
-  // addonId is computed from the principal URI and never propagated
-  mUserContextId = aAttrs.mUserContextId;
-
-  // TODO:
-  // Bug 1225353 - DocShell/NeckoOriginAttributes should inherit
-  // mSignedPkg accordingly by mSignedPkgInBrowser
-  mSignedPkg = aAttrs.mSignedPkg;
-
-  mPrivateBrowsingId = aAttrs.mPrivateBrowsingId;
-}
-
-void
-NeckoOriginAttributes::InheritFromDocToNecko(const PrincipalOriginAttributes& aAttrs)
-{
-  mAppId = aAttrs.mAppId;
-  mInIsolatedMozBrowser = aAttrs.mInIsolatedMozBrowser;
-
-  // addonId is computed from the principal URI and never propagated
-  mUserContextId = aAttrs.mUserContextId;
-
-  // TODO:
-  // Bug 1225353 - DocShell/NeckoOriginAttributes should inherit
-  // mSignedPkg accordingly by mSignedPkgInBrowser
-
-  mPrivateBrowsingId = aAttrs.mPrivateBrowsingId;
-}
-
-void
-NeckoOriginAttributes::InheritFromDocShellToNecko(const DocShellOriginAttributes& aAttrs)
-{
-  mAppId = aAttrs.mAppId;
-  mInIsolatedMozBrowser = aAttrs.mInIsolatedMozBrowser;
-
-  // addonId is computed from the principal URI and never propagated
-  mUserContextId = aAttrs.mUserContextId;
-
-  // TODO:
-  // Bug 1225353 - DocShell/NeckoOriginAttributes should inherit
-  // mSignedPkg accordingly by mSignedPkgInBrowser
-
-  mPrivateBrowsingId = aAttrs.mPrivateBrowsingId;
-}
-
-void
 OriginAttributes::CreateSuffix(nsACString& aStr) const
 {
+  MOZ_RELEASE_ASSERT(mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID);
+
   UniquePtr<URLParams> params(new URLParams());
   nsAutoString value;
-
-  //
-  // Important: While serializing any string-valued attributes, perform a
-  // release-mode assertion to make sure that they don't contain characters that
-  // will break the quota manager when it uses the serialization for file
-  // naming (see addonId below).
-  //
 
   if (mAppId != nsIScriptSecurityManager::NO_APP_ID) {
     value.AppendInt(mAppId);
     params->Set(NS_LITERAL_STRING("appId"), value);
   }
 
-  if (mInIsolatedMozBrowser) {
+  if (mInBrowser) {
     params->Set(NS_LITERAL_STRING("inBrowser"), NS_LITERAL_STRING("1"));
   }
 
   if (!mAddonId.IsEmpty()) {
-    if (mAddonId.FindCharInSet(dom::quota::QuotaManager::kReplaceChars) != kNotFound) {
-#ifdef MOZ_CRASHREPORTER
-      CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("Crash_AddonId"),
-                                         NS_ConvertUTF16toUTF8(mAddonId));
-#endif
-      MOZ_CRASH();
-    }
     params->Set(NS_LITERAL_STRING("addonId"), mAddonId);
-  }
-
-  if (mUserContextId != nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID) {
-    value.Truncate();
-    value.AppendInt(mUserContextId);
-    params->Set(NS_LITERAL_STRING("userContextId"), value);
-  }
-
-  if (!mSignedPkg.IsEmpty()) {
-    MOZ_RELEASE_ASSERT(mSignedPkg.FindCharInSet(dom::quota::QuotaManager::kReplaceChars) == kNotFound);
-    params->Set(NS_LITERAL_STRING("signedPkg"), mSignedPkg);
-  }
-
-  if (mPrivateBrowsingId) {
-    value.Truncate();
-    value.AppendInt(mPrivateBrowsingId);
-    params->Set(NS_LITERAL_STRING("privateBrowsingId"), value);
   }
 
   aStr.Truncate();
@@ -168,13 +54,6 @@ OriginAttributes::CreateSuffix(nsACString& aStr) const
     aStr.AppendLiteral("^");
     aStr.Append(NS_ConvertUTF16toUTF8(value));
   }
-
-// In debug builds, check the whole string for illegal characters too (just in case).
-#ifdef DEBUG
-  nsAutoCString str;
-  str.Assign(aStr);
-  MOZ_ASSERT(str.FindCharInSet(dom::quota::QuotaManager::kReplaceChars) == kNotFound);
-#endif
 }
 
 namespace {
@@ -187,10 +66,6 @@ public:
     : mOriginAttributes(aOriginAttributes)
   {
     MOZ_ASSERT(aOriginAttributes);
-    // If mPrivateBrowsingId is passed in as >0 and is not present in the suffix,
-    // then it will remain >0 when it should be 0 according to the suffix. Set to 0 before
-    // iterating to fix this.
-    mOriginAttributes->mPrivateBrowsingId = 0;
   }
 
   bool URLParamsIterator(const nsString& aName,
@@ -198,10 +73,14 @@ public:
   {
     if (aName.EqualsLiteral("appId")) {
       nsresult rv;
-      int64_t val  = aValue.ToInteger64(&rv);
-      NS_ENSURE_SUCCESS(rv, false);
-      NS_ENSURE_TRUE(val <= UINT32_MAX, false);
-      mOriginAttributes->mAppId = static_cast<uint32_t>(val);
+      mOriginAttributes->mAppId = aValue.ToInteger(&rv);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return false;
+      }
+
+      if (mOriginAttributes->mAppId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+        return false;
+      }
 
       return true;
     }
@@ -211,39 +90,13 @@ public:
         return false;
       }
 
-      mOriginAttributes->mInIsolatedMozBrowser = true;
+      mOriginAttributes->mInBrowser = true;
       return true;
     }
 
     if (aName.EqualsLiteral("addonId")) {
       MOZ_RELEASE_ASSERT(mOriginAttributes->mAddonId.IsEmpty());
       mOriginAttributes->mAddonId.Assign(aValue);
-      return true;
-    }
-
-    if (aName.EqualsLiteral("userContextId")) {
-      nsresult rv;
-      int64_t val  = aValue.ToInteger64(&rv);
-      NS_ENSURE_SUCCESS(rv, false);
-      NS_ENSURE_TRUE(val <= UINT32_MAX, false);
-      mOriginAttributes->mUserContextId  = static_cast<uint32_t>(val);
-
-      return true;
-    }
-
-    if (aName.EqualsLiteral("signedPkg")) {
-      MOZ_RELEASE_ASSERT(mOriginAttributes->mSignedPkg.IsEmpty());
-      mOriginAttributes->mSignedPkg.Assign(aValue);
-      return true;
-    }
-
-    if (aName.EqualsLiteral("privateBrowsingId")) {
-      nsresult rv;
-      int64_t val = aValue.ToInteger64(&rv);
-      NS_ENSURE_SUCCESS(rv, false);
-      NS_ENSURE_TRUE(val >= 0 && val <= UINT32_MAX, false);
-      mOriginAttributes->mPrivateBrowsingId = static_cast<uint32_t>(val);
-
       return true;
     }
 
@@ -292,12 +145,6 @@ OriginAttributes::PopulateFromOrigin(const nsACString& aOrigin,
   return PopulateFromSuffix(Substring(origin, pos));
 }
 
-void
-OriginAttributes::SyncAttributesWithPrivateBrowsing(bool aInPrivateBrowsing)
-{
-  mPrivateBrowsingId = aInPrivateBrowsing ? 1 : 0;
-}
-
 BasePrincipal::BasePrincipal()
 {}
 
@@ -309,6 +156,14 @@ BasePrincipal::GetOrigin(nsACString& aOrigin)
 {
   nsresult rv = GetOriginInternal(aOrigin);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // OriginAttributes::CreateSuffix asserts against UNKNOWN_APP_ID. It's trivial
+  // to trigger this getter from script on such a principal, so we handle it
+  // here at the API entry point.
+  if (mOriginAttributes.mAppId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+    NS_WARNING("Refusing to provide canonical origin string to principal with UNKNOWN_APP_ID");
+    return NS_ERROR_FAILURE;
+  }
 
   nsAutoCString suffix;
   mOriginAttributes.CreateSuffix(suffix);
@@ -364,44 +219,6 @@ BasePrincipal::SubsumesConsideringDomain(nsIPrincipal *aOther, bool *aResult)
 }
 
 NS_IMETHODIMP
-BasePrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsPrincipal)
-{
-  // Check the internal method first, which allows us to quickly approve loads
-  // for the System Principal.
-  if (MayLoadInternal(aURI)) {
-    return NS_OK;
-  }
-
-  nsresult rv;
-  if (aAllowIfInheritsPrincipal) {
-    // If the caller specified to allow loads of URIs that inherit
-    // our principal, allow the load if this URI inherits its principal.
-    bool doesInheritSecurityContext;
-    rv = NS_URIChainHasFlags(aURI, nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT,
-                             &doesInheritSecurityContext);
-    if (NS_SUCCEEDED(rv) && doesInheritSecurityContext) {
-      return NS_OK;
-    }
-  }
-
-  bool fetchableByAnyone;
-  rv = NS_URIChainHasFlags(aURI, nsIProtocolHandler::URI_FETCHABLE_BY_ANYONE, &fetchableByAnyone);
-  if (NS_SUCCEEDED(rv) && fetchableByAnyone) {
-    return NS_OK;
-  }
-
-  if (aReport) {
-    nsCOMPtr<nsIURI> prinURI;
-    rv = GetURI(getter_AddRefs(prinURI));
-    if (NS_SUCCEEDED(rv) && prinURI) {
-      nsScriptSecurityManager::ReportError(nullptr, NS_LITERAL_STRING("CheckSameOriginError"), prinURI, aURI);
-    }
-  }
-
-  return NS_ERROR_DOM_BAD_URI;
-}
-
-NS_IMETHODIMP
 BasePrincipal::GetCsp(nsIContentSecurityPolicy** aCsp)
 {
   NS_IF_ADDREF(*aCsp = mCSP);
@@ -409,55 +226,14 @@ BasePrincipal::GetCsp(nsIContentSecurityPolicy** aCsp)
 }
 
 NS_IMETHODIMP
-BasePrincipal::EnsureCSP(nsIDOMDocument* aDocument,
-                         nsIContentSecurityPolicy** aCSP)
+BasePrincipal::SetCsp(nsIContentSecurityPolicy* aCsp)
 {
-  if (mCSP) {
-    // if there is a CSP already associated with this principal
-    // then just return that - do not overwrite it!!!
-    NS_IF_ADDREF(*aCSP = mCSP);
-    return NS_OK;
-  }
+  // If CSP was already set, it should not be destroyed!  Instead, it should
+  // get set anew when a new principal is created.
+  if (mCSP)
+    return NS_ERROR_ALREADY_INITIALIZED;
 
-  nsresult rv = NS_OK;
-  mCSP = do_CreateInstance("@mozilla.org/cspcontext;1", &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Store the request context for violation reports
-  rv = aDocument ? mCSP->SetRequestContext(aDocument, nullptr)
-                 : mCSP->SetRequestContext(nullptr, this);
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_IF_ADDREF(*aCSP = mCSP);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::GetPreloadCsp(nsIContentSecurityPolicy** aPreloadCSP)
-{
-  NS_IF_ADDREF(*aPreloadCSP = mPreloadCSP);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::EnsurePreloadCSP(nsIDOMDocument* aDocument,
-                                nsIContentSecurityPolicy** aPreloadCSP)
-{
-  if (mPreloadCSP) {
-    // if there is a speculative CSP already associated with this principal
-    // then just return that - do not overwrite it!!!
-    NS_IF_ADDREF(*aPreloadCSP = mPreloadCSP);
-    return NS_OK;
-  }
-
-  nsresult rv = NS_OK;
-  mPreloadCSP = do_CreateInstance("@mozilla.org/cspcontext;1", &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Store the request context for violation reports
-  rv = aDocument ? mPreloadCSP->SetRequestContext(aDocument, nullptr)
-                 : mPreloadCSP->SetRequestContext(nullptr, this);
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_IF_ADDREF(*aPreloadCSP = mPreloadCSP);
+  mCSP = aCsp;
   return NS_OK;
 }
 
@@ -475,37 +251,18 @@ BasePrincipal::GetCspJSON(nsAString& outCSPinJSON)
 }
 
 NS_IMETHODIMP
-BasePrincipal::GetIsNullPrincipal(bool* aResult)
+BasePrincipal::GetIsNullPrincipal(bool* aIsNullPrincipal)
 {
-  *aResult = Kind() == eNullPrincipal;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::GetIsCodebasePrincipal(bool* aResult)
-{
-  *aResult = Kind() == eCodebasePrincipal;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::GetIsExpandedPrincipal(bool* aResult)
-{
-  *aResult = Kind() == eExpandedPrincipal;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::GetIsSystemPrincipal(bool* aResult)
-{
-  *aResult = Kind() == eSystemPrincipal;
+  *aIsNullPrincipal = false;
   return NS_OK;
 }
 
 NS_IMETHODIMP
 BasePrincipal::GetJarPrefix(nsACString& aJarPrefix)
 {
-  mozilla::GetJarPrefix(mOriginAttributes.mAppId, mOriginAttributes.mInIsolatedMozBrowser, aJarPrefix);
+  MOZ_ASSERT(AppId() != nsIScriptSecurityManager::UNKNOWN_APP_ID);
+
+  mozilla::GetJarPrefix(mOriginAttributes.mAppId, mOriginAttributes.mInBrowser, aJarPrefix);
   return NS_OK;
 }
 
@@ -552,23 +309,9 @@ BasePrincipal::GetAppId(uint32_t* aAppId)
 }
 
 NS_IMETHODIMP
-BasePrincipal::GetAddonId(nsAString& aAddonId)
+BasePrincipal::GetIsInBrowserElement(bool* aIsInBrowserElement)
 {
-  aAddonId.Assign(mOriginAttributes.mAddonId);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::GetUserContextId(uint32_t* aUserContextId)
-{
-  *aUserContextId = UserContextId();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::GetIsInIsolatedMozBrowserElement(bool* aIsInIsolatedMozBrowserElement)
-{
-  *aIsInIsolatedMozBrowserElement = IsInIsolatedMozBrowserElement();
+  *aIsInBrowserElement = IsInBrowserElement();
   return NS_OK;
 }
 
@@ -580,15 +323,16 @@ BasePrincipal::GetUnknownAppId(bool* aUnknownAppId)
 }
 
 already_AddRefed<BasePrincipal>
-BasePrincipal::CreateCodebasePrincipal(nsIURI* aURI, const PrincipalOriginAttributes& aAttrs)
+BasePrincipal::CreateCodebasePrincipal(nsIURI* aURI, OriginAttributes& aAttrs)
 {
   // If the URI is supposed to inherit the security context of whoever loads it,
   // we shouldn't make a codebase principal for it.
   bool inheritsPrincipal;
   nsresult rv = NS_URIChainHasFlags(aURI, nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT,
                                     &inheritsPrincipal);
+  nsCOMPtr<nsIPrincipal> principal;
   if (NS_FAILED(rv) || inheritsPrincipal) {
-    return nsNullPrincipal::Create(aAttrs);
+    return nsNullPrincipal::Create();
   }
 
   // Check whether the URI knows what its principal is supposed to be.
@@ -597,39 +341,17 @@ BasePrincipal::CreateCodebasePrincipal(nsIURI* aURI, const PrincipalOriginAttrib
     nsCOMPtr<nsIPrincipal> principal;
     uriPrinc->GetPrincipal(getter_AddRefs(principal));
     if (!principal) {
-      return nsNullPrincipal::Create(aAttrs);
+      return nsNullPrincipal::Create();
     }
-    RefPtr<BasePrincipal> concrete = Cast(principal);
+    nsRefPtr<BasePrincipal> concrete = Cast(principal);
     return concrete.forget();
   }
 
   // Mint a codebase principal.
-  RefPtr<nsPrincipal> codebase = new nsPrincipal();
+  nsRefPtr<nsPrincipal> codebase = new nsPrincipal();
   rv = codebase->Init(aURI, aAttrs);
   NS_ENSURE_SUCCESS(rv, nullptr);
   return codebase.forget();
-}
-
-already_AddRefed<BasePrincipal>
-BasePrincipal::CreateCodebasePrincipal(const nsACString& aOrigin)
-{
-  MOZ_ASSERT(!StringBeginsWith(aOrigin, NS_LITERAL_CSTRING("[")),
-             "CreateCodebasePrincipal does not support System and Expanded principals");
-
-  MOZ_ASSERT(!StringBeginsWith(aOrigin, NS_LITERAL_CSTRING(NS_NULLPRINCIPAL_SCHEME ":")),
-             "CreateCodebasePrincipal does not support nsNullPrincipal");
-
-  nsAutoCString originNoSuffix;
-  mozilla::PrincipalOriginAttributes attrs;
-  if (!attrs.PopulateFromOrigin(aOrigin, originNoSuffix)) {
-    return nullptr;
-  }
-
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_NewURI(getter_AddRefs(uri), originNoSuffix);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  return BasePrincipal::CreateCodebasePrincipal(uri, attrs);
 }
 
 bool

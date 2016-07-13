@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MediaStreamGraph.h"
 #include "DOMMediaStream.h"
 #include "InputPortData.h"
 #include "InputPortListeners.h"
@@ -24,7 +23,7 @@ NS_IMPL_RELEASE_INHERITED(InputPort, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(InputPort)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-InputPort::InputPort(nsPIDOMWindowInner* aWindow)
+InputPort::InputPort(nsPIDOMWindow* aWindow)
   : DOMEventTargetHelper(aWindow)
   , mIsConnected(false)
 {
@@ -61,10 +60,7 @@ InputPort::Init(nsIInputPortData* aData, nsIInputPortListener* aListener, ErrorR
   mInputPortListener = static_cast<InputPortListener*>(aListener);
   mInputPortListener->RegisterInputPort(this);
 
-  MediaStreamGraph* graph =
-    MediaStreamGraph::GetInstance(MediaStreamGraph::SYSTEM_THREAD_DRIVER,
-                                  AudioChannel::Normal);
-  mStream = DOMMediaStream::CreateSourceStreamAsInput(GetOwner(), graph);
+  mStream = DOMMediaStream::CreateSourceStream(GetOwner());
 }
 
 void
@@ -89,7 +85,7 @@ InputPort::NotifyConnectionChanged(bool aIsConnected)
   MOZ_ASSERT(mIsConnected != aIsConnected);
   mIsConnected = aIsConnected;
 
-  RefPtr<AsyncEventDispatcher> asyncDispatcher =
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this,
                              aIsConnected ? NS_LITERAL_STRING("connect") :
                                             NS_LITERAL_STRING("disconnect"),

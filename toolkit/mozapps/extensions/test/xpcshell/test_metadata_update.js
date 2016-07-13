@@ -23,11 +23,12 @@ Services.prefs.setBoolPref("extensions.checkUpdateSecurity", false);
 // None of this works without the add-on repository cache
 Services.prefs.setBoolPref("extensions.getAddons.cache.enabled", true);
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
+const Cr = Components.results;
 
+Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://testing-common/MockRegistrar.jsm");
 var testserver;
 
@@ -68,9 +69,10 @@ add_task(function* checkFirstMetadata() {
   Services.prefs.setBoolPref(PREF_EM_SHOW_MISMATCH_UI, true);
 
   // Create and configure the HTTP server.
-  testserver = createHttpServer();
+  testserver = new HttpServer();
   testserver.registerDirectory("/data/", do_get_file("data"));
   testserver.registerDirectory("/addons/", do_get_file("addons"));
+  testserver.start(-1);
   gPort = testserver.identity.primaryPort;
   const BASE_URL  = "http://localhost:" + gPort;
   const GETADDONS_RESULTS = BASE_URL + "/data/test_AddonRepository_cache.xml";
@@ -157,3 +159,15 @@ add_task(function* upgrade_young_pref_lastupdate() {
   yield promiseRestartManager("2");
   do_check_false(WindowWatcher.expected);
 });
+
+
+
+add_task(function* cleanup() {
+  return new Promise((resolve, reject) => {
+    testserver.stop(resolve);
+  });
+});
+
+function run_test() {
+  run_next_test();
+}

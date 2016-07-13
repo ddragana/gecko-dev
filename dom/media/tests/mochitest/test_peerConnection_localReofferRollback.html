@@ -23,7 +23,7 @@
 
         function PC_REMOTE_SETUP_ICE_HANDLER(test) {
           test.pcRemote.setupIceCandidateHandler(test);
-          if (test.testOptions.steeplechase) {
+          if (test.steeplechase) {
             test.pcRemote.endOfTrickleIce.then(() => {
               send_message({"type": "end_of_trickle_ice"});
             });
@@ -39,7 +39,7 @@
         function PC_REMOTE_ROLLBACK(test) {
           return test.setLocalDescription(
               test.pcRemote,
-              new RTCSessionDescription({ type: "rollback", sdp: ""}),
+              new mozRTCSessionDescription({ type: "rollback", sdp: ""}),
               STABLE);
         },
 

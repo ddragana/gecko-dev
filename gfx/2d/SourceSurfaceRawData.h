@@ -17,27 +17,12 @@ class SourceSurfaceRawData : public DataSourceSurface
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceRawData, override)
-
   SourceSurfaceRawData()
-    : mRawData(0)
-    , mStride(0)
-    , mFormat(SurfaceFormat::UNKNOWN)
-    , mMapCount(0)
-    , mOwnData(false)
-    , mDeallocator(nullptr)
-    , mClosure(nullptr)
+    : mMapCount(0)
+  {}
+  ~SourceSurfaceRawData()
   {
-  }
-
-  virtual ~SourceSurfaceRawData()
-  {
-    if (mDeallocator) {
-      mDeallocator(mClosure);
-    } else if (mOwnData) {
-      // The buffer is created from GuaranteePersistance().
-      delete [] mRawData;
-    }
-
+    if(mOwnData) delete [] mRawData;
     MOZ_ASSERT(mMapCount == 0);
   }
 
@@ -47,6 +32,12 @@ public:
   virtual SurfaceType GetType() const override { return SurfaceType::DATA; }
   virtual IntSize GetSize() const override { return mSize; }
   virtual SurfaceFormat GetFormat() const override { return mFormat; }
+
+  bool InitWrappingData(unsigned char *aData,
+                        const IntSize &aSize,
+                        int32_t aStride,
+                        SurfaceFormat aFormat,
+                        bool aOwnData);
 
   virtual void GuaranteePersistance() override;
 
@@ -77,26 +68,12 @@ public:
   }
 
 private:
-  friend class Factory;
-
-  // If we have a custom deallocator, the |aData| will be released using the
-  // custom deallocator and |aClosure| in dtor.
-  void InitWrappingData(unsigned char *aData,
-                        const IntSize &aSize,
-                        int32_t aStride,
-                        SurfaceFormat aFormat,
-                        Factory::SourceSurfaceDeallocator aDeallocator,
-                        void* aClosure);
-
   uint8_t *mRawData;
   int32_t mStride;
   SurfaceFormat mFormat;
   IntSize mSize;
   Atomic<int32_t> mMapCount;
-
   bool mOwnData;
-  Factory::SourceSurfaceDeallocator mDeallocator;
-  void* mClosure;
 };
 
 class SourceSurfaceAlignedRawData : public DataSourceSurface
@@ -104,9 +81,7 @@ class SourceSurfaceAlignedRawData : public DataSourceSurface
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceAlignedRawData, override)
   SourceSurfaceAlignedRawData()
-    : mStride(0)
-    , mFormat(SurfaceFormat::UNKNOWN)
-    , mMapCount(0)
+    : mMapCount(0)
   {}
   ~SourceSurfaceAlignedRawData()
   {
@@ -119,6 +94,14 @@ public:
   virtual SurfaceType GetType() const override { return SurfaceType::DATA; }
   virtual IntSize GetSize() const override { return mSize; }
   virtual SurfaceFormat GetFormat() const override { return mFormat; }
+
+  bool Init(const IntSize &aSize,
+            SurfaceFormat aFormat,
+            bool aZero);
+  bool InitWithStride(const IntSize &aSize,
+                      SurfaceFormat aFormat,
+                      int32_t aStride,
+                      bool aZero);
 
   virtual bool Map(MapType, MappedSurface *aMappedSurface) override
   {
@@ -138,16 +121,6 @@ public:
   }
 
 private:
-  friend class Factory;
-
-  bool Init(const IntSize &aSize,
-            SurfaceFormat aFormat,
-            bool aZero);
-  bool InitWithStride(const IntSize &aSize,
-                      SurfaceFormat aFormat,
-                      int32_t aStride,
-                      bool aZero);
-
   AlignedArray<uint8_t> mArray;
   int32_t mStride;
   SurfaceFormat mFormat;

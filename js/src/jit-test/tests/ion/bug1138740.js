@@ -1,6 +1,6 @@
 
 with({}){}
-x = new Int8Array(1)
+x = Int8Array(1)
 function f(y) {
     x[0] = y
 }

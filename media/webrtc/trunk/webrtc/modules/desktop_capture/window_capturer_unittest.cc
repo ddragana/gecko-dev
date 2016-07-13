@@ -11,32 +11,37 @@
 #include "webrtc/modules/desktop_capture/window_capturer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/desktop_region.h"
 #include "webrtc/system_wrappers/interface/logging.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
 class WindowCapturerTest : public testing::Test,
                            public DesktopCapturer::Callback {
  public:
-  void SetUp() override {
+  void SetUp() OVERRIDE {
     capturer_.reset(
         WindowCapturer::Create(DesktopCaptureOptions::CreateDefault()));
   }
 
-  void TearDown() override {}
+  void TearDown() OVERRIDE {
+  }
 
   // DesktopCapturer::Callback interface
-  SharedMemory* CreateSharedMemory(size_t size) override { return NULL; }
+  virtual SharedMemory* CreateSharedMemory(size_t size) OVERRIDE {
+    return NULL;
+  }
 
-  void OnCaptureCompleted(DesktopFrame* frame) override { frame_.reset(frame); }
+  virtual void OnCaptureCompleted(DesktopFrame* frame) OVERRIDE {
+    frame_.reset(frame);
+  }
 
  protected:
-  rtc::scoped_ptr<WindowCapturer> capturer_;
-  rtc::scoped_ptr<DesktopFrame> frame_;
+  scoped_ptr<WindowCapturer> capturer_;
+  scoped_ptr<DesktopFrame> frame_;
 };
 
 // Verify that we can enumerate windows.

@@ -89,7 +89,7 @@ nsAccessiblePivot::GetPosition(nsIAccessible** aPosition)
 NS_IMETHODIMP
 nsAccessiblePivot::SetPosition(nsIAccessible* aPosition)
 {
-  RefPtr<Accessible> position = nullptr;
+  nsRefPtr<Accessible> position = nullptr;
 
   if (aPosition) {
     position = aPosition->ToInternalAccessible();
@@ -168,7 +168,7 @@ nsAccessiblePivot::SetTextRange(nsIAccessibleText* aTextAccessible,
   nsCOMPtr<nsIAccessible> xpcAcc = do_QueryInterface(aTextAccessible);
   NS_ENSURE_ARG(xpcAcc);
 
-  RefPtr<Accessible> acc = xpcAcc->ToInternalAccessible();
+  nsRefPtr<Accessible> acc = xpcAcc->ToInternalAccessible();
   NS_ENSURE_ARG(acc);
 
   HyperTextAccessible* position = acc->AsHyperText();
@@ -393,7 +393,7 @@ nsAccessiblePivot::MoveNextByText(TextBoundaryType aBoundary,
     Accessible* childAtOffset = nullptr;
     for (int32_t i = tempStart; i < tempEnd; i++) {
       childAtOffset = text->GetChildAtOffset(i);
-      if (childAtOffset && !childAtOffset->IsText()) {
+      if (childAtOffset && nsAccUtils::IsEmbeddedObject(childAtOffset)) {
         tempEnd = i;
         break;
       }
@@ -401,7 +401,7 @@ nsAccessiblePivot::MoveNextByText(TextBoundaryType aBoundary,
     // If there's an embedded character at the very start of the range, we
     // instead want to traverse into it. So restart the movement with
     // the child as the starting point.
-    if (childAtOffset && !childAtOffset->IsText() &&
+    if (childAtOffset && nsAccUtils::IsEmbeddedObject(childAtOffset) &&
         tempStart == static_cast<int32_t>(childAtOffset->StartOffset())) {
       tempPosition = childAtOffset;
       tempStart = tempEnd = -1;
@@ -524,7 +524,7 @@ nsAccessiblePivot::MovePreviousByText(TextBoundaryType aBoundary,
     Accessible* childAtOffset = nullptr;
     for (int32_t i = tempEnd - 1; i >= tempStart; i--) {
       childAtOffset = text->GetChildAtOffset(i);
-      if (childAtOffset && !childAtOffset->IsText()) {
+      if (childAtOffset && nsAccUtils::IsEmbeddedObject(childAtOffset)) {
         tempStart = childAtOffset->EndOffset();
         break;
       }
@@ -532,7 +532,7 @@ nsAccessiblePivot::MovePreviousByText(TextBoundaryType aBoundary,
     // If there's an embedded character at the very end of the range, we
     // instead want to traverse into it. So restart the movement with
     // the child as the starting point.
-    if (childAtOffset && !childAtOffset->IsText() &&
+    if (childAtOffset && nsAccUtils::IsEmbeddedObject(childAtOffset) &&
         tempEnd == static_cast<int32_t>(childAtOffset->EndOffset())) {
       tempPosition = childAtOffset;
       tempStart = tempEnd = childAtOffset->AsHyperText()->CharacterCount();
@@ -643,7 +643,7 @@ nsAccessiblePivot::MovePivotInternal(Accessible* aPosition,
                                      PivotMoveReason aReason,
                                      bool aIsFromUserInput)
 {
-  RefPtr<Accessible> oldPosition = mPosition.forget();
+  nsRefPtr<Accessible> oldPosition = mPosition.forget();
   mPosition = aPosition;
   int32_t oldStart = mStartOffset, oldEnd = mEndOffset;
   mStartOffset = mEndOffset = -1;
@@ -901,7 +901,7 @@ RuleCache::ApplyFilter(Accessible* aAccessible, uint16_t* aResult)
     if ((nsIAccessibleTraversalRule::PREFILTER_TRANSPARENT & mPreFilter) &&
         !(state & states::OPAQUE1)) {
       nsIFrame* frame = aAccessible->GetFrame();
-      if (frame->StyleEffects()->mOpacity == 0.0f) {
+      if (frame->StyleDisplay()->mOpacity == 0.0f) {
         *aResult |= nsIAccessibleTraversalRule::FILTER_IGNORE_SUBTREE;
         return NS_OK;
       }

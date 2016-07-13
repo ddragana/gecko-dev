@@ -76,8 +76,6 @@ enum class SharedSurfaceType : uint8_t {
     DXGLInterop2,
     Gralloc,
     IOSurface,
-    GLXDrawable,
-    SharedGLTexture,
 
     Max
 };

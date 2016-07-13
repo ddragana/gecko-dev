@@ -13,6 +13,7 @@ var expect = '';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
  
+jit(true);
 
 function f1() {
   try
@@ -53,5 +54,6 @@ function f2() {
 f1();
 f2();
 
+jit(false);
 
 reportCompare(expect, actual, summary);

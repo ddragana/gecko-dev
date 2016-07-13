@@ -102,7 +102,7 @@ parent:
                                      bool fromHttp,
                                      SerializedLoadContext loadContext);
 
-  async __delete__();
+  __delete__();
 };
 
 }

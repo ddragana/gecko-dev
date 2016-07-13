@@ -25,12 +25,16 @@
 
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/video_engine/include/vie_network.h"
 
 #if defined(_WIN32)
 #pragma warning(disable: 4355) // 'this' : used in base member initializer list
 #endif
+
+const uint8_t kSenderReportPayloadType = 200;
+const uint8_t kReceiverReportPayloadType = 201;
 
 TbExternalTransport::TbExternalTransport(
     webrtc::ViENetwork& vieNetwork,
@@ -40,8 +44,9 @@ TbExternalTransport::TbExternalTransport(
       sender_channel_(sender_channel),
       receive_channels_(receive_channels),
       _vieNetwork(vieNetwork),
-      _thread(webrtc::ThreadWrapper::CreateThread(
-          ViEExternalTransportRun, this, "AutotestTransport")),
+      _thread(*webrtc::ThreadWrapper::CreateThread(
+          ViEExternalTransportRun, this, webrtc::kHighPriority,
+          "AutotestTransport")),
       _event(*webrtc::EventWrapper::Create()),
       _crit(*webrtc::CriticalSectionWrapper::CreateCriticalSection()),
       _statCrit(*webrtc::CriticalSectionWrapper::CreateCriticalSection()),
@@ -74,17 +79,20 @@ TbExternalTransport::TbExternalTransport(
       previous_drop_(false)
 {
     srand((int) webrtc::TickTime::MicrosecondTimestamp());
+    unsigned int tId = 0;
     memset(&network_parameters_, 0, sizeof(NetworkParameters));
-    _thread->Start();
-    _thread->SetPriority(webrtc::kHighPriority);
+    _thread.Start(tId);
 }
 
 TbExternalTransport::~TbExternalTransport()
 {
+    _thread.SetNotAlive();
     _event.Set();
-    _thread->Stop();
-    delete &_event;
-
+    if (_thread.Stop())
+    {
+        delete &_thread;
+        delete &_event;
+    }
     for (std::list<VideoPacket*>::iterator it = _rtpPackets.begin();
          it != _rtpPackets.end(); ++it) {
         delete *it;
@@ -99,7 +107,7 @@ TbExternalTransport::~TbExternalTransport()
     delete &_statCrit;
 }
 
-int TbExternalTransport::SendPacket(int channel, const void *data, size_t len)
+int TbExternalTransport::SendPacket(int channel, const void *data, int len)
 {
   // Parse timestamp from RTP header according to RFC 3550, section 5.1.
     uint8_t* ptr = (uint8_t*)data;
@@ -129,7 +137,7 @@ int TbExternalTransport::SendPacket(int channel, const void *data, size_t len)
         ssrc += ptr[11];
         if (ssrc != _SSRC)
         {
-            return static_cast<int>(len); // avoid error in trace file
+            return len; // return len to avoid error in trace file
         }
     }
     if (_temporalLayers) {
@@ -174,7 +182,7 @@ int TbExternalTransport::SendPacket(int channel, const void *data, size_t len)
             }
             if (_currentRelayLayer < TID)
             {
-                return static_cast<int>(len); // avoid error in trace file
+                return len; // return len to avoid error in trace file
             }
             if (ptr[14] & 0x80) // 2 byte PID
             {
@@ -219,11 +227,10 @@ int TbExternalTransport::SendPacket(int channel, const void *data, size_t len)
         _statCrit.Enter();
         _dropCount++;
         _statCrit.Leave();
-        return static_cast<int>(len);
+        return len;
     }
 
     VideoPacket* newPacket = new VideoPacket();
-    assert(len <= sizeof(newPacket->packetBuffer));
     memcpy(newPacket->packetBuffer, data, len);
 
     if (_temporalLayers)
@@ -259,7 +266,7 @@ int TbExternalTransport::SendPacket(int channel, const void *data, size_t len)
     _rtpPackets.push_back(newPacket);
     _event.Set();
     _crit.Leave();
-    return static_cast<int>(len);
+    return len;
 }
 
 void TbExternalTransport::RegisterSendFrameCallback(
@@ -278,16 +285,13 @@ void TbExternalTransport::SetTemporalToggle(unsigned char layers)
     _temporalLayers = layers;
 }
 
-int TbExternalTransport::SendRTCPPacket(int channel,
-                                        const void *data,
-                                        size_t len)
+int TbExternalTransport::SendRTCPPacket(int channel, const void *data, int len)
 {
     _statCrit.Enter();
     _rtcpCount++;
     _statCrit.Leave();
 
     VideoPacket* newPacket = new VideoPacket();
-    assert(len <= sizeof(newPacket->packetBuffer));
     memcpy(newPacket->packetBuffer, data, len);
     newPacket->length = len;
     newPacket->channel = channel;
@@ -300,7 +304,7 @@ int TbExternalTransport::SendRTCPPacket(int channel,
     _rtcpPackets.push_back(newPacket);
     _event.Set();
     _crit.Leave();
-    return static_cast<int>(len);
+    return len;
 }
 
 void TbExternalTransport::SetNetworkParameters(
@@ -491,10 +495,8 @@ bool TbExternalTransport::ViEExternalTransportProcess()
         // Send to ViE
         if (packet)
         {
-            uint8_t packet_type = static_cast<uint8_t>(packet->packetBuffer[1]);
-            const uint8_t kSenderReportPacketType = 200;
-            const uint8_t kReceiverReportPacketType = 201;
-            if (packet_type == kSenderReportPacketType) {
+            uint8_t pltype = static_cast<uint8_t>(packet->packetBuffer[1]);
+            if (pltype == kSenderReportPayloadType) {
               // Sender report.
               if (receive_channels_) {
                 for (SsrcChannelMap::iterator it = receive_channels_->begin();
@@ -508,7 +510,7 @@ bool TbExternalTransport::ViEExternalTransportProcess()
                                                packet->packetBuffer,
                                                packet->length);
               }
-            } else if (packet_type == kReceiverReportPacketType) {
+            } else if (pltype == kReceiverReportPayloadType) {
               // Receiver report.
               _vieNetwork.ReceivedRTCPPacket(sender_channel_,
                                              packet->packetBuffer,

@@ -125,43 +125,45 @@ sync protocol PTelephony {
   manages PTelephonyRequest;
 
 child:
-  async NotifyCallStateChanged(nsTelephonyCallInfo[] aAllInfo);
+  NotifyCallStateChanged(nsTelephonyCallInfo[] aAllInfo);
 
-  async NotifyCdmaCallWaiting(uint32_t aClientId, IPCCdmaWaitingCallData aData);
+  NotifyCdmaCallWaiting(uint32_t aClientId, IPCCdmaWaitingCallData aData);
 
-  async NotifyConferenceError(nsString aName, nsString aMessage);
+  NotifyConferenceCallStateChanged(uint16_t aCallState);
 
-  async NotifySupplementaryService(uint32_t aClientId, int32_t aCallIndex,
-                                   uint16_t aNotification);
+  NotifyConferenceError(nsString aName, nsString aMessage);
+
+  NotifySupplementaryService(uint32_t aClientId, int32_t aCallIndex,
+                             uint16_t aNotification);
 
 parent:
   /**
    * Sent when the child no longer needs to use PTelephony.
    */
-  async __delete__();
+  __delete__();
 
   /**
    * Sent when the child makes an asynchronous request to the parent.
    */
-  async PTelephonyRequest(IPCTelephonyRequest request);
+  PTelephonyRequest(IPCTelephonyRequest request);
 
-  async RegisterListener();
+  RegisterListener();
 
-  async UnregisterListener();
+  UnregisterListener();
 
-  async StartTone(uint32_t aClientId, nsString aTone);
+  StartTone(uint32_t aClientId, nsString aTone);
 
-  async StopTone(uint32_t aClientId);
+  StopTone(uint32_t aClientId);
 
   sync GetMicrophoneMuted()
     returns (bool aMuted);
 
-  async SetMicrophoneMuted(bool aMuted);
+  SetMicrophoneMuted(bool aMuted);
 
   sync GetSpeakerEnabled()
     returns (bool aEnabled);
 
-  async SetSpeakerEnabled(bool aEnabled);
+  SetSpeakerEnabled(bool aEnabled);
 };
 
 } /* namespace telephony */

@@ -181,7 +181,7 @@ const sdp_attrarray_t sdp_attr[SDP_MAX_ATTR_TYPES] =
     {"extmap", sizeof("extmap"),
       sdp_parse_attr_extmap, sdp_build_attr_extmap},
     {"identity", sizeof("identity"),
-      sdp_parse_attr_long_line, sdp_build_attr_long_line},
+      sdp_parse_attr_simple_string, sdp_build_attr_simple_string},
     {"msid", sizeof("msid"),
       sdp_parse_attr_msid, sdp_build_attr_msid},
     {"msid-semantic", sizeof("msid-semantic"),
@@ -194,12 +194,6 @@ const sdp_attrarray_t sdp_attr[SDP_MAX_ATTR_TYPES] =
       sdp_parse_attr_complete_line, sdp_build_attr_simple_string},
     {"ssrc", sizeof("ssrc"),
       sdp_parse_attr_ssrc, sdp_build_attr_ssrc},
-    {"imageattr", sizeof("imageattr"),
-      sdp_parse_attr_complete_line, sdp_build_attr_simple_string},
-    {"simulcast", sizeof("simulcast"),
-      sdp_parse_attr_complete_line, sdp_build_attr_simple_string},
-    {"rid", sizeof("rid"),
-      sdp_parse_attr_complete_line, sdp_build_attr_simple_string},
 };
 
 /* Note: These *must* be in the same order as the enum types. */
@@ -430,8 +424,7 @@ const sdp_namearray_t sdp_fmtp_codec_param[SDP_MAX_FMTP_PARAM] =
     {"useinbandfec",                    sizeof("useinbandfec")}, /* 46 */
     {"maxcodedaudiobandwidth",          sizeof("maxcodedaudiobandwidth")}, /* 47 */
     {"cbr",                             sizeof("cbr")}, /* 48 */
-    {"max-fr",                          sizeof("max-fr")}, /* 49 */
-    {"maxplaybackrate",                 sizeof("maxplaybackrate")} /* 50 */
+    {"max-fr",                          sizeof("max-fr")} /* 49 */
 } ;
 
 /* Note: These *must* be in the same order as the enum type. */
@@ -485,8 +478,7 @@ const sdp_namearray_t sdp_rtcp_fb_type_val[SDP_MAX_RTCP_FB] =
     SDP_NAME("ack"),
     SDP_NAME("ccm"),
     SDP_NAME("nack"),
-    SDP_NAME("trr-int"),
-    SDP_NAME("goog-remb")
+    SDP_NAME("trr-int")
 };
 
 /* Maintain the same order as defined in typdef sdp_rtcp_fb_nack_type_e */

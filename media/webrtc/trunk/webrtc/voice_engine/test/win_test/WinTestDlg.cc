@@ -129,9 +129,8 @@ class MyTransport : public Transport
 {
 public:
     MyTransport(VoENetwork* veNetwork);
-    int SendPacket(int channel, const void* data, size_t len) override;
-    int SendRTCPPacket(int channel, const void* data, size_t len) override;
-
+    virtual int SendPacket(int channel, const void *data, int len) OVERRIDE;
+    virtual int SendRTCPPacket(int channel, const void *data, int len) OVERRIDE;
 private:
     VoENetwork* _veNetworkPtr;
 };
@@ -142,14 +141,14 @@ MyTransport::MyTransport(VoENetwork* veNetwork) :
 }
 
 int
-MyTransport::SendPacket(int channel, const void *data, size_t len)
+MyTransport::SendPacket(int channel, const void *data, int len)
 {
     _veNetworkPtr->ReceivedRTPPacket(channel, data, len);
     return len;
 }
 
 int
-MyTransport::SendRTCPPacket(int channel, const void *data, size_t len)
+MyTransport::SendRTCPPacket(int channel, const void *data, int len)
 {
     _veNetworkPtr->ReceivedRTCPPacket(channel, data, len);
     return len;
@@ -924,27 +923,23 @@ void CTelephonyEvent::OnBnClickedButtonSetRxTelephonePt()
 {
     BOOL ret;
     int pt = GetDlgItemInt(IDC_EDIT_EVENT_RX_PT, &ret);
-    if (ret == FALSE || pt < 0 || pt > 127)
+    if (ret == FALSE)
         return;
     CodecInst codec;
     strcpy_s(codec.plname, 32, "telephone-event");
-    codec.pltype = pt;
-    codec.channels = 1;
-    codec.plfreq = 8000;
+    codec.pltype = pt; codec.channels = 1; codec.plfreq = 8000;
     TEST2(_veCodecPtr->SetRecPayloadType(_channel, codec) == 0,
-          _T("SetRecPayloadType(channel=%d, codec.pltype=%d)"), _channel,
-          codec.pltype);
+        _T("SetSendTelephoneEventPayloadType(channel=%d, codec.pltype=%u)"), _channel, codec.pltype);
 }
 
 void CTelephonyEvent::OnBnClickedButtonSetTxTelephonePt()
 {
     BOOL ret;
     int pt = GetDlgItemInt(IDC_EDIT_EVENT_TX_PT, &ret);
-    if (ret == FALSE || pt < 0 || pt > 127)
+    if (ret == FALSE)
         return;
     TEST2(_veDTMFPtr->SetSendTelephoneEventPayloadType(_channel, pt) == 0,
-          _T("SetSendTelephoneEventPayloadType(channel=%d, type=%d)"), _channel,
-          pt);
+        _T("SetSendTelephoneEventPayloadType(channel=%d, type=%u)"), _channel, pt);
 }
 
 void CTelephonyEvent::OnBnClickedCheckDetectInband()

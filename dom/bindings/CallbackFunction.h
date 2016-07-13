@@ -25,18 +25,9 @@ namespace dom {
 class CallbackFunction : public CallbackObject
 {
 public:
-  // See CallbackObject for an explanation of the arguments.
-  explicit CallbackFunction(JSContext* aCx, JS::Handle<JSObject*> aCallable,
-                            nsIGlobalObject* aIncumbentGlobal)
-    : CallbackObject(aCx, aCallable, aIncumbentGlobal)
-  {
-  }
-
-  // See CallbackObject for an explanation of the arguments.
   explicit CallbackFunction(JS::Handle<JSObject*> aCallable,
-                            JS::Handle<JSObject*> aAsyncStack,
                             nsIGlobalObject* aIncumbentGlobal)
-    : CallbackObject(aCallable, aAsyncStack, aIncumbentGlobal)
+    : CallbackObject(aCallable, aIncumbentGlobal)
   {
   }
 
@@ -54,15 +45,6 @@ public:
 protected:
   explicit CallbackFunction(CallbackFunction* aCallbackFunction)
     : CallbackObject(aCallbackFunction)
-  {
-  }
-
-  // See CallbackObject for an explanation of the arguments.
-  CallbackFunction(JSContext* aCx, JS::Handle<JSObject*> aCallable,
-                   nsIGlobalObject* aIncumbentGlobal,
-                   const FastCallbackConstructor&)
-    : CallbackObject(aCx, aCallable, aIncumbentGlobal,
-                     FastCallbackConstructor())
   {
   }
 };

@@ -1,3 +1,8 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
 /**
  * Provides infrastructure for automated login components tests.
  */
@@ -7,12 +12,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 //// Globals
 
-let { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/LoginRecipes.jsm");
-Cu.import("resource://gre/modules/LoginHelper.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadPaths",
                                   "resource://gre/modules/DownloadPaths.jsm");
@@ -32,7 +36,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "LoginTestUtils",
                                   "resource://testing-common/LoginTestUtils.jsm");
 LoginTestUtils.Assert = Assert;
 const TestData = LoginTestUtils.testData;
-const newPropertyBag = LoginHelper.newPropertyBag;
 
 /**
  * All the tests are implemented with add_task, this starts them automatically.
@@ -89,6 +92,30 @@ function getTempFile(aLeafName)
   return file;
 }
 
+/**
+ * Returns a new XPCOM property bag with the provided properties.
+ *
+ * @param aProperties
+ *        Each property of this object is copied to the property bag.  This
+ *        parameter can be omitted to return an empty property bag.
+ *
+ * @return A new property bag, that is an instance of nsIWritablePropertyBag,
+ *         nsIWritablePropertyBag2, nsIPropertyBag, and nsIPropertyBag2.
+ */
+function newPropertyBag(aProperties)
+{
+  let propertyBag = Cc["@mozilla.org/hash-property-bag;1"]
+                      .createInstance(Ci.nsIWritablePropertyBag);
+  if (aProperties) {
+    for (let [name, value] of Iterator(aProperties)) {
+      propertyBag.setProperty(name, value);
+    }
+  }
+  return propertyBag.QueryInterface(Ci.nsIPropertyBag)
+                    .QueryInterface(Ci.nsIPropertyBag2)
+                    .QueryInterface(Ci.nsIWritablePropertyBag2);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 const RecipeHelpers = {
@@ -101,11 +128,11 @@ const MockDocument = {
   /**
    * Create a document for the given URL containing the given HTML with the ownerDocument of all <form>s having a mocked location.
    */
-  createTestDocument(aDocumentURL, aContent = "<form>", aType = "text/html") {
+  createTestDocument(aDocumentURL, aHTML = "<form>") {
     let parser = Cc["@mozilla.org/xmlextras/domparser;1"].
                  createInstance(Ci.nsIDOMParser);
     parser.init();
-    let parsedDoc = parser.parseFromString(aContent, aType);
+    let parsedDoc = parser.parseFromString(aHTML, "text/html");
 
     for (let element of parsedDoc.forms) {
       this.mockOwnerDocumentProperty(element, parsedDoc, aDocumentURL);
@@ -137,7 +164,7 @@ const MockDocument = {
 
 //// Initialization functions common to all tests
 
-add_task(function* test_common_initialize()
+add_task(function test_common_initialize()
 {
   // Before initializing the service for the first time, we should copy the key
   // file required to decrypt the logins contained in the SQLite databases used

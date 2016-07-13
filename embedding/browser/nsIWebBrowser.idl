@@ -10,7 +10,6 @@ interface nsIInterfaceRequestor;
 interface nsIWebBrowserChrome;
 interface nsIURIContentListener;
 interface nsIDOMWindow;
-interface mozIDOMWindowProxy;
 interface nsIWeakReference;
 
 /**
@@ -20,7 +19,7 @@ interface nsIWeakReference;
  * to register any listeners. The interface may also be used at runtime
  * to obtain the content DOM window and from that the rest of the DOM.
  */
-[scriptable, uuid(4052b6da-4faa-4646-b3a1-7e16a01c2dc2)]
+[scriptable, uuid(33e9d001-caab-4ba9-8961-54902f197202)]
 interface nsIWebBrowser : nsISupports
 {
     /**
@@ -132,7 +131,7 @@ interface nsIWebBrowser : nsISupports
      *
      * @see nsIDOMWindow
      */
-    readonly attribute mozIDOMWindowProxy contentDOMWindow;
+    readonly attribute nsIDOMWindow contentDOMWindow;
 
     /**
      * Whether this web browser is active. Active means that it's visible

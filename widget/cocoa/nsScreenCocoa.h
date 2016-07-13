@@ -24,10 +24,6 @@ public:
     NS_IMETHOD GetPixelDepth(int32_t* aPixelDepth);
     NS_IMETHOD GetColorDepth(int32_t* aColorDepth);
     NS_IMETHOD GetContentsScaleFactor(double* aContentsScaleFactor);
-    NS_IMETHOD GetDefaultCSSScaleFactor(double* aScaleFactor)
-    {
-      return GetContentsScaleFactor(aScaleFactor);
-    }
 
     NSScreen *CocoaScreen() { return mScreen; }
 

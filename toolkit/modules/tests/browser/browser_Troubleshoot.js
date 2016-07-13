@@ -27,7 +27,7 @@ registerCleanupFunction(function () {
   delete window.Troubleshoot;
 });
 
-var tests = [
+let tests = [
 
   function snapshotSchema(done) {
     Troubleshoot.snapshot(function (snapshot) {
@@ -36,7 +36,7 @@ var tests = [
         ok(true, "The snapshot should conform to the schema.");
       }
       catch (err) {
-        ok(false, "Schema mismatch, " + err);
+        ok(false, err);
       }
       done();
     });
@@ -64,7 +64,7 @@ var tests = [
          "The pref should be absent because it's blacklisted.");
       ok(!("network.proxy.troubleshoot" in p),
          "The pref should be absent because it's blacklisted.");
-      prefs.forEach(p => Services.prefs.deleteBranch(p));
+      prefs.forEach(function (p) Services.prefs.deleteBranch(p));
       done();
     });
   },
@@ -112,10 +112,6 @@ const SNAPSHOT_SCHEMA = {
           required: true,
           type: "string",
         },
-        osVersion: {
-          required: true,
-          type: "string",
-        },
         vendor: {
           type: "string",
         },
@@ -128,9 +124,6 @@ const SNAPSHOT_SCHEMA = {
         remoteAutoStart: {
           type: "boolean",
           required: true,
-        },
-        autoStartStatus: {
-          type: "number",
         },
         numTotalWindows: {
           type: "number",
@@ -226,7 +219,7 @@ const SNAPSHOT_SCHEMA = {
           type: "boolean",
         },
         supportsHardwareH264: {
-          type: "string",
+          type: "boolean",
         },
         numAcceleratedWindowsMessage: {
           type: "array",
@@ -305,12 +298,6 @@ const SNAPSHOT_SCHEMA = {
           items: {
             type: "string",
           },
-        },
-        featureLog: {
-          type: "object",
-        },
-        crashGuards: {
-          type: "array",
         },
         direct2DEnabledMessage: {
           type: "array",
@@ -503,7 +490,7 @@ function validateObject_array(array, schema) {
   if (typeof(schema.items) != "object")
     // Don't care what the array's elements are.
     return;
-  array.forEach(elt => validateObject(elt, schema.items));
+  array.forEach(function (elt) validateObject(elt, schema.items));
 }
 
 function validateObject_string(str, schema) {}

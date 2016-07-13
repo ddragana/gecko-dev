@@ -15,9 +15,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "DownloadError",
 ////////////////////////////////////////////////////////////////////////////////
 //// Execution of common tests
 
-var gUseLegacySaver = false;
+let gUseLegacySaver = false;
 
-var scriptFile = do_get_file("common_test_Download.js");
+let scriptFile = do_get_file("common_test_Download.js");
 Services.scriptloader.loadSubScript(NetUtil.newURI(scriptFile).spec);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -87,3 +87,9 @@ add_task(function test_DownloadError()
   do_check_true(error.becauseBlocked);
   do_check_true(error.becauseBlockedByParentalControls);
 });
+
+////////////////////////////////////////////////////////////////////////////////
+//// Termination
+
+let tailFile = do_get_file("tail.js");
+Services.scriptloader.loadSubScript(NetUtil.newURI(tailFile).spec);

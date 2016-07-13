@@ -63,16 +63,16 @@ class CallTest : public ::testing::Test {
 
   Clock* const clock_;
 
-  rtc::scoped_ptr<Call> sender_call_;
+  scoped_ptr<Call> sender_call_;
   VideoSendStream::Config send_config_;
   VideoEncoderConfig encoder_config_;
   VideoSendStream* send_stream_;
 
-  rtc::scoped_ptr<Call> receiver_call_;
+  scoped_ptr<Call> receiver_call_;
   std::vector<VideoReceiveStream::Config> receive_configs_;
   std::vector<VideoReceiveStream*> receive_streams_;
 
-  rtc::scoped_ptr<test::FrameGeneratorCapturer> frame_generator_capturer_;
+  scoped_ptr<test::FrameGeneratorCapturer> frame_generator_capturer_;
   test::FakeEncoder fake_encoder_;
   ScopedVector<VideoDecoder> allocated_decoders_;
 };
@@ -109,7 +109,7 @@ class SendTest : public BaseTest {
   explicit SendTest(unsigned int timeout_ms);
   SendTest(unsigned int timeout_ms, const FakeNetworkPipe::Config& config);
 
-  bool ShouldCreateReceivers() const override;
+  virtual bool ShouldCreateReceivers() const OVERRIDE;
 };
 
 class EndToEndTest : public BaseTest {
@@ -117,7 +117,7 @@ class EndToEndTest : public BaseTest {
   explicit EndToEndTest(unsigned int timeout_ms);
   EndToEndTest(unsigned int timeout_ms, const FakeNetworkPipe::Config& config);
 
-  bool ShouldCreateReceivers() const override;
+  virtual bool ShouldCreateReceivers() const OVERRIDE;
 };
 
 }  // namespace test

@@ -21,7 +21,7 @@ exports.contract = contract({
   url: {
     is: [ 'string' ],
     ok: v => isLocalURL(v),
-    map: v => v.toString(),
+    map: function(v) v.toString(),
     msg: 'The option "url" must be a valid local URI.'
   }
 });

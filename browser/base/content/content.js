@@ -6,7 +6,7 @@
 /* This content script should work in any browser or iframe and should not
  * depend on the frame being contained in tabbrowser. */
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+let {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -14,17 +14,12 @@ Cu.import("resource:///modules/ContentWebRTC.jsm");
 Cu.import("resource:///modules/ContentObservers.jsm");
 Cu.import("resource://gre/modules/InlineSpellChecker.jsm");
 Cu.import("resource://gre/modules/InlineSpellCheckerContent.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "E10SUtils",
-  "resource:///modules/E10SUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
   "resource://gre/modules/BrowserUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ContentLinkHandler",
   "resource:///modules/ContentLinkHandler.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "LoginManagerContent",
-  "resource://gre/modules/LoginManagerContent.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "FormLikeFactory",
   "resource://gre/modules/LoginManagerContent.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "InsecurePasswordUtils",
   "resource://gre/modules/InsecurePasswordUtils.jsm");
@@ -43,8 +38,6 @@ XPCOMUtils.defineLazyGetter(this, "PageMenuChild", function() {
   Cu.import("resource://gre/modules/PageMenu.jsm", tmp);
   return new tmp.PageMenuChild();
 });
-XPCOMUtils.defineLazyModuleGetter(this, "Feeds",
-  "resource:///modules/Feeds.jsm");
 
 // TabChildGlobal
 var global = this;
@@ -53,9 +46,7 @@ var global = this;
 var formSubmitObserver = new FormSubmitObserver(content, this);
 
 addMessageListener("ContextMenu:DoCustomCommand", function(message) {
-  E10SUtils.wrapHandlingUserInput(
-    content, message.data.handlingUserInput,
-    () => PageMenuChild.executeMenu(message.data.generatedItemId));
+  PageMenuChild.executeMenu(message.data);
 });
 
 addMessageListener("RemoteLogins:fillForm", function(message) {
@@ -63,13 +54,10 @@ addMessageListener("RemoteLogins:fillForm", function(message) {
 });
 addEventListener("DOMFormHasPassword", function(event) {
   LoginManagerContent.onDOMFormHasPassword(event, content);
-  let formLike = FormLikeFactory.createFromForm(event.target);
-  InsecurePasswordUtils.checkForInsecurePasswords(formLike);
+  InsecurePasswordUtils.checkForInsecurePasswords(event.target);
 });
 addEventListener("DOMInputPasswordAdded", function(event) {
   LoginManagerContent.onDOMInputPasswordAdded(event, content);
-  let formLike = FormLikeFactory.createFromField(event.target);
-  InsecurePasswordUtils.checkForInsecurePasswords(formLike);
 });
 addEventListener("pageshow", function(event) {
   LoginManagerContent.onPageShow(event, content);
@@ -81,9 +69,7 @@ addEventListener("blur", function(event) {
   LoginManagerContent.onUsernameInput(event);
 });
 
-var gLastContextMenuEvent = null; // null or a WeakReference to a contextmenu event
-var handleContentContextMenu = function (event) {
-  gLastContextMenuEvent = null;
+let handleContentContextMenu = function (event) {
   let defaultPrevented = event.defaultPrevented;
   if (!Services.prefs.getBoolPref("dom.event.contextmenu.enabled")) {
     let plugin = null;
@@ -98,36 +84,8 @@ var handleContentContextMenu = function (event) {
     defaultPrevented = false;
   }
 
-  if (defaultPrevented) {
+  if (defaultPrevented)
     return;
-  }
-
-  if (event.mozInputSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
-    // If this was triggered by touch, then we don't want to show the actual
-    // context menu until we get the APZ:LongTapUp notification. However, we
-    // will need the |event| object when we get that notification, so we save
-    // it in a WeakReference. That way it won't leak things if we never get
-    // the APZ:LongTapUp notification (which is quite possible).
-    gLastContextMenuEvent = Cu.getWeakReference(event);
-    return;
-  }
-
-  // For non-touch-derived contextmenu events, we can handle it right away.
-  showContentContextMenu(event);
-}
-
-var showContentContextMenu = function (event) {
-  if (event == null) {
-    // If we weren't given an event, then this is being invoked from the
-    // APZ:LongTapUp observer, and the contextmenu event is stashed in
-    // gLastContextMenuEvent.
-    event = (gLastContextMenuEvent ? gLastContextMenuEvent.get() : null);
-    gLastContextMenuEvent = null;
-    if (event == null) {
-      // Still no event? We can't do anything, bail out.
-      return;
-    }
-  }
 
   let addonInfo = {};
   let subject = {
@@ -138,8 +96,7 @@ var showContentContextMenu = function (event) {
   Services.obs.notifyObservers(subject, "content-contextmenu", null);
 
   let doc = event.target.ownerDocument;
-  let docLocation = doc.mozDocumentURIIfNotForErrorPages;
-  docLocation = docLocation && docLocation.spec;
+  let docLocation = doc.location.href;
   let charSet = doc.characterSet;
   let baseURI = doc.baseURI;
   let referrer = doc.referrer;
@@ -147,18 +104,14 @@ var showContentContextMenu = function (event) {
   let frameOuterWindowID = doc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
                                           .getInterface(Ci.nsIDOMWindowUtils)
                                           .outerWindowID;
-  let loginFillInfo = LoginManagerContent.getFieldContext(event.target);
-
-  // The same-origin check will be done in nsContextMenu.openLinkInTab.
-  let parentAllowsMixedContent = !!docShell.mixedContentChannel;
 
   // get referrer attribute from clicked link and parse it
   // if per element referrer is enabled, the element referrer overrules
   // the document wide referrer
   if (Services.prefs.getBoolPref("network.http.enablePerElementReferrer")) {
     let referrerAttrValue = Services.netUtils.parseAttributePolicyString(event.target.
-                            getAttribute("referrerpolicy"));
-    if (referrerAttrValue !== Ci.nsIHttpChannel.REFERRER_POLICY_UNSET) {
+                            getAttribute("referrer"));
+    if (referrerAttrValue !== Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT) {
       referrerPolicy = referrerAttrValue;
     }
   }
@@ -173,11 +126,11 @@ var showContentContextMenu = function (event) {
     disableSetDesktopBg = disableSetDesktopBackground(event.target);
 
     try {
-      let imageCache =
+      let imageCache = 
         Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
                                         .getImgCacheForDocument(doc);
       let props =
-        imageCache.findEntryProperties(event.target.currentURI, doc);
+        imageCache.findEntryProperties(event.target.currentURI);
       try {
         contentType = props.get("type", Ci.nsISupportsCString).data;
       } catch(e) {}
@@ -212,8 +165,7 @@ var showContentContextMenu = function (event) {
                    { editFlags, spellInfo, customMenuItems, addonInfo,
                      principal, docLocation, charSet, baseURI, referrer,
                      referrerPolicy, contentType, contentDisposition,
-                     frameOuterWindowID, selectionInfo, disableSetDesktopBg,
-                     loginFillInfo, parentAllowsMixedContent },
+                     frameOuterWindowID, selectionInfo, disableSetDesktopBg },
                    { event, popupNode: event.target });
   }
   else {
@@ -235,8 +187,6 @@ var showContentContextMenu = function (event) {
       contentDisposition: contentDisposition,
       selectionInfo: selectionInfo,
       disableSetDesktopBackground: disableSetDesktopBg,
-      loginFillInfo,
-      parentAllowsMixedContent,
     };
   }
 }
@@ -245,117 +195,26 @@ Cc["@mozilla.org/eventlistenerservice;1"]
   .getService(Ci.nsIEventListenerService)
   .addSystemEventListener(global, "contextmenu", handleContentContextMenu, false);
 
-Services.obs.addObserver(showContentContextMenu, "APZ:LongTapUp", false);
-addEventListener("unload", () => {
-  Services.obs.removeObserver(showContentContextMenu, "APZ:LongTapUp")
-}, false);
-
 // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
 const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
 const TLS_ERROR_REPORT_TELEMETRY_EXPANDED = 1;
 const TLS_ERROR_REPORT_TELEMETRY_SUCCESS  = 6;
 const TLS_ERROR_REPORT_TELEMETRY_FAILURE  = 7;
 
-const SEC_ERROR_BASE          = Ci.nsINSSErrorsService.NSS_SEC_ERROR_BASE;
-const MOZILLA_PKIX_ERROR_BASE = Ci.nsINSSErrorsService.MOZILLA_PKIX_ERROR_BASE;
-
-const SEC_ERROR_EXPIRED_CERTIFICATE                = SEC_ERROR_BASE + 11;
-const SEC_ERROR_UNKNOWN_ISSUER                     = SEC_ERROR_BASE + 13;
-const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE         = SEC_ERROR_BASE + 30;
-const SEC_ERROR_OCSP_FUTURE_RESPONSE               = SEC_ERROR_BASE + 131;
-const SEC_ERROR_OCSP_OLD_RESPONSE                  = SEC_ERROR_BASE + 132;
-const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 5;
-const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 6;
-
-const PREF_BLOCKLIST_CLOCK_SKEW_SECONDS = "services.blocklist.clock_skew_seconds";
-
-const PREF_SSL_IMPACT_ROOTS = ["security.tls.version.", "security.ssl3."];
-
-const PREF_SSL_IMPACT = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
-  return prefs.concat(Services.prefs.getChildList(root));
-}, []);
-
-
-var AboutNetAndCertErrorListener = {
+let AboutNetErrorListener = {
   init: function(chromeGlobal) {
-    addMessageListener("CertErrorDetails", this);
     chromeGlobal.addEventListener('AboutNetErrorLoad', this, false, true);
     chromeGlobal.addEventListener('AboutNetErrorSetAutomatic', this, false, true);
-    chromeGlobal.addEventListener('AboutNetErrorOverride', this, false, true);
-    chromeGlobal.addEventListener('AboutNetErrorResetPreferences', this, false, true);
+    chromeGlobal.addEventListener('AboutNetErrorSendReport', this, false, true);
+    chromeGlobal.addEventListener('AboutNetErrorUIExpanded', this, false, true);
   },
 
   get isAboutNetError() {
     return content.document.documentURI.startsWith("about:neterror");
   },
 
-  get isAboutCertError() {
-    return content.document.documentURI.startsWith("about:certerror");
-  },
-
-  receiveMessage: function(msg) {
-    if (!this.isAboutCertError) {
-      return;
-    }
-
-    switch (msg.name) {
-      case "CertErrorDetails":
-        this.onCertErrorDetails(msg);
-        break;
-    }
-  },
-
-  onCertErrorDetails(msg) {
-    let div = content.document.getElementById("certificateErrorText");
-    div.textContent = msg.data.info;
-    let learnMoreLink = content.document.getElementById("learnMoreLink");
-
-    switch (msg.data.code) {
-      case SEC_ERROR_UNKNOWN_ISSUER:
-        learnMoreLink.href = "https://support.mozilla.org/kb/troubleshoot-SEC_ERROR_UNKNOWN_ISSUER";
-        break;
-
-      // in case the certificate expired we make sure the system clock
-      // matches settings server (kinto) time
-      case SEC_ERROR_EXPIRED_CERTIFICATE:
-      case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
-      case SEC_ERROR_OCSP_FUTURE_RESPONSE:
-      case SEC_ERROR_OCSP_OLD_RESPONSE:
-      case MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE:
-      case MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE:
-
-        // use blocklist stats if available
-        if (Services.prefs.getPrefType(PREF_BLOCKLIST_CLOCK_SKEW_SECONDS)) {
-          let difference = Services.prefs.getIntPref(PREF_BLOCKLIST_CLOCK_SKEW_SECONDS);
-
-          // if the difference is more than a day
-          if (Math.abs(difference) > 60 * 60 * 24) {
-            let formatter = new Intl.DateTimeFormat();
-            let systemDate = formatter.format(new Date());
-            // negative difference means local time is behind server time
-            let actualDate = formatter.format(new Date(Date.now() - difference * 1000));
-
-            content.document.getElementById("wrongSystemTime_URL")
-              .textContent = content.document.location.hostname;
-            content.document.getElementById("wrongSystemTime_systemDate")
-              .textContent = systemDate;
-            content.document.getElementById("wrongSystemTime_actualDate")
-              .textContent = actualDate;
-
-            content.document.getElementById("errorShortDesc")
-              .style.display = "none";
-            content.document.getElementById("wrongSystemTimePanel")
-              .style.display = "block";
-          }
-        }
-        let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "time-errors";
-        learnMoreLink.setAttribute("href", url);
-        break;
-    }
-  },
-
   handleEvent: function(aEvent) {
-    if (!this.isAboutNetError && !this.isAboutCertError) {
+    if (!this.isAboutNetError) {
       return;
     }
 
@@ -366,85 +225,112 @@ var AboutNetAndCertErrorListener = {
     case "AboutNetErrorSetAutomatic":
       this.onSetAutomatic(aEvent);
       break;
-    case "AboutNetErrorOverride":
-      this.onOverride(aEvent);
+    case "AboutNetErrorSendReport":
+      this.onSendReport(aEvent);
       break;
-    case "AboutNetErrorResetPreferences":
-      this.onResetPreferences(aEvent);
+    case "AboutNetErrorUIExpanded":
+      sendAsyncMessage("Browser:SSLErrorReportTelemetry",
+                       {reportStatus: TLS_ERROR_REPORT_TELEMETRY_EXPANDED});
       break;
     }
-  },
-
-  changedCertPrefs: function () {
-    for (let prefName of PREF_SSL_IMPACT) {
-      if (Services.prefs.prefHasUserValue(prefName)) {
-        return true;
-      }
-    }
-
-    return false;
   },
 
   onPageLoad: function(evt) {
-    if (this.isAboutCertError) {
-      let originalTarget = evt.originalTarget;
-      let ownerDoc = originalTarget.ownerDocument;
-      ClickEventHandler.onCertError(originalTarget, ownerDoc);
-    }
-
     let automatic = Services.prefs.getBoolPref("security.ssl.errorReporting.automatic");
     content.dispatchEvent(new content.CustomEvent("AboutNetErrorOptions", {
-      detail: JSON.stringify({
-        enabled: Services.prefs.getBoolPref("security.ssl.errorReporting.enabled"),
-        changedCertPrefs: this.changedCertPrefs(),
-        automatic: automatic
-      })
-    }));
+            detail: JSON.stringify({
+              enabled: Services.prefs.getBoolPref("security.ssl.errorReporting.enabled"),
+            automatic: automatic
+            })
+          }
+    ));
 
     sendAsyncMessage("Browser:SSLErrorReportTelemetry",
                      {reportStatus: TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN});
-  },
 
+    if (automatic) {
+      this.onSendReport(evt);
+    }
+    // hide parts of the UI we don't need yet
+    let contentDoc = content.document;
 
-  onResetPreferences: function(evt) {
-    sendAsyncMessage("Browser:ResetSSLPreferences");
+    let reportSendingMsg = contentDoc.getElementById("reportSendingMessage");
+    let reportSentMsg = contentDoc.getElementById("reportSentMessage");
+    let retryBtn = contentDoc.getElementById("reportCertificateErrorRetry");
+    reportSendingMsg.style.display = "none";
+    reportSentMsg.style.display = "none";
+    retryBtn.style.display = "none";
   },
 
   onSetAutomatic: function(evt) {
     sendAsyncMessage("Browser:SetSSLErrorReportAuto", {
-      automatic: evt.detail
-    });
-
-    // if we're enabling reports, send a report for this failure
-    if (evt.detail) {
-      let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
-                        .getService(Ci.nsISerializationHelper);
-
-      let serializable = docShell.failedChannel.securityInfo
-          .QueryInterface(Ci.nsITransportSecurityInfo)
-          .QueryInterface(Ci.nsISerializable);
-
-      let serializedSecurityInfo = serhelper.serializeToString(serializable);
-
-      let {host, port} = content.document.mozDocumentURIIfNotForErrorPages;
-      sendAsyncMessage("Browser:SendSSLErrorReport", {
-        uri: { host, port },
-        securityInfo: serializedSecurityInfo
+        automatic: evt.detail
       });
-
-    }
   },
 
-  onOverride: function(evt) {
-    let {host, port} = content.document.mozDocumentURIIfNotForErrorPages;
-    sendAsyncMessage("Browser:OverrideWeakCrypto", { uri: {host, port} });
+  onSendReport: function(evt) {
+    let contentDoc = content.document;
+
+    let reportSendingMsg = contentDoc.getElementById("reportSendingMessage");
+    let reportSentMsg = contentDoc.getElementById("reportSentMessage");
+    let reportBtn = contentDoc.getElementById("reportCertificateError");
+    let retryBtn = contentDoc.getElementById("reportCertificateErrorRetry");
+
+    addMessageListener("Browser:SSLErrorReportStatus", function(message) {
+      // show and hide bits - but only if this is a message for the right
+      // document - we'll compare on document URI
+      if (contentDoc.documentURI === message.data.documentURI) {
+        switch(message.data.reportStatus) {
+        case "activity":
+          // Hide the button that was just clicked
+          reportBtn.style.display = "none";
+          retryBtn.style.display = "none";
+          reportSentMsg.style.display = "none";
+          reportSendingMsg.style.removeProperty("display");
+          break;
+        case "error":
+          // show the retry button
+          retryBtn.style.removeProperty("display");
+          reportSendingMsg.style.display = "none";
+          sendAsyncMessage("Browser:SSLErrorReportTelemetry",
+                           {reportStatus: TLS_ERROR_REPORT_TELEMETRY_FAILURE});
+          break;
+        case "complete":
+          // Show a success indicator
+          reportSentMsg.style.removeProperty("display");
+          reportSendingMsg.style.display = "none";
+          sendAsyncMessage("Browser:SSLErrorReportTelemetry",
+                           {reportStatus: TLS_ERROR_REPORT_TELEMETRY_SUCCESS});
+          break;
+        }
+      }
+    });
+
+    let failedChannel = docShell.failedChannel;
+    let location = contentDoc.location.href;
+
+    let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
+                     .getService(Ci.nsISerializationHelper);
+
+    let serializable =  docShell.failedChannel.securityInfo
+                                .QueryInterface(Ci.nsITransportSecurityInfo)
+                                .QueryInterface(Ci.nsISerializable);
+
+    let serializedSecurityInfo = serhelper.serializeToString(serializable);
+
+    sendAsyncMessage("Browser:SendSSLErrorReport", {
+        elementId: evt.target.id,
+        documentURI: contentDoc.documentURI,
+        location: {hostname: contentDoc.location.hostname, port: contentDoc.location.port},
+        securityInfo: serializedSecurityInfo
+      });
   }
 }
 
-AboutNetAndCertErrorListener.init(this);
+AboutNetErrorListener.init(this);
 
 
-var ClickEventHandler = {
+let ClickEventHandler = {
   init: function init() {
     Cc["@mozilla.org/eventlistenerservice;1"]
       .getService(Ci.nsIEventListenerService)
@@ -464,7 +350,7 @@ var ClickEventHandler = {
 
     // Handle click events from about pages
     if (ownerDoc.documentURI.startsWith("about:certerror")) {
-      this.onCertError(originalTarget, ownerDoc);
+      this.onAboutCertError(originalTarget, ownerDoc);
       return;
     } else if (ownerDoc.documentURI.startsWith("about:blocked")) {
       this.onAboutBlocked(originalTarget, ownerDoc);
@@ -474,7 +360,7 @@ var ClickEventHandler = {
       return;
     }
 
-    let [href, node, principal] = this._hrefAndLinkNodeForClickEvent(event);
+    let [href, node] = this._hrefAndLinkNodeForClickEvent(event);
 
     // get referrer attribute from clicked link and parse it
     // if per element referrer is enabled, the element referrer overrules
@@ -483,8 +369,8 @@ var ClickEventHandler = {
     if (Services.prefs.getBoolPref("network.http.enablePerElementReferrer") &&
         node) {
       let referrerAttrValue = Services.netUtils.parseAttributePolicyString(node.
-                              getAttribute("referrerpolicy"));
-      if (referrerAttrValue !== Ci.nsIHttpChannel.REFERRER_POLICY_UNSET) {
+                              getAttribute("referrer"));
+      if (referrerAttrValue !== Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT) {
         referrerPolicy = referrerAttrValue;
       }
     }
@@ -492,12 +378,11 @@ var ClickEventHandler = {
     let json = { button: event.button, shiftKey: event.shiftKey,
                  ctrlKey: event.ctrlKey, metaKey: event.metaKey,
                  altKey: event.altKey, href: null, title: null,
-                 bookmark: false, referrerPolicy: referrerPolicy,
-                 originAttributes: principal ? principal.originAttributes : {} };
+                 bookmark: false, referrerPolicy: referrerPolicy };
 
     if (href) {
       try {
-        BrowserUtils.urlSecurityCheck(href, principal);
+        BrowserUtils.urlSecurityCheck(href, node.ownerDocument.nodePrincipal);
       } catch (e) {
         return;
       }
@@ -515,22 +400,6 @@ var ClickEventHandler = {
       }
       json.noReferrer = BrowserUtils.linkHasNoReferrer(node)
 
-      // Check if the link needs to be opened with mixed content allowed.
-      // Only when the owner doc has |mixedContentChannel| and the same origin
-      // should we allow mixed content.
-      json.allowMixedContent = false;
-      let docshell = ownerDoc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
-                             .getInterface(Ci.nsIWebNavigation)
-                             .QueryInterface(Ci.nsIDocShell);
-      if (docShell.mixedContentChannel) {
-        const sm = Services.scriptSecurityManager;
-        try {
-          let targetURI = BrowserUtils.makeURI(href);
-          sm.checkSameOriginURI(docshell.mixedContentChannel.URI, targetURI, false);
-          json.allowMixedContent = true;
-        } catch (e) {}
-      }
-
       sendAsyncMessage("Content:Click", json);
       return;
     }
@@ -541,27 +410,27 @@ var ClickEventHandler = {
     }
   },
 
-  onCertError: function (targetElement, ownerDoc) {
+  onAboutCertError: function (targetElement, ownerDoc) {
     let docshell = ownerDoc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
                                        .getInterface(Ci.nsIWebNavigation)
                                        .QueryInterface(Ci.nsIDocShell);
     let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
                      .getService(Ci.nsISerializationHelper);
-    let serializedSecurityInfo = "";
+    let serializedSSLStatus = "";
 
     try {
       let serializable =  docShell.failedChannel.securityInfo
-                                  .QueryInterface(Ci.nsITransportSecurityInfo)
+                                  .QueryInterface(Ci.nsISSLStatusProvider)
+                                  .SSLStatus
                                   .QueryInterface(Ci.nsISerializable);
-
-      serializedSecurityInfo = serhelper.serializeToString(serializable);
+      serializedSSLStatus = serhelper.serializeToString(serializable);
     } catch (e) { }
 
     sendAsyncMessage("Browser:CertExceptionError", {
       location: ownerDoc.location.href,
       elementId: targetElement.getAttribute("id"),
       isTopFrame: (ownerDoc.defaultView.parent === ownerDoc.defaultView),
-      securityInfoAsString: serializedSecurityInfo
+      sslStatusAsString: serializedSSLStatus
     });
   },
 
@@ -571,8 +440,6 @@ var ClickEventHandler = {
       reason = 'malware';
     } else if (/e=unwantedBlocked/.test(ownerDoc.documentURI)) {
       reason = 'unwanted';
-    } else if (/e=forbiddenBlocked/.test(ownerDoc.documentURI)) {
-      reason = 'forbidden';
     }
     sendAsyncMessage("Browser:SiteBlockedError", {
       location: ownerDoc.location.href,
@@ -584,10 +451,6 @@ var ClickEventHandler = {
 
   onAboutNetError: function (event, documentURI) {
     let elmId = event.originalTarget.getAttribute("id");
-    if (elmId == "returnButton") {
-      sendAsyncMessage("Browser:SSLErrorGoBack", {});
-      return;
-    }
     if (elmId != "errorTryAgain" || !/e=netOffline/.test(documentURI)) {
       return;
     }
@@ -605,11 +468,10 @@ var ClickEventHandler = {
    *
    * @param event
    *        The click event.
-   * @return [href, linkNode, linkPrincipal].
+   * @return [href, linkNode].
    *
    * @note linkNode will be null if the click wasn't on an anchor
-   *       element. This includes SVG links, because callers expect |node|
-   *       to behave like an <a> element, which SVG links (XLink) don't.
+   *       element (or XLink).
    */
   _hrefAndLinkNodeForClickEvent: function(event) {
     function isHTMLLink(aNode) {
@@ -625,20 +487,16 @@ var ClickEventHandler = {
     }
 
     if (node)
-      return [node.href, node, node.ownerDocument.nodePrincipal];
+      return [node.href, node];
 
     // If there is no linkNode, try simple XLink.
     let href, baseURI;
     node = event.target;
     while (node && !href) {
-      if (node.nodeType == content.Node.ELEMENT_NODE &&
-          (node.localName == "a" ||
-           node.namespaceURI == "http://www.w3.org/1998/Math/MathML")) {
+      if (node.nodeType == content.Node.ELEMENT_NODE) {
         href = node.getAttributeNS("http://www.w3.org/1999/xlink", "href");
-        if (href) {
+        if (href)
           baseURI = node.ownerDocument.baseURIObject;
-          break;
-        }
       }
       node = node.parentNode;
     }
@@ -646,8 +504,7 @@ var ClickEventHandler = {
     // In case of XLink, we don't return the node we got href from since
     // callers expect <a>-like elements.
     // Note: makeURI() will throw if aUri is not a valid URI.
-    return [href ? BrowserUtils.makeURI(href, null, baseURI).spec : null, null,
-            node && node.ownerDocument.nodePrincipal];
+    return [href ? BrowserUtils.makeURI(href, null, baseURI).spec : null, null];
   }
 };
 ClickEventHandler.init();
@@ -655,19 +512,13 @@ ClickEventHandler.init();
 ContentLinkHandler.init(this);
 
 // TODO: Load this lazily so the JSM is run only if a relevant event/message fires.
-var pluginContent = new PluginContent(global);
+let pluginContent = new PluginContent(global);
 
 addEventListener("DOMWebNotificationClicked", function(event) {
   sendAsyncMessage("DOMWebNotificationClicked", {});
 }, false);
 
-addEventListener("DOMServiceWorkerFocusClient", function(event) {
-  sendAsyncMessage("DOMServiceWorkerFocusClient", {});
-}, false);
-
 ContentWebRTC.init();
-addMessageListener("rtcpeer:Allow", ContentWebRTC);
-addMessageListener("rtcpeer:Deny", ContentWebRTC);
 addMessageListener("webrtc:Allow", ContentWebRTC);
 addMessageListener("webrtc:Deny", ContentWebRTC);
 addMessageListener("webrtc:StopSharing", ContentWebRTC);
@@ -686,31 +537,24 @@ addEventListener("pageshow", function(event) {
     });
   }
 });
-addEventListener("pagehide", function(event) {
-  if (event.target == content.document) {
-    sendAsyncMessage("PageVisibility:Hide", {
-      persisted: event.persisted,
-    });
-  }
-});
 
-var PageMetadataMessenger = {
+let PageMetadataMessenger = {
   init() {
     addMessageListener("PageMetadata:GetPageData", this);
-    addMessageListener("PageMetadata:GetMicroformats", this);
+    addMessageListener("PageMetadata:GetMicrodata", this);
   },
   receiveMessage(message) {
     switch(message.name) {
       case "PageMetadata:GetPageData": {
-        let target = message.objects.target;
-        let result = PageMetadata.getData(content.document, target);
+        let result = PageMetadata.getData(content.document);
         sendAsyncMessage("PageMetadata:PageDataResult", result);
         break;
       }
-      case "PageMetadata:GetMicroformats": {
+
+      case "PageMetadata:GetMicrodata": {
         let target = message.objects.target;
-        let result = PageMetadata.getMicroformats(content.document, target);
-        sendAsyncMessage("PageMetadata:MicroformatsResult", result);
+        let result = PageMetadata.getMicrodata(content.document, target);
+        sendAsyncMessage("PageMetadata:MicrodataResult", result);
         break;
       }
     }
@@ -776,9 +620,6 @@ addMessageListener("ContextMenu:MediaCommand", (message) => {
     case "pause":
       media.pause();
       break;
-    case "loop":
-      media.loop = !media.loop;
-      break;
     case "mute":
       media.muted = true;
       break;
@@ -794,9 +635,16 @@ addMessageListener("ContextMenu:MediaCommand", (message) => {
     case "showcontrols":
       media.setAttribute("controls", "true");
       break;
+    case "hidestats":
+    case "showstats":
+      let event = media.ownerDocument.createEvent("CustomEvent");
+      event.initCustomEvent("media-showStatistics", false, true,
+                            message.data.command == "showstats");
+      media.dispatchEvent(event);
+      break;
     case "fullscreen":
-      if (content.document.fullscreenEnabled)
-        media.requestFullscreen();
+      if (content.document.mozFullScreenEnabled)
+        media.mozRequestFullScreen();
       break;
   }
 });
@@ -893,15 +741,7 @@ addMessageListener("ContextMenu:SearchFieldBookmarkData", (message) => {
                    { spec, title, description, postData, charset });
 });
 
-addMessageListener("Bookmarks:GetPageDetails", (message) => {
-  let doc = content.document;
-  let isErrorPage = /^about:(neterror|certerror|blocked)/.test(doc.documentURI);
-  sendAsyncMessage("Bookmarks:GetPageDetails:Result",
-                   { isErrorPage: isErrorPage,
-                     description: PlacesUIUtils.getDescriptionFromDocument(doc) });
-});
-
-var LightWeightThemeWebInstallListener = {
+let LightWeightThemeWebInstallListener = {
   _previewWindow: null,
 
   init: function() {
@@ -1000,520 +840,3 @@ addMessageListener("ContextMenu:SetAsDesktopBackground", (message) => {
   if (disable)
     sendAsyncMessage("ContextMenu:SetAsDesktopBackground:Result", { disable });
 });
-
-var PageInfoListener = {
-
-  init: function() {
-    addMessageListener("PageInfo:getData", this);
-  },
-
-  receiveMessage: function(message) {
-    let strings = message.data.strings;
-    let window;
-    let document;
-
-    let frameOuterWindowID = message.data.frameOuterWindowID;
-
-    // If inside frame then get the frame's window and document.
-    if (frameOuterWindowID) {
-      window = Services.wm.getOuterWindowWithId(frameOuterWindowID);
-      document = window.document;
-    }
-    else {
-      window = content.window;
-      document = content.document;
-    }
-
-    let imageElement = message.objects.imageElement;
-
-    let pageInfoData = {metaViewRows: this.getMetaInfo(document),
-                        docInfo: this.getDocumentInfo(document),
-                        feeds: this.getFeedsInfo(document, strings),
-                        windowInfo: this.getWindowInfo(window),
-                        imageInfo: this.getImageInfo(imageElement)};
-
-    sendAsyncMessage("PageInfo:data", pageInfoData);
-
-    // Separate step so page info dialog isn't blank while waiting for this to finish.
-    this.getMediaInfo(document, window, strings);
-  },
-
-  getImageInfo: function(imageElement) {
-    let imageInfo = null;
-    if (imageElement) {
-      imageInfo = {
-        currentSrc: imageElement.currentSrc,
-        width: imageElement.width,
-        height: imageElement.height,
-        imageText: imageElement.title || imageElement.alt
-      };
-    }
-    return imageInfo;
-  },
-
-  getMetaInfo: function(document) {
-    let metaViewRows = [];
-
-    // Get the meta tags from the page.
-    let metaNodes = document.getElementsByTagName("meta");
-
-    for (let metaNode of metaNodes) {
-      metaViewRows.push([metaNode.name || metaNode.httpEquiv || metaNode.getAttribute("property"),
-                        metaNode.content]);
-    }
-
-    return metaViewRows;
-  },
-
-  getWindowInfo: function(window) {
-    let windowInfo = {};
-    windowInfo.isTopWindow = window == window.top;
-
-    let hostName = null;
-    try {
-      hostName = window.location.host;
-    }
-    catch (exception) { }
-
-    windowInfo.hostName = hostName;
-    return windowInfo;
-  },
-
-  getDocumentInfo: function(document) {
-    let docInfo = {};
-    docInfo.title = document.title;
-    docInfo.location = document.location.toString();
-    docInfo.referrer = document.referrer;
-    docInfo.compatMode = document.compatMode;
-    docInfo.contentType = document.contentType;
-    docInfo.characterSet = document.characterSet;
-    docInfo.lastModified = document.lastModified;
-    docInfo.principal = document.nodePrincipal;
-
-    let documentURIObject = {};
-    documentURIObject.spec = document.documentURIObject.spec;
-    documentURIObject.originCharset = document.documentURIObject.originCharset;
-    docInfo.documentURIObject = documentURIObject;
-
-    docInfo.isContentWindowPrivate = PrivateBrowsingUtils.isContentWindowPrivate(content);
-
-    return docInfo;
-  },
-
-  getFeedsInfo: function(document, strings) {
-    let feeds = [];
-    // Get the feeds from the page.
-    let linkNodes = document.getElementsByTagName("link");
-    let length = linkNodes.length;
-    for (let i = 0; i < length; i++) {
-      let link = linkNodes[i];
-      if (!link.href) {
-        continue;
-      }
-      let rel = link.rel && link.rel.toLowerCase();
-      let rels = {};
-
-      if (rel) {
-        for (let relVal of rel.split(/\s+/)) {
-          rels[relVal] = true;
-        }
-      }
-
-      if (rels.feed || (link.type && rels.alternate && !rels.stylesheet)) {
-        let type = Feeds.isValidFeed(link, document.nodePrincipal, "feed" in rels);
-        if (type) {
-          type = strings[type] || strings["application/rss+xml"];
-          feeds.push([link.title, type, link.href]);
-        }
-      }
-    }
-    return feeds;
-  },
-
-  // Only called once to get the media tab's media elements from the content page.
-  getMediaInfo: function(document, window, strings)
-  {
-    let frameList = this.goThroughFrames(document, window);
-    Task.spawn(() => this.processFrames(document, frameList, strings));
-  },
-
-  goThroughFrames: function(document, window)
-  {
-    let frameList = [document];
-    if (window && window.frames.length > 0) {
-      let num = window.frames.length;
-      for (let i = 0; i < num; i++) {
-        // Recurse through the frames.
-        frameList.concat(this.goThroughFrames(window.frames[i].document,
-                                              window.frames[i]));
-      }
-    }
-    return frameList;
-  },
-
-  processFrames: function*(document, frameList, strings)
-  {
-    let nodeCount = 0;
-    for (let doc of frameList) {
-      let iterator = doc.createTreeWalker(doc, content.NodeFilter.SHOW_ELEMENT);
-
-      // Goes through all the elements on the doc. imageViewRows takes only the media elements.
-      while (iterator.nextNode()) {
-        let mediaItems = this.getMediaItems(document, strings, iterator.currentNode);
-
-        if (mediaItems.length) {
-          sendAsyncMessage("PageInfo:mediaData",
-                           {mediaItems, isComplete: false});
-        }
-
-        if (++nodeCount % 500 == 0) {
-          // setTimeout every 500 elements so we don't keep blocking the content process.
-          yield new Promise(resolve => setTimeout(resolve, 10));
-        }
-      }
-    }
-    // Send that page info media fetching has finished.
-    sendAsyncMessage("PageInfo:mediaData", {isComplete: true});
-  },
-
-  getMediaItems: function(document, strings, elem)
-  {
-    // Check for images defined in CSS (e.g. background, borders)
-    let computedStyle = elem.ownerDocument.defaultView.getComputedStyle(elem, "");
-    // A node can have multiple media items associated with it - for example,
-    // multiple background images.
-    let mediaItems = [];
-
-    let addImage = (url, type, alt, elem, isBg) => {
-      let element = this.serializeElementInfo(document, url, type, alt, elem, isBg);
-      mediaItems.push([url, type, alt, element, isBg]);
-    };
-
-    if (computedStyle) {
-      let addImgFunc = (label, val) => {
-        if (val.primitiveType == content.CSSPrimitiveValue.CSS_URI) {
-          addImage(val.getStringValue(), label, strings.notSet, elem, true);
-        }
-        else if (val.primitiveType == content.CSSPrimitiveValue.CSS_STRING) {
-          // This is for -moz-image-rect.
-          // TODO: Reimplement once bug 714757 is fixed.
-          let strVal = val.getStringValue();
-          if (strVal.search(/^.*url\(\"?/) > -1) {
-            let url = strVal.replace(/^.*url\(\"?/,"").replace(/\"?\).*$/,"");
-            addImage(url, label, strings.notSet, elem, true);
-          }
-        }
-        else if (val.cssValueType == content.CSSValue.CSS_VALUE_LIST) {
-          // Recursively resolve multiple nested CSS value lists.
-          for (let i = 0; i < val.length; i++) {
-            addImgFunc(label, val.item(i));
-          }
-        }
-      };
-
-      addImgFunc(strings.mediaBGImg, computedStyle.getPropertyCSSValue("background-image"));
-      addImgFunc(strings.mediaBorderImg, computedStyle.getPropertyCSSValue("border-image-source"));
-      addImgFunc(strings.mediaListImg, computedStyle.getPropertyCSSValue("list-style-image"));
-      addImgFunc(strings.mediaCursor, computedStyle.getPropertyCSSValue("cursor"));
-    }
-
-    // One swi^H^H^Hif-else to rule them all.
-    if (elem instanceof content.HTMLImageElement) {
-      addImage(elem.src, strings.mediaImg,
-               (elem.hasAttribute("alt")) ? elem.alt : strings.notSet, elem, false);
-    }
-    else if (elem instanceof content.SVGImageElement) {
-      try {
-        // Note: makeURLAbsolute will throw if either the baseURI is not a valid URI
-        //       or the URI formed from the baseURI and the URL is not a valid URI.
-        let href = makeURLAbsolute(elem.baseURI, elem.href.baseVal);
-        addImage(href, strings.mediaImg, "", elem, false);
-      } catch (e) { }
-    }
-    else if (elem instanceof content.HTMLVideoElement) {
-      addImage(elem.currentSrc, strings.mediaVideo, "", elem, false);
-    }
-    else if (elem instanceof content.HTMLAudioElement) {
-      addImage(elem.currentSrc, strings.mediaAudio, "", elem, false);
-    }
-    else if (elem instanceof content.HTMLLinkElement) {
-      if (elem.rel && /\bicon\b/i.test(elem.rel)) {
-        addImage(elem.href, strings.mediaLink, "", elem, false);
-      }
-    }
-    else if (elem instanceof content.HTMLInputElement || elem instanceof content.HTMLButtonElement) {
-      if (elem.type.toLowerCase() == "image") {
-        addImage(elem.src, strings.mediaInput,
-                 (elem.hasAttribute("alt")) ? elem.alt : strings.notSet, elem, false);
-      }
-    }
-    else if (elem instanceof content.HTMLObjectElement) {
-      addImage(elem.data, strings.mediaObject, this.getValueText(elem), elem, false);
-    }
-    else if (elem instanceof content.HTMLEmbedElement) {
-      addImage(elem.src, strings.mediaEmbed, "", elem, false);
-    }
-
-    return mediaItems;
-  },
-
-  /**
-   * Set up a JSON element object with all the instanceOf and other infomation that
-   * makePreview in pageInfo.js uses to figure out how to display the preview.
-   */
-
-  serializeElementInfo: function(document, url, type, alt, item, isBG)
-  {
-    let result = {};
-
-    let imageText;
-    if (!isBG &&
-        !(item instanceof content.SVGImageElement) &&
-        !(document instanceof content.ImageDocument)) {
-      imageText = item.title || item.alt;
-
-      if (!imageText && !(item instanceof content.HTMLImageElement)) {
-        imageText = this.getValueText(item);
-      }
-    }
-
-    result.imageText = imageText;
-    result.longDesc = item.longDesc;
-    result.numFrames = 1;
-
-    if (item instanceof content.HTMLObjectElement ||
-      item instanceof content.HTMLEmbedElement ||
-      item instanceof content.HTMLLinkElement) {
-      result.mimeType = item.type;
-    }
-
-    if (!result.mimeType && !isBG && item instanceof Ci.nsIImageLoadingContent) {
-      // Interface for image loading content.
-      let imageRequest = item.getRequest(Ci.nsIImageLoadingContent.CURRENT_REQUEST);
-      if (imageRequest) {
-        result.mimeType = imageRequest.mimeType;
-        let image = !(imageRequest.imageStatus & imageRequest.STATUS_ERROR) && imageRequest.image;
-        if (image) {
-          result.numFrames = image.numFrames;
-        }
-      }
-    }
-
-    // If we have a data url, get the MIME type from the url.
-    if (!result.mimeType && url.startsWith("data:")) {
-      let dataMimeType = /^data:(image\/[^;,]+)/i.exec(url);
-      if (dataMimeType)
-        result.mimeType = dataMimeType[1].toLowerCase();
-    }
-
-    result.HTMLLinkElement = item instanceof content.HTMLLinkElement;
-    result.HTMLInputElement = item instanceof content.HTMLInputElement;
-    result.HTMLImageElement = item instanceof content.HTMLImageElement;
-    result.HTMLObjectElement = item instanceof content.HTMLObjectElement;
-    result.SVGImageElement = item instanceof content.SVGImageElement;
-    result.HTMLVideoElement = item instanceof content.HTMLVideoElement;
-    result.HTMLAudioElement = item instanceof content.HTMLAudioElement;
-
-    if (isBG) {
-      // Items that are showing this image as a background
-      // image might not necessarily have a width or height,
-      // so we'll dynamically generate an image and send up the
-      // natural dimensions.
-      let img = content.document.createElement("img");
-      img.src = url;
-      result.naturalWidth = img.naturalWidth;
-      result.naturalHeight = img.naturalHeight;
-    } else {
-      // Otherwise, we can use the current width and height
-      // of the image.
-      result.width = item.width;
-      result.height = item.height;
-    }
-
-    if (item instanceof content.SVGImageElement) {
-      result.SVGImageElementWidth = item.width.baseVal.value;
-      result.SVGImageElementHeight = item.height.baseVal.value;
-    }
-
-    result.baseURI = item.baseURI;
-
-    return result;
-  },
-
-  //******** Other Misc Stuff
-  // Modified from the Links Panel v2.3, http://segment7.net/mozilla/links/links.html
-  // parse a node to extract the contents of the node
-  getValueText: function(node)
-  {
-
-    let valueText = "";
-
-    // Form input elements don't generally contain information that is useful to our callers, so return nothing.
-    if (node instanceof content.HTMLInputElement ||
-        node instanceof content.HTMLSelectElement ||
-        node instanceof content.HTMLTextAreaElement) {
-      return valueText;
-    }
-
-    // Otherwise recurse for each child.
-    let length = node.childNodes.length;
-
-    for (let i = 0; i < length; i++) {
-      let childNode = node.childNodes[i];
-      let nodeType = childNode.nodeType;
-
-      // Text nodes are where the goods are.
-      if (nodeType == content.Node.TEXT_NODE) {
-        valueText += " " + childNode.nodeValue;
-      }
-      // And elements can have more text inside them.
-      else if (nodeType == content.Node.ELEMENT_NODE) {
-        // Images are special, we want to capture the alt text as if the image weren't there.
-        if (childNode instanceof content.HTMLImageElement) {
-          valueText += " " + this.getAltText(childNode);
-        }
-        else {
-          valueText += " " + this.getValueText(childNode);
-        }
-      }
-    }
-
-    return this.stripWS(valueText);
-  },
-
-  // Copied from the Links Panel v2.3, http://segment7.net/mozilla/links/links.html.
-  // Traverse the tree in search of an img or area element and grab its alt tag.
-  getAltText: function(node)
-  {
-    let altText = "";
-
-    if (node.alt) {
-      return node.alt;
-    }
-    let length = node.childNodes.length;
-    for (let i = 0; i < length; i++) {
-      if ((altText = this.getAltText(node.childNodes[i]) != undefined)) { // stupid js warning...
-        return altText;
-      }
-    }
-    return "";
-  },
-
-  // Copied from the Links Panel v2.3, http://segment7.net/mozilla/links/links.html.
-  // Strip leading and trailing whitespace, and replace multiple consecutive whitespace characters with a single space.
-  stripWS: function(text)
-  {
-    let middleRE = /\s+/g;
-    let endRE = /(^\s+)|(\s+$)/g;
-
-    text = text.replace(middleRE, " ");
-    return text.replace(endRE, "");
-  }
-};
-PageInfoListener.init();
-
-let OfflineApps = {
-  _docId: 0,
-  _docIdMap: new Map(),
-
-  _docManifestSet: new Set(),
-
-  _observerAdded: false,
-  registerWindow(aWindow) {
-    if (!this._observerAdded) {
-      this._observerAdded = true;
-      Services.obs.addObserver(this, "offline-cache-update-completed", true);
-    }
-    let manifestURI = this._getManifestURI(aWindow);
-    this._docManifestSet.add(manifestURI.spec);
-  },
-
-  handleEvent(event) {
-    if (event.type == "MozApplicationManifest") {
-      this.offlineAppRequested(event.originalTarget.defaultView);
-    }
-  },
-
-  _getManifestURI(aWindow) {
-    if (!aWindow.document.documentElement)
-      return null;
-
-    var attr = aWindow.document.documentElement.getAttribute("manifest");
-    if (!attr)
-      return null;
-
-    try {
-      var contentURI = BrowserUtils.makeURI(aWindow.location.href, null, null);
-      return BrowserUtils.makeURI(attr, aWindow.document.characterSet, contentURI);
-    } catch (e) {
-      return null;
-    }
-  },
-
-  offlineAppRequested(aContentWindow) {
-    this.registerWindow(aContentWindow);
-    if (!Services.prefs.getBoolPref("browser.offline-apps.notify")) {
-      return;
-    }
-
-    let currentURI = aContentWindow.document.documentURIObject;
-    // don't bother showing UI if the user has already made a decision
-    if (Services.perms.testExactPermission(currentURI, "offline-app") != Services.perms.UNKNOWN_ACTION)
-      return;
-
-    try {
-      if (Services.prefs.getBoolPref("offline-apps.allow_by_default")) {
-        // all pages can use offline capabilities, no need to ask the user
-        return;
-      }
-    } catch(e) {
-      // this pref isn't set by default, ignore failures
-    }
-    let docId = ++this._docId;
-    this._docIdMap.set(docId, Cu.getWeakReference(aContentWindow.document));
-    sendAsyncMessage("OfflineApps:RequestPermission", {
-      uri: currentURI.spec,
-      docId,
-    });
-  },
-
-  _startFetching(aDocument) {
-    if (!aDocument.documentElement)
-      return;
-
-    let manifestURI = this._getManifestURI(aDocument.defaultView);
-    if (!manifestURI)
-      return;
-
-    var updateService = Cc["@mozilla.org/offlinecacheupdate-service;1"].
-                        getService(Ci.nsIOfflineCacheUpdateService);
-    updateService.scheduleUpdate(manifestURI, aDocument.documentURIObject,
-                                 aDocument.nodePrincipal, aDocument.defaultView);
-  },
-
-  receiveMessage(aMessage) {
-    if (aMessage.name == "OfflineApps:StartFetching") {
-      let doc = this._docIdMap.get(aMessage.data.docId);
-      doc = doc && doc.get();
-      if (doc) {
-        this._startFetching(doc);
-      }
-      this._docIdMap.delete(aMessage.data.docId);
-    }
-  },
-
-  observe(aSubject, aTopic, aState) {
-    if (aTopic == "offline-cache-update-completed") {
-      let cacheUpdate = aSubject.QueryInterface(Ci.nsIOfflineCacheUpdate);
-      let uri = cacheUpdate.manifestURI;
-      if (uri && this._docManifestSet.has(uri.spec)) {
-        sendAsyncMessage("OfflineApps:CheckUsage", {uri: uri.spec});
-      }
-    }
-  },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
-};
-
-addEventListener("MozApplicationManifest", OfflineApps, false);
-addMessageListener("OfflineApps:StartFetching", OfflineApps);

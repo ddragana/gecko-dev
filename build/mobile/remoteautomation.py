@@ -7,14 +7,13 @@ import glob
 import time
 import re
 import os
-import posixpath
 import tempfile
 import shutil
 import subprocess
 import sys
 
 from automation import Automation
-from mozdevice import DMError, DeviceManager
+from devicemanager import DMError, DeviceManager
 from mozlog import get_default_logger
 import mozcrash
 
@@ -86,13 +85,6 @@ class RemoteAutomation(Automation):
         # Don't override the user's choice here.  See bug 1049688.
         env.setdefault('MOZ_DISABLE_NONLOCAL_CONNECTIONS', '1')
 
-        # Send an env var noting that we are in automation. Passing any
-        # value except the empty string will declare the value to exist.
-        #
-        # This may be used to disabled network connections during testing, e.g.
-        # Switchboard & telemetry uploads.
-        env.setdefault('MOZ_IN_AUTOMATION', '1')
-
         # Set WebRTC logging in case it is not set yet.
         # On Android, environment variables cannot contain ',' so the
         # standard WebRTC setting for NSPR_LOG_MODULES is not available.
@@ -103,7 +95,7 @@ class RemoteAutomation(Automation):
 
         return env
 
-    def waitForFinish(self, proc, utilityPath, timeout, maxTime, startTime, debuggerInfo, symbolsPath, outputHandler=None):
+    def waitForFinish(self, proc, utilityPath, timeout, maxTime, startTime, debuggerInfo, symbolsPath):
         """ Wait for tests to finish.
             If maxTime seconds elapse or no output is detected for timeout
             seconds, kill the process and fail the test.
@@ -222,7 +214,7 @@ class RemoteAutomation(Automation):
 
         try:
             dumpDir = tempfile.mkdtemp()
-            remoteCrashDir = posixpath.join(self._remoteProfile, 'minidumps')
+            remoteCrashDir = self._remoteProfile + '/minidumps/'
             if not self._devicemanager.dirExists(remoteCrashDir):
                 # If crash reporting is enabled (MOZ_CRASHREPORTER=1), the
                 # minidumps directory is automatically created when Fennec
@@ -295,8 +287,8 @@ class RemoteAutomation(Automation):
                 self.procName = app
 
             # Setting timeout at 1 hour since on a remote device this takes much longer.
-            # Temporarily increased to 90 minutes because no more chunks can be created.
-            self.timeout = 5400
+            # Temporarily increased to 75 minutes because no more chunks can be created.
+            self.timeout = 4500
             # The benefit of the following sleep is unclear; it was formerly 15 seconds
             time.sleep(1)
 
@@ -315,21 +307,20 @@ class RemoteAutomation(Automation):
             return pid
 
         def read_stdout(self):
-            """
-            Fetch the full remote log file using devicemanager, process them and
-            return whether there were any new log entries since the last call.
+            """ Fetch the full remote log file using devicemanager and return just
+                the new log entries since the last call (as a list of messages or lines).
             """
             if not self.dm.fileExists(self.proc):
-                return False
+                return []
             try:
                 newLogContent = self.dm.pullFile(self.proc, self.stdoutlen)
             except DMError:
                 # we currently don't retry properly in the pullFile
                 # function in dmSUT, so an error here is not necessarily
                 # the end of the world
-                return False
+                return []
             if not newLogContent:
-                return False
+                return []
 
             self.stdoutlen += len(newLogContent)
 
@@ -338,27 +329,26 @@ class RemoteAutomation(Automation):
                 if testStartFilenames:
                     self.lastTestSeen = testStartFilenames[-1]
                 print newLogContent
-                return True
+                return [newLogContent]
 
             self.logBuffer += newLogContent
             lines = self.logBuffer.split('\n')
-            lines = [l for l in lines if l]
-
-            if lines:
-                # We only keep the last (unfinished) line in the buffer
-                self.logBuffer = lines[-1]
-                del lines[-1]
-
             if not lines:
-                return False
+                return
 
+            # We only keep the last (unfinished) line in the buffer
+            self.logBuffer = lines[-1]
+            del lines[-1]
+            messages = []
             for line in lines:
                 # This passes the line to the logger (to be logged or buffered)
+                # and returns a list of structured messages (dict)
                 parsed_messages = self.messageLogger.write(line)
                 for message in parsed_messages:
-                    if isinstance(message, dict) and message.get('action') == 'test_start':
+                    if message['action'] == 'test_start':
                         self.lastTestSeen = message['test']
-            return True
+                messages += parsed_messages
+            return messages
 
         @property
         def getLastTestSeen(self):
@@ -384,10 +374,10 @@ class RemoteAutomation(Automation):
                 # too long, only do it every 60 seconds
                 if (not slowLog) or (timer % 60 == 0):
                     startRead = datetime.datetime.now()
-                    hasOutput = self.read_stdout()
+                    messages = self.read_stdout()
                     if (datetime.datetime.now() - startRead) > datetime.timedelta(seconds=5):
                         slowLog = True
-                    if hasOutput:
+                    if messages:
                         noOutputTimer = 0
                 time.sleep(interval)
                 timer += interval

@@ -16,7 +16,7 @@ using namespace mozilla::dom;
 PaymentProviderUtils::EnabledForScope(JSContext* aCx,
                                       JSObject* aGlobal)
 {
-  nsCOMPtr<nsPIDOMWindowInner> win =
+  nsCOMPtr<nsPIDOMWindow> win =
     do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(aGlobal));
   NS_ENSURE_TRUE(win, false);
 

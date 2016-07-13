@@ -51,7 +51,7 @@ nsMathMLmrootFrame::Init(nsIContent*       aContent,
   // The Style System will use Get/SetAdditionalStyleContext() to keep it
   // up-to-date if dynamic changes arise.
   nsAutoString sqrChar; sqrChar.Assign(kSqrChar);
-  mSqrChar.SetData(sqrChar);
+  mSqrChar.SetData(presContext, sqrChar);
   ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mSqrChar);
 }
 
@@ -172,7 +172,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   aDesiredSize.SetBlockStartAscent(0);
 
   nsBoundingMetrics bmSqr, bmBase, bmIndex;
-  DrawTarget* drawTarget = aReflowState.rendContext->GetDrawTarget();
+  nsRenderingContext& renderingContext = *aReflowState.rendContext;
 
   //////////////////
   // Reflow Children
@@ -214,7 +214,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   if (2 != count) {
     // report an error, encourage people to get their markups in order
     ReportChildCountError();
-    ReflowError(drawTarget, aDesiredSize);
+    ReflowError(renderingContext, aDesiredSize);
     aStatus = NS_FRAME_COMPLETE;
     NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
     // Call DidReflow() for the child frames we successfully did reflow.
@@ -225,9 +225,10 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   ////////////
   // Prepare the radical symbol and the overline bar
 
+  nsRefPtr<nsFontMetrics> fm;
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
-  RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
+  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
+                                        fontSizeInflation);
 
   nscoord ruleThickness, leading, psi;
   GetRadicalParameters(fm, StyleFont()->mMathDisplay ==
@@ -237,7 +238,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   // built-in: adjust clearance psi to emulate \mathstrut using '1' (TexBook, p.131)
   char16_t one = '1';
   nsBoundingMetrics bmOne =
-    nsLayoutUtils::AppUnitBoundsOfString(&one, 1, *fm, drawTarget);
+    nsLayoutUtils::AppUnitBoundsOfString(&one, 1, *fm, renderingContext);
   if (bmOne.ascent > bmBase.ascent)
     psi += bmOne.ascent - bmBase.ascent;
 
@@ -260,7 +261,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
 
   // height(radical) should be >= height(base) + psi + ruleThickness
   nsBoundingMetrics radicalSize;
-  mSqrChar.Stretch(aPresContext, drawTarget,
+  mSqrChar.Stretch(aPresContext, renderingContext,
                    fontSizeInflation,
                    NS_STRETCH_DIRECTION_VERTICAL, 
                    contSize, radicalSize,
@@ -365,7 +366,7 @@ nsMathMLmrootFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingConte
   if (baseFrame)
     indexFrame = baseFrame->GetNextSibling();
   if (!indexFrame || indexFrame->GetNextSibling()) {
-    ReflowError(aRenderingContext->GetDrawTarget(), aDesiredSize);
+    ReflowError(*aRenderingContext, aDesiredSize);
     return;
   }
 
@@ -376,13 +377,13 @@ nsMathMLmrootFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingConte
   nscoord indexWidth =
     nsLayoutUtils::IntrinsicForContainer(aRenderingContext, indexFrame,
                                          nsLayoutUtils::PREF_ISIZE);
-  nscoord sqrWidth = mSqrChar.GetMaxWidth(PresContext(),
-                                          aRenderingContext->GetDrawTarget(),
+  nscoord sqrWidth = mSqrChar.GetMaxWidth(PresContext(), *aRenderingContext,
                                           fontSizeInflation);
 
   nscoord dxSqr;
-  RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
+  nsRefPtr<nsFontMetrics> fm;
+  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
+                                        fontSizeInflation);
   GetRadicalXOffsets(indexWidth, sqrWidth, fm, nullptr, &dxSqr);
 
   nscoord width = dxSqr + sqrWidth + baseWidth;
@@ -401,6 +402,7 @@ nsMathMLmrootFrame::GetAdditionalStyleContext(int32_t aIndex) const
   switch (aIndex) {
   case NS_SQR_CHAR_STYLE_CONTEXT_INDEX:
     return mSqrChar.GetStyleContext();
+    break;
   default:
     return nullptr;
   }

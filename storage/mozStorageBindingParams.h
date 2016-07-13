@@ -60,7 +60,7 @@ protected:
   explicit BindingParams(mozIStorageBindingParamsArray *aOwningArray);
   // Note that this is managed as a sparse array, so particular caution should
   // be used for out-of-bounds usage.
-  nsTArray<RefPtr<Variant_base> > mParameters;
+  nsTArray<nsRefPtr<Variant_base> > mParameters;
   bool mLocked;
 
 private:
@@ -105,6 +105,17 @@ public:
 
 private:
   nsInterfaceHashtable<nsCStringHashKey, nsIVariant> mNamedParameters;
+
+  struct NamedParameterIterationClosureThunk
+  {
+    AsyncBindingParams *self;
+    sqlite3_stmt *statement;
+    nsCOMPtr<mozIStorageError> err;
+  };
+
+  static PLDHashOperator iterateOverNamedParameters(const nsACString &aName,
+                                                    nsIVariant *aValue,
+                                                    void *voidClosureThunk);
 };
 
 } // namespace storage

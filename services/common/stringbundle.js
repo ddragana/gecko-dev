@@ -4,7 +4,7 @@
 
 this.EXPORTED_SYMBOLS = ["StringBundle"];
 
-var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
 /**
  * A string bundle.
@@ -24,7 +24,7 @@ var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
  *     new StringBundle("chrome://example/locale/strings.properties");
  *   let foo = strings.get("foo");
  *   let barFormatted = strings.get("bar", [arg1, arg2]);
- *   for (let string of strings.getAll())
+ *   for each (let string in strings.getAll())
  *     dump (string.key + " = " + string.value + "\n");
  *
  * @param url {String}

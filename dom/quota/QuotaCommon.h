@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_quota_quotacommon_h__
 #define mozilla_dom_quota_quotacommon_h__
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsPrintfCString.h"
@@ -29,32 +30,7 @@
     NS_WARNING(str.get());                                                     \
   } while (0)
 
-class nsIEventTarget;
-
 BEGIN_QUOTA_NAMESPACE
-
-class BackgroundThreadObject
-{
-protected:
-  nsCOMPtr<nsIEventTarget> mOwningThread;
-
-public:
-  void
-  AssertIsOnOwningThread() const
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
-
-  nsIEventTarget*
-  OwningThread() const;
-
-protected:
-  BackgroundThreadObject();
-
-  explicit BackgroundThreadObject(nsIEventTarget* aOwningThread);
-};
 
 void
 AssertIsOnIOThread();

@@ -308,7 +308,7 @@ ParseXing(const char *aBuffer)
 }
 
 static int64_t
-FindNumVBRFrames(const nsCString& aFrame)
+FindNumVBRFrames(const nsAutoCString& aFrame)
 {
   const char *buffer = aFrame.get();
   const char *bufferEnd = aFrame.get() + aFrame.Length();

@@ -8,7 +8,7 @@
 
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "nsIXULTemplateResult.h"
 #include "nsTemplateMatch.h"
 #include "nsIRDFResource.h"
@@ -187,7 +187,7 @@ public:
     class iterator {
     protected:
         int32_t mRowIndex;
-        AutoTArray<Link, 8> mLink;
+        nsAutoTArray<Link, 8> mLink;
 
         void Next();
         void Prev();

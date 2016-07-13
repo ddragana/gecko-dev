@@ -12,8 +12,6 @@
 #include "gfxMatrix.h"
 #include "gfxRect.h"
 #include "gfxSVGGlyphs.h"
-#include "gfxTextRun.h"
-#include "nsAutoPtr.h"
 #include "nsIContent.h" // for GetContent
 #include "nsStubMutationObserver.h"
 #include "nsSVGPaintServerFrame.h"
@@ -22,6 +20,8 @@ class gfxContext;
 class nsDisplaySVGText;
 class SVGTextFrame;
 class nsTextFrame;
+
+typedef nsSVGDisplayContainerFrame SVGTextFrameBase;
 
 namespace mozilla {
 
@@ -128,7 +128,7 @@ private:
  * A runnable to mark glyph positions as needing to be recomputed
  * and to invalid the bounds of the SVGTextFrame frame.
  */
-class GlyphMetricsUpdater : public Runnable {
+class GlyphMetricsUpdater : public nsRunnable {
 public:
   NS_DECL_NSIRUNNABLE
   explicit GlyphMetricsUpdater(SVGTextFrame* aFrame) : mFrame(aFrame) { }
@@ -212,7 +212,8 @@ public:
 } // namespace mozilla
 
 /**
- * Frame class for SVG <text> elements.
+ * Frame class for SVG <text> elements, used when the
+ * layout.svg.css-text.enabled is true.
  *
  * An SVGTextFrame manages SVG text layout, painting and interaction for
  * all descendent text content elements.  The frame tree will look like this:
@@ -244,7 +245,7 @@ public:
  * itself do the painting.  Otherwise, a DrawPathCallback is passed to
  * PaintText so that we can fill the text geometry with SVG paint servers.
  */
-class SVGTextFrame final : public nsSVGDisplayContainerFrame
+class SVGTextFrame final : public SVGTextFrameBase
 {
   friend nsIFrame*
   NS_NewSVGTextFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -258,7 +259,6 @@ class SVGTextFrame final : public nsSVGDisplayContainerFrame
   friend class MutationObserver;
   friend class nsDisplaySVGText;
 
-  typedef gfxTextRun::Range Range;
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::Path Path;
   typedef mozilla::gfx::Point Point;
@@ -266,10 +266,10 @@ class SVGTextFrame final : public nsSVGDisplayContainerFrame
 
 protected:
   explicit SVGTextFrame(nsStyleContext* aContext)
-    : nsSVGDisplayContainerFrame(aContext)
-    , mFontSizeScaleFactor(1.0f)
-    , mLastContextScale(1.0f)
-    , mLengthAdjustScaleFactor(1.0f)
+    : SVGTextFrameBase(aContext),
+      mFontSizeScaleFactor(1.0f),
+      mLastContextScale(1.0f),
+      mLengthAdjustScaleFactor(1.0f)
   {
     AddStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
   }
@@ -292,7 +292,7 @@ public:
 
   virtual nsContainerFrame* GetContentInsertionFrame() override
   {
-    return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
+    return GetFirstPrincipalChild()->GetContentInsertionFrame();
   }
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
@@ -609,10 +609,16 @@ private:
   gfxFloat GetOffsetScale(nsIFrame* aTextPathFrame);
   gfxFloat GetStartOffset(nsIFrame* aTextPathFrame);
 
+  DrawMode SetupContextPaint(const DrawTarget* aDrawTarget,
+                             const gfxMatrix& aContextMatrix,
+                             nsIFrame* aFrame,
+                             gfxTextContextPaint* aOuterContextPaint,
+                             SVGTextContextPaint* aThisContextPaint);
+
   /**
    * The MutationObserver we have registered for the <text> element subtree.
    */
-  RefPtr<MutationObserver> mMutationObserver;
+  nsRefPtr<MutationObserver> mMutationObserver;
 
   /**
    * Cached canvasTM value.

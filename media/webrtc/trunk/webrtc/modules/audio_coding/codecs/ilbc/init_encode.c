@@ -24,7 +24,7 @@
  *---------------------------------------------------------------*/
 
 int16_t WebRtcIlbcfix_InitEncode(  /* (o) Number of bytes encoded */
-    IlbcEncoder *iLBCenc_inst,  /* (i/o) Encoder instance */
+    iLBC_Enc_Inst_t *iLBCenc_inst,  /* (i/o) Encoder instance */
     int16_t mode) {  /* (i) frame size mode */
   iLBCenc_inst->mode = mode;
 

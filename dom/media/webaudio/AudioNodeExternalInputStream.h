@@ -21,15 +21,14 @@ namespace mozilla {
 class AudioNodeExternalInputStream final : public AudioNodeStream
 {
 public:
-  static already_AddRefed<AudioNodeExternalInputStream>
-  Create(MediaStreamGraph* aGraph, AudioNodeEngine* aEngine);
-
+  AudioNodeExternalInputStream(AudioNodeEngine* aEngine, TrackRate aSampleRate,
+                               uint32_t aContextId);
 protected:
-  AudioNodeExternalInputStream(AudioNodeEngine* aEngine, TrackRate aSampleRate);
   ~AudioNodeExternalInputStream();
 
 public:
-  void ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags) override;
+  virtual void ProcessInput(GraphTime aFrom, GraphTime aTo,
+                            uint32_t aFlags) override;
 
 private:
   /**

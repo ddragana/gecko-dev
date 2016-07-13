@@ -15,8 +15,7 @@ CompositionEvent::CompositionEvent(EventTarget* aOwner,
                                    nsPresContext* aPresContext,
                                    WidgetCompositionEvent* aEvent)
   : UIEvent(aOwner, aPresContext,
-            aEvent ? aEvent :
-                     new WidgetCompositionEvent(false, eVoidEvent, nullptr))
+            aEvent ? aEvent : new WidgetCompositionEvent(false, 0, nullptr))
 {
   NS_ASSERTION(mEvent->mClass == eCompositionEventClass,
                "event type mismatch");
@@ -25,7 +24,7 @@ CompositionEvent::CompositionEvent(EventTarget* aOwner,
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->mTime = PR_Now();
+    mEvent->time = PR_Now();
 
     // XXX compositionstart is cancelable in draft of DOM3 Events.
     //     However, it doesn't make sence for us, we cannot cancel composition
@@ -42,31 +41,37 @@ NS_IMPL_ADDREF_INHERITED(CompositionEvent, UIEvent)
 NS_IMPL_RELEASE_INHERITED(CompositionEvent, UIEvent)
 
 NS_INTERFACE_MAP_BEGIN(CompositionEvent)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMCompositionEvent)
 NS_INTERFACE_MAP_END_INHERITING(UIEvent)
 
-void
-CompositionEvent::GetData(nsAString& aData) const
+NS_IMETHODIMP
+CompositionEvent::GetData(nsAString& aData)
 {
   aData = mData;
+  return NS_OK;
 }
 
-void
-CompositionEvent::GetLocale(nsAString& aLocale) const
+NS_IMETHODIMP
+CompositionEvent::GetLocale(nsAString& aLocale)
 {
   aLocale = mLocale;
+  return NS_OK;
 }
 
-void
+NS_IMETHODIMP
 CompositionEvent::InitCompositionEvent(const nsAString& aType,
                                        bool aCanBubble,
                                        bool aCancelable,
-                                       nsGlobalWindow* aView,
+                                       nsIDOMWindow* aView,
                                        const nsAString& aData,
                                        const nsAString& aLocale)
 {
-  UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, 0);
+  nsresult rv = UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, 0);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   mData = aData;
   mLocale = aLocale;
+  return NS_OK;
 }
 
 } // namespace dom
@@ -75,12 +80,12 @@ CompositionEvent::InitCompositionEvent(const nsAString& aType,
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<CompositionEvent>
-NS_NewDOMCompositionEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMCompositionEvent(nsIDOMEvent** aInstancePtrResult,
+                          EventTarget* aOwner,
                           nsPresContext* aPresContext,
                           WidgetCompositionEvent* aEvent)
 {
-  RefPtr<CompositionEvent> event =
-    new CompositionEvent(aOwner, aPresContext, aEvent);
-  return event.forget();
+  CompositionEvent* event = new CompositionEvent(aOwner, aPresContext, aEvent);
+  return CallQueryInterface(event, aInstancePtrResult);
 }

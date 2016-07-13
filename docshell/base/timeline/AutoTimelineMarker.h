@@ -8,9 +8,10 @@
 #define mozilla_AutoTimelineMarker_h_
 
 #include "mozilla/GuardObjects.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 class nsIDocShell;
+class nsDocShell;
 
 namespace mozilla {
 
@@ -27,7 +28,7 @@ namespace mozilla {
 //       nsresult rv = ParseTheCSSFile(mFile);
 //       ...
 //     }
-class MOZ_RAII AutoTimelineMarker
+class MOZ_STACK_CLASS AutoTimelineMarker
 {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
 
@@ -35,11 +36,11 @@ class MOZ_RAII AutoTimelineMarker
   const char* mName;
 
   // The docshell that is associated with this marker.
-  RefPtr<nsIDocShell> mDocShell;
+  nsRefPtr<nsDocShell> mDocShell;
 
 public:
-  AutoTimelineMarker(nsIDocShell* aDocShell,
-                     const char* aName MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+  explicit AutoTimelineMarker(nsIDocShell* aDocShell, const char* aName
+                              MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
   ~AutoTimelineMarker();
 
   AutoTimelineMarker(const AutoTimelineMarker& aOther) = delete;

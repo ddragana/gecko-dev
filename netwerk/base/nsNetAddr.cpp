@@ -19,6 +19,7 @@ nsNetAddr::nsNetAddr(NetAddr* addr)
   mAddr = *addr;
 }
 
+/* readonly attribute unsigned short family; */
 NS_IMETHODIMP nsNetAddr::GetFamily(uint16_t *aFamily)
 {
   switch(mAddr.raw.family) {
@@ -40,6 +41,7 @@ NS_IMETHODIMP nsNetAddr::GetFamily(uint16_t *aFamily)
   return NS_OK;
 }
 
+/* readonly attribute AUTF8String address; */
 NS_IMETHODIMP nsNetAddr::GetAddress(nsACString & aAddress)
 {
   switch(mAddr.raw.family) {
@@ -67,6 +69,7 @@ NS_IMETHODIMP nsNetAddr::GetAddress(nsACString & aAddress)
   return NS_OK;
 }
 
+/* readonly attribute unsigned short port; */
 NS_IMETHODIMP nsNetAddr::GetPort(uint16_t *aPort)
 {
   switch(mAddr.raw.family) {
@@ -88,6 +91,7 @@ NS_IMETHODIMP nsNetAddr::GetPort(uint16_t *aPort)
   return NS_OK;
 }
 
+/* readonly attribute unsigned long flow; */
 NS_IMETHODIMP nsNetAddr::GetFlow(uint32_t *aFlow)
 {
   switch(mAddr.raw.family) {
@@ -107,6 +111,7 @@ NS_IMETHODIMP nsNetAddr::GetFlow(uint32_t *aFlow)
   return NS_OK;
 }
 
+/* readonly attribute unsigned long scope; */
 NS_IMETHODIMP nsNetAddr::GetScope(uint32_t *aScope)
 {
   switch(mAddr.raw.family) {
@@ -126,6 +131,7 @@ NS_IMETHODIMP nsNetAddr::GetScope(uint32_t *aScope)
   return NS_OK;
 }
 
+/* readonly attribute boolean isV4Mapped; */
 NS_IMETHODIMP nsNetAddr::GetIsV4Mapped(bool *aIsV4Mapped)
 {
   switch(mAddr.raw.family) {

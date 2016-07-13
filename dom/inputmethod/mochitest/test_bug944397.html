@@ -76,12 +76,7 @@ function runTest() {
     SpecialPowers.pushPermissions([{
       type: 'input',
       allow: true,
-      context: {
-        url: imeUrl,
-        originAttributes: {
-          inIsolatedMozBrowser: true
-        }
-      }
+      context: imeUrl
     }], function() {
       // STEP 2c: Tell Gecko to use this iframe as its keyboard app
       let req = keyboard.setInputMethodActive(true);

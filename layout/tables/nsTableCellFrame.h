@@ -34,7 +34,6 @@ class nsTableCellFrame : public nsContainerFrame,
                          public nsITableCellLayout,
                          public nsIPercentBSizeObserver
 {
-  typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::image::DrawResult DrawResult;
 
 protected:
@@ -94,7 +93,7 @@ public:
 #endif
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
-    return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
+    return GetFirstPrincipalChild()->GetContentInsertionFrame();
   }
 
   virtual nsMargin GetUsedMargin() const override;
@@ -228,9 +227,10 @@ public:
                                      nsPoint              aPt,
                                      uint32_t             aFlags);
 
-  void DecorateForSelection(DrawTarget* aDrawTarget, nsPoint aPt);
+  void DecorateForSelection(nsRenderingContext& aRenderingContext,
+                            nsPoint              aPt);
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
+  virtual bool UpdateOverflow() override;
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {

@@ -13,21 +13,32 @@
 namespace js {
 namespace jit {
 
+static SimdTypeDescr::Type
+MIRTypeToSimdTypeDescr(MIRType type)
+{
+    MOZ_ASSERT(IsSimdType(type));
+    switch (type) {
+      case MIRType_Float32x4:   return SimdTypeDescr::Float32x4;
+      case MIRType_Int32x4:     return SimdTypeDescr::Int32x4;
+      default:                  break;
+    }
+    MOZ_CRASH("unexpected MIRType");
+}
+
 // Do not optimize any Phi instruction which has conflicting Unbox operations,
 // as this might imply some intended polymorphism.
 static bool
-CanUnboxSimdPhi(const JitCompartment* jitCompartment, MPhi* phi, SimdType unboxType)
+CanUnboxSimdPhi(const JitCompartment* jitCompartment, MPhi* phi, MIRType unboxType)
 {
-    MOZ_ASSERT(phi->type() == MIRType::Object);
+    MOZ_ASSERT(phi->type() == MIRType_Object);
 
     // If we are unboxing, we are more than likely to have boxed this SIMD type
     // once in baseline, otherwise, we cannot create a MSimdBox as we have no
     // template object to use.
-    if (!jitCompartment->maybeGetSimdTemplateObjectFor(unboxType))
+    if (!jitCompartment->maybeGetSimdTemplateObjectFor(MIRTypeToSimdTypeDescr(unboxType)))
         return false;
 
     MResumePoint* entry = phi->block()->entryResumePoint();
-    MIRType mirType = SimdTypeToMIRType(unboxType);
     for (MUseIterator i(phi->usesBegin()), e(phi->usesEnd()); i != e; i++) {
         // If we cannot recover the Simd object at the entry of the basic block,
         // then we would have to box the content anyways.
@@ -38,7 +49,7 @@ CanUnboxSimdPhi(const JitCompartment* jitCompartment, MPhi* phi, SimdType unboxT
             continue;
 
         MDefinition* def = (*i)->consumer()->toDefinition();
-        if (def->isSimdUnbox() && def->toSimdUnbox()->type() != mirType)
+        if (def->isSimdUnbox() && def->toSimdUnbox()->type() != unboxType)
             return false;
     }
 
@@ -46,7 +57,7 @@ CanUnboxSimdPhi(const JitCompartment* jitCompartment, MPhi* phi, SimdType unboxT
 }
 
 static void
-UnboxSimdPhi(const JitCompartment* jitCompartment, MIRGraph& graph, MPhi* phi, SimdType unboxType)
+UnboxSimdPhi(const JitCompartment* jitCompartment, MIRGraph& graph, MPhi* phi, MIRType unboxType)
 {
     TempAllocator& alloc = graph.alloc();
 
@@ -59,8 +70,7 @@ UnboxSimdPhi(const JitCompartment* jitCompartment, MIRGraph& graph, MPhi* phi, S
     }
 
     // Change the MIRType of the Phi.
-    MIRType mirType = SimdTypeToMIRType(unboxType);
-    phi->setResultType(mirType);
+    phi->setResultType(unboxType);
 
     MBasicBlock* phiBlock = phi->block();
     MInstruction* atRecover = phiBlock->safeInsertTop(nullptr, MBasicBlock::IgnoreRecover);
@@ -70,9 +80,10 @@ UnboxSimdPhi(const JitCompartment* jitCompartment, MIRGraph& graph, MPhi* phi, S
     MUseIterator i(phi->usesBegin()), e(phi->usesEnd());
 
     // Add a MSimdBox, and replace all the Phi uses with it.
-    JSObject* templateObject = jitCompartment->maybeGetSimdTemplateObjectFor(unboxType);
+    JSObject* templateObject =
+        jitCompartment->maybeGetSimdTemplateObjectFor(MIRTypeToSimdTypeDescr(unboxType));
     InlineTypedObject* inlineTypedObject = &templateObject->as<InlineTypedObject>();
-    MSimdBox* recoverBox = MSimdBox::New(alloc, nullptr, phi, inlineTypedObject, unboxType, gc::DefaultHeap);
+    MSimdBox* recoverBox = MSimdBox::New(alloc, nullptr, phi, inlineTypedObject, gc::DefaultHeap);
     recoverBox->setRecoveredOnBailout();
     phiBlock->insertBefore(atRecover, recoverBox);
 
@@ -89,7 +100,7 @@ UnboxSimdPhi(const JitCompartment* jitCompartment, MIRGraph& graph, MPhi* phi, S
         }
 
         if (!box) {
-            box = MSimdBox::New(alloc, nullptr, phi, inlineTypedObject, unboxType, gc::DefaultHeap);
+            box = MSimdBox::New(alloc, nullptr, phi, inlineTypedObject, gc::DefaultHeap);
             phiBlock->insertBefore(at, box);
         }
 
@@ -114,10 +125,10 @@ EagerSimdUnbox(MIRGenerator* mir, MIRGraph& graph)
                 continue;
 
             MPhi* phi = unbox->input()->toPhi();
-            if (!CanUnboxSimdPhi(jitCompartment, phi, unbox->simdType()))
+            if (!CanUnboxSimdPhi(jitCompartment, phi, unbox->type()))
                 continue;
 
-            UnboxSimdPhi(jitCompartment, graph, phi, unbox->simdType());
+            UnboxSimdPhi(jitCompartment, graph, phi, unbox->type());
         }
     }
 

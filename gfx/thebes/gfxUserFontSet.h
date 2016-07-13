@@ -9,13 +9,13 @@
 #include "gfxFont.h"
 #include "gfxFontFamilyList.h"
 #include "nsRefPtrHashtable.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIURI.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptError.h"
 #include "nsURIHashKey.h"
 #include "mozilla/net/ReferrerPolicy.h"
-#include "gfxFontConstants.h"
 
 class nsFontFaceLoader;
 
@@ -57,7 +57,7 @@ struct gfxFontFaceSrc {
     mozilla::net::ReferrerPolicy mReferrerPolicy;
     nsCOMPtr<nsIPrincipal> mOriginPrincipal; // principal if url
 
-    RefPtr<gfxFontFaceBufferSource> mBuffer;
+    nsRefPtr<gfxFontFaceBufferSource> mBuffer;
 };
 
 inline bool
@@ -101,8 +101,6 @@ public:
     { }
     virtual ~gfxUserFontData() { }
 
-    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-
     nsTArray<uint8_t> mMetadata;  // woff metadata block (compressed), if any
     nsCOMPtr<nsIURI>  mURI;       // URI of the source, if it was url()
     nsCOMPtr<nsIPrincipal> mPrincipal; // principal for the download, if url()
@@ -139,12 +137,10 @@ public:
     // add the given font entry to the end of the family's list
     void AddFontEntry(gfxFontEntry* aFontEntry) {
         // keep ref while removing existing entry
-        RefPtr<gfxFontEntry> fe = aFontEntry;
+        nsRefPtr<gfxFontEntry> fe = aFontEntry;
         // remove existing entry, if already present
         mAvailableFonts.RemoveElement(aFontEntry);
-        // insert at the beginning so that the last-defined font is the first
-        // one in the fontlist used for matching, as per CSS Fonts spec
-        mAvailableFonts.InsertElementAt(0, aFontEntry);
+        mAvailableFonts.AppendElement(aFontEntry);
 
         if (aFontEntry->mFamilyName.IsEmpty()) {
             aFontEntry->mFamilyName = Name();
@@ -212,11 +208,10 @@ public:
                               const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
                               uint32_t aWeight,
                               int32_t aStretch,
-                              uint8_t aStyle,
+                              uint32_t aItalicStyle,
                               const nsTArray<gfxFontFeature>& aFeatureSettings,
                               uint32_t aLanguageOverride,
-                              gfxSparseBitSet* aUnicodeRanges,
-                              uint8_t aFontDisplay) = 0;
+                              gfxSparseBitSet* aUnicodeRanges) = 0;
 
     // creates a font face for the specified family, or returns an existing
     // matching entry on the family if there is one
@@ -225,11 +220,10 @@ public:
                                const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
                                uint32_t aWeight,
                                int32_t aStretch,
-                               uint8_t aStyle,
+                               uint32_t aItalicStyle,
                                const nsTArray<gfxFontFeature>& aFeatureSettings,
                                uint32_t aLanguageOverride,
-                               gfxSparseBitSet* aUnicodeRanges,
-                               uint8_t aFontDisplay);
+                               gfxSparseBitSet* aUnicodeRanges);
 
     // add in a font face for which we have the gfxUserFontEntry already
     void AddUserFontEntry(const nsAString& aFamilyName,
@@ -262,10 +256,6 @@ public:
     virtual nsresult CheckFontLoad(const gfxFontFaceSrc* aFontFaceSrc,
                                    nsIPrincipal** aPrincipal,
                                    bool* aBypassCache) = 0;
-
-    // check whether content policies allow the given URI to load.
-    virtual bool IsFontLoadAllowed(nsIURI* aFontLocation,
-                                   nsIPrincipal* aPrincipal) = 0;
 
     // initialize the process that loads external font data, which upon
     // completion will call FontDataDownloadComplete method
@@ -321,17 +311,6 @@ public:
 
         // Clear everything so that we don't leak URIs and Principals.
         static void Shutdown();
-
-        // Memory-reporting support.
-        class MemoryReporter final : public nsIMemoryReporter
-        {
-        private:
-            ~MemoryReporter() { }
-
-        public:
-            NS_DECL_ISUPPORTS
-            NS_DECL_NSIMEMORYREPORTER
-        };
 
 #ifdef DEBUG_USERFONT_CACHE
         // dump contents
@@ -435,9 +414,9 @@ public:
                                             nsURIHashKey::HashKey(aKey->mURI),
                                             HashFeatures(aKey->mFontEntry->mFeatureSettings),
                                             mozilla::HashString(aKey->mFontEntry->mFamilyName),
-                                            (aKey->mFontEntry->mStyle |
-                                             (aKey->mFontEntry->mWeight << 2) |
-                                             (aKey->mFontEntry->mStretch << 11) ) ^
+                                            ((uint32_t)aKey->mFontEntry->mItalic |
+                                             (aKey->mFontEntry->mWeight << 1) |
+                                             (aKey->mFontEntry->mStretch << 10) ) ^
                                              aKey->mFontEntry->mLanguageOverride);
             }
 
@@ -447,10 +426,6 @@ public:
 
             bool IsPersistent() const { return mPersistence == kPersistent; }
             bool IsPrivate() const { return mPrivate; }
-
-            nsresult ReportMemory(nsIMemoryReporterCallback* aCb,
-                                  nsISupports* aClosure,
-                                  bool aAnonymize);
 
 #ifdef DEBUG_USERFONT_CACHE
             void Dump();
@@ -488,16 +463,7 @@ public:
         mLocalRulesUsed = true;
     }
 
-    static mozilla::LogModule* GetUserFontsLog();
-
-    // record statistics about font completion
-    virtual void RecordFontLoadDone(uint32_t aFontSize,
-                                    mozilla::TimeStamp aDoneTime) {}
-
-    void GetLoadStatistics(uint32_t& aLoadCount, uint64_t& aLoadSize) const {
-        aLoadCount = mDownloadCount;
-        aLoadSize = mDownloadSize;
-    }
+    static PRLogModuleInfo* GetUserFontsLog();
 
 protected:
     // Protected destructor, to discourage deletion outside of Release():
@@ -527,11 +493,10 @@ protected:
                                    const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
                                    uint32_t aWeight,
                                    int32_t aStretch,
-                                   uint8_t aStyle,
+                                   uint32_t aItalicStyle,
                                    const nsTArray<gfxFontFeature>& aFeatureSettings,
                                    uint32_t aLanguageOverride,
-                                   gfxSparseBitSet* aUnicodeRanges,
-                                   uint8_t aFontDisplay);
+                                   gfxSparseBitSet* aUnicodeRanges);
 
     // creates a new gfxUserFontFamily in mFontFamilies, or returns an existing
     // family if there is one
@@ -545,13 +510,6 @@ protected:
 
     // true when local names have been looked up, false otherwise
     bool mLocalRulesUsed;
-
-    // true when rules using local names need to be redone
-    bool mRebuildLocalRules;
-
-    // performance stats
-    uint32_t mDownloadCount;
-    uint64_t mDownloadSize;
 };
 
 // acts a placeholder until the real font is downloaded
@@ -574,11 +532,10 @@ public:
                      const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
                      uint32_t aWeight,
                      int32_t aStretch,
-                     uint8_t aStyle,
+                     uint32_t aItalicStyle,
                      const nsTArray<gfxFontFeature>& aFeatureSettings,
                      uint32_t aLanguageOverride,
-                     gfxSparseBitSet* aUnicodeRanges,
-                     uint8_t aFontDisplay);
+                     gfxSparseBitSet* aUnicodeRanges);
 
     virtual ~gfxUserFontEntry();
 
@@ -586,11 +543,10 @@ public:
     bool Matches(const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
                  uint32_t aWeight,
                  int32_t aStretch,
-                 uint8_t aStyle,
+                 uint32_t aItalicStyle,
                  const nsTArray<gfxFontFeature>& aFeatureSettings,
                  uint32_t aLanguageOverride,
-                 gfxSparseBitSet* aUnicodeRanges,
-                 uint8_t aFontDisplay);
+                 gfxSparseBitSet* aUnicodeRanges);
 
     virtual gfxFont* CreateFontInstance(const gfxFontStyle* aFontStyle,
                                         bool aNeedsBold);
@@ -618,8 +574,6 @@ public:
     gfxCharacterMap* GetUnicodeRangeMap() const {
         return mCharacterMap.get();
     }
-
-    uint8_t GetFontDisplay() const { return mFontDisplay; }
 
     // load the font - starts the loading of sources which continues until
     // a valid font resource is found or all sources fail
@@ -669,15 +623,6 @@ protected:
                            uint32_t           aMetaOrigLen,
                            uint8_t            aCompression);
 
-    // Clears and then adds to aResult all of the user font sets that this user
-    // font entry has been added to.  This will at least include mFontSet, the
-    // owner of this user font entry.
-    virtual void GetUserFontSets(nsTArray<gfxUserFontSet*>& aResult);
-
-    // Calls IncrementGeneration() on all user font sets that contain this
-    // user font entry.
-    void IncrementGeneration();
-
     // general load state
     UserFontLoadState        mUserFontLoadState;
 
@@ -691,21 +636,19 @@ protected:
                              // so keep hiding fallback font
         LOADING_SLOWLY,      // timeout happened and we're not nearly done,
                              // so use the fallback font
-        LOADING_TIMED_OUT,   // font load took too long
         LOADING_FAILED       // failed to load any source: use fallback
     };
     FontDataLoadingState     mFontDataLoadingState;
 
     bool                     mUnsupportedFormat;
-    uint8_t                  mFontDisplay; // timing of userfont fallback
 
-    RefPtr<gfxFontEntry>   mPlatformFontEntry;
+    nsRefPtr<gfxFontEntry>   mPlatformFontEntry;
     nsTArray<gfxFontFaceSrc> mSrcList;
     uint32_t                 mSrcIndex; // index of loading src item
     // This field is managed by the nsFontFaceLoader. In the destructor and Cancel()
     // methods of nsFontFaceLoader this reference is nulled out.
     nsFontFaceLoader* MOZ_NON_OWNING_REF mLoader; // current loader for this entry, if any
-    gfxUserFontSet*          mFontSet; // font-set which owns this userfont entry
+    gfxUserFontSet*          mFontSet; // font-set to which the userfont entry belongs
     nsCOMPtr<nsIPrincipal>   mPrincipal;
 };
 

@@ -39,7 +39,6 @@ class nsIFile;
 class nsIProfileLock;
 class nsIProfileUnlocker;
 class nsIFactory;
-class nsString;
 
 extern nsXREDirProvider* gDirServiceProvider;
 
@@ -54,7 +53,6 @@ extern char **gArgv;
 extern int    gRestartArgc;
 extern char **gRestartArgv;
 extern bool gLogConsoleErrors;
-extern nsString gAbsoluteArgv0Path;
 
 extern bool gIsGtest;
 
@@ -95,9 +93,6 @@ NS_LockProfilePath(nsIFile* aPath, nsIFile* aTempPath,
 void
 WriteConsoleLog();
 
-void
-OverrideDefaultLocaleIfNeeded();
-
 #ifdef XP_WIN
 void
 UseParentConsole();
@@ -121,12 +116,5 @@ extern GeckoProcessType sChildProcessType;
  * and the JIT debugger on Windows, and install unix signal handlers.
  */
 void SetupErrorHandling(const char* progname);
-
-/**
- * A numeric value indicating whether multiprocess might be blocked.
- * Possible values can be found at nsAppRunner.cpp. A value of 0
- * represents not blocking.
- */
-uint32_t MultiprocessBlockPolicy();
 
 #endif // nsAppRunner_h__

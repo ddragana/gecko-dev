@@ -23,28 +23,28 @@ public:
 
   MessageLoop* GMPMessageLoop();
 
-  bool RecvPGMPAudioDecoderConstructor(PGMPAudioDecoderChild* aActor) override;
-  bool RecvPGMPDecryptorConstructor(PGMPDecryptorChild* aActor) override;
-  bool RecvPGMPVideoDecoderConstructor(PGMPVideoDecoderChild* aActor) override;
-  bool RecvPGMPVideoEncoderConstructor(PGMPVideoEncoderChild* aActor) override;
+  virtual bool RecvPGMPAudioDecoderConstructor(PGMPAudioDecoderChild* aActor) override;
+  virtual bool RecvPGMPDecryptorConstructor(PGMPDecryptorChild* aActor) override;
+  virtual bool RecvPGMPVideoDecoderConstructor(PGMPVideoDecoderChild* aActor) override;
+  virtual bool RecvPGMPVideoEncoderConstructor(PGMPVideoEncoderChild* aActor) override;
 
-  PGMPAudioDecoderChild* AllocPGMPAudioDecoderChild() override;
-  bool DeallocPGMPAudioDecoderChild(PGMPAudioDecoderChild* aActor) override;
+  virtual PGMPAudioDecoderChild* AllocPGMPAudioDecoderChild() override;
+  virtual bool DeallocPGMPAudioDecoderChild(PGMPAudioDecoderChild* aActor) override;
 
-  PGMPDecryptorChild* AllocPGMPDecryptorChild() override;
-  bool DeallocPGMPDecryptorChild(PGMPDecryptorChild* aActor) override;
+  virtual PGMPDecryptorChild* AllocPGMPDecryptorChild() override;
+  virtual bool DeallocPGMPDecryptorChild(PGMPDecryptorChild* aActor) override;
 
-  PGMPVideoDecoderChild* AllocPGMPVideoDecoderChild() override;
-  bool DeallocPGMPVideoDecoderChild(PGMPVideoDecoderChild* aActor) override;
+  virtual PGMPVideoDecoderChild* AllocPGMPVideoDecoderChild() override;
+  virtual bool DeallocPGMPVideoDecoderChild(PGMPVideoDecoderChild* aActor) override;
 
-  PGMPVideoEncoderChild* AllocPGMPVideoEncoderChild() override;
-  bool DeallocPGMPVideoEncoderChild(PGMPVideoEncoderChild* aActor) override;
+  virtual PGMPVideoEncoderChild* AllocPGMPVideoEncoderChild() override;
+  virtual bool DeallocPGMPVideoEncoderChild(PGMPVideoEncoderChild* aActor) override;
 
-  void ActorDestroy(ActorDestroyReason aWhy) override;
-  void ProcessingError(Result aCode, const char* aReason) override;
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+  virtual void ProcessingError(Result aCode, const char* aReason) override;
 
   // GMPSharedMem
-  void CheckThread() override;
+  virtual void CheckThread() override;
 
   void CloseActive();
   bool IsUsed();

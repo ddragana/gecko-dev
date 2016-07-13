@@ -39,7 +39,8 @@ private:
   bool PossiblyByteExpandedFileName(const nsAString& aIn);
   bool PossiblyHostPortUrl(const nsACString& aUrl);
   bool MakeAlternateURI(nsIURI* aURI);
-  bool IsDomainWhitelisted(const nsACString& aAsciiHost,
+  bool IsLikelyFTP(const nsCString& aHostSpec);
+  bool IsDomainWhitelisted(const nsAutoCString aAsciiHost,
                            const uint32_t aDotLoc);
 };
 
@@ -64,6 +65,6 @@ private:
   bool mFixupCreatedAlternateURI;
   nsString mKeywordProviderName;
   nsString mKeywordAsSent;
-  nsCString mOriginalInput;
+  nsAutoCString mOriginalInput;
 };
 #endif

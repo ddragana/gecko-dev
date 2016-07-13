@@ -190,10 +190,9 @@ void GonkBufferQueueCore::freeBufferLocked(int slot) {
     if (mSlots[slot].mTextureClient) {
         mSlots[slot].mTextureClient->ClearRecycleCallback();
         // release TextureClient in ImageBridge thread
-        RefPtr<TextureClientReleaseTask> task =
-          MakeAndAddRef<TextureClientReleaseTask>(mSlots[slot].mTextureClient);
+        TextureClientReleaseTask* task = new TextureClientReleaseTask(mSlots[slot].mTextureClient);
         mSlots[slot].mTextureClient = NULL;
-        ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(task.forget());
+        ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(FROM_HERE, task);
     }
     mSlots[slot].mGraphicBuffer.clear();
     if (mSlots[slot].mBufferState == GonkBufferSlot::ACQUIRED) {

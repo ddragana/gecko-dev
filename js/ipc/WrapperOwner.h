@@ -30,9 +30,9 @@ class WrapperOwner : public virtual JavaScriptShared
     // Standard internal methods.
     // (The traps should be in the same order like js/Proxy.h)
     bool getOwnPropertyDescriptor(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-                                  JS::MutableHandle<JS::PropertyDescriptor> desc);
+                                  JS::MutableHandle<JSPropertyDescriptor> desc);
     bool defineProperty(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-                        JS::Handle<JS::PropertyDescriptor> desc,
+                        JS::Handle<JSPropertyDescriptor> desc,
                         JS::ObjectOpResult& result);
     bool ownPropertyKeys(JSContext* cx, JS::HandleObject proxy, JS::AutoIdVector& props);
     bool delete_(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
@@ -40,7 +40,7 @@ class WrapperOwner : public virtual JavaScriptShared
     bool preventExtensions(JSContext* cx, JS::HandleObject proxy, JS::ObjectOpResult& result);
     bool isExtensible(JSContext* cx, JS::HandleObject proxy, bool* extensible);
     bool has(JSContext* cx, JS::HandleObject proxy, JS::HandleId id, bool* bp);
-    bool get(JSContext* cx, JS::HandleObject proxy, JS::HandleValue receiver,
+    bool get(JSContext* cx, JS::HandleObject proxy, JS::HandleObject receiver,
              JS::HandleId id, JS::MutableHandleValue vp);
     bool set(JSContext* cx, JS::HandleObject proxy, JS::HandleId id, JS::HandleValue v,
              JS::HandleValue receiver, JS::ObjectOpResult& result);
@@ -49,17 +49,14 @@ class WrapperOwner : public virtual JavaScriptShared
 
     // SpiderMonkey extensions.
     bool getPropertyDescriptor(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-                               JS::MutableHandle<JS::PropertyDescriptor> desc);
+                               JS::MutableHandle<JSPropertyDescriptor> desc);
     bool hasOwn(JSContext* cx, JS::HandleObject proxy, JS::HandleId id, bool* bp);
     bool getOwnEnumerablePropertyKeys(JSContext* cx, JS::HandleObject proxy,
                                       JS::AutoIdVector& props);
     bool hasInstance(JSContext* cx, JS::HandleObject proxy, JS::MutableHandleValue v, bool* bp);
-    bool getBuiltinClass(JSContext* cx, JS::HandleObject proxy, js::ESClass* cls);
-    bool isArray(JSContext* cx, JS::HandleObject proxy, JS::IsArrayAnswer* answer);
+    bool objectClassIs(JSContext* cx, JS::HandleObject obj, js::ESClassValue classValue);
     const char* className(JSContext* cx, JS::HandleObject proxy);
     bool getPrototype(JSContext* cx, JS::HandleObject proxy, JS::MutableHandleObject protop);
-    bool getPrototypeIfOrdinary(JSContext* cx, JS::HandleObject proxy, bool* isOrdinary,
-                                JS::MutableHandleObject protop);
 
     bool regexp_toShared(JSContext* cx, JS::HandleObject proxy, js::RegExpGuard* g);
 
@@ -75,8 +72,6 @@ class WrapperOwner : public virtual JavaScriptShared
     bool domInstanceOf(JSContext* cx, JSObject* obj, int prototypeID, int depth, bool* bp);
 
     bool active() { return !inactive_; }
-
-    virtual bool allowMessage(JSContext* cx) = 0;
 
     void drop(JSObject* obj);
     void updatePointer(JSObject* obj, const JSObject* old);
@@ -130,7 +125,7 @@ class WrapperOwner : public virtual JavaScriptShared
                          ReturnStatus* rs, bool* bp) = 0;
     virtual bool SendHasOwn(const ObjectId& objId, const JSIDVariant& id,
                             ReturnStatus* rs, bool* bp) = 0;
-    virtual bool SendGet(const ObjectId& objId, const JSVariant& receiverVar,
+    virtual bool SendGet(const ObjectId& objId, const ObjectVariant& receiverVar,
                          const JSIDVariant& id,
                          ReturnStatus* rs, JSVariant* result) = 0;
     virtual bool SendSet(const ObjectId& objId, const JSIDVariant& id, const JSVariant& value,
@@ -143,14 +138,10 @@ class WrapperOwner : public virtual JavaScriptShared
                                      nsTArray<JSParam>* outparams) = 0;
     virtual bool SendHasInstance(const ObjectId& objId, const JSVariant& v,
                                  ReturnStatus* rs, bool* bp) = 0;
-    virtual bool SendGetBuiltinClass(const ObjectId& objId, ReturnStatus* rs,
-                                     uint32_t* classValue) = 0;
-    virtual bool SendIsArray(const ObjectId& objId, ReturnStatus* rs,
-                             uint32_t* answer) = 0;
+    virtual bool SendObjectClassIs(const ObjectId& objId, const uint32_t& classValue,
+                                   bool* result) = 0;
     virtual bool SendClassName(const ObjectId& objId, nsCString* result) = 0;
     virtual bool SendGetPrototype(const ObjectId& objId, ReturnStatus* rs, ObjectOrNullVariant* result) = 0;
-    virtual bool SendGetPrototypeIfOrdinary(const ObjectId& objId, ReturnStatus* rs, bool* isOrdinary,
-                                            ObjectOrNullVariant* result) = 0;
     virtual bool SendRegExpToShared(const ObjectId& objId, ReturnStatus* rs, nsString* source,
                                     uint32_t* flags) = 0;
 

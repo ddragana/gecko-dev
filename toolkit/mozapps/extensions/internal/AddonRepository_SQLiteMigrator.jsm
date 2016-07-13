@@ -10,7 +10,6 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
-/*globals AddonManagerPrivate*/
 Cu.import("resource://gre/modules/FileUtils.jsm");
 
 const KEY_PROFILEDIR  = "ProfD";
@@ -31,7 +30,7 @@ const LOGGER_ID = "addons.repository.sqlmigrator";
 
 // Create a new logger for use by the Addons Repository SQL Migrator
 // (Requires AddonManager.jsm)
-var logger = Log.repository.getLogger(LOGGER_ID);
+let logger = Log.repository.getLogger(LOGGER_ID);
 
 this.EXPORTED_SYMBOLS = ["AddonRepository_SQLiteMigrator"];
 
@@ -61,7 +60,7 @@ this.AddonRepository_SQLiteMigrator = {
 
     this._retrieveStoredData((results) => {
       this._closeConnection();
-      let resultArray = Object.keys(results).map(k => results[k]);
+      let resultArray = [addon for ([,addon] of Iterator(results))];
       logger.debug(resultArray.length + " addons imported.")
       aCallback(resultArray);
     });
@@ -74,7 +73,7 @@ this.AddonRepository_SQLiteMigrator = {
    *
    * @return bool           Whether the DB was opened successfully.
    */
-  _openConnection: function() {
+  _openConnection: function AD_openConnection() {
     delete this.connection;
 
     let dbfile = FileUtils.getFile(KEY_PROFILEDIR, [FILE_DATABASE], true);
@@ -142,10 +141,8 @@ this.AddonRepository_SQLiteMigrator = {
   },
 
   _closeConnection: function() {
-    for (let key in this.asyncStatementsCache) {
-      let stmt = this.asyncStatementsCache[key];
+    for each (let stmt in this.asyncStatementsCache)
       stmt.finalize();
-    }
     this.asyncStatementsCache = {};
 
     if (this.connection)
@@ -161,23 +158,24 @@ this.AddonRepository_SQLiteMigrator = {
    * @param  aCallback
    *         The callback to pass the add-ons back to
    */
-  _retrieveStoredData: function(aCallback) {
+  _retrieveStoredData: function AD_retrieveStoredData(aCallback) {
+    let self = this;
     let addons = {};
 
     // Retrieve all data from the addon table
-    let getAllAddons = () => {
-      this.getAsyncStatement("getAllAddons").executeAsync({
-        handleResult: aResults => {
+    function getAllAddons() {
+      self.getAsyncStatement("getAllAddons").executeAsync({
+        handleResult: function getAllAddons_handleResult(aResults) {
           let row = null;
           while ((row = aResults.getNextRow())) {
             let internal_id = row.getResultByName("internal_id");
-            addons[internal_id] = this._makeAddonFromAsyncRow(row);
+            addons[internal_id] = self._makeAddonFromAsyncRow(row);
           }
         },
 
-        handleError: this.asyncErrorLogger,
+        handleError: self.asyncErrorLogger,
 
-        handleCompletion: function(aReason) {
+        handleCompletion: function getAllAddons_handleCompletion(aReason) {
           if (aReason != Ci.mozIStorageStatementCallback.REASON_FINISHED) {
             logger.error("Error retrieving add-ons from database. Returning empty results");
             aCallback({});
@@ -190,9 +188,9 @@ this.AddonRepository_SQLiteMigrator = {
     }
 
     // Retrieve all data from the developer table
-    let getAllDevelopers = () => {
-      this.getAsyncStatement("getAllDevelopers").executeAsync({
-        handleResult: aResults => {
+    function getAllDevelopers() {
+      self.getAsyncStatement("getAllDevelopers").executeAsync({
+        handleResult: function getAllDevelopers_handleResult(aResults) {
           let row = null;
           while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
@@ -205,13 +203,13 @@ this.AddonRepository_SQLiteMigrator = {
             if (!addon.developers)
               addon.developers = [];
 
-            addon.developers.push(this._makeDeveloperFromAsyncRow(row));
+            addon.developers.push(self._makeDeveloperFromAsyncRow(row));
           }
         },
 
-        handleError: this.asyncErrorLogger,
+        handleError: self.asyncErrorLogger,
 
-        handleCompletion: function(aReason) {
+        handleCompletion: function getAllDevelopers_handleCompletion(aReason) {
           if (aReason != Ci.mozIStorageStatementCallback.REASON_FINISHED) {
             logger.error("Error retrieving developers from database. Returning empty results");
             aCallback({});
@@ -224,9 +222,9 @@ this.AddonRepository_SQLiteMigrator = {
     }
 
     // Retrieve all data from the screenshot table
-    let getAllScreenshots = () => {
-      this.getAsyncStatement("getAllScreenshots").executeAsync({
-        handleResult: aResults => {
+    function getAllScreenshots() {
+      self.getAsyncStatement("getAllScreenshots").executeAsync({
+        handleResult: function getAllScreenshots_handleResult(aResults) {
           let row = null;
           while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
@@ -238,13 +236,13 @@ this.AddonRepository_SQLiteMigrator = {
             let addon = addons[addon_internal_id];
             if (!addon.screenshots)
               addon.screenshots = [];
-            addon.screenshots.push(this._makeScreenshotFromAsyncRow(row));
+            addon.screenshots.push(self._makeScreenshotFromAsyncRow(row));
           }
         },
 
-        handleError: this.asyncErrorLogger,
+        handleError: self.asyncErrorLogger,
 
-        handleCompletion: function(aReason) {
+        handleCompletion: function getAllScreenshots_handleCompletion(aReason) {
           if (aReason != Ci.mozIStorageStatementCallback.REASON_FINISHED) {
             logger.error("Error retrieving screenshots from database. Returning empty results");
             aCallback({});
@@ -256,9 +254,9 @@ this.AddonRepository_SQLiteMigrator = {
       });
     }
 
-    let getAllCompatOverrides = () => {
-      this.getAsyncStatement("getAllCompatOverrides").executeAsync({
-        handleResult: aResults => {
+    function getAllCompatOverrides() {
+      self.getAsyncStatement("getAllCompatOverrides").executeAsync({
+        handleResult: function getAllCompatOverrides_handleResult(aResults) {
           let row = null;
           while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
@@ -270,13 +268,13 @@ this.AddonRepository_SQLiteMigrator = {
             let addon = addons[addon_internal_id];
             if (!addon.compatibilityOverrides)
               addon.compatibilityOverrides = [];
-            addon.compatibilityOverrides.push(this._makeCompatOverrideFromAsyncRow(row));
+            addon.compatibilityOverrides.push(self._makeCompatOverrideFromAsyncRow(row));
           }
         },
 
-        handleError: this.asyncErrorLogger,
+        handleError: self.asyncErrorLogger,
 
-        handleCompletion: function(aReason) {
+        handleCompletion: function getAllCompatOverrides_handleCompletion(aReason) {
           if (aReason != Ci.mozIStorageStatementCallback.REASON_FINISHED) {
             logger.error("Error retrieving compatibility overrides from database. Returning empty results");
             aCallback({});
@@ -288,9 +286,9 @@ this.AddonRepository_SQLiteMigrator = {
       });
     }
 
-    let getAllIcons = () => {
-      this.getAsyncStatement("getAllIcons").executeAsync({
-        handleResult: aResults => {
+    function getAllIcons() {
+      self.getAsyncStatement("getAllIcons").executeAsync({
+        handleResult: function getAllIcons_handleResult(aResults) {
           let row = null;
           while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
@@ -300,16 +298,16 @@ this.AddonRepository_SQLiteMigrator = {
             }
 
             let addon = addons[addon_internal_id];
-            let { size, url } = this._makeIconFromAsyncRow(row);
+            let { size, url } = self._makeIconFromAsyncRow(row);
             addon.icons[size] = url;
             if (size == 32)
               addon.iconURL = url;
           }
         },
 
-        handleError: this.asyncErrorLogger,
+        handleError: self.asyncErrorLogger,
 
-        handleCompletion: function(aReason) {
+        handleCompletion: function getAllIcons_handleCompletion(aReason) {
           if (aReason != Ci.mozIStorageStatementCallback.REASON_FINISHED) {
             logger.error("Error retrieving icons from database. Returning empty results");
             aCallback({});
@@ -317,10 +315,8 @@ this.AddonRepository_SQLiteMigrator = {
           }
 
           let returnedAddons = {};
-          for (let id in addons) {
-            let addon = addons[id];
+          for each (let addon in addons)
             returnedAddons[addon.id] = addon;
-          }
           aCallback(returnedAddons);
         }
       });
@@ -342,7 +338,7 @@ this.AddonRepository_SQLiteMigrator = {
    * @return a mozIStorageAsyncStatement for the SQL corresponding to the
    *         unique key
    */
-  getAsyncStatement: function(aKey) {
+  getAsyncStatement: function AD_getAsyncStatement(aKey) {
     if (aKey in this.asyncStatementsCache)
       return this.asyncStatementsCache[aKey];
 
@@ -389,7 +385,7 @@ this.AddonRepository_SQLiteMigrator = {
    *         The asynchronous row to use
    * @return The created add-on
    */
-  _makeAddonFromAsyncRow: function(aRow) {
+  _makeAddonFromAsyncRow: function AD__makeAddonFromAsyncRow(aRow) {
     // This is intentionally not an AddonSearchResult object in order
     // to allow AddonDatabase._parseAddon to parse it, same as if it
     // was read from the JSON database.
@@ -398,7 +394,7 @@ this.AddonRepository_SQLiteMigrator = {
 
     for (let prop of PROP_SINGLE) {
       addon[prop] = aRow.getResultByName(prop)
-    }
+    };
 
     return addon;
   },
@@ -410,7 +406,7 @@ this.AddonRepository_SQLiteMigrator = {
    *         The asynchronous row to use
    * @return The created developer
    */
-  _makeDeveloperFromAsyncRow: function(aRow) {
+  _makeDeveloperFromAsyncRow: function AD__makeDeveloperFromAsyncRow(aRow) {
     let name = aRow.getResultByName("name");
     let url = aRow.getResultByName("url")
     return new AddonManagerPrivate.AddonAuthor(name, url);
@@ -423,7 +419,7 @@ this.AddonRepository_SQLiteMigrator = {
    *         The asynchronous row to use
    * @return The created screenshot
    */
-  _makeScreenshotFromAsyncRow: function(aRow) {
+  _makeScreenshotFromAsyncRow: function AD__makeScreenshotFromAsyncRow(aRow) {
     let url = aRow.getResultByName("url");
     let width = aRow.getResultByName("width");
     let height = aRow.getResultByName("height");
@@ -442,7 +438,7 @@ this.AddonRepository_SQLiteMigrator = {
    *         The asynchronous row to use
    * @return The created CompatibilityOverride
    */
-  _makeCompatOverrideFromAsyncRow: function(aRow) {
+  _makeCompatOverrideFromAsyncRow: function AD_makeCompatOverrideFromAsyncRow(aRow) {
     let type = aRow.getResultByName("type");
     let minVersion = aRow.getResultByName("minVersion");
     let maxVersion = aRow.getResultByName("maxVersion");
@@ -464,7 +460,7 @@ this.AddonRepository_SQLiteMigrator = {
    *         The asynchronous row to use
    * @return An object containing the size and URL of the icon
    */
-  _makeIconFromAsyncRow: function(aRow) {
+  _makeIconFromAsyncRow: function AD_makeIconFromAsyncRow(aRow) {
     let size = aRow.getResultByName("size");
     let url = aRow.getResultByName("url");
     return { size: size, url: url };
@@ -478,7 +474,7 @@ this.AddonRepository_SQLiteMigrator = {
    * @param  aErrorString
    *         An error message
    */
-  logSQLError: function(aError, aErrorString) {
+  logSQLError: function AD_logSQLError(aError, aErrorString) {
     logger.error("SQL error " + aError + ": " + aErrorString);
   },
 
@@ -488,14 +484,14 @@ this.AddonRepository_SQLiteMigrator = {
    * @param  aError
    *         A mozIStorageError to log
    */
-  asyncErrorLogger: function(aError) {
+  asyncErrorLogger: function AD_asyncErrorLogger(aError) {
     logger.error("Async SQL error " + aError.result + ": " + aError.message);
   },
 
   /**
    * Synchronously creates the triggers in the database.
    */
-  _createTriggers: function() {
+  _createTriggers: function AD__createTriggers() {
     this.connection.executeSimpleSQL("DROP TRIGGER IF EXISTS delete_addon");
     this.connection.executeSimpleSQL("CREATE TRIGGER delete_addon AFTER DELETE " +
       "ON addon BEGIN " +
@@ -509,7 +505,7 @@ this.AddonRepository_SQLiteMigrator = {
   /**
    * Synchronously creates the indices in the database.
    */
-  _createIndices: function() {
+  _createIndices: function AD__createIndices() {
     this.connection.executeSimpleSQL("CREATE INDEX IF NOT EXISTS developer_idx " +
                                      "ON developer (addon_internal_id)");
     this.connection.executeSimpleSQL("CREATE INDEX IF NOT EXISTS screenshot_idx " +

@@ -14,18 +14,15 @@ XPCOMUtils.defineLazyGetter(this, "serverPort", function() {
   return httpServer.identity.primaryPort;
 });
 
-var handlerDone;
-var handlerPromise = new Promise(r => handlerDone = after(3, r));
-
 function listen4xxCodeHandler(metadata, response) {
   ok(true, "Listener point error")
-  handlerDone();
+  do_test_finished();
   response.setStatusLine(metadata.httpVersion, 410, "GONE");
 }
 
 function resubscribeHandler(metadata, response) {
   ok(true, "Ask for new subscription");
-  handlerDone();
+  do_test_finished();
   response.setHeader("Location",
                   'http://localhost:' + serverPort + '/newSubscription')
   response.setHeader("Link",
@@ -36,7 +33,7 @@ function resubscribeHandler(metadata, response) {
 
 function listenSuccessHandler(metadata, response) {
   do_check_true(true, "New listener point");
-  httpServer.stop(handlerDone);
+  httpServer.stop(do_test_finished);
   response.setStatusLine(metadata.httpVersion, 204, "Try again");
 }
 
@@ -51,11 +48,9 @@ function run_test() {
 
   do_get_profile();
 
-  setPrefs({
-    'testing.allowInsecureServerURL': true,
-    'testing.notifyWorkers': false,
-    'testing.notifyAllObservers': true,
-  });
+  disableServiceWorkerEvents(
+    'https://example.com/page'
+  );
 
   run_next_test();
 }
@@ -66,6 +61,10 @@ add_task(function* test1() {
   do_register_cleanup(() => {
     return db.drop().then(_ => db.close());
   });
+
+  do_test_pending();
+  do_test_pending();
+  do_test_pending();
 
   var serverURL = "http://localhost:" + httpServer.identity.primaryPort;
 
@@ -84,20 +83,8 @@ add_task(function* test1() {
 
   PushService.init({
     serverURI: serverURL + "/subscribe",
+    service: PushServiceHttp2,
     db
   });
-
-  yield handlerPromise;
-
-  let record = yield db.getByIdentifiers({
-    scope: 'https://example.com/page',
-    originAttributes: '',
-  });
-  equal(record.keyID, serverURL + '/newSubscription',
-    'Should update subscription URL');
-  equal(record.pushEndpoint, serverURL + '/newPushEndpoint',
-    'Should update push endpoint');
-  equal(record.pushReceiptEndpoint, serverURL + '/newReceiptPushEndpoint',
-    'Should update push receipt endpoint');
 
 });

@@ -4,10 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_indexeddatabase_h__
-#define mozilla_dom_indexeddatabase_h__
+#ifndef mozilla_dom_indexeddb_indexeddatabase_h__
+#define mozilla_dom_indexeddb_indexeddatabase_h__
 
 #include "js/StructuredClone.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 
@@ -15,20 +16,17 @@ namespace mozilla {
 namespace dom {
 
 class Blob;
-class IDBDatabase;
-class IDBMutableFile;
 
 namespace indexedDB {
 
 class FileInfo;
+class IDBDatabase;
 class SerializedStructuredCloneReadInfo;
 
 struct StructuredCloneFile
 {
-  RefPtr<Blob> mBlob;
-  RefPtr<IDBMutableFile> mMutableFile;
-  RefPtr<FileInfo> mFileInfo;
-  bool mMutable;
+  nsRefPtr<Blob> mBlob;
+  nsRefPtr<FileInfo> mFileInfo;
 
   // In IndexedDatabaseInlines.h
   inline
@@ -73,4 +71,4 @@ struct StructuredCloneReadInfo
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_indexeddatabase_h__
+#endif // mozilla_dom_indexeddb_indexeddatabase_h__

@@ -39,7 +39,7 @@ LookupRegisterAllocator(const char* name)
     return mozilla::Nothing();
 }
 
-struct DefaultJitOptions
+struct JitOptions
 {
     bool checkGraphConsistency;
 #ifdef CHECK_OSIPOINT_REGISTERS
@@ -47,48 +47,34 @@ struct DefaultJitOptions
 #endif
     bool checkRangeAnalysis;
     bool runExtraChecks;
-    bool disableAma;
-    bool disableEaa;
-    bool disableEagerSimdUnbox;
-    bool disableEdgeCaseAnalysis;
-    bool disableFlowAA;
-    bool disableGvn;
-    bool disableInlining;
-    bool disableLicm;
-    bool disableLoopUnrolling;
-    bool disablePgo;
-    bool disableInstructionReordering;
-    bool disableRangeAnalysis;
-    bool disableRecoverIns;
     bool disableScalarReplacement;
-    bool disableSharedStubs;
-    bool disableSincos;
+    bool disableEagerSimdUnbox;
+    bool disableGvn;
+    bool disableLicm;
+    bool disableInlining;
+    bool disableEdgeCaseAnalysis;
+    bool disableRangeAnalysis;
     bool disableSink;
+    bool disableLoopUnrolling;
+    bool disableEaa;
+    bool disableAma;
     bool eagerCompilation;
     bool forceInlineCaches;
+    mozilla::Maybe<uint32_t> forcedDefaultIonWarmUpThreshold;
+    mozilla::Maybe<IonRegisterAllocator> forcedRegisterAllocator;
     bool limitScriptSize;
     bool osr;
-    bool wasmTestMode;
     uint32_t baselineWarmUpThreshold;
     uint32_t exceptionBailoutThreshold;
     uint32_t frequentBailoutThreshold;
     uint32_t maxStackArgs;
     uint32_t osrPcMismatchesBeforeRecompile;
     uint32_t smallFunctionMaxBytecodeLength_;
-    uint32_t jumpThreshold;
-    uint32_t branchPruningHitCountFactor;
-    uint32_t branchPruningInstFactor;
-    uint32_t branchPruningBlockSpanFactor;
-    uint32_t branchPruningEffectfulInstFactor;
-    uint32_t branchPruningThreshold;
-    mozilla::Maybe<uint32_t> forcedDefaultIonWarmUpThreshold;
-    mozilla::Maybe<uint32_t> forcedDefaultIonSmallFunctionWarmUpThreshold;
-    mozilla::Maybe<IonRegisterAllocator> forcedRegisterAllocator;
 
     // The options below affect the rest of the VM, and not just the JIT.
     bool disableUnboxedObjects;
 
-    DefaultJitOptions();
+    JitOptions();
     bool isSmallFunction(JSScript* script) const;
     void setEagerCompilation();
     void setCompilerWarmUpThreshold(uint32_t warmUpThreshold);
@@ -96,7 +82,7 @@ struct DefaultJitOptions
     void enableGvn(bool val);
 };
 
-extern DefaultJitOptions JitOptions;
+extern JitOptions js_JitOptions;
 
 } // namespace jit
 } // namespace js

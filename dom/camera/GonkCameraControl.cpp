@@ -32,6 +32,7 @@
 #include "nsNetUtil.h" // for NS_ReadInputStreamToBuffer
 #endif
 #include "nsNetCID.h" // for NS_STREAMTRANSPORTSERVICE_CONTRACTID
+#include "nsAutoPtr.h" // for nsAutoArrayPtr
 #include "nsCOMPtr.h"
 #include "nsMemory.h"
 #include "nsThread.h"
@@ -86,7 +87,6 @@ nsGonkCameraControl::nsGonkCameraControl(uint32_t aCameraId)
   , mCapturePoster(false)
   , mAutoFocusPending(false)
   , mAutoFocusCompleteExpired(0)
-  , mPrevFacesDetected(0)
   , mReentrantMonitor("GonkCameraControl::OnTakePicture.Monitor")
 {
   // Constructor runs on the main thread...
@@ -139,19 +139,13 @@ nsGonkCameraControl::StartInternal(const Configuration* aInitialConfig)
     case NS_ERROR_ALREADY_INITIALIZED:
     case NS_OK:
       break;
-
+    
     default:
       return rv;
   }
 
   if (aInitialConfig) {
-    Configuration config;
-    rv = ValidateConfiguration(*aInitialConfig, config);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    rv = SetConfigurationInternal(config);
+    rv = SetConfigurationInternal(*aInitialConfig);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       // The initial configuration failed, close up the hardware
       StopInternal();
@@ -189,8 +183,6 @@ nsGonkCameraControl::Initialize()
 
   DOM_CAMERA_LOGI("Initializing camera %d (this=%p, mCameraHw=%p)\n", mCameraId, this, mCameraHw.get());
   mCurrentConfiguration.mRecorderProfile.Truncate();
-  mRequestedPreviewSize.width = UINT32_MAX;
-  mRequestedPreviewSize.height = UINT32_MAX;
 
   // Initialize our camera configuration database.
   mCameraHw->PullParameters(mParams);
@@ -246,7 +238,7 @@ nsGonkCameraControl::Initialize()
     DOM_CAMERA_LOGI(" - flash:                         NOT supported\n");
   }
 
-  AutoTArray<Size, 16> sizes;
+  nsAutoTArray<Size, 16> sizes;
   mParams.Get(CAMERA_PARAM_SUPPORTED_VIDEOSIZES, sizes);
   if (sizes.Length() > 0) {
     mSeparateVideoAndPreviewSizesSupported = true;
@@ -263,7 +255,7 @@ nsGonkCameraControl::Initialize()
     mLastRecorderSize = mCurrentConfiguration.mPreviewSize;
   }
 
-  AutoTArray<nsString, 8> modes;
+  nsAutoTArray<nsString, 8> modes;
   mParams.Get(CAMERA_PARAM_SUPPORTED_METERINGMODES, modes);
   if (!modes.IsEmpty()) {
     nsString mode;
@@ -286,7 +278,7 @@ nsGonkCameraControl::Initialize()
     DOM_CAMERA_LOGI(" - metering mode:                 '%s'\n",
       NS_ConvertUTF16toUTF8(mode).get());
   }
-
+      
   return NS_OK;
 }
 
@@ -301,7 +293,7 @@ nsGonkCameraControl::~nsGonkCameraControl()
 nsresult
 nsGonkCameraControl::ValidateConfiguration(const Configuration& aConfig, Configuration& aValidatedConfig)
 {
-  AutoTArray<Size, 16> supportedSizes;
+  nsAutoTArray<Size, 16> supportedSizes;
   Get(CAMERA_PARAM_SUPPORTED_PICTURESIZES, supportedSizes);
 
   nsresult rv = GetSupportedSize(aConfig.mPictureSize, supportedSizes,
@@ -329,19 +321,9 @@ nsGonkCameraControl::ValidateConfiguration(const Configuration& aConfig, Configu
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (mCurrentConfiguration.mMode == aConfig.mMode &&
-      mCurrentConfiguration.mRecorderProfile.Equals(profile->GetName()) &&
-      mRequestedPreviewSize.Equals(aConfig.mPreviewSize) &&
-      mCurrentConfiguration.mPictureSize.Equals(aValidatedConfig.mPictureSize))
-  {
-    DOM_CAMERA_LOGI("Camera configuration is unchanged\n");
-    return NS_ERROR_ALREADY_INITIALIZED;
-  }
-
   aValidatedConfig.mMode = aConfig.mMode;
   aValidatedConfig.mPreviewSize = aConfig.mPreviewSize;
   aValidatedConfig.mRecorderProfile = profile->GetName();
-  mRequestedPreviewSize = aConfig.mPreviewSize;
   return NS_OK;
 }
 
@@ -350,46 +332,53 @@ nsGonkCameraControl::SetConfigurationInternal(const Configuration& aConfig)
 {
   DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
 
-  ICameraControlParameterSetAutoEnter set(this);
-
-  nsresult rv;
-  switch (aConfig.mMode) {
-    case kPictureMode:
-      rv = SetPictureConfiguration(aConfig);
-      break;
-
-    case kVideoMode:
-      rv = SetVideoConfiguration(aConfig);
-      break;
-
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unanticipated camera mode in SetConfigurationInternal()");
-      rv = NS_ERROR_FAILURE;
-      break;
-  }
-
-  DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
+  // Ensure sanity of all provided parameters and determine defaults if
+  // none are provided when given a new configuration
+  Configuration config;
+  nsresult rv = ValidateConfiguration(aConfig, config);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    mRequestedPreviewSize.width = UINT32_MAX;
-    mRequestedPreviewSize.height = UINT32_MAX;
     return rv;
   }
 
-  rv = Set(CAMERA_PARAM_RECORDINGHINT, aConfig.mMode == kVideoMode);
-  if (NS_FAILED(rv)) {
-    DOM_CAMERA_LOGE("Failed to set recording hint (0x%x)\n", rv);
-  }
+  {
+    ICameraControlParameterSetAutoEnter set(this);
 
-  mCurrentConfiguration.mMode = aConfig.mMode;
-  mCurrentConfiguration.mRecorderProfile = aConfig.mRecorderProfile;
+    switch (config.mMode) {
+      case kPictureMode:
+        rv = SetPictureConfiguration(config);
+        break;
 
-  if (aConfig.mMode == kPictureMode) {
-    mCurrentConfiguration.mPictureSize = aConfig.mPictureSize;
-  } else /* if config.mMode == kVideoMode */ {
-    // The following is best-effort; we don't currently support taking
-    // pictures while in video mode, but we should at least return
-    // sane values to OnConfigurationChange() handlers...
-    SetPictureSizeImpl(aConfig.mPictureSize);
+      case kVideoMode:
+        rv = SetVideoConfiguration(config);
+        break;
+
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unanticipated camera mode in SetConfigurationInternal()");
+        rv = NS_ERROR_FAILURE;
+        break;
+    }
+
+    DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    rv = Set(CAMERA_PARAM_RECORDINGHINT, config.mMode == kVideoMode);
+    if (NS_FAILED(rv)) {
+      DOM_CAMERA_LOGE("Failed to set recording hint (0x%x)\n", rv);
+    }
+
+    mCurrentConfiguration.mMode = config.mMode;
+    mCurrentConfiguration.mRecorderProfile = config.mRecorderProfile;
+    
+    if (config.mMode == kPictureMode) {
+      mCurrentConfiguration.mPictureSize = config.mPictureSize;
+    } else /* if config.mMode == kVideoMode */ {
+      // The following is best-effort; we don't currently support taking
+      // pictures while in video mode, but we should at least return
+      // sane values to OnConfigurationChange() handlers...
+      SetPictureSizeImpl(config.mPictureSize);
+    }
   }
   return NS_OK;
 }
@@ -405,19 +394,8 @@ nsGonkCameraControl::SetConfigurationImpl(const Configuration& aConfig)
     return NS_ERROR_INVALID_ARG;
   }
 
-  Configuration config;
-  nsresult rv = ValidateConfiguration(aConfig, config);
-  if (rv == NS_ERROR_ALREADY_INITIALIZED) {
-    // Configuration did not change, so no need to stop/start the preview
-    // or push parameters to the camera hardware
-    OnConfigurationChange();
-    return NS_OK;
-  } else if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
   // Stop any currently running preview
-  rv = PausePreview();
+  nsresult rv = PausePreview();
   if (NS_FAILED(rv)) {
     DOM_CAMERA_LOGW("PausePreview() in SetConfigurationImpl() failed (0x%x)\n", rv);
     if (rv == NS_ERROR_NOT_INITIALIZED) {
@@ -428,7 +406,7 @@ nsGonkCameraControl::SetConfigurationImpl(const Configuration& aConfig)
   }
 
   DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
-  rv = SetConfigurationInternal(config);
+  rv = SetConfigurationInternal(aConfig);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     StopPreviewImpl();
     return rv;
@@ -571,7 +549,7 @@ nsGonkCameraControl::PushParameters()
   if (NS_GetCurrentThread() != mCameraThread) {
     DOM_CAMERA_LOGT("%s:%d - dispatching to Camera Thread\n", __func__, __LINE__);
     nsCOMPtr<nsIRunnable> pushParametersTask =
-      NewRunnableMethod(this, &nsGonkCameraControl::PushParametersImpl);
+      NS_NewRunnableMethod(this, &nsGonkCameraControl::PushParametersImpl);
     return mCameraThread->Dispatch(pushParametersTask, NS_DISPATCH_NORMAL);
   }
 
@@ -922,7 +900,7 @@ nsGonkCameraControl::SetThumbnailSizeImpl(const Size& aSize)
   uint32_t smallestDeltaIndex = UINT32_MAX;
   int targetArea = aSize.width * aSize.height;
 
-  AutoTArray<Size, 8> supportedSizes;
+  nsAutoTArray<Size, 8> supportedSizes;
   Get(CAMERA_PARAM_SUPPORTED_JPEG_THUMBNAIL_SIZES, supportedSizes);
 
   for (uint32_t i = 0; i < supportedSizes.Length(); ++i) {
@@ -967,7 +945,7 @@ nsGonkCameraControl::GetCameraHw()
 nsresult
 nsGonkCameraControl::SetThumbnailSize(const Size& aSize)
 {
-  class SetThumbnailSize : public Runnable
+  class SetThumbnailSize : public nsRunnable
   {
   public:
     SetThumbnailSize(nsGonkCameraControl* aCameraControl, const Size& aSize)
@@ -989,7 +967,7 @@ nsGonkCameraControl::SetThumbnailSize(const Size& aSize)
     }
 
   protected:
-    RefPtr<nsGonkCameraControl> mCameraControl;
+    nsRefPtr<nsGonkCameraControl> mCameraControl;
     Size mSize;
   };
 
@@ -1027,7 +1005,7 @@ nsGonkCameraControl::SetPictureSizeImpl(const Size& aSize)
     return NS_OK;
   }
 
-  AutoTArray<Size, 8> supportedSizes;
+  nsAutoTArray<Size, 8> supportedSizes;
   Get(CAMERA_PARAM_SUPPORTED_PICTURESIZES, supportedSizes);
 
   Size best;
@@ -1085,7 +1063,7 @@ nsGonkCameraControl::RationalizeRotation(int32_t aRotation)
 nsresult
 nsGonkCameraControl::SetPictureSize(const Size& aSize)
 {
-  class SetPictureSize : public Runnable
+  class SetPictureSize : public nsRunnable
   {
   public:
     SetPictureSize(nsGonkCameraControl* aCameraControl, const Size& aSize)
@@ -1107,7 +1085,7 @@ nsGonkCameraControl::SetPictureSize(const Size& aSize)
     }
 
   protected:
-    RefPtr<nsGonkCameraControl> mCameraControl;
+    nsRefPtr<nsGonkCameraControl> mCameraControl;
     Size mSize;
   };
 
@@ -1247,7 +1225,7 @@ nsGonkCameraControl::StartRecordingImpl(DeviceStorageFileDescriptor* aFileDescri
   // close the file descriptor when we leave this function. Also note, that
   // since we're already off the main thread, we don't need to dispatch this.
   // We just let the CloseFileRunnable destructor do the work.
-  RefPtr<CloseFileRunnable> closer;
+  nsRefPtr<CloseFileRunnable> closer;
   if (aFileDescriptor->mFileDescriptor.IsValid()) {
     closer = new CloseFileRunnable(aFileDescriptor->mFileDescriptor);
   }
@@ -1287,7 +1265,7 @@ nsGonkCameraControl::StartRecordingImpl(DeviceStorageFileDescriptor* aFileDescri
 nsresult
 nsGonkCameraControl::StopRecordingImpl()
 {
-  class RecordingComplete : public Runnable
+  class RecordingComplete : public nsRunnable
   {
   public:
     RecordingComplete(already_AddRefed<DeviceStorageFile> aFile)
@@ -1302,12 +1280,12 @@ nsGonkCameraControl::StopRecordingImpl()
       MOZ_ASSERT(NS_IsMainThread());
 
       nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-      obs->NotifyObservers(mFile, "file-watcher-notify", MOZ_UTF16("modified"));
+      obs->NotifyObservers(mFile, "file-watcher-notify", NS_LITERAL_STRING("modified").get());
       return NS_OK;
     }
 
   private:
-    RefPtr<DeviceStorageFile> mFile;
+    nsRefPtr<DeviceStorageFile> mFile;
   };
 
   ReentrantMonitorAutoEnter mon(mRecorderMonitor);
@@ -1343,48 +1321,6 @@ nsGonkCameraControl::StopRecordingImpl()
 
   // notify DeviceStorage that the new video file is closed and ready
   return NS_DispatchToMainThread(new RecordingComplete(mVideoFile.forget()));
-}
-
-nsresult
-nsGonkCameraControl::PauseRecordingImpl()
-{
-  ReentrantMonitorAutoEnter mon(mRecorderMonitor);
-
-#ifdef MOZ_WIDGET_GONK
-  if (!mRecorder) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  int err = mRecorder->pause();
-  switch (err) {
-    case OK:
-      break;
-    case INVALID_OPERATION:
-      return NS_ERROR_NOT_IMPLEMENTED;
-    default:
-      return NS_ERROR_FAILURE;
-  }
-#endif
-  OnRecorderStateChange(CameraControlListener::kRecorderPaused);
-  return NS_OK;
-}
-
-nsresult
-nsGonkCameraControl::ResumeRecordingImpl()
-{
-  ReentrantMonitorAutoEnter mon(mRecorderMonitor);
-
-#ifdef MOZ_WIDGET_GONK
-  if (!mRecorder) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  if (mRecorder->resume() != OK) {
-    return NS_ERROR_FAILURE;
-  }
-#endif
-  OnRecorderStateChange(CameraControlListener::kRecorderResumed);
-  return NS_OK;
 }
 
 nsresult
@@ -1424,7 +1360,7 @@ protected:
   virtual ~AutoFocusMovingTimerCallback()
   { }
 
-  RefPtr<nsGonkCameraControl> mCameraControl;
+  nsRefPtr<nsGonkCameraControl> mCameraControl;
 };
 
 NS_IMPL_ISUPPORTS(AutoFocusMovingTimerCallback, nsITimerCallback);
@@ -1448,7 +1384,7 @@ nsGonkCameraControl::OnAutoFocusMoving(bool aIsMoving)
         mAutoFocusCompleteTimer->Cancel();
 
         if (!mAutoFocusPending) {
-          RefPtr<nsITimerCallback> timerCb = new AutoFocusMovingTimerCallback(this);
+          nsRefPtr<nsITimerCallback> timerCb = new AutoFocusMovingTimerCallback(this);
           nsresult rv = mAutoFocusCompleteTimer->InitWithCallback(timerCb,
                                                                   kAutoFocusCompleteTimeoutMs,
                                                                   nsITimer::TYPE_ONE_SHOT);
@@ -1471,7 +1407,7 @@ nsGonkCameraControl::OnAutoFocusMoving(bool aIsMoving)
 void
 nsGonkCameraControl::OnAutoFocusComplete(bool aSuccess, bool aExpired)
 {
-  class AutoFocusComplete : public Runnable
+  class AutoFocusComplete : public nsRunnable
   {
   public:
     AutoFocusComplete(nsGonkCameraControl* aCameraControl, bool aSuccess, bool aExpired)
@@ -1488,7 +1424,7 @@ nsGonkCameraControl::OnAutoFocusComplete(bool aSuccess, bool aExpired)
     }
 
   protected:
-    RefPtr<nsGonkCameraControl> mCameraControl;
+    nsRefPtr<nsGonkCameraControl> mCameraControl;
     bool mSuccess;
     bool mExpired;
   };
@@ -1557,11 +1493,6 @@ nsGonkCameraControl::OnFacesDetected(camera_frame_metadata_t* aMetaData)
 
   nsTArray<Face> faces;
   uint32_t numFaces = aMetaData->number_of_faces;
-  if (numFaces == 0 && mPrevFacesDetected == 0) {
-    return;
-  }
-  mPrevFacesDetected = numFaces;
-
   DOM_CAMERA_LOGI("Camera detected %d face(s)", numFaces);
 
   faces.SetCapacity(numFaces);
@@ -1726,7 +1657,7 @@ nsGonkCameraControl::SelectCaptureAndPreviewSize(const Size& aPreviewSize,
                   aPreviewSize.width, aPreviewSize.height,
                   aMaxSize.width, aMaxSize.height);
 
-  AutoTArray<Size, 16> sizes;
+  nsAutoTArray<Size, 16> sizes;
   nsresult rv = Get(CAMERA_PARAM_SUPPORTED_PREVIEWSIZES, sizes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -1920,7 +1851,7 @@ public:
 
 protected:
   ~GonkRecorderListener() { }
-  RefPtr<nsGonkCameraControl> mCameraControl;
+  nsRefPtr<nsGonkCameraControl> mCameraControl;
 };
 
 void
@@ -2157,7 +2088,7 @@ nsresult
 nsGonkCameraControl::LoadRecorderProfiles()
 {
   if (mRecorderProfiles.Count() == 0) {
-    nsTArray<RefPtr<RecorderProfile>> profiles;
+    nsTArray<nsRefPtr<RecorderProfile>> profiles;
     nsresult rv = GonkRecorderProfile::GetAll(mCameraId, profiles);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
@@ -2171,7 +2102,6 @@ nsGonkCameraControl::LoadRecorderProfiles()
 
     nsTArray<RecorderProfile>::size_type bestIndexMatch = 0;
     int bestAreaMatch = 0;
-    uint32_t bestPriorityMatch = UINT32_MAX;
 
     // Limit profiles to those video sizes supported by the camera hardware...
     for (nsTArray<RecorderProfile>::size_type i = 0; i < profiles.Length(); ++i) {
@@ -2186,22 +2116,17 @@ nsGonkCameraControl::LoadRecorderProfiles()
         if (static_cast<uint32_t>(width) == sizes[n].width &&
             static_cast<uint32_t>(height) == sizes[n].height) {
           mRecorderProfiles.Put(profiles[i]->GetName(), profiles[i]);
-
-          // "Best" or default profile is the one with the lowest priority
-          // value and largest area.
           int area = width * height;
-          uint32_t priority = profiles[i]->GetPriority();
-          if (bestPriorityMatch > priority ||
-              (bestPriorityMatch == priority && area > bestAreaMatch)) {
+          if (area > bestAreaMatch) {
             bestIndexMatch = i;
             bestAreaMatch = area;
-            bestPriorityMatch = priority;
           }
           break;
         }
       }
     }
 
+    // Default profile is the one with the largest area.
     if (bestAreaMatch > 0) {
       nsAutoString name;
       name.AssignASCII("default");
@@ -2210,6 +2135,17 @@ nsGonkCameraControl::LoadRecorderProfiles()
   }
 
   return NS_OK;
+}
+
+/* static */ PLDHashOperator
+nsGonkCameraControl::Enumerate(const nsAString& aProfileName,
+                               RecorderProfile* aProfile,
+                               void* aUserArg)
+{
+  nsTArray<nsString>* profiles = static_cast<nsTArray<nsString>*>(aUserArg);
+  MOZ_ASSERT(profiles);
+  profiles->AppendElement(aProfileName);
+  return PL_DHASH_NEXT;
 }
 
 nsresult
@@ -2221,9 +2157,7 @@ nsGonkCameraControl::GetRecorderProfiles(nsTArray<nsString>& aProfiles)
   }
 
   aProfiles.Clear();
-  for (auto iter = mRecorderProfiles.Iter(); !iter.Done(); iter.Next()) {
-    aProfiles.AppendElement(iter.Key());
-  }
+  mRecorderProfiles.EnumerateRead(Enumerate, static_cast<void*>(&aProfiles));
   return NS_OK;
 }
 
@@ -2246,7 +2180,7 @@ nsGonkCameraControl::OnRateLimitPreview(bool aLimit)
 void
 nsGonkCameraControl::CreatePoster(Image* aImage, uint32_t aWidth, uint32_t aHeight, int32_t aRotation)
 {
-  class PosterRunnable : public Runnable {
+  class PosterRunnable : public nsRunnable {
   public:
     PosterRunnable(nsGonkCameraControl* aTarget, Image* aImage,
                    uint32_t aWidth, uint32_t aHeight, int32_t aRotation)
@@ -2272,7 +2206,8 @@ nsGonkCameraControl::CreatePoster(Image* aImage, uint32_t aWidth, uint32_t aHeig
 
       // ARGB is 32 bits / pixel
       size_t tmpLength = mWidth * mHeight * sizeof(uint32_t);
-      UniquePtr<uint8_t[]> tmp = MakeUnique<uint8_t[]>(tmpLength);
+      nsAutoArrayPtr<uint8_t> tmp;
+      tmp = new uint8_t[tmpLength];
 
       GrallocImage* nativeImage = static_cast<GrallocImage*>(mImage.get());
       android::sp<GraphicBuffer> graphicBuffer = nativeImage->GetGraphicBuffer();
@@ -2282,7 +2217,7 @@ nsGonkCameraControl::CreatePoster(Image* aImage, uint32_t aWidth, uint32_t aHeig
 
       uint32_t stride = mWidth * 4;
       int err = libyuv::ConvertToARGB(static_cast<uint8_t*>(graphicSrc),
-                                      srcLength, tmp.get(), stride, 0, 0,
+                                      srcLength, tmp, stride, 0, 0,
                                       mWidth, mHeight, mWidth, mHeight,
                                       libyuv::kRotate0, libyuv::FOURCC_NV21);
 
@@ -2305,7 +2240,7 @@ nsGonkCameraControl::CreatePoster(Image* aImage, uint32_t aWidth, uint32_t aHeig
       }
 
       nsString opt;
-      nsresult rv = encoder->InitFromData(tmp.get(), tmpLength, mWidth,
+      nsresult rv = encoder->InitFromData(tmp, tmpLength, mWidth,
                                           mHeight, stride,
                                           imgIEncoder::INPUT_FORMAT_HOSTARGB,
                                           opt);
@@ -2342,8 +2277,8 @@ nsGonkCameraControl::CreatePoster(Image* aImage, uint32_t aWidth, uint32_t aHeig
     }
 
   private:
-    RefPtr<nsGonkCameraControl> mTarget;
-    RefPtr<Image> mImage;
+    nsRefPtr<nsGonkCameraControl> mTarget;
+    nsRefPtr<Image> mImage;
     int32_t mWidth;
     int32_t mHeight;
     int32_t mRotation;
@@ -2366,7 +2301,7 @@ nsGonkCameraControl::CreatePoster(Image* aImage, uint32_t aWidth, uint32_t aHeig
 void
 nsGonkCameraControl::OnPoster(void* aData, uint32_t aLength)
 {
-  RefPtr<BlobImpl> blobImpl;
+  nsRefPtr<BlobImpl> blobImpl;
   if (aData) {
     blobImpl = new BlobImplMemory(aData, aLength, NS_LITERAL_STRING("image/jpeg"));
   }
@@ -2377,11 +2312,15 @@ void
 nsGonkCameraControl::OnNewPreviewFrame(layers::TextureClient* aBuffer)
 {
 #ifdef MOZ_WIDGET_GONK
-  RefPtr<GrallocImage> frame = new GrallocImage();
+  nsRefPtr<Image> frame = mImageContainer->CreateImage(ImageFormat::GRALLOC_PLANAR_YCBCR);
 
-  IntSize picSize(mCurrentConfiguration.mPreviewSize.width,
-                  mCurrentConfiguration.mPreviewSize.height);
-  frame->AdoptData(aBuffer, picSize);
+  GrallocImage* videoImage = static_cast<GrallocImage*>(frame.get());
+
+  GrallocImage::GrallocData data;
+  data.mGraphicBuffer = aBuffer;
+  data.mPicSize = IntSize(mCurrentConfiguration.mPreviewSize.width,
+                          mCurrentConfiguration.mPreviewSize.height);
+  videoImage->SetData(data);
 
   if (mCapturePoster.exchange(false)) {
     CreatePoster(frame,

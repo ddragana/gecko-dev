@@ -14,7 +14,6 @@
 #include "nsIHttpActivityObserver.h"
 #include "NullHttpChannel.h"
 #include "nsQueryObject.h"
-#include "nsNetUtil.h"
 
 namespace mozilla {
 namespace net {
@@ -63,7 +62,7 @@ public:
       return NS_OK;
     }
 
-    RefPtr<NullHttpChannel> channel = new NullHttpChannel();
+    nsRefPtr<NullHttpChannel> channel = new NullHttpChannel();
     channel->Init(uri, 0, nullptr, 0, nullptr);
     mActivityDistributor->ObserveActivity(
       nsCOMPtr<nsISupports>(do_QueryObject(channel)),
@@ -270,7 +269,7 @@ NullHttpTransaction::RequestHead()
 
 nsresult
 NullHttpTransaction::TakeSubTransactions(
-  nsTArray<RefPtr<nsAHttpTransaction> > &outTransactions)
+  nsTArray<nsRefPtr<nsAHttpTransaction> > &outTransactions)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

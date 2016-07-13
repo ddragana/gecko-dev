@@ -28,9 +28,9 @@ class SpeakerManager final
   NS_DECL_NSIDOMEVENTLISTENER
 
 public:
-  void Init(nsPIDOMWindowInner* aWindow);
+  void Init(nsPIDOMWindow* aWindow);
 
-  nsPIDOMWindowInner* GetParentObject() const;
+  nsPIDOMWindow* GetParentObject() const;
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
   /**

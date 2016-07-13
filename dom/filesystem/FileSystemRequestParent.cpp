@@ -18,42 +18,33 @@ namespace mozilla {
 namespace dom {
 
 FileSystemRequestParent::FileSystemRequestParent()
-  : mDestroyed(false)
 {
-  AssertIsOnBackgroundThread();
 }
 
 FileSystemRequestParent::~FileSystemRequestParent()
 {
-  AssertIsOnBackgroundThread();
 }
 
 #define FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(name)                         \
     case FileSystemParams::TFileSystem##name##Params: {                        \
       const FileSystem##name##Params& p = aParams;                             \
-      mFileSystem = FileSystemBase::DeserializeDOMPath(p.filesystem());        \
-      MOZ_ASSERT(mFileSystem);                                                 \
-      mTask = name##TaskParent::Create(mFileSystem, p, this, rv);              \
-      if (NS_WARN_IF(rv.Failed())) {                                           \
-        return false;                                                          \
-      }                                                                        \
+      mFileSystem = FileSystemBase::FromString(p.filesystem());                \
+      task = new name##Task(mFileSystem, p, this);                             \
       break;                                                                   \
     }
 
 bool
-FileSystemRequestParent::Initialize(const FileSystemParams& aParams)
+FileSystemRequestParent::Dispatch(ContentParent* aParent,
+                                  const FileSystemParams& aParams)
 {
-  AssertIsOnBackgroundThread();
-
-  ErrorResult rv;
-
+  MOZ_ASSERT(aParent, "aParent should not be null.");
+  nsRefPtr<FileSystemTaskBase> task;
   switch (aParams.type()) {
 
     FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(CreateDirectory)
     FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(CreateFile)
     FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(GetDirectoryListing)
     FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(GetFileOrDirectory)
-    FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(GetFiles)
     FILESYSTEM_REQUEST_PARENT_DISPATCH_ENTRY(Remove)
 
     default: {
@@ -62,47 +53,39 @@ FileSystemRequestParent::Initialize(const FileSystemParams& aParams)
     }
   }
 
-  if (NS_WARN_IF(!mTask || !mFileSystem)) {
+  if (NS_WARN_IF(!task || !mFileSystem)) {
     // Should never reach here.
     return false;
   }
 
-  if (mFileSystem->PermissionCheckType() != FileSystemBase::ePermissionCheckNotRequired) {
-    nsAutoCString access;
-    mTask->GetPermissionAccessType(access);
+  if (mFileSystem->RequiresPermissionChecks()) {
+    // Check the content process permission.
 
-    mPermissionName = mFileSystem->GetPermission();
-    mPermissionName.Append('-');
-    mPermissionName.Append(access);
+    nsCString access;
+    task->GetPermissionAccessType(access);
+
+    nsAutoCString permissionName;
+    permissionName = mFileSystem->GetPermission();
+    permissionName.Append('-');
+    permissionName.Append(access);
+
+    if (!AssertAppProcessPermission(aParent, permissionName.get())) {
+      return false;
+    }
   }
 
+  task->Start();
   return true;
 }
 
 void
-FileSystemRequestParent::Start()
+FileSystemRequestParent::ActorDestroy(ActorDestroyReason why)
 {
-  MOZ_ASSERT(!mDestroyed);
-  MOZ_ASSERT(mFileSystem);
-  MOZ_ASSERT(mTask);
-
-  mTask->Start();
-}
-
-void
-FileSystemRequestParent::ActorDestroy(ActorDestroyReason aWhy)
-{
-  AssertIsOnBackgroundThread();
-  MOZ_ASSERT(!mDestroyed);
-
   if (!mFileSystem) {
     return;
   }
-
   mFileSystem->Shutdown();
   mFileSystem = nullptr;
-  mTask = nullptr;
-  mDestroyed = true;
 }
 
 } // namespace dom

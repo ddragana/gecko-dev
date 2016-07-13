@@ -22,8 +22,6 @@ namespace dom {
 
 class GlobalObject;
 class DOMMatrix;
-class DOMPoint;
-struct DOMPointInit;
 
 class DOMMatrixReadOnly : public nsWrapperCache
 {
@@ -144,7 +142,7 @@ private:
   DOMMatrixReadOnly& operator=(const DOMMatrixReadOnly&) = delete;
 };
 
-class DOMMatrix : public DOMMatrixReadOnly
+class DOMMatrix final : public DOMMatrixReadOnly
 {
 public:
   explicit DOMMatrix(nsISupports* aParent)
@@ -246,10 +244,8 @@ public:
   DOMMatrix* SkewYSelf(double aSy);
   DOMMatrix* InvertSelf();
   DOMMatrix* SetMatrixValue(const nsAString& aTransformList, ErrorResult& aRv);
-protected:
+private:
   void Ensure3DMatrix();
-
-  virtual ~DOMMatrix() {}
 };
 
 } // namespace dom

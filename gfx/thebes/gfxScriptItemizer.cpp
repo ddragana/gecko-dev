@@ -64,14 +64,14 @@
 #define SYNC_FIXUP() (fixupCount = 0)
 
 void
-gfxScriptItemizer::push(uint32_t endPairChar, Script newScriptCode)
+gfxScriptItemizer::push(uint32_t endPairChar, int32_t scriptCode)
 {
     pushCount  = LIMIT_INC(pushCount);
     fixupCount = LIMIT_INC(fixupCount);
 
     parenSP = INC1(parenSP);
     parenStack[parenSP].endPairChar = endPairChar;
-    parenStack[parenSP].scriptCode = newScriptCode;
+    parenStack[parenSP].scriptCode = scriptCode;
 }
 
 void
@@ -97,22 +97,31 @@ gfxScriptItemizer::pop()
 }
 
 void
-gfxScriptItemizer::fixup(Script newScriptCode)
+gfxScriptItemizer::fixup(int32_t scriptCode)
 {
     int32_t fixupSP = DEC(parenSP, fixupCount);
 
     while (fixupCount-- > 0) {
         fixupSP = INC1(fixupSP);
-        parenStack[fixupSP].scriptCode = newScriptCode;
+        parenStack[fixupSP].scriptCode = scriptCode;
     }
 }
 
 static inline bool
-SameScript(Script runScript, Script currCharScript)
+SameScript(int32_t runScript, int32_t currCharScript)
 {
-    return runScript <= Script::INHERITED ||
-           currCharScript <= Script::INHERITED ||
+    return runScript <= MOZ_SCRIPT_INHERITED ||
+           currCharScript <= MOZ_SCRIPT_INHERITED ||
            currCharScript == runScript;
+}
+
+// Return whether the char has a mirrored-pair counterpart.
+// NOTE that this depends on the implementation of nsCharProps records in
+// nsUnicodeProperties, and may need to be updated if those structures change
+static inline bool
+HasMirroredChar(uint32_t aCh)
+{
+    return GetCharProps1(aCh).mMirrorOffsetIndex != 0;
 }
 
 gfxScriptItemizer::gfxScriptItemizer(const char16_t *src, uint32_t length)
@@ -132,7 +141,7 @@ gfxScriptItemizer::SetText(const char16_t *src, uint32_t length)
 
 bool
 gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
-                        Script& aRunScript)
+                        int32_t& aRunScript)
 {
     /* if we've fallen off the end of the text, we're done */
     if (scriptLimit >= textLength) {
@@ -140,11 +149,11 @@ gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
     }
 
     SYNC_FIXUP();
-    scriptCode = Script::COMMON;
+    scriptCode = MOZ_SCRIPT_COMMON;
 
     for (scriptStart = scriptLimit; scriptLimit < textLength; scriptLimit += 1) {
         uint32_t ch;
-        Script sc;
+        int32_t sc;
         uint32_t startOfChar = scriptLimit;
 
         ch = textPtr[scriptLimit];
@@ -158,12 +167,20 @@ gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
             }
         }
 
+        // Get the nsCharProps2 record for the current character,
+        // so we can read the script and (if needed) the gen category
+        // without needing to do two multi-level lookups.
+        // NOTE that this means we're relying on an implementation detail
+        // of the nsUnicodeProperties tables, and might have to revise this
+        // if the nsCharProps records used there are modified in future.
+        const nsCharProps2& charProps = GetCharProps2(ch);
+
         // Initialize gc to UNASSIGNED; we'll only set it to the true GC
         // if the character has script=COMMON, otherwise we don't care.
         uint8_t gc = HB_UNICODE_GENERAL_CATEGORY_UNASSIGNED;
 
-        sc = GetScriptCode(ch);
-        if (sc == Script::COMMON) {
+        sc = charProps.mScriptCode;
+        if (sc == MOZ_SCRIPT_COMMON) {
             /*
              * Paired character handling:
              *
@@ -175,7 +192,7 @@ gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
              * We only do this if the script is COMMON; for chars with
              * specific script assignments, we just use them as-is.
              */
-            gc = GetGeneralCategory(ch);
+            gc = charProps.mCategory;
             if (gc == HB_UNICODE_GENERAL_CATEGORY_OPEN_PUNCTUATION) {
                 uint32_t endPairChar = mozilla::unicode::GetMirroredChar(ch);
                 if (endPairChar != ch) {
@@ -195,8 +212,8 @@ gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
         }
 
         if (SameScript(scriptCode, sc)) {
-            if (scriptCode <= Script::INHERITED &&
-                sc > Script::INHERITED)
+            if (scriptCode <= MOZ_SCRIPT_INHERITED &&
+                sc > MOZ_SCRIPT_INHERITED)
             {
                 scriptCode = sc;
                 fixup(scriptCode);

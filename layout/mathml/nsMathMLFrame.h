@@ -21,6 +21,7 @@ class nsDisplayListSet;
 // Concrete base class with default methods that derived MathML frames can override
 class nsMathMLFrame : public nsIMathMLFrame {
 public:
+
   // nsIMathMLFrame ---
 
   virtual bool
@@ -49,7 +50,7 @@ public:
   virtual eMathMLFrameType GetMathMLFrameType() override;
 
   NS_IMETHOD
-  Stretch(mozilla::gfx::DrawTarget* aDrawTarget,
+  Stretch(nsRenderingContext& aRenderingContext,
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
           nsHTMLReflowMetrics& aDesiredStretchSize) override
@@ -198,8 +199,9 @@ public:
                       nscoord&        aSubDrop,
                       float           aFontSizeInflation) 
   {
-    RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetFontMetricsForFrame(aChild, aFontSizeInflation);
+    nsRefPtr<nsFontMetrics> fm;
+    nsLayoutUtils::GetFontMetricsForFrame(aChild, getter_AddRefs(fm),
+                                          aFontSizeInflation);
     GetSubDrop(fm, aSubDrop);
   }
 
@@ -208,8 +210,9 @@ public:
                       nscoord&        aSupDrop,
                       float           aFontSizeInflation) 
   {
-    RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetFontMetricsForFrame(aChild, aFontSizeInflation);
+    nsRefPtr<nsFontMetrics> fm;
+    nsLayoutUtils::GetFontMetricsForFrame(aChild, getter_AddRefs(fm),
+                                          aFontSizeInflation);
     GetSupDrop(fm, aSupDrop);
   }
 
@@ -333,14 +336,14 @@ public:
   // Here are some slower variants to obtain the desired metrics
   // by actually measuring some characters
   static void
-  GetRuleThickness(mozilla::gfx::DrawTarget* aDrawTarget,
-                   nsFontMetrics* aFontMetrics,
-                   nscoord& aRuleThickness);
+  GetRuleThickness(nsRenderingContext& aRenderingContext, 
+                   nsFontMetrics*      aFontMetrics,
+                   nscoord&             aRuleThickness);
 
   static void
-  GetAxisHeight(mozilla::gfx::DrawTarget* aDrawTarget,
-                nsFontMetrics* aFontMetrics,
-                nscoord& aAxisHeight);
+  GetAxisHeight(nsRenderingContext& aRenderingContext, 
+                nsFontMetrics*      aFontMetrics,
+                nscoord&             aAxisHeight);
 
   static void
   GetRadicalParameters(nsFontMetrics* aFontMetrics,
@@ -351,10 +354,10 @@ public:
 
 protected:
 #if defined(DEBUG) && defined(SHOW_BOUNDING_BOX)
-  void DisplayBoundingMetrics(nsDisplayListBuilder* aBuilder,
-                              nsIFrame* aFrame, const nsPoint& aPt,
-                              const nsBoundingMetrics& aMetrics,
-                              const nsDisplayListSet& aLists);
+  nsresult DisplayBoundingMetrics(nsDisplayListBuilder* aBuilder,
+                                  nsIFrame* aFrame, const nsPoint& aPt,
+                                  const nsBoundingMetrics& aMetrics,
+                                  const nsDisplayListSet& aLists);
 #endif
 
   /**

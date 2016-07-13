@@ -63,7 +63,8 @@ function checkFile() {
 }
 
 function run_test() {
-  if (mozinfo.os == "mac") {
+  var isOSX = ("nsILocalFileMac" in Components.interfaces);
+  if (isOSX) {
     dump("INFO | test_punycodeURIs.js | Skipping test on mac, bug 599475")
     return;
   }

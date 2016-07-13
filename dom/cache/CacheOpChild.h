@@ -10,7 +10,7 @@
 #include "mozilla/dom/cache/ActorChild.h"
 #include "mozilla/dom/cache/PCacheOpChild.h"
 #include "mozilla/dom/cache/TypeUtils.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 class nsIGlobalObject;
 
@@ -31,7 +31,7 @@ class CacheOpChild final : public PCacheOpChild
 private:
   // This class must be constructed by CacheChild or CacheStorageChild using
   // their ExecuteOp() factory method.
-  CacheOpChild(CacheWorkerHolder* aWorkerHolder, nsIGlobalObject* aGlobal,
+  CacheOpChild(Feature* aFeature, nsIGlobalObject* aGlobal,
                nsISupports* aParent, Promise* aPromise);
   ~CacheOpChild();
 
@@ -55,8 +55,8 @@ private:
   AssertOwningThread() const override;
 #endif
 
-  virtual mozilla::ipc::PBackgroundChild*
-  GetIPCManager() override;
+  virtual CachePushStreamChild*
+  CreatePushStream(nsIAsyncInputStream* aStream) override;
 
   // Utility methods
   void
@@ -72,7 +72,7 @@ private:
   // Hold the parent Cache or CacheStorage object alive until this async
   // operation completes.
   nsCOMPtr<nsISupports> mParent;
-  RefPtr<Promise> mPromise;
+  nsRefPtr<Promise> mPromise;
 
   NS_DECL_OWNINGTHREAD
 };

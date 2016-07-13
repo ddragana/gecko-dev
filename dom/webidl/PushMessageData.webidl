@@ -7,15 +7,13 @@
  * https://w3c.github.io/push-api/
  */
 
-[Func="nsContentUtils::PushEnabled",
- Exposed=ServiceWorker]
+[Exposed=ServiceWorker]
 interface PushMessageData
 {
-    [Throws]
-    ArrayBuffer arrayBuffer();
-    [Throws]
-    Blob        blob();
-    [Throws]
-    any         json();
-    USVString   text();
+    // FIXME(nsm): Bug 1149195.
+    // These methods will be exposed once encryption is supported.
+    // ArrayBuffer arrayBuffer();
+    // Blob        blob();
+    // object      json();
+    // USVString   text();
 };

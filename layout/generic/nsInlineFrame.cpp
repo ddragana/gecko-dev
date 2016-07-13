@@ -14,13 +14,11 @@
 #include "nsPresContext.h"
 #include "nsRenderingContext.h"
 #include "nsCSSAnonBoxes.h"
-#include "mozilla/RestyleManagerHandle.h"
-#include "mozilla/RestyleManagerHandleInlines.h"
+#include "nsAutoPtr.h"
+#include "RestyleManager.h"
 #include "nsDisplayList.h"
 #include "mozilla/Likely.h"
 #include "SVGTextFrame.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 
 #ifdef DEBUG
 #undef NOISY_PUSHING
@@ -70,7 +68,7 @@ nsInlineFrame::InvalidateFrame(uint32_t aDisplayItemKey)
     svgTextFrame->InvalidateFrame();
     return;
   }
-  nsContainerFrame::InvalidateFrame(aDisplayItemKey);
+  nsInlineFrameBase::InvalidateFrame(aDisplayItemKey);
 }
 
 void
@@ -83,7 +81,7 @@ nsInlineFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayIte
     svgTextFrame->InvalidateFrame();
     return;
   }
-  nsContainerFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey);
+  nsInlineFrameBase::InvalidateFrameWithRect(aRect, aDisplayItemKey);
 }
 
 static inline bool
@@ -207,10 +205,12 @@ nsInlineFrame::DestroyFrom(nsIFrame* aDestructRoot)
 }
 
 nsresult
-nsInlineFrame::StealFrame(nsIFrame* aChild)
+nsInlineFrame::StealFrame(nsIFrame* aChild,
+                          bool      aForceNormal)
 {
-  if (MaybeStealOverflowContainerFrame(aChild)) {
-    return NS_OK;
+  if (aChild->HasAnyStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER) &&
+      !aForceNormal) {
+    return nsContainerFrame::StealFrame(aChild, aForceNormal);
   }
 
   nsInlineFrame* parent = this;
@@ -292,13 +292,13 @@ nsInlineFrame::ComputeSize(nsRenderingContext *aRenderingContext,
 }
 
 nsRect
-nsInlineFrame::ComputeTightBounds(DrawTarget* aDrawTarget) const
+nsInlineFrame::ComputeTightBounds(gfxContext* aContext) const
 {
   // be conservative
   if (StyleContext()->HasTextDecorationLines()) {
     return GetVisualOverflowRect();
   }
-  return ComputeSimpleTightBounds(aDrawTarget);
+  return ComputeSimpleTightBounds(aContext);
 }
 
 void
@@ -316,13 +316,20 @@ nsInlineFrame::ReparentFloatsForInlineChild(nsIFrame* aOurLineContainer,
     return;
   }
 
-  nsBlockFrame* frameBlock = nsLayoutUtils::GetFloatContainingBlock(aFrame);
-  if (!frameBlock || frameBlock == aOurLineContainer) {
+  nsIFrame* ancestor = aFrame;
+  do {
+    ancestor = ancestor->GetParent();
+    if (!ancestor)
+      return;
+  } while (!ancestor->IsFloatContainingBlock());
+
+  if (ancestor == aOurLineContainer)
     return;
-  }
 
   nsBlockFrame* ourBlock = nsLayoutUtils::GetAsBlock(aOurLineContainer);
   NS_ASSERTION(ourBlock, "Not a block, but broke vertically?");
+  nsBlockFrame* frameBlock = nsLayoutUtils::GetAsBlock(ancestor);
+  NS_ASSERTION(frameBlock, "ancestor not a block");
 
   while (true) {
     ourBlock->ReparentFloats(aFrame, frameBlock, false);
@@ -350,7 +357,7 @@ ReparentChildListStyle(nsPresContext* aPresContext,
                        const nsFrameList::Slice& aFrames,
                        nsIFrame* aParentFrame)
 {
-  RestyleManagerHandle restyleManager = aPresContext->RestyleManager();
+  RestyleManager* restyleManager = aPresContext->RestyleManager();
 
   for (nsFrameList::Enumerator e(aFrames); !e.AtEnd(); e.Next()) {
     NS_ASSERTION(e.get()->GetParent() == aParentFrame, "Bogus parentage");
@@ -479,7 +486,7 @@ nsInlineFrame::AttributeChanged(int32_t aNameSpaceID,
                                 int32_t aModType)
 {
   nsresult rv =
-    nsContainerFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+    nsInlineFrameBase::AttributeChanged(aNameSpaceID, aAttribute, aModType);
 
   if (NS_FAILED(rv)) {
     return rv;
@@ -511,7 +518,7 @@ nsInlineFrame::DrainSelfOverflowListInternal(DrainFlags aFlags,
       }
       const bool doReparentSC =
         (aFlags & eInFirstLine) && !(aFlags & eForDestroy);
-      RestyleManagerHandle restyleManager = PresContext()->RestyleManager();
+      RestyleManager* restyleManager = PresContext()->RestyleManager();
       for (nsIFrame* f = firstChild; f; f = f->GetNextSibling()) {
         f->SetParent(this);
         if (doReparentSC) {
@@ -578,7 +585,7 @@ nsInlineFrame::ReflowFrames(nsPresContext* aPresContext,
 
   nsLineLayout* lineLayout = aReflowState.mLineLayout;
   bool inFirstLine = aReflowState.mLineLayout->GetInFirstLine();
-  RestyleManagerHandle restyleManager = aPresContext->RestyleManager();
+  RestyleManager* restyleManager = aPresContext->RestyleManager();
   WritingMode frameWM = aReflowState.GetWritingMode();
   WritingMode lineWM = aReflowState.mLineLayout->mRootSpan->mWritingMode;
   LogicalMargin framePadding = aReflowState.ComputedLogicalBorderPadding();
@@ -652,7 +659,7 @@ nsInlineFrame::ReflowFrames(nsPresContext* aPresContext,
       // so nsFirstLetterFrame::Reflow can destroy them safely (bug 401042).
       nsIFrame* realFrame = nsPlaceholderFrame::GetRealFrameFor(frame);
       if (realFrame->GetType() == nsGkAtoms::letterFrame) {
-        nsIFrame* child = realFrame->PrincipalChildList().FirstChild();
+        nsIFrame* child = realFrame->GetFirstPrincipalChild();
         if (child) {
           NS_ASSERTION(child->GetType() == nsGkAtoms::textFrame,
                        "unexpected frame type");
@@ -1051,7 +1058,7 @@ nsFirstLineFrame::Init(nsIContent*       aContent,
     // we behave as if an anonymous (unstyled) span was the child
     // of the parent frame.
     nsStyleContext* parentContext = aParent->StyleContext();
-    RefPtr<nsStyleContext> newSC = PresContext()->StyleSet()->
+    nsRefPtr<nsStyleContext> newSC = PresContext()->StyleSet()->
       ResolveAnonymousBoxStyle(nsCSSAnonBoxes::mozLineFrame, parentContext);
     SetStyleContext(newSC);
   } else {

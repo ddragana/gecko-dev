@@ -20,7 +20,7 @@ public:
   friend nsIFrame* NS_NewMathMLmunderoverFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   virtual nsresult
-  Place(DrawTarget*          aDrawTarget,
+  Place(nsRenderingContext& aRenderingContext,
         bool                 aPlaceOrigin,
         nsHTMLReflowMetrics& aDesiredSize) override;
 

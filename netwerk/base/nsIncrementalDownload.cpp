@@ -5,8 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Attributes.h"
-#include "mozilla/UniquePtrExtensions.h"
-#include "mozilla/UniquePtr.h"
 
 #include "nsIIncrementalDownload.h"
 #include "nsIRequestObserver.h"
@@ -16,19 +14,16 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserverService.h"
 #include "nsIObserver.h"
-#include "nsIStreamListener.h"
 #include "nsIFile.h"
 #include "nsITimer.h"
-#include "nsIURI.h"
-#include "nsIInputStream.h"
 #include "nsNetUtil.h"
+#include "nsAutoPtr.h"
 #include "nsWeakReference.h"
 #include "prio.h"
 #include "prprf.h"
 #include <algorithm>
 #include "nsIContentPolicy.h"
 #include "nsContentUtils.h"
-#include "mozilla/UniquePtr.h"
 
 // Default values used to initialize a nsIncrementalDownload object.
 #define DEFAULT_CHUNK_SIZE (4096 * 16)  // bytes
@@ -38,8 +33,6 @@
 
 // Number of times to retry a failed byte-range request.
 #define MAX_RETRY_COUNT 20
-
-using namespace mozilla;
 
 //-----------------------------------------------------------------------------
 
@@ -151,7 +144,7 @@ private:
   nsCOMPtr<nsIFile>                        mDest;
   nsCOMPtr<nsIChannel>                     mChannel;
   nsCOMPtr<nsITimer>                       mTimer;
-  mozilla::UniquePtr<char[]>               mChunk;
+  nsAutoArrayPtr<char>                     mChunk;
   int32_t                                  mChunkLen;
   int32_t                                  mChunkSize;
   int32_t                                  mInterval;
@@ -195,7 +188,7 @@ nsIncrementalDownload::FlushChunk()
   if (mChunkLen == 0)
     return NS_OK;
 
-  nsresult rv = AppendToFile(mDest, mChunk.get(), mChunkLen);
+  nsresult rv = AppendToFile(mDest, mChunk, mChunkLen);
   if (NS_FAILED(rv))
     return rv;
 
@@ -272,7 +265,7 @@ nsIncrementalDownload::ProcessTimeout()
   nsresult rv = NS_NewChannel(getter_AddRefs(channel),
                               mFinalURI,
                               nsContentUtils::GetSystemPrincipal(),
-                              nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                              nsILoadInfo::SEC_NORMAL,
                               nsIContentPolicy::TYPE_OTHER,
                               nullptr,   // loadGroup
                               this,      // aCallbacks
@@ -314,7 +307,7 @@ nsIncrementalDownload::ProcessTimeout()
     }
   }
 
-  rv = channel->AsyncOpen2(this);
+  rv = channel->AsyncOpen(this, nullptr);
   if (NS_FAILED(rv))
     return rv;
 
@@ -713,7 +706,7 @@ nsIncrementalDownload::OnStartRequest(nsIRequest *request,
   if (diff < int64_t(mChunkSize))
     mChunkSize = uint32_t(diff);
 
-  mChunk = mozilla::MakeUniqueFallible<char[]>(mChunkSize);
+  mChunk = new char[mChunkSize];
   if (!mChunk)
     rv = NS_ERROR_OUT_OF_MEMORY;
 
@@ -770,7 +763,7 @@ nsIncrementalDownload::OnDataAvailable(nsIRequest *request,
     uint32_t space = mChunkSize - mChunkLen;
     uint32_t n, len = std::min(space, count);
 
-    nsresult rv = input->Read(&mChunk[mChunkLen], len, &n);
+    nsresult rv = input->Read(mChunk + mChunkLen, len, &n);
     if (NS_FAILED(rv))
       return rv;
     if (n != len)

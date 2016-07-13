@@ -6,6 +6,7 @@
 #include "nsHTMLEditorEventListener.h"
 
 #include "mozilla/dom/Selection.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsEditor.h"
@@ -60,7 +61,7 @@ nsHTMLEditorEventListener::MouseUp(nsIDOMMouseEvent* aMouseEvent)
   nsHTMLEditor* htmlEditor = GetHTMLEditor();
 
   nsCOMPtr<nsIDOMEventTarget> target;
-  nsresult rv = aMouseEvent->AsEvent()->GetTarget(getter_AddRefs(target));
+  nsresult rv = aMouseEvent->GetTarget(getter_AddRefs(target));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
   nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);
@@ -79,17 +80,13 @@ nsHTMLEditorEventListener::MouseDown(nsIDOMMouseEvent* aMouseEvent)
   nsHTMLEditor* htmlEditor = GetHTMLEditor();
   // Contenteditable should disregard mousedowns outside it.
   // IsAcceptableInputEvent() checks it for a mouse event.
-  if (!htmlEditor->IsAcceptableInputEvent(aMouseEvent->AsEvent())) {
-    // If it's not acceptable mousedown event (including when mousedown event
-    // is fired outside of the active editing host), we need to commit
-    // composition because it will be change the selection to the clicked
-    // point.  Then, we won't be able to commit the composition.
-    return nsEditorEventListener::MouseDown(aMouseEvent);
+  if (!htmlEditor->IsAcceptableInputEvent(aMouseEvent)) {
+    return NS_OK;
   }
 
   // Detect only "context menu" click
   // XXX This should be easier to do!
-  // But eDOMEvents_contextmenu and eContextMenu is not exposed in any event
+  // But eDOMEvents_contextmenu and NS_CONTEXTMENU is not exposed in any event
   // interface :-(
   int16_t buttonNumber;
   nsresult rv = aMouseEvent->GetButton(&buttonNumber);
@@ -102,13 +99,13 @@ nsHTMLEditorEventListener::MouseDown(nsIDOMMouseEvent* aMouseEvent)
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIDOMEventTarget> target;
-  rv = aMouseEvent->AsEvent()->GetExplicitOriginalTarget(getter_AddRefs(target));
+  rv = aMouseEvent->GetExplicitOriginalTarget(getter_AddRefs(target));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
   nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);
 
   if (isContextClick || (buttonNumber == 0 && clickCount == 2)) {
-    RefPtr<Selection> selection = mEditor->GetSelection();
+    nsRefPtr<Selection> selection = mEditor->GetSelection();
     NS_ENSURE_TRUE(selection, NS_OK);
 
     // Get location of mouse within target node
@@ -129,7 +126,7 @@ nsHTMLEditorEventListener::MouseDown(nsIDOMMouseEvent* aMouseEvent)
       NS_ENSURE_SUCCESS(rv, rv);
 
       for (int32_t i = 0; i < rangeCount; i++) {
-        RefPtr<nsRange> range = selection->GetRangeAt(i);
+        nsRefPtr<nsRange> range = selection->GetRangeAt(i);
         if (!range) {
           // Don't bail yet, iterate through them all
           continue;
@@ -189,7 +186,7 @@ nsHTMLEditorEventListener::MouseDown(nsIDOMMouseEvent* aMouseEvent)
     // Prevent bubbling if we changed selection or
     //   for all context clicks
     if (element || isContextClick) {
-      aMouseEvent->AsEvent()->PreventDefault();
+      aMouseEvent->PreventDefault();
       return NS_OK;
     }
   } else if (!isContextClick && buttonNumber == 0 && clickCount == 1) {
@@ -197,7 +194,7 @@ nsHTMLEditorEventListener::MouseDown(nsIDOMMouseEvent* aMouseEvent)
     int32_t clientX, clientY;
     aMouseEvent->GetClientX(&clientX);
     aMouseEvent->GetClientY(&clientY);
-    htmlEditor->MouseDown(clientX, clientY, element, aMouseEvent->AsEvent());
+    htmlEditor->MouseDown(clientX, clientY, element, aMouseEvent);
   }
 
   return nsEditorEventListener::MouseDown(aMouseEvent);
@@ -207,7 +204,7 @@ nsresult
 nsHTMLEditorEventListener::MouseClick(nsIDOMMouseEvent* aMouseEvent)
 {
   nsCOMPtr<nsIDOMEventTarget> target;
-  nsresult rv = aMouseEvent->AsEvent()->GetTarget(getter_AddRefs(target));
+  nsresult rv = aMouseEvent->GetTarget(getter_AddRefs(target));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
   nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);

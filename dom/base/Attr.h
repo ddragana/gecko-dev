@@ -37,7 +37,8 @@ class Attr final : public nsIAttribute,
 public:
   Attr(nsDOMAttributeMap* aAttrMap,
        already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-       const nsAString& aValue);
+       const nsAString& aValue,
+       bool aNsAware);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
@@ -97,6 +98,8 @@ public:
 
   Element* GetOwnerElement(ErrorResult& aRv);
 
+  bool IsNSAware() const { return mNsAware; }
+
 protected:
   virtual Element* GetNameSpaceElement() override
   {
@@ -106,6 +109,8 @@ protected:
   static bool sInitialized;
 
 private:
+  already_AddRefed<nsIAtom> GetNameAtom(nsIContent* aContent);
+
   nsString mValue;
 };
 

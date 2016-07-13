@@ -6,6 +6,7 @@
 #ifndef GFX_FONT_INFO_LOADER_H
 #define GFX_FONT_INFO_LOADER_H
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
 #include "nsITimer.h"
@@ -14,7 +15,6 @@
 #include "nsString.h"
 #include "gfxFont.h"
 #include "nsIRunnable.h"
-#include "mozilla/Atomics.h"
 #include "mozilla/TimeStamp.h"
 #include "nsISupportsImpl.h"
 
@@ -33,7 +33,7 @@ struct FontFaceData {
 
     nsString mFullName;
     nsString mPostscriptName;
-    RefPtr<gfxCharacterMap> mCharacterMap;
+    nsRefPtr<gfxCharacterMap> mCharacterMap;
     uint32_t mUVSOffset;
     bool mSymbolFont;
 };
@@ -52,7 +52,6 @@ public:
     FontInfoData(bool aLoadOtherNames,
                  bool aLoadFaceNames,
                  bool aLoadCmaps) :
-        mCanceled(false),
         mLoadOtherNames(aLoadOtherNames),
         mLoadFaceNames(aLoadFaceNames),
         mLoadCmaps(aLoadCmaps)
@@ -89,7 +88,7 @@ public:
 
         aUVSOffset = faceData.mUVSOffset;
         aSymbolFont = faceData.mSymbolFont;
-        RefPtr<gfxCharacterMap> cmap = faceData.mCharacterMap;
+        nsRefPtr<gfxCharacterMap> cmap = faceData.mCharacterMap;
         return cmap.forget();
     }
 
@@ -115,10 +114,6 @@ public:
     }
 
     nsTArray<nsString> mFontFamiliesToLoad;
-
-    // currently non-issue but beware,
-    // this is also set during cleanup after finishing
-    mozilla::Atomic<bool> mCanceled;
 
     // time spent on the loader thread
     mozilla::TimeDuration mLoadTime;
@@ -249,7 +244,7 @@ protected:
     TimerState mState;
 
     // after async font loader completes, data is stored here
-    RefPtr<FontInfoData> mFontInfo;
+    nsRefPtr<FontInfoData> mFontInfo;
 
     // time spent on the loader thread
     mozilla::TimeDuration mLoadTime;

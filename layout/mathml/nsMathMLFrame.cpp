@@ -14,8 +14,8 @@
 #include "nsMathMLElement.h"
 
 // used to map attributes into CSS rules
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "nsStyleSet.h"
+#include "nsAutoPtr.h"
 #include "nsDisplayList.h"
 #include "nsRenderingContext.h"
 
@@ -98,9 +98,9 @@ nsMathMLFrame::ResolveMathMLCharStyle(nsPresContext*  aPresContext,
                                       nsStyleContext*  aParentStyleContext,
                                       nsMathMLChar*    aMathMLChar)
 {
-  CSSPseudoElementType pseudoType =
-    CSSPseudoElementType::mozMathAnonymous; // savings
-  RefPtr<nsStyleContext> newStyleContext;
+  nsCSSPseudoElements::Type pseudoType =
+    nsCSSPseudoElements::ePseudo_mozMathAnonymous; // savings
+  nsRefPtr<nsStyleContext> newStyleContext;
   newStyleContext = aPresContext->StyleSet()->
     ResolvePseudoElementStyle(aContent->AsElement(), pseudoType,
                               aParentStyleContext, nullptr);
@@ -168,15 +168,15 @@ nsMathMLFrame::GetPresentationDataFrom(nsIFrame*           aFrame,
 }
 
 /* static */ void
-nsMathMLFrame::GetRuleThickness(DrawTarget*    aDrawTarget,
-                                nsFontMetrics* aFontMetrics,
-                                nscoord&       aRuleThickness)
+nsMathMLFrame::GetRuleThickness(nsRenderingContext& aRenderingContext,
+                                nsFontMetrics*      aFontMetrics,
+                                nscoord&             aRuleThickness)
 {
   nscoord xHeight = aFontMetrics->XHeight();
   char16_t overBar = 0x00AF;
   nsBoundingMetrics bm =
     nsLayoutUtils::AppUnitBoundsOfString(&overBar, 1, *aFontMetrics,
-                                         aDrawTarget);
+                                         aRenderingContext);
   aRuleThickness = bm.ascent + bm.descent;
   if (aRuleThickness <= 0 || aRuleThickness >= xHeight) {
     // fall-back to the other version
@@ -185,9 +185,9 @@ nsMathMLFrame::GetRuleThickness(DrawTarget*    aDrawTarget,
 }
 
 /* static */ void
-nsMathMLFrame::GetAxisHeight(DrawTarget*    aDrawTarget,
-                             nsFontMetrics* aFontMetrics,
-                             nscoord&       aAxisHeight)
+nsMathMLFrame::GetAxisHeight(nsRenderingContext& aRenderingContext,
+                             nsFontMetrics*      aFontMetrics,
+                             nscoord&             aAxisHeight)
 {
   gfxFont* mathFont = aFontMetrics->GetThebesFontGroup()->GetFirstMathFont();
   if (mathFont) {
@@ -200,7 +200,8 @@ nsMathMLFrame::GetAxisHeight(DrawTarget*    aDrawTarget,
   nscoord xHeight = aFontMetrics->XHeight();
   char16_t minus = 0x2212; // not '-', but official Unicode minus sign
   nsBoundingMetrics bm =
-    nsLayoutUtils::AppUnitBoundsOfString(&minus, 1, *aFontMetrics, aDrawTarget);
+    nsLayoutUtils::AppUnitBoundsOfString(&minus, 1, *aFontMetrics,
+                                         aRenderingContext);
   aAxisHeight = bm.ascent - (bm.ascent + bm.descent)/2;
   if (aAxisHeight <= 0 || aAxisHeight >= xHeight) {
     // fall-back to the other version
@@ -231,8 +232,10 @@ nsMathMLFrame::CalcLength(nsPresContext*   aPresContext,
   }
   else if (eCSSUnit_XHeight == unit) {
     aPresContext->SetUsesExChUnits(true);
-    RefPtr<nsFontMetrics> fm = nsLayoutUtils::
-      GetFontMetricsForStyleContext(aStyleContext, aFontSizeInflation);
+    nsRefPtr<nsFontMetrics> fm;
+    nsLayoutUtils::GetFontMetricsForStyleContext(aStyleContext,
+                                                 getter_AddRefs(fm),
+                                                 aFontSizeInflation);
     nscoord xHeight = fm->XHeight();
     return NSToCoordRound(aCSSValue.GetFloatValue() * (float)xHeight);
   }
@@ -310,28 +313,28 @@ private:
 void nsDisplayMathMLBoundingMetrics::Paint(nsDisplayListBuilder* aBuilder,
                                            nsRenderingContext* aCtx)
 {
-  DrawTarget* drawTarget = aCtx->GetDrawTarget();
+  DrawTarget* drawTarget = aRenderingContext->GetDrawTarget();
   Rect r = NSRectToRect(mRect + ToReferenceFrame(),
                         mFrame->PresContext()->AppUnitsPerDevPixel());
   ColorPattern blue(ToDeviceColor(Color(0.f, 0.f, 1.f, 1.f)));
   drawTarget->StrokeRect(r, blue);
 }
 
-void
+nsresult
 nsMathMLFrame::DisplayBoundingMetrics(nsDisplayListBuilder* aBuilder,
                                       nsIFrame* aFrame, const nsPoint& aPt,
                                       const nsBoundingMetrics& aMetrics,
                                       const nsDisplayListSet& aLists) {
   if (!NS_MATHML_PAINT_BOUNDING_METRICS(mPresentationData.flags))
-    return;
+    return NS_OK;
     
   nscoord x = aPt.x + aMetrics.leftBearing;
   nscoord y = aPt.y - aMetrics.ascent;
   nscoord w = aMetrics.rightBearing - aMetrics.leftBearing;
   nscoord h = aMetrics.ascent + aMetrics.descent;
 
-  aLists.Content()->AppendNewToTop(new (aBuilder)
-      nsDisplayMathMLBoundingMetrics(aBuilder, aFrame, nsRect(x,y,w,h)));
+  return aLists.Content()->AppendNewToTop(new (aBuilder)
+      nsDisplayMathMLBoundingMetrics(aBuilder, this, nsRect(x,y,w,h)));
 }
 #endif
 
@@ -360,13 +363,11 @@ void nsDisplayMathMLBar::Paint(nsDisplayListBuilder* aBuilder,
 {
   // paint the bar with the current text color
   DrawTarget* drawTarget = aCtx->GetDrawTarget();
-  Rect rect =
-    NSRectToNonEmptySnappedRect(mRect + ToReferenceFrame(),
-                                mFrame->PresContext()->AppUnitsPerDevPixel(),
-                                *drawTarget);
-  nsCSSProperty colorProp = mFrame->StyleContext()->GetTextFillColorProp();
+  Rect rect = NSRectToSnappedRect(mRect + ToReferenceFrame(),
+                                  mFrame->PresContext()->AppUnitsPerDevPixel(),
+                                  *drawTarget);
   ColorPattern color(ToDeviceColor(
-                                 mFrame->GetVisitedDependentColor(colorProp)));
+                       mFrame->GetVisitedDependentColor(eCSSProperty_color)));
   drawTarget->FillRect(rect, color);
 }
 

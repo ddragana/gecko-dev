@@ -11,7 +11,6 @@
 #include <zlib.h>
 #include "Utils.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/RefCounted.h"
 #include "mozilla/RefPtr.h"
 
 /**
@@ -72,14 +71,13 @@ private:
   public:
     ZStreamBuf() : inUse(false) { }
 
-    bool get(char*& out)
+    char *get()
     {
       if (!inUse) {
         inUse = true;
-        out = buf;
-        return true;
+        return buf;
       } else {
-        return false;
+        MOZ_CRASH("ZStreamBuf already in use");
       }
     }
 
@@ -107,18 +105,10 @@ public:
   public:
     void *Alloc(uInt items, uInt size)
     {
-      if (items == 1 && size <= stateBuf1.size) {
-        char* res = nullptr;
-        if (stateBuf1.get(res) || stateBuf2.get(res)) {
-          return res;
-        }
-        MOZ_CRASH("ZStreamBuf already in use");
-      } else if (items * size == windowBuf1.size) {
-        char* res = nullptr;
-        if (windowBuf1.get(res) || windowBuf2.get(res)) {
-          return res;
-        }
-        MOZ_CRASH("ZStreamBuf already in use");
+      if (items == 1 && size <= stateBuf.size) {
+        return stateBuf.get();
+      } else if (items * size == windowBuf.size) {
+        return windowBuf.get();
       } else {
         MOZ_CRASH("No ZStreamBuf for allocation");
       }
@@ -126,22 +116,17 @@ public:
 
     void Free(void *ptr)
     {
-      if (stateBuf1.Equals(ptr)) {
-        stateBuf1.Release();
-      } else if (stateBuf2.Equals(ptr)) {
-        stateBuf2.Release();
-      }else if (windowBuf1.Equals(ptr)) {
-        windowBuf1.Release();
-      } else if (windowBuf2.Equals(ptr)) {
-        windowBuf2.Release();
+      if (stateBuf.Equals(ptr)) {
+        stateBuf.Release();
+      } else if (windowBuf.Equals(ptr)) {
+        windowBuf.Release();
       } else {
         MOZ_CRASH("Pointer doesn't match a ZStreamBuf");
       }
     }
 
-    // 0x3000 is an arbitrary size above 10K.
-    ZStreamBuf<0x3000> stateBuf1, stateBuf2;
-    ZStreamBuf<1 << MAX_WBITS> windowBuf1, windowBuf2;
+    ZStreamBuf<0x3000> stateBuf; // 0x3000 is an arbitrary size above 10K.
+    ZStreamBuf<1 << MAX_WBITS> windowBuf;
   };
 
 private:
@@ -285,7 +270,7 @@ private:
      */
     bool Equals(const char *str) const
     {
-      return (strncmp(str, buf, length) == 0 && str[length] == '\0');
+      return strncmp(str, buf, length) == 0;
     }
 
   private:
@@ -349,7 +334,7 @@ private:
       return reinterpret_cast<const char *>(this) + sizeof(*this)
              + filenameSize + extraFieldSize;
     }
-
+    
     le_uint16 minVersion;
     le_uint16 generalFlag;
     le_uint16 compression;

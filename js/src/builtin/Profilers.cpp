@@ -18,6 +18,9 @@
 #ifdef MOZ_INSTRUMENTS
 # include "devtools/Instruments.h"
 #endif
+#ifdef MOZ_SHARK
+# include "devtools/sharkctl.h"
+#endif
 #endif
 
 #ifdef XP_WIN
@@ -65,6 +68,10 @@ StartOSXProfiling(const char* profileName, pid_t pid)
 {
     bool ok = true;
     const char* profiler = nullptr;
+#ifdef MOZ_SHARK
+    ok = Shark::Start();
+    profiler = "Shark";
+#endif
 #ifdef MOZ_INSTRUMENTS
     ok = Instruments::Start(pid);
     profiler = "Instruments";
@@ -99,6 +106,9 @@ JS_StopProfiling(const char* profileName)
 {
     bool ok = true;
 #ifdef __APPLE__
+#ifdef MOZ_SHARK
+    Shark::Stop();
+#endif
 #ifdef MOZ_INSTRUMENTS
     Instruments::Stop(profileName);
 #endif
@@ -121,8 +131,12 @@ ControlProfilers(bool toState)
 
     if (! probes::ProfilingActive && toState) {
 #ifdef __APPLE__
-#if defined(MOZ_INSTRUMENTS)
+#if defined(MOZ_SHARK) || defined(MOZ_INSTRUMENTS)
         const char* profiler;
+#ifdef MOZ_SHARK
+        ok = Shark::Start();
+        profiler = "Shark";
+#endif
 #ifdef MOZ_INSTRUMENTS
         ok = Instruments::Resume();
         profiler = "Instruments";
@@ -140,6 +154,9 @@ ControlProfilers(bool toState)
 #endif
     } else if (probes::ProfilingActive && ! toState) {
 #ifdef __APPLE__
+#ifdef MOZ_SHARK
+        Shark::Stop();
+#endif
 #ifdef MOZ_INSTRUMENTS
         Instruments::Pause();
 #endif
@@ -330,7 +347,7 @@ ClearMaxGCPauseAccumulator(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-#if defined(MOZ_INSTRUMENTS)
+#if defined(MOZ_SHARK) || defined(MOZ_INSTRUMENTS)
 
 static bool
 IgnoreAndReturnTrue(JSContext* cx, unsigned argc, Value* vp)
@@ -385,7 +402,7 @@ static const JSFunctionSpec profiling_functions[] = {
     JS_FN("dumpProfile",     DumpProfile,         2,0),
     JS_FN("getMaxGCPauseSinceClear",    GetMaxGCPauseSinceClear,    0, 0),
     JS_FN("clearMaxGCPauseAccumulator", ClearMaxGCPauseAccumulator, 0, 0),
-#if defined(MOZ_INSTRUMENTS)
+#if defined(MOZ_SHARK) || defined(MOZ_INSTRUMENTS)
     /* Keep users of the old shark API happy. */
     JS_FN("connectShark",    IgnoreAndReturnTrue, 0,0),
     JS_FN("disconnectShark", IgnoreAndReturnTrue, 0,0),
@@ -505,37 +522,36 @@ bool js_StartPerf()
 
     pid_t childPid = fork();
     if (childPid == 0) {
-        /* perf record --pid $mainPID --output=$outfile $MOZ_PROFILE_PERF_FLAGS */
+        /* perf record --append --pid $mainPID --output=$outfile $MOZ_PROFILE_PERF_FLAGS */
 
         char mainPidStr[16];
         snprintf(mainPidStr, sizeof(mainPidStr), "%d", mainPid);
-        const char* defaultArgs[] = {"perf", "record", "--pid", mainPidStr, "--output", outfile};
+        const char* defaultArgs[] = {"perf", "record", "--append",
+                                     "--pid", mainPidStr, "--output", outfile};
 
         Vector<const char*, 0, SystemAllocPolicy> args;
-        if (!args.append(defaultArgs, ArrayLength(defaultArgs)))
-            return false;
+        args.append(defaultArgs, ArrayLength(defaultArgs));
 
         const char* flags = getenv("MOZ_PROFILE_PERF_FLAGS");
         if (!flags) {
             flags = "--call-graph";
         }
 
-        UniqueChars flags2((char*)js_malloc(strlen(flags) + 1));
+        char* flags2 = (char*)js_malloc(strlen(flags) + 1);
         if (!flags2)
             return false;
-        strcpy(flags2.get(), flags);
+        strcpy(flags2, flags);
 
-        // Split |flags2| on spaces.
+        // Split |flags2| on spaces.  (Don't bother to free it -- we're going to
+        // exec anyway.)
         char* toksave;
-        char* tok = strtok_r(flags2.get(), " ", &toksave);
+        char* tok = strtok_r(flags2, " ", &toksave);
         while (tok) {
-            if (!args.append(tok))
-                return false;
+            args.append(tok);
             tok = strtok_r(nullptr, " ", &toksave);
         }
 
-        if (!args.append((char*) nullptr))
-            return false;
+        args.append((char*) nullptr);
 
         execvp("perf", const_cast<char**>(args.begin()));
 
@@ -543,15 +559,17 @@ bool js_StartPerf()
         fprintf(stderr, "Unable to start perf.\n");
         exit(1);
     }
-    if (childPid > 0) {
+    else if (childPid > 0) {
         perfPid = childPid;
 
         /* Give perf a chance to warm up. */
         usleep(500 * 1000);
         return true;
     }
-    UnsafeError("js_StartPerf: fork() failed\n");
-    return false;
+    else {
+        UnsafeError("js_StartPerf: fork() failed\n");
+        return false;
+    }
 }
 
 bool js_StopPerf()

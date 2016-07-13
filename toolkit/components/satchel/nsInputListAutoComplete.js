@@ -16,12 +16,12 @@ InputListAutoComplete.prototype = {
 
   autoCompleteSearch : function (aUntrimmedSearchString, aField) {
     let [values, labels] = this.getListSuggestions(aField);
-    let searchResult = values.length > 0 ? Ci.nsIAutoCompleteResult.RESULT_SUCCESS
-                                         : Ci.nsIAutoCompleteResult.RESULT_NOMATCH;
-    let defaultIndex = values.length > 0 ? 0 : -1;
+    if (values.length === 0)
+      return null;
     return new FormAutoCompleteResult(aUntrimmedSearchString,
-                                      searchResult, defaultIndex, "",
-                                      values, labels, [], null);
+                                      Ci.nsIAutoCompleteResult.RESULT_SUCCESS,
+                                      0, "", values, labels,
+                                      [], null);
   },
 
   getListSuggestions : function (aField) {
@@ -60,5 +60,5 @@ InputListAutoComplete.prototype = {
   }
 };
 
-var component = [InputListAutoComplete];
+let component = [InputListAutoComplete];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

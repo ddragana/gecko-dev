@@ -17,9 +17,15 @@
 #include "mozilla/Logging.h"
 
 #define DUMP_LAYOUT_LEVEL 9 // this turns on the dumping of each doucment's layout info
-static mozilla::LazyLogModule gPrintingLog("printing");
-
-#define PR_PL(_p1)  MOZ_LOG(gPrintingLog, mozilla::LogLevel::Debug, _p1);
+static PRLogModuleInfo *
+GetPrintingLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("printing");
+  return sLog;
+}
+#define PR_PL(_p1)  MOZ_LOG(GetPrintingLog(), mozilla::LogLevel::Debug, _p1);
 
 //---------------------------------------------------
 //-- nsPrintData Class Impl
@@ -116,18 +122,6 @@ nsPrintData::DoOnProgressChange(int32_t      aProgress,
     wpl->OnProgressChange(nullptr, nullptr, aProgress, aMaxProgress, aProgress, aMaxProgress);
     if (aDoStartStop) {
       wpl->OnStateChange(nullptr, nullptr, aFlag, NS_OK);
-    }
-  }
-}
-
-void
-nsPrintData::DoOnStatusChange(nsresult aStatus)
-{
-  uint32_t numberOfListeners = mPrintProgressListeners.Length();
-  for (uint32_t i = 0; i < numberOfListeners; ++i) {
-    nsIWebProgressListener* listener = mPrintProgressListeners.SafeElementAt(i);
-    if (listener) {
-      listener->OnStatusChange(nullptr, nullptr, aStatus, nullptr);
     }
   }
 }

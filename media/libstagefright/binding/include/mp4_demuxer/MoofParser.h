@@ -5,6 +5,7 @@
 #ifndef MOOF_PARSER_H_
 #define MOOF_PARSER_H_
 
+#include "mozilla/Monitor.h"
 #include "mp4_demuxer/Atom.h"
 #include "mp4_demuxer/AtomType.h"
 #include "mp4_demuxer/SinfParser.h"
@@ -13,6 +14,7 @@
 #include "MediaResource.h"
 
 namespace mp4_demuxer {
+using mozilla::Monitor;
 typedef int64_t Microseconds;
 
 class Box;
@@ -33,9 +35,7 @@ public:
 
   Microseconds ToMicroseconds(int64_t aTimescaleUnits)
   {
-    int64_t major = aTimescaleUnits / mTimescale;
-    int64_t remainder = aTimescaleUnits % mTimescale;
-    return major * 1000000ll + remainder * 1000000ll / mTimescale;
+    return aTimescaleUnits * 1000000ll / mTimescale;
   }
 
   uint64_t mCreationTime;
@@ -140,7 +140,7 @@ struct Sample
   bool mSync;
 };
 
-class Saiz final : public Atom
+class Saiz : public Atom
 {
 public:
   Saiz(Box& aBox, AtomType aDefaultType);
@@ -150,7 +150,7 @@ public:
   nsTArray<uint8_t> mSampleInfoSize;
 };
 
-class Saio final : public Atom
+class Saio : public Atom
 {
 public:
   Saio(Box& aBox, AtomType aDefaultType);
@@ -163,6 +163,7 @@ public:
 class AuxInfo {
 public:
   AuxInfo(int64_t aMoofOffset, Saiz& aSaiz, Saio& aSaio);
+  bool GetByteRanges(nsTArray<MediaByteRange>* aByteRanges);
 
 private:
   int64_t mMoofOffset;
@@ -170,10 +171,10 @@ private:
   Saio& mSaio;
 };
 
-class Moof final : public Atom
+class Moof : public Atom
 {
 public:
-  Moof(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, Sinf& aSinf, uint64_t* aDecoderTime, bool aIsAudio);
+  Moof(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, Sinf& aSinf, bool aIsAudio);
   bool GetAuxInfo(AtomType aType, nsTArray<MediaByteRange>* aByteRanges);
   void FixRounding(const Moof& aMoof);
 
@@ -186,8 +187,7 @@ public:
   nsTArray<Saio> mSaios;
 
 private:
-    // aDecodeTime is updated to the end of the parsed TRAF on return.
-  void ParseTraf(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, Sinf& aSinf, uint64_t* aDecodeTime, bool aIsAudio);
+  void ParseTraf(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, Sinf& aSinf, bool aIsAudio);
   // aDecodeTime is updated to the end of the parsed TRUN on return.
   bool ParseTrun(Box& aBox, Tfhd& aTfhd, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, uint64_t* aDecodeTime, bool aIsAudio);
   void ParseSaiz(Box& aBox);
@@ -199,21 +199,21 @@ private:
 class MoofParser
 {
 public:
-  MoofParser(Stream* aSource, uint32_t aTrackId, bool aIsAudio)
+  MoofParser(Stream* aSource, uint32_t aTrackId, bool aIsAudio, Monitor* aMonitor)
     : mSource(aSource)
     , mOffset(0)
     , mTrex(aTrackId)
+    , mMonitor(aMonitor)
     , mIsAudio(aIsAudio)
-    , mLastDecodeTime(0)
   {
     // Setting the mTrex.mTrackId to 0 is a nasty work around for calculating
     // the composition range for MSE. We need an array of tracks.
   }
   bool RebuildFragmentedIndex(
-    const mozilla::MediaByteRangeSet& aByteRanges);
+    const nsTArray<mozilla::MediaByteRange>& aByteRanges);
   bool RebuildFragmentedIndex(BoxContext& aContext);
   Interval<Microseconds> GetCompositionRange(
-    const mozilla::MediaByteRangeSet& aByteRanges);
+    const nsTArray<mozilla::MediaByteRange>& aByteRanges);
   bool ReachedEnd();
   void ParseMoov(Box& aBox);
   void ParseTrak(Box& aBox);
@@ -228,12 +228,11 @@ public:
 
   bool BlockingReadNextMoof();
   bool HasMetadata();
-  already_AddRefed<mozilla::MediaByteBuffer> Metadata();
   MediaByteRange FirstCompleteMediaSegment();
   MediaByteRange FirstCompleteMediaHeader();
 
   mozilla::MediaByteRange mInitRange;
-  RefPtr<Stream> mSource;
+  nsRefPtr<Stream> mSource;
   uint64_t mOffset;
   nsTArray<uint64_t> mMoofOffsets;
   Mvhd mMvhd;
@@ -242,14 +241,12 @@ public:
   Tfdt mTfdt;
   Edts mEdts;
   Sinf mSinf;
-  nsTArray<Moof>& Moofs() { return mMoofs; }
+  Monitor* mMonitor;
+  nsTArray<Moof>& Moofs() { mMonitor->AssertCurrentThreadOwns(); return mMoofs; }
 private:
-  void ScanForMetadata(mozilla::MediaByteRange& aFtyp,
-                       mozilla::MediaByteRange& aMoov);
   nsTArray<Moof> mMoofs;
   nsTArray<MediaByteRange> mMediaRanges;
   bool mIsAudio;
-  uint64_t mLastDecodeTime;
 };
 }
 

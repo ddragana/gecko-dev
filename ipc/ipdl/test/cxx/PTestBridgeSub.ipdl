@@ -6,11 +6,11 @@ namespace _ipdltest {
 
 protocol PTestBridgeSub {
 child:
-    async Ping();
+    Ping();
 
 parent:
-    async BridgeEm();
-    async __delete__();
+    BridgeEm();
+    __delete__();
 
 state START:
     send Ping goto BRIDGEEM;

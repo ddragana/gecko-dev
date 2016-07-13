@@ -74,7 +74,6 @@ class LoggingWrapper(StringIO):
     instead"""
 
     def __init__(self, queue, prefix=None):
-        StringIO.__init__(self)
         self.queue = queue
         self.prefix = prefix
 
@@ -94,7 +93,6 @@ class LoggingWrapper(StringIO):
 
     def flush(self):
         pass
-
 
 class CaptureIO(object):
     def __init__(self, logger, do_capture):

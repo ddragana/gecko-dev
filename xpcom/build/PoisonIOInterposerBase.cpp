@@ -38,9 +38,8 @@ namespace {
 struct DebugFilesAutoLockTraits
 {
   typedef PRLock* type;
-  typedef const PRLock* const_type;
-  static const_type empty() { return nullptr; }
-  static void release(type aL) { PR_Unlock(aL); }
+  const static type empty() { return nullptr; }
+  const static void release(type aL) { PR_Unlock(aL); }
 };
 
 class DebugFilesAutoLock : public Scoped<DebugFilesAutoLockTraits>

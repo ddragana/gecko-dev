@@ -26,6 +26,7 @@ function test()
   }
   else
   {
+    jit(true);
 
     var o = {a:3, b:2};
     shapeOf(o);
@@ -34,6 +35,7 @@ function test()
     p.b=2;
     shapeOf(p);
 
+    jit(false);
 
   }
   reportCompare(expect, actual, summary);

@@ -5,6 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXPORTS.cubeb += [
+    'cubeb-stdint.h',
     'cubeb.h',
 ]
 

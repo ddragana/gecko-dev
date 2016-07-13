@@ -4,7 +4,6 @@
 
 include protocol PBackgroundIDBTransaction;
 include protocol PBackgroundIDBVersionChangeTransaction;
-include protocol PBackgroundMutableFile;
 include protocol PBlob;
 
 include PBackgroundIDBSharedTypes;
@@ -105,7 +104,7 @@ protocol PBackgroundIDBRequest
   manager PBackgroundIDBTransaction or PBackgroundIDBVersionChangeTransaction;
 
 child:
-  async __delete__(RequestResponse response);
+  __delete__(RequestResponse response);
 };
 
 } // namespace indexedDB

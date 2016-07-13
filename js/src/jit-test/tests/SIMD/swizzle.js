@@ -42,7 +42,7 @@ function f() {
     }
 }
 
-function testBailouts(expectException, uglyDuckling) {
+function testBailouts(uglyDuckling) {
     var i4 = SIMD.Int32x4(1, 2, 3, 4);
     for (var i = 0; i < 150; i++) {
         // Test bailouts
@@ -54,10 +54,9 @@ function testBailouts(expectException, uglyDuckling) {
             print(e);
             caught = true;
             assertEq(i, 149);
-            assertEq(e instanceof TypeError || e instanceof RangeError, true);
+            assertEq(e instanceof TypeError, true);
         }
-        if (i == 149)
-            assertEq(caught, expectException);
+        assertEq(i < 149 || caught, true);
     }
 }
 
@@ -70,35 +69,18 @@ function testInt32x4SwizzleBailout() {
 }
 
 f();
-testBailouts(true, -1);
-testBailouts(true, 4);
-testBailouts(true, 2.5);
-testBailouts(true, undefined);
-testBailouts(true, {});
-testBailouts(true, 'one');
-testBailouts(false, false);
-testBailouts(false, null);
-testBailouts(false, " 0.0 ");
+testBailouts(-1);
+testBailouts(4);
+testBailouts(2.5);
+testBailouts(undefined);
+testBailouts(null);
+testBailouts({});
+testBailouts('one');
+testBailouts(true);
 
 try {
     testInt32x4SwizzleBailout();
     throw 'not caught';
 } catch(e) {
-    assertEq(e instanceof RangeError, true);
+    assertEq(e instanceof TypeError, true);
 }
-
-(function() {
-    var zappa = 0;
-
-    function testBailouts() {
-        var i4 = SIMD.Int32x4(1, 2, 3, 4);
-        for (var i = 0; i < 300; i++) {
-            var value = i == 299 ? 2.5 : 1;
-            SIMD.Int32x4.swizzle(i4, value, 3, 2, 0);
-            zappa = i;
-        }
-    }
-
-    try { testBailouts(); } catch (e) {}
-    assertEq(zappa, 298);
-})();

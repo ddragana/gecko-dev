@@ -23,9 +23,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SpeechGrammarList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-SpeechGrammarList::SpeechGrammarList(nsISupports* aParent)
+SpeechGrammarList::SpeechGrammarList(nsISupports* aParent, nsISpeechRecognitionService* aRecognitionService)
   : mParent(aParent)
 {
+  this->mRecognitionService = aRecognitionService;
 }
 
 SpeechGrammarList::~SpeechGrammarList()
@@ -36,9 +37,16 @@ already_AddRefed<SpeechGrammarList>
 SpeechGrammarList::Constructor(const GlobalObject& aGlobal,
                                ErrorResult& aRv)
 {
-  RefPtr<SpeechGrammarList> speechGrammarList =
-    new SpeechGrammarList(aGlobal.GetAsSupports());
-  return speechGrammarList.forget();
+  nsCOMPtr<nsISpeechRecognitionService> recognitionService;
+  recognitionService = GetSpeechRecognitionService();
+  if (!recognitionService) {
+    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+    return nullptr;
+  } else {
+    nsRefPtr<SpeechGrammarList> speechGrammarList =
+      new SpeechGrammarList(aGlobal.GetAsSupports(), recognitionService);
+    return speechGrammarList.forget();
+  }
 }
 
 JSObject*
@@ -62,7 +70,7 @@ SpeechGrammarList::Length() const
 already_AddRefed<SpeechGrammar>
 SpeechGrammarList::Item(uint32_t aIndex, ErrorResult& aRv)
 {
-  RefPtr<SpeechGrammar> result = mItems.ElementAt(aIndex);
+  nsRefPtr<SpeechGrammar> result = mItems.ElementAt(aIndex);
   return result.forget();
 }
 
@@ -83,6 +91,7 @@ SpeechGrammarList::AddFromString(const nsAString& aString,
   SpeechGrammar* speechGrammar = new SpeechGrammar(mParent);
   speechGrammar->SetSrc(aString, aRv);
   mItems.AppendElement(speechGrammar);
+  mRecognitionService->ValidateAndSetGrammarList(speechGrammar, nullptr);
   return;
 }
 

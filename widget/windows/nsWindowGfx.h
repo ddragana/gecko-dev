@@ -19,10 +19,8 @@ public:
     kSmallIcon,
     kRegularIcon
   };
-  static mozilla::gfx::IntSize GetIconMetrics(IconSizeType aSizeType);
-  static nsresult CreateIcon(imgIContainer *aContainer, bool aIsCursor,
-                             uint32_t aHotspotX, uint32_t aHotspotY,
-                             mozilla::gfx::IntSize aScaledSize, HICON *aIcon);
+  static gfxIntSize GetIconMetrics(IconSizeType aSizeType);
+  static nsresult CreateIcon(imgIContainer *aContainer, bool aIsCursor, uint32_t aHotspotX, uint32_t aHotspotY, gfxIntSize aScaledSize, HICON *aIcon);
 
 private:
   /**

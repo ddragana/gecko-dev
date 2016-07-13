@@ -14,7 +14,6 @@
 #endif
 %}
 
-interface mozIDOMWindowProxy;
 interface nsIDOMNodeIterator;
 interface nsIDOMNodeFilter;
 interface nsIDOMTreeWalker;
@@ -33,7 +32,7 @@ interface nsIDOMLocation;
  * http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html
  */
 
-[uuid(b15fa0f4-97c1-4388-af62-2ceff7a89bdf)]
+[uuid(35dc5030-dc83-4291-88a2-0906c549788e)]
 interface nsIDOMDocument : nsIDOMNode
 {
   readonly attribute nsIDOMDocumentType         doctype;
@@ -106,7 +105,7 @@ interface nsIDOMDocument : nsIDOMNode
    *
    * @see <http://www.whatwg.org/html/#dom-document-defaultview>
    */
-  readonly attribute mozIDOMWindowProxy   defaultView;
+  readonly attribute nsIDOMWindow   defaultView;
 
   /**
    * @see <http://www.whatwg.org/html/#dom-document-characterset>

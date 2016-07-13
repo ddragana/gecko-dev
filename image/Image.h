@@ -8,7 +8,7 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TimeStamp.h"
-#include "gfx2DGlue.h"
+#include "gfx2DGlue.h"                // for gfxMemoryLocation
 #include "imgIContainer.h"
 #include "ImageURL.h"
 #include "nsStringFwd.h"
@@ -147,6 +147,10 @@ public:
    * flag is set, INIT_FLAG_DISCARDABLE and INIT_FLAG_DECODE_ONLY_ON_DRAW must
    * not be set.
    *
+   * INIT_FLAG_DOWNSCALE_DURING_DECODE: The container should attempt to
+   * downscale images during decoding instead of decoding them to their
+   * intrinsic size.
+   *
    * INIT_FLAG_SYNC_LOAD: The container is being loaded synchronously, so
    * it should avoid relying on async workers to get the container ready.
    */
@@ -154,7 +158,8 @@ public:
   static const uint32_t INIT_FLAG_DISCARDABLE              = 0x1;
   static const uint32_t INIT_FLAG_DECODE_IMMEDIATELY       = 0x2;
   static const uint32_t INIT_FLAG_TRANSIENT                = 0x4;
-  static const uint32_t INIT_FLAG_SYNC_LOAD                = 0x8;
+  static const uint32_t INIT_FLAG_DOWNSCALE_DURING_DECODE  = 0x8;
+  static const uint32_t INIT_FLAG_SYNC_LOAD                = 0x10;
 
   virtual already_AddRefed<ProgressTracker> GetProgressTracker() = 0;
   virtual void SetProgressTracker(ProgressTracker* aProgressTracker) {}
@@ -212,7 +217,8 @@ public:
                                        bool aLastPart) = 0;
 
   /**
-   * Called when the SurfaceCache discards a surface belonging to this image.
+   * Called when the SurfaceCache discards a persistent surface belonging to
+   * this image.
    */
   virtual void OnSurfaceDiscarded() = 0;
 
@@ -223,8 +229,6 @@ public:
   virtual void SetHasError() = 0;
 
   virtual ImageURL* GetURI() = 0;
-
-  virtual void ReportUseCounters() { }
 };
 
 class ImageResource : public Image
@@ -232,7 +236,7 @@ class ImageResource : public Image
 public:
   already_AddRefed<ProgressTracker> GetProgressTracker() override
   {
-    RefPtr<ProgressTracker> progressTracker = mProgressTracker;
+    nsRefPtr<ProgressTracker> progressTracker = mProgressTracker;
     MOZ_ASSERT(progressTracker);
     return progressTracker.forget();
   }
@@ -309,8 +313,8 @@ protected:
   virtual nsresult StopAnimation() = 0;
 
   // Member data shared by all implementations of this abstract class
-  RefPtr<ProgressTracker>     mProgressTracker;
-  RefPtr<ImageURL>            mURI;
+  nsRefPtr<ProgressTracker>     mProgressTracker;
+  nsRefPtr<ImageURL>            mURI;
   TimeStamp                     mLastRefreshTime;
   uint64_t                      mInnerWindowId;
   uint32_t                      mAnimationConsumers;

@@ -21,13 +21,13 @@ namespace webrtc {
 class RWLockPosix : public RWLockWrapper {
  public:
   static RWLockPosix* Create();
-  ~RWLockPosix() override;
+  virtual ~RWLockPosix();
 
-  void AcquireLockExclusive() override;
-  void ReleaseLockExclusive() override;
+  virtual void AcquireLockExclusive() OVERRIDE;
+  virtual void ReleaseLockExclusive() OVERRIDE;
 
-  void AcquireLockShared() override;
-  void ReleaseLockShared() override;
+  virtual void AcquireLockShared() OVERRIDE;
+  virtual void ReleaseLockShared() OVERRIDE;
 
  private:
   RWLockPosix();

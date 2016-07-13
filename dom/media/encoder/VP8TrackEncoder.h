@@ -54,9 +54,7 @@ private:
                                          StreamTime aProcessedDuration);
 
   // Get the encoded data from encoder to aData.
-  // Return value: false if the vpx_codec_get_cx_data returns null
-  //               for EOS detection.
-  bool GetEncodedPartitions(EncodedFrameContainer& aData);
+  nsresult GetEncodedPartitions(EncodedFrameContainer& aData);
 
   // Prepare the input data to the mVPXImageWrapper for encoding.
   nsresult PrepareRawFrame(VideoChunk &aChunk);
@@ -71,9 +69,9 @@ private:
   StreamTime mRemainingTicks;
 
   // Muted frame, we only create it once.
-  RefPtr<layers::Image> mMuteFrame;
+  nsRefPtr<layers::Image> mMuteFrame;
 
-  // I420 frame, for converting to I420.
+  // I420 frame, convert the 4:4:4, 4:2:2 to I420.
   nsTArray<uint8_t> mI420Frame;
 
   /**

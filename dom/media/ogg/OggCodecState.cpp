@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "mozilla/DebugOnly.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include <stdint.h>
 
 #include "nsDebug.h"
@@ -32,7 +32,7 @@
 
 namespace mozilla {
 
-extern LazyLogModule gMediaDecoderLog;
+extern PRLogModuleInfo* gMediaDecoderLog;
 #define LOG(type, msg) MOZ_LOG(gMediaDecoderLog, type, msg)
 
 /** Decoder base class for Ogg-encapsulated streams. */
@@ -1448,7 +1448,7 @@ bool SkeletonState::DecodeFisbone(ogg_packet* aPacket)
     }
     msgLength--;
     msgProbe++;
-  }
+  };
 
   if (!mMsgFieldStore.Contains(serialno)) {
     mMsgFieldStore.Put(serialno, field.forget());

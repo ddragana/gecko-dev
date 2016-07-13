@@ -12,6 +12,7 @@ var expect = '';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
  
+jit(true);
 
 Object.defineProperty(__proto__, "functional",
 {
@@ -21,5 +22,6 @@ Object.defineProperty(__proto__, "functional",
 for each (let x in [new Boolean(true), new Boolean(true), -0, new
                     Boolean(true), -0]) { undefined; }
 
+jit(false);
 
 reportCompare(expect, actual, summary);

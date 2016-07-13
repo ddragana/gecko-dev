@@ -37,6 +37,7 @@ NS_IMPL_ISUPPORTS(nsFontFace, nsIDOMFontFace)
 ////////////////////////////////////////////////////////////////////////
 // nsIDOMFontFace
 
+/* readonly attribute boolean fromFontGroup; */
 NS_IMETHODIMP
 nsFontFace::GetFromFontGroup(bool * aFromFontGroup)
 {
@@ -45,6 +46,7 @@ nsFontFace::GetFromFontGroup(bool * aFromFontGroup)
   return NS_OK;
 }
 
+/* readonly attribute boolean fromLanguagePrefs; */
 NS_IMETHODIMP
 nsFontFace::GetFromLanguagePrefs(bool * aFromLanguagePrefs)
 {
@@ -53,6 +55,7 @@ nsFontFace::GetFromLanguagePrefs(bool * aFromLanguagePrefs)
   return NS_OK;
 }
 
+/* readonly attribute boolean fromSystemFallback; */
 NS_IMETHODIMP
 nsFontFace::GetFromSystemFallback(bool * aFromSystemFallback)
 {
@@ -61,6 +64,7 @@ nsFontFace::GetFromSystemFallback(bool * aFromSystemFallback)
   return NS_OK;
 }
 
+/* readonly attribute DOMString name; */
 NS_IMETHODIMP
 nsFontFace::GetName(nsAString & aName)
 {
@@ -73,6 +77,7 @@ nsFontFace::GetName(nsAString & aName)
   return NS_OK;
 }
 
+/* readonly attribute DOMString CSSFamilyName; */
 NS_IMETHODIMP
 nsFontFace::GetCSSFamilyName(nsAString & aCSSFamilyName)
 {
@@ -80,6 +85,7 @@ nsFontFace::GetCSSFamilyName(nsAString & aCSSFamilyName)
   return NS_OK;
 }
 
+/* readonly attribute nsIDOMCSSFontFaceRule rule; */
 NS_IMETHODIMP
 nsFontFace::GetRule(nsIDOMCSSFontFaceRule **aRule)
 {
@@ -101,6 +107,7 @@ nsFontFace::GetRule(nsIDOMCSSFontFaceRule **aRule)
   return NS_OK;
 }
 
+/* readonly attribute long srcIndex; */
 NS_IMETHODIMP
 nsFontFace::GetSrcIndex(int32_t * aSrcIndex)
 {
@@ -113,6 +120,7 @@ nsFontFace::GetSrcIndex(int32_t * aSrcIndex)
   return NS_OK;
 }
 
+/* readonly attribute DOMString URI; */
 NS_IMETHODIMP
 nsFontFace::GetURI(nsAString & aURI)
 {
@@ -128,6 +136,7 @@ nsFontFace::GetURI(nsAString & aURI)
   return NS_OK;
 }
 
+/* readonly attribute DOMString localName; */
 NS_IMETHODIMP
 nsFontFace::GetLocalName(nsAString & aLocalName)
 {
@@ -140,6 +149,7 @@ nsFontFace::GetLocalName(nsAString & aLocalName)
   return NS_OK;
 }
 
+/* readonly attribute DOMString format; */
 static void
 AppendToFormat(nsAString & aResult, const char* aFormat)
 {
@@ -181,13 +191,14 @@ nsFontFace::GetFormat(nsAString & aFormat)
   return NS_OK;
 }
 
+/* readonly attribute DOMString metadata; */
 NS_IMETHODIMP
 nsFontFace::GetMetadata(nsAString & aMetadata)
 {
   aMetadata.Truncate();
   if (mFontEntry->IsUserFont() && !mFontEntry->IsLocalUserFont()) {
     NS_ASSERTION(mFontEntry->mUserFontData, "missing userFontData");
-    const gfxUserFontData* userFontData = mFontEntry->mUserFontData.get();
+    const gfxUserFontData* userFontData = mFontEntry->mUserFontData;
     if (userFontData->mMetadata.Length() && userFontData->mMetaOrigLen) {
       nsAutoCString str;
       str.SetLength(userFontData->mMetaOrigLen);

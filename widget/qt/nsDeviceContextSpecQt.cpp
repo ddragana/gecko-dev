@@ -10,7 +10,6 @@
 #define SET_PRINTER_FEATURES_VIA_PREFS 1
 #define PRINTERFEATURES_PREF "print.tmp.printerfeatures"
 
-#include "mozilla/gfx/PrintTargetPDF.h"
 #include "mozilla/Logging.h"
 
 #include "plstr.h"
@@ -31,8 +30,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-using namespace mozilla;
-using namespace mozilla::gfx;
+#include "gfxPDFSurface.h"
 
 static PRLogModuleInfo* DeviceContextSpecQtLM =
     PR_NewLogModule("DeviceContextSpecQt");
@@ -52,8 +50,12 @@ nsDeviceContextSpecQt::~nsDeviceContextSpecQt()
 NS_IMPL_ISUPPORTS(nsDeviceContextSpecQt,
         nsIDeviceContextSpec)
 
-already_AddRefed<PrintTarget> nsDeviceContextSpecQt::MakePrintTarget()
+NS_IMETHODIMP nsDeviceContextSpecQt::GetSurfaceForPrinter(
+        gfxASurface** aSurface)
 {
+    NS_ENSURE_ARG_POINTER(aSurface);
+    *aSurface = nullptr;
+
     double width, height;
     mPrintSettings->GetEffectivePageSize(&width, &height);
 
@@ -75,7 +77,7 @@ already_AddRefed<PrintTarget> nsDeviceContextSpecQt::MakePrintTarget()
 
     QTemporaryFile file;
     if(!file.open()) {
-        return nullptr;
+        return NS_ERROR_GFX_PRINTER_COULD_NOT_OPEN_FILE;
     }
     file.setAutoRemove(false);
 
@@ -85,7 +87,7 @@ already_AddRefed<PrintTarget> nsDeviceContextSpecQt::MakePrintTarget()
             getter_AddRefs(mSpoolFile));
     if (NS_FAILED(rv)) {
         file.remove();
-        return nullptr;
+        return NS_ERROR_GFX_PRINTER_COULD_NOT_OPEN_FILE;
     }
 
     mSpoolName = file.fileName().toUtf8().constData();
@@ -97,26 +99,33 @@ already_AddRefed<PrintTarget> nsDeviceContextSpecQt::MakePrintTarget()
 
     rv = stream->Init(mSpoolFile, -1, -1, 0);
     if (NS_FAILED(rv))
-        return nullptr;
+        return rv;
 
     int16_t format;
     mPrintSettings->GetOutputFormat(&format);
+
+    nsRefPtr<gfxASurface> surface;
+    gfxSize surfaceSize(width, height);
 
     if (format == nsIPrintSettings::kOutputFormatNative) {
         if (mIsPPreview) {
             // There is nothing to detect on Print Preview, use PS.
             // TODO: implement for Qt?
             //format = nsIPrintSettings::kOutputFormatPS;
-            return nullptr;
+            return NS_ERROR_NOT_IMPLEMENTED;
         }
         format = nsIPrintSettings::kOutputFormatPDF;
     }
-
     if (format == nsIPrintSettings::kOutputFormatPDF) {
-        return PrintTargetPDF::CreateOrNull(stream, IntSize(width, height));
+        surface = new gfxPDFSurface(stream, surfaceSize);
+    } else {
+        return NS_ERROR_NOT_IMPLEMENTED;
     }
 
-    return nullptr;
+    MOZ_ASSERT(surface, "valid address expected");
+
+    surface.swap(*aSurface);
+    return NS_OK;
 }
 
 NS_IMETHODIMP nsDeviceContextSpecQt::Init(nsIWidget* aWidget,
@@ -142,7 +151,7 @@ NS_IMETHODIMP nsDeviceContextSpecQt::Init(nsIWidget* aWidget,
 
 NS_IMETHODIMP nsDeviceContextSpecQt::BeginDocument(
         const nsAString& aTitle,
-        const nsAString& aPrintToFileName,
+        char16_t* aPrintToFileName,
         int32_t aStartPage,
         int32_t aEndPage)
 {
@@ -247,3 +256,11 @@ NS_IMETHODIMP nsPrinterEnumeratorQt::InitPrintSettingsFromPrinter(
     // Probably should use NS_ERROR_NOT_IMPLEMENTED
     return NS_OK;
 }
+
+NS_IMETHODIMP nsPrinterEnumeratorQt::DisplayPropertiesDlg(
+        const char16_t* aPrinter,
+        nsIPrintSettings* aPrintSettings)
+{
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+

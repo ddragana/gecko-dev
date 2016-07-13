@@ -12,6 +12,7 @@
 
 #include "mozilla/FileUtils.h"
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIThread.h"
 
@@ -48,8 +49,8 @@ protected:
   virtual ~MozMtpServer() {}
 
 private:
-  RefPtr<RefCountedMtpServer> mMtpServer;
-  RefPtr<MozMtpDatabase> mMozMtpDatabase;
+  nsRefPtr<RefCountedMtpServer> mMtpServer;
+  nsRefPtr<MozMtpDatabase> mMozMtpDatabase;
   nsCOMPtr<nsIThread> mServerThread;
   ScopedClose mMtpUsbFd;
 };

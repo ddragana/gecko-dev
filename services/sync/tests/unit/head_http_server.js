@@ -1,4 +1,4 @@
-var Cm = Components.manager;
+const Cm = Components.manager;
 
 // Shared logging for all HTTP server functions.
 Cu.import("resource://gre/modules/Log.jsm");
@@ -178,13 +178,9 @@ ServerCollection.prototype = {
    * @return an array of IDs.
    */
   keys: function keys(filter) {
-    let ids = [];
-    for (let [id, wbo] in Iterator(this._wbos)) {
-      if (wbo.payload && (!filter || filter(id, wbo))) {
-        ids.push(id);
-      }
-    }
-    return ids;
+    return [id for ([id, wbo] in Iterator(this._wbos))
+               if (wbo.payload &&
+                   (!filter || filter(id, wbo)))];
   },
 
   /**
@@ -198,13 +194,8 @@ ServerCollection.prototype = {
    * @return an array of ServerWBOs.
    */
   wbos: function wbos(filter) {
-    let os = [];
-    for (let [id, wbo] in Iterator(this._wbos)) {
-      if (wbo.payload) {
-        os.push(wbo);
-      }
-    }
-
+    let os = [wbo for ([id, wbo] in Iterator(this._wbos))
+              if (wbo.payload)];
     if (filter) {
       return os.filter(filter);
     }
@@ -287,13 +278,10 @@ ServerCollection.prototype = {
   get: function(options) {
     let result;
     if (options.full) {
-      let data = [];
-      for (let [id, wbo] in Iterator(this._wbos)) {
-        // Drop deleted.
-        if (wbo.modified && this._inResultSet(wbo, options)) {
-          data.push(wbo.get());
-        }
-      }
+      let data = [wbo.get() for ([id, wbo] in Iterator(this._wbos))
+                            // Drop deleted.
+                            if (wbo.modified &&
+                                this._inResultSet(wbo, options))];
       if (options.limit) {
         data = data.slice(0, options.limit);
       }
@@ -303,12 +291,8 @@ ServerCollection.prototype = {
       // Use options as a backchannel to report count.
       options.recordCount = data.length;
     } else {
-      let data = [];
-      for (let [id, wbo] in Iterator(this._wbos)) {
-        if (this._inResultSet(wbo, options)) {
-          data.push(id);
-        }
-      }
+      let data = [id for ([id, wbo] in Iterator(this._wbos))
+                     if (this._inResultSet(wbo, options))];
       if (options.limit) {
         data = data.slice(0, options.limit);
       }
@@ -325,8 +309,7 @@ ServerCollection.prototype = {
 
     // This will count records where we have an existing ServerWBO
     // registered with us as successful and all other records as failed.
-    for (let key in input) {
-      let record = input[key];
+    for each (let record in input) {
       let wbo = this.wbo(record.id);
       if (!wbo && this.acceptNew) {
         this._log.debug("Creating WBO " + JSON.stringify(record.id) +
@@ -371,7 +354,7 @@ ServerCollection.prototype = {
 
       // Parse queryString
       let options = {};
-      for (let chunk of request.queryString.split("&")) {
+      for each (let chunk in request.queryString.split("&")) {
         if (!chunk) {
           continue;
         }
@@ -522,7 +505,7 @@ function track_collections_helper() {
  * find out what it needs without monkeypatching. Use this object as your
  * prototype, and override as appropriate.
  */
-var SyncServerCallback = {
+let SyncServerCallback = {
   onCollectionDeleted: function onCollectionDeleted(user, collection) {},
   onItemDeleted: function onItemDeleted(user, collection, wboID) {},
 
@@ -562,13 +545,13 @@ SyncServer.prototype = {
    * Start the SyncServer's underlying HTTP server.
    *
    * @param port
-   *        The numeric port on which to start. -1 implies the default, a
-   *        randomly chosen port.
+   *        The numeric port on which to start. A falsy value implies the
+   *        default, a randomly chosen port.
    * @param cb
    *        A callback function (of no arguments) which is invoked after
    *        startup.
    */
-  start: function start(port = -1, cb) {
+  start: function start(port, cb) {
     if (this.started) {
       this._log.warn("Warning: server already started on " + this.port);
       return;
@@ -586,7 +569,7 @@ SyncServer.prototype = {
     } catch (ex) {
       _("==========================================");
       _("Got exception starting Sync HTTP server.");
-      _("Error: " + Log.exceptionStr(ex));
+      _("Error: " + Utils.exceptionStr(ex));
       _("Is there a process already listening on port " + port + "?");
       _("==========================================");
       do_throw(ex);
@@ -721,8 +704,7 @@ SyncServer.prototype = {
       throw new Error("Unknown user.");
     }
     let userCollections = this.users[username].collections;
-    for (let name in userCollections) {
-      let coll = userCollections[name];
+    for each (let [name, coll] in Iterator(userCollections)) {
       this._log.trace("Bulk deleting " + name + " for " + username + "...");
       coll.delete({});
     }
@@ -786,10 +768,7 @@ SyncServer.prototype = {
    */
   respond: function respond(req, resp, code, status, body, headers) {
     resp.setStatusLine(req.httpVersion, code, status);
-    if (!headers)
-      headers = this.defaultHeaders;
-    for (let header in headers) {
-      let value = headers[header];
+    for each (let [header, value] in Iterator(headers || this.defaultHeaders)) {
       resp.setHeader(header, value);
     }
     resp.setHeader("X-Weave-Timestamp", "" + this.timestamp(), false);

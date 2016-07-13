@@ -12,6 +12,5 @@
 ../mozbase/mozprocess
 ../mozbase/mozprofile
 ../mozbase/mozrunner
-../mozbase/mozscreenshot
 ../mozbase/moztest
 ../mozbase/mozversion

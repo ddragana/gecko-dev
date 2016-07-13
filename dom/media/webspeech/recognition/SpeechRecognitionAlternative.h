@@ -10,6 +10,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsString.h"
 #include "nsWrapperCache.h"
+#include "nsAutoPtr.h"
 #include "js/TypeDecls.h"
 
 #include "mozilla/Attributes.h"
@@ -30,7 +31,7 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void GetTranscript(nsString& aRetVal) const;
 
@@ -41,7 +42,7 @@ public:
 private:
   ~SpeechRecognitionAlternative();
 
-  RefPtr<SpeechRecognition> mParent;
+  nsRefPtr<SpeechRecognition> mParent;
 };
 
 } // namespace dom

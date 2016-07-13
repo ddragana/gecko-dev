@@ -6,19 +6,18 @@ import sys
 from setuptools import setup, find_packages
 
 PACKAGE_NAME = 'mozrunner'
-PACKAGE_VERSION = '6.12'
+PACKAGE_VERSION = '6.8'
 
 desc = """Reliable start/stop/configuration of Mozilla Applications (Firefox, Thunderbird, etc.)"""
 
-deps = ['mozdevice >= 0.37',
+deps = ['mozcrash >= 0.14',
+        'mozdevice >= 0.37',
         'mozfile >= 1.0',
         'mozinfo >= 0.7',
         'mozlog >= 3.0',
-        'mozprocess >= 0.23',
+        'mozprocess >= 0.17',
         'mozprofile >= 0.18',
         ]
-
-EXTRAS_REQUIRE = {'crash': ['mozcrash >= 0.14']}
 
 # we only support python 2 right now
 assert sys.version_info[0] == 2
@@ -45,8 +44,7 @@ setup(name=PACKAGE_NAME,
             'resources/metrotestharness.exe'
       ]},
       zip_safe=False,
-      install_requires=deps,
-      extras_require=EXTRAS_REQUIRE,
+      install_requires = deps,
       entry_points="""
       # -*- Entry points: -*-
       [console_scripts]

@@ -9,21 +9,16 @@
 #include "gdb-tests.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
-#include "js/Initialization.h"
 
 using namespace JS;
 
-static const JSClassOps global_classOps = {
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr,
-    JS_GlobalObjectTraceHook
-};
-
 /* The class of the global object. */
-static const JSClass global_class = {
+const JSClass global_class = {
     "global", JSCLASS_GLOBAL_FLAGS,
-    &global_classOps
+    nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr,
+    JS_GlobalObjectTraceHook
 };
 
 template<typename T>
@@ -42,8 +37,8 @@ checkBool(bool success)
     abort();
 }
 
-/* The warning reporter callback. */
-void reportWarning(JSContext* cx, const char* message, JSErrorReport* report)
+/* The error reporter callback. */
+void reportError(JSContext* cx, const char* message, JSErrorReport* report)
 {
     fprintf(stderr, "%s:%u: %s\n",
             report->filename ? report->filename : "<no filename>",
@@ -64,24 +59,21 @@ void breakpoint() {
 GDBFragment* GDBFragment::allFragments = nullptr;
 
 int
-main(int argc, const char** argv)
+main (int argc, const char** argv)
 {
     if (!JS_Init()) return 1;
     JSRuntime* runtime = checkPtr(JS_NewRuntime(1024 * 1024));
-    JSContext* cx = JS_GetContext(runtime);
+    JS_SetGCParameter(runtime, JSGC_MAX_BYTES, 0xffffffff);
+    JS_SetNativeStackQuota(runtime, 5000000);
 
-    JS_SetGCParameter(cx, JSGC_MAX_BYTES, 0xffffffff);
-    JS_SetNativeStackQuota(cx, 5000000);
-
-    checkBool(JS::InitSelfHostedCode(cx));
-    JS::SetWarningReporter(cx, reportWarning);
+    JSContext* cx = checkPtr(JS_NewContext(runtime, 8192));
+    JS_SetErrorReporter(runtime, reportError);
 
     JSAutoRequest ar(cx);
 
     /* Create the global object. */
     JS::CompartmentOptions options;
-    options.behaviors().setVersion(JSVERSION_LATEST);
-
+    options.setVersion(JSVERSION_LATEST);
     RootedObject global(cx, checkPtr(JS_NewGlobalObject(cx, &global_class,
                         nullptr, JS::FireOnNewGlobalHook, options)));
     JSAutoCompartment ac(cx, global);

@@ -22,7 +22,7 @@ int gTestsIndex = 0;
 
 #define TEST_INFO_STR "TEST-INFO | (%s) | "
 
-class RunNextTest : public mozilla::Runnable
+class RunNextTest : public nsRunnable
 {
 public:
   NS_IMETHOD Run()
@@ -120,7 +120,7 @@ main(int aArgc,
     }
 #endif
 
-  RefPtr<WaitForConnectionClosed> spinClose = new WaitForConnectionClosed();
+  nsRefPtr<WaitForConnectionClosed> spinClose = new WaitForConnectionClosed();
 
   // Tinderboxes are constantly on idle.  Since idle tasks can interact with
   // tests, causing random failures, disable the idle service.

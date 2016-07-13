@@ -314,7 +314,7 @@ RValueAllocation
 RValueAllocation::read(CompactBufferReader& reader)
 {
     uint8_t mode = reader.readByte();
-    const Layout& layout = layoutFromMode(Mode(mode & MODE_BITS_MASK));
+    const Layout& layout = layoutFromMode(Mode(mode & MODE_MASK));
     Payload arg1, arg2;
 
     readPayload(reader, layout.type1, &mode, &arg1);
@@ -323,7 +323,8 @@ RValueAllocation::read(CompactBufferReader& reader)
 }
 
 void
-RValueAllocation::writePayload(CompactBufferWriter& writer, PayloadType type, Payload p)
+RValueAllocation::writePayload(CompactBufferWriter& writer, PayloadType type,
+                               Payload p)
 {
     switch (type) {
       case PAYLOAD_NONE:
@@ -347,12 +348,10 @@ RValueAllocation::writePayload(CompactBufferWriter& writer, PayloadType type, Pa
       case PAYLOAD_PACKED_TAG: {
         // This code assumes that the PACKED_TAG payload is following the
         // writeByte of the mode.
-        if (!writer.oom()) {
-            MOZ_ASSERT(writer.length());
-            uint8_t* mode = writer.buffer() + (writer.length() - 1);
-            MOZ_ASSERT((*mode & PACKED_TAG_MASK) == 0 && (p.type & ~PACKED_TAG_MASK) == 0);
-            *mode = *mode | p.type;
-        }
+        MOZ_ASSERT(writer.length());
+        uint8_t* mode = writer.buffer() + (writer.length() - 1);
+        MOZ_ASSERT((*mode & PACKED_TAG_MASK) == 0 && (p.type & ~PACKED_TAG_MASK) == 0);
+        *mode = *mode | p.type;
         break;
       }
     }
@@ -552,7 +551,7 @@ SnapshotReader::spewBailingFrom() const
     if (JitSpewEnabled(JitSpew_IonBailouts)) {
         JitSpewHeader(JitSpew_IonBailouts);
         Fprinter& out = JitSpewPrinter();
-        out.printf(" bailing from bytecode: %s, MIR: ", CodeName[pcOpcode_]);
+        out.printf(" bailing from bytecode: %s, MIR: ", js_CodeName[pcOpcode_]);
         MDefinition::PrintOpcodeName(out, MDefinition::Opcode(mirOpcode_));
         out.printf(" [%u], LIR: ", mirId_);
         LInstruction::printName(out, LInstruction::Opcode(lirOpcode_));
@@ -662,10 +661,8 @@ SnapshotWriter::add(const RValueAllocation& alloc)
     if (!p) {
         offset = allocWriter_.length();
         alloc.write(allocWriter_);
-        if (!allocMap_.add(p, alloc, offset)) {
-            allocWriter_.setOOM();
+        if (!allocMap_.add(p, alloc, offset))
             return false;
-        }
     } else {
         offset = p->value();
     }

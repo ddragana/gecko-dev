@@ -6,6 +6,8 @@
 
 #include "nsISupports.idl"
 
+interface nsIDOMWindow;
+
 /**
  * nsIWebContentHandlerRegistrar
  * 
@@ -17,7 +19,7 @@
  * can invoke it. 
  */
 
-[scriptable, uuid(65a3fafd-0e4a-4b06-8b4e-6a611da63d98)]
+[scriptable, uuid(e6a75410-c93e-42bf-84ca-a5c3ec34a2f1)]
 interface nsIWebContentHandlerRegistrar : nsISupports
 {
   /**
@@ -28,11 +30,11 @@ interface nsIWebContentHandlerRegistrar : nsISupports
    void registerContentHandler(in DOMString mimeType,
                                in DOMString uri,
                                in DOMString title,
-                               in nsISupports windowOrBrowser);
+                               in nsIDOMWindow contentWindow);
    void registerProtocolHandler(in DOMString protocol,
                                 in DOMString uri,
                                 in DOMString title,
-                                in nsISupports windowOrBrowser);
+                                in nsIDOMWindow contentWindow);
 };
 
 %{ C++

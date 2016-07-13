@@ -58,7 +58,6 @@ elif CONFIG['ANDROID_VERSION'] == '15':
 SOURCES += [
     'GeckoTouchDispatcher.cpp',
     'GfxInfo.cpp',
-    'GonkClipboardData.cpp',
     'GonkMemoryPressureMonitoring.cpp',
     'GonkPermission.cpp',
     'HwcComposer2D.cpp',
@@ -81,9 +80,8 @@ FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '/dom/system/android',
-    '/gfx/skia/skia/include/config',
-    '/gfx/skia/skia/include/core',
-    '/image',
+    '/gfx/skia/trunk/include/config',
+    '/gfx/skia/trunk/include/core',
     '/widget',
 ]
 
@@ -96,14 +94,10 @@ if CONFIG['ANDROID_VERSION'] != '15':
 if CONFIG['MOZ_OMX_DECODER']:
     DEFINES['MOZ_OMX_DECODER'] = True
 
-if CONFIG['ANDROID_VERSION'] > '15':
-    LOCAL_INCLUDES += [
-        '%' + '%s/frameworks/native/opengl/include' % CONFIG['ANDROID_SOURCE'],
-    ]
-
-LOCAL_INCLUDES += [
-    '%' + '%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
+CXXFLAGS += [
+    '-I%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
         'hardware/libhardware/include',
         'hardware/libhardware_legacy/include',
+        'frameworks/native/opengl/include',
     ]
 ]

@@ -43,12 +43,8 @@ vacuumParticipant.prototype =
   classID: Components.ID("{52aa0b22-b82f-4e38-992a-c3675a3355d2}"),
   contractID: "@unit.test.com/test-vacuum-participant;1",
 
-  get expectedDatabasePageSize() {
-    return this._dbConn.defaultPageSize;
-  },
-  get databaseConnection() {
-    return this._dbConn;
-  },
+  get expectedDatabasePageSize() this._dbConn.defaultPageSize,
+  get databaseConnection() this._dbConn,
 
   _grant: true,
   onBeginVacuum: function TVP_onBeginVacuum()
@@ -76,17 +72,15 @@ vacuumParticipant.prototype =
     else if (aData == "wal") {
       try {
         this._dbConn.close();
-      } catch (e) {
-        // Do nothing.
       }
+      catch(e) {}
       this._dbConn = getDatabase(new_db_file("testVacuum2"));
     }
     else if (aData == "wal-fail") {
       try {
         this._dbConn.close();
-      } catch (e) {
-        // Do nothing.
       }
+      catch(e) {}
       this._dbConn = getDatabase(new_db_file("testVacuum3"));
       // Use WAL journal mode.
       this._dbConn.executeSimpleSQL("PRAGMA journal_mode = WAL");
@@ -98,9 +92,8 @@ vacuumParticipant.prototype =
     else if (aData == "memory") {
       try {
         this._dbConn.asyncClose();
-      } catch (e) {
-        // Do nothing.
       }
+      catch(e) {}
       this._dbConn = Cc["@mozilla.org/storage/service;1"].
                      getService(Ci.mozIStorageService).
                      openSpecialDatabase("memory");
@@ -109,17 +102,16 @@ vacuumParticipant.prototype =
       Services.obs.removeObserver(this, "test-options");
       try {
         this._dbConn.asyncClose();
-      } catch (e) {
-        // Do nothing.
       }
+      catch(e) {}
     }
   },
 
   QueryInterface: XPCOMUtils.generateQI([
-    Ci.mozIStorageVacuumParticipant,
-    Ci.nsIObserver,
+    Ci.mozIStorageVacuumParticipant
+  , Ci.nsIObserver
   ])
 };
 
-var gComponentsArray = [vacuumParticipant];
+let gComponentsArray = [vacuumParticipant];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(gComponentsArray);

@@ -27,6 +27,8 @@ class VPMFramePreprocessor {
   VPMFramePreprocessor();
   ~VPMFramePreprocessor();
 
+  int32_t ChangeUniqueId(const int32_t id);
+
   void Reset();
 
   // Enable temporal decimation.
@@ -61,6 +63,7 @@ class VPMFramePreprocessor {
   // we can compute new content metrics every |kSkipFrameCA| frames.
   enum { kSkipFrameCA = 2 };
 
+  int32_t id_;
   VideoContentMetrics* content_metrics_;
   I420VideoFrame resampled_frame_;
   VPMSpatialResampler* spatial_resampler_;

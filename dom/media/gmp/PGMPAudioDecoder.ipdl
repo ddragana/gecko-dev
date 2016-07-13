@@ -18,18 +18,18 @@ async protocol PGMPAudioDecoder
 {
   manager PGMPContent;
 child:
-  async InitDecode(GMPAudioCodecData aCodecSettings);
-  async Decode(GMPAudioEncodedSampleData aInput);
-  async Reset();
-  async Drain();
-  async DecodingComplete();
+  InitDecode(GMPAudioCodecData aCodecSettings);
+  Decode(GMPAudioEncodedSampleData aInput);
+  Reset();
+  Drain();
+  DecodingComplete();
 parent:
-  async __delete__();
-  async Decoded(GMPAudioDecodedSampleData aDecoded);
-  async InputDataExhausted();
-  async DrainComplete();
-  async ResetComplete();
-  async Error(GMPErr aErr);
+  __delete__();
+  Decoded(GMPAudioDecodedSampleData aDecoded);
+  InputDataExhausted();
+  DrainComplete();
+  ResetComplete();
+  Error(GMPErr aErr);
   async Shutdown();
 };
 

@@ -16,10 +16,14 @@
 
 #include <sys/types.h>
 
+PRLogModuleInfo* gRtspLog;
+#undef LOG
+#define LOG(args) MOZ_LOG(gRtspLog, mozilla::LogLevel::Debug, args)
+
 #define SEND_DISCONNECT_IF_ERROR(rv)                         \
   if (NS_FAILED(rv) && mIPCOpen && mTotalTracks > 0ul) {     \
     for (uint32_t i = 0; i < mTotalTracks; i++) {            \
-      Unused << SendOnDisconnected(i, rv);                   \
+      unused << SendOnDisconnected(i, rv);                   \
     }                                                        \
   }
 
@@ -27,10 +31,6 @@ using namespace mozilla::ipc;
 
 namespace mozilla {
 namespace net {
-
-LazyLogModule gRtspLog("nsRtsp");
-#undef LOG
-#define LOG(args) MOZ_LOG(mozilla::net::gRtspLog, mozilla::LogLevel::Debug, args)
 
 void
 RtspControllerParent::Destroy()
@@ -40,8 +40,13 @@ RtspControllerParent::Destroy()
   // RtspControllerParent is deleted. This ensures we only delete the
   // RtspControllerParent on the main thread.
   if (!NS_IsMainThread()) {
-    RefPtr<RtspControllerParent> doomed(this);
-    NS_ReleaseOnMainThread(doomed.forget(), true);
+    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+    NS_ENSURE_TRUE_VOID(mainThread);
+    nsRefPtr<RtspControllerParent> doomed(this);
+    if (NS_FAILED(NS_ProxyRelease(mainThread,
+            static_cast<nsIStreamingProtocolListener*>(doomed), true))) {
+      NS_WARNING("Failed to proxy release to main thread!");
+    }
   } else {
     delete this;
   }
@@ -56,6 +61,8 @@ RtspControllerParent::RtspControllerParent()
   : mIPCOpen(true)
   , mTotalTracks(0)
 {
+  if (!gRtspLog)
+    gRtspLog = PR_NewLogModule("nsRtsp");
 }
 
 RtspControllerParent::~RtspControllerParent()

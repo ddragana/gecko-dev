@@ -224,7 +224,9 @@ InitOperators(void)
   nsCOMPtr<nsIPersistentProperties> mathfontProp;
   rv = NS_LoadPersistentPropertiesFromURISpec(
          getter_AddRefs(mathfontProp),
-         NS_LITERAL_CSTRING("resource://gre/res/fonts/mathfont.properties"));
+         NS_LITERAL_CSTRING("resource://gre/res/fonts/mathfont.properties"),
+         nsContentUtils::GetSystemPrincipal(),
+         nsIContentPolicy::TYPE_OTHER);
 
   if (NS_FAILED(rv)) return rv;
 
@@ -292,7 +294,7 @@ InitOperators(void)
 }
 
 static nsresult
-InitOperatorGlobals()
+InitGlobals()
 {
   gGlobalsInitialized = true;
   nsresult rv = NS_ERROR_OUT_OF_MEMORY;
@@ -348,7 +350,7 @@ nsMathMLOperators::LookupOperator(const nsString&       aOperator,
                                   float*                aTrailingSpace)
 {
   if (!gGlobalsInitialized) {
-    InitOperatorGlobals();
+    InitGlobals();
   }
   if (gOperatorTable) {
     NS_ASSERTION(aFlags && aLeadingSpace && aTrailingSpace, "bad usage");
@@ -393,7 +395,7 @@ nsMathMLOperators::LookupOperators(const nsString&       aOperator,
                                    float*                aTrailingSpace)
 {
   if (!gGlobalsInitialized) {
-    InitOperatorGlobals();
+    InitGlobals();
   }
 
   aFlags[NS_MATHML_OPERATOR_FORM_INFIX] = 0;

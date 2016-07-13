@@ -6,32 +6,22 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Move.h"
-#include "mozilla/Pair.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/unused.h"
 
 #include <stddef.h>
-#include <utility>
 
 using mozilla::Get;
 using mozilla::IsSame;
 using mozilla::MakeTuple;
 using mozilla::MakeUnique;
 using mozilla::Move;
-using mozilla::Pair;
 using mozilla::Tie;
 using mozilla::Tuple;
 using mozilla::UniquePtr;
-using mozilla::Unused;
-using std::pair;
-
-#if (_MSC_VER == 1800)
-// Optimizations in VS2013 on Windows 10 cause an internal compiler error
-// with this file.
-#pragma optimize("", off)
-#endif
+using mozilla::unused;
 
 #define CHECK(c) \
   do { \
@@ -55,9 +45,9 @@ TestConstruction()
 {
   // Default construction
   Tuple<> a;
-  Unused << a;
+  unused << a;
   Tuple<int> b;
-  Unused << b;
+  unused << b;
 
   // Construction from elements
   int x = 1, y = 1;
@@ -89,40 +79,6 @@ TestConstruction()
 }
 
 static void
-TestConstructionFromMozPair()
-{
-  // Construction from elements
-  int x = 1, y = 1;
-  Pair<int, int> a{x, y};
-  Pair<int&, const int&> b{x, y};
-  Tuple<int, int> c(a);
-  Tuple<int&, const int&> d(b);
-  x = 42;
-  y = 42;
-  CHECK(Get<0>(c) == 1);
-  CHECK(Get<1>(c) == 1);
-  CHECK(Get<0>(d) == 42);
-  CHECK(Get<1>(d) == 42);
-}
-
-static void
-TestConstructionFromStdPair()
-{
-  // Construction from elements
-  int x = 1, y = 1;
-  pair<int, int> a{x, y};
-  pair<int&, const int&> b{x, y};
-  Tuple<int, int> c(a);
-  Tuple<int&, const int&> d(b);
-  x = 42;
-  y = 42;
-  CHECK(Get<0>(c) == 1);
-  CHECK(Get<1>(c) == 1);
-  CHECK(Get<0>(d) == 42);
-  CHECK(Get<1>(d) == 42);
-}
-
-static void
 TestAssignment()
 {
   // Copy assignment
@@ -148,72 +104,6 @@ TestAssignment()
 }
 
 static void
-TestAssignmentFromMozPair()
-{
-  // Copy assignment
-  Tuple<int, int> a{0, 0};
-  Pair<int, int> b{42, 42};
-  a = b;
-  CHECK(Get<0>(a) == 42);
-  CHECK(Get<1>(a) == 42);
-
-  // Assignment to reference member
-  int i = 0;
-  int j = 0;
-  int k = 42;
-  Tuple<int&, int&> c{i, j};
-  Pair<int&, int&> d{k, k};
-  c = d;
-  CHECK(i == 42);
-  CHECK(j == 42);
-
-  // Move assignment
-  Tuple<UniquePtr<int>, UniquePtr<int>> e{MakeUnique<int>(0),
-                                          MakeUnique<int>(0)};
-  Pair<UniquePtr<int>, UniquePtr<int>> f{MakeUnique<int>(42),
-                                         MakeUnique<int>(42)};
-  e = Move(f);
-  CHECK(*Get<0>(e) == 42);
-  CHECK(*Get<1>(e) == 42);
-  CHECK(f.first() == nullptr);
-  CHECK(f.second() == nullptr);
-}
-
-static void
-TestAssignmentFromStdPair()
-{
-  // Copy assignment
-  Tuple<int, int> a{0, 0};
-  pair<int, int> b{42, 42};
-  a = b;
-  CHECK(Get<0>(a) == 42);
-  CHECK(Get<1>(a) == 42);
-
-  // Assignment to reference member
-  int i = 0;
-  int j = 0;
-  int k = 42;
-  Tuple<int&, int&> c{i, j};
-  pair<int&, int&> d{k, k};
-  c = d;
-  CHECK(i == 42);
-  CHECK(j == 42);
-
-  // Move assignment.
-  Tuple<UniquePtr<int>, UniquePtr<int>> e{MakeUnique<int>(0), MakeUnique<int>(0)};
-  // XXX: On some platforms std::pair doesn't support move constructor.
-  pair<UniquePtr<int>, UniquePtr<int>> f;
-  f.first = MakeUnique<int>(42);
-  f.second = MakeUnique<int>(42);
-
-  e = Move(f);
-  CHECK(*Get<0>(e) == 42);
-  CHECK(*Get<1>(e) == 42);
-  CHECK(f.first == nullptr);
-  CHECK(f.second == nullptr);
-}
-
-static void
 TestGet()
 {
   int x = 1;
@@ -236,7 +126,7 @@ TestGet()
   CHECK(y == 42);
 }
 
-static void
+static bool
 TestMakeTuple()
 {
   auto tuple = MakeTuple(42, 0.5f, 'c');
@@ -244,13 +134,7 @@ TestMakeTuple()
   CHECK(Get<0>(tuple) == 42);
   CHECK(Get<1>(tuple) == 0.5f);
   CHECK(Get<2>(tuple) == 'c');
-
-  // Make sure we don't infer the type to be Tuple<int&>.
-  int x = 1;
-  auto tuple2 = MakeTuple(x);
-  CHECK_TYPE(tuple2, Tuple<int>);
-  x = 2;
-  CHECK(Get<0>(tuple2) == 1);
+  return true;
 }
 
 static bool
@@ -271,18 +155,6 @@ TestTie()
   CHECK(i == Get<0>(rhs2));
   CHECK(f == Get<1>(rhs2));
   CHECK(c == Get<2>(rhs2));
-
-  // Test Pair
-  Pair<int, float> rhs3(-1, 1.2f);
-  Tie(i, f) = rhs3;
-  CHECK(i == rhs3.first());
-  CHECK(f == rhs3.second());
-
-  pair<int, float> rhs4(42, 1.5f);
-  Tie(i, f) = rhs4;
-  CHECK(i == rhs4.first);
-  CHECK(f == rhs4.second);
-
   return true;
 }
 
@@ -290,11 +162,7 @@ int
 main()
 {
   TestConstruction();
-  TestConstructionFromMozPair();
-  TestConstructionFromStdPair();
   TestAssignment();
-  TestAssignmentFromMozPair();
-  TestAssignmentFromStdPair();
   TestGet();
   TestMakeTuple();
   TestTie();

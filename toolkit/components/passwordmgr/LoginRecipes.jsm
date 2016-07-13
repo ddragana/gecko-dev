@@ -8,7 +8,7 @@ this.EXPORTED_SYMBOLS = ["LoginRecipesContent", "LoginRecipesParent"];
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 const REQUIRED_KEYS = ["hosts"];
-const OPTIONAL_KEYS = ["description", "notUsernameSelector", "passwordSelector", "pathRegex", "usernameSelector"];
+const OPTIONAL_KEYS = ["description", "passwordSelector", "pathRegex", "usernameSelector"];
 const SUPPORTED_KEYS = REQUIRED_KEYS.concat(OPTIONAL_KEYS);
 
 Cu.importGlobalProperties(["URL"]);
@@ -182,7 +182,7 @@ LoginRecipesParent.prototype = {
 };
 
 
-var LoginRecipesContent = {
+let LoginRecipesContent = {
   /**
    * @param {Set} aRecipes - Possible recipes that could apply to the form
    * @param {FormLike} aForm - We use a form instead of just a URL so we can later apply
@@ -227,8 +227,7 @@ var LoginRecipesContent = {
     let chosenRecipe = null;
     // Find the first (most-specific recipe that involves field overrides).
     for (let recipe of recipes) {
-      if (!recipe.usernameSelector && !recipe.passwordSelector &&
-          !recipe.notUsernameSelector) {
+      if (!recipe.usernameSelector && !recipe.passwordSelector) {
         continue;
       }
 
@@ -250,7 +249,7 @@ var LoginRecipesContent = {
     }
     let field = aParent.ownerDocument.querySelector(aSelector);
     if (!field) {
-      log.debug("Login field selector wasn't matched:", aSelector);
+      log.warn("Login field selector wasn't matched:", aSelector);
       return null;
     }
     if (!(field instanceof aParent.ownerDocument.defaultView.HTMLInputElement)) {

@@ -77,7 +77,6 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIDNSService,
   nsDNSService::GetXPCOMSingleton)
 
 #include "nsSocketTransportService2.h"
-typedef mozilla::net::nsSocketTransportService nsSocketTransportService;
 #undef LOG
 #undef LOG_ENABLED
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsSocketTransportService, Init)

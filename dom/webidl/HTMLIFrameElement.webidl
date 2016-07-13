@@ -18,7 +18,7 @@ interface HTMLIFrameElement : HTMLElement {
            attribute DOMString srcdoc;
   [SetterThrows, Pure]
            attribute DOMString name;
-  [PutForwards=value] readonly attribute DOMTokenList sandbox;
+  [PutForwards=value] readonly attribute DOMSettableTokenList sandbox;
            // attribute boolean seamless;
   [SetterThrows, Pure]
            attribute boolean allowFullscreen;
@@ -27,7 +27,7 @@ interface HTMLIFrameElement : HTMLElement {
   [SetterThrows, Pure]
            attribute DOMString height;
   [SetterThrows, Pure, Pref="network.http.enablePerElementReferrer"]
-           attribute DOMString referrerPolicy;
+           attribute DOMString referrer;
   readonly attribute Document? contentDocument;
   readonly attribute WindowProxy? contentWindow;
 };

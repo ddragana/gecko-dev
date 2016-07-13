@@ -1,8 +1,6 @@
 "use strict";
 const TEST_PAGE = "http://mochi.test:8888/browser/browser/base/content/test/general/file_double_close_tab.html";
-var testTab;
-
-SpecialPowers.pushPrefEnv({"set": [["dom.require_user_interaction_for_beforeunload", false]]});
+let testTab;
 
 function waitForDialog(callback) {
   function onTabModalDialogLoaded(node) {

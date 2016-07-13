@@ -10,6 +10,7 @@ Components.utils.import("resource://gre/modules/Task.jsm");
  */
 
 function run_test() {
+  do_test_pending();
   run_next_test();
 }
 
@@ -188,7 +189,7 @@ add_task(function* test_proto() {
 });
 
 // Tests setting dates on directories.
-add_task(function* test_dirs() {
+add_task(function test_dirs() {
   let path = OS.Path.join(OS.Constants.Path.tmpDir,
                               "test_osfile_async_setDates_dir");
   yield OS.File.makeDir(path);
@@ -209,3 +210,5 @@ add_task(function* test_dirs() {
     yield OS.File.removeEmptyDir(path);
   }
 });
+
+add_task(do_test_finished);

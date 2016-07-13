@@ -4,5 +4,5 @@ protocol multimanDupMgrs {
     manager multimanDupMgrsMgr or multimanDupMgrsMgr;
 
 child:
-    async __delete__();
+    __delete__();
 };

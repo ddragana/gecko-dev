@@ -9,6 +9,7 @@
 
 #include "AudioEventTimeline.h"
 #include "mozilla/ErrorResult.h"
+#include "nsAutoPtr.h"
 #include "MediaStreamGraph.h"
 #include "AudioSegment.h"
 
@@ -23,9 +24,9 @@ namespace dom {
 // This MediaStream is managed by the AudioParam subclass on the main
 // thread, and can only be obtained from the AudioNodeEngine instances
 // consuming this class.
-class AudioParamTimeline : public AudioEventTimeline
+class AudioParamTimeline : public AudioEventTimeline<ErrorResult>
 {
-  typedef AudioEventTimeline BaseClass;
+  typedef AudioEventTimeline<ErrorResult> BaseClass;
 
 public:
   explicit AudioParamTimeline(float aDefaultValue)
@@ -47,24 +48,6 @@ public:
   float GetValueAtTime(TimeType aTime)
   {
     return GetValueAtTime(aTime, 0);
-  }
-
-  template<typename TimeType>
-  void InsertEvent(const AudioTimelineEvent& aEvent)
-  {
-    if (aEvent.mType == AudioTimelineEvent::Cancel) {
-      CancelScheduledValues(aEvent.template Time<TimeType>());
-      return;
-    }
-    if (aEvent.mType == AudioTimelineEvent::Stream) {
-      mStream = aEvent.mStream;
-      return;
-    }
-    if (aEvent.mType == AudioTimelineEvent::SetValue) {
-      AudioEventTimeline::SetValue(aEvent.mValue);
-      return;
-    }
-    AudioEventTimeline::InsertEvent<TimeType>(aEvent);
   }
 
   // Get the value of the AudioParam at time aTime + aCounter.
@@ -98,7 +81,7 @@ private:
 
 protected:
   // This is created lazily when needed.
-  RefPtr<MediaStream> mStream;
+  nsRefPtr<MediaStream> mStream;
 };
 
 template<> inline float

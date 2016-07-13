@@ -7,7 +7,7 @@ include protocol PBackground;
 include PBackgroundSharedTypes;
 include ServiceWorkerRegistrarTypes;
 
-using mozilla::PrincipalOriginAttributes from "mozilla/ipc/BackgroundUtils.h";
+using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 
 namespace mozilla {
 namespace dom {
@@ -17,28 +17,28 @@ protocol PServiceWorkerManager
   manager PBackground;
 
 parent:
-  async Register(ServiceWorkerRegistrationData data);
+  Register(ServiceWorkerRegistrationData data);
 
-  async Unregister(PrincipalInfo principalInfo, nsString scope);
+  Unregister(PrincipalInfo principalInfo, nsString scope);
 
-  async PropagateSoftUpdate(PrincipalOriginAttributes originAttributes,
-                            nsString scope);
-  async PropagateUnregister(PrincipalInfo principalInfo, nsString scope);
+  PropagateSoftUpdate(OriginAttributes originAttributes,
+                      nsString scope);
+  PropagateUnregister(PrincipalInfo principalInfo, nsString scope);
 
-  async PropagateRemove(nsCString host);
+  PropagateRemove(nsCString host);
 
-  async PropagateRemoveAll();
+  PropagateRemoveAll();
 
-  async Shutdown();
+  Shutdown();
 
 child:
-  async NotifyRegister(ServiceWorkerRegistrationData data);
-  async NotifySoftUpdate(PrincipalOriginAttributes originAttributes, nsString scope);
-  async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
-  async NotifyRemove(nsCString host);
-  async NotifyRemoveAll();
+  NotifyRegister(ServiceWorkerRegistrationData data);
+  NotifySoftUpdate(OriginAttributes originAttributes, nsString scope);
+  NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
+  NotifyRemove(nsCString host);
+  NotifyRemoveAll();
 
-  async __delete__();
+  __delete__();
 };
 
 } // namespace dom

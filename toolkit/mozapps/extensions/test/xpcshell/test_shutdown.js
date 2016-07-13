@@ -4,15 +4,12 @@
 
 // Verify that API functions fail if the Add-ons Manager isn't initialised.
 
-const IGNORE = ["getPreferredIconURL", "escapeAddonURI",
-                "shouldAutoUpdate", "getStartupChanges",
+const IGNORE = ["escapeAddonURI", "shouldAutoUpdate", "getStartupChanges",
                 "addTypeListener", "removeTypeListener",
                 "addAddonListener", "removeAddonListener",
                 "addInstallListener", "removeInstallListener",
                 "addManagerListener", "removeManagerListener",
-                "mapURIToAddonID", "shutdown", "init",
-                "stateToString", "errorToString", "getUpgradeListener",
-                "addUpgradeListener", "removeUpgradeListener"];
+                "mapURIToAddonID", "shutdown"];
 
 const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "AddonScreenshot", "AddonType", "startup", "shutdown",
@@ -21,8 +18,7 @@ const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "recordTimestamp", "recordSimpleMeasure",
                         "recordException", "getSimpleMeasures", "simpleTimer",
                         "setTelemetryDetails", "getTelemetryDetails",
-                        "callNoUpdateListeners", "backgroundUpdateTimerHandler",
-                        "hasUpgradeListener", "getUpgradeListener"];
+                        "callNoUpdateListeners", "backgroundUpdateTimerHandler"];
 
 function test_functions() {
   for (let prop in AddonManager) {

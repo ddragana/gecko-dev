@@ -140,10 +140,7 @@ nsHTMLDNSPrefetch::Prefetch(const nsAString &hostname, uint16_t flags)
     // considers empty strings to be valid hostnames
     if (!hostname.IsEmpty() &&
         net_IsValidHostName(NS_ConvertUTF16toUTF8(hostname))) {
-      // during shutdown gNeckoChild might be null
-      if (gNeckoChild) {
-        gNeckoChild->SendHTMLDNSPrefetch(nsAutoString(hostname), flags);
-      }
+      gNeckoChild->SendHTMLDNSPrefetch(nsAutoString(hostname), flags);
     }
     return NS_OK;
   }
@@ -185,7 +182,8 @@ nsHTMLDNSPrefetch::CancelPrefetch(Link *aElement,
     return NS_ERROR_NOT_AVAILABLE;
 
   nsAutoString hostname;
-  aElement->GetHostname(hostname);
+  ErrorResult rv;
+  aElement->GetHostname(hostname, rv);
   return CancelPrefetch(hostname, flags, aReason);
 }
 
@@ -200,11 +198,8 @@ nsHTMLDNSPrefetch::CancelPrefetch(const nsAString &hostname,
     // considers empty strings to be valid hostnames
     if (!hostname.IsEmpty() &&
         net_IsValidHostName(NS_ConvertUTF16toUTF8(hostname))) {
-      // during shutdown gNeckoChild might be null
-      if (gNeckoChild) {
-        gNeckoChild->SendCancelHTMLDNSPrefetch(nsString(hostname), flags,
-                                               aReason);
-      }
+      gNeckoChild->SendCancelHTMLDNSPrefetch(nsString(hostname), flags,
+                                             aReason);
     }
     return NS_OK;
   }
@@ -320,7 +315,7 @@ nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue()
       if (link && link->HasDeferredDNSPrefetchRequest()) {
         nsCOMPtr<nsIURI> hrefURI(link ? link->GetURI() : nullptr);
         bool isLocalResource = false;
-        nsresult rv = NS_OK;
+        nsresult rv;
 
         hostName.Truncate();
         if (hrefURI) {
@@ -332,11 +327,8 @@ nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue()
 
         if (!hostName.IsEmpty() && NS_SUCCEEDED(rv) && !isLocalResource) {
           if (IsNeckoChild()) {
-            // during shutdown gNeckoChild might be null
-            if (gNeckoChild) {
-              gNeckoChild->SendHTMLDNSPrefetch(NS_ConvertUTF8toUTF16(hostName),
-                                               mEntries[mTail].mFlags);
-            }
+            gNeckoChild->SendHTMLDNSPrefetch(NS_ConvertUTF8toUTF16(hostName),
+                                           mEntries[mTail].mFlags);
           } else {
             nsCOMPtr<nsICancelable> tmpOutstanding;
 

@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -87,7 +85,7 @@ class StackAllocator : public std::allocator<T> {
   // TODO: If we were fancy pants, perhaps we could share storage
   // iff sizeof(T) == sizeof(U).
   template<typename U, size_t other_capacity>
-  explicit StackAllocator(const StackAllocator<U, other_capacity>& other)
+  StackAllocator(const StackAllocator<U, other_capacity>& other)
       : source_(NULL) {
   }
 

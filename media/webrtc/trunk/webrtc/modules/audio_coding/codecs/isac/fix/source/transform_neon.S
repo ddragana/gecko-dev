@@ -27,8 +27,7 @@ GLOBAL_LABEL WebRtcIsacfix_kSinTab2
 
 DEFINE_FUNCTION WebRtcIsacfix_Time2SpecNeon
 .align  2
-  push {r3-r11,lr}            @ need to push r4-r11, but push r3 too to keep
-                              @ stack 8-byte aligned
+  push {r4-r11,lr}
   sub sp, sp, #(16 + FRAMESAMPLES * 4)
 
   str r0, [sp]                @ inre1Q9
@@ -43,7 +42,7 @@ DEFINE_FUNCTION WebRtcIsacfix_Time2SpecNeon
   add r5, sp, #(16 + FRAMESAMPLES * 2)  @ tmpimQ16;
 
   adr r9, WebRtcIsacfix_kCosTab1
-#if defined(__APPLE__) || defined(__clang__)
+#if defined(__APPLE__)
   mov r6, #:lower16:(WebRtcIsacfix_kSinTab1 - WebRtcIsacfix_kCosTab1)
 #else
   mov r6, #(WebRtcIsacfix_kSinTab1 - WebRtcIsacfix_kCosTab1)
@@ -228,7 +227,7 @@ Time2Spec_PostFftTransform:
   bgt Time2Spec_PostFftTransform
 
   add sp, sp, #(16 + FRAMESAMPLES * 4)
-  pop {r3-r11,pc}
+  pop {r4-r11,pc}
 
 .align  8
 @ Cosine table 1 in Q14
@@ -329,8 +328,7 @@ _WebRtcIsacfix_kSinTab1:  @ Label for iOS
 
 DEFINE_FUNCTION WebRtcIsacfix_Spec2TimeNeon
 .align  2
-  push {r3-r11,lr}            @ need to push r4-r11, but push r3 too to keep
-                              @ stack 8-byte aligned
+  push {r4-r11,lr}
 
   sub sp, sp, #16
   str r0, [sp]                @ inreQ7
@@ -461,7 +459,7 @@ TransformAndFindMax:
   bgt TransformAndFindMax
 
   adr r10, WebRtcIsacfix_kSinTab1
-#if defined(__APPLE__) || defined(__clang__)
+#if defined(__APPLE__)
   mov r2, #:lower16:(WebRtcIsacfix_kSinTab1 - WebRtcIsacfix_kCosTab1)
 #else
   mov r2, #(WebRtcIsacfix_kSinTab1 - WebRtcIsacfix_kCosTab1)
@@ -642,4 +640,4 @@ DemodulateAndSeparate:
   bgt DemodulateAndSeparate
 
   add sp, sp, #16
-  pop {r3-r11,pc}
+  pop {r4-r11,pc}

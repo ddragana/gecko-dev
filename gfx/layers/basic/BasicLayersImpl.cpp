@@ -39,25 +39,6 @@ GetMaskData(Layer* aMaskLayer,
   return false;
 }
 
-already_AddRefed<SourceSurface>
-GetMaskForLayer(Layer* aLayer, Matrix* aMaskTransform)
-{
-  if (!aLayer->GetMaskLayer()) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(aMaskTransform);
-
-  AutoMoz2DMaskData mask;
-  if (GetMaskData(aLayer->GetMaskLayer(), Point(), &mask)) {
-    *aMaskTransform = mask.GetTransform();
-    RefPtr<SourceSurface> surf = mask.GetSurface();
-    return surf.forget();
-  }
-
-  return nullptr;
-}
-
 void
 PaintWithMask(gfxContext* aContext, float aOpacity, Layer* aMaskLayer)
 {
@@ -115,7 +96,7 @@ void
 FillRectWithMask(DrawTarget* aDT,
                  const Rect& aRect,
                  SourceSurface* aSurface,
-                 SamplingFilter aSamplingFilter,
+                 Filter aFilter,
                  const DrawOptions& aOptions,
                  ExtendMode aExtendMode,
                  SourceSurface* aMaskSource,
@@ -134,7 +115,7 @@ FillRectWithMask(DrawTarget* aDT,
       transform = (*aSurfaceTransform) * transform;
     }
 
-    SurfacePattern source(aSurface, aExtendMode, transform, aSamplingFilter);
+    SurfacePattern source(aSurface, aExtendMode, transform, aFilter);
 
     aDT->SetTransform(*aMaskTransform);
     aDT->MaskSurface(source, aMaskSource, Point(0, 0), aOptions);
@@ -146,7 +127,7 @@ FillRectWithMask(DrawTarget* aDT,
   aDT->FillRect(aRect,
                 SurfacePattern(aSurface, aExtendMode,
                                aSurfaceTransform ? (*aSurfaceTransform) : Matrix(),
-                               aSamplingFilter), aOptions);
+                               aFilter), aOptions);
 }
 
 void
@@ -154,21 +135,19 @@ FillRectWithMask(DrawTarget* aDT,
                  const gfx::Point& aDeviceOffset,
                  const Rect& aRect,
                  SourceSurface* aSurface,
-                 SamplingFilter aSamplingFilter,
+                 Filter aFilter,
                  const DrawOptions& aOptions,
                  Layer* aMaskLayer)
 {
   AutoMoz2DMaskData mask;
   if (GetMaskData(aMaskLayer, aDeviceOffset, &mask)) {
     const Matrix& maskTransform = mask.GetTransform();
-    FillRectWithMask(aDT, aRect, aSurface, aSamplingFilter, aOptions,
-                     ExtendMode::CLAMP,
+    FillRectWithMask(aDT, aRect, aSurface, aFilter, aOptions, ExtendMode::CLAMP,
                      mask.GetSurface(), &maskTransform);
     return;
   }
 
-  FillRectWithMask(aDT, aRect, aSurface, aSamplingFilter, aOptions,
-                   ExtendMode::CLAMP);
+  FillRectWithMask(aDT, aRect, aSurface, aFilter, aOptions, ExtendMode::CLAMP);
 }
 
 BasicImplData*

@@ -2,9 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef MERGED_COMPARTMENT
+
 this.EXPORTED_SYMBOLS = ["Async"];
 
-var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+
+#endif
 
 // Constants for makeSyncCallback, waitForSyncCallback.
 const CB_READY = {};
@@ -119,22 +123,11 @@ this.Async = {
     Services.obs.addObserver(function onQuitApplication() {
       Services.obs.removeObserver(onQuitApplication, "quit-application");
       Async.checkAppReady = function() {
-        let exception = Components.Exception("App. Quitting", Cr.NS_ERROR_ABORT);
-        exception.appIsShuttingDown = true;
-        throw exception;
+        throw Components.Exception("App. Quitting", Cr.NS_ERROR_ABORT);
       };
     }, "quit-application", false);
     // In the common case, checkAppReady just returns true
     return (Async.checkAppReady = function() { return true; })();
-  },
-
-  /**
-   * Check if the passed exception is one raised by checkAppReady. Typically
-   * this will be used in exception handlers to allow such exceptions to
-   * make their way to the top frame and allow the app to actually terminate.
-   */
-  isShutdownException(exception) {
-    return exception && exception.appIsShuttingDown === true;
   },
 
   /**
@@ -173,7 +166,7 @@ this.Async = {
       let row;
       while ((row = results.getNextRow()) != null) {
         let item = {};
-        for (let name of this.names) {
+        for each (let name in this.names) {
           item[name] = row.getResultByName(name);
         }
         this.results.push(item);
@@ -206,15 +199,5 @@ this.Async = {
     storageCallback.syncCb = Async.makeSyncCallback();
     query.executeAsync(storageCallback);
     return Async.waitForSyncCallback(storageCallback.syncCb);
-  },
-
-  promiseSpinningly(promise) {
-    let cb = Async.makeSpinningCallback();
-    promise.then(result =>  {
-      cb(null, result);
-    }, err => {
-      cb(err || new Error("Promise rejected without explicit error"));
-    });
-    return cb.wait();
   },
 };

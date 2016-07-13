@@ -6,10 +6,8 @@ function test() {
   Harness.installsCompletedCallback = finish_test;
   Harness.setup();
 
-  gBrowser.selectedTab = gBrowser.addTab("about:blank");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    gBrowser.loadURI(TESTROOT + "multipackage.xpi");
-  });
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "multipackage.xpi");
 }
 
 function get_item(items, name) {
@@ -33,7 +31,8 @@ function confirm_install(window) {
 
   item = get_item(items, "Signed XPI Test");
   if (item) {
-    is(item.signed, "false", "Should have listed the item as signed");
+    is(item.cert, "(Object Signer)", "Should have seen the signer");
+    is(item.signed, "true", "Should have listed the item as signed");
     is(item.icon, "", "Should have listed no icon for the item");
   }
 

@@ -13,11 +13,11 @@
   }
 
   navigator.serviceWorker.ready.then(function(swr) {
-    swr.showNotification("Hi there. The ServiceWorker should receive a click event for this.", { data: { complex: ["jsval", 5] }});
+    swr.showNotification("Hi there. The ServiceWorker should receive a click event for this.");
   });
 
   navigator.serviceWorker.onmessage = function(msg) {
-    testWindow.callback(msg.data.result);
+    testWindow.callback();
   };
 </script>
 

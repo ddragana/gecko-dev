@@ -5,99 +5,115 @@
 
 #include "WebGLContextLossHandler.h"
 
-#include "mozilla/DebugOnly.h"
-#include "nsISupportsImpl.h"
 #include "nsITimer.h"
 #include "nsThreadUtils.h"
 #include "WebGLContext.h"
 
 namespace mozilla {
 
-class WatchdogTimerEvent final : public nsITimerCallback
-{
-    const WeakPtr<WebGLContextLossHandler> mHandler;
-
-public:
-    NS_DECL_ISUPPORTS
-
-    explicit WatchdogTimerEvent(WebGLContextLossHandler* handler)
-        : mHandler(handler)
-    { }
-
-private:
-    virtual ~WatchdogTimerEvent() { }
-
-    NS_IMETHOD Notify(nsITimer*) override {
-        if (mHandler) {
-            mHandler->TimerCallback();
-        }
-        return NS_OK;
-    }
-};
-
-NS_IMPL_ISUPPORTS(WatchdogTimerEvent, nsITimerCallback, nsISupports)
-
-////////////////////////////////////////
-
 WebGLContextLossHandler::WebGLContextLossHandler(WebGLContext* webgl)
-    : mWebGL(webgl)
+    : mWeakWebGL(webgl)
     , mTimer(do_CreateInstance(NS_TIMER_CONTRACTID))
-    , mTimerPending(false)
+    , mIsTimerRunning(false)
     , mShouldRunTimerAgain(false)
+    , mIsDisabled(false)
 #ifdef DEBUG
     , mThread(NS_GetCurrentThread())
 #endif
 {
-    MOZ_ASSERT(mThread);
 }
 
 WebGLContextLossHandler::~WebGLContextLossHandler()
 {
-    // NS_GetCurrentThread() returns null during shutdown.
-    const DebugOnly<nsIThread*> callingThread = NS_GetCurrentThread();
-    MOZ_ASSERT(callingThread == mThread || !callingThread);
+    MOZ_ASSERT(!mIsTimerRunning);
 }
-
-////////////////////
 
 void
-WebGLContextLossHandler::RunTimer()
+WebGLContextLossHandler::StartTimer(unsigned long delayMS)
 {
-    MOZ_ASSERT(NS_GetCurrentThread() == mThread);
+    // We can't pass an already_AddRefed through InitWithFuncCallback, so we
+    // should do the AddRef/Release manually.
+    this->AddRef();
 
-    // If the timer was already running, don't restart it here. Instead,
-    // wait until the previous call is done, then fire it one more time.
-    // This is also an optimization to prevent unnecessary
-    // cross-communication between threads.
-    if (mTimerPending) {
-        mShouldRunTimerAgain = true;
-        return;
-    }
-
-    const RefPtr<WatchdogTimerEvent> event = new WatchdogTimerEvent(this);
-    const uint32_t kDelayMS = 1000;
-    mTimer->InitWithCallback(event, kDelayMS, nsITimer::TYPE_ONE_SHOT);
-
-    mTimerPending = true;
+    mTimer->InitWithFuncCallback(StaticTimerCallback,
+                                 static_cast<void*>(this),
+                                 delayMS,
+                                 nsITimer::TYPE_ONE_SHOT);
 }
 
-////////////////////
+/*static*/ void
+WebGLContextLossHandler::StaticTimerCallback(nsITimer*, void* voidHandler)
+{
+    typedef WebGLContextLossHandler T;
+    T* handler = static_cast<T*>(voidHandler);
+
+    handler->TimerCallback();
+
+    // Release the AddRef from StartTimer.
+    handler->Release();
+}
 
 void
 WebGLContextLossHandler::TimerCallback()
 {
     MOZ_ASSERT(NS_GetCurrentThread() == mThread);
+    MOZ_ASSERT(mIsTimerRunning);
+    mIsTimerRunning = false;
 
-    mTimerPending = false;
+    if (mIsDisabled)
+        return;
 
-    const bool runOnceMore = mShouldRunTimerAgain;
-    mShouldRunTimerAgain = false;
-
-    mWebGL->UpdateContextLossStatus();
-
-    if (runOnceMore && !mTimerPending) {
+    // If we need to run the timer again, restart it immediately.
+    // Otherwise, the code we call into below might *also* try to
+    // restart it.
+    if (mShouldRunTimerAgain) {
         RunTimer();
+        MOZ_ASSERT(mIsTimerRunning);
     }
+
+    if (mWeakWebGL) {
+        mWeakWebGL->UpdateContextLossStatus();
+    }
+}
+
+void
+WebGLContextLossHandler::RunTimer()
+{
+    MOZ_ASSERT(!mIsDisabled);
+
+    // If the timer was already running, don't restart it here. Instead,
+    // wait until the previous call is done, then fire it one more time.
+    // This is an optimization to prevent unnecessary
+    // cross-communication between threads.
+    if (mIsTimerRunning) {
+        mShouldRunTimerAgain = true;
+        return;
+    }
+
+    StartTimer(1000);
+
+    mIsTimerRunning = true;
+    mShouldRunTimerAgain = false;
+}
+
+void
+WebGLContextLossHandler::DisableTimer()
+{
+    if (mIsDisabled)
+        return;
+
+    mIsDisabled = true;
+
+    // We can't just Cancel() the timer, as sometimes we end up
+    // receiving a callback after calling Cancel(). This could cause us
+    // to receive the callback after object destruction.
+
+    // Instead, we let the timer finish, but ignore it.
+
+    if (!mIsTimerRunning)
+        return;
+
+    mTimer->SetDelay(0);
 }
 
 } // namespace mozilla

@@ -36,10 +36,6 @@ ToNumberSlow(JSContext* cx, JS::Value v, double* dp);
 extern JS_PUBLIC_API(bool)
 ToInt8Slow(JSContext *cx, JS::HandleValue v, int8_t *out);
 
-/* DO NOT CALL THIS. Use JS::ToUint8. */
-extern JS_PUBLIC_API(bool)
-ToUint8Slow(JSContext *cx, JS::HandleValue v, uint8_t *out);
-
 /* DO NOT CALL THIS. Use JS::ToInt16. */
 extern JS_PUBLIC_API(bool)
 ToInt16Slow(JSContext *cx, JS::HandleValue v, int16_t *out);
@@ -79,7 +75,7 @@ namespace JS {
 namespace detail {
 
 #ifdef JS_DEBUG
-/**
+/*
  * Assert that we're not doing GC on cx, that we're in a request as
  * needed, and that the compartments for cx and v are correct.
  * Also check that GC would be safe at this point.
@@ -93,7 +89,7 @@ inline void AssertArgumentsAreSane(JSContext* cx, HandleValue v)
 
 } // namespace detail
 
-/**
+/*
  * ES6 draft 20141224, 7.1.1, second algorithm.
  *
  * Most users shouldn't call this -- use JS::ToBoolean, ToNumber, or ToString
@@ -217,19 +213,6 @@ ToInt8(JSContext *cx, JS::HandleValue v, int8_t *out)
         return true;
     }
     return js::ToInt8Slow(cx, v, out);
-}
-
-/* ES6 ECMA-262, 7.1.10 */
-MOZ_ALWAYS_INLINE bool
-ToUint8(JSContext *cx, JS::HandleValue v, uint8_t *out)
-{
-    detail::AssertArgumentsAreSane(cx, v);
-
-    if (v.isInt32()) {
-        *out = uint8_t(v.toInt32());
-        return true;
-    }
-    return js::ToUint8Slow(cx, v, out);
 }
 
 /*
@@ -400,9 +383,9 @@ ToIntWidth(double d)
 inline int32_t
 ToInt32(double d)
 {
-    // clang crashes compiling this when targeting arm:
+    // clang crashes compiling this when targeting arm-darwin:
     // https://llvm.org/bugs/show_bug.cgi?id=22974
-#if defined (__arm__) && defined (__GNUC__) && !defined(__clang__)
+#if defined (__arm__) && defined (__GNUC__) && !defined(__APPLE__)
     int32_t i;
     uint32_t    tmp0;
     uint32_t    tmp1;
@@ -542,24 +525,11 @@ ToInt8(double d)
     return detail::ToIntWidth<int8_t>(d);
 }
 
-/* ECMA-262 7.1.10 ToUInt8() specialized for doubles. */
-inline int8_t
-ToUint8(double d)
-{
-    return detail::ToUintWidth<uint8_t>(d);
-}
-
 /* WEBIDL 4.2.6 */
 inline int16_t
 ToInt16(double d)
 {
     return detail::ToIntWidth<int16_t>(d);
-}
-
-inline uint16_t
-ToUint16(double d)
-{
-    return detail::ToUintWidth<uint16_t>(d);
 }
 
 /* WEBIDL 4.2.10 */

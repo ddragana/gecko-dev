@@ -8,57 +8,39 @@
 #define mozilla_dom_FileSystemRequestParent_h
 
 #include "mozilla/dom/PFileSystemRequestParent.h"
-#include "mozilla/dom/FileSystemBase.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
 
 namespace mozilla {
 namespace dom {
 
-class FileSystemParams;
-class FileSystemTaskParentBase;
+class FileSystemBase;
 
-class FileSystemRequestParent final : public PFileSystemRequestParent
+class FileSystemRequestParent final
+  : public PFileSystemRequestParent
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FileSystemRequestParent)
-
 public:
   FileSystemRequestParent();
 
-  const nsCString&
-  PermissionName() const
+  bool
+  IsRunning()
   {
-    return mPermissionName;
-  }
-
-  FileSystemBase::ePermissionCheckType
-  PermissionCheckType() const
-  {
-    return mFileSystem ? mFileSystem->PermissionCheckType()
-                       : FileSystemBase::eNotSet;
+    return state() == PFileSystemRequest::__Start;
   }
 
   bool
-  Initialize(const FileSystemParams& aParams);
-
-  void
-  Start();
-
-  bool Destroyed() const
-  {
-    return mDestroyed;
-  }
+  Dispatch(ContentParent* aParent, const FileSystemParams& aParams);
 
   virtual void
   ActorDestroy(ActorDestroyReason why) override;
 
 private:
+  // Private destructor, to discourage deletion outside of Release():
+  virtual
   ~FileSystemRequestParent();
 
-  RefPtr<FileSystemBase> mFileSystem;
-  RefPtr<FileSystemTaskParentBase> mTask;
-
-  nsCString mPermissionName;
-
-  bool mDestroyed;
+  nsRefPtr<FileSystemBase> mFileSystem;
 };
 
 } // namespace dom

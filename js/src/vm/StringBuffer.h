@@ -45,13 +45,11 @@ class StringBuffer
      */
     mozilla::MaybeOneOf<Latin1CharBuffer, TwoByteCharBuffer> cb;
 
-#ifdef DEBUG
     /*
      * Make sure ensureTwoByteChars() is called before calling
      * infallibleAppend(char16_t).
      */
-    bool hasEnsuredTwoByteChars_;
-#endif
+    mozilla::DebugOnly<bool> hasEnsuredTwoByteChars_;
 
     /* Number of reserve()'d chars, see inflateChars. */
     size_t reserved_;
@@ -72,48 +70,42 @@ class StringBuffer
         return cb.ref<TwoByteCharBuffer>();
     }
 
-    MOZ_MUST_USE bool inflateChars();
+    bool inflateChars();
 
   public:
     explicit StringBuffer(ExclusiveContext* cx)
-      : cx(cx)
-#ifdef DEBUG
-      , hasEnsuredTwoByteChars_(false)
-#endif
-      , reserved_(0)
+      : cx(cx), hasEnsuredTwoByteChars_(false), reserved_(0)
     {
         cb.construct<Latin1CharBuffer>(cx);
     }
 
-    MOZ_MUST_USE bool reserve(size_t len) {
+    inline bool reserve(size_t len) {
         if (len > reserved_)
             reserved_ = len;
         return isLatin1() ? latin1Chars().reserve(len) : twoByteChars().reserve(len);
     }
-    MOZ_MUST_USE bool resize(size_t len) {
+    inline bool resize(size_t len) {
         return isLatin1() ? latin1Chars().resize(len) : twoByteChars().resize(len);
     }
-    bool empty() const {
+    inline bool empty() const {
         return isLatin1() ? latin1Chars().empty() : twoByteChars().empty();
     }
-    size_t length() const {
+    inline size_t length() const {
         return isLatin1() ? latin1Chars().length() : twoByteChars().length();
     }
-    char16_t getChar(size_t idx) const {
+    inline char16_t getChar(size_t idx) const {
         return isLatin1() ? latin1Chars()[idx] : twoByteChars()[idx];
     }
 
-    MOZ_MUST_USE bool ensureTwoByteChars() {
+    inline bool ensureTwoByteChars() {
         if (isLatin1() && !inflateChars())
             return false;
 
-#ifdef DEBUG
         hasEnsuredTwoByteChars_ = true;
-#endif
         return true;
     }
 
-    MOZ_MUST_USE bool append(const char16_t c) {
+    inline bool append(const char16_t c) {
         if (isLatin1()) {
             if (c <= JSString::MAX_LATIN1_CHAR)
                 return latin1Chars().append(Latin1Char(c));
@@ -122,44 +114,43 @@ class StringBuffer
         }
         return twoByteChars().append(c);
     }
-    MOZ_MUST_USE bool append(Latin1Char c) {
+    inline bool append(Latin1Char c) {
         return isLatin1() ? latin1Chars().append(c) : twoByteChars().append(c);
     }
-    MOZ_MUST_USE bool append(char c) {
+    inline bool append(char c) {
         return append(Latin1Char(c));
     }
 
-    inline MOZ_MUST_USE bool append(const char16_t* begin, const char16_t* end);
-
-    MOZ_MUST_USE bool append(const char16_t* chars, size_t len) {
+    inline bool append(const char16_t* begin, const char16_t* end);
+    inline bool append(const char16_t* chars, size_t len) {
         return append(chars, chars + len);
     }
 
-    MOZ_MUST_USE bool append(const Latin1Char* begin, const Latin1Char* end) {
+    inline bool append(const Latin1Char* begin, const Latin1Char* end) {
         return isLatin1() ? latin1Chars().append(begin, end) : twoByteChars().append(begin, end);
     }
-    MOZ_MUST_USE bool append(const Latin1Char* chars, size_t len) {
+    inline bool append(const Latin1Char* chars, size_t len) {
         return append(chars, chars + len);
     }
 
-    MOZ_MUST_USE bool append(const JS::ConstCharPtr chars, size_t len) {
+    inline bool append(const JS::ConstCharPtr chars, size_t len) {
         return append(chars.get(), chars.get() + len);
     }
-    MOZ_MUST_USE bool appendN(Latin1Char c, size_t n) {
+    inline bool appendN(Latin1Char c, size_t n) {
         return isLatin1() ? latin1Chars().appendN(c, n) : twoByteChars().appendN(c, n);
     }
 
-    inline MOZ_MUST_USE bool append(JSString* str);
-    inline MOZ_MUST_USE bool append(JSLinearString* str);
-    inline MOZ_MUST_USE bool appendSubstring(JSString* base, size_t off, size_t len);
-    inline MOZ_MUST_USE bool appendSubstring(JSLinearString* base, size_t off, size_t len);
+    inline bool append(JSString* str);
+    inline bool append(JSLinearString* str);
+    inline bool appendSubstring(JSString* base, size_t off, size_t len);
+    inline bool appendSubstring(JSLinearString* base, size_t off, size_t len);
 
-    MOZ_MUST_USE bool append(const char* chars, size_t len) {
+    inline bool append(const char* chars, size_t len) {
         return append(reinterpret_cast<const Latin1Char*>(chars), len);
     }
 
     template <size_t ArrayLength>
-    MOZ_MUST_USE bool append(const char (&array)[ArrayLength]) {
+    bool append(const char (&array)[ArrayLength]) {
         return append(array, ArrayLength - 1); /* No trailing '\0'. */
     }
 

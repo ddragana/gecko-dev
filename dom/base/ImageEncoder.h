@@ -11,17 +11,14 @@
 #include "nsError.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/HTMLCanvasElementBinding.h"
-#include "mozilla/UniquePtr.h"
 #include "nsLayoutUtils.h"
 #include "nsSize.h"
 
 class nsICanvasRenderingContextInternal;
-class nsIThreadPool;
 
 namespace mozilla {
 
 namespace layers {
-class AsyncCanvasRenderer;
 class Image;
 } // namespace layers
 
@@ -43,7 +40,6 @@ public:
                               const nsAString& aOptions,
                               const nsIntSize aSize,
                               nsICanvasRenderingContextInternal* aContext,
-                              layers::AsyncCanvasRenderer* aRenderer,
                               nsIInputStream** aStream);
 
   // Extracts data asynchronously. aType may change to "image/png" if we had to
@@ -60,7 +56,7 @@ public:
   static nsresult ExtractDataAsync(nsAString& aType,
                                    const nsAString& aOptions,
                                    bool aUsingCustomOptions,
-                                   UniquePtr<uint8_t[]> aImageBuffer,
+                                   uint8_t* aImageBuffer,
                                    int32_t aFormat,
                                    const nsIntSize aSize,
                                    EncodeCompleteCallback* aEncodeCallback);
@@ -88,7 +84,7 @@ public:
                                  nsIInputStream** aStream);
 
 private:
-  // When called asynchronously, aContext and aRenderer are null.
+  // When called asynchronously, aContext is null.
   static nsresult
   ExtractDataInternal(const nsAString& aType,
                       const nsAString& aOptions,
@@ -97,7 +93,6 @@ private:
                       const nsIntSize aSize,
                       layers::Image* aImage,
                       nsICanvasRenderingContextInternal* aContext,
-                      layers::AsyncCanvasRenderer* aRenderer,
                       nsIInputStream** aStream,
                       imgIEncoder* aEncoder);
 
@@ -108,13 +103,7 @@ private:
   // undefined in this case.
   static already_AddRefed<imgIEncoder> GetImageEncoder(nsAString& aType);
 
-  static nsresult EnsureThreadPool();
-
-  // Thread pool for dispatching EncodingRunnable.
-  static StaticRefPtr<nsIThreadPool> sThreadPool;
-
   friend class EncodingRunnable;
-  friend class EncoderThreadPoolTerminator;
 };
 
 /**

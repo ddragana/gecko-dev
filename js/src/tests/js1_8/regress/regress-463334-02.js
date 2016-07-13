@@ -20,12 +20,14 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
  
+  jit(true);
 
   for (let i in 
          (function() { for (let j = 0; j < 4; ++j) with({t: NaN}) yield; })()) 
   { 
   }
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

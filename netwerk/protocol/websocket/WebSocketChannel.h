@@ -22,7 +22,7 @@
 #include "BaseWebSocketChannel.h"
 
 #ifdef MOZ_WIDGET_GONK
-#include "nsINetworkInterface.h"
+#include "nsINetworkManager.h"
 #include "nsProxyRelease.h"
 #endif
 
@@ -39,8 +39,7 @@ class nsIRandomGenerator;
 class nsISocketTransport;
 class nsIURI;
 
-namespace mozilla {
-namespace net {
+namespace mozilla { namespace net {
 
 class OutboundMessage;
 class OutboundEnqueuer;
@@ -50,13 +49,6 @@ class CallOnMessageAvailable;
 class CallOnStop;
 class CallOnServerClose;
 class CallAcknowledge;
-class WebSocketEventService;
-
-extern nsresult
-CalculateWebSocketHashedSecret(const nsACString& aKey, nsACString& aHash);
-extern void
-ProcessServerWebSocketExtensions(const nsACString& aExtensions,
-                                 nsACString& aNegotiatedExtensions);
 
 // Used to enforce "1 connecting websocket per host" rule, and reconnect delays
 enum wsConnectingState {
@@ -78,8 +70,6 @@ class WebSocketChannel : public BaseWebSocketChannel,
                          public nsIInterfaceRequestor,
                          public nsIChannelEventSink
 {
-  friend class WebSocketFrame;
-
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIHTTPUPGRADELISTENER
@@ -98,7 +88,6 @@ public:
   //
   NS_IMETHOD AsyncOpen(nsIURI *aURI,
                        const nsACString &aOrigin,
-                       uint64_t aWindowID,
                        nsIWebSocketListener *aListener,
                        nsISupports *aContext) override;
   NS_IMETHOD Close(uint16_t aCode, const nsACString & aReason) override;
@@ -115,19 +104,23 @@ public:
   void GetEffectiveURL(nsAString& aEffectiveURL) const override;
   bool IsEncrypted() const override;
 
-  const static uint32_t kControlFrameMask   = 0x8;
+  enum {
+    // Non Control Frames
+    kContinuation = 0x0,
+    kText =         0x1,
+    kBinary =       0x2,
 
-  // First byte of the header
+    // Control Frames
+    kClose =        0x8,
+    kPing =         0x9,
+    kPong =         0xA
+  };
+
+  const static uint32_t kControlFrameMask   = 0x8;
+  const static uint8_t kMaskBit             = 0x80;
   const static uint8_t kFinalFragBit        = 0x80;
   const static uint8_t kRsvBitsMask         = 0x70;
   const static uint8_t kRsv1Bit             = 0x40;
-  const static uint8_t kRsv2Bit             = 0x20;
-  const static uint8_t kRsv3Bit             = 0x10;
-  const static uint8_t kOpcodeBitsMask      = 0x0F;
-
-  // Second byte of the header
-  const static uint8_t kMaskBit             = 0x80;
-  const static uint8_t kPayloadLengthBitsMask = 0x7F;
 
 protected:
   virtual ~WebSocketChannel();
@@ -173,8 +166,7 @@ private:
   void DecrementSessionCount();
 
   void EnsureHdrOut(uint32_t size);
-
-  static void ApplyMask(uint32_t mask, uint8_t *data, uint64_t len);
+  void ApplyMask(uint32_t mask, uint8_t *data, uint64_t len);
 
   bool     IsPersistentFramePtr();
   nsresult ProcessInput(uint8_t *buffer, uint32_t count);
@@ -186,14 +178,7 @@ private:
   {
     mPingOutstanding = 0;
     if (mPingTimer) {
-      if (!mPingInterval) {
-        // The timer was created by forced ping and regular pinging is disabled,
-        // so cancel and null out mPingTimer.
-        mPingTimer->Cancel();
-        mPingTimer = nullptr;
-      } else {
-        mPingTimer->SetDelay(mPingInterval);
-      }
+      mPingTimer->SetDelay(mPingInterval);
     }
   }
 
@@ -233,11 +218,7 @@ private:
   const static int32_t            kLingeringCloseTimeout =   1000;
   const static int32_t            kLingeringCloseThreshold = 50;
 
-  RefPtr<WebSocketEventService>   mService;
-
   int32_t                         mMaxConcurrentConnections;
-
-  uint64_t                        mInnerWindowID;
 
   // following members are accessed only on the main thread
   uint32_t                        mGotUpgradeOK              : 1;
@@ -300,15 +281,17 @@ private:
   bool                            mPrivateBrowsing;
 
   nsCOMPtr<nsIDashboardEventNotifier> mConnectionLogService;
+  uint32_t mSerial;
+  static uint32_t sSerialSeed;
 
 // These members are used for network per-app metering (bug 855949)
 // Currently, they are only available on gonk.
   Atomic<uint64_t, Relaxed>       mCountRecv;
   Atomic<uint64_t, Relaxed>       mCountSent;
   uint32_t                        mAppId;
-  bool                            mIsInIsolatedMozBrowser;
+  bool                            mIsInBrowser;
 #ifdef MOZ_WIDGET_GONK
-  nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
+  nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
 #endif
   nsresult                        SaveNetworkStats(bool);
   void                            CountRecvBytes(uint64_t recvBytes)

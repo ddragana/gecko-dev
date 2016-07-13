@@ -21,8 +21,6 @@ namespace rtc {
 OptionsFile::OptionsFile(const std::string &path) : path_(path) {
 }
 
-OptionsFile::~OptionsFile() = default;
-
 bool OptionsFile::Load() {
   options_.clear();
   // Open file.

@@ -11,7 +11,6 @@
 #include "NumericTools.h"
 #include "Point.h"
 #include "Tools.h"
-#include "mozilla/Maybe.h"
 
 #include <cmath>
 
@@ -33,40 +32,26 @@ struct IntMarginTyped:
     IntMarginTyped() : Super() {}
     IntMarginTyped(int32_t aTop, int32_t aRight, int32_t aBottom, int32_t aLeft) :
         Super(aTop, aRight, aBottom, aLeft) {}
-
-    // XXX When all of the code is ported, the following functions to convert
-    // to and from unknown types should be removed.
-
-    static IntMarginTyped<units> FromUnknownMargin(const IntMarginTyped<UnknownUnits>& aMargin) {
-        return IntMarginTyped<units>(aMargin.top, aMargin.right,
-                                     aMargin.bottom, aMargin.left);
-    }
-
-    IntMarginTyped<UnknownUnits> ToUnknownMargin() const {
-        return IntMarginTyped<UnknownUnits>(this->top, this->right,
-                                            this->bottom, this->left);
-    }
 };
 typedef IntMarginTyped<UnknownUnits> IntMargin;
 
-template<class units, class F = Float>
+template<class units>
 struct MarginTyped:
-    public BaseMargin<F, MarginTyped<units> >,
+    public BaseMargin<Float, MarginTyped<units> >,
     public units {
     static_assert(IsPixel<units>::value,
                   "'units' must be a coordinate system tag");
 
-    typedef BaseMargin<F, MarginTyped<units, F> > Super;
+    typedef BaseMargin<Float, MarginTyped<units> > Super;
 
     MarginTyped() : Super() {}
-    MarginTyped(F aTop, F aRight, F aBottom, F aLeft) :
+    MarginTyped(Float aTop, Float aRight, Float aBottom, Float aLeft) :
         Super(aTop, aRight, aBottom, aLeft) {}
     explicit MarginTyped(const IntMarginTyped<units>& aMargin) :
-        Super(F(aMargin.top), F(aMargin.right),
-              F(aMargin.bottom), F(aMargin.left)) {}
+        Super(float(aMargin.top), float(aMargin.right),
+              float(aMargin.bottom), float(aMargin.left)) {}
 };
 typedef MarginTyped<UnknownUnits> Margin;
-typedef MarginTyped<UnknownUnits, double> MarginDouble;
 
 template<class units>
 IntMarginTyped<units> RoundedToInt(const MarginTyped<units>& aMargin)
@@ -97,8 +82,8 @@ struct IntRectTyped :
     void RoundIn() {}
     void RoundOut() {}
 
-    // XXX When all of the code is ported, the following functions to convert
-    // to and from unknown types should be removed.
+    // XXX When all of the code is ported, the following functions to convert to and from
+    // unknown types should be removed.
 
     static IntRectTyped<units> FromUnknownRect(const IntRectTyped<UnknownUnits>& rect) {
         return IntRectTyped<units>(rect.x, rect.y, rect.width, rect.height);
@@ -124,10 +109,6 @@ struct IntRectTyped :
 
     void InflateToMultiple(const IntSizeTyped<units>& aTileSize)
     {
-      if (this->IsEmpty()) {
-        return;
-      }
-
       int32_t yMost = this->YMost();
       int32_t xMost = this->XMost();
 
@@ -143,23 +124,23 @@ struct IntRectTyped :
 };
 typedef IntRectTyped<UnknownUnits> IntRect;
 
-template<class units, class F = Float>
+template<class units>
 struct RectTyped :
-    public BaseRect<F, RectTyped<units, F>, PointTyped<units, F>, SizeTyped<units, F>, MarginTyped<units, F> >,
+    public BaseRect<Float, RectTyped<units>, PointTyped<units>, SizeTyped<units>, MarginTyped<units> >,
     public units {
     static_assert(IsPixel<units>::value,
                   "'units' must be a coordinate system tag");
 
-    typedef BaseRect<F, RectTyped<units, F>, PointTyped<units, F>, SizeTyped<units, F>, MarginTyped<units, F> > Super;
+    typedef BaseRect<Float, RectTyped<units>, PointTyped<units>, SizeTyped<units>, MarginTyped<units> > Super;
 
     RectTyped() : Super() {}
-    RectTyped(const PointTyped<units, F>& aPos, const SizeTyped<units, F>& aSize) :
+    RectTyped(const PointTyped<units>& aPos, const SizeTyped<units>& aSize) :
         Super(aPos, aSize) {}
-    RectTyped(F _x, F _y, F _width, F _height) :
+    RectTyped(Float _x, Float _y, Float _width, Float _height) :
         Super(_x, _y, _width, _height) {}
     explicit RectTyped(const IntRectTyped<units>& rect) :
-        Super(F(rect.x), F(rect.y),
-              F(rect.width), F(rect.height)) {}
+        Super(float(rect.x), float(rect.y),
+              float(rect.width), float(rect.height)) {}
 
     void NudgeToIntegers()
     {
@@ -173,30 +154,29 @@ struct RectTyped :
     {
       *aOut = IntRectTyped<units>(int32_t(this->X()), int32_t(this->Y()),
                                   int32_t(this->Width()), int32_t(this->Height()));
-      return RectTyped<units, F>(F(aOut->x), F(aOut->y),
-                                 F(aOut->width), F(aOut->height))
+      return RectTyped<units>(Float(aOut->x), Float(aOut->y), 
+                              Float(aOut->width), Float(aOut->height))
              .IsEqualEdges(*this);
     }
 
     // XXX When all of the code is ported, the following functions to convert to and from
     // unknown types should be removed.
 
-    static RectTyped<units, F> FromUnknownRect(const RectTyped<UnknownUnits, F>& rect) {
-        return RectTyped<units, F>(rect.x, rect.y, rect.width, rect.height);
+    static RectTyped<units> FromUnknownRect(const RectTyped<UnknownUnits>& rect) {
+        return RectTyped<units>(rect.x, rect.y, rect.width, rect.height);
     }
 
-    RectTyped<UnknownUnits, F> ToUnknownRect() const {
-        return RectTyped<UnknownUnits, F>(this->x, this->y, this->width, this->height);
+    RectTyped<UnknownUnits> ToUnknownRect() const {
+        return RectTyped<UnknownUnits>(this->x, this->y, this->width, this->height);
     }
 
     // This is here only to keep IPDL-generated code happy. DO NOT USE.
-    bool operator==(const RectTyped<units, F>& aRect) const
+    bool operator==(const RectTyped<units>& aRect) const
     {
-      return RectTyped<units, F>::IsEqualEdges(aRect);
+      return RectTyped<units>::IsEqualEdges(aRect);
     }
 };
 typedef RectTyped<UnknownUnits> Rect;
-typedef RectTyped<UnknownUnits, double> RectDouble;
 
 template<class units>
 IntRectTyped<units> RoundedToInt(const RectTyped<units>& aRect)
@@ -229,35 +209,6 @@ IntRectTyped<units> RoundedOut(const RectTyped<units>& aRect)
                              int32_t(copy.y),
                              int32_t(copy.width),
                              int32_t(copy.height));
-}
-
-template<class units>
-IntRectTyped<units> TruncatedToInt(const RectTyped<units>& aRect) {
-  return IntRectTyped<units>(int32_t(aRect.x),
-                             int32_t(aRect.y),
-                             int32_t(aRect.width),
-                             int32_t(aRect.height));
-}
-
-template<class units>
-RectTyped<units> IntRectToRect(const IntRectTyped<units>& aRect)
-{
-  return RectTyped<units>(aRect.x, aRect.y, aRect.width, aRect.height);
-}
-
-// Convenience function for intersecting two IntRects wrapped in Maybes.
-template <typename Units>
-Maybe<IntRectTyped<Units>>
-IntersectMaybeRects(const Maybe<IntRectTyped<Units>>& a,
-                    const Maybe<IntRectTyped<Units>>& b)
-{
-  if (!a) {
-    return b;
-  } else if (!b) {
-    return a;
-  } else {
-    return Some(a->Intersect(*b));
-  }
 }
 
 } // namespace gfx

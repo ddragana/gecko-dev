@@ -12,8 +12,6 @@ const nsIFilePicker   = Components.interfaces.nsIFilePicker;
 const STDURL_CTRID    = "@mozilla.org/network/standard-url;1";
 const nsIURI          = Components.interfaces.nsIURI;
 
-Components.utils.import("resource://gre/modules/NetUtil.jsm");
-
 var gStop = false;
 
 function loadFile(aUriSpec)
@@ -24,13 +22,17 @@ function loadFile(aUriSpec)
     if (!serv) {
         throw Components.results.ERR_FAILURE;
     }
-    var chan = NetUtil.newChannel({
-        uri: aUriSpec,
-        loadUsingSystemPrincipal: true
-    });
+    var chan = serv.newChannel2(aUriSpec,
+                                null,
+                                null,
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER);
     var instream = 
         Components.classes[SIS_CTRID].createInstance(nsISIS);
-    instream.init(chan.open2());
+    instream.init(chan.open());
 
     return instream.read(instream.available());
 }

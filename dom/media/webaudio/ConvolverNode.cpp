@@ -6,8 +6,6 @@
 
 #include "ConvolverNode.h"
 #include "mozilla/dom/ConvolverNodeBinding.h"
-#include "nsAutoPtr.h"
-#include "AlignmentUtils.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "blink/Reverb.h"
@@ -43,7 +41,7 @@ public:
     SAMPLE_RATE,
     NORMALIZE
   };
-  void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override
+  virtual void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override
   {
     switch (aIndex) {
     case BUFFER_LENGTH:
@@ -64,7 +62,7 @@ public:
       NS_ERROR("Bad ConvolverNodeEngine Int32Parameter");
     }
   }
-  void SetDoubleParameter(uint32_t aIndex, double aParam) override
+  virtual void SetDoubleParameter(uint32_t aIndex, double aParam) override
   {
     switch (aIndex) {
     case SAMPLE_RATE:
@@ -75,7 +73,7 @@ public:
       NS_ERROR("Bad ConvolverNodeEngine DoubleParameter");
     }
   }
-  void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aBuffer) override
+  virtual void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aBuffer) override
   {
     mBuffer = aBuffer;
     AdjustReverb();
@@ -98,32 +96,31 @@ public:
     }
 
     mReverb = new WebCore::Reverb(mBuffer, mBufferLength,
+                                  WEBAUDIO_BLOCK_SIZE,
                                   MaxFFTSize, 2, mUseBackgroundThreads,
                                   mNormalize, mSampleRate);
   }
 
-  void ProcessBlock(AudioNodeStream* aStream,
-                    GraphTime aFrom,
-                    const AudioBlock& aInput,
-                    AudioBlock* aOutput,
-                    bool* aFinished) override
+  virtual void ProcessBlock(AudioNodeStream* aStream,
+                            const AudioChunk& aInput,
+                            AudioChunk* aOutput,
+                            bool* aFinished) override
   {
     if (!mReverb) {
-      aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
+      *aOutput = aInput;
       return;
     }
 
-    AudioBlock input = aInput;
+    AudioChunk input = aInput;
     if (aInput.IsNull()) {
       if (mLeftOverData > 0) {
         mLeftOverData -= WEBAUDIO_BLOCK_SIZE;
-        input.AllocateChannels(1);
+        AllocateAudioBlock(1, &input);
         WriteZeroesToAudioBlock(&input, 0, WEBAUDIO_BLOCK_SIZE);
       } else {
         if (mLeftOverData != INT32_MIN) {
           mLeftOverData = INT32_MIN;
-          aStream->ScheduleCheckForInactive();
-          RefPtr<PlayingRefChanged> refchanged =
+          nsRefPtr<PlayingRefChanged> refchanged =
             new PlayingRefChanged(aStream, PlayingRefChanged::RELEASE);
           aStream->Graph()->
             DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
@@ -134,17 +131,17 @@ public:
     } else {
       if (aInput.mVolume != 1.0f) {
         // Pre-multiply the input's volume
-        uint32_t numChannels = aInput.ChannelCount();
-        input.AllocateChannels(numChannels);
+        uint32_t numChannels = aInput.mChannelData.Length();
+        AllocateAudioBlock(numChannels, &input);
         for (uint32_t i = 0; i < numChannels; ++i) {
           const float* src = static_cast<const float*>(aInput.mChannelData[i]);
-          float* dest = input.ChannelFloatsForWrite(i);
+          float* dest = static_cast<float*>(const_cast<void*>(input.mChannelData[i]));
           AudioBlockCopyChannelWithScale(src, aInput.mVolume, dest);
         }
       }
 
       if (mLeftOverData <= 0) {
-        RefPtr<PlayingRefChanged> refchanged =
+        nsRefPtr<PlayingRefChanged> refchanged =
           new PlayingRefChanged(aStream, PlayingRefChanged::ADDREF);
         aStream->Graph()->
           DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
@@ -152,17 +149,12 @@ public:
       mLeftOverData = mBufferLength;
       MOZ_ASSERT(mLeftOverData > 0);
     }
-    aOutput->AllocateChannels(2);
+    AllocateAudioBlock(2, aOutput);
 
-    mReverb->process(&input, aOutput);
+    mReverb->process(&input, aOutput, WEBAUDIO_BLOCK_SIZE);
   }
 
-  bool IsActive() const override
-  {
-    return mLeftOverData != INT32_MIN;
-  }
-
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
     if (mBuffer && !mBuffer->IsShared()) {
@@ -176,13 +168,13 @@ public:
     return amount;
   }
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
 private:
-  RefPtr<ThreadSharedFloatArrayBufferList> mBuffer;
+  nsRefPtr<ThreadSharedFloatArrayBufferList> mBuffer;
   nsAutoPtr<WebCore::Reverb> mReverb;
   int32_t mBufferLength;
   int32_t mLeftOverData;
@@ -199,8 +191,7 @@ ConvolverNode::ConvolverNode(AudioContext* aContext)
   , mNormalize(true)
 {
   ConvolverNodeEngine* engine = new ConvolverNodeEngine(this, mNormalize);
-  mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
 }
 
 ConvolverNode::~ConvolverNode()
@@ -254,22 +245,20 @@ ConvolverNode::SetBuffer(JSContext* aCx, AudioBuffer* aBuffer, ErrorResult& aRv)
   MOZ_ASSERT(ns, "Why don't we have a stream here?");
   if (mBuffer) {
     uint32_t length = mBuffer->Length();
-    RefPtr<ThreadSharedFloatArrayBufferList> data =
+    nsRefPtr<ThreadSharedFloatArrayBufferList> data =
       mBuffer->GetThreadSharedChannelsForRate(aCx);
     if (data && length < WEBAUDIO_BLOCK_SIZE) {
       // For very small impulse response buffers, we need to pad the
       // buffer with 0 to make sure that the Reverb implementation
       // has enough data to compute FFTs from.
       length = WEBAUDIO_BLOCK_SIZE;
-      RefPtr<ThreadSharedFloatArrayBufferList> paddedBuffer =
+      nsRefPtr<ThreadSharedFloatArrayBufferList> paddedBuffer =
         new ThreadSharedFloatArrayBufferList(data->GetChannels());
-      void* channelData = malloc(sizeof(float) * length * data->GetChannels() + 15);
-      float* alignedChannelData = ALIGNED16(channelData);
-      ASSERT_ALIGNED16(alignedChannelData);
+      float* channelData = (float*) malloc(sizeof(float) * length * data->GetChannels());
       for (uint32_t i = 0; i < data->GetChannels(); ++i) {
-        PodCopy(alignedChannelData + length * i, data->GetData(i), mBuffer->Length());
-        PodZero(alignedChannelData + length * i + mBuffer->Length(), WEBAUDIO_BLOCK_SIZE - mBuffer->Length());
-        paddedBuffer->SetData(i, (i == 0) ? channelData : nullptr, free, alignedChannelData);
+        PodCopy(channelData + length * i, data->GetData(i), mBuffer->Length());
+        PodZero(channelData + length * i + mBuffer->Length(), WEBAUDIO_BLOCK_SIZE - mBuffer->Length());
+        paddedBuffer->SetData(i, (i == 0) ? channelData : nullptr, free, channelData);
       }
       data = paddedBuffer;
     }

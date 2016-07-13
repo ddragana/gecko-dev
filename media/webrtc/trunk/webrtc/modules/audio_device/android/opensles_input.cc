@@ -34,6 +34,8 @@
   do {                                                           \
     SLresult err = (op);                                         \
     if (err != SL_RESULT_SUCCESS) {                              \
+      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_,          \
+                   "OpenSL error: %d", err);                     \
       assert(false);                                             \
       return ret_val;                                            \
     }                                                            \
@@ -51,8 +53,9 @@ enum {
 namespace webrtc {
 
 OpenSlesInput::OpenSlesInput(
-    PlayoutDelayProvider* delay_provider, AudioManager* audio_manager)
-    : delay_provider_(delay_provider),
+    const int32_t id, PlayoutDelayProvider* delay_provider)
+    : id_(id),
+      delay_provider_(delay_provider),
       initialized_(false),
       mic_initialized_(false),
       rec_initialized_(false),
@@ -81,9 +84,10 @@ OpenSlesInput::~OpenSlesInput() {
 }
 
 int32_t OpenSlesInput::SetAndroidAudioDeviceObjects(void* javaVM,
+                                                    void* env,
                                                     void* context) {
 #if !defined(WEBRTC_GONK)
-  AudioManagerJni::SetAndroidAudioDeviceObjects(javaVM, context);
+  AudioManagerJni::SetAndroidAudioDeviceObjects(javaVM, env, context);
 #endif
   return 0;
 }
@@ -100,7 +104,7 @@ int32_t OpenSlesInput::Init() {
   /* Try to dynamically open the OpenSLES library */
   opensles_lib_ = dlopen("libOpenSLES.so", RTLD_LAZY);
   if (!opensles_lib_) {
-      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0,
+      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_,
                    "  failed to dlopen OpenSLES library");
       return -1;
   }
@@ -118,7 +122,7 @@ int32_t OpenSlesInput::Init() {
       !SL_IID_ANDROIDCONFIGURATION_ ||
       !SL_IID_ANDROIDSIMPLEBUFFERQUEUE_ ||
       !SL_IID_RECORD_) {
-      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0,
+      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_,
                    "  failed to find OpenSLES function");
       return -1;
   }
@@ -356,7 +360,7 @@ void OpenSlesInput::AllocateBuffers() {
   fifo_.reset(new SingleRwFifo(num_fifo_buffers_needed_));
 
   // Allocate the memory area to be used.
-  rec_buf_.reset(new rtc::scoped_ptr<int8_t[]>[TotalBuffersUsed()]);
+  rec_buf_.reset(new scoped_ptr<int8_t[]>[TotalBuffersUsed()]);
   for (int i = 0; i < TotalBuffersUsed(); ++i) {
     rec_buf_[i].reset(new int8_t[buffer_size_bytes()]);
   }
@@ -396,7 +400,7 @@ void OpenSlesInput::SetupVoiceMode() {
   SLAndroidConfigurationItf configItf;
   SLresult res = (*sles_recorder_)->GetInterface(sles_recorder_, SL_IID_ANDROIDCONFIGURATION_,
                                                  (void*)&configItf);
-  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL GetInterface: %d", res);
+  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL GetInterface: %d", res);
 
   if (res == SL_RESULT_SUCCESS) {
     SLuint32 voiceMode = SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION;
@@ -405,7 +409,7 @@ void OpenSlesInput::SetupVoiceMode() {
     res = (*configItf)->SetConfiguration(configItf,
                                          SL_ANDROID_KEY_RECORDING_PRESET,
                                          &voiceMode, voiceSize);
-    WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL Set Voice mode res: %d", res);
+    WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL Set Voice mode res: %d", res);
   }
 }
 
@@ -418,7 +422,7 @@ bool OpenSlesInput::CheckPlatformAEC() {
     return false;
   }
 
-  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "Platform has %d effects", numFx);
+  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "Platform has %d effects", numFx);
 
   for (uint32_t i = 0; i < numFx; i++) {
     if (android::AudioEffect::queryEffect(i, &fxDesc) != android::NO_ERROR) {
@@ -434,7 +438,7 @@ bool OpenSlesInput::CheckPlatformAEC() {
 
 void OpenSlesInput::SetupAECAndNS() {
   bool hasAec = CheckPlatformAEC();
-  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "Platform has AEC: %d", hasAec);
+  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "Platform has AEC: %d", hasAec);
   // This code should not have been enabled if this fails, because it means the
   // software AEC has will have been disabled as well. If you hit this, you need
   // to fix your B2G config or fix the hardware AEC on your device.
@@ -443,7 +447,7 @@ void OpenSlesInput::SetupAECAndNS() {
   SLAndroidConfigurationItf configItf;
   SLresult res = (*sles_recorder_)->GetInterface(sles_recorder_, SL_IID_ANDROIDCONFIGURATION_,
                                                  (void*)&configItf);
-  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL GetInterface: %d", res);
+  WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL GetInterface: %d", res);
 
   if (res == SL_RESULT_SUCCESS) {
     SLuint32 sessionId = 0;
@@ -451,36 +455,36 @@ void OpenSlesInput::SetupAECAndNS() {
     res = (*configItf)->GetConfiguration(configItf,
                                          SL_ANDROID_KEY_RECORDING_SESSION_ID,
                                          &idSize, &sessionId);
-    WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL Get sessionId res: %d", res);
+    WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL Get sessionId res: %d", res);
 
     if (res == SL_RESULT_SUCCESS && idSize == sizeof(sessionId)) {
-      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL sessionId: %d", sessionId);
+      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL sessionId: %d", sessionId);
 
       aec_ = new android::AudioEffect(FX_IID_AEC, NULL, 0, 0, 0, sessionId, 0);
-      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL aec: %p", aec_);
+      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL aec: %p", aec_);
 
       if (aec_) {
         android::status_t status = aec_->initCheck();
         if (status == android::NO_ERROR || status == android::ALREADY_EXISTS) {
-          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL aec enabled");
+          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL aec enabled");
           aec_->setEnabled(true);
         } else {
-          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL aec disabled: %d", status);
+          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL aec disabled: %d", status);
           delete aec_;
           aec_ = NULL;
         }
       }
 
       ns_ = new android::AudioEffect(FX_IID_NS, NULL, 0, 0, 0, sessionId, 0);
-      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL ns: %p", ns_);
+      WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL ns: %p", ns_);
 
       if (ns_) {
         android::status_t status = ns_->initCheck();
         if (status == android::NO_ERROR || status == android::ALREADY_EXISTS) {
-          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL ns enabled");
+          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL ns enabled");
           ns_->setEnabled(true);
         } else {
-          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, 0, "OpenSL ns disabled: %d", status);
+          WEBRTC_TRACE(kTraceError, kTraceAudioDevice, id_, "OpenSL ns disabled: %d", status);
           delete ns_;
           ns_ = NULL;
         }
@@ -588,6 +592,7 @@ bool OpenSlesInput::HandleOverrun(int event_id, int event_msg) {
   if (event_id == kNoOverrun) {
     return false;
   }
+  WEBRTC_TRACE(kTraceWarning, kTraceAudioDevice, id_, "Audio overrun");
   assert(event_id == kOverrun);
   assert(event_msg > 0);
   // Wait for all enqueued buffers be flushed.
@@ -644,14 +649,16 @@ void OpenSlesInput::RecorderSimpleBufferQueueCallbackHandler(
 }
 
 bool OpenSlesInput::StartCbThreads() {
-  rec_thread_ = ThreadWrapper::CreateThread(CbThread, this,
-                                            "opensl_rec_thread");
+  rec_thread_.reset(ThreadWrapper::CreateThread(CbThread,
+                                                this,
+                                                kRealtimePriority,
+                                                "opensl_rec_thread"));
   assert(rec_thread_.get());
-  if (!rec_thread_->Start()) {
+  unsigned int thread_id = 0;
+  if (!rec_thread_->Start(thread_id)) {
     assert(false);
     return false;
   }
-  rec_thread_->SetPriority(kRealtimePriority);
   OPENSL_RETURN_ON_FAILURE(
       (*sles_recorder_itf_)->SetRecordState(sles_recorder_itf_,
                                             SL_RECORDSTATE_RECORDING),

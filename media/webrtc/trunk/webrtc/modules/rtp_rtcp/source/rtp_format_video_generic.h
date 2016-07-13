@@ -30,9 +30,10 @@ class RtpPacketizerGeneric : public RtpPacketizer {
 
   virtual ~RtpPacketizerGeneric();
 
-  void SetPayloadData(const uint8_t* payload_data,
-                      size_t payload_size,
-                      const RTPFragmentationHeader* fragmentation) override;
+  virtual void SetPayloadData(
+      const uint8_t* payload_data,
+      size_t payload_size,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   // Get the next payload with generic payload header.
   // buffer is a pointer to where the output will be written.
@@ -41,22 +42,22 @@ class RtpPacketizerGeneric : public RtpPacketizer {
   // the frame, false otherwise (i.e., call the function again to get the
   // next packet).
   // Returns true on success or false if there was no payload to packetize.
-  bool NextPacket(uint8_t* buffer,
-                  size_t* bytes_to_send,
-                  bool* last_packet) override;
+  virtual bool NextPacket(uint8_t* buffer,
+                          size_t* bytes_to_send,
+                          bool* last_packet) OVERRIDE;
 
-  ProtectionType GetProtectionType() override;
+  virtual ProtectionType GetProtectionType() OVERRIDE;
 
-  StorageType GetStorageType(uint32_t retransmission_settings) override;
+  virtual StorageType GetStorageType(uint32_t retransmission_settings) OVERRIDE;
 
-  std::string ToString() override;
+  virtual std::string ToString() OVERRIDE;
 
  private:
   const uint8_t* payload_data_;
   size_t payload_size_;
   const size_t max_payload_len_;
   FrameType frame_type_;
-  size_t payload_length_;
+  uint32_t payload_length_;
   uint8_t generic_header_;
 
   DISALLOW_COPY_AND_ASSIGN(RtpPacketizerGeneric);
@@ -67,9 +68,9 @@ class RtpDepacketizerGeneric : public RtpDepacketizer {
  public:
   virtual ~RtpDepacketizerGeneric() {}
 
-  bool Parse(ParsedPayload* parsed_payload,
-             const uint8_t* payload_data,
-             size_t payload_data_length) override;
+  virtual bool Parse(ParsedPayload* parsed_payload,
+                     const uint8_t* payload_data,
+                     size_t payload_data_length) OVERRIDE;
 };
 }  // namespace webrtc
 #endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_VIDEO_GENERIC_H_

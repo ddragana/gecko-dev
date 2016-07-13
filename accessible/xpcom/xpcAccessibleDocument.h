@@ -25,11 +25,7 @@ class xpcAccessibleDocument : public xpcAccessibleHyperText,
 {
 public:
   explicit xpcAccessibleDocument(DocAccessible* aIntl) :
-    xpcAccessibleHyperText(aIntl), mCache(kDefaultCacheLength), mRemote(false) { }
-
-  xpcAccessibleDocument(ProxyAccessible* aProxy, uint32_t aInterfaces) :
-    xpcAccessibleHyperText(aProxy, aInterfaces), mCache(kDefaultCacheLength),
-    mRemote(true) {}
+    xpcAccessibleHyperText(aIntl), mCache(kDefaultCacheLength) { }
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(xpcAccessibleDocument,
@@ -41,7 +37,7 @@ public:
   NS_IMETHOD GetMimeType(nsAString& aType) final override;
   NS_IMETHOD GetDocType(nsAString& aType) final override;
   NS_IMETHOD GetDOMDocument(nsIDOMDocument** aDOMDocument) final override;
-  NS_IMETHOD GetWindow(mozIDOMWindowProxy** aDOMWindow) final override;
+  NS_IMETHOD GetWindow(nsIDOMWindow** aDOMWindow) final override;
   NS_IMETHOD GetParentDocument(nsIAccessibleDocument** aDocument)
     final override;
   NS_IMETHOD GetChildDocumentCount(uint32_t* aCount) final override;
@@ -55,7 +51,6 @@ public:
    * Return XPCOM wrapper for the internal accessible.
    */
   xpcAccessibleGeneric* GetAccessible(Accessible* aAccessible);
-  xpcAccessibleGeneric* GetXPCAccessible(ProxyAccessible* aProxy);
 
   virtual void Shutdown() override;
 
@@ -63,18 +58,10 @@ protected:
   virtual ~xpcAccessibleDocument() {}
 
 private:
-  DocAccessible* Intl()
-  {
-    if (Accessible* acc = mIntl.AsAccessible()) {
-      return acc->AsDoc();
-    }
-
-    return nullptr;
-  }
+  DocAccessible* Intl() { return mIntl->AsDoc(); }
 
   void NotifyOfShutdown(Accessible* aAccessible)
   {
-    MOZ_ASSERT(!mRemote);
     xpcAccessibleGeneric* xpcAcc = mCache.GetWeak(aAccessible);
     if (xpcAcc)
       xpcAcc->Shutdown();
@@ -82,26 +69,13 @@ private:
     mCache.Remove(aAccessible);
   }
 
-  void NotifyOfShutdown(ProxyAccessible* aProxy)
-  {
-    MOZ_ASSERT(mRemote);
-    xpcAccessibleGeneric* acc = mCache.GetWeak(aProxy);
-    if (acc) {
-      acc->Shutdown();
-    }
-
-    mCache.Remove(aProxy);
-  }
-
   friend class DocManager;
   friend class DocAccessible;
-  friend class ProxyAccessible;
 
   xpcAccessibleDocument(const xpcAccessibleDocument&) = delete;
   xpcAccessibleDocument& operator =(const xpcAccessibleDocument&) = delete;
 
-  nsRefPtrHashtable<nsPtrHashKey<const void>, xpcAccessibleGeneric> mCache;
-  bool mRemote;
+  nsRefPtrHashtable<nsPtrHashKey<const Accessible>, xpcAccessibleGeneric> mCache;
 };
 
 inline xpcAccessibleGeneric*
@@ -118,8 +92,6 @@ ToXPC(Accessible* aAccessible)
   return xpcDoc ? xpcDoc->GetAccessible(aAccessible) : nullptr;
 }
 
-xpcAccessibleGeneric* ToXPC(AccessibleOrProxy aAcc);
-
 inline xpcAccessibleHyperText*
 ToXPCText(HyperTextAccessible* aAccessible)
 {
@@ -133,12 +105,6 @@ ToXPCText(HyperTextAccessible* aAccessible)
 
 inline xpcAccessibleDocument*
 ToXPCDocument(DocAccessible* aAccessible)
-{
-  return GetAccService()->GetXPCDocument(aAccessible);
-}
-
-inline xpcAccessibleDocument*
-ToXPCDocument(DocAccessibleParent* aAccessible)
 {
   return GetAccService()->GetXPCDocument(aAccessible);
 }

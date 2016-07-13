@@ -12,7 +12,7 @@
   });
 
   function badCertificate(config, expectedError, message) {
-    return RTCPeerConnection.generateCertificate(config)
+    return mozRTCPeerConnection.generateCertificate(config)
       .then(() => ok(false, message),
             e => is(e.name, expectedError, message));
   }
@@ -28,13 +28,6 @@
         modulusLength: 1023,
         publicExponent: new Uint8Array([1, 0, 1])
       }, "NotSupportedError", "1023-bit is too small to succeed"),
-
-      badCertificate({
-        name: "RSASSA-PKCS1-v1_5",
-          hash: "SHA-384",
-          modulusLength: 2048,
-          publicExponent: new Uint8Array([1, 0, 1])
-      }, "NotSupportedError", "SHA-384 isn't supported yet"),
 
       badCertificate({
         name: "ECDH",
@@ -101,21 +94,21 @@
   runNetworkTest(function (options) {
     var expiredCert;
     return Promise.resolve()
-      .then(() => RTCPeerConnection.generateCertificate({
+      .then(() => mozRTCPeerConnection.generateCertificate({
         name: "ECDSA",
         namedCurve: "P-256",
         expires: 1 // smallest possible expiration window
       }))
       .then(cert => {
-        ok(!isNaN(cert.expires), 'cert has expiration time');
-        info('Expires at ' + new Date(cert.expires));
+        ok(cert.expires instanceof Date, 'cert has expiration time');
+        info('Expires at ' + cert.expires);
         expiredCert = cert;
       })
 
       .then(() => checkBadParameters())
 
       .then(() => {
-        var delay = expiredCert.expires - Date.now();
+        var delay = expiredCert.expires.getTime() - Date.now();
         // Hopefully this delay is never needed.
         if (delay > 0) {
           return new Promise(r => setTimeout(r, delay));
@@ -124,7 +117,7 @@
       .then(() => {
         ok(expiredCert.expires <= Date.now(), 'Cert should be at or past expiration');
         try {
-          new RTCPeerConnection({ certificates: [expiredCert] });
+          new mozRTCPeerConnection({ certificates: [expiredCert] });
           ok(false, 'Constructing peer connection with an expired cert is not allowed');
         } catch(e) {
           is(e.name, 'InvalidParameterError',
@@ -133,11 +126,11 @@
       })
 
       .then(() => Promise.all([
-        RTCPeerConnection.generateCertificate({
+        mozRTCPeerConnection.generateCertificate({
           name: "ECDSA",
           namedCurve: "P-256"
         }),
-        RTCPeerConnection.generateCertificate({
+        mozRTCPeerConnection.generateCertificate({
           name: "RSASSA-PKCS1-v1_5",
           hash: "SHA-256",
           modulusLength: 2048,
@@ -149,7 +142,7 @@
       .then(storeAndRetrieve)
       .then(certs => {
         try {
-          new RTCPeerConnection({ certificates: certs });
+          new mozRTCPeerConnection({ certificates: certs });
           ok(false, 'Constructing peer connection with multiple certs is not allowed');
         } catch(e) {
           is(e.name, 'NotSupportedError',

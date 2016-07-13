@@ -44,7 +44,7 @@ bool
 MessagePortParent::RecvPostMessages(nsTArray<MessagePortMessage>&& aMessages)
 {
   // This converts the object in a data struct where we have BlobImpls.
-  FallibleTArray<RefPtr<SharedMessagePortMessage>> messages;
+  FallibleTArray<nsRefPtr<SharedMessagePortMessage>> messages;
   if (NS_WARN_IF(
       !SharedMessagePortMessage::FromMessagesToSharedParent(aMessages,
                                                             messages))) {
@@ -71,7 +71,7 @@ bool
 MessagePortParent::RecvDisentangle(nsTArray<MessagePortMessage>&& aMessages)
 {
   // This converts the object in a data struct where we have BlobImpls.
-  FallibleTArray<RefPtr<SharedMessagePortMessage>> messages;
+  FallibleTArray<nsRefPtr<SharedMessagePortMessage>> messages;
   if (NS_WARN_IF(
       !SharedMessagePortMessage::FromMessagesToSharedParent(aMessages,
                                                             messages))) {
@@ -103,7 +103,7 @@ MessagePortParent::RecvStopSendingData()
   }
 
   mCanSendData = false;
-  Unused << SendStopSendingDataConfirmed();
+  unused << SendStopSendingDataConfirmed();
   return true;
 }
 
@@ -122,7 +122,7 @@ MessagePortParent::RecvClose()
 
   MOZ_ASSERT(!mEntangled);
 
-  Unused << Send__delete__(this);
+  unused << Send__delete__(this);
   return true;
 }
 
@@ -132,7 +132,7 @@ MessagePortParent::ActorDestroy(ActorDestroyReason aWhy)
   if (mService && mEntangled) {
     // When the last parent is deleted, this service is freed but this cannot
     // be done when the hashtables are written by CloseAll.
-    RefPtr<MessagePortService> kungFuDeathGrip = mService;
+    nsRefPtr<MessagePortService> kungFuDeathGrip = mService;
     mService->ParentDestroy(this);
   }
 }
@@ -149,7 +149,7 @@ void
 MessagePortParent::CloseAndDelete()
 {
   Close();
-  Unused << Send__delete__(this);
+  unused << Send__delete__(this);
 }
 
 void

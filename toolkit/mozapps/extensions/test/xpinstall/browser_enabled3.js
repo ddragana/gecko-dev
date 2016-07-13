@@ -9,32 +9,17 @@ function test() {
   Services.prefs.setBoolPref("xpinstall.enabled", false);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Unsigned XPI": TESTROOT + "amosigned.xpi"
+    "Unsigned XPI": TESTROOT + "unsigned.xpi"
   }));
   gBrowser.selectedTab = gBrowser.addTab();
 
-  ContentTask.spawn(gBrowser.selectedBrowser, TESTROOT + "installtrigger.html?" + triggers, url => {
-    return new Promise(resolve => {
-      function page_loaded() {
-        content.removeEventListener("PageLoaded", page_loaded, false);
-        resolve(content.document.getElementById("return").textContent);
-      }
+  function loadListener() {
+    gBrowser.selectedBrowser.removeEventListener("load", loadListener, true);
+    gBrowser.contentWindow.addEventListener("InstallTriggered", page_loaded, false);
+  }
 
-      function load_listener() {
-        removeEventListener("load", load_listener, true);
-        content.addEventListener("InstallTriggered", page_loaded, false);
-      }
-
-      addEventListener("load", load_listener, true);
-
-      content.location.href = url;
-    });
-  }).then(text => {
-    is(text, "false", "installTrigger should have not been enabled");
-    Services.prefs.clearUserPref("xpinstall.enabled");
-    gBrowser.removeCurrentTab();
-    Harness.finish();
-  });
+  gBrowser.selectedBrowser.addEventListener("load", loadListener, true);
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 }
 
 function install_disabled(installInfo) {
@@ -50,3 +35,14 @@ function confirm_install(window) {
   ok(false, "Should never see an install confirmation dialog");
   return false;
 }
+
+function page_loaded() {
+  gBrowser.contentWindow.removeEventListener("InstallTriggered", page_loaded, false);
+  Services.prefs.clearUserPref("xpinstall.enabled");
+
+  var doc = gBrowser.contentDocument;
+  is(doc.getElementById("return").textContent, "false", "installTrigger should have not been enabled");
+  gBrowser.removeCurrentTab();
+  Harness.finish();
+}
+// ----------------------------------------------------------------------------

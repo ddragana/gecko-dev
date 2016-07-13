@@ -28,6 +28,7 @@ STYLE_STRUCTS = [("INHERITED",) + x for x in [
     ("List",           "nullptr",               NORMAL_DEP + LENGTH_DEP),
     ("Text",           "CheckTextCallback",     NORMAL_DEP + LENGTH_DEP + COLOR_DEP),
     ("Visibility",     "nullptr",               NORMAL_DEP),
+    ("Quotes",         "nullptr",               NORMAL_DEP),
     ("UserInterface",  "nullptr",               NORMAL_DEP),
     ("TableBorder",    "nullptr",               NORMAL_DEP + LENGTH_DEP),
     ("SVG",            "nullptr",               NORMAL_DEP + LENGTH_DEP + COLOR_DEP),
@@ -48,7 +49,6 @@ STYLE_STRUCTS = [("INHERITED",) + x for x in [
     ("XUL",            "nullptr",   NORMAL_DEP),
     ("SVGReset",       "nullptr",   NORMAL_DEP + LENGTH_DEP + COLOR_DEP),
     ("Column",         "nullptr",   NORMAL_DEP + LENGTH_DEP + COLOR_DEP),
-    ("Effects",        "nullptr",   NORMAL_DEP + LENGTH_DEP + COLOR_DEP),
 ]]
 
 

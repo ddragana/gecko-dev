@@ -5,25 +5,33 @@
 <link rel="help" href="https://html.spec.whatwg.org/multipage/#the-base-element">
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
-<body>
+<body onload="on_load()">
   <div id="log"></div>
   <iframe id="test1" src="example.html" style="width:0;height:0" frameborder="0"></iframe>
   <iframe id="test2" src="example.html" name="targetWin" style="width:0;height:0" frameborder="0"></iframe>
   <script>
-    async_test(function() {
-      window.onload = this.step_func(function() {
-        var fr1 = document.getElementById("test1");
-        fr1.addEventListener("load", this.unreached_func("loaded in the wrong iframe"));
+    var t = async_test("The attributes of the a element must be affected by the first base element"),
+        doc1,
+        fr2,
+        a1;
 
-        var fr2 = document.getElementById("test2");
-        fr2.addEventListener("load", this.step_func_done(function () {
+    function on_load() {
+      setup(function (){
+        doc1 = document.getElementById("test1").contentDocument;
+        fr2 = document.getElementById("test2");
+        a1 = doc1.getElementById("a1");
+      });
+
+      fr2.addEventListener("load", function () {
+        t.step(function () {
           var doc2 = fr2.contentDocument;
           assert_not_equals(doc2.location.href.indexOf("example2.html"), -1, "The target attribute does not impact the a element.");
           assert_equals(doc2.getElementById("d1").innerHTML, "PASS", "The opend page should be the example2.html.");
-        }), true);
+        });
+        t.done();
+      }, true);
 
-        fr1.contentDocument.getElementById("a1").click();
-      });
-    }, "The attributes of the a element must be affected by the first base element");
+      a1.click();
+    }
   </script>
 </body>

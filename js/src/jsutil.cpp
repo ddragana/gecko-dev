@@ -11,13 +11,10 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/PodOperations.h"
-#include "mozilla/ThreadLocal.h"
 
 #include <stdio.h>
 
 #include "jstypes.h"
-
-#include "vm/HelperThreads.h"
 
 #ifdef WIN32
 #    include "jswin.h"
@@ -31,56 +28,11 @@ using mozilla::CeilingLog2Size;
 using mozilla::PodArrayZero;
 
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
-/* For OOM testing functionality in Utility.h. */
-namespace js {
-
-mozilla::Atomic<AutoEnterOOMUnsafeRegion*> AutoEnterOOMUnsafeRegion::owner_;
-
-namespace oom {
-
-JS_PUBLIC_DATA(uint32_t) targetThread = 0;
-JS_PUBLIC_DATA(MOZ_THREAD_LOCAL(uint32_t)) threadType;
-JS_PUBLIC_DATA(uint64_t) maxAllocations = UINT64_MAX;
-JS_PUBLIC_DATA(uint64_t) counter = 0;
-JS_PUBLIC_DATA(bool) failAlways = true;
-
-bool
-InitThreadType(void) {
-    return threadType.init();
-}
-
-void
-SetThreadType(ThreadType type) {
-    threadType.set(type);
-}
-
-uint32_t
-GetThreadType(void) {
-    return threadType.get();
-}
-
-void
-SimulateOOMAfter(uint64_t allocations, uint32_t thread, bool always) {
-    MOZ_ASSERT(counter + allocations > counter);
-    MOZ_ASSERT(thread > js::oom::THREAD_TYPE_NONE && thread < js::oom::THREAD_TYPE_MAX);
-    targetThread = thread;
-    maxAllocations = counter + allocations;
-    failAlways = always;
-}
-
-void
-ResetSimulatedOOM() {
-    if (targetThread != THREAD_TYPE_NONE && targetThread != THREAD_TYPE_MAIN)
-        HelperThreadState().waitForAllThreads();
-    targetThread = THREAD_TYPE_NONE;
-    maxAllocations = UINT64_MAX;
-    failAlways = false;
-}
-
-
-} // namespace oom
-} // namespace js
-#endif // defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+/* For JS_OOM_POSSIBLY_FAIL in jsutil.h. */
+JS_PUBLIC_DATA(uint32_t) OOM_maxAllocations = UINT32_MAX;
+JS_PUBLIC_DATA(uint32_t) OOM_counter = 0;
+JS_PUBLIC_DATA(bool) OOM_failAlways = true;
+#endif
 
 JS_PUBLIC_API(void)
 JS_Assert(const char* s, const char* file, int ln)

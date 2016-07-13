@@ -79,10 +79,6 @@ SHARED_LIBRARY_DIRS = \
 	../pki \
 	../dev \
 	../base \
-	$(NULL)
-
-ifndef NSS_DISABLE_LIBPKIX
-SHARED_LIBRARY_DIRS += \
 	../libpkix/pkix/certsel \
 	../libpkix/pkix/checker \
 	../libpkix/pkix/params \
@@ -95,7 +91,6 @@ SHARED_LIBRARY_DIRS += \
 	../libpkix/pkix_pl_nss/system \
 	../libpkix/pkix_pl_nss/module \
 	$(NULL)
-endif
 
 ifeq (,$(filter-out WINNT WIN95,$(OS_TARGET)))
 ifndef NS_USE_GCC

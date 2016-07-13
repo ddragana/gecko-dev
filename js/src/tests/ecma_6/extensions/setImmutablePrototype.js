@@ -36,13 +36,6 @@ if (typeof setImmutablePrototype !== "function")
   }
 }
 
-if (typeof immutablePrototypesEnabled !== "function" &&
-    typeof SpecialPowers !== "undefined")
-{
-  immutablePrototypesEnabled =
-    SpecialPowers.Cu.getJSTestingFunctions().immutablePrototypesEnabled;
-}
-
 if (typeof wrap !== "function")
 {
   // good enough
@@ -93,11 +86,9 @@ function checkPrototypeMutationFailure(obj, desc)
 
 function runNormalTests(global)
 {
-  if (typeof setImmutablePrototype !== "function" ||
-      typeof immutablePrototypesEnabled !== "function" ||
-      !immutablePrototypesEnabled())
+  if (typeof setImmutablePrototype !== "function")
   {
-    print("no testable setImmutablePrototype function available, skipping tests");
+    print("no usable setImmutablePrototype function available, skipping tests");
     return;
   }
 
@@ -180,6 +171,18 @@ function runNormalTests(global)
     assertEq(e instanceof global.TypeError, true,
              "expected TypeError, instead threw " + e);
   }
+
+  // hated indirect proxies
+  var oldProto = {};
+  var indirectProxy = global.Proxy.create({}, oldProto);
+  assertEq(setImmutablePrototype(indirectProxy), true);
+  assertEq(Object.getPrototypeOf(indirectProxy), oldProto);
+  checkPrototypeMutationFailure(indirectProxy, "indirectProxy");
+
+  var indirectFunctionProxy = global.Proxy.createFunction({}, function call() {});
+  assertEq(setImmutablePrototype(indirectFunctionProxy), true);
+  assertEq(Object.getPrototypeOf(indirectFunctionProxy), global.Function.prototype);
+  checkPrototypeMutationFailure(indirectFunctionProxy, "indirectFunctionProxy");
 }
 
 var global = this;

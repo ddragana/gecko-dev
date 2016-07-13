@@ -19,7 +19,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "Session", "@mozilla.org/browser/sessio
 
 const DATA_VERSION = 1;
 
-var ClientRecord = function (params) {
+let ClientRecord = function (params) {
   this.id = params.id;
   this.name = params.name || "?";
   this.tabs = new Set();
@@ -37,7 +37,7 @@ ClientRecord.prototype = {
   }
 };
 
-var TabRecord = function (params) {
+let TabRecord = function (params) {
   this.url = params.url || "";
   this.update(params);
 };
@@ -60,7 +60,7 @@ TabRecord.prototype = {
   },
 };
 
-var TabCache = function () {
+let TabCache = function () {
   this.tabs = new Map();
   this.clients = new Map();
 };
@@ -87,7 +87,7 @@ TabCache.prototype = {
       this.clients.set(cRecord.id, cRecord);
     }
 
-    for (let tab of tabs) {
+    for each (let tab in tabs) {
       if (!tab || 'object' !== typeof(tab)) {
         continue;
       }
@@ -158,7 +158,7 @@ this.Tabs = function () {
   };
 
   let registerListenersForWindow = function (window) {
-    for (let topic of topics) {
+    for each (let topic in topics) {
       window.addEventListener(topic, update, false);
     }
     window.addEventListener("unload", unregisterListeners, false);
@@ -166,7 +166,7 @@ this.Tabs = function () {
 
   let unregisterListenersForWindow = function (window) {
     window.removeEventListener("unload", unregisterListeners, false);
-    for (let topic of topics) {
+    for each (let topic in topics) {
       window.removeEventListener(topic, update, false);
     }
   };

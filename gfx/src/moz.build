@@ -14,8 +14,9 @@ XPIDL_MODULE = 'gfx'
 DEFINES['MOZ_APP_VERSION'] = '"%s"' % CONFIG['MOZ_APP_VERSION']
 
 EXPORTS += [
-    'DriverCrashGuard.h',
+    'DriverInitCrashDetection.h',
     'FilterSupport.h',
+    'gfxCore.h',
     'gfxCrashReporterUtils.h',
     'gfxTelemetry.h',
     'nsBoundingMetrics.h',
@@ -32,22 +33,18 @@ EXPORTS += [
     'nsPoint.h',
     'nsRect.h',
     'nsRegion.h',
-    'nsRegionFwd.h',
     'nsRenderingContext.h',
     'nsSize.h',
     'nsThemeConstants.h',
     'nsTransform2D.h',
-    'PingPongRegion.h',
-    'RegionBuilder.h',
 ]
 
 EXPORTS.mozilla += [
     'AppUnits.h',
-    'ArrayView.h',
 ]
 
 EXPORTS.mozilla.gfx += [
-    'TiledRegion.h',
+    'RegionTyped.h',
 ]
 
 if CONFIG['MOZ_X11']:
@@ -57,7 +54,7 @@ if CONFIG['MOZ_X11']:
     ]
 
 UNIFIED_SOURCES += [
-    'DriverCrashGuard.cpp',
+    'DriverInitCrashDetection.cpp',
     'FilterSupport.cpp',
     'gfxCrashReporterUtils.cpp',
     'gfxTelemetry.cpp',
@@ -66,11 +63,11 @@ UNIFIED_SOURCES += [
     'nsFontMetrics.cpp',
     'nsRect.cpp',
     'nsRegion.cpp',
+    'nsRenderingContext.cpp',
     'nsScriptableRegion.cpp',
     'nsThebesFontEnumerator.cpp',
     'nsThebesGfxFactory.cpp',
     'nsTransform2D.cpp',
-    'TiledRegion.cpp',
 ]
 
 # nsDeviceContext.cpp cannot be built in unified mode because it pulls in OS X system headers.
@@ -78,18 +75,14 @@ SOURCES += [
     'nsDeviceContext.cpp',
 ]
 
-include('/ipc/chromium/chromium-config.mozbuild')
-
-LOCAL_INCLUDES += [
-    '/dom/ipc',  # for ContentChild.h
-]
+FAIL_ON_WARNINGS = True
 
 FINAL_LIBRARY = 'xul'
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_WIDGET_GTK']:
     CXXFLAGS += CONFIG['MOZ_PANGO_CFLAGS']
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':

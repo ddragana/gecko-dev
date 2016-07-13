@@ -23,7 +23,6 @@
 #include "nsIDOMHTMLInputElement.h"
 #include "nsRenderingContext.h"
 #include "nsGkAtoms.h"
-#include "nsAttrValueInlines.h"
 
 #include "mozilla/EventStates.h"
 #include "mozilla/Services.h"
@@ -177,18 +176,9 @@ nsNativeThemeGTK::GetTabMarginPixels(nsIFrame* aFrame)
                        aFrame->PresContext()->AppUnitsToDevPixels(-margin)));
 }
 
-static bool ShouldScrollbarButtonBeDisabled(int32_t aCurpos, int32_t aMaxpos,
-                                            uint8_t aWidgetType)
-{
-  return ((aCurpos == 0 && (aWidgetType == NS_THEME_SCROLLBARBUTTON_UP ||
-                            aWidgetType == NS_THEME_SCROLLBARBUTTON_LEFT))
-      || (aCurpos == aMaxpos && (aWidgetType == NS_THEME_SCROLLBARBUTTON_DOWN ||
-                                 aWidgetType == NS_THEME_SCROLLBARBUTTON_RIGHT)));
-}
-
 bool
 nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
-                                       WidgetNodeType& aGtkWidgetType,
+                                       GtkThemeWidgetType& aGtkWidgetType,
                                        GtkWidgetState* aState,
                                        gint* aWidgetFlags)
 {
@@ -240,8 +230,8 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
               *aWidgetFlags |= MOZ_GTK_WIDGET_INCONSISTENT;
           }
         }
-      } else if (aWidgetType == NS_THEME_TOOLBARBUTTON_DROPDOWN ||
-                 aWidgetType == NS_THEME_TREEHEADERSORTARROW ||
+      } else if (aWidgetType == NS_THEME_TOOLBAR_BUTTON_DROPDOWN ||
+                 aWidgetType == NS_THEME_TREEVIEW_HEADER_SORTARROW ||
                  aWidgetType == NS_THEME_BUTTON_ARROW_PREVIOUS ||
                  aWidgetType == NS_THEME_BUTTON_ARROW_NEXT ||
                  aWidgetType == NS_THEME_BUTTON_ARROW_UP ||
@@ -270,11 +260,11 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
         aState->focused = TRUE;
         aState->depressed = TRUE; // see moz_gtk_entry_paint()
       } else if (aWidgetType == NS_THEME_BUTTON ||
-                 aWidgetType == NS_THEME_TOOLBARBUTTON ||
-                 aWidgetType == NS_THEME_DUALBUTTON ||
-                 aWidgetType == NS_THEME_TOOLBARBUTTON_DROPDOWN ||
-                 aWidgetType == NS_THEME_MENULIST ||
-                 aWidgetType == NS_THEME_MENULIST_BUTTON) {
+                 aWidgetType == NS_THEME_TOOLBAR_BUTTON ||
+                 aWidgetType == NS_THEME_TOOLBAR_DUAL_BUTTON ||
+                 aWidgetType == NS_THEME_TOOLBAR_BUTTON_DROPDOWN ||
+                 aWidgetType == NS_THEME_DROPDOWN ||
+                 aWidgetType == NS_THEME_DROPDOWN_BUTTON) {
         aState->active &= aState->inHover;
       }
 
@@ -285,7 +275,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
         if (aWidgetType == NS_THEME_NUMBER_INPUT ||
             aWidgetType == NS_THEME_TEXTFIELD ||
             aWidgetType == NS_THEME_TEXTFIELD_MULTILINE ||
-            aWidgetType == NS_THEME_MENULIST_TEXTFIELD ||
+            aWidgetType == NS_THEME_DROPDOWN_TEXTFIELD ||
             aWidgetType == NS_THEME_SPINNER_TEXTFIELD ||
             aWidgetType == NS_THEME_RADIO_CONTAINER ||
             aWidgetType == NS_THEME_RADIO_LABEL) {
@@ -296,8 +286,8 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
           aState->focused = FALSE;
         }
 
-        if (aWidgetType == NS_THEME_SCROLLBARTHUMB_VERTICAL ||
-            aWidgetType == NS_THEME_SCROLLBARTHUMB_HORIZONTAL) {
+        if (aWidgetType == NS_THEME_SCROLLBAR_THUMB_VERTICAL ||
+            aWidgetType == NS_THEME_SCROLLBAR_THUMB_HORIZONTAL) {
           // for scrollbars we need to go up two to go from the thumb to
           // the slider to the actual scrollbar object
           nsIFrame *tmpFrame = aFrame->GetParent()->GetParent();
@@ -310,17 +300,20 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
           }
         }
 
-        if (aWidgetType == NS_THEME_SCROLLBARBUTTON_UP ||
-            aWidgetType == NS_THEME_SCROLLBARBUTTON_DOWN ||
-            aWidgetType == NS_THEME_SCROLLBARBUTTON_LEFT ||
-            aWidgetType == NS_THEME_SCROLLBARBUTTON_RIGHT) {
+        if (aWidgetType == NS_THEME_SCROLLBAR_BUTTON_UP ||
+            aWidgetType == NS_THEME_SCROLLBAR_BUTTON_DOWN ||
+            aWidgetType == NS_THEME_SCROLLBAR_BUTTON_LEFT ||
+            aWidgetType == NS_THEME_SCROLLBAR_BUTTON_RIGHT) {
           // set the state to disabled when the scrollbar is scrolled to
           // the beginning or the end, depending on the button type.
           int32_t curpos = CheckIntAttr(aFrame, nsGkAtoms::curpos, 0);
           int32_t maxpos = CheckIntAttr(aFrame, nsGkAtoms::maxpos, 100);
-          if (ShouldScrollbarButtonBeDisabled(curpos, maxpos, aWidgetType)) {
+          if ((curpos == 0 && (aWidgetType == NS_THEME_SCROLLBAR_BUTTON_UP ||
+                aWidgetType == NS_THEME_SCROLLBAR_BUTTON_LEFT)) ||
+              (curpos == maxpos &&
+               (aWidgetType == NS_THEME_SCROLLBAR_BUTTON_DOWN ||
+                aWidgetType == NS_THEME_SCROLLBAR_BUTTON_RIGHT)))
             aState->disabled = true;
-          }
 
           // In order to simulate native GTK scrollbar click behavior,
           // we set the active attribute on the element to true if it's
@@ -331,7 +324,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
 
           if (aWidgetFlags) {
             *aWidgetFlags = GetScrollbarButtonType(aFrame);
-            if (aWidgetType - NS_THEME_SCROLLBARBUTTON_UP < 2)
+            if (aWidgetType - NS_THEME_SCROLLBAR_BUTTON_UP < 2)
               *aWidgetFlags |= MOZ_GTK_STEPPER_VERTICAL;
           }
         }
@@ -354,8 +347,10 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
 
           if (isTopLevel) {
             aState->inHover = menuFrame->IsOpen();
+            *aWidgetFlags |= MOZ_TOPLEVEL_MENU_ITEM;
           } else {
             aState->inHover = CheckBooleanAttr(aFrame, nsGkAtoms::menuactive);
+            *aWidgetFlags &= ~MOZ_TOPLEVEL_MENU_ITEM;
           }
 
           aState->active = FALSE;
@@ -374,11 +369,11 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
         // A button with drop down menu open or an activated toggle button
         // should always appear depressed.
         if (aWidgetType == NS_THEME_BUTTON ||
-            aWidgetType == NS_THEME_TOOLBARBUTTON ||
-            aWidgetType == NS_THEME_DUALBUTTON ||
-            aWidgetType == NS_THEME_TOOLBARBUTTON_DROPDOWN ||
-            aWidgetType == NS_THEME_MENULIST ||
-            aWidgetType == NS_THEME_MENULIST_BUTTON) {
+            aWidgetType == NS_THEME_TOOLBAR_BUTTON ||
+            aWidgetType == NS_THEME_TOOLBAR_DUAL_BUTTON ||
+            aWidgetType == NS_THEME_TOOLBAR_BUTTON_DROPDOWN ||
+            aWidgetType == NS_THEME_DROPDOWN ||
+            aWidgetType == NS_THEME_DROPDOWN_BUTTON) {
           bool menuOpen = IsOpenButton(aFrame);
           aState->depressed = IsCheckedButton(aFrame) || menuOpen;
           // we must not highlight buttons with open drop down menus on hover.
@@ -387,7 +382,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
 
         // When the input field of the drop down button has focus, some themes
         // should draw focus for the drop down button as well.
-        if (aWidgetType == NS_THEME_MENULIST_BUTTON && aWidgetFlags) {
+        if (aWidgetType == NS_THEME_DROPDOWN_BUTTON && aWidgetFlags) {
           *aWidgetFlags = CheckBooleanAttr(aFrame, nsGkAtoms::parentfocused);
         }
       }
@@ -396,15 +391,11 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
 
   switch (aWidgetType) {
   case NS_THEME_BUTTON:
+  case NS_THEME_TOOLBAR_BUTTON:
+  case NS_THEME_TOOLBAR_DUAL_BUTTON:
     if (aWidgetFlags)
-      *aWidgetFlags = GTK_RELIEF_NORMAL;
+      *aWidgetFlags = (aWidgetType == NS_THEME_BUTTON) ? GTK_RELIEF_NORMAL : GTK_RELIEF_NONE;
     aGtkWidgetType = MOZ_GTK_BUTTON;
-    break;
-  case NS_THEME_TOOLBARBUTTON:
-  case NS_THEME_DUALBUTTON:
-    if (aWidgetFlags)
-      *aWidgetFlags = GTK_RELIEF_NONE;
-    aGtkWidgetType = MOZ_GTK_TOOLBAR_BUTTON;
     break;
   case NS_THEME_FOCUS_OUTLINE:
     aGtkWidgetType = MOZ_GTK_ENTRY;
@@ -413,39 +404,39 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
   case NS_THEME_RADIO:
     aGtkWidgetType = (aWidgetType == NS_THEME_RADIO) ? MOZ_GTK_RADIOBUTTON : MOZ_GTK_CHECKBUTTON;
     break;
-  case NS_THEME_SCROLLBARBUTTON_UP:
-  case NS_THEME_SCROLLBARBUTTON_DOWN:
-  case NS_THEME_SCROLLBARBUTTON_LEFT:
-  case NS_THEME_SCROLLBARBUTTON_RIGHT:
+  case NS_THEME_SCROLLBAR_BUTTON_UP:
+  case NS_THEME_SCROLLBAR_BUTTON_DOWN:
+  case NS_THEME_SCROLLBAR_BUTTON_LEFT:
+  case NS_THEME_SCROLLBAR_BUTTON_RIGHT:
     aGtkWidgetType = MOZ_GTK_SCROLLBAR_BUTTON;
     break;
-  case NS_THEME_SCROLLBAR_VERTICAL:
-    aGtkWidgetType = MOZ_GTK_SCROLLBAR_VERTICAL;
+  case NS_THEME_SCROLLBAR_TRACK_VERTICAL:
+    aGtkWidgetType = MOZ_GTK_SCROLLBAR_TRACK_VERTICAL;
     if (GetWidgetTransparency(aFrame, aWidgetType) == eOpaque)
         *aWidgetFlags = MOZ_GTK_TRACK_OPAQUE;
     else
         *aWidgetFlags = 0;
     break;
-  case NS_THEME_SCROLLBAR_HORIZONTAL:
-    aGtkWidgetType = MOZ_GTK_SCROLLBAR_HORIZONTAL;
+  case NS_THEME_SCROLLBAR_TRACK_HORIZONTAL:
+    aGtkWidgetType = MOZ_GTK_SCROLLBAR_TRACK_HORIZONTAL;
     if (GetWidgetTransparency(aFrame, aWidgetType) == eOpaque)
         *aWidgetFlags = MOZ_GTK_TRACK_OPAQUE;
     else
         *aWidgetFlags = 0;
     break;
-  case NS_THEME_SCROLLBARTHUMB_VERTICAL:
+  case NS_THEME_SCROLLBAR_THUMB_VERTICAL:
     aGtkWidgetType = MOZ_GTK_SCROLLBAR_THUMB_VERTICAL;
     break;
-  case NS_THEME_SCROLLBARTHUMB_HORIZONTAL:
+  case NS_THEME_SCROLLBAR_THUMB_HORIZONTAL:
     aGtkWidgetType = MOZ_GTK_SCROLLBAR_THUMB_HORIZONTAL;
     break;
   case NS_THEME_SPINNER:
     aGtkWidgetType = MOZ_GTK_SPINBUTTON;
     break;
-  case NS_THEME_SPINNER_UPBUTTON:
+  case NS_THEME_SPINNER_UP_BUTTON:
     aGtkWidgetType = MOZ_GTK_SPINBUTTON_UP;
     break;
-  case NS_THEME_SPINNER_DOWNBUTTON:
+  case NS_THEME_SPINNER_DOWN_BUTTON:
     aGtkWidgetType = MOZ_GTK_SPINBUTTON_DOWN;
     break;
   case NS_THEME_SPINNER_TEXTFIELD:
@@ -482,7 +473,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
       *aWidgetFlags = GTK_ORIENTATION_HORIZONTAL;
     aGtkWidgetType = MOZ_GTK_SCALE_HORIZONTAL;
     break;
-  case NS_THEME_SCALETHUMB_HORIZONTAL:
+  case NS_THEME_SCALE_THUMB_HORIZONTAL:
     if (aWidgetFlags)
       *aWidgetFlags = GTK_ORIENTATION_HORIZONTAL;
     aGtkWidgetType = MOZ_GTK_SCALE_THUMB_HORIZONTAL;
@@ -492,15 +483,15 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
       *aWidgetFlags = GTK_ORIENTATION_VERTICAL;
     aGtkWidgetType = MOZ_GTK_SCALE_VERTICAL;
     break;
-  case NS_THEME_SEPARATOR:
+  case NS_THEME_TOOLBAR_SEPARATOR:
     aGtkWidgetType = MOZ_GTK_TOOLBAR_SEPARATOR;
     break;
-  case NS_THEME_SCALETHUMB_VERTICAL:
+  case NS_THEME_SCALE_THUMB_VERTICAL:
     if (aWidgetFlags)
       *aWidgetFlags = GTK_ORIENTATION_VERTICAL;
     aGtkWidgetType = MOZ_GTK_SCALE_THUMB_VERTICAL;
     break;
-  case NS_THEME_TOOLBARGRIPPER:
+  case NS_THEME_TOOLBAR_GRIPPER:
     aGtkWidgetType = MOZ_GTK_GRIPPER;
     break;
   case NS_THEME_RESIZER:
@@ -508,20 +499,14 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     break;
   case NS_THEME_NUMBER_INPUT:
   case NS_THEME_TEXTFIELD:
-    aGtkWidgetType = MOZ_GTK_ENTRY;
-    break;
   case NS_THEME_TEXTFIELD_MULTILINE:
-#if (MOZ_WIDGET_GTK == 3)
-    aGtkWidgetType = MOZ_GTK_TEXT_VIEW;
-#else
     aGtkWidgetType = MOZ_GTK_ENTRY;
-#endif
     break;
   case NS_THEME_LISTBOX:
   case NS_THEME_TREEVIEW:
     aGtkWidgetType = MOZ_GTK_TREEVIEW;
     break;
-  case NS_THEME_TREEHEADERCELL:
+  case NS_THEME_TREEVIEW_HEADER_CELL:
     if (aWidgetFlags) {
       // In this case, the flag denotes whether the header is the sorted one or not
       if (GetTreeSortDirection(aFrame) == eTreeSortDirection_Natural)
@@ -531,7 +516,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     }
     aGtkWidgetType = MOZ_GTK_TREE_HEADER_CELL;
     break;
-  case NS_THEME_TREEHEADERSORTARROW:
+  case NS_THEME_TREEVIEW_HEADER_SORTARROW:
     if (aWidgetFlags) {
       switch (GetTreeSortDirection(aFrame)) {
         case eTreeSortDirection_Ascending:
@@ -551,30 +536,30 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     }
     aGtkWidgetType = MOZ_GTK_TREE_HEADER_SORTARROW;
     break;
-  case NS_THEME_TREETWISTY:
+  case NS_THEME_TREEVIEW_TWISTY:
     aGtkWidgetType = MOZ_GTK_TREEVIEW_EXPANDER;
     if (aWidgetFlags)
       *aWidgetFlags = GTK_EXPANDER_COLLAPSED;
     break;
-  case NS_THEME_TREETWISTYOPEN:
+  case NS_THEME_TREEVIEW_TWISTY_OPEN:
     aGtkWidgetType = MOZ_GTK_TREEVIEW_EXPANDER;
     if (aWidgetFlags)
       *aWidgetFlags = GTK_EXPANDER_EXPANDED;
     break;
-  case NS_THEME_MENULIST:
+  case NS_THEME_DROPDOWN:
     aGtkWidgetType = MOZ_GTK_DROPDOWN;
     if (aWidgetFlags)
         *aWidgetFlags = IsFrameContentNodeInNamespace(aFrame, kNameSpaceID_XHTML);
     break;
-  case NS_THEME_MENULIST_TEXT:
+  case NS_THEME_DROPDOWN_TEXT:
     return false; // nothing to do, but prevents the bg from being drawn
-  case NS_THEME_MENULIST_TEXTFIELD:
+  case NS_THEME_DROPDOWN_TEXTFIELD:
     aGtkWidgetType = MOZ_GTK_DROPDOWN_ENTRY;
     break;
-  case NS_THEME_MENULIST_BUTTON:
+  case NS_THEME_DROPDOWN_BUTTON:
     aGtkWidgetType = MOZ_GTK_DROPDOWN_ARROW;
     break;
-  case NS_THEME_TOOLBARBUTTON_DROPDOWN:
+  case NS_THEME_TOOLBAR_BUTTON_DROPDOWN:
   case NS_THEME_BUTTON_ARROW_DOWN:
   case NS_THEME_BUTTON_ARROW_UP:
   case NS_THEME_BUTTON_ARROW_NEXT:
@@ -609,16 +594,16 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
   case NS_THEME_TOOLTIP:
     aGtkWidgetType = MOZ_GTK_TOOLTIP;
     break;
-  case NS_THEME_STATUSBARPANEL:
-  case NS_THEME_RESIZERPANEL:
+  case NS_THEME_STATUSBAR_PANEL:
+  case NS_THEME_STATUSBAR_RESIZER_PANEL:
     aGtkWidgetType = MOZ_GTK_FRAME;
     break;
   case NS_THEME_PROGRESSBAR:
   case NS_THEME_PROGRESSBAR_VERTICAL:
     aGtkWidgetType = MOZ_GTK_PROGRESSBAR;
     break;
-  case NS_THEME_PROGRESSCHUNK:
-  case NS_THEME_PROGRESSCHUNK_VERTICAL:
+  case NS_THEME_PROGRESSBAR_CHUNK:
+  case NS_THEME_PROGRESSBAR_CHUNK_VERTICAL:
     {
       nsIFrame* stateFrame = aFrame->GetParent();
       EventStates eventStates = GetContentState(stateFrame, aWidgetType);
@@ -630,14 +615,14 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
                          : MOZ_GTK_PROGRESS_CHUNK;
     }
     break;
-  case NS_THEME_TAB_SCROLL_ARROW_BACK:
-  case NS_THEME_TAB_SCROLL_ARROW_FORWARD:
+  case NS_THEME_TAB_SCROLLARROW_BACK:
+  case NS_THEME_TAB_SCROLLARROW_FORWARD:
     if (aWidgetFlags)
-      *aWidgetFlags = aWidgetType == NS_THEME_TAB_SCROLL_ARROW_BACK ?
+      *aWidgetFlags = aWidgetType == NS_THEME_TAB_SCROLLARROW_BACK ?
                         GTK_ARROW_LEFT : GTK_ARROW_RIGHT;
     aGtkWidgetType = MOZ_GTK_TAB_SCROLLARROW;
     break;
-  case NS_THEME_TABPANELS:
+  case NS_THEME_TAB_PANELS:
     aGtkWidgetType = MOZ_GTK_TABPANELS;
     break;
   case NS_THEME_TAB:
@@ -677,13 +662,6 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     aGtkWidgetType = MOZ_GTK_MENUPOPUP;
     break;
   case NS_THEME_MENUITEM:
-    {
-      nsMenuFrame *menuFrame = do_QueryFrame(aFrame);
-      if (menuFrame && menuFrame->IsOnMenuBar()) {
-        aGtkWidgetType = MOZ_GTK_MENUBARITEM;
-        break;
-      }
-    }
     aGtkWidgetType = MOZ_GTK_MENUITEM;
     break;
   case NS_THEME_MENUSEPARATOR:
@@ -702,9 +680,6 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
   case NS_THEME_DIALOG:
     aGtkWidgetType = MOZ_GTK_WINDOW;
     break;
-  case NS_THEME_GTK_INFO_BAR:
-    aGtkWidgetType = MOZ_GTK_INFO_BAR;
-    break;
   default:
     return false;
   }
@@ -715,7 +690,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
 #if (MOZ_WIDGET_GTK == 2)
 class ThemeRenderer : public gfxGdkNativeRenderer {
 public:
-  ThemeRenderer(GtkWidgetState aState, WidgetNodeType aGTKWidgetType,
+  ThemeRenderer(GtkWidgetState aState, GtkThemeWidgetType aGTKWidgetType,
                 gint aFlags, GtkTextDirection aDirection,
                 const GdkRectangle& aGDKRect, const GdkRectangle& aGDKClip)
     : mState(aState), mGTKWidgetType(aGTKWidgetType), mFlags(aFlags),
@@ -724,7 +699,7 @@ public:
                        GdkRectangle * clipRects, uint32_t numClipRects);
 private:
   GtkWidgetState mState;
-  WidgetNodeType mGTKWidgetType;
+  GtkThemeWidgetType mGTKWidgetType;
   gint mFlags;
   GtkTextDirection mDirection;
   const GdkRectangle& mGDKRect;
@@ -837,7 +812,7 @@ private:
 
 static void
 DrawThemeWithCairo(gfxContext* aContext, DrawTarget* aDrawTarget,
-                   GtkWidgetState aState, WidgetNodeType aGTKWidgetType,
+                   GtkWidgetState aState, GtkThemeWidgetType aGTKWidgetType,
                    gint aFlags, GtkTextDirection aDirection, gint aScaleFactor,
                    bool aSnapped, const Point& aDrawOrigin, const nsIntSize& aDrawSize,
                    GdkRectangle& aGDKRect, nsITheme::Transparency aTransparency)
@@ -878,7 +853,7 @@ DrawThemeWithCairo(gfxContext* aContext, DrawTarget* aDrawTarget,
   // If using a Cairo xlib surface, then try to reuse it.
   BorrowedXlibDrawable borrow(aDrawTarget);
   if (borrow.GetDrawable()) {
-    nsIntSize size = borrow.GetSize();
+    nsIntSize size = aDrawTarget->GetSize();
     cairo_surface_t* surf = nullptr;
     // Check if the surface is using XRender.
 #ifdef CAIRO_HAS_XLIB_XRENDER_SURFACE
@@ -895,10 +870,6 @@ DrawThemeWithCairo(gfxContext* aContext, DrawTarget* aDrawTarget,
             size.width, size.height);
       }
       if (!NS_WARN_IF(!surf)) {
-        Point offset = borrow.GetOffset();
-        if (offset != Point()) {
-          cairo_surface_set_device_offset(surf, offset.x, offset.y);
-        }
         cairo_t* cr = cairo_create(surf);
         if (!NS_WARN_IF(!cr)) {
           RefPtr<SystemCairoClipper> clipper = new SystemCairoClipper(cr);
@@ -923,16 +894,12 @@ DrawThemeWithCairo(gfxContext* aContext, DrawTarget* aDrawTarget,
   nsIntSize size;
   int32_t stride;
   SurfaceFormat format;
-  IntPoint origin;
-  if (aDrawTarget->LockBits(&data, &size, &stride, &format, &origin)) {
+  if (aDrawTarget->LockBits(&data, &size, &stride, &format)) {
     // Create a Cairo image surface context the device rectangle.
     cairo_surface_t* surf =
       cairo_image_surface_create_for_data(
         data, GfxFormatToCairoFormat(format), size.width, size.height, stride);
     if (!NS_WARN_IF(!surf)) {
-      if (origin != IntPoint()) {
-        cairo_surface_set_device_offset(surf, -origin.x, -origin.y);
-      }
       cairo_t* cr = cairo_create(surf);
       if (!NS_WARN_IF(!cr)) {
         RefPtr<SystemCairoClipper> clipper = new SystemCairoClipper(cr);
@@ -1008,10 +975,10 @@ nsNativeThemeGTK::GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
   // GTK2 themes (Ximian Industrial, Bluecurve, Misty, at least);
   // We modify the frame's overflow area.  See bug 297508.
   switch (aWidgetType) {
-  case NS_THEME_SCROLLBARTHUMB_VERTICAL:
+  case NS_THEME_SCROLLBAR_THUMB_VERTICAL:
     aExtra->top = aExtra->bottom = 1;
     break;
-  case NS_THEME_SCROLLBARTHUMB_HORIZONTAL:
+  case NS_THEME_SCROLLBAR_THUMB_HORIZONTAL:
     aExtra->left = aExtra->right = 1;
     break;
 
@@ -1046,7 +1013,6 @@ nsNativeThemeGTK::GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
         aExtra->left = left;
         break;
       }
-      return false;
     }
   case NS_THEME_FOCUS_OUTLINE:
     {
@@ -1073,7 +1039,6 @@ nsNativeThemeGTK::GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
       } else {
         aExtra->bottom = extra;
       }
-      return false;
     }
   default:
     return false;
@@ -1094,15 +1059,8 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
                                        const nsRect& aDirtyRect)
 {
   GtkWidgetState state;
-  WidgetNodeType gtkWidgetType;
-  // For resizer drawing, we want IsFrameRTL, which treats vertical-rl modes
-  // as right-to-left (in addition to horizontal text with direction=RTL),
-  // rather than just considering the text direction.
-  // This will make resizers on vertically-oriented elements render properly.
-  GtkTextDirection direction =
-    aWidgetType == NS_THEME_RESIZER
-    ? (IsFrameRTL(aFrame) ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_LTR)
-    : GetTextDirection(aFrame);
+  GtkThemeWidgetType gtkWidgetType;
+  GtkTextDirection direction = GetTextDirection(aFrame);
   gint flags;
   if (!GetGtkWidgetAndState(aWidgetType, aFrame, gtkWidgetType, &state,
                             &flags))
@@ -1137,7 +1095,7 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
   nsIntRect overflowRect(widgetRect);
   nsIntMargin extraSize;
   if (GetExtraSizeForWidget(aFrame, aWidgetType, &extraSize)) {
-    overflowRect.Inflate(extraSize);
+    overflowRect.Inflate(gfx::ToIntMargin(extraSize));
   }
 
   // This is the rectangle that will actually be drawn, in gdk pixels
@@ -1245,22 +1203,12 @@ nsNativeThemeGTK::GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
   GtkTextDirection direction = GetTextDirection(aFrame);
   aResult->top = aResult->left = aResult->right = aResult->bottom = 0;
   switch (aWidgetType) {
-  case NS_THEME_SCROLLBAR_VERTICAL:
-  case NS_THEME_SCROLLBARTRACK_HORIZONTAL:
+  case NS_THEME_SCROLLBAR_TRACK_VERTICAL:
+  case NS_THEME_SCROLLBAR_TRACK_HORIZONTAL:
     {
       MozGtkScrollbarMetrics metrics;
       moz_gtk_get_scrollbar_metrics(&metrics);
-      /* Top and bottom border for whole vertical scrollbar, top and bottom
-       * border for horizontal track - to correctly position thumb element */
-      aResult->top = aResult->bottom = metrics.trough_border;
-    }
-    break;
-  case NS_THEME_SCROLLBAR_HORIZONTAL:
-  case NS_THEME_SCROLLBARTRACK_VERTICAL:
-    {
-      MozGtkScrollbarMetrics metrics;
-      moz_gtk_get_scrollbar_metrics(&metrics);
-      aResult->left = aResult->right = metrics.trough_border;
+      aResult->top = aResult->left = aResult->right = aResult->bottom = metrics.trough_border;
     }
     break;
   case NS_THEME_TOOLBOX:
@@ -1268,7 +1216,7 @@ nsNativeThemeGTK::GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
     // gtk's 'toolbar' for purposes of painting the widget background,
     // we don't use the toolbar border for toolbox.
     break;
-  case NS_THEME_DUALBUTTON:
+  case NS_THEME_TOOLBAR_DUAL_BUTTON:
     // TOOLBAR_DUAL_BUTTON is an interesting case.  We want a border to draw
     // around the entire button + dropdown, and also an inner border if you're
     // over the button part.  But, we want the inner button to be right up
@@ -1278,7 +1226,7 @@ nsNativeThemeGTK::GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
     break;
   case NS_THEME_TAB:
     {
-      WidgetNodeType gtkWidgetType;
+      GtkThemeWidgetType gtkWidgetType;
       gint flags;
 
       if (!GetGtkWidgetAndState(aWidgetType, aFrame, gtkWidgetType, nullptr,
@@ -1298,10 +1246,9 @@ nsNativeThemeGTK::GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
     // will need to fall through and use the default case as before.
     if (IsRegularMenuItem(aFrame))
       break;
-    MOZ_FALLTHROUGH;
   default:
     {
-      WidgetNodeType gtkWidgetType;
+      GtkThemeWidgetType gtkWidgetType;
       if (GetGtkWidgetAndState(aWidgetType, aFrame, gtkWidgetType, nullptr,
                                nullptr)) {
         moz_gtk_get_widget_border(gtkWidgetType, &aResult->left, &aResult->top,
@@ -1326,12 +1273,12 @@ nsNativeThemeGTK::GetWidgetPadding(nsDeviceContext* aContext,
 {
   switch (aWidgetType) {
     case NS_THEME_BUTTON_FOCUS:
-    case NS_THEME_TOOLBARBUTTON:
-    case NS_THEME_DUALBUTTON:
-    case NS_THEME_TAB_SCROLL_ARROW_BACK:
-    case NS_THEME_TAB_SCROLL_ARROW_FORWARD:
-    case NS_THEME_MENULIST_BUTTON:
-    case NS_THEME_TOOLBARBUTTON_DROPDOWN:
+    case NS_THEME_TOOLBAR_BUTTON:
+    case NS_THEME_TOOLBAR_DUAL_BUTTON:
+    case NS_THEME_TAB_SCROLLARROW_BACK:
+    case NS_THEME_TAB_SCROLLARROW_FORWARD:
+    case NS_THEME_DROPDOWN_BUTTON:
+    case NS_THEME_TOOLBAR_BUTTON_DROPDOWN:
     case NS_THEME_BUTTON_ARROW_UP:
     case NS_THEME_BUTTON_ARROW_DOWN:
     case NS_THEME_BUTTON_ARROW_NEXT:
@@ -1353,7 +1300,7 @@ nsNativeThemeGTK::GetWidgetPadding(nsDeviceContext* aContext,
           return false;
 
         aResult->SizeTo(0, 0, 0, 0);
-        WidgetNodeType gtkWidgetType;
+        GtkThemeWidgetType gtkWidgetType;
         if (GetGtkWidgetAndState(aWidgetType, aFrame, gtkWidgetType, nullptr,
                                  nullptr)) {
           moz_gtk_get_widget_border(gtkWidgetType, &aResult->left, &aResult->top,
@@ -1413,8 +1360,8 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
   *aIsOverridable = true;
 
   switch (aWidgetType) {
-    case NS_THEME_SCROLLBARBUTTON_UP:
-    case NS_THEME_SCROLLBARBUTTON_DOWN:
+    case NS_THEME_SCROLLBAR_BUTTON_UP:
+    case NS_THEME_SCROLLBAR_BUTTON_DOWN:
       {
         MozGtkScrollbarMetrics metrics;
         moz_gtk_get_scrollbar_metrics(&metrics);
@@ -1424,8 +1371,8 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
         *aIsOverridable = false;
       }
       break;
-    case NS_THEME_SCROLLBARBUTTON_LEFT:
-    case NS_THEME_SCROLLBARBUTTON_RIGHT:
+    case NS_THEME_SCROLLBAR_BUTTON_LEFT:
+    case NS_THEME_SCROLLBAR_BUTTON_RIGHT:
       {
         MozGtkScrollbarMetrics metrics;
         moz_gtk_get_scrollbar_metrics(&metrics);
@@ -1450,8 +1397,8 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       *aIsOverridable = false;
     }
     break;
-    case NS_THEME_SCROLLBAR_HORIZONTAL:
-    case NS_THEME_SCROLLBAR_VERTICAL:
+    case NS_THEME_SCROLLBAR_TRACK_HORIZONTAL:
+    case NS_THEME_SCROLLBAR_TRACK_VERTICAL:
     {
       /* While we enforce a minimum size for the thumb, this is ignored
        * for the some scrollbars if buttons are hidden (bug 513006) because
@@ -1464,7 +1411,7 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       // Require room for the slider in the track if we don't have buttons.
       bool hasScrollbarButtons = moz_gtk_has_scrollbar_buttons();
 
-      if (aWidgetType == NS_THEME_SCROLLBAR_VERTICAL) {
+      if (aWidgetType == NS_THEME_SCROLLBAR_TRACK_VERTICAL) {
         aResult->width = metrics.slider_width + 2 * metrics.trough_border;
         if (!hasScrollbarButtons)
           aResult->height = metrics.min_slider_size + 2 * metrics.trough_border;
@@ -1477,13 +1424,13 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       *aIsOverridable = false;
     }
     break;
-    case NS_THEME_SCROLLBARTHUMB_VERTICAL:
-    case NS_THEME_SCROLLBARTHUMB_HORIZONTAL:
+    case NS_THEME_SCROLLBAR_THUMB_VERTICAL:
+    case NS_THEME_SCROLLBAR_THUMB_HORIZONTAL:
       {
         MozGtkScrollbarMetrics metrics;
         moz_gtk_get_scrollbar_metrics(&metrics);
 
-        if (aWidgetType == NS_THEME_SCROLLBARTHUMB_VERTICAL) {
+        if (aWidgetType == NS_THEME_SCROLLBAR_THUMB_VERTICAL) {
           aResult->width = metrics.slider_width;
           aResult->height = metrics.min_slider_size;
         } else {
@@ -1509,25 +1456,12 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
         *aIsOverridable = false;
       }
       break;
-    case NS_THEME_RANGE:
-      {
-        gint scale_width, scale_height;
-
-        moz_gtk_get_scale_metrics(IsRangeHorizontal(aFrame) ?
-            GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL,
-            &scale_width, &scale_height);
-        aResult->width = scale_width;
-        aResult->height = scale_height;
-
-        *aIsOverridable = true;
-      }
-      break;
-    case NS_THEME_SCALETHUMB_HORIZONTAL:
-    case NS_THEME_SCALETHUMB_VERTICAL:
+    case NS_THEME_SCALE_THUMB_HORIZONTAL:
+    case NS_THEME_SCALE_THUMB_VERTICAL:
       {
         gint thumb_length, thumb_height;
 
-        if (aWidgetType == NS_THEME_SCALETHUMB_VERTICAL) {
+        if (aWidgetType == NS_THEME_SCALE_THUMB_VERTICAL) {
           moz_gtk_get_scalethumb_metrics(GTK_ORIENTATION_VERTICAL, &thumb_length, &thumb_height);
           aResult->width = thumb_height;
           aResult->height = thumb_length;
@@ -1540,14 +1474,14 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
         *aIsOverridable = false;
       }
       break;
-    case NS_THEME_TAB_SCROLL_ARROW_BACK:
-    case NS_THEME_TAB_SCROLL_ARROW_FORWARD:
+    case NS_THEME_TAB_SCROLLARROW_BACK:
+    case NS_THEME_TAB_SCROLLARROW_FORWARD:
       {
         moz_gtk_get_tab_scroll_arrow_size(&aResult->width, &aResult->height);
         *aIsOverridable = false;
       }
       break;
-  case NS_THEME_MENULIST_BUTTON:
+  case NS_THEME_DROPDOWN_BUTTON:
     {
       moz_gtk_get_combo_box_entry_button_size(&aResult->width,
                                               &aResult->height);
@@ -1580,15 +1514,14 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       aResult->height = indicator_size;
     }
     break;
-  case NS_THEME_TOOLBARBUTTON_DROPDOWN:
+  case NS_THEME_TOOLBAR_BUTTON_DROPDOWN:
   case NS_THEME_BUTTON_ARROW_UP:
   case NS_THEME_BUTTON_ARROW_DOWN:
   case NS_THEME_BUTTON_ARROW_NEXT:
   case NS_THEME_BUTTON_ARROW_PREVIOUS:
     {
-      moz_gtk_get_arrow_size(MOZ_GTK_TOOLBARBUTTON_ARROW,
-                             &aResult->width, &aResult->height);
-      *aIsOverridable = false;
+        moz_gtk_get_arrow_size(&aResult->width, &aResult->height);
+        *aIsOverridable = false;
     }
     break;
   case NS_THEME_CHECKBOX_CONTAINER:
@@ -1596,35 +1529,19 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
   case NS_THEME_CHECKBOX_LABEL:
   case NS_THEME_RADIO_LABEL:
   case NS_THEME_BUTTON:
-  case NS_THEME_MENULIST:
-  case NS_THEME_TOOLBARBUTTON:
-  case NS_THEME_TREEHEADERCELL:
+  case NS_THEME_DROPDOWN:
+  case NS_THEME_TOOLBAR_BUTTON:
+  case NS_THEME_TREEVIEW_HEADER_CELL:
     {
-      if (aWidgetType == NS_THEME_MENULIST) {
-        // Include the arrow size.
-        moz_gtk_get_arrow_size(MOZ_GTK_DROPDOWN,
-                               &aResult->width, &aResult->height);
-      }
-      // else the minimum size is missing consideration of container
-      // descendants; the value returned here will not be helpful, but the
-      // box model may consider border and padding with child minimum sizes.
-
+      // Just include our border, and let the box code augment the size.
       nsIntMargin border;
       nsNativeThemeGTK::GetWidgetBorder(aFrame->PresContext()->DeviceContext(),
                                         aFrame, aWidgetType, &border);
-      aResult->width += border.left + border.right;
-      aResult->height += border.top + border.bottom;
+      aResult->width = border.left + border.right;
+      aResult->height = border.top + border.bottom;
     }
     break;
-#if (MOZ_WIDGET_GTK == 3)
-  case NS_THEME_NUMBER_INPUT:
-  case NS_THEME_TEXTFIELD:
-    {
-      moz_gtk_get_entry_min_height(&aResult->height);
-    }
-    break;
-#endif
-  case NS_THEME_SEPARATOR:
+  case NS_THEME_TOOLBAR_SEPARATOR:
     {
       gint separator_width;
     
@@ -1638,9 +1555,9 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
     aResult->width = 14;
     aResult->height = 26;
     break;
-  case NS_THEME_TREEHEADERSORTARROW:
-  case NS_THEME_SPINNER_UPBUTTON:
-  case NS_THEME_SPINNER_DOWNBUTTON:
+  case NS_THEME_TREEVIEW_HEADER_SORTARROW:
+  case NS_THEME_SPINNER_UP_BUTTON:
+  case NS_THEME_SPINNER_DOWN_BUTTON:
     // hard code these sizes
     aResult->width = 14;
     aResult->height = 13;
@@ -1650,8 +1567,8 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
     aResult->width = aResult->height = 15;
     *aIsOverridable = false;
     break;
-  case NS_THEME_TREETWISTY:
-  case NS_THEME_TREETWISTYOPEN:
+  case NS_THEME_TREEVIEW_TWISTY:
+  case NS_THEME_TREEVIEW_TWISTY_OPEN:
     {
       gint expander_size;
 
@@ -1669,17 +1586,16 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
 
 NS_IMETHODIMP
 nsNativeThemeGTK::WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType, 
-                                     nsIAtom* aAttribute, bool* aShouldRepaint,
-                                     const nsAttrValue* aOldValue)
+                                     nsIAtom* aAttribute, bool* aShouldRepaint)
 {
   // Some widget types just never change state.
   if (aWidgetType == NS_THEME_TOOLBOX ||
       aWidgetType == NS_THEME_TOOLBAR ||
       aWidgetType == NS_THEME_STATUSBAR ||
-      aWidgetType == NS_THEME_STATUSBARPANEL ||
-      aWidgetType == NS_THEME_RESIZERPANEL ||
-      aWidgetType == NS_THEME_PROGRESSCHUNK ||
-      aWidgetType == NS_THEME_PROGRESSCHUNK_VERTICAL ||
+      aWidgetType == NS_THEME_STATUSBAR_PANEL ||
+      aWidgetType == NS_THEME_STATUSBAR_RESIZER_PANEL ||
+      aWidgetType == NS_THEME_PROGRESSBAR_CHUNK ||
+      aWidgetType == NS_THEME_PROGRESSBAR_CHUNK_VERTICAL ||
       aWidgetType == NS_THEME_PROGRESSBAR ||
       aWidgetType == NS_THEME_PROGRESSBAR_VERTICAL ||
       aWidgetType == NS_THEME_MENUBAR ||
@@ -1692,38 +1608,20 @@ nsNativeThemeGTK::WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType,
     return NS_OK;
   }
 
-  if ((aWidgetType == NS_THEME_SCROLLBARTHUMB_VERTICAL ||
-       aWidgetType == NS_THEME_SCROLLBARTHUMB_HORIZONTAL) &&
+  if ((aWidgetType == NS_THEME_SCROLLBAR_THUMB_VERTICAL ||
+       aWidgetType == NS_THEME_SCROLLBAR_THUMB_HORIZONTAL) &&
        aAttribute == nsGkAtoms::active) {
     *aShouldRepaint = true;
     return NS_OK;
   }
 
-  if ((aWidgetType == NS_THEME_SCROLLBARBUTTON_UP ||
-       aWidgetType == NS_THEME_SCROLLBARBUTTON_DOWN ||
-       aWidgetType == NS_THEME_SCROLLBARBUTTON_LEFT ||
-       aWidgetType == NS_THEME_SCROLLBARBUTTON_RIGHT) &&
+  if ((aWidgetType == NS_THEME_SCROLLBAR_BUTTON_UP ||
+       aWidgetType == NS_THEME_SCROLLBAR_BUTTON_DOWN ||
+       aWidgetType == NS_THEME_SCROLLBAR_BUTTON_LEFT ||
+       aWidgetType == NS_THEME_SCROLLBAR_BUTTON_RIGHT) &&
       (aAttribute == nsGkAtoms::curpos ||
        aAttribute == nsGkAtoms::maxpos)) {
-    // If 'curpos' has changed and we are passed its old value, we can
-    // determine whether the button's enablement actually needs to change.
-    if (aAttribute == nsGkAtoms::curpos && aOldValue) {
-      int32_t curpos = CheckIntAttr(aFrame, nsGkAtoms::curpos, 0);
-      int32_t maxpos = CheckIntAttr(aFrame, nsGkAtoms::maxpos, 0);
-      nsAutoString str;
-      aOldValue->ToString(str);
-      nsresult err;
-      int32_t oldCurpos = str.ToInteger(&err);
-      if (str.IsEmpty() || NS_FAILED(err)) {
-        *aShouldRepaint = true;
-      } else {
-        bool disabledBefore = ShouldScrollbarButtonBeDisabled(oldCurpos, maxpos, aWidgetType);
-        bool disabledNow = ShouldScrollbarButtonBeDisabled(curpos, maxpos, aWidgetType);
-        *aShouldRepaint = (disabledBefore != disabledNow);
-      }
-    } else {
-      *aShouldRepaint = true;
-    }
+    *aShouldRepaint = true;
     return NS_OK;
   }
 
@@ -1771,13 +1669,13 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
 
   switch (aWidgetType) {
   // Combobox dropdowns don't support native theming in vertical mode.
-  case NS_THEME_MENULIST:
-  case NS_THEME_MENULIST_TEXT:
-  case NS_THEME_MENULIST_TEXTFIELD:
+  case NS_THEME_DROPDOWN:
+  case NS_THEME_DROPDOWN_TEXT:
+  case NS_THEME_DROPDOWN_TEXTFIELD:
     if (aFrame && aFrame->GetWritingMode().IsVertical()) {
       return false;
     }
-    MOZ_FALLTHROUGH;
+    // fall through
 
   case NS_THEME_BUTTON:
   case NS_THEME_BUTTON_FOCUS:
@@ -1785,67 +1683,65 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
   case NS_THEME_CHECKBOX:
   case NS_THEME_TOOLBOX: // N/A
   case NS_THEME_TOOLBAR:
-  case NS_THEME_TOOLBARBUTTON:
-  case NS_THEME_DUALBUTTON: // so we can override the border with 0
-  case NS_THEME_TOOLBARBUTTON_DROPDOWN:
+  case NS_THEME_TOOLBAR_BUTTON:
+  case NS_THEME_TOOLBAR_DUAL_BUTTON: // so we can override the border with 0
+  case NS_THEME_TOOLBAR_BUTTON_DROPDOWN:
   case NS_THEME_BUTTON_ARROW_UP:
   case NS_THEME_BUTTON_ARROW_DOWN:
   case NS_THEME_BUTTON_ARROW_NEXT:
   case NS_THEME_BUTTON_ARROW_PREVIOUS:
-  case NS_THEME_SEPARATOR:
-  case NS_THEME_TOOLBARGRIPPER:
+  case NS_THEME_TOOLBAR_SEPARATOR:
+  case NS_THEME_TOOLBAR_GRIPPER:
   case NS_THEME_STATUSBAR:
-  case NS_THEME_STATUSBARPANEL:
-  case NS_THEME_RESIZERPANEL:
+  case NS_THEME_STATUSBAR_PANEL:
+  case NS_THEME_STATUSBAR_RESIZER_PANEL:
   case NS_THEME_RESIZER:
   case NS_THEME_LISTBOX:
-    // case NS_THEME_LISTITEM:
+    // case NS_THEME_LISTBOX_LISTITEM:
   case NS_THEME_TREEVIEW:
-    // case NS_THEME_TREEITEM:
-  case NS_THEME_TREETWISTY:
-    // case NS_THEME_TREELINE:
-    // case NS_THEME_TREEHEADER:
-  case NS_THEME_TREEHEADERCELL:
-  case NS_THEME_TREEHEADERSORTARROW:
-  case NS_THEME_TREETWISTYOPEN:
+    // case NS_THEME_TREEVIEW_TREEITEM:
+  case NS_THEME_TREEVIEW_TWISTY:
+    // case NS_THEME_TREEVIEW_LINE:
+    // case NS_THEME_TREEVIEW_HEADER:
+  case NS_THEME_TREEVIEW_HEADER_CELL:
+  case NS_THEME_TREEVIEW_HEADER_SORTARROW:
+  case NS_THEME_TREEVIEW_TWISTY_OPEN:
     case NS_THEME_PROGRESSBAR:
-    case NS_THEME_PROGRESSCHUNK:
+    case NS_THEME_PROGRESSBAR_CHUNK:
     case NS_THEME_PROGRESSBAR_VERTICAL:
-    case NS_THEME_PROGRESSCHUNK_VERTICAL:
+    case NS_THEME_PROGRESSBAR_CHUNK_VERTICAL:
     case NS_THEME_TAB:
-    // case NS_THEME_TABPANEL:
-    case NS_THEME_TABPANELS:
-    case NS_THEME_TAB_SCROLL_ARROW_BACK:
-    case NS_THEME_TAB_SCROLL_ARROW_FORWARD:
+    // case NS_THEME_TAB_PANEL:
+    case NS_THEME_TAB_PANELS:
+    case NS_THEME_TAB_SCROLLARROW_BACK:
+    case NS_THEME_TAB_SCROLLARROW_FORWARD:
   case NS_THEME_TOOLTIP:
   case NS_THEME_SPINNER:
-  case NS_THEME_SPINNER_UPBUTTON:
-  case NS_THEME_SPINNER_DOWNBUTTON:
+  case NS_THEME_SPINNER_UP_BUTTON:
+  case NS_THEME_SPINNER_DOWN_BUTTON:
   case NS_THEME_SPINNER_TEXTFIELD:
     // case NS_THEME_SCROLLBAR:  (n/a for gtk)
     // case NS_THEME_SCROLLBAR_SMALL: (n/a for gtk)
-  case NS_THEME_SCROLLBARBUTTON_UP:
-  case NS_THEME_SCROLLBARBUTTON_DOWN:
-  case NS_THEME_SCROLLBARBUTTON_LEFT:
-  case NS_THEME_SCROLLBARBUTTON_RIGHT:
-  case NS_THEME_SCROLLBAR_HORIZONTAL:
-  case NS_THEME_SCROLLBAR_VERTICAL:
-  case NS_THEME_SCROLLBARTRACK_HORIZONTAL:
-  case NS_THEME_SCROLLBARTRACK_VERTICAL:
-  case NS_THEME_SCROLLBARTHUMB_HORIZONTAL:
-  case NS_THEME_SCROLLBARTHUMB_VERTICAL:
+  case NS_THEME_SCROLLBAR_BUTTON_UP:
+  case NS_THEME_SCROLLBAR_BUTTON_DOWN:
+  case NS_THEME_SCROLLBAR_BUTTON_LEFT:
+  case NS_THEME_SCROLLBAR_BUTTON_RIGHT:
+  case NS_THEME_SCROLLBAR_TRACK_HORIZONTAL:
+  case NS_THEME_SCROLLBAR_TRACK_VERTICAL:
+  case NS_THEME_SCROLLBAR_THUMB_HORIZONTAL:
+  case NS_THEME_SCROLLBAR_THUMB_VERTICAL:
   case NS_THEME_NUMBER_INPUT:
   case NS_THEME_TEXTFIELD:
   case NS_THEME_TEXTFIELD_MULTILINE:
   case NS_THEME_RANGE:
   case NS_THEME_RANGE_THUMB:
   case NS_THEME_SCALE_HORIZONTAL:
-  case NS_THEME_SCALETHUMB_HORIZONTAL:
+  case NS_THEME_SCALE_THUMB_HORIZONTAL:
   case NS_THEME_SCALE_VERTICAL:
-  case NS_THEME_SCALETHUMB_VERTICAL:
-    // case NS_THEME_SCALETHUMBSTART:
-    // case NS_THEME_SCALETHUMBEND:
-    // case NS_THEME_SCALETHUMBTICK:
+  case NS_THEME_SCALE_THUMB_VERTICAL:
+    // case NS_THEME_SCALE_THUMB_START:
+    // case NS_THEME_SCALE_THUMB_END:
+    // case NS_THEME_SCALE_TICK:
   case NS_THEME_CHECKBOX_CONTAINER:
   case NS_THEME_RADIO_CONTAINER:
   case NS_THEME_CHECKBOX_LABEL:
@@ -1860,12 +1756,9 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
   case NS_THEME_SPLITTER:
   case NS_THEME_WINDOW:
   case NS_THEME_DIALOG:
-#if (MOZ_WIDGET_GTK == 3)
-  case NS_THEME_GTK_INFO_BAR:
-#endif
     return !IsWidgetStyled(aPresContext, aFrame, aWidgetType);
 
-  case NS_THEME_MENULIST_BUTTON:
+  case NS_THEME_DROPDOWN_BUTTON:
     if (aFrame && aFrame->GetWritingMode().IsVertical()) {
       return false;
     }
@@ -1885,12 +1778,12 @@ NS_IMETHODIMP_(bool)
 nsNativeThemeGTK::WidgetIsContainer(uint8_t aWidgetType)
 {
   // XXXdwh At some point flesh all of this out.
-  if (aWidgetType == NS_THEME_MENULIST_BUTTON ||
+  if (aWidgetType == NS_THEME_DROPDOWN_BUTTON ||
       aWidgetType == NS_THEME_RADIO ||
       aWidgetType == NS_THEME_RANGE_THUMB ||
       aWidgetType == NS_THEME_CHECKBOX ||
-      aWidgetType == NS_THEME_TAB_SCROLL_ARROW_BACK ||
-      aWidgetType == NS_THEME_TAB_SCROLL_ARROW_FORWARD ||
+      aWidgetType == NS_THEME_TAB_SCROLLARROW_BACK ||
+      aWidgetType == NS_THEME_TAB_SCROLLARROW_FORWARD ||
       aWidgetType == NS_THEME_BUTTON_ARROW_UP ||
       aWidgetType == NS_THEME_BUTTON_ARROW_DOWN ||
       aWidgetType == NS_THEME_BUTTON_ARROW_NEXT ||
@@ -1902,9 +1795,9 @@ nsNativeThemeGTK::WidgetIsContainer(uint8_t aWidgetType)
 bool
 nsNativeThemeGTK::ThemeDrawsFocusForWidget(uint8_t aWidgetType)
 {
-   if (aWidgetType == NS_THEME_MENULIST ||
+   if (aWidgetType == NS_THEME_DROPDOWN ||
       aWidgetType == NS_THEME_BUTTON || 
-      aWidgetType == NS_THEME_TREEHEADERCELL)
+      aWidgetType == NS_THEME_TREEVIEW_HEADER_CELL)
     return true;
   
   return false;
@@ -1929,8 +1822,8 @@ nsNativeThemeGTK::GetWidgetTransparency(nsIFrame* aFrame, uint8_t aWidgetType)
   case NS_THEME_WINDOW:
   case NS_THEME_DIALOG:
     return eOpaque;
-  case NS_THEME_SCROLLBAR_VERTICAL:
-  case NS_THEME_SCROLLBAR_HORIZONTAL:
+  case NS_THEME_SCROLLBAR_TRACK_VERTICAL:
+  case NS_THEME_SCROLLBAR_TRACK_HORIZONTAL:
 #if (MOZ_WIDGET_GTK == 3)
     // Make scrollbar tracks opaque on the window's scroll frame to prevent
     // leaf layers from overlapping. See bug 1179780.

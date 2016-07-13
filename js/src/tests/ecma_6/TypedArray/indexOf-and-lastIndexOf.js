@@ -7,17 +7,8 @@ const constructors = [
     Int32Array,
     Uint32Array,
     Float32Array,
-    Float64Array ];
-
-if (typeof SharedArrayBuffer != "undefined")
-    constructors.push(sharedConstructor(Int8Array),
-		      sharedConstructor(Uint8Array),
-		      sharedConstructor(Int16Array),
-		      sharedConstructor(Uint16Array),
-		      sharedConstructor(Int32Array),
-		      sharedConstructor(Uint32Array),
-		      sharedConstructor(Float32Array),
-		      sharedConstructor(Float64Array));
+    Float64Array
+];
 
 // Tests for TypedArray#indexOf.
 for (var constructor of constructors) {
@@ -30,7 +21,7 @@ for (var constructor of constructors) {
     assertEq(new constructor([1, 2, 3, 4, 5]).indexOf(6), -1);
     assertEq(new constructor([1, 2, 1, 2, 1]).indexOf(1), 0);
 
-    if (isFloatingConstructor(constructor)) {
+    if (constructor === Float32Array || constructor === Float64Array) {
         assertEq(new constructor([NaN, 0, -0]).indexOf(NaN), -1);
         assertEq(new constructor([NaN, 0, -0]).indexOf(0), 1);
         assertEq(new constructor([NaN, 0, -0]).indexOf(-0), 1);
@@ -82,7 +73,7 @@ for (var constructor of constructors) {
     assertEq(new constructor([1, 2, 3, 4, 5]).lastIndexOf(6), -1);
     assertEq(new constructor([1, 2, 1, 2, 1]).lastIndexOf(1), 4);
 
-    if (isFloatingConstructor(constructor)) {
+    if (constructor === Float32Array || constructor === Float64Array) {
         assertEq(new constructor([NaN, 0, -0]).lastIndexOf(NaN), -1);
         assertEq(new constructor([NaN, 0, -0]).lastIndexOf(0), 2);
         assertEq(new constructor([NaN, 0, -0]).lastIndexOf(-0), 2);

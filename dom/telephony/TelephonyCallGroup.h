@@ -8,7 +8,6 @@
 #define mozilla_dom_telephony_telephonycallgroup_h__
 
 #include "mozilla/dom/Promise.h"
-#include "mozilla/dom/TelephonyCallGroupBinding.h"
 #include "mozilla/dom/telephony/TelephonyCommon.h"
 
 namespace mozilla {
@@ -16,22 +15,22 @@ namespace dom {
 
 class TelephonyCallGroup final : public DOMEventTargetHelper
 {
-  RefPtr<Telephony> mTelephony;
+  nsRefPtr<Telephony> mTelephony;
 
-  nsTArray<RefPtr<TelephonyCall> > mCalls;
+  nsTArray<nsRefPtr<TelephonyCall> > mCalls;
 
-  RefPtr<CallsList> mCallsList;
+  nsRefPtr<CallsList> mCallsList;
 
-  TelephonyCallGroupState mState;
+  nsString mState;
+
+  uint16_t mCallState;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TelephonyCallGroup,
                                            DOMEventTargetHelper)
 
-  friend class Telephony;
-
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return GetOwner();
@@ -63,15 +62,10 @@ public:
   already_AddRefed<Promise>
   Resume(ErrorResult& aRv);
 
-  TelephonyCallGroupState
-  State() const
+  void
+  GetState(nsString& aState) const
   {
-    return mState;
-  }
-
-  bool
-  IsActive() {
-    return mState == TelephonyCallGroupState::Connected;
+    aState = mState;
   }
 
   IMPL_EVENT_HANDLER(statechange)
@@ -92,37 +86,30 @@ public:
   already_AddRefed<TelephonyCall>
   GetCall(uint32_t aServiceId, uint32_t aCallIndex);
 
-  const nsTArray<RefPtr<TelephonyCall> >&
+  const nsTArray<nsRefPtr<TelephonyCall> >&
   CallsArray() const
   {
     return mCalls;
   }
 
-  // Update its call state according to the calls wihtin itself.
   void
-  ChangeState();
+  ChangeState(uint16_t aCallState);
+
+  uint16_t
+  CallState() const
+  {
+    return mCallState;
+  }
 
   nsresult
   NotifyError(const nsAString& aName, const nsAString& aMessage);
 
 private:
-  explicit TelephonyCallGroup(nsPIDOMWindowInner* aOwner);
+  explicit TelephonyCallGroup(nsPIDOMWindow* aOwner);
   ~TelephonyCallGroup();
 
   nsresult
-  Hold(nsITelephonyCallback* aCallback);
-
-  nsresult
-  Resume(nsITelephonyCallback* aCallback);
-
-  nsresult
-  NotifyStateChanged();
-
-  nsresult
   NotifyCallsChanged(TelephonyCall* aCall);
-
-  void
-  ChangeStateInternal(TelephonyCallGroupState aState);
 
   nsresult
   DispatchCallEvent(const nsAString& aType,

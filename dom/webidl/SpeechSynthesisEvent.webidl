@@ -10,7 +10,7 @@
  * liability, trademark and document use rules apply.
  */
 
-[Constructor(DOMString type, SpeechSynthesisEventInit eventInitDict),
+[Constructor(DOMString type, optional SpeechSynthesisEventInit eventInitDict),
  Pref="media.webspeech.synth.enabled"]
 interface SpeechSynthesisEvent : Event
 {

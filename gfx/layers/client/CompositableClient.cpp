@@ -7,19 +7,16 @@
 #include <stdint.h>                     // for uint64_t, uint32_t
 #include "gfxPlatform.h"                // for gfxPlatform
 #include "mozilla/layers/CompositableForwarder.h"
-#include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/TextureClient.h"  // for TextureClient, etc
 #include "mozilla/layers/TextureClientOGL.h"
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "mozilla/layers/PCompositableChild.h"
-#include "mozilla/layers/TextureClientRecycleAllocator.h"
 #ifdef XP_WIN
 #include "gfxWindowsPlatform.h"         // for gfxWindowsPlatform
 #include "mozilla/layers/TextureD3D11.h"
 #include "mozilla/layers/TextureD3D9.h"
 #endif
 #include "gfxUtils.h"
-#include "IPDLActor.h"
 
 namespace mozilla {
 namespace layers {
@@ -32,7 +29,8 @@ using namespace mozilla::gfx;
  *
  * CompositableChild is owned by a CompositableClient.
  */
-class CompositableChild : public ChildActor<PCompositableChild>
+class CompositableChild : public PCompositableChild
+                        , public AsyncTransactionTrackersHolder
 {
 public:
   CompositableChild()
@@ -47,6 +45,7 @@ public:
   }
 
   virtual void ActorDestroy(ActorDestroyReason) override {
+    DestroyAsyncTransactionTrackersHolder();
     if (mCompositableClient) {
       mCompositableClient->mCompositableChild = nullptr;
     }
@@ -62,15 +61,36 @@ RemoveTextureFromCompositableTracker::ReleaseTextureClient()
 {
   if (mTextureClient &&
       mTextureClient->GetAllocator() &&
-      !mTextureClient->GetAllocator()->UsesImageBridge())
+      !mTextureClient->GetAllocator()->IsImageBridgeChild())
   {
-    RefPtr<TextureClientReleaseTask> task = new TextureClientReleaseTask(mTextureClient);
-    RefPtr<ClientIPCAllocator> allocator = mTextureClient->GetAllocator();
+    TextureClientReleaseTask* task = new TextureClientReleaseTask(mTextureClient);
+    RefPtr<ISurfaceAllocator> allocator = mTextureClient->GetAllocator();
     mTextureClient = nullptr;
-    allocator->AsClientAllocator()->GetMessageLoop()->PostTask(task.forget());
+    allocator->GetMessageLoop()->PostTask(FROM_HERE, task);
   } else {
     mTextureClient = nullptr;
   }
+}
+
+/* static */ void
+CompositableClient::TransactionCompleteted(PCompositableChild* aActor, uint64_t aTransactionId)
+{
+  CompositableChild* child = static_cast<CompositableChild*>(aActor);
+  child->TransactionCompleteted(aTransactionId);
+}
+
+/* static */ void
+CompositableClient::HoldUntilComplete(PCompositableChild* aActor, AsyncTransactionTracker* aTracker)
+{
+  CompositableChild* child = static_cast<CompositableChild*>(aActor);
+  child->HoldUntilComplete(aTracker);
+}
+
+/* static */ uint64_t
+CompositableClient::GetTrackersHolderId(PCompositableChild* aActor)
+{
+  CompositableChild* child = static_cast<CompositableChild*>(aActor);
+  return child->GetId();
 }
 
 /* static */ PCompositableChild*
@@ -108,6 +128,7 @@ CompositableClient::CompositableClient(CompositableForwarder* aForwarder,
 : mCompositableChild(nullptr)
 , mForwarder(aForwarder)
 , mTextureFlags(aTextureFlags)
+, mDestroyed(false)
 {
   MOZ_COUNT_CTOR(CompositableClient);
 }
@@ -139,7 +160,6 @@ CompositableClient::GetIPDLActor() const
 bool
 CompositableClient::Connect(ImageContainer* aImageContainer)
 {
-  MOZ_ASSERT(!mCompositableChild);
   if (!GetForwarder() || GetIPDLActor()) {
     return false;
   }
@@ -147,28 +167,21 @@ CompositableClient::Connect(ImageContainer* aImageContainer)
   return true;
 }
 
-bool
-CompositableClient::IsConnected() const
-{
-  return mCompositableChild && mCompositableChild->CanSend();
-}
-
 void
 CompositableClient::Destroy()
 {
-  if (!IsConnected()) {
+  mDestroyed = true;
+
+  if (!mCompositableChild) {
     return;
   }
-
+  // Send pending AsyncMessages before deleting CompositableChild.
+  // They might have dependency to the mCompositableChild.
+  mForwarder->SendPendingAsyncMessges();
+  // Delete CompositableChild.
   mCompositableChild->mCompositableClient = nullptr;
-  mCompositableChild->Destroy(mForwarder);
+  PCompositableChild::Send__delete__(mCompositableChild);
   mCompositableChild = nullptr;
-}
-
-bool
-CompositableClient::DestroyFallback(PCompositableChild* aActor)
-{
-  return aActor->SendDestroySync();
 }
 
 uint64_t
@@ -180,7 +193,7 @@ CompositableClient::GetAsyncID() const
   return 0; // zero is always an invalid async ID
 }
 
-already_AddRefed<TextureClient>
+already_AddRefed<BufferTextureClient>
 CompositableClient::CreateBufferTextureClient(gfx::SurfaceFormat aFormat,
                                               gfx::IntSize aSize,
                                               gfx::BackendType aMoz2DBackend,
@@ -194,12 +207,12 @@ CompositableClient::CreateBufferTextureClient(gfx::SurfaceFormat aFormat,
 already_AddRefed<TextureClient>
 CompositableClient::CreateTextureClientForDrawing(gfx::SurfaceFormat aFormat,
                                                   gfx::IntSize aSize,
-                                                  BackendSelector aSelector,
+                                                  gfx::BackendType aMoz2DBackend,
                                                   TextureFlags aTextureFlags,
                                                   TextureAllocationFlags aAllocFlags)
 {
   return TextureClient::CreateForDrawing(GetForwarder(),
-                                         aFormat, aSize, aSelector,
+                                         aFormat, aSize, aMoz2DBackend,
                                          aTextureFlags | mTextureFlags,
                                          aAllocFlags);
 }
@@ -207,7 +220,7 @@ CompositableClient::CreateTextureClientForDrawing(gfx::SurfaceFormat aFormat,
 bool
 CompositableClient::AddTextureClient(TextureClient* aClient)
 {
-  if(!aClient) {
+  if(!aClient || !aClient->IsAllocated()) {
     return false;
   }
   aClient->SetAddedToCompositableClient();
@@ -218,15 +231,7 @@ void
 CompositableClient::ClearCachedResources()
 {
   if (mTextureClientRecycler) {
-    mTextureClientRecycler->ShrinkToMinimumSize();
-  }
-}
-
-void
-CompositableClient::HandleMemoryPressure()
-{
-  if (mTextureClientRecycler) {
-    mTextureClientRecycler->ShrinkToMinimumSize();
+    mTextureClientRecycler = nullptr;
   }
 }
 
@@ -247,47 +252,13 @@ CompositableClient::GetTextureClientRecycler()
     return nullptr;
   }
 
-  if(!mForwarder->UsesImageBridge()) {
-    MOZ_ASSERT(NS_IsMainThread());
-    mTextureClientRecycler = new layers::TextureClientRecycleAllocator(mForwarder);
-    return mTextureClientRecycler;
-  }
-
-  // Handle a case that mForwarder is ImageBridge
-
-  if (InImageBridgeChildThread()) {
-    mTextureClientRecycler = new layers::TextureClientRecycleAllocator(mForwarder);
-    return mTextureClientRecycler;
-  }
-
-  ReentrantMonitor barrier("CompositableClient::GetTextureClientRecycler");
-  ReentrantMonitorAutoEnter mainThreadAutoMon(barrier);
-  bool done = false;
-
-  RefPtr<Runnable> runnable =
-    NS_NewRunnableFunction([&]() {
-      if (!mTextureClientRecycler) {
-        mTextureClientRecycler = new layers::TextureClientRecycleAllocator(mForwarder);
-      }
-      ReentrantMonitorAutoEnter childThreadAutoMon(barrier);
-      done = true;
-      barrier.NotifyAll();
-    });
-
-  ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(runnable.forget());
-
-  // should stop the thread until done.
-  while (!done) {
-    barrier.Wait();
-  }
-
+  mTextureClientRecycler =
+    new layers::TextureClientRecycleAllocator(mForwarder);
   return mTextureClientRecycler;
 }
 
 void
-CompositableClient::DumpTextureClient(std::stringstream& aStream,
-                                      TextureClient* aTexture,
-                                      TextureDumpMode aCompress)
+CompositableClient::DumpTextureClient(std::stringstream& aStream, TextureClient* aTexture)
 {
   if (!aTexture) {
     return;
@@ -296,18 +267,7 @@ CompositableClient::DumpTextureClient(std::stringstream& aStream,
   if (!dSurf) {
     return;
   }
-  if (aCompress == TextureDumpMode::Compress) {
-    aStream << gfxUtils::GetAsLZ4Base64Str(dSurf).get();
-  } else {
-    aStream << gfxUtils::GetAsDataURI(dSurf).get();
-  }
-}
-
-AutoRemoveTexture::~AutoRemoveTexture()
-{
-  if (mCompositable && mTexture && mCompositable->IsConnected()) {
-    mCompositable->RemoveTexture(mTexture);
-  }
+  aStream << gfxUtils::GetAsLZ4Base64Str(dSurf).get();
 }
 
 } // namespace layers

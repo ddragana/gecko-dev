@@ -179,5 +179,3 @@ end
 def ft
   call $arg0->DumpFrameTree()
 end
-
-source .gdbinit_python

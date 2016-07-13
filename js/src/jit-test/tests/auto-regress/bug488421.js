@@ -4,7 +4,7 @@
 function f(foo)
 {
   var x;
-  eval("this.__defineGetter__(\"y\", function ()x)");
+  eval("__defineGetter__(\"y\", function ()x)");
 }
 f("");
 try {

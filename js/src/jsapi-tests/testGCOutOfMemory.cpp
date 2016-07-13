@@ -8,8 +8,18 @@
 
 #include "jsapi-tests/tests.h"
 
+static unsigned errorCount = 0;
+
+static void
+ErrorCounter(JSContext* cx, const char* message, JSErrorReport* report)
+{
+    ++errorCount;
+}
+
 BEGIN_TEST(testGCOutOfMemory)
 {
+    JS_SetErrorReporter(rt, ErrorCounter);
+
     JS::RootedValue root(cx);
 
     // Count the number of allocations until we hit OOM, and store it in 'max'.
@@ -25,14 +35,9 @@ BEGIN_TEST(testGCOutOfMemory)
 
     /* Check that we get OOM. */
     CHECK(!ok);
-    CHECK(JS_GetPendingException(cx, &root));
-    CHECK(root.isString());
-    bool match = false;
-    CHECK(JS_StringEqualsAscii(cx, root.toString(), "out of memory", &match));
-    CHECK(match);
-    JS_ClearPendingException(cx);
-
-    JS_GC(cx);
+    CHECK(!JS_IsExceptionPending(cx));
+    CHECK_EQUAL(errorCount, 1u);
+    JS_GC(rt);
 
     // The above GC should have discarded everything. Verify that we can now
     // allocate half as many objects without OOMing.
@@ -43,7 +48,7 @@ BEGIN_TEST(testGCOutOfMemory)
          "        array.push({});"
          "    }"
          "})();", &root);
-    CHECK(!JS_IsExceptionPending(cx));
+    CHECK_EQUAL(errorCount, 1u);
     return true;
 }
 
@@ -58,7 +63,7 @@ virtual JSRuntime * createRuntime() override {
     JSRuntime* rt = JS_NewRuntime(768 * 1024, 128 * 1024);
     if (!rt)
         return nullptr;
-    setNativeStackQuota(JS_GetContext(rt));
+    setNativeStackQuota(rt);
     return rt;
 }
 

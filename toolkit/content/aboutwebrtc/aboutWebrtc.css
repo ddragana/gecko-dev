@@ -33,7 +33,7 @@ html {
   margin-bottom: 2px;
 }
 
-#content > div {
+#content {
   padding: 1em 2em;
   margin: 1em 0;
   border: 1px solid #afaca9;
@@ -41,19 +41,14 @@ html {
   background: none repeat scroll 0% 0% #fff;
 }
 
-.section-heading *
-{
-  display: inline-block;
-}
-
-.section-heading > button {
-  margin-left: 1em;
-  margin-right: 1em;
-}
-
-.peer-connection > h3
-{
+.peer-connection > h3,
+.log > h3 {
   background-color: #ddd;
+}
+
+.peer-connection section {
+  border: 1px solid #afaca9;
+  padding: 10px;
 }
 
 .peer-connection table {

@@ -4,10 +4,10 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://w3c.github.io/hr-time/
+ * http://www.w3.org/TR/hr-time/
  *
- * Copyright © 2015 W3C® (MIT, ERCIM, Keio, Beihang).
- * W3C liability, trademark and document use rules apply.
+ * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
+ * liability, trademark and document use rules apply.
  */
 
 typedef double DOMHighResTimeStamp;
@@ -32,11 +32,11 @@ partial interface Performance {
 // http://www.w3.org/TR/performance-timeline/#sec-window.performance-attribute
 [Exposed=(Window,Worker)]
 partial interface Performance {
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   PerformanceEntryList getEntries();
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   PerformanceEntryList getEntriesByType(DOMString entryType);
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   PerformanceEntryList getEntriesByName(DOMString name, optional DOMString
     entryType);
 };
@@ -44,11 +44,11 @@ partial interface Performance {
 // http://www.w3.org/TR/resource-timing/#extensions-performance-interface
 [Exposed=Window]
 partial interface Performance {
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   void clearResourceTimings();
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   void setResourceTimingBufferSize(unsigned long maxSize);
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   attribute EventHandler onresourcetimingbufferfull;
 };
 
@@ -62,13 +62,12 @@ partial interface Performance {
 // http://www.w3.org/TR/user-timing/
 [Exposed=(Window,Worker)]
 partial interface Performance {
-  [Func="Performance::IsEnabled", Throws]
+  [Func="nsPerformance::IsEnabled", Throws]
   void mark(DOMString markName);
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   void clearMarks(optional DOMString markName);
-  [Func="Performance::IsEnabled", Throws]
+  [Func="nsPerformance::IsEnabled", Throws]
   void measure(DOMString measureName, optional DOMString startMark, optional DOMString endMark);
-  [Func="Performance::IsEnabled"]
+  [Func="nsPerformance::IsEnabled"]
   void clearMeasures(optional DOMString measureName);
 };
-

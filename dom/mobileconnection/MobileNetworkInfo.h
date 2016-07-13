@@ -23,7 +23,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MobileNetworkInfo)
 
-  explicit MobileNetworkInfo(nsPIDOMWindowInner* aWindow);
+  explicit MobileNetworkInfo(nsPIDOMWindow* aWindow);
 
   MobileNetworkInfo(const nsAString& aShortName, const nsAString& aLongName,
                     const nsAString& aMcc, const nsAString& aMnc,
@@ -32,7 +32,7 @@ public:
   void
   Update(nsIMobileNetworkInfo* aInfo);
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return mWindow;
@@ -61,7 +61,7 @@ private:
   ~MobileNetworkInfo() {}
 
 private:
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   nsString mShortName;
   nsString mLongName;
   nsString mMcc;

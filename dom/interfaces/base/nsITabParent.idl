@@ -5,7 +5,7 @@
 
 #include "domstubs.idl"
 
-[builtinclass, scriptable, uuid(8e49f7b0-1f98-4939-bf91-e9c39cd56434)]
+[scriptable, uuid(CE6F563B-BD77-4EF2-9D7C-A94C587353E4)]
 interface nsITabParent : nsISupports
 {
   void injectTouchEvent(in AString aType,
@@ -23,34 +23,7 @@ interface nsITabParent : nsISupports
 
   readonly attribute boolean useAsyncPanZoom;
 
-  /**
-    * Manages the docshell active state of the remote browser.
-    */
-  attribute boolean docShellIsActive;
-
-  /**
-   * Whether this tabParent is in prerender mode.
-   */
-  [infallible] readonly attribute boolean isPrerendered;
-
-  /**
-    * As an optimisation, setting the docshell's active state to
-    * inactive also triggers a layer invalidation to free up some
-    * potentially unhelpful memory usage. This attribute should be
-    * used where callers would like to set the docshell's state
-    * without losing any layer data.
-    *
-    * Otherwise, this does the same as setting the attribute above.
-    */
-  void setDocShellIsActiveAndForeground(in boolean aIsActive);
-
-  /**
-   * During interactions where painting performance
-   * is more important than scrolling, we may temporarily
-   * suppress the displayport. Each enable called must be matched
-   * with a disable call.
-   */
-  void suppressDisplayport(in bool aEnabled);
+  void setIsDocShellActive(in bool aIsActive);
 
   readonly attribute uint64_t tabId;
 

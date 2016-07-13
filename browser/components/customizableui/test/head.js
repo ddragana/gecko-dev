@@ -5,13 +5,12 @@
 "use strict";
 
 // Avoid leaks by using tmp for imports...
-var tmp = {};
+let tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
 Cu.import("resource:///modules/CustomizableUI.jsm", tmp);
-Cu.import("resource://gre/modules/AppConstants.jsm", tmp);
-var {Promise, CustomizableUI, AppConstants} = tmp;
+let {Promise, CustomizableUI} = tmp;
 
-var ChromeUtils = {};
+let ChromeUtils = {};
 Services.scriptloader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
 
 Services.prefs.setBoolPref("browser.uiCustomization.skipSourceNodeCheck", true);
@@ -22,21 +21,21 @@ registerCleanupFunction(() => Services.prefs.clearUserPref("browser.uiCustomizat
 CustomizableUI.destroyWidget("e10s-button");
 CustomizableUI.removeWidgetFromArea("e10s-button");
 
-var {synthesizeDragStart, synthesizeDrop} = ChromeUtils;
+let {synthesizeDragStart, synthesizeDrop} = ChromeUtils;
 
 const kNSXUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const kTabEventFailureTimeoutInMs = 20000;
 
-function createDummyXULButton(id, label, win = window) {
+function createDummyXULButton(id, label) {
   let btn = document.createElementNS(kNSXUL, "toolbarbutton");
   btn.id = id;
   btn.setAttribute("label", label || id);
   btn.className = "toolbarbutton-1 chromeclass-toolbar-additional";
-  win.gNavToolbox.palette.appendChild(btn);
+  window.gNavToolbox.palette.appendChild(btn);
   return btn;
 }
 
-var gAddedToolbars = new Set();
+let gAddedToolbars = new Set();
 
 function createToolbarWithPlacements(id, placements = []) {
   gAddedToolbars.add(id);
@@ -114,8 +113,12 @@ function resetCustomization() {
   return CustomizableUI.reset();
 }
 
+XPCOMUtils.defineLazyGetter(this, 'gDeveloperButtonInNavbar', function() {
+  return getAreaWidgetIds(CustomizableUI.AREA_NAVBAR).indexOf("developer-button") != -1;
+});
+
 function isInDevEdition() {
-  return AppConstants.MOZ_DEV_EDITION;
+  return gDeveloperButtonInNavbar;
 }
 
 function removeDeveloperButtonIfDevEdition(areaPanelPlacements) {
@@ -140,7 +143,7 @@ function placementArraysEqual(areaId, actualPlacements, expectedPlacements) {
     } else if (expectedPlacements[i] instanceof RegExp) {
       ok(expectedPlacements[i].test(actualPlacements[i]),
          "Item " + i + " (" + actualPlacements[i] + ") in " +
-         areaId + " should match " + expectedPlacements[i]);
+         areaId + " should match " + expectedPlacements[i]); 
     } else {
       ok(false, "Unknown type of expected placement passed to " +
                 " assertAreaPlacements. Is your test broken?");
@@ -188,12 +191,32 @@ function endCustomizing(aWindow=window) {
   aWindow.gNavToolbox.addEventListener("aftercustomization", onCustomizationEnds);
   aWindow.gCustomizeMode.exit();
 
-  return deferredEndCustomizing.promise;
+  return deferredEndCustomizing.promise.then(function() {
+    let deferredLoadNewTab = Promise.defer();
+
+    //XXXgijs so some tests depend on this tab being about:blank. Make it so.
+    let newTabBrowser = aWindow.gBrowser.selectedBrowser;
+    newTabBrowser.stop();
+
+    // If we stop early enough, this might actually be about:blank.
+    if (newTabBrowser.contentDocument.location.href == "about:blank") {
+      return;
+    }
+
+    // Otherwise, make it be about:blank, and wait for that to be done.
+    function onNewTabLoaded(e) {
+      newTabBrowser.removeEventListener("load", onNewTabLoaded, true);
+      deferredLoadNewTab.resolve();
+    }
+    newTabBrowser.addEventListener("load", onNewTabLoaded, true);
+    newTabBrowser.contentDocument.location.replace("about:blank");
+    return deferredLoadNewTab.promise;
+  });
 }
 
 function startCustomizing(aWindow=window) {
   if (aWindow.document.documentElement.getAttribute("customizing") == "true") {
-    return null;
+    return;
   }
   Services.prefs.setBoolPref("browser.uiCustomization.disableAnimation", true);
   let deferred = Promise.defer();
@@ -266,7 +289,7 @@ function promisePanelElementShown(win, aPanel) {
     aPanel.removeEventListener("popupshown", onPanelOpen);
     win.clearTimeout(timeoutId);
     deferred.resolve();
-  }
+  };
   aPanel.addEventListener("popupshown", onPanelOpen);
   return deferred.promise;
 }
@@ -309,7 +332,7 @@ function subviewShown(aSubview) {
     aSubview.removeEventListener("ViewShowing", onViewShowing);
     win.clearTimeout(timeoutId);
     deferred.resolve();
-  }
+  };
   aSubview.addEventListener("ViewShowing", onViewShowing);
   return deferred.promise;
 }
@@ -324,7 +347,7 @@ function subviewHidden(aSubview) {
     aSubview.removeEventListener("ViewHiding", onViewHiding);
     win.clearTimeout(timeoutId);
     deferred.resolve();
-  }
+  };
   aSubview.addEventListener("ViewHiding", onViewHiding);
   return deferred.promise;
 }
@@ -351,7 +374,7 @@ function waitForCondition(aConditionFn, aMaxTries=50, aCheckInterval=100) {
 
 function waitFor(aTimeout=100) {
   let deferred = Promise.defer();
-  setTimeout(() => deferred.resolve(), aTimeout);
+  setTimeout(function() deferred.resolve(), aTimeout);
   return deferred.promise;
 }
 
@@ -482,7 +505,7 @@ function promisePopupEvent(aPopup, aEventSuffix) {
   function onPopupEvent(e) {
     aPopup.removeEventListener(eventType, onPopupEvent);
     deferred.resolve();
-  }
+  };
 
   aPopup.addEventListener(eventType, onPopupEvent);
   return deferred.promise;

@@ -5,18 +5,13 @@
 // This module is the stateful server side of test_http2.js and is meant
 // to have node be restarted in between each invocation
 
-var node_http2_root = '../node-http2';
-if (process.env.NODE_HTTP2_ROOT) {
-  node_http2_root = process.env.NODE_HTTP2_ROOT;
-}
-var http2 = require(node_http2_root);
+var http2 = require('../node-http2');
 var fs = require('fs');
 var url = require('url');
 var crypto = require('crypto');
 
 // Hook into the decompression code to log the decompressed name-value pairs
-var compression_module = node_http2_root + "/lib/protocol/compressor";
-var http2_compression = require(compression_module);
+var http2_compression = require('../node-http2/lib/protocol/compressor');
 var HeaderSetDecompressor = http2_compression.HeaderSetDecompressor;
 var originalRead = HeaderSetDecompressor.prototype.read;
 var lastDecompressor;
@@ -33,8 +28,7 @@ HeaderSetDecompressor.prototype.read = function() {
   return pair;
 }
 
-var connection_module = node_http2_root + "/lib/protocol/connection";
-var http2_connection = require(connection_module);
+var http2_connection = require('../node-http2/lib/protocol/connection');
 var Connection = http2_connection.Connection;
 var originalClose = Connection.prototype.close;
 Connection.prototype.close = function (error, lastId) {
@@ -44,31 +38,6 @@ Connection.prototype.close = function (error, lastId) {
 
   originalClose.apply(this, arguments);
 }
-
-var framer_module = node_http2_root + "/lib/protocol/framer";
-var http2_framer = require(framer_module);
-var Serializer = http2_framer.Serializer;
-var originalTransform = Serializer.prototype._transform;
-var newTransform = function (frame, encoding, done) {
-  if (frame.type == 'DATA') {
-    // Insert our empty DATA frame
-    emptyFrame = {};
-    emptyFrame.type = 'DATA';
-    emptyFrame.data = new Buffer(0);
-    emptyFrame.flags = [];
-    emptyFrame.stream = frame.stream;
-    var buffers = [];
-    Serializer['DATA'](emptyFrame, buffers);
-    Serializer.commonHeader(emptyFrame, buffers);
-    for (var i = 0; i < buffers.length; i++) {
-      this.push(buffers[i]);
-    }
-
-    // Reset to the original version for later uses
-    Serializer.prototype._transform = originalTransform;
-  }
-  originalTransform.apply(this, arguments);
-};
 
 function getHttpContent(path) {
   var content = '<!doctype html>' +
@@ -128,83 +97,22 @@ runlater.prototype = {
   }
 };
 
-var moreData = function() {};
-moreData.prototype = {
-  req : null,
-  resp : null,
-  iter: 3,
-
-  onTimeout : function onTimeout() {
-    // 1mb of data
-    content = generateContent(1024*1024);
-    this.resp.write(content); // 1mb chunk
-    this.iter--;
-    if (!this.iter) {
-      this.resp.end();
-    } else {
-      setTimeout(executeRunLater, 1, this);
-    }
-  }
-};
-
 function executeRunLater(arg) {
   arg.onTimeout();
-}
-
-var Compressor = http2_compression.Compressor;
-var HeaderSetCompressor = http2_compression.HeaderSetCompressor;
-var originalCompressHeaders = Compressor.prototype.compress;
-
-function insertSoftIllegalHpack(headers) {
-  var originalCompressed = originalCompressHeaders.apply(this, headers);
-  var illegalLiteral = new Buffer([
-      0x00, // Literal, no index
-      0x08, // Name: not huffman encoded, 8 bytes long
-      0x3a, 0x69, 0x6c, 0x6c, 0x65, 0x67, 0x61, 0x6c, // :illegal
-      0x10, // Value: not huffman encoded, 16 bytes long
-      // REALLY NOT LEGAL
-      0x52, 0x45, 0x41, 0x4c, 0x4c, 0x59, 0x20, 0x4e, 0x4f, 0x54, 0x20, 0x4c, 0x45, 0x47, 0x41, 0x4c
-  ]);
-  var newBufferLength = originalCompressed.length + illegalLiteral.length;
-  var concatenated = new Buffer(newBufferLength);
-  originalCompressed.copy(concatenated, 0);
-  illegalLiteral.copy(concatenated, originalCompressed.length);
-  return concatenated;
-}
-
-function insertHardIllegalHpack(headers) {
-  var originalCompressed = originalCompressHeaders.apply(this, headers);
-  // Now we have to add an invalid header
-  var illegalIndexed = HeaderSetCompressor.integer(5000, 7);
-  // The above returns an array of buffers, but there's only one buffer, so
-  // get rid of the array.
-  illegalIndexed = illegalIndexed[0];
-  // Set the first bit to 1 to signal this is an indexed representation
-  illegalIndexed[0] |= 0x80;
-  var newBufferLength = originalCompressed.length + illegalIndexed.length;
-  var concatenated = new Buffer(newBufferLength);
-  originalCompressed.copy(concatenated, 0);
-  illegalIndexed.copy(concatenated, originalCompressed.length);
-  return concatenated;
 }
 
 var h11required_conn = null;
 var h11required_header = "yes";
 var didRst = false;
 var rstConnection = null;
-var illegalheader_conn = null;
 
 function handleRequest(req, res) {
-  // We do this first to ensure nothing goes wonky in our tests that don't want
-  // the headers to have something illegal in them
-  Compressor.prototype.compress = originalCompressHeaders;
-
   var u = url.parse(req.url);
   var content = getHttpContent(u.pathname);
   var push, push1, push1a, push2, push3;
 
   // PushService tests.
-  var pushPushServer1, pushPushServer2, pushPushServer3, pushPushServer4;
+  var pushPushServer1, pushPushServer2, pushPushServer3;
 
   if (req.httpVersionMajor === 2) {
     res.setHeader('X-Connection-Http2', 'yes');
@@ -287,20 +195,6 @@ function handleRequest(req, res) {
     });
     push.end('// comments');
     content = '<head> <script src="push2.js"/></head>body text';
-  }
-
-  else if (u.pathname === "/push5") {
-    push = res.push('/push5.js');
-    push.writeHead(200, {
-      'content-type': 'application/javascript',
-      'pushed' : 'yes',
-      // no content-length
-      'X-Connection-Http2': 'yes'
-    });
-    content = generateContent(1024 * 150);
-    push.write(content);
-    push.end();
-    content = '<head> <script src="push5.js"/></head>body text';
   }
 
   else if (u.pathname === "/pushapi1") {
@@ -421,18 +315,6 @@ function handleRequest(req, res) {
       res.stream.reset('HTTP_1_1_REQUIRED');
       return;
     }
-  }
-
-  else if (u.pathname === "/bigdownload") {
-
-    res.setHeader('Content-Type', 'text/html');
-    res.writeHead(200);
-
-    var rl = new moreData();
-    rl.req = req;
-    rl.resp = res;
-    setTimeout(executeRunLater, 1, rl);
-    return;
   }
 
   else if (u.pathname === "/h11required_session") {
@@ -605,69 +487,40 @@ function handleRequest(req, res) {
 
   else if (u.pathname ==="/pushNotifications/subscription1") {
     pushPushServer1 = res.push(
-      { hostname: 'localhost:' + serverPort, port: serverPort,
-        path : '/pushNotificationsDeliver1', method : 'GET',
-        headers: { 'Encryption-Key': 'keyid="notification1"; dh="BO_tgGm-yvYAGLeRe16AvhzaUcpYRiqgsGOlXpt0DRWDRGGdzVLGlEVJMygqAUECarLnxCiAOHTP_znkedrlWoU"',
-                   'Encryption': 'keyid="notification1";salt="uAZaiXpOSfOLJxtOCZ09dA"',
-                   'Content-Encoding': 'aesgcm128',
-                 }
-      });
+        { hostname: 'localhost:' + serverPort, port: serverPort,
+          path : '/pushNotificationsDeliver1', method : 'GET',
+          headers: {'x-pushed-request': 'true', 'x-foo' : 'bar'}});
     pushPushServer1.writeHead(200, {
+      'content-length' : 2,
       'subresource' : '1'
       });
-
-    pushPushServer1.end('370aeb3963f12c4f12bf946bd0a7a9ee7d3eaff8f7aec62b530fc25cfa', 'hex');
+    pushPushServer1.end('ok');
     return;
   }
 
   else if (u.pathname ==="/pushNotifications/subscription2") {
     pushPushServer2 = res.push(
-      { hostname: 'localhost:' + serverPort, port: serverPort,
-        path : '/pushNotificationsDeliver3', method : 'GET',
-        headers: { 'Encryption-Key': 'keyid="notification2"; dh="BKVdQcgfncpNyNWsGrbecX0zq3eHIlHu5XbCGmVcxPnRSbhjrA6GyBIeGdqsUL69j5Z2CvbZd-9z1UBH0akUnGQ"',
-                   'Encryption': 'keyid="notification2";salt="vFn3t3M_k42zHBdpch3VRw"',
-                   'Content-Encoding': 'aesgcm128',
-                 }
-      });
+        { hostname: 'localhost:' + serverPort, port: serverPort,
+          path : '/pushNotificationsDeliver3', method : 'GET',
+          headers: {'x-pushed-request': 'true', 'x-foo' : 'bar'}});
     pushPushServer2.writeHead(200, {
+      'content-length' : 2,
       'subresource' : '1'
       });
-
-    pushPushServer2.end('66df5d11daa01e5c802ff97cdf7f39684b5bf7c6418a5cf9b609c6826c04b25e403823607ac514278a7da945', 'hex');
+    pushPushServer2.end('ok');
     return;
   }
 
   else if (u.pathname ==="/pushNotifications/subscription3") {
     pushPushServer3 = res.push(
-      { hostname: 'localhost:' + serverPort, port: serverPort,
-        path : '/pushNotificationsDeliver3', method : 'GET',
-        headers: { 'Encryption-Key': 'keyid="notification3";dh="BD3xV_ACT8r6hdIYES3BJj1qhz9wyv7MBrG9vM2UCnjPzwE_YFVpkD-SGqE-BR2--0M-Yf31wctwNsO1qjBUeMg"',
-                   'Encryption': 'keyid="notification3"; salt="DFq188piWU7osPBgqn4Nlg"; rs=24',
-                   'Content-Encoding': 'aesgcm128',
-                 }
-      });
+        { hostname: 'localhost:' + serverPort, port: serverPort,
+          path : '/pushNotificationsDeliver3', method : 'GET',
+          headers: {'x-pushed-request': 'true', 'x-foo' : 'bar'}});
     pushPushServer3.writeHead(200, {
+      'content-length' : 2,
       'subresource' : '1'
       });
-
-    pushPushServer3.end('2caaeedd9cf1059b80c58b6c6827da8ff7de864ac8bea6d5775892c27c005209cbf9c4de0c3fbcddb9711d74eaeebd33f7275374cb42dd48c07168bc2cc9df63e045ce2d2a2408c66088a40c', 'hex');
-    return;
-  }
-
-  else if (u.pathname == "/pushNotifications/subscription4") {
-    pushPushServer4 = res.push(
-      { hostname: 'localhost:' + serverPort, port: serverPort,
-        path : '/pushNotificationsDeliver4', method : 'GET',
-        headers: { 'Crypto-Key': 'keyid="notification4";dh="BJScXUUTcs7D8jJWI1AOxSgAKkF7e56ay4Lek52TqDlWo1yGd5czaxFWfsuP4j7XNWgGYm60-LKpSUMlptxPFVQ"',
-                   'Encryption': 'keyid="notification4"; salt="sn9p2QqF3V6KBclda8vx7w"',
-                   'Content-Encoding': 'aesgcm',
-                 }
-      });
-    pushPushServer4.writeHead(200, {
-      'subresource' : '1'
-      });
-
-    pushPushServer4.end('9eba7ba6192544a39bd9e9b58e702d0748f1776b27f6616cdc55d29ed5a015a6db8f2dd82cd5751a14315546194ff1c18458ab91eb36c9760ccb042670001fd9964557a079553c3591ee131ceb259389cfffab3ab873f873caa6a72e87d262b8684c3260e5940b992234deebf57a9ff3a8775742f3cbcb152d249725a28326717e19cce8506813a155eff5df9bdba9e3ae8801d3cc2b7e7f2f1b6896e63d1fdda6f85df704b1a34db7b2dd63eba11ede154300a318c6f83c41a3d32356a196e36bc905b99195fd91ae4ff3f545c42d17f1fdc1d5bd2bf7516d0765e3a859fffac84f46160b79cedda589f74c25357cf6988cd8ba83867ebd86e4579c9d3b00a712c77fcea3b663007076e21f9819423faa830c2176ff1001c1690f34be26229a191a938517', 'hex');
+    pushPushServer3.end('ok');
     return;
   }
 
@@ -677,60 +530,6 @@ function handleRequest(req, res) {
     res.writeHead(410, "GONE");
     res.end("");
     return;
-  }
-
-  else if (u.pathname === "/illegalhpacksoft") {
-    // This will cause the compressor to compress a header that is not legal,
-    // but only affects the stream, not the session.
-    illegalheader_conn = req.stream.connection;
-    Compressor.prototype.compress = insertSoftIllegalHpack;
-    // Fall through to the default response behavior
-  }
-
-  else if (u.pathname === "/illegalhpackhard") {
-    // This will cause the compressor to insert an HPACK instruction that will
-    // cause a session failure.
-    Compressor.prototype.compress = insertHardIllegalHpack;
-    // Fall through to default response behavior
-  }
-
-  else if (u.pathname === "/illegalhpack_validate") {
-    if (req.stream.connection === illegalheader_conn) {
-      res.setHeader('X-Did-Goaway', 'no');
-    } else {
-      res.setHeader('X-Did-Goaway', 'yes');
-    }
-    // Fall through to the default response behavior
-  }
-
-  else if (u.pathname === "/foldedheader") {
-    res.setHeader('X-Folded-Header', 'this is\n folded');
-    // Fall through to the default response behavior
-  }
-
-  else if (u.pathname === "/emptydata") {
-    // Overwrite the original transform with our version that will insert an
-    // empty DATA frame at the beginning of the stream response, then fall
-    // through to the default response behavior.
-    Serializer.prototype._transform = newTransform;
-  }
-
-  // for use with test_immutable.js
-  else if (u.pathname === "/immutable-test-without-attribute") {
-     res.setHeader('Cache-Control', 'max-age=100000');
-     res.setHeader('Etag', '1');
-     if (req.headers["if-none-match"]) {
-       res.setHeader("x-conditional", "true");
-     }
-    // default response from here
-  }
-  else if (u.pathname === "/immutable-test-with-attribute") {
-    res.setHeader('Cache-Control', 'max-age=100000, immutable');
-    res.setHeader('Etag', '2');
-     if (req.headers["if-none-match"]) {
-       res.setHeader("x-conditional", "true");
-     }
-   // default response from here
   }
 
   res.setHeader('Content-Type', 'text/html');
@@ -743,11 +542,10 @@ function handleRequest(req, res) {
 
 // Set up the SSL certs for our server - this server has a cert for foo.example.com
 // signed by netwerk/tests/unit/CA.cert.der
-//var log_module = node_http2_root + "/test/util";
 var options = {
   key: fs.readFileSync(__dirname + '/http2-key.pem'),
   cert: fs.readFileSync(__dirname + '/http2-cert.pem'),
-  //, log: require(log_module).createLogger('server')
+  //, log: require('../node-http2/test/util').createLogger('server')
 };
 
 var server = http2.createServer(options, handleRequest);
@@ -765,15 +563,4 @@ function listenok() {
   serverPort = server._server.address().port;
   console.log('HTTP2 server listening on port ' + serverPort);
 }
-
-/*var portSelection = -1;
-var envport = process.env.MOZHTTP2_PORT;
-if (envport !== undefined) {
-  try {
-    portSelection = parseInt(envport, 10);
-  } catch (e) {
-    portSelection = -1;
-  }
-}
-server.listen(portSelection, "0.0.0.0", 200, listenok);*/
 server.listen(5300, "0.0.0.0", 200, listenok);

@@ -14,12 +14,16 @@ function run_test() {
 add_task(function* test_registration_missing_scope() {
   PushService.init({
     serverURI: "wss://push.example.org/",
+    networkInfo: new MockDesktopNetworkInfo(),
     makeWebSocket(uri) {
       return new MockWebSocket(uri);
     }
   });
   yield rejects(
-    PushService.registration({ scope: '', originAttributes: '' }),
+    PushNotificationService.registration('', ''),
+    function(error) {
+      return error.error == 'NotFoundError';
+    },
     'Record missing page and manifest URLs'
   );
 });

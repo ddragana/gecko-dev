@@ -23,6 +23,8 @@ class VPMDeflickering {
   VPMDeflickering();
   ~VPMDeflickering();
 
+  int32_t ChangeUniqueId(int32_t id);
+
   void Reset();
   int32_t ProcessFrame(I420VideoFrame* frame,
                        VideoProcessingModule::FrameStats* stats);
@@ -38,6 +40,8 @@ class VPMDeflickering {
   enum { kNumProbs = 12 };
   enum { kNumQuants = kNumProbs + 2 };
   enum { kMaxOnlyLength = 5 };
+
+  int32_t id_;
 
   uint32_t  mean_buffer_length_;
   uint8_t   detection_state_;    // 0: No flickering

@@ -118,11 +118,12 @@ static int id3_framesize(const uint8_t *p, long length)
 int mp3_sniff(const uint8_t *buf, long length)
 {
   mp3_header header;
-  const uint8_t *p;
+  const uint8_t *p, *q;
   long skip;
   long avail;
 
   p = buf;
+  q = p;
   avail = length;
   while (avail >= 4) {
     if (is_id3(p, avail)) {

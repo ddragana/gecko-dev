@@ -8,13 +8,12 @@
 #include "nsIStorageStream.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
-#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace scache {
 
 NS_EXPORT nsresult
-NewObjectInputStreamFromBuffer(UniquePtr<char[]> buffer, uint32_t len, 
+NewObjectInputStreamFromBuffer(char* buffer, uint32_t len, 
                                nsIObjectInputStream** stream);
 
 // We can't retrieve the wrapped stream from the objectOutputStream later,
@@ -29,11 +28,11 @@ NewObjectOutputWrappedStorageStream(nsIObjectOutputStream **wrapperStream,
                                     bool wantDebugStream);
 
 // Creates a buffer for storing the stream into the cache. The buffer is
-// allocated with 'new []'.  After calling this function, the caller would
-// typically call nsIStartupCache::PutBuffer with the returned buffer.
+// allocated with 'new []'. Typically, the caller would store the buffer in
+// an nsAutoArrayPtr<char> and then call nsIStartupCache::PutBuffer with it.
 NS_EXPORT nsresult
 NewBufferFromStorageStream(nsIStorageStream *storageStream, 
-                           UniquePtr<char[]>* buffer, uint32_t* len);
+                           char** buffer, uint32_t* len);
 
 NS_EXPORT nsresult
 PathifyURI(nsIURI *in, nsACString &out);

@@ -117,7 +117,7 @@ Bootstrap.prototype = {
         name: metadata.name,
         paths: Object.assign({
           "": "resource://gre/modules/commonjs/",
-          "devtools/": "resource://devtools/",
+          "devtools/": "resource://gre/modules/devtools/",
           "./": baseURI
         }, readPaths(id)),
         manifest: metadata,

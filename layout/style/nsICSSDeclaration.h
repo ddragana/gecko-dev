@@ -28,6 +28,7 @@
 #include "nsIDOMCSSRule.h"
 #include "nsIDOMCSSValue.h"
 #include "mozilla/ErrorResult.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 
 class nsINode;
@@ -75,7 +76,7 @@ public:
   NS_IMETHOD GetPropertyCSSValue(const nsAString& aProp, nsIDOMCSSValue** aVal) override
   {
     mozilla::ErrorResult error;
-    RefPtr<mozilla::dom::CSSValue> val = GetPropertyCSSValue(aProp, error);
+    nsRefPtr<mozilla::dom::CSSValue> val = GetPropertyCSSValue(aProp, error);
     if (error.Failed()) {
       return error.StealNSResult();
     }

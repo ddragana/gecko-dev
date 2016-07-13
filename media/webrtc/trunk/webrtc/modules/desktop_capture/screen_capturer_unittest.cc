@@ -30,13 +30,13 @@ class ScreenCapturerTest : public testing::Test {
  public:
   SharedMemory* CreateSharedMemory(size_t size);
 
-  void SetUp() override {
+  virtual void SetUp() OVERRIDE {
     capturer_.reset(
         ScreenCapturer::Create(DesktopCaptureOptions::CreateDefault()));
   }
 
  protected:
-  rtc::scoped_ptr<ScreenCapturer> capturer_;
+  scoped_ptr<ScreenCapturer> capturer_;
   MockScreenCapturerCallback callback_;
 };
 

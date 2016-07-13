@@ -42,9 +42,9 @@ function test2()
   var win = OpenBrowserWindow({private: true});
   win.addEventListener("load", function onLoad() {
     win.removeEventListener("load", onLoad, false);
-    executeSoon(() => test3(win));
+    executeSoon(function() test3(win));
   }, false);
-  registerCleanupFunction(() => win.close());
+  registerCleanupFunction(function() win.close());
 }
 
 function test3(win)

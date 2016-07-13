@@ -5,8 +5,6 @@
 #ifndef _SDPHELPER_H_
 #define _SDPHELPER_H_
 
-#include "nsError.h"
-
 #include "signaling/src/sdp/SdpMediaSection.h"
 #include "signaling/src/sdp/SdpAttribute.h"
 
@@ -22,12 +20,6 @@ class Sdp;
 
 class SdpHelper {
   public:
-    enum MsectionBundleType {
-      kNoBundle,
-      kSlaveBundle,
-      kMasterBundle
-    };
-
     // Takes a std::string* into which error strings will be written for the
     // lifetime of the SdpHelper.
     explicit SdpHelper(std::string* errorDest) : mLastError(*errorDest) {}
@@ -38,14 +30,11 @@ class SdpHelper {
                                  const SdpMediaSection& source,
                                  SdpMediaSection* dest);
     bool AreOldTransportParamsValid(const Sdp& oldAnswer,
-                                    const Sdp& offerersPreviousSdp,
                                     const Sdp& newOffer,
                                     size_t level);
-    bool IceCredentialsDiffer(const SdpMediaSection& msection1,
-                              const SdpMediaSection& msection2);
 
     bool MsectionIsDisabled(const SdpMediaSection& msection) const;
-    static void DisableMsection(Sdp* sdp, SdpMediaSection* msection);
+    void DisableMsection(Sdp* sdp, SdpMediaSection* msection) const;
 
     // Maps each mid to the m-section that is the master of its bundle.
     // Mids that do not appear in an a=group:BUNDLE do not appear here.
@@ -58,9 +47,6 @@ class SdpHelper {
         const Sdp& sdp,
         std::vector<SdpGroupAttributeList::Group>* groups) const;
 
-    nsresult GetMidFromLevel(const Sdp& sdp,
-                             uint16_t level,
-                             std::string* mid);
     nsresult GetIdsFromMsid(const Sdp& sdp,
                             const SdpMediaSection& msection,
                             std::string* streamId,
@@ -74,16 +60,6 @@ class SdpHelper {
                                const std::string& candidate,
                                const std::string& mid,
                                uint16_t level);
-    void SetIceGatheringComplete(Sdp* sdp,
-                                 uint16_t level,
-                                 BundledMids bundledMids);
-    void SetDefaultAddresses(const std::string& defaultCandidateAddr,
-                             uint16_t defaultCandidatePort,
-                             const std::string& defaultRtcpCandidateAddr,
-                             uint16_t defaultRtcpCandidatePort,
-                             Sdp* sdp,
-                             uint16_t level,
-                             BundledMids bundledMids);
     void SetDefaultAddresses(const std::string& defaultCandidateAddr,
                              uint16_t defaultCandidatePort,
                              const std::string& defaultRtcpCandidateAddr,
@@ -91,12 +67,11 @@ class SdpHelper {
                              SdpMediaSection* msection);
     void SetupMsidSemantic(const std::vector<std::string>& msids,
                            Sdp* sdp) const;
-    MsectionBundleType GetMsectionBundleType(const Sdp& sdp,
-                                             uint16_t level,
-                                             BundledMids& bundledMids,
-                                             std::string* masterMid) const;
 
     std::string GetCNAME(const SdpMediaSection& msection) const;
+    void SetSsrcs(const std::vector<uint32_t>& ssrcs,
+                  const std::string& cname,
+                  SdpMediaSection* msection) const;
 
     SdpMediaSection* FindMsectionByMid(Sdp& sdp,
                                        const std::string& mid) const;
@@ -107,18 +82,11 @@ class SdpHelper {
     nsresult CopyStickyParams(const SdpMediaSection& source,
                               SdpMediaSection* dest);
     bool HasRtcp(SdpMediaSection::Protocol proto) const;
-    static SdpMediaSection::Protocol GetProtocolForMediaType(
+    SdpMediaSection::Protocol GetProtocolForMediaType(
         SdpMediaSection::MediaType type);
     void appendSdpParseErrors(
           const std::vector<std::pair<size_t, std::string> >& aErrors,
           std::string* aErrorString);
-
-    static bool GetPtAsInt(const std::string& ptString, uint16_t* ptOutparam);
-
-    void AddCommonExtmaps(
-        const SdpMediaSection& remoteMsection,
-        const std::vector<SdpExtmapAttributeList::Extmap>& localExtensions,
-        SdpMediaSection* localMsection);
 
   private:
     std::string& mLastError;

@@ -35,7 +35,6 @@ namespace mozilla { namespace pkix {
 Result
 CheckSignatureAlgorithm(TrustDomain& trustDomain,
                         EndEntityOrCA endEntityOrCA,
-                        Time notBefore,
                         const der::SignedDataWithSignature& signedData,
                         Input signatureValue)
 {
@@ -92,8 +91,7 @@ CheckSignatureAlgorithm(TrustDomain& trustDomain,
   // more generally it short-circuits any path building with them (which, of
   // course, is even slower).
 
-  rv = trustDomain.CheckSignatureDigestAlgorithm(digestAlg, endEntityOrCA,
-                                                 notBefore);
+  rv = trustDomain.CheckSignatureDigestAlgorithm(digestAlg, endEntityOrCA);
   if (rv != Success) {
     return rv;
   }
@@ -127,7 +125,7 @@ CheckSignatureAlgorithm(TrustDomain& trustDomain,
 // 4.1.2.5 Validity
 
 Result
-ParseValidity(Input encodedValidity,
+CheckValidity(Input encodedValidity, Time time,
               /*optional out*/ Time* notBeforeOut,
               /*optional out*/ Time* notAfterOut)
 {
@@ -150,19 +148,6 @@ ParseValidity(Input encodedValidity,
     return Result::ERROR_INVALID_DER_TIME;
   }
 
-  if (notBeforeOut) {
-    *notBeforeOut = notBefore;
-  }
-  if (notAfterOut) {
-    *notAfterOut = notAfter;
-  }
-
-  return Success;
-}
-
-Result
-CheckValidity(Time time, Time notBefore, Time notAfter)
-{
   if (time < notBefore) {
     return Result::ERROR_NOT_YET_VALID_CERTIFICATE;
   }
@@ -171,6 +156,12 @@ CheckValidity(Time time, Time notBefore, Time notAfter)
     return Result::ERROR_EXPIRED_CERTIFICATE;
   }
 
+  if (notBeforeOut) {
+    *notBeforeOut = notBefore;
+  }
+  if (notAfterOut) {
+    *notAfterOut = notAfter;
+  }
   return Success;
 }
 
@@ -496,7 +487,8 @@ CertPolicyId::IsAnyPolicy() const {
     return true;
   }
   return numBytes == sizeof(::mozilla::pkix::anyPolicy) &&
-         std::equal(bytes, bytes + numBytes, ::mozilla::pkix::anyPolicy);
+         !memcmp(bytes, ::mozilla::pkix::anyPolicy,
+                 sizeof(::mozilla::pkix::anyPolicy));
 }
 
 // certificatePolicies ::= SEQUENCE SIZE (1..MAX) OF PolicyInformation
@@ -684,8 +676,7 @@ CheckBasicConstraints(EndEntityOrCA endEntityOrCA,
 
 static Result
 MatchEKU(Reader& value, KeyPurposeId requiredEKU,
-         EndEntityOrCA endEntityOrCA, TrustDomain& trustDomain,
-         Time notBefore, /*in/out*/ bool& found,
+         EndEntityOrCA endEntityOrCA, /*in/out*/ bool& found,
          /*in/out*/ bool& foundOCSPSigning)
 {
   // See Section 5.9 of "A Layman's Guide to a Subset of ASN.1, BER, and DER"
@@ -716,24 +707,15 @@ MatchEKU(Reader& value, KeyPurposeId requiredEKU,
 
   if (!found) {
     switch (requiredEKU) {
-      case KeyPurposeId::id_kp_serverAuth: {
-        if (value.MatchRest(server)) {
-          match = true;
-          break;
-        }
-        // Potentially treat CA certs with step-up OID as also having SSL server
-        // type. Comodo has issued certificates that require this behavior that
-        // don't expire until June 2020!
-        if (endEntityOrCA == EndEntityOrCA::MustBeCA &&
-            value.MatchRest(serverStepUp)) {
-          Result rv = trustDomain.NetscapeStepUpMatchesServerAuth(notBefore,
-                                                                  match);
-          if (rv != Success) {
-            return rv;
-          }
-        }
+      case KeyPurposeId::id_kp_serverAuth:
+        // Treat CA certs with step-up OID as also having SSL server type.
+        // Comodo has issued certificates that require this behavior that don't
+        // expire until June 2020! TODO(bug 982932): Limit this exception to
+        // old certificates.
+        match = value.MatchRest(server) ||
+                (endEntityOrCA == EndEntityOrCA::MustBeCA &&
+                 value.MatchRest(serverStepUp));
         break;
-      }
 
       case KeyPurposeId::id_kp_clientAuth:
         match = value.MatchRest(client);
@@ -774,8 +756,7 @@ MatchEKU(Reader& value, KeyPurposeId requiredEKU,
 Result
 CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA,
                       const Input* encodedExtendedKeyUsage,
-                      KeyPurposeId requiredEKU, TrustDomain& trustDomain,
-                      Time notBefore)
+                      KeyPurposeId requiredEKU)
 {
   // XXX: We're using Result::ERROR_INADEQUATE_CERT_TYPE here so that callers
   // can distinguish EKU mismatch from KU mismatch from basic constraints
@@ -790,8 +771,7 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA,
     Reader input(*encodedExtendedKeyUsage);
     Result rv = der::NestedOf(input, der::SEQUENCE, der::OIDTag,
                               der::EmptyAllowed::No, [&](Reader& r) {
-      return MatchEKU(r, requiredEKU, endEntityOrCA, trustDomain, notBefore,
-                      found, foundOCSPSigning);
+      return MatchEKU(r, requiredEKU, endEntityOrCA, found, foundOCSPSigning);
     });
     if (rv != Success) {
       return Result::ERROR_INADEQUATE_CERT_TYPE;
@@ -843,65 +823,6 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA,
 }
 
 Result
-CheckTLSFeatures(const BackCert& subject, BackCert& potentialIssuer)
-{
-  const Input* issuerTLSFeatures = potentialIssuer.GetRequiredTLSFeatures();
-  if (!issuerTLSFeatures) {
-    return Success;
-  }
-
-  const Input* subjectTLSFeatures = subject.GetRequiredTLSFeatures();
-  if (issuerTLSFeatures->GetLength() == 0 ||
-      !subjectTLSFeatures ||
-      !InputsAreEqual(*issuerTLSFeatures, *subjectTLSFeatures)) {
-    return Result::ERROR_REQUIRED_TLS_FEATURE_MISSING;
-  }
-
-  return Success;
-}
-
-Result
-TLSFeaturesSatisfiedInternal(const Input* requiredTLSFeatures,
-                             const Input* stapledOCSPResponse)
-{
-  if (!requiredTLSFeatures) {
-    return Success;
-  }
-
-  // RFC 6066 10.2: ExtensionType status_request
-  const static uint8_t status_request = 5;
-  const static uint8_t status_request_bytes[] = { status_request };
-
-  Reader input(*requiredTLSFeatures);
-  return der::NestedOf(input, der::SEQUENCE, der::INTEGER,
-                       der::EmptyAllowed::No, [&](Reader& r) {
-    if (!r.MatchRest(status_request_bytes)) {
-      return Result::ERROR_REQUIRED_TLS_FEATURE_MISSING;
-    }
-
-    if (!stapledOCSPResponse) {
-      return Result::ERROR_REQUIRED_TLS_FEATURE_MISSING;
-    }
-
-    return Result::Success;
-  });
-}
-
-Result
-CheckTLSFeaturesAreSatisfied(Input& cert,
-                             const Input* stapledOCSPResponse)
-{
-  BackCert backCert(cert, EndEntityOrCA::MustBeEndEntity, nullptr);
-  Result rv = backCert.Init();
-  if (rv != Success) {
-    return rv;
-  }
-
-  return TLSFeaturesSatisfiedInternal(backCert.GetRequiredTLSFeatures(),
-                                      stapledOCSPResponse);
-}
-
-Result
 CheckIssuerIndependentProperties(TrustDomain& trustDomain,
                                  const BackCert& cert,
                                  Time time,
@@ -924,17 +845,6 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
     return rv;
   }
 
-  // IMPORTANT: We parse the validity interval here, so that we can use the
-  // notBefore and notAfter values in checks for things that might be deprecated
-  // over time. However, we must not fail for semantic errors until the end of
-  // this method, in order to preserve error ranking.
-  Time notBefore(Time::uninitialized);
-  Time notAfter(Time::uninitialized);
-  rv = ParseValidity(cert.GetValidity(), &notBefore, &notAfter);
-  if (rv != Success) {
-    return rv;
-  }
-
   if (trustLevel == TrustLevel::TrustAnchor &&
       endEntityOrCA == EndEntityOrCA::MustBeEndEntity &&
       requiredEKUIfPresent == KeyPurposeId::id_kp_OCSPSigning) {
@@ -947,7 +857,7 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
 
   switch (trustLevel) {
     case TrustLevel::InheritsTrust:
-      rv = CheckSignatureAlgorithm(trustDomain, endEntityOrCA, notBefore,
+      rv = CheckSignatureAlgorithm(trustDomain, endEntityOrCA,
                                    cert.GetSignedData(), cert.GetSignature());
       if (rv != Success) {
         return rv;
@@ -1024,7 +934,7 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
 
   // 4.2.1.12. Extended Key Usage
   rv = CheckExtendedKeyUsage(endEntityOrCA, cert.GetExtKeyUsage(),
-                             requiredEKUIfPresent, trustDomain, notBefore);
+                             requiredEKUIfPresent);
   if (rv != Success) {
     return rv;
   }
@@ -1036,9 +946,11 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
   // 4.2.1.14. Inhibit anyPolicy is implicitly supported; see the documentation
   //           about policy enforcement in pkix.h.
 
-  // IMPORTANT: Even though we parse validity above, we wait until this point to
-  // check it, so that error ranking works correctly.
-  rv = CheckValidity(time, notBefore, notAfter);
+  // IMPORTANT: This check must come after the other checks in order for error
+  // ranking to work correctly.
+  Time notBefore(Time::uninitialized);
+  Time notAfter(Time::uninitialized);
+  rv = CheckValidity(cert.GetValidity(), time, &notBefore, &notAfter);
   if (rv != Success) {
     return rv;
   }

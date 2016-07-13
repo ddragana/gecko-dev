@@ -30,8 +30,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
                                   "resource://gre/modules/AsyncShutdown.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStorage",
                                   "resource://gre/modules/TelemetryStorage.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryReportingPolicy",
-                                  "resource://gre/modules/TelemetryReportingPolicy.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "Telemetry",
                                    "@mozilla.org/base/telemetry;1",
                                    "nsITelemetry");
@@ -44,6 +42,7 @@ const LOGGER_PREFIX = "TelemetrySend::";
 const PREF_BRANCH = "toolkit.telemetry.";
 const PREF_SERVER = PREF_BRANCH + "server";
 const PREF_UNIFIED = PREF_BRANCH + "unified";
+const PREF_TELEMETRY_ENABLED = PREF_BRANCH + "enabled";
 const PREF_FHR_UPLOAD_ENABLED = "datareporting.healthreport.uploadEnabled";
 
 const TOPIC_IDLE_DAILY = "idle-daily";
@@ -88,7 +87,7 @@ const OVERDUE_PING_FILE_AGE = 7 * 24 * 60 * MS_IN_A_MINUTE; // 1 week
  * Tests override properties on this object to allow for control of behavior
  * that would otherwise be very hard to cover.
  */
-var Policy = {
+let Policy = {
   now: () => new Date(),
   midnightPingFuzzingDelay: () => MIDNIGHT_FUZZING_DELAY_MS,
   setSchedulerTickTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
@@ -112,18 +111,10 @@ function isDeletionPing(aPing) {
   return isV4PingFormat(aPing) && (aPing.type == PING_TYPE_DELETION);
 }
 
-/**
- * Save the provided ping as a pending ping. If it's a deletion ping, save it
- * to a special location.
- * @param {Object} aPing The ping to save.
- * @return {Promise} A promise resolved when the ping is saved.
- */
-function savePing(aPing) {
-  if (isDeletionPing(aPing)) {
-    return TelemetryStorage.saveDeletionPing(aPing);
-  } else {
-    return TelemetryStorage.savePendingPing(aPing);
-  }
+function tomorrow(date) {
+  let d = new Date(date);
+  d.setDate(d.getDate() + 1);
+  return d;
 }
 
 /**
@@ -152,6 +143,7 @@ function gzipCompressString(string) {
   converter.onStopRequest(null, null, null);
   return observer.buffer;
 }
+
 
 this.TelemetrySend = {
 
@@ -207,13 +199,6 @@ this.TelemetrySend = {
   },
 
   /**
-   * Notify that we can start submitting data to the servers.
-   */
-  notifyCanUpload: function() {
-    return TelemetrySendImpl.notifyCanUpload();
-  },
-
-  /**
    * Only used in tests. Used to reset the module data to emulate a restart.
    */
   reset: function() {
@@ -225,13 +210,6 @@ this.TelemetrySend = {
    */
   setServer: function(server) {
     return TelemetrySendImpl.setServer(server);
-  },
-
-  /**
-   * Clear out unpersisted, yet to be sent, pings and cancel outgoing ping requests.
-   */
-  clearCurrentPings: function() {
-    return TelemetrySendImpl.clearCurrentPings();
   },
 
   /**
@@ -256,7 +234,7 @@ this.TelemetrySend = {
   },
 };
 
-var CancellableTimeout = {
+let CancellableTimeout = {
   _deferred: null,
   _timer: null,
 
@@ -297,7 +275,7 @@ var CancellableTimeout = {
 /**
  * SendScheduler implements the timer & scheduling behavior for ping sends.
  */
-var SendScheduler = {
+let SendScheduler = {
   // Whether any ping sends failed since the last tick. If yes, we start with our exponential
   // backoff timeout.
   _sendsFailed: false,
@@ -326,19 +304,16 @@ var SendScheduler = {
     return Promise.resolve(this._sendTask);
   },
 
-  start: function() {
-    this._log.trace("start");
-    this._sendsFailed = false;
-    this._backoffDelay = SEND_TICK_DELAY;
-    this._shutdown = false;
-  },
-
   /**
    * Only used for testing, resets the state to emulate a restart.
    */
   reset: function() {
     this._log.trace("reset");
-    return this.shutdown().then(() => this.start());
+    return this.shutdown().then(() => {
+      this._sendsFailed = false;
+      this._backoffDelay = SEND_TICK_DELAY;
+      this._shutdown = false;
+    });
   },
 
   /**
@@ -407,12 +382,8 @@ var SendScheduler = {
       let pending = TelemetryStorage.getPendingPingList();
       let current = TelemetrySendImpl.getUnpersistedPings();
       this._log.trace("_doSendTask - pending: " + pending.length + ", current: " + current.length);
-      // Note that the two lists contain different kind of data. |pending| only holds ping
-      // info, while |current| holds actual ping data.
-      if (!TelemetrySendImpl.sendingEnabled()) {
-        pending = pending.filter(pingInfo => TelemetryStorage.isDeletionPing(pingInfo.id));
-        current = current.filter(p => isDeletionPing(p));
-      }
+      pending = pending.filter(p => TelemetrySendImpl.canSend(p));
+      current = current.filter(p => TelemetrySendImpl.canSend(p));
       this._log.trace("_doSendTask - can send - pending: " + pending.length + ", current: " + current.length);
 
       // Bail out if there is nothing to send.
@@ -447,7 +418,7 @@ var SendScheduler = {
       this._sendsFailed = false;
       const sendStartTime = Policy.now();
       this._sendTaskState = "wait on ping sends";
-      yield TelemetrySendImpl.sendPings(current, sending.map(p => p.id));
+      yield TelemetrySendImpl.sendPings(current, [for (p of sending) p.id]);
       if (this._shutdown || (TelemetrySend.pendingPingCount == 0)) {
         this._log.trace("_doSendTask - bailing out after sending, shutdown: " + this._shutdown +
                         ", pendingPingCount: " + TelemetrySend.pendingPingCount);
@@ -522,10 +493,8 @@ var SendScheduler = {
   },
  };
 
-var TelemetrySendImpl = {
+let TelemetrySendImpl = {
   _sendingEnabled: false,
-  // Tracks the shutdown state.
-  _shutdown: false,
   _logger: null,
   // This tracks all pending ping requests to the server.
   _pendingPingRequests: new Map(),
@@ -621,8 +590,6 @@ var TelemetrySendImpl = {
    }),
 
   shutdown: Task.async(function*() {
-    this._shutdown = true;
-
     for (let topic of this.OBSERVER_TOPICS) {
       try {
         Services.obs.removeObserver(this, topic);
@@ -650,8 +617,8 @@ var TelemetrySendImpl = {
   reset: function() {
     this._log.trace("reset");
 
-    this._shutdown = false;
     this._currentPings = new Map();
+
     this._overduePingCount = 0;
 
     const histograms = [
@@ -665,15 +632,6 @@ var TelemetrySendImpl = {
     return SendScheduler.reset();
   },
 
-  /**
-   * Notify that we can start submitting data to the servers.
-   */
-  notifyCanUpload: function() {
-    // Let the scheduler trigger sending pings if possible.
-    SendScheduler.triggerSendingPings(true);
-    return this.promisePendingPingActivity();
-  },
-
   observe: function(subject, topic, data) {
     switch(topic) {
     case TOPIC_IDLE_DAILY:
@@ -685,16 +643,16 @@ var TelemetrySendImpl = {
   submitPing: function(ping) {
     this._log.trace("submitPing - ping id: " + ping.id);
 
-    if (!this.sendingEnabled(ping)) {
+    if (!this.canSend(ping)) {
       this._log.trace("submitPing - Telemetry is not allowed to send pings.");
       return Promise.resolve();
     }
 
-    if (!this.canSendNow) {
+    if (!this._sendingEnabled) {
       // Sending is disabled or throttled, add this to the persisted pending pings.
       this._log.trace("submitPing - can't send ping now, persisting to disk - " +
-                      "canSendNow: " + this.canSendNow);
-      return savePing(ping);
+                      "sendingEnabled: " + this._sendingEnabled);
+      return TelemetryStorage.savePendingPing(ping);
     }
 
     // Let the scheduler trigger sending pings if possible.
@@ -712,38 +670,6 @@ var TelemetrySendImpl = {
     this._log.trace("setServer", server);
     this._server = server;
   },
-
-  /**
-   * Clear out unpersisted, yet to be sent, pings and cancel outgoing ping requests.
-   */
-  clearCurrentPings: Task.async(function*() {
-    if (this._shutdown) {
-      this._log.trace("clearCurrentPings - in shutdown, bailing out");
-      return;
-    }
-
-    // Temporarily disable the scheduler. It must not try to reschedule ping sending
-    // while we're deleting them.
-    yield SendScheduler.shutdown();
-
-    // Now that the ping activity has settled, abort outstanding ping requests.
-    this._cancelOutgoingRequests();
-
-    // Also, purge current pings.
-    this._currentPings.clear();
-
-    // We might have been interrupted and shutdown could have been started.
-    // We need to bail out in that case to avoid triggering send activity etc.
-    // at unexpected times.
-    if (this._shutdown) {
-      this._log.trace("clearCurrentPings - in shutdown, not spinning SendScheduler up again");
-      return;
-    }
-
-    // Enable the scheduler again and spin the send task.
-    SendScheduler.start();
-    SendScheduler.triggerSendingPings(true);
-  }),
 
   _cancelOutgoingRequests: function() {
     // Abort any pending ping XHRs.
@@ -768,8 +694,7 @@ var TelemetrySendImpl = {
           yield this._doPing(ping, ping.id, false);
         } catch (ex) {
           this._log.info("sendPings - ping " + ping.id + " not sent, saving to disk", ex);
-          // Deletion pings must be saved to a special location.
-          yield savePing(ping);
+          yield TelemetryStorage.savePendingPing(ping);
         } finally {
           this._currentPings.delete(ping.id);
         }
@@ -841,9 +766,6 @@ var TelemetrySendImpl = {
     }
 
     if (success && isPersisted) {
-      if (TelemetryStorage.isDeletionPing(id)) {
-        return TelemetryStorage.removeDeletionPing();
-      }
       return TelemetryStorage.removePendingPing(id);
     } else {
       return Promise.resolve();
@@ -884,7 +806,7 @@ var TelemetrySendImpl = {
   },
 
   _doPing: function(ping, id, isPersisted) {
-    if (!this.sendingEnabled(ping)) {
+    if (!this.canSend(ping)) {
       // We can't send the pings to the server, so don't try to.
       this._log.trace("_doPing - Can't send ping " + ping.id);
       return Promise.resolve();
@@ -905,7 +827,6 @@ var TelemetrySendImpl = {
     request.open("POST", url, true);
     request.overrideMimeType("text/plain");
     request.setRequestHeader("Content-Type", "application/json; charset=UTF-8");
-    request.setRequestHeader("Date", Policy.now().toUTCString());
 
     this._pendingPingRequests.set(id, request);
 
@@ -951,7 +872,6 @@ var TelemetrySendImpl = {
         // 4XX means that something with the request was broken.
         this._log.error("_doPing - error submitting to " + url + ", status: " + status
                         + " - ping request broken?");
-        Telemetry.getHistogramById("TELEMETRY_PING_EVICTED_FOR_SERVER_ERRORS").add();
         // TODO: we should handle this better, but for now we should avoid resubmitting
         // broken requests by pretending success.
         success = true;
@@ -978,19 +898,6 @@ var TelemetrySendImpl = {
     let utf8Payload = converter.ConvertFromUnicode(JSON.stringify(networkPayload));
     utf8Payload += converter.Finish();
     Telemetry.getHistogramById("TELEMETRY_STRINGIFY").add(new Date() - startTime);
-
-    // Check the size and drop pings which are too big.
-    const pingSizeBytes = utf8Payload.length;
-    if (pingSizeBytes > TelemetryStorage.MAXIMUM_PING_SIZE) {
-      this._log.error("_doPing - submitted ping exceeds the size limit, size: " + pingSizeBytes);
-      Telemetry.getHistogramById("TELEMETRY_PING_SIZE_EXCEEDED_SEND").add();
-      Telemetry.getHistogramById("TELEMETRY_DISCARDED_SEND_PINGS_SIZE_MB")
-               .add(Math.floor(pingSizeBytes / 1024 / 1024));
-      // We don't need to call |request.abort()| as it was not sent yet.
-      this._pendingPingRequests.delete(id);
-      return TelemetryStorage.removePendingPing(id);
-    }
-
     let payloadStream = Cc["@mozilla.org/io/string-input-stream;1"]
                         .createInstance(Ci.nsIStringInputStream);
     startTime = new Date();
@@ -1003,21 +910,7 @@ var TelemetrySendImpl = {
   },
 
   /**
-   * Check if sending is temporarily disabled.
-   * @return {Boolean} True if we can send pings to the server right now, false if
-   *         sending is temporarily disabled.
-   */
-  get canSendNow() {
-    // If the reporting policy was not accepted yet, don't send pings.
-    if (!TelemetryReportingPolicy.canUpload()) {
-      return false;
-    }
-
-    return this._sendingEnabled;
-  },
-
-  /**
-   * Check if sending is disabled. If FHR is not allowed to upload,
+   * Check if pings can be sent to the server. If FHR is not allowed to upload,
    * pings are not sent to the server (Telemetry is a sub-feature of FHR). If trying
    * to send a deletion ping, don't block it.
    * If unified telemetry is off, don't send pings if Telemetry is disabled.
@@ -1025,7 +918,7 @@ var TelemetrySendImpl = {
    * @param {Object} [ping=null] A ping to be checked.
    * @return {Boolean} True if pings can be send to the servers, false otherwise.
    */
-  sendingEnabled: function(ping = null) {
+  canSend: function(ping = null) {
     // We only send pings from official builds, but allow overriding this for tests.
     if (!Telemetry.isOfficialTelemetry && !this._testMode) {
       return false;
@@ -1042,7 +935,7 @@ var TelemetrySendImpl = {
     }
 
     // Without unified Telemetry, the Telemetry enabled pref controls ping sending.
-    return Utils.isTelemetryEnabled;
+    return Preferences.get(PREF_TELEMETRY_ENABLED, false);
   },
 
   /**
@@ -1062,9 +955,9 @@ var TelemetrySendImpl = {
    */
   promisePendingPingActivity: function () {
     this._log.trace("promisePendingPingActivity - Waiting for ping task");
-    let p = Array.from(this._pendingPingActivity, p => p.catch(ex => {
+    let p = [for (p of this._pendingPingActivity) p.catch(ex => {
       this._log.error("promisePendingPingActivity - ping activity had an error", ex);
-    }));
+    })];
     p.push(SendScheduler.waitOnSendTask());
     return Promise.all(p);
   },
@@ -1072,7 +965,7 @@ var TelemetrySendImpl = {
   _persistCurrentPings: Task.async(function*() {
     for (let [id, ping] of this._currentPings) {
       try {
-        yield savePing(ping);
+        yield TelemetryStorage.savePendingPing(ping);
         this._log.trace("_persistCurrentPings - saved ping " + id);
       } catch (ex) {
         this._log.error("_persistCurrentPings - failed to save ping " + id, ex);

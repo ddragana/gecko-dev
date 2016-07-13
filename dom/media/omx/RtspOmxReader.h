@@ -28,7 +28,7 @@ class RtspOmxReader : public MediaOmxReader
 protected:
   // Provide a Rtsp extractor.
   nsresult InitOmxDecoder() final override;
-  void EnsureActive() override;
+  virtual void EnsureActive() override;
 
 public:
   RtspOmxReader(AbstractMediaDecoder* aDecoder)
@@ -43,12 +43,13 @@ public:
     MOZ_ASSERT(mRtspResource);
   }
 
-  virtual ~RtspOmxReader() {
+  virtual ~RtspOmxReader() override {
     MOZ_COUNT_DTOR(RtspOmxReader);
   }
 
   // Implement a time-based seek instead of byte-based..
-  RefPtr<SeekPromise> Seek(SeekTarget aTarget, int64_t aEndTime) final override;
+  virtual nsRefPtr<SeekPromise>
+  Seek(int64_t aTime, int64_t aEndTime) final override;
 
   // Override GetBuffered() to do nothing for below reasons:
   // 1. Because the Rtsp stream is a/v separated. The buffered data in a/v
@@ -59,15 +60,16 @@ public:
   // we returned are not useful for the MediaDecodeStateMachine. Unlike the
   // ChannelMediaResource, it has a "cache" that can store the whole streaming
   // data so the |GetBuffered| function can retrieve useful time ranges.
-  media::TimeIntervals GetBuffered() final override {
+  virtual media::TimeIntervals GetBuffered() final override {
     return media::TimeIntervals::Invalid();
   }
 
-  void SetIdle() override;
+  virtual void SetIdle() override;
 
-  RefPtr<MediaDecoderReader::MetadataPromise> AsyncReadMetadata() override;
+  virtual nsRefPtr<MediaDecoderReader::MetadataPromise> AsyncReadMetadata()
+    override;
 
-  void HandleResourceAllocated() override;
+  virtual void HandleResourceAllocated() override;
 
 private:
   // A pointer to RtspMediaResource for calling the Rtsp specific function.

@@ -41,7 +41,7 @@ PowerManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 nsresult
-PowerManager::Init(nsPIDOMWindowInner* aWindow)
+PowerManager::Init(nsIDOMWindow *aWindow)
 {
   mWindow = aWindow;
 
@@ -135,7 +135,7 @@ PowerManager::Callback(const nsAString &aTopic, const nsAString &aState)
    * because the callbacks may install new listeners. We expect no
    * more than one listener per window, so it shouldn't be too long.
    */
-  AutoTArray<nsCOMPtr<nsIDOMMozWakeLockListener>, 2> listeners(mListeners);
+  nsAutoTArray<nsCOMPtr<nsIDOMMozWakeLockListener>, 2> listeners(mListeners);
   for (uint32_t i = 0; i < listeners.Length(); ++i) {
     listeners[i]->Callback(aTopic, aState);
   }
@@ -196,9 +196,9 @@ PowerManager::SetCpuSleepAllowed(bool aAllowed)
 }
 
 already_AddRefed<PowerManager>
-PowerManager::CreateInstance(nsPIDOMWindowInner* aWindow)
+PowerManager::CreateInstance(nsPIDOMWindow* aWindow)
 {
-  RefPtr<PowerManager> powerManager = new PowerManager();
+  nsRefPtr<PowerManager> powerManager = new PowerManager();
   if (NS_FAILED(powerManager->Init(aWindow))) {
     powerManager = nullptr;
   }

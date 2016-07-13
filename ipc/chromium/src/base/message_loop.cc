@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -42,9 +40,6 @@
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
-
-using mozilla::Move;
-using mozilla::Runnable;
 
 static base::ThreadLocalPointer<MessageLoop>& get_tls_ptr() {
   static base::ThreadLocalPointer<MessageLoop> tls_ptr;
@@ -94,7 +89,7 @@ MessageLoop* MessageLoop::current() {
 
 static mozilla::Atomic<int32_t> message_loop_id_seq(0);
 
-MessageLoop::MessageLoop(Type type, nsIThread* aThread)
+MessageLoop::MessageLoop(Type type)
     : type_(type),
       id_(++message_loop_id_seq),
       nestable_tasks_allowed_(true),
@@ -111,12 +106,10 @@ MessageLoop::MessageLoop(Type type, nsIThread* aThread)
   get_tls_ptr().Set(this);
 
   switch (type_) {
-  case TYPE_MOZILLA_PARENT:
-    MOZ_RELEASE_ASSERT(!aThread);
-    pump_ = new mozilla::ipc::MessagePump(aThread);
+  case TYPE_MOZILLA_UI:
+    pump_ = new mozilla::ipc::MessagePump();
     return;
   case TYPE_MOZILLA_CHILD:
-    MOZ_RELEASE_ASSERT(!aThread);
     pump_ = new mozilla::ipc::MessagePumpForChildProcess();
     // There is a MessageLoop Run call from XRE_InitChildProcess
     // and another one from MessagePumpForChildProcess. The one
@@ -126,11 +119,11 @@ MessageLoop::MessageLoop(Type type, nsIThread* aThread)
     run_depth_base_ = 2;
     return;
   case TYPE_MOZILLA_NONMAINTHREAD:
-    pump_ = new mozilla::ipc::MessagePumpForNonMainThreads(aThread);
+    pump_ = new mozilla::ipc::MessagePumpForNonMainThreads();
     return;
 #if defined(OS_WIN)
   case TYPE_MOZILLA_NONMAINUITHREAD:
-    pump_ = new mozilla::ipc::MessagePumpForNonMainUIThreads(aThread);
+    pump_ = new mozilla::ipc::MessagePumpForNonMainUIThreads();
     return;
 #endif
   default:
@@ -208,6 +201,12 @@ void MessageLoop::Run() {
   RunHandler();
 }
 
+void MessageLoop::RunAllPending() {
+  AutoRunState save_state(this);
+  state_->quit_received = true;  // Means run until we would otherwise block.
+  RunHandler();
+}
+
 // Runs the loop in two different SEH modes:
 // enable_SEH_restoration_ = false : any unhandled exception goes to the last
 // one that calls SetUnhandledExceptionFilter().
@@ -245,10 +244,10 @@ bool MessageLoop::ProcessNextDelayedNonNestableTask() {
   if (deferred_non_nestable_work_queue_.empty())
     return false;
 
-  RefPtr<Runnable> task = deferred_non_nestable_work_queue_.front().task.forget();
+  Task* task = deferred_non_nestable_work_queue_.front().task;
   deferred_non_nestable_work_queue_.pop();
 
-  RunTask(task.forget());
+  RunTask(task);
   return true;
 }
 
@@ -263,36 +262,53 @@ void MessageLoop::Quit() {
   }
 }
 
-void MessageLoop::PostTask(already_AddRefed<Runnable> task) {
-  PostTask_Helper(Move(task), 0);
+void MessageLoop::PostTask(
+    const tracked_objects::Location& from_here, Task* task) {
+  PostTask_Helper(from_here, task, 0, true);
 }
 
-void MessageLoop::PostDelayedTask(already_AddRefed<Runnable> task, int delay_ms) {
-  PostTask_Helper(Move(task), delay_ms);
+void MessageLoop::PostDelayedTask(
+    const tracked_objects::Location& from_here, Task* task, int delay_ms) {
+  PostTask_Helper(from_here, task, delay_ms, true);
 }
 
-void MessageLoop::PostIdleTask(already_AddRefed<Runnable> task) {
+void MessageLoop::PostNonNestableTask(
+    const tracked_objects::Location& from_here, Task* task) {
+  PostTask_Helper(from_here, task, 0, false);
+}
+
+void MessageLoop::PostNonNestableDelayedTask(
+    const tracked_objects::Location& from_here, Task* task, int delay_ms) {
+  PostTask_Helper(from_here, task, delay_ms, false);
+}
+
+void MessageLoop::PostIdleTask(
+    const tracked_objects::Location& from_here, Task* task) {
   DCHECK(current() == this);
-  MOZ_ASSERT(NS_IsMainThread());
 
-  PendingTask pending_task(Move(task), false);
-  deferred_non_nestable_work_queue_.push(Move(pending_task));
+#ifdef MOZ_TASK_TRACER
+  task = mozilla::tasktracer::CreateTracedTask(task);
+  (static_cast<mozilla::tasktracer::TracedTask*>(task))->DispatchTask();
+#endif
+
+  task->SetBirthPlace(from_here);
+  PendingTask pending_task(task, false);
+  deferred_non_nestable_work_queue_.push(pending_task);
 }
 
 // Possibly called on a background thread!
-void MessageLoop::PostTask_Helper(already_AddRefed<Runnable> task, int delay_ms) {
-  if (nsIEventTarget* target = pump_->GetXPCOMThread()) {
-    nsresult rv;
-    if (delay_ms) {
-      rv = target->DelayedDispatch(Move(task), delay_ms);
-    } else {
-      rv = target->Dispatch(Move(task), 0);
-    }
-    MOZ_ALWAYS_SUCCEEDS(rv);
-    return;
-  }
+void MessageLoop::PostTask_Helper(
+    const tracked_objects::Location& from_here, Task* task, int delay_ms,
+    bool nestable) {
 
-  PendingTask pending_task(Move(task), true);
+#ifdef MOZ_TASK_TRACER
+  task = mozilla::tasktracer::CreateTracedTask(task);
+  (static_cast<mozilla::tasktracer::TracedTask*>(task))->DispatchTask(delay_ms);
+#endif
+
+  task->SetBirthPlace(from_here);
+
+  PendingTask pending_task(task, nestable);
 
   if (delay_ms > 0) {
     pending_task.delayed_run_time =
@@ -305,10 +321,10 @@ void MessageLoop::PostTask_Helper(already_AddRefed<Runnable> task, int delay_ms)
   // directly, as it could starve handling of foreign threads.  Put every task
   // into this queue.
 
-  RefPtr<base::MessagePump> pump;
+  nsRefPtr<base::MessagePump> pump;
   {
     AutoLock locked(incoming_queue_lock_);
-    incoming_queue_.push(Move(pending_task));
+    incoming_queue_.push(pending_task);
     pump = pump_;
   }
   // Since the incoming_queue_ may contain a task that destroys this message
@@ -340,21 +356,20 @@ bool MessageLoop::NestableTasksAllowed() const {
 
 //------------------------------------------------------------------------------
 
-void MessageLoop::RunTask(already_AddRefed<Runnable> aTask) {
+void MessageLoop::RunTask(Task* task) {
   DCHECK(nestable_tasks_allowed_);
   // Execute the task and assume the worst: It is probably not reentrant.
   nestable_tasks_allowed_ = false;
 
-  RefPtr<Runnable> task = aTask;
   task->Run();
-  task = nullptr;
+  delete task;
 
   nestable_tasks_allowed_ = true;
 }
 
-bool MessageLoop::DeferOrRunPendingTask(PendingTask&& pending_task) {
+bool MessageLoop::DeferOrRunPendingTask(const PendingTask& pending_task) {
   if (pending_task.nestable || state_->run_depth <= run_depth_base_) {
-    RunTask(pending_task.task.forget());
+    RunTask(pending_task.task);
     // Show that we ran a task (Note: a new one might arrive as a
     // consequence!).
     return true;
@@ -362,7 +377,7 @@ bool MessageLoop::DeferOrRunPendingTask(PendingTask&& pending_task) {
 
   // We couldn't run the task now because we're in a nested message loop
   // and the task isn't nestable.
-  deferred_non_nestable_work_queue_.push(Move(pending_task));
+  deferred_non_nestable_work_queue_.push(pending_task);
   return false;
 }
 
@@ -373,7 +388,7 @@ void MessageLoop::AddToDelayedWorkQueue(const PendingTask& pending_task) {
   // delayed_run_time value.
   PendingTask new_pending_task(pending_task);
   new_pending_task.sequence_num = next_sequence_num_++;
-  delayed_work_queue_.push(Move(new_pending_task));
+  delayed_work_queue_.push(new_pending_task);
 }
 
 void MessageLoop::ReloadWorkQueue() {
@@ -395,14 +410,27 @@ void MessageLoop::ReloadWorkQueue() {
 }
 
 bool MessageLoop::DeletePendingTasks() {
+#ifdef DEBUG
+  if (!work_queue_.empty()) {
+    Task* task = work_queue_.front().task;
+    tracked_objects::Location loc = task->GetBirthPlace();
+    printf("Unexpected task! %s:%s:%d\n",
+	   loc.function_name(), loc.file_name(), loc.line_number());
+  }
+#endif
+
   MOZ_ASSERT(work_queue_.empty());
   bool did_work = !deferred_non_nestable_work_queue_.empty();
   while (!deferred_non_nestable_work_queue_.empty()) {
+    Task* task = deferred_non_nestable_work_queue_.front().task;
     deferred_non_nestable_work_queue_.pop();
+    delete task;
   }
   did_work |= !delayed_work_queue_.empty();
   while (!delayed_work_queue_.empty()) {
+    Task* task = delayed_work_queue_.top().task;
     delayed_work_queue_.pop();
+    delete task;
   }
   return did_work;
 }
@@ -420,16 +448,15 @@ bool MessageLoop::DoWork() {
 
     // Execute oldest task.
     do {
-      PendingTask pending_task = Move(work_queue_.front());
+      PendingTask pending_task = work_queue_.front();
       work_queue_.pop();
       if (!pending_task.delayed_run_time.is_null()) {
-        // NB: Don't move, because we use this later!
         AddToDelayedWorkQueue(pending_task);
         // If we changed the topmost task, then it is time to re-schedule.
         if (delayed_work_queue_.top().task == pending_task.task)
           pump_->ScheduleDelayedWork(pending_task.delayed_run_time);
       } else {
-        if (DeferOrRunPendingTask(Move(pending_task)))
+        if (DeferOrRunPendingTask(pending_task))
           return true;
       }
     } while (!work_queue_.empty());
@@ -456,7 +483,7 @@ bool MessageLoop::DoDelayedWork(TimeTicks* next_delayed_work_time) {
   if (!delayed_work_queue_.empty())
     *next_delayed_work_time = delayed_work_queue_.top().delayed_run_time;
 
-  return DeferOrRunPendingTask(Move(pending_task));
+  return DeferOrRunPendingTask(pending_task);
 }
 
 bool MessageLoop::DoIdleWork() {

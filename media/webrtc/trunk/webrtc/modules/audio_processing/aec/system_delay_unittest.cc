@@ -43,15 +43,13 @@ class SystemDelayTest : public ::testing::Test {
   int MapBufferSizeToSamples(int size_in_ms);
 
   void* handle_;
-  Aec* self_;
+  aecpc_t* self_;
   int samples_per_frame_;
   // Dummy input/output speech data.
   static const int kSamplesPerChunk = 160;
   float far_[kSamplesPerChunk];
   float near_[kSamplesPerChunk];
   float out_[kSamplesPerChunk];
-  const float* near_ptr_;
-  float* out_ptr_;
 };
 
 SystemDelayTest::SystemDelayTest()
@@ -62,13 +60,11 @@ SystemDelayTest::SystemDelayTest()
     near_[i] = 514.0;
   }
   memset(out_, 0, sizeof(out_));
-  near_ptr_ = near_;
-  out_ptr_ = out_;
 }
 
 void SystemDelayTest::SetUp() {
   ASSERT_EQ(0, WebRtcAec_Create(&handle_));
-  self_ = reinterpret_cast<Aec*>(handle_);
+  self_ = reinterpret_cast<aecpc_t*>(handle_);
 }
 
 void SystemDelayTest::TearDown() {
@@ -107,9 +103,10 @@ void SystemDelayTest::RenderAndCapture(int device_buffer_ms) {
   EXPECT_EQ(0, WebRtcAec_BufferFarend(handle_, far_, samples_per_frame_));
   EXPECT_EQ(0,
             WebRtcAec_Process(handle_,
-                              &near_ptr_,
-                              1,
-                              &out_ptr_,
+                              near_,
+                              NULL,
+                              out_,
+                              NULL,
                               samples_per_frame_,
                               device_buffer_ms,
                               0));
@@ -271,9 +268,10 @@ TEST_F(SystemDelayTest,
     for (; process_time_ms < kStableConvergenceMs; process_time_ms += 10) {
       EXPECT_EQ(0,
                 WebRtcAec_Process(handle_,
-                                  &near_ptr_,
-                                  1,
-                                  &out_ptr_,
+                                  near_,
+                                  NULL,
+                                  out_,
+                                  NULL,
                                   samples_per_frame_,
                                   kDeviceBufMs,
                                   0));
@@ -324,9 +322,10 @@ TEST_F(SystemDelayTest, CorrectDelayWhenBufferUnderrun) {
     for (int j = 0; j <= kStableConvergenceMs; j += 10) {
       EXPECT_EQ(0,
                 WebRtcAec_Process(handle_,
-                                  &near_ptr_,
-                                  1,
-                                  &out_ptr_,
+                                  near_,
+                                  NULL,
+                                  out_,
+                                  NULL,
                                   samples_per_frame_,
                                   kDeviceBufMs,
                                   0));

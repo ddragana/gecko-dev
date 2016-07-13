@@ -28,7 +28,7 @@
 
 #include "convolver.h"
 #include <algorithm>
-#include "skia/include/core/SkTypes.h"
+#include "skia/SkTypes.h"
 
 #if defined(_MIPS_ARCH_LOONGSON3A)
 
@@ -37,13 +37,13 @@
 namespace skia {
 
 // Convolves horizontally along a single row. The row data is given in
-// |src_data| and continues for the num_values() of the filter.
+// |src_data| and continues for the [begin, end) of the filter.
 void ConvolveHorizontally_LS3(const unsigned char* src_data,
+                               int begin, int end,
                                const ConvolutionFilter1D& filter,
                                unsigned char* out_row) {
-  int num_values = filter.num_values();
   int tmp, filter_offset, filter_length;
-  double zero, mask[4], shuf_50, shuf_fa;
+  double zero, mask[3], shuf_50, shuf_fa;
 
   asm volatile (
     ".set push \n\t"
@@ -51,28 +51,27 @@ void ConvolveHorizontally_LS3(const unsigned char* src_data,
     "xor %[zero], %[zero], %[zero] \n\t"
     // |mask| will be used to decimate all extra filter coefficients that are
     // loaded by SIMD when |filter_length| is not divisible by 4.
-    // mask[0] is not used in following algorithm.
     "li %[tmp], 1 \n\t"
     "dsll32 %[tmp], 0x10 \n\t"
     "daddiu %[tmp], -1 \n\t"
-    "dmtc1 %[tmp], %[mask3] \n\t"
-    "dsrl %[tmp], 0x10 \n\t"
-    "mtc1 %[tmp], %[mask2] \n\t"
+    "dmtc1 %[tmp], %[mask2] \n\t"
     "dsrl %[tmp], 0x10 \n\t"
     "mtc1 %[tmp], %[mask1] \n\t"
+    "dsrl %[tmp], 0x10 \n\t"
+    "mtc1 %[tmp], %[mask0] \n\t"
     "ori %[tmp], $0, 0x50 \n\t"
     "mtc1 %[tmp], %[shuf_50] \n\t"
     "ori %[tmp], $0, 0xfa \n\t"
     "mtc1 %[tmp], %[shuf_fa] \n\t"
     ".set pop \n\t"
-    :[zero]"=f"(zero), [mask1]"=f"(mask[1]),
-     [mask2]"=f"(mask[2]), [mask3]"=f"(mask[3]),
+    :[zero]"=f"(zero), [mask0]"=f"(mask[0]),
+     [mask1]"=f"(mask[1]), [mask2]"=f"(mask[2]),
      [shuf_50]"=f"(shuf_50), [shuf_fa]"=f"(shuf_fa),
      [tmp]"=&r"(tmp)
   );
 
   // Output one pixel each iteration, calculating all channels (RGBA) together.
-  for (int out_x = 0; out_x < num_values; out_x++) {
+  for (int out_x = begin; out_x < end; out_x++) {
     const ConvolutionFilter1D::Fixed* filter_values =
         filter.FilterForValue(out_x, &filter_offset, &filter_length);
     double accumh, accuml;
@@ -99,8 +98,7 @@ void ConvolveHorizontally_LS3(const unsigned char* src_data,
         ".set arch=loongson3a \n\t"
         // Load 4 coefficients => duplicate 1st and 2nd of them for all channels.
         // [16] xx xx xx xx c3 c2 c1 c0
-        "gsldlc1 %[coeffl], 7(%[fval]) \n\t"
-        "gsldrc1 %[coeffl], (%[fval]) \n\t"
+        "ldc1 %[coeffl], (%[fval]) \n\t"
         "xor %[coeffh], %[coeffh], %[coeffh] \n\t"
         // [16] xx xx xx xx c1 c1 c0 c0
         _mm_pshuflh(coeff16, coeff, shuf_50)
@@ -171,8 +169,7 @@ void ConvolveHorizontally_LS3(const unsigned char* src_data,
       asm volatile (
         ".set push \n\t"
         ".set arch=loongson3a \n\t"
-        "gsldlc1 %[coeffl], 7(%[fval]) \n\t"
-        "gsldrc1 %[coeffl], (%[fval]) \n\t"
+        "ldc1 %[coeffl], (%[fval]) \n\t"
         "xor %[coeffh], %[coeffh], %[coeffh] \n\t"
         // Mask out extra filter taps.
         "and %[coeffl], %[coeffl], %[mask] \n\t"
@@ -206,7 +203,7 @@ void ConvolveHorizontally_LS3(const unsigned char* src_data,
          [mul_hih]"=&f"(mul_hih), [mul_hil]"=&f"(mul_hil),
          [mul_loh]"=&f"(mul_loh), [mul_lol]"=&f"(mul_lol)
         :[fval]"r"(filter_values), [rtf]"r"(row_to_filter),
-         [zeroh]"f"(zero), [zerol]"f"(zero), [mask]"f"(mask[r]),
+         [zeroh]"f"(zero), [zerol]"f"(zero), [mask]"f"(mask[r-1]),
          [shuf_50]"f"(shuf_50), [shuf_fa]"f"(shuf_fa)
       );
     }
@@ -237,104 +234,16 @@ void ConvolveHorizontally_LS3(const unsigned char* src_data,
   }
 }
 
-// Convolves horizontally along a single row. The row data is given in
-// |src_data| and continues for the [begin, end) of the filter.
-// Process one pixel at a time.
-void ConvolveHorizontally1_LS3(const unsigned char* src_data,
-                               const ConvolutionFilter1D& filter,
-                               unsigned char* out_row) {
-  int num_values = filter.num_values();
-  double zero;
-  double sra;
-
-  asm volatile (
-    ".set push \n"
-    ".set arch=loongson3a \n"
-    "xor %[zero], %[zero], %[zero] \n"
-    "mtc1 %[sk_sra], %[sra] \n"
-    ".set pop \n"
-    :[zero]"=&f"(zero), [sra]"=&f"(sra)
-    :[sk_sra]"r"(ConvolutionFilter1D::kShiftBits)
-  );
-  // Loop over each pixel on this row in the output image.
-  for (int out_x = 0; out_x < num_values; out_x++) {
-    // Get the filter that determines the current output pixel.
-    int filter_offset;
-    int filter_length;
-    const ConvolutionFilter1D::Fixed* filter_values =
-        filter.FilterForValue(out_x, &filter_offset, &filter_length);
-
-    // Compute the first pixel in this row that the filter affects. It will
-    // touch |filter_length| pixels (4 bytes each) after this.
-    const unsigned char* row_to_filter = &src_data[filter_offset * 4];
-
-    // Apply the filter to the row to get the destination pixel in |accum|.
-    double accuml;
-    double accumh;
-    asm volatile (
-      ".set push \n"
-      ".set arch=loongson3a \n"
-      "xor %[accuml], %[accuml], %[accuml] \n"
-      "xor %[accumh], %[accumh], %[accumh] \n"
-      ".set pop \n"
-      :[accuml]"=&f"(accuml), [accumh]"=&f"(accumh)
-    );
-    for (int filter_x = 0; filter_x < filter_length; filter_x++) {
-      double src8;
-      double src16;
-      double coeff;
-      double coeff16;
-      asm volatile (
-        ".set push \n"
-        ".set arch=loongson3a \n"
-        "lwc1 %[src8], %[rtf] \n"
-        "mtc1 %[fv], %[coeff] \n"
-        "pshufh %[coeff16], %[coeff], %[zero] \n"
-        "punpcklbh %[src16], %[src8], %[zero] \n"
-        "pmullh %[src8], %[src16], %[coeff16] \n"
-        "pmulhh %[coeff], %[src16], %[coeff16] \n"
-        "punpcklhw %[src16], %[src8], %[coeff] \n"
-        "punpckhhw %[coeff16], %[src8], %[coeff] \n"
-        "paddw %[accuml], %[accuml], %[src16] \n"
-        "paddw %[accumh], %[accumh], %[coeff16] \n"
-        ".set pop \n"
-        :[accuml]"+f"(accuml), [accumh]"+f"(accumh),
-         [src8]"=&f"(src8), [src16]"=&f"(src16),
-         [coeff]"=&f"(coeff), [coeff16]"=&f"(coeff16)
-        :[rtf]"m"(row_to_filter[filter_x * 4]),
-         [fv]"r"(filter_values[filter_x]), [zero]"f"(zero)
-      );
-    }
-
-    asm volatile (
-      ".set push \n"
-      ".set arch=loongson3a \n"
-      // Bring this value back in range. All of the filter scaling factors
-      // are in fixed point with kShiftBits bits of fractional part.
-      "psraw %[accuml], %[accuml], %[sra] \n"
-      "psraw %[accumh], %[accumh], %[sra] \n"
-      // Store the new pixel.
-      "packsswh %[accuml], %[accuml], %[accumh] \n"
-      "packushb %[accuml], %[accuml], %[zero] \n"
-      "swc1 %[accuml], %[out_row] \n"
-      ".set pop \n"
-      :[accuml]"+f"(accuml), [accumh]"+f"(accumh)
-      :[sra]"f"(sra), [zero]"f"(zero), [out_row]"m"(out_row[out_x * 4])
-      :"memory"
-    );
-  }
-}
-
 // Convolves horizontally along four rows. The row data is given in
-// |src_data| and continues for the num_values() of the filter.
+// |src_data| and continues for the [begin, end) of the filter.
 // The algorithm is almost same as |ConvolveHorizontally_LS3|. Please
 // refer to that function for detailed comments.
 void ConvolveHorizontally4_LS3(const unsigned char* src_data[4],
+                                int begin, int end,
                                 const ConvolutionFilter1D& filter,
                                 unsigned char* out_row[4]) {
-  int num_values = filter.num_values();
   int tmp, filter_offset, filter_length;
-  double zero, mask[4], shuf_50, shuf_fa;
+  double zero, mask[3], shuf_50, shuf_fa;
 
   asm volatile (
     ".set push \n\t"
@@ -342,28 +251,27 @@ void ConvolveHorizontally4_LS3(const unsigned char* src_data[4],
     "xor %[zero], %[zero], %[zero] \n\t"
     // |mask| will be used to decimate all extra filter coefficients that are
     // loaded by SIMD when |filter_length| is not divisible by 4.
-    // mask[0] is not used in following algorithm.
     "li %[tmp], 1 \n\t"
     "dsll32 %[tmp], 0x10 \n\t"
     "daddiu %[tmp], -1 \n\t"
-    "dmtc1 %[tmp], %[mask3] \n\t"
-    "dsrl %[tmp], 0x10 \n\t"
-    "mtc1 %[tmp], %[mask2] \n\t"
+    "dmtc1 %[tmp], %[mask2] \n\t"
     "dsrl %[tmp], 0x10 \n\t"
     "mtc1 %[tmp], %[mask1] \n\t"
+    "dsrl %[tmp], 0x10 \n\t"
+    "mtc1 %[tmp], %[mask0] \n\t"
     "ori %[tmp], $0, 0x50 \n\t"
     "mtc1 %[tmp], %[shuf_50] \n\t"
     "ori %[tmp], $0, 0xfa \n\t"
     "mtc1 %[tmp], %[shuf_fa] \n\t"
     ".set pop \n\t"
-    :[zero]"=f"(zero), [mask1]"=f"(mask[1]),
-     [mask2]"=f"(mask[2]), [mask3]"=f"(mask[3]),
+    :[zero]"=f"(zero), [mask0]"=f"(mask[0]),
+     [mask1]"=f"(mask[1]), [mask2]"=f"(mask[2]),
      [shuf_50]"=f"(shuf_50), [shuf_fa]"=f"(shuf_fa),
      [tmp]"=&r"(tmp)
   );
 
   // Output one pixel each iteration, calculating all channels (RGBA) together.
-  for (int out_x = 0; out_x < num_values; out_x++) {
+  for (int out_x = begin; out_x < end; out_x++) {
     const ConvolutionFilter1D::Fixed* filter_values =
         filter.FilterForValue(out_x, &filter_offset, &filter_length);
     double accum0h, accum0l, accum1h, accum1l;
@@ -395,8 +303,7 @@ void ConvolveHorizontally4_LS3(const unsigned char* src_data[4],
         ".set push \n\t"
         ".set arch=loongson3a \n\t"
         // [16] xx xx xx xx c3 c2 c1 c0
-        "gsldlc1 %[coeffl], 7(%[fval]) \n\t"
-        "gsldrc1 %[coeffl], (%[fval]) \n\t"
+        "ldc1 %[coeffl], (%[fval]) \n\t"
         "xor %[coeffh], %[coeffh], %[coeffh] \n\t"
         // [16] xx xx xx xx c1 c1 c0 c0
         _mm_pshuflh(coeff16lo, coeff, shuf_50)
@@ -465,8 +372,7 @@ void ConvolveHorizontally4_LS3(const unsigned char* src_data[4],
       asm volatile (
         ".set push \n\t"
         ".set arch=loongson3a \n\t"
-        "gsldlc1 %[coeffl], 7(%[fval]) \n\t"
-        "gsldrc1 %[coeffl], (%[fval]) \n\t"
+        "ldc1 %[coeffl], (%[fval]) \n\t"
         "xor %[coeffh], %[coeffh], %[coeffh] \n\t"
         // Mask out extra filter taps.
         "and %[coeffl], %[coeffl], %[mask] \n\t"
@@ -479,7 +385,7 @@ void ConvolveHorizontally4_LS3(const unsigned char* src_data[4],
         :[coeffh]"=&f"(coeffh), [coeffl]"=&f"(coeffl),
          [coeff16loh]"=&f"(coeff16loh), [coeff16lol]"=&f"(coeff16lol),
          [coeff16hih]"=&f"(coeff16hih), [coeff16hil]"=&f"(coeff16hil)
-        :[fval]"r"(filter_values), [mask]"f"(mask[r]),
+        :[fval]"r"(filter_values), [mask]"f"(mask[r-1]),
          [shuf_50]"f"(shuf_50), [shuf_fa]"f"(shuf_fa)
       );
 
@@ -534,17 +440,16 @@ void ConvolveHorizontally4_LS3(const unsigned char* src_data[4],
 // Does vertical convolution to produce one output row. The filter values and
 // length are given in the first two parameters. These are applied to each
 // of the rows pointed to in the |source_data_rows| array, with each row
-// being |pixel_width| wide.
+// being |end - begin| wide.
 //
-// The output must have room for |pixel_width * 4| bytes.
+// The output must have room for |(end - begin) * 4| bytes.
 template<bool has_alpha>
 void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values,
                                   int filter_length,
                                   unsigned char* const* source_data_rows,
-                                  int pixel_width,
+                                  int begin, int end,
                                   unsigned char* out_row) {
   uint64_t tmp;
-  int width = pixel_width & ~3;
   double zero, sra, coeff16h, coeff16l;
   double accum0h, accum0l, accum1h, accum1l;
   double accum2h, accum2l, accum3h, accum3l;
@@ -563,7 +468,7 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
   );
 
   // Output four pixels per iteration (16 bytes).
-  for (out_x = 0; out_x < width; out_x += 4) {
+  for (out_x = begin; out_x + 3 < end; out_x += 4) {
     // Accumulated result for each pixel. 32 bits per RGBA channel.
     asm volatile (
       ".set push \n\t"
@@ -592,8 +497,7 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
         ".set arch=loongson3a \n\t"
         // Duplicate the filter coefficient 8 times.
         // [16] cj cj cj cj cj cj cj cj
-        "gsldlc1 %[coeff16l], 7+%[fval] \n\t"
-        "gsldrc1 %[coeff16l], %[fval] \n\t"
+        "mtc1 %[fval], %[coeff16l] \n\t"
         "pshufh %[coeff16l], %[coeff16l], %[zerol] \n\t"
         "mov.d %[coeff16h], %[coeff16l] \n\t"
         // Load four pixels (16 bytes) together.
@@ -630,7 +534,7 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
          [accum1h]"+f"(accum1h), [accum1l]"+f"(accum1l),
          [coeff16h]"=&f"(coeff16h), [coeff16l]"=&f"(coeff16l)
         :[zeroh]"f"(zero), [zerol]"f"(zero),
-         [fval]"m"(filter_values[filter_y]),
+         [fval]"r"(filter_values[filter_y]),
          [src]"r"(src)
       );
 
@@ -747,7 +651,8 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
 
   // When the width of the output is not divisible by 4, We need to save one
   // pixel (4 bytes) each time. And also the fourth pixel is always absent.
-  if (pixel_width & 3) {
+  int r = end - out_x;
+  if (r > 0) {
     asm volatile (
       ".set push \n\t"
       ".set arch=loongson3a \n\t"
@@ -768,8 +673,7 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
       asm volatile (
         ".set push \n\t"
         ".set arch=loongson3a \n\t"
-        "gsldlc1 %[coeff16l], 7+%[fval] \n\t"
-        "gsldrc1 %[coeff16l], %[fval] \n\t"
+        "mtc1 %[fval], %[coeff16l] \n\t"
         "pshufh %[coeff16l], %[coeff16l], %[zerol] \n\t"
         "mov.d %[coeff16h], %[coeff16l] \n\t"
         // [8] a3 b3 g3 r3 a2 b2 g2 r2 a1 b1 g1 r1 a0 b0 g0 r0
@@ -805,7 +709,7 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
          [accum2h]"+f"(accum2h), [accum2l]"+f"(accum2l),
          [coeff16h]"=&f"(coeff16h), [coeff16l]"=&f"(coeff16l)
         :[zeroh]"f"(zero), [zerol]"f"(zero),
-         [fval]"m"(filter_values[filter_y]),
+         [fval]"r"(filter_values[filter_y]),
          [src]"r"(src)
       );
     }
@@ -889,7 +793,7 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
       :[s4]"=f"(s4), [s64]"=f"(s64),
        [tmp]"=&r"(tmp)
     );
-    for (int out_x = width; out_x < pixel_width; out_x++) {
+    for (; out_x < end; out_x++) {
       double t;
 
       asm volatile (
@@ -911,14 +815,14 @@ void ConvolveVertically_LS3_impl(const ConvolutionFilter1D::Fixed* filter_values
 void ConvolveVertically_LS3(const ConvolutionFilter1D::Fixed* filter_values,
                              int filter_length,
                              unsigned char* const* source_data_rows,
-                             int pixel_width,
+                             int begin, int end,
                              unsigned char* out_row, bool has_alpha) {
   if (has_alpha) {
     ConvolveVertically_LS3_impl<true>(filter_values, filter_length,
-                                       source_data_rows, pixel_width, out_row);
+                                       source_data_rows, begin, end, out_row);
   } else {
     ConvolveVertically_LS3_impl<false>(filter_values, filter_length,
-                                       source_data_rows, pixel_width, out_row);
+                                       source_data_rows, begin, end, out_row);
   }
 }
 

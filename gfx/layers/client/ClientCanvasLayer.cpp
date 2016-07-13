@@ -11,7 +11,6 @@
 #include "SharedSurfaceGL.h"            // for SurfaceFactory_GLTexture, etc
 #include "ClientLayerManager.h"         // for ClientLayerManager, etc
 #include "mozilla/gfx/Point.h"          // for IntSize
-#include "mozilla/layers/AsyncCanvasRenderer.h"
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -19,6 +18,19 @@
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
 #include "nsXULAppAPI.h"                // for XRE_GetProcessType, etc
 #include "gfxPrefs.h"                   // for WebGLForceLayersReadback
+
+#ifdef XP_WIN
+#include "SharedSurfaceANGLE.h"         // for SurfaceFactory_ANGLEShareHandle
+#include "gfxWindowsPlatform.h"
+#endif
+
+#ifdef MOZ_WIDGET_GONK
+#include "SharedSurfaceGralloc.h"
+#endif
+
+#ifdef XP_MACOSX
+#include "SharedSurfaceIO.h"
+#endif
 
 using namespace mozilla::gfx;
 using namespace mozilla::gl;
@@ -65,7 +77,40 @@ ClientCanvasLayer::Initialize(const Data& aData)
     mFlags |= TextureFlags::NON_PREMULTIPLIED;
   }
 
-  UniquePtr<SurfaceFactory> factory = GLScreenBuffer::CreateFactory(mGLContext, caps, forwarder, mFlags);
+  UniquePtr<SurfaceFactory> factory;
+
+  if (!gfxPrefs::WebGLForceLayersReadback()) {
+    switch (forwarder->GetCompositorBackendType()) {
+      case mozilla::layers::LayersBackend::LAYERS_OPENGL: {
+#if defined(XP_MACOSX)
+        factory = SurfaceFactory_IOSurface::Create(mGLContext, caps, forwarder, mFlags);
+#elif defined(MOZ_WIDGET_GONK)
+        factory = MakeUnique<SurfaceFactory_Gralloc>(mGLContext, caps, forwarder, mFlags);
+#else
+        if (mGLContext->GetContextType() == GLContextType::EGL) {
+          if (XRE_IsParentProcess()) {
+            factory = SurfaceFactory_EGLImage::Create(mGLContext, caps, forwarder,
+                                                      mFlags);
+          }
+        }
+#endif
+        break;
+      }
+      case mozilla::layers::LayersBackend::LAYERS_D3D11: {
+#ifdef XP_WIN
+        if (mGLContext->IsANGLE() &&
+            gfxWindowsPlatform::GetPlatform()->DoesD3D11TextureSharingWork())
+        {
+          factory = SurfaceFactory_ANGLEShareHandle::Create(mGLContext, caps, forwarder,
+                                                            mFlags);
+        }
+#endif
+        break;
+      }
+      default:
+        break;
+    }
+  }
 
   if (mGLFrontbuffer) {
     // We're using a source other than the one in the default screen.
@@ -89,6 +134,11 @@ ClientCanvasLayer::RenderLayer()
 
   RenderMaskLayers(this);
 
+  if (!IsDirty()) {
+    return;
+  }
+  Painted();
+
   if (!mCanvasClient) {
     TextureFlags flags = TextureFlags::IMMEDIATE_UPLOAD;
     if (mOriginPos == gl::OriginPos::BottomLeft) {
@@ -111,30 +161,13 @@ ClientCanvasLayer::RenderLayer()
       return;
     }
     if (HasShadow()) {
-      if (mAsyncRenderer) {
-        static_cast<CanvasClientBridge*>(mCanvasClient.get())->SetLayer(this);
-      } else {
-        mCanvasClient->Connect();
-        ClientManager()->AsShadowForwarder()->Attach(mCanvasClient, this);
-      }
+      mCanvasClient->Connect();
+      ClientManager()->AsShadowForwarder()->Attach(mCanvasClient, this);
     }
   }
 
-  if (mCanvasClient && mAsyncRenderer) {
-    mCanvasClient->UpdateAsync(mAsyncRenderer);
-  }
-
-  if (!IsDirty()) {
-    return;
-  }
-  Painted();
-
   FirePreTransactionCallback();
-  if (mBufferProvider && mBufferProvider->GetTextureClient()) {
-    mCanvasClient->UpdateFromTexture(mBufferProvider->GetTextureClient());
-  } else {
-    mCanvasClient->Update(gfx::IntSize(mBounds.width, mBounds.height), this);
-  }
+  mCanvasClient->Update(gfx::IntSize(mBounds.width, mBounds.height), this);
 
   FireDidTransactionCallback();
 
@@ -145,10 +178,6 @@ ClientCanvasLayer::RenderLayer()
 CanvasClient::CanvasClientType
 ClientCanvasLayer::GetCanvasClientType()
 {
-  if (mAsyncRenderer) {
-    return CanvasClient::CanvasClientAsync;
-  }
-
   if (mGLContext) {
     return CanvasClient::CanvasClientTypeShSurf;
   }
@@ -159,7 +188,7 @@ already_AddRefed<CanvasLayer>
 ClientLayerManager::CreateCanvasLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  RefPtr<ClientCanvasLayer> layer =
+  nsRefPtr<ClientCanvasLayer> layer =
     new ClientCanvasLayer(this);
   CREATE_SHADOW(Canvas);
   return layer.forget();

@@ -36,7 +36,7 @@ public:
   NS_DECL_NSIDNSLISTENER
   NS_DECL_NSIDNSLISTENERPROXY
 
-  class OnLookupCompleteRunnable : public Runnable
+  class OnLookupCompleteRunnable : public nsRunnable
   {
   public:
     OnLookupCompleteRunnable(const nsMainThreadPtrHandle<nsIDNSListener>& aListener,

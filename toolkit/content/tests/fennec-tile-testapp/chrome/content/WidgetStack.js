@@ -48,7 +48,7 @@ function log2() {
   logbase.apply(window, arguments);
 }
 
-var reportError = log;
+let reportError = log;
 
 /*
  * wsBorder class
@@ -551,8 +551,7 @@ WidgetStack.prototype = {
     this.globalOffsetX += x;
     this.globalOffsetY += y;
 
-    for (let wid in this._widgetState) {
-      let state = this._widgetState[wid];
+    for each (let state in this._widgetState) {
       state.rect.x += x;
       state.rect.y += y;
 
@@ -601,8 +600,7 @@ WidgetStack.prototype = {
     //log2("setViewportBounds dltrb", dleft, dtop, dright, dbottom);
 
     // move all vp-relative widgets to be the right offset from the bounds again
-    for (let wid in this._widgetState) {
-      let state = this._widgetState[wid];
+    for each (let state in this._widgetState) {
       if (state.vpRelative) {
         //log2("vpRelative widget", state.id, state.rect.x, dleft, dright);
         if (state.vpOffsetXBefore) {
@@ -771,10 +769,8 @@ WidgetStack.prototype = {
 
     // XXX these methods aren't working correctly yet, but they aren't strictly
     // necessary in Fennec's default config
-    //for (let wid in this._widgetState) {
-    //  let s = this._widgetState[wid];
+    //for each (let s in this._widgetState)
     //  this._updateWidgetRect(s);
-    //}
     //this._updateViewportOverflow();
 
     this._viewingRect.width = width;
@@ -1116,8 +1112,7 @@ WidgetStack.prototype = {
     // will be ignored in commitState.
     // The widget rects are in real stack space though, so we need to subtract
     // our (now negated) dx, dy from their coordinates.
-    for (let wid in this._widgetState) {
-      let state = this._widgetState[wid];
+    for each (let state in this._widgetState) {
       if (!state.ignoreX)
         state.rect.x -= dx;
       if (!state.ignoreY)
@@ -1180,7 +1175,7 @@ WidgetStack.prototype = {
 
     if (w.hasAttribute("constraint")) {
       let cs = w.getAttribute("constraint").split(",");
-      for (let s of cs) {
+      for each (let s in cs) {
         if (s == "ignore-x")
           state.ignoreX = true;
         else if (s == "ignore-y")
@@ -1244,8 +1239,7 @@ WidgetStack.prototype = {
 
     let ofRect = this._viewingRect.clone();
 
-    for (let wid in this._widgetState) {
-      let state = this._widgetState[wid];
+    for each (let state in this._widgetState) {
       if (vp && state.vpRelative) {
         // compute the vpOffset from 0,0 assuming that the viewport rect is 0,0
         if (state.rect.left >= vp.rect.right) {
@@ -1279,8 +1273,7 @@ WidgetStack.prototype = {
 
     let ofRect = new wsRect(0, 0, this._viewingRect.width, this._viewingRect.height);
 
-    for (let wid in this._widgetState) {
-      let state = this._widgetState[wid];
+    for each (let state in this._widgetState) {
       if (vp && state.vpRelative) {
         ofRect.left = Math.min(ofRect.left, state.rect.left);
         ofRect.top = Math.min(ofRect.top, state.rect.top);
@@ -1307,10 +1300,8 @@ WidgetStack.prototype = {
   _widgetBounds: function () {
     let r = new wsRect(0,0,0,0);
 
-    for (let wid in this._widgetState) {
-      let state = this._widgetState[wid];
+    for each (let state in this._widgetState)
       r = r.union(state.rect);
-    }
 
     return r;
   },
@@ -1399,7 +1390,7 @@ WidgetStack.prototype = {
 
     if (el.hasAttribute("constraint")) {
       let cs = el.getAttribute("constraint").split(",");
-      for (let s of cs) {
+      for each (let s in cs) {
         if (s == "ignore-x")
           barrier.ignoreX = true;
         else if (s == "ignore-y")

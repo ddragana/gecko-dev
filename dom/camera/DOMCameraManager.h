@@ -10,6 +10,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/Promise.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsIObserver.h"
 #include "nsHashKeys.h"
 #include "nsWrapperCache.h"
@@ -18,7 +19,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
   class ErrorResult;
@@ -49,9 +50,9 @@ public:
   // Great Renaming proposed in bug 983177.
   static bool HasSupport(JSContext* aCx, JSObject* aGlobal);
 
-  static bool CheckPermission(nsPIDOMWindowInner* aWindow);
+  static bool CheckPermission(nsPIDOMWindow* aWindow);
   static already_AddRefed<nsDOMCameraManager>
-    CreateInstance(nsPIDOMWindowInner* aWindow);
+    CreateInstance(nsPIDOMWindow* aWindow);
   static bool IsWindowStillActive(uint64_t aWindowId);
 
   void Register(mozilla::nsDOMCameraControl* aDOMCameraControl);
@@ -72,7 +73,7 @@ public:
             mozilla::ErrorResult& aRv);
   void GetListOfCameras(nsTArray<nsString>& aList, mozilla::ErrorResult& aRv);
 
-  nsPIDOMWindowInner* GetParentObject() const { return mWindow; }
+  nsPIDOMWindow* GetParentObject() const { return mWindow; }
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 #ifdef MOZ_WIDGET_GONK
@@ -86,14 +87,14 @@ protected:
 
 private:
   nsDOMCameraManager() = delete;
-  explicit nsDOMCameraManager(nsPIDOMWindowInner* aWindow);
+  explicit nsDOMCameraManager(nsPIDOMWindow* aWindow);
   nsDOMCameraManager(const nsDOMCameraManager&) = delete;
   nsDOMCameraManager& operator=(const nsDOMCameraManager&) = delete;
 
 protected:
   uint64_t mWindowId;
   uint32_t mPermission;
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   /**
    * 'sActiveWindows' is only ever accessed while in the Main Thread,
    * so it is not otherwise protected.

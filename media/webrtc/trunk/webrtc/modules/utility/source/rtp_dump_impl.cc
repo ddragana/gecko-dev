@@ -12,7 +12,6 @@
 
 #include <assert.h>
 #include <stdio.h>
-#include <limits>
 
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
@@ -55,7 +54,7 @@ typedef struct
     uint16_t plen;
     // Milliseconds since the start of recording.
     uint32_t offset;
-} RtpDumpPacketHeader;
+} rtpDumpPktHdr_t;
 
 RtpDump* RtpDump::CreateRtpDump()
 {
@@ -146,7 +145,7 @@ bool RtpDumpImpl::IsActive() const
     return _file.Open();
 }
 
-int32_t RtpDumpImpl::DumpPacket(const uint8_t* packet, size_t packetLength)
+int32_t RtpDumpImpl::DumpPacket(const uint8_t* packet, uint16_t packetLength)
 {
     CriticalSectionScoped lock(_critSect);
     if (!IsActive())
@@ -159,9 +158,7 @@ int32_t RtpDumpImpl::DumpPacket(const uint8_t* packet, size_t packetLength)
         return -1;
     }
 
-    RtpDumpPacketHeader hdr;
-    size_t total_size = packetLength + sizeof hdr;
-    if (packetLength < 1 || total_size > std::numeric_limits<uint16_t>::max())
+    if (packetLength < 1)
     {
         return -1;
     }
@@ -170,8 +167,11 @@ int32_t RtpDumpImpl::DumpPacket(const uint8_t* packet, size_t packetLength)
     // considered RTP (without further verification).
     bool isRTCP = RTCP(packet);
 
+    rtpDumpPktHdr_t hdr;
+    uint32_t offset;
+
     // Offset is relative to when recording was started.
-    uint32_t offset = GetTimeInMS();
+    offset = GetTimeInMS();
     if (offset < _startTime)
     {
         // Compensate for wraparound.
@@ -181,7 +181,7 @@ int32_t RtpDumpImpl::DumpPacket(const uint8_t* packet, size_t packetLength)
     }
     hdr.offset = RtpDumpHtonl(offset);
 
-    hdr.length = RtpDumpHtons((uint16_t)(total_size));
+    hdr.length = RtpDumpHtons((uint16_t)(packetLength + sizeof(hdr)));
     if (isRTCP)
     {
         hdr.plen = 0;
@@ -207,9 +207,22 @@ int32_t RtpDumpImpl::DumpPacket(const uint8_t* packet, size_t packetLength)
 
 bool RtpDumpImpl::RTCP(const uint8_t* packet) const
 {
-    return packet[1] == 192 || packet[1] == 200 || packet[1] == 201 ||
-        packet[1] == 202 || packet[1] == 203 || packet[1] == 204 ||
-        packet[1] == 205 || packet[1] == 206 || packet[1] == 207;
+    const uint8_t payloadType = packet[1];
+    bool is_rtcp = false;
+
+    switch(payloadType)
+    {
+    case 192:
+        is_rtcp = true;
+        break;
+    case 193: case 195:
+        break;
+    case 200: case 201: case 202: case 203:
+    case 204: case 205: case 206: case 207:
+        is_rtcp = true;
+        break;
+    }
+    return is_rtcp;
 }
 
 // TODO (hellner): why is TickUtil not used here?

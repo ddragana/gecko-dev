@@ -19,22 +19,22 @@
 namespace js {
 
 GenericPrinter::GenericPrinter()
-  : hadOOM_(false)
+  : reportedOOM_(false)
 {
 }
 
 void
 GenericPrinter::reportOutOfMemory()
 {
-    if (hadOOM_)
+    if (reportedOOM_)
         return;
-    hadOOM_ = true;
+    reportedOOM_ = true;
 }
 
 bool
 GenericPrinter::hadOutOfMemory() const
 {
-    return hadOOM_;
+    return reportedOOM_;
 }
 
 int
@@ -88,12 +88,11 @@ Sprinter::realloc_(size_t newSize)
     return true;
 }
 
-Sprinter::Sprinter(ExclusiveContext* cx, bool shouldReportOOM)
+Sprinter::Sprinter(ExclusiveContext* cx)
   : context(cx),
 #ifdef DEBUG
     initialized(false),
 #endif
-    shouldReportOOM(shouldReportOOM),
     base(nullptr), size(0), offset(0)
 { }
 
@@ -208,7 +207,7 @@ Sprinter::vprintf(const char* fmt, va_list ap)
     do {
         va_list aq;
         va_copy(aq, ap);
-        int i = JS_vsnprintf(base + offset, size - offset, fmt, aq);
+        int i = vsnprintf(base + offset, size - offset, fmt, aq);
         va_end(aq);
         if (i > -1 && (size_t) i < size - offset) {
             offset += i;
@@ -255,11 +254,11 @@ Sprinter::getOffset() const
 void
 Sprinter::reportOutOfMemory()
 {
-    if (hadOOM_)
+    if (reportedOOM_)
         return;
-    if (context && shouldReportOOM)
+    if (context)
         ReportOutOfMemory(context);
-    hadOOM_ = true;
+    reportedOOM_ = true;
 }
 
 ptrdiff_t
@@ -386,15 +385,13 @@ QuoteString(ExclusiveContext* cx, JSString* str, char16_t quote)
 }
 
 Fprinter::Fprinter(FILE* fp)
-  : file_(nullptr),
-    init_(false)
+  : file_(nullptr)
 {
     init(fp);
 }
 
 Fprinter::Fprinter()
-  : file_(nullptr),
-    init_(false)
+  : file_(nullptr)
 { }
 
 Fprinter::~Fprinter()
@@ -510,7 +507,7 @@ LSprinter::clear()
     head_ = nullptr;
     tail_ = nullptr;
     unused_ = 0;
-    hadOOM_ = false;
+    reportedOOM_ = false;
 }
 
 int
@@ -598,15 +595,15 @@ LSprinter::vprintf(const char* fmt, va_list ap)
 void
 LSprinter::reportOutOfMemory()
 {
-    if (hadOOM_)
+    if (reportedOOM_)
         return;
-    hadOOM_ = true;
+    reportedOOM_ = true;
 }
 
 bool
 LSprinter::hadOutOfMemory() const
 {
-    return hadOOM_;
+    return reportedOOM_;
 }
 
 } // namespace js

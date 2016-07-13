@@ -1,5 +1,5 @@
 
-var o2 = new Proxy({}, {});
+var o2 = Proxy.create({});
 function f1() {}
 function f2() {}
 function f4(o) {

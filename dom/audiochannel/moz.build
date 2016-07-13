@@ -21,9 +21,7 @@ UNIFIED_SOURCES += [
     'AudioChannelService.cpp',
 ]
 
-LOCAL_INCLUDES += [
-    '/dom/base/',
-]
+FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

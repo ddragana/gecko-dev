@@ -95,7 +95,9 @@ class FilesystemInterface {
 
   // Returns a DirectoryIterator for a given pathname.
   // TODO: Do fancy abstracted stuff
-  virtual DirectoryIterator* IterateDirectory();
+  virtual DirectoryIterator *IterateDirectory() {
+    return new DirectoryIterator();
+  }
 
   // Opens a file. Returns an open StreamInterface if function succeeds.
   // Otherwise, returns NULL.
@@ -131,7 +133,9 @@ class FilesystemInterface {
 
   // This deletes the contents of a folder, recursively, and then deletes
   // the folder itself.
-  virtual bool DeleteFolderAndContents(const Pathname& folder);
+  virtual bool DeleteFolderAndContents(const Pathname &folder) {
+    return DeleteFolderContents(folder) && DeleteEmptyFolder(folder);
+  }
 
   // This will delete whatever is located at path, be it a file or a folder.
   // If it is a folder, it will delete it recursively by calling

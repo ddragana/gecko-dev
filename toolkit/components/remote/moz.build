@@ -14,7 +14,7 @@ SOURCES += [
     'nsXRemoteService.cpp',
 ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_ENABLE_GTK']:
     SOURCES += [
         'nsGTKRemoteService.cpp',
     ]
@@ -26,3 +26,5 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
 FINAL_LIBRARY = 'xul'
 
 CXXFLAGS += CONFIG['TK_CFLAGS']
+
+FAIL_ON_WARNINGS = True

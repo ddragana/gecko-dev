@@ -97,16 +97,16 @@ nsLayoutDebuggingTools::~nsLayoutDebuggingTools()
 NS_IMPL_ISUPPORTS(nsLayoutDebuggingTools, nsILayoutDebuggingTools)
 
 NS_IMETHODIMP
-nsLayoutDebuggingTools::Init(mozIDOMWindow* aWin)
+nsLayoutDebuggingTools::Init(nsIDOMWindow *aWin)
 {
     if (!Preferences::GetService()) {
         return NS_ERROR_UNEXPECTED;
     }
 
     {
-        if (!aWin)
+        nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aWin);
+        if (!window)
             return NS_ERROR_UNEXPECTED;
-        auto* window = nsPIDOMWindowInner::From(aWin);
         mDocShell = window->GetDocShell();
     }
     NS_ENSURE_TRUE(mDocShell, NS_ERROR_UNEXPECTED);
@@ -426,7 +426,7 @@ DumpViewsRecur(nsIDocShell* aDocShell, FILE* out)
 {
 #ifdef DEBUG
     fprintf(out, "docshell=%p \n", static_cast<void*>(aDocShell));
-    RefPtr<nsViewManager> vm(view_manager(aDocShell));
+    nsRefPtr<nsViewManager> vm(view_manager(aDocShell));
     if (vm) {
         nsView* root = vm->GetRootView();
         if (root) {
@@ -516,7 +516,7 @@ nsLayoutDebuggingTools::DumpReflowStats()
 
 void nsLayoutDebuggingTools::ForceRefresh()
 {
-    RefPtr<nsViewManager> vm(view_manager(mDocShell));
+    nsRefPtr<nsViewManager> vm(view_manager(mDocShell));
     if (!vm)
         return;
     nsView* root = vm->GetRootView();

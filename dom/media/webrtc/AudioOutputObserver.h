@@ -6,7 +6,6 @@
 #define AUDIOOUTPUTOBSERVER_H_
 
 #include "mozilla/StaticPtr.h"
-#include "nsAutoPtr.h"
 #include "AudioMixer.h"
 
 namespace webrtc {

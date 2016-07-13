@@ -21,9 +21,6 @@ math {
   font-size: inherit;
   font-style: normal;
   font-family: serif;
-  line-height: normal;
-  word-spacing: normal;
-  letter-spacing: normal;
   text-rendering: optimizeLegibility;
   -moz-float-edge: margin-box;
   -moz-math-display: inline;
@@ -173,10 +170,10 @@ mtr:last-child > mtd {
   padding-bottom: 0ex;
 }
 mtd:first-child {
-  padding-inline-start: 0em;
+  -moz-padding-start: 0em;
 }
 mtd:last-child {
-  padding-inline-end: 0em;
+  -moz-padding-end: 0em;
 }
 /* re-instate the spacing if the table has a surrounding frame */
 mtable[frame="solid"] > mtr:first-child > mtd,
@@ -189,11 +186,11 @@ mtable[frame="dashed"] > mtr:last-child > mtd {
 }
 mtable[frame="solid"] > mtr > mtd:first-child,
 mtable[frame="dashed"] > mtr > mtd:first-child {
-  padding-inline-start: 0.4em; /* framespacing.left (or right in rtl)*/
+  -moz-padding-start: 0.4em; /* framespacing.left (or right in rtl)*/
 }
 mtable[frame="solid"] > mtr > mtd:last-child,
 mtable[frame="dashed"] > mtr > mtd:last-child {
-  padding-inline-end: 0.4em; /* framespacing.right (or left in rtl)*/
+  -moz-padding-end: 0.4em; /* framespacing.right (or left in rtl)*/
 }
 
 mtable[rowspacing] > mtr > mtd,

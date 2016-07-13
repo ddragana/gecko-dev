@@ -7,7 +7,7 @@
 #define NSSUBDOCUMENTFRAME_H_
 
 #include "mozilla/Attributes.h"
-#include "nsAtomicContainerFrame.h"
+#include "nsLeafFrame.h"
 #include "nsIReflowCallback.h"
 #include "nsFrameLoader.h"
 #include "Units.h"
@@ -15,7 +15,7 @@
 /******************************************************************************
  * nsSubDocumentFrame
  *****************************************************************************/
-class nsSubDocumentFrame : public nsAtomicContainerFrame,
+class nsSubDocumentFrame : public nsLeafFrame,
                            public nsIReflowCallback
 {
 public:
@@ -35,10 +35,9 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsAtomicContainerFrame::IsFrameOfType(aFlags &
-      ~(nsIFrame::eReplaced |
-        nsIFrame::eReplacedSizing |
-        nsIFrame::eReplacedContainsBlock));
+    // nsLeafFrame is already eReplacedContainsBlock, but that's somewhat bogus
+    return nsLeafFrame::IsFrameOfType(aFlags &
+      ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock));
   }
 
   virtual void Init(nsIContent*       aContent,
@@ -139,8 +138,8 @@ protected:
 
   bool IsInline() { return mIsInline; }
 
-  nscoord GetIntrinsicISize();
-  nscoord GetIntrinsicBSize();
+  virtual nscoord GetIntrinsicISize() override;
+  virtual nscoord GetIntrinsicBSize() override;
 
   // Show our document viewer. The document viewer is hidden via a script
   // runner, so that we can save and restore the presentation if we're
@@ -157,7 +156,7 @@ protected:
    */
   nsIFrame* ObtainIntrinsicSizeFrame();
 
-  RefPtr<nsFrameLoader> mFrameLoader;
+  nsRefPtr<nsFrameLoader> mFrameLoader;
   nsView* mInnerView;
   bool mIsInline;
   bool mPostedReflowCallback;

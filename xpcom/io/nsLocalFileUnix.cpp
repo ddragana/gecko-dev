@@ -20,6 +20,9 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <locale.h>
+#if defined(VMS)
+#include <fabdef.h>
+#endif
 
 #if defined(HAVE_SYS_QUOTA_H) && defined(HAVE_LINUX_QUOTA_H)
 #define USE_LINUX_QUOTACTL
@@ -281,7 +284,7 @@ NS_IMETHODIMP
 nsLocalFile::Clone(nsIFile** aFile)
 {
   // Just copy-construct ourselves
-  RefPtr<nsLocalFile> copy = new nsLocalFile(*this);
+  nsRefPtr<nsLocalFile> copy = new nsLocalFile(*this);
   copy.forget(aFile);
   return NS_OK;
 }
@@ -1004,7 +1007,11 @@ nsLocalFile::MoveToNative(nsIFile* aNewParent, const nsACString& aNewName)
 
   // try for atomic rename, falling back to copy/delete
   if (rename(mPath.get(), newPathName.get()) < 0) {
+#ifdef VMS
+    if (errno == EXDEV || errno == ENXIO) {
+#else
     if (errno == EXDEV) {
+#endif
       rv = CopyToNative(aNewParent, aNewName);
       if (NS_SUCCEEDED(rv)) {
         rv = Remove(true);
@@ -1223,6 +1230,14 @@ nsLocalFile::GetFileSize(int64_t* aFileSize)
   }
   *aFileSize = 0;
   ENSURE_STAT_CACHE();
+
+#if defined(VMS)
+  /* Only two record formats can report correct file content size */
+  if ((mCachedStat.st_fab_rfm != FAB$C_STMLF) &&
+      (mCachedStat.st_fab_rfm != FAB$C_STMCR)) {
+    return NS_ERROR_FAILURE;
+  }
+#endif
 
   if (!S_ISDIR(mCachedStat.st_mode)) {
     *aFileSize = (int64_t)mCachedStat.st_size;
@@ -1845,7 +1860,7 @@ nsLocalFile::SetFollowLinks(bool aFollowLinks)
 NS_IMETHODIMP
 nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator** aEntries)
 {
-  RefPtr<nsDirEnumeratorUnix> dir = new nsDirEnumeratorUnix();
+  nsRefPtr<nsDirEnumeratorUnix> dir = new nsDirEnumeratorUnix();
 
   nsresult rv = dir->Init(this, false);
   if (NS_FAILED(rv)) {
@@ -2047,7 +2062,7 @@ nsresult
 NS_NewNativeLocalFile(const nsACString& aPath, bool aFollowSymlinks,
                       nsIFile** aResult)
 {
-  RefPtr<nsLocalFile> file = new nsLocalFile();
+  nsRefPtr<nsLocalFile> file = new nsLocalFile();
 
   file->SetFollowLinks(aFollowSymlinks);
 
@@ -2162,7 +2177,11 @@ nsLocalFile::RenameToNative(nsIFile* aNewParentDir, const nsACString& aNewName)
 
   // try for atomic rename
   if (rename(mPath.get(), newPathName.get()) < 0) {
+#ifdef VMS
+    if (errno == EXDEV || errno == ENXIO) {
+#else
     if (errno == EXDEV) {
+#endif
       rv = NS_ERROR_FILE_ACCESS_DENIED;
     } else {
       rv = NSRESULT_FOR_ERRNO();
@@ -2684,7 +2703,7 @@ nsresult
 NS_NewLocalFileWithFSRef(const FSRef* aFSRef, bool aFollowLinks,
                          nsILocalFileMac** aResult)
 {
-  RefPtr<nsLocalFile> file = new nsLocalFile();
+  nsRefPtr<nsLocalFile> file = new nsLocalFile();
 
   file->SetFollowLinks(aFollowLinks);
 
@@ -2700,7 +2719,7 @@ nsresult
 NS_NewLocalFileWithCFURL(const CFURLRef aURL, bool aFollowLinks,
                          nsILocalFileMac** aResult)
 {
-  RefPtr<nsLocalFile> file = new nsLocalFile();
+  nsRefPtr<nsLocalFile> file = new nsLocalFile();
 
   file->SetFollowLinks(aFollowLinks);
 

@@ -15,7 +15,6 @@
 #include <limits>
 
 #include "webrtc/base/checks.h"
-#include "webrtc/base/safe_conversions.h"
 #include "webrtc/common_audio/include/audio_util.h"
 #include "webrtc/common_audio/wav_header.h"
 
@@ -25,28 +24,18 @@ namespace webrtc {
 static const WavFormat kWavFormat = kWavFormatPcm;
 static const int kBytesPerSample = 2;
 
-// Doesn't take ownership of the file handle and won't close it.
-class ReadableWavFile : public ReadableWav {
- public:
-  explicit ReadableWavFile(FILE* file) : file_(file) {}
-  virtual size_t Read(void* buf, size_t num_bytes) {
-    return fread(buf, 1, num_bytes, file_);
-  }
-
- private:
-  FILE* file_;
-};
-
 WavReader::WavReader(const std::string& filename)
     : file_handle_(fopen(filename.c_str(), "rb")) {
-  CHECK(file_handle_ && "Could not open wav file for reading.");
+  CHECK(file_handle_);
+  uint8_t header[kWavHeaderSize];
+  const size_t read =
+      fread(header, sizeof(*header), kWavHeaderSize, file_handle_);
+  CHECK_EQ(kWavHeaderSize, read);
 
-  ReadableWavFile readable(file_handle_);
   WavFormat format;
   int bytes_per_sample;
-  CHECK(ReadWavHeader(&readable, &num_channels_, &sample_rate_, &format,
+  CHECK(ReadWavHeader(header, &num_channels_, &sample_rate_, &format,
                       &bytes_per_sample, &num_samples_));
-  num_samples_remaining_ = num_samples_;
   CHECK_EQ(kWavFormat, format);
   CHECK_EQ(kBytesPerSample, bytes_per_sample);
 }
@@ -56,15 +45,12 @@ WavReader::~WavReader() {
 }
 
 size_t WavReader::ReadSamples(size_t num_samples, int16_t* samples) {
-  // There could be metadata after the audio; ensure we don't read it.
-  num_samples = std::min(rtc::checked_cast<uint32_t>(num_samples),
-                         num_samples_remaining_);
+
+
   const size_t read =
       fread(samples, sizeof(*samples), num_samples, file_handle_);
   // If we didn't read what was requested, ensure we've reached the EOF.
   CHECK(read == num_samples || feof(file_handle_));
-  CHECK_LE(read, num_samples_remaining_);
-  num_samples_remaining_ -= rtc::checked_cast<uint32_t>(read);
 #ifndef WEBRTC_ARCH_LITTLE_ENDIAN
   //convert to big-endian
   for(size_t idx = 0; idx < num_samples; idx++) {
@@ -99,19 +85,17 @@ WavWriter::WavWriter(const std::string& filename, int sample_rate,
       num_channels_(num_channels),
       num_samples_(0),
       file_handle_(fopen(filename.c_str(), "wb")) {
-  if (file_handle_) {
-    CHECK(file_handle_ && "Could not open wav file for writing.");
-    CHECK(CheckWavParameters(num_channels_,
-                             sample_rate_,
-                             kWavFormat,
-                             kBytesPerSample,
-                             num_samples_));
+  CHECK(file_handle_);
+  CHECK(CheckWavParameters(num_channels_,
+                           sample_rate_,
+                           kWavFormat,
+                           kBytesPerSample,
+                           num_samples_));
 
-    // Write a blank placeholder header, since we need to know the total number
-    // of samples before we can fill in the real data.
-    static const uint8_t blank_header[kWavHeaderSize] = {0};
-    CHECK_EQ(1u, fwrite(blank_header, kWavHeaderSize, 1, file_handle_));
-  }
+  // Write a blank placeholder header, since we need to know the total number
+  // of samples before we can fill in the real data.
+  static const uint8_t blank_header[kWavHeaderSize] = {0};
+  CHECK_EQ(1u, fwrite(blank_header, kWavHeaderSize, 1, file_handle_));
 }
 
 WavWriter::~WavWriter() {
@@ -119,9 +103,6 @@ WavWriter::~WavWriter() {
 }
 
 void WavWriter::WriteSamples(const int16_t* samples, size_t num_samples) {
-  if (!file_handle_) {
-    return;
-  }
 #ifndef WEBRTC_ARCH_LITTLE_ENDIAN
   int16_t * le_samples = new int16_t[num_samples];
   for(size_t idx = 0; idx < num_samples; idx++) {
@@ -156,9 +137,6 @@ void WavWriter::WriteSamples(const float* samples, size_t num_samples) {
 }
 
 void WavWriter::Close() {
-  if (!file_handle_) {
-    return;
-  }
   CHECK_EQ(0, fseek(file_handle_, 0, SEEK_SET));
   uint8_t header[kWavHeaderSize];
   WriteWavHeader(header, num_channels_, sample_rate_, kWavFormat,

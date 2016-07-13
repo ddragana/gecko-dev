@@ -54,24 +54,10 @@
                 label="&openLinkCmdInCurrent.label;"
                 accesskey="&openLinkCmdInCurrent.accesskey;"
                 oncommand="gContextMenu.openLinkInCurrent();"/>
-# label and usercontextid are dynamically set.
-      <menuitem id="context-openlinkincontainertab"
-                accesskey="&openLinkCmdInTab.accesskey;"
-                oncommand="gContextMenu.openLinkInTab(event);"/>
       <menuitem id="context-openlinkintab"
                 label="&openLinkCmdInTab.label;"
                 accesskey="&openLinkCmdInTab.accesskey;"
-                usercontextid="0"
-                oncommand="gContextMenu.openLinkInTab(event);"/>
-
-      <menu id="context-openlinkinusercontext-menu"
-            label="&openLinkCmdInContainerTab.label;"
-            accesskey="&openLinkCmdInContainerTab.accesskey;"
-            hidden="true">
-        <menupopup oncommand="gContextMenu.openLinkInTab(event);"
-                   onpopupshowing="return gContextMenu.createContainerMenu(event);" />
-      </menu>
-
+                oncommand="gContextMenu.openLinkInTab();"/>
       <menuitem id="context-openlink"
                 label="&openLinkCmd.label;"
                 accesskey="&openLinkCmd.accesskey;"
@@ -93,6 +79,10 @@
                 label="&saveLinkCmd.label;"
                 accesskey="&saveLinkCmd.accesskey;"
                 oncommand="gContextMenu.saveLink();"/>
+      <menuitem id="context-savelinktopocket"
+                label="&saveLinkToPocketCmd.label;"
+                accesskey="&saveLinkToPocketCmd.accesskey;"
+                oncommand="gContextMenu.saveLinkToPocket();"/>
       <menu id="context-marklinkMenu" label="&social.marklinkMenu.label;"
             accesskey="&social.marklinkMenu.accesskey;">
         <menupopup/>
@@ -122,46 +112,35 @@
                 label="&mediaUnmute.label;"
                 accesskey="&mediaUnmute.accesskey;"
                 oncommand="gContextMenu.mediaCommand('unmute');"/>
-      <menu id="context-media-playbackrate" label="&mediaPlaybackRate2.label;" accesskey="&mediaPlaybackRate2.accesskey;">
+      <menu id="context-media-playbackrate" label="&mediaPlaybackRate.label;" accesskey="&mediaPlaybackRate.accesskey;">
         <menupopup>
           <menuitem id="context-media-playbackrate-050x"
-                    label="&mediaPlaybackRate050x2.label;"
-                    accesskey="&mediaPlaybackRate050x2.accesskey;"
+                    label="&mediaPlaybackRate050x.label;"
+                    accesskey="&mediaPlaybackRate050x.accesskey;"
                     type="radio"
                     name="playbackrate"
                     oncommand="gContextMenu.mediaCommand('playbackRate', 0.5);"/>
           <menuitem id="context-media-playbackrate-100x"
-                    label="&mediaPlaybackRate100x2.label;"
-                    accesskey="&mediaPlaybackRate100x2.accesskey;"
+                    label="&mediaPlaybackRate100x.label;"
+                    accesskey="&mediaPlaybackRate100x.accesskey;"
                     type="radio"
                     name="playbackrate"
                     checked="true"
                     oncommand="gContextMenu.mediaCommand('playbackRate', 1.0);"/>
-          <menuitem id="context-media-playbackrate-125x"
-                    label="&mediaPlaybackRate125x2.label;"
-                    accesskey="&mediaPlaybackRate125x2.accesskey;"
-                    type="radio"
-                    name="playbackrate"
-                    oncommand="gContextMenu.mediaCommand('playbackRate', 1.25);"/>
           <menuitem id="context-media-playbackrate-150x"
-                    label="&mediaPlaybackRate150x2.label;"
-                    accesskey="&mediaPlaybackRate150x2.accesskey;"
+                    label="&mediaPlaybackRate150x.label;"
+                    accesskey="&mediaPlaybackRate150x.accesskey;"
                     type="radio"
                     name="playbackrate"
                     oncommand="gContextMenu.mediaCommand('playbackRate', 1.5);"/>
           <menuitem id="context-media-playbackrate-200x"
-                    label="&mediaPlaybackRate200x2.label;"
-                    accesskey="&mediaPlaybackRate200x2.accesskey;"
+                    label="&mediaPlaybackRate200x.label;"
+                    accesskey="&mediaPlaybackRate200x.accesskey;"
                     type="radio"
                     name="playbackrate"
                     oncommand="gContextMenu.mediaCommand('playbackRate', 2.0);"/>
         </menupopup>
       </menu>
-      <menuitem id="context-media-loop"
-                label="&mediaLoop.label;"
-                accesskey="&mediaLoop.accesskey;"
-                type="checkbox"
-                oncommand="gContextMenu.mediaCommand('loop');"/>
       <menuitem id="context-media-showcontrols"
                 label="&mediaShowControls.label;"
                 accesskey="&mediaShowControls.accesskey;"
@@ -170,6 +149,14 @@
                 label="&mediaHideControls.label;"
                 accesskey="&mediaHideControls.accesskey;"
                 oncommand="gContextMenu.mediaCommand('hidecontrols');"/>
+      <menuitem id="context-video-showstats"
+                accesskey="&videoShowStats.accesskey;"
+                label="&videoShowStats.label;"
+                oncommand="gContextMenu.mediaCommand('showstats');"/>
+      <menuitem id="context-video-hidestats"
+                accesskey="&videoHideStats.accesskey;"
+                label="&videoHideStats.label;"
+                oncommand="gContextMenu.mediaCommand('hidestats');"/>
       <menuitem id="context-video-fullscreen"
                 accesskey="&videoFullScreen.accesskey;"
                 label="&videoFullScreen.label;"
@@ -283,6 +270,10 @@
                 label="&savePageCmd.label;"
                 accesskey="&savePageCmd.accesskey2;"
                 oncommand="gContextMenu.savePageAs();"/>
+      <menuitem id="context-pocket"
+                label="&saveToPocketCmd.label;"
+                accesskey="&saveToPocketCmd.accesskey;"
+                oncommand="gContextMenu.savePageToPocket();"/>
       <menu id="context-markpageMenu" label="&social.markpageMenu.label;"
             accesskey="&social.markpageMenu.accesskey;">
         <menupopup/>
@@ -391,7 +382,7 @@
                 label="&viewPageSourceCmd.label;"
                 accesskey="&viewPageSourceCmd.accesskey;"
                 oncommand="BrowserViewSource(gContextMenu.browser);"
-                observes="canViewSource"/>
+                observes="isImage"/>
       <menuitem id="context-viewinfo"
                 label="&viewPageInfoCmd.label;"
                 accesskey="&viewPageInfoCmd.accesskey;"
@@ -426,28 +417,6 @@
                 label="&bidiSwitchPageDirectionItem.label;"
                 accesskey="&bidiSwitchPageDirectionItem.accesskey;"
                 oncommand="gContextMenu.switchPageDirection();"/>
-      <menuseparator id="fill-login-separator" hidden="true"/>
-      <menu id="fill-login"
-            label="&fillLoginMenu.label;"
-            label-login="&fillLoginMenu.label;"
-            label-password="&fillPasswordMenu.label;"
-            label-username="&fillUsernameMenu.label;"
-            accesskey="&fillLoginMenu.accesskey;"
-            accesskey-login="&fillLoginMenu.accesskey;"
-            accesskey-password="&fillPasswordMenu.accesskey;"
-            accesskey-username="&fillUsernameMenu.accesskey;"
-            hidden="true">
-        <menupopup id="fill-login-popup">
-          <menuitem id="fill-login-no-logins"
-                    label="&noLoginSuggestions.label;"
-                    disabled="true"
-                    hidden="true"/>
-          <menuseparator id="saved-logins-separator"/>
-          <menuitem id="fill-login-saved-passwords"
-                    label="&viewSavedLogins.label;"
-                    oncommand="gContextMenu.openPasswordManager();"/>
-        </menupopup>
-      </menu>
       <menuseparator id="inspect-separator" hidden="true"/>
       <menuitem id="context-inspect"
                 hidden="true"

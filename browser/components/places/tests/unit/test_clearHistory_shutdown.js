@@ -17,7 +17,7 @@ const URIS = [
 
 const TOPIC_CONNECTION_CLOSED = "places-connection-closed";
 
-var EXPECTED_NOTIFICATIONS = [
+let EXPECTED_NOTIFICATIONS = [
   "places-shutdown"
 , "places-will-close-connection"
 , "places-expiration-finished"
@@ -35,10 +35,8 @@ const FTP_URL = "ftp://localhost/clearHistoryOnShutdown/";
 var formHistoryStartup = Cc["@mozilla.org/satchel/form-history-startup;1"].
                          getService(Ci.nsIObserver);
 formHistoryStartup.observe(null, "profile-after-change", null);
-XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
-                                  "resource://gre/modules/FormHistory.jsm");
 
-var timeInMicroseconds = Date.now() * 1000;
+let timeInMicroseconds = Date.now() * 1000;
 
 function run_test() {
   run_next_test();
@@ -51,8 +49,6 @@ add_task(function* test_execute() {
   let glue = Cc["@mozilla.org/browser/browserglue;1"].
              getService(Ci.nsIObserver);
   glue.observe(null, "initial-migration-will-import-default-bookmarks", null);
-  glue.observe(null, "test-initialize-sanitizer", null);
-
 
   Services.prefs.setBoolPref("privacy.clearOnShutdown.cache", true);
   Services.prefs.setBoolPref("privacy.clearOnShutdown.cookies", true);
@@ -75,16 +71,13 @@ add_task(function* test_execute() {
   }
   do_print("Add cache.");
   yield storeCache(FTP_URL, "testData");
-  do_print("Add form history.");
-  yield addFormHistory();
-  Assert.equal((yield getFormHistoryCount()), 1, "Added form history");
+});
 
+add_task(function* run_test_continue() {
   do_print("Simulate and wait shutdown.");
   yield shutdownPlaces();
 
-  Assert.equal((yield getFormHistoryCount()), 0, "Form history cleared");
-
-  let stmt = DBConn(true).createStatement(
+  let stmt = DBConn().createStatement(
     "SELECT id FROM moz_places WHERE url = :page_url "
   );
 
@@ -100,32 +93,14 @@ add_task(function* test_execute() {
 
   do_print("Check cache");
   // Check cache.
-  yield checkCache(FTP_URL);
+  let promiseCacheChecked = checkCache(FTP_URL);
+
+  do_print("Shutdown the download manager");
+  // Shutdown the download manager.
+  Services.obs.notifyObservers(null, "quit-application", null);
+
+  yield promiseCacheChecked;
 });
-
-function addFormHistory() {
-  return new Promise(resolve => {
-    let now = Date.now() * 1000;
-    FormHistory.update({ op: "add",
-                         fieldname: "testfield",
-                         value: "test",
-                         timesUsed: 1,
-                         firstUsed: now,
-                         lastUsed: now
-                       },
-                       { handleCompletion(reason) { resolve(); } });
-  });
-}
-
-function getFormHistoryCount() {
-  return new Promise((resolve, reject) => {
-    let count = -1;
-    FormHistory.count({ fieldname: "testfield" },
-                      { handleResult(result) { count = result; },
-                        handleCompletion(reason) { resolve(count); }
-                      });
-  });
-}
 
 function storeCache(aURL, aContent) {
   let cache = Services.cache2;

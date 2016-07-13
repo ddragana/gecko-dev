@@ -14,7 +14,6 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Compiler.h"
 #include "mozilla/GuardObjects.h"
-#include "mozilla/HashFunctions.h"
 #include "mozilla/PodOperations.h"
 
 #include <limits.h>
@@ -45,6 +44,9 @@ js_memcpy(void* dst_, const void* src_, size_t len)
 }
 
 namespace js {
+
+MOZ_NORETURN MOZ_COLD void
+CrashAtUnhandlableOOM(const char* reason);
 
 template <class T>
 struct AlignmentTestStruct
@@ -135,28 +137,6 @@ ForEach(InputIterT begin, InputIterT end, CallableT f)
         f(*begin);
 }
 
-template <class Container1, class Container2>
-static inline bool
-EqualContainers(const Container1& lhs, const Container2& rhs)
-{
-    if (lhs.length() != rhs.length())
-        return false;
-    for (size_t i = 0, n = lhs.length(); i < n; i++) {
-        if (lhs[i] != rhs[i])
-            return false;
-    }
-    return true;
-}
-
-template <class Container>
-static inline HashNumber
-AddContainerToHash(const Container& c, HashNumber hn = 0)
-{
-    for (size_t i = 0; i < c.length(); i++)
-        hn = mozilla::AddToHash(hn, HashNumber(c[i]));
-    return hn;
-}
-
 template <class T>
 static inline T
 Min(T t1, T t2)
@@ -188,7 +168,7 @@ ImplicitCast(U& u)
 }
 
 template<typename T>
-class MOZ_RAII AutoScopedAssign
+class AutoScopedAssign
 {
   public:
     AutoScopedAssign(T* addr, const T& value
@@ -262,13 +242,13 @@ BitArrayIndexToWordMask(size_t i)
 }
 
 static inline bool
-IsBitArrayElementSet(const size_t* array, size_t length, size_t i)
+IsBitArrayElementSet(size_t* array, size_t length, size_t i)
 {
     return array[BitArrayIndexToWordIndex(length, i)] & BitArrayIndexToWordMask(i);
 }
 
 static inline bool
-IsAnyBitArrayElementSet(const size_t* array, size_t length)
+IsAnyBitArrayElementSet(size_t* array, size_t length)
 {
     unsigned numWords = NumWordsForBitArrayOfLength(length);
     for (unsigned i = 0; i < numWords; ++i) {
@@ -313,36 +293,6 @@ PodSet(T* aDst, T aSrc, size_t aNElem)
 }
 
 } /* namespace mozilla */
-
-/*
- * Patterns used by SpiderMonkey to overwrite unused memory. If you are
- * accessing an object with one of these pattern, you probably have a dangling
- * pointer. These values should be odd, see the comment in IsThingPoisoned.
- *
- * Note: new patterns should also be added to the array in IsThingPoisoned!
- */
-#define JS_FRESH_NURSERY_PATTERN 0x2F
-#define JS_SWEPT_NURSERY_PATTERN 0x2B
-#define JS_ALLOCATED_NURSERY_PATTERN 0x2D
-#define JS_FRESH_TENURED_PATTERN 0x4F
-#define JS_MOVED_TENURED_PATTERN 0x49
-#define JS_SWEPT_TENURED_PATTERN 0x4B
-#define JS_ALLOCATED_TENURED_PATTERN 0x4D
-
-/*
- * Ensure JS_SWEPT_CODE_PATTERN is a byte pattern that will crash immediately
- * when executed, so either an undefined instruction or an instruction that's
- * illegal in user mode.
- */
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_NONE)
-# define JS_SWEPT_CODE_PATTERN 0xED // IN instruction, crashes in user mode.
-#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
-# define JS_SWEPT_CODE_PATTERN 0xA3 // undefined instruction
-#elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
-# define JS_SWEPT_CODE_PATTERN 0x01 // undefined instruction
-#else
-# error "JS_SWEPT_CODE_PATTERN not defined for this platform"
-#endif
 
 static inline void*
 Poison(void* ptr, uint8_t value, size_t num)

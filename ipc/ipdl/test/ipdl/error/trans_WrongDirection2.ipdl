@@ -1,8 +1,8 @@
 protocol trans_WrongDirection2 {
 
 parent:
-    async Msg();
-    async __delete__();
+    Msg();
+    __delete__();
 
 state S1:
     send Msg goto S1;

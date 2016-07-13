@@ -17,7 +17,7 @@ MutationEvent::MutationEvent(EventTarget* aOwner,
                              nsPresContext* aPresContext,
                              InternalMutationEvent* aEvent)
   : Event(aOwner, aPresContext,
-          aEvent ? aEvent : new InternalMutationEvent(false, eVoidEvent))
+          aEvent ? aEvent : new InternalMutationEvent(false, 0))
 {
   mEventIsInternal = (aEvent == nullptr);
 }
@@ -96,16 +96,17 @@ MutationEvent::InitMutationEvent(const nsAString& aTypeArg,
                                  const nsAString& aAttrNameArg,
                                  uint16_t aAttrChangeArg)
 {
-  Event::InitEvent(aTypeArg, aCanBubbleArg, aCancelableArg);
+  nsresult rv = Event::InitEvent(aTypeArg, aCanBubbleArg, aCancelableArg);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   InternalMutationEvent* mutation = mEvent->AsMutationEvent();
   mutation->mRelatedNode = aRelatedNodeArg;
   if (!aPrevValueArg.IsEmpty())
-    mutation->mPrevAttrValue = NS_Atomize(aPrevValueArg);
+    mutation->mPrevAttrValue = do_GetAtom(aPrevValueArg);
   if (!aNewValueArg.IsEmpty())
-    mutation->mNewAttrValue = NS_Atomize(aNewValueArg);
+    mutation->mNewAttrValue = do_GetAtom(aNewValueArg);
   if (!aAttrNameArg.IsEmpty()) {
-    mutation->mAttrName = NS_Atomize(aAttrNameArg);
+    mutation->mAttrName = do_GetAtom(aAttrNameArg);
   }
   mutation->mAttrChange = aAttrChangeArg;
     
@@ -118,11 +119,14 @@ MutationEvent::InitMutationEvent(const nsAString& aTypeArg,
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<MutationEvent>
-NS_NewDOMMutationEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMMutationEvent(nsIDOMEvent** aInstancePtrResult,
+                       EventTarget* aOwner,
                        nsPresContext* aPresContext,
                        InternalMutationEvent* aEvent) 
 {
-  RefPtr<MutationEvent> it = new MutationEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  MutationEvent* it = new MutationEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

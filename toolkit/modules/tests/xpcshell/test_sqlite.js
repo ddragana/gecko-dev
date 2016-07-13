@@ -3,7 +3,7 @@
 
 "use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 do_get_profile();
 
@@ -126,9 +126,7 @@ add_task(function* test_schema_version() {
       yield db.setSchemaVersion(v);
       do_print("Schema version " + v + " should have been rejected");
       success = false;
-    } catch (ex) {
-      if (!ex.message.startsWith("Schema version must be an integer."))
-        throw ex;
+    } catch (ex if ex.message.startsWith("Schema version must be an integer.")) {
       success = true;
     }
     do_check_true(success);
@@ -277,15 +275,6 @@ add_task(function* test_execute_invalid_statement() {
   yield c.close();
 });
 
-add_task(function* test_incorrect_like_bindings() {
-  let c = yield getDummyDatabase("incorrect_like_bindings");
-
-  let sql = "select * from dirs where path LIKE 'non%'";
-  Assert.throws(() => c.execute(sql), /Please enter a LIKE clause/);
-  Assert.throws(() => c.executeCached(sql), /Please enter a LIKE clause/);
-
-  yield c.close();
-});
 add_task(function* test_on_row_exception_ignored() {
   let c = yield getDummyDatabase("on_row_exception_ignored");
 
@@ -920,11 +909,7 @@ add_task(function* test_cloneStorageConnection() {
   try {
     let clone = yield Sqlite.cloneStorageConnection({ connection: null });
     do_throw(new Error("Should throw on invalid connection"));
-  } catch (ex) {
-    if (ex.name != "TypeError") {
-      throw ex;
-    }
-  }
+  } catch (ex if ex.name == "TypeError") {}
 });
 
 // Test clone() method.

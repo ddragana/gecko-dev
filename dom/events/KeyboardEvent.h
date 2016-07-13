@@ -60,16 +60,16 @@ public:
   uint32_t Location();
 
   void GetCode(nsAString& aCode);
-  void GetInitDict(KeyboardEventInit& aParam);
 
   void InitKeyEvent(const nsAString& aType, bool aCanBubble, bool aCancelable,
-                    nsGlobalWindow* aView, bool aCtrlKey, bool aAltKey,
+                    nsIDOMWindow* aView, bool aCtrlKey, bool aAltKey,
                     bool aShiftKey, bool aMetaKey,
-                    uint32_t aKeyCode, uint32_t aCharCode)
+                    uint32_t aKeyCode, uint32_t aCharCode,
+                    ErrorResult& aRv)
   {
-    auto* view = aView ? aView->AsInner() : nullptr;
-    InitKeyEvent(aType, aCanBubble, aCancelable, view, aCtrlKey, aAltKey,
-                 aShiftKey, aMetaKey, aKeyCode, aCharCode);
+    aRv = InitKeyEvent(aType, aCanBubble, aCancelable, aView,
+                       aCtrlKey, aAltKey, aShiftKey,aMetaKey,
+                       aKeyCode, aCharCode);
   }
 
 protected:
@@ -92,10 +92,5 @@ private:
 
 } // namespace dom
 } // namespace mozilla
-
-already_AddRefed<mozilla::dom::KeyboardEvent>
-NS_NewDOMKeyboardEvent(mozilla::dom::EventTarget* aOwner,
-                       nsPresContext* aPresContext,
-                       mozilla::WidgetKeyboardEvent* aEvent);
 
 #endif // mozilla_dom_KeyboardEvent_h_

@@ -1,67 +1,75 @@
-add_task(function* ()
+function test()
 {
   const kPrefName_AutoScroll = "general.autoScroll";
   Services.prefs.setBoolPref(kPrefName_AutoScroll, false);
 
+  var doc;
+
+  function startLoad(dataUri) {
+    gBrowser.selectedBrowser.addEventListener("pageshow", onLoad, false);
+    gBrowser.loadURI(dataUri);
+  }
+
+  function onLoad() {
+    gBrowser.selectedBrowser.removeEventListener("pageshow", onLoad, false);
+    waitForFocus(onFocus, content);
+  }
+
+  function onFocus() {
+    doc = gBrowser.contentDocument;
+    runChecks();
+  }
+
+  function endTest() {
+    // restore the changed prefs
+    if (Services.prefs.prefHasUserValue(kPrefName_AutoScroll))
+      Services.prefs.clearUserPref(kPrefName_AutoScroll);
+
+    // waitForFocus() fixes a failure in the next test if the latter runs too soon.
+    waitForFocus(finish);
+  }
+
+  waitForExplicitFinish();
+
   let dataUri = 'data:text/html,<html><body id="i" style="overflow-y: scroll"><div style="height: 2000px"></div>\
       <iframe id="iframe" style="display: none;"></iframe>\
 </body></html>';
+  startLoad(dataUri);
 
-  let loadedPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
-  gBrowser.loadURI(dataUri);
-  yield loadedPromise;
-
-  yield BrowserTestUtils.synthesizeMouse("#i", 50, 50, { button: 1 },
-                                         gBrowser.selectedBrowser);
-
-  yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
-    var iframe = content.document.getElementById("iframe");
-
-    if (iframe) {
-      var e = new iframe.contentWindow.PageTransitionEvent("pagehide",
-                                                           { bubbles: true,
-                                                             cancelable: true,
-                                                             persisted: false });
-      iframe.contentDocument.dispatchEvent(e);
-      iframe.contentDocument.documentElement.dispatchEvent(e);
-    }
-  });
-
-  yield BrowserTestUtils.synthesizeMouse("#i", 100, 100,
-                                         { type: "mousemove", clickCount: "0" },
-                                         gBrowser.selectedBrowser);
-
-  // If scrolling didn't work, we wouldn't do any redraws and thus time out, so
-  // request and force redraws to get the chance to check for scrolling at all.
-  yield new Promise(resolve => window.requestAnimationFrame(resolve));
-
-  let msg = yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
-    // Skip the first animation frame callback as it's the same callback that
-    // the browser uses to kick off the scrolling.
-    return new Promise(resolve => {
-      function checkScroll() {
-        let msg = "";
-        let elem = content.document.getElementById('i');
-        if (elem.scrollTop != 0) {
-          msg += "element should not have scrolled vertically";
-        }
-        if (elem.scrollLeft != 0) {
-          msg += "element should not have scrolled horizontally";
-        }
-
-        resolve(msg);
+  function runChecks() {
+    var elem = doc.getElementById('i');
+    // Skip the first callback as it's the same callback that the browser
+    // uses to kick off the scrolling.
+    var skipFrames = 1;
+    var checkScroll = function () {
+      if (skipFrames--) {
+        window.requestAnimationFrame(checkScroll);
+        return;
       }
+      ok(elem.scrollTop == 0, "element should not have scrolled vertically");
+      ok(elem.scrollLeft == 0, "element should not have scrolled horizontally");
 
-      content.requestAnimationFrame(checkScroll);
-    });
-  });
+      endTest();
+    };
+    EventUtils.synthesizeMouse(elem, 50, 50, { button: 1 },
+                               gBrowser.contentWindow);
 
-  ok(!msg, "element scroll " + msg);
+    var iframe = gBrowser.contentDocument.getElementById("iframe");
+    var e = new iframe.contentWindow.PageTransitionEvent("pagehide",
+                                                         { bubbles: true,
+                                                           cancelable: true,
+                                                           persisted: false });
+    iframe.contentDocument.dispatchEvent(e);
+    iframe.contentDocument.documentElement.dispatchEvent(e);
 
-  // restore the changed prefs
-  if (Services.prefs.prefHasUserValue(kPrefName_AutoScroll))
-    Services.prefs.clearUserPref(kPrefName_AutoScroll);
-
-  // wait for focus to fix a failure in the next test if the latter runs too soon.
-  yield SimpleTest.promiseFocus();
-});
+    EventUtils.synthesizeMouse(elem, 100, 100,
+                               { type: "mousemove", clickCount: "0" },
+                               gBrowser.contentWindow);
+    /*
+     * if scrolling didn’t work, we wouldn’t do any redraws and thus time out.
+     * so request and force redraws to get the chance to check for scrolling at
+     * all.
+     */
+    window.requestAnimationFrame(checkScroll);
+  }
+}

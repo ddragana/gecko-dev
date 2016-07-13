@@ -14,7 +14,6 @@ class TargetConfig;
 class LayerTransactionParent;
 class AsyncCompositionManager;
 class APZTestData;
-class CompositorBridgeParentIPCAllocator;
 
 class ShadowLayersManager
 {
@@ -26,9 +25,7 @@ public:
                                      bool aIsFirstPaint,
                                      bool aScheduleComposite,
                                      uint32_t aPaintSequenceNumber,
-                                     bool aIsRepeatTransaction,
-                                     int32_t aPaintSyncId,
-                                     bool aHitTestUpdate) = 0;
+                                     bool aIsRepeatTransaction) = 0;
 
     virtual AsyncCompositionManager* GetCompositionManager(LayerTransactionParent* aLayerTree) { return nullptr; }
 
@@ -45,7 +42,6 @@ public:
     virtual void SetConfirmedTargetAPZC(const LayerTransactionParent* aLayerTree,
                                         const uint64_t& aInputBlockId,
                                         const nsTArray<ScrollableLayerGuid>& aTargets) = 0;
-    virtual CompositorBridgeParentIPCAllocator* AsCompositorBridgeParentIPCAllocator() { return nullptr; }
 };
 
 } // namespace layers

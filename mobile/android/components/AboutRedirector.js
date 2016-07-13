@@ -8,7 +8,7 @@ const Cu = Components.utils;
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-var modules = {
+let modules = {
   // about:
   "": {
     uri: "chrome://browser/content/about.xhtml",
@@ -34,7 +34,9 @@ var modules = {
   },
 
   rights: {
-    uri: "chrome://browser/content/aboutRights.xhtml",
+    uri: AppConstants.MOZ_OFFICIAL_BRANDING ?
+      "chrome://browser/content/aboutRights.xhtml" :
+      "chrome://global/content/aboutRights-unbranded.xhtml",
     privileged: false
   },
   blocked: {
@@ -58,6 +60,7 @@ var modules = {
   reader: {
     uri: "chrome://global/content/reader/aboutReader.html",
     privileged: false,
+    dontLink: true,
     hide: true
   },
   feedback: {
@@ -68,19 +71,23 @@ var modules = {
     uri: "chrome://browser/content/aboutPrivateBrowsing.xhtml",
     privileged: true
   },
-  logins: {
-    uri: "chrome://browser/content/aboutLogins.xhtml",
-    privileged: true
-  },
-  accounts: {
-    uri: "chrome://browser/content/aboutAccounts.xhtml",
-    privileged: true
-  },
-};
+}
 
 if (AppConstants.MOZ_SERVICES_HEALTHREPORT) {
   modules['healthreport'] = {
     uri: "chrome://browser/content/aboutHealthReport.xhtml",
+    privileged: true
+  };
+}
+if (AppConstants.MOZ_DEVICES) {
+  modules['devices'] = {
+    uri: "chrome://browser/content/aboutDevices.xhtml",
+    privileged: true
+  };
+}
+if (AppConstants.NIGHTLY_BUILD) {
+  modules['logins'] = {
+    uri: "chrome://browser/content/aboutLogins.xhtml",
     privileged: true
   };
 }
@@ -101,6 +108,8 @@ AboutRedirector.prototype = {
     let moduleInfo = this._getModuleInfo(aURI);
     if (moduleInfo.hide)
       flags = Ci.nsIAboutModule.HIDE_FROM_ABOUTABOUT;
+    if (moduleInfo.dontLink)
+      flags = flags | Ci.nsIAboutModule.MAKE_UNLINKABLE;
 
     return flags | Ci.nsIAboutModule.ALLOW_SCRIPT;
   },

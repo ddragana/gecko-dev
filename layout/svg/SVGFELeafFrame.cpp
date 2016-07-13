@@ -10,17 +10,19 @@
 #include "nsSVGEffects.h"
 #include "nsSVGFilters.h"
 
+typedef nsFrame SVGFELeafFrameBase;
+
 /*
  * This frame is used by filter primitive elements that don't
  * have special child elements that provide parameters.
  */
-class SVGFELeafFrame : public nsFrame
+class SVGFELeafFrame : public SVGFELeafFrameBase
 {
   friend nsIFrame*
   NS_NewSVGFELeafFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
   explicit SVGFELeafFrame(nsStyleContext* aContext)
-    : nsFrame(aContext)
+    : SVGFELeafFrameBase(aContext)
   {
     AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
@@ -36,7 +38,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsFrame::IsFrameOfType(aFlags & ~(nsIFrame::eSVG));
+    return SVGFELeafFrameBase::IsFrameOfType(aFlags & ~(nsIFrame::eSVG));
   }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -57,7 +59,7 @@ public:
                                     nsIAtom* aAttribute,
                                     int32_t  aModType) override;
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
+  virtual bool UpdateOverflow() override {
     // We don't maintain a visual overflow rect
     return false;
   }
@@ -81,7 +83,7 @@ SVGFELeafFrame::Init(nsIContent*       aContent,
                "Trying to construct an SVGFELeafFrame for a "
                "content element that doesn't support the right interfaces");
 
-  nsFrame::Init(aContent, aParent, aPrevInFlow);
+  SVGFELeafFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -103,5 +105,6 @@ SVGFELeafFrame::AttributeChanged(int32_t  aNameSpaceID,
     nsSVGEffects::InvalidateDirectRenderingObservers(GetParent());
   }
 
-  return nsFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+  return SVGFELeafFrameBase::AttributeChanged(aNameSpaceID,
+                                              aAttribute, aModType);
 }

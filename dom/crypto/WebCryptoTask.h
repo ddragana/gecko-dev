@@ -7,7 +7,8 @@
 #ifndef mozilla_dom_WebCryptoTask_h
 #define mozilla_dom_WebCryptoTask_h
 
-#include "nsNSSShutDown.h"
+#include "CryptoTask.h"
+
 #include "nsIGlobalObject.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/DOMException.h"
@@ -57,15 +58,30 @@ if (NS_FAILED(rv)) { \
   return; \
 }
 
-class WebCryptoTask : public CancelableRunnable,
-                      public nsNSSShutDownObject
+class WebCryptoTask : public CryptoTask
 {
 public:
-  virtual void DispatchWithPromise(Promise* aResultPromise);
-
-  void Skip()
+  virtual void DispatchWithPromise(Promise* aResultPromise)
   {
-    virtualDestroyNSSReference();
+    MOZ_ASSERT(NS_IsMainThread());
+    mResultPromise = aResultPromise;
+
+    // Fail if an error was set during the constructor
+    MAYBE_EARLY_FAIL(mEarlyRv)
+
+    // Perform pre-NSS operations, and fail if they fail
+    mEarlyRv = BeforeCrypto();
+    MAYBE_EARLY_FAIL(mEarlyRv)
+
+    // Skip NSS if we're already done, or launch a CryptoTask
+    if (mEarlyComplete) {
+      CallCallback(mEarlyRv);
+      Skip();
+      return;
+    }
+
+     mEarlyRv = Dispatch("SubtleCrypto");
+     MAYBE_EARLY_FAIL(mEarlyRv)
   }
 
 protected:
@@ -122,8 +138,7 @@ public:
                           const ObjectOrString& aAlgorithm,
                           const CryptoOperationData& aData);
 
-  static WebCryptoTask* CreateImportKeyTask(nsIGlobalObject* aGlobal,
-                          JSContext* aCx,
+  static WebCryptoTask* CreateImportKeyTask(JSContext* aCx,
                           const nsAString& aFormat,
                           JS::Handle<JSObject*> aKeyData,
                           const ObjectOrString& aAlgorithm,
@@ -131,14 +146,12 @@ public:
                           const Sequence<nsString>& aKeyUsages);
   static WebCryptoTask* CreateExportKeyTask(const nsAString& aFormat,
                           CryptoKey& aKey);
-  static WebCryptoTask* CreateGenerateKeyTask(nsIGlobalObject* aGlobal,
-                          JSContext* aCx,
+  static WebCryptoTask* CreateGenerateKeyTask(JSContext* aCx,
                           const ObjectOrString& aAlgorithm,
                           bool aExtractable,
                           const Sequence<nsString>& aKeyUsages);
 
-  static WebCryptoTask* CreateDeriveKeyTask(nsIGlobalObject* aGlobal,
-                          JSContext* aCx,
+  static WebCryptoTask* CreateDeriveKeyTask(JSContext* aCx,
                           const ObjectOrString& aAlgorithm,
                           CryptoKey& aBaseKey,
                           const ObjectOrString& aDerivedKeyType,
@@ -154,8 +167,7 @@ public:
                           CryptoKey& aKey,
                           CryptoKey& aWrappingKey,
                           const ObjectOrString& aWrapAlgorithm);
-  static WebCryptoTask* CreateUnwrapKeyTask(nsIGlobalObject* aGlobal,
-                          JSContext* aCx,
+  static WebCryptoTask* CreateUnwrapKeyTask(JSContext* aCx,
                           const nsAString& aFormat,
                           const ArrayBufferViewOrArrayBuffer& aWrappedKey,
                           CryptoKey& aUnwrappingKey,
@@ -165,16 +177,14 @@ public:
                           const Sequence<nsString>& aKeyUsages);
 
 protected:
-  RefPtr<Promise> mResultPromise;
+  nsRefPtr<Promise> mResultPromise;
   nsresult mEarlyRv;
   bool mEarlyComplete;
 
-  WebCryptoTask();
-  virtual ~WebCryptoTask();
-
-  bool IsOnOriginalThread() {
-    return !mOriginalThread || NS_GetCurrentThread() == mOriginalThread;
-  }
+  WebCryptoTask()
+    : mEarlyRv(NS_OK)
+    , mEarlyComplete(false)
+  {}
 
   // For things that need to happen on the main thread
   // either before or after CalculateResult
@@ -188,45 +198,23 @@ protected:
 
   // Subclasses should override this method if they keep references to
   // any NSS objects, e.g., SECKEYPrivateKey or PK11SymKey.
-  virtual void ReleaseNSSResources() {}
+  virtual void ReleaseNSSResources() override {}
 
-  virtual nsresult CalculateResult() final;
+  virtual nsresult CalculateResult() override final;
 
-  virtual void CallCallback(nsresult rv) final;
-
-private:
-  NS_IMETHOD Run() override final;
-  nsresult Cancel() override final;
-
-  virtual void
-  virtualDestroyNSSReference() override final
-  {
-    MOZ_ASSERT(IsOnOriginalThread());
-
-    if (!mReleasedNSSResources) {
-      mReleasedNSSResources = true;
-      ReleaseNSSResources();
-    }
-  }
-
-  class InternalWorkerHolder;
-
-  nsCOMPtr<nsIThread> mOriginalThread;
-  RefPtr<InternalWorkerHolder> mWorkerHolder;
-  bool mReleasedNSSResources;
-  nsresult mRv;
+  virtual void CallCallback(nsresult rv) override final;
 };
 
 // XXX This class is declared here (unlike others) to enable reuse by WebRTC.
 class GenerateAsymmetricKeyTask : public WebCryptoTask
 {
 public:
-  GenerateAsymmetricKeyTask(nsIGlobalObject* aGlobal, JSContext* aCx,
+  GenerateAsymmetricKeyTask(JSContext* aCx,
                             const ObjectOrString& aAlgorithm, bool aExtractable,
                             const Sequence<nsString>& aKeyUsages);
 protected:
   ScopedPLArenaPool mArena;
-  UniquePtr<CryptoKeyPair> mKeyPair;
+  CryptoKeyPair mKeyPair;
   nsString mAlgName;
   CK_MECHANISM_TYPE mMechanism;
   PK11RSAGenParams mRsaParams;
@@ -236,7 +224,6 @@ protected:
   virtual void ReleaseNSSResources() override;
   virtual nsresult DoCrypto() override;
   virtual void Resolve() override;
-  virtual void Cleanup() override;
 
 private:
   ScopedSECKEYPublicKey mPublicKey;

@@ -7,17 +7,8 @@ const constructors = [
     Int32Array,
     Uint32Array,
     Float32Array,
-    Float64Array ];
-
-if (typeof SharedArrayBuffer != "undefined")
-    constructors.push(sharedConstructor(Int8Array),
-		      sharedConstructor(Uint8Array),
-		      sharedConstructor(Int16Array),
-		      sharedConstructor(Uint16Array),
-		      sharedConstructor(Int32Array),
-		      sharedConstructor(Uint32Array),
-		      sharedConstructor(Float32Array),
-		      sharedConstructor(Float64Array));
+    Float64Array
+];
 
 for (var constructor of constructors) {
     // 'from' method is identical for all typed array constructors.
@@ -26,7 +17,7 @@ for (var constructor of constructors) {
     // %TypedArray%.from copies arrays.
     var src = new constructor([1, 2, 3]), copy = constructor.from(src);
     assertEq(copy === src, false);
-    assertEq(isSharedConstructor(constructor) || copy instanceof constructor, true);
+    assertEq(copy instanceof constructor, true);
     assertDeepEq(copy, src);
 
     // Non-element properties are not copied.
@@ -37,7 +28,7 @@ for (var constructor of constructors) {
     // %TypedArray%.from can copy non-iterable objects, if they're array-like.
     src = {0: 0, 1: 1, length: 2};
     copy = constructor.from(src);
-    assertEq(isSharedConstructor(constructor) || copy instanceof constructor, true);
+    assertEq(copy instanceof constructor, true);
     assertDeepEq(copy, new constructor([0, 1]));
 
     // Properties past the .length are not copied.

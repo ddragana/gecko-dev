@@ -12,7 +12,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabParent.h"
 
-using mozilla::Unused;
+using mozilla::unused;
 using namespace mozilla::dom;
 
 NS_IMPL_ISUPPORTS(ColorPickerParent::ColorPickerShownCallback,
@@ -22,7 +22,7 @@ NS_IMETHODIMP
 ColorPickerParent::ColorPickerShownCallback::Update(const nsAString& aColor)
 {
   if (mColorPickerParent) {
-    Unused << mColorPickerParent->SendUpdate(nsString(aColor));
+    unused << mColorPickerParent->SendUpdate(nsString(aColor));
   }
   return NS_OK;
 }
@@ -31,7 +31,7 @@ NS_IMETHODIMP
 ColorPickerParent::ColorPickerShownCallback::Done(const nsAString& aColor)
 {
   if (mColorPickerParent) {
-    Unused << mColorPickerParent->Send__delete__(mColorPickerParent,
+    unused << mColorPickerParent->Send__delete__(mColorPickerParent,
                                                  nsString(aColor));
   }
   return NS_OK;
@@ -56,7 +56,7 @@ ColorPickerParent::CreateColorPicker()
     return false;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = ownerElement->OwnerDoc()->GetWindow();
+  nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(ownerElement->OwnerDoc()->GetWindow());
   if (!window) {
     return false;
   }
@@ -68,7 +68,7 @@ bool
 ColorPickerParent::RecvOpen()
 {
   if (!CreateColorPicker()) {
-    Unused << Send__delete__(this, mInitialColor);
+    unused << Send__delete__(this, mInitialColor);
     return true;
   }
 

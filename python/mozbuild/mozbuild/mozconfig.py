@@ -7,12 +7,10 @@ from __future__ import absolute_import, unicode_literals
 import filecmp
 import os
 import re
-import sys
 import subprocess
-import traceback
 
 from collections import defaultdict
-from mozpack import path as mozpath
+from mach.mixin.process import ProcessExecutionMixin
 
 
 MOZ_MYCONFIG_ERROR = '''
@@ -33,13 +31,6 @@ by a command inside your mozconfig failing. Please change your mozconfig
 to not error and/or to catch errors in executed commands.
 '''.strip()
 
-MOZCONFIG_BAD_OUTPUT = '''
-Evaluation of your mozconfig produced unexpected output.  This could be
-triggered by a command inside your mozconfig failing or producing some warnings
-or error messages. Please change your mozconfig to not error and/or to catch
-errors in executed commands.
-'''.strip()
-
 
 class MozconfigFindException(Exception):
     """Raised when a mozconfig location is not defined properly."""
@@ -57,7 +48,7 @@ class MozconfigLoadException(Exception):
         Exception.__init__(self, message)
 
 
-class MozconfigLoader(object):
+class MozconfigLoader(ProcessExecutionMixin):
     """Handles loading and parsing of mozconfig files."""
 
     RE_MAKE_VARIABLE = re.compile('''
@@ -108,7 +99,7 @@ class MozconfigLoader(object):
         if 'MOZ_MYCONFIG' in env:
             raise MozconfigFindException(MOZ_MYCONFIG_ERROR)
 
-        env_path = env.get('MOZCONFIG', None) or None
+        env_path = env.get('MOZCONFIG', None)
         if env_path is not None:
             if not os.path.isabs(env_path):
                 potential_roots = [self.topsrcdir, os.getcwd()]
@@ -215,7 +206,7 @@ class MozconfigLoader(object):
         if path is None:
             return result
 
-        path = mozpath.normsep(path)
+        path = path.replace(os.sep, '/')
 
         result['configure_args'] = []
         result['make_extra'] = []
@@ -223,22 +214,13 @@ class MozconfigLoader(object):
 
         env = dict(os.environ)
 
-        # Since mozconfig_loader is a shell script, running it "normally"
-        # actually leads to two shell executions on Windows. Avoid this by
-        # directly calling sh mozconfig_loader.
-        shell = 'sh'
-        if 'MOZILLABUILD' in os.environ:
-            shell = os.environ['MOZILLABUILD'] + '/msys/bin/sh'
-        if sys.platform == 'win32':
-            shell = shell + '.exe'
-
-        command = [shell, mozpath.normsep(self._loader_script),
-                   mozpath.normsep(self.topsrcdir), path]
+        args = self._normalize_command([self._loader_script,
+            self.topsrcdir.replace(os.sep, '/'), path], True)
 
         try:
             # We need to capture stderr because that's where the shell sends
             # errors if execution fails.
-            output = subprocess.check_output(command, stderr=subprocess.STDOUT,
+            output = subprocess.check_output(args, stderr=subprocess.STDOUT,
                 cwd=self.topsrcdir, env=env)
         except subprocess.CalledProcessError as e:
             lines = e.output.splitlines()
@@ -252,17 +234,7 @@ class MozconfigLoader(object):
 
             raise MozconfigLoadException(path, MOZCONFIG_BAD_EXIT_CODE, lines)
 
-        try:
-            parsed = self._parse_loader_output(output)
-        except AssertionError:
-            # _parse_loader_output uses assertions to verify the
-            # well-formedness of the shell output; when these fail, it
-            # generally means there was a problem with the output, but we
-            # include the assertion traceback just to be sure.
-            print('Assertion failed in _parse_loader_output:')
-            traceback.print_exc()
-            raise MozconfigLoadException(path, MOZCONFIG_BAD_OUTPUT,
-                                         output.splitlines())
+        parsed = self._parse_loader_output(output)
 
         def diff_vars(vars_before, vars_after):
             set1 = set(vars_before.keys()) - self.IGNORE_SHELL_VARIABLES
@@ -358,8 +330,7 @@ class MozconfigLoader(object):
             # XXX This is an ugly hack. Data may be lost from things
             # like environment variable values.
             # See https://bugzilla.mozilla.org/show_bug.cgi?id=831381
-            line = line.decode('mbcs' if sys.platform == 'win32' else 'utf-8',
-                               'ignore')
+            line = line.decode('utf-8', 'ignore')
 
             if not line:
                 continue

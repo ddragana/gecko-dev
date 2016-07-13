@@ -34,14 +34,17 @@ function executeSoon(aFun)
 }
 
 function clearAllDatabases(callback) {
-  let qms = SpecialPowers.Services.qms;
   let principal = SpecialPowers.wrap(document).nodePrincipal;
-  let request = qms.clearStoragesForPrincipal(principal);
-  let cb = SpecialPowers.wrapCallback(callback);
-  request.callback = cb;
+  let appId, inBrowser;
+  if (principal.appId != Components.interfaces.nsIPrincipal.UNKNOWN_APP_ID &&
+      principal.appId != Components.interfaces.nsIPrincipal.NO_APP_ID) {
+    appId = principal.appId;
+    inBrowser = principal.isInBrowserElement;
+  }
+  SpecialPowers.clearStorageForURI(document.documentURI, callback, appId, inBrowser);
 }
 
-var testHarnessGenerator = testHarnessSteps();
+let testHarnessGenerator = testHarnessSteps();
 testHarnessGenerator.next();
 
 function testHarnessSteps() {
@@ -112,14 +115,7 @@ function testHarnessSteps() {
 
     let worker = new Worker(workerScriptURL);
 
-    worker._expectingUncaughtException = false;
     worker.onerror = function(event) {
-      if (worker._expectingUncaughtException) {
-        ok(true, "Worker had an expected error: " + event.message);
-        worker._expectingUncaughtException = false;
-        event.preventDefault();
-        return;
-      }
       ok(false, "Worker had an error: " + event.message);
       worker.terminate();
       nextTestHarnessStep();
@@ -153,10 +149,6 @@ function testHarnessSteps() {
           nextTestHarnessStep();
           break;
 
-        case "expectUncaughtException":
-          worker._expectingUncaughtException = message.expecting;
-          break;
-
         default:
           ok(false,
              "Received a bad message from worker: " + JSON.stringify(message));
@@ -167,11 +159,6 @@ function testHarnessSteps() {
     URL.revokeObjectURL(workerScriptURL);
 
     yield undefined;
-
-    if (worker._expectingUncaughtException) {
-      ok(false, "expectUncaughtException was called but no uncaught " +
-                "exception was detected!");
-    }
 
     worker.terminate();
     worker = null;
@@ -247,11 +234,6 @@ function errorHandler(event)
 {
   ok(false, "indexedDB error, '" + event.target.error.name + "'");
   finishTest();
-}
-
-function expectUncaughtException(expecting)
-{
-  SimpleTest.expectUncaughtException(expecting);
 }
 
 function browserErrorHandler(event)
@@ -350,6 +332,10 @@ function workerScript() {
       return "undefined";
     }
 
+    if (_thing_ === null) {
+      return "null";
+    }
+
     let str;
 
     try {
@@ -400,16 +386,10 @@ function workerScript() {
   };
 
   self.executeSoon = function(_fun_) {
-    var channel = new MessageChannel();
-    channel.port1.postMessage("");
-    channel.port2.onmessage = function(event) { _fun_(); };
+    setTimeout(_fun_, 0);
   };
 
   self.finishTest = function() {
-    if (self._expectingUncaughtException) {
-      self.ok(false, "expectUncaughtException was called but no uncaught "
-                     + "exception was detected!");
-    }
     self.postMessage({ op: "done" });
   };
 
@@ -495,29 +475,7 @@ function workerScript() {
     return false;
   }
 
-  self.getRandomBuffer = function(_size_) {
-    let buffer = new ArrayBuffer(_size_);
-    is(buffer.byteLength, _size_, "Correct byte length");
-    let view = new Uint8Array(buffer);
-    for (let i = 0; i < _size_; i++) {
-      view[i] = parseInt(Math.random() * 255)
-    }
-    return buffer;
-  };
-
-  self._expectingUncaughtException = false;
-  self.expectUncaughtException = function(_expecting_) {
-    self._expectingUncaughtException = !!_expecting_;
-    self.postMessage({ op: "expectUncaughtException", expecting: !!_expecting_ });
-  };
-
   self.onerror = function(_message_, _file_, _line_) {
-    if (self._expectingUncaughtException) {
-      self._expectingUncaughtException = false;
-      ok(true, "Worker: expected exception [" + _file_ + ":" + _line_ + "]: '" +
-         _message_ + "'");
-      return;
-    }
     ok(false,
        "Worker: uncaught exception [" + _file_ + ":" + _line_ + "]: '" +
          _message_ + "'");

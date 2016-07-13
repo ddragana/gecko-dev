@@ -16,20 +16,21 @@ interface ServiceWorkerContainer : EventTarget {
   // and discussion at https://etherpad.mozilla.org/serviceworker07apr
   [Unforgeable] readonly attribute ServiceWorker? controller;
 
-  [SameObject, Throws]
+  [Throws]
   readonly attribute Promise<ServiceWorkerRegistration> ready;
 
-  [NewObject]
+  [Throws]
   Promise<ServiceWorkerRegistration> register(USVString scriptURL,
                                               optional RegistrationOptions options);
 
-  [NewObject]
-  Promise<any> getRegistration(optional USVString documentURL = "");
+  [Throws]
+  Promise<ServiceWorkerRegistration> getRegistration(optional USVString documentURL = "");
 
-  [NewObject]
+  [Throws]
   Promise<sequence<ServiceWorkerRegistration>> getRegistrations();
 
   attribute EventHandler oncontrollerchange;
+  attribute EventHandler onreloadpage;
   attribute EventHandler onerror;
   attribute EventHandler onmessage;
 };

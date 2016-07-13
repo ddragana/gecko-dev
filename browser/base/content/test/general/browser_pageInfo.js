@@ -15,7 +15,7 @@ function test() {
 
   function observer(win, topic, data) {
     Services.obs.removeObserver(observer, "page-info-dialog-loaded");
-    pageInfo.onFinished.push(handlePageInfo);
+    handlePageInfo();
   }
 
   function handlePageInfo() {

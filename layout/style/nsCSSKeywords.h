@@ -18,7 +18,7 @@
 
  */
 #define CSS_KEY(_name,_id) eCSSKeyword_##_id,
-enum nsCSSKeyword : int16_t {
+enum nsCSSKeyword {
   eCSSKeyword_UNKNOWN = -1,
 #include "nsCSSKeywordList.h"
   eCSSKeyword_COUNT

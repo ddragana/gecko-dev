@@ -16,7 +16,6 @@
 class nsPresContext;
 
 namespace mozilla {
-enum class CSSPseudoElementType : uint8_t;
 class WidgetEvent;
 class WidgetGUIEvent;
 namespace dom {
@@ -34,7 +33,6 @@ class nsNumberControlFrame final : public nsContainerFrame
   friend nsIFrame*
   NS_NewNumberControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  typedef mozilla::CSSPseudoElementType CSSPseudoElementType;
   typedef mozilla::dom::Element Element;
   typedef mozilla::dom::HTMLInputElement HTMLInputElement;
   typedef mozilla::WidgetEvent WidgetEvent;
@@ -188,7 +186,7 @@ public:
    */
   nsresult HandleSelectCall();
 
-  virtual Element* GetPseudoElement(CSSPseudoElementType aType) override;
+  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) override;
 
   bool ShouldUseNativeStyleForSpinner() const;
 
@@ -198,12 +196,12 @@ private:
   nsresult MakeAnonymousElement(Element** aResult,
                                 nsTArray<ContentInfo>& aElements,
                                 nsIAtom* aTagName,
-                                CSSPseudoElementType aPseudoType,
+                                nsCSSPseudoElements::Type aPseudoType,
                                 nsStyleContext* aParentContext);
 
   class SyncDisabledStateEvent;
   friend class SyncDisabledStateEvent;
-  class SyncDisabledStateEvent : public mozilla::Runnable
+  class SyncDisabledStateEvent : public nsRunnable
   {
   public:
     explicit SyncDisabledStateEvent(nsNumberControlFrame* aFrame)

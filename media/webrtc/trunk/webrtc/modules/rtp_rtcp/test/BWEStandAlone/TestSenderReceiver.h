@@ -13,7 +13,6 @@
 
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
-#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/test/channel_transport/udp_transport.h"
 #include "webrtc/typedefs.h"
 
@@ -21,6 +20,7 @@ class TestLoadGenerator;
 namespace webrtc {
 class CriticalSectionWrapper;
 class EventWrapper;
+class ThreadWrapper;
 }
 
 using namespace webrtc;
@@ -69,38 +69,43 @@ public:
     int32_t SetPacketTimeout(const uint32_t timeoutMS);
 
     // Inherited from RtpFeedback
-    int32_t OnInitializeDecoder(const int32_t id,
-                                const int8_t payloadType,
-                                const int8_t payloadName[RTP_PAYLOAD_NAME_SIZE],
-                                const uint32_t frequency,
-                                const uint8_t channels,
-                                const uint32_t rate) override {
+    virtual int32_t OnInitializeDecoder(
+        const int32_t id,
+        const int8_t payloadType,
+        const int8_t payloadName[RTP_PAYLOAD_NAME_SIZE],
+        const uint32_t frequency,
+        const uint8_t channels,
+        const uint32_t rate) OVERRIDE {
       return 0;
     }
 
-    void OnIncomingSSRCChanged(const int32_t id, const uint32_t SSRC) override {
-    }
+    virtual void OnIncomingSSRCChanged(const int32_t id,
+                                       const uint32_t SSRC) OVERRIDE {}
 
-    void OnIncomingCSRCChanged(const int32_t id,
-                               const uint32_t CSRC,
-                               const bool added) override {}
+    virtual void OnIncomingCSRCChanged(const int32_t id,
+                                       const uint32_t CSRC,
+                                       const bool added) OVERRIDE {}
+
 
     // Inherited from RtpData
-    int32_t OnReceivedPayloadData(
+    virtual int32_t OnReceivedPayloadData(
         const uint8_t* payloadData,
-        const size_t payloadSize,
-        const webrtc::WebRtcRTPHeader* rtpHeader) override;
+        const uint16_t payloadSize,
+        const webrtc::WebRtcRTPHeader* rtpHeader) OVERRIDE;
+
 
     // Inherited from UdpTransportData
-    void IncomingRTPPacket(const int8_t* incomingRtpPacket,
-                           const size_t rtpPacketLength,
-                           const int8_t* fromIP,
-                           const uint16_t fromPort) override;
+    virtual void IncomingRTPPacket(const int8_t* incomingRtpPacket,
+                                   const int32_t rtpPacketLength,
+                                   const int8_t* fromIP,
+                                   const uint16_t fromPort) OVERRIDE;
 
-    void IncomingRTCPPacket(const int8_t* incomingRtcpPacket,
-                            const size_t rtcpPacketLength,
-                            const int8_t* fromIP,
-                            const uint16_t fromPort) override;
+    virtual void IncomingRTCPPacket(const int8_t* incomingRtcpPacket,
+                                    const int32_t rtcpPacketLength,
+                                    const int8_t* fromIP,
+                                    const uint16_t fromPort) OVERRIDE;
+
+
 
     /////////////////////////////////
     // Sender methods
@@ -113,7 +118,7 @@ public:
 
     int32_t SendOutgoingData(const uint32_t timeStamp,
         const uint8_t* payloadData,
-        const size_t payloadSize,
+        const uint32_t payloadSize,
         const webrtc::FrameType frameType = webrtc::kVideoFrameDelta);
 
     int32_t SetLoadGenerator(TestLoadGenerator *generator);
@@ -138,14 +143,14 @@ private:
     UdpTransport* _transport;
     webrtc::CriticalSectionWrapper* _critSect;
     webrtc::EventWrapper *_eventPtr;
-    rtc::scoped_ptr<webrtc::ThreadWrapper> _procThread;
+    webrtc::ThreadWrapper* _procThread;
     bool _running;
     int8_t _payloadType;
     TestLoadGenerator* _loadGenerator;
     bool _isSender;
     bool _isReceiver;
     SendRecCB * _sendRecCB;
-    size_t _lastBytesReceived;
+    uint32_t _lastBytesReceived;
     int64_t _lastTime;
 
 };

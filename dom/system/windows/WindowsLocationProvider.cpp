@@ -34,9 +34,18 @@ WindowsLocationProvider::MLSUpdate::Update(nsIDOMGeoPosition *aPosition)
   if (!coords) {
     return NS_ERROR_FAILURE;
   }
+
   Telemetry::Accumulate(Telemetry::GEOLOCATION_WIN8_SOURCE_IS_MLS, true);
+
   return mCallback->Update(aPosition);
 }
+
+NS_IMETHODIMP
+WindowsLocationProvider::MLSUpdate::LocationUpdatePending()
+{
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 WindowsLocationProvider::MLSUpdate::NotifyError(uint16_t aError)
 {
@@ -45,6 +54,7 @@ WindowsLocationProvider::MLSUpdate::NotifyError(uint16_t aError)
   }
   return mCallback->NotifyError(aError);
 }
+
 
 class LocationEvent final : public ILocationEvents
 {
@@ -66,7 +76,7 @@ public:
 
 private:
   nsCOMPtr<nsIGeolocationUpdate> mCallback;
-  RefPtr<WindowsLocationProvider> mProvider;
+  nsRefPtr<WindowsLocationProvider> mProvider;
   ULONG mCount;
 };
 
@@ -150,7 +160,7 @@ LocationEvent::OnLocationChanged(REFIID aReportType,
     return S_OK;
   }
 
-  RefPtr<ILatLongReport> latLongReport;
+  nsRefPtr<ILatLongReport> latLongReport;
   if (FAILED(aReport->QueryInterface(IID_ILatLongReport,
                                      getter_AddRefs(latLongReport)))) {
     return E_FAIL;
@@ -171,7 +181,7 @@ LocationEvent::OnLocationChanged(REFIID aReportType,
   DOUBLE verror = 0.0;
   latLongReport->GetAltitudeError(&verror);
 
-  RefPtr<nsGeoPosition> position =
+  nsRefPtr<nsGeoPosition> position =
     new nsGeoPosition(latitude, longitude, alt, herror, verror, 0.0, 0.0,
                       PR_Now());
   mCallback->Update(position);
@@ -194,7 +204,7 @@ WindowsLocationProvider::~WindowsLocationProvider()
 NS_IMETHODIMP
 WindowsLocationProvider::Startup()
 {
-  RefPtr<ILocation> location;
+  nsRefPtr<ILocation> location;
   if (FAILED(::CoCreateInstance(CLSID_Location, nullptr, CLSCTX_INPROC_SERVER,
                                 IID_ILocation,
                                 getter_AddRefs(location)))) {
@@ -216,7 +226,7 @@ NS_IMETHODIMP
 WindowsLocationProvider::Watch(nsIGeolocationUpdate* aCallback)
 {
   if (mLocation) {
-    RefPtr<LocationEvent> event = new LocationEvent(aCallback, this);
+    nsRefPtr<LocationEvent> event = new LocationEvent(aCallback, this);
     if (SUCCEEDED(mLocation->RegisterForReport(event, IID_ILatLongReport, 0))) {
       return NS_OK;
     }

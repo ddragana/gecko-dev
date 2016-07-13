@@ -28,6 +28,7 @@
 
 #include "base/basictypes.h"
 
+#define _USE_MATH_DEFINES
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -36,10 +37,10 @@
 
 #include "base/stack_container.h"
 #include "convolver.h"
-#include "skia/include/core/SkColorPriv.h"
-#include "skia/include/core/SkBitmap.h"
-#include "skia/include/core/SkRect.h"
-#include "skia/include/core/SkFontHost.h"
+#include "skia/SkColorPriv.h"
+#include "skia/SkBitmap.h"
+#include "skia/SkRect.h"
+#include "skia/SkFontHost.h"
 
 namespace skia {
 

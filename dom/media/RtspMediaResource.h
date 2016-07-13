@@ -8,7 +8,6 @@
 
 #include "MediaResource.h"
 #include "mozilla/Monitor.h"
-#include "nsAutoPtr.h"
 #include "nsITimer.h"
 #include "VideoUtils.h"
 
@@ -72,7 +71,7 @@ class RtspTrackBuffer;
 class RtspMediaResource : public BaseMediaResource
 {
 public:
-  RtspMediaResource(MediaResourceCallback* aCallback, nsIChannel* aChannel, nsIURI* aURI,
+  RtspMediaResource(MediaDecoder* aDecoder, nsIChannel* aChannel, nsIURI* aURI,
                     const nsACString& aContentType);
   virtual ~RtspMediaResource();
 
@@ -80,7 +79,7 @@ public:
 
   // Get the RtspMediaResource pointer if this MediaResource is a
   // RtspMediaResource. For calling Rtsp specific functions.
-  RtspMediaResource* GetRtspPointer() override final {
+  virtual RtspMediaResource* GetRtspPointer() override final {
     return this;
   }
 
@@ -95,7 +94,7 @@ public:
 
   // Even it is a live stream, as long as it provides valid timestamps,
   // we tell state machine it's not a live stream.
-  bool IsRealTime() override {
+  virtual bool IsRealTime() override {
     return !mHasTimestamp;
   }
 
@@ -125,29 +124,38 @@ public:
   void DisablePlayoutDelay();
 
   // dummy
-  nsresult ReadAt(int64_t aOffset, char* aBuffer,
-                  uint32_t aCount, uint32_t* aBytes)  override{
+  virtual nsresult ReadAt(int64_t aOffset, char* aBuffer,
+                          uint32_t aCount, uint32_t* aBytes)  override{
     return NS_ERROR_FAILURE;
   }
   // dummy
-  void     SetReadMode(MediaCacheStream::ReadMode aMode) override {}
+  virtual void     SetReadMode(MediaCacheStream::ReadMode aMode) override {}
   // dummy
-  void     SetPlaybackRate(uint32_t aBytesPerSecond) override {}
+  virtual void     SetPlaybackRate(uint32_t aBytesPerSecond) override {}
   // dummy
-  int64_t  Tell() override { return 0; }
+  virtual nsresult Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes)
+  override {
+    return NS_OK;
+  }
+  // dummy
+  virtual nsresult Seek(int32_t aWhence, int64_t aOffset) override {
+    return NS_OK;
+  }
+  // dummy
+  virtual int64_t  Tell() override { return 0; }
 
   // Any thread
-  void    Pin() override {}
-  void    Unpin() override {}
+  virtual void    Pin() override {}
+  virtual void    Unpin() override {}
 
-  bool    IsSuspendedByCache() override { return mIsSuspend; }
+  virtual bool    IsSuspendedByCache() override { return mIsSuspend; }
 
-  bool    IsSuspended() override { return false; }
-  bool    IsTransportSeekable() override { return true; }
+  virtual bool    IsSuspended() override { return false; }
+  virtual bool    IsTransportSeekable() override { return true; }
   // dummy
-  double  GetDownloadRate(bool* aIsReliable) override { *aIsReliable = false; return 0; }
+  virtual double  GetDownloadRate(bool* aIsReliable) override { *aIsReliable = false; return 0; }
 
-  int64_t GetLength() override {
+  virtual int64_t GetLength() override {
     if (mIsLiveStream) {
       return -1;
     }
@@ -155,40 +163,43 @@ public:
   }
 
   // dummy
-  int64_t GetNextCachedData(int64_t aOffset) override { return 0; }
+  virtual int64_t GetNextCachedData(int64_t aOffset) override { return 0; }
   // dummy
-  int64_t GetCachedDataEnd(int64_t aOffset) override { return 0; }
+  virtual int64_t GetCachedDataEnd(int64_t aOffset) override { return 0; }
   // dummy
-  bool    IsDataCachedToEndOfResource(int64_t aOffset) override {
+  virtual bool    IsDataCachedToEndOfResource(int64_t aOffset) override {
     return false;
   }
   // dummy
-  nsresult GetCachedRanges(MediaByteRangeSet& aRanges) override {
+  nsresult GetCachedRanges(nsTArray<MediaByteRange>& aRanges) override {
     return NS_ERROR_FAILURE;
   }
 
   // The following methods can be called on main thread only.
 
-  nsresult Open(nsIStreamListener** aStreamListener) override;
-  nsresult Close() override;
-  void     Suspend(bool aCloseImmediately) override;
-  void     Resume() override;
-  already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override;
-  bool     CanClone() override {
+  virtual nsresult Open(nsIStreamListener** aStreamListener) override;
+  virtual nsresult Close() override;
+  virtual void     Suspend(bool aCloseImmediately) override;
+  virtual void     Resume() override;
+  virtual already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override;
+  virtual bool     CanClone() override {
     return false;
   }
-  already_AddRefed<MediaResource> CloneData(MediaResourceCallback*) override {
+  virtual already_AddRefed<MediaResource> CloneData(MediaDecoder* aDecoder)
+  override {
     return nullptr;
   }
   // dummy
-  nsresult ReadFromCache(char* aBuffer, int64_t aOffset,
+  virtual nsresult ReadFromCache(char* aBuffer, int64_t aOffset,
                                  uint32_t aCount) override {
     return NS_ERROR_FAILURE;
   }
 
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfExcludingThis(
+                      MallocSizeOf aMallocSizeOf) const override;
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override {
+  virtual size_t SizeOfIncludingThis(
+                      MallocSizeOf aMallocSizeOf) const override {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
@@ -211,7 +222,7 @@ public:
     void Revoke();
 
   private:
-    RefPtr<RtspMediaResource> mResource;
+    nsRefPtr<RtspMediaResource> mResource;
   };
   friend class Listener;
 
@@ -224,7 +235,7 @@ protected:
   nsresult OnConnected(uint8_t aIndex, nsIStreamingProtocolMetaData* aMeta);
   nsresult OnDisconnected(uint8_t aIndex, nsresult aReason);
 
-  RefPtr<Listener> mListener;
+  nsRefPtr<Listener> mListener;
 
 private:
   // Notify mDecoder the rtsp stream is suspend. Main thread only.

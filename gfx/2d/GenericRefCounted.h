@@ -11,7 +11,6 @@
 #define MOZILLA_GENERICREFCOUNTED_H_
 
 #include "mozilla/RefPtr.h"
-#include "mozilla/RefCounted.h"
 
 namespace mozilla {
 

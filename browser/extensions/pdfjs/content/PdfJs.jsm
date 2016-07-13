@@ -1,3 +1,5 @@
+/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,8 +15,8 @@
  * limitations under the License.
  */
 /* jshint esnext:true */
-/* globals Components, Services, XPCOMUtils, PdfjsChromeUtils,
-           PdfjsContentUtils, PdfStreamConverter */
+/* globals Components, Services, XPCOMUtils, PdfjsChromeUtils, PdfRedirector,
+           PdfjsContentUtils, DEFAULT_PREFERENCES, PdfStreamConverter */
 
 'use strict';
 
@@ -41,7 +43,7 @@ const PDF_CONTENT_TYPE = 'application/pdf';
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
-var Svc = {};
+let Svc = {};
 XPCOMUtils.defineLazyServiceGetter(Svc, 'mime',
                                    '@mozilla.org/mime;1',
                                    'nsIMIMEService');
@@ -77,22 +79,22 @@ function isDefaultHandler() {
 }
 
 function initializeDefaultPreferences() {
-  var DEFAULT_PREFERENCES =
-{
-  "showPreviousViewOnLoad": true,
-  "defaultZoomValue": "",
-  "sidebarViewOnLoad": 0,
-  "enableHandToolOnLoad": false,
-  "enableWebGL": false,
-  "pdfBugEnabled": false,
-  "disableRange": false,
-  "disableStream": false,
-  "disableAutoFetch": false,
-  "disableFontFace": false,
-  "disableTextLayer": false,
-  "useOnlyCssZoom": false,
-  "externalLinkTarget": 0
-}
+
+var DEFAULT_PREFERENCES = {
+  showPreviousViewOnLoad: true,
+  defaultZoomValue: '',
+  sidebarViewOnLoad: 0,
+  enableHandToolOnLoad: false,
+  enableWebGL: false,
+  pdfBugEnabled: false,
+  disableRange: false,
+  disableStream: false,
+  disableAutoFetch: false,
+  disableFontFace: false,
+  disableTextLayer: false,
+  useOnlyCssZoom: false
+};
+
 
   var defaultBranch = Services.prefs.getDefaultBranch(PREF_PREFIX + '.');
   var defaultValue;
@@ -143,7 +145,7 @@ Factory.prototype = {
   }
 };
 
-var PdfJs = {
+let PdfJs = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
   _registered: false,
   _initialized: false,

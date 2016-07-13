@@ -9,6 +9,7 @@
 #include "mozilla/dom/Selection.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "nsAString.h"                  // for nsAString_internal::Length, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsContentUtils.h"             // for nsContentUtils
 #include "nsDebug.h"                    // for NS_ENSURE_TRUE, etc
 #include "nsDependentSubstring.h"       // for Substring
@@ -263,7 +264,7 @@ NS_IMETHODIMP
 nsTextServicesDocument::ExpandRangeToWordBoundaries(nsIDOMRange *aRange)
 {
   NS_ENSURE_ARG_POINTER(aRange);
-  RefPtr<nsRange> range = static_cast<nsRange*>(aRange);
+  nsRefPtr<nsRange> range = static_cast<nsRange*>(aRange);
 
   // Get the end points of the range.
 
@@ -523,12 +524,12 @@ nsTextServicesDocument::LastSelectedBlock(TSDBlockSelectionStatus *aSelStatus,
     return result;
   }
 
-  RefPtr<Selection> selection = domSelection->AsSelection();
+  nsRefPtr<Selection> selection = static_cast<Selection*>(domSelection.get());
 
   bool isCollapsed = selection->IsCollapsed();
 
   nsCOMPtr<nsIContentIterator> iter;
-  RefPtr<nsRange> range;
+  nsRefPtr<nsRange> range;
   nsCOMPtr<nsIDOMNode>         parent;
   int32_t                      i, rangeCount, offset;
 
@@ -1963,7 +1964,7 @@ nsTextServicesDocument::CreateContentIterator(nsRange* aRange,
   // Create a nsFilteredContentIterator
   // This class wraps the ContentIterator in order to give itself a chance
   // to filter out certain content nodes
-  RefPtr<nsFilteredContentIterator> filter = new nsFilteredContentIterator(mTxtSvcFilter);
+  nsRefPtr<nsFilteredContentIterator> filter = new nsFilteredContentIterator(mTxtSvcFilter);
 
   nsresult result = filter->Init(aRange);
   if (NS_FAILED(result)) {
@@ -2032,7 +2033,7 @@ nsTextServicesDocument::CreateDocumentContentRange(nsRange** aRange)
   nsCOMPtr<nsINode> nativeNode = do_QueryInterface(node);
   NS_ENSURE_STATE(nativeNode);
 
-  RefPtr<nsRange> range = new nsRange(nativeNode);
+  nsRefPtr<nsRange> range = new nsRange(nativeNode);
 
   rv = range->SelectNodeContents(node);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2094,7 +2095,7 @@ nsTextServicesDocument::CreateDocumentContentIterator(nsIContentIterator **aIter
 
   NS_ENSURE_TRUE(aIterator, NS_ERROR_NULL_POINTER);
 
-  RefPtr<nsRange> range;
+  nsRefPtr<nsRange> range;
 
   result = CreateDocumentContentRange(getter_AddRefs(range));
 
@@ -2526,7 +2527,7 @@ nsTextServicesDocument::GetCollapsedSelection(nsITextServicesDocument::TSDBlockS
   NS_ENSURE_SUCCESS(result, result);
   NS_ENSURE_TRUE(domSelection, NS_ERROR_FAILURE);
 
-  RefPtr<Selection> selection = domSelection->AsSelection();
+  nsRefPtr<Selection> selection = static_cast<Selection*>(domSelection.get());
 
   // The calling function should have done the GetIsCollapsed()
   // check already. Just assume it's collapsed!
@@ -2551,7 +2552,7 @@ nsTextServicesDocument::GetCollapsedSelection(nsITextServicesDocument::TSDBlockS
   int32_t eStartOffset = eStart->mNodeOffset;
   int32_t eEndOffset   = eEnd->mNodeOffset + eEnd->mLength;
 
-  RefPtr<nsRange> range = selection->GetRangeAt(0);
+  nsRefPtr<nsRange> range = selection->GetRangeAt(0);
   NS_ENSURE_STATE(range);
 
   nsCOMPtr<nsIDOMNode> domParent;
@@ -2735,7 +2736,7 @@ nsTextServicesDocument::GetUncollapsedSelection(nsITextServicesDocument::TSDBloc
 {
   nsresult result;
 
-  RefPtr<nsRange> range;
+  nsRefPtr<nsRange> range;
   OffsetEntry *entry;
 
   nsCOMPtr<nsISelection> domSelection;
@@ -2744,7 +2745,7 @@ nsTextServicesDocument::GetUncollapsedSelection(nsITextServicesDocument::TSDBloc
   NS_ENSURE_SUCCESS(result, result);
   NS_ENSURE_TRUE(domSelection, NS_ERROR_FAILURE);
 
-  RefPtr<Selection> selection = domSelection->AsSelection();
+  nsRefPtr<Selection> selection = static_cast<Selection*>(domSelection.get());
 
   // It is assumed that the calling function has made sure that the
   // selection is not collapsed, and that the input params to this
@@ -2753,7 +2754,7 @@ nsTextServicesDocument::GetUncollapsedSelection(nsITextServicesDocument::TSDBloc
   nsCOMPtr<nsIDOMNode> startParent, endParent;
   int32_t startOffset, endOffset;
   int32_t rangeCount, tableCount, i;
-  int32_t e1s1 = 0, e1s2 = 0, e2s1 = 0, e2s2 = 0;
+  int32_t e1s1, e1s2, e2s1, e2s2;
 
   OffsetEntry *eStart, *eEnd;
   int32_t eStartOffset, eEndOffset;

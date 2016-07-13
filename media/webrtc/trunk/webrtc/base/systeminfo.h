@@ -52,8 +52,7 @@ class SystemInfo {
 
   // The gpu identifier
   struct GpuInfo {
-    GpuInfo();
-    ~GpuInfo();
+    GpuInfo() : vendor_id(0), device_id(0) {}
     std::string device_name;
     std::string description;
     int vendor_id;

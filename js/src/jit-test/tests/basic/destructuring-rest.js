@@ -4,6 +4,8 @@ load(libdir + 'eqArrayHelper.js');
 
 assertThrowsInstanceOf(() => new Function('[...a, ,] = []'), SyntaxError, 'trailing elision');
 assertThrowsInstanceOf(() => new Function('[a, ...b, c] = []'), SyntaxError, 'trailing param');
+assertThrowsInstanceOf(() => new Function('[...[a]] = []'), SyntaxError, 'nested arraypattern');
+assertThrowsInstanceOf(() => new Function('[...{a}] = []'), SyntaxError, 'nested objectpattern');
 assertThrowsInstanceOf(() => new Function('[...a=b] = []'), SyntaxError, 'assignment expression');
 assertThrowsInstanceOf(() => new Function('[...a()] = []'), SyntaxError, 'call expression');
 assertThrowsInstanceOf(() => new Function('[...(a,b)] = []'), SyntaxError, 'comma expression');
@@ -20,14 +22,6 @@ assertThrowsInstanceOf(() =>
 	assertThrowsInstanceOf(() => new Function('[...b,] = []'), SyntaxError)
 	, Error);
 
-assertThrowsInstanceOf(() => {
-  try {
-    eval('let [...[...x]] = (() => { throw "foo"; } )();');
-  } catch(e) {
-    assertEq(e, "foo");
-  }
-  x;
-}, ReferenceError);
 
 var inputArray = [1, 2, 3];
 var inputDeep = [1, inputArray];
@@ -51,11 +45,6 @@ function testAll(fn) {
   assertEqArray(fn('[, ...(o.prop)]', inputArray, 'o.prop'), expected);
   o.prop = null;
   assertEqArray(fn('[, ...(o.call().prop)]', inputArray, 'o.prop'), expected);
-
-  o.prop = null;
-  assertEqArray(fn('[, ...[...(o.prop)]]', inputArray, 'o.prop'), expected);
-  o.prop = null;
-  assertEqArray(fn('[, ...[...(o.call().prop)]]', inputArray, 'o.prop'), expected);
 }
 function testDeclaration(fn) {
   testStr(fn);
@@ -64,24 +53,10 @@ function testDeclaration(fn) {
   assertEqArray(fn('[, ...rest]', inputGenerator()), expected);
   assertEqArray(fn('[, [, ...rest]]', inputDeep), expected);
   assertEqArray(fn('{a: [, ...rest]}', inputObject), expected);
-
-  assertEqArray(fn('[, ...[...rest]]', inputArray), expected);
-  assertEqArray(fn('[, ...[...rest]]', inputGenerator()), expected);
-  assertEqArray(fn('[, [, ...[...rest]]]', inputDeep), expected);
-  assertEqArray(fn('{a: [, ...[...rest]]}', inputObject), expected);
-
-  assertEqArray(fn('[, ...{0: a, 1: b}]', inputArray, '[a, b]'), expected);
-  assertEqArray(fn('[, ...{0: a, 1: b}]', inputGenerator(), '[a, b]'), expected);
-  assertEqArray(fn('[, [, ...{0: a, 1: b}]]', inputDeep, '[a, b]'), expected);
-  assertEqArray(fn('{a: [, ...{0: a, 1: b}]}', inputObject, '[a, b]'), expected);
 }
 
 function testStr(fn) {
   assertEqArray(fn('[, ...rest]', inputStr), expectedStr);
-
-  assertEqArray(fn('[, ...[...rest]]', inputStr), expectedStr);
-
-  assertEqArray(fn('[, ...{0: a, 1: b}]', inputStr, '[a, b]'), expectedStr);
 }
 
 function testForIn(pattern, input, binding) {
@@ -113,9 +88,8 @@ testAll(testGlobal);
 
 function testClosure(pattern, input, binding) {
   binding = binding || 'rest';
-  const decl = binding.replace('[', '').replace(']', '');
   return new Function('input',
-    'var ' + decl + '; (function () {' +
+    'var ' + binding + '; (function () {' +
     '(' + pattern + ' = input);' +
     '})();' +
     'return ' + binding
@@ -152,3 +126,15 @@ function testThrow(pattern, input, binding) {
   )(input);
 }
 testDeclaration(testThrow);
+
+// XXX: Support for let blocks will be removed in bug 1023609.
+// However, they test a special code path in destructuring assignment so having
+// these tests here for now seems like a good idea.
+function testLetBlock(pattern, input, binding) {
+  binding = binding || 'rest';
+  return new Function('input',
+    'let (' + pattern + ' = input)' +
+    '{ return ' + binding + '; }'
+  )(input);
+}
+testDeclaration(testLetBlock);

@@ -11,7 +11,6 @@
 // shellapi.h is needed to build with WIN32_LEAN_AND_MEAN
 #include <shellapi.h>
 
-#include "mozilla/RefPtr.h"
 #include "nsDragService.h"
 #include "nsITransferable.h"
 #include "nsDataObj.h"
@@ -23,6 +22,8 @@
 #include "nsISupportsArray.h"
 #include "nsIDocument.h"
 #include "nsDataObjCollection.h"
+
+#include "nsAutoPtr.h"
 
 #include "nsString.h"
 #include "nsEscape.h"
@@ -36,7 +37,7 @@
 #include "gfxContext.h"
 #include "nsRect.h"
 #include "nsMathUtils.h"
-#include "WinUtils.h"
+#include "gfxWindowsPlatform.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "mozilla/gfx/Tools.h"
@@ -169,11 +170,18 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
 }
 
 //-------------------------------------------------------------------------
-nsresult
-nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
-                                     nsIScriptableRegion* aRegion,
-                                     uint32_t aActionType)
+NS_IMETHODIMP
+nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
+                                 nsISupportsArray *anArrayTransferables,
+                                 nsIScriptableRegion *aRegion,
+                                 uint32_t aActionType)
 {
+  nsresult rv = nsBaseDragService::InvokeDragSession(aDOMNode,
+                                                     anArrayTransferables,
+                                                     aRegion,
+                                                     aActionType);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // Try and get source URI of the items that are being dragged
   nsIURI *uri = nullptr;
 
@@ -183,7 +191,7 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
   }
 
   uint32_t numItemsToDrag = 0;
-  nsresult rv = anArrayTransferables->Count(&numItemsToDrag);
+  rv = anArrayTransferables->Count(&numItemsToDrag);
   if (!numItemsToDrag)
     return NS_ERROR_FAILURE;
 
@@ -194,7 +202,7 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
   // "collection" object to fake out the OS. This collection contains
   // one |IDataObject| for each transferable. If there is just the one
   // (most cases), only pass around the native |IDataObject|.
-  RefPtr<IDataObject> itemToDrag;
+  nsRefPtr<IDataObject> itemToDrag;
   if (numItemsToDrag > 1) {
     nsDataObjCollection * dataObjCollection = new nsDataObjCollection();
     if (!dataObjCollection)
@@ -206,9 +214,8 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
       nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
       if (trans) {
         // set the requestingNode on the transferable
-        trans->SetRequestingNode(mSourceNode);
-        trans->SetContentPolicyType(mContentPolicyType);
-        RefPtr<IDataObject> dataObj;
+        trans->SetRequestingNode(aDOMNode);
+        nsRefPtr<IDataObject> dataObj;
         rv = nsClipboard::CreateNativeDataObject(trans,
                                                  getter_AddRefs(dataObj), uri);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -226,8 +233,7 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
     nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
     if (trans) {
       // set the requestingNode on the transferable
-      trans->SetRequestingNode(mSourceNode);
-      trans->SetContentPolicyType(mContentPolicyType);
+      trans->SetRequestingNode(aDOMNode);
       rv = nsClipboard::CreateNativeDataObject(trans,
                                                getter_AddRefs(itemToDrag),
                                                uri);
@@ -241,7 +247,7 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
                                  CLSCTX_INPROC_SERVER,
                                  IID_IDragSourceHelper, (void**)&pdsh))) {
     SHDRAGIMAGE sdi;
-    if (CreateDragImage(mSourceNode, aRegion, &sdi)) {
+    if (CreateDragImage(aDOMNode, aRegion, &sdi)) {
       if (FAILED(pdsh->InitializeFromBitmap(&sdi, itemToDrag)))
         DeleteObject(sdi.hbmpDragImage);
     }
@@ -259,7 +265,7 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
 {
   // To do the drag we need to create an object that
   // implements the IDataObject interface (for OLE)
-  RefPtr<nsNativeDragSource> nativeDragSrc =
+  nsRefPtr<nsNativeDragSource> nativeDragSrc =
     new nsNativeDragSource(mDataTransfer);
 
   // Now figure out what the native drag effect should be
@@ -284,7 +290,7 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
   StartDragSession();
   OpenDragPopup();
 
-  RefPtr<IAsyncOperation> pAsyncOp;
+  nsRefPtr<IAsyncOperation> pAsyncOp;
   // Offer to do an async drag
   if (SUCCEEDED(aDataObj->QueryInterface(IID_IAsyncOperation,
                                          getter_AddRefs(pAsyncOp)))) {
@@ -326,9 +332,7 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
   // Note that we must convert this from device pixels back to Windows logical
   // pixels (bug 818927).
   DWORD pos = ::GetMessagePos();
-  POINT pt = { GET_X_LPARAM(pos), GET_Y_LPARAM(pos) };
-  HMONITOR monitor = ::MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
-  double dpiScale = widget::WinUtils::LogToPhysFactor(monitor);
+  FLOAT dpiScale = gfxWindowsPlatform::GetPlatform()->GetDPIScale();
   nsIntPoint logPos(NSToIntRound(GET_X_LPARAM(pos) / dpiScale),
                     NSToIntRound(GET_Y_LPARAM(pos) / dpiScale));
   SetDragEndPoint(logPos);

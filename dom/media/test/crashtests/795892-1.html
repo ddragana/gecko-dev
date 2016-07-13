@@ -6,18 +6,12 @@ function boom()
 {
   var a = document.getElementById("a");
   a.play();
-  a.onplaying = function () {
-    a.onplaying = null;
-    // Note we reset 'src' to release decoder resources and cubeb streams to
-    // prevent OOM or OpenCubeb() failures.
-    a.src = "";
-    document.documentElement.className = "";
-  }
+  a.onplaying = function () { document.documentElement.className = ""; }
 }
 </script>
 </head>
 
 <body>
-<video id="a" src="cors.webm" crossorigin preload="metadata" onloadedmetadata="boom();">
+<video id="a" src="cors.webm" crossorigin onloadedmetadata="boom();">
 </body>
 </html>

@@ -8,7 +8,6 @@
 #define GECKO_TASK_TRACER_H
 
 #include "nsCOMPtr.h"
-#include "mozilla/UniquePtr.h"
 
 /**
  * TaskTracer provides a way to trace the correlation between different tasks
@@ -65,7 +64,7 @@ void AddLabel(const char* aFormat, ...);
 
 void StartLogging();
 void StopLogging();
-UniquePtr<nsTArray<nsCString>> GetLoggedData(TimeStamp aStartTime);
+nsTArray<nsCString>* GetLoggedData(TimeStamp aStartTime);
 
 // Returns the timestamp when Task Tracer is enabled in this process.
 const PRTime GetStartTime();
@@ -76,8 +75,7 @@ const PRTime GetStartTime();
 
 Task* CreateTracedTask(Task* aTask);
 
-already_AddRefed<nsIRunnable>
-CreateTracedRunnable(already_AddRefed<nsIRunnable>&& aRunnable);
+already_AddRefed<nsIRunnable> CreateTracedRunnable(nsIRunnable* aRunnable);
 
 // Free the TraceInfo allocated on a thread's TLS. Currently we are wrapping
 // tasks running on nsThreads and base::thread, so FreeTraceInfo is called at

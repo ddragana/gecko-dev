@@ -108,10 +108,10 @@ For more details @see bugzilla bug 76722
 */
 
 
-class nsParserContinueEvent : public Runnable
+class nsParserContinueEvent : public nsRunnable
 {
 public:
-  RefPtr<nsParser> mParser;
+  nsRefPtr<nsParser> mParser;
 
   explicit nsParserContinueEvent(nsParser* aParser)
     : mParser(aParser)
@@ -1512,9 +1512,7 @@ nsParser::ResumeParse(bool allowIteration, bool aIsFinalChunk,
               if (theContext) {
                 theIterationIsOk = allowIteration && theContextIsStringBased;
                 if (theContext->mCopyUnused) {
-                  if (!theContext->mScanner->CopyUnusedData(mUnusedInput)) {
-                    mInternalState = NS_ERROR_OUT_OF_MEMORY;
-                  }
+                  theContext->mScanner->CopyUnusedData(mUnusedInput);
                 }
 
                 delete theContext;
@@ -1686,7 +1684,7 @@ ExtractCharsetFromXmlDeclaration(const unsigned char* aBytes, int32_t aLen,
   return !oCharset.IsEmpty();
 }
 
-inline char
+inline const char
 GetNextChar(nsACString::const_iterator& aStart,
             nsACString::const_iterator& aEnd)
 {

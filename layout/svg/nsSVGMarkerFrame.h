@@ -26,14 +26,16 @@ class SVGSVGElement;
 
 struct nsSVGMark;
 
-class nsSVGMarkerFrame : public nsSVGContainerFrame
+typedef nsSVGContainerFrame nsSVGMarkerFrameBase;
+
+class nsSVGMarkerFrame : public nsSVGMarkerFrameBase
 {
   friend class nsSVGMarkerAnonChildFrame;
   friend nsContainerFrame*
   NS_NewSVGMarkerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
   explicit nsSVGMarkerFrame(nsStyleContext* aContext)
-    : nsSVGContainerFrame(aContext)
+    : nsSVGMarkerFrameBase(aContext)
     , mMarkedFrame(nullptr)
     , mInUse(false)
     , mInUse2(false)
@@ -74,11 +76,11 @@ public:
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
     // Any children must be added to our single anonymous inner frame kid.
-    MOZ_ASSERT(PrincipalChildList().FirstChild() &&
-               PrincipalChildList().FirstChild()->GetType() ==
+    MOZ_ASSERT(GetFirstPrincipalChild() &&
+               GetFirstPrincipalChild()->GetType() ==
                  nsGkAtoms::svgMarkerAnonChildFrame,
                "Where is our anonymous child?");
-    return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
+    return GetFirstPrincipalChild()->GetContentInsertionFrame();
   }
 
   // nsSVGMarkerFrame methods:
@@ -108,7 +110,7 @@ private:
   // prevent nasty reference loops) as well as the reference to the marked
   // frame and its coordinate context. It's easy to mess this up
   // and break things, so this helper makes the code far more robust.
-  class MOZ_RAII AutoMarkerReferencer
+  class MOZ_STACK_CLASS AutoMarkerReferencer
   {
   public:
     AutoMarkerReferencer(nsSVGMarkerFrame *aFrame,
@@ -133,14 +135,19 @@ private:
 ////////////////////////////////////////////////////////////////////////
 // nsMarkerAnonChildFrame class
 
-class nsSVGMarkerAnonChildFrame : public nsSVGDisplayContainerFrame
+typedef nsSVGDisplayContainerFrame nsSVGMarkerAnonChildFrameBase;
+
+/**
+ */
+class nsSVGMarkerAnonChildFrame
+  : public nsSVGMarkerAnonChildFrameBase
 {
   friend nsContainerFrame*
   NS_NewSVGMarkerAnonChildFrame(nsIPresShell* aPresShell,
                                 nsStyleContext* aContext);
 
   explicit nsSVGMarkerAnonChildFrame(nsStyleContext* aContext)
-    : nsSVGDisplayContainerFrame(aContext)
+    : nsSVGMarkerAnonChildFrameBase(aContext)
   {}
 
 public:

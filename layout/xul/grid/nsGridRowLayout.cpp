@@ -64,7 +64,7 @@ nsGridRowLayout::GetParentGridPart(nsIFrame* aBox, nsIFrame** aParentBox)
 
   // get the parent
   if (aBox)
-    aBox = nsBox::GetParentXULBox(aBox);
+    aBox = nsBox::GetParentBox(aBox);
 
   if (aBox)
   {
@@ -93,14 +93,14 @@ nsGridRowLayout::GetGrid(nsIFrame* aBox, int32_t* aIndex, nsGridRowLayout* aRequ
    }
 
    int32_t index = -1;
-   nsIFrame* child = nsBox::GetChildXULBox(aBox);
+   nsIFrame* child = nsBox::GetChildBox(aBox);
    int32_t count = 0;
    while(child)
    {
      // if there is a scrollframe walk inside it to its child
      nsIFrame* childBox = nsGrid::GetScrolledBox(child);
 
-     nsBoxLayout* layout = childBox->GetXULLayoutManager();
+     nsBoxLayout* layout = childBox->GetLayoutManager();
      nsIGridPart* gridRow = nsGrid::GetPartFromBox(childBox);
      if (gridRow) 
      {
@@ -112,7 +112,7 @@ nsGridRowLayout::GetGrid(nsIFrame* aBox, int32_t* aIndex, nsGridRowLayout* aRequ
      } else 
        count++;
 
-     child = nsBox::GetNextXULBox(child);
+     child = nsBox::GetNextBox(child);
    }
 
    // if we didn't find ourselves then the tree isn't properly formed yet
@@ -147,10 +147,10 @@ nsGridRowLayout::GetTotalMargin(nsIFrame* aBox, bool aIsHorizontal)
     aBox = nsGrid::GetScrollBox(aBox);
 
     // see if we have a next to see if we are last
-    nsIFrame* next = nsBox::GetNextXULBox(aBox);
+    nsIFrame* next = nsBox::GetNextBox(aBox);
 
     // get the parent first child to see if we are first
-    nsIFrame* child = nsBox::GetChildXULBox(parent);
+    nsIFrame* child = nsBox::GetChildBox(parent);
 
     margin = part->GetTotalMargin(parent, aIsHorizontal);
 
@@ -182,7 +182,7 @@ nsGridRowLayout::GetTotalMargin(nsIFrame* aBox, bool aIsHorizontal)
     
   // add ours to it.
   nsMargin ourMargin;
-  aBox->GetXULMargin(ourMargin);
+  aBox->GetMargin(ourMargin);
   margin += ourMargin;
 
   return margin;

@@ -213,11 +213,16 @@ nsComposerCommandsUpdater::DidMerge(nsITransactionManager *aManager,
 #endif
 
 nsresult
-nsComposerCommandsUpdater::Init(nsPIDOMWindowOuter* aDOMWindow)
+nsComposerCommandsUpdater::Init(nsIDOMWindow* aDOMWindow)
 {
   NS_ENSURE_ARG(aDOMWindow);
   mDOMWindow = do_GetWeakReference(aDOMWindow);
-  mDocShell = do_GetWeakReference(aDOMWindow->GetDocShell());
+
+  nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aDOMWindow));
+  if (window)
+  {
+    mDocShell = do_GetWeakReference(window->GetDocShell());
+  }
   return NS_OK;
 }
 
@@ -334,10 +339,11 @@ nsComposerCommandsUpdater::UpdateOneCommand(const char *aCommand)
 bool
 nsComposerCommandsUpdater::SelectionIsCollapsed()
 {
-  nsCOMPtr<nsPIDOMWindowOuter> domWindow = do_QueryReferent(mDOMWindow);
+  nsCOMPtr<nsIDOMWindow> domWindow = do_QueryReferent(mDOMWindow);
   NS_ENSURE_TRUE(domWindow, true);
 
-  if (nsCOMPtr<nsISelection> domSelection = domWindow->GetSelection())
+  nsCOMPtr<nsISelection> domSelection;
+  if (NS_SUCCEEDED(domWindow->GetSelection(getter_AddRefs(domSelection))) && domSelection)
   {
     bool selectionCollapsed = false;
     domSelection->GetIsCollapsed(&selectionCollapsed);
@@ -354,7 +360,7 @@ nsComposerCommandsUpdater::GetCommandUpdater()
 {
   nsCOMPtr<nsIDocShell> docShell = do_QueryReferent(mDocShell);
   NS_ENSURE_TRUE(docShell, nullptr);
-  nsCOMPtr<nsICommandManager> manager = docShell->GetCommandManager();
+  nsCOMPtr<nsICommandManager> manager = do_GetInterface(docShell);
   nsCOMPtr<nsPICommandUpdater> updater = do_QueryInterface(manager);
   return updater.forget();
 }
@@ -379,7 +385,7 @@ nsComposerCommandsUpdater::Notify(nsITimer *timer)
 nsresult
 NS_NewComposerCommandsUpdater(nsISelectionListener** aInstancePtrResult)
 {
-  RefPtr<nsComposerCommandsUpdater> newThang = new nsComposerCommandsUpdater;
+  nsRefPtr<nsComposerCommandsUpdater> newThang = new nsComposerCommandsUpdater;
   newThang.forget(aInstancePtrResult);
   return NS_OK;
 }

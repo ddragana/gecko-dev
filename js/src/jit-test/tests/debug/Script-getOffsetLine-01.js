@@ -1,11 +1,11 @@
-// Basic getOffsetLocation test, using Error.lineNumber as the gold standard.
+// Basic getOffsetLine test, using Error.lineNumber as the gold standard.
 
 var g = newGlobal();
 var dbg = Debugger(g);
 var hits;
 dbg.onDebuggerStatement = function (frame) {
     var knownLine = frame.eval("line").return;
-    assertEq(frame.script.getOffsetLocation(frame.offset).lineNumber, knownLine);
+    assertEq(frame.script.getOffsetLine(frame.offset), knownLine);
     hits++;
 };
 

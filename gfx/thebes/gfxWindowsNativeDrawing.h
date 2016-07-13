@@ -79,20 +79,23 @@ public:
     /* Returns true if the native drawing should be executed again */
     bool ShouldRenderAgain();
 
+    /* Returns true if double pass alpha extraction is taking place. */
+    bool IsDoublePass();
+
     /* Places the result to the context, if necessary */
     void PaintToContext();
 
 private:
 
-    RefPtr<gfxContext> mContext;
+    nsRefPtr<gfxContext> mContext;
     gfxRect mNativeRect;
     uint32_t mNativeDrawFlags;
 
     // what state the rendering is in
     uint8_t mRenderState;
 
-    mozilla::gfx::Point mDeviceOffset;
-    RefPtr<gfxPattern> mBlackPattern, mWhitePattern;
+    gfxPoint mDeviceOffset;
+    nsRefPtr<gfxPattern> mBlackPattern, mWhitePattern;
 
     enum TransformType {
         TRANSLATION_ONLY,
@@ -106,7 +109,7 @@ private:
     XFORM mWorldTransform;
 
     // saved state
-    RefPtr<gfxWindowsSurface> mWinSurface, mBlackSurface, mWhiteSurface;
+    nsRefPtr<gfxWindowsSurface> mWinSurface, mBlackSurface, mWhiteSurface;
     HDC mDC;
     XFORM mOldWorldTransform;
     POINT mOrigViewportOrigin;

@@ -9,57 +9,51 @@
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FileSystemUtils.h"
-#include "nsIGlobalObject.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsIFile.h"
+#include "nsPIDOMWindow.h"
 
 namespace mozilla {
 namespace dom {
 
 OSFileSystem::OSFileSystem(const nsAString& aRootDir)
 {
-  mLocalOrDeviceStorageRootPath = aRootDir;
-  mPermissionCheckType = ePermissionCheckNotRequired;
+  mLocalRootPath = aRootDir;
+  FileSystemUtils::LocalPathToNormalizedPath(mLocalRootPath,
+                                             mNormalizedLocalRootPath);
+
+  // Non-mobile devices don't have the concept of separate permissions to
+  // access different parts of devices storage like Pictures, or Videos, etc.
+  mRequiresPermissionChecks = false;
+
+  mString = mLocalRootPath;
 
 #ifdef DEBUG
   mPermission.AssignLiteral("never-used");
 #endif
 }
 
-already_AddRefed<FileSystemBase>
-OSFileSystem::Clone()
+void
+OSFileSystem::Init(nsPIDOMWindow* aWindow)
 {
-  AssertIsOnOwningThread();
+  MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread!");
+  MOZ_ASSERT(!mWindow, "No duple Init() calls");
+  MOZ_ASSERT(aWindow);
+  mWindow = aWindow;
+}
 
-  RefPtr<OSFileSystem> fs = new OSFileSystem(mLocalOrDeviceStorageRootPath);
-  if (mParent) {
-    fs->Init(mParent);
-  }
-
-  return fs.forget();
+nsPIDOMWindow*
+OSFileSystem::GetWindow() const
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread!");
+  return mWindow;
 }
 
 void
-OSFileSystem::Init(nsISupports* aParent)
+OSFileSystem::GetRootName(nsAString& aRetval) const
 {
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!mParent, "No duple Init() calls");
-  MOZ_ASSERT(aParent);
-
-  mParent = aParent;
-
-#ifdef DEBUG
-  nsCOMPtr<nsIGlobalObject> obj = do_QueryInterface(aParent);
-  MOZ_ASSERT(obj);
-#endif
-}
-
-nsISupports*
-OSFileSystem::GetParentObject() const
-{
-  AssertIsOnOwningThread();
-  return mParent;
+  return aRetval.AssignLiteral("/");
 }
 
 bool
@@ -80,43 +74,6 @@ OSFileSystem::IsSafeDirectory(Directory* aDir) const
   // storage that it is being used with.
   MOZ_CRASH("Don't use OSFileSystem with the Device Storage API");
   return true;
-}
-
-void
-OSFileSystem::Unlink()
-{
-  AssertIsOnOwningThread();
-  mParent = nullptr;
-}
-
-void
-OSFileSystem::Traverse(nsCycleCollectionTraversalCallback &cb)
-{
-  AssertIsOnOwningThread();
-
-  OSFileSystem* tmp = this;
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent);
-}
-
-void
-OSFileSystem::SerializeDOMPath(nsAString& aOutput) const
-{
-  AssertIsOnOwningThread();
-  aOutput = mLocalOrDeviceStorageRootPath;
-}
-
-/**
- * OSFileSystemParent
- */
-
-OSFileSystemParent::OSFileSystemParent(const nsAString& aRootDir)
-{
-  mLocalOrDeviceStorageRootPath = aRootDir;
-  mPermissionCheckType = ePermissionCheckNotRequired;
-
-#ifdef DEBUG
-  mPermission.AssignLiteral("never-used");
-#endif
 }
 
 } // namespace dom

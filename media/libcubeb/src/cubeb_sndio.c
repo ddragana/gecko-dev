@@ -67,7 +67,7 @@ sndio_onmove(void *arg, int delta)
 {
   cubeb_stream *s = (cubeb_stream *)arg;
 
-  s->rdpos += delta * s->bpf;
+  s->rdpos += delta;
 }
 
 static void *
@@ -103,7 +103,7 @@ sndio_mainloop(void *arg)
         break;
       }
       pthread_mutex_unlock(&s->mtx);
-      nfr = s->data_cb(s, s->arg, NULL, s->buf, s->nfr);
+      nfr = s->data_cb(s, s->arg, s->buf, s->nfr);
       pthread_mutex_lock(&s->mtx);
       if (nfr < 0) {
         DPR("sndio_mainloop() cb err\n");
@@ -135,7 +135,7 @@ sndio_mainloop(void *arg)
         state = CUBEB_STATE_ERROR;
         break;
       }
-      s->wrpos += n;
+      s->wrpos = 0;
       start += n;
     }
   }
@@ -170,14 +170,10 @@ sndio_destroy(cubeb *context)
 }
 
 static int
-sndio_stream_init(cubeb * context,
-                  cubeb_stream ** stream,
-                  char const * stream_name,
-                  cubeb_devid input_device,
-                  cubeb_stream_params * input_stream_params,
-                  cubeb_devid output_device,
-                  cubeb_stream_params * output_stream_params,
-                  unsigned int latency,
+sndio_stream_init(cubeb *context,
+                  cubeb_stream **stream,
+                  char const *stream_name,
+                  cubeb_stream_params stream_params, unsigned int latency,
                   cubeb_data_callback data_callback,
                   cubeb_state_callback state_callback,
                   void *user_ptr)
@@ -187,17 +183,11 @@ sndio_stream_init(cubeb * context,
   DPR("sndio_stream_init(%s)\n", stream_name);
   size_t size;
 
-  assert(!input_stream_params && "not supported.");
-  if (input_device || output_device) {
-    /* Device selection not yet implemented. */
-    return CUBEB_ERROR_DEVICE_UNAVAILABLE;
-  }
-
   s = malloc(sizeof(cubeb_stream));
   if (s == NULL)
     return CUBEB_ERROR;
   s->context = context;
-  s->hdl = sio_open(NULL, SIO_PLAY, 1);
+  s->hdl = sio_open(NULL, SIO_PLAY, 0);
   if (s->hdl == NULL) {
     free(s);
     DPR("sndio_stream_init(), sio_open() failed\n");
@@ -206,7 +196,7 @@ sndio_stream_init(cubeb * context,
   sio_initpar(&wpar);
   wpar.sig = 1;
   wpar.bits = 16;
-  switch (output_stream_params->format) {
+  switch (stream_params.format) {
   case CUBEB_SAMPLE_S16LE:
     wpar.le = 1;
     break;
@@ -220,8 +210,8 @@ sndio_stream_init(cubeb * context,
     DPR("sndio_stream_init() unsupported format\n");
     return CUBEB_ERROR_INVALID_FORMAT;
   }
-  wpar.rate = output_stream_params->rate;
-  wpar.pchan = output_stream_params->channels;
+  wpar.rate = stream_params.rate;
+  wpar.pchan = stream_params.channels;
   wpar.appbufsz = latency * wpar.rate / 1000;
   if (!sio_setpar(s->hdl, &wpar) || !sio_getpar(s->hdl, &rpar)) {
     sio_close(s->hdl);
@@ -247,7 +237,7 @@ sndio_stream_init(cubeb * context,
   s->arg = user_ptr;
   s->mtx = PTHREAD_MUTEX_INITIALIZER;
   s->rdpos = s->wrpos = 0;
-  if (output_stream_params->format == CUBEB_SAMPLE_FLOAT32LE) {
+  if (stream_params.format == CUBEB_SAMPLE_FLOAT32LE) {
     s->conv = 1;
     size = rpar.round * rpar.pchan * sizeof(float);
   } else {
@@ -336,7 +326,7 @@ sndio_stream_get_position(cubeb_stream *s, uint64_t *p)
 {
   pthread_mutex_lock(&s->mtx);
   DPR("sndio_stream_get_position() %lld\n", s->rdpos);
-  *p = s->rdpos / s->bpf;
+  *p = s->rdpos;
   pthread_mutex_unlock(&s->mtx);
   return CUBEB_OK;
 }
@@ -356,7 +346,7 @@ sndio_stream_get_latency(cubeb_stream * stm, uint32_t * latency)
 {
   // http://www.openbsd.org/cgi-bin/man.cgi?query=sio_open
   // in the "Measuring the latency and buffers usage" paragraph.
-  *latency = (stm->wrpos - stm->rdpos) / stm->bpf;
+  *latency = stm->wrpos - stm->rdpos;
   return CUBEB_OK;
 }
 
@@ -366,7 +356,6 @@ static struct cubeb_ops const sndio_ops = {
   .get_max_channel_count = sndio_get_max_channel_count,
   .get_min_latency = sndio_get_min_latency,
   .get_preferred_sample_rate = sndio_get_preferred_sample_rate,
-  .enumerate_devices = NULL,
   .destroy = sndio_destroy,
   .stream_init = sndio_stream_init,
   .stream_destroy = sndio_stream_destroy,
@@ -378,6 +367,5 @@ static struct cubeb_ops const sndio_ops = {
   .stream_set_panning = NULL,
   .stream_get_current_device = NULL,
   .stream_device_destroy = NULL,
-  .stream_register_device_changed_callback = NULL,
-  .register_device_collection_changed = NULL
+  .stream_register_device_changed_callback = NULL
 };

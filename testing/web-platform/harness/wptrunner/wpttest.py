@@ -12,8 +12,6 @@ import mozinfo
 from wptmanifest.parser import atoms
 
 atom_reset = atoms["Reset"]
-enabled_tests = set(["testharness", "reftest", "wdspec"])
-
 
 class Result(object):
     def __init__(self, status, message, expected=None, extra=None):
@@ -23,9 +21,6 @@ class Result(object):
         self.message = message
         self.expected = expected
         self.extra = extra
-
-    def __repr__(self):
-        return "<%s.%s %s>" % (self.__module__, self.__class__.__name__, self.status)
 
 
 class SubtestResult(object):
@@ -38,18 +33,10 @@ class SubtestResult(object):
         self.stack = stack
         self.expected = expected
 
-    def __repr__(self):
-        return "<%s.%s %s %s>" % (self.__module__, self.__class__.__name__, self.name, self.status)
-
 
 class TestharnessResult(Result):
     default_expected = "OK"
     statuses = set(["OK", "ERROR", "TIMEOUT", "EXTERNAL-TIMEOUT", "CRASH"])
-
-
-class TestharnessSubtestResult(SubtestResult):
-    default_expected = "PASS"
-    statuses = set(["PASS", "FAIL", "TIMEOUT", "NOTRUN"])
 
 
 class ReftestResult(Result):
@@ -57,14 +44,9 @@ class ReftestResult(Result):
     statuses = set(["PASS", "FAIL", "ERROR", "TIMEOUT", "EXTERNAL-TIMEOUT", "CRASH"])
 
 
-class WdspecResult(Result):
-    default_expected = "OK"
-    statuses = set(["OK", "ERROR", "TIMEOUT", "EXTERNAL-TIMEOUT", "CRASH"])
-
-
-class WdspecSubtestResult(SubtestResult):
+class TestharnessSubtestResult(SubtestResult):
     default_expected = "PASS"
-    statuses = set(["PASS", "FAIL", "ERROR"])
+    statuses = set(["PASS", "FAIL", "TIMEOUT", "NOTRUN"])
 
 
 def get_run_info(metadata_root, product, **kwargs):
@@ -75,7 +57,7 @@ def get_run_info(metadata_root, product, **kwargs):
 
 
 class RunInfo(dict):
-    def __init__(self, metadata_root, product, debug, extras=None):
+    def __init__(self, metadata_root, product, debug):
         self._update_mozinfo(metadata_root)
         self.update(mozinfo.info)
         self["product"] = product
@@ -84,8 +66,6 @@ class RunInfo(dict):
         elif "debug" not in self:
             # Default to release
             self["debug"] = False
-        if extras is not None:
-            self.update(extras)
 
     def _update_mozinfo(self, metadata_root):
         """Add extra build information from a mozinfo.json file in a parent
@@ -99,7 +79,6 @@ class RunInfo(dict):
             path = os.path.split(path)[0]
 
         mozinfo.find_and_update_from_json(*dirs)
-
 
 class B2GRunInfo(RunInfo):
     def __init__(self, *args, **kwargs):
@@ -134,6 +113,7 @@ class Test(object):
                    path=manifest_item.path,
                    protocol="https" if hasattr(manifest_item, "https") and manifest_item.https else "http")
 
+
     @property
     def id(self):
         return self.url
@@ -159,20 +139,13 @@ class Test(object):
                 if subtest_meta is not None:
                     yield subtest_meta
 
+
     def disabled(self, subtest=None):
         for meta in self.itermeta(subtest):
             disabled = meta.disabled
             if disabled is not None:
                 return disabled
         return None
-
-    @property
-    def restart_after(self):
-        for meta in self.itermeta(None):
-            restart_after = meta.restart_after
-            if restart_after is not None:
-                return True
-        return False
 
     @property
     def tags(self):
@@ -216,9 +189,6 @@ class Test(object):
         except KeyError:
             return default
 
-    def __repr__(self):
-        return "<%s.%s %s>" % (self.__module__, self.__class__.__name__, self.id)
-
 
 class TestharnessTest(Test):
     result_cls = TestharnessResult
@@ -242,9 +212,7 @@ class ReftestTest(Test):
     result_cls = ReftestResult
     test_type = "reftest"
 
-    def __init__(self, url, inherit_metadata, test_metadata, references,
-                 timeout=DEFAULT_TIMEOUT, path=None, viewport_size=None,
-                 dpi=None, protocol="http"):
+    def __init__(self, url, inherit_metadata, test_metadata, references, timeout=DEFAULT_TIMEOUT, path=None, protocol="http"):
         Test.__init__(self, url, inherit_metadata, test_metadata, timeout, path, protocol)
 
         for _, ref_type in references:
@@ -252,8 +220,6 @@ class ReftestTest(Test):
                 raise ValueError
 
         self.references = references
-        self.viewport_size = viewport_size
-        self.dpi = dpi
 
     @classmethod
     def from_manifest(cls,
@@ -278,8 +244,6 @@ class ReftestTest(Test):
                    [],
                    timeout=timeout,
                    path=manifest_test.path,
-                   viewport_size=manifest_test.viewport_size,
-                   dpi=manifest_test.dpi,
                    protocol="https" if hasattr(manifest_test, "https") and manifest_test.https else "http")
 
         nodes[url] = node
@@ -321,18 +285,12 @@ class ReftestTest(Test):
         return ("reftype", "refurl")
 
 
-class WdspecTest(Test):
-    result_cls = WdspecResult
-    subtest_result_cls = WdspecSubtestResult
-    test_type = "wdspec"
-
-
 manifest_test_cls = {"reftest": ReftestTest,
                      "testharness": TestharnessTest,
-                     "manual": ManualTest,
-                     "wdspec": WdspecTest}
+                     "manual": ManualTest}
 
 
 def from_manifest(manifest_test, inherit_metadata, test_metadata):
     test_cls = manifest_test_cls[manifest_test.item_type]
+
     return test_cls.from_manifest(manifest_test, inherit_metadata, test_metadata)

@@ -83,10 +83,6 @@ nrappkit copyright:
 #ifndef test_nr_socket__
 #define test_nr_socket__
 
-extern "C" {
-#include "transport_addr.h"
-}
-
 #include "nr_socket_prsock.h"
 
 extern "C" {
@@ -97,7 +93,6 @@ extern "C" {
 #include <vector>
 #include <map>
 #include <list>
-#include <string>
 
 #include "mozilla/UniquePtr.h"
 #include "prinrval.h"
@@ -137,8 +132,6 @@ class TestNat {
       allow_hairpinning_(false),
       refresh_on_ingress_(false),
       block_udp_(false),
-      block_stun_(false),
-      delay_stun_resp_ms_(0),
       sockets_() {}
 
     bool has_port_mappings() const;
@@ -159,8 +152,6 @@ class TestNat {
 
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TestNat);
 
-    static NatBehavior ToNatBehavior(const std::string& type);
-
     bool enabled_;
     TestNat::NatBehavior filtering_type_;
     TestNat::NatBehavior mapping_type_;
@@ -168,9 +159,6 @@ class TestNat {
     bool allow_hairpinning_;
     bool refresh_on_ingress_;
     bool block_udp_;
-    bool block_stun_;
-    /* Note: this can only delay a single response so far (bug 1253657) */
-    uint32_t delay_stun_resp_ms_;
 
   private:
     std::set<TestNrSocket*> sockets_;
@@ -179,45 +167,34 @@ class TestNat {
 };
 
 /**
- * Subclass of NrSocketBase that can simulate things like being behind a NAT,
- * packet loss, latency, packet rewriting, etc. Also exposes some stuff that
- * assists in diagnostics.
- * This is accomplished by wrapping an "internal" socket (that handles traffic
- * behind the NAT), and a collection of "external" sockets (that handle traffic
- * into/out of the NAT)
+ * Subclass of NrSocket that can simulate things like being behind a NAT, packet
+ * loss, latency, packet rewriting, etc. Also exposes some stuff that assists in
+ * diagnostics.
  */
-class TestNrSocket : public NrSocketBase {
+class TestNrSocket : public NrSocket {
   public:
     explicit TestNrSocket(TestNat *nat);
+
+    virtual ~TestNrSocket();
 
     bool has_port_mappings() const;
     bool is_my_external_tuple(const nr_transport_addr &addr) const;
 
-    // Overrides of NrSocketBase
-    int create(nr_transport_addr *addr) override;
+    // Overrides of NrSocket
     int sendto(const void *msg, size_t len,
                int flags, nr_transport_addr *to) override;
     int recvfrom(void * buf, size_t maxlen,
                  size_t *len, int flags,
                  nr_transport_addr *from) override;
-    int getaddr(nr_transport_addr *addrp) override;
-    void close() override;
     int connect(nr_transport_addr *addr) override;
     int write(const void *msg, size_t len, size_t *written) override;
     int read(void *buf, size_t maxlen, size_t *len) override;
 
-    int listen(int backlog) override;
-    int accept(nr_transport_addr *addrp, nr_socket **sockp) override;
     int async_wait(int how, NR_async_cb cb, void *cb_arg,
                    char *function, int line) override;
     int cancel(int how) override;
 
-    // Need override since this is virtual in NrSocketBase
-    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TestNrSocket, override)
-
   private:
-    virtual ~TestNrSocket();
-
     class UdpPacket {
       public:
         UdpPacket(const void *msg, size_t len, const nr_transport_addr &addr) :
@@ -238,7 +215,7 @@ class TestNrSocket : public NrSocketBase {
     class PortMapping {
       public:
         PortMapping(const nr_transport_addr &remote_address,
-                    const RefPtr<NrSocketBase> &external_socket);
+                    const nsRefPtr<NrSocket> &external_socket);
 
         int sendto(const void *msg, size_t len, const nr_transport_addr &to);
         int async_wait(int how, NR_async_cb cb, void *cb_arg,
@@ -248,39 +225,17 @@ class TestNrSocket : public NrSocketBase {
         NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PortMapping);
 
         PRIntervalTime last_used_;
-        RefPtr<NrSocketBase> external_socket_;
+        nsRefPtr<NrSocket> external_socket_;
         // For non-symmetric, most of the data here doesn't matter
         nr_transport_addr remote_address_;
 
       private:
-        ~PortMapping() {
-          external_socket_->close();
-        }
+        ~PortMapping(){}
 
         // If external_socket_ returns E_WOULDBLOCK, we don't want to propagate
         // that to the code using the TestNrSocket. We can also perhaps use this
         // to help simulate things like latency.
-        std::list<RefPtr<UdpPacket>> send_queue_;
-    };
-
-    struct DeferredPacket {
-      DeferredPacket(TestNrSocket *sock,
-                     const void *data, size_t len,
-                     int flags,
-                     nr_transport_addr *addr,
-                     RefPtr<NrSocketBase> internal_socket) :
-          socket_(sock),
-          buffer_(reinterpret_cast<const uint8_t *>(data), len),
-          flags_(flags),
-          internal_socket_(internal_socket) {
-        nr_transport_addr_copy(&to_, addr);
-      }
-
-      TestNrSocket *socket_;
-      DataBuffer buffer_;
-      int flags_;
-      nr_transport_addr to_;
-      RefPtr<NrSocketBase> internal_socket_;
+        std::list<nsRefPtr<UdpPacket>> send_queue_;
     };
 
     bool is_port_mapping_stale(const PortMapping &port_mapping) const;
@@ -288,10 +243,10 @@ class TestNrSocket : public NrSocketBase {
                        PortMapping **port_mapping_used) const;
     void destroy_stale_port_mappings();
 
-    static void socket_readable_callback(void *real_sock_v,
-                                         int how,
-                                         void *test_sock_v);
-    void on_socket_readable(NrSocketBase *external_or_internal_socket);
+    static void port_mapping_readable_callback(void *ext_sock_v,
+                                               int how,
+                                               void *test_sock_v);
+    void on_port_mapping_readable(NrSocket *external_socket);
     void fire_readable_callback();
 
     static void port_mapping_tcp_passthrough_callback(void *ext_sock_v,
@@ -302,31 +257,24 @@ class TestNrSocket : public NrSocketBase {
     static void port_mapping_writeable_callback(void *ext_sock_v,
                                                 int how,
                                                 void *test_sock_v);
-    void write_to_port_mapping(NrSocketBase *external_socket);
+    void write_to_port_mapping(NrSocket *external_socket);
     bool is_tcp_connection_behind_nat() const;
 
     PortMapping* get_port_mapping(const nr_transport_addr &remote_addr,
                                   TestNat::NatBehavior filter) const;
     PortMapping* create_port_mapping(
         const nr_transport_addr &remote_addr,
-        const RefPtr<NrSocketBase> &external_socket) const;
-    RefPtr<NrSocketBase> create_external_socket(
+        const nsRefPtr<NrSocket> &external_socket) const;
+    nsRefPtr<NrSocket> create_external_socket(
         const nr_transport_addr &remote_addr) const;
 
-    static void process_delayed_cb(NR_SOCKET s, int how, void *cb_arg);
-
-    RefPtr<NrSocketBase> readable_socket_;
-    // The socket for the "internal" address; used to talk to stuff behind the
-    // same nat.
-    RefPtr<NrSocketBase> internal_socket_;
-    RefPtr<TestNat> nat_;
+    nsRefPtr<NrSocket> readable_socket_;
+    nsRefPtr<TestNat> nat_;
     // Since our comparison logic is different depending on what kind of NAT
     // we simulate, and the STL does not make it very easy to switch out the
     // comparison function at runtime, and these lists are going to be very
     // small anyway, we just brute-force it.
-    std::list<RefPtr<PortMapping>> port_mappings_;
-
-    void *timer_handle_;
+    std::list<nsRefPtr<PortMapping>> port_mappings_;
 };
 
 } // namespace mozilla

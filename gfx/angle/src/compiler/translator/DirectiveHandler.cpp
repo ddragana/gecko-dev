@@ -8,8 +8,7 @@
 
 #include <sstream>
 
-#include "angle_gl.h"
-#include "common/debug.h"
+#include "compiler/translator/compilerdebug.h"
 #include "compiler/translator/Diagnostics.h"
 
 static TBehavior getBehavior(const std::string& str)
@@ -26,16 +25,12 @@ static TBehavior getBehavior(const std::string& str)
     return EBhUndefined;
 }
 
-TDirectiveHandler::TDirectiveHandler(TExtensionBehavior &extBehavior,
-                                     TDiagnostics &diagnostics,
-                                     int &shaderVersion,
-                                     sh::GLenum shaderType,
-                                     bool debugShaderPrecisionSupported)
+TDirectiveHandler::TDirectiveHandler(TExtensionBehavior& extBehavior,
+                                     TDiagnostics& diagnostics,
+                                     int& shaderVersion)
     : mExtensionBehavior(extBehavior),
       mDiagnostics(diagnostics),
-      mShaderVersion(shaderVersion),
-      mShaderType(shaderType),
-      mDebugShaderPrecisionSupported(debugShaderPrecisionSupported)
+      mShaderVersion(shaderVersion)
 {
 }
 
@@ -60,16 +55,7 @@ void TDirectiveHandler::handlePragma(const pp::SourceLocation& loc,
         const char kAll[] = "all";
 
         if (name == kInvariant && value == kAll)
-        {
-            if (mShaderVersion == 300 && mShaderType == GL_FRAGMENT_SHADER)
-            {
-                // ESSL 3.00.4 section 4.6.1
-                mDiagnostics.writeInfo(
-                    pp::Diagnostics::PP_ERROR, loc,
-                    "#pragma STDGL invariant(all) can not be used in fragment shader", name, value);
-            }
             mPragma.stdgl.invariantAll = true;
-        }
         // The STDGL pragma is used to reserve pragmas for use by future
         // revisions of GLSL.  Do not generate an error on unexpected
         // name and value.
@@ -79,7 +65,6 @@ void TDirectiveHandler::handlePragma(const pp::SourceLocation& loc,
     {
         const char kOptimize[] = "optimize";
         const char kDebug[] = "debug";
-        const char kDebugShaderPrecision[] = "webgl_debug_shader_precision";
         const char kOn[] = "on";
         const char kOff[] = "off";
 
@@ -94,12 +79,6 @@ void TDirectiveHandler::handlePragma(const pp::SourceLocation& loc,
         {
             if (value == kOn) mPragma.debug = true;
             else if (value == kOff) mPragma.debug = false;
-            else invalidValue = true;
-        }
-        else if (name == kDebugShaderPrecision && mDebugShaderPrecisionSupported)
-        {
-            if (value == kOn) mPragma.debugShaderPrecision = true;
-            else if (value == kOff) mPragma.debugShaderPrecision = false;
             else invalidValue = true;
         }
         else

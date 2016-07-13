@@ -22,7 +22,7 @@ namespace dom {
  * CameraClosedListenerProxy and CameraClosedMessage
  */
 template<class T>
-class CameraClosedMessage : public Runnable
+class CameraClosedMessage : public nsRunnable
 {
 public:
   explicit CameraClosedMessage(nsMainThreadPtrHandle<T> aListener)
@@ -36,7 +36,7 @@ public:
   {
     MOZ_ASSERT(NS_IsMainThread());
 
-    RefPtr<T> listener = mListener.get();
+    nsRefPtr<T> listener = mListener.get();
     if (listener) {
       listener->OnHardwareClosed();
     }
@@ -239,10 +239,10 @@ CameraRecorderProfiles::~CameraRecorderProfiles()
 }
 
 void
-CameraRecorderProfiles::GetSupportedNames(nsTArray<nsString>& aNames)
+CameraRecorderProfiles::GetSupportedNames(unsigned aFlags, nsTArray<nsString>& aNames)
 {
-  DOM_CAMERA_LOGT("%s:%d : this=%p\n",
-    __func__, __LINE__, this);
+  DOM_CAMERA_LOGT("%s:%d : this=%p, flags=0x%x\n",
+    __func__, __LINE__, this, aFlags);
   if (!mCameraControl) {
     aNames.Clear();
     return;
@@ -265,7 +265,7 @@ CameraRecorderProfiles::NamedGetter(const nsAString& aName, bool& aFound)
 
   CameraRecorderProfile* profile = mProfiles.GetWeak(aName, &aFound);
   if (!aFound || !profile) {
-    RefPtr<ICameraControl::RecorderProfile> p = mCameraControl->GetProfileInfo(aName);
+    nsRefPtr<ICameraControl::RecorderProfile> p = mCameraControl->GetProfileInfo(aName);
     if (p) {
       profile = new CameraRecorderProfile(this, *p);
       mProfiles.Put(aName, profile);
@@ -273,6 +273,15 @@ CameraRecorderProfiles::NamedGetter(const nsAString& aName, bool& aFound)
     }
   }
   return profile;
+}
+
+bool
+CameraRecorderProfiles::NameIsEnumerable(const nsAString& aName)
+{
+  DOM_CAMERA_LOGT("%s:%d : this=%p, name='%s' (always returns true)\n",
+    __func__, __LINE__, this, NS_ConvertUTF16toUTF8(aName).get());
+
+  return true;
 }
 
 void
@@ -308,7 +317,7 @@ CameraCapabilities::HasSupport(JSContext* aCx, JSObject* aGlobal)
   return Navigator::HasCameraSupport(aCx, aGlobal);
 }
 
-CameraCapabilities::CameraCapabilities(nsPIDOMWindowInner* aWindow,
+CameraCapabilities::CameraCapabilities(nsPIDOMWindow* aWindow,
                                        ICameraControl* aCameraControl)
   : mWindow(aWindow)
   , mCameraControl(aCameraControl)
@@ -573,7 +582,7 @@ CameraCapabilities::RecorderProfiles()
     return nullptr;
   }
 
-  RefPtr<CameraRecorderProfiles> profiles =
+  nsRefPtr<CameraRecorderProfiles> profiles =
     new CameraRecorderProfiles(this, mCameraControl);
   return profiles;
 }

@@ -57,7 +57,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CellBroadcastMessage)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-CellBroadcastMessage::CellBroadcastMessage(nsPIDOMWindowInner* aWindow,
+CellBroadcastMessage::CellBroadcastMessage(nsPIDOMWindow* aWindow,
                                            uint32_t aServiceId,
                                            uint32_t aGsmGeographicalScope,
                                            uint16_t aMessageCode,
@@ -111,7 +111,7 @@ CellBroadcastMessage::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenPro
 already_AddRefed<CellBroadcastEtwsInfo>
 CellBroadcastMessage::GetEtws() const
 {
-  RefPtr<CellBroadcastEtwsInfo> etwsInfo = mEtwsInfo;
+  nsRefPtr<CellBroadcastEtwsInfo> etwsInfo = mEtwsInfo;
   return etwsInfo.forget();
 }
 
@@ -129,7 +129,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CellBroadcastEtwsInfo)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-CellBroadcastEtwsInfo::CellBroadcastEtwsInfo(nsPIDOMWindowInner* aWindow,
+CellBroadcastEtwsInfo::CellBroadcastEtwsInfo(nsPIDOMWindow* aWindow,
                                              uint32_t aWarningType,
                                              bool aEmergencyUserAlert,
                                              bool aPopup)

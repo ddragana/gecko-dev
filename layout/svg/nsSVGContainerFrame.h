@@ -23,6 +23,8 @@ class nsStyleContext;
 
 struct nsRect;
 
+typedef nsContainerFrame nsSVGContainerFrameBase;
+
 /**
  * Base class for SVG container frames. Frame sub-classes that do not
  * display their contents directly (such as the frames for <marker> or
@@ -35,13 +37,13 @@ struct nsRect;
  * Do *not* blindly cast to SVG element types in this class's methods (see the
  * warning comment for nsSVGDisplayContainerFrame below). 
  */
-class nsSVGContainerFrame : public nsContainerFrame
+class nsSVGContainerFrame : public nsSVGContainerFrameBase
 {
   friend nsIFrame* NS_NewSVGContainerFrame(nsIPresShell* aPresShell,
                                            nsStyleContext* aContext);
 protected:
   explicit nsSVGContainerFrame(nsStyleContext* aContext)
-    : nsContainerFrame(aContext)
+    : nsSVGContainerFrameBase(aContext)
   {
     AddStateBits(NS_FRAME_SVG_LAYOUT);
   }
@@ -78,7 +80,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsContainerFrame::IsFrameOfType(
+    return nsSVGContainerFrameBase::IsFrameOfType(
             aFlags & ~(nsIFrame::eSVG | nsIFrame::eSVGContainer));
   }
 
@@ -86,7 +88,7 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override {}
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
+  virtual bool UpdateOverflow() override;
 
 protected:
   /**

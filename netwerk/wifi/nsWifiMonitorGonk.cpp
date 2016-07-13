@@ -22,7 +22,7 @@
 
 using namespace mozilla;
 
-LazyLogModule gWifiMonitorLog("WifiMonitor");
+PRLogModuleInfo *gWifiMonitorLog;
 
 NS_IMPL_ISUPPORTS(nsWifiMonitor,
                   nsIWifiMonitor,
@@ -31,6 +31,8 @@ NS_IMPL_ISUPPORTS(nsWifiMonitor,
 
 nsWifiMonitor::nsWifiMonitor()
 {
+  gWifiMonitorLog = PR_NewLogModule("WifiMonitor");
+
   nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
   if (obsSvc) {
     obsSvc->AddObserver(this, "xpcom-shutdown", false);
@@ -122,7 +124,7 @@ nsWifiMonitor::Onready(uint32_t count, nsIWifiScanResult **results)
   nsCOMArray<nsWifiAccessPoint> accessPoints;
 
   for (uint32_t i = 0; i < count; i++) {
-    RefPtr<nsWifiAccessPoint> ap = new nsWifiAccessPoint();
+    nsRefPtr<nsWifiAccessPoint> ap = new nsWifiAccessPoint();
 
     nsString temp;
     results[i]->GetBssid(temp);

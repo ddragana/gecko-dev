@@ -9,9 +9,13 @@
 #include "MediaData.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Logging.h"
-#include "mozilla/Snprintf.h"
 
-extern mozilla::LogModule* GetSourceBufferResourceLog();
+extern PRLogModuleInfo* GetSourceBufferResourceLog();
+
+/* Polyfill __func__ on MSVC to pass to the log. */
+#ifdef _MSC_VER
+#define __func__ __FUNCTION__
+#endif
 
 #define SBR_DEBUG(arg, ...) MOZ_LOG(GetSourceBufferResourceLog(), mozilla::LogLevel::Debug, ("ResourceQueue(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #define SBR_DEBUGV(arg, ...) MOZ_LOG(GetSourceBufferResourceLog(), mozilla::LogLevel::Verbose, ("ResourceQueue(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
@@ -30,13 +34,13 @@ ResourceItem::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
   size_t size = aMallocSizeOf(this);
 
   // size excluding this
-  size += mData->ShallowSizeOfExcludingThis(aMallocSizeOf);
+  size += mData->SizeOfExcludingThis(aMallocSizeOf);
 
   return size;
 }
 
 class ResourceQueueDeallocator : public nsDequeFunctor {
-  void* operator() (void* aObject) override {
+  virtual void* operator() (void* aObject) {
     delete static_cast<ResourceItem*>(aObject);
     return nullptr;
   }
@@ -109,7 +113,7 @@ uint32_t ResourceQueue::EvictBefore(uint64_t aOffset, ErrorResult& aRv)
       uint32_t offset = aOffset - mOffset;
       mOffset += offset;
       evicted += offset;
-      RefPtr<MediaByteBuffer> data = new MediaByteBuffer;
+      nsRefPtr<MediaByteBuffer> data = new MediaByteBuffer;
       if (!data->AppendElements(item->mData->Elements() + offset,
                                 item->mData->Length() - offset,
                                 fallible)) {
@@ -165,7 +169,7 @@ ResourceQueue::Dump(const char* aPath)
     ResourceItem* item = ResourceAt(i);
 
     char buf[255];
-    snprintf_literal(buf, "%s/%08u.bin", aPath, i);
+    PR_snprintf(buf, sizeof(buf), "%s/%08u.bin", aPath, i);
     FILE* fp = fopen(buf, "wb");
     if (!fp) {
       return;

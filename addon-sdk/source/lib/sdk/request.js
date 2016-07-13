@@ -26,27 +26,27 @@ const request = ns();
 const { validateOptions, validateSingleOption } = new OptionsValidator({
   url: {
     // Also converts a URL instance to string, bug 857902
-    map: url => url.toString(),
+    map: function (url) url.toString(),
     ok: isValidURI
   },
   headers: {
-    map: v => v || {},
+    map: function (v) v || {},
     is:  ["object"],
   },
   content: {
-    map: v => v || null,
+    map: function (v) v || null,
     is:  ["string", "object", "null"],
   },
   contentType: {
-    map: v => v || "application/x-www-form-urlencoded",
+    map: function (v) v || "application/x-www-form-urlencoded",
     is:  ["string"],
   },
   overrideMimeType: {
-    map: v => v || null,
+    map: function(v) v || null,
     is: ["string", "null"],
   },
   anonymous: {
-    map: v => v || false,
+    map: function(v) v || false,
     is: ["boolean", "null"],
   }
 });
@@ -165,22 +165,14 @@ const Response = Class({
     response(this).request = request;
   },
   // more about responseURL: https://bugzilla.mozilla.org/show_bug.cgi?id=998076
-  get url() {
-    return response(this).request.responseURL;
-  },
-  get text() {
-    return response(this).request.responseText;
-  },
+  get url() response(this).request.responseURL,
+  get text() response(this).request.responseText,
   get xml() {
     throw new Error("Sorry, the 'xml' property is no longer available. " +
                     "see bug 611042 for more information.");
   },
-  get status() {
-    return response(this).request.status;
-  },
-  get statusText() {
-    return response(this).request.statusText;
-  },
+  get status() response(this).request.status,
+  get statusText() response(this).request.statusText,
   get json() {
     try {
       return JSON.parse(this.text);
@@ -220,9 +212,7 @@ const Response = Class({
     });
     return headers;
   },
-  get anonymous() {
-    return response(this).request.mozAnon;
-  }
+  get anonymous() response(this).request.mozAnon
 });
 
 // apiUtils.validateOptions doesn't give the ability to easily validate single

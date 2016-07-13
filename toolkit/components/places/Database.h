@@ -14,11 +14,10 @@
 #include "mozilla/storage/StatementCache.h"
 #include "mozilla/Attributes.h"
 #include "nsIEventTarget.h"
-#include "Shutdown.h"
 
 // This is the schema version. Update it at any schema change and add a
 // corresponding migrateVxx method below.
-#define DATABASE_SCHEMA_VERSION 33
+#define DATABASE_SCHEMA_VERSION 30
 
 // Fired after Places inited.
 #define TOPIC_PLACES_INIT_COMPLETE "places-init-complete"
@@ -42,7 +41,11 @@
 
 // Simulate profile-before-change. This topic may only be used by
 // calling `observe` directly on the database. Used for testing only.
-#define TOPIC_SIMULATE_PLACES_SHUTDOWN "test-simulate-places-shutdown"
+#define TOPIC_SIMULATE_PLACES_MUST_CLOSE_1 "test-simulate-places-shutdown-phase-1"
+
+// Simulate profile-before-change. This topic may only be used by
+// calling `observe` directly on the database. Used for testing only.
+#define TOPIC_SIMULATE_PLACES_MUST_CLOSE_2 "test-simulate-places-shutdown-phase-2"
 
 class nsIRunnable;
 
@@ -61,8 +64,7 @@ enum JournalMode {
 , JOURNAL_WAL
 };
 
-class ClientsShutdownBlocker;
-class ConnectionShutdownBlocker;
+class DatabaseShutdown;
 
 class Database final : public nsIObserver
                      , public nsSupportsWeakReference
@@ -85,14 +87,17 @@ public:
   /**
    * The AsyncShutdown client used by clients of this API to be informed of shutdown.
    */
-  already_AddRefed<nsIAsyncShutdownClient> GetClientsShutdown();
+  already_AddRefed<nsIAsyncShutdownClient> GetConnectionShutdown();
 
   /**
    * Getter to use when instantiating the class.
    *
    * @return Singleton instance of this class.
    */
-  static already_AddRefed<Database> GetDatabase();
+  static already_AddRefed<Database> GetDatabase()
+  {
+    return GetSingleton();
+  }
 
   /**
    * Returns last known database status.
@@ -191,8 +196,6 @@ public:
    */
   already_AddRefed<mozIStorageAsyncStatement> GetAsyncStatement(const nsACString& aQuery) const;
 
-  uint32_t MaxUrlLength();
-
 protected:
   /**
    * Finalizes the cached statements and closes the database connection.
@@ -244,9 +247,9 @@ protected:
   nsresult InitFunctions();
 
   /**
-   * Initializes temp entities, like triggers, tables, views...
+   * Initializes triggers defined in nsPlacesTriggers.h
    */
-  nsresult InitTempEntities();
+  nsresult InitTempTriggers();
 
   /**
    * Helpers used by schema upgrades.
@@ -266,13 +269,10 @@ protected:
   nsresult MigrateV27Up();
   nsresult MigrateV28Up();
   nsresult MigrateV30Up();
-  nsresult MigrateV31Up();
-  nsresult MigrateV32Up();
-  nsresult MigrateV33Up();
 
   nsresult UpdateBookmarkRootTitles();
 
-  friend class ConnectionShutdownBlocker;
+  friend class DatabaseShutdown;
 
 private:
   ~Database();
@@ -295,27 +295,19 @@ private:
   bool mClosed;
 
   /**
-   * Phases for shutting down the Database.
-   * See Shutdown.h for further details about the shutdown procedure.
+   * Determine at which shutdown phase we need to start shutting down
+   * the Database.
    */
-  already_AddRefed<nsIAsyncShutdownClient> GetProfileChangeTeardownPhase();
-  already_AddRefed<nsIAsyncShutdownClient> GetProfileBeforeChangePhase();
+  already_AddRefed<nsIAsyncShutdownClient> GetShutdownPhase();
 
   /**
-   * Blockers in charge of waiting for the Places clients and then shutting
-   * down the mozStorage connection.
-   * See Shutdown.h for further details about the shutdown procedure.
+   * A companion object in charge of shutting down the mozStorage
+   * connection once all clients have disconnected.
    *
-   * Cycles with these are broken in `Shutdown()`.
+   * Cycles between `this` and `mConnectionShutdown` are broken
+   * in `Shutdown()`.
    */
-  RefPtr<ClientsShutdownBlocker> mClientsShutdown;
-  RefPtr<ConnectionShutdownBlocker> mConnectionShutdown;
-
-  // Maximum length of a stored url.
-  // For performance reasons we don't store very long urls in history, since
-  // they are slower to search through and cause abnormal database growth,
-  // affecting the awesomebar fetch time.
-  uint32_t mMaxUrlLength;
+  nsRefPtr<DatabaseShutdown> mConnectionShutdown;
 };
 
 } // namespace places

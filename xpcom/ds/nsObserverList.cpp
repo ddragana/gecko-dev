@@ -59,11 +59,12 @@ nsObserverList::RemoveObserver(nsIObserver* anObserver)
   return NS_OK;
 }
 
-void
+nsresult
 nsObserverList::GetObserverList(nsISimpleEnumerator** anEnumerator)
 {
-  RefPtr<nsObserverEnumerator> e(new nsObserverEnumerator(this));
+  nsRefPtr<nsObserverEnumerator> e(new nsObserverEnumerator(this));
   e.forget(anEnumerator);
+  return NS_OK;
 }
 
 void

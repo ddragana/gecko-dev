@@ -10,13 +10,15 @@
 #include "nsSVGEffects.h"
 #include "nsSVGFilters.h"
 
-class SVGFEUnstyledLeafFrame : public nsFrame
+typedef nsFrame SVGFEUnstyledLeafFrameBase;
+
+class SVGFEUnstyledLeafFrame : public SVGFEUnstyledLeafFrameBase
 {
   friend nsIFrame*
   NS_NewSVGFEUnstyledLeafFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
   explicit SVGFEUnstyledLeafFrame(nsStyleContext* aContext)
-    : nsFrame(aContext)
+    : SVGFEUnstyledLeafFrameBase(aContext)
   {
     AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
@@ -30,7 +32,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsFrame::IsFrameOfType(aFlags & ~(nsIFrame::eSVG));
+    return SVGFEUnstyledLeafFrameBase::IsFrameOfType(aFlags & ~(nsIFrame::eSVG));
   }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -51,7 +53,7 @@ public:
                                     nsIAtom* aAttribute,
                                     int32_t  aModType) override;
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
+  virtual bool UpdateOverflow() override {
     // We don't maintain a visual overflow rect
     return false;
   }
@@ -83,5 +85,6 @@ SVGFEUnstyledLeafFrame::AttributeChanged(int32_t  aNameSpaceID,
     nsSVGEffects::InvalidateDirectRenderingObservers(GetParent()->GetParent());
   }
 
-  return nsFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+  return SVGFEUnstyledLeafFrameBase::AttributeChanged(aNameSpaceID,
+                                                        aAttribute, aModType);
 }

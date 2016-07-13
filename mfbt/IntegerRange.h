@@ -26,7 +26,7 @@ public:
     : mCurrent(aCurrent) { }
 
   template<typename IntType>
-  explicit IntegerIterator(const IntegerIterator<IntType>& aOther)
+  IntegerIterator(const IntegerIterator<IntType>& aOther)
     : mCurrent(aOther.mCurrent) { }
 
   IntTypeT operator*() const { return mCurrent; }

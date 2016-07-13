@@ -1,5 +1,5 @@
 // Bug 991981. Check for various quirks when setting a field of a typed object
-// during which set operation the underlying buffer is detached.
+// during which set operation the underlying buffer is neutered.
 
 if (typeof TypedObject === "undefined")
   quit();
@@ -19,9 +19,8 @@ function main(variant)
 
   assertThrowsInstanceOf(function()
   {
-    line.to = { x: 22,
-                get y() { detachArrayBuffer(buf, variant); return 44; } };
-  }, TypeError, "setting into a detached buffer is bad mojo");
+    line.to = { x: 22, get y() { neuter(buf, variant); return 44; } };
+  }, TypeError, "setting into a neutered buffer is bad mojo");
 }
 
 main("same-data");

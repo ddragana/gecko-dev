@@ -12,7 +12,9 @@ namespace mozilla {
 
 WebGLVertexArrayGL::WebGLVertexArrayGL(WebGLContext* webgl)
     : WebGLVertexArray(webgl)
+#if defined(XP_LINUX)
     , mIsVAO(false)
+#endif
 { }
 
 WebGLVertexArrayGL::~WebGLVertexArrayGL()
@@ -28,7 +30,9 @@ WebGLVertexArrayGL::DeleteImpl()
     mContext->MakeContextCurrent();
     mContext->gl->fDeleteVertexArrays(1, &mGLName);
 
+#if defined(XP_LINUX)
     mIsVAO = false;
+#endif
 }
 
 void
@@ -37,7 +41,9 @@ WebGLVertexArrayGL::BindVertexArrayImpl()
     mContext->mBoundVertexArray = this;
     mContext->gl->fBindVertexArray(mGLName);
 
+#if defined(XP_LINUX)
     mIsVAO = true;
+#endif
 }
 
 void
@@ -49,11 +55,15 @@ WebGLVertexArrayGL::GenVertexArray()
 bool
 WebGLVertexArrayGL::IsVertexArrayImpl()
 {
+#if defined(XP_LINUX)
     gl::GLContext* gl = mContext->gl;
-    if (gl->WorkAroundDriverBugs())
+    if (gl->WorkAroundDriverBugs() &&
+        gl->Vendor() == gl::GLVendor::VMware &&
+        gl->Renderer() == gl::GLRenderer::GalliumLlvmpipe)
     {
         return mIsVAO;
     }
+#endif
 
     mContext->MakeContextCurrent();
     return mContext->gl->fIsVertexArray(mGLName) != 0;

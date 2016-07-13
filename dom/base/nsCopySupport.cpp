@@ -171,11 +171,8 @@ SelectionCopyHelper(nsISelection *aSel, nsIDocument *aDoc,
   nsAutoString htmlInfoBuf;
   if (encodedTextHTML) {
     // Redo the encoding, but this time use the passed-in flags.
-    // Don't allow wrapping of CJK strings.
     mimeType.AssignLiteral(kHTMLMime);
-    rv = docEncoder->Init(domDoc, mimeType,
-                          aFlags |
-                          nsIDocumentEncoder::OutputDisallowLineBreaking);
+    rv = docEncoder->Init(domDoc, mimeType, aFlags);
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = docEncoder->SetSelection(aSel);
@@ -310,7 +307,7 @@ nsCopySupport::GetTransferableForNode(nsINode* aNode,
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
   NS_ENSURE_TRUE(node, NS_ERROR_FAILURE);
-  RefPtr<nsRange> range = new nsRange(aNode);
+  nsRefPtr<nsRange> range = new nsRange(aNode);
   rv = range->SelectNode(node);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = selection->AddRange(range);
@@ -554,17 +551,26 @@ nsCopySupport::GetSelectionForCopy(nsIDocument* aDocument, nsISelection** aSelec
   if (!presShell)
     return nullptr;
 
-  nsCOMPtr<nsIContent> focusedContent;
-  nsCOMPtr<nsISelectionController> selectionController =
-    presShell->GetSelectionControllerForFocusedContent(
-      getter_AddRefs(focusedContent));
-  if (!selectionController) {
-    return nullptr;
+  // check if the focused node in the window has a selection
+  nsCOMPtr<nsPIDOMWindow> focusedWindow;
+  nsIContent* content =
+    nsFocusManager::GetFocusedDescendant(aDocument->GetWindow(), false,
+                                         getter_AddRefs(focusedWindow));
+  if (content) {
+    nsIFrame* frame = content->GetPrimaryFrame();
+    if (frame) {
+      nsCOMPtr<nsISelectionController> selCon;
+      frame->GetSelectionController(presShell->GetPresContext(), getter_AddRefs(selCon));
+      if (selCon) {
+        selCon->GetSelection(nsISelectionController::SELECTION_NORMAL, aSelection);
+        return content;
+      }
+    }
   }
 
-  selectionController->GetSelection(nsISelectionController::SELECTION_NORMAL,
-                                    aSelection);
-  return focusedContent;
+  // if no selection was found, use the main selection for the window
+  NS_IF_ADDREF(*aSelection = presShell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL));
+  return nullptr;
 }
 
 bool
@@ -615,18 +621,14 @@ IsSelectionInsideRuby(nsISelection* aSelection)
 }
 
 bool
-nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
-                                  int32_t aClipboardType,
-                                  nsIPresShell* aPresShell,
-                                  nsISelection* aSelection,
-                                  bool* aActionTaken)
+nsCopySupport::FireClipboardEvent(int32_t aType, int32_t aClipboardType, nsIPresShell* aPresShell,
+                                  nsISelection* aSelection, bool* aActionTaken)
 {
   if (aActionTaken) {
     *aActionTaken = false;
   }
 
-  NS_ASSERTION(aEventMessage == eCut || aEventMessage == eCopy ||
-               aEventMessage == ePaste,
+  NS_ASSERTION(aType == NS_CUT || aType == NS_COPY || aType == NS_PASTE,
                "Invalid clipboard event type");
 
   nsCOMPtr<nsIPresShell> presShell = aPresShell;
@@ -637,7 +639,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
   if (!doc)
     return false;
 
-  nsCOMPtr<nsPIDOMWindowOuter> piWindow = doc->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> piWindow = doc->GetWindow();
   if (!piWindow)
     return false;
 
@@ -679,15 +681,14 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
 
   // next, fire the cut, copy or paste event
   bool doDefault = true;
-  RefPtr<DataTransfer> clipboardData;
+  nsRefPtr<DataTransfer> clipboardData;
   if (chromeShell || Preferences::GetBool("dom.event.clipboardevents.enabled", true)) {
     clipboardData =
-      new DataTransfer(doc->GetScopeObject(), aEventMessage,
-                       aEventMessage == ePaste, aClipboardType);
+      new DataTransfer(piWindow, aType, aType == NS_PASTE, aClipboardType);
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    InternalClipboardEvent evt(true, aEventMessage);
-    evt.mClipboardData = clipboardData;
+    InternalClipboardEvent evt(true, aType);
+    evt.clipboardData = clipboardData;
     EventDispatcher::Dispatch(content, presShell->GetPresContext(), &evt,
                               nullptr, &status);
     // If the event was cancelled, don't do the clipboard operation
@@ -697,7 +698,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
   // No need to do anything special during a paste. Either an event listener
   // took care of it and cancelled the event, or the caller will handle it.
   // Return true to indicate that the event wasn't cancelled.
-  if (aEventMessage == ePaste) {
+  if (aType == NS_PASTE) {
     // Clear and mark the clipboardData as readonly. This prevents someone
     // from reading the clipboard contents after the paste event has fired.
     if (clipboardData) {
@@ -737,7 +738,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
 
     // when cutting non-editable content, do nothing
     // XXX this is probably the wrong editable flag to check
-    if (aEventMessage != eCut || content->IsEditable()) {
+    if (aType != NS_CUT || content->IsEditable()) {
       // get the data from the selection if any
       bool isCollapsed;
       sel->GetIsCollapsed(&isCollapsed);

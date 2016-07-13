@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -11,7 +9,6 @@
 #include "base/waitable_event.h"
 #include "GeckoProfiler.h"
 #include "mozilla/IOInterposer.h"
-#include "nsThreadUtils.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -20,12 +17,11 @@
 namespace base {
 
 // This task is used to trigger the message loop to exit.
-class ThreadQuitTask : public mozilla::Runnable {
+class ThreadQuitTask : public Task {
  public:
-  NS_IMETHOD Run() override {
+  virtual void Run() {
     MessageLoop::current()->Quit();
     Thread::SetThreadWasQuitProperly(true);
-    return NS_OK;
   }
 };
 
@@ -49,11 +45,9 @@ Thread::Thread(const char *name)
       message_loop_(NULL),
       thread_id_(0),
       name_(name) {
-  MOZ_COUNT_CTOR(base::Thread);
 }
 
 Thread::~Thread() {
-  MOZ_COUNT_DTOR(base::Thread);
   Stop();
 }
 
@@ -116,10 +110,8 @@ void Thread::Stop() {
   DCHECK_NE(thread_id_, PlatformThread::CurrentId());
 
   // StopSoon may have already been called.
-  if (message_loop_) {
-    RefPtr<ThreadQuitTask> task = new ThreadQuitTask();
-    message_loop_->PostTask(task.forget());
-  }
+  if (message_loop_)
+    message_loop_->PostTask(FROM_HERE, new ThreadQuitTask());
 
   // Wait for the thread to exit.  It should already have terminated but make
   // sure this assumption is valid.
@@ -148,8 +140,7 @@ void Thread::StopSoon() {
   // to someone calling Quit() on our message loop directly.
   DCHECK(message_loop_);
 
-  RefPtr<ThreadQuitTask> task = new ThreadQuitTask();
-  message_loop_->PostTask(task.forget());
+  message_loop_->PostTask(FROM_HERE, new ThreadQuitTask());
 }
 
 void Thread::ThreadMain() {
@@ -158,8 +149,7 @@ void Thread::ThreadMain() {
   mozilla::IOInterposer::RegisterCurrentThread();
 
   // The message loop for this thread.
-  MessageLoop message_loop(startup_data_->options.message_loop_type,
-                           NS_GetCurrentThread());
+  MessageLoop message_loop(startup_data_->options.message_loop_type);
 
   // Complete the initialization of our Thread object.
   thread_id_ = PlatformThread::CurrentId();

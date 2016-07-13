@@ -8,8 +8,6 @@
 namespace mozilla {
 
 using namespace gfx;
-using layers::ImageContainer;
-using layers::LayerManager;
 
 namespace image {
 
@@ -46,14 +44,6 @@ FrozenImage::GetFrame(uint32_t aWhichFrame,
   return InnerImage()->GetFrame(FRAME_FIRST, aFlags);
 }
 
-NS_IMETHODIMP_(already_AddRefed<SourceSurface>)
-FrozenImage::GetFrameAtSize(const IntSize& aSize,
-                            uint32_t aWhichFrame,
-                            uint32_t aFlags)
-{
-  return InnerImage()->GetFrameAtSize(aSize, FRAME_FIRST, aFlags);
-}
-
 NS_IMETHODIMP_(bool)
 FrozenImage::IsImageContainerAvailable(LayerManager* aManager, uint32_t aFlags)
 {
@@ -76,12 +66,12 @@ FrozenImage::Draw(gfxContext* aContext,
                   const nsIntSize& aSize,
                   const ImageRegion& aRegion,
                   uint32_t /* aWhichFrame - ignored */,
-                  SamplingFilter aSamplingFilter,
+                  GraphicsFilter aFilter,
                   const Maybe<SVGImageContext>& aSVGContext,
                   uint32_t aFlags)
 {
   return InnerImage()->Draw(aContext, aSize, aRegion, FRAME_FIRST,
-                            aSamplingFilter, aSVGContext, aFlags);
+                            aFilter, aSVGContext, aFlags);
 }
 
 NS_IMETHODIMP_(void)

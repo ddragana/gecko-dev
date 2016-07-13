@@ -9,7 +9,6 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/ctypes.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
 
 const RECOVERYSERVICE_CID = Components.ID("{b3caca5d-0bb0-48c6-912b-6be6cbf08832}");
 const RECOVERYSERVICE_CONTRACTID = "@mozilla.org/recovery-service;1";
@@ -18,45 +17,43 @@ function log(msg) {
   dump("-*- RecoveryService: " + msg + "\n");
 }
 
-const isGonk = AppConstants.platform === 'gonk';
+#ifdef MOZ_WIDGET_GONK
+let librecovery = (function() {
+  let library;
+  try {
+    library = ctypes.open("librecovery.so");
+  } catch (e) {
+    log("Unable to open librecovery.so");
+    throw Cr.NS_ERROR_FAILURE;
+  }
+  // Bug 1163956, modify updatePath from ctyps.char.ptr to ctype.char.array(4096)
+  // align with librecovery.h. 4096 comes from PATH_MAX
+  let FotaUpdateStatus = new ctypes.StructType("FotaUpdateStatus", [
+                                                { result: ctypes.int },
+                                                { updatePath: ctypes.char.array(4096) }
+                                              ]);
 
-if (isGonk) {
-  var librecovery = (function() {
-    let library;
-    try {
-      library = ctypes.open("librecovery.so");
-    } catch (e) {
-      log("Unable to open librecovery.so");
-      throw Cr.NS_ERROR_FAILURE;
-    }
-    // Bug 1163956, modify updatePath from ctyps.char.ptr to ctype.char.array(4096)
-    // align with librecovery.h. 4096 comes from PATH_MAX
-    let FotaUpdateStatus = new ctypes.StructType("FotaUpdateStatus", [
-                                                  { result: ctypes.int },
-                                                  { updatePath: ctypes.char.array(4096) }
-                                                ]);
+  return {
+    factoryReset:        library.declare("factoryReset",
+                                         ctypes.default_abi,
+                                         ctypes.int),
+    installFotaUpdate:   library.declare("installFotaUpdate",
+                                         ctypes.default_abi,
+                                         ctypes.int,
+                                         ctypes.char.ptr,
+                                         ctypes.int),
 
-    return {
-      factoryReset:        library.declare("factoryReset",
-                                           ctypes.default_abi,
-                                           ctypes.int),
-      installFotaUpdate:   library.declare("installFotaUpdate",
-                                           ctypes.default_abi,
-                                           ctypes.int,
-                                           ctypes.char.ptr,
-                                           ctypes.int),
-
-      FotaUpdateStatus:    FotaUpdateStatus,
-      getFotaUpdateStatus: library.declare("getFotaUpdateStatus",
-                                           ctypes.default_abi,
-                                           ctypes.int,
-                                           FotaUpdateStatus.ptr)
-    };
-  })();
-
-}
+    FotaUpdateStatus:    FotaUpdateStatus,
+    getFotaUpdateStatus: library.declare("getFotaUpdateStatus",
+                                         ctypes.default_abi,
+                                         ctypes.int,
+                                         FotaUpdateStatus.ptr)
+  };
+})();
 
 const gFactoryResetFile = "__post_reset_cmd__";
+
+#endif
 
 function RecoveryService() {}
 
@@ -71,10 +68,7 @@ RecoveryService.prototype = {
   }),
 
   factoryReset: function RS_factoryReset(reason) {
-    if (!isGonk) {
-      Cr.NS_ERROR_FAILURE;
-    }
-
+#ifdef MOZ_WIDGET_GONK
     function doReset() {
       // If this succeeds, then the device reboots and this never returns
       if (librecovery.factoryReset() != 0) {
@@ -125,13 +119,12 @@ RecoveryService.prototype = {
     } else {
       doReset();
     }
+#endif
+    throw Cr.NS_ERROR_FAILURE;
   },
 
   installFotaUpdate: function RS_installFotaUpdate(updatePath) {
-    if (!isGonk) {
-      throw Cr.NS_ERROR_FAILURE;
-    }
-
+#ifdef MOZ_WIDGET_GONK
     // If this succeeds, then the device reboots and this never returns
     if (librecovery.installFotaUpdate(updatePath, updatePath.length) != 0) {
       log("Error: FOTA install failed. Trying again after clearing cache.");
@@ -141,18 +134,20 @@ RecoveryService.prototype = {
     if (librecovery.installFotaUpdate(updatePath, updatePath.length) != 0) {
       log("Error: FOTA install failed again");
     }
+#endif
+    throw Cr.NS_ERROR_FAILURE;
   },
 
   getFotaUpdateStatus: function RS_getFotaUpdateStatus() {
     let status =  Ci.nsIRecoveryService.FOTA_UPDATE_UNKNOWN;
+#ifdef MOZ_WIDGET_GONK
+    let cStatus = librecovery.FotaUpdateStatus();
 
-    if (isGonk) {
-      let cStatus = librecovery.FotaUpdateStatus();
-
-      if (librecovery.getFotaUpdateStatus(cStatus.address()) == 0) {
-        status = cStatus.result;
-      }
+    if (librecovery.getFotaUpdateStatus(cStatus.address()) == 0) {
+      status = cStatus.result;
     }
+
+#endif
     return status;
   }
 };

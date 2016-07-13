@@ -27,9 +27,7 @@ public:
 
 private:
   friend class DOMStorageObserver;
-  virtual nsresult Observe(const char* aTopic,
-                           const nsAString& aOriginAttributesPattern,
-                           const nsACString& aOriginScope) = 0;
+  virtual nsresult Observe(const char* aTopic, const nsACString& aScopePrefix) = 0;
 };
 
 // Statically (though layout statics) initialized observer receiving and processing
@@ -47,9 +45,7 @@ public:
 
   void AddSink(DOMStorageObserverSink* aObs);
   void RemoveSink(DOMStorageObserverSink* aObs);
-  void Notify(const char* aTopic,
-              const nsAString& aOriginAttributesPattern = EmptyString(),
-              const nsACString& aOriginScope = EmptyCString());
+  void Notify(const char* aTopic, const nsACString& aData = EmptyCString());
 
 private:
   virtual ~DOMStorageObserver() {}

@@ -167,7 +167,7 @@ nsScrollbarFrame::GetScrollbarMediator()
 }
 
 nsresult
-nsScrollbarFrame::GetXULMargin(nsMargin& aMargin)
+nsScrollbarFrame::GetMargin(nsMargin& aMargin)
 {
   nsresult rv = NS_ERROR_FAILURE;
   aMargin.SizeTo(0,0,0,0);
@@ -180,7 +180,7 @@ nsScrollbarFrame::GetXULMargin(nsMargin& aMargin)
       bool isOverridable;
       theme->GetMinimumWidgetSize(presContext, this, NS_THEME_SCROLLBAR, &size,
                                   &isOverridable);
-      if (IsXULHorizontal()) {
+      if (IsHorizontal()) {
         aMargin.top = -presContext->DevPixelsToAppUnits(size.height);
       }
       else {
@@ -191,10 +191,10 @@ nsScrollbarFrame::GetXULMargin(nsMargin& aMargin)
   }
 
   if (NS_FAILED(rv)) {
-    rv = nsBox::GetXULMargin(aMargin);
+    rv = nsBox::GetMargin(aMargin);
   }
 
-  if (NS_SUCCEEDED(rv) && !IsXULHorizontal()) {
+  if (NS_SUCCEEDED(rv) && !IsHorizontal()) {
     nsIScrollbarMediator* scrollFrame = GetScrollbarMediator();
     if (scrollFrame && !scrollFrame->IsScrollbarOnRight()) {
       Swap(aMargin.left, aMargin.right);
@@ -249,9 +249,6 @@ nsScrollbarFrame::MoveToNewPosition()
   // get the max pos
   int32_t maxpos = nsSliderFrame::GetMaxPosition(content);
 
-  // save the old curpos
-  int32_t oldCurpos = curpos;
-
   // increment the given amount
   if (mIncrement) {
     curpos += mIncrement;
@@ -300,10 +297,7 @@ nsScrollbarFrame::MoveToNewPosition()
     nsITheme *theme = presContext->GetTheme();
     if (theme && theme->ThemeSupportsWidget(presContext, this, disp->mAppearance)) {
       bool repaint;
-      nsAttrValue oldValue;
-      oldValue.SetTo(oldCurpos);
-      theme->WidgetStateChanged(this, disp->mAppearance, nsGkAtoms::curpos,
-          &repaint, &oldValue);
+      theme->WidgetStateChanged(this, disp->mAppearance, nsGkAtoms::curpos, &repaint);
     }
   }
   content->UnsetAttr(kNameSpaceID_None, nsGkAtoms::smooth, false);

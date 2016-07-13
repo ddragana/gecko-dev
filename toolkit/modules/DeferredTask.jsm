@@ -134,9 +134,7 @@ this.DeferredTask.prototype = {
    * Indicates whether the task is currently requested to start again later,
    * regardless of whether it is currently running.
    */
-  get isArmed() {
-    return this._armed;
-  },
+  get isArmed() this._armed,
   _armed: false,
 
   /**
@@ -144,9 +142,7 @@ this.DeferredTask.prototype = {
    * read from code inside the task function, but can also be true when read
    * from external code, in case the task is an asynchronous generator function.
    */
-  get isRunning() {
-    return !!this._runningPromise;
-  },
+  get isRunning() !!this._runningPromise,
 
   /**
    * Promise resolved when the current execution of the task terminates, or null
@@ -277,7 +273,7 @@ this.DeferredTask.prototype = {
     this._armed = false;
     this._runningPromise = runningDeferred.promise;
 
-    runningDeferred.resolve(Task.spawn(function* () {
+    runningDeferred.resolve(Task.spawn(function () {
       // Execute the provided function asynchronously.
       yield Task.spawn(this._taskFn).then(null, Cu.reportError);
 

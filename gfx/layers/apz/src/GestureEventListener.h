@@ -10,14 +10,13 @@
 #include "InputData.h"                  // for MultiTouchInput, etc
 #include "Units.h"
 #include "mozilla/EventForwards.h"      // for nsEventStatus
-#include "mozilla/RefPtr.h"             // for RefPtr
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsISupportsImpl.h"
 #include "nsTArray.h"                   // for nsTArray
 
+class CancelableTask;
+
 namespace mozilla {
-
-class CancelableRunnable;
-
 namespace layers {
 
 class AsyncPanZoomController;
@@ -60,14 +59,6 @@ public:
    * event contained only one touch.
    */
   int32_t GetLastTouchIdentifier() const;
-
-  /**
-   * Function used to disable long tap gestures.
-   *
-   * On slow running tests, drags and touch events can be misinterpreted
-   * as a long tap. This allows tests to disable long tap gesture detection.
-   */
-  static void SetLongTapEnabled(bool aLongTapEnabled);
 
 private:
   // Private destructor, to discourage deletion outside of Release():
@@ -138,7 +129,7 @@ private:
   nsEventStatus HandleInputTouchMove();
   nsEventStatus HandleInputTouchCancel();
   void HandleInputTimeoutLongTap();
-  void HandleInputTimeoutMaxTap(bool aDuringFastFling);
+  void HandleInputTimeoutMaxTap();
 
   void TriggerSingleTapConfirmedEvent();
 
@@ -149,7 +140,7 @@ private:
    */
   void SetState(GestureState aState);
 
-  RefPtr<AsyncPanZoomController> mAsyncPanZoomController;
+  nsRefPtr<AsyncPanZoomController> mAsyncPanZoomController;
 
   /**
    * Array containing all active touches. When a touch happens it, gets added to
@@ -215,7 +206,7 @@ private:
    * CancelLongTapTimeoutTask: Cancel the mLongTapTimeoutTask and also set
    * it to null.
    */
-  RefPtr<CancelableRunnable> mLongTapTimeoutTask;
+  CancelableTask *mLongTapTimeoutTask;
   void CancelLongTapTimeoutTask();
   void CreateLongTapTimeoutTask();
 
@@ -228,9 +219,10 @@ private:
    * CancelMaxTapTimeoutTask: Cancel the mMaxTapTimeoutTask and also set
    * it to null.
    */
-  RefPtr<CancelableRunnable> mMaxTapTimeoutTask;
+  CancelableTask *mMaxTapTimeoutTask;
   void CancelMaxTapTimeoutTask();
   void CreateMaxTapTimeoutTask();
+
 };
 
 } // namespace layers

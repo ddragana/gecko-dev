@@ -8,6 +8,7 @@
 
 #include "EditAggregateTxn.h"
 #include "EditTxn.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsID.h"
 #include "nsIEditor.h"
@@ -62,7 +63,7 @@ protected:
 protected:
 
   /** p1 in the range */
-  RefPtr<nsRange> mRange;
+  nsRefPtr<nsRange> mRange;
 
   /** the editor for this transaction */
   nsEditor* mEditor;

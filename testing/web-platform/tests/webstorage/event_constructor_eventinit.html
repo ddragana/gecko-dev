@@ -9,18 +9,21 @@
     <h1>event_Constructor</h1>
     <div id="log"></div>
     <script>
-        async_test(function(t) {
+        test(function() {
+            var t = async_test("StorageEvent constructor and nulls");
             function onStorageEvent(event) {
-                assert_equals(event.type, 'storage', 'type');
-                assert_equals(event.key, null, 'key');
-                assert_equals(event.oldValue, null, 'oldValue');
-                assert_equals(event.newValue, null, 'newValue');
-                assert_equals(event.url, 'null', 'url');
-                assert_equals(event.storageArea, null, 'storageArea');
+                t.step(function() {
+                    assert_equals(event.type, 'storage', 'type');
+                    assert_equals(event.key, null, 'key');
+                    assert_equals(event.oldValue, null, 'oldValue');
+                    assert_equals(event.newValue, null, 'newValue');
+                    assert_equals(event.url, 'null', 'url');
+                    assert_equals(event.storageArea, null, 'storageArea');
+                });
                 t.done();
             }
 
-            window.addEventListener('storage', t.step_func(onStorageEvent), false);
+            window.addEventListener('storage', onStorageEvent, false);
             var event = new StorageEvent('storage', {
                 key: null,
                 oldValue: null,
@@ -28,7 +31,7 @@
                 url: null
             });
             window.dispatchEvent(event);
-        }, "StorageEvent constructor and nulls - Construct StorageEvent with StorageEventInit.");
+        }, "Construct StorageEvent with StorageEventInit.");
     </script>
  </body>
 </html>

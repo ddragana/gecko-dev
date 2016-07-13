@@ -16,9 +16,7 @@
    We use <limits> to get the libstdc++ version. */
 #include <limits>
 #if __GLIBCXX__ <= 20070719
-#ifndef __EXCEPTIONS
 #define __EXCEPTIONS
-#endif
 #endif
 
 #include "nsMenuItemIconX.h"
@@ -28,7 +26,7 @@
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMElement.h"
-#include "nsICSSDeclaration.h"
+#include "nsIDOMCSSStyleDeclaration.h"
 #include "nsIDOMCSSValue.h"
 #include "nsIDOMCSSPrimitiveValue.h"
 #include "nsIDOMRect.h"
@@ -44,8 +42,8 @@
 #include "nsContentUtils.h"
 #include "nsIContentPolicy.h"
 
-using mozilla::dom::Element;
 using mozilla::gfx::SourceSurface;
+using mozilla::RefPtr;
 
 static const uint32_t kIconWidth = 16;
 static const uint32_t kIconHeight = 16;
@@ -170,7 +168,7 @@ nsMenuItemIconX::GetIconURI(nsIURI** aIconURI)
 
   nsresult rv;
   nsCOMPtr<nsIDOMCSSValue> cssValue;
-  nsCOMPtr<nsICSSDeclaration> cssStyleDecl;
+  nsCOMPtr<nsIDOMCSSStyleDeclaration> cssStyleDecl;
   nsCOMPtr<nsIDOMCSSPrimitiveValue> primitiveValue;
   uint16_t primitiveType;
   if (!hasImageAttr) {
@@ -180,19 +178,18 @@ nsMenuItemIconX::GetIconURI(nsIURI** aIconURI)
     if (!document)
       return NS_ERROR_FAILURE;
 
-    nsCOMPtr<nsPIDOMWindowInner> window = document->GetInnerWindow();
+    nsCOMPtr<nsPIDOMWindow> window = document->GetWindow();
     if (!window)
       return NS_ERROR_FAILURE;
 
-    nsCOMPtr<Element> domElement = do_QueryInterface(mContent);
+    nsCOMPtr<nsIDOMElement> domElement = do_QueryInterface(mContent);
     if (!domElement)
       return NS_ERROR_FAILURE;
 
-    ErrorResult dummy;
-    cssStyleDecl = window->GetComputedStyle(*domElement, EmptyString(), dummy);
-    dummy.SuppressException();
-    if (!cssStyleDecl)
-      return NS_ERROR_FAILURE;
+    rv = window->GetComputedStyle(domElement, EmptyString(),
+                                  getter_AddRefs(cssStyleDecl));
+    if (NS_FAILED(rv))
+      return rv;
 
     NS_NAMED_LITERAL_STRING(listStyleImage, "list-style-image");
     rv = cssStyleDecl->GetPropertyCSSValue(listStyleImage,
@@ -285,7 +282,7 @@ nsMenuItemIconX::LoadIcon(nsIURI* aIconURI)
   nsCOMPtr<nsILoadGroup> loadGroup = document->GetDocumentLoadGroup();
   if (!loadGroup) return NS_ERROR_FAILURE;
 
-  RefPtr<imgLoader> loader = nsContentUtils::GetImgLoaderForDocument(document);
+  nsRefPtr<imgLoader> loader = nsContentUtils::GetImgLoaderForDocument(document);
   if (!loader) return NS_ERROR_FAILURE;
 
   if (!mSetIcon) {
@@ -312,8 +309,8 @@ nsMenuItemIconX::LoadIcon(nsIURI* aIconURI)
   nsresult rv = loader->LoadImage(aIconURI, nullptr, nullptr,
                                   mozilla::net::RP_Default,
                                   nullptr, loadGroup, this,
-                                  nullptr, nullptr, nsIRequest::LOAD_NORMAL, nullptr,
-                                  nsIContentPolicy::TYPE_INTERNAL_IMAGE, EmptyString(),
+                                  nullptr, nsIRequest::LOAD_NORMAL, nullptr,
+                                  nsIContentPolicy::TYPE_IMAGE, EmptyString(),
                                   getter_AddRefs(mIconRequest));
   if (NS_FAILED(rv)) return rv;
 

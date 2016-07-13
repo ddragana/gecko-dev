@@ -26,21 +26,41 @@ NS_IMPL_ADDREF_INHERITED(ScrollAreaEvent, UIEvent)
 NS_IMPL_RELEASE_INHERITED(ScrollAreaEvent, UIEvent)
 
 NS_INTERFACE_MAP_BEGIN(ScrollAreaEvent)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMScrollAreaEvent)
 NS_INTERFACE_MAP_END_INHERITING(UIEvent)
 
-void
+
+#define FORWARD_GETTER(_name)                                                  \
+  NS_IMETHODIMP                                                                \
+  ScrollAreaEvent::Get ## _name(float* aResult)                                \
+  {                                                                            \
+    *aResult = _name();                                                        \
+    return NS_OK;                                                              \
+  }
+
+FORWARD_GETTER(X)
+FORWARD_GETTER(Y)
+FORWARD_GETTER(Width)
+FORWARD_GETTER(Height)
+
+NS_IMETHODIMP
 ScrollAreaEvent::InitScrollAreaEvent(const nsAString& aEventType,
                                      bool aCanBubble,
                                      bool aCancelable,
-                                     nsGlobalWindow* aView,
+                                     nsIDOMWindow* aView,
                                      int32_t aDetail,
                                      float aX,
                                      float aY,
                                      float aWidth,
                                      float aHeight)
 {
-  UIEvent::InitUIEvent(aEventType, aCanBubble, aCancelable, aView, aDetail);
+  nsresult rv =
+    UIEvent::InitUIEvent(aEventType, aCanBubble, aCancelable, aView, aDetail);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   mClientArea->SetRect(aX, aY, aWidth, aHeight);
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP_(void)
@@ -60,7 +80,7 @@ ScrollAreaEvent::Serialize(IPC::Message* aMsg,
 }
 
 NS_IMETHODIMP_(bool)
-ScrollAreaEvent::Deserialize(const IPC::Message* aMsg, PickleIterator* aIter)
+ScrollAreaEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
 {
   NS_ENSURE_TRUE(Event::Deserialize(aMsg, aIter), false);
 
@@ -80,12 +100,12 @@ ScrollAreaEvent::Deserialize(const IPC::Message* aMsg, PickleIterator* aIter)
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<ScrollAreaEvent>
-NS_NewDOMScrollAreaEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMScrollAreaEvent(nsIDOMEvent** aInstancePtrResult,
+                         EventTarget* aOwner,
                          nsPresContext* aPresContext,
                          InternalScrollAreaEvent* aEvent)
 {
-  RefPtr<ScrollAreaEvent> ev =
-    new ScrollAreaEvent(aOwner, aPresContext, aEvent);
-  return ev.forget();
+  ScrollAreaEvent* ev = new ScrollAreaEvent(aOwner, aPresContext, aEvent);
+  return CallQueryInterface(ev, aInstancePtrResult);
 }

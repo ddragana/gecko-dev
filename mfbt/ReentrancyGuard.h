@@ -16,7 +16,7 @@
 namespace mozilla {
 
 /* Useful for implementing containers that assert non-reentrancy */
-class MOZ_RAII ReentrancyGuard
+class ReentrancyGuard
 {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 #ifdef DEBUG
@@ -26,12 +26,12 @@ class MOZ_RAII ReentrancyGuard
 public:
   template<class T>
 #ifdef DEBUG
-  explicit ReentrancyGuard(T& aObj
-                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  ReentrancyGuard(T& aObj
+                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mEntered(aObj.mEntered)
 #else
-  explicit ReentrancyGuard(T&
-                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  ReentrancyGuard(T&
+                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
 #endif
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;

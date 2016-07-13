@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
 import os
 import unittest
@@ -23,18 +22,13 @@ class ProcTestMisc(proctest.ProcTest):
         p.processOutput(timeout=5)
         p.wait()
 
-        self.determine_status(p, False, ())
-
-    def test_unicode_in_environment(self):
-        env = {
-            'FOOBAR': 'ʘ',
-        }
-        p = processhandler.ProcessHandler([self.python, self.proclaunch,
-                                          "process_normal_finish_python.ini"],
-                                          cwd=here, env=env)
-        # passes if no exceptions are raised
-        p.run()
-        p.wait()
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              p.proc.returncode,
+                              p.didTimeout,
+                              False,
+                              ())
 
 if __name__ == '__main__':
     unittest.main()

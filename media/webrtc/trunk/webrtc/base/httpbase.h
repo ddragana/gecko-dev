@@ -94,7 +94,7 @@ class HttpBase
 {
 public:
   HttpBase();
-  ~HttpBase() override;
+  virtual ~HttpBase();
 
   void notify(IHttpNotify* notify) { notify_ = notify; }
   bool attach(StreamInterface* stream);
@@ -145,22 +145,16 @@ protected:
   void OnDocumentEvent(StreamInterface* stream, int events, int error);
 
   // HttpParser Interface
-  ProcessResult ProcessLeader(const char* line,
-                              size_t len,
-                              HttpError* error) override;
-  ProcessResult ProcessHeader(const char* name,
-                              size_t nlen,
-                              const char* value,
-                              size_t vlen,
-                              HttpError* error) override;
-  ProcessResult ProcessHeaderComplete(bool chunked,
-                                      size_t& data_size,
-                                      HttpError* error) override;
-  ProcessResult ProcessData(const char* data,
-                            size_t len,
-                            size_t& read,
-                            HttpError* error) override;
-  void OnComplete(HttpError err) override;
+  virtual ProcessResult ProcessLeader(const char* line, size_t len,
+                                      HttpError* error);
+  virtual ProcessResult ProcessHeader(const char* name, size_t nlen,
+                                      const char* value, size_t vlen,
+                                      HttpError* error);
+  virtual ProcessResult ProcessHeaderComplete(bool chunked, size_t& data_size,
+                                              HttpError* error);
+  virtual ProcessResult ProcessData(const char* data, size_t len, size_t& read,
+                                    HttpError* error);
+  virtual void OnComplete(HttpError err);
 
 private:
   class DocumentStream;

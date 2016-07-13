@@ -140,7 +140,7 @@ nsresult
 nsDownloadManager::ResumeRetry(nsDownload *aDl)
 {
   // Keep a reference in case we need to cancel the download
-  RefPtr<nsDownload> dl = aDl;
+  nsRefPtr<nsDownload> dl = aDl;
 
   // Try to resume the active download
   nsresult rv = dl->Resume();
@@ -173,7 +173,7 @@ nsDownloadManager::PauseAllDownloads(nsCOMArray<nsDownload>& aDownloads, bool aS
 {
   nsresult retVal = NS_OK;
   for (int32_t i = aDownloads.Count() - 1; i >= 0; --i) {
-    RefPtr<nsDownload> dl = aDownloads[i];
+    nsRefPtr<nsDownload> dl = aDownloads[i];
 
     // Only pause things that need to be paused
     if (!dl->IsPaused()) {
@@ -206,7 +206,7 @@ nsDownloadManager::ResumeAllDownloads(nsCOMArray<nsDownload>& aDownloads, bool a
 {
   nsresult retVal = NS_OK;
   for (int32_t i = aDownloads.Count() - 1; i >= 0; --i) {
-    RefPtr<nsDownload> dl = aDownloads[i];
+    nsRefPtr<nsDownload> dl = aDownloads[i];
 
     // If aResumeAll is true, then resume everything; otherwise, check if the
     // download should auto-resume
@@ -242,7 +242,7 @@ nsDownloadManager::RemoveAllDownloads(nsCOMArray<nsDownload>& aDownloads)
 {
   nsresult rv = NS_OK;
   for (int32_t i = aDownloads.Count() - 1; i >= 0; --i) {
-    RefPtr<nsDownload> dl = aDownloads[0];
+    nsRefPtr<nsDownload> dl = aDownloads[0];
 
     nsresult result = NS_OK;
     if (!dl->mPrivate && dl->IsPaused() && GetQuitBehavior() != QUIT_AND_CANCEL)
@@ -272,7 +272,7 @@ nsDownloadManager::RemoveDownloadsForURI(mozIStorageStatement* aStatement, nsIUR
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool hasMore = false;
-  AutoTArray<nsCString, 4> downloads;
+  nsAutoTArray<nsCString, 4> downloads;
   // Get all the downloads that match the provided URI
   while (NS_SUCCEEDED(aStatement->ExecuteStep(&hasMore)) &&
          hasMore) {
@@ -494,7 +494,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to the next upgrade
-    MOZ_FALLTHROUGH;
 
   case 2: // Add referrer column to the database
     {
@@ -509,7 +508,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to the next upgrade
-    MOZ_FALLTHROUGH;
 
   case 3: // This version adds a column to the database (entityID)
     {
@@ -524,7 +522,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to the next upgrade
-    MOZ_FALLTHROUGH;
 
   case 4: // This version adds a column to the database (tempPath)
     {
@@ -539,7 +536,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to the next upgrade
-    MOZ_FALLTHROUGH;
 
   case 5: // This version adds two columns for tracking transfer progress
     {
@@ -559,7 +555,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to the next upgrade
-    MOZ_FALLTHROUGH;
 
   case 6: // This version adds three columns to DB (MIME type related info)
     {
@@ -584,7 +579,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to next upgrade
-    MOZ_FALLTHROUGH;
 
   case 7: // This version adds a column to remember to auto-resume downloads
     {
@@ -599,7 +593,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to the next upgrade
-    MOZ_FALLTHROUGH;
 
     // Warning: schema versions >=8 must take into account that they can
     // be operating on schemas from unknown, future versions that have
@@ -634,7 +627,6 @@ nsDownloadManager::InitFileDB()
 
   // Extra sanity checking for developers
 #ifndef DEBUG
-    MOZ_FALLTHROUGH;
   case DM_SCHEMA_VERSION:
 #endif
     break;
@@ -651,7 +643,6 @@ nsDownloadManager::InitFileDB()
       NS_ENSURE_SUCCESS(rv, rv);
     }
     // Fallthrough to downgrade check
-    MOZ_FALLTHROUGH;
 
   // Downgrading
   // If columns have been added to the table, we can still use the ones we
@@ -816,7 +807,7 @@ nsDownloadManager::RestoreActiveDownloads()
   nsresult retVal = NS_OK;
   bool hasResults;
   while (NS_SUCCEEDED(stmt->ExecuteStep(&hasResults)) && hasResults) {
-    RefPtr<nsDownload> dl;
+    nsRefPtr<nsDownload> dl;
     // Keep trying to add even if we fail one, but make sure to return failure.
     // Additionally, be careful to not call anything that tries to change the
     // database because we're iterating over a live statement.
@@ -1169,7 +1160,7 @@ nsDownloadManager::GetDownloadFromDB(mozIStorageConnection* aDBConn,
     return NS_ERROR_NOT_AVAILABLE;
 
   // We have a download, so lets create it
-  RefPtr<nsDownload> dl = new nsDownload();
+  nsRefPtr<nsDownload> dl = new nsDownload();
   if (!dl)
     return NS_ERROR_OUT_OF_MEMORY;
   dl->mPrivate = aDBConn == mPrivateDBConn;
@@ -1274,17 +1265,17 @@ nsDownloadManager::GetDownloadFromDB(mozIStorageConnection* aDBConn,
   if (dl->mGUID.IsEmpty()) {
     rv = GenerateGUID(dl->mGUID);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<mozIStorageStatement> updateStmt;
+    nsCOMPtr<mozIStorageStatement> stmt;
     rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
                                     "UPDATE moz_downloads SET guid = :guid "
                                     "WHERE id = :id"),
-                                  getter_AddRefs(updateStmt));
+                                  getter_AddRefs(stmt));
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = updateStmt->BindUTF8StringByName(NS_LITERAL_CSTRING("guid"), dl->mGUID);
+    rv = stmt->BindUTF8StringByName(NS_LITERAL_CSTRING("guid"), dl->mGUID);
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = updateStmt->BindInt64ByName(NS_LITERAL_CSTRING("id"), dl->mID);
+    rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("id"), dl->mID);
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = updateStmt->Execute();
+    rv = stmt->Execute();
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1489,6 +1480,9 @@ nsDownloadManager::GetUserDownloadsDirectory(nsIFile **aResult)
     case 0: // Desktop
       {
         nsCOMPtr<nsIFile> downloadDir;
+        nsCOMPtr<nsIProperties> dirService =
+           do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID, &rv);
+        NS_ENSURE_SUCCESS(rv, rv);
         rv = dirService->Get(NS_OS_DESKTOP_DIR,
                              NS_GET_IID(nsIFile),
                              getter_AddRefs(downloadDir));
@@ -1571,7 +1565,7 @@ nsDownloadManager::AddDownload(DownloadType aDownloadType,
   rv = targetFileURL->GetFile(getter_AddRefs(targetFile));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<nsDownload> dl = new nsDownload();
+  nsRefPtr<nsDownload> dl = new nsDownload();
   if (!dl)
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -1695,7 +1689,7 @@ nsDownloadManager::GetDownload(uint32_t aID, nsIDownload **aDownloadItem)
 
   nsDownload *itm = FindDownload(aID);
 
-  RefPtr<nsDownload> dl;
+  nsRefPtr<nsDownload> dl;
   if (!itm) {
     nsresult rv = GetDownloadFromDB(aID, getter_AddRefs(dl));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1709,7 +1703,7 @@ nsDownloadManager::GetDownload(uint32_t aID, nsIDownload **aDownloadItem)
 }
 
 namespace {
-class AsyncResult : public Runnable
+class AsyncResult : public nsRunnable
 {
 public:
   AsyncResult(nsresult aStatus, nsIDownload* aResult,
@@ -1740,13 +1734,13 @@ nsDownloadManager::GetDownloadByGUID(const nsACString& aGUID,
   nsDownload *itm = FindDownload(aGUID);
 
   nsresult rv = NS_OK;
-  RefPtr<nsDownload> dl;
+  nsRefPtr<nsDownload> dl;
   if (!itm) {
     rv = GetDownloadFromDB(aGUID, getter_AddRefs(dl));
     itm = dl.get();
   }
 
-  RefPtr<AsyncResult> runnable = new AsyncResult(rv, itm, aCallback);
+  nsRefPtr<AsyncResult> runnable = new AsyncResult(rv, itm, aCallback);
   NS_DispatchToMainThread(runnable);
   return NS_OK;
 }
@@ -1791,7 +1785,7 @@ nsDownloadManager::CancelDownload(uint32_t aID)
   NS_WARNING("Using integer IDs without compat mode enabled");
 
   // We AddRef here so we don't lose access to member variables when we remove
-  RefPtr<nsDownload> dl = FindDownload(aID);
+  nsRefPtr<nsDownload> dl = FindDownload(aID);
 
   // if it's null, someone passed us a bad id.
   if (!dl)
@@ -1803,12 +1797,13 @@ nsDownloadManager::CancelDownload(uint32_t aID)
 nsresult
 nsDownloadManager::RetryDownload(const nsACString& aGUID)
 {
-  RefPtr<nsDownload> dl;
+  nsRefPtr<nsDownload> dl;
   nsresult rv = GetDownloadFromDB(aGUID, getter_AddRefs(dl));
   NS_ENSURE_SUCCESS(rv, rv);
 
   return RetryDownload(dl);
 }
+
 
 NS_IMETHODIMP
 nsDownloadManager::RetryDownload(uint32_t aID)
@@ -1817,7 +1812,7 @@ nsDownloadManager::RetryDownload(uint32_t aID)
 
   NS_WARNING("Using integer IDs without compat mode enabled");
 
-  RefPtr<nsDownload> dl;
+  nsRefPtr<nsDownload> dl;
   nsresult rv = GetDownloadFromDB(aID, getter_AddRefs(dl));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1900,7 +1895,7 @@ RemoveDownloadByGUID(const nsACString& aGUID, mozIStorageConnection* aDBConn)
 nsresult
 nsDownloadManager::RemoveDownload(const nsACString& aGUID)
 {
-  RefPtr<nsDownload> dl = FindDownload(aGUID);
+  nsRefPtr<nsDownload> dl = FindDownload(aGUID);
   MOZ_ASSERT(!dl, "Can't call RemoveDownload on a download in progress!");
   if (dl)
     return NS_ERROR_FAILURE;
@@ -1924,7 +1919,7 @@ nsDownloadManager::RemoveDownload(uint32_t aID)
 
   NS_WARNING("Using integer IDs without compat mode enabled");
 
-  RefPtr<nsDownload> dl = FindDownload(aID);
+  nsRefPtr<nsDownload> dl = FindDownload(aID);
   MOZ_ASSERT(!dl, "Can't call RemoveDownload on a download in progress!");
   if (dl)
     return NS_ERROR_FAILURE;
@@ -2328,7 +2323,7 @@ NS_IMETHODIMP
 nsDownloadManager::OnVisit(nsIURI *aURI, int64_t aVisitID, PRTime aTime,
                            int64_t aSessionID, int64_t aReferringID,
                            uint32_t aTransitionType, const nsACString& aGUID,
-                           bool aHidden, uint32_t aVisitCount, uint32_t aTyped)
+                           bool aHidden)
 {
   return NS_OK;
 }
@@ -2573,7 +2568,7 @@ nsDownloadManager::ConfirmCancelDownloads(int32_t aCount,
 
   // Get Download Manager window, to be parent of alert.
   nsCOMPtr<nsIWindowMediator> wm = do_GetService(NS_WINDOWMEDIATOR_CONTRACTID);
-  nsCOMPtr<mozIDOMWindowProxy> dmWindow;
+  nsCOMPtr<nsIDOMWindow> dmWindow;
   if (wm) {
     wm->GetMostRecentWindow(MOZ_UTF16("Download:Manager"),
                             getter_AddRefs(dmWindow));
@@ -2667,7 +2662,7 @@ nsDownload::SetState(DownloadState aState)
   mDownloadState = aState;
 
   // We don't want to lose access to our member variables
-  RefPtr<nsDownload> kungFuDeathGrip = this;
+  nsRefPtr<nsDownload> kungFuDeathGrip = this;
 
   // When the state changed listener is dispatched, queries to the database and
   // the download manager api should reflect what the nsIDownload object would
@@ -3053,7 +3048,7 @@ nsDownload::OnStateChange(nsIWebProgress *aWebProgress,
   MOZ_ASSERT(NS_IsMainThread(), "Must call OnStateChange in main thread");
 
   // We don't want to lose access to our member variables
-  RefPtr<nsDownload> kungFuDeathGrip = this;
+  nsRefPtr<nsDownload> kungFuDeathGrip = this;
 
   // Check if we're starting a request; the NETWORK flag is necessary to not
   // pick up the START of *each* file but only for the whole request
@@ -3563,7 +3558,7 @@ nsDownload::Resume()
   rv = NS_NewChannel(getter_AddRefs(channel),
                      mSource,
                      nsContentUtils::GetSystemPrincipal(),
-                     nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                     nsILoadInfo::SEC_NORMAL,
                      nsIContentPolicy::TYPE_OTHER,
                      nullptr,  // aLoadGroup
                      ir);
@@ -3762,7 +3757,7 @@ nsDownload::FailDownload(nsresult aStatus, const char16_t *aMessage)
   nsCOMPtr<nsIWindowMediator> wm =
     do_GetService(NS_WINDOWMEDIATOR_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
-  nsCOMPtr<mozIDOMWindowProxy> dmWindow;
+  nsCOMPtr<nsIDOMWindow> dmWindow;
   rv = wm->GetMostRecentWindow(MOZ_UTF16("Download:Manager"),
                                getter_AddRefs(dmWindow));
   NS_ENSURE_SUCCESS(rv, rv);

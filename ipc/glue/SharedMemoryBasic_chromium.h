@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: sw=2 ts=8 et :
+ */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,15 +21,18 @@
 namespace mozilla {
 namespace ipc {
 
-class SharedMemoryBasic final : public SharedMemoryCommon<base::SharedMemoryHandle>
+class SharedMemoryBasic final : public SharedMemory
 {
 public:
+  typedef base::SharedMemoryHandle Handle;
+
   SharedMemoryBasic()
   {
   }
 
-  virtual bool SetHandle(const Handle& aHandle) override {
-    return mSharedMemory.SetHandle(aHandle, false);
+  explicit SharedMemoryBasic(const Handle& aHandle)
+    : mSharedMemory(aHandle, false)
+  {
   }
 
   virtual bool Create(size_t aNbytes) override
@@ -49,11 +53,6 @@ public:
     return ok;
   }
 
-  virtual void CloseHandle() override
-  {
-    mSharedMemory.Close(false);
-  }
-
   virtual void* memory() const override
   {
     return mSharedMemory.memory();
@@ -69,13 +68,13 @@ public:
     return base::SharedMemory::NULLHandle();
   }
 
-  virtual bool IsHandleValid(const Handle &aHandle) const override
+  static bool IsHandleValid(const Handle &aHandle)
   {
     return base::SharedMemory::IsHandleValid(aHandle);
   }
 
-  virtual bool ShareToProcess(base::ProcessId aProcessId,
-                              Handle* new_handle) override
+  bool ShareToProcess(base::ProcessId aProcessId,
+                      Handle* new_handle)
   {
     base::SharedMemoryHandle handle;
     bool ret = mSharedMemory.ShareToProcess(aProcessId, &handle);

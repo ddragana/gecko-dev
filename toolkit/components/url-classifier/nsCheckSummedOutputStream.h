@@ -33,7 +33,7 @@ protected:
   virtual ~nsCheckSummedOutputStream() { nsSafeFileOutputStream::Close(); }
 
   nsCOMPtr<nsICryptoHash> mHash;
-  nsCString mCheckSum;
+  nsAutoCString mCheckSum;
 };
 
 // returns a file output stream which can be QI'ed to nsIFileOutputStream.

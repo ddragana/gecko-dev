@@ -108,6 +108,12 @@ bool UdpSocket2ManagerWindows::Init(int32_t id,
   return true;
 }
 
+int32_t UdpSocket2ManagerWindows::ChangeUniqueId(const int32_t id)
+{
+    _id = id;
+    return 0;
+}
+
 bool UdpSocket2ManagerWindows::Start()
 {
     WEBRTC_TRACE(kTraceDebug, kTraceTransport, _id,
@@ -268,6 +274,12 @@ bool UdpSocket2ManagerWindows::StopWorkerThreads()
         _managerNumber,
         _numActiveSockets);
 
+    // Set worker threads to not alive so that they will stop calling
+    // UdpSocket2WorkerWindows::Run().
+    for (WorkerList::iterator iter = _workerThreadsList.begin();
+         iter != _workerThreadsList.end(); ++iter) {
+        (*iter)->SetNotAlive();
+    }
     // Release all threads waiting for GetQueuedCompletionStatus(..).
     if(_ioCompletionHandle)
     {
@@ -520,6 +532,7 @@ int32_t UdpSocket2WorkerWindows::_numOfWorkers = 0;
 
 UdpSocket2WorkerWindows::UdpSocket2WorkerWindows(HANDLE ioCompletionHandle)
     : _ioCompletionHandle(ioCompletionHandle),
+      _pThread(NULL),
       _init(false)
 {
     _workerNumber = _numOfWorkers++;
@@ -529,19 +542,20 @@ UdpSocket2WorkerWindows::UdpSocket2WorkerWindows(HANDLE ioCompletionHandle)
 
 UdpSocket2WorkerWindows::~UdpSocket2WorkerWindows()
 {
+    if(_pThread)
+    {
+        delete _pThread;
+    }
     WEBRTC_TRACE(kTraceMemory,  kTraceTransport, -1,
                  "UdpSocket2WorkerWindows deleted");
 }
 
 bool UdpSocket2WorkerWindows::Start()
 {
+    unsigned int id = 0;
     WEBRTC_TRACE(kTraceStateInfo,  kTraceTransport, -1,
                  "Start UdpSocket2WorkerWindows");
-    if (!_pThread->Start())
-        return false;
-
-    _pThread->SetPriority(kRealtimePriority);
-    return true;
+    return _pThread->Start(id);
 }
 
 bool UdpSocket2WorkerWindows::Stop()
@@ -551,18 +565,36 @@ bool UdpSocket2WorkerWindows::Stop()
     return _pThread->Stop();
 }
 
+void UdpSocket2WorkerWindows::SetNotAlive()
+{
+    WEBRTC_TRACE(kTraceStateInfo,  kTraceTransport, -1,
+                 "SetNotAlive UdpSocket2WorkerWindows");
+    _pThread->SetNotAlive();
+}
+
 int32_t UdpSocket2WorkerWindows::Init()
 {
     if(!_init)
     {
         const char* threadName = "UdpSocket2ManagerWindows_thread";
-        _pThread = ThreadWrapper::CreateThread(Run, this, threadName);
+        _pThread = ThreadWrapper::CreateThread(Run, this, kRealtimePriority,
+                                               threadName);
+        if(_pThread == NULL)
+        {
+            WEBRTC_TRACE(
+                kTraceError,
+                kTraceTransport,
+                -1,
+                "UdpSocket2WorkerWindows(%d)::Init(), error creating thread!",
+                _workerNumber);
+            return -1;
+        }
         _init = true;
     }
     return 0;
 }
 
-bool UdpSocket2WorkerWindows::Run(void* obj)
+bool UdpSocket2WorkerWindows::Run(ThreadObj obj)
 {
     UdpSocket2WorkerWindows* pWorker =
         static_cast<UdpSocket2WorkerWindows*>(obj);

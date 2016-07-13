@@ -333,7 +333,7 @@ interface MozIcc : EventTarget
    */
   [Throws]
   DOMRequest updateContact(IccContactType contactType,
-                           mozContact contact,
+                           any contact,
                            optional DOMString? pin2 = null);
 
   // Integrated Circuit Card Helpers.

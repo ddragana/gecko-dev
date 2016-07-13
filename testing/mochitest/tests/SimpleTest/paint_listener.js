@@ -1,6 +1,6 @@
 (function() {
   var accumulatedRect = null;
-  var onpaint = new Array();
+  var onpaint = function() {};
   var debug = false;
   const FlushModes = {
     FLUSH: 0,
@@ -24,9 +24,7 @@
                         Math.max(accumulatedRect[2], eventRect[2]),
                         Math.max(accumulatedRect[3], eventRect[3]) ]
                     : eventRect;
-    while (onpaint.length > 0) {
-      window.setTimeout(onpaint.pop(), 0);
-    }
+    onpaint();
   }
   window.addEventListener("MozAfterPaint", paintListener, false);
 
@@ -37,6 +35,7 @@
       if (debug) {
         dump("waiting for paint suppression to end...\n");
       }
+      onpaint = function() {};
       window.setTimeout(function() {
         waitForPaints(callback, subdoc, flushMode);
       }, 0);
@@ -57,8 +56,8 @@
       if (debug) {
         dump("waiting for paint...\n");
       }
-      onpaint.push(
-        function() { waitForPaints(callback, subdoc, FlushModes.NOFLUSH); });
+      onpaint =
+        function() { waitForPaints(callback, subdoc, FlushModes.NOFLUSH); };
       if (utils.isTestControllingRefreshes) {
         utils.advanceTimeAndRefresh(0);
       }
@@ -70,6 +69,7 @@
     }
     var result = accumulatedRect || [ 0, 0, 0, 0 ];
     accumulatedRect = null;
+    onpaint = function() {};
     callback.apply(null, result);
   }
 

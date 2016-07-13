@@ -25,7 +25,10 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(Audio)
 namespace mozilla {
 namespace dom {
 
+extern bool IsAudioAPIEnabled();
+
 NS_IMPL_ELEMENT_CLONE(HTMLAudioElement)
+
 
 HTMLAudioElement::HTMLAudioElement(already_AddRefed<NodeInfo>& aNodeInfo)
   : HTMLMediaElement(aNodeInfo)
@@ -48,7 +51,7 @@ HTMLAudioElement::Audio(const GlobalObject& aGlobal,
                         const Optional<nsAString>& aSrc,
                         ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
   nsIDocument* doc;
   if (!win || !(doc = win->GetExtantDoc())) {
     aRv.Throw(NS_ERROR_FAILURE);
@@ -60,7 +63,7 @@ HTMLAudioElement::Audio(const GlobalObject& aGlobal,
                                         kNameSpaceID_XHTML,
                                         nsIDOMNode::ELEMENT_NODE);
 
-  RefPtr<HTMLAudioElement> audio = new HTMLAudioElement(nodeInfo);
+  nsRefPtr<HTMLAudioElement> audio = new HTMLAudioElement(nodeInfo);
   audio->SetHTMLAttr(nsGkAtoms::preload, NS_LITERAL_STRING("auto"), aRv);
   if (aRv.Failed()) {
     return nullptr;
@@ -76,9 +79,13 @@ HTMLAudioElement::Audio(const GlobalObject& aGlobal,
 nsresult HTMLAudioElement::SetAcceptHeader(nsIHttpChannel* aChannel)
 {
     nsAutoCString value(
+#ifdef MOZ_WEBM
       "audio/webm,"
+#endif
       "audio/ogg,"
+#ifdef MOZ_WAVE
       "audio/wav,"
+#endif
       "audio/*;q=0.9,"
       "application/ogg;q=0.7,"
       "video/*;q=0.6,*/*;q=0.5");

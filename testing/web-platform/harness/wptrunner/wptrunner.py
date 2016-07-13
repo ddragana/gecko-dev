@@ -40,12 +40,8 @@ def setup_logging(*args, **kwargs):
     global logger
     logger = wptlogging.setup(*args, **kwargs)
 
-def get_loader(test_paths, product, ssl_env, debug=None, run_info_extras=None, **kwargs):
-    if run_info_extras is None:
-        run_info_extras = {}
-
-    run_info = wpttest.get_run_info(kwargs["run_info"], product, debug=debug,
-                                    extras=run_info_extras)
+def get_loader(test_paths, product, ssl_env, debug=None, **kwargs):
+    run_info = wpttest.get_run_info(kwargs["run_info"], product, debug=debug)
 
     test_manifests = testloader.ManifestLoader(test_paths, force_manifest_update=kwargs["manifest_update"]).load()
 
@@ -102,8 +98,6 @@ def list_disabled(test_paths, product, **kwargs):
 def get_pause_after_test(test_loader, **kwargs):
     total_tests = sum(len(item) for item in test_loader.tests.itervalues())
     if kwargs["pause_after_test"] is None:
-        if kwargs["repeat_until_unexpected"]:
-            return False
         if kwargs["repeat"] == 1 and total_tests == 1:
             return True
         return False
@@ -117,21 +111,17 @@ def run_tests(config, test_paths, product, **kwargs):
         (check_args,
          browser_cls, get_browser_kwargs,
          executor_classes, get_executor_kwargs,
-         env_options, run_info_extras) = products.load_product(config, product)
+         env_options) = products.load_product(config, product)
 
         ssl_env = env.ssl_env(logger, **kwargs)
 
         check_args(**kwargs)
 
         if "test_loader" in kwargs:
-            run_info = wpttest.get_run_info(kwargs["run_info"], product, debug=None,
-                                            extras=run_info_extras(**kwargs))
+            run_info = wpttest.get_run_info(kwargs["run_info"], product, debug=None)
             test_loader = kwargs["test_loader"]
         else:
-            run_info, test_loader = get_loader(test_paths,
-                                               product,
-                                               ssl_env,
-                                               run_info_extras=run_info_extras(**kwargs),
+            run_info, test_loader = get_loader(test_paths, product, ssl_env,
                                                **kwargs)
 
         if kwargs["run_by_dir"] is False:
@@ -162,15 +152,10 @@ def run_tests(config, test_paths, product, **kwargs):
             browser_kwargs = get_browser_kwargs(ssl_env=ssl_env, **kwargs)
 
             repeat = kwargs["repeat"]
-            repeat_count = 0
-            repeat_until_unexpected = kwargs["repeat_until_unexpected"]
+            for repeat_count in xrange(repeat):
+                if repeat > 1:
+                    logger.info("Repetition %i / %i" % (repeat_count + 1, repeat))
 
-            while repeat_count < repeat or repeat_until_unexpected:
-                repeat_count += 1
-                if repeat_until_unexpected:
-                    logger.info("Repetition %i" % (repeat_count))
-                elif repeat > 1:
-                    logger.info("Repetition %i / %i" % (repeat_count, repeat))
 
                 unexpected_count = 0
                 logger.suite_start(test_loader.test_ids, run_info)
@@ -215,8 +200,6 @@ def run_tests(config, test_paths, product, **kwargs):
 
                 unexpected_total += unexpected_count
                 logger.info("Got %i unexpected results" % unexpected_count)
-                if repeat_until_unexpected and unexpected_total > 0:
-                    break
                 logger.suite_end()
 
     return unexpected_total == 0
@@ -224,9 +207,9 @@ def run_tests(config, test_paths, product, **kwargs):
 
 def main():
     """Main entry point when calling from the command line"""
-    kwargs = wptcommandline.parse_args()
-
     try:
+        kwargs = wptcommandline.parse_args()
+
         if kwargs["prefs_root"] is None:
             kwargs["prefs_root"] = os.path.abspath(os.path.join(here, "prefs"))
 
@@ -239,9 +222,6 @@ def main():
         else:
             return not run_tests(**kwargs)
     except Exception:
-        if kwargs["pdb"]:
-            import pdb, traceback
-            print traceback.format_exc()
-            pdb.post_mortem()
-        else:
-            raise
+        import pdb, traceback
+        print traceback.format_exc()
+        pdb.post_mortem()

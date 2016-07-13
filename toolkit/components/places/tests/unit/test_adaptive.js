@@ -24,40 +24,22 @@ function AutoCompleteInput(aSearches) {
 AutoCompleteInput.prototype = {
   constructor: AutoCompleteInput,
 
-  get minResultsForPopup() {
-    return 0;
-  },
-  get timeout() {
-    return 10;
-  },
-  get searchParam() {
-    return "";
-  },
-  get textValue() {
-    return "";
-  },
-  get disableAutoComplete() {
-    return false;
-  },
-  get completeDefaultIndex() {
-    return false;
-  },
+  get minResultsForPopup() 0,
+  get timeout() 10,
+  get searchParam() "",
+  get textValue() "",
+  get disableAutoComplete() false,
+  get completeDefaultIndex() false,
 
-  get searchCount() {
-    return this.searches.length;
-  },
-  getSearchAt: function (aIndex) {
-    return this.searches[aIndex];
-  },
+  get searchCount() this.searches.length,
+  getSearchAt: function (aIndex) this.searches[aIndex],
 
   onSearchBegin: function () {},
   onSearchComplete: function() {},
 
-  get popupOpen() {
-    return false;
-  },
+  get popupOpen() false,
   popup: {
-    set selectedIndex(aIndex) {},
+    set selectedIndex(aIndex) aIndex,
     invalidate: function () {},
     QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompletePopup])
   },
@@ -75,7 +57,7 @@ function ensure_results(expected, searchTerm)
 
   // Make an AutoCompleteInput that uses our searches
   // and confirms results on search complete.
-  let input = new AutoCompleteInput(["unifiedcomplete"]);
+  let input = new AutoCompleteInput(["history"]);
 
   controller.input = input;
 
@@ -98,7 +80,7 @@ function ensure_results(expected, searchTerm)
 /**
  * Asynchronous task that bumps up the rank for an uri.
  */
-function* task_setCountRank(aURI, aCount, aRank, aSearch, aBookmark)
+function task_setCountRank(aURI, aCount, aRank, aSearch, aBookmark)
 {
   // Bump up the visit count for the uri.
   let visits = [];
@@ -112,17 +94,11 @@ function* task_setCountRank(aURI, aCount, aRank, aSearch, aBookmark)
     QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompleteInput,
                                            Ci.nsIAutoCompletePopup,
                                            Ci.nsIAutoCompleteController]),
-    get popup() {
-      return thing;
-    },
-    get controller() {
-      return thing;
-    },
+    get popup() thing,
+    get controller() thing,
     popupOpen: true,
     selectedIndex: 0,
-    getValueAt: function() {
-      return aURI.spec;
-    },
+    getValueAt: function() aURI.spec,
     searchString: aSearch
   };
 
@@ -160,20 +136,20 @@ function doAdaptiveDecay()
   }, this);
 }
 
-var uri1 = uri("http://site.tld/1");
-var uri2 = uri("http://site.tld/2");
+let uri1 = uri("http://site.tld/1");
+let uri2 = uri("http://site.tld/2");
 
 // d1 is some date for the page visit
-var d1 = new Date(Date.now() - 1000 * 60 * 60) * 1000;
+let d1 = new Date(Date.now() - 1000 * 60 * 60) * 1000;
 // c1 is larger (should show up higher) than c2
-var c1 = 10;
-var c2 = 1;
+let c1 = 10;
+let c2 = 1;
 // s1 is a partial match of s2
-var s0 = "";
-var s1 = "si";
-var s2 = "site";
+let s0 = "";
+let s1 = "si";
+let s2 = "site";
 
-var observer = {
+let observer = {
   results: null,
   search: null,
   runCount: -1,
@@ -196,9 +172,9 @@ function makeResult(aURI, aStyle = "favicon") {
   };
 }
 
-var tests = [
+let tests = [
   // Test things without a search term.
-  function*() {
+  function() {
     print("Test 0 same count, diff rank, same term; no search");
     observer.results = [
       makeResult(uri1),
@@ -209,7 +185,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c1, s2);
     yield task_setCountRank(uri2, c1, c2, s2);
   },
-  function*() {
+  function() {
     print("Test 1 same count, diff rank, same term; no search");
     observer.results = [
       makeResult(uri2),
@@ -220,7 +196,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c2, s2);
     yield task_setCountRank(uri2, c1, c1, s2);
   },
-  function*() {
+  function() {
     print("Test 2 diff count, same rank, same term; no search");
     observer.results = [
       makeResult(uri1),
@@ -231,7 +207,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c1, s2);
     yield task_setCountRank(uri2, c2, c1, s2);
   },
-  function*() {
+  function() {
     print("Test 3 diff count, same rank, same term; no search");
     observer.results = [
       makeResult(uri2),
@@ -244,7 +220,7 @@ var tests = [
   },
 
   // Test things with a search term (exact match one, partial other).
-  function*() {
+  function() {
     print("Test 4 same count, same rank, diff term; one exact/one partial search");
     observer.results = [
       makeResult(uri1),
@@ -255,7 +231,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c1, s1);
     yield task_setCountRank(uri2, c1, c1, s2);
   },
-  function*() {
+  function() {
     print("Test 5 same count, same rank, diff term; one exact/one partial search");
     observer.results = [
       makeResult(uri2),
@@ -268,7 +244,7 @@ var tests = [
   },
 
   // Test things with a search term (exact match both).
-  function*() {
+  function() {
     print("Test 6 same count, diff rank, same term; both exact search");
     observer.results = [
       makeResult(uri1),
@@ -279,7 +255,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c1, s1);
     yield task_setCountRank(uri2, c1, c2, s1);
   },
-  function*() {
+  function() {
     print("Test 7 same count, diff rank, same term; both exact search");
     observer.results = [
       makeResult(uri2),
@@ -292,7 +268,7 @@ var tests = [
   },
 
   // Test things with a search term (partial match both).
-  function*() {
+  function() {
     print("Test 8 same count, diff rank, same term; both partial search");
     observer.results = [
       makeResult(uri1),
@@ -303,7 +279,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c1, s2);
     yield task_setCountRank(uri2, c1, c2, s2);
   },
-  function*() {
+  function() {
     print("Test 9 same count, diff rank, same term; both partial search");
     observer.results = [
       makeResult(uri2),
@@ -314,7 +290,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c2, s2);
     yield task_setCountRank(uri2, c1, c1, s2);
   },
-  function*() {
+  function() {
     print("Test 10 same count, same rank, same term, decay first; exact match");
     observer.results = [
       makeResult(uri2),
@@ -326,7 +302,7 @@ var tests = [
     doAdaptiveDecay();
     yield task_setCountRank(uri2, c1, c1, s1);
   },
-  function*() {
+  function() {
     print("Test 11 same count, same rank, same term, decay second; exact match");
     observer.results = [
       makeResult(uri1),
@@ -339,7 +315,7 @@ var tests = [
     yield task_setCountRank(uri1, c1, c1, s1);
   },
   // Test that bookmarks are hidden if the preferences are set right.
-  function*() {
+  function() {
     print("Test 12 same count, diff rank, same term; no search; history only");
     Services.prefs.setBoolPref("browser.urlbar.suggest.history", true);
     Services.prefs.setBoolPref("browser.urlbar.suggest.bookmark", false);
@@ -354,7 +330,7 @@ var tests = [
     yield task_setCountRank(uri2, c1, c2, s2);
   },
   // Test that tags are shown if the preferences are set right.
-  function*() {
+  function() {
     print("Test 13 same count, diff rank, same term; no search; history only with tag");
     Services.prefs.setBoolPref("browser.urlbar.suggest.history", true);
     Services.prefs.setBoolPref("browser.urlbar.suggest.bookmark", false);
@@ -374,16 +350,18 @@ var tests = [
  * This deferred object contains a promise that is resolved when the
  * ensure_results function has finished its execution.
  */
-var deferEnsureResults;
+let deferEnsureResults;
 
 /**
  * Test adaptive autocomplete.
  */
-add_task(function* test_adaptive()
+function run_test()
 {
-  // Disable autoFill for this test.
-  Services.prefs.setBoolPref("browser.urlbar.autoFill", false);
-  do_register_cleanup(() => Services.prefs.clearUserPref("browser.urlbar.autoFill"));
+  run_next_test();
+}
+
+add_task(function test_adaptive()
+{
   for (let [, test] in Iterator(tests)) {
     // Cleanup.
     PlacesUtils.bookmarks.removeFolderChildren(PlacesUtils.unfiledBookmarksFolderId);

@@ -47,14 +47,10 @@ public:
 
 /* HangStack stores an array of const char pointers,
    with optional internal storage for strings. */
-class HangStack
+class HangStack : public mozilla::Vector<const char*, 8>
 {
-public:
-  static const size_t sMaxInlineStorage = 8;
-
 private:
-  typedef mozilla::Vector<const char*, sMaxInlineStorage> Impl;
-  Impl mImpl;
+  typedef mozilla::Vector<const char*, 8> Base;
 
   // Stack entries can either be a static const char*
   // or a pointer to within this buffer.
@@ -64,7 +60,7 @@ public:
   HangStack() { }
 
   HangStack(HangStack&& aOther)
-    : mImpl(mozilla::Move(aOther.mImpl))
+    : Base(mozilla::Move(aOther))
     , mBuffer(mozilla::Move(aOther.mBuffer))
   {
   }
@@ -82,34 +78,8 @@ public:
     return !operator==(aOther);
   }
 
-  const char*& operator[](size_t aIndex) {
-    return mImpl[aIndex];
-  }
-
-  const char* const& operator[](size_t aIndex) const {
-    return mImpl[aIndex];
-  }
-
-  size_t capacity() const { return mImpl.capacity(); }
-  size_t length() const { return mImpl.length(); }
-  bool empty() const { return mImpl.empty(); }
-  bool canAppendWithoutRealloc(size_t aNeeded) const {
-    return mImpl.canAppendWithoutRealloc(aNeeded);
-  }
-  void infallibleAppend(const char* aEntry) { mImpl.infallibleAppend(aEntry); }
-  bool reserve(size_t aRequest) { return mImpl.reserve(aRequest); }
-  const char** begin() { return mImpl.begin(); }
-  const char* const* begin() const { return mImpl.begin(); }
-  const char** end() { return mImpl.end(); }
-  const char* const* end() const { return mImpl.end(); }
-  const char*& back() { return mImpl.back(); }
-  void erase(const char** aEntry) { mImpl.erase(aEntry); }
-  void erase(const char** aBegin, const char** aEnd) {
-    mImpl.erase(aBegin, aEnd);
-  }
-
   void clear() {
-    mImpl.clear();
+    Base::clear();
     mBuffer.clear();
   }
 
@@ -187,9 +157,7 @@ public:
   void Add(PRIntervalTime aTime, HangMonitor::HangAnnotationsPtr aAnnotations) {
     TimeHistogram::Add(aTime);
     if (aAnnotations) {
-      if (!mAnnotations.append(Move(aAnnotations))) {
-        MOZ_CRASH();
-      }
+      mAnnotations.append(Move(aAnnotations));
     }
   }
 };
@@ -203,7 +171,7 @@ public:
 class ThreadHangStats
 {
 private:
-  nsCString mName;
+  nsAutoCString mName;
 
 public:
   TimeHistogram mActivity;

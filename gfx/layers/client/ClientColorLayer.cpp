@@ -7,6 +7,7 @@
 #include "Layers.h"                     // for ColorLayer, etc
 #include "mozilla/layers/LayersMessages.h"  // for ColorLayerAttributes, etc
 #include "mozilla/mozalloc.h"           // for operator new
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
@@ -33,7 +34,7 @@ protected:
   }
 
 public:
-  virtual void SetVisibleRegion(const LayerIntRegion& aRegion)
+  virtual void SetVisibleRegion(const nsIntRegion& aRegion)
   {
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -69,7 +70,7 @@ already_AddRefed<ColorLayer>
 ClientLayerManager::CreateColorLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  RefPtr<ClientColorLayer> layer =
+  nsRefPtr<ClientColorLayer> layer =
     new ClientColorLayer(this);
   CREATE_SHADOW(Color);
   return layer.forget();

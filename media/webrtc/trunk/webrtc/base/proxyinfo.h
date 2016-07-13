@@ -34,8 +34,7 @@ struct ProxyInfo {
   std::string username;
   CryptString password;
 
-  ProxyInfo();
-  ~ProxyInfo();
+  ProxyInfo() : type(PROXY_NONE), autodetect(false) { }
 };
 
 } // namespace rtc

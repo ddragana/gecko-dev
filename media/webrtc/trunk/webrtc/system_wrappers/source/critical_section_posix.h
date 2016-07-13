@@ -21,10 +21,10 @@ class CriticalSectionPosix : public CriticalSectionWrapper {
  public:
   CriticalSectionPosix();
 
-  ~CriticalSectionPosix() override;
+  virtual ~CriticalSectionPosix();
 
-  void Enter() override;
-  void Leave() override;
+  virtual void Enter() OVERRIDE;
+  virtual void Leave() OVERRIDE;
 
  private:
   pthread_mutex_t mutex_;

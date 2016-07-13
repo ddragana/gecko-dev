@@ -2,29 +2,28 @@
 * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-function clickClearReports(browser) {
-  let doc = content.document;
+function clickClearReports(tab, cb) {
+  let doc = gBrowser.getBrowserForTab(tab).contentDocument;
 
   let button = doc.getElementById("clear-reports");
 
   if (!button) {
-    Assert.ok(false, "Button not found");
-    return Promise.resolve();
+    ok(false, "Button not found");
+    cb();
+    return;
   }
 
   let style = doc.defaultView.getComputedStyle(button, "");
 
-  Assert.notEqual(style.display, "none", "Clear reports button visible");
+  isnot(style.display, "none", "Clear reports button visible");
 
-  let deferred = {};
-  deferred.promise = new Promise(resolve => deferred.resolve = resolve);
-  var observer = new content.MutationObserver(function(mutations) {
+  var observer = new MutationObserver(function(mutations) {
     for (let mutation of mutations) {
       if (mutation.type == "attributes" &&
           mutation.attributeName == "style") {
         observer.disconnect();
-        Assert.equal(style.display, "none", "Clear reports button hidden");
-        deferred.resolve();
+        is(style.display, "none", "Clear reports button hidden");
+        cb();
       }
     }
   });
@@ -36,12 +35,11 @@ function clickClearReports(browser) {
   });
 
   button.click();
-  return deferred.promise;
 }
 
 var promptShown = false;
 
-var oldPrompt = Services.prompt;
+let oldPrompt = Services.prompt;
 Services.prompt = {
   confirm: function() {
     promptShown = true;
@@ -53,7 +51,9 @@ registerCleanupFunction(function () {
   Services.prompt = oldPrompt;
 });
 
-add_task(function* test() {
+function test() {
+  waitForExplicitFinish();
+
   let appD = make_fake_appdir();
   let crD = appD.clone();
   crD.append("Crash Reports");
@@ -64,10 +64,10 @@ add_task(function* test() {
 
   let file1 = submitdir.clone();
   file1.append("bp-nontxt");
-  file1.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
+  file1.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
   let file2 = submitdir.clone();
   file2.append("nonbp-file.txt");
-  file2.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
+  file2.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
   add_fake_crashes(crD, 5);
 
   // Add crashes to pending dir
@@ -81,44 +81,56 @@ add_task(function* test() {
   // Add crashes to reports dir
   let report1 = crD.clone();
   report1.append("NotInstallTime777");
-  report1.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
+  report1.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
   let report2 = crD.clone();
   report2.append("InstallTime" + Services.appinfo.appBuildID);
-  report2.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
+  report2.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
   let report3 = crD.clone();
   report3.append("InstallTimeNew");
-  report3.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
+  report3.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
   let report4 = crD.clone();
   report4.append("InstallTimeOld");
-  report4.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
+  report4.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
   report4.lastModifiedTime = Date.now() - 63172000000;
+
+  let tab = gBrowser.selectedTab = gBrowser.addTab("about:blank");
 
   registerCleanupFunction(function () {
     cleanup_fake_appdir();
+    gBrowser.removeTab(tab);
   });
 
-  yield BrowserTestUtils.withNewTab({ gBrowser, url: "about:crashes" },
-    function* (browser) {
+  let browser = gBrowser.getBrowserForTab(tab);
+
+  browser.addEventListener("load", function onLoad() {
+    browser.removeEventListener("load", onLoad, true);
+
+    executeSoon(function() {
       let dirs = [ submitdir, pendingdir, crD ];
       let existing = [ file1.path, file2.path, report1.path, report2.path,
                        report3.path, submitdir.path, pendingdir.path ];
 
-      yield ContentTask.spawn(browser, null, clickClearReports);
+      clickClearReports(tab, function() {
+        for (let dir of dirs) {
+          let entries = dir.directoryEntries;
+          while (entries.hasMoreElements()) {
+            let file = entries.getNext().QueryInterface(Ci.nsIFile);
+            let index = existing.indexOf(file.path);
+            isnot(index, -1, file.leafName + " exists");
 
-      for (let dir of dirs) {
-        let entries = dir.directoryEntries;
-        while (entries.hasMoreElements()) {
-          let file = entries.getNext().QueryInterface(Ci.nsIFile);
-          let index = existing.indexOf(file.path);
-          isnot(index, -1, file.leafName + " exists");
-
-          if (index != -1) {
-            existing.splice(index, 1);
+            if (index != -1) {
+              existing.splice(index, 1);
+            }
           }
         }
-      }
 
-      is(existing.length, 0, "All the files that should still exist exist");
-      ok(promptShown, "Prompt shown");
+        is(existing.length, 0, "All the files that should still exist exist");
+        ok(promptShown, "Prompt shown");
+
+        finish();
+      });
     });
-});
+  }, true);
+
+  browser.loadURI("about:crashes", null, null);
+}

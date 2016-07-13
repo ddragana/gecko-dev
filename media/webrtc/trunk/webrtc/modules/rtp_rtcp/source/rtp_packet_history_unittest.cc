@@ -15,7 +15,6 @@
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_packet_history.h"
 #include "webrtc/system_wrappers/interface/clock.h"
-#include "webrtc/video_engine/vie_defines.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -41,7 +40,7 @@ class RtpPacketHistoryTest : public ::testing::Test {
   uint8_t packet_out_[kMaxPacketLength];
 
   void CreateRtpPacket(uint16_t seq_num, uint32_t ssrc, uint8_t payload,
-      uint32_t timestamp, uint8_t* array, size_t* cur_pos) {
+      uint32_t timestamp, uint8_t* array, uint16_t* cur_pos) {
     array[(*cur_pos)++] = 0x80;
     array[(*cur_pos)++] = payload;
     array[(*cur_pos)++] = seq_num >> 8;
@@ -67,7 +66,7 @@ TEST_F(RtpPacketHistoryTest, SetStoreStatus) {
 
 TEST_F(RtpPacketHistoryTest, NoStoreStatus) {
   EXPECT_FALSE(hist_->StorePackets());
-  size_t len = 0;
+  uint16_t len = 0;
   int64_t capture_time_ms = fake_clock_.TimeInMilliseconds();
   CreateRtpPacket(kSeqNum, kSsrc, kPayload, kTimestamp, packet_, &len);
   EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
@@ -81,7 +80,7 @@ TEST_F(RtpPacketHistoryTest, NoStoreStatus) {
 
 TEST_F(RtpPacketHistoryTest, DontStore) {
   hist_->SetStorePacketsStatus(true, 10);
-  size_t len = 0;
+  uint16_t len = 0;
   int64_t capture_time_ms = fake_clock_.TimeInMilliseconds();
   CreateRtpPacket(kSeqNum, kSsrc, kPayload, kTimestamp, packet_, &len);
   EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
@@ -106,7 +105,7 @@ TEST_F(RtpPacketHistoryTest, PutRtpPacket_TooLargePacketLength) {
 
 TEST_F(RtpPacketHistoryTest, GetRtpPacket_NotStored) {
   hist_->SetStorePacketsStatus(true, 10);
-  size_t len = kMaxPacketLength;
+  uint16_t len = kMaxPacketLength;
   int64_t time;
   EXPECT_FALSE(hist_->GetPacketAndSetSendTime(0, 0, false, packet_, &len,
                                               &time));
@@ -114,7 +113,7 @@ TEST_F(RtpPacketHistoryTest, GetRtpPacket_NotStored) {
 
 TEST_F(RtpPacketHistoryTest, PutRtpPacket) {
   hist_->SetStorePacketsStatus(true, 10);
-  size_t len = 0;
+  uint16_t len = 0;
   CreateRtpPacket(kSeqNum, kSsrc, kPayload, kTimestamp, packet_, &len);
 
   EXPECT_FALSE(hist_->HasRTPPacket(kSeqNum));
@@ -126,52 +125,52 @@ TEST_F(RtpPacketHistoryTest, PutRtpPacket) {
 
 TEST_F(RtpPacketHistoryTest, GetRtpPacket) {
   hist_->SetStorePacketsStatus(true, 10);
-  size_t len = 0;
+  uint16_t len = 0;
   int64_t capture_time_ms = 1;
   CreateRtpPacket(kSeqNum, kSsrc, kPayload, kTimestamp, packet_, &len);
   EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
                                    capture_time_ms, kAllowRetransmission));
 
-  size_t len_out = kMaxPacketLength;
+  uint16_t len_out = kMaxPacketLength;
   int64_t time;
   EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum, 0, false, packet_out_,
                                              &len_out, &time));
   EXPECT_EQ(len, len_out);
   EXPECT_EQ(capture_time_ms, time);
-  for (size_t i = 0; i < len; i++)  {
+  for (int i = 0; i < len; i++)  {
     EXPECT_EQ(packet_[i], packet_out_[i]);
   }
 }
 
 TEST_F(RtpPacketHistoryTest, NoCaptureTime) {
   hist_->SetStorePacketsStatus(true, 10);
-  size_t len = 0;
+  uint16_t len = 0;
   fake_clock_.AdvanceTimeMilliseconds(1);
   int64_t capture_time_ms = fake_clock_.TimeInMilliseconds();
   CreateRtpPacket(kSeqNum, kSsrc, kPayload, kTimestamp, packet_, &len);
   EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
                                    -1, kAllowRetransmission));
 
-  size_t len_out = kMaxPacketLength;
+  uint16_t len_out = kMaxPacketLength;
   int64_t time;
   EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum, 0, false, packet_out_,
                                              &len_out, &time));
   EXPECT_EQ(len, len_out);
   EXPECT_EQ(capture_time_ms, time);
-  for (size_t i = 0; i < len; i++)  {
+  for (int i = 0; i < len; i++)  {
     EXPECT_EQ(packet_[i], packet_out_[i]);
   }
 }
 
 TEST_F(RtpPacketHistoryTest, DontRetransmit) {
   hist_->SetStorePacketsStatus(true, 10);
-  size_t len = 0;
+  uint16_t len = 0;
   int64_t capture_time_ms = fake_clock_.TimeInMilliseconds();
   CreateRtpPacket(kSeqNum, kSsrc, kPayload, kTimestamp, packet_, &len);
   EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
                                    capture_time_ms, kDontRetransmit));
 
-  size_t len_out = kMaxPacketLength;
+  uint16_t len_out = kMaxPacketLength;
   int64_t time;
   EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum, 0, false, packet_out_,
                                              &len_out, &time));
@@ -181,7 +180,7 @@ TEST_F(RtpPacketHistoryTest, DontRetransmit) {
 
 TEST_F(RtpPacketHistoryTest, MinResendTime) {
   hist_->SetStorePacketsStatus(true, 10);
-  size_t len = 0;
+  uint16_t len = 0;
   int64_t capture_time_ms = fake_clock_.TimeInMilliseconds();
   CreateRtpPacket(kSeqNum, kSsrc, kPayload, kTimestamp, packet_, &len);
   EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
@@ -196,7 +195,7 @@ TEST_F(RtpPacketHistoryTest, MinResendTime) {
   len = kMaxPacketLength;
   EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum, 100, false, packet_, &len,
                                              &time));
-  EXPECT_GT(len, 0u);
+  EXPECT_GT(len, 0);
   EXPECT_EQ(capture_time_ms, time);
 
   // Time has not elapsed. Packet should be found, but no bytes copied.
@@ -204,71 +203,4 @@ TEST_F(RtpPacketHistoryTest, MinResendTime) {
   EXPECT_FALSE(hist_->GetPacketAndSetSendTime(kSeqNum, 101, false, packet_,
                                               &len, &time));
 }
-
-TEST_F(RtpPacketHistoryTest, DynamicExpansion) {
-  hist_->SetStorePacketsStatus(true, 10);
-  size_t len;
-  int64_t capture_time_ms = fake_clock_.TimeInMilliseconds();
-  int64_t time;
-
-  // Add 4 packets, and then send them.
-  for (int i = 0; i < 4; ++i) {
-    len = 0;
-    CreateRtpPacket(kSeqNum + i, kSsrc, kPayload, kTimestamp, packet_, &len);
-    EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
-                                     capture_time_ms, kAllowRetransmission));
-  }
-  for (int i = 0; i < 4; ++i) {
-    len = kMaxPacketLength;
-    EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum + i, 100, false, packet_,
-                                               &len, &time));
-  }
-  capture_time_ms += 33;
-
-  // Add 16 packets, and then send them. History should expand to make this
-  // work.
-  for (int i = 4; i < 20; ++i) {
-    len = 0;
-    CreateRtpPacket(kSeqNum + i, kSsrc, kPayload, kTimestamp, packet_, &len);
-    EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
-                                     capture_time_ms, kAllowRetransmission));
-  }
-  for (int i = 4; i < 20; ++i) {
-    len = kMaxPacketLength;
-    EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum + i, 100, false, packet_,
-                                               &len, &time));
-  }
-
-  fake_clock_.AdvanceTimeMilliseconds(100);
-
-  // Retransmit last 16 packets.
-  for (int i = 4; i < 20; ++i) {
-    len = kMaxPacketLength;
-    EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum + i, 100, false, packet_,
-                                               &len, &time));
-  }
-}
-
-TEST_F(RtpPacketHistoryTest, FullExpansion) {
-  hist_->SetStorePacketsStatus(true, kSendSidePacketHistorySize);
-  size_t len;
-  int64_t capture_time_ms = fake_clock_.TimeInMilliseconds();
-  int64_t time;
-  for (size_t i = 0; i < kMaxHistoryCapacity + 1; ++i) {
-    len = 0;
-    CreateRtpPacket(kSeqNum + i, kSsrc, kPayload, kTimestamp, packet_, &len);
-    EXPECT_EQ(0, hist_->PutRTPPacket(packet_, len, kMaxPacketLength,
-                                     capture_time_ms, kAllowRetransmission));
-  }
-
-  fake_clock_.AdvanceTimeMilliseconds(100);
-
-  // Retransmit all packets currently in buffer.
-  for (size_t i = 1; i < kMaxHistoryCapacity + 1; ++i) {
-    len = kMaxPacketLength;
-    EXPECT_TRUE(hist_->GetPacketAndSetSendTime(kSeqNum + i, 100, false, packet_,
-                                               &len, &time));
-  }
-}
-
 }  // namespace webrtc

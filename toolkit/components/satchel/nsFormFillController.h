@@ -16,6 +16,7 @@
 #include "nsCOMPtr.h"
 #include "nsDataHashtable.h"
 #include "nsIDocShell.h"
+#include "nsIDOMWindow.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsILoginManager.h"
 #include "nsIMutationObserver.h"
@@ -29,7 +30,6 @@
 
 class nsFormHistory;
 class nsINode;
-class nsPIDOMWindowOuter;
 
 class nsFormFillController final : public nsIFormFillController,
                                    public nsIAutoCompleteInput,
@@ -58,8 +58,8 @@ public:
 protected:
   virtual ~nsFormFillController();
 
-  void AddWindowListeners(nsPIDOMWindowOuter* aWindow);
-  void RemoveWindowListeners(nsPIDOMWindowOuter* aWindow);
+  void AddWindowListeners(nsIDOMWindow *aWindow);
+  void RemoveWindowListeners(nsIDOMWindow *aWindow);
 
   void AddKeyListener(nsINode* aInput);
   void RemoveKeyListener();
@@ -79,12 +79,14 @@ protected:
   bool RowMatch(nsFormHistory *aHistory, uint32_t aIndex, const nsAString &aInputName, const nsAString &aInputValue);
 
   inline nsIDocShell *GetDocShellForInput(nsIDOMHTMLInputElement *aInput);
-  inline nsPIDOMWindowOuter *GetWindowForDocShell(nsIDocShell *aDocShell);
+  inline nsIDOMWindow *GetWindowForDocShell(nsIDocShell *aDocShell);
   inline int32_t GetIndexOfDocShell(nsIDocShell *aDocShell);
 
   void MaybeRemoveMutationObserver(nsINode* aNode);
 
-  void RemoveForDocument(nsIDocument* aDoc);
+  static PLDHashOperator RemoveForDocumentEnumerator(const nsINode* aKey,
+                                                     bool& aEntry,
+                                                     void* aUserData);
   bool IsEventTrusted(nsIDOMEvent *aEvent);
   // members //////////////////////////////////////////
 

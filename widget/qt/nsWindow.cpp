@@ -57,6 +57,7 @@
 #include "imgIContainer.h"
 #include "nsGfxCIID.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsAutoPtr.h"
 
 #include "gfxQtPlatform.h"
 
@@ -132,17 +133,17 @@ nsWindow::~nsWindow()
 }
 
 nsresult
-nsWindow::Create(nsIWidget* aParent,
-                 nsNativeWidget aNativeParent,
-                 const LayoutDeviceIntRect& aRect,
-                 nsWidgetInitData* aInitData)
+nsWindow::Create(nsIWidget        *aParent,
+                 nsNativeWidget    aNativeParent,
+                 const nsIntRect  &aRect,
+                 nsWidgetInitData *aInitData)
 {
     // only set the base parent if we're not going to be a dialog or a
     // toplevel
     nsIWidget *baseParent = aParent;
 
     // initialize all the common bits of this class
-    BaseCreate(baseParent, aInitData);
+    BaseCreate(baseParent, aRect, aInitData);
 
     mVisible = true;
 
@@ -596,7 +597,7 @@ nsWindow::ConfigureChildren(const nsTArray<nsIWidget::Configuration>& aConfigura
     for (uint32_t i = 0; i < aConfigurations.Length(); ++i) {
         const Configuration& configuration = aConfigurations[i];
 
-        nsWindow* w = static_cast<nsWindow*>(configuration.mChild.get());
+        nsWindow* w = static_cast<nsWindow*>(configuration.mChild);
         NS_ASSERTION(w->GetParent() == this,
                      "Configured widget is not a child");
 
@@ -612,10 +613,10 @@ nsWindow::ConfigureChildren(const nsTArray<nsIWidget::Configuration>& aConfigura
 }
 
 NS_IMETHODIMP
-nsWindow::Invalidate(const LayoutDeviceIntRect& aRect)
+nsWindow::Invalidate(const nsIntRect &aRect)
 {
     LOGDRAW(("Invalidate (rect) [%p,%p]: %d %d %d %d\n", (void *)this,
-             (void*)mWidget, aRect.x, aRect.y, aRect.width, aRect.height));
+             (void*)mWidget,aRect.x, aRect.y, aRect.width, aRect.height));
 
     if (!mWidget) {
         return NS_OK;
@@ -659,15 +660,6 @@ nsWindow::GetNativeData(uint32_t aDataType)
     case NS_NATIVE_SHELLWIDGET: {
         break;
     }
-    case NS_RAW_NATIVE_IME_CONTEXT: {
-        void* pseudoIMEContext = GetPseudoIMEContext();
-        if (pseudoIMEContext) {
-            return pseudoIMEContext;
-        }
-        // Our qt widget looks like using only one context per process.
-        // However, it's better to set the context's pointer.
-        return qApp->inputMethod();
-    }
     default:
         NS_WARNING("nsWindow::GetNativeData called with bad value");
         return nullptr;
@@ -680,8 +672,8 @@ NS_IMETHODIMP
 nsWindow::DispatchEvent(WidgetGUIEvent* aEvent, nsEventStatus& aStatus)
 {
 #ifdef DEBUG
-    debug_DumpEvent(stdout, aEvent->mWidget, aEvent,
-                    "something", 0);
+    debug_DumpEvent(stdout, aEvent->widget, aEvent,
+                    nsAutoCString("something"), 0);
 #endif
 
     aStatus = nsEventStatus_eIgnore;
@@ -720,6 +712,10 @@ NS_IMETHODIMP_(InputContext)
 nsWindow::GetInputContext()
 {
     mInputContext.mIMEState.mOpen = IMEState::OPEN_STATE_NOT_SUPPORTED;
+    // Our qt widget looks like using only one context per process.
+    // However, it's better to set the context's pointer.
+    mInputContext.mNativeIMEContext = qApp->inputMethod();
+
     return mInputContext;
 }
 
@@ -776,14 +772,15 @@ nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen*)
 LayerManager*
 nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
                           LayersBackend aBackendHint,
-                          LayerManagerPersistence aPersistence)
+                          LayerManagerPersistence aPersistence,
+                          bool* aAllowRetaining)
 {
     if (!mLayerManager && eTransparencyTransparent == GetTransparencyMode()) {
         mLayerManager = CreateBasicLayerManager();
     }
 
     return nsBaseWidget::GetLayerManager(aShadowManager, aBackendHint,
-                                         aPersistence);
+                                         aPersistence, aAllowRetaining);
 }
 
 void
@@ -820,8 +817,8 @@ nsWindow::StartRemoteDrawing()
     Screen* screen = DefaultScreenOfDisplay(dpy);
     Visual* defaultVisual = DefaultVisualOfScreen(screen);
     gfxASurface* surf = new gfxXlibSurface(dpy, mWidget->winId(), defaultVisual,
-                                           IntSize(mWidget->width(),
-                                                   mWidget->height()));
+                                           gfxIntSize(mWidget->width(),
+                                                      mWidget->height()));
 
     IntSize size(surf->GetSize().width, surf->GetSize().height);
     if (size.width <= 0 || size.height <= 0) {
@@ -860,42 +857,26 @@ nsWindow::SetTitle(const nsAString& aTitle)
 
 // EVENTS
 
-nsIWidgetListener*
-nsWindow::GetPaintListener()
-{
-    return mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
-}
-
 void
 nsWindow::OnPaint()
 {
     LOGDRAW(("nsWindow::%s [%p]\n", __FUNCTION__, (void *)this));
-    nsIWidgetListener* listener = GetPaintListener();
+    nsIWidgetListener* listener =
+        mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
     if (!listener) {
         return;
     }
 
     listener->WillPaintWindow(this);
 
-    nsIWidgetListener* listener = GetPaintListener();
-    if (!listener) {
-        return;
-    }
-
     switch (GetLayerManager()->GetBackendType()) {
         case mozilla::layers::LayersBackend::LAYERS_CLIENT: {
-            LayoutDeviceIntRegion region(
-              LayoutDeviceIntRect(0, 0, mWidget->width(), mWidget->height()));
+            nsIntRegion region(nsIntRect(0, 0, mWidget->width(), mWidget->height()));
             listener->PaintWindow(this, region);
             break;
         }
         default:
             NS_ERROR("Invalid layer manager");
-    }
-
-    nsIWidgetListener* listener = GetPaintListener();
-    if (!listener) {
-        return;
     }
 
     listener->DidPaintWindow();
@@ -924,7 +905,7 @@ nsWindow::moveEvent(QMoveEvent* aEvent)
 nsEventStatus
 nsWindow::resizeEvent(QResizeEvent* aEvent)
 {
-    LayoutDeviceIntRect rect;
+    nsIntRect rect;
 
     // Generate XPFE resize event
     GetBounds(rect);
@@ -957,14 +938,14 @@ static void
 InitMouseEvent(WidgetMouseEvent& aMouseEvent, QMouseEvent* aEvent,
                int aClickCount)
 {
-    aMouseEvent.mRefPoint.x = nscoord(aEvent->pos().x());
-    aMouseEvent.mRefPoint.y = nscoord(aEvent->pos().y());
+    aMouseEvent.refPoint.x = nscoord(aEvent->pos().x());
+    aMouseEvent.refPoint.y = nscoord(aEvent->pos().y());
 
     aMouseEvent.InitBasicModifiers(aEvent->modifiers() & Qt::ControlModifier,
                                    aEvent->modifiers() & Qt::AltModifier,
                                    aEvent->modifiers() & Qt::ShiftModifier,
                                    aEvent->modifiers() & Qt::MetaModifier);
-    aMouseEvent.mClickCount = aClickCount;
+    aMouseEvent.clickCount = aClickCount;
 
     switch (aEvent->button()) {
     case Qt::LeftButton:
@@ -1018,14 +999,15 @@ nsWindow::mousePressEvent(QMouseEvent* aEvent)
         return nsEventStatus_eIgnore;
     }
 
-    WidgetMouseEvent event(true, eMouseDown, this, WidgetMouseEvent::eReal);
+    WidgetMouseEvent event(true, NS_MOUSE_BUTTON_DOWN, this,
+                           WidgetMouseEvent::eReal);
     InitMouseEvent(event, aEvent, 1);
     nsEventStatus status = DispatchEvent(&event);
 
     // Right click on linux should also pop up a context menu.
     if (event.button == WidgetMouseEvent::eRightButton &&
         MOZ_LIKELY(!mIsDestroyed)) {
-        WidgetMouseEvent contextMenuEvent(true, eContextMenu, this,
+        WidgetMouseEvent contextMenuEvent(true, NS_CONTEXTMENU, this,
                                           WidgetMouseEvent::eReal);
         InitMouseEvent(contextMenuEvent, aEvent, 1);
         DispatchEvent(&contextMenuEvent, status);
@@ -1043,7 +1025,8 @@ nsWindow::mouseReleaseEvent(QMouseEvent* aEvent)
     if (!IsAcceptedButton(aEvent->button()))
         return nsEventStatus_eIgnore;
 
-    WidgetMouseEvent event(true, eMouseUp, this, WidgetMouseEvent::eReal);
+    WidgetMouseEvent event(true, NS_MOUSE_BUTTON_UP, this,
+                           WidgetMouseEvent::eReal);
     InitMouseEvent(event, aEvent, 1);
     return DispatchEvent(&event);
 }
@@ -1057,7 +1040,7 @@ nsWindow::mouseDoubleClickEvent(QMouseEvent* aEvent)
     if (!IsAcceptedButton(aEvent->button()))
         return nsEventStatus_eIgnore;
 
-    WidgetMouseEvent event(true, eMouseDoubleClick, this,
+    WidgetMouseEvent event(true, NS_MOUSE_DOUBLECLICK, this,
                            WidgetMouseEvent::eReal);
     InitMouseEvent(event, aEvent, 2);
     return DispatchEvent(&event);
@@ -1117,21 +1100,21 @@ InitKeyEvent(WidgetKeyboardEvent& aEvent, QKeyEvent* aQEvent)
                               aQEvent->modifiers() & Qt::MetaModifier);
 
     aEvent.mIsRepeat =
-        (aEvent.mMessage == eKeyDown || aEvent.mMessage == eKeyPress) &&
+        (aEvent.message == NS_KEY_DOWN || aEvent.message == NS_KEY_PRESS) &&
         aQEvent->isAutoRepeat();
-    aEvent.mTime = 0;
+    aEvent.time = 0;
 
     if (sAltGrModifier) {
-        aEvent.mModifiers |= (MODIFIER_CONTROL | MODIFIER_ALT);
+        aEvent.modifiers |= (MODIFIER_CONTROL | MODIFIER_ALT);
     }
 
     if (aQEvent->text().length() && aQEvent->text()[0].isPrint()) {
-        aEvent.mCharCode = static_cast<uint32_t>(aQEvent->text()[0].unicode());
-        aEvent.mKeyCode = 0;
+        aEvent.charCode = (int32_t) aQEvent->text()[0].unicode();
+        aEvent.keyCode = 0;
         aEvent.mKeyNameIndex = KEY_NAME_INDEX_PrintableKey;
     } else {
-        aEvent.mCharCode = 0;
-        aEvent.mKeyCode = QtKeyCodeToDOMKeyCode(aQEvent->key());
+        aEvent.charCode = 0;
+        aEvent.keyCode = QtKeyCodeToDOMKeyCode(aQEvent->key());
         aEvent.mKeyNameIndex = QtKeyCodeToDOMKeyNameIndex(aQEvent->key());
     }
 
@@ -1159,7 +1142,7 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
     // Before we dispatch a key, check if it's the context menu key.
     // If so, send a context menu key event instead.
     if (IsContextMenuKeyEvent(aEvent)) {
-        WidgetMouseEvent contextMenuEvent(true, eContextMenu, this,
+        WidgetMouseEvent contextMenuEvent(true, NS_CONTEXTMENU, this,
                                           WidgetMouseEvent::eReal,
                                           WidgetMouseEvent::eContextMenuKey);
         return DispatchEvent(&contextMenuEvent);
@@ -1173,7 +1156,7 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
     if (!aEvent->isAutoRepeat() && !IsKeyDown(domKeyCode)) {
         SetKeyDownFlag(domKeyCode);
 
-        WidgetKeyboardEvent downEvent(true, eKeyDown, this);
+        WidgetKeyboardEvent downEvent(true, NS_KEY_DOWN, this);
         InitKeyEvent(downEvent, aEvent);
 
         nsEventStatus status = DispatchEvent(&downEvent);
@@ -1190,8 +1173,8 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
         }
     }
 
-    // Don't pass modifiers as eKeyPress events.
-    // Instead of selectively excluding some keys from eKeyPress events,
+    // Don't pass modifiers as NS_KEY_PRESS events.
+    // Instead of selectively excluding some keys from NS_KEY_PRESS events,
     // we instead selectively include (as per MSDN spec
     // ( http://msdn.microsoft.com/en-us/library/system.windows.forms.control.keypress%28VS.71%29.aspx );
     // no official spec covers KeyPress events).
@@ -1221,27 +1204,27 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
             return DispatchCommandEvent(nsGkAtoms::Home);
         case Qt::Key_Copy:
         case Qt::Key_F16: // F16, F20, F18, F14 are old keysyms for Copy Cut Paste Undo
-            return DispatchContentCommandEvent(eContentCommandCopy);
+            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_COPY);
         case Qt::Key_Cut:
         case Qt::Key_F20:
-            return DispatchContentCommandEvent(eContentCommandCut);
+            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_CUT);
         case Qt::Key_Paste:
         case Qt::Key_F18:
         case Qt::Key_F9:
-            return DispatchContentCommandEvent(eContentCommandPaste);
+            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_PASTE);
         case Qt::Key_F14:
-            return DispatchContentCommandEvent(eContentCommandUndo);
+            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_UNDO);
     }
 
     // Qt::Key_Redo and Qt::Key_Undo are not available yet.
     if (aEvent->nativeVirtualKey() == 0xff66) {
-        return DispatchContentCommandEvent(eContentCommandRedo);
+        return DispatchContentCommandEvent(NS_CONTENT_COMMAND_REDO);
     }
     if (aEvent->nativeVirtualKey() == 0xff65) {
-        return DispatchContentCommandEvent(eContentCommandUndo);
+        return DispatchContentCommandEvent(NS_CONTENT_COMMAND_UNDO);
     }
 
-    WidgetKeyboardEvent event(true, eKeyPress, this);
+    WidgetKeyboardEvent event(true, NS_KEY_PRESS, this);
     InitKeyEvent(event, aEvent);
     // Seend the key press event
     return DispatchEvent(&event);
@@ -1261,7 +1244,7 @@ nsWindow::keyReleaseEvent(QKeyEvent* aEvent)
     }
 
     // send the key event as a key up event
-    WidgetKeyboardEvent event(true, eKeyUp, this);
+    WidgetKeyboardEvent event(true, NS_KEY_UP, this);
     InitKeyEvent(event, aEvent);
 
     if (aEvent->key() == Qt::Key_AltGr) {
@@ -1278,8 +1261,8 @@ nsEventStatus
 nsWindow::wheelEvent(QWheelEvent* aEvent)
 {
     // check to see if we should rollup
-    WidgetWheelEvent wheelEvent(true, eWheel, this);
-    wheelEvent.mDeltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
+    WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, this);
+    wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
 
     // negative values for aEvent->delta indicate downward scrolling;
     // this is opposite Gecko usage.
@@ -1290,24 +1273,24 @@ nsWindow::wheelEvent(QWheelEvent* aEvent)
 
     switch (aEvent->orientation()) {
     case Qt::Vertical:
-        wheelEvent.mDeltaY = wheelEvent.mLineOrPageDeltaY = delta;
+        wheelEvent.deltaY = wheelEvent.lineOrPageDeltaY = delta;
         break;
     case Qt::Horizontal:
-        wheelEvent.mDeltaX = wheelEvent.mLineOrPageDeltaX = delta;
+        wheelEvent.deltaX = wheelEvent.lineOrPageDeltaX = delta;
         break;
     default:
         Q_ASSERT(0);
         break;
     }
 
-    wheelEvent.mRefPoint.x = nscoord(aEvent->pos().x());
-    wheelEvent.mRefPoint.y = nscoord(aEvent->pos().y());
+    wheelEvent.refPoint.x = nscoord(aEvent->pos().x());
+    wheelEvent.refPoint.y = nscoord(aEvent->pos().y());
 
     wheelEvent.InitBasicModifiers(aEvent->modifiers() & Qt::ControlModifier,
                                   aEvent->modifiers() & Qt::AltModifier,
                                   aEvent->modifiers() & Qt::ShiftModifier,
                                   aEvent->modifiers() & Qt::MetaModifier);
-    wheelEvent.mTime = 0;
+    wheelEvent.time = 0;
 
     return DispatchEvent(&wheelEvent);
 }
@@ -1385,8 +1368,7 @@ nsWindow::DispatchDeactivateEventOnTopLevelWindow(void)
 }
 
 void
-nsWindow::DispatchResizeEvent(LayoutDeviceIntRect& aRect,
-                              nsEventStatus& aStatus)
+nsWindow::DispatchResizeEvent(nsIntRect &aRect, nsEventStatus &aStatus)
 {
     aStatus = nsEventStatus_eIgnore;
     if (mWidgetListener &&
@@ -1447,7 +1429,7 @@ nsWindow::PlaceBehind(nsTopLevelWidgetZPlacement  aPlacement,
 }
 
 NS_IMETHODIMP
-nsWindow::SetSizeMode(nsSizeMode aMode)
+nsWindow::SetSizeMode(int32_t aMode)
 {
     nsresult rv;
 
@@ -1515,14 +1497,15 @@ void find_first_visible_parent(QWindow* aItem, QWindow*& aVisibleItem)
 }
 
 NS_IMETHODIMP
-nsWindow::GetScreenBounds(LayoutDeviceIntRect& aRect)
+nsWindow::GetScreenBounds(nsIntRect &aRect)
 {
-    aRect = LayoutDeviceIntRect(LayoutDeviceIntPoint(0, 0), mBounds.Size());
+    aRect = gfx::IntRect(gfx::IntPoint(0, 0), mBounds.Size());
     if (mIsTopLevel) {
         QPoint pos = mWidget->position();
         aRect.MoveTo(pos.x(), pos.y());
-    } else {
-        aRect.MoveTo(WidgetToScreenOffset());
+    }
+    else {
+        aRect.MoveTo(WidgetToScreenOffsetUntyped());
     }
     LOG(("GetScreenBounds %d %d | %d %d | %d %d\n",
          aRect.x, aRect.y,
@@ -1611,7 +1594,7 @@ nsWindow::CheckForRollup(double aMouseX, double aMouseY,
         // the current submenu
         uint32_t popupsToRollup = UINT32_MAX;
         if (rollupListener) {
-            AutoTArray<nsIWidget*, 5> widgetChain;
+            nsAutoTArray<nsIWidget*, 5> widgetChain;
             uint32_t sameTypeCount = rollupListener->GetSubmenuWidgetChain(&widgetChain);
             for (uint32_t i=0; i<widgetChain.Length(); ++i) {
                 nsIWidget* widget =  widgetChain[i];
@@ -1684,7 +1667,7 @@ nsWindow::DispatchCommandEvent(nsIAtom* aCommand)
 }
 
 nsEventStatus
-nsWindow::DispatchContentCommandEvent(EventMessage aMsg)
+nsWindow::DispatchContentCommandEvent(int32_t aMsg)
 {
     WidgetContentCommandEvent event(true, aMsg, this);
 
@@ -1981,16 +1964,17 @@ void
 nsWindow::ProcessMotionEvent()
 {
     if (mMoveEvent.needDispatch) {
-        WidgetMouseEvent event(true, eMouseMove, this, WidgetMouseEvent::eReal);
+        WidgetMouseEvent event(true, NS_MOUSE_MOVE, this,
+                               WidgetMouseEvent::eReal);
 
-        event.mRefPoint.x = nscoord(mMoveEvent.pos.x());
-        event.mRefPoint.y = nscoord(mMoveEvent.pos.y());
+        event.refPoint.x = nscoord(mMoveEvent.pos.x());
+        event.refPoint.y = nscoord(mMoveEvent.pos.y());
 
         event.InitBasicModifiers(mMoveEvent.modifiers & Qt::ControlModifier,
                                  mMoveEvent.modifiers & Qt::AltModifier,
                                  mMoveEvent.modifiers & Qt::ShiftModifier,
                                  mMoveEvent.modifiers & Qt::MetaModifier);
-        event.mClickCount = 0;
+        event.clickCount      = 0;
 
         DispatchEvent(&event);
         mMoveEvent.needDispatch = false;

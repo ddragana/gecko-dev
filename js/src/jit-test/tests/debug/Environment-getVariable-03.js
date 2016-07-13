@@ -17,5 +17,6 @@ g.eval("function f() {\n" +
        "        }\n" +
        "}\n");
 g.f();
+g.eval("let (x = 'c') { debugger; }");
 g.eval("{ let x = 'd'; debugger; }");
-assertEq(log, 'a0bd');
+assertEq(log, 'a0bcd');

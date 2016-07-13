@@ -14,8 +14,8 @@ function log(msg) {
   // Services.console.logStringMessage(msg);
 }
 
-var _notificationsMap = {};
-var _handlersMap = {};
+let _notificationsMap = {};
+let _handlersMap = {};
 
 function Notification(aId, aOptions) {
   this._id = aId;
@@ -155,7 +155,7 @@ Notification.prototype = {
   }
 }
 
-var Notifications = {
+let Notifications = {
   get idService() {
     delete this.idService;
     return this.idService = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
@@ -231,6 +231,14 @@ var Notifications = {
           });
         }
 
+        if (notification && !notification._buttons) {
+          break;
+        }
+
+        let button = notification._buttons[data.buttonId];
+        if (button && button.onClicked) {
+          button.onClicked(id, notification._cookie);
+        }
         break;
       case "notification-cleared":
       case "notification-closed":

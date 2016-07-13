@@ -17,7 +17,7 @@ disableTrackAllocations();
 for (let { name, object, line } of tests) {
   print("Entering test: " + name);
 
-  let allocationSite = getAllocationMetadata(object);
+  let allocationSite = getObjectMetadata(object);
   print(allocationSite);
 
   assertEq(allocationSite.line, line);

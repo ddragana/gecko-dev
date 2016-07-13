@@ -6,20 +6,14 @@
 
 #include "WheelScrollAnimation.h"
 
-#include "AsyncPanZoomController.h"
-#include "gfxPrefs.h"
-#include "nsPoint.h"
-
 namespace mozilla {
 namespace layers {
 
-WheelScrollAnimation::WheelScrollAnimation(AsyncPanZoomController& aApzc,
-                                           const nsPoint& aInitialPosition,
-                                           ScrollWheelInput::ScrollDeltaType aDeltaType)
-  : AsyncScrollBase(aInitialPosition)
+WheelScrollAnimation::WheelScrollAnimation(AsyncPanZoomController& aApzc, const nsPoint& aInitialPosition)
+  : AsyncPanZoomAnimation(TimeDuration::FromMilliseconds(gfxPrefs::APZSmoothScrollRepaintInterval()))
+  , AsyncScrollBase(aInitialPosition)
   , mApzc(aApzc)
   , mFinalDestination(aInitialPosition)
-  , mDeltaType(aDeltaType)
 {
 }
 
@@ -55,22 +49,11 @@ WheelScrollAnimation::DoSample(FrameMetrics& aFrameMetrics, const TimeDuration& 
   ParentLayerPoint displacement =
     (CSSPoint::FromAppUnits(sampledDest) - aFrameMetrics.GetScrollOffset()) * zoom;
 
-  if (finished) {
-    mApzc.mX.SetVelocity(0);
-    mApzc.mY.SetVelocity(0);
-  } else if (!IsZero(displacement)) {
-    // Velocity is measured in ParentLayerCoords / Milliseconds
-    float xVelocity = displacement.x / aDelta.ToMilliseconds();
-    float yVelocity = displacement.y / aDelta.ToMilliseconds();
-    mApzc.mX.SetVelocity(xVelocity);
-    mApzc.mY.SetVelocity(yVelocity);
-  }
-
   // Note: we ignore overscroll for wheel animations.
   ParentLayerPoint adjustedOffset, overscroll;
   mApzc.mX.AdjustDisplacement(displacement.x, adjustedOffset.x, overscroll.x);
   mApzc.mY.AdjustDisplacement(displacement.y, adjustedOffset.y, overscroll.y,
-                              !mApzc.mScrollMetadata.AllowVerticalScrollWithWheel());
+                              !aFrameMetrics.AllowVerticalScrollWithWheel());
 
   // If we expected to scroll, but there's no more scroll range on either axis,
   // then end the animation early. Note that the initial displacement could be 0
@@ -92,24 +75,10 @@ WheelScrollAnimation::InitPreferences(TimeStamp aTime)
     return;
   }
 
-  switch (mDeltaType) {
-  case ScrollWheelInput::SCROLLDELTA_PAGE:
-    mOriginMaxMS = clamped(gfxPrefs::PageSmoothScrollMaxDurationMs(), 0, 10000);
-    mOriginMinMS = clamped(gfxPrefs::PageSmoothScrollMinDurationMs(), 0, mOriginMaxMS);
-    break;
-  case ScrollWheelInput::SCROLLDELTA_PIXEL:
-    mOriginMaxMS = clamped(gfxPrefs::PixelSmoothScrollMaxDurationMs(), 0, 10000);
-    mOriginMinMS = clamped(gfxPrefs::PixelSmoothScrollMinDurationMs(), 0, mOriginMaxMS);
-    break;
-  case ScrollWheelInput::SCROLLDELTA_LINE:
-  default:
-    mOriginMaxMS = clamped(gfxPrefs::WheelSmoothScrollMaxDurationMs(), 0, 10000);
-    mOriginMinMS = clamped(gfxPrefs::WheelSmoothScrollMinDurationMs(), 0, mOriginMaxMS);
-    break;
-  }
+  mOriginMaxMS = clamped(gfxPrefs::WheelSmoothScrollMaxDurationMs(), 0, 10000);
+  mOriginMinMS = clamped(gfxPrefs::WheelSmoothScrollMinDurationMs(), 0, mOriginMaxMS);
 
-  // The pref is 100-based int percentage, while mIntervalRatio is 1-based ratio
-  mIntervalRatio = ((double)gfxPrefs::SmoothScrollDurationToIntervalRatio()) / 100.0;
+  mIntervalRatio = (gfxPrefs::SmoothScrollDurationToIntervalRatio() * 100) / 100.0;
   mIntervalRatio = std::max(1.0, mIntervalRatio);
 
   InitializeHistory(aTime);

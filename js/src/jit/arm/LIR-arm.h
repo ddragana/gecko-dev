@@ -10,6 +10,27 @@
 namespace js {
 namespace jit {
 
+class LBox : public LInstructionHelper<2, 1, 0>
+{
+    MIRType type_;
+
+  public:
+    LIR_HEADER(Box);
+
+    LBox(const LAllocation& in_payload, MIRType type)
+      : type_(type)
+    {
+        setOperand(0, in_payload);
+    }
+
+    MIRType type() const {
+        return type_;
+    }
+    const char* extraName() const {
+        return StringFromMIRType(type_);
+    }
+};
+
 class LBoxFloatingPoint : public LInstructionHelper<2, 1, 1>
 {
     MIRType type_;
@@ -60,11 +81,9 @@ class LUnboxFloatingPoint : public LInstructionHelper<1, 2, 0>
 
     static const size_t Input = 0;
 
-    LUnboxFloatingPoint(const LBoxAllocation& input, MIRType type)
+    LUnboxFloatingPoint(MIRType type)
       : type_(type)
-    {
-        setBoxOperand(Input, input);
-    }
+    { }
 
     MUnbox* mir() const {
         return mir_->toUnbox();
@@ -269,6 +288,22 @@ class LModMaskI : public LInstructionHelper<1, 1, 2>
     }
 };
 
+class LPowHalfD : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(PowHalfD);
+    LPowHalfD(const LAllocation& input) {
+        setOperand(0, input);
+    }
+
+    const LAllocation* input() {
+        return getOperand(0);
+    }
+    const LDefinition* output() {
+        return getDef(0);
+    }
+};
+
 // Takes a tableswitch with an integer to decide.
 class LTableSwitch : public LInstructionHelper<0, 1, 1>
 {
@@ -303,10 +338,9 @@ class LTableSwitchV : public LInstructionHelper<0, BOX_PIECES, 2>
   public:
     LIR_HEADER(TableSwitchV);
 
-    LTableSwitchV(const LBoxAllocation& input, const LDefinition& inputCopy,
-                  const LDefinition& floatCopy, MTableSwitch* ins)
+    LTableSwitchV(const LDefinition& inputCopy, const LDefinition& floatCopy,
+                  MTableSwitch* ins)
     {
-        setBoxOperand(InputValue, input);
         setTemp(0, inputCopy);
         setTemp(1, floatCopy);
         setMir(ins);
@@ -497,6 +531,23 @@ class LAsmJSAtomicBinopCallout : public LCallInstructionHelper<1, 2, 0>
 
     const MAsmJSAtomicBinopHeap* mir() const {
         return mir_->toAsmJSAtomicBinopHeap();
+    }
+};
+
+// Math.random().
+class LRandom : public LCallInstructionHelper<1, 0, 2>
+{
+  public:
+    LIR_HEADER(Random)
+    LRandom(const LDefinition& temp, const LDefinition& temp2) {
+        setTemp(0, temp);
+        setTemp(1, temp2);
+    }
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
+    const LDefinition* temp2() {
+        return getTemp(1);
     }
 };
 

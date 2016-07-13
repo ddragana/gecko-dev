@@ -54,17 +54,16 @@ DeadObjectProxy::delete_(JSContext* cx, HandleObject wrapper, HandleId id,
 }
 
 bool
-DeadObjectProxy::getPrototype(JSContext* cx, HandleObject proxy, MutableHandleObject protop) const
+DeadObjectProxy::enumerate(JSContext* cx, HandleObject wrapper, MutableHandleObject objp) const
 {
-    protop.set(nullptr);
-    return true;
+    ReportDead(cx);
+    return false;
 }
 
 bool
-DeadObjectProxy::getPrototypeIfOrdinary(JSContext* cx, HandleObject proxy, bool* isOrdinary,
-                                        MutableHandleObject protop) const
+DeadObjectProxy::getPrototype(JSContext* cx, HandleObject proxy, MutableHandleObject protop) const
 {
-    *isOrdinary = false;
+    protop.set(nullptr);
     return true;
 }
 
@@ -100,7 +99,7 @@ DeadObjectProxy::construct(JSContext* cx, HandleObject wrapper, const CallArgs& 
 
 bool
 DeadObjectProxy::nativeCall(JSContext* cx, IsAcceptableThis test, NativeImpl impl,
-                            const CallArgs& args) const
+                            CallArgs args) const
 {
     ReportDead(cx);
     return false;
@@ -115,14 +114,7 @@ DeadObjectProxy::hasInstance(JSContext* cx, HandleObject proxy, MutableHandleVal
 }
 
 bool
-DeadObjectProxy::getBuiltinClass(JSContext* cx, HandleObject proxy, ESClass* cls) const
-{
-    ReportDead(cx);
-    return false;
-}
-
-bool
-DeadObjectProxy::isArray(JSContext* cx, HandleObject obj, JS::IsArrayAnswer* answer) const
+DeadObjectProxy::objectClassIs(HandleObject obj, ESClassValue classValue, JSContext* cx) const
 {
     ReportDead(cx);
     return false;
@@ -148,11 +140,21 @@ DeadObjectProxy::regexp_toShared(JSContext* cx, HandleObject proxy, RegExpGuard*
     return false;
 }
 
+bool
+DeadObjectProxy::defaultValue(JSContext* cx, HandleObject obj, JSType hint,
+                              MutableHandleValue vp) const
+{
+    ReportDead(cx);
+    return false;
+}
+
 const char DeadObjectProxy::family = 0;
 const DeadObjectProxy DeadObjectProxy::singleton;
+
 
 bool
 js::IsDeadProxyObject(JSObject* obj)
 {
-    return IsDerivedProxyObject(obj, &DeadObjectProxy::singleton);
+    return obj->is<ProxyObject>() &&
+           obj->as<ProxyObject>().handler() == &DeadObjectProxy::singleton;
 }

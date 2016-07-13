@@ -35,7 +35,7 @@ function testPageMod(assert, done, testURL, pageModOptions,
                      testCallback, timeout) {
   let loader = createLoader();
   let { PageMod } = loader.require("sdk/page-mod");
-  let pageMods = pageModOptions.map(opts => new PageMod(opts));
+  let pageMods = [new PageMod(opts) for each (opts in pageModOptions)];
   let newTab = openNewTab(testURL);
   let b = getBrowserForTab(newTab);
 
@@ -48,7 +48,7 @@ function testPageMod(assert, done, testURL, pageModOptions,
     setTimeout(testCallback, timeout,
       b.contentWindow.wrappedJSObject,  // TODO: remove this CPOW
       function () {
-        pageMods.forEach(mod => mod.destroy());
+        pageMods.forEach(function(mod) mod.destroy());
         // XXX leaks reported if we don't close the tab?
         closeTab(newTab);
         loader.unload();

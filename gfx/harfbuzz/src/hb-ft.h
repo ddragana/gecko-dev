@@ -1,6 +1,5 @@
 /*
  * Copyright © 2009  Red Hat, Inc.
- * Copyright © 2015  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -23,7 +22,6 @@
  * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * Red Hat Author(s): Behdad Esfahbod
- * Google Author(s): Behdad Esfahbod
  */
 
 #ifndef HB_FT_H
@@ -59,7 +57,7 @@ HB_BEGIN_DECLS
  * probably should use (the more recent) hb_ft_face_create_referenced()
  * instead.
  */
-HB_EXTERN hb_face_t *
+hb_face_t *
 hb_ft_face_create (FT_Face           ft_face,
 		   hb_destroy_func_t destroy);
 
@@ -71,7 +69,7 @@ hb_ft_face_create (FT_Face           ft_face,
  * Client is still responsible for making sure that ft-face is destroyed
  * after hb-face is.
  */
-HB_EXTERN hb_face_t *
+hb_face_t *
 hb_ft_face_create_cached (FT_Face ft_face);
 
 /* This version is like hb_ft_face_create(), except that it calls
@@ -81,7 +79,7 @@ hb_ft_face_create_cached (FT_Face ft_face);
  * This is the most convenient version to use.  Use it unless you have
  * very good reasons not to.
  */
-HB_EXTERN hb_face_t *
+hb_face_t *
 hb_ft_face_create_referenced (FT_Face ft_face);
 
 
@@ -98,27 +96,22 @@ hb_ft_face_create_referenced (FT_Face ft_face);
 
 /* See notes on hb_ft_face_create().  Same issues re lifecycle-management
  * apply here.  Use hb_ft_font_create_referenced() if you can. */
-HB_EXTERN hb_font_t *
+hb_font_t *
 hb_ft_font_create (FT_Face           ft_face,
 		   hb_destroy_func_t destroy);
 
 /* See notes on hb_ft_face_create_referenced() re lifecycle-management
  * issues. */
-HB_EXTERN hb_font_t *
+hb_font_t *
 hb_ft_font_create_referenced (FT_Face ft_face);
 
-HB_EXTERN FT_Face
-hb_ft_font_get_face (hb_font_t *font);
-
-HB_EXTERN void
-hb_ft_font_set_load_flags (hb_font_t *font, int load_flags);
-
-HB_EXTERN int
-hb_ft_font_get_load_flags (hb_font_t *font);
 
 /* Makes an hb_font_t use FreeType internally to implement font functions. */
-HB_EXTERN void
+void
 hb_ft_font_set_funcs (hb_font_t *font);
+
+FT_Face
+hb_ft_font_get_face (hb_font_t *font);
 
 
 HB_END_DECLS

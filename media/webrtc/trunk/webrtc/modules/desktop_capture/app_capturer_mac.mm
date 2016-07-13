@@ -31,13 +31,13 @@ class AppCapturerMac : public AppCapturer {
   virtual ~AppCapturerMac();
 
   // AppCapturer interface.
-  virtual bool GetAppList(AppList* apps) override;
-  virtual bool SelectApp(ProcessId processId) override;
-  virtual bool BringAppToFront() override;
+  virtual bool GetAppList(AppList* apps) OVERRIDE;
+  virtual bool SelectApp(ProcessId processId) OVERRIDE;
+  virtual bool BringAppToFront() OVERRIDE;
 
   // DesktopCapturer interface.
-  virtual void Start(Callback* callback) override;
-  virtual void Capture(const DesktopRegion& region) override;
+  virtual void Start(Callback* callback) OVERRIDE;
+  virtual void Capture(const DesktopRegion& region) OVERRIDE;
 
  private:
   Callback* callback_;

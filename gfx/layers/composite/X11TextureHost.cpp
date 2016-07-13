@@ -22,7 +22,7 @@ X11TextureHost::X11TextureHost(TextureFlags aFlags,
                                const SurfaceDescriptorX11& aDescriptor)
  : TextureHost(aFlags)
 {
-  RefPtr<gfxXlibSurface> surface = aDescriptor.OpenForeign();
+  nsRefPtr<gfxXlibSurface> surface = aDescriptor.OpenForeign();
   mSurface = surface.get();
 
   if (!(aFlags & TextureFlags::DEALLOCATE_CLIENT)) {
@@ -41,12 +41,14 @@ X11TextureHost::Lock()
     switch (mCompositor->GetBackendType()) {
       case LayersBackend::LAYERS_BASIC:
         mTextureSource =
-          new X11TextureSourceBasic(mCompositor->AsBasicCompositor(), mSurface);
+          new X11TextureSourceBasic(static_cast<BasicCompositor*>(mCompositor.get()),
+                                    mSurface);
         break;
 #ifdef GL_PROVIDER_GLX
       case LayersBackend::LAYERS_OPENGL:
         mTextureSource =
-          new X11TextureSourceOGL(mCompositor->AsCompositorOGL(), mSurface);
+          new X11TextureSourceOGL(static_cast<CompositorOGL*>(mCompositor.get()),
+                                  mSurface);
         break;
 #endif
       default:

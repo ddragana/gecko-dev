@@ -11,11 +11,8 @@
 //
 // These tests cannot test that sharing works across workers.  There
 // are or will be tests, in dom/workers, that do that.
-
-if (!this.SharedArrayBuffer) {
-    reportCompare(true,true);
-    quit(0);
-}
+//
+// Structured cloning is not tested here (there are no APIs).
 
 var b;
 
@@ -24,16 +21,18 @@ function testSharedArrayBuffer() {
     assertEq(b instanceof SharedArrayBuffer, true);
     assertEq(b.byteLength, 4096);
 
+    assertEq(!!SharedArrayBuffer.isView, true);
+
     b.fnord = "Hi there";
     assertEq(b.fnord, "Hi there");
 
     SharedArrayBuffer.prototype.abracadabra = "no wishing for wishes!";
     assertEq(b.abracadabra, "no wishing for wishes!");
 
-    // SharedArrayBuffer is not a conversion operator, not even for instances of itself
-    assertThrowsInstanceOf(() => SharedArrayBuffer(b), TypeError);
+    // can "convert" a buffer (really works as an assertion)
+    assertEq(SharedArrayBuffer(b), b);
 
-    // can't convert any other object either
+    // can't convert any other object
     assertThrowsInstanceOf(() => SharedArrayBuffer({}), TypeError);
 
     // byteLength can be invoked as per normal, indirectly
@@ -45,15 +44,53 @@ function testSharedArrayBuffer() {
 }
 
 function testSharedTypedArray() {
-    var x1 = new Int8Array(b);
-    var x2 = new Int32Array(b);
+    assertEq(SharedInt8Array.prototype.BYTES_PER_ELEMENT, 1);
+    assertEq(SharedUint8Array.prototype.BYTES_PER_ELEMENT, 1);
+    assertEq(SharedUint8ClampedArray.prototype.BYTES_PER_ELEMENT, 1);
+    assertEq(SharedInt16Array.prototype.BYTES_PER_ELEMENT, 2);
+    assertEq(SharedUint16Array.prototype.BYTES_PER_ELEMENT, 2);
+    assertEq(SharedInt32Array.prototype.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedUint32Array.prototype.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedFloat32Array.prototype.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedFloat32Array.prototype.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedFloat64Array.prototype.BYTES_PER_ELEMENT, 8);
+    assertEq(SharedFloat64Array.prototype.BYTES_PER_ELEMENT, 8);
 
-    assertEq(ArrayBuffer.isView(x1), true); // ArrayBuffer.isView() works even if the buffer is a SharedArrayBuffer
-    assertEq(ArrayBuffer.isView(x2), true);
-    assertEq(ArrayBuffer.isView({}), false);
+    assertEq(SharedInt8Array.BYTES_PER_ELEMENT, 1);
+    assertEq(SharedUint8Array.BYTES_PER_ELEMENT, 1);
+    assertEq(SharedUint8ClampedArray.BYTES_PER_ELEMENT, 1);
+    assertEq(SharedInt16Array.BYTES_PER_ELEMENT, 2);
+    assertEq(SharedUint16Array.BYTES_PER_ELEMENT, 2);
+    assertEq(SharedInt32Array.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedUint32Array.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedFloat32Array.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedFloat32Array.BYTES_PER_ELEMENT, 4);
+    assertEq(SharedFloat64Array.BYTES_PER_ELEMENT, 8);
+    assertEq(SharedFloat64Array.BYTES_PER_ELEMENT, 8);
+
+    // Distinct prototypes for distinct types
+    SharedInt8Array.prototype.hello = "hi there";
+    assertEq(SharedUint8Array.prototype.hello, undefined);
+
+    var x1 = new SharedInt8Array(b);
+    var x2 = new SharedInt32Array(b);
+
+    assertEq(SharedArrayBuffer.isView(x1), true);
+    assertEq(SharedArrayBuffer.isView(x2), true);
+    assertEq(SharedArrayBuffer.isView({}), false);
+    assertEq(SharedArrayBuffer.isView(new Int32Array(10)), false);
 
     assertEq(x1.buffer, b);
     assertEq(x2.buffer, b);
+
+    assertEq(Object.getOwnPropertyDescriptor(SharedInt8Array.prototype,"buffer").get.call(x1), x1.buffer);
+    assertEq(Object.getOwnPropertyDescriptor(SharedInt32Array.prototype,"buffer").get.call(x2), x2.buffer);
+
+    // Not generic
+    assertThrowsInstanceOf(() => Object.getOwnPropertyDescriptor(SharedInt8Array.prototype,"buffer").get.call({}), TypeError);
+
+    // Not even to other shared typed arrays
+    assertThrowsInstanceOf(() => Object.getOwnPropertyDescriptor(SharedInt8Array.prototype,"buffer").get.call(x2), TypeError);
 
     assertEq(x1.byteLength, b.byteLength);
     assertEq(x2.byteLength, b.byteLength);
@@ -64,31 +101,50 @@ function testSharedTypedArray() {
     assertEq(x1.length, b.byteLength);
     assertEq(x2.length, b.byteLength / 4);
 
-    var x3 = new Int8Array(b, 20);
+    // Conversions that should work
+    assertEq(SharedInt8Array(x1), x1);
+    assertEq(SharedInt32Array(x2), x2);
+
+    var x3 = new SharedInt8Array(b, 20);
     assertEq(x3.length, b.byteLength - 20);
     assertEq(x3.byteOffset, 20);
 
-    var x3 = new Int32Array(b, 20, 10);
+    var x3 = new SharedInt32Array(b, 20, 10);
     assertEq(x3.length, 10);
     assertEq(x3.byteOffset, 20);
 
     // Mismatched type
-    assertThrowsInstanceOf(() => Int8Array(x2), TypeError);
+    assertThrowsInstanceOf(() => SharedInt8Array(x2), TypeError);
 
     // Unconvertable object
-    assertThrowsInstanceOf(() => Int8Array({}), TypeError);
+    assertThrowsInstanceOf(() => SharedInt8Array({}), TypeError);
 
     // negative start
-    assertThrowsInstanceOf(() => new Int8Array(b, -7), RangeError);
+    assertThrowsInstanceOf(() => new SharedInt8Array(b, -7), RangeError);
 
     // not congruent mod element size
-    assertThrowsInstanceOf(() => new Int32Array(b, 3), RangeError);
+    assertThrowsInstanceOf(() => new SharedInt32Array(b, 3), RangeError);
 
     // start out of range
-    assertThrowsInstanceOf(() => new Int32Array(b, 4104), RangeError);
+    assertThrowsInstanceOf(() => new SharedInt32Array(b, 4104), RangeError);
 
     // end out of range
-    assertThrowsInstanceOf(() => new Int32Array(b, 4092, 2), RangeError);
+    assertThrowsInstanceOf(() => new SharedInt32Array(b, 4092, 2), RangeError);
+
+    var b2 = new SharedInt32Array(1024); // Should create a new buffer
+    assertEq(b2.length, 1024);
+    assertEq(b2.byteLength, 4096);
+    assertEq(b2.byteOffset, 0);
+    assertEq(b2.buffer != b, true);
+
+    var b3 = new SharedInt32Array("1024"); // Should create a new buffer
+    assertEq(b3.length, 1024);
+    assertEq(b3.byteLength, 4096);
+    assertEq(b3.byteOffset, 0);
+    assertEq(b3.buffer != b, true);
+
+    // bad length
+    assertThrowsInstanceOf(() => new SharedInt32Array({}), TypeError);
 
     // Views alias the storage
     x2[0] = -1;
@@ -110,10 +166,10 @@ function testSharedTypedArray() {
 }
 
 function testSharedTypedArrayMethods() {
-    var v = new Int32Array(b);
+    var v = new SharedInt32Array(b);
     for ( var i=0 ; i < v.length ; i++ )
         v[i] = i;
-
+    
     // Rudimentary tests - they don't test any boundary conditions
 
     // subarray
@@ -172,63 +228,10 @@ function testSharedTypedArrayMethods() {
     assertEq(v[9], -5);
 }
 
-function testClone1() {
-    var sab1 = b;
-    var blob = serialize(sab1, [sab1]);
-    var sab2 = deserialize(blob);
-    assertEq(sharedAddress(sab1), sharedAddress(sab2));
+if (typeof SharedArrayBuffer === "function") {
+    testSharedArrayBuffer();
+    testSharedTypedArray();
+    testSharedTypedArrayMethods();
 }
-
-function testClone2() {
-    var sab = b;
-    var ia1 = new Int32Array(sab);
-    var blob = serialize(ia1, [sab]);
-    var ia2 = deserialize(blob);
-    assertEq(ia1.length, ia2.length);
-    assertEq(ia1.buffer instanceof SharedArrayBuffer, true);
-    assertEq(sharedAddress(ia1.buffer), sharedAddress(ia2.buffer));
-    ia1[10] = 37;
-    assertEq(ia2[10], 37);
-}
-
-function testApplicable() {
-    var sab = b;
-    var x;
-
-    // Just make sure we can create all the view types on shared memory.
-
-    x = new Int32Array(sab);
-    assertEq(x.length, sab.byteLength / Int32Array.BYTES_PER_ELEMENT);
-    x = new Uint32Array(sab);
-    assertEq(x.length, sab.byteLength / Uint32Array.BYTES_PER_ELEMENT);
-
-    x = new Int16Array(sab);
-    assertEq(x.length, sab.byteLength / Int16Array.BYTES_PER_ELEMENT);
-    x = new Uint16Array(sab);
-    assertEq(x.length, sab.byteLength / Uint16Array.BYTES_PER_ELEMENT);
-
-    x = new Int8Array(sab);
-    assertEq(x.length, sab.byteLength / Int8Array.BYTES_PER_ELEMENT);
-    x = new Uint8Array(sab);
-    assertEq(x.length, sab.byteLength / Uint8Array.BYTES_PER_ELEMENT);
-
-    // Though the atomic operations are illegal on Uint8ClampedArray and the
-    // float arrays, they can still be used to create views on shared memory.
-
-    x = new Uint8ClampedArray(sab);
-    assertEq(x.length, sab.byteLength / Uint8ClampedArray.BYTES_PER_ELEMENT);
-
-    x = new Float32Array(sab);
-    assertEq(x.length, sab.byteLength / Float32Array.BYTES_PER_ELEMENT);
-    x = new Float64Array(sab);
-    assertEq(x.length, sab.byteLength / Float64Array.BYTES_PER_ELEMENT);
-}
-
-testSharedArrayBuffer();
-testSharedTypedArray();
-testSharedTypedArrayMethods();
-testClone1();
-testClone2();
-testApplicable();
 
 reportCompare(0, 0, 'ok');

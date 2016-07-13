@@ -17,7 +17,7 @@ namespace xpc {
 
 bool
 InterposeProperty(JSContext* cx, JS::HandleObject target, const nsIID* iid, JS::HandleId id,
-                  JS::MutableHandle<JS::PropertyDescriptor> descriptor);
+                  JS::MutableHandle<JSPropertyDescriptor> descriptor);
 
 bool
 InterposeCall(JSContext* cx, JS::HandleObject wrapper,
@@ -30,13 +30,13 @@ class AddonWrapper : public Base {
 
     virtual bool getOwnPropertyDescriptor(JSContext* cx, JS::Handle<JSObject*> wrapper,
                                           JS::Handle<jsid> id,
-                                          JS::MutableHandle<JS::PropertyDescriptor> desc) const override;
+                                          JS::MutableHandle<JSPropertyDescriptor> desc) const override;
     virtual bool defineProperty(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-                                JS::Handle<JS::PropertyDescriptor> desc,
+                                JS::Handle<JSPropertyDescriptor> desc,
                                 JS::ObjectOpResult& result) const override;
     virtual bool delete_(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
                          JS::ObjectOpResult& result) const override;
-    virtual bool get(JSContext* cx, JS::Handle<JSObject*> wrapper, JS::Handle<JS::Value> receiver,
+    virtual bool get(JSContext* cx, JS::Handle<JSObject*> wrapper, JS::Handle<JSObject*> receiver,
                      JS::Handle<jsid> id, JS::MutableHandle<JS::Value> vp) const override;
     virtual bool set(JSContext* cx, JS::HandleObject wrapper, JS::HandleId id, JS::HandleValue v,
                      JS::HandleValue receiver, JS::ObjectOpResult& result) const override;
@@ -45,7 +45,7 @@ class AddonWrapper : public Base {
 
     virtual bool getPropertyDescriptor(JSContext* cx, JS::Handle<JSObject*> wrapper,
                                        JS::Handle<jsid> id,
-                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override;
+                                       JS::MutableHandle<JSPropertyDescriptor> desc) const override;
 
     static const AddonWrapper singleton;
 };

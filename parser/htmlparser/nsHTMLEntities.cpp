@@ -9,7 +9,7 @@
 
 #include "nsString.h"
 #include "nsCRT.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 
 using namespace mozilla;
 
@@ -23,40 +23,45 @@ struct EntityNodeEntry : public PLDHashEntryHdr
   const EntityNode* node;
 }; 
 
-static bool matchNodeString(const PLDHashEntryHdr* aHdr, const void* key)
+static bool
+  matchNodeString(PLDHashTable*, const PLDHashEntryHdr* aHdr,
+                  const void* key)
 {
   const EntityNodeEntry* entry = static_cast<const EntityNodeEntry*>(aHdr);
   const char* str = static_cast<const char*>(key);
   return (nsCRT::strcmp(entry->node->mStr, str) == 0);
 }
 
-static bool matchNodeUnicode(const PLDHashEntryHdr* aHdr, const void* key)
+static bool
+  matchNodeUnicode(PLDHashTable*, const PLDHashEntryHdr* aHdr,
+                   const void* key)
 {
   const EntityNodeEntry* entry = static_cast<const EntityNodeEntry*>(aHdr);
   const int32_t ucode = NS_PTR_TO_INT32(key);
   return (entry->node->mUnicode == ucode);
 }
 
-static PLDHashNumber hashUnicodeValue(const void* key)
+static PLDHashNumber
+  hashUnicodeValue(PLDHashTable*, const void* key)
 {
   // key is actually the unicode value
   return PLDHashNumber(NS_PTR_TO_INT32(key));
-}
+  }
 
 
 static const PLDHashTableOps EntityToUnicodeOps = {
-  PLDHashTable::HashStringKey,
+  PL_DHashStringKey,
   matchNodeString,
-  PLDHashTable::MoveEntryStub,
-  PLDHashTable::ClearEntryStub,
+  PL_DHashMoveEntryStub,
+  PL_DHashClearEntryStub,
   nullptr,
 }; 
 
 static const PLDHashTableOps UnicodeToEntityOps = {
   hashUnicodeValue,
   matchNodeUnicode,
-  PLDHashTable::MoveEntryStub,
-  PLDHashTable::ClearEntryStub,
+  PL_DHashMoveEntryStub,
+  PL_DHashClearEntryStub,
   nullptr,
 };
 
@@ -87,8 +92,9 @@ nsHTMLEntities::AddRefTable(void)
          node < node_end; ++node) {
 
       // add to Entity->Unicode table
-      auto entry = static_cast<EntityNodeEntry*>
-                              (gEntityToUnicode->Add(node->mStr, fallible));
+      EntityNodeEntry* entry =
+        static_cast<EntityNodeEntry*>
+                   (PL_DHashTableAdd(gEntityToUnicode, node->mStr, fallible));
       NS_ASSERTION(entry, "Error adding an entry");
       // Prefer earlier entries when we have duplication.
       if (!entry->node)
@@ -96,16 +102,17 @@ nsHTMLEntities::AddRefTable(void)
 
       // add to Unicode->Entity table
       entry = static_cast<EntityNodeEntry*>
-                         (gUnicodeToEntity->Add(NS_INT32_TO_PTR(node->mUnicode),
-                                                fallible));
+                         (PL_DHashTableAdd(gUnicodeToEntity,
+                                           NS_INT32_TO_PTR(node->mUnicode),
+                                           fallible));
       NS_ASSERTION(entry, "Error adding an entry");
       // Prefer earlier entries when we have duplication.
       if (!entry->node)
         entry->node = node;
     }
 #ifdef DEBUG
-    gUnicodeToEntity->MarkImmutable();
-    gEntityToUnicode->MarkImmutable();
+    PL_DHashMarkTableImmutable(gUnicodeToEntity);
+    PL_DHashMarkTableImmutable(gEntityToUnicode);
 #endif
   }
   ++gTableRefCnt;
@@ -140,8 +147,9 @@ nsHTMLEntities::EntityToUnicode(const nsCString& aEntity)
       return EntityToUnicode(temp);
     }
 
-  auto entry =
-    static_cast<EntityNodeEntry*>(gEntityToUnicode->Search(aEntity.get()));
+  EntityNodeEntry* entry =
+    static_cast<EntityNodeEntry*>
+               (PL_DHashTableSearch(gEntityToUnicode, aEntity.get()));
 
   return entry ? entry->node->mUnicode : -1;
 }
@@ -162,9 +170,9 @@ const char*
 nsHTMLEntities::UnicodeToEntity(int32_t aUnicode)
 {
   NS_ASSERTION(gUnicodeToEntity, "no lookup table, needs addref");
-  auto entry =
+  EntityNodeEntry* entry =
     static_cast<EntityNodeEntry*>
-               (gUnicodeToEntity->Search(NS_INT32_TO_PTR(aUnicode)));
+               (PL_DHashTableSearch(gUnicodeToEntity, NS_INT32_TO_PTR(aUnicode)));
 
   return entry ? entry->node->mStr : nullptr;
 }

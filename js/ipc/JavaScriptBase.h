@@ -66,8 +66,9 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
                       ReturnStatus* rs, bool* bp) {
         return Answer::RecvHasOwn(ObjectId::deserialize(objId), id, rs, bp);
     }
-    bool RecvGet(const uint64_t& objId, const JSVariant& receiverVar, const JSIDVariant& id,
-                 ReturnStatus* rs, JSVariant* result) {
+    bool RecvGet(const uint64_t& objId, const ObjectVariant& receiverVar,
+                   const JSIDVariant& id,
+                   ReturnStatus* rs, JSVariant* result) {
         return Answer::RecvGet(ObjectId::deserialize(objId), receiverVar, id, rs, result);
     }
     bool RecvSet(const uint64_t& objId, const JSIDVariant& id, const JSVariant& value,
@@ -87,22 +88,15 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
     bool RecvHasInstance(const uint64_t& objId, const JSVariant& v, ReturnStatus* rs, bool* bp) {
         return Answer::RecvHasInstance(ObjectId::deserialize(objId), v, rs, bp);
     }
-    bool RecvGetBuiltinClass(const uint64_t& objId, ReturnStatus* rs, uint32_t* classValue) {
-        return Answer::RecvGetBuiltinClass(ObjectId::deserialize(objId), rs, classValue);
-    }
-    bool RecvIsArray(const uint64_t& objId, ReturnStatus* rs, uint32_t* answer) {
-        return Answer::RecvIsArray(ObjectId::deserialize(objId), rs, answer);
+    bool RecvObjectClassIs(const uint64_t& objId, const uint32_t& classValue,
+                             bool* result) {
+        return Answer::RecvObjectClassIs(ObjectId::deserialize(objId), classValue, result);
     }
     bool RecvClassName(const uint64_t& objId, nsCString* result) {
         return Answer::RecvClassName(ObjectId::deserialize(objId), result);
     }
     bool RecvGetPrototype(const uint64_t& objId, ReturnStatus* rs, ObjectOrNullVariant* result) {
         return Answer::RecvGetPrototype(ObjectId::deserialize(objId), rs, result);
-    }
-    bool RecvGetPrototypeIfOrdinary(const uint64_t& objId, ReturnStatus* rs, bool* isOrdinary,
-                                    ObjectOrNullVariant* result)
-    {
-        return Answer::RecvGetPrototypeIfOrdinary(ObjectId::deserialize(objId), rs, isOrdinary, result);
     }
     bool RecvRegExpToShared(const uint64_t& objId, ReturnStatus* rs, nsString* source, uint32_t* flags) {
         return Answer::RecvRegExpToShared(ObjectId::deserialize(objId), rs, source, flags);
@@ -161,7 +155,8 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
                     ReturnStatus* rs, bool* bp) {
         return Base::SendHasOwn(objId.serialize(), id, rs, bp);
     }
-    bool SendGet(const ObjectId& objId, const JSVariant& receiverVar, const JSIDVariant& id,
+    bool SendGet(const ObjectId& objId, const ObjectVariant& receiverVar,
+                 const JSIDVariant& id,
                  ReturnStatus* rs, JSVariant* result) {
         return Base::SendGet(objId.serialize(), receiverVar, id, rs, result);
     }
@@ -182,23 +177,15 @@ class JavaScriptBase : public WrapperOwner, public WrapperAnswer, public Base
     bool SendHasInstance(const ObjectId& objId, const JSVariant& v, ReturnStatus* rs, bool* bp) {
         return Base::SendHasInstance(objId.serialize(), v, rs, bp);
     }
-    bool SendGetBuiltinClass(const ObjectId& objId, ReturnStatus* rs, uint32_t* classValue) {
-        return Base::SendGetBuiltinClass(objId.serialize(), rs, classValue);
-    }
-    bool SendIsArray(const ObjectId& objId, ReturnStatus* rs, uint32_t* answer)
-    {
-        return Base::SendIsArray(objId.serialize(), rs, answer);
+    bool SendObjectClassIs(const ObjectId& objId, const uint32_t& classValue,
+                           bool* result) {
+        return Base::SendObjectClassIs(objId.serialize(), classValue, result);
     }
     bool SendClassName(const ObjectId& objId, nsCString* result) {
         return Base::SendClassName(objId.serialize(), result);
     }
     bool SendGetPrototype(const ObjectId& objId, ReturnStatus* rs, ObjectOrNullVariant* result) {
         return Base::SendGetPrototype(objId.serialize(), rs, result);
-    }
-    bool SendGetPrototypeIfOrdinary(const ObjectId& objId, ReturnStatus* rs, bool* isOrdinary,
-                                    ObjectOrNullVariant* result)
-    {
-        return Base::SendGetPrototypeIfOrdinary(objId.serialize(), rs, isOrdinary, result);
     }
 
     bool SendRegExpToShared(const ObjectId& objId, ReturnStatus* rs,

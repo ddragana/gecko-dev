@@ -12,15 +12,15 @@ function test() {
   var pm = Services.perms;
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
-  var inner_url = encodeURIComponent(TESTROOT + "installtrigger.html?" + encodeURIComponent(JSON.stringify({
+  var triggers = encodeURIComponent(JSON.stringify({
     "Unsigned XPI": {
       URL: TESTROOT + "unsigned.xpi",
       IconURL: TESTROOT + "icon.png",
       toString: function() { return this.URL; }
     }
-  })));
+  }));
   gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.loadURI(TESTROOT + "installtrigger_frame.html?" + inner_url);
+  gBrowser.loadURI(TESTROOT + "installtrigger_frame.html?" + triggers);
 }
 
 function confirm_install(window) {

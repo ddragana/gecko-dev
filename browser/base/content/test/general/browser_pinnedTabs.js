@@ -1,8 +1,6 @@
 var tabs;
 
-function index(tab) {
-  return Array.indexOf(gBrowser.tabs, tab);
-}
+function index(tab) Array.indexOf(gBrowser.tabs, tab);
 
 function indexTest(tab, expectedIndex, msg) {
   var diag = "tab " + tab + " should be at index " + expectedIndex;

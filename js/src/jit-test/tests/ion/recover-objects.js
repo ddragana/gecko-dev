@@ -1,4 +1,4 @@
-// |jit-test| test-join=--no-unboxed-objects; --ion-pgo=on
+// |jit-test| test-join=--no-unboxed-objects
 //
 // Unboxed object optimization might not trigger in all cases, thus we ensure
 // that Scalar Replacement optimization is working well independently of the
@@ -25,7 +25,7 @@ var uceFault = function (i) {
 
 
 // Without "use script" in the inner function, the arguments might be
-// observable.
+// obersvable.
 function inline_notSoEmpty1(a, b, c, d) {
     // This function is not strict, so we might be able to observe its
     // arguments, if somebody ever called fun.arguments inside it.
@@ -50,10 +50,9 @@ function notSoEmpty1() {
     assertRecoveredOnBailout(c, true);
     assertRecoveredOnBailout(d, true);
     assertRecoveredOnBailout(unused, true);
-    // This can only be recovered on bailout iff either we have type
-    // information for the property access in the branch, or the branch is
-    // removed before scalar replacement.
-    assertRecoveredOnBailout(res, true);
+    // Scalar Replacement is coming after the branch removal made by GVN, and
+    // the ucefault branch is not taken yet.
+    assertRecoveredOnBailout(res, false);
 }
 
 // Check that we can recover objects with their content.
@@ -76,10 +75,9 @@ function notSoEmpty2(i) {
     assertRecoveredOnBailout(c, true);
     assertRecoveredOnBailout(d, true);
     assertRecoveredOnBailout(unused, true);
-    // This can only be recovered on bailout iff either we have type
-    // information for the property access in the branch, or the branch is
-    // removed before scalar replacement.
-    assertRecoveredOnBailout(res, true);
+    // Scalar Replacement is coming after the branch removal made by GVN, and
+    // the ucefault branch is not taken yet.
+    assertRecoveredOnBailout(res, false);
 }
 
 // Check that we can recover objects with their content.

@@ -11,7 +11,6 @@
 #error nsError.h no longer supports C sources
 #endif
 
-#include "mozilla/Attributes.h"
 #include "mozilla/Likely.h"
 
 #include <stdint.h>
@@ -77,8 +76,6 @@
 #define NS_ERROR_MODULE_DOM_FILESYSTEM 36
 #define NS_ERROR_MODULE_DOM_BLUETOOTH 37
 #define NS_ERROR_MODULE_SIGNED_APP 38
-#define NS_ERROR_MODULE_DOM_ANIM 39
-#define NS_ERROR_MODULE_DOM_PUSH 40
 
 /* NS_ERROR_MODULE_GENERAL should be used by modules that do not
  * care if return code values overlap. Callers of methods that
@@ -160,8 +157,6 @@ static_assert(((nsresult)0) < ((nsresult)-1),
 static_assert(sizeof(nsresult) == sizeof(uint32_t),
               "nsresult must be 32 bits");
 
-#define MOZ_ALWAYS_SUCCEEDS(expr) MOZ_ALWAYS_TRUE(NS_SUCCEEDED(expr))
-
 /**
  * @name Standard Error Generating Macros
  */
@@ -193,12 +188,12 @@ NS_ErrorAccordingToNSPR();
  * @name Standard Macros for retrieving error bits
  */
 
-inline MOZ_CONSTEXPR uint16_t
+inline uint16_t
 NS_ERROR_GET_CODE(nsresult aErr)
 {
   return uint32_t(aErr) & 0xffff;
 }
-inline MOZ_CONSTEXPR uint16_t
+inline uint16_t
 NS_ERROR_GET_MODULE(nsresult aErr)
 {
   return ((uint32_t(aErr) >> 16) - NS_ERROR_MODULE_BASE_OFFSET) & 0x1fff;

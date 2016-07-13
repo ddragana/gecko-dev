@@ -1,12 +1,12 @@
 var g = true;
 
-function get(name)
+function getown(name)
 {
     if (g)
-	   return 8;
+	return { value: 8, enumerable: true, writable: false, configurable: true };
 }
 
-var p = new Proxy({}, { get: get } );
+var p = Proxy.create( { getPropertyDescriptor: getown } );
 var o2 = Object.create(p);
 
 function test(x, expected) {

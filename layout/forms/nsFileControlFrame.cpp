@@ -67,7 +67,8 @@ nsFileControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
   }
 
   nsContentUtils::DestroyAnonymousContent(&mTextContent);
-  nsContentUtils::DestroyAnonymousContent(&mBrowseFilesOrDirs);
+  nsContentUtils::DestroyAnonymousContent(&mBrowseDirs);
+  nsContentUtils::DestroyAnonymousContent(&mBrowseFiles);
 
   mMouseListener->ForgetFrame();
   nsBlockFrame::DestroyFrom(aDestructRoot);
@@ -78,7 +79,7 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
                HTMLInputElement* aInputElement,
                const nsAString& aAccessKey)
 {
-  RefPtr<Element> button = aDoc->CreateHTMLElement(nsGkAtoms::button);
+  nsRefPtr<Element> button = aDoc->CreateHTMLElement(nsGkAtoms::button);
   // NOTE: SetIsNativeAnonymousRoot() has to be called before setting any
   // attribute.
   button->SetIsNativeAnonymousRoot();
@@ -92,7 +93,7 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
 
   // Set the browse button text. It's a bit of a pain to do because we want to
   // make sure we are not notifying.
-  RefPtr<nsTextNode> textContent =
+  nsRefPtr<nsTextNode> textContent =
     new nsTextNode(button->NodeInfo()->NodeInfoManager());
 
   textContent->SetText(buttonTxt, false);
@@ -104,7 +105,7 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
 
   // Make sure access key and tab order for the element actually redirect to the
   // file picking button.
-  RefPtr<HTMLButtonElement> buttonElement =
+  nsRefPtr<HTMLButtonElement> buttonElement =
     HTMLButtonElement::FromContentOrNull(button);
 
   if (!aAccessKey.IsEmpty()) {
@@ -126,7 +127,11 @@ nsFileControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
   nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
 
-  RefPtr<HTMLInputElement> fileContent = HTMLInputElement::FromContentOrNull(mContent);
+  nsIContent* content = GetContent();
+  bool isDirPicker = Preferences::GetBool("dom.input.dirpicker", false) &&
+                     content && content->HasAttr(kNameSpaceID_None, nsGkAtoms::directory);
+
+  nsRefPtr<HTMLInputElement> fileContent = HTMLInputElement::FromContentOrNull(mContent);
 
   // The access key is transferred to the "Choose files..." button only. In
   // effect that access key allows access to the control via that button, then
@@ -134,13 +139,26 @@ nsFileControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   nsAutoString accessKey;
   fileContent->GetAccessKey(accessKey);
 
-  mBrowseFilesOrDirs = MakeAnonButton(doc, "Browse", fileContent, accessKey);
-  if (!mBrowseFilesOrDirs || !aElements.AppendElement(mBrowseFilesOrDirs)) {
+  mBrowseFiles = MakeAnonButton(doc, isDirPicker ? "ChooseFiles" : "Browse",
+                                fileContent, accessKey);
+  if (!mBrowseFiles || !aElements.AppendElement(mBrowseFiles)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
+  if (isDirPicker) {
+    mBrowseDirs = MakeAnonButton(doc, "ChooseDirs", fileContent, EmptyString());
+    // Setting the 'directory' attribute is simply a means of allowing our
+    // event handling code in HTMLInputElement.cpp to distinguish between a
+    // click on the "Choose files" button from the "Choose a folder" button.
+    mBrowseDirs->SetAttr(kNameSpaceID_None, nsGkAtoms::directory,
+                         EmptyString(), false);
+    if (!mBrowseDirs || !aElements.AppendElement(mBrowseDirs)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+  }
+
   // Create and setup the text showing the selected files.
-  RefPtr<NodeInfo> nodeInfo;
+  nsRefPtr<NodeInfo> nodeInfo;
   nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::label, nullptr,
                                                  kNameSpaceID_XUL,
                                                  nsIDOMNode::ELEMENT_NODE);
@@ -175,8 +193,12 @@ void
 nsFileControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                              uint32_t aFilter)
 {
-  if (mBrowseFilesOrDirs) {
-    aElements.AppendElement(mBrowseFilesOrDirs);
+  if (mBrowseFiles) {
+    aElements.AppendElement(mBrowseFiles);
+  }
+
+  if (mBrowseDirs) {
+    aElements.AppendElement(mBrowseDirs);
   }
 
   if (mTextContent) {
@@ -264,12 +286,7 @@ nsFileControlFrame::DnDListener::IsValidDropData(nsIDOMDataTransfer* aDOMDataTra
   NS_ENSURE_TRUE(dataTransfer, false);
 
   // We only support dropping files onto a file upload control
-  ErrorResult rv;
-  RefPtr<DOMStringList> types = dataTransfer->GetTypes(rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    return false;
-  }
-
+  nsRefPtr<DOMStringList> types = dataTransfer->Types();
   return types->Contains(NS_LITERAL_STRING("Files"));
 }
 
@@ -306,10 +323,17 @@ nsFileControlFrame::SyncDisabledState()
 {
   EventStates eventStates = mContent->AsElement()->State();
   if (eventStates.HasState(NS_EVENT_STATE_DISABLED)) {
-    mBrowseFilesOrDirs->SetAttr(kNameSpaceID_None, nsGkAtoms::disabled,
-                                EmptyString(), true);
+    mBrowseFiles->SetAttr(kNameSpaceID_None, nsGkAtoms::disabled, EmptyString(),
+                          true);
+    if (mBrowseDirs) {
+      mBrowseDirs->SetAttr(kNameSpaceID_None, nsGkAtoms::disabled, EmptyString(),
+                           true);
+    }
   } else {
-    mBrowseFilesOrDirs->UnsetAttr(kNameSpaceID_None, nsGkAtoms::disabled, true);
+    mBrowseFiles->UnsetAttr(kNameSpaceID_None, nsGkAtoms::disabled, true);
+    if (mBrowseDirs) {
+      mBrowseDirs->UnsetAttr(kNameSpaceID_None, nsGkAtoms::disabled, true);
+    }
   }
 }
 
@@ -320,11 +344,17 @@ nsFileControlFrame::AttributeChanged(int32_t  aNameSpaceID,
 {
   if (aNameSpaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::tabindex) {
     if (aModType == nsIDOMMutationEvent::REMOVAL) {
-      mBrowseFilesOrDirs->UnsetAttr(aNameSpaceID, aAttribute, true);
+      mBrowseFiles->UnsetAttr(aNameSpaceID, aAttribute, true);
+      if (mBrowseDirs) {
+        mBrowseDirs->UnsetAttr(aNameSpaceID, aAttribute, true);
+      }
     } else {
       nsAutoString value;
       mContent->GetAttr(aNameSpaceID, aAttribute, value);
-      mBrowseFilesOrDirs->SetAttr(aNameSpaceID, aAttribute, value, true);
+      mBrowseFiles->SetAttr(aNameSpaceID, aAttribute, value, true);
+      if (mBrowseDirs) {
+        mBrowseDirs->SetAttr(aNameSpaceID, aAttribute, value, true);
+      }
     }
   }
 

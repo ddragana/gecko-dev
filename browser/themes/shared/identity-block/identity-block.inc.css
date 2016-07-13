@@ -5,6 +5,8 @@
 %endif
 
 #identity-box {
+  --identity-box-border-color: hsla(0,0%,16%,.2);
+  --identity-box-selected-background-color: rgb(231,230,230);
   --identity-box-verified-color: hsl(92,100%,30%);
 %ifdef MOZ_OFFICIAL_BRANDING
   --identity-box-chrome-color: rgb(229,115,0);
@@ -16,12 +18,20 @@
 %endif
 %endif
 
+  border-inline-end: 1px solid;
+  border-image: linear-gradient(transparent 15%,
+                                var(--identity-box-border-color) 15%,
+                                var(--identity-box-border-color) 85%,
+                                transparent 85%);
+  border-image-slice: 1;
   font-size: .9em;
-  padding: 3px 5px;
-  overflow: hidden;
-  /* The latter two properties have a transition to handle the delayed hiding of
-     the forward button when hovered. */
-  transition: background-color 150ms ease, padding-left, padding-right;
+  padding: 2px 5px;
+  margin-inline-end: 4px;
+}
+
+#identity-box:hover,
+#identity-box[open=true] {
+  background-color: var(--identity-box-selected-background-color);
 }
 
 #urlbar[pageproxystate="valid"] > #identity-box.verifiedIdentity {
@@ -32,66 +42,44 @@
   color: var(--identity-box-chrome-color);
 }
 
-#identity-icon-labels:-moz-locale-dir(ltr) {
-  padding-left: 2px;
+#identity-icon-labels {
+  padding-inline-start: 2px;
 }
 
-#identity-icon-labels:-moz-locale-dir(rtl) {
-  padding-right: 2px;
+#notification-popup-box:not([hidden]) + #identity-box {
+  -moz-padding-start: 10px;
+  border-radius: 0;
 }
 
-@conditionalForwardWithUrlbar@ > #forward-button[disabled] + #urlbar > #identity-box {
-  padding-inline-start: calc(var(--backbutton-urlbar-overlap) + 5px);
+@conditionalForwardWithUrlbar@ > #urlbar > #identity-box {
+  border-radius: 0;
 }
 
-@conditionalForwardWithUrlbar@:hover:not([switchingtabs]) > #forward-button[disabled] + #urlbar > #identity-box {
-  /* Forward button hiding is delayed when hovered, so we should use the same
-     delay for the identity box. We handle both horizontal paddings (for LTR and
-     RTL), the latter two delays here are for padding-left and padding-right. */
-  transition-delay: 0s, 100s, 100s;
+@conditionalForwardWithUrlbar@:not([switchingtabs]) > #urlbar > #identity-box {
+  transition: padding-left, padding-right;
 }
 
-@conditionalForwardWithUrlbar@:not(:hover) > #forward-button[disabled] + #urlbar > #identity-box {
+@conditionalForwardWithUrlbar@ > #forward-button[disabled] + #urlbar > #notification-popup-box[hidden] + #identity-box:-moz-locale-dir(ltr) {
+  padding-left: calc(var(--backbutton-urlbar-overlap) + 4px);
+}
+
+@conditionalForwardWithUrlbar@ > #forward-button[disabled] + #urlbar > #notification-popup-box[hidden] + #identity-box:-moz-locale-dir(rtl) {
+  padding-right: calc(var(--backbutton-urlbar-overlap) + 4px);
+}
+
+@conditionalForwardWithUrlbar@:hover:not([switchingtabs]) > #forward-button[disabled] + #urlbar > #notification-popup-box[hidden] + #identity-box {
+  /* forward button hiding is delayed when hovered */
+  transition-delay: 100s;
+}
+
+@conditionalForwardWithUrlbar@:not(:hover) > #forward-button[disabled] + #urlbar > #notification-popup-box[hidden] + #identity-box:-moz-locale-dir(ltr) {
   /* when not hovered anymore, trigger a new non-delayed transition to react to the forward button hiding */
-  padding-inline-start: calc(var(--backbutton-urlbar-overlap) + 5.01px);
+  padding-left: calc(var(--backbutton-urlbar-overlap) + 4.01px);
 }
 
-/* MAIN IDENTITY ICON */
-
-#identity-icon {
-  width: 16px;
-  height: 16px;
-  list-style-image: url(chrome://browser/skin/identity-icon.svg#normal);
-}
-
-#identity-box:hover > #identity-icon:not(.no-hover),
-#identity-box[open=true] > #identity-icon {
-  list-style-image: url(chrome://browser/skin/identity-icon.svg#hover);
-}
-
-#identity-box.grantedPermissions > #identity-icon {
-  list-style-image: url(chrome://browser/skin/identity-icon.svg#notice);
-}
-
-#identity-box.grantedPermissions:hover > #identity-icon:not(.no-hover),
-#identity-box.grantedPermissions[open=true] > #identity-icon {
-  list-style-image: url(chrome://browser/skin/identity-icon.svg#notice-hover);
-}
-
-#urlbar[pageproxystate="valid"] > #identity-box.chromeUI > #identity-icon {
-  list-style-image: url(chrome://branding/content/identity-icons-brand.svg);
-}
-
-#urlbar[pageproxystate="invalid"] > #identity-box > #identity-icon {
-  opacity: 0.3;
-}
-
-#urlbar[actiontype="searchengine"] > #identity-box > #identity-icon {
-  -moz-image-region: inherit;
-  list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg#search-icon);
-  width: 16px;
-  height: 16px;
-  opacity: 1;
+@conditionalForwardWithUrlbar@:not(:hover) > #forward-button[disabled] + #urlbar > #notification-popup-box[hidden] + #identity-box:-moz-locale-dir(rtl) {
+  /* when not hovered anymore, trigger a new non-delayed transition to react to the forward button hiding */
+  padding-right: calc(var(--backbutton-urlbar-overlap) + 4.01px);
 }
 
 /* TRACKING PROTECTION ICON */
@@ -99,66 +87,65 @@
 #tracking-protection-icon {
   width: 16px;
   height: 16px;
-  margin-inline-start: 2px;
-  margin-inline-end: 0;
+  margin-inline-end: 2px;
   list-style-image: url(chrome://browser/skin/tracking-protection-16.svg);
-  opacity: 1;
 }
 
 #tracking-protection-icon[state="loaded-tracking-content"] {
   list-style-image: url(chrome://browser/skin/tracking-protection-disabled-16.svg);
 }
 
-#tracking-protection-icon[animate] {
-  transition: margin-left 200ms ease-out, margin-right 200ms ease-out;
-}
-
 #tracking-protection-icon:not([state]) {
-  margin-inline-end: -18px;
-  pointer-events: none;
-  opacity: 0;
-  /* Only animate the shield in, when it disappears hide it immediately. */
-  transition: none;
+  display: none;
 }
 
-#urlbar[pageproxystate="invalid"] > #identity-box > #tracking-protection-icon {
-  visibility: collapse;
-}
+/* MAIN IDENTITY ICON */
 
-/* CONNECTION ICON */
-
-#connection-icon {
+#page-proxy-favicon {
   width: 16px;
   height: 16px;
-  margin-inline-start: 2px;
-  visibility: collapse;
+  list-style-image: url(chrome://browser/skin/identity-not-secure.svg);
 }
 
-#urlbar[pageproxystate="valid"] > #identity-box.verifiedDomain > #connection-icon,
-#urlbar[pageproxystate="valid"] > #identity-box.verifiedIdentity > #connection-icon {
+.chromeUI > #page-proxy-favicon[pageproxystate="valid"] {
+  list-style-image: url(chrome://branding/content/identity-icons-brand.png);
+  -moz-image-region: rect(0, 16px, 16px, 0);
+}
+
+.verifiedDomain > #page-proxy-favicon[pageproxystate="valid"],
+.verifiedIdentity > #page-proxy-favicon[pageproxystate="valid"] {
   list-style-image: url(chrome://browser/skin/identity-secure.svg);
-  visibility: visible;
 }
 
-#urlbar[pageproxystate="valid"] > #identity-box.insecureLoginForms > #connection-icon,
-#urlbar[pageproxystate="valid"] > #identity-box.mixedActiveContent > #connection-icon {
+.mixedActiveContent > #page-proxy-favicon[pageproxystate="valid"] {
   list-style-image: url(chrome://browser/skin/identity-mixed-active-loaded.svg);
-  visibility: visible;
 }
 
-#urlbar[pageproxystate="valid"] > #identity-box.weakCipher > #connection-icon,
-#urlbar[pageproxystate="valid"] > #identity-box.mixedDisplayContent > #connection-icon,
-#urlbar[pageproxystate="valid"] > #identity-box.mixedDisplayContentLoadedActiveBlocked > #connection-icon {
+.weakCipher > #page-proxy-favicon[pageproxystate="valid"],
+.mixedDisplayContent > #page-proxy-favicon[pageproxystate="valid"],
+.mixedDisplayContentLoadedActiveBlocked > #page-proxy-favicon[pageproxystate="valid"] {
   list-style-image: url(chrome://browser/skin/identity-mixed-passive-loaded.svg);
-  visibility: visible;
 }
 
-#urlbar[pageproxystate="valid"] > #identity-box.mixedActiveBlocked > #connection-icon {
+.mixedActiveBlocked > #page-proxy-favicon[pageproxystate="valid"] {
   list-style-image: url(chrome://browser/skin/identity-mixed-active-blocked.svg);
-  visibility: visible;
 }
 
-#urlbar[pageproxystate="valid"] > #identity-box.certUserOverridden > #connection-icon {
-  list-style-image: url(chrome://browser/skin/identity-mixed-passive-loaded.svg);
-  visibility: visible;
+#page-proxy-favicon[pageproxystate="invalid"] {
+  opacity: 0.3;
+}
+
+@media (min-resolution: 1.1dppx) {
+  .chromeUI > #page-proxy-favicon[pageproxystate="valid"] {
+    list-style-image: url(chrome://branding/content/identity-icons-brand@2x.png);
+    -moz-image-region: rect(0, 32px, 32px, 0);
+  }
+}
+
+#urlbar[actiontype="searchengine"] > #identity-box > #page-proxy-favicon {
+  -moz-image-region: inherit;
+  list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg#search-icon);
+  width: 16px;
+  height: 16px;
+  opacity: 1;
 }

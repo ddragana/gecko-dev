@@ -39,7 +39,7 @@
 // Time between subsequent vacuum calls for a certain database.
 #define VACUUM_INTERVAL_SECONDS 30 * 86400 // 30 days.
 
-extern mozilla::LazyLogModule gStorageLog;
+extern PRLogModuleInfo *gStorageLog;
 
 namespace mozilla {
 namespace storage {
@@ -189,7 +189,7 @@ Vacuumer::execute()
   // Notify a heavy IO task is about to start.
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
-    rv =
+    DebugOnly<nsresult> rv =
       os->NotifyObservers(nullptr, OBSERVER_TOPIC_HEAVY_IO,
                           OBSERVER_DATA_VACUUM_BEGIN.get());
     MOZ_ASSERT(NS_SUCCEEDED(rv), "Should be able to notify");
@@ -204,7 +204,7 @@ Vacuumer::execute()
   rv = mDBConn->CreateAsyncStatement(pageSizeQuery,
                                      getter_AddRefs(pageSizeStmt));
   NS_ENSURE_SUCCESS(rv, false);
-  RefPtr<BaseCallback> callback = new BaseCallback();
+  nsRefPtr<BaseCallback> callback = new BaseCallback();
   nsCOMPtr<mozIStoragePendingStatement> ps;
   rv = pageSizeStmt->ExecuteAsync(callback, getter_AddRefs(ps));
   NS_ENSURE_SUCCESS(rv, false);
@@ -226,13 +226,11 @@ Vacuumer::execute()
 NS_IMETHODIMP
 Vacuumer::HandleError(mozIStorageError *aError)
 {
-  int32_t result;
-  nsresult rv;
-  nsAutoCString message;
-
 #ifdef DEBUG
-  rv = aError->GetResult(&result);
+  int32_t result;
+  nsresult rv = aError->GetResult(&result);
   NS_ENSURE_SUCCESS(rv, rv);
+  nsAutoCString message;
   rv = aError->GetMessage(message);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -247,8 +245,10 @@ Vacuumer::HandleError(mozIStorageError *aError)
 #endif
 
   if (MOZ_LOG_TEST(gStorageLog, LogLevel::Error)) {
-    rv = aError->GetResult(&result);
+    int32_t result;
+    nsresult rv = aError->GetResult(&result);
     NS_ENSURE_SUCCESS(rv, rv);
+    nsAutoCString message;
     rv = aError->GetMessage(message);
     NS_ENSURE_SUCCESS(rv, rv);
     MOZ_LOG(gStorageLog, LogLevel::Error,
@@ -371,7 +371,7 @@ VacuumManager::Observe(nsISupports *aSubject,
     }
     int32_t index;
     for (index = startIndex; index < entries.Count(); ++index) {
-      RefPtr<Vacuumer> vacuum = new Vacuumer(entries[index]);
+      nsRefPtr<Vacuumer> vacuum = new Vacuumer(entries[index]);
       // Only vacuum one database per day.
       if (vacuum->execute()) {
         break;

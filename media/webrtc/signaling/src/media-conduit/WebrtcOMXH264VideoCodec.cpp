@@ -21,7 +21,7 @@
 using namespace android;
 
 // WebRTC
-//#include "webrtc/common_video/interface/texture_video_frame.h"
+#include "webrtc/common_video/interface/texture_video_frame.h"
 #include "webrtc/video_engine/include/vie_external_codec.h"
 #include "runnable_utils.h"
 
@@ -128,7 +128,7 @@ ShutdownThread(nsCOMPtr<nsIThread>& aThread)
 // TODO: Bug 997110 - Revisit queue/drain logic. Current design assumes that
 //       encoder only generate one output buffer per input frame and won't work
 //       if encoder drops frames or generates multiple output per input.
-class OMXOutputDrain : public Runnable
+class OMXOutputDrain : public nsRunnable
 {
 public:
   void Start() {
@@ -172,12 +172,9 @@ public:
 
   NS_IMETHODIMP Run() override
   {
-    MonitorAutoLock lock(mMonitor);
-    if (mEnding) {
-      return NS_OK;
-    }
     MOZ_ASSERT(mThread);
 
+    MonitorAutoLock lock(mMonitor);
     while (true) {
       if (mInputFrames.empty()) {
         // Wait for new input.
@@ -527,9 +524,12 @@ public:
       return;
     }
 
-    gfx::IntSize picSize(buffer->GetSize());
+    layers::GrallocImage::GrallocData grallocData;
+    grallocData.mPicSize = buffer->GetSize();
+    grallocData.mGraphicBuffer = buffer;
+
     nsAutoPtr<layers::GrallocImage> grallocImage(new layers::GrallocImage());
-    grallocImage->AdoptData(buffer, picSize);
+    grallocImage->SetData(grallocData);
 
     // Get timestamp of the frame about to render.
     int64_t timestamp = -1;
@@ -547,14 +547,14 @@ public:
     MOZ_ASSERT(timestamp >= 0 && renderTimeMs >= 0);
 
     CODEC_LOGD("Decoder NewFrame: %dx%d, timestamp %lld, renderTimeMs %lld",
-               picSize.width, picSize.height, timestamp, renderTimeMs);
+               grallocData.mPicSize.width, grallocData.mPicSize.height, timestamp, renderTimeMs);
 
-    nsAutoPtr<webrtc::I420VideoFrame> videoFrame(new webrtc::I420VideoFrame(
-      new ImageNativeHandle(grallocImage.forget()),
-      picSize.width,
-      picSize.height,
-      timestamp,
-      renderTimeMs));
+    nsAutoPtr<webrtc::I420VideoFrame> videoFrame(
+      new webrtc::TextureVideoFrame(new ImageNativeHandle(grallocImage.forget()),
+                                    grallocData.mPicSize.width,
+                                    grallocData.mPicSize.height,
+                                    timestamp,
+                                    renderTimeMs));
     if (videoFrame != nullptr) {
       mCallback->Decoded(*videoFrame);
     }
@@ -786,7 +786,7 @@ private:
       uint32_t offset;
       uint32_t size;
     };
-    AutoTArray<nal_entry, 1> nals;
+    nsAutoTArray<nal_entry, 1> nals;
 
     // Break input encoded data into NALUs and send each one to callback.
     const uint8_t* data = aEncodedImage._buffer;
@@ -841,7 +841,7 @@ WebrtcOMXH264VideoEncoder::WebrtcOMXH264VideoEncoder()
 int32_t
 WebrtcOMXH264VideoEncoder::InitEncode(const webrtc::VideoCodec* aCodecSettings,
                                       int32_t aNumOfCores,
-                                      size_t aMaxPayloadSize)
+                                      uint32_t aMaxPayloadSize)
 {
   CODEC_LOGD("WebrtcOMXH264VideoEncoder:%p init", this);
 
@@ -1003,9 +1003,9 @@ WebrtcOMXH264VideoEncoder::Encode(const webrtc::I420VideoFrame& aInputImage,
                                    (yuvData.mYSize.height + 1) / 2);
   yuvData.mPicSize = yuvData.mYSize;
   yuvData.mStereoMode = StereoMode::MONO;
-  layers::RecyclingPlanarYCbCrImage img(nullptr);
-  // AdoptData() doesn't need AllocateAndGetNewBuffer(); OMXVideoEncoder is ok with this
-  img.AdoptData(yuvData);
+  layers::PlanarYCbCrImage img(nullptr);
+  // SetDataNoCopy() doesn't need AllocateAndGetNewBuffer(); OMXVideoEncoder is ok with this
+  img.SetDataNoCopy(yuvData);
 
   CODEC_LOGD("Encode frame: %dx%d, timestamp %u (%lld), renderTimeMs %" PRIu64,
              aInputImage.width(), aInputImage.height(),
@@ -1077,9 +1077,9 @@ WebrtcOMXH264VideoEncoder::~WebrtcOMXH264VideoEncoder()
 // Note: stagefright doesn't handle these parameters.
 int32_t
 WebrtcOMXH264VideoEncoder::SetChannelParameters(uint32_t aPacketLossRate,
-                                                int64_t aRoundTripTimeMs)
+                                                int aRoundTripTimeMs)
 {
-  CODEC_LOGD("WebrtcOMXH264VideoEncoder:%p set channel packet loss:%u, rtt:%" PRIi64,
+  CODEC_LOGD("WebrtcOMXH264VideoEncoder:%p set channel packet loss:%u, rtt:%d",
              this, aPacketLossRate, aRoundTripTimeMs);
 
   return WEBRTC_VIDEO_CODEC_OK;

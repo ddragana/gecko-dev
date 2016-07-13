@@ -16,9 +16,8 @@ const { URL: parseURL } = require("../url");
 const LoginInfo = CC("@mozilla.org/login-manager/loginInfo;1",
                      "nsILoginInfo", "init");
 
-function filterMatchingLogins(loginInfo) {
-  return Object.keys(this).every(key => loginInfo[key] === this[key], this);
-}
+function filterMatchingLogins(loginInfo)
+  Object.keys(this).every(function(key) loginInfo[key] === this[key], this);
 
 /**
  * Removes `user`, `password` and `path` fields from the given `url` if it's
@@ -71,9 +70,7 @@ Login.prototype.toLoginInfo = function toLoginInfo() {
                        usernameField, passwordField);
 };
 
-function loginToJSON(value) {
-  return Login(value).toJSON();
-}
+function loginToJSON(value) Login(value).toJSON()
 
 /**
  * Returns array of `nsILoginInfo` objects that are stored in the login manager

@@ -57,7 +57,7 @@ function test() {
 
     if (loadCount == 3) {
       gBrowser.removeEventListener("DOMContentLoaded", handleLoad, true);
-      gBrowser.loadURI("about:blank");
+      content.location.href = "about:blank";
       executeSoon(check_next_uri);
     }
   }
@@ -67,7 +67,7 @@ function test() {
       let uri = URIs.shift();
       loadCount = 0;
       gBrowser.addEventListener("DOMContentLoaded", handleLoad, true);
-      gBrowser.loadURI(uri);
+      content.location.href = uri;
     }
     else {
       confirm_results();

@@ -19,10 +19,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLMeterElement.h"
 #include "nsContentList.h"
-#include "nsCSSPseudoElements.h"
 #include "nsStyleSet.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "nsThemeConstants.h"
 #include <algorithm>
 
@@ -59,12 +56,6 @@ nsMeterFrame::DestroyFrom(nsIFrame* aDestructRoot)
   nsContainerFrame::DestroyFrom(aDestructRoot);
 }
 
-nsIAtom*
-nsMeterFrame::GetType() const
-{
-  return nsGkAtoms::meterFrame;
-}
-
 nsresult
 nsMeterFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
@@ -75,8 +66,8 @@ nsMeterFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   mBarDiv = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Associate ::-moz-meter-bar pseudo-element to the anonymous child.
-  CSSPseudoElementType pseudoType = CSSPseudoElementType::mozMeterBar;
-  RefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
+  nsCSSPseudoElements::Type pseudoType = nsCSSPseudoElements::ePseudo_mozMeterBar;
+  nsRefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
     ResolvePseudoElementStyle(mContent->AsElement(), pseudoType,
                               StyleContext(), mBarDiv->AsElement());
 
@@ -230,8 +221,10 @@ nsMeterFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
                               const LogicalSize& aPadding,
                               bool aShrinkWrap)
 {
-  RefPtr<nsFontMetrics> fontMet =
-    nsLayoutUtils::GetFontMetricsForFrame(this, 1.0f);
+  nsRefPtr<nsFontMetrics> fontMet;
+  NS_ENSURE_SUCCESS(nsLayoutUtils::GetFontMetricsForFrame(this,
+                                                          getter_AddRefs(fontMet)),
+                    LogicalSize(aWM));
 
   const WritingMode wm = GetWritingMode();
   LogicalSize autoSize(wm);
@@ -249,8 +242,9 @@ nsMeterFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
 nscoord
 nsMeterFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 {
-  RefPtr<nsFontMetrics> fontMet =
-    nsLayoutUtils::GetFontMetricsForFrame(this, 1.0f);
+  nsRefPtr<nsFontMetrics> fontMet;
+  NS_ENSURE_SUCCESS(
+      nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fontMet)), 0);
 
   nscoord minISize = fontMet->Font().size; // 1em
 
@@ -271,25 +265,22 @@ nsMeterFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 bool
 nsMeterFrame::ShouldUseNativeStyle() const
 {
-  nsIFrame* barFrame = mBarDiv->GetPrimaryFrame();
-
   // Use the native style if these conditions are satisfied:
   // - both frames use the native appearance;
   // - neither frame has author specified rules setting the border or the
   //   background.
   return StyleDisplay()->mAppearance == NS_THEME_METERBAR &&
-         !PresContext()->HasAuthorSpecifiedRules(this,
+         mBarDiv->GetPrimaryFrame()->StyleDisplay()->mAppearance == NS_THEME_METERBAR_CHUNK &&
+         !PresContext()->HasAuthorSpecifiedRules(const_cast<nsMeterFrame*>(this),
                                                  NS_AUTHOR_SPECIFIED_BORDER | NS_AUTHOR_SPECIFIED_BACKGROUND) &&
-         barFrame &&
-         barFrame->StyleDisplay()->mAppearance == NS_THEME_METERCHUNK &&
-         !PresContext()->HasAuthorSpecifiedRules(barFrame,
+         !PresContext()->HasAuthorSpecifiedRules(mBarDiv->GetPrimaryFrame(),
                                                  NS_AUTHOR_SPECIFIED_BORDER | NS_AUTHOR_SPECIFIED_BACKGROUND);
 }
 
 Element*
-nsMeterFrame::GetPseudoElement(CSSPseudoElementType aType)
+nsMeterFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
 {
-  if (aType == CSSPseudoElementType::mozMeterBar) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozMeterBar) {
     return mBarDiv;
   }
 

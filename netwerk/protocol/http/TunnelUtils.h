@@ -8,7 +8,6 @@
 #define mozilla_net_TLSFilterTransaction_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/UniquePtr.h"
 #include "nsAHttpTransaction.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
@@ -152,13 +151,13 @@ private:
   static PRStatus FilterClose(PRFileDesc *fd);
 
 private:
-  RefPtr<nsAHttpTransaction> mTransaction;
+  nsRefPtr<nsAHttpTransaction> mTransaction;
   nsCOMPtr<nsISupports> mSecInfo;
   nsCOMPtr<nsITimer> mTimer;
-  RefPtr<NudgeTunnelCallback> mNudgeCallback;
+  nsRefPtr<NudgeTunnelCallback> mNudgeCallback;
 
   // buffered network output, after encryption
-  UniquePtr<char[]> mEncryptedText;
+  nsAutoArrayPtr<char> mEncryptedText;
   uint32_t mEncryptedTextUsed;
   uint32_t mEncryptedTextSize;
 
@@ -202,10 +201,6 @@ public:
   nsHttpRequestHead *RequestHead() override final;
   void Close(nsresult reason) override final;
 
-  // ConnectedReadyForInput() tests whether the spdy connect transaction is attached to
-  // an nsHttpConnection that can properly deal with flow control, etc..
-  bool ConnectedReadyForInput();
-
 private:
   friend class InputStreamShim;
   friend class OutputStreamShim;
@@ -219,29 +214,29 @@ private:
   nsAHttpConnection    *mSession;
   nsAHttpSegmentReader *mSegmentReader;
 
-  UniquePtr<char[]>   mInputData;
+  nsAutoArrayPtr<char> mInputData;
   uint32_t             mInputDataSize;
   uint32_t             mInputDataUsed;
   uint32_t             mInputDataOffset;
 
-  UniquePtr<char[]>    mOutputData;
+  nsAutoArrayPtr<char> mOutputData;
   uint32_t             mOutputDataSize;
   uint32_t             mOutputDataUsed;
   uint32_t             mOutputDataOffset;
 
   bool                           mForcePlainText;
   TimeStamp                      mTimestampSyn;
-  RefPtr<nsHttpConnectionInfo> mConnInfo;
+  nsRefPtr<nsHttpConnectionInfo> mConnInfo;
 
   // mTunneledConn, mTunnelTransport, mTunnelStreamIn, mTunnelStreamOut
   // are the connectors to the "real" http connection. They are created
   // together when the tunnel setup is complete and a static reference is held
   // for the lifetime of the tunnel.
-  RefPtr<nsHttpConnection>     mTunneledConn;
-  RefPtr<SocketTransportShim>  mTunnelTransport;
-  RefPtr<InputStreamShim>      mTunnelStreamIn;
-  RefPtr<OutputStreamShim>     mTunnelStreamOut;
-  RefPtr<nsHttpTransaction>    mDrivingTransaction;
+  nsRefPtr<nsHttpConnection>     mTunneledConn;
+  nsRefPtr<SocketTransportShim>  mTunnelTransport;
+  nsRefPtr<InputStreamShim>      mTunnelStreamIn;
+  nsRefPtr<OutputStreamShim>     mTunnelStreamOut;
+  nsRefPtr<nsHttpTransaction>    mDrivingTransaction;
 };
 
 } // namespace net

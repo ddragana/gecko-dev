@@ -209,7 +209,7 @@ public:
 
   bool    HasUnpaginatedBSize();
   void    SetHasUnpaginatedBSize(bool aValue);
-  nscoord GetUnpaginatedBSize();
+  nscoord GetUnpaginatedBSize(nsPresContext* aPresContext);
   void    SetUnpaginatedBSize(nsPresContext* aPresContext, nscoord aValue);
 
   nscoord GetBStartBCBorderWidth() const { return mBStartBorderWidth; }

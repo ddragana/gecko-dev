@@ -11,11 +11,11 @@
 #include "nsWeakReference.h"
 #include "nsIObserver.h"
 #include "nsWrapperCache.h"
+#include "nsPluginTags.h"
 #include "nsPIDOMWindow.h"
 
 class nsPluginElement;
 class nsMimeType;
-class nsIInternalPluginTag;
 
 class nsPluginArray final : public nsIObserver,
                             public nsSupportsWeakReference,
@@ -29,8 +29,8 @@ public:
   // nsIObserver
   NS_DECL_NSIOBSERVER
 
-  explicit nsPluginArray(nsPIDOMWindowInner* aWindow);
-  nsPIDOMWindowInner* GetParentObject() const;
+  explicit nsPluginArray(nsPIDOMWindow* aWindow);
+  nsPIDOMWindow* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // nsPluginArray registers itself as an observer with a weak reference.
@@ -40,7 +40,7 @@ public:
   void Init();
   void Invalidate();
 
-  void GetMimeTypes(nsTArray<RefPtr<nsMimeType>>& aMimeTypes);
+  void GetMimeTypes(nsTArray<nsRefPtr<nsMimeType>>& aMimeTypes);
 
   // PluginArray WebIDL methods
 
@@ -49,8 +49,9 @@ public:
   void Refresh(bool aReloadDocuments);
   nsPluginElement* IndexedGetter(uint32_t aIndex, bool &aFound);
   nsPluginElement* NamedGetter(const nsAString& aName, bool &aFound);
+  bool NameIsEnumerable(const nsAString& aName);
   uint32_t Length();
-  void GetSupportedNames(nsTArray<nsString>& aRetval);
+  void GetSupportedNames(unsigned, nsTArray<nsString>& aRetval);
 
 private:
   virtual ~nsPluginArray();
@@ -58,8 +59,8 @@ private:
   bool AllowPlugins() const;
   void EnsurePlugins();
 
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
-  nsTArray<RefPtr<nsPluginElement> > mPlugins;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
+  nsTArray<nsRefPtr<nsPluginElement> > mPlugins;
 };
 
 class nsPluginElement final : public nsISupports,
@@ -69,13 +70,12 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsPluginElement)
 
-  nsPluginElement(nsPIDOMWindowInner* aWindow,
-                  nsIInternalPluginTag* aPluginTag);
+  nsPluginElement(nsPIDOMWindow* aWindow, nsPluginTag* aPluginTag);
 
-  nsPIDOMWindowInner* GetParentObject() const;
+  nsPIDOMWindow* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  nsIInternalPluginTag* PluginTag() const
+  nsPluginTag* PluginTag() const
   {
     return mPluginTag;
   }
@@ -90,19 +90,20 @@ public:
   nsMimeType* NamedItem(const nsAString& name);
   nsMimeType* IndexedGetter(uint32_t index, bool &found);
   nsMimeType* NamedGetter(const nsAString& name, bool &found);
+  bool NameIsEnumerable(const nsAString& aName);
   uint32_t Length();
-  void GetSupportedNames(nsTArray<nsString>& retval);
+  void GetSupportedNames(unsigned, nsTArray<nsString>& retval);
 
-  nsTArray<RefPtr<nsMimeType> >& MimeTypes();
+  nsTArray<nsRefPtr<nsMimeType> >& MimeTypes();
 
 protected:
   ~nsPluginElement();
 
   void EnsurePluginMimeTypes();
 
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
-  nsCOMPtr<nsIInternalPluginTag> mPluginTag;
-  nsTArray<RefPtr<nsMimeType> > mMimeTypes;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
+  nsRefPtr<nsPluginTag> mPluginTag;
+  nsTArray<nsRefPtr<nsMimeType> > mMimeTypes;
 };
 
 #endif /* nsPluginArray_h___ */

@@ -113,14 +113,12 @@ public:
   CreateSessionTask(ClearKeySessionManager* aTarget,
                     uint32_t aCreateSessionToken,
                     uint32_t aPromiseId,
-                    const string& aInitDataType,
                     const uint8_t* aInitData,
                     uint32_t aInitDataSize,
                     GMPSessionType aSessionType)
     : mTarget(aTarget)
     , mCreateSessionToken(aCreateSessionToken)
     , mPromiseId(aPromiseId)
-    , mInitDataType(aInitDataType)
     , mSessionType(aSessionType)
   {
     mInitData.insert(mInitData.end(),
@@ -130,8 +128,8 @@ public:
   virtual void Run() override {
     mTarget->CreateSession(mCreateSessionToken,
                            mPromiseId,
-                           mInitDataType.c_str(),
-                           mInitDataType.size(),
+                           "cenc",
+                           strlen("cenc"),
                            &mInitData.front(),
                            mInitData.size(),
                            mSessionType);
@@ -143,7 +141,6 @@ private:
   RefPtr<ClearKeySessionManager> mTarget;
   uint32_t mCreateSessionToken;
   uint32_t mPromiseId;
-  const string mInitDataType;
   vector<uint8_t> mInitData;
   GMPSessionType mSessionType;
 };
@@ -153,7 +150,6 @@ private:
 ClearKeyPersistence::DeferCreateSessionIfNotReady(ClearKeySessionManager* aInstance,
                                                   uint32_t aCreateSessionToken,
                                                   uint32_t aPromiseId,
-                                                  const string& aInitDataType,
                                                   const uint8_t* aInitData,
                                                   uint32_t aInitDataSize,
                                                   GMPSessionType aSessionType)
@@ -164,7 +160,6 @@ ClearKeyPersistence::DeferCreateSessionIfNotReady(ClearKeySessionManager* aInsta
   GMPTask* t = new CreateSessionTask(aInstance,
                                      aCreateSessionToken,
                                      aPromiseId,
-                                     aInitDataType,
                                      aInitData,
                                      aInitDataSize,
                                      aSessionType);

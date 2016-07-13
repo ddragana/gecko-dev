@@ -276,7 +276,7 @@ nsTreeColumn::Invalidate()
 
   // If we have an Id, cache the Id as an atom.
   if (!mId.IsEmpty()) {
-    mAtom = NS_Atomize(mId);
+    mAtom = do_GetAtom(mId);
   }
 
   // Cache our index.
@@ -288,13 +288,13 @@ nsTreeColumn::Invalidate()
   const nsStyleText* textStyle = frame->StyleText();
 
   mTextAlignment = textStyle->mTextAlign;
-  // START or END alignment sometimes means RIGHT
-  if ((mTextAlignment == NS_STYLE_TEXT_ALIGN_START &&
+  // DEFAULT or END alignment sometimes means RIGHT
+  if ((mTextAlignment == NS_STYLE_TEXT_ALIGN_DEFAULT &&
        vis->mDirection == NS_STYLE_DIRECTION_RTL) ||
       (mTextAlignment == NS_STYLE_TEXT_ALIGN_END &&
        vis->mDirection == NS_STYLE_DIRECTION_LTR)) {
     mTextAlignment = NS_STYLE_TEXT_ALIGN_RIGHT;
-  } else if (mTextAlignment == NS_STYLE_TEXT_ALIGN_START ||
+  } else if (mTextAlignment == NS_STYLE_TEXT_ALIGN_DEFAULT ||
              mTextAlignment == NS_STYLE_TEXT_ALIGN_END) {
     mTextAlignment = NS_STYLE_TEXT_ALIGN_LEFT;
   }
@@ -321,13 +321,11 @@ nsTreeColumn::Invalidate()
   // Figure out our column type. Default type is text.
   mType = nsITreeColumn::TYPE_TEXT;
   static nsIContent::AttrValuesArray typestrings[] =
-    {&nsGkAtoms::checkbox, &nsGkAtoms::progressmeter, &nsGkAtoms::password,
-     nullptr};
+    {&nsGkAtoms::checkbox, &nsGkAtoms::progressmeter, nullptr};
   switch (mContent->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::type,
                                     typestrings, eCaseMatters)) {
     case 0: mType = nsITreeColumn::TYPE_CHECKBOX; break;
     case 1: mType = nsITreeColumn::TYPE_PROGRESSMETER; break;
-    case 2: mType = nsITreeColumn::TYPE_PASSWORD; break;
   }
 
   // Fetch the crop style.
@@ -606,6 +604,12 @@ nsTreeColumns::NamedGetter(const nsAString& aId, bool& aFound)
   return nullptr;
 }
 
+bool
+nsTreeColumns::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 nsTreeColumn*
 nsTreeColumns::GetNamedColumn(const nsAString& aId)
 {
@@ -621,7 +625,7 @@ nsTreeColumns::GetNamedColumn(const nsAString& aId, nsITreeColumn** _retval)
 }
 
 void
-nsTreeColumns::GetSupportedNames(nsTArray<nsString>& aNames)
+nsTreeColumns::GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
 {
   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
     aNames.AppendElement(currCol->GetId());
@@ -732,7 +736,7 @@ nsTreeColumns::EnsureColumns()
     if (!colFrame)
       return;
 
-    colFrame = colFrame->PrincipalChildList().FirstChild();
+    colFrame = colFrame->GetFirstPrincipalChild();
     if (!colFrame)
       return;
 

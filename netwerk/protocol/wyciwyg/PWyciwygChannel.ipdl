@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=8 et tw=80 ft=cpp : */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,39 +19,39 @@ protocol PWyciwygChannel
   manager PNecko;
 
 parent:
-  async __delete__();
+  __delete__();
 
-  async Init(URIParams     uri,
-             PrincipalInfo requestingPrincipalInfo,
-             PrincipalInfo triggeringPrincipalInfo,
-             uint32_t      securityFlags,
-             uint32_t      contentPolicyType);
-  async AsyncOpen(URIParams             originalURI,
-                  uint32_t              loadFlags,
-                  SerializedLoadContext loadContext,
-                  PBrowserOrId browser);
-  async AppData(SerializedLoadContext loadContext, PBrowserOrId browser);
+  Init(URIParams     uri,
+       PrincipalInfo requestingPrincipalInfo,
+       PrincipalInfo triggeringPrincipalInfo,
+       uint32_t      securityFlags,
+       uint32_t      contentPolicyType);
+  AsyncOpen(URIParams             originalURI,
+            uint32_t              loadFlags,
+            SerializedLoadContext loadContext,
+            PBrowserOrId browser);
+  AppData(SerializedLoadContext loadContext, PBrowserOrId browser);
 
   // methods corresponding to those of nsIWyciwygChannel
-  async WriteToCacheEntry(nsString data);
-  async CloseCacheEntry(nsresult reason);
-  async SetCharsetAndSource(int32_t source, nsCString charset);
-  async SetSecurityInfo(nsCString securityInfo);
-  async Cancel(nsresult status);
+  WriteToCacheEntry(nsString data);
+  CloseCacheEntry(nsresult reason);
+  SetCharsetAndSource(int32_t source, nsCString charset);
+  SetSecurityInfo(nsCString securityInfo);
+  Cancel(nsresult status);
 
 child:
-  async OnStartRequest(nsresult  statusCode,
-                       int64_t   contentLength,
-                       int32_t   source,
-                       nsCString charset,
-                       nsCString securityInfo);
+  OnStartRequest(nsresult  statusCode,
+                 int64_t   contentLength,
+                 int32_t   source,
+                 nsCString charset,
+                 nsCString securityInfo);
 
-  async OnDataAvailable(nsCString data,
-                        uint64_t  offset);
+  OnDataAvailable(nsCString data,
+                  uint64_t  offset);
 
-  async OnStopRequest(nsresult statusCode);
+  OnStopRequest(nsresult statusCode);
 
-  async CancelEarly(nsresult statusCode);
+  CancelEarly(nsresult statusCode);
 };
 
 

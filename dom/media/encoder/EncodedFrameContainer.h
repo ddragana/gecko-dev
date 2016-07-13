@@ -6,6 +6,7 @@
 #ifndef EncodedFrameContainer_H_
 #define EncodedFrameContainer_H_
 
+#include "nsAutoPtr.h"
 #include "nsTArray.h"
 
 namespace mozilla {
@@ -26,14 +27,14 @@ public:
     mEncodedFrames.AppendElement(aEncodedFrame);
   }
   // Retrieve all of the encoded frames
-  const nsTArray<RefPtr<EncodedFrame> >& GetEncodedFrames() const
+  const nsTArray<nsRefPtr<EncodedFrame> >& GetEncodedFrames() const
   {
     return mEncodedFrames;
   }
 private:
   // This container is used to store the video or audio encoded packets.
   // Muxer should check mFrameType and get the encoded data type from mEncodedFrames.
-  nsTArray<RefPtr<EncodedFrame> > mEncodedFrames;
+  nsTArray<nsRefPtr<EncodedFrame> > mEncodedFrames;
 };
 
 // Represent one encoded frame
@@ -59,8 +60,6 @@ public:
     AAC_CSD,          // AAC codec specific data
     AMR_AUDIO_CSD,
     AMR_AUDIO_FRAME,
-    EVRC_AUDIO_CSD,
-    EVRC_AUDIO_FRAME,
     UNKNOWN           // FrameType not set
   };
   void SwapInFrameData(nsTArray<uint8_t>& aData)

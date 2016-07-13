@@ -31,10 +31,6 @@ public:
     NS_IMETHOD GetPixelDepth(int32_t* aPixelDepth);
     NS_IMETHOD GetColorDepth(int32_t* aColorDepth);
     NS_IMETHOD GetContentsScaleFactor(double* aContentsScaleFactor);
-    NS_IMETHOD GetDefaultCSSScaleFactor(double* aScaleFactor)
-    {
-      return GetContentsScaleFactor(aScaleFactor);
-    }
 
 private:
     UIScreen* mScreen;
@@ -49,7 +45,7 @@ public:
 
     NS_DECL_NSISCREENMANAGER
 
-    static LayoutDeviceIntRect GetBounds();
+    static nsIntRect GetBounds();
 
 private:
     virtual ~UIKitScreenManager () {}

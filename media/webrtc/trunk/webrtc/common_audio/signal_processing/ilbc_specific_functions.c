@@ -32,7 +32,8 @@ void WebRtcSpl_ReverseOrderMultArrayElements(int16_t *out, const int16_t *in,
     const int16_t *winptr = win;
     for (i = 0; i < vector_length; i++)
     {
-      *outptr++ = (int16_t)((*inptr++ * *winptr--) >> right_shifts);
+        (*outptr++) = (int16_t)WEBRTC_SPL_MUL_16_16_RSFT(*inptr++,
+                                                               *winptr--, right_shifts);
     }
 }
 
@@ -46,7 +47,8 @@ void WebRtcSpl_ElementwiseVectorMult(int16_t *out, const int16_t *in,
     const int16_t *winptr = win;
     for (i = 0; i < vector_length; i++)
     {
-      *outptr++ = (int16_t)((*inptr++ * *winptr++) >> right_shifts);
+        (*outptr++) = (int16_t)WEBRTC_SPL_MUL_16_16_RSFT(*inptr++,
+                                                               *winptr++, right_shifts);
     }
 }
 

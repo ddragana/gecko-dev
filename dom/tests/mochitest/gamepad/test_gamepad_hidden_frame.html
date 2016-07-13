@@ -11,11 +11,10 @@
 <script type="text/javascript" src="mock_gamepad.js"></script>
 <script class="testbody" type="text/javascript">
 SimpleTest.waitForExplicitFinish();
-
-window.addEventListener("gamepadbuttondown", function() {
-  // Wait to ensure that all frames received the button press as well.
- SpecialPowers.executeSoon(tests[testNum++]);
-});
+var index = GamepadService.addGamepad("test gamepad", // id
+                                      SpecialPowers.Ci.nsIGamepadServiceTest.NO_MAPPING,
+                                      4, // buttons
+                                      2);// axes
 
 function pressButton() {
   GamepadService.newButtonEvent(index, 0, true);
@@ -29,26 +28,20 @@ function setFrameVisible(f, visible) {
 }
 
 var frames_loaded = 0;
-function startTest() {
+var f1, f2;
+function frame_loaded() {
   frames_loaded++;
-  if (frames_loaded == 2) {
-    GamepadService.addGamepad("test gamepad", // id
-                              GamepadService.standardMapping,
-                              4, // buttons
-                              2).then(function(i) {
-                                index = i;
-                                gamepad_loaded();
-                              });
+ if (frames_loaded == 2) {
+    f1 = document.getElementById('f1');
+    f2 = document.getElementById('f2');
+    pressButton();
   }
 }
-var f1, f2;
-function gamepad_loaded() {
-  f1 = document.getElementById('f1');
-  f2 = document.getElementById('f2');
-  pressButton();
-}
 
-
+window.addEventListener("gamepadbuttondown", function() {
+  // Wait to ensure that all frames received the button press as well.
+ SpecialPowers.executeSoon(tests[testNum++]);
+});
 
 var testNum = 0;
 var tests = [
@@ -62,7 +55,7 @@ function test1() {
 
   // Now hide the second frame and send another button press.
   setFrameVisible(f2, false);
-  SpecialPowers.executeSoon( () => { pressButton(); });
+  SpecialPowers.executeSoon(function() { pressButton(); });
 }
 
 function test2() {
@@ -73,7 +66,7 @@ function test2() {
 }
 
 </script>
-<iframe id="f1" src="gamepad_frame.html" onload="runGamepadTest(startTest)"></iframe>
-<iframe id="f2" src="gamepad_frame.html" onload="runGamepadTest(startTest)"></iframe>
+<iframe id="f1" src="gamepad_frame.html" onload="frame_loaded()"></iframe>
+<iframe id="f2" src="gamepad_frame.html" onload="frame_loaded()"></iframe>
 </body>
 </html>

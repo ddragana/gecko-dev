@@ -6,7 +6,6 @@
 #define mozilla_plugins_PluginWidgetParent_h
 
 #include "mozilla/plugins/PPluginWidgetParent.h"
-#include "nsAutoPtr.h"
 #include "nsIWidget.h"
 #include "nsCOMPtr.h"
 

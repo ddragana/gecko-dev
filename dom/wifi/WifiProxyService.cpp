@@ -29,10 +29,10 @@ namespace mozilla {
 static StaticRefPtr<WifiProxyService> gWifiProxyService;
 
 // The singleton supplicant class, that can be used on any thread.
-static UniquePtr<WpaSupplicant> gWpaSupplicant;
+static nsAutoPtr<WpaSupplicant> gWpaSupplicant;
 
 // Runnable used dispatch the WaitForEvent result on the main thread.
-class WifiEventDispatcher : public Runnable
+class WifiEventDispatcher : public nsRunnable
 {
 public:
   WifiEventDispatcher(const nsAString& aEvent, const nsACString& aInterface)
@@ -55,7 +55,7 @@ private:
 };
 
 // Runnable used to call WaitForEvent on the event thread.
-class EventRunnable : public Runnable
+class EventRunnable : public nsRunnable
 {
 public:
   EventRunnable(const nsACString& aInterface)
@@ -87,7 +87,7 @@ private:
 };
 
 // Runnable used dispatch the Command result on the main thread.
-class WifiResultDispatcher : public Runnable
+class WifiResultDispatcher : public nsRunnable
 {
 public:
   WifiResultDispatcher(WifiResultOptions& aResult, const nsACString& aInterface)
@@ -110,7 +110,7 @@ private:
 };
 
 // Runnable used to call SendCommand on the control thread.
-class ControlRunnable : public Runnable
+class ControlRunnable : public nsRunnable
 {
 public:
   ControlRunnable(CommandOptions aOptions, const nsACString& aInterface)
@@ -160,11 +160,11 @@ WifiProxyService::FactoryCreate()
     gWifiProxyService = new WifiProxyService();
     ClearOnShutdown(&gWifiProxyService);
 
-    gWpaSupplicant = MakeUnique<WpaSupplicant>();
+    gWpaSupplicant = new WpaSupplicant();
     ClearOnShutdown(&gWpaSupplicant);
   }
 
-  RefPtr<WifiProxyService> service = gWifiProxyService.get();
+  nsRefPtr<WifiProxyService> service = gWifiProxyService.get();
   return service.forget();
 }
 
@@ -248,10 +248,6 @@ WifiProxyService::SendCommand(JS::Handle<JS::Value> aOptions,
     return NS_ERROR_FAILURE;
   }
 
-  if (!mControlThread) {
-    return NS_ERROR_FAILURE;
-  }
-
   // Dispatch the command to the control thread.
   CommandOptions commandOptions(options);
   nsCOMPtr<nsIRunnable> runnable = new ControlRunnable(commandOptions, aInterface);
@@ -297,10 +293,8 @@ WifiProxyService::DispatchWifiResult(const WifiResultOptions& aOptions, const ns
     return;
   }
 
-  if (mListener) {
-    // Call the listener with a JS value.
-    mListener->OnCommand(val, aInterface);
-  }
+  // Call the listener with a JS value.
+  mListener->OnCommand(val, aInterface);
 }
 
 void

@@ -9,6 +9,7 @@
 #include "mozilla/dom/BlobSet.h"
 #include "mozilla/dom/FileBinding.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "nsAutoPtr.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIMultiplexInputStream.h"
 #include "nsStringStream.h"
@@ -23,37 +24,6 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 NS_IMPL_ISUPPORTS_INHERITED0(MultipartBlobImpl, BlobImpl)
-
-/* static */ already_AddRefed<MultipartBlobImpl>
-MultipartBlobImpl::Create(const nsTArray<RefPtr<BlobImpl>>& aBlobImpls,
-                          const nsAString& aName,
-                          const nsAString& aContentType,
-                          ErrorResult& aRv)
-{
-  RefPtr<MultipartBlobImpl> blobImpl =
-    new MultipartBlobImpl(aBlobImpls, aName, aContentType);
-  blobImpl->SetLengthAndModifiedDate(aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-
-  return blobImpl.forget();
-}
-
-/* static */ already_AddRefed<MultipartBlobImpl>
-MultipartBlobImpl::Create(const nsTArray<RefPtr<BlobImpl>>& aBlobImpls,
-                          const nsAString& aContentType,
-                          ErrorResult& aRv)
-{
-  RefPtr<MultipartBlobImpl> blobImpl =
-    new MultipartBlobImpl(aBlobImpls, aContentType);
-  blobImpl->SetLengthAndModifiedDate(aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-
-  return blobImpl.forget();
-}
 
 void
 MultipartBlobImpl::GetInternalStream(nsIInputStream** aStream,
@@ -93,7 +63,7 @@ MultipartBlobImpl::CreateSlice(uint64_t aStart, uint64_t aLength,
                                ErrorResult& aRv)
 {
   // If we clamped to nothing we create an empty blob
-  nsTArray<RefPtr<BlobImpl>> blobImpls;
+  nsTArray<nsRefPtr<BlobImpl>> blobImpls;
 
   uint64_t length = aLength;
   uint64_t skipStart = aStart;
@@ -111,7 +81,7 @@ MultipartBlobImpl::CreateSlice(uint64_t aStart, uint64_t aLength,
     if (skipStart < l) {
       uint64_t upperBound = std::min<uint64_t>(l - skipStart, length);
 
-      RefPtr<BlobImpl> firstBlobImpl =
+      nsRefPtr<BlobImpl> firstBlobImpl =
         blobImpl->CreateSlice(skipStart, upperBound,
                               aContentType, aRv);
       if (NS_WARN_IF(aRv.Failed())) {
@@ -141,7 +111,7 @@ MultipartBlobImpl::CreateSlice(uint64_t aStart, uint64_t aLength,
     }
 
     if (length < l) {
-      RefPtr<BlobImpl> lastBlobImpl =
+      nsRefPtr<BlobImpl> lastBlobImpl =
         blobImpl->CreateSlice(0, length, aContentType, aRv);
       if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;
@@ -155,41 +125,38 @@ MultipartBlobImpl::CreateSlice(uint64_t aStart, uint64_t aLength,
   }
 
   // we can create our blob now
-  RefPtr<BlobImpl> impl = Create(blobImpls, aContentType, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-
+  nsRefPtr<BlobImpl> impl =
+    new MultipartBlobImpl(blobImpls, aContentType);
   return impl.forget();
 }
 
 void
-MultipartBlobImpl::InitializeBlob(ErrorResult& aRv)
+MultipartBlobImpl::InitializeBlob()
 {
-  SetLengthAndModifiedDate(aRv);
-  NS_WARN_IF(aRv.Failed());
+  SetLengthAndModifiedDate();
 }
 
 void
-MultipartBlobImpl::InitializeBlob(JSContext* aCx,
-                                  const Sequence<Blob::BlobPart>& aData,
-                                  const nsAString& aContentType,
-                                  bool aNativeEOL,
-                                  ErrorResult& aRv)
+MultipartBlobImpl::InitializeBlob(
+       JSContext* aCx,
+       const Sequence<OwningArrayBufferOrArrayBufferViewOrBlobOrString>& aData,
+       const nsAString& aContentType,
+       bool aNativeEOL,
+       ErrorResult& aRv)
 {
   mContentType = aContentType;
   BlobSet blobSet;
 
   for (uint32_t i = 0, len = aData.Length(); i < len; ++i) {
-    const Blob::BlobPart& data = aData[i];
+    const OwningArrayBufferOrArrayBufferViewOrBlobOrString& data = aData[i];
 
     if (data.IsBlob()) {
-      RefPtr<Blob> blob = data.GetAsBlob().get();
+      nsRefPtr<Blob> blob = data.GetAsBlob().get();
       blobSet.AppendBlobImpl(blob->Impl());
     }
 
-    else if (data.IsUSVString()) {
-      aRv = blobSet.AppendString(data.GetAsUSVString(), aNativeEOL, aCx);
+    else if (data.IsString()) {
+      aRv = blobSet.AppendString(data.GetAsString(), aNativeEOL, aCx);
       if (aRv.Failed()) {
         return;
       }
@@ -220,12 +187,11 @@ MultipartBlobImpl::InitializeBlob(JSContext* aCx,
 
 
   mBlobImpls = blobSet.GetBlobImpls();
-  SetLengthAndModifiedDate(aRv);
-  NS_WARN_IF(aRv.Failed());
+  SetLengthAndModifiedDate();
 }
 
 void
-MultipartBlobImpl::SetLengthAndModifiedDate(ErrorResult& aRv)
+MultipartBlobImpl::SetLengthAndModifiedDate()
 {
   MOZ_ASSERT(mLength == UINT64_MAX);
   MOZ_ASSERT(mLastModificationDate == INT64_MAX);
@@ -235,26 +201,23 @@ MultipartBlobImpl::SetLengthAndModifiedDate(ErrorResult& aRv)
   bool lastModifiedSet = false;
 
   for (uint32_t index = 0, count = mBlobImpls.Length(); index < count; index++) {
-    RefPtr<BlobImpl>& blob = mBlobImpls[index];
+    nsRefPtr<BlobImpl>& blob = mBlobImpls[index];
 
 #ifdef DEBUG
     MOZ_ASSERT(!blob->IsSizeUnknown());
     MOZ_ASSERT(!blob->IsDateUnknown());
 #endif
 
-    uint64_t subBlobLength = blob->GetSize(aRv);
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
+    ErrorResult error;
+    uint64_t subBlobLength = blob->GetSize(error);
+    MOZ_ALWAYS_TRUE(!error.Failed());
 
     MOZ_ASSERT(UINT64_MAX - subBlobLength >= totalLength);
     totalLength += subBlobLength;
 
     if (blob->IsFile()) {
-      int64_t partLastModified = blob->GetLastModified(aRv);
-      if (NS_WARN_IF(aRv.Failed())) {
-        return;
-      }
+      int64_t partLastModified = blob->GetLastModified(error);
+      MOZ_ALWAYS_TRUE(!error.Failed());
 
       if (lastModified < partLastModified) {
         lastModified = partLastModified;
@@ -351,12 +314,11 @@ MultipartBlobImpl::InitializeChromeFile(Blob& aBlob,
   blobSet.AppendBlobImpl(aBlob.Impl());
   mBlobImpls = blobSet.GetBlobImpls();
 
-  SetLengthAndModifiedDate(aRv);
-  NS_WARN_IF(aRv.Failed());
+  SetLengthAndModifiedDate();
 }
 
 void
-MultipartBlobImpl::InitializeChromeFile(nsPIDOMWindowInner* aWindow,
+MultipartBlobImpl::InitializeChromeFile(nsPIDOMWindow* aWindow,
                                         nsIFile* aFile,
                                         const ChromeFilePropertyBag& aBag,
                                         bool aIsFromNsIFile,
@@ -400,7 +362,7 @@ MultipartBlobImpl::InitializeChromeFile(nsPIDOMWindowInner* aWindow,
     aFile->GetLeafName(mName);
   }
 
-  RefPtr<File> blob = File::CreateFromFile(aWindow, aFile, aBag.mTemporary);
+  nsRefPtr<File> blob = File::CreateFromFile(aWindow, aFile, aBag.mTemporary);
 
   // Pre-cache size.
   blob->GetSize(aRv);
@@ -423,12 +385,11 @@ MultipartBlobImpl::InitializeChromeFile(nsPIDOMWindowInner* aWindow,
   blobSet.AppendBlobImpl(static_cast<File*>(blob.get())->Impl());
   mBlobImpls = blobSet.GetBlobImpls();
 
-  SetLengthAndModifiedDate(aRv);
-  NS_WARN_IF(aRv.Failed());
+  SetLengthAndModifiedDate();
 }
 
 void
-MultipartBlobImpl::InitializeChromeFile(nsPIDOMWindowInner* aWindow,
+MultipartBlobImpl::InitializeChromeFile(nsPIDOMWindow* aWindow,
                                         const nsAString& aData,
                                         const ChromeFilePropertyBag& aBag,
                                         ErrorResult& aRv)

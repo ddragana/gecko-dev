@@ -6,7 +6,10 @@
 
 const TEST_PAGE = "http://mochi.test:8888/browser/browser/components/customizableui/test/support/test_967000_charEncoding_page.html";
 
-add_task(function*() {
+let newTab;
+let initialLocation = gBrowser.currentURI.spec;
+
+add_task(function() {
   info("Check Character Encoding button functionality");
 
   // add the Character Encoding button to the panel
@@ -25,15 +28,14 @@ add_task(function*() {
   PanelUI.hide();
   yield panelHidePromise;
 
-  let newTab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, TEST_PAGE, true, true);
+  newTab = gBrowser.selectedTab;
+  yield promiseTabLoadEvent(newTab, TEST_PAGE)
 
   yield PanelUI.show();
   ok(!charEncodingButton.hasAttribute("disabled"), "The Character encoding button gets enabled");
-  let characterEncodingView = document.getElementById("PanelUI-characterEncodingView");
-  let subviewShownPromise = subviewShown(characterEncodingView);
   charEncodingButton.click();
-  yield subviewShownPromise;
 
+  let characterEncodingView = document.getElementById("PanelUI-characterEncodingView");
   ok(characterEncodingView.hasAttribute("current"), "The Character encoding panel is displayed");
 
   let pinnedEncodings = document.getElementById("PanelUI-characterEncodingView-pinned");
@@ -51,12 +53,14 @@ add_task(function*() {
   panelHidePromise = promisePanelHidden(window);
   PanelUI.hide();
   yield panelHidePromise;
-
-  yield BrowserTestUtils.removeTab(newTab);
 });
 
-add_task(function* asyncCleanup() {
+add_task(function asyncCleanup() {
   // reset the panel to the default state
   yield resetCustomization();
   ok(CustomizableUI.inDefaultState, "The UI is in default state again.");
+
+  // restore the initial location
+  gBrowser.addTab(initialLocation);
+  gBrowser.removeTab(newTab);
 });

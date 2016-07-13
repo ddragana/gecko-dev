@@ -22,7 +22,7 @@
 
 class nsIContent;
 class nsIDocShellTreeItem;
-class nsPIDOMWindowOuter;
+class nsPIDOMWindow;
 class nsIMessageBroadcaster;
 
 namespace mozilla {
@@ -70,12 +70,12 @@ public:
   /**
    * Return a focused window. Version of nsIFocusManager::GetFocusedWindow.
    */
-  nsPIDOMWindowOuter* GetFocusedWindow() const { return mFocusedWindow; }
+  nsPIDOMWindow* GetFocusedWindow() const { return mFocusedWindow; }
 
   /**
    * Return an active window. Version of nsIFocusManager::GetActiveWindow.
    */
-  nsPIDOMWindowOuter* GetActiveWindow() const { return mActiveWindow; }
+  nsPIDOMWindow* GetActiveWindow() const { return mActiveWindow; }
 
   /**
    * Called when content has been removed.
@@ -108,13 +108,13 @@ public:
    *
    * aWindow and aFocusedWindow must both be non-null.
    */
-  static nsIContent* GetFocusedDescendant(nsPIDOMWindowOuter* aWindow, bool aDeep,
-                                          nsPIDOMWindowOuter** aFocusedWindow);
+  static nsIContent* GetFocusedDescendant(nsPIDOMWindow* aWindow, bool aDeep,
+                                          nsPIDOMWindow** aFocusedWindow);
 
   /**
    * Returns the content node that focus will be redirected to if aContent was
    * focused. This is used for the special case of certain XUL elements such
-   * as textboxes or input number which redirect focus to an anonymous child.
+   * as textboxes which redirect focus to an anonymous child.
    *
    * aContent must be non-null.
    *
@@ -151,7 +151,7 @@ protected:
   /**
    * Activate or deactivate the window and send the activate/deactivate events.
    */
-  void ActivateOrDeactivate(nsPIDOMWindowOuter* aWindow, bool aActive);
+  void ActivateOrDeactivate(nsPIDOMWindow* aWindow, bool aActive);
 
   /**
    * Blur whatever is currently focused and focus aNewContent. aFlags is a
@@ -171,15 +171,15 @@ protected:
    * Returns true if aPossibleAncestor is the same as aWindow or an
    * ancestor of aWindow.
    */
-  bool IsSameOrAncestor(nsPIDOMWindowOuter* aPossibleAncestor,
-                        nsPIDOMWindowOuter* aWindow);
+  bool IsSameOrAncestor(nsPIDOMWindow* aPossibleAncestor,
+                          nsPIDOMWindow* aWindow);
 
   /**
    * Returns the window that is the lowest common ancestor of both aWindow1
    * and aWindow2, or null if they share no common ancestor.
    */
-  already_AddRefed<nsPIDOMWindowOuter>
-  GetCommonAncestor(nsPIDOMWindowOuter* aWindow1, nsPIDOMWindowOuter* aWindow2);
+  already_AddRefed<nsPIDOMWindow> GetCommonAncestor(nsPIDOMWindow* aWindow1,
+                                                    nsPIDOMWindow* aWindow2);
 
   /**
    * When aNewWindow is focused, adjust the ancestors of aNewWindow so that they
@@ -187,12 +187,12 @@ protected:
    * the active top-level window and navigate down the currently focused
    * elements for each frame in the tree to get to aNewWindow.
    */
-  void AdjustWindowFocus(nsPIDOMWindowOuter* aNewWindow, bool aCheckPermission);
+  void AdjustWindowFocus(nsPIDOMWindow* aNewWindow, bool aCheckPermission);
 
   /**
    * Returns true if aWindow is visible.
    */
-  bool IsWindowVisible(nsPIDOMWindowOuter* aWindow);
+  bool IsWindowVisible(nsPIDOMWindow* aWindow);
 
   /**
    * Returns true if aContent is a root element and not focusable.
@@ -238,11 +238,10 @@ protected:
    *
    * If aAdjustWidget is false, don't change the widget focus state.
    */
-  bool Blur(nsPIDOMWindowOuter* aWindowToClear,
-            nsPIDOMWindowOuter* aAncestorWindowToFocus,
-            bool aIsLeavingDocument,
-            bool aAdjustWidget,
-            nsIContent* aContentToFocus = nullptr);
+  bool Blur(nsPIDOMWindow* aWindowToClear,
+              nsPIDOMWindow* aAncestorWindowToFocus,
+              bool aIsLeavingDocument,
+              bool aAdjustWidget);
 
   /**
    * Focus an element in the active window and child frame.
@@ -270,31 +269,29 @@ protected:
    *
    * If aAdjustWidget is false, don't change the widget focus state.
    */
-  void Focus(nsPIDOMWindowOuter* aWindow,
+  void Focus(nsPIDOMWindow* aWindow,
              nsIContent* aContent,
              uint32_t aFlags,
              bool aIsNewDocument,
              bool aFocusChanged,
              bool aWindowRaised,
-             bool aAdjustWidget,
-             nsIContent* aContentLostFocus = nullptr);
+             bool aAdjustWidget);
 
   /**
    * Fires a focus or blur event at aTarget.
    *
-   * aEventMessage should be either eFocus or eBlur.
-   * For blur events, aFocusMethod should normally be non-zero.
+   * aType should be either NS_FOCUS_CONTENT or NS_BLUR_CONTENT. For blur
+   * events, aFocusMethod should normally be non-zero.
    *
    * aWindowRaised should only be true if called from WindowRaised.
    */
-  void SendFocusOrBlurEvent(mozilla::EventMessage aEventMessage,
+  void SendFocusOrBlurEvent(uint32_t aType,
                             nsIPresShell* aPresShell,
                             nsIDocument* aDocument,
                             nsISupports* aTarget,
                             uint32_t aFocusMethod,
                             bool aWindowRaised,
-                            bool aIsRefocus = false,
-                            mozilla::dom::EventTarget* aRelatedTarget = nullptr);
+                            bool aIsRefocus = false);
 
   /**
    * Scrolls aContent into view unless the FLAG_NOSCROLL flag is set.
@@ -306,7 +303,7 @@ protected:
   /**
    * Raises the top-level window aWindow at the widget level.
    */
-  void RaiseWindow(nsPIDOMWindowOuter* aWindow);
+  void RaiseWindow(nsPIDOMWindow* aWindow);
 
   /**
    * Updates the caret positon and visibility to match the focus.
@@ -356,7 +353,7 @@ protected:
    * navigation is not done to parent documents and iteration returns to the
    * beginning (or end) of the starting document.
    */
-  nsresult DetermineElementToMoveFocus(nsPIDOMWindowOuter* aWindow,
+  nsresult DetermineElementToMoveFocus(nsPIDOMWindow* aWindow,
                                        nsIContent* aStart,
                                        int32_t aType, bool aNoParentTraversal,
                                        nsIContent** aNextContent);
@@ -441,7 +438,7 @@ protected:
    * - if aCheckVisibility is true and the aWindow is not visible.
    * - if aDocument is a frameset document.
    */
-  nsIContent* GetRootForFocus(nsPIDOMWindowOuter* aWindow,
+  nsIContent* GetRootForFocus(nsPIDOMWindow* aWindow,
                               nsIDocument* aDocument,
                               bool aForDocumentNavigation,
                               bool aCheckVisibility);
@@ -460,7 +457,7 @@ protected:
    * which is used, for example, to focus links as the caret is moved over
    * them.
    */
-  void GetFocusInSelection(nsPIDOMWindowOuter* aWindow,
+  void GetFocusInSelection(nsPIDOMWindow* aWindow,
                            nsIContent* aStartSelection,
                            nsIContent* aEndSelection,
                            nsIContent** aFocusedContent);
@@ -478,15 +475,15 @@ private:
                                      bool aWindowShouldShowFocusRing,
                                      bool aGettingFocus);
 
-  void SetFocusedWindowInternal(nsPIDOMWindowOuter* aWindow);
+  void SetFocusedWindowInternal(nsPIDOMWindow* aWindow);
 
   // the currently active and front-most top-most window
-  nsCOMPtr<nsPIDOMWindowOuter> mActiveWindow;
+  nsCOMPtr<nsPIDOMWindow> mActiveWindow;
 
   // the child or top-level window that is currently focused. This window will
   // either be the same window as mActiveWindow or a descendant of it.
   // Except during shutdown use SetFocusedWindowInternal to set mFocusedWindow!
-  nsCOMPtr<nsPIDOMWindowOuter> mFocusedWindow;
+  nsCOMPtr<nsPIDOMWindow> mFocusedWindow;
 
   // the currently focused content, which is always inside mFocusedWindow. This
   // is a cached copy of the mFocusedWindow's current content. This may be null
@@ -500,7 +497,7 @@ private:
   nsCOMPtr<nsIContent> mFirstFocusEvent;
 
   // keep track of a window while it is being lowered
-  nsCOMPtr<nsPIDOMWindowOuter> mWindowBeingLowered;
+  nsCOMPtr<nsPIDOMWindow> mWindowBeingLowered;
 
   // synchronized actions cannot be interrupted with events, so queue these up
   // and fire them later.

@@ -3,12 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-var addonIDs = ["test_bug393285_1@tests.mozilla.org",
+let addonIDs = ["test_bug393285_1@tests.mozilla.org",
                 "test_bug393285_2@tests.mozilla.org",
                 "test_bug393285_3a@tests.mozilla.org",
                 "test_bug393285_4@tests.mozilla.org"];
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 const URI_EXTENSION_BLOCKLIST_DIALOG = "chrome://mozapps/content/extensions/blocklist.xul";
 
@@ -125,7 +125,7 @@ function run_test() {
   startupManager();
 
   AddonManager.getAddonsByIDs(addonIDs, function(addons) {
-    for (let addon of addons) {
+    for (addon of addons) {
       do_check_eq(addon.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
     }
     run_test_1();

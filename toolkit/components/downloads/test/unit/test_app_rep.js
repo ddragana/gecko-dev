@@ -9,18 +9,16 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const gAppRep = Cc["@mozilla.org/downloads/application-reputation-service;1"].
                   getService(Ci.nsIApplicationReputationService);
-var gHttpServ = null;
-var gTables = {};
+let gHttpServ = null;
+let gTables = {};
 
-var ALLOW_LIST = 0;
-var BLOCK_LIST = 1;
-var NO_LIST = 2;
+let ALLOW_LIST = 0;
+let BLOCK_LIST = 1;
+let NO_LIST = 2;
 
-var whitelistedURI = createURI("http://foo:bar@whitelisted.com/index.htm#junk");
-var exampleURI = createURI("http://user:password@example.com/i.html?foo=bar");
-var blocklistedURI = createURI("http://baz:qux@blocklisted.com?xyzzy");
-
-const appRepURLPref = "browser.safebrowsing.downloads.remote.url";
+let whitelistedURI = createURI("http://foo:bar@whitelisted.com/index.htm#junk");
+let exampleURI = createURI("http://user:password@example.com/i.html?foo=bar");
+let blocklistedURI = createURI("http://baz:qux@blocklisted.com?xyzzy");
 
 function readFileToString(aFilename) {
   let f = do_get_file(aFilename);
@@ -59,9 +57,9 @@ function registerTableUpdate(aTable, aFilename) {
   });
 }
 
-add_task(function* test_setup() {
+function run_test() {
   // Set up a local HTTP server to return bad verdicts.
-  Services.prefs.setCharPref(appRepURLPref,
+  Services.prefs.setCharPref("browser.safebrowsing.appRepURL",
                              "http://localhost:4444/download");
   // Ensure safebrowsing is enabled for this test, even if the app
   // doesn't have it enabled.
@@ -89,9 +87,7 @@ add_task(function* test_setup() {
     do_throw("This test should never make a remote lookup");
   });
   gHttpServ.start(4444);
-});
 
-function run_test() {
   run_next_test();
 }
 
@@ -163,9 +159,7 @@ add_test(function test_nullCallback() {
       fileSize: 12,
     }, null);
     do_throw("Callback cannot be null");
-  } catch (ex) {
-    if (ex.result != Cr.NS_ERROR_INVALID_POINTER)
-      throw ex;
+  } catch (ex if ex.result == Cr.NS_ERROR_INVALID_POINTER) {
     // We don't even increment the count here, because there's no callback.
     check_telemetry(counts.total, counts.shouldBlock, counts.listCounts);
     run_next_test();
@@ -225,7 +219,7 @@ add_test(function test_local_list() {
 });
 
 add_test(function test_unlisted() {
-  Services.prefs.setCharPref(appRepURLPref,
+  Services.prefs.setCharPref("browser.safebrowsing.appRepURL",
                              "http://localhost:4444/download");
   let counts = get_telemetry_counts();
   let listCounts = counts.listCounts;
@@ -242,7 +236,7 @@ add_test(function test_unlisted() {
 });
 
 add_test(function test_non_uri() {
-  Services.prefs.setCharPref(appRepURLPref,
+  Services.prefs.setCharPref("browser.safebrowsing.appRepURL",
                              "http://localhost:4444/download");
   let counts = get_telemetry_counts();
   let listCounts = counts.listCounts;
@@ -261,7 +255,7 @@ add_test(function test_non_uri() {
 });
 
 add_test(function test_local_blacklist() {
-  Services.prefs.setCharPref(appRepURLPref,
+  Services.prefs.setCharPref("browser.safebrowsing.appRepURL",
                              "http://localhost:4444/download");
   let counts = get_telemetry_counts();
   let listCounts = counts.listCounts;
@@ -278,7 +272,7 @@ add_test(function test_local_blacklist() {
 });
 
 add_test(function test_referer_blacklist() {
-  Services.prefs.setCharPref(appRepURLPref,
+  Services.prefs.setCharPref("browser.safebrowsing.appRepURL",
                              "http://localhost:4444/download");
   let counts = get_telemetry_counts();
   let listCounts = counts.listCounts;
@@ -296,7 +290,7 @@ add_test(function test_referer_blacklist() {
 });
 
 add_test(function test_blocklist_trumps_allowlist() {
-  Services.prefs.setCharPref(appRepURLPref,
+  Services.prefs.setCharPref("browser.safebrowsing.appRepURL",
                              "http://localhost:4444/download");
   let counts = get_telemetry_counts();
   let listCounts = counts.listCounts;
@@ -314,7 +308,7 @@ add_test(function test_blocklist_trumps_allowlist() {
 });
 
 add_test(function test_redirect_on_blocklist() {
-  Services.prefs.setCharPref(appRepURLPref,
+  Services.prefs.setCharPref("browser.safebrowsing.appRepURL",
                              "http://localhost:4444/download");
   let counts = get_telemetry_counts();
   let listCounts = counts.listCounts;
@@ -323,11 +317,11 @@ add_test(function test_redirect_on_blocklist() {
   let secman = Services.scriptSecurityManager;
   let badRedirects = Cc["@mozilla.org/array;1"]
                        .createInstance(Ci.nsIMutableArray);
-  badRedirects.appendElement(secman.createCodebasePrincipal(exampleURI, {}),
+  badRedirects.appendElement(secman.getNoAppCodebasePrincipal(exampleURI),
                              false);
-  badRedirects.appendElement(secman.createCodebasePrincipal(blocklistedURI, {}),
+  badRedirects.appendElement(secman.getNoAppCodebasePrincipal(blocklistedURI),
                              false);
-  badRedirects.appendElement(secman.createCodebasePrincipal(whitelistedURI, {}),
+  badRedirects.appendElement(secman.getNoAppCodebasePrincipal(whitelistedURI),
                              false);
   gAppRep.queryReputation({
     sourceURI: whitelistedURI,

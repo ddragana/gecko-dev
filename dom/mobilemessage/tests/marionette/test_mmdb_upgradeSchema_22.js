@@ -6,10 +6,10 @@ MARIONETTE_HEAD_JS = 'mmdb_head.js';
 
 Cu.import("resource://gre/modules/PhoneNumberUtils.jsm");
 
-var RIL = {};
+let RIL = {};
 Cu.import("resource://gre/modules/ril_consts.js", RIL);
 
-var MMS = {};
+let MMS = {};
 Cu.import("resource://gre/modules/MmsPduHelper.jsm", MMS);
 
 const DBNAME = "test_mmdb_upgradeSchema_22:" + newUUID();
@@ -40,7 +40,7 @@ const FILTER_READ_READ = 1;
 
 const DISABLE_MMS_GROUPING_FOR_RECEIVING = true;
 
-var LEGACY = {
+let LEGACY = {
   saveRecord: function(aMessageRecord, aAddresses, aCallback) {
     if (DEBUG) debug("Going to store " + JSON.stringify(aMessageRecord));
 
@@ -171,7 +171,7 @@ var LEGACY = {
         aMessageRecord.threadIdIndex = [threadId, timestamp];
         // Setup participantIdsIndex.
         aMessageRecord.participantIdsIndex = [];
-        for (let id of participantIds) {
+        for each (let id in participantIds) {
           aMessageRecord.participantIdsIndex.push([id, timestamp]);
         }
 

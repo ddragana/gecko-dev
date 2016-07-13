@@ -13,6 +13,7 @@
 
 namespace mozilla {
 namespace dom {
+namespace indexedDB {
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(IDBWrapperCache)
 
@@ -47,7 +48,7 @@ IDBWrapperCache::IDBWrapperCache(DOMEventTargetHelper* aOwner)
   : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
 { }
 
-IDBWrapperCache::IDBWrapperCache(nsPIDOMWindowInner* aOwner)
+IDBWrapperCache::IDBWrapperCache(nsPIDOMWindow* aOwner)
   : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
 { }
 
@@ -76,5 +77,6 @@ IDBWrapperCache::AssertIsRooted() const
 }
 #endif
 
+} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla

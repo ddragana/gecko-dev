@@ -33,10 +33,10 @@ public:
     nsGridCell();
     ~nsGridCell();
 
-    nsSize      GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState);
-    nsSize      GetXULMinSize(nsBoxLayoutState& aBoxLayoutState);
-    nsSize      GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState);
-    bool        IsXULCollapsed();
+    nsSize      GetPrefSize(nsBoxLayoutState& aBoxLayoutState);
+    nsSize      GetMinSize(nsBoxLayoutState& aBoxLayoutState);
+    nsSize      GetMaxSize(nsBoxLayoutState& aBoxLayoutState);
+    bool        IsCollapsed();
 
 // accessors
     nsIFrame*   GetBoxInColumn()               { return mBoxInColumn; }

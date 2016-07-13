@@ -27,7 +27,7 @@
 #include <string.h>
 #include "prdtoa.h"
 #include "mozilla/Logging.h"
-#include "mozilla/Snprintf.h"
+#include "prprf.h"
 #include "prmem.h"
 #include "nsCRTGlue.h"
 #include "nsTextFormatter.h"
@@ -351,14 +351,14 @@ cvt_f(SprintfState* aState, double aDouble, int aWidth, int aPrec,
       break;
     case 'E':
       exp = 'E';
-      MOZ_FALLTHROUGH;
+    // no break
     case 'e':
       numdigits = aPrec + 1;
       mode = 2;
       break;
     case 'G':
       exp = 'E';
-      MOZ_FALLTHROUGH;
+    // no break
     case 'g':
       if (aPrec == 0) {
         aPrec = 1;
@@ -406,8 +406,7 @@ cvt_f(SprintfState* aState, double aDouble, int aWidth, int aPrec,
           }
         }
         *bufp++ = exp;
-
-        snprintf(bufp, bufsz - (bufp - buf), "%+03d", decpt - 1);
+        PR_snprintf(bufp, bufsz - (bufp - buf), "%+03d", decpt - 1);
         break;
 
       case 'f':
@@ -459,7 +458,7 @@ cvt_f(SprintfState* aState, double aDouble, int aWidth, int aPrec,
             }
           }
           *bufp++ = exp;
-          snprintf(bufp, bufsz - (bufp - buf), "%+03d", decpt - 1);
+          PR_snprintf(bufp, bufsz - (bufp - buf), "%+03d", decpt - 1);
         } else {
           if (decpt < 1) {
             *bufp++ = '0';
@@ -631,7 +630,7 @@ BuildArgArray(const char16_t* aFmt, va_list aAp, int* aRv,
       continue;
     }
     cn = 0;
-    /* should improve error check later */
+    /* should imporve error check later */
     while (c && c != '$') {
       cn = cn * 10 + c - '0';
       c = *p++;
@@ -881,14 +880,14 @@ dosprintf(SprintfState* aState, const char16_t* aFmt, va_list aAp)
     if (nas) {
       /* the aFmt contains the Numbered Arguments feature */
       i = 0;
-      /* should improve error check later */
+      /* should imporve error check later */
       while (c && c != '$') {
         i = (i * 10) + (c - '0');
         c = *aFmt++;
       }
 
       if (nas[i - 1].type == NumArgState::UNKNOWN) {
-        if (nas != nasArray) {
+        if (nas && (nas != nasArray)) {
           PR_DELETE(nas);
         }
         return -1;
@@ -1223,7 +1222,7 @@ GrowStuff(SprintfState* aState, const char16_t* aStr, uint32_t aLen)
     --aLen;
     *aState->cur++ = *aStr++;
   }
-  MOZ_ASSERT((uint32_t)(aState->cur - aState->base) <= aState->maxlen);
+  PR_ASSERT((uint32_t)(aState->cur - aState->base) <= aState->maxlen);
   return 0;
 }
 
@@ -1318,7 +1317,7 @@ nsTextFormatter::snprintf(char16_t* aOut, uint32_t aOutLen,
   va_list ap;
   uint32_t rv;
 
-  MOZ_ASSERT((int32_t)aOutLen > 0);
+  PR_ASSERT((int32_t)aOutLen > 0);
   if ((int32_t)aOutLen <= 0) {
     return 0;
   }
@@ -1336,7 +1335,7 @@ nsTextFormatter::vsnprintf(char16_t* aOut, uint32_t aOutLen,
   SprintfState ss;
   uint32_t n;
 
-  MOZ_ASSERT((int32_t)aOutLen > 0);
+  PR_ASSERT((int32_t)aOutLen > 0);
   if ((int32_t)aOutLen <= 0) {
     return 0;
   }

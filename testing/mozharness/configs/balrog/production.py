@@ -4,7 +4,7 @@ config = {
             'balrog_api_root': 'https://aus4-admin.mozilla.org/api',
             'ignore_failures': False,
             'url_replacements': [
-                ('http://archive.mozilla.org/pub', 'http://download.cdn.mozilla.net/pub'),
+                ('http://ftp.mozilla.org/pub/mozilla.org', 'http://download.cdn.mozilla.net/pub/mozilla.org'),
             ],
             'balrog_usernames': {
                 'b2g': 'b2gbld',
@@ -16,9 +16,8 @@ config = {
                 'horizon': 'ffxbld',
             }
         },
-        # Bug 1275911 - get releng automation posting to cloudops balrog stage instance
         {
-            'balrog_api_root': 'https://balrog-admin.stage.mozaws.net/api',
+            'balrog_api_root': 'https://aus4-admin-dev.allizom.org/api',
             'ignore_failures': True,
             'balrog_usernames': {
                 'b2g': 'stage-b2gbld',

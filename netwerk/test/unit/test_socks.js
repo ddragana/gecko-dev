@@ -1,4 +1,4 @@
-var CC = Components.Constructor;
+const CC = Components.Constructor;
 
 const ServerSocket = CC("@mozilla.org/network/server-socket;1",
                         "nsIServerSocket",
@@ -428,7 +428,7 @@ SocksTestServer.prototype = {
     var argv = [];
 
     // marshaled: socks_ver|server_port|dest_host|dest_port|<remote|local>
-    for (var test of this.test_cases) {
+    for each (var test in this.test_cases) {
       var arg = test.type + '|' +
         String(socks_listen_port) + '|' +
         test.host + '|' + test.port + '|';
@@ -467,7 +467,7 @@ SocksTestServer.prototype = {
       }
       this.client_subprocess = null;
     }
-    for (var client of this.client_connections)
+    for each (var client in this.client_connections)
       client.close();
     this.client_connections = [];
     if (this.listener) {

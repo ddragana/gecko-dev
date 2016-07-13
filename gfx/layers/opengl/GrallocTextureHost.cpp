@@ -35,7 +35,7 @@ SurfaceFormatForAndroidPixelFormat(android::PixelFormat aFormat,
   case android::PIXEL_FORMAT_RGBX_8888:
     return swapRB ? gfx::SurfaceFormat::B8G8R8X8 : gfx::SurfaceFormat::R8G8B8X8;
   case android::PIXEL_FORMAT_RGB_565:
-    return gfx::SurfaceFormat::R5G6B5_UINT16;
+    return gfx::SurfaceFormat::R5G6B5;
   case HAL_PIXEL_FORMAT_YCbCr_422_SP:
   case HAL_PIXEL_FORMAT_YCrCb_420_SP:
   case HAL_PIXEL_FORMAT_YCbCr_422_I:
@@ -99,7 +99,7 @@ TextureTargetForAndroidPixelFormat(android::PixelFormat aFormat)
 }
 
 GrallocTextureHostOGL::GrallocTextureHostOGL(TextureFlags aFlags,
-                                             const SurfaceDescriptorGralloc& aDescriptor)
+                                             const NewSurfaceDescriptorGralloc& aDescriptor)
   : TextureHost(aFlags)
   , mGrallocHandle(aDescriptor)
   , mSize(0, 0)
@@ -118,7 +118,7 @@ GrallocTextureHostOGL::GrallocTextureHostOGL(TextureFlags aFlags,
     mSize = gfx::IntSize(graphicBuffer->getWidth(), graphicBuffer->getHeight());
     mCropSize = mSize;
   } else {
-    printf_stderr("gralloc buffer is nullptr\n");
+    printf_stderr("gralloc buffer is nullptr");
   }
 }
 
@@ -130,7 +130,8 @@ GrallocTextureHostOGL::~GrallocTextureHostOGL()
 void
 GrallocTextureHostOGL::SetCompositor(Compositor* aCompositor)
 {
-  mCompositor = AssertGLCompositor(aCompositor);
+  MOZ_ASSERT(aCompositor);
+  mCompositor = static_cast<CompositorOGL*>(aCompositor);
   if (mGLTextureSource) {
     mGLTextureSource->SetCompositor(mCompositor);
   }
@@ -237,18 +238,11 @@ GrallocTextureHostOGL::GetAsSurface() {
     return nullptr;
   }
   uint8_t* grallocData;
-  int32_t rv = graphicBuffer->lock(GRALLOC_USAGE_SW_READ_OFTEN, reinterpret_cast<void**>(&grallocData));
-  if (rv) {
-    return nullptr;
-  }
+  graphicBuffer->lock(GRALLOC_USAGE_SW_READ_OFTEN, reinterpret_cast<void**>(&grallocData));
   RefPtr<gfx::DataSourceSurface> grallocTempSurf =
     gfx::Factory::CreateWrappingDataSourceSurface(grallocData,
                                                   graphicBuffer->getStride() * android::bytesPerPixel(graphicBuffer->getPixelFormat()),
                                                   GetSize(), GetFormat());
-  if (!grallocTempSurf) {
-    graphicBuffer->unlock();
-    return nullptr;
-  }
   RefPtr<gfx::DataSourceSurface> surf = CreateDataSourceSurfaceByCloning(grallocTempSurf);
 
   graphicBuffer->unlock();
@@ -259,7 +253,6 @@ GrallocTextureHostOGL::GetAsSurface() {
 void
 GrallocTextureHostOGL::UnbindTextureSource()
 {
-  TextureHost::UnbindTextureSource();
   // Clear the reference to the TextureSource (if any), because we know that
   // another TextureHost is being bound to the TextureSource. This means that
   // we will have to re-do gl->fEGLImageTargetTexture2D next time we go through
@@ -397,7 +390,7 @@ GrallocTextureHostOGL::WaitAcquireFenceHandleSyncComplete()
     return;
   }
 
-  RefPtr<FenceHandle::FdObj> fence = mAcquireFenceHandle.GetAndResetFdObj();
+  nsRefPtr<FenceHandle::FdObj> fence = mAcquireFenceHandle.GetAndResetFdObj();
   int fenceFd = fence->GetAndResetFd();
 
   EGLint attribs[] = {
@@ -419,7 +412,7 @@ GrallocTextureHostOGL::WaitAcquireFenceHandleSyncComplete()
   EGLint status = sEGLLibrary.fClientWaitSync(EGL_DISPLAY(),
                                               sync,
                                               0,
-                                              400000000 /*400 msec*/);
+                                              400000000 /*400 usec*/);
   if (status != LOCAL_EGL_CONDITION_SATISFIED) {
     NS_ERROR("failed to wait native fence sync");
   }
@@ -429,7 +422,7 @@ GrallocTextureHostOGL::WaitAcquireFenceHandleSyncComplete()
 void
 GrallocTextureHostOGL::SetCropRect(nsIntRect aCropRect)
 {
-  MOZ_ASSERT(aCropRect.TopLeft() == gfx::IntPoint(0, 0));
+  MOZ_ASSERT(aCropRect.TopLeft() == IntPoint(0, 0));
   MOZ_ASSERT(!aCropRect.IsEmpty());
   MOZ_ASSERT(aCropRect.width <= mSize.width);
   MOZ_ASSERT(aCropRect.height <= mSize.height);
@@ -465,16 +458,6 @@ GrallocTextureHostOGL::BindTextureSource(CompositableTextureSourceRef& aTextureS
 #endif
   return true;
 }
-
-FenceHandle
-GrallocTextureHostOGL::GetCompositorReleaseFence()
-{
-  if (!mCompositor) {
-    return FenceHandle();
-  }
-  return mCompositor->GetReleaseFence();
-}
-
 
 } // namepsace layers
 } // namepsace mozilla

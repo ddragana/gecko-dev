@@ -19,19 +19,17 @@ DIRS += [
     'base',
     'chrome',
     'components',
-    'extensions',
     'modules',
     'themes/core',
     'app',
     'fonts',
     'geckoview_library',
+    'extensions',
 ]
 
-if CONFIG['MOZ_ANDROID_PACKAGE_INSTALL_BOUNCER']:
-    DIRS += ['bouncer'] # No ordering implied with respect to base.
+if not CONFIG['LIBXUL_SDK']:
+    DIRS += ['../../xulrunner/tools/redit']
 
 TEST_DIRS += [
     'tests',
 ]
-
-SPHINX_TREES['fennec'] = 'docs'

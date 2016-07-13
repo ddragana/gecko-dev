@@ -7,14 +7,14 @@
 // ----------------------------------------------------------------------------
 //
 // test_bad_args
-//     - checks that calls to nsIPackagedAppService::GetResource do not accept a null argument
+//     - checks that calls to nsIPackagedAppService::requestURI do not accept a null argument
 // test_callback_gets_called
 //     - checks the regular use case -> requesting a resource should asynchronously return an entry
 // test_same_content
 //     - makes another request for the same file, and checks that the same content is returned
 // test_request_number
 //     - this test does not make a request, but checks that the package has only
-//       been requested once. The entry returned by the call to getResource in
+//       been requested once. The entry returned by the call to requestURI in
 //       test_same_content should be returned from the cache.
 //
 // test_package_does_not_exist
@@ -30,19 +30,10 @@
 // test_bad_package_404
 //    - tests that a request for a missing subresource doesn't hang if
 //      if the last file in the package is missing some headers
-//
-// test_worse_package
-//    - tests that a request for a missing/existing resource doesn't
-//      break the service and the async verifier.
-//
 
 Cu.import('resource://gre/modules/LoadContextInfo.jsm');
 Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
-
-var gPrefs = Cc["@mozilla.org/preferences-service;1"]
-               .getService(Components.interfaces.nsIPrefBranch);
 
 // The number of times this package has been requested
 // This number might be reset by tests that use it
@@ -68,43 +59,9 @@ function packagedAppContentHandler(metadata, response)
   response.bodyOutputStream.write(body, body.length);
 }
 
-function getChannelForURL(url, notificationCallbacks) {
-  let uri = createURI(url);
-  let ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
-              .getService(Ci.nsIScriptSecurityManager);
-  let principal = ssm.createCodebasePrincipal(uri, {});
-  let tmpChannel =
-    NetUtil.newChannel({
-      uri: url,
-      loadingPrincipal: principal,
-      securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-      contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER
-    });
-
-  if (notificationCallbacks) {
-    tmpChannel.loadInfo.originAttributes = { appId: 1024,
-                                             inIsolatedMozBrowser: false
-                                           };
-    // Use custom notificationCallbacks if any.
-    tmpChannel.notificationCallbacks = notificationCallbacks;
-  } else {
-    tmpChannel.loadInfo.originAttributes = { appId: principal.appId,
-                                             inIsolatedMozBrowser: principal.isInIsolatedMozBrowserElement
-                                           };
-    tmpChannel.notificationCallbacks =
-      new LoadContextCallback(principal.appId,
-                              principal.isInIsolatedMozBrowserElement,
-                              false,
-                              false);
-
-  }
-  return tmpChannel;
-}
-
 // The package content
 // getData formats it as described at http://www.w3.org/TR/web-packaging/#streamable-package-format
 var testData = {
-  packageHeader: 'manifest-signature: dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\r\n',
   content: [
    { headers: ["Content-Location: /index.html", "Content-Type: text/html"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
    { headers: ["Content-Location: /scripts/app.js", "Content-Type: text/javascript"], data: "module Math from '/scripts/helpers/math.js';\r\n...\r\n", type: "text/javascript" },
@@ -127,79 +84,6 @@ var testData = {
   }
 }
 
-function signedPackage(origin) {
-  return [
-  "manifest-signature: MIIF1AYJKoZIhvcNAQcCoIIFxTCCBcECAQExCzAJBgUrDgMCGgUAMAsGCSqGSIb3DQEHAaCCA54wggOaMIICgqADAgECAgECMA0GCSqGSIb3DQEBCwUAMHMxCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEkMCIGA1UEChMbRXhhbXBsZSBUcnVzdGVkIENvcnBvcmF0aW9uMRkwFwYDVQQDExBUcnVzdGVkIFZhbGlkIENBMB4XDTE1MDkxMDA4MDQzNVoXDTM1MDkxMDA4MDQzNVowdDELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MSQwIgYDVQQKExtFeGFtcGxlIFRydXN0ZWQgQ29ycG9yYXRpb24xGjAYBgNVBAMTEVRydXN0ZWQgQ29ycCBDZXJ0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAts8whjOzEbn/w1xkFJ67af7F/JPujBK91oyJekh2schIMzFau9pY8S1AiJQoJCulOJCJfUc8hBLKBZiGAkii+4Gpx6cVqMLe6C22MdD806Soxn8Dg4dQqbIvPuI4eeVKu5CEk80PW/BaFMmRvRHO62C7PILuH6yZeGHC4P7dTKpsk4CLxh/jRGXLC8jV2BCW0X+3BMbHBg53NoI9s1Gs7KGYnfOHbBP5wEFAa00RjHnubUaCdEBlC8Kl4X7p0S4RGb3rsB08wgFe9EmSZHIgcIm+SuVo7N4qqbI85qo2ulU6J8NN7ZtgMPHzrMhzgAgf/KnqPqwDIxnNmRNJmHTUYwIDAQABozgwNjAMBgNVHRMBAf8EAjAAMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMDMA4GA1UdDwEB/wQEAwIHgDANBgkqhkiG9w0BAQsFAAOCAQEAukH6cJUUj5faa8CuPCqrEa0PoLY4SYNnff9NI+TTAHkB9l+kOcFl5eo2EQOcWmZKYi7QLlWC4jy/KQYattO9FMaxiOQL4FAc6ZIbNyfwWBzZWyr5syYJTTTnkLq8A9pCKarN49+FqhJseycU+8EhJEJyP5pv5hLvDNTTHOQ6SXhASsiX8cjo3AY4bxA5pWeXuTZ459qDxOnQd+GrOe4dIeqflk0hA2xYKe3SfF+QlK8EO370B8Dj8RX230OATM1E3OtYyALe34KW3wM9Qm9rb0eViDnVyDiCWkhhQnw5yPg/XQfloug2itRYuCnfUoRt8xfeHgwz2Ymz8cUADn3KpTGCAf4wggH6AgEBMHgwczELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MSQwIgYDVQQKExtFeGFtcGxlIFRydXN0ZWQgQ29ycG9yYXRpb24xGTAXBgNVBAMTEFRydXN0ZWQgVmFsaWQgQ0ECAQIwCQYFKw4DAhoFAKBdMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTE1MTAwMTIxMTEwNlowIwYJKoZIhvcNAQkEMRYEFHAisUYrrt+gBxYFhZ5KQQusOmN3MA0GCSqGSIb3DQEBAQUABIIBACHW4V0BsPWOvWrGOTRj6mPpNbH/JI1bN2oyqQZrpUQoaBY+BbYxO7TY4Uwe+aeIR/TTPJznOMF/dl3Bna6TPabezU4ylg7TVFI6W7zC5f5DZKp+Xv6uTX6knUzbbW1fkJqMtE8hGUzYXc3/C++Ci6kuOzrpWOhk6DpJHeUO/ioV56H0+QK/oMAjYpEsOohaPqvTPNOBhMQ0OQP3bmuJ6HcjZ/oz96PpzXUPKT1tDe6VykIYkV5NvtC8Tu2lDbYvp9ug3gyDgdyNSV47y5i/iWkzEhsAJB+9Z50wKhplnkxxVHEXkB/6tmfvExvQ28gLd/VbaEGDX2ljCaTSUjhD0o0=\r",
-  "--7B0MKBI3UH\r",
-  "Content-Location: manifest.webapp\r",
-  "Content-Type: application/x-web-app-manifest+json\r",
-  "\r",
-  "{",
-  "  \"name\": \"My App\",",
-  "  \"moz-resources\": [",
-  "    {",
-  "      \"src\": \"page2.html\",",
-  "      \"integrity\": \"JREF3JbXGvZ+I1KHtoz3f46ZkeIPrvXtG4VyFQrJ7II=\"",
-  "    },",
-  "    {",
-  "      \"src\": \"index.html\",",
-  "      \"integrity\": \"zEubR310nePwd30NThIuoCxKJdnz7Mf5z+dZHUbH1SE=\"",
-  "    },",
-  "    {",
-  "      \"src\": \"scripts/script.js\",",
-  "      \"integrity\": \"6TqtNArQKrrsXEQWu3D9ZD8xvDRIkhyV6zVdTcmsT5Q=\"",
-  "    },",
-  "    {",
-  "      \"src\": \"scripts/library.js\",",
-  "      \"integrity\": \"TN2ByXZiaBiBCvS4MeZ02UyNi44vED+KjdjLInUl4o8=\"",
-  "    }",
-  "  ],",
-  "  \"moz-permissions\": [",
-  "    {",
-  "      \"systemXHR\": {",
-  "        \"description\": \"Needed to download stuff\"",
-  "      },",
-  "      \"devicestorage:pictures\": {",
-  "        \"description\": \"Need to load pictures\"",
-  "      }",
-  "    }",
-  "  ],",
-  "  \"package-identifier\": \"611FC2FE-491D-4A47-B3B3-43FBDF6F404F\",",
-  "  \"moz-package-origin\": \"" + origin + "\",",
-  "  \"description\": \"A great app!\"",
-  "}\r",
-  "--7B0MKBI3UH\r",
-  "Content-Location: page2.html\r",
-  "Content-Type: text/html\r",
-  "\r",
-  "<html>",
-  "  page2.html",
-  "</html>",
-  "\r",
-  "--7B0MKBI3UH\r",
-  "Content-Location: index.html\r",
-  "Content-Type: text/html\r",
-  "\r",
-  "<html>",
-  "  Last updated: 2015/10/01 14:10 PST",
-  "</html>",
-  "\r",
-  "--7B0MKBI3UH\r",
-  "Content-Location: scripts/script.js\r",
-  "Content-Type: text/javascript\r",
-  "\r",
-  "// script.js",
-  "\r",
-  "--7B0MKBI3UH\r",
-  "Content-Location: scripts/library.js\r",
-  "Content-Type: text/javascript\r",
-  "\r",
-  "// library.js",
-  "\r",
-  "--7B0MKBI3UH--"
-].join("\n");
-};
-
 XPCOMUtils.defineLazyGetter(this, "uri", function() {
   return "http://localhost:" + httpserver.identity.primaryPort;
 });
@@ -208,7 +92,7 @@ XPCOMUtils.defineLazyGetter(this, "uri", function() {
 var httpserver = null;
 // The packaged app service initialized in run_test
 var paservice = null;
-// This variable is set before getResource is called. The listener uses this variable
+// This variable is set before requestURI is called. The listener uses this variable
 // to check the correct resource path for the returned entry
 var packagePath = null;
 
@@ -219,13 +103,6 @@ function run_test()
   httpserver.registerPathHandler("/package", packagedAppContentHandler);
   httpserver.registerPathHandler("/304Package", packagedAppContentHandler);
   httpserver.registerPathHandler("/badPackage", packagedAppBadContentHandler);
-
-  let worsePackageNum = 6;
-  for (let i = 0; i < worsePackageNum; i++) {
-    httpserver.registerPathHandler("/worsePackage_" + i,
-                                   packagedAppWorseContentHandler.bind(null, i));
-  }
-
   httpserver.start(-1);
 
   paservice = Cc["@mozilla.org/network/packaged-app-service;1"]
@@ -245,24 +122,6 @@ function run_test()
   add_test(test_bad_package);
   add_test(test_bad_package_404);
 
-  // Channels created by addons could have no load info.
-  // In debug mode this triggers an assertion, but we still want to test that
-  // it works in optimized mode. See bug 1196021 comment 17
-  if (Components.classes["@mozilla.org/xpcom/debug;1"]
-                .getService(Components.interfaces.nsIDebug2)
-                .isDebugBuild == false) {
-    add_test(test_channel_no_loadinfo);
-  }
-
-  add_test(test_worse_package_0);
-  add_test(test_worse_package_1);
-  add_test(test_worse_package_2);
-  add_test(test_worse_package_3);
-  add_test(test_worse_package_4);
-  add_test(test_worse_package_5);
-
-  add_test(test_request_has_ref);
-
   // run tests
   run_next_test();
 }
@@ -270,10 +129,8 @@ function run_test()
 // This checks the proper metadata is on the entry
 var metadataListener = {
   onMetaDataElement: function(key, value) {
-    if (key == 'response-head') {
-      var kExpectedResponseHead = "HTTP/1.1 200 \r\nContent-Location: /index.html\r\nContent-Type: text/html\r\n";
-      ok(0 === value.indexOf(kExpectedResponseHead), 'The cached response header not matched');
-    }
+    if (key == 'response-head')
+      equal(value, "HTTP/1.1 200 \r\nContent-Location: /index.html\r\nContent-Type: text/html\r\n");
     else if (key == 'request-method')
       equal(value, "GET");
     else
@@ -313,10 +170,10 @@ var cacheListener = new packagedResourceListener(testData.content[0].data);
 
 // These calls should fail, since one of the arguments is invalid or null
 function test_bad_args() {
-  Assert.throws(() => { paservice.getResource(getChannelForURL("http://test.com"), cacheListener); }, "url's with no !// aren't allowed");
-  Assert.throws(() => { paservice.getResource(getChannelForURL("http://test.com/package!//test"), null); }, "should have a callback");
-  Assert.throws(() => { paservice.getResource(null, cacheListener); }, "should have a channel");
-
+  Assert.throws(() => { paservice.requestURI(createURI("http://test.com"), LoadContextInfo.default, cacheListener); }, "url's with no !// aren't allowed");
+  Assert.throws(() => { paservice.requestURI(createURI("http://test.com/package!//test"), LoadContextInfo.default, null); }, "should have a callback");
+  Assert.throws(() => { paservice.requestURI(null, LoadContextInfo.default, cacheListener); }, "should have a URI");
+  Assert.throws(() => { paservice.requestURI(createURI("http://test.com/package!//test"), null, cacheListener); }, "should have a LoadContextInfo");
   run_next_test();
 }
 
@@ -325,15 +182,13 @@ function test_bad_args() {
 // This tests that the callback gets called, and the cacheListener gets the proper content.
 function test_callback_gets_called() {
   packagePath = "/package";
-  let url = uri + packagePath + "!//index.html";
-  paservice.getResource(getChannelForURL(url), cacheListener);
+  paservice.requestURI(createURI(uri + packagePath + "!//index.html"), LoadContextInfo.default, cacheListener);
 }
 
 // Tests that requesting the same resource returns the same content
 function test_same_content() {
   packagePath = "/package";
-  let url = uri + packagePath + "!//index.html";
-  paservice.getResource(getChannelForURL(url), cacheListener);
+  paservice.requestURI(createURI(uri + packagePath + "!//index.html"), LoadContextInfo.default, cacheListener);
 }
 
 // Check the content handler has been called the expected number of times.
@@ -345,16 +200,8 @@ function test_request_number() {
 // This tests that new content is returned if the package has been updated
 function test_updated_package() {
   packagePath = "/package";
-  let url = uri + packagePath + "!//index.html";
-  paservice.getResource(getChannelForURL(url),
-    new packagedResourceListener(testData.content[0].data.replace(/\.\.\./g, 'xxx')));
-}
-
-// This tests that requested URI with reference should still work.
-function test_request_has_ref() {
-  packagePath = "/package";
-  let url = uri + packagePath + "!//index.html#Ref";
-  paservice.getResource(getChannelForURL(url), cacheListener);
+  paservice.requestURI(createURI(uri + packagePath + "!//index.html"), LoadContextInfo.default,
+      new packagedResourceListener(testData.content[0].data.replace(/\.\.\./g, 'xxx')));
 }
 
 // ----------------------------------------------------------------------------
@@ -377,15 +224,13 @@ var listener404 = {
 // Tests that an error is returned for a non existing package
 function test_package_does_not_exist() {
   packagePath = "/package_non_existent";
-  let url = uri + packagePath + "!//index.html";
-  paservice.getResource(getChannelForURL(url), listener404);
+  paservice.requestURI(createURI(uri + packagePath + "!//index.html"), LoadContextInfo.default, listener404);
 }
 
 // Tests that an error is returned for a non existing resource in a package
 function test_file_does_not_exist() {
   packagePath = "/package"; // This package exists
-  let url = uri + packagePath + "!//file_non_existent.html";
-  paservice.getResource(getChannelForURL(url), listener404);
+  paservice.requestURI(createURI(uri + packagePath + "!//file_non_existent.html"), LoadContextInfo.default, listener404);
 }
 
 // ----------------------------------------------------------------------------
@@ -426,176 +271,13 @@ function packagedAppBadContentHandler(metadata, response)
 // Checks that the resource with the proper headers inside the bad package is still returned
 function test_bad_package() {
   packagePath = "/badPackage";
-  let url = uri + packagePath + "!//index.html";
-  paservice.getResource(getChannelForURL(url), cacheListener);
+  paservice.requestURI(createURI(uri + packagePath + "!//index.html"), LoadContextInfo.default, cacheListener);
 }
 
 // Checks that the request for a non-existent resource doesn't hang for a bad package
 function test_bad_package_404() {
   packagePath = "/badPackage";
-  let url = uri + packagePath + "!//file_non_existent.html";
-  paservice.getResource(getChannelForURL(url), listener404);
+  paservice.requestURI(createURI(uri + packagePath + "!//file_non_existent.html"), LoadContextInfo.default, listener404);
 }
 
 // ----------------------------------------------------------------------------
-
-// NOTE: This test only runs in NON-DEBUG mode.
-function test_channel_no_loadinfo() {
-  packagePath = "/package";
-  let url = uri + packagePath + "!//index.html";
-  let channel = getChannelForURL(url);
-  channel.loadInfo = null;
-  paservice.getResource(channel, cacheListener);
-}
-
-// ----------------------------------------------------------------------------
-
-// Worse package testing to ensure the async PackagedAppVerifier working good.
-
-function getData(aTestingData) {
-  var str = "";
-  for (var i in aTestingData.content) {
-    str += "--" + aTestingData.token + "\r\n";
-    for (var j in aTestingData.content[i].headers) {
-      str += aTestingData.content[i].headers[j] + "\r\n";
-    }
-    str += "\r\n";
-    str += aTestingData.content[i].data + "\r\n";
-  }
-
-  str += "--" + aTestingData.token + "--";
-  return str;
-}
-
-var worseTestData = [
-  // 0. Only one broken resource.
-  { content: [
-     { headers: ["Content-Type: text/javascript"], data: "module Math from '/scripts/helpers/math.js';\r\n...\r\n", type: "text/javascript" },
-    ],
-    token : "gc0pJq0M:08jU534c0p",
-  },
-
-  // 1. Only one valid resource.
-  { content: [
-     { headers: ["Content-Location: /index.html", "Content-Type: text/html"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-    ],
-    token : "gc0pJq0M:08jU534c0p",
-  },
-
-  // 2. All broken resources.
-  { content: [
-     { headers: ["Content-Type: text/javascript"], data: "module Math from '/scripts/helpers/math.js';\r\n...\r\n", type: "text/javascript" },
-     { headers: ["Content-Type: text/javascript"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-     { headers: ["Content-Type: text/javascript"], data: "export function sum(nums) { ... }\r\n...\r\n", type: "text/javascript" }
-    ],
-    token : "gc0pJq0M:08jU534c0p",
-  },
-
-  // 3. All broken resources except the first one.
-  { content: [
-     { headers: ["Content-Location: /index.html", "Content-Type: text/html"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-     { headers: ["Content-Type: text/javascript"], data: "module Math from '/scripts/helpers/math.js';\r\n...\r\n", type: "text/javascript" },
-     { headers: ["Content-Type: text/javascript"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-     { headers: ["Content-Type: text/javascript"], data: "export function sum(nums) { ... }\r\n...\r\n", type: "text/javascript" }
-    ],
-    token : "gc0pJq0M:08jU534c0p",
-  },
-
-  // 4. All broken resources except the last one.
-  { content: [
-     { headers: ["Content-Type: text/javascript"], data: "module Math from '/scripts/helpers/math.js';\r\n...\r\n", type: "text/javascript" },
-     { headers: ["Content-Type: text/javascript"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-     { headers: ["Content-Type: text/javascript"], data: "export function sum(nums) { ... }\r\n...\r\n", type: "text/javascript" },
-     { headers: ["Content-Location: /index.html", "Content-Type: text/html"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-    ],
-    token : "gc0pJq0M:08jU534c0p",
-  },
-
-  // 5. All broken resources except the first and the last one.
-  { content: [
-     { headers: ["Content-Location: /whatever.html", "Content-Type: text/html"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-     { headers: ["Content-Type: text/javascript"], data: "module Math from '/scripts/helpers/math.js';\r\n...\r\n", type: "text/javascript" },
-     { headers: ["Content-Type: text/javascript"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-     { headers: ["Content-Type: text/javascript"], data: "export function sum(nums) { ... }\r\n...\r\n", type: "text/javascript" },
-     { headers: ["Content-Location: /index.html", "Content-Type: text/html"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
-    ],
-    token : "gc0pJq0M:08jU534c0p",
-  },
-];
-
-function packagedAppWorseContentHandler(index, metadata, response)
-{
-  response.setHeader("Content-Type", 'application/package');
-  var body = getData(worseTestData[index]);
-  response.bodyOutputStream.write(body, body.length);
-}
-
-function test_worse_package(index, success) {
-  packagePath = "/worsePackage_" + index;
-  let url = uri + packagePath + "!//index.html";
-  let channel = getChannelForURL(url);
-  paservice.getResource(channel, {
-    QueryInterface: function (iid) {
-      if (iid.equals(Ci.nsICacheEntryOpenCallback) ||
-          iid.equals(Ci.nsISupports))
-        return this;
-      throw Cr.NS_ERROR_NO_INTERFACE;
-    },
-    onCacheEntryCheck: function() { return Ci.nsICacheEntryOpenCallback.ENTRY_WANTED; },
-    onCacheEntryAvailable: function (entry, isnew, appcache, status) {
-      let cacheSuccess = (status === Cr.NS_OK);
-      equal(success, status === Cr.NS_OK, "Check status");
-      run_next_test();
-    }
-  });
-}
-
-function test_worse_package_0() {
-  test_worse_package(0, false);
-}
-
-function test_worse_package_1() {
-  test_worse_package(1, true);
-}
-
-function test_worse_package_2() {
-  test_worse_package(2, false);
-}
-
-function test_worse_package_3() {
-  test_worse_package(3, true);
-}
-
-function test_worse_package_4() {
-  test_worse_package(4, true);
-}
-
-function test_worse_package_5() {
-  test_worse_package(5, true);
-}
-
-//-----------------------------------------------------------------------------
-
-// Used as a stub when the cache listener is not important.
-var dummyCacheListener = {
-  QueryInterface: function (iid) {
-    if (iid.equals(Ci.nsICacheEntryOpenCallback) ||
-        iid.equals(Ci.nsISupports))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-  onCacheEntryCheck: function() { return Ci.nsICacheEntryOpenCallback.ENTRY_WANTED; },
-  onCacheEntryAvailable: function () {}
-};
-
-function setTrustedOrigin() {
-  let pref = "network.http.signed-packages.trusted-origin";
-  ok(!!Ci.nsISupportsString, "Ci.nsISupportsString");
-  let origin = Cc["@mozilla.org/supports-string;1"].createInstance(Ci.nsISupportsString);
-  origin.data = uri;
-  gPrefs.setComplexValue(pref, Ci.nsISupportsString, origin);
-}
-
-function resetTrustedOrigin() {
-  gPrefs.clearUserPref("network.http.signed-packages.trusted-origin");
-}

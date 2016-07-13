@@ -62,8 +62,7 @@ this.FxAccountsManager = {
 
     return {
       email: this._activeSession.email,
-      verified: this._activeSession.verified,
-      profile: this._activeSession.profile,
+      verified: this._activeSession.verified
     }
   },
 
@@ -100,7 +99,7 @@ this.FxAccountsManager = {
     return this._fxAccounts.getAccountsClient();
   },
 
-  _signInSignUp: function(aMethod, aEmail, aPassword, aFetchKeys) {
+  _signInSignUp: function(aMethod, aEmail, aPassword) {
     if (Services.io.offline) {
       return this._error(ERROR_OFFLINE);
     }
@@ -128,7 +127,15 @@ this.FxAccountsManager = {
             user: this._user
           });
         }
-        return client[aMethod](aEmail, aPassword, aFetchKeys);
+        let syncEnabled = false;
+        try {
+          syncEnabled = Services.prefs.getBoolPref("services.sync.enabled");
+        } catch(e) {
+          dump(e + "\n");
+        }
+        // XXX Refetch FxA credentials if services.sync.enabled preference
+        //     changes. Bug 1183103
+        return client[aMethod](aEmail, aPassword, syncEnabled);
       }
     ).then(
       user => {
@@ -157,31 +164,12 @@ this.FxAccountsManager = {
             this._activeSession = user;
             log.debug("User signed in: " + JSON.stringify(this._user) +
                       " - Account created " + (aMethod == "signUp"));
-
-            // There is no way to obtain the key fetch token afterwards
-            // without login out the user and asking her to log in again.
-            // Also, key fetch tokens are designed to be short-lived, so
-            // we need to fetch kB as soon as we have the key fetch token.
-            if (aFetchKeys) {
-              this._fxAccounts.getKeys();
-            }
-
-            return this._fxAccounts.getSignedInUserProfile().catch(error => {
-              // Not fetching the profile is sad but the FxA logs will already
-              // have noise.
-              return null;
+            return Promise.resolve({
+              accountCreated: aMethod === "signUp",
+              user: this._user
             });
           }
-        ).then(profile => {
-          if (profile) {
-            this._activeSession.profile = profile;
-          }
-
-          return Promise.resolve({
-            accountCreated: aMethod === "signUp",
-            user: this._user
-          });
-        });
+        );
       },
       reason => { return this._serverError(reason); }
     );
@@ -233,7 +221,7 @@ this.FxAccountsManager = {
         }
       );
     }
-    return Promise.reject(reason.message ? { error: reason.message } : reason);
+    return Promise.reject(reason);
   },
 
   _getAssertion: function(aAudience, aPrincipal) {
@@ -371,12 +359,12 @@ this.FxAccountsManager = {
 
   // -- API --
 
-  signIn: function(aEmail, aPassword, aFetchKeys) {
-    return this._signInSignUp("signIn", aEmail, aPassword, aFetchKeys);
+  signIn: function(aEmail, aPassword) {
+    return this._signInSignUp("signIn", aEmail, aPassword);
   },
 
-  signUp: function(aEmail, aPassword, aFetchKeys) {
-    return this._signInSignUp("signUp", aEmail, aPassword, aFetchKeys);
+  signUp: function(aEmail, aPassword) {
+    return this._signInSignUp("signUp", aEmail, aPassword);
   },
 
   signOut: function() {
@@ -431,23 +419,10 @@ this.FxAccountsManager = {
         // we kick off verification before returning what we have.
         if (!user.verified) {
           this.verificationStatus(user);
-          // Trying to get the profile for unverified users will fail, so we
-          // don't even try in that case.
-          log.debug("Account ", this._user);
-          return Promise.resolve(this._user);
         }
 
-        return this._fxAccounts.getSignedInUserProfile().then(profile => {
-          if (profile) {
-            this._activeSession.profile = profile;
-          }
-          log.debug("Account ", this._user);
-          return Promise.resolve(this._user);
-        }).catch(error => {
-          // FxAccounts logs already inform about the error.
-          log.debug("Account ", this._user);
-          return Promise.resolve(this._user);
-        });
+        log.debug("Account " + JSON.stringify(this._user));
+        return Promise.resolve(this._user);
       }
     );
   },
@@ -510,13 +485,6 @@ this.FxAccountsManager = {
         if (this._activeSession.verified != data.verified) {
           this._activeSession.verified = data.verified;
           this._fxAccounts.setSignedInUser(this._activeSession);
-          this._fxAccounts.getSignedInUserProfile().then(profile => {
-            if (profile) {
-              this._activeSession.profile = profile;
-            }
-          }).catch(error => {
-            // FxAccounts logs already inform about the error.
-          });
         }
         log.debug(JSON.stringify(this._user));
       },
@@ -552,8 +520,7 @@ this.FxAccountsManager = {
 
     let principal = aPrincipal;
     log.debug("FxAccountsManager.getAssertion() aPrincipal: ",
-              principal.origin, principal.appId,
-              principal.isInIsolatedMozBrowserElement);
+              principal.origin, principal.appId, principal.isInBrowserElement);
 
     return this.getAccount().then(
       user => {

@@ -18,7 +18,8 @@ namespace a11y {
 class RootAccessibleWrap : public RootAccessible
 {
 public:
-  RootAccessibleWrap(nsIDocument* aDocument, nsIPresShell* aPresShell);
+  RootAccessibleWrap(nsIDocument* aDocument, nsIContent* aRootContent,
+                     nsIPresShell* aPresShell);
   virtual ~RootAccessibleWrap();
 
     Class GetNativeType ();

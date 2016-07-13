@@ -116,18 +116,13 @@ int MOZ_XMLIsNCNameChar(const char* ptr)
 int MOZ_XMLTranslateEntity(const char* ptr, const char* end, const char** next,
                            XML_Char* result)
 {
-  // Can we assert here somehow?
-  // MOZ_ASSERT(*ptr == '&');
-
   const ENCODING* enc = XmlGetUtf16InternalEncodingNS();
-  /* scanRef expects to be pointed to the char after the '&'. */
-  int tok = PREFIX(scanRef)(enc, ptr + enc->minBytesPerChar, end, next);
+  int tok = PREFIX(scanRef)(enc, ptr, end, next);
   if (tok <= XML_TOK_INVALID) {
     return 0;
   }
 
   if (tok == XML_TOK_CHAR_REF) {
-    /* XmlCharRefNumber expects to be pointed to the '&'. */
     int n = XmlCharRefNumber(enc, ptr);
 
     /* We could get away with just < 0, but better safe than sorry. */
@@ -139,13 +134,10 @@ int MOZ_XMLTranslateEntity(const char* ptr, const char* end, const char** next,
   }
 
   if (tok == XML_TOK_ENTITY_REF) {
-    /* XmlPredefinedEntityName expects to be pointed to the char after '&'.
-
-       *next points to after the semicolon, so the entity ends at
+    /* *next points to after the semicolon, so the entity ends at
        *next - enc->minBytesPerChar. */
     XML_Char ch =
-      (XML_Char)XmlPredefinedEntityName(enc, ptr + enc->minBytesPerChar,
-                                        *next - enc->minBytesPerChar);
+      (XML_Char)XmlPredefinedEntityName(enc, ptr, *next - enc->minBytesPerChar);
     if (!ch) {
       return 0;
     }

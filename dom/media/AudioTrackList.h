@@ -18,10 +18,10 @@ class AudioTrack;
 class AudioTrackList : public MediaTrackList
 {
 public:
-  AudioTrackList(nsPIDOMWindowInner* aOwnerWindow, HTMLMediaElement* aMediaElement)
+  AudioTrackList(nsPIDOMWindow* aOwnerWindow, HTMLMediaElement* aMediaElement)
     : MediaTrackList(aOwnerWindow, aMediaElement) {}
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   AudioTrack* operator[](uint32_t aIndex);
 
@@ -31,7 +31,7 @@ public:
   AudioTrack* GetTrackById(const nsAString& aId);
 
 protected:
-  AudioTrackList* AsAudioTrackList() override { return this; }
+  virtual AudioTrackList* AsAudioTrackList() override { return this; }
 };
 
 } // namespace dom

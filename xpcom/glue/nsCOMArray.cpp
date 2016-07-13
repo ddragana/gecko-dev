@@ -146,12 +146,6 @@ nsCOMArray_base::InsertElementAt(uint32_t aIndex, nsISupports* aElement)
   NS_IF_ADDREF(aElement);
 }
 
-void
-nsCOMArray_base::InsertElementAt(uint32_t aIndex, already_AddRefed<nsISupports> aElement)
-{
-  mArray.InsertElementAt(aIndex, aElement.take());
-}
-
 bool
 nsCOMArray_base::InsertObjectsAt(const nsCOMArray_base& aObjects, int32_t aIndex)
 {
@@ -297,6 +291,23 @@ nsCOMArray_base::SetCount(int32_t aNewCount)
   mArray.SetLength(aNewCount);
   return true;
 }
+
+size_t
+nsCOMArray_base::SizeOfExcludingThis(
+    nsBaseArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
+    mozilla::MallocSizeOf aMallocSizeOf, void* aData) const
+{
+  size_t n = mArray.SizeOfExcludingThis(aMallocSizeOf);
+
+  if (aSizeOfElementIncludingThis) {
+    for (uint32_t index = 0; index < mArray.Length(); ++index) {
+      n += aSizeOfElementIncludingThis(mArray[index], aMallocSizeOf, aData);
+    }
+  }
+
+  return n;
+}
+
 
 void
 nsCOMArray_base::Adopt(nsISupports** aElements, uint32_t aSize)

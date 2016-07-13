@@ -55,7 +55,7 @@ WakeLock::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 nsresult
-WakeLock::Init(const nsAString &aTopic, nsPIDOMWindowInner* aWindow)
+WakeLock::Init(const nsAString &aTopic, nsIDOMWindow *aWindow)
 {
   // Don't Init() a WakeLock twice.
   MOZ_ASSERT(mTopic.IsEmpty());
@@ -67,13 +67,14 @@ WakeLock::Init(const nsAString &aTopic, nsPIDOMWindowInner* aWindow)
   mTopic.Assign(aTopic);
 
   mWindow = do_GetWeakReference(aWindow);
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aWindow);
 
   /**
    * Null windows are allowed. A wake lock without associated window
    * is always considered invisible.
    */
-  if (aWindow) {
-    nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc();
+  if (window) {
+    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
     NS_ENSURE_STATE(doc);
     mHidden = doc->Hidden();
   }
@@ -171,7 +172,9 @@ WakeLock::DoUnlock()
 void
 WakeLock::AttachEventListener()
 {
-  if (nsCOMPtr<nsPIDOMWindowInner> window = do_QueryReferent(mWindow)) {
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
+
+  if (window) {
     nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
     if (doc) {
       doc->AddSystemEventListener(NS_LITERAL_STRING("visibilitychange"),
@@ -195,7 +198,9 @@ WakeLock::AttachEventListener()
 void
 WakeLock::DetachEventListener()
 {
-  if (nsCOMPtr<nsPIDOMWindowInner> window = do_QueryReferent(mWindow)) {
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
+
+  if (window) {
     nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
     if (doc) {
       doc->RemoveSystemEventListener(NS_LITERAL_STRING("visibilitychange"),
@@ -270,10 +275,10 @@ WakeLock::HandleEvent(nsIDOMEvent *aEvent)
   return NS_OK;
 }
 
-nsPIDOMWindowInner*
+nsISupports*
 WakeLock::GetParentObject() const
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(mWindow);
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(mWindow);
   return window;
 }
 

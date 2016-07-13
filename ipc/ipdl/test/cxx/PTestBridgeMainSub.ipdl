@@ -10,14 +10,14 @@ intr protocol PTestBridgeMainSub {
     bridges PTestBridgeMain, PTestBridgeSub;
 
 child:
-    async Hi();
+    Hi();
     intr HiRpc();
 
 parent:
-    async Hello();
+    Hello();
     sync HelloSync();
     intr HelloRpc();
-    async __delete__();
+    __delete__();
 
 state START:       recv Hello goto HI;
 state HI:          send Hi goto HELLO_SYNC;

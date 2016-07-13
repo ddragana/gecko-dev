@@ -1,11 +1,11 @@
 protocol race_DiamondRule1 {
 
 child:
-    async Msg1();
-    async Msg1_();
+    Msg1();
+    Msg1_();
 parent:
-    async Msg2();
-    async Msg2_();
+    Msg2();
+    Msg2_();
 
     // OK: this state machine is one of the simplest that follows the
     // Diamond Rule

@@ -75,9 +75,13 @@ assertEq(a.b(1).next().value, 1);
 a = {*["b"](c){"use strict";return c;}};
 assertEq(a.b(1).next().value, 1);
 
-// Generators should not have [[Construct]]
+// Constructing
 a = {*g() { yield 1; }}
-assertThrowsInstanceOf(() => { new a.g }, TypeError);
+it = new a.g;
+next = it.next();
+assertEq(next.done, false);
+assertEq(next.value, 1);
+next = it.next();
+assertEq(next.done, true);
 
-if (typeof reportCompare === 'function')
-    reportCompare(0, 0, "ok");
+reportCompare(0, 0, "ok");

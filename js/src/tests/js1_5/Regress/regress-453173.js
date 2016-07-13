@@ -21,9 +21,11 @@ function test()
 
   var i;
 
+  jit(true);
 
   for(i=0;i<4;++i) [,];
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

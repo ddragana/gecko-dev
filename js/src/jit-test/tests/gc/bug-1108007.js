@@ -5,7 +5,7 @@ gczeal(2);
 (function() {
     evaluate(cacheEntry((function() {
         return "".toSource()
-    })()), Object.create({ global: newGlobal({ cloneSingletons: true }) }, {
+    })()), Object.create({}, {
         saveBytecode: {
             value: true
         }

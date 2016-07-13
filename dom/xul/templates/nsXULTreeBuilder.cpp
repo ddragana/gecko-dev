@@ -262,6 +262,9 @@ NS_NewXULTreeBuilder(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 
     nsresult rv;
     nsXULTreeBuilder* result = new nsXULTreeBuilder();
+    if (! result)
+        return NS_ERROR_OUT_OF_MEMORY;
+
     NS_ADDREF(result); // stabilize
 
     rv = result->InitGlobals();
@@ -373,7 +376,7 @@ nsXULTreeBuilder::Sort(nsIDOMElement* aElement)
         return NS_OK;
 
     // Grab the new sort variable
-    mSortVariable = NS_Atomize(sort);
+    mSortVariable = do_GetAtom(sort);
 
     nsAutoString hints;
     header->GetAttr(kNameSpaceID_None, nsGkAtoms::sorthints, hints);
@@ -1261,7 +1264,7 @@ nsXULTreeBuilder::EnsureSortVariables()
                 nsAutoString sort;
                 child->GetAttr(kNameSpaceID_None, nsGkAtoms::sort, sort);
                 if (! sort.IsEmpty()) {
-                    mSortVariable = NS_Atomize(sort);
+                    mSortVariable = do_GetAtom(sort);
 
                     static nsIContent::AttrValuesArray strings[] =
                       {&nsGkAtoms::ascending, &nsGkAtoms::descending, nullptr};
@@ -1463,7 +1466,7 @@ nsXULTreeBuilder::OpenSubtreeOf(nsTreeRows::Subtree* aSubtree,
                                 nsIXULTemplateResult *aResult,
                                 int32_t* aDelta)
 {
-    AutoTArray<int32_t, 8> open;
+    nsAutoTArray<int32_t, 8> open;
     int32_t count = 0;
 
     int32_t rulecount = mQuerySets.Length();
@@ -1837,6 +1840,7 @@ nsXULTreeBuilder::SortSubtree(nsTreeRows::Subtree* aSubtree)
 }
 
 
+/* boolean canDrop (in long index, in long orientation); */
 NS_IMETHODIMP
 nsXULTreeBuilder::CanDrop(int32_t index, int32_t orientation,
                           nsIDOMDataTransfer* dataTransfer, bool *_retval)

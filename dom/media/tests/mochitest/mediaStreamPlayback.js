@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+const TIMEUPDATE_TIMEOUT_LENGTH = 10000;
 const ENDED_TIMEOUT_LENGTH = 30000;
 
-/* The time we wait depends primarily on the canplaythrough event firing
+/* Time we wait for the canplaythrough event to fire
  * Note: this needs to be at least 30s because the
  *       B2G emulator in VMs is really slow. */
-const VERIFYPLAYING_TIMEOUT_LENGTH = 60000;
+const CANPLAYTHROUGH_TIMEOUT_LENGTH = 60000;
 
 /**
  * This class manages playback of a HTMLMediaElement with a MediaStream.
@@ -25,59 +26,6 @@ function MediaStreamPlayback(mediaElement, mediaStream) {
 
 MediaStreamPlayback.prototype = {
 
-   /**
-   * Starts media element with a media stream, runs it until a canplaythrough
-   * and timeupdate event fires, and calls stop() on all its tracks.
-   *
-   * @param {Boolean} isResume specifies if this media element is being resumed
-   *                           from a previous run
-   */
-  playMediaWithMediaStreamTracksStop : function(isResume) {
-    this.startMedia(isResume);
-    return this.verifyPlaying()
-      .then(() => this.stopTracksForStreamInMediaPlayback())
-      .then(() => this.stopMediaElement());
-  },
-
-  /**
-   * Stops the local media stream's tracks while it's currently in playback in
-   * a media element.
-   *
-   * Precondition: The media stream and element should both be actively
-   *               being played. All the stream's tracks must be local.
-   */
-  stopTracksForStreamInMediaPlayback : function () {
-    var elem = this.mediaElement;
-    var waitForEnded = () => new Promise(resolve => {
-      elem.addEventListener('ended', function ended() {
-        elem.removeEventListener('ended', ended);
-        resolve();
-      });
-    });
-
-    var noTrackEnded = Promise.all(this.mediaStream.getTracks().map(t => {
-      let onNextLoop = wait(0);
-      let p = Promise.race([
-        onNextLoop,
-        haveEvent(t, "ended", onNextLoop)
-          .then(() => Promise.reject("Unexpected ended event for track " + t.id),
-                () => Promise.resolve())
-      ]);
-      t.stop();
-      return p;
-    }));
-
-    // XXX (bug 1208316) When we implement MediaStream.active, do not stop
-    // the stream. We just do it now so the media element will raise 'ended'.
-    if (!this.mediaStream.stop) {
-      return;
-    }
-    this.mediaStream.stop();
-    return timeout(waitForEnded(), ENDED_TIMEOUT_LENGTH, "ended event never fired")
-             .then(() => ok(true, "ended event successfully fired"))
-             .then(() => noTrackEnded);
-  },
-
   /**
    * Starts media with a media stream, runs it until a canplaythrough and
    * timeupdate event fires, and stops the media.
@@ -86,8 +34,7 @@ MediaStreamPlayback.prototype = {
    *                           from a previous run
    */
   playMedia : function(isResume) {
-    this.startMedia(isResume);
-    return this.verifyPlaying()
+    return this.startMedia(isResume)
       .then(() => this.stopMediaElement());
   },
 
@@ -98,34 +45,28 @@ MediaStreamPlayback.prototype = {
    *                           is being resumed from a previous run
    */
   startMedia : function(isResume) {
+    var canPlayThroughFired = false;
 
-    // If we're playing media element for the first time, check that time is zero.
+    // If we're playing this media element for the first time,
+    // check that the time is zero.
     if (!isResume) {
       is(this.mediaElement.currentTime, 0,
          "Before starting the media element, currentTime = 0");
     }
-    this.canPlayThroughFired = listenUntil(this.mediaElement, 'canplaythrough',
-                                           () => true);
 
-    // Hooks up the media stream to the media element and starts playing it
-    this.mediaElement.srcObject = this.mediaStream;
-    this.mediaElement.play();
-  },
+    return new Promise((resolve, reject) => {
+      /**
+       * Callback fired when the canplaythrough event is fired. We only
+       * run the logic of this function once, as this event can fire
+       * multiple times while a HTMLMediaStream is playing content from
+       * a real-time MediaStream.
+       */
+      var canPlayThroughCallback = () => {
+        // Disable the canplaythrough event listener to prevent multiple calls
+        canPlayThroughFired = true;
+        this.mediaElement.removeEventListener('canplaythrough',
+                                              canPlayThroughCallback, false);
 
-  /**
-   * Verifies that media is playing.
-   */
-  verifyPlaying : function() {
-    var lastStreamTime = this.mediaStream.currentTime;
-    var lastElementTime = this.mediaElement.currentTime;
-
-    var mediaTimeProgressed = listenUntil(this.mediaElement, 'timeupdate',
-        () => this.mediaStream.currentTime > lastStreamTime &&
-              this.mediaElement.currentTime > lastElementTime);
-
-    return timeout(Promise.all([this.canPlayThroughFired, mediaTimeProgressed]),
-                   VERIFYPLAYING_TIMEOUT_LENGTH, "verifyPlaying timed out")
-      .then(() => {
         is(this.mediaElement.paused, false,
            "Media element should be playing");
         is(this.mediaElement.duration, Number.POSITIVE_INFINITY,
@@ -152,7 +93,45 @@ MediaStreamPlayback.prototype = {
         is(this.mediaElement.src, "", "No src should be defined");
         is(this.mediaElement.currentSrc, "",
            "Current src should still be an empty string");
-      });
+
+        var timeUpdateCallback = () => {
+          if (this.mediaStream.currentTime > 0 &&
+              this.mediaElement.currentTime > 0) {
+            this.mediaElement.removeEventListener('timeupdate',
+                                                  timeUpdateCallback, false);
+            resolve();
+          }
+        };
+
+        // When timeupdate fires, we validate time has passed and move
+        // onto the success condition
+        this.mediaElement.addEventListener('timeupdate', timeUpdateCallback,
+                                           false);
+
+        // If timeupdate doesn't fire in enough time, we fail the test
+        setTimeout(() => {
+          this.mediaElement.removeEventListener('timeupdate',
+                                                timeUpdateCallback, false);
+          reject(new Error("timeUpdate event never fired"));
+        }, TIMEUPDATE_TIMEOUT_LENGTH);
+      };
+
+      // Adds a listener intended to be fired when playback is available
+      // without further buffering.
+      this.mediaElement.addEventListener('canplaythrough', canPlayThroughCallback,
+                                         false);
+
+      // Hooks up the media stream to the media element and starts playing it
+      this.mediaElement.mozSrcObject = this.mediaStream;
+      this.mediaElement.play();
+
+      // If canplaythrough doesn't fire in enough time, we fail the test
+      setTimeout(() => {
+        this.mediaElement.removeEventListener('canplaythrough',
+                                              canPlayThroughCallback, false);
+        reject(new Error("canplaythrough event never fired"));
+      }, CANPLAYTHROUGH_TIMEOUT_LENGTH);
+    });
   },
 
   /**
@@ -163,7 +142,7 @@ MediaStreamPlayback.prototype = {
    */
   stopMediaElement : function() {
     this.mediaElement.pause();
-    this.mediaElement.srcObject = null;
+    this.mediaElement.mozSrcObject = null;
   }
 }
 
@@ -185,26 +164,21 @@ function LocalMediaStreamPlayback(mediaElement, mediaStream) {
 LocalMediaStreamPlayback.prototype = Object.create(MediaStreamPlayback.prototype, {
 
   /**
-   * DEPRECATED - MediaStream.stop() is going away. Use MediaStreamTrack.stop()!
-   *
    * Starts media with a media stream, runs it until a canplaythrough and
    * timeupdate event fires, and calls stop() on the stream.
    *
    * @param {Boolean} isResume specifies if this media element is being resumed
    *                           from a previous run
    */
-  playMediaWithDeprecatedStreamStop : {
+  playMediaWithStreamStop : {
     value: function(isResume) {
-      this.startMedia(isResume);
-      return this.verifyPlaying()
-        .then(() => this.deprecatedStopStreamInMediaPlayback())
+      return this.startMedia(isResume)
+        .then(() => this.stopStreamInMediaPlayback())
         .then(() => this.stopMediaElement());
     }
   },
 
   /**
-   * DEPRECATED - MediaStream.stop() is going away. Use MediaStreamTrack.stop()!
-   *
    * Stops the local media stream while it's currently in playback in
    * a media element.
    *
@@ -212,7 +186,7 @@ LocalMediaStreamPlayback.prototype = Object.create(MediaStreamPlayback.prototype
    *               being played.
    *
    */
-  deprecatedStopStreamInMediaPlayback : {
+  stopStreamInMediaPlayback : {
     value: function () {
       return new Promise((resolve, reject) => {
         /**

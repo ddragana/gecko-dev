@@ -19,35 +19,45 @@
 #include "webrtc/typedefs.h"
 #include <speex/speex_resampler.h>
 
-namespace webrtc {
-
-#define FIXED_RATE_RESAMPLER 0x10
-
-// All methods return 0 on success and -1 on failure.
-class Resampler
+namespace webrtc
 {
 
+#define FIXED_RATE_RESAMPLER 0x10
+enum ResamplerType
+{
+    kResamplerSynchronous            = 0x00,
+    kResamplerSynchronousStereo      = 0x01,
+    kResamplerFixedSynchronous       = 0x00 | FIXED_RATE_RESAMPLER,
+    kResamplerFixedSynchronousStereo = 0x01 | FIXED_RATE_RESAMPLER,
+};
+
+class Resampler
+{
 public:
     Resampler();
-    Resampler(int inFreq, int outFreq, int num_channels);
+    // TODO(andrew): use an init function instead.
+    Resampler(int in_freq, int out_freq, ResamplerType type);
     ~Resampler();
 
     // Reset all states
-    int Reset(int inFreq, int outFreq, int num_channels);
+    int Reset(int in_freq, int out_freq, ResamplerType type);
 
     // Reset all states if any parameter has changed
-    int ResetIfNeeded(int inFreq, int outFreq, int num_channels);
+    int ResetIfNeeded(int in_freq, int out_freq, ResamplerType type);
 
-    // Resample samplesIn to samplesOut.
-    int Push(const int16_t* samplesIn, int lengthIn, int16_t* samplesOut,
-             int maxLen, int &outLen);
+    // Synchronous resampling, all output samples are written to samplesOut
+    int Push(const int16_t* samples_in, int length_in,
+             int16_t* samples_out, int max_len, int &out_len);
 
 private:
+    bool IsFixedRate() { return !!(type_ & FIXED_RATE_RESAMPLER); }
+
     SpeexResamplerState* state_;
 
     int in_freq_;
     int out_freq_;
     int channels_;
+    ResamplerType type_;
 };
 
 }  // namespace webrtc

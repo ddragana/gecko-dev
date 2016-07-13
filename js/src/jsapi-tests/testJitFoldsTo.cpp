@@ -26,11 +26,8 @@ BEGIN_TEST(testJitFoldsTo_DivReciprocal)
     block->add(p);
     MConstant* c = MConstant::New(func.alloc, DoubleValue(4.0));
     block->add(c);
-    MDiv* div = MDiv::New(func.alloc, p, c, MIRType::Double);
+    MDiv* div = MDiv::New(func.alloc, p, c, MIRType_Double);
     block->add(div);
-    if (!div->typePolicy()->adjustInputs(func.alloc, div))
-        return false;
-    MDefinition* left = div->getOperand(0);
     MReturn* ret = MReturn::New(func.alloc, div);
     block->end(ret);
 
@@ -40,9 +37,9 @@ BEGIN_TEST(testJitFoldsTo_DivReciprocal)
     // Test that the div got folded to p * 0.25.
     MDefinition* op = ret->getOperand(0);
     CHECK(op->isMul());
-    CHECK(op->getOperand(0) == left);
+    CHECK(op->getOperand(0) == p);
     CHECK(op->getOperand(1)->isConstant());
-    CHECK(op->getOperand(1)->toConstant()->numberToDouble() == 0.25);
+    CHECK(op->getOperand(1)->toConstant()->value().toNumber() == 0.25);
     return true;
 }
 END_TEST(testJitFoldsTo_DivReciprocal)
@@ -57,12 +54,8 @@ BEGIN_TEST(testJitFoldsTo_NoDivReciprocal)
     block->add(p);
     MConstant* c = MConstant::New(func.alloc, DoubleValue(5.0));
     block->add(c);
-    MDiv* div = MDiv::New(func.alloc, p, c, MIRType::Double);
+    MDiv* div = MDiv::New(func.alloc, p, c, MIRType_Double);
     block->add(div);
-    if (!div->typePolicy()->adjustInputs(func.alloc, div))
-        return false;
-    MDefinition* left = div->getOperand(0);
-    MDefinition* right = div->getOperand(1);
     MReturn* ret = MReturn::New(func.alloc, div);
     block->end(ret);
 
@@ -72,8 +65,8 @@ BEGIN_TEST(testJitFoldsTo_NoDivReciprocal)
     // Test that the div didn't get folded.
     MDefinition* op = ret->getOperand(0);
     CHECK(op->isDiv());
-    CHECK(op->getOperand(0) == left);
-    CHECK(op->getOperand(1) == right);
+    CHECK(op->getOperand(0) == p);
+    CHECK(op->getOperand(1) == c);
     return true;
 }
 END_TEST(testJitFoldsTo_NoDivReciprocal)
@@ -156,7 +149,7 @@ BEGIN_TEST(testJitNotTest)
     MReturn* ret = MReturn::New(func.alloc, p);
     exit->end(ret);
 
-    MOZ_ALWAYS_TRUE(exit->addPredecessorWithoutPhis(then));
+    exit->addPredecessorWithoutPhis(then);
 
     if (!func.runGVN())
         return false;
@@ -195,7 +188,7 @@ BEGIN_TEST(testJitNotNotTest)
     MReturn* ret = MReturn::New(func.alloc, p);
     exit->end(ret);
 
-    MOZ_ALWAYS_TRUE(exit->addPredecessorWithoutPhis(then));
+    exit->addPredecessorWithoutPhis(then);
 
     if (!func.runGVN())
         return false;
@@ -219,7 +212,7 @@ BEGIN_TEST(testJitFoldsTo_UnsignedDiv)
     block->add(c0);
     MConstant* c1 = MConstant::New(func.alloc, Int32Value(0xffffffff));
     block->add(c1);
-    MDiv* div = MDiv::NewAsmJS(func.alloc, c0, c1, MIRType::Int32, /*unsignd=*/true);
+    MDiv* div = MDiv::NewAsmJS(func.alloc, c0, c1, MIRType_Int32, /*unsignd=*/true);
     block->add(div);
     MReturn* ret = MReturn::New(func.alloc, div);
     block->end(ret);
@@ -229,7 +222,7 @@ BEGIN_TEST(testJitFoldsTo_UnsignedDiv)
 
     // Test that the div got folded to 0.
     MConstant* op = ret->getOperand(0)->toConstant();
-    CHECK(mozilla::NumbersAreIdentical(op->numberToDouble(), 0.0));
+    CHECK(mozilla::NumbersAreIdentical(op->value().toNumber(), 0.0));
     return true;
 }
 END_TEST(testJitFoldsTo_UnsignedDiv)
@@ -244,7 +237,7 @@ BEGIN_TEST(testJitFoldsTo_UnsignedMod)
     block->add(c0);
     MConstant* c1 = MConstant::New(func.alloc, Int32Value(0xffffffff));
     block->add(c1);
-    MMod* mod = MMod::NewAsmJS(func.alloc, c0, c1, MIRType::Int32, /*unsignd=*/true);
+    MMod* mod = MMod::NewAsmJS(func.alloc, c0, c1, MIRType_Int32, /*unsignd=*/true);
     block->add(mod);
     MReturn* ret = MReturn::New(func.alloc, mod);
     block->end(ret);
@@ -254,7 +247,7 @@ BEGIN_TEST(testJitFoldsTo_UnsignedMod)
 
     // Test that the mod got folded to 1.
     MConstant* op = ret->getOperand(0)->toConstant();
-    CHECK(mozilla::NumbersAreIdentical(op->numberToDouble(), 1.0));
+    CHECK(mozilla::NumbersAreIdentical(op->value().toNumber(), 1.0));
     return true;
 }
 END_TEST(testJitFoldsTo_UnsignedMod)

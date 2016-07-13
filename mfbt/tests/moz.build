@@ -9,7 +9,6 @@ CppUnitTests([
     'TestAtomics',
     'TestBinarySearch',
     'TestBloomFilter',
-    'TestBufferList',
     'TestCasting',
     'TestCeilingFloor',
     'TestCheckedInt',
@@ -17,23 +16,16 @@ CppUnitTests([
     'TestCountZeroes',
     'TestEndian',
     'TestEnumSet',
-    'TestFastBernoulliTrial',
     'TestFloatingPoint',
-    'TestFunction',
-    'TestInitializerList',
     'TestIntegerPrintfMacros',
     'TestIntegerRange',
     'TestJSONWriter',
-    'TestLinkedList',
     'TestMacroArgs',
     'TestMacroForEach',
-    'TestMathAlgorithms',
     'TestMaybe',
-    'TestNotNull',
     'TestPair',
     'TestRefPtr',
     'TestRollingMean',
-    'TestSaturate',
     'TestScopeExit',
     'TestSegmentedVector',
     'TestSHA1',
@@ -46,7 +38,6 @@ CppUnitTests([
     'TestVariant',
     'TestVector',
     'TestWeakPtr',
-    'TestXorShift128PlusRNG',
 ])
 
 if not CONFIG['MOZ_ASAN']:
@@ -65,9 +56,8 @@ if CONFIG['_MSC_VER']:
     '-wd4530', # C++ exception handler used, but unwind semantics are not enabled
   ]
 
+FAIL_ON_WARNINGS = True
+
 USE_LIBS += [
     'mfbt',
 ]
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

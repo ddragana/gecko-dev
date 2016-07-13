@@ -37,10 +37,10 @@
 
 #icon {
   margin-top: 8px;
-  margin-inline-end: 10px;
+  -moz-margin-end: 10px;
   max-width: 64px;
   max-height: 64px;
-  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric.svg");
+  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric.png");
 }
 
 .addon-info[type="theme"] #icon {
@@ -77,37 +77,35 @@
 }
 
 #warning-icon {
-  list-style-image: url("chrome://mozapps/skin/extensions/alerticon-warning.svg");
+  list-style-image: url("chrome://mozapps/skin/extensions/alerticon-warning.png");
   width: 16px;
-  height: 16px;
+  height: 15px;
   margin-top: 5px;
-  margin-inline-end: 5px;
+  -moz-margin-end: 5px;
 }
 
 #allow {
-  margin-inline-start: 84px;
+  -moz-margin-start: 84px;
   margin-bottom: 20px;
 }
 
-#buttonDeck {
+#continuePanel,
+#restartPanel {
   margin-top: 25px;
-  -moz-box-align: stretch;
-  -moz-box-pack: stretch;
+  -moz-box-pack: end;
+  -moz-box-align: center;
 }
 
 #continuePanel {
   -moz-box-pack: end;
-  -moz-box-align: end;
 }
 
-#restartPanel {
-  -moz-box-pack: end;
-  -moz-box-align: stretch;
+#restartMessage {
+  text-align: right;
 }
 
-#restartPanelButtons {
-  margin-top: 25px;
-  -moz-box-pack: end;
+#restartSpacer {
+  -moz-box-flex: 1;
 }
 
 #later {

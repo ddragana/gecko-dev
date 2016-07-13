@@ -12,7 +12,7 @@
 
 namespace mozilla {
 
-class ReportDecodeResultTask final : public Runnable
+class ReportDecodeResultTask final : public nsRunnable
 {
 public:
   ReportDecodeResultTask(DecodeJob& aDecodeJob,

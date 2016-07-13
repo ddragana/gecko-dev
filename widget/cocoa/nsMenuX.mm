@@ -62,6 +62,7 @@ int32_t nsMenuX::sIndexingMenuLevel = 0;
 - (id) initWithMenuGroupOwner:(nsMenuGroupOwnerX *)aMenuGroupOwner
 {
   if ((self = [super init]) != nil) {
+    mMenuGroupOwner = nullptr;
     [self setMenuGroupOwner:aMenuGroupOwner];
   }
   return self;
@@ -82,9 +83,6 @@ int32_t nsMenuX::sIndexingMenuLevel = 0;
 {
   // weak reference as the nsMenuGroupOwnerX owns all of its sub-objects
   mMenuGroupOwner = aMenuGroupOwner;
-  if (aMenuGroupOwner) {
-    aMenuGroupOwner->AddMenuItemInfoToSet(self);
-  }
 }
 
 @end
@@ -235,31 +233,30 @@ nsresult nsMenuX::AddMenuItem(nsMenuItemX* aMenuItem)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-nsMenuX* nsMenuX::AddMenu(UniquePtr<nsMenuX> aMenu)
+nsresult nsMenuX::AddMenu(nsMenuX* aMenu)
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  // aMenu transfers ownership to mMenuObjectsArray and becomes nullptr, so
-  // we need to keep a raw pointer to access it conveniently.
-  nsMenuX* menu = aMenu.get();
-  mMenuObjectsArray.AppendElement(Move(aMenu));
+  // Add a submenu
+  if (!aMenu)
+    return NS_ERROR_NULL_POINTER;
 
-  if (nsMenuUtilsX::NodeIsHiddenOrCollapsed(menu->Content())) {
-    return menu;
-  }
-
+  mMenuObjectsArray.AppendElement(aMenu);
+  if (nsMenuUtilsX::NodeIsHiddenOrCollapsed(aMenu->Content()))
+    return NS_OK;
   ++mVisibleItemsCount;
 
   // We have to add a menu item and then associate the menu with it
-  NSMenuItem* newNativeMenuItem = menu->NativeMenuItem();
-  if (newNativeMenuItem) {
-    [mNativeMenu addItem:newNativeMenuItem];
-    [newNativeMenuItem setSubmenu:(NSMenu*)menu->NativeData()];
-  }
+  NSMenuItem* newNativeMenuItem = aMenu->NativeMenuItem();
+  if (!newNativeMenuItem)
+    return NS_ERROR_FAILURE;
+  [mNativeMenu addItem:newNativeMenuItem];
 
-  return menu;
+  [newNativeMenuItem setSubmenu:(NSMenu*)aMenu->NativeData()];
 
-  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(nullptr);
+  return NS_OK;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
 // Includes all items, including hidden/collapsed ones
@@ -274,7 +271,7 @@ nsMenuObjectX* nsMenuX::GetItemAt(uint32_t aPos)
   if (aPos >= (uint32_t)mMenuObjectsArray.Length())
     return NULL;
 
-  return mMenuObjectsArray[aPos].get();
+  return mMenuObjectsArray[aPos];
 }
 
 // Only includes visible items
@@ -295,13 +292,13 @@ nsMenuObjectX* nsMenuX::GetVisibleItemAt(uint32_t aPos)
 
   // If there are no invisible items, can provide direct access
   if (mVisibleItemsCount == count)
-    return mMenuObjectsArray[aPos].get();
+    return mMenuObjectsArray[aPos];
 
   // Otherwise, traverse the array until we find the the item we're looking for.
   nsMenuObjectX* item;
   uint32_t visibleNodeIndex = 0;
   for (uint32_t i = 0; i < count; i++) {
-    item = mMenuObjectsArray[i].get();
+    item = mMenuObjectsArray[i];
     if (!nsMenuUtilsX::NodeIsHiddenOrCollapsed(item->Content())) {
       if (aPos == visibleNodeIndex) {
         // we found the visible node we're looking for, return it
@@ -356,7 +353,7 @@ nsEventStatus nsMenuX::MenuOpened()
   }
 
   nsEventStatus status = nsEventStatus_eIgnore;
-  WidgetMouseEvent event(true, eXULPopupShown, nullptr,
+  WidgetMouseEvent event(true, NS_XUL_POPUP_SHOWN, nullptr,
                          WidgetMouseEvent::eReal);
 
   nsCOMPtr<nsIContent> popupContent;
@@ -380,7 +377,7 @@ void nsMenuX::MenuClosed()
     mContent->UnsetAttr(kNameSpaceID_None, nsGkAtoms::open, true);
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    WidgetMouseEvent event(true, eXULPopupHidden, nullptr,
+    WidgetMouseEvent event(true, NS_XUL_POPUP_HIDDEN, nullptr,
                            WidgetMouseEvent::eReal);
 
     nsCOMPtr<nsIContent> popupContent;
@@ -539,7 +536,7 @@ void nsMenuX::LoadMenuItem(nsIContent* inMenuItemContent)
 
 void nsMenuX::LoadSubMenu(nsIContent* inMenuContent)
 {
-  auto menu = MakeUnique<nsMenuX>();
+  nsAutoPtr<nsMenuX> menu(new nsMenuX());
   if (!menu)
     return;
 
@@ -547,15 +544,13 @@ void nsMenuX::LoadSubMenu(nsIContent* inMenuContent)
   if (NS_FAILED(rv))
     return;
 
-  // |menu|'s ownership is transfer to AddMenu but, if it is successfully
-  // added, we can access it via the returned raw pointer.
-  nsMenuX* menu_ptr = AddMenu(Move(menu));
+  AddMenu(menu);
 
   // This needs to happen after the nsIMenu object is inserted into
   // our item array in AddMenu()
-  if (menu_ptr) {
-    menu_ptr->SetupIcon();
-  }
+  menu->SetupIcon();
+
+  menu.forget();
 }
 
 // This menu is about to open. Returns TRUE if we should keep processing the event,
@@ -563,7 +558,7 @@ void nsMenuX::LoadSubMenu(nsIContent* inMenuContent)
 bool nsMenuX::OnOpen()
 {
   nsEventStatus status = nsEventStatus_eIgnore;
-  WidgetMouseEvent event(true, eXULPopupShowing, nullptr,
+  WidgetMouseEvent event(true, NS_XUL_POPUP_SHOWING, nullptr,
                          WidgetMouseEvent::eReal);
   
   nsCOMPtr<nsIContent> popupContent;
@@ -580,7 +575,7 @@ bool nsMenuX::OnOpen()
   // must potentially be updated.
 
   // Get new popup content first since it might have changed as a result of the
-  // eXULPopupShowing event above.
+  // NS_XUL_POPUP_SHOWING event above.
   GetMenuPopupContent(getter_AddRefs(popupContent));
   if (!popupContent)
     return true;
@@ -601,7 +596,7 @@ bool nsMenuX::OnClose()
     return true;
 
   nsEventStatus status = nsEventStatus_eIgnore;
-  WidgetMouseEvent event(true, eXULPopupHiding, nullptr,
+  WidgetMouseEvent event(true, NS_XUL_POPUP_HIDING, nullptr,
                          WidgetMouseEvent::eReal);
 
   nsCOMPtr<nsIContent> popupContent;

@@ -120,7 +120,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     }
   }
 
-  ~PhysicalSocket() override {
+  virtual ~PhysicalSocket() {
     Close();
   }
 
@@ -135,7 +135,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return s_ != INVALID_SOCKET;
   }
 
-  SocketAddress GetLocalAddress() const override {
+  SocketAddress GetLocalAddress() const {
     sockaddr_storage addr_storage = {0};
     socklen_t addrlen = sizeof(addr_storage);
     sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
@@ -150,7 +150,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return address;
   }
 
-  SocketAddress GetRemoteAddress() const override {
+  SocketAddress GetRemoteAddress() const {
     sockaddr_storage addr_storage = {0};
     socklen_t addrlen = sizeof(addr_storage);
     sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
@@ -165,7 +165,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return address;
   }
 
-  int Bind(const SocketAddress& bind_addr) override {
+  int Bind(const SocketAddress& bind_addr) {
     sockaddr_storage addr_storage;
     size_t len = bind_addr.ToSockAddrStorage(&addr_storage);
     sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
@@ -180,7 +180,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return err;
   }
 
-  int Connect(const SocketAddress& addr) override {
+  int Connect(const SocketAddress& addr) {
     // TODO: Implicit creation is required to reconnect...
     // ...but should we make it more explicit?
     if (state_ != CS_CLOSED) {
@@ -222,19 +222,21 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return 0;
   }
 
-  int GetError() const override {
+  int GetError() const {
     CritScope cs(&crit_);
     return error_;
   }
 
-  void SetError(int error) override {
+  void SetError(int error) {
     CritScope cs(&crit_);
     error_ = error;
   }
 
-  ConnState GetState() const override { return state_; }
+  ConnState GetState() const {
+    return state_;
+  }
 
-  int GetOption(Option opt, int* value) override {
+  int GetOption(Option opt, int* value) {
     int slevel;
     int sopt;
     if (TranslateOption(opt, &slevel, &sopt) == -1)
@@ -249,7 +251,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return ret;
   }
 
-  int SetOption(Option opt, int value) override {
+  int SetOption(Option opt, int value) {
     int slevel;
     int sopt;
     if (TranslateOption(opt, &slevel, &sopt) == -1)
@@ -262,7 +264,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return ::setsockopt(s_, slevel, sopt, (SockOptArg)&value, sizeof(value));
   }
 
-  int Send(const void* pv, size_t cb) override {
+  int Send(const void *pv, size_t cb) {
     int sent = ::send(s_, reinterpret_cast<const char *>(pv), (int)cb,
 #if defined(WEBRTC_LINUX) && !defined(WEBRTC_ANDROID)
         // Suppress SIGPIPE. Without this, attempting to send on a socket whose
@@ -285,9 +287,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return sent;
   }
 
-  int SendTo(const void* buffer,
-             size_t length,
-             const SocketAddress& addr) override {
+  int SendTo(const void* buffer, size_t length, const SocketAddress& addr) {
     sockaddr_storage saddr;
     size_t len = addr.ToSockAddrStorage(&saddr);
     int sent = ::sendto(
@@ -309,7 +309,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return sent;
   }
 
-  int Recv(void* buffer, size_t length) override {
+  int Recv(void* buffer, size_t length) {
     int received = ::recv(s_, static_cast<char*>(buffer),
                           static_cast<int>(length), 0);
     if ((received == 0) && (length != 0)) {
@@ -335,7 +335,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return received;
   }
 
-  int RecvFrom(void* buffer, size_t length, SocketAddress* out_addr) override {
+  int RecvFrom(void* buffer, size_t length, SocketAddress *out_addr) {
     sockaddr_storage addr_storage;
     socklen_t addr_len = sizeof(addr_storage);
     sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
@@ -355,7 +355,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return received;
   }
 
-  int Listen(int backlog) override {
+  int Listen(int backlog) {
     int err = ::listen(s_, backlog);
     UpdateLastError();
     if (err == 0) {
@@ -369,7 +369,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return err;
   }
 
-  AsyncSocket* Accept(SocketAddress* out_addr) override {
+  AsyncSocket* Accept(SocketAddress *out_addr) {
     sockaddr_storage addr_storage;
     socklen_t addr_len = sizeof(addr_storage);
     sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
@@ -383,7 +383,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return ss_->WrapSocket(s);
   }
 
-  int Close() override {
+  int Close() {
     if (s_ == INVALID_SOCKET)
       return 0;
     int err = ::closesocket(s_);
@@ -398,7 +398,7 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return err;
   }
 
-  int EstimateMTU(uint16* mtu) override {
+  int EstimateMTU(uint16* mtu) {
     SocketAddress addr = GetRemoteAddress();
     if (addr.IsAny()) {
       SetError(ENOTCONN);
@@ -563,7 +563,7 @@ class EventDispatcher : public Dispatcher {
     ss_->Add(this);
   }
 
-  ~EventDispatcher() override {
+  virtual ~EventDispatcher() {
     ss_->Remove(this);
     close(afd_[0]);
     close(afd_[1]);
@@ -579,9 +579,11 @@ class EventDispatcher : public Dispatcher {
     }
   }
 
-  uint32 GetRequestedEvents() override { return DE_READ; }
+  virtual uint32 GetRequestedEvents() {
+    return DE_READ;
+  }
 
-  void OnPreEvent(uint32 ff) override {
+  virtual void OnPreEvent(uint32 ff) {
     // It is not possible to perfectly emulate an auto-resetting event with
     // pipes.  This simulates it by resetting before the event is handled.
 
@@ -593,11 +595,17 @@ class EventDispatcher : public Dispatcher {
     }
   }
 
-  void OnEvent(uint32 ff, int err) override { ASSERT(false); }
+  virtual void OnEvent(uint32 ff, int err) {
+    ASSERT(false);
+  }
 
-  int GetDescriptor() override { return afd_[0]; }
+  virtual int GetDescriptor() {
+    return afd_[0];
+  }
 
-  bool IsDescriptorClosed() override { return false; }
+  virtual bool IsDescriptorClosed() {
+    return false;
+  }
 
  private:
   PhysicalSocketServer *ss_;
@@ -727,13 +735,15 @@ class PosixSignalDispatcher : public Dispatcher {
     owner_->Add(this);
   }
 
-  ~PosixSignalDispatcher() override {
+  virtual ~PosixSignalDispatcher() {
     owner_->Remove(this);
   }
 
-  uint32 GetRequestedEvents() override { return DE_READ; }
+  virtual uint32 GetRequestedEvents() {
+    return DE_READ;
+  }
 
-  void OnPreEvent(uint32 ff) override {
+  virtual void OnPreEvent(uint32 ff) {
     // Events might get grouped if signals come very fast, so we read out up to
     // 16 bytes to make sure we keep the pipe empty.
     uint8 b[16];
@@ -745,7 +755,7 @@ class PosixSignalDispatcher : public Dispatcher {
     }
   }
 
-  void OnEvent(uint32 ff, int err) override {
+  virtual void OnEvent(uint32 ff, int err) {
     for (int signum = 0; signum < PosixSignalHandler::kNumPosixSignals;
          ++signum) {
       if (PosixSignalHandler::Instance()->IsSignalSet(signum)) {
@@ -764,11 +774,13 @@ class PosixSignalDispatcher : public Dispatcher {
     }
   }
 
-  int GetDescriptor() override {
+  virtual int GetDescriptor() {
     return PosixSignalHandler::Instance()->GetDescriptor();
   }
 
-  bool IsDescriptorClosed() override { return false; }
+  virtual bool IsDescriptorClosed() {
+    return false;
+  }
 
   void SetHandler(int signum, void (*handler)(int)) {
     handlers_[signum] = handler;
@@ -797,7 +809,7 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
   SocketDispatcher(SOCKET s, PhysicalSocketServer *ss) : PhysicalSocket(ss, s) {
   }
 
-  ~SocketDispatcher() override {
+  virtual ~SocketDispatcher() {
     Close();
   }
 
@@ -811,7 +823,7 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
     return Create(AF_INET, type);
   }
 
-  bool Create(int family, int type) override {
+  virtual bool Create(int family, int type) {
     // Change the socket to be non-blocking.
     if (!PhysicalSocket::Create(family, type))
       return false;
@@ -819,9 +831,11 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
     return Initialize();
   }
 
-  int GetDescriptor() override { return s_; }
+  virtual int GetDescriptor() {
+    return s_;
+  }
 
-  bool IsDescriptorClosed() override {
+  virtual bool IsDescriptorClosed() {
     // We don't have a reliable way of distinguishing end-of-stream
     // from readability.  So test on each readable call.  Is this
     // inefficient?  Probably.
@@ -856,16 +870,18 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
     }
   }
 
-  uint32 GetRequestedEvents() override { return enabled_events_; }
+  virtual uint32 GetRequestedEvents() {
+    return enabled_events_;
+  }
 
-  void OnPreEvent(uint32 ff) override {
+  virtual void OnPreEvent(uint32 ff) {
     if ((ff & DE_CONNECT) != 0)
       state_ = CS_CONNECTED;
     if ((ff & DE_CLOSE) != 0)
       state_ = CS_CLOSED;
   }
 
-  void OnEvent(uint32 ff, int err) override {
+  virtual void OnEvent(uint32 ff, int err) {
     // Make sure we deliver connect/accept first. Otherwise, consumers may see
     // something like a READ followed by a CONNECT, which would be odd.
     if ((ff & DE_CONNECT) != 0) {
@@ -891,7 +907,7 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
     }
   }
 
-  int Close() override {
+  virtual int Close() {
     if (s_ == INVALID_SOCKET)
       return 0;
 
@@ -910,21 +926,28 @@ class FileDispatcher: public Dispatcher, public AsyncFile {
     fcntl(fd_, F_SETFL, fcntl(fd_, F_GETFL, 0) | O_NONBLOCK);
   }
 
-  ~FileDispatcher() override {
+  virtual ~FileDispatcher() {
     ss_->Remove(this);
   }
 
   SocketServer* socketserver() { return ss_; }
 
-  int GetDescriptor() override { return fd_; }
+  virtual int GetDescriptor() {
+    return fd_;
+  }
 
-  bool IsDescriptorClosed() override { return false; }
+  virtual bool IsDescriptorClosed() {
+    return false;
+  }
 
-  uint32 GetRequestedEvents() override { return flags_; }
+  virtual uint32 GetRequestedEvents() {
+    return flags_;
+  }
 
-  void OnPreEvent(uint32 ff) override {}
+  virtual void OnPreEvent(uint32 ff) {
+  }
 
-  void OnEvent(uint32 ff, int err) override {
+  virtual void OnEvent(uint32 ff, int err) {
     if ((ff & DE_READ) != 0)
       SignalReadEvent(this);
     if ((ff & DE_WRITE) != 0)
@@ -933,15 +956,19 @@ class FileDispatcher: public Dispatcher, public AsyncFile {
       SignalCloseEvent(this, err);
   }
 
-  bool readable() override { return (flags_ & DE_READ) != 0; }
+  virtual bool readable() {
+    return (flags_ & DE_READ) != 0;
+  }
 
-  void set_readable(bool value) override {
+  virtual void set_readable(bool value) {
     flags_ = value ? (flags_ | DE_READ) : (flags_ & ~DE_READ);
   }
 
-  bool writable() override { return (flags_ & DE_WRITE) != 0; }
+  virtual bool writable() {
+    return (flags_ & DE_WRITE) != 0;
+  }
 
-  void set_writable(bool value) override {
+  virtual void set_writable(bool value) {
     flags_ = value ? (flags_ | DE_WRITE) : (flags_ & ~DE_WRITE);
   }
 
@@ -1152,9 +1179,9 @@ class Signaler : public EventDispatcher {
   Signaler(PhysicalSocketServer* ss, bool* pf)
       : EventDispatcher(ss), pf_(pf) {
   }
-  ~Signaler() override { }
+  virtual ~Signaler() { }
 
-  void OnEvent(uint32 ff, int err) override {
+  void OnEvent(uint32 ff, int err) {
     if (pf_)
       *pf_ = false;
   }
@@ -1520,7 +1547,7 @@ bool PhysicalSocketServer::Wait(int cmsWait, bool process_io) {
     if (cmsWait == kForever) {
       cmsNext = cmsWait;
     } else {
-      cmsNext = std::max(0, cmsTotal - cmsElapsed);
+      cmsNext = _max(0, cmsTotal - cmsElapsed);
     }
 
     // Wait for one of the events to signal

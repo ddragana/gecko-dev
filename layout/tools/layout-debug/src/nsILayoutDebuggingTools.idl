@@ -6,21 +6,21 @@
 
 #include "nsISupports.idl"
 
-interface mozIDOMWindow;
+interface nsIDOMWindow;
 
 /**
  * A series of hooks into non-IDL-ized layout code to allow all the
  * layout debugging functions to be used from chrome.
  */
 
-[scriptable, uuid(f336d8d3-9721-4ad3-85d0-a7018c0a3383)]
+[scriptable, uuid(4b968d4b-9c08-4635-a7e0-55084843f0fd)]
 interface nsILayoutDebuggingTools : nsISupports
 {
 
     /*
      * Initialize debugger object to act on a docshell.
      */
-    void init(in mozIDOMWindow win);
+    void init(in nsIDOMWindow win);
 
     /*
      * Notify the debugger that the docshell has been told to load a new

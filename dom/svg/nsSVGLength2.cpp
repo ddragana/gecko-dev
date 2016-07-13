@@ -17,7 +17,6 @@
 #include "nsSVGIntegrationUtils.h"
 #include "nsTextFormatter.h"
 #include "DOMSVGLength.h"
-#include "LayoutLogging.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -122,7 +121,7 @@ static float
 FixAxisLength(float aLength)
 {
   if (aLength == 0.0f) {
-    LAYOUT_WARNING("zero axis length");
+    NS_WARNING("zero axis length");
     return 1e-20f;
   }
   return aLength;
@@ -350,7 +349,7 @@ nsSVGLength2::NewValueSpecifiedUnits(uint16_t unitType,
 nsresult
 nsSVGLength2::ToDOMBaseVal(DOMSVGLength **aResult, nsSVGElement *aSVGElement)
 {
-  RefPtr<DOMSVGLength> domBaseVal =
+  nsRefPtr<DOMSVGLength> domBaseVal =
     DOMSVGLength::GetTearOff(this, aSVGElement, false);
 
   domBaseVal.forget(aResult);
@@ -360,7 +359,7 @@ nsSVGLength2::ToDOMBaseVal(DOMSVGLength **aResult, nsSVGElement *aSVGElement)
 nsresult
 nsSVGLength2::ToDOMAnimVal(DOMSVGLength **aResult, nsSVGElement *aSVGElement)
 {
-  RefPtr<DOMSVGLength> domAnimVal =
+  nsRefPtr<DOMSVGLength> domAnimVal =
     DOMSVGLength::GetTearOff(this, aSVGElement, true);
 
   domAnimVal.forget(aResult);
@@ -450,7 +449,7 @@ nsSVGLength2::SetAnimValue(float aValue, nsSVGElement *aSVGElement)
 already_AddRefed<SVGAnimatedLength>
 nsSVGLength2::ToDOMAnimatedLength(nsSVGElement* aSVGElement)
 {
-  RefPtr<SVGAnimatedLength> svgAnimatedLength =
+  nsRefPtr<SVGAnimatedLength> svgAnimatedLength =
     sSVGAnimatedLengthTearoffTable.GetTearoff(this);
   if (!svgAnimatedLength) {
     svgAnimatedLength = new SVGAnimatedLength(this, aSVGElement);

@@ -14,6 +14,7 @@ var expect = 'No Crash';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+jit(true);
 
 /************************ BROWSER DETECT (http://www.quirksmode.org/js/detect.html) ************************/
 
@@ -110,5 +111,6 @@ var BrowserDetect = {
 
 BrowserDetect.init();
 
+jit(false);
 
 reportCompare(expect, actual, summary);

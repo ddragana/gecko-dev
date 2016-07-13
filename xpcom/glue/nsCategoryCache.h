@@ -79,7 +79,7 @@ public:
       nsISupports* entry = iter.UserData();
       nsCOMPtr<T> service = do_QueryInterface(entry);
       if (service) {
-        aResult.AppendElement(service.forget());
+        aResult.AppendObject(service);
       }
     }
   }
@@ -89,7 +89,7 @@ private:
   nsCategoryCache(const nsCategoryCache<T>&);
 
   nsCString mCategoryName;
-  RefPtr<nsCategoryObserver> mObserver;
+  nsRefPtr<nsCategoryObserver> mObserver;
 };
 
 #endif

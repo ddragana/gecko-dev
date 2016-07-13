@@ -8,7 +8,7 @@
  * The server should not be used for any production purposes.
  */
 
-var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 this.EXPORTED_SYMBOLS = [
   "ServerBSO",
@@ -102,7 +102,7 @@ ServerBSO.prototype = {
   toJSON: function toJSON() {
     let obj = {};
 
-    for (let key of this.FIELDS) {
+    for each (let key in this.FIELDS) {
       if (this[key] !== undefined) {
         obj[key] = this[key];
       }
@@ -306,7 +306,7 @@ StorageServerCollection.prototype = {
 
   get totalPayloadSize() {
     let size = 0;
-    for (let bso of this.bsos()) {
+    for each (let bso in this.bsos()) {
       size += bso.payload.length;
     }
 
@@ -324,13 +324,8 @@ StorageServerCollection.prototype = {
    * @return an array of IDs.
    */
   keys: function keys(filter) {
-    let ids = [];
-    for (let [id, bso] in Iterator(this._bsos)) {
-      if (!bso.deleted && (!filter || filter(id, bso))) {
-        ids.push(id);
-      }
-    }
-    return ids;
+    return [id for ([id, bso] in Iterator(this._bsos))
+               if (!bso.deleted && (!filter || filter(id, bso)))];
   },
 
   /**
@@ -344,12 +339,8 @@ StorageServerCollection.prototype = {
    * @return an array of ServerBSOs.
    */
   bsos: function bsos(filter) {
-    let os = [];
-    for (let [id, bso] in Iterator(this._bsos)) {
-      if (!bso.deleted) {
-        os.push(bso);
-      }
-    }
+    let os = [bso for ([id, bso] in Iterator(this._bsos))
+              if (!bso.deleted)];
 
     if (!filter) {
       return os;
@@ -450,8 +441,7 @@ StorageServerCollection.prototype = {
 
   get: function get(options) {
     let data = [];
-    for (let id in this._bsos) {
-      let bso = this._bsos[id];
+    for each (let bso in this._bsos) {
       if (!bso.modified) {
         continue;
       }
@@ -514,7 +504,7 @@ StorageServerCollection.prototype = {
 
     // This will count records where we have an existing ServerBSO
     // registered with us as successful and all other records as failed.
-    for (let record of input) {
+    for each (let record in input) {
       count += 1;
       if (count > this.BATCH_MAX_COUNT) {
         failed[record.id] = "Max record count exceeded.";
@@ -573,7 +563,8 @@ StorageServerCollection.prototype = {
           failed[record.id] = "no bso configured";
         }
       } catch (ex) {
-        this._log.info("Exception when processing BSO", ex);
+        this._log.info("Exception when processing BSO: " +
+                       CommonUtils.exceptionStr(ex));
         failed[record.id] = "Exception when processing.";
       }
     }
@@ -611,7 +602,7 @@ StorageServerCollection.prototype = {
   parseOptions: function parseOptions(request) {
     let options = {};
 
-    for (let chunk of request.queryString.split("&")) {
+    for each (let chunk in request.queryString.split("&")) {
       if (!chunk) {
         continue;
       }
@@ -665,7 +656,7 @@ StorageServerCollection.prototype = {
       let requestModified = parseInt(request.getHeader("x-if-modified-since"),
                                      10);
       let newestBSO = 0;
-      for (let bso of data) {
+      for each (let bso in data) {
         if (bso.modified > newestBSO) {
           newestBSO = bso.modified;
         }
@@ -755,7 +746,7 @@ StorageServerCollection.prototype = {
         return sendMozSvcError(request, response, "8");
       }
     } else if (inputMediaType == "application/newlines") {
-      for (let line of inputBody.split("\n")) {
+      for each (let line in inputBody.split("\n")) {
         let record;
         try {
           record = JSON.parse(line);
@@ -932,7 +923,7 @@ StorageServer.prototype = {
     } catch (ex) {
       _("==========================================");
       _("Got exception starting Storage HTTP server on port " + this.port);
-      _("Error: " + Log.exceptionStr(ex));
+      _("Error: " + CommonUtils.exceptionStr(ex));
       _("Is there a process already listening on port " + this.port + "?");
       _("==========================================");
       do_throw(ex);
@@ -1087,8 +1078,7 @@ StorageServer.prototype = {
       throw new Error("Unknown user.");
     }
     let userCollections = this.users[username].collections;
-    for (let name in userCollections) {
-      let coll = userCollections[name];
+    for each (let [name, coll] in Iterator(userCollections)) {
       this._log.trace("Bulk deleting " + name + " for " + username + "...");
       coll.delete({});
     }
@@ -1109,8 +1099,7 @@ StorageServer.prototype = {
   newestCollectionTimestamp: function newestCollectionTimestamp(username) {
     let collections = this.users[username].collections;
     let newest = 0;
-    for (let name in collections) {
-      let collection = collections[name];
+    for each (let collection in collections) {
       if (collection.timestamp > newest) {
         newest = collection.timestamp;
       }
@@ -1160,9 +1149,7 @@ StorageServer.prototype = {
 
   infoQuota: function infoQuota(username) {
     let total = 0;
-    let usage = this.infoUsage(username);
-    for (let key in usage) {
-      let value = usage[key];
+    for each (let value in this.infoUsage(username)) {
       total += value;
     }
 
@@ -1204,11 +1191,9 @@ StorageServer.prototype = {
   _pruneExpired: function _pruneExpired() {
     let now = Date.now();
 
-    for (let username in this.users) {
-      let user = this.users[username];
-      for (let name in user.collections) {
-        let collection = user.collections[name];
-        for (let bso of collection.bsos()) {
+    for each (let user in this.users) {
+      for each (let collection in user.collections) {
+        for each (let bso in collection.bsos()) {
           // ttl === 0 is a special case, so we can't simply !ttl.
           if (typeof(bso.ttl) != "number") {
             continue;
@@ -1255,11 +1240,7 @@ StorageServer.prototype = {
   respond: function respond(req, resp, code, status, body, headers, timestamp) {
     this._log.info("Response: " + code + " " + status);
     resp.setStatusLine(req.httpVersion, code, status);
-    if (!headers) {
-      headers = this.defaultHeaders;
-    }
-    for (let header in headers) {
-      let value = headers[header];
+    for each (let [header, value] in Iterator(headers || this.defaultHeaders)) {
       resp.setHeader(header, value, false);
     }
 
@@ -1287,7 +1268,7 @@ StorageServer.prototype = {
       if (e instanceof HttpError) {
         this.respond(req, resp, e.code, e.description, "", {}, timestamp);
       } else {
-        this._log.warn("StorageServer: handleDefault caught an error", e);
+        this._log.warn(CommonUtils.exceptionStr(e));
         throw e;
       }
     }
@@ -1392,7 +1373,8 @@ StorageServer.prototype = {
       try {
         return handler.call(this, handler, req, resp, version, username, rest);
       } catch (ex) {
-        this._log.warn("Got exception during request", ex);
+        this._log.warn("Got exception during request: " +
+                       CommonUtils.exceptionStr(ex));
         throw ex;
       }
     }

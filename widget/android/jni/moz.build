@@ -12,9 +12,11 @@ EXPORTS.mozilla.jni += [
     'Utils.h',
 ]
 
-UNIFIED_SOURCES += [
+SOURCES += [
     'Utils.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
 
 FINAL_LIBRARY = 'xul'
 

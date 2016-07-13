@@ -18,7 +18,7 @@
 
 using namespace mozilla;
 
-static MOZ_THREAD_LOCAL(bool) sTLSIsMainThread;
+static mozilla::ThreadLocal<bool> sTLSIsMainThread;
 
 bool
 NS_IsMainThread()
@@ -29,14 +29,16 @@ NS_IsMainThread()
 void
 NS_SetMainThread()
 {
-  if (!sTLSIsMainThread.init()) {
-    MOZ_CRASH();
+  if (!sTLSIsMainThread.initialized()) {
+    if (!sTLSIsMainThread.init()) {
+      MOZ_CRASH();
+    }
+    sTLSIsMainThread.set(true);
   }
-  sTLSIsMainThread.set(true);
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-typedef nsTArray<RefPtr<nsThread>> nsThreadArray;
+typedef nsTArray<nsRefPtr<nsThread>> nsThreadArray;
 
 //-----------------------------------------------------------------------------
 
@@ -130,7 +132,7 @@ nsThreadManager::Shutdown()
   {
     OffTheBooksMutexAutoLock lock(mLock);
     for (auto iter = mThreadsByPRThread.Iter(); !iter.Done(); iter.Next()) {
-      RefPtr<nsThread>& thread = iter.Data();
+      nsRefPtr<nsThread>& thread = iter.Data();
       threads.AppendElement(thread);
       iter.Remove();
     }
@@ -152,12 +154,6 @@ nsThreadManager::Shutdown()
       thread->Shutdown();
     }
   }
-
-  // NB: It's possible that there are events in the queue that want to *start*
-  // an asynchronous shutdown. But we have already shutdown the threads above,
-  // so there's no need to worry about them. We only have to wait for all
-  // in-flight asynchronous thread shutdowns to complete.
-  mMainThread->WaitForAllAsynchronousShutdowns();
 
   // In case there are any more events somehow...
   NS_ProcessPendingEvents(mMainThread);
@@ -229,7 +225,7 @@ nsThreadManager::GetCurrentThread()
   }
 
   // OK, that's fine.  We'll dynamically create one :-)
-  RefPtr<nsThread> thread = new nsThread(nsThread::NOT_MAIN_THREAD, 0);
+  nsRefPtr<nsThread> thread = new nsThread(nsThread::NOT_MAIN_THREAD, 0);
   if (!thread || NS_FAILED(thread->InitCurrentThread())) {
     return nullptr;
   }
@@ -249,7 +245,7 @@ nsThreadManager::NewThread(uint32_t aCreationFlags,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  RefPtr<nsThread> thr = new nsThread(nsThread::NOT_MAIN_THREAD, aStackSize);
+  nsRefPtr<nsThread> thr = new nsThread(nsThread::NOT_MAIN_THREAD, aStackSize);
   nsresult rv = thr->Init();  // Note: blocks until the new thread has been set up
   if (NS_FAILED(rv)) {
     return rv;
@@ -282,7 +278,7 @@ nsThreadManager::GetThreadFromPRThread(PRThread* aThread, nsIThread** aResult)
     return NS_ERROR_INVALID_ARG;
   }
 
-  RefPtr<nsThread> temp;
+  nsRefPtr<nsThread> temp;
   {
     OffTheBooksMutexAutoLock lock(mLock);
     mThreadsByPRThread.Get(aThread, getter_AddRefs(temp));

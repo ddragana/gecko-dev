@@ -1,19 +1,19 @@
 "use strict";
 
-var { interfaces: Ci, classes: Cc, utils: Cu, results: Cr } = Components;
+const { interfaces: Ci, classes: Cc, utils: Cu, results: Cr } = Components;
 
-var {WebRequest} = Cu.import("resource://gre/modules/WebRequest.jsm", {});
+let {WebRequest} = Cu.import("resource://gre/modules/WebRequest.jsm", {});
 
 const BASE = "http://example.com/browser/toolkit/modules/tests/browser";
 const URL = BASE + "/WebRequest_dynamic.sjs";
 
-var countBefore = 0;
-var countAfter = 0;
+let countBefore = 0;
+let countAfter = 0;
 
 function onBeforeSendHeaders(details)
 {
   if (details.url != URL) {
-    return undefined;
+    return;
   }
 
   countBefore++;

@@ -1,4 +1,4 @@
 protocol Nullable {
 child:
-    async Msg(nullable int i);
+    Msg(nullable int i);
 };

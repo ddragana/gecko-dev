@@ -24,6 +24,7 @@
 #include "nsITimer.h"
 #include "nsISimpleEnumerator.h"
 #include "nsCOMArray.h"
+#include "nsAutoPtr.h"
 #include "nsBaseFilePicker.h"
 #include "nsString.h"
 #include "nsdefs.h"
@@ -60,7 +61,7 @@ class nsFilePicker :
 public:
   nsFilePicker(); 
 
-  NS_IMETHOD Init(mozIDOMWindowProxy *aParent, const nsAString& aTitle, int16_t aMode);
+  NS_IMETHOD Init(nsIDOMWindow *aParent, const nsAString& aTitle, int16_t aMode);
                   
   NS_DECL_ISUPPORTS
   
@@ -146,8 +147,8 @@ protected:
     
     void Append(const nsAString& aTitle, const nsAString& aFilter);
   private:
-    AutoTArray<COMDLG_FILTERSPEC, 1> mSpecList;
-    AutoTArray<nsString, 2> mStrings;
+    nsAutoTArray<COMDLG_FILTERSPEC, 1> mSpecList;
+    nsAutoTArray<nsString, 2> mStrings;
   };
 
   ComDlgFilterSpec       mComFilterList;

@@ -8,15 +8,10 @@ module.metadata = {
   "stability": "unstable"
 };
 
-const { Cc, Ci, Cr, Cu } = require("chrome");
+const { Cc, Ci, Cr } = require("chrome");
 const { emit, on, off } = require("./core");
-var observerService = Cc["@mozilla.org/observer-service;1"]
-                      .getService(Ci.nsIObserverService);
-
-const { ShimWaiver } = Cu.import("resource://gre/modules/ShimWaiver.jsm");
-const addObserver = ShimWaiver.getProperty(observerService, "addObserver");
-const removeObserver = ShimWaiver.getProperty(observerService, "removeObserver");
-
+const { addObserver, removeObserver } = Cc["@mozilla.org/observer-service;1"].
+                        getService(Ci.nsIObserverService);
 const { when: unload } = require("../system/unload");
 
 // Simple class that can be used to instantiate event channel that

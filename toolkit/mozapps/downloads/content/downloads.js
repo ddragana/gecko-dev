@@ -1,6 +1,7 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+# -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 "use strict";
 
@@ -16,26 +17,25 @@ const nsLocalFile = Components.Constructor("@mozilla.org/file/local;1",
 
 var Cc = Components.classes;
 var Ci = Components.interfaces;
-var Cu = Components.utils;
+let Cu = Components.utils;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/DownloadUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
 
 const nsIDM = Ci.nsIDownloadManager;
 
-var gDownloadManager = Cc["@mozilla.org/download-manager;1"].getService(nsIDM);
-var gDownloadManagerUI = Cc["@mozilla.org/download-manager-ui;1"].
+let gDownloadManager = Cc["@mozilla.org/download-manager;1"].getService(nsIDM);
+let gDownloadManagerUI = Cc["@mozilla.org/download-manager-ui;1"].
                          getService(Ci.nsIDownloadManagerUI);
 
-var gDownloadListener = null;
-var gDownloadsView = null;
-var gSearchBox = null;
-var gSearchTerms = [];
-var gBuilder = 0;
+let gDownloadListener = null;
+let gDownloadsView = null;
+let gSearchBox = null;
+let gSearchTerms = [];
+let gBuilder = 0;
 
 // This variable is used when performing commands on download items and gives
 // the command the ability to do something after all items have been operated
@@ -44,7 +44,7 @@ var gBuilder = 0;
 // before executing commands, the value will be set to |null|; and when
 // commands want to create a callback, they set the value to be a callback
 // function to be executed after all download items have been visited.
-var gPerformAllCallback;
+let gPerformAllCallback;
 
 // Control the performance of the incremental list building by setting how many
 // milliseconds to wait before building more of the list and how many items to
@@ -65,7 +65,7 @@ var gUserInteracted = false;
 
 // These strings will be converted to the corresponding ones from the string
 // bundle on startup.
-var gStr = {
+let gStr = {
   paused: "paused",
   cannotPause: "cannotPause",
   doneStatus: "doneStatus",
@@ -83,7 +83,7 @@ var gStr = {
 };
 
 // The statement to query for downloads that are active or match the search
-var gStmt = null;
+let gStmt = null;
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Start/Stop Observers
@@ -257,18 +257,18 @@ function openDownload(aDownload)
       dontAsk = !pref.getBoolPref(PREF_BDM_ALERTONEXEOPEN);
     } catch (e) { }
 
-    if (AppConstants.platform == "win") {
-      // On Vista and above, we rely on native security prompting for
-      // downloaded content unless it's disabled.
-      try {
-        var sysInfo = Cc["@mozilla.org/system-info;1"].
-                      getService(Ci.nsIPropertyBag2);
-        if (parseFloat(sysInfo.getProperty("version")) >= 6 &&
-            pref.getBoolPref(PREF_BDM_SCANWHENDONE)) {
-          dontAsk = true;
-        }
-      } catch (ex) { }
-    }
+#ifdef XP_WIN
+    // On Vista and above, we rely on native security prompting for
+    // downloaded content unless it's disabled.
+    try {
+      var sysInfo = Cc["@mozilla.org/system-info;1"].
+                    getService(Ci.nsIPropertyBag2);
+      if (parseFloat(sysInfo.getProperty("version")) >= 6 &&
+          pref.getBoolPref(PREF_BDM_SCANWHENDONE)) {
+        dontAsk = true;
+      }
+    } catch (ex) { }
+#endif
 
     if (!dontAsk) {
       var strings = document.getElementById("downloadStrings");
@@ -320,7 +320,7 @@ function copySourceLocation(aDownload)
   // Check if we should initialize a callback
   if (gPerformAllCallback === null) {
     let uris = [];
-    gPerformAllCallback = aURI => aURI ? uris.push(aURI) :
+    gPerformAllCallback = function(aURI) aURI ? uris.push(aURI) :
       clipboard.copyString(uris.join("\n"));
   }
 
@@ -414,7 +414,7 @@ function Startup()
 
   // convert strings to those in the string bundle
   let sb = document.getElementById("downloadStrings");
-  let getStr = string => sb.getString(string);
+  let getStr = function(string) sb.getString(string);
   for (let [name, value] in Iterator(gStr))
     gStr[name] = typeof value == "string" ? getStr(value) : value.map(getStr);
 
@@ -469,7 +469,7 @@ function Shutdown()
   gStmt.finalize();
 }
 
-var gDownloadObserver = {
+let gDownloadObserver = {
   observe: function gdo_observe(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "download-manager-remove-download":
@@ -486,10 +486,11 @@ var gDownloadObserver = {
         removeFromView(dl);
         break;
       case "browser-lastwindow-close-granted":
-        if (AppConstants.platform != "macosx" &&
-            gDownloadManager.activeDownloadCount == 0) {
+#ifndef XP_MACOSX
+        if (gDownloadManager.activeDownloadCount == 0) {
           setTimeout(gCloseDownloadManager, 0);
         }
+#endif
         break;
     }
   }
@@ -985,11 +986,11 @@ function updateStatus(aItem, aDownload) {
         }
         return sizeText;
       };
-      stateSize[nsIDM.DOWNLOAD_FAILED] = () => gStr.stateFailed;
-      stateSize[nsIDM.DOWNLOAD_CANCELED] = () => gStr.stateCanceled;
-      stateSize[nsIDM.DOWNLOAD_BLOCKED_PARENTAL] = () => gStr.stateBlockedParentalControls;
-      stateSize[nsIDM.DOWNLOAD_BLOCKED_POLICY] = () => gStr.stateBlockedPolicy;
-      stateSize[nsIDM.DOWNLOAD_DIRTY] = () => gStr.stateDirty;
+      stateSize[nsIDM.DOWNLOAD_FAILED] = function() gStr.stateFailed;
+      stateSize[nsIDM.DOWNLOAD_CANCELED] = function() gStr.stateCanceled;
+      stateSize[nsIDM.DOWNLOAD_BLOCKED_PARENTAL] = function() gStr.stateBlockedParentalControls;
+      stateSize[nsIDM.DOWNLOAD_BLOCKED_POLICY] = function() gStr.stateBlockedPolicy;
+      stateSize[nsIDM.DOWNLOAD_DIRTY] = function() gStr.stateDirty;
 
       // Insert 1 is the download size or download state
       status = replaceInsert(gStr.doneStatus, 1, stateSize[state]());
@@ -1150,7 +1151,7 @@ function stepListBuilder(aNumItems) {
     if (!gStmt.executeStep()) {
       // Send a notification that we finished, but wait for clear list to update
       updateClearListButton();
-      setTimeout(() => Cc["@mozilla.org/observer-service;1"].
+      setTimeout(function() Cc["@mozilla.org/observer-service;1"].
         getService(Ci.nsIObserverService).
         notifyObservers(window, "download-manager-ui-done", null), 0);
 
@@ -1237,7 +1238,7 @@ function prependList(aDownload)
   if (item) {
     // Add item to the beginning
     gDownloadsView.insertBefore(item, gDownloadsView.firstChild);
-
+    
     // Because of the joys of XBL, we can't update the buttons until the
     // download object is in the document.
     updateButtons(item);

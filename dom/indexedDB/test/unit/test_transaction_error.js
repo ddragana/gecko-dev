@@ -3,7 +3,7 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-var testGenerator = testSteps();
+let testGenerator = testSteps();
 
 function testSteps() {
   const dbName = this.window ?
@@ -34,14 +34,6 @@ function testSteps() {
   event = yield undefined;
 
   db = event.target.result;
-
-  try {
-    db.transaction(objectStoreName, "versionchange");
-    ok(false, "TypeError shall be thrown if transaction mode is wrong.");
-  } catch (e) {
-    ok(e instanceof DOMException, "got a database exception");
-    is(e.name, "TypeError", "correct error");
-  }
 
   let transaction = db.transaction(objectStoreName, "readwrite");
   transaction.onerror = grabEventAndContinueHandler;

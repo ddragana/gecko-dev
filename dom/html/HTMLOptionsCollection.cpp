@@ -10,12 +10,12 @@
 #include "mozAutoDocUpdate.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/HTMLFormSubmission.h"
 #include "mozilla/dom/HTMLOptionElement.h"
 #include "mozilla/dom/HTMLOptionsCollectionBinding.h"
 #include "mozilla/dom/HTMLSelectElement.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsError.h"
+#include "nsFormSubmission.h"
 #include "nsGkAtoms.h"
 #include "nsIComboboxControlFrame.h"
 #include "nsIDocument.h"
@@ -169,7 +169,7 @@ HTMLOptionsCollection::SetOption(uint32_t aIndex,
   } else {
     // Find the option they're talking about and replace it
     // hold a strong reference to follow COM rules.
-    RefPtr<HTMLOptionElement> refChild = ItemAsOption(index);
+    nsRefPtr<HTMLOptionElement> refChild = ItemAsOption(index);
     NS_ENSURE_TRUE(refChild, NS_ERROR_UNEXPECTED);
 
     nsCOMPtr<nsINode> parent = refChild->GetParent();
@@ -280,9 +280,14 @@ HTMLOptionsCollection::NamedItem(const nsAString& aName,
 }
 
 void
-HTMLOptionsCollection::GetSupportedNames(nsTArray<nsString>& aNames)
+HTMLOptionsCollection::GetSupportedNames(unsigned aFlags,
+                                         nsTArray<nsString>& aNames)
 {
-  AutoTArray<nsIAtom*, 8> atoms;
+  if (!(aFlags & JSITER_HIDDEN)) {
+    return;
+  }
+
+  nsAutoTArray<nsIAtom*, 8> atoms;
   for (uint32_t i = 0; i < mElements.Length(); ++i) {
     HTMLOptionElement* content = mElements.ElementAt(i);
     if (content) {
@@ -304,10 +309,9 @@ HTMLOptionsCollection::GetSupportedNames(nsTArray<nsString>& aNames)
     }
   }
 
-  uint32_t atomsLen = atoms.Length();
-  nsString* names = aNames.AppendElements(atomsLen);
-  for (uint32_t i = 0; i < atomsLen; ++i) {
-    atoms[i]->ToString(names[i]);
+  aNames.SetCapacity(atoms.Length());
+  for (uint32_t i = 0; i < atoms.Length(); ++i) {
+    aNames.AppendElement(nsDependentAtomString(atoms[i]));
   }
 }
 

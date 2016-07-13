@@ -10,7 +10,6 @@
 #include "mozilla/dom/NonRefcountedDOMObject.h"
 #include "mozilla/dom/TextDecoderBinding.h"
 #include "mozilla/dom/TypedArray.h"
-#include "nsAutoPtr.h"
 #include "nsIUnicodeDecoder.h"
 
 namespace mozilla {

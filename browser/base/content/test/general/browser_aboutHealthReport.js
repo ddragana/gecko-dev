@@ -13,8 +13,6 @@ const HTTPS_BASE = "https://example.com/browser/browser/base/content/test/genera
 const TELEMETRY_LOG_PREF = "toolkit.telemetry.log.level";
 const telemetryOriginalLogPref = Preferences.get(TELEMETRY_LOG_PREF, null);
 
-const originalReportUrl = Services.prefs.getCharPref("datareporting.healthreport.about.reportUrl");
-
 registerCleanupFunction(function() {
   // Ensure we don't pollute prefs for next tests.
   if (telemetryOriginalLogPref) {
@@ -24,8 +22,13 @@ registerCleanupFunction(function() {
   }
 
   try {
-    Services.prefs.setCharPref("datareporting.healthreport.about.reportUrl", originalReportUrl);
-    Services.prefs.setBoolPref("datareporting.healthreport.uploadEnabled", true);
+    Services.prefs.clearUserPref("datareporting.healthreport.about.reportUrl");
+    let policy = Cc["@mozilla.org/datareporting/service;1"]
+                 .getService(Ci.nsISupports)
+                 .wrappedJSObject
+                 .policy;
+    policy.recordHealthReportUploadEnabled(true,
+                                           "Resetting after tests.");
   } catch (ex) {}
 });
 
@@ -57,7 +60,7 @@ function setupPingArchive() {
   }
 }
 
-var gTests = [
+let gTests = [
 
 {
   desc: "Test the remote commands",
@@ -71,6 +74,12 @@ var gTests = [
   run: function (iframe)
   {
     let deferred = Promise.defer();
+
+    let policy = Cc["@mozilla.org/datareporting/service;1"]
+                 .getService(Ci.nsISupports)
+                 .wrappedJSObject
+                 .policy;
+
     let results = 0;
     try {
       iframe.contentWindow.addEventListener("FirefoxHealthReportTestResponse", function evtHandler(event) {

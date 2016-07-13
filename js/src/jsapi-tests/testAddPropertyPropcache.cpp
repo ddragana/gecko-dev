@@ -16,14 +16,10 @@ AddProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::HandleValu
     return true;
 }
 
-static const JSClassOps AddPropertyClassOps = {
-    AddProperty
-};
-
 static const JSClass AddPropertyClass = {
     "AddPropertyTester",
     0,
-    &AddPropertyClassOps
+    AddProperty
 };
 
 BEGIN_TEST(testAddPropertyHook)

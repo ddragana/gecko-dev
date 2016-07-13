@@ -70,8 +70,8 @@ typedef ucontext_t tickcontext_t;
 pid_t gettid();
 #endif
 
-#if defined(__arm__) && defined(ANDROID)
- // Should also work on ARM Linux, but not tested there yet.
+#if defined(SPS_ARCH_arm) && defined(MOZ_WIDGET_GONK)
+ // Should also work on other Android and ARM Linux, but not tested there yet.
  #define USE_EHABI_STACKWALK
 #endif
 #ifdef USE_EHABI_STACKWALK
@@ -220,12 +220,6 @@ GeckoSampler::GeckoSampler(double aInterval, int aEntrySize,
     mThreadNameFilters[i] = aThreadNameFilters[i];
   }
 
-  // Deep copy aFeatures
-  MOZ_ALWAYS_TRUE(mFeatures.resize(aFeatureCount));
-  for (uint32_t i = 0; i < aFeatureCount; ++i) {
-    mFeatures[i] = aFeatures[i];
-  }
-
   bool ignore;
   sStartTime = mozilla::TimeStamp::ProcessCreation(ignore);
 
@@ -247,8 +241,6 @@ GeckoSampler::GeckoSampler(double aInterval, int aEntrySize,
     mozilla::tasktracer::StartLogging();
   }
 #endif
-
-  mGatherer = new mozilla::ProfileGatherer(this);
 }
 
 GeckoSampler::~GeckoSampler()
@@ -281,10 +273,6 @@ GeckoSampler::~GeckoSampler()
 #if defined(XP_WIN)
   delete mIntelPowerGadget;
 #endif
-
-  // Cancel any in-flight async profile gatherering
-  // requests
-  mGatherer->Cancel();
 }
 
 void GeckoSampler::HandleSaveRequest()
@@ -310,7 +298,7 @@ void GeckoSampler::StreamTaskTracer(SpliceableJSONWriter& aWriter)
 {
 #ifdef MOZ_TASK_TRACER
   aWriter.StartArrayProperty("data");
-    UniquePtr<nsTArray<nsCString>> data = mozilla::tasktracer::GetLoggedData(sStartTime);
+    nsAutoPtr<nsTArray<nsCString>> data(mozilla::tasktracer::GetLoggedData(sStartTime));
     for (uint32_t i = 0; i < data->Length(); ++i) {
       aWriter.StringElement((data->ElementAt(i)).get());
     }
@@ -410,14 +398,6 @@ JSObject* GeckoSampler::ToJSObject(JSContext *aCx, double aSinceTime)
   }
   return &val.toObject();
 }
-
-void GeckoSampler::GetGatherer(nsISupports** aRetVal)
-{
-  if (!aRetVal || NS_WARN_IF(!mGatherer)) {
-    return;
-  }
-  NS_ADDREF(*aRetVal = mGatherer);
-}
 #endif
 
 UniquePtr<char[]> GeckoSampler::ToJSON(double aSinceTime)
@@ -430,11 +410,17 @@ UniquePtr<char[]> GeckoSampler::ToJSON(double aSinceTime)
 void GeckoSampler::ToJSObjectAsync(double aSinceTime,
                                   mozilla::dom::Promise* aPromise)
 {
-  if (NS_WARN_IF(!mGatherer)) {
+  if (NS_WARN_IF(mGatherer)) {
     return;
   }
 
-  mGatherer->Start(aSinceTime, aPromise);
+  mGatherer = new mozilla::ProfileGatherer(this, aSinceTime, aPromise);
+  mGatherer->Start();
+}
+
+void GeckoSampler::ProfileGathered()
+{
+  mGatherer = nullptr;
 }
 
 struct SubprocessClosure {
@@ -523,7 +509,6 @@ void GeckoSampler::StreamJSON(SpliceableJSONWriter& aWriter, double aSinceTime)
     if (TaskTracer()) {
       aWriter.StartObjectProperty("tasktracer");
       StreamTaskTracer(aWriter);
-      aWriter.EndObject();
     }
 
     // Lists the samples for each ThreadProfile
@@ -555,7 +540,7 @@ void GeckoSampler::StreamJSON(SpliceableJSONWriter& aWriter, double aSinceTime)
         SubprocessClosure closure(&aWriter);
         nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
         if (os) {
-          RefPtr<ProfileSaveEvent> pse = new ProfileSaveEvent(SubProcessCallback, &closure);
+          nsRefPtr<ProfileSaveEvent> pse = new ProfileSaveEvent(SubProcessCallback, &closure);
           os->NotifyObservers(pse, "profiler-subprocess", nullptr);
         }
       }
@@ -564,11 +549,7 @@ void GeckoSampler::StreamJSON(SpliceableJSONWriter& aWriter, double aSinceTime)
       if (ProfileJava()) {
         mozilla::widget::GeckoJavaSampler::PauseJavaProfiling();
 
-        aWriter.Start();
-        {
-          BuildJavaThreadJSObject(aWriter);
-        }
-        aWriter.End();
+        BuildJavaThreadJSObject(aWriter);
 
         mozilla::widget::GeckoJavaSampler::UnpauseJavaProfiling();
       }
@@ -944,6 +925,10 @@ void StackWalkCallback(uint32_t aFrameNumber, void* aPC, void* aSP,
 
 void GeckoSampler::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample)
 {
+#ifndef XP_MACOSX
+  uintptr_t thread = GetThreadHandle(aSample->threadProfile->GetPlatformData());
+  MOZ_ASSERT(thread);
+#endif
   void* pc_array[1000];
   void* sp_array[1000];
   NativeStack nativeStack = {
@@ -960,10 +945,11 @@ void GeckoSampler::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSampl
   StackWalkCallback(/* frameNumber */ 0, aSample->pc, aSample->sp, &nativeStack);
 
   uint32_t maxFrames = uint32_t(nativeStack.size - nativeStack.count);
-  // win X64 doesn't support disabling frame pointers emission so we need
-  // to fallback to using StackWalk64 which is slower.
-#if defined(XP_MACOSX) || (defined(XP_WIN) && !defined(V8_HOST_ARCH_X64))
-  void *stackEnd = aSample->threadProfile->GetStackTop();
+#ifdef XP_MACOSX
+  pthread_t pt = GetProfiledThread(aSample->threadProfile->GetPlatformData());
+  void *stackEnd = reinterpret_cast<void*>(-1);
+  if (pt)
+    stackEnd = static_cast<char*>(pthread_get_stackaddr_np(pt));
   bool rv = true;
   if (aSample->fp >= aSample->sp && aSample->fp <= stackEnd)
     rv = FramePointerStackWalk(StackWalkCallback, /* skipFrames */ 0,
@@ -971,9 +957,15 @@ void GeckoSampler::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSampl
                                reinterpret_cast<void**>(aSample->fp), stackEnd);
 #else
   void *platformData = nullptr;
+#ifdef XP_WIN
+  if (aSample->isSamplingCurrentThread) {
+    // In this case we want MozStackWalk to know that it's walking the
+    // current thread's stack, so we pass 0 as the thread handle.
+    thread = 0;
+  }
+  platformData = aSample->context;
+#endif // XP_WIN
 
-  uintptr_t thread = GetThreadHandle(aSample->threadProfile->GetPlatformData());
-  MOZ_ASSERT(thread);
   bool rv = MozStackWalk(StackWalkCallback, /* skipFrames */ 0, maxFrames,
                              &nativeStack, thread, platformData);
 #endif

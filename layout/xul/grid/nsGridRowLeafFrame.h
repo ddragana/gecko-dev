@@ -44,7 +44,7 @@ public:
                      nsBoxLayout* aLayoutManager):
     nsBoxFrame(aContext, aIsRoot, aLayoutManager) {}
 
-  virtual nsresult GetXULBorderAndPadding(nsMargin& aBorderAndPadding) override;
+  virtual nsresult GetBorderAndPadding(nsMargin& aBorderAndPadding) override;
 
 }; // class nsGridRowLeafFrame
 

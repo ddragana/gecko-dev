@@ -37,7 +37,7 @@ class MediaResource;
   this is done by the Start() static method by synchronously
   dispatching to the main thread.
 */
-class AndroidMediaResourceServer : public Runnable
+class AndroidMediaResourceServer : public nsRunnable
 {
 private:
   // Mutex protecting private members of AndroidMediaResourceServer.
@@ -51,7 +51,7 @@ private:
   // Mapping between MediaResource URL's to the MediaResource
   // object served at that URL.
   typedef std::map<nsCString,
-                  RefPtr<mozilla::MediaResource> > ResourceMap;
+                  nsRefPtr<mozilla::MediaResource> > ResourceMap;
   ResourceMap mResources;
 
   // Create a AndroidMediaResourceServer that will listen on an automatically

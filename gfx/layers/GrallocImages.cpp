@@ -48,7 +48,7 @@ struct GraphicBufferAutoUnlock {
 };
 
 GrallocImage::GrallocImage()
-  : RecyclingPlanarYCbCrImage(nullptr)
+  : PlanarYCbCrImage(nullptr)
 {
   mFormat = ImageFormat::GRALLOC_PLANAR_YCBCR;
 }
@@ -57,7 +57,7 @@ GrallocImage::~GrallocImage()
 {
 }
 
-bool
+void
 GrallocImage::SetData(const Data& aData)
 {
   MOZ_ASSERT(!mTextureClient, "TextureClient is already set");
@@ -70,29 +70,33 @@ GrallocImage::SetData(const Data& aData)
 
   if (gfxPlatform::GetPlatform()->IsInGonkEmulator()) {
     // Emulator does not support HAL_PIXEL_FORMAT_YV12.
-    return false;
+    return;
   }
 
-  ClientIPCAllocator* allocator = ImageBridgeChild::GetSingleton();
-  GrallocTextureData* texData = GrallocTextureData::Create(mData.mYSize, HAL_PIXEL_FORMAT_YV12,
-                                                           gfx::BackendType::NONE,
-                                                           GraphicBuffer::USAGE_SW_READ_OFTEN |
-                                                             GraphicBuffer::USAGE_SW_WRITE_OFTEN |
-                                                             GraphicBuffer::USAGE_HW_TEXTURE,
-                                                           allocator
-  );
-
-  if (!texData) {
-    return false;
+  RefPtr<GrallocTextureClientOGL> textureClient =
+       new GrallocTextureClientOGL(ImageBridgeChild::GetSingleton(),
+                                   gfx::SurfaceFormat::UNKNOWN,
+                                   gfx::BackendType::NONE);
+  // GrallocImages are all YUV and don't support alpha.
+  textureClient->SetIsOpaque(true);
+  bool result =
+    textureClient->AllocateGralloc(mData.mYSize,
+                                   HAL_PIXEL_FORMAT_YV12,
+                                   GraphicBuffer::USAGE_SW_READ_OFTEN |
+                                   GraphicBuffer::USAGE_SW_WRITE_OFTEN |
+                                   GraphicBuffer::USAGE_HW_TEXTURE);
+  sp<GraphicBuffer> graphicBuffer = textureClient->GetGraphicBuffer();
+  if (!result || !graphicBuffer.get()) {
+    mTextureClient = nullptr;
+    return;
   }
 
-  mTextureClient = new TextureClient(texData, TextureFlags::DEFAULT, allocator);
-  sp<GraphicBuffer> graphicBuffer = texData->GetGraphicBuffer();
+  mTextureClient = textureClient;
 
   void* vaddr;
   if (graphicBuffer->lock(GraphicBuffer::USAGE_SW_WRITE_OFTEN,
                           &vaddr) != OK) {
-    return false;
+    return;
   }
 
   uint8_t* yChannel = static_cast<uint8_t*>(vaddr);
@@ -140,14 +144,12 @@ GrallocImage::SetData(const Data& aData)
   mData.mYChannel     = nullptr;
   mData.mCrChannel    = nullptr;
   mData.mCbChannel    = nullptr;
-  return true;
 }
 
-void
-GrallocImage::AdoptData(TextureClient* aGraphicBuffer, const gfx::IntSize& aSize)
+void GrallocImage::SetData(const GrallocData& aData)
 {
-  mTextureClient = aGraphicBuffer;
-  mSize = aSize;
+  mTextureClient = static_cast<GrallocTextureClientOGL*>(aData.mGraphicBuffer.get());
+  mSize = aData.mPicSize;
 }
 
 /**
@@ -382,7 +384,7 @@ ConvertOmxYUVFormatToRGB565(android::sp<GraphicBuffer>& aBuffer,
     return BAD_VALUE;
   }
 
-  uint32_t pixelStride = aMappedSurface->mStride/gfx::BytesPerPixel(gfx::SurfaceFormat::R5G6B5_UINT16);
+  uint32_t pixelStride = aMappedSurface->mStride/gfx::BytesPerPixel(gfx::SurfaceFormat::R5G6B5);
   rv = colorConverter.convert(buffer, width, height,
                               0, 0, width - 1, height - 1 /* source crop */,
                               aMappedSurface->mData, pixelStride, height,
@@ -395,15 +397,18 @@ ConvertOmxYUVFormatToRGB565(android::sp<GraphicBuffer>& aBuffer,
   return OK;
 }
 
-already_AddRefed<gfx::DataSourceSurface>
-GetDataSourceSurfaceFrom(android::sp<android::GraphicBuffer>& aGraphicBuffer,
-                         gfx::IntSize aSize,
-                         const layers::PlanarYCbCrData& aYcbcrData)
+already_AddRefed<gfx::SourceSurface>
+GrallocImage::GetAsSourceSurface()
 {
-  MOZ_ASSERT(aGraphicBuffer.get());
+  if (!mTextureClient) {
+    return nullptr;
+  }
+
+  android::sp<GraphicBuffer> graphicBuffer =
+    mTextureClient->GetGraphicBuffer();
 
   RefPtr<gfx::DataSourceSurface> surface =
-    gfx::Factory::CreateDataSourceSurface(aSize, gfx::SurfaceFormat::R5G6B5_UINT16);
+    gfx::Factory::CreateDataSourceSurface(GetSize(), gfx::SurfaceFormat::R5G6B5);
   if (NS_WARN_IF(!surface)) {
     return nullptr;
   }
@@ -415,33 +420,18 @@ GetDataSourceSurfaceFrom(android::sp<android::GraphicBuffer>& aGraphicBuffer,
   }
 
   int32_t rv;
-  rv = ConvertOmxYUVFormatToRGB565(aGraphicBuffer, surface, &mappedSurface, aYcbcrData);
+  rv = ConvertOmxYUVFormatToRGB565(graphicBuffer, surface, &mappedSurface, mData);
   if (rv == OK) {
     surface->Unmap();
     return surface.forget();
   }
 
-  rv = ConvertVendorYUVFormatToRGB565(aGraphicBuffer, surface, &mappedSurface);
+  rv = ConvertVendorYUVFormatToRGB565(graphicBuffer, surface, &mappedSurface);
   surface->Unmap();
   if (rv != OK) {
     NS_WARNING("Unknown color format");
     return nullptr;
   }
-
-  return surface.forget();
-}
-
-already_AddRefed<gfx::SourceSurface>
-GrallocImage::GetAsSourceSurface()
-{
-  if (!mTextureClient) {
-    return nullptr;
-  }
-
-  android::sp<GraphicBuffer> graphicBuffer = GetGraphicBuffer();
-
-  RefPtr<gfx::DataSourceSurface> surface =
-    GetDataSourceSurfaceFrom(graphicBuffer, mSize, mData);
 
   return surface.forget();
 }
@@ -452,7 +442,7 @@ GrallocImage::GetGraphicBuffer() const
   if (!mTextureClient) {
     return nullptr;
   }
-  return static_cast<GrallocTextureData*>(mTextureClient->GetInternalData())->GetGraphicBuffer();
+  return mTextureClient->GetGraphicBuffer();
 }
 
 void*
@@ -461,7 +451,8 @@ GrallocImage::GetNativeBuffer()
   if (!mTextureClient) {
     return nullptr;
   }
-  android::sp<android::GraphicBuffer> graphicBuffer = GetGraphicBuffer();
+  android::sp<android::GraphicBuffer> graphicBuffer =
+    mTextureClient->GetGraphicBuffer();
   if (!graphicBuffer.get()) {
     return nullptr;
   }

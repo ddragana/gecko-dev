@@ -86,7 +86,7 @@ struct TracerStartClosure {
 };
 
 #ifdef MOZ_WIDGET_GONK
-class EventLoopLagDispatcher : public Runnable
+class EventLoopLagDispatcher : public nsRunnable
 {
   public:
     explicit EventLoopLagDispatcher(int aLag)

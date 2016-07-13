@@ -29,8 +29,10 @@ nsresult CallGetClassObject(const char* aContractID, const nsIID& aIID,
 class MOZ_STACK_CLASS nsCreateInstanceByCID final : public nsCOMPtr_helper
 {
 public:
-  nsCreateInstanceByCID(const nsCID& aCID, nsresult* aErrorPtr)
+  nsCreateInstanceByCID(const nsCID& aCID, nsISupports* aOuter,
+                        nsresult* aErrorPtr)
     : mCID(aCID)
+    , mOuter(aOuter)
     , mErrorPtr(aErrorPtr)
   {
   }
@@ -40,14 +42,17 @@ public:
 
 private:
   const nsCID&    mCID;
+  nsISupports* MOZ_NON_OWNING_REF mOuter;
   nsresult*       mErrorPtr;
 };
 
 class MOZ_STACK_CLASS nsCreateInstanceByContractID final : public nsCOMPtr_helper
 {
 public:
-  nsCreateInstanceByContractID(const char* aContractID, nsresult* aErrorPtr)
+  nsCreateInstanceByContractID(const char* aContractID, nsISupports* aOuter,
+                               nsresult* aErrorPtr)
     : mContractID(aContractID)
+    , mOuter(aOuter)
     , mErrorPtr(aErrorPtr)
   {
   }
@@ -56,14 +61,17 @@ public:
 
 private:
   const char*   mContractID;
+  nsISupports* MOZ_NON_OWNING_REF mOuter;
   nsresult*     mErrorPtr;
 };
 
 class MOZ_STACK_CLASS nsCreateInstanceFromFactory final : public nsCOMPtr_helper
 {
 public:
-  nsCreateInstanceFromFactory(nsIFactory* aFactory, nsresult* aErrorPtr)
+  nsCreateInstanceFromFactory(nsIFactory* aFactory, nsISupports* aOuter,
+                              nsresult* aErrorPtr)
     : mFactory(aFactory)
+    , mOuter(aOuter)
     , mErrorPtr(aErrorPtr)
   {
   }
@@ -72,6 +80,7 @@ public:
 
 private:
   nsIFactory* MOZ_NON_OWNING_REF mFactory;
+  nsISupports* MOZ_NON_OWNING_REF mOuter;
   nsresult*     mErrorPtr;
 };
 
@@ -79,19 +88,39 @@ private:
 inline const nsCreateInstanceByCID
 do_CreateInstance(const nsCID& aCID, nsresult* aError = 0)
 {
-  return nsCreateInstanceByCID(aCID, aError);
+  return nsCreateInstanceByCID(aCID, 0, aError);
+}
+
+inline const nsCreateInstanceByCID
+do_CreateInstance(const nsCID& aCID, nsISupports* aOuter, nsresult* aError = 0)
+{
+  return nsCreateInstanceByCID(aCID, aOuter, aError);
 }
 
 inline const nsCreateInstanceByContractID
 do_CreateInstance(const char* aContractID, nsresult* aError = 0)
 {
-  return nsCreateInstanceByContractID(aContractID, aError);
+  return nsCreateInstanceByContractID(aContractID, 0, aError);
+}
+
+inline const nsCreateInstanceByContractID
+do_CreateInstance(const char* aContractID, nsISupports* aOuter,
+                  nsresult* aError = 0)
+{
+  return nsCreateInstanceByContractID(aContractID, aOuter, aError);
 }
 
 inline const nsCreateInstanceFromFactory
 do_CreateInstance(nsIFactory* aFactory, nsresult* aError = 0)
 {
-  return nsCreateInstanceFromFactory(aFactory, aError);
+  return nsCreateInstanceFromFactory(aFactory, 0, aError);
+}
+
+inline const nsCreateInstanceFromFactory
+do_CreateInstance(nsIFactory* aFactory, nsISupports* aOuter,
+                  nsresult* aError = 0)
+{
+  return nsCreateInstanceFromFactory(aFactory, aOuter, aError);
 }
 
 

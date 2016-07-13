@@ -4,7 +4,6 @@
 
 #include "nsUsageArrayHelper.h"
 
-#include "ScopedNSSTypes.h"
 #include "mozilla/Assertions.h"
 #include "nsCOMPtr.h"
 #include "nsComponentManagerUtils.h"
@@ -20,7 +19,7 @@
 using namespace mozilla;
 using namespace mozilla::psm;
 
-extern LazyLogModule gPIPNSSLog;
+extern PRLogModuleInfo* gPIPNSSLog;
 
 static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID); // XXX? needed?::
 
@@ -104,11 +103,9 @@ nsUsageArrayHelper::check(uint32_t previousCheckResult,
     MOZ_CRASH("unknown cert usage passed to check()");
   }
 
-  UniqueCERTCertList unusedBuiltChain;
   SECStatus rv = certVerifier->VerifyCert(mCert, aCertUsage, time,
                                           nullptr /*XXX:wincx*/,
-                                          nullptr /*hostname*/,
-                                          unusedBuiltChain, flags);
+                                          nullptr /*hostname*/, flags);
 
   if (rv == SECSuccess) {
     typestr.Append(suffix);

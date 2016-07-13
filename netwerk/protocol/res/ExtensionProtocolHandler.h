@@ -10,41 +10,26 @@
 #include "nsWeakReference.h"
 
 namespace mozilla {
-namespace net {
 
 class ExtensionProtocolHandler final : public nsISubstitutingProtocolHandler,
-                                       public nsIProtocolHandlerWithDynamicFlags,
-                                       public SubstitutingProtocolHandler,
+                                       public mozilla::SubstitutingProtocolHandler,
                                        public nsSupportsWeakReference
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIPROTOCOLHANDLERWITHDYNAMICFLAGS
-  NS_FORWARD_NSIPROTOCOLHANDLER(SubstitutingProtocolHandler::)
-  NS_FORWARD_NSISUBSTITUTINGPROTOCOLHANDLER(SubstitutingProtocolHandler::)
+  NS_FORWARD_NSIPROTOCOLHANDLER(mozilla::SubstitutingProtocolHandler::)
+  NS_FORWARD_NSISUBSTITUTINGPROTOCOLHANDLER(mozilla::SubstitutingProtocolHandler::)
 
-  ExtensionProtocolHandler() : SubstitutingProtocolHandler("moz-extension") {}
+  // In general a moz-extension URI is only loadable by chrome, but a whitelisted
+  // subset are web-accessible (see nsIAddonPolicyService).
+  ExtensionProtocolHandler()
+    : SubstitutingProtocolHandler("moz-extension", URI_STD | URI_DANGEROUS_TO_LOAD | URI_IS_LOCAL_RESOURCE)
+  {}
 
 protected:
   ~ExtensionProtocolHandler() {}
-
-  bool ResolveSpecialCases(const nsACString& aHost, const nsACString& aPath, nsACString& aResult) override
-  {
-    // Create a special about:blank-like moz-extension://foo/_blank.html for all
-    // registered extensions. We can't just do this as a substitution because
-    // substitutions can only match on host.
-    if (SubstitutingProtocolHandler::HasSubstitution(aHost) && aPath.EqualsLiteral("/_blank.html")) {
-      aResult.AssignLiteral("about:blank");
-      return true;
-    }
-
-    return false;
-  }
-
-  virtual nsresult SubstituteChannel(nsIURI* uri, nsILoadInfo* aLoadInfo, nsIChannel** result) override;
 };
 
-} // namespace net
 } // namespace mozilla
 
 #endif /* ExtensionProtocolHandler_h___ */

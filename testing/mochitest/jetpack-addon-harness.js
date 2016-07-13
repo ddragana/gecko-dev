@@ -9,17 +9,23 @@ if (Cc === undefined) {
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://gre/modules/Timer.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
   "resource://gre/modules/AddonManager.jsm");
 
-// How long to wait for an add-on to uninstall before aborting
-const MAX_UNINSTALL_TIME = 10000;
-setTimeout(testInit, 0);
+// Start the tests after the window has been displayed
+window.addEventListener("load", function testOnLoad() {
+  window.removeEventListener("load", testOnLoad);
+  window.addEventListener("MozAfterPaint", function testOnMozAfterPaint() {
+    window.removeEventListener("MozAfterPaint", testOnMozAfterPaint);
+    setTimeout(testInit, 0);
+  });
+});
 
-var sdkpath = null;
+let sdkpath = null;
 
 // Strip off the chrome prefix to get the actual path of the test directory
 function realPath(chrome) {
@@ -27,58 +33,68 @@ function realPath(chrome) {
                .replace(".xpi", "");
 }
 
-const chromeRegistry = Cc["@mozilla.org/chrome/chrome-registry;1"]
-      .getService(Ci.nsIChromeRegistry);
-
 // Installs a single add-on returning a promise for when install is completed
 function installAddon(url) {
-  let chromeURL = Services.io.newURI(url, null, null);
-  let file = chromeRegistry.convertChromeURL(chromeURL)
-      .QueryInterface(Ci.nsIFileURL).file;
+  return new Promise(function(resolve, reject) {
+    AddonManager.getInstallForURL(url, function(install) {
+      install.addListener({
+        onDownloadEnded: function(install) {
+          // Set add-on's test options
+          const options = {
+            test: {
+              iterations: 1,
+              stop: false,
+              keepOpen: true,
+            },
+            profile: {
+              memory: false,
+              leaks: false,
+            },
+            output: {
+              logLevel: "verbose",
+              format: "tbpl",
+            },
+            console: {
+              logLevel: "info",
+            },
+          }
+          setPrefs("extensions." + install.addon.id + ".sdk", options);
 
-  let addon;
-  const listener = {
-    onInstalling(_addon) {
-      addon = _addon;
-      // Set add-on's test options
-      const options = {
-        test: {
-          iterations: 1,
-          stop: false,
-          keepOpen: true,
+          // If necessary override the add-ons module paths to point somewhere
+          // else
+          if (sdkpath) {
+            let paths = {}
+            for (let path of ["dev", "diffpatcher", "framescript", "method", "node", "sdk", "toolkit"]) {
+              paths[path] = sdkpath + path;
+            }
+            setPrefs("extensions.modules." + install.addon.id + ".path", paths);
+          }
         },
-        profile: {
-          memory: false,
-          leaks: false,
-        },
-        output: {
-          logLevel: "verbose",
-          format: "tbpl",
-        },
-        console: {
-          logLevel: "info",
-        },
-      }
-      setPrefs("extensions." + addon.id + ".sdk", options);
 
-      // If necessary override the add-ons module paths to point somewhere
-      // else
-      if (sdkpath) {
-        let paths = {}
-        for (let path of ["dev", "diffpatcher", "framescript", "method", "node", "sdk", "toolkit"]) {
-          paths[path] = sdkpath + path;
+        onInstallEnded: function(install, addon) {
+          resolve(addon);
+        },
+
+        onDownloadCancelled: function(install) {
+          reject("Download cancelled: " + install.error);
+        },
+
+        onDownloadFailed: function(install) {
+          reject("Download failed: " + install.error);
+        },
+
+        onInstallCancelled: function(install) {
+          reject("Install cancelled: " + install.error);
+        },
+
+        onInstallFailed: function(install) {
+          reject("Install failed: " + install.error);
         }
-        setPrefs("extensions.modules." + addon.id + ".path", paths);
-      }
-    },
-  };
-  AddonManager.addAddonListener(listener);
+      });
 
-  return AddonManager.installTemporaryAddon(file)
-    .then(() => {
-      AddonManager.removeAddonListener(listener);
-      return addon;
-    });
+      install.install();
+    }, "application/x-xpinstall");
+  });
 }
 
 // Uninstalls an add-on returning a promise for when it is gone
@@ -89,8 +105,6 @@ function uninstallAddon(oldAddon) {
         if (addon.id != oldAddon.id)
           return;
 
-        AddonManager.removeAddonListener(this);
-
         dump("TEST-INFO | jetpack-addon-harness.js | Uninstalled test add-on " + addon.id + "\n");
 
         // Some add-ons do async work on uninstall, we must wait for that to
@@ -100,11 +114,6 @@ function uninstallAddon(oldAddon) {
     });
 
     oldAddon.uninstall();
-
-    // The uninstall should happen quickly, if not throw an exception
-    setTimeout(() => {
-      reject(new Error(`Addon ${oldAddon.id} failed to uninstall in a timely fashion.`));
-    }, MAX_UNINSTALL_TIME);
   });
 }
 
@@ -120,7 +129,7 @@ function waitForResults() {
 }
 
 // Runs tests for the add-on available at URL.
-var testAddon = Task.async(function*({ url }) {
+let testAddon = Task.async(function*({ url }) {
   dump("TEST-INFO | jetpack-addon-harness.js | Installing test add-on " + realPath(url) + "\n");
   let addon = yield installAddon(url);
 

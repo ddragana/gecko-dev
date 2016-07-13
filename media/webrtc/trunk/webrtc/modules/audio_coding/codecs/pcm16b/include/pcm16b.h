@@ -21,24 +21,62 @@ extern "C" {
 #endif
 
 /****************************************************************************
+ * WebRtcPcm16b_EncodeW16(...)
+ *
+ * "Encode" a sample vector to 16 bit linear (Encoded standard is big endian)
+ *
+ * Input:
+ *    - speechIn16b    : Input speech vector
+ *    - length_samples : Number of samples in speech vector
+ *
+ * Output:
+ *    - speechOut16b   : Encoded data vector (big endian 16 bit)
+ *
+ * Returned value      : Size in bytes of speechOut16b
+ */
+
+int16_t WebRtcPcm16b_EncodeW16(const int16_t* speechIn16b,
+                               int16_t length_samples,
+                               int16_t* speechOut16b);
+
+/****************************************************************************
  * WebRtcPcm16b_Encode(...)
  *
  * "Encode" a sample vector to 16 bit linear (Encoded standard is big endian)
  *
  * Input:
- *              - speech        : Input speech vector
- *              - len           : Number of samples in speech vector
+ *		- speech16b		: Input speech vector
+ *		- len			: Number of samples in speech vector
  *
  * Output:
- *              - encoded       : Encoded data vector (big endian 16 bit)
+ *		- speech8b		: Encoded data vector (big endian 16 bit)
  *
- * Returned value               : Length (in bytes) of coded data.
- *                                Always equal to twice the len input parameter.
+ * Returned value		: Size in bytes of speech8b
  */
 
-int16_t WebRtcPcm16b_Encode(const int16_t* speech,
+int16_t WebRtcPcm16b_Encode(int16_t *speech16b,
                             int16_t len,
-                            uint8_t* encoded);
+                            unsigned char *speech8b);
+
+/****************************************************************************
+ * WebRtcPcm16b_DecodeW16(...)
+ *
+ * "Decode" a vector to 16 bit linear (Encoded standard is big endian)
+ *
+ * Input:
+ *    - speechIn16b  : Encoded data vector (big endian 16 bit)
+ *    - length_bytes : Number of bytes in speechIn16b
+ *
+ * Output:
+ *    - speechOut16b : Decoded speech vector
+ *
+ * Returned value    : Samples in speechOut16b
+ */
+
+int16_t WebRtcPcm16b_DecodeW16(int16_t *speechIn16b,
+                               int16_t length_bytes,
+                               int16_t *speechOut16b,
+                               int16_t* speechType);
 
 /****************************************************************************
  * WebRtcPcm16b_Decode(...)
@@ -46,18 +84,19 @@ int16_t WebRtcPcm16b_Encode(const int16_t* speech,
  * "Decode" a vector to 16 bit linear (Encoded standard is big endian)
  *
  * Input:
- *              - encoded       : Encoded data vector (big endian 16 bit)
- *              - len           : Number of bytes in encoded
+ *		- speech8b		: Encoded data vector (big endian 16 bit)
+ *		- len			: Number of bytes in speech8b
  *
  * Output:
- *              - speech        : Decoded speech vector
+ *		- speech16b		: Decoded speech vector
  *
- * Returned value               : Samples in speech
+ * Returned value		: Samples in speech16b
  */
 
-int16_t WebRtcPcm16b_Decode(const uint8_t* encoded,
+
+int16_t WebRtcPcm16b_Decode(unsigned char *speech8b,
                             int16_t len,
-                            int16_t* speech);
+                            int16_t *speech16b);
 
 #ifdef __cplusplus
 }

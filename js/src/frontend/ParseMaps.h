@@ -37,7 +37,7 @@ typedef InlineMap<JSAtom*, DefinitionList, 24> AtomDefnListMap;
  * the list and map->vector must point to pre-allocated memory.
  */
 void
-InitAtomMap(AtomIndexMap* indices, GCPtrAtom* atoms);
+InitAtomMap(AtomIndexMap* indices, HeapPtrAtom* atoms);
 
 /*
  * A pool that permits the reuse of the backing storage for the defn, index, or
@@ -134,7 +134,7 @@ struct AtomThingMapPtr
 
     void init() { clearMap(); }
 
-    MOZ_MUST_USE bool ensureMap(ExclusiveContext* cx);
+    bool ensureMap(ExclusiveContext* cx);
     void releaseMap(ExclusiveContext* cx);
 
     bool hasMap() const { return map_; }
@@ -250,14 +250,6 @@ class DefinitionList
         return (Node*) (u.bits & ~0x1);
     }
 
-    Node* lastNode() const {
-        MOZ_ASSERT(isMultiple());
-        Node* node = firstNode();
-        while (node->next)
-            node = node->next;
-        return node;
-    }
-
     static Node*
     allocNode(ExclusiveContext* cx, LifoAlloc& alloc, uintptr_t bits, Node* tail);
 
@@ -332,7 +324,7 @@ class DefinitionList
      * return true. Otherwise there is exactly one Definition in the list; do
      * nothing and return false.
      */
-    MOZ_MUST_USE bool popFront() {
+    bool popFront() {
         if (!isMultiple())
             return false;
 
@@ -351,8 +343,8 @@ class DefinitionList
      * Return true on success. On OOM, report on cx and return false.
      */
     template <typename ParseHandler>
-    MOZ_MUST_USE bool pushFront(ExclusiveContext* cx, LifoAlloc& alloc,
-                                typename ParseHandler::DefinitionNode defn) {
+    bool pushFront(ExclusiveContext* cx, LifoAlloc& alloc,
+                   typename ParseHandler::DefinitionNode defn) {
         Node* tail;
         if (isMultiple()) {
             tail = firstNode();
@@ -366,26 +358,6 @@ class DefinitionList
         if (!node)
             return false;
         *this = DefinitionList(node);
-        return true;
-    }
-
-    template <typename ParseHandler>
-    MOZ_MUST_USE bool appendBack(ExclusiveContext* cx, LifoAlloc& alloc,
-                                 typename ParseHandler::DefinitionNode defn)
-    {
-        Node* last = allocNode(cx, alloc, ParseHandler::definitionToBits(defn), nullptr);
-        if (!last)
-            return false;
-
-        if (isMultiple()) {
-            lastNode()->next = last;
-        } else {
-            Node* oldLast = allocNode(cx, alloc, u.bits, last);
-            if (!oldLast)
-                return false;
-            *this = DefinitionList(oldLast);
-        }
-
         return true;
     }
 
@@ -454,7 +426,7 @@ class AtomDecls
 
     ~AtomDecls();
 
-    MOZ_MUST_USE bool init();
+    bool init();
 
     void clear() {
         map->clear();
@@ -469,18 +441,6 @@ class AtomDecls
         return p.value().front<ParseHandler>();
     }
 
-    /* Return the definition at the tail of the chain for |atom|. */
-    DefinitionNode lookupLast(JSAtom* atom) const {
-        MOZ_ASSERT(map);
-        DefinitionList::Range range = lookupMulti(atom);
-        DefinitionNode dn = ParseHandler::nullDefinition();
-        while (!range.empty()) {
-            dn = range.front<ParseHandler>();
-            range.popFront();
-        }
-        return dn;
-    }
-
     /* Perform a lookup that can iterate over the definitions associated with |atom|. */
     DefinitionList::Range lookupMulti(JSAtom* atom) const {
         MOZ_ASSERT(map);
@@ -490,7 +450,7 @@ class AtomDecls
     }
 
     /* Add-or-update a known-unique definition for |atom|. */
-    MOZ_MUST_USE bool addUnique(JSAtom* atom, DefinitionNode defn) {
+    bool addUnique(JSAtom* atom, DefinitionNode defn) {
         MOZ_ASSERT(map);
         AtomDefnListAddPtr p = map->lookupForAdd(atom);
         if (!p)
@@ -500,8 +460,7 @@ class AtomDecls
         return true;
     }
 
-    MOZ_MUST_USE bool addShadow(JSAtom* atom, DefinitionNode defn);
-    MOZ_MUST_USE bool addShadowedForAnnexB(JSAtom* atom, DefinitionNode defn);
+    bool addShadow(JSAtom* atom, DefinitionNode defn);
 
     /* Updating the definition for an entry that is known to exist is infallible. */
     void updateFirst(JSAtom* atom, DefinitionNode defn) {

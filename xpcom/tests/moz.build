@@ -15,6 +15,11 @@ TEST_DIRS += [
 if CONFIG['OS_ARCH'] == 'WINNT':
     TEST_DIRS += ['windows']
 
+if CONFIG['DEHYDRA_PATH']:
+    TEST_DIRS += ['static-checker']
+
+FAIL_ON_WARNINGS = True
+
 EXPORTS.testing += [
     'TestHarness.h',
 ]
@@ -53,6 +58,7 @@ GeckoCppUnitTests([
     'TestCOMArray',
     'TestCOMPtr',
     'TestCOMPtrEq',
+    'TestDeque',
     'TestFile',
     'TestHashtables',
     'TestID',
@@ -71,6 +77,11 @@ if CONFIG['MOZ_MEMORY']:
         'TestJemalloc',
     ])
 
+# XXX Make these tests work in libxul builds.
+#CPP_UNIT_TESTS += [
+#    'TestAtoms',
+#]
+
 # FIXME: bug 577500 TestStaticAtoms fails when run in dist/bin
 #CPP_UNIT_TESTS += [
 #    'TestStaticAtoms',
@@ -83,10 +94,6 @@ if CONFIG['MOZ_DEBUG'] and CONFIG['OS_ARCH'] not in ('WINNT'):
         'TestDeadlockDetector',
         'TestDeadlockDetectorScalability',
     ])
-
-TEST_HARNESS_FILES.xpcshell.xpcom.tests.unit += [
-    '!/dist/bin/components/xpcomtest.xpt',
-]
 
 XPIDL_MODULE = 'xpcomtest'
 XPIDL_SOURCES += [

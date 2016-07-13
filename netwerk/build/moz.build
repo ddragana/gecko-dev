@@ -12,6 +12,8 @@ SOURCES += [
     'nsNetModule.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
@@ -28,9 +30,11 @@ LOCAL_INCLUDES += [
     '/netwerk/streamconv/converters',
 ]
 
-protocols = CONFIG['NECKO_PROTOCOLS']
+protocols = CONFIG['NECKO_PROTOCOLS'].copy()
+if 'about' in protocols:
+    protocols.remove('about')
 LOCAL_INCLUDES += sorted([
-    '/netwerk/protocol/%s' % d for d in protocols if d != 'about'
+    '/netwerk/protocol/%s' % d for d in protocols
 ])
 
 if CONFIG['OS_ARCH'] == 'WINNT':
@@ -73,6 +77,6 @@ if CONFIG['MOZ_RTSP']:
         '/netwerk/protocol/rtsp',
     ]
 
-LOCAL_INCLUDES += [
-    '!/netwerk/dns',
+GENERATED_INCLUDES += [
+    '/netwerk/dns',
 ]

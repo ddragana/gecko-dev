@@ -12,7 +12,7 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 
 const Ci = Components.interfaces;
 const CONTENT_PAGE = "http://mochi.test:8888/chrome/dom/tests/mochitest/localstorage/page_blank.html";
-const slavePath = "/chrome/dom/tests/mochitest/localstorage/";
+const slavePath = "/tests/dom/tests/mochitest/localstorage/";
 var currentTest = 1;
 var quota;
 
@@ -39,7 +39,7 @@ function startTest() {
     }, false);
     slave = aWindow.content.frames[0];
 
-    SimpleTest.waitForFocus(() => doNextTest(aWindow), aWindow);
+    SimpleTest.waitForFocus(function() doNextTest(aWindow), aWindow);
   });
 }
 
@@ -138,11 +138,7 @@ function onMessageReceived(event, aWindow) {
       // Just fall through...
     // Indication of successfully finished step of a test
     case "perf":
-      // postMessage should send to the slaveOrigin. However with the addition of private
-      // browsing flags in origin attributes this will cause postMessage to fail. The origin of this
-      // window has false privatebrowsing, while the recipient is in a private window.
-      // To fix this issue and preserve the integrity of the test a * is passed to get around origin equality.
-      slave.postMessage("step", "*");
+      slave.postMessage("step", slaveOrigin);
       break;
     // Indication of all test parts finish (from any of the frames)
     case "done":

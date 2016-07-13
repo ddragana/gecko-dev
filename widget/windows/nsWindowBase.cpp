@@ -9,7 +9,6 @@
 #include "KeyboardLayout.h"
 #include "WinUtils.h"
 #include "npapi.h"
-#include "nsAutoPtr.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -24,15 +23,15 @@ nsWindowBase::DispatchPluginEvent(const MSG& aMsg)
   if (!PluginHasFocus()) {
     return false;
   }
-  WidgetPluginEvent pluginEvent(true, ePluginInputEvent, this);
-  LayoutDeviceIntPoint point(0, 0);
+  WidgetPluginEvent pluginEvent(true, NS_PLUGIN_INPUT_EVENT, this);
+  nsIntPoint point(0, 0);
   InitEvent(pluginEvent, &point);
   NPEvent npEvent;
   npEvent.event = aMsg.message;
   npEvent.wParam = aMsg.wParam;
   npEvent.lParam = aMsg.lParam;
   pluginEvent.mPluginEvent.Copy(npEvent);
-  pluginEvent.mRetargetToFocusedDocument = true;
+  pluginEvent.retargetToFocusedDocument = true;
   return DispatchWindowEvent(&pluginEvent);
 }
 
@@ -71,7 +70,7 @@ nsWindowBase::InitTouchInjection()
 }
 
 bool
-nsWindowBase::InjectTouchPoint(uint32_t aId, LayoutDeviceIntPoint& aPoint,
+nsWindowBase::InjectTouchPoint(uint32_t aId, nsIntPoint& aPointerScreenPoint,
                                POINTER_FLAGS aFlags, uint32_t aPressure,
                                uint32_t aOrientation)
 {
@@ -91,8 +90,8 @@ nsWindowBase::InjectTouchPoint(uint32_t aId, LayoutDeviceIntPoint& aPoint,
   info.pointerInfo.pointerFlags = aFlags;
   info.pointerInfo.pointerType =  PT_TOUCH;
   info.pointerInfo.pointerId = aId;
-  info.pointerInfo.ptPixelLocation.x = aPoint.x;
-  info.pointerInfo.ptPixelLocation.y = aPoint.y;
+  info.pointerInfo.ptPixelLocation.x = WinUtils::LogToPhys(aPointerScreenPoint.x);
+  info.pointerInfo.ptPixelLocation.y = WinUtils::LogToPhys(aPointerScreenPoint.y);
 
   info.rcContact.top = info.pointerInfo.ptPixelLocation.y - 2;
   info.rcContact.bottom = info.pointerInfo.ptPixelLocation.y + 2;
@@ -106,21 +105,10 @@ nsWindowBase::InjectTouchPoint(uint32_t aId, LayoutDeviceIntPoint& aPoint,
   return true;
 }
 
-void nsWindowBase::ChangedDPI()
-{
-  if (mWidgetListener) {
-    nsIPresShell* presShell = mWidgetListener->GetPresShell();
-    if (presShell) {
-      presShell->BackingScaleFactorChanged();
-    }
-    mWidgetListener->UIResolutionChanged();
-  }
-}
-
 nsresult
 nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                          nsIWidget::TouchPointerState aPointerState,
-                                         LayoutDeviceIntPoint aPoint,
+                                         nsIntPoint aPointerScreenPoint,
                                          double aPointerPressure,
                                          uint32_t aPointerOrientation,
                                          nsIObserver* aObserver)
@@ -161,7 +149,7 @@ nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
       flags |= POINTER_FLAG_CANCELED;
     }
 
-    return !InjectTouchPoint(aPointerId, aPoint, flags,
+    return !InjectTouchPoint(aPointerId, aPointerScreenPoint, flags,
                              pressure, aPointerOrientation) ?
       NS_ERROR_UNEXPECTED : NS_OK;
   }
@@ -172,7 +160,7 @@ nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
   }
 
   // Create a new pointer
-  info = new PointerInfo(aPointerId, aPoint);
+  info = new PointerInfo(aPointerId, aPointerScreenPoint);
 
   POINTER_FLAGS flags = POINTER_FLAG_INRANGE;
   if (contact) {
@@ -180,9 +168,18 @@ nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
   }
 
   mActivePointers.Put(aPointerId, info);
-  return !InjectTouchPoint(aPointerId, aPoint, flags,
+  return !InjectTouchPoint(aPointerId, aPointerScreenPoint, flags,
                            pressure, aPointerOrientation) ?
     NS_ERROR_UNEXPECTED : NS_OK;
+}
+
+// static
+PLDHashOperator
+nsWindowBase::CancelTouchPoints(const unsigned int& aPointerId, nsAutoPtr<PointerInfo>& aInfo, void* aUserArg)
+{
+  nsWindowBase* self = static_cast<nsWindowBase*>(aUserArg);
+  self->InjectTouchPoint(aInfo.get()->mPointerId, aInfo.get()->mPosition, POINTER_FLAG_CANCELED);
+  return (PLDHashOperator)(PL_DHASH_NEXT|PL_DHASH_REMOVE);
 }
 
 nsresult
@@ -194,12 +191,7 @@ nsWindowBase::ClearNativeTouchSequence(nsIObserver* aObserver)
   }
 
   // cancel all input points
-  for (auto iter = mActivePointers.Iter(); !iter.Done(); iter.Next()) {
-    nsAutoPtr<PointerInfo>& info = iter.Data();
-    InjectTouchPoint(info.get()->mPointerId, info.get()->mPosition,
-                     POINTER_FLAG_CANCELED);
-    iter.Remove();
-  }
+  mActivePointers.Enumerate(CancelTouchPoints, (void*)this);
 
   nsBaseWidget::ClearNativeTouchSequence(nullptr);
 

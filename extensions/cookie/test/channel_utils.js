@@ -166,15 +166,11 @@ ChannelListener.prototype = {
  * Class that implements nsILoadContext.  Use it as callbacks for channel when
  * test needs it.
  */
-function LoadContextCallback(appId, inIsolatedMozBrowser, isPrivate, isContent) {
+function LoadContextCallback(appId, inBrowserElement, isPrivate, isContent) {
   this.appId = appId;
-  this.isInIsolatedMozBrowserElement = inIsolatedMozBrowser;
+  this.isInBrowserElement = inBrowserElement;
   this.usePrivateBrowsing = isPrivate;
   this.isContent = isContent;
-  this.originAttributes = {
-    appId: appId,
-    inIsolatedMozBrowser: inIsolatedMozBrowser
-  };
 }
 
 LoadContextCallback.prototype = {

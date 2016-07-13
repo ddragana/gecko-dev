@@ -68,6 +68,21 @@ VideoRenderMacCocoaImpl::Init()
 }
 
 int32_t
+VideoRenderMacCocoaImpl::ChangeUniqueId(const int32_t id)
+{
+    CriticalSectionScoped cs(&_renderMacCocoaCritsect);
+    WEBRTC_TRACE(kTraceInfo, kTraceVideoRenderer, _id, "%s", __FUNCTION__);
+    _id = id;
+
+    if(_ptrCocoaRender)
+    {
+        _ptrCocoaRender->ChangeUniqueID(_id);
+    }
+
+    return 0;
+}
+
+int32_t
 VideoRenderMacCocoaImpl::ChangeWindow(void* window)
 {
 

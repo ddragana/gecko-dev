@@ -80,7 +80,7 @@ DOMSVGNumberList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 // Helper class: AutoChangeNumberListNotifier
 // Stack-based helper class to pair calls to WillChangeNumberList and
 // DidChangeNumberList.
-class MOZ_RAII AutoChangeNumberListNotifier
+class MOZ_STACK_CLASS AutoChangeNumberListNotifier
 {
 public:
   explicit AutoChangeNumberListNotifier(DOMSVGNumberList* aNumberList MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -118,7 +118,7 @@ DOMSVGNumberList::InternalListLengthWillChange(uint32_t aNewLength)
     aNewLength = DOMSVGNumber::MaxListIndex();
   }
 
-  RefPtr<DOMSVGNumberList> kungFuDeathGrip;
+  nsRefPtr<DOMSVGNumberList> kungFuDeathGrip;
   if (aNewLength < oldLength) {
     // RemovingFromList() might clear last reference to |this|.
     // Retain a temporary reference to keep from dying before returning.
@@ -188,7 +188,7 @@ DOMSVGNumberList::Initialize(DOMSVGNumber& aItem,
   // from this list, and so the InsertItemBefore() call would not insert a
   // clone of newItem, it would actually insert newItem. To prevent that from
   // happening we have to do the clone here, if necessary.
-  RefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
+  nsRefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
 
   Clear(error);
   MOZ_ASSERT(!error.Failed());
@@ -199,7 +199,7 @@ already_AddRefed<DOMSVGNumber>
 DOMSVGNumberList::GetItem(uint32_t index, ErrorResult& error)
 {
   bool found;
-  RefPtr<DOMSVGNumber> item = IndexedGetter(index, found, error);
+  nsRefPtr<DOMSVGNumber> item = IndexedGetter(index, found, error);
   if (!found) {
     error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
   }
@@ -236,20 +236,13 @@ DOMSVGNumberList::InsertItemBefore(DOMSVGNumber& aItem,
   }
 
   // must do this before changing anything!
-  RefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
+  nsRefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
 
   // Ensure we have enough memory so we can avoid complex error handling below:
   if (!mItems.SetCapacity(mItems.Length() + 1, fallible) ||
       !InternalList().SetCapacity(InternalList().Length() + 1)) {
     error.Throw(NS_ERROR_OUT_OF_MEMORY);
     return nullptr;
-  }
-  if (AnimListMirrorsBaseList()) {
-    if (!mAList->mAnimVal->mItems.SetCapacity(
-          mAList->mAnimVal->mItems.Length() + 1, fallible)) {
-      error.Throw(NS_ERROR_OUT_OF_MEMORY);
-      return nullptr;
-    }
   }
 
   AutoChangeNumberListNotifier notifier(this);
@@ -285,7 +278,7 @@ DOMSVGNumberList::ReplaceItem(DOMSVGNumber& aItem,
   }
 
   // must do this before changing anything!
-  RefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
+  nsRefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
 
   AutoChangeNumberListNotifier notifier(this);
   if (mItems[index]) {
@@ -324,7 +317,7 @@ DOMSVGNumberList::RemoveItem(uint32_t index,
   MaybeRemoveItemFromAnimValListAt(index);
 
   // We have to return the removed item, so get it, creating it if necessary:
-  RefPtr<DOMSVGNumber> result = GetItemAt(index);
+  nsRefPtr<DOMSVGNumber> result = GetItemAt(index);
 
   AutoChangeNumberListNotifier notifier(this);
   // Notify the DOM item of removal *before* modifying the lists so that the
@@ -347,7 +340,7 @@ DOMSVGNumberList::GetItemAt(uint32_t aIndex)
   if (!mItems[aIndex]) {
     mItems[aIndex] = new DOMSVGNumber(this, AttrEnum(), aIndex, IsAnimValList());
   }
-  RefPtr<DOMSVGNumber> result = mItems[aIndex];
+  nsRefPtr<DOMSVGNumber> result = mItems[aIndex];
   return result.forget();
 }
 
@@ -356,15 +349,16 @@ DOMSVGNumberList::MaybeInsertNullInAnimValListAt(uint32_t aIndex)
 {
   MOZ_ASSERT(!IsAnimValList(), "call from baseVal to animVal");
 
-  if (!AnimListMirrorsBaseList()) {
+  DOMSVGNumberList* animVal = mAList->mAnimVal;
+
+  if (!animVal || mAList->IsAnimating()) {
+    // No animVal list wrapper, or animVal not a clone of baseVal
     return;
   }
 
-  DOMSVGNumberList* animVal = mAList->mAnimVal;
-
-  MOZ_ASSERT(animVal, "AnimListMirrorsBaseList() promised a non-null animVal");
   MOZ_ASSERT(animVal->mItems.Length() == mItems.Length(),
              "animVal list not in sync!");
+
   MOZ_ALWAYS_TRUE(animVal->mItems.InsertElementAt(aIndex, nullptr, fallible));
 
   UpdateListIndicesFromIndex(animVal->mItems, aIndex + 1);
@@ -375,15 +369,15 @@ DOMSVGNumberList::MaybeRemoveItemFromAnimValListAt(uint32_t aIndex)
 {
   MOZ_ASSERT(!IsAnimValList(), "call from baseVal to animVal");
 
-  if (!AnimListMirrorsBaseList()) {
+  // This needs to be a strong reference; otherwise, the RemovingFromList call
+  // below might drop the last reference to animVal before we're done with it.
+  nsRefPtr<DOMSVGNumberList> animVal = mAList->mAnimVal;
+
+  if (!animVal || mAList->IsAnimating()) {
+    // No animVal list wrapper, or animVal not a clone of baseVal
     return;
   }
 
-  // This needs to be a strong reference; otherwise, the RemovingFromList call
-  // below might drop the last reference to animVal before we're done with it.
-  RefPtr<DOMSVGNumberList> animVal = mAList->mAnimVal;
-
-  MOZ_ASSERT(animVal, "AnimListMirrorsBaseList() promised a non-null animVal");
   MOZ_ASSERT(animVal->mItems.Length() == mItems.Length(),
              "animVal list not in sync!");
 

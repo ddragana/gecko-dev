@@ -1,3 +1,5 @@
+var test = `
+
 // First, let's test the trivial. A chain of three works.
 class base {
     constructor() { }
@@ -7,7 +9,7 @@ class base {
 }
 
 class middle extends base {
-    constructor() { super(); }
+    constructor() { }
     testChain() {
         this.middleCalled = true;
         super.testChain();
@@ -15,7 +17,7 @@ class middle extends base {
 }
 
 class derived extends middle {
-    constructor() { super(); }
+    constructor() { }
     testChain() {
         super.testChain();
         assertEq(this.middleCalled, true);
@@ -30,7 +32,7 @@ function bootlegMiddle() { }
 bootlegMiddle.prototype = middle.prototype;
 
 new class extends bootlegMiddle {
-        constructor() { super(); }
+        constructor() { }
         testChain() {
             super.testChain();
             assertEq(this.middleCalled, true);
@@ -41,11 +43,11 @@ new class extends bootlegMiddle {
 // Now let's try out some "long" chains
 base.prototype.x = "yeehaw";
 
-let chain = class extends base { constructor() { super(); } }
+let chain = class extends base { constructor() { } }
 
 const CHAIN_LENGTH = 100;
 for (let i = 0; i < CHAIN_LENGTH; i++)
-    chain = class extends chain { constructor() { super(); } }
+    chain = class extends chain { constructor() { } }
 
 // Now we poke the chain
 let inst = new chain();
@@ -53,6 +55,11 @@ inst.testChain();
 assertEq(inst.baseCalled, true);
 
 assertEq(inst.x, "yeehaw");
+
+`;
+
+if (classesEnabled())
+    eval(test);
 
 if (typeof reportCompare === 'function')
     reportCompare(0,0,"OK");

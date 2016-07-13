@@ -15,7 +15,16 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "nsComponentManagerUtils.h"
+#if !defined(MOZILLA_XPCOMRT_API)
 #include "nsIProtocolProxyCallback.h"
+#endif
+
+#ifdef USE_FAKE_MEDIA_STREAMS
+#include "FakeMediaStreams.h"
+#else
+#include "DOMMediaStream.h"
+#include "MediaSegment.h"
+#endif
 
 #include "signaling/src/jsep/JsepSession.h"
 #include "AudioSegment.h"
@@ -40,7 +49,7 @@ struct RTCOutboundRTPStreamStats;
 }
 }
 
-#include "nricectxhandler.h"
+#include "nricectx.h"
 #include "nriceresolver.h"
 #include "nricemediastream.h"
 #include "MediaPipeline.h"
@@ -80,12 +89,8 @@ public:
   nsresult StorePipeline(const std::string& trackId,
                          const RefPtr<MediaPipeline>& aPipeline);
 
-  virtual void AddTrack(const std::string& trackId,
-                        const RefPtr<dom::MediaStreamTrack>& aTrack)
-  {
-    mTracks.insert(std::make_pair(trackId, aTrack));
-  }
-  virtual void RemoveTrack(const std::string& trackId);
+  virtual void AddTrack(const std::string& trackId) { mTracks.insert(trackId); }
+  void RemoveTrack(const std::string& trackId);
   bool HasTrack(const std::string& trackId) const
   {
     return !!mTracks.count(trackId);
@@ -97,32 +102,21 @@ public:
   const std::map<std::string, RefPtr<MediaPipeline>>&
   GetPipelines() const { return mPipelines; }
   RefPtr<MediaPipeline> GetPipelineByTrackId_m(const std::string& trackId);
-  // This is needed so PeerConnectionImpl can unregister itself as
-  // PrincipalChangeObserver from each track.
-  const std::map<std::string, RefPtr<dom::MediaStreamTrack>>&
-  GetMediaStreamTracks() const { return mTracks; }
-  dom::MediaStreamTrack* GetTrackById(const std::string& trackId) const
-  {
-    auto it = mTracks.find(trackId);
-    if (it == mTracks.end()) {
-      return nullptr;
-    }
-
-    return it->second;
-  }
   const std::string& GetId() const { return mId; }
 
   void DetachTransport_s();
-  virtual void DetachMedia_m();
+  void DetachMedia_m();
   bool AnyCodecHasPluginID(uint64_t aPluginID);
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  nsRefPtr<mozilla::dom::VideoStreamTrack> GetVideoTrackByTrackId(const std::string& trackId);
+#endif
 protected:
-  void EndTrack(MediaStream* stream, dom::MediaStreamTrack* track);
-  RefPtr<DOMMediaStream> mMediaStream;
+  nsRefPtr<DOMMediaStream> mMediaStream;
   PeerConnectionMedia *mParent;
   const std::string mId;
   // These get set up before we generate our local description, the pipelines
   // and conduits are set up once offer/answer completes.
-  std::map<std::string, RefPtr<dom::MediaStreamTrack>> mTracks;
+  std::set<std::string> mTracks;
   std::map<std::string, RefPtr<MediaPipeline>> mPipelines;
 };
 
@@ -140,12 +134,10 @@ public:
 
   nsresult TakePipelineFrom(RefPtr<LocalSourceStreamInfo>& info,
                             const std::string& oldTrackId,
-                            dom::MediaStreamTrack& aNewTrack,
                             const std::string& newTrackId);
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  void UpdateSinkIdentity_m(dom::MediaStreamTrack* aTrack,
-                            nsIPrincipal* aPrincipal,
+  void UpdateSinkIdentity_m(nsIPrincipal* aPrincipal,
                             const PeerIdentity* aSinkIdentity);
 #endif
 
@@ -155,40 +147,6 @@ private:
   already_AddRefed<MediaPipeline> ForgetPipelineByTrackId_m(
       const std::string& trackId);
 };
-
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-class RemoteTrackSource : public dom::MediaStreamTrackSource
-{
-public:
-  explicit RemoteTrackSource(nsIPrincipal* aPrincipal, const nsString& aLabel)
-    : dom::MediaStreamTrackSource(aPrincipal, true, aLabel) {}
-
-  dom::MediaSourceEnum GetMediaSource() const override
-  {
-    return dom::MediaSourceEnum::Other;
-  }
-
-  already_AddRefed<dom::Promise>
-  ApplyConstraints(nsPIDOMWindowInner* aWindow,
-                   const dom::MediaTrackConstraints& aConstraints,
-                   ErrorResult &aRv) override
-  {
-    NS_ERROR("Can't ApplyConstraints() a remote source!");
-    return nullptr;
-  }
-
-  void Stop() override { NS_ERROR("Can't stop a remote source!"); }
-
-  void SetPrincipal(nsIPrincipal* aPrincipal)
-  {
-    mPrincipal = aPrincipal;
-    PrincipalChanged();
-  }
-
-protected:
-  virtual ~RemoteTrackSource() {}
-};
-#endif
 
 class RemoteSourceStreamInfo : public SourceStreamInfo {
   ~RemoteSourceStreamInfo() {}
@@ -201,8 +159,6 @@ class RemoteSourceStreamInfo : public SourceStreamInfo {
   {
   }
 
-  void DetachMedia_m() override;
-  void RemoveTrack(const std::string& trackId) override;
   void SyncPipeline(RefPtr<MediaPipelineReceive> aPipeline);
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
@@ -211,29 +167,53 @@ class RemoteSourceStreamInfo : public SourceStreamInfo {
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RemoteSourceStreamInfo)
 
-  void AddTrack(const std::string& trackId,
-                const RefPtr<dom::MediaStreamTrack>& aTrack) override
+  virtual void AddTrack(const std::string& track) override
   {
-    SourceStreamInfo::AddTrack(trackId, aTrack);
+    mTrackIdMap.push_back(track);
+    SourceStreamInfo::AddTrack(track);
   }
 
   TrackID GetNumericTrackId(const std::string& trackId) const
   {
-    dom::MediaStreamTrack* track = GetTrackById(trackId);
-    if (!track) {
-      return TRACK_INVALID;
+    for (size_t i = 0; i < mTrackIdMap.size(); ++i) {
+      if (mTrackIdMap[i] == trackId) {
+        return static_cast<TrackID>(i + 1);
+      }
     }
-    return track->mTrackID;
+    return TRACK_INVALID;
+  }
+
+  nsresult GetTrackId(TrackID numericTrackId, std::string* trackId) const
+  {
+    if (numericTrackId <= 0 ||
+        static_cast<size_t>(numericTrackId) > mTrackIdMap.size()) {
+      return NS_ERROR_INVALID_ARG;;
+    }
+
+    *trackId = mTrackIdMap[numericTrackId - 1];
+    return NS_OK;
   }
 
   void StartReceiving();
 
+  /**
+   * Returns true if a |MediaPipeline| should be queueing its track instead of
+   * adding it to the |SourceMediaStream| directly.
+   */
+  bool ShouldQueueTracks() const
+  {
+    return !mReceiving;
+  }
+
  private:
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  // MediaStreamTrackSources associated with this remote stream.
-  // We use them for updating their principal if that's needed.
-  std::vector<RefPtr<RemoteTrackSource>> mTrackSources;
-#endif
+  // For remote streams, the MediaStreamGraph API forces us to select a
+  // numeric track id before creation of the MediaStreamTrack, and does not
+  // allow us to specify a string-based id until later. We cannot simply use
+  // something based on mline index, since renegotiation can move tracks
+  // around. Hopefully someday we'll be able to specify the string id up-front,
+  // and have the numeric track id selected for us, in which case this variable
+  // and its dependencies can go away.
+  std::vector<std::string> mTrackIdMap;
 
   // True iff SetPullEnabled(true) has been called on the DOMMediaStream. This
   // happens when offer/answer concludes.
@@ -241,35 +221,25 @@ class RemoteSourceStreamInfo : public SourceStreamInfo {
 };
 
 class PeerConnectionMedia : public sigslot::has_slots<> {
-  ~PeerConnectionMedia()
-  {
-    MOZ_RELEASE_ASSERT(!mMainThread);
-  }
+  ~PeerConnectionMedia() {}
 
  public:
   explicit PeerConnectionMedia(PeerConnectionImpl *parent);
 
-  enum IceRestartState { ICE_RESTART_NONE,
-                         ICE_RESTART_PROVISIONAL,
-                         ICE_RESTART_COMMITTED
-  };
-
   PeerConnectionImpl* GetPC() { return mParent; }
   nsresult Init(const std::vector<NrIceStunServer>& stun_servers,
-                const std::vector<NrIceTurnServer>& turn_servers,
-                NrIceCtx::Policy policy);
+                const std::vector<NrIceTurnServer>& turn_servers);
   // WARNING: This destroys the object!
   void SelfDestruct();
 
-  RefPtr<NrIceCtxHandler> ice_ctx_hdlr() const { return mIceCtxHdlr; }
-  RefPtr<NrIceCtx> ice_ctx() const { return mIceCtxHdlr->ctx(); }
+  RefPtr<NrIceCtx> ice_ctx() const { return mIceCtx; }
 
   RefPtr<NrIceMediaStream> ice_media_stream(size_t i) const {
-    return mIceCtxHdlr->ctx()->GetStream(i);
+    return mIceCtx->GetStream(i);
   }
 
   size_t num_ice_media_streams() const {
-    return mIceCtxHdlr->ctx()->GetStreamCount();
+    return mIceCtx->GetStreamCount();
   }
 
   // Ensure ICE transports exist that we might need when offer/answer concludes
@@ -282,19 +252,6 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
   // Start ICE checks.
   void StartIceChecks(const JsepSession& session);
 
-  bool IsIceRestarting() const;
-  IceRestartState GetIceRestartState() const;
-
-  // Begin ICE restart
-  void BeginIceRestart(const std::string& ufrag,
-                       const std::string& pwd);
-  // Commit ICE Restart - offer/answer complete, no rollback possible
-  void CommitIceRestart();
-  // Finalize ICE restart
-  void FinalizeIceRestart();
-  // Abort ICE restart
-  void RollbackIceRestart();
-
   // Process a trickle ICE candidate.
   void AddIceCandidate(const std::string& candidate, const std::string& mid,
                        uint32_t aMLine);
@@ -303,15 +260,18 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
   nsresult UpdateMediaPipelines(const JsepSession& session);
 
   // Add a track (main thread only)
-  nsresult AddTrack(DOMMediaStream& aMediaStream,
+  nsresult AddTrack(DOMMediaStream* aMediaStream,
                     const std::string& streamId,
-                    dom::MediaStreamTrack& aTrack,
                     const std::string& trackId);
 
   nsresult RemoveLocalTrack(const std::string& streamId,
                             const std::string& trackId);
   nsresult RemoveRemoteTrack(const std::string& streamId,
                             const std::string& trackId);
+
+  nsresult GetRemoteTrackId(const std::string streamId,
+                            TrackID numericTrackId,
+                            std::string* trackId) const;
 
   // Get a specific local stream
   uint32_t LocalStreamsLength()
@@ -320,7 +280,6 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
   }
   LocalSourceStreamInfo* GetLocalStreamByIndex(int index);
   LocalSourceStreamInfo* GetLocalStreamById(const std::string& id);
-  LocalSourceStreamInfo* GetLocalStreamByTrackId(const std::string& id);
 
   // Get a specific remote stream
   uint32_t RemoteStreamsLength()
@@ -330,27 +289,24 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
 
   RemoteSourceStreamInfo* GetRemoteStreamByIndex(size_t index);
   RemoteSourceStreamInfo* GetRemoteStreamById(const std::string& id);
-  RemoteSourceStreamInfo* GetRemoteStreamByTrackId(const std::string& id);
 
   // Add a remote stream.
-  nsresult AddRemoteStream(RefPtr<RemoteSourceStreamInfo> aInfo);
+  nsresult AddRemoteStream(nsRefPtr<RemoteSourceStreamInfo> aInfo);
 
-  nsresult ReplaceTrack(const std::string& aOldStreamId,
-                        const std::string& aOldTrackId,
-                        dom::MediaStreamTrack& aNewTrack,
-                        const std::string& aNewStreamId,
-                        const std::string& aNewTrackId);
+  nsresult ReplaceTrack(const std::string& oldStreamId,
+                        const std::string& oldTrackId,
+                        DOMMediaStream* aNewStream,
+                        const std::string& newStreamId,
+                        const std::string& aNewTrack);
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   // In cases where the peer isn't yet identified, we disable the pipeline (not
   // the stream, that would potentially affect others), so that it sends
   // black/silence.  Once the peer is identified, re-enable those streams.
-  // aTrack will be set if this update came from a principal change on aTrack.
-  void UpdateSinkIdentity_m(dom::MediaStreamTrack* aTrack,
-                            nsIPrincipal* aPrincipal,
+  void UpdateSinkIdentity_m(nsIPrincipal* aPrincipal,
                             const PeerIdentity* aSinkIdentity);
-  // this determines if any track is peerIdentity constrained
-  bool AnyLocalTrackHasPeerIdentity() const;
+  // this determines if any stream is peerIdentity constrained
+  bool AnyLocalStreamHasPeerIdentity() const;
   // When we finally learn who is on the other end, we need to change the ownership
   // on streams
   void UpdateRemoteStreamPrincipals_m(nsIPrincipal* aPrincipal);
@@ -436,12 +392,10 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
   // This passes address, port, level of the default candidate.
   sigslot::signal5<const std::string&, uint16_t,
                    const std::string&, uint16_t, uint16_t>
-      SignalUpdateDefaultCandidate;
-  sigslot::signal1<uint16_t>
       SignalEndOfLocalCandidates;
 
  private:
-  nsresult InitProxy();
+#if !defined(MOZILLA_XPCOMRT_API)
   class ProtocolProxyQueryHandler : public nsIProtocolProxyCallback {
    public:
     explicit ProtocolProxyQueryHandler(PeerConnectionMedia *pcm) :
@@ -458,6 +412,7 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
     RefPtr<PeerConnectionMedia> pcm_;
     virtual ~ProtocolProxyQueryHandler() {}
   };
+#endif // !defined(MOZILLA_XPCOMRT_API)
 
   // Shutdown media transport. Must be called on STS thread.
   void ShutdownMediaTransport_s();
@@ -484,13 +439,6 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
                         bool aIsIceLite,
                         const std::vector<std::string>& aIceOptionsList);
 
-  void BeginIceRestart_s(RefPtr<NrIceCtx> new_ctx);
-  void FinalizeIceRestart_s();
-  void RollbackIceRestart_s();
-  bool GetPrefDefaultAddressOnly() const;
-
-  void ConnectSignals(NrIceCtx *aCtx, NrIceCtx *aOldCtx=nullptr);
-
   // Process a trickle ICE candidate.
   void AddIceCandidate_s(const std::string& aCandidate, const std::string& aMid,
                          uint32_t aMLine);
@@ -503,26 +451,18 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
                                 NrIceCtx::ConnectionState state);
   void IceStreamReady_s(NrIceMediaStream *aStream);
   void OnCandidateFound_s(NrIceMediaStream *aStream,
-                          const std::string& aCandidate);
+                        const std::string &candidate);
   void EndOfLocalCandidates(const std::string& aDefaultAddr,
                             uint16_t aDefaultPort,
                             const std::string& aDefaultRtcpAddr,
                             uint16_t aDefaultRtcpPort,
                             uint16_t aMLine);
-  void GetDefaultCandidates(const NrIceMediaStream& aStream,
-                            NrIceCandidate* aCandidate,
-                            NrIceCandidate* aRtcpCandidate);
 
   void IceGatheringStateChange_m(NrIceCtx* ctx,
                                  NrIceCtx::GatheringState state);
   void IceConnectionStateChange_m(NrIceCtx* ctx,
                                   NrIceCtx::ConnectionState state);
-  void OnCandidateFound_m(const std::string& aCandidateLine,
-                          const std::string& aDefaultAddr,
-                          uint16_t aDefaultPort,
-                          const std::string& aDefaultRtcpAddr,
-                          uint16_t aDefaultRtcpPort,
-                          uint16_t aMLine);
+  void OnCandidateFound_m(const std::string &candidate, uint16_t aMLine);
   void EndOfLocalCandidates_m(const std::string& aDefaultAddr,
                               uint16_t aDefaultPort,
                               const std::string& aDefaultRtcpAddr,
@@ -540,19 +480,19 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
 
   // A list of streams returned from GetUserMedia
   // This is only accessed on the main thread (with one special exception)
-  nsTArray<RefPtr<LocalSourceStreamInfo> > mLocalSourceStreams;
+  nsTArray<nsRefPtr<LocalSourceStreamInfo> > mLocalSourceStreams;
 
   // A list of streams provided by the other side
   // This is only accessed on the main thread (with one special exception)
-  nsTArray<RefPtr<RemoteSourceStreamInfo> > mRemoteSourceStreams;
+  nsTArray<nsRefPtr<RemoteSourceStreamInfo> > mRemoteSourceStreams;
 
   std::map<size_t, std::pair<bool, RefPtr<MediaSessionConduit>>> mConduits;
 
   // ICE objects
-  RefPtr<NrIceCtxHandler> mIceCtxHdlr;
+  RefPtr<NrIceCtx> mIceCtx;
 
   // DNS
-  RefPtr<NrIceResolver> mDNSResolver;
+  nsRefPtr<NrIceResolver> mDNSResolver;
 
   // Transport flows: even is RTP, odd is RTCP
   std::map<int, RefPtr<TransportFlow> > mTransportFlows;
@@ -580,9 +520,6 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
 
   // Used to store the result of the request.
   UniquePtr<NrIceProxyServer> mProxyServer;
-
-  // Used to track the state of ice restart
-  IceRestartState mIceRestartState;
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PeerConnectionMedia)
 };

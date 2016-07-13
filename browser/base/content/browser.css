@@ -7,7 +7,6 @@
 @namespace svg url("http://www.w3.org/2000/svg");
 
 :root {
-  --identity-popup-expander-width: 38px;
   --panelui-subview-transition-duration: 150ms;
 }
 
@@ -73,6 +72,10 @@ toolbar[customizable="true"] {
 #toolbar-menubar {
   -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-menubar-stub");
 }
+
+toolbar[customizable="true"]:not([nowindowdrag="true"]) {
+  -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-drag");
+}
 %endif
 
 #toolbar-menubar[autohide="true"] {
@@ -117,10 +120,6 @@ panelview {
 panelview:not([mainview]):not([current]) {
   transition: visibility 0s linear var(--panelui-subview-transition-duration);
   visibility: collapse;
-}
-
-browser[frameType="social"][remote="true"] {
-  -moz-binding: url("chrome://global/content/bindings/remote-browser.xml#remote-browser");
 }
 
 tabbrowser {
@@ -228,7 +227,10 @@ toolbar[customizing] > .overflow-button {
 
 #titlebar {
   -moz-binding: url("chrome://global/content/bindings/general.xml#windowdragbox");
+
+%ifdef XP_MACOSX
   -moz-window-dragging: drag;
+%endif
 }
 
 #titlebar-spacer {
@@ -243,13 +245,19 @@ toolbar[customizing] > .overflow-button {
   -moz-appearance: -moz-window-button-box;
 }
 
-#personal-bookmarks {
-  -moz-window-dragging: inherit;
-}
-
 %ifdef XP_MACOSX
 #titlebar-fullscreen-button {
   -moz-appearance: -moz-mac-fullscreen-button;
+}
+
+/* Because these buttons don't move, they should always be aligned the same,
+ * left and right were deprecated, so we have to do work to get it to mean that: */
+#titlebar-buttonbox-container:-moz-locale-dir(ltr) {
+  -moz-box-align: start;
+}
+
+#titlebar-buttonbox-container:-moz-locale-dir(rtl) {
+  -moz-box-align: end;
 }
 
 /* Fullscreen and caption buttons don't move with RTL on OS X so override the automatic ordering. */
@@ -282,17 +290,6 @@ toolbar[customizing] > .overflow-button {
 %ifdef XP_WIN
 #main-window[sizemode="maximized"] #titlebar-buttonbox {
   -moz-appearance: -moz-window-button-box-maximized;
-}
-
-#main-window[tabletmode] #titlebar-min,
-#main-window[tabletmode] #titlebar-max {
-  display: none !important;
-}
-
-#main-window[tabsintitlebar] #TabsToolbar,
-#main-window[tabsintitlebar] #toolbar-menubar,
-#main-window[tabsintitlebar] #navigator-toolbox > toolbar:-moz-lwtheme {
-  -moz-window-dragging: drag;
 }
 %endif
 
@@ -331,14 +328,6 @@ toolbarpaletteitem[removable="false"] {
   opacity: 0.5;
   cursor: default;
 }
-
-%ifndef XP_MACOSX
-toolbarpaletteitem[place="palette"],
-toolbarpaletteitem[place="panel"],
-toolbarpaletteitem[place="toolbar"] {
-  -moz-user-focus: normal;
-}
-%endif
 
 #bookmarks-toolbar-placeholder,
 toolbarpaletteitem > #personal-bookmarks > #PlacesToolbar,
@@ -391,7 +380,8 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
 @media (resolution: 2dppx) {
-  .searchbar-engine-image {
+  .searchbar-engine-image,
+  .searchbar-engine-menuitem > .menu-iconic-left > .menu-iconic-icon {
     image-rendering: -moz-crisp-edges;
   }
 }
@@ -440,28 +430,24 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   -moz-binding: url(chrome://browser/content/urlbarBindings.xml#urlbar);
 }
 
-/* Always show URLs LTR. */
-.ac-url-text:-moz-locale-dir(rtl) {
+.ac-url-text:-moz-locale-dir(rtl),
+.ac-title:-moz-locale-dir(rtl) > description {
   direction: ltr !important;
 }
 
-/* For non-action items, hide the action text; for action items, hide the URL
-   text. */
-.ac-url[actiontype],
-.ac-action:not([actiontype]) {
-  display: none;
+/* For results that are actions, their description text is shown instead of
+   the URL - this needs to follow the locale's direction, unlike URLs. */
+panel:not([noactions]) > richlistbox > richlistitem.overridable-action:-moz-locale-dir(rtl) > .ac-url-box {
+  direction: rtl;
 }
 
-/* For action items in a noactions popup, show the URL text and hide the action
-   text and type icon. */
-#PopupAutoCompleteRichResult[noactions] > richlistbox > richlistitem.overridable-action > .ac-url {
-  display: -moz-box;
+panel[noactions] > richlistbox > richlistitem.overridable-action > .ac-url-box > .ac-url > .ac-action-text,
+panel[noactions] > richlistbox > richlistitem.overridable-action > .ac-url-box > .ac-action-icon {
+  visibility: collapse;
 }
-#PopupAutoCompleteRichResult[noactions] > richlistbox > richlistitem.overridable-action > .ac-action {
-  display: none;
-}
-#PopupAutoCompleteRichResult[noactions] > richlistbox > richlistitem.overridable-action > .ac-type-icon {
-  list-style-image: none;
+
+panel[noactions] > richlistbox > richlistitem.overridable-action > .ac-url-box > .ac-url > .ac-url-text {
+  visibility: visible;
 }
 
 #urlbar:not([actiontype="switchtab"]) > #urlbar-display-box {
@@ -473,39 +459,22 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 }
 
 #PopupSearchAutoComplete {
-  -moz-binding: url("chrome://browser/content/search/search.xml#browser-search-autocomplete-result-popup");
+  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#browser-search-autocomplete-result-popup");
 }
 
 /* Overlay a badge on top of the icon of additional open search providers
    in the search panel. */
 .addengine-item > .button-box > .button-icon {
-  -moz-binding: url("chrome://browser/content/search/search.xml#addengine-icon");
+  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#addengine-icon");
   display: -moz-stack;
+}
+
+searchbar[oneoffui] {
+  -moz-binding: url("chrome://browser/content/search/search.xml#searchbar-flare") !important;
 }
 
 #PopupAutoCompleteRichResult {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#urlbar-rich-result-popup");
-}
-
-#PopupAutoCompleteRichResult.showSearchSuggestionsNotification {
-  transition: height 100ms;
-}
-
-#PopupAutoCompleteRichResult > hbox[anonid="search-suggestions-notification"] {
-  visibility: collapse;
-  transition: margin-top 100ms;
-}
-
-#PopupAutoCompleteRichResult.showSearchSuggestionsNotification > hbox[anonid="search-suggestions-notification"] {
-  visibility: visible;
-}
-
-#PopupAutoCompleteRichResult > richlistbox {
-  transition: height 100ms;
-}
-
-#PopupAutoCompleteRichResult.showSearchSuggestionsNotification > richlistbox {
-  transition: none;
 }
 
 #urlbar[pageproxystate="invalid"] > #urlbar-icons > .urlbar-icon,
@@ -521,10 +490,6 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 #urlbar[pageproxystate="invalid"] > #identity-box {
   pointer-events: none;
-}
-
-#urlbar[pageproxystate="invalid"] > #identity-box > #notification-popup-box {
-  pointer-events: auto;
 }
 
 #identity-icon-labels {
@@ -568,7 +533,7 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 }
 
 #identity-box.verifiedIdentity > #identity-icon-labels > #identity-icon-label {
-  margin-inline-end: 0.25em !important;
+  -moz-margin-end: 0.25em !important;
 }
 
 #main-window[customizing] :-moz-any(#urlbar, .searchbar-textbox) > .autocomplete-textbox-container > .textbox-input-box {
@@ -590,7 +555,7 @@ toolbarbutton.bookmark-item {
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
 @media (resolution: 2dppx) {
-  #alltabs-popup > .menuitem-iconic > .menu-iconic-left > .menu-iconic-icon,
+  .alltabs-popup > .menuitem-iconic > .menu-iconic-left > .menu-iconic-icon,
   .menuitem-with-favicon > .menu-iconic-left > .menu-iconic-icon {
     image-rendering: -moz-crisp-edges;
   }
@@ -600,10 +565,6 @@ toolbarbutton.bookmark-item {
   #personal-bookmarks[cui-areatype="toolbar"] > #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
     image-rendering: -moz-crisp-edges;
   }
-  /* Synced Tabs sidebar */
-  html|*.tabs-container html|*.item-tabs-list html|*.item-icon-container {
-    image-rendering: -moz-crisp-edges;
-  }
 }
 
 #editBMPanel_tagsSelector {
@@ -611,11 +572,26 @@ toolbarbutton.bookmark-item {
   width: auto;
 }
 
+/* The star doesn't make sense as text */
+toolbar[mode="text"] #bookmarks-menu-button > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
+  display: -moz-box !important;
+}
+toolbar[mode="text"] #bookmarks-menu-button > .toolbarbutton-menubutton-button > .toolbarbutton-text,
+toolbar[mode="full"] #bookmarks-menu-button.bookmark-item > .toolbarbutton-menubutton-button > .toolbarbutton-text {
+  display: none;
+}
+
 menupopup[emptyplacesresult="true"] > .hide-if-empty-places-result {
   display: none;
 }
+
 menuitem.spell-suggestion {
   font-weight: bold;
+}
+
+/* apply Fitts' law to the notification bar's close button */
+window[sizemode="maximized"] #content .notification-inner {
+  border-right: 0px !important;
 }
 
 /* Hide extension toolbars that neglected to set the proper class */
@@ -628,6 +604,18 @@ window[chromehidden~="toolbar"] toolbar:not(#nav-bar):not(#TabsToolbar):not(#pri
 #mainPopupSet {
   min-width: 1px;
 }
+
+%ifdef MOZ_SERVICES_SYNC
+/* Sync notification UI */
+#sync-notifications {
+  -moz-binding: url("chrome://browser/content/sync/notification.xml#notificationbox");
+  overflow-y: visible !important;
+}
+
+#sync-notifications notification {
+  -moz-binding: url("chrome://browser/content/sync/notification.xml#notification");
+}
+%endif
 
 /* History Swipe Animation */
 
@@ -660,47 +648,32 @@ window[chromehidden~="toolbar"] toolbar:not(#nav-bar):not(#TabsToolbar):not(#pri
   background: black;
 }
 
-html|*#fullscreen-warning {
+#full-screen-warning-container {
   position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   z-index: 2147483647 !important;
-  visibility: visible;
-  transition: transform 300ms ease-in;
-  /* To center the warning box horizontally,
-     we use left: 50% with translateX(-50%). */
-  top: 0; left: 50%;
-  transform: translate(-50%, -100%);
-  box-sizing: border-box;
-  width: -moz-max-content;
-  max-width: 95%;
   pointer-events: none;
 }
-html|*#fullscreen-warning:not([hidden]) {
-  display: flex;
-  will-change: transform;
-}
-html|*#fullscreen-warning[onscreen] {
-  transform: translate(-50%, 50px);
-}
-html|*#fullscreen-warning[ontop] {
-  /* Use -10px to hide the border and border-radius on the top */
-  transform: translate(-50%, -10px);
-}
-#main-window[OSXLionFullscreen] html|*#fullscreen-warning[ontop] {
-  transform: translate(-50%, 80px);
+
+#full-screen-warning-container[fade-warning-out] {
+  transition-property: opacity !important;
+  transition-duration: 500ms !important;
+  opacity: 0.0;
 }
 
-html|*#fullscreen-domain-text,
-html|*#fullscreen-generic-text {
+#full-screen-warning-message {
+  /* We must specify a max-width, otherwise word-wrap:break-word doesn't
+     work in descendant <description> and <label> elements. Bug 630864. */
+  max-width: 800px;
+}
+
+#full-screen-domain-text {
   word-wrap: break-word;
   /* We must specify a min-width, otherwise word-wrap:break-word doesn't work. Bug 630864. */
-  min-width: 1px
-}
-html|*#fullscreen-domain-text:not([hidden]) + html|*#fullscreen-generic-text {
-  display: none;
-}
-
-html|*#fullscreen-exit-button {
-  pointer-events: auto;
+  min-width: 1px;
 }
 
 /* ::::: Ctrl-Tab Panel ::::: */
@@ -749,6 +722,11 @@ html|*#fullscreen-exit-button {
   display: none;
 }
 
+#notification-popup .text-link.custom-link {
+  -moz-binding: url("chrome://global/content/bindings/text.xml#text-label");
+  text-decoration: none;
+}
+
 #invalid-form-popup > description {
   max-width: 280px;
 }
@@ -758,11 +736,18 @@ html|*#fullscreen-exit-button {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  -moz-stack-sizing: ignore;
 }
 
 #addon-progress-notification {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#addon-progress-notification");
+}
+
+#identity-request-notification {
+  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#identity-request-notification");
+}
+
+#bad-content-notification {
+  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#bad-content-notification");
 }
 
 #click-to-play-plugins-notification {
@@ -835,6 +820,15 @@ statuspanel[inactive][previoustype=overLink] {
   -moz-box-align: end;
 }
 
+.panel-inner-arrowcontentfooter[footertype="promobox"] {
+  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#promobox");
+}
+
+/* tabview menus */
+.tabview-menuitem {
+  max-width: 32em;
+}
+
 /* gcli */
 
 html|*#gcli-tooltip-frame,
@@ -896,26 +890,31 @@ notification[value="translation"] {
   -moz-binding: url("chrome://browser/content/translation-infobar.xml#translationbar");
 }
 
+/* Loop/ Hello */
+notification[value="loop-sharing-notification"] .close-icon {
+  display: none;
+}
+
 /* Social */
 /* Note the chatbox 'width' values are duplicated in socialchat.xml */
 chatbox {
   -moz-binding: url("chrome://browser/content/socialchat.xml#chatbox");
   transition: height 150ms ease-out, width 150ms ease-out;
-  height: 290px;
-  width: 300px; /* CHAT_WIDTH_OPEN in socialchat.xml */
+  height: 285px;
+  width: 260px; /* CHAT_WIDTH_OPEN in socialchat.xml */
 }
 
 chatbox[customSize] {
-  width: 350px; /* CHAT_WIDTH_OPEN_ALT in socialchat.xml */
+  width: 300px; /* CHAT_WIDTH_OPEN_ALT in socialchat.xml */
 }
 
 #chat-window[customSize] {
-  min-width: 350px;
+  min-width: 300px;
 }
 
 chatbox[customSize="loopChatEnabled"] {
-  /* 430px as defined per UX */
-  height: 430px;
+  /* 325px as defined per UX */
+  height: 325px;
 }
 
 #chat-window[customSize="loopChatEnabled"] {
@@ -924,18 +923,13 @@ chatbox[customSize="loopChatEnabled"] {
 }
 
 chatbox[customSize="loopChatMessageAppended"] {
-  /* 430px as defined per UX */
-  height: 430px;
-}
-
-chatbox[customSize="loopChatDisabledMessageAppended"] {
-  /* 388px as defined per UX */
-  height: 388px;
+  /* 445px as defined per UX */
+  height: 445px;
 }
 
 #chat-window[customSize="loopChatMessageAppended"] {
   /* 445px + 30px top bar height. */
-  min-height: calc(400px + 30px);
+  min-height: calc(445px + 30px);
 }
 
 chatbox[minimized="true"] {
@@ -954,8 +948,8 @@ chatbar {
 }
 
 chatbar[customSize] > .chatbar-innerbox {
-  /* 450px to make room for the maximum custom-size chatbox; currently 'loopChatMessageAppended'. */
-  margin-top: -450px;
+  /* 425px to make room for the maximum custom-size chatbox; currently 'loopChatMessageAppended'. */
+  margin-top: -425px;
 }
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
@@ -978,16 +972,16 @@ chatbar[customSize] > .chatbar-innerbox {
 /* Bug 924050: If we've loaded the indicator, for now we hide it in the menu panel,
    and just show the icon. This is a hack to side-step very weird layout bugs that
    seem to be caused by the indicator stack interacting with the menu panel. */
-#downloads-button[indicator]:not([cui-areatype="menu-panel"]) > .toolbarbutton-badge-stack > image.toolbarbutton-icon,
+#downloads-button[indicator]:not([cui-areatype="menu-panel"]) > image.toolbarbutton-icon,
 #downloads-button[indicator][cui-areatype="menu-panel"] > #downloads-indicator-anchor {
   display: none;
 }
 
-toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbutton-badge-stack > image.toolbarbutton-icon {
+toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > image.toolbarbutton-icon {
   display: -moz-box;
 }
 
-toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-indicator-anchor {
+toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > stack.toolbarbutton-icon {
   display: none;
 }
 
@@ -998,15 +992,55 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-
   visibility: hidden;
 }
 
+/* Hacks for toolbar full and text modes, until bug 573329 removes them */
+
+toolbar[mode="text"] > #downloads-button {
+  display: -moz-box;
+  -moz-box-orient: vertical;
+  -moz-box-pack: center;
+}
+
+toolbar[mode="text"] > #downloads-button > .toolbarbutton-text {
+  -moz-box-ordinal-group: 1;
+}
+
+toolbar[mode="text"] > #downloads-button > .toolbarbutton-icon {
+  display: -moz-box;
+  -moz-box-ordinal-group: 2;
+  visibility: collapse;
+}
+
+/* full screen chat window support */
+chatbar:-moz-full-screen-ancestor,
+chatbox:-moz-full-screen-ancestor  {
+  border: none;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  box-sizing: border-box !important;
+}
+
 /* hide chat chrome when chat is fullscreen */
-#chat-window[sizemode="fullscreen"] chatbox > .chat-titlebar {
+chatbox:-moz-full-screen-ancestor > .chat-titlebar {
   display: none;
 }
 
-/* hide chatbar and sidebar if browser tab is fullscreen */
-#main-window[inFullscreen][inDOMFullscreen] chatbar,
-#main-window[inFullscreen][inDOMFullscreen] #social-sidebar-box,
-#main-window[inFullscreen][inDOMFullscreen] #social-sidebar-splitter {
+/* hide chatbar if browser tab is fullscreen */
+*:-moz-full-screen-ancestor chatbar:not(:-moz-full-screen-ancestor) {
+  display: none;
+}
+
+/* hide sidebar when fullscreen */
+*:-moz-full-screen-ancestor #social-sidebar-box:not(:-moz-full-screen-ancestor) {
   display: none;
 }
 
@@ -1020,7 +1054,7 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-
 
 /* Indent options in optgroups */
 .contentSelectDropdown-ingroup .menu-iconic-text {
-  padding-inline-start: 2em;
+  -moz-padding-start: 2em;
 }
 
 /* Give this menupopup an arrow panel styling */
@@ -1095,7 +1129,6 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
 @media (resolution: 2dppx) {
-  #PanelUI-remotetabs-tabslist > toolbarbutton > .toolbarbutton-icon,
   #PanelUI-recentlyClosedWindows > toolbarbutton > .toolbarbutton-icon,
   #PanelUI-recentlyClosedTabs > toolbarbutton > .toolbarbutton-icon,
   #PanelUI-historyItems > toolbarbutton > .toolbarbutton-icon {
@@ -1259,10 +1292,34 @@ toolbarpaletteitem[place="palette"][hidden] {
   animation-duration: 2s;
 }
 
+#abouthome-search-panel > .panel-arrowcontainer > .panel-arrowcontent {
+  padding: 0;
+  font-size: 110%;
+}
+
+#abouthome-search-panel-manage {
+  padding: 4px 24px;
+}
+
+#abouthome-search-panel-manage > label {
+  padding: 0;
+  margin: 0;
+}
+
 /* Combined context-menu items */
 #context-navigation > .menuitem-iconic > .menu-iconic-text,
 #context-navigation > .menuitem-iconic > .menu-accel-container {
   display: none;
+}
+
+/* Tracking protection doorhanger */
+.popup-notification-footer[popupid="bad-content"] {
+  display: none;
+}
+
+.popup-notification-footer[popupid="bad-content"][mixedblockdisabled],
+.popup-notification-footer[popupid="bad-content"][trackingblockdisabled] {
+  display: block;
 }
 
 #login-fill-doorhanger:not([inDetailView]) > #login-fill-clickcapturer {
@@ -1277,8 +1334,26 @@ toolbarpaletteitem[place="palette"][hidden] {
   box-shadow: 0 0 2px 2px rgba(255,0,0,0.4);
 }
 
-.dragfeedback-tab {
-  -moz-appearance: none;
-  opacity: 0.65;
-  -moz-window-shadow: none;
+#password-notification-password::after {
+  color: hsl(0,0%,60%);
+  content: attr(show-content);
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  transition: color 250ms;
+}
+
+#password-notification-password:hover::after {
+  color: hsl(210,100%,50%);
+}
+
+#password-notification-password[focused]::after {
+  content: none;
+}
+
+/* Bug 1175941: Disable the transition on 10.10 due to flickering, possibly due to an OS X bug. */
+@media (-moz-mac-yosemite-theme) {
+  #password-notification-password::after {
+    transition: none;
+  }
 }

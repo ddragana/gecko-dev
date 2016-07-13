@@ -146,6 +146,8 @@ dictionary RTCCodecStats : RTCStats {
   DOMString parameters;            // From SDP description line
 };
 
+callback RTCStatsReportCallback = void (RTCStatsReport obj);
+
 // This is the internal representation of the report in this implementation
 // to be received from c++
 
@@ -171,7 +173,9 @@ dictionary RTCStatsReportInternal {
 // MapClass(DOMString, object)
  JSImplementation="@mozilla.org/dom/rtcstatsreport;1"]
 interface RTCStatsReport {
-  readonly maplike<DOMString, object>;
   [ChromeOnly]
   readonly attribute DOMString mozPcid;
+  void forEach(RTCStatsReportCallback callbackFn, optional any thisArg);
+  object get(DOMString key);
+  boolean has(DOMString key);
 };

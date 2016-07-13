@@ -15,11 +15,9 @@
 #include "nsThreadUtils.h"
 #include "nsReadableUtils.h"
 #include "nsIObserverService.h"
-#include "mozilla/Telemetry.h"
-#include "mozilla/ArrayUtils.h"
 
-// MOZ_LOG=LoadManager:5
-mozilla::LazyLogModule gLoadManagerLog("LoadManager");
+// NSPR_LOG_MODULES=LoadManager:5
+PRLogModuleInfo *gLoadManagerLog = nullptr;
 #undef LOG
 #undef LOG_ENABLED
 #define LOG(args) MOZ_LOG(gLoadManagerLog, mozilla::LogLevel::Debug, args)
@@ -46,6 +44,8 @@ LoadManagerSingleton::LoadManagerSingleton(int aLoadMeasurementInterval,
     mHighLoadThreshold(aHighLoadThreshold),
     mLowLoadThreshold(aLowLoadThreshold)
 {
+  if (!gLoadManagerLog)
+    gLoadManagerLog = PR_NewLogModule("LoadManager");
   LOG(("LoadManager - Initializing (%dms x %d, %f, %f)",
        mLoadMeasurementInterval, mAveragingMeasurements,
        mHighLoadThreshold, mLowLoadThreshold));
@@ -53,11 +53,6 @@ LoadManagerSingleton::LoadManagerSingleton(int aLoadMeasurementInterval,
   mLoadMonitor = new LoadMonitor(mLoadMeasurementInterval);
   mLoadMonitor->Init(mLoadMonitor);
   mLoadMonitor->SetLoadChangeCallback(this);
-
-  mLastStateChange = TimeStamp::Now();
-  for (auto &in_state : mTimeInState) {
-    in_state = 0;
-  }
 }
 
 LoadManagerSingleton::~LoadManagerSingleton()
@@ -105,22 +100,21 @@ LoadManagerSingleton::LoadChanged(float aSystemLoad, float aProcesLoad)
   if (mLoadSumMeasurements >= mAveragingMeasurements) {
     double averagedLoad = mLoadSum / (float)mLoadSumMeasurements;
 
-    webrtc::CPULoadState newState = mCurrentState;
+    webrtc::CPULoadState oldState = mCurrentState;
 
     if (mOveruseActive || averagedLoad > mHighLoadThreshold) {
       LOG(("LoadManager - LoadStressed"));
-      newState = webrtc::kLoadStressed;
+      mCurrentState = webrtc::kLoadStressed;
     } else if (averagedLoad < mLowLoadThreshold) {
       LOG(("LoadManager - LoadRelaxed"));
-      newState = webrtc::kLoadRelaxed;
+      mCurrentState = webrtc::kLoadRelaxed;
     } else {
       LOG(("LoadManager - LoadNormal"));
-      newState = webrtc::kLoadNormal;
+      mCurrentState = webrtc::kLoadNormal;
     }
 
-    if (newState != mCurrentState) {
-      LoadHasChanged(newState);
-    }
+    if (oldState != mCurrentState)
+      LoadHasChanged();
 
     mLoadSum = 0;
     mLoadSumMeasurements = 0;
@@ -134,7 +128,8 @@ LoadManagerSingleton::OveruseDetected()
   MutexAutoLock lock(mLock);
   mOveruseActive = true;
   if (mCurrentState != webrtc::kLoadStressed) {
-    LoadHasChanged(webrtc::kLoadStressed);
+    mCurrentState = webrtc::kLoadStressed;
+    LoadHasChanged();
   }
 }
 
@@ -147,18 +142,10 @@ LoadManagerSingleton::NormalUsage()
 }
 
 void
-LoadManagerSingleton::LoadHasChanged(webrtc::CPULoadState aNewState)
+LoadManagerSingleton::LoadHasChanged()
 {
   mLock.AssertCurrentThreadOwns();
-  LOG(("LoadManager - Signaling LoadHasChanged from %d to %d to %d listeners",
-       mCurrentState, aNewState, mObservers.Length()));
-
-  // Record how long we spent in this state for later Telemetry or display
-  TimeStamp now = TimeStamp::Now();
-  mTimeInState[mCurrentState] += (now - mLastStateChange).ToMilliseconds();
-  mLastStateChange = now;
-
-  mCurrentState = aNewState;
+  LOG(("LoadManager - Signaling LoadHasChanged to %d listeners", mObservers.Length()));
   for (size_t i = 0; i < mObservers.Length(); i++) {
     mObservers.ElementAt(i)->onLoadStateChanged(mCurrentState);
   }
@@ -170,6 +157,13 @@ LoadManagerSingleton::AddObserver(webrtc::CPULoadStateObserver * aObserver)
   LOG(("LoadManager - Adding Observer"));
   MutexAutoLock lock(mLock);
   mObservers.AppendElement(aObserver);
+  if (mObservers.Length() == 1) {
+    if (!mLoadMonitor) {
+      mLoadMonitor = new LoadMonitor(mLoadMeasurementInterval);
+      mLoadMonitor->Init(mLoadMonitor);
+      mLoadMonitor->SetLoadChangeCallback(this);
+    }
+  }
 }
 
 void
@@ -182,37 +176,8 @@ LoadManagerSingleton::RemoveObserver(webrtc::CPULoadStateObserver * aObserver)
   }
   if (mObservers.Length() == 0) {
     if (mLoadMonitor) {
-      // Record how long we spent in the final state for later Telemetry or display
-      TimeStamp now = TimeStamp::Now();
-      mTimeInState[mCurrentState] += (now - mLastStateChange).ToMilliseconds();
-
-      float total = 0;
-      for (size_t i = 0; i < MOZ_ARRAY_LENGTH(mTimeInState); i++) {
-        total += mTimeInState[i];
-      }
-      // Don't include short calls; we don't have reasonable load data, and
-      // such short calls rarely reach a stable state.  Keep relatively
-      // short calls separate from longer ones
-      bool log = total > 5*PR_MSEC_PER_SEC;
-      bool small = log && total < 30*PR_MSEC_PER_SEC;
-      if (log) {
-        // Note: We don't care about rounding here; thus total may be < 100
-        Telemetry::Accumulate(small ? Telemetry::WEBRTC_LOAD_STATE_RELAXED_SHORT :
-                                      Telemetry::WEBRTC_LOAD_STATE_RELAXED,
-                              (uint32_t) (mTimeInState[webrtc::CPULoadState::kLoadRelaxed]/total * 100));
-        Telemetry::Accumulate(small ? Telemetry::WEBRTC_LOAD_STATE_NORMAL_SHORT :
-                                      Telemetry::WEBRTC_LOAD_STATE_NORMAL,
-                              (uint32_t) (mTimeInState[webrtc::CPULoadState::kLoadNormal]/total * 100));
-        Telemetry::Accumulate(small ? Telemetry::WEBRTC_LOAD_STATE_STRESSED_SHORT :
-                                      Telemetry::WEBRTC_LOAD_STATE_STRESSED,
-                              (uint32_t) (mTimeInState[webrtc::CPULoadState::kLoadStressed]/total * 100));
-      }
-      for (auto &in_state : mTimeInState) {
-        in_state = 0;
-      }
-
       // Dance to avoid deadlock on mLock!
-      RefPtr<LoadMonitor> loadMonitor = mLoadMonitor.forget();
+      nsRefPtr<LoadMonitor> loadMonitor = mLoadMonitor.forget();
       MutexAutoUnlock unlock(mLock);
 
       loadMonitor->Shutdown();

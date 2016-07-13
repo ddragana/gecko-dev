@@ -34,13 +34,13 @@ function err(file, lineNo, msg) {
 
 function run_test()
 {
-  for (var test of test_array) {
+  for each (var test in test_array) {
     var lineStream = new_line_input_stream(test.file);
     var lineNo = 0;
     var more = false;
     var line = {};
     more = lineStream.readLine(line);
-    for (var check of test.lines) {
+    for each (var check in test.lines) {
       ++lineNo;
       if (lineNo == test.lines.length) {
         if (more) err(test.file, lineNo, "There should be no more data after the last line");

@@ -42,41 +42,37 @@ public:
                       bool ipV6Enable = false, bool disableGQOS = false);
     virtual ~UdpSocket2Windows();
 
-    bool ValidHandle() override;
+    virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE;
 
-    bool SetCallback(CallbackObj, IncomingSocketCallback) override;
+    virtual bool ValidHandle() OVERRIDE;
 
-    bool Bind(const SocketAddress& name) override;
-    bool SetSockopt(int32_t level,
-                    int32_t optname,
-                    const int8_t* optval,
-                    int32_t optlen) override;
+    virtual bool SetCallback(CallbackObj, IncomingSocketCallback) OVERRIDE;
 
-    bool StartReceiving(const uint32_t receiveBuffers) override;
-    inline bool StartReceiving() override { return StartReceiving(8); }
-    bool StopReceiving() override;
+    virtual bool Bind(const SocketAddress& name) OVERRIDE;
+    virtual bool SetSockopt(int32_t level, int32_t optname,
+                            const int8_t* optval, int32_t optlen) OVERRIDE;
 
-    int32_t SendTo(const int8_t* buf,
-                   size_t len,
-                   const SocketAddress& to) override;
+    virtual bool StartReceiving(const uint32_t receiveBuffers) OVERRIDE;
+    virtual inline bool StartReceiving() OVERRIDE {return StartReceiving(8);}
+    virtual bool StopReceiving() OVERRIDE;
 
-    void CloseBlocking() override;
+    virtual int32_t SendTo(const int8_t* buf, int32_t len,
+                           const SocketAddress& to) OVERRIDE;
+
+    virtual void CloseBlocking() OVERRIDE;
 
     SOCKET GetFd() { return _socket;}
 
-    bool SetQos(int32_t serviceType,
-                int32_t tokenRate,
-                int32_t bucketSize,
-                int32_t peekBandwith,
-                int32_t minPolicedSize,
-                int32_t maxSduSize,
-                const SocketAddress& stRemName,
-                int32_t overrideDSCP = 0) override;
+    virtual bool SetQos(int32_t serviceType, int32_t tokenRate,
+                        int32_t bucketSize, int32_t peekBandwith,
+                        int32_t minPolicedSize, int32_t maxSduSize,
+                        const SocketAddress &stRemName,
+                        int32_t overrideDSCP = 0) OVERRIDE;
 
-    int32_t SetTOS(const int32_t serviceType) override;
-    int32_t SetPCP(const int32_t pcp) override;
+    virtual int32_t SetTOS(const int32_t serviceType) OVERRIDE;
+    virtual int32_t SetPCP(const int32_t pcp) OVERRIDE;
 
-    uint32_t ReceiveBuffers() override { return _receiveBuffers.Value(); }
+    virtual uint32_t ReceiveBuffers() OVERRIDE {return _receiveBuffers.Value();}
 
 protected:
     void IOCompleted(PerIoContext* pIOContext, uint32_t ioSize, uint32_t error);

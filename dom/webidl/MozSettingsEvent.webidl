@@ -4,8 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-[Constructor(DOMString type, optional MozSettingsEventInit eventInitDict),
- CheckAnyPermissions="settings-api-read settings-api-write"]
+[Constructor(DOMString type, optional MozSettingsEventInit eventInitDict)]
 interface MozSettingsEvent : Event
 {
   readonly attribute DOMString? settingName;

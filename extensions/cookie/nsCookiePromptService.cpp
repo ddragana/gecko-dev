@@ -28,7 +28,7 @@ nsCookiePromptService::~nsCookiePromptService() {
 }
 
 NS_IMETHODIMP
-nsCookiePromptService::CookieDialog(mozIDOMWindowProxy *aParent,
+nsCookiePromptService::CookieDialog(nsIDOMWindow *aParent,
                                     nsICookie *aCookie,
                                     const nsACString &aHostname,
                                     int32_t aCookiesFromHost,
@@ -59,16 +59,17 @@ nsCookiePromptService::CookieDialog(mozIDOMWindowProxy *aParent,
   if (NS_FAILED(rv)) return rv;
 
   nsCOMPtr<nsISupports> arguments = do_QueryInterface(block);
+  nsCOMPtr<nsIDOMWindow> dialog;
 
-  nsCOMPtr<mozIDOMWindowProxy> parent(aParent);
+  nsCOMPtr<nsIDOMWindow> parent(aParent);
   if (!parent) // if no parent provided, consult the window watcher:
     wwatcher->GetActiveWindow(getter_AddRefs(parent));
 
   if (parent) {
-    auto* privateParent = nsPIDOMWindowOuter::From(parent);
+    nsCOMPtr<nsPIDOMWindow> privateParent(do_QueryInterface(parent));
     if (privateParent)
       privateParent = privateParent->GetPrivateRoot();
-    parent = privateParent;
+    parent = do_QueryInterface(privateParent);
   }
 
   // We're opening a chrome window and passing in a nsIDialogParamBlock. Setting
@@ -80,7 +81,6 @@ nsCookiePromptService::CookieDialog(mozIDOMWindowProxy *aParent,
   // tab containing the permission-requesting page.  This removes confusion
   // about which monitor is displaying the dialog (see bug 470356), but also
   // avoids unwanted tab switches (see bug 405239).
-  nsCOMPtr<mozIDOMWindowProxy> dialog;
   rv = wwatcher->OpenWindow(parent, "chrome://cookie/content/cookieAcceptDialog.xul", "_blank",
                             "centerscreen,chrome,modal,titlebar", arguments,
                             getter_AddRefs(dialog));

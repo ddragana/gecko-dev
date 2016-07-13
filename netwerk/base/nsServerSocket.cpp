@@ -13,12 +13,13 @@
 #include "prio.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include "mozilla/net/DNS.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIFile.h"
 
-namespace mozilla { namespace net {
+using namespace mozilla;
+using namespace mozilla::net;
 
 static NS_DEFINE_CID(kSocketTransportServiceCID, NS_SOCKETTRANSPORTSERVICE_CID);
 
@@ -29,7 +30,10 @@ typedef void (nsServerSocket:: *nsServerSocketFunc)(void);
 static nsresult
 PostEvent(nsServerSocket *s, nsServerSocketFunc func)
 {
-  nsCOMPtr<nsIRunnable> ev = NewRunnableMethod(s, func);
+  nsCOMPtr<nsIRunnable> ev = NS_NewRunnableMethod(s, func);
+  if (!ev)
+    return NS_ERROR_OUT_OF_MEMORY;
+
   if (!gSocketTransportService)
     return NS_ERROR_FAILURE;
 
@@ -125,7 +129,7 @@ nsServerSocket::TryAttach()
   if (!gSocketTransportService->CanAttachSocket())
   {
     nsCOMPtr<nsIRunnable> event =
-      NewRunnableMethod(this, &nsServerSocket::OnMsgAttach);
+      NS_NewRunnableMethod(this, &nsServerSocket::OnMsgAttach);
     if (!event)
       return NS_ERROR_OUT_OF_MEMORY;
 
@@ -154,7 +158,7 @@ void
 nsServerSocket::CreateClientTransport(PRFileDesc* aClientFD,
                                       const NetAddr& aClientAddr)
 {
-  RefPtr<nsSocketTransport> trans = new nsSocketTransport;
+  nsRefPtr<nsSocketTransport> trans = new nsSocketTransport;
   if (NS_WARN_IF(!trans)) {
     mCondition = NS_ERROR_OUT_OF_MEMORY;
     return;
@@ -229,17 +233,15 @@ nsServerSocket::OnSocketDetached(PRFileDesc *fd)
     mListener->OnStopListening(this, mCondition);
 
     // need to atomically clear mListener.  see our Close() method.
-    RefPtr<nsIServerSocketListener> listener = nullptr;
+    nsIServerSocketListener *listener = nullptr;
     {
       MutexAutoLock lock(mLock);
-      listener = mListener.forget();
+      mListener.swap(listener);
     }
-
     // XXX we need to proxy the release to the listener's target thread to work
     // around bug 337492.
-    if (listener) {
-      NS_ProxyRelease(mListenerTarget, listener.forget());
-    }
+    if (listener)
+      NS_ProxyRelease(mListenerTarget, listener);
   }
 }
 
@@ -431,7 +433,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISERVERSOCKETLISTENER
 
-  class OnSocketAcceptedRunnable : public Runnable
+  class OnSocketAcceptedRunnable : public nsRunnable
   {
   public:
     OnSocketAcceptedRunnable(const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,
@@ -450,7 +452,7 @@ public:
     nsCOMPtr<nsISocketTransport> mTransport;
   };
 
-  class OnStopListeningRunnable : public Runnable
+  class OnStopListeningRunnable : public nsRunnable
   {
   public:
     OnStopListeningRunnable(const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,
@@ -481,7 +483,7 @@ NS_IMETHODIMP
 ServerSocketListenerProxy::OnSocketAccepted(nsIServerSocket* aServ,
                                             nsISocketTransport* aTransport)
 {
-  RefPtr<OnSocketAcceptedRunnable> r =
+  nsRefPtr<OnSocketAcceptedRunnable> r =
     new OnSocketAcceptedRunnable(mListener, aServ, aTransport);
   return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
 }
@@ -490,7 +492,7 @@ NS_IMETHODIMP
 ServerSocketListenerProxy::OnStopListening(nsIServerSocket* aServ,
                                            nsresult aStatus)
 {
-  RefPtr<OnStopListeningRunnable> r =
+  nsRefPtr<OnStopListeningRunnable> r =
     new OnStopListeningRunnable(mListener, aServ, aStatus);
   return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
 }
@@ -555,6 +557,3 @@ nsServerSocket::GetAddress(PRNetAddr *aResult)
   memcpy(aResult, &mAddr, sizeof(mAddr));
   return NS_OK;
 }
-
-} // namespace net
-} // namespace mozilla

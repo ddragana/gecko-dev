@@ -8,18 +8,24 @@
 #define mozilla_dom_MessageEvent_h_
 
 #include "mozilla/dom/Event.h"
-#include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/MessagePortList.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsIDOMMessageEvent.h"
+#include "mozilla/dom/MessagePortList.h"
 
 namespace mozilla {
 namespace dom {
 
 struct MessageEventInit;
 class MessagePort;
+class MessagePortBase;
 class MessagePortList;
-class OwningWindowProxyOrMessagePort;
-class WindowProxyOrMessagePort;
+class OwningWindowProxyOrMessagePortOrClient;
+
+namespace workers {
+
+class ServiceWorkerClient;
+
+} // namespace workers
 
 /**
  * Implements the MessageEvent event, used for cross-document messaging and
@@ -28,7 +34,8 @@ class WindowProxyOrMessagePort;
  * See http://www.whatwg.org/specs/web-apps/current-work/#messageevent for
  * further details.
  */
-class MessageEvent final : public Event
+class MessageEvent final : public Event,
+                           public nsIDOMMessageEvent
 {
 public:
   MessageEvent(EventTarget* aOwner,
@@ -38,6 +45,8 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(MessageEvent, Event)
 
+  NS_DECL_NSIDOMMESSAGEEVENT
+
   // Forward to base class
   NS_FORWARD_TO_EVENT
 
@@ -45,9 +54,8 @@ public:
 
   void GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aData,
                ErrorResult& aRv);
-  void GetOrigin(nsAString&) const;
-  void GetLastEventId(nsAString&) const;
-  void GetSource(Nullable<OwningWindowProxyOrMessagePort>& aValue) const;
+
+  void GetSource(Nullable<OwningWindowProxyOrMessagePortOrClient>& aValue) const;
 
   MessagePortList* GetPorts()
   {
@@ -59,7 +67,9 @@ public:
   // Non WebIDL methods
   void SetSource(mozilla::dom::MessagePort* aPort);
 
-  void SetSource(nsPIDOMWindowInner* aWindow)
+  void SetSource(workers::ServiceWorkerClient* aClient);
+
+  void SetSource(nsPIDOMWindow* aWindow)
   {
     mWindowSource = aWindow;
   }
@@ -76,12 +86,6 @@ public:
               const MessageEventInit& aEventInit,
               ErrorResult& aRv);
 
-  void InitMessageEvent(JSContext* aCx, const nsAString& aType, bool aCanBubble,
-                        bool aCancelable, JS::Handle<JS::Value> aData,
-                        const nsAString& aOrigin, const nsAString& aLastEventId,
-                        const Nullable<WindowProxyOrMessagePort>& aSource,
-                        const Nullable<Sequence<OwningNonNull<MessagePort>>>& aPorts);
-
 protected:
   ~MessageEvent();
 
@@ -89,17 +93,13 @@ private:
   JS::Heap<JS::Value> mData;
   nsString mOrigin;
   nsString mLastEventId;
-  RefPtr<nsPIDOMWindowInner> mWindowSource;
-  RefPtr<MessagePort> mPortSource;
-  RefPtr<MessagePortList> mPorts;
+  nsCOMPtr<nsIDOMWindow> mWindowSource;
+  nsRefPtr<MessagePortBase> mPortSource;
+  nsRefPtr<workers::ServiceWorkerClient> mClientSource;
+  nsRefPtr<MessagePortList> mPorts;
 };
 
 } // namespace dom
 } // namespace mozilla
-
-already_AddRefed<mozilla::dom::MessageEvent>
-NS_NewDOMMessageEvent(mozilla::dom::EventTarget* aOwner,
-                      nsPresContext* aPresContext,
-                      mozilla::WidgetEvent* aEvent);
 
 #endif // mozilla_dom_MessageEvent_h_

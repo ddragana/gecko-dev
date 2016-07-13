@@ -32,13 +32,10 @@ class TestClient : public sigslot::has_slots<> {
     size_t size;
   };
 
-  // Default timeout for NextPacket reads.
-  static const int kTimeoutMs = 5000;
-
   // Creates a client that will send and receive with the given socket and
   // will post itself messages with the given thread.
   explicit TestClient(AsyncPacketSocket* socket);
-  ~TestClient() override;
+  ~TestClient();
 
   SocketAddress address() const { return socket_->GetLocalAddress(); }
   SocketAddress remote_address() const { return socket_->GetRemoteAddress(); }
@@ -58,9 +55,9 @@ class TestClient : public sigslot::has_slots<> {
   int SendTo(const char* buf, size_t size, const SocketAddress& dest);
 
   // Returns the next packet received by the client or 0 if none is received
-  // within the specified timeout. The caller must delete the packet
+  // within a reasonable amount of time.  The caller must delete the packet
   // when done with it.
-  Packet* NextPacket(int timeout_ms);
+  Packet* NextPacket();
 
   // Checks that the next packet has the given contents. Returns the remote
   // address that the packet was sent from.
@@ -75,8 +72,7 @@ class TestClient : public sigslot::has_slots<> {
   bool ready_to_send() const;
 
  private:
-  // Timeout for reads when no packet is expected.
-  static const int kNoPacketTimeoutMs = 1000;
+  static const int kTimeout = 1000;
   // Workaround for the fact that AsyncPacketSocket::GetConnState doesn't exist.
   Socket::ConnState GetState();
   // Slot for packets read on the socket.

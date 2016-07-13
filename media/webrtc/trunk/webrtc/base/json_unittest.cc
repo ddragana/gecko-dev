@@ -8,13 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/base/json.h"
-
 #include <vector>
-
 #include "webrtc/base/gunit.h"
-
-namespace rtc {
+#include "webrtc/base/json.h"
 
 static Json::Value in_s("foo");
 static Json::Value in_sn("99");
@@ -279,5 +275,3 @@ TEST(JsonTest, DoubleVectorToFromArray) {
     EXPECT_EQ(in[i], outj[i]);
   }
 }
-
-}  // namespace rtc

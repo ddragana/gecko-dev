@@ -1,35 +1,40 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* $Id: nsPKCS12Blob.cpp,v 1.49 2007/09/05 07:13:46 jwalden%mit.edu Exp $ */
 
 #include "nsPKCS12Blob.h"
 
-#include "ScopedNSSTypes.h"
-#include "mozilla/Casting.h"
-#include "nsCRT.h"
-#include "nsCRTGlue.h"
-#include "nsDirectoryServiceDefs.h"
-#include "nsICertificateDialogs.h"
-#include "nsIDirectoryService.h"
-#include "nsIFile.h"
-#include "nsIInputStream.h"
-#include "nsKeygenHandler.h" // For GetSlotWithMechanism
-#include "nsNSSCertificate.h"
-#include "nsNSSComponent.h"
-#include "nsNSSHelper.h"
-#include "nsNSSShutDown.h"
-#include "nsNetUtil.h"
-#include "nsPK11TokenDB.h"
-#include "nsReadableUtils.h"
-#include "nsString.h"
-#include "nsThreadUtils.h"
 #include "pkix/pkixtypes.h"
+
 #include "prmem.h"
 #include "prprf.h"
+
+#include "nsIFile.h"
+#include "nsNetUtil.h"
+#include "nsIInputStream.h"
+#include "nsIDirectoryService.h"
+#include "nsThreadUtils.h"
+
+#include "nsNSSComponent.h"
+#include "nsNSSHelper.h"
+#include "nsString.h"
+#include "nsReadableUtils.h"
+#include "nsXPIDLString.h"
+#include "nsDirectoryServiceDefs.h"
+#include "nsNSSHelper.h"
+#include "nsNSSCertificate.h"
+#include "nsKeygenHandler.h" //For GetSlotWithMechanism
+#include "nsPK11TokenDB.h"
+#include "nsICertificateDialogs.h"
+#include "nsNSSShutDown.h"
+#include "nsCRT.h"
+
 #include "secerr.h"
 
+extern PRLogModuleInfo* gPIPNSSLog;
+
 using namespace mozilla;
-extern LazyLogModule gPIPNSSLog;
 
 #define PIP_PKCS12_TMPFILENAME   NS_LITERAL_CSTRING(".pip_p12tmp")
 #define PIP_PKCS12_BUFFER_SIZE   2048
@@ -56,13 +61,6 @@ nsPKCS12Blob::~nsPKCS12Blob()
 {
   delete mDigestIterator;
   delete mDigest;
-
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return;
-  }
-
-  shutdown(calledFromObject);
 }
 
 // nsPKCS12Blob::SetToken
@@ -72,15 +70,12 @@ nsresult
 nsPKCS12Blob::SetToken(nsIPK11Token *token)
 {
  nsNSSShutDownPreventionLock locker;
- if (isAlreadyShutDown()) {
-  return NS_ERROR_NOT_AVAILABLE;
- }
  nsresult rv = NS_OK;
  if (token) {
    mToken = token;
  } else {
    PK11SlotInfo *slot;
-   rv = GetSlotWithMechanism(CKM_RSA_PKCS, mUIContext, &slot, locker);
+   rv = GetSlotWithMechanism(CKM_RSA_PKCS, mUIContext,&slot);
    if (NS_FAILED(rv)) {
       mToken = 0;  
    } else {
@@ -147,10 +142,10 @@ nsPKCS12Blob::ImportFromFileHelper(nsIFile *file,
   SEC_PKCS12DecoderContext *dcx = nullptr;
   SECItem unicodePw;
 
-  UniquePK11SlotInfo slot;
+  PK11SlotInfo *slot=nullptr;
   nsXPIDLString tokenName;
   unicodePw.data = nullptr;
-
+  
   aWantRetry = rr_do_not_retry;
 
   if (aImportMode == im_try_zero_length_secitem)
@@ -167,11 +162,11 @@ nsPKCS12Blob::ImportFromFileHelper(nsIFile *file,
       return NS_OK;
     }
   }
-
+  
   mToken->GetTokenName(getter_Copies(tokenName));
   {
     NS_ConvertUTF16toUTF8 tokenNameCString(tokenName);
-    slot = UniquePK11SlotInfo(PK11_FindSlotByName(tokenNameCString.get()));
+    slot = PK11_FindSlotByName(tokenNameCString.get());
   }
   if (!slot) {
     srv = SECFailure;
@@ -179,7 +174,7 @@ nsPKCS12Blob::ImportFromFileHelper(nsIFile *file,
   }
 
   // initialize the decoder
-  dcx = SEC_PKCS12DecoderStart(&unicodePw, slot.get(), nullptr,
+  dcx = SEC_PKCS12DecoderStart(&unicodePw, slot, nullptr,
                                digest_open, digest_close,
                                digest_read, digest_write,
                                this);
@@ -229,9 +224,11 @@ finish:
     {
       handleError(PIP_PKCS12_NSS_ERROR);
     }
-  } else if (NS_FAILED(rv)) {
+  } else if (NS_FAILED(rv)) { 
     handleError(PIP_PKCS12_RESTORE_FAILED);
   }
+  if (slot)
+    PK11_FreeSlot(slot);
   // finish the decoder
   if (dcx)
     SEC_PKCS12DecoderFinish(dcx);
@@ -309,7 +306,7 @@ nsPKCS12Blob::ExportToFile(nsIFile *file,
   for (i=0; i<numCerts; i++) {
     nsNSSCertificate *cert = (nsNSSCertificate *)certs[i];
     // get it as a CERTCertificate XXX
-    UniqueCERTCertificate nssCert(cert->GetCert());
+    ScopedCERTCertificate nssCert(cert->GetCert());
     if (!nssCert) {
       rv = NS_ERROR_FAILURE;
       goto finish;
@@ -412,17 +409,22 @@ finish:
 //
 // For the NSS PKCS#12 library, must convert PRUnichars (shorts) to
 // a buffer of octets.  Must handle byte order correctly.
-nsresult
+// TODO: Is there a mozilla way to do this?  In the string lib?
+void
 nsPKCS12Blob::unicodeToItem(const char16_t *uni, SECItem *item)
 {
-  uint32_t len = NS_strlen(uni) + 1;
-  if (!SECITEM_AllocItem(nullptr, item, sizeof(char16_t) * len)) {
-    return NS_ERROR_OUT_OF_MEMORY;
+  int len = 0;
+  while (uni[len++] != 0);
+  SECITEM_AllocItem(nullptr, item, sizeof(char16_t) * len);
+#ifdef IS_LITTLE_ENDIAN
+  int i = 0;
+  for (i=0; i<len; i++) {
+    item->data[2*i  ] = (unsigned char )(uni[i] << 8);
+    item->data[2*i+1] = (unsigned char )(uni[i]);
   }
-
-  mozilla::NativeEndian::copyAndSwapToBigEndian(item->data, uni, len);
-
-  return NS_OK;
+#else
+  memcpy(item->data, uni, item->len);
+#endif
 }
 
 // newPKCS12FilePassword
@@ -440,9 +442,18 @@ nsPKCS12Blob::newPKCS12FilePassword(SECItem *unicodePw)
                        NS_CERTIFICATEDIALOGS_CONTRACTID);
   if (NS_FAILED(rv)) return rv;
   bool pressedOK;
-  rv = certDialogs->SetPKCS12FilePassword(mUIContext, password, &pressedOK);
+  {
+    nsPSMUITracker tracker;
+    if (tracker.isUIForbidden()) {
+      rv = NS_ERROR_NOT_AVAILABLE;
+    }
+    else {
+      rv = certDialogs->SetPKCS12FilePassword(mUIContext, password, &pressedOK);
+    }
+  }
   if (NS_FAILED(rv) || !pressedOK) return rv;
-  return unicodeToItem(password.get(), unicodePw);
+  unicodeToItem(password.get(), unicodePw);
+  return NS_OK;
 }
 
 // getPKCS12FilePassword
@@ -460,9 +471,18 @@ nsPKCS12Blob::getPKCS12FilePassword(SECItem *unicodePw)
                        NS_CERTIFICATEDIALOGS_CONTRACTID);
   if (NS_FAILED(rv)) return rv;
   bool pressedOK;
-  rv = certDialogs->GetPKCS12FilePassword(mUIContext, password, &pressedOK);
+  {
+    nsPSMUITracker tracker;
+    if (tracker.isUIForbidden()) {
+      rv = NS_ERROR_NOT_AVAILABLE;
+    }
+    else {
+      rv = certDialogs->GetPKCS12FilePassword(mUIContext, password, &pressedOK);
+    }
+  }
   if (NS_FAILED(rv) || !pressedOK) return rv;
-  return unicodeToItem(password.get(), unicodePw);
+  unicodeToItem(password.get(), unicodePw);
+  return NS_OK;
 }
 
 // inputToDecoder
@@ -514,9 +534,9 @@ nsPKCS12Blob::inputToDecoder(SEC_PKCS12DecoderContext *dcx, nsIFile *file)
 SECStatus
 nsPKCS12Blob::digest_open(void *arg, PRBool reading)
 {
-  auto cx = static_cast<nsPKCS12Blob*>(arg);
+  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
   NS_ENSURE_TRUE(cx, SECFailure);
-
+  
   if (reading) {
     NS_ENSURE_TRUE(cx->mDigest, SECFailure);
 
@@ -549,17 +569,17 @@ nsPKCS12Blob::digest_open(void *arg, PRBool reading)
 SECStatus
 nsPKCS12Blob::digest_close(void *arg, PRBool remove_it)
 {
-  auto cx = static_cast<nsPKCS12Blob*>(arg);
+  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
   NS_ENSURE_TRUE(cx, SECFailure);
 
   delete cx->mDigestIterator;
   cx->mDigestIterator = nullptr;
 
-  if (remove_it) {
+  if (remove_it) {  
     delete cx->mDigest;
     cx->mDigest = nullptr;
   }
-
+  
   return SECSuccess;
 }
 
@@ -568,7 +588,7 @@ nsPKCS12Blob::digest_close(void *arg, PRBool remove_it)
 int
 nsPKCS12Blob::digest_read(void *arg, unsigned char *buf, unsigned long len)
 {
-  auto cx = static_cast<nsPKCS12Blob*>(arg);
+  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
   NS_ENSURE_TRUE(cx, SECFailure);
   NS_ENSURE_TRUE(cx->mDigest, SECFailure);
 
@@ -576,13 +596,13 @@ nsPKCS12Blob::digest_read(void *arg, unsigned char *buf, unsigned long len)
   NS_ENSURE_TRUE(cx->mDigestIterator, SECFailure);
 
   unsigned long available = cx->mDigestIterator->size_forward();
-
+  
   if (len > available)
     len = available;
 
   memcpy(buf, cx->mDigestIterator->get(), len);
   cx->mDigestIterator->advance(len);
-
+  
   return len;
 }
 
@@ -591,16 +611,16 @@ nsPKCS12Blob::digest_read(void *arg, unsigned char *buf, unsigned long len)
 int
 nsPKCS12Blob::digest_write(void *arg, unsigned char *buf, unsigned long len)
 {
-  auto cx = static_cast<nsPKCS12Blob*>(arg);
+  nsPKCS12Blob *cx = reinterpret_cast<nsPKCS12Blob *>(arg);
   NS_ENSURE_TRUE(cx, SECFailure);
   NS_ENSURE_TRUE(cx->mDigest, SECFailure);
 
   // make sure we are in write mode, read iterator has not yet been allocated
   NS_ENSURE_FALSE(cx->mDigestIterator, SECFailure);
-
-  cx->mDigest->Append(BitwiseCast<char*, unsigned char*>(buf),
-                      static_cast<uint32_t>(len));
-
+  
+  cx->mDigest->Append(reinterpret_cast<char *>(buf),
+                     static_cast<uint32_t>(len));
+  
   return len;
 }
 
@@ -646,9 +666,10 @@ nsPKCS12Blob::nickname_collision(SECItem *oldNick, PRBool *cancel, void *wincx)
     // without a corresponding cert.
     //  XXX If a user imports *many* certs without the 'friendly name'
     //      attribute, then this may take a long time.  :(
-    nickname = nickFromPropC;
     if (count > 1) {
-      nickname.AppendPrintf(" #%d", count);
+      nickname.Adopt(PR_smprintf("%s #%d", nickFromPropC.get(), count));
+    } else {
+      nickname = nickFromPropC;
     }
     CERTCertificate *cert = CERT_FindCertByNickname(CERT_GetDefaultCertDB(),
                                            const_cast<char*>(nickname.get()));

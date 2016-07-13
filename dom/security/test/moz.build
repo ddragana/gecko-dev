@@ -16,7 +16,6 @@ MOCHITEST_MANIFESTS += [
     'cors/mochitest.ini',
     'csp/mochitest.ini',
     'mixedcontentblocker/mochitest.ini',
-    'sri/mochitest.ini',
 ]
 
 MOCHITEST_CHROME_MANIFESTS += [
@@ -24,6 +23,5 @@ MOCHITEST_CHROME_MANIFESTS += [
 ]
 
 BROWSER_CHROME_MANIFESTS += [
-    'contentverifier/browser.ini',
     'csp/browser.ini',
 ]

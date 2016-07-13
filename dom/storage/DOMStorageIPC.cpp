@@ -68,13 +68,13 @@ DOMStorageDBChild::~DOMStorageDBChild()
 }
 
 nsTHashtable<nsCStringHashKey>&
-DOMStorageDBChild::OriginsHavingData()
+DOMStorageDBChild::ScopesHavingData()
 {
-  if (!mOriginsHavingData) {
-    mOriginsHavingData = new nsTHashtable<nsCStringHashKey>;
+  if (!mScopesHavingData) {
+    mScopesHavingData = new nsTHashtable<nsCStringHashKey>;
   }
 
-  return *mOriginsHavingData;
+  return *mScopesHavingData;
 }
 
 nsresult
@@ -102,7 +102,7 @@ DOMStorageDBChild::AsyncPreload(DOMStorageCacheBridge* aCache, bool aPriority)
     // Adding ref to cache for the time of preload.  This ensures a reference to
     // to the cache and that all keys will load into this cache object.
     mLoadingCaches.PutEntry(aCache);
-    SendAsyncPreload(aCache->OriginSuffix(), aCache->OriginNoSuffix(), aPriority);
+    SendAsyncPreload(aCache->Scope(), aPriority);
   } else {
     // No IPC, no love.  But the LoadDone call is expected.
     aCache->LoadDone(NS_ERROR_UNEXPECTED);
@@ -113,7 +113,7 @@ void
 DOMStorageDBChild::AsyncGetUsage(DOMStorageUsageBridge* aUsage)
 {
   if (mIPCOpen) {
-    SendAsyncGetUsage(aUsage->OriginScope());
+    SendAsyncGetUsage(aUsage->Scope());
   }
 }
 
@@ -136,8 +136,7 @@ DOMStorageDBChild::SyncPreload(DOMStorageCacheBridge* aCache, bool aForceSync)
   // case the async preload has already loaded some keys.
   InfallibleTArray<nsString> keys, values;
   nsresult rv;
-  SendPreload(aCache->OriginSuffix(), aCache->OriginNoSuffix(), aCache->LoadedCount(),
-              &keys, &values, &rv);
+  SendPreload(aCache->Scope(), aCache->LoadedCount(), &keys, &values, &rv);
 
   for (uint32_t i = 0; i < keys.Length(); ++i) {
     aCache->LoadItem(keys[i], values[i]);
@@ -155,9 +154,8 @@ DOMStorageDBChild::AsyncAddItem(DOMStorageCacheBridge* aCache,
     return mStatus;
   }
 
-  SendAsyncAddItem(aCache->OriginSuffix(), aCache->OriginNoSuffix(),
-                   nsString(aKey), nsString(aValue));
-  OriginsHavingData().PutEntry(aCache->Origin());
+  SendAsyncAddItem(aCache->Scope(), nsString(aKey), nsString(aValue));
+  ScopesHavingData().PutEntry(aCache->Scope());
   return NS_OK;
 }
 
@@ -170,9 +168,8 @@ DOMStorageDBChild::AsyncUpdateItem(DOMStorageCacheBridge* aCache,
     return mStatus;
   }
 
-  SendAsyncUpdateItem(aCache->OriginSuffix(), aCache->OriginNoSuffix(),
-                      nsString(aKey), nsString(aValue));
-  OriginsHavingData().PutEntry(aCache->Origin());
+  SendAsyncUpdateItem(aCache->Scope(), nsString(aKey), nsString(aValue));
+  ScopesHavingData().PutEntry(aCache->Scope());
   return NS_OK;
 }
 
@@ -184,8 +181,7 @@ DOMStorageDBChild::AsyncRemoveItem(DOMStorageCacheBridge* aCache,
     return mStatus;
   }
 
-  SendAsyncRemoveItem(aCache->OriginSuffix(), aCache->OriginNoSuffix(),
-                      nsString(aKey));
+  SendAsyncRemoveItem(aCache->Scope(), nsString(aKey));
   return NS_OK;
 }
 
@@ -196,47 +192,44 @@ DOMStorageDBChild::AsyncClear(DOMStorageCacheBridge* aCache)
     return mStatus;
   }
 
-  SendAsyncClear(aCache->OriginSuffix(), aCache->OriginNoSuffix());
-  OriginsHavingData().RemoveEntry(aCache->Origin());
+  SendAsyncClear(aCache->Scope());
+  ScopesHavingData().RemoveEntry(aCache->Scope());
   return NS_OK;
 }
 
 bool
-DOMStorageDBChild::ShouldPreloadOrigin(const nsACString& aOrigin)
+DOMStorageDBChild::ShouldPreloadScope(const nsACString& aScope)
 {
-  // Return true if we didn't receive the origins list yet.
+  // Return true if we didn't receive the aScope list yet.
   // I tend to rather preserve a bit of early-after-start performance
-  // than a bit of memory here.
-  return !mOriginsHavingData || mOriginsHavingData->Contains(aOrigin);
+  // then a bit of memory here.
+  return !mScopesHavingData || mScopesHavingData->Contains(aScope);
 }
 
 bool
 DOMStorageDBChild::RecvObserve(const nsCString& aTopic,
-                               const nsString& aOriginAttributesPattern,
-                               const nsCString& aOriginScope)
+                               const nsCString& aScopePrefix)
 {
-  DOMStorageObserver::Self()->Notify(
-    aTopic.get(), aOriginAttributesPattern, aOriginScope);
+  DOMStorageObserver::Self()->Notify(aTopic.get(), aScopePrefix);
   return true;
 }
 
 bool
-DOMStorageDBChild::RecvOriginsHavingData(nsTArray<nsCString>&& aOrigins)
+DOMStorageDBChild::RecvScopesHavingData(nsTArray<nsCString>&& aScopes)
 {
-  for (uint32_t i = 0; i < aOrigins.Length(); ++i) {
-    OriginsHavingData().PutEntry(aOrigins[i]);
+  for (uint32_t i = 0; i < aScopes.Length(); ++i) {
+    ScopesHavingData().PutEntry(aScopes[i]);
   }
 
   return true;
 }
 
 bool
-DOMStorageDBChild::RecvLoadItem(const nsCString& aOriginSuffix,
-                                const nsCString& aOriginNoSuffix,
+DOMStorageDBChild::RecvLoadItem(const nsCString& aScope,
                                 const nsString& aKey,
                                 const nsString& aValue)
 {
-  DOMStorageCache* aCache = mManager->GetCache(aOriginSuffix, aOriginNoSuffix);
+  DOMStorageCache* aCache = mManager->GetCache(aScope);
   if (aCache) {
     aCache->LoadItem(aKey, aValue);
   }
@@ -245,11 +238,9 @@ DOMStorageDBChild::RecvLoadItem(const nsCString& aOriginSuffix,
 }
 
 bool
-DOMStorageDBChild::RecvLoadDone(const nsCString& aOriginSuffix,
-                                const nsCString& aOriginNoSuffix,
-                                const nsresult& aRv)
+DOMStorageDBChild::RecvLoadDone(const nsCString& aScope, const nsresult& aRv)
 {
-  DOMStorageCache* aCache = mManager->GetCache(aOriginSuffix, aOriginNoSuffix);
+  DOMStorageCache* aCache = mManager->GetCache(aScope);
   if (aCache) {
     aCache->LoadDone(aRv);
 
@@ -261,9 +252,9 @@ DOMStorageDBChild::RecvLoadDone(const nsCString& aOriginSuffix,
 }
 
 bool
-DOMStorageDBChild::RecvLoadUsage(const nsCString& aOriginNoSuffix, const int64_t& aUsage)
+DOMStorageDBChild::RecvLoadUsage(const nsCString& aScope, const int64_t& aUsage)
 {
-  RefPtr<DOMStorageUsageBridge> scopeUsage = mManager->GetOriginUsage(aOriginNoSuffix);
+  nsRefPtr<DOMStorageUsageBridge> scopeUsage = mManager->GetScopeUsage(aScope);
   scopeUsage->LoadUsage(aUsage);
   return true;
 }
@@ -300,7 +291,7 @@ DOMStorageDBParent::ReleaseIPDLReference()
 
 namespace {
 
-class SendInitialChildDataRunnable : public Runnable
+class SendInitialChildDataRunnable : public nsRunnable
 {
 public:
   explicit SendInitialChildDataRunnable(DOMStorageDBParent* aParent)
@@ -317,8 +308,8 @@ private:
     DOMStorageDBBridge* db = DOMStorageCache::GetDatabase();
     if (db) {
       InfallibleTArray<nsCString> scopes;
-      db->GetOriginsHavingData(&scopes);
-      mozilla::Unused << mParent->SendOriginsHavingData(scopes);
+      db->GetScopesHavingData(&scopes);
+      mozilla::unused << mParent->SendScopesHavingData(scopes);
     }
 
     // We need to check if the device is in a low disk space situation, so
@@ -326,21 +317,20 @@ private:
     nsCOMPtr<nsIDiskSpaceWatcher> diskSpaceWatcher =
       do_GetService("@mozilla.org/toolkit/disk-space-watcher;1");
     if (!diskSpaceWatcher) {
+      NS_WARNING("Could not get disk information from DiskSpaceWatcher");
       return NS_OK;
     }
-
     bool lowDiskSpace = false;
     diskSpaceWatcher->GetIsDiskFull(&lowDiskSpace);
-
     if (lowDiskSpace) {
-      mozilla::Unused << mParent->SendObserve(
-        nsDependentCString("low-disk-space"), EmptyString(), EmptyCString());
+      mozilla::unused << mParent->SendObserve(
+        nsDependentCString("low-disk-space"), EmptyCString());
     }
 
     return NS_OK;
   }
 
-  RefPtr<DOMStorageDBParent> mParent;
+  nsRefPtr<DOMStorageDBParent> mParent;
 };
 
 } // namespace
@@ -358,7 +348,7 @@ DOMStorageDBParent::DOMStorageDBParent()
 
   // Cannot send directly from here since the channel
   // is not completely built at this moment.
-  RefPtr<SendInitialChildDataRunnable> r =
+  nsRefPtr<SendInitialChildDataRunnable> r =
     new SendInitialChildDataRunnable(this);
   NS_DispatchToCurrentThread(r);
 }
@@ -384,9 +374,9 @@ DOMStorageDBParent::CloneProtocol(Channel* aChannel,
 }
 
 DOMStorageDBParent::CacheParentBridge*
-DOMStorageDBParent::NewCache(const nsACString& aOriginSuffix, const nsACString& aOriginNoSuffix)
+DOMStorageDBParent::NewCache(const nsACString& aScope)
 {
-  return new CacheParentBridge(this, aOriginSuffix, aOriginNoSuffix);
+  return new CacheParentBridge(this, aScope);
 }
 
 void
@@ -396,21 +386,19 @@ DOMStorageDBParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 bool
-DOMStorageDBParent::RecvAsyncPreload(const nsCString& aOriginSuffix,
-                                     const nsCString& aOriginNoSuffix,
-                                     const bool& aPriority)
+DOMStorageDBParent::RecvAsyncPreload(const nsCString& aScope, const bool& aPriority)
 {
   DOMStorageDBBridge* db = DOMStorageCache::StartDatabase();
   if (!db) {
     return false;
   }
 
-  db->AsyncPreload(NewCache(aOriginSuffix, aOriginNoSuffix), aPriority);
+  db->AsyncPreload(NewCache(aScope), aPriority);
   return true;
 }
 
 bool
-DOMStorageDBParent::RecvAsyncGetUsage(const nsCString& aOriginNoSuffix)
+DOMStorageDBParent::RecvAsyncGetUsage(const nsCString& aScope)
 {
   DOMStorageDBBridge* db = DOMStorageCache::StartDatabase();
   if (!db) {
@@ -418,7 +406,7 @@ DOMStorageDBParent::RecvAsyncGetUsage(const nsCString& aOriginNoSuffix)
   }
 
   // The object releases it self in LoadUsage method
-  RefPtr<UsageParentBridge> usage = new UsageParentBridge(this, aOriginNoSuffix);
+  nsRefPtr<UsageParentBridge> usage = new UsageParentBridge(this, aScope);
   db->AsyncGetUsage(usage);
   return true;
 }
@@ -432,15 +420,13 @@ namespace {
 class SyncLoadCacheHelper : public DOMStorageCacheBridge
 {
 public:
-  SyncLoadCacheHelper(const nsCString& aOriginSuffix,
-                      const nsCString& aOriginNoSuffix,
+  SyncLoadCacheHelper(const nsCString& aScope,
                       uint32_t aAlreadyLoadedCount,
                       InfallibleTArray<nsString>* aKeys,
                       InfallibleTArray<nsString>* aValues,
                       nsresult* rv)
   : mMonitor("DOM Storage SyncLoad IPC")
-  , mSuffix(aOriginSuffix)
-  , mOrigin(aOriginNoSuffix)
+  , mScope(aScope)
   , mKeys(aKeys)
   , mValues(aValues)
   , mRv(rv)
@@ -451,12 +437,7 @@ public:
     *mRv = NS_ERROR_UNEXPECTED;
   }
 
-  virtual const nsCString Origin() const
-  {
-    return DOMStorageManager::CreateOrigin(mSuffix, mOrigin);
-  }
-  virtual const nsCString& OriginNoSuffix() const { return mOrigin; }
-  virtual const nsCString& OriginSuffix() const { return mSuffix; }
+  virtual const nsCString& Scope() const { return mScope; }
   virtual bool Loaded() { return mLoaded; }
   virtual uint32_t LoadedCount() { return mLoadedCount; }
   virtual bool LoadItem(const nsAString& aKey, const nsString& aValue)
@@ -492,7 +473,7 @@ public:
 
 private:
   Monitor mMonitor;
-  nsCString mSuffix, mOrigin;
+  nsCString mScope;
   InfallibleTArray<nsString>* mKeys;
   InfallibleTArray<nsString>* mValues;
   nsresult* mRv;
@@ -503,8 +484,7 @@ private:
 } // namespace
 
 bool
-DOMStorageDBParent::RecvPreload(const nsCString& aOriginSuffix,
-                                const nsCString& aOriginNoSuffix,
+DOMStorageDBParent::RecvPreload(const nsCString& aScope,
                                 const uint32_t& aAlreadyLoadedCount,
                                 InfallibleTArray<nsString>* aKeys,
                                 InfallibleTArray<nsString>* aValues,
@@ -515,16 +495,15 @@ DOMStorageDBParent::RecvPreload(const nsCString& aOriginSuffix,
     return false;
   }
 
-  RefPtr<SyncLoadCacheHelper> cache(
-    new SyncLoadCacheHelper(aOriginSuffix, aOriginNoSuffix, aAlreadyLoadedCount, aKeys, aValues, aRv));
+  nsRefPtr<SyncLoadCacheHelper> cache(
+    new SyncLoadCacheHelper(aScope, aAlreadyLoadedCount, aKeys, aValues, aRv));
 
   db->SyncPreload(cache, true);
   return true;
 }
 
 bool
-DOMStorageDBParent::RecvAsyncAddItem(const nsCString& aOriginSuffix,
-                                     const nsCString& aOriginNoSuffix,
+DOMStorageDBParent::RecvAsyncAddItem(const nsCString& aScope,
                                      const nsString& aKey,
                                      const nsString& aValue)
 {
@@ -533,17 +512,16 @@ DOMStorageDBParent::RecvAsyncAddItem(const nsCString& aOriginSuffix,
     return false;
   }
 
-  nsresult rv = db->AsyncAddItem(NewCache(aOriginSuffix, aOriginNoSuffix), aKey, aValue);
+  nsresult rv = db->AsyncAddItem(NewCache(aScope), aKey, aValue);
   if (NS_FAILED(rv) && mIPCOpen) {
-    mozilla::Unused << SendError(rv);
+    mozilla::unused << SendError(rv);
   }
 
   return true;
 }
 
 bool
-DOMStorageDBParent::RecvAsyncUpdateItem(const nsCString& aOriginSuffix,
-                                        const nsCString& aOriginNoSuffix,
+DOMStorageDBParent::RecvAsyncUpdateItem(const nsCString& aScope,
                                         const nsString& aKey,
                                         const nsString& aValue)
 {
@@ -552,17 +530,16 @@ DOMStorageDBParent::RecvAsyncUpdateItem(const nsCString& aOriginSuffix,
     return false;
   }
 
-  nsresult rv = db->AsyncUpdateItem(NewCache(aOriginSuffix, aOriginNoSuffix), aKey, aValue);
+  nsresult rv = db->AsyncUpdateItem(NewCache(aScope), aKey, aValue);
   if (NS_FAILED(rv) && mIPCOpen) {
-    mozilla::Unused << SendError(rv);
+    mozilla::unused << SendError(rv);
   }
 
   return true;
 }
 
 bool
-DOMStorageDBParent::RecvAsyncRemoveItem(const nsCString& aOriginSuffix,
-                                        const nsCString& aOriginNoSuffix,
+DOMStorageDBParent::RecvAsyncRemoveItem(const nsCString& aScope,
                                         const nsString& aKey)
 {
   DOMStorageDBBridge* db = DOMStorageCache::StartDatabase();
@@ -570,26 +547,25 @@ DOMStorageDBParent::RecvAsyncRemoveItem(const nsCString& aOriginSuffix,
     return false;
   }
 
-  nsresult rv = db->AsyncRemoveItem(NewCache(aOriginSuffix, aOriginNoSuffix), aKey);
+  nsresult rv = db->AsyncRemoveItem(NewCache(aScope), aKey);
   if (NS_FAILED(rv) && mIPCOpen) {
-    mozilla::Unused << SendError(rv);
+    mozilla::unused << SendError(rv);
   }
 
   return true;
 }
 
 bool
-DOMStorageDBParent::RecvAsyncClear(const nsCString& aOriginSuffix,
-                                   const nsCString& aOriginNoSuffix)
+DOMStorageDBParent::RecvAsyncClear(const nsCString& aScope)
 {
   DOMStorageDBBridge* db = DOMStorageCache::StartDatabase();
   if (!db) {
     return false;
   }
 
-  nsresult rv = db->AsyncClear(NewCache(aOriginSuffix, aOriginNoSuffix));
+  nsresult rv = db->AsyncClear(NewCache(aScope));
   if (NS_FAILED(rv) && mIPCOpen) {
-    mozilla::Unused << SendError(rv);
+    mozilla::unused << SendError(rv);
   }
 
   return true;
@@ -611,17 +587,15 @@ DOMStorageDBParent::RecvAsyncFlush()
 
 nsresult
 DOMStorageDBParent::Observe(const char* aTopic,
-                            const nsAString& aOriginAttributesPattern,
-                            const nsACString& aOriginScope)
+                            const nsACString& aScopePrefix)
 {
   if (mIPCOpen) {
 #ifdef MOZ_NUWA_PROCESS
     if (!(static_cast<ContentParent*>(Manager())->IsNuwaProcess() &&
           ContentParent::IsNuwaReady())) {
 #endif
-      mozilla::Unused << SendObserve(nsDependentCString(aTopic),
-                                     nsString(aOriginAttributesPattern),
-                                     nsCString(aOriginScope));
+      mozilla::unused << SendObserve(nsDependentCString(aTopic),
+                                     nsCString(aScopePrefix));
 #ifdef MOZ_NUWA_PROCESS
     }
 #endif
@@ -633,7 +607,7 @@ DOMStorageDBParent::Observe(const char* aTopic,
 namespace {
 
 // Results must be sent back on the main thread
-class LoadRunnable : public Runnable
+class LoadRunnable : public nsRunnable
 {
 public:
   enum TaskType {
@@ -643,34 +617,30 @@ public:
 
   LoadRunnable(DOMStorageDBParent* aParent,
                TaskType aType,
-               const nsACString& aOriginSuffix,
-               const nsACString& aOriginNoSuffix,
+               const nsACString& aScope,
                const nsAString& aKey = EmptyString(),
                const nsAString& aValue = EmptyString())
   : mParent(aParent)
   , mType(aType)
-  , mSuffix(aOriginSuffix)
-  , mOrigin(aOriginNoSuffix)
+  , mScope(aScope)
   , mKey(aKey)
   , mValue(aValue)
   { }
 
   LoadRunnable(DOMStorageDBParent* aParent,
                TaskType aType,
-               const nsACString& aOriginSuffix,
-               const nsACString& aOriginNoSuffix,
+               const nsACString& aScope,
                nsresult aRv)
   : mParent(aParent)
   , mType(aType)
-  , mSuffix(aOriginSuffix)
-  , mOrigin(aOriginNoSuffix)
+  , mScope(aScope)
   , mRv(aRv)
   { }
 
 private:
-  RefPtr<DOMStorageDBParent> mParent;
+  nsRefPtr<DOMStorageDBParent> mParent;
   TaskType mType;
-  nsCString mSuffix, mOrigin;
+  nsCString mScope;
   nsString mKey;
   nsString mValue;
   nsresult mRv;
@@ -684,10 +654,10 @@ private:
     switch (mType)
     {
     case loadItem:
-      mozilla::Unused << mParent->SendLoadItem(mSuffix, mOrigin, mKey, mValue);
+      mozilla::unused << mParent->SendLoadItem(mScope, mKey, mValue);
       break;
     case loadDone:
-      mozilla::Unused << mParent->SendLoadDone(mSuffix, mOrigin, mRv);
+      mozilla::unused << mParent->SendLoadDone(mScope, mRv);
       break;
     }
 
@@ -699,12 +669,6 @@ private:
 
 // DOMStorageDBParent::CacheParentBridge
 
-const nsCString
-DOMStorageDBParent::CacheParentBridge::Origin() const
-{
-  return DOMStorageManager::CreateOrigin(mOriginSuffix, mOriginNoSuffix);
-}
-
 bool
 DOMStorageDBParent::CacheParentBridge::LoadItem(const nsAString& aKey, const nsString& aValue)
 {
@@ -714,8 +678,8 @@ DOMStorageDBParent::CacheParentBridge::LoadItem(const nsAString& aKey, const nsS
 
   ++mLoadedCount;
 
-  RefPtr<LoadRunnable> r =
-    new LoadRunnable(mParent, LoadRunnable::loadItem, mOriginSuffix, mOriginNoSuffix, aKey, aValue);
+  nsRefPtr<LoadRunnable> r =
+    new LoadRunnable(mParent, LoadRunnable::loadItem, mScope, aKey, aValue);
   NS_DispatchToMainThread(r);
   return true;
 }
@@ -730,8 +694,8 @@ DOMStorageDBParent::CacheParentBridge::LoadDone(nsresult aRv)
 
   mLoaded = true;
 
-  RefPtr<LoadRunnable> r =
-    new LoadRunnable(mParent, LoadRunnable::loadDone, mOriginSuffix, mOriginNoSuffix, aRv);
+  nsRefPtr<LoadRunnable> r =
+    new LoadRunnable(mParent, LoadRunnable::loadDone, mScope, aRv);
   NS_DispatchToMainThread(r);
 }
 
@@ -746,12 +710,12 @@ DOMStorageDBParent::CacheParentBridge::LoadWait()
 
 namespace {
 
-class UsageRunnable : public Runnable
+class UsageRunnable : public nsRunnable
 {
 public:
-  UsageRunnable(DOMStorageDBParent* aParent, const nsACString& aOriginScope, const int64_t& aUsage)
+  UsageRunnable(DOMStorageDBParent* aParent, const nsACString& aScope, const int64_t& aUsage)
   : mParent(aParent)
-  , mOriginScope(aOriginScope)
+  , mScope(aScope)
   , mUsage(aUsage)
   {}
 
@@ -762,12 +726,12 @@ private:
       return NS_OK;
     }
 
-    mozilla::Unused << mParent->SendLoadUsage(mOriginScope, mUsage);
+    mozilla::unused << mParent->SendLoadUsage(mScope, mUsage);
     return NS_OK;
   }
 
-  RefPtr<DOMStorageDBParent> mParent;
-  nsCString mOriginScope;
+  nsRefPtr<DOMStorageDBParent> mParent;
+  nsCString mScope;
   int64_t mUsage;
 };
 
@@ -776,7 +740,7 @@ private:
 void
 DOMStorageDBParent::UsageParentBridge::LoadUsage(const int64_t aUsage)
 {
-  RefPtr<UsageRunnable> r = new UsageRunnable(mParent, mOriginScope, aUsage);
+  nsRefPtr<UsageRunnable> r = new UsageRunnable(mParent, mScope, aUsage);
   NS_DispatchToMainThread(r);
 }
 

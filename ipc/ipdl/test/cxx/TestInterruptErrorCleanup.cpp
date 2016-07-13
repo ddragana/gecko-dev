@@ -1,6 +1,5 @@
 #include "TestInterruptErrorCleanup.h"
 
-#include "base/task.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/Mutex.h"
 
@@ -45,6 +44,7 @@ void DeleteTheWorld()
     MutexAutoLock lock(mutex);
 
     XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(DeleteSubprocess, &mutex, &cvar));
 
     cvar.Wait();
@@ -101,7 +101,7 @@ TestInterruptErrorCleanupParent::Main()
     // errors/crashes.
 
     MessageLoop::current()->PostTask(
-        NewRunnableFunction(DeleteTheWorld));
+        FROM_HERE, NewRunnableFunction(DeleteTheWorld));
 
     // it's a failure if this *succeeds*
     if (CallError())
@@ -118,7 +118,7 @@ TestInterruptErrorCleanupParent::Main()
     // notification enqueued by AsyncChannel, because that event is
     // enqueued within the same mutex that ends up signaling the
     // wakeup-on-error of |CallError()| above
-    MessageLoop::current()->PostTask(NewRunnableFunction(Done));
+    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableFunction(Done));
 }
 
 void

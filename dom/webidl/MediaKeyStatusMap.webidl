@@ -13,17 +13,24 @@
 enum MediaKeyStatus {
   "usable",
   "expired",
-  "released",
-  "output-restricted",
   "output-downscaled",
-  "status-pending",
+  "output-not-allowed",
   "internal-error"
 };
 
 [Pref="media.eme.apiVisible"]
 interface MediaKeyStatusMap {
-  iterable<ArrayBuffer,MediaKeyStatus>;
+  [Throws]
   readonly attribute unsigned long size;
-  boolean has (BufferSource keyId);
-  MediaKeyStatus get (BufferSource keyId);
+
+  [Throws]
+  object keys();
+
+  [Throws]
+  object values();
+
+  [Throws]
+  object entries();
+
+  // XXX: forEach, @@iterator
 };

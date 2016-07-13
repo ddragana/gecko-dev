@@ -14,10 +14,11 @@
 #include "nsString.h"
 #include "prtime.h"
 
+class nsProxyInfo;
+class nsHttpChannel;
+
 namespace mozilla {
 namespace net {
-
-class nsProxyInfo;
 
 class NullHttpChannel final
   : public nsINullChannel

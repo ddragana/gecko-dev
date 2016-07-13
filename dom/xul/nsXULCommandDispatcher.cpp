@@ -37,13 +37,16 @@
 
 using namespace mozilla;
 
-static LazyLogModule gCommandLog("nsXULCommandDispatcher");
+static PRLogModuleInfo* gCommandLog;
 
 ////////////////////////////////////////////////////////////////////////
 
 nsXULCommandDispatcher::nsXULCommandDispatcher(nsIDocument* aDocument)
     : mDocument(aDocument), mUpdaters(nullptr)
 {
+
+  if (! gCommandLog)
+    gCommandLog = PR_NewLogModule("nsXULCommandDispatcher");
 }
 
 nsXULCommandDispatcher::~nsXULCommandDispatcher()
@@ -93,7 +96,8 @@ already_AddRefed<nsPIWindowRoot>
 nsXULCommandDispatcher::GetWindowRoot()
 {
   if (mDocument) {
-    if (nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetWindow()) {
+    nsCOMPtr<nsPIDOMWindow> window(mDocument->GetWindow());
+    if (window) {
       return window->GetTopWindowRoot();
     }
   }
@@ -102,17 +106,17 @@ nsXULCommandDispatcher::GetWindowRoot()
 }
 
 nsIContent*
-nsXULCommandDispatcher::GetRootFocusedContentAndWindow(nsPIDOMWindowOuter** aWindow)
+nsXULCommandDispatcher::GetRootFocusedContentAndWindow(nsPIDOMWindow** aWindow)
 {
   *aWindow = nullptr;
 
-  if (!mDocument) {
-    return nullptr;
-  }
-
-  if (nsCOMPtr<nsPIDOMWindowOuter> win = mDocument->GetWindow()) {
-    if (nsCOMPtr<nsPIDOMWindowOuter> rootWindow = win->GetPrivateRoot()) {
-      return nsFocusManager::GetFocusedDescendant(rootWindow, true, aWindow);
+  if (mDocument) {
+    nsCOMPtr<nsPIDOMWindow> win = mDocument->GetWindow();
+    if (win) {
+      nsCOMPtr<nsPIDOMWindow> rootWindow = win->GetPrivateRoot();
+      if (rootWindow) {
+        return nsFocusManager::GetFocusedDescendant(rootWindow, true, aWindow);
+      }
     }
   }
 
@@ -124,15 +128,14 @@ nsXULCommandDispatcher::GetFocusedElement(nsIDOMElement** aElement)
 {
   *aElement = nullptr;
 
-  nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+  nsCOMPtr<nsPIDOMWindow> focusedWindow;
   nsIContent* focusedContent =
     GetRootFocusedContentAndWindow(getter_AddRefs(focusedWindow));
   if (focusedContent) {
     CallQueryInterface(focusedContent, aElement);
 
     // Make sure the caller can access the focused element.
-    nsCOMPtr<nsINode> node = do_QueryInterface(*aElement);
-    if (!node || !nsContentUtils::SubjectPrincipalOrSystemIfNativeCaller()->Subsumes(node->NodePrincipal())) {
+    if (!nsContentUtils::CanCallerAccess(*aElement)) {
       // XXX This might want to return null, but we use that return value
       // to mean "there is no focused element," so to be clear, throw an
       // exception.
@@ -145,22 +148,24 @@ nsXULCommandDispatcher::GetFocusedElement(nsIDOMElement** aElement)
 }
 
 NS_IMETHODIMP
-nsXULCommandDispatcher::GetFocusedWindow(mozIDOMWindowProxy** aWindow)
+nsXULCommandDispatcher::GetFocusedWindow(nsIDOMWindow** aWindow)
 {
   *aWindow = nullptr;
 
-  nsCOMPtr<nsPIDOMWindowOuter> window;
+  nsCOMPtr<nsPIDOMWindow> window;
   GetRootFocusedContentAndWindow(getter_AddRefs(window));
   if (!window)
     return NS_OK;
 
   // Make sure the caller can access this window. The caller can access this
   // window iff it can access the document.
-  nsCOMPtr<nsIDocument> doc = window->GetDoc();
+  nsCOMPtr<nsIDOMDocument> domdoc;
+  nsresult rv = window->GetDocument(getter_AddRefs(domdoc));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   // Note: If there is no document, then this window has been cleared and
   // there's nothing left to protect, so let the window pass through.
-  if (doc && !nsContentUtils::CanCallerAccess(doc))
+  if (domdoc && !nsContentUtils::CanCallerAccess(domdoc))
     return NS_ERROR_DOM_SECURITY_ERR;
 
   window.forget(aWindow);
@@ -177,17 +182,17 @@ nsXULCommandDispatcher::SetFocusedElement(nsIDOMElement* aElement)
     return fm->SetFocus(aElement, 0);
 
   // if aElement is null, clear the focus in the currently focused child window
-  nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+  nsCOMPtr<nsPIDOMWindow> focusedWindow;
   GetRootFocusedContentAndWindow(getter_AddRefs(focusedWindow));
   return fm->ClearFocus(focusedWindow);
 }
 
 NS_IMETHODIMP
-nsXULCommandDispatcher::SetFocusedWindow(mozIDOMWindowProxy* aWindow)
+nsXULCommandDispatcher::SetFocusedWindow(nsIDOMWindow* aWindow)
 {
   NS_ENSURE_TRUE(aWindow, NS_OK); // do nothing if set to null
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = nsPIDOMWindowOuter::From(aWindow);
+  nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aWindow));
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
@@ -214,7 +219,7 @@ nsXULCommandDispatcher::AdvanceFocus()
 NS_IMETHODIMP
 nsXULCommandDispatcher::RewindFocus()
 {
-  nsCOMPtr<nsPIDOMWindowOuter> win;
+  nsCOMPtr<nsPIDOMWindow> win;
   GetRootFocusedContentAndWindow(getter_AddRefs(win));
 
   nsCOMPtr<nsIDOMElement> result;
@@ -228,7 +233,7 @@ nsXULCommandDispatcher::RewindFocus()
 NS_IMETHODIMP
 nsXULCommandDispatcher::AdvanceFocusIntoSubtree(nsIDOMElement* aElt)
 {
-  nsCOMPtr<nsPIDOMWindowOuter> win;
+  nsCOMPtr<nsPIDOMWindow> win;
   GetRootFocusedContentAndWindow(getter_AddRefs(win));
 
   nsCOMPtr<nsIDOMElement> result;
@@ -305,7 +310,11 @@ nsXULCommandDispatcher::AddCommandUpdater(nsIDOMElement* aElement,
 #endif
 
   // If we get here, this is a new updater. Append it to the list.
-  *link = new Updater(aElement, aEvents, aTargets);
+  updater = new Updater(aElement, aEvents, aTargets);
+  if (! updater)
+      return NS_ERROR_OUT_OF_MEMORY;
+
+  *link = updater;
   return NS_OK;
 }
 
@@ -392,7 +401,7 @@ nsXULCommandDispatcher::UpdateCommands(const nsAString& aEventName)
     }
 #endif
 
-    WidgetEvent event(true, eXULCommandUpdate);
+    WidgetEvent event(true, NS_XUL_COMMAND_UPDATE);
     EventDispatcher::Dispatch(content, nullptr, &event);
   }
   return NS_OK;

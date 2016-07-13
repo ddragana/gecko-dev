@@ -7,12 +7,11 @@
 #include <algorithm>
 #include "mozilla/Attributes.h"
 #include "mozilla/ReentrantMonitor.h"
-#include "nsIBufferedStreams.h"
 #include "nsICloneableInputStream.h"
 #include "nsIPipe.h"
 #include "nsIEventTarget.h"
 #include "nsISeekableStream.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsSegmentedBuffer.h"
 #include "nsStreamUtils.h"
 #include "nsCOMPtr.h"
@@ -30,10 +29,18 @@ using namespace mozilla;
 #undef LOG
 #endif
 //
-// set MOZ_LOG=nsPipe:5
+// set NSPR_LOG_MODULES=nsPipe:5
 //
-static LazyLogModule sPipeLog("nsPipe");
-#define LOG(args) MOZ_LOG(sPipeLog, mozilla::LogLevel::Debug, args)
+static PRLogModuleInfo*
+GetPipeLog()
+{
+  static PRLogModuleInfo* sLog;
+  if (!sLog) {
+    sLog = PR_NewLogModule("nsPipe");
+  }
+  return sLog;
+}
+#define LOG(args) MOZ_LOG(GetPipeLog(), mozilla::LogLevel::Debug, args)
 
 #define DEFAULT_SEGMENT_SIZE  4096
 #define DEFAULT_SEGMENT_COUNT 16
@@ -74,7 +81,9 @@ public:
   inline void NotifyInputReady(nsIAsyncInputStream* aStream,
                                nsIInputStreamCallback* aCallback)
   {
-    mInputList.AppendElement(InputEntry(aStream, aCallback));
+    NS_ASSERTION(!mInputCallback, "already have an input event");
+    mInputStream = aStream;
+    mInputCallback = aCallback;
   }
 
   inline void NotifyOutputReady(nsIAsyncOutputStream* aStream,
@@ -86,22 +95,8 @@ public:
   }
 
 private:
-  struct InputEntry
-  {
-    InputEntry(nsIAsyncInputStream* aStream, nsIInputStreamCallback* aCallback)
-      : mStream(aStream)
-      , mCallback(aCallback)
-    {
-      MOZ_ASSERT(mStream);
-      MOZ_ASSERT(mCallback);
-    }
-
-    nsCOMPtr<nsIAsyncInputStream> mStream;
-    nsCOMPtr<nsIInputStreamCallback> mCallback;
-  };
-
-  nsTArray<InputEntry> mInputList;
-
+  nsCOMPtr<nsIAsyncInputStream>     mInputStream;
+  nsCOMPtr<nsIInputStreamCallback>  mInputCallback;
   nsCOMPtr<nsIAsyncOutputStream>    mOutputStream;
   nsCOMPtr<nsIOutputStreamCallback> mOutputCallback;
 };
@@ -145,7 +140,6 @@ class nsPipeInputStream final
   , public nsISearchableInputStream
   , public nsICloneableInputStream
   , public nsIClassInfo
-  , public nsIBufferedInputStream
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -155,7 +149,6 @@ public:
   NS_DECL_NSISEARCHABLEINPUTSTREAM
   NS_DECL_NSICLONEABLEINPUTSTREAM
   NS_DECL_NSICLASSINFO
-  NS_DECL_NSIBUFFEREDINPUTSTREAM
 
   explicit nsPipeInputStream(nsPipe* aPipe)
     : mPipe(aPipe)
@@ -187,13 +180,8 @@ public:
   // synchronously wait for the pipe to become readable.
   nsresult Wait();
 
-  // These two don't acquire the monitor themselves.  Instead they
-  // expect their caller to have done so and to pass the monitor as
-  // evidence.
-  MonitorAction OnInputReadable(uint32_t aBytesWritten, nsPipeEvents&,
-                                const ReentrantMonitorAutoEnter& ev);
-  MonitorAction OnInputException(nsresult, nsPipeEvents&,
-                                 const ReentrantMonitorAutoEnter& ev);
+  MonitorAction OnInputReadable(uint32_t aBytesWritten, nsPipeEvents&);
+  MonitorAction OnInputException(nsresult, nsPipeEvents&);
 
   nsPipeReadState& ReadState()
   {
@@ -207,18 +195,14 @@ public:
 
   nsresult Status() const;
 
-  // A version of Status() that doesn't acquire the monitor.
-  nsresult Status(const ReentrantMonitorAutoEnter& ev) const;
-
 private:
   virtual ~nsPipeInputStream();
 
-  RefPtr<nsPipe>               mPipe;
+  nsRefPtr<nsPipe>               mPipe;
 
   int64_t                        mLogicalOffset;
   // Individual input streams can be closed without effecting the rest of the
-  // pipe.  So track individual input stream status separately.  |mInputStatus|
-  // is protected by |mPipe->mReentrantMonitor|.
+  // pipe.  So track individual input stream status separately.
   nsresult                       mInputStatus;
   bool                           mBlocking;
 
@@ -360,7 +344,7 @@ private:
   // compatibility we need to be able to consistently return this same
   // object from GetInputStream().  Note, mOriginalInput is also stored
   // in mInputList as a weak ref.
-  RefPtr<nsPipeInputStream> mOriginalInput;
+  nsRefPtr<nsPipeInputStream> mOriginalInput;
 
   ReentrantMonitor    mReentrantMonitor;
   nsSegmentedBuffer   mBuffer;
@@ -369,7 +353,6 @@ private:
   char*               mWriteCursor;
   char*               mWriteLimit;
 
-  // |mStatus| is protected by |mReentrantMonitor|.
   nsresult            mStatus;
   bool                mInited;
 };
@@ -535,10 +518,7 @@ nsPipe::Release()
     delete (this);
     return 0;
   }
-  // Avoid racing on |mOriginalInput| by only looking at it when
-  // the refcount is 1, that is, we are the only pointer (hence only
-  // thread) to access it.
-  if (count == 1 && mOriginalInput) {
+  if (mOriginalInput && count == 1) {
     mOriginalInput = nullptr;
     return 1;
   }
@@ -580,7 +560,7 @@ nsPipe::Init(bool aNonBlockingIn,
 NS_IMETHODIMP
 nsPipe::GetInputStream(nsIAsyncInputStream** aInputStream)
 {
-  RefPtr<nsPipeInputStream> ref = mOriginalInput;
+  nsRefPtr<nsPipeInputStream> ref = mOriginalInput;
   ref.forget(aInputStream);
   return NS_OK;
 }
@@ -882,8 +862,7 @@ nsPipe::AdvanceWriteCursor(uint32_t aBytesWritten)
     // notify input stream that pipe now contains additional data
     bool needNotify = false;
     for (uint32_t i = 0; i < mInputList.Length(); ++i) {
-      if (mInputList[i]->OnInputReadable(aBytesWritten, events, mon)
-          == NotifyMonitor) {
+      if (mInputList[i]->OnInputReadable(aBytesWritten, events) == NotifyMonitor) {
         needNotify = true;
       }
     }
@@ -924,8 +903,7 @@ nsPipe::OnInputStreamException(nsPipeInputStream* aStream, nsresult aReason)
         continue;
       }
 
-      MonitorAction action = mInputList[i]->OnInputException(aReason, events,
-                                                             mon);
+      MonitorAction action = mInputList[i]->OnInputException(aReason, events);
       mInputList.RemoveElementAt(i);
 
       // Notify after element is removed in case we re-enter as a result.
@@ -966,8 +944,7 @@ nsPipe::OnPipeException(nsresult aReason, bool aOutputOnly)
         continue;
       }
 
-      if (mInputList[i]->OnInputException(aReason, events, mon)
-          == NotifyMonitor) {
+      if (mInputList[i]->OnInputException(aReason, events) == NotifyMonitor) {
         needNotify = true;
       }
     }
@@ -989,10 +966,9 @@ nsPipe::CloneInputStream(nsPipeInputStream* aOriginal,
                          nsIInputStream** aCloneOut)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-  RefPtr<nsPipeInputStream> ref = new nsPipeInputStream(*aOriginal);
+  nsRefPtr<nsPipeInputStream> ref = new nsPipeInputStream(*aOriginal);
   mInputList.AppendElement(ref);
-  nsCOMPtr<nsIAsyncInputStream> downcast = ref.forget();
-  downcast.forget(aCloneOut);
+  ref.forget(aCloneOut);
   return NS_OK;
 }
 
@@ -1106,15 +1082,15 @@ nsPipeEvents::~nsPipeEvents()
 {
   // dispatch any pending events
 
-  for (uint32_t i = 0; i < mInputList.Length(); ++i) {
-    mInputList[i].mCallback->OnInputStreamReady(mInputList[i].mStream);
+  if (mInputCallback) {
+    mInputCallback->OnInputStreamReady(mInputStream);
+    mInputCallback = 0;
+    mInputStream = 0;
   }
-  mInputList.Clear();
-
   if (mOutputCallback) {
     mOutputCallback->OnOutputStreamReady(mOutputStream);
-    mOutputCallback = nullptr;
-    mOutputStream = nullptr;
+    mOutputCallback = 0;
+    mOutputStream = 0;
   }
 }
 
@@ -1125,37 +1101,22 @@ nsPipeEvents::~nsPipeEvents()
 NS_IMPL_ADDREF(nsPipeInputStream);
 NS_IMPL_RELEASE(nsPipeInputStream);
 
-NS_INTERFACE_TABLE_HEAD(nsPipeInputStream)
-  NS_INTERFACE_TABLE_BEGIN
-    NS_INTERFACE_TABLE_ENTRY(nsPipeInputStream, nsIAsyncInputStream)
-    NS_INTERFACE_TABLE_ENTRY(nsPipeInputStream, nsISeekableStream)
-    NS_INTERFACE_TABLE_ENTRY(nsPipeInputStream, nsISearchableInputStream)
-    NS_INTERFACE_TABLE_ENTRY(nsPipeInputStream, nsICloneableInputStream)
-    NS_INTERFACE_TABLE_ENTRY(nsPipeInputStream, nsIBufferedInputStream)
-    NS_INTERFACE_TABLE_ENTRY(nsPipeInputStream, nsIClassInfo)
-    NS_INTERFACE_TABLE_ENTRY_AMBIGUOUS(nsPipeInputStream, nsIInputStream,
-                                       nsIAsyncInputStream)
-    NS_INTERFACE_TABLE_ENTRY_AMBIGUOUS(nsPipeInputStream, nsISupports,
-                                       nsIAsyncInputStream)
-  NS_INTERFACE_TABLE_END
-NS_INTERFACE_TABLE_TAIL
+NS_IMPL_QUERY_INTERFACE(nsPipeInputStream,
+                        nsIInputStream,
+                        nsIAsyncInputStream,
+                        nsISeekableStream,
+                        nsISearchableInputStream,
+                        nsICloneableInputStream,
+                        nsIClassInfo)
 
 NS_IMPL_CI_INTERFACE_GETTER(nsPipeInputStream,
                             nsIInputStream,
                             nsIAsyncInputStream,
                             nsISeekableStream,
                             nsISearchableInputStream,
-                            nsICloneableInputStream,
-                            nsIBufferedInputStream)
+                            nsICloneableInputStream)
 
 NS_IMPL_THREADSAFE_CI(nsPipeInputStream)
-
-NS_IMETHODIMP
-nsPipeInputStream::Init(nsIInputStream*, uint32_t)
-{
-  MOZ_CRASH("nsPipeInputStream should never be initialized with "
-            "nsIBufferedInputStream::Init!\n");
-}
 
 uint32_t
 nsPipeInputStream::Available()
@@ -1171,7 +1132,7 @@ nsPipeInputStream::Wait()
 
   ReentrantMonitorAutoEnter mon(mPipe->mReentrantMonitor);
 
-  while (NS_SUCCEEDED(Status(mon)) && (mReadState.mAvailable == 0)) {
+  while (NS_SUCCEEDED(Status()) && (mReadState.mAvailable == 0)) {
     LOG(("III pipe input: waiting for data\n"));
 
     mBlocked = true;
@@ -1179,16 +1140,14 @@ nsPipeInputStream::Wait()
     mBlocked = false;
 
     LOG(("III pipe input: woke up [status=%x available=%u]\n",
-         Status(mon), mReadState.mAvailable));
+         Status(), mReadState.mAvailable));
   }
 
-  return Status(mon) == NS_BASE_STREAM_CLOSED ? NS_OK : Status(mon);
+  return Status() == NS_BASE_STREAM_CLOSED ? NS_OK : Status();
 }
 
 MonitorAction
-nsPipeInputStream::OnInputReadable(uint32_t aBytesWritten,
-                                   nsPipeEvents& aEvents,
-                                   const ReentrantMonitorAutoEnter& ev)
+nsPipeInputStream::OnInputReadable(uint32_t aBytesWritten, nsPipeEvents& aEvents)
 {
   MonitorAction result = DoNotNotifyMonitor;
 
@@ -1207,8 +1166,7 @@ nsPipeInputStream::OnInputReadable(uint32_t aBytesWritten,
 }
 
 MonitorAction
-nsPipeInputStream::OnInputException(nsresult aReason, nsPipeEvents& aEvents,
-                                    const ReentrantMonitorAutoEnter& ev)
+nsPipeInputStream::OnInputException(nsresult aReason, nsPipeEvents& aEvents)
 {
   LOG(("nsPipeInputStream::OnInputException [this=%x reason=%x]\n",
        this, aReason));
@@ -1240,8 +1198,6 @@ nsPipeInputStream::CloseWithStatus(nsresult aReason)
 {
   LOG(("III CloseWithStatus [this=%x reason=%x]\n", this, aReason));
 
-  ReentrantMonitorAutoEnter mon(mPipe->mReentrantMonitor);
-
   if (NS_FAILED(mInputStatus)) {
     return NS_OK;
   }
@@ -1267,8 +1223,8 @@ nsPipeInputStream::Available(uint64_t* aResult)
   ReentrantMonitorAutoEnter mon(mPipe->mReentrantMonitor);
 
   // return error if closed
-  if (!mReadState.mAvailable && NS_FAILED(Status(mon))) {
-    return Status(mon);
+  if (!mReadState.mAvailable && NS_FAILED(Status())) {
+    return Status();
   }
 
   *aResult = (uint64_t)mReadState.mAvailable;
@@ -1319,8 +1275,8 @@ nsPipeInputStream::ReadSegments(nsWriteSegmentFun aWriter,
     while (segment.Length()) {
       writeCount = 0;
 
-      rv = aWriter(static_cast<nsIAsyncInputStream*>(this), aClosure,
-                   segment.Data(), *aReadCount, segment.Length(), &writeCount);
+      rv = aWriter(this, aClosure, segment.Data(), *aReadCount,
+                   segment.Length(), &writeCount);
 
       if (NS_FAILED(rv) || writeCount == 0) {
         aCount = 0;
@@ -1380,7 +1336,7 @@ nsPipeInputStream::AsyncWait(nsIInputStreamCallback* aCallback,
       aCallback = proxy;
     }
 
-    if (NS_FAILED(Status(mon)) ||
+    if (NS_FAILED(Status()) ||
        (mReadState.mAvailable && !(aFlags & WAIT_CLOSURE_ONLY))) {
       // stream is already closed or readable; post event.
       pipeEvents.NotifyInputReady(this, aCallback);
@@ -1406,8 +1362,8 @@ nsPipeInputStream::Tell(int64_t* aOffset)
   ReentrantMonitorAutoEnter mon(mPipe->mReentrantMonitor);
 
   // return error if closed
-  if (!mReadState.mAvailable && NS_FAILED(Status(mon))) {
-    return Status(mon);
+  if (!mReadState.mAvailable && NS_FAILED(Status())) {
+    return Status();
   }
 
   *aOffset = mLogicalOffset;
@@ -1520,16 +1476,9 @@ nsPipeInputStream::Clone(nsIInputStream** aCloneOut)
 }
 
 nsresult
-nsPipeInputStream::Status(const ReentrantMonitorAutoEnter& ev) const
-{
-  return NS_FAILED(mInputStatus) ? mInputStatus : mPipe->mStatus;
-}
-
-nsresult
 nsPipeInputStream::Status() const
 {
-  ReentrantMonitorAutoEnter mon(mPipe->mReentrantMonitor);
-  return Status(mon);
+  return NS_FAILED(mInputStatus) ? mInputStatus : mPipe->mStatus;
 }
 
 nsPipeInputStream::~nsPipeInputStream()

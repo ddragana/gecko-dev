@@ -39,8 +39,8 @@ GetParsingInfo(const GlobalObject& aGlobal,
     return NS_ERROR_FAILURE;
   }
 
-  aInfo.mDocURI = nsCOMPtr<nsIURI>(doc->GetDocumentURI()).get();
-  aInfo.mBaseURI = nsCOMPtr<nsIURI>(doc->GetBaseURI()).get();
+  aInfo.mDocURI = nsCOMPtr<nsIURI>(doc->GetDocumentURI());
+  aInfo.mBaseURI = nsCOMPtr<nsIURI>(doc->GetBaseURI());
   aInfo.mPrincipal = win->GetPrincipal();
   return NS_OK;
 }
@@ -85,9 +85,14 @@ CSS::Supports(const GlobalObject& aGlobal,
 /* static */ void
 CSS::Escape(const GlobalObject& aGlobal,
             const nsAString& aIdent,
-            nsAString& aReturn)
+            nsAString& aReturn,
+            ErrorResult& aRv)
 {
-  nsStyleUtil::AppendEscapedCSSIdent(aIdent, aReturn);
+  bool success = nsStyleUtil::AppendEscapedCSSIdent(aIdent, aReturn);
+
+  if (!success) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_CHARACTER_ERR);
+  }
 }
 
 } // namespace dom

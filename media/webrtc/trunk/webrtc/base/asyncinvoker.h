@@ -69,7 +69,7 @@ namespace rtc {
 class AsyncInvoker : public MessageHandler {
  public:
   AsyncInvoker();
-  ~AsyncInvoker() override;
+  virtual ~AsyncInvoker();
 
   // Call |functor| asynchronously on |thread|, with no callback upon
   // completion. Returns immediately.
@@ -77,8 +77,8 @@ class AsyncInvoker : public MessageHandler {
   void AsyncInvoke(Thread* thread,
                    const FunctorT& functor,
                    uint32 id = 0) {
-    scoped_refptr<AsyncClosure> closure(
-        new RefCountedObject<FireAndForgetAsyncClosure<FunctorT> >(functor));
+    AsyncClosure* closure =
+        new RefCountedObject<FireAndForgetAsyncClosure<FunctorT> >(functor);
     DoInvoke(thread, closure, id);
   }
 
@@ -89,9 +89,9 @@ class AsyncInvoker : public MessageHandler {
                    void (HostT::*callback)(ReturnT),
                    HostT* callback_host,
                    uint32 id = 0) {
-    scoped_refptr<AsyncClosure> closure(
+    AsyncClosure* closure =
         new RefCountedObject<NotifyingAsyncClosure<ReturnT, FunctorT, HostT> >(
-            this, Thread::Current(), functor, callback, callback_host));
+            this, Thread::Current(), functor, callback, callback_host);
     DoInvoke(thread, closure, id);
   }
 
@@ -103,9 +103,9 @@ class AsyncInvoker : public MessageHandler {
                    void (HostT::*callback)(),
                    HostT* callback_host,
                    uint32 id = 0) {
-    scoped_refptr<AsyncClosure> closure(
+    AsyncClosure* closure =
         new RefCountedObject<NotifyingAsyncClosure<void, FunctorT, HostT> >(
-            this, Thread::Current(), functor, callback, callback_host));
+            this, Thread::Current(), functor, callback, callback_host);
     DoInvoke(thread, closure, id);
   }
 
@@ -120,9 +120,8 @@ class AsyncInvoker : public MessageHandler {
   sigslot::signal0<> SignalInvokerDestroyed;
 
  private:
-  void OnMessage(Message* msg) override;
-  void DoInvoke(Thread* thread, const scoped_refptr<AsyncClosure>& closure,
-                uint32 id);
+  virtual void OnMessage(Message* msg);
+  void DoInvoke(Thread* thread, AsyncClosure* closure, uint32 id);
 
   bool destroying_;
 

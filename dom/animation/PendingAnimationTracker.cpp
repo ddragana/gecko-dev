@@ -63,7 +63,6 @@ PendingAnimationTracker::TriggerPendingAnimationsOnNextTick(const TimeStamp&
       // itself on the next tick where it has a timeline.
       if (!timeline) {
         iter.Remove();
-        continue;
       }
 
       // When the timeline's refresh driver is under test control, its values

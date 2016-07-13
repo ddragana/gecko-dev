@@ -19,41 +19,10 @@
 namespace mozilla {
 namespace css {
 
-NS_IMPL_QUERY_INTERFACE(ImportantStyleData, nsIStyleRule)
-NS_IMPL_ADDREF_USING_AGGREGATOR(ImportantStyleData, Declaration())
-NS_IMPL_RELEASE_USING_AGGREGATOR(ImportantStyleData, Declaration())
-
-/* virtual */ void
-ImportantStyleData::MapRuleInfoInto(nsRuleData* aRuleData)
-{
-  Declaration()->MapImportantRuleInfoInto(aRuleData);
-}
-
-/* virtual */ bool
-ImportantStyleData::MightMapInheritedStyleData()
-{
-  return Declaration()->MapsImportantInheritedStyleData();
-}
-
-#ifdef DEBUG
-/* virtual */ void
-ImportantStyleData::List(FILE* out, int32_t aIndent) const
-{
-  // Indent
-  nsAutoCString str;
-  for (int32_t index = aIndent; --index >= 0; ) {
-    str.AppendLiteral("  ");
-  }
-
-  str.AppendLiteral("! important rule\n");
-  fprintf_stderr(out, "%s", str.get());
-}
-#endif
-
 Declaration::Declaration()
   : mImmutable(false)
 {
-  mContainer.mRaw = uintptr_t(0);
+  MOZ_COUNT_CTOR(mozilla::css::Declaration);
 }
 
 Declaration::Declaration(const Declaration& aCopy)
@@ -70,57 +39,12 @@ Declaration::Declaration(const Declaration& aCopy)
         nullptr),
     mImmutable(false)
 {
-  mContainer.mRaw = uintptr_t(0);
+  MOZ_COUNT_CTOR(mozilla::css::Declaration);
 }
 
 Declaration::~Declaration()
 {
-}
-
-NS_INTERFACE_MAP_BEGIN(Declaration)
-  if (aIID.Equals(NS_GET_IID(mozilla::css::Declaration))) {
-    *aInstancePtr = this;
-    NS_ADDREF_THIS();
-    return NS_OK;
-  }
-  else
-  NS_INTERFACE_MAP_ENTRY(nsIStyleRule)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIStyleRule)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_ADDREF(Declaration)
-NS_IMPL_RELEASE(Declaration)
-
-/* virtual */ void
-Declaration::MapRuleInfoInto(nsRuleData* aRuleData)
-{
-  MOZ_ASSERT(mData, "must call only while compressed");
-  mData->MapRuleInfoInto(aRuleData);
-  if (mVariables) {
-    mVariables->MapRuleInfoInto(aRuleData);
-  }
-}
-
-/* virtual */ bool
-Declaration::MightMapInheritedStyleData()
-{
-  MOZ_ASSERT(mData, "must call only while compressed");
-  if (mVariables && mVariables->Count() != 0) {
-    return true;
-  }
-  return mData->HasInheritedStyleData();
-}
-
-bool
-Declaration::MapsImportantInheritedStyleData() const
-{
-  MOZ_ASSERT(mData, "must call only while compressed");
-  MOZ_ASSERT(HasImportantData(), "must only be called for Declarations with "
-                                 "important data");
-  if (mImportantVariables && mImportantVariables->Count() != 0) {
-    return true;
-  }
-  return mImportantData ? mImportantData->HasInheritedStyleData() : false;
+  MOZ_COUNT_DTOR(mozilla::css::Declaration);
 }
 
 void
@@ -146,7 +70,7 @@ Declaration::RemoveProperty(nsCSSProperty aProperty)
 
   if (nsCSSProps::IsShorthand(aProperty)) {
     CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(p, aProperty,
-                                         CSSEnabledState::eForAllContent) {
+                                         nsCSSProps::eEnabledForAllContent) {
       data.ClearLonghandProperty(*p);
       mOrder.RemoveElement(static_cast<uint32_t>(*p));
     }
@@ -201,274 +125,6 @@ Declaration::GetAuthoredValue(nsCSSProperty aProperty, nsAString& aValue) const
   GetValue(aProperty, aValue, nsCSSValue::eAuthorSpecified);
 }
 
-static void
-AppendSingleImageLayerPositionValue(const nsCSSValue& aPositionX,
-                                    const nsCSSValue& aPositionY,
-                                    const nsCSSProperty aTable[],
-                                    nsAString& aValue,
-                                    nsCSSValue::Serialization aSerialization)
-{
-  // We need to make sure that we don't serialize to an invalid 3-value form.
-  // The 3-value form is only valid if both edges are present.
-  const nsCSSValue &xEdge = aPositionX.GetArrayValue()->Item(0);
-  const nsCSSValue &xOffset = aPositionX.GetArrayValue()->Item(1);
-  const nsCSSValue &yEdge = aPositionY.GetArrayValue()->Item(0);
-  const nsCSSValue &yOffset = aPositionY.GetArrayValue()->Item(1);
-  bool xHasEdge = (eCSSUnit_Enumerated == xEdge.GetUnit());
-  bool xHasBoth = xHasEdge && (eCSSUnit_Null != xOffset.GetUnit());
-  bool yHasEdge = (eCSSUnit_Enumerated == yEdge.GetUnit());
-  bool yHasBoth = yHasEdge && (eCSSUnit_Null != yOffset.GetUnit());
-
-  if (yHasBoth && !xHasEdge) {
-    // Output 4-value form by adding the x edge.
-    aValue.AppendLiteral("left ");
-  }
-  aPositionX.AppendToString(aTable[nsStyleImageLayers::positionX],
-                            aValue, aSerialization);
-
-  aValue.Append(char16_t(' '));
-
-  if (xHasBoth && !yHasEdge) {
-    // Output 4-value form by adding the y edge.
-    aValue.AppendLiteral("top ");
-  }
-  aPositionY.AppendToString(aTable[nsStyleImageLayers::positionY],
-                            aValue, aSerialization);
-}
-
-void
-Declaration::GetImageLayerValue(
-                   nsCSSCompressedDataBlock *data,
-                   nsAString& aValue,
-                   nsCSSValue::Serialization aSerialization,
-                   const nsCSSProperty aTable[]) const
-{
-  // We know from our caller that all subproperties were specified.
-  // However, we still can't represent that in the shorthand unless
-  // they're all lists of the same length.  So if they're different
-  // lengths, we need to bail out.
-  // We also need to bail out if an item has background-clip and
-  // background-origin that are different and not the default
-  // values.  (We omit them if they're both default.)
-
-  // Common CSS properties for both background & mask layer.
-  const nsCSSValueList *image =
-    data->ValueFor(aTable[nsStyleImageLayers::image])->GetListValue();
-  const nsCSSValuePairList *repeat =
-    data->ValueFor(aTable[nsStyleImageLayers::repeat])->GetPairListValue();
-  const nsCSSValueList *positionX =
-    data->ValueFor(aTable[nsStyleImageLayers::positionX])->GetListValue();
-  const nsCSSValueList *positionY =
-    data->ValueFor(aTable[nsStyleImageLayers::positionY])->GetListValue();
-  const nsCSSValueList *clip =
-    data->ValueFor(aTable[nsStyleImageLayers::clip])->GetListValue();
-  const nsCSSValueList *origin =
-    data->ValueFor(aTable[nsStyleImageLayers::origin])->GetListValue();
-  const nsCSSValuePairList *size =
-    data->ValueFor(aTable[nsStyleImageLayers::size])->GetPairListValue();
-
-  // Background layer property.
-  const nsCSSValueList *attachment =
-    (aTable[nsStyleImageLayers::attachment] ==  eCSSProperty_UNKNOWN)?
-      nullptr :
-      data->ValueFor(aTable[nsStyleImageLayers::attachment])->GetListValue();
-
-  // Mask layer properties.
-  const nsCSSValueList *composite =
-    (aTable[nsStyleImageLayers::composite] ==  eCSSProperty_UNKNOWN)?
-      nullptr :
-      data->ValueFor(aTable[nsStyleImageLayers::composite])->GetListValue();
-  const nsCSSValueList *mode =
-    (aTable[nsStyleImageLayers::maskMode] ==  eCSSProperty_UNKNOWN)?
-      nullptr :
-      data->ValueFor(aTable[nsStyleImageLayers::maskMode])->GetListValue();
-
-  for (;;) {
-    // Serialize background-color at the beginning of the last item.
-    if (!image->mNext) {
-      if (aTable[nsStyleImageLayers::color] != eCSSProperty_UNKNOWN) {
-        AppendValueToString(aTable[nsStyleImageLayers::color], aValue,
-                            aSerialization);
-        aValue.Append(char16_t(' '));
-      }
-    }
-
-    image->mValue.AppendToString(aTable[nsStyleImageLayers::image], aValue,
-                                 aSerialization);
-
-    aValue.Append(char16_t(' '));
-    repeat->mXValue.AppendToString(aTable[nsStyleImageLayers::repeat], aValue,
-                                   aSerialization);
-    if (repeat->mYValue.GetUnit() != eCSSUnit_Null) {
-      repeat->mYValue.AppendToString(aTable[nsStyleImageLayers::repeat], aValue,
-                                     aSerialization);
-    }
-
-    if (attachment) {
-      aValue.Append(char16_t(' '));
-          attachment->mValue.AppendToString(aTable[nsStyleImageLayers::attachment],
-                                            aValue, aSerialization);
-    }
-
-    aValue.Append(char16_t(' '));
-    AppendSingleImageLayerPositionValue(positionX->mValue, positionY->mValue,
-                                        aTable, aValue, aSerialization);
-
-    if (size->mXValue.GetUnit() != eCSSUnit_Auto ||
-        size->mYValue.GetUnit() != eCSSUnit_Auto) {
-      aValue.Append(char16_t(' '));
-      aValue.Append(char16_t('/'));
-      aValue.Append(char16_t(' '));
-      size->mXValue.AppendToString(aTable[nsStyleImageLayers::size], aValue,
-                                   aSerialization);
-      aValue.Append(char16_t(' '));
-      size->mYValue.AppendToString(aTable[nsStyleImageLayers::size], aValue,
-                                   aSerialization);
-    }
-
-    MOZ_ASSERT(clip->mValue.GetUnit() == eCSSUnit_Enumerated &&
-               origin->mValue.GetUnit() == eCSSUnit_Enumerated,
-               "should not have inherit/initial within list");
-
-    if (clip->mValue.GetIntValue() != NS_STYLE_IMAGELAYER_CLIP_BORDER ||
-        origin->mValue.GetIntValue() != NS_STYLE_IMAGELAYER_ORIGIN_PADDING) {
-#ifdef DEBUG
-      for (size_t i = 0; nsCSSProps::kImageLayerOriginKTable[i].mValue != -1; i++) {
-        // For each keyword & value in kOriginKTable, ensure that
-        // kBackgroundKTable has a matching entry at the same position.
-        MOZ_ASSERT(nsCSSProps::kImageLayerOriginKTable[i].mKeyword ==
-                   nsCSSProps::kBackgroundClipKTable[i].mKeyword);
-        MOZ_ASSERT(nsCSSProps::kImageLayerOriginKTable[i].mValue ==
-                   nsCSSProps::kBackgroundClipKTable[i].mValue);
-      }
-#endif
-      static_assert(NS_STYLE_IMAGELAYER_CLIP_BORDER ==
-                    NS_STYLE_IMAGELAYER_ORIGIN_BORDER &&
-                    NS_STYLE_IMAGELAYER_CLIP_PADDING ==
-                    NS_STYLE_IMAGELAYER_ORIGIN_PADDING &&
-                    NS_STYLE_IMAGELAYER_CLIP_CONTENT ==
-                    NS_STYLE_IMAGELAYER_ORIGIN_CONTENT,
-                    "mask-clip and mask-origin style constants must agree");
-      aValue.Append(char16_t(' '));
-      origin->mValue.AppendToString(aTable[nsStyleImageLayers::origin], aValue,
-                                    aSerialization);
-
-      if (clip->mValue != origin->mValue) {
-        aValue.Append(char16_t(' '));
-        clip->mValue.AppendToString(aTable[nsStyleImageLayers::clip], aValue,
-                                    aSerialization);
-      }
-    }
-
-    if (composite) {
-      aValue.Append(char16_t(' '));
-      composite->mValue.AppendToString(aTable[nsStyleImageLayers::composite],
-                                       aValue, aSerialization);
-    }
-
-    if (mode) {
-      aValue.Append(char16_t(' '));
-      mode->mValue.AppendToString(aTable[nsStyleImageLayers::maskMode],
-                                  aValue, aSerialization);
-    }
-
-    image = image->mNext;
-    repeat = repeat->mNext;
-    positionX = positionX->mNext;
-    positionY = positionY->mNext;
-    clip = clip->mNext;
-    origin = origin->mNext;
-    size = size->mNext;
-    attachment = attachment ? attachment->mNext : nullptr;
-    composite = composite ? composite->mNext : nullptr;
-    mode = mode ? mode->mNext : nullptr;
-
-    if (!image) {
-      // This layer is an background layer
-      if (aTable == nsStyleImageLayers::kBackgroundLayerTable) {
-        if (repeat || positionX || positionY || clip || origin || size ||
-            attachment) {
-          // Uneven length lists, so can't be serialized as shorthand.
-          aValue.Truncate();
-          return;
-        }
-      // This layer is an mask layer
-      } else {
-#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
-        MOZ_ASSERT(aTable == nsStyleImageLayers::kMaskLayerTable);
-#else
-        MOZ_ASSERT_UNREACHABLE("Should never get here when mask-as-shorthand is disable");
-#endif
-        if (repeat || positionX || positionY || clip || origin || size ||
-            composite || mode) {
-          // Uneven length lists, so can't be serialized as shorthand.
-          aValue.Truncate();
-          return;
-        }
-      }
-      break;
-    }
-
-    // This layer is an background layer
-    if (aTable == nsStyleImageLayers::kBackgroundLayerTable) {
-      if (!repeat || !positionX || !positionY || !clip || !origin || !size ||
-          !attachment) {
-        // Uneven length lists, so can't be serialized as shorthand.
-        aValue.Truncate();
-        return;
-      }
-    // This layer is an mask layer
-    } else {
-#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
-      MOZ_ASSERT(aTable == nsStyleImageLayers::kMaskLayerTable);
-#else
-      MOZ_ASSERT_UNREACHABLE("Should never get here when mask-as-shorthand is disable");
-#endif
-      if (!repeat || !positionX || !positionY || !clip || !origin || !size ||
-          !composite || !mode) {
-        // Uneven length lists, so can't be serialized as shorthand.
-        aValue.Truncate();
-        return;
-      }
-    }
-    aValue.Append(char16_t(','));
-    aValue.Append(char16_t(' '));
-  }
-}
-
-void
-Declaration::GetImageLayerPositionValue(
-                   nsCSSCompressedDataBlock *data,
-                   nsAString& aValue,
-                   nsCSSValue::Serialization aSerialization,
-                   const nsCSSProperty aTable[]) const
-{
-  // We know from above that all subproperties were specified.
-  // However, we still can't represent that in the shorthand unless
-  // they're all lists of the same length.  So if they're different
-  // lengths, we need to bail out.
-  const nsCSSValueList *positionX =
-    data->ValueFor(aTable[nsStyleImageLayers::positionX])->GetListValue();
-  const nsCSSValueList *positionY =
-    data->ValueFor(aTable[nsStyleImageLayers::positionY])->GetListValue();
-  for (;;) {
-    AppendSingleImageLayerPositionValue(positionX->mValue, positionY->mValue,
-                                        aTable, aValue, aSerialization);
-    positionX = positionX->mNext;
-    positionY = positionY->mNext;
-
-    if (!positionX || !positionY) {
-      if (positionX || positionY) {
-        // Uneven length lists, so can't be serialized as shorthand.
-        aValue.Truncate();
-      }
-      return;
-    }
-    aValue.Append(char16_t(','));
-    aValue.Append(char16_t(' '));
-  }
-}
-
 void
 Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
                       nsCSSValue::Serialization aSerialization) const
@@ -512,7 +168,7 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
            initialCount = 0, inheritCount = 0, unsetCount = 0,
            matchingTokenStreamCount = 0, nonMatchingTokenStreamCount = 0;
   CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(p, aProperty,
-                                       CSSEnabledState::eForAllContent) {
+                                       nsCSSProps::eEnabledForAllContent) {
     if (*p == eCSSProperty__x_system_font) {
       // The system-font subproperty doesn't count.
       continue;
@@ -584,10 +240,10 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
 
   nsCSSCompressedDataBlock *data = importantCount ? mImportantData : mData;
   switch (aProperty) {
-    case eCSSProperty_margin:
-    case eCSSProperty_padding:
-    case eCSSProperty_border_color:
-    case eCSSProperty_border_style:
+    case eCSSProperty_margin: 
+    case eCSSProperty_padding: 
+    case eCSSProperty_border_color: 
+    case eCSSProperty_border_style: 
     case eCSSProperty_border_width: {
       const nsCSSProperty* subprops =
         nsCSSProps::SubpropertyEntryFor(aProperty);
@@ -706,7 +362,6 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
       }
       // tweak aProperty and fall through
       aProperty = eCSSProperty_border_top;
-      MOZ_FALLTHROUGH;
     }
     case eCSSProperty_border_top:
     case eCSSProperty_border_right:
@@ -739,27 +394,126 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
       break;
     }
     case eCSSProperty_background: {
-      GetImageLayerValue(data, aValue, aSerialization,
-                         nsStyleImageLayers::kBackgroundLayerTable);
+      // We know from above that all subproperties were specified.
+      // However, we still can't represent that in the shorthand unless
+      // they're all lists of the same length.  So if they're different
+      // lengths, we need to bail out.
+      // We also need to bail out if an item has background-clip and
+      // background-origin that are different and not the default
+      // values.  (We omit them if they're both default.)
+      const nsCSSValueList *image =
+        data->ValueFor(eCSSProperty_background_image)->
+        GetListValue();
+      const nsCSSValuePairList *repeat =
+        data->ValueFor(eCSSProperty_background_repeat)->
+        GetPairListValue();
+      const nsCSSValueList *attachment =
+        data->ValueFor(eCSSProperty_background_attachment)->
+        GetListValue();
+      const nsCSSValueList *position =
+        data->ValueFor(eCSSProperty_background_position)->
+        GetListValue();
+      const nsCSSValueList *clip =
+        data->ValueFor(eCSSProperty_background_clip)->
+        GetListValue();
+      const nsCSSValueList *origin =
+        data->ValueFor(eCSSProperty_background_origin)->
+        GetListValue();
+      const nsCSSValuePairList *size =
+        data->ValueFor(eCSSProperty_background_size)->
+        GetPairListValue();
+      for (;;) {
+        // Serialize background-color at the beginning of the last item.
+        if (!image->mNext) {
+          AppendValueToString(eCSSProperty_background_color, aValue,
+                              aSerialization);
+          aValue.Append(char16_t(' '));
+        }
+
+        image->mValue.AppendToString(eCSSProperty_background_image, aValue,
+                                     aSerialization);
+        aValue.Append(char16_t(' '));
+        repeat->mXValue.AppendToString(eCSSProperty_background_repeat, aValue,
+                                       aSerialization);
+        if (repeat->mYValue.GetUnit() != eCSSUnit_Null) {
+          repeat->mYValue.AppendToString(eCSSProperty_background_repeat, aValue,
+                                         aSerialization);
+        }
+        aValue.Append(char16_t(' '));
+        attachment->mValue.AppendToString(eCSSProperty_background_attachment,
+                                          aValue, aSerialization);
+        aValue.Append(char16_t(' '));
+        position->mValue.AppendToString(eCSSProperty_background_position,
+                                        aValue, aSerialization);
+        
+        if (size->mXValue.GetUnit() != eCSSUnit_Auto ||
+            size->mYValue.GetUnit() != eCSSUnit_Auto) {
+          aValue.Append(char16_t(' '));
+          aValue.Append(char16_t('/'));
+          aValue.Append(char16_t(' '));
+          size->mXValue.AppendToString(eCSSProperty_background_size, aValue,
+                                       aSerialization);
+          aValue.Append(char16_t(' '));
+          size->mYValue.AppendToString(eCSSProperty_background_size, aValue,
+                                       aSerialization);
+        }
+
+        MOZ_ASSERT(clip->mValue.GetUnit() == eCSSUnit_Enumerated &&
+                   origin->mValue.GetUnit() == eCSSUnit_Enumerated,
+                   "should not have inherit/initial within list");
+
+        if (clip->mValue.GetIntValue() != NS_STYLE_BG_CLIP_BORDER ||
+            origin->mValue.GetIntValue() != NS_STYLE_BG_ORIGIN_PADDING) {
+          MOZ_ASSERT(nsCSSProps::kKeywordTableTable[
+                       eCSSProperty_background_origin] ==
+                     nsCSSProps::kBackgroundOriginKTable);
+          MOZ_ASSERT(nsCSSProps::kKeywordTableTable[
+                       eCSSProperty_background_clip] ==
+                     nsCSSProps::kBackgroundOriginKTable);
+          static_assert(NS_STYLE_BG_CLIP_BORDER ==
+                        NS_STYLE_BG_ORIGIN_BORDER &&
+                        NS_STYLE_BG_CLIP_PADDING ==
+                        NS_STYLE_BG_ORIGIN_PADDING &&
+                        NS_STYLE_BG_CLIP_CONTENT ==
+                        NS_STYLE_BG_ORIGIN_CONTENT,
+                        "bg-clip and bg-origin style constants must agree");
+          aValue.Append(char16_t(' '));
+          origin->mValue.AppendToString(eCSSProperty_background_origin, aValue,
+                                        aSerialization);
+
+          if (clip->mValue != origin->mValue) {
+            aValue.Append(char16_t(' '));
+            clip->mValue.AppendToString(eCSSProperty_background_clip, aValue,
+                                        aSerialization);
+          }
+        }
+
+        image = image->mNext;
+        repeat = repeat->mNext;
+        attachment = attachment->mNext;
+        position = position->mNext;
+        clip = clip->mNext;
+        origin = origin->mNext;
+        size = size->mNext;
+
+        if (!image) {
+          if (repeat || attachment || position || clip || origin || size) {
+            // Uneven length lists, so can't be serialized as shorthand.
+            aValue.Truncate();
+            return;
+          }
+          break;
+        }
+        if (!repeat || !attachment || !position || !clip || !origin || !size) {
+          // Uneven length lists, so can't be serialized as shorthand.
+          aValue.Truncate();
+          return;
+        }
+        aValue.Append(char16_t(','));
+        aValue.Append(char16_t(' '));
+      }
       break;
     }
-    case eCSSProperty_background_position: {
-      GetImageLayerPositionValue(data, aValue, aSerialization,
-                                 nsStyleImageLayers::kBackgroundLayerTable);
-      break;
-    }
-#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
-    case eCSSProperty_mask: {
-      GetImageLayerValue(data, aValue, aSerialization,
-                         nsStyleImageLayers::kMaskLayerTable);
-      break;
-    }
-    case eCSSProperty_mask_position: {
-      GetImageLayerPositionValue(data, aValue, aSerialization,
-                                 nsStyleImageLayers::kMaskLayerTable);
-      break;
-    }
-#endif
     case eCSSProperty_font: {
       // systemFont might not be present; other values are guaranteed to be
       // available based on the shorthand check at the beginning of the
@@ -829,7 +583,9 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
       } else {
         // properties reset by this shorthand property to their
         // initial values but not represented in its syntax
-        if (sizeAdjust->GetUnit() != eCSSUnit_None ||
+        if (stretch->GetUnit() != eCSSUnit_Enumerated ||
+            stretch->GetIntValue() != NS_STYLE_FONT_STRETCH_NORMAL ||
+            sizeAdjust->GetUnit() != eCSSUnit_None ||
             featureSettings->GetUnit() != eCSSUnit_Normal ||
             languageOverride->GetUnit() != eCSSUnit_Normal ||
             fontKerning->GetIntValue() != NS_FONT_KERNING_AUTO ||
@@ -867,12 +623,6 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
             weight->GetIntValue() != NS_FONT_WEIGHT_NORMAL) {
           weight->AppendToString(eCSSProperty_font_weight, aValue,
                                  aSerialization);
-          aValue.Append(char16_t(' '));
-        }
-        if (stretch->GetUnit() != eCSSUnit_Enumerated ||
-            stretch->GetIntValue() != NS_FONT_STRETCH_NORMAL) {
-          stretch->AppendToString(eCSSProperty_font_stretch, aValue,
-                                  aSerialization);
           aValue.Append(char16_t(' '));
         }
         size->AppendToString(eCSSProperty_font_size, aValue, aSerialization);
@@ -1189,18 +939,6 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
     // This can express either grid-template-{areas,columns,rows}
     // or grid-auto-{flow,columns,rows}, but not both.
     case eCSSProperty_grid: {
-      const nsCSSValue& columnGapValue =
-        *data->ValueFor(eCSSProperty_grid_column_gap);
-      if (columnGapValue.GetUnit() != eCSSUnit_Pixel ||
-          columnGapValue.GetFloatValue() != 0.0f) {
-        return; // Not serializable, bail.
-      }
-      const nsCSSValue& rowGapValue =
-        *data->ValueFor(eCSSProperty_grid_row_gap);
-      if (rowGapValue.GetUnit() != eCSSUnit_Pixel ||
-          rowGapValue.GetFloatValue() != 0.0f) {
-        return; // Not serializable, bail.
-      }
       const nsCSSValue& areasValue =
         *data->ValueFor(eCSSProperty_grid_template_areas);
       const nsCSSValue& columnsValue =
@@ -1221,10 +959,10 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
         AppendValueToString(eCSSProperty_grid_auto_flow,
                             aValue, aSerialization);
         aValue.Append(char16_t(' '));
-        AppendValueToString(eCSSProperty_grid_auto_rows,
+        AppendValueToString(eCSSProperty_grid_auto_columns,
                             aValue, aSerialization);
         aValue.AppendLiteral(" / ");
-        AppendValueToString(eCSSProperty_grid_auto_columns,
+        AppendValueToString(eCSSProperty_grid_auto_rows,
                             aValue, aSerialization);
         break;
       } else if (!(autoFlowValue.GetUnit() == eCSSUnit_Enumerated &&
@@ -1235,7 +973,6 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
         return;
       }
       // Fall through to eCSSProperty_grid_template
-      MOZ_FALLTHROUGH;
     }
     case eCSSProperty_grid_template: {
       const nsCSSValue& areasValue =
@@ -1245,10 +982,10 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
       const nsCSSValue& rowsValue =
         *data->ValueFor(eCSSProperty_grid_template_rows);
       if (areasValue.GetUnit() == eCSSUnit_None) {
-        AppendValueToString(eCSSProperty_grid_template_rows,
+        AppendValueToString(eCSSProperty_grid_template_columns,
                             aValue, aSerialization);
         aValue.AppendLiteral(" / ");
-        AppendValueToString(eCSSProperty_grid_template_columns,
+        AppendValueToString(eCSSProperty_grid_template_rows,
                             aValue, aSerialization);
         break;
       }
@@ -1285,6 +1022,11 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
       if ((nRowItems - 1) / 2 != areas->NRows()) {
         // Not serializable, bail.
         return;
+      }
+      if (columnsValue.GetUnit() != eCSSUnit_None) {
+        AppendValueToString(eCSSProperty_grid_template_columns,
+                            aValue, aSerialization);
+        aValue.AppendLiteral(" / ");
       }
       rowsItem = rowsValue.GetListValue();
       uint32_t row = 0;
@@ -1327,50 +1069,6 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
           aValue.Append(char16_t(' '));
         }
       }
-      if (columnsValue.GetUnit() != eCSSUnit_None) {
-        aValue.AppendLiteral(" / ");
-        AppendValueToString(eCSSProperty_grid_template_columns,
-                            aValue, aSerialization);
-      }
-      break;
-    }
-    case eCSSProperty_grid_gap: {
-      const nsCSSProperty* subprops =
-        nsCSSProps::SubpropertyEntryFor(aProperty);
-      MOZ_ASSERT(subprops[2] == eCSSProperty_UNKNOWN,
-                 "must have exactly two subproperties");
-
-      nsAutoString val1, val2;
-      AppendValueToString(subprops[0], val1, aSerialization);
-      AppendValueToString(subprops[1], val2, aSerialization);
-      if (val1 == val2) {
-        aValue.Append(val1);
-      } else {
-        aValue.Append(val1);
-        aValue.Append(' ');
-        aValue.Append(val2);
-      }
-      break;
-    }
-    case eCSSProperty_text_emphasis: {
-      const nsCSSValue* emphasisStyle =
-        data->ValueFor(eCSSProperty_text_emphasis_style);
-      const nsCSSValue* emphasisColor =
-        data->ValueFor(eCSSProperty_text_emphasis_color);
-      bool isDefaultColor = emphasisColor->GetUnit() == eCSSUnit_EnumColor &&
-        emphasisColor->GetIntValue() == NS_COLOR_CURRENTCOLOR;
-
-      if (emphasisStyle->GetUnit() != eCSSUnit_None || isDefaultColor) {
-        AppendValueToString(eCSSProperty_text_emphasis_style,
-                            aValue, aSerialization);
-        if (!isDefaultColor) {
-          aValue.Append(char16_t(' '));
-        }
-      }
-      if (!isDefaultColor) {
-        AppendValueToString(eCSSProperty_text_emphasis_color,
-                            aValue, aSerialization);
-      }
       break;
     }
     case eCSSProperty__moz_transform: {
@@ -1395,28 +1093,6 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
       // we don't have a shorthand that can express. Bail.
       break;
     }
-    case eCSSProperty__webkit_text_stroke: {
-      const nsCSSValue* strokeWidth =
-        data->ValueFor(eCSSProperty__webkit_text_stroke_width);
-      const nsCSSValue* strokeColor =
-        data->ValueFor(eCSSProperty__webkit_text_stroke_color);
-      bool isDefaultColor = strokeColor->GetUnit() == eCSSUnit_EnumColor &&
-        strokeColor->GetIntValue() == NS_COLOR_CURRENTCOLOR;
-
-      if (strokeWidth->GetUnit() != eCSSUnit_Integer ||
-          strokeWidth->GetIntValue() != 0 || isDefaultColor) {
-        AppendValueToString(eCSSProperty__webkit_text_stroke_width,
-                            aValue, aSerialization);
-        if (!isDefaultColor) {
-          aValue.Append(char16_t(' '));
-        }
-      }
-      if (!isDefaultColor) {
-        AppendValueToString(eCSSProperty__webkit_text_stroke_color,
-                            aValue, aSerialization);
-      }
-      break;
-    }
     case eCSSProperty_all:
       // If we got here, then we didn't have all "inherit" or "initial" or
       // "unset" values for all of the longhand property components of 'all'.
@@ -1432,8 +1108,8 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
 bool
 Declaration::GetValueIsImportant(const nsAString& aProperty) const
 {
-  nsCSSProperty propID = nsCSSProps::
-    LookupProperty(aProperty, CSSEnabledState::eIgnoreEnabledState);
+  nsCSSProperty propID =
+    nsCSSProps::LookupProperty(aProperty, nsCSSProps::eIgnoreEnabledState);
   if (propID == eCSSProperty_UNKNOWN) {
     return false;
   }
@@ -1458,7 +1134,7 @@ Declaration::GetValueIsImportant(nsCSSProperty aProperty) const
   }
 
   CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(p, aProperty,
-                                       CSSEnabledState::eForAllContent) {
+                                       nsCSSProps::eEnabledForAllContent) {
     if (*p == eCSSProperty__x_system_font) {
       // The system_font subproperty doesn't count.
       continue;
@@ -1562,7 +1238,7 @@ Declaration::ToString(nsAString& aString) const
 
   int32_t count = mOrder.Length();
   int32_t index;
-  AutoTArray<nsCSSProperty, 16> shorthandsUsed;
+  nsAutoTArray<nsCSSProperty, 16> shorthandsUsed;
   for (index = 0; index < count; index++) {
     nsCSSProperty property = GetPropertyAt(index);
 
@@ -1572,7 +1248,7 @@ Declaration::ToString(nsAString& aString) const
       continue;
     }
 
-    if (!nsCSSProps::IsEnabled(property, CSSEnabledState::eForAllContent)) {
+    if (!nsCSSProps::IsEnabled(property)) {
       continue;
     }
     bool doneProperty = false;
@@ -1659,16 +1335,9 @@ Declaration::ToString(nsAString& aString) const
 }
 
 #ifdef DEBUG
-/* virtual */ void
+void
 Declaration::List(FILE* out, int32_t aIndent) const
 {
-  const Rule* owningRule = GetOwningRule();
-  if (owningRule) {
-    // More useful to print the selector and sheet URI too.
-    owningRule->List(out, aIndent);
-    return;
-  }
-
   nsAutoCString str;
   for (int32_t index = aIndent; --index >= 0; ) {
     str.AppendLiteral("  ");
@@ -1708,24 +1377,22 @@ Declaration::InitializeEmpty()
   mData = nsCSSCompressedDataBlock::CreateEmptyBlock();
 }
 
-already_AddRefed<Declaration>
+Declaration*
 Declaration::EnsureMutable()
 {
   MOZ_ASSERT(mData, "should only be called when not expanded");
-  RefPtr<Declaration> result;
   if (!IsMutable()) {
-    result = new Declaration(*this);
+    return new Declaration(*this);
   } else {
-    result = this;
+    return this;
   }
-  return result.forget();
 }
 
 size_t
 Declaration::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
-  n += mOrder.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  n += mOrder.SizeOfExcludingThis(aMallocSizeOf);
   n += mData          ? mData         ->SizeOfIncludingThis(aMallocSizeOf) : 0;
   n += mImportantData ? mImportantData->SizeOfIncludingThis(aMallocSizeOf) : 0;
   if (mVariables) {
@@ -1735,6 +1402,13 @@ Declaration::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     n += mImportantVariables->SizeOfIncludingThis(aMallocSizeOf);
   }
   return n;
+}
+
+bool
+Declaration::HasVariableDeclaration(const nsAString& aName) const
+{
+  return (mVariables && mVariables->Has(aName)) ||
+         (mImportantVariables && mImportantVariables->Has(aName));
 }
 
 void

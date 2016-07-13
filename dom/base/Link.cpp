@@ -11,14 +11,9 @@
 #include "mozilla/dom/Element.h"
 #include "nsIURL.h"
 #include "nsISizeOf.h"
-#include "nsIDocShell.h"
-#include "nsIPrefetchService.h"
-#include "nsCPrefetchService.h"
-#include "nsStyleLinkElement.h"
 
 #include "nsEscape.h"
 #include "nsGkAtoms.h"
-#include "nsHTMLDNSPrefetch.h"
 #include "nsString.h"
 #include "mozAutoDocUpdate.h"
 
@@ -49,95 +44,6 @@ Link::ElementHasHref() const
            mElement->HasAttr(kNameSpaceID_None, nsGkAtoms::href))
         || (!mElement->IsHTMLElement() &&
             mElement->HasAttr(kNameSpaceID_XLink, nsGkAtoms::href)));
-}
-
-void
-Link::TryDNSPrefetch()
-{
-  MOZ_ASSERT(mElement->IsInComposedDoc());
-  if (ElementHasHref() && nsHTMLDNSPrefetch::IsAllowed(mElement->OwnerDoc())) {
-    nsHTMLDNSPrefetch::PrefetchLow(this);
-  }
-}
-
-void
-Link::CancelDNSPrefetch(nsWrapperCache::FlagsType aDeferredFlag,
-                        nsWrapperCache::FlagsType aRequestedFlag)
-{
-  // If prefetch was deferred, clear flag and move on
-  if (mElement->HasFlag(aDeferredFlag)) {
-    mElement->UnsetFlags(aDeferredFlag);
-    // Else if prefetch was requested, clear flag and send cancellation
-  } else if (mElement->HasFlag(aRequestedFlag)) {
-    mElement->UnsetFlags(aRequestedFlag);
-    // Possible that hostname could have changed since binding, but since this
-    // covers common cases, most DNS prefetch requests will be canceled
-    nsHTMLDNSPrefetch::CancelPrefetchLow(this, NS_ERROR_ABORT);
-  }
-}
-
-void
-Link::TryDNSPrefetchPreconnectOrPrefetch()
-{
-  MOZ_ASSERT(mElement->IsInComposedDoc());
-  if (!ElementHasHref()) {
-    return;
-  }
-
-  nsAutoString rel;
-  if (!mElement->GetAttr(kNameSpaceID_None, nsGkAtoms::rel, rel)) {
-    return;
-  }
-
-  if (!nsContentUtils::PrefetchEnabled(mElement->OwnerDoc()->GetDocShell())) {
-    return;
-  }
-
-  uint32_t linkTypes = nsStyleLinkElement::ParseLinkTypes(rel,
-                         mElement->NodePrincipal());
-
-  if ((linkTypes & nsStyleLinkElement::ePREFETCH) ||
-      (linkTypes & nsStyleLinkElement::eNEXT)){
-    nsCOMPtr<nsIPrefetchService> prefetchService(do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
-    if (prefetchService) {
-      nsCOMPtr<nsIURI> uri(GetURI());
-      if (uri) {
-        nsCOMPtr<nsIDOMNode> domNode = GetAsDOMNode(mElement);
-        prefetchService->PrefetchURI(uri,
-                                     mElement->OwnerDoc()->GetDocumentURI(),
-                                     domNode, linkTypes & nsStyleLinkElement::ePREFETCH);
-        return;
-      }
-    }
-  }
-
-  if (linkTypes & nsStyleLinkElement::ePRECONNECT) {
-    nsCOMPtr<nsIURI> uri(GetURI());
-    if (uri && mElement->OwnerDoc()) {
-      mElement->OwnerDoc()->MaybePreconnect(uri,
-        mElement->AttrValueToCORSMode(mElement->GetParsedAttr(nsGkAtoms::crossorigin)));
-      return;
-    }
-  }
-
-  if (linkTypes & nsStyleLinkElement::eDNS_PREFETCH) {
-    if (nsHTMLDNSPrefetch::IsAllowed(mElement->OwnerDoc())) {
-      nsHTMLDNSPrefetch::PrefetchLow(this);
-    }
-  }
-}
-
-void
-Link::CancelPrefetch()
-{
-  nsCOMPtr<nsIPrefetchService> prefetchService(do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
-  if (prefetchService) {
-    nsCOMPtr<nsIURI> uri(GetURI());
-    if (uri) {
-      nsCOMPtr<nsIDOMNode> domNode = GetAsDOMNode(mElement);
-      prefetchService->CancelPrefetchURI(uri, domNode);
-    }
-  }
 }
 
 void
@@ -224,7 +130,7 @@ Link::GetURI() const
 }
 
 void
-Link::SetProtocol(const nsAString &aProtocol)
+Link::SetProtocol(const nsAString &aProtocol, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   if (!uri) {
@@ -243,7 +149,7 @@ Link::SetProtocol(const nsAString &aProtocol)
 }
 
 void
-Link::SetPassword(const nsAString &aPassword)
+Link::SetPassword(const nsAString &aPassword, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   if (!uri) {
@@ -256,7 +162,7 @@ Link::SetPassword(const nsAString &aPassword)
 }
 
 void
-Link::SetUsername(const nsAString &aUsername)
+Link::SetUsername(const nsAString &aUsername, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   if (!uri) {
@@ -269,7 +175,7 @@ Link::SetUsername(const nsAString &aUsername)
 }
 
 void
-Link::SetHost(const nsAString &aHost)
+Link::SetHost(const nsAString &aHost, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   if (!uri) {
@@ -282,7 +188,7 @@ Link::SetHost(const nsAString &aHost)
 }
 
 void
-Link::SetHostname(const nsAString &aHostname)
+Link::SetHostname(const nsAString &aHostname, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   if (!uri) {
@@ -295,7 +201,7 @@ Link::SetHostname(const nsAString &aHostname)
 }
 
 void
-Link::SetPathname(const nsAString &aPathname)
+Link::SetPathname(const nsAString &aPathname, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   nsCOMPtr<nsIURL> url(do_QueryInterface(uri));
@@ -309,7 +215,14 @@ Link::SetPathname(const nsAString &aPathname)
 }
 
 void
-Link::SetSearch(const nsAString& aSearch)
+Link::SetSearch(const nsAString& aSearch, ErrorResult& aError)
+{
+  SetSearchInternal(aSearch);
+  UpdateURLSearchParams();
+}
+
+void
+Link::SetSearchInternal(const nsAString& aSearch)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   nsCOMPtr<nsIURL> url(do_QueryInterface(uri));
@@ -323,7 +236,7 @@ Link::SetSearch(const nsAString& aSearch)
 }
 
 void
-Link::SetPort(const nsAString &aPort)
+Link::SetPort(const nsAString &aPort, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   if (!uri) {
@@ -348,7 +261,7 @@ Link::SetPort(const nsAString &aPort)
 }
 
 void
-Link::SetHash(const nsAString &aHash)
+Link::SetHash(const nsAString &aHash, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURIToMutate());
   if (!uri) {
@@ -361,7 +274,7 @@ Link::SetHash(const nsAString &aHash)
 }
 
 void
-Link::GetOrigin(nsAString &aOrigin)
+Link::GetOrigin(nsAString &aOrigin, ErrorResult& aError)
 {
   aOrigin.Truncate();
 
@@ -376,7 +289,7 @@ Link::GetOrigin(nsAString &aOrigin)
 }
 
 void
-Link::GetProtocol(nsAString &_protocol)
+Link::GetProtocol(nsAString &_protocol, ErrorResult& aError)
 {
   nsCOMPtr<nsIURI> uri(GetURI());
   if (!uri) {
@@ -388,10 +301,11 @@ Link::GetProtocol(nsAString &_protocol)
     CopyASCIItoUTF16(scheme, _protocol);
   }
   _protocol.Append(char16_t(':'));
+  return;
 }
 
 void
-Link::GetUsername(nsAString& aUsername)
+Link::GetUsername(nsAString& aUsername, ErrorResult& aError)
 {
   aUsername.Truncate();
 
@@ -406,7 +320,7 @@ Link::GetUsername(nsAString& aUsername)
 }
 
 void
-Link::GetPassword(nsAString &aPassword)
+Link::GetPassword(nsAString &aPassword, ErrorResult& aError)
 {
   aPassword.Truncate();
 
@@ -421,7 +335,7 @@ Link::GetPassword(nsAString &aPassword)
 }
 
 void
-Link::GetHost(nsAString &_host)
+Link::GetHost(nsAString &_host, ErrorResult& aError)
 {
   _host.Truncate();
 
@@ -439,7 +353,7 @@ Link::GetHost(nsAString &_host)
 }
 
 void
-Link::GetHostname(nsAString &_hostname)
+Link::GetHostname(nsAString &_hostname, ErrorResult& aError)
 {
   _hostname.Truncate();
 
@@ -453,7 +367,7 @@ Link::GetHostname(nsAString &_hostname)
 }
 
 void
-Link::GetPathname(nsAString &_pathname)
+Link::GetPathname(nsAString &_pathname, ErrorResult& aError)
 {
   _pathname.Truncate();
 
@@ -473,7 +387,7 @@ Link::GetPathname(nsAString &_pathname)
 }
 
 void
-Link::GetSearch(nsAString &_search)
+Link::GetSearch(nsAString &_search, ErrorResult& aError)
 {
   _search.Truncate();
 
@@ -493,7 +407,7 @@ Link::GetSearch(nsAString &_search)
 }
 
 void
-Link::GetPort(nsAString &_port)
+Link::GetPort(nsAString &_port, ErrorResult& aError)
 {
   _port.Truncate();
 
@@ -515,7 +429,7 @@ Link::GetPort(nsAString &_port)
 }
 
 void
-Link::GetHash(nsAString &_hash)
+Link::GetHash(nsAString &_hash, ErrorResult& aError)
 {
   _hash.Truncate();
 
@@ -568,6 +482,7 @@ Link::ResetLinkState(bool aNotify, bool aHasHref)
 
   // If we've cached the URI, reset always invalidates it.
   mCachedURI = nullptr;
+  UpdateURLSearchParams();
 
   // Update our state back to the default.
   mLinkState = defaultState;
@@ -654,6 +569,68 @@ Link::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   // - mHistory, because it is non-owning
 
   return n;
+}
+
+URLSearchParams*
+Link::SearchParams()
+{
+  CreateSearchParamsIfNeeded();
+  return mSearchParams;
+}
+
+void
+Link::URLSearchParamsUpdated(URLSearchParams* aSearchParams)
+{
+  MOZ_ASSERT(mSearchParams);
+  MOZ_ASSERT(mSearchParams == aSearchParams);
+
+  nsString search;
+  mSearchParams->Serialize(search);
+  SetSearchInternal(search);
+}
+
+void
+Link::UpdateURLSearchParams()
+{
+  if (!mSearchParams) {
+    return;
+  }
+
+  nsAutoCString search;
+  nsCOMPtr<nsIURI> uri(GetURI());
+  nsCOMPtr<nsIURL> url(do_QueryInterface(uri));
+  if (url) {
+    nsresult rv = url->GetQuery(search);
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Failed to get the query from a nsIURL.");
+    }
+  }
+
+  mSearchParams->ParseInput(search);
+}
+
+void
+Link::CreateSearchParamsIfNeeded()
+{
+  if (!mSearchParams) {
+    mSearchParams = new URLSearchParams(this, this);
+    UpdateURLSearchParams();
+  }
+}
+
+void
+Link::Unlink()
+{
+  if (mSearchParams) {
+    mSearchParams = nullptr;
+  }
+}
+
+void
+Link::Traverse(nsCycleCollectionTraversalCallback &cb)
+{
+  Link* tmp = this;
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSearchParams);
 }
 
 } // namespace dom

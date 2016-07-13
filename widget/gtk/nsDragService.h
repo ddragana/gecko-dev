@@ -7,7 +7,7 @@
 #ifndef nsDragService_h__
 #define nsDragService_h__
 
-#include "mozilla/RefPtr.h"
+#include "nsAutoPtr.h"
 #include "nsBaseDragService.h"
 #include "nsIObserver.h"
 #include "nsAutoRef.h"
@@ -58,16 +58,11 @@ public:
 
     NS_DECL_NSIOBSERVER
 
-    // nsBaseDragService
-    virtual nsresult InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
-                                           nsIScriptableRegion* aRegion,
-                                           uint32_t aActionType) override;
     // nsIDragService
     NS_IMETHOD InvokeDragSession (nsIDOMNode *aDOMNode,
                                   nsISupportsArray * anArrayTransferables,
                                   nsIScriptableRegion * aRegion,
-                                  uint32_t aActionType,
-                                  nsContentPolicyType aContentPolicyType) override;
+                                  uint32_t aActionType) override;
     NS_IMETHOD StartDragSession() override;
     NS_IMETHOD EndDragSession(bool aDoneDrag) override;
 
@@ -97,12 +92,12 @@ public:
 
     gboolean ScheduleMotionEvent(nsWindow *aWindow,
                                  GdkDragContext *aDragContext,
-                                 mozilla::LayoutDeviceIntPoint aWindowPoint,
+                                 nsIntPoint aWindowPoint,
                                  guint aTime);
     void ScheduleLeaveEvent();
     gboolean ScheduleDropEvent(nsWindow *aWindow,
                                GdkDragContext *aDragContext,
-                               mozilla::LayoutDeviceIntPoint aWindowPoint,
+                               nsIntPoint aWindowPoint,
                                guint aTime);
 
     nsWindow* GetMostRecentDestWindow()
@@ -154,16 +149,16 @@ private:
     // mPendingTime, carry information from the GTK signal that will be used
     // when the scheduled task is run.  mPendingWindow and mPendingDragContext
     // will be nullptr if the scheduled task is eDragTaskLeave.
-    RefPtr<nsWindow> mPendingWindow;
-    mozilla::LayoutDeviceIntPoint mPendingWindowPoint;
+    nsRefPtr<nsWindow> mPendingWindow;
+    nsIntPoint mPendingWindowPoint;
     nsCountedRef<GdkDragContext> mPendingDragContext;
     guint mPendingTime;
 
     // mTargetWindow and mTargetWindowPoint record the position of the last
     // eDragTaskMotion or eDragTaskDrop task that was run or is still running.
     // mTargetWindow is cleared once the drag has completed or left.
-    RefPtr<nsWindow> mTargetWindow;
-    mozilla::LayoutDeviceIntPoint mTargetWindowPoint;
+    nsRefPtr<nsWindow> mTargetWindow;
+    nsIntPoint mTargetWindowPoint;
     // mTargetWidget and mTargetDragContext are set only while dispatching
     // motion or drop events.  mTime records the corresponding timestamp.
     nsCountedRef<GtkWidget> mTargetWidget;
@@ -211,7 +206,7 @@ private:
 
     gboolean Schedule(DragTask aTask, nsWindow *aWindow,
                       GdkDragContext *aDragContext,
-                      mozilla::LayoutDeviceIntPoint aWindowPoint, guint aTime);
+                      nsIntPoint aWindowPoint, guint aTime);
 
     // Callback for g_idle_add_full() to run mScheduledTask.
     static gboolean TaskDispatchCallback(gpointer data);

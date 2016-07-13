@@ -24,7 +24,7 @@ WebGL2Context::CreateTransformFeedback()
     MakeContextCurrent();
     gl->fGenTransformFeedbacks(1, &tf);
 
-    RefPtr<WebGLTransformFeedback> globj = new WebGLTransformFeedback(this, tf);
+    nsRefPtr<WebGLTransformFeedback> globj = new WebGLTransformFeedback(this, tf);
     return globj.forget();
 }
 
@@ -41,7 +41,7 @@ WebGL2Context::DeleteTransformFeedback(WebGLTransformFeedback* tf)
         return;
 
     if (mBoundTransformFeedback == tf)
-        BindTransformFeedback(LOCAL_GL_TRANSFORM_FEEDBACK, nullptr);
+        BindTransformFeedback(LOCAL_GL_TRANSFORM_FEEDBACK, tf);
 
     tf->RequestDelete();
 }
@@ -52,10 +52,10 @@ WebGL2Context::IsTransformFeedback(WebGLTransformFeedback* tf)
     if (IsContextLost())
         return false;
 
-    if (!ValidateObjectAllowDeletedOrNull("isTransformFeedback", tf))
+    if (!ValidateObjectAllowDeleted("isTransformFeedback", tf))
         return false;
 
-    if (!tf || tf->IsDeleted())
+    if (tf->IsDeleted())
         return false;
 
     MakeContextCurrent();

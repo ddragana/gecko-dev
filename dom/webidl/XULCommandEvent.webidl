@@ -14,6 +14,7 @@ interface XULCommandEvent : UIEvent
 
   readonly attribute Event? sourceEvent;
 
+  [Throws]
   void initCommandEvent(DOMString type,
                         boolean canBubble,
                         boolean cancelable,

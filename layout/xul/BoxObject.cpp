@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -47,6 +46,17 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BoxObject)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
+static PLDHashOperator
+PropertyTraverser(const nsAString& aKey, nsISupports* aProperty, void* userArg)
+{
+  nsCycleCollectionTraversalCallback *cb =
+    static_cast<nsCycleCollectionTraversalCallback*>(userArg);
+
+  cb->NoteXPCOMChild(aProperty);
+
+  return PL_DHASH_NEXT;
+}
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BoxObject)
   // XXX jmorton: why aren't we unlinking mPropertyTable?
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -55,9 +65,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(BoxObject)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
   if (tmp->mPropertyTable) {
-    for (auto iter = tmp->mPropertyTable->Iter(); !iter.Done(); iter.Next()) {
-      cb.NoteXPCOMChild(iter.UserData());
-    }
+    tmp->mPropertyTable->EnumerateRead(PropertyTraverser, &cb);
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -135,7 +143,7 @@ BoxObject::GetPresShell(bool aFlushLayout)
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocument> doc = mContent->GetUncomposedDoc();
+  nsCOMPtr<nsIDocument> doc = mContent->GetCurrentDoc();
   if (!doc) {
     return nullptr;
   }
@@ -382,7 +390,7 @@ BoxObject::GetFirstChild(nsIDOMElement * *aFirstVisibleChild)
   *aFirstVisibleChild = nullptr;
   nsIFrame* frame = GetFrame(false);
   if (!frame) return NS_OK;
-  nsIFrame* firstFrame = frame->PrincipalChildList().FirstChild();
+  nsIFrame* firstFrame = frame->GetFirstPrincipalChild();
   if (!firstFrame) return NS_OK;
   // get the content for the box and query to a dom element
   nsCOMPtr<nsIDOMElement> el = do_QueryInterface(firstFrame->GetContent());
@@ -429,7 +437,7 @@ BoxObject::GetPreviousSibling(nsIFrame* aParentFrame, nsIFrame* aFrame,
                               nsIDOMElement** aResult)
 {
   *aResult = nullptr;
-  nsIFrame* nextFrame = aParentFrame->PrincipalChildList().FirstChild();
+  nsIFrame* nextFrame = aParentFrame->GetFirstPrincipalChild();
   nsIFrame* prevFrame = nullptr;
   while (nextFrame) {
     if (nextFrame == aFrame)

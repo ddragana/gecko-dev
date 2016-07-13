@@ -39,13 +39,13 @@ var gTabsListener = {
     // When a new tab is opened, location is first set to "about:blank", so
     // we can ignore those calls.
     // Ignore multiple notifications for the same URI too.
-    if (spec == "about:blank" || this._loadedURIs.includes(spec))
+    if (spec == "about:blank" || this._loadedURIs.indexOf(spec) != -1)
       return;
 
-    ok(gCurrentTest.URIs.includes(spec),
+    ok(gCurrentTest.URIs.indexOf(spec) != -1,
        "Opened URI found in list: " + spec);
 
-    if (gCurrentTest.URIs.includes(spec))
+    if (gCurrentTest.URIs.indexOf(spec) != -1 )
       this._loadedURIs.push(spec);
 
     if (this._loadedURIs.length == gCurrentTest.URIs.length) {

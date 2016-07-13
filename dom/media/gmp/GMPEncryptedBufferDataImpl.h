@@ -7,7 +7,6 @@
 #define GMPEncryptedBufferDataImpl_h_
 
 #include "gmp-decryption.h"
-#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "mozilla/gmp/GMPTypes.h"
 
@@ -20,9 +19,9 @@ class GMPStringListImpl : public GMPStringList
 {
 public:
   explicit GMPStringListImpl(const nsTArray<nsCString>& aStrings);
-  uint32_t Size() const override;
-  void StringAt(uint32_t aIndex,
-                const char** aOutString, uint32_t *aOutLength) const override;
+  virtual const uint32_t Size() const override;
+  virtual void StringAt(uint32_t aIndex,
+                        const char** aOutString, uint32_t *aOutLength) const override;
   virtual ~GMPStringListImpl() override;
   void RelinquishData(nsTArray<nsCString>& aStrings);
 
@@ -38,14 +37,14 @@ public:
 
   void RelinquishData(GMPDecryptionData& aData);
 
-  const uint8_t* KeyId() const override;
-  uint32_t KeyIdSize() const override;
-  const uint8_t* IV() const override;
-  uint32_t IVSize() const override;
-  uint32_t NumSubsamples() const override;
-  const uint16_t* ClearBytes() const override;
-  const uint32_t* CipherBytes() const override;
-  const GMPStringList* SessionIds() const override;
+  virtual const uint8_t* KeyId() const override;
+  virtual uint32_t KeyIdSize() const override;
+  virtual const uint8_t* IV() const override;
+  virtual uint32_t IVSize() const override;
+  virtual uint32_t NumSubsamples() const override;
+  virtual const uint16_t* ClearBytes() const override;
+  virtual const uint32_t* CipherBytes() const override;
+  virtual const GMPStringList* SessionIds() const override;
 
 private:
   nsTArray<uint8_t> mKeyId;
@@ -63,16 +62,16 @@ public:
     , mData(aData)
   {
   }
-  uint32_t Id() const override {
+  virtual uint32_t Id() const {
     return mId;
   }
-  uint8_t* Data() override {
+  virtual uint8_t* Data() {
     return mData.Elements();
   }
-  uint32_t Size() const override {
+  virtual uint32_t Size() const {
     return mData.Length();
   }
-  void Resize(uint32_t aSize) override {
+  virtual void Resize(uint32_t aSize) {
     mData.SetLength(aSize);
   }
 

@@ -261,12 +261,10 @@ public:
   void Compact() { mArray.Compact(); }
 
   // Returns the number of bytes on the heap taken up by this object, not
-  // including sizeof(*this). If you want to measure anything hanging off the
-  // array, you must iterate over the elements and measure them individually;
-  // hence the "Shallow" prefix.
-  size_t ShallowSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  // including sizeof(*this).
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return mArray.ShallowSizeOfExcludingThis(aMallocSizeOf);
+    return mArray.SizeOfExcludingThis(aMallocSizeOf);
   }
 
   //
@@ -422,7 +420,7 @@ public:
   };
 
 protected:
-  AutoTArray<T, N> mArray;
+  nsAutoTArray<T, N> mArray;
 };
 
 template<class T>
@@ -472,7 +470,7 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
 #define NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(array_, obstype_, func_, params_) \
   PR_BEGIN_MACRO                                                             \
     nsTObserverArray<obstype_ *>::ForwardIterator iter_(array_);             \
-    RefPtr<obstype_> obs_;                                                 \
+    nsRefPtr<obstype_> obs_;                                                 \
     while (iter_.HasMore()) {                                                 \
       obs_ = iter_.GetNext();                                                \
       obs_ -> func_ params_ ;                                                \

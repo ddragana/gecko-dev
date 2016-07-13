@@ -36,8 +36,7 @@ static const nsStaticAtom CSSPseudoElements_info[] = {
 // Flags data for each of the pseudo-elements, which must be separate
 // from the previous array since there's no place for it in
 // nsStaticAtom.
-/* static */ const uint32_t
-nsCSSPseudoElements::kPseudoElementFlags[] = {
+static const uint32_t CSSPseudoElements_flags[] = {
 #define CSS_PSEUDO_ELEMENT(name_, value_, flags_) \
   flags_,
 #include "nsCSSPseudoElementList.h"
@@ -68,44 +67,49 @@ nsCSSPseudoElements::IsCSS2PseudoElement(nsIAtom *aAtom)
                   aAtom == nsCSSPseudoElements::firstLetter ||
                   aAtom == nsCSSPseudoElements::firstLine;
   NS_ASSERTION(nsCSSAnonBoxes::IsAnonBox(aAtom) ||
-               result == PseudoElementHasFlags(
-                   GetPseudoType(aAtom, EnabledState::eIgnoreEnabledState),
-                   CSS_PSEUDO_ELEMENT_IS_CSS2),
+               result ==
+                 PseudoElementHasFlags(GetPseudoType(aAtom), CSS_PSEUDO_ELEMENT_IS_CSS2),
                "result doesn't match flags");
   return result;
 }
 
-/* static */ CSSPseudoElementType
-nsCSSPseudoElements::GetPseudoType(nsIAtom *aAtom, EnabledState aEnabledState)
+/* static */ nsCSSPseudoElements::Type
+nsCSSPseudoElements::GetPseudoType(nsIAtom *aAtom)
 {
-  for (CSSPseudoElementTypeBase i = 0;
-       i < ArrayLength(CSSPseudoElements_info);
-       ++i) {
+  for (uint32_t i = 0; i < ArrayLength(CSSPseudoElements_info); ++i) {
     if (*CSSPseudoElements_info[i].mAtom == aAtom) {
-      auto type = static_cast<Type>(i);
-      return IsEnabled(type, aEnabledState) ? type : Type::NotPseudo;
+      return Type(i);
     }
   }
 
   if (nsCSSAnonBoxes::IsAnonBox(aAtom)) {
 #ifdef MOZ_XUL
     if (nsCSSAnonBoxes::IsTreePseudoElement(aAtom)) {
-      return Type::XULTree;
+      return ePseudo_XULTree;
     }
 #endif
 
-    return Type::AnonBox;
+    return ePseudo_AnonBox;
   }
 
-  return Type::NotPseudo;
+  return ePseudo_NotPseudoElement;
 }
 
 /* static */ nsIAtom*
 nsCSSPseudoElements::GetPseudoAtom(Type aType)
 {
-  NS_ASSERTION(aType < Type::Count, "Unexpected type");
-  return *CSSPseudoElements_info[
-    static_cast<CSSPseudoElementTypeBase>(aType)].mAtom;
+  NS_ASSERTION(aType < nsCSSPseudoElements::ePseudo_PseudoElementCount,
+               "Unexpected type");
+  return *CSSPseudoElements_info[aType].mAtom;
+}
+
+/* static */ uint32_t
+nsCSSPseudoElements::FlagsForPseudoElement(const Type aType)
+{
+  size_t index = static_cast<size_t>(aType);
+  NS_ASSERTION(index < ArrayLength(CSSPseudoElements_flags),
+               "argument must be a pseudo-element");
+  return CSSPseudoElements_flags[index];
 }
 
 /* static */ bool

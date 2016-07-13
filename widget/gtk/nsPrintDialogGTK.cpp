@@ -113,11 +113,10 @@ ShowCustomDialog(GtkComboBox *changed_box, gpointer user_data)
 
 class nsPrintDialogWidgetGTK {
   public:
-    nsPrintDialogWidgetGTK(nsPIDOMWindowOuter *aParent,
-                           nsIPrintSettings *aPrintSettings);
+    nsPrintDialogWidgetGTK(nsIDOMWindow *aParent, nsIPrintSettings *aPrintSettings);
     ~nsPrintDialogWidgetGTK() { gtk_widget_destroy(dialog); }
     NS_ConvertUTF16toUTF8 GetUTF8FromBundle(const char* aKey);
-    gint Run();
+    const gint Run();
 
     nsresult ImportSettings(nsIPrintSettings *aNSSettings);
     nsresult ExportSettings(nsIPrintSettings *aNSSettings);
@@ -150,8 +149,7 @@ class nsPrintDialogWidgetGTK {
     void ExportHeaderFooter(nsIPrintSettings *aNS);
 };
 
-nsPrintDialogWidgetGTK::nsPrintDialogWidgetGTK(nsPIDOMWindowOuter *aParent,
-                                               nsIPrintSettings *aSettings)
+nsPrintDialogWidgetGTK::nsPrintDialogWidgetGTK(nsIDOMWindow *aParent, nsIPrintSettings *aSettings)
 {
   nsCOMPtr<nsIWidget> widget = WidgetUtils::DOMWindowToWidget(aParent);
   NS_ASSERTION(widget, "Need a widget for dialog to be modal.");
@@ -345,7 +343,7 @@ nsPrintDialogWidgetGTK::OptionWidgetToString(GtkWidget *dropdown)
     return header_footer_tags[index];
 }
 
-gint
+const gint
 nsPrintDialogWidgetGTK::Run()
 {
   const gint response = gtk_dialog_run(GTK_DIALOG(dialog));
@@ -527,8 +525,7 @@ nsPrintDialogServiceGTK::Init()
 }
 
 NS_IMETHODIMP
-nsPrintDialogServiceGTK::Show(nsPIDOMWindowOuter *aParent,
-                              nsIPrintSettings *aSettings,
+nsPrintDialogServiceGTK::Show(nsIDOMWindow *aParent, nsIPrintSettings *aSettings,
                               nsIWebBrowserPrint *aWebBrowserPrint)
 {
   NS_PRECONDITION(aParent, "aParent must not be null");
@@ -563,7 +560,7 @@ nsPrintDialogServiceGTK::Show(nsPIDOMWindowOuter *aParent,
 }
 
 NS_IMETHODIMP
-nsPrintDialogServiceGTK::ShowPageSetup(nsPIDOMWindowOuter *aParent,
+nsPrintDialogServiceGTK::ShowPageSetup(nsIDOMWindow *aParent,
                                        nsIPrintSettings *aNSSettings)
 {
   NS_PRECONDITION(aParent, "aParent must not be null");

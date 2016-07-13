@@ -7,7 +7,6 @@
 #ifndef mozilla_image_imgFrame_h
 #define mozilla_image_imgFrame_h
 
-#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Move.h"
@@ -42,7 +41,7 @@ enum class DisposalMethod : int8_t {
 };
 
 enum class Opacity : uint8_t {
-  FULLY_OPAQUE,
+  OPAQUE,
   SOME_TRANSPARENCY
 };
 
@@ -58,14 +57,13 @@ struct AnimationData
 {
   AnimationData(uint8_t* aRawData, uint32_t aPaletteDataLength,
                 int32_t aRawTimeout, const nsIntRect& aRect,
-                BlendMethod aBlendMethod, const Maybe<gfx::IntRect>& aBlendRect,
-                DisposalMethod aDisposalMethod, bool aHasAlpha)
+                BlendMethod aBlendMethod, DisposalMethod aDisposalMethod,
+                bool aHasAlpha)
     : mRawData(aRawData)
     , mPaletteDataLength(aPaletteDataLength)
     , mRawTimeout(aRawTimeout)
     , mRect(aRect)
     , mBlendMethod(aBlendMethod)
-    , mBlendRect(aBlendRect)
     , mDisposalMethod(aDisposalMethod)
     , mHasAlpha(aHasAlpha)
   { }
@@ -75,9 +73,34 @@ struct AnimationData
   int32_t mRawTimeout;
   nsIntRect mRect;
   BlendMethod mBlendMethod;
-  Maybe<gfx::IntRect> mBlendRect;
   DisposalMethod mDisposalMethod;
   bool mHasAlpha;
+};
+
+/**
+ * ScalingData contains all of the information necessary for performing
+ * high-quality (CPU-based) scaling an imgFrame.
+ *
+ * It includes pointers to the raw image data of the underlying imgFrame, but
+ * does not own that data. A RawAccessFrameRef for the underlying imgFrame must
+ * outlive the ScalingData for it to remain valid.
+ */
+struct ScalingData
+{
+  ScalingData(uint8_t* aRawData,
+              gfx::IntSize aSize,
+              uint32_t aBytesPerRow,
+              gfx::SurfaceFormat aFormat)
+    : mRawData(aRawData)
+    , mSize(aSize)
+    , mBytesPerRow(aBytesPerRow)
+    , mFormat(aFormat)
+  { }
+
+  uint8_t* mRawData;
+  gfx::IntSize mSize;
+  uint32_t mBytesPerRow;
+  gfx::SurfaceFormat mFormat;
 };
 
 class imgFrame
@@ -85,9 +108,6 @@ class imgFrame
   typedef gfx::Color Color;
   typedef gfx::DataSourceSurface DataSourceSurface;
   typedef gfx::DrawTarget DrawTarget;
-  typedef gfx::SamplingFilter SamplingFilter;
-  typedef gfx::IntPoint IntPoint;
-  typedef gfx::IntRect IntRect;
   typedef gfx::IntSize IntSize;
   typedef gfx::SourceSurface SourceSurface;
   typedef gfx::SurfaceFormat SurfaceFormat;
@@ -134,7 +154,7 @@ public:
   nsresult InitWithDrawable(gfxDrawable* aDrawable,
                             const nsIntSize& aSize,
                             const SurfaceFormat aFormat,
-                            SamplingFilter aSamplingFilter,
+                            GraphicsFilter aFilter,
                             uint32_t aImageFlags);
 
   DrawableFrameRef DrawableRef();
@@ -153,7 +173,7 @@ public:
   void SetRawAccessOnly();
 
   bool Draw(gfxContext* aContext, const ImageRegion& aRegion,
-            SamplingFilter aSamplingFilter, uint32_t aImageFlags);
+            GraphicsFilter aFilter, uint32_t aImageFlags);
 
   nsresult ImageUpdated(const nsIntRect& aUpdateRect);
 
@@ -173,15 +193,11 @@ public:
    *                         used; see FrameAnimator::GetTimeoutForFrame.
    * @param aBlendMethod     For animation frames, a blending method to be used
    *                         when compositing this frame.
-   * @param aBlendRect       For animation frames, if present, the subrect in
-   *                         which @aBlendMethod applies. Outside of this
-   *                         subrect, BlendMethod::OVER is always used.
    */
   void Finish(Opacity aFrameOpacity = Opacity::SOME_TRANSPARENCY,
               DisposalMethod aDisposalMethod = DisposalMethod::KEEP,
               int32_t aRawTimeout = 0,
-              BlendMethod aBlendMethod = BlendMethod::OVER,
-              const Maybe<IntRect>& aBlendRect = Nothing());
+              BlendMethod aBlendMethod = BlendMethod::OVER);
 
   /**
    * Mark this imgFrame as aborted. This informs the imgFrame that if it isn't
@@ -193,14 +209,9 @@ public:
   void Abort();
 
   /**
-   * Returns true if this imgFrame has been aborted.
-   */
-  bool IsAborted() const;
-
-  /**
    * Returns true if this imgFrame is completely decoded.
    */
-  bool IsFinished() const;
+  bool IsImageComplete() const;
 
   /**
    * Blocks until this imgFrame is either completely decoded, or is marked as
@@ -210,7 +221,7 @@ public:
    * careful in your use of this method to avoid excessive main thread jank or
    * deadlock.
    */
-  void WaitUntilFinished() const;
+  void WaitUntilComplete() const;
 
   /**
    * Returns the number of bytes per pixel this imgFrame requires.  This is a
@@ -221,9 +232,9 @@ public:
   uint32_t GetBytesPerPixel() const { return GetIsPaletted() ? 1 : 4; }
 
   IntSize GetImageSize() const { return mImageSize; }
-  IntRect GetRect() const { return mFrameRect; }
-  IntSize GetSize() const { return mFrameRect.Size(); }
-  bool NeedsPadding() const { return mFrameRect.TopLeft() != IntPoint(0, 0); }
+  nsIntRect GetRect() const;
+  IntSize GetSize() const { return mSize; }
+  bool NeedsPadding() const { return mOffset != nsIntPoint(0, 0); }
   void GetImageData(uint8_t** aData, uint32_t* length) const;
   uint8_t* GetImageData() const;
 
@@ -232,7 +243,15 @@ public:
   uint32_t* GetPaletteData() const;
   uint8_t GetPaletteDepth() const { return mPaletteDepth; }
 
+  /**
+   * Get the SurfaceFormat for this imgFrame.
+   *
+   * This should only be used for assertions.
+   */
+  SurfaceFormat GetFormat() const;
+
   AnimationData GetAnimationData() const;
+  ScalingData GetScalingData() const;
 
   bool GetCompositingFailed() const;
   void SetCompositingFailed(bool val);
@@ -243,9 +262,10 @@ public:
   bool IsSinglePixel() const;
 
   already_AddRefed<SourceSurface> GetSurface();
+  already_AddRefed<DrawTarget> GetDrawTarget();
 
-  void AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf, size_t& aHeapSizeOut,
-                              size_t& aNonHeapSizeOut) const;
+  size_t SizeOfExcludingThis(gfxMemoryLocation aLocation,
+                             MallocSizeOf aMallocSizeOf) const;
 
 private: // methods
 
@@ -253,16 +273,17 @@ private: // methods
 
   nsresult LockImageData();
   nsresult UnlockImageData();
-  bool     CanOptimizeOpaqueImage();
   nsresult Optimize();
+  nsresult Deoptimize();
 
   void AssertImageDataLocked() const;
 
-  bool AreAllPixelsWritten() const;
+  bool IsImageCompleteInternal() const;
   nsresult ImageUpdatedInternal(const nsIntRect& aUpdateRect);
   void GetImageDataInternal(uint8_t** aData, uint32_t* length) const;
   uint32_t GetImageBytesPerRow() const;
   uint32_t GetImageDataLength() const;
+  int32_t GetStride() const;
   already_AddRefed<SourceSurface> GetSurfaceInternal();
 
   uint32_t PaletteDataLength() const
@@ -272,7 +293,7 @@ private: // methods
   }
 
   struct SurfaceWithFormat {
-    RefPtr<gfxDrawable> mDrawable;
+    nsRefPtr<gfxDrawable> mDrawable;
     SurfaceFormat mFormat;
     SurfaceWithFormat() { }
     SurfaceWithFormat(gfxDrawable* aDrawable, SurfaceFormat aFormat)
@@ -317,13 +338,10 @@ private: // data
 
   DisposalMethod mDisposalMethod;
   BlendMethod    mBlendMethod;
-  Maybe<IntRect> mBlendRect;
   SurfaceFormat  mFormat;
 
   bool mHasNoAlpha;
   bool mAborted;
-  bool mFinished;
-  bool mOptimizable;
 
 
   //////////////////////////////////////////////////////////////////////////////
@@ -331,7 +349,8 @@ private: // data
   //////////////////////////////////////////////////////////////////////////////
 
   IntSize      mImageSize;
-  IntRect      mFrameRect;
+  IntSize      mSize;
+  nsIntPoint   mOffset;
 
   // The palette and image data for images that are paletted, since Cairo
   // doesn't support these images.
@@ -352,6 +371,7 @@ private: // data
 
   bool mSinglePixel;
   bool mCompositingFailed;
+  bool mOptimizable;
 };
 
 /**
@@ -413,24 +433,21 @@ public:
 private:
   DrawableFrameRef(const DrawableFrameRef& aOther) = delete;
 
-  RefPtr<imgFrame> mFrame;
+  nsRefPtr<imgFrame> mFrame;
   VolatileBufferPtr<uint8_t> mRef;
 };
 
 /**
  * A reference to an imgFrame that holds the imgFrame's surface in memory in a
  * format appropriate for access as raw data. If you have a RawAccessFrameRef
- * |ref| and |if (ref)| is true, then calls to GetImageData() and
- * GetPaletteData() are guaranteed to succeed. This guarantee is stronger than
- * DrawableFrameRef, so everything that a valid DrawableFrameRef guarantees is
- * also guaranteed by a valid RawAccessFrameRef.
+ * |ref| and |if (ref)| is true, then calls to GetImageData(), GetPaletteData(),
+ * and GetDrawTarget() are guaranteed to succeed. This guarantee is stronger
+ * than DrawableFrameRef, so everything that a valid DrawableFrameRef guarantees
+ * is also guaranteed by a valid RawAccessFrameRef.
  *
  * This may be considerably more expensive than is necessary just for drawing,
  * so only use this when you need to read or write the raw underlying image data
  * that the imgFrame holds.
- *
- * Once all an imgFrame's RawAccessFrameRefs go out of scope, new
- * RawAccessFrameRefs cannot be created.
  */
 class RawAccessFrameRef final
 {
@@ -500,7 +517,7 @@ public:
 private:
   RawAccessFrameRef(const RawAccessFrameRef& aOther) = delete;
 
-  RefPtr<imgFrame> mFrame;
+  nsRefPtr<imgFrame> mFrame;
 };
 
 } // namespace image

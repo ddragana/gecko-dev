@@ -13,8 +13,8 @@ struct PropertyComparator
 {
   const nsCString& mKey;
   explicit PropertyComparator(const nsCString& aKey) : mKey(aKey) {}
-  int operator()(const nsUConvProp& aProperty) const {
-    return mKey.Compare(aProperty.mKey);
+  int operator()(const char* (&aProperty)[3]) const {
+    return mKey.Compare(aProperty[0]);
   }
 };
 
@@ -22,7 +22,7 @@ struct PropertyComparator
 
 // static
 nsresult
-nsUConvPropertySearch::SearchPropertyValue(const nsUConvProp aProperties[],
+nsUConvPropertySearch::SearchPropertyValue(const char* aProperties[][3],
                                            int32_t aNumberOfProperties,
                                            const nsACString& aKey,
                                            nsACString& aValue)
@@ -33,8 +33,8 @@ nsUConvPropertySearch::SearchPropertyValue(const nsUConvProp aProperties[],
   size_t index;
   if (BinarySearchIf(aProperties, 0, aNumberOfProperties,
                      PropertyComparator(flat), &index)) {
-    nsDependentCString val(aProperties[index].mValue,
-                           aProperties[index].mValueLength);
+    nsDependentCString val(aProperties[index][1],
+                           NS_PTR_TO_UINT32(aProperties[index][2]));
     aValue.Assign(val);
     return NS_OK;
   }

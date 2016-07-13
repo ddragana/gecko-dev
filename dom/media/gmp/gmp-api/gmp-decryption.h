@@ -21,7 +21,7 @@
 
 class GMPStringList {
 public:
-  virtual uint32_t Size() const = 0;
+  virtual const uint32_t Size() const = 0;
 
   virtual void StringAt(uint32_t aIndex,
                         const char** aOutString, uint32_t* aOutLength) const = 0;
@@ -94,16 +94,36 @@ enum GMPMediaKeyStatus {
   kGMPUsable = 0,
   kGMPExpired = 1,
   kGMPOutputDownscaled = 2,
-  kGMPOutputRestricted = 3,
+  kGMPOutputNotAllowed = 3,
   kGMPInternalError = 4,
-  kGMPUnknown = 5, // Removes key from MediaKeyStatusMap
-  kGMPReleased = 6,
-  kGMPStatusPending = 7,
-  kGMPMediaKeyStatusInvalid = 8 // Must always be last.
+  kGMPUnknown = 5,
+  kGMPMediaKeyStatusInvalid = 6 // Must always be last.
 };
 
 // Time in milliseconds, as offset from epoch, 1 Jan 1970.
 typedef int64_t GMPTimestamp;
+
+// Capability definitions. The capabilities of the EME GMP are reported
+// to Gecko by calling the GMPDecryptorCallback::SetCapabilities()
+// callback and specifying the logical OR of the GMP_EME_CAP_* flags below.
+//
+// Note the DECRYPT and the DECRYPT_AND_DECODE are mutually exclusive;
+// only one mode should be reported for each stream type, but different
+// modes can be reported for different stream types.
+//
+// Note: Gecko does not currently support the caps changing at runtime.
+// Set them once per plugin initialization, during the startup of
+// the GMPDecryptor.
+
+// Capability; CDM can decrypt encrypted buffers and return still
+// compressed buffers back to Gecko for decompression there.
+#define GMP_EME_CAP_DECRYPT_AUDIO (uint64_t(1) << 0)
+#define GMP_EME_CAP_DECRYPT_VIDEO (uint64_t(1) << 1)
+
+// Capability; CDM can decrypt and then decode encrypted buffers,
+// and return decompressed samples to Gecko for playback.
+#define GMP_EME_CAP_DECRYPT_AND_DECODE_AUDIO (uint64_t(1) << 2)
+#define GMP_EME_CAP_DECRYPT_AND_DECODE_VIDEO (uint64_t(1) << 3)
 
 // Callbacks to be called from the CDM. Threadsafe.
 class GMPDecryptorCallback {
@@ -186,7 +206,12 @@ public:
                                 uint32_t aKeyIdLength,
                                 GMPMediaKeyStatus aStatus) = 0;
 
-  // DEPRECATED; this function has no affect.
+  // The CDM must report its capabilites of this CDM. aCaps should be a
+  // logical OR of the GMP_EME_CAP_* flags. The CDM *MUST* call this
+  // function and report whether it can decrypt and/or decode. Without
+  // this, Gecko does not know how to use the CDM and will not send
+  // samples to the CDM to decrypt or decrypt-and-decode mode. Note a
+  // CDM cannot change modes once playback has begun.
   virtual void SetCapabilities(uint64_t aCaps) = 0;
 
   // Returns decrypted buffer to Gecko, or reports failure.
@@ -213,9 +238,7 @@ enum GMPSessionType {
   kGMPSessionInvalid = 2 // Must always be last.
 };
 
-// Gecko supports the current GMPDecryptor version, and the previous.
-#define GMP_API_DECRYPTOR "eme-decrypt-v8"
-#define GMP_API_DECRYPTOR_BACKWARDS_COMPAT "eme-decrypt-v7"
+#define GMP_API_DECRYPTOR "eme-decrypt-v7"
 
 // API exposed by plugin library to manage decryption sessions.
 // When the Host requests this by calling GMPGetAPIFunc().
@@ -227,6 +250,13 @@ public:
 
   // Sets the callback to use with the decryptor to return results
   // to Gecko.
+  //
+  // The CDM must also call GMPDecryptorCallback::SetCapabilities()
+  // exactly once during start up, to inform Gecko whether to use the CDM
+  // in decrypt or decrypt-and-decode mode.
+  //
+  // Note: GMPDecryptorCallback::SetCapabilities() must be called before
+  // Gecko will send any samples for decryption to the GMP.
   virtual void Init(GMPDecryptorCallback* aCallback) = 0;
 
   // Initiates the creation of a session given |aType| and |aInitData|, and

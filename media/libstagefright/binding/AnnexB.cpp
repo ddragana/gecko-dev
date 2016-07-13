@@ -3,12 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include "mp4_demuxer/AnnexB.h"
 #include "mp4_demuxer/ByteReader.h"
 #include "mp4_demuxer/ByteWriter.h"
 #include "MediaData.h"
-#include "nsAutoPtr.h"
 
 using namespace mozilla;
 
@@ -25,18 +24,18 @@ AnnexB::ConvertSampleToAnnexB(mozilla::MediaRawData* aSample)
   if (!IsAVCC(aSample)) {
     return true;
   }
-  MOZ_ASSERT(aSample->Data());
+  MOZ_ASSERT(aSample->mData);
 
   if (!ConvertSampleTo4BytesAVCC(aSample)) {
     return false;
   }
 
-  if (aSample->Size() < 4) {
+  if (aSample->mSize < 4) {
     // Nothing to do, it's corrupted anyway.
     return true;
   }
 
-  ByteReader reader(aSample->Data(), aSample->Size());
+  ByteReader reader(aSample->mData, aSample->mSize);
 
   mozilla::Vector<uint8_t> tmp;
   ByteWriter writer(tmp);
@@ -60,7 +59,7 @@ AnnexB::ConvertSampleToAnnexB(mozilla::MediaRawData* aSample)
 
   // Prepend the Annex B NAL with SPS and PPS tables to keyframes.
   if (aSample->mKeyframe) {
-    RefPtr<MediaByteBuffer> annexB =
+    nsRefPtr<MediaByteBuffer> annexB =
       ConvertExtraDataToAnnexB(aSample->mExtraData);
     if (!samplewriter->Prepend(annexB->Elements(), annexB->Length())) {
       return false;
@@ -88,7 +87,7 @@ AnnexB::ConvertExtraDataToAnnexB(const mozilla::MediaByteBuffer* aExtraData)
   // [5] | unused             | numSps                           |
   //     +------+------+------+------+------+------+------+------+
 
-  RefPtr<mozilla::MediaByteBuffer> annexB = new mozilla::MediaByteBuffer;
+  nsRefPtr<mozilla::MediaByteBuffer> annexB = new mozilla::MediaByteBuffer;
 
   ByteReader reader(*aExtraData);
   const uint8_t* ptr = reader.Read(5);
@@ -221,13 +220,13 @@ AnnexB::ConvertSampleToAVCC(mozilla::MediaRawData* aSample)
     return ConvertSampleTo4BytesAVCC(aSample);
   }
   if (!IsAnnexB(aSample)) {
-    // Not AnnexB, nothing to convert.
-    return true;
+    // Not AnnexB, can't convert.
+    return false;
   }
 
   mozilla::Vector<uint8_t> nalu;
   ByteWriter writer(nalu);
-  ByteReader reader(aSample->Data(), aSample->Size());
+  ByteReader reader(aSample->mData, aSample->mSize);
 
   ParseNALUnits(writer, reader);
   nsAutoPtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
@@ -237,18 +236,16 @@ AnnexB::ConvertSampleToAVCC(mozilla::MediaRawData* aSample)
 already_AddRefed<mozilla::MediaByteBuffer>
 AnnexB::ExtractExtraData(const mozilla::MediaRawData* aSample)
 {
-  RefPtr<mozilla::MediaByteBuffer> extradata = new mozilla::MediaByteBuffer;
-  if (HasSPS(aSample->mExtraData)) {
+  nsRefPtr<mozilla::MediaByteBuffer> extradata = new mozilla::MediaByteBuffer;
+  if (IsAVCC(aSample) && HasSPS(aSample->mExtraData)) {
     // We already have an explicit extradata, re-use it.
     extradata = aSample->mExtraData;
     return extradata.forget();
   }
 
   if (IsAnnexB(aSample)) {
-    // We can't extract data from AnnexB.
     return extradata.forget();
   }
-
   // SPS content
   mozilla::Vector<uint8_t> sps;
   ByteWriter spsw(sps);
@@ -266,7 +263,7 @@ AnnexB::ExtractExtraData(const mozilla::MediaRawData* aSample)
     // ConvertSampleToAVCC.
     nalLenSize = 4;
   }
-  ByteReader reader(aSample->Data(), aSample->Size());
+  ByteReader reader(aSample->mData, aSample->mSize);
 
   // Find SPS and PPS NALUs in AVCC data
   while (reader.Remaining() > nalLenSize) {
@@ -277,17 +274,17 @@ AnnexB::ExtractExtraData(const mozilla::MediaRawData* aSample)
       case 3: nalLen = reader.ReadU24(); break;
       case 4: nalLen = reader.ReadU32(); break;
     }
-    uint8_t nalType = reader.PeekU8() & 0x1f;
+    uint8_t nalType = reader.PeekU8();
     const uint8_t* p = reader.Read(nalLen);
     if (!p) {
       return extradata.forget();
     }
 
-    if (nalType == 0x7) { /* SPS */
+    if (nalType == 0x67) { /* SPS */
       numSps++;
       spsw.WriteU16(nalLen);
       spsw.Write(p, nalLen);
-    } else if (nalType == 0x8) { /* PPS */
+    } else if (nalType == 0x68) { /* PPS */
       numPps++;
       ppsw.WriteU16(nalLen);
       ppsw.Write(p, nalLen);
@@ -347,7 +344,7 @@ AnnexB::ConvertSampleTo4BytesAVCC(mozilla::MediaRawData* aSample)
   }
   mozilla::Vector<uint8_t> dest;
   ByteWriter writer(dest);
-  ByteReader reader(aSample->Data(), aSample->Size());
+  ByteReader reader(aSample->mData, aSample->mSize);
   while (reader.Remaining() > nalLenSize) {
     uint32_t nalLen;
     switch (nalLenSize) {
@@ -370,17 +367,17 @@ AnnexB::ConvertSampleTo4BytesAVCC(mozilla::MediaRawData* aSample)
 bool
 AnnexB::IsAVCC(const mozilla::MediaRawData* aSample)
 {
-  return aSample->Size() >= 3 && aSample->mExtraData &&
+  return aSample->mSize >= 3 && aSample->mExtraData &&
     aSample->mExtraData->Length() >= 7 && (*aSample->mExtraData)[0] == 1;
 }
 
 bool
 AnnexB::IsAnnexB(const mozilla::MediaRawData* aSample)
 {
-  if (aSample->Size() < 4) {
+  if (aSample->mSize < 4) {
     return false;
   }
-  uint32_t header = mozilla::BigEndian::readUint32(aSample->Data());
+  uint32_t header = mozilla::BigEndian::readUint32(aSample->mData);
   return header == 0x00000001 || (header >> 8) == 0x000001;
 }
 

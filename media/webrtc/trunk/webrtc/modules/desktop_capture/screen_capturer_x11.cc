@@ -18,7 +18,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/differ.h"
@@ -26,6 +25,7 @@
 #include "webrtc/modules/desktop_capture/screen_capturer_helper.h"
 #include "webrtc/modules/desktop_capture/x11/x_server_pixel_buffer.h"
 #include "webrtc/system_wrappers/interface/logging.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 
 // TODO(sergeyu): Move this to a header where it can be shared.
@@ -50,18 +50,18 @@ class ScreenCapturerLinux : public ScreenCapturer,
   bool Init(const DesktopCaptureOptions& options);
 
   // DesktopCapturer interface.
-  void Start(Callback* delegate) override;
-  void Capture(const DesktopRegion& region) override;
+  virtual void Start(Callback* delegate) OVERRIDE;
+  virtual void Capture(const DesktopRegion& region) OVERRIDE;
 
   // ScreenCapturer interface.
-  bool GetScreenList(ScreenList* screens) override;
-  bool SelectScreen(ScreenId id) override;
+  virtual bool GetScreenList(ScreenList* screens) OVERRIDE;
+  virtual bool SelectScreen(ScreenId id) OVERRIDE;
 
  private:
   Display* display() { return options_.x_display()->display(); }
 
   // SharedXDisplay::XEventHandler interface.
-  bool HandleXEvent(const XEvent& event) override;
+  virtual bool HandleXEvent(const XEvent& event) OVERRIDE;
 
   void InitXDamage();
 
@@ -119,7 +119,7 @@ class ScreenCapturerLinux : public ScreenCapturer,
   DesktopRegion last_invalid_region_;
 
   // |Differ| for use when polling for changes.
-  rtc::scoped_ptr<Differ> differ_;
+  scoped_ptr<Differ> differ_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenCapturerLinux);
 };
@@ -260,7 +260,7 @@ void ScreenCapturerLinux::Capture(const DesktopRegion& region) {
   // Note that we can't reallocate other buffers at this point, since the caller
   // may still be reading from them.
   if (!queue_.current_frame()) {
-    rtc::scoped_ptr<DesktopFrame> frame(
+    scoped_ptr<DesktopFrame> frame(
         new BasicDesktopFrame(x_server_pixel_buffer_.window_size()));
     queue_.ReplaceCurrentFrame(frame.release());
   }
@@ -442,7 +442,7 @@ ScreenCapturer* ScreenCapturer::Create(const DesktopCaptureOptions& options) {
   if (!options.x_display())
     return NULL;
 
-  rtc::scoped_ptr<ScreenCapturerLinux> capturer(new ScreenCapturerLinux());
+  scoped_ptr<ScreenCapturerLinux> capturer(new ScreenCapturerLinux());
   if (!capturer->Init(options))
     capturer.reset();
   return capturer.release();

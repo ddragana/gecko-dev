@@ -10,32 +10,22 @@
 #include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/embedding/PPrintingParent.h"
 
-class nsIPrintSettingsService;
-class nsIWebProgressListener;
-class nsPIDOMWindowOuter;
+class nsIDOMWindow;
 class PPrintProgressDialogParent;
 class PPrintSettingsDialogParent;
 
 namespace mozilla {
-namespace layout {
-class PRemotePrintJobParent;
-class RemotePrintJobParent;
-}
-
 namespace embedding {
 
 class PrintingParent final : public PPrintingParent
 {
 public:
-    NS_INLINE_DECL_REFCOUNTING(PrintingParent)
-
     virtual bool
     RecvShowProgress(PBrowserParent* parent,
                      PPrintProgressDialogParent* printProgressDialog,
-                     PRemotePrintJobParent* remotePrintJob,
                      const bool& isForPrinting,
                      bool* notifyOnOpen,
-                     nsresult* result);
+                     bool* success);
     virtual bool
     RecvShowPrintDialog(PPrintSettingsDialogParent* aDialog,
                         PBrowserParent* aParent,
@@ -59,51 +49,24 @@ public:
     virtual bool
     DeallocPPrintSettingsDialogParent(PPrintSettingsDialogParent* aActor);
 
-    virtual PRemotePrintJobParent*
-    AllocPRemotePrintJobParent();
-
-    virtual bool
-    DeallocPRemotePrintJobParent(PRemotePrintJobParent* aActor);
-
     virtual void
     ActorDestroy(ActorDestroyReason aWhy);
 
     MOZ_IMPLICIT PrintingParent();
-
-    /**
-     * Serialize nsIPrintSettings to PrintData ready for sending to a child
-     * process. A RemotePrintJob will be created and added to the PrintData.
-     * An optional progress listener can be given, which will be registered
-     * with the RemotePrintJob, so that progress can be tracked in the parent.
-     *
-     * @param aPrintSettings optional print settings to serialize, otherwise a
-     *                       default print settings will be used.
-     * @param aProgressListener optional print progress listener.
-     * @param aRemotePrintJob optional remote print job, so that an existing
-     *                        one can be used.
-     * @param aPrintData PrintData to populate.
-     */
-    nsresult
-    SerializeAndEnsureRemotePrintJob(nsIPrintSettings* aPrintSettings,
-                                     nsIWebProgressListener* aListener,
-                                     layout::RemotePrintJobParent* aRemotePrintJob,
-                                     PrintData* aPrintData);
-
-private:
     virtual ~PrintingParent();
 
-    nsPIDOMWindowOuter*
+private:
+    nsIDOMWindow*
     DOMWindowFromBrowserParent(PBrowserParent* parent);
 
     nsresult
     ShowPrintDialog(PBrowserParent* parent,
                     const PrintData& data,
                     PrintData* result);
-
-    nsCOMPtr<nsIPrintSettingsService> mPrintSettingsSvc;
 };
 
 } // namespace embedding
 } // namespace mozilla
 
 #endif
+

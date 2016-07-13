@@ -52,15 +52,14 @@ public:
 
   nsDOMOfflineResourceList(nsIURI* aManifestURI,
                            nsIURI* aDocumentURI,
-                           nsIPrincipal* aLoadingPrincipal,
-                           nsPIDOMWindowInner* aWindow);
+                           nsPIDOMWindow* aWindow);
 
   void FirePendingEvents();
   void Disconnect();
 
   nsresult Init();
 
-  nsPIDOMWindowInner* GetParentObject() const
+  nsPIDOMWindow* GetParentObject() const
   {
     return GetOwner();
   }
@@ -116,7 +115,7 @@ public:
   }
   uint32_t Length()
   {
-    mozilla::IgnoredErrorResult rv;
+    ErrorResult rv;
     uint32_t length = GetMozLength(rv);
     return rv.Failed() ? 0 : length;
   }
@@ -154,7 +153,6 @@ private:
   nsCString mManifestSpec;
 
   nsCOMPtr<nsIURI> mDocumentURI;
-  nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
   nsCOMPtr<nsIApplicationCacheService> mApplicationCacheService;
   nsCOMPtr<nsIApplicationCache> mAvailableApplicationCache;
   nsCOMPtr<nsIOfflineCacheUpdate> mCacheUpdate;

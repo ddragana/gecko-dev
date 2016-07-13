@@ -7,6 +7,7 @@
 #ifndef MOZILLA_DOMSVGSTRINGLIST_H__
 #define MOZILLA_DOMSVGSTRINGLIST_H__
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsSVGElement.h"
@@ -107,7 +108,7 @@ private:
   SVGStringList &InternalList() const;
 
   // Strong ref to our element to keep it alive.
-  RefPtr<nsSVGElement> mElement;
+  nsRefPtr<nsSVGElement> mElement;
 
   uint8_t mAttrEnum;
 

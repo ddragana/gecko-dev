@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2007 Henri Sivonen
- * Copyright (c) 2007-2015 Mozilla Foundation
+ * Copyright (c) 2007-2011 Mozilla Foundation
  * Portions of comments Copyright 2004-2008 Apple Computer, Inc., Mozilla
  * Foundation, and Opera Software ASA.
  *
@@ -119,7 +119,7 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
     bool isTemplateModeStackEmpty();
     bool isSpecialParentInForeign(nsHtml5StackNode* stackNode);
   public:
-    static nsString* extractCharsetFromContent(nsString* attributeValue, nsHtml5TreeBuilder* tb);
+    static nsString* extractCharsetFromContent(nsString* attributeValue);
   private:
     void checkMetaCharset(nsHtml5HtmlAttributes* attributes);
   public:
@@ -334,7 +334,7 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
 #define NS_HTML5TREE_BUILDER_FOREIGNOBJECT_OR_DESC 59
 #define NS_HTML5TREE_BUILDER_NOEMBED 60
 #define NS_HTML5TREE_BUILDER_FIELDSET 61
-#define NS_HTML5TREE_BUILDER_OUTPUT 62
+#define NS_HTML5TREE_BUILDER_OUTPUT_OR_LABEL 62
 #define NS_HTML5TREE_BUILDER_OBJECT 63
 #define NS_HTML5TREE_BUILDER_FONT 64
 #define NS_HTML5TREE_BUILDER_KEYGEN 65

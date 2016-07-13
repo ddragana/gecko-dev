@@ -54,7 +54,7 @@ public:
          nsReflowStatus&          aStatus) override;
 
   virtual nsresult
-  Place(DrawTarget*          aDrawTarget,
+  Place(nsRenderingContext& aRenderingContext,
         bool                 aPlaceOrigin,
         nsHTMLReflowMetrics& aDesiredSize) override;
 

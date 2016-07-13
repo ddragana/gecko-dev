@@ -15,11 +15,8 @@ namespace dom {
 
 // static
 already_AddRefed<FileSystemBase>
-FileSystemBase::DeserializeDOMPath(const nsAString& aString)
+FileSystemBase::FromString(const nsAString& aString)
 {
-  MOZ_ASSERT(XRE_IsParentProcess(), "Only call from parent process!");
-  AssertIsOnBackgroundThread();
-
   if (StringBeginsWith(aString, NS_LITERAL_STRING("devicestorage-"))) {
     // The string representation of devicestorage file system is of the format:
     // devicestorage-StorageType-StorageName
@@ -37,48 +34,59 @@ FileSystemBase::DeserializeDOMPath(const nsAString& aString)
       storageName = tokenizer.nextToken();
     }
 
-    RefPtr<DeviceStorageFileSystem> f =
+    nsRefPtr<DeviceStorageFileSystem> f =
       new DeviceStorageFileSystem(storageType, storageName);
     return f.forget();
   }
-
-  return RefPtr<OSFileSystemParent>(new OSFileSystemParent(aString)).forget();
+  return nsRefPtr<OSFileSystem>(new OSFileSystem(aString)).forget();
 }
 
 FileSystemBase::FileSystemBase()
   : mShutdown(false)
-  , mPermissionCheckType(eNotSet)
-#ifdef DEBUG
-  , mOwningThread(PR_GetCurrentThread())
-#endif
+  , mRequiresPermissionChecks(true)
 {
 }
 
 FileSystemBase::~FileSystemBase()
 {
-  AssertIsOnOwningThread();
 }
 
 void
 FileSystemBase::Shutdown()
 {
-  AssertIsOnOwningThread();
   mShutdown = true;
 }
 
-nsISupports*
-FileSystemBase::GetParentObject() const
+nsPIDOMWindow*
+FileSystemBase::GetWindow() const
 {
-  AssertIsOnOwningThread();
   return nullptr;
 }
 
-bool
-FileSystemBase::GetRealPath(BlobImpl* aFile, nsIFile** aPath) const
+already_AddRefed<nsIFile>
+FileSystemBase::GetLocalFile(const nsAString& aRealPath) const
 {
-  AssertIsOnOwningThread();
+  MOZ_ASSERT(XRE_IsParentProcess(),
+             "Should be on parent process!");
+  nsAutoString localPath;
+  FileSystemUtils::NormalizedPathToLocalPath(aRealPath, localPath);
+  localPath = mLocalRootPath + localPath;
+  nsCOMPtr<nsIFile> file;
+  nsresult rv = NS_NewLocalFile(localPath, false, getter_AddRefs(file));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
+  return file.forget();
+}
+
+bool
+FileSystemBase::GetRealPath(BlobImpl* aFile, nsAString& aRealPath) const
+{
+  MOZ_ASSERT(XRE_IsParentProcess(),
+             "Should be on parent process!");
   MOZ_ASSERT(aFile, "aFile Should not be null.");
-  MOZ_ASSERT(aPath);
+
+  aRealPath.Truncate();
 
   nsAutoString filePath;
   ErrorResult rv;
@@ -87,116 +95,33 @@ FileSystemBase::GetRealPath(BlobImpl* aFile, nsIFile** aPath) const
     return false;
   }
 
-  rv = NS_NewNativeLocalFile(NS_ConvertUTF16toUTF8(filePath),
-                             true, aPath);
-  if (NS_WARN_IF(rv.Failed())) {
-    return false;
-  }
-
-  return true;
+  return LocalPathToRealPath(filePath, aRealPath);
 }
 
 bool
 FileSystemBase::IsSafeFile(nsIFile* aFile) const
 {
-  AssertIsOnOwningThread();
   return false;
 }
 
 bool
 FileSystemBase::IsSafeDirectory(Directory* aDir) const
 {
-  AssertIsOnOwningThread();
   return false;
 }
 
-void
-FileSystemBase::GetDirectoryName(nsIFile* aFile, nsAString& aRetval,
-                                 ErrorResult& aRv) const
+bool
+FileSystemBase::LocalPathToRealPath(const nsAString& aLocalPath,
+                                    nsAString& aRealPath) const
 {
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aFile);
-
-  aRv = aFile->GetLeafName(aRetval);
-  NS_WARN_IF(aRv.Failed());
-}
-
-void
-FileSystemBase::GetDOMPath(nsIFile* aFile,
-                           nsAString& aRetval,
-                           ErrorResult& aRv) const
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aFile);
-
-  aRetval.Truncate();
-
-  nsCOMPtr<nsIFile> fileSystemPath;
-  aRv = NS_NewNativeLocalFile(NS_ConvertUTF16toUTF8(LocalOrDeviceStorageRootPath()),
-                              true, getter_AddRefs(fileSystemPath));
-  if (NS_WARN_IF(aRv.Failed())) {
-    return;
+  nsAutoString path;
+  FileSystemUtils::LocalPathToNormalizedPath(aLocalPath, path);
+  if (!FileSystemUtils::IsDescendantPath(mNormalizedLocalRootPath, path)) {
+    aRealPath.Truncate();
+    return false;
   }
-
-  nsCOMPtr<nsIFile> path;
-  aRv = aFile->Clone(getter_AddRefs(path));
-  if (NS_WARN_IF(aRv.Failed())) {
-    return;
-  }
-
-  nsTArray<nsString> parts;
-
-  while (true) {
-    nsAutoString leafName;
-    aRv = path->GetLeafName(leafName);
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
-
-    if (!leafName.IsEmpty()) {
-      parts.AppendElement(leafName);
-    }
-
-    bool equal = false;
-    aRv = fileSystemPath->Equals(path, &equal);
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
-
-    if (equal) {
-      break;
-    }
-
-    nsCOMPtr<nsIFile> parentPath;
-    aRv = path->GetParent(getter_AddRefs(parentPath));
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
-
-    MOZ_ASSERT(parentPath);
-
-    aRv = parentPath->Clone(getter_AddRefs(path));
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
-  }
-
-  if (parts.IsEmpty()) {
-    aRetval.AppendLiteral(FILESYSTEM_DOM_PATH_SEPARATOR_LITERAL);
-    return;
-  }
-
-  for (int32_t i = parts.Length() - 1; i >= 0; --i) {
-    aRetval.AppendLiteral(FILESYSTEM_DOM_PATH_SEPARATOR_LITERAL);
-    aRetval.Append(parts[i]);
-  }
-}
-
-void
-FileSystemBase::AssertIsOnOwningThread() const
-{
-  MOZ_ASSERT(mOwningThread);
-  MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
+  aRealPath = Substring(path, mNormalizedLocalRootPath.Length());
+  return true;
 }
 
 } // namespace dom

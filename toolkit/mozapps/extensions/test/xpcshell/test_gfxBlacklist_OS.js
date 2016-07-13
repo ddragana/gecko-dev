@@ -3,7 +3,7 @@
  */
 
 // This should eventually be moved to head_addons.js
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 // Test whether a machine which differs only on OS version, but otherwise
 // exactly matches the blacklist entry, is not blocked.
@@ -58,7 +58,7 @@ function run_test() {
     case "Darwin":
       gfxInfo.spoofVendorID("0xabcd");
       gfxInfo.spoofDeviceID("0x1234");
-      gfxInfo.spoofOSVersion(0x1080);
+      gfxInfo.spoofOSVersion(0x1070);
       break;
     case "Android":
       // On Android, the driver version is used as the OS version (because

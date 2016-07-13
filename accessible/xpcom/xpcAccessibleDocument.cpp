@@ -9,11 +9,9 @@
 #include "xpcAccessibleTable.h"
 #include "xpcAccessibleTableCell.h"
 
-#include "mozilla/a11y/DocAccessibleParent.h"
 #include "DocAccessible-inl.h"
 #include "nsIDOMDocument.h"
 
-using namespace mozilla;
 using namespace mozilla::a11y;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -99,7 +97,7 @@ xpcAccessibleDocument::GetDOMDocument(nsIDOMDocument** aDOMDocument)
 }
 
 NS_IMETHODIMP
-xpcAccessibleDocument::GetWindow(mozIDOMWindowProxy** aDOMWindow)
+xpcAccessibleDocument::GetWindow(nsIDOMWindow** aDOMWindow)
 {
   NS_ENSURE_ARG_POINTER(aDOMWindow);
   *aDOMWindow = nullptr;
@@ -170,7 +168,6 @@ xpcAccessibleDocument::GetVirtualCursor(nsIAccessiblePivot** aVirtualCursor)
 xpcAccessibleGeneric*
 xpcAccessibleDocument::GetAccessible(Accessible* aAccessible)
 {
-  MOZ_ASSERT(!mRemote);
   if (ToXPCDocument(aAccessible->Document()) != this) {
     NS_ERROR("This XPCOM document is not related with given internal accessible!");
     return nullptr;
@@ -198,53 +195,17 @@ xpcAccessibleDocument::GetAccessible(Accessible* aAccessible)
   return xpcAcc;
 }
 
-xpcAccessibleGeneric*
-xpcAccessibleDocument::GetXPCAccessible(ProxyAccessible* aProxy)
+static PLDHashOperator
+ShutdownAndRemove(const Accessible* aKey, nsRefPtr<xpcAccessibleGeneric>& aValue,
+                  void* aUnused)
 {
-  MOZ_ASSERT(mRemote);
-  MOZ_ASSERT(aProxy->Document() == mIntl.AsProxy());
-  if (aProxy->IsDoc()) {
-    return this;
-  }
-
-  xpcAccessibleGeneric* acc = mCache.GetWeak(aProxy);
-  if (acc) {
-    return acc;
-  }
-
-  // XXX support exposing optional interfaces.
-  uint8_t interfaces = 0;
-  if (aProxy->mHasValue) {
-    interfaces |= eValue;
-  }
-
-  acc = new xpcAccessibleGeneric(aProxy, interfaces);
-  mCache.Put(aProxy, acc);
-
-  return acc;
+  aValue->Shutdown();
+  return PL_DHASH_REMOVE;
 }
 
 void
 xpcAccessibleDocument::Shutdown()
 {
-  for (auto iter = mCache.Iter(); !iter.Done(); iter.Next()) {
-    iter.Data()->Shutdown();
-    iter.Remove();
-  }
+  mCache.Enumerate(ShutdownAndRemove, nullptr);
   xpcAccessibleGeneric::Shutdown();
-}
-
-xpcAccessibleGeneric*
-a11y::ToXPC(AccessibleOrProxy aAcc)
-{
-  if (aAcc.IsNull()) {
-    return nullptr;
-  }
-
-  if (aAcc.IsAccessible()) {
-    return ToXPC(aAcc.AsAccessible());
-  }
-
- xpcAccessibleDocument* doc = ToXPCDocument(aAcc.AsProxy()->Document());
- return doc->GetXPCAccessible(aAcc.AsProxy());
 }

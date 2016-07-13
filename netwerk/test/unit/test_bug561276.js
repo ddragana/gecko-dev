@@ -4,17 +4,25 @@
 //
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var httpserver = new HttpServer();
 var iteration = 0;
 
 function setupChannel(suffix)
 {
-    var chan = NetUtil.newChannel({
-      uri: "http://localhost:" + httpserver.identity.primaryPort + suffix,
-      loadUsingSystemPrincipal: true
-    });
+    var ios =
+        Components.classes["@mozilla.org/network/io-service;1"]
+        .getService(Ci.nsIIOService);
+    var chan = ios.newChannel2("http://localhost:" +
+			                         httpserver.identity.primaryPort + suffix,
+                               "",
+                               null,
+                               null,      // aLoadingNode
+                               Services.scriptSecurityManager.getSystemPrincipal(),
+                               null,      // aTriggeringPrincipal
+                               Ci.nsILoadInfo.SEC_NORMAL,
+                               Ci.nsIContentPolicy.TYPE_OTHER);
     var httpChan = chan.QueryInterface(Components.interfaces.nsIHttpChannel);
     httpChan.requestMethod = "GET";
     return httpChan;
@@ -37,7 +45,7 @@ function run_test()
 
     // load first time
     var channel = setupChannel("/redirect1");
-    channel.asyncOpen2(new ChannelListener(checkValueAndTrigger, null));
+    channel.asyncOpen(new ChannelListener(checkValueAndTrigger, null), null);
 
     do_test_pending();
 }

@@ -31,15 +31,6 @@ XULComboboxAccessible::
     mGenericTypes |= eAutoComplete;
   else
     mGenericTypes |= eCombobox;
-
-  // Both the XUL <textbox type="autocomplete"> and <menulist editable="true">
-  // widgets use XULComboboxAccessible. We need to walk the anonymous children
-  // for these so that the entry field is a child. Otherwise no XBL children.
-  if (!mContent->NodeInfo()->Equals(nsGkAtoms::textbox, kNameSpaceID_XUL) &&
-      !mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::editable,
-                             nsGkAtoms::_true, eIgnoreCase)) {
-    mStateFlags |= eNoXBLKids;
-  }
 }
 
 role
@@ -103,6 +94,23 @@ XULComboboxAccessible::Value(nsString& aValue)
   nsCOMPtr<nsIDOMXULMenuListElement> menuList(do_QueryInterface(mContent));
   if (menuList)
     menuList->GetLabel(aValue);
+}
+
+bool
+XULComboboxAccessible::CanHaveAnonChildren()
+{
+  if (mContent->NodeInfo()->Equals(nsGkAtoms::textbox, kNameSpaceID_XUL) ||
+      mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::editable,
+                            nsGkAtoms::_true, eIgnoreCase)) {
+    // Both the XUL <textbox type="autocomplete"> and <menulist editable="true"> widgets
+    // use XULComboboxAccessible. We need to walk the anonymous children for these
+    // so that the entry field is a child
+    return true;
+  }
+
+  // Argument of false indicates we don't walk anonymous children for
+  // menuitems
+  return false;
 }
 
 uint8_t

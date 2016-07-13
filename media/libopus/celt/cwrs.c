@@ -460,12 +460,10 @@ void encode_pulses(const int *_y,int _n,int _k,ec_enc *_enc){
   ec_enc_uint(_enc,icwrs(_n,_y),CELT_PVQ_V(_n,_k));
 }
 
-static opus_val32 cwrsi(int _n,int _k,opus_uint32 _i,int *_y){
+static void cwrsi(int _n,int _k,opus_uint32 _i,int *_y){
   opus_uint32 p;
   int         s;
   int         k0;
-  opus_int16  val;
-  opus_val32  yy=0;
   celt_assert(_k>0);
   celt_assert(_n>1);
   while(_n>2){
@@ -489,9 +487,7 @@ static opus_val32 cwrsi(int _n,int _k,opus_uint32 _i,int *_y){
       }
       else for(p=row[_k];p>_i;p=row[_k])_k--;
       _i-=p;
-      val=(k0-_k+s)^s;
-      *_y++=val;
-      yy=MAC16_16(yy,val,val);
+      *_y++=(k0-_k+s)^s;
     }
     /*Lots of dimensions case:*/
     else{
@@ -511,9 +507,7 @@ static opus_val32 cwrsi(int _n,int _k,opus_uint32 _i,int *_y){
         do p=CELT_PVQ_U_ROW[--_k][_n];
         while(p>_i);
         _i-=p;
-        val=(k0-_k+s)^s;
-        *_y++=val;
-        yy=MAC16_16(yy,val,val);
+        *_y++=(k0-_k+s)^s;
       }
     }
     _n--;
@@ -525,19 +519,14 @@ static opus_val32 cwrsi(int _n,int _k,opus_uint32 _i,int *_y){
   k0=_k;
   _k=(_i+1)>>1;
   if(_k)_i-=2*_k-1;
-  val=(k0-_k+s)^s;
-  *_y++=val;
-  yy=MAC16_16(yy,val,val);
+  *_y++=(k0-_k+s)^s;
   /*_n==1*/
   s=-(int)_i;
-  val=(_k+s)^s;
-  *_y=val;
-  yy=MAC16_16(yy,val,val);
-  return yy;
+  *_y=(_k+s)^s;
 }
 
-opus_val32 decode_pulses(int *_y,int _n,int _k,ec_dec *_dec){
-  return cwrsi(_n,_k,ec_dec_uint(_dec,CELT_PVQ_V(_n,_k)),_y);
+void decode_pulses(int *_y,int _n,int _k,ec_dec *_dec){
+  cwrsi(_n,_k,ec_dec_uint(_dec,CELT_PVQ_V(_n,_k)),_y);
 }
 
 #else /* SMALL_FOOTPRINT */
@@ -602,10 +591,8 @@ static opus_uint32 ncwrs_urow(unsigned _n,unsigned _k,opus_uint32 *_u){
   _y: Returns the vector of pulses.
   _u: Must contain entries [0..._k+1] of row _n of U() on input.
       Its contents will be destructively modified.*/
-static opus_val32 cwrsi(int _n,int _k,opus_uint32 _i,int *_y,opus_uint32 *_u){
+static void cwrsi(int _n,int _k,opus_uint32 _i,int *_y,opus_uint32 *_u){
   int j;
-  opus_int16 val;
-  opus_val32 yy=0;
   celt_assert(_n>0);
   j=0;
   do{
@@ -620,13 +607,10 @@ static opus_val32 cwrsi(int _n,int _k,opus_uint32 _i,int *_y,opus_uint32 *_u){
     while(p>_i)p=_u[--_k];
     _i-=p;
     yj-=_k;
-    val=(yj+s)^s;
-    _y[j]=val;
-    yy=MAC16_16(yy,val,val);
+    _y[j]=(yj+s)^s;
     uprev(_u,_k+2,0);
   }
   while(++j<_n);
-  return yy;
 }
 
 /*Returns the index of the given combination of K elements chosen from a set
@@ -701,15 +685,13 @@ void encode_pulses(const int *_y,int _n,int _k,ec_enc *_enc){
   RESTORE_STACK;
 }
 
-opus_val32 decode_pulses(int *_y,int _n,int _k,ec_dec *_dec){
+void decode_pulses(int *_y,int _n,int _k,ec_dec *_dec){
   VARDECL(opus_uint32,u);
-  int ret;
   SAVE_STACK;
   celt_assert(_k>0);
   ALLOC(u,_k+2U,opus_uint32);
-  ret = cwrsi(_n,_k,ec_dec_uint(_dec,ncwrs_urow(_n,_k,u)),_y,u);
+  cwrsi(_n,_k,ec_dec_uint(_dec,ncwrs_urow(_n,_k,u)),_y,u);
   RESTORE_STACK;
-  return ret;
 }
 
 #endif /* SMALL_FOOTPRINT */

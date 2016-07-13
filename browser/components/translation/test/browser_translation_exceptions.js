@@ -4,10 +4,10 @@
 
 // tests the translation infobar, using a fake 'Translation' implementation.
 
-var tmp = {};
+let tmp = {};
 Cu.import("resource:///modules/translation/Translation.jsm", tmp);
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
-var {Translation, Promise} = tmp;
+let {Translation, Promise} = tmp;
 
 const kLanguagesPref = "browser.translation.neverForLanguages";
 const kShowUIPref = "browser.translation.ui.show";
@@ -58,19 +58,7 @@ function getDomainExceptions() {
 }
 
 function getInfoBar() {
-  let deferred = Promise.defer();
-  let infobar =
-    gBrowser.getNotificationBox().getNotificationWithValue("translation");
-
-  if (!infobar) {
-    deferred.resolve();
-  } else {
-    // Wait for all animations to finish
-    Promise.all(infobar.getAnimations().map(animation => animation.finished))
-      .then(() => deferred.resolve(infobar));
-  }
-
-  return deferred.promise;
+  return gBrowser.getNotificationBox().getNotificationWithValue("translation");
 }
 
 function openPopup(aPopup) {
@@ -101,7 +89,7 @@ function waitForWindowLoad(aWin) {
 }
 
 
-var gTests = [
+let gTests = [
 
 {
   desc: "clean exception lists at startup",
@@ -121,7 +109,7 @@ var gTests = [
                                       {state: Translation.STATE_OFFER,
                                        originalShown: true,
                                        detectedLanguage: "fr"});
-    let notif = yield getInfoBar();
+    let notif = getInfoBar();
     ok(notif, "the infobar is visible");
     let ui = gBrowser.selectedBrowser.translationUI;
     let uri = gBrowser.selectedBrowser.currentURI;
@@ -139,8 +127,7 @@ var gTests = [
 
     // Click the 'Never for French' item.
     notif._getAnonElt("neverForLanguage").click();
-    notif = yield getInfoBar();
-    ok(!notif, "infobar hidden");
+    ok(!getInfoBar(), "infobar hidden");
 
     // Check this has been saved to the exceptions list.
     let langs = getLanguageExceptions();
@@ -151,7 +138,7 @@ var gTests = [
 
     // Reopen the infobar.
     PopupNotifications.getNotification("translate").anchorElement.click();
-    notif = yield getInfoBar();
+    notif = getInfoBar();
     // Open the "options" drop down.
     yield openPopup(notif._getAnonElt("options"));
     ok(notif._getAnonElt("neverForLanguage").disabled,
@@ -171,7 +158,7 @@ var gTests = [
                                       {state: Translation.STATE_OFFER,
                                        originalShown: true,
                                        detectedLanguage: "fr"});
-    let notif = yield getInfoBar();
+    let notif = getInfoBar();
     ok(notif, "the infobar is visible");
     let ui = gBrowser.selectedBrowser.translationUI;
     let uri = gBrowser.selectedBrowser.currentURI;
@@ -189,8 +176,7 @@ var gTests = [
 
     // Click the 'Never for French' item.
     notif._getAnonElt("neverForSite").click();
-    notif = yield getInfoBar();
-    ok(!notif, "infobar hidden");
+    ok(!getInfoBar(), "infobar hidden");
 
     // Check this has been saved to the exceptions list.
     let sites = getDomainExceptions();
@@ -201,7 +187,7 @@ var gTests = [
 
     // Reopen the infobar.
     PopupNotifications.getNotification("translate").anchorElement.click();
-    notif = yield getInfoBar();
+    notif = getInfoBar();
     // Open the "options" drop down.
     yield openPopup(notif._getAnonElt("options"));
     ok(notif._getAnonElt("neverForSite").disabled,

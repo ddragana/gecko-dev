@@ -14,20 +14,6 @@
 
   "use strict";
 
-  function registerPage() {
-    var gScript = SpecialPowers.loadChromeScript(SimpleTest.getTestFileURL('system_message_chrome_script.js'));
-    gScript.addMessageListener("page-registered", function pageRegisteredHandler() {
-      gScript.removeMessageListener("page-registered", pageRegisteredHandler);
-      gScript.destroy();
-      testFireTimeAlertWithNoData();
-    });
-
-    gScript.sendAsyncMessage("trigger-register-page",
-                             { type: "alarm",
-                               manifestURL: window.location.origin + "/manifest.webapp",
-                               pageURL: window.location.href });
-  }
-
   function testFireTimeAlertWithNoData() {
     var secondsLater = new Date();
     secondsLater.setSeconds(secondsLater.getSeconds() + 1);
@@ -75,7 +61,7 @@
 
       if (isAllowedToTest) {
         ok(true, "Start to test...");
-        registerPage();
+        testFireTimeAlertWithNoData();
       } else {
         // A sanity check to make sure we must run tests on Firefox OS (B2G).
         if (navigator.userAgent.indexOf("Mobile") != -1 &&

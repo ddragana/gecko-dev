@@ -29,7 +29,7 @@ public:
   already_AddRefed<Promise> Transceive(const Uint8Array& aCommand,
                                        ErrorResult& aRv);
 
-  nsPIDOMWindowInner* GetParentObject() const { return mWindow; }
+  nsPIDOMWindow* GetParentObject() const { return mWindow; }
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -38,13 +38,13 @@ public:
               ErrorResult& aRv);
 
 private:
-  MozIsoDepTech(nsPIDOMWindowInner* aWindow, MozNFCTag& aNFCTag);
+  MozIsoDepTech(nsPIDOMWindow* aWindow, MozNFCTag& aNFCTag);
   virtual ~MozIsoDepTech();
 
-  RefPtr<nsPIDOMWindowInner> mWindow;
-  RefPtr<MozNFCTag> mTag;
+  nsRefPtr<nsPIDOMWindow> mWindow;
+  nsRefPtr<MozNFCTag> mTag;
 
-  static const NFCTechType sTechnology;
+  static const NFCTechType mTechnology;
 };
 
 } // namespace dom

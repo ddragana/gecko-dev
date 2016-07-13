@@ -90,6 +90,15 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=409604
       "tr"
     ];
 
+  // ui.key.contentAccess must be set to value 5 before running the test.
+  function setOrRestoreContentAccess(newValue) {
+    if (!newValue) {
+      SpecialPowers.clearUserPref("ui.key.contentAccess");
+    } else {
+      SpecialPowers.setIntPref("ui.key.contentAccess", newValue);
+    }
+  }
+
   function handleFocus(e) {
     ok("accessKey" in e, "(focus) accesskey property not found on element");
     var expected = focusArray.shift();
@@ -209,14 +218,17 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=409604
   function start() {
     testFocusableElements();
     testUnfocusableElements();
+    setOrRestoreContentAccess(0);
     SimpleTest.finish();
   }
 
   function doTest() {
-    SpecialPowers.pushPrefEnv({"set": [["ui.key.contentAccess", 5]]}, start);
+    setOrRestoreContentAccess(5);
+    setTimeout(start, 100);
   }
 
   SimpleTest.waitForExplicitFinish();
+  SimpleTest.requestFlakyTimeout("untriaged");
   addLoadEvent(doTest);
 
 </script>

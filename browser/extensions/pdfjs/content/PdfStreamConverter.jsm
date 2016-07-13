@@ -1,3 +1,5 @@
+/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,15 +67,16 @@ function getFindBar(domWindow) {
   if (PdfjsContentUtils.isRemote) {
     throw new Error('FindBar is not accessible from the content process.');
   }
+  var browser = getContainingBrowser(domWindow);
   try {
-    var browser = getContainingBrowser(domWindow);
     var tabbrowser = browser.getTabBrowser();
-    var tab = tabbrowser.getTabForBrowser(browser);
+    var tab;
+    tab = tabbrowser.getTabForBrowser(browser);
     return tabbrowser.getFindBar(tab);
   } catch (e) {
-    // Suppress errors for PDF files opened in the bookmark sidebar, see
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1248959.
-    return null;
+    // FF22 has no _getTabForBrowser, and FF24 has no getFindBar
+    var chromeWindow = browser.ownerDocument.defaultView;
+    return chromeWindow.gFindBar;
   }
 }
 
@@ -148,15 +151,18 @@ function getLocalizedString(strings, id, property) {
   return id;
 }
 
-function createNewChannel(uri, node) {
-  return NetUtil.newChannel({
-    uri: uri,
-    loadUsingSystemPrincipal: true,
-  });
+function makeContentReadable(obj, window) {
+  /* jshint -W027 */
+  return Cu.cloneInto(obj, window);
 }
 
-function asyncOpenChannel(channel, listener, context) {
-  return channel.asyncOpen2(listener);
+function createNewChannel(uri, node, principal) {
+  return NetUtil.newChannel({
+    uri: uri,
+    loadingNode: node,
+    loadingPrincipal: principal,
+    contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER,
+  });
 }
 
 function asyncFetchChannel(channel, callback) {
@@ -254,9 +260,11 @@ ChromeActions.prototype = {
     var extHelperAppSvc =
           Cc['@mozilla.org/uriloader/external-helper-app-service;1'].
              getService(Ci.nsIExternalHelperAppService);
+    var frontWindow = Cc['@mozilla.org/embedcomp/window-watcher;1'].
+                         getService(Ci.nsIWindowWatcher).activeWindow;
 
     var docIsPrivate = this.isInPrivateBrowsing();
-    var netChannel = createNewChannel(blobUri, this.domWindow.document);
+    var netChannel = createNewChannel(blobUri, frontWindow.document, null);
     if ('nsIPrivateBrowsingChannel' in Ci &&
         netChannel instanceof Ci.nsIPrivateBrowsingChannel) {
       netChannel.setPrivate(docIsPrivate);
@@ -276,14 +284,13 @@ ChromeActions.prototype = {
       try {
         // contentDisposition/contentDispositionFilename is readonly before FF18
         channel.contentDisposition = Ci.nsIChannel.DISPOSITION_ATTACHMENT;
-        if (self.contentDispositionFilename && !data.isAttachment) {
+        if (self.contentDispositionFilename) {
           channel.contentDispositionFilename = self.contentDispositionFilename;
         } else {
           channel.contentDispositionFilename = filename;
         }
       } catch (e) {}
       channel.setURI(originalUri);
-      channel.loadInfo = netChannel.loadInfo;
       channel.contentStream = aInputStream;
       if ('nsIPrivateBrowsingChannel' in Ci &&
           channel instanceof Ci.nsIPrivateBrowsingChannel) {
@@ -293,14 +300,10 @@ ChromeActions.prototype = {
       var listener = {
         extListener: null,
         onStartRequest: function(aRequest, aContext) {
-          var loadContext = self.domWindow
-                                .QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIWebNavigation)
-                                .QueryInterface(Ci.nsILoadContext);
           this.extListener = extHelperAppSvc.doContent(
             (data.isAttachment ? 'application/octet-stream' :
                                  'application/pdf'),
-            aRequest, loadContext, false);
+            aRequest, frontWindow, false);
           this.extListener.onStartRequest(aRequest, aContext);
         },
         onStopRequest: function(aRequest, aContext, aStatusCode) {
@@ -319,7 +322,7 @@ ChromeActions.prototype = {
         }
       };
 
-      asyncOpenChannel(channel, listener, null);
+      channel.asyncOpen(listener, null);
     });
   },
   getLocale: function() {
@@ -351,7 +354,7 @@ ChromeActions.prototype = {
 
     // ... or when the new find events code exists.
     var findBar = getFindBar(this.domWindow);
-    return !!findBar && ('updateControlState' in findBar);
+    return findBar && ('updateControlState' in findBar);
   },
   supportsDocumentFonts: function() {
     var prefBrowser = getIntPref('browser.display.use_document_fonts', 1);
@@ -359,13 +362,11 @@ ChromeActions.prototype = {
     return (!!prefBrowser && prefGfx);
   },
   supportsDocumentColors: function() {
-    return getIntPref('browser.display.document_color_use', 0) !== 2;
-  },
-  supportedMouseWheelZoomModifierKeys: function() {
-    return {
-      ctrlKey: getIntPref('mousewheel.with_control.action', 3) === 3,
-      metaKey: getIntPref('mousewheel.with_meta.action', 1) === 3,
-    };
+    if (getIntPref('browser.display.document_color_use', 0) === 2 ||
+        !getBoolPref('browser.display.use_document_colors', true)) {
+      return false;
+    }
+    return true;
   },
   reportTelemetry: function (data) {
     var probeInfo = JSON.parse(data);
@@ -606,8 +607,8 @@ var RangedChromeActions = (function RangedChromeActionsClosure() {
     // If we are in range request mode, this means we manually issued xhr
     // requests, which we need to abort when we leave the page
     domWindow.addEventListener('unload', function unload(e) {
+      self.networkManager.abortAllRequests();
       domWindow.removeEventListener(e.type, unload);
-      self.abortLoading();
     });
   }
 
@@ -635,7 +636,7 @@ var RangedChromeActions = (function RangedChromeActionsClosure() {
         }, '*');
       };
       this.dataListener.oncomplete = function () {
-        self.dataListener = null;
+        delete self.dataListener;
       };
     }
 
@@ -679,15 +680,6 @@ var RangedChromeActions = (function RangedChromeActionsClosure() {
     });
   };
 
-  proto.abortLoading = function RangedChromeActions_abortLoading() {
-    this.networkManager.abortAllRequests();
-    if (this.originalRequest) {
-      this.originalRequest.cancel(Cr.NS_BINDING_ABORTED);
-      this.originalRequest = null;
-    }
-    this.dataListener = null;
-  };
-
   return RangedChromeActions;
 })();
 
@@ -697,10 +689,9 @@ var StandardChromeActions = (function StandardChromeActionsClosure() {
    * This is for a single network stream
    */
   function StandardChromeActions(domWindow, contentDispositionFilename,
-                                 originalRequest, dataListener) {
+                                 dataListener) {
 
     ChromeActions.call(this, domWindow, contentDispositionFilename);
-    this.originalRequest = originalRequest;
     this.dataListener = dataListener;
   }
 
@@ -726,27 +717,18 @@ var StandardChromeActions = (function StandardChromeActionsClosure() {
       }, '*');
     };
 
-    this.dataListener.oncomplete =
-        function StandardChromeActions_dataListenerComplete(data, errorCode) {
+    this.dataListener.oncomplete = function ChromeActions_dataListenerComplete(
+                                      data, errorCode) {
       self.domWindow.postMessage({
         pdfjsLoadAction: 'complete',
         data: data,
         errorCode: errorCode
       }, '*');
 
-      self.dataListener = null;
-      self.originalRequest = null;
+      delete self.dataListener;
     };
 
     return true;
-  };
-
-  proto.abortLoading = function StandardChromeActions_abortLoading() {
-    if (this.originalRequest) {
-      this.originalRequest.cancel(Cr.NS_BINDING_ABORTED);
-      this.originalRequest = null;
-    }
-    this.dataListener = null;
   };
 
   return StandardChromeActions;
@@ -771,7 +753,7 @@ RequestListener.prototype.receive = function(event) {
   var response;
   if (sync) {
     response = actions[action].call(this.actions, data);
-    event.detail.response = Cu.cloneInto(response, doc.defaultView);
+    event.detail.response = response;
   } else {
     if (!event.detail.responseExpected) {
       doc.documentElement.removeChild(message);
@@ -780,7 +762,8 @@ RequestListener.prototype.receive = function(event) {
       response = function sendResponse(response) {
         try {
           var listener = doc.createEvent('CustomEvent');
-          let detail = Cu.cloneInto({ response: response }, doc.defaultView);
+          let detail = makeContentReadable({response: response},
+                                           doc.defaultView);
           listener.initCustomEvent('pdf.js.response', true, false, detail);
           return message.dispatchEvent(listener);
         } catch (e) {
@@ -824,7 +807,7 @@ FindEventManager.prototype.receiveMessage = function(msg) {
   var type = msg.data.type;
   var contentWindow = this.contentWindow;
 
-  detail = Cu.cloneInto(detail, contentWindow);
+  detail = makeContentReadable(detail, contentWindow);
   var forward = contentWindow.document.createEvent('CustomEvent');
   forward.initCustomEvent(type, true, true, detail);
   contentWindow.dispatchEvent(forward);
@@ -959,7 +942,8 @@ PdfStreamConverter.prototype = {
                         .createInstance(Ci.nsIBinaryInputStream);
 
     // Create a new channel that is viewer loaded as a resource.
-    var channel = createNewChannel(PDF_VIEWER_WEB_PAGE, null);
+    var systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    var channel = createNewChannel(PDF_VIEWER_WEB_PAGE, null, systemPrincipal);
 
     var listener = this.listener;
     var dataListener = this.dataListener;
@@ -969,11 +953,10 @@ PdfStreamConverter.prototype = {
     // trigger an assertion.
     var proxy = {
       onStartRequest: function(request, context) {
-        listener.onStartRequest(aRequest, aContext);
+        listener.onStartRequest(aRequest, context);
       },
       onDataAvailable: function(request, context, inputStream, offset, count) {
-        listener.onDataAvailable(aRequest, aContext, inputStream,
-                                 offset, count);
+        listener.onDataAvailable(aRequest, context, inputStream, offset, count);
       },
       onStopRequest: function(request, context, statusCode) {
         // We get the DOM window here instead of before the request since it
@@ -986,7 +969,7 @@ PdfStreamConverter.prototype = {
             rangeRequest, streamRequest, dataListener);
         } else {
           actions = new StandardChromeActions(
-            domWindow, contentDispositionFilename, aRequest, dataListener);
+            domWindow, contentDispositionFilename, dataListener);
         }
         var requestListener = new RequestListener(actions);
         domWindow.addEventListener(PDFJS_EVENT_ID, function(event) {
@@ -996,7 +979,7 @@ PdfStreamConverter.prototype = {
           var findEventManager = new FindEventManager(domWindow);
           findEventManager.bind();
         }
-        listener.onStopRequest(aRequest, aContext, statusCode);
+        listener.onStopRequest(aRequest, context, statusCode);
 
         if (domWindow.frameElement) {
           var isObjectEmbed = domWindow.frameElement.tagName !== 'IFRAME' ||
@@ -1009,19 +992,19 @@ PdfStreamConverter.prototype = {
     // Keep the URL the same so the browser sees it as the same.
     channel.originalURI = aRequest.URI;
     channel.loadGroup = aRequest.loadGroup;
-    channel.loadInfo.originAttributes = aRequest.loadInfo.originAttributes;
 
-    // We can use the resource principal when data is fetched by the chrome,
-    // e.g. useful for NoScript. Make make sure we reuse the origin attributes
-    // from the request channel to keep isolation consistent.
-    var ssm = Cc['@mozilla.org/scriptsecuritymanager;1']
-                .getService(Ci.nsIScriptSecurityManager);
+    // We can use resource principal when data is fetched by the chrome
+    // e.g. useful for NoScript
+    var securityManager = Cc['@mozilla.org/scriptsecuritymanager;1']
+                          .getService(Ci.nsIScriptSecurityManager);
     var uri = NetUtil.newURI(PDF_VIEWER_WEB_PAGE, null, null);
-    var resourcePrincipal;
-    resourcePrincipal =
-      ssm.createCodebasePrincipal(uri, aRequest.loadInfo.originAttributes);
+    // FF16 and below had getCodebasePrincipal, it was replaced by
+    // getNoAppCodebasePrincipal (bug 758258).
+    var resourcePrincipal = 'getNoAppCodebasePrincipal' in securityManager ?
+                            securityManager.getNoAppCodebasePrincipal(uri) :
+                            securityManager.getCodebasePrincipal(uri);
     aRequest.owner = resourcePrincipal;
-    asyncOpenChannel(channel, proxy, aContext);
+    channel.asyncOpen(proxy, aContext);
   },
 
   // nsIRequestObserver::onStopRequest

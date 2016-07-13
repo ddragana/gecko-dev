@@ -9,40 +9,26 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
-#define _XOPEN_SOURCE 600
+#define _XOPEN_SOURCE 500
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <assert.h>
-#include <limits.h>
 
 #include "cubeb/cubeb.h"
 #include "common.h"
-#ifdef CUBEB_GECKO_BUILD
-#include "TestHarness.h"
-#endif
 
 #define SAMPLE_FREQUENCY 48000
-#if (defined(_WIN32) || defined(__WIN32__))
-#define STREAM_FORMAT CUBEB_SAMPLE_FLOAT32LE
-#else
-#define STREAM_FORMAT CUBEB_SAMPLE_S16LE
-#endif
 
 /* store the phase of the generated waveform */
 struct cb_user_data {
   long position;
 };
 
-long data_cb(cubeb_stream *stream, void *user, const void* inputbuffer, void *outputbuffer, long nframes)
+long data_cb(cubeb_stream *stream, void *user, void *buffer, long nframes)
 {
   struct cb_user_data *u = (struct cb_user_data *)user;
-#if (defined(_WIN32) || defined(__WIN32__))
-  float *b = (float *)outputbuffer;
-#else
-  short *b = (short *)outputbuffer;
-#endif
-  float t1, t2;
+  short *b = (short *)buffer;
   int i;
 
   if (stream == NULL || u == NULL)
@@ -51,24 +37,10 @@ long data_cb(cubeb_stream *stream, void *user, const void* inputbuffer, void *ou
   /* generate our test tone on the fly */
   for (i = 0; i < nframes; i++) {
     /* North American dial tone */
-    t1 = sin(2*M_PI*(i + u->position)*350/SAMPLE_FREQUENCY);
-    t2 = sin(2*M_PI*(i + u->position)*440/SAMPLE_FREQUENCY);
-#if (defined(_WIN32) || defined(__WIN32__))
-    b[i]  = 0.5 * t1;
-    b[i] += 0.5 * t2;
-#else
-    b[i]  = (SHRT_MAX / 2) * t1;
-    b[i] += (SHRT_MAX / 2) * t2;
-#endif
+    b[i]  = 16000*sin(2*M_PI*(i + u->position)*350/SAMPLE_FREQUENCY);
+    b[i] += 16000*sin(2*M_PI*(i + u->position)*440/SAMPLE_FREQUENCY);
     /* European dial tone */
-    /*
-    t1 = sin(2*M_PI*(i + u->position)*425/SAMPLE_FREQUENCY);
-#if (defined(_WIN32) || defined(__WIN32__))
-    b[i] = t1;
-#else
-    b[i]  = SHRT_MAX * t1;
-#endif
-    */
+    /*b[i]  = 30000*sin(2*M_PI*(i + u->position)*425/SAMPLE_FREQUENCY);*/
   }
   /* remember our phase to avoid clicking on buffer transitions */
   /* we'll still click if position overflows */
@@ -100,10 +72,6 @@ void state_cb(cubeb_stream *stream, void *user, cubeb_state state)
 
 int main(int argc, char *argv[])
 {
-#ifdef CUBEB_GECKO_BUILD
-  ScopedXPCOM xpcom("test_tone");
-#endif
-
   cubeb *ctx;
   cubeb_stream *stream;
   cubeb_stream_params params;
@@ -116,7 +84,7 @@ int main(int argc, char *argv[])
     return r;
   }
 
-  params.format = STREAM_FORMAT;
+  params.format = CUBEB_SAMPLE_S16NE;
   params.rate = SAMPLE_FREQUENCY;
   params.channels = 1;
 
@@ -127,7 +95,7 @@ int main(int argc, char *argv[])
   }
   user_data->position = 0;
 
-  r = cubeb_stream_init(ctx, &stream, "Cubeb tone (mono)", NULL, NULL, NULL, &params,
+  r = cubeb_stream_init(ctx, &stream, "Cubeb tone (mono)", params,
                         250, data_cb, state_cb, user_data);
   if (r != CUBEB_OK) {
     fprintf(stderr, "Error initializing cubeb stream\n");

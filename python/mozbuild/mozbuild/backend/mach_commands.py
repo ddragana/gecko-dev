@@ -67,10 +67,13 @@ class MachCommands(MachCommandBase):
         if res != 0:
             return 1
 
-        if ide in ('androidstudio', 'intellij'):
+        if ide == 'androidstudio' or 'intellij':
             res = self._mach_context.commands.dispatch('package', self._mach_context)
             if res != 0:
                 return 1
+            res = self._mach_context.commands.dispatch('gradle-install', self._mach_context)
+            if res != 0:
+                 return 1
         else:
             # Generate or refresh the IDE backend.
             python = self.virtualenv_manager.python_path

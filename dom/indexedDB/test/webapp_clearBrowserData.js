@@ -110,10 +110,20 @@ function testSteps()
 
 function start()
 {
+  if (!SpecialPowers.isMainProcess()) {
+    todo(false, "Test disabled in child processes, for now");
+    SimpleTest.finish();
+    return;
+  }
+
   SpecialPowers.addPermission("browser", true, document);
-  SpecialPowers.addPermission("browser", true, { manifestURL: manifestURL });
+  SpecialPowers.addPermission("browser", true, { manifestURL: manifestURL,
+                                                 isInBrowserElement: false });
   SpecialPowers.addPermission("embed-apps", true, document);
-  SpecialPowers.addPermission("indexedDB", true, { manifestURL: manifestURL });
+  SpecialPowers.addPermission("indexedDB", true, { manifestURL: manifestURL,
+                                                   isInBrowserElement: false });
+
+  SpecialPowers.setAllAppsLaunchable(true);
 
   window.addEventListener("unload", function cleanup(event) {
     if (event.target == document) {

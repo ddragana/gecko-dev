@@ -16,7 +16,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 //// Helpers
 
-class ServiceInitializer : public mozilla::Runnable
+class ServiceInitializer : public nsRunnable
 {
 public:
   NS_IMETHOD Run()

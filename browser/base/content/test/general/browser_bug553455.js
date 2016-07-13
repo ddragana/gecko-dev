@@ -9,8 +9,6 @@ const XPINSTALL_URL = "chrome://mozapps/content/xpinstall/xpinstallConfirm.xul";
 const PREF_INSTALL_REQUIREBUILTINCERTS = "extensions.install.requireBuiltInCerts";
 const PROGRESS_NOTIFICATION = "addon-progress";
 
-const { REQUIRE_SIGNING } = Cu.import("resource://gre/modules/addons/AddonConstants.jsm", {});
-
 var rootDir = getRootDirectory(gTestPath);
 var path = rootDir.split('/');
 var chromeName = path[0] + '//' + path[2];
@@ -88,7 +86,7 @@ function wait_for_notification_close(aCallback) {
   info("Waiting for notification to close");
   PopupNotifications.panel.addEventListener("popuphidden", function() {
     PopupNotifications.panel.removeEventListener("popuphidden", arguments.callee, false);
-    executeSoon(aCallback);
+    aCallback();
   }, false);
 }
 
@@ -127,17 +125,6 @@ function wait_for_install_dialog(aCallback) {
     onWindowTitleChange: function(aXULWindow, aNewTitle) {
     }
   });
-}
-
-function remove_tab_and_run_next_test() {
-  let eventCount = 0;
-  let nextTest = () => {
-    if (++eventCount == 2) {
-      runNextTest();
-    }
-  }
-  wait_for_notification_close(nextTest);
-  BrowserTestUtils.removeTab(gBrowser.selectedTab).then(nextTest);
 }
 
 function accept_install_dialog() {
@@ -204,12 +191,13 @@ function test_disabled_install() {
         ok(false, "xpinstall.enabled should be set");
       }
 
-      BrowserTestUtils.removeTab(gBrowser.selectedTab).then(() => {
-        AddonManager.getAllInstalls(function(aInstalls) {
-          is(aInstalls.length, 0, "Shouldn't be any pending installs");
+      gBrowser.removeTab(gBrowser.selectedTab);
 
-          runNextTest();
-        });
+      AddonManager.getAllInstalls(function(aInstalls) {
+        is(aInstalls.length, 1, "Should have been one install created");
+        aInstalls[0].cancel();
+
+        runNextTest();
       });
     });
 
@@ -218,9 +206,10 @@ function test_disabled_install() {
   });
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "XPI": "amosigned.xpi"
+    "XPI": "unsigned.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_blocked_install() {
@@ -248,7 +237,8 @@ function test_blocked_install() {
         is(aInstalls.length, 1, "Should be one pending install");
           aInstalls[0].cancel();
 
-          remove_tab_and_run_next_test();
+          wait_for_notification_close(runNextTest);
+          gBrowser.removeTab(gBrowser.selectedTab);
         });
       });
 
@@ -265,45 +255,41 @@ function test_blocked_install() {
   });
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "XPI": "amosigned.xpi"
+    "XPI": "unsigned.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_whitelisted_install() {
-  var originalTab = gBrowser.selectedTab;
-  var tab;
-
   // Wait for the progress notification
   wait_for_progress_notification(function(aPanel) {
     gBrowser.selectedTab = originalTab;
 
     // Wait for the install confirmation dialog
     wait_for_install_dialog(function() {
+      is(gBrowser.selectedTab, tab,
+         "tab selected in response to the addon-install-confirmation notification");
 
-      BrowserTestUtils.waitForCondition(() => !!tab, "tab should be present").then(() => {
-        is(gBrowser.selectedTab, tab,
-           "tab selected in response to the addon-install-confirmation notification");
+      // Wait for the complete notification
+      wait_for_notification("addon-install-restart", function(aPanel) {
+        let notification = aPanel.childNodes[0];
+        is(notification.button.label, "Restart Now", "Should have seen the right button");
+        is(notification.getAttribute("label"),
+           "XPI Test will be installed after you restart " + gApp + ".",
+           "Should have seen the right message");
 
-        // Wait for the complete notification
-        wait_for_notification("addon-install-restart", function(aPanel) {
-          let notification = aPanel.childNodes[0];
-          is(notification.button.label, "Restart Now", "Should have seen the right button");
-          is(notification.getAttribute("label"),
-             "XPI Test will be installed after you restart " + gApp + ".",
-             "Should have seen the right message");
+        AddonManager.getAllInstalls(function(aInstalls) {
+          is(aInstalls.length, 1, "Should be one pending install");
+          aInstalls[0].cancel();
 
-          AddonManager.getAllInstalls(function(aInstalls) {
-            is(aInstalls.length, 1, "Should be one pending install");
-            aInstalls[0].cancel();
-
-            Services.perms.remove(makeURI("http://example.com/"), "install");
-            remove_tab_and_run_next_test();
-          });
+          Services.perms.remove(makeURI("http://example.com/"), "install");
+          wait_for_notification_close(runNextTest);
+          gBrowser.removeTab(gBrowser.selectedTab);
         });
-
-        accept_install_dialog();
       });
+
+      accept_install_dialog();
     });
   });
 
@@ -311,11 +297,12 @@ function test_whitelisted_install() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "XPI": "amosigned.xpi"
+    "XPI": "unsigned.xpi"
   }));
-
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?"
-    + triggers).then(newTab => tab = newTab);
+  let originalTab = gBrowser.selectedTab;
+  let tab = gBrowser.addTab();
+  gBrowser.selectedTab = tab;
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_failed_download() {
@@ -329,7 +316,8 @@ function test_failed_download() {
          "Should have seen the right message");
 
       Services.perms.remove(makeURI("http://example.com/"), "install");
-      remove_tab_and_run_next_test();
+      wait_for_notification_close(runNextTest);
+      gBrowser.removeTab(gBrowser.selectedTab);
     });
   });
 
@@ -339,7 +327,8 @@ function test_failed_download() {
   var triggers = encodeURIComponent(JSON.stringify({
     "XPI": "missing.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_corrupt_file() {
@@ -354,7 +343,8 @@ function test_corrupt_file() {
          "Should have seen the right message");
 
       Services.perms.remove(makeURI("http://example.com/"), "install");
-      remove_tab_and_run_next_test();
+      wait_for_notification_close(runNextTest);
+      gBrowser.removeTab(gBrowser.selectedTab);
     });
   });
 
@@ -364,7 +354,8 @@ function test_corrupt_file() {
   var triggers = encodeURIComponent(JSON.stringify({
     "XPI": "corrupt.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_incompatible() {
@@ -379,7 +370,8 @@ function test_incompatible() {
          "Should have seen the right message");
 
       Services.perms.remove(makeURI("http://example.com/"), "install");
-      remove_tab_and_run_next_test();
+      wait_for_notification_close(runNextTest);
+      gBrowser.removeTab(gBrowser.selectedTab);
     });
   });
 
@@ -389,7 +381,8 @@ function test_incompatible() {
   var triggers = encodeURIComponent(JSON.stringify({
     "XPI": "incompatible.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_restartless() {
@@ -452,7 +445,8 @@ function test_multiple() {
             aAddon.uninstall();
 
             Services.perms.remove(makeURI("http://example.com/"), "install");
-            remove_tab_and_run_next_test();
+            wait_for_notification_close(runNextTest);
+            gBrowser.removeTab(gBrowser.selectedTab);
           });
         });
       });
@@ -465,10 +459,11 @@ function test_multiple() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Unsigned XPI": "amosigned.xpi",
+    "Unsigned XPI": "unsigned.xpi",
     "Restartless XPI": "restartless.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_sequential() {
@@ -523,7 +518,8 @@ function test_sequential() {
 
             Services.perms.remove(makeURI("http://example.com"), "install");
             wait_for_notification_close(() => {
-              BrowserTestUtils.removeTab(gBrowser.selectedTab).then(runNextTest);
+              gBrowser.removeTab(gBrowser.selectedTab);
+              runNextTest();
             });
 
             cancel_install_dialog();
@@ -544,15 +540,15 @@ function test_sequential() {
   var triggers = encodeURIComponent(JSON.stringify({
     "Restartless XPI": "restartless.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_someunverified() {
   // This test is only relevant if using the new doorhanger UI and allowing
   // unsigned add-ons
   if (!Preferences.get("xpinstall.customConfirmationUI", false) ||
-      Preferences.get("xpinstall.signatures.required", true) ||
-      REQUIRE_SIGNING) {
+      Preferences.get("xpinstall.signatures.required", true)) {
     runNextTest();
     return;
   }
@@ -563,8 +559,7 @@ function test_someunverified() {
     wait_for_install_dialog(function() {
       let notification = document.getElementById("addon-install-confirmation-notification");
       let message = notification.getAttribute("label");
-      is(message, "Caution: This site would like to install 2 add-ons in " + gApp +
-         ", some of which are unverified. Proceed at your own risk.",
+      is(message, "Caution: This site would like to install 2 add-ons in " + gApp + ", some of which are unverified. Proceed at your own risk.",
          "Should see the right message");
 
       let container = document.getElementById("addon-install-confirmation-content");
@@ -586,7 +581,8 @@ function test_someunverified() {
           t.uninstall();
 
           Services.perms.remove(makeURI("http://example.com/"), "install");
-          remove_tab_and_run_next_test();
+          wait_for_notification_close(runNextTest);
+          gBrowser.removeTab(gBrowser.selectedTab);
         });
       });
 
@@ -598,18 +594,18 @@ function test_someunverified() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Extension XPI": "restartless-unsigned.xpi",
+    "Extension XPI": "restartless.xpi",
     "Theme XPI": "theme.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_allunverified() {
   // This test is only relevant if using the new doorhanger UI and allowing
   // unsigned add-ons
   if (!Preferences.get("xpinstall.customConfirmationUI", false) ||
-      Preferences.get("xpinstall.signatures.required", true) ||
-      REQUIRE_SIGNING) {
+      Preferences.get("xpinstall.signatures.required", true)) {
     runNextTest();
     return;
   }
@@ -633,7 +629,8 @@ function test_allunverified() {
           aAddon.uninstall();
 
           Services.perms.remove(makeURI("http://example.com/"), "install");
-          remove_tab_and_run_next_test();
+          wait_for_notification_close(runNextTest);
+          gBrowser.removeTab(gBrowser.selectedTab);
         });
       });
 
@@ -645,9 +642,10 @@ function test_allunverified() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Extension XPI": "restartless-unsigned.xpi"
+    "Extension XPI": "restartless.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_url() {
@@ -667,7 +665,8 @@ function test_url() {
           is(aInstalls.length, 1, "Should be one pending install");
           aInstalls[0].cancel();
 
-          remove_tab_and_run_next_test();
+          wait_for_notification_close(runNextTest);
+          gBrowser.removeTab(gBrowser.selectedTab);
         });
       });
 
@@ -675,10 +674,8 @@ function test_url() {
     });
   });
 
-  gBrowser.selectedTab = gBrowser.addTab("about:blank");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    gBrowser.loadURI(TESTROOT + "amosigned.xpi");
-  });
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "unsigned.xpi");
 },
 
 function test_localfile() {
@@ -694,7 +691,8 @@ function test_localfile() {
          "This add-on could not be installed because it appears to be corrupt.",
          "Should have seen the right message");
 
-      remove_tab_and_run_next_test();
+      wait_for_notification_close(runNextTest);
+      gBrowser.removeTab(gBrowser.selectedTab);
     });
   }, "addon-install-failed", false);
 
@@ -705,10 +703,8 @@ function test_localfile() {
   } catch (ex) {
     var path = CHROMEROOT + "corrupt.xpi";
   }
-  gBrowser.selectedTab = gBrowser.addTab("about:blank");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    gBrowser.loadURI(path);
-  });
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(path);
 },
 
 function test_tabclose() {
@@ -724,90 +720,30 @@ function test_tabclose() {
       AddonManager.getAllInstalls(aInstalls => {
         is(aInstalls.length, 1, "Should be one pending install");
 
-        let eventCount = 0;
-        let nextTest = () => {
-          if (++eventCount == 2) {
-            runNextTest();
-          }
-        }
-
         wait_for_notification_close(() => {
           AddonManager.getAllInstalls(aInstalls => {
             is(aInstalls.length, 0, "Should be no pending install since the tab is closed");
-            nextTest();
+            runNextTest();
           });
         });
 
-        BrowserTestUtils.removeTab(gBrowser.selectedTab).then(nextTest);
+        gBrowser.removeTab(gBrowser.selectedTab);
       });
     });
   });
 
-  gBrowser.selectedTab = gBrowser.addTab("about:blank");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    gBrowser.loadURI(TESTROOT + "amosigned.xpi");
-  });
-},
-
-// Add-ons should be cancelled and the install notification destroyed when
-// navigating to a new origin
-function test_tabnavigate() {
-  if (!Preferences.get("xpinstall.customConfirmationUI", false)) {
-    runNextTest();
-    return;
-  }
-
-  // Wait for the progress notification
-  wait_for_progress_notification(aPanel => {
-    // Wait for the install confirmation dialog
-    wait_for_install_dialog(() => {
-      wait_for_notification_close(() => {
-        AddonManager.getAllInstalls(aInstalls => {
-          is(aInstalls.length, 0, "Should be no pending install");
-
-          Services.perms.remove(makeURI("http://example.com/"), "install");
-          loadPromise.then(() => {
-            BrowserTestUtils.removeTab(gBrowser.selectedTab).then(runNextTest);
-          });
-        });
-      });
-
-      let loadPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
-      gBrowser.loadURI("about:blank");
-    });
-  });
-
-  var pm = Services.perms;
-  pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
-
-  var triggers = encodeURIComponent(JSON.stringify({
-    "Extension XPI": "amosigned.xpi"
-  }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
-},
-
-function test_urlbar() {
-  wait_for_notification("addon-install-origin-blocked", function(aPanel) {
-    let notification = aPanel.childNodes[0];
-
-    is(notification.button.label, "", "Button to allow install should be hidden.");
-
-    remove_tab_and_run_next_test();
-  });
-
-  gBrowser.selectedTab = gBrowser.addTab("about:blank");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    gURLBar.value = TESTROOT + "amosigned.xpi";
-    gURLBar.focus();
-    EventUtils.synthesizeKey("VK_RETURN", {});
-  });
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "unsigned.xpi");
 },
 
 function test_wronghost() {
   gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.addEventListener("load", function() {
+    if (gBrowser.currentURI.spec != TESTROOT2 + "enabled.html")
+      return;
 
-  let requestedUrl = TESTROOT2 + "enabled.html";
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser, false, requestedUrl).then(() => {
+    gBrowser.removeEventListener("load", arguments.callee, true);
+
     // Wait for the progress notification
     wait_for_progress_notification(function(aPanel) {
       // Wait for the complete notification
@@ -818,12 +754,13 @@ function test_wronghost() {
            "because it appears to be corrupt.",
            "Should have seen the right message");
 
-        remove_tab_and_run_next_test();
+        wait_for_notification_close(runNextTest);
+        gBrowser.removeTab(gBrowser.selectedTab);
       });
     });
 
     gBrowser.loadURI(TESTROOT + "corrupt.xpi");
-  });
+  }, true);
   gBrowser.loadURI(TESTROOT2 + "enabled.html");
 },
 
@@ -846,8 +783,12 @@ function test_reload() {
 
         PopupNotifications.panel.addEventListener("popuphiding", test_fail, false);
 
-        let requestedUrl = TESTROOT2 + "enabled.html";
-        BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser, false, requestedUrl).then(() => {
+        gBrowser.addEventListener("load", function() {
+          if (gBrowser.currentURI.spec != TESTROOT2 + "enabled.html")
+            return;
+
+          gBrowser.removeEventListener("load", arguments.callee, true);
+
           PopupNotifications.panel.removeEventListener("popuphiding", test_fail, false);
 
           AddonManager.getAllInstalls(function(aInstalls) {
@@ -855,9 +796,10 @@ function test_reload() {
             aInstalls[0].cancel();
 
             Services.perms.remove(makeURI("http://example.com/"), "install");
-            remove_tab_and_run_next_test();
+            wait_for_notification_close(runNextTest);
+            gBrowser.removeTab(gBrowser.selectedTab);
           });
-        });
+        }, true);
         gBrowser.loadURI(TESTROOT2 + "enabled.html");
       });
 
@@ -869,9 +811,10 @@ function test_reload() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Unsigned XPI": "amosigned.xpi"
+    "Unsigned XPI": "unsigned.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_theme() {
@@ -897,7 +840,8 @@ function test_theme() {
             aAddon.uninstall();
 
             Services.perms.remove(makeURI("http://example.com/"), "install");
-            remove_tab_and_run_next_test();
+            wait_for_notification_close(runNextTest);
+            gBrowser.removeTab(gBrowser.selectedTab);
           });
         });
       });
@@ -912,7 +856,8 @@ function test_theme() {
   var triggers = encodeURIComponent(JSON.stringify({
     "Theme XPI": "theme.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_renotify_blocked() {
@@ -925,24 +870,13 @@ function test_renotify_blocked() {
       executeSoon(function () {
         wait_for_notification("addon-install-blocked", function(aPanel) {
           AddonManager.getAllInstalls(function(aInstalls) {
-            is(aInstalls.length, 2, "Should be two pending installs");
-
-            let eventCount = 0;
-            let nextTest = () => {
-              if (++eventCount == 2) {
-                runNextTest();
-              }
-            }
-
-            wait_for_notification_close(() => {
-              AddonManager.getAllInstalls(function(aInstalls) {
-                is(aInstalls.length, 0, "Should have cancelled the installs");
-                nextTest();
-              });
-            });
+          is(aInstalls.length, 2, "Should be two pending installs");
+            aInstalls[0].cancel();
+            aInstalls[1].cancel();
 
             info("Closing browser tab");
-            BrowserTestUtils.removeTab(gBrowser.selectedTab).then(nextTest);
+            wait_for_notification_close(runNextTest);
+            gBrowser.removeTab(gBrowser.selectedTab);
           });
         });
 
@@ -955,9 +889,10 @@ function test_renotify_blocked() {
   });
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "XPI": "amosigned.xpi"
+    "XPI": "unsigned.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_renotify_installed() {
@@ -984,7 +919,8 @@ function test_renotify_installed() {
                     aInstalls[0].cancel();
 
                     Services.perms.remove(makeURI("http://example.com/"), "install");
-                    remove_tab_and_run_next_test();
+                    wait_for_notification_close(runNextTest);
+                    gBrowser.removeTab(gBrowser.selectedTab);
                   });
                 });
 
@@ -1008,9 +944,10 @@ function test_renotify_installed() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "XPI": "amosigned.xpi"
+    "XPI": "unsigned.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_cancel() {
@@ -1050,7 +987,8 @@ function test_cancel() {
             is(aInstalls.length, 0, "Should be no pending install");
 
             Services.perms.remove(makeURI("http://example.com/"), "install");
-            BrowserTestUtils.removeTab(gBrowser.selectedTab).then(runNextTest);
+            gBrowser.removeTab(gBrowser.selectedTab);
+            runNextTest();
           });
         });
       }
@@ -1064,16 +1002,17 @@ function test_cancel() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "XPI": "slowinstall.sjs?file=amosigned.xpi"
+    "XPI": "slowinstall.sjs?file=unsigned.xpi"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, TESTROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 },
 
 function test_failed_security() {
   Services.prefs.setBoolPref(PREF_INSTALL_REQUIREBUILTINCERTS, false);
 
   setup_redirect({
-    "Location": TESTROOT + "amosigned.xpi"
+    "Location": TESTROOT + "unsigned.xpi"
   });
 
   // Wait for the blocked notification
@@ -1101,7 +1040,8 @@ function test_failed_security() {
         is(notification.id, "addon-install-failed-notification", "Should have seen the install fail");
 
         Services.prefs.setBoolPref(PREF_INSTALL_REQUIREBUILTINCERTS, true);
-        remove_tab_and_run_next_test();
+        wait_for_notification_close(runNextTest);
+        gBrowser.removeTab(gBrowser.selectedTab);
       });
     }, "addon-install-failed", false);
   });
@@ -1109,7 +1049,8 @@ function test_failed_security() {
   var triggers = encodeURIComponent(JSON.stringify({
     "XPI": "redirect.sjs?mode=redirect"
   }));
-  BrowserTestUtils.openNewForegroundTab(gBrowser, SECUREROOT + "installtrigger.html?" + triggers);
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(SECUREROOT + "installtrigger.html?" + triggers);
 }
 ];
 

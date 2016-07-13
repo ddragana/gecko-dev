@@ -7,7 +7,7 @@
 #define MOZILLA_GFX_PATH_SKIA_H_
 
 #include "2D.h"
-#include "skia/include/core/SkPath.h"
+#include "skia/SkPath.h"
 
 namespace mozilla {
 namespace gfx {
@@ -58,9 +58,9 @@ public:
   
   virtual BackendType GetBackendType() const { return BackendType::SKIA; }
 
-  virtual already_AddRefed<PathBuilder> CopyToBuilder(FillRule aFillRule) const;
+  virtual already_AddRefed<PathBuilder> CopyToBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
   virtual already_AddRefed<PathBuilder> TransformedCopyToBuilder(const Matrix &aTransform,
-                                                             FillRule aFillRule) const;
+                                                             FillRule aFillRule = FillRule::FILL_WINDING) const;
 
   virtual bool ContainsPoint(const Point &aPoint, const Matrix &aTransform) const;
   

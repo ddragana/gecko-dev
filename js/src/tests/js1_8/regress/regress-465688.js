@@ -20,7 +20,9 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(true); 
   for each (let d in [-0x80000000, -0x80000000]) - -d;
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

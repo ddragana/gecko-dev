@@ -127,10 +127,10 @@ nsRDFXMLSerializer::Init(nsIRDFDataSource* aDataSource)
     // Add the ``RDF'' prefix, by default.
     nsCOMPtr<nsIAtom> prefix;
 
-    prefix = NS_Atomize("RDF");
+    prefix = do_GetAtom("RDF");
     AddNameSpace(prefix, NS_LITERAL_STRING("http://www.w3.org/1999/02/22-rdf-syntax-ns#"));
 
-    prefix = NS_Atomize("NC");
+    prefix = do_GetAtom("NC");
     AddNameSpace(prefix, NS_LITERAL_STRING("http://home.netscape.com/NC-rdf#"));
 
     mPrefixID = 0;
@@ -192,7 +192,7 @@ nsRDFXMLSerializer::EnsureNewPrefix()
         isNewPrefix = true;
         qname.AssignLiteral("NS");
         qname.AppendInt(++mPrefixID, 10);
-        prefix = NS_Atomize(qname);
+        prefix = do_GetAtom(qname);
         nsNameSpaceMap::const_iterator iter = mNameSpaces.first();
         while (iter != mNameSpaces.last() && isNewPrefix) {
             isNewPrefix = (iter->mPrefix != prefix);
@@ -607,7 +607,7 @@ nsRDFXMLSerializer::SerializeDescription(nsIOutputStream* aStream,
 
     // Any value that's a literal we can write out as an inline
     // attribute on the RDF:Description
-    AutoTArray<nsIRDFResource*, 8> visited;
+    nsAutoTArray<nsIRDFResource*, 8> visited;
     int32_t skipped = 0;
 
     nsCOMPtr<nsISimpleEnumerator> arcs;

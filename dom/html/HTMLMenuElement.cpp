@@ -78,7 +78,7 @@ HTMLMenuElement::SendShowEvent()
     return NS_ERROR_FAILURE;
   }
 
-  WidgetEvent event(true, eShow);
+  WidgetEvent event(true, NS_SHOW_EVENT);
   event.mFlags.mBubbles = false;
   event.mFlags.mCancelable = false;
 
@@ -87,7 +87,7 @@ HTMLMenuElement::SendShowEvent()
     return NS_ERROR_FAILURE;
   }
  
-  RefPtr<nsPresContext> presContext = shell->GetPresContext();
+  nsRefPtr<nsPresContext> presContext = shell->GetPresContext();
   nsEventStatus status = nsEventStatus_eIgnore;
   EventDispatcher::Dispatch(static_cast<nsIContent*>(this), presContext,
                             &event, nullptr, &status);

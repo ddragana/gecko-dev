@@ -16,6 +16,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPtr.h"
 
+#include "nsAutoPtr.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
@@ -38,8 +39,8 @@ const char* kGamepadEventsEnabledPref =
 // Amount of time to wait before cleaning up gamepad resources
 // when no pages are listening for events.
 const int kCleanupDelayMS = 2000;
-const nsTArray<RefPtr<nsGlobalWindow> >::index_type NoIndex =
-    nsTArray<RefPtr<nsGlobalWindow> >::NoIndex;
+const nsTArray<nsRefPtr<nsGlobalWindow> >::index_type NoIndex =
+    nsTArray<nsRefPtr<nsGlobalWindow> >::NoIndex;
 
 StaticRefPtr<GamepadService> gGamepadServiceSingleton;
 
@@ -77,8 +78,12 @@ GamepadService::Observe(nsISupports* aSubject,
 }
 
 void
-GamepadService::StopMonitoring()
+GamepadService::BeginShutdown()
 {
+  mShuttingDown = true;
+  if (mTimer) {
+    mTimer->Cancel();
+  }
   if (mStarted) {
     if (XRE_IsParentProcess()) {
       MaybeStopGamepadMonitoring();
@@ -87,22 +92,12 @@ GamepadService::StopMonitoring()
     }
     mStarted = false;
   }
-  mGamepads.Clear();
-}
-
-void
-GamepadService::BeginShutdown()
-{
-  mShuttingDown = true;
-  if (mTimer) {
-    mTimer->Cancel();
-  }
-  StopMonitoring();
   // Don't let windows call back to unregister during shutdown
   for (uint32_t i = 0; i < mListeners.Length(); i++) {
     mListeners[i]->SetHasGamepadEventListener(false);
   }
   mListeners.Clear();
+  mGamepads.Clear();
   sShutdown = true;
 }
 
@@ -149,18 +144,14 @@ GamepadService::RemoveListener(nsGlobalWindow* aWindow)
   mListeners.RemoveElement(aWindow);
 
   if (mListeners.Length() == 0 && !mShuttingDown && mStarted) {
-    if (XRE_IsParentProcess()) {
-      StartCleanupTimer();
-    } else {
-      StopMonitoring();
-    }
+    StartCleanupTimer();
   }
 }
 
 already_AddRefed<Gamepad>
 GamepadService::GetGamepad(uint32_t aIndex)
 {
-  RefPtr<Gamepad> gamepad;
+  nsRefPtr<Gamepad> gamepad;
   if (mGamepads.Get(aIndex, getter_AddRefs(gamepad))) {
     return gamepad.forget();
   }
@@ -176,7 +167,7 @@ GamepadService::AddGamepad(uint32_t aIndex,
                            uint32_t aNumAxes)
 {
   //TODO: bug 852258: get initial button/axis state
-  RefPtr<Gamepad> gamepad =
+  nsRefPtr<Gamepad> gamepad =
     new Gamepad(nullptr,
                 aId,
                 0, // index is set by global window
@@ -192,7 +183,7 @@ GamepadService::AddGamepad(uint32_t aIndex,
 void
 GamepadService::RemoveGamepad(uint32_t aIndex)
 {
-  RefPtr<Gamepad> gamepad = GetGamepad(aIndex);
+  nsRefPtr<Gamepad> gamepad = GetGamepad(aIndex);
   if (!gamepad) {
     NS_WARNING("Trying to delete gamepad with invalid index");
     return;
@@ -206,7 +197,7 @@ void
 GamepadService::NewButtonEvent(uint32_t aIndex, uint32_t aButton, bool aPressed,
                                double aValue)
 {
-  RefPtr<Gamepad> gamepad = GetGamepad(aIndex);
+  nsRefPtr<Gamepad> gamepad = GetGamepad(aIndex);
   if (mShuttingDown || !gamepad) {
     return;
   }
@@ -215,15 +206,13 @@ GamepadService::NewButtonEvent(uint32_t aIndex, uint32_t aButton, bool aPressed,
 
   // Hold on to listeners in a separate array because firing events
   // can mutate the mListeners array.
-  nsTArray<RefPtr<nsGlobalWindow>> listeners(mListeners);
+  nsTArray<nsRefPtr<nsGlobalWindow> > listeners(mListeners);
 
   for (uint32_t i = listeners.Length(); i > 0 ; ) {
     --i;
 
-    MOZ_ASSERT(listeners[i]->IsInnerWindow());
-
     // Only send events to non-background windows
-    if (!listeners[i]->AsInner()->IsCurrentInnerWindow() ||
+    if (!listeners[i]->IsCurrentInnerWindow() ||
         listeners[i]->GetOuterWindow()->IsBackground()) {
       continue;
     }
@@ -236,7 +225,7 @@ GamepadService::NewButtonEvent(uint32_t aIndex, uint32_t aButton, bool aPressed,
       first_time = true;
     }
 
-    RefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
+    nsRefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
     if (listenerGamepad) {
       listenerGamepad->SetButton(aButton, aPressed, aValue);
       if (first_time) {
@@ -263,7 +252,7 @@ GamepadService::FireButtonEvent(EventTarget* aTarget,
   init.mCancelable = false;
   init.mGamepad = aGamepad;
   init.mButton = aButton;
-  RefPtr<GamepadButtonEvent> event =
+  nsRefPtr<GamepadButtonEvent> event =
     GamepadButtonEvent::Constructor(aTarget, name, init);
 
   event->SetTrusted(true);
@@ -275,7 +264,7 @@ GamepadService::FireButtonEvent(EventTarget* aTarget,
 void
 GamepadService::NewAxisMoveEvent(uint32_t aIndex, uint32_t aAxis, double aValue)
 {
-  RefPtr<Gamepad> gamepad = GetGamepad(aIndex);
+  nsRefPtr<Gamepad> gamepad = GetGamepad(aIndex);
   if (mShuttingDown || !gamepad) {
     return;
   }
@@ -283,15 +272,13 @@ GamepadService::NewAxisMoveEvent(uint32_t aIndex, uint32_t aAxis, double aValue)
 
   // Hold on to listeners in a separate array because firing events
   // can mutate the mListeners array.
-  nsTArray<RefPtr<nsGlobalWindow> > listeners(mListeners);
+  nsTArray<nsRefPtr<nsGlobalWindow> > listeners(mListeners);
 
   for (uint32_t i = listeners.Length(); i > 0 ; ) {
     --i;
 
-    MOZ_ASSERT(listeners[i]->IsInnerWindow());
-
     // Only send events to non-background windows
-    if (!listeners[i]->AsInner()->IsCurrentInnerWindow() ||
+    if (!listeners[i]->IsCurrentInnerWindow() ||
         listeners[i]->GetOuterWindow()->IsBackground()) {
       continue;
     }
@@ -304,7 +291,7 @@ GamepadService::NewAxisMoveEvent(uint32_t aIndex, uint32_t aAxis, double aValue)
       first_time = true;
     }
 
-    RefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
+    nsRefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
     if (listenerGamepad) {
       listenerGamepad->SetAxis(aAxis, aValue);
       if (first_time) {
@@ -330,7 +317,7 @@ GamepadService::FireAxisMoveEvent(EventTarget* aTarget,
   init.mGamepad = aGamepad;
   init.mAxis = aAxis;
   init.mValue = aValue;
-  RefPtr<GamepadAxisMoveEvent> event =
+  nsRefPtr<GamepadAxisMoveEvent> event =
     GamepadAxisMoveEvent::Constructor(aTarget,
                                       NS_LITERAL_STRING("gamepadaxismove"),
                                       init);
@@ -344,7 +331,7 @@ GamepadService::FireAxisMoveEvent(EventTarget* aTarget,
 void
 GamepadService::NewConnectionEvent(uint32_t aIndex, bool aConnected)
 {
-  RefPtr<Gamepad> gamepad = GetGamepad(aIndex);
+  nsRefPtr<Gamepad> gamepad = GetGamepad(aIndex);
 
   if (mShuttingDown || !gamepad) {
     return;
@@ -352,16 +339,14 @@ GamepadService::NewConnectionEvent(uint32_t aIndex, bool aConnected)
 
   // Hold on to listeners in a separate array because firing events
   // can mutate the mListeners array.
-  nsTArray<RefPtr<nsGlobalWindow> > listeners(mListeners);
+  nsTArray<nsRefPtr<nsGlobalWindow> > listeners(mListeners);
 
   if (aConnected) {
     for (uint32_t i = listeners.Length(); i > 0 ; ) {
       --i;
 
-      MOZ_ASSERT(listeners[i]->IsInnerWindow());
-
       // Only send events to non-background windows
-      if (!listeners[i]->AsInner()->IsCurrentInnerWindow() ||
+      if (!listeners[i]->IsCurrentInnerWindow() ||
           listeners[i]->GetOuterWindow()->IsBackground()) {
         continue;
       }
@@ -374,7 +359,7 @@ GamepadService::NewConnectionEvent(uint32_t aIndex, bool aConnected)
 
       SetWindowHasSeenGamepad(listeners[i], aIndex);
 
-      RefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
+      nsRefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
       if (listenerGamepad) {
         // Fire event
         FireConnectionEvent(listeners[i], listenerGamepad, aConnected);
@@ -390,7 +375,7 @@ GamepadService::NewConnectionEvent(uint32_t aIndex, bool aConnected)
       // deal with the hassle of syncing the state of removed gamepads.
 
       if (WindowHasSeenGamepad(listeners[i], aIndex)) {
-        RefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
+        nsRefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(aIndex);
         if (listenerGamepad) {
           listenerGamepad->SetConnected(false);
           // Fire event
@@ -413,7 +398,7 @@ GamepadService::FireConnectionEvent(EventTarget* aTarget,
   init.mBubbles = false;
   init.mCancelable = false;
   init.mGamepad = aGamepad;
-  RefPtr<GamepadEvent> event =
+  nsRefPtr<GamepadEvent> event =
     GamepadEvent::Constructor(aTarget, name, init);
 
   event->SetTrusted(true);
@@ -425,7 +410,7 @@ GamepadService::FireConnectionEvent(EventTarget* aTarget,
 void
 GamepadService::SyncGamepadState(uint32_t aIndex, Gamepad* aGamepad)
 {
-  RefPtr<Gamepad> gamepad = GetGamepad(aIndex);
+  nsRefPtr<Gamepad> gamepad = GetGamepad(aIndex);
   if (mShuttingDown || !mEnabled || !gamepad) {
     return;
   }
@@ -452,7 +437,7 @@ GamepadService::GetService()
     gGamepadServiceSingleton = new GamepadService();
     ClearOnShutdown(&gGamepadServiceSingleton);
   }
-  RefPtr<GamepadService> service(gGamepadServiceSingleton);
+  nsRefPtr<GamepadService> service(gGamepadServiceSingleton);
   return service.forget();
 }
 
@@ -465,7 +450,7 @@ GamepadService::IsAPIEnabled() {
 bool
 GamepadService::WindowHasSeenGamepad(nsGlobalWindow* aWindow, uint32_t aIndex)
 {
-  RefPtr<Gamepad> gamepad = aWindow->GetGamepad(aIndex);
+  nsRefPtr<Gamepad> gamepad = aWindow->GetGamepad(aIndex);
   return gamepad != nullptr;
 }
 
@@ -485,12 +470,12 @@ GamepadService::SetWindowHasSeenGamepad(nsGlobalWindow* aWindow,
   if (aHasSeen) {
     aWindow->SetHasSeenGamepadInput(true);
     nsCOMPtr<nsISupports> window = ToSupports(aWindow);
-    RefPtr<Gamepad> gamepad = GetGamepad(aIndex);
+    nsRefPtr<Gamepad> gamepad = GetGamepad(aIndex);
     MOZ_ASSERT(gamepad);
     if (!gamepad) {
       return;
     }
-    RefPtr<Gamepad> clonedGamepad = gamepad->Clone(window);
+    nsRefPtr<Gamepad> clonedGamepad = gamepad->Clone(window);
     aWindow->AddGamepad(aIndex, clonedGamepad);
   } else {
     aWindow->RemoveGamepad(aIndex);
@@ -515,9 +500,16 @@ GamepadService::TimeoutHandler(nsITimer* aTimer, void* aClosure)
   }
 
   if (self->mListeners.Length() == 0) {
-    self->StopMonitoring();
+    if (XRE_IsParentProcess()) {
+      MaybeStopGamepadMonitoring();
+    } else {
+      ContentChild::GetSingleton()->SendGamepadListenerRemoved();
+    }
+
+    self->mStarted = false;
+      self->mGamepads.Clear();
+    }
   }
-}
 
 void
 GamepadService::StartCleanupTimer()

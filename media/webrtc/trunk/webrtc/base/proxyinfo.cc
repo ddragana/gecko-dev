@@ -17,8 +17,4 @@ const char * ProxyToString(ProxyType proxy) {
   return PROXY_NAMES[proxy];
 }
 
-ProxyInfo::ProxyInfo() : type(PROXY_NONE), autodetect(false) {
-}
-ProxyInfo::~ProxyInfo() = default;
-
 } // namespace rtc

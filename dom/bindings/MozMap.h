@@ -104,7 +104,7 @@ public:
     }
   }
 
-  MOZ_MUST_USE
+  MOZ_WARN_UNUSED_RESULT
   DataType* AddEntry(const nsAString& aKey)
   {
     EntryType* ent = this->PutEntry(aKey, fallible);

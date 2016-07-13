@@ -62,6 +62,7 @@ pref("browser.cache.memory_limit", 2048); // 2 MB
 
 /* image cache prefs */
 pref("image.cache.size", 1048576); // bytes
+pref("image.high_quality_downscaling.enabled", false);
 pref("canvas.image.cache.limit", 20971520); // 20 MB
 
 /* offline cache prefs */
@@ -101,6 +102,7 @@ pref("network.predictor.max-db-size", 2097152); // bytes
 pref("network.predictor.preserve", 50); // percentage of predictor data to keep when cleaning up
 
 /* session history */
+pref("browser.sessionhistory.max_total_viewers", 1);
 pref("browser.sessionhistory.max_entries", 50);
 pref("browser.sessionhistory.contentViewerTimeout", 360);
 
@@ -202,9 +204,6 @@ pref("geo.provider.use_mls", false);
 pref("geo.cell.scan", true);
 pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
 
-// base url for the stumbler
-pref("geo.stumbler.url", "https://location.services.mozilla.com/v1/geosubmit?key=%MOZILLA_API_KEY%");
-
 // enable geo
 pref("geo.enabled", true);
 
@@ -223,6 +222,11 @@ pref("dom.use_watchdog", false);
 // ensure that those calls don't accidentally trigger the dialog.
 pref("dom.max_script_run_time", 0);
 pref("dom.max_chrome_script_run_time", 0);
+pref("dom.max_child_script_run_time", 0);
+
+// Temporarily disable support for offsetX/Y to work around Google Maps bug
+// (bug 1150284)
+pref("dom.mouseEvent.offsetXY.enabled", false);
 
 // plugins
 pref("plugin.disable", true);
@@ -231,20 +235,17 @@ pref("dom.ipc.plugins.enabled", true);
 // product URLs
 // The breakpad report server to link to in about:crashes
 pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
-pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/b2g/%VERSION%/releasenotes/");
-pref("app.support.baseURL", "https://support.mozilla.com/b2g");
-pref("app.privacyURL", "https://www.mozilla.com/%LOCALE%/m/privacy.html");
-pref("app.creditsURL", "https://www.mozilla.org/credits/");
-pref("app.featuresURL", "https://www.mozilla.com/%LOCALE%/b2g/features/");
-pref("app.faqURL", "https://www.mozilla.com/%LOCALE%/b2g/faq/");
+pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/b2g/%VERSION%/releasenotes/");
+pref("app.support.baseURL", "http://support.mozilla.com/b2g");
+pref("app.privacyURL", "http://www.mozilla.com/%LOCALE%/m/privacy.html");
+pref("app.creditsURL", "http://www.mozilla.org/credits/");
+pref("app.featuresURL", "http://www.mozilla.com/%LOCALE%/b2g/features/");
+pref("app.faqURL", "http://www.mozilla.com/%LOCALE%/b2g/faq/");
 
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
 
 pref("security.warn_viewing_mixed", false); // Warning is disabled.  See Bug 616712.
-
-// Block insecure active content on https pages
-pref("security.mixed_content.block_active_content", true);
 
 // 2 = strict certificate pinning checks.
 // This default preference is more strict than Firefox because B2G
@@ -297,12 +298,13 @@ pref("ui.dragThresholdY", 25);
 
 // Layers Acceleration.  We can only have nice things on gonk, because
 // they're not maintained anywhere else.
+pref("layers.offmainthreadcomposition.enabled", true);
 #ifndef MOZ_WIDGET_GONK
 pref("dom.ipc.tabs.disabled", true);
-pref("layers.async-pan-zoom.enabled", false);
 #else
 pref("dom.ipc.tabs.disabled", false);
 pref("layers.acceleration.disabled", false);
+pref("layers.async-pan-zoom.enabled", true);
 pref("gfx.content.azure.backends", "cairo");
 #endif
 
@@ -320,12 +322,13 @@ pref("media.cache_readahead_limit", 30);
 
 #ifdef MOZ_FMP4
 // Enable/Disable Gonk Decoder Module
-pref("media.gonk.enabled", true);
+pref("media.fragmented-mp4.gonk.enabled", true);
 #endif
 
 //Encrypted media extensions.
 pref("media.eme.enabled", true);
 pref("media.eme.apiVisible", true);
+
 // The default number of decoded video frames that are enqueued in
 // MediaDecoderReader's mVideoQueue.
 pref("media.video-queue.default-size", 3);
@@ -341,9 +344,78 @@ pref("image.mem.surfacecache.max_size_kb", 131072);  // 128MB
 pref("image.mem.surfacecache.size_factor", 8);  // 1/8 of main memory
 pref("image.mem.surfacecache.discard_factor", 2);  // Discard 1/2 of the surface cache at a time.
 pref("image.mem.surfacecache.min_expiration_ms", 86400000); // 24h, we rely on the out of memory hook
+pref("image.onload.decode.limit", 24); /* don't decode more than 24 images eagerly */
 
+// XXX this isn't a good check for "are touch events supported", but
+// we don't really have a better one at the moment.
+// enable touch events interfaces
+pref("dom.w3c_touch_events.enabled", 1);
 pref("dom.w3c_touch_events.safetyX", 0); // escape borders in units of 1/240"
 pref("dom.w3c_touch_events.safetyY", 120); // escape borders in units of 1/240"
+
+// W3C draft pointer events
+pref("dom.w3c_pointer_events.enabled", false);
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", false);
+
+#ifdef MOZ_SAFE_BROWSING
+// Safe browsing does nothing unless this pref is set
+pref("browser.safebrowsing.enabled", false);
+
+// Prevent loading of pages identified as malware
+pref("browser.safebrowsing.malware.enabled", false);
+
+pref("browser.safebrowsing.debug", false);
+pref("browser.safebrowsing.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
+pref("browser.safebrowsing.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
+pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");
+pref("browser.safebrowsing.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
+pref("browser.safebrowsing.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
+
+pref("browser.safebrowsing.id", "Firefox");
+
+// Tables for application reputation.
+pref("urlclassifier.downloadBlockTable", "goog-badbinurl-shavar");
+
+// Non-enhanced mode (local url lists) URL list to check for updates
+pref("browser.safebrowsing.provider.0.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client={moz:client}&appver={moz:version}&pver=2.2&key=%GOOGLE_API_KEY%");
+
+pref("browser.safebrowsing.dataProvider", 0);
+
+// Does the provider name need to be localizable?
+pref("browser.safebrowsing.provider.0.name", "Google");
+pref("browser.safebrowsing.provider.0.reportURL", "https://safebrowsing.google.com/safebrowsing/report?");
+pref("browser.safebrowsing.provider.0.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client={moz:client}&appver={moz:version}&pver=2.2");
+
+// HTML report pages
+pref("browser.safebrowsing.provider.0.reportGenericURL", "http://{moz:locale}.phish-generic.mozilla.com/?hl={moz:locale}");
+pref("browser.safebrowsing.provider.0.reportErrorURL", "http://{moz:locale}.phish-error.mozilla.com/?hl={moz:locale}");
+pref("browser.safebrowsing.provider.0.reportPhishURL", "http://{moz:locale}.phish-report.mozilla.com/?hl={moz:locale}");
+pref("browser.safebrowsing.provider.0.reportMalwareURL", "http://{moz:locale}.malware-report.mozilla.com/?hl={moz:locale}");
+pref("browser.safebrowsing.provider.0.reportMalwareErrorURL", "http://{moz:locale}.malware-error.mozilla.com/?hl={moz:locale}");
+
+// FAQ URLs
+
+// The number of random entries to send with a gethash request.
+pref("urlclassifier.gethashnoise", 4);
+
+// Gethash timeout for Safebrowsing.
+pref("urlclassifier.gethash.timeout_ms", 5000);
+
+// If an urlclassifier table has not been updated in this number of seconds,
+// a gethash request will be forced to check that the result is still in
+// the database.
+pref("urlclassifier.max-complete-age", 2700);
+
+// URL for checking the reason for a malware warning.
+pref("browser.safebrowsing.malware.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
+
+// Tracking protection
+pref("privacy.trackingprotection.enabled", true);
+pref("privacy.trackingprotection.pbmode.enabled", false);
+
+#endif
 
 // True if this is the first time we are showing about:firstrun
 pref("browser.firstrun.show.uidiscovery", true);
@@ -365,6 +437,8 @@ pref("browser.dom.window.dump.enabled", false);
 // Default Content Security Policy to apply to certified apps.
 // If you change this CSP, make sure to update the fast path in nsCSPService.cpp
 pref("security.apps.certified.CSP.default", "default-src * data: blob:; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline' app://theme.gaiamobile.org");
+// Default Content Security Policy to apply to trusted apps.
+pref("security.apps.trusted.CSP.default", "default-src * data: blob:; object-src 'none'; frame-src 'none'");
 
 // handle links targeting new windows
 // 1=current window/tab, 2=new window, 3=new tab in most recent window
@@ -385,7 +459,7 @@ pref("dom.ipc.processCount", 100000);
 
 pref("dom.ipc.browser_frames.oop_by_default", false);
 
-#if !defined(MOZ_MULET) && !defined(MOZ_GRAPHENE)
+#ifndef MOZ_MULET
 pref("dom.meta-viewport.enabled", true);
 #endif
 
@@ -394,6 +468,9 @@ pref("dom.sms.enabled", true);
 
 //The waiting time in network manager.
 pref("network.gonk.ms-release-mms-connection", 30000);
+
+// WebContacts
+pref("dom.mozContacts.enabled", true);
 
 // Shortnumber matching needed for e.g. Brazil:
 // 03187654321 can be found with 87654321
@@ -482,9 +559,6 @@ pref("layout.frame_rate.precise", true);
 // Handle hardware buttons in the b2g chrome package
 pref("b2g.keys.menu.enabled", true);
 
-// Display simulator software buttons
-pref("b2g.software-buttons", false);
-
 // Screen timeout in seconds
 pref("power.screen.timeout", 60);
 
@@ -527,10 +601,12 @@ pref("b2g.update.download-watchdog-max-retries", 5);
 pref("app.update.enabled", true);
 pref("app.update.auto", false);
 pref("app.update.silent", false);
+pref("app.update.mode", 0);
+pref("app.update.incompatible.mode", 0);
 pref("app.update.staging.enabled", true);
 pref("app.update.service.enabled", true);
 
-pref("app.update.url", "https://aus5.mozilla.org/update/5/%PRODUCT%/%VERSION%/%BUILD_ID%/%PRODUCT_DEVICE%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%IMEI%/update.xml");
+pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%PRODUCT_DEVICE%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
 
 // Interval at which update manifest is fetched.  In units of seconds.
@@ -551,7 +627,9 @@ pref("app.update.socket.maxErrors", 20);
 pref("app.update.log", true);
 
 // SystemUpdate API
+#ifdef MOZ_WIDGET_GONK
 pref("dom.system_update.active", "@mozilla.org/updates/update-prompt;1");
+#endif
 #else
 // Explicitly disable the shutdown watchdog.  It's enabled by default.
 // When the updater is disabled, we want to know about shutdown hangs.
@@ -599,6 +677,9 @@ pref("dom.forms.number", true);
 // implemented for b2g (bug 875751)
 pref("dom.forms.color", false);
 
+// Turns on gralloc-based direct texturing for Gonk
+pref("gfx.gralloc.enabled", false);
+
 // This preference instructs the JS engine to discard the
 // source of any privileged JS after compilation. This saves
 // memory, but makes things like Function.prototype.toSource()
@@ -629,7 +710,7 @@ pref("javascript.options.mem.gc_max_empty_chunk_count", 2);
 pref("ui.showHideScrollbars", 1);
 pref("ui.useOverlayScrollbars", 1);
 pref("ui.scrollbarFadeBeginDelay", 450);
-pref("ui.scrollbarFadeDuration", 0);
+pref("ui.scrollbarFadeDuration", 200);
 
 // Scrollbar position follows the document `dir` attribute
 pref("layout.scrollbar.side", 1);
@@ -731,12 +812,7 @@ pref("hal.gonk.COMPOSITOR.nice", -4);
 // this too high, then we'll send out a memory pressure event every Z seconds
 // (see below), even while we have processes that we would happily kill in
 // order to free up memory.
-pref("gonk.notifyHardLowMemUnderKB", 14336);
-
-// Fire a memory pressure event when the system has less than Xmb of memory
-// remaining and then switch to the hard trigger, see above.  This should be
-// placed above the BACKGROUND priority class.
-pref("gonk.notifySoftLowMemUnderKB", 43008);
+pref("hal.processPriorityManager.gonk.notifyLowMemUnderKB", 14336);
 
 // We wait this long before polling the memory-pressure fd after seeing one
 // memory pressure event.  (When we're not under memory pressure, we sit
@@ -828,8 +904,8 @@ pref("memory.system_memory_reporter", true);
 // Don't dump memory reports on OOM, by default.
 pref("memory.dump_reports_on_oom", false);
 
-pref("layout.framevisibility.numscrollportwidths", 1);
-pref("layout.framevisibility.numscrollportheights", 1);
+pref("layout.imagevisibility.numscrollportwidths", 1);
+pref("layout.imagevisibility.numscrollportheights", 1);
 
 // Enable native identity (persona/browserid)
 pref("dom.identity.enabled", true);
@@ -857,6 +933,8 @@ pref("general.useragent.updates.retry", 86400); // 1 day
 // Device ID can be composed of letter, numbers, hyphen ("-") and dot (".")
 pref("general.useragent.device_id", "");
 
+// Make <audio> and <video> talk to the AudioChannelService.
+pref("media.useAudioChannelService", true);
 // Add Mozilla AudioChannel APIs.
 pref("media.useAudioChannelAPI", true);
 
@@ -884,6 +962,16 @@ pref("network.sntp.pools", // Servers separated by ';'.
      "0.pool.ntp.org;1.pool.ntp.org;2.pool.ntp.org;3.pool.ntp.org");
 pref("network.sntp.port", 123);
 pref("network.sntp.timeout", 30); // In seconds.
+
+// Enable dataStore
+pref("dom.datastore.enabled", true);
+// When an entry is changed, use two timers to fire system messages in a more
+// moderate pattern.
+pref("dom.datastore.sysMsgOnChangeShortTimeoutSec", 10);
+pref("dom.datastore.sysMsgOnChangeLongTimeoutSec", 60);
+
+// DOM Inter-App Communication API.
+pref("dom.inter-app-communication-api.enabled", true);
 
 // Allow ADB to run for this many hours before disabling
 // (only applies when marionette is disabled)
@@ -913,9 +1001,6 @@ pref("gfx.canvas.max-size-for-skia-gl", -1);
 // enable fence with readpixels for SurfaceStream
 pref("gfx.gralloc.fence-with-readpixels", true);
 
-// enable screen mirroring to external display
-pref("gfx.screen-mirroring.enabled", true);
-
 // The url of the page used to display network error details.
 pref("b2g.neterror.url", "net_error.html");
 
@@ -936,6 +1021,7 @@ pref("media.webspeech.synth.enabled", true);
 
 // Enable Web Speech recognition API
 pref("media.webspeech.recognition.enable", true);
+pref("media.webspeech.service.default", "pocketsphinx");
 
 // Downloads API
 pref("dom.mozDownloads.enabled", true);
@@ -953,8 +1039,17 @@ pref("security.exthelperapp.disable_background_handling", true);
 // Inactivity time in milliseconds after which we shut down the OS.File worker.
 pref("osfile.reset_worker_delay", 5000);
 
+// APZC preferences.
+#ifdef MOZ_WIDGET_GONK
+pref("apz.allow_zooming", true);
+#endif
+
+// Gaia relies heavily on scroll events for now, so lets fire them
+// more often than the default value (100).
+pref("apz.asyncscroll.throttle", 40);
+pref("apz.pan_repaint_interval", 16);
+
 // APZ physics settings, tuned by UX designers
-pref("apz.axis_lock.mode", 2); // Use "sticky" axis locking
 pref("apz.fling_curve_function_x1", "0.41");
 pref("apz.fling_curve_function_y1", "0.0");
 pref("apz.fling_curve_function_x2", "0.80");
@@ -962,8 +1057,25 @@ pref("apz.fling_curve_function_y2", "1.0");
 pref("apz.fling_curve_threshold_inches_per_ms", "0.01");
 pref("apz.fling_friction", "0.0019");
 pref("apz.max_velocity_inches_per_ms", "0.07");
+pref("apz.touch_start_tolerance", "0.1");
+
+// Tweak default displayport values to reduce the risk of running out of
+// memory when zooming in
+pref("apz.x_skate_size_multiplier", "1.25");
+pref("apz.y_skate_size_multiplier", "1.5");
+pref("apz.x_stationary_size_multiplier", "1.5");
+pref("apz.y_stationary_size_multiplier", "1.8");
+pref("apz.enlarge_displayport_when_clipped", true);
+// Use "sticky" axis locking
+pref("apz.axis_lock.mode", 2);
+
+// Overscroll-related settings
 pref("apz.overscroll.enabled", true);
-pref("apz.displayport_expiry_ms", 0); // causes issues on B2G, see bug 1250924
+pref("apz.overscroll.stretch_factor", "0.35");
+pref("apz.overscroll.spring_stiffness", "0.0018");
+pref("apz.overscroll.spring_friction", "0.015");
+pref("apz.overscroll.stop_distance_threshold", "5.0");
+pref("apz.overscroll.stop_velocity_threshold", "0.01");
 
 // For event-regions based hit-testing
 pref("layout.event-regions.enabled", true);
@@ -987,25 +1099,12 @@ pref("dom.wakelock.enabled", true);
 
 // Enable webapps add-ons
 pref("dom.apps.customization.enabled", true);
-pref("dom.apps.reviewer_paths", "/reviewers/,/extension/reviewers/");
 
-// New implementation to unify touch-caret and selection-carets.
-pref("layout.accessiblecaret.enabled", true);
+// Enable touch caret by default
+pref("touchcaret.enabled", true);
 
-// Show the selection bars at the two ends of the selection highlight. Required
-// by the spec in bug 921965.
-pref("layout.accessiblecaret.bar.enabled", true);
-
-// Hide the caret in cursor mode after 3 seconds.
-pref("layout.accessiblecaret.timeout_ms", 3000);
-
-// APZ on real devices supports long tap events.
-#ifdef MOZ_WIDGET_GONK
-pref("layout.accessiblecaret.use_long_tap_injector", false);
-#endif
-
-// Hide carets and text selection dialog during scrolling.
-pref("layout.accessiblecaret.always_show_when_scrolling", false);
+// Enable selection caret by default
+pref("selectioncaret.enabled", true);
 
 // Enable sync and mozId with Firefox Accounts.
 pref("services.sync.fxaccounts.enabled", true);
@@ -1014,14 +1113,13 @@ pref("identity.fxaccounts.enabled", true);
 // Mobile Identity API.
 pref("services.mobileid.server.uri", "https://msisdn.services.mozilla.com");
 
-pref("identity.fxaccounts.remote.oauth.uri", "https://oauth.accounts.firefox.com/v1");
-pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox.com/v1");
-
-// Disable Firefox Accounts device registration until bug 1238895 is fixed.
-pref("identity.fxaccounts.skipDeviceRegistration", true);
-
 // Enable mapped array buffer.
+#ifndef XP_WIN
 pref("dom.mapped_arraybuffer.enabled", true);
+#endif
+
+// BroadcastChannel API
+pref("dom.broadcastChannel.enabled", true);
 
 // SystemUpdate API
 pref("dom.system_update.enabled", true);
@@ -1050,53 +1148,22 @@ pref("dom.mozSettings.SettingsService.verbose.enabled", false);
 // readwrite.
 pref("dom.mozSettings.allowForceReadOnly", false);
 
+// RequestSync API is enabled by default on B2G.
+pref("dom.requestSync.enabled", true);
+
+// Resample touch events on b2g
+pref("gfx.touch.resample", true);
+
 // Comma separated list of activity names that can only be provided by
 // the system app in dev mode.
 pref("dom.activities.developer_mode_only", "import-app");
 
 // mulet apparently loads firefox.js as well as b2g.js, so we have to explicitly
-// disable serviceworkers and push here to get them disabled in mulet.
+// disable serviceworkers here to get them disabled in mulet.
 pref("dom.serviceWorkers.enabled", false);
-pref("dom.push.enabled", false);
-
-#if defined(RELEASE_BUILD)
-// Bug 1278848: Enable service worker notifications on release B2G once
-// they're ready.
-pref("dom.webnotifications.serviceworker.enabled", false);
-#else
-pref("dom.webnotifications.serviceworker.enabled", true);
-#endif
 
 // Retain at most 10 processes' layers buffers
 pref("layers.compositor-lru-size", 10);
 
-// Enable Cardboard VR on mobile, assuming VR at all is enabled
-pref("dom.vr.cardboard.enabled", true);
-
 // In B2G by deafult any AudioChannelAgent is muted when created.
 pref("dom.audiochannel.mutedByDefault", true);
-
-// The app origin of bluetooth app, which is responsible for listening pairing
-// requests.
-pref("dom.bluetooth.app-origin", "app://bluetooth.gaiamobile.org");
-
-// Enable W3C WebBluetooth API and disable B2G only GATT client API.
-pref("dom.bluetooth.webbluetooth.enabled", false);
-
-// Default device name for Presentation API
-pref("dom.presentation.device.name", "Firefox OS");
-
-// Enable notification of performance timing
-pref("dom.performance.enable_notify_performance_timing", true);
-
-// Multi-screen
-pref("b2g.multiscreen.chrome_remote_url", "chrome://b2g/content/shell_remote.html");
-pref("b2g.multiscreen.system_remote_url", "index_remote.html");
-
-// Audio competing between tabs
-pref("dom.audiochannel.audioCompeting", false);
-
-// Because we can't have nice things.
-#ifdef MOZ_GRAPHENE
-#include ../graphene/graphene.js
-#endif

@@ -13,6 +13,7 @@
 #include "nsIThreadRetargetableStreamListener.h"
 #include "nsIPrincipal.h"
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsProxyRelease.h"
 #include "nsStringGlue.h"
@@ -95,7 +96,7 @@ public:
   void ContinueEvict();
 
   // Request that we start decoding the image as soon as data becomes available.
-  void StartDecoding();
+  void RequestDecode();
 
   inline uint64_t InnerWindowID() const {
     return mInnerWindowId;
@@ -220,7 +221,7 @@ private:
   // Update the cache entry size based on the image container.
   void UpdateCacheEntrySize();
 
-  /// Returns true if StartDecoding() was called.
+  /// Returns true if RequestDecode() was called.
   bool IsDecodeRequested() const;
 
   // Weak reference to parent loader; this request cannot outlive its owner.
@@ -229,7 +230,7 @@ private:
   // The original URI we were loaded with. This is the same as the URI we are
   // keyed on in the cache. We store a string here to avoid off main thread
   // refcounting issues with nsStandardURL.
-  RefPtr<ImageURL> mURI;
+  nsRefPtr<ImageURL> mURI;
   // The URI of the resource we ended up loading after all redirects, etc.
   nsCOMPtr<nsIURI> mCurrentURI;
   // The principal of the document which loaded this image. Used when
@@ -248,16 +249,12 @@ private:
   nsCString mContentType;
 
   /* we hold on to this to this so long as we have observers */
-  RefPtr<imgCacheEntry> mCacheEntry;
+  nsRefPtr<imgCacheEntry> mCacheEntry;
 
   /// The key under which this imgRequest is stored in the image cache.
   ImageCacheKey mCacheKey;
 
   void* mLoadId;
-
-  /// Raw pointer to the first proxy that was added to this imgRequest. Use only
-  /// pointer comparisons; there's no guarantee this will remain valid.
-  void* mFirstProxy;
 
   imgCacheValidator* mValidator;
   nsCOMPtr<nsIAsyncVerifyRedirectCallback> mRedirectCallback;
@@ -280,8 +277,8 @@ private:
   // Member variables protected by mMutex. Note that *all* flags in our bitfield
   // are protected by mMutex; if you're adding a new flag that isn'protected, it
   // must not be a part of this bitfield.
-  RefPtr<ProgressTracker> mProgressTracker;
-  RefPtr<Image> mImage;
+  nsRefPtr<ProgressTracker> mProgressTracker;
+  nsRefPtr<Image> mImage;
   bool mIsMultiPartChannel : 1;
   bool mGotData : 1;
   bool mIsInCache : 1;

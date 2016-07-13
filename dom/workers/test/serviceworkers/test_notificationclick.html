@@ -23,26 +23,21 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=916893
   function testFrame(src) {
     var iframe = document.createElement("iframe");
     iframe.src = src;
-    window.callback = function(result) {
+    window.callback = function() {
       window.callback = null;
       document.body.removeChild(iframe);
       iframe = null;
-      ok(result, "Got notificationclick event with correct data.");
+      ok(true, "Got notificationclick event.");
       MockServices.unregister();
-      registration.unregister().then(function() {
-        SimpleTest.finish();
-      });
+      SimpleTest.finish();
     };
     document.body.appendChild(iframe);
   }
-
-  var registration;
 
   function runTest() {
     MockServices.register();
     testFrame('notificationclick.html');
     navigator.serviceWorker.register("notificationclick.js", { scope: "notificationclick.html" }).then(function(reg) {
-      registration = reg;
     }, function(e) {
       ok(false, "registration should have passed!");
     });
@@ -54,7 +49,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=916893
     ["dom.serviceWorkers.enabled", true],
     ["dom.serviceWorkers.testing.enabled", true],
     ["dom.webnotifications.workers.enabled", true],
-    ["dom.webnotifications.serviceworker.enabled", true],
     ["notification.prompt.testing", true],
   ]}, runTest);
 </script>

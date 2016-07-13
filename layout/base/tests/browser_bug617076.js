@@ -1,3 +1,10 @@
+function test()
+{
+  waitForExplicitFinish();
+
+  test1();
+}
+
 /**
  * 1. load about:addons in a new tab and select that tab
  * 2. insert a button with tooltiptext
@@ -8,39 +15,47 @@
  *
  * the test succeeds if it doesn't trigger any assertions
  */
+function test1() {
+  let uri = "about:addons";
+  let tab = gBrowser.addTab();
 
-add_task(function* test() {
-  // Open the test tab
-  let testTab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "about:addons");
+  tab.linkedBrowser.addEventListener("load", function(aEvent) {
+    tab.linkedBrowser.removeEventListener("load", arguments.callee, true);
 
-  // insert button into test page content
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
-    let doc = content.document;
-    let e = doc.createElement("button");
-    e.setAttribute("label", "hello");
-    e.setAttribute("tooltiptext", "world");
-    e.setAttribute("id", "test-button");
+    let doc = gBrowser.contentDocument;
+    var e = doc.createElement("button");
+    e.setAttribute('label', "hello");
+    e.setAttribute('tooltiptext', "world");
     doc.documentElement.insertBefore(e, doc.documentElement.firstChild);
-  });
 
-  // open a second tab and select it
-  let tab2 = yield BrowserTestUtils.openNewForegroundTab(gBrowser, "about:blank", true);
-  gBrowser.selectedTab = tab2;
+    let tab2 = gBrowser.addTab();
+    gBrowser.selectedTab = tab2;
 
-  // Select the testTab then perform mouse events on inserted button
-  gBrowser.selectedTab = testTab;
-  let browser = gBrowser.selectedBrowser;
-  EventUtils.disableNonTestMouseEvents(true);
-  try {
-    yield BrowserTestUtils.synthesizeMouse("#test-button", 1, 1, { type: "mouseover" }, browser);
-    yield BrowserTestUtils.synthesizeMouse("#test-button", 2, 6, { type: "mousemove" }, browser);
-    yield BrowserTestUtils.synthesizeMouse("#test-button", 2, 4, { type: "mousemove" }, browser);
-  } finally {
-    EventUtils.disableNonTestMouseEvents(false);
-  }
+    setTimeout(function() {
+      gBrowser.selectedTab = tab;
 
-  // cleanup
-  yield BrowserTestUtils.removeTab(testTab);
-  yield BrowserTestUtils.removeTab(tab2);
-  ok(true, "pass if no assertions");
-});
+      let doc = gBrowser.contentDocument;
+      var win = gBrowser.contentWindow;
+      EventUtils.disableNonTestMouseEvents(true);
+      try {
+        EventUtils.synthesizeMouse(e, 1, 1, { type: "mouseover" }, win);
+        EventUtils.synthesizeMouse(e, 2, 6, { type: "mousemove" }, win);
+        EventUtils.synthesizeMouse(e, 2, 4, { type: "mousemove" }, win);
+      } finally {
+        EventUtils.disableNonTestMouseEvents(false);
+      }
+
+      executeSoon(function() {
+        gBrowser.removeTab(tab, {animate: false});
+        gBrowser.removeTab(tab2, {animate: false});
+        ok(true, "pass if no assertions");
+
+        // done
+        executeSoon(finish);
+      });
+    }, 0);
+  }, true);
+
+  gBrowser.selectedTab = tab;
+  gBrowser.selectedBrowser.loadURI(uri);
+}

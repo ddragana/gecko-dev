@@ -72,4 +72,3 @@ best fit for you.
    commands
    driver
    logging
-   settings

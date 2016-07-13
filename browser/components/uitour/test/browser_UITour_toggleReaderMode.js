@@ -1,16 +1,18 @@
 "use strict";
 
-var gTestTab;
-var gContentAPI;
-var gContentWindow;
+let gTestTab;
+let gContentAPI;
+let gContentWindow;
 
-add_task(setup_UITourTest);
+function test() {
+  UITourTest();
+}
 
-add_UITour_task(function*() {
-  ok(!gBrowser.selectedBrowser.currentURI.spec.startsWith("about:reader"),
-     "Should not be in reader mode at start of test.");
-  yield gContentAPI.toggleReaderMode();
-  yield waitForConditionPromise(() => gBrowser.selectedBrowser.currentURI.spec.startsWith("about:reader"));
-  ok(gBrowser.selectedBrowser.currentURI.spec.startsWith("about:reader"),
-     "Should be in reader mode now.");
-});
+let tests = [
+  taskify(function*() {
+    ok(!gBrowser.selectedBrowser.currentURI.spec.startsWith("about:reader"), "Should not be in reader mode at start of test.");
+    gContentAPI.toggleReaderMode();
+    yield waitForConditionPromise(() => gBrowser.selectedBrowser.currentURI.spec.startsWith("about:reader"));
+    ok(gBrowser.selectedBrowser.currentURI.spec.startsWith("about:reader"), "Should be in reader mode now.");
+  })
+];

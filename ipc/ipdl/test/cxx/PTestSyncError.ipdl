@@ -6,11 +6,11 @@ namespace _ipdltest {
 sync protocol PTestSyncError {
 
 child:
-    async Start();
+    Start();
 
 parent:
     sync Error();
-    async __delete__();
+    __delete__();
 
 
 state START:

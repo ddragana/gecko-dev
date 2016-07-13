@@ -17,29 +17,20 @@ using namespace mozilla::dom;
 CustomEvent::CustomEvent(mozilla::dom::EventTarget* aOwner,
                          nsPresContext* aPresContext,
                          mozilla::WidgetEvent* aEvent)
-  : Event(aOwner, aPresContext, aEvent)
-  , mDetail(JS::NullValue())
+: Event(aOwner, aPresContext, aEvent)
 {
-  mozilla::HoldJSObjects(this);
 }
 
-CustomEvent::~CustomEvent()
-{
-  mozilla::DropJSObjects(this);
-}
+CustomEvent::~CustomEvent() {}
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(CustomEvent)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(CustomEvent, Event)
-  tmp->mDetail.setUndefined();
-  mozilla::DropJSObjects(this);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDetail)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(CustomEvent, Event)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDetail)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(CustomEvent, Event)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mDetail)
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_ADDREF_INHERITED(CustomEvent, Event)
 NS_IMPL_RELEASE_INHERITED(CustomEvent, Event)
@@ -55,7 +46,7 @@ CustomEvent::Constructor(const GlobalObject& aGlobal,
                          ErrorResult& aRv)
 {
   nsCOMPtr<mozilla::dom::EventTarget> t = do_QueryInterface(aGlobal.GetAsSupports());
-  RefPtr<CustomEvent> e = new CustomEvent(t, nullptr, nullptr);
+  nsRefPtr<CustomEvent> e = new CustomEvent(t, nullptr, nullptr);
   bool trusted = e->Init(t);
   JS::Rooted<JS::Value> detail(aGlobal.Context(), aParam.mDetail);
   e->InitCustomEvent(aGlobal.Context(), aType, aParam.mBubbles, aParam.mCancelable, detail, aRv);
@@ -75,21 +66,9 @@ CustomEvent::InitCustomEvent(const nsAString& aType,
                              bool aCancelable,
                              nsIVariant* aDetail)
 {
-  AutoJSAPI jsapi;
-  NS_ENSURE_STATE(jsapi.Init(GetParentObject()));
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JS::Value> detail(cx);
-
-  if (!aDetail) {
-    detail = JS::NullValue();
-  } else if (NS_WARN_IF(!VariantToJsval(cx, aDetail, &detail))) {
-    JS_ClearPendingException(cx);
-    return NS_ERROR_FAILURE;
-  }
-
-  Event::InitEvent(aType, aCanBubble, aCancelable);
-  mDetail = detail;
-
+  nsresult rv = Event::InitEvent(aType, aCanBubble, aCancelable);
+  NS_ENSURE_SUCCESS(rv, rv);
+  mDetail = aDetail;
   return NS_OK;
 }
 
@@ -101,44 +80,45 @@ CustomEvent::InitCustomEvent(JSContext* aCx,
                              JS::Handle<JS::Value> aDetail,
                              ErrorResult& aRv)
 {
-  Event::InitEvent(aType, aCanBubble, aCancelable);
-  mDetail = aDetail;
+  nsCOMPtr<nsIVariant> detail;
+  if (nsIXPConnect* xpc = nsContentUtils::XPConnect()) {
+    xpc->JSToVariant(aCx, aDetail, getter_AddRefs(detail));
+  }
+
+  if (!detail) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return;
+  }
+  aRv = InitCustomEvent(aType, aCanBubble, aCancelable, detail);
 }
 
 NS_IMETHODIMP
 CustomEvent::GetDetail(nsIVariant** aDetail)
 {
-  if (mDetail.isNull()) {
-    *aDetail = nullptr;
-    return NS_OK;
-  }
-
-  AutoJSAPI jsapi;
-  NS_ENSURE_STATE(jsapi.Init(GetParentObject()));
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JS::Value> detail(cx, mDetail);
-  nsIXPConnect* xpc = nsContentUtils::XPConnect();
-
-  if (NS_WARN_IF(!xpc)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  return xpc->JSToVariant(cx, detail, aDetail);
+  NS_IF_ADDREF(*aDetail = mDetail);
+  return NS_OK;
 }
 
 void
 CustomEvent::GetDetail(JSContext* aCx,
                        JS::MutableHandle<JS::Value> aRetval)
 {
-  aRetval.set(mDetail);
+  if (!mDetail) {
+    aRetval.setNull();
+    return;
+  }
+
+  VariantToJsval(aCx, mDetail, aRetval);
 }
 
-already_AddRefed<CustomEvent>
-NS_NewDOMCustomEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMCustomEvent(nsIDOMEvent** aInstancePtrResult,
+                     mozilla::dom::EventTarget* aOwner,
                      nsPresContext* aPresContext,
                      mozilla::WidgetEvent* aEvent)
 {
-  RefPtr<CustomEvent> it =
-    new CustomEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  CustomEvent* it = new CustomEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

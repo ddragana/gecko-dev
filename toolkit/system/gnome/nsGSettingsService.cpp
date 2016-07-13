@@ -6,7 +6,7 @@
 #include "mozilla/ArrayUtils.h"
 
 #include "nsGSettingsService.h"
-#include "nsString.h"
+#include "nsStringAPI.h"
 #include "nsCOMPtr.h"
 #include "nsMemory.h"
 #include "prlink.h"

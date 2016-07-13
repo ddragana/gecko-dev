@@ -27,16 +27,14 @@ add_task(function* test_registration_success() {
     channelID: 'f6edfbcd-79d6-49b8-9766-48b9dcfeff0f',
     pushEndpoint: 'https://example.com/update/same-manifest/2',
     scope: 'https://example.net/b',
-    originAttributes: ChromeUtils.originAttributesToSuffix(
-      { appId: 42 }),
+    originAttributes: ChromeUtils.originAttributesToSuffix({ appId: 42 }),
     version: 10,
     quota: Infinity,
   }, {
     channelID: 'b1cf38c9-6836-4d29-8a30-a3e98d59b728',
     pushEndpoint: 'https://example.org/update/different-manifest',
     scope: 'https://example.org/c',
-    originAttributes: ChromeUtils.originAttributesToSuffix(
-      { appId: 42, inIsolatedMozBrowser: true }),
+    originAttributes: ChromeUtils.originAttributesToSuffix({ appId: 42, inBrowser: true }),
     version: 15,
     quota: Infinity,
   }];
@@ -44,33 +42,40 @@ add_task(function* test_registration_success() {
     yield db.put(record);
   }
 
-  let handshakeDone;
-  let handshakePromise = new Promise(resolve => handshakeDone = resolve);
+  let handshakeDefer = Promise.defer();
   PushService.init({
     serverURI: "wss://push.example.org/",
+    networkInfo: new MockDesktopNetworkInfo(),
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
         onHello(request) {
           equal(request.uaid, userAgentID, 'Wrong device ID in handshake');
+          deepEqual(request.channelIDs.sort(), [
+            'b1cf38c9-6836-4d29-8a30-a3e98d59b728',
+            'bf001fe0-2684-42f2-bc4d-a3e14b11dd5b',
+            'f6edfbcd-79d6-49b8-9766-48b9dcfeff0f',
+          ], 'Wrong channel list in handshake');
           this.serverSendMsg(JSON.stringify({
             messageType: 'hello',
             status: 200,
             uaid: userAgentID
           }));
-          handshakeDone();
+          handshakeDefer.resolve();
         }
       });
     }
   });
 
-  yield handshakePromise;
+  yield waitForPromise(
+    handshakeDefer.promise,
+    DEFAULT_TIMEOUT,
+    'Timed out waiting for handshake'
+  );
 
-  let registration = yield PushService.registration({
-    scope: 'https://example.net/a',
-    originAttributes: '',
-  });
+  let registration = yield PushNotificationService.registration(
+    'https://example.net/a', '');
   equal(
-    registration.endpoint,
+    registration.pushEndpoint,
     'https://example.com/update/same-manifest/1',
     'Wrong push endpoint for scope'
   );

@@ -262,7 +262,7 @@ public:
     }
     ;
     virtual int32_t RenderFrame(const uint32_t streamId,
-                                const I420VideoFrame& videoFrame)
+                                I420VideoFrame& videoFrame)
     {
         _cnt++;
         if (_cnt % 100 == 0)

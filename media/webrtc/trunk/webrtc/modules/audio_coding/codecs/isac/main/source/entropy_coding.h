@@ -87,11 +87,11 @@ int WebRtcIsac_DecodeLpc(Bitstr* streamdata, double* LPCCoef_lo,
 
 /* quantize & code LPC Coef */
 void WebRtcIsac_EncodeLpcLb(double* LPCCoef_lo, double* LPCCoef_hi,
-                            Bitstr* streamdata, IsacSaveEncoderData* encData);
+                            Bitstr* streamdata, ISAC_SaveEncData_t* encData);
 
 void WebRtcIsac_EncodeLpcGainLb(double* LPCCoef_lo, double* LPCCoef_hi,
                                 Bitstr* streamdata,
-                                IsacSaveEncoderData* encData);
+                                ISAC_SaveEncData_t* encData);
 
 /******************************************************************************
  * WebRtcIsac_EncodeLpcUB()
@@ -177,12 +177,10 @@ int WebRtcIsac_EncodeGain2(int32_t* gain2, Bitstr* streamdata);
 
 void WebRtcIsac_EncodePitchGain(int16_t* PitchGains_Q12,
                                 Bitstr* streamdata,
-                                IsacSaveEncoderData* encData);
+                                ISAC_SaveEncData_t* encData);
 
-void WebRtcIsac_EncodePitchLag(double* PitchLags,
-                               int16_t* PitchGain_Q12,
-                               Bitstr* streamdata,
-                               IsacSaveEncoderData* encData);
+void WebRtcIsac_EncodePitchLag(double* PitchLags, int16_t* PitchGain_Q12,
+                               Bitstr* streamdata, ISAC_SaveEncData_t* encData);
 
 int WebRtcIsac_DecodePitchGain(Bitstr* streamdata,
                                int16_t* PitchGain_Q12);

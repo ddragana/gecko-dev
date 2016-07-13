@@ -21,7 +21,7 @@ namespace mozilla {
  * between unquoted and quoted names for serializaiton
  */ 
 
-enum FontFamilyType : uint32_t {
+enum FontFamilyType {
   eFamily_none = 0,  // used when finding generics
 
   // explicitly named font family (e.g. Helvetica)
@@ -29,7 +29,7 @@ enum FontFamilyType : uint32_t {
   eFamily_named_quoted,
 
   // generics
-  eFamily_serif,         // pref font code relies on this ordering!!!
+  eFamily_serif,
   eFamily_sans_serif,
   eFamily_monospace,
   eFamily_cursive,
@@ -37,11 +37,7 @@ enum FontFamilyType : uint32_t {
 
   // special
   eFamily_moz_variable,
-  eFamily_moz_fixed,
-
-  eFamily_generic_first = eFamily_serif,
-  eFamily_generic_last = eFamily_fantasy,
-  eFamily_generic_count = (eFamily_fantasy - eFamily_serif + 1)
+  eFamily_moz_fixed
 };
 
 enum QuotedName { eQuotedName, eUnquotedName };
@@ -155,6 +151,10 @@ struct FontFamilyName final {
     // memory reporting
     size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
         return mName.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    }
+
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+        return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
     }
 
     FontFamilyType mType;
@@ -337,12 +337,7 @@ public:
 
     // memory reporting
     size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
-        size_t n = 0;
-        n += mFontlist.ShallowSizeOfExcludingThis(aMallocSizeOf);
-        for (size_t i = 0; i < mFontlist.Length(); i++) {
-            n += mFontlist[i].SizeOfExcludingThis(aMallocSizeOf);
-        }
-        return n;
+        return mFontlist.SizeOfExcludingThis(aMallocSizeOf);
     }
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {

@@ -13,13 +13,13 @@
 NS_NAMED_LITERAL_CSTRING(HOST, "example.org");
 const int16_t PORT = 443;
 
-class psm_TLSIntoleranceTest : public ::testing::Test
+class TLSIntoleranceTest : public ::testing::Test
 {
 protected:
   nsSSLIOLayerHelpers helpers;
 };
 
-TEST_F(psm_TLSIntoleranceTest, FullFallbackProcess)
+TEST_F(TLSIntoleranceTest, Test_Full_Fallback_Process)
 {
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, helpers.mVersionFallbackLimit);
 
@@ -95,7 +95,7 @@ TEST_F(psm_TLSIntoleranceTest, FullFallbackProcess)
   }
 }
 
-TEST_F(psm_TLSIntoleranceTest, DisableFallbackWithHighLimit)
+TEST_F(TLSIntoleranceTest, Test_Disable_Fallback_With_High_Limit)
 {
   // this value disables version fallback entirely: with this value, all efforts
   // to mark an origin as version intolerant fail
@@ -114,7 +114,7 @@ TEST_F(psm_TLSIntoleranceTest, DisableFallbackWithHighLimit)
                                                    0));
 }
 
-TEST_F(psm_TLSIntoleranceTest, FallbackLimitBelowMin)
+TEST_F(TLSIntoleranceTest, Test_Fallback_Limit_Below_Min)
 {
   // check that we still respect the minimum version,
   // when it is higher than the fallback limit
@@ -138,7 +138,7 @@ TEST_F(psm_TLSIntoleranceTest, FallbackLimitBelowMin)
                                                    0));
 }
 
-TEST_F(psm_TLSIntoleranceTest, TolerantOverridesIntolerant1)
+TEST_F(TLSIntoleranceTest, Test_Tolerant_Overrides_Intolerant_1)
 {
   ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
                                                   SSL_LIBRARY_VERSION_TLS_1_0,
@@ -154,7 +154,7 @@ TEST_F(psm_TLSIntoleranceTest, TolerantOverridesIntolerant1)
   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
 }
 
-TEST_F(psm_TLSIntoleranceTest, TolerantOverridesIntolerant2)
+TEST_F(TLSIntoleranceTest, Test_Tolerant_Overrides_Intolerant_2)
 {
   ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
                                                   SSL_LIBRARY_VERSION_TLS_1_0,
@@ -170,7 +170,7 @@ TEST_F(psm_TLSIntoleranceTest, TolerantOverridesIntolerant2)
   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
 }
 
-TEST_F(psm_TLSIntoleranceTest, IntolerantDoesNotOverrideTolerant)
+TEST_F(TLSIntoleranceTest, Test_Intolerant_Does_Not_Override_Tolerant)
 {
   // No adjustment made when there is no entry for the site.
   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
@@ -188,7 +188,7 @@ TEST_F(psm_TLSIntoleranceTest, IntolerantDoesNotOverrideTolerant)
   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
 }
 
-TEST_F(psm_TLSIntoleranceTest, PortIsRelevant)
+TEST_F(TLSIntoleranceTest, Test_Port_Is_Relevant)
 {
   helpers.rememberTolerantAtVersion(HOST, 1, SSL_LIBRARY_VERSION_TLS_1_2);
   ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, 1,
@@ -217,7 +217,7 @@ TEST_F(psm_TLSIntoleranceTest, PortIsRelevant)
   }
 }
 
-TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonInitial)
+TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Initial)
 {
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 1));
 
@@ -225,7 +225,7 @@ TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonInitial)
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 2));
 }
 
-TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonStored)
+TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Stored)
 {
   helpers.rememberIntolerantAtVersion(HOST, 1, SSL_LIBRARY_VERSION_TLS_1_0,
                                       SSL_LIBRARY_VERSION_TLS_1_2,
@@ -238,7 +238,7 @@ TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonStored)
   ASSERT_EQ(SSL_ERROR_BAD_MAC_READ, helpers.getIntoleranceReason(HOST, 1));
 }
 
-TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonCleared)
+TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Cleared)
 {
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 1));
 
@@ -252,7 +252,7 @@ TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonCleared)
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 1));
 }
 
-TEST_F(psm_TLSIntoleranceTest, StrongCiphersFailed)
+TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed)
 {
   helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_1;
 
@@ -297,7 +297,7 @@ TEST_F(psm_TLSIntoleranceTest, StrongCiphersFailed)
   }
 }
 
-TEST_F(psm_TLSIntoleranceTest, StrongCiphersFailedAt1_1)
+TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed_At_1_1)
 {
   helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_0;
 
@@ -343,7 +343,7 @@ TEST_F(psm_TLSIntoleranceTest, StrongCiphersFailedAt1_1)
   }
 }
 
-TEST_F(psm_TLSIntoleranceTest, StrongCiphersFailedWithHighLimit)
+TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed_With_High_Limit)
 {
   // this value disables version fallback entirely: with this value, all efforts
   // to mark an origin as version intolerant fail
@@ -364,7 +364,7 @@ TEST_F(psm_TLSIntoleranceTest, StrongCiphersFailedWithHighLimit)
                                                    0));
 }
 
-TEST_F(psm_TLSIntoleranceTest, TolerantDoesNotOverrideWeakCiphersFallback)
+TEST_F(TLSIntoleranceTest, Test_Tolerant_Does_Not_Override_Weak_Ciphers_Fallback)
 {
   ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
   // No adjustment made when intolerant is zero.
@@ -378,7 +378,7 @@ TEST_F(psm_TLSIntoleranceTest, TolerantDoesNotOverrideWeakCiphersFallback)
   ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
 }
 
-TEST_F(psm_TLSIntoleranceTest, WeakCiphersFallbackDoesNotOverrideTolerant)
+TEST_F(TLSIntoleranceTest, Test_Weak_Ciphers_Fallback_Does_Not_Override_Tolerant)
 {
   // No adjustment made when there is no entry for the site.
   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
@@ -393,7 +393,7 @@ TEST_F(psm_TLSIntoleranceTest, WeakCiphersFallbackDoesNotOverrideTolerant)
   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
 }
 
-TEST_F(psm_TLSIntoleranceTest, TLSForgetIntolerance)
+TEST_F(TLSIntoleranceTest, TLS_Forget_Intolerance)
 {
   {
     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
@@ -423,7 +423,7 @@ TEST_F(psm_TLSIntoleranceTest, TLSForgetIntolerance)
   }
 }
 
-TEST_F(psm_TLSIntoleranceTest, TLSForgetStrongCipherFailed)
+TEST_F(TLSIntoleranceTest, TLS_Forget_Strong_Cipher_Failed)
 {
   {
     ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
@@ -446,7 +446,7 @@ TEST_F(psm_TLSIntoleranceTest, TLSForgetStrongCipherFailed)
   }
 }
 
-TEST_F(psm_TLSIntoleranceTest, TLSDontForgetTolerance)
+TEST_F(TLSIntoleranceTest, TLS_Dont_Forget_Tolerance)
 {
   {
     helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
@@ -488,7 +488,7 @@ TEST_F(psm_TLSIntoleranceTest, TLSDontForgetTolerance)
   }
 }
 
-TEST_F(psm_TLSIntoleranceTest, TLSPerSiteFallbackLimit)
+TEST_F(TLSIntoleranceTest, TLS_Per_Site_Fallback_Limit)
 {
   NS_NAMED_LITERAL_CSTRING(example_com, "example.com");
   NS_NAMED_LITERAL_CSTRING(example_net, "example.net");
@@ -565,4 +565,68 @@ TEST_F(psm_TLSIntoleranceTest, TLSPerSiteFallbackLimit)
   ASSERT_TRUE(helpers.fallbackLimitReached(example_org, SSL_LIBRARY_VERSION_TLS_1_2));
   ASSERT_TRUE(helpers.fallbackLimitReached(example_org, SSL_LIBRARY_VERSION_TLS_1_1));
   ASSERT_TRUE(helpers.fallbackLimitReached(example_org, SSL_LIBRARY_VERSION_TLS_1_0));
+}
+
+TEST_F(TLSIntoleranceTest, TLS_Static_Fallback_List)
+{
+  NS_NAMED_LITERAL_CSTRING(fallback_test, "fallback.test");
+  NS_NAMED_LITERAL_CSTRING(no_fallback_test, "no.fallback.test");
+  NS_NAMED_LITERAL_CSTRING(wildcard_test, "wildcard.test");
+  NS_NAMED_LITERAL_CSTRING(a_wildcard_test, "a.wildcard.test");
+  NS_NAMED_LITERAL_CSTRING(long_example_wildcard_test, "long.example.wildcard.test");
+
+  helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_0;
+  helpers.mUseStaticFallbackList = false;
+
+  ASSERT_FALSE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_FALSE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_FALSE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_FALSE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_FALSE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+
+  helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_2;
+
+  ASSERT_TRUE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_TRUE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_TRUE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_TRUE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_TRUE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_TRUE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_TRUE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_TRUE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_TRUE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_TRUE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+
+  helpers.mUseStaticFallbackList = true;
+
+  ASSERT_FALSE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(fallback_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_TRUE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_TRUE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(no_fallback_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_TRUE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_TRUE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_FALSE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(a_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
+  ASSERT_FALSE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_2));
+  ASSERT_FALSE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_1));
+  ASSERT_TRUE(helpers.fallbackLimitReached(long_example_wildcard_test, SSL_LIBRARY_VERSION_TLS_1_0));
 }

@@ -41,17 +41,9 @@ WEBIDL_EXAMPLE_INTERFACES += [
     'TestExampleProxyInterface',
 ]
 
-# Bug 932082 tracks having bindings use namespaced includes.
+GENERATED_INCLUDES += ['..']
 LOCAL_INCLUDES += [
-    '!/dist/include/mozilla/dom',
-]
-
-LOCAL_INCLUDES += [
-    '!..',
     '/dom/bindings',
     '/js/xpconnect/src',
     '/js/xpconnect/wrappers',
 ]
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

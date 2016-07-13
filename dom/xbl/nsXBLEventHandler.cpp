@@ -90,18 +90,18 @@ nsXBLKeyEventHandler::ExecuteMatchedHandlers(
                         uint32_t aCharCode,
                         const IgnoreModifierState& aIgnoreModifierState)
 {
-  WidgetEvent* event = aKeyEvent->AsEvent()->WidgetEventPtr();
-  nsCOMPtr<EventTarget> target = aKeyEvent->AsEvent()->InternalDOMEvent()->GetCurrentTarget();
+  WidgetEvent* event = aKeyEvent->GetInternalNSEvent();
+  nsCOMPtr<EventTarget> target = aKeyEvent->InternalDOMEvent()->GetCurrentTarget();
 
   bool executed = false;
   for (uint32_t i = 0; i < mProtoHandlers.Length(); ++i) {
     nsXBLPrototypeHandler* handler = mProtoHandlers[i];
     bool hasAllowUntrustedAttr = handler->HasAllowUntrustedAttr();
-    if ((event->IsTrusted() ||
+    if ((event->mFlags.mIsTrusted ||
         (hasAllowUntrustedAttr && handler->AllowUntrustedEvents()) ||
         (!hasAllowUntrustedAttr && !mIsBoundToChrome && !mUsingContentXBLScope)) &&
         handler->KeyEventMatched(aKeyEvent, aCharCode, aIgnoreModifierState)) {
-      handler->ExecuteHandler(target, aKeyEvent->AsEvent());
+      handler->ExecuteHandler(target, aKeyEvent);
       executed = true;
     }
   }
@@ -140,21 +140,18 @@ nsXBLKeyEventHandler::HandleEvent(nsIDOMEvent* aEvent)
   if (!key)
     return NS_OK;
 
-  WidgetKeyboardEvent* nativeKeyboardEvent =
-    aEvent->WidgetEventPtr()->AsKeyboardEvent();
-  MOZ_ASSERT(nativeKeyboardEvent);
-  AutoShortcutKeyCandidateArray shortcutKeys;
-  nativeKeyboardEvent->GetShortcutKeyCandidates(shortcutKeys);
+  nsAutoTArray<nsShortcutCandidate, 10> accessKeys;
+  nsContentUtils::GetAccelKeyCandidates(key, accessKeys);
 
-  if (shortcutKeys.IsEmpty()) {
+  if (accessKeys.IsEmpty()) {
     ExecuteMatchedHandlers(key, 0, IgnoreModifierState());
     return NS_OK;
   }
 
-  for (uint32_t i = 0; i < shortcutKeys.Length(); ++i) {
+  for (uint32_t i = 0; i < accessKeys.Length(); ++i) {
     IgnoreModifierState ignoreModifierState;
-    ignoreModifierState.mShift = shortcutKeys[i].mIgnoreShift;
-    if (ExecuteMatchedHandlers(key, shortcutKeys[i].mCharCode,
+    ignoreModifierState.mShift = accessKeys[i].mIgnoreShift;
+    if (ExecuteMatchedHandlers(key, accessKeys[i].mCharCode,
                                ignoreModifierState)) {
       return NS_OK;
     }
@@ -168,7 +165,7 @@ already_AddRefed<nsXBLEventHandler>
 NS_NewXBLEventHandler(nsXBLPrototypeHandler* aHandler,
                       nsIAtom* aEventType)
 {
-  RefPtr<nsXBLEventHandler> handler;
+  nsRefPtr<nsXBLEventHandler> handler;
 
   switch (nsContentUtils::GetEventClassID(nsDependentAtomString(aEventType))) {
     case eDragEventClass:

@@ -32,7 +32,6 @@ nsSMILAnimationController::nsSMILAnimationController(nsIDocument* aDoc)
     mDeferredStartSampling(false),
     mRunningSample(false),
     mRegisteredWithRefreshDriver(false),
-    mMightHavePendingStyleUpdates(false),
     mDocument(aDoc)
 {
   MOZ_ASSERT(aDoc, "need a non-null document");
@@ -319,13 +318,12 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
     return;
   }
 
-  bool isStyleFlushNeeded = mResampleNeeded;
   mResampleNeeded = false;
   // Set running sample flag -- do this before flushing styles so that when we
   // flush styles we don't end up requesting extra samples
   AutoRestore<bool> autoRestoreRunningSample(mRunningSample);
   mRunningSample = true;
-
+  
   // STEP 1: Bring model up to date
   // (i)  Rewind elements where necessary
   // (ii) Run milestone samples
@@ -379,9 +377,7 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
   for (auto iter = mAnimationElementTable.Iter(); !iter.Done(); iter.Next()) {
     SVGAnimationElement* animElem = iter.Get()->GetKey();
     SampleTimedElement(animElem, &activeContainers);
-    AddAnimationToCompositorTable(animElem,
-                                  currentCompositorTable,
-                                  isStyleFlushNeeded);
+    AddAnimationToCompositorTable(animElem, currentCompositorTable);
   }
   activeContainers.Clear();
 
@@ -425,11 +421,9 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
   }
 
   nsCOMPtr<nsIDocument> kungFuDeathGrip(mDocument);  // keeps 'this' alive too
-  if (isStyleFlushNeeded) {
-    mDocument->FlushPendingNotifications(Flush_Style);
-  }
+  mDocument->FlushPendingNotifications(Flush_Style);
 
-  // WARNING:
+  // WARNING: 
   // WARNING: the above flush may have destroyed the pres shell and/or
   // WARNING: frames and other layout related objects.
   // WARNING:
@@ -439,14 +433,12 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
   // random order. For animation from/to 'inherit' values to work correctly
   // when the inherited value is *also* being animated, we really should be
   // traversing our animated nodes in an ancestors-first order (bug 501183)
-  bool mightHavePendingStyleUpdates = false;
   for (auto iter = currentCompositorTable->Iter(); !iter.Done(); iter.Next()) {
-    iter.Get()->ComposeAttribute(mightHavePendingStyleUpdates);
+    iter.Get()->ComposeAttribute();
   }
 
   // Update last compositor table
   mLastCompositorTable = currentCompositorTable.forget();
-  mMightHavePendingStyleUpdates = mightHavePendingStyleUpdates;
 
   NS_ASSERTION(!mResampleNeeded, "Resample dirty flag set during sample!");
 }
@@ -525,7 +517,7 @@ nsSMILAnimationController::DoMilestoneSamples()
       break;
     }
 
-    nsTArray<RefPtr<mozilla::dom::SVGAnimationElement>> elements;
+    nsTArray<nsRefPtr<mozilla::dom::SVGAnimationElement>> elements;
     for (auto iter = mChildContainerTable.Iter(); !iter.Done(); iter.Next()) {
       nsSMILTimeContainer* container = iter.Get()->GetKey();
       if (container->IsPausedByType(nsSMILTimeContainer::PAUSE_BEGIN)) {
@@ -602,9 +594,7 @@ nsSMILAnimationController::SampleTimedElement(
 
 /*static*/ void
 nsSMILAnimationController::AddAnimationToCompositorTable(
-  SVGAnimationElement* aElement,
-  nsSMILCompositorTable* aCompositorTable,
-  bool& aStyleFlushNeeded)
+  SVGAnimationElement* aElement, nsSMILCompositorTable* aCompositorTable)
 {
   // Add a compositor to the hash table if there's not already one there
   nsSMILTargetIdentifier key;
@@ -637,7 +627,6 @@ nsSMILAnimationController::AddAnimationToCompositorTable(
     // trigger this same clause in future samples (until it changes again).
     func.ClearHasChanged();
   }
-  aStyleFlushNeeded |= func.ValueNeedsReparsingEverySample();
 }
 
 static inline bool
@@ -695,7 +684,7 @@ nsSMILAnimationController::GetTargetIdentifierForAnimation(
       } else {
         nsCSSProperty prop =
           nsCSSProps::LookupProperty(nsDependentAtomString(attributeName),
-                                     CSSEnabledState::eForAllContent);
+                                     nsCSSProps::eEnabledForAllContent);
         isCSS = nsSMILCSSProperty::IsPropertyAnimatable(prop);
       }
     }
@@ -715,9 +704,6 @@ nsSMILAnimationController::GetTargetIdentifierForAnimation(
 void
 nsSMILAnimationController::AddStyleUpdatesTo(RestyleTracker& aTracker)
 {
-  MOZ_ASSERT(mMightHavePendingStyleUpdates,
-             "Should only add style updates when we think we might have some");
-
   for (auto iter = mAnimationElementTable.Iter(); !iter.Done(); iter.Next()) {
     SVGAnimationElement* animElement = iter.Get()->GetKey();
 
@@ -728,15 +714,13 @@ nsSMILAnimationController::AddStyleUpdatesTo(RestyleTracker& aTracker)
     }
 
     // mIsCSS true means that the rules are the ones returned from
-    // Element::GetSMILOverrideStyleDeclaration (via nsSMILCSSProperty objects),
+    // Element::GetSMILOverrideStyleRule (via nsSMILCSSProperty objects),
     // and mIsCSS false means the rules are nsSMILMappedAttribute objects
     // returned from nsSVGElement::GetAnimatedContentStyleRule.
     nsRestyleHint rshint = key.mIsCSS ? eRestyle_StyleAttribute_Animations
                                       : eRestyle_SVGAttrAnimations;
     aTracker.AddPendingRestyle(key.mElement, rshint, nsChangeHint(0));
   }
-
-  mMightHavePendingStyleUpdates = false;
 }
 
 //----------------------------------------------------------------------

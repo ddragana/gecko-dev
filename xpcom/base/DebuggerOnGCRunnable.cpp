@@ -21,7 +21,7 @@ DebuggerOnGCRunnable::Enqueue(JSRuntime* aRt, const JS::GCDescription& aDesc)
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  RefPtr<DebuggerOnGCRunnable> runOnGC =
+  nsRefPtr<DebuggerOnGCRunnable> runOnGC =
     new DebuggerOnGCRunnable(Move(gcEvent));
   return NS_DispatchToCurrentThread(runOnGC);
 }
@@ -37,7 +37,7 @@ DebuggerOnGCRunnable::Run()
   return NS_OK;
 }
 
-nsresult
+NS_IMETHODIMP
 DebuggerOnGCRunnable::Cancel()
 {
   mGCData = nullptr;

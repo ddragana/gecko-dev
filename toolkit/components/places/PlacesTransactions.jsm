@@ -185,20 +185,18 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "console",
-                                  "resource://gre/modules/Console.jsm");
+                                  "resource://gre/modules/devtools/Console.jsm");
 
 Components.utils.importGlobalProperties(["URL"]);
 
-var TransactionsHistory = [];
+let TransactionsHistory = [];
 TransactionsHistory.__proto__ = {
   __proto__: Array.prototype,
 
   // The index of the first undo entry (if any) - See the documentation
   // at the top of this file.
   _undoPosition: 0,
-  get undoPosition() {
-    return this._undoPosition;
-  },
+  get undoPosition() this._undoPosition,
 
   // Handy shortcuts
   get topUndoEntry() {
@@ -308,7 +306,7 @@ TransactionsHistory.__proto__ = {
 };
 
 
-var PlacesTransactions = {
+let PlacesTransactions = {
   /**
    * @see Batches in the module documentation.
    */
@@ -488,7 +486,7 @@ Enqueuer.prototype = {
   }
 };
 
-var TransactionsManager = {
+let TransactionsManager = {
   // See the documentation at the top of this file. |transact| calls are not
   // serialized with |batch| calls.
   _mainEnqueuer: new Enqueuer(),
@@ -680,8 +678,8 @@ function DefineTransaction(aRequiredProps = [], aOptionalProps = []) {
       let input = DefineTransaction.verifyInput(aInput, aRequiredProps,
                                                 aOptionalProps);
       let executeArgs = [this,
-                         ...aRequiredProps.map(prop => input[prop]),
-                         ...aOptionalProps.map(prop => input[prop])];
+                         ...[input[prop] for (prop of aRequiredProps)],
+                         ...[input[prop] for (prop of aOptionalProps)]];
       this.execute = Function.bind.apply(this.execute, executeArgs);
     }
     return TransactionsHistory.proxifyTransaction(this);
@@ -725,7 +723,7 @@ DefineTransaction.annotationObjectValidate = function (obj) {
       checkProperty("value", false, isPrimitive) ) {
     // Nothing else should be set
     let validKeys = ["name", "value", "flags", "expires"];
-    if (Object.keys(obj).every( (k) => validKeys.includes(k)))
+    if (Object.keys(obj).every( (k) => validKeys.indexOf(k) != -1 ))
       return obj;
   }
   throw new Error("Invalid annotation object");
@@ -785,7 +783,7 @@ function (aName, aBasePropertyName) {
 
       // This also takes care of abandoning the global scope of the input
       // array (through Array.prototype).
-      return aValue.map(baseProp.validateValue);
+      return [for (e of aValue) baseProp.validateValue(e)];
     },
 
     // We allow setting either the array property itself (e.g. urls), or a
@@ -1040,8 +1038,8 @@ function* createItemsFromBookmarksTree(aBookmarksTree, aRestoring = false,
     }
     if (annos.length > 0) {
       if (!aRestoring && aExcludingAnnotations.length > 0) {
-        annos = annos.filter(a => !aExcludingAnnotations.includes(a.name));
-
+        annos = [for(a of annos)
+                 if (aExcludingAnnotations.indexOf(a.name) == -1) a];
       }
 
       PlacesUtils.setAnnotationsForItem(itemId, annos);
@@ -1067,7 +1065,7 @@ function* createItemsFromBookmarksTree(aBookmarksTree, aRestoring = false,
  * are also documented there.
  *****************************************************************************/
 
-var PT = PlacesTransactions;
+let PT = PlacesTransactions;
 
 /**
  * Transaction for creating a bookmark.
@@ -1095,7 +1093,7 @@ PT.NewBookmark.prototype = Object.seal({
           PlacesUtils.setAnnotationsForItem(itemId, aAnnos);
         if (aTags.length > 0) {
           let currentTags = PlacesUtils.tagging.getTagsForURI(aURI);
-          aTags = aTags.filter(t => !currentTags.includes(t));
+          aTags = [t for (t of aTags) if (currentTags.indexOf(t) == -1)];
           PlacesUtils.tagging.tagURI(aURI, aTags);
         }
 
@@ -1267,7 +1265,8 @@ PT.EditUrl.prototype = Object.seal({
         PlacesUtils.tagging.untagURI(oldURI, oldURITags);
 
       let currentNewURITags = PlacesUtils.tagging.getTagsForURI(aURI);
-      newURIAdditionalTags = oldURITags.filter(t => !currentNewURITags.includes(t));
+      newURIAdditionalTags = [t for (t of oldURITags)
+                              if (currentNewURITags.indexOf(t) == -1)];
       if (newURIAdditionalTags)
         PlacesUtils.tagging.tagURI(aURI, newURIAdditionalTags);
     }
@@ -1433,11 +1432,7 @@ PT.Remove.prototype = {
                         guid + "). Ex: " + ex);
       }
     }
-
-    let toRestore = [];
-    for (let guid of aGuids) {
-      toRestore.push(yield promiseBookmarksTree(guid));
-    }
+    let toRestore = [for (guid of aGuids) yield promiseBookmarksTree(guid)];
 
     let removeThem = Task.async(function* () {
       for (let guid of aGuids) {
@@ -1508,7 +1503,7 @@ PT.Tag.prototype = {
       }
       else {
         let currentTags = PlacesUtils.tagging.getTagsForURI(currentURI);
-        let newTags = aTags.filter(t => !currentTags.includes(t));
+        let newTags = [t for (t of aTags) if (currentTags.indexOf(t) == -1)];
         PlacesUtils.tagging.tagURI(currentURI, newTags);
         onUndo.unshift(() => {
           PlacesUtils.tagging.untagURI(currentURI, newTags);
@@ -1549,7 +1544,7 @@ PT.Untag.prototype = {
       let tagsToRemove;
       let tagsSet = PlacesUtils.tagging.getTagsForURI(currentURI);
       if (aTags.length > 0)
-        tagsToRemove = aTags.filter(t => tagsSet.includes(t));
+        tagsToRemove = [t for (t of aTags) if (tagsSet.indexOf(t) != -1)];
       else
         tagsToRemove = tagsSet;
       PlacesUtils.tagging.untagURI(currentURI, tagsToRemove);

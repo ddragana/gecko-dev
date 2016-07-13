@@ -76,7 +76,7 @@ bool TestManyChildAllocsChild::RecvGo()
             fail("can't send Hello()");
     }
 
-    size_t len = ManagedPTestManyChildAllocsSubChild().Count();
+    size_t len = ManagedPTestManyChildAllocsSubChild().Length();
     if (NALLOCS != len)
         fail("expected %lu kids, got %lu", NALLOCS, len);
 

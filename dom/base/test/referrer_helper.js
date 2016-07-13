@@ -23,8 +23,7 @@ window.addEventListener("message", function(event) {
  * to do checkIndividualResults and resetState
  */
 function doXHR(aUrl, onSuccess, onFail) {
-  // The server is at http[s]://example.com so we need cross-origin XHR.
-  var xhr = new XMLHttpRequest({mozSystem: true});
+  var xhr = new XMLHttpRequest();
   xhr.responseType = "json";
   xhr.onload = function () {
     onSuccess(xhr);
@@ -32,7 +31,7 @@ function doXHR(aUrl, onSuccess, onFail) {
   xhr.onerror = function () {
     onFail(xhr);
   };
-  xhr.open('GET', "http" + aUrl, true);
+  xhr.open('GET', aUrl, true);
   xhr.send(null);
 }
 
@@ -70,8 +69,6 @@ var tests = (function() {
 
   // enable referrer attribute
   yield SpecialPowers.pushPrefEnv({"set": [['network.http.enablePerElementReferrer', true]]}, advance);
-  yield SpecialPowers.pushPrefEnv({"set": [['security.mixed_content.block_active_content', false]]}, advance);
-  yield SpecialPowers.pushPermissions([{'type': 'systemXHR', 'allow': true, 'context': document}], advance);
 
   var iframe = document.getElementById("testframe");
 
@@ -90,8 +87,7 @@ var tests = (function() {
             searchParams.append(l, tests[i][l]);
           }
         }
-        var schemeFrom = tests[i].SCHEME_FROM || "http";
-        yield iframe.src = schemeFrom + SJS + searchParams.toString();
+        yield iframe.src = SJS + searchParams.toString();
         yield checkIndividualResults(tests[i].DESC, tests[i].RESULT, tests[i].NAME);
       };
     };

@@ -4,6 +4,9 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+interface MozMmsMessage;
+interface MozSmsMessage;
+
 dictionary SmsSegmentInfo {
   /**
    * The number of total segments for the input string. The value is always
@@ -69,7 +72,7 @@ dictionary MobileMessageFilter
   boolean? read = null;
 
   // Filtering by a message's threadId attribute.
-  [EnforceRange] unsigned long long? threadId = null;
+  [EnforceRange] unsigned long long? threadId = 0;
 };
 
 /**
@@ -160,18 +163,18 @@ interface MozMobileMessageManager : EventTarget
   [Throws]
   DOMRequest getMessage(long id);
 
-  // The parameter can be either a message id, or a {Mms,Sms}Message, or an
-  // array of {Mms,Sms}Message objects.
+  // The parameter can be either a message id, or a Moz{Mms,Sms}Message, or an
+  // array of Moz{Mms,Sms}Message objects.
   [Throws]
   DOMRequest delete(long id);
   [Throws]
-  DOMRequest delete(SmsMessage message);
+  DOMRequest delete(MozSmsMessage message);
   [Throws]
-  DOMRequest delete(MmsMessage message);
+  DOMRequest delete(MozMmsMessage message);
   [Throws]
-  DOMRequest delete(sequence<(long or SmsMessage or MmsMessage)> params);
+  DOMRequest delete(sequence<(long or MozSmsMessage or MozMmsMessage)> params);
 
-  // Iterates through {Mms,Sms}Message.
+  // Iterates through Moz{Mms,Sms}Message.
   [Throws]
   DOMCursor getMessages(optional MobileMessageFilter filter,
                         optional boolean reverse = false);
@@ -181,17 +184,17 @@ interface MozMobileMessageManager : EventTarget
                              boolean read,
                              optional boolean sendReadReport = false);
 
-  // Iterates through MobileMessageThread.
+  // Iterates through nsIDOMMozMobileMessageThread.
   [Throws]
   DOMCursor getThreads();
 
   [Throws]
   DOMRequest retrieveMMS(long id);
   [Throws]
-  DOMRequest retrieveMMS(MmsMessage message);
+  DOMRequest retrieveMMS(MozMmsMessage message);
 
   [Throws]
-  Promise<SmscAddress> getSmscAddress(optional unsigned long serviceId);
+  DOMRequest getSmscAddress(optional unsigned long serviceId);
 
   /**
    * Set the SMSC address.

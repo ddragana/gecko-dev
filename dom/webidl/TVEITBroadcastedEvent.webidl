@@ -13,7 +13,7 @@ dictionary TVEITBroadcastedEventInit : EventInit {
 
 [Pref="dom.tv.enabled",
  CheckAnyPermissions="tv",
- AvailableIn=CertifiedApps,
+ Func="Navigator::HasTVSupport",
  Constructor(DOMString type, optional TVEITBroadcastedEventInit eventInitDict)]
 interface TVEITBroadcastedEvent : Event {
   [Pure, Cached] readonly attribute sequence<TVProgram> programs;

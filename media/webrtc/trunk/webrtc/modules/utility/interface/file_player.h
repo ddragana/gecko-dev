@@ -27,7 +27,8 @@ public:
     enum {MAX_AUDIO_BUFFER_IN_SAMPLES = 60*32};
     enum {MAX_AUDIO_BUFFER_IN_BYTES = MAX_AUDIO_BUFFER_IN_SAMPLES*2};
 
-    // Note: will return NULL for unsupported formats.
+    // Note: will return NULL for video file formats (e.g. AVI) if the flag
+    //       WEBRTC_MODULE_UTILITY_VIDEO is not defined.
     static FilePlayer* CreateFilePlayer(const uint32_t instanceID,
                                         const FileFormats fileFormat);
 

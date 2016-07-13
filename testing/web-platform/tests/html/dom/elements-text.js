@@ -10,7 +10,7 @@ var textElements = {
     hreflang: "string",
     type: "string",
 
-    // HTMLHyperlinkElementUtils
+    // URLUtils
     href: "url",
 
     // Obsolete

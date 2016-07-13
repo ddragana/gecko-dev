@@ -50,7 +50,7 @@ typedef AsyncExecuteStatements::StatementDataArray StatementDataArray;
 /**
  * Notifies a callback with a result set.
  */
-class CallbackResultNotifier : public Runnable
+class CallbackResultNotifier : public nsRunnable
 {
 public:
   CallbackResultNotifier(mozIStorageStatementCallback *aCallback,
@@ -82,13 +82,13 @@ public:
 private:
   mozIStorageStatementCallback *mCallback;
   nsCOMPtr<mozIStorageResultSet> mResults;
-  RefPtr<AsyncExecuteStatements> mEventStatus;
+  nsRefPtr<AsyncExecuteStatements> mEventStatus;
 };
 
 /**
  * Notifies the calling thread that an error has occurred.
  */
-class ErrorNotifier : public Runnable
+class ErrorNotifier : public nsRunnable
 {
 public:
   ErrorNotifier(mozIStorageStatementCallback *aCallback,
@@ -118,14 +118,14 @@ public:
 private:
   mozIStorageStatementCallback *mCallback;
   nsCOMPtr<mozIStorageError> mErrorObj;
-  RefPtr<AsyncExecuteStatements> mEventStatus;
+  nsRefPtr<AsyncExecuteStatements> mEventStatus;
 };
 
 /**
  * Notifies the calling thread that the statement has finished executing.  Takes
  * ownership of the StatementData so it is released on the proper thread.
  */
-class CompletionNotifier : public Runnable
+class CompletionNotifier : public nsRunnable
 {
 public:
   /**
@@ -169,7 +169,7 @@ AsyncExecuteStatements::execute(StatementDataArray &aStatements,
                                 mozIStoragePendingStatement **_stmt)
 {
   // Create our event to run in the background
-  RefPtr<AsyncExecuteStatements> event =
+  nsRefPtr<AsyncExecuteStatements> event =
     new AsyncExecuteStatements(aStatements, aConnection, aNativeConnection,
                                aCallback);
   NS_ENSURE_TRUE(event, NS_ERROR_OUT_OF_MEMORY);
@@ -191,7 +191,7 @@ AsyncExecuteStatements::execute(StatementDataArray &aStatements,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Return it as the pending statement object and track it.
-  event.forget(_stmt);
+  NS_ADDREF(*_stmt = event);
   return NS_OK;
 }
 
@@ -320,13 +320,10 @@ AsyncExecuteStatements::executeAndProcessStatement(sqlite3_stmt *aStatement,
     }
   } while (hasResults);
 
-#ifndef MOZ_STORAGE_SORTWARNING_SQL_DUMP
-  if (MOZ_LOG_TEST(gStorageLog, LogLevel::Warning))
+#ifdef DEBUG
+  // Check to make sure that this statement was smart about what it did.
+  checkAndLogStatementPerformance(aStatement);
 #endif
-  {
-    // Check to make sure that this statement was smart about what it did.
-    checkAndLogStatementPerformance(aStatement);
-  }
 
   // If we are done, we need to set our state accordingly while we still hold
   // our mutex.  We would have already returned if we were canceled or had
@@ -400,7 +397,7 @@ AsyncExecuteStatements::buildAndNotifyResults(sqlite3_stmt *aStatement)
     mResultSet = new ResultSet();
   NS_ENSURE_TRUE(mResultSet, NS_ERROR_OUT_OF_MEMORY);
 
-  RefPtr<Row> row(new Row());
+  nsRefPtr<Row> row(new Row());
   NS_ENSURE_TRUE(row, NS_ERROR_OUT_OF_MEMORY);
 
   nsresult rv = row->initialize(aStatement);
@@ -466,7 +463,7 @@ AsyncExecuteStatements::notifyComplete()
 
   // Always generate a completion notification; it is what guarantees that our
   // destruction does not happen here on the async thread.
-  RefPtr<CompletionNotifier> completionEvent =
+  nsRefPtr<CompletionNotifier> completionEvent =
     new CompletionNotifier(mCallback, mState);
 
   // We no longer own mCallback (the CompletionNotifier takes ownership).
@@ -502,7 +499,7 @@ AsyncExecuteStatements::notifyError(mozIStorageError *aError)
   if (!mCallback)
     return NS_OK;
 
-  RefPtr<ErrorNotifier> notifier =
+  nsRefPtr<ErrorNotifier> notifier =
     new ErrorNotifier(mCallback, aError, this);
   NS_ENSURE_TRUE(notifier, NS_ERROR_OUT_OF_MEMORY);
 
@@ -515,7 +512,7 @@ AsyncExecuteStatements::notifyResults()
   mMutex.AssertNotCurrentThreadOwns();
   NS_ASSERTION(mCallback, "notifyResults called without a callback!");
 
-  RefPtr<CallbackResultNotifier> notifier =
+  nsRefPtr<CallbackResultNotifier> notifier =
     new CallbackResultNotifier(mCallback, mResultSet, this);
   NS_ENSURE_TRUE(notifier, NS_ERROR_OUT_OF_MEMORY);
 

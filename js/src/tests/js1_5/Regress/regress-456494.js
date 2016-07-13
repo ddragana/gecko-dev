@@ -20,6 +20,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(true);
 
   function k(s)
   {
@@ -33,6 +34,7 @@ function test()
   }
   f(1);
 
+  jit(false);
 
   if (typeof this.tracemonkey != 'undefined')
   {

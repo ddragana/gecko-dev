@@ -17,7 +17,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Basic Plugin Logging Usage Instructions
 //
-// 1. Set this environment variable: MOZ_LOG=<name>:<level>
+// 1. Set this environment variable: NSPR_LOG_MODULES=<name>:<level>
 
 // Choose the <name> and <level> from this list (no quotes):
 
@@ -33,14 +33,14 @@
 #define PLUGIN_LOG_NOISY  mozilla::LogLevel::Verbose
 
 // 2. You can combine logs and levels by separating them with a comma:
-//    My favorite Win32 Example: SET MOZ_LOG=Plugin:5,PluginNPP:5,PluginNPN:5
+//    My favorite Win32 Example: SET NSPR_LOG_MODULES=Plugin:5,PluginNPP:5,PluginNPN:5
 
 // 3. Instead of output going to the console, you can log to a file. Additionally, set the
-//    MOZ_LOG_FILE environment variable to point to the full path of a file.
-//    My favorite Win32 Example: SET MOZ_LOG_FILE=c:\temp\pluginLog.txt
+//    NSPR_LOG_FILE environment variable to point to the full path of a file.
+//    My favorite Win32 Example: SET NSPR_LOG_FILE=c:\temp\pluginLog.txt
 
-// 4. For complete information see the Gecko Developer guide:
-// https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Gecko_Logging
+// 4. For complete information see the NSPR Reference: 
+//    http://www.mozilla.org/projects/nspr/reference/html/prlog.html
 
 
 #ifdef PLUGIN_LOGGING
@@ -48,9 +48,9 @@
 class nsPluginLogging
 {
 public:
-  static mozilla::LazyLogModule gNPNLog;  // 4.x NP API, calls into navigator
-  static mozilla::LazyLogModule gNPPLog;  // 4.x NP API, calls into plugin
-  static mozilla::LazyLogModule gPluginLog;  // general plugin log
+  static PRLogModuleInfo* gNPNLog;  // 4.x NP API, calls into navigator
+  static PRLogModuleInfo* gNPPLog;  // 4.x NP API, calls into plugin
+  static PRLogModuleInfo* gPluginLog;  // general plugin log
 };
 
 #endif   // PLUGIN_LOGGING

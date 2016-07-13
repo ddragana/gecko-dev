@@ -8,70 +8,62 @@
 
 #include "ExtendedValidation.h"
 #include "NSSCertDBTrustDomain.h"
-#include "ScopedNSSTypes.h"
-#include "SharedSSLState.h"
-#include "cert.h"
-#include "certdb.h"
-#include "mozilla/ArrayUtils.h"
-#include "mozilla/Casting.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/PublicSSL.h"
-#include "mozilla/Services.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/SyncRunnable.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/unused.h"
 #include "nsAppDirectoryServiceDefs.h"
-#include "nsCRT.h"
 #include "nsCertVerificationThread.h"
-#include "nsClientAuthRemember.h"
+#include "nsAppDirectoryServiceDefs.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsICertOverrideService.h"
-#include "nsIFile.h"
-#include "nsIObserverService.h"
-#include "nsIPrompt.h"
-#include "nsIProperties.h"
-#include "nsISiteSecurityService.h"
-#include "nsITokenPasswordDialogs.h"
-#include "nsIWindowWatcher.h"
-#include "nsIXULRuntime.h"
-#include "nsNSSCertificateDB.h"
-#include "nsNSSHelper.h"
-#include "nsNSSShutDown.h"
-#include "nsServiceManagerUtils.h"
+#include "NSSCertDBTrustDomain.h"
 #include "nsThreadUtils.h"
-#include "nsXULAppAPI.h"
-#include "nss.h"
-#include "p12plcy.h"
-#include "pkix/pkixnss.h"
-#include "secerr.h"
-#include "secmod.h"
-#include "ssl.h"
-#include "sslerr.h"
-#include "sslproto.h"
+#include "mozilla/Preferences.h"
+#include "nsThreadUtils.h"
+#include "mozilla/PublicSSL.h"
+#include "mozilla/StaticPtr.h"
 
 #ifndef MOZ_NO_SMART_CARDS
 #include "nsSmartCardMonitor.h"
 #endif
 
-#ifdef XP_WIN
-#include "mozilla/WindowsVersion.h"
-#include "nsILocalFileWin.h"
+#include "nsCRT.h"
+#include "nsNTLMAuthModule.h"
+#include "nsIFile.h"
+#include "nsIProperties.h"
+#include "nsIWindowWatcher.h"
+#include "nsIPrompt.h"
+#include "nsIBufEntropyCollector.h"
+#include "nsITokenPasswordDialogs.h"
+#include "nsISiteSecurityService.h"
+#include "nsServiceManagerUtils.h"
+#include "nsNSSShutDown.h"
+#include "SharedSSLState.h"
+#include "NSSErrorsService.h"
 
-#include "windows.h" // this needs to be before the following includes
-#include "lmcons.h"
-#include "sddl.h"
-#include "wincrypt.h"
-#include "nsIWindowsRegKey.h"
+#include "nss.h"
+#include "pkix/pkixnss.h"
+#include "ssl.h"
+#include "sslproto.h"
+#include "secmod.h"
+#include "secerr.h"
+#include "sslerr.h"
+
+#include "nsXULAppAPI.h"
+
+#ifdef XP_WIN
+#include "nsILocalFileWin.h"
 #endif
+
+#include "p12plcy.h"
 
 using namespace mozilla;
 using namespace mozilla::psm;
 
-LazyLogModule gPIPNSSLog("pipnss");
+PRLogModuleInfo* gPIPNSSLog = nullptr;
 
 int nsNSSComponent::mInstanceCount = 0;
+
+bool nsPSMInitPanic::isPanic = false;
 
 // This function can be called from chrome or content processes
 // to ensure that NSS is initialized.
@@ -87,30 +79,8 @@ bool EnsureNSSInitializedChromeOrContent()
     return true;
   }
 
-  // If this is a content process and not the main thread (i.e. probably a
-  // worker) then forward this call to the main thread.
   if (!NS_IsMainThread()) {
-    static Atomic<bool> initialized(false);
-
-    // Cache the result to dispatch to the main thread only once per worker.
-    if (initialized) {
-      return true;
-    }
-
-    nsCOMPtr<nsIThread> mainThread;
-    nsresult rv = NS_GetMainThread(getter_AddRefs(mainThread));
-    if (NS_FAILED(rv)) {
-      return false;
-    }
-
-    // Forward to the main thread synchronously.
-    mozilla::SyncRunnable::DispatchToThread(mainThread,
-      new SyncRunnable(NS_NewRunnableFunction([]() {
-        initialized = EnsureNSSInitializedChromeOrContent();
-      }))
-    );
-
-    return initialized;
+    return false;
   }
 
   if (NSS_IsInitialized()) {
@@ -133,6 +103,9 @@ bool EnsureNSSInitializedChromeOrContent()
 // creating any other components.
 bool EnsureNSSInitialized(EnsureNSSOperator op)
 {
+  if (nsPSMInitPanic::GetPanic())
+    return false;
+
   if (GeckoProcessType_Default != XRE_GetProcessType())
   {
     if (op == nssEnsureOnChromeOnly)
@@ -171,7 +144,7 @@ bool EnsureNSSInitialized(EnsureNSSOperator op)
   case nssInitFailed:
     NS_ASSERTION(loading, "Bad call to EnsureNSSInitialized(nssInitFailed)");
     loading = false;
-    MOZ_FALLTHROUGH;
+    // no break
 
   case nssShutdown:
     PR_AtomicSet(&haveLoaded, 0);
@@ -257,10 +230,15 @@ nsNSSComponent::nsNSSComponent()
 #endif
    mCertVerificationThread(nullptr)
 {
+  if (!gPIPNSSLog)
+    gPIPNSSLog = PR_NewLogModule("pipnss");
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::ctor\n"));
+  mObserversRegistered = false;
 
   NS_ASSERTION( (0 == mInstanceCount), "nsNSSComponent is a singleton, but instantiated multiple times!");
   ++mInstanceCount;
+  mShutdownObjectList = nsNSSShutDownList::construct();
+  mIsNetworkDown = false;
 }
 
 void
@@ -304,7 +282,7 @@ nsNSSComponent::~nsNSSComponent()
   SharedSSLState::GlobalCleanup();
   RememberCertErrorsTable::Cleanup();
   --mInstanceCount;
-  nsNSSShutDownList::shutdown();
+  delete mShutdownObjectList;
 
   // We are being freed, drop the haveLoaded flag to re-enable
   // potential nss initialization later.
@@ -349,6 +327,26 @@ nsNSSComponent::GetPIPNSSBundleString(const char* name, nsAString& outString)
     }
   }
 
+  return rv;
+}
+
+NS_IMETHODIMP
+nsNSSComponent::NSSBundleFormatStringFromName(const char* name,
+                                              const char16_t** params,
+                                              uint32_t numParams,
+                                              nsAString& outString)
+{
+  nsresult rv = NS_ERROR_FAILURE;
+
+  if (mNSSErrorsBundle && name) {
+    nsXPIDLString result;
+    rv = mNSSErrorsBundle->FormatStringFromName(NS_ConvertASCIItoUTF16(name).get(),
+                                                params, numParams,
+                                                getter_Copies(result));
+    if (NS_SUCCEEDED(rv)) {
+      outString = result;
+    }
+  }
   return rv;
 }
 
@@ -428,646 +426,6 @@ nsNSSComponent::ShutdownSmartCardThreads()
   mThreadList = nullptr;
 }
 #endif // MOZ_NO_SMART_CARDS
-
-#ifdef XP_WIN
-static bool
-GetUserSid(nsAString& sidString)
-{
-  // UNLEN is the maximum user name length (see Lmcons.h). +1 for the null
-  // terminator.
-  WCHAR lpAccountName[UNLEN + 1];
-  DWORD lcAccountName = sizeof(lpAccountName) / sizeof(lpAccountName[0]);
-  BOOL success = GetUserName(lpAccountName, &lcAccountName);
-  if (!success) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("GetUserName failed"));
-    return false;
-  }
-  char sid_buffer[SECURITY_MAX_SID_SIZE];
-  SID* sid = BitwiseCast<SID*, char*>(sid_buffer);
-  DWORD cbSid = ArrayLength(sid_buffer);
-  SID_NAME_USE eUse;
-  // There doesn't appear to be a defined maximum length for the domain name
-  // here. To deal with this, we start with a reasonable buffer length and
-  // see if that works. If it fails and the error indicates insufficient length,
-  // we use the indicated required length and try again.
-  DWORD cchReferencedDomainName = 128;
-  auto ReferencedDomainName(MakeUnique<WCHAR[]>(cchReferencedDomainName));
-  success = LookupAccountName(nullptr, lpAccountName, sid, &cbSid,
-                              ReferencedDomainName.get(),
-                              &cchReferencedDomainName, &eUse);
-  if (!success && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("LookupAccountName failed"));
-    return false;
-  }
-  if (!success) {
-    ReferencedDomainName = MakeUnique<WCHAR[]>(cchReferencedDomainName);
-    success = LookupAccountName(nullptr, lpAccountName, sid, &cbSid,
-                                ReferencedDomainName.get(),
-                                &cchReferencedDomainName, &eUse);
-  }
-  if (!success) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("LookupAccountName failed"));
-    return false;
-  }
-  LPTSTR StringSid;
-  success = ConvertSidToStringSid(sid, &StringSid);
-  if (!success) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("ConvertSidToStringSid failed"));
-    return false;
-  }
-  sidString.Assign(StringSid);
-  LocalFree(StringSid);
-  return true;
-}
-
-// This is a specialized helper function to read the value of a registry key
-// that might not be present. If it is present, returns (via the output
-// parameter) its value. Otherwise, returns the given default value.
-// This function handles one level of nesting. That is, if the desired value
-// is actually in a direct child of the given registry key (where the child
-// and/or the value being sought may not actually be present), this function
-// will handle that. In the normal case, though, optionalChildName will be
-// null.
-static nsresult
-ReadRegKeyValueWithDefault(nsCOMPtr<nsIWindowsRegKey> regKey,
-                           uint32_t flags,
-                           wchar_t* optionalChildName,
-                           wchar_t* valueName,
-                           uint32_t defaultValue,
-                           uint32_t& valueOut)
-{
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("ReadRegKeyValueWithDefault"));
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("attempting to read '%S%s%S' with default '%u'",
-           optionalChildName ? optionalChildName : L"",
-           optionalChildName ? "\\" : "", valueName, defaultValue));
-  if (optionalChildName) {
-    nsDependentString childNameString(optionalChildName);
-    bool hasChild;
-    nsresult rv = regKey->HasChild(childNameString, &hasChild);
-    if (NS_FAILED(rv)) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("failed to determine if child key is present"));
-      return rv;
-    }
-    if (!hasChild) {
-      valueOut = defaultValue;
-      return NS_OK;
-    }
-    nsCOMPtr<nsIWindowsRegKey> childRegKey;
-    rv = regKey->OpenChild(childNameString, flags,
-                           getter_AddRefs(childRegKey));
-    if (NS_FAILED(rv)) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't open child key"));
-      return rv;
-    }
-    return ReadRegKeyValueWithDefault(childRegKey, flags, nullptr, valueName,
-                                      defaultValue, valueOut);
-  }
-  nsDependentString valueNameString(valueName);
-  bool hasValue;
-  nsresult rv = regKey->HasValue(valueNameString, &hasValue);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("failed to determine if value is present"));
-    return rv;
-  }
-  if (!hasValue) {
-    valueOut = defaultValue;
-    return NS_OK;
-  }
-  rv = regKey->ReadIntValue(valueNameString, &valueOut);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("failed to read value"));
-    return rv;
-  }
-  return NS_OK;
-}
-
-static nsresult
-AccountHasFamilySafetyEnabled(bool& enabled)
-{
-  enabled = false;
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("AccountHasFamilySafetyEnabled?"));
-  nsCOMPtr<nsIWindowsRegKey> parentalControlsKey(
-    do_CreateInstance("@mozilla.org/windows-registry-key;1"));
-  if (!parentalControlsKey) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't create nsIWindowsRegKey"));
-    return NS_ERROR_FAILURE;
-  }
-  uint32_t flags = nsIWindowsRegKey::ACCESS_READ | nsIWindowsRegKey::WOW64_64;
-  NS_NAMED_LITERAL_STRING(familySafetyPath,
-    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Parental Controls");
-  nsresult rv = parentalControlsKey->Open(
-    nsIWindowsRegKey::ROOT_KEY_LOCAL_MACHINE, familySafetyPath, flags);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't open parentalControlsKey"));
-    return rv;
-  }
-  NS_NAMED_LITERAL_STRING(usersString, "Users");
-  bool hasUsers;
-  rv = parentalControlsKey->HasChild(usersString, &hasUsers);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("HasChild(Users) failed"));
-    return rv;
-  }
-  if (!hasUsers) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("Users subkey not present - Parental Controls not enabled"));
-    return NS_OK;
-  }
-  nsCOMPtr<nsIWindowsRegKey> usersKey;
-  rv = parentalControlsKey->OpenChild(usersString, flags,
-                                      getter_AddRefs(usersKey));
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("failed to open Users subkey"));
-    return rv;
-  }
-  nsAutoString sid;
-  if (!GetUserSid(sid)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't get sid"));
-    return NS_ERROR_FAILURE;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("our sid is '%S'", sid.get()));
-  bool hasSid;
-  rv = usersKey->HasChild(sid, &hasSid);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("HasChild(sid) failed"));
-    return rv;
-  }
-  if (!hasSid) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("sid not present in Family Safety Users"));
-    return NS_OK;
-  }
-  nsCOMPtr<nsIWindowsRegKey> sidKey;
-  rv = usersKey->OpenChild(sid, flags, getter_AddRefs(sidKey));
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't open sid key"));
-    return rv;
-  }
-  // There are three keys we're interested in: "Parental Controls On",
-  // "Logging Required", and "Web\\Filter On". These keys will have value 0
-  // or 1, indicating a particular feature is disabled or enabled,
-  // respectively. So, if "Parental Controls On" is not 1, Family Safety is
-  // disabled and we don't care about anything else. If both "Logging
-  // Required" and "Web\\Filter On" are 0, the proxy will not be running,
-  // so for our purposes we can consider Family Safety disabled in that
-  // case.
-  // By default, "Logging Required" is 1 and "Web\\Filter On" is 0,
-  // reflecting the initial settings when Family Safety is enabled for an
-  // account for the first time, However, these sub-keys are not created
-  // unless they are switched away from the default value.
-  uint32_t parentalControlsOn;
-  rv = sidKey->ReadIntValue(NS_LITERAL_STRING("Parental Controls On"),
-                            &parentalControlsOn);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("couldn't read Parental Controls On"));
-    return rv;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("Parental Controls On: %u", parentalControlsOn));
-  if (parentalControlsOn != 1) {
-    return NS_OK;
-  }
-  uint32_t loggingRequired;
-  rv = ReadRegKeyValueWithDefault(sidKey, flags, nullptr, L"Logging Required",
-                                  1, loggingRequired);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("failed to read value of Logging Required"));
-    return rv;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("Logging Required: %u", loggingRequired));
-  uint32_t webFilterOn;
-  rv = ReadRegKeyValueWithDefault(sidKey, flags, L"Web", L"Filter On", 0,
-                                  webFilterOn);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("failed to read value of Web\\Filter On"));
-    return rv;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Web\\Filter On: %u", webFilterOn));
-  enabled = loggingRequired == 1 || webFilterOn == 1;
-  return NS_OK;
-}
-
-// It would be convenient to just use nsIX509CertDB in the following code.
-// However, since nsIX509CertDB depends on nsNSSComponent initialization (and
-// since this code runs during that initialization), we can't use it. Instead,
-// we can use NSS APIs directly (as long as we're called late enough in
-// nsNSSComponent initialization such that those APIs are safe to use).
-
-// Helper function to convert a PCCERT_CONTEXT (i.e. a certificate obtained via
-// a Windows API) to a temporary CERTCertificate (i.e. a certificate for use
-// with NSS APIs).
-static UniqueCERTCertificate
-PCCERT_CONTEXTToCERTCertificate(PCCERT_CONTEXT pccert)
-{
-  MOZ_ASSERT(pccert);
-  if (!pccert) {
-    return nullptr;
-  }
-
-  SECItem derCert = {
-    siBuffer,
-    pccert->pbCertEncoded,
-    pccert->cbCertEncoded
-  };
-  return UniqueCERTCertificate(
-    CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &derCert,
-                            nullptr, // nickname unnecessary
-                            false, // not permanent
-                            true)); // copy DER
-}
-
-static const char* kMicrosoftFamilySafetyCN = "Microsoft Family Safety";
-
-nsresult
-nsNSSComponent::MaybeImportFamilySafetyRoot(PCCERT_CONTEXT certificate,
-                                            bool& wasFamilySafetyRoot)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!NS_IsMainThread()) {
-    return NS_ERROR_NOT_SAME_THREAD;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("MaybeImportFamilySafetyRoot"));
-  wasFamilySafetyRoot = false;
-
-  UniqueCERTCertificate nssCertificate(
-    PCCERT_CONTEXTToCERTCertificate(certificate));
-  if (!nssCertificate) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't decode certificate"));
-    return NS_ERROR_FAILURE;
-  }
-  // Looking for a certificate with the common name 'Microsoft Family Safety'
-  UniquePORTString subjectName(CERT_GetCommonName(&nssCertificate->subject));
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("subject name is '%s'", subjectName.get()));
-  if (nsCRT::strcmp(subjectName.get(), kMicrosoftFamilySafetyCN) == 0) {
-    wasFamilySafetyRoot = true;
-    CERTCertTrust trust = {
-      CERTDB_TRUSTED_CA | CERTDB_VALID_CA | CERTDB_USER,
-      0,
-      0
-    };
-    if (CERT_ChangeCertTrust(nullptr, nssCertificate.get(), &trust)
-          != SECSuccess) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("couldn't trust certificate for TLS server auth"));
-      return NS_ERROR_FAILURE;
-    }
-    MOZ_ASSERT(!mFamilySafetyRoot);
-    mFamilySafetyRoot = Move(nssCertificate);
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("added Family Safety root"));
-  }
-  return NS_OK;
-}
-
-// Because HCERTSTORE is just a typedef void*, we can't use any of the nice
-// scoped or unique pointer templates. To elaborate, any attempt would
-// instantiate those templates with T = void. When T gets used in the context
-// of T&, this results in void&, which isn't legal.
-class ScopedCertStore final
-{
-public:
-  explicit ScopedCertStore(HCERTSTORE certstore) : certstore(certstore) {}
-
-  ~ScopedCertStore()
-  {
-    CertCloseStore(certstore, 0);
-  }
-
-  HCERTSTORE get()
-  {
-    return certstore;
-  }
-
-private:
-  ScopedCertStore(const ScopedCertStore&) = delete;
-  ScopedCertStore& operator=(const ScopedCertStore&) = delete;
-  HCERTSTORE certstore;
-};
-
-static const wchar_t* kWindowsDefaultRootStoreName = L"ROOT";
-
-nsresult
-nsNSSComponent::LoadFamilySafetyRoot()
-{
-  ScopedCertStore certstore(
-    CertOpenSystemStore(0, kWindowsDefaultRootStoreName));
-  if (!certstore.get()) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("couldn't get certstore '%S'", kWindowsDefaultRootStoreName));
-    return NS_ERROR_FAILURE;
-  }
-  // Any resources held by the certificate are released by the next call to
-  // CertFindCertificateInStore.
-  PCCERT_CONTEXT certificate = nullptr;
-  while ((certificate = CertFindCertificateInStore(certstore.get(),
-                                                   X509_ASN_ENCODING, 0,
-                                                   CERT_FIND_ANY, nullptr,
-                                                   certificate))) {
-    bool wasFamilySafetyRoot = false;
-    nsresult rv = MaybeImportFamilySafetyRoot(certificate,
-                                              wasFamilySafetyRoot);
-    if (NS_SUCCEEDED(rv) && wasFamilySafetyRoot) {
-      return NS_OK; // We're done (we're only expecting one root).
-    }
-  }
-  return NS_ERROR_FAILURE;
-}
-
-void
-nsNSSComponent::UnloadFamilySafetyRoot()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!NS_IsMainThread()) {
-    return;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("UnloadFamilySafetyRoot"));
-  if (!mFamilySafetyRoot) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Family Safety Root wasn't present"));
-    return;
-  }
-  // It would be intuitive to set the trust to { 0, 0, 0 } here. However, this
-  // doesn't work for temporary certificates because CERT_ChangeCertTrust first
-  // looks up the current trust settings in the permanent cert database, finds
-  // that such trust doesn't exist, considers the current trust to be
-  // { 0, 0, 0 }, and decides that it doesn't need to update the trust since
-  // they're the same. To work around this, we set a non-zero flag to ensure
-  // that the trust will get updated.
-  CERTCertTrust trust = { CERTDB_USER, 0, 0 };
-  if (CERT_ChangeCertTrust(nullptr, mFamilySafetyRoot.get(), &trust)
-        != SECSuccess) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("couldn't untrust certificate for TLS server auth"));
-  }
-  mFamilySafetyRoot = nullptr;
-}
-
-#endif // XP_WIN
-
-// The supported values of this pref are:
-// 0: disable detecting Family Safety mode and importing the root
-// 1: only attempt to detect Family Safety mode (don't import the root)
-// 2: detect Family Safety mode and import the root
-const char* kFamilySafetyModePref = "security.family_safety.mode";
-
-// The telemetry gathered by this function is as follows:
-// 0-2: the value of the Family Safety mode pref
-// 3: detecting Family Safety mode failed
-// 4: Family Safety was not enabled
-// 5: Family Safety was enabled
-// 6: failed to import the Family Safety root
-// 7: successfully imported the root
-void
-nsNSSComponent::MaybeEnableFamilySafetyCompatibility()
-{
-#ifdef XP_WIN
-  UnloadFamilySafetyRoot();
-  if (!(IsWin8Point1OrLater() && !IsWin10OrLater())) {
-    return;
-  }
-  // Detect but don't import by default.
-  uint32_t familySafetyMode = Preferences::GetUint(kFamilySafetyModePref, 1);
-  if (familySafetyMode > 2) {
-    familySafetyMode = 0;
-  }
-  Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, familySafetyMode);
-  if (familySafetyMode == 0) {
-    return;
-  }
-  bool familySafetyEnabled;
-  nsresult rv = AccountHasFamilySafetyEnabled(familySafetyEnabled);
-  if (NS_FAILED(rv)) {
-    Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 3);
-    return;
-  }
-  if (!familySafetyEnabled) {
-    Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 4);
-    return;
-  }
-  Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 5);
-  if (familySafetyMode == 2) {
-    rv = LoadFamilySafetyRoot();
-    if (NS_FAILED(rv)) {
-      Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 6);
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("failed to load Family Safety root"));
-    } else {
-      Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 7);
-    }
-  }
-#endif // XP_WIN
-}
-
-#ifdef XP_WIN
-// Helper function to determine if the OS considers the given certificate to be
-// a trust anchor for TLS server auth certificates. This is to be used in the
-// context of importing what are presumed to be root certificates from the OS.
-// If this function returns true but it turns out that the given certificate is
-// in some way unsuitable to issue certificates, mozilla::pkix will never build
-// a valid chain that includes the certificate, so importing it even if it
-// isn't a valid CA poses no risk.
-static bool
-CertIsTrustAnchorForTLSServerAuth(PCCERT_CONTEXT certificate)
-{
-  MOZ_ASSERT(certificate);
-  if (!certificate) {
-    return false;
-  }
-
-  PCCERT_CHAIN_CONTEXT pChainContext = nullptr;
-  CERT_ENHKEY_USAGE enhkeyUsage;
-  memset(&enhkeyUsage, 0, sizeof(CERT_ENHKEY_USAGE));
-  LPSTR identifiers[] = {
-    "1.3.6.1.5.5.7.3.1", // id-kp-serverAuth
-  };
-  enhkeyUsage.cUsageIdentifier = ArrayLength(identifiers);
-  enhkeyUsage.rgpszUsageIdentifier = identifiers;
-  CERT_USAGE_MATCH certUsage;
-  memset(&certUsage, 0, sizeof(CERT_USAGE_MATCH));
-  certUsage.dwType = USAGE_MATCH_TYPE_AND;
-  certUsage.Usage = enhkeyUsage;
-  CERT_CHAIN_PARA chainPara;
-  memset(&chainPara, 0, sizeof(CERT_CHAIN_PARA));
-  chainPara.cbSize = sizeof(CERT_CHAIN_PARA);
-  chainPara.RequestedUsage = certUsage;
-
-  if (!CertGetCertificateChain(nullptr, certificate, nullptr, nullptr,
-                               &chainPara, 0, nullptr, &pChainContext)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("CertGetCertificateChain failed"));
-    return false;
-  }
-  bool trusted = pChainContext->TrustStatus.dwErrorStatus ==
-                 CERT_TRUST_NO_ERROR;
-  bool isRoot = pChainContext->cChain == 1;
-  CertFreeCertificateChain(pChainContext);
-  if (trusted && isRoot) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("certificate is trust anchor for TLS server auth"));
-    return true;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("certificate not trust anchor for TLS server auth"));
-  return false;
-}
-
-void
-nsNSSComponent::UnloadEnterpriseRoots()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!NS_IsMainThread()) {
-    return;
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("UnloadEnterpriseRoots"));
-  if (!mEnterpriseRoots) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("no enterprise roots were present"));
-    return;
-  }
-  // It would be intuitive to set the trust to { 0, 0, 0 } here. However, this
-  // doesn't work for temporary certificates because CERT_ChangeCertTrust first
-  // looks up the current trust settings in the permanent cert database, finds
-  // that such trust doesn't exist, considers the current trust to be
-  // { 0, 0, 0 }, and decides that it doesn't need to update the trust since
-  // they're the same. To work around this, we set a non-zero flag to ensure
-  // that the trust will get updated.
-  CERTCertTrust trust = { CERTDB_USER, 0, 0 };
-  for (CERTCertListNode* n = CERT_LIST_HEAD(mEnterpriseRoots.get());
-       !CERT_LIST_END(n, mEnterpriseRoots.get()); n = CERT_LIST_NEXT(n)) {
-    if (!n || !n->cert) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("library failure: CERTCertListNode null or lacks cert"));
-      continue;
-    }
-    if (CERT_ChangeCertTrust(nullptr, n->cert, &trust) != SECSuccess) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("couldn't untrust certificate for TLS server auth"));
-    }
-  }
-  mEnterpriseRoots = nullptr;
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("unloaded enterprise roots"));
-}
-
-NS_IMETHODIMP
-nsNSSComponent::GetEnterpriseRoots(nsIX509CertList** enterpriseRoots)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!NS_IsMainThread()) {
-    return NS_ERROR_NOT_SAME_THREAD;
-  }
-  NS_ENSURE_ARG_POINTER(enterpriseRoots);
-
-  nsNSSShutDownPreventionLock lock;
-  // nsNSSComponent isn't a nsNSSShutDownObject, so we can't check
-  // isAlreadyShutDown(). However, since mEnterpriseRoots is cleared when NSS
-  // shuts down, we can use that as a proxy for checking for NSS shutdown.
-  // (Of course, it may also be the case that no enterprise roots were imported,
-  // so we should just return a null list and NS_OK in this case.)
-  if (!mEnterpriseRoots) {
-    *enterpriseRoots = nullptr;
-    return NS_OK;
-  }
-  UniqueCERTCertList enterpriseRootsCopy(
-    nsNSSCertList::DupCertList(mEnterpriseRoots, lock));
-  if (!enterpriseRootsCopy) {
-    return NS_ERROR_FAILURE;
-  }
-  nsCOMPtr<nsIX509CertList> enterpriseRootsCertList(
-    new nsNSSCertList(Move(enterpriseRootsCopy), lock));
-  if (!enterpriseRootsCertList) {
-    return NS_ERROR_FAILURE;
-  }
-  enterpriseRootsCertList.forget(enterpriseRoots);
-  return NS_OK;
-}
-#endif // XP_WIN
-
-static const char* kEnterpriseRootModePref = "security.enterprise_roots.enabled";
-
-void
-nsNSSComponent::MaybeImportEnterpriseRoots()
-{
-#ifdef XP_WIN
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!NS_IsMainThread()) {
-    return;
-  }
-  UnloadEnterpriseRoots();
-  bool importEnterpriseRoots = Preferences::GetBool(kEnterpriseRootModePref,
-                                                    false);
-  if (!importEnterpriseRoots) {
-    return;
-  }
-  DWORD flags = CERT_SYSTEM_STORE_LOCAL_MACHINE |
-                CERT_STORE_OPEN_EXISTING_FLAG |
-                CERT_STORE_READONLY_FLAG;
-  // The certificate store being opened should consist only of certificates
-  // added by a user or administrator and not any certificates that are part
-  // of Microsoft's root store program.
-  // The 3rd parameter to CertOpenStore should be NULL according to
-  // https://msdn.microsoft.com/en-us/library/windows/desktop/aa376559%28v=vs.85%29.aspx
-  ScopedCertStore enterpriseRootStore(CertOpenStore(
-    CERT_STORE_PROV_SYSTEM_REGISTRY_W, 0, NULL, flags,
-    kWindowsDefaultRootStoreName));
-  if (!enterpriseRootStore.get()) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("failed to open enterprise root store"));
-    return;
-  }
-  MOZ_ASSERT(!mEnterpriseRoots);
-  mEnterpriseRoots.reset(CERT_NewCertList());
-  CERTCertTrust trust = {
-    CERTDB_TRUSTED_CA | CERTDB_VALID_CA | CERTDB_USER,
-    0,
-    0
-  };
-  PCCERT_CONTEXT certificate = nullptr;
-  uint32_t numImported = 0;
-  while ((certificate = CertFindCertificateInStore(enterpriseRootStore.get(),
-                                                   X509_ASN_ENCODING, 0,
-                                                   CERT_FIND_ANY, nullptr,
-                                                   certificate))) {
-    if (!CertIsTrustAnchorForTLSServerAuth(certificate)) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("skipping cert not trust anchor for TLS server auth"));
-      continue;
-    }
-    UniqueCERTCertificate nssCertificate(
-      PCCERT_CONTEXTToCERTCertificate(certificate));
-    if (!nssCertificate) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't decode certificate"));
-      continue;
-    }
-    // Don't import the Microsoft Family Safety root (this prevents the
-    // Enterprise Roots feature from interacting poorly with the Family
-    // Safety support).
-    UniquePORTString subjectName(
-      CERT_GetCommonName(&nssCertificate->subject));
-    if (nsCRT::strcmp(subjectName.get(), kMicrosoftFamilySafetyCN) == 0) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("skipping Family Safety Root"));
-      continue;
-    }
-    if (CERT_AddCertToListTail(mEnterpriseRoots.get(), nssCertificate.get())
-          != SECSuccess) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't add cert to list"));
-      continue;
-    }
-    if (CERT_ChangeCertTrust(nullptr, nssCertificate.get(), &trust)
-          != SECSuccess) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("couldn't trust certificate for TLS server auth"));
-    }
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Imported '%s'", subjectName.get()));
-    numImported++;
-    // now owned by mEnterpriseRoots
-    Unused << nssCertificate.release();
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("imported %u roots", numImported));
-#endif // XP_WIN
-}
 
 void
 nsNSSComponent::LoadLoadableRoots()
@@ -1214,8 +572,8 @@ nsNSSComponent::ConfigureInternalPKCS11Token()
   nsAutoString privateTokenDescription;
   nsAutoString slotDescription;
   nsAutoString privateSlotDescription;
-  nsAutoString fips140SlotDescription;
   nsAutoString fips140TokenDescription;
+  nsAutoString fips140SlotDescription;
 
   nsresult rv;
   rv = GetPIPNSSBundleString("ManufacturerID", manufacturerID);
@@ -1236,10 +594,10 @@ nsNSSComponent::ConfigureInternalPKCS11Token()
   rv = GetPIPNSSBundleString("PrivateSlotDescription", privateSlotDescription);
   if (NS_FAILED(rv)) return rv;
 
-  rv = GetPIPNSSBundleString("Fips140SlotDescription", fips140SlotDescription);
+  rv = GetPIPNSSBundleString("Fips140TokenDescription", fips140TokenDescription);
   if (NS_FAILED(rv)) return rv;
 
-  rv = GetPIPNSSBundleString("Fips140TokenDescription", fips140TokenDescription);
+  rv = GetPIPNSSBundleString("Fips140SlotDescription", fips140SlotDescription);
   if (NS_FAILED(rv)) return rv;
 
   PK11_ConfigurePKCS11(NS_ConvertUTF16toUTF8(manufacturerID).get(),
@@ -1248,8 +606,8 @@ nsNSSComponent::ConfigureInternalPKCS11Token()
                        NS_ConvertUTF16toUTF8(privateTokenDescription).get(),
                        NS_ConvertUTF16toUTF8(slotDescription).get(),
                        NS_ConvertUTF16toUTF8(privateSlotDescription).get(),
-                       NS_ConvertUTF16toUTF8(fips140SlotDescription).get(),
                        NS_ConvertUTF16toUTF8(fips140TokenDescription).get(),
+                       NS_ConvertUTF16toUTF8(fips140SlotDescription).get(),
                        0, 0);
   return NS_OK;
 }
@@ -1282,27 +640,16 @@ typedef struct {
   const char* pref;
   long id;
   bool enabledByDefault;
-  bool fallback;
+  bool weak;
 } CipherPref;
 
-// Update the switch statement in AccumulateCipherSuite in nsNSSCallbacks.cpp
-// when you add/remove cipher suites here.
+// Update the switch statement in HandshakeCallback in nsNSSCallbacks.cpp when
+// you add/remove cipher suites here.
 static const CipherPref sCipherPrefs[] = {
  { "security.ssl3.ecdhe_rsa_aes_128_gcm_sha256",
    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, true },
  { "security.ssl3.ecdhe_ecdsa_aes_128_gcm_sha256",
    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, true },
-
- { "security.ssl3.ecdhe_ecdsa_chacha20_poly1305_sha256",
-   TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, true },
- { "security.ssl3.ecdhe_rsa_chacha20_poly1305_sha256",
-   TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, true },
-
- { "security.ssl3.ecdhe_ecdsa_aes_256_gcm_sha384",
-   TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, true },
- { "security.ssl3.ecdhe_rsa_aes_256_gcm_sha384",
-   TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, true },
-
  { "security.ssl3.ecdhe_rsa_aes_128_sha",
    TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, true },
  { "security.ssl3.ecdhe_ecdsa_aes_128_sha",
@@ -1314,17 +661,15 @@ static const CipherPref sCipherPrefs[] = {
    TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, true },
 
  { "security.ssl3.dhe_rsa_aes_128_sha",
-   TLS_DHE_RSA_WITH_AES_128_CBC_SHA, true, true },
+   TLS_DHE_RSA_WITH_AES_128_CBC_SHA, true },
 
  { "security.ssl3.dhe_rsa_aes_256_sha",
-   TLS_DHE_RSA_WITH_AES_256_CBC_SHA, true, true },
+   TLS_DHE_RSA_WITH_AES_256_CBC_SHA, true },
 
- { "security.ssl3.ecdhe_psk_aes_128_gcm_sha256",
-   TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256, true },
- { "security.ssl3.ecdhe_psk_chacha20_poly1305_sha256",
-   TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256, true },
- { "security.ssl3.ecdhe_psk_aes_256_gcm_sha384",
-   TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384, true },
+ { "security.ssl3.ecdhe_rsa_rc4_128_sha",
+   TLS_ECDHE_RSA_WITH_RC4_128_SHA, true, true }, // deprecated (RC4)
+ { "security.ssl3.ecdhe_ecdsa_rc4_128_sha",
+   TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, true, true }, // deprecated (RC4)
 
  { "security.ssl3.rsa_aes_128_sha",
    TLS_RSA_WITH_AES_128_CBC_SHA, true }, // deprecated (RSA key exchange)
@@ -1333,31 +678,36 @@ static const CipherPref sCipherPrefs[] = {
  { "security.ssl3.rsa_des_ede3_sha",
    TLS_RSA_WITH_3DES_EDE_CBC_SHA, true }, // deprecated (RSA key exchange, 3DES)
 
- // All the rest are disabled
+ { "security.ssl3.rsa_rc4_128_sha",
+   TLS_RSA_WITH_RC4_128_SHA, true, true }, // deprecated (RSA key exchange, RC4)
+ { "security.ssl3.rsa_rc4_128_md5",
+   TLS_RSA_WITH_RC4_128_MD5, true, true }, // deprecated (RSA key exchange, RC4, HMAC-MD5)
+
+ // All the rest are disabled by default
 
  { nullptr, 0 } // end marker
 };
 
-// Bit flags indicating what fallback ciphers are enabled.
+// Bit flags indicating what weak ciphers are enabled.
 // The bit index will correspond to the index in sCipherPrefs.
 // Wrtten by the main thread, read from any threads.
-static Atomic<uint32_t> sEnabledFallbackCiphers;
+static Atomic<uint32_t> sEnabledWeakCiphers;
 static_assert(MOZ_ARRAY_LENGTH(sCipherPrefs) - 1 <= sizeof(uint32_t) * CHAR_BIT,
               "too many cipher suites");
 
 /*static*/ bool
-nsNSSComponent::AreAnyFallbackCiphersEnabled()
+nsNSSComponent::AreAnyWeakCiphersEnabled()
 {
-  return !!sEnabledFallbackCiphers;
+  return !!sEnabledWeakCiphers;
 }
 
 /*static*/ void
-nsNSSComponent::UseFallbackCiphersOnSocket(PRFileDesc* fd)
+nsNSSComponent::UseWeakCiphersOnSocket(PRFileDesc* fd)
 {
-  const uint32_t enabledFallbackCiphers = sEnabledFallbackCiphers;
+  const uint32_t enabledWeakCiphers = sEnabledWeakCiphers;
   const CipherPref* const cp = sCipherPrefs;
   for (size_t i = 0; cp[i].pref; ++i) {
-    if (enabledFallbackCiphers & ((uint32_t)1 << i)) {
+    if (enabledWeakCiphers & ((uint32_t)1 << i)) {
       SSL_CipherPrefSet(fd, cp[i].id, true);
     }
   }
@@ -1419,6 +769,7 @@ public:
   NS_DECL_NSIOBSERVER
 
   static nsresult StartObserve();
+  static nsresult StopObserve();
 
 protected:
   virtual ~CipherSuiteChangeObserver() {}
@@ -1439,19 +790,28 @@ CipherSuiteChangeObserver::StartObserve()
 {
   NS_ASSERTION(NS_IsMainThread(), "CipherSuiteChangeObserver::StartObserve() can only be accessed in main thread");
   if (!sObserver) {
-    RefPtr<CipherSuiteChangeObserver> observer = new CipherSuiteChangeObserver();
+    nsRefPtr<CipherSuiteChangeObserver> observer = new CipherSuiteChangeObserver();
     nsresult rv = Preferences::AddStrongObserver(observer.get(), "security.");
     if (NS_FAILED(rv)) {
       sObserver = nullptr;
       return rv;
     }
-
-    nsCOMPtr<nsIObserverService> observerService =
-      mozilla::services::GetObserverService();
-    observerService->AddObserver(observer, NS_XPCOM_SHUTDOWN_OBSERVER_ID,
-                                 false);
-
     sObserver = observer;
+  }
+  return NS_OK;
+}
+
+// static
+nsresult
+CipherSuiteChangeObserver::StopObserve()
+{
+  NS_ASSERTION(NS_IsMainThread(), "CipherSuiteChangeObserver::StopObserve() can only be accessed in main thread");
+  if (sObserver) {
+    nsresult rv = Preferences::RemoveObserver(sObserver.get(), "security.");
+    sObserver = nullptr;
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
   }
   return NS_OK;
 }
@@ -1470,18 +830,18 @@ CipherSuiteChangeObserver::Observe(nsISupports* aSubject,
       if (prefName.Equals(cp[i].pref)) {
         bool cipherEnabled = Preferences::GetBool(cp[i].pref,
                                                   cp[i].enabledByDefault);
-        if (cp[i].fallback) {
-          // Fallback ciphers will not be used by default even if they
+        if (cp[i].weak) {
+          // Weak ciphers will not be used by default even if they
           // are enabled in prefs. They are only used on specific
           // sockets as a part of a fallback mechanism.
-          // Only the main thread will change sEnabledFallbackCiphers.
-          uint32_t enabledFallbackCiphers = sEnabledFallbackCiphers;
+          // Only the main thread will change sEnabledWeakCiphers.
+          uint32_t enabledWeakCiphers = sEnabledWeakCiphers;
           if (cipherEnabled) {
-            enabledFallbackCiphers |= ((uint32_t)1 << i);
+            enabledWeakCiphers |= ((uint32_t)1 << i);
           } else {
-            enabledFallbackCiphers &= ~((uint32_t)1 << i);
+            enabledWeakCiphers &= ~((uint32_t)1 << i);
           }
-          sEnabledFallbackCiphers = enabledFallbackCiphers;
+          sEnabledWeakCiphers = enabledWeakCiphers;
         } else {
           SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
           SSL_ClearSessionCache();
@@ -1489,13 +849,6 @@ CipherSuiteChangeObserver::Observe(nsISupports* aSubject,
         break;
       }
     }
-  } else if (nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
-    Preferences::RemoveObserver(this, "security.");
-    MOZ_ASSERT(sObserver.get() == this);
-    sObserver = nullptr;
-    nsCOMPtr<nsIObserverService> observerService =
-      mozilla::services::GetObserverService();
-    observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
   }
   return NS_OK;
 }
@@ -1527,61 +880,12 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
   PublicSSLState()->SetOCSPStaplingEnabled(ocspStaplingEnabled);
   PrivateSSLState()->SetOCSPStaplingEnabled(ocspStaplingEnabled);
 
-  bool ocspMustStapleEnabled = Preferences::GetBool("security.ssl.enable_ocsp_must_staple",
-                                                    true);
-  PublicSSLState()->SetOCSPMustStapleEnabled(ocspMustStapleEnabled);
-  PrivateSSLState()->SetOCSPMustStapleEnabled(ocspMustStapleEnabled);
-
   CertVerifier::PinningMode pinningMode =
     static_cast<CertVerifier::PinningMode>
       (Preferences::GetInt("security.cert_pinning.enforcement_level",
                            CertVerifier::pinningDisabled));
   if (pinningMode > CertVerifier::pinningEnforceTestMode) {
     pinningMode = CertVerifier::pinningDisabled;
-  }
-
-  CertVerifier::SHA1Mode sha1Mode = static_cast<CertVerifier::SHA1Mode>
-      (Preferences::GetInt("security.pki.sha1_enforcement_level",
-                           static_cast<int32_t>(CertVerifier::SHA1Mode::Allowed)));
-  switch (sha1Mode) {
-    case CertVerifier::SHA1Mode::Allowed:
-    case CertVerifier::SHA1Mode::Forbidden:
-    case CertVerifier::SHA1Mode::Before2016:
-    case CertVerifier::SHA1Mode::ImportedRoot:
-      break;
-    default:
-      sha1Mode = CertVerifier::SHA1Mode::Allowed;
-      break;
-  }
-
-  BRNameMatchingPolicy::Mode nameMatchingMode =
-    static_cast<BRNameMatchingPolicy::Mode>
-      (Preferences::GetInt("security.pki.name_matching_mode",
-                           static_cast<int32_t>(BRNameMatchingPolicy::Mode::DoNotEnforce)));
-  switch (nameMatchingMode) {
-    case BRNameMatchingPolicy::Mode::Enforce:
-    case BRNameMatchingPolicy::Mode::EnforceAfter23August2015:
-    case BRNameMatchingPolicy::Mode::EnforceAfter23August2016:
-    case BRNameMatchingPolicy::Mode::DoNotEnforce:
-      break;
-    default:
-      nameMatchingMode = BRNameMatchingPolicy::Mode::DoNotEnforce;
-      break;
-  }
-
-  NetscapeStepUpPolicy netscapeStepUpPolicy =
-    static_cast<NetscapeStepUpPolicy>
-      (Preferences::GetUint("security.pki.netscape_step_up_policy",
-                            static_cast<uint32_t>(NetscapeStepUpPolicy::AlwaysMatch)));
-  switch (netscapeStepUpPolicy) {
-    case NetscapeStepUpPolicy::AlwaysMatch:
-    case NetscapeStepUpPolicy::MatchBefore23August2016:
-    case NetscapeStepUpPolicy::MatchBefore23August2015:
-    case NetscapeStepUpPolicy::NeverMatch:
-      break;
-    default:
-      netscapeStepUpPolicy = NetscapeStepUpPolicy::AlwaysMatch;
-      break;
   }
 
   CertVerifier::OcspDownloadConfig odc;
@@ -1593,9 +897,7 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
                                  lock);
   mDefaultCertVerifier = new SharedCertVerifier(odc, osc, ogc,
                                                 certShortLifetimeInDays,
-                                                pinningMode, sha1Mode,
-                                                nameMatchingMode,
-                                                netscapeStepUpPolicy);
+                                                pinningMode);
 }
 
 // Enable the TLS versions given in the prefs, defaulting to TLS 1.0 (min) and
@@ -1646,8 +948,8 @@ GetNSSProfilePath(nsAutoCString& aProfilePath)
   nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
                                        getter_AddRefs(profileFile));
   if (NS_FAILED(rv)) {
-    NS_WARNING("NSS will be initialized without a profile directory. "
-               "Some things may not work as expected.");
+    MOZ_LOG(gPIPNSSLog, LogLevel::Error,
+           ("Unable to get profile directory - continuing with no NSS DB\n"));
     return NS_OK;
   }
 
@@ -1670,8 +972,6 @@ GetNSSProfilePath(nsAutoCString& aProfilePath)
     return rv;
   }
 
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("NSS profile at '%s'\n", aProfilePath.get()));
   return NS_OK;
 }
 
@@ -1692,8 +992,9 @@ nsNSSComponent::InitializeNSS()
   MutexAutoLock lock(mutex);
 
   if (mNSSInitialized) {
-    // We should never try to initialize NSS more than once in a process.
-    MOZ_ASSERT_UNREACHABLE("Trying to initialize NSS twice");
+    PR_ASSERT(!"Trying to initialize NSS twice"); // We should never try to
+                                                  // initialize NSS more than
+                                                  // once in a process.
     return NS_ERROR_FAILURE;
   }
 
@@ -1710,32 +1011,20 @@ nsNSSComponent::InitializeNSS()
   nsAutoCString profileStr;
   nsresult rv = GetNSSProfilePath(profileStr);
   if (NS_FAILED(rv)) {
+    nsPSMInitPanic::SetPanic();
     return NS_ERROR_NOT_AVAILABLE;
   }
 
   SECStatus init_rv = SECFailure;
   bool nocertdb = Preferences::GetBool("security.nocertdb", false);
-  bool inSafeMode = true;
-  nsCOMPtr<nsIXULRuntime> runtime(do_GetService("@mozilla.org/xre/runtime;1"));
-  // There might not be an nsIXULRuntime in embedded situations. This will
-  // default to assuming we are in safe mode (as a result, no external PKCS11
-  // modules will be loaded).
-  if (runtime) {
-    rv = runtime->GetInSafeMode(&inSafeMode);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("inSafeMode: %u\n", inSafeMode));
 
   if (!nocertdb && !profileStr.IsEmpty()) {
     // First try to initialize the NSS DB in read/write mode.
-    // Only load PKCS11 modules if we're not in safe mode.
-    init_rv = ::mozilla::psm::InitializeNSS(profileStr.get(), false, !inSafeMode);
+    init_rv = ::mozilla::psm::InitializeNSS(profileStr.get(), false);
     // If that fails, attempt read-only mode.
     if (init_rv != SECSuccess) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("could not init NSS r/w in %s\n", profileStr.get()));
-      init_rv = ::mozilla::psm::InitializeNSS(profileStr.get(), true, !inSafeMode);
+      init_rv = ::mozilla::psm::InitializeNSS(profileStr.get(), true);
     }
     if (init_rv != SECSuccess) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("could not init in r/o either\n"));
@@ -1749,12 +1038,9 @@ nsNSSComponent::InitializeNSS()
   }
   if (init_rv != SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("could not initialize NSS - panicking\n"));
+    nsPSMInitPanic::SetPanic();
     return NS_ERROR_NOT_AVAILABLE;
   }
-
-  // ensure we have an initial value for the content signer root
-  mContentSigningRootHash =
-    Preferences::GetString("security.content.signature.root_hash");
 
   mNSSInitialized = true;
 
@@ -1770,6 +1056,7 @@ nsNSSComponent::InitializeNSS()
 
   rv = setEnabledTLSVersions();
   if (NS_FAILED(rv)) {
+    nsPSMInitPanic::SetPanic();
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1777,9 +1064,6 @@ nsNSSComponent::InitializeNSS()
   // Initialize the certverifier log before calling any functions that library.
   InitCertVerifierLog();
   LoadLoadableRoots();
-
-  MaybeEnableFamilySafetyCompatibility();
-  MaybeImportEnterpriseRoots();
 
   ConfigureTLSSessionIdentifiers();
 
@@ -1789,8 +1073,6 @@ nsNSSComponent::InitializeNSS()
   SSL_OptionSetDefault(SSL_REQUIRE_SAFE_NEGOTIATION, requireSafeNegotiation);
 
   SSL_OptionSetDefault(SSL_ENABLE_RENEGOTIATION, SSL_RENEGOTIATE_REQUIRES_XTN);
-
-  SSL_OptionSetDefault(SSL_ENABLE_EXTENDED_MASTER_SECRET, true);
 
   SSL_OptionSetDefault(SSL_ENABLE_FALSE_START,
                        Preferences::GetBool("security.ssl.enable_false_start",
@@ -1812,17 +1094,6 @@ nsNSSComponent::InitializeNSS()
     return NS_ERROR_FAILURE;
   }
 
-  // TLSServerSocket may be run with the session cache enabled. It is necessary
-  // to call this once before that can happen. This specifies a maximum of 1000
-  // cache entries (the default number of cache entries is 10000, which seems a
-  // little excessive as there probably won't be that many clients connecting to
-  // any TLSServerSockets the browser runs.)
-  // Note that this must occur before any calls to SSL_ClearSessionCache
-  // (otherwise memory will leak).
-  if (SSL_ConfigServerSessionIDCache(1000, 0, 0, nullptr) != SECSuccess) {
-    return NS_ERROR_FAILURE;
-  }
-
   // ensure the CertBlocklist is initialised
   nsCOMPtr<nsICertBlocklist> certList = do_GetService(NS_CERTBLOCKLIST_CONTRACTID);
   if (!certList) {
@@ -1831,6 +1102,8 @@ nsNSSComponent::InitializeNSS()
 
   // dynamic options from prefs
   setValidationOptions(true, lock);
+
+  mHttpForNSS.initTable();
 
 #ifndef MOZ_NO_SMART_CARDS
   LaunchSmartCardThreads();
@@ -1846,17 +1119,7 @@ nsNSSComponent::InitializeNSS()
     return NS_ERROR_FAILURE;
   }
 
-  // Initialize the cert override service
-  nsCOMPtr<nsICertOverrideService> coService =
-    do_GetService(NS_CERTOVERRIDE_CONTRACTID);
-  if (!coService) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Cannot initialize cert override service\n"));
-    return NS_ERROR_FAILURE;
-  }
 
-  if (PK11_IsFIPS()) {
-    Telemetry::Accumulate(Telemetry::FIPS_ENABLED, true);
-  }
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS Initialization done\n"));
   return NS_OK;
 }
@@ -1877,25 +1140,20 @@ nsNSSComponent::ShutdownNSS()
     PK11_SetPasswordFunc((PK11PasswordFunc)nullptr);
 
     Preferences::RemoveObserver(this, "security.");
-
-#ifdef XP_WIN
-    mFamilySafetyRoot = nullptr;
-    mEnterpriseRoots = nullptr;
-#endif
+    if (NS_FAILED(CipherSuiteChangeObserver::StopObserve())) {
+      MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("nsNSSComponent::ShutdownNSS cannot stop observing cipher suite change\n"));
+    }
 
 #ifndef MOZ_NO_SMART_CARDS
     ShutdownSmartCardThreads();
 #endif
     SSL_ClearSessionCache();
-    // TLSServerSocket may be run with the session cache enabled. This ensures
-    // those resources are cleaned up.
-    Unused << SSL_ShutdownServerSessionIDCache();
     UnloadLoadableRoots();
 #ifndef MOZ_NO_EV_CERTS
     CleanupIdentityInfo();
 #endif
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("evaporating psm resources\n"));
-    nsNSSShutDownList::evaporateAllNSSResources();
+    mShutdownObjectList->evaporateAllNSSResources();
     EnsureNSSInitialized(nssShutdown);
     if (SECSuccess != ::NSS_Shutdown()) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("NSS SHUTDOWN FAILURE\n"));
@@ -1906,7 +1164,7 @@ nsNSSComponent::ShutdownNSS()
   }
 }
 
-nsresult
+NS_IMETHODIMP
 nsNSSComponent::Init()
 {
   // No mutex protection.
@@ -1915,6 +1173,12 @@ nsNSSComponent::Init()
   nsresult rv = NS_OK;
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Beginning NSS initialization\n"));
+
+  if (!mShutdownObjectList)
+  {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS init, out of memory in constructor\n"));
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   rv = InitializePIPNSSBundle();
   if (NS_FAILED(rv)) {
@@ -1935,45 +1199,143 @@ nsNSSComponent::Init()
                                         getter_Copies(result));
   }
 
+  // Do that before NSS init, to make sure we won't get unloaded.
+  RegisterObservers();
 
   rv = InitializeNSS();
   if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Error,
-            ("nsNSSComponent::InitializeNSS() failed\n"));
+    MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("Unable to Initialize NSS.\n"));
+
+    DeregisterObservers();
+    mPIPNSSBundle = nullptr;
     return rv;
   }
 
   RememberCertErrorsTable::Init();
 
   createBackgroundThreads();
-  if (!mCertVerificationThread) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("nsNSSComponent::createBackgroundThreads() failed\n"));
+  if (!mCertVerificationThread)
+  {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS init, could not create threads\n"));
+
+    DeregisterObservers();
+    mPIPNSSBundle = nullptr;
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  return RegisterObservers();
+  nsCOMPtr<nsIEntropyCollector> ec
+      = do_GetService(NS_ENTROPYCOLLECTOR_CONTRACTID);
+
+  nsCOMPtr<nsIBufEntropyCollector> bec;
+
+  if (ec) {
+    bec = do_QueryInterface(ec);
+  }
+
+  NS_ASSERTION(bec, "No buffering entropy collector.  "
+                    "This means no entropy will be collected.");
+  if (bec) {
+    bec->ForwardTo(this);
+  }
+
+  return rv;
 }
 
 // nsISupports Implementation for the class
 NS_IMPL_ISUPPORTS(nsNSSComponent,
+                  nsIEntropyCollector,
                   nsINSSComponent,
-                  nsIObserver)
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
+NS_IMETHODIMP
+nsNSSComponent::RandomUpdate(void* entropy, int32_t bufLen)
+{
+  nsNSSShutDownPreventionLock locker;
+
+  // Asynchronous event happening often,
+  // must not interfere with initialization or profile switch.
+
+  MutexAutoLock lock(mutex);
+
+  if (!mNSSInitialized)
+      return NS_ERROR_NOT_INITIALIZED;
+
+  PK11_RandomUpdate(entropy, bufLen);
+  return NS_OK;
+}
+
+static const char* const PROFILE_CHANGE_NET_TEARDOWN_TOPIC
+  = "profile-change-net-teardown";
+static const char* const PROFILE_CHANGE_NET_RESTORE_TOPIC
+  = "profile-change-net-restore";
+static const char* const PROFILE_CHANGE_TEARDOWN_TOPIC
+  = "profile-change-teardown";
 static const char* const PROFILE_BEFORE_CHANGE_TOPIC = "profile-before-change";
+static const char* const PROFILE_DO_CHANGE_TOPIC = "profile-do-change";
 
 NS_IMETHODIMP
 nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                         const char16_t* someData)
 {
-  if (nsCRT::strcmp(aTopic, PROFILE_BEFORE_CHANGE_TOPIC) == 0) {
+  if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_TEARDOWN_TOPIC) == 0) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("in PSM code, receiving change-teardown\n"));
+    DoProfileChangeTeardown(aSubject);
+  }
+  else if (nsCRT::strcmp(aTopic, PROFILE_BEFORE_CHANGE_TOPIC) == 0) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("receiving profile change topic\n"));
-    DoProfileBeforeChange();
-  } else if (nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
+    DoProfileBeforeChange(aSubject);
+  }
+  else if (nsCRT::strcmp(aTopic, PROFILE_DO_CHANGE_TOPIC) == 0) {
+    if (someData && NS_LITERAL_STRING("startup").Equals(someData)) {
+      // The application is initializing against a known profile directory for
+      // the first time during process execution.
+      // However, earlier code execution might have already triggered NSS init.
+      // We must ensure that NSS gets shut down prior to any attempt to init
+      // it again. We use the same cleanup functionality used when switching
+      // profiles. The order of function calls must correspond to the order
+      // of notifications sent by Profile Manager (nsProfile).
+      DoProfileChangeNetTeardown();
+      DoProfileChangeTeardown(aSubject);
+      DoProfileBeforeChange(aSubject);
+      DoProfileChangeNetRestore();
+    }
+
+    bool needsInit = true;
+
+    {
+      MutexAutoLock lock(mutex);
+
+      if (mNSSInitialized) {
+        // We have already initialized NSS before the profile came up,
+        // no need to do it again
+        needsInit = false;
+      }
+    }
+
+    if (needsInit) {
+      if (NS_FAILED(InitializeNSS())) {
+        MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("Unable to Initialize NSS after profile switch.\n"));
+      }
+    }
+  }
+  else if (nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
 
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent: XPCom shutdown observed\n"));
 
     // Cleanup code that requires services, it's too late in destructor.
+
+    nsCOMPtr<nsIEntropyCollector> ec
+        = do_GetService(NS_ENTROPYCOLLECTOR_CONTRACTID);
+
+    if (ec) {
+      nsCOMPtr<nsIBufEntropyCollector> bec
+        = do_QueryInterface(ec);
+      if (bec) {
+        bec->DontForward();
+      }
+    }
+
     deleteBackgroundThreads();
   }
   else if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
@@ -2008,31 +1370,22 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                prefName.EqualsLiteral("security.OCSP.GET.enabled") ||
                prefName.EqualsLiteral("security.pki.cert_short_lifetime_in_days") ||
                prefName.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
-               prefName.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
-               prefName.EqualsLiteral("security.cert_pinning.enforcement_level") ||
-               prefName.EqualsLiteral("security.pki.sha1_enforcement_level") ||
-               prefName.EqualsLiteral("security.pki.name_matching_mode") ||
-               prefName.EqualsLiteral("security.pki.netscape_step_up_policy")) {
+               prefName.EqualsLiteral("security.cert_pinning.enforcement_level")) {
       MutexAutoLock lock(mutex);
       setValidationOptions(false, lock);
-#ifdef DEBUG
-    } else if (prefName.EqualsLiteral("security.test.built_in_root_hash")) {
-      MutexAutoLock lock(mutex);
-      mTestBuiltInRootHash = Preferences::GetString("security.test.built_in_root_hash");
-#endif // DEBUG
-    } else if (prefName.Equals(kFamilySafetyModePref)) {
-      MaybeEnableFamilySafetyCompatibility();
-    } else if (prefName.EqualsLiteral("security.content.signature.root_hash")) {
-      MutexAutoLock lock(mutex);
-      mContentSigningRootHash =
-        Preferences::GetString("security.content.signature.root_hash");
-    } else if (prefName.Equals(kEnterpriseRootModePref)) {
-      MaybeImportEnterpriseRoots();
     } else {
       clearSessionCache = false;
     }
     if (clearSessionCache)
       SSL_ClearSessionCache();
+  }
+  else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_NET_TEARDOWN_TOPIC) == 0) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("receiving network teardown topic\n"));
+    DoProfileChangeNetTeardown();
+  }
+  else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_NET_RESTORE_TOPIC) == 0) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("receiving network restore topic\n"));
+    DoProfileChangeNetRestore();
   }
 
   return NS_OK;
@@ -2065,7 +1418,13 @@ nsNSSComponent::ShowAlertWithConstructedString(const nsString& message)
   nsCOMPtr<nsIPrompt> prompter;
   nsresult rv = GetNewPrompter(getter_AddRefs(prompter));
   if (prompter) {
-    rv = prompter->Alert(nullptr, message.get());
+    nsPSMUITracker tracker;
+    if (tracker.isUIForbidden()) {
+      NS_WARNING("Suppressing alert because PSM UI is forbidden");
+      rv = NS_ERROR_UNEXPECTED;
+    } else {
+      rv = prompter->Alert(nullptr, message.get());
+    }
   }
   return rv;
 }
@@ -2097,7 +1456,7 @@ nsresult nsNSSComponent::LogoutAuthenticatedPK11()
 
   nsClientAuthRememberService::ClearAllRememberedDecisions();
 
-  return nsNSSShutDownList::doPK11Logout();
+  return mShutdownObjectList->doPK11Logout();
 }
 
 nsresult
@@ -2105,27 +1464,72 @@ nsNSSComponent::RegisterObservers()
 {
   // Happens once during init only, no mutex protection.
 
-  nsCOMPtr<nsIObserverService> observerService(
-    do_GetService("@mozilla.org/observer-service;1"));
-  if (!observerService) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("nsNSSComponent: couldn't get observer service\n"));
-    return NS_ERROR_FAILURE;
+  nsCOMPtr<nsIObserverService> observerService(do_GetService("@mozilla.org/observer-service;1"));
+  NS_ASSERTION(observerService, "could not get observer service");
+  if (observerService) {
+    mObserversRegistered = true;
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent: adding observers\n"));
+
+    // We are a service.
+    // Once we are loaded, don't allow being removed from memory.
+    // This makes sense, as initializing NSS is expensive.
+
+    // By using false for parameter ownsWeak in AddObserver,
+    // we make sure that we won't get unloaded until the application shuts down.
+
+    observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
+
+    observerService->AddObserver(this, PROFILE_CHANGE_TEARDOWN_TOPIC, false);
+    observerService->AddObserver(this, PROFILE_BEFORE_CHANGE_TOPIC, false);
+    observerService->AddObserver(this, PROFILE_DO_CHANGE_TOPIC, false);
+    observerService->AddObserver(this, PROFILE_CHANGE_NET_TEARDOWN_TOPIC, false);
+    observerService->AddObserver(this, PROFILE_CHANGE_NET_RESTORE_TOPIC, false);
   }
+  return NS_OK;
+}
 
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent: adding observers\n"));
-  // Using false for the ownsweak parameter means the observer service will
-  // keep a strong reference to this component. As a result, this will live at
-  // least as long as the observer service.
-  observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
-  observerService->AddObserver(this, PROFILE_BEFORE_CHANGE_TOPIC, false);
+nsresult
+nsNSSComponent::DeregisterObservers()
+{
+  if (!mObserversRegistered)
+    return NS_OK;
 
+  nsCOMPtr<nsIObserverService> observerService(do_GetService("@mozilla.org/observer-service;1"));
+  NS_ASSERTION(observerService, "could not get observer service");
+  if (observerService) {
+    mObserversRegistered = false;
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent: removing observers\n"));
+
+    observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
+
+    observerService->RemoveObserver(this, PROFILE_CHANGE_TEARDOWN_TOPIC);
+    observerService->RemoveObserver(this, PROFILE_BEFORE_CHANGE_TOPIC);
+    observerService->RemoveObserver(this, PROFILE_DO_CHANGE_TOPIC);
+    observerService->RemoveObserver(this, PROFILE_CHANGE_NET_TEARDOWN_TOPIC);
+    observerService->RemoveObserver(this, PROFILE_CHANGE_NET_RESTORE_TOPIC);
+  }
   return NS_OK;
 }
 
 void
-nsNSSComponent::DoProfileBeforeChange()
+nsNSSComponent::DoProfileChangeNetTeardown()
 {
+  if (mCertVerificationThread)
+    mCertVerificationThread->requestExit();
+  mIsNetworkDown = true;
+}
+
+void
+nsNSSComponent::DoProfileChangeTeardown(nsISupports* aSubject)
+{
+  mShutdownObjectList->ifPossibleDisallowUI();
+}
+
+void
+nsNSSComponent::DoProfileBeforeChange(nsISupports* aSubject)
+{
+  NS_ASSERTION(mIsNetworkDown, "nsNSSComponent relies on profile manager to wait for synchronous shutdown of all network activity");
+
   bool needsCleanup = true;
 
   {
@@ -2142,6 +1546,16 @@ nsNSSComponent::DoProfileBeforeChange()
   if (needsCleanup) {
     ShutdownNSS();
   }
+  mShutdownObjectList->allowUI();
+}
+
+void
+nsNSSComponent::DoProfileChangeNetRestore()
+{
+  // XXX this doesn't work well, since nothing expects null pointers
+  deleteBackgroundThreads();
+  createBackgroundThreads();
+  mIsNetworkDown = false;
 }
 
 NS_IMETHODIMP
@@ -2149,63 +1563,6 @@ nsNSSComponent::IsNSSInitialized(bool* initialized)
 {
   MutexAutoLock lock(mutex);
   *initialized = mNSSInitialized;
-  return NS_OK;
-}
-
-#ifdef DEBUG
-NS_IMETHODIMP
-nsNSSComponent::IsCertTestBuiltInRoot(CERTCertificate* cert, bool& result)
-{
-  MutexAutoLock lock(mutex);
-  MOZ_ASSERT(mNSSInitialized);
-
-  result = false;
-
-  if (mTestBuiltInRootHash.IsEmpty()) {
-    return NS_OK;
-  }
-
-  RefPtr<nsNSSCertificate> nsc = nsNSSCertificate::Create(cert);
-  if (!nsc) {
-    return NS_ERROR_FAILURE;
-  }
-  nsAutoString certHash;
-  nsresult rv = nsc->GetSha256Fingerprint(certHash);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  result = mTestBuiltInRootHash.Equals(certHash);
-  return NS_OK;
-}
-#endif // DEBUG
-
-NS_IMETHODIMP
-nsNSSComponent::IsCertContentSigningRoot(CERTCertificate* cert, bool& result)
-{
-  MutexAutoLock lock(mutex);
-  MOZ_ASSERT(mNSSInitialized);
-
-  result = false;
-
-  if (mContentSigningRootHash.IsEmpty()) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("mContentSigningRootHash is empty"));
-    return NS_ERROR_FAILURE;
-  }
-
-  RefPtr<nsNSSCertificate> nsc = nsNSSCertificate::Create(cert);
-  if (!nsc) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("creating nsNSSCertificate failed"));
-    return NS_ERROR_FAILURE;
-  }
-  nsAutoString certHash;
-  nsresult rv = nsc->GetSha256Fingerprint(certHash);
-  if (NS_FAILED(rv)) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("getting cert fingerprint failed"));
-    return rv;
-  }
-
-  result = mContentSigningRootHash.Equals(certHash);
   return NS_OK;
 }
 
@@ -2289,36 +1646,40 @@ getNSSDialogs(void** _result, REFNSIID aIID, const char* contract)
 }
 
 nsresult
-setPassword(PK11SlotInfo* slot, nsIInterfaceRequestor* ctx,
-            nsNSSShutDownPreventionLock& /*proofOfLock*/)
+setPassword(PK11SlotInfo* slot, nsIInterfaceRequestor* ctx)
 {
-  MOZ_ASSERT(slot);
-  MOZ_ASSERT(ctx);
-  NS_ENSURE_ARG_POINTER(slot);
-  NS_ENSURE_ARG_POINTER(ctx);
+  nsNSSShutDownPreventionLock locker;
+  nsresult rv = NS_OK;
 
   if (PK11_NeedUserInit(slot)) {
-    nsCOMPtr<nsITokenPasswordDialogs> dialogs;
-    nsresult rv = getNSSDialogs(getter_AddRefs(dialogs),
-                                NS_GET_IID(nsITokenPasswordDialogs),
-                                NS_TOKENPASSWORDSDIALOG_CONTRACTID);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-
+    nsITokenPasswordDialogs* dialogs;
     bool canceled;
     NS_ConvertUTF8toUTF16 tokenName(PK11_GetTokenName(slot));
-    rv = dialogs->SetPassword(ctx, tokenName.get(), &canceled);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
 
-    if (canceled) {
-      return NS_ERROR_NOT_AVAILABLE;
+    rv = getNSSDialogs((void**)&dialogs,
+                       NS_GET_IID(nsITokenPasswordDialogs),
+                       NS_TOKENPASSWORDSDIALOG_CONTRACTID);
+
+    if (NS_FAILED(rv)) goto loser;
+
+    {
+      nsPSMUITracker tracker;
+      if (tracker.isUIForbidden()) {
+        rv = NS_ERROR_NOT_AVAILABLE;
+      }
+      else {
+        rv = dialogs->SetPassword(ctx,
+                                  tokenName.get(),
+                                  &canceled);
+      }
     }
+    NS_RELEASE(dialogs);
+    if (NS_FAILED(rv)) goto loser;
+
+    if (canceled) { rv = NS_ERROR_NOT_AVAILABLE; goto loser; }
   }
-
-  return NS_OK;
+ loser:
+  return rv;
 }
 
 namespace mozilla {
@@ -2340,22 +1701,22 @@ InitializeCipherSuite()
   }
 
   // Now only set SSL/TLS ciphers we knew about at compile time
-  uint32_t enabledFallbackCiphers = 0;
+  uint32_t enabledWeakCiphers = 0;
   const CipherPref* const cp = sCipherPrefs;
   for (size_t i = 0; cp[i].pref; ++i) {
     bool cipherEnabled = Preferences::GetBool(cp[i].pref,
                                               cp[i].enabledByDefault);
-    if (cp[i].fallback) {
-      // Fallback ciphers are not used by default. See the comment
+    if (cp[i].weak) {
+      // Weak ciphers are not used by default. See the comment
       // in CipherSuiteChangeObserver::Observe for details.
       if (cipherEnabled) {
-        enabledFallbackCiphers |= ((uint32_t)1 << i);
+        enabledWeakCiphers |= ((uint32_t)1 << i);
       }
     } else {
       SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
     }
   }
-  sEnabledFallbackCiphers = enabledFallbackCiphers;
+  sEnabledWeakCiphers = enabledWeakCiphers;
 
   // Enable ciphers for PKCS#12
   SEC_PKCS12EnableCipher(PKCS12_RC4_40, 1);
@@ -2366,13 +1727,6 @@ InitializeCipherSuite()
   SEC_PKCS12EnableCipher(PKCS12_DES_EDE3_168, 1);
   SEC_PKCS12SetPreferredCipher(PKCS12_DES_EDE3_168, 1);
   PORT_SetUCS2_ASCIIConversionFunction(pip_ucs2_ascii_conversion_fn);
-
-  // PSM enforces a minimum RSA key size of 1024 bits, which is overridable.
-  // NSS has its own minimum, which is not overridable (the default is 1023
-  // bits). This sets the NSS minimum to 512 bits so users can still connect to
-  // devices like wifi routers with woefully small keys (they would have to add
-  // an override to do so, but they already do for such devices).
-  NSS_OptionSet(NSS_RSA_MIN_KEY_SIZE, 512);
 
   // Observe preference change around cipher suite setting.
   return CipherSuiteChangeObserver::StartObserve();

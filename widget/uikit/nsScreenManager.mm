@@ -9,7 +9,7 @@
 #include "nsScreenManager.h"
 #include "nsAppShell.h"
 
-static LayoutDeviceIntRect gScreenBounds;
+static nsIntRect gScreenBounds;
 static bool gScreenBoundsSet = false;
 
 UIKitScreen::UIKitScreen(UIScreen* aScreen)
@@ -83,7 +83,7 @@ UIKitScreenManager::UIKitScreenManager()
 {
 }
 
-LayoutDeviceIntRect
+nsIntRect
 UIKitScreenManager::GetBounds()
 {
     if (!gScreenBoundsSet) {

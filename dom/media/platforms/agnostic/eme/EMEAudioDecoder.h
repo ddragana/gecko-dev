@@ -18,18 +18,25 @@ public:
    : AudioCallbackAdapter(aCallback)
   {}
 
-  void Error(GMPErr aErr) override;
+  virtual void Error(GMPErr aErr) override;
 };
 
 class EMEAudioDecoder : public GMPAudioDecoder {
 public:
-  EMEAudioDecoder(CDMProxy* aProxy, const GMPAudioDecoderParams& aParams);
+  EMEAudioDecoder(CDMProxy* aProxy,
+                  const AudioInfo& aConfig,
+                  TaskQueue* aTaskQueue,
+                  MediaDataDecoderCallbackProxy* aCallback)
+   : GMPAudioDecoder(aConfig, aTaskQueue, aCallback, new EMEAudioCallbackAdapter(aCallback))
+   , mProxy(aProxy)
+  {
+  }
 
 private:
-  void InitTags(nsTArray<nsCString>& aTags) override;
-  nsCString GetNodeId() override;
+  virtual void InitTags(nsTArray<nsCString>& aTags) override;
+  virtual nsCString GetNodeId() override;
 
-  RefPtr<CDMProxy> mProxy;
+  nsRefPtr<CDMProxy> mProxy;
 };
 
 } // namespace mozilla

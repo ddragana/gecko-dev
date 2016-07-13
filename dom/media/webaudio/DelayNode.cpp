@@ -32,6 +32,7 @@ public:
   DelayNodeEngine(AudioNode* aNode, AudioDestinationNode* aDestination,
                   double aMaxDelayTicks)
     : AudioNodeEngine(aNode)
+    , mSource(nullptr)
     , mDestination(aDestination->Stream())
     // Keep the default value in sync with the default value in DelayNode::DelayNode.
     , mDelay(0.f)
@@ -46,41 +47,45 @@ public:
   {
   }
 
-  DelayNodeEngine* AsDelayNodeEngine() override
+  virtual DelayNodeEngine* AsDelayNodeEngine() override
   {
     return this;
+  }
+
+  void SetSourceStream(AudioNodeStream* aSource)
+  {
+    mSource = aSource;
   }
 
   enum Parameters {
     DELAY,
   };
-  void RecvTimelineEvent(uint32_t aIndex,
-                         AudioTimelineEvent& aEvent) override
+  void SetTimelineParameter(uint32_t aIndex,
+                            const AudioParamTimeline& aValue,
+                            TrackRate aSampleRate) override
   {
-    MOZ_ASSERT(mDestination);
-    WebAudioUtils::ConvertAudioTimelineEventToTicks(aEvent,
-                                                    mDestination);
-
     switch (aIndex) {
     case DELAY:
-      mDelay.InsertEvent<int64_t>(aEvent);
+      MOZ_ASSERT(mSource && mDestination);
+      mDelay = aValue;
+      WebAudioUtils::ConvertAudioParamToTicks(mDelay, mSource, mDestination);
       break;
     default:
       NS_ERROR("Bad DelayNodeEngine TimelineParameter");
     }
   }
 
-  void ProcessBlock(AudioNodeStream* aStream,
-                    GraphTime aFrom,
-                    const AudioBlock& aInput,
-                    AudioBlock* aOutput,
-                    bool* aFinished) override
+  virtual void ProcessBlock(AudioNodeStream* aStream,
+                            const AudioChunk& aInput,
+                            AudioChunk* aOutput,
+                            bool* aFinished) override
   {
+    MOZ_ASSERT(mSource == aStream, "Invalid source stream");
     MOZ_ASSERT(aStream->SampleRate() == mDestination->SampleRate());
 
     if (!aInput.IsSilentOrSubnormal()) {
       if (mLeftOverData <= 0) {
-        RefPtr<PlayingRefChanged> refchanged =
+        nsRefPtr<PlayingRefChanged> refchanged =
           new PlayingRefChanged(aStream, PlayingRefChanged::ADDREF);
         aStream->Graph()->
           DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
@@ -91,17 +96,15 @@ public:
     } else {
       if (mLeftOverData != INT32_MIN) {
         mLeftOverData = INT32_MIN;
-        aStream->ScheduleCheckForInactive();
-
         // Delete our buffered data now we no longer need it
         mBuffer.Reset();
 
-        RefPtr<PlayingRefChanged> refchanged =
+        nsRefPtr<PlayingRefChanged> refchanged =
           new PlayingRefChanged(aStream, PlayingRefChanged::RELEASE);
         aStream->Graph()->
           DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
       }
-      aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
+      *aOutput = aInput;
       return;
     }
 
@@ -110,19 +113,18 @@ public:
     // Skip output update if mLastChunks has already been set by
     // ProduceBlockBeforeInput() when in a cycle.
     if (!mHaveProducedBeforeInput) {
-      UpdateOutputBlock(aStream, aFrom, aOutput, 0.0);
+      UpdateOutputBlock(aOutput, 0.0);
     }
     mHaveProducedBeforeInput = false;
     mBuffer.NextBlock();
   }
 
-  void UpdateOutputBlock(AudioNodeStream* aStream, GraphTime aFrom,
-                         AudioBlock* aOutput, double minDelay)
+  void UpdateOutputBlock(AudioChunk* aOutput, double minDelay)
   {
     double maxDelay = mMaxDelay;
-    double sampleRate = aStream->SampleRate();
+    double sampleRate = mSource->SampleRate();
     ChannelInterpretation channelInterpretation =
-      aStream->GetChannelInterpretation();
+      mSource->GetChannelInterpretation();
     if (mDelay.HasSimpleValue()) {
       // If this DelayNode is in a cycle, make sure the delay value is at least
       // one block, even if that is greater than maxDelay.
@@ -134,7 +136,7 @@ public:
       // Compute the delay values for the duration of the input AudioChunk
       // If this DelayNode is in a cycle, make sure the delay value is at least
       // one block.
-      StreamTime tick = mDestination->GraphTimeToStreamTime(aFrom);
+      StreamTime tick = mSource->GetCurrentPosition();
       float values[WEBAUDIO_BLOCK_SIZE];
       mDelay.GetValuesAtTime(tick, values,WEBAUDIO_BLOCK_SIZE);
 
@@ -149,38 +151,33 @@ public:
     }
   }
 
-  void ProduceBlockBeforeInput(AudioNodeStream* aStream,
-                               GraphTime aFrom,
-                               AudioBlock* aOutput) override
+  virtual void ProduceBlockBeforeInput(AudioChunk* aOutput) override
   {
     if (mLeftOverData <= 0) {
       aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
     } else {
-      UpdateOutputBlock(aStream, aFrom, aOutput, WEBAUDIO_BLOCK_SIZE);
+      UpdateOutputBlock(aOutput, WEBAUDIO_BLOCK_SIZE);
     }
     mHaveProducedBeforeInput = true;
   }
 
-  bool IsActive() const override
-  {
-    return mLeftOverData != INT32_MIN;
-  }
-
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
     // Not owned:
+    // - mSource - probably not owned
     // - mDestination - probably not owned
     // - mDelay - shares ref with AudioNode, don't count
     amount += mBuffer.SizeOfExcludingThis(aMallocSizeOf);
     return amount;
   }
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
+  AudioNodeStream* mSource;
   AudioNodeStream* mDestination;
   AudioParamTimeline mDelay;
   DelayBuffer mBuffer;
@@ -196,13 +193,13 @@ DelayNode::DelayNode(AudioContext* aContext, double aMaxDelay)
               2,
               ChannelCountMode::Max,
               ChannelInterpretation::Speakers)
-  , mDelay(new AudioParam(this, DelayNodeEngine::DELAY, 0.0f, "delayTime"))
+  , mDelay(new AudioParam(this, SendDelayToStream, 0.0f, "delayTime"))
 {
   DelayNodeEngine* engine =
     new DelayNodeEngine(this, aContext->Destination(),
                         aContext->SampleRate() * aMaxDelay);
-  mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
+  engine->SetSourceStream(mStream);
 }
 
 DelayNode::~DelayNode()
@@ -227,6 +224,13 @@ JSObject*
 DelayNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   return DelayNodeBinding::Wrap(aCx, this, aGivenProto);
+}
+
+void
+DelayNode::SendDelayToStream(AudioNode* aNode)
+{
+  DelayNode* This = static_cast<DelayNode*>(aNode);
+  SendTimelineParameterToStream(This, DelayNodeEngine::DELAY, *This->mDelay);
 }
 
 } // namespace dom

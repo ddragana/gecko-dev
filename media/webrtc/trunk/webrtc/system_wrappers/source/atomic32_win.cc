@@ -14,13 +14,14 @@
 #include <windows.h>
 
 #include "webrtc/common_types.h"
+#include "webrtc/system_wrappers/interface/compile_assert.h"
 
 namespace webrtc {
 
 Atomic32::Atomic32(int32_t initial_value)
     : value_(initial_value) {
-  static_assert(sizeof(value_) == sizeof(LONG),
-                "counter variable is the expected size");
+  COMPILE_ASSERT(sizeof(value_) == sizeof(LONG),
+                 counter_variable_is_the_expected_size);
   assert(Is32bitAligned());
 }
 

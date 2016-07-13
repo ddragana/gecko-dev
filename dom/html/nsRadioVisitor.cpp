@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsRadioVisitor.h"
+#include "nsAutoPtr.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsIConstraintValidation.h"
 
@@ -15,7 +16,7 @@ NS_IMPL_ISUPPORTS(nsRadioVisitor, nsIRadioVisitor)
 bool
 nsRadioSetCheckedChangedVisitor::Visit(nsIFormControl* aRadio)
 {
-  RefPtr<HTMLInputElement> radio =
+  nsRefPtr<HTMLInputElement> radio =
     static_cast<HTMLInputElement*>(aRadio);
   NS_ASSERTION(radio, "Visit() passed a null button!");
 
@@ -30,7 +31,7 @@ nsRadioGetCheckedChangedVisitor::Visit(nsIFormControl* aRadio)
     return true;
   }
 
-  RefPtr<HTMLInputElement> radio =
+  nsRefPtr<HTMLInputElement> radio =
     static_cast<HTMLInputElement*>(aRadio);
   NS_ASSERTION(radio, "Visit() passed a null button!");
 

@@ -43,18 +43,31 @@ nsGTKRemoteService::Startup(const char* aAppName, const char* aProfileName)
   gtk_widget_realize(mServerWindow);
   HandleCommandsFor(mServerWindow, nullptr);
 
-  for (auto iter = mWindows.Iter(); !iter.Done(); iter.Next()) {
-    HandleCommandsFor(iter.Key(), iter.UserData());
-  }
+  mWindows.EnumerateRead(StartupHandler, this);
 
   return NS_OK;
 }
 
-static nsIWidget* GetMainWidget(nsPIDOMWindowInner* aWindow)
+PLDHashOperator
+nsGTKRemoteService::StartupHandler(GtkWidget* aKey,
+                                   nsIWeakReference* aData,
+                                   void* aClosure)
+{
+  GtkWidget* widget = (GtkWidget*) aKey;
+  nsGTKRemoteService* aThis = (nsGTKRemoteService*) aClosure;
+
+  aThis->HandleCommandsFor(widget, aData);
+  return PL_DHASH_NEXT;
+}
+
+static nsIWidget* GetMainWidget(nsIDOMWindow* aWindow)
 {
   // get the native window for this instance
+  nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aWindow));
+  NS_ENSURE_TRUE(window, nullptr);
+
   nsCOMPtr<nsIBaseWindow> baseWindow
-    (do_QueryInterface(aWindow->GetDocShell()));
+    (do_QueryInterface(window->GetDocShell()));
   NS_ENSURE_TRUE(baseWindow, nullptr);
 
   nsCOMPtr<nsIWidget> mainWidget;
@@ -63,9 +76,9 @@ static nsIWidget* GetMainWidget(nsPIDOMWindowInner* aWindow)
 }
 
 NS_IMETHODIMP
-nsGTKRemoteService::RegisterWindow(mozIDOMWindow* aWindow)
+nsGTKRemoteService::RegisterWindow(nsIDOMWindow* aWindow)
 {
-  nsIWidget* mainWidget = GetMainWidget(nsPIDOMWindowInner::From(aWindow));
+  nsIWidget* mainWidget = GetMainWidget(aWindow);
   NS_ENSURE_TRUE(mainWidget, NS_ERROR_FAILURE);
 
   GtkWidget* widget =

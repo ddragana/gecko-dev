@@ -13,11 +13,16 @@
 #include "gfxPlatform.h"
 #include "GLDefs.h"
 #include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/MatrixFwd.h"
 #include "mozilla/Monitor.h"
 
 #include "SurfaceTexture.h"
 #include "AndroidNativeWindow.h"
+
+namespace mozilla {
+namespace gfx {
+class Matrix4x4;
+}
+}
 
 namespace mozilla {
 namespace gl {
@@ -44,7 +49,7 @@ public:
   // Android Jelly Bean.
   static already_AddRefed<AndroidSurfaceTexture> Create();
 
-  static AndroidSurfaceTexture* Find(int aId);
+  static AndroidSurfaceTexture* Find(int id);
 
   // If we are on Jelly Bean, the SurfaceTexture can be detached and reattached
   // to allow consumption from different GLContexts. It is recommended to only
@@ -56,21 +61,21 @@ public:
 
   nsresult Detach();
 
-  // Ability to detach is based on API version (16+), and we also block PowerVR
-  // since it has some type of fencing problem. Bug 1100126.
-  bool CanDetach() const;
+  // Ability to detach is based on API version (16+), and we also block PowerVR since it has some type
+  // of fencing problem. Bug 1100126.
+  bool CanDetach() { return mCanDetach; }
 
-  GLContext* AttachedContext() const { return mAttachedContext; }
+  GLContext* GetAttachedContext() { return mAttachedContext; }
 
-  AndroidNativeWindow* NativeWindow() const {
+  AndroidNativeWindow* NativeWindow() {
     return mNativeWindow;
   }
 
   // This attaches the updated data to the TEXTURE_EXTERNAL target
   void UpdateTexImage();
 
-  void GetTransformMatrix(mozilla::gfx::Matrix4x4& aMatrix) const;
-  int ID() const { return mID; }
+  void GetTransformMatrix(mozilla::gfx::Matrix4x4& aMatrix);
+  int ID() { return mID; }
 
   void SetDefaultSize(mozilla::gfx::IntSize size);
 
@@ -82,26 +87,27 @@ public:
   // callback from the underlying SurfaceTexture instance
   void NotifyFrameAvailable();
 
-  GLuint Texture() const { return mTexture; }
-  const widget::sdk::Surface::Ref& JavaSurface() const { return mSurface; }
+  GLuint Texture() { return mTexture; }
+  const widget::sdk::Surface::Ref& JavaSurface() { return mSurface; }
 
 private:
   AndroidSurfaceTexture();
   ~AndroidSurfaceTexture();
 
   bool Init(GLContext* aContext, GLuint aTexture);
+  void UpdateCanDetach();
 
   GLuint mTexture;
   widget::sdk::SurfaceTexture::GlobalRef mSurfaceTexture;
   widget::sdk::Surface::GlobalRef mSurface;
 
+  Monitor mMonitor;
   GLContext* mAttachedContext;
+  bool mCanDetach;
 
   RefPtr<AndroidNativeWindow> mNativeWindow;
   int mID;
   nsCOMPtr<nsIRunnable> mFrameAvailableCallback;
-
-  mutable Monitor mMonitor;
 };
 
 }

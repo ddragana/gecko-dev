@@ -11,17 +11,19 @@
 #include "nsSVGEffects.h"
 #include "nsSVGFilters.h"
 
+typedef nsContainerFrame SVGFEContainerFrameBase;
+
 /*
  * This frame is used by filter primitive elements that
  * have special child elements that provide parameters.
  */
-class SVGFEContainerFrame : public nsContainerFrame
+class SVGFEContainerFrame : public SVGFEContainerFrameBase
 {
   friend nsIFrame*
   NS_NewSVGFEContainerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
   explicit SVGFEContainerFrame(nsStyleContext* aContext)
-    : nsContainerFrame(aContext)
+    : SVGFEContainerFrameBase(aContext)
   {
     AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
@@ -31,7 +33,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsContainerFrame::IsFrameOfType(
+    return SVGFEContainerFrameBase::IsFrameOfType(
             aFlags & ~(nsIFrame::eSVG | nsIFrame::eSVGContainer));
   }
 
@@ -58,7 +60,7 @@ public:
                                     nsIAtom* aAttribute,
                                     int32_t  aModType) override;
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
+  virtual bool UpdateOverflow() override {
     // We don't maintain a visual overflow rect
     return false;
   }
@@ -82,7 +84,7 @@ SVGFEContainerFrame::Init(nsIContent*       aContent,
                "Trying to construct an SVGFEContainerFrame for a "
                "content element that doesn't support the right interfaces");
 
-  nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  SVGFEContainerFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -104,5 +106,6 @@ SVGFEContainerFrame::AttributeChanged(int32_t  aNameSpaceID,
     nsSVGEffects::InvalidateDirectRenderingObservers(GetParent());
   }
 
-  return nsContainerFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+  return SVGFEContainerFrameBase::AttributeChanged(aNameSpaceID,
+                                                     aAttribute, aModType);
 }

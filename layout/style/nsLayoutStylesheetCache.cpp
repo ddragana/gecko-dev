@@ -10,11 +10,7 @@
 #include "mozilla/CSSStyleSheet.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/ServoStyleSheet.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
 #include "mozilla/css/Loader.h"
-#include "mozilla/dom/SRIMetadata.h"
 #include "nsIFile.h"
 #include "nsNetUtil.h"
 #include "nsIObserverService.h"
@@ -22,21 +18,7 @@
 #include "nsIXULRuntime.h"
 #include "nsPrintfCString.h"
 
-// Includes for the crash report annotation in ErrorLoadingBuiltinSheet.
-#ifdef MOZ_CRASHREPORTER
-#include "mozilla/Omnijar.h"
-#include "nsDirectoryService.h"
-#include "nsDirectoryServiceDefs.h"
-#include "nsExceptionHandler.h"
-#include "nsIChromeRegistry.h"
-#include "nsISimpleEnumerator.h"
-#include "nsISubstitutingProtocolHandler.h"
-#include "zlib.h"
-#include "nsZipArchive.h"
-#endif
-
 using namespace mozilla;
-using namespace mozilla::css;
 
 static bool sNumberControlEnabled;
 
@@ -69,191 +51,230 @@ nsLayoutStylesheetCache::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::ScrollbarsSheet()
 {
-  if (!mScrollbarsSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mScrollbarsSheet) {
     // Scrollbars don't need access to unsafe rules
     LoadSheetURL("chrome://global/skin/scrollbars.css",
-                 &mScrollbarsSheet, eAuthorSheetFeatures);
+                 gStyleCache->mScrollbarsSheet, false);
   }
 
-  return mScrollbarsSheet;
+  return gStyleCache->mScrollbarsSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::FormsSheet()
 {
-  if (!mFormsSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mFormsSheet) {
     // forms.css needs access to unsafe rules
     LoadSheetURL("resource://gre-resources/forms.css",
-                 &mFormsSheet, eAgentSheetFeatures);
+                 gStyleCache->mFormsSheet, true);
   }
 
-  return mFormsSheet;
+  return gStyleCache->mFormsSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::NumberControlSheet()
 {
+  EnsureGlobal();
+
   if (!sNumberControlEnabled) {
     return nullptr;
   }
 
-  if (!mNumberControlSheet) {
+  if (!gStyleCache->mNumberControlSheet) {
     LoadSheetURL("resource://gre-resources/number-control.css",
-                 &mNumberControlSheet, eAgentSheetFeatures);
+                 gStyleCache->mNumberControlSheet, true);
   }
 
-  return mNumberControlSheet;
+  return gStyleCache->mNumberControlSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::UserContentSheet()
 {
-  return mUserContentSheet;
+  EnsureGlobal();
+  return gStyleCache->mUserContentSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::UserChromeSheet()
 {
-  return mUserChromeSheet;
+  EnsureGlobal();
+  return gStyleCache->mUserChromeSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::UASheet()
 {
-  if (!mUASheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mUASheet) {
     LoadSheetURL("resource://gre-resources/ua.css",
-                 &mUASheet, eAgentSheetFeatures);
+                 gStyleCache->mUASheet, true);
   }
 
-  return mUASheet;
+  return gStyleCache->mUASheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::HTMLSheet()
 {
-  if (!mHTMLSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mHTMLSheet) {
     LoadSheetURL("resource://gre-resources/html.css",
-                 &mHTMLSheet, eAgentSheetFeatures);
+                 gStyleCache->mHTMLSheet, true);
   }
 
-  return mHTMLSheet;
+  return gStyleCache->mHTMLSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::MinimalXULSheet()
 {
-  return mMinimalXULSheet;
+  EnsureGlobal();
+  return gStyleCache->mMinimalXULSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::XULSheet()
 {
-  return mXULSheet;
+  EnsureGlobal();
+  return gStyleCache->mXULSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::QuirkSheet()
 {
-  return mQuirkSheet;
+  EnsureGlobal();
+  return gStyleCache->mQuirkSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
+nsLayoutStylesheetCache::FullScreenOverrideSheet()
+{
+  EnsureGlobal();
+  return gStyleCache->mFullScreenOverrideSheet;
+}
+
+CSSStyleSheet*
 nsLayoutStylesheetCache::SVGSheet()
 {
-  return mSVGSheet;
+  EnsureGlobal();
+  return gStyleCache->mSVGSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::MathMLSheet()
 {
-  if (!mMathMLSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mMathMLSheet) {
     LoadSheetURL("resource://gre-resources/mathml.css",
-                 &mMathMLSheet, eAgentSheetFeatures);
+                 gStyleCache->mMathMLSheet, true);
   }
 
-  return mMathMLSheet;
+  return gStyleCache->mMathMLSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::CounterStylesSheet()
 {
-  return mCounterStylesSheet;
+  EnsureGlobal();
+
+  return gStyleCache->mCounterStylesSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::NoScriptSheet()
 {
-  if (!mNoScriptSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mNoScriptSheet) {
     LoadSheetURL("resource://gre-resources/noscript.css",
-                 &mNoScriptSheet, eAgentSheetFeatures);
+                 gStyleCache->mNoScriptSheet, true);
   }
 
-  return mNoScriptSheet;
+  return gStyleCache->mNoScriptSheet;
 }
 
-StyleSheetHandle
+CSSStyleSheet*
 nsLayoutStylesheetCache::NoFramesSheet()
 {
-  if (!mNoFramesSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mNoFramesSheet) {
     LoadSheetURL("resource://gre-resources/noframes.css",
-                 &mNoFramesSheet, eAgentSheetFeatures);
+                 gStyleCache->mNoFramesSheet, true);
   }
 
-  return mNoFramesSheet;
+  return gStyleCache->mNoFramesSheet;
 }
 
-StyleSheetHandle
+/* static */ CSSStyleSheet*
 nsLayoutStylesheetCache::ChromePreferenceSheet(nsPresContext* aPresContext)
 {
-  if (!mChromePreferenceSheet) {
-    BuildPreferenceSheet(&mChromePreferenceSheet, aPresContext);
+  EnsureGlobal();
+
+  if (!gStyleCache->mChromePreferenceSheet) {
+    gStyleCache->BuildPreferenceSheet(gStyleCache->mChromePreferenceSheet,
+                                      aPresContext);
   }
 
-  return mChromePreferenceSheet;
+  return gStyleCache->mChromePreferenceSheet;
 }
 
-StyleSheetHandle
+/* static */ CSSStyleSheet*
 nsLayoutStylesheetCache::ContentPreferenceSheet(nsPresContext* aPresContext)
 {
-  if (!mContentPreferenceSheet) {
-    BuildPreferenceSheet(&mContentPreferenceSheet, aPresContext);
+  EnsureGlobal();
+
+  if (!gStyleCache->mContentPreferenceSheet) {
+    gStyleCache->BuildPreferenceSheet(gStyleCache->mContentPreferenceSheet,
+                                      aPresContext);
   }
 
-  return mContentPreferenceSheet;
+  return gStyleCache->mContentPreferenceSheet;
 }
 
-StyleSheetHandle
+/* static */ CSSStyleSheet*
 nsLayoutStylesheetCache::ContentEditableSheet()
 {
-  if (!mContentEditableSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mContentEditableSheet) {
     LoadSheetURL("resource://gre/res/contenteditable.css",
-                 &mContentEditableSheet, eAgentSheetFeatures);
+                 gStyleCache->mContentEditableSheet, true);
   }
 
-  return mContentEditableSheet;
+  return gStyleCache->mContentEditableSheet;
 }
 
-StyleSheetHandle
+/* static */ CSSStyleSheet*
 nsLayoutStylesheetCache::DesignModeSheet()
 {
-  if (!mDesignModeSheet) {
+  EnsureGlobal();
+
+  if (!gStyleCache->mDesignModeSheet) {
     LoadSheetURL("resource://gre/res/designmode.css",
-                 &mDesignModeSheet, eAgentSheetFeatures);
+                 gStyleCache->mDesignModeSheet, true);
   }
 
-  return mDesignModeSheet;
+  return gStyleCache->mDesignModeSheet;
 }
 
 void
 nsLayoutStylesheetCache::Shutdown()
 {
-  gCSSLoader_Gecko = nullptr;
-  gCSSLoader_Servo = nullptr;
-  gStyleCache_Gecko = nullptr;
-  gStyleCache_Servo = nullptr;
+  NS_IF_RELEASE(gCSSLoader);
+  gStyleCache = nullptr;
 }
 
 MOZ_DEFINE_MALLOC_SIZE_OF(LayoutStylesheetCacheMallocSizeOf)
@@ -282,6 +303,7 @@ nsLayoutStylesheetCache::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf
   MEASURE(mCounterStylesSheet);
   MEASURE(mDesignModeSheet);
   MEASURE(mFormsSheet);
+  MEASURE(mFullScreenOverrideSheet);
   MEASURE(mHTMLSheet);
   MEASURE(mMathMLSheet);
   MEASURE(mMinimalXULSheet);
@@ -298,14 +320,12 @@ nsLayoutStylesheetCache::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf
 
   // Measurement of the following members may be added later if DMD finds it is
   // worthwhile:
-  // - gCSSLoader_Gecko
-  // - gCSSLoader_Servo
+  // - gCSSLoader
 
   return n;
 }
 
-nsLayoutStylesheetCache::nsLayoutStylesheetCache(StyleBackendType aType)
-  : mBackendType(aType)
+nsLayoutStylesheetCache::nsLayoutStylesheetCache()
 {
   nsCOMPtr<nsIObserverService> obsSvc =
     mozilla::services::GetObserverService();
@@ -323,15 +343,17 @@ nsLayoutStylesheetCache::nsLayoutStylesheetCache(StyleBackendType aType)
   // And make sure that we load our UA sheets.  No need to do this
   // per-profile, since they're profile-invariant.
   LoadSheetURL("resource://gre-resources/counterstyles.css",
-               &mCounterStylesSheet, eAgentSheetFeatures);
+               mCounterStylesSheet, true);
+  LoadSheetURL("resource://gre-resources/full-screen-override.css",
+               mFullScreenOverrideSheet, true);
   LoadSheetURL("chrome://global/content/minimal-xul.css",
-               &mMinimalXULSheet, eAgentSheetFeatures);
+               mMinimalXULSheet, true);
   LoadSheetURL("resource://gre-resources/quirk.css",
-               &mQuirkSheet, eAgentSheetFeatures);
+               mQuirkSheet, true);
   LoadSheetURL("resource://gre/res/svg.css",
-               &mSVGSheet, eAgentSheetFeatures);
+               mSVGSheet, true);
   LoadSheetURL("chrome://global/content/xul.css",
-               &mXULSheet, eAgentSheetFeatures);
+               mXULSheet, true);
 
   // The remaining sheets are created on-demand do to their use being rarer
   // (which helps save memory for Firefox OS apps) or because they need to
@@ -341,6 +363,7 @@ nsLayoutStylesheetCache::nsLayoutStylesheetCache(StyleBackendType aType)
 nsLayoutStylesheetCache::~nsLayoutStylesheetCache()
 {
   mozilla::UnregisterWeakMemoryReporter(this);
+  MOZ_ASSERT(!gStyleCache);
 }
 
 void
@@ -349,40 +372,26 @@ nsLayoutStylesheetCache::InitMemoryReporter()
   mozilla::RegisterWeakMemoryReporter(this);
 }
 
-/* static */ nsLayoutStylesheetCache*
-nsLayoutStylesheetCache::For(StyleBackendType aType)
+void
+nsLayoutStylesheetCache::EnsureGlobal()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  bool mustInit = !gStyleCache_Gecko && !gStyleCache_Servo;
-  auto& cache = aType == StyleBackendType::Gecko ? gStyleCache_Gecko :
-                                                   gStyleCache_Servo;
+  if (gStyleCache) return;
 
-  if (!cache) {
-    cache = new nsLayoutStylesheetCache(aType);
-    cache->InitMemoryReporter();
-  }
+  gStyleCache = new nsLayoutStylesheetCache();
 
-  if (mustInit) {
-    // Initialization that only needs to be done once for both
-    // nsLayoutStylesheetCaches.
+  gStyleCache->InitMemoryReporter();
 
-    Preferences::AddBoolVarCache(&sNumberControlEnabled, NUMBER_CONTROL_PREF,
-                                 true);
+  Preferences::AddBoolVarCache(&sNumberControlEnabled, NUMBER_CONTROL_PREF,
+                               true);
 
-    // For each pref that controls a CSS feature that a UA style sheet depends
-    // on (such as a pref that enables a property that a UA style sheet uses),
-    // register DependentPrefChanged as a callback to ensure that the relevant
-    // style sheets will be re-parsed.
-    // Preferences::RegisterCallback(&DependentPrefChanged,
-    //                               "layout.css.example-pref.enabled");
-    Preferences::RegisterCallback(&DependentPrefChanged,
-                                  "layout.css.grid.enabled");
-    Preferences::RegisterCallback(&DependentPrefChanged,
-                                  "dom.details_element.enabled");
-  }
-
-  return cache;
+  // For each pref that controls a CSS feature that a UA style sheet depends
+  // on (such as a pref that enables a property that a UA style sheet uses),
+  // register DependentPrefChanged as a callback to ensure that the relevant
+  // style sheets will be re-parsed.
+  Preferences::RegisterCallback(&DependentPrefChanged,
+                                "layout.css.ruby.enabled");
 }
 
 void
@@ -411,27 +420,25 @@ nsLayoutStylesheetCache::InitFromProfile()
   contentFile->Append(NS_LITERAL_STRING("userContent.css"));
   chromeFile->Append(NS_LITERAL_STRING("userChrome.css"));
 
-  LoadSheetFile(contentFile, &mUserContentSheet, eUserSheetFeatures);
-  LoadSheetFile(chromeFile, &mUserChromeSheet, eUserSheetFeatures);
+  LoadSheetFile(contentFile, mUserContentSheet);
+  LoadSheetFile(chromeFile, mUserChromeSheet);
 }
 
-void
+/* static */ void
 nsLayoutStylesheetCache::LoadSheetURL(const char* aURL,
-                                      StyleSheetHandle::RefPtr* aSheet,
-                                      SheetParsingMode aParsingMode)
+                                      nsRefPtr<CSSStyleSheet>& aSheet,
+                                      bool aEnableUnsafeRules)
 {
   nsCOMPtr<nsIURI> uri;
   NS_NewURI(getter_AddRefs(uri), aURL);
-  LoadSheet(uri, aSheet, aParsingMode);
+  LoadSheet(uri, aSheet, aEnableUnsafeRules);
   if (!aSheet) {
     NS_ERROR(nsPrintfCString("Could not load %s", aURL).get());
   }
 }
 
 void
-nsLayoutStylesheetCache::LoadSheetFile(nsIFile* aFile,
-                                       StyleSheetHandle::RefPtr* aSheet,
-                                       SheetParsingMode aParsingMode)
+nsLayoutStylesheetCache::LoadSheetFile(nsIFile* aFile, nsRefPtr<CSSStyleSheet>& aSheet)
 {
   bool exists = false;
   aFile->Exists(&exists);
@@ -441,291 +448,12 @@ nsLayoutStylesheetCache::LoadSheetFile(nsIFile* aFile,
   nsCOMPtr<nsIURI> uri;
   NS_NewFileURI(getter_AddRefs(uri), aFile);
 
-  LoadSheet(uri, aSheet, aParsingMode);
+  LoadSheet(uri, aSheet, false);
 }
-
-#ifdef MOZ_CRASHREPORTER
-static inline nsresult
-ComputeCRC32(nsIFile* aFile, uint32_t* aResult)
-{
-  PRFileDesc* fd;
-  nsresult rv = aFile->OpenNSPRFileDesc(PR_RDONLY, 0, &fd);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  uint32_t crc = crc32(0, nullptr, 0);
-
-  unsigned char buf[512];
-  int32_t n;
-  while ((n = PR_Read(fd, buf, sizeof(buf))) > 0) {
-    crc = crc32(crc, buf, n);
-  }
-  PR_Close(fd);
-
-  if (n < 0) {
-    return NS_ERROR_FAILURE;
-  }
-
-  *aResult = crc;
-  return NS_OK;
-}
-
-static void
-ListInterestingFiles(nsString& aAnnotation, nsIFile* aFile,
-                     const nsTArray<nsString>& aInterestingFilenames)
-{
-  nsString filename;
-  aFile->GetLeafName(filename);
-  for (const nsString& interestingFilename : aInterestingFilenames) {
-    if (interestingFilename == filename) {
-      nsString path;
-      aFile->GetPath(path);
-      aAnnotation.AppendLiteral("  ");
-      aAnnotation.Append(path);
-      aAnnotation.AppendLiteral(" (");
-      int64_t size;
-      if (NS_SUCCEEDED(aFile->GetFileSize(&size))) {
-        aAnnotation.AppendPrintf("%ld", size);
-      } else {
-        aAnnotation.AppendLiteral("???");
-      }
-      aAnnotation.AppendLiteral(" bytes, crc32 = ");
-      uint32_t crc;
-      nsresult rv = ComputeCRC32(aFile, &crc);
-      if (NS_SUCCEEDED(rv)) {
-        aAnnotation.AppendPrintf("0x%08x)\n", crc);
-      } else {
-        aAnnotation.AppendPrintf("error 0x%08x)\n", uint32_t(rv));
-      }
-      return;
-    }
-  }
-
-  bool isDir = false;
-  aFile->IsDirectory(&isDir);
-
-  if (!isDir) {
-    return;
-  }
-
-  nsCOMPtr<nsISimpleEnumerator> entries;
-  if (NS_FAILED(aFile->GetDirectoryEntries(getter_AddRefs(entries)))) {
-    aAnnotation.AppendLiteral("  (failed to enumerated directory)\n");
-    return;
-  }
-
-  for (;;) {
-    bool hasMore = false;
-    if (NS_FAILED(entries->HasMoreElements(&hasMore))) {
-      aAnnotation.AppendLiteral("  (failed during directory enumeration)\n");
-      return;
-    }
-    if (!hasMore) {
-      break;
-    }
-
-    nsCOMPtr<nsISupports> entry;
-    if (NS_FAILED(entries->GetNext(getter_AddRefs(entry)))) {
-      aAnnotation.AppendLiteral("  (failed during directory enumeration)\n");
-      return;
-    }
-
-    nsCOMPtr<nsIFile> file = do_QueryInterface(entry);
-    if (file) {
-      ListInterestingFiles(aAnnotation, file, aInterestingFilenames);
-    }
-  }
-}
-
-// Generate a crash report annotation to help debug issues with style
-// sheets failing to load (bug 1194856).
-static void
-AnnotateCrashReport(nsIURI* aURI)
-{
-  nsAutoCString spec;
-  nsAutoCString scheme;
-  nsDependentCSubstring filename;
-  if (aURI) {
-    aURI->GetSpec(spec);
-    aURI->GetScheme(scheme);
-    int32_t i = spec.RFindChar('/');
-    if (i != -1) {
-      filename.Rebind(spec, i + 1);
-    }
-  }
-
-  nsString annotation;
-
-  // The URL of the sheet that failed to load.
-  annotation.AppendLiteral("Error loading sheet: ");
-  annotation.Append(NS_ConvertUTF8toUTF16(spec).get());
-  annotation.Append('\n');
-
-  annotation.AppendLiteral("NS_ERROR_FILE_CORRUPTION reason: ");
-  if (nsZipArchive::sFileCorruptedReason) {
-    annotation.Append(NS_ConvertUTF8toUTF16(nsZipArchive::sFileCorruptedReason).get());
-    annotation.Append('\n');
-  } else {
-    annotation.AppendLiteral("(none)\n");
-  }
-
-  // The jar: or file: URL that the sheet's resource: or chrome: URL
-  // resolves to.
-  if (scheme.EqualsLiteral("resource")) {
-    annotation.AppendLiteral("Real location: ");
-    nsCOMPtr<nsISubstitutingProtocolHandler> handler;
-    nsCOMPtr<nsIIOService> io(do_GetIOService());
-    if (io) {
-      nsCOMPtr<nsIProtocolHandler> ph;
-      io->GetProtocolHandler(scheme.get(), getter_AddRefs(ph));
-      if (ph) {
-        handler = do_QueryInterface(ph);
-      }
-    }
-    if (!handler) {
-      annotation.AppendLiteral("(ResolveURI failed)\n");
-    } else {
-      nsAutoCString resolvedSpec;
-      handler->ResolveURI(aURI, resolvedSpec);
-      annotation.Append(NS_ConvertUTF8toUTF16(resolvedSpec));
-      annotation.Append('\n');
-    }
-  } else if (scheme.EqualsLiteral("chrome")) {
-    annotation.AppendLiteral("Real location: ");
-    nsCOMPtr<nsIChromeRegistry> reg =
-      mozilla::services::GetChromeRegistryService();
-    if (!reg) {
-      annotation.AppendLiteral("(no chrome registry)\n");
-    } else {
-      nsCOMPtr<nsIURI> resolvedURI;
-      reg->ConvertChromeURL(aURI, getter_AddRefs(resolvedURI));
-      if (!resolvedURI) {
-        annotation.AppendLiteral("(ConvertChromeURL failed)\n");
-      } else {
-        nsAutoCString resolvedSpec;
-        resolvedURI->GetSpec(resolvedSpec);
-        annotation.Append(NS_ConvertUTF8toUTF16(resolvedSpec));
-        annotation.Append('\n');
-      }
-    }
-  }
-
-  nsTArray<nsString> interestingFiles;
-  interestingFiles.AppendElement(NS_LITERAL_STRING("chrome.manifest"));
-  interestingFiles.AppendElement(NS_LITERAL_STRING("omni.ja"));
-  interestingFiles.AppendElement(NS_ConvertUTF8toUTF16(filename));
-
-  annotation.AppendLiteral("GRE directory: ");
-  nsCOMPtr<nsIFile> file;
-  nsDirectoryService::gService->Get(NS_GRE_DIR, NS_GET_IID(nsIFile),
-                                    getter_AddRefs(file));
-  if (file) {
-    // The Firefox installation directory.
-    nsString path;
-    file->GetPath(path);
-    annotation.Append(path);
-    annotation.Append('\n');
-
-    // List interesting files -- any chrome.manifest or omni.ja file or any file
-    // whose name is the sheet's filename -- under the Firefox installation
-    // directory.
-    annotation.AppendLiteral("Interesting files in the GRE directory:\n");
-    ListInterestingFiles(annotation, file, interestingFiles);
-
-    // If the Firefox installation directory has a chrome.manifest file, let's
-    // see what's in it.
-    file->Append(NS_LITERAL_STRING("chrome.manifest"));
-    bool exists = false;
-    file->Exists(&exists);
-    if (exists) {
-      annotation.AppendLiteral("Contents of chrome.manifest:\n[[[\n");
-      PRFileDesc* fd;
-      if (NS_SUCCEEDED(file->OpenNSPRFileDesc(PR_RDONLY, 0, &fd))) {
-        nsCString contents;
-        char buf[512];
-        int32_t n;
-        while ((n = PR_Read(fd, buf, sizeof(buf))) > 0) {
-          contents.Append(buf, n);
-        }
-        if (n < 0) {
-          annotation.AppendLiteral("  (error while reading)\n");
-        } else {
-          annotation.Append(NS_ConvertUTF8toUTF16(contents));
-        }
-        PR_Close(fd);
-      }
-      annotation.AppendLiteral("]]]\n");
-    }
-  } else {
-    annotation.AppendLiteral("(none)\n");
-  }
-
-  // The jar: or file: URL prefix that chrome: and resource: URLs get translated
-  // to.
-  annotation.AppendLiteral("GRE omnijar URI string: ");
-  nsCString uri;
-  nsresult rv = Omnijar::GetURIString(Omnijar::GRE, uri);
-  if (NS_FAILED(rv)) {
-    annotation.AppendLiteral("(failed)\n");
-  } else {
-    annotation.Append(NS_ConvertUTF8toUTF16(uri));
-    annotation.Append('\n');
-  }
-
-  RefPtr<nsZipArchive> zip = Omnijar::GetReader(Omnijar::GRE);
-  if (zip) {
-    // List interesting files in the GRE omnijar.
-    annotation.AppendLiteral("Interesting files in the GRE omnijar:\n");
-    nsZipFind* find;
-    rv = zip->FindInit(nullptr, &find);
-    if (NS_FAILED(rv)) {
-      annotation.AppendPrintf("  (FindInit failed with 0x%08x)\n", rv);
-    } else if (!find) {
-      annotation.AppendLiteral("  (FindInit returned null)\n");
-    } else {
-      const char* result;
-      uint16_t len;
-      while (NS_SUCCEEDED(find->FindNext(&result, &len))) {
-        nsCString itemPathname;
-        nsString itemFilename;
-        itemPathname.Append(result, len);
-        int32_t i = itemPathname.RFindChar('/');
-        if (i != -1) {
-          itemFilename = NS_ConvertUTF8toUTF16(Substring(itemPathname, i + 1));
-        }
-        for (const nsString& interestingFile : interestingFiles) {
-          if (interestingFile == itemFilename) {
-            annotation.AppendLiteral("  ");
-            annotation.Append(NS_ConvertUTF8toUTF16(itemPathname));
-            nsZipItem* item = zip->GetItem(itemPathname.get());
-            if (!item) {
-              annotation.AppendLiteral(" (GetItem failed)\n");
-            } else {
-              annotation.AppendPrintf(" (%d bytes, crc32 = 0x%08x)\n",
-                                      item->RealSize(),
-                                      item->CRC32());
-            }
-            break;
-          }
-        }
-      }
-      delete find;
-    }
-  } else {
-    annotation.AppendLiteral("No GRE omnijar\n");
-  }
-
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("SheetLoadFailure"),
-                                     NS_ConvertUTF16toUTF8(annotation));
-}
-#endif
 
 static void
 ErrorLoadingBuiltinSheet(nsIURI* aURI, const char* aMsg)
 {
-#ifdef MOZ_CRASHREPORTER
-  AnnotateCrashReport(aURI);
-#endif
-
   nsAutoCString spec;
   if (aURI) {
     aURI->GetSpec(spec);
@@ -736,30 +464,26 @@ ErrorLoadingBuiltinSheet(nsIURI* aURI, const char* aMsg)
 
 void
 nsLayoutStylesheetCache::LoadSheet(nsIURI* aURI,
-                                   StyleSheetHandle::RefPtr* aSheet,
-                                   SheetParsingMode aParsingMode)
+                                   nsRefPtr<CSSStyleSheet>& aSheet,
+                                   bool aEnableUnsafeRules)
 {
   if (!aURI) {
     ErrorLoadingBuiltinSheet(aURI, "null URI");
     return;
   }
 
-  auto& loader = mBackendType == StyleBackendType::Gecko ?
-    gCSSLoader_Gecko :
-    gCSSLoader_Servo;
-
-  if (!loader) {
-    loader = new mozilla::css::Loader(mBackendType);
-    if (!loader) {
+  if (!gCSSLoader) {
+    gCSSLoader = new mozilla::css::Loader();
+    NS_IF_ADDREF(gCSSLoader);
+    if (!gCSSLoader) {
       ErrorLoadingBuiltinSheet(aURI, "no Loader");
       return;
     }
   }
 
-#ifdef MOZ_CRASHREPORTER
-  nsZipArchive::sFileCorruptedReason = nullptr;
-#endif
-  nsresult rv = loader->LoadSheetSync(aURI, aParsingMode, true, aSheet);
+
+  nsresult rv = gCSSLoader->LoadSheetSync(aURI, aEnableUnsafeRules, true,
+                                          getter_AddRefs(aSheet));
   if (NS_FAILED(rv)) {
     ErrorLoadingBuiltinSheet(aURI,
       nsPrintfCString("LoadSheetSync failed with error %x", rv).get());
@@ -767,133 +491,97 @@ nsLayoutStylesheetCache::LoadSheet(nsIURI* aURI,
 }
 
 /* static */ void
-nsLayoutStylesheetCache::InvalidateSheet(StyleSheetHandle::RefPtr* aGeckoSheet,
-                                         StyleSheetHandle::RefPtr* aServoSheet)
+nsLayoutStylesheetCache::InvalidateSheet(nsRefPtr<CSSStyleSheet>& aSheet)
 {
-  MOZ_ASSERT(gCSSLoader_Gecko || gCSSLoader_Servo,
-             "pref changed before we loaded a sheet?");
+  MOZ_ASSERT(gCSSLoader, "pref changed before we loaded a sheet?");
 
-  const bool gotGeckoSheet = aGeckoSheet && *aGeckoSheet;
-  const bool gotServoSheet = aServoSheet && *aServoSheet;
-
-  // Make sure sheets have the expected types
-  MOZ_ASSERT(!gotGeckoSheet || (*aGeckoSheet)->IsGecko());
-  MOZ_ASSERT(!gotServoSheet || (*aServoSheet)->IsServo());
-  // Make sure the URIs match
-  MOZ_ASSERT(!gotServoSheet || !gotGeckoSheet ||
-             (*aGeckoSheet)->GetSheetURI() == (*aServoSheet)->GetSheetURI(),
-             "Sheets passed should have the same URI");
-
-  nsIURI* uri;
-  if (gotGeckoSheet) {
-    uri = (*aGeckoSheet)->GetSheetURI();
-  } else if (gotServoSheet) {
-    uri = (*aServoSheet)->GetSheetURI();
-  } else {
-    return;
-  }
-
-  if (gCSSLoader_Gecko) {
-    gCSSLoader_Gecko->ObsoleteSheet(uri);
-  }
-  if (gCSSLoader_Servo) {
-    gCSSLoader_Servo->ObsoleteSheet(uri);
-  }
-  if (gotGeckoSheet) {
-    *aGeckoSheet = nullptr;
-  }
-  if (gotServoSheet) {
-    *aServoSheet = nullptr;
+  if (aSheet) {
+    gCSSLoader->ObsoleteSheet(aSheet->GetSheetURI());
+    aSheet = nullptr;
   }
 }
 
 /* static */ void
 nsLayoutStylesheetCache::DependentPrefChanged(const char* aPref, void* aData)
 {
-  MOZ_ASSERT(gStyleCache_Gecko || gStyleCache_Servo,
-             "pref changed after shutdown?");
+  MOZ_ASSERT(gStyleCache, "pref changed after shutdown?");
 
   // Cause any UA style sheets whose parsing depends on the value of prefs
-  // to be re-parsed by dropping the sheet from gCSSLoader_{Gecko,Servo}'s cache
-  // then setting our cached sheet pointer to null.  This will only work for
-  // sheets that are loaded lazily.
+  // to be re-parsed by dropping the sheet from gCSSLoader's cache then
+  // setting our cached sheet pointer to null.  This will only work for sheets
+  // that are loaded lazily.
 
-#define INVALIDATE(sheet_) \
-  InvalidateSheet(gStyleCache_Gecko ? &gStyleCache_Gecko->sheet_ : nullptr, \
-                  gStyleCache_Servo ? &gStyleCache_Servo->sheet_ : nullptr);
-
-  INVALIDATE(mUASheet);  // for layout.css.grid.enabled
-  INVALIDATE(mHTMLSheet); // for dom.details_element.enabled
-
-#undef INVALIDATE
+  // for layout.css.ruby.enabled
+  InvalidateSheet(gStyleCache->mUASheet);
+  InvalidateSheet(gStyleCache->mHTMLSheet);
 }
 
 /* static */ void
 nsLayoutStylesheetCache::InvalidatePreferenceSheets()
 {
-  if (gStyleCache_Gecko) {
-    gStyleCache_Gecko->mContentPreferenceSheet = nullptr;
-    gStyleCache_Gecko->mChromePreferenceSheet = nullptr;
+  if (!gStyleCache) {
+    return;
   }
-  if (gStyleCache_Servo) {
-    gStyleCache_Servo->mContentPreferenceSheet = nullptr;
-    gStyleCache_Servo->mChromePreferenceSheet = nullptr;
-  }
+
+  gStyleCache->mContentPreferenceSheet = nullptr;
+  gStyleCache->mChromePreferenceSheet = nullptr;
+}
+
+/* static */ void
+nsLayoutStylesheetCache::AppendPreferenceRule(CSSStyleSheet* aSheet,
+                                              const nsAString& aString)
+{
+  uint32_t result;
+  aSheet->InsertRuleInternal(aString, aSheet->StyleRuleCount(), &result);
+}
+
+/* static */ void
+nsLayoutStylesheetCache::AppendPreferenceColorRule(CSSStyleSheet* aSheet,
+                                                   const char* aString,
+                                                   nscolor aColor)
+{
+  nsAutoString rule;
+  rule.AppendPrintf(
+      aString, NS_GET_R(aColor), NS_GET_G(aColor), NS_GET_B(aColor));
+  AppendPreferenceRule(aSheet, rule);
 }
 
 void
-nsLayoutStylesheetCache::BuildPreferenceSheet(StyleSheetHandle::RefPtr* aSheet,
+nsLayoutStylesheetCache::BuildPreferenceSheet(nsRefPtr<CSSStyleSheet>& aSheet,
                                               nsPresContext* aPresContext)
 {
-  if (mBackendType == StyleBackendType::Gecko) {
-    *aSheet = new CSSStyleSheet(CORS_NONE, mozilla::net::RP_Default);
-  } else {
-    *aSheet = new ServoStyleSheet(CORS_NONE, mozilla::net::RP_Default,
-                                  dom::SRIMetadata());
-  }
-
-  StyleSheetHandle sheet = *aSheet;
-
-  sheet->SetParsingMode(eAgentSheetFeatures);
+  aSheet = new CSSStyleSheet(CORS_NONE, mozilla::net::RP_Default);
 
   nsCOMPtr<nsIURI> uri;
   NS_NewURI(getter_AddRefs(uri), "about:PreferenceStyleSheet", nullptr);
   MOZ_ASSERT(uri, "URI creation shouldn't fail");
 
-  sheet->SetURIs(uri, uri, uri);
-  sheet->AsStyleSheet()->SetComplete();
+  aSheet->SetURIs(uri, uri, uri);
+  aSheet->SetComplete();
 
-  static const uint32_t kPreallocSize = 1024;
-
-  nsString sheetText;
-  sheetText.SetCapacity(kPreallocSize);
-
-#define NS_GET_R_G_B(color_) \
-  NS_GET_R(color_), NS_GET_G(color_), NS_GET_B(color_)
-
-  sheetText.AppendLiteral(
-      "@namespace url(http://www.w3.org/1999/xhtml);\n"
-      "@namespace svg url(http://www.w3.org/2000/svg);\n");
+  AppendPreferenceRule(aSheet,
+      NS_LITERAL_STRING("@namespace url(http://www.w3.org/1999/xhtml);"));
+  AppendPreferenceRule(aSheet,
+      NS_LITERAL_STRING("@namespace svg url(http://www.w3.org/2000/svg);"));
 
   // Rules for link styling.
-  nscolor linkColor = aPresContext->DefaultLinkColor();
-  nscolor activeColor = aPresContext->DefaultActiveLinkColor();
-  nscolor visitedColor = aPresContext->DefaultVisitedLinkColor();
 
-  sheetText.AppendPrintf(
-      "*|*:link { color: #%02x%02x%02x; }\n"
-      "*|*:-moz-any-link:active { color: #%02x%02x%02x; }\n"
-      "*|*:visited { color: #%02x%02x%02x; }\n",
-      NS_GET_R_G_B(linkColor),
-      NS_GET_R_G_B(activeColor),
-      NS_GET_R_G_B(visitedColor));
+  AppendPreferenceColorRule(aSheet,
+      "*|*:link { color: #%02x%02x%02x; }",
+      aPresContext->DefaultLinkColor());
+  AppendPreferenceColorRule(aSheet,
+      "*|*:-moz-any-link:active { color: #%02x%02x%02x; }",
+      aPresContext->DefaultActiveLinkColor());
+  AppendPreferenceColorRule(aSheet,
+      "*|*:visited { color: #%02x%02x%02x; }",
+      aPresContext->DefaultVisitedLinkColor());
 
-  bool underlineLinks =
-    aPresContext->GetCachedBoolPref(kPresContext_UnderlineLinks);
-  sheetText.AppendPrintf(
-      "*|*:-moz-any-link%s { text-decoration: %s; }\n",
-      underlineLinks ? ":not(svg|a)" : "",
-      underlineLinks ? "underline" : "none");
+  AppendPreferenceRule(aSheet,
+      aPresContext->GetCachedBoolPref(kPresContext_UnderlineLinks) ?
+        NS_LITERAL_STRING(
+            "*|*:-moz-any-link:not(svg|a) { text-decoration: underline; }") :
+        NS_LITERAL_STRING(
+            "*|*:-moz-any-link{ text-decoration: none; }"));
 
   // Rules for focus styling.
 
@@ -905,67 +593,58 @@ nsLayoutStylesheetCache::BuildPreferenceSheet(StyleSheetHandle::RefPtr* aSheet,
     if (focusRingWidth != 1) {
       // If the focus ring width is different from the default, fix buttons
       // with rings.
-      sheetText.AppendPrintf(
+      nsString rule;
+      rule.AppendPrintf(
           "button::-moz-focus-inner, input[type=\"reset\"]::-moz-focus-inner, "
           "input[type=\"button\"]::-moz-focus-inner, "
           "input[type=\"submit\"]::-moz-focus-inner { "
           "padding: 1px 2px 1px 2px; "
-          "border: %dpx %s transparent !important; }\n",
+          "border: %d %s transparent !important; }",
           focusRingWidth,
-          focusRingStyle == 0 ? "solid" : "dotted");
+          focusRingWidth == 0 ? (const char*) "solid" : (const char*) "dotted");
+      AppendPreferenceRule(aSheet, rule);
 
-      sheetText.AppendLiteral(
-          "button:focus::-moz-focus-inner, "
-          "input[type=\"reset\"]:focus::-moz-focus-inner, "
-          "input[type=\"button\"]:focus::-moz-focus-inner, "
-          "input[type=\"submit\"]:focus::-moz-focus-inner { "
-          "border-color: ButtonText !important; }\n");
+      // NS_LITERAL_STRING doesn't work with concatenated string literals, hence
+      // the newline escaping.
+      AppendPreferenceRule(aSheet, NS_LITERAL_STRING("\
+button:focus::-moz-focus-inner, \
+input[type=\"reset\"]:focus::-moz-focus-inner, \
+input[type=\"button\"]:focus::-moz-focus-inner, \
+input[type=\"submit\"]:focus::-moz-focus-inner { \
+border-color: ButtonText !important; }"));
     }
 
-    sheetText.AppendPrintf(
-        "%s { outline: %dpx %s !important; %s}\n",
-        focusRingOnAnything ?
-          ":focus" :
-          "*|*:link:focus, *|*:visited:focus",
-        focusRingWidth,
-        focusRingStyle == 0 ? // solid
-          "solid -moz-mac-focusring" : "dotted WindowText",
-        focusRingStyle == 0 ? // solid
-          "-moz-outline-radius: 3px; outline-offset: 1px; " : "");
+    nsString rule;
+    if (focusRingOnAnything) {
+      rule.AppendLiteral(":focus");
+    } else {
+      rule.AppendLiteral("*|*:link:focus, *|*:visited:focus");
+    }
+    rule.AppendPrintf(" { outline: %dpx ", focusRingWidth);
+    if (focusRingStyle == 0) { // solid
+      rule.AppendLiteral("solid -moz-mac-focusring !important; "
+                         "-moz-outline-radius: 3px; outline-offset: 1px; }");
+    } else {
+      rule.AppendLiteral("dotted WindowText !important; }");
+    }
+    AppendPreferenceRule(aSheet, rule);
   }
 
   if (aPresContext->GetUseFocusColors()) {
+    nsString rule;
     nscolor focusText = aPresContext->FocusTextColor();
     nscolor focusBG = aPresContext->FocusBackgroundColor();
-    sheetText.AppendPrintf(
+    rule.AppendPrintf(
         "*:focus, *:focus > font { color: #%02x%02x%02x !important; "
-        "background-color: #%02x%02x%02x !important; }\n",
-        NS_GET_R_G_B(focusText),
-        NS_GET_R_G_B(focusBG));
+        "background-color: #%02x%02x%02x !important; }",
+        NS_GET_R(focusText), NS_GET_G(focusText), NS_GET_B(focusText),
+        NS_GET_R(focusBG), NS_GET_G(focusBG), NS_GET_B(focusBG));
+    AppendPreferenceRule(aSheet, rule);
   }
-
-  NS_ASSERTION(sheetText.Length() <= kPreallocSize,
-               "kPreallocSize should be big enough to build preference style "
-               "sheet without reallocation");
-
-  if (sheet->IsGecko()) {
-    sheet->AsGecko()->ReparseSheet(sheetText);
-  } else {
-    sheet->AsServo()->ParseSheet(sheetText, uri, uri, nullptr, 0,
-                                 SheetParsingMode::eAuthorSheetFeatures);
-  }
-
-#undef NS_GET_R_G_B
 }
 
 mozilla::StaticRefPtr<nsLayoutStylesheetCache>
-nsLayoutStylesheetCache::gStyleCache_Gecko;
+nsLayoutStylesheetCache::gStyleCache;
 
-mozilla::StaticRefPtr<nsLayoutStylesheetCache>
-nsLayoutStylesheetCache::gStyleCache_Servo;
-
-mozilla::StaticRefPtr<mozilla::css::Loader>
-nsLayoutStylesheetCache::gCSSLoader_Gecko;
-
-mozilla::StaticRefPtr<mozilla::css::Loader>
-nsLayoutStylesheetCache::gCSSLoader_Servo;
+mozilla::css::Loader*
+nsLayoutStylesheetCache::gCSSLoader = nullptr;

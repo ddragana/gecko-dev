@@ -30,12 +30,11 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  virtual already_AddRefed<PrintTarget> MakePrintTarget() final;
+  NS_IMETHOD GetSurfaceForPrinter(gfxASurface **surface) override;
 
   NS_IMETHOD Init(nsIWidget *aWidget, nsIPrintSettings* aPS,
                   bool aIsPrintPreview) override;
-  NS_IMETHOD BeginDocument(const nsAString& aTitle,
-                           const nsAString& aPrintToFileName,
+  NS_IMETHOD BeginDocument(const nsAString& aTitle, char16_t * aPrintToFileName,
                            int32_t aStartPage, int32_t aEndPage) override;
   NS_IMETHOD EndDocument() override;
   NS_IMETHOD BeginPage() override { return NS_OK; }
@@ -57,8 +56,9 @@ protected:
 
 private:
   void EnumeratePrinters();
-  void StartPrintJob();
   static gboolean PrinterEnumerator(GtkPrinter *aPrinter, gpointer aData);
+  static void StartPrintJob(nsDeviceContextSpecGTK *spec,
+                            GtkPrinter *printer);
 };
 
 //-------------------------------------------------------------------------

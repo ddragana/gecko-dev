@@ -10,6 +10,27 @@
 namespace js {
 namespace jit {
 
+class LBox : public LInstructionHelper<2, 1, 0>
+{
+    MIRType type_;
+
+  public:
+    LIR_HEADER(Box);
+
+    LBox(const LAllocation& in_payload, MIRType type)
+      : type_(type)
+    {
+        setOperand(0, in_payload);
+    }
+
+    MIRType type() const {
+        return type_;
+    }
+    const char* extraName() const {
+        return StringFromMIRType(type_);
+    }
+};
+
 class LBoxFloatingPoint : public LInstructionHelper<2, 1, 1>
 {
     MIRType type_;
@@ -61,11 +82,9 @@ class LUnboxFloatingPoint : public LInstructionHelper<1, 2, 0>
 
     static const size_t Input = 0;
 
-    LUnboxFloatingPoint(const LBoxAllocation& input, MIRType type)
+    LUnboxFloatingPoint(MIRType type)
       : type_(type)
-    {
-        setBoxOperand(Input, input);
-    }
+    { }
 
     MUnbox* mir() const {
         return mir_->toUnbox();
@@ -121,6 +140,23 @@ class LAsmJSLoadFuncPtr : public LInstructionHelper<1, 1, 0>
     }
     const LAllocation* index() {
         return getOperand(0);
+    }
+};
+
+// Math.random().
+class LRandom : public LCallInstructionHelper<1, 0, 2>
+{
+  public:
+    LIR_HEADER(Random)
+    LRandom(const LDefinition& temp, const LDefinition& temp2) {
+        setTemp(0, temp);
+        setTemp(1, temp2);
+    }
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
+    const LDefinition* temp2() {
+        return getTemp(1);
     }
 };
 

@@ -6,15 +6,12 @@
 
 #include "Logging.h"
 #include "SourceSurfaceSkia.h"
-#include "skia/include/core/SkBitmap.h"
-#include "skia/include/core/SkDevice.h"
+#include "skia/SkBitmap.h"
+#include "skia/SkDevice.h"
 #include "HelpersSkia.h"
 #include "DrawTargetSkia.h"
 #include "DataSurfaceHelpers.h"
-
-#ifdef USE_SKIA_GPU
-#include "skia/include/gpu/SkGrPixelRef.h"
-#endif
+#include "skia/SkGrPixelRef.h"
 
 namespace mozilla {
 namespace gfx {
@@ -50,29 +47,42 @@ SourceSurfaceSkia::InitFromCanvas(SkCanvas* aCanvas,
                                   SurfaceFormat aFormat,
                                   DrawTargetSkia* aOwner)
 {
-  mBitmap = aCanvas->getDevice()->accessBitmap(false);
+  SkISize size = aCanvas->getDeviceSize();
+
+  mBitmap = (SkBitmap)aCanvas->getDevice()->accessBitmap(false);
 
   mFormat = aFormat;
 
-  mSize = IntSize(mBitmap.width(), mBitmap.height());
+  mSize = IntSize(size.fWidth, size.fHeight);
   mStride = mBitmap.rowBytes();
   mDrawTarget = aOwner;
 
   return true;
 }
 
-bool
+bool 
 SourceSurfaceSkia::InitFromData(unsigned char* aData,
                                 const IntSize &aSize,
                                 int32_t aStride,
                                 SurfaceFormat aFormat)
 {
   SkBitmap temp;
-  temp.setInfo(MakeSkiaImageInfo(aSize, aFormat), aStride);
+  SkAlphaType alphaType = (aFormat == SurfaceFormat::B8G8R8X8) ?
+    kOpaque_SkAlphaType : kPremul_SkAlphaType;
+
+  SkImageInfo info = SkImageInfo::Make(aSize.width,
+                                       aSize.height,
+                                       GfxFormatToSkiaColorType(aFormat),
+                                       alphaType);
+  temp.setInfo(info, aStride);
   temp.setPixels(aData);
 
-  if (!temp.copyTo(&mBitmap)) {
+  if (!temp.copyTo(&mBitmap, GfxFormatToSkiaColorType(aFormat))) {
     return false;
+  }
+
+  if (aFormat == SurfaceFormat::B8G8R8X8) {
+    mBitmap.setAlphaType(kIgnore_SkAlphaType);
   }
 
   mSize = aSize;
@@ -81,37 +91,33 @@ SourceSurfaceSkia::InitFromData(unsigned char* aData,
   return true;
 }
 
-void
-SourceSurfaceSkia::InitFromBitmap(const SkBitmap& aBitmap)
-{
-  mBitmap = aBitmap;
-
-  mSize = IntSize(mBitmap.width(), mBitmap.height());
-  mFormat = SkiaColorTypeToGfxFormat(mBitmap.colorType(), mBitmap.alphaType());
-  mStride = mBitmap.rowBytes();
-}
-
-#ifdef USE_SKIA_GPU
 bool
-SourceSurfaceSkia::InitFromGrTexture(GrTexture* aTexture,
-                                     const IntSize &aSize,
-                                     SurfaceFormat aFormat)
+SourceSurfaceSkia::InitFromTexture(DrawTargetSkia* aOwner,
+                                   unsigned int aTexture,
+                                   const IntSize &aSize,
+                                   SurfaceFormat aFormat)
 {
-  if (!aTexture) {
-    return false;
-  }
+  MOZ_ASSERT(aOwner, "null GrContext");
+#ifdef USE_SKIA_GPU
+  GrBackendTextureDesc skiaTexGlue;
+  mSize.width = skiaTexGlue.fWidth = aSize.width;
+  mSize.height = skiaTexGlue.fHeight = aSize.height;
+  skiaTexGlue.fFlags = kNone_GrBackendTextureFlag;
+  skiaTexGlue.fOrigin = kBottomLeft_GrSurfaceOrigin;
+  skiaTexGlue.fConfig = GfxFormatToGrConfig(aFormat);
+  skiaTexGlue.fSampleCnt = 0;
+  skiaTexGlue.fTextureHandle = aTexture;
 
-  // Create a GPU pixelref wrapping the texture.
-  SkImageInfo imgInfo = MakeSkiaImageInfo(aSize, aFormat);
-  mBitmap.setInfo(imgInfo);
-  mBitmap.setPixelRef(new SkGrPixelRef(imgInfo, aTexture))->unref();
+  GrTexture *skiaTexture = aOwner->mGrContext->wrapBackendTexture(skiaTexGlue);
+  SkImageInfo imgInfo = SkImageInfo::Make(aSize.width, aSize.height, GfxFormatToSkiaColorType(aFormat), kOpaque_SkAlphaType);
+  SkGrPixelRef *texRef = new SkGrPixelRef(imgInfo, skiaTexture, false);
+  mBitmap.setInfo(imgInfo, aSize.width*aSize.height*4);
+  mBitmap.setPixelRef(texRef);
+#endif
 
-  mSize = aSize;
-  mFormat = aFormat;
-  mStride = mBitmap.rowBytes();
+  mDrawTarget = aOwner;
   return true;
 }
-#endif
 
 unsigned char*
 SourceSurfaceSkia::GetData()
@@ -132,13 +138,9 @@ SourceSurfaceSkia::DrawTargetWillChange()
     MaybeUnlock();
 
     mDrawTarget = nullptr;
-
-    // First try a deep copy to avoid a readback from the GPU.
-    // If that fails, try the CPU copy.
-    if (!mBitmap.deepCopyTo(&mBitmap) &&
-        !mBitmap.copyTo(&mBitmap)) {
-      mBitmap.reset();
-    }
+    SkBitmap temp = mBitmap;
+    mBitmap.reset();
+    temp.copyTo(&mBitmap, temp.colorType());
   }
 }
 

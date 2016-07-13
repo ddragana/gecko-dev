@@ -19,13 +19,6 @@
           .some(sn => sn.track == t))) // that's being sent over |pc|.
   }
 
-  function allRemoteStreamsHaveReceiver(pc) {
-    return pc.getRemoteStreams()
-      .every(s => s.getTracks()        // Every remote stream,
-        .some(t => pc.getReceivers()   // should have some track,
-          .some(sn => sn.track == t))) // that's being received over |pc|.
-  }
-
   function replacetest(wrapper) {
     var pc = wrapper._pc;
     var oldSenderCount = pc.getSenders().length;
@@ -33,13 +26,11 @@
     var oldTrack = sender.track;
     ok(sender, "We have a sender for video");
     ok(allLocalStreamsHaveSender(pc),
-       "Shouldn't have any local streams without a corresponding sender");
-    ok(allRemoteStreamsHaveReceiver(pc),
-       "Shouldn't have any remote streams without a corresponding receiver");
+       "Shouldn't have any streams without a corresponding sender");
 
     var newTrack;
     var audiotrack;
-    return navigator.mediaDevices.getUserMedia({video:true, audio:true})
+    return navigator.mediaDevices.getUserMedia({video:true, audio:true, fake:true})
       .then(newStream => {
         window.grip = newStream;
         newTrack = newStream.getVideoTracks()[0];
@@ -68,7 +59,7 @@
     test = new PeerConnectionTest();
     test.audioCtx = new AudioContext();
     test.setMediaConstraints([{video: true, audio: true}], [{video: true}]);
-    test.chain.removeAfter("PC_REMOTE_WAIT_FOR_MEDIA_FLOW");
+    test.chain.removeAfter("PC_REMOTE_CHECK_MEDIA_FLOW_PRESENT");
 
     // Test replaceTrack on pcRemote separately since it's video only.
     test.chain.append([
@@ -121,8 +112,7 @@
 
         var sourceNode = test.audioCtx.createOscillator();
         sourceNode.type = 'sine';
-        // We need a frequency not too close to the fake audio track
-        // (440Hz for loopback devices, 1kHz for fake tracks).
+        // We need a frequency not too close to the fake audio track (1kHz).
         sourceNode.frequency.value = 2000;
         sourceNode.start();
 
@@ -146,7 +136,7 @@
     ]);
     test.chain.append([
       function PC_LOCAL_CHECK_WEBAUDIO_FLOW_PRESENT(test) {
-        return test.pcRemote.checkReceivingToneFrom(test.audioCtx, test.pcLocal);
+        return test.pcRemote.checkReceivingToneFrom(test.pcLocal);
       }
     ]);
     test.chain.append([
@@ -167,6 +157,17 @@
           is(e.name, "InvalidParameterError",
              "addTrack existing track should fail");
         }
+        return navigator.mediaDevices.getUserMedia({video:true, fake: true})
+          .then(differentStream => {
+            var track = differentStream.getVideoTracks()[0];
+            try {
+              test.pcLocal._pc.addTrack(track, stream);
+              ok(false, "addTrack w/wrong stream should fail");
+            } catch (e) {
+              is(e.name, "InvalidParameterError",
+                 "addTrack w/wrong stream should fail");
+            }
+          });
       }
     ]);
     test.run();

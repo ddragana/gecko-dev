@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 import logging
 
 try:  # Python 3
@@ -9,7 +8,7 @@ except ImportError:
 from ._collections import RecentlyUsedContainer
 from .connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from .connectionpool import port_by_scheme
-from .exceptions import LocationValueError, MaxRetryError, ProxySchemeUnknown
+from .exceptions import LocationValueError
 from .request import RequestMethods
 from .util.url import parse_url
 from .util.retry import Retry
@@ -26,7 +25,7 @@ pool_classes_by_scheme = {
 log = logging.getLogger(__name__)
 
 SSL_KEYWORDS = ('key_file', 'cert_file', 'cert_reqs', 'ca_certs',
-                'ssl_version', 'ca_cert_dir')
+                'ssl_version')
 
 
 class PoolManager(RequestMethods):
@@ -64,14 +63,6 @@ class PoolManager(RequestMethods):
         self.connection_pool_kw = connection_pool_kw
         self.pools = RecentlyUsedContainer(num_pools,
                                            dispose_func=lambda p: p.close())
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.clear()
-        # Return False to re-raise any potential exceptions
-        return False
 
     def _new_pool(self, scheme, host, port):
         """
@@ -176,14 +167,7 @@ class PoolManager(RequestMethods):
         if not isinstance(retries, Retry):
             retries = Retry.from_int(retries, redirect=redirect)
 
-        try:
-            retries = retries.increment(method, url, response=response, _pool=conn)
-        except MaxRetryError:
-            if retries.raise_on_redirect:
-                raise
-            return response
-
-        kw['retries'] = retries
+        kw['retries'] = retries.increment(method, redirect_location)
         kw['redirect'] = redirect
 
         log.info("Redirecting %s -> %s" % (url, redirect_location))
@@ -228,8 +212,8 @@ class ProxyManager(PoolManager):
             port = port_by_scheme.get(proxy.scheme, 80)
             proxy = proxy._replace(port=port)
 
-        if proxy.scheme not in ("http", "https"):
-            raise ProxySchemeUnknown(proxy.scheme)
+        assert proxy.scheme in ("http", "https"), \
+            'Not supported proxy scheme %s' % proxy.scheme
 
         self.proxy = proxy
         self.proxy_headers = proxy_headers or {}

@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "mozilla/DebugOnly.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include <stdint.h>
 
 #include "OpusParser.h"
@@ -24,7 +24,7 @@ extern "C" {
 
 namespace mozilla {
 
-extern LazyLogModule gMediaDecoderLog;
+extern PRLogModuleInfo* gMediaDecoderLog;
 #define OPUS_LOG(type, msg) MOZ_LOG(gMediaDecoderLog, type, msg)
 
 OpusParser::OpusParser():
@@ -165,7 +165,8 @@ bool OpusParser::DecodeTags(unsigned char* aData, size_t aLength)
   // won't fit in the packet, stop reading now.
   if (ncomments > (bytes>>2))
     return false;
-  for (uint32_t i = 0; i < ncomments; i++) {
+  uint32_t i;
+  for (i = 0; i < ncomments; i++) {
     if (bytes < 4)
       return false;
     len = LittleEndian::readUint32(buf);
@@ -189,3 +190,4 @@ bool OpusParser::DecodeTags(unsigned char* aData, size_t aLength)
 }
 
 } // namespace mozilla
+

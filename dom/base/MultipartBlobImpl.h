@@ -16,8 +16,8 @@
 #include <algorithm>
 #include "nsPIDOMWindow.h"
 
-namespace mozilla {
-namespace dom {
+using namespace mozilla;
+using namespace mozilla::dom;
 
 class MultipartBlobImpl final : public BlobImplBase
 {
@@ -25,17 +25,25 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   // Create as a file
-  static already_AddRefed<MultipartBlobImpl>
-  Create(const nsTArray<RefPtr<BlobImpl>>& aBlobImpls,
-         const nsAString& aName,
-         const nsAString& aContentType,
-         ErrorResult& aRv);
+  MultipartBlobImpl(const nsTArray<nsRefPtr<BlobImpl>>& aBlobImpls,
+                    const nsAString& aName,
+                    const nsAString& aContentType)
+    : BlobImplBase(aName, aContentType, UINT64_MAX),
+      mBlobImpls(aBlobImpls),
+      mIsFromNsIFile(false)
+  {
+    SetLengthAndModifiedDate();
+  }
 
   // Create as a blob
-  static already_AddRefed<MultipartBlobImpl>
-  Create(const nsTArray<RefPtr<BlobImpl>>& aBlobImpls,
-         const nsAString& aContentType,
-         ErrorResult& aRv);
+  MultipartBlobImpl(const nsTArray<nsRefPtr<BlobImpl>>& aBlobImpls,
+                    const nsAString& aContentType)
+    : BlobImplBase(aContentType, UINT64_MAX),
+      mBlobImpls(aBlobImpls),
+      mIsFromNsIFile(false)
+  {
+    SetLengthAndModifiedDate();
+  }
 
   // Create as a file to be later initialized
   explicit MultipartBlobImpl(const nsAString& aName)
@@ -51,24 +59,25 @@ public:
   {
   }
 
-  void InitializeBlob(ErrorResult& aRv);
+  void InitializeBlob();
 
-  void InitializeBlob(JSContext* aCx,
-                      const Sequence<Blob::BlobPart>& aData,
-                      const nsAString& aContentType,
-                      bool aNativeEOL,
-                      ErrorResult& aRv);
+  void InitializeBlob(
+       JSContext* aCx,
+       const Sequence<OwningArrayBufferOrArrayBufferViewOrBlobOrString>& aData,
+       const nsAString& aContentType,
+       bool aNativeEOL,
+       ErrorResult& aRv);
 
   void InitializeChromeFile(Blob& aData,
                             const ChromeFilePropertyBag& aBag,
                             ErrorResult& aRv);
 
-  void InitializeChromeFile(nsPIDOMWindowInner* aWindow,
+  void InitializeChromeFile(nsPIDOMWindow* aWindow,
                             const nsAString& aData,
                             const ChromeFilePropertyBag& aBag,
                             ErrorResult& aRv);
 
-  void InitializeChromeFile(nsPIDOMWindowInner* aWindow,
+  void InitializeChromeFile(nsPIDOMWindow* aWindow,
                             nsIFile* aData,
                             const ChromeFilePropertyBag& aBag,
                             bool aIsFromNsIFile,
@@ -87,9 +96,9 @@ public:
   virtual void GetInternalStream(nsIInputStream** aInputStream,
                                  ErrorResult& aRv) override;
 
-  virtual const nsTArray<RefPtr<BlobImpl>>* GetSubBlobImpls() const override
+  virtual const nsTArray<nsRefPtr<BlobImpl>>* GetSubBlobImpls() const override
   {
-    return mBlobImpls.Length() ? &mBlobImpls : nullptr;
+    return &mBlobImpls;
   }
 
   virtual void GetMozFullPathInternal(nsAString& aFullPath,
@@ -103,35 +112,20 @@ public:
     mName = aName;
   }
 
+  void SetFromNsIFile(bool aValue)
+  {
+    mIsFromNsIFile = aValue;
+  }
+
   virtual bool MayBeClonedToOtherThreads() const override;
 
 protected:
-  MultipartBlobImpl(const nsTArray<RefPtr<BlobImpl>>& aBlobImpls,
-                    const nsAString& aName,
-                    const nsAString& aContentType)
-    : BlobImplBase(aName, aContentType, UINT64_MAX),
-      mBlobImpls(aBlobImpls),
-      mIsFromNsIFile(false)
-  {
-  }
-
-  MultipartBlobImpl(const nsTArray<RefPtr<BlobImpl>>& aBlobImpls,
-                    const nsAString& aContentType)
-    : BlobImplBase(aContentType, UINT64_MAX),
-      mBlobImpls(aBlobImpls),
-      mIsFromNsIFile(false)
-  {
-  }
-
   virtual ~MultipartBlobImpl() {}
 
-  void SetLengthAndModifiedDate(ErrorResult& aRv);
+  void SetLengthAndModifiedDate();
 
-  nsTArray<RefPtr<BlobImpl>> mBlobImpls;
+  nsTArray<nsRefPtr<BlobImpl>> mBlobImpls;
   bool mIsFromNsIFile;
 };
-
-} // dom namespace
-} // mozilla namespace
 
 #endif // mozilla_dom_MultipartBlobImpl_h

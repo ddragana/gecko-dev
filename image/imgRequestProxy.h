@@ -14,9 +14,9 @@
 #include "nsISupportsPriority.h"
 #include "nsITimedChannel.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/Rect.h"
 
 #include "imgRequest.h"
@@ -138,7 +138,7 @@ protected:
   class imgCancelRunnable;
   friend class imgCancelRunnable;
 
-  class imgCancelRunnable : public mozilla::Runnable
+  class imgCancelRunnable : public nsRunnable
   {
     public:
       imgCancelRunnable(imgRequestProxy* owner, nsresult status)
@@ -151,7 +151,7 @@ protected:
       }
 
     private:
-      RefPtr<imgRequestProxy> mOwner;
+      nsRefPtr<imgRequestProxy> mOwner;
       nsresult mStatus;
   };
 
@@ -191,14 +191,14 @@ public:
   NS_FORWARD_SAFE_NSITIMEDCHANNEL(TimedChannel())
 
 protected:
-  mozilla::UniquePtr<ProxyBehaviour> mBehaviour;
+  nsAutoPtr<ProxyBehaviour> mBehaviour;
 
 private:
   friend class imgCacheValidator;
   friend imgRequestProxy* NewStaticProxy(imgRequestProxy* aThis);
 
   // The URI of our request.
-  RefPtr<ImageURL> mURI;
+  nsRefPtr<ImageURL> mURI;
 
   // mListener is only promised to be a weak ref (see imgILoader.idl),
   // but we actually keep a strong ref to it until we've seen our

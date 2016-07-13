@@ -20,7 +20,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
 
 const PREF_DEBUG = "dom.payment.debug";
 
-var _debug;
+let _debug;
 try {
   _debug = Services.prefs.getPrefType(PREF_DEBUG) == Ci.nsIPrefBranch.PREF_BOOL
            && Services.prefs.getBoolPref(PREF_DEBUG);
@@ -231,16 +231,9 @@ PaymentProvider.prototype.removeSilentSmsObserver = function(aNumber, aCallback)
 };
 
 PaymentProvider.prototype._onSilentSms = function(aSubject, aTopic, aData) {
-  if (!aSubject || !(aSubject instanceof Ci.nsISmsMessage)) {
-    _debug && DEBUG("Invalid subject when receiving silent message!");
-    return;
-  }
+  _debug && DEBUG("Got silent message! " + aSubject.sender + " - " + aSubject.body);
 
-  let message = aSubject.QueryInterface(Ci.nsISmsMessage);
-
-  _debug && DEBUG("Got silent message! " + message.sender + " - " + message.body);
-
-  let number = message.sender;
+  let number = aSubject.sender;
   if (!number || this._silentNumbers.indexOf(number) == -1) {
     _debug && DEBUG("No observers for " + number);
     return;
@@ -253,7 +246,7 @@ PaymentProvider.prototype._onSilentSms = function(aSubject, aTopic, aData) {
   if (this._strategy.paymentServiceId === null) {
     let i = 0;
     while(i < gRil.numRadioInterfaces) {
-      if (this.iccInfo[i].iccId === message.iccId) {
+      if (this.iccInfo[i].iccId === aSubject.iccId) {
         this._strategy.paymentServiceId = i;
         break;
       }
@@ -262,13 +255,7 @@ PaymentProvider.prototype._onSilentSms = function(aSubject, aTopic, aData) {
   }
 
   this._silentSmsObservers[number].forEach(function(callback) {
-    callback({
-      iccId: message.iccId,
-      sender: message.sender,
-      body: message.body,
-      timestamp: message.timestamp,
-      sentTimestamp: message.sentTimestamp
-    });
+    callback(aSubject);
   });
 };
 

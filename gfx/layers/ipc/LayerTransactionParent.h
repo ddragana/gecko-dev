@@ -14,6 +14,7 @@
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
 #include "mozilla/layers/PLayerTransactionParent.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
 
 namespace mozilla {
@@ -35,13 +36,12 @@ class CompositableParent;
 class ShadowLayersManager;
 
 class LayerTransactionParent final : public PLayerTransactionParent,
-                                     public CompositableParentManager,
-                                     public ShmemAllocator
+                                     public CompositableParentManager
 {
   typedef mozilla::layout::RenderFrameParent RenderFrameParent;
   typedef InfallibleTArray<Edit> EditArray;
-  typedef InfallibleTArray<OpDestroy> OpDestroyArray;
   typedef InfallibleTArray<EditReply> EditReplyArray;
+  typedef InfallibleTArray<AsyncChildMessageData> AsyncChildMessageArray;
   typedef InfallibleTArray<PluginWindowData> PluginsArray;
 
 public:
@@ -60,17 +60,25 @@ public:
   uint64_t GetId() const { return mId; }
   Layer* GetRoot() const { return mRoot; }
 
-  virtual ShmemAllocator* AsShmemAllocator() override { return this; }
-
+  // ISurfaceAllocator
   virtual bool AllocShmem(size_t aSize,
                           ipc::SharedMemory::SharedMemoryType aType,
-                          ipc::Shmem* aShmem) override;
+                          ipc::Shmem* aShmem) override {
+    return PLayerTransactionParent::AllocShmem(aSize, aType, aShmem);
+  }
 
   virtual bool AllocUnsafeShmem(size_t aSize,
                                 ipc::SharedMemory::SharedMemoryType aType,
-                                ipc::Shmem* aShmem) override;
+                                ipc::Shmem* aShmem) override {
+    return PLayerTransactionParent::AllocUnsafeShmem(aSize, aType, aShmem);
+  }
 
-  virtual void DeallocShmem(ipc::Shmem& aShmem) override;
+  virtual void DeallocShmem(ipc::Shmem& aShmem) override
+  {
+    PLayerTransactionParent::DeallocShmem(aShmem);
+  }
+
+  virtual LayersBackend GetCompositorBackendType() const override;
 
   virtual bool IsSameProcess() const override;
 
@@ -78,40 +86,22 @@ public:
   void SetPendingTransactionId(uint64_t aId) { mPendingTransaction = aId; }
 
   // CompositableParentManager
+  virtual void SendFenceHandleIfPresent(PTextureParent* aTexture,
+                                        CompositableHost* aCompositableHost) override;
+
   virtual void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) override;
-
-  virtual void SendPendingAsyncMessages() override;
-
-  virtual void SetAboutToSendAsyncMessages() override;
-
-  virtual void NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId) override;
 
   virtual base::ProcessId GetChildProcessId() override
   {
     return OtherPid();
   }
 
-  void AddPendingCompositorUpdate() {
-    mPendingCompositorUpdates++;
-  }
-  void SetPendingCompositorUpdates(uint32_t aCount) {
-    // Only called after construction.
-    MOZ_ASSERT(mPendingCompositorUpdates == 0);
-    mPendingCompositorUpdates = aCount;
-  }
-  void AcknowledgeCompositorUpdate() {
-    MOZ_ASSERT(mPendingCompositorUpdates > 0);
-    mPendingCompositorUpdates--;
-  }
+  virtual void ReplyRemoveTexture(const OpReplyRemoveTexture& aReply) override;
 
 protected:
-  virtual bool RecvSyncWithCompositor() override { return true; }
-
   virtual bool RecvShutdown() override;
 
   virtual bool RecvUpdate(EditArray&& cset,
-                          OpDestroyArray&& aToDestroy,
-                          const uint64_t& aFwdTransactionId,
                           const uint64_t& aTransactionId,
                           const TargetConfig& targetConfig,
                           PluginsArray&& aPlugins,
@@ -120,12 +110,9 @@ protected:
                           const uint32_t& paintSequenceNumber,
                           const bool& isRepeatTransaction,
                           const mozilla::TimeStamp& aTransactionStart,
-                          const int32_t& aPaintSyncId,
                           EditReplyArray* reply) override;
 
   virtual bool RecvUpdateNoSwap(EditArray&& cset,
-                                OpDestroyArray&& aToDestroy,
-                                const uint64_t& aFwdTransactionId,
                                 const uint64_t& aTransactionId,
                                 const TargetConfig& targetConfig,
                                 PluginsArray&& aPlugins,
@@ -133,8 +120,7 @@ protected:
                                 const bool& scheduleComposite,
                                 const uint32_t& paintSequenceNumber,
                                 const bool& isRepeatTransaction,
-                                const mozilla::TimeStamp& aTransactionStart,
-                                const int32_t& aPaintSyncId) override;
+                                const mozilla::TimeStamp& aTransactionStart) override;
 
   virtual bool RecvClearCachedResources() override;
   virtual bool RecvForceComposite() override;
@@ -146,7 +132,7 @@ protected:
                                          MaybeTransform* aTransform)
                                          override;
   virtual bool RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aId,
-                                        const float& aX, const float& aY) override;
+                                        const int32_t& aX, const int32_t& aY) override;
   virtual bool RecvSetAsyncZoom(const FrameMetrics::ViewID& aId,
                                 const float& aValue) override;
   virtual bool RecvFlushApzRepaints() override;
@@ -160,6 +146,13 @@ protected:
 
   virtual PCompositableParent* AllocPCompositableParent(const TextureInfo& aInfo) override;
   virtual bool DeallocPCompositableParent(PCompositableParent* actor) override;
+
+  virtual PTextureParent* AllocPTextureParent(const SurfaceDescriptor& aSharedData,
+                                              const TextureFlags& aFlags) override;
+  virtual bool DeallocPTextureParent(PTextureParent* actor) override;
+
+  virtual bool
+  RecvChildAsyncMessages(InfallibleTArray<AsyncChildMessageData>&& aMessages) override;
 
   virtual void ActorDestroy(ActorDestroyReason why) override;
 
@@ -177,16 +170,16 @@ protected:
     mIPCOpen = false;
     RELEASE_MANUALLY(this);
   }
-  friend class CompositorBridgeParent;
-  friend class CrossProcessCompositorBridgeParent;
+  friend class CompositorParent;
+  friend class CrossProcessCompositorParent;
   friend class layout::RenderFrameParent;
 
 private:
-  RefPtr<LayerManagerComposite> mLayerManager;
+  nsRefPtr<LayerManagerComposite> mLayerManager;
   ShadowLayersManager* mShadowLayersManager;
   // Hold the root because it might be grafted under various
   // containers in the "real" layer tree
-  RefPtr<Layer> mRoot;
+  nsRefPtr<Layer> mRoot;
   // When this is nonzero, it refers to a layer tree owned by the
   // compositor thread.  It is always true that
   //   mId != 0 => mRoot == null
@@ -194,11 +187,6 @@ private:
   uint64_t mId;
 
   uint64_t mPendingTransaction;
-
-  // Number of compositor updates we're waiting for the child to
-  // acknowledge.
-  uint32_t mPendingCompositorUpdates;
-
   // When the widget/frame/browser stuff in this process begins its
   // destruction process, we need to Disconnect() all the currently
   // live shadow layers, because some of them might be orphaned from

@@ -9,13 +9,17 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
-#include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEventDispatcherListener.h"
+#include "nsAutoPtr.h"
 #include "nsITextInputProcessor.h"
 #include "nsITextInputProcessorCallback.h"
 #include "nsTArray.h"
 
 namespace mozilla {
+
+namespace widget{
+class TextEventDispatcher;
+} // namespace widget
 
 class TextInputProcessor final : public nsITextInputProcessor
                                , public widget::TextEventDispatcherListener
@@ -35,19 +39,13 @@ public:
   NS_IMETHOD_(void)
     OnRemovedFrom(TextEventDispatcher* aTextEventDispatcher) override;
 
-  NS_IMETHOD_(void) WillDispatchKeyboardEvent(
-                      TextEventDispatcher* aTextEventDispatcher,
-                      WidgetKeyboardEvent& aKeyboardEvent,
-                      uint32_t aIndexOfKeypress,
-                      void* aData) override;
-
 protected:
   virtual ~TextInputProcessor();
 
 private:
   bool IsComposing() const;
   nsresult BeginInputTransactionInternal(
-             mozIDOMWindow* aWindow,
+             nsIDOMWindow* aWindow,
              nsITextInputProcessorCallback* aCallback,
              bool aForTests,
              bool& aSucceeded);
@@ -62,7 +60,7 @@ private:
   nsresult KeydownInternal(const WidgetKeyboardEvent& aKeyboardEvent,
                            uint32_t aKeyFlags,
                            bool aAllowToDispatchKeypress,
-                           uint32_t& aConsumedFlags);
+                           bool& aDoDefault);
   nsresult KeyupInternal(const WidgetKeyboardEvent& aKeyboardEvent,
                          uint32_t aKeyFlags,
                          bool& aDoDefault);
@@ -109,7 +107,7 @@ private:
     ~AutoPendingCompositionResetter();
 
   private:
-    RefPtr<TextInputProcessor> mTIP;
+    nsRefPtr<TextInputProcessor> mTIP;
   };
 
   /**
@@ -181,7 +179,7 @@ private:
 
   TextEventDispatcher* mDispatcher; // [Weak]
   nsCOMPtr<nsITextInputProcessorCallback> mCallback;
-  RefPtr<ModifierKeyDataArray> mModifierKeyDataArray;
+  nsRefPtr<ModifierKeyDataArray> mModifierKeyDataArray;
 
   bool mForTests;
 };

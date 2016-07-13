@@ -382,11 +382,6 @@ hb_glib_get_unicode_funcs (void)
   return const_cast<hb_unicode_funcs_t *> (&_hb_glib_unicode_funcs);
 }
 
-/**
- * hb_glib_blob_create:
- *
- * Since: 0.9.38
- **/
 hb_blob_t *
 hb_glib_blob_create (GBytes *gbytes)
 {

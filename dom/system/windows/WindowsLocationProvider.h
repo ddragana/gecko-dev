@@ -7,7 +7,7 @@
 #ifndef mozilla_dom_WindowsLocationProvider_h__
 #define mozilla_dom_WindowsLocationProvider_h__
 
-#include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsIGeolocationProvider.h"
 
 #include <locationapi.h>
@@ -42,8 +42,8 @@ public:
 private:
   ~WindowsLocationProvider();
 
-  RefPtr<ILocation> mLocation;
-  RefPtr<MLSFallback> mMLSProvider;
+  nsRefPtr<ILocation> mLocation;
+  nsRefPtr<MLSFallback> mMLSProvider;
 };
 
 } // namespace dom

@@ -69,10 +69,6 @@ def main():
                       dest='testfile',
                       default='all_tests.json',
                       help='path to the test file to run [default: %default]')
-    parser.add_option('--stop-on-error',
-                      action='store_true',
-                      dest='stop_on_error',
-                      help='stop running tests after the first failure')
     (options, args) = parser.parse_args()
 
     configfile = options.configfile
@@ -117,7 +113,6 @@ def main():
                         resultfile=options.resultfile,
                         rlock=rlock,
                         testfile=testfile,
-                        stop_on_error=options.stop_on_error,
                       )
     TPS.run_tests()
 

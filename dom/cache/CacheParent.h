@@ -36,10 +36,16 @@ private:
   RecvPCacheOpConstructor(PCacheOpParent* actor,
                           const CacheOpArgs& aOpArgs) override;
 
+  virtual PCachePushStreamParent*
+  AllocPCachePushStreamParent() override;
+
+  virtual bool
+  DeallocPCachePushStreamParent(PCachePushStreamParent* aActor) override;
+
   virtual bool
   RecvTeardown() override;
 
-  RefPtr<cache::Manager> mManager;
+  nsRefPtr<cache::Manager> mManager;
   const CacheId mCacheId;
 };
 

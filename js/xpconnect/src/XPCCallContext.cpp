@@ -9,7 +9,6 @@
 #include "xpcprivate.h"
 #include "jswrapper.h"
 #include "jsfriendapi.h"
-#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace xpc;
@@ -17,7 +16,8 @@ using namespace JS;
 
 #define IS_TEAROFF_CLASS(clazz) ((clazz) == &XPC_WN_Tearoff_JSClass)
 
-XPCCallContext::XPCCallContext(JSContext* cx,
+XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
+                               JSContext* cx,
                                HandleObject obj    /* = nullptr               */,
                                HandleObject funobj /* = nullptr               */,
                                HandleId name       /* = JSID_VOID             */,
@@ -27,24 +27,26 @@ XPCCallContext::XPCCallContext(JSContext* cx,
     :   mAr(cx),
         mState(INIT_FAILED),
         mXPC(nsXPConnect::XPConnect()),
-        mXPCJSRuntime(nullptr),
+        mXPCContext(nullptr),
         mJSContext(cx),
+        mCallerLanguage(callerLanguage),
         mWrapper(nullptr),
         mTearOff(nullptr),
         mName(cx)
 {
     MOZ_ASSERT(cx);
-    MOZ_ASSERT(cx == nsContentUtils::GetCurrentJSContext());
+    MOZ_ASSERT(cx == XPCJSRuntime::Get()->GetJSContextStack()->Peek());
 
     if (!mXPC)
         return;
 
-    mXPCJSRuntime = XPCJSRuntime::Get();
+    mXPCContext = XPCContext::GetXPCContext(mJSContext);
+    mPrevCallerLanguage = mXPCContext->SetCallingLangType(mCallerLanguage);
 
     // hook into call context chain.
-    mPrevCallContext = mXPCJSRuntime->SetCallContext(this);
+    mPrevCallContext = XPCJSRuntime::Get()->SetCallContext(this);
 
-    mState = HAVE_RUNTIME;
+    mState = HAVE_CONTEXT;
 
     if (!obj)
         return;
@@ -55,7 +57,7 @@ XPCCallContext::XPCCallContext(JSContext* cx,
 
     mTearOff = nullptr;
 
-    JSObject* unwrapped = js::CheckedUnwrap(obj, /* stopAtWindowProxy = */ false);
+    JSObject* unwrapped = js::CheckedUnwrap(obj, /* stopAtOuter = */ false);
     if (!unwrapped) {
         JS_ReportError(mJSContext, "Permission denied to call method on |this|");
         mState = INIT_FAILED;
@@ -84,6 +86,24 @@ XPCCallContext::XPCCallContext(JSContext* cx,
         SetArgsAndResultPtr(argc, argv, rval);
 
     CHECK_STATE(HAVE_OBJECT);
+}
+
+// static
+JSContext*
+XPCCallContext::GetDefaultJSContext()
+{
+    // This is slightly questionable. If called without an explicit
+    // JSContext (generally a call to a wrappedJS) we will use the JSContext
+    // on the top of the JSContext stack - if there is one - *before*
+    // falling back on the safe JSContext.
+    // This is good AND bad because it makes calls from JS -> native -> JS
+    // have JS stack 'continuity' for purposes of stack traces etc.
+    // Note: this *is* what the pre-XPCCallContext xpconnect did too.
+
+    XPCJSContextStack* stack = XPCJSRuntime::Get()->GetJSContextStack();
+    JSContext* topJSContext = stack->Peek();
+
+    return topJSContext ? topJSContext : stack->GetSafeJSContext();
 }
 
 void
@@ -125,7 +145,7 @@ void
 XPCCallContext::SetCallInfo(XPCNativeInterface* iface, XPCNativeMember* member,
                             bool isSetter)
 {
-    CHECK_STATE(HAVE_RUNTIME);
+    CHECK_STATE(HAVE_CONTEXT);
 
     // We are going straight to the method info and need not do a lookup
     // by id.
@@ -197,7 +217,7 @@ XPCCallContext::SystemIsBeingShutDown()
     // can be making this call on one thread for call contexts on another
     // thread.
     NS_WARNING("Shutting Down XPConnect even through there is a live XPCCallContext");
-    mXPCJSRuntime = nullptr;
+    mXPCContext = nullptr;
     mState = SYSTEM_SHUTDOWN;
     if (mPrevCallContext)
         mPrevCallContext->SystemIsBeingShutDown();
@@ -205,12 +225,15 @@ XPCCallContext::SystemIsBeingShutDown()
 
 XPCCallContext::~XPCCallContext()
 {
-    if (mXPCJSRuntime) {
-        DebugOnly<XPCCallContext*> old = mXPCJSRuntime->SetCallContext(mPrevCallContext);
+    if (mXPCContext) {
+        mXPCContext->SetCallingLangType(mPrevCallerLanguage);
+
+        DebugOnly<XPCCallContext*> old = XPCJSRuntime::Get()->SetCallContext(mPrevCallContext);
         MOZ_ASSERT(old == this, "bad pop from per thread data");
     }
 }
 
+/* readonly attribute nsISupports Callee; */
 NS_IMETHODIMP
 XPCCallContext::GetCallee(nsISupports * *aCallee)
 {
@@ -219,6 +242,7 @@ XPCCallContext::GetCallee(nsISupports * *aCallee)
     return NS_OK;
 }
 
+/* readonly attribute uint16_t CalleeMethodIndex; */
 NS_IMETHODIMP
 XPCCallContext::GetCalleeMethodIndex(uint16_t* aCalleeMethodIndex)
 {
@@ -226,6 +250,7 @@ XPCCallContext::GetCalleeMethodIndex(uint16_t* aCalleeMethodIndex)
     return NS_OK;
 }
 
+/* readonly attribute XPCNativeInterface CalleeInterface; */
 NS_IMETHODIMP
 XPCCallContext::GetCalleeInterface(nsIInterfaceInfo * *aCalleeInterface)
 {
@@ -234,6 +259,7 @@ XPCCallContext::GetCalleeInterface(nsIInterfaceInfo * *aCalleeInterface)
     return NS_OK;
 }
 
+/* readonly attribute nsIClassInfo CalleeClassInfo; */
 NS_IMETHODIMP
 XPCCallContext::GetCalleeClassInfo(nsIClassInfo * *aCalleeClassInfo)
 {
@@ -242,14 +268,16 @@ XPCCallContext::GetCalleeClassInfo(nsIClassInfo * *aCalleeClassInfo)
     return NS_OK;
 }
 
+/* readonly attribute JSContextPtr JSContext; */
 NS_IMETHODIMP
 XPCCallContext::GetJSContext(JSContext * *aJSContext)
 {
-    JS_AbortIfWrongThread(mJSContext);
+    JS_AbortIfWrongThread(JS_GetRuntime(mJSContext));
     *aJSContext = mJSContext;
     return NS_OK;
 }
 
+/* readonly attribute uint32_t Argc; */
 NS_IMETHODIMP
 XPCCallContext::GetArgc(uint32_t* aArgc)
 {
@@ -257,6 +285,7 @@ XPCCallContext::GetArgc(uint32_t* aArgc)
     return NS_OK;
 }
 
+/* readonly attribute JSValPtr ArgvPtr; */
 NS_IMETHODIMP
 XPCCallContext::GetArgvPtr(Value** aArgvPtr)
 {
@@ -269,5 +298,13 @@ XPCCallContext::GetPreviousCallContext(nsAXPCNativeCallContext** aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
   *aResult = GetPrevCallContext();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+XPCCallContext::GetLanguage(uint16_t* aResult)
+{
+  NS_ENSURE_ARG_POINTER(aResult);
+  *aResult = GetCallerLanguage();
   return NS_OK;
 }

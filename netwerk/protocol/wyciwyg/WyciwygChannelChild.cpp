@@ -12,7 +12,6 @@
 #include "mozilla/dom/ContentChild.h"
 
 #include "nsCharsetSource.h"
-#include "nsContentUtils.h"
 #include "nsStringStream.h"
 #include "nsNetUtil.h"
 #include "nsISerializable.h"
@@ -56,7 +55,12 @@ WyciwygChannelChild::~WyciwygChannelChild()
 {
   LOG(("Destroying WyciwygChannelChild @%x\n", this));
   if (mLoadInfo) {
-    NS_ReleaseOnMainThread(mLoadInfo.forget());
+    nsCOMPtr<nsIThread> mainThread;
+    NS_GetMainThread(getter_AddRefs(mainThread));
+
+    nsILoadInfo *forgetableLoadInfo;
+    mLoadInfo.forget(&forgetableLoadInfo);
+    NS_ProxyRelease(mainThread, forgetableLoadInfo, false);
   }
 }
 
@@ -100,7 +104,7 @@ WyciwygChannelChild::Init(nsIURI* uri)
     mozilla::ipc::PrincipalToPrincipalInfo(mLoadInfo->TriggeringPrincipal(),
                                            &triggeringPrincipalInfo);
     securityFlags = mLoadInfo->GetSecurityFlags();
-    policyType = mLoadInfo->InternalContentPolicyType();
+    policyType = mLoadInfo->GetContentPolicyType();
   }
   else {
     // use default values if no loadInfo is provided
@@ -108,7 +112,7 @@ WyciwygChannelChild::Init(nsIURI* uri)
                                            &requestingPrincipalInfo);
     mozilla::ipc::PrincipalToPrincipalInfo(nsContentUtils::GetSystemPrincipal(),
                                            &triggeringPrincipalInfo);
-    securityFlags = nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
+    securityFlags = nsILoadInfo::SEC_NORMAL;
     policyType = nsIContentPolicy::TYPE_OTHER;
   }
 
@@ -153,9 +157,13 @@ WyciwygChannelChild::RecvOnStartRequest(const nsresult& statusCode,
                                         const nsCString& charset,
                                         const nsCString& securityInfo)
 {
-  mEventQ->RunOrEnqueue(new WyciwygStartRequestEvent(this, statusCode,
-                                                     contentLength, source,
-                                                     charset, securityInfo));
+  if (mEventQ->ShouldEnqueue()) {
+    mEventQ->Enqueue(new WyciwygStartRequestEvent(this, statusCode,
+                                                 contentLength, source,
+                                                 charset, securityInfo));
+  } else {
+    OnStartRequest(statusCode, contentLength, source, charset, securityInfo);
+  }
   return true;
 }
 
@@ -204,7 +212,11 @@ bool
 WyciwygChannelChild::RecvOnDataAvailable(const nsCString& data,
                                          const uint64_t& offset)
 {
-  mEventQ->RunOrEnqueue(new WyciwygDataAvailableEvent(this, data, offset));
+  if (mEventQ->ShouldEnqueue()) {
+    mEventQ->Enqueue(new WyciwygDataAvailableEvent(this, data, offset));
+  } else {
+    OnDataAvailable(data, offset);
+  }
   return true;
 }
 
@@ -262,7 +274,11 @@ private:
 bool
 WyciwygChannelChild::RecvOnStopRequest(const nsresult& statusCode)
 {
-  mEventQ->RunOrEnqueue(new WyciwygStopRequestEvent(this, statusCode));
+  if (mEventQ->ShouldEnqueue()) {
+    mEventQ->Enqueue(new WyciwygStopRequestEvent(this, statusCode));
+  } else {
+    OnStopRequest(statusCode);
+  }
   return true;
 }
 
@@ -315,7 +331,11 @@ class WyciwygCancelEvent : public ChannelEvent
 bool
 WyciwygChannelChild::RecvCancelEarly(const nsresult& statusCode)
 {
-  mEventQ->RunOrEnqueue(new WyciwygCancelEvent(this, statusCode));
+  if (mEventQ->ShouldEnqueue()) {
+    mEventQ->Enqueue(new WyciwygCancelEvent(this, statusCode));
+  } else {
+    CancelEarly(statusCode);
+  }
   return true;
 }
 
@@ -348,12 +368,14 @@ void WyciwygChannelChild::CancelEarly(const nsresult& statusCode)
 // nsIRequest
 //-----------------------------------------------------------------------------
 
+/* readonly attribute AUTF8String name; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetName(nsACString & aName)
 {
   return mURI->GetSpec(aName);
 }
 
+/* boolean isPending (); */
 NS_IMETHODIMP
 WyciwygChannelChild::IsPending(bool *aIsPending)
 {
@@ -361,6 +383,7 @@ WyciwygChannelChild::IsPending(bool *aIsPending)
   return NS_OK;
 }
 
+/* readonly attribute nsresult status; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetStatus(nsresult *aStatus)
 {
@@ -368,6 +391,7 @@ WyciwygChannelChild::GetStatus(nsresult *aStatus)
   return NS_OK;
 }
 
+/* void cancel (in nsresult aStatus); */
 NS_IMETHODIMP
 WyciwygChannelChild::Cancel(nsresult aStatus)
 {
@@ -381,18 +405,21 @@ WyciwygChannelChild::Cancel(nsresult aStatus)
   return NS_OK;
 }
 
+/* void suspend (); */
 NS_IMETHODIMP
 WyciwygChannelChild::Suspend()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void resume (); */
 NS_IMETHODIMP
 WyciwygChannelChild::Resume()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* attribute nsILoadGroup loadGroup; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetLoadGroup(nsILoadGroup * *aLoadGroup)
 {
@@ -412,11 +439,10 @@ WyciwygChannelChild::SetLoadGroup(nsILoadGroup * aLoadGroup)
                                 mLoadGroup,
                                 NS_GET_IID(nsIProgressEventSink),
                                 getter_AddRefs(mProgressSink));
-
-  UpdatePrivateBrowsing();
   return NS_OK;
 }
 
+/* attribute nsLoadFlags loadFlags; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetLoadFlags(nsLoadFlags *aLoadFlags)
 {
@@ -435,6 +461,7 @@ WyciwygChannelChild::SetLoadFlags(nsLoadFlags aLoadFlags)
 // nsIChannel
 //-----------------------------------------------------------------------------
 
+/* attribute nsIURI originalURI; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetOriginalURI(nsIURI * *aOriginalURI)
 {
@@ -452,6 +479,7 @@ WyciwygChannelChild::SetOriginalURI(nsIURI * aOriginalURI)
   return NS_OK;
 }
 
+/* readonly attribute nsIURI URI; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetURI(nsIURI * *aURI)
 {
@@ -460,6 +488,7 @@ WyciwygChannelChild::GetURI(nsIURI * *aURI)
   return NS_OK;
 }
 
+/* attribute nsISupports owner; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetOwner(nsISupports * *aOwner)
 {
@@ -487,6 +516,7 @@ WyciwygChannelChild::SetLoadInfo(nsILoadInfo* aLoadInfo)
   return NS_OK;
 }
 
+/* attribute nsIInterfaceRequestor notificationCallbacks; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetNotificationCallbacks(nsIInterfaceRequestor * *aCallbacks)
 {
@@ -506,10 +536,10 @@ WyciwygChannelChild::SetNotificationCallbacks(nsIInterfaceRequestor * aCallbacks
                                 mLoadGroup,
                                 NS_GET_IID(nsIProgressEventSink),
                                 getter_AddRefs(mProgressSink));
-  UpdatePrivateBrowsing();
   return NS_OK;
 }
 
+/* readonly attribute nsISupports securityInfo; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetSecurityInfo(nsISupports * *aSecurityInfo)
 {
@@ -518,6 +548,7 @@ WyciwygChannelChild::GetSecurityInfo(nsISupports * *aSecurityInfo)
   return NS_OK;
 }
 
+/* attribute ACString contentType; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetContentType(nsACString & aContentType)
 {
@@ -530,6 +561,7 @@ WyciwygChannelChild::SetContentType(const nsACString & aContentType)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* attribute ACString contentCharset; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetContentCharset(nsACString & aContentCharset)
 {
@@ -572,6 +604,7 @@ WyciwygChannelChild::GetContentDispositionHeader(nsACString &aContentDisposition
   return NS_ERROR_NOT_AVAILABLE;
 }
 
+/* attribute int64_t contentLength; */
 NS_IMETHODIMP
 WyciwygChannelChild::GetContentLength(int64_t *aContentLength)
 {
@@ -583,6 +616,7 @@ WyciwygChannelChild::SetContentLength(int64_t aContentLength)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* nsIInputStream open (); */
 NS_IMETHODIMP
 WyciwygChannelChild::Open(nsIInputStream **_retval)
 {
@@ -606,16 +640,10 @@ GetTabChild(nsIChannel* aChannel)
   return iTabChild ? static_cast<mozilla::dom::TabChild*>(iTabChild.get()) : nullptr;
 }
 
+/* void asyncOpen (in nsIStreamListener aListener, in nsISupports aContext); */
 NS_IMETHODIMP
 WyciwygChannelChild::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
 {
-  MOZ_ASSERT(!mLoadInfo ||
-             mLoadInfo->GetSecurityMode() == 0 ||
-             mLoadInfo->GetInitialSecurityCheckDone() ||
-             (mLoadInfo->GetSecurityMode() == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
-              nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
-             "security flags in loadInfo but asyncOpen2() not called");
-
   LOG(("WyciwygChannelChild::AsyncOpen [this=%p]\n", this));
 
   // The only places creating wyciwyg: channels should be
@@ -667,6 +695,7 @@ WyciwygChannelChild::AsyncOpen2(nsIStreamListener *aListener)
 // nsIWyciwygChannel
 //-----------------------------------------------------------------------------
 
+/* void writeToCacheEntry (in AString aData); */
 NS_IMETHODIMP
 WyciwygChannelChild::WriteToCacheEntry(const nsAString & aData)
 {
@@ -688,6 +717,7 @@ WyciwygChannelChild::WriteToCacheEntry(const nsAString & aData)
   return NS_OK;
 }
 
+/* void closeCacheEntry (in nsresult reason); */
 NS_IMETHODIMP
 WyciwygChannelChild::CloseCacheEntry(nsresult reason)
 {
@@ -702,6 +732,7 @@ WyciwygChannelChild::CloseCacheEntry(nsresult reason)
   return NS_OK;
 }
 
+/* void setSecurityInfo (in nsISupports aSecurityInfo); */
 NS_IMETHODIMP
 WyciwygChannelChild::SetSecurityInfo(nsISupports *aSecurityInfo)
 {
@@ -722,6 +753,7 @@ WyciwygChannelChild::SetSecurityInfo(nsISupports *aSecurityInfo)
   return NS_OK;
 }
 
+/* void setCharsetAndSource (in long aSource, in ACString aCharset); */
 NS_IMETHODIMP
 WyciwygChannelChild::SetCharsetAndSource(int32_t aSource, const nsACString & aCharset)
 {
@@ -738,6 +770,7 @@ WyciwygChannelChild::SetCharsetAndSource(int32_t aSource, const nsACString & aCh
   return NS_OK;
 }
 
+/* ACString getCharsetAndSource (out long aSource); */
 NS_IMETHODIMP
 WyciwygChannelChild::GetCharsetAndSource(int32_t *aSource, nsACString & _retval)
 {

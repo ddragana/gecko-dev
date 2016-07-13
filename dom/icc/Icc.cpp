@@ -7,22 +7,20 @@
 #include "mozilla/dom/Icc.h"
 
 #include "IccCallback.h"
-#include "IccContact.h"
-#include "mozilla/dom/ContactsBinding.h"
 #include "mozilla/dom/DOMRequest.h"
 #include "mozilla/dom/IccInfo.h"
 #include "mozilla/dom/MozStkCommandEvent.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsIIccInfo.h"
+#include "nsIIccProvider.h"
 #include "nsIIccService.h"
 #include "nsIStkCmdFactory.h"
 #include "nsIStkProactiveCmd.h"
+#include "nsRadioInterfaceLayer.h"
 #include "nsServiceManagerUtils.h"
-#include "nsContentUtils.h"
 
 using mozilla::dom::icc::IccCallback;
-using mozilla::dom::icc::IccContact;
 
 namespace mozilla {
 namespace dom {
@@ -61,15 +59,24 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(Icc, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(Icc, DOMEventTargetHelper)
 
-Icc::Icc(nsPIDOMWindowInner* aWindow, nsIIcc* aHandler, nsIIccInfo* aIccInfo)
+Icc::Icc(nsPIDOMWindow* aWindow, long aClientId, nsIIcc* aHandler, nsIIccInfo* aIccInfo)
   : mLive(true)
+  , mClientId(aClientId)
   , mHandler(aHandler)
 {
   BindToOwner(aWindow);
 
+  mProvider = do_GetService(NS_RILCONTENTHELPER_CONTRACTID);
+
   if (aIccInfo) {
     aIccInfo->GetIccid(mIccId);
     UpdateIccInfo(aIccInfo);
+  }
+
+  // Not being able to acquire the provider isn't fatal since we check
+  // for it explicitly below.
+  if (!mProvider) {
+    NS_WARNING("Could not acquire nsIIccProvider!");
   }
 }
 
@@ -81,6 +88,7 @@ void
 Icc::Shutdown()
 {
   mIccInfo.SetNull();
+  mProvider = nullptr;
   mHandler = nullptr;
   mLive = false;
 }
@@ -94,7 +102,11 @@ Icc::NotifyEvent(const nsAString& aName)
 nsresult
 Icc::NotifyStkEvent(const nsAString& aName, nsIStkProactiveCmd* aStkProactiveCmd)
 {
-  JSContext* cx = nsContentUtils::RootingCxForThread();
+  AutoJSAPI jsapi;
+  if (NS_WARN_IF(!jsapi.InitWithLegacyErrorReporting(GetOwner()))) {
+    return NS_ERROR_UNEXPECTED;
+  }
+  JSContext* cx = jsapi.cx();
   JS::Rooted<JS::Value> value(cx);
 
   nsCOMPtr<nsIStkCmdFactory> cmdFactory =
@@ -104,12 +116,12 @@ Icc::NotifyStkEvent(const nsAString& aName, nsIStkProactiveCmd* aStkProactiveCmd
   cmdFactory->CreateCommandMessage(aStkProactiveCmd, &value);
   NS_ENSURE_TRUE(value.isObject(), NS_ERROR_UNEXPECTED);
 
-  RootedDictionary<MozStkCommandEventInit> init(cx);
+  MozStkCommandEventInit init;
   init.mBubbles = false;
   init.mCancelable = false;
   init.mCommand = value;
 
-  RefPtr<MozStkCommandEvent> event =
+  nsRefPtr<MozStkCommandEvent> event =
     MozStkCommandEvent::Constructor(this, aName, init);
 
   return DispatchTrustedEvent(event);
@@ -308,10 +320,10 @@ Icc::GetCardLock(IccLockType aLockType, ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+  nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
   // TODO: Bug 1125018 - Simplify The Result of GetCardLock and
   // getCardLockRetryCount in MozIcc.webidl without a wrapper object.
-  RefPtr<IccCallback> requestCallback =
+  nsRefPtr<IccCallback> requestCallback =
     new IccCallback(GetOwner(), request, true);
   nsresult rv = mHandler->GetCardLockEnabled(static_cast<uint32_t>(aLockType),
                                              requestCallback);
@@ -331,8 +343,8 @@ Icc::UnlockCardLock(const IccUnlockCardLockOptions& aOptions, ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<DOMRequest> request = new DOMRequest(GetOwner());
-  RefPtr<IccCallback> requestCallback =
+  nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+  nsRefPtr<IccCallback> requestCallback =
     new IccCallback(GetOwner(), request);
   const nsString& password = IsPukCardLockType(aOptions.mLockType)
                            ? aOptions.mPuk : aOptions.mPin;
@@ -356,8 +368,8 @@ Icc::SetCardLock(const IccSetCardLockOptions& aOptions, ErrorResult& aRv)
   }
 
   nsresult rv;
-  RefPtr<DOMRequest> request = new DOMRequest(GetOwner());
-  RefPtr<IccCallback> requestCallback =
+  nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+  nsRefPtr<IccCallback> requestCallback =
     new IccCallback(GetOwner(), request);
 
   if (aOptions.mEnabled.WasPassed()) {
@@ -393,8 +405,8 @@ Icc::GetCardLockRetryCount(IccLockType aLockType, ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<DOMRequest> request = new DOMRequest(GetOwner());
-  RefPtr<IccCallback> requestCallback =
+  nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+  nsRefPtr<IccCallback> requestCallback =
     new IccCallback(GetOwner(), request);
   nsresult rv = mHandler->GetCardLockRetryCount(static_cast<uint32_t>(aLockType),
                                                 requestCallback);
@@ -409,55 +421,44 @@ Icc::GetCardLockRetryCount(IccLockType aLockType, ErrorResult& aRv)
 already_AddRefed<DOMRequest>
 Icc::ReadContacts(IccContactType aContactType, ErrorResult& aRv)
 {
-  if (!mHandler) {
+  if (!mProvider) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  RefPtr<DOMRequest> request = new DOMRequest(GetOwner());
-  RefPtr<IccCallback> requestCallback =
-    new IccCallback(GetOwner(), request);
-
-  nsresult rv = mHandler->ReadContacts(static_cast<uint32_t>(aContactType),
-                                       requestCallback);
+  nsRefPtr<nsIDOMDOMRequest> request;
+  nsresult rv = mProvider->ReadContacts(mClientId, GetOwner(),
+                                        static_cast<uint32_t>(aContactType),
+                                        getter_AddRefs(request));
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
     return nullptr;
   }
 
-  return request.forget();
+  return request.forget().downcast<DOMRequest>();
 }
 
 already_AddRefed<DOMRequest>
-Icc::UpdateContact(IccContactType aContactType, mozContact& aContact,
-                   const nsAString& aPin2, ErrorResult& aRv)
+Icc::UpdateContact(const JSContext* aCx, IccContactType aContactType,
+                   JS::Handle<JS::Value> aContact, const nsAString& aPin2,
+                   ErrorResult& aRv)
 {
-  if (!mHandler) {
+  if (!mProvider) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  RefPtr<DOMRequest> request = new DOMRequest(GetOwner());
-  RefPtr<IccCallback> requestCallback =
-    new IccCallback(GetOwner(), request);
-
-  nsCOMPtr<nsIIccContact> iccContact;
-  nsresult rv = IccContact::Create(aContact, getter_AddRefs(iccContact));
+  nsRefPtr<nsIDOMDOMRequest> request;
+  nsresult rv = mProvider->UpdateContact(mClientId, GetOwner(),
+                                         static_cast<uint32_t>(aContactType),
+                                         aContact, aPin2,
+                                         getter_AddRefs(request));
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
     return nullptr;
   }
 
-  rv = mHandler->UpdateContact(static_cast<uint32_t>(aContactType),
-                               iccContact,
-                               aPin2,
-                               requestCallback);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-    return nullptr;
-  }
-
-  return request.forget();
+  return request.forget().downcast<DOMRequest>();
 }
 
 already_AddRefed<DOMRequest>
@@ -469,8 +470,8 @@ Icc::MatchMvno(IccMvnoType aMvnoType, const nsAString& aMvnoData,
     return nullptr;
   }
 
-  RefPtr<DOMRequest> request = new DOMRequest(GetOwner());
-  RefPtr<IccCallback> requestCallback =
+  nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+  nsRefPtr<IccCallback> requestCallback =
     new IccCallback(GetOwner(), request);
   nsresult rv = mHandler->MatchMvno(static_cast<uint32_t>(aMvnoType),
                                     aMvnoData, requestCallback);
@@ -495,12 +496,12 @@ Icc::GetServiceState(IccService aService, ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<Promise> promise = Promise::Create(global, aRv);
+  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
 
-  RefPtr<IccCallback> requestCallback =
+  nsRefPtr<IccCallback> requestCallback =
     new IccCallback(GetOwner(), promise);
 
   nsresult rv =

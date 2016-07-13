@@ -6,7 +6,6 @@
 #include "MediaData.h"
 #include "mozilla/Array.h"
 #include "mozilla/ArrayUtils.h"
-#include "nsAutoPtr.h"
 
 using namespace mozilla;
 
@@ -38,7 +37,7 @@ Adts::ConvertSample(uint16_t aChannelCount, int8_t aFrequencyIndex,
 {
   static const int kADTSHeaderSize = 7;
 
-  size_t newSize = aSample->Size() + kADTSHeaderSize;
+  size_t newSize = aSample->mSize + kADTSHeaderSize;
 
   // ADTS header uses 13 bits for packet size.
   if (newSize >= (1 << 13) || aChannelCount > 15 ||
@@ -64,7 +63,7 @@ Adts::ConvertSample(uint16_t aChannelCount, int8_t aFrequencyIndex,
   if (aSample->mCrypto.mValid) {
     if (aSample->mCrypto.mPlainSizes.Length() == 0) {
       writer->mCrypto.mPlainSizes.AppendElement(kADTSHeaderSize);
-      writer->mCrypto.mEncryptedSizes.AppendElement(aSample->Size() - kADTSHeaderSize);
+      writer->mCrypto.mEncryptedSizes.AppendElement(aSample->mSize - kADTSHeaderSize);
     } else {
       writer->mCrypto.mPlainSizes[0] += kADTSHeaderSize;
     }

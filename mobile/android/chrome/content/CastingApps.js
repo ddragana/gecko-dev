@@ -16,8 +16,23 @@ var rokuDevice = {
     Cu.import("resource://gre/modules/RokuApp.jsm");
     return new RokuApp(aService);
   },
+  mirror: Services.prefs.getBoolPref("browser.mirroring.enabled.roku"),
   types: ["video/mp4"],
   extensions: ["mp4"]
+};
+
+var matchstickDevice = {
+  id: "matchstick:dial",
+  target: "urn:dial-multiscreen-org:service:dial:1",
+  filters: {
+    manufacturer: "openflint"
+  },
+  factory: function(aService) {
+    Cu.import("resource://gre/modules/MatchstickApp.jsm");
+    return new MatchstickApp(aService);
+  },
+  types: ["video/mp4", "video/webm"],
+  extensions: ["mp4", "webm"]
 };
 
 var mediaPlayerDevice = {
@@ -59,71 +74,10 @@ var mediaPlayerDevice = {
   }
 };
 
-var fxOSTVDevice = {
-  id: "app://fling-player.gaiamobile.org",
-  target: "app://fling-player.gaiamobile.org/index.html",
-  factory: function(aService) {
-    Cu.import("resource://gre/modules/PresentationApp.jsm");
-    let request = new window.PresentationRequest(this.target);
-    return new PresentationApp(aService, request);
-  },
-  init: function() {
-    Services.obs.addObserver(this, "presentation-device-change", false);
-    SimpleServiceDiscovery.addExternalDiscovery(this);
-  },
-  observe: function(subject, topic, data) {
-    let device = subject.QueryInterface(Ci.nsIPresentationDevice);
-    let service = this.toService(device);
-    switch (data) {
-      case "add":
-        SimpleServiceDiscovery.addService(service);
-        break;
-      case "update":
-        SimpleServiceDiscovery.updateService(service);
-        break;
-      case "remove":
-        if(SimpleServiceDiscovery.findServiceForID(device.id)) {
-          SimpleServiceDiscovery.removeService(device.id);
-        }
-        break;
-    }
-  },
-  toService: function(device) {
-    return {
-      location: device.id,
-      target: fxOSTVDevice.target,
-      friendlyName: device.name,
-      uuid: device.id,
-      manufacturer: "Firefox OS TV",
-      modelName: "Firefox OS TV",
-    };
-  },
-  startDiscovery: function() {
-    window.navigator.mozPresentationDeviceInfo.forceDiscovery();
-
-    // need to update the lastPing time for known device.
-    window.navigator.mozPresentationDeviceInfo.getAll()
-    .then(function(devices) {
-      for (let device of devices) {
-        let service = fxOSTVDevice.toService(device);
-        SimpleServiceDiscovery.addService(service);
-      }
-    });
-  },
-  stopDiscovery: function() {
-    // do nothing
-  },
-  types: ["video/mp4", "video/webm"],
-  extensions: ["mp4", "webm"],
-};
-
 var CastingApps = {
   _castMenuId: -1,
   mirrorStartMenuId: -1,
   mirrorStopMenuId: -1,
-  _blocked: null,
-  _bound: null,
-  _interval: 120 * 1000, // 120 seconds
 
   init: function ca_init() {
     if (!this.isCastingEnabled()) {
@@ -132,17 +86,14 @@ var CastingApps = {
 
     // Register targets
     SimpleServiceDiscovery.registerDevice(rokuDevice);
+    SimpleServiceDiscovery.registerDevice(matchstickDevice);
 
     // MediaPlayerDevice will notify us any time the native device list changes.
     mediaPlayerDevice.init();
     SimpleServiceDiscovery.registerDevice(mediaPlayerDevice);
 
-    // Presentation Device will notify us any time the available device list changes.
-    fxOSTVDevice.init();
-    SimpleServiceDiscovery.registerDevice(fxOSTVDevice);
-
-    // Search for devices continuously
-    SimpleServiceDiscovery.search(this._interval);
+    // Search for devices continuously every 120 seconds
+    SimpleServiceDiscovery.search(120 * 1000);
 
     this._castMenuId = NativeWindow.contextmenus.add(
       Strings.browser.GetStringFromName("contextmenu.sendToDevice"),
@@ -156,16 +107,11 @@ var CastingApps = {
     Services.obs.addObserver(this, "Casting:Mirror", false);
     Services.obs.addObserver(this, "ssdp-service-found", false);
     Services.obs.addObserver(this, "ssdp-service-lost", false);
-    Services.obs.addObserver(this, "application-background", false);
-    Services.obs.addObserver(this, "application-foreground", false);
 
     BrowserApp.deck.addEventListener("TabSelect", this, true);
     BrowserApp.deck.addEventListener("pageshow", this, true);
     BrowserApp.deck.addEventListener("playing", this, true);
     BrowserApp.deck.addEventListener("ended", this, true);
-    BrowserApp.deck.addEventListener("MozAutoplayMediaBlocked", this, true);
-    // Note that the XBL binding is untrusted
-    BrowserApp.deck.addEventListener("MozNoControlsVideoBindingAttached", this, true, true);
   },
 
   _mirrorStarted: function(stopMirrorCallback) {
@@ -260,20 +206,15 @@ var CastingApps = {
         }
         break;
       case "ssdp-service-found":
-        this.serviceAdded(SimpleServiceDiscovery.findServiceForID(aData));
-        break;
+        {
+          this.serviceAdded(SimpleServiceDiscovery.findServiceForID(aData));
+          break;
+        }
       case "ssdp-service-lost":
-        this.serviceLost(SimpleServiceDiscovery.findServiceForID(aData));
-        break;
-      case "application-background":
-        // Turn off polling while in the background
-        this._interval = SimpleServiceDiscovery.search(0);
-        SimpleServiceDiscovery.stopSearch();
-        break;
-      case "application-foreground":
-        // Turn polling on when app comes back to foreground
-        SimpleServiceDiscovery.search(this._interval);
-        break;
+        {
+          this.serviceLost(SimpleServiceDiscovery.findServiceForID(aData));
+          break;
+        }
     }
   },
 
@@ -295,28 +236,6 @@ var CastingApps = {
         if (video instanceof HTMLVideoElement) {
           // If playing, send the <video>, but if ended we send nothing to shutdown the pageaction
           this._updatePageActionForVideo(aEvent.type === "playing" ? video : null);
-        }
-        break;
-      }
-      case "MozAutoplayMediaBlocked": {
-        if (this._bound && this._bound.has(aEvent.target)) {
-          aEvent.target.dispatchEvent(new CustomEvent("MozNoControlsBlockedVideo"));
-        } else {
-          if (!this._blocked) {
-            this._blocked = new WeakMap;
-          }
-          this._blocked.set(aEvent.target, true);
-        }
-        break;
-      }
-      case "MozNoControlsVideoBindingAttached": {
-        if (!this._bound) {
-          this._bound = new WeakMap;
-        }
-        this._bound.set(aEvent.target, true);
-        if (this._blocked && this._blocked.has(aEvent.target)) {
-          this._blocked.delete(aEvent.target);
-          aEvent.target.dispatchEvent(new CustomEvent("MozNoControlsBlockedVideo"));
         }
         break;
       }
@@ -412,25 +331,12 @@ var CastingApps = {
   },
 
   _getContentTypeForURI: function(aURI, aElement, aCallback) {
-    let channel;
-    try {
-      let secFlags = Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS;
-      if (aElement.crossOrigin) {
-        secFlags = Ci.nsILoadInfo.SEC_REQUIRE_CORS_DATA_INHERITS;
-        if (aElement.crossOrigin === "use-credentials") {
-          secFlags |= Ci.nsILoadInfo.SEC_COOKIES_INCLUDE;
-        }
-      }
-      channel = NetUtil.newChannel({
-        uri: aURI,
-        loadingNode: aElement,
-        securityFlags: secFlags,
-        contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_VIDEO
-      });
-    } catch(e) {
-     aCallback(null);
-     return;
-    }
+    let channel = Services.io.newChannelFromURI2(aURI,
+                                                 aElement,
+                                                 null, // aLoadingPrincipal
+                                                 null, // aTriggeringPrincipal
+                                                 Ci.nsILoadInfo.SEC_NORMAL,
+                                                 Ci.nsIContentPolicy.TYPE_OTHER);
 
     let listener = {
       onStartRequest: function(request, context) {
@@ -451,12 +357,7 @@ var CastingApps = {
       onStopRequest: function(request, context, statusCode)  {},
       onDataAvailable: function(request, context, stream, offset, count) {}
     };
-
-    if (channel) {
-      channel.asyncOpen2(listener);
-    } else {
-      aCallback(null);
-    }
+    channel.asyncOpen(listener, null)
   },
 
   // Because this method uses a callback, make sure we return ASAP if we know
@@ -521,30 +422,22 @@ var CastingApps = {
       asyncURIs.push(sourceURI);
     }
 
-    // Helper method that walks the array of possible URIs, fetching the mimetype as we go.
+    // If we didn't find a good URI directly, let's look using async methods
     // As soon as we find a good sourceURL, avoid firing the callback any further
-    var _getContentTypeForURIs = (aURIs) => {
+    aCallback.fired = false;
+    for (let sourceURI of asyncURIs) {
       // Do an async fetch to figure out the mimetype of the source video
-      let sourceURI = aURIs.pop();
       this._getContentTypeForURI(sourceURI, aElement, (aType) => {
-        if (this.allowableMimeType(aType, aTypes)) {
-          // We found a supported mimetype.
+        if (!aCallback.fired && this.allowableMimeType(aType, aTypes)) {
+          aCallback.fired = true;
           aCallback({ element: aElement, source: sourceURI.spec, poster: posterURL, sourceURI: sourceURI, type: aType });
-        } else {
-          // This URI was not a supported mimetype, so let's try the next, if we have more.
-          if (aURIs.length > 0) {
-            _getContentTypeForURIs(aURIs);
-          } else {
-            // We were not able to find a supported mimetype.
-            aCallback(null);
-          }
         }
       });
     }
 
-    // If we didn't find a good URI directly, let's look using async methods.
-    if (asyncURIs.length > 0) {
-      _getContentTypeForURIs(asyncURIs);
+    // If we didn't find any castable source, let's send back a signal
+    if (!aCallback.fired) {
+      aCallback(null);
     }
   },
 
@@ -833,16 +726,8 @@ var CastingApps = {
     }
 
     let status = aRemoteMedia.status;
-    switch (status) {
-      case "started":
-        Messaging.sendRequest({ type: "Casting:Playing" });
-        break;
-      case "paused":
-        Messaging.sendRequest({ type: "Casting:Paused" });
-        break;
-      case "completed":
-        this.closeExternal();
-        break;
+    if (status == "completed") {
+      this.closeExternal();
     }
   }
 };

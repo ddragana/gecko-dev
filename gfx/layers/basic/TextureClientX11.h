@@ -13,41 +13,50 @@
 namespace mozilla {
 namespace layers {
 
-class X11TextureData : public TextureData
+/**
+ * A TextureClient implementation based on Xlib.
+ */
+class TextureClientX11 : public TextureClient
 {
-public:
-  static X11TextureData* Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                                TextureFlags aFlags, ClientIPCAllocator* aAllocator);
+ public:
+  TextureClientX11(ISurfaceAllocator* aAllocator, gfx::SurfaceFormat format, TextureFlags aFlags = TextureFlags::DEFAULT);
 
-  virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
+  ~TextureClientX11();
 
-  virtual bool Lock(OpenMode aMode, FenceHandle*) override;
+  // TextureClient
+
+  virtual bool IsAllocated() const override;
+
+  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) override;
+
+  virtual gfx::IntSize GetSize() const override { return mSize; }
+
+  virtual bool Lock(OpenMode aMode) override;
 
   virtual void Unlock() override;
 
-  virtual void FillInfo(TextureData::Info& aInfo) const override;
+  virtual bool IsLocked() const override { return mLocked; }
 
-  virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() override;
+  virtual bool AllocateForSurface(gfx::IntSize aSize, TextureAllocationFlags flags) override;
 
-  virtual void Deallocate(ClientIPCAllocator*) override;
+  virtual bool CanExposeDrawTarget() const override { return true; }
 
-  virtual TextureData*
-  CreateSimilar(ClientIPCAllocator* aAllocator,
-                TextureFlags aFlags = TextureFlags::DEFAULT,
+  virtual gfx::DrawTarget* BorrowDrawTarget() override;
+
+  virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
+
+  virtual bool HasInternalBuffer() const override { return false; }
+
+  virtual already_AddRefed<TextureClient>
+  CreateSimilar(TextureFlags aFlags = TextureFlags::DEFAULT,
                 TextureAllocationFlags aAllocFlags = ALLOC_DEFAULT) const override;
 
-  virtual bool UpdateFromSurface(gfx::SourceSurface* aSurface) override;
-
-protected:
-  X11TextureData(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                 bool aClientDeallocation, bool aIsCrossProcess,
-                 gfxXlibSurface* aSurface);
-
-  gfx::IntSize mSize;
+ private:
   gfx::SurfaceFormat mFormat;
+  gfx::IntSize mSize;
   RefPtr<gfxXlibSurface> mSurface;
-  bool mClientDeallocation;
-  bool mIsCrossProcess;
+  RefPtr<gfx::DrawTarget> mDrawTarget;
+  bool mLocked;
 };
 
 } // namespace layers

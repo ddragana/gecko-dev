@@ -11,10 +11,10 @@
  * Tests for the "DownloadPaths.jsm" JavaScript module.
  */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
+const Cr = Components.results;
 
 Cu.import("resource://gre/modules/DownloadPaths.jsm");
 
@@ -29,7 +29,7 @@ function createTemporarySaveDirectory()
                 getService(Ci.nsIProperties).get("TmpD", Ci.nsIFile);
   saveDir.append("testsavedir");
   if (!saveDir.exists()) {
-    saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
+    saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0755);
   }
   return saveDir;
 }

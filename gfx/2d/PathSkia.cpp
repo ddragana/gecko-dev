@@ -126,26 +126,29 @@ PathSkia::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFillRule)
   return MakeAndAddRef<PathBuilderSkia>(aTransform, mPath, aFillRule);
 }
 
-static bool
-SkPathContainsPoint(const SkPath& aPath, const Point& aPoint, const Matrix& aTransform)
-{
-  Matrix inverse = aTransform;
-  if (!inverse.Invert()) {
-    return false;
-  }
-
-  SkPoint point = PointToSkPoint(inverse * aPoint);
-  return aPath.contains(point.fX, point.fY);
-}
-
 bool
 PathSkia::ContainsPoint(const Point &aPoint, const Matrix &aTransform) const
 {
-  if (!mPath.isFinite()) {
+  Matrix inverse = aTransform;
+  inverse.Invert();
+  Point transformed = inverse * aPoint;
+
+  Rect bounds = GetBounds(aTransform);
+
+  if (aPoint.x < bounds.x || aPoint.y < bounds.y ||
+      aPoint.x > bounds.XMost() || aPoint.y > bounds.YMost()) {
     return false;
   }
 
-  return SkPathContainsPoint(mPath, aPoint, aTransform);
+  SkRegion pointRect;
+  pointRect.setRect(int32_t(SkFloatToScalar(transformed.x - 1.f)),
+                    int32_t(SkFloatToScalar(transformed.y - 1.f)),
+                    int32_t(SkFloatToScalar(transformed.x + 1.f)),
+                    int32_t(SkFloatToScalar(transformed.y + 1.f)));
+
+  SkRegion pathRegion;
+  
+  return pathRegion.setPath(mPath, pointRect);
 }
 
 bool
@@ -153,28 +156,37 @@ PathSkia::StrokeContainsPoint(const StrokeOptions &aStrokeOptions,
                               const Point &aPoint,
                               const Matrix &aTransform) const
 {
-  if (!mPath.isFinite()) {
-    return false;
-  }
+  Matrix inverse = aTransform;
+  inverse.Invert();
+  Point transformed = inverse * aPoint;
 
   SkPaint paint;
-  if (!StrokeOptionsToPaint(paint, aStrokeOptions)) {
-    return false;
-  }
+  StrokeOptionsToPaint(paint, aStrokeOptions);
 
   SkPath strokePath;
   paint.getFillPath(mPath, &strokePath);
 
-  return SkPathContainsPoint(strokePath, aPoint, aTransform);
+  Rect bounds = aTransform.TransformBounds(SkRectToRect(strokePath.getBounds()));
+
+  if (aPoint.x < bounds.x || aPoint.y < bounds.y ||
+      aPoint.x > bounds.XMost() || aPoint.y > bounds.YMost()) {
+    return false;
+  }
+
+  SkRegion pointRect;
+  pointRect.setRect(int32_t(SkFloatToScalar(transformed.x - 1.f)),
+                    int32_t(SkFloatToScalar(transformed.y - 1.f)),
+                    int32_t(SkFloatToScalar(transformed.x + 1.f)),
+                    int32_t(SkFloatToScalar(transformed.y + 1.f)));
+
+  SkRegion pathRegion;
+  
+  return pathRegion.setPath(strokePath, pointRect);
 }
 
 Rect
 PathSkia::GetBounds(const Matrix &aTransform) const
 {
-  if (!mPath.isFinite()) {
-    return Rect();
-  }
-
   Rect bounds = SkRectToRect(mPath.getBounds());
   return aTransform.TransformBounds(bounds);
 }
@@ -183,15 +195,9 @@ Rect
 PathSkia::GetStrokedBounds(const StrokeOptions &aStrokeOptions,
                            const Matrix &aTransform) const
 {
-  if (!mPath.isFinite()) {
-    return Rect();
-  }
-
   SkPaint paint;
-  if (!StrokeOptionsToPaint(paint, aStrokeOptions)) {
-    return Rect();
-  }
-
+  StrokeOptionsToPaint(paint, aStrokeOptions);
+  
   SkPath result;
   paint.getFillPath(mPath, &result);
 

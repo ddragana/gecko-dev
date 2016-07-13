@@ -6,9 +6,11 @@
 /* General Partial MAR File Patch Apply Test */
 
 function run_test() {
-  if (!setupTestCommon()) {
+  if (!shouldRunServiceTest()) {
     return;
   }
+
+  setupTestCommon();
   gTestFiles = gTestFilesPartialSuccess;
   gTestFiles[gTestFiles.length - 1].originalContents = null;
   gTestFiles[gTestFiles.length - 1].compareContents = "FromPartial\n";
@@ -17,41 +19,7 @@ function run_test() {
   gTestFiles[gTestFiles.length - 2].compareContents = "FromPartial\n";
   gTestFiles[gTestFiles.length - 2].comparePerms = 0o644;
   gTestDirs = gTestDirsPartialSuccess;
-  setupDistributionDir();
-  setupUpdaterTest(FILE_PARTIAL_MAR, false);
-}
-
-/**
- * Called after the call to setupUpdaterTest finishes.
- */
-function setupUpdaterTestFinished() {
-  runUpdate(STATE_SUCCEEDED, false, 0, true);
-}
-
-/**
- * Called after the call to runUpdate finishes.
- */
-function runUpdateFinished() {
-  checkPostUpdateAppLog();
-}
-
-/**
- * Called after the call to checkPostUpdateAppLog finishes.
- */
-function checkPostUpdateAppLogFinished() {
-  checkAppBundleModTime();
-  standardInit();
-  checkPostUpdateRunningFile(true);
-  checkFilesAfterUpdateSuccess(getApplyDirFile);
-  checkUpdateLogContents(LOG_PARTIAL_SUCCESS);
-  checkDistributionDir();
-  checkCallbackLog();
-}
-
-/**
- * Setup the state of the distribution directory for the test.
- */
-function setupDistributionDir() {
+  setupUpdaterTest(FILE_PARTIAL_MAR);
   if (IS_MACOSX) {
     // Create files in the old distribution directory location to verify that
     // the directory and its contents are removed when there is a distribution
@@ -61,16 +29,44 @@ function setupDistributionDir() {
     testFile = getApplyDirFile(DIR_MACOS + "distribution/test/testFile", true);
     writeFile(testFile, "test\n");
   }
+
+  createUpdaterINI(true);
+  setAppBundleModTime();
+
+  setupAppFilesAsync();
+}
+
+function setupAppFilesFinished() {
+  runUpdateUsingService(STATE_PENDING_SVC, STATE_SUCCEEDED);
 }
 
 /**
- * Checks the state of the distribution directory.
+ * Checks if the post update binary was properly launched for the platforms that
+ * support launching post update process.
  */
-function checkDistributionDir() {
+function checkUpdateFinished() {
+  if (IS_WIN || IS_MACOSX) {
+    gCheckFunc = finishCheckUpdateFinished;
+    checkPostUpdateAppLog();
+  } else {
+    finishCheckUpdateFinished();
+  }
+}
+
+/**
+ * Checks if the update has finished and if it has finished performs checks for
+ * the test.
+ */
+function finishCheckUpdateFinished() {
   if (IS_MACOSX) {
     let distributionDir = getApplyDirFile(DIR_MACOS + "distribution", true);
-    Assert.ok(!distributionDir.exists(),
-              MSG_SHOULD_NOT_EXIST + getMsgPath(distributionDir.path));
-    checkUpdateLogContains(REMOVE_OLD_DIST_DIR);
+    Assert.ok(!distributionDir.exists(), MSG_SHOULD_NOT_EXIST);
+    checkUpdateLogContains("removing old distribution directory");
   }
+
+  checkAppBundleModTime();
+  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
+  checkUpdateLogContents(LOG_PARTIAL_SUCCESS);
+  standardInit();
+  checkCallbackServiceLog();
 }

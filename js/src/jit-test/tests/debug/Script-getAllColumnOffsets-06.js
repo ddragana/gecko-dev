@@ -14,15 +14,14 @@ Debugger(global).onDebuggerStatement = function (frame) {
 };
 
 global.log = "";
-global.eval("function ppppp() { return 1; }");
 //                     1         2         3         4
-//           01234567890123456789012345678901234567890123456789
-global.eval("function f(){ 1 && ppppp(ppppp()) && new Error() } debugger;");
+//           0123456789012345678901234567890123456789012345678
+global.eval("function f(){ 1 && print(print()) && new Error() } debugger;");
 global.f();
 
 // 14 - Enter the function body
 // 25 - Inner print()
 // 19 - Outer print()
 // 37 - new Error()
-// 49 - Exit the function body
-assertEq(global.log, "14 25 19 37 49 ");
+// 48 - Exit the function body
+assertEq(global.log, "14 25 19 37 48 ");

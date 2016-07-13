@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 const PREF_DEPRECATION_WARNINGS = "devtools.errorconsole.deprecation_warnings";
 
 Cu.import("resource://gre/modules/Services.jsm", this);
@@ -33,7 +33,7 @@ function deprecationFunctionCustomCallstack () {
   return true;
 }
 
-var tests = [
+let tests = [
 // Test deprecation warning without passing the callstack.
 {
   deprecatedFunction: basicDeprecatedFunction,
@@ -84,7 +84,7 @@ var tests = [
 }];
 
 // Which test are we running now?
-var idx = -1;
+let idx = -1;
 
 function test() {
   waitForExplicitFinish();

@@ -174,11 +174,11 @@ HTMLTableRowElement::InsertCell(int32_t aIndex,
   }
 
   // create the cell
-  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::td,
                               getter_AddRefs(nodeInfo));
 
-  RefPtr<nsGenericHTMLElement> cell =
+  nsRefPtr<nsGenericHTMLElement> cell =
     NS_NewHTMLTableCellElement(nodeInfo.forget());
   if (!cell) {
     aError.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -286,7 +286,7 @@ HTMLTableRowElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes
         textAlign->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
     }
   }
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
+  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(TextReset)) {
     nsCSSValue* verticalAlign = aData->ValueForVerticalAlign();
     if (verticalAlign->GetUnit() == eCSSUnit_Null) {
       // valign: enum

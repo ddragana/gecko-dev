@@ -25,7 +25,7 @@ NS_IMPL_ISUPPORTS_INHERITED0(AppCacheStorage, CacheStorage)
 
 AppCacheStorage::AppCacheStorage(nsILoadContextInfo* aInfo,
                                  nsIApplicationCache* aAppCache)
-: CacheStorage(aInfo, true /* disk */, false /* lookup app cache */, false /* skip size check */, false /* pin */)
+: CacheStorage(aInfo, true /* disk */, false /* lookup app cache */)
 , mAppCache(aAppCache)
 {
   MOZ_COUNT_CTOR(AppCacheStorage);
@@ -75,7 +75,7 @@ NS_IMETHODIMP AppCacheStorage::AsyncOpenURI(nsIURI *aURI,
   rv = noRefURI->GetScheme(scheme);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<_OldCacheLoad> appCacheLoad =
+  nsRefPtr<_OldCacheLoad> appCacheLoad =
     new _OldCacheLoad(scheme, cacheKey, aCallback, appCache,
                       LoadInfo(), WriteToDisk(), aFlags);
   rv = appCacheLoad->Start();
@@ -107,7 +107,7 @@ NS_IMETHODIMP AppCacheStorage::AsyncDoomURI(nsIURI *aURI, const nsACString & aId
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  RefPtr<_OldStorage> old = new _OldStorage(
+  nsRefPtr<_OldStorage> old = new _OldStorage(
     LoadInfo(), WriteToDisk(), LookupAppCache(), true, mAppCache);
   return old->AsyncDoomURI(aURI, aIdExtension, aCallback);
 }
@@ -119,17 +119,32 @@ NS_IMETHODIMP AppCacheStorage::AsyncEvictStorage(nsICacheEntryDoomCallback* aCal
 
   nsresult rv;
 
-  if (!mAppCache) {
-    // Discard everything under this storage context
-    nsCOMPtr<nsIApplicationCacheService> appCacheService =
-      do_GetService(NS_APPLICATIONCACHESERVICE_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIApplicationCacheService> appCacheService =
+    do_GetService(NS_APPLICATIONCACHESERVICE_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = appCacheService->Evict(LoadInfo());
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else {
+  if (!mAppCache) {
+    if (LoadInfo()->AppId() == nsILoadContextInfo::NO_APP_ID &&
+        !LoadInfo()->IsInBrowserElement()) {
+
+      // Clear everything.
+      nsCOMPtr<nsICacheService> serv =
+          do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      rv = nsCacheService::GlobalInstance()->EvictEntriesInternal(nsICache::STORE_OFFLINE);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+    else {
+      // Clear app or inbrowser staff.
+      rv = appCacheService->DiscardByAppId(LoadInfo()->AppId(),
+                                           LoadInfo()->IsInBrowserElement());
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+  }
+  else {
     // Discard the group
-    RefPtr<_OldStorage> old = new _OldStorage(
+    nsRefPtr<_OldStorage> old = new _OldStorage(
       LoadInfo(), WriteToDisk(), LookupAppCache(), true, mAppCache);
     rv = old->AsyncEvictStorage(aCallback);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -157,7 +172,7 @@ NS_IMETHODIMP AppCacheStorage::AsyncVisitStorage(nsICacheStorageVisitor* aVisito
     do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<_OldVisitCallbackWrapper> cb = new _OldVisitCallbackWrapper(
+  nsRefPtr<_OldVisitCallbackWrapper> cb = new _OldVisitCallbackWrapper(
     "offline", aVisitor, aVisitEntries, LoadInfo());
   rv = nsCacheService::GlobalInstance()->VisitEntriesInternal(cb);
   NS_ENSURE_SUCCESS(rv, rv);

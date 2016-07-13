@@ -8,8 +8,6 @@
 
 #include "gfxFont.h"
 
-#include "mozilla/gfx/2D.h"
-
 struct gr_face;
 struct gr_font;
 struct gr_segment;
@@ -19,18 +17,18 @@ public:
     explicit gfxGraphiteShaper(gfxFont *aFont);
     virtual ~gfxGraphiteShaper();
 
-    virtual bool ShapeText(DrawTarget      *aDrawTarget,
+    virtual bool ShapeText(gfxContext      *aContext,
                            const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
-                           Script           aScript,
+                           int32_t          aScript,
                            bool             aVertical,
                            gfxShapedText   *aShapedText);
 
     static void Shutdown();
 
 protected:
-    nsresult SetGlyphsFromSegment(DrawTarget      *aDrawTarget,
+    nsresult SetGlyphsFromSegment(gfxContext      *aContext,
                                   gfxShapedText   *aShapedText,
                                   uint32_t         aOffset,
                                   uint32_t         aLength,
@@ -44,8 +42,9 @@ protected:
     gr_font *mGrFont; // owned by the shaper itself
 
     struct CallbackData {
-        gfxFont* mFont;
-        mozilla::gfx::DrawTarget* mDrawTarget;
+        gfxFont           *mFont;
+        gfxGraphiteShaper *mShaper;
+        gfxContext        *mContext;
     };
 
     CallbackData mCallbackData;

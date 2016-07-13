@@ -6,6 +6,7 @@
 #define __nsFontFace_h__
 
 #include "nsIDOMFontFace.h"
+#include "nsAutoPtr.h"
 
 class gfxFontEntry;
 class gfxFontGroup;
@@ -29,8 +30,8 @@ public:
 protected:
   virtual ~nsFontFace();
 
-  RefPtr<gfxFontEntry> mFontEntry;
-  RefPtr<gfxFontGroup> mFontGroup;
+  nsRefPtr<gfxFontEntry> mFontEntry;
+  nsRefPtr<gfxFontGroup> mFontGroup;
   uint8_t mMatchType;
 };
 

@@ -28,12 +28,15 @@
 #include "js/RootingAPI.h"
 #include "nsTObserverArray.h"
 #include "mozilla/dom/SameProcessMessageQueue.h"
-#include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/dom/StructuredCloneUtils.h"
 #include "mozilla/jsipc/CpowHolder.h"
 
 class nsIFrameLoader;
 
 namespace mozilla {
+
+struct OwningSerializedStructuredCloneBuffer;
+
 namespace dom {
 
 class nsIContentParent;
@@ -54,6 +57,9 @@ enum MessageManagerFlags {
 
 class MessageManagerCallback
 {
+protected:
+  typedef mozilla::OwningSerializedStructuredCloneBuffer OwningSerializedStructuredCloneBuffer;
+
 public:
   virtual ~MessageManagerCallback() {}
 
@@ -64,22 +70,22 @@ public:
 
   virtual bool DoSendBlockingMessage(JSContext* aCx,
                                      const nsAString& aMessage,
-                                     StructuredCloneData& aData,
+                                     const StructuredCloneData& aData,
                                      JS::Handle<JSObject*> aCpows,
                                      nsIPrincipal* aPrincipal,
-                                     nsTArray<StructuredCloneData>* aRetVal,
+                                     nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal,
                                      bool aIsSync)
   {
     return true;
   }
 
-  virtual nsresult DoSendAsyncMessage(JSContext* aCx,
-                                      const nsAString& aMessage,
-                                      StructuredCloneData& aData,
-                                      JS::Handle<JSObject*> aCpows,
-                                      nsIPrincipal* aPrincipal)
+  virtual bool DoSendAsyncMessage(JSContext* aCx,
+                                  const nsAString& aMessage,
+                                  const StructuredCloneData& aData,
+                                  JS::Handle<JSObject*> aCpows,
+                                  nsIPrincipal* aPrincipal)
   {
-    return NS_OK;
+    return true;
   }
 
   virtual bool CheckPermission(const nsAString& aPermission)
@@ -110,18 +116,15 @@ public:
 
 protected:
   bool BuildClonedMessageDataForParent(nsIContentParent* aParent,
-                                       StructuredCloneData& aData,
+                                       const StructuredCloneData& aData,
                                        ClonedMessageData& aClonedData);
   bool BuildClonedMessageDataForChild(nsIContentChild* aChild,
-                                      StructuredCloneData& aData,
+                                      const StructuredCloneData& aData,
                                       ClonedMessageData& aClonedData);
 };
 
-void UnpackClonedMessageDataForParent(const ClonedMessageData& aClonedData,
-                                      StructuredCloneData& aData);
-
-void UnpackClonedMessageDataForChild(const ClonedMessageData& aClonedData,
-                                     StructuredCloneData& aData);
+StructuredCloneData UnpackClonedMessageDataForParent(const ClonedMessageData& aData);
+StructuredCloneData UnpackClonedMessageDataForChild(const ClonedMessageData& aData);
 
 } // namespace ipc
 } // namespace dom
@@ -163,7 +166,8 @@ class nsFrameMessageManager final : public nsIContentFrameMessageManager,
                                     public nsIProcessChecker
 {
   friend class mozilla::dom::MessageManagerReporter;
-  typedef mozilla::dom::ipc::StructuredCloneData StructuredCloneData;
+  typedef mozilla::dom::StructuredCloneData StructuredCloneData;
+  typedef mozilla::OwningSerializedStructuredCloneBuffer OwningSerializedStructuredCloneBuffer;
 public:
   nsFrameMessageManager(mozilla::dom::ipc::MessageManagerCallback* aCallback,
                         nsFrameMessageManager* aParentManager,
@@ -192,9 +196,9 @@ public:
 
   nsresult ReceiveMessage(nsISupports* aTarget, nsIFrameLoader* aTargetFrameLoader,
                           const nsAString& aMessage,
-                          bool aIsSync, StructuredCloneData* aCloneData,
+                          bool aIsSync, const StructuredCloneData* aCloneData,
                           mozilla::jsipc::CpowHolder* aCpows, nsIPrincipal* aPrincipal,
-                          nsTArray<StructuredCloneData>* aRetVal);
+                          nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal);
 
   void AddChildManager(nsFrameMessageManager* aManager);
   void RemoveChildManager(nsFrameMessageManager* aManager)
@@ -215,13 +219,11 @@ public:
                                 const JS::Value& aJSON,
                                 const JS::Value& aObjects,
                                 nsIPrincipal* aPrincipal,
-                                const JS::Value& aTransfers,
                                 JSContext* aCx,
                                 uint8_t aArgc);
-
   nsresult DispatchAsyncMessageInternal(JSContext* aCx,
                                         const nsAString& aMessage,
-                                        StructuredCloneData& aData,
+                                        const StructuredCloneData& aData,
                                         JS::Handle<JSObject*> aCpows,
                                         nsIPrincipal* aPrincipal);
   void RemoveFromParent();
@@ -250,8 +252,6 @@ public:
 
   void SetInitialProcessData(JS::HandleValue aInitialData);
 
-  void LoadPendingScripts();
-
 private:
   nsresult SendMessage(const nsAString& aMessageName,
                        JS::Handle<JS::Value> aJSON,
@@ -264,9 +264,9 @@ private:
 
   nsresult ReceiveMessage(nsISupports* aTarget, nsIFrameLoader* aTargetFrameLoader,
                           bool aTargetClosed, const nsAString& aMessage,
-                          bool aIsSync, StructuredCloneData* aCloneData,
+                          bool aIsSync, const StructuredCloneData* aCloneData,
                           mozilla::jsipc::CpowHolder* aCpows, nsIPrincipal* aPrincipal,
-                          nsTArray<StructuredCloneData>* aRetVal);
+                          nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal);
 
   NS_IMETHOD LoadScript(const nsAString& aURL,
                         bool aAllowDelayedLoad,
@@ -291,7 +291,7 @@ protected:
   bool mDisconnected;
   mozilla::dom::ipc::MessageManagerCallback* mCallback;
   nsAutoPtr<mozilla::dom::ipc::MessageManagerCallback> mOwnedCallback;
-  RefPtr<nsFrameMessageManager> mParentManager;
+  nsRefPtr<nsFrameMessageManager> mParentManager;
   nsTArray<nsString> mPendingScripts;
   nsTArray<bool> mPendingScriptsGlobalStates;
   JS::Heap<JS::Value> mInitialProcessData;
@@ -317,40 +317,39 @@ private:
 /* A helper class for taking care of many details for async message sending
    within a single process.  Intended to be used like so:
 
-   class MyAsyncMessage : public nsSameProcessAsyncMessageBase, public Runnable
+   class MyAsyncMessage : public nsSameProcessAsyncMessageBase, public nsRunnable
    {
+     // Initialize nsSameProcessAsyncMessageBase...
+
      NS_IMETHOD Run() {
        ReceiveMessage(..., ...);
        return NS_OK;
      }
    };
-
-
-   RefPtr<nsSameProcessAsyncMessageBase> ev = new MyAsyncMessage();
-   nsresult rv = ev->Init(...);
-   if (NS_SUCCEEDED(rv)) {
-     NS_DispatchToMainThread(ev);
-   }
-*/
+ */
 class nsSameProcessAsyncMessageBase
 {
-public:
-  typedef mozilla::dom::ipc::StructuredCloneData StructuredCloneData;
+  typedef mozilla::dom::StructuredCloneClosure StructuredCloneClosure;
 
-  nsSameProcessAsyncMessageBase(JSContext* aCx, JS::Handle<JSObject*> aCpows);
-  nsresult Init(JSContext* aCx,
-                const nsAString& aMessage,
-                StructuredCloneData& aData,
-                nsIPrincipal* aPrincipal);
+public:
+  typedef mozilla::dom::StructuredCloneData StructuredCloneData;
+
+  nsSameProcessAsyncMessageBase(JSContext* aCx,
+                                const nsAString& aMessage,
+                                const StructuredCloneData& aData,
+                                JS::Handle<JSObject*> aCpows,
+                                nsIPrincipal* aPrincipal);
 
   void ReceiveMessage(nsISupports* aTarget, nsIFrameLoader* aTargetFrameLoader,
                       nsFrameMessageManager* aManager);
+
 private:
   nsSameProcessAsyncMessageBase(const nsSameProcessAsyncMessageBase&);
 
   JSRuntime* mRuntime;
   nsString mMessage;
-  StructuredCloneData mData;
+  JSAutoStructuredCloneBuffer mData;
+  StructuredCloneClosure mClosure;
   JS::PersistentRooted<JSObject*> mCpows;
   nsCOMPtr<nsIPrincipal> mPrincipal;
 };
@@ -377,7 +376,6 @@ struct nsMessageManagerScriptHolder
 class nsMessageManagerScriptExecutor
 {
 public:
-  static void PurgeCache();
   static void Shutdown();
   already_AddRefed<nsIXPConnectJSObjectHolder> GetGlobal()
   {
@@ -400,10 +398,9 @@ protected:
   void TryCacheLoadAndCompileScript(const nsAString& aURL,
                                     bool aRunInGlobalScope);
   bool InitChildGlobalInternal(nsISupports* aScope, const nsACString& aID);
-  void Trace(const TraceCallbacks& aCallbacks, void* aClosure);
   nsCOMPtr<nsIXPConnectJSObjectHolder> mGlobal;
   nsCOMPtr<nsIPrincipal> mPrincipal;
-  AutoTArray<JS::Heap<JSObject*>, 2> mAnonymousGlobalScopes;
+  nsAutoTArray<JS::Heap<JSObject*>, 2> mAnonymousGlobalScopes;
 
   static nsDataHashtable<nsStringHashKey, nsMessageManagerScriptHolder*>* sCachedScripts;
   static nsScriptCacheCleaner* sScriptCacheCleaner;
@@ -418,21 +415,15 @@ class nsScriptCacheCleaner final : public nsIObserver
   nsScriptCacheCleaner()
   {
     nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
-    if (obsSvc) {
-      obsSvc->AddObserver(this, "message-manager-flush-caches", false);
+    if (obsSvc)
       obsSvc->AddObserver(this, "xpcom-shutdown", false);
-    }
   }
 
   NS_IMETHODIMP Observe(nsISupports *aSubject,
                         const char *aTopic,
                         const char16_t *aData) override
   {
-    if (strcmp("message-manager-flush-caches", aTopic) == 0) {
-      nsMessageManagerScriptExecutor::PurgeCache();
-    } else if (strcmp("xpcom-shutdown", aTopic) == 0) {
-      nsMessageManagerScriptExecutor::Shutdown();
-    }
+    nsMessageManagerScriptExecutor::Shutdown();
     return NS_OK;
   }
 };

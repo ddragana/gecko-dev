@@ -19,7 +19,7 @@ child:
   /**
    * Send when asynchronous request has completed.
    */
-  async __delete__(MobileConnectionReply aResponse);
+  __delete__(MobileConnectionReply aResponse);
 };
 
 /**

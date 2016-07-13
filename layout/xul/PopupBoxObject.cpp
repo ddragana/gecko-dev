@@ -130,7 +130,7 @@ PopupBoxObject::MoveTo(int32_t aLeft, int32_t aTop)
 {
   nsMenuPopupFrame *menuPopupFrame = mContent ? do_QueryFrame(mContent->GetPrimaryFrame()) : nullptr;
   if (menuPopupFrame) {
-    menuPopupFrame->MoveTo(CSSIntPoint(aLeft, aTop), true);
+    menuPopupFrame->MoveTo(aLeft, aTop, true);
   }
 }
 
@@ -271,7 +271,7 @@ PopupBoxObject::GetAnchorNode() const
 already_AddRefed<DOMRect>
 PopupBoxObject::GetOuterScreenRect()
 {
-  RefPtr<DOMRect> rect = new DOMRect(mContent);
+  nsRefPtr<DOMRect> rect = new DOMRect(mContent);
 
   // Return an empty rectangle if the popup is not open.
   nsMenuPopupFrame *menuPopupFrame = do_QueryFrame(GetFrame(false));
@@ -283,11 +283,11 @@ PopupBoxObject::GetOuterScreenRect()
   if (view) {
     nsIWidget* widget = view->GetWidget();
     if (widget) {
-      LayoutDeviceIntRect screenRect;
+      nsIntRect screenRect;
       widget->GetScreenBounds(screenRect);
 
       int32_t pp = menuPopupFrame->PresContext()->AppUnitsPerDevPixel();
-      rect->SetLayoutRect(LayoutDeviceIntRect::ToAppUnits(screenRect, pp));
+      rect->SetLayoutRect(ToAppUnits(screenRect, pp));
     }
   }
   return rect.forget();
@@ -355,16 +355,6 @@ PopupBoxObject::AlignmentOffset()
   nsPoint appOffset(menuPopupFrame->GetAlignmentOffset(), 0);
   nsIntPoint popupOffset = appOffset.ToNearestPixels(pp);
   return popupOffset.x;
-}
-
-void
-PopupBoxObject::SetConstraintRect(dom::DOMRectReadOnly& aRect)
-{
-  nsMenuPopupFrame *menuPopupFrame = do_QueryFrame(GetFrame(false));
-  if (menuPopupFrame) {
-    menuPopupFrame->SetOverrideConstraintRect(
-      LayoutDeviceIntRect(aRect.Left(), aRect.Top(), aRect.Width(), aRect.Height()));
-  }
 }
 
 } // namespace dom

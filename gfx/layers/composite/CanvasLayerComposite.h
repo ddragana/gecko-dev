@@ -69,7 +69,7 @@ protected:
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
 
 private:
-  gfx::SamplingFilter GetSamplingFilter();
+  gfx::Filter GetEffectFilter();
 
 private:
   RefPtr<CompositableHost> mCompositableHost;

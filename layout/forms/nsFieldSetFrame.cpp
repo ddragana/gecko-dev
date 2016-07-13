@@ -13,7 +13,7 @@
 #include <algorithm>
 #include "nsIFrame.h"
 #include "nsPresContext.h"
-#include "mozilla/RestyleManager.h"
+#include "RestyleManager.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsDisplayList.h"
@@ -101,6 +101,7 @@ public:
     MOZ_COUNT_DTOR(nsDisplayFieldSetBorderBackground);
   }
 #endif
+
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                        HitTestState* aState,
                        nsTArray<nsIFrame*> *aOutFrames) override;
@@ -127,7 +128,8 @@ nsDisplayFieldSetBorderBackground::Paint(nsDisplayListBuilder* aBuilder,
                                          nsRenderingContext* aCtx)
 {
   DrawResult result = static_cast<nsFieldSetFrame*>(mFrame)->
-    PaintBorder(aBuilder, *aCtx, ToReferenceFrame(), mVisibleRect);
+    PaintBorderBackground(*aCtx, ToReferenceFrame(),
+                          mVisibleRect, aBuilder->GetBackgroundPaintFlags());
 
   nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
 }
@@ -165,16 +167,13 @@ nsFieldSetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // we need to paint the outline
   if (!(GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER) &&
       IsVisibleForPainting(aBuilder)) {
-    if (StyleEffects()->mBoxShadow) {
+    if (StyleBorder()->mBoxShadow) {
       aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
         nsDisplayBoxShadowOuter(aBuilder, this));
     }
 
-    nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
-      aBuilder, this, VisualBorderRectRelativeToSelf(),
-      aLists.BorderBackground(),
-      /* aAllowWillPaintBorderOptimization = */ false);
-
+    // don't bother checking to see if we really have a border or background.
+    // we usually will have a border.
     aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
       nsDisplayFieldSetBorderBackground(aBuilder, this));
   
@@ -211,11 +210,8 @@ nsFieldSetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 DrawResult
-nsFieldSetFrame::PaintBorder(
-  nsDisplayListBuilder* aBuilder,
-  nsRenderingContext& aRenderingContext,
-  nsPoint aPt,
-  const nsRect& aDirtyRect)
+nsFieldSetFrame::PaintBorderBackground(nsRenderingContext& aRenderingContext,
+    nsPoint aPt, const nsRect& aDirtyRect, uint32_t aBGFlags)
 {
   // if the border is smaller than the legend. Move the border down
   // to be centered on the legend.
@@ -227,14 +223,12 @@ nsFieldSetFrame::PaintBorder(
   rect += aPt;
   nsPresContext* presContext = PresContext();
 
-  PaintBorderFlags borderFlags = aBuilder->ShouldSyncDecodeImages()
-                               ? PaintBorderFlags::SYNC_DECODE_IMAGES
-                               : PaintBorderFlags();
-
-  DrawResult result = DrawResult::SUCCESS;
+  DrawResult result =
+    nsCSSRendering::PaintBackground(presContext, aRenderingContext, this,
+                                    aDirtyRect, rect, aBGFlags);
 
   nsCSSRendering::PaintBoxShadowInner(presContext, aRenderingContext,
-                                      this, rect);
+                                      this, rect, aDirtyRect);
 
   if (nsIFrame* legend = GetLegend()) {
     css::Side legendSide = wm.PhysicalSide(eLogicalSideBStart);
@@ -259,9 +253,8 @@ nsFieldSetFrame::PaintBorder(
     gfx->Save();
     gfx->Clip(NSRectToSnappedRect(clipRect.GetPhysicalRect(wm, rect.Size()),
                                   appUnitsPerDevPixel, *drawTarget));
-    result &=
-      nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
-                                  aDirtyRect, rect, mStyleContext, borderFlags);
+    nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
+                                aDirtyRect, rect, mStyleContext);
     gfx->Restore();
 
     // draw inline-end portion of the block-start side of the border
@@ -273,9 +266,8 @@ nsFieldSetFrame::PaintBorder(
     gfx->Save();
     gfx->Clip(NSRectToSnappedRect(clipRect.GetPhysicalRect(wm, rect.Size()),
                                   appUnitsPerDevPixel, *drawTarget));
-    result &=
-      nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
-                                  aDirtyRect, rect, mStyleContext, borderFlags);
+    nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
+                                aDirtyRect, rect, mStyleContext);
     gfx->Restore();
 
     // draw remainder of the border (omitting the block-start side)
@@ -286,15 +278,14 @@ nsFieldSetFrame::PaintBorder(
     gfx->Save();
     gfx->Clip(NSRectToSnappedRect(clipRect.GetPhysicalRect(wm, rect.Size()),
                                   appUnitsPerDevPixel, *drawTarget));
-    result &=
-      nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
-                                  aDirtyRect, rect, mStyleContext, borderFlags);
+    nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
+                                aDirtyRect, rect, mStyleContext);
     gfx->Restore();
   } else {
-    result &=
-      nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
-                                  aDirtyRect, nsRect(aPt, mRect.Size()),
-                                  mStyleContext, borderFlags);
+    nsCSSRendering::PaintBorder(presContext, aRenderingContext, this,
+                                aDirtyRect,
+                                nsRect(aPt, mRect.Size()),
+                                mStyleContext);
   }
 
   return result;
@@ -579,28 +570,31 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
     // If the inner content rect is larger than the legend, we can align the
     // legend.
     if (innerContentRect.ISize(wm) > mLegendRect.ISize(wm)) {
-      // NOTE legend @align values are: left/right/center/top/bottom.
-      // GetLogicalAlign converts left/right to start/end for the given WM.
-      // @see HTMLLegendElement::ParseAttribute, nsLegendFrame::GetLogicalAlign
       int32_t align = static_cast<nsLegendFrame*>
-        (legend->GetContentInsertionFrame())->GetLogicalAlign(wm);
+        (legend->GetContentInsertionFrame())->GetAlign();
+      if (!wm.IsBidiLTR()) {
+        if (align == NS_STYLE_TEXT_ALIGN_LEFT ||
+            align == NS_STYLE_TEXT_ALIGN_MOZ_LEFT) {
+          align = NS_STYLE_TEXT_ALIGN_END;
+        } else if (align == NS_STYLE_TEXT_ALIGN_RIGHT ||
+                   align == NS_STYLE_TEXT_ALIGN_MOZ_RIGHT) {
+          align = NS_STYLE_TEXT_ALIGN_DEFAULT;
+        }
+      }
       switch (align) {
         case NS_STYLE_TEXT_ALIGN_END:
           mLegendRect.IStart(wm) =
             innerContentRect.IEnd(wm) - mLegendRect.ISize(wm);
           break;
         case NS_STYLE_TEXT_ALIGN_CENTER:
+        case NS_STYLE_TEXT_ALIGN_MOZ_CENTER:
           // Note: rounding removed; there doesn't seem to be any need
           mLegendRect.IStart(wm) = innerContentRect.IStart(wm) +
             (innerContentRect.ISize(wm) - mLegendRect.ISize(wm)) / 2;
           break;
-        case NS_STYLE_TEXT_ALIGN_START:
-        case NS_STYLE_VERTICAL_ALIGN_TOP:
-        case NS_STYLE_VERTICAL_ALIGN_BOTTOM:
+        default:
           mLegendRect.IStart(wm) = innerContentRect.IStart(wm);
           break;
-        default:
-          MOZ_ASSERT_UNREACHABLE("unexpected GetLogicalAlign value");
       }
     } else {
       // otherwise make place for the legend
@@ -659,9 +653,8 @@ void
 nsFieldSetFrame::SetInitialChildList(ChildListID    aListID,
                                      nsFrameList&   aChildList)
 {
-  nsContainerFrame::SetInitialChildList(aListID, aChildList);
-  MOZ_ASSERT(aListID != kPrincipalList || GetInner(),
-             "Setting principal child list should populate our inner frame");
+  nsContainerFrame::SetInitialChildList(kPrincipalList, aChildList);
+  MOZ_ASSERT(GetInner());
 }
 void
 nsFieldSetFrame::AppendFrames(ChildListID    aListID,

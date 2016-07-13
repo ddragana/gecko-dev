@@ -3,19 +3,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsSecureBrowserUIImpl_h
-#define nsSecureBrowserUIImpl_h
+#ifndef nsSecureBrowserUIImpl_h_
+#define nsSecureBrowserUIImpl_h_
 
-#include "PLDHashTable.h"
-#include "mozilla/ReentrancyGuard.h"
+#ifdef DEBUG
+#include "mozilla/Atomics.h"
+#endif
+#include "mozilla/ReentrantMonitor.h"
 #include "nsCOMPtr.h"
-#include "nsINetUtil.h"
-#include "nsISSLStatusProvider.h"
+#include "nsString.h"
+#include "nsIDOMElement.h"
+#include "nsIDOMWindow.h"
 #include "nsISecureBrowserUI.h"
-#include "nsISecurityEventSink.h"
-#include "nsIURI.h"
+#include "nsIDocShell.h"
+#include "nsIDocShellTreeItem.h"
 #include "nsIWebProgressListener.h"
+#include "nsIURI.h"
+#include "nsISecurityEventSink.h"
 #include "nsWeakReference.h"
+#include "nsISSLStatusProvider.h"
+#include "nsIAssociatedContentSecurity.h"
+#include "pldhash.h"
+#include "nsINetUtil.h"
 
 class nsISSLStatus;
 class nsIChannel;
@@ -29,12 +38,11 @@ class nsSecureBrowserUIImpl : public nsISecureBrowserUI,
                               public nsSupportsWeakReference,
                               public nsISSLStatusProvider
 {
-  friend class mozilla::ReentrancyGuard;
-
 public:
+  
   nsSecureBrowserUIImpl();
-
-  NS_DECL_ISUPPORTS
+  
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWEBPROGRESSLISTENER
   NS_DECL_NSISECUREBROWSERUI
   NS_DECL_NSISSLSTATUSPROVIDER
@@ -42,12 +50,14 @@ public:
 protected:
   virtual ~nsSecureBrowserUIImpl() {};
 
+  mozilla::ReentrantMonitor mReentrantMonitor;
+  
   nsWeakPtr mWindow;
   nsWeakPtr mDocShell;
   nsCOMPtr<nsINetUtil> mIOService;
   nsCOMPtr<nsIURI> mCurrentURI;
   nsCOMPtr<nsISecurityEventSink> mToplevelEventSink;
-
+  
   enum lockIconState {
     lis_no_security,
     lis_broken_security,
@@ -67,11 +77,11 @@ protected:
   int32_t mDocumentRequestsInProgress;
   int32_t mSubRequestsBrokenSecurity;
   int32_t mSubRequestsNoSecurity;
-  bool mCertUserOverridden;
   bool mRestoreSubrequests;
   bool mOnLocationChangeSeen;
 #ifdef DEBUG
-  bool mEntered; // For ReentrancyGuard.
+  /* related to mReentrantMonitor */
+  mozilla::Atomic<int32_t> mOnStateLocationChangeReentranceDetection;
 #endif
 
   static already_AddRefed<nsISupports> ExtractSecurityInfo(nsIRequest* aRequest);
@@ -93,4 +103,5 @@ protected:
   PLDHashTable mTransferringRequests;
 };
 
-#endif // nsSecureBrowserUIImpl_h
+
+#endif /* nsSecureBrowserUIImpl_h_ */

@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-requestLongerTimeout(2);
+Components.utils.import("resource://gre/modules/Promise.jsm", this);
 
-var chatbar = document.getElementById("pinnedchats");
+let chatbar = document.getElementById("pinnedchats");
 
 add_chat_task(function* testOpenCloseChat() {
   let chatbox = yield promiseOpenChat("http://example.com");
@@ -25,7 +25,9 @@ add_chat_task(function* testOpenCloseChat() {
   is(chatbar.selectedChat, null);
 
   // We check the content gets an unload event as we close it.
+  let promiseClosed = promiseOneEvent(chatbox.content, "unload", true);
   chatbox.close();
+  yield promiseClosed;
 });
 
 // In this case we open a chat minimized, then request the same chat again
@@ -80,9 +82,8 @@ add_chat_task(function* testOpenTwiceCallbacks() {
 // Bug 817782 - check chats work in new top-level windows.
 add_chat_task(function* testSecondTopLevelWindow() {
   const chatUrl = "http://example.com";
-  let winPromise = BrowserTestUtils.waitForNewWindow();
-  OpenBrowserWindow();
-  let secondWindow = yield winPromise;
+  let secondWindow = OpenBrowserWindow();
+  yield promiseOneEvent(secondWindow, "load");
   yield promiseOpenChat(chatUrl);
   // the chat was created - let's make sure it was created in the second window.
   Assert.equal(numChatsInWindow(window), 0, "main window has no chats");
@@ -129,69 +130,4 @@ add_chat_task(function* testChatWindowChooser() {
             "Private window isn't selected for new chats.");
   privateWindow.close();
   secondWindow.close();
-});
-
-add_chat_task(function* testButtonSet() {
-  let chatbox = yield promiseOpenChat("http://example.com#1");
-  let document = chatbox.ownerDocument;
-
-  // Expect all default buttons to be visible.
-  for (let buttonId of kDefaultButtonSet) {
-    let button = document.getAnonymousElementByAttribute(chatbox, "anonid", buttonId);
-    Assert.ok(!button.hidden, "Button '" + buttonId + "' should be visible");
-  }
-
-  let visible = new Set(["minimize", "close"]);
-  chatbox = yield promiseOpenChat("http://example.com#2", null, null, [...visible].join(","));
-
-  for (let buttonId of kDefaultButtonSet) {
-    let button = document.getAnonymousElementByAttribute(chatbox, "anonid", buttonId);
-    if (visible.has(buttonId)) {
-      Assert.ok(!button.hidden, "Button '" + buttonId + "' should be visible");
-    } else {
-      Assert.ok(button.hidden, "Button '" + buttonId + "' should NOT be visible");
-    }
-  }
-});
-
-add_chat_task(function* testCustomButton() {
-  let commanded = 0;
-  let customButton = {
-    id: "custom",
-    onCommand: function() {
-      ++commanded;
-    }
-  };
-
-  Chat.registerButton(customButton);
-
-  let chatbox = yield promiseOpenChat("http://example.com#1");
-  let document = chatbox.ownerDocument;
-  let titlebarNode = document.getAnonymousElementByAttribute(chatbox, "class",
-    "chat-titlebar");
-
-  Assert.equal(titlebarNode.getElementsByClassName("chat-custom")[0], null,
-    "Custom chat button should not be in the toolbar yet.");
-
-  let visible = new Set(["minimize", "close", "custom"]);
-  Chat.loadButtonSet(chatbox, [...visible].join(","));
-
-  for (let buttonId of kDefaultButtonSet) {
-    let button = document.getAnonymousElementByAttribute(chatbox, "anonid", buttonId);
-    if (visible.has(buttonId)) {
-      Assert.ok(!button.hidden, "Button '" + buttonId + "' should be visible");
-    } else {
-      Assert.ok(button.hidden, "Button '" + buttonId + "' should NOT be visible");
-    }
-  }
-
-  let customButtonNode = titlebarNode.getElementsByClassName("chat-custom")[0];
-  Assert.ok(!customButtonNode.hidden, "Custom button should be visible");
-
-  let ev = document.createEvent("XULCommandEvent");
-  ev.initCommandEvent("command", true, true, document.defaultView, 0, false,
-    false, false, false, null);
-  customButtonNode.dispatchEvent(ev);
-
-  Assert.equal(commanded, 1, "Button should have been commanded once");
 });

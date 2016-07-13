@@ -9,7 +9,7 @@ import os
 import re
 
 from mozharness.mozilla.testing.errors import TinderBoxPrintRe
-from mozharness.base.log import OutputParser, WARNING, INFO, CRITICAL, ERROR
+from mozharness.base.log import OutputParser, WARNING, INFO, CRITICAL
 from mozharness.mozilla.buildbot import TBPL_WARNING, TBPL_FAILURE, TBPL_RETRY
 from mozharness.mozilla.buildbot import TBPL_SUCCESS, TBPL_WORST_LEVEL_TUPLE
 
@@ -50,8 +50,6 @@ class TestSummaryOutputParserHelper(OutputParser):
         self.passed = 0
         self.todo = 0
         self.last_line = None
-        self.tbpl_status = TBPL_SUCCESS
-        self.worst_log_level = INFO
         super(TestSummaryOutputParserHelper, self).__init__(**kwargs)
 
     def parse_single_line(self, line):
@@ -65,18 +63,7 @@ class TestSummaryOutputParserHelper(OutputParser):
                 # ignore bad values
                 pass
 
-    def evaluate_parser(self, return_code, success_codes=None):
-        if return_code == 0 and self.passed > 0 and self.failed == 0:
-            self.tbpl_status = TBPL_SUCCESS
-        elif return_code == 10 and self.failed > 0:
-            self.tbpl_status = TBPL_WARNING
-        else:
-            self.tbpl_status = TBPL_FAILURE
-            self.worst_log_level = ERROR
-
-        return (self.tbpl_status, self.worst_log_level)
-
-    def print_summary(self, suite_name):
+    def evaluate_parser(self):
         # generate the TinderboxPrint line for TBPL
         emphasize_fail_text = '<em class="testfail">%s</em>'
         failed = "0"
@@ -87,10 +74,9 @@ class TestSummaryOutputParserHelper(OutputParser):
                 failed = emphasize_fail_text % str(self.failed)
             self.tsummary = "%d/%s/%d" % (self.passed, failed, self.todo)
 
-        self.info("TinderboxPrint: %s<br/>%s\n" % (suite_name, self.tsummary))
-
-    def append_tinderboxprint_line(self, suite_name):
-        self.print_summary(suite_name)
+    def print_summary(self, suite_name):
+        self.evaluate_parser()
+        self.info("TinderboxPrint: %s: %s\n" % (suite_name, self.tsummary))
 
 
 class DesktopUnittestOutputParser(OutputParser):
@@ -235,7 +221,7 @@ class EmulatorMixin(object):
         dirs = self.query_abs_dirs()
         self.mkdir_p(dirs['abs_emulator_dir'])
         if self.config.get('emulator_url'):
-            self.download_unzip(self.config['emulator_url'], dirs['abs_emulator_dir'])
+            self._download_unzip(self.config['emulator_url'], dirs['abs_emulator_dir'])
         elif self.config.get('emulator_manifest'):
             manifest_path = self.create_tooltool_manifest(self.config['emulator_manifest'])
             do_unzip = True

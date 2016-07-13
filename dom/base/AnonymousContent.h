@@ -25,7 +25,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(AnonymousContent)
 
   explicit AnonymousContent(Element* aContentNode);
-  Element* GetContentNode();
+  nsCOMPtr<Element> GetContentNode();
   void SetContentNode(Element* aContentNode);
   bool WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto, JS::MutableHandle<JSObject*> aReflector);
 
@@ -51,10 +51,6 @@ public:
   void RemoveAttributeForElement(const nsAString& aElementId,
                                  const nsAString& aName,
                                  ErrorResult& aRv);
-
-  already_AddRefed<nsISupports> GetCanvasContext(const nsAString& aElementId,
-                                                 const nsAString& aContextId,
-                                                 ErrorResult& aRv);
 
 private:
   ~AnonymousContent();

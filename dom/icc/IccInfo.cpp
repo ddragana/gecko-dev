@@ -37,7 +37,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IccInfo)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 NS_INTERFACE_MAP_END
 
-IccInfo::IccInfo(nsPIDOMWindowInner* aWindow)
+IccInfo::IccInfo(nsPIDOMWindow* aWindow)
   : mWindow(aWindow)
 {
   mIccType.SetIsVoid(true);
@@ -183,7 +183,7 @@ IccInfo::IsDisplaySpnRequired() const
 
 NS_IMPL_ISUPPORTS_INHERITED(GsmIccInfo, IccInfo, nsIGsmIccInfo)
 
-GsmIccInfo::GsmIccInfo(nsPIDOMWindowInner* aWindow)
+GsmIccInfo::GsmIccInfo(nsPIDOMWindow* aWindow)
   : IccInfo(aWindow)
 {
   mPhoneNumber.SetIsVoid(true);
@@ -234,7 +234,7 @@ GsmIccInfo::GetMsisdn(nsAString& aMsisdn) const
 
 NS_IMPL_ISUPPORTS_INHERITED(CdmaIccInfo, IccInfo, nsICdmaIccInfo)
 
-CdmaIccInfo::CdmaIccInfo(nsPIDOMWindowInner* aWindow)
+CdmaIccInfo::CdmaIccInfo(nsPIDOMWindow* aWindow)
   : IccInfo(aWindow)
 {
   mPhoneNumber.SetIsVoid(true);

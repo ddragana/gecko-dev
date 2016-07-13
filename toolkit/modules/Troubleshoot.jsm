@@ -12,7 +12,7 @@ Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
-var Experiments;
+let Experiments;
 try {
   Experiments = Cu.import("resource:///modules/experiments/Experiments.jsm").Experiments;
 }
@@ -47,6 +47,7 @@ const PREFS_WHITELIST = [
   "browser.fixup.",
   "browser.history_expire_",
   "browser.link.open_newwindow",
+  "browser.newtab.url",
   "browser.places.",
   "browser.privatebrowsing.",
   "browser.search.context.loadInBackground",
@@ -85,19 +86,10 @@ const PREFS_WHITELIST = [
   "print.",
   "privacy.",
   "security.",
-  "services.sync.declinedEngines",
-  "services.sync.lastPing",
-  "services.sync.lastSync",
-  "services.sync.numClients",
-  "services.sync.engine.",
   "social.enabled",
   "storage.vacuum.last.",
   "svg.",
   "toolkit.startup.recent_crashes",
-  "ui.osk.enabled",
-  "ui.osk.detect_physical_keyboard",
-  "ui.osk.require_tablet_mode",
-  "ui.osk.debug.keyboardDisplayReason",
   "webgl.",
 ];
 
@@ -175,16 +167,11 @@ this.Troubleshoot = {
 // generate the provider's data.  The function is passed a "done" callback, and
 // when done, it must pass its data to the callback.  The resulting snapshot
 // object will contain a name => data entry for each provider.
-var dataProviders = {
+let dataProviders = {
 
   application: function application(done) {
-
-    let sysInfo = Cc["@mozilla.org/system-info;1"].
-                  getService(Ci.nsIPropertyBag2);
-
     let data = {
       name: Services.appinfo.name,
-      osVersion: sysInfo.getProperty("name") + " " + sysInfo.getProperty("version"),
       version: AppConstants.MOZ_APP_VERSION_DISPLAY,
       buildID: Services.appinfo.appBuildID,
       userAgent: Cc["@mozilla.org/network/protocol;1?name=http"].
@@ -194,7 +181,7 @@ var dataProviders = {
     };
 
     if (AppConstants.MOZ_UPDATER)
-      data.updateChannel = Cu.import("resource://gre/modules/UpdateUtils.jsm", {}).UpdateUtils.UpdateChannel;
+      data.updateChannel = Cu.import("resource://gre/modules/UpdateChannel.jsm", {}).UpdateChannel.get();
 
     try {
       data.vendor = Services.prefs.getCharPref("app.support.vendor");
@@ -224,16 +211,6 @@ var dataProviders = {
 
     data.remoteAutoStart = Services.appinfo.browserTabsRemoteAutostart;
 
-    try {
-      let e10sStatus = Cc["@mozilla.org/supports-PRUint64;1"]
-                         .createInstance(Ci.nsISupportsPRUint64);
-      let appinfo = Services.appinfo.QueryInterface(Ci.nsIObserver);
-      appinfo.observe(e10sStatus, "getE10SBlocked", "");
-      data.autoStartStatus = e10sStatus.data;
-    } catch (e) {
-      data.autoStartStatus = -1;
-    }
-
     done(data);
   },
 
@@ -242,11 +219,7 @@ var dataProviders = {
       extensions.sort(function (a, b) {
         if (a.isActive != b.isActive)
           return b.isActive ? 1 : -1;
-
-        // In some unfortunate cases addon names can be null.
-        let aname = a.name || null;
-        let bname = b.name || null;
-        let lc = aname.localeCompare(bname);
+        let lc = a.name.localeCompare(b.name);
         if (lc != 0)
           return lc;
         if (a.version != b.version)
@@ -327,28 +300,18 @@ var dataProviders = {
     }
     catch (e) {}
 
-    let promises = [];
-    // done will be called upon all pending promises being resolved.
-    // add your pending promise to promises when adding new ones.
-    function completed() {
-      Promise.all(promises).then(() => done(data));
-    }
-
     data.numTotalWindows = 0;
     data.numAcceleratedWindows = 0;
     let winEnumer = Services.ww.getWindowEnumerator();
     while (winEnumer.hasMoreElements()) {
+      data.numTotalWindows++;
       let winUtils = winEnumer.getNext().
                      QueryInterface(Ci.nsIInterfaceRequestor).
                      getInterface(Ci.nsIDOMWindowUtils);
       try {
-        // NOTE: windowless browser's windows should not be reported in the graphics troubleshoot report
-        if (winUtils.layerManagerType == "None") {
-          continue;
-        }
-        data.numTotalWindows++;
         data.windowLayerManagerType = winUtils.layerManagerType;
         data.windowLayerManagerRemote = winUtils.layerManagerRemote;
+        data.supportsHardwareH264 = winUtils.supportsHardwareH264Decoding;
       }
       catch (e) {
         continue;
@@ -356,16 +319,6 @@ var dataProviders = {
       if (data.windowLayerManagerType != "Basic")
         data.numAcceleratedWindows++;
     }
-
-    let winUtils = Services.wm.getMostRecentWindow("").
-                   QueryInterface(Ci.nsIInterfaceRequestor).
-                   getInterface(Ci.nsIDOMWindowUtils)
-    data.supportsHardwareH264 = "Unknown";
-    let promise = winUtils.supportsHardwareH264Decoding;
-    promise.then(function(v) {
-      data.supportsHardwareH264 = v;
-    });
-    promises.push(promise);
 
     if (!data.numAcceleratedWindows && gfxInfo) {
       let win = AppConstants.platform == "win";
@@ -375,7 +328,7 @@ var dataProviders = {
     }
 
     if (!gfxInfo) {
-      completed();
+      done(data);
       return;
     }
 
@@ -473,10 +426,7 @@ var dataProviders = {
       }
     }
 
-    data.featureLog = gfxInfo.getFeatureLog();
-    data.crashGuards = gfxInfo.getActiveCrashGuards();
-
-    completed();
+    done(data);
   },
 
   javaScript: function javaScript(done) {

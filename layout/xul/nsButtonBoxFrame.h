@@ -32,7 +32,8 @@ public:
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
 
-  virtual void MouseClicked(mozilla::WidgetGUIEvent* aEvent)
+  virtual void MouseClicked(nsPresContext* aPresContext,
+                            mozilla::WidgetGUIEvent* aEvent)
   { DoMouseClick(aEvent, false); }
 
   void Blurred();
@@ -68,7 +69,7 @@ private:
     nsButtonBoxFrame* mButtonBoxFrame;
   };
 
-  RefPtr<nsButtonBoxListener> mButtonBoxListener;
+  nsRefPtr<nsButtonBoxListener> mButtonBoxListener;
   bool mIsHandlingKeyEvent;
 }; // class nsButtonBoxFrame
 

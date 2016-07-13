@@ -79,13 +79,13 @@ var tests = [
                 { values: "foo bar baz qux", length: 4 } ] }
 ];
 
-for (let test of tests) {
+for each (let test in tests) {
   let list = test.element;
-  for (let property of test.listProperty.split(".")) {
+  for each (let property in test.listProperty.split(".")) {
     list = list[property];
   }
 
-  for (let subtest of test.subtests) {
+  for each (let subtest in test.subtests) {
     if (subtest.values) {
       test.element.setAttribute(test.attribute, subtest.values);
     }

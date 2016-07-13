@@ -165,7 +165,7 @@ XULButtonAccessible::ContainerWidget() const
 }
 
 bool
-XULButtonAccessible::IsAcceptableChild(nsIContent* aEl) const
+XULButtonAccessible::IsAcceptableChild(Accessible* aPossibleChild) const
 {
   // In general XUL button has not accessible children. Nevertheless menu
   // buttons can have button (@type="menu-button") and popup accessibles
@@ -173,21 +173,17 @@ XULButtonAccessible::IsAcceptableChild(nsIContent* aEl) const
 
   // XXX: no children until the button is menu button. Probably it's not
   // totally correct but in general AT wants to have leaf buttons.
-  nsAutoString role;
-  nsCoreUtils::XBLBindingRole(aEl, role);
+  roles::Role role = aPossibleChild->Role();
 
   // Get an accessible for menupopup or panel elements.
-  if (role.EqualsLiteral("xul:menupopup")) {
+  if (role == roles::MENUPOPUP)
     return true;
-  }
 
   // Button type="menu-button" contains a real button. Get an accessible
   // for it. Ignore dropmarker button which is placed as a last child.
-  if ((!role.EqualsLiteral("xul:button") &&
-       !role.EqualsLiteral("xul:toolbarbutton")) ||
-      aEl->IsXULElement(nsGkAtoms::dropMarker)) {
+  if (role != roles::PUSHBUTTON ||
+      aPossibleChild->GetContent()->IsXULElement(nsGkAtoms::dropMarker))
     return false;
-  }
 
   return mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
                                nsGkAtoms::menuButton, eCaseMatters);
@@ -228,27 +224,22 @@ XULDropmarkerAccessible::DropmarkerOpen(bool aToggleOpen) const
 {
   bool isOpen = false;
 
-  nsIContent* parent = mContent->GetFlattenedTreeParent();
+  nsCOMPtr<nsIDOMXULButtonElement> parentButtonElement =
+    do_QueryInterface(mContent->GetFlattenedTreeParent());
 
-  while (parent) {
-    nsCOMPtr<nsIDOMXULButtonElement> parentButtonElement =
-      do_QueryInterface(parent);
-    if (parentButtonElement) {
-      parentButtonElement->GetOpen(&isOpen);
-      if (aToggleOpen)
-        parentButtonElement->SetOpen(!isOpen);
-      return isOpen;
-    }
-
+  if (parentButtonElement) {
+    parentButtonElement->GetOpen(&isOpen);
+    if (aToggleOpen)
+      parentButtonElement->SetOpen(!isOpen);
+  }
+  else {
     nsCOMPtr<nsIDOMXULMenuListElement> parentMenuListElement =
-      do_QueryInterface(parent);
+      do_QueryInterface(parentButtonElement);
     if (parentMenuListElement) {
       parentMenuListElement->GetOpen(&isOpen);
       if (aToggleOpen)
         parentMenuListElement->SetOpen(!isOpen);
-      return isOpen;
     }
-    parent = parent->GetFlattenedTreeParent();
   }
 
   return isOpen;

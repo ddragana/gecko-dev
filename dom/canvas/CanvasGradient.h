@@ -68,9 +68,9 @@ protected:
   {
   }
 
-  RefPtr<CanvasRenderingContext2D> mContext;
+  nsRefPtr<CanvasRenderingContext2D> mContext;
   nsTArray<mozilla::gfx::GradientStop> mRawStops;
-  RefPtr<mozilla::gfx::GradientStops> mStops;
+  mozilla::RefPtr<mozilla::gfx::GradientStops> mStops;
   Type mType;
   virtual ~CanvasGradient() {}
 };

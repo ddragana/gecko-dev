@@ -28,13 +28,13 @@ namespace {
  * Run().  Tread lightly.
  */
 class MessageLoopIdleTask
-  : public Runnable
+  : public Task
   , public SupportsWeakPtr<MessageLoopIdleTask>
 {
 public:
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(MessageLoopIdleTask)
   MessageLoopIdleTask(nsIRunnable* aTask, uint32_t aEnsureRunsAfterMS);
-  NS_IMETHOD Run() override;
+  virtual void Run();
 
 private:
   nsresult Init(uint32_t aEnsureRunsAfterMS);
@@ -95,14 +95,14 @@ MessageLoopIdleTask::Init(uint32_t aEnsureRunsAfterMS)
     return NS_ERROR_UNEXPECTED;
   }
 
-  RefPtr<MessageLoopTimerCallback> callback =
+  nsRefPtr<MessageLoopTimerCallback> callback =
     new MessageLoopTimerCallback(this);
 
   return mTimer->InitWithCallback(callback, aEnsureRunsAfterMS,
                                   nsITimer::TYPE_ONE_SHOT);
 }
 
-NS_IMETHODIMP
+/* virtual */ void
 MessageLoopIdleTask::Run()
 {
   // Null out our pointers because if Run() was called by the timer, this
@@ -118,8 +118,6 @@ MessageLoopIdleTask::Run()
     mTask->Run();
     mTask = nullptr;
   }
-
-  return NS_OK;
 }
 
 MessageLoopTimerCallback::MessageLoopTimerCallback(MessageLoopIdleTask* aTask)
@@ -152,10 +150,8 @@ nsMessageLoop::PostIdleTask(nsIRunnable* aTask, uint32_t aEnsureRunsAfterMS)
 {
   // The message loop owns MessageLoopIdleTask and deletes it after calling
   // Run().  Be careful...
-  RefPtr<MessageLoopIdleTask> idle =
-    new MessageLoopIdleTask(aTask, aEnsureRunsAfterMS);
-  MessageLoop::current()->PostIdleTask(idle.forget());
-
+  MessageLoop::current()->PostIdleTask(FROM_HERE,
+    new MessageLoopIdleTask(aTask, aEnsureRunsAfterMS));
   return NS_OK;
 }
 

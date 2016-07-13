@@ -9,9 +9,19 @@ module.metadata = {
 
 const { isValidURI, isLocalURL, URL } = require('../url');
 const { contract } = require('../util/contract');
-const { isString, isNil, instanceOf, isJSONable } = require('../lang/type');
+const { isString, isNil, instanceOf } = require('../lang/type');
 const { validateOptions,
   string, array, object, either, required } = require('../deprecated/api-utils');
+
+const isJSONable = (value) => {
+  try {
+    JSON.parse(JSON.stringify(value));
+  }
+  catch (e) {
+    return false;
+  }
+  return true;
+};
 
 const isValidScriptFile = (value) =>
   (isString(value) || instanceOf(value, URL)) && isLocalURL(value);
@@ -53,22 +63,14 @@ exports.validationAttributes = valid;
  * @param {Object} validation
  *    validation rule passed to `api-utils`
  */
-function validate(suspect, validation) {
-  return validateOptions(
-    { $: suspect },
-    { $: validation }
-  ).$;
-}
+function validate(suspect, validation) validateOptions(
+  { $: suspect },
+  { $: validation }
+).$
 
-function Allow(script) {
-  return {
-    get script() {
-      return script;
-    },
-    set script(value) {
-      script = !!value;
-    }
-  };
-}
+function Allow(script) ({
+  get script() script,
+  set script(value) script = !!value
+})
 
 exports.contract = contract(valid);

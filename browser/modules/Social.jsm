@@ -28,6 +28,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "PageMetadata",
   "resource://gre/modules/PageMetadata.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
   "resource://gre/modules/Promise.jsm");
 
@@ -93,7 +95,7 @@ this.Social = {
       // Retrieve the current set of providers, and set the current provider.
       SocialService.getOrderedProviderList(function (providers) {
         Social._updateProviderCache(providers);
-        Social._updateEnabledState(SocialService.enabled);
+        Social._updateWorkerState(SocialService.enabled);
         deferred.resolve(false);
       });
     } else {
@@ -111,14 +113,15 @@ this.Social = {
       }
       if (topic == "provider-enabled") {
         Social._updateProviderCache(providers);
-        Social._updateEnabledState(true);
+        Social._updateWorkerState(true);
         Services.obs.notifyObservers(null, "social:" + topic, origin);
         return;
       }
       if (topic == "provider-disabled") {
-        // a provider was removed from the list of providers, update states
+        // a provider was removed from the list of providers, that does not
+        // affect worker state for other providers
         Social._updateProviderCache(providers);
-        Social._updateEnabledState(providers.length > 0);
+        Social._updateWorkerState(providers.length > 0);
         Services.obs.notifyObservers(null, "social:" + topic, origin);
         return;
       }
@@ -133,10 +136,8 @@ this.Social = {
     return deferred.promise;
   },
 
-  _updateEnabledState: function(enable) {
-    for (let p of Social.providers) {
-      p.enabled = enable;
-    }
+  _updateWorkerState: function(enable) {
+    [p.enabled = enable for (p of Social.providers) if (p.enabled != enable)];
   },
 
   // Called to update our cache of providers and set the current provider
@@ -212,7 +213,7 @@ this.Social = {
         }]
       };
       PlacesUtils.asyncHistory.updatePlaces(place, {
-        handleError: () => Cu.reportError("couldn't update history for socialmark annotation"),
+        handleError: function () Cu.reportError("couldn't update history for socialmark annotation"),
         handleResult: function () {},
         handleCompletion: function () {
           promiseSetAnnotation(aURI, providerList).then(function() {
@@ -272,10 +273,13 @@ function CreateSocialStatusWidget(aId, aProvider) {
       node.setAttribute("oncommand", "SocialStatus.showPopup(this);");
       node.setAttribute("constrain-size", "true");
 
+      if (PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView))
+        node.setAttribute("disabled", "true");
+
       return node;
     }
   });
-}
+};
 
 function CreateSocialMarkWidget(aId, aProvider) {
   if (!aProvider.markURL)
@@ -310,7 +314,7 @@ function CreateSocialMarkWidget(aId, aProvider) {
       return node;
     }
   });
-}
+};
 
 
 function sizeSocialPanelToContent(panel, iframe, requestedSize) {

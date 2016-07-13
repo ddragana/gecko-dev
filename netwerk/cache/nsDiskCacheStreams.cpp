@@ -317,8 +317,10 @@ nsDiskCacheStreamIO::Close()
 {
     if (!mOutputStreamIsOpen) return NS_OK;
 
+    mozilla::TimeStamp start = mozilla::TimeStamp::Now();
+
     // grab service lock
-    nsCacheServiceAutoLock lock;
+    nsCacheServiceAutoLock lock(LOCK_TELEM(NSDISKCACHESTREAMIO_CLOSEOUTPUTSTREAM));
 
     if (!mBinding) {    // if we're severed, just clear member variables
         mOutputStreamIsOpen = false;
@@ -328,6 +330,13 @@ nsDiskCacheStreamIO::Close()
     nsresult rv = CloseOutputStream();
     if (NS_FAILED(rv))
         NS_WARNING("CloseOutputStream() failed");
+
+    mozilla::Telemetry::ID id;
+    if (NS_IsMainThread())
+        id = mozilla::Telemetry::NETWORK_DISK_CACHE_STREAMIO_CLOSE_MAIN_THREAD;
+    else
+        id = mozilla::Telemetry::NETWORK_DISK_CACHE_STREAMIO_CLOSE;
+    mozilla::Telemetry::AccumulateTimeDelta(id, start);
 
     return rv;
 }
@@ -417,7 +426,7 @@ nsDiskCacheStreamIO::Write( const char * buffer,
     }
 
     // grab service lock
-    nsCacheServiceAutoLock lock;
+    nsCacheServiceAutoLock lock(LOCK_TELEM(NSDISKCACHESTREAMIO_WRITE));
     if (!mBinding)  return NS_ERROR_NOT_AVAILABLE;
 
     if (mInStreamCount) {

@@ -6,8 +6,6 @@
 #include "ActiveElementManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/Preferences.h"
 #include "base/message_loop.h"
 #include "base/task.h"
@@ -94,20 +92,21 @@ ActiveElementManager::TriggerElementActivation()
                     // bug properly should make this unnecessary.
     MOZ_ASSERT(mSetActiveTask == nullptr);
 
-    RefPtr<CancelableRunnable> task =
-      NewCancelableRunnableMethod<nsCOMPtr<dom::Element>>(this,
-                                                          &ActiveElementManager::SetActiveTask,
-                                                          mTarget);
-    mSetActiveTask = task;
-    MessageLoop::current()->PostDelayedTask(task.forget(), sActivationDelayMs);
+    mSetActiveTask = NewRunnableMethod(
+        this, &ActiveElementManager::SetActiveTask, mTarget);
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, mSetActiveTask, sActivationDelayMs);
     AEM_LOG("Scheduling mSetActiveTask %p\n", mSetActiveTask);
   }
 }
 
 void
-ActiveElementManager::ClearActivation()
+ActiveElementManager::HandlePanStart()
 {
-  AEM_LOG("Clearing element activation\n");
+  AEM_LOG("Handle pan start\n");
+
+  // The user started to pan, so we don't want mTarget to be :active.
+  // Make it not :active, and clear any pending task to make it :active.
   CancelTask();
   ResetActive();
 }
@@ -166,7 +165,7 @@ ElementHasActiveStyle(dom::Element* aElement)
   if (!pc) {
     return false;
   }
-  StyleSetHandle styleSet = pc->StyleSet();
+  nsStyleSet* styleSet = pc->StyleSet();
   for (dom::Element* e = aElement; e; e = e->GetParentElement()) {
     if (styleSet->HasStateDependentStyle(e, NS_EVENT_STATE_ACTIVE)) {
       AEM_LOG("Element %p's style is dependent on the active state\n", e);
@@ -211,7 +210,7 @@ ActiveElementManager::ResetTouchBlockState()
 }
 
 void
-ActiveElementManager::SetActiveTask(const nsCOMPtr<dom::Element>& aTarget)
+ActiveElementManager::SetActiveTask(dom::Element* aTarget)
 {
   AEM_LOG("mSetActiveTask %p running\n", mSetActiveTask);
 

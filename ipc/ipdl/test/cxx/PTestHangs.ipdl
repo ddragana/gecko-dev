@@ -12,7 +12,7 @@ parent:
 child:
     async Start();
     intr Hang();
-    async __delete__();
+    __delete__();
 
 
 state START:

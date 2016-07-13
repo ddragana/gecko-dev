@@ -3,7 +3,7 @@
 //
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpserver.identity.primaryPort;
@@ -25,31 +25,6 @@ var teststring1 = "--" + BOUNDARY + "\r\n"
 var teststring2 = "--" + BOUNDARY + "--\r\n";
 
 const BUFFERSIZE = 4096;
-var correctOnProgress = false;
-
-var listenerCallback = {
-  QueryInterface: function (iid) {
-    if (iid.equals(Ci.nsISupports) ||
-	iid.equals(Ci.nsIProgressEventSink))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-
-  getInterface: function (iid) {
-    if (iid.equals(Ci.nsIProgressEventSink))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-
-  onProgress: function (request, context, progress, progressMax) {
-    // this works because the response is 0 bytes and does not trigger onprogress
-    if (progress === progressMax) {
-      correctOnProgress = true;
-    }
-  },
-
-    onStatus: function (request, context, status, statusArg) { },
-};
 
 function run_test() {
   var sstream1 = Cc["@mozilla.org/io/string-input-stream;1"].
@@ -88,14 +63,23 @@ function run_test() {
   channel.QueryInterface(Ci.nsIUploadChannel)
          .setUploadStream(mime, "", mime.available());
   channel.requestMethod = "POST";
-  channel.notificationCallbacks = listenerCallback;
-  channel.asyncOpen2(new ChannelListener(checkRequest, channel));
+
+  channel.asyncOpen(new ChannelListener(checkRequest, channel), null);
+
   do_test_pending();
 }
 
 function setupChannel(path) {
-  return NetUtil.newChannel({uri: URL + path, loadUsingSystemPrincipal: true})
-                .QueryInterface(Ci.nsIHttpChannel);
+  var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
+  return chan = ios.newChannel2(URL + path,
+                               "",
+                               null,
+                               null,      // aLoadingNode
+                               Services.scriptSecurityManager.getSystemPrincipal(),
+                               null,      // aTriggeringPrincipal
+                               Ci.nsILoadInfo.SEC_NORMAL,
+                               Ci.nsIContentPolicy.TYPE_OTHER)
+                   .QueryInterface(Ci.nsIHttpChannel);
 }
 
 function serverHandler(metadata, response) {
@@ -115,6 +99,5 @@ function serverHandler(metadata, response) {
 }
 
 function checkRequest(request, data, context) {
-  do_check_true(correctOnProgress);
   httpserver.stop(do_test_finished);
 }

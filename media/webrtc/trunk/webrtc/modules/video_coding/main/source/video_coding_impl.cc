@@ -16,20 +16,25 @@
 #include "webrtc/modules/video_coding/main/source/packet.h"
 #include "webrtc/modules/video_coding/main/source/video_coding_impl.h"
 #include "webrtc/system_wrappers/interface/clock.h"
+#include "webrtc/system_wrappers/interface/trace_event.h"
 
 namespace webrtc {
 namespace vcm {
 
-int64_t
+uint32_t
 VCMProcessTimer::Period() const {
     return _periodMs;
 }
 
-int64_t
+uint32_t
 VCMProcessTimer::TimeUntilProcess() const {
-    const int64_t time_since_process = _clock->TimeInMilliseconds() - _latestMs;
-    const int64_t time_until_process = _periodMs - time_since_process;
-    return std::max<int64_t>(time_until_process, 0);
+    const int64_t time_since_process = _clock->TimeInMilliseconds() -
+        static_cast<int64_t>(_latestMs);
+    const int64_t time_until_process = static_cast<int64_t>(_periodMs) -
+        time_since_process;
+    if (time_until_process < 0)
+      return 0;
+    return time_until_process;
 }
 
 void
@@ -54,7 +59,7 @@ class EncodedImageCallbackWrapper : public EncodedImageCallback {
   }
 
   // TODO(andresp): Change to void as return value is ignored.
-  virtual int32_t Encoded(const EncodedImage& encoded_image,
+  virtual int32_t Encoded(EncodedImage& encoded_image,
                           const CodecSpecificInfo* codec_specific_info,
                           const RTPFragmentationHeader* fragmentation) {
     CriticalSectionScoped cs(cs_.get());
@@ -65,7 +70,7 @@ class EncodedImageCallbackWrapper : public EncodedImageCallback {
   }
 
  private:
-  rtc::scoped_ptr<CriticalSectionWrapper> cs_;
+  scoped_ptr<CriticalSectionWrapper> cs_;
   EncodedImageCallback* callback_ GUARDED_BY(cs_);
 };
 
@@ -73,12 +78,9 @@ class VideoCodingModuleImpl : public VideoCodingModule {
  public:
   VideoCodingModuleImpl(Clock* clock,
                         EventFactory* event_factory,
-                        bool owns_event_factory,
-                        VideoEncoderRateObserver* encoder_rate_observer)
+                        bool owns_event_factory)
       : VideoCodingModule(),
-        sender_(new vcm::VideoSender(clock,
-                                     &post_encode_callback_,
-                                     encoder_rate_observer)),
+        sender_(new vcm::VideoSender(clock, &post_encode_callback_)),
         receiver_(new vcm::VideoReceiver(clock, event_factory)),
         own_event_factory_(owns_event_factory ? event_factory : NULL) {}
 
@@ -88,15 +90,15 @@ class VideoCodingModuleImpl : public VideoCodingModule {
     own_event_factory_.reset();
   }
 
-  int64_t TimeUntilNextProcess() override {
-    int64_t sender_time = sender_->TimeUntilNextProcess();
-    int64_t receiver_time = receiver_->TimeUntilNextProcess();
+  virtual int32_t TimeUntilNextProcess() OVERRIDE {
+    int32_t sender_time = sender_->TimeUntilNextProcess();
+    int32_t receiver_time = receiver_->TimeUntilNextProcess();
     assert(sender_time >= 0);
     assert(receiver_time >= 0);
     return VCM_MIN(sender_time, receiver_time);
   }
 
-  int32_t Process() override {
+  virtual int32_t Process() OVERRIDE {
     int32_t sender_return = sender_->Process();
     int32_t receiver_return = receiver_->Process();
     if (sender_return != VCM_OK)
@@ -104,248 +106,272 @@ class VideoCodingModuleImpl : public VideoCodingModule {
     return receiver_return;
   }
 
-  int32_t InitializeSender() override { return sender_->InitializeSender(); }
+  virtual int32_t InitializeSender() OVERRIDE {
+    return sender_->InitializeSender();
+  }
 
-  int32_t RegisterSendCodec(const VideoCodec* sendCodec,
-                            uint32_t numberOfCores,
-                            uint32_t maxPayloadSize) override {
+  virtual int32_t RegisterSendCodec(const VideoCodec* sendCodec,
+                                    uint32_t numberOfCores,
+                                    uint32_t maxPayloadSize) OVERRIDE {
     return sender_->RegisterSendCodec(sendCodec, numberOfCores, maxPayloadSize);
   }
 
-  const VideoCodec& GetSendCodec() const override {
-    return sender_->GetSendCodec();
+  virtual int32_t SendCodec(VideoCodec* currentSendCodec) const OVERRIDE {
+    return sender_->SendCodec(currentSendCodec);
   }
 
-  // DEPRECATED.
-  int32_t SendCodec(VideoCodec* currentSendCodec) const override {
-    return sender_->SendCodecBlocking(currentSendCodec);
+  virtual VideoCodecType SendCodec() const OVERRIDE {
+    return sender_->SendCodec();
   }
 
-  // DEPRECATED.
-  VideoCodecType SendCodec() const override {
-    return sender_->SendCodecBlocking();
-  }
-
-  int32_t RegisterExternalEncoder(VideoEncoder* externalEncoder,
-                                  uint8_t payloadType,
-                                  bool internalSource) override {
+  virtual int32_t RegisterExternalEncoder(VideoEncoder* externalEncoder,
+                                          uint8_t payloadType,
+                                          bool internalSource) OVERRIDE {
     return sender_->RegisterExternalEncoder(
         externalEncoder, payloadType, internalSource);
   }
 
-  int32_t CodecConfigParameters(uint8_t* buffer, int32_t size) override {
+  virtual int32_t CodecConfigParameters(uint8_t* buffer,
+                                        int32_t size) OVERRIDE {
     return sender_->CodecConfigParameters(buffer, size);
   }
 
-  int Bitrate(unsigned int* bitrate) const override {
+  virtual int Bitrate(unsigned int* bitrate) const OVERRIDE {
     return sender_->Bitrate(bitrate);
   }
 
-  int FrameRate(unsigned int* framerate) const override {
+  virtual int FrameRate(unsigned int* framerate) const OVERRIDE {
     return sender_->FrameRate(framerate);
   }
 
-  int32_t SetChannelParameters(uint32_t target_bitrate,  // bits/s.
-                               uint8_t lossRate,
-                               int64_t rtt) override {
+  virtual int32_t SetChannelParameters(uint32_t target_bitrate,  // bits/s.
+                                       uint8_t lossRate,
+                                       uint32_t rtt) OVERRIDE {
     return sender_->SetChannelParameters(target_bitrate, lossRate, rtt);
   }
 
-  int32_t RegisterTransportCallback(
-      VCMPacketizationCallback* transport) override {
+  virtual int32_t RegisterTransportCallback(
+      VCMPacketizationCallback* transport) OVERRIDE {
     return sender_->RegisterTransportCallback(transport);
   }
 
-  int32_t RegisterSendStatisticsCallback(
-      VCMSendStatisticsCallback* sendStats) override {
+  virtual int32_t RegisterSendStatisticsCallback(
+      VCMSendStatisticsCallback* sendStats) OVERRIDE {
     return sender_->RegisterSendStatisticsCallback(sendStats);
   }
 
-  int32_t RegisterVideoQMCallback(
-      VCMQMSettingsCallback* videoQMSettings) override {
+  virtual int32_t RegisterVideoQMCallback(
+      VCMQMSettingsCallback* videoQMSettings) OVERRIDE {
     return sender_->RegisterVideoQMCallback(videoQMSettings);
   }
 
-  int32_t RegisterProtectionCallback(
-      VCMProtectionCallback* protection) override {
+  virtual int32_t RegisterProtectionCallback(
+      VCMProtectionCallback* protection) OVERRIDE {
     return sender_->RegisterProtectionCallback(protection);
   }
 
-  int32_t SetVideoProtection(VCMVideoProtection videoProtection,
-                             bool enable) override {
-    sender_->SetVideoProtection(enable, videoProtection);
-    return receiver_->SetVideoProtection(videoProtection, enable);
+  virtual int32_t SetVideoProtection(VCMVideoProtection videoProtection,
+                                     bool enable) OVERRIDE {
+    int32_t sender_return =
+        sender_->SetVideoProtection(videoProtection, enable);
+    int32_t receiver_return =
+        receiver_->SetVideoProtection(videoProtection, enable);
+    if (sender_return == VCM_OK)
+      return receiver_return;
+    return sender_return;
   }
 
-  int32_t AddVideoFrame(const I420VideoFrame& videoFrame,
-                        const VideoContentMetrics* contentMetrics,
-                        const CodecSpecificInfo* codecSpecificInfo) override {
+  virtual int32_t AddVideoFrame(
+      const I420VideoFrame& videoFrame,
+      const VideoContentMetrics* contentMetrics,
+      const CodecSpecificInfo* codecSpecificInfo) OVERRIDE {
     return sender_->AddVideoFrame(
         videoFrame, contentMetrics, codecSpecificInfo);
   }
 
-  int32_t IntraFrameRequest(int stream_index) override {
+  virtual int32_t IntraFrameRequest(int stream_index) OVERRIDE {
     return sender_->IntraFrameRequest(stream_index);
   }
 
-  int32_t EnableFrameDropper(bool enable) override {
+  virtual int32_t EnableFrameDropper(bool enable) OVERRIDE {
     return sender_->EnableFrameDropper(enable);
   }
 
-  int32_t SentFrameCount(VCMFrameCount& frameCount) const override {
+  virtual int32_t SentFrameCount(VCMFrameCount& frameCount) const OVERRIDE {
     return sender_->SentFrameCount(&frameCount);
   }
 
-  int StartDebugRecording(const char* file_name_utf8) override {
+  virtual int SetSenderNackMode(SenderNackMode mode) OVERRIDE {
+    return sender_->SetSenderNackMode(mode);
+  }
+
+  virtual int SetSenderReferenceSelection(bool enable) OVERRIDE {
+    return sender_->SetSenderReferenceSelection(enable);
+  }
+
+  virtual int SetSenderFEC(bool enable) OVERRIDE {
+    return sender_->SetSenderFEC(enable);
+  }
+
+  virtual int SetSenderKeyFramePeriod(int periodMs) OVERRIDE {
+    return sender_->SetSenderKeyFramePeriod(periodMs);
+  }
+
+  virtual int StartDebugRecording(const char* file_name_utf8) OVERRIDE {
     return sender_->StartDebugRecording(file_name_utf8);
   }
 
-  int StopDebugRecording() override {
+  virtual int StopDebugRecording() OVERRIDE {
     sender_->StopDebugRecording();
     return VCM_OK;
   }
 
-  void SuspendBelowMinBitrate() override {
+  virtual void SuspendBelowMinBitrate() OVERRIDE {
     return sender_->SuspendBelowMinBitrate();
   }
 
-  bool VideoSuspended() const override { return sender_->VideoSuspended(); }
+  virtual bool VideoSuspended() const OVERRIDE {
+    return sender_->VideoSuspended();
+  }
 
-  int32_t InitializeReceiver() override {
+  virtual int32_t InitializeReceiver() OVERRIDE {
     return receiver_->InitializeReceiver();
   }
 
-  int32_t RegisterReceiveCodec(const VideoCodec* receiveCodec,
-                               int32_t numberOfCores,
-                               bool requireKeyFrame) override {
+  virtual int32_t RegisterReceiveCodec(const VideoCodec* receiveCodec,
+                                       int32_t numberOfCores,
+                                       bool requireKeyFrame) OVERRIDE {
     return receiver_->RegisterReceiveCodec(
         receiveCodec, numberOfCores, requireKeyFrame);
   }
 
-  int32_t RegisterExternalDecoder(VideoDecoder* externalDecoder,
-                                  uint8_t payloadType,
-                                  bool internalRenderTiming) override {
+  virtual int32_t RegisterExternalDecoder(VideoDecoder* externalDecoder,
+                                          uint8_t payloadType,
+                                          bool internalRenderTiming) OVERRIDE {
     return receiver_->RegisterExternalDecoder(
         externalDecoder, payloadType, internalRenderTiming);
   }
 
-  int32_t RegisterReceiveCallback(
-      VCMReceiveCallback* receiveCallback) override {
+  virtual int32_t RegisterReceiveCallback(
+      VCMReceiveCallback* receiveCallback) OVERRIDE {
     return receiver_->RegisterReceiveCallback(receiveCallback);
   }
 
-  int32_t RegisterReceiveStatisticsCallback(
-      VCMReceiveStatisticsCallback* receiveStats) override {
+  virtual int32_t RegisterReceiveStatisticsCallback(
+      VCMReceiveStatisticsCallback* receiveStats) OVERRIDE {
     return receiver_->RegisterReceiveStatisticsCallback(receiveStats);
   }
 
-  int32_t RegisterDecoderTimingCallback(
-      VCMDecoderTimingCallback* decoderTiming) override {
+  virtual int32_t RegisterDecoderTimingCallback(
+      VCMDecoderTimingCallback* decoderTiming) OVERRIDE {
     return receiver_->RegisterDecoderTimingCallback(decoderTiming);
   }
 
-  int32_t RegisterFrameTypeCallback(
-      VCMFrameTypeCallback* frameTypeCallback) override {
+  virtual int32_t RegisterFrameTypeCallback(
+      VCMFrameTypeCallback* frameTypeCallback) OVERRIDE {
     return receiver_->RegisterFrameTypeCallback(frameTypeCallback);
   }
 
-  int32_t RegisterPacketRequestCallback(
-      VCMPacketRequestCallback* callback) override {
+  virtual int32_t RegisterPacketRequestCallback(
+      VCMPacketRequestCallback* callback) OVERRIDE {
     return receiver_->RegisterPacketRequestCallback(callback);
   }
 
   virtual int32_t RegisterReceiveStateCallback(
-      VCMReceiveStateCallback* callback) override {
+      VCMReceiveStateCallback* callback) OVERRIDE {
     return receiver_->RegisterReceiveStateCallback(callback);
   }
 
-  int RegisterRenderBufferSizeCallback(
-      VCMRenderBufferSizeCallback* callback) override {
+  virtual int RegisterRenderBufferSizeCallback(
+      VCMRenderBufferSizeCallback* callback) OVERRIDE {
     return receiver_->RegisterRenderBufferSizeCallback(callback);
   }
 
-  int32_t Decode(uint16_t maxWaitTimeMs) override {
+  virtual int32_t Decode(uint16_t maxWaitTimeMs) OVERRIDE {
     return receiver_->Decode(maxWaitTimeMs);
   }
 
-  int32_t ResetDecoder() override { return receiver_->ResetDecoder(); }
+  virtual int32_t DecodeDualFrame(uint16_t maxWaitTimeMs) OVERRIDE {
+    return receiver_->DecodeDualFrame(maxWaitTimeMs);
+  }
 
-  int32_t ReceiveCodec(VideoCodec* currentReceiveCodec) const override {
+  virtual int32_t ResetDecoder() OVERRIDE { return receiver_->ResetDecoder(); }
+
+  virtual int32_t ReceiveCodec(VideoCodec* currentReceiveCodec) const OVERRIDE {
     return receiver_->ReceiveCodec(currentReceiveCodec);
   }
 
-  VideoCodecType ReceiveCodec() const override {
+  virtual VideoCodecType ReceiveCodec() const OVERRIDE {
     return receiver_->ReceiveCodec();
   }
 
-  int32_t IncomingPacket(const uint8_t* incomingPayload,
-                         size_t payloadLength,
-                         const WebRtcRTPHeader& rtpInfo) override {
+  virtual int32_t IncomingPacket(const uint8_t* incomingPayload,
+                                 uint32_t payloadLength,
+                                 const WebRtcRTPHeader& rtpInfo) OVERRIDE {
     return receiver_->IncomingPacket(incomingPayload, payloadLength, rtpInfo);
   }
 
-  int32_t SetMinimumPlayoutDelay(uint32_t minPlayoutDelayMs) override {
+  virtual int32_t SetMinimumPlayoutDelay(uint32_t minPlayoutDelayMs) OVERRIDE {
     return receiver_->SetMinimumPlayoutDelay(minPlayoutDelayMs);
   }
 
-  int32_t SetRenderDelay(uint32_t timeMS) override {
+  virtual int32_t SetRenderDelay(uint32_t timeMS) OVERRIDE {
     return receiver_->SetRenderDelay(timeMS);
   }
 
-  int32_t Delay() const override { return receiver_->Delay(); }
+  virtual int32_t Delay() const OVERRIDE { return receiver_->Delay(); }
 
-  uint32_t DiscardedPackets() const override {
+  virtual int32_t ReceivedFrameCount(VCMFrameCount& frameCount) const OVERRIDE {
+    return receiver_->ReceivedFrameCount(&frameCount);
+  }
+
+  virtual uint32_t DiscardedPackets() const OVERRIDE {
     return receiver_->DiscardedPackets();
   }
 
-  int SetReceiverRobustnessMode(ReceiverRobustness robustnessMode,
-                                VCMDecodeErrorMode errorMode) override {
+  virtual int SetReceiverRobustnessMode(ReceiverRobustness robustnessMode,
+                                        VCMDecodeErrorMode errorMode) OVERRIDE {
     return receiver_->SetReceiverRobustnessMode(robustnessMode, errorMode);
   }
 
-  void SetNackSettings(size_t max_nack_list_size,
-                       int max_packet_age_to_nack,
-                       int max_incomplete_time_ms) override {
+  virtual void SetNackSettings(size_t max_nack_list_size,
+                               int max_packet_age_to_nack,
+                               int max_incomplete_time_ms) OVERRIDE {
     return receiver_->SetNackSettings(
         max_nack_list_size, max_packet_age_to_nack, max_incomplete_time_ms);
   }
 
-  void SetDecodeErrorMode(VCMDecodeErrorMode decode_error_mode) override {
+  void SetDecodeErrorMode(VCMDecodeErrorMode decode_error_mode) OVERRIDE {
     return receiver_->SetDecodeErrorMode(decode_error_mode);
   }
 
-  int SetMinReceiverDelay(int desired_delay_ms) override {
+  virtual int SetMinReceiverDelay(int desired_delay_ms) OVERRIDE {
     return receiver_->SetMinReceiverDelay(desired_delay_ms);
   }
 
-  virtual void SetCPULoadState(CPULoadState state) override {
+  virtual void SetCPULoadState(CPULoadState state) OVERRIDE {
     return sender_->SetCPULoadState(state);
   }
 
-  int32_t SetReceiveChannelParameters(int64_t rtt) override {
+  virtual int32_t SetReceiveChannelParameters(uint32_t rtt) OVERRIDE {
     return receiver_->SetReceiveChannelParameters(rtt);
   }
 
-  void RegisterPreDecodeImageCallback(EncodedImageCallback* observer) override {
+  virtual void RegisterPreDecodeImageCallback(
+      EncodedImageCallback* observer) OVERRIDE {
     receiver_->RegisterPreDecodeImageCallback(observer);
   }
 
-  void RegisterPostEncodeImageCallback(
-      EncodedImageCallback* observer) override {
+  virtual void RegisterPostEncodeImageCallback(
+      EncodedImageCallback* observer) OVERRIDE {
     post_encode_callback_.Register(observer);
-  }
-
-  void TriggerDecoderShutdown() override {
-    receiver_->TriggerDecoderShutdown();
   }
 
  private:
   EncodedImageCallbackWrapper post_encode_callback_;
-  // TODO(tommi): Change sender_ and receiver_ to be non pointers
-  // (construction is 1 alloc instead of 3).
-  rtc::scoped_ptr<vcm::VideoSender> sender_;
-  rtc::scoped_ptr<vcm::VideoReceiver> receiver_;
-  rtc::scoped_ptr<EventFactory> own_event_factory_;
+  scoped_ptr<vcm::VideoSender> sender_;
+  scoped_ptr<vcm::VideoReceiver> receiver_;
+  scoped_ptr<EventFactory> own_event_factory_;
 };
 }  // namespace
 
@@ -367,19 +393,16 @@ int32_t VideoCodingModule::Codec(VideoCodecType codecType, VideoCodec* codec) {
   return VCMCodecDataBase::Codec(codecType, codec) ? 0 : -1;
 }
 
-VideoCodingModule* VideoCodingModule::Create(
-    VideoEncoderRateObserver* encoder_rate_observer) {
-  return new VideoCodingModuleImpl(Clock::GetRealTimeClock(),
-                                   new EventFactoryImpl, true,
-                                   encoder_rate_observer);
+VideoCodingModule* VideoCodingModule::Create() {
+  return new VideoCodingModuleImpl(
+      Clock::GetRealTimeClock(), new EventFactoryImpl, true);
 }
 
-VideoCodingModule* VideoCodingModule::Create(
-    Clock* clock,
-    EventFactory* event_factory) {
+VideoCodingModule* VideoCodingModule::Create(Clock* clock,
+                                             EventFactory* event_factory) {
   assert(clock);
   assert(event_factory);
-  return new VideoCodingModuleImpl(clock, event_factory, false, nullptr);
+  return new VideoCodingModuleImpl(clock, event_factory, false);
 }
 
 void VideoCodingModule::Destroy(VideoCodingModule* module) {

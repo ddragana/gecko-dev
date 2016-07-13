@@ -30,7 +30,6 @@ class MemoryStream;
 class HttpRequest {
 public:
   HttpRequest(const std::string &user_agent);
-  ~HttpRequest();
 
   void Send();
 

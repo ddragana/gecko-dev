@@ -62,7 +62,10 @@ nsresult
 txRtfHandler::getAsRTF(txAExprResult** aResult)
 {
     *aResult = new txResultTreeFragment(Move(mBuffer));
+    NS_ENSURE_TRUE(*aResult, NS_ERROR_OUT_OF_MEMORY);
+
     NS_ADDREF(*aResult);
+
     return NS_OK;
 }
 

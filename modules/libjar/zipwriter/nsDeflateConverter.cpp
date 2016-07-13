@@ -9,14 +9,12 @@
 #include "nsIInputStreamPump.h"
 #include "nsComponentManagerUtils.h"
 #include "nsMemory.h"
+#include "nsAutoPtr.h"
 #include "plstr.h"
-#include "mozilla/UniquePtr.h"
 
 #define ZLIB_TYPE "deflate"
 #define GZIP_TYPE "gzip"
 #define X_GZIP_TYPE "x-gzip"
-
-using namespace mozilla;
 
 /**
  * nsDeflateConverter is a stream converter applies the deflate compression
@@ -62,6 +60,8 @@ nsresult nsDeflateConverter::Init()
     return NS_OK;
 }
 
+/* nsIInputStream convert (in nsIInputStream aFromStream, in string aFromType
+ *                         in string aToType, in nsISupports aCtxt); */
 NS_IMETHODIMP nsDeflateConverter::Convert(nsIInputStream *aFromStream,
                                           const char *aFromType,
                                           const char *aToType,
@@ -71,6 +71,9 @@ NS_IMETHODIMP nsDeflateConverter::Convert(nsIInputStream *aFromStream,
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void asyncConvertData (in string aFromType, in string aToType,
+ *                        in nsIStreamListener aListener,
+ *                        in nsISupports aCtxt); */
 NS_IMETHODIMP nsDeflateConverter::AsyncConvertData(const char *aFromType,
                                                    const char *aToType,
                                                    nsIStreamListener *aListener,
@@ -97,6 +100,10 @@ NS_IMETHODIMP nsDeflateConverter::AsyncConvertData(const char *aFromType,
     return rv;
 }
 
+/* void onDataAvailable (in nsIRequest aRequest, in nsISupports aContext,
+ *                       in nsIInputStream aInputStream,
+ *                       in unsigned long long aOffset,
+ *                       in unsigned long aCount); */
 NS_IMETHODIMP nsDeflateConverter::OnDataAvailable(nsIRequest *aRequest,
                                                   nsISupports *aContext,
                                                   nsIInputStream *aInputStream,
@@ -106,7 +113,7 @@ NS_IMETHODIMP nsDeflateConverter::OnDataAvailable(nsIRequest *aRequest,
     if (!mListener)
         return NS_ERROR_NOT_INITIALIZED;
 
-    auto buffer = MakeUnique<char[]>(aCount);
+    nsAutoArrayPtr<char> buffer(new char[aCount]);
     NS_ENSURE_TRUE(buffer, NS_ERROR_OUT_OF_MEMORY);
 
     nsresult rv = ZW_ReadData(aInputStream, buffer.get(), aCount);
@@ -132,6 +139,7 @@ NS_IMETHODIMP nsDeflateConverter::OnDataAvailable(nsIRequest *aRequest,
     return NS_OK;
 }
 
+/* void onStartRequest (in nsIRequest aRequest, in nsISupports aContext); */
 NS_IMETHODIMP nsDeflateConverter::OnStartRequest(nsIRequest *aRequest,
                                                  nsISupports *aContext)
 {
@@ -141,6 +149,8 @@ NS_IMETHODIMP nsDeflateConverter::OnStartRequest(nsIRequest *aRequest,
     return mListener->OnStartRequest(aRequest, mContext);
 }
 
+/* void onStopRequest (in nsIRequest aRequest, in nsISupports aContext,
+ *                     in nsresult aStatusCode); */
 NS_IMETHODIMP nsDeflateConverter::OnStopRequest(nsIRequest *aRequest,
                                                 nsISupports *aContext,
                                                 nsresult aStatusCode)

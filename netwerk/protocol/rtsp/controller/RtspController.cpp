@@ -42,11 +42,12 @@
 #include <algorithm>
 #include "nsDebug.h"
 
+extern PRLogModuleInfo* gRtspLog;
+#undef LOG
+#define LOG(args) MOZ_LOG(gRtspLog, mozilla::LogLevel::Debug, args)
+
 namespace mozilla {
 namespace net {
-extern LazyLogModule gRtspLog;
-#undef LOG
-#define LOG(args) MOZ_LOG(mozilla::net::gRtspLog, mozilla::LogLevel::Debug, args)
 
 //-----------------------------------------------------------------------------
 // RtspController
@@ -195,7 +196,7 @@ RtspController::AsyncOpen(nsIStreamingProtocolListener *aListener)
 //-----------------------------------------------------------------------------
 // nsIStreamingProtocolListener
 //-----------------------------------------------------------------------------
-class SendMediaDataTask : public Runnable
+class SendMediaDataTask : public nsRunnable
 {
 public:
   SendMediaDataTask(nsIStreamingProtocolListener *listener,
@@ -226,7 +227,7 @@ private:
   nsCString mData;
   uint32_t mLength;
   uint32_t mOffset;
-  RefPtr<nsIStreamingProtocolMetaData> mMetaData;
+  nsRefPtr<nsIStreamingProtocolMetaData> mMetaData;
   nsCOMPtr<nsIStreamingProtocolListener> mListener;
 };
 
@@ -238,14 +239,14 @@ RtspController::OnMediaDataAvailable(uint8_t index,
                                      nsIStreamingProtocolMetaData *meta)
 {
   if (mListener && mState == CONNECTED) {
-    RefPtr<SendMediaDataTask> task =
+    nsRefPtr<SendMediaDataTask> task =
       new SendMediaDataTask(mListener, index, data, length, offset, meta);
     return NS_DispatchToMainThread(task);
   }
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-class SendOnConnectedTask : public Runnable
+class SendOnConnectedTask : public nsRunnable
 {
 public:
   SendOnConnectedTask(nsIStreamingProtocolListener *listener,
@@ -266,7 +267,7 @@ public:
 private:
   nsCOMPtr<nsIStreamingProtocolListener> mListener;
   uint8_t mIndex;
-  RefPtr<nsIStreamingProtocolMetaData> mMetaData;
+  nsRefPtr<nsIStreamingProtocolMetaData> mMetaData;
 };
 
 
@@ -277,14 +278,14 @@ RtspController::OnConnected(uint8_t index,
   LOG(("RtspController::OnConnected()"));
   mState = CONNECTED;
   if (mListener) {
-    RefPtr<SendOnConnectedTask> task =
+    nsRefPtr<SendOnConnectedTask> task =
       new SendOnConnectedTask(mListener, index, meta);
     return NS_DispatchToMainThread(task);
   }
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-class SendOnDisconnectedTask : public Runnable
+class SendOnDisconnectedTask : public nsRunnable
 {
 public:
   SendOnDisconnectedTask(nsIStreamingProtocolListener *listener,
@@ -316,7 +317,7 @@ RtspController::OnDisconnected(uint8_t index,
   mState = DISCONNECTED;
 
   if (mListener) {
-    RefPtr<SendOnDisconnectedTask> task =
+    nsRefPtr<SendOnDisconnectedTask> task =
       new SendOnDisconnectedTask(mListener, index, reason);
     // Break the cycle reference between the Listener (RtspControllerParent) and
     // us.

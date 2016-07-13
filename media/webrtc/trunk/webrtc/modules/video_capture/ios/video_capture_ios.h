@@ -26,10 +26,11 @@ class VideoCaptureIos : public VideoCaptureImpl {
                                     const char* device_unique_id_utf8);
 
   // Implementation of VideoCaptureImpl.
-  int32_t StartCapture(const VideoCaptureCapability& capability) override;
-  int32_t StopCapture() override;
-  bool CaptureStarted() override;
-  int32_t CaptureSettings(VideoCaptureCapability& settings) override;
+  virtual int32_t StartCapture(
+      const VideoCaptureCapability& capability) OVERRIDE;
+  virtual int32_t StopCapture() OVERRIDE;
+  virtual bool CaptureStarted() OVERRIDE;
+  virtual int32_t CaptureSettings(VideoCaptureCapability& settings) OVERRIDE;
 
  private:
   RTCVideoCaptureIosObjC* capture_device_;

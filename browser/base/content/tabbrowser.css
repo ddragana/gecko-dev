@@ -19,23 +19,8 @@
 }
 
 .tab-close-button[pinned],
-.tabbrowser-tabs[closebuttons="activetab"] > * > * > * > .tab-close-button:not([visuallyselected="true"]),
-.tab-icon-image:not([src]):not([pinned]):not([crashed])[selected],
-.tab-icon-image:not([src]):not([pinned]):not([crashed]):not([sharing]),
-.tab-icon-image[busy],
-.tab-throbber:not([busy]),
-.tab-icon-sound:not([soundplaying]):not([muted]),
-.tab-icon-sound[pinned],
-.tab-sharing-icon-overlay,
-.tab-icon-overlay {
+.tabbrowser-tabs[closebuttons="activetab"] > * > * > * > .tab-close-button:not([visuallyselected="true"]) {
   display: none;
-}
-
-.tab-sharing-icon-overlay[sharing]:not([selected]),
-.tab-icon-overlay[soundplaying][pinned],
-.tab-icon-overlay[muted][pinned],
-.tab-icon-overlay[crashed] {
-  display: -moz-box;
 }
 
 .tab-label[pinned] {
@@ -66,6 +51,13 @@ tabpanels {
   }
 }
 
+.tab-icon-image:not([src]):not([pinned]):not([crashed]),
+.tab-throbber:not([busy]),
+.tab-icon-image[busy],
+.tab-icon-overlay[busy] {
+  display: none;
+}
+
 .closing-tabs-spacer {
   pointer-events: none;
 }
@@ -92,6 +84,6 @@ tabbrowser[pendingpaint] {
   background-image: url(chrome://browser/skin/tabbrowser/pendingpaint.png);
   background-repeat: no-repeat;
   background-position: center center;
-  background-color: #f9f9f9 !important;
-  background-size: 30px;
+  background-color: #fff;
+  opacity: 0.3;
 }

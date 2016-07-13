@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "js/HashTable.h"
-#include "js/Utility.h"
 #include "jsapi-tests/tests.h"
 
 //#define FUZZ
@@ -109,9 +108,8 @@ AddLowKeys(IntMap* am, IntMap* bm, int seed)
         if (!am->has(n)) {
             if (bm->has(n))
                 return false;
-
-            if (!am->putNew(n, n) || !bm->putNew(n, n))
-                return false;
+            am->putNew(n, n);
+            bm->putNew(n, n);
             i++;
         }
     }
@@ -128,8 +126,8 @@ AddLowKeys(IntSet* as, IntSet* bs, int seed)
         if (!as->has(n)) {
             if (bs->has(n))
                 return false;
-            if (!as->putNew(n) || !bs->putNew(n))
-                return false;
+            as->putNew(n);
+            bs->putNew(n);
             i++;
         }
     }
@@ -140,8 +138,7 @@ template <class NewKeyFunction>
 static bool
 SlowRekey(IntMap* m) {
     IntMap tmp;
-    if (!tmp.init())
-        return false;
+    tmp.init();
 
     for (IntMap::Range r = m->all(); !r.empty(); r.popFront()) {
         if (NewKeyFunction::shouldBeRemoved(r.front().key()))
@@ -149,14 +146,12 @@ SlowRekey(IntMap* m) {
         uint32_t hi = NewKeyFunction::rekey(r.front().key());
         if (tmp.has(hi))
             return false;
-        if (!tmp.putNew(hi, r.front().value()))
-            return false;
+        tmp.putNew(hi, r.front().value());
     }
 
     m->clear();
     for (IntMap::Range r = tmp.all(); !r.empty(); r.popFront()) {
-        if (!m->putNew(r.front().key(), r.front().value()))
-            return false;
+        m->putNew(r.front().key(), r.front().value());
     }
 
     return true;
@@ -166,8 +161,7 @@ template <class NewKeyFunction>
 static bool
 SlowRekey(IntSet* s) {
     IntSet tmp;
-    if (!tmp.init())
-        return false;
+    tmp.init();
 
     for (IntSet::Range r = s->all(); !r.empty(); r.popFront()) {
         if (NewKeyFunction::shouldBeRemoved(r.front()))
@@ -175,14 +169,12 @@ SlowRekey(IntSet* s) {
         uint32_t hi = NewKeyFunction::rekey(r.front());
         if (tmp.has(hi))
             return false;
-        if (!tmp.putNew(hi))
-            return false;
+        tmp.putNew(hi);
     }
 
     s->clear();
     for (IntSet::Range r = tmp.all(); !r.empty(); r.popFront()) {
-        if (!s->putNew(r.front()))
-            return false;
+        s->putNew(r.front());
     }
 
     return true;
@@ -191,8 +183,8 @@ SlowRekey(IntSet* s) {
 BEGIN_TEST(testHashRekeyManual)
 {
     IntMap am, bm;
-    CHECK(am.init());
-    CHECK(bm.init());
+    am.init();
+    bm.init();
     for (size_t i = 0; i < TestIterations; ++i) {
 #ifdef FUZZ
         fprintf(stderr, "map1: %lu\n", i);
@@ -213,8 +205,8 @@ BEGIN_TEST(testHashRekeyManual)
     }
 
     IntSet as, bs;
-    CHECK(as.init());
-    CHECK(bs.init());
+    as.init();
+    bs.init();
     for (size_t i = 0; i < TestIterations; ++i) {
 #ifdef FUZZ
         fprintf(stderr, "set1: %lu\n", i);
@@ -241,8 +233,8 @@ END_TEST(testHashRekeyManual)
 BEGIN_TEST(testHashRekeyManualRemoval)
 {
     IntMap am, bm;
-    CHECK(am.init());
-    CHECK(bm.init());
+    am.init();
+    bm.init();
     for (size_t i = 0; i < TestIterations; ++i) {
 #ifdef FUZZ
         fprintf(stderr, "map2: %lu\n", i);
@@ -267,8 +259,8 @@ BEGIN_TEST(testHashRekeyManualRemoval)
     }
 
     IntSet as, bs;
-    CHECK(as.init());
-    CHECK(bs.init());
+    as.init();
+    bs.init();
     for (size_t i = 0; i < TestIterations; ++i) {
 #ifdef FUZZ
         fprintf(stderr, "set1: %lu\n", i);
@@ -335,56 +327,12 @@ BEGIN_TEST(testHashSetOfMoveOnlyType)
     typedef js::HashSet<MoveOnlyType, MoveOnlyType::HashPolicy, js::SystemAllocPolicy> Set;
 
     Set set;
-    CHECK(set.init());
+    set.init();
 
     MoveOnlyType a(1);
 
-    CHECK(set.put(mozilla::Move(a))); // This shouldn't generate a compiler error.
+    set.put(mozilla::Move(a)); // This shouldn't generate a compiler error.
 
     return true;
 }
 END_TEST(testHashSetOfMoveOnlyType)
-
-#if defined(DEBUG)
-
-// Add entries to a HashMap using lookupWithDefault until either we get an OOM,
-// or the table has been resized a few times.
-static bool
-LookupWithDefaultUntilResize() {
-    IntMap m;
-
-    if (!m.init())
-        return false;
-
-    // Add entries until we've resized the table four times.
-    size_t lastCapacity = m.capacity();
-    size_t resizes = 0;
-    uint32_t key = 0;
-    while (resizes < 4) {
-        if (!m.lookupWithDefault(key++, 0))
-            return false;
-
-        size_t capacity = m.capacity();
-        if (capacity != lastCapacity) {
-            resizes++;
-            lastCapacity = capacity;
-        }
-    }
-
-    return true;
-}
-
-BEGIN_TEST(testHashMapLookupWithDefaultOOM)
-{
-    uint32_t timeToFail;
-    for (timeToFail = 1; timeToFail < 1000; timeToFail++) {
-        js::oom::SimulateOOMAfter(timeToFail, js::oom::THREAD_TYPE_MAIN, false);
-        LookupWithDefaultUntilResize();
-    }
-
-    js::oom::ResetSimulatedOOM();
-    return true;
-}
-
-END_TEST(testHashMapLookupWithDefaultOOM)
-#endif // defined(DEBUG)

@@ -15,13 +15,17 @@ var serverPort = -1;
 
 function run_test() {
   var env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
-  serverPort = env.get("MOZHTTP2_PORT");
+  serverPort = env.get("MOZHTTP2-PORT");
   do_check_neq(serverPort, null);
 
   do_get_profile();
   prefs = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch);
 
   tlsProfile = prefs.getBoolPref("network.http.spdy.enforce-tls-profile");
+
+  disableServiceWorkerEvents(
+    'https://example.net/page/invalid-response'
+  );
 
   serverURL = "https://localhost:" + serverPort;
 
@@ -42,12 +46,13 @@ add_task(function* test_pushSubscriptionNoConnection() {
   });
 
   yield rejects(
-    PushService.register({
-      scope: 'https://example.net/page/invalid-response',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for not being able to establish connecion.'
+    PushNotificationService.register(
+      'https://example.net/page/invalid-response',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error && error.includes("Error");
+    },
+    'Wrong error for not being able to establish connecion.'
   );
 
   let record = yield db.getAllKeyIDs();
@@ -82,12 +87,13 @@ add_task(function* test_pushSubscriptionMissingLocation() {
   });
 
   yield rejects(
-    PushService.register({
-      scope: 'https://example.net/page/invalid-response',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for the missing location header.'
+    PushNotificationService.register(
+      'https://example.net/page/invalid-response',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error && error.includes("Return code 201, but the answer is bogus");
+    },
+    'Wrong error for the missing location header.'
   );
 
   let record = yield db.getAllKeyIDs();
@@ -108,12 +114,13 @@ add_task(function* test_pushSubscriptionMissingLink() {
   });
 
   yield rejects(
-    PushService.register({
-      scope: 'https://example.net/page/invalid-response',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for the missing link header.'
+    PushNotificationService.register(
+      'https://example.net/page/invalid-response',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error && error.includes("Return code 201, but the answer is bogus");
+    },
+    'Wrong error for the missing link header.'
   );
 
   let record = yield db.getAllKeyIDs();
@@ -134,12 +141,13 @@ add_task(function* test_pushSubscriptionMissingLink1() {
   });
 
   yield rejects(
-    PushService.register({
-      scope: 'https://example.net/page/invalid-response',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for the missing push endpoint.'
+    PushNotificationService.register(
+      'https://example.net/page/invalid-response',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error && error.includes("Return code 201, but the answer is bogus");
+    },
+    'Wrong error for the missing push endpoint.'
   );
 
   let record = yield db.getAllKeyIDs();
@@ -160,12 +168,13 @@ add_task(function* test_pushSubscriptionLocationBogus() {
   });
 
   yield rejects(
-    PushService.register({
-      scope: 'https://example.net/page/invalid-response',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for the bogus location'
+    PushNotificationService.register(
+      'https://example.net/page/invalid-response',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error && error.includes("Return code 201, but URI is bogus.");
+    },
+    'Wrong error for the bogus location'
   );
 
   let record = yield db.getAllKeyIDs();
@@ -186,12 +195,13 @@ add_task(function* test_pushSubscriptionNot2xxCode() {
   });
 
   yield rejects(
-    PushService.register({
-      scope: 'https://example.net/page/invalid-response',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for not 201 responce code.'
+    PushNotificationService.register(
+      'https://example.net/page/invalid-response',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error && error.includes("Error");
+    },
+    'Wrong error for not 201 responce code.'
   );
 
   let record = yield db.getAllKeyIDs();

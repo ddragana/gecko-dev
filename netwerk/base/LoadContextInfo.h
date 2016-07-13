@@ -19,43 +19,33 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSILOADCONTEXTINFO
 
-  LoadContextInfo(bool aIsPrivate, bool aIsAnonymous, NeckoOriginAttributes aOriginAttributes);
+  LoadContextInfo(bool aIsPrivate, uint32_t aAppId, bool aIsInBrowser, bool aIsAnonymous);
 
 private:
   virtual ~LoadContextInfo();
 
 protected:
+  uint32_t mAppId;
   bool mIsPrivate : 1;
+  bool mIsInBrowser : 1;
   bool mIsAnonymous : 1;
-  NeckoOriginAttributes mOriginAttributes;
 };
 
-class LoadContextInfoFactory : public nsILoadContextInfoFactory
-{
-  virtual ~LoadContextInfoFactory() {}
-public:
-  NS_DECL_ISUPPORTS // deliberately not thread-safe
-  NS_DECL_NSILOADCONTEXTINFOFACTORY
-};
+LoadContextInfo *
+GetLoadContextInfo(nsIChannel * aChannel);
 
-LoadContextInfo*
-GetLoadContextInfo(nsIChannel *aChannel);
+LoadContextInfo *
+GetLoadContextInfo(nsILoadContext * aLoadContext,
+                   bool aAnonymous);
 
-LoadContextInfo*
-GetLoadContextInfo(nsILoadContext *aLoadContext,
-                   bool aIsAnonymous);
+LoadContextInfo *
+GetLoadContextInfo(nsILoadContextInfo* aInfo);
 
-LoadContextInfo*
-GetLoadContextInfo(nsIDOMWindow *aLoadContext,
-                   bool aIsAnonymous);
-
-LoadContextInfo*
-GetLoadContextInfo(nsILoadContextInfo *aInfo);
-
-LoadContextInfo*
-GetLoadContextInfo(bool const aIsPrivate,
-                   bool const aIsAnonymous,
-                   NeckoOriginAttributes const &aOriginAttributes);
+LoadContextInfo *
+GetLoadContextInfo(bool const aIsPrivate = false,
+                   uint32_t const aAppId = nsILoadContextInfo::NO_APP_ID,
+                   bool const aIsInBrowserElement = false,
+                   bool const aIsAnonymous = false);
 
 } // namespace net
 } // namespace mozilla

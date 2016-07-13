@@ -16,19 +16,18 @@ document.addEventListener("Initialized", () => {
   if (!AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
     document.getElementById("redirectSearchCheckbox").hidden = true;
   }
+
+  if (Services.prefs.getBoolPref("browser.search.showOneOffButtons"))
+    return;
+
+  document.getElementById("category-search").hidden = true;
+  if (document.location.hash == "#search")
+    document.location.hash = "";
 });
 
 var gEngineView = null;
 
 var gSearchPane = {
-
-  /**
-   * Initialize autocomplete to ensure prefs are in sync.
-   */
-  _initAutocomplete: function () {
-    Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-              .getService(Components.interfaces.mozIPlacesAutoComplete);
-  },
 
   init: function ()
   {
@@ -47,42 +46,20 @@ var gSearchPane = {
     window.addEventListener("unload", () => {
       Services.obs.removeObserver(this, "browser-search-engine-modified", false);
     });
-
-    this._initAutocomplete();
-
-    let suggestsPref =
-      document.getElementById("browser.search.suggest.enabled");
-    suggestsPref.addEventListener("change", () => {
-      this.updateSuggestsCheckbox();
-    });
-    this.updateSuggestsCheckbox();
-  },
-
-  updateSuggestsCheckbox() {
-    let suggestsPref =
-      document.getElementById("browser.search.suggest.enabled");
-    let permanentPB =
-      Services.prefs.getBoolPref("browser.privatebrowsing.autostart");
-    let urlbarSuggests = document.getElementById("urlBarSuggestion");
-    urlbarSuggests.disabled = !suggestsPref.value || permanentPB;
-
-    let urlbarSuggestsPref =
-      document.getElementById("browser.urlbar.suggest.searches");
-    urlbarSuggests.checked = urlbarSuggestsPref.value;
-    if (urlbarSuggests.disabled) {
-      urlbarSuggests.checked = false;
-    }
-
-    let permanentPBLabel =
-      document.getElementById("urlBarSuggestionPermanentPBLabel");
-    permanentPBLabel.hidden = urlbarSuggests.hidden || !permanentPB;
   },
 
   buildDefaultEngineDropDown: function() {
     // This is called each time something affects the list of engines.
     let list = document.getElementById("defaultEngine");
-    // Set selection to the current default engine.
-    let currentEngine = Services.search.currentEngine.name;
+    let currentEngine;
+
+    // First, try to preserve the current selection.
+    if (list.selectedItem)
+      currentEngine = list.selectedItem.label;
+
+    // If there's no current selection, use the current default engine.
+    if (!currentEngine)
+      currentEngine = Services.search.currentEngine.name;
 
     // If the current engine isn't in the list any more, select the first item.
     let engines = gEngineView._engineStore._engines;
@@ -95,7 +72,8 @@ var gSearchPane = {
       let item = list.appendItem(e.name);
       item.setAttribute("class", "menuitem-iconic searchengine-menuitem menuitem-with-favicon");
       if (e.iconURI) {
-        item.setAttribute("image", e.iconURI.spec);
+        let uri = PlacesUtils.getImageURLForResolution(window, e.iconURI.spec);
+        item.setAttribute("image", uri);
       }
       item.engine = e;
       if (e.name == currentEngine)
@@ -124,7 +102,7 @@ var gSearchPane = {
             gSearchPane.onRestoreDefaults();
             break;
           case "removeEngineButton":
-            Services.search.removeEngine(gEngineView.selectedEngine.originalEngine);
+            gSearchPane.remove();
             break;
         }
         break;
@@ -166,17 +144,7 @@ var gSearchPane = {
         gEngineView.invalidate();
         break;
       case "engine-removed":
-        gSearchPane.remove(aEngine);
-        break;
       case "engine-current":
-        // If the user is going through the drop down using up/down keys, the
-        // dropdown may still be open (eg. on Windows) when engine-current is
-        // fired, so rebuilding the list unconditionally would get in the way.
-        let selectedEngine =
-          document.getElementById("defaultEngine").selectedItem.engine;
-        if (selectedEngine.name != aEngine.name)
-          gSearchPane.buildDefaultEngineDropDown();
-        break;
       case "engine-default":
         // Not relevant
         break;
@@ -209,13 +177,8 @@ var gSearchPane = {
     else {
       let isMac = Services.appinfo.OS == "Darwin";
       if ((isMac && aEvent.keyCode == KeyEvent.DOM_VK_RETURN) ||
-          (!isMac && aEvent.keyCode == KeyEvent.DOM_VK_F2)) {
+          (!isMac && aEvent.keyCode == KeyEvent.DOM_VK_F2))
         tree.startEditing(index, tree.columns.getLastColumn());
-      } else if (aEvent.keyCode == KeyEvent.DOM_VK_DELETE ||
-                 isMac && aEvent.shiftKey && aEvent.keyCode == KeyEvent.DOM_VK_BACK_SPACE) {
-        // Delete and Shift+Backspace (Mac) removes selected engine.
-        Services.search.removeEngine(gEngineView.selectedEngine.originalEngine);
-     }
     }
   },
 
@@ -229,8 +192,9 @@ var gSearchPane = {
     document.getElementById("restoreDefaultSearchEngines").disabled = !aEnable;
   },
 
-  remove: function(aEngine) {
-    let index = gEngineView._engineStore.removeEngine(aEngine);
+  remove: function() {
+    gEngineView._engineStore.removeEngine(gEngineView.selectedEngine);
+    let index = gEngineView.selectedIndex;
     gEngineView.rowCountChanged(index, -1);
     gEngineView.invalidate();
     gEngineView.selection.select(Math.min(index, gEngineView.lastIndex));
@@ -239,18 +203,17 @@ var gSearchPane = {
   },
 
   editKeyword: Task.async(function* (aEngine, aNewKeyword) {
-    let keyword = aNewKeyword.trim();
-    if (keyword) {
+    if (aNewKeyword) {
       let eduplicate = false;
       let dupName = "";
 
       // Check for duplicates in Places keywords.
-      let bduplicate = !!(yield PlacesUtils.keywords.fetch(keyword));
+      let bduplicate = !!(yield PlacesUtils.keywords.fetch(aNewKeyword));
 
       // Check for duplicates in changes we haven't committed yet
       let engines = gEngineView._engineStore.engines;
-      for (let engine of engines) {
-        if (engine.alias == keyword &&
+      for each (let engine in engines) {
+        if (engine.alias == aNewKeyword &&
             engine.name != aEngine.name) {
           eduplicate = true;
           dupName = engine.name;
@@ -270,7 +233,7 @@ var gSearchPane = {
       }
     }
 
-    gEngineView._engineStore.changeEngine(aEngine, "alias", keyword);
+    gEngineView._engineStore.changeEngine(aEngine, "alias", aNewKeyword);
     gEngineView.invalidate();
     return true;
   }),
@@ -311,7 +274,7 @@ function EngineStore() {
   this._defaultEngines = Services.search.getDefaultEngines().map(this._cloneEngine, this);
 
   // check if we need to disable the restore defaults button
-  var someHidden = this._defaultEngines.some(e => e.hidden);
+  var someHidden = this._defaultEngines.some(function (e) e.hidden);
   gSearchPane.showRestoreDefaults(someHidden);
 }
 EngineStore.prototype = {
@@ -331,7 +294,11 @@ EngineStore.prototype = {
   },
 
   _getEngineByName: function ES_getEngineByName(aName) {
-    return this._engines.find(engine => engine.name == aName);
+    for each (var engine in this._engines)
+      if (engine.name == aName)
+        return engine;
+
+    return null;
   },
 
   _cloneEngine: function ES_cloneEngine(aEngine) {
@@ -370,18 +337,16 @@ EngineStore.prototype = {
   },
 
   removeEngine: function ES_removeEngine(aEngine) {
-    let engineName = aEngine.name;
-    let index = this._engines.findIndex(element => element.name == engineName);
-
+    var index = this._getIndexForEngine(aEngine);
     if (index == -1)
       throw new Error("invalid engine?");
 
     this._engines.splice(index, 1);
+    Services.search.removeEngine(aEngine.originalEngine);
 
-    if (this._defaultEngines.some(this._isSameEngine, this._engines[index]))
+    if (this._defaultEngines.some(this._isSameEngine, aEngine))
       gSearchPane.showRestoreDefaults(true);
     gSearchPane.buildDefaultEngineDropDown();
-    return index;
   },
 
   restoreDefaultEngines: function ES_restoreDefaultEngines() {
@@ -407,7 +372,6 @@ EngineStore.prototype = {
         added++;
       }
     }
-    Services.search.resetToOriginalDefaultEngine();
     gSearchPane.showRestoreDefaults(false);
     gSearchPane.buildDefaultEngineDropDown();
     return added;
@@ -479,15 +443,10 @@ EngineView.prototype = {
   },
 
   getImageSrc: function(index, column) {
-    if (column.id == "engineName") {
-      if (this._engineStore.engines[index].iconURI)
-        return this._engineStore.engines[index].iconURI.spec;
-
-      if (window.devicePixelRatio > 1)
-        return "chrome://browser/skin/search-engine-placeholder@2x.png";
-      return "chrome://browser/skin/search-engine-placeholder.png";
+    if (column.id == "engineName" && this._engineStore.engines[index].iconURI) {
+      let uri = this._engineStore.engines[index].iconURI.spec;
+      return PlacesUtils.getImageURLForResolution(window, uri);
     }
-
     return "";
   },
 

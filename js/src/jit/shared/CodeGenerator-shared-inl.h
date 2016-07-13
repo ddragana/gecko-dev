@@ -25,20 +25,10 @@ ToInt32(const LAllocation* a)
     MOZ_CRASH("this is not a constant!");
 }
 
-static inline int64_t
-ToInt64(const LAllocation* a)
-{
-    if (a->isConstantValue())
-        return a->toConstant()->toInt64();
-    if (a->isConstantIndex())
-        return a->toConstantIndex()->index();
-    MOZ_CRASH("this is not a constant!");
-}
-
 static inline double
 ToDouble(const LAllocation* a)
 {
-    return a->toConstant()->numberToDouble();
+    return a->toConstant()->toNumber();
 }
 
 static inline Register
@@ -58,18 +48,6 @@ static inline Register
 ToRegister(const LDefinition* def)
 {
     return ToRegister(*def->output());
-}
-
-static inline Register64
-ToOutRegister64(LInstruction* ins)
-{
-#if JS_BITS_PER_WORD == 32
-    Register loReg = ToRegister(ins->getDef(0));
-    Register hiReg = ToRegister(ins->getDef(1));
-    return Register64(hiReg, loReg);
-#else
-    return Register64(ToRegister(ins->getDef(0)));
-#endif
 }
 
 static inline Register
@@ -111,14 +89,6 @@ ToFloatRegister(const LDefinition* def)
     return ToFloatRegister(*def->output());
 }
 
-static inline FloatRegister
-ToTempFloatRegisterOrInvalid(const LDefinition* def)
-{
-    if (def->isBogusTemp())
-        return InvalidFloatReg;
-    return ToFloatRegister(def);
-}
-
 static inline AnyRegister
 ToAnyRegister(const LAllocation& a)
 {
@@ -140,12 +110,12 @@ ToAnyRegister(const LDefinition* def)
     return ToAnyRegister(def->output());
 }
 
-static inline RegisterOrInt32Constant
-ToRegisterOrInt32Constant(const LAllocation* a)
+static inline Int32Key
+ToInt32Key(const LAllocation* a)
 {
     if (a->isConstant())
-        return RegisterOrInt32Constant(ToInt32(a));
-    return RegisterOrInt32Constant(ToRegister(a));
+        return Int32Key(ToInt32(a));
+    return Int32Key(ToRegister(a));
 }
 
 static inline ValueOperand
@@ -244,17 +214,26 @@ CodeGeneratorShared::ToStackOffset(const LAllocation* a) const
     return ToStackOffset(*a);
 }
 
-Address
-CodeGeneratorShared::ToAddress(const LAllocation& a)
+Operand
+CodeGeneratorShared::ToOperand(const LAllocation& a)
 {
-    MOZ_ASSERT(a.isMemory());
-    return Address(masm.getStackPointer(), ToStackOffset(&a));
+    if (a.isGeneralReg())
+        return Operand(a.toGeneralReg()->reg());
+    if (a.isFloatReg())
+        return Operand(a.toFloatReg()->reg());
+    return Operand(masm.getStackPointer(), ToStackOffset(&a));
 }
 
-Address
-CodeGeneratorShared::ToAddress(const LAllocation* a)
+Operand
+CodeGeneratorShared::ToOperand(const LAllocation* a)
 {
-    return ToAddress(*a);
+    return ToOperand(*a);
+}
+
+Operand
+CodeGeneratorShared::ToOperand(const LDefinition* def)
+{
+    return ToOperand(def->output());
 }
 
 void
@@ -316,7 +295,7 @@ CodeGeneratorShared::verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, b
       case Scalar::Int16:
         if (kind == HeapAccess::Load)
             kind = HeapAccess::LoadSext32;
-        MOZ_FALLTHROUGH;
+        // FALL THROUGH
       case Scalar::Uint8:
       case Scalar::Uint16:
       case Scalar::Int32:
@@ -338,8 +317,6 @@ CodeGeneratorShared::verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, b
       case Scalar::Float32:
       case Scalar::Float64:
       case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
       case Scalar::Int32x4:
         op = OtherOperand(ToFloatRegister(alloc).encoding());
         break;
@@ -354,15 +331,6 @@ CodeGeneratorShared::verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, b
     masm.verifyHeapAccessDisassembly(begin, end,
                                      HeapAccess(kind, size, ComplexAddress(mem), op));
 #endif
-}
-
-inline bool
-CodeGeneratorShared::isGlobalObject(JSObject* object)
-{
-    // Calling object->is<GlobalObject>() is racy because this relies on
-    // checking the group and this can be changed while we are compiling off the
-    // main thread.
-    return object == gen->compartment->maybeGlobal();
 }
 
 } // namespace jit

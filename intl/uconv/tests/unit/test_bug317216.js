@@ -9,10 +9,10 @@
  * UTF16 character and mid-surrogate pair
  */
 
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 const test = [
 // 0: Valid surrogate pair
@@ -75,8 +75,16 @@ const ios = new IOService();
 function testCase(testText, expectedText, bufferLength, charset)
 {
   var dataURI = "data:text/plain;charset=" + charset + "," + testText;
-  var channel = NetUtil.newChannel({uri: dataURI, loadUsingSystemPrincipal: true});
-  var testInputStream = channel.open2();
+
+  var channel = ios.newChannel2(dataURI,
+                                "",
+                                null,
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER);
+  var testInputStream = channel.open();
   var testConverter = new ConverterInputStream(testInputStream,
                                                charset,
                                                bufferLength,

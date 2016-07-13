@@ -2,15 +2,19 @@ dnl This Source Code Form is subject to the terms of the Mozilla Public
 dnl License, v. 2.0. If a copy of the MPL was not distributed with this
 dnl file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+dnl Output the contents of config.log when configure exits with an
+dnl error code.
+define([MOZ_CONFIG_LOG_TRAP],
+[changequote(<<<, >>>)dnl
+trap '[ "$?" != 0 ] && echo "------ config.log ------" && tail -n 25 config.log' EXIT
+changequote([, ])dnl
+])
+
 dnl Wrap AC_INIT_PREPARE to add the above trap.
 define([_MOZ_AC_INIT_PREPARE], defn([AC_INIT_PREPARE]))
 define([AC_INIT_PREPARE],
 [_MOZ_AC_INIT_PREPARE($1)
-
-test "x$prefix" = xNONE && prefix=$ac_default_prefix
-# Let make expand exec_prefix.
-test "x$exec_prefix" = xNONE && exec_prefix='${prefix}'
-
+MOZ_CONFIG_LOG_TRAP
 > subconfigures
 > skip_subconfigures
 ])
@@ -70,6 +74,7 @@ if test "$no_recursion" != yes; then
   if ! $PYTHON $_topsrcdir/build/subconfigure.py $1; then
       exit 1
   fi
+  MOZ_CONFIG_LOG_TRAP
 fi
 ])
 

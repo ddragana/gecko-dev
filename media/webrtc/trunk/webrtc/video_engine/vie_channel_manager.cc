@@ -10,8 +10,6 @@
 
 #include "webrtc/video_engine/vie_channel_manager.h"
 
-#include <vector>
-
 #include "webrtc/common.h"
 #include "webrtc/engine_configurations.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
@@ -21,7 +19,6 @@
 #include "webrtc/video_engine/call_stats.h"
 #include "webrtc/video_engine/encoder_state_feedback.h"
 #include "webrtc/video_engine/vie_channel.h"
-#include "webrtc/video_engine/vie_channel_group.h"
 #include "webrtc/video_engine/vie_defines.h"
 #include "webrtc/video_engine/vie_encoder.h"
 #include "webrtc/video_engine/vie_remb.h"
@@ -29,16 +26,19 @@
 
 namespace webrtc {
 
-ViEChannelManager::ViEChannelManager(int engine_id,
-                                     int number_of_cores,
-                                     const Config& config)
+ViEChannelManager::ViEChannelManager(
+    int engine_id,
+    int number_of_cores,
+    const Config& config)
     : channel_id_critsect_(CriticalSectionWrapper::CreateCriticalSection()),
       engine_id_(engine_id),
       number_of_cores_(number_of_cores),
       free_channel_ids_(new bool[kViEMaxNumberOfChannels]),
       free_channel_ids_size_(kViEMaxNumberOfChannels),
       voice_sync_interface_(NULL),
+      voice_engine_(NULL),
       module_process_thread_(NULL),
+      engine_config_(config),
       load_manager_(NULL)
 {
   for (int idx = 0; idx < free_channel_ids_size_; idx++) {
@@ -47,12 +47,10 @@ ViEChannelManager::ViEChannelManager(int engine_id,
 }
 
 ViEChannelManager::~ViEChannelManager() {
-  while (!channel_groups_.empty()) {
-    // The channel group is deleted by DeleteChannel when all its channels have
-    // been deleted.
-    for (int channel_id : channel_groups_.front()->GetChannelIds()) {
-      DeleteChannel(channel_id);
-    }
+  while (channel_map_.size() > 0) {
+    ChannelMap::iterator it = channel_map_.begin();
+    // DeleteChannel will erase this channel from the map and invalidate |it|.
+    DeleteChannel(it->first);
   }
 
   if (voice_sync_interface_) {
@@ -68,6 +66,8 @@ ViEChannelManager::~ViEChannelManager() {
     free_channel_ids_size_ = 0;
   }
   assert(channel_groups_.empty());
+  assert(channel_map_.empty());
+  assert(vie_encoder_map_.empty());
 }
 
 void ViEChannelManager::SetModuleProcessThread(
@@ -79,9 +79,9 @@ void ViEChannelManager::SetModuleProcessThread(
 void ViEChannelManager::SetLoadManager(
     CPULoadStateCallbackInvoker* load_manager) {
   load_manager_ = load_manager;
-  for (ChannelGroups::const_iterator it = channel_groups_.begin();
-       it != channel_groups_.end(); ++it) {
-    (*it)->SetLoadManager(load_manager);
+  for (EncoderMap::const_iterator comp_it = vie_encoder_map_.begin();
+       comp_it != vie_encoder_map_.end(); ++comp_it) {
+    comp_it->second->SetLoadManager(load_manager);
   }
 }
 
@@ -96,25 +96,56 @@ int ViEChannelManager::CreateChannel(int* channel_id,
   }
 
   // Create a new channel group and add this channel.
-  rtc::scoped_ptr<ChannelGroup> group(
-      new ChannelGroup(module_process_thread_, channel_group_config));
+  ChannelGroup* group = new ChannelGroup(engine_id_, module_process_thread_,
+                                         channel_group_config);
+  BitrateController* bitrate_controller = group->GetBitrateController();
+  ViEEncoder* vie_encoder = new ViEEncoder(engine_id_, new_channel_id,
+                                           number_of_cores_,
+                                           engine_config_,
+                                           *module_process_thread_,
+                                           bitrate_controller);
 
-  if (!group->CreateSendChannel(new_channel_id, engine_id_, number_of_cores_,
-                                false)) {
+  RtcpBandwidthObserver* bandwidth_observer =
+      bitrate_controller->CreateRtcpBandwidthObserver();
+  RemoteBitrateEstimator* remote_bitrate_estimator =
+      group->GetRemoteBitrateEstimator();
+  EncoderStateFeedback* encoder_state_feedback =
+      group->GetEncoderStateFeedback();
+  RtcpRttStats* rtcp_rtt_stats =
+      group->GetCallStats()->rtcp_rtt_stats();
+
+  if (!(vie_encoder->Init() &&
+        CreateChannelObject(new_channel_id, vie_encoder, bandwidth_observer,
+                            remote_bitrate_estimator, rtcp_rtt_stats,
+                            encoder_state_feedback->GetRtcpIntraFrameObserver(),
+                            true))) {
+    delete vie_encoder;
+    vie_encoder = NULL;
     ReturnChannelId(new_channel_id);
+    delete group;
     return -1;
   }
 
+  // Add ViEEncoder to EncoderFeedBackObserver.
+  unsigned int ssrc = 0;
+  int idx = 0;
+  channel_map_[new_channel_id]->GetLocalSSRC(idx, &ssrc);
+  encoder_state_feedback->AddEncoder(ssrc, vie_encoder);
+  std::list<unsigned int> ssrcs;
+  ssrcs.push_back(ssrc);
+  vie_encoder->SetSsrcs(ssrcs);
   *channel_id = new_channel_id;
   group->AddChannel(*channel_id);
-  channel_groups_.push_back(group.release());
+  channel_groups_.push_back(group);
+  // Register the channel to receive stats updates.
+  group->GetCallStats()->RegisterStatsObserver(
+      channel_map_[new_channel_id]->GetStatsObserver());
   return 0;
 }
 
 int ViEChannelManager::CreateChannel(int* channel_id,
                                      int original_channel,
-                                     bool sender,
-                                     bool disable_default_encoder) {
+                                     bool sender) {
   CriticalSectionScoped cs(channel_id_critsect_);
 
   ChannelGroup* channel_group = FindGroup(original_channel);
@@ -125,45 +156,70 @@ int ViEChannelManager::CreateChannel(int* channel_id,
   if (new_channel_id == -1) {
     return -1;
   }
+  BitrateController* bitrate_controller = channel_group->GetBitrateController();
+  RtcpBandwidthObserver* bandwidth_observer =
+      bitrate_controller->CreateRtcpBandwidthObserver();
+  RemoteBitrateEstimator* remote_bitrate_estimator =
+      channel_group->GetRemoteBitrateEstimator();
+  EncoderStateFeedback* encoder_state_feedback =
+      channel_group->GetEncoderStateFeedback();
+    RtcpRttStats* rtcp_rtt_stats =
+        channel_group->GetCallStats()->rtcp_rtt_stats();
+
+  ViEEncoder* vie_encoder = NULL;
   if (sender) {
-    if (!channel_group->CreateSendChannel(new_channel_id, engine_id_,
-                                          number_of_cores_,
-                                          disable_default_encoder)) {
-      ReturnChannelId(new_channel_id);
-      return -1;
+    // We need to create a new ViEEncoder.
+    vie_encoder = new ViEEncoder(engine_id_, new_channel_id, number_of_cores_,
+                                 engine_config_,
+                                 *module_process_thread_,
+                                 bitrate_controller);
+    if (!(vie_encoder->Init() &&
+        CreateChannelObject(
+            new_channel_id,
+            vie_encoder,
+            bandwidth_observer,
+            remote_bitrate_estimator,
+            rtcp_rtt_stats,
+            encoder_state_feedback->GetRtcpIntraFrameObserver(),
+            sender))) {
+      delete vie_encoder;
+      vie_encoder = NULL;
     }
+    // Register the ViEEncoder to get key frame requests for this channel.
+    unsigned int ssrc = 0;
+    int stream_idx = 0;
+    channel_map_[new_channel_id]->GetLocalSSRC(stream_idx, &ssrc);
+    encoder_state_feedback->AddEncoder(ssrc, vie_encoder);
   } else {
-    if (!channel_group->CreateReceiveChannel(new_channel_id, engine_id_,
-                                             original_channel, number_of_cores_,
-                                             disable_default_encoder)) {
-      ReturnChannelId(new_channel_id);
-      return -1;
+    vie_encoder = ViEEncoderPtr(original_channel);
+    assert(vie_encoder);
+    if (!CreateChannelObject(
+        new_channel_id,
+        vie_encoder,
+        bandwidth_observer,
+        remote_bitrate_estimator,
+        rtcp_rtt_stats,
+        encoder_state_feedback->GetRtcpIntraFrameObserver(),
+        sender)) {
+      vie_encoder = NULL;
     }
+  }
+  if (!vie_encoder) {
+    ReturnChannelId(new_channel_id);
+    return -1;
   }
   *channel_id = new_channel_id;
   channel_group->AddChannel(*channel_id);
+  // Register the channel to receive stats updates.
+  channel_group->GetCallStats()->RegisterStatsObserver(
+      channel_map_[new_channel_id]->GetStatsObserver());
   return 0;
 }
 
 int ViEChannelManager::DeleteChannel(int channel_id) {
+  ViEChannel* vie_channel = NULL;
+  ViEEncoder* vie_encoder = NULL;
   ChannelGroup* group = NULL;
-  {
-    // Read lock to make sure no one tries to delete it on us
-    ViEChannelManagerScoped(*this);
-
-    // Protect the maps.
-    CriticalSectionScoped cs(channel_id_critsect_);
-
-    group = FindGroup(channel_id);
-    if (group == NULL)
-      return -1;
-    group->Stop(channel_id);
-  }
-  // Now release the read lock, and get a write lock since we know the
-  // threads are stopped.  Otherwise we can deadlock if we hold a write
-  // lock and the thread is processing and needs a read lock, and we try to
-  // stop the thread (ProcessThread::DeRegisterModule().  See Mozilla
-  // bug 1276156.
   {
     // Write lock to make sure no one is using the channel.
     ViEManagerWriteScoped wl(this);
@@ -171,17 +227,60 @@ int ViEChannelManager::DeleteChannel(int channel_id) {
     // Protect the maps.
     CriticalSectionScoped cs(channel_id_critsect_);
 
-    group = FindGroup(channel_id);
-    if (group == NULL)
+    ChannelMap::iterator c_it = channel_map_.find(channel_id);
+    if (c_it == channel_map_.end()) {
+      // No such channel.
       return -1;
+    }
+    vie_channel = c_it->second;
+    channel_map_.erase(c_it);
+
     ReturnChannelId(channel_id);
-    group->DeleteChannel(channel_id);
+
+    // Find the encoder object.
+    EncoderMap::iterator e_it = vie_encoder_map_.find(channel_id);
+    assert(e_it != vie_encoder_map_.end());
+    vie_encoder = e_it->second;
+
+    group = FindGroup(channel_id);
+    group->GetCallStats()->DeregisterStatsObserver(
+        vie_channel->GetStatsObserver());
+    group->SetChannelRembStatus(channel_id, false, false, vie_channel);
+
+    // Remove the feedback if we're owning the encoder.
+    if (vie_encoder->channel_id() == channel_id) {
+      group->GetEncoderStateFeedback()->RemoveEncoder(vie_encoder);
+    }
+
+    unsigned int remote_ssrc = 0;
+    vie_channel->GetRemoteSSRC(&remote_ssrc);
+    group->RemoveChannel(channel_id, remote_ssrc);
+
+    // Check if other channels are using the same encoder.
+    if (ChannelUsingViEEncoder(channel_id)) {
+      vie_encoder = NULL;
+    } else {
+      // Delete later when we've released the critsect.
+    }
+
+    // We can't erase the item before we've checked for other channels using
+    // same ViEEncoder.
+    vie_encoder_map_.erase(e_it);
 
     if (group->Empty()) {
       channel_groups_.remove(group);
     } else {
       group = NULL;  // Prevent group from being deleted.
     }
+  }
+  delete vie_channel;
+  // Leave the write critsect before deleting the objects.
+  // Deleting a channel can cause other objects, such as renderers, to be
+  // deleted, which might take time.
+  // If statment just to show that this object is not always deleted.
+  if (vie_encoder) {
+    LOG(LS_VERBOSE) << "ViEEncoder deleted for channel " << channel_id;
+    delete vie_encoder;
   }
   // If statment just to show that this object is not always deleted.
   if (group) {
@@ -190,6 +289,7 @@ int ViEChannelManager::DeleteChannel(int channel_id) {
     LOG(LS_VERBOSE) << "Channel group deleted for channel " << channel_id;
     delete group;
   }
+  LOG(LS_VERBOSE) << "Channel deleted " << channel_id;
   return 0;
 }
 
@@ -208,12 +308,14 @@ int ViEChannelManager::SetVoiceEngine(VoiceEngine* voice_engine) {
     }
   }
 
-  for (ChannelGroup* group : channel_groups_) {
-    group->SetSyncInterface(sync_interface);
+  for (ChannelMap::iterator it = channel_map_.begin(); it != channel_map_.end();
+       ++it) {
+    it->second->SetVoiceChannel(-1, sync_interface);
   }
   if (voice_sync_interface_) {
     voice_sync_interface_->Release();
   }
+  voice_engine_ = voice_engine;
   voice_sync_interface_ = sync_interface;
   return 0;
 }
@@ -242,6 +344,11 @@ int ViEChannelManager::DisconnectVoiceChannel(int channel_id) {
   return -1;
 }
 
+VoiceEngine* ViEChannelManager::GetVoiceEngine() {
+  CriticalSectionScoped cs(channel_id_critsect_);
+  return voice_engine_;
+}
+
 bool ViEChannelManager::SetRembStatus(int channel_id, bool sender,
                                       bool receiver) {
   CriticalSectionScoped cs(channel_id_critsect_);
@@ -252,8 +359,7 @@ bool ViEChannelManager::SetRembStatus(int channel_id, bool sender,
   ViEChannel* channel = ViEChannelPtr(channel_id);
   assert(channel);
 
-  group->SetChannelRembStatus(channel_id, sender, receiver, channel);
-  return true;
+  return group->SetChannelRembStatus(channel_id, sender, receiver, channel);
 }
 
 bool ViEChannelManager::SetReservedTransmitBitrate(
@@ -290,6 +396,17 @@ void ViEChannelManager::UpdateSsrcs(int channel_id,
   }
 }
 
+bool ViEChannelManager::SetBandwidthEstimationConfig(
+    int channel_id, const webrtc::Config& config) {
+  CriticalSectionScoped cs(channel_id_critsect_);
+  ChannelGroup* group = FindGroup(channel_id);
+  if (!group) {
+    return false;
+  }
+  group->SetBandwidthEstimationConfig(config);
+  return true;
+}
+
 bool ViEChannelManager::GetEstimatedSendBandwidth(
     int channel_id, uint32_t* estimated_bandwidth) const {
   CriticalSectionScoped cs(channel_id_critsect_);
@@ -316,46 +433,66 @@ bool ViEChannelManager::GetEstimatedReceiveBandwidth(
   return true;
 }
 
-bool ViEChannelManager::GetPacerQueuingDelayMs(int channel_id,
-                                               int64_t* delay_ms) const {
-  CriticalSectionScoped cs(channel_id_critsect_);
-  ChannelGroup* group = FindGroup(channel_id);
-  if (!group)
-    return false;
-  *delay_ms = group->GetPacerQueuingDelayMs();
-  return true;
-}
+bool ViEChannelManager::CreateChannelObject(
+    int channel_id,
+    ViEEncoder* vie_encoder,
+    RtcpBandwidthObserver* bandwidth_observer,
+    RemoteBitrateEstimator* remote_bitrate_estimator,
+    RtcpRttStats* rtcp_rtt_stats,
+    RtcpIntraFrameObserver* intra_frame_observer,
+    bool sender) {
+  PacedSender* paced_sender = vie_encoder->GetPacedSender();
 
-bool ViEChannelManager::SetBitrateConfig(int channel_id,
-                                         int min_bitrate_bps,
-                                         int start_bitrate_bps,
-                                         int max_bitrate_bps) {
-  CriticalSectionScoped cs(channel_id_critsect_);
-  ChannelGroup* group = FindGroup(channel_id);
-  if (!group)
+  // Register the channel at the encoder.
+  RtpRtcp* send_rtp_rtcp_module = vie_encoder->SendRtpRtcpModule();
+
+  ViEChannel* vie_channel = new ViEChannel(channel_id, engine_id_,
+                                           number_of_cores_,
+                                           engine_config_,
+                                           *module_process_thread_,
+                                           intra_frame_observer,
+                                           bandwidth_observer,
+                                           remote_bitrate_estimator,
+                                           rtcp_rtt_stats,
+                                           paced_sender,
+                                           send_rtp_rtcp_module,
+                                           sender);
+  if (vie_channel->Init() != 0) {
+    delete vie_channel;
     return false;
-  BitrateController* bitrate_controller = group->GetBitrateController();
-  if (start_bitrate_bps > 0)
-    bitrate_controller->SetStartBitrate(start_bitrate_bps);
-  bitrate_controller->SetMinMaxBitrate(min_bitrate_bps, max_bitrate_bps);
+  }
+  VideoCodec encoder;
+  if (vie_encoder->GetEncoder(&encoder) != 0) {
+    delete vie_channel;
+    return false;
+  }
+  if (sender && vie_channel->SetSendCodec(encoder) != 0) {
+    delete vie_channel;
+    return false;
+  }
+  // Store the channel, add it to the channel group and save the vie_encoder.
+  channel_map_[channel_id] = vie_channel;
+  vie_encoder_map_[channel_id] = vie_encoder;
   return true;
 }
 
 ViEChannel* ViEChannelManager::ViEChannelPtr(int channel_id) const {
   CriticalSectionScoped cs(channel_id_critsect_);
-  ChannelGroup* group = FindGroup(channel_id);
-  if (group == NULL)
+  ChannelMap::const_iterator it = channel_map_.find(channel_id);
+  if (it == channel_map_.end()) {
+    LOG(LS_ERROR) << "Channel doesn't exist " << channel_id;
     return NULL;
-  return group->GetChannel(channel_id);
+  }
+  return it->second;
 }
 
 ViEEncoder* ViEChannelManager::ViEEncoderPtr(int video_channel_id) const {
   CriticalSectionScoped cs(channel_id_critsect_);
-  ChannelGroup* group = FindGroup(video_channel_id);
-  if (group == NULL) {
+  EncoderMap::const_iterator it = vie_encoder_map_.find(video_channel_id);
+  if (it == vie_encoder_map_.end()) {
     return NULL;
   }
-  return group->GetEncoder(video_channel_id);
+  return it->second;
 }
 
 int ViEChannelManager::FreeChannelId() {
@@ -391,20 +528,39 @@ ChannelGroup* ViEChannelManager::FindGroup(int channel_id) const {
 
 bool ViEChannelManager::ChannelUsingViEEncoder(int channel_id) const {
   CriticalSectionScoped cs(channel_id_critsect_);
-  ChannelGroup* group = FindGroup(channel_id);
-  if (group == NULL) {
+  EncoderMap::const_iterator orig_it = vie_encoder_map_.find(channel_id);
+  if (orig_it == vie_encoder_map_.end()) {
+    // No ViEEncoder for this channel.
     return false;
   }
-  return group->OtherChannelsUsingEncoder(channel_id);
+
+  // Loop through all other channels to see if anyone points at the same
+  // ViEEncoder.
+  for (EncoderMap::const_iterator comp_it = vie_encoder_map_.begin();
+       comp_it != vie_encoder_map_.end(); ++comp_it) {
+    // Make sure we're not comparing the same channel with itself.
+    if (comp_it->first != channel_id) {
+      if (comp_it->second == orig_it->second) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 void ViEChannelManager::ChannelsUsingViEEncoder(int channel_id,
                                                 ChannelList* channels) const {
   CriticalSectionScoped cs(channel_id_critsect_);
-  ChannelGroup* group = FindGroup(channel_id);
-  if (group == NULL)
-    return;
-  group->GetChannelsUsingEncoder(channel_id, channels);
+  EncoderMap::const_iterator orig_it = vie_encoder_map_.find(channel_id);
+
+  for (ChannelMap::const_iterator c_it = channel_map_.begin();
+       c_it != channel_map_.end(); ++c_it) {
+    EncoderMap::const_iterator comp_it = vie_encoder_map_.find(c_it->first);
+    assert(comp_it != vie_encoder_map_.end());
+    if (comp_it->second == orig_it->second) {
+      channels->push_back(c_it->second);
+    }
+  }
 }
 
 ViEChannelManagerScoped::ViEChannelManagerScoped(

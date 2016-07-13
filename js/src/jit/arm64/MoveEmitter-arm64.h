@@ -35,7 +35,13 @@ class MoveEmitterARM64
     }
 
     MemOperand cycleSlot();
-    MemOperand toMemOperand(const MoveOperand& operand) const;
+    MemOperand toMemOperand(const MoveOperand& operand) const {
+        MOZ_ASSERT(operand.isMemory());
+        ARMRegister base(operand.base(), 64);
+        if (operand.base() == masm.getStackPointer())
+            return MemOperand(base, operand.disp() + (masm.framePushed() -  pushedAtStart_));
+        return MemOperand(base, operand.disp());
+    }
     ARMRegister toARMReg32(const MoveOperand& operand) const {
         MOZ_ASSERT(operand.isGeneralReg());
         return ARMRegister(operand.reg(), 32);

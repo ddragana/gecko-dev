@@ -20,19 +20,14 @@ EXPORTS += [
 ]
 
 if CONFIG['MOZ_WEBRTC']:
-    if CONFIG['OS_TARGET'] == 'WINNT':
-        DEFINES['WEBRTC_WIN'] = True
-    else:
-        DEFINES['WEBRTC_POSIX'] = True
     EXPORTS += ['AudioOutputObserver.h',
-                'MediaEngineRemoteVideoSource.h',
                 'MediaEngineWebRTC.h']
     EXPORTS.mozilla.dom += [ 'RTCIdentityProviderRegistrar.h' ]
     UNIFIED_SOURCES += [
         'MediaEngineCameraVideoSource.cpp',
-        'MediaEngineRemoteVideoSource.cpp',
         'MediaEngineTabVideoSource.cpp',
         'MediaEngineWebRTCAudio.cpp',
+        'MediaEngineWebRTCVideo.cpp',
         'MediaTrackConstraints.cpp',
         'RTCCertificate.cpp',
         'RTCIdentityProviderRegistrar.cpp',
@@ -83,17 +78,18 @@ include('/ipc/chromium/chromium-config.mozbuild')
 #    defined, which complains about important MOZ_EXPORT attributes for
 #    android API types
 if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
-    CXXFLAGS += [
-        '-Wno-error=attributes',
-        '-Wno-error=shadow',
-    ]
+  CXXFLAGS += [
+    '-Wno-error=attributes'
+  ]
 
 FINAL_LIBRARY = 'xul'
+if CONFIG['OS_ARCH'] == 'WINNT':
+    DEFINES['NOMINMAX'] = True
+
 
 if CONFIG['_MSC_VER']:
-    CXXFLAGS += [
-        '-wd4275', # non dll-interface class used as base for dll-interface class
-        '-wd4312', # This is intended as a temporary hack to support building with VS2015
-                   # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
-    ]
-    DEFINES['__PRETTY_FUNCTION__'] = '__FUNCSIG__'
+  CXXFLAGS += [
+    '-wd4275', # non dll-interface class used as base for dll-interface class
+  ]
+
+FAIL_ON_WARNINGS = True

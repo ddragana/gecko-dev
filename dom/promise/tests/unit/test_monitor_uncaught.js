@@ -4,13 +4,9 @@
 
 "use strict";
 
-var { utils: Cu } = Components;
+const { utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/Timer.jsm", this);
-Cu.import("resource://testing-common/PromiseTestUtils.jsm", this);
-
-// Prevent test failures due to the unhandled rejections in this test file.
-PromiseTestUtils.disableUncaughtRejectionObserverForSelfTest();
 
 add_task(function* test_globals() {
   Assert.equal(Promise.defer || undefined, undefined, "We are testing DOM Promise.");
@@ -69,7 +65,7 @@ add_task(function* test_observe_uncaught() {
         this.resolve();
       } else {
         do_print(this.name + " is still waiting for " + this.expected.size + " observations:");
-        do_print(JSON.stringify(Array.from(this.expected.values(), (x) => names.get(x))));
+        do_print(JSON.stringify([names.get(x) for (x of this.expected.values())]));
       }
     },
   };
@@ -217,7 +213,7 @@ add_task(function* test_observe_uncaught() {
   do_print("All calls to onLeftUncaught are complete.");
   if (onConsumed.expected.size != 0) {
     do_print("onConsumed is still waiting for the following Promise:");
-    do_print(JSON.stringify(Array.from(onConsumed.expected.values(), (x) => names.get(x))));
+    do_print(JSON.stringify([names.get(x) for (x of onConsumed.expected.values())]));
     yield onConsumed.blocker;
   }
 

@@ -8,13 +8,12 @@ import re
 import threading
 import time
 
-import version_codes
-
 from Zeroconf import Zeroconf, ServiceBrowser
 from devicemanager import ZeroconfListener
 from devicemanagerADB import DeviceManagerADB
 from devicemanagerSUT import DeviceManagerSUT
 from devicemanager import DMError
+from distutils.version import StrictVersion
 
 class DroidMixin(object):
     """Mixin to extend DeviceManager with Android-specific functionality"""
@@ -103,7 +102,7 @@ class DroidMixin(object):
         if extraArgs:
             extras['args'] = " ".join(extraArgs)
 
-        self.launchApplication(appName, "org.mozilla.gecko.BrowserApp", intent, url=url, extras=extras,
+        self.launchApplication(appName, ".App", intent, url=url, extras=extras,
                                wait=wait, failIfRunning=failIfRunning)
 
     def getInstalledApps(self):
@@ -132,8 +131,8 @@ class DroidMixin(object):
 
         :param appName: Name of application (e.g. `com.android.chrome`)
         """
-        version = self.shellCheckOutput(["getprop", "ro.build.version.sdk"])
-        if int(version) >= version_codes.HONEYCOMB:
+        version = self.shellCheckOutput(["getprop", "ro.build.version.release"])
+        if StrictVersion(version) >= StrictVersion('3.0'):
             self.shellCheckOutput([ "am", "force-stop", appName ], root=self._stopApplicationNeedsRoot)
         else:
             num_tries = 0
@@ -168,7 +167,7 @@ class DroidADB(DeviceManagerADB, DroidMixin):
         # activity is indicated by something like:
         #   mFocusedApp=AppWindowToken{483e6db0 token=HistoryRecord{484dcad8 com.mozilla.SUTAgentAndroid/.SUTAgentAndroid}}
         # or, on other devices:
-        #   FocusedApplication: name='AppWindowToken{41a65340 token=ActivityRecord{418fbd68 org.mozilla.fennec_mozdev/org.mozilla.gecko.BrowserApp}}', dispatchingTimeout=5000.000ms
+        #   FocusedApplication: name='AppWindowToken{41a65340 token=ActivityRecord{418fbd68 org.mozilla.fennec_mozdev/.App}}', dispatchingTimeout=5000.000ms
         # Extract this line, ending in the forward slash:
         m = re.search('mFocusedApp(.+)/', data)
         if not m:

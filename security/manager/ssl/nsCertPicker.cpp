@@ -4,23 +4,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCertPicker.h"
-
-#include "ScopedNSSTypes.h"
-#include "cert.h"
-#include "mozilla/RefPtr.h"
-#include "nsCOMPtr.h"
-#include "nsICertPickDialogs.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIServiceManager.h"
-#include "nsMemory.h"
-#include "nsNSSCertHelper.h"
-#include "nsNSSCertificate.h"
-#include "nsNSSComponent.h"
-#include "nsNSSHelper.h"
-#include "nsNSSShutDown.h"
-#include "nsReadableUtils.h"
-#include "nsString.h"
 #include "pkix/pkixtypes.h"
+#include "nsMemory.h"
+#include "nsCOMPtr.h"
+#include "nsXPIDLString.h"
+#include "nsIServiceManager.h"
+#include "nsNSSComponent.h"
+#include "nsNSSCertificate.h"
+#include "nsReadableUtils.h"
+#include "nsICertPickDialogs.h"
+#include "nsNSSShutDown.h"
+#include "nsNSSCertHelper.h"
+#include "ScopedNSSTypes.h"
+
+#include "cert.h"
 
 using namespace mozilla;
 
@@ -32,12 +29,6 @@ nsCertPicker::nsCertPicker()
 
 nsCertPicker::~nsCertPicker()
 {
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return;
-  }
-
-  shutdown(calledFromObject);
 }
 
 NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx, 
@@ -45,15 +36,10 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
                                         int32_t certUsage, 
                                         bool allowInvalid, 
                                         bool allowDuplicateNicknames, 
-                                        const nsAString &emailAddress,
                                         bool *canceled, 
                                         nsIX509Cert **_retval)
 {
   nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
   int32_t selectedIndex = -1;
   bool selectionFound = false;
   char16_t **certNicknameList = nullptr;
@@ -64,13 +50,14 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
   {
     // Iterate over all certs. This assures that user is logged in to all hardware tokens.
     nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
-    UniqueCERTCertList allcerts(PK11_ListCerts(PK11CertListUnique, ctx));
+    ScopedCERTCertList allcerts(PK11_ListCerts(PK11CertListUnique, ctx));
   }
 
-  /* find all user certs that are valid for the specified usage */
+  /* find all user certs that are valid and for SSL */
   /* note that we are allowing expired certs in this list */
-  UniqueCERTCertList certList(
-    CERT_FindUserCertsByUsage(CERT_GetDefaultCertDB(),
+
+  ScopedCERTCertList certList(
+    CERT_FindUserCertsByUsage(CERT_GetDefaultCertDB(), 
                               (SECCertUsage)certUsage,
                               !allowDuplicateNicknames,
                               !allowInvalid,
@@ -79,33 +66,7 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  /* if a (non-empty) emailAddress argument is supplied to PickByUsage, */
-  /* remove non-matching certificates from the candidate list */
-
-  if (!emailAddress.IsEmpty()) {
-    node = CERT_LIST_HEAD(certList);
-    while (!CERT_LIST_END(node, certList)) {
-      /* if the cert has at least one e-mail address, check if suitable */
-      if (CERT_GetFirstEmailAddress(node->cert)) {
-        RefPtr<nsNSSCertificate> tempCert(nsNSSCertificate::Create(node->cert));
-        bool match = false;
-        rv = tempCert->ContainsEmailAddress(emailAddress, &match);
-        if (NS_FAILED(rv)) {
-          return rv;
-        }
-        if (!match) {
-          /* doesn't contain the specified address, so remove from the list */
-          CERTCertListNode* freenode = node;
-          node = CERT_LIST_NEXT(node);
-          CERT_RemoveCertListNode(freenode);
-          continue;
-        }
-      }
-      node = CERT_LIST_NEXT(node);
-    }
-  }
-
-  UniqueCERTCertNicknames nicknames(getNSSCertNicknamesFromCertList(certList));
+  ScopedCERTCertNicknames nicknames(getNSSCertNicknamesFromCertList(certList.get()));
   if (!nicknames) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -127,16 +88,20 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
        node = CERT_LIST_NEXT(node)
       )
   {
-    RefPtr<nsNSSCertificate> tempCert(nsNSSCertificate::Create(node->cert));
+    nsNSSCertificate *tempCert = nsNSSCertificate::Create(node->cert);
 
     if (tempCert) {
+
+      // XXX we really should be using an nsCOMPtr instead of manually add-refing,
+      // but nsNSSCertificate does not have a default constructor.
+
+      NS_ADDREF(tempCert);
 
       nsAutoString i_nickname(NS_ConvertUTF8toUTF16(nicknames->nicknames[CertsToUse]));
       nsAutoString nickWithSerial;
       nsAutoString details;
 
       if (!selectionFound) {
-        /* for the case when selectedNickname refers to a bare nickname */
         if (i_nickname == nsDependentString(selectedNickname)) {
           selectedIndex = CertsToUse;
           selectionFound = true;
@@ -146,33 +111,37 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
       if (NS_SUCCEEDED(tempCert->FormatUIStrings(i_nickname, nickWithSerial, details))) {
         certNicknameList[CertsToUse] = ToNewUnicode(nickWithSerial);
         certDetailsList[CertsToUse] = ToNewUnicode(details);
-        if (!selectionFound) {
-          /* for the case when selectedNickname refers to nickname + serial */
-          if (nickWithSerial == nsDependentString(selectedNickname)) {
-            selectedIndex = CertsToUse;
-            selectionFound = true;
-          }
-        }
       }
       else {
         certNicknameList[CertsToUse] = nullptr;
         certDetailsList[CertsToUse] = nullptr;
       }
 
+      NS_RELEASE(tempCert);
+
       ++CertsToUse;
     }
   }
 
   if (CertsToUse) {
-    nsCOMPtr<nsICertPickDialogs> dialogs;
-    rv = getNSSDialogs(getter_AddRefs(dialogs), NS_GET_IID(nsICertPickDialogs),
-                       NS_CERTPICKDIALOGS_CONTRACTID);
+    nsICertPickDialogs *dialogs = nullptr;
+    rv = getNSSDialogs((void**)&dialogs, 
+      NS_GET_IID(nsICertPickDialogs), 
+      NS_CERTPICKDIALOGS_CONTRACTID);
 
     if (NS_SUCCEEDED(rv)) {
-      // Show the cert picker dialog and get the index of the selected cert.
-      rv = dialogs->PickCertificate(ctx, (const char16_t**)certNicknameList,
-                                    (const char16_t**)certDetailsList,
-                                    CertsToUse, &selectedIndex, canceled);
+      nsPSMUITracker tracker;
+      if (tracker.isUIForbidden()) {
+        rv = NS_ERROR_NOT_AVAILABLE;
+      }
+      else {
+        /* Throw up the cert picker dialog and get back the index of the selected cert */
+        rv = dialogs->PickCertificate(ctx,
+          (const char16_t**)certNicknameList, (const char16_t**)certDetailsList,
+          CertsToUse, &selectedIndex, canceled);
+      }
+
+      NS_RELEASE(dialogs);
     }
   }
 
@@ -194,13 +163,21 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
          ++i, node = CERT_LIST_NEXT(node)) {
 
       if (i == selectedIndex) {
-        RefPtr<nsNSSCertificate> cert = nsNSSCertificate::Create(node->cert);
+        nsNSSCertificate *cert = nsNSSCertificate::Create(node->cert);
         if (!cert) {
           rv = NS_ERROR_OUT_OF_MEMORY;
           break;
         }
 
-        cert.forget(_retval);
+        nsIX509Cert *x509 = 0;
+        nsresult rv = cert->QueryInterface(NS_GET_IID(nsIX509Cert), (void**)&x509);
+        if (NS_FAILED(rv)) {
+          break;
+        }
+
+        NS_ADDREF(x509);
+        *_retval = x509;
+        NS_RELEASE(cert);
         break;
       }
     }

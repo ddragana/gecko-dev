@@ -11,24 +11,20 @@ prefpane .groupbox-title {
 
 .actionsMenu > .menulist-label-box > .menulist-icon {
   margin-top: 2px;
-  margin-inline-start: 2px;
-  margin-inline-end: 8px !important;
+  -moz-margin-start: 2px;
+  -moz-margin-end: 8px !important;
 }
 
 #downloadFolder > .fileFieldContentBox {
-  padding-inline-start: 3px;
-}
-
-#fxaProfileImage {
-  -moz-user-focus: normal;
+  -moz-padding-start: 3px;
 }
 
 textbox + button {
-  margin-inline-start: -4px;
+  -moz-margin-start: -4px;
 }
 
 filefield + button {
-  margin-inline-start: -8px;
+  -moz-margin-start: -8px;
 }
 
 #popupPolicyRow {

@@ -10,25 +10,25 @@
  * W3C liability, trademark and document use rules apply.
  */
 
-dictionary MediaKeySystemMediaCapability {
-   DOMString contentType = "";
-   // TODO: robustness
+enum MediaKeysRequirement {
+  "required",
+  "optional",
+  "disallowed"
 };
 
-dictionary MediaKeySystemConfiguration {
-  DOMString                               label = "";
-  sequence<DOMString>                     initDataTypes;
-  sequence<MediaKeySystemMediaCapability> audioCapabilities;
-  sequence<MediaKeySystemMediaCapability> videoCapabilities;
-
-   // TODO: distinctiveIdentifier, persistentState, sessionTypes  
+dictionary MediaKeySystemOptions {
+  DOMString            initDataType = "";
+  DOMString            audioType = "";
+  DOMString            audioCapability = "";
+  DOMString            videoType = "";
+  DOMString            videoCapability = "";
+  MediaKeysRequirement uniqueidentifier = "optional";
+  MediaKeysRequirement stateful = "optional";
 };
 
 [Pref="media.eme.apiVisible"]
 interface MediaKeySystemAccess {
   readonly    attribute DOMString keySystem;
-  [NewObject]
-  MediaKeySystemConfiguration getConfiguration();
   [NewObject]
   Promise<MediaKeys> createMediaKeys();
 };

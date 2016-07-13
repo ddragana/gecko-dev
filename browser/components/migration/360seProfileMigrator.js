@@ -18,8 +18,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "Sqlite",
                                   "resource://gre/modules/Sqlite.jsm");
 
-const kBookmarksFileName = "360sefav.db";
-
 function copyToTempUTF8File(file, charset) {
   let inputStream = Cc["@mozilla.org/network/file-input-stream;1"]
                       .createInstance(Ci.nsIFileInputStream);
@@ -80,7 +78,8 @@ function parseINIStrings(file) {
 
 function getHash(aStr) {
   // return the two-digit hexadecimal code for a byte
-  let toHexString = charCode => ("0" + charCode.toString(16)).slice(-2);
+  function toHexString(charCode)
+    ("0" + charCode.toString(16)).slice(-2);
 
   let hasher = Cc["@mozilla.org/security/hash;1"].
                createInstance(Ci.nsICryptoHash);
@@ -92,12 +91,12 @@ function getHash(aStr) {
 
   // convert the binary hash data to a hex string.
   let binary = hasher.finish(false);
-  return Array.from(binary, (c, i) => toHexString(binary.charCodeAt(i))).join("").toLowerCase();
+  return [toHexString(binary.charCodeAt(i)) for (i in binary)].join("").toLowerCase();
 }
 
 function Bookmarks(aProfileFolder) {
   let file = aProfileFolder.clone();
-  file.append(kBookmarksFileName);
+  file.append("360sefav.db");
 
   this._file = file;
 }
@@ -297,24 +296,7 @@ Qihoo360seProfileMigrator.prototype.getResources = function(aProfile) {
   let resources = [
     new Bookmarks(profileFolder)
   ];
-  return resources.filter(r => r.exists);
-};
-
-Qihoo360seProfileMigrator.prototype.getLastUsedDate = function() {
-  let bookmarksPaths = this.sourceProfiles.map(({id}) => {
-    return OS.Path.join(this._usersDir.path, id, kBookmarksFileName);
-  });
-  if (!bookmarksPaths.length) {
-    return Promise.resolve(new Date(0));
-  }
-  let datePromises = bookmarksPaths.map(path => {
-    return OS.File.stat(path).catch(_ => null).then(info => {
-      return info ? info.lastModificationDate : 0;
-    });
-  });
-  return Promise.all(datePromises).then(dates => {
-    return new Date(Math.max.apply(Math, dates));
-  });
+  return [r for each (r in resources) if (r.exists)];
 };
 
 Qihoo360seProfileMigrator.prototype.classDescription = "360 Secure Browser Profile Migrator";

@@ -30,7 +30,7 @@ const TEST_DOC_URL = module.uri.replace(/context-menu\/test-helper\.js$/, "test-
 function TestHelper(assert, done) {
   // Methods on the wrapped test can be called on this object.
   for (var prop in assert)
-    this[prop] = (...args) => assert[prop].apply(assert, args);
+    this[prop] = () => assert[prop].apply(assert, arguments);
   this.assert = assert;
   this.end = done;
   this.loaders = [];
@@ -272,9 +272,7 @@ TestHelper.prototype = {
     }
     else {
       this.delayedEventListener(this.contextMenuPopup, "popuphidden",
-                                function () {
-                                  return closeBrowserWindow.call(this);
-                                },
+                                function () closeBrowserWindow.call(this),
                                 false);
       this.contextMenuPopup.hidePopup();
     }

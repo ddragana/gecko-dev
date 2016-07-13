@@ -26,8 +26,8 @@ class MouseCursorMonitorWin : public MouseCursorMonitor {
   explicit MouseCursorMonitorWin(ScreenId screen);
   virtual ~MouseCursorMonitorWin();
 
-  void Init(Callback* callback, Mode mode) override;
-  void Capture() override;
+  virtual void Init(Callback* callback, Mode mode) OVERRIDE;
+  virtual void Capture() OVERRIDE;
 
  private:
   // Get the rect of the currently selected screen, relative to the primary
@@ -95,7 +95,7 @@ void MouseCursorMonitorWin::Capture() {
   if (last_cursor_ != cursor_info.hCursor) {
     last_cursor_ = cursor_info.hCursor;
     // Note that |cursor_info.hCursor| does not need to be freed.
-    rtc::scoped_ptr<MouseCursor> cursor(
+    scoped_ptr<MouseCursor> cursor(
         CreateMouseCursorFromHCursor(desktop_dc_, cursor_info.hCursor));
     if (cursor.get())
       callback_->OnMouseCursor(cursor.release());

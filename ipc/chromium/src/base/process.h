@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -31,8 +29,8 @@ typedef pid_t ProcessId;
 class Process {
  public:
   Process() : process_(0), last_working_set_size_(0) {}
-  explicit Process(ProcessHandle aHandle) :
-    process_(aHandle), last_working_set_size_(0) {}
+  explicit Process(ProcessHandle handle) :
+    process_(handle), last_working_set_size_(0) {}
 
   // A handle to the current process.
   static Process Current();
@@ -40,7 +38,7 @@ class Process {
   // Get/Set the handle for this process. The handle will be 0 if the process
   // is no longer running.
   ProcessHandle handle() const { return process_; }
-  void set_handle(ProcessHandle aHandle) { process_ = aHandle; }
+  void set_handle(ProcessHandle handle) { process_ = handle; }
 
   // Get the PID for this process.
   ProcessId pid() const;

@@ -54,11 +54,8 @@ const size_t ChunkMarkBitmapOffset = 1032352;
 const size_t ChunkMarkBitmapBits = 129024;
 #endif
 const size_t ChunkRuntimeOffset = ChunkSize - sizeof(void*);
-const size_t ChunkTrailerSize = 2 * sizeof(uintptr_t) + sizeof(uint64_t);
-const size_t ChunkLocationOffset = ChunkSize - ChunkTrailerSize;
-const size_t ArenaZoneOffset = sizeof(size_t);
-const size_t ArenaHeaderSize = sizeof(size_t) + 2 * sizeof(uintptr_t) +
-                               sizeof(size_t) + sizeof(uintptr_t);
+const size_t ChunkLocationOffset = ChunkSize - 2 * sizeof(void*) - sizeof(uint64_t);
+const size_t ArenaZoneOffset = 0;
 
 /*
  * Live objects are marked black. How many other additional colors are available
@@ -115,21 +112,13 @@ struct Zone
     JSTracer* const barrierTracer_;     // A pointer to the JSRuntime's |gcMarker|.
 
   public:
-    // Stack GC roots for Rooted GC pointers.
-    js::RootedListHeads stackRoots_;
-    template <typename T> friend class JS::Rooted;
-
     bool needsIncrementalBarrier_;
 
     Zone(JSRuntime* runtime, JSTracer* barrierTracerArg)
       : runtime_(runtime),
         barrierTracer_(barrierTracerArg),
         needsIncrementalBarrier_(false)
-    {
-        for (auto& stackRootPtr : stackRoots_) {
-            stackRootPtr = nullptr;
-        }
-    }
+    {}
 
     bool needsIncrementalBarrier() const {
         return needsIncrementalBarrier_;
@@ -152,20 +141,18 @@ struct Zone
         return runtime_;
     }
 
-    static MOZ_ALWAYS_INLINE JS::shadow::Zone* asShadowZone(JS::Zone* zone) {
+    static JS::shadow::Zone* asShadowZone(JS::Zone* zone) {
         return reinterpret_cast<JS::shadow::Zone*>(zone);
     }
 };
 
 } /* namespace shadow */
 
-/**
- * A GC pointer, tagged with the trace kind.
- *
- * In general, a GC pointer should be stored with an exact type. This class
- * is for use when that is not possible because a single pointer must point
- * to several kinds of GC thing.
- */
+// A GC pointer, tagged with the trace kind.
+//
+// In general, a GC pointer should be stored with an exact type. This class
+// is for use when that is not possible because a single pointer must point
+// to several kinds of GC thing.
 class JS_FRIEND_API(GCCellPtr)
 {
   public:
@@ -176,10 +163,12 @@ class JS_FRIEND_API(GCCellPtr)
     MOZ_IMPLICIT GCCellPtr(decltype(nullptr)) : ptr(checkedCast(nullptr, JS::TraceKind::Null)) {}
 
     // Construction from an explicit type.
-    template <typename T>
-    explicit GCCellPtr(T* p) : ptr(checkedCast(p, JS::MapTypeToTraceKind<T>::kind)) { }
-    explicit GCCellPtr(JSFunction* p) : ptr(checkedCast(p, JS::TraceKind::Object)) { }
+    explicit GCCellPtr(JSObject* obj) : ptr(checkedCast(obj, JS::TraceKind::Object)) { }
+    explicit GCCellPtr(JSFunction* fun) : ptr(checkedCast(fun, JS::TraceKind::Object)) { }
+    explicit GCCellPtr(JSString* str) : ptr(checkedCast(str, JS::TraceKind::String)) { }
     explicit GCCellPtr(JSFlatString* str) : ptr(checkedCast(str, JS::TraceKind::String)) { }
+    explicit GCCellPtr(JS::Symbol* sym) : ptr(checkedCast(sym, JS::TraceKind::Symbol)) { }
+    explicit GCCellPtr(JSScript* script) : ptr(checkedCast(script, JS::TraceKind::Script)) { }
     explicit GCCellPtr(const Value& v);
 
     JS::TraceKind kind() const {
@@ -196,22 +185,31 @@ class JS_FRIEND_API(GCCellPtr)
     }
 
     // Simplify checks to the kind.
-    template <typename T>
-    bool is() const { return kind() == JS::MapTypeToTraceKind<T>::kind; }
+    bool isObject() const { return kind() == JS::TraceKind::Object; }
+    bool isScript() const { return kind() == JS::TraceKind::Script; }
+    bool isString() const { return kind() == JS::TraceKind::String; }
+    bool isSymbol() const { return kind() == JS::TraceKind::Symbol; }
+    bool isShape() const { return kind() == JS::TraceKind::Shape; }
+    bool isObjectGroup() const { return kind() == JS::TraceKind::ObjectGroup; }
 
     // Conversions to more specific types must match the kind. Access to
     // further refined types is not allowed directly from a GCCellPtr.
-    template <typename T>
-    T& as() const {
-        MOZ_ASSERT(kind() == JS::MapTypeToTraceKind<T>::kind);
-        // We can't use static_cast here, because the fact that JSObject
-        // inherits from js::gc::Cell is not part of the public API.
-        return *reinterpret_cast<T*>(asCell());
+    JSObject* toObject() const {
+        MOZ_ASSERT(kind() == JS::TraceKind::Object);
+        return reinterpret_cast<JSObject*>(asCell());
     }
-
-    // Return a pointer to the cell this |GCCellPtr| refers to, or |nullptr|.
-    // (It would be more symmetrical with |to| for this to return a |Cell&|, but
-    // the result can be |nullptr|, and null references are undefined behavior.)
+    JSString* toString() const {
+        MOZ_ASSERT(kind() == JS::TraceKind::String);
+        return reinterpret_cast<JSString*>(asCell());
+    }
+    JSScript* toScript() const {
+        MOZ_ASSERT(kind() == JS::TraceKind::Script);
+        return reinterpret_cast<JSScript*>(asCell());
+    }
+    Symbol* toSymbol() const {
+        MOZ_ASSERT(kind() == JS::TraceKind::Symbol);
+        return reinterpret_cast<Symbol*>(asCell());
+    }
     js::gc::Cell* asCell() const {
         return reinterpret_cast<js::gc::Cell*>(ptr & ~OutOfLineTraceKindMask);
     }
@@ -256,24 +254,6 @@ inline bool
 operator!=(const GCCellPtr& ptr1, const GCCellPtr& ptr2)
 {
     return !(ptr1 == ptr2);
-}
-
-// Unwraps the given GCCellPtr and calls the given functor with a template
-// argument of the actual type of the pointer.
-template <typename F, typename... Args>
-auto
-DispatchTyped(F f, GCCellPtr thing, Args&&... args)
-  -> decltype(f(static_cast<JSObject*>(nullptr), mozilla::Forward<Args>(args)...))
-{
-    switch (thing.kind()) {
-#define JS_EXPAND_DEF(name, type, _) \
-      case JS::TraceKind::name: \
-          return f(&thing.as<type>(), mozilla::Forward<Args>(args)...);
-      JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
-#undef JS_EXPAND_DEF
-      default:
-          MOZ_CRASH("Invalid trace kind in DispatchTyped for GCCellPtr.");
-    }
 }
 
 } /* namespace JS */
@@ -401,9 +381,6 @@ GCThingIsMarkedGray(GCCellPtr thing)
     return js::gc::detail::CellIsMarkedGray(thing.asCell());
 }
 
-extern JS_PUBLIC_API(JS::TraceKind)
-GCThingTraceKind(void* thing);
-
 } /* namespace JS */
 
 namespace js {
@@ -414,13 +391,13 @@ IsIncrementalBarrierNeededOnTenuredGCThing(JS::shadow::Runtime* rt, const JS::GC
 {
     MOZ_ASSERT(thing);
     MOZ_ASSERT(!js::gc::IsInsideNursery(thing.asCell()));
-    if (rt->isHeapCollecting())
+    if (rt->isHeapBusy())
         return false;
     JS::Zone* zone = JS::GetTenuredGCThingZone(thing);
     return JS::shadow::Zone::asShadowZone(zone)->needsIncrementalBarrier();
 }
 
-/**
+/*
  * Create an object providing access to the garbage collector's internal notion
  * of the current state of memory (both GC heap memory and GCthing-controlled
  * malloc memory.

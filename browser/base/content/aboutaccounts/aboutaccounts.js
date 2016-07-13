@@ -4,12 +4,12 @@
 
 "use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FxAccounts.jsm");
 
-var fxAccountsCommon = {};
+let fxAccountsCommon = {};
 Cu.import("resource://gre/modules/FxAccountsCommon.js", fxAccountsCommon);
 
 // for master-password utilities
@@ -27,11 +27,11 @@ const OBSERVER_TOPICS = [
 
 function log(msg) {
   //dump("FXA: " + msg + "\n");
-}
+};
 
 function error(msg) {
   console.log("Firefox Account Error: " + msg + "\n");
-}
+};
 
 function getPreviousAccountNameHash() {
   try {
@@ -102,7 +102,7 @@ function updateDisplayedEmail(user) {
   }
 }
 
-var wrapper = {
+let wrapper = {
   iframe: null,
 
   init: function (url, urlParams) {
@@ -114,10 +114,6 @@ var wrapper = {
 
     let iframe = document.getElementById("remote");
     this.iframe = iframe;
-    this.iframe.QueryInterface(Ci.nsIFrameLoaderOwner);
-    let docShell = this.iframe.frameLoader.docShell;
-    docShell.QueryInterface(Ci.nsIWebProgress);
-    docShell.addProgressListener(this.iframeListener, Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT);
     iframe.addEventListener("load", this);
 
     // Ideally we'd just merge urlParams with new URL(url).searchParams, but our
@@ -126,58 +122,7 @@ var wrapper = {
     if (urlParamStr) {
       url += (url.includes("?") ? "&" : "?") + urlParamStr;
     }
-    this.url = url;
-    // Set the iframe's location with loadURI/LOAD_FLAGS_REPLACE_HISTORY to
-    // avoid having a new history entry being added. REPLACE_HISTORY is used
-    // to replace the current entry, which is `about:blank`.
-    let webNav = iframe.frameLoader.docShell.QueryInterface(Ci.nsIWebNavigation);
-    webNav.loadURI(url, Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY, null, null, null);
-  },
-
-  retry: function () {
-    let webNav = this.iframe.frameLoader.docShell.QueryInterface(Ci.nsIWebNavigation);
-    webNav.loadURI(this.url, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY, null, null, null);
-  },
-
-  iframeListener: {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
-                                         Ci.nsISupportsWeakReference,
-                                         Ci.nsISupports]),
-
-    onStateChange: function(aWebProgress, aRequest, aState, aStatus) {
-      let failure = false;
-
-      // Captive portals sometimes redirect users
-      if ((aState & Ci.nsIWebProgressListener.STATE_REDIRECTING)) {
-        failure = true;
-      } else if ((aState & Ci.nsIWebProgressListener.STATE_STOP)) {
-        if (aRequest instanceof Ci.nsIHttpChannel) {
-          try {
-            failure = aRequest.responseStatus != 200;
-          } catch (e) {
-            failure = aStatus != Components.results.NS_OK;
-          }
-        }
-      }
-
-      // Calling cancel() will raise some OnStateChange notifications by itself,
-      // so avoid doing that more than once
-      if (failure && aStatus != Components.results.NS_BINDING_ABORTED) {
-        aRequest.cancel(Components.results.NS_BINDING_ABORTED);
-        setErrorPage();
-      }
-    },
-
-    onLocationChange: function(aWebProgress, aRequest, aLocation, aFlags) {
-      if (aRequest && aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) {
-        aRequest.cancel(Components.results.NS_BINDING_ABORTED);
-        setErrorPage();
-      }
-    },
-
-    onProgressChange: function() {},
-    onStatusChange: function() {},
-    onSecurityChange: function() {},
+    iframe.src = url;
   },
 
   handleEvent: function (evt) {
@@ -203,13 +148,8 @@ var wrapper = {
 
     if (accountData.customizeSync) {
       Services.prefs.setBoolPref(PREF_SYNC_SHOW_CUSTOMIZATION, true);
+      delete accountData.customizeSync;
     }
-    delete accountData.customizeSync;
-    // sessionTokenContext is erroneously sent by the content server.
-    // https://github.com/mozilla/fxa-content-server/issues/2766
-    // To avoid having the FxA storage manager not knowing what to do with
-    // it we delete it here.
-    delete accountData.sessionTokenContext;
 
     // We need to confirm a relink - see shouldAllowRelink for more
     let newAccountEmail = accountData.email;
@@ -220,8 +160,8 @@ var wrapper = {
       // we need to tell the page we successfully received the message, but
       // then bail without telling fxAccounts
       this.injectData("message", { status: "login" });
-      // after a successful login we return to preferences
-      openPrefs();
+      // and re-init the page by navigating to about:accounts
+      window.location = "about:accounts";
       return;
     }
     delete accountData.verifiedCanLinkAccount;
@@ -241,7 +181,7 @@ var wrapper = {
       // If the user data is verified, we want it to immediately look like
       // they are signed in without waiting for messages to bounce around.
       if (accountData.verified) {
-        openPrefs();
+        show("stage", "manage");
       }
       this.injectData("message", { status: "login" });
       // until we sort out a better UX, just leave the jelly page in place.
@@ -259,6 +199,22 @@ var wrapper = {
     // We need to confirm a relink - see shouldAllowRelink for more
     let ok = shouldAllowRelink(accountData.email);
     this.injectData("message", { status: "can_link_account", data: { ok: ok } });
+  },
+
+  /**
+   * onSessionStatus sends the currently signed in user's credentials
+   * to the jelly.
+   */
+  onSessionStatus: function () {
+    log("Received: 'session_status'.");
+
+    fxAccounts.getSignedInUser().then(
+      (accountData) => {
+        updateDisplayedEmail(accountData);
+        this.injectData("message", { status: "session_status", data: accountData });
+      },
+      (err) => this.injectData("message", { status: "error", error: err })
+    );
   },
 
   /**
@@ -283,6 +239,9 @@ var wrapper = {
         break;
       case "can_link_account":
         this.onCanLinkAccount(data);
+        break;
+      case "session_status":
+        this.onSessionStatus(data);
         break;
       case "sign_out":
         this.onSignOut(data);
@@ -328,15 +287,8 @@ function getStarted() {
   show("remote");
 }
 
-function retry() {
-  show("remote");
-  wrapper.retry();
-}
-
 function openPrefs() {
-  // Bug 1199303 calls for this tab to always be replaced with Preferences
-  // rather than it opening in a different tab.
-  window.location = "about:preferences#sync";
+  window.openPreferences("paneSync");
 }
 
 function init() {
@@ -401,13 +353,7 @@ function init() {
       }
       break;
     }
-  }).catch(err => {
-    error("Failed to get the signed in user: " + err);
   });
-}
-
-function setErrorPage() {
-  show("stage", "networkError");
 }
 
 // Causes the "top-level" element with |id| to be shown - all other top-level
@@ -496,9 +442,6 @@ document.addEventListener("DOMContentLoaded", function onload() {
   var buttonGetStarted = document.getElementById('buttonGetStarted');
   buttonGetStarted.addEventListener('click', getStarted);
 
-  var buttonRetry = document.getElementById('buttonRetry');
-  buttonRetry.addEventListener('click', retry);
-
   var oldsync = document.getElementById('oldsync');
   oldsync.addEventListener('click', handleOldSync);
 
@@ -514,9 +457,8 @@ function initObservers() {
       window.location = "about:accounts?action=signin";
       return;
     }
-
-    // must be onverified - we want to open preferences.
-    openPrefs();
+    // must be onverified - just about:accounts is loaded.
+    window.location = "about:accounts";
   }
 
   for (let topic of OBSERVER_TOPICS) {

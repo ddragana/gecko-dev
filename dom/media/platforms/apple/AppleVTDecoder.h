@@ -16,40 +16,32 @@ namespace mozilla {
 class AppleVTDecoder : public AppleVDADecoder {
 public:
   AppleVTDecoder(const VideoInfo& aConfig,
-                 TaskQueue* aTaskQueue,
+                 FlushableTaskQueue* aVideoTaskQueue,
                  MediaDataDecoderCallback* aCallback,
                  layers::ImageContainer* aImageContainer);
-
-  RefPtr<InitPromise> Init() override;
-  bool IsHardwareAccelerated(nsACString& aFailureReason) const override
+  virtual ~AppleVTDecoder();
+  virtual nsresult Init() override;
+  virtual nsresult Input(MediaRawData* aSample) override;
+  virtual nsresult Flush() override;
+  virtual nsresult Drain() override;
+  virtual nsresult Shutdown() override;
+  virtual bool IsHardwareAccelerated() const override
   {
     return mIsHardwareAccelerated;
   }
 
-  const char* GetDescriptionName() const override
-  {
-    return mIsHardwareAccelerated
-      ? "apple hardware VT decoder"
-      : "apple software VT decoder";
-  }
-
 private:
-  virtual ~AppleVTDecoder();
-  void ProcessFlush() override;
-  void ProcessDrain() override;
-  void ProcessShutdown() override;
-
   CMVideoFormatDescriptionRef mFormat;
   VTDecompressionSessionRef mSession;
 
   // Method to pass a frame to VideoToolbox for decoding.
-  nsresult DoDecode(MediaRawData* aSample) override;
+  nsresult SubmitFrame(MediaRawData* aSample);
   // Method to set up the decompression session.
   nsresult InitializeSession();
   nsresult WaitForAsynchronousFrames();
   CFDictionaryRef CreateDecoderSpecification();
   CFDictionaryRef CreateDecoderExtensions();
-  Atomic<bool> mIsHardwareAccelerated;
+  bool mIsHardwareAccelerated;
 };
 
 } // namespace mozilla

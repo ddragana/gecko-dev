@@ -34,7 +34,7 @@ public:
     void CheckLinkStatus(void);
 
 protected:
-    class ChangeEvent : public mozilla::Runnable {
+    class ChangeEvent : public nsRunnable {
     public:
         NS_DECL_NSIRUNNABLE
         ChangeEvent(nsINetworkLinkService *aService, const char *aEventID)
@@ -60,41 +60,18 @@ protected:
 
     nsCOMPtr<nsIThread> mThread;
 
+    HANDLE        mShutdownEvent;
+
 private:
-    // Returns the new timeout period for coalescing (or INFINITE)
-    DWORD nextCoalesceWaitTime();
-
-    // Called for every detected network change
-    nsresult NetworkChanged();
-
-    // Figure out the current network identification
-    void calculateNetworkId(void);
-    bool findMac(char *gateway);
-    nsCString mNetworkId;
-
-    HANDLE mCheckEvent;
-
-    // set true when mCheckEvent means shutdown
-    bool mShutdown;
-
     // This is a checksum of various meta data for all network interfaces
     // considered UP at last check.
     ULONG mIPInterfaceChecksum;
 
-    // start time of the checking
-    mozilla::TimeStamp mStartTime;
+    // time of the last sent changed event
+    mozilla::TimeStamp mChangedTime;
 
     // Network changed events are enabled
     bool mAllowChangedEvent;
-
-    // Check for IPv6 network changes
-    bool mIPv6Changes;
-
-    // Flag set while coalescing change events
-    bool mCoalescingActive;
-
-    // Time stamp for first event during coalescing
-    mozilla::TimeStamp mChangeTime;
 };
 
 #endif /* NSNOTIFYADDRLISTENER_H_ */

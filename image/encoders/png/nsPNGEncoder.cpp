@@ -12,7 +12,15 @@
 
 using namespace mozilla;
 
-static LazyLogModule sPNGEncoderLog("PNGEncoder");
+static PRLogModuleInfo*
+GetPNGEncoderLog()
+{
+  static PRLogModuleInfo* sPNGEncoderLog;
+  if (!sPNGEncoderLog) {
+    sPNGEncoderLog = PR_NewLogModule("PNGEncoder");
+  }
+  return sPNGEncoderLog;
+}
 
 NS_IMPL_ISUPPORTS(nsPNGEncoder, imgIEncoder, nsIInputStream,
                   nsIAsyncInputStream)
@@ -279,18 +287,22 @@ nsPNGEncoder::AddImageFrame(const uint8_t* aData,
   if (aInputFormat == INPUT_FORMAT_HOSTARGB) {
     // PNG requires RGBA with post-multiplied alpha, so we need to
     // convert
-    UniquePtr<uint8_t[]> row = MakeUnique<uint8_t[]>(aWidth * 4);
+    uint8_t* row = new uint8_t[aWidth * 4];
     for (uint32_t y = 0; y < aHeight; y++) {
-      ConvertHostARGBRow(&aData[y * aStride], row.get(), aWidth, useTransparency);
-      png_write_row(mPNG, row.get());
+      ConvertHostARGBRow(&aData[y * aStride], row, aWidth, useTransparency);
+      png_write_row(mPNG, row);
     }
+    delete[] row;
+
   } else if (aInputFormat == INPUT_FORMAT_RGBA && !useTransparency) {
     // RBGA, but we need to strip the alpha
-    UniquePtr<uint8_t[]> row = MakeUnique<uint8_t[]>(aWidth * 4);
+    uint8_t* row = new uint8_t[aWidth * 4];
     for (uint32_t y = 0; y < aHeight; y++) {
-      StripAlpha(&aData[y * aStride], row.get(), aWidth);
-      png_write_row(mPNG, row.get());
+      StripAlpha(&aData[y * aStride], row, aWidth);
+      png_write_row(mPNG, row);
     }
+    delete[] row;
+
   } else if (aInputFormat == INPUT_FORMAT_RGB ||
              aInputFormat == INPUT_FORMAT_RGBA) {
     // simple RBG(A), no conversion needed
@@ -512,6 +524,7 @@ nsPNGEncoder::ParseOptions(const nsAString& aOptions,
 }
 
 
+/* void close (); */
 NS_IMETHODIMP
 nsPNGEncoder::Close()
 {
@@ -525,6 +538,7 @@ nsPNGEncoder::Close()
   return NS_OK;
 }
 
+/* unsigned long available (); */
 NS_IMETHODIMP
 nsPNGEncoder::Available(uint64_t* _retval)
 {
@@ -536,12 +550,17 @@ nsPNGEncoder::Available(uint64_t* _retval)
   return NS_OK;
 }
 
+/* [noscript] unsigned long read (in charPtr aBuf,
+                                  in unsigned long aCount); */
 NS_IMETHODIMP
 nsPNGEncoder::Read(char* aBuf, uint32_t aCount, uint32_t* _retval)
 {
   return ReadSegments(NS_CopySegmentToBuffer, aBuf, aCount, _retval);
 }
 
+/* [noscript] unsigned long readSegments (in nsWriteSegmentFun aWriter,
+                                          in voidPtr aClosure,
+                                          in unsigned long aCount); */
 NS_IMETHODIMP
 nsPNGEncoder::ReadSegments(nsWriteSegmentFun aWriter,
                            void* aClosure, uint32_t aCount,
@@ -573,6 +592,7 @@ nsPNGEncoder::ReadSegments(nsWriteSegmentFun aWriter,
   return NS_OK;
 }
 
+/* boolean isNonBlocking (); */
 NS_IMETHODIMP
 nsPNGEncoder::IsNonBlocking(bool* _retval)
 {
@@ -677,7 +697,7 @@ void
 nsPNGEncoder::WarningCallback(png_structp png_ptr,
                             png_const_charp warning_msg)
 {
-  MOZ_LOG(sPNGEncoderLog, LogLevel::Warning,
+  MOZ_LOG(GetPNGEncoderLog(), LogLevel::Warning,
          ("libpng warning: %s\n", warning_msg));
 }
 
@@ -688,7 +708,7 @@ void
 nsPNGEncoder::ErrorCallback(png_structp png_ptr,
                             png_const_charp error_msg)
 {
-  MOZ_LOG(sPNGEncoderLog, LogLevel::Error, ("libpng error: %s\n", error_msg));
+  MOZ_LOG(GetPNGEncoderLog(), LogLevel::Error, ("libpng error: %s\n", error_msg));
   png_longjmp(png_ptr, 1);
 }
 

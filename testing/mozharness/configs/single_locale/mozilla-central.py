@@ -16,7 +16,7 @@ config = {
     "repos": [{
         "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
-        "branch": "default",
+        "revision": "default",
         "dest": "tools",
     }, {
         "vcs": "hgtool",
@@ -30,4 +30,5 @@ config = {
     }],
     # purge options
     'is_automation': True,
+    'purge_minsize': 12,
 }

@@ -27,37 +27,20 @@ public:
 
   // Overrides FileSystemBase
 
-  virtual already_AddRefed<FileSystemBase>
-  Clone() override;
-
-  virtual bool
-  ShouldCreateDirectory() override { return true; }
-
   virtual void
   Shutdown() override;
 
-  virtual nsISupports*
-  GetParentObject() const override;
+  virtual nsPIDOMWindow*
+  GetWindow() const override;
 
   virtual void
-  GetDirectoryName(nsIFile* aFile, nsAString& aRetval,
-                   ErrorResult& aRv) const override;
+  GetRootName(nsAString& aRetval) const override;
 
   virtual bool
   IsSafeFile(nsIFile* aFile) const override;
 
   virtual bool
   IsSafeDirectory(Directory* aDir) const override;
-
-  virtual void
-  SerializeDOMPath(nsAString& aSerializedString) const override;
-
-  virtual bool
-  NeedToGoToMainThread() const override { return true; }
-
-  virtual nsresult
-  MainThreadWork() override;
-
 private:
   virtual
   ~DeviceStorageFileSystem();
@@ -65,7 +48,7 @@ private:
   nsString mStorageType;
   nsString mStorageName;
 
-  uint64_t mWindowId;
+  nsDOMDeviceStorage* mDeviceStorage;
 };
 
 } // namespace dom

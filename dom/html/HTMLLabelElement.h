@@ -18,12 +18,12 @@ namespace mozilla {
 class EventChainPostVisitor;
 namespace dom {
 
-class HTMLLabelElement final : public nsGenericHTMLElement,
+class HTMLLabelElement final : public nsGenericHTMLFormElement,
                                public nsIDOMHTMLLabelElement
 {
 public:
   explicit HTMLLabelElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : nsGenericHTMLElement(aNodeInfo),
+    : nsGenericHTMLFormElement(aNodeInfo),
       mHandlingEvent(false)
   {
   }
@@ -42,7 +42,7 @@ public:
   // nsIDOMHTMLLabelElement
   NS_DECL_NSIDOMHTMLLABELELEMENT
 
-  HTMLFormElement* GetForm() const;
+  using nsGenericHTMLFormElement::GetForm;
   void GetHtmlFor(nsString& aHtmlFor)
   {
     GetHTMLAttr(nsGkAtoms::_for, aHtmlFor);
@@ -59,12 +59,17 @@ public:
   using nsGenericHTMLElement::Focus;
   virtual void Focus(mozilla::ErrorResult& aError) override;
 
+  // nsIFormControl
+  NS_IMETHOD_(uint32_t) GetType() const override { return NS_FORM_LABEL; }
+  NS_IMETHOD Reset() override;
+  NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission) override;
+
   virtual bool IsDisabled() const override { return false; }
 
   // nsIContent
   virtual nsresult PostHandleEvent(
                      EventChainPostVisitor& aVisitor) override;
-  virtual bool PerformAccesskey(bool aKeyCausesActivation,
+  virtual void PerformAccesskey(bool aKeyCausesActivation,
                                 bool aIsTrustedEvent) override;
   virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
 

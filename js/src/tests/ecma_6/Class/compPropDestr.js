@@ -7,5 +7,5 @@ var key = "z";
 var { [key]: foo } = { z: "bar" };
 assertEq(foo, "bar");
 
-if (typeof reportCompare === 'function')
-    reportCompare(0, 0, "ok");
+
+reportCompare(0, 0, "ok");

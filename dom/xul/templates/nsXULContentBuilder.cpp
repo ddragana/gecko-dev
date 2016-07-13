@@ -34,7 +34,7 @@
 #include "nsTextNode.h"
 #include "mozilla/dom/Element.h"
 
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "rdf.h"
 
 using namespace mozilla;
@@ -348,6 +348,9 @@ NS_NewXULContentBuilder(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 
     nsresult rv;
     nsXULContentBuilder* result = new nsXULContentBuilder();
+    if (!result)
+        return NS_ERROR_OUT_OF_MEMORY;
+
     NS_ADDREF(result); // stabilize
 
     rv = result->InitGlobals();
@@ -615,7 +618,7 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
                 rv = SubstituteText(aChild, attrValue, value);
                 if (NS_FAILED(rv)) return rv;
 
-                RefPtr<nsTextNode> content =
+                nsRefPtr<nsTextNode> content =
                   new nsTextNode(mRoot->NodeInfo()->NodeInfoManager());
 
                 content->SetText(value, false);
@@ -816,14 +819,14 @@ nsXULContentBuilder::AddPersistentAttributes(Element* aTemplateNode,
         nsCOMPtr<nsIAtom> tag;
         int32_t nameSpaceID;
 
-        RefPtr<mozilla::dom::NodeInfo> ni =
+        nsRefPtr<mozilla::dom::NodeInfo> ni =
             aTemplateNode->GetExistingAttrNameFromQName(attribute);
         if (ni) {
             tag = ni->NameAtom();
             nameSpaceID = ni->NamespaceID();
         }
         else {
-            tag = NS_Atomize(attribute);
+            tag = do_GetAtom(attribute);
             NS_ENSURE_TRUE(tag, NS_ERROR_OUT_OF_MEMORY);
 
             nameSpaceID = kNameSpaceID_None;
@@ -1270,7 +1273,7 @@ nsXULContentBuilder::RemoveGeneratedContent(nsIContent* aElement)
 {
     // Keep a queue of "ungenerated" elements that we have to probe
     // for generated content.
-    AutoTArray<nsIContent*, 8> ungenerated;
+    nsAutoTArray<nsIContent*, 8> ungenerated;
     if (ungenerated.AppendElement(aElement) == nullptr)
         return NS_ERROR_OUT_OF_MEMORY;
 
@@ -1351,7 +1354,7 @@ nsXULContentBuilder::CreateElement(int32_t aNameSpaceID,
     if (! doc)
         return NS_ERROR_NOT_INITIALIZED;
 
-    RefPtr<mozilla::dom::NodeInfo> nodeInfo =
+    nsRefPtr<mozilla::dom::NodeInfo> nodeInfo =
         doc->NodeInfoManager()->GetNodeInfo(aTag, nullptr, aNameSpaceID,
                                             nsIDOMNode::ELEMENT_NODE);
 
@@ -1507,8 +1510,7 @@ nsXULContentBuilder::AttributeChanged(nsIDocument* aDocument,
                                       Element*     aElement,
                                       int32_t      aNameSpaceID,
                                       nsIAtom*     aAttribute,
-                                      int32_t      aModType,
-                                      const nsAttrValue* aOldValue)
+                                      int32_t      aModType)
 {
     nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
 
@@ -1534,7 +1536,7 @@ nsXULContentBuilder::AttributeChanged(nsIDocument* aDocument,
 
     // Pass along to the generic template builder.
     nsXULTemplateBuilder::AttributeChanged(aDocument, aElement, aNameSpaceID,
-                                           aAttribute, aModType, aOldValue);
+                                           aAttribute, aModType);
 }
 
 void

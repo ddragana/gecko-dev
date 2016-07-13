@@ -89,6 +89,7 @@ nsPrintOptionsGTK::DeserializeToPrintSettings(const PrintData& data,
   return NS_OK;
 }
 
+/* nsIPrintSettings CreatePrintSettings (); */
 nsresult nsPrintOptionsGTK::_CreatePrintSettings(nsIPrintSettings **_retval)
 {
   *_retval = nullptr;

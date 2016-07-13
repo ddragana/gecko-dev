@@ -28,8 +28,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "checkRenamed",
                                   "resource://gre/modules/identity/IdentityUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "objectCopy",
                                   "resource://gre/modules/identity/IdentityUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "makeMessageObject",
-                                  "resource://gre/modules/identity/IdentityUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
                                    "@mozilla.org/uuid-generator;1",
@@ -641,7 +639,7 @@ nsDOMIdentity.prototype = {
 
     this._log("DOMIdentityMessage: " + JSON.stringify(message));
 
-    return makeMessageObject(message);
+    return message;
   },
 
  /**
@@ -650,14 +648,14 @@ nsDOMIdentity.prototype = {
   */
   // nsIObserver
   observe: function nsDOMIdentityInternal_observe(aSubject, aTopic, aData) {
-    let wId = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
-    if (wId != this._innerWindowID) {
+    let window = aSubject.QueryInterface(Ci.nsIDOMWindow);
+    if (window != this._window) {
       return;
     }
 
     this.uninit();
 
-    Services.obs.removeObserver(this, "inner-window-destroyed");
+    Services.obs.removeObserver(this, "dom-window-destroyed");
     this._initializeState();
 
     // TODO: Also send message to DOMIdentity notifiying window is no longer valid
@@ -729,7 +727,7 @@ nsDOMIdentity.prototype = {
     }, this);
 
     // Setup observers so we can remove message listeners.
-    Services.obs.addObserver(this, "inner-window-destroyed", false);
+    Services.obs.addObserver(this, "dom-window-destroyed", false);
   },
 
   uninit: function DOMIdentity_uninit() {

@@ -2,6 +2,7 @@
 <script>
   navigator.serviceWorker.getRegistration(".").then(function(registration) {
     if(!registration) {
+      window.parent.postMessage({status: "unregistrationdone"}, "*");
       return;
     }
     registration.unregister().then(() => {

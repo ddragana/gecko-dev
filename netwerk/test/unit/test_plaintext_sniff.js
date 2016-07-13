@@ -1,7 +1,6 @@
 // Test the plaintext-or-binary sniffer
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
 
 // List of Content-Type headers to test.  For each header we have an array.
 // The first element in the array is the Content-Type header string.  The
@@ -74,11 +73,19 @@ for (i = 0; i <= 127; ++i) {
 }
 
 function makeChan(headerIdx, bodyIdx) {
-  var chan = NetUtil.newChannel({
-    uri: "http://localhost:" + httpserv.identity.primaryPort +
-         "/" + headerIdx + "/" + bodyIdx,
-    loadUsingSystemPrincipal: true
-  }).QueryInterface(Components.interfaces.nsIHttpChannel);
+  var ios = Components.classes["@mozilla.org/network/io-service;1"]
+                      .getService(Components.interfaces.nsIIOService);
+  var chan =
+    ios.newChannel2("http://localhost:" + httpserv.identity.primaryPort +
+                    "/" + headerIdx + "/" + bodyIdx,
+                    null,
+                    null,
+                    null,      // aLoadingNode
+                    Services.scriptSecurityManager.getSystemPrincipal(),
+                    null,      // aTriggeringPrincipal
+                    Ci.nsILoadInfo.SEC_NORMAL,
+                    Ci.nsIContentPolicy.TYPE_OTHER)
+       .QueryInterface(Components.interfaces.nsIHttpChannel);
 
   chan.loadFlags |=
     Components.interfaces.nsIChannel.LOAD_CALL_CONTENT_SNIFFERS;
@@ -149,7 +156,7 @@ function doTest(headerIdx, bodyIdx) {
 
   var listener = makeListener(headerIdx, bodyIdx);
 
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener, null);
 
   do_test_pending();    
 }
@@ -176,7 +183,7 @@ function run_test() {
   // disable on Windows for now, because it seems to leak sockets and die.
   // Silly operating system!
   // This is a really nasty way to detect Windows.  I wish we could do better.
-  if (mozinfo.os == "win") {
+  if ("@mozilla.org/windows-registry-key;1" in Cc) {
     return;
   }
 

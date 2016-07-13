@@ -42,7 +42,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MobileConnection,
                                            DOMEventTargetHelper)
 
-  MobileConnection(nsPIDOMWindowInner* aWindow, uint32_t aClientId);
+  MobileConnection(nsPIDOMWindow *aWindow, uint32_t aClientId);
 
   void
   Shutdown();
@@ -50,7 +50,7 @@ public:
   virtual void
   DisconnectFromOwner() override;
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return GetOwner();
@@ -165,9 +165,9 @@ private:
   nsString mIccId;
   nsCOMPtr<nsIMobileConnection> mMobileConnection;
   nsCOMPtr<nsIIcc> mIccHandler;
-  RefPtr<Listener> mListener;
-  RefPtr<MobileConnectionInfo> mVoice;
-  RefPtr<MobileConnectionInfo> mData;
+  nsRefPtr<Listener> mListener;
+  nsRefPtr<MobileConnectionInfo> mVoice;
+  nsRefPtr<MobileConnectionInfo> mData;
 
   bool
   CheckPermission(const char* aType) const;

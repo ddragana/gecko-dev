@@ -4,7 +4,6 @@
 
 from __future__ import print_function, unicode_literals
 
-import logging
 import re
 
 class OutputHandler(object):
@@ -39,11 +38,10 @@ class OutputHandler(object):
     appropriately.
     '''
 
-    def __init__(self, logger):
+    def __init__(self):
         # The regexps in this list match all of Valgrind's errors. Note that
         # Valgrind is English-only, so we don't have to worry about
         # localization.
-        self.logger = logger
         self.re_error = \
             r'==\d+== (' + \
             r'(Use of uninitialised value of size \d+)|' + \
@@ -65,12 +63,8 @@ class OutputHandler(object):
         self.error_count = 0
         self.suppression_count = 0
         self.number_of_stack_entries_to_get = 0
-        self.curr_error = None
-        self.curr_location = None
+        self.curr_failure_msg = None
         self.buffered_lines = None
-
-    def log(self, line):
-        self.logger(logging.INFO, 'valgrind-output', {'line': line}, '{line}')
 
     def __call__(self, line):
         if self.number_of_stack_entries_to_get == 0:
@@ -79,11 +73,10 @@ class OutputHandler(object):
             if m:
                 self.error_count += 1
                 self.number_of_stack_entries_to_get = 4
-                self.curr_error = m.group(1)
-                self.curr_location = ""
+                self.curr_failure_msg = 'TEST-UNEXPECTED-FAIL | valgrind-test | ' + m.group(1) + " at "
                 self.buffered_lines = [line]
             else:
-                self.log(line)
+                print(line)
 
         else:
             # We've recently found a Valgrind error, and are now extracting
@@ -91,24 +84,20 @@ class OutputHandler(object):
             self.buffered_lines.append(line)
             m = re.match(self.re_stack_entry, line)
             if m:
-                self.curr_location += m.group(1)
+                self.curr_failure_msg += m.group(1)
             else:
-                self.curr_location += '?!?'
+                self.curr_failure_msg += '?!?'
 
             self.number_of_stack_entries_to_get -= 1
             if self.number_of_stack_entries_to_get != 0:
-                self.curr_location += ' / '
+                self.curr_failure_msg += ' / '
             else:
                 # We've finished getting the first few stack entries. Print the
                 # failure message and the buffered lines, and then reset state.
-                self.logger(logging.ERROR, 'valgrind-error-msg',
-                            {'error': self.curr_error,
-                             'location': self.curr_location},
-                             'TEST-UNEXPECTED-FAIL | valgrind-test | {error} at {location}')
+                print('\n' + self.curr_failure_msg + '\n')
                 for b in self.buffered_lines:
-                    self.log(b)
-                self.curr_error = None
-                self.curr_location = None
+                    print(b)
+                self.curr_failure_msg = None
                 self.buffered_lines = None
 
         if re.match(self.re_suppression, line):

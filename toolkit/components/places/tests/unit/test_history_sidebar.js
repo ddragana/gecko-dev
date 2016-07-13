@@ -23,7 +23,7 @@ var ps = Cc["@mozilla.org/preferences-service;1"].
  * @param aDayOffset
  *        number of days to add, pass a negative value to subtract them.
  */
-function* task_add_normalized_visit(aURI, aTime, aDayOffset) {
+function task_add_normalized_visit(aURI, aTime, aDayOffset) {
   var dateObj = new Date(aTime);
   // Normalize to midnight
   dateObj.setHours(0);
@@ -79,19 +79,19 @@ var visibleContainers = containers.filter(
 /**
  * Asynchronous task that fills history and checks containers' labels.
  */
-function* task_fill_history() {
+function task_fill_history() {
   print("\n\n*** TEST Fill History\n");
   // We can't use "now" because our hardcoded offsets would be invalid for some
   // date.  So we hardcode a date.
-  for (let i = 0; i < containers.length; i++) {
-    let container = containers[i];
+  for (var i = 0; i < containers.length; i++) {
+    var container = containers[i];
     var testURI = uri("http://mirror"+i+".mozilla.com/b");
     yield task_add_normalized_visit(testURI, nowObj.getTime(), container.offset);
-    testURI = uri("http://mirror"+i+".mozilla.com/a");
+    var testURI = uri("http://mirror"+i+".mozilla.com/a");
     yield task_add_normalized_visit(testURI, nowObj.getTime(), container.offset);
-    testURI = uri("http://mirror"+i+".google.com/b");
+    var testURI = uri("http://mirror"+i+".google.com/b");
     yield task_add_normalized_visit(testURI, nowObj.getTime(), container.offset);
-    testURI = uri("http://mirror"+i+".google.com/a");
+    var testURI = uri("http://mirror"+i+".google.com/a");
     yield task_add_normalized_visit(testURI, nowObj.getTime(), container.offset);
     // Bug 485703 - Hide date containers not containing additional entries
     //              compared to previous ones.
@@ -110,8 +110,8 @@ function* task_fill_history() {
   var cc = root.childCount;
   print("Found containers:");
   var previousLabels = [];
-  for (let i = 0; i < cc; i++) {
-    let container = visibleContainers[i];
+  for (var i = 0; i < cc; i++) {
+    var container = visibleContainers[i];
     var node = root.getChild(i);
     print(node.title);
     if (container.label)
@@ -201,17 +201,17 @@ function test_RESULTS_AS_DATE_SITE_QUERY() {
   result.sortingMode = options.SORT_BY_TITLE_DESCENDING;
 
   // Check one of the days
-  dayNode = root.getChild(0)
+  var dayNode = root.getChild(0)
                     .QueryInterface(Ci.nsINavHistoryContainerResultNode);
   dayNode.containerOpen = true;
   do_check_eq(dayNode.childCount, 2);
 
   // Hosts are still sorted by title
-  site1 = dayNode.getChild(0)
+  var site1 = dayNode.getChild(0)
                      .QueryInterface(Ci.nsINavHistoryContainerResultNode);
   do_check_eq(site1.title, "mirror0.google.com");
 
-  site2 = dayNode.getChild(1)
+  var site2 = dayNode.getChild(1)
                      .QueryInterface(Ci.nsINavHistoryContainerResultNode);
   do_check_eq(site2.title, "mirror0.mozilla.com");
 
@@ -219,7 +219,7 @@ function test_RESULTS_AS_DATE_SITE_QUERY() {
   do_check_eq(site1.childCount, 2);
 
   // But URLs are now sorted by title descending
-  site1visit = site1.getChild(0);
+  var site1visit = site1.getChild(0);
   do_check_eq(site1visit.uri, "http://mirror0.google.com/b");
 
   site1.containerOpen = false;
@@ -267,16 +267,16 @@ function test_RESULTS_AS_DATE_QUERY() {
   result.sortingMode = options.SORT_BY_TITLE_DESCENDING;
 
   // Check one of the days
-  dayNode = root.getChild(0)
+  var dayNode = root.getChild(0)
                     .QueryInterface(Ci.nsINavHistoryContainerResultNode);
   dayNode.containerOpen = true;
   do_check_eq(dayNode.childCount, 4);
 
   // But URLs are now sorted by title descending
-  visit1 = dayNode.getChild(0);
+  var visit1 = dayNode.getChild(0);
   do_check_eq(visit1.uri, "http://mirror0.mozilla.com/b");
 
-  visit2 = dayNode.getChild(3);
+  var visit2 = dayNode.getChild(3);
   do_check_eq(visit2.uri, "http://mirror0.google.com/a");
 
   dayNode.containerOpen = false;
@@ -331,7 +331,7 @@ function test_RESULTS_AS_SITE_QUERY() {
 
   // Bug 473157: changing sorting mode should not affect the containers
   result.sortingMode = options.SORT_BY_TITLE_DESCENDING;
-  siteNode = root.getChild(6)
+  var siteNode = root.getChild(6)
                      .QueryInterface(Ci.nsINavHistoryContainerResultNode);
   do_check_eq(siteNode.title, "mirror3.google.com");
 
@@ -352,7 +352,7 @@ function test_RESULTS_AS_SITE_QUERY() {
 /**
  * Checks that queries grouped by date do liveupdate correctly.
  */
-function* task_test_date_liveupdate(aResultType) {
+function task_test_date_liveupdate(aResultType) {
   var midnight = nowObj;
   midnight.setHours(0);
   midnight.setMinutes(0);
@@ -422,7 +422,7 @@ function run_test()
   run_next_test();
 }
 
-add_task(function* test_history_sidebar()
+add_task(function test_history_sidebar()
 {
   // If we're dangerously close to a date change, just bail out.
   if (nowObj.getHours() == 23 && nowObj.getMinutes() >= 50) {
@@ -438,7 +438,7 @@ add_task(function* test_history_sidebar()
   yield task_test_date_liveupdate(Ci.nsINavHistoryQueryOptions.RESULTS_AS_DATE_QUERY);
 
   // The remaining views are
-  //   RESULTS_AS_URI + SORT_BY_VISITCOUNT_DESCENDING
+  //   RESULTS_AS_URI + SORT_BY_VISITCOUNT_DESCENDING 
   //   ->  test_399266.js
   //   RESULTS_AS_URI + SORT_BY_DATE_DESCENDING
   //   ->  test_385397.js

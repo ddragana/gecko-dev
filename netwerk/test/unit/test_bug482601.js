@@ -1,5 +1,5 @@
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var httpserv = null;
 var test_nr = 0;
@@ -80,8 +80,16 @@ var results = ["http-on-examine-response",
                "http-on-examine-cached-response"];
 
 function makeChan(url) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true})
-                .QueryInterface(Ci.nsIHttpChannel);
+  var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
+  var chan = ios.newChannel2(url,
+                             null,
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_OTHER).QueryInterface(Ci.nsIHttpChannel);
+  return chan;
 }
 
 function storeCache(aCacheEntry, aResponseHeads, aContent) {
@@ -105,7 +113,7 @@ function test_nocache() {
 
   var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
                       "/bug482601/nocache");
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener, null);
 }
 
 function test_partial() {
@@ -131,7 +139,7 @@ function test_partial2(status, entry) {
 
   var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
                       "/bug482601/partial");
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener, null);
 }
 
 function test_cached() {
@@ -158,7 +166,7 @@ function test_cached2(status, entry) {
   var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
                       "/bug482601/cached");
   chan.loadFlags = Ci.nsIRequest.VALIDATE_ALWAYS;
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener, null);
 }
 
 function test_only_from_cache() {
@@ -185,7 +193,7 @@ function test_only_from_cache2(status, entry) {
   var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
                       "/bug482601/only_from_cache");
   chan.loadFlags = Ci.nsICachingChannel.LOAD_ONLY_FROM_CACHE;
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener, null);
 }
 
 

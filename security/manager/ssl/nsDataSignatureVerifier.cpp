@@ -7,8 +7,6 @@
 #include "cms.h"
 #include "cryptohi.h"
 #include "keyhi.h"
-#include "mozilla/Casting.h"
-#include "mozilla/unused.h"
 #include "nsCOMPtr.h"
 #include "nsNSSComponent.h"
 #include "nssb64.h"
@@ -37,86 +35,81 @@ const SEC_ASN1Template CERT_SignatureDataTemplate[] =
     { 0, }
 };
 
-nsDataSignatureVerifier::~nsDataSignatureVerifier()
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return;
-  }
-
-  shutdown(calledFromObject);
-}
-
 NS_IMETHODIMP
-nsDataSignatureVerifier::VerifyData(const nsACString& aData,
-                                    const nsACString& aSignature,
-                                    const nsACString& aPublicKey,
-                                    bool* _retval)
+nsDataSignatureVerifier::VerifyData(const nsACString & aData,
+                                    const nsACString & aSignature,
+                                    const nsACString & aPublicKey,
+                                    bool *_retval)
 {
-  NS_ENSURE_ARG_POINTER(_retval);
+    // Allocate an arena to handle the majority of the allocations
+    PLArenaPool *arena;
+    arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+    if (!arena)
+        return NS_ERROR_OUT_OF_MEMORY;
 
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+    // Base 64 decode the key
+    SECItem keyItem;
+    PORT_Memset(&keyItem, 0, sizeof(SECItem));
+    if (!NSSBase64_DecodeBuffer(arena, &keyItem,
+                                nsPromiseFlatCString(aPublicKey).get(),
+                                aPublicKey.Length())) {
+        PORT_FreeArena(arena, false);
+        return NS_ERROR_FAILURE;
+    }
+    
+    // Extract the public key from the data
+    CERTSubjectPublicKeyInfo *pki = SECKEY_DecodeDERSubjectPublicKeyInfo(&keyItem);
+    if (!pki) {
+        PORT_FreeArena(arena, false);
+        return NS_ERROR_FAILURE;
+    }
+    SECKEYPublicKey *publicKey = SECKEY_ExtractPublicKey(pki);
+    SECKEY_DestroySubjectPublicKeyInfo(pki);
+    pki = nullptr;
+    
+    if (!publicKey) {
+        PORT_FreeArena(arena, false);
+        return NS_ERROR_FAILURE;
+    }
+    
+    // Base 64 decode the signature
+    SECItem signatureItem;
+    PORT_Memset(&signatureItem, 0, sizeof(SECItem));
+    if (!NSSBase64_DecodeBuffer(arena, &signatureItem,
+                                nsPromiseFlatCString(aSignature).get(),
+                                aSignature.Length())) {
+        SECKEY_DestroyPublicKey(publicKey);
+        PORT_FreeArena(arena, false);
+        return NS_ERROR_FAILURE;
+    }
+    
+    // Decode the signature and algorithm
+    CERTSignedData sigData;
+    PORT_Memset(&sigData, 0, sizeof(CERTSignedData));
+    SECStatus ss = SEC_QuickDERDecodeItem(arena, &sigData, 
+                                          CERT_SignatureDataTemplate,
+                                          &signatureItem);
+    if (ss != SECSuccess) {
+        SECKEY_DestroyPublicKey(publicKey);
+        PORT_FreeArena(arena, false);
+        return NS_ERROR_FAILURE;
+    }
+    
+    // Perform the final verification
+    DER_ConvertBitString(&(sigData.signature));
+    ss = VFY_VerifyDataWithAlgorithmID((const unsigned char*)nsPromiseFlatCString(aData).get(),
+                                       aData.Length(), publicKey,
+                                       &(sigData.signature),
+                                       &(sigData.signatureAlgorithm),
+                                       nullptr, nullptr);
+    
+    // Clean up remaining objects
+    SECKEY_DestroyPublicKey(publicKey);
+    PORT_FreeArena(arena, false);
+    
+    *_retval = (ss == SECSuccess);
 
-  // Allocate an arena to handle the majority of the allocations
-  UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
-  if (!arena) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  // Base 64 decode the key
-  SECItem keyItem;
-  PORT_Memset(&keyItem, 0, sizeof(SECItem));
-  if (!NSSBase64_DecodeBuffer(arena.get(), &keyItem,
-                              PromiseFlatCString(aPublicKey).get(),
-                              aPublicKey.Length())) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Extract the public key from the data
-  UniqueCERTSubjectPublicKeyInfo pki(
-    SECKEY_DecodeDERSubjectPublicKeyInfo(&keyItem));
-  if (!pki) {
-    return NS_ERROR_FAILURE;
-  }
-
-  UniqueSECKEYPublicKey publicKey(SECKEY_ExtractPublicKey(pki.get()));
-  if (!publicKey) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Base 64 decode the signature
-  SECItem signatureItem;
-  PORT_Memset(&signatureItem, 0, sizeof(SECItem));
-  if (!NSSBase64_DecodeBuffer(arena.get(), &signatureItem,
-                              PromiseFlatCString(aSignature).get(),
-                              aSignature.Length())) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Decode the signature and algorithm
-  CERTSignedData sigData;
-  PORT_Memset(&sigData, 0, sizeof(CERTSignedData));
-  SECStatus srv = SEC_QuickDERDecodeItem(arena.get(), &sigData,
-                                         CERT_SignatureDataTemplate,
-                                         &signatureItem);
-  if (srv != SECSuccess) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Perform the final verification
-  DER_ConvertBitString(&(sigData.signature));
-  srv = VFY_VerifyDataWithAlgorithmID(
-    BitwiseCast<const unsigned char*, const char*>(
-      PromiseFlatCString(aData).get()),
-    aData.Length(), publicKey.get(), &(sigData.signature),
-    &(sigData.signatureAlgorithm), nullptr, nullptr);
-
-  *_retval = (srv == SECSuccess);
-
-  return NS_OK;
+    return NS_OK;
 }
 
 namespace mozilla {
@@ -126,8 +119,7 @@ VerifyCMSDetachedSignatureIncludingCertificate(
   const SECItem& buffer, const SECItem& detachedDigest,
   nsresult (*verifyCertificate)(CERTCertificate* cert, void* context,
                                 void* pinArg),
-  void* verifyCertificateContext, void* pinArg,
-  const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+  void *verifyCertificateContext, void* pinArg)
 {
   // XXX: missing pinArg is tolerated.
   if (NS_WARN_IF(!buffer.data && buffer.len > 0) ||
@@ -137,7 +129,7 @@ VerifyCMSDetachedSignatureIncludingCertificate(
     return NS_ERROR_INVALID_ARG;
   }
 
-  UniqueNSSCMSMessage
+  ScopedNSSCMSMessage
     cmsMsg(NSS_CMSMessage_CreateFromDER(const_cast<SECItem*>(&buffer), nullptr,
                                         nullptr, nullptr, nullptr, nullptr,
                                         nullptr));
@@ -156,7 +148,7 @@ VerifyCMSDetachedSignatureIncludingCertificate(
 
   // signedData is non-owning
   NSSCMSSignedData* signedData =
-    static_cast<NSSCMSSignedData*>(NSS_CMSContentInfo_GetContent(cinfo));
+    reinterpret_cast<NSSCMSSignedData*>(NSS_CMSContentInfo_GetContent(cinfo));
   if (!signedData) {
     return NS_ERROR_CMS_VERIFY_NO_CONTENT_INFO;
   }
@@ -169,26 +161,24 @@ VerifyCMSDetachedSignatureIncludingCertificate(
 
   // Parse the certificates into CERTCertificate objects held in memory so
   // verifyCertificate will be able to find them during path building.
-  UniqueCERTCertList certs(CERT_NewCertList());
+  ScopedCERTCertList certs(CERT_NewCertList());
   if (!certs) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   if (signedData->rawCerts) {
     for (size_t i = 0; signedData->rawCerts[i]; ++i) {
-      UniqueCERTCertificate
+      ScopedCERTCertificate
         cert(CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
                                      signedData->rawCerts[i], nullptr, false,
                                      true));
       // Skip certificates that fail to parse
-      if (!cert) {
-        continue;
+      if (cert) {
+        if (CERT_AddCertToListTail(certs.get(), cert.get()) == SECSuccess) {
+          cert.forget(); // ownership transfered
+        } else {
+          return NS_ERROR_OUT_OF_MEMORY;
+        }
       }
-
-      if (CERT_AddCertToListTail(certs.get(), cert.get()) != SECSuccess) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
-
-      Unused << cert.release(); // Ownership transferred to the cert list.
     }
   }
 
@@ -232,7 +222,7 @@ namespace {
 struct VerifyCertificateContext
 {
   nsCOMPtr<nsIX509Cert> signingCert;
-  UniqueCERTCertList builtChain;
+  ScopedCERTCertList builtChain;
 };
 
 static nsresult
@@ -244,7 +234,7 @@ VerifyCertificate(CERTCertificate* cert, void* voidContext, void* pinArg)
   }
 
   VerifyCertificateContext* context =
-    static_cast<VerifyCertificateContext*>(voidContext);
+    reinterpret_cast<VerifyCertificateContext*>(voidContext);
 
   nsCOMPtr<nsIX509Cert> xpcomCert(nsNSSCertificate::Create(cert));
   if (!xpcomCert) {
@@ -260,7 +250,9 @@ VerifyCertificate(CERTCertificate* cert, void* voidContext, void* pinArg)
                                                certificateUsageObjectSigner,
                                                Now(), pinArg,
                                                nullptr, // hostname
-                                               context->builtChain));
+                                               0, // flags
+                                               nullptr, // stapledOCSPResponse
+                                               &context->builtChain));
 }
 
 } // namespace
@@ -273,20 +265,18 @@ nsDataSignatureVerifier::VerifySignature(const char* aRSABuf,
                                          int32_t* aErrorCode,
                                          nsIX509Cert** aSigningCert)
 {
-  if (!aRSABuf || !aPlaintext || !aErrorCode || !aSigningCert) {
+  if (!aPlaintext || !aSigningCert || !aErrorCode) {
     return NS_ERROR_INVALID_ARG;
-  }
-
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return NS_ERROR_NOT_AVAILABLE;
   }
 
   *aErrorCode = VERIFY_ERROR_OTHER;
   *aSigningCert = nullptr;
 
+  nsNSSShutDownPreventionLock locker;
+
   Digest digest;
-  nsresult rv = digest.DigestBuf(SEC_OID_SHA1, uint8_t_ptr_cast(aPlaintext),
+  nsresult rv = digest.DigestBuf(SEC_OID_SHA1,
+                                 reinterpret_cast<const uint8_t*>(aPlaintext),
                                  aPlaintextLen);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -294,7 +284,7 @@ nsDataSignatureVerifier::VerifySignature(const char* aRSABuf,
 
   SECItem buffer = {
     siBuffer,
-    BitwiseCast<unsigned char*, const char*>(aRSABuf),
+    reinterpret_cast<uint8_t*>(const_cast<char*>(aRSABuf)),
     aRSABufLen
   };
 
@@ -302,7 +292,7 @@ nsDataSignatureVerifier::VerifySignature(const char* aRSABuf,
   // XXX: pinArg is missing
   rv = VerifyCMSDetachedSignatureIncludingCertificate(buffer, digest.get(),
                                                       VerifyCertificate,
-                                                      &context, nullptr, locker);
+                                                      &context, nullptr);
   if (NS_SUCCEEDED(rv)) {
     *aErrorCode = VERIFY_OK;
   } else if (NS_ERROR_GET_MODULE(rv) == NS_ERROR_MODULE_SECURITY) {

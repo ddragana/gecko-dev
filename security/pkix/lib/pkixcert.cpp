@@ -219,15 +219,6 @@ BackCert::RememberExtension(Reader& extnID, Input extnValue,
   static const uint8_t Netscape_certificate_type[] = {
     0x60, 0x86, 0x48, 0x01, 0x86, 0xf8, 0x42, 0x01, 0x01
   };
-  // python DottedOIDToCode.py id-pe-tlsfeature 1.3.6.1.5.5.7.1.24
-  static const uint8_t id_pe_tlsfeature[] = {
-    0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x18
-  };
-  // python DottedOIDToCode.py id-embeddedSctList 1.3.6.1.4.1.11129.2.4.2
-  // See Section 3.3 of RFC 6962.
-  static const uint8_t id_embeddedSctList[] = {
-    0x2b, 0x06, 0x01, 0x04, 0x01, 0xd6, 0x79, 0x02, 0x04, 0x02
-  };
 
   Input* out = nullptr;
 
@@ -272,10 +263,6 @@ BackCert::RememberExtension(Reader& extnID, Input extnValue,
     out = &inhibitAnyPolicy;
   } else if (extnID.MatchRest(id_pe_authorityInfoAccess)) {
     out = &authorityInfoAccess;
-  } else if (extnID.MatchRest(id_pe_tlsfeature)) {
-    out = &requiredTLSFeatures;
-  } else if (extnID.MatchRest(id_embeddedSctList)) {
-    out = &signedCertificateTimestamps;
   } else if (extnID.MatchRest(id_pkix_ocsp_nocheck) && critical) {
     // We need to make sure we don't reject delegated OCSP response signing
     // certificates that contain the id-pkix-ocsp-nocheck extension marked as
@@ -305,19 +292,6 @@ BackCert::RememberExtension(Reader& extnID, Input extnValue,
   }
 
   return Success;
-}
-
-Result
-ExtractSignedCertificateTimestampListFromExtension(Input extnValue,
-                                                   Input& sctList)
-{
-  Reader decodedValue;
-  Result rv = der::ExpectTagAndGetValueAtEnd(extnValue, der::OCTET_STRING,
-                                             decodedValue);
-  if (rv != Success) {
-    return rv;
-  }
-  return decodedValue.SkipToEnd(sctList);
 }
 
 } } // namespace mozilla::pkix

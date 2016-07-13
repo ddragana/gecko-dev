@@ -8,6 +8,7 @@
 #define mozilla_a11y_TextRange_h__
 
 #include "mozilla/Move.h"
+#include "nsAutoPtr.h"
 #include "nsCaseTreatment.h"
 #include "nsRect.h"
 #include "nsTArray.h"
@@ -130,12 +131,6 @@ public:
    */
   void Normalize(ETextUnit aUnit);
 
-  /**
-   * Crops the range if it overlaps the given accessible element boundaries,
-   * returns true if the range was cropped successfully.
-   */
-  bool Crop(Accessible* aContainer);
-
   enum EDirection {
     eBackward,
     eForward
@@ -248,17 +243,9 @@ private:
                     HyperTextAccessible* aStopContainer = nullptr,
                     int32_t aStopOffset = 0);
 
-  /**
-   * A helper method returning a common parent for two given accessible
-   * elements.
-   */
-  Accessible* CommonParent(Accessible* aAcc1, Accessible* aAcc2,
-                           nsTArray<Accessible*>* aParents1, uint32_t* aPos1,
-                           nsTArray<Accessible*>* aParents2, uint32_t* aPos2) const;
-
-  RefPtr<HyperTextAccessible> mRoot;
-  RefPtr<HyperTextAccessible> mStartContainer;
-  RefPtr<HyperTextAccessible> mEndContainer;
+  nsRefPtr<HyperTextAccessible> mRoot;
+  nsRefPtr<HyperTextAccessible> mStartContainer;
+  nsRefPtr<HyperTextAccessible> mEndContainer;
   int32_t mStartOffset;
   int32_t mEndOffset;
 };

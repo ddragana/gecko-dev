@@ -23,6 +23,8 @@ class CodeGeneratorARM : public CodeGeneratorShared
     CodeGeneratorARM* thisFromCtor() {return this;}
 
   protected:
+    // Label for the common return path.
+    NonAssertingLabel returnLabel_;
     NonAssertingLabel deoptLabel_;
 
     MoveOperand toMoveOperand(LAllocation a) const;
@@ -60,6 +62,8 @@ class CodeGeneratorARM : public CodeGeneratorShared
                                   T* mir);
 
   protected:
+    bool generatePrologue();
+    bool generateEpilogue();
     bool generateOutOfLineCode();
 
     void emitRoundDouble(FloatRegister src, Register dest, Label* fail);
@@ -123,8 +127,6 @@ class CodeGeneratorARM : public CodeGeneratorShared
     virtual void visitUrshD(LUrshD* ins);
 
     virtual void visitClzI(LClzI* ins);
-    virtual void visitCtzI(LCtzI* ins);
-    virtual void visitPopcntI(LPopcntI* ins);
 
     virtual void visitTestIAndBranch(LTestIAndBranch* test);
     virtual void visitCompare(LCompare* comp);
@@ -137,8 +139,8 @@ class CodeGeneratorARM : public CodeGeneratorShared
     virtual void visitCompareFAndBranch(LCompareFAndBranch* comp);
     virtual void visitCompareB(LCompareB* lir);
     virtual void visitCompareBAndBranch(LCompareBAndBranch* lir);
-    virtual void visitCompareBitwise(LCompareBitwise* lir);
-    virtual void visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir);
+    virtual void visitCompareV(LCompareV* lir);
+    virtual void visitCompareVAndBranch(LCompareVAndBranch* lir);
     virtual void visitBitAndAndBranch(LBitAndAndBranch* baab);
     virtual void visitAsmJSUInt32ToDouble(LAsmJSUInt32ToDouble* lir);
     virtual void visitAsmJSUInt32ToFloat32(LAsmJSUInt32ToFloat32* lir);
@@ -196,12 +198,6 @@ class CodeGeneratorARM : public CodeGeneratorShared
     void visitNegF(LNegF* lir);
     void visitLoadTypedArrayElementStatic(LLoadTypedArrayElementStatic* ins);
     void visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic* ins);
-    void visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop* lir);
-    void visitAtomicTypedArrayElementBinopForEffect(LAtomicTypedArrayElementBinopForEffect* lir);
-    void visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir);
-    void visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir);
-    void visitAsmSelect(LAsmSelect* ins);
-    void visitAsmReinterpret(LAsmReinterpret* ins);
     void visitAsmJSCall(LAsmJSCall* ins);
     void visitAsmJSLoadHeap(LAsmJSLoadHeap* ins);
     void visitAsmJSStoreHeap(LAsmJSStoreHeap* ins);
@@ -217,27 +213,12 @@ class CodeGeneratorARM : public CodeGeneratorShared
     void visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins);
     void visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins);
     void visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
-    void visitWasmTruncateToInt32(LWasmTruncateToInt32* ins);
-    void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool);
-    void visitCopySignD(LCopySignD* ins);
-    void visitCopySignF(LCopySignF* ins);
 
     void visitMemoryBarrier(LMemoryBarrier* ins);
 
     void generateInvalidateEpilogue();
 
-    void setReturnDoubleRegs(LiveRegisterSet* regs);
-
-    // Generating a result.
-    template<typename S, typename T>
-    void atomicBinopToTypedIntArray(AtomicOp op, Scalar::Type arrayType, const S& value,
-                                    const T& mem, Register flagTemp, Register outTemp,
-                                    AnyRegister output);
-
-    // Generating no result.
-    template<typename S, typename T>
-    void atomicBinopToTypedIntArray(AtomicOp op, Scalar::Type arrayType, const S& value,
-                                    const T& mem, Register flagTemp);
+    void visitRandom(LRandom* ins);
 
   protected:
     void visitEffectiveAddress(LEffectiveAddress* ins);
@@ -248,11 +229,12 @@ class CodeGeneratorARM : public CodeGeneratorShared
   public:
     // Unimplemented SIMD instructions
     void visitSimdSplatX4(LSimdSplatX4* lir) { MOZ_CRASH("NYI"); }
-    void visitSimd128Int(LSimd128Int* ins) { MOZ_CRASH("NYI"); }
-    void visitSimd128Float(LSimd128Float* ins) { MOZ_CRASH("NYI"); }
+    void visitInt32x4(LInt32x4* ins) { MOZ_CRASH("NYI"); }
+    void visitFloat32x4(LFloat32x4* ins) { MOZ_CRASH("NYI"); }
     void visitSimdReinterpretCast(LSimdReinterpretCast* ins) { MOZ_CRASH("NYI"); }
     void visitSimdExtractElementI(LSimdExtractElementI* ins) { MOZ_CRASH("NYI"); }
     void visitSimdExtractElementF(LSimdExtractElementF* ins) { MOZ_CRASH("NYI"); }
+    void visitSimdSignMaskX4(LSimdSignMaskX4* ins) { MOZ_CRASH("NYI"); }
     void visitSimdGeneralShuffleI(LSimdGeneralShuffleI* lir) { MOZ_CRASH("NYI"); }
     void visitSimdGeneralShuffleF(LSimdGeneralShuffleF* lir) { MOZ_CRASH("NYI"); }
     void visitSimdSwizzleI(LSimdSwizzleI* lir) { MOZ_CRASH("NYI"); }
@@ -261,7 +243,7 @@ class CodeGeneratorARM : public CodeGeneratorShared
     void visitSimdBinaryCompFx4(LSimdBinaryCompFx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithIx4(LSimdBinaryArithIx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithFx4(LSimdBinaryArithFx4* lir) { MOZ_CRASH("NYI"); }
-    void visitSimdBinaryBitwise(LSimdBinaryBitwise* lir) { MOZ_CRASH("NYI"); }
+    void visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4* lir) { MOZ_CRASH("NYI"); }
 };
 
 typedef CodeGeneratorARM CodeGeneratorSpecific;

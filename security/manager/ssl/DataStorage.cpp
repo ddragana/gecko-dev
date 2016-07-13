@@ -6,10 +6,6 @@
 
 #include "DataStorage.h"
 
-#include "mozilla/ClearOnShutdown.h"
-#include "mozilla/dom/PContent.h"
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/ContentParent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
@@ -39,13 +35,10 @@ namespace mozilla {
 NS_IMPL_ISUPPORTS(DataStorage,
                   nsIObserver)
 
-StaticAutoPtr<DataStorage::DataStorages> DataStorage::sDataStorages;
-
 DataStorage::DataStorage(const nsString& aFilename)
   : mMutex("DataStorage::mMutex")
   , mPendingWrite(false)
   , mShuttingDown(false)
-  , mInitCalled(false)
   , mReadyMonitor("DataStorage::mReadyMonitor")
   , mReady(false)
   , mFilename(aFilename)
@@ -54,36 +47,6 @@ DataStorage::DataStorage(const nsString& aFilename)
 
 DataStorage::~DataStorage()
 {
-}
-
-// static
-already_AddRefed<DataStorage>
-DataStorage::Get(const nsString& aFilename)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!sDataStorages) {
-    sDataStorages = new DataStorages();
-    ClearOnShutdown(&sDataStorages);
-  }
-  RefPtr<DataStorage> storage;
-  if (!sDataStorages->Get(aFilename, getter_AddRefs(storage))) {
-    storage = new DataStorage(aFilename);
-    sDataStorages->Put(aFilename, storage);
-  }
-  return storage.forget();
-}
-
-// static
-already_AddRefed<DataStorage>
-DataStorage::GetIfExists(const nsString& aFilename)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!sDataStorages) {
-    sDataStorages = new DataStorages();
-  }
-  RefPtr<DataStorage> storage;
-  sDataStorages->Get(aFilename, getter_AddRefs(storage));
-  return storage.forget();
 }
 
 nsresult
@@ -97,41 +60,15 @@ DataStorage::Init(bool& aDataWillPersist)
 
   MutexAutoLock lock(mMutex);
 
-  // Ignore attempts to initialize several times.
-  if (mInitCalled) {
-    return NS_OK;
+  nsresult rv;
+  rv = NS_NewThread(getter_AddRefs(mWorkerThread));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
-  mInitCalled = true;
-
-  nsresult rv;
-  if (XRE_IsParentProcess()) {
-    rv = NS_NewNamedThread("DataStorage", getter_AddRefs(mWorkerThread));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    rv = AsyncReadData(aDataWillPersist, lock);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  } else {
-    // In the child process, we ask the parent process for the data.
-    MOZ_ASSERT(XRE_IsContentProcess());
-    aDataWillPersist = false;
-    InfallibleTArray<DataStorageItem> items;
-    dom::ContentChild::GetSingleton()->
-        SendReadDataStorageArray(mFilename, &items);
-    for (auto& item : items) {
-      Entry entry;
-      entry.mValue = item.value();
-      rv = PutInternal(item.key(), entry, item.type(), lock);
-      if (NS_FAILED(rv)) {
-        return rv;
-      }
-    }
-    mReady = true;
-    NotifyObservers("data-storage-ready");
+  rv = AsyncReadData(aDataWillPersist, lock);
+  if (NS_FAILED(rv)) {
+    return rv;
   }
 
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
@@ -141,17 +78,7 @@ DataStorage::Init(bool& aDataWillPersist)
   // Clear private data as appropriate.
   os->AddObserver(this, "last-pb-context-exited", false);
   // Observe shutdown; save data and prevent any further writes.
-  // In the parent process, we need to write to the profile directory, so
-  // we should listen for profile-before-change so that we can safely
-  // write to the profile.  In the content process however we don't have
-  // access to the profile directory and profile notifications are not
-  // dispatched, so we need to clean up on xpcom-shutdown.
-  if (XRE_IsParentProcess()) {
-    os->AddObserver(this, "profile-before-change", false);
-  }
-  // In the Parent process, this is a backstop for xpcshell and other cases
-  // where profile-before-change might not get sent.
-  os->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
+  os->AddObserver(this, "profile-before-change", false);
 
   // For test purposes, we can set the write timer to be very fast.
   mTimerDelay = Preferences::GetInt("test.datastorage.write_timer_ms",
@@ -164,7 +91,7 @@ DataStorage::Init(bool& aDataWillPersist)
   return NS_OK;
 }
 
-class DataStorage::Reader : public Runnable
+class DataStorage::Reader : public nsRunnable
 {
 public:
   explicit Reader(DataStorage* aDataStorage)
@@ -179,7 +106,7 @@ private:
   static nsresult ParseLine(nsDependentCSubstring& aLine, nsCString& aKeyOut,
                             Entry& aEntryOut);
 
-  RefPtr<DataStorage> mDataStorage;
+  nsRefPtr<DataStorage> mDataStorage;
 };
 
 DataStorage::Reader::~Reader()
@@ -189,16 +116,16 @@ DataStorage::Reader::~Reader()
     MonitorAutoLock readyLock(mDataStorage->mReadyMonitor);
     mDataStorage->mReady = true;
     nsresult rv = mDataStorage->mReadyMonitor.NotifyAll();
-    Unused << NS_WARN_IF(NS_FAILED(rv));
+    unused << NS_WARN_IF(NS_FAILED(rv));
   }
 
   // This is for tests.
   nsCOMPtr<nsIRunnable> job =
-    NewRunnableMethod<const char*>(mDataStorage,
-                                   &DataStorage::NotifyObservers,
-                                   "data-storage-ready");
+    NS_NewRunnableMethodWithArg<const char*>(mDataStorage,
+                                             &DataStorage::NotifyObservers,
+                                             "data-storage-ready");
   nsresult rv = NS_DispatchToMainThread(job, NS_DISPATCH_NORMAL);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  unused << NS_WARN_IF(NS_FAILED(rv));
 }
 
 NS_IMETHODIMP
@@ -390,12 +317,11 @@ nsresult
 DataStorage::AsyncReadData(bool& aHaveProfileDir,
                            const MutexAutoLock& /*aProofOfLock*/)
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
   aHaveProfileDir = false;
   // Allocate a Reader so that even if it isn't dispatched,
   // the data-storage-ready notification will be fired and Get
   // will be able to proceed (this happens in its destructor).
-  RefPtr<Reader> job(new Reader(this));
+  nsRefPtr<Reader> job(new Reader(this));
   nsresult rv;
   // If we don't have a profile directory, this will fail.
   // That's okay - it just means there is no persistent state.
@@ -479,32 +405,17 @@ DataStorage::GetTableForType(DataStorageType aType,
   MOZ_CRASH("given bad DataStorage storage type");
 }
 
-void
-DataStorage::ReadAllFromTable(DataStorageType aType,
-                              InfallibleTArray<dom::DataStorageItem>* aItems,
-                              const MutexAutoLock& aProofOfLock)
+// NB: The lock must be held when calling this function.
+/* static */
+PLDHashOperator
+DataStorage::EvictCallback(const nsACString& aKey, Entry aEntry, void* aArg)
 {
-  for (auto iter = GetTableForType(aType, aProofOfLock).Iter();
-       !iter.Done(); iter.Next()) {
-    DataStorageItem* item = aItems->AppendElement();
-    item->key() = iter.Key();
-    item->value() = iter.Data().mValue;
-    item->type() = aType;
+  KeyAndEntry* toEvict = (KeyAndEntry*)aArg;
+  if (aEntry.mScore < toEvict->mEntry.mScore) {
+    toEvict->mKey = aKey;
+    toEvict->mEntry = aEntry;
   }
-}
-
-void
-DataStorage::GetAll(InfallibleTArray<dom::DataStorageItem>* aItems)
-{
-  WaitForReady();
-  MutexAutoLock lock(mMutex);
-
-  aItems->SetCapacity(mPersistentDataTable.Count() +
-                      mTemporaryDataTable.Count() +
-                      mPrivateDataTable.Count());
-  ReadAllFromTable(DataStorage_Persistent, aItems, lock);
-  ReadAllFromTable(DataStorage_Temporary, aItems, lock);
-  ReadAllFromTable(DataStorage_Private, aItems, lock);
+  return PLDHashOperator::PL_DHASH_NEXT;
 }
 
 // Limit the number of entries per table. This is to prevent unbounded
@@ -531,32 +442,8 @@ DataStorage::MaybeEvictOneEntry(DataStorageType aType,
     // ultimately not that concerning, considering that if an attacker can
     // modify data in the profile, they can cause much worse harm.
     toEvict.mEntry.mScore = sMaxScore;
-
-    for (auto iter = table.Iter(); !iter.Done(); iter.Next()) {
-      Entry entry = iter.UserData();
-      if (entry.mScore < toEvict.mEntry.mScore) {
-        toEvict.mKey = iter.Key();
-        toEvict.mEntry = entry;
-      }
-    }
-
+    table.EnumerateRead(EvictCallback, (void*)&toEvict);
     table.Remove(toEvict.mKey);
-  }
-}
-
-template <class Functor>
-static
-void
-RunOnAllContentParents(Functor func)
-{
-  if (!XRE_IsParentProcess()) {
-    return;
-  }
-  using dom::ContentParent;
-  nsTArray<ContentParent*> parents;
-  ContentParent::GetAll(parents);
-  for (auto& parent: parents) {
-    func(parent);
   }
 }
 
@@ -586,14 +473,6 @@ DataStorage::Put(const nsCString& aKey, const nsCString& aValue,
     return rv;
   }
 
-  RunOnAllContentParents([&](dom::ContentParent* aParent) {
-    DataStorageItem item;
-    item.key() = aKey;
-    item.value() = aValue;
-    item.type() = aType;
-    Unused << aParent->SendDataStoragePut(mFilename, item);
-  });
-
   return NS_OK;
 }
 
@@ -622,15 +501,11 @@ DataStorage::Remove(const nsCString& aKey, DataStorageType aType)
   table.Remove(aKey);
 
   if (aType == DataStorage_Persistent && !mPendingWrite) {
-    Unused << AsyncSetTimer(lock);
+    unused << AsyncSetTimer(lock);
   }
-
-  RunOnAllContentParents([&](dom::ContentParent* aParent) {
-    Unused << aParent->SendDataStorageRemove(mFilename, aKey, aType);
-  });
 }
 
-class DataStorage::Writer : public Runnable
+class DataStorage::Writer : public nsRunnable
 {
 public:
   Writer(nsCString& aData, DataStorage* aDataStorage)
@@ -643,7 +518,7 @@ private:
   NS_DECL_NSIRUNNABLE
 
   nsCString mData;
-  RefPtr<DataStorage> mDataStorage;
+  nsRefPtr<DataStorage> mDataStorage;
 };
 
 NS_IMETHODIMP
@@ -687,9 +562,9 @@ DataStorage::Writer::Run()
 
   // Observed by tests.
   nsCOMPtr<nsIRunnable> job =
-    NewRunnableMethod<const char*>(mDataStorage,
-                                   &DataStorage::NotifyObservers,
-                                   "data-storage-written");
+    NS_NewRunnableMethodWithArg<const char*>(mDataStorage,
+                                             &DataStorage::NotifyObservers,
+                                             "data-storage-written");
   rv = NS_DispatchToMainThread(job, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -698,29 +573,34 @@ DataStorage::Writer::Run()
   return NS_OK;
 }
 
+// NB: The lock must be held when calling this function.
+/* static */
+PLDHashOperator
+DataStorage::WriteDataCallback(const nsACString& aKey, Entry aEntry, void* aArg)
+{
+  nsCString* output = (nsCString*)aArg;
+  output->Append(aKey);
+  output->Append('\t');
+  output->AppendInt(aEntry.mScore);
+  output->Append('\t');
+  output->AppendInt(aEntry.mLastAccessed);
+  output->Append('\t');
+  output->Append(aEntry.mValue);
+  output->Append('\n');
+  return PLDHashOperator::PL_DHASH_NEXT;
+}
+
 nsresult
 DataStorage::AsyncWriteData(const MutexAutoLock& /*aProofOfLock*/)
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
-
   if (mShuttingDown || !mBackingFile) {
     return NS_OK;
   }
 
   nsCString output;
-  for (auto iter = mPersistentDataTable.Iter(); !iter.Done(); iter.Next()) {
-    Entry entry = iter.UserData();
-    output.Append(iter.Key());
-    output.Append('\t');
-    output.AppendInt(entry.mScore);
-    output.Append('\t');
-    output.AppendInt(entry.mLastAccessed);
-    output.Append('\t');
-    output.Append(entry.mValue);
-    output.Append('\n');
-  }
+  mPersistentDataTable.EnumerateRead(WriteDataCallback, (void*)&output);
 
-  RefPtr<Writer> job(new Writer(output, this));
+  nsRefPtr<Writer> job(new Writer(output, this));
   nsresult rv = mWorkerThread->Dispatch(job, NS_DISPATCH_NORMAL);
   mPendingWrite = false;
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -739,20 +619,13 @@ DataStorage::Clear()
   mTemporaryDataTable.Clear();
   mPrivateDataTable.Clear();
 
-  if (XRE_IsParentProcess()) {
-    // Asynchronously clear the file. This is similar to the permission manager
-    // in that it doesn't wait to synchronously remove the data from its backing
-    // storage either.
-    nsresult rv = AsyncWriteData(lock);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
+  // Asynchronously clear the file. This is similar to the permission manager
+  // in that it doesn't wait to synchronously remove the data from its backing
+  // storage either.
+  nsresult rv = AsyncWriteData(lock);
+  if (NS_FAILED(rv)) {
+    return rv;
   }
-
-  RunOnAllContentParents([&](dom::ContentParent* aParent) {
-    Unused << aParent->SendDataStorageClear(mFilename);
-  });
-
   return NS_OK;
 }
 
@@ -760,11 +633,9 @@ DataStorage::Clear()
 void
 DataStorage::TimerCallback(nsITimer* aTimer, void* aClosure)
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
-
-  RefPtr<DataStorage> aDataStorage = (DataStorage*)aClosure;
+  nsRefPtr<DataStorage> aDataStorage = (DataStorage*)aClosure;
   MutexAutoLock lock(aDataStorage->mMutex);
-  Unused << aDataStorage->AsyncWriteData(lock);
+  unused << aDataStorage->AsyncWriteData(lock);
 }
 
 // We only initialize the timer on the worker thread because it's not safe
@@ -772,13 +643,13 @@ DataStorage::TimerCallback(nsITimer* aTimer, void* aClosure)
 nsresult
 DataStorage::AsyncSetTimer(const MutexAutoLock& /*aProofOfLock*/)
 {
-  if (mShuttingDown || !XRE_IsParentProcess()) {
+  if (mShuttingDown) {
     return NS_OK;
   }
 
   mPendingWrite = true;
   nsCOMPtr<nsIRunnable> job =
-    NewRunnableMethod(this, &DataStorage::SetTimer);
+    NS_NewRunnableMethod(this, &DataStorage::SetTimer);
   nsresult rv = mWorkerThread->Dispatch(job, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -790,8 +661,6 @@ void
 DataStorage::SetTimer()
 {
   MOZ_ASSERT(!NS_IsMainThread());
-  MOZ_ASSERT(XRE_IsParentProcess());
-
   MutexAutoLock lock(mMutex);
 
   nsresult rv;
@@ -804,7 +673,7 @@ DataStorage::SetTimer()
 
   rv = mTimer->InitWithFuncCallback(TimerCallback, this,
                                     mTimerDelay, nsITimer::TYPE_ONE_SHOT);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  unused << NS_WARN_IF(NS_FAILED(rv));
 }
 
 void
@@ -825,10 +694,8 @@ DataStorage::NotifyObservers(const char* aTopic)
 nsresult
 DataStorage::DispatchShutdownTimer(const MutexAutoLock& /*aProofOfLock*/)
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
-
   nsCOMPtr<nsIRunnable> job =
-    NewRunnableMethod(this, &DataStorage::ShutdownTimer);
+    NS_NewRunnableMethod(this, &DataStorage::ShutdownTimer);
   nsresult rv = mWorkerThread->Dispatch(job, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -839,11 +706,10 @@ DataStorage::DispatchShutdownTimer(const MutexAutoLock& /*aProofOfLock*/)
 void
 DataStorage::ShutdownTimer()
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(!NS_IsMainThread());
   MutexAutoLock lock(mMutex);
   nsresult rv = mTimer->Cancel();
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  unused << NS_WARN_IF(NS_FAILED(rv));
   mTimer = nullptr;
 }
 
@@ -865,19 +731,15 @@ DataStorage::Observe(nsISupports* aSubject, const char* aTopic,
   if (strcmp(aTopic, "last-pb-context-exited") == 0) {
     MutexAutoLock lock(mMutex);
     mPrivateDataTable.Clear();
-  } else if (strcmp(aTopic, "profile-before-change") == 0 ||
-             (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0 &&
-              XRE_IsParentProcess())) {
-    MOZ_ASSERT(XRE_IsParentProcess());
-    // per bug 1271402, this should be safe to run multiple times
+  } else if (strcmp(aTopic, "profile-before-change") == 0) {
     {
       MutexAutoLock lock(mMutex);
       rv = AsyncWriteData(lock);
       mShuttingDown = true;
-      Unused << NS_WARN_IF(NS_FAILED(rv));
+      unused << NS_WARN_IF(NS_FAILED(rv));
       if (mTimer) {
         rv = DispatchShutdownTimer(lock);
-        Unused << NS_WARN_IF(NS_FAILED(rv));
+        unused << NS_WARN_IF(NS_FAILED(rv));
       }
     }
     // Run the thread to completion and prevent any further events
@@ -887,11 +749,6 @@ DataStorage::Observe(nsISupports* aSubject, const char* aTopic,
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
-
-    sDataStorages->Clear();
-  } else if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
-    MOZ_ASSERT(!XRE_IsParentProcess());
-    sDataStorages->Clear();
   } else if (strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
     MutexAutoLock lock(mMutex);
     mTimerDelay = Preferences::GetInt("test.datastorage.write_timer_ms",

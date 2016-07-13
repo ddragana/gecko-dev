@@ -11,8 +11,6 @@
 //
 thisTestLeaksUncaughtRejectionsAndShouldBeFixed("TypeError: this.docShell is null");
 
-SpecialPowers.pushPrefEnv({"set": [["dom.require_user_interaction_for_beforeunload", false]]});
-
 const TEST_URL = "http://example.com/browser/toolkit/components/startup/tests/browser/beforeunload.html";
 
 function test() {

@@ -9,8 +9,7 @@ function test() {
     let numLocationChanges = 0;
 
     let listener = {
-      onLocationChange: function(browser, webProgress, request, uri, flags) {
-        info("location change: " + (uri && uri.spec));
+      onLocationChange: function() {
         numLocationChanges++;
       }
     };

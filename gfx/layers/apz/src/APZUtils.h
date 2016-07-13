@@ -8,8 +8,6 @@
 #define mozilla_layers_APZUtils_h
 
 #include <stdint.h>                     // for uint32_t
-#include "LayersTypes.h"
-#include "UnitTransforms.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/FloatingPoint.h"
 
@@ -19,24 +17,13 @@ namespace layers {
 enum HitTestResult {
   HitNothing,
   HitLayer,
-  HitLayerTouchActionNone,
-  HitLayerTouchActionPanX,
-  HitLayerTouchActionPanY,
   HitDispatchToContentRegion,
 };
 
 enum CancelAnimationFlags : uint32_t {
-  Default = 0x0,            /* Cancel all animations */
-  ExcludeOverscroll = 0x1,  /* Don't clear overscroll */
-  ScrollSnap = 0x2          /* Snap to snap points */
+  Default = 0,            /* Cancel all animations */
+  ExcludeOverscroll = 1   /* Don't clear overscroll */
 };
-
-inline CancelAnimationFlags
-operator|(CancelAnimationFlags a, CancelAnimationFlags b)
-{
-  return static_cast<CancelAnimationFlags>(static_cast<int>(a)
-                                         | static_cast<int>(b));
-}
 
 enum class ScrollSource {
   // scrollTo() or something similar.
@@ -64,16 +51,6 @@ static bool IsZero(const gfx::PointTyped<Units>& aPoint)
 {
   return FuzzyEqualsAdditive(aPoint.x, 0.0f, COORDINATE_EPSILON)
       && FuzzyEqualsAdditive(aPoint.y, 0.0f, COORDINATE_EPSILON);
-}
-
-// Deem an AsyncTransformComponentMatrix (obtained by multiplying together
-// one or more AsyncTransformComponentMatrix objects) as constituting a
-// complete async transform.
-inline AsyncTransformMatrix
-CompleteAsyncTransform(const AsyncTransformComponentMatrix& aMatrix)
-{
-  return ViewAs<AsyncTransformMatrix>(aMatrix,
-      PixelCastJustification::MultipleAsyncTransforms);
 }
 
 } // namespace layers

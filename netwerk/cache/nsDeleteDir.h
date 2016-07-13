@@ -70,7 +70,6 @@ private:
   static nsDeleteDir * gInstance;
   mozilla::Mutex       mLock;
   mozilla::CondVar     mCondVar;
-  bool                 mNotified;
   nsCOMArray<nsITimer> mTimers;
   nsCOMPtr<nsIThread>  mThread;
   bool                 mShutdownPending;

@@ -67,7 +67,7 @@ nsLayoutDebugCLH::Handle(nsICommandLine* aCmdLine)
         do_GetService(NS_WINDOWWATCHER_CONTRACTID);
     NS_ENSURE_TRUE(wwatch, NS_ERROR_FAILURE);
 
-    nsCOMPtr<mozIDOMWindowProxy> opened;
+    nsCOMPtr<nsIDOMWindow> opened;
     wwatch->OpenWindow(nullptr, "chrome://layoutdebug/content/",
                        "_blank", "chrome,dialog=no,all", argsArray,
                        getter_AddRefs(opened));

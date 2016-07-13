@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "mozilla/CheckedInt.h"
+#include "mozilla/Constants.h"
 
 #include "2D.h"
 #include "DataSurfaceHelpers.h"

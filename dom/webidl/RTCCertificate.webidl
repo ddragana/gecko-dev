@@ -8,5 +8,5 @@
 
 [Pref="media.peerconnection.enabled"]
 interface RTCCertificate {
-  readonly attribute DOMTimeStamp expires;
+  readonly attribute Date expires;
 };

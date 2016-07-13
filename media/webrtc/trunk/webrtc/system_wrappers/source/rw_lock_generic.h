@@ -22,13 +22,13 @@ class ConditionVariableWrapper;
 class RWLockGeneric : public RWLockWrapper {
  public:
   RWLockGeneric();
-  ~RWLockGeneric() override;
+  virtual ~RWLockGeneric();
 
-  void AcquireLockExclusive() override;
-  void ReleaseLockExclusive() override;
+  virtual void AcquireLockExclusive() OVERRIDE;
+  virtual void ReleaseLockExclusive() OVERRIDE;
 
-  void AcquireLockShared() override;
-  void ReleaseLockShared() override;
+  virtual void AcquireLockShared() OVERRIDE;
+  virtual void ReleaseLockShared() OVERRIDE;
 
  private:
   CriticalSectionWrapper* critical_section_;

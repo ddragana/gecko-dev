@@ -4,7 +4,6 @@
 
 package org.mozilla.search;
 
-import android.support.annotation.NonNull;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.Locales;
 import org.mozilla.gecko.R;
@@ -12,11 +11,12 @@ import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.db.BrowserContract.SearchHistory;
 import org.mozilla.gecko.distribution.Distribution;
-import org.mozilla.gecko.search.SearchEngine;
-import org.mozilla.gecko.search.SearchEngineManager;
-import org.mozilla.gecko.search.SearchEngineManager.SearchEngineCallback;
+import org.mozilla.gecko.health.BrowserHealthRecorder;
 import org.mozilla.search.autocomplete.SearchBar;
 import org.mozilla.search.autocomplete.SuggestionsFragment;
+import org.mozilla.search.providers.SearchEngine;
+import org.mozilla.search.providers.SearchEngineManager;
+import org.mozilla.search.providers.SearchEngineManager.SearchEngineCallback;
 
 import android.content.AsyncQueryHandler;
 import android.content.ContentResolver;
@@ -30,9 +30,9 @@ import android.view.View;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.Interpolator;
 
-import android.animation.Animator;
-import android.animation.AnimatorSet;
-import android.animation.ObjectAnimator;
+import com.nineoldandroids.animation.Animator;
+import com.nineoldandroids.animation.AnimatorSet;
+import com.nineoldandroids.animation.ObjectAnimator;
 
 /**
  * The main entrance for the Android search intent.
@@ -63,8 +63,7 @@ public class SearchActivity extends Locales.LocaleAwareFragmentActivity
     private SearchState searchState = SearchState.PRESEARCH;
     private EditState editState = EditState.WAITING;
 
-    @NonNull
-    private SearchEngineManager searchEngineManager; // Contains reference to Context - DO NOT LEAK!
+    private SearchEngineManager searchEngineManager;
 
     // Only accessed on the main thread.
     private SearchEngine engine;
@@ -195,7 +194,8 @@ public class SearchActivity extends Locales.LocaleAwareFragmentActivity
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        searchEngineManager.unregisterListeners();
+        searchEngineManager.destroy();
+        searchEngineManager = null;
         engine = null;
         suggestionsFragment = null;
         postSearchFragment = null;
@@ -255,7 +255,7 @@ public class SearchActivity extends Locales.LocaleAwareFragmentActivity
         storeQuery(query);
 
         try {
-            //BrowserHealthRecorder.recordSearchDelayed("activity", engine.getIdentifier());
+            BrowserHealthRecorder.recordSearchDelayed("activity", engine.getIdentifier());
         } catch (Exception e) {
             // This should never happen: it'll only throw if the
             // search location is wrong. But let's not tempt fate.

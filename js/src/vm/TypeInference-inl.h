@@ -11,8 +11,6 @@
 
 #include "vm/TypeInference.h"
 
-#include "mozilla/BinarySearch.h"
-#include "mozilla/Casting.h"
 #include "mozilla/PodOperations.h"
 
 #include "builtin/SymbolObject.h"
@@ -21,6 +19,7 @@
 #include "vm/BooleanObject.h"
 #include "vm/NumberObject.h"
 #include "vm/SharedArrayObject.h"
+#include "vm/SharedTypedArrayObject.h"
 #include "vm/StringObject.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/UnboxedObject.h"
@@ -285,21 +284,17 @@ struct AutoEnterAnalysis
     // Pending recompilations to perform before execution of JIT code can resume.
     RecompileInfoVector pendingRecompiles;
 
-    // Prevent us from calling the objectMetadataCallback.
-    js::AutoSuppressAllocationMetadataBuilder suppressMetadata;
-
     FreeOp* freeOp;
     Zone* zone;
 
     explicit AutoEnterAnalysis(ExclusiveContext* cx)
-      : suppressGC(cx), oom(cx->zone()), suppressMetadata(cx)
+      : suppressGC(cx), oom(cx->zone())
     {
         init(cx->defaultFreeOp(), cx->zone());
     }
 
     AutoEnterAnalysis(FreeOp* fop, Zone* zone)
-      : suppressGC(zone->runtimeFromMainThread()->contextFromMainThread()),
-        oom(zone), suppressMetadata(zone)
+      : suppressGC(zone->runtimeFromMainThread()), oom(zone)
     {
         init(fop, zone);
     }
@@ -466,8 +461,8 @@ MarkObjectStateChange(ExclusiveContext* cx, JSObject* obj)
 }
 
 /* Interface helpers for JSScript*. */
-extern void TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, TypeSet::Type type);
 extern void TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, const Value& rval);
+extern void TypeDynamicResult(JSContext* cx, JSScript* script, jsbytecode* pc, TypeSet::Type type);
 
 /////////////////////////////////////////////////////////////////////
 // Script interface functions
@@ -508,7 +503,7 @@ template <typename TYPESET>
 TypeScript::BytecodeTypes(JSScript* script, jsbytecode* pc, uint32_t* bytecodeMap,
                           uint32_t* hint, TYPESET* typeArray)
 {
-    MOZ_ASSERT(CodeSpec[*pc].format & JOF_TYPESET);
+    MOZ_ASSERT(js_CodeSpec[*pc].format & JOF_TYPESET);
     uint32_t offset = script->pcToOffset(pc);
 
     // See if this pc is the next typeset opcode after the last one looked up.
@@ -521,17 +516,26 @@ TypeScript::BytecodeTypes(JSScript* script, jsbytecode* pc, uint32_t* bytecodeMa
     if (bytecodeMap[*hint] == offset)
         return typeArray + *hint;
 
-    // Fall back to a binary search.  We'll either find the exact offset, or
-    // there are more JOF_TYPESET opcodes than nTypeSets in the script (as can
-    // happen if the script is very long) and we'll use the last location.
-    size_t loc;
-#ifdef DEBUG
-    bool found =
-#endif
-        mozilla::BinarySearch(bytecodeMap, 0, script->nTypeSets() - 1, offset, &loc);
+    // Fall back to a binary search.
+    size_t bottom = 0;
+    size_t top = script->nTypeSets() - 1;
+    size_t mid = bottom + (top - bottom) / 2;
+    while (mid < top) {
+        if (bytecodeMap[mid] < offset)
+            bottom = mid + 1;
+        else if (bytecodeMap[mid] > offset)
+            top = mid;
+        else
+            break;
+        mid = bottom + (top - bottom) / 2;
+    }
 
-    MOZ_ASSERT_IF(found, bytecodeMap[loc] == offset);
-    *hint = mozilla::AssertedCast<uint32_t>(loc);
+    // We should have have zeroed in on either the exact offset, unless there
+    // are more JOF_TYPESET opcodes than nTypeSets in the script (as can happen
+    // if the script is very long).
+    MOZ_ASSERT(bytecodeMap[mid] == offset || mid == top);
+
+    *hint = mid;
     return typeArray + *hint;
 }
 
@@ -551,12 +555,6 @@ TypeScript::BytecodeTypes(JSScript* script, jsbytecode* pc)
 TypeScript::Monitor(JSContext* cx, JSScript* script, jsbytecode* pc, const js::Value& rval)
 {
     TypeMonitorResult(cx, script, pc, rval);
-}
-
-/* static */ inline void
-TypeScript::Monitor(JSContext* cx, JSScript* script, jsbytecode* pc, TypeSet::Type type)
-{
-    TypeMonitorResult(cx, script, pc, type);
 }
 
 /* static */ inline void

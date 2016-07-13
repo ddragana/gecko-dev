@@ -25,33 +25,18 @@
 
 using namespace mozilla::net;
 
-NS_IMPL_ISUPPORTS(nsAboutCache, nsIAboutModule)
-NS_IMPL_ISUPPORTS(nsAboutCache::Channel, nsIChannel, nsIRequest, nsICacheStorageVisitor)
+NS_IMPL_ISUPPORTS(nsAboutCache, nsIAboutModule, nsICacheStorageVisitor)
 
 NS_IMETHODIMP
 nsAboutCache::NewChannel(nsIURI* aURI,
                          nsILoadInfo* aLoadInfo,
                          nsIChannel** result)
 {
-    nsresult rv;
-
     NS_ENSURE_ARG_POINTER(aURI);
 
-    RefPtr<Channel> channel = new Channel();
-    rv = channel->Init(aURI, aLoadInfo);
-    if (NS_FAILED(rv)) return rv;
-
-    channel.forget(result);
-
-    return NS_OK;
-}
-
-nsresult
-nsAboutCache::Channel::Init(nsIURI* aURI, nsILoadInfo* aLoadInfo)
-{
     nsresult rv;
 
-    mCancel = false;
+    *result = nullptr;
 
     nsCOMPtr<nsIInputStream> inputStream;
     rv = NS_NewPipe(getter_AddRefs(inputStream), getter_AddRefs(mStream),
@@ -79,7 +64,8 @@ nsAboutCache::Channel::Init(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     // The entries header is added on encounter of the first entry
     mEntriesHeaderAdded = false;
 
-    rv = NS_NewInputStreamChannelInternal(getter_AddRefs(mChannel),
+    nsCOMPtr<nsIChannel> channel;
+    rv = NS_NewInputStreamChannelInternal(getter_AddRefs(channel),
                                           aURI,
                                           inputStream,
                                           NS_LITERAL_CSTRING("text/html"),
@@ -131,45 +117,16 @@ nsAboutCache::Channel::Init(nsIURI* aURI, nsILoadInfo* aLoadInfo)
 
     FlushBuffer();
 
-    return NS_OK;
-}
-
-NS_IMETHODIMP nsAboutCache::Channel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
-{
-    nsresult rv;
-
-    if (!mChannel) {
-        return NS_ERROR_UNEXPECTED;
-    }
-
-    // Kick the walk loop.
+    // Kick it, this goes async.
     rv = VisitNextStorage();
     if (NS_FAILED(rv)) return rv;
 
-    MOZ_ASSERT(!aContext, "asyncOpen2() does not take a context argument");
-    rv = NS_MaybeOpenChannelUsingAsyncOpen2(mChannel, aListener);
-    if (NS_FAILED(rv)) return rv;
-
+    channel.forget(result);
     return NS_OK;
 }
 
-NS_IMETHODIMP nsAboutCache::Channel::AsyncOpen2(nsIStreamListener *aListener)
-{
-    return AsyncOpen(aListener, nullptr);
-}
-
-NS_IMETHODIMP nsAboutCache::Channel::Open(nsIInputStream * *_retval)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP nsAboutCache::Channel::Open2(nsIInputStream * *_retval)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
 nsresult
-nsAboutCache::Channel::ParseURI(nsIURI * uri, nsACString & storage)
+nsAboutCache::ParseURI(nsIURI * uri, nsACString & storage)
 {
     //
     // about:cache[?storage=<storage-name>[&context=<context-key>]]
@@ -210,7 +167,7 @@ nsAboutCache::Channel::ParseURI(nsIURI * uri, nsACString & storage)
 }
 
 nsresult
-nsAboutCache::Channel::VisitNextStorage()
+nsAboutCache::VisitNextStorage()
 {
     if (!mStorageList.Length())
         return NS_ERROR_NOT_AVAILABLE;
@@ -222,11 +179,13 @@ nsAboutCache::Channel::VisitNextStorage()
     // from visitor callback.  The cache v1 service doesn't like it.
     // TODO - mayhemer, bug 913828, remove this dispatch and call
     // directly.
-    return NS_DispatchToMainThread(mozilla::NewRunnableMethod(this, &nsAboutCache::Channel::FireVisitStorage));
+    nsCOMPtr<nsIRunnable> event =
+        NS_NewRunnableMethod(this, &nsAboutCache::FireVisitStorage);
+    return NS_DispatchToMainThread(event);
 }
 
 void
-nsAboutCache::Channel::FireVisitStorage()
+nsAboutCache::FireVisitStorage()
 {
     nsresult rv;
 
@@ -255,7 +214,7 @@ nsAboutCache::Channel::FireVisitStorage()
 }
 
 nsresult
-nsAboutCache::Channel::VisitStorage(nsACString const & storageName)
+nsAboutCache::VisitStorage(nsACString const & storageName)
 {
     nsresult rv;
 
@@ -300,8 +259,8 @@ nsAboutCache::GetStorage(nsACString const & storageName,
 }
 
 NS_IMETHODIMP
-nsAboutCache::Channel::OnCacheStorageInfo(uint32_t aEntryCount, uint64_t aConsumption,
-                                          uint64_t aCapacity, nsIFile * aDirectory)
+nsAboutCache::OnCacheStorageInfo(uint32_t aEntryCount, uint64_t aConsumption,
+                                 uint64_t aCapacity, nsIFile * aDirectory)
 {
     // We need mStream for this
     if (!mStream) {
@@ -385,14 +344,12 @@ nsAboutCache::Channel::OnCacheStorageInfo(uint32_t aEntryCount, uint64_t aConsum
 }
 
 NS_IMETHODIMP
-nsAboutCache::Channel::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnhance,
-                                        int64_t aDataSize, int32_t aFetchCount,
-                                        uint32_t aLastModified, uint32_t aExpirationTime,
-                                        bool aPinned)
+nsAboutCache::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnhance,
+                               int64_t aDataSize, int32_t aFetchCount,
+                               uint32_t aLastModified, uint32_t aExpirationTime)
 {
     // We need mStream for this
-    if (!mStream || mCancel) {
-        // Returning a failure from this callback stops the iteration
+    if (!mStream) {
         return NS_ERROR_FAILURE;
     }
 
@@ -405,7 +362,6 @@ nsAboutCache::Channel::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnha
                               "   <col id=\"col-fetchCount\">\n"
                               "   <col id=\"col-lastModified\">\n"
                               "   <col id=\"col-expires\">\n"
-                              "   <col id=\"col-pinned\">\n"
                               "  </colgroup>\n"
                               "  <thead>\n"
                               "    <tr>\n"
@@ -414,7 +370,6 @@ nsAboutCache::Channel::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnha
                               "      <th>Fetch count</th>\n"
                               "      <th>Last Modifed</th>\n"
                               "      <th>Expires</th>\n"
-                              "      <th>Pinning</th>\n"
                               "    </tr>\n"
                               "  </thead>\n");
         mEntriesHeaderAdded = true;
@@ -491,23 +446,15 @@ nsAboutCache::Channel::OnCacheEntryInfo(nsIURI *aURI, const nsACString & aIdEnha
     }
     mBuffer.AppendLiteral("</td>\n");
 
-    // Pinning
-    mBuffer.AppendLiteral("    <td>");
-    if (aPinned) {
-      mBuffer.Append(NS_LITERAL_CSTRING("Pinned"));
-    } else {
-      mBuffer.Append(NS_LITERAL_CSTRING("&nbsp;"));
-    }
-    mBuffer.AppendLiteral("</td>\n");
-
     // Entry is done...
     mBuffer.AppendLiteral("  </tr>\n");
 
-    return FlushBuffer();
+    FlushBuffer();
+    return NS_OK;
 }
 
 NS_IMETHODIMP
-nsAboutCache::Channel::OnCacheEntryVisitCompleted()
+nsAboutCache::OnCacheEntryVisitCompleted()
 {
     if (!mStream) {
         return NS_ERROR_FAILURE;
@@ -535,20 +482,12 @@ nsAboutCache::Channel::OnCacheEntryVisitCompleted()
     return NS_OK;
 }
 
-nsresult
-nsAboutCache::Channel::FlushBuffer()
+void
+nsAboutCache::FlushBuffer()
 {
-    nsresult rv;
-
     uint32_t bytesWritten;
-    rv = mStream->Write(mBuffer.get(), mBuffer.Length(), &bytesWritten);
+    mStream->Write(mBuffer.get(), mBuffer.Length(), &bytesWritten);
     mBuffer.Truncate();
-
-    if (NS_FAILED(rv)) {
-        mCancel = true;
-    }
-
-    return rv;
 }
 
 NS_IMETHODIMP

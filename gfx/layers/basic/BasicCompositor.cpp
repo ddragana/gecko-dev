@@ -7,18 +7,23 @@
 #include "BasicLayersImpl.h"            // for FillRectWithMask
 #include "TextureHostBasic.h"
 #include "mozilla/layers/Effects.h"
+#include "mozilla/layers/YCbCrImageDataSerializer.h"
 #include "nsIWidget.h"
 #include "gfx2DGlue.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
-#include "mozilla/gfx/Tools.h"
-#include "mozilla/gfx/ssse3-scaler.h"
-#include "mozilla/SSE.h"
 #include "gfxUtils.h"
 #include "YCbCrUtils.h"
 #include <algorithm>
 #include "ImageContainer.h"
 #include "gfxPrefs.h"
+#ifdef MOZ_ENABLE_SKIA
+#include "skia/SkCanvas.h"              // for SkCanvas
+#include "skia/SkBitmapDevice.h"        // for SkBitmapDevice
+#else
+#define PIXMAN_DONT_DEFINE_STDINT
+#include "pixman.h"                     // for pixman_f_transform, etc
+#endif
 
 namespace mozilla {
 using namespace mozilla::gfx;
@@ -29,19 +34,6 @@ class DataTextureSourceBasic : public DataTextureSource
                              , public TextureSourceBasic
 {
 public:
-  virtual const char* Name() const override { return "DataTextureSourceBasic"; }
-
-  explicit DataTextureSourceBasic(DataSourceSurface* aSurface)
-  : mSurface(aSurface)
-  , mWrappingExistingData(!!aSurface)
-  {}
-
-  virtual DataTextureSource* AsDataTextureSource() override
-  {
-    // If the texture wraps someone else's memory we'd rather not use it as
-    // a DataTextureSource per say (that is call Update on it).
-    return mWrappingExistingData ? nullptr : this;
-  }
 
   virtual TextureSourceBasic* AsSourceBasic() override { return this; }
 
@@ -49,22 +41,18 @@ public:
 
   SurfaceFormat GetFormat() const override
   {
-    return mSurface ? mSurface->GetFormat() : gfx::SurfaceFormat::UNKNOWN;
+    return mSurface->GetFormat();
   }
 
   virtual IntSize GetSize() const override
   {
-    return mSurface ? mSurface->GetSize() : gfx::IntSize(0, 0);
+    return mSurface->GetSize();
   }
 
   virtual bool Update(gfx::DataSourceSurface* aSurface,
                       nsIntRegion* aDestRegion = nullptr,
                       gfx::IntPoint* aSrcOffset = nullptr) override
   {
-    MOZ_ASSERT(!mWrappingExistingData);
-    if (mWrappingExistingData) {
-      return false;
-    }
     mSurface = aSurface;
     return true;
   }
@@ -77,17 +65,16 @@ public:
 
 public:
   RefPtr<gfx::DataSourceSurface> mSurface;
-  bool mWrappingExistingData;
 };
 
-BasicCompositor::BasicCompositor(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget)
-  : Compositor(aWidget, aParent)
-  , mDidExternalComposition(false)
+BasicCompositor::BasicCompositor(nsIWidget *aWidget)
+  : mWidget(aWidget)
 {
   MOZ_COUNT_CTOR(BasicCompositor);
+  SetBackend(LayersBackend::LAYERS_BASIC);
 
   mMaxTextureSize =
-    Factory::GetMaxSurfaceSize(gfxPlatform::GetPlatform()->GetContentBackendFor(LayersBackend::LAYERS_BASIC));
+    Factory::GetMaxSurfaceSize(gfxPlatform::GetPlatform()->GetContentBackend());
 }
 
 BasicCompositor::~BasicCompositor()
@@ -96,7 +83,7 @@ BasicCompositor::~BasicCompositor()
 }
 
 bool
-BasicCompositor::Initialize(nsCString* const out_failureReason)
+BasicCompositor::Initialize()
 {
   return mWidget ? mWidget->InitCompositor(this) : false;
 };
@@ -116,21 +103,10 @@ BasicCompositingRenderTarget::BindRenderTarget()
   }
 }
 
-void BasicCompositor::DetachWidget()
+void BasicCompositor::Destroy()
 {
-  if (mWidget) {
-    mWidget->CleanupRemoteDrawing();
-  }
-  Compositor::DetachWidget();
-}
-
-TextureFactoryIdentifier
-BasicCompositor::GetTextureFactoryIdentifier()
-{
-  TextureFactoryIdentifier ident(LayersBackend::LAYERS_BASIC,
-                                 XRE_GetProcessType(),
-                                 GetMaxTextureSize());
-  return ident;
+  mWidget->CleanupRemoteDrawing();
+  mWidget = nullptr;
 }
 
 already_AddRefed<CompositingRenderTarget>
@@ -158,67 +134,21 @@ BasicCompositor::CreateRenderTargetFromSource(const IntRect &aRect,
                                               const CompositingRenderTarget *aSource,
                                               const IntPoint &aSourcePoint)
 {
-  MOZ_CRASH("GFX: Shouldn't be called!");
+  MOZ_CRASH("Shouldn't be called!");
   return nullptr;
-}
-
-already_AddRefed<CompositingRenderTarget>
-BasicCompositor::CreateRenderTargetForWindow(const LayoutDeviceIntRect& aRect, const LayoutDeviceIntRect& aClearRect, BufferMode aBufferMode)
-{
-  MOZ_ASSERT(mDrawTarget);
-  MOZ_ASSERT(aRect.width != 0 && aRect.height != 0, "Trying to create a render target of invalid size");
-
-  if (aRect.width * aRect.height == 0) {
-    return nullptr;
-  }
-
-  RefPtr<BasicCompositingRenderTarget> rt;
-  IntRect rect = aRect.ToUnknownRect();
-
-  if (aBufferMode != BufferMode::BUFFER_NONE) {
-    RefPtr<DrawTarget> target = mWidget->GetBackBufferDrawTarget(mDrawTarget, aRect, aClearRect);
-    if (!target) {
-      return nullptr;
-    }
-    MOZ_ASSERT(target != mDrawTarget);
-    rt = new BasicCompositingRenderTarget(target, rect);
-  } else {
-    IntRect windowRect = rect;
-    // Adjust bounds rect to account for new origin at (0, 0).
-    if (windowRect.Size() != mDrawTarget->GetSize()) {
-      windowRect.ExpandToEnclose(IntPoint(0, 0));
-    }
-    rt = new BasicCompositingRenderTarget(mDrawTarget, windowRect);
-    if (!aClearRect.IsEmpty()) {
-      IntRect clearRect = aRect.ToUnknownRect();
-      mDrawTarget->ClearRect(Rect(clearRect - rt->GetOrigin()));
-    }
-  }
-
-  return rt.forget();
 }
 
 already_AddRefed<DataTextureSource>
 BasicCompositor::CreateDataTextureSource(TextureFlags aFlags)
 {
-  RefPtr<DataTextureSourceBasic> result = new DataTextureSourceBasic(nullptr);
-  if (aFlags & TextureFlags::RGB_FROM_YCBCR) {
-      result->mFromYCBCR = true;
-  }
-  return result.forget();
-}
-
-already_AddRefed<DataTextureSource>
-BasicCompositor::CreateDataTextureSourceAround(DataSourceSurface* aSurface)
-{
-  RefPtr<DataTextureSource> result = new DataTextureSourceBasic(aSurface);
+  RefPtr<DataTextureSource> result = new DataTextureSourceBasic();
   return result.forget();
 }
 
 bool
 BasicCompositor::SupportsEffect(EffectTypes aEffect)
 {
-  return aEffect != EffectTypes::YCBCR && aEffect != EffectTypes::COMPONENT_ALPHA;
+  return static_cast<EffectTypes>(aEffect) != EffectTypes::YCBCR;
 }
 
 static void
@@ -226,16 +156,11 @@ DrawSurfaceWithTextureCoords(DrawTarget *aDest,
                              const gfx::Rect& aDestRect,
                              SourceSurface *aSource,
                              const gfx::Rect& aTextureCoords,
-                             gfx::SamplingFilter aSamplingFilter,
-                             const DrawOptions& aOptions,
+                             gfx::Filter aFilter,
+                             float aOpacity,
                              SourceSurface *aMask,
                              const Matrix* aMaskTransform)
 {
-  if (!aSource) {
-    gfxWarning() << "DrawSurfaceWithTextureCoords problem " << gfx::hexa(aSource) << " and " << gfx::hexa(aMask);
-    return;
-  }
-
   // Convert aTextureCoords into aSource's coordinate space
   gfxRect sourceRect(aTextureCoords.x * aSource->GetSize().width,
                      aTextureCoords.y * aSource->GetSize().height,
@@ -257,100 +182,151 @@ DrawSurfaceWithTextureCoords(DrawTarget *aDest,
   gfx::Rect unitRect(0, 0, 1, 1);
   ExtendMode mode = unitRect.Contains(aTextureCoords) ? ExtendMode::CLAMP : ExtendMode::REPEAT;
 
-  FillRectWithMask(aDest, aDestRect, aSource, aSamplingFilter, aOptions,
+  FillRectWithMask(aDest, aDestRect, aSource, aFilter, DrawOptions(aOpacity),
                    mode, aMask, aMaskTransform, &matrix);
 }
 
-static void
-SetupMask(const EffectChain& aEffectChain,
-          DrawTarget* aDest,
-          const IntPoint& aOffset,
-          RefPtr<SourceSurface>& aMaskSurface,
-          Matrix& aMaskTransform)
+#ifdef MOZ_ENABLE_SKIA
+static SkMatrix
+Matrix3DToSkia(const Matrix4x4& aMatrix)
 {
-  if (aEffectChain.mSecondaryEffects[EffectTypes::MASK]) {
-    EffectMask *effectMask = static_cast<EffectMask*>(aEffectChain.mSecondaryEffects[EffectTypes::MASK].get());
-    aMaskSurface = effectMask->mMaskTexture->AsSourceBasic()->GetSurface(aDest);
-    if (!aMaskSurface) {
-      gfxWarning() << "Invalid sourceMask effect";
-    }
-    MOZ_ASSERT(effectMask->mMaskTransform.Is2D(), "How did we end up with a 3D transform here?!");
-    aMaskTransform = effectMask->mMaskTransform.As2D();
-    aMaskTransform.PostTranslate(-aOffset.x, -aOffset.y);
-  }
+  SkMatrix transform;
+  transform.setAll(aMatrix._11,
+                   aMatrix._21,
+                   aMatrix._41,
+                   aMatrix._12,
+                   aMatrix._22,
+                   aMatrix._42,
+                   aMatrix._14,
+                   aMatrix._24,
+                   aMatrix._44);
+
+  return transform;
 }
 
-static bool
-AttemptVideoScale(TextureSourceBasic* aSource, const SourceSurface* aSourceMask,
-                       gfx::Float aOpacity, CompositionOp aBlendMode,
-                       const TexturedEffect* aTexturedEffect,
-                       const Matrix& aNewTransform, const gfx::Rect& aRect,
-                       const gfx::Rect& aClipRect,
-                       DrawTarget* aDest, const DrawTarget* aBuffer)
+static void
+Transform(DataSourceSurface* aDest,
+          DataSourceSurface* aSource,
+          const Matrix4x4& aTransform,
+          const Point& aDestOffset)
 {
-#ifdef MOZILLA_SSE_HAVE_CPUID_DETECTION
-  if (!mozilla::supports_ssse3())
-      return false;
-  if (aNewTransform.IsTranslation()) // unscaled painting should take the regular path
-      return false;
-  if (aNewTransform.HasNonAxisAlignedTransform() || aNewTransform.HasNegativeScaling())
-      return false;
-  if (aSourceMask || aOpacity != 1.0f)
-      return false;
-  if (aBlendMode != CompositionOp::OP_OVER && aBlendMode != CompositionOp::OP_SOURCE)
-      return false;
+  if (aTransform.IsSingular()) {
+    return;
+  }
 
-  IntRect dstRect;
-  // the compiler should know a lot about aNewTransform at this point
-  // maybe it can do some sophisticated optimization of the following
-  if (!aNewTransform.TransformBounds(aRect).ToIntRect(&dstRect))
-      return false;
+  IntSize destSize = aDest->GetSize();
+  SkImageInfo destInfo = SkImageInfo::Make(destSize.width,
+                                           destSize.height,
+                                           kBGRA_8888_SkColorType,
+                                           kPremul_SkAlphaType);
+  SkBitmap destBitmap;
+  destBitmap.setInfo(destInfo, aDest->Stride());
+  destBitmap.setPixels((uint32_t*)aDest->GetData());
+  SkCanvas destCanvas(destBitmap);
 
-  IntRect clipRect;
-  if (!aClipRect.ToIntRect(&clipRect))
-      return false;
+  IntSize srcSize = aSource->GetSize();
+  SkImageInfo srcInfo = SkImageInfo::Make(srcSize.width,
+                                          srcSize.height,
+                                          kBGRA_8888_SkColorType,
+                                          kPremul_SkAlphaType);
+  SkBitmap src;
+  src.setInfo(srcInfo, aSource->Stride());
+  src.setPixels((uint32_t*)aSource->GetData());
 
-  if (!(aTexturedEffect->mTextureCoords == Rect(0.0f, 0.0f, 1.0f, 1.0f)))
-      return false;
-  if (aDest->GetFormat() == SurfaceFormat::R5G6B5_UINT16)
-      return false;
+  Matrix4x4 transform = aTransform;
+  transform.PostTranslate(Point3D(-aDestOffset.x, -aDestOffset.y, 0));
+  destCanvas.setMatrix(Matrix3DToSkia(transform));
 
-  uint8_t* dstData;
-  IntSize dstSize;
-  int32_t dstStride;
-  SurfaceFormat dstFormat;
-  if (aDest->LockBits(&dstData, &dstSize, &dstStride, &dstFormat)) {
-    // If we're not painting to aBuffer the clip will
-    // be applied later
-    IntRect fillRect = dstRect;
-    if (aDest == aBuffer) {
-      // we need to clip fillRect because LockBits ignores the clip on the aDest
-      fillRect = fillRect.Intersect(clipRect);
-    }
+  SkPaint paint;
+  paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+  paint.setAntiAlias(true);
+  paint.setFilterLevel(SkPaint::kLow_FilterLevel);
+  SkRect destRect = SkRect::MakeXYWH(0, 0, srcSize.width, srcSize.height);
+  destCanvas.drawBitmapRectToRect(src, nullptr, destRect, &paint);
+}
+#else
+static pixman_transform
+Matrix3DToPixman(const Matrix4x4& aMatrix)
+{
+  pixman_f_transform transform;
 
-    fillRect = fillRect.Intersect(IntRect(IntPoint(0, 0), aDest->GetSize()));
-    IntPoint offset = fillRect.TopLeft() - dstRect.TopLeft();
+  transform.m[0][0] = aMatrix._11;
+  transform.m[0][1] = aMatrix._21;
+  transform.m[0][2] = aMatrix._41;
+  transform.m[1][0] = aMatrix._12;
+  transform.m[1][1] = aMatrix._22;
+  transform.m[1][2] = aMatrix._42;
+  transform.m[2][0] = aMatrix._14;
+  transform.m[2][1] = aMatrix._24;
+  transform.m[2][2] = aMatrix._44;
 
-    RefPtr<DataSourceSurface> srcSource = aSource->GetSurface(aDest)->GetDataSurface();
-    DataSourceSurface::ScopedMap mapSrc(srcSource, DataSourceSurface::READ);
+  pixman_transform result;
+  pixman_transform_from_pixman_f_transform(&result, &transform);
 
-    ssse3_scale_data((uint32_t*)mapSrc.GetData(), srcSource->GetSize().width, srcSource->GetSize().height,
-                     mapSrc.GetStride()/4,
-                     ((uint32_t*)dstData) + fillRect.x + (dstStride / 4) * fillRect.y, dstRect.width, dstRect.height,
-                     dstStride / 4,
-                     offset.x, offset.y,
-                     fillRect.width, fillRect.height);
+  return result;
+}
 
-    aDest->ReleaseBits(dstData);
-    return true;
-  } else
-#endif // MOZILLA_SSE_HAVE_CPUID_DETECTION
-    return false;
+static void
+Transform(DataSourceSurface* aDest,
+          DataSourceSurface* aSource,
+          const Matrix4x4& aTransform,
+          const Point& aDestOffset)
+{
+  IntSize destSize = aDest->GetSize();
+  pixman_image_t* dest = pixman_image_create_bits(PIXMAN_a8r8g8b8,
+                                                  destSize.width,
+                                                  destSize.height,
+                                                  (uint32_t*)aDest->GetData(),
+                                                  aDest->Stride());
+
+  IntSize srcSize = aSource->GetSize();
+  pixman_image_t* src = pixman_image_create_bits(PIXMAN_a8r8g8b8,
+                                                 srcSize.width,
+                                                 srcSize.height,
+                                                 (uint32_t*)aSource->GetData(),
+                                                 aSource->Stride());
+
+  MOZ_ASSERT(src !=0 && dest != 0, "Failed to create pixman images?");
+
+  pixman_transform pixTransform = Matrix3DToPixman(aTransform);
+  pixman_transform pixTransformInverted;
+
+  // If the transform is singular then nothing would be drawn anyway, return here
+  if (!pixman_transform_invert(&pixTransformInverted, &pixTransform)) {
+    pixman_image_unref(dest);
+    pixman_image_unref(src);
+    return;
+  }
+  pixman_image_set_transform(src, &pixTransformInverted);
+
+  pixman_image_composite32(PIXMAN_OP_SRC,
+                           src,
+                           nullptr,
+                           dest,
+                           aDestOffset.x,
+                           aDestOffset.y,
+                           0,
+                           0,
+                           0,
+                           0,
+                           destSize.width,
+                           destSize.height);
+
+  pixman_image_unref(dest);
+  pixman_image_unref(src);
+}
+#endif
+
+static inline IntRect
+RoundOut(Rect r)
+{
+  r.RoundOut();
+  return IntRect(r.x, r.y, r.width, r.height);
 }
 
 void
 BasicCompositor::DrawQuad(const gfx::Rect& aRect,
-                          const gfx::IntRect& aClipRect,
+                          const gfx::Rect& aClipRect,
                           const EffectChain &aEffectChain,
                           gfx::Float aOpacity,
                           const gfx::Matrix4x4& aTransform,
@@ -362,6 +338,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
   // |dest| is a temporary surface.
   RefPtr<DrawTarget> dest = buffer;
 
+  buffer->PushClipRect(aClipRect);
   AutoRestoreTransform autoRestoreTransform(dest);
 
   Matrix newTransform;
@@ -373,7 +350,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
     newTransform = aTransform.As2D();
   } else {
     // Create a temporary surface for the transform.
-    dest = gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(RoundedOut(aRect).Size(), SurfaceFormat::B8G8R8A8);
+    dest = gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(RoundOut(aRect).Size(), SurfaceFormat::B8G8R8A8);
     if (!dest) {
       return;
     }
@@ -381,39 +358,34 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
     dest->SetTransform(Matrix::Translation(-aRect.x, -aRect.y));
 
     // Get the bounds post-transform.
-    transformBounds = aTransform.TransformAndClipBounds(aRect, Rect(offset.x, offset.y, buffer->GetSize().width, buffer->GetSize().height));
+    new3DTransform = aTransform;
+    gfxRect bounds = ThebesRect(aRect);
+    bounds.TransformBounds(new3DTransform);
+    bounds.IntersectRect(bounds, gfxRect(offset.x, offset.y, buffer->GetSize().width, buffer->GetSize().height));
+
+    transformBounds = ToRect(bounds);
     transformBounds.RoundOut();
 
-    if (transformBounds.IsEmpty()) {
-      return;
-    }
-
-    newTransform = Matrix();
+    // Propagate the coordinate offset to our 2D draw target.
+    newTransform = Matrix::Translation(transformBounds.x, transformBounds.y);
 
     // When we apply the 3D transformation, we do it against a temporary
     // surface, so undo the coordinate offset.
-    new3DTransform = aTransform;
-    new3DTransform.PreTranslate(aRect.x, aRect.y, 0);
+    new3DTransform = Matrix4x4::Translation(aRect.x, aRect.y, 0) * new3DTransform;
   }
-
-  // XXX the transform is probably just an integer offset so this whole
-  // business here is a bit silly.
-  Rect transformedClipRect = buffer->GetTransform().TransformBounds(Rect(aClipRect));
-
-  buffer->PushClipRect(Rect(aClipRect));
 
   newTransform.PostTranslate(-offset.x, -offset.y);
   buffer->SetTransform(newTransform);
 
   RefPtr<SourceSurface> sourceMask;
   Matrix maskTransform;
-  if (aTransform.Is2D()) {
-    SetupMask(aEffectChain, dest, offset, sourceMask, maskTransform);
-  }
-
-  CompositionOp blendMode = CompositionOp::OP_OVER;
-  if (Effect* effect = aEffectChain.mSecondaryEffects[EffectTypes::BLEND_MODE].get()) {
-    blendMode = static_cast<EffectBlendMode*>(effect)->mBlendMode;
+  if (aEffectChain.mSecondaryEffects[EffectTypes::MASK]) {
+    EffectMask *effectMask = static_cast<EffectMask*>(aEffectChain.mSecondaryEffects[EffectTypes::MASK].get());
+    sourceMask = effectMask->mMaskTexture->AsSourceBasic()->GetSurface(dest);
+    MOZ_ASSERT(effectMask->mMaskTransform.Is2D(), "How did we end up with a 3D transform here?!");
+    MOZ_ASSERT(!effectMask->mIs3D);
+    maskTransform = effectMask->mMaskTransform.As2D();
+    maskTransform.PreTranslate(-offset.x, -offset.y);
   }
 
   switch (aEffectChain.mPrimaryEffect->mType) {
@@ -421,17 +393,8 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
       EffectSolidColor* effectSolidColor =
         static_cast<EffectSolidColor*>(aEffectChain.mPrimaryEffect.get());
 
-      bool unboundedOp = !IsOperatorBoundByMask(blendMode);
-      if (unboundedOp) {
-        dest->PushClipRect(aRect);
-      }
-
       FillRectWithMask(dest, aRect, effectSolidColor->mColor,
-                       DrawOptions(aOpacity, blendMode), sourceMask, &maskTransform);
-
-      if (unboundedOp) {
-        dest->PopClip();
-      }
+                       DrawOptions(aOpacity), sourceMask, &maskTransform);
       break;
     }
     case EffectTypes::RGB: {
@@ -439,26 +402,14 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
           static_cast<TexturedEffect*>(aEffectChain.mPrimaryEffect.get());
       TextureSourceBasic* source = texturedEffect->mTexture->AsSourceBasic();
 
-      if (source && texturedEffect->mPremultiplied) {
-        // we have a fast path for video here
-        if (source->mFromYCBCR &&
-            AttemptVideoScale(source, sourceMask, aOpacity, blendMode,
-                              texturedEffect,
-                              newTransform, aRect, transformedClipRect,
-                              dest, buffer)) {
-          // we succeeded in scaling
-        } else {
+      if (texturedEffect->mPremultiplied) {
           DrawSurfaceWithTextureCoords(dest, aRect,
                                        source->GetSurface(dest),
                                        texturedEffect->mTextureCoords,
-                                       texturedEffect->mSamplingFilter,
-                                       DrawOptions(aOpacity, blendMode),
-                                       sourceMask, &maskTransform);
-        }
-      } else if (source) {
-        SourceSurface* srcSurf = source->GetSurface(dest);
-        if (srcSurf) {
-          RefPtr<DataSourceSurface> srcData = srcSurf->GetDataSurface();
+                                       texturedEffect->mFilter,
+                                       aOpacity, sourceMask, &maskTransform);
+      } else {
+          RefPtr<DataSourceSurface> srcData = source->GetSurface(dest)->GetDataSurface();
 
           // Yes, we re-create the premultiplied data every time.
           // This might be better with a cache, eventually.
@@ -467,14 +418,9 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
           DrawSurfaceWithTextureCoords(dest, aRect,
                                        premultData,
                                        texturedEffect->mTextureCoords,
-                                       texturedEffect->mSamplingFilter,
-                                       DrawOptions(aOpacity, blendMode),
-                                       sourceMask, &maskTransform);
-        }
-      } else {
-        gfxDevCrash(LogReason::IncompatibleBasicTexturedEffect) << "Bad for basic with " << texturedEffect->mTexture->Name() << " and " << gfx::hexa(sourceMask);
+                                       texturedEffect->mFilter,
+                                       aOpacity, sourceMask, &maskTransform);
       }
-
       break;
     }
     case EffectTypes::YCBCR: {
@@ -491,9 +437,8 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
       DrawSurfaceWithTextureCoords(dest, aRect,
                                    sourceSurf,
                                    effectRenderTarget->mTextureCoords,
-                                   effectRenderTarget->mSamplingFilter,
-                                   DrawOptions(aOpacity, blendMode),
-                                   sourceMask, &maskTransform);
+                                   effectRenderTarget->mFilter,
+                                   aOpacity, sourceMask, &maskTransform);
       break;
     }
     case EffectTypes::COMPONENT_ALPHA: {
@@ -509,45 +454,23 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
   if (!aTransform.Is2D()) {
     dest->Flush();
 
-    RefPtr<SourceSurface> destSnapshot = dest->Snapshot();
-
-    SetupMask(aEffectChain, buffer, offset, sourceMask, maskTransform);
-
-    if (sourceMask) {
-      RefPtr<DrawTarget> transformDT =
-        dest->CreateSimilarDrawTarget(IntSize(transformBounds.width, transformBounds.height),
-                                      SurfaceFormat::B8G8R8A8);
-      new3DTransform.PostTranslate(-transformBounds.x, -transformBounds.y, 0);
-      if (transformDT &&
-          transformDT->Draw3DTransformedSurface(destSnapshot, new3DTransform)) {
-        RefPtr<SourceSurface> transformSnapshot = transformDT->Snapshot();
-
-        // Transform the source by it's normal transform, and then the inverse
-        // of the mask transform so that it's in the mask's untransformed
-        // coordinate space.
-        Matrix sourceTransform = newTransform;
-        sourceTransform.PostTranslate(transformBounds.TopLeft());
-
-        Matrix inverseMask = maskTransform;
-        inverseMask.Invert();
-
-        sourceTransform *= inverseMask;
-
-        SurfacePattern source(transformSnapshot, ExtendMode::CLAMP, sourceTransform);
-
-        buffer->PushClipRect(transformBounds);
-
-        // Mask in the untransformed coordinate space, and then transform
-        // by the mask transform to put the result back into destination
-        // coords.
-        buffer->SetTransform(maskTransform);
-        buffer->MaskSurface(source, sourceMask, Point(0, 0));
-
-        buffer->PopClip();
-      }
-    } else {
-      buffer->Draw3DTransformedSurface(destSnapshot, new3DTransform);
+    RefPtr<SourceSurface> snapshot = dest->Snapshot();
+    RefPtr<DataSourceSurface> source = snapshot->GetDataSurface();
+    RefPtr<DataSourceSurface> temp =
+      Factory::CreateDataSourceSurface(RoundOut(transformBounds).Size(), SurfaceFormat::B8G8R8A8
+#ifdef MOZ_ENABLE_SKIA
+        , true
+#endif
+        );
+    if (NS_WARN_IF(!temp)) {
+      buffer->PopClip();
+      return;
     }
+
+    Transform(temp, source, new3DTransform, transformBounds.TopLeft());
+
+    transformBounds.MoveTo(0, 0);
+    buffer->DrawSurface(temp, transformBounds, transformBounds);
   }
 
   buffer->PopClip();
@@ -561,76 +484,45 @@ BasicCompositor::ClearRect(const gfx::Rect& aRect)
 
 void
 BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
-                            const gfx::IntRect *aClipRectIn,
-                            const gfx::IntRect& aRenderBounds,
-                            const nsIntRegion& aOpaqueRegion,
-                            gfx::IntRect *aClipRectOut /* = nullptr */,
-                            gfx::IntRect *aRenderBoundsOut /* = nullptr */)
+                            const gfx::Rect *aClipRectIn,
+                            const gfx::Rect& aRenderBounds,
+                            gfx::Rect *aClipRectOut /* = nullptr */,
+                            gfx::Rect *aRenderBoundsOut /* = nullptr */)
 {
-  LayoutDeviceIntRect intRect(LayoutDeviceIntPoint(), mWidget->GetClientSize());
-  IntRect rect = IntRect(0, 0, intRect.width, intRect.height);
+  mWidgetSize = mWidget->GetClientSize();
+  IntRect intRect = gfx::IntRect(IntPoint(), mWidgetSize);
+  Rect rect = Rect(0, 0, intRect.width, intRect.height);
 
-  LayoutDeviceIntRegion invalidRegionSafe;
-  if (mDidExternalComposition) {
-    // We do not know rendered region during external composition, just redraw
-    // whole widget.
-    invalidRegionSafe = intRect;
-    mDidExternalComposition = false;
-  } else {
-    // Sometimes the invalid region is larger than we want to draw.
-    invalidRegionSafe.And(
-      LayoutDeviceIntRegion::FromUnknownRegion(aInvalidRegion), intRect);
-  }
+  // Sometimes the invalid region is larger than we want to draw.
+  nsIntRegion invalidRegionSafe;
+  invalidRegionSafe.And(aInvalidRegion, intRect);
 
+  IntRect invalidRect = invalidRegionSafe.GetBounds();
+  mInvalidRect = IntRect(invalidRect.x, invalidRect.y, invalidRect.width, invalidRect.height);
   mInvalidRegion = invalidRegionSafe;
-  mInvalidRect = mInvalidRegion.GetBounds();
 
   if (aRenderBoundsOut) {
-    *aRenderBoundsOut = IntRect();
+    *aRenderBoundsOut = Rect();
   }
 
-  BufferMode bufferMode = BufferMode::BUFFERED;
-  if (mTarget) {
-    // If we have a copy target, then we don't have a widget-provided mDrawTarget (currently). Use a dummy
-    // placeholder so that CreateRenderTarget() works. This is only used to create a new buffered
-    // draw target that we composite into, then copy the results the destination.
-    mDrawTarget = mTarget;
-  } else {
-    // StartRemoteDrawingInRegion can mutate mInvalidRegion.
-    mDrawTarget = mWidget->StartRemoteDrawingInRegion(mInvalidRegion, &bufferMode);
-    if (!mDrawTarget) {
-      return;
-    }
-    mInvalidRect = mInvalidRegion.GetBounds();
-    if (mInvalidRect.IsEmpty()) {
-      mWidget->EndRemoteDrawingInRegion(mDrawTarget, mInvalidRegion);
-      return;
-    }
-  }
-
-  if (!mDrawTarget || mInvalidRect.IsEmpty()) {
+  if (mInvalidRect.width <= 0 || mInvalidRect.height <= 0) {
     return;
   }
 
-  LayoutDeviceIntRect clearRect;
-  if (!aOpaqueRegion.IsEmpty()) {
-    LayoutDeviceIntRegion clearRegion = mInvalidRegion;
-    clearRegion.SubOut(LayoutDeviceIntRegion::FromUnknownRegion(aOpaqueRegion));
-    clearRect = clearRegion.GetBounds();
+  if (mTarget) {
+    // If we have a copy target, then we don't have a widget-provided mDrawTarget (currently). Create a dummy
+    // placeholder so that CreateRenderTarget() works.
+    mDrawTarget = gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(IntSize(1,1), SurfaceFormat::B8G8R8A8);
   } else {
-    clearRect = mInvalidRect;
+    mDrawTarget = mWidget->StartRemoteDrawing();
   }
-
-  // Prevent CreateRenderTargetForWindow from clearing unwanted area.
-  gfxUtils::ClipToRegion(mDrawTarget,
-                         mInvalidRegion.ToUnknownRegion());
+  if (!mDrawTarget) {
+    return;
+  }
 
   // Setup an intermediate render target to buffer all compositing. We will
   // copy this into mDrawTarget (the widget), and/or mTarget in EndFrame()
-  RefPtr<CompositingRenderTarget> target =
-    CreateRenderTargetForWindow(mInvalidRect,
-                                clearRect,
-                                bufferMode);
+  RefPtr<CompositingRenderTarget> target = CreateRenderTarget(mInvalidRect, INIT_MODE_CLEAR);
   if (!target) {
     if (!mTarget) {
       mWidget->EndRemoteDrawingInRegion(mDrawTarget, mInvalidRegion);
@@ -641,21 +533,19 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
 
   // We only allocate a surface sized to the invalidated region, so we need to
   // translate future coordinates.
-  mRenderTarget->mDrawTarget->SetTransform(Matrix::Translation(-mRenderTarget->GetOrigin()));
+  mRenderTarget->mDrawTarget->SetTransform(Matrix::Translation(-invalidRect.x,
+                                                               -invalidRect.y));
 
-  if (mRenderTarget->mDrawTarget != mDrawTarget) {
-    gfxUtils::ClipToRegion(mRenderTarget->mDrawTarget,
-                           mInvalidRegion.ToUnknownRegion());
-  }
+  gfxUtils::ClipToRegion(mRenderTarget->mDrawTarget, invalidRegionSafe);
 
   if (aRenderBoundsOut) {
     *aRenderBoundsOut = rect;
   }
 
   if (aClipRectIn) {
-    mRenderTarget->mDrawTarget->PushClipRect(Rect(*aClipRectIn));
+    mRenderTarget->mDrawTarget->PushClipRect(*aClipRectIn);
   } else {
-    mRenderTarget->mDrawTarget->PushClipRect(Rect(rect));
+    mRenderTarget->mDrawTarget->PushClipRect(rect);
     if (aClipRectOut) {
       *aClipRectOut = rect;
     }
@@ -665,8 +555,6 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
 void
 BasicCompositor::EndFrame()
 {
-  Compositor::EndFrame();
-
   // Pop aClipRectIn/bounds rect
   mRenderTarget->mDrawTarget->PopClip();
 
@@ -675,66 +563,35 @@ BasicCompositor::EndFrame()
     float g = float(rand()) / RAND_MAX;
     float b = float(rand()) / RAND_MAX;
     // We're still clipped to mInvalidRegion, so just fill the bounds.
-    mRenderTarget->mDrawTarget->FillRect(
-      IntRectToRect(mInvalidRegion.GetBounds()).ToUnknownRect(),
-      ColorPattern(Color(r, g, b, 0.2f)));
+    mRenderTarget->mDrawTarget->FillRect(ToRect(mInvalidRegion.GetBounds()),
+                                         ColorPattern(Color(r, g, b, 0.2f)));
   }
 
   // Pop aInvalidregion
-  mDrawTarget->PopClip();
-  if (mRenderTarget->mDrawTarget != mDrawTarget) {
-    mRenderTarget->mDrawTarget->PopClip();
+  mRenderTarget->mDrawTarget->PopClip();
+
+  // Note: Most platforms require us to buffer drawing to the widget surface.
+  // That's why we don't draw to mDrawTarget directly.
+  RefPtr<SourceSurface> source = mRenderTarget->mDrawTarget->Snapshot();
+  RefPtr<DrawTarget> dest(mTarget ? mTarget : mDrawTarget);
+
+  nsIntPoint offset = mTarget ? mTargetBounds.TopLeft() : nsIntPoint();
+
+  // The source DrawTarget is clipped to the invalidation region, so we have
+  // to copy the individual rectangles in the region or else we'll draw blank
+  // pixels.
+  nsIntRegionRectIterator iter(mInvalidRegion);
+  for (const IntRect *r = iter.Next(); r; r = iter.Next()) {
+    dest->CopySurface(source,
+                      IntRect(r->x - mInvalidRect.x, r->y - mInvalidRect.y, r->width, r->height),
+                      IntPoint(r->x - offset.x, r->y - offset.y));
   }
-
-  if (mTarget || mRenderTarget->mDrawTarget != mDrawTarget) {
-    // Note: Most platforms require us to buffer drawing to the widget surface.
-    // That's why we don't draw to mDrawTarget directly.
-    RefPtr<SourceSurface> source;
-    if (mRenderTarget->mDrawTarget != mDrawTarget) {
-      source = mWidget->EndBackBufferDrawing();
-    } else {
-      source = mRenderTarget->mDrawTarget->Snapshot();
-    }
-    RefPtr<DrawTarget> dest(mTarget ? mTarget : mDrawTarget);
-
-    nsIntPoint offset = mTarget ? mTargetBounds.TopLeft() : nsIntPoint();
-
-    // The source DrawTarget is clipped to the invalidation region, so we have
-    // to copy the individual rectangles in the region or else we'll draw blank
-    // pixels.
-    for (auto iter = mInvalidRegion.RectIter(); !iter.Done(); iter.Next()) {
-      const LayoutDeviceIntRect& r = iter.Get();
-      dest->CopySurface(source,
-                        IntRect(r.x, r.y, r.width, r.height) - mRenderTarget->GetOrigin(),
-                        IntPoint(r.x, r.y) - offset);
-    }
-  }
-
   if (!mTarget) {
     mWidget->EndRemoteDrawingInRegion(mDrawTarget, mInvalidRegion);
   }
 
   mDrawTarget = nullptr;
   mRenderTarget = nullptr;
-}
-
-void
-BasicCompositor::EndFrameForExternalComposition(const gfx::Matrix& aTransform)
-{
-  MOZ_ASSERT(!mTarget);
-  MOZ_ASSERT(!mDrawTarget);
-  MOZ_ASSERT(!mRenderTarget);
-
-  mDidExternalComposition = true;
-}
-
-BasicCompositor*
-AssertBasicCompositor(Compositor* aCompositor)
-{
-  BasicCompositor* compositor = aCompositor ? aCompositor->AsBasicCompositor()
-                                            : nullptr;
-  MOZ_DIAGNOSTIC_ASSERT(!!compositor);
-  return compositor;
 }
 
 } // namespace layers

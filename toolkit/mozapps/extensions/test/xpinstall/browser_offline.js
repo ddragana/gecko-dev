@@ -1,4 +1,4 @@
-var proxyPrefValue;
+let proxyPrefValue;
 
 // ----------------------------------------------------------------------------
 // Tests that going offline cancels an in progress download.
@@ -11,7 +11,7 @@ function test() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Unsigned XPI": TESTROOT + "amosigned.xpi"
+    "Unsigned XPI": TESTROOT + "unsigned.xpi"
   }));
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
@@ -34,9 +34,8 @@ function finish_test(count) {
     info("Checking if the browser is still offline...");
 
     let tab = gBrowser.selectedTab;
-    ContentTask.spawn(tab.linkedBrowser, null, () => {
-      return ContentTaskUtils.waitForEvent(this, "DOMContentLoaded", true);
-    }).then(() => {
+    tab.linkedBrowser.addEventListener("DOMContentLoaded", function errorLoad() {
+      tab.linkedBrowser.removeEventListener("DOMContentLoaded", errorLoad, true);
       let url = tab.linkedBrowser.contentDocument.documentURI;
       info("loaded: " + url);
       if (/^about:neterror\?e=netOffline/.test(url)) {
@@ -45,7 +44,7 @@ function finish_test(count) {
         gBrowser.removeCurrentTab();
         Harness.finish();
       }
-    });
+    }, true);
     tab.linkedBrowser.loadURI("http://example.com/");
   }
 

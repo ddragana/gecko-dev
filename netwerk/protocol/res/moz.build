@@ -11,11 +11,13 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_res'
 
-UNIFIED_SOURCES += [
+SOURCES += [
     'ExtensionProtocolHandler.cpp',
     'nsResProtocolHandler.cpp',
     'SubstitutingProtocolHandler.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

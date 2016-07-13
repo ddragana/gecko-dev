@@ -28,7 +28,7 @@ public:
 
     ~MyEffectFilter() {}
 
-    virtual int Transform(size_t size,
+    virtual int Transform(int size,
                           unsigned char* frame_buffer,
                           int64_t ntp_time_ms,
                           unsigned int timestamp,
@@ -48,7 +48,7 @@ void ViEAutoTest::ViEImageProcessStandardTest()
     //***************************************************************
     int rtpPort = 6000;
     // Create VIE
-    TbInterfaces ViE("ViEImageProcessStandardTest");
+    TbInterfaces ViE("ViEImageProcessAPITest");
     // Create a video channel
     TbVideoChannel tbChannel(ViE, webrtc::kVideoCodecVP8);
     // Create a capture device
@@ -89,9 +89,8 @@ void ViEAutoTest::ViEImageProcessStandardTest()
     ViETest::Log("Only Window 2 should be black and white");
     AutoTestSleep(kAutoTestSleepTimeMs);
 
-    StopRenderCaptureDeviceAndOutputStream(&ViE, &tbChannel, &tbCapture);
-
-    tbCapture.Disconnect(tbChannel.videoChannel);
+    EXPECT_EQ(0, ViE.render->StopRender(tbCapture.captureId));
+    EXPECT_EQ(0, ViE.render->RemoveRenderer(tbCapture.captureId));
 
     int rtpPort2 = rtpPort + 100;
     // Create a video channel
@@ -130,10 +129,6 @@ void ViEAutoTest::ViEImageProcessStandardTest()
 
     EXPECT_EQ(0, ViE.image_process->DeregisterSendEffectFilter(
         tbChannel.videoChannel));
-
-    EXPECT_EQ(0, ViE.render->RemoveRenderer(tbChannel2.videoChannel));
-
-    tbCapture.Disconnect(tbChannel2.videoChannel);
 
     //***************************************************************
     //	Testing finished. Tear down Video Engine
@@ -227,6 +222,4 @@ void ViEAutoTest::ViEImageProcessAPITest()
         tbChannel.videoChannel, false));
     EXPECT_NE(0, ViE.image_process->EnableColorEnhancement(
         tbCapture.captureId, true));
-
-    tbCapture.Disconnect(tbChannel.videoChannel);
 }

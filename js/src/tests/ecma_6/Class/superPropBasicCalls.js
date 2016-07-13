@@ -1,3 +1,5 @@
+var test = `
+
 // Super property (and calls) works in non-extending classes and object
 // litterals.
 class toStringTest {
@@ -22,6 +24,11 @@ let toStrOL = {
 }
 
 toStrOL.test();
+
+`;
+
+if (classesEnabled())
+    eval(test);
 
 if (typeof reportCompare === 'function')
     reportCompare(0,0,"OK");

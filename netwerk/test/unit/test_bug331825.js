@@ -1,5 +1,5 @@
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var server;
 const BUGID = "331825";
@@ -24,14 +24,21 @@ function run_test() {
   server.start(-1);
 
   // make request
-  var channel = NetUtil.newChannel({
-    uri: "http://localhost:" + server.identity.primaryPort + "/bug" + BUGID,
-    loadUsingSystemPrincipal: true
-  });
+  var channel =
+      Components.classes["@mozilla.org/network/io-service;1"].
+      getService(Components.interfaces.nsIIOService).
+      newChannel2("http://localhost:" + server.identity.primaryPort + "/bug" + BUGID,
+                  null,
+                  null,
+                  null,      // aLoadingNode
+                  Services.scriptSecurityManager.getSystemPrincipal(),
+                  null,      // aTriggeringPrincipal
+                  Ci.nsILoadInfo.SEC_NORMAL,
+                  Ci.nsIContentPolicy.TYPE_OTHER);
 
   channel.QueryInterface(Components.interfaces.nsIHttpChannel);
   channel.setRequestHeader("If-None-Match", "foobar", false);
-  channel.asyncOpen2(new TestListener());
+  channel.asyncOpen(new TestListener(), null);
 
   do_test_pending();
 }

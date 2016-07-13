@@ -26,7 +26,6 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
@@ -42,8 +41,6 @@ const TOPIC_EXPIRATION_FINISHED = "places-expiration-finished";
 const TOPIC_IDLE_BEGIN = "idle";
 const TOPIC_IDLE_END = "active";
 const TOPIC_IDLE_DAILY = "idle-daily";
-const TOPIC_TESTING_MODE = "testing-mode";
-const TOPIC_TEST_INTERVAL_CHANGED = "test-interval-changed";
 
 // Branch for all expiration preferences.
 const PREF_BRANCH = "places.history.expiration.";
@@ -75,7 +72,7 @@ const DATABASE_TO_MEMORY_PERC = 4;
 const DATABASE_TO_DISK_PERC = 2;
 // Maximum size of the optimal database.  High-end hardware has plenty of
 // memory and disk space, but performances don't grow linearly.
-const DATABASE_MAX_SIZE = 62914560; // 60MiB
+const DATABASE_MAX_SIZE = 167772160; // 160MiB
 // If the physical memory size is bogus, fallback to this.
 const MEMSIZE_FALLBACK_BYTES = 268435456; // 256 MiB
 // If the disk available space is bogus, fallback to this.
@@ -103,8 +100,9 @@ const EXPIRE_AGGRESSIVITY_MULTIPLIER = 3;
 // This is the average size in bytes of an URI entry in the database.
 // Magic numbers are determined through analysis of the distribution of a ratio
 // between number of unique URIs and database size among our users.
-// Used as a fall back value when it's not possible to calculate the real value.
-const URIENTRY_AVG_SIZE = 600;
+// Based on these values we evaluate how many unique URIs we can handle before
+// starting expiring some.
+const URIENTRY_AVG_SIZE = 1600;
 
 // Seconds of idle time before starting a larger expiration step.
 // Notice during idle we stop the expiration timer since we don't want to hurt
@@ -124,17 +122,17 @@ const ANALYZE_PAGES_THRESHOLD = 100;
 // expiration will be more aggressive, to bring back history to a saner size.
 const OVERLIMIT_PAGES_THRESHOLD = 1000;
 
-const MSECS_PER_DAY = 86400000;
+const USECS_PER_DAY = 86400000000;
 const ANNOS_EXPIRE_POLICIES = [
   { bind: "expire_days",
     type: Ci.nsIAnnotationService.EXPIRE_DAYS,
-    time: 7 * 1000 * MSECS_PER_DAY },
+    time: 7 * USECS_PER_DAY },
   { bind: "expire_weeks",
     type: Ci.nsIAnnotationService.EXPIRE_WEEKS,
-    time: 30 * 1000 * MSECS_PER_DAY },
+    time: 30 * USECS_PER_DAY },
   { bind: "expire_months",
     type: Ci.nsIAnnotationService.EXPIRE_MONTHS,
-    time: 180 * 1000 * MSECS_PER_DAY },
+    time: 180 * USECS_PER_DAY },
 ];
 
 // When we expire we can use these limits:
@@ -171,25 +169,6 @@ const ACTION = {
 // The queries we use to expire.
 const EXPIRATION_QUERIES = {
 
-  // Some visits can be expired more often than others, cause they are less
-  // useful to the user and can pollute awesomebar results:
-  // 1. urls over 255 chars
-  // 2. redirect sources and downloads
-  // Note: due to the REPLACE option, this should be executed before
-  // QUERY_FIND_VISITS_TO_EXPIRE, that has a more complete result.
-  QUERY_FIND_EXOTIC_VISITS_TO_EXPIRE: {
-    sql: `INSERT INTO expiration_notify (v_id, url, guid, visit_date, reason)
-          SELECT v.id, h.url, h.guid, v.visit_date, "exotic"
-          FROM moz_historyvisits v
-          JOIN moz_places h ON h.id = v.place_id
-          WHERE visit_date < strftime('%s','now','localtime','start of day','-60 days','utc') * 1000000
-          AND ( LENGTH(h.url) > 255 OR v.visit_type = 7 )
-          ORDER BY v.visit_date ASC
-          LIMIT :limit_visits`,
-    actions: ACTION.TIMED_OVERLIMIT | ACTION.IDLE_DIRTY | ACTION.IDLE_DAILY |
-             ACTION.DEBUG
-  },
-
   // Finds visits to be expired when history is over the unique pages limit,
   // otherwise will return nothing.
   // This explicitly excludes any visits added in the last 7 days, to protect
@@ -218,15 +197,16 @@ const EXPIRATION_QUERIES = {
   },
 
   // Finds orphan URIs in the database.
-  // Notice we won't notify single removed URIs on History.clear(), so we don't
+  // Notice we won't notify single removed URIs on removeAllPages, so we don't
   // run this query in such a case, but just delete URIs.
   // This could run in the middle of adding a visit or bookmark to a new page.
   // In such a case since it is async, could end up expiring the orphan page
   // before it actually gets the new visit or bookmark.
   // Thus, since new pages get frecency -1, we filter on that.
   QUERY_FIND_URIS_TO_EXPIRE: {
-    sql: `INSERT INTO expiration_notify (p_id, url, guid, visit_date)
-          SELECT h.id, h.url, h.guid, h.last_visit_date
+    sql: `INSERT INTO expiration_notify
+            (p_id, url, guid, visit_date, expected_results)
+          SELECT h.id, h.url, h.guid, h.last_visit_date, :limit_uris
           FROM moz_places h
           LEFT JOIN moz_historyvisits v ON h.id = v.place_id
           WHERE h.last_visit_date IS NULL
@@ -259,15 +239,6 @@ const EXPIRATION_QUERIES = {
             LIMIT :limit_uris
           )`,
     actions: ACTION.CLEAR_HISTORY
-  },
-
-  // Hosts accumulated during the places delete are updated through a trigger
-  // (see nsPlacesTriggers.h).
-  QUERY_UPDATE_HOSTS: {
-    sql: `DELETE FROM moz_updatehosts_temp`,
-    actions: ACTION.CLEAR_HISTORY | ACTION.TIMED | ACTION.TIMED_OVERLIMIT |
-             ACTION.SHUTDOWN_DIRTY | ACTION.IDLE_DIRTY | ACTION.IDLE_DAILY |
-             ACTION.DEBUG
   },
 
   // Expire orphan icons from the database.
@@ -391,11 +362,8 @@ const EXPIRATION_QUERIES = {
   QUERY_SELECT_NOTIFICATIONS: {
     sql: `SELECT url, guid, MAX(visit_date) AS visit_date,
                  MAX(IFNULL(MIN(p_id, 1), MIN(v_id, 0))) AS whole_entry,
-                 MAX(expected_results) AS expected_results,
-                 (SELECT MAX(visit_date) FROM expiration_notify
-                  WHERE reason = "expired" AND url = n.url AND p_id ISNULL
-                 ) AS most_recent_expired_visit
-          FROM expiration_notify n
+                 expected_results
+          FROM expiration_notify
           GROUP BY url`,
     actions: ACTION.TIMED | ACTION.TIMED_OVERLIMIT | ACTION.SHUTDOWN_DIRTY |
              ACTION.IDLE_DIRTY | ACTION.IDLE_DAILY | ACTION.DEBUG
@@ -475,8 +443,7 @@ function nsPlacesExpiration()
        , url TEXT NOT NULL
        , guid TEXT NOT NULL
        , visit_date INTEGER
-       , expected_results INTEGER NOT NULL DEFAULT 0
-       , reason TEXT NOT NULL DEFAULT "expired"
+       , expected_results INTEGER NOT NULL
        )`);
     stmt.executeAsync();
     stmt.finalize();
@@ -484,6 +451,9 @@ function nsPlacesExpiration()
     return db;
   });
 
+  XPCOMUtils.defineLazyServiceGetter(this, "_sys",
+                                     "@mozilla.org/system-info;1",
+                                     "nsIPropertyBag2");
   XPCOMUtils.defineLazyServiceGetter(this, "_idle",
                                      "@mozilla.org/widget/idleservice;1",
                                      "nsIIdleService");
@@ -491,19 +461,18 @@ function nsPlacesExpiration()
   this._prefBranch = Cc["@mozilla.org/preferences-service;1"].
                      getService(Ci.nsIPrefService).
                      getBranch(PREF_BRANCH);
+  this._loadPrefs();
 
-  this._loadPrefs().then(() => {
-    // Observe our preferences branch for changes.
-    this._prefBranch.addObserver("", this, true);
-
-    // Create our expiration timer.
-    this._newTimer();
-  }, Cu.reportError);
+  // Observe our preferences branch for changes.
+  this._prefBranch.addObserver("", this, false);
 
   // Register topic observers.
-  Services.obs.addObserver(this, TOPIC_SHUTDOWN, true);
-  Services.obs.addObserver(this, TOPIC_DEBUG_START_EXPIRATION, true);
-  Services.obs.addObserver(this, TOPIC_IDLE_DAILY, true);
+  Services.obs.addObserver(this, TOPIC_SHUTDOWN, false);
+  Services.obs.addObserver(this, TOPIC_DEBUG_START_EXPIRATION, false);
+  Services.obs.addObserver(this, TOPIC_IDLE_DAILY, false);
+
+  // Create our expiration timer.
+  this._newTimer();
 }
 
 nsPlacesExpiration.prototype = {
@@ -513,12 +482,14 @@ nsPlacesExpiration.prototype = {
 
   observe: function PEX_observe(aSubject, aTopic, aData)
   {
-    if (this._shuttingDown) {
-      return;
-    }
-
     if (aTopic == TOPIC_SHUTDOWN) {
       this._shuttingDown = true;
+      Services.obs.removeObserver(this, TOPIC_SHUTDOWN);
+      Services.obs.removeObserver(this, TOPIC_DEBUG_START_EXPIRATION);
+      Services.obs.removeObserver(this, TOPIC_IDLE_DAILY);
+
+      this._prefBranch.removeObserver("", this);
+
       this.expireOnIdle = false;
 
       if (this._timer) {
@@ -538,12 +509,12 @@ nsPlacesExpiration.prototype = {
       this._finalizeInternalStatements();
     }
     else if (aTopic == TOPIC_PREF_CHANGED) {
-      this._loadPrefs().then(() => {
-        if (aData == PREF_INTERVAL_SECONDS) {
-          // Renew the timer with the new interval value.
-          this._newTimer();
-        }
-      }, Cu.reportError);
+      this._loadPrefs();
+
+      if (aData == PREF_INTERVAL_SECONDS) {
+        // Renew the timer with the new interval value.
+        this._newTimer();
+      }
     }
     else if (aTopic == TOPIC_DEBUG_START_EXPIRATION) {
       // The passed-in limit is the maximum number of visits to expire when
@@ -587,9 +558,6 @@ nsPlacesExpiration.prototype = {
     }
     else if (aTopic == TOPIC_IDLE_DAILY) {
       this._expireWithActionAndLimit(ACTION.IDLE_DAILY, LIMIT.LARGE);
-    }
-    else if (aTopic == TOPIC_TESTING_MODE) {
-      this._testingMode = true;
     }
   },
 
@@ -667,38 +635,17 @@ nsPlacesExpiration.prototype = {
 
     let row;
     while ((row = aResultSet.getNextRow())) {
-      // expected_results is set to the number of expected visits by
-      // QUERY_FIND_VISITS_TO_EXPIRE.  We decrease that counter for each found
-      // visit and if it reaches zero we mark the database as dirty, since all
-      // the expected visits were expired, so it's likely the next run will
-      // find more.
-      let expectedResults = row.getResultByName("expected_results");
-      if (expectedResults > 0) {
-        if (!("_expectedResultsCount" in this)) {
-          this._expectedResultsCount = expectedResults;
-        }
-        if (this._expectedResultsCount > 0) {
-          this._expectedResultsCount--;
-        }
-      }
+      if (!("_expectedResultsCount" in this))
+        this._expectedResultsCount = row.getResultByName("expected_results");
+      if (this._expectedResultsCount > 0)
+        this._expectedResultsCount--;
 
       let uri = Services.io.newURI(row.getResultByName("url"), null, null);
       let guid = row.getResultByName("guid");
       let visitDate = row.getResultByName("visit_date");
       let wholeEntry = row.getResultByName("whole_entry");
-      let mostRecentExpiredVisit = row.getResultByName("most_recent_expired_visit");
       let reason = Ci.nsINavHistoryObserver.REASON_EXPIRED;
       let observers = PlacesUtils.history.getObservers();
-
-      if (mostRecentExpiredVisit) {
-        let days = parseInt((Date.now() - (mostRecentExpiredVisit / 1000)) / MSECS_PER_DAY);
-        if (!this._mostRecentExpiredVisitDays) {
-          this._mostRecentExpiredVisitDays = days;
-        }
-        else if (days < this._mostRecentExpiredVisitDays) {
-          this._mostRecentExpiredVisitDays = days;
-        }
-      }
 
       // Dispatch expiration notifications to history.
       if (wholeEntry) {
@@ -720,19 +667,6 @@ nsPlacesExpiration.prototype = {
   handleCompletion: function PEX_handleCompletion(aReason)
   {
     if (aReason == Ci.mozIStorageStatementCallback.REASON_FINISHED) {
-
-      if (this._mostRecentExpiredVisitDays) {
-        try {
-          Services.telemetry
-                  .getHistogramById("PLACES_MOST_RECENT_EXPIRED_VISIT_DAYS")
-                  .add(this._mostRecentExpiredVisitDays);
-        } catch (ex) {
-          Components.utils.reportError("Unable to report telemetry.");
-        } finally {
-          delete this._mostRecentExpiredVisitDays;
-        }
-      }
-
       if ("_expectedResultsCount" in this) {
         // Adapt the aggressivity of steps based on the status of history.
         // A dirty history will return all the entries we are expecting bringing
@@ -787,9 +721,7 @@ nsPlacesExpiration.prototype = {
     }
     return aNewStatus;
   },
-  get status() {
-    return this._status;
-  },
+  get status() this._status,
 
   _isIdleObserver: false,
   _expireOnIdle: false,
@@ -814,31 +746,27 @@ nsPlacesExpiration.prototype = {
       this._expireOnIdle = aExpireOnIdle;
     return this._expireOnIdle;
   },
-  get expireOnIdle() {
-    return this._expireOnIdle;
-  },
+  get expireOnIdle() this._expireOnIdle,
 
-  _loadPrefs: Task.async(function* () {
+  _loadPrefs: function PEX__loadPrefs() {
     // Get the user's limit, if it was set.
     try {
       // We want to silently fail since getIntPref throws if it does not exist,
       // and use a default to fallback to.
       this._urisLimit = this._prefBranch.getIntPref(PREF_MAX_URIS);
-    } catch(ex) { /* User limit not set */ }
+    }
+    catch(e) {}
 
     if (this._urisLimit < 0) {
-      // Some testing code expects a pref change to be synchronous, so
-      // temporarily set this to a large value, while we asynchronously update
-      // to the correct value.
-      this._urisLimit = 300000;
+      // The preference did not exist or has a negative value.
+      // Calculate the number of unique places that may fit an optimal database
+      // size on this hardware.  If there are more than these unique pages,
+      // some will be expired.
 
-      // The user didn't specify a custom limit, so we calculate the number of
-      // unique places that may fit an optimal database size on this hardware.
-      // Oldest pages over this threshold will be expired.
       let memSizeBytes = MEMSIZE_FALLBACK_BYTES;
       try {
         // Limit the size on systems with small memory.
-         memSizeBytes = Services.sysinfo.getProperty("memsize");
+         memSizeBytes = this._sys.getProperty("memsize");
       } catch (ex) {}
       if (memSizeBytes <= 0) {
         memsize = MEMSIZE_FALLBACK_BYTES;
@@ -861,20 +789,7 @@ nsPlacesExpiration.prototype = {
         DATABASE_MAX_SIZE
       );
 
-      // Calculate avg size of a URI in the database.
-      let db = yield PlacesUtils.promiseDBConnection();
-      let pageSize = (yield db.execute(`PRAGMA page_size`))[0].getResultByIndex(0);
-      let pageCount = (yield db.execute(`PRAGMA page_count`))[0].getResultByIndex(0);
-      let freelistCount = (yield db.execute(`PRAGMA freelist_count`))[0].getResultByIndex(0);
-      let dbSize = (pageCount - freelistCount) * pageSize;
-      let uriCount = (yield db.execute(`SELECT count(*) FROM moz_places`))[0].getResultByIndex(0);
-      let avgURISize = Math.ceil(dbSize / uriCount);
-      // For new profiles this value may be too large, due to the Sqlite header,
-      // or Infinity when there are no pages.  Thus we must limit it.
-      if (avgURISize > (URIENTRY_AVG_SIZE * 3)) {
-        avgURISize = URIENTRY_AVG_SIZE;
-      }
-      this._urisLimit = Math.ceil(optimalDatabaseSize / avgURISize);
+      this._urisLimit = Math.ceil(optimalDatabaseSize / URIENTRY_AVG_SIZE);
     }
 
     // Expose the calculated limit to other components.
@@ -886,11 +801,11 @@ nsPlacesExpiration.prototype = {
       // We want to silently fail since getIntPref throws if it does not exist,
       // and use a default to fallback to.
       this._interval = this._prefBranch.getIntPref(PREF_INTERVAL_SECONDS);
-    } catch (ex) { /* User interval not set */ }
-    if (this._interval <= 0) {
-      this._interval = PREF_INTERVAL_SECONDS_NOTSET;
     }
-  }),
+    catch (e) {}
+    if (this._interval <= 0)
+      this._interval = PREF_INTERVAL_SECONDS_NOTSET;
+  },
 
   /**
    * Evaluates the real number of pages in the database and the value currently
@@ -963,8 +878,7 @@ nsPlacesExpiration.prototype = {
    */
   _finalizeInternalStatements: function PEX__finalizeInternalStatements()
   {
-    for (let queryType in this._cachedStatements) {
-      let stmt = this._cachedStatements[queryType];
+    for each (let stmt in this._cachedStatements) {
       stmt.finalize();
     }
   },
@@ -1013,12 +927,6 @@ nsPlacesExpiration.prototype = {
     // Bind the appropriate parameters.
     let params = stmt.params;
     switch (aQueryType) {
-      case "QUERY_FIND_EXOTIC_VISITS_TO_EXPIRE":
-        // Avoid expiring all visits in case of an unlimited debug expiration,
-        // just remove orphans instead.
-        params.limit_visits =
-          aLimit == LIMIT.DEBUG && baseLimit == -1 ? 0 : baseLimit;
-        break;
       case "QUERY_FIND_VISITS_TO_EXPIRE":
         params.max_uris = this._urisLimit;
         // Avoid expiring all visits in case of an unlimited debug expiration,
@@ -1078,17 +986,13 @@ nsPlacesExpiration.prototype = {
     if (this._timer)
       this._timer.cancel();
     if (this._shuttingDown)
-      return undefined;
+      return;
     let interval = this.status != STATUS.DIRTY ?
       this._interval * EXPIRE_AGGRESSIVITY_MULTIPLIER : this._interval;
 
     let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     timer.initWithCallback(this, interval * 1000,
                            Ci.nsITimer.TYPE_REPEATING_SLACK);
-    if (this._testingMode) {
-      Services.obs.notifyObservers(null, TOPIC_TEST_INTERVAL_CHANGED,
-                                   interval);
-    }
     return this._timer = timer;
   },
 
@@ -1104,12 +1008,11 @@ nsPlacesExpiration.prototype = {
   , Ci.nsINavHistoryObserver
   , Ci.nsITimerCallback
   , Ci.mozIStorageStatementCallback
-  , Ci.nsISupportsWeakReference
   ])
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Module Registration
 
-var components = [nsPlacesExpiration];
+let components = [nsPlacesExpiration];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

@@ -21,9 +21,7 @@ function PlacesTreeView(aFlatList, aOnOpenFlatContainer, aController) {
 }
 
 PlacesTreeView.prototype = {
-  get wrappedJSObject() {
-    return this;
-  },
+  get wrappedJSObject() this,
 
   __xulStore: null,
   get _xulStore() {
@@ -154,7 +152,7 @@ PlacesTreeView.prototype = {
     // A node is removed form the view either if it has no parent or if its
     // root-ancestor is not the root node (in which case that's the node
     // for which nodeRemoved was called).
-    let ancestors = Array.from(PlacesUtils.nodeAncestors(aNode));
+    let ancestors = [x for (x of PlacesUtils.nodeAncestors(aNode))];
     if (ancestors.length == 0 ||
         ancestors[ancestors.length - 1] != this._rootNode) {
       throw new Error("Removed node passed to _getRowForNode");
@@ -178,9 +176,8 @@ PlacesTreeView.prototype = {
 
     let row = -1;
     let useNodeIndex = typeof(aNodeIndex) == "number";
-    if (parent == this._rootNode) {
+    if (parent == this._rootNode)
       row = useNodeIndex ? aNodeIndex : this._rootNode.getChildIndex(aNode);
-    }
     else if (useNodeIndex && typeof(aParentRow) == "number") {
       // If we have both the row of the parent node, and the node's index, we
       // can avoid searching the rows array if the parent is a plain container.
@@ -230,7 +227,7 @@ PlacesTreeView.prototype = {
     if (aRow < 0) {
       return null;
     }
-
+  
     let node = this._rows[aRow];
     if (node !== undefined)
       return node;
@@ -279,7 +276,7 @@ PlacesTreeView.prototype = {
       return 0;
 
     // Inserting the new elements into the rows array in one shot (by
-    // Array.prototype.concat) is faster than resizing the array (by splice) on each loop
+    // Array.concat) is faster than resizing the array (by splice) on each loop
     // iteration.
     let cc = aContainer.childCount;
     let newElements = new Array(cc);
@@ -856,7 +853,8 @@ PlacesTreeView.prototype = {
         .then(aLivemark => {
           this._controller.cacheLivemarkInfo(aNode, aLivemark);
           let properties = this._cellProperties.get(aNode);
-          this._cellProperties.set(aNode, properties += " livemark");
+          this._cellProperties.set(aNode, properties += " livemark ");
+
           // The livemark attribute is set as a cell property on the title cell.
           this._invalidateCellValue(aNode, this.COLUMN_TYPE_TITLE);
         }, Components.utils.reportError);
@@ -882,25 +880,24 @@ PlacesTreeView.prototype = {
       if (queryOptions.excludeItems) {
         return;
       }
-      if (aNode.itemId != -1) { // run when there's a valid node id
-        PlacesUtils.livemarks.getLivemark({ id: aNode.itemId })
-          .then(aLivemark => {
-            let shouldInvalidate =
-              !this._controller.hasCachedLivemarkInfo(aNode);
-            this._controller.cacheLivemarkInfo(aNode, aLivemark);
-            if (aNewState == Components.interfaces.nsINavHistoryContainerResultNode.STATE_OPENED) {
-              aLivemark.registerForUpdates(aNode, this);
-              // Prioritize the current livemark.
-              aLivemark.reload();
-              PlacesUtils.livemarks.reloadLivemarks();
-              if (shouldInvalidate)
-                this.invalidateContainer(aNode);
-            }
-            else {
-              aLivemark.unregisterForUpdates(aNode);
-            }
-          }, () => undefined);
-      }
+
+      PlacesUtils.livemarks.getLivemark({ id: aNode.itemId })
+        .then(aLivemark => {
+          let shouldInvalidate = 
+            !this._controller.hasCachedLivemarkInfo(aNode);
+          this._controller.cacheLivemarkInfo(aNode, aLivemark);
+          if (aNewState == Components.interfaces.nsINavHistoryContainerResultNode.STATE_OPENED) {
+            aLivemark.registerForUpdates(aNode, this);
+            // Prioritize the current livemark.
+            aLivemark.reload();
+            PlacesUtils.livemarks.reloadLivemarks();
+            if (shouldInvalidate)
+              this.invalidateContainer(aNode);
+          }
+          else {
+            aLivemark.unregisterForUpdates(aNode);
+          }
+        }, () => undefined);
     }
   },
 
@@ -1070,9 +1067,7 @@ PlacesTreeView.prototype = {
     }
   },
 
-  get result() {
-    return this._result;
-  },
+  get result() this._result,
   set result(val) {
     if (this._result) {
       this._result.removeObserver(this);
@@ -1117,15 +1112,9 @@ PlacesTreeView.prototype = {
   },
 
   // nsITreeView
-  get rowCount() {
-    return this._rows.length;
-  },
-  get selection() {
-    return this._selection;
-  },
-  set selection(val) {
-    this._selection = val;
-  },
+  get rowCount() this._rows.length,
+  get selection() this._selection,
+  set selection(val) this._selection = val,
 
   getRowProperties: function() { return ""; },
 
@@ -1157,7 +1146,7 @@ PlacesTreeView.prototype = {
       properties = "";
       let itemId = node.itemId;
       let nodeType = node.type;
-      if (PlacesUtils.containerTypes.includes(nodeType)) {
+      if (PlacesUtils.containerTypes.indexOf(nodeType) != -1) {
         if (nodeType == Ci.nsINavHistoryResultNode.RESULT_TYPE_QUERY) {
           properties += " query";
           if (PlacesUtils.nodeIsTagQuery(node))
@@ -1176,8 +1165,7 @@ PlacesTreeView.prototype = {
             PlacesUtils.livemarks.getLivemark({ id: node.itemId })
               .then(aLivemark => {
                 this._controller.cacheLivemarkInfo(node, aLivemark);
-                let props = this._cellProperties.get(node);
-                this._cellProperties.set(node, props += " livemark");
+                properties += " livemark";
                 // The livemark attribute is set as a cell property on the title cell.
                 this._invalidateCellValue(node, this.COLUMN_TYPE_TITLE);
               }, () => undefined);
@@ -1406,9 +1394,7 @@ PlacesTreeView.prototype = {
     return false;
   },
 
-  getLevel: function(aRow) {
-    return this._getNodeForRow(aRow).indentLevel;
-  },
+  getLevel: function(aRow) this._getNodeForRow(aRow).indentLevel,
 
   getImageSrc: function PTV_getImageSrc(aRow, aColumn) {
     // Only the title column has an image.
@@ -1416,6 +1402,9 @@ PlacesTreeView.prototype = {
       return "";
 
     let node = this._getNodeForRow(aRow);
+    if (PlacesUtils.nodeIsURI(node) && node.icon)
+      return PlacesUtils.getImageURLForResolution(window, node.icon);
+
     return node.icon;
   },
 

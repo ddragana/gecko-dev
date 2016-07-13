@@ -10,14 +10,17 @@
 <div id="log">This test requires JavaScript.</div>
 
 <script>
-async_test(function() {
-  var frame = document.createElement("iframe");
-  frame.onload = this.step_func_done(init);
-  frame.src = "ParentNode-querySelector-All-content.html#target";
-  document.body.appendChild(frame);
-});
+var testType = TEST_QSA;
+var docType  = "html"; // Only run tests suitable for HTML
 
-function init(e) {
+var frame = document.createElement("iframe"),
+    doc;
+
+frame.onload = init;
+frame.src = "ParentNode-querySelector-All-content.html#target";
+document.body.appendChild(frame);
+
+function init() {
   /*
    * This test suite tests Selectors API methods in 4 different contexts:
    * 1. Document node
@@ -52,16 +55,13 @@ function init(e) {
    * The ParentNode-querySelector-All.js file contains all the common test functions for running each of the aforementioned tests
    */
 
-  var testType = TEST_QSA;
-  var docType  = "html"; // Only run tests suitable for HTML
-
   // Prepare the nodes for testing
-  var doc = e.target.contentDocument;                 // Document Node tests
+  doc = frame.contentDocument;                 // Document Node tests
 
   var element = doc.getElementById("root");   // In-document Element Node tests
 
   //Setup the namespace tests
-  setupSpecialElements(doc, element);
+  setupSpecialElements(element);
 
   var outOfScope = element.cloneNode(true);   // Append this to the body before running the in-document
                                                // Element tests, but after running the Document tests. This
@@ -89,10 +89,10 @@ function init(e) {
   runSpecialSelectorTests("Fragment", fragment);
   runSpecialSelectorTests("In-document Element", element);
 
-  verifyStaticList("Document", doc, doc);
-  verifyStaticList("Detached Element", doc, detached);
-  verifyStaticList("Fragment", doc, fragment);
-  verifyStaticList("In-document Element", doc, element);
+  verifyStaticList("Document", doc);
+  verifyStaticList("Detached Element", detached);
+  verifyStaticList("Fragment", fragment);
+  verifyStaticList("In-document Element", element);
 
   runInvalidSelectorTest("Document", doc, invalidSelectors);
   runInvalidSelectorTest("Detached Element", detached, invalidSelectors);

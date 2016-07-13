@@ -20,27 +20,40 @@ protected:
   ~RawReader();
 
 public:
-  nsresult ResetDecode(TrackSet aTracks) override;
-  bool DecodeAudioData() override;
+  virtual nsresult Init(MediaDecoderReader* aCloneDonor) override;
+  virtual nsresult ResetDecode() override;
+  virtual bool DecodeAudioData() override;
 
-  bool DecodeVideoFrame(bool &aKeyframeSkip,
-                        int64_t aTimeThreshold) override;
+  virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
+                                  int64_t aTimeThreshold) override;
 
-  nsresult ReadMetadata(MediaInfo* aInfo,
-                        MetadataTags** aTags) override;
-  RefPtr<SeekPromise> Seek(SeekTarget aTarget, int64_t aEndTime) override;
+  virtual bool HasAudio() override
+  {
+    return false;
+  }
 
-  media::TimeIntervals GetBuffered() override;
+  virtual bool HasVideo() override
+  {
+    return true;
+  }
+
+  virtual nsresult ReadMetadata(MediaInfo* aInfo,
+                                MetadataTags** aTags) override;
+  virtual nsRefPtr<SeekPromise>
+  Seek(int64_t aTime, int64_t aEndTime) override;
+
+  virtual media::TimeIntervals GetBuffered() override;
+
+  virtual bool IsMediaSeekable() override;
 
 private:
-  bool ReadFromResource(uint8_t *aBuf, uint32_t aLength);
+  bool ReadFromResource(MediaResource *aResource, uint8_t *aBuf, uint32_t aLength);
 
   RawVideoHeader mMetadata;
   uint32_t mCurrentFrame;
   double mFrameRate;
   uint32_t mFrameSize;
   nsIntRect mPicture;
-  MediaResourceIndex mResource;
 };
 
 } // namespace mozilla

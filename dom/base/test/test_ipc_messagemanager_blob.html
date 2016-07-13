@@ -26,7 +26,9 @@
           return;
         }
 
-        let reader = new FileReader();
+        let reader =
+          Components.classes["@mozilla.org/files/filereader;1"]
+                    .createInstance(Components.interfaces.nsIDOMFileReader);
         reader.addEventListener("load", function() {
           let response = reader.result == "this is a great success!" ?
                          message.json :
@@ -117,7 +119,7 @@
         mm.loadFrameScript("data:,(" + childFrameScript.toString() + ")();",
                            false);
 
-        for (let message of messages) {
+        for each (let message in messages) {
           mm.sendAsyncMessage("test:ipcClonedMessage", message);
         }
       });

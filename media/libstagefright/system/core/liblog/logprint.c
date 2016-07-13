@@ -267,6 +267,7 @@ AndroidLogPrintFormat android_log_formatFromString(const char * formatString)
 int android_log_addFilterRule(AndroidLogFormat *p_format,
         const char *filterExpression)
 {
+    size_t i=0;
     size_t tagNameLength;
     android_LogPriority pri = ANDROID_LOG_DEFAULT;
 
@@ -745,6 +746,7 @@ char *android_log_formatLogLine (
 #endif
     struct tm* ptm;
     char timeBuf[32];
+    char headerBuf[128];
     char prefixBuf[128], suffixBuf[128];
     char priChar;
     int prefixSuffixIsHeaderFooter = 0;
@@ -845,6 +847,7 @@ char *android_log_formatLogLine (
 
     UNINDENTED_BLOCK_START
     size_t numLines;
+    size_t i;
     char *p;
     size_t bufferSize;
     const char *pm;

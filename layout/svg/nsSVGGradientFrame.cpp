@@ -14,17 +14,17 @@
 #include "nsContentUtils.h"
 #include "nsSVGEffects.h"
 #include "nsSVGAnimatedTransformList.h"
+#include "gfxColor.h"
 
 // XXX Tight coupling with content classes ahead!
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::gfx;
 
 //----------------------------------------------------------------------
 // Helper classes
 
-class MOZ_RAII nsSVGGradientFrame::AutoGradientReferencer
+class MOZ_STACK_CLASS nsSVGGradientFrame::AutoGradientReferencer
 {
 public:
   explicit AutoGradientReferencer(nsSVGGradientFrame *aFrame
@@ -48,12 +48,14 @@ private:
 //----------------------------------------------------------------------
 // Implementation
 
-nsSVGGradientFrame::nsSVGGradientFrame(nsStyleContext* aContext)
-  : nsSVGPaintServerFrame(aContext)
-  , mLoopFlag(false)
-  , mNoHRefURI(false)
+nsSVGGradientFrame::nsSVGGradientFrame(nsStyleContext* aContext) :
+  nsSVGGradientFrameBase(aContext),
+  mLoopFlag(false),
+  mNoHRefURI(false)
 {
 }
+
+NS_IMPL_FRAMEARENA_HELPERS(nsSVGGradientFrame)
 
 //----------------------------------------------------------------------
 // nsIFrame methods:
@@ -71,14 +73,14 @@ nsSVGGradientFrame::AttributeChanged(int32_t         aNameSpaceID,
   } else if (aNameSpaceID == kNameSpaceID_XLink &&
              aAttribute == nsGkAtoms::href) {
     // Blow away our reference, if any
-    Properties().Delete(nsSVGEffects::HrefAsPaintingProperty());
+    Properties().Delete(nsSVGEffects::HrefProperty());
     mNoHRefURI = false;
     // And update whoever references us
     nsSVGEffects::InvalidateDirectRenderingObservers(this);
   }
 
-  return nsSVGPaintServerFrame::AttributeChanged(aNameSpaceID,
-                                                 aAttribute, aModType);
+  return nsSVGGradientFrameBase::AttributeChanged(aNameSpaceID,
+                                                  aAttribute, aModType);
 }
 
 //----------------------------------------------------------------------
@@ -225,7 +227,7 @@ nsSVGGradientFrame::GetPaintServerPattern(nsIFrame* aSource,
                 aSource->GetParent() : aSource;
   }
 
-  AutoTArray<nsIFrame*,8> stopFrames;
+  nsAutoTArray<nsIFrame*,8> stopFrames;
   GetStopFrames(&stopFrames);
 
   uint32_t nStops = stopFrames.Length();
@@ -233,7 +235,7 @@ nsSVGGradientFrame::GetPaintServerPattern(nsIFrame* aSource,
   // SVG specification says that no stops should be treated like
   // the corresponding fill or stroke had "none" specified.
   if (nStops == 0) {
-    RefPtr<gfxPattern> pattern = new gfxPattern(Color());
+    nsRefPtr<gfxPattern> pattern = new gfxPattern(gfxRGBA(0, 0, 0, 0));
     return pattern.forget();
   }
 
@@ -243,9 +245,12 @@ nsSVGGradientFrame::GetPaintServerPattern(nsIFrame* aSource,
     float stopOpacity = stopFrames[nStops-1]->StyleSVGReset()->mStopOpacity;
     nscolor stopColor = stopFrames[nStops-1]->StyleSVGReset()->mStopColor;
 
-    Color stopColor2 = Color::FromABGR(stopColor);
-    stopColor2.a *= stopOpacity * aGraphicOpacity;
-    RefPtr<gfxPattern> pattern = new gfxPattern(stopColor2);
+    nsRefPtr<gfxPattern> pattern = new gfxPattern(
+                           gfxRGBA(NS_GET_R(stopColor)/255.0,
+                                   NS_GET_G(stopColor)/255.0,
+                                   NS_GET_B(stopColor)/255.0,
+                                   NS_GET_A(stopColor)/255.0 *
+                                     stopOpacity * aGraphicOpacity));
     return pattern.forget();
   }
 
@@ -270,17 +275,17 @@ nsSVGGradientFrame::GetPaintServerPattern(nsIFrame* aSource,
     return nullptr;
   }
 
-  RefPtr<gfxPattern> gradient = CreateGradient();
+  nsRefPtr<gfxPattern> gradient = CreateGradient();
   if (!gradient || gradient->CairoStatus())
     return nullptr;
 
   uint16_t aSpread = GetSpreadMethod();
   if (aSpread == SVG_SPREADMETHOD_PAD)
-    gradient->SetExtend(ExtendMode::CLAMP);
+    gradient->SetExtend(gfxPattern::EXTEND_PAD);
   else if (aSpread == SVG_SPREADMETHOD_REFLECT)
-    gradient->SetExtend(ExtendMode::REFLECT);
+    gradient->SetExtend(gfxPattern::EXTEND_REFLECT);
   else if (aSpread == SVG_SPREADMETHOD_REPEAT)
-    gradient->SetExtend(ExtendMode::REPEAT);
+    gradient->SetExtend(gfxPattern::EXTEND_REPEAT);
 
   gradient->SetMatrix(patternMatrix);
 
@@ -298,9 +303,12 @@ nsSVGGradientFrame::GetPaintServerPattern(nsIFrame* aSource,
     else
       lastOffset = offset;
 
-    Color stopColor2 = Color::FromABGR(stopColor);
-    stopColor2.a *= stopOpacity * aGraphicOpacity;
-    gradient->AddColorStop(offset, stopColor2);
+    gradient->AddColorStop(offset,
+                           gfxRGBA(NS_GET_R(stopColor)/255.0,
+                                   NS_GET_G(stopColor)/255.0,
+                                   NS_GET_B(stopColor)/255.0,
+                                   NS_GET_A(stopColor)/255.0 *
+                                     stopOpacity * aGraphicOpacity));
   }
 
   return gradient.forget();
@@ -314,8 +322,8 @@ nsSVGGradientFrame::GetReferencedGradient()
   if (mNoHRefURI)
     return nullptr;
 
-  nsSVGPaintingProperty *property =
-    Properties().Get(nsSVGEffects::HrefAsPaintingProperty());
+  nsSVGPaintingProperty *property = static_cast<nsSVGPaintingProperty*>
+    (Properties().Get(nsSVGEffects::HrefProperty()));
 
   if (!property) {
     // Fetch our gradient element's xlink:href attribute
@@ -331,11 +339,10 @@ nsSVGGradientFrame::GetReferencedGradient()
     nsCOMPtr<nsIURI> targetURI;
     nsCOMPtr<nsIURI> base = mContent->GetBaseURI();
     nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
-                                              mContent->GetUncomposedDoc(), base);
+                                              mContent->GetCurrentDoc(), base);
 
     property =
-      nsSVGEffects::GetPaintingProperty(targetURI, this,
-                                        nsSVGEffects::HrefAsPaintingProperty());
+      nsSVGEffects::GetPaintingProperty(targetURI, this, nsSVGEffects::HrefProperty());
     if (!property)
       return nullptr;
   }
@@ -406,7 +413,7 @@ nsSVGLinearGradientFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::linearGradient),
                "Content is not an SVG linearGradient");
 
-  nsSVGGradientFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGLinearGradientFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -475,7 +482,8 @@ nsSVGLinearGradientFrame::GetLinearGradientWithLength(uint32_t aIndex,
     return thisElement;
   }
 
-  return nsSVGGradientFrame::GetLinearGradientWithLength(aIndex, aDefault);
+  return nsSVGLinearGradientFrameBase::GetLinearGradientWithLength(aIndex,
+                                                                   aDefault);
 }
 
 bool
@@ -497,7 +505,7 @@ nsSVGLinearGradientFrame::CreateGradient()
   x2 = GetLengthValue(dom::SVGLinearGradientElement::ATTR_X2);
   y2 = GetLengthValue(dom::SVGLinearGradientElement::ATTR_Y2);
 
-  RefPtr<gfxPattern> pattern = new gfxPattern(x1, y1, x2, y2);
+  nsRefPtr<gfxPattern> pattern = new gfxPattern(x1, y1, x2, y2);
   return pattern.forget();
 }
 
@@ -514,7 +522,7 @@ nsSVGRadialGradientFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::radialGradient),
                "Content is not an SVG radialGradient");
 
-  nsSVGGradientFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGRadialGradientFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -601,7 +609,8 @@ nsSVGRadialGradientFrame::GetRadialGradientWithLength(uint32_t aIndex,
     return thisElement;
   }
 
-  return nsSVGGradientFrame::GetRadialGradientWithLength(aIndex, aDefault);
+  return nsSVGRadialGradientFrameBase::GetRadialGradientWithLength(aIndex,
+                                                                   aDefault);
 }
 
 bool
@@ -641,7 +650,7 @@ nsSVGRadialGradientFrame::CreateGradient()
     }
   }
 
-  RefPtr<gfxPattern> pattern = new gfxPattern(fx, fy, 0, cx, cy, r);
+  nsRefPtr<gfxPattern> pattern = new gfxPattern(fx, fy, 0, cx, cy, r);
   return pattern.forget();
 }
 

@@ -12,11 +12,10 @@
 #include "nsUXThemeData.h"
 #include "nsIDOMSimpleGestureEvent.h"
 #include "nsIDOMWheelEvent.h"
+#include "mozilla/Constants.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TouchEvents.h"
-
-#include <cmath>
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -119,7 +118,7 @@ bool nsWinGesture::InitLibrary()
 #define GCOUNT 5
 
 bool nsWinGesture::SetWinGestureSupport(HWND hWnd,
-                     WidgetGestureNotifyEvent::PanDirection aDirection)
+                     WidgetGestureNotifyEvent::ePanDirection aDirection)
 {
   if (!getGestureInfo)
     return false;
@@ -314,7 +313,8 @@ nsWinGesture::ProcessGestureMessage(HWND hWnd, WPARAM wParam, LPARAM lParam,
   coord = gi.ptsLocation;
   coord.ScreenToClient(hWnd);
 
-  evt.mRefPoint = LayoutDeviceIntPoint(coord.x, coord.y);
+  evt.refPoint.x = coord.x;
+  evt.refPoint.y = coord.y;
 
   // Multiple gesture can occur at the same time so gesture state
   // info can't be shared.
@@ -334,23 +334,23 @@ nsWinGesture::ProcessGestureMessage(HWND hWnd, WPARAM wParam, LPARAM lParam,
         // The low 32 bits are the distance in pixels.
         mZoomIntermediate = (float)gi.ullArguments;
 
-        evt.mMessage = eMagnifyGestureStart;
-        evt.mDelta = 0.0;
+        evt.message = NS_SIMPLE_GESTURE_MAGNIFY_START;
+        evt.delta = 0.0;
       }
       else if (gi.dwFlags & GF_END) {
         // Send a zoom end event, the delta is the change
         // in touch points.
-        evt.mMessage = eMagnifyGesture;
+        evt.message = NS_SIMPLE_GESTURE_MAGNIFY;
         // (positive for a "zoom in")
-        evt.mDelta = -1.0 * (mZoomIntermediate - (float)gi.ullArguments);
+        evt.delta = -1.0 * (mZoomIntermediate - (float)gi.ullArguments);
         mZoomIntermediate = (float)gi.ullArguments;
       }
       else {
         // Send a zoom intermediate event, the delta is the change
         // in touch points.
-        evt.mMessage = eMagnifyGestureUpdate;
+        evt.message = NS_SIMPLE_GESTURE_MAGNIFY_UPDATE;
         // (positive for a "zoom in")
-        evt.mDelta = -1.0 * (mZoomIntermediate - (float)gi.ullArguments);
+        evt.delta = -1.0 * (mZoomIntermediate - (float)gi.ullArguments);
         mZoomIntermediate = (float)gi.ullArguments;
       }
     }
@@ -375,37 +375,40 @@ nsWinGesture::ProcessGestureMessage(HWND hWnd, WPARAM wParam, LPARAM lParam,
           degrees = mRotateIntermediate = 0.0;
       }
 
-      evt.mDirection = 0;
-      evt.mDelta = degrees - mRotateIntermediate;
+      evt.direction = 0;
+      evt.delta = degrees - mRotateIntermediate;
       mRotateIntermediate = degrees;
 
-      if (evt.mDelta > 0)
-        evt.mDirection = nsIDOMSimpleGestureEvent::ROTATION_COUNTERCLOCKWISE;
-      else if (evt.mDelta < 0)
-        evt.mDirection = nsIDOMSimpleGestureEvent::ROTATION_CLOCKWISE;
+      if (evt.delta > 0)
+        evt.direction = nsIDOMSimpleGestureEvent::ROTATION_COUNTERCLOCKWISE;
+      else if (evt.delta < 0)
+        evt.direction = nsIDOMSimpleGestureEvent::ROTATION_CLOCKWISE;
 
-      if (gi.dwFlags & GF_BEGIN) {
-        evt.mMessage = eRotateGestureStart;
-      } else if (gi.dwFlags & GF_END) {
-        evt.mMessage = eRotateGesture;
-      } else {
-        evt.mMessage = eRotateGestureUpdate;
-      }
+      if (gi.dwFlags & GF_BEGIN)
+        evt.message = NS_SIMPLE_GESTURE_ROTATE_START;
+      else if (gi.dwFlags & GF_END)
+        evt.message = NS_SIMPLE_GESTURE_ROTATE;
+      else
+        evt.message = NS_SIMPLE_GESTURE_ROTATE_UPDATE;
     }
     break;
 
     case GID_TWOFINGERTAP:
-      // Normally maps to "restore" from whatever you may have recently changed.
-      // A simple double click.
-      evt.mMessage = eTapGesture;
-      evt.mClickCount = 1;
-      break;
+    {
+      // Normally maps to "restore" from whatever you may have recently changed. A simple
+      // double click.
+      evt.message = NS_SIMPLE_GESTURE_TAP;
+      evt.clickCount = 1;
+    }
+    break;
 
     case GID_PRESSANDTAP:
+    {
       // Two finger right click. Defaults to right click if it falls through.
-      evt.mMessage = ePressTapGesture;
-      evt.mClickCount = 1;
-      break;
+      evt.message = NS_SIMPLE_GESTURE_PRESSTAP;
+      evt.clickCount = 1;
+    }
+    break;
   }
 
   return true;
@@ -564,26 +567,27 @@ nsWinGesture::PanFeedbackFinalize(HWND hWnd, bool endFeedback)
 bool
 nsWinGesture::PanDeltaToPixelScroll(WidgetWheelEvent& aWheelEvent)
 {
-  aWheelEvent.mDeltaX = aWheelEvent.mDeltaY = aWheelEvent.mDeltaZ = 0.0;
-  aWheelEvent.mLineOrPageDeltaX = aWheelEvent.mLineOrPageDeltaY = 0;
+  aWheelEvent.deltaX = aWheelEvent.deltaY = aWheelEvent.deltaZ = 0.0;
+  aWheelEvent.lineOrPageDeltaX = aWheelEvent.lineOrPageDeltaY = 0;
 
-  aWheelEvent.mRefPoint = LayoutDeviceIntPoint(mPanRefPoint.x, mPanRefPoint.y);
-  aWheelEvent.mDeltaMode = nsIDOMWheelEvent::DOM_DELTA_PIXEL;
-  aWheelEvent.mScrollType = WidgetWheelEvent::SCROLL_SYNCHRONOUSLY;
+  aWheelEvent.refPoint.x = mPanRefPoint.x;
+  aWheelEvent.refPoint.y = mPanRefPoint.y;
+  aWheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_PIXEL;
+  aWheelEvent.scrollType = WidgetWheelEvent::SCROLL_SYNCHRONOUSLY;
   aWheelEvent.mIsNoLineOrPageDelta = true;
 
-  aWheelEvent.mOverflowDeltaX = 0.0;
-  aWheelEvent.mOverflowDeltaY = 0.0;
+  aWheelEvent.overflowDeltaX = 0.0;
+  aWheelEvent.overflowDeltaY = 0.0;
 
   // Don't scroll the view if we are currently at a bounds, or, if we are
   // panning back from a max feedback position. This keeps the original drag point
   // constant.
   if (!mXAxisFeedback) {
-    aWheelEvent.mDeltaX = mPixelScrollDelta.x;
+    aWheelEvent.deltaX = mPixelScrollDelta.x;
   }
   if (!mYAxisFeedback) {
-    aWheelEvent.mDeltaY = mPixelScrollDelta.y;
+    aWheelEvent.deltaY = mPixelScrollDelta.y;
   }
 
-  return (aWheelEvent.mDeltaX != 0 || aWheelEvent.mDeltaY != 0);
+  return (aWheelEvent.deltaX != 0 || aWheelEvent.deltaY != 0);
 }

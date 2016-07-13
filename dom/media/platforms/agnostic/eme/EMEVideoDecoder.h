@@ -23,19 +23,36 @@ public:
    : VideoCallbackAdapter(aCallback, aVideoInfo, aImageContainer)
   {}
 
-  void Error(GMPErr aErr) override;
+  virtual void Error(GMPErr aErr) override;
 };
 
 class EMEVideoDecoder : public GMPVideoDecoder {
 public:
-  EMEVideoDecoder(CDMProxy* aProxy, const GMPVideoDecoderParams& aParams);
+  EMEVideoDecoder(CDMProxy* aProxy,
+                  const VideoInfo& aConfig,
+                  layers::LayersBackend aLayersBackend,
+                  layers::ImageContainer* aImageContainer,
+                  TaskQueue* aTaskQueue,
+                  MediaDataDecoderCallbackProxy* aCallback)
+   : GMPVideoDecoder(aConfig,
+                     aLayersBackend,
+                     aImageContainer,
+                     aTaskQueue,
+                     aCallback,
+                     new EMEVideoCallbackAdapter(aCallback,
+                                                 VideoInfo(aConfig.mDisplay.width,
+                                                           aConfig.mDisplay.height),
+                                                 aImageContainer))
+   , mProxy(aProxy)
+  {
+  }
 
 private:
-  void InitTags(nsTArray<nsCString>& aTags) override;
-  nsCString GetNodeId() override;
-  GMPUniquePtr<GMPVideoEncodedFrame> CreateFrame(MediaRawData* aSample) override;
+  virtual void InitTags(nsTArray<nsCString>& aTags) override;
+  virtual nsCString GetNodeId() override;
+  virtual GMPUniquePtr<GMPVideoEncodedFrame> CreateFrame(MediaRawData* aSample) override;
 
-  RefPtr<CDMProxy> mProxy;
+  nsRefPtr<CDMProxy> mProxy;
 };
 
 } // namespace mozilla

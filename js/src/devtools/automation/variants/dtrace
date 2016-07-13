@@ -1,3 +1,4 @@
+--enable-threadsafe
 --enable-optimize
 --enable-debug
 --enable-dtrace

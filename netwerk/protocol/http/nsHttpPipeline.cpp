@@ -12,11 +12,12 @@
 #include "nsISocketTransport.h"
 #include "nsIPipe.h"
 #include "nsCOMPtr.h"
-#include "nsSocketTransportService2.h"
 #include <algorithm>
 
 #ifdef DEBUG
 #include "prthread.h"
+// defined by the socket transport service while active
+extern PRThread *gSocketThread;
 #endif
 
 namespace mozilla {
@@ -88,13 +89,12 @@ nsHttpPipeline::~nsHttpPipeline()
 nsresult
 nsHttpPipeline::AddTransaction(nsAHttpTransaction *trans)
 {
-    LOG(("nsHttpPipeline::AddTransaction [this=%p trans=%p]\n", this, trans));
+    LOG(("nsHttpPipeline::AddTransaction [this=%p trans=%x]\n", this, trans));
 
     if (mRequestQ.Length() || mResponseQ.Length())
         mUtilizedPipeline = true;
 
-    // A reference to the actual transaction is held by the pipeline transaction
-    // in either the request or response queue
+    NS_ADDREF(trans);
     mRequestQ.AppendElement(trans);
     uint32_t qlen = PipelineDepth();
 
@@ -181,7 +181,7 @@ nsHttpPipeline::OnHeadersAvailable(nsAHttpTransaction *trans,
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     MOZ_ASSERT(mConnection, "no connection");
 
-    RefPtr<nsHttpConnectionInfo> ci;
+    nsRefPtr<nsHttpConnectionInfo> ci;
     GetConnectionInfo(getter_AddRefs(ci));
     MOZ_ASSERT(ci);
 
@@ -202,28 +202,32 @@ nsHttpPipeline::OnHeadersAvailable(nsAHttpTransaction *trans,
 }
 
 void
-nsHttpPipeline::CloseTransaction(nsAHttpTransaction *aTrans, nsresult reason)
+nsHttpPipeline::CloseTransaction(nsAHttpTransaction *trans, nsresult reason)
 {
-    LOG(("nsHttpPipeline::CloseTransaction [this=%p trans=%p reason=%x]\n",
-        this, aTrans, reason));
+    LOG(("nsHttpPipeline::CloseTransaction [this=%p trans=%x reason=%x]\n",
+        this, trans, reason));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     MOZ_ASSERT(NS_FAILED(reason), "expecting failure code");
 
     // the specified transaction is to be closed with the given "reason"
-    RefPtr<nsAHttpTransaction> trans(aTrans);
+
     int32_t index;
     bool killPipeline = false;
 
-    if ((index = mRequestQ.IndexOf(trans)) >= 0) {
+    index = mRequestQ.IndexOf(trans);
+    if (index >= 0) {
         if (index == 0 && mRequestIsPartial) {
             // the transaction is in the request queue.  check to see if any of
             // its data has been written out yet.
             killPipeline = true;
         }
         mRequestQ.RemoveElementAt(index);
-    } else if ((index = mResponseQ.IndexOf(trans)) >= 0) {
-        mResponseQ.RemoveElementAt(index);
+    }
+    else {
+        index = mResponseQ.IndexOf(trans);
+        if (index >= 0)
+            mResponseQ.RemoveElementAt(index);
         // while we could avoid killing the pipeline if this transaction is the
         // last transaction in the pipeline, there doesn't seem to be that much
         // value in doing so.  most likely if this transaction is going away,
@@ -236,7 +240,7 @@ nsHttpPipeline::CloseTransaction(nsAHttpTransaction *aTrans, nsresult reason)
     DontReuse();
 
     trans->Close(reason);
-    trans = nullptr;
+    NS_RELEASE(trans);
 
     if (killPipeline) {
         // reschedule anything from this pipeline onto a different connection
@@ -323,7 +327,7 @@ nsHttpPipeline::PushBack(const char *data, uint32_t length)
     return NS_OK;
 }
 
-already_AddRefed<nsHttpConnection>
+nsHttpConnection *
 nsHttpPipeline::TakeHttpConnection()
 {
     if (mConnection)
@@ -369,7 +373,7 @@ nsHttpPipeline::Http1xTransactionCount()
 
 nsresult
 nsHttpPipeline::TakeSubTransactions(
-    nsTArray<RefPtr<nsAHttpTransaction> > &outTransactions)
+    nsTArray<nsRefPtr<nsAHttpTransaction> > &outTransactions)
 {
     LOG(("nsHttpPipeline::TakeSubTransactions [this=%p]\n", this));
 
@@ -379,10 +383,11 @@ nsHttpPipeline::TakeSubTransactions(
     int32_t i, count = mRequestQ.Length();
     for (i = 0; i < count; ++i) {
         nsAHttpTransaction *trans = Request(i);
-        // set the transaction connection object back to the underlying
+        // set the transaction conneciton object back to the underlying
         // nsHttpConnectionHandle
         trans->SetConnection(mConnection);
         outTransactions.AppendElement(trans);
+        NS_RELEASE(trans);
     }
     mRequestQ.Clear();
 
@@ -397,7 +402,7 @@ nsHttpPipeline::TakeSubTransactions(
 void
 nsHttpPipeline::SetConnection(nsAHttpConnection *conn)
 {
-    LOG(("nsHttpPipeline::SetConnection [this=%p conn=%p]\n", this, conn));
+    LOG(("nsHttpPipeline::SetConnection [this=%p conn=%x]\n", this, conn));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     MOZ_ASSERT(!conn || !mConnection, "already have a connection");
@@ -408,7 +413,7 @@ nsHttpPipeline::SetConnection(nsAHttpConnection *conn)
 nsAHttpConnection *
 nsHttpPipeline::Connection()
 {
-    LOG(("nsHttpPipeline::Connection [this=%p conn=%p]\n", this, mConnection.get()));
+    LOG(("nsHttpPipeline::Connection [this=%p conn=%x]\n", this, mConnection.get()));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     return mConnection;
@@ -677,7 +682,8 @@ nsHttpPipeline::WriteSegments(nsAHttpSegmentWriter *writer,
             rv = NS_BASE_STREAM_WOULD_BLOCK;
         else
             rv = NS_BASE_STREAM_CLOSED;
-    } else {
+    }
+    else {
         //
         // ask the transaction to consume data from the connection.
         // PushBack may be called recursively.
@@ -689,6 +695,7 @@ nsHttpPipeline::WriteSegments(nsAHttpSegmentWriter *writer,
 
             // Release the transaction if it is not IsProxyConnectInProgress()
             if (trans == Response(0)) {
+                NS_RELEASE(trans);
                 mResponseQ.RemoveElementAt(0);
                 mResponseIsPartial = false;
                 ++mHttp1xTransactionCount;
@@ -696,7 +703,7 @@ nsHttpPipeline::WriteSegments(nsAHttpSegmentWriter *writer,
 
             // ask the connection manager to add additional transactions
             // to our pipeline.
-            RefPtr<nsHttpConnectionInfo> ci;
+            nsRefPtr<nsHttpConnectionInfo> ci;
             GetConnectionInfo(getter_AddRefs(ci));
             if (ci)
                 gHttpHandler->ConnMgr()->ProcessPendingQForEntry(ci);
@@ -706,7 +713,7 @@ nsHttpPipeline::WriteSegments(nsAHttpSegmentWriter *writer,
     }
 
     if (mPushBackLen) {
-        nsHttpPushBackWriter pushBackWriter(mPushBackBuf, mPushBackLen);
+        nsHttpPushBackWriter writer(mPushBackBuf, mPushBackLen);
         uint32_t len = mPushBackLen, n;
         mPushBackLen = 0;
 
@@ -721,7 +728,7 @@ nsHttpPipeline::WriteSegments(nsAHttpSegmentWriter *writer,
         // the push back buffer is never larger than NS_HTTP_SEGMENT_SIZE,
         // so we are guaranteed that the next response will eat the entire
         // push back buffer (even though it might again call PushBack).
-        rv = WriteSegments(&pushBackWriter, len, &n);
+        rv = WriteSegments(&writer, len, &n);
     }
 
     return rv;
@@ -752,6 +759,7 @@ nsHttpPipeline::CancelPipeline(nsresult originalReason)
             trans->Close(originalReason);
         else
             trans->Close(NS_ERROR_NET_RESET);
+        NS_RELEASE(trans);
     }
     mRequestQ.Clear();
 
@@ -762,6 +770,7 @@ nsHttpPipeline::CancelPipeline(nsresult originalReason)
     for (i = 1; i < respLen; ++i) {
         trans = Response(i);
         trans->Close(NS_ERROR_NET_RESET);
+        NS_RELEASE(trans);
     }
 
     if (respLen > 1)
@@ -787,7 +796,7 @@ nsHttpPipeline::Close(nsresult reason)
     mStatus = reason;
     mClosed = true;
 
-    RefPtr<nsHttpConnectionInfo> ci;
+    nsRefPtr<nsHttpConnectionInfo> ci;
     GetConnectionInfo(getter_AddRefs(ci));
     uint32_t numRescheduled = CancelPipeline(reason);
 
@@ -817,6 +826,7 @@ nsHttpPipeline::Close(nsresult reason)
         trans->Close(reason);
     }
 
+    NS_RELEASE(trans);
     mResponseQ.Clear();
 }
 
@@ -848,7 +858,7 @@ nsHttpPipeline::FillSendBuf()
 
     uint32_t n;
     uint64_t avail;
-    RefPtr<nsAHttpTransaction> trans;
+    nsAHttpTransaction *trans;
     nsITransport *transport = Transport();
 
     while ((trans = Request(0)) != nullptr) {

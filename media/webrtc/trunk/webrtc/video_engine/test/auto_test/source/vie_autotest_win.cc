@@ -19,6 +19,7 @@
 
 #include "webrtc/engine_configurations.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 
 #include <windows.h>
 
@@ -46,8 +47,9 @@ ViEAutoTestWindowManager::ViEAutoTestWindowManager()
     : _window1(NULL),
       _window2(NULL),
       _terminate(false),
-      _eventThread(webrtc::ThreadWrapper::CreateThread(
-          EventProcess, this, "ViEAutotestEventThread")),
+      _eventThread(*webrtc::ThreadWrapper::CreateThread(
+          EventProcess, this, webrtc::kNormalPriority,
+          "ViEAutotestEventThread")),
       _crit(*webrtc::CriticalSectionWrapper::CreateCriticalSection()),
       _hwnd1(NULL),
       _hwnd2(NULL),
@@ -84,7 +86,8 @@ int ViEAutoTestWindowManager::CreateWindows(AutoTestRect window1Size,
   memcpy(_hwnd1Title, window1Title, TITLE_LENGTH);
   memcpy(_hwnd2Title, window2Title, TITLE_LENGTH);
 
-  _eventThread->Start();
+  unsigned int tId = 0;
+  _eventThread.Start(tId);
 
   do {
     _crit.Enter();
@@ -99,11 +102,14 @@ int ViEAutoTestWindowManager::CreateWindows(AutoTestRect window1Size,
 }
 
 int ViEAutoTestWindowManager::TerminateWindows() {
+  _eventThread.SetNotAlive();
+
   _terminate = true;
-  _eventThread->Stop();
-  _crit.Enter();
-  _eventThread.reset();
-  _crit.Leave();
+  if (_eventThread.Stop()) {
+    _crit.Enter();
+    delete &_eventThread;
+    _crit.Leave();
+  }
 
   return 0;
 }

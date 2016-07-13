@@ -1,3 +1,5 @@
+var test = `
+
 let derivedInstance;
 
 class base {
@@ -24,7 +26,7 @@ class base {
 }
 
 class derived extends base {
-    constructor() { super(); }
+    constructor() { }
 
     // |super| actually checks the chain, not |this|
     method() { throw "FAIL"; }
@@ -72,6 +74,11 @@ derivedInstance = new derived();
 derivedInstance.test();
 derivedInstance.testInEval();
 derivedInstance.testInArrow();
+
+`;
+
+if (classesEnabled())
+    eval(test);
 
 if (typeof reportCompare === 'function')
     reportCompare(0,0,"OK");

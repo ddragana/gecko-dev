@@ -31,15 +31,27 @@
   var oldMessageCount;
   var waitCount = 0;
 
+  function setCachePref(enabled) {
+    var prefBranch = SpecialPowers.Cc["@mozilla.org/preferences-service;1"]
+                                  .getService(SpecialPowers.Ci.nsIPrefBranch);
+    if (enabled) {
+      prefBranch.setBoolPref("browser.sessionhistory.cache_subframes", true);
+    }
+    else {
+      try {
+        prefBranch.clearUserPref("browser.sessionhistory.cache_subframes");
+      } catch (e) { /* Pref didn't exist, meh */ }
+    }
+  }
+
   function finishTest() {
     if (finished) {
       return;
     }
     finished = true;
-    SpecialPowers.flushPrefEnv(function () {
-      iframe.terminateWorker();
-      SimpleTest.finish();
-    });
+    setCachePref(false);
+    iframe.terminateWorker();
+    SimpleTest.finish();
   }
 
   function waitInterval() {
@@ -72,13 +84,12 @@
     is(String(iframe.location), "about:blank", "Wrong url!");
     is(suspended, false, "Already suspended?");
     is(resumed, false, "Already resumed?");
-    SpecialPowers.popPrefEnv(function () {
-      suspended = true;
-      var iframeElement = document.getElementById("workerFrame");
-      iframeElement.onload = badOnloadCallback;
-      oldMessageCount = lastCount;
-      interval = setInterval(waitInterval, 1000);
-    });
+    setCachePref(false);
+    suspended = true;
+    var iframeElement = document.getElementById("workerFrame");
+    iframeElement.onload = badOnloadCallback;
+    oldMessageCount = lastCount;
+    interval = setInterval(waitInterval, 1000);
   }
 
   function messageCallback(data) {
@@ -91,13 +102,12 @@
          "Got good data, lastCount = " + lastCount + ", data = " + data);
       lastCount = data;
       if (lastCount == 25) {
-        SpecialPowers.pushPrefEnv({"set": [["browser.sessionhistory.cache_subframes", true]]}, function () {
-          iframe.location = "about:blank";
-          // We want suspend_iframe.html to go into bfcache, so we need to flush
-          // out all pending notifications. Otherwise, if they're flushed too
-          // late, they could kick us out of the bfcache again.
-          iframe.document.body.offsetTop;
-        });
+        setCachePref(true);
+        iframe.location = "about:blank";
+        // We want suspend_iframe.html to go into bfcache, so we need to flush
+        // out all pending notifications. Otherwise, if they're flushed too
+        // late, they could kick us out of the bfcache again.
+        iframe.document.body.offsetTop;
       }
       return;
     }

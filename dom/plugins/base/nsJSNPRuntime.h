@@ -9,8 +9,7 @@
 #include "nscore.h"
 #include "npapi.h"
 #include "npruntime.h"
-#include "PLDHashTable.h"
-#include "js/RootingAPI.h"
+#include "pldhash.h"
 
 class nsJSNPRuntime
 {
@@ -34,21 +33,8 @@ public:
     return !(*this == other);
   }
 
-  void trace(JSTracer* trc) {
-      JS::TraceEdge(trc, &mJSObj, "nsJSObjWrapperKey");
-  }
-
-  nsJSObjWrapperKey(const nsJSObjWrapperKey& other)
-    : mJSObj(other.mJSObj),
-      mNpp(other.mNpp)
-  {}
-  void operator=(const nsJSObjWrapperKey& other) {
-    mJSObj = other.mJSObj;
-    mNpp = other.mNpp;
-  }
-
-  JS::Heap<JSObject*> mJSObj;
-  NPP mNpp;
+  JSObject * mJSObj;
+  const NPP mNpp;
 };
 
 class nsJSObjWrapper : public NPObject
@@ -58,12 +44,9 @@ public:
   const NPP mNpp;
   bool mDestroyPending;
 
-  static NPObject* GetNewOrUsed(NPP npp, JS::Handle<JSObject*> obj);
+  static NPObject *GetNewOrUsed(NPP npp, JSContext *cx,
+                                JS::Handle<JSObject*> obj);
   static bool HasOwnProperty(NPObject* npobj, NPIdentifier npid);
-
-  void trace(JSTracer* trc) {
-      JS::TraceEdge(trc, &mJSObj, "nsJSObjWrapper");
-  }
 
 protected:
   explicit nsJSObjWrapper(NPP npp);

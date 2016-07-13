@@ -6,10 +6,9 @@
  * Modified 2011 by Guido Vollbeding.
  * libjpeg-turbo Modifications:
  * Copyright 2009 Pierre Ossman <ossman@cendio.se> for Cendio AB
- * Copyright (C) 2009, 2011-2012, 2014-2015, D. R. Commander.
+ * Copyright (C) 2009, 2011-2012, 2014, D. R. Commander.
  * Copyright (C) 2013, Linaro Limited.
- * For conditions of distribution and use, see the accompanying README.ijg
- * file.
+ * For conditions of distribution and use, see the accompanying README file.
  *
  * This file contains output colorspace conversion routines.
  */
@@ -27,16 +26,16 @@ typedef struct {
   struct jpeg_color_deconverter pub; /* public fields */
 
   /* Private state for YCC->RGB conversion */
-  int *Cr_r_tab;                /* => table for Cr to R conversion */
-  int *Cb_b_tab;                /* => table for Cb to B conversion */
-  JLONG *Cr_g_tab;              /* => table for Cr to G conversion */
-  JLONG *Cb_g_tab;              /* => table for Cb to G conversion */
+  int * Cr_r_tab;               /* => table for Cr to R conversion */
+  int * Cb_b_tab;               /* => table for Cb to B conversion */
+  INT32 * Cr_g_tab;             /* => table for Cr to G conversion */
+  INT32 * Cb_g_tab;             /* => table for Cb to G conversion */
 
   /* Private state for RGB->Y conversion */
-  JLONG *rgb_y_tab;             /* => table for RGB to Y conversion */
+  INT32 * rgb_y_tab;            /* => table for RGB to Y conversion */
 } my_color_deconverter;
 
-typedef my_color_deconverter *my_cconvert_ptr;
+typedef my_color_deconverter * my_cconvert_ptr;
 
 
 /**************** YCbCr -> RGB conversion: most common case **************/
@@ -74,8 +73,8 @@ typedef my_color_deconverter *my_cconvert_ptr;
  */
 
 #define SCALEBITS       16      /* speediest right-shift on some machines */
-#define ONE_HALF        ((JLONG) 1 << (SCALEBITS-1))
-#define FIX(x)          ((JLONG) ((x) * (1L<<SCALEBITS) + 0.5))
+#define ONE_HALF        ((INT32) 1 << (SCALEBITS-1))
+#define FIX(x)          ((INT32) ((x) * (1L<<SCALEBITS) + 0.5))
 
 /* We allocate one big table for RGB->Y conversion and divide it up into
  * three parts, instead of doing three alloc_small requests.  This lets us
@@ -212,7 +211,7 @@ build_ycc_rgb_table (j_decompress_ptr cinfo)
 {
   my_cconvert_ptr cconvert = (my_cconvert_ptr) cinfo->cconvert;
   int i;
-  JLONG x;
+  INT32 x;
   SHIFT_TEMPS
 
   cconvert->Cr_r_tab = (int *)
@@ -221,12 +220,12 @@ build_ycc_rgb_table (j_decompress_ptr cinfo)
   cconvert->Cb_b_tab = (int *)
     (*cinfo->mem->alloc_small) ((j_common_ptr) cinfo, JPOOL_IMAGE,
                                 (MAXJSAMPLE+1) * sizeof(int));
-  cconvert->Cr_g_tab = (JLONG *)
+  cconvert->Cr_g_tab = (INT32 *)
     (*cinfo->mem->alloc_small) ((j_common_ptr) cinfo, JPOOL_IMAGE,
-                                (MAXJSAMPLE+1) * sizeof(JLONG));
-  cconvert->Cb_g_tab = (JLONG *)
+                                (MAXJSAMPLE+1) * sizeof(INT32));
+  cconvert->Cb_g_tab = (INT32 *)
     (*cinfo->mem->alloc_small) ((j_common_ptr) cinfo, JPOOL_IMAGE,
-                                (MAXJSAMPLE+1) * sizeof(JLONG));
+                                (MAXJSAMPLE+1) * sizeof(INT32));
 
   for (i = 0, x = -CENTERJSAMPLE; i <= MAXJSAMPLE; i++, x++) {
     /* i is the actual input pixel value, in the range 0..MAXJSAMPLE */
@@ -303,13 +302,13 @@ LOCAL(void)
 build_rgb_y_table (j_decompress_ptr cinfo)
 {
   my_cconvert_ptr cconvert = (my_cconvert_ptr) cinfo->cconvert;
-  JLONG *rgb_y_tab;
-  JLONG i;
+  INT32 * rgb_y_tab;
+  INT32 i;
 
   /* Allocate and fill in the conversion tables. */
-  cconvert->rgb_y_tab = rgb_y_tab = (JLONG *)
+  cconvert->rgb_y_tab = rgb_y_tab = (INT32 *)
     (*cinfo->mem->alloc_small) ((j_common_ptr) cinfo, JPOOL_IMAGE,
-                                (TABLE_SIZE * sizeof(JLONG)));
+                                (TABLE_SIZE * sizeof(INT32)));
 
   for (i = 0; i <= MAXJSAMPLE; i++) {
     rgb_y_tab[i+R_Y_OFF] = FIX(0.29900) * i;
@@ -330,7 +329,7 @@ rgb_gray_convert (j_decompress_ptr cinfo,
 {
   my_cconvert_ptr cconvert = (my_cconvert_ptr) cinfo->cconvert;
   register int r, g, b;
-  register JLONG *ctab = cconvert->rgb_y_tab;
+  register INT32 * ctab = cconvert->rgb_y_tab;
   register JSAMPROW outptr;
   register JSAMPROW inptr0, inptr1, inptr2;
   register JDIMENSION col;
@@ -365,53 +364,23 @@ null_convert (j_decompress_ptr cinfo,
               JSAMPIMAGE input_buf, JDIMENSION input_row,
               JSAMPARRAY output_buf, int num_rows)
 {
-  register JSAMPROW inptr, inptr0, inptr1, inptr2, inptr3, outptr;
-  register JDIMENSION col;
+  register JSAMPROW inptr, outptr;
+  register JDIMENSION count;
   register int num_components = cinfo->num_components;
   JDIMENSION num_cols = cinfo->output_width;
   int ci;
 
-  if (num_components == 3) {
-    while (--num_rows >= 0) {
-      inptr0 = input_buf[0][input_row];
-      inptr1 = input_buf[1][input_row];
-      inptr2 = input_buf[2][input_row];
-      input_row++;
-      outptr = *output_buf++;
-      for (col = 0; col < num_cols; col++) {
-        *outptr++ = inptr0[col];
-        *outptr++ = inptr1[col];
-        *outptr++ = inptr2[col];
+  while (--num_rows >= 0) {
+    for (ci = 0; ci < num_components; ci++) {
+      inptr = input_buf[ci][input_row];
+      outptr = output_buf[0] + ci;
+      for (count = num_cols; count > 0; count--) {
+        *outptr = *inptr++;     /* needn't bother with GETJSAMPLE() here */
+        outptr += num_components;
       }
     }
-  } else if (num_components == 4) {
-    while (--num_rows >= 0) {
-      inptr0 = input_buf[0][input_row];
-      inptr1 = input_buf[1][input_row];
-      inptr2 = input_buf[2][input_row];
-      inptr3 = input_buf[3][input_row];
-      input_row++;
-      outptr = *output_buf++;
-      for (col = 0; col < num_cols; col++) {
-        *outptr++ = inptr0[col];
-        *outptr++ = inptr1[col];
-        *outptr++ = inptr2[col];
-        *outptr++ = inptr3[col];
-      }
-    }
-  } else {
-    while (--num_rows >= 0) {
-      for (ci = 0; ci < num_components; ci++) {
-        inptr = input_buf[ci][input_row];
-        outptr = *output_buf;
-        for (col = 0; col < num_cols; col++) {
-          outptr[ci] = inptr[col];
-          outptr += num_components;
-        }
-      }
-      output_buf++;
-      input_row++;
-    }
+    input_row++;
+    output_buf++;
   }
 }
 
@@ -543,11 +512,11 @@ ycck_cmyk_convert (j_decompress_ptr cinfo,
   register JDIMENSION col;
   JDIMENSION num_cols = cinfo->output_width;
   /* copy these pointers into registers if possible */
-  register JSAMPLE *range_limit = cinfo->sample_range_limit;
-  register int *Crrtab = cconvert->Cr_r_tab;
-  register int *Cbbtab = cconvert->Cb_b_tab;
-  register JLONG *Crgtab = cconvert->Cr_g_tab;
-  register JLONG *Cbgtab = cconvert->Cb_g_tab;
+  register JSAMPLE * range_limit = cinfo->sample_range_limit;
+  register int * Crrtab = cconvert->Cr_r_tab;
+  register int * Cbbtab = cconvert->Cb_b_tab;
+  register INT32 * Crgtab = cconvert->Cr_g_tab;
+  register INT32 * Cbgtab = cconvert->Cb_g_tab;
   SHIFT_TEMPS
 
   while (--num_rows >= 0) {
@@ -604,8 +573,8 @@ ycck_cmyk_convert (j_decompress_ptr cinfo,
  */
 
 #define DITHER_MASK       0x3
-#define DITHER_ROTATE(x)  ((((x) & 0xFF) << 24) | (((x) >> 8) & 0x00FFFFFF))
-static const JLONG dither_matrix[4] = {
+#define DITHER_ROTATE(x)  (((x) << 24) | (((x) >> 8) & 0x00FFFFFF))
+static const INT32 dither_matrix[4] = {
   0x0008020A,
   0x0C040E06,
   0x030B0109,

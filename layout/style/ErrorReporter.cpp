@@ -26,7 +26,7 @@
 using namespace mozilla;
 
 namespace {
-class ShortTermURISpecCache : public Runnable {
+class ShortTermURISpecCache : public nsRunnable {
 public:
   ShortTermURISpecCache() : mPending(false) {}
 
@@ -313,24 +313,6 @@ ErrorReporter::ReportUnexpected(const char *aMessage,
   aToken.AppendToString(tokenString);
   const char16_t charStr[2] = { aChar, 0 };
   const char16_t *params[2] = { tokenString.get(), charStr };
-
-  nsAutoString str;
-  sStringBundle->FormatStringFromName(NS_ConvertASCIItoUTF16(aMessage).get(),
-                                      params, ArrayLength(params),
-                                      getter_Copies(str));
-  AddToError(str);
-}
-
-void
-ErrorReporter::ReportUnexpected(const char *aMessage,
-                                const nsString &aParam,
-                                const nsString &aValue)
-{
-  if (!ShouldReportErrors()) return;
-
-  nsAutoString qparam;
-  nsStyleUtil::AppendEscapedCSSIdent(aParam, qparam);
-  const char16_t *params[2] = { qparam.get(), aValue.get() };
 
   nsAutoString str;
   sStringBundle->FormatStringFromName(NS_ConvertASCIItoUTF16(aMessage).get(),

@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/TextTrack.h"
 #include "mozilla/dom/TextTrackBinding.h"
 #include "mozilla/dom/TextTrackList.h"
@@ -29,7 +28,7 @@ NS_IMPL_RELEASE_INHERITED(TextTrack, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TextTrack)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-TextTrack::TextTrack(nsPIDOMWindowInner* aOwnerWindow,
+TextTrack::TextTrack(nsPIDOMWindow* aOwnerWindow,
                      TextTrackKind aKind,
                      const nsAString& aLabel,
                      const nsAString& aLanguage,
@@ -47,7 +46,7 @@ TextTrack::TextTrack(nsPIDOMWindowInner* aOwnerWindow,
   SetDefaultSettings();
 }
 
-TextTrack::TextTrack(nsPIDOMWindowInner* aOwnerWindow,
+TextTrack::TextTrack(nsPIDOMWindow* aOwnerWindow,
                      TextTrackList* aTextTrackList,
                      TextTrackKind aKind,
                      const nsAString& aLabel,
@@ -74,7 +73,7 @@ TextTrack::~TextTrack()
 void
 TextTrack::SetDefaultSettings()
 {
-  nsPIDOMWindowInner* ownerWindow = GetOwner();
+  nsPIDOMWindow* ownerWindow = GetOwner();
   mCueList = new TextTrackCueList(ownerWindow);
   mActiveCueList = new TextTrackCueList(ownerWindow);
   mCuePos = 0;
@@ -92,34 +91,9 @@ TextTrack::SetMode(TextTrackMode aValue)
 {
   if (mMode != aValue) {
     mMode = aValue;
-    if (aValue == TextTrackMode::Disabled) {
-      SetCuesInactive();
-      // Remove all the cues in MediaElement.
-      if (mTextTrackList) {
-        HTMLMediaElement* mediaElement = mTextTrackList->GetMediaElement();
-        if (mediaElement) {
-          for (size_t i = 0; i < mCueList->Length(); ++i) {
-            mediaElement->NotifyCueRemoved(*(*mCueList)[i]);
-          }
-        }
-      }
-    } else {
-      // Add all the cues into MediaElement.
-      if (mTextTrackList) {
-        HTMLMediaElement* mediaElement = mTextTrackList->GetMediaElement();
-        if (mediaElement) {
-          for (size_t i = 0; i < mCueList->Length(); ++i) {
-            mediaElement->NotifyCueAdded(*(*mCueList)[i]);
-          }
-        }
-      }
-    }
     if (mTextTrackList) {
       mTextTrackList->CreateAndDispatchChangeEvent();
     }
-    // Ensure the TimeMarchesOn is called in case that the mCueList
-    // is empty.
-    NotifyCueUpdated(nullptr);
   }
 }
 
@@ -140,8 +114,8 @@ TextTrack::AddCue(TextTrackCue& aCue)
   aCue.SetTrack(this);
   if (mTextTrackList) {
     HTMLMediaElement* mediaElement = mTextTrackList->GetMediaElement();
-    if (mediaElement && (mMode != TextTrackMode::Disabled)) {
-      mediaElement->NotifyCueAdded(aCue);
+    if (mediaElement) {
+      mediaElement->AddCue(aCue);
     }
   }
   SetDirty();
@@ -150,16 +124,7 @@ TextTrack::AddCue(TextTrackCue& aCue)
 void
 TextTrack::RemoveCue(TextTrackCue& aCue, ErrorResult& aRv)
 {
-  aCue.SetActive(false);
-
   mCueList->RemoveCue(aCue, aRv);
-  aCue.SetTrack(nullptr);
-  if (mTextTrackList) {
-    HTMLMediaElement* mediaElement = mTextTrackList->GetMediaElement();
-    if (mediaElement) {
-      mediaElement->NotifyCueRemoved(aCue);
-    }
-  }
   SetDirty();
 }
 
@@ -215,15 +180,17 @@ TextTrack::UpdateActiveCueList()
 TextTrackCueList*
 TextTrack::GetActiveCues() {
   if (mMode != TextTrackMode::Disabled) {
+    UpdateActiveCueList();
     return mActiveCueList;
   }
   return nullptr;
 }
 
 void
-TextTrack::GetActiveCueArray(nsTArray<RefPtr<TextTrackCue> >& aCues)
+TextTrack::GetActiveCueArray(nsTArray<nsRefPtr<TextTrackCue> >& aCues)
 {
   if (mMode != TextTrackMode::Disabled) {
+    UpdateActiveCueList();
     mActiveCueList->GetArray(aCues);
   }
 }
@@ -278,44 +245,6 @@ TextTrack::GetTrackElement() {
 void
 TextTrack::SetTrackElement(HTMLTrackElement* aTrackElement) {
   mTrackElement = aTrackElement;
-}
-
-void
-TextTrack::SetCuesInactive()
-{
-  mCueList->SetCuesInactive();
-}
-
-void
-TextTrack::NotifyCueUpdated(TextTrackCue *aCue)
-{
-  mCueList->NotifyCueUpdated(aCue);
-  if (mTextTrackList) {
-    HTMLMediaElement* mediaElement = mTextTrackList->GetMediaElement();
-    if (mediaElement) {
-      mediaElement->NotifyCueUpdated(aCue);
-    }
-  }
-  SetDirty();
-}
-
-void
-TextTrack::GetLabel(nsAString& aLabel) const
-{
-  if (mTrackElement) {
-    mTrackElement->GetLabel(aLabel);
-  } else {
-    aLabel = mLabel;
-  }
-}
-void
-TextTrack::GetLanguage(nsAString& aLanguage) const
-{
-  if (mTrackElement) {
-    mTrackElement->GetSrclang(aLanguage);
-  } else {
-    aLanguage = mLanguage;
-  }
 }
 
 } // namespace dom

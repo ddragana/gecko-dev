@@ -5,9 +5,9 @@
 
 "use strict";
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+let Cc = Components.classes;
+let Ci = Components.interfaces;
+let Cu = Components.utils;
 
 this.EXPORTED_SYMBOLS = [ "ContentClick" ];
 
@@ -15,7 +15,7 @@ Cu.import("resource:///modules/PlacesUIUtils.jsm");
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-var ContentClick = {
+let ContentClick = {
   init: function() {
     let mm = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
     mm.addMessageListener("Content:Click", this);
@@ -61,33 +61,26 @@ var ContentClick = {
 
     // Note: We don't need the sidebar code here.
 
-    // Mark the page as a user followed link.  This is done so that history can
-    // distinguish automatic embed visits from user activated ones.  For example
-    // pages loaded in frames are embed visits and lost with the session, while
-    // visits across frames should be preserved.
-    try {
-      if (!PrivateBrowsingUtils.isWindowPrivate(window))
-        PlacesUIUtils.markPageAsFollowedLink(json.href);
-    } catch (ex) { /* Skip invalid URIs. */ }
-
     // This part is based on handleLinkClick.
     var where = window.whereToOpenLink(json);
     if (where == "current")
-      return;
+      return false;
 
     // Todo(903022): code for where == save
 
     let params = { charset: browser.characterSet,
                    referrerURI: browser.documentURI,
                    referrerPolicy: json.referrerPolicy,
-                   noReferrer: json.noReferrer,
-                   allowMixedContent: json.allowMixedContent };
-
-    // The new tab/window must use the same userContextId.
-    if (json.originAttributes.userContextId) {
-      params.userContextId = json.originAttributes.userContextId;
-    }
-
+                   noReferrer: json.noReferrer };
     window.openLinkIn(json.href, where, params);
+
+    // Mark the page as a user followed link.  This is done so that history can
+    // distinguish automatic embed visits from user activated ones.  For example
+    // pages loaded in frames are embed visits and lost with the session, while
+    // visits across frames should be preserved.
+    try {
+      if (!PrivateBrowsingUtils.isWindowPrivate(window))
+        PlacesUIUtils.markPageAsFollowedLink(href);
+    } catch (ex) { /* Skip invalid URIs. */ }
   }
 };

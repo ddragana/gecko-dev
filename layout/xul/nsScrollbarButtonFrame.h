@@ -35,7 +35,8 @@ public:
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
 
-  static nsresult GetChildWithTag(nsIAtom* atom, nsIFrame* start, nsIFrame*& result);
+  static nsresult GetChildWithTag(nsPresContext* aPresContext,
+                                  nsIAtom* atom, nsIFrame* start, nsIFrame*& result);
   static nsresult GetParentWithTag(nsIAtom* atom, nsIFrame* start, nsIFrame*& result);
 
   bool HandleButtonPress(nsPresContext* aPresContext,
@@ -62,7 +63,8 @@ public:
                            nsEventStatus* aEventStatus) override;
 
 protected:
-  virtual void MouseClicked(mozilla::WidgetGUIEvent* aEvent) override;
+  virtual void MouseClicked(nsPresContext* aPresContext,
+                            mozilla::WidgetGUIEvent* aEvent) override;
 
   void StartRepeat() {
     nsRepeatService::GetInstance()->Start(Notify, this);

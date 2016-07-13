@@ -58,13 +58,13 @@ SVGFEComponentTransferElement::GetPrimitiveDescription(nsSVGFilterInstance* aIns
                                                        const nsTArray<bool>& aInputsAreTainted,
                                                        nsTArray<RefPtr<SourceSurface>>& aInputImages)
 {
-  RefPtr<SVGComponentTransferFunctionElement> childForChannel[4];
+  nsRefPtr<SVGComponentTransferFunctionElement> childForChannel[4];
 
   for (nsIContent* childContent = nsINode::GetFirstChild();
        childContent;
        childContent = childContent->GetNextSibling()) {
 
-    RefPtr<SVGComponentTransferFunctionElement> child;
+    nsRefPtr<SVGComponentTransferFunctionElement> child;
     CallQueryInterface(childContent,
             (SVGComponentTransferFunctionElement**)getter_AddRefs(child));
     if (child) {

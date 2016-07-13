@@ -7,15 +7,18 @@
 #include "nsISupports.idl"
 
 interface nsIPKCS11Slot;
-interface nsISimpleEnumerator;
+interface nsIEnumerator;
 
 [scriptable, uuid(8a44bdf9-d1a5-4734-bd5a-34ed7fe564c2)]
 interface nsIPKCS11Module : nsISupports
 {
+
   readonly attribute wstring name;
   readonly attribute wstring libName;
 
   nsIPKCS11Slot findSlotByName(in wstring name);
 
-  nsISimpleEnumerator listSlots();
+  nsIEnumerator listSlots();
+
 };
+

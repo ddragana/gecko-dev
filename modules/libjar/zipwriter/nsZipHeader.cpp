@@ -18,13 +18,12 @@
 #define ZIP_EXTENDED_TIMESTAMP_FIELD 0x5455
 #define ZIP_EXTENDED_TIMESTAMP_MODTIME 0x01
 
-using namespace mozilla;
-
 /**
  * nsZipHeader represents an entry from a zip file.
  */
 NS_IMPL_ISUPPORTS(nsZipHeader, nsIZipEntry)
 
+/* readonly attribute unsigned short compression; */
 NS_IMETHODIMP nsZipHeader::GetCompression(uint16_t *aCompression)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -33,6 +32,7 @@ NS_IMETHODIMP nsZipHeader::GetCompression(uint16_t *aCompression)
     return NS_OK;
 }
 
+/* readonly attribute unsigned long size; */
 NS_IMETHODIMP nsZipHeader::GetSize(uint32_t *aSize)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -41,6 +41,7 @@ NS_IMETHODIMP nsZipHeader::GetSize(uint32_t *aSize)
     return NS_OK;
 }
 
+/* readonly attribute unsigned long realSize; */
 NS_IMETHODIMP nsZipHeader::GetRealSize(uint32_t *aRealSize)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -49,6 +50,7 @@ NS_IMETHODIMP nsZipHeader::GetRealSize(uint32_t *aRealSize)
     return NS_OK;
 }
 
+/* readonly attribute unsigned long CRC32; */
 NS_IMETHODIMP nsZipHeader::GetCRC32(uint32_t *aCRC32)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -57,6 +59,7 @@ NS_IMETHODIMP nsZipHeader::GetCRC32(uint32_t *aCRC32)
     return NS_OK;
 }
 
+/* readonly attribute boolean isDirectory; */
 NS_IMETHODIMP nsZipHeader::GetIsDirectory(bool *aIsDirectory)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -68,6 +71,7 @@ NS_IMETHODIMP nsZipHeader::GetIsDirectory(bool *aIsDirectory)
     return NS_OK;
 }
 
+/* readonly attribute PRTime lastModifiedTime; */
 NS_IMETHODIMP nsZipHeader::GetLastModifiedTime(PRTime *aLastModifiedTime)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -114,6 +118,7 @@ NS_IMETHODIMP nsZipHeader::GetLastModifiedTime(PRTime *aLastModifiedTime)
     return NS_OK;
 }
 
+/* readonly attribute boolean isSynthetic; */
 NS_IMETHODIMP nsZipHeader::GetIsSynthetic(bool *aIsSynthetic)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -122,6 +127,7 @@ NS_IMETHODIMP nsZipHeader::GetIsSynthetic(bool *aIsSynthetic)
     return NS_OK;
 }
 
+/* readonly attribute unsigned long permissions; */
 NS_IMETHODIMP nsZipHeader::GetPermissions(uint32_t *aPermissions)
 {
     NS_ASSERTION(mInited, "Not initalised");
@@ -146,7 +152,7 @@ void nsZipHeader::Init(const nsACString & aPath, PRTime aDate, uint32_t aAttr,
     // Store modification timestamp as extra field
     // First fill CDS extra field
     mFieldLength = 9;
-    mExtraField = MakeUnique<uint8_t[]>(mFieldLength);
+    mExtraField = new uint8_t[mFieldLength];
     if (!mExtraField) {
         mFieldLength = 0;
     } else {
@@ -157,7 +163,7 @@ void nsZipHeader::Init(const nsACString & aPath, PRTime aDate, uint32_t aAttr,
         WRITE32(mExtraField.get(), &pos, aDate / PR_USEC_PER_SEC);
 
         // Fill local extra field
-        mLocalExtraField = MakeUnique<uint8_t[]>(mFieldLength);
+        mLocalExtraField = new uint8_t[mFieldLength];
         if (mLocalExtraField) {
             mLocalFieldLength = mFieldLength;
             memcpy(mLocalExtraField.get(), mExtraField.get(), mLocalFieldLength);
@@ -285,28 +291,28 @@ nsresult nsZipHeader::ReadCDSHeader(nsIInputStream *stream)
     mOffset = READ32(buf, &pos);
 
     if (namelength > 0) {
-        auto field = MakeUnique<char[]>(namelength);
+        nsAutoArrayPtr<char> field(new char[namelength]);
         NS_ENSURE_TRUE(field, NS_ERROR_OUT_OF_MEMORY);
         rv = ZW_ReadData(stream, field.get(), namelength);
         NS_ENSURE_SUCCESS(rv, rv);
-        mName.Assign(field.get(), namelength);
+        mName.Assign(field, namelength);
     }
     else
         mName = NS_LITERAL_CSTRING("");
 
     if (mFieldLength > 0) {
-        mExtraField = MakeUnique<uint8_t[]>(mFieldLength);
+        mExtraField = new uint8_t[mFieldLength];
         NS_ENSURE_TRUE(mExtraField, NS_ERROR_OUT_OF_MEMORY);
         rv = ZW_ReadData(stream, (char *)mExtraField.get(), mFieldLength);
         NS_ENSURE_SUCCESS(rv, rv);
     }
 
     if (commentlength > 0) {
-        auto field = MakeUnique<char[]>(commentlength);
+        nsAutoArrayPtr<char> field(new char[commentlength]);
         NS_ENSURE_TRUE(field, NS_ERROR_OUT_OF_MEMORY);
         rv = ZW_ReadData(stream, field.get(), commentlength);
         NS_ENSURE_SUCCESS(rv, rv);
-        mComment.Assign(field.get(), commentlength);
+        mComment.Assign(field, commentlength);
     }
     else
         mComment = NS_LITERAL_CSTRING("");
@@ -317,7 +323,7 @@ nsresult nsZipHeader::ReadCDSHeader(nsIInputStream *stream)
 
 const uint8_t * nsZipHeader::GetExtraField(uint16_t aTag, bool aLocal, uint16_t *aBlockSize)
 {
-    const uint8_t *buf = aLocal ? mLocalExtraField.get() : mExtraField.get();
+    const uint8_t *buf = aLocal ? mLocalExtraField : mExtraField;
     uint32_t buflen = aLocal ? mLocalFieldLength : mFieldLength;
     uint32_t pos = 0;
     uint16_t tag, blocksize;
@@ -372,11 +378,11 @@ nsresult nsZipHeader::PadExtraField(uint32_t aOffset, uint16_t aAlignSize)
       return NS_ERROR_FAILURE;
     }
 
-    UniquePtr<uint8_t[]> field = Move(mLocalExtraField);
+    nsAutoArrayPtr<uint8_t> field = mLocalExtraField;
     uint32_t pos = mLocalFieldLength;
 
-    mLocalExtraField = MakeUnique<uint8_t[]>(mLocalFieldLength + pad_size);
-    memcpy(mLocalExtraField.get(), field.get(), mLocalFieldLength);
+    mLocalExtraField = new uint8_t[mLocalFieldLength + pad_size];
+    memcpy(mLocalExtraField.get(), field, mLocalFieldLength);
     // Use 0xFFFF as tag ID to avoid conflict with other IDs.
     // For more information, please read "Extensible data fields" section in:
     // http://www.pkware.com/documents/casestudies/APPNOTE.TXT

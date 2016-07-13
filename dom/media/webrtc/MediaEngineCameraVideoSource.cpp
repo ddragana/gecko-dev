@@ -11,7 +11,7 @@ namespace mozilla {
 using namespace mozilla::gfx;
 using namespace mozilla::dom;
 
-extern LogModule* GetMediaManagerLog();
+extern PRLogModuleInfo* GetMediaManagerLog();
 #define LOG(msg) MOZ_LOG(GetMediaManagerLog(), mozilla::LogLevel::Debug, msg)
 #define LOGFRAME(msg) MOZ_LOG(GetMediaManagerLog(), mozilla::LogLevel::Verbose, msg)
 
@@ -19,15 +19,14 @@ extern LogModule* GetMediaManagerLog();
 bool MediaEngineCameraVideoSource::AppendToTrack(SourceMediaStream* aSource,
                                                  layers::Image* aImage,
                                                  TrackID aID,
-                                                 StreamTime delta,
-                                                 const PrincipalHandle& aPrincipalHandle)
+                                                 StreamTime delta)
 {
   MOZ_ASSERT(aSource);
 
   VideoSegment segment;
-  RefPtr<layers::Image> image = aImage;
+  nsRefPtr<layers::Image> image = aImage;
   IntSize size(image ? mWidth : 0, image ? mHeight : 0);
-  segment.AppendFrame(image.forget(), delta, size, aPrincipalHandle);
+  segment.AppendFrame(image.forget(), delta, size);
 
   // This is safe from any thread, and is safe if the track is Finished
   // or Destroyed.
@@ -163,49 +162,6 @@ MediaEngineCameraVideoSource::LogConstraints(
        c.mFrameRate.mIdeal.WasPassed()? c.mFrameRate.mIdeal.Value() : 0));
 }
 
-void
-MediaEngineCameraVideoSource::LogCapability(const char* aHeader,
-    const webrtc::CaptureCapability &aCapability, uint32_t aDistance)
-{
-  // RawVideoType and VideoCodecType media/webrtc/trunk/webrtc/common_types.h
-  static const char* const types[] = {
-    "I420",
-    "YV12",
-    "YUY2",
-    "UYVY",
-    "IYUV",
-    "ARGB",
-    "RGB24",
-    "RGB565",
-    "ARGB4444",
-    "ARGB1555",
-    "MJPEG",
-    "NV12",
-    "NV21",
-    "BGRA",
-    "Unknown type"
-  };
-
-  static const char* const codec[] = {
-    "VP8",
-    "VP9",
-    "H264",
-    "I420",
-    "RED",
-    "ULPFEC",
-    "Generic codec",
-    "Unknown codec"
-  };
-
-  LOG(("%s: %4u x %4u x %2u maxFps, %s, %s. Distance = %lu",
-       aHeader, aCapability.width, aCapability.height, aCapability.maxFPS,
-       types[std::min(std::max(uint32_t(0), uint32_t(aCapability.rawType)),
-                      uint32_t(sizeof(types) / sizeof(*types) - 1))],
-       codec[std::min(std::max(uint32_t(0), uint32_t(aCapability.codecType)),
-                      uint32_t(sizeof(codec) / sizeof(*codec) - 1))],
-       aDistance));
-}
-
 bool
 MediaEngineCameraVideoSource::ChooseCapability(
     const MediaTrackConstraints &aConstraints,
@@ -239,7 +195,6 @@ MediaEngineCameraVideoSource::ChooseCapability(
     webrtc::CaptureCapability cap;
     GetCapability(candidate.mIndex, cap);
     candidate.mDistance = GetFitnessDistance(cap, aConstraints, false, aDeviceId);
-    LogCapability("Capability", cap, candidate.mDistance);
     if (candidate.mDistance == UINT32_MAX) {
       candidateSet.RemoveElementAt(i);
     } else {
@@ -264,7 +219,7 @@ MediaEngineCameraVideoSource::ChooseCapability(
         }
       }
       if (!candidateSet.Length()) {
-        candidateSet.AppendElements(Move(rejects));
+        candidateSet.MoveElementsFrom(rejects);
       }
     }
   }
@@ -279,7 +234,6 @@ MediaEngineCameraVideoSource::ChooseCapability(
 
   // Any remaining multiples all have the same distance. A common case of this
   // occurs when no ideal is specified. Lean toward defaults.
-  uint32_t sameDistance = candidateSet[0].mDistance;
   {
     MediaTrackConstraintSet prefs;
     prefs.mWidth.SetAsLong() = aPrefs.GetWidth();
@@ -314,7 +268,9 @@ MediaEngineCameraVideoSource::ChooseCapability(
     GetCapability(candidateSet[0].mIndex, mCapability);
   }
 
-  LogCapability("Chosen capability", mCapability, sameDistance);
+  LOG(("chose cap %dx%d @%dfps codec %d raw %d",
+       mCapability.width, mCapability.height, mCapability.maxFPS,
+       mCapability.codecType, mCapability.rawType));
   return true;
 }
 

@@ -403,8 +403,10 @@ DisplayItemClip::GetCommonRoundedRectCount(const DisplayItemClip& aOther,
 void
 DisplayItemClip::AppendRoundedRects(nsTArray<RoundedRect>* aArray, uint32_t aCount) const
 {
-  size_t count = std::min(mRoundedClipRects.Length(), size_t(aCount));
-  aArray->AppendElements(mRoundedClipRects.Elements(), count);
+  uint32_t count = std::min(mRoundedClipRects.Length(), size_t(aCount));
+  for (uint32_t i = 0; i < count; ++i) {
+    *aArray->AppendElement() = mRoundedClipRects[i];
+  }
 }
 
 bool

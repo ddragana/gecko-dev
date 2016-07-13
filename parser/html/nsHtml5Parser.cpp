@@ -209,8 +209,8 @@ nsHtml5Parser::Parse(const nsAString& aSourceBuffer,
   
   // Gripping the other objects just in case, since the other old grip
   // required grips to these, too.
-  RefPtr<nsHtml5StreamParser> streamKungFuDeathGrip(GetStreamParser());
-  RefPtr<nsHtml5TreeOpExecutor> treeOpKungFuDeathGrip(mExecutor);
+  nsRefPtr<nsHtml5StreamParser> streamKungFuDeathGrip(GetStreamParser());
+  nsRefPtr<nsHtml5TreeOpExecutor> treeOpKungFuDeathGrip(mExecutor);
 
   if (!mExecutor->HasStarted()) {
     NS_ASSERTION(!GetStreamParser(),
@@ -313,8 +313,8 @@ nsHtml5Parser::Parse(const nsAString& aSourceBuffer,
   // and a flaw would lead to worse problems with plain pointers. If this
   // turns out to be a perf problem, it's worthwhile to consider making
   // prevSearchbuf a plain pointer again.
-  RefPtr<nsHtml5OwningUTF16Buffer> prevSearchBuf;
-  RefPtr<nsHtml5OwningUTF16Buffer> firstLevelMarker;
+  nsRefPtr<nsHtml5OwningUTF16Buffer> prevSearchBuf;
+  nsRefPtr<nsHtml5OwningUTF16Buffer> firstLevelMarker;
 
   if (aKey) {
     if (mFirstBuffer == mLastBuffer) {
@@ -370,13 +370,7 @@ nsHtml5Parser::Parse(const nsAString& aSourceBuffer,
         lineNumberSave = mTokenizer->getLineNumber();
       }
 
-      if (!mTokenizer->EnsureBufferSpace(stackBuffer.getLength())) {
-        return mExecutor->MarkAsBroken(NS_ERROR_OUT_OF_MEMORY);
-      }
       mLastWasCR = mTokenizer->tokenizeBuffer(&stackBuffer);
-      if (NS_FAILED((rv = mTreeBuilder->IsBroken()))) {
-        return mExecutor->MarkAsBroken(rv);
-      }
 
       if (inRootContext) {
         mRootContextLineNumber = mTokenizer->getLineNumber();
@@ -398,7 +392,7 @@ nsHtml5Parser::Parse(const nsAString& aSourceBuffer,
     }
   }
 
-  RefPtr<nsHtml5OwningUTF16Buffer> heapBuffer;
+  nsRefPtr<nsHtml5OwningUTF16Buffer> heapBuffer;
   if (stackBuffer.hasMore()) {
     // The buffer wasn't tokenized to completion. Create a copy of the tail
     // on the heap.
@@ -482,16 +476,8 @@ nsHtml5Parser::Parse(const nsAString& aSourceBuffer,
     while (stackBuffer.hasMore()) {
       stackBuffer.adjust(mDocWriteSpeculativeLastWasCR);
       if (stackBuffer.hasMore()) {
-        if (!mDocWriteSpeculativeTokenizer->EnsureBufferSpace(
-            stackBuffer.getLength())) {
-          return mExecutor->MarkAsBroken(NS_ERROR_OUT_OF_MEMORY);
-        }
         mDocWriteSpeculativeLastWasCR =
             mDocWriteSpeculativeTokenizer->tokenizeBuffer(&stackBuffer);
-        nsresult rv;
-        if (NS_FAILED((rv = mDocWriteSpeculativeTreeBuilder->IsBroken()))) {
-          return mExecutor->MarkAsBroken(rv);
-        }
       }
     }
 
@@ -514,8 +500,8 @@ nsHtml5Parser::Terminate()
   // XXX - [ until we figure out a way to break parser-sink circularity ]
   // Hack - Hold a reference until we are completely done...
   nsCOMPtr<nsIParser> kungFuDeathGrip(this);
-  RefPtr<nsHtml5StreamParser> streamKungFuDeathGrip(GetStreamParser());
-  RefPtr<nsHtml5TreeOpExecutor> treeOpKungFuDeathGrip(mExecutor);
+  nsRefPtr<nsHtml5StreamParser> streamKungFuDeathGrip(GetStreamParser());
+  nsRefPtr<nsHtml5TreeOpExecutor> treeOpKungFuDeathGrip(mExecutor);
   if (GetStreamParser()) {
     GetStreamParser()->Terminate();
   }
@@ -627,23 +613,16 @@ nsHtml5Parser::ParseUntilBlocked()
           return NS_OK;
         }
         if (mDocumentClosed) {
-          nsresult rv;
           NS_ASSERTION(!GetStreamParser(),
                        "This should only happen with script-created parser.");
-          if (NS_SUCCEEDED((rv = mExecutor->IsBroken()))) {
-            mTokenizer->eof();
-            if (NS_FAILED((rv = mTreeBuilder->IsBroken()))) {
-              mExecutor->MarkAsBroken(rv);
-            } else {
-              mTreeBuilder->StreamEnded();
-            }
-          }
+          mTokenizer->eof();
+          mTreeBuilder->StreamEnded();
           mTreeBuilder->Flush();
           mExecutor->FlushDocumentWrite();
           // The below call does memory cleanup, so call it even if the
           // parser has been marked as broken.
           mTokenizer->end();
-          return rv;
+          return NS_OK;
         }
         // never release the last buffer.
         NS_ASSERTION(!mLastBuffer->getStart() && !mLastBuffer->getEnd(),
@@ -683,20 +662,13 @@ nsHtml5Parser::ParseUntilBlocked()
       if (inRootContext) {
         mTokenizer->setLineNumber(mRootContextLineNumber);
       }
-      if (!mTokenizer->EnsureBufferSpace(mFirstBuffer->getLength())) {
-        return mExecutor->MarkAsBroken(NS_ERROR_OUT_OF_MEMORY);
-      }
       mLastWasCR = mTokenizer->tokenizeBuffer(mFirstBuffer);
-      nsresult rv;
-      if (NS_FAILED((rv = mTreeBuilder->IsBroken()))) {
-        return mExecutor->MarkAsBroken(rv);
-      }
       if (inRootContext) {
         mRootContextLineNumber = mTokenizer->getLineNumber();
       }
       if (mTreeBuilder->HasScript()) {
         mTreeBuilder->Flush();
-        rv = mExecutor->FlushDocumentWrite();
+        nsresult rv = mExecutor->FlushDocumentWrite();
         NS_ENSURE_SUCCESS(rv, rv);
       }
       if (mBlocked) {

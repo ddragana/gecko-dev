@@ -16,16 +16,16 @@
   width: 16px;
   margin-top: 0px;
   margin-bottom: 0px;
-  margin-inline-start: 0px;
-  margin-inline-end: 5px;
+  -moz-margin-start: 0px;
+  -moz-margin-end: 5px;
 }
 
 .small-indent {
-  margin-inline-start: 15px; 
-  margin-inline-end: 15px;
+  -moz-margin-start: 15px; 
+  -moz-margin-end: 15px;
 }
 
 .small-indent label {
-  margin-inline-start: 0px; 
+  -moz-margin-start: 0px; 
 }
 

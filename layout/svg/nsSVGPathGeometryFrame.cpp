@@ -50,7 +50,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGPathGeometryFrame)
 NS_QUERYFRAME_HEAD(nsSVGPathGeometryFrame)
   NS_QUERYFRAME_ENTRY(nsISVGChildFrame)
   NS_QUERYFRAME_ENTRY(nsSVGPathGeometryFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsSVGPathGeometryFrameBase)
 
 //----------------------------------------------------------------------
 // Display list item:
@@ -123,7 +123,7 @@ nsSVGPathGeometryFrame::Init(nsIContent*       aContent,
                              nsIFrame*         aPrevInFlow)
 {
   AddStateBits(aParent->GetStateBits() & NS_STATE_SVG_CLIPPATH_CHILD);
-  nsFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGPathGeometryFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 
 nsresult
@@ -150,12 +150,12 @@ nsSVGPathGeometryFrame::AttributeChanged(int32_t         aNameSpaceID,
 /* virtual */ void
 nsSVGPathGeometryFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
-  nsFrame::DidSetStyleContext(aOldStyleContext);
+  nsSVGPathGeometryFrameBase::DidSetStyleContext(aOldStyleContext);
 
   if (aOldStyleContext) {
-    auto oldStyleEffects = aOldStyleContext->PeekStyleEffects();
-    if (oldStyleEffects &&
-        StyleEffects()->mOpacity != oldStyleEffects->mOpacity &&
+    float oldOpacity = aOldStyleContext->PeekStyleDisplay()->mOpacity;
+    float newOpacity = StyleDisplay()->mOpacity;
+    if (newOpacity != oldOpacity &&
         nsSVGUtils::CanOptimizeOpacity(this)) {
       // nsIFrame::BuildDisplayListForStackingContext() is not going to create an
       // nsDisplayOpacity display list item, so DLBI won't invalidate for us.
@@ -165,9 +165,10 @@ nsSVGPathGeometryFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
     nsSVGPathGeometryElement* element =
       static_cast<nsSVGPathGeometryElement*>(mContent);
 
-    auto oldStyleSVG = aOldStyleContext->PeekStyleSVG();
-    if (oldStyleSVG && !SVGContentUtils::ShapeTypeHasNoCorners(mContent)) {
-      if (StyleSVG()->mStrokeLinecap != oldStyleSVG->mStrokeLinecap &&
+    if (aOldStyleContext->PeekStyleSVG() &&
+        !SVGContentUtils::ShapeTypeHasNoCorners(mContent)) {
+      if ((StyleSVG()->mStrokeLinecap !=
+             aOldStyleContext->PeekStyleSVG()->mStrokeLinecap) &&
           element->IsSVGElement(nsGkAtoms::path)) {
         // If the stroke-linecap changes to or from "butt" then our element
         // needs to update its cached Moz2D Path, since SVGPathData::BuildPath
@@ -175,13 +176,15 @@ nsSVGPathGeometryFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
         // length subpaths base on that property.
         element->ClearAnyCachedPath();
       } else if (GetStateBits() & NS_STATE_SVG_CLIPPATH_CHILD) {
-        if (StyleSVG()->mClipRule != oldStyleSVG->mClipRule) {
+        if (StyleSVG()->mClipRule !=
+              aOldStyleContext->PeekStyleSVG()->mClipRule) {
           // Moz2D Path objects are fill-rule specific.
           // For clipPath we use clip-rule as the path's fill-rule.
           element->ClearAnyCachedPath();
         }
       } else {
-        if (StyleSVG()->mFillRule != oldStyleSVG->mFillRule) {
+        if (StyleSVG()->mFillRule !=
+              aOldStyleContext->PeekStyleSVG()->mFillRule) {
           // Moz2D Path objects are fill-rule specific.
           element->ClearAnyCachedPath();
         }
@@ -216,10 +219,8 @@ nsSVGPathGeometryFrame::IsSVGTransformed(gfx::Matrix *aOwnTransform,
   if ((transformList && transformList->HasTransform()) ||
       content->GetAnimateMotionTransform()) {
     if (aOwnTransform) {
-      *aOwnTransform = gfx::ToMatrix(
-                         content->PrependLocalTransformsTo(
-                           gfxMatrix(),
-                           eUserSpaceToParent));
+      *aOwnTransform = gfx::ToMatrix(content->PrependLocalTransformsTo(gfxMatrix(),
+                                  nsSVGElement::eUserSpaceToParent));
     }
     foundTransform = true;
   }
@@ -231,8 +232,7 @@ nsSVGPathGeometryFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                          const nsRect&           aDirtyRect,
                                          const nsDisplayListSet& aLists)
 {
-  if (!static_cast<const nsSVGElement*>(mContent)->HasValidDimensions() ||
-      (!IsVisibleForPainting(aBuilder) && aBuilder->IsForPainting())) {
+  if (!static_cast<const nsSVGElement*>(mContent)->HasValidDimensions()) {
     return;
   }
   aLists.Content()->AppendNewToTop(
@@ -351,23 +351,8 @@ nsSVGPathGeometryFrame::GetFrameForPoint(const gfxPoint& aPoint)
 nsRect
 nsSVGPathGeometryFrame::GetCoveredRegion()
 {
-  gfxMatrix canvasTM = GetCanvasTM();
-  if (canvasTM.PreservesAxisAlignedRectangles()) {
-    return nsSVGUtils::TransformFrameRectToOuterSVG(
-             mRect, canvasTM, PresContext());
-  }
-
-  // To get tight bounds we need to compute directly in outer SVG coordinates
-  uint32_t flags = nsSVGUtils::eBBoxIncludeFill |
-                   nsSVGUtils::eBBoxIncludeStroke |
-                   nsSVGUtils::eBBoxIncludeMarkers;
-  gfxRect extent =
-    GetBBoxContribution(ToMatrix(canvasTM), flags).ToThebesRect();
-  nsRect region = nsLayoutUtils::RoundGfxRectToAppRect(
-                    extent, PresContext()->AppUnitsPerCSSPixel());
-
   return nsSVGUtils::TransformFrameRectToOuterSVG(
-                       region, gfxMatrix(), PresContext());
+           mRect, GetCanvasTM(), PresContext());
 }
 
 void
@@ -485,39 +470,25 @@ nsSVGPathGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
                    ((aFlags & nsSVGUtils::eBBoxIncludeStroke) &&
                     nsSVGUtils::HasStroke(this));
 
-  SVGContentUtils::AutoStrokeOptions strokeOptions;
-  if (getStroke) {
-    SVGContentUtils::GetStrokeOptions(&strokeOptions, element,
-                                      StyleContext(), nullptr,
-                                      SVGContentUtils::eIgnoreStrokeDashing);
-  } else {
-    // Override the default line width of 1.f so that when we call
-    // GetGeometryBounds below the result doesn't include stroke bounds.
-    strokeOptions.mLineWidth = 0.f;
-  }
-
-  Rect simpleBounds;
   bool gotSimpleBounds = false;
-  gfxMatrix userToOuterSVG;
-  if (getStroke &&
-      nsSVGUtils::GetNonScalingStrokeTransform(this, &userToOuterSVG)) {
-    Matrix moz2dUserToOuterSVG = ToMatrix(userToOuterSVG);
-    if (moz2dUserToOuterSVG.IsSingular()) {
-      return bbox;
+  if (!StyleSVGReset()->HasNonScalingStroke()) {
+    SVGContentUtils::AutoStrokeOptions strokeOptions;
+    strokeOptions.mLineWidth = 0.f;
+    if (getStroke) {
+      SVGContentUtils::GetStrokeOptions(&strokeOptions, element,
+        StyleContext(), nullptr,
+        SVGContentUtils::eIgnoreStrokeDashing);
     }
-    gotSimpleBounds = element->GetGeometryBounds(&simpleBounds,
-                                                 strokeOptions,
-                                                 aToBBoxUserspace,
-                                                 &moz2dUserToOuterSVG);
-  } else {
+    Rect simpleBounds;
     gotSimpleBounds = element->GetGeometryBounds(&simpleBounds,
                                                  strokeOptions,
                                                  aToBBoxUserspace);
+    if (gotSimpleBounds) {
+      bbox = simpleBounds;
+    }
   }
 
-  if (gotSimpleBounds) {
-    bbox = simpleBounds;
-  } else {
+  if (!gotSimpleBounds) {
     // Get the bounds using a Moz2D Path object (more expensive):
     RefPtr<DrawTarget> tmpDT;
 #ifdef XP_WIN
@@ -526,7 +497,7 @@ nsSVGPathGeometryFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
     // calculations. To avoid that and meet the expectations of web content we
     // have to use a CAIRO DrawTarget. The most efficient way to do that is to
     // wrap the cached cairo_surface_t from ScreenReferenceSurface():
-    RefPtr<gfxASurface> refSurf =
+    nsRefPtr<gfxASurface> refSurf =
       gfxPlatform::GetPlatform()->ScreenReferenceSurface();
     tmpDT = gfxPlatform::GetPlatform()->
       CreateDrawTargetForSurface(refSurf, IntSize(1, 1));

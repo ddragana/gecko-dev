@@ -18,7 +18,7 @@ import re
 
 def env(config):
     e = dict(os.environ)
-    e['PATH'] = ':'.join(p for p in (config.get('gcc_bin'), config.get('sixgill_bin'), e['PATH']) if p)
+    e['PATH'] = '%s:%s' % (e['PATH'], config['sixgill_bin'])
     e['XDB'] = '%(sixgill_bin)s/xdb.so' % config
     e['SOURCE'] = config['source']
     e['ANALYZED_OBJDIR'] = config['objdir']
@@ -72,14 +72,12 @@ def generate_hazards(config, outfilename):
                         '%(gcEdges)s',
                         '%(suppressedFunctions_list)s',
                         '%(gcTypes)s',
-                        '%(typeInfo)s',
                         str(i+1), '%(jobs)s',
                         'tmp.%s' % (i+1,)),
                        config)
         outfile = 'rootingHazards.%s' % (i+1,)
         output = open(outfile, 'w')
-        if config['verbose']:
-            print_command(command, outfile=outfile, env=env(config))
+        print_command(command, outfile=outfile, env=env(config))
         jobs.append((command, Popen(command, stdout=output, env=env(config))))
 
     final_status = 0
@@ -93,8 +91,7 @@ def generate_hazards(config, outfilename):
 
     with open(outfilename, 'w') as output:
         command = ['cat'] + [ 'rootingHazards.%s' % (i+1,) for i in range(int(config['jobs'])) ]
-        if config['verbose']:
-            print_command(command, outfile=outfilename)
+        print_command(command, outfile=outfilename)
         subprocess.call(command, stdout=output)
 
 JOBS = { 'dbs':
@@ -109,12 +106,8 @@ JOBS = { 'dbs':
                '.'),
               ()),
 
-         'list-dbs':
-             (('ls', '-l'),
-              ()),
-
          'callgraph':
-             (('%(js)s', '%(analysis_scriptdir)s/computeCallgraph.js', '%(typeInfo)s'),
+             (('%(js)s', '%(analysis_scriptdir)s/computeCallgraph.js'),
               'callgraph.txt'),
 
          'gcFunctions':
@@ -123,9 +116,8 @@ JOBS = { 'dbs':
               ('gcFunctions.txt', 'gcFunctions.lst', 'gcEdges.txt', 'suppressedFunctions.lst')),
 
          'gcTypes':
-             (('%(js)s', '%(analysis_scriptdir)s/computeGCTypes.js',
-               '[gcTypes]', '[typeInfo]'),
-              ('gcTypes.txt', 'typeInfo.txt')),
+             (('%(js)s', '%(analysis_scriptdir)s/computeGCTypes.js',),
+              'gcTypes.txt'),
 
          'allFunctions':
              (('%(sixgill_bin)s/xdbkeys', 'src_body.xdb',),
@@ -135,8 +127,7 @@ JOBS = { 'dbs':
              (generate_hazards, 'rootingHazards.txt'),
 
          'explain':
-             ((os.environ.get('PYTHON', 'python2.7'),
-               '%(analysis_scriptdir)s/explain.py',
+             (('python', '%(analysis_scriptdir)s/explain.py',
                '%(hazards)s', '%(gcFunctions)s',
                '[explained_hazards]', '[unnecessary]', '[refs]'),
               ('hazards.txt', 'unnecessary.txt', 'refs.txt'))
@@ -159,8 +150,7 @@ def run_job(name, config):
         if isinstance(outfiles, basestring):
             stdout_filename = '%s.tmp' % name
             temp_map[stdout_filename] = outfiles
-            if config['verbose']:
-                print_command(cmdspec, outfile=outfiles, env=env(config))
+            print_command(cmdspec, outfile=outfiles, env=env(config))
         else:
             stdout_filename = None
             pc = list(cmdspec)
@@ -168,8 +158,7 @@ def run_job(name, config):
             for (i, name) in out_indexes(cmdspec):
                 pc[i] = outfiles[outfile]
                 outfile += 1
-            if config['verbose']:
-                print_command(pc, env=env(config))
+            print_command(pc, env=env(config))
 
         command = list(cmdspec)
         outfile = 0
@@ -196,15 +185,20 @@ config = { 'ANALYSIS_SCRIPTDIR': os.path.dirname(__file__) }
 defaults = [ '%s/defaults.py' % config['ANALYSIS_SCRIPTDIR'],
              '%s/defaults.py' % os.getcwd() ]
 
+for default in defaults:
+    try:
+        execfile(default, config)
+        print("Loaded %s" % default)
+    except:
+        pass
+
+data = config.copy()
+
 parser = argparse.ArgumentParser(description='Statically analyze build tree for rooting hazards.')
 parser.add_argument('step', metavar='STEP', type=str, nargs='?',
                     help='run starting from this step')
 parser.add_argument('--source', metavar='SOURCE', type=str, nargs='?',
                     help='source code to analyze')
-parser.add_argument('--objdir', metavar='DIR', type=str, nargs='?',
-                    help='object directory of compiled files')
-parser.add_argument('--js', metavar='JSSHELL', type=str, nargs='?',
-                    help='full path to ctypes-capable JS shell')
 parser.add_argument('--upto', metavar='UPTO', type=str, nargs='?',
                     help='last step to execute')
 parser.add_argument('--jobs', '-j', default=None, metavar='JOBS', type=int,
@@ -217,21 +211,8 @@ parser.add_argument('--tag', '-t', type=str, nargs='?',
                     help='name of job, also sets build command to "build.<tag>"')
 parser.add_argument('--expect-file', type=str, nargs='?',
                     help='deprecated option, temporarily still present for backwards compatibility')
-parser.add_argument('--verbose', '-v', action='store_true',
-                    help='Display cut & paste commands to run individual steps')
 
 args = parser.parse_args()
-
-for default in defaults:
-    try:
-        execfile(default, config)
-        if args.verbose:
-            print("Loaded %s" % default)
-    except:
-        pass
-
-data = config.copy()
-
 for k,v in vars(args).items():
     if v is not None:
         data[k] = v
@@ -242,7 +223,7 @@ if args.tag and not args.buildcommand:
 if args.jobs is not None:
     data['jobs'] = args.jobs
 if not data.get('jobs'):
-    data['jobs'] = subprocess.check_output(['nproc', '--ignore=1']).strip()
+    data['jobs'] = subprocess.check_output(['nproc', '--ignore=1'])
 
 if args.buildcommand:
     data['buildcommand'] = args.buildcommand
@@ -261,8 +242,8 @@ if not data.get('source') and data.get('sixgill_bin'):
     data['source'] = path.replace("/js/src/jsapi.cpp", "")
 
 steps = [ 'dbs',
-          'gcTypes',
           'callgraph',
+          'gcTypes',
           'gcFunctions',
           'allFunctions',
           'hazards',
@@ -286,7 +267,7 @@ for step in steps:
         for (i, name) in out_indexes(command):
             data[name] = outfiles[outfile]
             outfile += 1
-        assert len(outfiles) == outfile, 'step \'%s\': mismatched number of output files (%d) and params (%d)' % (step, outfile, len(outfiles))
+        assert len(outfiles) == outfile, 'step \'%s\': mismatched number of output files and params' % step
 
 if args.step:
     steps = steps[steps.index(args.step):]

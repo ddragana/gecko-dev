@@ -4,7 +4,7 @@
 
 package org.mozilla.search;
 
-import android.content.Context;
+import android.app.Activity;
 import android.database.Cursor;
 import android.graphics.Rect;
 import android.net.Uri;
@@ -26,7 +26,6 @@ import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
 
-import org.mozilla.gecko.GeckoApplication;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
@@ -64,13 +63,13 @@ public class PreSearchFragment extends Fragment {
     }
 
     @Override
-    public void onAttach(Context context) {
-        super.onAttach(context);
+    public void onAttach(Activity activity) {
+        super.onAttach(activity);
 
-        if (context instanceof AcceptsSearchQuery) {
-            searchListener = (AcceptsSearchQuery) context;
+        if (activity instanceof AcceptsSearchQuery) {
+            searchListener = (AcceptsSearchQuery) activity;
         } else {
-            throw new ClassCastException(context.toString() + " must implement AcceptsSearchQuery.");
+            throw new ClassCastException(activity.toString() + " must implement AcceptsSearchQuery.");
         }
     }
 
@@ -94,8 +93,6 @@ public class PreSearchFragment extends Fragment {
         getLoaderManager().destroyLoader(LOADER_ID_SEARCH_HISTORY);
         cursorAdapter.swapCursor(null);
         cursorAdapter = null;
-
-        GeckoApplication.watchReference(getActivity(), this);
     }
 
     @Override
@@ -113,7 +110,7 @@ public class PreSearchFragment extends Fragment {
                     final Rect startBounds = new Rect();
                     view.getGlobalVisibleRect(startBounds);
 
-                    Telemetry.sendUIEvent(TelemetryContract.Event.SEARCH, TelemetryContract.Method.SUGGESTION, "history");
+                    Telemetry.sendUIEvent(TelemetryContract.Event.SEARCH, TelemetryContract.Method.HOMESCREEN, "history");
 
                     searchListener.onSearch(query, new SuggestionAnimation() {
                         @Override

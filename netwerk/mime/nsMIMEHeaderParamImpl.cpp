@@ -1238,14 +1238,13 @@ nsresult DecodeRFC2047Str(const char *aHeader, const char *aDefaultCharset,
     if (q[1] != '?')
       goto badsyntax;
 
-    // loop-wise, keep going until we hit "?=".  the inner check handles the
-    //  nul terminator should the string terminate before we hit the right
-    //  marker.  (And the r[1] will never reach beyond the end of the string
-    //  because *r != '?' is true if r is the nul character.)
-    for (r = q + 2; *r != '?' || r[1] != '='; r++) {
+    r = q;
+    for (r = q + 2; *r != '?'; r++) {
       if (*r < ' ') goto badsyntax;
     }
-    if (r == q + 2) {
+    if (r[1] != '=')
+        goto badsyntax;
+    else if (r == q + 2) {
         // it's empty, skip
         begin = r + 2;
         isLastEncodedWord = 1;

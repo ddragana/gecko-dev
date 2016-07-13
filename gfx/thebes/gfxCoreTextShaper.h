@@ -18,11 +18,11 @@ public:
 
     virtual ~gfxCoreTextShaper();
 
-    virtual bool ShapeText(DrawTarget      *aDrawTarget,
+    virtual bool ShapeText(gfxContext      *aContext,
                            const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
-                           Script           aScript,
+                           int32_t          aScript,
                            bool             aVertical,
                            gfxShapedText   *aShapedText);
 
@@ -31,10 +31,7 @@ public:
 
 protected:
     CTFontRef mCTFont;
-
-    // attributes for shaping text with LTR or RTL directionality
-    CFDictionaryRef mAttributesDictLTR;
-    CFDictionaryRef mAttributesDictRTL;
+    CFDictionaryRef mAttributesDict;
 
     nsresult SetGlyphsFromRun(gfxShapedText *aShapedText,
                               uint32_t       aOffset,
@@ -44,9 +41,6 @@ protected:
 
     CTFontRef CreateCTFontWithFeatures(CGFloat aSize,
                                        CTFontDescriptorRef aDescriptor);
-
-    CFDictionaryRef CreateAttrDict(bool aRightToLeft);
-    CFDictionaryRef CreateAttrDictWithoutDirection();
 
     static CTFontDescriptorRef
     CreateFontFeaturesDescriptor(const std::pair<SInt16,SInt16> aFeatures[],

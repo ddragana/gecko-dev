@@ -10,6 +10,7 @@
 #include "basic/BasicLayers.h"          // for BasicLayerManager
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/mozalloc.h"           // for operator new
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 #include "nsPoint.h"                    // for nsIntPoint
@@ -38,32 +39,22 @@ BasicContainerLayer::ComputeEffectiveTransforms(const Matrix4x4& aTransformToSur
   // containers.
   Matrix residual;
   Matrix4x4 idealTransform = GetLocalTransform() * aTransformToSurface;
-  if (!Extend3DContext() && !Is3DContextLeaf()) {
-    // For 3D transform leaked from extended parent layer.
-    idealTransform.ProjectTo2D();
-  }
+  idealTransform.ProjectTo2D();
 
   if (!idealTransform.CanDraw2D()) {
-    if (!Extend3DContext() ||
-        (!idealTransform.Is2D() && Creates3DContextWithExtendingChildren())) {
-      if (!Creates3DContextWithExtendingChildren()) {
-        idealTransform.ProjectTo2D();
-      }
-      mEffectiveTransform = idealTransform;
-      ComputeEffectiveTransformsForChildren(Matrix4x4());
-      ComputeEffectiveTransformForMaskLayers(Matrix4x4());
-      mUseIntermediateSurface = true;
-      return;
-    }
-
     mEffectiveTransform = idealTransform;
-    ComputeEffectiveTransformsForChildren(idealTransform);
-    ComputeEffectiveTransformForMaskLayers(idealTransform);
-    mUseIntermediateSurface = false;
+    ComputeEffectiveTransformsForChildren(Matrix4x4());
+    ComputeEffectiveTransformForMaskLayers(Matrix4x4());
+    mUseIntermediateSurface = true;
     return;
   }
 
-  // With 2D transform or extended 3D context.
+  mEffectiveTransform = SnapTransformTranslation(idealTransform, &residual);
+  // We always pass the ideal matrix down to our children, so there is no
+  // need to apply any compensation using the residual from SnapTransformTranslation.
+  ComputeEffectiveTransformsForChildren(idealTransform);
+
+  ComputeEffectiveTransformForMaskLayers(aTransformToSurface);
 
   Layer* child = GetFirstChild();
   bool hasSingleBlendingChild = false;
@@ -82,21 +73,7 @@ BasicContainerLayer::ComputeEffectiveTransforms(const Matrix4x4& aTransformToSur
     GetMaskLayer() ||
     GetForceIsolatedGroup() ||
     (GetMixBlendMode() != CompositionOp::OP_OVER && HasMultipleChildren()) ||
-    (GetEffectiveOpacity() != 1.0 && ((HasMultipleChildren() && !Extend3DContext()) || hasSingleBlendingChild));
-
-  if (!Extend3DContext()) {
-    idealTransform.ProjectTo2D();
-  }
-  mEffectiveTransform =
-    !mUseIntermediateSurface ?
-    idealTransform : SnapTransformTranslation(idealTransform, &residual);
-  Matrix4x4 childTransformToSurface =
-    (!mUseIntermediateSurface ||
-     (mUseIntermediateSurface && !Extend3DContext() /* 2D */)) ?
-    idealTransform : Matrix4x4::From2D(residual);
-  ComputeEffectiveTransformsForChildren(childTransformToSurface);
-
-  ComputeEffectiveTransformForMaskLayers(aTransformToSurface);
+    (GetEffectiveOpacity() != 1.0 && (HasMultipleChildren() || hasSingleBlendingChild));
 }
 
 bool
@@ -108,7 +85,7 @@ BasicContainerLayer::ChildrenPartitionVisibleRegion(const gfx::IntRect& aInRect)
     return false;
 
   nsIntPoint offset(int32_t(transform._31), int32_t(transform._32));
-  gfx::IntRect rect = aInRect.Intersect(GetLocalVisibleRegion().ToUnknownRegion().GetBounds() + offset);
+  gfx::IntRect rect = aInRect.Intersect(GetEffectiveVisibleRegion().GetBounds() + offset);
   nsIntRegion covered;
 
   for (Layer* l = mFirstChild; l; l = l->GetNextSibling()) {
@@ -120,11 +97,11 @@ BasicContainerLayer::ChildrenPartitionVisibleRegion(const gfx::IntRect& aInRect)
         ThebesMatrix(childTransform).HasNonIntegerTranslation() ||
         l->GetEffectiveOpacity() != 1.0)
       return false;
-    nsIntRegion childRegion = l->GetLocalVisibleRegion().ToUnknownRegion();
+    nsIntRegion childRegion = l->GetEffectiveVisibleRegion();
     childRegion.MoveBy(int32_t(childTransform._31), int32_t(childTransform._32));
     childRegion.And(childRegion, rect);
     if (l->GetClipRect()) {
-      childRegion.And(childRegion, l->GetClipRect()->ToUnknownRect() + offset);
+      childRegion.And(childRegion, ParentLayerIntRect::ToUntyped(*l->GetClipRect()) + offset);
     }
     nsIntRegion intersection;
     intersection.And(covered, childRegion);
@@ -159,7 +136,7 @@ already_AddRefed<ContainerLayer>
 BasicLayerManager::CreateContainerLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  RefPtr<ContainerLayer> layer = new BasicContainerLayer(this);
+  nsRefPtr<ContainerLayer> layer = new BasicContainerLayer(this);
   return layer.forget();
 }
 

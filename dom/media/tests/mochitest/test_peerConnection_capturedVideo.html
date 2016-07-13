@@ -14,7 +14,7 @@ createHTML({
   title: "Captured video-only over peer connection",
   visible: true
 }).then(() => new Promise(resolve => {
-  manager.runTests(getPlayableVideos(gLongerTests), startTest);
+  manager.runTests(getPlayableVideos(gSmallTests), startTest);
   manager.onFinished = () => {
     // Tear down before SimpleTest.finish.
     if ("nsINetworkInterfaceListService" in SpecialPowers.Ci) {
@@ -61,7 +61,10 @@ function startTest(media, token) {
       test.setMediaConstraints([{ video: hasVideo, audio: hasAudio }], []);
       test.chain.replace("PC_LOCAL_GUM", [
         function PC_LOCAL_CAPTUREVIDEO(test) {
-          test.pcLocal.attachLocalStream(stream);
+          var type = "";
+          if (hasAudio) { type += "audio"; }
+          if (hasVideo) { type += "video"; }
+          test.pcLocal.attachMedia(stream, type, "local");
           video.play();
         }
       ]);
@@ -73,8 +76,8 @@ function startTest(media, token) {
                         (e.code ? " (code=" + e.code + ")" : "") +
                         " in test for " + media.name +
                         (e.stack ? ":\n" + e.stack : "")))
-  .then(() => test && test.close())
   .then(() => {
+    if (test) { test.close(); }
     removeNodeAndSource(video);
     manager.finished(token);
   })

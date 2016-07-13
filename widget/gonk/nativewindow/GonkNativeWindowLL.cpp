@@ -160,7 +160,7 @@ void GonkNativeWindow::returnBuffer(TextureClient* client) {
     }
 
     FenceHandle handle = client->GetAndResetReleaseFenceHandle();
-    RefPtr<FenceHandle::FdObj> fdObj = handle.GetAndResetFdObj();
+    nsRefPtr<FenceHandle::FdObj> fdObj = handle.GetAndResetFdObj();
     sp<Fence> fence = new Fence(fdObj->GetAndResetFd());
 
     status_t err;

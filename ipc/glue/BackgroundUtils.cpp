@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,7 +6,6 @@
 
 #include "MainThreadUtils.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/BasePrincipal.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "nsPrincipal.h"
@@ -26,7 +23,6 @@ namespace net {
 class OptionalLoadInfoArgs;
 }
 
-using mozilla::BasePrincipal;
 using namespace mozilla::net;
 
 namespace ipc {
@@ -60,9 +56,10 @@ PrincipalInfoToPrincipal(const PrincipalInfo& aPrincipalInfo,
     }
 
     case PrincipalInfo::TNullPrincipalInfo: {
-      const NullPrincipalInfo& info =
-        aPrincipalInfo.get_NullPrincipalInfo();
-      principal = nsNullPrincipal::Create(info.attrs());
+      principal = do_CreateInstance(NS_NULLPRINCIPAL_CONTRACTID, &rv);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return nullptr;
+      }
 
       return principal.forget();
     }
@@ -77,12 +74,14 @@ PrincipalInfoToPrincipal(const PrincipalInfo& aPrincipalInfo,
         return nullptr;
       }
 
-      PrincipalOriginAttributes attrs;
-      if (info.attrs().mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID) {
-        attrs = info.attrs();
+      if (info.appId() == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+        rv = secMan->GetSimpleCodebasePrincipal(uri, getter_AddRefs(principal));
+      } else {
+        rv = secMan->GetAppCodebasePrincipal(uri,
+                                             info.appId(),
+                                             info.isInBrowserElement(),
+                                             getter_AddRefs(principal));
       }
-      principal = BasePrincipal::CreateCodebasePrincipal(uri, attrs);
-      rv = principal ? NS_OK : NS_ERROR_FAILURE;
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return nullptr;
       }
@@ -105,7 +104,7 @@ PrincipalInfoToPrincipal(const PrincipalInfo& aPrincipalInfo,
         whitelist.AppendElement(wlPrincipal);
       }
 
-      RefPtr<nsExpandedPrincipal> expandedPrincipal = new nsExpandedPrincipal(whitelist);
+      nsRefPtr<nsExpandedPrincipal> expandedPrincipal = new nsExpandedPrincipal(whitelist);
       if (!expandedPrincipal) {
         NS_WARNING("could not instantiate expanded principal");
         return nullptr;
@@ -130,14 +129,14 @@ PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
   MOZ_ASSERT(aPrincipal);
   MOZ_ASSERT(aPrincipalInfo);
 
-  bool isNullPrin;
-  nsresult rv = aPrincipal->GetIsNullPrincipal(&isNullPrin);
+  bool isNullPointer;
+  nsresult rv = aPrincipal->GetIsNullPrincipal(&isNullPointer);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  if (isNullPrin) {
-    *aPrincipalInfo = NullPrincipalInfo(BasePrincipal::Cast(aPrincipal)->OriginAttributesRef());
+  if (isNullPointer) {
+    *aPrincipalInfo = NullPrincipalInfo();
     return NS_OK;
   }
 
@@ -167,7 +166,7 @@ PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     PrincipalInfo info;
 
     nsTArray< nsCOMPtr<nsIPrincipal> >* whitelist;
-    MOZ_ALWAYS_SUCCEEDS(expanded->GetWhiteList(&whitelist));
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(expanded->GetWhiteList(&whitelist)));
 
     for (uint32_t i = 0; i < whitelist->Length(); i++) {
       rv = PrincipalToPrincipalInfo((*whitelist)[i], &info);
@@ -200,8 +199,29 @@ PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     return rv;
   }
 
-  *aPrincipalInfo = ContentPrincipalInfo(BasePrincipal::Cast(aPrincipal)->OriginAttributesRef(),
-                                         spec);
+  bool isUnknownAppId;
+  rv = aPrincipal->GetUnknownAppId(&isUnknownAppId);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  uint32_t appId;
+  if (isUnknownAppId) {
+    appId = nsIScriptSecurityManager::UNKNOWN_APP_ID;
+  } else {
+    rv = aPrincipal->GetAppId(&appId);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  bool isInBrowserElement;
+  rv = aPrincipal->GetIsInBrowserElement(&isInBrowserElement);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  *aPrincipalInfo = ContentPrincipalInfo(appId, isInBrowserElement, spec);
   return NS_OK;
 }
 
@@ -216,24 +236,14 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
   }
 
   nsresult rv = NS_OK;
-  OptionalPrincipalInfo loadingPrincipalInfo = mozilla::void_t();
-  if (aLoadInfo->LoadingPrincipal()) {
-    PrincipalInfo loadingPrincipalInfoTemp;
-    rv = PrincipalToPrincipalInfo(aLoadInfo->LoadingPrincipal(),
-                                  &loadingPrincipalInfoTemp);
-    NS_ENSURE_SUCCESS(rv, rv);
-    loadingPrincipalInfo = loadingPrincipalInfoTemp;
-  }
+  PrincipalInfo requestingPrincipalInfo;
+  rv = PrincipalToPrincipalInfo(aLoadInfo->LoadingPrincipal(),
+                                &requestingPrincipalInfo);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   PrincipalInfo triggeringPrincipalInfo;
   rv = PrincipalToPrincipalInfo(aLoadInfo->TriggeringPrincipal(),
                                 &triggeringPrincipalInfo);
-
-  nsTArray<PrincipalInfo> redirectChainIncludingInternalRedirects;
-  for (const nsCOMPtr<nsIPrincipal>& principal : aLoadInfo->RedirectChainIncludingInternalRedirects()) {
-    rv = PrincipalToPrincipalInfo(principal, redirectChainIncludingInternalRedirects.AppendElement());
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
 
   nsTArray<PrincipalInfo> redirectChain;
   for (const nsCOMPtr<nsIPrincipal>& principal : aLoadInfo->RedirectChain()) {
@@ -243,27 +253,17 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
 
   *aOptionalLoadInfoArgs =
     LoadInfoArgs(
-      loadingPrincipalInfo,
+      requestingPrincipalInfo,
       triggeringPrincipalInfo,
       aLoadInfo->GetSecurityFlags(),
-      aLoadInfo->InternalContentPolicyType(),
-      static_cast<uint32_t>(aLoadInfo->GetTainting()),
+      aLoadInfo->GetContentPolicyType(),
       aLoadInfo->GetUpgradeInsecureRequests(),
-      aLoadInfo->GetVerifySignedContent(),
-      aLoadInfo->GetEnforceSRI(),
       aLoadInfo->GetInnerWindowID(),
       aLoadInfo->GetOuterWindowID(),
       aLoadInfo->GetParentOuterWindowID(),
-      aLoadInfo->GetFrameOuterWindowID(),
       aLoadInfo->GetEnforceSecurity(),
       aLoadInfo->GetInitialSecurityCheckDone(),
-      aLoadInfo->GetIsInThirdPartyContext(),
-      aLoadInfo->GetOriginAttributes(),
-      redirectChainIncludingInternalRedirects,
-      redirectChain,
-      aLoadInfo->CorsUnsafeHeaders(),
-      aLoadInfo->GetForcePreflight(),
-      aLoadInfo->GetIsPreflight());
+      redirectChain);
 
   return NS_OK;
 }
@@ -281,24 +281,12 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
     aOptionalLoadInfoArgs.get_LoadInfoArgs();
 
   nsresult rv = NS_OK;
-  nsCOMPtr<nsIPrincipal> loadingPrincipal;
-  if (loadInfoArgs.requestingPrincipalInfo().type() != OptionalPrincipalInfo::Tvoid_t) {
-    loadingPrincipal = PrincipalInfoToPrincipal(loadInfoArgs.requestingPrincipalInfo(), &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
+  nsCOMPtr<nsIPrincipal> requestingPrincipal =
+    PrincipalInfoToPrincipal(loadInfoArgs.requestingPrincipalInfo(), &rv);
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIPrincipal> triggeringPrincipal =
     PrincipalInfoToPrincipal(loadInfoArgs.triggeringPrincipalInfo(), &rv);
   NS_ENSURE_SUCCESS(rv, rv);
-
-  nsTArray<nsCOMPtr<nsIPrincipal>> redirectChainIncludingInternalRedirects;
-  for (const PrincipalInfo& principalInfo : loadInfoArgs.redirectChainIncludingInternalRedirects()) {
-    nsCOMPtr<nsIPrincipal> redirectedPrincipal =
-      PrincipalInfoToPrincipal(principalInfo, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-    redirectChainIncludingInternalRedirects.AppendElement(redirectedPrincipal.forget());
-  }
 
   nsTArray<nsCOMPtr<nsIPrincipal>> redirectChain;
   for (const PrincipalInfo& principalInfo : loadInfoArgs.redirectChain()) {
@@ -309,27 +297,17 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
   }
 
   nsCOMPtr<nsILoadInfo> loadInfo =
-    new mozilla::LoadInfo(loadingPrincipal,
+    new mozilla::LoadInfo(requestingPrincipal,
                           triggeringPrincipal,
                           loadInfoArgs.securityFlags(),
                           loadInfoArgs.contentPolicyType(),
-                          static_cast<LoadTainting>(loadInfoArgs.tainting()),
                           loadInfoArgs.upgradeInsecureRequests(),
-                          loadInfoArgs.verifySignedContent(),
-                          loadInfoArgs.enforceSRI(),
                           loadInfoArgs.innerWindowID(),
                           loadInfoArgs.outerWindowID(),
                           loadInfoArgs.parentOuterWindowID(),
-                          loadInfoArgs.frameOuterWindowID(),
                           loadInfoArgs.enforceSecurity(),
                           loadInfoArgs.initialSecurityCheckDone(),
-                          loadInfoArgs.isInThirdPartyContext(),
-                          loadInfoArgs.originAttributes(),
-                          redirectChainIncludingInternalRedirects,
-                          redirectChain,
-                          loadInfoArgs.corsUnsafeHeaders(),
-                          loadInfoArgs.forcePreflight(),
-                          loadInfoArgs.isPreflight());
+                          redirectChain);
 
    loadInfo.forget(outLoadInfo);
    return NS_OK;

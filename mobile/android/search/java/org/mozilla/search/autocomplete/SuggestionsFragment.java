@@ -7,15 +7,15 @@ package org.mozilla.search.autocomplete;
 import java.util.ArrayList;
 import java.util.List;
 
-import android.support.v4.content.ContextCompat;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.search.SearchEngine;
 import org.mozilla.gecko.SuggestClient;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.search.AcceptsSearchQuery;
 import org.mozilla.search.AcceptsSearchQuery.SuggestionAnimation;
+import org.mozilla.search.providers.SearchEngine;
 
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.Rect;
 import android.os.Bundle;
@@ -67,17 +67,17 @@ public class SuggestionsFragment extends Fragment {
     }
 
     @Override
-    public void onAttach(Context context) {
-        super.onAttach(context);
+    public void onAttach(Activity activity) {
+        super.onAttach(activity);
 
-        if (context instanceof AcceptsSearchQuery) {
-            searchListener = (AcceptsSearchQuery) context;
+        if (activity instanceof AcceptsSearchQuery) {
+            searchListener = (AcceptsSearchQuery) activity;
         } else {
-            throw new ClassCastException(context.toString() + " must implement AcceptsSearchQuery.");
+            throw new ClassCastException(activity.toString() + " must implement AcceptsSearchQuery.");
         }
 
         suggestionLoaderCallbacks = new SuggestionLoaderCallbacks();
-        autoCompleteAdapter = new AutoCompleteAdapter(context);
+        autoCompleteAdapter = new AutoCompleteAdapter(activity);
     }
 
     @Override
@@ -212,7 +212,7 @@ public class SuggestionsFragment extends Fragment {
             this.suggestions = null;
 
             // Color of search term match in search suggestion
-            suggestionHighlightColor = ContextCompat.getColor(context, R.color.suggestion_highlight);
+            suggestionHighlightColor = context.getResources().getColor(R.color.suggestion_highlight);
         }
 
         @Override

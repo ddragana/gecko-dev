@@ -15,8 +15,6 @@
 #define ZIP_METHOD_STORE 0
 #define ZIP_METHOD_DEFLATE 8
 
-using namespace mozilla;
-
 /**
  * nsZipDataStream handles the writing an entry's into the zip file.
  * It is set up to wither write the data as is, or in the event that compression
@@ -61,6 +59,9 @@ nsresult nsZipDataStream::Init(nsZipWriter *aWriter,
     return NS_OK;
 }
 
+/* void onDataAvailable (in nsIRequest aRequest, in nsISupports aContext,
+ *                       in nsIInputStream aInputStream,
+ *                       in unsigned long long aOffset, in unsigned long aCount); */
 NS_IMETHODIMP nsZipDataStream::OnDataAvailable(nsIRequest *aRequest,
                                                nsISupports *aContext,
                                                nsIInputStream *aInputStream,
@@ -70,7 +71,7 @@ NS_IMETHODIMP nsZipDataStream::OnDataAvailable(nsIRequest *aRequest,
     if (!mOutput)
         return NS_ERROR_NOT_INITIALIZED;
 
-    auto buffer = MakeUnique<char[]>(aCount);
+    nsAutoArrayPtr<char> buffer(new char[aCount]);
     NS_ENSURE_TRUE(buffer, NS_ERROR_OUT_OF_MEMORY);
 
     nsresult rv = ZW_ReadData(aInputStream, buffer.get(), aCount);
@@ -79,6 +80,7 @@ NS_IMETHODIMP nsZipDataStream::OnDataAvailable(nsIRequest *aRequest,
     return ProcessData(aRequest, aContext, buffer.get(), aOffset, aCount);
 }
 
+/* void onStartRequest (in nsIRequest aRequest, in nsISupports aContext); */
 NS_IMETHODIMP nsZipDataStream::OnStartRequest(nsIRequest *aRequest,
                                               nsISupports *aContext)
 {
@@ -88,6 +90,8 @@ NS_IMETHODIMP nsZipDataStream::OnStartRequest(nsIRequest *aRequest,
     return mOutput->OnStartRequest(aRequest, aContext);
 }
 
+/* void onStopRequest (in nsIRequest aRequest, in nsISupports aContext,
+ *                     in nsresult aStatusCode); */
 NS_IMETHODIMP nsZipDataStream::OnStopRequest(nsIRequest *aRequest,
                                              nsISupports *aContext,
                                              nsresult aStatusCode)
@@ -154,7 +158,7 @@ nsresult nsZipDataStream::ReadStream(nsIInputStream *aStream)
     nsresult rv = OnStartRequest(nullptr, nullptr);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    auto buffer = MakeUnique<char[]>(4096);
+    nsAutoArrayPtr<char> buffer(new char[4096]);
     NS_ENSURE_TRUE(buffer, NS_ERROR_OUT_OF_MEMORY);
 
     uint32_t read = 0;

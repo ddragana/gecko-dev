@@ -15,8 +15,6 @@
 namespace mozilla {
 namespace dom {
 
-class HTMLFormSubmission;
-
 class HTMLOutputElement final : public nsGenericHTMLFormElement,
                                 public nsStubMutationObserver,
                                 public nsIConstraintValidation
@@ -33,7 +31,7 @@ public:
   // nsIFormControl
   NS_IMETHOD_(uint32_t) GetType() const override { return NS_FORM_OUTPUT; }
   NS_IMETHOD Reset() override;
-  NS_IMETHOD SubmitNamesValues(HTMLFormSubmission* aFormSubmission) override;
+  NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission) override;
 
   virtual bool IsDisabled() const override { return false; }
 
@@ -66,7 +64,7 @@ public:
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // WebIDL
-  nsDOMTokenList* HtmlFor();
+  nsDOMSettableTokenList* HtmlFor();
   // nsGenericHTMLFormElement::GetForm is fine.
   void GetName(nsAString& aName)
   {
@@ -110,7 +108,7 @@ protected:
   ValueModeFlag                     mValueModeFlag;
   bool                              mIsDoneAddingChildren;
   nsString                          mDefaultValue;
-  RefPtr<nsDOMTokenList>  mTokenList;
+  nsRefPtr<nsDOMSettableTokenList>  mTokenList;
 };
 
 } // namespace dom

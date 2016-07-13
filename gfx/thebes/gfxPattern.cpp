@@ -19,15 +19,15 @@
 
 using namespace mozilla::gfx;
 
-gfxPattern::gfxPattern(const Color& aColor)
-  : mExtend(ExtendMode::CLAMP)
+gfxPattern::gfxPattern(const gfxRGBA& aColor)
+  : mExtend(EXTEND_NONE)
 {
   mGfxPattern.InitColorPattern(ToDeviceColor(aColor));
 }
 
 // linear
 gfxPattern::gfxPattern(gfxFloat x0, gfxFloat y0, gfxFloat x1, gfxFloat y1)
-  : mExtend(ExtendMode::CLAMP)
+  : mExtend(EXTEND_NONE)
 {
   mGfxPattern.InitLinearGradientPattern(Point(x0, y0), Point(x1, y1), nullptr);
 }
@@ -35,7 +35,7 @@ gfxPattern::gfxPattern(gfxFloat x0, gfxFloat y0, gfxFloat x1, gfxFloat y1)
 // radial
 gfxPattern::gfxPattern(gfxFloat cx0, gfxFloat cy0, gfxFloat radius0,
                        gfxFloat cx1, gfxFloat cy1, gfxFloat radius1)
-  : mExtend(ExtendMode::CLAMP)
+  : mExtend(EXTEND_NONE)
 {
   mGfxPattern.InitRadialGradientPattern(Point(cx0, cy0), Point(cx1, cy1),
                                         radius0, radius1, nullptr);
@@ -44,14 +44,14 @@ gfxPattern::gfxPattern(gfxFloat cx0, gfxFloat cy0, gfxFloat radius0,
 // Azure
 gfxPattern::gfxPattern(SourceSurface *aSurface, const Matrix &aPatternToUserSpace)
   : mPatternToUserSpace(aPatternToUserSpace)
-  , mExtend(ExtendMode::CLAMP)
+  , mExtend(EXTEND_NONE)
 {
-  mGfxPattern.InitSurfacePattern(aSurface, mExtend, Matrix(), // matrix is overridden in GetPattern()
-                                 mozilla::gfx::SamplingFilter::GOOD);
+  mGfxPattern.InitSurfacePattern(aSurface, ToExtendMode(mExtend), Matrix(), // matrix is overridden in GetPattern()
+                                 mozilla::gfx::Filter::GOOD);
 }
 
 void
-gfxPattern::AddColorStop(gfxFloat offset, const Color& c)
+gfxPattern::AddColorStop(gfxFloat offset, const gfxRGBA& c)
 {
   if (mGfxPattern.GetPattern()->GetType() != PatternType::LINEAR_GRADIENT &&
       mGfxPattern.GetPattern()->GetType() != PatternType::RADIAL_GRADIENT) {
@@ -75,7 +75,8 @@ gfxPattern::SetColorStops(GradientStops* aStops)
 void
 gfxPattern::CacheColorStops(const DrawTarget *aDT)
 {
-  mStops = gfxGradientCache::GetOrCreateGradientStops(aDT, mStopsList, mExtend);
+  mStops = gfxGradientCache::GetOrCreateGradientStops(aDT, mStopsList,
+                                                      ToExtendMode(mExtend));
 }
 
 void
@@ -131,14 +132,15 @@ gfxPattern::GetPattern(const DrawTarget *aTarget,
   if (!mStops &&
       !mStopsList.IsEmpty()) {
     mStops = aTarget->CreateGradientStops(mStopsList.Elements(),
-                                          mStopsList.Length(), mExtend);
+                                          mStopsList.Length(),
+                                          ToExtendMode(mExtend));
   }
 
   switch (mGfxPattern.GetPattern()->GetType()) {
   case PatternType::SURFACE: {
     SurfacePattern* surfacePattern = static_cast<SurfacePattern*>(mGfxPattern.GetPattern());
     surfacePattern->mMatrix = patternToUser;
-    surfacePattern->mExtendMode = mExtend;
+    surfacePattern->mExtendMode = ToExtendMode(mExtend);
     break;
   }
   case PatternType::LINEAR_GRADIENT: {
@@ -162,9 +164,9 @@ gfxPattern::GetPattern(const DrawTarget *aTarget,
 }
 
 void
-gfxPattern::SetExtend(ExtendMode aExtend)
+gfxPattern::SetExtend(GraphicsExtend extend)
 {
-  mExtend = aExtend;
+  mExtend = extend;
   mStops = nullptr;
 }
 
@@ -181,34 +183,46 @@ gfxPattern::IsOpaque()
   return false;
 }
 
+gfxPattern::GraphicsExtend
+gfxPattern::Extend() const
+{
+  return mExtend;
+}
+
 void
-gfxPattern::SetSamplingFilter(gfx::SamplingFilter filter)
+gfxPattern::SetFilter(GraphicsFilter filter)
 {
   if (mGfxPattern.GetPattern()->GetType() != PatternType::SURFACE) {
     return;
   }
 
-  static_cast<SurfacePattern*>(mGfxPattern.GetPattern())->mSamplingFilter = filter;
+  static_cast<SurfacePattern*>(mGfxPattern.GetPattern())->mFilter = ToFilter(filter);
 }
 
-SamplingFilter
-gfxPattern::SamplingFilter() const
+GraphicsFilter
+gfxPattern::Filter() const
 {
   if (mGfxPattern.GetPattern()->GetType() != PatternType::SURFACE) {
-    return gfx::SamplingFilter::GOOD;
+    return GraphicsFilter::FILTER_GOOD;
   }
-  return static_cast<const SurfacePattern*>(mGfxPattern.GetPattern())->mSamplingFilter;
+  return ThebesFilter(static_cast<const SurfacePattern*>(mGfxPattern.GetPattern())->mFilter);
 }
 
 bool
-gfxPattern::GetSolidColor(Color& aColorOut)
+gfxPattern::GetSolidColor(gfxRGBA& aColor)
 {
   if (mGfxPattern.GetPattern()->GetType() == PatternType::COLOR) {
-    aColorOut = static_cast<ColorPattern*>(mGfxPattern.GetPattern())->mColor;
+    aColor = ThebesColor(static_cast<ColorPattern*>(mGfxPattern.GetPattern())->mColor);
     return true;
   }
 
  return false;
+}
+
+gfxPattern::GraphicsPatternType
+gfxPattern::GetType() const
+{
+  return ThebesPatternType(mGfxPattern.GetPattern()->GetType());
 }
 
 int

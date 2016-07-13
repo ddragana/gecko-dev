@@ -15,7 +15,7 @@
 #include "nsWrapperCache.h"
 #include "mozilla/ErrorResult.h"
 
-class nsPIDOMWindowInner;
+class nsIDOMWindow;
 
 namespace mozilla {
 namespace dom {
@@ -45,7 +45,7 @@ public:
   // Initialize this wake lock on behalf of the given window.  Null windows are
   // allowed; a lock without an associated window is always considered
   // invisible.
-  nsresult Init(const nsAString &aTopic, nsPIDOMWindowInner* aWindow);
+  nsresult Init(const nsAString &aTopic, nsIDOMWindow* aWindow);
 
   // Initialize this wake lock on behalf of the given process.  If the process
   // dies, the lock is released.  A wake lock initialized via this method is
@@ -54,7 +54,7 @@ public:
 
   // WebIDL methods
 
-  nsPIDOMWindowInner* GetParentObject() const;
+  nsISupports* GetParentObject() const;
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;

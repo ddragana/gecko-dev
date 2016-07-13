@@ -7,15 +7,14 @@
 
 #include "nscore.h"
 #include "nspr.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/Mutex.h"
-#include "mozilla/StaticMutex.h"
 
 class nsNSSShutDownObject;
 class nsOnPK11LogoutCancelObject;
 
-// Singleton, owned by nsNSSShutDownList
+// Singleton, owner by nsNSSShutDownList
 class nsNSSActivityState
 {
 public:
@@ -26,8 +25,32 @@ public:
   // shutting down NSS is prohibited.
   void enter();
   void leave();
-  // Wait for all activity to stop, and block any other thread on entering
-  // relevant PSM code.
+  
+  // Call enter/leave when PSM is about to show a UI
+  // while still holding resources.
+  void enterBlockingUIState();
+  void leaveBlockingUIState();
+  
+  // Is the activity aware of any blocking PSM UI currently shown?
+  bool isBlockingUIActive();
+
+  // Is it forbidden to bring up an UI while holding resources?
+  bool isUIForbidden();
+  
+  // Check whether setting the current thread restriction is possible.
+  // If it is possible, and the "do_it_for_real" flag is used,
+  // the state tracking will have ensured that we will stay in this state.
+  // As of writing, this includes forbidding PSM UI.
+  enum RealOrTesting {test_only, do_it_for_real};
+  bool ifPossibleDisallowUI(RealOrTesting rot);
+
+  // Notify the state tracking that going to the restricted state is
+  // no longer planned.
+  // As of writing, this includes clearing the "PSM UI forbidden" flag.
+  void allowUI();
+
+  // If currently no UI is shown, wait for all activity to stop,
+  // and block any other thread on entering relevant PSM code.
   PRStatus restrictActivityToCurrentThread();
   
   // Go back to normal state.
@@ -45,6 +68,13 @@ private:
   // The number of active scopes holding resources.
   int mNSSActivityCounter;
 
+  // The number of scopes holding resources while blocked
+  // showing an UI.
+  int mBlockingUICounter;
+
+  // Whether bringing up UI is currently forbidden
+  bool mIsUIForbidden;
+
   // nullptr means "no restriction"
   // if not null, activity is only allowed on that thread
   PRThread* mNSSRestrictedThread;
@@ -58,13 +88,25 @@ public:
   ~nsNSSShutDownPreventionLock();
 };
 
+// Helper class that automatically enters/leaves the global UI tracking
+class nsPSMUITracker
+{
+public:
+  nsPSMUITracker();
+  ~nsPSMUITracker();
+  
+  bool isUIForbidden();
+};
+
 // Singleton, used by nsNSSComponent to track the list of PSM objects,
 // which hold NSS resources and support the "early cleanup mechanism".
 class nsNSSShutDownList
 {
 public:
-  static void shutdown();
+  ~nsNSSShutDownList();
 
+  static nsNSSShutDownList *construct();
+  
   // track instances that support early cleanup
   static void remember(nsNSSShutDownObject *o);
   static void forget(nsNSSShutDownObject *o);
@@ -74,24 +116,42 @@ public:
   static void remember(nsOnPK11LogoutCancelObject *o);
   static void forget(nsOnPK11LogoutCancelObject *o);
 
+  // track the creation and destruction of SSL sockets
+  // performed by clients using PSM services
+  static void trackSSLSocketCreate();
+  static void trackSSLSocketClose();
+  static bool areSSLSocketsActive();
+  
+  // Are we able to do the early cleanup?
+  // Returns failure if at the current time "early cleanup" is not possible.
+  bool isUIActive();
+
+  // If possible to do "early cleanup" at the current time, remember that we want to
+  // do it, and disallow actions that would change the possibility.
+  bool ifPossibleDisallowUI();
+
+  // Notify that it is no longer planned to do the "early cleanup".
+  void allowUI();
+  
   // Do the "early cleanup", if possible.
-  static nsresult evaporateAllNSSResources();
+  nsresult evaporateAllNSSResources();
 
   // PSM has been asked to log out of a token.
   // Notify all registered instances that want to react to that event.
-  static nsresult doPK11Logout();
-
-  // Signal entering/leaving a scope where shutting down NSS is prohibited.
-  static void enterActivityState();
-  static void leaveActivityState();
-
+  nsresult doPK11Logout();
+  
+  static nsNSSActivityState *getActivityState()
+  {
+    return singleton ? &singleton->mActivityState : nullptr;
+  }
+  
 private:
-  static bool construct(const mozilla::StaticMutexAutoLock& /*proofOfLock*/);
-
   nsNSSShutDownList();
-  ~nsNSSShutDownList();
 
 protected:
+  mozilla::Mutex mListLock;
+  static nsNSSShutDownList *singleton;
+  uint32_t mActiveSSLSockets;
   PLDHashTable mObjects;
   PLDHashTable mPK11LogoutCancelObjects;
   nsNSSActivityState mActivityState;
@@ -127,22 +187,6 @@ protected:
   shutdown(calledFromObject). The second call will deregister with
   the tracking list, to ensure no additional attempt to free the resources
   will be made.
-
-  ----------------------------------------------------------------------------
-  IMPORTANT NOTE REGARDING CLASSES THAT IMPLEMENT nsNSSShutDownObject BUT DO
-  NOT DIRECTLY HOLD NSS RESOURCES:
-  ----------------------------------------------------------------------------
-  Currently, classes that do not hold NSS resources but do call NSS functions
-  inherit from nsNSSShutDownObject (and use the lock/isAlreadyShutDown
-  mechanism) as a way of ensuring it is safe to call those functions. Because
-  these classes do not hold any resources, however, it is tempting to skip the
-  destructor component of this interface. This MUST NOT be done, because
-  if an object of such a class is destructed before the nsNSSShutDownList
-  processes all of its entries, this essentially causes a use-after-free when
-  nsNSSShutDownList reaches the entry that has been destroyed. The safe way to
-  do this is to implement the destructor as usual but omit the call to
-  destructorSafeDestroyNSSReference() as it is unnecessary and probably isn't
-  defined for that class.
 
   destructorSafeDestroyNSSReference() does not need to acquire an
   nsNSSShutDownPreventionLock or check isAlreadyShutDown() as long as it

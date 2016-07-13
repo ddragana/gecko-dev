@@ -4,17 +4,17 @@
 
 "use strict";
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+let Cc = Components.classes;
+let Ci = Components.interfaces;
+let Cu = Components.utils;
 
 Cu.importGlobalProperties(['Blob', 'File']);
 Cu.import("resource://gre/modules/Services.jsm");
 
 this.EXPORTED_SYMBOLS = ["SettingsDB", "SETTINGSDB_NAME", "SETTINGSSTORE_NAME"];
 
-var DEBUG = false;
-var VERBOSE = false;
+let DEBUG = false;
+let VERBOSE = false;
 
 try {
   DEBUG   =
@@ -40,7 +40,7 @@ const TYPED_ARRAY_THINGS = new Set([
 ]);
 
 this.SETTINGSDB_NAME = "settings";
-this.SETTINGSDB_VERSION = 8;
+this.SETTINGSDB_VERSION = 5;
 this.SETTINGSSTORE_NAME = "settings";
 
 Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
@@ -83,7 +83,7 @@ SettingsDB.prototype = {
     let chan = NetUtil.newChannel({
       uri: NetUtil.newURI(settingsFile),
       loadUsingSystemPrincipal: true});
-    let stream = chan.open2();
+    let stream = chan.open();
     // Obtain a converter to read from a UTF-8 encoded input stream.
     let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
                     .createInstance(Ci.nsIScriptableUnicodeConverter);

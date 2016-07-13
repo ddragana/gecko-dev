@@ -81,10 +81,7 @@ SOURCES += [
 
 if CONFIG['MOZ_RUST']:
     SOURCES += [
-        'binding/mp4parse/src/lib.rs',
-    ]
-    EXPORTS += [
-        'binding/include/mp4parse.h',
+        'binding/MP4Metadata.rs',
     ]
 
 UNIFIED_SOURCES += [
@@ -105,6 +102,7 @@ UNIFIED_SOURCES += [
     'frameworks/av/media/libstagefright/foundation/ABitReader.cpp',
     'frameworks/av/media/libstagefright/foundation/ABuffer.cpp',
     'frameworks/av/media/libstagefright/foundation/AString.cpp',
+    'frameworks/av/media/libstagefright/id3/ID3.cpp',
     'frameworks/av/media/libstagefright/MediaBuffer.cpp',
     'frameworks/av/media/libstagefright/MediaDefs.cpp',
     'frameworks/av/media/libstagefright/MediaSource.cpp',
@@ -132,9 +130,6 @@ TEST_DIRS += [
     'gtest',
 ]
 
-# We allow warnings for third-party code that can be updated from upstream.
-ALLOW_COMPILER_WARNINGS = True
-
 FINAL_LIBRARY = 'xul'
 
 # Suppress warnings in third-party code.
@@ -155,11 +150,11 @@ if CONFIG['_MSC_VER']:
 elif CONFIG['GNU_CXX']:
     CFLAGS += [
         '-Wno-comment',
+        '-Wno-declaration-after-statement',
         '-Wno-sign-compare'
     ]
     CXXFLAGS += [
         '-Wno-format',
-        '-Wno-format-security',
         '-Wno-multichar',
         '-Wno-sign-compare',
         '-Wno-unused',

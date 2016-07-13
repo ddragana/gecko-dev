@@ -10,34 +10,38 @@
 #include "jsapi.h"
 
 #include "NamespaceImports.h"
-#include "gc/Tracer.h"
-#include "js/GCVector.h"
 #include "js/Id.h"
 
 namespace js {
 
 struct IdValuePair
 {
-    Value value;
     jsid id;
+    Value value;
 
     IdValuePair()
-      : value(UndefinedValue()), id(JSID_EMPTY)
+      : id(JSID_EMPTY), value(UndefinedValue())
     {}
     explicit IdValuePair(jsid idArg)
-      : value(UndefinedValue()), id(idArg)
+      : id(idArg), value(UndefinedValue())
     {}
     IdValuePair(jsid idArg, Value valueArg)
-      : value(valueArg), id(idArg)
+      : id(idArg), value(valueArg)
     {}
-
-    void trace(JSTracer* trc) {
-        TraceRoot(trc, &value, "IdValuePair::value");
-        TraceRoot(trc, &id, "IdValuePair::id");
-    }
 };
 
-using IdValueVector = JS::GCVector<IdValuePair>;
+class MOZ_STACK_CLASS AutoIdValueVector : public JS::AutoVectorRooterBase<IdValuePair>
+{
+  public:
+    explicit AutoIdValueVector(ContextFriendFields* cx
+                               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+        : AutoVectorRooterBase<IdValuePair>(cx, IDVALVECTOR)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
 
 } /* namespace js */
 

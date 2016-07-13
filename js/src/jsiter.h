@@ -28,15 +28,13 @@
 
 namespace js {
 
-class PropertyIteratorObject;
-
 struct NativeIterator
 {
-    GCPtrObject obj;    // Object being iterated.
-    JSObject* iterObj_; // Internal iterator object.
-    GCPtrFlatString* props_array;
-    GCPtrFlatString* props_cursor;
-    GCPtrFlatString* props_end;
+    HeapPtrObject obj;                  // Object being iterated.
+    JSObject* iterObj_;                 // Internal iterator object.
+    HeapPtrFlatString* props_array;
+    HeapPtrFlatString* props_cursor;
+    HeapPtrFlatString* props_end;
     HeapReceiverGuard* guard_array;
     uint32_t guard_length;
     uint32_t guard_key;
@@ -52,11 +50,11 @@ struct NativeIterator
         return (flags & JSITER_FOREACH) == 0;
     }
 
-    inline GCPtrFlatString* begin() const {
+    inline HeapPtrFlatString* begin() const {
         return props_array;
     }
 
-    inline GCPtrFlatString* end() const {
+    inline HeapPtrFlatString* end() const {
         return props_end;
     }
 
@@ -67,7 +65,7 @@ struct NativeIterator
     JSObject* iterObj() const {
         return iterObj_;
     }
-    GCPtrFlatString* current() const {
+    HeapPtrFlatString* current() const {
         MOZ_ASSERT(props_cursor < props_end);
         return props_cursor;
     }
@@ -106,12 +104,11 @@ struct NativeIterator
     }
 
     static NativeIterator* allocateSentinel(JSContext* maybecx);
-    static NativeIterator* allocateIterator(JSContext* cx, uint32_t slength, uint32_t plength);
+    static NativeIterator* allocateIterator(JSContext* cx, uint32_t slength,
+                                            const js::AutoIdVector& props);
     void init(JSObject* obj, JSObject* iterObj, unsigned flags, uint32_t slength, uint32_t key);
-    bool initProperties(JSContext* cx, Handle<PropertyIteratorObject*> obj,
-                        const js::AutoIdVector& props);
 
-    void trace(JSTracer* trc);
+    void mark(JSTracer* trc);
 
     static void destroy(NativeIterator* iter) {
         js_free(iter);
@@ -120,8 +117,6 @@ struct NativeIterator
 
 class PropertyIteratorObject : public NativeObject
 {
-    static const ClassOps classOps_;
-
   public:
     static const Class class_;
 
@@ -151,11 +146,8 @@ class StringIteratorObject : public JSObject
     static const Class class_;
 };
 
-class ListIteratorObject : public JSObject
-{
-  public:
-    static const Class class_;
-};
+bool
+VectorToIdArray(JSContext* cx, AutoIdVector& props, JSIdArray** idap);
 
 bool
 GetIterator(JSContext* cx, HandleObject obj, unsigned flags, MutableHandleObject objp);
@@ -219,10 +211,7 @@ extern JSObject*
 CreateItrResultObject(JSContext* cx, HandleValue value, bool done);
 
 extern JSObject*
-InitLegacyIteratorClass(JSContext* cx, HandleObject obj);
-
-extern JSObject*
-InitStopIterationClass(JSContext* cx, HandleObject obj);
+InitIteratorClasses(JSContext* cx, HandleObject obj);
 
 } /* namespace js */
 

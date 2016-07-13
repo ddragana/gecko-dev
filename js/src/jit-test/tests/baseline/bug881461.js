@@ -1,2 +1,2 @@
-z = new Proxy({__proto__: (function(){})}, {});
+z = Proxy.create({}, (function(){}));
 ({__proto__: z, set c(a) {}});

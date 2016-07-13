@@ -18,7 +18,6 @@
 #include "nsNetUtil.h"
 #include "nsTArray.h"
 #include "prprf.h"
-#include "nsVariant.h"
 
 using namespace mozilla;
 
@@ -126,6 +125,7 @@ static void SetOptionsKeyUint32(const nsCString& aValue,
 #define QUERYKEY_NOTANNOTATION "!annotation"
 #define QUERYKEY_ANNOTATION "annotation"
 #define QUERYKEY_URI "uri"
+#define QUERYKEY_URIISPREFIX "uriIsPrefix"
 #define QUERYKEY_SEPARATOR "OR"
 #define QUERYKEY_GROUP "group"
 #define QUERYKEY_SORT "sort"
@@ -301,7 +301,7 @@ nsNavHistory::QueryStringToQueryArray(const nsACString& aQueryString,
   aQueries->Clear();
   *aOptions = nullptr;
 
-  RefPtr<nsNavHistoryQueryOptions> options(new nsNavHistoryQueryOptions());
+  nsRefPtr<nsNavHistoryQueryOptions> options(new nsNavHistoryQueryOptions());
   if (! options)
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -425,6 +425,9 @@ nsNavHistory::QueriesToQueryString(nsINavHistoryQuery **aQueries,
     // uri
     query->GetHasUri(&hasIt);
     if (hasIt) {
+      AppendBoolKeyValueIfTrue(aQueryString,
+                               NS_LITERAL_CSTRING(QUERYKEY_URIISPREFIX),
+                               query, &nsINavHistoryQuery::GetUriIsPrefix);
       nsCOMPtr<nsIURI> uri;
       query->GetUri(getter_AddRefs(uri));
       NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE); // hasURI should tell is if invalid
@@ -721,6 +724,10 @@ nsNavHistory::TokensToQueries(const nsTArray<QueryKeyValuePair>& aTokens,
       rv = query->SetUri(uri);
       NS_ENSURE_SUCCESS(rv, rv);
 
+    // URI is prefix
+    } else if (kvp.key.EqualsLiteral(QUERYKEY_URIISPREFIX)) {
+      SetQueryKeyBool(kvp.value, query, &nsINavHistoryQuery::SetUriIsPrefix);
+
     // not annotation
     } else if (kvp.key.EqualsLiteral(QUERYKEY_NOTANNOTATION)) {
       nsAutoCString unescaped(kvp.value);
@@ -893,7 +900,7 @@ nsNavHistoryQuery::nsNavHistoryQuery()
     mBeginTimeReference(TIME_RELATIVE_EPOCH),
     mEndTime(0), mEndTimeReference(TIME_RELATIVE_EPOCH),
     mOnlyBookmarked(false),
-    mDomainIsHost(false),
+    mDomainIsHost(false), mUriIsPrefix(false),
     mAnnotationIsNot(false),
     mTagsAreNot(false)
 {
@@ -901,19 +908,7 @@ nsNavHistoryQuery::nsNavHistoryQuery()
   mDomain.SetIsVoid(true);
 }
 
-nsNavHistoryQuery::nsNavHistoryQuery(const nsNavHistoryQuery& aOther)
-  : mMinVisits(aOther.mMinVisits), mMaxVisits(aOther.mMaxVisits),
-    mBeginTime(aOther.mBeginTime),
-    mBeginTimeReference(aOther.mBeginTimeReference),
-    mEndTime(aOther.mEndTime), mEndTimeReference(aOther.mEndTimeReference),
-    mSearchTerms(aOther.mSearchTerms), mOnlyBookmarked(aOther.mOnlyBookmarked),
-    mDomainIsHost(aOther.mDomainIsHost), mDomain(aOther.mDomain),
-    mUri(aOther.mUri),
-    mAnnotationIsNot(aOther.mAnnotationIsNot),
-    mAnnotation(aOther.mAnnotation), mTags(aOther.mTags),
-    mTagsAreNot(aOther.mTagsAreNot), mTransitions(aOther.mTransitions)
-{}
-
+/* attribute PRTime beginTime; */
 NS_IMETHODIMP nsNavHistoryQuery::GetBeginTime(PRTime *aBeginTime)
 {
   *aBeginTime = mBeginTime;
@@ -925,6 +920,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetBeginTime(PRTime aBeginTime)
   return NS_OK;
 }
 
+/* attribute long beginTimeReference; */
 NS_IMETHODIMP nsNavHistoryQuery::GetBeginTimeReference(uint32_t* _retval)
 {
   *_retval = mBeginTimeReference;
@@ -938,18 +934,21 @@ NS_IMETHODIMP nsNavHistoryQuery::SetBeginTimeReference(uint32_t aReference)
   return NS_OK;
 }
 
+/* readonly attribute boolean hasBeginTime; */
 NS_IMETHODIMP nsNavHistoryQuery::GetHasBeginTime(bool* _retval)
 {
   *_retval = ! (mBeginTimeReference == TIME_RELATIVE_EPOCH && mBeginTime == 0);
   return NS_OK;
 }
 
+/* readonly attribute PRTime absoluteBeginTime; */
 NS_IMETHODIMP nsNavHistoryQuery::GetAbsoluteBeginTime(PRTime* _retval)
 {
   *_retval = nsNavHistory::NormalizeTime(mBeginTimeReference, mBeginTime);
   return NS_OK;
 }
 
+/* attribute PRTime endTime; */
 NS_IMETHODIMP nsNavHistoryQuery::GetEndTime(PRTime *aEndTime)
 {
   *aEndTime = mEndTime;
@@ -961,6 +960,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetEndTime(PRTime aEndTime)
   return NS_OK;
 }
 
+/* attribute long endTimeReference; */
 NS_IMETHODIMP nsNavHistoryQuery::GetEndTimeReference(uint32_t* _retval)
 {
   *_retval = mEndTimeReference;
@@ -974,18 +974,21 @@ NS_IMETHODIMP nsNavHistoryQuery::SetEndTimeReference(uint32_t aReference)
   return NS_OK;
 }
 
+/* readonly attribute boolean hasEndTime; */
 NS_IMETHODIMP nsNavHistoryQuery::GetHasEndTime(bool* _retval)
 {
   *_retval = ! (mEndTimeReference == TIME_RELATIVE_EPOCH && mEndTime == 0);
   return NS_OK;
 }
 
+/* readonly attribute PRTime absoluteEndTime; */
 NS_IMETHODIMP nsNavHistoryQuery::GetAbsoluteEndTime(PRTime* _retval)
 {
   *_retval = nsNavHistory::NormalizeTime(mEndTimeReference, mEndTime);
   return NS_OK;
 }
 
+/* attribute string searchTerms; */
 NS_IMETHODIMP nsNavHistoryQuery::GetSearchTerms(nsAString& aSearchTerms)
 {
   aSearchTerms = mSearchTerms;
@@ -1002,6 +1005,7 @@ NS_IMETHODIMP nsNavHistoryQuery::GetHasSearchTerms(bool* _retval)
   return NS_OK;
 }
 
+/* attribute int32_t minVisits; */
 NS_IMETHODIMP nsNavHistoryQuery::GetMinVisits(int32_t* _retval)
 {
   NS_ENSURE_ARG_POINTER(_retval);
@@ -1014,6 +1018,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetMinVisits(int32_t aVisits)
   return NS_OK;
 }
 
+/* attribute PRint32 maxVisits; */
 NS_IMETHODIMP nsNavHistoryQuery::GetMaxVisits(int32_t* _retval)
 {
   NS_ENSURE_ARG_POINTER(_retval);
@@ -1026,6 +1031,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetMaxVisits(int32_t aVisits)
   return NS_OK;
 }
 
+/* attribute boolean onlyBookmarked; */
 NS_IMETHODIMP nsNavHistoryQuery::GetOnlyBookmarked(bool *aOnlyBookmarked)
 {
   *aOnlyBookmarked = mOnlyBookmarked;
@@ -1037,6 +1043,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetOnlyBookmarked(bool aOnlyBookmarked)
   return NS_OK;
 }
 
+/* attribute boolean domainIsHost; */
 NS_IMETHODIMP nsNavHistoryQuery::GetDomainIsHost(bool *aDomainIsHost)
 {
   *aDomainIsHost = mDomainIsHost;
@@ -1048,6 +1055,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetDomainIsHost(bool aDomainIsHost)
   return NS_OK;
 }
 
+/* attribute AUTF8String domain; */
 NS_IMETHODIMP nsNavHistoryQuery::GetDomain(nsACString& aDomain)
 {
   aDomain = mDomain;
@@ -1065,6 +1073,19 @@ NS_IMETHODIMP nsNavHistoryQuery::GetHasDomain(bool* _retval)
   return NS_OK;
 }
 
+/* attribute boolean uriIsPrefix; */
+NS_IMETHODIMP nsNavHistoryQuery::GetUriIsPrefix(bool* aIsPrefix)
+{
+  *aIsPrefix = mUriIsPrefix;
+  return NS_OK;
+}
+NS_IMETHODIMP nsNavHistoryQuery::SetUriIsPrefix(bool aIsPrefix)
+{
+  mUriIsPrefix = aIsPrefix;
+  return NS_OK;
+}
+
+/* attribute nsIURI uri; */
 NS_IMETHODIMP nsNavHistoryQuery::GetUri(nsIURI** aUri)
 {
   NS_IF_ADDREF(*aUri = mUri);
@@ -1081,6 +1102,7 @@ NS_IMETHODIMP nsNavHistoryQuery::GetHasUri(bool* aHasUri)
   return NS_OK;
 }
 
+/* attribute boolean annotationIsNot; */
 NS_IMETHODIMP nsNavHistoryQuery::GetAnnotationIsNot(bool* aIsNot)
 {
   *aIsNot = mAnnotationIsNot;
@@ -1092,6 +1114,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetAnnotationIsNot(bool aIsNot)
   return NS_OK;
 }
 
+/* attribute AUTF8String annotation; */
 NS_IMETHODIMP nsNavHistoryQuery::GetAnnotation(nsACString& aAnnotation)
 {
   aAnnotation = mAnnotation;
@@ -1108,15 +1131,18 @@ NS_IMETHODIMP nsNavHistoryQuery::GetHasAnnotation(bool* aHasIt)
   return NS_OK;
 }
 
+/* attribute nsIVariant tags; */
 NS_IMETHODIMP nsNavHistoryQuery::GetTags(nsIVariant **aTags)
 {
   NS_ENSURE_ARG_POINTER(aTags);
 
-  RefPtr<nsVariant> out = new nsVariant();
+  nsresult rv;
+  nsCOMPtr<nsIWritableVariant> out = do_CreateInstance(NS_VARIANT_CONTRACTID,
+                                                       &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   uint32_t arrayLen = mTags.Length();
 
-  nsresult rv;
   if (arrayLen == 0)
     rv = out->SetAsEmptyArray();
   else {
@@ -1227,6 +1253,7 @@ NS_IMETHODIMP nsNavHistoryQuery::SetTags(nsIVariant *aTags)
   return NS_OK;
 }
 
+/* attribute boolean tagsAreNot; */
 NS_IMETHODIMP nsNavHistoryQuery::GetTagsAreNot(bool *aTagsAreNot)
 {
   NS_ENSURE_ARG_POINTER(aTagsAreNot);
@@ -1314,10 +1341,11 @@ NS_IMETHODIMP nsNavHistoryQuery::Clone(nsINavHistoryQuery** _retval)
 {
   *_retval = nullptr;
 
-  RefPtr<nsNavHistoryQuery> clone = new nsNavHistoryQuery(*this);
+  nsNavHistoryQuery *clone = new nsNavHistoryQuery(*this);
   NS_ENSURE_TRUE(clone, NS_ERROR_OUT_OF_MEMORY);
 
-  clone.forget(_retval);
+  clone->mRefCnt = 0; // the clone doesn't inherit our refcount
+  NS_ADDREF(*_retval = clone);
   return NS_OK;
 }
 
@@ -1509,7 +1537,7 @@ nsNavHistoryQueryOptions::Clone(nsNavHistoryQueryOptions **aResult)
   if (! result)
     return NS_ERROR_OUT_OF_MEMORY;
 
-  RefPtr<nsNavHistoryQueryOptions> resultHolder(result);
+  nsRefPtr<nsNavHistoryQueryOptions> resultHolder(result);
   result->mSort = mSort;
   result->mResultType = mResultType;
   result->mExcludeItems = mExcludeItems;

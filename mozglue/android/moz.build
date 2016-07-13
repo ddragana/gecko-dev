@@ -17,6 +17,8 @@ SOURCES += [
     'SQLiteBridge.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
 FINAL_LIBRARY = 'mozglue'
 
 for var in ('ANDROID_PACKAGE_NAME',
@@ -26,8 +28,8 @@ for var in ('ANDROID_PACKAGE_NAME',
 if CONFIG['MOZ_FOLD_LIBS']:
     DEFINES['MOZ_FOLD_LIBS'] = True
 
+GENERATED_INCLUDES += ['/build']
 LOCAL_INCLUDES += [
-    '!/build',
     '../linker',
     '/db/sqlite3/src',
     '/ipc/chromium/src',
@@ -52,6 +54,3 @@ LOCAL_INCLUDES += [
 ]
 
 DISABLE_STL_WRAPPING = True
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

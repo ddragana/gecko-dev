@@ -7,20 +7,16 @@
 #define GFX_LAYERSTYPES_H
 
 #include <stdint.h>                     // for uint32_t
+#include "mozilla/gfx/Point.h"          // for IntPoint
+#include "nsRegion.h"
+
+#include "mozilla/TypedEnumBits.h"
 
 #ifdef MOZ_WIDGET_GONK
 #include <utils/RefBase.h>
-#include "mozilla/layers/GonkNativeHandle.h"
 #endif
-
-#include "Units.h"
-#include "mozilla/gfx/Point.h"          // for IntPoint
-#include "mozilla/TypedEnumBits.h"
-#include "nsRegion.h"
-
 #include <stdio.h>            // FILE
 #include "mozilla/Logging.h"            // for PR_LOG
-
 #ifndef MOZ_LAYERS_HAVE_LOG
 #  define MOZ_LAYERS_HAVE_LOG
 #endif
@@ -114,17 +110,6 @@ struct LayerRenderState {
 
   void SetOverlayId(const int32_t& aId)
   { mOverlayId = aId; }
-
-  void SetSidebandStream(const GonkNativeHandle& aStream)
-  {
-    mSidebandStream = aStream;
-  }
-
-  android::GraphicBuffer* GetGrallocBuffer() const
-  { return mSurface.get(); }
-
-  const GonkNativeHandle& GetSidebandStream()
-  { return mSidebandStream; }
 #endif
 
   void SetOffset(const nsIntPoint& aOffset)
@@ -148,7 +133,6 @@ struct LayerRenderState {
   // size of mSurface
   gfx::IntSize mSize;
   TextureHost* mTexture;
-  GonkNativeHandle mSidebandStream;
 #endif
 };
 
@@ -190,14 +174,29 @@ struct EventRegions {
   bool operator==(const EventRegions& aRegions) const
   {
     return mHitRegion == aRegions.mHitRegion &&
-           mDispatchToContentHitRegion == aRegions.mDispatchToContentHitRegion &&
-           mNoActionRegion == aRegions.mNoActionRegion &&
-           mHorizontalPanRegion == aRegions.mHorizontalPanRegion &&
-           mVerticalPanRegion == aRegions.mVerticalPanRegion;
+           mDispatchToContentHitRegion == aRegions.mDispatchToContentHitRegion;
   }
   bool operator!=(const EventRegions& aRegions) const
   {
     return !(*this == aRegions);
+  }
+
+  void OrWith(const EventRegions& aOther)
+  {
+    mHitRegion.OrWith(aOther.mHitRegion);
+    mDispatchToContentHitRegion.OrWith(aOther.mDispatchToContentHitRegion);
+  }
+
+  void AndWith(const nsIntRegion& aRegion)
+  {
+    mHitRegion.AndWith(aRegion);
+    mDispatchToContentHitRegion.AndWith(aRegion);
+  }
+
+  void Sub(const EventRegions& aMinuend, const nsIntRegion& aSubtrahend)
+  {
+    mHitRegion.Sub(aMinuend.mHitRegion, aSubtrahend);
+    mDispatchToContentHitRegion.Sub(aMinuend.mDispatchToContentHitRegion, aSubtrahend);
   }
 
   void ApplyTranslationAndScale(float aXTrans, float aYTrans, float aXScale, float aYScale)
@@ -219,18 +218,12 @@ struct EventRegions {
   {
     mHitRegion.Transform(aTransform);
     mDispatchToContentHitRegion.Transform(aTransform);
-    mNoActionRegion.Transform(aTransform);
-    mHorizontalPanRegion.Transform(aTransform);
-    mVerticalPanRegion.Transform(aTransform);
   }
 
   bool IsEmpty() const
   {
     return mHitRegion.IsEmpty()
-        && mDispatchToContentHitRegion.IsEmpty()
-        && mNoActionRegion.IsEmpty()
-        && mHorizontalPanRegion.IsEmpty()
-        && mVerticalPanRegion.IsEmpty();
+        && mDispatchToContentHitRegion.IsEmpty();
   }
 
   nsCString ToString() const
@@ -269,28 +262,6 @@ operator|=(EventRegionsOverride& a, EventRegionsOverride b)
   a = a | b;
   return a;
 }
-
-// Flags used as an argument to functions that dump textures.
-enum TextureDumpMode {
-  Compress,      // dump texture with LZ4 compression
-  DoNotCompress  // dump texture uncompressed
-};
-
-// Some specialized typedefs of Matrix4x4Typed.
-typedef gfx::Matrix4x4Typed<LayerPixel, CSSTransformedLayerPixel> CSSTransformMatrix;
-// Several different async transforms can contribute to a layer's transform
-// (specifically, an async animation can contribute a transform, and each APZC
-// that scrolls a layer can contribute async scroll/zoom and overscroll
-// transforms).
-// To try to model this with typed units, we represent individual async
-// transforms as ParentLayer -> ParentLayer transforms (aliased as
-// AsyncTransformComponentMatrix), and we represent the product of all of them
-// as a CSSTransformLayer -> ParentLayer transform (aliased as
-// AsyncTransformMatrix). To create an AsyncTransformMatrix from component
-// matrices, a ViewAs operation is needed. A MultipleAsyncTransforms
-// PixelCastJustification is provided for this purpose.
-typedef gfx::Matrix4x4Typed<ParentLayerPixel, ParentLayerPixel> AsyncTransformComponentMatrix;
-typedef gfx::Matrix4x4Typed<CSSTransformedLayerPixel, ParentLayerPixel> AsyncTransformMatrix;
 
 } // namespace layers
 } // namespace mozilla

@@ -41,7 +41,7 @@ PluginScriptableObjectChild::IdentifierTable PluginScriptableObjectChild::sIdent
 /* static */ PluginScriptableObjectChild::StoredIdentifier*
 PluginScriptableObjectChild::HashIdentifier(const nsCString& aIdentifier)
 {
-  StoredIdentifier* stored = sIdentifiers.Get(aIdentifier).get();
+  StoredIdentifier* stored = sIdentifiers.Get(aIdentifier);
   if (stored) {
     return stored;
   }
@@ -338,8 +338,6 @@ PluginScriptableObjectChild::ScriptableGetProperty(NPObject* aObject,
   NS_ASSERTION(actor, "This shouldn't ever be null!");
   NS_ASSERTION(actor->Type() == Proxy, "Bad type!");
 
-  PluginInstanceChild::AutoStackHelper guard(actor->mInstance);
-
   Variant result;
   bool success;
   actor->CallGetParentProperty(FromNPIdentifier(aName),
@@ -438,7 +436,7 @@ PluginScriptableObjectChild::ScriptableEnumerate(NPObject* aObject,
   NS_ASSERTION(actor, "This shouldn't ever be null!");
   NS_ASSERTION(actor->Type() == Proxy, "Bad type!");
 
-  AutoTArray<PluginIdentifier, 10> identifiers;
+  AutoInfallibleTArray<PluginIdentifier, 10> identifiers;
   bool success;
   actor->CallEnumerate(&identifiers, &success);
 
@@ -709,7 +707,6 @@ bool
 PluginScriptableObjectChild::AnswerInvalidate()
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     return true;
@@ -734,7 +731,6 @@ PluginScriptableObjectChild::AnswerHasMethod(const PluginIdentifier& aId,
                                              bool* aHasMethod)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerHasMethod with an invalidated object!");
@@ -762,7 +758,6 @@ PluginScriptableObjectChild::AnswerInvoke(const PluginIdentifier& aId,
                                           bool* aSuccess)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerInvoke with an invalidated object!");
@@ -780,7 +775,7 @@ PluginScriptableObjectChild::AnswerInvoke(const PluginIdentifier& aId,
     return true;
   }
 
-  AutoTArray<NPVariant, 10> convertedArgs;
+  AutoFallibleTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount, mozilla::fallible)) {
@@ -833,7 +828,6 @@ PluginScriptableObjectChild::AnswerInvokeDefault(InfallibleTArray<Variant>&& aAr
                                                  bool* aSuccess)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerInvokeDefault with an invalidated object!");
@@ -851,7 +845,7 @@ PluginScriptableObjectChild::AnswerInvokeDefault(InfallibleTArray<Variant>&& aAr
     return true;
   }
 
-  AutoTArray<NPVariant, 10> convertedArgs;
+  AutoFallibleTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount, mozilla::fallible)) {
@@ -902,7 +896,6 @@ PluginScriptableObjectChild::AnswerHasProperty(const PluginIdentifier& aId,
                                                bool* aHasProperty)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerHasProperty with an invalidated object!");
@@ -931,7 +924,6 @@ PluginScriptableObjectChild::AnswerGetChildProperty(const PluginIdentifier& aId,
                                                     bool* aSuccess)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   *aHasProperty = *aHasMethod = *aSuccess = false;
   *aResult = void_t();
@@ -980,7 +972,6 @@ PluginScriptableObjectChild::AnswerSetProperty(const PluginIdentifier& aId,
                                                bool* aSuccess)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerSetProperty with an invalidated object!");
@@ -1019,7 +1010,6 @@ PluginScriptableObjectChild::AnswerRemoveProperty(const PluginIdentifier& aId,
                                                   bool* aSuccess)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerRemoveProperty with an invalidated object!");
@@ -1050,7 +1040,6 @@ PluginScriptableObjectChild::AnswerEnumerate(InfallibleTArray<PluginIdentifier>*
                                              bool* aSuccess)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerEnumerate with an invalidated object!");
@@ -1090,7 +1079,6 @@ PluginScriptableObjectChild::AnswerConstruct(InfallibleTArray<Variant>&& aArgs,
                                              bool* aSuccess)
 {
   AssertPluginThread();
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerConstruct with an invalidated object!");
@@ -1108,7 +1096,7 @@ PluginScriptableObjectChild::AnswerConstruct(InfallibleTArray<Variant>&& aArgs,
     return true;
   }
 
-  AutoTArray<NPVariant, 10> convertedArgs;
+  AutoFallibleTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount, mozilla::fallible)) {
@@ -1177,8 +1165,6 @@ bool
 PluginScriptableObjectChild::Evaluate(NPString* aScript,
                                       NPVariant* aResult)
 {
-  PluginInstanceChild::AutoStackHelper guard(mInstance);
-
   nsDependentCString script("");
   if (aScript->UTF8Characters && aScript->UTF8Length) {
     script.Rebind(aScript->UTF8Characters, aScript->UTF8Length);

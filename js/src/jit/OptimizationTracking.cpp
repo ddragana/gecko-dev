@@ -139,7 +139,7 @@ void
 SpewTempOptimizationTypeInfoVector(const TempOptimizationTypeInfoVector* types,
                                    const char* indent = nullptr)
 {
-#ifdef JS_JITSPEW
+#ifdef DEBUG
     for (const OptimizationTypeInfo* t = types->begin(); t != types->end(); t++) {
         JitSpewStart(JitSpew_OptimizationTracking, "   %s%s of type %s, type set",
                      indent ? indent : "",
@@ -155,7 +155,7 @@ void
 SpewTempOptimizationAttemptsVector(const TempOptimizationAttemptsVector* attempts,
                                    const char* indent = nullptr)
 {
-#ifdef JS_JITSPEW
+#ifdef DEBUG
     for (const OptimizationAttempt* a = attempts->begin(); a != attempts->end(); a++) {
         JitSpew(JitSpew_OptimizationTracking, "   %s%s: %s", indent ? indent : "",
                 TrackedStrategyString(a->strategy()), TrackedOutcomeString(a->outcome()));
@@ -166,7 +166,7 @@ SpewTempOptimizationAttemptsVector(const TempOptimizationAttemptsVector* attempt
 void
 TrackedOptimizations::spew() const
 {
-#ifdef JS_JITSPEW
+#ifdef DEBUG
     SpewTempOptimizationTypeInfoVector(&types_);
     SpewTempOptimizationAttemptsVector(&attempts_);
 #endif
@@ -852,7 +852,7 @@ MaybeConstructorFromType(TypeSet::Type ty)
 static void
 SpewConstructor(TypeSet::Type ty, JSFunction* constructor)
 {
-#ifdef JS_JITSPEW
+#ifdef DEBUG
     if (!constructor->isInterpreted()) {
         JitSpew(JitSpew_OptimizationTracking, "   Unique type %s has native constructor",
                 TypeSet::TypeString(ty));
@@ -883,7 +883,7 @@ SpewConstructor(TypeSet::Type ty, JSFunction* constructor)
 static void
 SpewAllocationSite(TypeSet::Type ty, JSScript* script, uint32_t offset)
 {
-#ifdef JS_JITSPEW
+#ifdef DEBUG
     JitSpew(JitSpew_OptimizationTracking, "   Unique type %s has alloc site %s:%u",
             TypeSet::TypeString(ty), script->filename(),
             PCToLineNumber(script, script->offsetToPC(offset)));
@@ -903,7 +903,7 @@ jit::WriteIonTrackedOptimizationsTable(JSContext* cx, CompactBufferWriter& write
 {
     MOZ_ASSERT(unique.sorted());
 
-#ifdef JS_JITSPEW
+#ifdef DEBUG
     // Spew training data, which may be fed into a script to determine a good
     // encoding strategy.
     if (JitSpewEnabled(JitSpew_OptimizationTracking)) {
@@ -1058,16 +1058,12 @@ IonBuilder::startTrackingOptimizations()
             // OOMs are handled as if optimization tracking were turned off.
             if (!trackedOptimizationSites_.append(site))
                 site = nullptr;
-        } else if (site->hasOptimizations()) {
+        } else {
             // The same bytecode may be visited multiple times (see
             // restartLoop). Only the last time matters, so clear any previous
             // tracked optimizations.
             site->optimizations()->clear();
         }
-
-        // The case of !site->hasOptimizations() means we had an OOM when
-        // previously attempting to track optimizations. Leave
-        // site->optimizations_ nullptr to leave optimization tracking off.
 
         if (site)
             current->updateTrackedSite(site);
@@ -1094,7 +1090,7 @@ IonBuilder::trackTypeInfoUnchecked(TrackedTypeSite kind, JSObject* obj)
 {
     BytecodeSite* site = current->trackedSite();
     // OOMs are handled as if optimization tracking were turned off.
-    OptimizationTypeInfo typeInfo(alloc(), kind, MIRType::Object);
+    OptimizationTypeInfo typeInfo(alloc(), kind, MIRType_Object);
     if (!typeInfo.trackType(TypeSet::ObjectType(obj)))
         return;
     if (!site->optimizations()->trackTypeInfo(mozilla::Move(typeInfo)))

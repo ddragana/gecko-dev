@@ -17,7 +17,8 @@ DataContainerEvent::DataContainerEvent(EventTarget* aOwner,
                                        WidgetEvent* aEvent)
   : Event(aOwner, aPresContext, aEvent)
 {
-  if (nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aOwner)) {
+  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(mOwner);
+  if (win) {
     if (nsIDocument* doc = win->GetExtantDoc()) {
       doc->WarnOnceAbout(nsIDocument::eDataContainerEvent);
     }
@@ -27,11 +28,11 @@ DataContainerEvent::DataContainerEvent(EventTarget* aOwner,
 NS_IMPL_CYCLE_COLLECTION_CLASS(DataContainerEvent)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(DataContainerEvent, Event)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mData)
+  tmp->mData.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(DataContainerEvent, Event)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mData)
+  tmp->mData.EnumerateRead(TraverseEntry, &cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ADDREF_INHERITED(DataContainerEvent, Event)
@@ -80,19 +81,33 @@ DataContainerEvent::SetData(JSContext* aCx, const nsAString& aKey,
   aRv = SetData(aKey, val);
 }
 
+PLDHashOperator
+DataContainerEvent::TraverseEntry(const nsAString& aKey,
+                                  nsIVariant* aDataItem,
+                                  void* aUserArg)
+{
+  nsCycleCollectionTraversalCallback *cb =
+    static_cast<nsCycleCollectionTraversalCallback*>(aUserArg);
+  cb->NoteXPCOMChild(aDataItem);
+
+  return PL_DHASH_NEXT;
+}
+
 } // namespace dom
 } // namespace mozilla
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<DataContainerEvent>
-NS_NewDOMDataContainerEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMDataContainerEvent(nsIDOMEvent** aInstancePtrResult,
+                            EventTarget* aOwner,
                             nsPresContext* aPresContext,
                             WidgetEvent* aEvent)
 {
-  RefPtr<DataContainerEvent> it =
-    new DataContainerEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  DataContainerEvent* it = new DataContainerEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }
 

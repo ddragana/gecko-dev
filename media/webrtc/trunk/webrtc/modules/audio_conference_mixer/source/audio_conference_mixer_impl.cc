@@ -191,9 +191,14 @@ AudioConferenceMixerImpl::~AudioConferenceMixerImpl() {
     assert(_audioFramePool == NULL);
 }
 
+int32_t AudioConferenceMixerImpl::ChangeUniqueId(const int32_t id) {
+    _id = id;
+    return 0;
+}
+
 // Process should be called every kProcessPeriodicityInMs ms
-int64_t AudioConferenceMixerImpl::TimeUntilNextProcess() {
-    int64_t timeUntilNextProcess = 0;
+int32_t AudioConferenceMixerImpl::TimeUntilNextProcess() {
+    int32_t timeUntilNextProcess = 0;
     CriticalSectionScoped cs(_crit.get());
     if(_timeScheduler.TimeToNextUpdate(timeUntilNextProcess) != 0) {
         WEBRTC_TRACE(kTraceError, kTraceAudioMixerServer, _id,

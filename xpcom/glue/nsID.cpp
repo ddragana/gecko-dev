@@ -5,18 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsID.h"
+#include "prprf.h"
 #include "nsMemory.h"
-#include "mozilla/Snprintf.h"
-
-void nsID::Clear()
-{
-  m0 = 0;
-  m1 = 0;
-  m2 = 0;
-  for (int i = 0; i < 8; ++i) {
-    m3[i] = 0;
-  }
-}
 
 /**
  * Multiplies the_int_var with 16 (0x10) and adds the value of the
@@ -111,11 +101,11 @@ nsID::ToString() const
   char* res = (char*)NS_Alloc(NSID_LENGTH);
 
   if (res) {
-    snprintf(res, NSID_LENGTH, gIDFormat,
-             m0, (uint32_t)m1, (uint32_t)m2,
-             (uint32_t)m3[0], (uint32_t)m3[1], (uint32_t)m3[2],
-             (uint32_t)m3[3], (uint32_t)m3[4], (uint32_t)m3[5],
-             (uint32_t)m3[6], (uint32_t)m3[7]);
+    PR_snprintf(res, NSID_LENGTH, gIDFormat,
+                m0, (uint32_t)m1, (uint32_t)m2,
+                (uint32_t)m3[0], (uint32_t)m3[1], (uint32_t)m3[2],
+                (uint32_t)m3[3], (uint32_t)m3[4], (uint32_t)m3[5],
+                (uint32_t)m3[6], (uint32_t)m3[7]);
   }
   return res;
 }
@@ -123,11 +113,11 @@ nsID::ToString() const
 void
 nsID::ToProvidedString(char (&aDest)[NSID_LENGTH]) const
 {
-  snprintf_literal(aDest, gIDFormat,
-                   m0, (uint32_t)m1, (uint32_t)m2,
-                   (uint32_t)m3[0], (uint32_t)m3[1], (uint32_t)m3[2],
-                   (uint32_t)m3[3], (uint32_t)m3[4], (uint32_t)m3[5],
-                   (uint32_t)m3[6], (uint32_t)m3[7]);
+  PR_snprintf(aDest, NSID_LENGTH, gIDFormat,
+              m0, (uint32_t)m1, (uint32_t)m2,
+              (uint32_t)m3[0], (uint32_t)m3[1], (uint32_t)m3[2],
+              (uint32_t)m3[3], (uint32_t)m3[4], (uint32_t)m3[5],
+              (uint32_t)m3[6], (uint32_t)m3[7]);
 }
 
 #endif // XPCOM_GLUE_AVOID_NSPR

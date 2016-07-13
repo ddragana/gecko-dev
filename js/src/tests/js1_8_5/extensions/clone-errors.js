@@ -17,7 +17,7 @@ check(new Error("oops"));
 check(this);
 check(Math);
 check(function () {});
-check(new Proxy({}, {}));
+check(Proxy.create({enumerate: function () { return []; }}));
 
 // A failing getter.
 check({get x() { throw new Error("fail"); }});

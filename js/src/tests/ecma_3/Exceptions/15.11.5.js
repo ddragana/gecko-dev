@@ -21,16 +21,15 @@ function test()
   enterFunc ('test');
   printStatus (summary);
 
-  var actual = { name: "no error", message: "no message" };
+  var actual = '';
+  var expect = 'TypeError: Error.prototype is not a constructor';
   try {
       new Error.prototype;
   } catch (e) {
-      actual = e;
+      actual = '' + e;
   }
 
-  reportCompare("TypeError", actual.name, "must be a TypeError");
-  reportCompare(true, /not a constructor/.test(actual.message),
-                "message must indicate not a constructor");
+  reportCompare(actual, expect, "not a constructor");
 
   exitFunc ('test');
 }

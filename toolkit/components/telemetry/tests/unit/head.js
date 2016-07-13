@@ -1,32 +1,29 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var { classes: Cc, utils: Cu, interfaces: Ci, results: Cr } = Components;
+const { classes: Cc, utils: Cu, interfaces: Ci, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/TelemetryController.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/PromiseUtils.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://testing-common/httpd.js", this);
-Cu.import("resource://gre/modules/AppConstants.jsm");
 
-const gIsWindows = AppConstants.platform == "win";
-const gIsMac = AppConstants.platform == "macosx";
-const gIsAndroid = AppConstants.platform == "android";
-const gIsGonk = AppConstants.platform == "gonk";
-const gIsLinux = AppConstants.platform == "linux";
-
-const Telemetry = Cc["@mozilla.org/base/telemetry;1"].getService(Ci.nsITelemetry);
+const gIsWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
+const gIsMac = ("@mozilla.org/xpcom/mac-utils;1" in Cc);
+const gIsAndroid =  ("@mozilla.org/android/bridge;1" in Cc);
+const gIsGonk = ("@mozilla.org/cellbroadcast/gonkservice;1" in Cc);
 
 const MILLISECONDS_PER_MINUTE = 60 * 1000;
 const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
 const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
 
-const PREF_TELEMETRY_ENABLED = "toolkit.telemetry.enabled";
+const HAS_DATAREPORTINGSERVICE = "@mozilla.org/datareporting/service;1" in Cc;
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-var gGlobalScope = this;
+let gOldAppInfo = null;
+let gGlobalScope = this;
 
 const PingServer = {
   _httpServer: null,
@@ -77,10 +74,7 @@ const PingServer = {
 
   promiseNextRequest: function() {
     const deferred = this._defers[this._currentDeferred++];
-    // Send the ping to the consumer on the next tick, so that the completion gets
-    // signaled to Telemetry.
-    return new Promise(r => Services.tm.currentThread.dispatch(() => r(deferred.promise),
-                                                               Ci.nsIThread.DISPATCH_NORMAL));
+    return deferred.promise;
   },
 
   promiseNextPing: function() {
@@ -98,7 +92,7 @@ const PingServer = {
 
   promiseNextPings: function(count) {
     return this.promiseNextRequests(count).then(requests => {
-      return Array.from(requests, decodeRequestPayload);
+      return [for (req of requests) decodeRequestPayload(req)];
     });
   },
 };
@@ -136,7 +130,7 @@ function decodeRequestPayload(request) {
     unicodeConverter.charset = "UTF-8";
     let utf8string = unicodeConverter.ConvertToUnicode(observer.buffer);
     utf8string += unicodeConverter.Finish();
-    payload = JSON.parse(utf8string);
+    payload = decoder.decode(utf8string);
   } else {
     payload = decoder.decodeFromStream(s, s.available());
   }
@@ -148,10 +142,7 @@ function wrapWithExceptionHandler(f) {
   function wrapper(...args) {
     try {
       f(...args);
-    } catch (ex) {
-      if (typeof(ex) != 'object') {
-        throw ex;
-      }
+    } catch (ex if typeof(ex) == 'object') {
       dump("Caught exception: " + ex.message + "\n");
       dump(ex.stack);
       do_test_finished();
@@ -160,31 +151,69 @@ function wrapWithExceptionHandler(f) {
   return wrapper;
 }
 
-function loadAddonManager(ID, name, version, platformVersion) {
+function loadAddonManager(id, name, version, platformVersion) {
   let ns = {};
   Cu.import("resource://gre/modules/Services.jsm", ns);
   let head = "../../../../mozapps/extensions/test/xpcshell/head_addons.js";
   let file = do_get_file(head);
   let uri = ns.Services.io.newFileURI(file);
   ns.Services.scriptloader.loadSubScript(uri.spec, gGlobalScope);
-  createAppInfo(ID, name, version, platformVersion);
-  // As we're not running in application, we need to setup the features directory
-  // used by system add-ons.
-  const distroDir = FileUtils.getDir("ProfD", ["sysfeatures", "app0"], true);
-  registerDirectory("XREAppFeat", distroDir);
+  createAppInfo(id, name, version, platformVersion);
   startupManager();
 }
 
-var gAppInfo = null;
+function createAppInfo(id, name, version, platformVersion) {
+  const XULAPPINFO_CONTRACTID = "@mozilla.org/xre/app-info;1";
+  const XULAPPINFO_CID = Components.ID("{c763b610-9d49-455a-bbd2-ede71682a1ac}");
+  let gAppInfo;
+  if (!gOldAppInfo) {
+    gOldAppInfo = Cc[XULAPPINFO_CONTRACTID].getService(Ci.nsIXULRuntime);
+  }
 
-function createAppInfo(ID, name, version, platformVersion) {
-  let tmp = {};
-  Cu.import("resource://testing-common/AppInfo.jsm", tmp);
-  tmp.updateAppInfo({
-    ID, name, version, platformVersion,
-    crashReporter: true,
-  });
-  gAppInfo = tmp.getAppInfo();
+  gAppInfo = {
+    // nsIXULAppInfo
+    vendor: "Mozilla",
+    name: name,
+    ID: id,
+    version: version,
+    appBuildID: "2007010101",
+    platformVersion: platformVersion,
+    platformBuildID: "2007010101",
+
+    // nsIXULRuntime
+    inSafeMode: false,
+    logConsoleErrors: true,
+    OS: "XPCShell",
+    XPCOMABI: "noarch-spidermonkey",
+    invalidateCachesOnRestart: function invalidateCachesOnRestart() {
+      // Do nothing
+    },
+
+    // nsICrashReporter
+    annotations: {},
+
+    annotateCrashReport: function(key, data) {
+      this.annotations[key] = data;
+    },
+
+    QueryInterface: XPCOMUtils.generateQI([Ci.nsIXULAppInfo,
+                                           Ci.nsIXULRuntime,
+                                           Ci.nsICrashReporter,
+                                           Ci.nsISupports])
+  };
+
+  Object.setPrototypeOf(gAppInfo, gOldAppInfo);
+
+  var XULAppInfoFactory = {
+    createInstance: function (outer, iid) {
+      if (outer != null)
+        throw Cr.NS_ERROR_NO_AGGREGATION;
+      return gAppInfo.QueryInterface(iid);
+    }
+  };
+  var registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
+  registrar.registerFactory(XULAPPINFO_CID, "XULAppInfo",
+                            XULAPPINFO_CONTRACTID, XULAppInfoFactory);
 }
 
 // Fake the timeout functions for the TelemetryScheduler.
@@ -209,7 +238,6 @@ function fakeNow(...args) {
     Cu.import("resource://gre/modules/TelemetryController.jsm"),
     Cu.import("resource://gre/modules/TelemetryStorage.jsm"),
     Cu.import("resource://gre/modules/TelemetrySend.jsm"),
-    Cu.import("resource://gre/modules/TelemetryReportingPolicy.jsm"),
   ];
 
   for (let m of modules) {
@@ -217,12 +245,6 @@ function fakeNow(...args) {
   }
 
   return new Date(date);
-}
-
-function fakeMonotonicNow(ms) {
-  const m = Cu.import("resource://gre/modules/TelemetrySession.jsm");
-  m.Policy.monotonicNow = () => ms;
-  return ms;
 }
 
 // Fake the timeout functions for TelemetryController sending.
@@ -243,11 +265,6 @@ function fakeGeneratePingId(func) {
   module.Policy.generatePingId = func;
 }
 
-function fakeCachedClientId(uuid) {
-  let module = Cu.import("resource://gre/modules/TelemetryController.jsm");
-  module.Policy.getCachedClientID = () => uuid;
-}
-
 // Return a date that is |offset| ms in the future from |date|.
 function futureDate(date, offset) {
   return new Date(date.getTime() + offset);
@@ -263,43 +280,11 @@ function promiseRejects(promise) {
   return promise.then(() => false, () => true);
 }
 
-// Generates a random string of at least a specific length.
-function generateRandomString(length) {
-  let string = "";
-
-  while (string.length < length) {
-    string += Math.random().toString(36);
-  }
-
-  return string.substring(0, length);
-}
-
-// Short-hand for retrieving the histogram with that id.
-function getHistogram(histogramId) {
-  return Telemetry.getHistogramById(histogramId);
-}
-
-// Short-hand for retrieving the snapshot of the Histogram with that id.
-function getSnapshot(histogramId) {
-  return Telemetry.getHistogramById(histogramId).snapshot();
-}
-
-// Helper for setting an empty list of Environment preferences to watch.
-function setEmptyPrefWatchlist() {
-  let TelemetryEnvironment =
-    Cu.import("resource://gre/modules/TelemetryEnvironment.jsm").TelemetryEnvironment;
-  TelemetryEnvironment.testWatchPreferences(new Map());
-}
-
 if (runningInParent) {
   // Set logging preferences for all the tests.
   Services.prefs.setCharPref("toolkit.telemetry.log.level", "Trace");
   // Telemetry archiving should be on.
   Services.prefs.setBoolPref("toolkit.telemetry.archive.enabled", true);
-  // Telemetry xpcshell tests cannot show the infobar.
-  Services.prefs.setBoolPref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
-  // FHR uploads should be enabled.
-  Services.prefs.setBoolPref("datareporting.healthreport.uploadEnabled", true);
 
   fakePingSendTimer((callback, timeout) => {
     Services.tm.mainThread.dispatch(() => callback(), Ci.nsIThread.DISPATCH_NORMAL);
@@ -309,7 +294,7 @@ if (runningInParent) {
   do_register_cleanup(() => TelemetrySend.shutdown());
 }
 
-TelemetryController.testInitLogging();
+TelemetryController.initLogging();
 
 // Avoid timers interrupting test behavior.
 fakeSchedulerTimer(() => {}, () => {});

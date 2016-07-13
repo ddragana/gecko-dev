@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -54,10 +52,8 @@ public:
   FileDescriptor();
 
   FileDescriptor(const FileDescriptor& aOther)
-    : mHandleCreatedByOtherProcess(false)
-#ifdef DEBUG
-    , mHandleCreatedByOtherProcessWasUsed(false)
-#endif
+    : mHandleCreatedByOtherProcess(false),
+      mHandleCreatedByOtherProcessWasUsed(false)
   {
     // Don't use operator= here because that will call
     // CloseCurrentProcessHandle() on this (uninitialized) object.
@@ -73,9 +69,7 @@ public:
   : mHandle(aPickle.fd)
 #endif
   , mHandleCreatedByOtherProcess(true)
-#ifdef DEBUG
   , mHandleCreatedByOtherProcessWasUsed(false)
-#endif
   { }
 
   ~FileDescriptor()
@@ -108,11 +102,9 @@ public:
   PlatformHandleType
   PlatformHandle() const
   {
-#ifdef DEBUG
     if (mHandleCreatedByOtherProcess) {
       mHandleCreatedByOtherProcessWasUsed = true;
     }
-#endif
     return mHandle;
   }
 
@@ -128,17 +120,13 @@ private:
   {
     if (aOther.mHandleCreatedByOtherProcess) {
       mHandleCreatedByOtherProcess = true;
-#ifdef DEBUG
       mHandleCreatedByOtherProcessWasUsed =
         aOther.mHandleCreatedByOtherProcessWasUsed;
-#endif
       mHandle = aOther.PlatformHandle();
     } else {
       DuplicateInCurrentProcess(aOther.PlatformHandle());
       mHandleCreatedByOtherProcess = false;
-#ifdef DEBUG
       mHandleCreatedByOtherProcessWasUsed = false;
-#endif
     }
   }
 
@@ -159,11 +147,9 @@ private:
   // destruction.
   bool mHandleCreatedByOtherProcess;
 
-#ifdef DEBUG
   // This is to ensure that we don't leak the handle (which is only possible
   // when we're in the receiving process).
-  mutable bool mHandleCreatedByOtherProcessWasUsed;
-#endif
+  mutable DebugOnly<bool> mHandleCreatedByOtherProcessWasUsed;
 };
 
 } // namespace ipc

@@ -9,17 +9,20 @@
     <h1>event_session_StorageEventInit</h1>
     <div id="log"></div>
     <script>
-        async_test(function(t) {
+        test(function() {
+            var t = async_test("storageeventinit test");
             function onStorageEvent(event) {
-                assert_equals(event.key, 'key');
-                assert_equals(event.oldValue, 'oldValue');
-                assert_equals(event.newValue, 'newValue');
-                assert_equals(event.url, window.location.href);
-                assert_equals(event.storageArea, window.sessionStorage);
+                t.step(function() {
+                    assert_equals(event.key, 'key');
+                    assert_equals(event.oldValue, 'oldValue');
+                    assert_equals(event.newValue, 'newValue');
+                    assert_equals(event.url, window.location.href);
+                    assert_equals(event.storageArea, window.sessionStorage);
+                });
                 t.done();
             }
 
-            window.addEventListener('storage', t.step_func(onStorageEvent), false);
+            window.addEventListener('storage', onStorageEvent, false);
 
             var event = new StorageEvent('storage', {
                 key: 'key',
@@ -30,7 +33,7 @@
             });
 
             window.dispatchEvent(event);
-        }, "storageeventinit test - Storage event is fired due to set values for StorageEventInit.");
+        }, "Storage event is fired due to set values for StorageEventInit.");
     </script>
  </body>
 </html>

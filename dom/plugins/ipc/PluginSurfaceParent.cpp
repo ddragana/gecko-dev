@@ -12,7 +12,7 @@ namespace mozilla {
 namespace plugins {
 
 PluginSurfaceParent::PluginSurfaceParent(const WindowsSharedMemoryHandle& handle,
-                                         const gfx::IntSize& size,
+                                         const gfxIntSize& size,
                                          bool transparent)
 {
   SharedDIBSurface* dibsurf = new SharedDIBSurface();

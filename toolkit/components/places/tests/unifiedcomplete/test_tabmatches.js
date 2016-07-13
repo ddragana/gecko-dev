@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var gTabRestrictChar = "%";
+let gTabRestrictChar = "%";
 
 add_task(function* test_tab_matches() {
   let uri1 = NetUtil.newURI("http://abc.com/");
@@ -24,7 +24,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: "abc.com",
     searchParam: "enable-actions",
-    matches: [ makeVisitMatch("abc.com", "http://abc.com/", { heuristic: true }),
+    matches: [ makeVisitMatch("abc.com", "http://abc.com/"),
                makeSwitchToTabMatch("http://abc.com/", { title: "ABC rocks" }) ]
   });
 
@@ -32,7 +32,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: "abc",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch("abc", { heuristic: true }),
+    matches: [ makeSearchMatch("abc"),
                makeSwitchToTabMatch("http://abc.com/", { title: "ABC rocks" }),
                { uri: uri2, title: "xyz.net - we're better than ABC", style: [ "favicon" ] } ]
   });
@@ -42,7 +42,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: "abc",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch("abc", { heuristic: true }),
+    matches: [ makeSearchMatch("abc"),
                makeSwitchToTabMatch("http://abc.com/", { title: "ABC rocks" }),
                makeSwitchToTabMatch("http://xyz.net/", { title: "xyz.net - we're better than ABC" }) ]
   });
@@ -52,7 +52,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: "abc",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch("abc", { heuristic: true }),
+    matches: [ makeSearchMatch("abc"),
                makeSwitchToTabMatch("http://abc.com/", { title: "ABC rocks" }),
                makeSwitchToTabMatch("http://xyz.net/", { title: "xyz.net - we're better than ABC" }) ]
   });
@@ -61,7 +61,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: "abc",
     searchParam: "enable-actions disable-private-actions",
-    matches: [ makeSearchMatch("abc", { heuristic: true }),
+    matches: [ makeSearchMatch("abc"),
                { uri: uri1, title: "ABC rocks", style: [ "favicon" ] },
                { uri: uri2, title: "xyz.net - we're better than ABC", style: [ "favicon" ] } ]
   });
@@ -80,7 +80,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: "abc",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch("abc", { heuristic: true }),
+    matches: [ makeSearchMatch("abc"),
                { uri: uri1, title: "ABC rocks", style: [ "favicon" ] },
                { uri: uri2, title: "xyz.net - we're better than ABC", style: [ "favicon" ] } ]
   });
@@ -90,7 +90,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: gTabRestrictChar + " abc",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch(gTabRestrictChar + " abc", { heuristic: true }),
+    matches: [ makeSearchMatch(gTabRestrictChar + " abc"),
                makeSwitchToTabMatch("http://abc.com/", { title: "ABC rocks" }) ]
   });
 
@@ -98,7 +98,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: "mozilla",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch("mozilla", { heuristic: true }),
+    matches: [ makeSearchMatch("mozilla"),
                makeSwitchToTabMatch("about:mozilla") ]
   });
 
@@ -106,7 +106,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: gTabRestrictChar + " mozilla",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch(gTabRestrictChar + " mozilla", { heuristic: true }),
+    matches: [ makeSearchMatch(gTabRestrictChar + " mozilla"),
                makeSwitchToTabMatch("about:mozilla") ]
   });
 
@@ -114,7 +114,7 @@ add_task(function* test_tab_matches() {
   yield check_autocomplete({
     search: gTabRestrictChar,
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch(gTabRestrictChar, { heuristic: true }),
+    matches: [ makeSearchMatch(gTabRestrictChar),
                makeSwitchToTabMatch("http://abc.com/", { title: "ABC rocks" }),
                makeSwitchToTabMatch("about:mozilla"),
                makeSwitchToTabMatch("data:text/html,test") ]

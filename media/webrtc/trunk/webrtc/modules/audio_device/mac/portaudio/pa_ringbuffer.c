@@ -63,10 +63,8 @@
  * Initialize FIFO.
  * elementCount must be power of 2, returns -1 if not.
  */
-PaRingBufferSize PaUtil_InitializeRingBuffer(PaUtilRingBuffer* rbuf,
-                                             PaRingBufferSize elementSizeBytes,
-                                             PaRingBufferSize elementCount,
-                                             void* dataPtr) {
+ring_buffer_size_t PaUtil_InitializeRingBuffer( PaUtilRingBuffer *rbuf, ring_buffer_size_t elementSizeBytes, ring_buffer_size_t elementCount, void *dataPtr )
+{
     if( ((elementCount-1) & elementCount) != 0) return -1; /* Not Power of two. */
     rbuf->bufferSize = elementCount;
     rbuf->buffer = (char *)dataPtr;
@@ -79,14 +77,14 @@ PaRingBufferSize PaUtil_InitializeRingBuffer(PaUtilRingBuffer* rbuf,
 
 /***************************************************************************
 ** Return number of elements available for reading. */
-PaRingBufferSize PaUtil_GetRingBufferReadAvailable( PaUtilRingBuffer *rbuf )
+ring_buffer_size_t PaUtil_GetRingBufferReadAvailable( PaUtilRingBuffer *rbuf )
 {
     PaUtil_ReadMemoryBarrier();
     return ( (rbuf->writeIndex - rbuf->readIndex) & rbuf->bigMask );
 }
 /***************************************************************************
 ** Return number of elements available for writing. */
-PaRingBufferSize PaUtil_GetRingBufferWriteAvailable( PaUtilRingBuffer *rbuf )
+ring_buffer_size_t PaUtil_GetRingBufferWriteAvailable( PaUtilRingBuffer *rbuf )
 {
     /* Since we are calling PaUtil_GetRingBufferReadAvailable, we don't need an aditional MB */
     return ( rbuf->bufferSize - PaUtil_GetRingBufferReadAvailable(rbuf));
@@ -105,21 +103,19 @@ void PaUtil_FlushRingBuffer( PaUtilRingBuffer *rbuf )
 ** If non-contiguous, size2 will be the size of second region.
 ** Returns room available to be written or elementCount, whichever is smaller.
 */
-PaRingBufferSize PaUtil_GetRingBufferWriteRegions(PaUtilRingBuffer* rbuf,
-                                                  PaRingBufferSize elementCount,
-                                                  void** dataPtr1,
-                                                  PaRingBufferSize* sizePtr1,
-                                                  void** dataPtr2,
-                                                  PaRingBufferSize* sizePtr2) {
-    PaRingBufferSize   index;
-    PaRingBufferSize   available = PaUtil_GetRingBufferWriteAvailable( rbuf );
+ring_buffer_size_t PaUtil_GetRingBufferWriteRegions( PaUtilRingBuffer *rbuf, ring_buffer_size_t elementCount,
+                                       void **dataPtr1, ring_buffer_size_t *sizePtr1,
+                                       void **dataPtr2, ring_buffer_size_t *sizePtr2 )
+{
+    ring_buffer_size_t   index;
+    ring_buffer_size_t   available = PaUtil_GetRingBufferWriteAvailable( rbuf );
     if( elementCount > available ) elementCount = available;
     /* Check to see if write is not contiguous. */
     index = rbuf->writeIndex & rbuf->smallMask;
     if( (index + elementCount) > rbuf->bufferSize )
     {
         /* Write data in two blocks that wrap the buffer. */
-        PaRingBufferSize   firstHalf = rbuf->bufferSize - index;
+        ring_buffer_size_t   firstHalf = rbuf->bufferSize - index;
         *dataPtr1 = &rbuf->buffer[index*rbuf->elementSizeBytes];
         *sizePtr1 = firstHalf;
         *dataPtr2 = &rbuf->buffer[0];
@@ -138,9 +134,8 @@ PaRingBufferSize PaUtil_GetRingBufferWriteRegions(PaUtilRingBuffer* rbuf,
 
 /***************************************************************************
 */
-PaRingBufferSize PaUtil_AdvanceRingBufferWriteIndex(
-    PaUtilRingBuffer* rbuf,
-    PaRingBufferSize elementCount) {
+ring_buffer_size_t PaUtil_AdvanceRingBufferWriteIndex( PaUtilRingBuffer *rbuf, ring_buffer_size_t elementCount )
+{
     /* we need to ensure that previous writes are seen before we update the write index */
     PaUtil_WriteMemoryBarrier();
     return rbuf->writeIndex = (rbuf->writeIndex + elementCount) & rbuf->bigMask;
@@ -152,21 +147,19 @@ PaRingBufferSize PaUtil_AdvanceRingBufferWriteIndex(
 ** If non-contiguous, size2 will be the size of second region.
 ** Returns room available to be written or elementCount, whichever is smaller.
 */
-PaRingBufferSize PaUtil_GetRingBufferReadRegions(PaUtilRingBuffer* rbuf,
-                                                 PaRingBufferSize elementCount,
-                                                 void** dataPtr1,
-                                                 PaRingBufferSize* sizePtr1,
-                                                 void** dataPtr2,
-                                                 PaRingBufferSize* sizePtr2) {
-    PaRingBufferSize   index;
-    PaRingBufferSize   available = PaUtil_GetRingBufferReadAvailable( rbuf );
+ring_buffer_size_t PaUtil_GetRingBufferReadRegions( PaUtilRingBuffer *rbuf, ring_buffer_size_t elementCount,
+                                void **dataPtr1, ring_buffer_size_t *sizePtr1,
+                                void **dataPtr2, ring_buffer_size_t *sizePtr2 )
+{
+    ring_buffer_size_t   index;
+    ring_buffer_size_t   available = PaUtil_GetRingBufferReadAvailable( rbuf );
     if( elementCount > available ) elementCount = available;
     /* Check to see if read is not contiguous. */
     index = rbuf->readIndex & rbuf->smallMask;
     if( (index + elementCount) > rbuf->bufferSize )
     {
         /* Write data in two blocks that wrap the buffer. */
-        PaRingBufferSize firstHalf = rbuf->bufferSize - index;
+        ring_buffer_size_t firstHalf = rbuf->bufferSize - index;
         *dataPtr1 = &rbuf->buffer[index*rbuf->elementSizeBytes];
         *sizePtr1 = firstHalf;
         *dataPtr2 = &rbuf->buffer[0];
@@ -183,9 +176,8 @@ PaRingBufferSize PaUtil_GetRingBufferReadRegions(PaUtilRingBuffer* rbuf,
 }
 /***************************************************************************
 */
-PaRingBufferSize PaUtil_AdvanceRingBufferReadIndex(
-    PaUtilRingBuffer* rbuf,
-    PaRingBufferSize elementCount) {
+ring_buffer_size_t PaUtil_AdvanceRingBufferReadIndex( PaUtilRingBuffer *rbuf, ring_buffer_size_t elementCount )
+{
     /* we need to ensure that previous writes are always seen before updating the index. */
     PaUtil_WriteMemoryBarrier();
     return rbuf->readIndex = (rbuf->readIndex + elementCount) & rbuf->bigMask;
@@ -193,10 +185,9 @@ PaRingBufferSize PaUtil_AdvanceRingBufferReadIndex(
 
 /***************************************************************************
 ** Return elements written. */
-PaRingBufferSize PaUtil_WriteRingBuffer(PaUtilRingBuffer* rbuf,
-                                        const void* data,
-                                        PaRingBufferSize elementCount) {
-    PaRingBufferSize size1, size2, numWritten;
+ring_buffer_size_t PaUtil_WriteRingBuffer( PaUtilRingBuffer *rbuf, const void *data, ring_buffer_size_t elementCount )
+{
+    ring_buffer_size_t size1, size2, numWritten;
     void *data1, *data2;
     numWritten = PaUtil_GetRingBufferWriteRegions( rbuf, elementCount, &data1, &size1, &data2, &size2 );
     if( size2 > 0 )
@@ -216,10 +207,9 @@ PaRingBufferSize PaUtil_WriteRingBuffer(PaUtilRingBuffer* rbuf,
 
 /***************************************************************************
 ** Return elements read. */
-PaRingBufferSize PaUtil_ReadRingBuffer(PaUtilRingBuffer* rbuf,
-                                       void* data,
-                                       PaRingBufferSize elementCount) {
-    PaRingBufferSize size1, size2, numRead;
+ring_buffer_size_t PaUtil_ReadRingBuffer( PaUtilRingBuffer *rbuf, void *data, ring_buffer_size_t elementCount )
+{
+    ring_buffer_size_t size1, size2, numRead;
     void *data1, *data2;
     numRead = PaUtil_GetRingBufferReadRegions( rbuf, elementCount, &data1, &size1, &data2, &size2 );
     if( size2 > 0 )

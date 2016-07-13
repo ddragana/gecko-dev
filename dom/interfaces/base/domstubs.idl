@@ -61,7 +61,7 @@ interface nsIDOMCSSValue;
 interface nsIDOMCSSPrimitiveValue;
 interface nsIDOMCSSRule;
 interface nsIDOMCSSRuleList;
-interface nsIDOMCSSKeyframeRule;
+interface nsIDOMMozCSSKeyframeRule;
 interface nsIDOMCSSFontFeatureValuesRule;
 interface nsIDOMCSSStyleSheet;
 interface nsIDOMCSSStyleDeclaration;

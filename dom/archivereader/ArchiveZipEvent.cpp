@@ -10,9 +10,6 @@
 #include "nsContentUtils.h"
 #include "nsCExternalHandlerService.h"
 
-#include "mozilla/UniquePtr.h"
-
-using namespace mozilla;
 using namespace mozilla::dom;
 
 USING_ARCHIVEREADER_NAMESPACE
@@ -87,7 +84,7 @@ ArchiveZipItem::GetFile(ArchiveReader* aArchiveReader)
     return nullptr;
   }
 
-  RefPtr<dom::File> file = dom::File::Create(aArchiveReader,
+  nsRefPtr<dom::File> file = dom::File::Create(aArchiveReader,
     new ArchiveZipBlobImpl(filename,
                            NS_ConvertUTF8toUTF16(GetType()),
                            StrToInt32(mCentralStruct.orglen),
@@ -194,8 +191,8 @@ ArchiveReaderZipEvent::Exec()
     }
 
     // Read the name:
-    auto filename = MakeUnique<char[]>(filenameLen + 1);
-    rv = inputStream->Read(filename.get(), filenameLen, &ret);
+    nsAutoArrayPtr<char> filename(new char[filenameLen + 1]);
+    rv = inputStream->Read(filename, filenameLen, &ret);
     if (NS_FAILED(rv) || ret != filenameLen) {
       return RunShare(NS_ERROR_UNEXPECTED);
     }
@@ -204,8 +201,7 @@ ArchiveReaderZipEvent::Exec()
 
     // We ignore the directories:
     if (filename[filenameLen - 1] != '/') {
-      mFileList.AppendElement(new ArchiveZipItem(filename.get(), centralStruct,
-                                                 mEncoding));
+      mFileList.AppendElement(new ArchiveZipItem(filename, centralStruct, mEncoding));
     }
 
     // Ignore the rest

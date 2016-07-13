@@ -13,7 +13,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 
-var log = Cu.reportError;
+let log = Cu.reportError;
 
 XPCOMUtils.defineLazyGetter(this, "converter", function () {
   let conv = Cc["@mozilla.org/intl/scriptableunicodeconverter"].createInstance(Ci.nsIScriptableUnicodeConverter);
@@ -57,7 +57,6 @@ var SimpleServiceDiscovery = {
   _searchTimestamp: 0,
   _searchTimeout: Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer),
   _searchRepeat: Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer),
-  _discoveryMethods: [],
 
   _forceTrailingSlash: function(aURL) {
     // Cleanup the URL to make it consistent across devices
@@ -142,9 +141,6 @@ var SimpleServiceDiscovery = {
     // UDP broadcasts, so this is a way to skip discovery.
     this._searchFixedDevices();
 
-    // Look for any devices via registered external discovery mechanism.
-    this._startExternalDiscovery();
-
     // Perform a UDP broadcast to search for SSDP devices
     let socket = Cc["@mozilla.org/network/udp-socket;1"].createInstance(Ci.nsIUDPSocket);
     try {
@@ -198,7 +194,7 @@ var SimpleServiceDiscovery = {
     fixedDevices = JSON.parse(fixedDevices);
     for (let fixedDevice of fixedDevices) {
       // Verify we have the right data
-      if (!("location" in fixedDevice) || !("target" in fixedDevice)) {
+      if (!"location" in fixedDevice || !"target" in fixedDevice) {
         continue;
       }
 
@@ -230,8 +226,6 @@ var SimpleServiceDiscovery = {
         }
       }
     }
-
-    this._stopExternalDiscovery();
   },
 
   getSupportedExtensions: function() {
@@ -415,21 +409,5 @@ var SimpleServiceDiscovery = {
 
     // Make sure we remember this service is not stale
     this._services.get(service.uuid).lastPing = this._searchTimestamp;
-  },
-
-  addExternalDiscovery: function(discovery) {
-    this._discoveryMethods.push(discovery);
-  },
-
-  _startExternalDiscovery: function() {
-    for (let discovery of this._discoveryMethods) {
-      discovery.startDiscovery();
-    }
-  },
-
-  _stopExternalDiscovery: function() {
-    for (let discovery of this._discoveryMethods) {
-      discovery.stopDiscovery();
-    }
-  },
+  }
 }

@@ -311,7 +311,7 @@ getRunAttributesCB(AtkText *aText, gint aOffset,
     return nullptr;
   }
 
-  AutoTArray<Attribute, 10> attrs;
+  nsAutoTArray<Attribute, 10> attrs;
   proxy->TextAttributes(false, aOffset, &attrs, &startOffset, &endOffset);
   *aStartOffset = startOffset;
   *aEndOffset = endOffset;
@@ -337,7 +337,7 @@ getDefaultAttributesCB(AtkText *aText)
     return nullptr;
   }
 
-  AutoTArray<Attribute, 10> attrs;
+  nsAutoTArray<Attribute, 10> attrs;
   proxy->DefaultTextAttributes(&attrs);
   return ConvertToAtkTextAttributeSet(attrs);
 }
@@ -586,8 +586,9 @@ setCaretOffsetCB(AtkText *aText, gint aOffset)
   }
 
   if (ProxyAccessible* proxy = GetProxy(ATK_OBJECT(aText))) {
-    proxy->SetCaretOffset(aOffset);
-    return TRUE;
+    if (proxy->SetCaretOffset(aOffset)) {
+      return TRUE;
+    }
   }
 
   return FALSE;

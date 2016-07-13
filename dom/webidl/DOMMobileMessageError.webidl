@@ -8,5 +8,5 @@
  CheckAnyPermissions="sms",
  AvailableIn="CertifiedApps"]
 interface DOMMobileMessageError : DOMError {
-  readonly attribute (SmsMessage or MmsMessage) data;
+  readonly attribute (MozSmsMessage or MozMmsMessage) data;
 };

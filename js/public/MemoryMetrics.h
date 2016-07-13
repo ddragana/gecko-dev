@@ -55,7 +55,8 @@ struct TabSizes
     size_t other;
 };
 
-/** These are the measurements used by Servo. */
+// These are the measurements used by Servo. It's important that this is a POD
+// struct so that Servo can have a parallel |repr(C)| Rust equivalent.
 struct ServoSizes
 {
     enum Kind {
@@ -95,22 +96,18 @@ struct ServoSizes
 
 namespace js {
 
-/**
- * In memory reporting, we have concept of "sundries", line items which are too
- * small to be worth reporting individually.  Under some circumstances, a memory
- * reporter gets tossed into the sundries bucket if it's smaller than
- * MemoryReportingSundriesThreshold() bytes.
- *
- * We need to define this value here, rather than in the code which actually
- * generates the memory reports, because NotableStringInfo uses this value.
- */
+// In memory reporting, we have concept of "sundries", line items which are too
+// small to be worth reporting individually.  Under some circumstances, a memory
+// reporter gets tossed into the sundries bucket if it's smaller than
+// MemoryReportingSundriesThreshold() bytes.
+//
+// We need to define this value here, rather than in the code which actually
+// generates the memory reports, because NotableStringInfo uses this value.
 JS_FRIEND_API(size_t) MemoryReportingSundriesThreshold();
 
-/**
- * This hash policy avoids flattening ropes (which perturbs the site being
- * measured and requires a JSContext) at the expense of doing a FULL ROPE COPY
- * on every hash and match! Beware.
- */
+// This hash policy avoids flattening ropes (which perturbs the site being
+// measured and requires a JSContext) at the expense of doing a FULL ROPE COPY
+// on every hash and match! Beware.
 struct InefficientNonFlatteningStringHashPolicy
 {
     typedef JSString* Lookup;
@@ -166,11 +163,10 @@ struct ClassInfo
 #define FOR_EACH_SIZE(macro) \
     macro(Objects, GCHeapUsed, objectsGCHeap) \
     macro(Objects, MallocHeap, objectsMallocHeapSlots) \
-    macro(Objects, MallocHeap, objectsMallocHeapElementsNormal) \
+    macro(Objects, MallocHeap, objectsMallocHeapElementsNonAsmJS) \
     macro(Objects, MallocHeap, objectsMallocHeapElementsAsmJS) \
-    macro(Objects, NonHeap,    objectsNonHeapElementsNormal) \
     macro(Objects, NonHeap,    objectsNonHeapElementsAsmJS) \
-    macro(Objects, NonHeap,    objectsNonHeapElementsShared) \
+    macro(Objects, NonHeap,    objectsNonHeapElementsMapped) \
     macro(Objects, NonHeap,    objectsNonHeapCodeAsmJS) \
     macro(Objects, MallocHeap, objectsMallocHeapMisc) \
     \
@@ -225,14 +221,12 @@ struct ClassInfo
 #undef FOR_EACH_SIZE
 };
 
-/**
- * Holds data about a notable class (one whose combined object and shape
- * instances use more than a certain amount of memory) so we can report it
- * individually.
- *
- * The only difference between this class and ClassInfo is that this class
- * holds a copy of the filename.
- */
+// Holds data about a notable class (one whose combined object and shape
+// instances use more than a certain amount of memory) so we can report it
+// individually.
+//
+// The only difference between this class and ClassInfo is that this class
+// holds a copy of the filename.
 struct NotableClassInfo : public ClassInfo
 {
     NotableClassInfo();
@@ -250,7 +244,7 @@ struct NotableClassInfo : public ClassInfo
     NotableClassInfo(const NotableClassInfo& info) = delete;
 };
 
-/** Data for tracking JIT-code memory usage. */
+// Data for tracking JIT-code memory usage.
 struct CodeSizes
 {
 #define FOR_EACH_SIZE(macro) \
@@ -275,7 +269,7 @@ struct CodeSizes
 #undef FOR_EACH_SIZE
 };
 
-/** Data for tracking GC memory usage. */
+// Data for tracking GC memory usage.
 struct GCSizes
 {
     // |nurseryDecommitted| is marked as NonHeap rather than GCHeapDecommitted
@@ -289,6 +283,8 @@ struct GCSizes
     macro(_, MallocHeap, storeBufferCells) \
     macro(_, MallocHeap, storeBufferSlots) \
     macro(_, MallocHeap, storeBufferWholeCells) \
+    macro(_, MallocHeap, storeBufferRelocVals) \
+    macro(_, MallocHeap, storeBufferRelocCells) \
     macro(_, MallocHeap, storeBufferGenerics)
 
     GCSizes()
@@ -306,13 +302,11 @@ struct GCSizes
 #undef FOR_EACH_SIZE
 };
 
-/**
- * This class holds information about the memory taken up by identical copies of
- * a particular string.  Multiple JSStrings may have their sizes aggregated
- * together into one StringInfo object.  Note that two strings with identical
- * chars will not be aggregated together if one is a short string and the other
- * is not.
- */
+// This class holds information about the memory taken up by identical copies of
+// a particular string.  Multiple JSStrings may have their sizes aggregated
+// together into one StringInfo object.  Note that two strings with identical
+// chars will not be aggregated together if one is a short string and the other
+// is not.
 struct StringInfo
 {
 #define FOR_EACH_SIZE(macro) \
@@ -363,13 +357,11 @@ struct StringInfo
 #undef FOR_EACH_SIZE
 };
 
-/**
- * Holds data about a notable string (one which, counting all duplicates, uses
- * more than a certain amount of memory) so we can report it individually.
- *
- * The only difference between this class and StringInfo is that
- * NotableStringInfo holds a copy of some or all of the string's chars.
- */
+// Holds data about a notable string (one which, counting all duplicates, uses
+// more than a certain amount of memory) so we can report it individually.
+//
+// The only difference between this class and StringInfo is that
+// NotableStringInfo holds a copy of some or all of the string's chars.
 struct NotableStringInfo : public StringInfo
 {
     static const size_t MAX_SAVED_CHARS = 1024;
@@ -390,13 +382,13 @@ struct NotableStringInfo : public StringInfo
     NotableStringInfo(const NotableStringInfo& info) = delete;
 };
 
-/**
- * This class holds information about the memory taken up by script sources
- * from a particular file.
- */
+// This class holds information about the memory taken up by script sources
+// from a particular file.
 struct ScriptSourceInfo
 {
 #define FOR_EACH_SIZE(macro) \
+    macro(_, MallocHeap, compressed) \
+    macro(_, MallocHeap, uncompressed) \
     macro(_, MallocHeap, misc)
 
     ScriptSourceInfo()
@@ -432,14 +424,12 @@ struct ScriptSourceInfo
 #undef FOR_EACH_SIZE
 };
 
-/**
- * Holds data about a notable script source file (one whose combined
- * script sources use more than a certain amount of memory) so we can report it
- * individually.
- *
- * The only difference between this class and ScriptSourceInfo is that this
- * class holds a copy of the filename.
- */
+// Holds data about a notable script source file (one whose combined
+// script sources use more than a certain amount of memory) so we can report it
+// individually.
+//
+// The only difference between this class and ScriptSourceInfo is that this
+// class holds a copy of the filename.
 struct NotableScriptSourceInfo : public ScriptSourceInfo
 {
     NotableScriptSourceInfo();
@@ -457,21 +447,20 @@ struct NotableScriptSourceInfo : public ScriptSourceInfo
     NotableScriptSourceInfo(const NotableScriptSourceInfo& info) = delete;
 };
 
-/**
- * These measurements relate directly to the JSRuntime, and not to zones and
- * compartments within it.
- */
+// These measurements relate directly to the JSRuntime, and not to zones and
+// compartments within it.
 struct RuntimeSizes
 {
 #define FOR_EACH_SIZE(macro) \
     macro(_, MallocHeap, object) \
     macro(_, MallocHeap, atomsTable) \
     macro(_, MallocHeap, contexts) \
+    macro(_, MallocHeap, dtoa) \
     macro(_, MallocHeap, temporary) \
     macro(_, MallocHeap, interpreterStack) \
     macro(_, MallocHeap, mathCache) \
-    macro(_, MallocHeap, sharedImmutableStringsCache) \
     macro(_, MallocHeap, uncompressedSourceCache) \
+    macro(_, MallocHeap, compressedSourceSet) \
     macro(_, MallocHeap, scriptData)
 
     RuntimeSizes()
@@ -597,8 +586,7 @@ struct ZoneStats
     macro(Other,   GCHeapUsed,  objectGroupsGCHeap) \
     macro(Other,   MallocHeap,  objectGroupsMallocHeap) \
     macro(Other,   MallocHeap,  typePool) \
-    macro(Other,   MallocHeap,  baselineStubsOptimized) \
-    macro(Other,   MallocHeap,  uniqueIdMap)
+    macro(Other,   MallocHeap,  baselineStubsOptimized)
 
     ZoneStats()
       : FOR_EACH_SIZE(ZERO_SIZE)
@@ -709,10 +697,7 @@ struct CompartmentStats
     macro(Other,   MallocHeap, objectMetadataTable) \
     macro(Other,   MallocHeap, crossCompartmentWrappersTable) \
     macro(Other,   MallocHeap, regexpCompartment) \
-    macro(Other,   MallocHeap, savedStacksSet) \
-    macro(Other,   MallocHeap, nonSyntacticLexicalScopesTable) \
-    macro(Other,   MallocHeap, jitCompartment) \
-    macro(Other,   MallocHeap, privateData)
+    macro(Other,   MallocHeap, savedStacksSet)
 
     CompartmentStats()
       : FOR_EACH_SIZE(ZERO_SIZE)
@@ -734,8 +719,6 @@ struct CompartmentStats
         other.allClasses = nullptr;
         MOZ_ASSERT(!other.isTotals);
     }
-
-    CompartmentStats(const CompartmentStats&) = delete; // disallow copying
 
     ~CompartmentStats() {
         // |allClasses| is usually deleted and set to nullptr before this

@@ -9,7 +9,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
-var DEBUG = false;
+let DEBUG = false;
 
 if (DEBUG) {
   debug = function (s) { dump("-*- PACGenerator: " + s + "\n"); };
@@ -107,7 +107,7 @@ PACGenerator.prototype = {
       pac += "var origins ='" + appOrigins +
              "'.split(/[ ,]+/).filter(Boolean); " +
              "if ((origins.indexOf('*') > -1 || origins.indexOf(myAppOrigin()) > -1)" +
-             " && isInIsolatedMozBrowser()) { return 'PROXY " + proxy + "'; } ";
+             " && isInBrowser()) { return 'PROXY " + proxy + "'; } ";
     }
 
     // Rules for system proxy.

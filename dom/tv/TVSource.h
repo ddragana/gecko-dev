@@ -32,10 +32,9 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TVSource, DOMEventTargetHelper)
 
-  static already_AddRefed<TVSource>
-  Create(nsPIDOMWindowInner* aWindow,
-         TVSourceType aType,
-         TVTuner* aTuner);
+  static already_AddRefed<TVSource> Create(nsPIDOMWindow* aWindow,
+                                           TVSourceType aType,
+                                           TVTuner* aTuner);
 
   // WebIDL (internal functions)
 
@@ -84,7 +83,7 @@ public:
   IMPL_EVENT_HANDLER(scanningstatechanged);
 
 private:
-  TVSource(nsPIDOMWindowInner* aWindow,
+  TVSource(nsPIDOMWindow* aWindow,
            TVSourceType aType,
            TVTuner* aTuner);
 
@@ -102,8 +101,8 @@ private:
   nsresult DispatchEITBroadcastedEvent(const Sequence<OwningNonNull<TVProgram>>& aPrograms);
 
   nsCOMPtr<nsITVService> mTVService;
-  RefPtr<TVTuner> mTuner;
-  RefPtr<TVChannel> mCurrentChannel;
+  nsRefPtr<TVTuner> mTuner;
+  nsRefPtr<TVChannel> mCurrentChannel;
   TVSourceType mType;
   bool mIsScanning;
 };

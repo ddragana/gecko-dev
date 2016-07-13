@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/TelemetryStopwatch.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MigrationUtils",
@@ -114,21 +113,20 @@ var PlacesOrganizer = {
     PlacesSearchBox.init();
 
     window.addEventListener("AppCommand", this, true);
+#ifdef XP_MACOSX
+    // 1. Map Edit->Find command to OrganizerCommand_find:all.  Need to map
+    // both the menuitem and the Find key.
+    var findMenuItem = document.getElementById("menu_find");
+    findMenuItem.setAttribute("command", "OrganizerCommand_find:all");
+    var findKey = document.getElementById("key_find");
+    findKey.setAttribute("command", "OrganizerCommand_find:all");
 
-    if (AppConstants.platform === "macosx") {
-      // 1. Map Edit->Find command to OrganizerCommand_find:all.  Need to map
-      // both the menuitem and the Find key.
-      let findMenuItem = document.getElementById("menu_find");
-      findMenuItem.setAttribute("command", "OrganizerCommand_find:all");
-      let findKey = document.getElementById("key_find");
-      findKey.setAttribute("command", "OrganizerCommand_find:all");
-
-      // 2. Disable some keybindings from browser.xul
-      let elements = ["cmd_handleBackspace", "cmd_handleShiftBackspace"];
-      for (let i = 0; i < elements.length; i++) {
-        document.getElementById(elements[i]).setAttribute("disabled", "true");
-      }
+    // 2. Disable some keybindings from browser.xul
+    var elements = ["cmd_handleBackspace", "cmd_handleShiftBackspace"];
+    for (var i=0; i < elements.length; i++) {
+      document.getElementById(elements[i]).setAttribute("disabled", "true");
     }
+#endif
 
     // remove the "Properties" context-menu item, we've our own details pane
     document.getElementById("placesContext")
@@ -362,8 +360,7 @@ var PlacesOrganizer = {
    * cookies, history, preferences, and bookmarks.
    */
   importFromBrowser: function PO_importFromBrowser() {
-    // We pass in the type of source we're using for use in telemetry:
-    MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_PLACES]);
+    MigrationUtils.showMigrationWizard(window);
   },
 
   /**
@@ -418,7 +415,7 @@ var PlacesOrganizer = {
     while (restorePopup.childNodes.length > 1)
       restorePopup.removeChild(restorePopup.firstChild);
 
-    Task.spawn(function* () {
+    Task.spawn(function() {
       let backupFiles = yield PlacesBackups.getBackupFiles();
       if (backupFiles.length == 0)
         return;
@@ -465,16 +462,18 @@ var PlacesOrganizer = {
   /**
    * Called when a menuitem is selected from the restore menu.
    */
-  onRestoreMenuItemClick: Task.async(function* (aMenuItem) {
-    let backupName = aMenuItem.getAttribute("value");
-    let backupFilePaths = yield PlacesBackups.getBackupFiles();
-    for (let backupFilePath of backupFilePaths) {
-      if (OS.Path.basename(backupFilePath) == backupName) {
-        PlacesOrganizer.restoreBookmarksFromFile(backupFilePath);
-        break;
+  onRestoreMenuItemClick: function PO_onRestoreMenuItemClick(aMenuItem) {
+    Task.spawn(function() {
+      let backupName = aMenuItem.getAttribute("value");
+      let backupFilePaths = yield PlacesBackups.getBackupFiles();
+      for (let backupFilePath of backupFilePaths) {
+        if (OS.Path.basename(backupFilePath) == backupName) {
+          PlacesOrganizer.restoreBookmarksFromFile(backupFilePath);
+          break;
+        }
       }
-    }
-  }),
+    });
+  },
 
   /**
    * Called when 'Choose File...' is selected from the restore menu.
@@ -505,8 +504,7 @@ var PlacesOrganizer = {
    */
   restoreBookmarksFromFile: function PO_restoreBookmarksFromFile(aFilePath) {
     // check file extension
-    if (!aFilePath.toLowerCase().endsWith("json") &&
-        !aFilePath.toLowerCase().endsWith("jsonlz4"))  {
+    if (!aFilePath.endsWith("json") && !aFilePath.endsWith("jsonlz4"))  {
       this._showErrorAlert(PlacesUIUtils.getString("bookmarksRestoreFormatError"));
       return;
     }
@@ -519,7 +517,7 @@ var PlacesOrganizer = {
                          PlacesUIUtils.getString("bookmarksRestoreAlert")))
       return;
 
-    Task.spawn(function* () {
+    Task.spawn(function() {
       try {
         yield BookmarkJSONUtils.importFromFile(aFilePath, true);
       } catch(ex) {
@@ -559,7 +557,6 @@ var PlacesOrganizer = {
     fp.appendFilter(PlacesUIUtils.getString("bookmarksRestoreFilterName"),
                     RESTORE_FILEPICKER_FILTER_EXT);
     fp.defaultString = PlacesBackups.getFilenameForDate();
-    fp.defaultExtension = "json";
     fp.displayDirectory = backupsDir;
     fp.open(fpCallback);
   },
@@ -595,7 +592,7 @@ var PlacesOrganizer = {
         infoBox.setAttribute("minimal", "true");
       infoBox.removeAttribute("wasminimal");
       infoBoxExpanderWrapper.hidden =
-        this._additionalInfoFields.every(id =>
+        this._additionalInfoFields.every(function (id)
           document.getElementById(id).collapsed);
     }
     additionalInfoBroadcaster.hidden = infoBox.getAttribute("minimal") == "true";
@@ -632,7 +629,7 @@ var PlacesOrganizer = {
       // don't update the panel if we are already editing this node unless we're
       // in multi-edit mode
       if (selectedNode) {
-        let concreteId = PlacesUtils.getConcreteItemId(selectedNode);
+        var concreteId = PlacesUtils.getConcreteItemId(selectedNode);
         var nodeIsSame = gEditItemOverlay.itemId == selectedNode.itemId ||
                          gEditItemOverlay.itemId == concreteId ||
                          (selectedNode.itemId == -1 && gEditItemOverlay.uri &&
@@ -652,7 +649,7 @@ var PlacesOrganizer = {
       // does allow setting properties for folder shortcuts as well, but since
       // the UI does not distinct between the couple, we better just show
       // the concrete item properties for shortcuts to root nodes.
-      let concreteId = PlacesUtils.getConcreteItemId(selectedNode);
+      var concreteId = PlacesUtils.getConcreteItemId(selectedNode);
       var isRootItem = concreteId != -1 && PlacesUtils.isRootItem(concreteId);
       var readOnly = isRootItem ||
                      selectedNode.parent.itemId == PlacesUIUtils.leftPaneFolderId;
@@ -673,7 +670,7 @@ var PlacesOrganizer = {
     }
     else if (!selectedNode && aNodeList[0]) {
       if (aNodeList.every(PlacesUtils.nodeIsURI)) {
-        let uris = aNodeList.map(node => PlacesUtils._uri(node.uri));
+        let uris = [for (node of aNodeList) PlacesUtils._uri(node.uri)];
         detailsDeck.selectedIndex = 1;
         gEditItemOverlay.initPanel({ uris
                                    , hiddenRows: ["folderPicker",
@@ -775,7 +772,7 @@ var PlacesSearchBox = {
   get searchFilter() {
     return document.getElementById("searchFilter");
   },
-
+   
   /**
    * Folders to include when searching.
    */
@@ -895,7 +892,7 @@ var PlacesSearchBox = {
         title = PlacesUIUtils.getString("searchDownloads");
         break;
       default:
-        title = PlacesUIUtils.getString("searchBookmarks");
+        title = PlacesUIUtils.getString("searchBookmarks");                                    
     }
     this.searchFilter.placeholder = title;
   },
@@ -1205,13 +1202,13 @@ var ViewMenu = {
     if (aColumn) {
       columnId = aColumn.getAttribute("anonid");
       if (!aDirection) {
-        let sortColumn = this._getSortColumn();
+        var sortColumn = this._getSortColumn();
         if (sortColumn)
           aDirection = sortColumn.getAttribute("sortDirection");
       }
     }
     else {
-      let sortColumn = this._getSortColumn();
+      var sortColumn = this._getSortColumn();
       columnId = sortColumn ? sortColumn.getAttribute("anonid") : "title";
     }
 
@@ -1250,7 +1247,7 @@ var ViewMenu = {
   }
 }
 
-var ContentArea = {
+let ContentArea = {
   _specialViews: new Map(),
 
   init: function CA_init() {
@@ -1309,9 +1306,7 @@ var ContentArea = {
                                            options: aOptions || new Object() });
   },
 
-  get currentView() {
-    return PlacesUIUtils.getViewForNode(this._deck.selectedPanel);
-  },
+  get currentView() PlacesUIUtils.getViewForNode(this._deck.selectedPanel),
   set currentView(aNewView) {
     let oldView = this.currentView;
     if (oldView != aNewView) {
@@ -1325,9 +1320,7 @@ var ContentArea = {
     return aNewView;
   },
 
-  get currentPlace() {
-    return this.currentView.place;
-  },
+  get currentPlace() this.currentView.place,
   set currentPlace(aQueryString) {
     let oldView = this.currentView;
     let newView = this.getContentViewForQueryString(aQueryString);
@@ -1356,11 +1349,11 @@ var ContentArea = {
       // On Windows and Linux the menu buttons are menus wrapped in a menubar.
       if (elt.id == "placesMenu") {
         for (let menuElt of elt.childNodes) {
-          menuElt.hidden = !options.toolbarSet.includes(menuElt.id);
+          menuElt.hidden = options.toolbarSet.indexOf(menuElt.id) == -1;
         }
       }
       else {
-        elt.hidden = !options.toolbarSet.includes(elt.id);
+        elt.hidden = options.toolbarSet.indexOf(elt.id) == -1;
       }
     }
   },
@@ -1387,21 +1380,17 @@ var ContentArea = {
   }
 };
 
-var ContentTree = {
+let ContentTree = {
   init: function CT_init() {
     this._view = document.getElementById("placeContent");
   },
 
-  get view() {
-    return this._view;
-  },
+  get view() this._view,
 
-  get viewOptions() {
-    return Object.seal({
-      showDetailsPane: true,
-      toolbarSet: "back-button, forward-button, organizeButton, viewMenu, maintenanceButton, libraryToolbarSpacer, searchFilter"
-    });
-  },
+  get viewOptions() Object.seal({
+    showDetailsPane: true,
+    toolbarSet: "back-button, forward-button, organizeButton, viewMenu, maintenanceButton, libraryToolbarSpacer, searchFilter"
+  }),
 
   openSelectedNode: function CT_openSelectedNode(aEvent) {
     let view = this.view;

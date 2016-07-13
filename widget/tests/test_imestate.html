@@ -1232,9 +1232,6 @@ function runEditorFlagChangeTests()
 
   var container = document.getElementById("display");
 
-  // Reset selection from previous tests.
-  window.getSelection().collapse(container, 0);
-
   // the editor has focus directly.
   container.setAttribute("contenteditable", "true");
   container.focus();

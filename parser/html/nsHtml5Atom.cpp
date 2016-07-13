@@ -9,18 +9,11 @@
 nsHtml5Atom::nsHtml5Atom(const nsAString& aString)
 {
   mLength = aString.Length();
-  mIsStatic = false;
-  RefPtr<nsStringBuffer> buf = nsStringBuffer::FromString(aString);
+  nsRefPtr<nsStringBuffer> buf = nsStringBuffer::FromString(aString);
   if (buf) {
     mString = static_cast<char16_t*>(buf->Data());
   } else {
-    const size_t size = (mLength + 1) * sizeof(char16_t);
-    buf = nsStringBuffer::Alloc(size);
-    if (MOZ_UNLIKELY(!buf)) {
-      // We OOM because atom allocations should be small and it's hard to
-      // handle them more gracefully in a constructor.
-      NS_ABORT_OOM(size);
-    }
+    buf = nsStringBuffer::Alloc((mLength + 1) * sizeof(char16_t));
     mString = static_cast<char16_t*>(buf->Data());
     CopyUnicodeTo(aString, 0, mString, mLength);
     mString[mLength] = char16_t(0);
@@ -32,7 +25,7 @@ nsHtml5Atom::nsHtml5Atom(const nsAString& aString)
   NS_ASSERTION(Equals(aString), "correct data");
 
   // Take ownership of buffer
-  mozilla::Unused << buf.forget();
+  mozilla::unused << buf.forget();
 }
 
 nsHtml5Atom::~nsHtml5Atom()
@@ -75,6 +68,12 @@ nsHtml5Atom::ToUTF8String(nsACString& aReturn)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+NS_IMETHODIMP_(bool)
+nsHtml5Atom::IsStaticAtom()
+{
+  return false;
+}
+
 NS_IMETHODIMP
 nsHtml5Atom::ScriptableEquals(const nsAString& aString, bool* aResult)
 {
@@ -82,10 +81,9 @@ nsHtml5Atom::ScriptableEquals(const nsAString& aString, bool* aResult)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP_(size_t)
-nsHtml5Atom::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+NS_IMETHODIMP_(bool)
+nsHtml5Atom::EqualsUTF8(const nsACString& aString)
 {
-  NS_NOTREACHED("Should not call SizeOfIncludingThis.");
-  return 0;
+  NS_NOTREACHED("Should not attempt to compare with an UTF-8 string.");
+  return false;
 }
-

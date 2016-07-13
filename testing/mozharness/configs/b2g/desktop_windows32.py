@@ -21,6 +21,12 @@ config = {
     "buildbot_json_path": "buildprops.json",
     'exes': {
         'python2.7': sys.executable,
+        'hgtool.py': [
+            sys.executable,
+            os.path.join(
+                os.getcwd(), 'build', 'tools', 'buildfarm', 'utils', 'hgtool.py'
+            )
+        ],
         'gittool.py': [
             sys.executable,
             os.path.join(
@@ -43,6 +49,8 @@ config = {
         ],
     },
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
+    'purge_skip': ['info', 'rel-*:45d', 'tb-rel-*:45d'],
+    'purge_basedirs':  [],
     'enable_ccache': False,
     'vcs_share_base': 'C:\\builds\\hg-shared',
     'objdir': 'obj-firefox',
@@ -67,7 +75,7 @@ config = {
         'HG_SHARE_BASE_DIR': 'C:/builds/hg-shared',
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'MOZ_OBJDIR': 'obj-firefox',
-        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/python27;'
+        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/nsis-2.46u;C:/mozilla-build/python27;'
                 'C:/mozilla-build/buildbotve/scripts;'
                 '%s' % (os.environ.get('path')),
         'PDBSTR_PATH': '/c/Program Files (x86)/Windows Kits/8.0/Debuggers/x64/srcsrv/pdbstr.exe',
@@ -86,6 +94,7 @@ config = {
         'MINIDUMP_SAVE_PATH': '%(base_work_dir)s/minidumps',
     },
     'enable_pymake': True,
+    'purge_minsize': 12,
     'src_mozconfig': 'b2g/config/mozconfigs/win32_gecko/nightly',
     'tooltool_manifest_src': "b2g/config/tooltool-manifests/win32/releng.manifest",
     #########################################################################

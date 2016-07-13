@@ -18,7 +18,6 @@
 #include "nsWeakReference.h"
 #include "nsCOMArray.h"
 #include "nsRect.h"
-#include "Units.h"
 
 // Interfaces needed
 #include "nsIBaseWindow.h"
@@ -73,7 +72,6 @@ public:
    void LockUntilChromeLoad() { mLockedUntilChromeLoad = true; }
    bool IsLocked() const { return mLockedUntilChromeLoad; }
    void IgnoreXULSizeMode(bool aEnable) { mIgnoreXULSizeMode = aEnable; }
-   void WasRegistered() { mRegistered = true; }
 
 protected:
    enum persistentAttributes {
@@ -94,14 +92,13 @@ protected:
    void OnChromeLoaded();
    void StaggerPosition(int32_t &aRequestedX, int32_t &aRequestedY,
                         int32_t aSpecWidth, int32_t aSpecHeight);
-   bool       LoadPositionFromXUL(int32_t aSpecWidth, int32_t aSpecHeight);
-   bool       LoadSizeFromXUL(int32_t& aSpecWidth, int32_t& aSpecHeight);
-   void       SetSpecifiedSize(int32_t aSpecWidth, int32_t aSpecHeight);
+   bool       LoadPositionFromXUL();
+   bool       LoadSizeFromXUL();
    bool       LoadMiscPersistentAttributesFromXUL();
    void       SyncAttributesToWidget();
    NS_IMETHOD SavePersistentAttributes();
 
-   NS_IMETHOD GetWindowDOMWindow(mozIDOMWindowProxy** aDOMWindow);
+   NS_IMETHOD GetWindowDOMWindow(nsIDOMWindow** aDOMWindow);
    mozilla::dom::Element* GetWindowDOMElement() const;
 
    // See nsIDocShellTreeOwner for docs on next two methods
@@ -129,7 +126,7 @@ protected:
    nsContentTreeOwner*     mPrimaryContentTreeOwner;
    nsCOMPtr<nsIWidget>     mWindow;
    nsCOMPtr<nsIDocShell>   mDocShell;
-   nsCOMPtr<nsPIDOMWindowOuter>  mDOMWindow;
+   nsCOMPtr<nsIDOMWindow>  mDOMWindow;
    nsCOMPtr<nsIWeakReference> mParentWindow;
    nsCOMPtr<nsIPrompt>     mPrompter;
    nsCOMPtr<nsIAuthPrompt> mAuthPrompter;
@@ -152,7 +149,6 @@ protected:
    // mDestroying is used to prevent reentry into into Destroy(), which can
    // otherwise happen due to script running as we tear down various things.
    bool                    mDestroying;
-   bool                    mRegistered;
    uint32_t                mContextFlags;
    uint32_t                mPersistentAttributesDirty; // persistentAttributes
    uint32_t                mPersistentAttributesMask;
@@ -161,8 +157,6 @@ protected:
    nsIntRect               mOpenerScreenRect; // the screen rect of the opener
 
    nsCOMArray<nsIWeakReference> mTargetableShells; // targetable shells only
-
-   nsCOMPtr<nsITabParent> mPrimaryTabParent;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsXULWindow, NS_XULWINDOW_IMPL_CID)
@@ -178,7 +172,7 @@ public:
    ~nsContentShellInfo();
 
 public:
-   nsString id; // The identifier of the content shell
+   nsAutoString id; // The identifier of the content shell
    nsWeakPtr child; // content shell (weak reference to nsIDocShellTreeItem)
 };
 

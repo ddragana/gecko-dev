@@ -26,6 +26,7 @@ function test()
     gczeal = (function (){});
   }
 
+  jit(true);
 
   function f()
   {
@@ -34,6 +35,7 @@ function test()
   __proto__.__iterator__ = this.__defineGetter__("", function(){})
     f();
 
+  jit(false);
 
   delete __proto__.__iterator__;
 

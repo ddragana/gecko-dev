@@ -11,7 +11,6 @@
 
 #include "mozilla/Mutex.h"
 #include "nsString.h"
-#include "Intervals.h"
 
 namespace mozilla {
 
@@ -198,7 +197,7 @@ private:
 
   // If the MP3 has a variable bitrate, then there *should* be metadata about
   // the encoding in the first frame. We buffer the first frame here.
-  nsCString mFirstFrame;
+  nsAutoCString mFirstFrame;
 
   // While we are reading the first frame, this is the stream offset of the
   // last byte of that frame. -1 at all other times.

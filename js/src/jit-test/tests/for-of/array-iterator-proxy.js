@@ -5,7 +5,7 @@ load(libdir + "iteration.js");
 
 var s = '';
 
-var handler = {
+var proxyObj = {
     get: function (recipient, name) {
         if (name == 'length') {
             s += 'L';
@@ -17,7 +17,7 @@ var handler = {
     }
 };
 
-var it = Array.prototype[Symbol.iterator].call(new Proxy([0, 1], handler));
+var it = Array.prototype[Symbol.iterator].call(Proxy.create(proxyObj));
 
 assertIteratorNext(it, "0");
 s += ' ';
@@ -27,7 +27,7 @@ assertIteratorDone(it, undefined);
 assertEq(s, "L0 L1 L");
 
 s = '';
-var ki = Array.prototype.keys.call(new Proxy([0, 1], handler));
+var ki = Array.prototype.keys.call(Proxy.create(proxyObj));
 
 assertIteratorNext(ki, 0);
 s += ' ';
@@ -37,7 +37,7 @@ assertIteratorDone(ki, undefined);
 assertEq(s, "L L L");
 
 s = '';
-var ei = Array.prototype.entries.call(new Proxy([0, 1], handler));
+var ei = Array.prototype.entries.call(Proxy.create(proxyObj));
 
 assertIteratorNext(ei, [0, "0"]);
 s += ' ';

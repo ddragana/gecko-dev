@@ -21,7 +21,7 @@
 //   - checks that the headers for each part is set correctly
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var httpserver = null;
 
@@ -30,7 +30,16 @@ XPCOMUtils.defineLazyGetter(this, "uri", function() {
 });
 
 function make_channel(url) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true});
+  var ios = Cc["@mozilla.org/network/io-service;1"].
+            getService(Ci.nsIIOService);
+  return ios.newChannel2(url,
+                         "",
+                         null,
+                         null,      // aLoadingNode
+                         Services.scriptSecurityManager.getSystemPrincipal(),
+                         null,      // aTriggeringPrincipal
+                         Ci.nsILoadInfo.SEC_NORMAL,
+                         Ci.nsIContentPolicy.TYPE_OTHER);
 }
 
 function contentHandler(metadata, response)
@@ -67,21 +76,7 @@ function contentHandler_type_missing(metadata, response)
   response.bodyOutputStream.write(body, body.length);
 }
 
-function contentHandler_with_package_header(chunkSize, metadata, response)
-{
-  response.setHeader("Content-Type", 'application/package');
-  var body = testData.packageHeader + testData.getData();
-
-  response.bodyOutputStream.write(body.substring(0,chunkSize), chunkSize);
-  response.processAsync();
-  do_timeout(5, function() {
-    response.bodyOutputStream.write(body.substring(chunkSize), body.length-chunkSize);
-    response.finish();
-  });
-}
-
 var testData = {
-  packageHeader: 'manifest-signature: dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\r\n',
   content: [
    { headers: ["Content-Location: /index.html", "Content-Type: text/html"], data: "<html>\r\n  <head>\r\n    <script src=\"/scripts/app.js\"></script>\r\n    ...\r\n  </head>\r\n  ...\r\n</html>\r\n", type: "text/html" },
    { headers: ["Content-Location: /scripts/app.js", "Content-Type: text/javascript"], data: "module Math from '/scripts/helpers/math.js';\r\n...\r\n", type: "text/javascript" },
@@ -104,7 +99,7 @@ var testData = {
   }
 }
 
-function multipartListener(test, badContentType, shouldVerifyPackageHeader) {
+function multipartListener(test, badContentType) {
   this._buffer = "";
   this.testNum = 0;
   this.test = test;
@@ -113,7 +108,6 @@ function multipartListener(test, badContentType, shouldVerifyPackageHeader) {
   // content type. If so, resources will have their content type set to
   // application/octet-stream
   this.badContentType = badContentType == undefined ? false : badContentType;
-  this.shouldVerifyPackageHeader = shouldVerifyPackageHeader;
 }
 
 multipartListener.prototype.responseHandler = function(request, buffer) {
@@ -134,24 +128,11 @@ multipartListener.prototype.QueryInterface = function(iid) {
 }
 
 multipartListener.prototype.onStartRequest = function(request, context) {
-  if (this.shouldVerifyPackageHeader) {
-    let partChannel = request.QueryInterface(Ci.nsIMultiPartChannel);
-    ok(!!partChannel, 'Should be multipart channel');
-    equal(partChannel.preamble, this.test.packageHeader);
-  }
-
   this._buffer = "";
   this.headerListener = new headerListener(this.test.content[this.testNum].headers, this.badContentType);
   let headerProvider = request.QueryInterface(Ci.nsIResponseHeadProvider);
   if (headerProvider) {
     headerProvider.visitResponseHeaders(this.headerListener);
-  }
-
-  // Verify the original header if the request is a multipart channel.
-  let partChannel = request.QueryInterface(Ci.nsIMultiPartChannel);
-  if (partChannel) {
-    let originalHeader = this.test.content[this.testNum].headers.join("\r\n") + "\r\n\r\n";
-    equal(originalHeader, partChannel.originalResponseHeader, "Oringinal header check.");
   }
 }
 
@@ -201,7 +182,7 @@ function test_multipart() {
            null);
 
   var chan = make_channel(uri + "/multipart");
-  chan.asyncOpen2(conv);
+  chan.asyncOpen(conv, null);
 }
 
 function test_multipart_with_boundary() {
@@ -213,7 +194,7 @@ function test_multipart_with_boundary() {
            null);
 
   var chan = make_channel(uri + "/multipart2");
-  chan.asyncOpen2(conv);
+  chan.asyncOpen(conv, null);
 }
 
 function test_multipart_chunked_headers() {
@@ -225,7 +206,7 @@ function test_multipart_chunked_headers() {
            null);
 
   var chan = make_channel(uri + "/multipart3");
-  chan.asyncOpen2(conv);
+  chan.asyncOpen(conv, null);
 }
 
 function test_multipart_content_type_other() {
@@ -238,40 +219,9 @@ function test_multipart_content_type_other() {
            null);
 
   var chan = make_channel(uri + "/multipart4");
-  chan.asyncOpen2(conv);
+  chan.asyncOpen(conv, null);
 }
 
-function test_multipart_package_header(aChunkSize) {
-  var streamConv = Cc["@mozilla.org/streamConverters;1"]
-                     .getService(Ci.nsIStreamConverterService);
-
-  var conv = streamConv.asyncConvertData("application/package",
-           "*/*",
-           new multipartListener(testData, false, true),
-           null);
-
-  var chan = make_channel(uri + "/multipart5_" + aChunkSize);
-  chan.asyncOpen2(conv);
-}
-
-// Bug 1212223 - Test multipart with package header and different chunk size.
-// Use explict function name to make the test case log more readable.
-
-function test_multipart_package_header_50() {
-  return test_multipart_package_header(50);
-}
-
-function test_multipart_package_header_100() {
-  return test_multipart_package_header(100);
-}
-
-function test_multipart_package_header_150() {
-  return test_multipart_package_header(150);
-}
-
-function test_multipart_package_header_200() {
-  return test_multipart_package_header(200);
-}
 
 function run_test()
 {
@@ -280,13 +230,6 @@ function run_test()
   httpserver.registerPathHandler("/multipart2", contentHandler_with_boundary);
   httpserver.registerPathHandler("/multipart3", contentHandler_chunked_headers);
   httpserver.registerPathHandler("/multipart4", contentHandler_type_missing);
-
-  // Bug 1212223 - Test multipart with package header and different chunk size.
-  httpserver.registerPathHandler("/multipart5_50", contentHandler_with_package_header.bind(null, 50));
-  httpserver.registerPathHandler("/multipart5_100", contentHandler_with_package_header.bind(null, 100));
-  httpserver.registerPathHandler("/multipart5_150", contentHandler_with_package_header.bind(null, 150));
-  httpserver.registerPathHandler("/multipart5_200", contentHandler_with_package_header.bind(null, 200));
-
   httpserver.start(-1);
 
   run_next_test();
@@ -296,9 +239,3 @@ add_test(test_multipart);
 add_test(test_multipart_with_boundary);
 add_test(test_multipart_chunked_headers);
 add_test(test_multipart_content_type_other);
-
-// Bug 1212223 - Test multipart with package header and different chunk size.
-add_test(test_multipart_package_header_50);
-add_test(test_multipart_package_header_100);
-add_test(test_multipart_package_header_150);
-add_test(test_multipart_package_header_200);

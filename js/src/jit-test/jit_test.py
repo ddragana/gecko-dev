@@ -5,7 +5,7 @@
 
 from __future__ import print_function, unicode_literals
 
-import math, os, platform, posixpath, shlex, shutil, subprocess, sys, traceback
+import math, os, posixpath, shlex, shutil, subprocess, sys, traceback
 
 def add_libdir_to_path():
     from os.path import dirname, exists, join, realpath
@@ -17,8 +17,7 @@ def add_libdir_to_path():
 add_libdir_to_path()
 
 import jittests
-from tests import get_jitflags, get_cpu_count, get_environment_overlay, \
-                  change_env
+from tests import get_jitflags
 
 # Python 3.3 added shutil.which, but we can't use that yet.
 def which(name):
@@ -32,29 +31,19 @@ def which(name):
 
     return name
 
-def choose_item(jobs, max_items, display):
-    job_count = len(jobs)
-
-    # Don't present a choice if there are too many tests
-    if job_count > max_items:
-        raise Exception('Too many jobs.')
-
-    for i, job in enumerate(jobs, 1):
-        print("{}) {}".format(i, display(job)))
-
-    item = raw_input('Which one:\n')
-    try:
-        item = int(item)
-        if item > job_count or item < 1:
-            raise Exception('Input isn\'t between 1 and {}'.format(job_count))
-    except ValueError:
-        raise Exception('Unrecognized input')
-
-    return jobs[item - 1]
-
 def main(argv):
+
+    # If no multiprocessing is available, fallback to serial test execution
+    max_jobs_default = 1
+    if jittests.HAVE_MULTIPROCESSING:
+        try:
+            max_jobs_default = jittests.cpu_count()
+        except NotImplementedError:
+            pass
+
     # The [TESTS] optional arguments are paths of test files relative
     # to the jit-test/tests directory.
+
     from optparse import OptionParser
     op = OptionParser(usage='%prog [options] JS_SHELL [TESTS]')
     op.add_option('-s', '--show-cmd', dest='show_cmd', action='store_true',
@@ -101,8 +90,6 @@ def main(argv):
                   help='Retest using test list file [FILE]')
     op.add_option('-g', '--debug', action='store_const', const='gdb', dest='debugger',
                   help='Run a single test under the gdb debugger')
-    op.add_option('-G', '--debug-rr', action='store_const', const='rr', dest='debugger',
-                  help='Run a single test under the rr debugger')
     op.add_option('--debugger', type='string',
                   help='Run a single test under the specified debugger')
     op.add_option('--valgrind', dest='valgrind', action='store_true',
@@ -125,7 +112,7 @@ def main(argv):
                   help='Run tests with all IonMonkey option combinations'
                   ' (ignores --jitflags)')
     op.add_option('-j', '--worker-count', dest='max_jobs', type=int,
-                  default=max(1, get_cpu_count()),
+                  default=max_jobs_default,
                   help='Number of tests to run in parallel (default %default)')
     op.add_option('--remote', action='store_true',
                   help='Run tests on a remote device')
@@ -158,23 +145,12 @@ def main(argv):
                   help='The total number of test chunks.')
     op.add_option('--ignore-timeouts', dest='ignore_timeouts', metavar='FILE',
                   help='Ignore timeouts of tests listed in [FILE]')
-    op.add_option('--test-reflect-stringify', dest="test_reflect_stringify",
-                  help="instead of running tests, use them to test the "
-                  "Reflect.stringify code in specified file")
 
     options, args = op.parse_args(argv)
     if len(args) < 1:
         op.error('missing JS_SHELL argument')
-    js_shell = which(args[0])
+    # We need to make sure we are using backslashes on Windows.
     test_args = args[1:]
-    test_environment = get_environment_overlay(js_shell)
-
-    if not (os.path.isfile(js_shell) and os.access(js_shell, os.X_OK)):
-        if (platform.system() != 'Windows' or
-            os.path.isfile(js_shell) or not
-            os.path.isfile(js_shell + ".exe") or not
-            os.access(js_shell + ".exe", os.X_OK)):
-            op.error('shell is not executable: ' + js_shell)
 
     if jittests.stdio_might_be_broken():
         # Prefer erring on the side of caution and not using stdio if
@@ -195,7 +171,6 @@ def main(argv):
 
     # Forbid running several variants of the same asmjs test, when debugging.
     options.can_test_also_noasmjs = not options.debugger
-    options.can_test_also_wasm_baseline = not options.debugger
 
     if test_args:
         read_all = False
@@ -239,10 +214,6 @@ def main(argv):
     if not options.run_slow:
         test_list = [_ for _ in test_list if not _.slow]
 
-    if options.test_reflect_stringify is not None:
-        for test in test_list:
-            test.test_reflect_stringify = options.test_reflect_stringify
-
     # If chunking is enabled, determine which tests are part of this chunk.
     # This code was adapted from testing/mochitest/runtestsremote.py.
     if options.total_chunks > 1:
@@ -252,12 +223,9 @@ def main(argv):
         end = int(round(options.this_chunk * tests_per_chunk))
         test_list = test_list[start:end]
 
-    if not test_list:
-        print("No tests found matching command line arguments after filtering.",
-              file=sys.stderr)
-        sys.exit(0)
-
     # The full test list is ready. Now create copies for each JIT configuration.
+    job_list = []
+    test_flags = []
     if options.tbpl:
         # Running all bits would take forever. Instead, we test a few
         # interesting combinations.
@@ -267,14 +235,8 @@ def main(argv):
     else:
         test_flags = get_jitflags(options.jitflags)
 
-    test_list = [_ for test in test_list for _ in test.copy_variants(test_flags)]
-
-    job_list = (test for test in test_list)
-    job_count = len(test_list)
-
-    if options.repeat:
-        job_list = (test for test in job_list for i in range(options.repeat))
-        job_count *= options.repeat
+    job_list = [_ for test in test_list
+                for _ in test.copy_variants(test_flags)]
 
     if options.ignore_timeouts:
         read_all = False
@@ -287,7 +249,7 @@ def main(argv):
     else:
         options.ignore_timeouts = set()
 
-    prefix = [js_shell] + shlex.split(options.shell_args)
+    prefix = [which(args[0])] + shlex.split(options.shell_args)
     prologue = os.path.join(jittests.LIB_DIR, 'prologue.js')
     if options.remote:
         prologue = posixpath.join(options.remote_test_root,
@@ -300,45 +262,32 @@ def main(argv):
     os.mkdir(jittests.JS_CACHE_DIR)
 
     if options.debugger:
-        if job_count > 1:
+        if len(job_list) > 1:
             print('Multiple tests match command line'
                   ' arguments, debugger can only run one')
-            jobs = list(job_list)
+            for tc in job_list:
+                print('    {}'.format(tc.path))
+            sys.exit(1)
 
-            def display_job(job):
-                if len(job.jitflags) != 0:
-                    flags = "({})".format(' '.join(job.jitflags))
-                return '{} {}'.format(job.path, flags)
-
-            try:
-                tc = choose_item(jobs, max_items=50, display=display_job)
-            except Exception as e:
-                sys.exit(str(e))
-        else:
-            tc = job_list.next()
-
+        tc = job_list[0]
         if options.debugger == 'gdb':
             debug_cmd = ['gdb', '--args']
         elif options.debugger == 'lldb':
             debug_cmd = ['lldb', '--']
-        elif options.debugger == 'rr':
-            debug_cmd = ['rr', 'record']
         else:
             debug_cmd = options.debugger.split()
 
-        with change_env(test_environment):
-            subprocess.call(debug_cmd + tc.command(prefix, jittests.LIB_DIR, jittests.MODULE_DIR))
-            if options.debugger == 'rr':
-                subprocess.call(['rr', 'replay'])
+        subprocess.call(debug_cmd + tc.command(prefix, jittests.LIB_DIR))
         sys.exit()
 
     try:
         ok = None
         if options.remote:
-            ok = jittests.run_tests_remote(job_list, job_count, prefix, options)
+            ok = jittests.run_tests_remote(job_list, prefix, options)
+        elif options.max_jobs > 1 and jittests.HAVE_MULTIPROCESSING:
+            ok = jittests.run_tests_parallel(job_list, prefix, options)
         else:
-            with change_env(test_environment):
-                ok = jittests.run_tests(job_list, job_count, prefix, options)
+            ok = jittests.run_tests(job_list, prefix, options)
         if not ok:
             sys.exit(2)
     except OSError:

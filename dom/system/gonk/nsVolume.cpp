@@ -5,7 +5,6 @@
 #include "nsVolume.h"
 
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "nsIPowerManagerService.h"
 #include "nsISupportsUtils.h"
 #include "nsIVolume.h"
@@ -64,22 +63,6 @@ nsVolume::nsVolume(const Volume* aVolume)
     mIsUnmounting(aVolume->IsUnmounting()),
     mIsRemovable(aVolume->IsRemovable()),
     mIsHotSwappable(aVolume->IsHotSwappable())
-{
-}
-
-nsVolume::nsVolume(const nsVolume* aVolume)
-  : mName(aVolume->mName),
-    mMountPoint(aVolume->mMountPoint),
-    mState(aVolume->mState),
-    mMountGeneration(aVolume->mMountGeneration),
-    mMountLocked(aVolume->mMountLocked),
-    mIsFake(aVolume->mIsFake),
-    mIsMediaPresent(aVolume->mIsMediaPresent),
-    mIsSharing(aVolume->mIsSharing),
-    mIsFormatting(aVolume->mIsFormatting),
-    mIsUnmounting(aVolume->mIsUnmounting),
-    mIsRemovable(aVolume->mIsRemovable),
-    mIsHotSwappable(aVolume->mIsHotSwappable)
 {
 }
 
@@ -266,6 +249,7 @@ NS_IMETHODIMP nsVolume::Format()
   MOZ_ASSERT(XRE_IsParentProcess());
 
   XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(FormatVolumeIOThread, NameStr()));
 
   return NS_OK;
@@ -289,6 +273,7 @@ NS_IMETHODIMP nsVolume::Mount()
   MOZ_ASSERT(XRE_IsParentProcess());
 
   XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(MountVolumeIOThread, NameStr()));
 
   return NS_OK;
@@ -312,6 +297,7 @@ NS_IMETHODIMP nsVolume::Unmount()
   MOZ_ASSERT(XRE_IsParentProcess());
 
   XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(UnmountVolumeIOThread, NameStr()));
 
   return NS_OK;
@@ -347,28 +333,40 @@ nsVolume::LogState() const
   LOG("nsVolume: %s state %s", NameStr().get(), StateStr());
 }
 
-void nsVolume::UpdateMountLock(nsVolume* aOldVolume)
+void nsVolume::Set(nsIVolume* aVolume)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  bool oldMountLocked = aOldVolume ? aOldVolume->mMountLocked : false;
+  aVolume->GetName(mName);
+  aVolume->GetMountPoint(mMountPoint);
+  aVolume->GetState(&mState);
+  aVolume->GetIsFake(&mIsFake);
+  aVolume->GetIsMediaPresent(&mIsMediaPresent);
+  aVolume->GetIsSharing(&mIsSharing);
+  aVolume->GetIsFormatting(&mIsFormatting);
+  aVolume->GetIsUnmounting(&mIsUnmounting);
+  aVolume->GetIsRemovable(&mIsRemovable);
+  aVolume->GetIsHotSwappable(&mIsHotSwappable);
+
+  int32_t volMountGeneration;
+  aVolume->GetMountGeneration(&volMountGeneration);
+
   if (mState != nsIVolume::STATE_MOUNTED) {
     // Since we're not in the mounted state, we need to
     // forgot whatever mount generation we may have had.
     mMountGeneration = -1;
-    mMountLocked = oldMountLocked;
+    return;
+  }
+  if (mMountGeneration == volMountGeneration) {
+    // No change in mount generation, nothing else to do
     return;
   }
 
-  int32_t oldMountGeneration = aOldVolume ? aOldVolume->mMountGeneration : -1;
-  if (mMountGeneration == oldMountGeneration) {
-    // No change in mount generation, nothing else to do
-    mMountLocked = oldMountLocked;
-    return;
-  }
+  mMountGeneration = volMountGeneration;
 
   if (!XRE_IsParentProcess()) {
     // Child processes just track the state, not maintain it.
+    aVolume->GetIsMountLocked(&mMountLocked);
     return;
   }
 
@@ -409,6 +407,7 @@ nsVolume::UpdateMountLock(bool aMountLocked)
   mMountLocked = aMountLocked;
   LogState();
   XRE_GetIOMessageLoop()->PostTask(
+     FROM_HERE,
      NewRunnableFunction(Volume::UpdateMountLock,
                          NS_LossyConvertUTF16toASCII(Name()),
                          MountGeneration(), aMountLocked));

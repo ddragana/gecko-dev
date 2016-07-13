@@ -34,6 +34,10 @@ using mozilla::IsWin7OrLater;
 
 #endif
 
+#if defined(VMS)
+#include <unixlib.h>
+#endif
+
 #ifndef MAXPATHLEN
 #ifdef PATH_MAX
 #define MAXPATHLEN PATH_MAX
@@ -149,8 +153,8 @@ GetLibrarySaveToPath(int aFallbackFolderId, REFKNOWNFOLDERID aFolderId,
     return GetWindowsFolder(aFallbackFolderId, aFile);
   }
 
-  RefPtr<IShellLibrary> shellLib;
-  RefPtr<IShellItem> savePath;
+  nsRefPtr<IShellLibrary> shellLib;
+  nsRefPtr<IShellItem> savePath;
   HRESULT hr =
     SHLoadLibraryFromKnownFolder(aFolderId, STGM_READ,
                                  IID_IShellLibrary, getter_AddRefs(shellLib));
@@ -217,7 +221,19 @@ GetRegWindowsAppDataFolder(bool aLocal, nsIFile** aFile)
 static nsresult
 GetUnixHomeDir(nsIFile** aFile)
 {
-#if defined(ANDROID)
+#ifdef VMS
+  char* pHome;
+  pHome = getenv("HOME");
+  if (*pHome == '/') {
+    return NS_NewNativeLocalFile(nsDependentCString(pHome),
+                                 true,
+                                 aFile);
+  } else {
+    return NS_NewNativeLocalFile(nsDependentCString(decc$translate_vms(pHome)),
+                                 true,
+                                 aFile);
+  }
+#elif defined(ANDROID)
   // XXX no home dir on android; maybe we should return the sdcard if present?
   return NS_ERROR_FAILURE;
 #else

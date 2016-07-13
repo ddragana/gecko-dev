@@ -48,7 +48,7 @@ txXPathTreeWalker::moveToRoot()
         return;
     }
 
-    nsIDocument* root = mPosition.mNode->GetUncomposedDoc();
+    nsIDocument* root = mPosition.mNode->GetCurrentDoc();
     if (root) {
         mPosition.mIndex = txXPathNode::eDocument;
         mPosition.mNode = root;
@@ -74,7 +74,7 @@ txXPathTreeWalker::moveToElementById(const nsAString& aID)
         return false;
     }
 
-    nsIDocument* doc = mPosition.mNode->GetUncomposedDoc();
+    nsIDocument* doc = mPosition.mNode->GetCurrentDoc();
 
     nsCOMPtr<nsIContent> content;
     if (doc) {
@@ -358,7 +358,7 @@ txXPathNodeUtils::getLocalName(const txXPathNode& aNode)
             nsAutoString target;
             node->GetNodeName(target);
 
-            return NS_Atomize(target);
+            return NS_NewAtom(target);
         }
 
         return nullptr;
@@ -591,8 +591,8 @@ txXPathNodeUtils::comparePosition(const txXPathNode& aNode,
     }
 
     // Get document for both nodes.
-    nsIDocument* document = aNode.mNode->GetUncomposedDoc();
-    nsIDocument* otherDocument = aOtherNode.mNode->GetUncomposedDoc();
+    nsIDocument* document = aNode.mNode->GetCurrentDoc();
+    nsIDocument* otherDocument = aOtherNode.mNode->GetCurrentDoc();
 
     // If the nodes have different current documents, compare the document
     // pointers.
@@ -604,7 +604,7 @@ txXPathNodeUtils::comparePosition(const txXPathNode& aNode,
     // same tree.
 
     // Get parents up the tree.
-    AutoTArray<nsINode*, 8> parents, otherParents;
+    nsAutoTArray<nsINode*, 8> parents, otherParents;
     nsINode* node = aNode.mNode;
     nsINode* otherNode = aOtherNode.mNode;
     nsINode* parent;

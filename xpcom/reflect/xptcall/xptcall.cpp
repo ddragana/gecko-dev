@@ -61,7 +61,11 @@ NS_GetXPTCallStub(REFNSIID aIID, nsIXPTCProxy* aOuter,
         return NS_ERROR_FAILURE;
     }
 
-    *aResult = new nsXPTCStubBase(aOuter, iie);
+    nsXPTCStubBase* newbase = new nsXPTCStubBase(aOuter, iie);
+    if (!newbase)
+        return NS_ERROR_OUT_OF_MEMORY;
+
+    *aResult = newbase;
     return NS_OK;
 }
 

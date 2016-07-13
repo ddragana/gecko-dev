@@ -1,15 +1,44 @@
 /**
+ * Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/
+ */
+
+gBrowser.selectedTab = gBrowser.addTab();
+
+function finishAndCleanUp()
+{
+  gBrowser.removeCurrentTab();
+  PlacesTestUtils.clearHistory().then(finish);
+}
+
+/**
  * One-time observer callback.
  */
-function promiseObserve(name, checkFn) {
-  return new Promise(resolve => {
-    Services.obs.addObserver(function observer(subject) {
-      if (checkFn(subject)) {
-        Services.obs.removeObserver(observer, name);
-        resolve();
-      }
-    }, name, false);
-  });
+function waitForObserve(name, callback)
+{
+  var observerService = Cc["@mozilla.org/observer-service;1"]
+                        .getService(Ci.nsIObserverService);
+  var observer = {
+    QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+    observe: function(subject, topic, data) {
+      observerService.removeObserver(observer, name);
+      observer = null;
+      callback(subject, topic, data);
+    }
+  };
+
+  observerService.addObserver(observer, name, false);
+}
+
+/**
+ * One-time DOMContentLoaded callback.
+ */
+function waitForLoad(callback)
+{
+  gBrowser.addEventListener("DOMContentLoaded", function() {
+    gBrowser.removeEventListener("DOMContentLoaded", arguments.callee, true);
+    callback();
+  }, true);
 }
 
 var conn = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
@@ -17,11 +46,11 @@ var conn = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnectio
 /**
  * Gets a single column value from either the places or historyvisits table.
  */
-function getColumn(table, column, fromColumnName, fromColumnValue) {
+function getColumn(table, column, fromColumnName, fromColumnValue)
+{
   let sql = `SELECT ${column}
              FROM ${table}
              WHERE ${fromColumnName} = :val
-             ${fromColumnName == "url" ? "AND url_hash = hash(:val)" : ""}
              LIMIT 1`;
   let stmt = conn.createStatement(sql);
   try {
@@ -34,9 +63,12 @@ function getColumn(table, column, fromColumnName, fromColumnValue) {
   }
 }
 
-add_task(function* () {
+function test()
+{
   // Make sure places visit chains are saved correctly with a redirect
   // transitions.
+
+  waitForExplicitFinish();
 
   // Part 1: observe history events that fire when a visit occurs.
   // Make sure visits appear in order, and that the visit chain is correct.
@@ -48,7 +80,7 @@ add_task(function* () {
   ];
   var currentIndex = 0;
 
-  function checkObserver(subject) {
+  waitForObserve("uri-visit-saved", function(subject, topic, data) {
     var uri = subject.QueryInterface(Ci.nsIURI);
     var expected = expectedUrls[currentIndex];
     is(uri.spec, expected, "Saved URL visit " + uri.spec);
@@ -67,18 +99,20 @@ add_task(function* () {
     }
 
     currentIndex++;
-    return (currentIndex >= expectedUrls.length);
-  }
-  let visitUriPromise = promiseObserve("uri-visit-saved", checkObserver);
-
-  const testUrl = "http://example.com/tests/toolkit/components/places/tests/browser/begin.html";
-  yield BrowserTestUtils.openNewForegroundTab(gBrowser, testUrl);
+    if (currentIndex < expectedUrls.length) {
+      waitForObserve("uri-visit-saved", arguments.callee);
+    }
+    else {
+      finishAndCleanUp();
+    }
+  });
 
   // Load begin page, click link on page to record visits.
-  yield BrowserTestUtils.synthesizeMouseAtCenter("#clickme", { }, gBrowser.selectedBrowser);
-  yield visitUriPromise;
-
-  yield PlacesTestUtils.clearHistory();
-
-  gBrowser.removeCurrentTab();
-});
+  content.location.href = "http://example.com/tests/toolkit/components/places/tests/browser/begin.html";
+  waitForLoad(function() {
+    EventUtils.sendMouseEvent({type: 'click'}, 'clickme', content.window);
+    waitForLoad(function() {
+      content.location.href = "about:blank";
+    });
+  });
+}

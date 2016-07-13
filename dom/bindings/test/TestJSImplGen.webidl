@@ -553,17 +553,6 @@ interface TestJSImplInterface {
   Date receiveDate();
   Date? receiveNullableDate();
 
-  // Promise types
-  void passPromise(Promise<any> arg);
-  void passNullablePromise(Promise<any>? arg);
-  void passOptionalPromise(optional Promise<any> arg);
-  void passOptionalNullablePromise(optional Promise<any>? arg);
-  void passOptionalNullablePromiseWithDefaultValue(optional Promise<any>? arg = null);
-  void passPromiseSequence(sequence<Promise<any>> arg);
-  void passNullablePromiseSequence(sequence<Promise<any>?> arg);
-  Promise<any> receivePromise();
-  Promise<any> receiveAddrefedPromise();
-
   // binaryNames tests
   void methodRenamedFrom();
   [BinaryName="otherMethodRenamedTo"]
@@ -741,24 +730,6 @@ interface TestJSImplInterface {
   void prefable23();
   [Pref="abc.def", Func="TestFuncControlledMember", AvailableIn=PrivilegedApps]
   void prefable24();
-
-  // Conditionally exposed methods/attributes involving [SecureContext]
-  [SecureContext]
-  readonly attribute boolean conditionalOnSecureContext1;
-  [SecureContext, Pref="abc.def"]
-  readonly attribute boolean conditionalOnSecureContext2;
-  [SecureContext, Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
-  readonly attribute boolean conditionalOnSecureContext3;
-  [SecureContext, Pref="abc.def", Func="TestFuncControlledMember"]
-  readonly attribute boolean conditionalOnSecureContext4;
-  [SecureContext]
-  void conditionalOnSecureContext5();
-  [SecureContext, Pref="abc.def"]
-  void conditionalOnSecureContext6();
-  [SecureContext, Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
-  void conditionalOnSecureContext7();
-  [SecureContext, Pref="abc.def", Func="TestFuncControlledMember"]
-  void conditionalOnSecureContext8();
 
   // Miscellania
   [LenientThis] attribute long attrWithLenientThis;

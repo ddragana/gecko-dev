@@ -39,7 +39,7 @@ class WrapperAnswer : public virtual JavaScriptShared
                  ReturnStatus* rs, bool* foundp);
     bool RecvHasOwn(const ObjectId& objId, const JSIDVariant& id,
                     ReturnStatus* rs, bool* foundp);
-    bool RecvGet(const ObjectId& objId, const JSVariant& receiverVar,
+    bool RecvGet(const ObjectId& objId, const ObjectVariant& receiverVar,
                  const JSIDVariant& id,
                  ReturnStatus* rs, JSVariant* result);
     bool RecvSet(const ObjectId& objId, const JSIDVariant& id, const JSVariant& value,
@@ -51,13 +51,10 @@ class WrapperAnswer : public virtual JavaScriptShared
                              const bool& construct, ReturnStatus* rs, JSVariant* result,
                              nsTArray<JSParam>* outparams);
     bool RecvHasInstance(const ObjectId& objId, const JSVariant& v, ReturnStatus* rs, bool* bp);
-    bool RecvGetBuiltinClass(const ObjectId& objId, ReturnStatus* rs,
-                             uint32_t* classValue);
-    bool RecvIsArray(const ObjectId& objId, ReturnStatus* rs, uint32_t* ans);
+    bool RecvObjectClassIs(const ObjectId& objId, const uint32_t& classValue,
+                           bool* result);
     bool RecvClassName(const ObjectId& objId, nsCString* result);
     bool RecvGetPrototype(const ObjectId& objId, ReturnStatus* rs, ObjectOrNullVariant* result);
-    bool RecvGetPrototypeIfOrdinary(const ObjectId& objId, ReturnStatus* rs, bool* isOrdinary,
-                                    ObjectOrNullVariant* result);
     bool RecvRegExpToShared(const ObjectId& objId, ReturnStatus* rs, nsString* source, uint32_t* flags);
 
     bool RecvGetPropertyKeys(const ObjectId& objId, const uint32_t& flags,

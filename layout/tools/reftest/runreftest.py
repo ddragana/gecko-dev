@@ -6,11 +6,11 @@
 Runs the reftest test harness.
 """
 
+from optparse import OptionParser
+from urlparse import urlparse
 import collections
-import json
 import multiprocessing
 import os
-import platform
 import re
 import shutil
 import signal
@@ -19,29 +19,21 @@ import sys
 import threading
 
 SCRIPT_DIRECTORY = os.path.abspath(
-    os.path.realpath(os.path.dirname(__file__)))
-if SCRIPT_DIRECTORY not in sys.path:
-    sys.path.insert(0, SCRIPT_DIRECTORY)
+    os.path.realpath(os.path.dirname(sys.argv[0])))
+sys.path.insert(0, SCRIPT_DIRECTORY)
 
+from automationutils import (
+    dumpScreen,
+    printstatus
+)
 import mozcrash
 import mozdebug
 import mozinfo
 import mozleak
-import mozlog
 import mozprocess
 import mozprofile
 import mozrunner
-from mozrunner.utils import get_stack_fixer_function, test_environment
-from mozscreenshot import printstatus, dump_screen
-
-try:
-    from marionette import Marionette
-    from marionette_driver.addons import Addons
-except ImportError:
-    Marionette=None
-
-from output import OutputHandler, ReftestFormatter
-import reftestcommandline
+from mozrunner.utils import test_environment
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -50,6 +42,19 @@ try:
     build_obj = MozbuildObject.from_environment(cwd=here)
 except ImportError:
     build_obj = None
+
+# set up logging handler a la automation.py.in for compatability
+import logging
+log = logging.getLogger()
+
+
+def resetGlobalLog():
+    while log.handlers:
+        log.removeHandler(log.handlers[0])
+    handler = logging.StreamHandler(sys.stdout)
+    log.setLevel(logging.INFO)
+    log.addHandler(handler)
+resetGlobalLog()
 
 
 def categoriesToRegex(categoryList):
@@ -72,9 +77,9 @@ printLock = threading.Lock()
 
 
 class ReftestThread(threading.Thread):
-    def __init__(self, cmdargs):
+    def __init__(self, cmdlineArgs):
         threading.Thread.__init__(self)
-        self.cmdargs = cmdargs
+        self.cmdlineArgs = cmdlineArgs
         self.summaryMatches = {}
         self.retcode = -1
         for text, _ in summaryLines:
@@ -82,9 +87,9 @@ class ReftestThread(threading.Thread):
 
     def run(self):
         with printLock:
-            print "Starting thread with", self.cmdargs
+            print "Starting thread with", self.cmdlineArgs
             sys.stdout.flush()
-        process = subprocess.Popen(self.cmdargs, stdout=subprocess.PIPE)
+        process = subprocess.Popen(self.cmdlineArgs, stdout=subprocess.PIPE)
         for chunk in self.chunkForMergedOutput(process.stdout):
             with printLock:
                 print chunk,
@@ -130,100 +135,14 @@ class ReftestThread(threading.Thread):
             if summaryHeadRegex.search(line) is None:
                 yield line
 
-class ReftestResolver(object):
-    def defaultManifest(self, suite):
-        return {"reftest": "reftest.list",
-                "crashtest": "crashtests.list",
-                "jstestbrowser": "jstests.list"}[suite]
-
-    def directoryManifest(self, suite, path):
-        return os.path.join(path, self.defaultManifest(suite))
-
-    def findManifest(self, suite, test_file, subdirs=True):
-        """Return a tuple of (manifest-path, filter-string) for running test_file.
-
-        test_file is a path to a test or a manifest file
-        """
-        rv = []
-        default_manifest = self.defaultManifest(suite)
-        if not os.path.isabs(test_file):
-            test_file = self.absManifestPath(test_file)
-
-        if os.path.isdir(test_file):
-            for dirpath, dirnames, filenames in os.walk(test_file):
-                if default_manifest in filenames:
-                    rv.append((os.path.join(dirpath, default_manifest), None))
-                    # We keep recursing into subdirectories which means that in the case
-                    # of include directives we get the same manifest multiple times.
-                    # However reftest.js will only read each manifest once
-
-        elif test_file.endswith('.list'):
-            if os.path.exists(test_file):
-                rv = [(test_file, None)]
-        else:
-            dirname, pathname = os.path.split(test_file)
-            found = True
-            while not os.path.exists(os.path.join(dirname, default_manifest)):
-                dirname, suffix = os.path.split(dirname)
-                pathname = os.path.join(suffix, pathname)
-                if os.path.dirname(dirname) == dirname:
-                    found = False
-                    break
-            if found:
-                rv = [(os.path.join(dirname, default_manifest),
-                       r".*(?:/|\\)%s$" % pathname)]
-
-        return rv
-
-    def absManifestPath(self, path):
-        return os.path.normpath(os.path.abspath(path))
-
-    def manifestURL(self, options, path):
-        return "file://%s" % path
-
-    def resolveManifests(self, options, tests):
-        suite = options.suite
-        manifests = {}
-        for testPath in tests:
-            for manifest, filter_str in self.findManifest(suite, testPath):
-                manifest = self.manifestURL(options, manifest)
-                if manifest not in manifests:
-                    manifests[manifest] = set()
-                manifests[manifest].add(filter_str)
-
-        for key in manifests.iterkeys():
-            if None in manifests[key]:
-                manifests[key] = None
-            else:
-                manifests[key] = "|".join(list(manifests[key]))
-        return manifests
-
 
 class RefTest(object):
-    use_marionette = True
     oldcwd = os.getcwd()
-    resolver_cls = ReftestResolver
 
     def __init__(self):
         self.update_mozinfo()
         self.lastTestSeen = 'reftest'
         self.haveDumpedScreen = False
-        self.resolver = self.resolver_cls()
-        self.log = None
-
-    def _populate_logger(self, options):
-        if self.log:
-            return
-
-        mozlog.commandline.log_formatters["tbpl"] = (ReftestFormatter,
-                                                     "Reftest specific formatter for the"
-                                                     "benefit of legacy log parsers and"
-                                                     "tools such as the reftest analyzer")
-        fmt_options = {}
-        if not options.log_tbpl_level and os.environ.get('MOZ_REFTEST_VERBOSE'):
-            options.log_tbpl_level = fmt_options['level'] = 'debug'
-        self.log = mozlog.commandline.setup_logging(
-            "reftest harness", options, {"tbpl": sys.stdout}, fmt_options)
 
     def update_mozinfo(self):
         """walk up directories to find mozinfo.json update the info"""
@@ -242,15 +161,29 @@ class RefTest(object):
         "Get an absolute path relative to self.oldcwd."
         return os.path.normpath(os.path.join(self.oldcwd, os.path.expanduser(path)))
 
-    def createReftestProfile(self, options, manifests, server='localhost', port=0,
-                             profile_to_clone=None):
-        """Sets up a profile for reftest.
+    def getManifestPath(self, path):
+        "Get the path of the manifest, and for remote testing this function is subclassed to point to remote manifest"
+        path = self.getFullPath(path)
+        if os.path.isdir(path):
+            defaultManifestPath = os.path.join(path, 'reftest.list')
+            if os.path.exists(defaultManifestPath):
+                path = defaultManifestPath
+            else:
+                defaultManifestPath = os.path.join(path, 'crashtests.list')
+                if os.path.exists(defaultManifestPath):
+                    path = defaultManifestPath
+        return path
 
-        :param options: Object containing command line options
-        :param manifests: Dictionary of the form {manifest_path: [filters]}
-        :param server: Server name to use for http tests
-        :param profile_to_clone: Path to a profile to use as the basis for the
-                                 test profile
+    def makeJSString(self, s):
+        return '"%s"' % re.sub(r'([\\"])', r'\\\1', s)
+
+    def createReftestProfile(self, options, manifest, server='localhost', port=0,
+                             special_powers=True, profile_to_clone=None):
+        """
+          Sets up a profile for reftest.
+          'manifest' is the path to the reftest.list file we want to test with.  This is used in
+          the remote subclass in remotereftest.py so we can write it to a preference for the
+          bootstrap extension.
         """
 
         locations = mozprofile.permissions.ServerLocations()
@@ -259,7 +192,7 @@ class RefTest(object):
 
         # Set preferences for communication between our command line arguments
         # and the reftest harness.  Preferences that are required for reftest
-        # to work should instead be set in reftest-preferences.js .
+        # to work should instead be set in reftest-cmdline.js .
         prefs = {}
         prefs['reftest.timeout'] = options.timeout * 1000
         if options.totalChunks:
@@ -270,52 +203,62 @@ class RefTest(object):
             prefs['reftest.logFile'] = options.logFile
         if options.ignoreWindowSize:
             prefs['reftest.ignoreWindowSize'] = True
+        if options.filter:
+            prefs['reftest.filter'] = options.filter
         if options.shuffle:
             prefs['reftest.shuffle'] = True
-        if options.repeat:
-            prefs['reftest.repeat'] = options.repeat
-        if options.runUntilFailure:
-            prefs['reftest.runUntilFailure'] = True
         prefs['reftest.focusFilterMode'] = options.focusFilterMode
-        prefs['reftest.logLevel'] = options.log_tbpl_level or 'info'
-        prefs['reftest.manifests'] = json.dumps(manifests)
 
+        # Ensure that telemetry is disabled, so we don't connect to the telemetry
+        # server in the middle of the tests.
+        prefs['toolkit.telemetry.enabled'] = False
+        prefs['toolkit.telemetry.unified'] = False
+        # Likewise for safebrowsing.
+        prefs['browser.safebrowsing.enabled'] = False
+        prefs['browser.safebrowsing.malware.enabled'] = False
+        # And for snippets.
+        prefs['browser.snippets.enabled'] = False
+        prefs['browser.snippets.syncPromo.enabled'] = False
+        prefs['browser.snippets.firstrunHomepage.enabled'] = False
+        # And for useragent updates.
+        prefs['general.useragent.updates.enabled'] = False
+        # And for webapp updates.  Yes, it is supposed to be an integer.
+        prefs['browser.webapps.checkForUpdates'] = 0
+        # And for about:newtab content fetch and pings.
+        prefs['browser.newtabpage.directory.source'] = 'data:application/json,{"reftest":1}'
+        prefs['browser.newtabpage.directory.ping'] = ''
+        # Only allow add-ons from the profile and app and allow foreign
+        # injection
+        prefs["extensions.enabledScopes"] = 5
+        prefs["extensions.autoDisableScopes"] = 0
+        # Allow unsigned add-ons
+        prefs['xpinstall.signatures.required'] = False
+
+        # Don't use auto-enabled e10s
+        prefs['browser.tabs.remote.autostart.1'] = False
+        prefs['browser.tabs.remote.autostart.2'] = False
         if options.e10s:
             prefs['browser.tabs.remote.autostart'] = True
-            prefs['extensions.e10sBlocksEnabling'] = False
-
-        # Bug 1262954: For winXP + e10s disable acceleration
-        if platform.system() in ("Windows", "Microsoft") and \
-           '5.1' in platform.version() and options.e10s:
-            prefs['layers.acceleration.disabled'] = True
-
-        if options.marionette:
-            port = options.marionette.split(':')[1]
-            prefs['marionette.defaultPrefs.port'] = int(port)
-
-        preference_file = os.path.join(here, 'reftest-preferences.js')
-        prefs.update(mozprofile.Preferences.read_prefs(preference_file))
 
         for v in options.extraPrefs:
             thispref = v.split('=')
             if len(thispref) < 2:
                 print "Error: syntax error in --setpref=" + v
                 sys.exit(1)
-            prefs[thispref[0]] = thispref[1].strip()
+            prefs[thispref[0]] = mozprofile.Preferences.cast(
+                thispref[1].strip())
 
+        # install the reftest extension bits into the profile
         addons = []
-        if not self.use_marionette:
-            addons.append(options.reftestExtensionPath)
+        addons.append(os.path.join(SCRIPT_DIRECTORY, "reftest"))
 
-        if options.specialPowersExtensionPath is not None:
-            if not self.use_marionette:
-                addons.append(options.specialPowersExtensionPath)
+        # I would prefer to use "--install-extension reftest/specialpowers", but that requires tight coordination with
+        # release engineering and landing on multiple branches at once.
+        if special_powers and (manifest.endswith('crashtests.list') or manifest.endswith('jstests.list')):
+            addons.append(os.path.join(SCRIPT_DIRECTORY, 'specialpowers'))
             # SpecialPowers requires insecure automation-only features that we
             # put behind a pref.
             prefs['security.turn_off_all_security_so_that_viruses_can_take_over_this_computer'] = True
-
-        for pref in prefs:
-            prefs[pref] = mozprofile.Preferences.cast(prefs[pref])
 
         # Install distributed extensions, if application has any.
         distExtDir = os.path.join(options.app[:options.app.rfind(os.sep)],
@@ -340,20 +283,13 @@ class RefTest(object):
         return profile
 
     def environment(self, **kwargs):
-        kwargs['log'] = self.log
+        kwargs['log'] = log
         return test_environment(**kwargs)
 
     def buildBrowserEnv(self, options, profileDir):
         browserEnv = self.environment(
             xrePath=options.xrePath, debugger=options.debugger)
         browserEnv["XPCOM_DEBUG_BREAK"] = "stack"
-
-        if mozinfo.info["asan"]:
-            # Disable leak checking for reftests for now
-            if "ASAN_OPTIONS" in browserEnv:
-                browserEnv["ASAN_OPTIONS"] += ":detect_leaks=0"
-            else:
-                browserEnv["ASAN_OPTIONS"] = "detect_leaks=0"
 
         for v in options.environment:
             ix = v.find("=")
@@ -369,11 +305,11 @@ class RefTest(object):
 
     def killNamedOrphans(self, pname):
         """ Kill orphan processes matching the given command name """
-        self.log.info("Checking for orphan %s processes..." % pname)
+        log.info("Checking for orphan %s processes..." % pname)
 
         def _psInfo(line):
             if pname in line:
-                self.log.info(line)
+                log.info(line)
         process = mozprocess.ProcessHandler(['ps', '-f'],
                                             processOutputLine=_psInfo)
         process.run()
@@ -384,13 +320,13 @@ class RefTest(object):
             if len(parts) == 3 and parts[0].isdigit():
                 pid = int(parts[0])
                 if parts[2] == pname and parts[1] == '1':
-                    self.log.info("killing %s orphan with pid %d" % (pname, pid))
+                    log.info("killing %s orphan with pid %d" % (pname, pid))
                     try:
                         os.kill(
                             pid, getattr(signal, "SIGKILL", signal.SIGTERM))
                     except Exception as e:
-                        self.log.info("Failed to kill process %d: %s" %
-                                      (pid, str(e)))
+                        log.info("Failed to kill process %d: %s" %
+                                 (pid, str(e)))
         process = mozprocess.ProcessHandler(['ps', '-o', 'pid,ppid,comm'],
                                             processOutputLine=_psKill)
         process.run()
@@ -400,10 +336,7 @@ class RefTest(object):
         if profileDir:
             shutil.rmtree(profileDir, True)
 
-    def runTests(self, tests, options, cmdargs=None):
-        cmdargs = cmdargs or []
-        self._populate_logger(options)
-
+    def runTests(self, testPath, options, cmdlineArgs=None):
         # Despite our efforts to clean up servers started by this script, in practice
         # we still see infrequent cases where a process is orphaned and interferes
         # with future tests, typically because the old server is keeping the port in use.
@@ -412,15 +345,8 @@ class RefTest(object):
         self.killNamedOrphans('ssltunnel')
         self.killNamedOrphans('xpcshell')
 
-        if options.cleanupCrashes:
-            mozcrash.cleanup_pending_crash_reports()
-
-        manifests = self.resolver.resolveManifests(options, tests)
-        if options.filter:
-            manifests[""] = options.filter
-
-        if not getattr(options, 'runTestsInParallel', False):
-            return self.runSerialTests(manifests, options, cmdargs)
+        if not options.runTestsInParallel:
+            return self.runSerialTests(testPath, options, cmdlineArgs)
 
         cpuCount = multiprocessing.cpu_count()
 
@@ -438,26 +364,20 @@ class RefTest(object):
         totalJobs = jobsWithoutFocus + 1
         perProcessArgs = [sys.argv[:] for i in range(0, totalJobs)]
 
-        host = 'localhost'
-        port = 2828
-        if options.marionette:
-            host, port = options.marionette.split(':')
-
         # First job is only needs-focus tests.  Remaining jobs are
         # non-needs-focus and chunked.
         perProcessArgs[0].insert(-1, "--focus-filter-mode=needs-focus")
         for (chunkNumber, jobArgs) in enumerate(perProcessArgs[1:], start=1):
             jobArgs[-1:-1] = ["--focus-filter-mode=non-needs-focus",
                               "--total-chunks=%d" % jobsWithoutFocus,
-                              "--this-chunk=%d" % chunkNumber,
-                              "--marionette=%s:%d" % (host, port)]
-            port += 1
+                              "--this-chunk=%d" % chunkNumber]
 
         for jobArgs in perProcessArgs:
             try:
                 jobArgs.remove("--run-tests-in-parallel")
             except:
                 pass
+            jobArgs.insert(-1, "--no-run-tests-in-parallel")
             jobArgs[0:0] = [sys.executable, "-u"]
 
         threads = [ReftestThread(args) for args in perProcessArgs[1:]]
@@ -506,17 +426,17 @@ class RefTest(object):
         """handle process output timeout"""
         # TODO: bug 913975 : _processOutput should call self.processOutputLine
         # one more time one timeout (I think)
-        self.log.error("%s | application timed out after %d seconds with no output" % (self.lastTestSeen, int(timeout)))
-        self.log.error("Force-terminating active process(es).");
+        log.error("TEST-UNEXPECTED-FAIL | %s | application timed out after %d seconds with no output" %
+                  (self.lastTestSeen, int(timeout)))
         self.killAndGetStack(
             proc, utilityPath, debuggerInfo, dump_screen=not debuggerInfo)
 
     def dumpScreen(self, utilityPath):
         if self.haveDumpedScreen:
-            self.log.info("Not taking screenshot here: see the one that was previously logged")
+            log.info("Not taking screenshot here: see the one that was previously logged")
             return
         self.haveDumpedScreen = True
-        dump_screen(utilityPath, self.log)
+        dumpScreen(utilityPath)
 
     def killAndGetStack(self, process, utilityPath, debuggerInfo, dump_screen=False):
         """
@@ -536,7 +456,7 @@ class RefTest(object):
                 if os.path.exists(crashinject):
                     status = subprocess.Popen(
                         [crashinject, str(process.pid)]).wait()
-                    printstatus("crashinject", status)
+                    printstatus(status, "crashinject")
                     if status == 0:
                         return
             else:
@@ -544,15 +464,117 @@ class RefTest(object):
                     process.kill(sig=signal.SIGABRT)
                 except OSError:
                     # https://bugzilla.mozilla.org/show_bug.cgi?id=921509
-                    self.log.info("Can't trigger Breakpad, process no longer exists")
+                    log.info("Can't trigger Breakpad, process no longer exists")
                 return
-        self.log.info("Can't trigger Breakpad, just killing process")
+        log.info("Can't trigger Breakpad, just killing process")
         process.kill()
+
+    # output processing
+
+    class OutputHandler(object):
+
+        """line output handler for mozrunner"""
+
+        def __init__(self, harness, utilityPath, symbolsPath=None, dump_screen_on_timeout=True):
+            """
+            harness -- harness instance
+            dump_screen_on_timeout -- whether to dump the screen on timeout
+            """
+            self.harness = harness
+            self.utilityPath = utilityPath
+            self.symbolsPath = symbolsPath
+            self.dump_screen_on_timeout = dump_screen_on_timeout
+            self.stack_fixer_function = self.stack_fixer()
+
+        def processOutputLine(self, line):
+            """per line handler of output for mozprocess"""
+            for handler in self.output_handlers():
+                line = handler(line)
+        __call__ = processOutputLine
+
+        def output_handlers(self):
+            """returns ordered list of output handlers"""
+            return [self.fix_stack,
+                    self.format,
+                    self.record_last_test,
+                    self.handle_timeout_and_dump_screen,
+                    self.log,
+                    ]
+
+        def stack_fixer(self):
+            """
+            return stackFixerFunction, if any, to use on the output lines
+            """
+
+            if not mozinfo.info.get('debug'):
+                return None
+
+            stack_fixer_function = None
+
+            def import_stack_fixer_module(module_name):
+                sys.path.insert(0, self.utilityPath)
+                module = __import__(module_name, globals(), locals(), [])
+                sys.path.pop(0)
+                return module
+
+            if self.symbolsPath and os.path.exists(self.symbolsPath):
+                # Run each line through a function in fix_stack_using_bpsyms.py (uses breakpad symbol files).
+                # This method is preferred for Tinderbox builds, since native
+                # symbols may have been stripped.
+                stack_fixer_module = import_stack_fixer_module(
+                    'fix_stack_using_bpsyms')
+                stack_fixer_function = lambda line: stack_fixer_module.fixSymbols(
+                    line, self.symbolsPath)
+
+            elif mozinfo.isMac:
+                # Run each line through fix_macosx_stack.py (uses atos).
+                # This method is preferred for developer machines, so we don't
+                # have to run "make buildsymbols".
+                stack_fixer_module = import_stack_fixer_module(
+                    'fix_macosx_stack')
+                stack_fixer_function = lambda line: stack_fixer_module.fixSymbols(
+                    line)
+
+            elif mozinfo.isLinux:
+                # Run each line through fix_linux_stack.py (uses addr2line).
+                # This method is preferred for developer machines, so we don't
+                # have to run "make buildsymbols".
+                stack_fixer_module = import_stack_fixer_module(
+                    'fix_linux_stack')
+                stack_fixer_function = lambda line: stack_fixer_module.fixSymbols(
+                    line)
+
+            return stack_fixer_function
+
+        # output line handlers:
+        # these take a line and return a line
+        def fix_stack(self, line):
+            if self.stack_fixer_function:
+                return self.stack_fixer_function(line)
+            return line
+
+        def format(self, line):
+            """format the line"""
+            return line.rstrip().decode("UTF-8", "ignore")
+
+        def record_last_test(self, line):
+            """record last test on harness"""
+            if "TEST-START" in line and "|" in line:
+                self.harness.lastTestSeen = line.split("|")[1].strip()
+            return line
+
+        def handle_timeout_and_dump_screen(self, line):
+            if self.dump_screen_on_timeout and "TEST-UNEXPECTED-FAIL" in line and "Test timed out" in line:
+                self.harness.dumpScreen(self.utilityPath)
+            return line
+
+        def log(self, line):
+            log.info(line)
+            return line
 
     def runApp(self, profile, binary, cmdargs, env,
                timeout=None, debuggerInfo=None,
-               symbolsPath=None, options=None,
-               valgrindPath=None, valgrindArgs=None, valgrindSuppFiles=None):
+               symbolsPath=None, options=None):
 
         def timeoutHandler():
             self.handleTimeout(
@@ -564,17 +586,10 @@ class RefTest(object):
             interactive = debuggerInfo.interactive
             debug_args = [debuggerInfo.path] + debuggerInfo.args
 
-        def record_last_test(message):
-            """Records the last test seen by this harness for the benefit of crash logging."""
-            if message['action'] == 'test_start':
-                if " " in message['test']:
-                    self.lastTestSeen = message['test'].split(" ")[0]
-                else:
-                    self.lastTestSeen = message['test']
-
-        self.log.add_handler(record_last_test)
-
-        outputHandler = OutputHandler(self.log, options.utilityPath, symbolsPath=symbolsPath)
+        outputHandler = self.OutputHandler(harness=self,
+                                           utilityPath=options.utilityPath,
+                                           symbolsPath=symbolsPath,
+                                           dump_screen_on_timeout=not debuggerInfo)
 
         kp_kwargs = {
             'kill_on_timeout': False,
@@ -604,48 +619,27 @@ class RefTest(object):
                      interactive=interactive,
                      outputTimeout=timeout)
         proc = runner.process_handler
-
-        if self.use_marionette:
-            marionette_args = {
-                'socket_timeout': options.marionette_socket_timeout,
-                'symbols_path': options.symbolsPath,
-            }
-            if options.marionette:
-                host, port = options.marionette.split(':')
-                marionette_args['host'] = host
-                marionette_args['port'] = int(port)
-
-            marionette = Marionette(**marionette_args)
-            marionette.start_session(timeout=options.marionette_port_timeout)
-
-            addons = Addons(marionette)
-            if options.specialPowersExtensionPath:
-                addons.install(options.specialPowersExtensionPath, temp=True)
-
-            addons.install(options.reftestExtensionPath, temp=True)
-
-            marionette.delete_session()
-
         status = runner.wait()
         runner.process_handler = None
+        if timeout is None:
+            didTimeout = False
+        else:
+            didTimeout = proc.didTimeout
 
         if status:
-            msg = "TEST-UNEXPECTED-FAIL | %s | application terminated with exit code %s" % \
-                (self.lastTestSeen, status)
-            # use process_output so message is logged verbatim
-            self.log.process_output(None, msg)
+            log.info("TEST-UNEXPECTED-FAIL | %s | application terminated with exit code %s",
+                     self.lastTestSeen, status)
         else:
             self.lastTestSeen = 'Main app process exited normally'
 
-        crashed = mozcrash.log_crashes(self.log, os.path.join(profile.profile, 'minidumps'),
-                                       symbolsPath, test=self.lastTestSeen)
-
+        crashed = mozcrash.check_for_crashes(os.path.join(profile.profile, "minidumps"),
+                                             symbolsPath, test_name=self.lastTestSeen)
         runner.cleanup()
         if not status and crashed:
             status = 1
         return status
 
-    def runSerialTests(self, manifests, options, cmdargs=None):
+    def runSerialTests(self, testPath, options, cmdlineArgs=None):
         debuggerInfo = None
         if options.debugger:
             debuggerInfo = mozdebug.get_debugger_info(options.debugger, options.debuggerArgs,
@@ -653,22 +647,19 @@ class RefTest(object):
 
         profileDir = None
         try:
-            if cmdargs is None:
-                cmdargs = []
-
-            if self.use_marionette:
-                cmdargs.append('-marionette')
-
-            profile = self.createReftestProfile(options, manifests)
+            reftestlist = self.getManifestPath(testPath)
+            if cmdlineArgs == None:
+                cmdlineArgs = ['-reftest', reftestlist]
+            profile = self.createReftestProfile(options, reftestlist)
             profileDir = profile.profile  # name makes more sense
 
             # browser environment
             browserEnv = self.buildBrowserEnv(options, profileDir)
 
-            self.log.info("Running with e10s: {}".format(options.e10s))
+            log.info("REFTEST INFO | runreftest.py | Running tests: start.\n")
             status = self.runApp(profile,
                                  binary=options.app,
-                                 cmdargs=cmdargs,
+                                 cmdargs=cmdlineArgs,
                                  # give the JS harness 30 seconds to deal with
                                  # its own timeouts
                                  env=browserEnv,
@@ -676,12 +667,10 @@ class RefTest(object):
                                  symbolsPath=options.symbolsPath,
                                  options=options,
                                  debuggerInfo=debuggerInfo)
-            self.log.info("Process mode: {}".format('e10s' if options.e10s else 'non-e10s'))
             mozleak.process_leak_log(self.leakLogFile,
                                      leak_thresholds=options.leakThresholds,
-                                     stack_fixer=get_stack_fixer_function(options.utilityPath,
-                                                                          options.symbolsPath),
-            )
+                                     log=log)
+            log.info("\nREFTEST INFO | runreftest.py | Running tests: end.")
         finally:
             self.cleanup(profileDir)
         return status
@@ -689,44 +678,226 @@ class RefTest(object):
     def copyExtraFilesToProfile(self, options, profile):
         "Copy extra files or dirs specified on the command line to the testing profile."
         profileDir = profile.profile
-        if not os.path.exists(os.path.join(profileDir, "hyphenation")):
-            os.makedirs(os.path.join(profileDir, "hyphenation"))
         for f in options.extraProfileFiles:
             abspath = self.getFullPath(f)
             if os.path.isfile(abspath):
                 if os.path.basename(abspath) == 'user.js':
                     extra_prefs = mozprofile.Preferences.read_prefs(abspath)
                     profile.set_preferences(extra_prefs)
-                elif os.path.basename(abspath).endswith('.dic'):
-                    shutil.copy2(abspath, os.path.join(profileDir, "hyphenation"))
                 else:
                     shutil.copy2(abspath, profileDir)
             elif os.path.isdir(abspath):
                 dest = os.path.join(profileDir, os.path.basename(abspath))
                 shutil.copytree(abspath, dest)
             else:
-                self.log.warning(
-                    "runreftest.py | Failed to copy %s to profile" % abspath)
+                log.warning(
+                    "WARNING | runreftest.py | Failed to copy %s to profile", abspath)
                 continue
 
 
-def run(**kwargs):
-    parser = reftestcommandline.DesktopArgumentsParser()
+class ReftestOptions(OptionParser):
 
-    # Mach gives us kwargs; this is a way to turn them back into an
-    # options object
-    parser.set_defaults(**kwargs)
+    def __init__(self):
+        OptionParser.__init__(self)
+        defaults = {}
+        self.add_option("--xre-path",
+                        action="store", type="string", dest="xrePath",
+                        # individual scripts will set a sane default
+                        default=None,
+                        help="absolute path to directory containing XRE (probably xulrunner)")
+        self.add_option("--symbols-path",
+                        action="store", type="string", dest="symbolsPath",
+                        default=None,
+                        help="absolute path to directory containing breakpad symbols, or the URL of a zip file containing symbols")
+        self.add_option("--debugger",
+                        action="store", dest="debugger",
+                        help="use the given debugger to launch the application")
+        self.add_option("--debugger-args",
+                        action="store", dest="debuggerArgs",
+                        help="pass the given args to the debugger _before_ "
+                        "the application on the command line")
+        self.add_option("--debugger-interactive",
+                        action="store_true", dest="debuggerInteractive",
+                        help="prevents the test harness from redirecting "
+                        "stdout and stderr for interactive debuggers")
+        self.add_option("--appname",
+                        action="store", type="string", dest="app",
+                        help="absolute path to application, overriding default")
+        # Certain paths do not make sense when we're cross compiling Fennec.  This
+        # logic is cribbed from the example in
+        # python/mozbuild/mozbuild/mach_commands.py.
+        defaults['app'] = build_obj.get_binary_path() if \
+            build_obj and build_obj.substs['MOZ_BUILD_APP'] != 'mobile/android' else None
 
-    if 'tests' in kwargs:
-        options = parser.parse_args(kwargs["tests"])
-    else:
-        options = parser.parse_args()
+        self.add_option("--extra-profile-file",
+                        action="append", dest="extraProfileFiles",
+                        default=[],
+                        help="copy specified files/dirs to testing profile")
+        self.add_option("--timeout",
+                        action="store", dest="timeout", type="int",
+                        default=5 * 60,  # 5 minutes per bug 479518
+                        help="reftest will timeout in specified number of seconds. [default %default s].")
+        self.add_option("--leak-threshold",
+                        action="store", type="int", dest="defaultLeakThreshold",
+                        default=0,
+                        help="fail if the number of bytes leaked in default "
+                        "processes through refcounted objects (or bytes "
+                               "in classes with MOZ_COUNT_CTOR and MOZ_COUNT_DTOR) "
+                               "is greater than the given number")
+        self.add_option("--utility-path",
+                        action="store", type="string", dest="utilityPath",
+                        help="absolute path to directory containing utility "
+                        "programs (xpcshell, ssltunnel, certutil)")
+        defaults["utilityPath"] = build_obj.bindir if \
+            build_obj and build_obj.substs['MOZ_BUILD_APP'] != 'mobile/android' else None
 
+        self.add_option("--total-chunks",
+                        type="int", dest="totalChunks",
+                        help="how many chunks to split the tests up into")
+        defaults["totalChunks"] = None
+
+        self.add_option("--this-chunk",
+                        type="int", dest="thisChunk",
+                        help="which chunk to run between 1 and --total-chunks")
+        defaults["thisChunk"] = None
+
+        self.add_option("--log-file",
+                        action="store", type="string", dest="logFile",
+                        default=None,
+                        help="file to log output to in addition to stdout")
+        defaults["logFile"] = None
+
+        self.add_option("--skip-slow-tests",
+                        dest="skipSlowTests", action="store_true",
+                        help="skip tests marked as slow when running")
+        defaults["skipSlowTests"] = False
+
+        self.add_option("--ignore-window-size",
+                        dest="ignoreWindowSize", action="store_true",
+                        help="ignore the window size, which may cause spurious failures and passes")
+        defaults["ignoreWindowSize"] = False
+
+        self.add_option("--install-extension",
+                        action="append", dest="extensionsToInstall",
+                        help="install the specified extension in the testing profile. "
+                        "The extension file's name should be <id>.xpi where <id> is "
+                               "the extension's id as indicated in its install.rdf. "
+                               "An optional path can be specified too.")
+        defaults["extensionsToInstall"] = []
+
+        self.add_option("--run-tests-in-parallel",
+                        action="store_true", dest="runTestsInParallel",
+                        help="run tests in parallel if possible")
+        self.add_option("--no-run-tests-in-parallel",
+                        action="store_false", dest="runTestsInParallel",
+                        help="do not run tests in parallel")
+        defaults["runTestsInParallel"] = False
+
+        self.add_option("--setenv",
+                        action="append", type="string",
+                        dest="environment", metavar="NAME=VALUE",
+                        help="sets the given variable in the application's "
+                        "environment")
+        defaults["environment"] = []
+
+        self.add_option("--filter",
+                        action="store", type="string", dest="filter",
+                        help="specifies a regular expression (as could be passed to the JS "
+                        "RegExp constructor) to test against URLs in the reftest manifest; "
+                               "only test items that have a matching test URL will be run.")
+        defaults["filter"] = None
+
+        self.add_option("--shuffle",
+                        action="store_true", dest="shuffle",
+                        help="run reftests in random order")
+        defaults["shuffle"] = False
+
+        self.add_option("--focus-filter-mode",
+                        action="store", type="string", dest="focusFilterMode",
+                        help="filters tests to run by whether they require focus. "
+                        "Valid values are `all', `needs-focus', or `non-needs-focus'. "
+                               "Defaults to `all'.")
+        defaults["focusFilterMode"] = "all"
+
+        self.add_option("--e10s",
+                        action="store_true",
+                        dest="e10s",
+                        help="enables content processes")
+        defaults["e10s"] = False
+
+        self.add_option("--setpref",
+                        action="append", type="string",
+                        default=[],
+                        dest="extraPrefs", metavar="PREF=VALUE",
+                        help="defines an extra user preference")
+
+        self.set_defaults(**defaults)
+
+    def verifyCommonOptions(self, options, reftest):
+        if options.totalChunks is not None and options.thisChunk is None:
+            self.error("thisChunk must be specified when totalChunks is specified")
+
+        if options.totalChunks:
+            if not 1 <= options.thisChunk <= options.totalChunks:
+                self.error("thisChunk must be between 1 and totalChunks")
+
+        if options.logFile:
+            options.logFile = reftest.getFullPath(options.logFile)
+
+        if options.xrePath is not None:
+            if not os.access(options.xrePath, os.F_OK):
+                self.error("--xre-path '%s' not found" % options.xrePath)
+            if not os.path.isdir(options.xrePath):
+                self.error("--xre-path '%s' is not a directory" %
+                           options.xrePath)
+            options.xrePath = reftest.getFullPath(options.xrePath)
+
+        if options.runTestsInParallel:
+            if options.logFile is not None:
+                self.error("cannot specify logfile with parallel tests")
+            if options.totalChunks is not None and options.thisChunk is None:
+                self.error("cannot specify thisChunk or totalChunks with parallel tests")
+            if options.focusFilterMode != "all":
+                self.error("cannot specify focusFilterMode with parallel tests")
+            if options.debugger is not None:
+                self.error("cannot specify a debugger with parallel tests")
+
+        options.leakThresholds = {
+            "default": options.defaultLeakThreshold,
+            "tab": 5000,  # See dependencies of bug 1051230.
+        }
+
+        return options
+
+
+def main():
+    parser = ReftestOptions()
     reftest = RefTest()
-    parser.validate(options, reftest)
 
-    return reftest.runTests(options.tests, options)
+    options, args = parser.parse_args()
+    if len(args) != 1:
+        print >>sys.stderr, "No reftest.list specified."
+        sys.exit(1)
 
+    options = parser.verifyCommonOptions(options, reftest)
+    if options.app is None:
+        parser.error("could not find the application path, --appname must be specified")
+
+    options.app = reftest.getFullPath(options.app)
+    if not os.path.exists(options.app):
+        print """Error: Path %(app)s doesn't exist.
+Are you executing $objdir/_tests/reftest/runreftest.py?""" \
+                % {"app": options.app}
+        sys.exit(1)
+
+    if options.xrePath is None:
+        options.xrePath = os.path.dirname(options.app)
+
+    if options.symbolsPath and len(urlparse(options.symbolsPath).scheme) < 2:
+        options.symbolsPath = reftest.getFullPath(options.symbolsPath)
+    options.utilityPath = reftest.getFullPath(options.utilityPath)
+
+    sys.exit(reftest.runTests(args[0], options))
 
 if __name__ == "__main__":
-    sys.exit(run())
+    main()

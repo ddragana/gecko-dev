@@ -7,10 +7,12 @@
 #include <dlfcn.h>
 
 #include "AppleVTLinker.h"
+#include "MainThreadUtils.h"
 #include "mozilla/ArrayUtils.h"
 #include "nsDebug.h"
 
-#define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
+PRLogModuleInfo* GetAppleMediaLog();
+#define LOG(...) MOZ_LOG(GetAppleMediaLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 namespace mozilla {
 
@@ -18,6 +20,7 @@ AppleVTLinker::LinkStatus
 AppleVTLinker::sLinkStatus = LinkStatus_INIT;
 
 void* AppleVTLinker::sLink = nullptr;
+nsrefcnt AppleVTLinker::sRefCount = 0;
 CFStringRef AppleVTLinker::skPropEnableHWAccel = nullptr;
 CFStringRef AppleVTLinker::skPropUsingHWAccel = nullptr;
 
@@ -28,6 +31,12 @@ CFStringRef AppleVTLinker::skPropUsingHWAccel = nullptr;
 /* static */ bool
 AppleVTLinker::Link()
 {
+  // Bump our reference count every time we're called.
+  // Add a lock or change the thread assertion if
+  // you need to call this off the main thread.
+  MOZ_ASSERT(NS_IsMainThread());
+  ++sRefCount;
+
   if (sLinkStatus) {
     return sLinkStatus == LinkStatus_SUCCEEDED;
   }
@@ -76,7 +85,14 @@ fail:
 /* static */ void
 AppleVTLinker::Unlink()
 {
-  if (sLink) {
+  // We'll be called by multiple Decoders, one intantiated for
+  // each media element. Therefore we receive must maintain a
+  // reference count to avoidunloading our symbols when other
+  // instances still need them.
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(sRefCount > 0, "Unbalanced Unlink()");
+  --sRefCount;
+  if (sLink && sRefCount < 1) {
     LOG("Unlinking VideoToolbox framework.");
 #define LINK_FUNC(func)                                                   \
     func = nullptr;

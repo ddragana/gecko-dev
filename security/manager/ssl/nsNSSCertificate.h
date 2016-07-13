@@ -3,20 +3,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsNSSCertificate_h
-#define nsNSSCertificate_h
+#ifndef _NS_NSSCERTIFICATE_H_
+#define _NS_NSSCERTIFICATE_H_
 
-#include "ScopedNSSTypes.h"
-#include "certt.h"
-#include "nsCOMPtr.h"
-#include "nsIASN1Object.h"
-#include "nsIClassInfo.h"
-#include "nsISerializable.h"
-#include "nsISimpleEnumerator.h"
 #include "nsIX509Cert.h"
 #include "nsIX509CertDB.h"
 #include "nsIX509CertList.h"
+#include "nsIASN1Object.h"
+#include "nsCOMPtr.h"
 #include "nsNSSShutDown.h"
+#include "nsISimpleEnumerator.h"
+#include "nsISerializable.h"
+#include "nsIClassInfo.h"
+#include "ScopedNSSTypes.h"
+#include "certt.h"
 
 namespace mozilla { namespace pkix { class DERArray; } }
 
@@ -53,15 +53,10 @@ public:
     ev_status_unknown = 2
   };
 
-  // This is a separate static method so nsNSSComponent can use it during NSS
-  // initialization. Other code should probably not use it.
-  static nsresult GetDbKey(const mozilla::UniqueCERTCertificate& cert,
-                           nsACString& aDbKey);
-
 private:
   virtual ~nsNSSCertificate();
 
-  mozilla::UniqueCERTCertificate mCert;
+  mozilla::ScopedCERTCertificate mCert;
   bool             mPermDelete;
   uint32_t         mCertType;
   nsresult CreateASN1Struct(nsIASN1Object** aRetVal);
@@ -84,7 +79,7 @@ namespace mozilla {
 
 SECStatus ConstructCERTCertListFromReversedDERArray(
             const mozilla::pkix::DERArray& certArray,
-            /*out*/ mozilla::UniqueCERTCertList& certList);
+            /*out*/ mozilla::ScopedCERTCertList& certList);
 
 } // namespace mozilla
 
@@ -98,21 +93,20 @@ public:
   NS_DECL_NSISERIALIZABLE
 
   // certList is adopted
-  nsNSSCertList(mozilla::UniqueCERTCertList certList,
+  nsNSSCertList(mozilla::ScopedCERTCertList& certList,
                 const nsNSSShutDownPreventionLock& proofOfLock);
 
   nsNSSCertList();
 
-  static mozilla::UniqueCERTCertList DupCertList(
-    const mozilla::UniqueCERTCertList& certList,
-    const nsNSSShutDownPreventionLock& proofOfLock);
-
+  static CERTCertList* DupCertList(CERTCertList* aCertList,
+                                   const nsNSSShutDownPreventionLock&
+                                     proofOfLock);
 private:
    virtual ~nsNSSCertList();
    virtual void virtualDestroyNSSReference() override;
    void destructorSafeDestroyNSSReference();
 
-   mozilla::UniqueCERTCertList mCertList;
+   mozilla::ScopedCERTCertList mCertList;
 
    nsNSSCertList(const nsNSSCertList&) = delete;
    void operator=(const nsNSSCertList&) = delete;
@@ -125,18 +119,29 @@ public:
    NS_DECL_THREADSAFE_ISUPPORTS
    NS_DECL_NSISIMPLEENUMERATOR
 
-   nsNSSCertListEnumerator(const mozilla::UniqueCERTCertList& certList,
+   nsNSSCertListEnumerator(CERTCertList* certList,
                            const nsNSSShutDownPreventionLock& proofOfLock);
 private:
    virtual ~nsNSSCertListEnumerator();
    virtual void virtualDestroyNSSReference() override;
    void destructorSafeDestroyNSSReference();
 
-   mozilla::UniqueCERTCertList mCertList;
+   mozilla::ScopedCERTCertList mCertList;
 
    nsNSSCertListEnumerator(const nsNSSCertListEnumerator&) = delete;
    void operator=(const nsNSSCertListEnumerator&) = delete;
 };
+
+
+#define NS_NSS_LONG 4
+#define NS_NSS_GET_LONG(x) ((((unsigned long)((x)[0])) << 24) | \
+                            (((unsigned long)((x)[1])) << 16) | \
+                            (((unsigned long)((x)[2])) <<  8) | \
+                             ((unsigned long)((x)[3])) )
+#define NS_NSS_PUT_LONG(src,dest) (dest)[0] = (((src) >> 24) & 0xff); \
+                                  (dest)[1] = (((src) >> 16) & 0xff); \
+                                  (dest)[2] = (((src) >>  8) & 0xff); \
+                                  (dest)[3] = ((src) & 0xff);
 
 #define NS_X509CERT_CID { /* 660a3226-915c-4ffb-bb20-8985a632df05 */   \
     0x660a3226,                                                        \
@@ -145,4 +150,4 @@ private:
     { 0xbb, 0x20, 0x89, 0x85, 0xa6, 0x32, 0xdf, 0x05 }                 \
   }
 
-#endif // nsNSSCertificate_h
+#endif // _NS_NSSCERTIFICATE_H_

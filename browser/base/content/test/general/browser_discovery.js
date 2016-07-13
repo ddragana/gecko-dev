@@ -1,8 +1,6 @@
 var browser;
 
-function doc() {
-  return browser.contentDocument;
-}
+function doc() browser.contentDocument;
 
 function setHandlerFunc(aResultFunc) {
   gBrowser.addEventListener("DOMLinkAdded", function (event) {
@@ -52,8 +50,7 @@ function runIconDiscoveryTest() {
 function iconDiscovery() {
   if (iconDiscoveryTests.length) {
     setHandlerFunc(runIconDiscoveryTest);
-    gBrowser.setIcon(gBrowser.selectedTab, null,
-                     Services.scriptSecurityManager.getSystemPrincipal());
+    gBrowser.setIcon(gBrowser.selectedTab, null);
 
     var test = iconDiscoveryTests[0];
     var head = doc().getElementById("linkparent");

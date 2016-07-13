@@ -38,7 +38,7 @@ namespace workers {
 namespace cache {
 
 class CacheStorageChild;
-class CacheWorkerHolder;
+class Feature;
 
 class CacheStorage final : public nsIIPCBackgroundChildCreateCallback
                          , public nsWrapperCache
@@ -49,15 +49,12 @@ class CacheStorage final : public nsIIPCBackgroundChildCreateCallback
 public:
   static already_AddRefed<CacheStorage>
   CreateOnMainThread(Namespace aNamespace, nsIGlobalObject* aGlobal,
-                     nsIPrincipal* aPrincipal, bool aStorageDisabled,
+                     nsIPrincipal* aPrincipal, bool aPrivateBrowsing,
                      bool aForceTrustedOrigin, ErrorResult& aRv);
 
   static already_AddRefed<CacheStorage>
   CreateOnWorker(Namespace aNamespace, nsIGlobalObject* aGlobal,
                  workers::WorkerPrivate* aWorkerPrivate, ErrorResult& aRv);
-
-  static bool
-  DefineCaches(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
 
   // webidl interface methods
   already_AddRefed<Promise> Match(const RequestOrUSVString& aRequest,
@@ -92,13 +89,12 @@ public:
   virtual void AssertOwningThread() const override;
 #endif
 
-  virtual mozilla::ipc::PBackgroundChild*
-  GetIPCManager() override;
+  virtual CachePushStreamChild*
+  CreatePushStream(nsIAsyncInputStream* aStream) override;
 
 private:
   CacheStorage(Namespace aNamespace, nsIGlobalObject* aGlobal,
-               const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
-               CacheWorkerHolder* aWorkerHolder);
+               const mozilla::ipc::PrincipalInfo& aPrincipalInfo, Feature* aFeature);
   explicit CacheStorage(nsresult aFailureResult);
   ~CacheStorage();
 
@@ -107,7 +103,7 @@ private:
   const Namespace mNamespace;
   nsCOMPtr<nsIGlobalObject> mGlobal;
   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
-  RefPtr<CacheWorkerHolder> mWorkerHolder;
+  nsRefPtr<Feature> mFeature;
 
   // weak ref cleared in DestroyInternal
   CacheStorageChild* mActor;

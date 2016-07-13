@@ -12,7 +12,7 @@ const modules = [
 ];
 
 function run_test() {
-  for (let m of modules) {
+  for each (let m in modules) {
     let resource = "resource://gre/modules/identity/" + m;
     Components.utils.import(resource, {});
     do_print("loaded " + resource);

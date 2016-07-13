@@ -6,6 +6,7 @@
 
 #include "MP4Decoder.h"
 #include "MediaDecoderStateMachine.h"
+#include "MediaFormatReader.h"
 #include "MP4Demuxer.h"
 #include "mozilla/Preferences.h"
 #include "nsCharSeparatedTokenizer.h"
@@ -13,9 +14,6 @@
 #include "mozilla/CDMProxy.h"
 #endif
 #include "mozilla/Logging.h"
-#include "nsMimeTypes.h"
-#include "nsContentTypeParser.h"
-#include "VideoUtils.h"
 
 #ifdef XP_WIN
 #include "mozilla/WindowsVersion.h"
@@ -26,28 +24,72 @@
 #endif
 #include "mozilla/layers/LayersTypes.h"
 
-#include "PDMFactory.h"
-
 namespace mozilla {
 
-MP4Decoder::MP4Decoder(MediaDecoderOwner* aOwner)
-  : MediaDecoder(aOwner)
+#if defined(MOZ_GONK_MEDIACODEC) || defined(XP_WIN) || defined(MOZ_APPLEMEDIA) || defined(MOZ_FFMPEG)
+#define MP4_READER_DORMANT_HEURISTIC
+#else
+#undef MP4_READER_DORMANT_HEURISTIC
+#endif
+
+MP4Decoder::MP4Decoder()
 {
+#if defined(MP4_READER_DORMANT_HEURISTIC)
   mDormantSupported = Preferences::GetBool("media.decoder.heuristic.dormant.enabled", false);
+#endif
 }
 
 MediaDecoderStateMachine* MP4Decoder::CreateStateMachine()
 {
-  mReader =
-    new MediaFormatReader(this,
-                          new MP4Demuxer(GetResource()),
-                          GetVideoFrameContainer());
+  MediaDecoderReader* reader = new MediaFormatReader(this, new MP4Demuxer(GetResource()));
 
-  return new MediaDecoderStateMachine(this, mReader);
+  return new MediaDecoderStateMachine(this, reader);
+}
+
+#ifdef MOZ_EME
+nsresult
+MP4Decoder::SetCDMProxy(CDMProxy* aProxy)
+{
+  nsresult rv = MediaDecoder::SetCDMProxy(aProxy);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (aProxy) {
+    // The MediaFormatReader can't decrypt EME content until it has a CDMProxy,
+    // and the CDMProxy knows the capabilities of the CDM. The MediaFormatReader
+    // remains in "waiting for resources" state until then.
+    CDMCaps::AutoLock caps(aProxy->Capabilites());
+    nsCOMPtr<nsIRunnable> task(
+      NS_NewRunnableMethod(this, &MediaDecoder::NotifyWaitingForResourcesStatusChanged));
+    caps.CallOnMainThreadWhenCapsAvailable(task);
+  }
+  return NS_OK;
+}
+#endif
+
+static bool
+IsSupportedAudioCodec(const nsAString& aCodec,
+                      bool& aOutContainsAAC,
+                      bool& aOutContainsMP3)
+{
+  // AAC-LC or HE-AAC in M4A.
+  aOutContainsAAC = aCodec.EqualsASCII("mp4a.40.2")     // MPEG4 AAC-LC
+                    || aCodec.EqualsASCII("mp4a.40.5")  // MPEG4 HE-AAC
+                    || aCodec.EqualsASCII("mp4a.67");   // MPEG2 AAC-LC
+  if (aOutContainsAAC) {
+    return true;
+  }
+#ifndef MOZ_GONK_MEDIACODEC // B2G doesn't support MP3 in MP4 yet.
+  aOutContainsMP3 = aCodec.EqualsASCII("mp3");
+  if (aOutContainsMP3) {
+    return true;
+  }
+#else
+  aOutContainsMP3 = false;
+#endif
+  return false;
 }
 
 static bool
-IsWhitelistedH264Codec(const nsAString& aCodec)
+IsSupportedH264Codec(const nsAString& aCodec)
 {
   int16_t profile = 0, level = 0;
 
@@ -81,213 +123,266 @@ IsWhitelistedH264Codec(const nsAString& aCodec)
 
 /* static */
 bool
-MP4Decoder::CanHandleMediaType(const nsACString& aMIMETypeExcludingCodecs,
+MP4Decoder::CanHandleMediaType(const nsACString& aType,
                                const nsAString& aCodecs,
-                               DecoderDoctorDiagnostics* aDiagnostics)
+                               bool& aOutContainsAAC,
+                               bool& aOutContainsH264,
+                               bool& aOutContainsMP3)
 {
   if (!IsEnabled()) {
     return false;
   }
 
-  // Whitelist MP4 types, so they explicitly match what we encounter on
-  // the web, as opposed to what we use internally (i.e. what our demuxers
-  // etc output).
-  const bool isMP4Audio = aMIMETypeExcludingCodecs.EqualsASCII("audio/mp4") ||
-                          aMIMETypeExcludingCodecs.EqualsASCII("audio/x-m4a") ||
-                          aMIMETypeExcludingCodecs.EqualsASCII("audio/opus");
-  const bool isMP4Video =
-  // On B2G, treat 3GPP as MP4 when Gonk PDM is available.
-#ifdef MOZ_GONK_MEDIACODEC
-    aMIMETypeExcludingCodecs.EqualsASCII(VIDEO_3GPP) ||
-#endif
-    aMIMETypeExcludingCodecs.EqualsASCII("video/mp4") ||
-    aMIMETypeExcludingCodecs.EqualsASCII("video/quicktime") ||
-    aMIMETypeExcludingCodecs.EqualsASCII("video/x-m4v");
-  if (!isMP4Audio && !isMP4Video) {
+  if (aType.EqualsASCII("audio/mp4") || aType.EqualsASCII("audio/x-m4a")) {
+    return MP4Decoder::CanCreateAACDecoder() &&
+           (aCodecs.IsEmpty() ||
+            IsSupportedAudioCodec(aCodecs,
+                                  aOutContainsAAC,
+                                  aOutContainsMP3));
+  }
+
+  if (!aType.EqualsASCII("video/mp4") ||
+      !MP4Decoder::CanCreateH264Decoder()) {
     return false;
   }
 
-  nsTArray<nsCString> codecMimes;
-  if (aCodecs.IsEmpty()) {
-    // No codecs specified. Assume AAC/H.264
-    if (isMP4Audio) {
-      codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mp4a-latm"));
-    } else {
-      MOZ_ASSERT(isMP4Video);
-      codecMimes.AppendElement(NS_LITERAL_CSTRING("video/avc"));
+  // Verify that all the codecs specifed are ones that we expect that
+  // we can play.
+  nsCharSeparatedTokenizer tokenizer(aCodecs, ',');
+  bool expectMoreTokens = false;
+  while (tokenizer.hasMoreTokens()) {
+    const nsSubstring& token = tokenizer.nextToken();
+    expectMoreTokens = tokenizer.separatorAfterCurrentToken();
+    if (IsSupportedAudioCodec(token,
+                              aOutContainsAAC,
+                              aOutContainsMP3)) {
+      continue;
     }
-  } else {
-    // Verify that all the codecs specified are ones that we expect that
-    // we can play.
-    nsTArray<nsString> codecs;
-    if (!ParseCodecsString(aCodecs, codecs)) {
-      return false;
+    if (IsSupportedH264Codec(token)) {
+      aOutContainsH264 = true;
+      continue;
     }
-    for (const nsString& codec : codecs) {
-      if (IsAACCodecString(codec)) {
-        codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mp4a-latm"));
-        continue;
-      }
-      if (codec.EqualsLiteral("mp3")) {
-        codecMimes.AppendElement(NS_LITERAL_CSTRING("audio/mpeg"));
-        continue;
-      }
-      // Note: Only accept H.264 in a video content type, not in an audio
-      // content type.
-      if (IsWhitelistedH264Codec(codec) && isMP4Video) {
-        codecMimes.AppendElement(NS_LITERAL_CSTRING("video/avc"));
-        continue;
-      }
-      // Some unsupported codec.
-      return false;
-    }
+    return false;
   }
-
-  // Verify that we have a PDM that supports the whitelisted types.
-  RefPtr<PDMFactory> platform = new PDMFactory();
-  for (const nsCString& codecMime : codecMimes) {
-    if (!platform->SupportsMimeType(codecMime, aDiagnostics)) {
-      return false;
-    }
+  if (expectMoreTokens) {
+    // Last codec name was empty
+    return false;
   }
 
   return true;
 }
 
-/* static */ bool
-MP4Decoder::CanHandleMediaType(const nsAString& aContentType,
-                               DecoderDoctorDiagnostics* aDiagnostics)
+static bool
+IsFFmpegAvailable()
 {
-  nsContentTypeParser parser(aContentType);
-  nsAutoString mimeType;
-  nsresult rv = parser.GetType(mimeType);
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-  nsString codecs;
-  parser.GetParameter("codecs", codecs);
+#ifndef MOZ_FFMPEG
+  return false;
+#else
+  return Preferences::GetBool("media.fragmented-mp4.ffmpeg.enabled", false);
+#endif
+}
 
-  return CanHandleMediaType(NS_ConvertUTF16toUTF8(mimeType),
-                            codecs,
-                            aDiagnostics);
+static bool
+IsAppleAvailable()
+{
+#ifndef MOZ_APPLEMEDIA
+  // Not the right platform.
+  return false;
+#else
+  return Preferences::GetBool("media.apple.mp4.enabled", false);
+#endif
+}
+
+static bool
+IsAndroidAvailable()
+{
+#ifndef MOZ_WIDGET_ANDROID
+  return false;
+#else
+  // We need android.media.MediaCodec which exists in API level 16 and higher.
+  return AndroidBridge::Bridge() && (AndroidBridge::Bridge()->GetAPIVersion() >= 16);
+#endif
+}
+
+static bool
+IsGonkMP4DecoderAvailable()
+{
+#ifndef MOZ_GONK_MEDIACODEC
+  return false;
+#else
+  return Preferences::GetBool("media.fragmented-mp4.gonk.enabled", false);
+#endif
+}
+
+static bool
+IsGMPDecoderAvailable()
+{
+  return Preferences::GetBool("media.fragmented-mp4.gmp.enabled", false);
+}
+
+static bool
+HavePlatformMPEGDecoders()
+{
+  return Preferences::GetBool("media.fragmented-mp4.use-blank-decoder") ||
+#ifdef XP_WIN
+         // We have H.264/AAC platform decoders on Windows Vista and up.
+         IsVistaOrLater() ||
+#endif
+         IsAndroidAvailable() ||
+         IsFFmpegAvailable() ||
+         IsAppleAvailable() ||
+         IsGonkMP4DecoderAvailable() ||
+         IsGMPDecoderAvailable() ||
+         // TODO: Other platforms...
+         false;
 }
 
 /* static */
 bool
 MP4Decoder::IsEnabled()
 {
-  return Preferences::GetBool("media.mp4.enabled", true);
+  return Preferences::GetBool("media.fragmented-mp4.enabled") &&
+         HavePlatformMPEGDecoders();
 }
 
-// sTestH264ExtraData represents the content of the avcC atom found in
-// an AVC1 h264 video. It contains the H264 SPS and PPS NAL.
-// the structure of the avcC atom is as follow:
-// write(0x1);  // version, always 1
-// write(sps[0].data[1]); // profile
-// write(sps[0].data[2]); // compatibility
-// write(sps[0].data[3]); // level
-// write(0xFC | 3); // reserved (6 bits), NULA length size - 1 (2 bits)
-// write(0xE0 | 1); // reserved (3 bits), num of SPS (5 bits)
-// write_word(sps[0].size); // 2 bytes for length of SPS
-// for(size_t i=0 ; i < sps[0].size ; ++i)
-//   write(sps[0].data[i]); // data of SPS
-// write(&b, pps.size());  // num of PPS
-// for(size_t i=0 ; i < pps.size() ; ++i) {
-//   write_word(pps[i].size);  // 2 bytes for length of PPS
-//   for(size_t j=0 ; j < pps[i].size ; ++j)
-//     write(pps[i].data[j]);  // data of PPS
-//   }
-// }
-// here we have a h264 Baseline, 640x360
-// We use a 640x360 extradata, as some video framework (Apple VT) will never
-// attempt to use hardware decoding for small videos.
 static const uint8_t sTestH264ExtraData[] = {
-  0x01, 0x42, 0xc0, 0x1e, 0xff, 0xe1, 0x00, 0x17, 0x67, 0x42,
-  0xc0, 0x1e, 0xbb, 0x40, 0x50, 0x17, 0xfc, 0xb8, 0x08, 0x80,
-  0x00, 0x00, 0x32, 0x00, 0x00, 0x0b, 0xb5, 0x07, 0x8b, 0x17,
-  0x50, 0x01, 0x00, 0x04, 0x68, 0xce, 0x32, 0xc8
+  0x01, 0x64, 0x00, 0x0a, 0xff, 0xe1, 0x00, 0x17, 0x67, 0x64,
+  0x00, 0x0a, 0xac, 0xd9, 0x44, 0x26, 0x84, 0x00, 0x00, 0x03,
+  0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xc8, 0x3c, 0x48, 0x96,
+  0x58, 0x01, 0x00, 0x06, 0x68, 0xeb, 0xe3, 0xcb, 0x22, 0xc0
 };
 
 static already_AddRefed<MediaDataDecoder>
 CreateTestH264Decoder(layers::LayersBackend aBackend,
-                      VideoInfo& aConfig,
-                      TaskQueue* aTaskQueue)
+                      VideoInfo& aConfig)
 {
   aConfig.mMimeType = "video/avc";
   aConfig.mId = 1;
   aConfig.mDuration = 40000;
   aConfig.mMediaTime = 0;
-  aConfig.mImage = aConfig.mDisplay = nsIntSize(640, 360);
+  aConfig.mDisplay = aConfig.mImage = nsIntSize(64, 64);
   aConfig.mExtraData = new MediaByteBuffer();
   aConfig.mExtraData->AppendElements(sTestH264ExtraData,
                                      MOZ_ARRAY_LENGTH(sTestH264ExtraData));
 
-  RefPtr<PDMFactory> platform = new PDMFactory();
-  RefPtr<MediaDataDecoder> decoder(platform->CreateDecoder({ aConfig, aTaskQueue, aBackend }));
+  PlatformDecoderModule::Init();
+
+  nsRefPtr<PlatformDecoderModule> platform = PlatformDecoderModule::Create();
+  if (!platform) {
+    return nullptr;
+  }
+
+  nsRefPtr<MediaDataDecoder> decoder(
+    platform->CreateDecoder(aConfig, nullptr, nullptr, aBackend, nullptr));
+  if (!decoder) {
+    return nullptr;
+  }
+  nsresult rv = decoder->Init();
+  NS_ENSURE_SUCCESS(rv, nullptr);
 
   return decoder.forget();
 }
 
-/* static */ already_AddRefed<dom::Promise>
-MP4Decoder::IsVideoAccelerated(layers::LayersBackend aBackend, nsIGlobalObject* aParent)
+/* static */ bool
+MP4Decoder::IsVideoAccelerated(layers::LayersBackend aBackend)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  VideoInfo config;
+  nsRefPtr<MediaDataDecoder> decoder(CreateTestH264Decoder(aBackend, config));
+  if (!decoder) {
+    return false;
+  }
+  bool result = decoder->IsHardwareAccelerated();
+  decoder->Shutdown();
+  return result;
+}
 
-  ErrorResult rv;
-  RefPtr<dom::Promise> promise;
-  promise = dom::Promise::Create(aParent, rv);
-  if (rv.Failed()) {
-    rv.SuppressException();
+/* static */ bool
+MP4Decoder::CanCreateH264Decoder()
+{
+#ifdef XP_WIN
+  static bool haveCachedResult = false;
+  static bool result = false;
+  if (haveCachedResult) {
+    return result;
+  }
+  VideoInfo config;
+  nsRefPtr<MediaDataDecoder> decoder(
+    CreateTestH264Decoder(layers::LayersBackend::LAYERS_BASIC, config));
+  if (decoder) {
+    decoder->Shutdown();
+    result = true;
+  }
+  haveCachedResult = true;
+  return result;
+#else
+  return IsEnabled();
+#endif
+}
+
+#ifdef XP_WIN
+static already_AddRefed<MediaDataDecoder>
+CreateTestAACDecoder(AudioInfo& aConfig)
+{
+  PlatformDecoderModule::Init();
+
+  nsRefPtr<PlatformDecoderModule> platform = PlatformDecoderModule::Create();
+  if (!platform) {
     return nullptr;
   }
 
-  RefPtr<TaskQueue> taskQueue =
-    new TaskQueue(GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
-  VideoInfo config;
-  RefPtr<MediaDataDecoder> decoder(CreateTestH264Decoder(aBackend, config, taskQueue));
+  nsRefPtr<MediaDataDecoder> decoder(
+    platform->CreateDecoder(aConfig, nullptr, nullptr));
   if (!decoder) {
-    taskQueue->BeginShutdown();
-    taskQueue->AwaitShutdownAndIdle();
-    promise->MaybeResolve(NS_LITERAL_STRING("No; Failed to create H264 decoder"));
-    return promise.forget();
+    return nullptr;
   }
+  nsresult rv = decoder->Init();
+  NS_ENSURE_SUCCESS(rv, nullptr);
 
-  decoder->Init()
-    ->Then(AbstractThread::MainThread(), __func__,
-           [promise, decoder, taskQueue] (TrackInfo::TrackType aTrack) {
-             nsCString failureReason;
-             bool ok = decoder->IsHardwareAccelerated(failureReason);
-             nsAutoString result;
-             if (ok) {
-               result.AssignLiteral("Yes");
-             } else {
-               result.AssignLiteral("No");
-             }
-             if (failureReason.Length()) {
-               result.AppendLiteral("; ");
-               AppendUTF8toUTF16(failureReason, result);
-             }
-             decoder->Shutdown();
-             taskQueue->BeginShutdown();
-             taskQueue->AwaitShutdownAndIdle();
-             promise->MaybeResolve(result);
-           },
-           [promise, decoder, taskQueue] (MediaDataDecoder::DecoderFailureReason aResult) {
-             decoder->Shutdown();
-             taskQueue->BeginShutdown();
-             taskQueue->AwaitShutdownAndIdle();
-             promise->MaybeResolve(NS_LITERAL_STRING("No; Failed to initialize H264 decoder"));
-           });
-
-  return promise.forget();
+  return decoder.forget();
 }
 
-void
-MP4Decoder::GetMozDebugReaderData(nsAString& aString)
+// bipbop.mp4's extradata/config...
+static const uint8_t sTestAACExtraData[] = {
+  0x03, 0x80, 0x80, 0x80, 0x22, 0x00, 0x02, 0x00, 0x04, 0x80,
+  0x80, 0x80, 0x14, 0x40, 0x15, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x11, 0x51, 0x00, 0x00, 0x11, 0x51, 0x05, 0x80, 0x80, 0x80,
+  0x02, 0x13, 0x90, 0x06, 0x80, 0x80, 0x80, 0x01, 0x02
+};
+
+static const uint8_t sTestAACConfig[] = { 0x13, 0x90 };
+
+#endif // XP_WIN
+
+/* static */ bool
+MP4Decoder::CanCreateAACDecoder()
 {
-  if (mReader) {
-    mReader->GetMozDebugReaderData(aString);
+#ifdef XP_WIN
+  static bool haveCachedResult = false;
+  static bool result = false;
+  if (haveCachedResult) {
+    return result;
   }
+  AudioInfo config;
+  config.mMimeType = "audio/mp4a-latm";
+  config.mRate = 22050;
+  config.mChannels = 2;
+  config.mBitDepth = 16;
+  config.mProfile = 2;
+  config.mExtendedProfile = 2;
+  config.mCodecSpecificConfig->AppendElements(sTestAACConfig,
+                                              MOZ_ARRAY_LENGTH(sTestAACConfig));
+  config.mExtraData->AppendElements(sTestAACExtraData,
+                                    MOZ_ARRAY_LENGTH(sTestAACExtraData));
+  nsRefPtr<MediaDataDecoder> decoder(CreateTestAACDecoder(config));
+  if (decoder) {
+    decoder->Shutdown();
+    result = true;
+  }
+  haveCachedResult = true;
+  return result;
+#else
+  return IsEnabled();
+#endif
 }
 
 } // namespace mozilla

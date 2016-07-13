@@ -7,17 +7,8 @@ const constructors = [
     Int32Array,
     Uint32Array,
     Float32Array,
-    Float64Array ];
-
-if (typeof SharedArrayBuffer != "undefined")
-    constructors.push(sharedConstructor(Int8Array),
-		      sharedConstructor(Uint8Array),
-		      sharedConstructor(Int16Array),
-		      sharedConstructor(Uint16Array),
-		      sharedConstructor(Int32Array),
-		      sharedConstructor(Uint32Array),
-		      sharedConstructor(Float32Array),
-		      sharedConstructor(Float64Array));
+    Float64Array
+];
 
 // Tests for TypedArray#map.
 for (var constructor of constructors) {
@@ -120,7 +111,7 @@ for (var constructor of constructors) {
     });
 
     // Called from other globals.
-    if (typeof newGlobal === "function" && !isSharedConstructor(constructor)) {
+    if (typeof newGlobal === "function") {
         var map = newGlobal()[constructor.name].prototype.map;
         var sum = 0;
         assertDeepEq(map.call(new constructor([1, 2, 3]), v => sum += v), new constructor([1,3,6]));
@@ -244,7 +235,7 @@ for (var constructor of constructors) {
     });
 
     // Called from other globals.
-    if (typeof newGlobal === "function" && !isSharedConstructor(constructor)) {
+    if (typeof newGlobal === "function") {
         var filter = newGlobal()[constructor.name].prototype.filter;
         var sum = 0;
         assertDeepEq(filter.call(new constructor([1, 2, 3]), v => {sum += v; return true}),
@@ -273,13 +264,24 @@ for (var constructor of constructors) {
 // behaviour of filter. See https://bugzilla.mozilla.org/show_bug.cgi?id=1121936#c18
 // for more details.
 
-var arr = new Uint16Array([1,2,3]);
+// Object conforming to the "iterator" protocol
+var obj = {
+    v: 0,
+    next: function() {
+        if (this.v == 5) {
+	       return {done : true, value : this.v };
+        } else {
+	       this.v++;
+	       return { done : false, value : this.v };
+        }
+    }
+};
 
 // save
 var old = Array.prototype[Symbol.iterator];
 
-Array.prototype[Symbol.iterator] = () => { throw new Error("unreachable"); };
-assertDeepEq(arr.filter(v => true), arr);
+Array.prototype[Symbol.iterator] = obj;
+assertDeepEq(new Uint16Array([1,2,3]).filter(v => true), new Uint16Array([1,2,3]));
 
 // restore
 Array.prototype[Symbol.iterator] = old;

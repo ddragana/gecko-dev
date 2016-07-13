@@ -9,7 +9,7 @@ function run_test()
   run_next_test();
 }
 
-add_task(function* test_execute()
+add_task(function test_execute()
 {
   try {
     var histsvc = Cc["@mozilla.org/browser/nav-history-service;1"].
@@ -42,11 +42,11 @@ add_task(function* test_execute()
                        0 /* first item */, "test query");
 
   // query for that query
-  options = histsvc.getNewQueryOptions();
-  query = histsvc.getNewQuery();
+  var options = histsvc.getNewQueryOptions();
+  var query = histsvc.getNewQuery();
   query.setFolders([bmsvc.toolbarFolder], 1);
-  result = histsvc.executeQuery(query, options);
-  root = result.root;
+  var result = histsvc.executeQuery(query, options);
+  var root = result.root;
   root.containerOpen = true;
   var queryNode = root.getChild(0);
   do_check_eq(queryNode.title, "test query");

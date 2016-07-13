@@ -98,13 +98,13 @@ nsSMILTimeValueSpec::ResolveReferences(nsIContent* aContextNode)
 
   // If we're not bound to the document yet, don't worry, we'll get called again
   // when that happens
-  if (!aContextNode->IsInUncomposedDoc())
+  if (!aContextNode->IsInDoc())
     return;
 
   // Hold ref to the old element so that it isn't destroyed in between resetting
   // the referenced element and using the pointer to update the referenced
   // element.
-  RefPtr<Element> oldReferencedElement = mReferencedElement.get();
+  nsRefPtr<Element> oldReferencedElement = mReferencedElement.get();
 
   if (mParams.mDependentElemID) {
     mReferencedElement.ResetWithID(aContextNode,
@@ -113,7 +113,7 @@ nsSMILTimeValueSpec::ResolveReferences(nsIContent* aContextNode)
     Element* target = mOwner->GetTargetElement();
     mReferencedElement.ResetWithElement(target);
   } else if (mParams.mType == nsSMILTimeValueSpecParams::ACCESSKEY) {
-    nsIDocument* doc = aContextNode->GetUncomposedDoc();
+    nsIDocument* doc = aContextNode->GetCurrentDoc();
     MOZ_ASSERT(doc, "We are in the document but current doc is null");
     mReferencedElement.ResetWithElement(doc->GetRootElement());
   } else {
@@ -146,7 +146,7 @@ nsSMILTimeValueSpec::HandleNewInterval(nsSMILInterval& aInterval,
   }
 
   // Create the instance time and register it with the interval
-  RefPtr<nsSMILInstanceTime> newInstance =
+  nsRefPtr<nsSMILInstanceTime> newInstance =
     new nsSMILInstanceTime(newTime, nsSMILInstanceTime::SOURCE_SYNCBASE, this,
                            &aInterval);
   mOwner->AddInstanceTime(newInstance, mIsBegin);
@@ -350,10 +350,10 @@ nsSMILTimeValueSpec::GetEventListenerManager(Element* aTarget)
   nsCOMPtr<EventTarget> target;
 
   if (mParams.mType == nsSMILTimeValueSpecParams::ACCESSKEY) {
-    nsIDocument* doc = aTarget->GetUncomposedDoc();
+    nsIDocument* doc = aTarget->GetCurrentDoc();
     if (!doc)
       return nullptr;
-    nsPIDOMWindowOuter* win = doc->GetWindow();
+    nsPIDOMWindow* win = doc->GetWindow();
     if (!win)
       return nullptr;
     target = do_QueryInterface(win);
@@ -391,7 +391,7 @@ nsSMILTimeValueSpec::HandleEvent(nsIDOMEvent* aEvent)
     return;
   }
 
-  RefPtr<nsSMILInstanceTime> newInstance =
+  nsRefPtr<nsSMILInstanceTime> newInstance =
     new nsSMILInstanceTime(newTime, nsSMILInstanceTime::SOURCE_EVENT);
   mOwner->AddInstanceTime(newInstance, mIsBegin);
 }

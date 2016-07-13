@@ -49,7 +49,17 @@ ArchiveReaderEvent::ArchiveReaderEvent(ArchiveReader* aArchiveReader)
 ArchiveReaderEvent::~ArchiveReaderEvent()
 {
   if (!NS_IsMainThread()) {
-    NS_ReleaseOnMainThread(mMimeService.forget());
+    nsIMIMEService* mimeService;
+    mMimeService.forget(&mimeService);
+
+    if (mimeService) {
+      nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+      NS_WARN_IF_FALSE(mainThread, "Couldn't get the main thread! Leaking!");
+
+      if (mainThread) {
+        NS_ProxyRelease(mainThread, mimeService);
+      }
+    }
   }
 
   MOZ_COUNT_DTOR(ArchiveReaderEvent);
@@ -86,7 +96,8 @@ ArchiveReaderEvent::RunShare(nsresult aStatus)
 {
   mStatus = aStatus;
 
-  NS_DispatchToMainThread(NewRunnableMethod(this, &ArchiveReaderEvent::ShareMainThread));
+  nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this, &ArchiveReaderEvent::ShareMainThread);
+  NS_DispatchToMainThread(event);
 
   return NS_OK;
 }
@@ -94,12 +105,12 @@ ArchiveReaderEvent::RunShare(nsresult aStatus)
 void
 ArchiveReaderEvent::ShareMainThread()
 {
-  nsTArray<RefPtr<File>> fileList;
+  nsTArray<nsRefPtr<File>> fileList;
 
   if (!NS_FAILED(mStatus)) {
     // This extra step must run in the main thread:
     for (uint32_t index = 0; index < mFileList.Length(); ++index) {
-      RefPtr<ArchiveItem> item = mFileList[index];
+      nsRefPtr<ArchiveItem> item = mFileList[index];
 
       nsString tmp;
       nsresult rv = item->GetFilename(tmp);
@@ -120,7 +131,7 @@ ArchiveReaderEvent::ShareMainThread()
       }
 
       // This is a File:
-      RefPtr<File> file = item->GetFile(mArchiveReader);
+      nsRefPtr<File> file = item->GetFile(mArchiveReader);
       if (file) {
         fileList.AppendElement(file);
       }

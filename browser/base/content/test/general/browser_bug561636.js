@@ -14,7 +14,7 @@ function checkPopupHide()
      "[Test " + testId + "] The invalid form popup should not be shown");
 }
 
-var gObserver = {
+let gObserver = {
   QueryInterface : XPCOMUtils.generateQI([Ci.nsIFormSubmitObserver]),
 
   notifyInvalidSubmit : function (aFormElement, aInvalidElements)
@@ -73,18 +73,20 @@ function* blurChildElement(browser)
 
 function* checkChildFocus(browser, message)
 {
-  yield ContentTask.spawn(browser, [message, testId], function* (args) {
-    let [msg, testId] = args;
-    var focused = content.document.activeElement == content.document.getElementById('i');
+  let [activeElement, validMsg] =
+    yield ContentTask.spawn(browser, message, function* (msg) {
+      var focused = content.document.activeElement == content.document.getElementById('i');
 
-    var validMsg = true;
-    if (msg) {
-      validMsg = (msg == content.document.getElementById('i').validationMessage);
-    }
+      var validMsg = true;
+      if (msg) {
+        validMsg = (msg == content.document.getElementById('i').validationMessage);
+      }
 
-    Assert.equal(focused, true, "Test " + testId + " First invalid element should be focused");
-    Assert.equal(validMsg, true, "Test " + testId + " The panel should show the message from validationMessage");
+      return [focused, validMsg];
   });
+
+  is(activeElement, true, "Test " + testId + " First invalid element should be focused");
+  is(validMsg, true, "Test " + testId + " The panel should show the message from validationMessage");
 }
 
 /**

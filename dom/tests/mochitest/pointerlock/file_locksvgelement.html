@@ -36,25 +36,27 @@
           elemWasLocked = false;
 
         document.addEventListener("mozpointerlockchange", function (e) {
-          if (document.fullscreenElement &&
+          if (document.mozFullScreen &&
               document.mozPointerLockElement === elem) {
             elemWasLocked = true;
             document.mozExitPointerLock();
           } else {
-            addFullscreenChangeContinuation("exit", function() {
-              ok(elemWasLocked, "Expected SVG elem to become locked.");
-              SimpleTest.finish();
-            });
-            document.exitFullscreen();
+            document.mozCancelFullScreen();
+          }
+        }, false);
+
+        document.addEventListener("mozfullscreenchange", function (e) {
+          if (document.mozFullScreenElement === elem) {
+            elem.mozRequestPointerLock();
+          } else {
+            ok(elemWasLocked, "Expected SVG elem to become locked.");
+            SimpleTest.finish();
           }
         }, false);
 
         function start() {
           elem = document.getElementById("svg-elem");
-          addFullscreenChangeContinuation("enter", function() {
-            elem.mozRequestPointerLock();
-          });
-          elem.requestFullscreen();
+          elem.mozRequestFullScreen();
         }
       </script>
     </pre>

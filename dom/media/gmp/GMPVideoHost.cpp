@@ -71,15 +71,8 @@ GMPVideoHostImpl::SharedMemMgr()
   return mSharedMemMgr;
 }
 
-// XXX This should merge with ActorDestroyed
 void
 GMPVideoHostImpl::DoneWithAPI()
-{
-  ActorDestroyed();
-}
-
-void
-GMPVideoHostImpl::ActorDestroyed()
 {
   for (uint32_t i = mPlanes.Length(); i > 0; i--) {
     mPlanes[i - 1]->DoneWithAPI();
@@ -87,6 +80,20 @@ GMPVideoHostImpl::ActorDestroyed()
   }
   for (uint32_t i = mEncodedFrames.Length(); i > 0; i--) {
     mEncodedFrames[i - 1]->DoneWithAPI();
+    mEncodedFrames.RemoveElementAt(i - 1);
+  }
+  mSharedMemMgr = nullptr;
+}
+
+void
+GMPVideoHostImpl::ActorDestroyed()
+{
+  for (uint32_t i = mPlanes.Length(); i > 0; i--) {
+    mPlanes[i - 1]->ActorDestroyed();
+    mPlanes.RemoveElementAt(i - 1);
+  }
+  for (uint32_t i = mEncodedFrames.Length(); i > 0; i--) {
+    mEncodedFrames[i - 1]->ActorDestroyed();
     mEncodedFrames.RemoveElementAt(i - 1);
   }
   mSharedMemMgr = nullptr;

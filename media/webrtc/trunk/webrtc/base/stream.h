@@ -63,7 +63,7 @@ class StreamInterface : public MessageHandler {
     MSG_POST_EVENT = 0xF1F1, MSG_MAX = MSG_POST_EVENT
   };
 
-  ~StreamInterface() override;
+  virtual ~StreamInterface();
 
   virtual StreamState GetState() const = 0;
 
@@ -130,7 +130,7 @@ class StreamInterface : public MessageHandler {
   // does not require a matching call to ConsumeReadData if the data is not
   // processed.  Read and ConsumeReadData invalidate the buffer returned by
   // GetReadData.
-  virtual const void* GetReadData(size_t* data_len);
+  virtual const void* GetReadData(size_t* data_len) { return NULL; }
   virtual void ConsumeReadData(size_t used) {}
 
   // GetWriteBuffer returns a pointer to a buffer which is owned by the stream.
@@ -144,7 +144,7 @@ class StreamInterface : public MessageHandler {
   // amount of buffer is not yet available, return NULL and Signal SE_WRITE
   // when it is available.  If the requested amount is too large, return an
   // error.
-  virtual void* GetWriteBuffer(size_t* buf_len);
+  virtual void* GetWriteBuffer(size_t* buf_len) { return NULL; }
   virtual void ConsumeWriteBuffer(size_t used) {}
 
   // Write data_len bytes found in data, circumventing any throttling which
@@ -165,33 +165,33 @@ class StreamInterface : public MessageHandler {
   // Seek to a byte offset from the beginning of the stream.  Returns false if
   // the stream does not support seeking, or cannot seek to the specified
   // position.
-  virtual bool SetPosition(size_t position);
+  virtual bool SetPosition(size_t position) { return false; }
 
   // Get the byte offset of the current position from the start of the stream.
   // Returns false if the position is not known.
-  virtual bool GetPosition(size_t* position) const;
+  virtual bool GetPosition(size_t* position) const { return false; }
 
   // Get the byte length of the entire stream.  Returns false if the length
   // is not known.
-  virtual bool GetSize(size_t* size) const;
+  virtual bool GetSize(size_t* size) const { return false; }
 
   // Return the number of Read()-able bytes remaining before end-of-stream.
   // Returns false if not known.
-  virtual bool GetAvailable(size_t* size) const;
+  virtual bool GetAvailable(size_t* size) const { return false; }
 
   // Return the number of Write()-able bytes remaining before end-of-stream.
   // Returns false if not known.
-  virtual bool GetWriteRemaining(size_t* size) const;
+  virtual bool GetWriteRemaining(size_t* size) const { return false; }
 
   // Return true if flush is successful.
-  virtual bool Flush();
+  virtual bool Flush() { return false; }
 
   // Communicates the amount of data which will be written to the stream.  The
   // stream may choose to preallocate memory to accomodate this data.  The
   // stream may return false to indicate that there is not enough room (ie,
   // Write will return SR_EOS/SR_ERROR at some point).  Note that calling this
   // function should not affect the existing state of data in the stream.
-  virtual bool ReserveSize(size_t size);
+  virtual bool ReserveSize(size_t size) { return true; }
 
   //
   // CONVENIENCE METHODS
@@ -225,7 +225,7 @@ class StreamInterface : public MessageHandler {
   StreamInterface();
 
   // MessageHandler Interface
-  void OnMessage(Message* msg) override;
+  virtual void OnMessage(Message* msg);
 
  private:
   DISALLOW_EVIL_CONSTRUCTORS(StreamInterface);
@@ -245,16 +245,20 @@ class StreamAdapterInterface : public StreamInterface,
   explicit StreamAdapterInterface(StreamInterface* stream, bool owned = true);
 
   // Core Stream Interface
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
+  virtual StreamState GetState() const {
+    return stream_->GetState();
+  }
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error) {
+    return stream_->Read(buffer, buffer_len, read, error);
+  }
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error) {
+    return stream_->Write(data, data_len, written, error);
+  }
+  virtual void Close() {
+    stream_->Close();
+  }
 
   // Optional Stream Interface
   /*  Note: Many stream adapters were implemented prior to this Read/Write
@@ -283,23 +287,39 @@ class StreamAdapterInterface : public StreamInterface,
   }
   */
 
-  bool SetPosition(size_t position) override;
-  bool GetPosition(size_t* position) const override;
-  bool GetSize(size_t* size) const override;
-  bool GetAvailable(size_t* size) const override;
-  bool GetWriteRemaining(size_t* size) const override;
-  bool ReserveSize(size_t size) override;
-  bool Flush() override;
+  virtual bool SetPosition(size_t position) {
+    return stream_->SetPosition(position);
+  }
+  virtual bool GetPosition(size_t* position) const {
+    return stream_->GetPosition(position);
+  }
+  virtual bool GetSize(size_t* size) const {
+    return stream_->GetSize(size);
+  }
+  virtual bool GetAvailable(size_t* size) const {
+    return stream_->GetAvailable(size);
+  }
+  virtual bool GetWriteRemaining(size_t* size) const {
+    return stream_->GetWriteRemaining(size);
+  }
+  virtual bool ReserveSize(size_t size) {
+    return stream_->ReserveSize(size);
+  }
+  virtual bool Flush() {
+    return stream_->Flush();
+  }
 
   void Attach(StreamInterface* stream, bool owned = true);
   StreamInterface* Detach();
 
  protected:
-  ~StreamAdapterInterface() override;
+  virtual ~StreamAdapterInterface();
 
   // Note that the adapter presents itself as the origin of the stream events,
   // since users of the adapter may not recognize the adapted object.
-  virtual void OnEvent(StreamInterface* stream, int events, int err);
+  virtual void OnEvent(StreamInterface* stream, int events, int err) {
+    SignalEvent(this, events, err);
+  }
   StreamInterface* stream() { return stream_; }
 
  private:
@@ -317,21 +337,16 @@ class StreamAdapterInterface : public StreamInterface,
 class StreamTap : public StreamAdapterInterface {
  public:
   explicit StreamTap(StreamInterface* stream, StreamInterface* tap);
-  ~StreamTap() override;
 
   void AttachTap(StreamInterface* tap);
   StreamInterface* DetachTap();
   StreamResult GetTapResult(int* error);
 
   // StreamAdapterInterface Interface
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
 
  private:
   scoped_ptr<StreamInterface> tap_;
@@ -356,14 +371,12 @@ class StreamSegment : public StreamAdapterInterface {
   explicit StreamSegment(StreamInterface* stream, size_t length);
 
   // StreamAdapterInterface Interface
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  bool SetPosition(size_t position) override;
-  bool GetPosition(size_t* position) const override;
-  bool GetSize(size_t* size) const override;
-  bool GetAvailable(size_t* size) const override;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual bool SetPosition(size_t position);
+  virtual bool GetPosition(size_t* position) const;
+  virtual bool GetSize(size_t* size) const;
+  virtual bool GetAvailable(size_t* size) const;
 
  private:
   size_t start_, pos_, length_;
@@ -377,19 +390,15 @@ class StreamSegment : public StreamAdapterInterface {
 class NullStream : public StreamInterface {
  public:
   NullStream();
-  ~NullStream() override;
+  virtual ~NullStream();
 
   // StreamInterface Interface
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
+  virtual StreamState GetState() const;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
+  virtual void Close();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -400,7 +409,7 @@ class NullStream : public StreamInterface {
 class FileStream : public StreamInterface {
  public:
   FileStream();
-  ~FileStream() override;
+  virtual ~FileStream();
 
   // The semantics of filename and mode are the same as stdio's fopen
   virtual bool Open(const std::string& filename, const char* mode, int* error);
@@ -411,23 +420,19 @@ class FileStream : public StreamInterface {
   // buffering causes writes to block until the bytes on disk are updated.
   virtual bool DisableBuffering();
 
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
-  bool SetPosition(size_t position) override;
-  bool GetPosition(size_t* position) const override;
-  bool GetSize(size_t* size) const override;
-  bool GetAvailable(size_t* size) const override;
-  bool ReserveSize(size_t size) override;
+  virtual StreamState GetState() const;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
+  virtual void Close();
+  virtual bool SetPosition(size_t position);
+  virtual bool GetPosition(size_t* position) const;
+  virtual bool GetSize(size_t* size) const;
+  virtual bool GetAvailable(size_t* size) const;
+  virtual bool ReserveSize(size_t size);
 
-  bool Flush() override;
+  virtual bool Flush();
 
 #if defined(WEBRTC_POSIX) && !defined(__native_client__)
   // Tries to aquire an exclusive lock on the file.
@@ -455,15 +460,11 @@ class CircularFileStream : public FileStream {
  public:
   explicit CircularFileStream(size_t max_size);
 
-  bool Open(const std::string& filename, const char* mode, int* error) override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
+  virtual bool Open(const std::string& filename, const char* mode, int* error);
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
 
  private:
   enum ReadSegment {
@@ -486,27 +487,28 @@ class CircularFileStream : public FileStream {
 class AsyncWriteStream : public StreamInterface {
  public:
   // Takes ownership of the stream, but not the thread.
-  AsyncWriteStream(StreamInterface* stream, rtc::Thread* write_thread);
-  ~AsyncWriteStream() override;
+  AsyncWriteStream(StreamInterface* stream, rtc::Thread* write_thread)
+      : stream_(stream),
+        write_thread_(write_thread),
+        state_(stream ? stream->GetState() : SS_CLOSED) {
+  }
+
+  virtual ~AsyncWriteStream();
 
   // StreamInterface Interface
-  StreamState GetState() const override;
+  virtual StreamState GetState() const { return state_; }
   // This is needed by some stream writers, such as RtpDumpWriter.
-  bool GetPosition(size_t* position) const override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
-  bool Flush() override;
+  virtual bool GetPosition(size_t* position) const;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
+  virtual void Close();
+  virtual bool Flush();
 
  protected:
   // From MessageHandler
-  void OnMessage(rtc::Message* pmsg) override;
+  virtual void OnMessage(rtc::Message* pmsg);
   virtual void ClearBufferAndWrite();
 
  private:
@@ -528,16 +530,13 @@ class AsyncWriteStream : public StreamInterface {
 class POpenStream : public FileStream {
  public:
   POpenStream() : wait_status_(-1) {}
-  ~POpenStream() override;
+  virtual ~POpenStream();
 
-  bool Open(const std::string& subcommand,
-            const char* mode,
-            int* error) override;
+  virtual bool Open(const std::string& subcommand, const char* mode,
+                    int* error);
   // Same as Open(). shflag is ignored.
-  bool OpenShare(const std::string& subcommand,
-                 const char* mode,
-                 int shflag,
-                 int* error) override;
+  virtual bool OpenShare(const std::string& subcommand, const char* mode,
+                         int shflag, int* error);
 
   // Returns the wait status from the last Close() of an Open()'ed stream, or
   // -1 if no Open()+Close() has been done on this object. Meaning of the number
@@ -545,7 +544,7 @@ class POpenStream : public FileStream {
   int GetWaitStatus() const { return wait_status_; }
 
  protected:
-  void DoClose() override;
+  virtual void DoClose();
 
  private:
   int wait_status_;
@@ -561,21 +560,17 @@ class POpenStream : public FileStream {
 
 class MemoryStreamBase : public StreamInterface {
  public:
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t bytes,
-                    size_t* bytes_read,
-                    int* error) override;
-  StreamResult Write(const void* buffer,
-                     size_t bytes,
-                     size_t* bytes_written,
-                     int* error) override;
-  void Close() override;
-  bool SetPosition(size_t position) override;
-  bool GetPosition(size_t* position) const override;
-  bool GetSize(size_t* size) const override;
-  bool GetAvailable(size_t* size) const override;
-  bool ReserveSize(size_t size) override;
+  virtual StreamState GetState() const;
+  virtual StreamResult Read(void* buffer, size_t bytes, size_t* bytes_read,
+                            int* error);
+  virtual StreamResult Write(const void* buffer, size_t bytes,
+                             size_t* bytes_written, int* error);
+  virtual void Close();
+  virtual bool SetPosition(size_t position);
+  virtual bool GetPosition(size_t* position) const;
+  virtual bool GetSize(size_t* size) const;
+  virtual bool GetAvailable(size_t* size) const;
+  virtual bool ReserveSize(size_t size);
 
   char* GetBuffer() { return buffer_; }
   const char* GetBuffer() const { return buffer_; }
@@ -602,12 +597,12 @@ class MemoryStream : public MemoryStreamBase {
   MemoryStream();
   explicit MemoryStream(const char* data);  // Calls SetData(data, strlen(data))
   MemoryStream(const void* data, size_t length);  // Calls SetData(data, length)
-  ~MemoryStream() override;
+  virtual ~MemoryStream();
 
   void SetData(const void* data, size_t length);
 
  protected:
-  StreamResult DoReserve(size_t size, int* error) override;
+  virtual StreamResult DoReserve(size_t size, int* error);
   // Memory Streams are aligned for efficiency.
   static const int kAlignment = 16;
   char* buffer_alloc_;
@@ -620,7 +615,7 @@ class ExternalMemoryStream : public MemoryStreamBase {
  public:
   ExternalMemoryStream();
   ExternalMemoryStream(void* data, size_t length);
-  ~ExternalMemoryStream() override;
+  virtual ~ExternalMemoryStream();
 
   void SetData(void* data, size_t length);
 };
@@ -635,7 +630,7 @@ class FifoBuffer : public StreamInterface {
   explicit FifoBuffer(size_t length);
   // Creates a FIFO buffer with the specified capacity and owner
   FifoBuffer(size_t length, Thread* owner);
-  ~FifoBuffer() override;
+  virtual ~FifoBuffer();
   // Gets the amount of data currently readable from the buffer.
   bool GetBuffered(size_t* data_len) const;
   // Resizes the buffer to the specified capacity. Fails if data_length_ > size
@@ -656,21 +651,17 @@ class FifoBuffer : public StreamInterface {
                            size_t* bytes_written);
 
   // StreamInterface methods
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t bytes,
-                    size_t* bytes_read,
-                    int* error) override;
-  StreamResult Write(const void* buffer,
-                     size_t bytes,
-                     size_t* bytes_written,
-                     int* error) override;
-  void Close() override;
-  const void* GetReadData(size_t* data_len) override;
-  void ConsumeReadData(size_t used) override;
-  void* GetWriteBuffer(size_t* buf_len) override;
-  void ConsumeWriteBuffer(size_t used) override;
-  bool GetWriteRemaining(size_t* size) const override;
+  virtual StreamState GetState() const;
+  virtual StreamResult Read(void* buffer, size_t bytes,
+                            size_t* bytes_read, int* error);
+  virtual StreamResult Write(const void* buffer, size_t bytes,
+                             size_t* bytes_written, int* error);
+  virtual void Close();
+  virtual const void* GetReadData(size_t* data_len);
+  virtual void ConsumeReadData(size_t used);
+  virtual void* GetWriteBuffer(size_t* buf_len);
+  virtual void ConsumeWriteBuffer(size_t used);
+  virtual bool GetWriteRemaining(size_t* size) const;
 
  private:
   // Helper method that implements ReadOffset. Caller must acquire a lock
@@ -702,18 +693,14 @@ class LoggingAdapter : public StreamAdapterInterface {
 
   void set_label(const std::string& label);
 
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
+  virtual void Close();
 
  protected:
-  void OnEvent(StreamInterface* stream, int events, int err) override;
+  virtual void OnEvent(StreamInterface* stream, int events, int err);
 
  private:
   LoggingSeverity level_;
@@ -733,21 +720,17 @@ class StringStream : public StreamInterface {
   explicit StringStream(std::string& str);
   explicit StringStream(const std::string& str);
 
-  StreamState GetState() const override;
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
-  bool SetPosition(size_t position) override;
-  bool GetPosition(size_t* position) const override;
-  bool GetSize(size_t* size) const override;
-  bool GetAvailable(size_t* size) const override;
-  bool ReserveSize(size_t size) override;
+  virtual StreamState GetState() const;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
+  virtual void Close();
+  virtual bool SetPosition(size_t position);
+  virtual bool GetPosition(size_t* position) const;
+  virtual bool GetSize(size_t* size) const;
+  virtual bool GetAvailable(size_t* size) const;
+  virtual bool ReserveSize(size_t size);
 
  private:
   std::string& str_;
@@ -777,7 +760,7 @@ class StreamReference : public StreamAdapterInterface {
   explicit StreamReference(StreamInterface* stream);
   StreamInterface* GetStream() { return stream(); }
   StreamInterface* NewReference();
-  ~StreamReference() override;
+  virtual ~StreamReference();
 
  private:
   class StreamRefCount {

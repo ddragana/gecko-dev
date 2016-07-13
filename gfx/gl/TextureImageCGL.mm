@@ -21,9 +21,10 @@ TextureImageCGL::TextureImageCGL(GLuint aTexture,
                 GLenum aWrapMode,
                 ContentType aContentType,
                 GLContext* aContext,
-                TextureImage::Flags aFlags)
+                TextureImage::Flags aFlags,
+                TextureImage::ImageFormat aImageFormat)
     : BasicTextureImage(aTexture, aSize, aWrapMode, aContentType,
-                        aContext, aFlags)
+                        aContext, aFlags, aImageFormat)
     , mPixelBuffer(0)
     , mBoundPixelBuffer(false)
 {}
@@ -69,20 +70,21 @@ CreateTextureImageCGL(GLContext* gl,
     if (!gl->IsOffscreenSizeAllowed(aSize) &&
         gfxPlatform::OffMainThreadCompositingEnabled()) {
       NS_ASSERTION(aWrapMode == LOCAL_GL_CLAMP_TO_EDGE, "Can't support wrapping with tiles!");
-      RefPtr<TextureImage> t = new gl::TiledTextureImage(gl, aSize, aContentType,
+      nsRefPtr<TextureImage> t = new gl::TiledTextureImage(gl, aSize, aContentType,
                                                            aFlags, aImageFormat);
       return t.forget();
     }
 
     return CreateBasicTextureImage(gl, aSize, aContentType, aWrapMode,
-                                   aFlags);
+                                   aFlags, aImageFormat);
 }
 
 already_AddRefed<TextureImage>
-TileGenFuncCGL(GLContext* gl,
+TileGenFuncCGL(GLContext *gl,
                const IntSize& aSize,
                TextureImage::ContentType aContentType,
-               TextureImage::Flags aFlags)
+               TextureImage::Flags aFlags,
+               TextureImage::ImageFormat aImageFormat)
 {
     bool useNearestFilter = aFlags & TextureImage::UseNearestFilter;
     gl->MakeCurrent();
@@ -99,9 +101,9 @@ TileGenFuncCGL(GLContext* gl,
     gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
     gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
 
-    RefPtr<TextureImageCGL> teximage
+    nsRefPtr<TextureImageCGL> teximage
         (new TextureImageCGL(texture, aSize, LOCAL_GL_CLAMP_TO_EDGE, aContentType,
-                             gl, aFlags));
+                             gl, aFlags, aImageFormat));
     return teximage.forget();
 }
 

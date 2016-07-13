@@ -7,6 +7,7 @@
 #ifndef MOZILLA_SVGANIMATEDPRESERVEASPECTRATIO_H__
 #define MOZILLA_SVGANIMATEDPRESERVEASPECTRATIO_H__
 
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
 #include "nsISMILAttr.h"
@@ -28,6 +29,7 @@ public:
   void Init() {
     mBaseVal.mAlign = SVG_PRESERVEASPECTRATIO_XMIDYMID;
     mBaseVal.mMeetOrSlice = SVG_MEETORSLICE_MEET;
+    mBaseVal.mDefer = false;
     mAnimVal = mBaseVal;
     mIsAnimated = false;
     mIsBaseSet = false;
@@ -45,7 +47,8 @@ public:
       return NS_ERROR_FAILURE;
     }
     SetBaseValue(SVGPreserveAspectRatio(
-                   static_cast<SVGAlign>(aAlign), mBaseVal.GetMeetOrSlice()),
+                   static_cast<SVGAlign>(aAlign), mBaseVal.GetMeetOrSlice(),
+                   mBaseVal.GetDefer()),
                  aSVGElement);
     return NS_OK;
   }
@@ -55,7 +58,8 @@ public:
       return NS_ERROR_FAILURE;
     }
     SetBaseValue(SVGPreserveAspectRatio(
-                   mBaseVal.GetAlign(), static_cast<SVGMeetOrSlice>(aMeetOrSlice)),
+                   mBaseVal.GetAlign(), static_cast<SVGMeetOrSlice>(aMeetOrSlice),
+                   mBaseVal.GetDefer()),
                  aSVGElement);
     return NS_OK;
   }
@@ -133,7 +137,7 @@ class DOMSVGAnimatedPreserveAspectRatio final : public nsISupports,
 protected:
   // kept alive because it belongs to content:
   SVGAnimatedPreserveAspectRatio* mVal;
-  RefPtr<nsSVGElement> mSVGElement;
+  nsRefPtr<nsSVGElement> mSVGElement;
 };
 
 } // namespace dom

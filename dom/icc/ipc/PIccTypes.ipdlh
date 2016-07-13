@@ -19,14 +19,6 @@ struct IccInfoData
   int32_t   prlVersion;
 };
 
-struct IccContactData
-{
-  nsString id;
-  nsString[] names;
-  nsString[] numbers;
-  nsString[] emails;
-};
-
 } // namespace icc
 } // namespace dom
 } // namespace mozilla

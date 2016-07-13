@@ -25,7 +25,6 @@ class InputEvent;
 
 namespace layers {
 class APZCTreeManager;
-class AsyncDragMetrics;
 class TargetConfig;
 struct TextureFactoryIdentifier;
 struct ScrollableLayerGuid;
@@ -33,9 +32,10 @@ struct ScrollableLayerGuid;
 
 namespace layout {
 
+class RemoteContentController;
+
 class RenderFrameParent : public PRenderFrameParent
 {
-  typedef mozilla::layers::AsyncDragMetrics AsyncDragMetrics;
   typedef mozilla::layers::FrameMetrics FrameMetrics;
   typedef mozilla::layers::ContainerLayer ContainerLayer;
   typedef mozilla::layers::Layer Layer;
@@ -56,11 +56,11 @@ public:
    * chosen, then RenderFrameParent will watch input events and use
    * them to asynchronously pan and zoom.
    */
-  RenderFrameParent(nsFrameLoader* aFrameLoader, bool* aSuccess);
+  RenderFrameParent(nsFrameLoader* aFrameLoader,
+                    TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                    uint64_t* aId, bool* aSuccess);
   virtual ~RenderFrameParent();
 
-  bool Init(nsFrameLoader* aFrameLoader);
-  bool IsInitted();
   void Destroy();
 
   void BuildDisplayList(nsDisplayListBuilder* aBuilder,
@@ -77,13 +77,29 @@ public:
 
   void OwnerContentChanged(nsIContent* aContent);
 
+  void SetBackgroundColor(nscolor aColor) { mBackgroundColor = gfxRGBA(aColor); };
+
+  void ZoomToRect(uint32_t aPresShellId, ViewID aViewId, const CSSRect& aRect);
+
+  void ContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
+                                 uint64_t aInputBlockId,
+                                 bool aPreventDefault);
+  void SetTargetAPZC(uint64_t aInputBlockId,
+                     const nsTArray<ScrollableLayerGuid>& aTargets);
+  void SetAllowedTouchBehavior(uint64_t aInputBlockId,
+                               const nsTArray<TouchBehaviorFlags>& aFlags);
+
+  void UpdateZoomConstraints(uint32_t aPresShellId,
+                             ViewID aViewId,
+                             const Maybe<ZoomConstraints>& aConstraints);
+
   bool HitTest(const nsRect& aRect);
 
   void GetTextureFactoryIdentifier(TextureFactoryIdentifier* aTextureFactoryIdentifier);
 
   inline uint64_t GetLayersId() { return mLayersId; }
 
-  void TakeFocusForClickFromTap();
+  void TakeFocusForClick();
 
 protected:
   void ActorDestroy(ActorDestroyReason why) override;
@@ -91,8 +107,6 @@ protected:
   virtual bool RecvNotifyCompositorTransaction() override;
 
   virtual bool RecvUpdateHitRegion(const nsRegion& aRegion) override;
-
-  virtual bool RecvTakeFocusForClickFromTap() override;
 
 private:
   void TriggerRepaint();
@@ -105,8 +119,15 @@ private:
   // context.
   uint64_t mLayersId;
 
-  RefPtr<nsFrameLoader> mFrameLoader;
-  RefPtr<ContainerLayer> mContainer;
+  nsRefPtr<nsFrameLoader> mFrameLoader;
+  nsRefPtr<ContainerLayer> mContainer;
+  // When our scrolling behavior is ASYNC_PAN_ZOOM, we have a nonnull
+  // APZCTreeManager. It's used to manipulate the shadow layer tree
+  // on the compositor thread.
+  nsRefPtr<layers::APZCTreeManager> mApzcTreeManager;
+  nsRefPtr<RemoteContentController> mContentController;
+
+  layers::APZCTreeManager* GetApzcTreeManager();
 
   // True after Destroy() has been called, which is triggered
   // originally by nsFrameLoader::Destroy().  After this point, we can
@@ -123,11 +144,12 @@ private:
   // It's possible for mFrameLoader==null and
   // mFrameLoaderDestroyed==false.
   bool mFrameLoaderDestroyed;
+  // this is gfxRGBA because that's what ColorLayer wants.
+  gfxRGBA mBackgroundColor;
 
   nsRegion mTouchRegion;
 
   bool mAsyncPanZoomEnabled;
-  bool mInitted;
 };
 
 } // namespace layout

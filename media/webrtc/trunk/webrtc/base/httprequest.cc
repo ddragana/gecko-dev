@@ -54,8 +54,6 @@ HttpRequest::HttpRequest(const std::string &user_agent)
       client_(user_agent.c_str(), NULL), error_(HE_NONE) {
 }
 
-HttpRequest::~HttpRequest() = default;
-
 void HttpRequest::Send() {
   // TODO: Rewrite this to use the thread's native socket server, and a more
   // natural flow?

@@ -34,6 +34,11 @@ private:
                          nsIWeakReference* aWindow);
 
 
+  static PLDHashOperator StartupHandler(GtkWidget* aKey,
+                                        nsIWeakReference* aData,
+                                        void* aClosure);
+
+
   static gboolean HandlePropertyChange(GtkWidget *widget,
                                        GdkEventProperty *event,
                                        nsIWeakReference* aThis);

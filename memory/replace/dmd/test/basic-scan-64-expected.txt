@@ -4,6 +4,7 @@
 Invocation {
   $DMD = '--mode=scan'
   Mode = 'live'
+  Sample-below size = 1
 }
 
 #-----------------------------------------------------------------

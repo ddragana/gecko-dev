@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/webrtcUI.jsm");
 
 const BUNDLE_URL = "chrome://browser/locale/webrtcIndicator.properties";
-var gStringBundle;
+let gStringBundle;
 
 function init(event) {
   gStringBundle = Services.strings.createBundle(BUNDLE_URL);
@@ -30,12 +30,6 @@ function init(event) {
   fxButton.addEventListener("mousedown", PositionHandler);
 
   updateIndicatorState();
-
-  // Alert accessibility implementations stuff just changed. We only need to do
-  // this initially, because changes after this will automatically fire alert
-  // events if things change materially.
-  let ev = new CustomEvent("AlertActive", {bubbles: true, cancelable: true});
-  document.documentElement.dispatchEvent(ev);
 }
 
 function updateIndicatorState() {
@@ -129,7 +123,7 @@ function onFirefoxButtonClick(event) {
   activeStreams[0].browser.ownerDocument.defaultView.focus();
 }
 
-var PositionHandler = {
+let PositionHandler = {
   positionCustomized: false,
   threshold: 10,
   adjustPosition: function() {
@@ -140,14 +134,12 @@ var PositionHandler = {
       let primaryScreen = Cc["@mozilla.org/gfx/screenmanager;1"]
                             .getService(Ci.nsIScreenManager)
                             .primaryScreen;
-      let widthDevPix = {};
-      primaryScreen.GetRect({}, {}, widthDevPix, {});
-      let availTopDevPix = {};
-      primaryScreen.GetAvailRect({}, availTopDevPix, {}, {});
-      let scaleFactor = primaryScreen.defaultCSSScaleFactor;
-      let widthCss = widthDevPix.value / scaleFactor;
-      window.moveTo((widthCss - document.documentElement.clientWidth) / 2,
-                    availTopDevPix.value / scaleFactor);
+      let width = {};
+      primaryScreen.GetRectDisplayPix({}, {}, width, {});
+      let availTop = {};
+      primaryScreen.GetAvailRectDisplayPix({}, availTop, {}, {});
+      window.moveTo((width.value - document.documentElement.clientWidth) / 2,
+                    availTop.value);
     } else {
       // This will ensure we're at y=0.
       this.setXPosition(window.screenX);

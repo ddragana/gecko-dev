@@ -12,13 +12,8 @@ const { Cc, Ci, Cu } = require('chrome');
 const { Unknown } = require('../platform/xpcom');
 const { Class } = require('../core/heritage');
 const { ns } = require('../core/namespace');
-const observerService =
+const { addObserver, removeObserver, notifyObservers } = 
   Cc['@mozilla.org/observer-service;1'].getService(Ci.nsIObserverService);
-const { addObserver, removeObserver, notifyObservers } = observerService;
-const { ShimWaiver } = Cu.import("resource://gre/modules/ShimWaiver.jsm");
-const addObserverNoShim = ShimWaiver.getProperty(observerService, "addObserver");
-const removeObserverNoShim = ShimWaiver.getProperty(observerService, "removeObserver");
-const notifyObserversNoShim = ShimWaiver.getProperty(observerService, "notifyObservers");
 const unloadSubject = require('@loader/unload');
 
 const Subject = Class({
@@ -38,7 +33,7 @@ const Subject = Class({
   getInterfaces: function() {}
 });
 
-function emit(type, event, shimmed = false) {
+function emit(type, event) {
   // From bug 910599
   // We must test to see if 'subject' or 'data' is a defined property
   // of the event object, but also allow primitives to be passed in,
@@ -53,11 +48,7 @@ function emit(type, event, shimmed = false) {
     // All other types return themselves (and cast to strings/null
     // via observer service)
     event;
-  if (shimmed) {
-    notifyObservers(subject, type, data);
-  } else {
-    notifyObserversNoShim(subject, type, data);
-  }
+  notifyObservers(subject, type, data);
 }
 exports.emit = emit;
 
@@ -92,7 +83,7 @@ const Observer = Class({
 
 const subscribers = ns();
 
-function on(type, listener, strong, shimmed = false) {
+function on(type, listener, strong) {
   // Unless last optional argument is `true` we use a weak reference to a
   // listener.
   let weak = !strong;
@@ -103,34 +94,29 @@ function on(type, listener, strong, shimmed = false) {
   if (!(type in observers)) {
     let observer = Observer(listener);
     observers[type] = observer;
-    if (shimmed) {
-      addObserver(observer, type, weak);
-    } else {
-      addObserverNoShim(observer, type, weak);
-    }
+    addObserver(observer, type, weak);
     // WeakRef gymnastics to remove all alive observers on unload
     let ref = Cu.getWeakReference(observer);
     weakRefs.set(observer, ref);
     stillAlive.set(ref, type);
-    wasShimmed.set(ref, shimmed);
   }
 }
 exports.on = on;
 
-function once(type, listener, shimmed = false) {
+function once(type, listener) {
   // Note: this code assumes order in which listeners are called, which is fine
   // as long as dispatch happens in same order as listener registration which
   // is the case now. That being said we should be aware that this may break
   // in a future if order will change.
-  on(type, listener, shimmed);
+  on(type, listener);
   on(type, function cleanup() {
-    off(type, listener, shimmed);
-    off(type, cleanup, shimmed);
-  }, true, shimmed);
+    off(type, listener);
+    off(type, cleanup);
+  }, true);
 }
 exports.once = once;
 
-function off(type, listener, shimmed = false) {
+function off(type, listener) {
   // Take list of observers as with the given `listener`.
   let observers = subscribers(listener);
   // If `observer` for the given `type` is registered, then
@@ -138,29 +124,22 @@ function off(type, listener, shimmed = false) {
   if (type in observers) {
     let observer = observers[type];
     delete observers[type];
-    if (shimmed) {
-      removeObserver(observer, type);
-    } else {
-      removeObserverNoShim(observer, type);
-    }
+    removeObserver(observer, type);
     stillAlive.delete(weakRefs.get(observer));
-    wasShimmed.delete(weakRefs.get(observer));
   }
 }
 exports.off = off;
 
 // must use WeakMap to keep reference to all the WeakRefs (!), see bug 986115
-var weakRefs = new WeakMap();
+let weakRefs = new WeakMap();
 
 // and we're out of beta, we're releasing on time!
-var stillAlive = new Map();
-
-var wasShimmed = new Map();
+let stillAlive = new Map();   
 
 on('sdk:loader:destroy', function onunload({ subject, data: reason }) {
   // using logic from ./unload, to avoid a circular module reference
   if (subject.wrappedJSObject === unloadSubject) {
-    off('sdk:loader:destroy', onunload, false);
+    off('sdk:loader:destroy', onunload);
 
     // don't bother
     if (reason === 'shutdown') 
@@ -168,14 +147,9 @@ on('sdk:loader:destroy', function onunload({ subject, data: reason }) {
 
     stillAlive.forEach( (type, ref) => {
       let observer = ref.get();
-      if (observer) {
-        if (wasShimmed.get(ref)) {
-          removeObserver(observer, type);
-        } else {
-          removeObserverNoShim(observer, type);
-        }
-      }
+      if (observer) 
+        removeObserver(observer, type);
     })
   }
   // a strong reference
-}, true, false);
+}, true);

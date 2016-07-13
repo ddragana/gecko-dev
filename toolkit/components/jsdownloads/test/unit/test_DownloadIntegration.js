@@ -11,6 +11,20 @@
 //// Globals
 
 /**
+ * Enable test mode for the _confirmCancelDownloads method to return
+ * the number of downloads instead of showing the prompt to cancel or not.
+ */
+function enableObserversTestMode() {
+  DownloadIntegration.testMode = true;
+  DownloadIntegration.dontLoadObservers = false;
+  function cleanup() {
+    DownloadIntegration.testMode = false;
+    DownloadIntegration.dontLoadObservers = true;
+  }
+  do_register_cleanup(cleanup);
+}
+
+/**
  * Notifies the prompt observers and verify the expected downloads count.
  *
  * @param aIsPrivate
@@ -25,39 +39,25 @@ function notifyPromptObservers(aIsPrivate, aExpectedCount, aExpectedPBCount) {
                    createInstance(Ci.nsISupportsPRBool);
 
   // Notify quit application requested observer.
-  DownloadIntegration._testPromptDownloads = -1;
+  DownloadIntegration.testPromptDownloads = -1;
   Services.obs.notifyObservers(cancelQuit, "quit-application-requested", null);
-  do_check_eq(DownloadIntegration._testPromptDownloads, aExpectedCount);
+  do_check_eq(DownloadIntegration.testPromptDownloads, aExpectedCount);
 
   // Notify offline requested observer.
-  DownloadIntegration._testPromptDownloads = -1;
+  DownloadIntegration.testPromptDownloads = -1;
   Services.obs.notifyObservers(cancelQuit, "offline-requested", null);
-  do_check_eq(DownloadIntegration._testPromptDownloads, aExpectedCount);
+  do_check_eq(DownloadIntegration.testPromptDownloads, aExpectedCount);
 
   if (aIsPrivate) {
     // Notify last private browsing requested observer.
-    DownloadIntegration._testPromptDownloads = -1;
+    DownloadIntegration.testPromptDownloads = -1;
     Services.obs.notifyObservers(cancelQuit, "last-pb-context-exiting", null);
-    do_check_eq(DownloadIntegration._testPromptDownloads, aExpectedPBCount);
+    do_check_eq(DownloadIntegration.testPromptDownloads, aExpectedPBCount);
   }
-
-  delete DownloadIntegration._testPromptDownloads;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Tests
-
-/**
- * Allows re-enabling the real download directory logic during one test.
- */
-function allowDirectoriesInTest() {
-  DownloadIntegration.allowDirectories = true;
-  function cleanup() {
-    DownloadIntegration.allowDirectories = false;
-  }
-  do_register_cleanup(cleanup);
-  return cleanup;
-}
 
 XPCOMUtils.defineLazyGetter(this, "gStringBundle", function() {
   return Services.strings.
@@ -65,13 +65,20 @@ XPCOMUtils.defineLazyGetter(this, "gStringBundle", function() {
 });
 
 /**
- * Tests that getSystemDownloadsDirectory returns an existing directory or
- * creates a new directory depending on the platform. Instead of the real
- * directory, this test is executed in the temporary directory so we can safely
- * delete the created folder to check whether it is created again.
+ * Tests that the getSystemDownloadsDirectory returns a valid download
+ * directory string path.
  */
-add_task(function* test_getSystemDownloadsDirectory_exists_or_creates()
+add_task(function test_getSystemDownloadsDirectory()
 {
+  // Enable test mode for the getSystemDownloadsDirectory method to return
+  // temp directory instead so we can check whether the desired directory
+  // is created or not.
+  DownloadIntegration.testMode = true;
+  function cleanup() {
+    DownloadIntegration.testMode = false;
+  }
+  do_register_cleanup(cleanup);
+
   let tempDir = Services.dirsvc.get("TmpD", Ci.nsIFile);
   let downloadDir;
 
@@ -100,39 +107,26 @@ add_task(function* test_getSystemDownloadsDirectory_exists_or_creates()
     do_check_true(info.isDir);
     yield OS.File.removeEmptyDir(targetPath);
   }
-});
 
-/**
- * Tests that the real directory returned by getSystemDownloadsDirectory is not
- * the one that is used during unit tests. Since this is the actual downloads
- * directory of the operating system, we don't try to delete it afterwards.
- */
-add_task(function* test_getSystemDownloadsDirectory_real()
-{
-  let fakeDownloadDir = yield DownloadIntegration.getSystemDownloadsDirectory();
-
-  let cleanup = allowDirectoriesInTest();
-  let realDownloadDir = yield DownloadIntegration.getSystemDownloadsDirectory();
+  let downloadDirBefore = yield DownloadIntegration.getSystemDownloadsDirectory();
   cleanup();
-
-  do_check_neq(fakeDownloadDir, realDownloadDir);
+  let downloadDirAfter = yield DownloadIntegration.getSystemDownloadsDirectory();
+  do_check_neq(downloadDirBefore, downloadDirAfter);
 });
 
 /**
  * Tests that the getPreferredDownloadsDirectory returns a valid download
  * directory string path.
  */
-add_task(function* test_getPreferredDownloadsDirectory()
+add_task(function test_getPreferredDownloadsDirectory()
 {
-  let cleanupDirectories = allowDirectoriesInTest();
-
   let folderListPrefName = "browser.download.folderList";
   let dirPrefName = "browser.download.dir";
-  function cleanupPrefs() {
+  function cleanup() {
     Services.prefs.clearUserPref(folderListPrefName);
     Services.prefs.clearUserPref(dirPrefName);
   }
-  do_register_cleanup(cleanupPrefs);
+  do_register_cleanup(cleanup);
 
   // Should return the system downloads directory.
   Services.prefs.setIntPref(folderListPrefName, 1);
@@ -180,18 +174,15 @@ add_task(function* test_getPreferredDownloadsDirectory()
   downloadDir = yield DownloadIntegration.getPreferredDownloadsDirectory();
   do_check_eq(downloadDir, systemDir);
 
-  cleanupPrefs();
-  cleanupDirectories();
+  cleanup();
 });
 
 /**
  * Tests that the getTemporaryDownloadsDirectory returns a valid download
  * directory string path.
  */
-add_task(function* test_getTemporaryDownloadsDirectory()
+add_task(function test_getTemporaryDownloadsDirectory()
 {
-  let cleanup = allowDirectoriesInTest();
-
   let downloadDir = yield DownloadIntegration.getTemporaryDownloadsDirectory();
   do_check_neq(downloadDir, "");
 
@@ -202,33 +193,19 @@ add_task(function* test_getTemporaryDownloadsDirectory()
     let tempDir = Services.dirsvc.get("TmpD", Ci.nsIFile);
     do_check_eq(downloadDir, tempDir.path);
   }
-
-  cleanup();
 });
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Tests DownloadObserver
 
 /**
- * Re-enables the default observers for the following tests.
- *
- * This takes effect the first time a DownloadList object is created, and lasts
- * until this test file has completed.
- */
-add_task(function* test_observers_setup()
-{
-  DownloadIntegration.allowObservers = true;
-  do_register_cleanup(function () {
-    DownloadIntegration.allowObservers = false;
-  });
-});
-
-/**
  * Tests notifications prompts when observers are notified if there are public
  * and private active downloads.
  */
-add_task(function* test_notifications()
+add_task(function test_notifications()
 {
+  enableObserversTestMode();
+
   for (let isPrivate of [false, true]) {
     mustInterruptResponses();
 
@@ -238,7 +215,7 @@ add_task(function* test_notifications()
     let download3 = yield promiseNewDownload(httpUrl("interruptible.txt"));
     let promiseAttempt1 = download1.start();
     let promiseAttempt2 = download2.start();
-    download3.start().catch(() => {});
+    download3.start();
 
     // Add downloads to list.
     yield list.add(download1);
@@ -265,14 +242,16 @@ add_task(function* test_notifications()
  * Tests that notifications prompts observers are not notified if there are no
  * public or private active downloads.
  */
-add_task(function* test_no_notifications()
+add_task(function test_no_notifications()
 {
+  enableObserversTestMode();
+
   for (let isPrivate of [false, true]) {
     let list = yield promiseNewList(isPrivate);
     let download1 = yield promiseNewDownload(httpUrl("interruptible.txt"));
     let download2 = yield promiseNewDownload(httpUrl("interruptible.txt"));
-    download1.start().catch(() => {});
-    download2.start().catch(() => {});
+    download1.start();
+    download2.start();
 
     // Add downloads to list.
     yield list.add(download1);
@@ -293,8 +272,9 @@ add_task(function* test_no_notifications()
  * Tests notifications prompts when observers are notified if there are public
  * and private active downloads at the same time.
  */
-add_task(function* test_mix_notifications()
+add_task(function test_mix_notifications()
 {
+  enableObserversTestMode();
   mustInterruptResponses();
 
   let publicList = yield promiseNewList();
@@ -324,19 +304,21 @@ add_task(function* test_mix_notifications()
  * Tests suspending and resuming as well as going offline and then online again.
  * The downloads should stop when suspending and start again when resuming.
  */
-add_task(function* test_suspend_resume()
+add_task(function test_suspend_resume()
 {
+  enableObserversTestMode();
+
   // The default wake delay is 10 seconds, so set the wake delay to be much
   // faster for these tests.
   Services.prefs.setIntPref("browser.download.manager.resumeOnWakeDelay", 5);
 
   let addDownload = function(list)
   {
-    return Task.spawn(function* () {
+    return Task.spawn(function () {
       let download = yield promiseNewDownload(httpUrl("interruptible.txt"));
-      download.start().catch(() => {});
+      download.start();
       list.add(download);
-      return download;
+      throw new Task.Result(download);
     });
   }
 
@@ -403,8 +385,9 @@ add_task(function* test_suspend_resume()
  * Tests both the downloads list and the in-progress downloads are clear when
  * private browsing observer is notified.
  */
-add_task(function* test_exit_private_browsing()
+add_task(function test_exit_private_browsing()
 {
+  enableObserversTestMode();
   mustInterruptResponses();
 
   let privateList = yield promiseNewList(true);
@@ -423,13 +406,18 @@ add_task(function* test_exit_private_browsing()
   do_check_eq((yield privateList.getAll()).length, 2);
 
   // Simulate exiting the private browsing.
-  yield new Promise(resolve => {
-    DownloadIntegration._testResolveClearPrivateList = resolve;
-    Services.obs.notifyObservers(null, "last-pb-context-exited", null);
-  });
-  delete DownloadIntegration._testResolveClearPrivateList;
+  DownloadIntegration._deferTestClearPrivateList = Promise.defer();
+  Services.obs.notifyObservers(null, "last-pb-context-exited", null);
+  let result = yield DownloadIntegration._deferTestClearPrivateList.promise;
 
+  do_check_eq(result, "success");
   do_check_eq((yield privateList.getAll()).length, 0);
 
   continueResponses();
 });
+
+////////////////////////////////////////////////////////////////////////////////
+//// Termination
+
+let tailFile = do_get_file("tail.js");
+Services.scriptloader.loadSubScript(NetUtil.newURI(tailFile).spec);

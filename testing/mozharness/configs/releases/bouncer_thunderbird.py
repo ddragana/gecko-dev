@@ -4,8 +4,6 @@ config = {
     "products": {
         "installer": {
             "product-name": "Thunderbird-%(version)s",
-            "check_uptake": True,
-            "alias": "thunderbird-latest",
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -45,7 +43,6 @@ config = {
         },
         "installer-ssl": {
             "product-name": "Thunderbird-%(version)s-SSL",
-            "check_uptake": True,
             "ssl-only": True,
             "add-locales": True,
             "paths": {
@@ -85,7 +82,6 @@ config = {
         },
         "complete-mar": {
             "product-name": "Thunderbird-%(version)s-Complete",
-            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -127,7 +123,6 @@ config = {
     "partials": {
         "releases-dir": {
             "product-name": "Thunderbird-%(version)s-Partial-%(prev_version)s",
-            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {

@@ -8,7 +8,7 @@
 #define ATOM_TYPE_H_
 
 #include <stdint.h>
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 
 using namespace mozilla;
 

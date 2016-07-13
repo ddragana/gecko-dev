@@ -6,11 +6,6 @@
 
 EXPORTS += [
     'gfxVR.h',
-    'ipc/VRManagerChild.h',
-    'ipc/VRManagerParent.h',
-    'ipc/VRMessageUtils.h',
-    'VRDeviceProxy.h',
-    'VRManager.h',
 ]
 
 LOCAL_INCLUDES += [
@@ -21,43 +16,16 @@ UNIFIED_SOURCES += [
     'gfxVR.cpp',
     'gfxVRCardboard.cpp',
     'gfxVROculus.cpp',
-    'gfxVROSVR.cpp',
-    'ipc/VRManagerChild.cpp',
-    'ipc/VRManagerParent.cpp',
-    'VRDeviceProxy.cpp',
-    'VRDeviceProxyOrientationFallBack.cpp',
-    'VRManager.cpp',
 ]
-
-SOURCES += [
-    'gfxVROculus050.cpp',
-]
-
-IPDL_SOURCES = [
-    'ipc/PVRManager.ipdl',
-]
-
-# For building with the real SDK instead of our local hack
-#SOURCES += [
-#    'OVR_CAPI_Util.cpp',
-#    'OVR_CAPIShim.c',
-#    'OVR_StereoProjection.cpp',
-#]
-#
-#CXXFLAGS += ["-Ic:/proj/ovr/OculusSDK-0.6.0-beta/LibOVR/Include"]
-#CFLAGS += ["-Ic:/proj/ovr/OculusSDK-0.6.0-beta/LibOVR/Include"]
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']
 CFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CFLAGS += CONFIG['TK_CFLAGS']
 
+FAIL_ON_WARNINGS = not CONFIG['_MSC_VER']
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
-# This is intended as a temporary hack to enable VS2015 builds.
-if CONFIG['_MSC_VER']:
-    # ovr_capi_dynamic.h '<unnamed-tag>': Alignment specifier is less than
-    # actual alignment (8), and will be ignored
-    CXXFLAGS += ['-wd4359']

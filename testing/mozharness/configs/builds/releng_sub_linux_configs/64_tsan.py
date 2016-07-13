@@ -16,6 +16,7 @@ config = {
         # 'update',
     ],
     'stage_platform': 'linux64-tsan',
+    'purge_minsize': 12,
     'tooltool_manifest_src': "browser/config/tooltool-manifests/linux64/\
 tsan.manifest",
     'platform_supports_post_upload_to_latest': False,

@@ -25,10 +25,10 @@ add_task(function* test_unregister_error() {
     quota: Infinity,
   });
 
-  let unregisterDone;
-  let unregisterPromise = new Promise(resolve => unregisterDone = resolve);
+  let unregisterDefer = Promise.defer();
   PushService.init({
     serverURI: "wss://push.example.org/",
+    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -49,20 +49,19 @@ add_task(function* test_unregister_error() {
             error: 'omg, everything is exploding',
             channelID
           }));
-          unregisterDone();
+          unregisterDefer.resolve();
         }
       });
     }
   });
 
-  yield PushService.unregister({
-    scope: 'https://example.net/page/failure',
-    originAttributes: '',
-  });
+  yield PushNotificationService.unregister(
+    'https://example.net/page/failure', '');
 
   let result = yield db.getByKeyID(channelID);
   ok(!result, 'Deleted push record exists');
 
   // Make sure we send a request to the server.
-  yield unregisterPromise;
+  yield waitForPromise(unregisterDefer.promise, DEFAULT_TIMEOUT,
+    'Timed out waiting for unregister');
 });

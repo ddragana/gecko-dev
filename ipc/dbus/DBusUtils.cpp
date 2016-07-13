@@ -17,6 +17,7 @@
 */
 
 #include <dbus/dbus.h>
+#include "nsAutoPtr.h"
 #include "DBusUtils.h"
 
 #undef CHROMIUM_LOG
@@ -57,7 +58,7 @@ void DBusReplyHandler::Callback(DBusMessage* aReply, void* aData)
 {
   MOZ_ASSERT(aData);
 
-  RefPtr<DBusReplyHandler> handler =
+  nsRefPtr<DBusReplyHandler> handler =
     already_AddRefed<DBusReplyHandler>(static_cast<DBusReplyHandler*>(aData));
 
   handler->Handle(aReply);

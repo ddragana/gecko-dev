@@ -44,10 +44,17 @@ already_AddRefed<AudioBuffer>
 AudioProcessingEvent::LazilyCreateBuffer(uint32_t aNumberOfChannels,
                                          ErrorResult& aRv)
 {
-  RefPtr<AudioBuffer> buffer =
+  AutoJSAPI jsapi;
+  if (NS_WARN_IF(!jsapi.Init(mNode->GetOwner()))) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+  JSContext* cx = jsapi.cx();
+
+  nsRefPtr<AudioBuffer> buffer =
     AudioBuffer::Create(mNode->Context(), aNumberOfChannels,
                         mNode->BufferSize(),
-                        mNode->Context()->SampleRate(), aRv);
+                        mNode->Context()->SampleRate(), cx, aRv);
   MOZ_ASSERT(buffer || aRv.ErrorCodeIs(NS_ERROR_OUT_OF_MEMORY));
   return buffer.forget();
 }

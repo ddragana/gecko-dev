@@ -11,6 +11,7 @@
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/layers/PImageContainerParent.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
 
 namespace mozilla {
 namespace layers {
@@ -25,7 +26,7 @@ public:
 
   virtual bool RecvAsyncDelete() override;
 
-  AutoTArray<ImageHost*,1> mImageHosts;
+  nsAutoTArray<ImageHost*,1> mImageHosts;
 
 private:
   virtual void ActorDestroy(ActorDestroyReason why) override {}

@@ -30,12 +30,12 @@
 #define NS_FRAME_TRACE_CHILD_REFLOW 0x4
 #define NS_FRAME_TRACE_NEW_FRAMES   0x8
 
-#define NS_FRAME_LOG_TEST(_lm,_bit) (int(((mozilla::LogModule*)_lm)->Level()) & (_bit))
+#define NS_FRAME_LOG_TEST(_lm,_bit) (int((_lm)->level) & (_bit))
 
 #ifdef DEBUG
 #define NS_FRAME_LOG(_bit,_args)                                \
   PR_BEGIN_MACRO                                                \
-    if (NS_FRAME_LOG_TEST(nsFrame::sFrameLogModule,_bit)) {  \
+    if (NS_FRAME_LOG_TEST(nsFrame::GetLogModuleInfo(),_bit)) {  \
       PR_LogPrint _args;                                        \
     }                                                           \
   PR_END_MACRO
@@ -52,14 +52,14 @@
 // XXX remove me
 #define NS_FRAME_TRACE_MSG(_bit,_args)                          \
   PR_BEGIN_MACRO                                                \
-    if (NS_FRAME_LOG_TEST(nsFrame::sFrameLogModule,_bit)) {  \
+    if (NS_FRAME_LOG_TEST(nsFrame::GetLogModuleInfo(),_bit)) {  \
       TraceMsg _args;                                           \
     }                                                           \
   PR_END_MACRO
 
 #define NS_FRAME_TRACE(_bit,_args)                              \
   PR_BEGIN_MACRO                                                \
-    if (NS_FRAME_LOG_TEST(nsFrame::sFrameLogModule,_bit)) {  \
+    if (NS_FRAME_LOG_TEST(nsFrame::GetLogModuleInfo(),_bit)) {  \
       TraceMsg _args;                                           \
     }                                                           \
   PR_END_MACRO
@@ -78,14 +78,11 @@
 #define NS_FRAME_TRACE_REFLOW_OUT(_method, _status)
 #endif
 
-// Frame allocation boilerplate macros. Every subclass of nsFrame must
-// either use NS_{DECL,IMPL}_FRAMEARENA_HELPERS pair for allocating
-// memory correctly, or use NS_DECL_ABSTRACT_FRAME to declare a frame
-// class abstract and stop it from being instantiated. If a frame class
-// without its own operator new and GetFrameId gets instantiated, the
-// per-frame recycler lists in nsPresArena will not work correctly,
-// with potentially catastrophic consequences (not enough memory is
-// allocated for a frame object).
+// Frame allocation boilerplate macros.  Every subclass of nsFrame
+// must define its own operator new and GetAllocatedSize.  If they do
+// not, the per-frame recycler lists in nsPresArena will not work
+// correctly, with potentially catastrophic consequences (not enough
+// memory is allocated for a frame object).
 
 #define NS_DECL_FRAMEARENA_HELPERS                                \
   void* operator new(size_t, nsIPresShell*) MOZ_MUST_OVERRIDE;    \
@@ -96,10 +93,6 @@
   { return aShell->AllocateFrame(nsQueryFrame::class##_id, sz); } \
   nsQueryFrame::FrameIID class::GetFrameId()                      \
   { return nsQueryFrame::class##_id; }
-
-#define NS_DECL_ABSTRACT_FRAME(class)                                   \
-  void* operator new(size_t, nsIPresShell*) MOZ_MUST_OVERRIDE = delete; \
-  virtual nsQueryFrame::FrameIID GetFrameId() override MOZ_MUST_OVERRIDE = 0;
 
 //----------------------------------------------------------------------
 
@@ -169,9 +162,6 @@ public:
 
   virtual nsresult  GetPointFromOffset(int32_t  inOffset,
                                        nsPoint* outPoint) override;
-  virtual nsresult  GetCharacterRectsInRange(int32_t aInOffset,
-                                             int32_t aLength,
-                                             nsTArray<nsRect>& aOutRect) override;
 
   virtual nsresult  GetChildFrameContainingOffset(int32_t    inContentOffset,
                                                   bool       inHint,
@@ -276,7 +266,7 @@ public:
 
   // Compute tight bounds assuming this frame honours its border, background
   // and outline, its children's tight bounds, and nothing else.
-  nsRect ComputeSimpleTightBounds(mozilla::gfx::DrawTarget* aDrawTarget) const;
+  nsRect ComputeSimpleTightBounds(gfxContext* aContext) const;
   
   /**
    * A helper, used by |nsFrame::ComputeSize| (for frames that need to
@@ -371,9 +361,7 @@ public:
 
   virtual bool CanContinueTextRun() const override;
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
-
-  virtual void UnionChildOverflow(nsOverflowAreas& aOverflowAreas) override;
+  virtual bool UpdateOverflow() override;
 
   // Selection Methods
 
@@ -399,6 +387,7 @@ public:
   nsresult PeekBackwardAndForward(nsSelectionAmount aAmountBack,
                                   nsSelectionAmount aAmountForward,
                                   int32_t aStartPos,
+                                  nsPresContext* aPresContext,
                                   bool aJumpLines,
                                   uint32_t aSelectFlags);
 
@@ -413,11 +402,11 @@ public:
   virtual ContentOffsets CalcContentOffsetsFromFramePoint(nsPoint aPoint);
 
   // Box layout methods
-  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nscoord GetXULFlex() override;
-  virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nscoord GetFlex(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nscoord GetBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
 
   // We compute and store the HTML content's overflow area. So don't
   // try to compute it in the box code.
@@ -656,7 +645,7 @@ protected:
   // Fills aCursor with the appropriate information from ui
   static void FillCursorInformationFromStyle(const nsStyleUserInterface* ui,
                                              nsIFrame::Cursor& aCursor);
-  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
 
 #ifdef DEBUG_LAYOUT
   virtual void GetBoxName(nsAutoString& aName) override;
@@ -679,12 +668,6 @@ private:
                  bool aMoveFrame = true);
 
   NS_IMETHODIMP RefreshSizeCache(nsBoxLayoutState& aState);
-
-  // Returns true if this frame has any kind of CSS animations.
-  bool HasCSSAnimations();
-
-  // Returns true if this frame has any kind of CSS transitions.
-  bool HasCSSTransitions();
 
 #ifdef DEBUG_FRAME_DUMP
 public:
@@ -719,7 +702,7 @@ public:
 
   /**
    * See if style tree verification is enabled. To enable style tree
-   * verification add "styleverifytree:1" to your MOZ_LOG
+   * verification add "styleverifytree:1" to your NSPR_LOG_MODULES
    * environment variable (any non-zero debug level will work). Or,
    * call SetVerifyStyleTreeEnable with true.
    */
@@ -730,7 +713,14 @@ public:
    */
   static void SetVerifyStyleTreeEnable(bool aEnabled);
 
-  static mozilla::LazyLogModule sFrameLogModule;
+  /**
+   * The frame class and related classes share an nspr log module
+   * for logging frame activity.
+   *
+   * Note: the log module is created during library initialization which
+   * means that you cannot perform logging before then.
+   */
+  static PRLogModuleInfo* GetLogModuleInfo();
 
   // Show frame borders when rendering
   static void ShowFrameBorders(bool aEnable);
@@ -743,6 +733,12 @@ public:
 #endif
 
 public:
+
+  static void PrintDisplayItem(nsDisplayListBuilder* aBuilder,
+                               nsDisplayItem* aItem,
+                               std::stringstream& aStream,
+                               bool aDumpSublist = false,
+                               bool aDumpHtml = false);
 
   static void PrintDisplayList(nsDisplayListBuilder* aBuilder,
                                const nsDisplayList& aList,

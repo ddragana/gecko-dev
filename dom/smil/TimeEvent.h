@@ -11,8 +11,6 @@
 #include "mozilla/dom/TimeEventBinding.h"
 #include "nsIDOMTimeEvent.h"
 
-class nsGlobalWindow;
-
 namespace mozilla {
 namespace dom {
 
@@ -39,33 +37,30 @@ public:
     return TimeEventBinding::Wrap(aCx, this, aGivenProto);
   }
 
-  void InitTimeEvent(const nsAString& aType, nsGlobalWindow* aView,
-                     int32_t aDetail);
-
-
   int32_t Detail() const
   {
     return mDetail;
   }
 
-  nsPIDOMWindowOuter* GetView() const
+  nsIDOMWindow* GetView() const
   {
     return mView;
+  }
+
+  void InitTimeEvent(const nsAString& aType, nsIDOMWindow* aView,
+                     int32_t aDetail, ErrorResult& aRv)
+  {
+    aRv = InitTimeEvent(aType, aView, aDetail);
   }
 
 private:
   ~TimeEvent() {}
 
-  nsCOMPtr<nsPIDOMWindowOuter> mView;
+  nsCOMPtr<nsIDOMWindow> mView;
   int32_t mDetail;
 };
 
 } // namespace dom
 } // namespace mozilla
-
-already_AddRefed<mozilla::dom::TimeEvent>
-NS_NewDOMTimeEvent(mozilla::dom::EventTarget* aOwner,
-                   nsPresContext* aPresContext,
-                   mozilla::InternalSMILTimeEvent* aEvent);
 
 #endif // mozilla_dom_TimeEvent_h_

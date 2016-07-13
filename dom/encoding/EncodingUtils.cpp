@@ -15,11 +15,11 @@
 namespace mozilla {
 namespace dom {
 
-static const nsUConvProp labelsEncodings[] = {
+static const char* labelsEncodings[][3] = {
 #include "labelsencodings.properties.h"
 };
 
-static const nsUConvProp encodingsGroups[] = {
+static const char* encodingsGroups[][3] = {
 #include "encodingsgroups.properties.h"
 };
 

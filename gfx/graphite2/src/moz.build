@@ -27,8 +27,6 @@ UNIFIED_SOURCES += [
     'CachedFace.cpp',
     'CmapCache.cpp',
     'Code.cpp',
-    'Collider.cpp',
-    'Decompressor.cpp',
     'Face.cpp',
     'FeatureMap.cpp',
     'FileFace.cpp',
@@ -42,11 +40,10 @@ UNIFIED_SOURCES += [
     'gr_logging.cpp',
     'gr_segment.cpp',
     'gr_slot.cpp',
-    'Intervals.cpp',
     'json.cpp',
     'Justifier.cpp',
+    'NameTable.cpp',
     'Pass.cpp',
-    'Position.cpp',
     'SegCache.cpp',
     'SegCacheEntry.cpp',
     'SegCacheStore.cpp',
@@ -58,18 +55,13 @@ UNIFIED_SOURCES += [
     'UtfCodec.cpp',
 ]
 
-# Excluded from UNIFIED_SOURCES because <cmath> from other files breaks it,
-# see bug 1272647.
-SOURCES += [
-    'NameTable.cpp',
-]
-
-# tell graphite2 not to export symbols, we'll be linking it directly with
-# thebes
-DEFINES['GRAPHITE2_STATIC'] = True
-
-# We allow warnings for third-party code that can be updated from upstream.
-ALLOW_COMPILER_WARNINGS = True
+if CONFIG['GKMEDIAS_SHARED_LIBRARY']:
+    NO_VISIBILITY_FLAGS = True
+    DEFINES['GRAPHITE2_EXPORTING'] = True
+else:
+    # tell graphite2 not to export symbols, we'll be linking it directly with
+    # thebes
+    DEFINES['GRAPHITE2_STATIC'] = True
 
 FINAL_LIBRARY = 'gkmedias'
 

@@ -45,7 +45,7 @@ public:
   void InitSimpleGestureEvent(const nsAString& aType,
                               bool aCanBubble,
                               bool aCancelable,
-                              nsGlobalWindow* aView,
+                              nsIDOMWindow* aView,
                               int32_t aDetail,
                               int32_t aScreenX,
                               int32_t aScreenY,
@@ -60,7 +60,16 @@ public:
                               uint32_t aAllowedDirections,
                               uint32_t aDirection,
                               double aDelta,
-                              uint32_t aClickCount);
+                              uint32_t aClickCount,
+                              ErrorResult& aRv)
+  {
+    aRv = InitSimpleGestureEvent(aType, aCanBubble, aCancelable,
+                                 aView, aDetail, aScreenX, aScreenY,
+                                 aClientX, aClientY, aCtrlKey, aAltKey,
+                                 aShiftKey, aMetaKey, aButton,
+                                 aRelatedTarget, aAllowedDirections,
+                                 aDirection, aDelta, aClickCount);
+  }
 
 protected:
   ~SimpleGestureEvent() {}
@@ -68,10 +77,5 @@ protected:
 
 } // namespace dom
 } // namespace mozilla
-
-already_AddRefed<mozilla::dom::SimpleGestureEvent>
-NS_NewDOMSimpleGestureEvent(mozilla::dom::EventTarget* aOwner,
-                            nsPresContext* aPresContext,
-                            mozilla::WidgetSimpleGestureEvent* aEvent);
 
 #endif // mozilla_dom_SimpleGestureEvent_h_

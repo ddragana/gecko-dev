@@ -8,12 +8,9 @@
 #include <stdint.h>
 
 #include "mozilla/EventForwards.h"
-#include "mozilla/TimeStamp.h"
-
-#include "nsRegionFwd.h"
-#include "Units.h"
 
 class nsView;
+class nsIntRegion;
 class nsIPresShell;
 class nsIWidget;
 class nsIXULWindow;
@@ -26,8 +23,7 @@ enum nsSizeMode
   nsSizeMode_Normal = 0,
   nsSizeMode_Minimized,
   nsSizeMode_Maximized,
-  nsSizeMode_Fullscreen,
-  nsSizeMode_Invalid
+  nsSizeMode_Fullscreen
 };
 
 /**
@@ -80,12 +76,6 @@ public:
   virtual void SizeModeChanged(nsSizeMode aSizeMode);
 
   /**
-   * Called when the DPI (device resolution scaling factor) is changed,
-   * such that UI elements may need to be rescaled.
-   */
-  virtual void UIResolutionChanged();
-
-  /**
    * Called when the z-order of the window is changed. Returns true if the
    * notification was handled. aPlacement indicates the new z order. If
    * placement is nsWindowZRelative, then aRequestBelow should be the
@@ -135,8 +125,7 @@ public:
    * This is called at a time when it is not OK to change the geometry of
    * this widget or of other widgets.
    */
-  virtual bool PaintWindow(nsIWidget* aWidget,
-                           mozilla::LayoutDeviceIntRegion aRegion);
+  virtual bool PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion);
 
   /**
    * Indicates that a paint occurred.
@@ -146,9 +135,7 @@ public:
    */
   virtual void DidPaintWindow();
 
-  virtual void DidCompositeWindow(uint64_t aTransactionId,
-                                  const mozilla::TimeStamp& aCompositeStart,
-                                  const mozilla::TimeStamp& aCompositeEnd);
+  virtual void DidCompositeWindow();
 
   /**
    * Request that layout schedules a repaint on the next refresh driver tick.

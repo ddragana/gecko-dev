@@ -1,1 +1,1 @@
-from . import lint
+import lint

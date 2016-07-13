@@ -15,7 +15,7 @@
 #include <algorithm>
 
 #include "gflags/gflags.h"
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/test/channel_transport/include/channel_transport.h"
 #include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
 #include "webrtc/video_engine/test/auto_test/interface/vie_autotest_defines.h"
@@ -73,7 +73,7 @@ class ViEAutotestEncoderObserver : public webrtc::ViEEncoderObserver {
               << " BR: " << bitrate << std::endl;
   }
 
-  void SuspendChange(int video_channel, bool is_suspended) override {
+  virtual void SuspendChange(int video_channel, bool is_suspended) OVERRIDE {
     std::cout << "SuspendChange: " << is_suspended << std::endl;
   }
 };
@@ -283,8 +283,10 @@ int ViEAutoTest::ViECustomCall() {
   int buffer_delay_ms = 0;
   bool is_image_scale_enabled = false;
   bool remb = true;
-  rtc::scoped_ptr<webrtc::test::VideoChannelTransport> video_channel_transport;
-  rtc::scoped_ptr<webrtc::test::VoiceChannelTransport> voice_channel_transport;
+  webrtc::scoped_ptr<webrtc::test::VideoChannelTransport>
+      video_channel_transport;
+  webrtc::scoped_ptr<webrtc::test::VoiceChannelTransport>
+      voice_channel_transport;
 
   while (!start_call) {
     // Get the IP address to use from call.
@@ -1508,7 +1510,7 @@ void PrintRTCCPStatistics(webrtc::ViERTP_RTCP* vie_rtp_rtcp,
   int error = 0;
   int number_of_errors = 0;
   webrtc::RtcpStatistics rtcp_stats;
-  int64_t rtt_ms = 0;
+  int rtt_ms = 0;
 
   switch (stat_type) {
     case kReceivedStatistic:
@@ -1562,13 +1564,13 @@ void PrintRTPStatistics(webrtc::ViERTP_RTCP* vie_rtp_rtcp,
                                          "ERROR: %s at line %d",
                                          __FUNCTION__, __LINE__);
   std::cout << "\tRTP bytes sent: "
-            << sent.transmitted.payload_bytes << std::endl;
+            << sent.bytes << std::endl;
   std::cout << "\tRTP packets sent: "
-            << sent.transmitted.packets << std::endl;
+            << sent.packets << std::endl;
   std::cout << "\tRTP bytes received: "
-            << received.transmitted.payload_bytes << std::endl;
+            << received.bytes << std::endl;
   std::cout << "\tRTP packets received: "
-            << received.transmitted.packets << std::endl;
+            << received.packets << std::endl;
 }
 
 void PrintBandwidthUsage(webrtc::ViERTP_RTCP* vie_rtp_rtcp,

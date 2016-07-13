@@ -9,6 +9,7 @@
 #include "nsXULTemplateQueryProcessorStorage.h"
 #include "nsIRDFResource.h"
 #include "nsIXULTemplateResult.h"
+#include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 
 /**
@@ -27,7 +28,7 @@ protected:
 
     ~nsXULTemplateResultStorage();
 
-    RefPtr<nsXULTemplateResultSetStorage> mResultSet;
+    nsRefPtr<nsXULTemplateResultSetStorage> mResultSet;
 
     nsCOMArray<nsIVariant> mValues;
 

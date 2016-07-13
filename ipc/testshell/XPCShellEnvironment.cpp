@@ -46,8 +46,6 @@ using mozilla::ipc::XPCShellEnvironment;
 using mozilla::ipc::TestShellChild;
 using mozilla::ipc::TestShellParent;
 using mozilla::AutoSafeJSContext;
-using mozilla::dom::AutoJSAPI;
-using mozilla::dom::AutoEntryScript;
 using namespace JS;
 
 namespace {
@@ -75,11 +73,8 @@ private:
 inline XPCShellEnvironment*
 Environment(Handle<JSObject*> global)
 {
-    AutoJSAPI jsapi;
-    if (!jsapi.Init(global)) {
-        return nullptr;
-    }
-    JSContext* cx = jsapi.cx();
+    AutoSafeJSContext cx;
+    JSAutoCompartment ac(cx, global);
     Rooted<Value> v(cx);
     if (!JS_GetProperty(cx, global, "__XPCShellEnvironment", &v) ||
         !v.get().isDouble())
@@ -240,8 +235,11 @@ GC(JSContext *cx,
 {
     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
-    JS_GC(cx);
-
+    JSRuntime *rt = JS_GetRuntime(cx);
+    JS_GC(rt);
+#ifdef JS_GCMETER
+    js_DumpGCStats(rt, stdout);
+#endif
     args.rval().setUndefined();
     return true;
 }
@@ -366,17 +364,17 @@ XPCShellEnvironment::ProcessFile(JSContext *cx,
         options.setFileAndLine("typein", startline);
         JS::Rooted<JSScript*> script(cx);
         if (JS_CompileScript(cx, buffer, strlen(buffer), options, &script)) {
-            JS::WarningReporter older;
+            JSErrorReporter older;
 
             ok = JS_ExecuteScript(cx, script, &result);
             if (ok && !result.isUndefined()) {
-                /* Suppress warnings from JS::ToString(). */
-                older = JS::SetWarningReporter(cx, nullptr);
+                /* Suppress error reports from JS::ToString(). */
+                older = JS_SetErrorReporter(JS_GetRuntime(cx), nullptr);
                 str = JS::ToString(cx, result);
                 JSAutoByteString bytes;
                 if (str)
                     bytes.encodeLatin1(cx, str);
-                JS::SetWarningReporter(cx, older);
+                JS_SetErrorReporter(JS_GetRuntime(cx), older);
 
                 if (!!bytes)
                     fprintf(stdout, "%s\n", bytes.ptr());
@@ -453,21 +451,18 @@ XPCShellEnvironment::XPCShellEnvironment()
 
 XPCShellEnvironment::~XPCShellEnvironment()
 {
-    if (GetGlobalObject()) {
-        AutoJSAPI jsapi;
-        if (!jsapi.Init(GetGlobalObject())) {
-            return;
-        }
-        JSContext* cx = jsapi.cx();
-        Rooted<JSObject*> global(cx, GetGlobalObject());
 
+    AutoSafeJSContext cx;
+    Rooted<JSObject*> global(cx, GetGlobalObject());
+    if (global) {
         {
             JSAutoCompartment ac(cx, global);
             JS_SetAllNonReservedSlotsToUndefined(cx, global);
         }
         mGlobalHolder.reset();
 
-        JS_GC(cx);
+        JSRuntime *rt = JS_GetRuntime(cx);
+        JS_GC(rt);
     }
 }
 
@@ -490,6 +485,8 @@ XPCShellEnvironment::Init()
 
     AutoSafeJSContext cx;
 
+    JS_SetContextPrivate(cx, this);
+
     nsCOMPtr<nsIXPConnect> xpc =
       do_GetService(nsIXPConnect::GetCID());
     if (!xpc) {
@@ -509,7 +506,7 @@ XPCShellEnvironment::Init()
         fprintf(stderr, "+++ Failed to get ScriptSecurityManager service, running without principals");
     }
 
-    RefPtr<BackstagePass> backstagePass;
+    nsRefPtr<BackstagePass> backstagePass;
     rv = NS_NewBackstagePass(getter_AddRefs(backstagePass));
     if (NS_FAILED(rv)) {
         NS_ERROR("Failed to create backstage pass!");
@@ -517,11 +514,8 @@ XPCShellEnvironment::Init()
     }
 
     JS::CompartmentOptions options;
-    options.creationOptions().setZone(JS::SystemZone);
-    options.behaviors().setVersion(JSVERSION_LATEST);
-    if (xpc::SharedMemoryEnabled())
-        options.creationOptions().setSharedMemoryAndAtomicsEnabled(true);
-
+    options.setZone(JS::SystemZone)
+           .setVersion(JSVERSION_LATEST);
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     rv = xpc->InitClassesWithNewWrappedGlobal(cx,
                                               static_cast<nsIGlobalObject *>(backstagePass),
@@ -571,9 +565,9 @@ bool
 XPCShellEnvironment::EvaluateString(const nsString& aString,
                                     nsString* aResult)
 {
-  AutoEntryScript aes(GetGlobalObject(),
-                      "ipc XPCShellEnvironment::EvaluateString");
-  JSContext* cx = aes.cx();
+  AutoSafeJSContext cx;
+  JS::Rooted<JSObject*> global(cx, GetGlobalObject());
+  JSAutoCompartment ac(cx, global);
 
   JS::CompileOptions options(cx);
   options.setFileAndLine("typein", 0);
@@ -591,12 +585,12 @@ XPCShellEnvironment::EvaluateString(const nsString& aString,
   JS::Rooted<JS::Value> result(cx);
   bool ok = JS_ExecuteScript(cx, script, &result);
   if (ok && !result.isUndefined()) {
-      JS::WarningReporter old = JS::SetWarningReporter(cx, nullptr);
+      JSErrorReporter old = JS_SetErrorReporter(JS_GetRuntime(cx), nullptr);
       JSString* str = JS::ToString(cx, result);
       nsAutoJSString autoStr;
       if (str)
           autoStr.init(cx, str);
-      JS::SetWarningReporter(cx, old);
+      JS_SetErrorReporter(JS_GetRuntime(cx), old);
 
       if (!autoStr.IsEmpty() && aResult) {
           aResult->Assign(autoStr);

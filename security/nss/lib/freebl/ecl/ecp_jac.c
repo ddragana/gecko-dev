@@ -232,9 +232,7 @@ ec_GFp_pt_dbl_jac(const mp_int *px, const mp_int *py, const mp_int *pz,
 		MP_CHECKOK(group->meth->field_add(&t0, &M, &t0, group->meth));
 		MP_CHECKOK(group->meth->
 				   field_add(&t0, &group->curvea, &M, group->meth));
-	} else if (MP_SIGN(&group->curvea) == MP_NEG &&
-		   MP_USED(&group->curvea) == 1 &&
-		   MP_DIGIT(&group->curvea, 0) == 3) {
+	} else if (mp_cmp_int(&group->curvea, -3) == 0) {
 		/* M = 3 * (px + pz^2) * (px - pz^2) */
 		MP_CHECKOK(group->meth->field_sqr(pz, &M, group->meth));
 		MP_CHECKOK(group->meth->field_add(px, &M, &t0, group->meth));
@@ -389,7 +387,7 @@ ec_GFp_pts_mul_jac(const mp_int *k1, const mp_int *k2, const mp_int *px,
 	mp_int precomp[4][4][2];
 	mp_int rz;
 	const mp_int *a, *b;
-	unsigned int i, j;
+	int i, j;
 	int ai, bi, d;
 
 	for (i = 0; i < 4; i++) {
@@ -496,7 +494,7 @@ ec_GFp_pts_mul_jac(const mp_int *k1, const mp_int *k2, const mp_int *px,
 	MP_CHECKOK(mp_init(&rz));
 	MP_CHECKOK(ec_GFp_pt_set_inf_jac(rx, ry, &rz));
 
-        for (i = d; i-- > 0;) {
+	for (i = d - 1; i >= 0; i--) {
 		ai = MP_GET_BIT(a, 2 * i + 1);
 		ai <<= 1;
 		ai |= MP_GET_BIT(a, 2 * i);

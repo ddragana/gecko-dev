@@ -35,12 +35,12 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(TimeManager)
 
-  explicit TimeManager(nsPIDOMWindowInner* aWindow)
+  explicit TimeManager(nsPIDOMWindow* aWindow)
     : mWindow(aWindow)
   {
   }
 
-  nsPIDOMWindowInner* GetParentObject() const
+  nsPIDOMWindow* GetParentObject() const
   {
     return mWindow;
   }
@@ -52,7 +52,7 @@ public:
 private:
   ~TimeManager() {}
 
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
 };
 
 } // namespace time

@@ -13,9 +13,6 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsITimer.h"
 #include "mozilla/net/DNS.h"
-#ifdef XP_WIN
-#include "mozilla/WindowsVersion.h"
-#endif
 #include "prerror.h"
 
 #define REQUEST  0x68656c6f
@@ -274,7 +271,7 @@ main(int32_t argc, char *argv[])
   NS_ENSURE_SUCCESS(rv, -1);
 
   // Create UDPServerListener to process UDP packets
-  RefPtr<UDPServerListener> serverListener = new UDPServerListener();
+  nsRefPtr<UDPServerListener> serverListener = new UDPServerListener();
 
   nsCOMPtr<nsIScriptSecurityManager> secman =
     do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
@@ -292,7 +289,7 @@ main(int32_t argc, char *argv[])
   server->AsyncListen(serverListener);
 
   // Bind clinet on arbitrary port
-  RefPtr<UDPClientListener> clientListener = new UDPClientListener();
+  nsRefPtr<UDPClientListener> clientListener = new UDPClientListener();
   client->Init(0, false, systemPrincipal, true, 0);
   client->AsyncListen(clientListener);
 
@@ -338,14 +335,19 @@ main(int32_t argc, char *argv[])
   if (NS_WARN_IF(!timer)) {
     return -1;
   }
-  RefPtr<MulticastTimerCallback> timerCb = new MulticastTimerCallback();
+  nsRefPtr<MulticastTimerCallback> timerCb = new MulticastTimerCallback();
 
   // The following multicast tests using multiple sockets require a firewall
-  // exception on Windows XP (the earliest version of Windows we now support)
-  // before they pass. For now, we'll skip them here. Later versions of Windows
-  // (Win2003 and onward) don't seem to have this issue.
+  // exception on Windows XP before they pass.  For now, we'll skip them here.
+  // Later versions of Windows don't seem to have this issue.
 #ifdef XP_WIN
-  if (!mozilla::IsWin2003OrLater()) {   // i.e. if it is WinXP
+  OSVERSIONINFO OsVersion;
+  OsVersion.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+#pragma warning(push)
+#pragma warning(disable:4996) // 'GetVersionExA': was declared deprecated
+  GetVersionEx(&OsVersion);
+#pragma warning(pop)
+  if (OsVersion.dwMajorVersion == 5 && OsVersion.dwMinorVersion == 1) {
     goto close;
   }
 #endif

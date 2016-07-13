@@ -82,7 +82,7 @@ NS_IMPL_RELEASE_INHERITED(DeviceStorageAreaListener, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN(DeviceStorageAreaListener)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-DeviceStorageAreaListener::DeviceStorageAreaListener(nsPIDOMWindowInner* aWindow)
+DeviceStorageAreaListener::DeviceStorageAreaListener(nsPIDOMWindow* aWindow)
   : DOMEventTargetHelper(aWindow)
 {
   MOZ_ASSERT(aWindow);
@@ -136,7 +136,7 @@ DeviceStorageAreaListener::DispatchStorageAreaChangedEvent(
   init.mOperation = aOperation;
   init.mStorageName = aStorageName;
 
-  RefPtr<DeviceStorageAreaChangedEvent> event =
+  nsRefPtr<DeviceStorageAreaChangedEvent> event =
     DeviceStorageAreaChangedEvent::Constructor(this,
                                                NS_LITERAL_STRING("storageareachanged"),
                                                init);

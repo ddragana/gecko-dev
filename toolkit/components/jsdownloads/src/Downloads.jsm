@@ -22,12 +22,13 @@ const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
 
-Cu.import("resource://gre/modules/Integration.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/DownloadCore.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadCombinedList",
                                   "resource://gre/modules/DownloadList.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadIntegration",
+                                  "resource://gre/modules/DownloadIntegration.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadList",
                                   "resource://gre/modules/DownloadList.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadSummary",
@@ -38,9 +39,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
-
-Integration.downloads.defineModuleGetter(this, "DownloadIntegration",
-            "resource://gre/modules/DownloadIntegration.jsm");
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Downloads
@@ -53,21 +51,15 @@ this.Downloads = {
   /**
    * Work on downloads that were not started from a private browsing window.
    */
-  get PUBLIC() {
-    return "{Downloads.PUBLIC}";
-  },
+  get PUBLIC() "{Downloads.PUBLIC}",
   /**
    * Work on downloads that were started from a private browsing window.
    */
-  get PRIVATE() {
-    return "{Downloads.PRIVATE}";
-  },
+  get PRIVATE() "{Downloads.PRIVATE}",
   /**
    * Work on both Downloads.PRIVATE and Downloads.PUBLIC downloads.
    */
-  get ALL() {
-    return "{Downloads.ALL}";
-  },
+  get ALL() "{Downloads.ALL}",
 
   /**
    * Creates a new Download object.
@@ -174,7 +166,7 @@ this.Downloads = {
   getList: function (aType)
   {
     if (!this._promiseListsInitialized) {
-      this._promiseListsInitialized = Task.spawn(function* () {
+      this._promiseListsInitialized = Task.spawn(function () {
         let publicList = new DownloadList();
         let privateList = new DownloadList();
         let combinedList = new DownloadCombinedList(publicList, privateList);

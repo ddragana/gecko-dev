@@ -307,6 +307,8 @@ private:
     nsID                    mIID;
     XPTInterfaceDescriptor* mDescriptor;
 
+    uint16_t mMethodBaseIndex;
+    uint16_t mConstantBaseIndex;
     xptiTypelibGuts* mTypelib;
 
     xptiInterfaceEntry*     mParent;      // Valid only when fully resolved
@@ -314,12 +316,7 @@ private:
     xptiInterfaceInfo* MOZ_UNSAFE_REF("The safety of this pointer is ensured "
                                       "by the semantics of xptiWorkingSet.")
                             mInfo;        // May come and go.
-
-    uint16_t mMethodBaseIndex;
-    uint16_t mConstantBaseIndex;
-
     xptiInfoFlags           mFlags;
-
     char                    mName[1];     // Always last. Sized to fit.
 };
 
@@ -386,7 +383,7 @@ private:
 
 private:
     xptiInterfaceEntry* mEntry;
-    RefPtr<xptiInterfaceInfo> mParent;
+    nsRefPtr<xptiInterfaceInfo> mParent;
 };
 
 /***************************************************************************/

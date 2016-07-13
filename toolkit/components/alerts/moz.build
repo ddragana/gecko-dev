@@ -12,19 +12,8 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'alerts'
 
-EXPORTS += [
-    'nsAlertsUtils.h',
-]
-
-EXPORTS.mozilla += [
-    'AlertNotification.h',
-    'AlertNotificationIPCSerializer.h',
-]
-
 UNIFIED_SOURCES += [
-    'AlertNotification.cpp',
     'nsAlertsService.cpp',
-    'nsAlertsUtils.cpp',
     'nsXULAlerts.cpp',
 ]
 
@@ -33,6 +22,8 @@ include('/ipc/chromium/chromium-config.mozbuild')
 FINAL_LIBRARY = 'xul'
 
 JAR_MANIFESTS += ['jar.mn']
+
+FAIL_ON_WARNINGS = True
 
 with Files('**'):
     BUG_COMPONENT = ('Toolkit', 'Notifications and Alerts')

@@ -13,7 +13,7 @@
 
 #include <limits>
 
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {

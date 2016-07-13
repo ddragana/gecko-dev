@@ -1,15 +1,15 @@
 "use strict";
 
-var gTestTab;
-var gContentAPI;
-var gContentWindow;
-var setDefaultBrowserCalled = false;
+let gTestTab;
+let gContentAPI;
+let gContentWindow;
+let setDefaultBrowserCalled = false;
 
 Cc["@mozilla.org/moz/jssubscript-loader;1"]
   .getService(Ci.mozIJSSubScriptLoader)
   .loadSubScript("chrome://mochikit/content/tests/SimpleTest/MockObjects.js", this);
 
-function MockShellService() {}
+function MockShellService() {};
 MockShellService.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIShellService]),
   isDefaultBrowser: function(aStartupCheck, aForAllTypes) { return false; },
@@ -32,30 +32,37 @@ MockShellService.prototype = {
   defaultFeedReader: 0,
 };
 
-var mockShellService = new MockObjectRegisterer("@mozilla.org/browser/shell-service;1",
+let mockShellService = new MockObjectRegisterer("@mozilla.org/browser/shell-service;1",
                                                 MockShellService);
 
 // Temporarily disabled, see note at test_setDefaultBrowser.
 // mockShellService.register();
 
-add_task(setup_UITourTest);
+function test() {
+  UITourTest();
+}
 
-/* This test is disabled (bug 1180714) since the MockObjectRegisterer
- is not actually replacing the original ShellService.
-add_UITour_task(function* test_setDefaultBrowser() {
-  try {
-    yield gContentAPI.setConfiguration("defaultBrowser");
-    ok(setDefaultBrowserCalled, "setDefaultBrowser called");
-  } finally {
-    mockShellService.unregister();
-  }
-});
-*/
+let tests = [
 
-add_UITour_task(function* test_isDefaultBrowser() {
-  let shell = Components.classes["@mozilla.org/browser/shell-service;1"]
-        .getService(Components.interfaces.nsIShellService);
-  let isDefault = shell.isDefaultBrowser(false);
-  let data = yield getConfigurationPromise("appinfo");
-  is(isDefault, data.defaultBrowser, "gContentAPI result should match shellService.isDefaultBrowser");
-});
+  /* This test is disabled (bug 1180714) since the MockObjectRegisterer
+     is not actually replacing the original ShellService.
+  taskify(function* test_setDefaultBrowser() {
+    try {
+      gContentAPI.setConfiguration("defaultBrowser");
+      ok(setDefaultBrowserCalled, "setDefaultBrowser called");
+    } finally {
+      mockShellService.unregister();
+    }
+  }),
+  */
+
+  taskify(function* test_isDefaultBrowser(done) {
+    let shell = Components.classes["@mozilla.org/browser/shell-service;1"]
+                          .getService(Components.interfaces.nsIShellService);
+    let isDefault = shell.isDefaultBrowser(false);
+    gContentAPI.getConfiguration("appinfo", (data) => {
+      is(data.value, data.defaultBrowser, "gContentAPI result should match shellService.isDefaultBrowser");
+      done();
+    });
+  })
+];

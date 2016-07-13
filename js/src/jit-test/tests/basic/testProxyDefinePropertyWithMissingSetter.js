@@ -4,12 +4,13 @@ var actual = "";
 
 try {
 
-var x = new Proxy({}, {
-    defineProperty: function(target, name, desc) {
+(x = Proxy.createFunction((function() {
+  return {
+    defineProperty: function(name, desc) {
       Object.defineProperty(x, name, desc)
     },
-});
-
+  }
+})(), (eval)));
 Object.defineProperty(x, "", ({
   get: function() {}
 }))

@@ -7,7 +7,7 @@
 #include "nsISupports.idl"
 #include "nsIException.idl"
 
-[scriptable, builtinclass, uuid(875e6645-e762-4da6-9ec8-bf19ab0050df)]
+[scriptable, uuid(dd250248-2586-4ec1-a68f-8d14ef452517)]
 interface nsIXPCException : nsIException
 {
     // inherits methods from nsIException
@@ -16,7 +16,8 @@ interface nsIXPCException : nsIException
                     in nsresult         aResult,
                     in AUTF8String      aName,
                     in nsIStackFrame    aLocation,
-                    in nsISupports      aData);
+                    in nsISupports      aData,
+                    in nsIException     aInner);
 };
 
 /* this goes into the C++ header verbatim. */

@@ -90,7 +90,7 @@ exports.testSettingActiveWindowDoesNotIgnorePrivateWindow = function(assert, don
   makeEmptyBrowserWindow({
     private: true
   }).then(function(window) {
-    let continueAfterFocus = window => onFocus(window).then(nextTest);
+    let continueAfterFocus = function(window) onFocus(window).then(nextTest);
 
     // PWPB case
     if (isWindowPBSupported) {
@@ -212,7 +212,7 @@ exports.testWindowIteratorPrivateDefault = function(assert, done) {
   // there should only be one window open here, if not give us the
   // the urls
   if (browserWindows.length > 1) {
-    for (let tab of tabs) {
+    for each (let tab in tabs) {
       assert.fail("TAB URL: " + tab.url);
     }
   }

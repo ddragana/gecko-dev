@@ -26,11 +26,8 @@ function startTest() {
        'Media recorder stream = element stream post recording');
     stopCount++;
     if (stopCount == 2) {
-      if (dataavailable >= 2) {
-        SimpleTest.finish();
-      } else {
-        ok(false, 'Should have at least two dataavailable events');
-      }
+      is(2, dataavailable, 'Should has two dataavailable event');
+      SimpleTest.finish();
     }
   }
   recorder.ondataavailable = function (evt) {
@@ -44,6 +41,9 @@ function startTest() {
      info('blob size = ' + evt.data.size);
      is(evt.data.type, expectedMimeType,
        'Blob data received should have type = ' + expectedMimeType);
+    } else {
+      is(evt.data.type, '',
+         'Blob data received should have empty type');
     }
     dataavailable++;
   }

@@ -4,8 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsISupports.idl"
-
-interface mozIDOMWindowProxy;
+#include "domstubs.idl"
 
 /*
 	The nsPICommandUpdater interface is used by modules that implement
@@ -16,7 +15,7 @@ interface mozIDOMWindowProxy;
 	from an nsICommandManager.
 */
 
-[scriptable, uuid(35e474ae-8016-4c34-9644-edc11f8b0ce1)]
+[scriptable, uuid(B135F602-0BFE-11D5-A73C-F0E420E8293C)]
 interface nsPICommandUpdater : nsISupports
 {
 
@@ -25,7 +24,7 @@ interface nsPICommandUpdater : nsISupports
    * is the window that the command updater lives on.
    * 
    */
-  void    init(in mozIDOMWindowProxy aWindow);
+  void    init(in nsIDOMWindow aWindow);
    
   /*
    * Notify the command manager that the status of a command

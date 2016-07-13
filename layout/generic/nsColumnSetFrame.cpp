@@ -5,7 +5,6 @@
 
 /* rendering object for css3 multi-column layout */
 
-#include "mozilla/unused.h"
 #include "nsColumnSetFrame.h"
 #include "nsCSSRendering.h"
 #include "nsDisplayList.h"
@@ -137,17 +136,9 @@ nsColumnSetFrame::PaintColumnRule(nsRenderingContext* aCtx,
     }
 
     nsRect lineRect(linePt, ruleSize);
-
-    // Assert that we're not drawing a border-image here; if we were, we
-    // couldn't ignore the DrawResult that PaintBorderWithStyleBorder returns.
-    MOZ_ASSERT(border.mBorderImageSource.GetType() == eStyleImageType_Null);
-
-    Unused <<
-      nsCSSRendering::PaintBorderWithStyleBorder(presContext, *aCtx, this,
-                                                 aDirtyRect, lineRect, border,
-                                                 StyleContext(),
-                                                 PaintBorderFlags::SYNC_DECODE_IMAGES,
-                                                 skipSides);
+    nsCSSRendering::PaintBorderWithStyleBorder(presContext, *aCtx, this,
+        aDirtyRect, lineRect, border, StyleContext(),
+        skipSides);
 
     child = nextSibling;
     nextSibling = nextSibling->GetNextSibling();
@@ -236,8 +227,8 @@ nsColumnSetFrame::ChooseColumnStrategy(const nsHTMLReflowState& aReflowState,
   if (isBalancing) {
     const uint32_t MAX_NESTED_COLUMN_BALANCING = 2;
     uint32_t cnt = 0;
-    for (const nsHTMLReflowState* rs = aReflowState.mParentReflowState;
-         rs && cnt < MAX_NESTED_COLUMN_BALANCING; rs = rs->mParentReflowState) {
+    for (const nsHTMLReflowState* rs = aReflowState.parentReflowState;
+         rs && cnt < MAX_NESTED_COLUMN_BALANCING; rs = rs->parentReflowState) {
       if (rs->mFlags.mIsColumnBalancing) {
         ++cnt;
       }
@@ -1140,8 +1131,9 @@ void
 nsColumnSetFrame::SetInitialChildList(ChildListID     aListID,
                                       nsFrameList&    aChildList)
 {
-  MOZ_ASSERT(aListID != kPrincipalList || aChildList.OnlyChild(),
-             "initial principal child list must have exactly one child");
+  MOZ_ASSERT(aListID == kPrincipalList, "unexpected child list");
+  MOZ_ASSERT(aChildList.OnlyChild(),
+             "initial child list must have exactly one child");
   nsContainerFrame::SetInitialChildList(kPrincipalList, aChildList);
 }
 

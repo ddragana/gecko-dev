@@ -6,7 +6,6 @@
 #ifndef MATHMLTEXTRUNFACTORY_H_
 #define MATHMLTEXTRUNFACTORY_H_
 
-#include "nsAutoPtr.h"
 #include "nsTextRunTransformations.h"
 
 /**
@@ -23,7 +22,7 @@ public:
       mSSTYScriptLevel(aSSTYScriptLevel) {}
 
   virtual void RebuildTextRun(nsTransformedTextRun* aTextRun,
-                              mozilla::gfx::DrawTarget* aRefDrawTarget,
+                              gfxContext* aRefContext,
                               gfxMissingFontRecorder* aMFR) override;
   enum {
     // Style effects which may override single character <mi> behaviour

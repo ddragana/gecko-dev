@@ -48,8 +48,8 @@ nsDeckFrame::nsDeckFrame(nsStyleContext* aContext)
   : nsBoxFrame(aContext), mIndex(0)
 {
   nsCOMPtr<nsBoxLayout> layout;
-  NS_NewStackLayout(layout);
-  SetXULLayoutManager(layout);
+  NS_NewStackLayout(PresContext()->PresShell(), layout);
+  SetLayoutManager(layout);
 }
 
 nsIAtom*
@@ -200,7 +200,7 @@ nsDeckFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
 }
 
 NS_IMETHODIMP
-nsDeckFrame::DoXULLayout(nsBoxLayoutState& aState)
+nsDeckFrame::DoLayout(nsBoxLayoutState& aState)
 {
   // Make sure we tweak the state so it does not resize our children.
   // We will do that.
@@ -208,10 +208,10 @@ nsDeckFrame::DoXULLayout(nsBoxLayoutState& aState)
   aState.SetLayoutFlags(NS_FRAME_NO_SIZE_VIEW | NS_FRAME_NO_VISIBILITY);
 
   // do a normal layout
-  nsresult rv = nsBoxFrame::DoXULLayout(aState);
+  nsresult rv = nsBoxFrame::DoLayout(aState);
 
   // run though each child. Hide all but the selected one
-  nsIFrame* box = nsBox::GetChildXULBox(this);
+  nsIFrame* box = nsBox::GetChildBox(this);
 
   nscoord count = 0;
   while (box) 
@@ -220,7 +220,7 @@ nsDeckFrame::DoXULLayout(nsBoxLayoutState& aState)
     if (count != mIndex) 
       HideBox(box);
 
-    box = GetNextXULBox(box);
+    box = GetNextBox(box);
     count++;
   }
 

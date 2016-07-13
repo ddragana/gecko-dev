@@ -2,7 +2,7 @@
  * MIPS DSPr2 optimizations for libjpeg-turbo
  *
  * Copyright (C) 2013, MIPS Technologies, Inc., California.
- * All Rights Reserved.
+ * All rights reserved.
  * Authors:  Teodora Novkovic (teodora.novkovic@imgtec.com)
  *           Darko Laus       (darko.laus@imgtec.com)
  * This software is provided 'as-is', without any express or implied

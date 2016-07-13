@@ -5,8 +5,8 @@
 
 // This tests taskbar jump list functionality available on win7 and up.
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+const Cc = Components.classes;
+const Ci = Components.interfaces;
 
 function test_basics()
 {
@@ -249,9 +249,10 @@ function test_jumplist()
 
 function run_test()
 {
-  if (mozinfo.os != "win") {
+  var isWindows = ("@mozilla.org/windows-registry-key;1" in Components.classes);
+  if (!isWindows)
     return;
-  }
+
   test_basics();
   test_separator();
   test_hashes();

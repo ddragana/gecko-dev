@@ -48,11 +48,9 @@ static inline bool FrameHasBorderOrBackground(nsIFrame* f) {
 class nsDisplayTableItem : public nsDisplayItem
 {
 public:
-  nsDisplayTableItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                     bool aDrawsBackground = true) :
+  nsDisplayTableItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame) :
       nsDisplayItem(aBuilder, aFrame),
-      mPartHasFixedBackground(false),
-      mDrawsBackground(aDrawsBackground) {}
+      mPartHasFixedBackground(false) {}
 
   // With collapsed borders, parts of the collapsed border can extend outside
   // the table part frames, so allow this display element to blow out to our
@@ -69,7 +67,6 @@ public:
 
 private:
   bool mPartHasFixedBackground;
-  bool mDrawsBackground;
 };
 
 class nsAutoPushCurrentTableItem
@@ -121,7 +118,7 @@ enum nsTableColType {
 
 /**
   * nsTableFrame maps the inner portion of a table (everything except captions.)
-  * Used as a pseudo-frame within nsTableWrapperFrame, it may also be used
+  * Used as a pseudo-frame within nsTableOuterFrame, it may also be used
   * stand-alone as the top-level frame.
   *
   * The principal child list contains row group frames. There is also an
@@ -137,11 +134,11 @@ public:
   NS_DECL_QUERYFRAME_TARGET(nsTableFrame)
   NS_DECL_FRAMEARENA_HELPERS
 
-  typedef nsTArray<nsIFrame*> FrameTArray;
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(PositionedTablePartArray, FrameTArray)
+  NS_DECLARE_FRAME_PROPERTY(PositionedTablePartArray,
+                            DeleteValue<nsTArray<nsIFrame*>>)
 
-  /** nsTableWrapperFrame has intimate knowledge of the inner table frame */
-  friend class nsTableWrapperFrame;
+  /** nsTableOuterFrame has intimate knowledge of the inner table frame */
+  friend class nsTableOuterFrame;
 
   /** instantiate a new instance of nsTableRowFrame.
     * @param aPresShell the pres shell for this frame
@@ -221,12 +218,11 @@ public:
   /** helper method to find the table parent of any table frame object */
   static nsTableFrame* GetTableFrame(nsIFrame* aSourceFrame);
 
-  /* Like GetTableFrame, but will set *aDidPassThrough to false if we don't
-   * pass through aMustPassThrough on the way to the table.
+  /* Like GetTableFrame, but will return nullptr if we don't pass through
+   * aMustPassThrough on the way to the table.
    */
   static nsTableFrame* GetTableFramePassingThrough(nsIFrame* aMustPassThrough,
-                                                   nsIFrame* aSourceFrame,
-                                                   bool* aDidPassThrough);
+                                                   nsIFrame* aSourceFrame);
 
   typedef void (* DisplayGenericTablePartTraversal)
       (nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
@@ -276,10 +272,9 @@ public:
    * columns, row groups, rows, and cells), and the table border, and all
    * internal borders if border-collapse is on.
    */
-  DrawResult PaintTableBorderBackground(nsDisplayListBuilder* aBuilder,
-                                        nsRenderingContext& aRenderingContext,
+  DrawResult PaintTableBorderBackground(nsRenderingContext& aRenderingContext,
                                         const nsRect& aDirtyRect,
-                                        nsPoint aPt);
+                                        nsPoint aPt, uint32_t aBGPaintFlags);
 
   /** Get the outer half (i.e., the part outside the height and width of
    *  the table) of the largest segment (?) of border-collapsed border on
@@ -316,7 +311,8 @@ public:
   void AddBCDamageArea(const mozilla::TableArea& aValue);
   bool BCRecalcNeeded(nsStyleContext* aOldStyleContext,
                         nsStyleContext* aNewStyleContext);
-  void PaintBCBorders(DrawTarget& aDrawTarget, const nsRect& aDirtyRect);
+  void PaintBCBorders(nsRenderingContext& aRenderingContext,
+                      const nsRect&        aDirtyRect);
 
   virtual void MarkIntrinsicISizesDirty() override;
   // For border-collapse tables, the caller must not add padding and
@@ -601,7 +597,7 @@ public:
                                    const nsRect& aOrigVisualOverflow,
                                    bool aIsFirstReflow);
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
+  virtual bool UpdateOverflow() override;
 
 protected:
 
@@ -716,7 +712,7 @@ protected:
 
   nsIFrame* GetFirstBodyRowGroupFrame();
 public:
-  typedef AutoTArray<nsTableRowGroupFrame*, 8> RowGroupArray;
+  typedef nsAutoTArray<nsTableRowGroupFrame*, 8> RowGroupArray;
   /**
    * Push all our child frames from the aRowGroups array, in order, starting
    * from the frame at aPushFrom to the end of the array. The frames are put on
@@ -765,6 +761,12 @@ public:
 
   bool NeedToCollapse() const;
   void SetNeedToCollapse(bool aValue);
+
+  bool HasZeroColSpans() const;
+  void SetHasZeroColSpans(bool aValue);
+
+  bool NeedColSpanExpansion() const;
+  void SetNeedColSpanExpansion(bool aValue);
 
   /** The GeometryDirty bit is similar to the NS_FRAME_IS_DIRTY frame
     * state bit, which implies that all descendants are dirty.  The
@@ -861,7 +863,7 @@ protected:
   void DumpRowGroup(nsIFrame* aChildFrame);
 #endif
   // DATA MEMBERS
-  AutoTArray<nsTableColFrame*, 8> mColFrames;
+  nsAutoTArray<nsTableColFrame*, 8> mColFrames;
 
   struct TableBits {
     uint32_t mHaveReflowedColGroups:1; // have the col groups gotten their initial reflow
@@ -872,7 +874,9 @@ protected:
     uint32_t mNeedToCalcBCBorders:1;
     uint32_t mGeometryDirty:1;
     uint32_t mIStartContBCBorder:8;
-    uint32_t mNeedToCollapse:1;        // rows, cols that have visibility:collapse need to be collapsed
+    uint32_t mNeedToCollapse:1;    // rows, cols that have visibility:collapse need to be collapsed
+    uint32_t mHasZeroColSpans:1;
+    uint32_t mNeedColSpanExpansion:1;
     uint32_t mResizedColumns:1;        // have we resized columns since last reflow?
   } mBits;
 
@@ -938,6 +942,27 @@ inline bool nsTableFrame::NeedToCollapse() const
 {
   return (bool) static_cast<nsTableFrame*>(FirstInFlow())->mBits.mNeedToCollapse;
 }
+
+inline void nsTableFrame::SetHasZeroColSpans(bool aValue)
+{
+  mBits.mHasZeroColSpans = (unsigned)aValue;
+}
+
+inline bool nsTableFrame::HasZeroColSpans() const
+{
+  return (bool)mBits.mHasZeroColSpans;
+}
+
+inline void nsTableFrame::SetNeedColSpanExpansion(bool aValue)
+{
+  mBits.mNeedColSpanExpansion = (unsigned)aValue;
+}
+
+inline bool nsTableFrame::NeedColSpanExpansion() const
+{
+  return (bool)mBits.mNeedColSpanExpansion;
+}
+
 
 inline nsFrameList& nsTableFrame::GetColGroups()
 {

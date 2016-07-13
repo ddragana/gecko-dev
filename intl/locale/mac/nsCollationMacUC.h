@@ -11,10 +11,18 @@
 #include "mozilla/Attributes.h"
 
 #include "unicode/ucol.h"
+#include <Carbon/Carbon.h>
+
+// Maximum number of characters for a buffer to remember 
+// the generated collation key.
+const uint32_t kCacheSize = 128;
+// According to the documentation, the length of the key should typically be
+// at least 5 * textLength, but 6* would be safer.
+const uint32_t kCollationValueSizeFactor = 6;
 
 class nsCollationMacUC final : public nsICollation {
 
-public:
+public: 
   nsCollationMacUC();
 
   // nsISupports interface
@@ -24,12 +32,15 @@ public:
   NS_DECL_NSICOLLATION
 
 protected:
-  ~nsCollationMacUC();
+  ~nsCollationMacUC(); 
 
   nsresult ConvertLocaleICU(nsILocale* aNSLocale, char** aICULocale);
+  nsresult ConvertLocale(nsILocale* aNSLocale, LocaleRef* aMacLocale);
   nsresult ConvertStrength(const int32_t aStrength,
                            UCollationStrength* aStrengthOut,
                            UColAttributeValue* aCaseLevelOut);
+  nsresult StrengthToOptions(const int32_t aStrength,
+                             UCCollateOptions* aOptions);
   nsresult EnsureCollator(const int32_t newStrength);
   nsresult CleanUpCollator(void);
 
@@ -37,8 +48,13 @@ private:
   bool mInit;
   bool mHasCollator;
   char* mLocaleICU;
+  LocaleRef mLocale;
   int32_t mLastStrength;
   UCollator* mCollatorICU;
+  CollatorRef mCollator;
+  void *mBuffer; // temporary buffer to generate collation keys
+  uint32_t mBufferLen; // byte length of buffer
+  bool mUseICU;
 };
 
 #endif  /* nsCollationMacUC_h_ */

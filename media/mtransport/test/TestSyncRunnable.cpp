@@ -12,7 +12,7 @@ using namespace mozilla;
 
 nsIThread *gThread = nullptr;
 
-class TestRunnable : public Runnable {
+class TestRunnable : public nsRunnable {
 public:
   TestRunnable() : ran_(false) {}
 
@@ -46,8 +46,8 @@ public:
 
 TEST_F(TestSyncRunnable, TestDispatch)
 {
-  RefPtr<TestRunnable> r(new TestRunnable());
-  RefPtr<SyncRunnable> s(new SyncRunnable(r));
+  nsRefPtr<TestRunnable> r(new TestRunnable());
+  nsRefPtr<SyncRunnable> s(new SyncRunnable(r));
   s->DispatchToThread(gThread);
 
   ASSERT_TRUE(r->ran());
@@ -55,7 +55,23 @@ TEST_F(TestSyncRunnable, TestDispatch)
 
 TEST_F(TestSyncRunnable, TestDispatchStatic)
 {
-  RefPtr<TestRunnable> r(new TestRunnable());
+  nsRefPtr<TestRunnable> r(new TestRunnable());
   SyncRunnable::DispatchToThread(gThread, r);
   ASSERT_TRUE(r->ran());
+}
+
+
+#include "mtransport_test_utils.h"
+MtransportTestUtils *test_utils;
+
+int main(int argc, char **argv)
+{
+  test_utils = new MtransportTestUtils();
+  // Start the tests
+  ::testing::InitGoogleTest(&argc, argv);
+
+  int rv = RUN_ALL_TESTS();
+
+  delete test_utils;
+  return rv;
 }

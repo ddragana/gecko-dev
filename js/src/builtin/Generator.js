@@ -88,7 +88,6 @@ function LegacyGeneratorNext(val) {
         throw e;
     }
 }
-_SetCanonicalName(LegacyGeneratorNext, "next");
 
 function LegacyGeneratorThrow(val) {
     if (!IsObject(this) || !IsLegacyGeneratorObject(this))

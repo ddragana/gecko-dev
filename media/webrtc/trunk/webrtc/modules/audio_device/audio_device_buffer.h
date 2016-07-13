@@ -22,6 +22,7 @@ const uint32_t kPulsePeriodMs = 1000;
 const uint32_t kMaxBufferSizeBytes = 3840; // 10ms in stereo @ 96kHz
 
 class AudioDeviceObserver;
+class MediaFile;
 
 class AudioDeviceBuffer
 {

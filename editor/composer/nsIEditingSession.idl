@@ -6,10 +6,9 @@
 #include "nsISupports.idl"
 #include "domstubs.idl"
 
-interface mozIDOMWindowProxy;
 interface nsIEditor;
 
-[scriptable, uuid(24f963d1-e6fc-43ea-a206-99ac5fcc5265)]
+[scriptable, uuid(24f3f4da-18a4-448d-876d-7360fefac029)]
 
 interface nsIEditingSession : nsISupports
 {
@@ -40,8 +39,7 @@ interface nsIEditingSession : nsISupports
    *                                    (or part of it) editable.
    *  @param aInteractive if PR_FALSE turn off scripting and plugins
    */
-  void makeWindowEditable(in mozIDOMWindowProxy window,
-                          in string aEditorType,
+  void makeWindowEditable(in nsIDOMWindow window, in string aEditorType,
                           in boolean doAfterUriLoad,
                           in boolean aMakeWholeDocumentEditable,
                           in boolean aInteractive);
@@ -53,48 +51,48 @@ interface nsIEditingSession : nsISupports
    *  Use this, passing the content root window, to test if we've set up editing
    *  for this content.
    */
-  boolean windowIsEditable(in mozIDOMWindowProxy window);
+  boolean windowIsEditable(in nsIDOMWindow window);
 
   /**
    *  Get the editor for this window. May return null
    */
-	nsIEditor getEditorForWindow(in mozIDOMWindowProxy window);
+	nsIEditor getEditorForWindow(in nsIDOMWindow window);
 
   /**
    *  Setup editor and related support objects
    */
-  void setupEditorOnWindow(in mozIDOMWindowProxy window);
+  void setupEditorOnWindow(in nsIDOMWindow window);
 
   /**
    *   Destroy editor and related support objects
    */
-  void tearDownEditorOnWindow(in mozIDOMWindowProxy window);
+  void tearDownEditorOnWindow(in nsIDOMWindow window);
 
-  void setEditorOnControllers(in mozIDOMWindowProxy aWindow,
+  void setEditorOnControllers(in nsIDOMWindow aWindow,
                               in nsIEditor aEditor);
 
   /**
    * Disable scripts and plugins in aWindow.
    */
-  void disableJSAndPlugins(in mozIDOMWindowProxy aWindow);
+  void disableJSAndPlugins(in nsIDOMWindow aWindow);
 
   /**
    * Restore JS and plugins (enable/disable them) according to the state they
    * were before the last call to disableJSAndPlugins.
    */
-  void restoreJSAndPlugins(in mozIDOMWindowProxy aWindow);
+  void restoreJSAndPlugins(in nsIDOMWindow aWindow);
 
   /**
    * Removes all the editor's controllers/listeners etc and makes the window
    * uneditable.
    */
-  void detachFromWindow(in mozIDOMWindowProxy aWindow);
+  void detachFromWindow(in nsIDOMWindow aWindow);
 
   /**
    * Undos detachFromWindow(), reattaches this editing session/editor
    * to the window.
    */
-  void reattachToWindow(in mozIDOMWindowProxy aWindow);
+  void reattachToWindow(in nsIDOMWindow aWindow);
 
   /**
    * Whether this session has disabled JS and plugins.

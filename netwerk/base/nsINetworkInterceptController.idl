@@ -4,15 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsISupports.idl"
-#include "nsIContentPolicyBase.idl"
 
 interface nsIChannel;
-interface nsIConsoleReportCollector;
 interface nsIOutputStream;
 interface nsIURI;
 
 %{C++
-#include "nsIConsoleReportCollector.h"
 namespace mozilla {
 namespace dom {
 class ChannelInfo;
@@ -29,7 +26,7 @@ class ChannelInfo;
  * which do not implement nsIChannel.
  */
 
-[scriptable, uuid(f4b82975-6a86-4cc4-87fe-9a1fd430c86d)]
+[scriptable, uuid(1062c96a-d73c-4ad5-beb7-6e803e414973)]
 interface nsIInterceptedChannel : nsISupports
 {
     /**
@@ -53,11 +50,9 @@ interface nsIInterceptedChannel : nsISupports
     /**
      * Instruct a channel that has been intercepted that a response has been
      * synthesized and can now be read. No further header modification is allowed
-     * after this point. The caller may optionally pass a spec for a URL that
-     * this response originates from; an empty string will cause the original
-     * intercepted request's URL to be used instead.
+     * after this point.
      */
-    void finishSynthesizedResponse(in ACString finalURLSpec);
+    void finishSynthesizedResponse();
 
     /**
      * Cancel the pending intercepted request.
@@ -77,43 +72,15 @@ interface nsIInterceptedChannel : nsISupports
     readonly attribute nsIChannel channel;
 
     /**
-     * The URL of the underlying channel object, corrected for a potential
-     * secure upgrade.
+     * True if the underlying request was caused by a navigation attempt.
      */
-    readonly attribute nsIURI secureUpgradedChannelURI;
+    readonly attribute bool isNavigation;
 
     /**
      * This method allows to override the channel info for the channel.
      */
     [noscript]
     void setChannelInfo(in ChannelInfo channelInfo);
-
-    /**
-     * Get the internal load type from the underlying channel.
-     */
-    [noscript]
-    readonly attribute nsContentPolicyType internalContentPolicyType;
-
-    [noscript]
-    readonly attribute nsIConsoleReportCollector consoleReportCollector;
-
-%{C++
-    already_AddRefed<nsIConsoleReportCollector>
-    GetConsoleReportCollector()
-    {
-      nsCOMPtr<nsIConsoleReportCollector> reporter;
-      GetConsoleReportCollector(getter_AddRefs(reporter));
-      return reporter.forget();
-    }
-%}
-
-    /**
-     * Allow the ServiceWorkerManager to set an RAII-style object on the
-     * intercepted channel that should be released once the channel is
-     * torn down.
-     */
-    [noscript]
-    void setReleaseHandle(in nsISupports aHandle);
 };
 
 /**
@@ -122,7 +89,7 @@ interface nsIInterceptedChannel : nsISupports
  * request should be intercepted before any network request is initiated.
  */
 
-[scriptable, uuid(70d2b4fe-a552-48cd-8d93-1d8437a56b53)]
+[scriptable, uuid(69150b77-b561-43a2-bfba-7301dd5a35d0)]
 interface nsINetworkInterceptController : nsISupports
 {
     /**
@@ -132,7 +99,7 @@ interface nsINetworkInterceptController : nsISupports
      * @param aURI the URI being requested by a channel
      * @param aIsNavigate True if the request is for a navigation, false for a fetch.
      */
-    bool shouldPrepareForIntercept(in nsIURI aURI, in bool aIsNonSubresourceRequest);
+    bool shouldPrepareForIntercept(in nsIURI aURI, in bool aIsNavigate);
 
     /**
      * Notification when a given intercepted channel is prepared to accept a synthesized

@@ -12,8 +12,8 @@
 // Utility class for handing back parsed directives and (optional) values
 class nsSecurityHeaderDirective : public mozilla::LinkedListElement<nsSecurityHeaderDirective> {
 public:
-  nsCString mName;
-  nsCString mValue;
+  nsAutoCString mName;
+  nsAutoCString mValue;
 };
 
 // This class parses security-related HTTP headers like
@@ -67,7 +67,7 @@ private:
   const char *mCursor;
   nsSecurityHeaderDirective *mDirective;
 
-  nsCString mOutput;
+  nsAutoCString mOutput;
   bool mError;
 };
 

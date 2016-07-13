@@ -51,9 +51,11 @@ public:
   const static uint32_t kSendingChunkSize = 4095;
   const static uint32_t kTCPSendBufferSize = 131072;
 
-  // This is roughly the amount of data a suspended channel will have to
-  // buffer before h2 flow control kicks in.
-  const static uint32_t kInitialRwin = 12 * 1024 * 1024; // 12MB
+  // until we have an API that can push back on receiving data (right now
+  // WriteSegments is obligated to accept data and buffer) there is no
+  // reason to throttle with the rwin other than in server push
+  // scenarios.
+  const static uint32_t kInitialRwin = 256 * 1024 * 1024;
 
   const static uint32_t kDefaultMaxConcurrent = 100;
 
@@ -68,7 +70,7 @@ public:
 
     // this could go either way, but because there are network instances of
     // it being a hard error we should consider it hard.
-    if (code == NS_ERROR_FAILURE || code == NS_ERROR_OUT_OF_MEMORY) {
+    if (code == NS_ERROR_FAILURE) {
       return false;
     }
 

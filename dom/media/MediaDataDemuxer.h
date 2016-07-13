@@ -14,7 +14,7 @@
 #include "MediaInfo.h"
 #include "TimeUnits.h"
 #include "nsISupportsImpl.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsTArray.h"
 
 namespace mozilla {
@@ -46,11 +46,23 @@ public:
   // Initializes the demuxer. Other methods cannot be called unless
   // initialization has completed and succeeded.
   // Typically a demuxer will wait to parse the metadata before resolving the
-  // promise. The promise must not be resolved until sufficient data is
-  // supplied. For example, an incomplete metadata would cause the promise to be
-  // rejected should no more data be coming, while the demuxer would wait
-  // otherwise.
-  virtual RefPtr<InitPromise> Init() = 0;
+  // promise. The promise will be rejected with WAITING_FOR_DATA should
+  // insufficient data be available at the time. Init() would have to be called
+  // again to retry once more data has been received.
+  virtual nsRefPtr<InitPromise> Init() = 0;
+
+  // MediaFormatReader ensures that calls to the MediaDataDemuxer are thread-safe.
+  // This is done by having multiple demuxers, created with Clone(), one per
+  // running thread.
+  // However, should the MediaDataDemuxer object guaranteed to be thread-safe
+  // such cloning is unecessary and only one demuxer will be used across
+  // all threads.
+  virtual bool IsThreadSafe() { return false; }
+
+  // Clone the demuxer and return a new initialized demuxer.
+  // This can only be called once Init() has succeeded.
+  // The new demuxer can be immediately use to retrieve the track demuxers.
+  virtual already_AddRefed<MediaDataDemuxer> Clone() const = 0;
 
   // Returns true if a aType track type is available.
   virtual bool HasTrackType(TrackInfo::TrackType aType) const = 0;
@@ -70,10 +82,6 @@ public:
   // Returns true if the underlying resource allows seeking.
   virtual bool IsSeekable() const = 0;
 
-  // Returns true if the underlying resource can only seek within buffered
-  // ranges.
-  virtual bool IsSeekableOnlyInBufferedRanges() const { return false; }
-
   // Returns the media's crypto information, or nullptr if media isn't
   // encrypted.
   virtual UniquePtr<EncryptionInfo> GetCrypto()
@@ -81,17 +89,15 @@ public:
     return nullptr;
   }
 
-  // Notifies the demuxer that the underlying resource has received more data
-  // since the demuxer was initialized.
+  // Notifies the demuxer that the underlying resource has received more data.
   // The demuxer can use this mechanism to inform all track demuxers that new
-  // data is available and to refresh its buffered range.
-  virtual void NotifyDataArrived() { }
+  // data is available.
+  virtual void NotifyDataArrived(uint32_t aLength, int64_t aOffset) { }
 
-  // Notifies the demuxer that the underlying resource has had data removed
-  // since the demuxer was initialized.
+  // Notifies the demuxer that the underlying resource has had data removed.
   // The demuxer can use this mechanism to inform all track demuxers to update
-  // its buffered range.
-  // This will be called should the demuxer be used with MediaSourceResource.
+  // its TimeIntervals.
+  // This will be called should the demuxer be used with MediaSource.
   virtual void NotifyDataRemoved() { }
 
   // Indicate to MediaFormatReader if it should compute the start time
@@ -113,7 +119,7 @@ public:
   class SamplesHolder {
   public:
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SamplesHolder)
-    nsTArray<RefPtr<MediaRawData>> mSamples;
+    nsTArray<nsRefPtr<MediaRawData>> mSamples;
   private:
     ~SamplesHolder() {}
   };
@@ -129,7 +135,7 @@ public:
   };
 
   typedef MozPromise<media::TimeUnit, DemuxerFailureReason, /* IsExclusive = */ true> SeekPromise;
-  typedef MozPromise<RefPtr<SamplesHolder>, DemuxerFailureReason, /* IsExclusive = */ true> SamplesPromise;
+  typedef MozPromise<nsRefPtr<SamplesHolder>, DemuxerFailureReason, /* IsExclusive = */ true> SamplesPromise;
   typedef MozPromise<uint32_t, SkipFailureHolder, /* IsExclusive = */ true> SkipAccessPointPromise;
 
   // Returns the TrackInfo (a.k.a Track Description) for this track.
@@ -141,7 +147,7 @@ public:
 
   // Seeks to aTime. Upon success, SeekPromise will be resolved with the
   // actual time seeked to. Typically the random access point time
-  virtual RefPtr<SeekPromise> Seek(media::TimeUnit aTime) = 0;
+  virtual nsRefPtr<SeekPromise> Seek(media::TimeUnit aTime) = 0;
 
   // Returns the next aNumSamples sample(s) available.
   // If only a lesser amount of samples is available, only those will be
@@ -149,7 +155,7 @@ public:
   // A aNumSamples value of -1 indicates to return all remaining samples.
   // A video sample is typically made of a single video frame while an audio
   // sample will contains multiple audio frames.
-  virtual RefPtr<SamplesPromise> GetSamples(int32_t aNumSamples = 1) = 0;
+  virtual nsRefPtr<SamplesPromise> GetSamples(int32_t aNumSamples = 1) = 0;
 
   // Returns true if a call to GetSamples() may block while waiting on the
   // underlying resource to return the data.
@@ -185,7 +191,7 @@ public:
   // The first frame returned by the next call to GetSamples() will be the
   // first random access point found after aTimeThreshold.
   // Upon success, returns the number of frames skipped.
-  virtual RefPtr<SkipAccessPointPromise> SkipToNextRandomAccessPoint(media::TimeUnit aTimeThreshold) = 0;
+  virtual nsRefPtr<SkipAccessPointPromise> SkipToNextRandomAccessPoint(media::TimeUnit aTimeThreshold) = 0;
 
   // Gets the resource's offset used for the last Seek() or GetSample().
   // A negative value indicates that this functionality isn't supported.
@@ -201,12 +207,7 @@ public:
 
   virtual media::TimeIntervals GetBuffered() = 0;
 
-  // By default, it is assumed that the entire resource can be evicted once
-  // all samples have been demuxed.
-  virtual int64_t GetEvictionOffset(const media::TimeUnit& aTime)
-  {
-    return INT64_MAX;
-  }
+  virtual int64_t GetEvictionOffset(media::TimeUnit aTime) = 0;
 
   // If the MediaTrackDemuxer and MediaDataDemuxer hold cross references.
   // BreakCycles must be overridden.

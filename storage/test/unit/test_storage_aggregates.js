@@ -11,7 +11,7 @@ function setup()
   getOpenedDatabase().createTable("function_tests", "id INTEGER PRIMARY KEY");
 
   var stmt = createStatement("INSERT INTO function_tests (id) VALUES(?1)");
-  for (let i = 0; i < testNums.length; ++i) {
+  for(var i = 0; i < testNums.length; ++i) {
     stmt.bindByIndex(0, testNums[i]);
     stmt.execute();
   }
@@ -23,17 +23,17 @@ var testSquareAndSumFunction = {
   calls: 0,
   _sas: 0,
 
-  reset() {
+  reset: function() {
     this.calls = 0;
-    this._sas = 0;
+    this._sas  = 0;
   },
 
-  onStep(val) {
+  onStep: function(val) {
     ++this.calls;
     this._sas += val.getInt32(0) * val.getInt32(0);
   },
 
-  onFinal() {
+  onFinal: function() {
     var retval = this._sas;
     this._sas = 0; // Prepare for next group
     return retval;
@@ -79,9 +79,7 @@ function test_aggregate_no_aliases()
 function test_aggregate_call()
 {
   var stmt = createStatement("SELECT test_sas_aggr(id) FROM function_tests");
-  while (stmt.executeStep()) {
-    // Do nothing.
-  }
+  while(stmt.executeStep());
   do_check_eq(testNums.length, testSquareAndSumFunction.calls);
   testSquareAndSumFunction.reset();
   stmt.finalize();
@@ -90,7 +88,7 @@ function test_aggregate_call()
 function test_aggregate_result()
 {
   var sas = 0;
-  for (var i = 0; i < testNums.length; ++i) {
+  for(var i = 0; i < testNums.length; ++i) {
     sas += testNums[i] * testNums[i];
   }
   var stmt = createStatement("SELECT test_sas_aggr(id) FROM function_tests");

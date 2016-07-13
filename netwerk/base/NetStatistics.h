@@ -11,7 +11,6 @@
 
 #include "nsCOMPtr.h"
 #include "nsError.h"
-#include "nsINetworkInterface.h"
 #include "nsINetworkManager.h"
 #include "nsINetworkStatsServiceProxy.h"
 #include "nsThreadUtils.h"
@@ -25,7 +24,7 @@ const static uint64_t NETWORK_STATS_THRESHOLD = 65536;
 const static char NETWORK_STATS_NO_SERVICE_TYPE[] = "";
 
 inline nsresult
-GetActiveNetworkInfo(nsCOMPtr<nsINetworkInfo> &aNetworkInfo)
+GetActiveNetworkInterface(nsCOMPtr<nsINetworkInterface> &aNetworkInterface)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -34,32 +33,32 @@ GetActiveNetworkInfo(nsCOMPtr<nsINetworkInfo> &aNetworkInfo)
     do_GetService("@mozilla.org/network/manager;1", &rv);
 
   if (NS_FAILED(rv) || !networkManager) {
-    aNetworkInfo = nullptr;
+    aNetworkInterface = nullptr;
     return rv;
   }
 
-  networkManager->GetActiveNetworkInfo(getter_AddRefs(aNetworkInfo));
+  networkManager->GetActive(getter_AddRefs(aNetworkInterface));
 
   return NS_OK;
 }
 
-class SaveNetworkStatsEvent : public Runnable {
+class SaveNetworkStatsEvent : public nsRunnable {
 public:
   SaveNetworkStatsEvent(uint32_t aAppId,
-                        bool aIsInIsolatedMozBrowser,
-                        nsMainThreadPtrHandle<nsINetworkInfo> &aActiveNetworkInfo,
+                        bool aIsInBrowser,
+                        nsMainThreadPtrHandle<nsINetworkInterface> &aActiveNetwork,
                         uint64_t aCountRecv,
                         uint64_t aCountSent,
                         bool aIsAccumulative)
     : mAppId(aAppId),
-      mIsInIsolatedMozBrowser(aIsInIsolatedMozBrowser),
-      mActiveNetworkInfo(aActiveNetworkInfo),
+      mIsInBrowser(aIsInBrowser),
+      mActiveNetwork(aActiveNetwork),
       mCountRecv(aCountRecv),
       mCountSent(aCountSent),
       mIsAccumulative(aIsAccumulative)
   {
     MOZ_ASSERT(mAppId != NECKO_NO_APP_ID);
-    MOZ_ASSERT(mActiveNetworkInfo);
+    MOZ_ASSERT(mActiveNetwork);
   }
 
   NS_IMETHOD Run()
@@ -75,8 +74,8 @@ public:
 
     // save the network stats through NetworkStatsServiceProxy
     mNetworkStatsServiceProxy->SaveAppStats(mAppId,
-                                            mIsInIsolatedMozBrowser,
-                                            mActiveNetworkInfo,
+                                            mIsInBrowser,
+                                            mActiveNetwork,
                                             PR_Now() / 1000,
                                             mCountRecv,
                                             mCountSent,
@@ -87,8 +86,8 @@ public:
   }
 private:
   uint32_t mAppId;
-  bool     mIsInIsolatedMozBrowser;
-  nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
+  bool     mIsInBrowser;
+  nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
   uint64_t mCountRecv;
   uint64_t mCountSent;
   bool mIsAccumulative;

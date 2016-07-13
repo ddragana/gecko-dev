@@ -219,18 +219,9 @@ FrameTreeInternal.prototype = {
       return;
     }
 
-    // onStateChange will be fired when loading the initial about:blank URI for
-    // a browser, which we don't actually care about. This is particularly for
-    // the case of unrestored background tabs, where the content has not yet
-    // been restored: we don't want to accidentally send any updates to the
-    // parent when the about:blank placeholder page has loaded.
-    if (!this._chromeGlobal.docShell.hasLoadedNonBlankURI) {
-      return;
-    }
-
     if (stateFlags & Ci.nsIWebProgressListener.STATE_START) {
       // Clear the list of frames until we can recollect it.
-      this._frames = new WeakMap();
+      this._frames.clear();
 
       // Notify observers that the frame tree has been reset.
       this.notifyObservers("onFrameTreeReset");

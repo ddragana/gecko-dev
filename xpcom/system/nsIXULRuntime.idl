@@ -23,7 +23,7 @@ bool BrowserTabsRemoteAutostart();
  *                    stable/frozen, please contact Benjamin Smedberg.
  */
 
-[scriptable, uuid(a1b2e167-b748-42bf-ba85-996ec39062b9)]
+[scriptable, uuid(ce9d05f4-0c20-4f52-87e1-3a425e61e2f3)]
 interface nsIXULRuntime : nsISupports
 {
   /**
@@ -74,7 +74,6 @@ interface nsIXULRuntime : nsISupports
   const unsigned long PROCESS_TYPE_CONTENT = 2;
   const unsigned long PROCESS_TYPE_IPDLUNITTEST = 3;
   const unsigned long PROCESS_TYPE_GMPLUGIN = 4;
-  const unsigned long PROCESS_TYPE_GPU = 5;
 
   /**
    * The type of the caller's process.  Returns one of the values above.
@@ -93,16 +92,15 @@ interface nsIXULRuntime : nsISupports
   readonly attribute boolean browserTabsRemoteAutostart;
 
   /**
-   * A numeric value indicating whether multiprocess might be blocked.
-   * Possible values can be found at nsAppRunner.cpp. A value of 0
-   * represents not blocking.
-   */
-   readonly attribute unsigned long multiprocessBlockPolicy;
-
-  /**
    * If true, the accessibility service is running.
    */
   readonly attribute boolean accessibilityEnabled;
+
+  /**
+   * Indicates if the active accessibility client is blacklisted for e10s.
+   * DO NOT USE! This is temporary and will be removed.
+   */
+  readonly attribute boolean accessibilityIsBlacklistedForE10S;
 
   /**
    * Indicates whether the current Firefox build is 64-bit.

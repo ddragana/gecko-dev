@@ -1,10 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
+const Cr = Components.results;
 
 Cu.import("resource://testing-common/httpd.js");
 
@@ -165,7 +165,7 @@ function setup_test_identity(identity, cert, cb) {
   function keyGenerated(err, kpo) {
     store.addIdentity(identity, kpo, cert);
     cb();
-  }
+  };
 
   jwcrypto.generateKeyPair("DS160", keyGenerated);
 }
@@ -233,14 +233,14 @@ function setup_provisioning(identity, afterSetupCallback, doneProvisioningCallba
 }
 
 // Switch debug messages on by default
-var initialPrefDebugValue = false;
+let initialPrefDebugValue = false;
 try {
   initialPrefDebugValue = Services.prefs.getBoolPref("toolkit.identity.debug");
 } catch(noPref) {}
 Services.prefs.setBoolPref("toolkit.identity.debug", true);
 
 // Switch on firefox accounts
-var initialPrefFXAValue = false;
+let initialPrefFXAValue = false;
 try {
   initialPrefFXAValue = Services.prefs.getBoolPref("identity.fxaccounts.enabled");
 } catch(noPref) {}

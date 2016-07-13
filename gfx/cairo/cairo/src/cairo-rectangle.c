@@ -213,7 +213,8 @@ _cairo_box_intersects_line_segment (cairo_box_t *box, cairo_line_t *line)
 	    xlen = - xlen;
 	}
 
-        if (t1 > xlen || t2 < 0)
+	if ((t1 < 0 || t1 > xlen) &&
+	    (t2 < 0 || t2 > xlen))
 	    return FALSE;
     } else {
 	/* Fully vertical line -- check that X is in bounds */
@@ -231,7 +232,8 @@ _cairo_box_intersects_line_segment (cairo_box_t *box, cairo_line_t *line)
 	    ylen = - ylen;
 	}
 
-        if (t3 > ylen || t4 < 0)
+	if ((t3 < 0 || t3 > ylen) &&
+	    (t4 < 0 || t4 > ylen))
 	    return FALSE;
     } else {
 	/* Fully horizontal line -- check Y */

@@ -25,14 +25,11 @@ DIRS += [
     'gmp-plugin',
     'gmp-plugin-openh264',
     'imagecapture',
-    'mediasink',
     'mediasource',
     'ogg',
     'platforms',
     'systemservices',
-    'wave',
     'webaudio',
-    'webm',
     'webrtc',
     'webspeech',
     'webvtt',
@@ -42,6 +39,15 @@ DIRS += [
 if CONFIG['MOZ_RAW']:
     DIRS += ['raw']
 
+if CONFIG['MOZ_WAVE']:
+    DIRS += ['wave']
+
+if CONFIG['MOZ_WEBM']:
+    DIRS += ['webm']
+
+if CONFIG['MOZ_GSTREAMER']:
+    DIRS += ['gstreamer']
+
 if CONFIG['MOZ_DIRECTSHOW']:
     DIRS += ['directshow']
 
@@ -50,6 +56,9 @@ if CONFIG['MOZ_ANDROID_OMX']:
 
 if CONFIG['MOZ_FMP4']:
     DIRS += ['fmp4']
+
+if CONFIG['MOZ_APPLEMEDIA']:
+    DIRS += ['apple']
 
 if CONFIG['MOZ_WEBRTC']:
     DIRS += ['bridge']
@@ -65,9 +74,12 @@ TEST_DIRS += [
     'gtest',
 ]
 
+MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
+
 MOCHITEST_MANIFESTS += [
     'test/mochitest.ini',
     'tests/mochitest/identity/mochitest.ini',
+    'tests/mochitest/ipc/mochitest.ini',
 ]
 
 if CONFIG['MOZ_WEBRTC']:
@@ -84,89 +96,73 @@ XPIDL_MODULE = 'dom_media'
 
 EXPORTS += [
     'AbstractMediaDecoder.h',
-    'AccurateSeekTask.h',
-    'ADTSDecoder.h',
-    'ADTSDemuxer.h',
     'AudioBufferUtils.h',
     'AudioChannelFormat.h',
     'AudioCompactor.h',
-    'AudioConverter.h',
     'AudioMixer.h',
-    'AudioPacketizer.h',
     'AudioSampleFormat.h',
     'AudioSegment.h',
     'AudioStream.h',
-    'Benchmark.h',
     'BufferMediaResource.h',
     'CubebUtils.h',
-    'DecoderDoctorDiagnostics.h',
+    'DecodedStream.h',
     'DecoderTraits.h',
     'DOMMediaStream.h',
     'EncodedBufferCache.h',
     'FileBlockCache.h',
-    'FrameStatistics.h',
+    'GraphDriver.h',
     'Intervals.h',
     'Latency.h',
     'MediaCache.h',
-    'MediaCallbackID.h',
     'MediaData.h',
     'MediaDataDemuxer.h',
     'MediaDecoder.h',
     'MediaDecoderOwner.h',
     'MediaDecoderReader.h',
     'MediaDecoderStateMachine.h',
-    'MediaEventSource.h',
     'MediaFormatReader.h',
     'MediaInfo.h',
     'MediaMetadataManager.h',
-    'MediaPrefs.h',
     'MediaQueue.h',
     'MediaRecorder.h',
     'MediaResource.h',
-    'MediaResourceCallback.h',
     'MediaSegment.h',
-    'MediaStatistics.h',
     'MediaStreamGraph.h',
-    'MediaStreamListener.h',
     'MediaTimer.h',
     'MediaTrack.h',
     'MediaTrackList.h',
     'MP3Decoder.h',
     'MP3Demuxer.h',
     'MP3FrameParser.h',
-    'NextFrameSeekTask.h',
     'nsIDocumentActivity.h',
-    'PrincipalChangeObserver.h',
-    'QueueObject.h',
     'RtspMediaResource.h',
-    'SeekJob.h',
-    'SeekTarget.h',
-    'SeekTask.h',
     'SelfRef.h',
     'SharedBuffer.h',
-    'StreamTracks.h',
+    'SharedThreadPool.h',
+    'StreamBuffer.h',
     'ThreadPoolCOMListener.h',
     'TimeUnits.h',
+    'TimeVarying.h',
     'TrackUnionStream.h',
     'VideoFrameContainer.h',
     'VideoSegment.h',
     'VideoUtils.h',
     'VorbisUtils.h',
-    'XiphExtradata.h',
 ]
 
 EXPORTS.mozilla += [
+    'AbstractThread.h',
     'MediaManager.h',
+    'MozPromise.h',
+    'StateMirroring.h',
+    'StateWatching.h',
+    'TaskDispatcher.h',
+    'TaskQueue.h',
 ]
 
 EXPORTS.mozilla.media.webrtc += [
     'webrtc/WebrtcGlobal.h',
 ]
-
-if not CONFIG['MOZ_WEBRTC']:
-  EXPORTS.mtransport += [
-      '../../media/mtransport/runnable_utils.h',
-  ]
 
 IPDL_SOURCES += [
     'webrtc/PWebrtcGlobal.ipdl'
@@ -199,22 +195,18 @@ EXPORTS.mozilla.dom += [
 ]
 
 UNIFIED_SOURCES += [
-    'AccurateSeekTask.cpp',
-    'ADTSDecoder.cpp',
-    'ADTSDemuxer.cpp',
-    'AudioCaptureStream.cpp',
+    'AbstractThread.cpp',
     'AudioChannelFormat.cpp',
     'AudioCompactor.cpp',
-    'AudioConverter.cpp',
     'AudioSegment.cpp',
+    'AudioSink.cpp',
     'AudioStream.cpp',
     'AudioStreamTrack.cpp',
     'AudioTrack.cpp',
     'AudioTrackList.cpp',
-    'Benchmark.cpp',
     'CanvasCaptureMediaStream.cpp',
     'CubebUtils.cpp',
-    'DecoderDoctorDiagnostics.cpp',
+    'DecodedStream.cpp',
     'DOMMediaStream.cpp',
     'EncodedBufferCache.cpp',
     'FileBlockCache.cpp',
@@ -222,24 +214,19 @@ UNIFIED_SOURCES += [
     'GraphDriver.cpp',
     'Latency.cpp',
     'MediaCache.cpp',
-    'MediaCallbackID.cpp',
     'MediaData.cpp',
     'MediaDecoder.cpp',
     'MediaDecoderReader.cpp',
-    'MediaDecoderReaderWrapper.cpp',
     'MediaDecoderStateMachine.cpp',
     'MediaDeviceInfo.cpp',
     'MediaDevices.cpp',
     'MediaFormatReader.cpp',
-    'MediaInfo.cpp',
     'MediaManager.cpp',
-    'MediaPrefs.cpp',
     'MediaRecorder.cpp',
     'MediaResource.cpp',
     'MediaShutdownManager.cpp',
     'MediaStreamError.cpp',
     'MediaStreamGraph.cpp',
-    'MediaStreamListener.cpp',
     'MediaStreamTrack.cpp',
     'MediaTimer.cpp',
     'MediaTrack.cpp',
@@ -247,12 +234,10 @@ UNIFIED_SOURCES += [
     'MP3Decoder.cpp',
     'MP3Demuxer.cpp',
     'MP3FrameParser.cpp',
-    'NextFrameSeekTask.cpp',
-    'QueueObject.cpp',
     'RtspMediaResource.cpp',
-    'SeekJob.cpp',
-    'SeekTask.cpp',
-    'StreamTracks.cpp',
+    'SharedThreadPool.cpp',
+    'StreamBuffer.cpp',
+    'TaskQueue.cpp',
     'TextTrack.cpp',
     'TextTrackCue.cpp',
     'TextTrackCueList.cpp',
@@ -267,7 +252,6 @@ UNIFIED_SOURCES += [
     'VideoTrackList.cpp',
     'VideoUtils.cpp',
     'WebVTTListener.cpp',
-    'XiphExtradata.cpp',
 ]
 
 if CONFIG['OS_TARGET'] == 'WINNT':
@@ -299,6 +283,8 @@ EXTRA_JS_MODULES.media += [
     'RTCStatsReport.jsm',
 ]
 
+FAIL_ON_WARNINGS = True
+
 LOCAL_INCLUDES += [
     '/caps',
     '/dom/base',
@@ -321,11 +307,6 @@ if CONFIG['MOZ_WEBRTC']:
 
 DEFINES['MOZILLA_INTERNAL_API'] = True
 
-if CONFIG['OS_TARGET'] == 'WINNT':
-    DEFINES['WEBRTC_WIN'] = True
-else:
-    DEFINES['WEBRTC_POSIX'] = True
-
 if CONFIG['MOZ_OMX_DECODER']:
     DEFINES['MOZ_OMX_DECODER'] = True
 
@@ -335,20 +316,15 @@ if CONFIG['ANDROID_VERSION'] > '15':
 if CONFIG['MOZ_GONK_MEDIACODEC']:
     DEFINES['MOZ_GONK_MEDIACODEC'] = True
 
+CFLAGS += CONFIG['GSTREAMER_CFLAGS']
+CXXFLAGS += CONFIG['GSTREAMER_CFLAGS']
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
 # Suppress some GCC warnings being treated as errors:
 #  - about attributes on forward declarations for types that are already
 #    defined, which complains about an important MOZ_EXPORT for android::AString
 if CONFIG['GNU_CC']:
-    CXXFLAGS += [
-        '-Wno-error=attributes',
-        '-Wno-error=shadow',
-    ]
-
-if CONFIG['_MSC_VER']:
-    # This is intended as a temporary workaround to unblock compilation
-    # on VS2015 in warnings as errors mode.
-    CXXFLAGS += ['-wd4312']
+  CXXFLAGS += ['-Wno-error=attributes']
 
 FINAL_LIBRARY = 'xul'

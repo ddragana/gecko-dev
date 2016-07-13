@@ -6,7 +6,6 @@
 // Keep in (case-insensitive) order:
 #include "gfxMatrix.h"
 #include "mozilla/dom/SVGAElement.h"
-#include "nsAutoPtr.h"
 #include "nsSVGContainerFrame.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGUtils.h"
@@ -14,13 +13,15 @@
 
 using namespace mozilla;
 
-class nsSVGAFrame : public nsSVGDisplayContainerFrame
+typedef nsSVGDisplayContainerFrame nsSVGAFrameBase;
+
+class nsSVGAFrame : public nsSVGAFrameBase
 {
   friend nsIFrame*
   NS_NewSVGAFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
-  explicit nsSVGAFrame(nsStyleContext* aContext)
-    : nsSVGDisplayContainerFrame(aContext) {}
+  explicit nsSVGAFrame(nsStyleContext* aContext) :
+    nsSVGAFrameBase(aContext) {}
 
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -82,7 +83,7 @@ nsSVGAFrame::Init(nsIContent*       aContent,
                "Trying to construct an SVGAFrame for a "
                "content element that doesn't support the right interfaces");
 
-  nsSVGDisplayContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGAFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -123,7 +124,7 @@ nsSVGAFrame::NotifySVGChanged(uint32_t aFlags)
     mCanvasTM = nullptr;
   }
 
-  nsSVGDisplayContainerFrame::NotifySVGChanged(aFlags);
+  nsSVGAFrameBase::NotifySVGChanged(aFlags);
 }
 
 //----------------------------------------------------------------------

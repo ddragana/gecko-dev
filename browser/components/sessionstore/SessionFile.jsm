@@ -38,9 +38,7 @@ Cu.import("resource://gre/modules/AsyncShutdown.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "console",
-  "resource://gre/modules/Console.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
-  "resource://gre/modules/PromiseUtils.jsm");
+  "resource://gre/modules/devtools/Console.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "RunState",
   "resource:///modules/sessionstore/RunState.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
@@ -53,8 +51,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "sessionStartup",
   "@mozilla.org/browser/sessionstartup;1", "nsISessionStartup");
 XPCOMUtils.defineLazyModuleGetter(this, "SessionWorker",
   "resource:///modules/sessionstore/SessionWorker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SessionStore",
-  "resource:///modules/sessionstore/SessionStore.jsm");
 
 const PREF_UPGRADE_BACKUP = "browser.sessionstore.upgradeBackup.latestBuildID";
 const PREF_MAX_UPGRADE_BACKUPS = "browser.sessionstore.upgradeBackup.maxUpgradeBackups";
@@ -93,10 +89,10 @@ this.SessionFile = {
 
 Object.freeze(SessionFile);
 
-var Path = OS.Path;
-var profileDir = OS.Constants.Path.profileDir;
+let Path = OS.Path;
+let profileDir = OS.Constants.Path.profileDir;
 
-var SessionFileInternal = {
+let SessionFileInternal = {
   Paths: Object.freeze({
     // The path to the latest version of sessionstore written during a clean
     // shutdown. After startup, it is renamed `cleanBackup`.
@@ -177,27 +173,9 @@ var SessionFileInternal = {
     },
   }),
 
-  // Number of attempted calls to `write`.
-  // Note that we may have _attempts > _successes + _failures,
-  // if attempts never complete.
-  // Used for error reporting.
-  _attempts: 0,
-
-  // Number of successful calls to `write`.
-  // Used for error reporting.
-  _successes: 0,
-
-  // Number of failed calls to `write`.
-  // Used for error reporting.
-  _failures: 0,
-
-  // Resolved once initialization is complete.
-  // The promise never rejects.
-  _deferredInitialized: PromiseUtils.defer(),
-
-  // `true` once we have started initialization, i.e. once something
-  // has been scheduled that will eventually resolve `_deferredInitialized`.
-  _initializationStarted: false,
+  // `true` once `write` has succeeded at last once.
+  // Used for error-reporting.
+  _hasWriteEverSucceeded: false,
 
   // The ID of the latest version of Gecko for which we have an upgrade backup
   // or |undefined| if no upgrade backup was ever written.
@@ -209,10 +187,7 @@ var SessionFileInternal = {
     }
   },
 
-  // Find the correct session file, read it and setup the worker.
   read: Task.async(function* () {
-    this._initializationStarted = true;
-
     let result;
     let noFilesFound = true;
     // Attempt to load by order of priority from the various backups
@@ -222,15 +197,8 @@ var SessionFileInternal = {
       try {
         let path = this.Paths[key];
         let startMs = Date.now();
-
         let source = yield OS.File.read(path, { encoding: "utf-8" });
         let parsed = JSON.parse(source);
-
-        if (!SessionStore.isFormatVersionCompatible(parsed.version || ["sessionrestore", 0] /*fallback for old versions*/)) {
-          // Skip sessionstore files that we don't understand.
-          Cu.reportError("Cannot extract data from Session Restore file " + path + ". Wrong format/version: " + JSON.stringify(parsed.version) + ".");
-          continue;
-        }
         result = {
           origin: key,
           source: source,
@@ -277,37 +245,15 @@ var SessionFileInternal = {
 
     result.noFilesFound = noFilesFound;
 
-    // Initialize the worker (in the background) to let it handle backups and also
+    // Initialize the worker to let it handle backups and also
     // as a workaround for bug 964531.
-    let promiseInitialized = SessionWorker.post("init", [result.origin, this.Paths, {
+    SessionWorker.post("init", [result.origin, this.Paths, {
       maxUpgradeBackups: Preferences.get(PREF_MAX_UPGRADE_BACKUPS, 3),
       maxSerializeBack: Preferences.get(PREF_MAX_SERIALIZE_BACK, 10),
       maxSerializeForward: Preferences.get(PREF_MAX_SERIALIZE_FWD, -1)
     }]);
 
-    promiseInitialized.catch(err => {
-      // Ensure that we report errors but that they do not stop us.
-      Promise.reject(err);
-    }).then(() => this._deferredInitialized.resolve());
-
     return result;
-  }),
-
-  // Post a message to the worker, making sure that it has been initialized
-  // first.
-  _postToWorker: Task.async(function*(...args) {
-    if (!this._initializationStarted) {
-      // Initializing the worker is somewhat complex, as proper handling of
-      // backups requires us to first read and check the session. Consequently,
-      // the only way to initialize the worker is to first call `this.read()`.
-
-      // The call to `this.read()` causes background initialization of the worker.
-      // Initialization will be complete once `this._deferredInitialized.promise`
-      // resolves.
-      this.read();
-    }
-    yield this._deferredInitialized.promise;
-    return SessionWorker.post(...args)
   }),
 
   write: function (aData) {
@@ -326,15 +272,14 @@ var SessionFileInternal = {
     let performShutdownCleanup = isFinalWrite &&
       !sessionStartup.isAutomaticRestoreEnabled();
 
-    this._attempts++;
     let options = {isFinalWrite, performShutdownCleanup};
-    let promise = this._postToWorker("write", [aData, options]);
+    let promise = SessionWorker.post("write", [aData, options]);
 
     // Wait until the write is done.
     promise = promise.then(msg => {
       // Record how long the write took.
       this._recordTelemetry(msg.telemetry);
-      this._successes++;
+      this._hasWriteEverSucceeded = true;
       if (msg.result.upgradeBackup) {
         // We have just completed a backup-on-upgrade, store the information
         // in preferences.
@@ -344,7 +289,6 @@ var SessionFileInternal = {
     }, err => {
       // Catch and report any errors.
       console.error("Could not write session state file ", err, err.stack);
-      this._failures++;
       // By not doing anything special here we ensure that |promise| cannot
       // be rejected anymore. The shutdown/cleanup code at the end of the
       // function will thus always be executed.
@@ -358,9 +302,7 @@ var SessionFileInternal = {
       {
         fetchState: () => ({
           options,
-          attempts: this._attempts,
-          successes: this._successes,
-          failures: this._failures,
+          hasEverSucceeded: this._hasWriteEverSucceeded
         })
       });
 
@@ -378,7 +320,7 @@ var SessionFileInternal = {
   },
 
   wipe: function () {
-    return this._postToWorker("wipe");
+    return SessionWorker.post("wipe");
   },
 
   _recordTelemetry: function(telemetry) {

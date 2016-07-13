@@ -115,7 +115,6 @@ class ProfilerEvent {
 // macros, defined above, rather than directly calling Profiler methods.
 class Profiler {
  public:
-  ~Profiler();
   void StartEvent(const std::string& event_name);
   void StopEvent(const std::string& event_name);
   void ReportToLog(const char* file, int line, LoggingSeverity severity_to_use,
@@ -128,7 +127,7 @@ class Profiler {
 
   static Profiler* Instance();
  private:
-  Profiler();
+  Profiler() {}
 
   typedef std::map<std::string, ProfilerEvent> EventMap;
   EventMap events_;

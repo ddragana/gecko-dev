@@ -8,6 +8,7 @@
 #define mozilla_dom_GamepadService_h_
 
 #include <stdint.h>
+#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsIGamepadServiceTest.h"
 #include "nsGlobalWindow.h"
@@ -38,7 +39,6 @@ class GamepadService : public nsIObserver
   static bool IsAPIEnabled();
 
   void BeginShutdown();
-  void StopMonitoring();
 
   // Indicate that |aWindow| wants to receive gamepad events.
   void AddListener(nsGlobalWindow* aWindow);
@@ -128,7 +128,7 @@ class GamepadService : public nsIObserver
   nsRefPtrHashtable<nsUint32HashKey, Gamepad> mGamepads;
   // Inner windows that are listening for gamepad events.
   // has been sent to that window.
-  nsTArray<RefPtr<nsGlobalWindow> > mListeners;
+  nsTArray<nsRefPtr<nsGlobalWindow> > mListeners;
   nsCOMPtr<nsITimer> mTimer;
 };
 

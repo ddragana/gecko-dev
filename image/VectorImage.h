@@ -68,8 +68,6 @@ public:
   void OnSVGDocumentLoaded();
   void OnSVGDocumentError();
 
-  virtual void ReportUseCounters() override;
-
 protected:
   explicit VectorImage(ImageURL* aURI = nullptr);
   virtual ~VectorImage();
@@ -94,10 +92,10 @@ private:
   void CancelAllListeners();
   void SendInvalidationNotifications();
 
-  RefPtr<SVGDocumentWrapper>       mSVGDocumentWrapper;
-  RefPtr<SVGRootRenderingObserver> mRenderingObserver;
-  RefPtr<SVGLoadEventListener>     mLoadEventListener;
-  RefPtr<SVGParseCompleteListener> mParseCompleteListener;
+  nsRefPtr<SVGDocumentWrapper>       mSVGDocumentWrapper;
+  nsRefPtr<SVGRootRenderingObserver> mRenderingObserver;
+  nsRefPtr<SVGLoadEventListener>     mLoadEventListener;
+  nsRefPtr<SVGParseCompleteListener> mParseCompleteListener;
 
   /// Count of locks on this image (roughly correlated to visible instances).
   uint32_t mLockCount;

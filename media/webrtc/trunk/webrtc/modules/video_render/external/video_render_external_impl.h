@@ -33,6 +33,8 @@ public:
 
     virtual int32_t Init();
 
+    virtual int32_t ChangeUniqueId(const int32_t id);
+
     virtual int32_t ChangeWindow(void* window);
 
     /**************************************************************************
@@ -115,9 +117,10 @@ public:
 
     // VideoRenderCallback
     virtual int32_t RenderFrame(const uint32_t streamId,
-                                const I420VideoFrame& videoFrame);
+                                I420VideoFrame& videoFrame);
 
 private:
+    int32_t _id;
     CriticalSectionWrapper& _critSect;
     bool _fullscreen;
 };

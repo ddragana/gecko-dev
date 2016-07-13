@@ -8,7 +8,10 @@
 #define mozilla_AutoGlobalTimelineMarker_h_
 
 #include "mozilla/GuardObjects.h"
-#include "TimelineMarkerEnums.h"
+#include "mozilla/Vector.h"
+#include "nsRefPtr.h"
+
+class nsDocShell;
 
 namespace mozilla {
 
@@ -17,7 +20,7 @@ namespace mozilla {
 // Similar to `AutoTimelineMarker`, but adds its traced marker to all docshells,
 // not a single particular one. This is useful for operations that aren't
 // associated with any one particular doc shell, or when it isn't clear which
-// docshell triggered the operation.
+// doc shell triggered the operation.
 //
 // Example usage:
 //
@@ -27,18 +30,21 @@ namespace mozilla {
 //       cc->Collect();
 //       ...
 //     }
-class MOZ_RAII AutoGlobalTimelineMarker
+class MOZ_STACK_CLASS AutoGlobalTimelineMarker
 {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
 
   // The name of the marker we are adding.
   const char* mName;
-  // Whether to capture the JS stack or not.
-  MarkerStackRequest mStackRequest;
+
+  // The set of docshells that will get the marker.
+  Vector<nsRefPtr<nsDocShell>> mDocShells;
+
+  // True as long as no operation has failed, eg due to OOM.
+  bool mDocShellsRetrieved;
 
 public:
-  explicit AutoGlobalTimelineMarker(const char* aName,
-                                    MarkerStackRequest aStackRequest = MarkerStackRequest::STACK
+  explicit AutoGlobalTimelineMarker(const char* aName
                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
   ~AutoGlobalTimelineMarker();
 

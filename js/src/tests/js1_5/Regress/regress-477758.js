@@ -20,6 +20,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
  
+  jit(true);
 
   function map(array, func) {
     var result = [];
@@ -45,6 +46,7 @@ function test()
     reportCompare(expect, actual, summary + ': ' + i);
   }
 
+  jit(false);
 
   exitFunc ('test');
 }

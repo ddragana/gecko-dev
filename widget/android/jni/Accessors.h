@@ -3,15 +3,15 @@
 
 #include <jni.h>
 
+#include "mozilla/Attributes.h"
 #include "mozilla/jni/Refs.h"
 #include "mozilla/jni/Types.h"
-#include "mozilla/jni/Utils.h"
 #include "AndroidBridge.h"
 
 namespace mozilla {
-namespace jni {
+namespace jni{
 
-namespace detail {
+namespace {
 
 // Helper class to convert an arbitrary type to a jvalue, e.g. Value(123).val.
 struct Value
@@ -29,19 +29,25 @@ struct Value
     jvalue val;
 };
 
-} // namespace detail
-
-using namespace detail;
+}
 
 // Base class for Method<>, Field<>, and Constructor<>.
-class Accessor
-{
+class Accessor {
+public:
+    template<class Cls>
+    static jclass EnsureClassRef(JNIEnv* env)
+    {
+        if (!Cls::sClassRef) {
+            MOZ_ALWAYS_TRUE(Cls::sClassRef =
+                AndroidBridge::GetClassGlobalRef(env, Cls::name));
+        }
+        return Cls::sClassRef;
+    }
+
+private:
     static void GetNsresult(JNIEnv* env, nsresult* rv)
     {
         if (env->ExceptionCheck()) {
-#ifdef DEBUG
-            env->ExceptionDescribe();
-#endif
             env->ExceptionClear();
             *rv = NS_ERROR_FAILURE;
         } else {
@@ -50,16 +56,26 @@ class Accessor
     }
 
 protected:
+    // Called before making a JNIEnv call.
+    template<class Traits>
+    static JNIEnv* BeginAccess()
+    {
+        JNIEnv* const env = Traits::isMultithreaded
+                ? GetJNIForThread() : AndroidBridge::GetJNIEnv();
+
+        EnsureClassRef<class Traits::Owner>(env);
+        return env;
+    }
+
     // Called after making a JNIEnv call.
     template<class Traits>
-    static void EndAccess(const typename Traits::Owner::Context& ctx,
-                          nsresult* rv)
+    static void EndAccess(JNIEnv* env, nsresult* rv)
     {
         if (Traits::exceptionMode == ExceptionMode::ABORT) {
-            MOZ_CATCH_JNI_EXCEPTION(ctx.Env());
+            return HandleUncaughtException(env);
 
         } else if (Traits::exceptionMode == ExceptionMode::NSRESULT) {
-            GetNsresult(ctx.Env(), rv);
+            return GetNsresult(env, rv);
         }
     }
 };
@@ -70,37 +86,39 @@ template<class Traits, typename ReturnType = typename Traits::ReturnType>
 class Method : public Accessor
 {
     typedef Accessor Base;
-    typedef typename Traits::Owner::Context Context;
+    typedef class Traits::Owner Owner;
 
 protected:
     static jmethodID sID;
 
-    static void BeginAccess(const Context& ctx)
+    static JNIEnv* BeginAccess()
     {
+        JNIEnv* const env = Base::BeginAccess<Traits>();
+
         if (sID) {
-            return;
+            return env;
         }
 
         if (Traits::isStatic) {
             MOZ_ALWAYS_TRUE(sID = AndroidBridge::GetStaticMethodID(
-                ctx.Env(), ctx.ClassRef(), Traits::name, Traits::signature));
+                env, Traits::Owner::sClassRef, Traits::name, Traits::signature));
         } else {
             MOZ_ALWAYS_TRUE(sID = AndroidBridge::GetMethodID(
-                ctx.Env(), ctx.ClassRef(), Traits::name, Traits::signature));
+                env, Traits::Owner::sClassRef, Traits::name, Traits::signature));
         }
+        return env;
     }
 
-    static void EndAccess(const Context& ctx, nsresult* rv)
+    static void EndAccess(JNIEnv* env, nsresult* rv)
     {
-        return Base::EndAccess<Traits>(ctx, rv);
+        return Base::EndAccess<Traits>(env, rv);
     }
 
 public:
     template<typename... Args>
-    static ReturnType Call(const Context& ctx, nsresult* rv, const Args&... args)
+    static ReturnType Call(const Owner* cls, nsresult* rv, const Args&... args)
     {
-        JNIEnv* const env = ctx.Env();
-        BeginAccess(ctx);
+        JNIEnv* const env = BeginAccess();
 
         jvalue jargs[] = {
             Value(TypeAdapter<Args>::FromNative(env, args)).val ...
@@ -109,11 +127,11 @@ public:
         auto result = TypeAdapter<ReturnType>::ToNative(env,
                 Traits::isStatic ?
                 (env->*TypeAdapter<ReturnType>::StaticCall)(
-                        ctx.RawClassRef(), sID, jargs) :
+                        Owner::sClassRef, sID, jargs) :
                 (env->*TypeAdapter<ReturnType>::Call)(
-                        ctx.Get(), sID, jargs));
+                        cls->mInstance, sID, jargs));
 
-        EndAccess(ctx, rv);
+        EndAccess(env, rv);
         return result;
     }
 };
@@ -128,27 +146,26 @@ template<class Traits>
 class Method<Traits, void> : public Method<Traits, bool>
 {
     typedef Method<Traits, bool> Base;
-    typedef typename Traits::Owner::Context Context;
+    typedef typename Traits::Owner Owner;
 
 public:
     template<typename... Args>
-    static void Call(const Context& ctx, nsresult* rv,
-                     const Args&... args)
+    static void Call(const Owner* cls, nsresult* rv,
+                     const Args&... args) override
     {
-        JNIEnv* const env = ctx.Env();
-        Base::BeginAccess(ctx);
+        JNIEnv* const env = Base::BeginAccess();
 
         jvalue jargs[] = {
             Value(TypeAdapter<Args>::FromNative(env, args)).val ...
         };
 
         if (Traits::isStatic) {
-            env->CallStaticVoidMethodA(ctx.RawClassRef(), Base::sID, jargs);
+            env->CallStaticVoidMethodA(Owner::sClassRef, Base::sID, jargs);
         } else {
-            env->CallVoidMethodA(ctx.Get(), Base::sID, jargs);
+            env->CallVoidMethodA(cls->mInstance, Base::sID, jargs);
         }
 
-        Base::EndAccess(ctx, rv);
+        Base::EndAccess(env, rv);
     }
 };
 
@@ -156,26 +173,25 @@ public:
 // Constructor<> is used to construct a JNI instance given a traits class.
 template<class Traits>
 class Constructor : protected Method<Traits, typename Traits::ReturnType> {
-    typedef typename Traits::Owner::Context Context;
+    typedef class Traits::Owner Owner;
     typedef typename Traits::ReturnType ReturnType;
     typedef Method<Traits, ReturnType> Base;
 
 public:
     template<typename... Args>
-    static ReturnType Call(const Context& ctx, nsresult* rv,
-                           const Args&... args)
+    static ReturnType Call(const Owner* cls, nsresult* rv,
+                           const Args&... args) override
     {
-        JNIEnv* const env = ctx.Env();
-        Base::BeginAccess(ctx);
+        JNIEnv* const env = Base::BeginAccess();
 
         jvalue jargs[] = {
             Value(TypeAdapter<Args>::FromNative(env, args)).val ...
         };
 
         auto result = TypeAdapter<ReturnType>::ToNative(
-                env, env->NewObjectA(ctx.RawClassRef(), Base::sID, jargs));
+                env, env->NewObjectA(Owner::sClassRef, Base::sID, jargs));
 
-        Base::EndAccess(ctx, rv);
+        Base::EndAccess(env, rv);
         return result;
     }
 };
@@ -186,69 +202,76 @@ template<class Traits>
 class Field : public Accessor
 {
     typedef Accessor Base;
-    typedef typename Traits::Owner::Context Context;
+    typedef class Traits::Owner Owner;
     typedef typename Traits::ReturnType GetterType;
     typedef typename Traits::SetterType SetterType;
+
+    template<typename T> struct RemoveRef { typedef T Type; };
+    template<typename T> struct RemoveRef<const T&> { typedef T Type; };
+
+    // Setter type without any const/& added
+    typedef typename RemoveRef<SetterType>::Type SetterBaseType;
 
 private:
 
     static jfieldID sID;
 
-    static void BeginAccess(const Context& ctx)
+    static JNIEnv* BeginAccess()
     {
+        JNIEnv* const env = Base::BeginAccess<Traits>();
+
         if (sID) {
-            return;
+            return env;
         }
 
         if (Traits::isStatic) {
             MOZ_ALWAYS_TRUE(sID = AndroidBridge::GetStaticFieldID(
-                ctx.Env(), ctx.ClassRef(), Traits::name, Traits::signature));
+                env, Traits::Owner::sClassRef, Traits::name, Traits::signature));
         } else {
             MOZ_ALWAYS_TRUE(sID = AndroidBridge::GetFieldID(
-                ctx.Env(), ctx.ClassRef(), Traits::name, Traits::signature));
+                env, Traits::Owner::sClassRef, Traits::name, Traits::signature));
         }
+        return env;
     }
 
-    static void EndAccess(const Context& ctx, nsresult* rv)
+    static void EndAccess(JNIEnv* env, nsresult* rv)
     {
-        return Base::EndAccess<Traits>(ctx, rv);
+        return Base::EndAccess<Traits>(env, rv);
     }
 
 public:
-    static GetterType Get(const Context& ctx, nsresult* rv)
+    static GetterType Get(const Owner* cls, nsresult* rv)
     {
-        JNIEnv* const env = ctx.Env();
-        BeginAccess(ctx);
+        JNIEnv* const env = BeginAccess();
 
         auto result = TypeAdapter<GetterType>::ToNative(
                 env, Traits::isStatic ?
 
                 (env->*TypeAdapter<GetterType>::StaticGet)
-                        (ctx.RawClassRef(), sID) :
+                        (Owner::sClassRef, sID) :
 
                 (env->*TypeAdapter<GetterType>::Get)
-                        (ctx.Get(), sID));
+                        (cls->mInstance, sID));
 
-        EndAccess(ctx, rv);
+        EndAccess(env, rv);
         return result;
     }
 
-    static void Set(const Context& ctx, nsresult* rv, SetterType val)
+    static void Set(const Owner* cls, nsresult* rv, SetterType val)
     {
-        JNIEnv* const env = ctx.Env();
-        BeginAccess(ctx);
+        JNIEnv* const env = BeginAccess();
 
         if (Traits::isStatic) {
-            (env->*TypeAdapter<SetterType>::StaticSet)(
-                    ctx.RawClassRef(), sID,
-                    TypeAdapter<SetterType>::FromNative(env, val));
+            (env->*TypeAdapter<SetterBaseType>::StaticSet)(
+                    Owner::sClassRef, sID,
+                    TypeAdapter<SetterBaseType>::FromNative(env, val));
         } else {
-            (env->*TypeAdapter<SetterType>::Set)(
-                    ctx.Get(), sID,
-                    TypeAdapter<SetterType>::FromNative(env, val));
+            (env->*TypeAdapter<SetterBaseType>::Set)(
+                    cls->mInstance, sID,
+                    TypeAdapter<SetterBaseType>::FromNative(env, val));
         }
 
-        EndAccess(ctx, rv);
+        EndAccess(env, rv);
     }
 };
 
@@ -258,7 +281,7 @@ template<class T> jfieldID Field<T>::sID;
 
 // Define the sClassRef member declared in Refs.h and
 // used by Method and Field above.
-template<class C, typename T> jclass Context<C, T>::sClassRef;
+template<class C> jclass Class<C>::sClassRef;
 
 } // namespace jni
 } // namespace mozilla

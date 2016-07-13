@@ -24,18 +24,12 @@ class nsIPrefBranch;
 class nsICancelable;
 class nsICookieService;
 class nsIIOService;
-class nsIRequestContextService;
 class nsISiteSecurityService;
 class nsIStreamConverterService;
 class nsITimer;
-class nsIUUIDGenerator;
-
 
 namespace mozilla {
 namespace net {
-
-extern Atomic<PRThread*, Relaxed> gSocketThread;
-
 class ATokenBucketEvent;
 class EventTokenBucket;
 class Tickler;
@@ -70,10 +64,10 @@ public:
     nsHttpHandler();
 
     nsresult Init();
-    nsresult AddStandardRequestHeaders(nsHttpRequestHead *, bool isSecure);
-    nsresult AddConnectionHeader(nsHttpRequestHead *,
+    nsresult AddStandardRequestHeaders(nsHttpHeaderArray *);
+    nsresult AddConnectionHeader(nsHttpHeaderArray *,
                                  uint32_t capabilities);
-    bool     IsAcceptableEncoding(const char *encoding, bool isSecure);
+    bool     IsAcceptableEncoding(const char *encoding);
 
     const nsAFlatCString &UserAgent();
 
@@ -117,7 +111,6 @@ public:
     uint32_t       SpdySendingChunkSize() { return mSpdySendingChunkSize; }
     uint32_t       SpdySendBufferSize()      { return mSpdySendBufferSize; }
     uint32_t       SpdyPushAllowance()       { return mSpdyPushAllowance; }
-    uint32_t       SpdyPullAllowance()       { return mSpdyPullAllowance; }
     uint32_t       DefaultSpdyConcurrent()   { return mDefaultSpdyConcurrent; }
     PRIntervalTime SpdyPingThreshold() { return mSpdyPingThreshold; }
     PRIntervalTime SpdyPingTimeout() { return mSpdyPingTimeout; }
@@ -176,6 +169,7 @@ public:
     nsHttpConnectionMgr *ConnMgr()   { return mConnMgr; }
 
     // cache support
+    bool UseCache() const { return mUseCache; }
     uint32_t GenerateUniqueID() { return ++mLastUniqueID; }
     uint32_t SessionStartTime() { return mSessionStartTime; }
 
@@ -281,12 +275,6 @@ public:
         NotifyObservers(chan, NS_HTTP_ON_MODIFY_REQUEST_TOPIC);
     }
 
-    // Called by the channel and cached in the loadGroup
-    void OnUserAgentRequest(nsIHttpChannel *chan)
-    {
-      NotifyObservers(chan, NS_HTTP_ON_USERAGENT_REQUEST_TOPIC);
-    }
-
     // Called by the channel once headers are available
     void OnExamineResponse(nsIHttpChannel *chan)
     {
@@ -342,13 +330,6 @@ public:
     SpdyInformation *SpdyInfo() { return &mSpdyInfo; }
     bool IsH2MandatorySuiteEnabled() { return mH2MandatorySuiteEnabled; }
 
-    // Returns true if content-signature test pref is set such that they are
-    // NOT enforced on remote newtabs.
-    bool NewTabContentSignaturesDisabled()
-    {
-      return mNewTabContentSignaturesDisabled;
-    }
-
     // returns true in between Init and Shutdown states
     bool Active() { return mHandlerActive; }
 
@@ -357,18 +338,6 @@ public:
     TimeStamp GetCacheSkippedUntil() { return mCacheSkippedUntil; }
     void SetCacheSkippedUntil(TimeStamp arg) { mCacheSkippedUntil = arg; }
     void ClearCacheSkippedUntil() { mCacheSkippedUntil = TimeStamp(); }
-
-    nsIRequestContextService *GetRequestContextService()
-    {
-        return mRequestContextService.get();
-    }
-
-    void ShutdownConnectionManager();
-
-    bool KeepEmptyResponseHeadersAsEmtpyString() const
-    {
-        return mKeepEmptyResponseHeadersAsEmtpyString;
-    }
 
 private:
     virtual ~nsHttpHandler();
@@ -382,7 +351,7 @@ private:
 
     nsresult SetAccept(const char *);
     nsresult SetAcceptLanguages(const char *);
-    nsresult SetAcceptEncodings(const char *, bool mIsSecure);
+    nsresult SetAcceptEncodings(const char *);
 
     nsresult InitConnectionMgr();
 
@@ -402,7 +371,7 @@ private:
     nsHttpAuthCache mPrivateAuthCache;
 
     // the connection manager
-    RefPtr<nsHttpConnectionMgr> mConnMgr;
+    nsHttpConnectionMgr *mConnMgr;
 
     //
     // prefs
@@ -459,8 +428,7 @@ private:
 
     nsCString mAccept;
     nsCString mAcceptLanguages;
-    nsCString mHttpAcceptEncodings;
-    nsCString mHttpsAcceptEncodings;
+    nsCString mAcceptEncodings;
 
     nsXPIDLCString mDefaultSocketType;
 
@@ -487,6 +455,7 @@ private:
     nsXPIDLCString mUserAgentOverride;
     bool           mUserAgentIsDirty; // true if mUserAgent should be rebuilt
 
+    bool           mUseCache;
 
     bool           mPromptTempRedirect;
     // mSendSecureXSiteReferrer: default is false,
@@ -503,9 +472,6 @@ private:
     bool           mSafeHintEnabled;
     bool           mParentalControlEnabled;
 
-    // true in between init and shutdown states
-    Atomic<bool, Relaxed> mHandlerActive;
-
     // Whether telemetry is reported or not
     uint32_t           mTelemetryEnabled : 1;
 
@@ -514,6 +480,9 @@ private:
 
     // The value of 'hidden' network.http.debug-observations : 1;
     uint32_t           mDebugObservations : 1;
+
+    // true in between init and shutdown states
+    uint32_t           mHandlerActive : 1;
 
     uint32_t           mEnableSpdy : 1;
     uint32_t           mSpdyV31 : 1;
@@ -533,7 +502,6 @@ private:
     uint32_t       mSpdySendingChunkSize;
     uint32_t       mSpdySendBufferSize;
     uint32_t       mSpdyPushAllowance;
-    uint32_t       mSpdyPullAllowance;
     uint32_t       mDefaultSpdyConcurrent;
     PRIntervalTime mSpdyPingThreshold;
     PRIntervalTime mSpdyPingTimeout;
@@ -581,65 +549,36 @@ private:
 
     uint32_t mSdtChunkSize;
 
-    nsCOMPtr<nsIRequestContextService> mRequestContextService;
-
-    // True if remote newtab content-signature disabled because of the channel.
-    bool mNewTabContentSignaturesDisabled;
-
-    // If it is set to false, headers with empty value will not appear in the
-    // header array - behavior as it used to be. If it is true: empty headers
-    // coming from the network will exits in header array as empty string.
-    // Call SetHeader with an empty value will still delete the header.
-    // (Bug 6699259)
-    bool mKeepEmptyResponseHeadersAsEmtpyString;
-
 private:
     // For Rate Pacing Certain Network Events. Only assign this pointer on
     // socket thread.
     void MakeNewRequestTokenBucket();
-    RefPtr<EventTokenBucket> mRequestTokenBucket;
+    nsRefPtr<EventTokenBucket> mRequestTokenBucket;
 
 public:
     // Socket thread only
     nsresult SubmitPacedRequest(ATokenBucketEvent *event,
                                 nsICancelable **cancel)
     {
-        MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
-        if (!mRequestTokenBucket) {
-            return NS_ERROR_NOT_AVAILABLE;
-        }
+        if (!mRequestTokenBucket)
+            return NS_ERROR_UNEXPECTED;
         return mRequestTokenBucket->SubmitEvent(event, cancel);
     }
 
     // Socket thread only
     void SetRequestTokenBucket(EventTokenBucket *aTokenBucket)
     {
-        MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
         mRequestTokenBucket = aTokenBucket;
     }
 
-    void StopRequestTokenBucket()
-    {
-        MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
-        if (mRequestTokenBucket) {
-            mRequestTokenBucket->Stop();
-            mRequestTokenBucket = nullptr;
-        }
-    }
-
 private:
-    RefPtr<Tickler> mWifiTickler;
+    nsRefPtr<Tickler> mWifiTickler;
     void TickleWifi(nsIInterfaceRequestor *cb);
 
 private:
     nsresult SpeculativeConnectInternal(nsIURI *aURI,
                                         nsIInterfaceRequestor *aCallbacks,
                                         bool anonymous);
-
-    // UUID generator for channelIds
-    nsCOMPtr<nsIUUIDGenerator> mUUIDGen;
-
-    nsresult NewChannelId(nsID *channelId);
 };
 
 extern nsHttpHandler *gHttpHandler;

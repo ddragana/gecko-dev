@@ -1,34 +1,27 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-add_task(function* () {
+function runTests() {
   yield setLinks("0,1,2,3,4,5,6,7,8");
   setPinnedLinks("");
 
-  yield* addNewTabPageTab();
-  yield* checkGrid("0,1,2,3,4,5,6,7,8");
-
-  yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
-    content.addEventListener("error", function () {
-      sendAsyncMessage("test:newtab-error", {});
-    });
-  });
+  yield addNewTabPageTab();
+  checkGrid("0,1,2,3,4,5,6,7,8");
 
   let receivedError = false;
-  let mm = gBrowser.selectedBrowser.messageManager;
-  mm.addMessageListener("test:newtab-error", function onResponse(message) {
-    mm.removeMessageListener("test:newtab-error", onResponse);
-    ok(false, "Error event happened");
+  let block = getContentDocument().querySelector(".newtab-control-block");
+
+  function onError() {
     receivedError = true;
-  });
-
-  let pagesUpdatedPromise = whenPagesUpdated();
-
-  for (let i = 0; i < 3; i++) {
-    yield BrowserTestUtils.synthesizeMouseAtCenter(".newtab-control-block", {}, gBrowser.selectedBrowser);
   }
 
-  yield pagesUpdatedPromise;
+  let cw = getContentWindow();
+  cw.addEventListener("error", onError);
 
+  for (let i = 0; i < 3; i++)
+    EventUtils.synthesizeMouseAtCenter(block, {}, cw);
+
+  yield whenPagesUpdated();
   ok(!receivedError, "we got here without any errors");
-});
+  cw.removeEventListener("error", onError);
+}

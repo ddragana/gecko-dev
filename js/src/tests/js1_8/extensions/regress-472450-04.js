@@ -20,6 +20,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
  
+  jit(true);
 
   var cyclic = [];
   cyclic[0] = cyclic;
@@ -29,6 +30,7 @@ function test()
   }
   f();
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

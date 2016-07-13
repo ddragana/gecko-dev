@@ -6,7 +6,6 @@
 if CONFIG['MOZ_WEBSPEECH']:
     MOCHITEST_MANIFESTS += [
         'test/mochitest.ini',
-        'test/startup/mochitest.ini',
     ]
 
     XPIDL_MODULE = 'dom_webspeechsynth'
@@ -43,21 +42,16 @@ if CONFIG['MOZ_WEBSPEECH']:
         ]
 
     if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
-        DIRS += ['windows']
-
-    if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-        DIRS += ['cocoa']
-
-    if CONFIG['MOZ_SYNTH_SPEECHD']:
-        DIRS += ['speechd']
-
-    if CONFIG['MOZ_SYNTH_PICO']:
-        DIRS += ['pico']
+        DIRS = ['windows']
+    elif CONFIG['MOZ_SYNTH_PICO']:
+        DIRS = ['pico']
 
 IPDL_SOURCES += [
     'ipc/PSpeechSynthesis.ipdl',
     'ipc/PSpeechSynthesisRequest.ipdl',
 ]
+
+FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -65,6 +59,3 @@ FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     'ipc',
 ]
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

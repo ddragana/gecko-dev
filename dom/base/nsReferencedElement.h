@@ -12,6 +12,7 @@
 #include "nsIAtom.h"
 #include "nsIDocument.h"
 #include "nsThreadUtils.h"
+#include "nsAutoPtr.h"
 
 class nsIURI;
 
@@ -122,7 +123,7 @@ private:
     nsReferencedElement* mTarget;
   };
 
-  class ChangeNotification : public mozilla::Runnable,
+  class ChangeNotification : public nsRunnable,
                              public Notification
   {
   public:
@@ -147,8 +148,8 @@ private:
   protected:
     virtual ~ChangeNotification() {}
 
-    RefPtr<Element> mFrom;
-    RefPtr<Element> mTo;
+    nsRefPtr<Element> mFrom;
+    nsRefPtr<Element> mTo;
   };
   friend class ChangeNotification;
 
@@ -178,8 +179,8 @@ private:
   
   nsCOMPtr<nsIAtom>      mWatchID;
   nsCOMPtr<nsIDocument>  mWatchDocument;
-  RefPtr<Element> mElement;
-  RefPtr<Notification> mPendingNotification;
+  nsRefPtr<Element> mElement;
+  nsRefPtr<Notification> mPendingNotification;
   bool                   mReferencingImage;
 };
 

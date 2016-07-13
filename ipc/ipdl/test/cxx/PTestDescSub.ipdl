@@ -9,7 +9,7 @@ intr protocol PTestDescSub {
     manages PTestDescSubsub;
 
 child:
-    async __delete__();
+    __delete__();
 
     intr PTestDescSubsub();
 };

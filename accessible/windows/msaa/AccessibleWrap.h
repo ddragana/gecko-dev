@@ -26,7 +26,6 @@
 
 namespace mozilla {
 namespace a11y {
-class DocProxyAccessibleWrap;
 
 class AccessibleWrap : public Accessible,
                        public ia2Accessible,
@@ -41,125 +40,123 @@ public: // construction, destruction
   NS_DECL_ISUPPORTS_INHERITED
 
   public: // IUnknown methods - see iunknown.h for documentation
-    STDMETHODIMP QueryInterface(REFIID, void**) override;
+    STDMETHODIMP QueryInterface(REFIID, void**);
 
   // Return the registered OLE class ID of this object's CfDataObj.
     CLSID GetClassID() const;
 
   public: // COM interface IAccessible
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accParent( 
-        /* [retval][out] */ IDispatch __RPC_FAR *__RPC_FAR *ppdispParent) override;
+        /* [retval][out] */ IDispatch __RPC_FAR *__RPC_FAR *ppdispParent);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accChildCount( 
-        /* [retval][out] */ long __RPC_FAR *pcountChildren) override;
+        /* [retval][out] */ long __RPC_FAR *pcountChildren);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accChild( 
         /* [in] */ VARIANT varChild,
-        /* [retval][out] */ IDispatch __RPC_FAR *__RPC_FAR *ppdispChild) override;
+        /* [retval][out] */ IDispatch __RPC_FAR *__RPC_FAR *ppdispChild);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accName( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ BSTR __RPC_FAR *pszName) override;
+        /* [retval][out] */ BSTR __RPC_FAR *pszName);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accValue( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ BSTR __RPC_FAR *pszValue) override;
+        /* [retval][out] */ BSTR __RPC_FAR *pszValue);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accDescription( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ BSTR __RPC_FAR *pszDescription) override;
+        /* [retval][out] */ BSTR __RPC_FAR *pszDescription);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accRole( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ VARIANT __RPC_FAR *pvarRole) override;
+        /* [retval][out] */ VARIANT __RPC_FAR *pvarRole);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accState( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ VARIANT __RPC_FAR *pvarState) override;
+        /* [retval][out] */ VARIANT __RPC_FAR *pvarState);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accHelp( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ BSTR __RPC_FAR *pszHelp) override;
+        /* [retval][out] */ BSTR __RPC_FAR *pszHelp);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accHelpTopic( 
         /* [out] */ BSTR __RPC_FAR *pszHelpFile,
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ long __RPC_FAR *pidTopic) override;
+        /* [retval][out] */ long __RPC_FAR *pidTopic);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accKeyboardShortcut( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ BSTR __RPC_FAR *pszKeyboardShortcut) override;
+        /* [retval][out] */ BSTR __RPC_FAR *pszKeyboardShortcut);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accFocus( 
-        /* [retval][out] */ VARIANT __RPC_FAR *pvarChild) override;
+        /* [retval][out] */ VARIANT __RPC_FAR *pvarChild);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accSelection( 
-        /* [retval][out] */ VARIANT __RPC_FAR *pvarChildren) override;
+        /* [retval][out] */ VARIANT __RPC_FAR *pvarChildren);
 
     virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accDefaultAction( 
         /* [optional][in] */ VARIANT varChild,
-        /* [retval][out] */ BSTR __RPC_FAR *pszDefaultAction) override;
+        /* [retval][out] */ BSTR __RPC_FAR *pszDefaultAction);
 
     virtual /* [id] */ HRESULT STDMETHODCALLTYPE accSelect( 
         /* [in] */ long flagsSelect,
-        /* [optional][in] */ VARIANT varChild) override;
+        /* [optional][in] */ VARIANT varChild);
 
     virtual /* [id] */ HRESULT STDMETHODCALLTYPE accLocation( 
         /* [out] */ long __RPC_FAR *pxLeft,
         /* [out] */ long __RPC_FAR *pyTop,
         /* [out] */ long __RPC_FAR *pcxWidth,
         /* [out] */ long __RPC_FAR *pcyHeight,
-        /* [optional][in] */ VARIANT varChild) override;
+        /* [optional][in] */ VARIANT varChild);
 
     virtual /* [id] */ HRESULT STDMETHODCALLTYPE accNavigate( 
         /* [in] */ long navDir,
         /* [optional][in] */ VARIANT varStart,
-        /* [retval][out] */ VARIANT __RPC_FAR *pvarEndUpAt) override;
+        /* [retval][out] */ VARIANT __RPC_FAR *pvarEndUpAt);
 
     virtual /* [id] */ HRESULT STDMETHODCALLTYPE accHitTest( 
         /* [in] */ long xLeft,
         /* [in] */ long yTop,
-        /* [retval][out] */ VARIANT __RPC_FAR *pvarChild) override;
+        /* [retval][out] */ VARIANT __RPC_FAR *pvarChild);
 
     virtual /* [id] */ HRESULT STDMETHODCALLTYPE accDoDefaultAction( 
-        /* [optional][in] */ VARIANT varChild) override;
+        /* [optional][in] */ VARIANT varChild);
 
     virtual /* [id][propput] */ HRESULT STDMETHODCALLTYPE put_accName( 
         /* [optional][in] */ VARIANT varChild,
-        /* [in] */ BSTR szName) override;
+        /* [in] */ BSTR szName);
 
     virtual /* [id][propput] */ HRESULT STDMETHODCALLTYPE put_accValue( 
         /* [optional][in] */ VARIANT varChild,
-        /* [in] */ BSTR szValue) override;
+        /* [in] */ BSTR szValue);
 
   // IDispatch (support of scripting languages like VB)
-  virtual HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT *pctinfo) override;
+  virtual HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT *pctinfo);
 
   virtual HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT iTInfo, LCID lcid,
-                                                ITypeInfo **ppTInfo) override;
+                                                ITypeInfo **ppTInfo);
 
   virtual HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID riid,
                                                   LPOLESTR *rgszNames,
                                                   UINT cNames,
                                                   LCID lcid,
-                                                  DISPID *rgDispId) override;
+                                                  DISPID *rgDispId);
 
   virtual HRESULT STDMETHODCALLTYPE Invoke(DISPID dispIdMember, REFIID riid,
                                            LCID lcid, WORD wFlags,
                                            DISPPARAMS *pDispParams,
                                            VARIANT *pVarResult,
                                            EXCEPINFO *pExcepInfo,
-                                           UINT *puArgErr) override;
+                                           UINT *puArgErr);
 
   // Accessible
-  virtual nsresult HandleAccEvent(AccEvent* aEvent) override;
+  virtual nsresult HandleAccEvent(AccEvent* aEvent);
   virtual void Shutdown() override;
 
   // Helper methods
   static int32_t GetChildIDFor(Accessible* aAccessible);
   static HWND GetHWNDFor(Accessible* aAccessible);
-
-  static void FireWinEvent(Accessible* aTarget, uint32_t aEventType);
 
   /**
    * System caret support: update the Windows caret position. 
@@ -179,22 +176,12 @@ public: // construction, destruction
 
   static IDispatch* NativeAccessible(Accessible* aAccessible);
 
-#ifdef _WIN64
-  uint32_t GetExistingID() const { return mID; }
-  static const uint32_t kNoID = 0;
-#endif
-
 protected:
   virtual ~AccessibleWrap();
 
 #ifdef _WIN64
   uint32_t mID;
 #endif
-
-  /**
-   * Return the wrapper for the document's proxy.
-   */
-  DocProxyAccessibleWrap* DocProxyWrapper() const;
 
   /**
    * Creates ITypeInfo for LIBID_Accessibility if it's needed and returns it.
@@ -232,7 +219,7 @@ protected:
 };
 
 static inline AccessibleWrap*
-WrapperFor(const ProxyAccessible* aProxy)
+WrapperFor(ProxyAccessible* aProxy)
 {
   return reinterpret_cast<AccessibleWrap*>(aProxy->GetWrapper());
 }

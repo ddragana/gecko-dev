@@ -37,8 +37,8 @@ public:
   void Notify(
     const mozilla::hal::SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo);
 
-  nsresult AddWindowListenerImpl(nsPIDOMWindowInner* aWindow);
-  nsresult RemoveWindowListenerImpl(nsPIDOMWindowInner* aWindow);
+  nsresult AddWindowListenerImpl(nsPIDOMWindow* aWindow);
+  nsresult RemoveWindowListenerImpl(nsPIDOMWindow* aWindow);
 
 private:
   nsSystemTimeChangeObserver() { };
@@ -69,8 +69,8 @@ nsSystemTimeChangeObserver::FireMozTimeChangeEvent()
   ListenerArray::ForwardIterator iter(mWindowListeners);
   while (iter.HasMore()) {
     nsWeakPtr weakWindow = iter.GetNext();
-    nsCOMPtr<nsPIDOMWindowInner> innerWindow = do_QueryReferent(weakWindow);
-    nsCOMPtr<nsPIDOMWindowOuter> outerWindow;
+    nsCOMPtr<nsPIDOMWindow> innerWindow = do_QueryReferent(weakWindow);
+    nsCOMPtr<nsPIDOMWindow> outerWindow;
     nsCOMPtr<nsIDocument> document;
     if (!innerWindow ||
         !(document = innerWindow->GetExtantDoc()) ||
@@ -108,16 +108,23 @@ nsSystemTimeChangeObserver::Notify(
 }
 
 nsresult
-mozilla::time::AddWindowListener(nsPIDOMWindowInner* aWindow)
+mozilla::time::AddWindowListener(nsPIDOMWindow* aWindow)
 {
   return nsSystemTimeChangeObserver::GetInstance()->AddWindowListenerImpl(aWindow);
 }
 
 nsresult
-nsSystemTimeChangeObserver::AddWindowListenerImpl(nsPIDOMWindowInner* aWindow)
+nsSystemTimeChangeObserver::AddWindowListenerImpl(nsPIDOMWindow* aWindow)
 {
   if (!aWindow) {
     return NS_ERROR_ILLEGAL_VALUE;
+  }
+
+  if (aWindow->IsOuterWindow()) {
+    aWindow = aWindow->GetCurrentInnerWindow();
+    if (!aWindow) {
+      return NS_ERROR_FAILURE;
+    }
   }
 
   nsWeakPtr windowWeakRef = do_GetWeakReference(aWindow);
@@ -138,7 +145,7 @@ nsSystemTimeChangeObserver::AddWindowListenerImpl(nsPIDOMWindowInner* aWindow)
 }
 
 nsresult
-mozilla::time::RemoveWindowListener(nsPIDOMWindowInner* aWindow)
+mozilla::time::RemoveWindowListener(nsPIDOMWindow* aWindow)
 {
   if (!sObserver) {
     return NS_OK;
@@ -148,10 +155,17 @@ mozilla::time::RemoveWindowListener(nsPIDOMWindowInner* aWindow)
 }
 
 nsresult
-nsSystemTimeChangeObserver::RemoveWindowListenerImpl(nsPIDOMWindowInner* aWindow)
+nsSystemTimeChangeObserver::RemoveWindowListenerImpl(nsPIDOMWindow* aWindow)
 {
   if (!aWindow) {
     return NS_OK;
+  }
+
+  if (aWindow->IsOuterWindow()) {
+    aWindow = aWindow->GetCurrentInnerWindow();
+    if (!aWindow) {
+      return NS_ERROR_FAILURE;
+    }
   }
 
   nsWeakPtr windowWeakRef = do_GetWeakReference(aWindow);

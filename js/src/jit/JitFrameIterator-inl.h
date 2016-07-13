@@ -40,7 +40,7 @@ template <typename T>
 bool
 JitFrameIterator::isExitFrameLayout() const
 {
-    if (!isExitFrame())
+    if (!isExitFrame() || isFakeExitFrame())
         return false;
     return exitFrame()->is<T>();
 }

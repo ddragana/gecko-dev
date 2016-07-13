@@ -5,25 +5,20 @@ function test() {
 
   gBrowser.selectedTab = gBrowser.addTab();
 
-  ContentTask.spawn(gBrowser.selectedBrowser, TESTROOT + "enabled.html", function (url) {
-    return new Promise(resolve => {
-      function page_loaded() {
-        content.removeEventListener("PageLoaded", page_loaded, false);
-        resolve(content.document.getElementById("enabled").textContent);
-      }
+  function loadListener() {
+    gBrowser.selectedBrowser.removeEventListener("load", loadListener, true);
+    gBrowser.contentWindow.addEventListener("PageLoaded", page_loaded, false);
+  }
 
-      function load_listener() {
-        removeEventListener("load", load_listener, true);
-        content.addEventListener("PageLoaded", page_loaded, false);
-      }
+  gBrowser.selectedBrowser.addEventListener("load", loadListener, true);
+  gBrowser.loadURI(TESTROOT + "enabled.html");
+}
 
-      addEventListener("load", load_listener, true);
+function page_loaded() {
+  gBrowser.contentWindow.removeEventListener("PageLoaded", page_loaded, false);
 
-      content.location.href = url;
-    });
-  }).then(text => {
-    is(text, "true", "installTrigger should have been enabled");
-    gBrowser.removeCurrentTab();
-    finish();
-  });
+  var doc = gBrowser.contentDocument;
+  is(doc.getElementById("enabled").textContent, "true", "installTrigger should have been enabled");
+  gBrowser.removeCurrentTab();
+  finish();
 }

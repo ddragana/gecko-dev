@@ -39,7 +39,7 @@ nsIGlobalObject::UnregisterHostObjectURI(const nsACString& aURI)
 
 namespace {
 
-class UnlinkHostObjectURIsRunnable final : public mozilla::Runnable
+class UnlinkHostObjectURIsRunnable final : public nsRunnable
 {
 public:
   explicit UnlinkHostObjectURIsRunnable(nsTArray<nsCString>& aURIs)
@@ -84,7 +84,7 @@ nsIGlobalObject::UnlinkHostObjectURIs()
 
   // nsHostObjectProtocolHandler is main-thread only.
 
-  RefPtr<UnlinkHostObjectURIsRunnable> runnable =
+  nsRefPtr<UnlinkHostObjectURIsRunnable> runnable =
     new UnlinkHostObjectURIsRunnable(mHostObjectURIs);
   MOZ_ASSERT(mHostObjectURIs.IsEmpty());
 

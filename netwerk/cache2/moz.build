@@ -11,7 +11,6 @@ XPIDL_SOURCES += [
     'nsICacheStorage.idl',
     'nsICacheStorageService.idl',
     'nsICacheStorageVisitor.idl',
-    'nsICacheTesting.idl',
 ]
 
 XPIDL_MODULE = 'necko_cache2'
@@ -53,7 +52,6 @@ LOCAL_INCLUDES += [
     '/netwerk/cache',
 ]
 
-FINAL_LIBRARY = 'xul'
+FAIL_ON_WARNINGS = True
 
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']
+FINAL_LIBRARY = 'xul'

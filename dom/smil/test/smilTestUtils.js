@@ -109,6 +109,29 @@ var SMILUtil =
     }
     return computedStyle;
   },
+  
+  // This method hides (i.e. sets "display: none" on) all of the given node's
+  // descendents.  It also hides the node itself, if requested.
+  hideSubtree : function(node, hideNodeItself, useXMLAttribute)
+  {
+    // Hide node, if requested
+    if (hideNodeItself) {
+      if (useXMLAttribute) {
+        if (node.setAttribute) {
+          node.setAttribute("display", "none");
+        }
+      } else if (node.style) {
+        node.style.display = "none";
+      }
+    }
+
+    // Hide node's descendents
+    var child = node.firstChild;
+    while (child) {
+      SMILUtil.hideSubtree(child, true, useXMLAttribute);
+      child = child.nextSibling;
+    }
+  },
 
   getMotionFakeAttributeName : function() {
     return "_motion";
@@ -325,7 +348,7 @@ AnimTestcase.prototype =
   _animElementTagName : "animate", // Can be overridden for e.g. animateColor
   computedValMap      : null,
   skipReason          : null,
-
+  
   // Methods
   /**
    * runTest: Runs this AnimTestcase
@@ -393,7 +416,7 @@ AnimTestcase.prototype =
     if (this.computedValMap.noEffect) {
       return this.buildSeekListStatic(aAnimAttr, aBaseVal, aTimeData,
                                       "testcase specified to have no effect");
-    }
+    }      
     return this.buildSeekListAnimated(aAnimAttr, aBaseVal,
                                       aTimeData, aIsFreeze)
   },
@@ -631,7 +654,7 @@ AnimTestcasePaced.prototype =
 {
   // Member variables
   valuesString : null,
-
+  
   // Methods
   setupAnimationElement : function(aAnimAttr, aTimeData, aIsFreeze)
   {
@@ -745,7 +768,7 @@ AnimMotionTestcase.prototype =
 {
   // Member variables
   _animElementTagName : "animateMotion",
-
+  
   // Implementations of inherited methods that we need to override:
   // --------------------------------------------------------------
   setupAnimationElement : function(aAnimAttr, aTimeData, aIsFreeze)

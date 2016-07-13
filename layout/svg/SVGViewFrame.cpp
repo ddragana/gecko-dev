@@ -10,6 +10,8 @@
 #include "mozilla/dom/SVGSVGElement.h"
 #include "mozilla/dom/SVGViewElement.h"
 
+typedef nsFrame SVGViewFrameBase;
+
 using namespace mozilla::dom;
 
 /**
@@ -18,13 +20,13 @@ using namespace mozilla::dom;
  * identifier. The SVGViewFrame class passes on any attribute changes
  * the view receives to the overridden <svg> element (if there is one).
  **/
-class SVGViewFrame : public nsFrame
+class SVGViewFrame : public SVGViewFrameBase
 {
   friend nsIFrame*
   NS_NewSVGViewFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
   explicit SVGViewFrame(nsStyleContext* aContext)
-    : nsFrame(aContext)
+    : SVGViewFrameBase(aContext)
   {
     AddStateBits(NS_FRAME_IS_NONDISPLAY);
   }
@@ -40,7 +42,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsFrame::IsFrameOfType(aFlags & ~(nsIFrame::eSVG));
+    return SVGViewFrameBase::IsFrameOfType(aFlags & ~(nsIFrame::eSVG));
   }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -61,7 +63,7 @@ public:
                                     nsIAtom* aAttribute,
                                     int32_t  aModType) override;
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
+  virtual bool UpdateOverflow() override {
     // We don't maintain a visual overflow rect
     return false;
   }
@@ -84,7 +86,7 @@ SVGViewFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::view),
                "Content is not an SVG view");
 
-  nsFrame::Init(aContent, aParent, aPrevInFlow);
+  SVGViewFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -123,5 +125,6 @@ SVGViewFrame::AttributeChanged(int32_t  aNameSpaceID,
     }
   }
 
-  return nsFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+  return SVGViewFrameBase::AttributeChanged(aNameSpaceID,
+                                            aAttribute, aModType);
 }

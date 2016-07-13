@@ -4,7 +4,6 @@ load(libdir + 'eqArrayHelper.js');
 
 var arrayPattern = '[a = 1, b = 2, c = 3, d = 4, e = 5, f = 6]';
 var objectPattern = '{0: a = 1, 1: b = 2, 2: c = 3, 3: d = 4, 4: e = 5, 5: f = 6}';
-var objectPatternShorthand = '{a = 1, b = 2, c = 3, d = 4, e = 5, f = 6}';
 var nestedPattern = '{a: a = 1, b: [b = 2] = [], c: {c: [c]} = {c: [3]}, d: {d, e} = {d: 4, e: 5}, f: f = 6}';
 
 function testAll(fn) {
@@ -18,11 +17,6 @@ function testAll(fn) {
   assertEqArray(fn(objectPattern, [undefined, 0, false, null, "", undefined]), [1, 0, false, null, "", 6]);
   assertEqArray(fn(objectPattern, [0, false]), [0, false, 3, 4, 5, 6]);
 
-  assertEqArray(fn(objectPatternShorthand, {}), [1, 2, 3, 4, 5, 6]);
-  assertEqArray(fn(objectPatternShorthand, {a: 2, b: 3, c: 4, d: 5, e: 6, f: 7, g: 8, h: 9}), [2, 3, 4, 5, 6, 7]);
-  assertEqArray(fn(objectPatternShorthand, {a: undefined, b: 0, c: false, d: null, e: "", f: undefined}),
-                   [1, 0, false, null, "", 6]);
-  assertEqArray(fn(objectPatternShorthand, {a: 0, b: false}), [0, false, 3, 4, 5, 6]);
   assertEqArray(fn(nestedPattern, {}), [1, 2, 3, 4, 5, 6]);
   assertEqArray(fn(nestedPattern, {a: 2, b: [], c: undefined}), [2, 2, 3, 4, 5, 6]);
   assertEqArray(fn(nestedPattern, {a: undefined, b: [3], c: {c: [4]}}), [1, 3, 4, 4, 5, 6]);
@@ -97,6 +91,17 @@ function testThrow(pattern, input) {
   )(input);
 }
 testAll(testThrow);
+
+// XXX: Support for let blocks will be removed in bug 1023609.
+// However, they test a special code path in destructuring assignment so having
+// these tests here for now seems like a good idea.
+function testLetBlock(pattern, input) {
+  return new Function('input',
+    'let (' + pattern + ' = input)' +
+    '{ return [a, b, c, d, e, f]; }'
+  )(input);
+}
+testAll(testLetBlock);
 
 // test global const
 const [ca = 1, cb = 2] = [];
@@ -180,10 +185,6 @@ if (defaultsSupportedInForVar) {
 
     b = undefined;
     for (let {1: c = 10} in " ") { b = c; }
-    assertEq(b, 10);
-
-    b = undefined;
-    for (let {c = 10} in " ") { b = c; }
     assertEq(b, 10);
   `)();
 }

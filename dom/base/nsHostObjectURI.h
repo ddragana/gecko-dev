@@ -21,24 +21,22 @@
  * MediaStreams, with scheme "mediastream", and MediaSources, with scheme
  * "mediasource".
  */
-class nsHostObjectURI : public mozilla::net::nsSimpleURI,
+class nsHostObjectURI : public nsSimpleURI,
                         public nsIURIWithPrincipal
 {
 public:
   explicit nsHostObjectURI(nsIPrincipal* aPrincipal) :
-      mozilla::net::nsSimpleURI(), mPrincipal(aPrincipal)
+      nsSimpleURI(), mPrincipal(aPrincipal)
   {}
 
   // For use only from deserialization
-  nsHostObjectURI() : mozilla::net::nsSimpleURI() {}
+  nsHostObjectURI() : nsSimpleURI() {}
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIURIWITHPRINCIPAL
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
   NS_DECL_NSIIPCSERIALIZABLEURI
-
-  NS_IMETHOD SetScheme(const nsACString &aProtocol) override;
 
   // Override CloneInternal() and EqualsInternal()
   virtual nsresult CloneInternal(RefHandlingEnum aRefHandlingMode,
@@ -48,7 +46,7 @@ public:
                                   bool* aResult) override;
 
   // Override StartClone to hand back a nsHostObjectURI
-  virtual mozilla::net::nsSimpleURI* StartClone(RefHandlingEnum /* unused */) override
+  virtual nsSimpleURI* StartClone(RefHandlingEnum /* unused */) override
   { return new nsHostObjectURI(); }
 
   nsCOMPtr<nsIPrincipal> mPrincipal;

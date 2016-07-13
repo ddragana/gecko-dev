@@ -7,8 +7,6 @@
 #ifndef jit_IonOptimizationLevels_h
 #define jit_IonOptimizationLevels_h
 
-#include "mozilla/EnumeratedArray.h"
-
 #include "jsbytecode.h"
 #include "jstypes.h"
 
@@ -18,28 +16,28 @@
 namespace js {
 namespace jit {
 
-enum class OptimizationLevel : uint8_t
+enum OptimizationLevel
 {
-    Normal,
-    AsmJS,
-    Count,
-    DontCompile
+    Optimization_DontCompile,
+    Optimization_Normal,
+    Optimization_AsmJS,
+    Optimization_Count
 };
 
-#ifdef JS_JITSPEW
+#ifdef DEBUG
 inline const char*
 OptimizationLevelString(OptimizationLevel level)
 {
     switch (level) {
-      case OptimizationLevel::DontCompile:
+      case Optimization_DontCompile:
         return "Optimization_DontCompile";
-      case OptimizationLevel::Normal:
+      case Optimization_Normal:
         return "Optimization_Normal";
-      case OptimizationLevel::AsmJS:
+      case Optimization_AsmJS:
         return "Optimization_AsmJS";
-      case OptimizationLevel::Count:;
+      default:
+        MOZ_CRASH("Invalid OptimizationLevel");
     }
-    MOZ_CRASH("Invalid OptimizationLevel");
 }
 #endif
 
@@ -81,14 +79,8 @@ class OptimizationInfo
     // Toggles whether loop unrolling is performed.
     bool loopUnrolling_;
 
-    // Toggles whether instruction reordering is performed.
-    bool reordering_;
-
     // Toggles whether Truncation based on Range Analysis is used.
     bool autoTruncate_;
-
-    // Toggles whether sincos is used.
-    bool sincos_;
 
     // Toggles whether sink is used.
     bool sink_;
@@ -134,13 +126,6 @@ class OptimizationInfo
     // Default compiler warmup threshold, unless it is overridden.
     static const uint32_t CompilerWarmupThreshold = 1000;
 
-    // How many invocations or loop iterations are needed before small functions
-    // are compiled.
-    uint32_t compilerSmallFunctionWarmUpThreshold_;
-
-    // Default small function compiler warmup threshold, unless it is overridden.
-    static const uint32_t CompilerSmallFunctionWarmupThreshold = 100;
-
     // How many invocations or loop iterations are needed before calls
     // are inlined, as a fraction of compilerWarmUpThreshold.
     double inliningWarmUpThresholdFactor_;
@@ -161,79 +146,67 @@ class OptimizationInfo
     }
 
     bool inlineInterpreted() const {
-        return inlineInterpreted_ && !JitOptions.disableInlining;
+        return inlineInterpreted_ && !js_JitOptions.disableInlining;
     }
 
     bool inlineNative() const {
-        return inlineNative_ && !JitOptions.disableInlining;
+        return inlineNative_ && !js_JitOptions.disableInlining;
     }
 
     uint32_t compilerWarmUpThreshold(JSScript* script, jsbytecode* pc = nullptr) const;
 
     bool eagerSimdUnboxEnabled() const {
-        return eagerSimdUnbox_ && !JitOptions.disableEagerSimdUnbox;
+        return eagerSimdUnbox_ && !js_JitOptions.disableEagerSimdUnbox;
     }
 
     bool gvnEnabled() const {
-        return gvn_ && !JitOptions.disableGvn;
+        return gvn_ && !js_JitOptions.disableGvn;
     }
 
     bool licmEnabled() const {
-        return licm_ && !JitOptions.disableLicm;
+        return licm_ && !js_JitOptions.disableLicm;
     }
 
     bool rangeAnalysisEnabled() const {
-        return rangeAnalysis_ && !JitOptions.disableRangeAnalysis;
+        return rangeAnalysis_ && !js_JitOptions.disableRangeAnalysis;
     }
 
     bool loopUnrollingEnabled() const {
-        return loopUnrolling_ && !JitOptions.disableLoopUnrolling;
-    }
-
-    bool instructionReorderingEnabled() const {
-        return reordering_ && !JitOptions.disableInstructionReordering;
+        return loopUnrolling_ && !js_JitOptions.disableLoopUnrolling;
     }
 
     bool autoTruncateEnabled() const {
         return autoTruncate_ && rangeAnalysisEnabled();
     }
 
-    bool sincosEnabled() const {
-        return sincos_ && !JitOptions.disableSincos;
-    }
-
     bool sinkEnabled() const {
-        return sink_ && !JitOptions.disableSink;
+        return sink_ && !js_JitOptions.disableSink;
     }
 
     bool eaaEnabled() const {
-        return eaa_ && !JitOptions.disableEaa;
+        return eaa_ && !js_JitOptions.disableEaa;
     }
 
     bool amaEnabled() const {
-        return ama_ && !JitOptions.disableAma;
+        return ama_ && !js_JitOptions.disableAma;
     }
 
     bool edgeCaseAnalysisEnabled() const {
-        return edgeCaseAnalysis_ && !JitOptions.disableEdgeCaseAnalysis;
+        return edgeCaseAnalysis_ && !js_JitOptions.disableEdgeCaseAnalysis;
     }
 
     bool eliminateRedundantChecksEnabled() const {
         return eliminateRedundantChecks_;
     }
 
-    bool flowAliasAnalysisEnabled() const {
-        return !JitOptions.disableFlowAA;
-    }
-
     IonRegisterAllocator registerAllocator() const {
-        if (JitOptions.forcedRegisterAllocator.isSome())
-            return JitOptions.forcedRegisterAllocator.ref();
+        if (js_JitOptions.forcedRegisterAllocator.isSome())
+            return js_JitOptions.forcedRegisterAllocator.ref();
         return registerAllocator_;
     }
 
     bool scalarReplacementEnabled() const {
-        return scalarReplacement_ && !JitOptions.disableScalarReplacement;
+        return scalarReplacement_ && !js_JitOptions.disableScalarReplacement;
     }
 
     uint32_t smallFunctionMaxInlineDepth() const {
@@ -247,7 +220,7 @@ class OptimizationInfo
     }
 
     uint32_t inlineMaxBytecodePerCallSite(bool offThread) const {
-        return (offThread || !JitOptions.limitScriptSize)
+        return (offThread || !js_JitOptions.limitScriptSize)
                ? inlineMaxBytecodePerCallSiteOffThread_
                : inlineMaxBytecodePerCallSiteMainThread_;
     }
@@ -266,8 +239,8 @@ class OptimizationInfo
 
     uint32_t inliningWarmUpThreshold() const {
         uint32_t compilerWarmUpThreshold = compilerWarmUpThreshold_;
-        if (JitOptions.forcedDefaultIonWarmUpThreshold.isSome())
-            compilerWarmUpThreshold = JitOptions.forcedDefaultIonWarmUpThreshold.ref();
+        if (js_JitOptions.forcedDefaultIonWarmUpThreshold.isSome())
+            compilerWarmUpThreshold = js_JitOptions.forcedDefaultIonWarmUpThreshold.ref();
         return compilerWarmUpThreshold * inliningWarmUpThresholdFactor_;
     }
 
@@ -276,16 +249,19 @@ class OptimizationInfo
     }
 };
 
-class OptimizationLevelInfo
+class OptimizationInfos
 {
   private:
-    mozilla::EnumeratedArray<OptimizationLevel, OptimizationLevel::Count, OptimizationInfo> infos_;
+    OptimizationInfo infos_[Optimization_Count - 1];
 
   public:
-    OptimizationLevelInfo();
+    OptimizationInfos();
 
     const OptimizationInfo* get(OptimizationLevel level) const {
-        return &infos_[level];
+        MOZ_ASSERT(level < Optimization_Count);
+        MOZ_ASSERT(level != Optimization_DontCompile);
+
+        return &infos_[level - 1];
     }
 
     OptimizationLevel nextLevel(OptimizationLevel level) const;
@@ -294,7 +270,7 @@ class OptimizationLevelInfo
     OptimizationLevel levelForScript(JSScript* script, jsbytecode* pc = nullptr) const;
 };
 
-extern OptimizationLevelInfo IonOptimizations;
+extern OptimizationInfos js_IonOptimizations;
 
 } // namespace jit
 } // namespace js

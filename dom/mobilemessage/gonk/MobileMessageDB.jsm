@@ -673,7 +673,7 @@ MobileMessageDB.prototype = {
         stores = txn.objectStore(storeNames[0]);
       } else {
         stores = [];
-        for (let storeName of storeNames) {
+        for each (let storeName in storeNames) {
           if (DEBUG) debug("Retrieving object store " + storeName);
           stores.push(txn.objectStore(storeName));
         }
@@ -1460,7 +1460,7 @@ MobileMessageDB.prototype = {
               let timestamp = messageRecord.timestamp;
               // Setup participantIdsIndex.
               messageRecord.participantIdsIndex = [];
-              for (let id of participantIds) {
+              for each (let id in participantIds) {
                 messageRecord.participantIdsIndex.push([id, timestamp]);
               }
               if (threadRecord) {
@@ -2065,13 +2065,13 @@ MobileMessageDB.prototype = {
   },
 
   /**
-   * Generate a <code>nsISmsMessage</code> or
-   * <code>nsIMmsMessage</code> instance from a stored message record.
+   * Generate a <code>nsIDOMMozSmsMessage</code> or
+   * <code>nsIDOMMozMmsMessage</code> instance from a stored message record.
    *
    * @function MobileMessageDB.createDomMessageFromRecord
    * @param {MobileMessageDB.MessageRecord} aMessageRecord
    *        The stored message record.
-   * @return {nsISmsMessage|nsIMmsMessage}
+   * @return {nsIDOMMozSmsMessage|nsIDOMMozMmsMessage}
    */
   createDomMessageFromRecord: function(aMessageRecord) {
     if (DEBUG) {
@@ -2580,7 +2580,7 @@ MobileMessageDB.prototype = {
    * @callback MobileMessageDB.TransactionResultCallback
    * @param {number} aErrorCode
    *        The error code on failure, or <code>NS_OK</code> on success.
-   * @param {nsISmsMessage|nsIMmsMessage} aDomMessage
+   * @param {nsIDOMMozSmsMessage|nsIDOMMozMmsMessage} aDomMessage
    *        The DOM message instance of the transaction result.
    */
 
@@ -2857,7 +2857,7 @@ MobileMessageDB.prototype = {
         aMessageRecord.threadIdIndex = [threadId, timestamp];
         // Setup participantIdsIndex.
         aMessageRecord.participantIdsIndex = [];
-        for (let id of participantIds) {
+        for each (let id in participantIds) {
           aMessageRecord.participantIdsIndex.push([id, timestamp]);
         }
 
@@ -3592,7 +3592,7 @@ MobileMessageDB.prototype = {
    *        The error code on failure, or <code>NS_OK</code> on success.
    * @param {MobileMessageDB.MessageRecord} aMessageRecord
    *        The stored message record.
-   * @param {nsISmsMessage|nsIMmsMessage} aDomMessage
+   * @param {nsIDOMMozSmsMessage|nsIDOMMozMmsMessage} aDomMessage
    *        The DOM message instance of the message record.
    */
 
@@ -3827,35 +3827,8 @@ MobileMessageDB.prototype = {
         }
 
         if (segmentRecord.segments[seq]) {
-          if (segmentRecord.encoding == RIL.PDU_DCS_MSG_CODING_8BITS_ALPHABET &&
-              segmentRecord.encoding == aSmsSegment.encoding &&
-              segmentRecord.segments[seq].length == aSmsSegment.data.length &&
-              segmentRecord.segments[seq].every(function(aElement, aIndex) {
-                return aElement == aSmsSegment.data[aIndex];
-              })) {
-            if (DEBUG) {
-              debug("Got duplicated binary segment no: " + seq);
-            }
-            return;
-          }
-
-          if (segmentRecord.encoding != RIL.PDU_DCS_MSG_CODING_8BITS_ALPHABET &&
-              aSmsSegment.encoding != RIL.PDU_DCS_MSG_CODING_8BITS_ALPHABET &&
-              segmentRecord.segments[seq] == aSmsSegment.body) {
-            if (DEBUG) {
-              debug("Got duplicated text segment no: " + seq);
-            }
-            return;
-          }
-
-          // Update mandatory properties to ensure that the segments could be
-          // concatenated properly.
-          segmentRecord.encoding = aSmsSegment.encoding;
-          segmentRecord.originatorPort = aSmsSegment.originatorPort;
-          segmentRecord.destinationPort = aSmsSegment.destinationPort;
-          segmentRecord.teleservice = aSmsSegment.teleservice;
-          // Decrease the counter for this collided segment.
-          segmentRecord.receivedSegments--;
+          if (DEBUG) debug("Got duplicated segment no. " + seq);
+          return;
         }
 
         segmentRecord.timestamp = aSmsSegment.timestamp;
@@ -4072,8 +4045,7 @@ MobileMessageDB.prototype = {
    */
   createMessageCursor: function(aHasStartDate, aStartDate, aHasEndDate,
                                 aEndDate, aNumbers, aNumbersCount, aDelivery,
-                                aHasRead, aRead, aHasThreadId, aThreadId,
-                                aReverse, aCallback) {
+                                aHasRead, aRead, aThreadId, aReverse, aCallback) {
     if (DEBUG) {
       debug("Creating a message cursor. Filters:" +
             " startDate: " + (aHasStartDate ? aStartDate : "(null)") +
@@ -4081,7 +4053,7 @@ MobileMessageDB.prototype = {
             " delivery: " + aDelivery +
             " numbers: " + (aNumbersCount ? aNumbers : "(null)") +
             " read: " + (aHasRead ? aRead : "(null)") +
-            " threadId: " + (aHasThreadId ? aThreadId : "(null)") +
+            " threadId: " + aThreadId +
             " reverse: " + aReverse);
     }
 
@@ -4101,7 +4073,7 @@ MobileMessageDB.prototype = {
     if (aHasRead) {
       filter.read = aRead;
     }
-    if (aHasThreadId) {
+    if (aThreadId) {
       filter.threadId = aThreadId;
     }
 
@@ -4126,11 +4098,8 @@ MobileMessageDB.prototype = {
    * @param {boolean} value
    *        The updated <code>read</code> value.
    * @param {boolean} aSendReadReport
-   *        <code>true</code> to reply the read report of an incoming MMS
-   *        message whose <code>isReadReportSent</code> is 'false'.
-   *        Note: <code>isReadReportSent</code> will be set to 'true' no
-   *        matter aSendReadReport is true or not when a message was marked
-   *        from UNREAD to READ. See bug 1180470 for the new UX policy.
+   *        <code>true</code> to update the <code>isReadReportSent</code>
+   *        property if the message is MMS.
    * @param {nsIMobileMessageCallback} aRequest
    *        The callback object.
    */
@@ -4183,18 +4152,17 @@ MobileMessageDB.prototype = {
         messageRecord.read = value ? FILTER_READ_READ : FILTER_READ_UNREAD;
         messageRecord.readIndex = [messageRecord.read, messageRecord.timestamp];
         let readReportMessageId, readReportTo;
-        if (messageRecord.type == "mms" &&
+        if (aSendReadReport &&
+            messageRecord.type == "mms" &&
             messageRecord.delivery == DELIVERY_RECEIVED &&
             messageRecord.read == FILTER_READ_READ &&
             messageRecord.headers["x-mms-read-report"] &&
             !messageRecord.isReadReportSent) {
           messageRecord.isReadReportSent = true;
 
-          if (aSendReadReport) {
-            let from = messageRecord.headers["from"];
-            readReportTo = from && from.address;
-            readReportMessageId = messageRecord.headers["message-id"];
-          }
+          let from = messageRecord.headers["from"];
+          readReportTo = from && from.address;
+          readReportMessageId = messageRecord.headers["message-id"];
         }
 
         if (DEBUG) debug("Message.read set to: " + value);
@@ -4271,7 +4239,7 @@ MobileMessageDB.prototype = {
   }
 };
 
-var FilterSearcherHelper = {
+let FilterSearcherHelper = {
 
   /**
    * @param index

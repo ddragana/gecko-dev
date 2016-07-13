@@ -136,7 +136,8 @@ void VieRemb::OnReceiveBitrateChanged(const std::vector<unsigned int>& ssrcs,
   list_crit_->Leave();
 
   if (sender) {
-    sender->SetREMBData(bitrate_, ssrcs);
+    // TODO(holmer): Change RTP module API to take a const vector reference.
+    sender->SetREMBData(bitrate_, ssrcs.size(), &ssrcs[0]);
   }
 }
 

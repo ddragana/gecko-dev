@@ -9,7 +9,3 @@ addMessageListener("valid-assert", function (message) {
   assert.equal(1, 1, "another valid assertion");
   sendAsyncMessage("valid-assert-done");
 });
-
-addMessageListener("sync-message", () => {
-  return "Received a synchronous message.";
-});

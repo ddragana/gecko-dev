@@ -29,11 +29,10 @@ class AsyncInvoker;
 // lifetime can be independent of AsyncInvoker.
 class AsyncClosure : public RefCountInterface {
  public:
+  virtual ~AsyncClosure() {}
   // Runs the asynchronous task, and triggers a callback to the calling
   // thread if needed. Should be called from the target thread.
   virtual void Execute() = 0;
- protected:
-  ~AsyncClosure() override {}
 };
 
 // Simple closure that doesn't trigger a callback for the calling thread.
@@ -55,7 +54,7 @@ class FireAndForgetAsyncClosure : public AsyncClosure {
 class NotifyingAsyncClosureBase : public AsyncClosure,
                                   public sigslot::has_slots<> {
  public:
-  ~NotifyingAsyncClosureBase() override;
+  virtual ~NotifyingAsyncClosureBase() { disconnect_all(); }
 
  protected:
   NotifyingAsyncClosureBase(AsyncInvoker* invoker, Thread* calling_thread);

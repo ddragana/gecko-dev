@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef JS_JITSPEW
-
 #include "jit/JSONSpewer.h"
 
 #include <stdarg.h>
@@ -234,7 +232,7 @@ JSONSpewer::spewMDef(MDefinition* def)
     if (def->isAdd() || def->isSub() || def->isMod() || def->isMul() || def->isDiv())
         isTruncated = static_cast<MBinaryArithInstruction*>(def)->isTruncated();
 
-    if (def->type() != MIRType::None && def->range()) {
+    if (def->type() != MIRType_None && def->range()) {
         beginStringProperty("type");
         def->range()->dump(out_);
         out_.printf(" : %s%s", StringFromMIRType(def->type()), (isTruncated ? " (t)" : ""));
@@ -261,8 +259,6 @@ JSONSpewer::spewMIR(MIRGraph* mir)
         beginObject();
 
         integerProperty("number", block->id());
-        if (block->getHitState() == MBasicBlock::HitState::Count)
-            integerProperty("count", block->getHitCount());
 
         beginListProperty("attributes");
         if (block->isLoopBackedge())
@@ -373,7 +369,7 @@ JSONSpewer::spewRanges(BacktrackingAllocator* regalloc)
 
                     beginObject();
                     property("allocation");
-                    out_.printf("\"%s\"", range->bundle()->allocation().toString().get());
+                    out_.printf("\"%s\"", range->bundle()->allocation().toString());
                     integerProperty("start", range->from().bits());
                     integerProperty("end", range->to().bits());
                     endObject();
@@ -405,4 +401,11 @@ JSONSpewer::endFunction()
     endObject();
 }
 
-#endif /* JS_JITSPEW */
+void
+JSONSpewer::spewDebuggerGraph(MIRGraph* graph)
+{
+    beginObject();
+    spewMIR(graph);
+    spewLIR(graph);
+    endObject();
+}

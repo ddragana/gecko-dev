@@ -7,19 +7,21 @@
 #include "nsIPrefService.h"
 #include "nsIX509CertDB.h"
 #include "nsServiceManagerUtils.h"
-#include "TestHarness.h"
 
 int
 main(int argc, char* argv[])
 {
-  ScopedXPCOM xpcom("TestCertDB");
   {
+    NS_InitXPCOM2(nullptr, nullptr, nullptr);
     nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID));
     if (!prefs) {
       return -1;
     }
     // When NSS initializes, it attempts to get some localized strings.
-    // As a result, Android flips out if this isn't set.
+    // As a result, OS X and Windows flip out if this isn't set.
+    // (This isn't done automatically since this test doesn't have a
+    // lot of the other boilerplate components that would otherwise
+    // keep the certificate db alive longer than we want it to.)
     nsresult rv = prefs->SetBoolPref("intl.locale.matchOS", true);
     if (NS_FAILED(rv)) {
       return -1;
@@ -30,5 +32,6 @@ main(int argc, char* argv[])
     }
   } // this scopes the nsCOMPtrs
   // no nsCOMPtrs are allowed to be alive when you call NS_ShutdownXPCOM
+  NS_ShutdownXPCOM(nullptr);
   return 0;
 }

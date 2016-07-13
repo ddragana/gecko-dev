@@ -98,11 +98,11 @@ int32_t DeviceInfoIos::DisplayCaptureSettingsDialogBox(
 }
 
 int32_t DeviceInfoIos::GetOrientation(const char* deviceUniqueIdUTF8,
-                                      VideoRotation& orientation) {
+                                      VideoCaptureRotation& orientation) {
   if (strcmp(deviceUniqueIdUTF8, "Front Camera") == 0) {
-    orientation = kVideoRotation_0;
+    orientation = kCameraRotate0;
   } else {
-    orientation = kVideoRotation_90;
+    orientation = kCameraRotate90;
   }
   return orientation;
 }

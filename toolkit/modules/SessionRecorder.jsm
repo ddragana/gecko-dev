@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef MERGED_COMPARTMENT
+
 "use strict";
 
 this.EXPORTED_SYMBOLS = [
@@ -10,10 +12,13 @@ this.EXPORTED_SYMBOLS = [
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
+#endif
+
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/utils.js");
+
 
 // We automatically prune sessions older than this.
 const MAX_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days.
@@ -21,9 +26,6 @@ const STARTUP_RETRY_INTERVAL_MS = 5000;
 
 // Wait up to 5 minutes for startup measurements before giving up.
 const MAX_STARTUP_TRIES = 300000 / STARTUP_RETRY_INTERVAL_MS;
-
-const LOGGER_NAME = "Toolkit.Telemetry";
-const LOGGER_PREFIX = "SessionRecorder::";
 
 /**
  * Records information about browser sessions.
@@ -67,7 +69,7 @@ this.SessionRecorder = function (branch) {
     throw new Error("branch argument must end with '.': " + branch);
   }
 
-  this._log = Log.repository.getLoggerWithMessagePrefix(LOGGER_NAME, LOGGER_PREFIX);
+  this._log = Log.repository.getLogger("Services.DataReporting.SessionRecorder");
 
   this._prefs = new Preferences(branch);
   this._lastActivityWasInactive = false;
@@ -346,7 +348,8 @@ SessionRecorder.prototype = Object.freeze({
       this._log.debug("Recording last sessions as #" + count + ".");
       this._prefs.set("previous." + count, JSON.stringify(obj));
     } catch (ex) {
-      this._log.warn("Exception when migrating last session", ex);
+      this._log.warn("Exception when migrating last session: " +
+                     CommonUtils.exceptionStr(ex));
     } finally {
       this._log.debug("Resetting prefs from last session.");
       for (let pref of this._CURRENT_PREFS) {

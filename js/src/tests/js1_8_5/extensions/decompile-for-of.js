@@ -1,7 +1,7 @@
 // The decompiler can handle the implicit call to @@iterator in a for-of loop.
 
 var x;
-function check(code, msg) {
+function check(code) {
     var s = "no exception thrown";
     try {
         eval(code);
@@ -9,19 +9,19 @@ function check(code, msg) {
         s = exc.message;
     }
 
-    assertEq(s, msg);
+    assertEq(s, `x[Symbol.iterator] is not a function`);
 }
 
 x = {};
-check("for (var v of x) throw fit;", "x is not iterable");
-check("[...x]", "x is not iterable");
-check("Math.hypot(...x)", "x is not iterable");
+check("for (var v of x) throw fit;");
+check("[...x]");
+check("Math.hypot(...x)");
 
 x[Symbol.iterator] = "potato";
-check("for (var v of x) throw fit;", "x is not iterable");
+check("for (var v of x) throw fit;");
 
 x[Symbol.iterator] = {};
-check("for (var v of x) throw fit;", "x[Symbol.iterator] is not a function");
+check("for (var v of x) throw fit;");
 
 if (typeof reportCompare === "function")
     reportCompare(0, 0, "ok");

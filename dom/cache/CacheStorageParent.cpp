@@ -101,9 +101,8 @@ CacheStorageParent::RecvPCacheOpConstructor(PCacheOpParent* aActor,
   }
 
   if (NS_WARN_IF(NS_FAILED(mVerifiedStatus))) {
-    ErrorResult result(mVerifiedStatus);
-    Unused << CacheOpParent::Send__delete__(actor, result, void_t());
-    result.SuppressException();
+    unused << CacheOpParent::Send__delete__(actor, ErrorResult(mVerifiedStatus),
+                                            void_t());
     return true;
   }
 

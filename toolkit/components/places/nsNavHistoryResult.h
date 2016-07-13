@@ -94,7 +94,7 @@ private:
   NS_IMETHOD OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,      \
                      int64_t aSessionId, int64_t aReferringId,          \
                      uint32_t aTransitionType, const nsACString& aGUID, \
-                     bool aHidden, uint32_t aVisitCount, uint32_t aTyped) __VA_ARGS__;
+                     bool aHidden) __VA_ARGS__;
 
 // nsNavHistoryResult
 //
@@ -140,7 +140,7 @@ public:
                 uint32_t aQueryCount,
                 nsNavHistoryQueryOptions *aOptions);
 
-  RefPtr<nsNavHistoryContainerResultNode> mRootNode;
+  nsRefPtr<nsNavHistoryContainerResultNode> mRootNode;
 
   nsCOMArray<nsINavHistoryQuery> mQueries;
   nsCOMPtr<nsNavHistoryQueryOptions> mOptions;
@@ -161,21 +161,21 @@ public:
   bool mIsBookmarkFolderObserver;
   bool mIsAllBookmarksObserver;
 
-  typedef nsTArray< RefPtr<nsNavHistoryQueryResultNode> > QueryObserverList;
+  typedef nsTArray< nsRefPtr<nsNavHistoryQueryResultNode> > QueryObserverList;
   QueryObserverList mHistoryObservers;
   QueryObserverList mAllBookmarksObservers;
 
-  typedef nsTArray< RefPtr<nsNavHistoryFolderResultNode> > FolderObserverList;
+  typedef nsTArray< nsRefPtr<nsNavHistoryFolderResultNode> > FolderObserverList;
   nsDataHashtable<nsTrimInt64HashKey, FolderObserverList*> mBookmarkFolderObservers;
   FolderObserverList* BookmarkFolderObserversForId(int64_t aFolderId, bool aCreate);
 
-  typedef nsTArray< RefPtr<nsNavHistoryContainerResultNode> > ContainerObserverList;
+  typedef nsTArray< nsRefPtr<nsNavHistoryContainerResultNode> > ContainerObserverList;
 
   void RecursiveExpandCollapse(nsNavHistoryContainerResultNode* aContainer,
                                bool aExpand);
 
   void InvalidateTree();
-
+  
   bool mBatchInProgress;
 
   nsMaybeWeakPtrArray<nsINavHistoryResultObserver> mObservers;
@@ -243,13 +243,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsNavHistoryResult, NS_NAVHISTORYRESULT_IID)
   NS_IMETHOD GetPageGuid(nsACString& aPageGuid) override \
     { return nsNavHistoryResultNode::GetPageGuid(aPageGuid); } \
   NS_IMETHOD GetBookmarkGuid(nsACString& aBookmarkGuid) override \
-    { return nsNavHistoryResultNode::GetBookmarkGuid(aBookmarkGuid); } \
-  NS_IMETHOD GetVisitId(int64_t* aVisitId) override \
-    { return nsNavHistoryResultNode::GetVisitId(aVisitId); } \
-  NS_IMETHOD GetFromVisitId(int64_t* aFromVisitId) override \
-    { return nsNavHistoryResultNode::GetFromVisitId(aFromVisitId); } \
-  NS_IMETHOD GetVisitType(uint32_t* aVisitType) override \
-    { return nsNavHistoryResultNode::GetVisitType(aVisitType); }
+    { return nsNavHistoryResultNode::GetBookmarkGuid(aBookmarkGuid); }
 
 class nsNavHistoryResultNode : public nsINavHistoryResultNode
 {
@@ -274,9 +268,6 @@ public:
   NS_IMETHOD GetTags(nsAString& aTags) override;
   NS_IMETHOD GetPageGuid(nsACString& aPageGuid) override;
   NS_IMETHOD GetBookmarkGuid(nsACString& aBookmarkGuid) override;
-  NS_IMETHOD GetVisitId(int64_t* aVisitId) override;
-  NS_IMETHOD GetFromVisitId(int64_t* aFromVisitId) override;
-  NS_IMETHOD GetVisitType(uint32_t* aVisitType) override;
 
   virtual void OnRemoving();
 
@@ -290,8 +281,7 @@ public:
                            uint16_t aItemType,
                            int64_t aParentId,
                            const nsACString& aGUID,
-                           const nsACString& aParentGUID,
-                           const nsACString &aOldValue);
+                           const nsACString& aParentGUID);
 
 protected:
   virtual ~nsNavHistoryResultNode() {}
@@ -357,7 +347,7 @@ public:
     return reinterpret_cast<nsNavHistoryQueryResultNode*>(this);
   }
 
-  RefPtr<nsNavHistoryContainerResultNode> mParent;
+  nsRefPtr<nsNavHistoryContainerResultNode> mParent;
   nsCString mURI; // not necessarily valid for containers, call GetUri
   nsCString mTitle;
   nsString mTags;
@@ -368,8 +358,6 @@ public:
   int32_t mBookmarkIndex;
   int64_t mItemId;
   int64_t mFolderId;
-  int64_t mVisitId;
-  int64_t mFromVisitId;
   PRTime mDateAdded;
   PRTime mLastModified;
 
@@ -470,7 +458,7 @@ public:
   // their result pointer set so we can quickly get to the result without having
   // to walk the tree. Yet, this also saves us from storing a million pointers
   // for every leaf node to the result.
-  RefPtr<nsNavHistoryResult> mResult;
+  nsRefPtr<nsNavHistoryResult> mResult;
 
   // For example, RESULT_TYPE_QUERY. Query and Folder results override GetType
   // so this is not used, but is still kept in sync.
@@ -568,6 +556,13 @@ public:
                                                 void* closure);
 
   // finding children: THESE DO NOT ADDREF
+  nsNavHistoryResultNode* FindChildURI(nsIURI* aURI, uint32_t* aNodeIndex)
+  {
+    nsAutoCString spec;
+    if (NS_FAILED(aURI->GetSpec(spec)))
+      return nullptr;
+    return FindChildURI(spec, aNodeIndex);
+  }
   nsNavHistoryResultNode* FindChildURI(const nsACString& aSpec,
                                        uint32_t* aNodeIndex);
   // returns the index of the given node, -1 if not found

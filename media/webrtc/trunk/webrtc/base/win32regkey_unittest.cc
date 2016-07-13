@@ -169,7 +169,7 @@ TEST(RegKeyTest, RegKeyHelperFunctionsTest) {
   RegKeyHelperFunctionsTest();
 }
 
-void RegKeyNonStaticFunctionsTest() {
+TEST(RegKeyTest, RegKeyNonStaticFunctionsTest) {
   DWORD int_val = 0;
   DWORD64 int64_val = 0;
   wchar_t* str_val = NULL;
@@ -359,7 +359,7 @@ void RegKeyNonStaticFunctionsTest() {
   EXPECT_SUCCEEDED(RegKey::DeleteKey(kFullRkey1));
 }
 
-void RegKeyStaticFunctionsTest() {
+TEST(RegKeyTest, RegKeyStaticFunctionsTest) {
   DWORD int_val = 0;
   DWORD64 int64_val = 0;
   float float_val = 0;
@@ -585,13 +585,6 @@ void RegKeyStaticFunctionsTest() {
 
   // whack the whole key
   EXPECT_SUCCEEDED(RegKey::DeleteKey(kFullRkey1));
-}
-
-// Run both tests under the same test target. Because they access (read and
-// write) the same registry keys they can't run in parallel with eachother.
-TEST(RegKeyTest, RegKeyFunctionsTest) {
-  RegKeyNonStaticFunctionsTest();
-  RegKeyStaticFunctionsTest();
 }
 
 }  // namespace rtc

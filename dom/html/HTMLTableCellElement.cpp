@@ -369,12 +369,6 @@ static const nsAttrValue::EnumTable kCellScopeTable[] = {
   { 0 }
 };
 
-void
-HTMLTableCellElement::GetScope(DOMString& aScope)
-{
-  GetEnumAttr(nsGkAtoms::scope, nullptr, aScope);
-}
-
 bool
 HTMLTableCellElement::ParseAttribute(int32_t aNamespaceID,
                                      nsIAtom* aAttribute,
@@ -394,7 +388,9 @@ HTMLTableCellElement::ParseAttribute(int32_t aNamespaceID,
       if (res) {
         int32_t val = aResult.GetIntegerValue();
         // reset large colspan values as IE and opera do
-        if (val > MAX_COLSPAN || val <= 0) {
+        // quirks mode does not honor the special html 4 value of 0
+        if (val > MAX_COLSPAN || val < 0 ||
+            (0 == val && InNavQuirksMode(OwnerDoc()))) {
           aResult.SetTo(1, &aValue);
         }
       }
@@ -499,7 +495,7 @@ HTMLTableCellElement::MapAttributesIntoRule(const nsMappedAttributes* aAttribute
       }
     }
   }
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
+  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(TextReset)) {
     nsCSSValue* verticalAlign = aData->ValueForVerticalAlign();
     if (verticalAlign->GetUnit() == eCSSUnit_Null) {
       // valign: enum

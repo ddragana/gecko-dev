@@ -16,6 +16,7 @@
 #include "nsHTMLParts.h"
 #include "nsLineBox.h"
 #include "nsCSSPseudoElements.h"
+#include "nsStyleSet.h"
 #include "nsFloatManager.h"
 
 enum LineReflowStatus {
@@ -68,12 +69,14 @@ class nsBulletFrame;
  * prepended to the overflow lines.
  */
 
+typedef nsContainerFrame nsBlockFrameSuper;
+
 /*
  * Base class for block and inline frames.
  * The block frame has an additional child list, kAbsoluteList, which
  * contains the absolutely positioned frames.
- */
-class nsBlockFrame : public nsContainerFrame
+ */ 
+class nsBlockFrame : public nsBlockFrameSuper
 {
 public:
   NS_DECL_QUERYFRAME_TARGET(nsBlockFrame)
@@ -170,9 +173,8 @@ public:
   // to be before any line which does contain 'y'.
   nsLineBox* GetFirstLineContaining(nscoord y);
   // Set the line cursor to our first line. Only call this if you
-  // guarantee that either the lines' combinedArea.ys and combinedArea.
-  // yMosts are non-decreasing, or the line cursor is cleared before
-  // building the display list of this frame.
+  // guarantee that the lines' combinedArea.ys and combinedArea.yMosts
+  // are non-decreasing.
   void SetupLineCursor();
 
   virtual void ChildIsDirty(nsIFrame* aChild) override;
@@ -228,7 +230,7 @@ public:
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
 
-  virtual nsRect ComputeTightBounds(DrawTarget* aDrawTarget) const override;
+  virtual nsRect ComputeTightBounds(gfxContext* aContext) const override;
 
   virtual nsresult GetPrefWidthTightBounds(nsRenderingContext* aContext,
                                            nscoord* aX,
@@ -273,7 +275,8 @@ public:
    */
   virtual bool DrainSelfOverflowList() override;
 
-  virtual nsresult StealFrame(nsIFrame* aChild) override;
+  virtual nsresult StealFrame(nsIFrame* aChild,
+                              bool      aForceNormal = false) override;
 
   virtual void DeleteNextInFlowChild(nsIFrame* aNextInFlow,
                                      bool      aDeletingEmptyFrames) override;
@@ -316,12 +319,12 @@ public:
    * care about (which need not be its current mBCoord)
    */
   struct ReplacedElementISizeToClear {
-    // Note that we care about the inline-start margin but can ignore
-    // the inline-end margin.
-    nscoord marginIStart, borderBoxISize;
+    nscoord marginIStart, borderBoxISize, marginIEnd;
+    nscoord MarginBoxISize() const
+      { return marginIStart + borderBoxISize + marginIEnd; }
   };
   static ReplacedElementISizeToClear
-    ISizeToClearPastFloats(const nsBlockReflowState& aState,
+    ISizeToClearPastFloats(nsBlockReflowState& aState,
                            const mozilla::LogicalRect& aFloatAvailableSpace,
                            nsIFrame* aFrame);
 
@@ -360,13 +363,19 @@ protected:
   virtual ~nsBlockFrame();
 
 #ifdef DEBUG
-  already_AddRefed<nsStyleContext> GetFirstLetterStyle(nsPresContext* aPresContext);
+  already_AddRefed<nsStyleContext> GetFirstLetterStyle(nsPresContext* aPresContext)
+  {
+    return aPresContext->StyleSet()->
+      ProbePseudoElementStyle(mContent->AsElement(),
+                              nsCSSPseudoElements::ePseudo_firstLetter,
+                              mStyleContext);
+  }
 #endif
 
-  NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(LineCursorProperty, nsLineBox)
+  NS_DECLARE_FRAME_PROPERTY(LineCursorProperty, nullptr)
   nsLineBox* GetLineCursor() {
     return (GetStateBits() & NS_BLOCK_HAS_LINE_CURSOR) ?
-      Properties().Get(LineCursorProperty()) : nullptr;
+      static_cast<nsLineBox*>(Properties().Get(LineCursorProperty())) : nullptr;
   }
 
   nsLineBox* NewLineBox(nsIFrame* aFrame, bool aIsBlock) {
@@ -445,15 +454,6 @@ protected:
    */
   bool IsVisualFormControl(nsPresContext* aPresContext);
 
-  /**
-   * Helper function to create bullet frame.
-   * @param aCreateBulletList true to create bullet list; otherwise number list.
-   * @param aListStylePositionInside true to put the list position inside;
-   * otherwise outside.
-   */
-  void CreateBulletFrameForListItem(bool aCreateBulletList,
-                                    bool aListStylePositionInside);
-
 public:
   /**
    * Does all the real work for removing aDeletedFrame
@@ -474,9 +474,7 @@ public:
   void ReparentFloats(nsIFrame* aFirstFrame, nsBlockFrame* aOldParent,
                       bool aReparentSiblings);
 
-  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
-
-  virtual void UnionChildOverflow(nsOverflowAreas& aOverflowAreas) override;
+  virtual bool UpdateOverflow() override;
 
   /** Load all of aFrame's floats into the float manager iff aFrame is not a
    *  block formatting context. Handles all necessary float manager translations;

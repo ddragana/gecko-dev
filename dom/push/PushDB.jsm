@@ -5,24 +5,26 @@
 
 "use strict";
 
+// Don't modify this, instead set dom.push.debug.
+let gDebuggingEnabled = false;
+
+function debug(s) {
+  if (gDebuggingEnabled) {
+    dump("-*- PushDB.jsm: " + s + "\n");
+  }
+}
+
 const Cu = Components.utils;
 Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.importGlobalProperties(["indexedDB"]);
+
+const prefs = new Preferences("dom.push.");
 
 this.EXPORTED_SYMBOLS = ["PushDB"];
 
-XPCOMUtils.defineLazyGetter(this, "console", () => {
-  let {ConsoleAPI} = Cu.import("resource://gre/modules/Console.jsm", {});
-  return new ConsoleAPI({
-    maxLogLevelPref: "dom.push.loglevel",
-    prefix: "PushDB",
-  });
-});
-
 this.PushDB = function PushDB(dbName, dbVersion, dbStoreName, keyPath, model) {
-  console.debug("PushDB()");
+  debug("PushDB()");
   this._dbStoreName = dbStoreName;
   this._keyPath = keyPath;
   this._model = model;
@@ -30,6 +32,8 @@ this.PushDB = function PushDB(dbName, dbVersion, dbStoreName, keyPath, model) {
   // set the indexeddb database
   this.initDBHelper(dbName, dbVersion,
                     [dbStoreName]);
+  gDebuggingEnabled = prefs.get("debug");
+  prefs.observe("debug", this);
 };
 
 this.PushDB.prototype = {
@@ -86,7 +90,7 @@ this.PushDB.prototype = {
    */
 
   put: function(aRecord) {
-    console.debug("put()", aRecord);
+    debug("put()" + JSON.stringify(aRecord));
     if (!this.isValidRecord(aRecord)) {
       return Promise.reject(new TypeError(
         "Scope, originAttributes, and quota are required! " +
@@ -103,8 +107,8 @@ this.PushDB.prototype = {
           aTxn.result = undefined;
 
           aStore.put(aRecord).onsuccess = aEvent => {
-            console.debug("put: Request successful. Updated record",
-              aEvent.target.result);
+            debug("Request successful. Updated record ID: " +
+                  aEvent.target.result);
             aTxn.result = this.toPushRecord(aRecord);
           };
         },
@@ -119,18 +123,15 @@ this.PushDB.prototype = {
    *        The ID of record to be deleted.
    */
   delete: function(aKeyID) {
-    console.debug("delete()");
+    debug("delete()");
 
     return new Promise((resolve, reject) =>
       this.newTxn(
         "readwrite",
         this._dbStoreName,
-        (aTxn, aStore) => {
-          console.debug("delete: Removing record", aKeyID);
-          aStore.get(aKeyID).onsuccess = event => {
-            aTxn.result = this.toPushRecord(event.target.result);
-            aStore.delete(aKeyID);
-          };
+        function txnCb(aTxn, aStore) {
+          debug("Going to delete " + aKeyID);
+          aStore.delete(aKeyID);
         },
         resolve,
         reject
@@ -138,31 +139,14 @@ this.PushDB.prototype = {
     );
   },
 
-  // testFn(record) is called with a database record and should return true if
-  // that record should be deleted.
-  clearIf: function(testFn) {
-    console.debug("clearIf()");
+  clearAll: function clear() {
     return new Promise((resolve, reject) =>
       this.newTxn(
         "readwrite",
         this._dbStoreName,
-        (aTxn, aStore) => {
-          aTxn.result = undefined;
-
-          aStore.openCursor().onsuccess = event => {
-            let cursor = event.target.result;
-            if (cursor) {
-              let record = this.toPushRecord(cursor.value);
-              if (testFn(record)) {
-                let deleteRequest = cursor.delete();
-                deleteRequest.onerror = e => {
-                  console.error("clearIf: Error removing record",
-                    record.keyID, e);
-                }
-              }
-              cursor.continue();
-            }
-          }
+        function (aTxn, aStore) {
+          debug("Going to clear all!");
+          aStore.clear();
         },
         resolve,
         reject
@@ -171,7 +155,7 @@ this.PushDB.prototype = {
   },
 
   getByPushEndpoint: function(aPushEndpoint) {
-    console.debug("getByPushEndpoint()");
+    debug("getByPushEndpoint()");
 
     return new Promise((resolve, reject) =>
       this.newTxn(
@@ -182,9 +166,8 @@ this.PushDB.prototype = {
 
           let index = aStore.index("pushEndpoint");
           index.get(aPushEndpoint).onsuccess = aEvent => {
-            let record = this.toPushRecord(aEvent.target.result);
-            console.debug("getByPushEndpoint: Got record", record);
-            aTxn.result = record;
+            aTxn.result = this.toPushRecord(aEvent.target.result);
+            debug("Fetch successful " + aEvent.target.result);
           };
         },
         resolve,
@@ -194,7 +177,7 @@ this.PushDB.prototype = {
   },
 
   getByKeyID: function(aKeyID) {
-    console.debug("getByKeyID()");
+    debug("getByKeyID()");
 
     return new Promise((resolve, reject) =>
       this.newTxn(
@@ -204,50 +187,8 @@ this.PushDB.prototype = {
           aTxn.result = undefined;
 
           aStore.get(aKeyID).onsuccess = aEvent => {
-            let record = this.toPushRecord(aEvent.target.result);
-            console.debug("getByKeyID: Got record", record);
-            aTxn.result = record;
-          };
-        },
-        resolve,
-        reject
-      )
-    );
-  },
-
-  /**
-   * Iterates over all records associated with an origin.
-   *
-   * @param {String} origin The origin, matched as a prefix against the scope.
-   * @param {String} originAttributes Additional origin attributes. Requires
-   *  an exact match.
-   * @param {Function} callback A function with the signature `(record,
-   *  cursor)`, called for each record. `record` is the registration, and
-   *  `cursor` is an `IDBCursor`.
-   * @returns {Promise} Resolves once all records have been processed.
-   */
-  forEachOrigin: function(origin, originAttributes, callback) {
-    console.debug("forEachOrigin()");
-
-    return new Promise((resolve, reject) =>
-      this.newTxn(
-        "readwrite",
-        this._dbStoreName,
-        (aTxn, aStore) => {
-          aTxn.result = undefined;
-
-          let index = aStore.index("identifiers");
-          let range = IDBKeyRange.bound(
-            [origin, originAttributes],
-            [origin + "\x7f", originAttributes]
-          );
-          index.openCursor(range).onsuccess = event => {
-            let cursor = event.target.result;
-            if (!cursor) {
-              return;
-            }
-            callback(this.toPushRecord(cursor.value), cursor);
-            cursor.continue();
+            aTxn.result = this.toPushRecord(aEvent.target.result);
+            debug("Fetch successful " + aEvent.target.result);
           };
         },
         resolve,
@@ -258,11 +199,12 @@ this.PushDB.prototype = {
 
   // Perform a unique match against { scope, originAttributes }
   getByIdentifiers: function(aPageRecord) {
-    console.debug("getByIdentifiers()", aPageRecord);
+    debug("getByIdentifiers() { " + aPageRecord.scope + ", " +
+          JSON.stringify(aPageRecord.originAttributes) + " }");
     if (!aPageRecord.scope || aPageRecord.originAttributes == undefined) {
-      console.error("getByIdentifiers: Scope and originAttributes are required",
-        aPageRecord);
-      return Promise.reject(new TypeError("Invalid page record"));
+      return Promise.reject(
+               new TypeError("Scope and originAttributes are required! " +
+                             JSON.stringify(aPageRecord)));
     }
 
     return new Promise((resolve, reject) =>
@@ -317,7 +259,7 @@ this.PushDB.prototype = {
   },
 
   getAllKeyIDs: function() {
-    console.debug("getAllKeyIDs()");
+    debug("getAllKeyIDs()");
 
     return new Promise((resolve, reject) =>
       this.newTxn(
@@ -337,7 +279,7 @@ this.PushDB.prototype = {
   },
 
   _getAllByPushQuota: function(range) {
-    console.debug("getAllByPushQuota()");
+    debug("getAllByPushQuota()");
 
     return new Promise((resolve, reject) =>
       this.newTxn(
@@ -362,12 +304,12 @@ this.PushDB.prototype = {
   },
 
   getAllUnexpired: function() {
-    console.debug("getAllUnexpired()");
+    debug("getAllUnexpired()");
     return this._getAllByPushQuota(IDBKeyRange.lowerBound(1));
   },
 
   getAllExpired: function() {
-    console.debug("getAllExpired()");
+    debug("getAllExpired()");
     return this._getAllByPushQuota(IDBKeyRange.only(0));
   },
 
@@ -393,29 +335,18 @@ this.PushDB.prototype = {
 
             let record = aEvent.target.result;
             if (!record) {
-              console.error("update: Record does not exist", aKeyID);
+              debug("update: Key ID " + aKeyID + " does not exist");
               return;
             }
             let newRecord = aUpdateFunc(this.toPushRecord(record));
             if (!this.isValidRecord(newRecord)) {
-              console.error("update: Ignoring invalid update",
-                aKeyID, newRecord);
+              debug("update: Ignoring invalid update for key ID " + aKeyID);
               return;
             }
-            function putRecord() {
-              let req = aStore.put(newRecord);
-              req.onsuccess = aEvent => {
-                console.debug("update: Update successful", aKeyID, newRecord);
-                aTxn.result = newRecord;
-              };
-            }
-            if (aKeyID === newRecord.keyID) {
-              putRecord();
-            } else {
-              // If we changed the primary key, delete the old record to avoid
-              // unique constraint errors.
-              aStore.delete(aKeyID).onsuccess = putRecord;
-            }
+            aStore.put(newRecord).onsuccess = aEvent => {
+              debug("update: Update successful for key ID " + aKeyID);
+              aTxn.result = newRecord;
+            };
           };
         },
         resolve,
@@ -425,7 +356,7 @@ this.PushDB.prototype = {
   },
 
   drop: function() {
-    console.debug("drop()");
+    debug("drop()");
 
     return new Promise((resolve, reject) =>
       this.newTxn(
@@ -439,4 +370,9 @@ this.PushDB.prototype = {
       )
     );
   },
+
+  observe: function observe(aSubject, aTopic, aData) {
+    if ((aTopic == "nsPref:changed") && (aData == "dom.push.debug"))
+      gDebuggingEnabled = prefs.get("debug");
+  }
 };

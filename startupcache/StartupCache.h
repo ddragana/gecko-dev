@@ -20,7 +20,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/UniquePtr.h"
 
 /**
  * The StartupCache is a persistent cache of simple key-value pairs,
@@ -74,20 +73,20 @@ namespace scache {
 
 struct CacheEntry
 {
-  UniquePtr<char[]> data;
+  nsAutoArrayPtr<char> data;
   uint32_t size;
 
-  CacheEntry() : size(0) { }
+  CacheEntry() : data(nullptr), size(0) { }
 
   // Takes possession of buf
-  CacheEntry(UniquePtr<char[]> buf, uint32_t len) : data(Move(buf)), size(len) { }
+  CacheEntry(char* buf, uint32_t len) : data(buf), size(len) { }
 
   ~CacheEntry()
   {
   }
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) {
-    return mallocSizeOf(this) + mallocSizeOf(data.get());
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
+    return mallocSizeOf(data);
   }
 };
 
@@ -113,7 +112,7 @@ public:
   // StartupCache methods. See above comments for a more detailed description.
 
   // Returns a buffer that was previously stored, caller takes ownership.
-  nsresult GetBuffer(const char* id, UniquePtr<char[]>* outbuf, uint32_t* length);
+  nsresult GetBuffer(const char* id, char** outbuf, uint32_t* length);
 
   // Stores a buffer. Caller keeps ownership, we make a copy.
   nsresult PutBuffer(const char* id, const char* inbuf, uint32_t length);
@@ -136,7 +135,7 @@ public:
 
   // This measures all the heap memory used by the StartupCache, i.e. it
   // excludes the mapping.
-  size_t HeapSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+  size_t HeapSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
   size_t SizeOfMapping();
 
@@ -160,13 +159,18 @@ private:
   static void WriteTimeout(nsITimer *aTimer, void *aClosure);
   static void ThreadedWrite(void *aClosure);
 
+  static size_t SizeOfEntryExcludingThis(const nsACString& key,
+                                         const nsAutoPtr<CacheEntry>& data,
+                                         mozilla::MallocSizeOf mallocSizeOf,
+                                         void *);
+
   nsClassHashtable<nsCStringHashKey, CacheEntry> mTable;
   nsTArray<nsCString> mPendingWrites;
-  RefPtr<nsZipArchive> mArchive;
+  nsRefPtr<nsZipArchive> mArchive;
   nsCOMPtr<nsIFile> mFile;
 
   nsCOMPtr<nsIObserverService> mObserverService;
-  RefPtr<StartupCacheListener> mListener;
+  nsRefPtr<StartupCacheListener> mListener;
   nsCOMPtr<nsITimer> mTimer;
 
   bool mStartupWriteInitiated;

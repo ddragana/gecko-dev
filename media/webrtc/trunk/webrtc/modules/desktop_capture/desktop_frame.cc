@@ -32,7 +32,8 @@ void DesktopFrame::CopyPixelsFrom(uint8_t* src_buffer, int src_stride,
                                   const DesktopRect& dest_rect) {
   assert(DesktopRect::MakeSize(size()).ContainsRect(dest_rect));
 
-  uint8_t* dest = GetFrameDataAtPos(dest_rect.top_left());
+  uint8_t* dest = data() + stride() * dest_rect.top() +
+                  DesktopFrame::kBytesPerPixel * dest_rect.left();
   for (int y = 0; y < dest_rect.height(); ++y) {
     memcpy(dest, src_buffer, DesktopFrame::kBytesPerPixel * dest_rect.width());
     src_buffer += src_stride;
@@ -46,12 +47,9 @@ void DesktopFrame::CopyPixelsFrom(const DesktopFrame& src_frame,
   assert(DesktopRect::MakeSize(src_frame.size()).ContainsRect(
       DesktopRect::MakeOriginSize(src_pos, dest_rect.size())));
 
-  CopyPixelsFrom(src_frame.GetFrameDataAtPos(src_pos),
+  CopyPixelsFrom(src_frame.data() + src_frame.stride() * src_pos.y() +
+                     DesktopFrame::kBytesPerPixel * src_pos.x(),
                  src_frame.stride(), dest_rect);
-}
-
-uint8_t* DesktopFrame::GetFrameDataAtPos(const DesktopVector& pos) const {
-  return data() + stride() * pos.y() + DesktopFrame::kBytesPerPixel * pos.x();
 }
 
 BasicDesktopFrame::BasicDesktopFrame(DesktopSize size)

@@ -8,7 +8,6 @@
 #include "mozilla/dom/HTMLFrameSetElementBinding.h"
 #include "mozilla/dom/EventHandlerBinding.h"
 #include "nsGlobalWindow.h"
-#include "mozilla/UniquePtrExtensions.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(FrameSet)
 
@@ -82,25 +81,25 @@ HTMLFrameSetElement::SetAttr(int32_t aNameSpaceID,
    */
   if (aAttribute == nsGkAtoms::rows && aNameSpaceID == kNameSpaceID_None) {
     int32_t oldRows = mNumRows;
-    ParseRowCol(aValue, mNumRows, &mRowSpecs);
-
+    ParseRowCol(aValue, mNumRows, getter_Transfers(mRowSpecs));
+    
     if (mNumRows != oldRows) {
-      mCurrentRowColHint = nsChangeHint_ReconstructFrame;
+      mCurrentRowColHint = NS_STYLE_HINT_FRAMECHANGE;
     }
   } else if (aAttribute == nsGkAtoms::cols &&
              aNameSpaceID == kNameSpaceID_None) {
     int32_t oldCols = mNumCols;
-    ParseRowCol(aValue, mNumCols, &mColSpecs);
+    ParseRowCol(aValue, mNumCols, getter_Transfers(mColSpecs));
 
     if (mNumCols != oldCols) {
-      mCurrentRowColHint = nsChangeHint_ReconstructFrame;
+      mCurrentRowColHint = NS_STYLE_HINT_FRAMECHANGE;
     }
   }
-
+  
   rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aAttribute, aPrefix,
                                      aValue, aNotify);
   mCurrentRowColHint = NS_STYLE_HINT_REFLOW;
-
+  
   return rv;
 }
 
@@ -117,19 +116,19 @@ HTMLFrameSetElement::GetRowSpec(int32_t *aNumValues,
     const nsAttrValue* value = GetParsedAttr(nsGkAtoms::rows);
     if (value && value->Type() == nsAttrValue::eString) {
       nsresult rv = ParseRowCol(value->GetStringValue(), mNumRows,
-                                &mRowSpecs);
+                                getter_Transfers(mRowSpecs));
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
     if (!mRowSpecs) {  // we may not have had an attr or had an empty attr
-      mRowSpecs = MakeUnique<nsFramesetSpec[]>(1);
+      mRowSpecs = new nsFramesetSpec[1];
       mNumRows = 1;
       mRowSpecs[0].mUnit  = eFramesetUnit_Relative;
       mRowSpecs[0].mValue = 1;
     }
   }
 
-  *aSpecs = mRowSpecs.get();
+  *aSpecs = mRowSpecs;
   *aNumValues = mNumRows;
   return NS_OK;
 }
@@ -147,19 +146,19 @@ HTMLFrameSetElement::GetColSpec(int32_t *aNumValues,
     const nsAttrValue* value = GetParsedAttr(nsGkAtoms::cols);
     if (value && value->Type() == nsAttrValue::eString) {
       nsresult rv = ParseRowCol(value->GetStringValue(), mNumCols,
-                                &mColSpecs);
+                                getter_Transfers(mColSpecs));
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
     if (!mColSpecs) {  // we may not have had an attr or had an empty attr
-      mColSpecs = MakeUnique<nsFramesetSpec[]>(1);
+      mColSpecs = new nsFramesetSpec[1];
       mNumCols = 1;
       mColSpecs[0].mUnit  = eFramesetUnit_Relative;
       mColSpecs[0].mValue = 1;
     }
   }
 
-  *aSpecs = mColSpecs.get();
+  *aSpecs = mColSpecs;
   *aNumValues = mNumCols;
   return NS_OK;
 }
@@ -195,7 +194,7 @@ HTMLFrameSetElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
     nsGenericHTMLElement::GetAttributeChangeHint(aAttribute, aModType);
   if (aAttribute == nsGkAtoms::rows ||
       aAttribute == nsGkAtoms::cols) {
-    retval |= mCurrentRowColHint;
+    NS_UpdateHint(retval, mCurrentRowColHint);
   }
   return retval;
 }
@@ -206,7 +205,7 @@ HTMLFrameSetElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
 nsresult
 HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
                                  int32_t& aNumSpecs,
-                                 UniquePtr<nsFramesetSpec[]>* aSpecs)
+                                 nsFramesetSpec** aSpecs) 
 {
   if (aValue.IsEmpty()) {
     aNumSpecs = 0;
@@ -234,7 +233,7 @@ HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
     commaX = spec.FindChar(sComma, commaX + 1);
   }
 
-  auto specs = MakeUniqueFallible<nsFramesetSpec[]>(count);
+  nsFramesetSpec* specs = new (fallible) nsFramesetSpec[count];
   if (!specs) {
     *aSpecs = nullptr;
     aNumSpecs = 0;
@@ -328,8 +327,8 @@ HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
 
   aNumSpecs = count;
   // Transfer ownership to caller here
-  *aSpecs = Move(specs);
-
+  *aSpecs = specs;
+  
   return NS_OK;
 }
 
@@ -350,8 +349,10 @@ HTMLFrameSetElement::IsEventAttributeName(nsIAtom *aName)
   type_*                                                                       \
   HTMLFrameSetElement::GetOn##name_()                                          \
   {                                                                            \
-    if (nsPIDOMWindowInner* win = OwnerDoc()->GetInnerWindow()) {              \
-      nsGlobalWindow* globalWin = nsGlobalWindow::Cast(win);                   \
+    nsPIDOMWindow* win = OwnerDoc()->GetInnerWindow();                         \
+    if (win) {                                                                 \
+      nsCOMPtr<nsISupports> supports = do_QueryInterface(win);                 \
+      nsGlobalWindow* globalWin = nsGlobalWindow::FromSupports(supports);      \
       return globalWin->GetOn##name_();                                        \
     }                                                                          \
     return nullptr;                                                            \
@@ -359,12 +360,13 @@ HTMLFrameSetElement::IsEventAttributeName(nsIAtom *aName)
   void                                                                         \
   HTMLFrameSetElement::SetOn##name_(type_* handler)                            \
   {                                                                            \
-    nsPIDOMWindowInner* win = OwnerDoc()->GetInnerWindow();                    \
+    nsPIDOMWindow* win = OwnerDoc()->GetInnerWindow();                         \
     if (!win) {                                                                \
       return;                                                                  \
     }                                                                          \
                                                                                \
-    nsGlobalWindow* globalWin = nsGlobalWindow::Cast(win);                     \
+    nsCOMPtr<nsISupports> supports = do_QueryInterface(win);                   \
+    nsGlobalWindow* globalWin = nsGlobalWindow::FromSupports(supports);        \
     return globalWin->SetOn##name_(handler);                                   \
   }
 #define WINDOW_EVENT(name_, id_, type_, struct_)                               \

@@ -1,5 +1,5 @@
 // Enable signature checks for these tests
-gUseRealCertChecks = true;
+Services.prefs.setBoolPref(PREF_XPI_SIGNATURES_REQUIRED, true);
 // Disable update security
 Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
 
@@ -336,18 +336,19 @@ add_task(function*() {
   resetPrefs();
 });
 
-// Preliminarily-signed sideloaded add-ons should work
+// Only fully-signed sideloaded add-ons should work
 add_task(function*() {
   let file = manuallyInstall(do_get_file(DATA + ADDONS.bootstrap.preliminary), profileDir, ID);
 
   startupManager();
 
+  // Currently we leave the sideloaded add-on there but just don't run it
   let addon = yield promiseAddonByID(ID);
   do_check_neq(addon, null);
-  do_check_false(addon.appDisabled);
-  do_check_true(addon.isActive);
+  do_check_true(addon.appDisabled);
+  do_check_false(addon.isActive);
   do_check_eq(addon.signedState, AddonManager.SIGNEDSTATE_PRELIMINARY);
-  do_check_eq(getActiveVersion(), 2);
+  do_check_eq(getActiveVersion(), -1);
 
   addon.uninstall();
   yield promiseShutdownManager();
@@ -357,7 +358,6 @@ add_task(function*() {
   clearCache(file);
 });
 
-// Preliminarily-signed sideloaded add-ons should work via staged install
 add_task(function*() {
   let stage = profileDir.clone();
   stage.append("staged");
@@ -366,17 +366,14 @@ add_task(function*() {
 
   startupManager();
 
+  // Should have refused to install preliminarily signed version
   let addon = yield promiseAddonByID(ID);
-  do_check_neq(addon, null);
-  do_check_false(addon.appDisabled);
-  do_check_true(addon.isActive);
-  do_check_eq(addon.signedState, AddonManager.SIGNEDSTATE_PRELIMINARY);
-  do_check_eq(getActiveVersion(), 2);
-
-  addon.uninstall();
-  yield promiseShutdownManager();
-  resetPrefs();
+  do_check_eq(addon, null);
+  do_check_eq(getActiveVersion(), -1);
 
   do_check_false(file.exists());
   clearCache(file);
+
+  yield promiseShutdownManager();
+  resetPrefs();
 });

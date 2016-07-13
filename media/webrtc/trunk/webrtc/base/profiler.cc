@@ -11,7 +11,6 @@
 #include "webrtc/base/profiler.h"
 
 #include <math.h>
-#include <algorithm>
 
 #include "webrtc/base/timeutils.h"
 
@@ -65,8 +64,8 @@ void ProfilerEvent::Stop(uint64 stop_time) {
     if (event_count_ == 0) {
       minimum_ = maximum_ = elapsed;
     } else {
-      minimum_ = std::min(minimum_, elapsed);
-      maximum_ = std::max(maximum_, elapsed);
+      minimum_ = _min(minimum_, elapsed);
+      maximum_ = _max(maximum_, elapsed);
     }
     // Online variance and mean algorithm: http://en.wikipedia.org/wiki/
     // Algorithms_for_calculating_variance#Online_algorithm
@@ -86,14 +85,9 @@ double ProfilerEvent::standard_deviation() const {
     return sqrt(sum_of_squared_differences_ / (event_count_ - 1.0));
 }
 
-Profiler::~Profiler() = default;
-
 Profiler* Profiler::Instance() {
   LIBJINGLE_DEFINE_STATIC_LOCAL(Profiler, instance, ());
   return &instance;
-}
-
-Profiler::Profiler() {
 }
 
 void Profiler::StartEvent(const std::string& event_name) {

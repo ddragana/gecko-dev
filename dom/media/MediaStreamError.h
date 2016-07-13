@@ -12,7 +12,7 @@
 #include "nsWrapperCache.h"
 #include "js/TypeDecls.h"
 #include "nsPIDOMWindow.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 #if defined(XP_WIN) && defined(GetMessage)
 #undef GetMessage
@@ -34,10 +34,10 @@ class BaseMediaMgrError
 protected:
   BaseMediaMgrError(const nsAString& aName,
                     const nsAString& aMessage,
-                    const nsAString& aConstraint);
+                    const nsAString& aConstraintName);
   const nsString mName;
   nsString mMessage;
-  const nsString mConstraint;
+  const nsString mConstraintName;
 };
 
 class MediaMgrError final : public nsISupports,
@@ -46,8 +46,8 @@ class MediaMgrError final : public nsISupports,
 public:
   explicit MediaMgrError(const nsAString& aName,
                          const nsAString& aMessage =  EmptyString(),
-                         const nsAString& aConstraint =  EmptyString())
-  : BaseMediaMgrError(aName, aMessage, aConstraint) {}
+                         const nsAString& aConstraintName =  EmptyString())
+  : BaseMediaMgrError(aName, aMessage, aConstraintName) {}
 
   NS_DECL_THREADSAFE_ISUPPORTS
 
@@ -61,34 +61,34 @@ class MediaStreamError final : public nsISupports,
                                public nsWrapperCache
 {
 public:
-  MediaStreamError(nsPIDOMWindowInner* aParent,
+  MediaStreamError(nsPIDOMWindow* aParent,
                    const nsAString& aName,
                    const nsAString& aMessage = EmptyString(),
-                   const nsAString& aConstraint =  EmptyString());
+                   const nsAString& aConstraintName =  EmptyString());
 
-  MediaStreamError(nsPIDOMWindowInner* aParent,
+  MediaStreamError(nsPIDOMWindow* aParent,
                    const BaseMediaMgrError& aOther)
-  : BaseMediaMgrError(aOther.mName, aOther.mMessage, aOther.mConstraint)
+  : BaseMediaMgrError(aOther.mName, aOther.mMessage, aOther.mConstraintName)
   , mParent(aParent) {}
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaStreamError)
   NS_DECLARE_STATIC_IID_ACCESSOR(MOZILLA_DOM_MEDIASTREAMERROR_IMPLEMENTATION_IID)
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  nsPIDOMWindowInner* GetParentObject() const
+  nsPIDOMWindow* GetParentObject() const
   {
     return mParent;
   }
   void GetName(nsAString& aName) const;
   void GetMessage(nsAString& aMessage) const;
-  void GetConstraint(nsAString& aConstraint) const;
+  void GetConstraintName(nsAString& aConstraintName) const;
 
 private:
   virtual ~MediaStreamError() {}
 
-  RefPtr<nsPIDOMWindowInner> mParent;
+  nsRefPtr<nsPIDOMWindow> mParent;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(MediaStreamError,

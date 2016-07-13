@@ -102,7 +102,6 @@ function do_app_cache(manifestURL, pageURL) {
   let update =
     update_service.scheduleUpdate(manifestURL,
                                   pageURL,
-                                  Services.scriptSecurityManager.getSystemPrincipal(),
                                   null); /* no window */
 
   return update;

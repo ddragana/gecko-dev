@@ -174,6 +174,24 @@ exports.testTabClose_alt = function(assert, done) {
   });
 };
 
+exports.testAttachOnOpen_alt = function (assert, done) {
+  // Take care that attach has to be called on tab ready and not on tab open.
+  tabs.open({
+    url: "data:text/html;charset=utf-8,foobar",
+    onOpen: function (tab) {
+      let worker = tab.attach({
+        contentScript: 'self.postMessage(document.location.href); ',
+        onMessage: function (msg) {
+          assert.equal(msg, "about:blank",
+            "Worker document url is about:blank on open");
+          worker.destroy();
+          tab.close(done);
+        }
+      });
+    }
+  });
+};
+
 exports.testAttachOnMultipleDocuments_alt = function (assert, done) {
   // Example of attach that process multiple tab documents
   let firstLocation = "data:text/html;charset=utf-8,foobar";
@@ -191,7 +209,7 @@ exports.testAttachOnMultipleDocuments_alt = function (assert, done) {
       if (onReadyCount == 1) {
         worker1 = tab.attach({
           contentScript: 'self.on("message", ' +
-                         '  () => self.postMessage(document.location.href)' +
+                         '  function () self.postMessage(document.location.href)' +
                          ');',
           onMessage: function (msg) {
             assert.equal(msg, firstLocation,
@@ -214,7 +232,7 @@ exports.testAttachOnMultipleDocuments_alt = function (assert, done) {
       else if (onReadyCount == 2) {
         worker2 = tab.attach({
           contentScript: 'self.on("message", ' +
-                         '  () => self.postMessage(document.location.href)' +
+                         '  function () self.postMessage(document.location.href)' +
                          ');',
           onMessage: function (msg) {
             assert.equal(msg, secondLocation,
@@ -270,7 +288,7 @@ exports.testAttachWrappers_alt = function (assert, done) {
         onMessage: function (msg) {
           assert.equal(msg, true, "Worker has wrapped objects ("+count+")");
           if (count++ == 1)
-            tab.close(() => done());
+            tab.close(function() done());
         }
       });
     }
@@ -307,11 +325,11 @@ exports.testActiveWindowActiveTabOnActivate_alt = function(assert, done) {
 
   tabs.open({
     url: URL.replace("#title#", "tabs.open1"),
-    onOpen: tab => newTabs.push(tab)
+    onOpen: function(tab) newTabs.push(tab)
   });
   tabs.open({
     url: URL.replace("#title#", "tabs.open2"),
-    onOpen: tab => newTabs.push(tab)
+    onOpen: function(tab) newTabs.push(tab)
   });
 };
 
@@ -436,7 +454,7 @@ exports.testTabReload = function(assert, done) {
           assert.pass("the tab was loaded again");
           assert.equal(tab.url, url, "the tab has the same URL");
 
-          tab.close(() => done());
+          tab.close(function() done());
         }
       );
 
@@ -480,12 +498,8 @@ exports.testOnPageShowEvent = function (assert, done) {
     }
   }
 
-  function onOpen () {
-    return events.push('open');
-  }
-  function onReady () {
-    return events.push('ready');
-  }
+  function onOpen () events.push('open');
+  function onReady () events.push('ready');
 
   tabs.on('pageshow', onPageShow);
   tabs.on('open', onOpen);
@@ -530,12 +544,8 @@ exports.testOnPageShowEventDeclarative = function (assert, done) {
     }
   }
 
-  function onOpen () {
-    return events.push('open');
-  }
-  function onReady () {
-    return events.push('ready');
-  }
+  function onOpen () events.push('open');
+  function onReady () events.push('ready');
 
   tabs.open({
     url: firstUrl,

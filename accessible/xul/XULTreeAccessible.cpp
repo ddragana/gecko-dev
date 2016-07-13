@@ -145,9 +145,8 @@ XULTreeAccessible::Value(nsString& aValue)
 void
 XULTreeAccessible::Shutdown()
 {
-  if (!mDoc->IsDefunct()) {
-    UnbindCacheEntriesFromDocument(mAccessibleCache);
-  }
+  if (!mDoc->IsDefunct())
+    mAccessibleCache.Enumerate(UnbindCacheEntryFromDocument<Accessible>, nullptr);
 
   mTree = nullptr;
   mTreeView = nullptr;
@@ -168,7 +167,7 @@ XULTreeAccessible::NativeRole()
   if (!treeFrame)
     return roles::LIST;
 
-  RefPtr<nsTreeColumns> cols = treeFrame->Columns();
+  nsRefPtr<nsTreeColumns> cols = treeFrame->Columns();
   nsCOMPtr<nsITreeColumn> primaryCol;
   cols->GetPrimaryColumn(getter_AddRefs(primaryCol));
 
@@ -211,7 +210,7 @@ XULTreeAccessible::ChildAtPoint(int32_t aX, int32_t aY,
   Accessible* child = GetTreeItemAccessible(row);
   if (aWhichChild == eDeepestChild && child) {
     // Look for accessible cell for the found item accessible.
-    RefPtr<XULTreeItemAccessibleBase> treeitem = do_QueryObject(child);
+    nsRefPtr<XULTreeItemAccessibleBase> treeitem = do_QueryObject(child);
 
     Accessible* cell = treeitem->GetCellAccessible(column);
     if (cell)
@@ -529,12 +528,12 @@ XULTreeAccessible::GetTreeItemAccessible(int32_t aRow) const
   if (NS_FAILED(rv) || aRow >= rowCount)
     return nullptr;
 
-  void *key = reinterpret_cast<void*>(intptr_t(aRow));
+  void *key = reinterpret_cast<void*>(aRow);
   Accessible* cachedTreeItem = mAccessibleCache.GetWeak(key);
   if (cachedTreeItem)
     return cachedTreeItem;
 
-  RefPtr<Accessible> treeItem = CreateTreeItemAccessible(aRow);
+  nsRefPtr<Accessible> treeItem = CreateTreeItemAccessible(aRow);
   if (treeItem) {
     mAccessibleCache.Put(key, treeItem);
     Document()->BindToDocument(treeItem, nullptr);
@@ -551,7 +550,8 @@ XULTreeAccessible::InvalidateCache(int32_t aRow, int32_t aCount)
     return;
 
   if (!mTreeView) {
-    UnbindCacheEntriesFromDocument(mAccessibleCache);
+    mAccessibleCache.Enumerate(UnbindCacheEntryFromDocument<Accessible>,
+                               nullptr);
     return;
   }
 
@@ -564,11 +564,11 @@ XULTreeAccessible::InvalidateCache(int32_t aRow, int32_t aCount)
   // Fire destroy event for removed tree items and delete them from caches.
   for (int32_t rowIdx = aRow; rowIdx < aRow - aCount; rowIdx++) {
 
-    void* key = reinterpret_cast<void*>(intptr_t(rowIdx));
+    void* key = reinterpret_cast<void*>(rowIdx);
     Accessible* treeItem = mAccessibleCache.GetWeak(key);
 
     if (treeItem) {
-      RefPtr<AccEvent> event =
+      nsRefPtr<AccEvent> event =
         new AccEvent(nsIAccessibleEvent::EVENT_HIDE, treeItem);
       nsEventShell::FireEvent(event);
 
@@ -590,7 +590,7 @@ XULTreeAccessible::InvalidateCache(int32_t aRow, int32_t aCount)
 
   for (int32_t rowIdx = newRowCount; rowIdx < oldRowCount; ++rowIdx) {
 
-    void *key = reinterpret_cast<void*>(intptr_t(rowIdx));
+    void *key = reinterpret_cast<void*>(rowIdx);
     Accessible* treeItem = mAccessibleCache.GetWeak(key);
 
     if (treeItem) {
@@ -609,7 +609,8 @@ XULTreeAccessible::TreeViewInvalidated(int32_t aStartRow, int32_t aEndRow,
     return;
 
   if (!mTreeView) {
-    UnbindCacheEntriesFromDocument(mAccessibleCache);
+    mAccessibleCache.Enumerate(UnbindCacheEntryFromDocument<Accessible>,
+                               nullptr);
     return;
   }
 
@@ -643,11 +644,11 @@ XULTreeAccessible::TreeViewInvalidated(int32_t aStartRow, int32_t aEndRow,
 
   for (int32_t rowIdx = aStartRow; rowIdx <= endRow; ++rowIdx) {
 
-    void *key = reinterpret_cast<void*>(intptr_t(rowIdx));
+    void *key = reinterpret_cast<void*>(rowIdx);
     Accessible* accessible = mAccessibleCache.GetWeak(key);
 
     if (accessible) {
-      RefPtr<XULTreeItemAccessibleBase> treeitemAcc = do_QueryObject(accessible);
+      nsRefPtr<XULTreeItemAccessibleBase> treeitemAcc = do_QueryObject(accessible);
       NS_ASSERTION(treeitemAcc, "Wrong accessible at the given key!");
 
       treeitemAcc->RowInvalidated(aStartCol, endCol);
@@ -664,11 +665,12 @@ XULTreeAccessible::TreeViewChanged(nsITreeView* aView)
   // Fire reorder event on tree accessible on accessible tree (do not fire
   // show/hide events on tree items because it can be expensive to fire them for
   // each tree item.
-  RefPtr<AccReorderEvent> reorderEvent = new AccReorderEvent(this);
+  nsRefPtr<AccReorderEvent> reorderEvent = new AccReorderEvent(this);
   Document()->FireDelayedEvent(reorderEvent);
 
   // Clear cache.
-  UnbindCacheEntriesFromDocument(mAccessibleCache);
+  mAccessibleCache.Enumerate(UnbindCacheEntryFromDocument<Accessible>,
+                             nullptr);
 
   mTreeView = aView;
 }
@@ -679,13 +681,13 @@ XULTreeAccessible::TreeViewChanged(nsITreeView* aView)
 already_AddRefed<Accessible>
 XULTreeAccessible::CreateTreeItemAccessible(int32_t aRow) const
 {
-  RefPtr<Accessible> accessible =
+  nsRefPtr<Accessible> accessible =
     new XULTreeItemAccessible(mContent, mDoc, const_cast<XULTreeAccessible*>(this),
                               mTree, mTreeView, aRow);
 
   return accessible.forget();
 }
-
+                             
 ////////////////////////////////////////////////////////////////////////////////
 // XULTreeItemAccessibleBase
 ////////////////////////////////////////////////////////////////////////////////
@@ -1070,7 +1072,6 @@ XULTreeItemAccessible::
                         nsITreeView* aTreeView, int32_t aRow) :
   XULTreeItemAccessibleBase(aContent, aDoc, aParent, aTree, aTreeView, aRow)
 {
-  mStateFlags |= eNoKidsFromDOM;
   mColumn = nsCoreUtils::GetFirstSensibleColumn(mTree);
   GetCellName(mColumn, mCachedName);
 }
@@ -1142,6 +1143,14 @@ XULTreeItemAccessible::RowInvalidated(int32_t aStartColIdx, int32_t aEndColIdx)
     nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, this);
     mCachedName = name;
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// XULTreeItemAccessible: Accessible protected implementation
+
+void
+XULTreeItemAccessible::CacheChildren()
+{
 }
 
 

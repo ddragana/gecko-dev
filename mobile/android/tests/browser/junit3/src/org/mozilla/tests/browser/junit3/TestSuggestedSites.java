@@ -150,11 +150,18 @@ public class TestSuggestedSites extends InstrumentationTestCase {
     }
 
     private String generateSites(int n, String prefix) {
+        return generateSites(n, false, prefix);
+    }
+
+    private String generateSites(int n, boolean includeIds, String prefix) {
         JSONArray sites = new JSONArray();
 
         try {
             for (int i = 0; i < n; i++) {
                 JSONObject site = new JSONObject();
+                if (includeIds) {
+                    site.put("trackingid", i);
+                }
                 site.put("url", prefix + "url" + i);
                 site.put("title", prefix + "title" + i);
                 site.put("imageurl", prefix + "imageUrl" + i);
@@ -324,6 +331,24 @@ public class TestSuggestedSites extends InstrumentationTestCase {
         c.close();
     }
 
+    public void testDisabledState() {
+        resources.setSuggestedSitesResource(generateSites(3));
+
+        Cursor c = new SuggestedSites(context).get(DEFAULT_LIMIT);
+        assertEquals(3, c.getCount());
+        c.close();
+
+        // Disable suggested sites
+        GeckoSharedPrefs.forApp(context).edit()
+                                        .putBoolean(GeckoPreferences.PREFS_SUGGESTED_SITES, false)
+                                        .commit();
+
+        c = new SuggestedSites(context).get(DEFAULT_LIMIT);
+        assertNotNull(c);
+        assertEquals(0, c.getCount());
+        c.close();
+    }
+
     public void testImageUrlAndBgColor() {
         final int count = 3;
         resources.setSuggestedSitesResource(generateSites(count));
@@ -356,6 +381,38 @@ public class TestSuggestedSites extends InstrumentationTestCase {
         assertFalse(suggestedSites.contains("foo"));
         assertNull(suggestedSites.getImageUrlForUrl("foo"));
         assertNull(suggestedSites.getBackgroundColorForUrl("foo"));
+    }
+
+    public void testTrackingIds() {
+        final int count = 3;
+
+        // Test suggested sites with IDs.
+        resources.setSuggestedSitesResource(generateSites(count, true, ""));
+        SuggestedSites suggestedSites = new SuggestedSites(context);
+        Cursor c = suggestedSites.get(DEFAULT_LIMIT);
+        assertEquals(count, c.getCount());
+
+        for (int i = 0; i < count; i++) {
+            c.moveToNext();
+            String url = c.getString(c.getColumnIndexOrThrow(BrowserContract.SuggestedSites.URL));
+            assertTrue(suggestedSites.contains(url));
+            assertEquals(i, suggestedSites.getTrackingIdForUrl(url));
+        }
+        c.close();
+
+        // Test suggested sites where IDs are undefined.
+        resources.setSuggestedSitesResource(generateSites(count, false, ""));
+        suggestedSites = new SuggestedSites(context);
+        c = suggestedSites.get(DEFAULT_LIMIT);
+        assertEquals(count, c.getCount());
+
+        for (int i = 0; i < count; i++) {
+            c.moveToNext();
+            String url = c.getString(c.getColumnIndexOrThrow(BrowserContract.SuggestedSites.URL));
+            assertTrue(suggestedSites.contains(url));
+            assertEquals(SuggestedSites.TRACKING_ID_NONE, suggestedSites.getTrackingIdForUrl(url));
+        }
+        c.close();
     }
 
     public void testLocaleChanges() {

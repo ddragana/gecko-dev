@@ -7,13 +7,13 @@
 #ifndef mozilla_dom_cache_ActioChild_h
 #define mozilla_dom_cache_ActioChild_h
 
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 namespace mozilla {
 namespace dom {
 namespace cache {
 
-class CacheWorkerHolder;
+class Feature;
 
 class ActorChild
 {
@@ -22,23 +22,23 @@ public:
   StartDestroy() = 0;
 
   void
-  SetWorkerHolder(CacheWorkerHolder* aWorkerHolder);
+  SetFeature(Feature* aFeature);
 
   void
-  RemoveWorkerHolder();
+  RemoveFeature();
 
-  CacheWorkerHolder*
-  GetWorkerHolder() const;
+  Feature*
+  GetFeature() const;
 
   bool
-  WorkerHolderNotified() const;
+  FeatureNotified() const;
 
 protected:
   ActorChild();
   ~ActorChild();
 
 private:
-  RefPtr<CacheWorkerHolder> mWorkerHolder;
+  nsRefPtr<Feature> mFeature;
 };
 
 } // namespace cache

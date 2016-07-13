@@ -9,7 +9,7 @@
 
 #include "jsscript.h"
 
-#include "asmjs/AsmJS.h"
+#include "asmjs/AsmJSLink.h"
 #include "jit/BaselineJIT.h"
 #include "jit/IonAnalysis.h"
 #include "vm/ScopeObject.h"
@@ -30,54 +30,11 @@ AliasedFormalIter::AliasedFormalIter(JSScript* script)
     settle();
 }
 
-ScriptCounts::ScriptCounts()
-  : pcCounts_(),
-    throwCounts_(),
-    ionCounts_(nullptr)
+inline void
+ScriptCounts::destroy(FreeOp* fop)
 {
-}
-
-ScriptCounts::ScriptCounts(PCCountsVector&& jumpTargets)
-  : pcCounts_(Move(jumpTargets)),
-    throwCounts_(),
-    ionCounts_(nullptr)
-{
-}
-
-ScriptCounts::ScriptCounts(ScriptCounts&& src)
-  : pcCounts_(Move(src.pcCounts_)),
-    throwCounts_(Move(src.throwCounts_)),
-    ionCounts_(Move(src.ionCounts_))
-{
-    src.ionCounts_ = nullptr;
-}
-
-ScriptCounts&
-ScriptCounts::operator=(ScriptCounts&& src)
-{
-    pcCounts_ = Move(src.pcCounts_);
-    throwCounts_ = Move(src.throwCounts_);
-    ionCounts_ = Move(src.ionCounts_);
-    src.ionCounts_ = nullptr;
-    return *this;
-}
-
-ScriptCounts::~ScriptCounts()
-{
-    js_delete(ionCounts_);
-}
-
-ScriptAndCounts::ScriptAndCounts(JSScript* script)
-  : script(script),
-    scriptCounts()
-{
-    script->releaseScriptCounts(&scriptCounts);
-}
-
-ScriptAndCounts::ScriptAndCounts(ScriptAndCounts&& sac)
-  : script(Move(sac.script)),
-    scriptCounts(Move(sac.scriptCounts))
-{
+    fop->free_(pcCountsVector);
+    fop->delete_(ionCounts);
 }
 
 void
@@ -87,10 +44,9 @@ SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
 inline JSFunction*
 LazyScript::functionDelazifying(JSContext* cx) const
 {
-    Rooted<const LazyScript*> self(cx, this);
-    if (self->function_ && !self->function_->getOrCreateScript(cx))
+    if (function_ && !function_->getOrCreateScript(cx))
         return nullptr;
-    return self->function_;
+    return function_;
 }
 
 } // namespace js
@@ -111,16 +67,8 @@ JSScript::functionDelazifying() const
 inline void
 JSScript::setFunction(JSFunction* fun)
 {
-    MOZ_ASSERT(!function_ && !module_);
     MOZ_ASSERT(fun->isTenured());
     function_ = fun;
-}
-
-inline void
-JSScript::setModule(js::ModuleObject* module)
-{
-    MOZ_ASSERT(!function_ && !module_);
-    module_ = module;
 }
 
 inline void
@@ -159,13 +107,18 @@ JSScript::functionOrCallerFunction()
 inline js::RegExpObject*
 JSScript::getRegExp(size_t index)
 {
-    return &getObject(index)->as<js::RegExpObject>();
+    js::ObjectArray* arr = regexps();
+    MOZ_ASSERT(uint32_t(index) < arr->length);
+    JSObject* obj = arr->vector[index];
+    MOZ_ASSERT(obj->is<js::RegExpObject>());
+    return (js::RegExpObject*) obj;
 }
 
 inline js::RegExpObject*
 JSScript::getRegExp(jsbytecode* pc)
 {
-    return &getObject(pc)->as<js::RegExpObject>();
+    MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
+    return getRegExp(GET_UINT32_INDEX(pc));
 }
 
 inline js::GlobalObject&
@@ -185,14 +138,14 @@ JSScript::principals()
 }
 
 inline void
-JSScript::setBaselineScript(JSRuntime* maybeRuntime, js::jit::BaselineScript* baselineScript)
+JSScript::setBaselineScript(JSContext* maybecx, js::jit::BaselineScript* baselineScript)
 {
     if (hasBaselineScript())
         js::jit::BaselineScript::writeBarrierPre(zone(), baseline);
     MOZ_ASSERT(!hasIonScript());
     baseline = baselineScript;
     resetWarmUpResetCounter();
-    updateBaselineOrIonRaw(maybeRuntime);
+    updateBaselineOrIonRaw(maybecx);
 }
 
 inline bool

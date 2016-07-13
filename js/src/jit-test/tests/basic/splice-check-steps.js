@@ -3,7 +3,7 @@
  * visible externally.
  */
 
-function handlerMaker(expected_exceptions) {
+function handlerMaker(obj, expected_exceptions) {
   var order = [];
   function note(trap, name)
   {
@@ -15,23 +15,68 @@ function handlerMaker(expected_exceptions) {
 
   return [{
     /* this is the only trap we care about */
-    deleteProperty: function(target, name) {
+    delete: function(name) {
       note("del", name);
-      return Reflect.deleteProperty(target, name);
+      return delete obj[name];
     },
+
+    // Fundamental traps
+    getOwnPropertyDescriptor: function(name) {
+      var desc = Object.getOwnPropertyDescriptor(obj, name);
+      // a trapping proxy's properties must always be configurable
+      if (desc !== undefined)
+        desc.configurable = true;
+      return desc;
+    },
+    getPropertyDescriptor:  function(name) {
+      var desc = Object.getPropertyDescriptor(obj, name); // not in ES5
+      // a trapping proxy's properties must always be configurable
+      if (desc !== undefined)
+        desc.configurable = true;
+      return desc;
+    },
+    getOwnPropertyNames: function() {
+      return Object.getOwnPropertyNames(obj);
+    },
+    getPropertyNames: function() {
+      return Object.getPropertyNames(obj);                // not in ES5
+    },
+    defineProperty: function(name, desc) {
+      note("def", name);
+      Object.defineProperty(obj, name, desc);
+    },
+    fix:          function() {
+      if (Object.isFrozen(obj)) {
+        return Object.getOwnPropertyNames(obj).map(function(name) {
+          return Object.getOwnPropertyDescriptor(obj, name);
+        });
+      }
+      // As long as obj is not frozen, the proxy won't allow itself to be fixed
+      return undefined; // will cause a TypeError to be thrown
+    },
+
     // derived traps
-    has:          function(target, name) {
+    has:          function(name) {
       note("has", name);
-      return name in target;
+      return name in obj;
     },
-    get:          function(target, name, receiver) {
+    hasOwn:       function(name) { return Object.prototype.hasOwnProperty.call(obj, name); },
+    get:          function(receiver, name) {
       note("get", name);
-      return Reflect.get(target, name, receiver);
+      return obj[name];
     },
-    set:          function(target, name, value, receiver) {
+    set:          function(receiver, name, val) {
       note("set", name);
-      return Reflect.set(target, name, value, receiver);
+      obj[name] = val;
+      return true; // bad behavior when set fails in non-strict mode
     },
+    enumerate:    function() {
+      var result = [];
+      for (name in obj)
+        result.push(name);
+      return result;
+    },
+    keys: function() { return Object.keys(obj) }
   }, order];
 }
 
@@ -39,8 +84,8 @@ function handlerMaker(expected_exceptions) {
 // expected_order: the expected order of operations on arr, stringified
 function check_splice_proxy(arr, expected_order, expected_exceptions, expected_array, expected_result) {
     print (arr);
-    var [handler, store] = handlerMaker(expected_exceptions);
-    var proxy = new Proxy(arr, handler);
+    var [handler, store] = handlerMaker(arr, expected_exceptions);
+    var proxy = Proxy.create(handler);
 
     try {
         var args = Array.prototype.slice.call(arguments, 5);
@@ -79,7 +124,6 @@ function check_splice_proxy(arr, expected_order, expected_exceptions, expected_a
 check_splice_proxy(
         [10,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-3,get-3,set-0,has-4,get-4,set-1,has-5,get-5,set-2," +
         "del-5,del-4,del-3," +
@@ -94,7 +138,6 @@ check_splice_proxy(
 check_splice_proxy(
         [11,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-5,get-5,set-9,has-4,get-4,set-8,has-3,get-3,set-7," +
         "set-0,set-1,set-2,set-3,set-4,set-5,set-6," +
@@ -109,7 +152,6 @@ check_splice_proxy(
 check_splice_proxy(
         [12,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "set-0,set-1,set-2," +
         "set-length",
@@ -140,7 +182,6 @@ check_splice_proxy(
 check_splice_proxy(
         [14,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1",
         {has: '1'},
         [14,1,2,3,4,5],
@@ -152,7 +193,6 @@ check_splice_proxy(
 check_splice_proxy(
         [15,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1",
         {get: '1'},
         [15,1,2,3,4,5],
@@ -164,7 +204,6 @@ check_splice_proxy(
 check_splice_proxy(
         [16,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-3,get-3,set-0,has-4",
         {has: '4'},
@@ -178,7 +217,6 @@ check_splice_proxy(
 check_splice_proxy(
         [17,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-3,get-3,set-0,has-4,get-4",
         {get: '4'},
@@ -192,7 +230,6 @@ check_splice_proxy(
 check_splice_proxy(
         [18,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-3,get-3,set-0,has-4,get-4,set-1",
         {set: '1'},
@@ -205,7 +242,6 @@ check_splice_proxy(
 check_splice_proxy(
         [19,1,2,3,,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-3,get-3,set-0,has-4,del-1",
         {del: '1'},
@@ -218,7 +254,6 @@ check_splice_proxy(
 check_splice_proxy(
         [20,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-3,get-3,set-0,has-4,get-4,set-1,has-5,get-5,set-2," +
         "del-5,del-4",
@@ -232,7 +267,6 @@ check_splice_proxy(
 check_splice_proxy(
         [21,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-5,get-5,set-8,has-4",
         {has: '4'},
@@ -246,7 +280,6 @@ check_splice_proxy(
 check_splice_proxy(
         [22,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-5,get-5,set-8,has-4,get-4",
         {get: '4'},
@@ -260,7 +293,6 @@ check_splice_proxy(
 check_splice_proxy(
         [23,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-5,get-5,set-8,has-4,get-4,set-7",
         {set: '7'},
@@ -273,7 +305,6 @@ check_splice_proxy(
 check_splice_proxy(
         [24,1,2,3,,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-5,get-5,set-8,has-4,del-7",
         {del: '7'},
@@ -286,7 +317,6 @@ check_splice_proxy(
 check_splice_proxy(
         [25,1,2,3,4,5],
         "get-length," +
-        "get-constructor," +
         "has-0,get-0,has-1,get-1,has-2,get-2," +
         "has-5,get-5,set-8,has-4,get-4,set-7,has-3,get-3,set-6," +
         "set-0,set-1,set-2",

@@ -20,16 +20,18 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(true);
 
   y = {"a":1};
 
   for (var w = 0; w < 5; ++w) {
 
-    { let y; do break ; while (true); }
+    let (y) { do break ; while (true); }
     for each (let x in [{}, function(){}]) {y}
 
   }
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

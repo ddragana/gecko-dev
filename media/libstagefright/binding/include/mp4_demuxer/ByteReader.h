@@ -5,7 +5,7 @@
 #ifndef BYTE_READER_H_
 #define BYTE_READER_H_
 
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include "mozilla/Vector.h"
 #include "nsTArray.h"
 #include "MediaData.h"
@@ -25,7 +25,7 @@ public:
   {
   }
   template<size_t S>
-  explicit ByteReader(const AutoTArray<uint8_t, S>& aData)
+  ByteReader(const nsAutoTArray<uint8_t, S>& aData)
     : mPtr(aData.Elements()), mRemaining(aData.Length()), mLength(aData.Length())
   {
   }
@@ -33,7 +33,7 @@ public:
     : mPtr(aData.Elements()), mRemaining(aData.Length()), mLength(aData.Length())
   {
   }
-  explicit ByteReader(const mozilla::MediaByteBuffer* aData)
+  explicit ByteReader(const MediaByteBuffer* aData)
     : mPtr(aData->Elements()), mRemaining(aData->Length()), mLength(aData->Length())
   {
   }
@@ -87,16 +87,6 @@ public:
     return mozilla::BigEndian::readUint16(ptr);
   }
 
-  int16_t ReadLE16()
-  {
-    auto ptr = Read(2);
-    if (!ptr) {
-      MOZ_ASSERT(false);
-      return 0;
-    }
-    return mozilla::LittleEndian::readInt16(ptr);
-  }
-
   uint32_t ReadU24()
   {
     auto ptr = Read(3);
@@ -111,22 +101,6 @@ public:
   {
     return (uint32_t)ReadU24();
   }
-
-  int32_t ReadLE24()
-  {
-    auto ptr = Read(3);
-    if (!ptr) {
-      MOZ_ASSERT(false);
-      return 0;
-    }
-    int32_t result = int32_t(ptr[2] << 16 | ptr[1] << 8 | ptr[0]);
-    if (result & 0x00800000u) {
-      result -= 0x1000000;
-    }
-    return result;
-  }
-
-  bool CanRead32() { return mRemaining >= 4; }
 
   uint32_t ReadU32()
   {

@@ -26,10 +26,8 @@ using namespace JS;
 
 XPCWrappedNativeScope* XPCWrappedNativeScope::gScopes = nullptr;
 XPCWrappedNativeScope* XPCWrappedNativeScope::gDyingScopes = nullptr;
-bool XPCWrappedNativeScope::gShutdownObserverInitialized = false;
 XPCWrappedNativeScope::InterpositionMap* XPCWrappedNativeScope::gInterpositionMap = nullptr;
 InterpositionWhitelistArray* XPCWrappedNativeScope::gInterpositionWhitelists = nullptr;
-XPCWrappedNativeScope::AddonSet* XPCWrappedNativeScope::gAllowCPOWAddonSet = nullptr;
 
 NS_IMPL_ISUPPORTS(XPCWrappedNativeScope::ClearInterpositionsObserver, nsIObserver)
 
@@ -52,11 +50,6 @@ XPCWrappedNativeScope::ClearInterpositionsObserver::Observe(nsISupports* subject
     if (gInterpositionWhitelists) {
         delete gInterpositionWhitelists;
         gInterpositionWhitelists = nullptr;
-    }
-
-    if (gAllowCPOWAddonSet) {
-        delete gAllowCPOWAddonSet;
-        gAllowCPOWAddonSet = nullptr;
     }
 
     nsContentUtils::UnregisterShutdownObserver(this);
@@ -146,11 +139,9 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext* cx,
     JSAddonId* addonId = JS::AddonIdOfObject(aGlobal);
     if (gInterpositionMap) {
         bool isSystem = nsContentUtils::IsSystemPrincipal(principal);
-        bool waiveInterposition = priv->waiveInterposition;
-        InterpositionMap::Ptr interposition = gInterpositionMap->lookup(addonId);
-        if (!waiveInterposition && interposition) {
+        if (InterpositionMap::Ptr p = gInterpositionMap->lookup(addonId)) {
             MOZ_RELEASE_ASSERT(isSystem);
-            mInterposition = interposition->value();
+            mInterposition = p->value();
         }
         // We also want multiprocessCompatible add-ons to have a default interposition.
         if (!mInterposition && addonId && isSystem) {
@@ -162,11 +153,6 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext* cx,
             UpdateInterpositionWhitelist(cx, mInterposition);
           }
         }
-    }
-
-    if (addonId) {
-        // We forbid CPOWs unless they're specifically allowed.
-        priv->allowCPOWs = gAllowCPOWAddonSet ? gAllowCPOWAddonSet->has(addonId) : false;
     }
 }
 
@@ -346,12 +332,11 @@ GetScopeForXBLExecution(JSContext* cx, HandleObject contentScope, JSAddonId* add
 
     JSAutoCompartment ac(cx, contentScope);
     XPCWrappedNativeScope* nativeScope = CompartmentPrivate::Get(contentScope)->scope;
-    bool isSystem = nsContentUtils::IsSystemPrincipal(nativeScope->GetPrincipal());
 
     RootedObject scope(cx);
     if (nativeScope->UseContentXBLScope())
         scope = nativeScope->EnsureContentXBLScope(cx);
-    else if (addonId && CompartmentPerAddon() && isSystem)
+    else if (addonId && CompartmentPerAddon())
         scope = nativeScope->EnsureAddonScope(cx, addonId);
     else
         scope = global;
@@ -480,7 +465,7 @@ XPCWrappedNativeScope::~XPCWrappedNativeScope()
 void
 XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntime* rt)
 {
-    // Do JS::TraceEdge for all wrapped natives with external references, as
+    // Do JS_CallTracer for all wrapped natives with external references, as
     // well as any DOM expando objects.
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
@@ -492,7 +477,7 @@ XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntim
 
         if (cur->mDOMExpandoSet) {
             for (DOMExpandoSet::Enum e(*cur->mDOMExpandoSet); !e.empty(); e.popFront())
-                JS::TraceEdge(trc, &e.mutableFront(), "DOM expando object");
+                JS_CallHashSetObjectTracer(trc, e, e.front(), "DOM expando object");
         }
     }
 }
@@ -713,13 +698,11 @@ XPCWrappedNativeScope::SetAddonInterposition(JSContext* cx,
 {
     if (!gInterpositionMap) {
         gInterpositionMap = new InterpositionMap();
-        bool ok = gInterpositionMap->init();
-        NS_ENSURE_TRUE(ok, false);
+        gInterpositionMap->init();
 
-        if (!gShutdownObserverInitialized) {
-            gShutdownObserverInitialized = true;
-            nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
-        }
+        // Make sure to clear the map at shutdown.
+        // Note: this will take care of gInterpositionWhitelists too.
+        nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
     }
     if (interp) {
         bool ok = gInterpositionMap->put(addonId, interp);
@@ -727,30 +710,6 @@ XPCWrappedNativeScope::SetAddonInterposition(JSContext* cx,
         UpdateInterpositionWhitelist(cx, interp);
     } else {
         gInterpositionMap->remove(addonId);
-    }
-    return true;
-}
-
-/* static */ bool
-XPCWrappedNativeScope::AllowCPOWsInAddon(JSContext* cx,
-                                         JSAddonId* addonId,
-                                         bool allow)
-{
-    if (!gAllowCPOWAddonSet) {
-        gAllowCPOWAddonSet = new AddonSet();
-        bool ok = gAllowCPOWAddonSet->init();
-        NS_ENSURE_TRUE(ok, false);
-
-        if (!gShutdownObserverInitialized) {
-            gShutdownObserverInitialized = true;
-            nsContentUtils::RegisterShutdownObserver(new ClearInterpositionsObserver());
-        }
-    }
-    if (allow) {
-        bool ok = gAllowCPOWAddonSet->put(addonId);
-        NS_ENSURE_TRUE(ok, false);
-    } else {
-        gAllowCPOWAddonSet->remove(addonId);
     }
     return true;
 }
@@ -795,11 +754,7 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
     MOZ_RELEASE_ASSERT(MAX_INTERPOSITION > gInterpositionWhitelists->Length() + 1);
     InterpositionWhitelistPair* newPair = gInterpositionWhitelists->AppendElement();
     newPair->interposition = interposition;
-    if (!newPair->whitelist.init()) {
-        JS_ReportOutOfMemory(cx);
-        return false;
-    }
-
+    newPair->whitelist.init();
     whitelist = &newPair->whitelist;
 
     RootedValue whitelistVal(cx);
@@ -828,18 +783,12 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
     {
         JSAutoCompartment ac(cx, whitelistObj);
 
-        bool isArray;
-        if (!JS_IsArrayObject(cx, whitelistObj, &isArray))
-            return false;
-
-        if (!isArray) {
+        uint32_t length;
+        if (!JS_IsArrayObject(cx, whitelistObj) ||
+            !JS_GetArrayLength(cx, whitelistObj, &length)) {
             JS_ReportError(cx, "Whitelist must be an array.");
             return false;
         }
-
-        uint32_t length;
-        if (!JS_GetArrayLength(cx, whitelistObj, &length))
-            return false;
 
         for (uint32_t i = 0; i < length; i++) {
             RootedValue idval(cx);
@@ -861,10 +810,7 @@ XPCWrappedNativeScope::UpdateInterpositionWhitelist(JSContext* cx,
             // By internizing the id's we ensure that they won't get
             // GCed so we can use them as hash keys.
             jsid id = INTERNED_STRING_TO_JSID(cx, str);
-            if (!whitelist->put(JSID_BITS(id))) {
-                JS_ReportOutOfMemory(cx);
-                return false;
-            }
+            whitelist->put(JSID_BITS(id));
         }
     }
 

@@ -2,10 +2,10 @@
 # waitpid to dispatch tasks.  This avoids several deadlocks that are possible
 # with fork/exec + threads + Python.
 
-import errno, os, select, sys
+import errno, os, select
 from datetime import datetime, timedelta
 from progressbar import ProgressBar
-from results import NullTestOutput, TestOutput, escape_cmdline
+from results import NullTestOutput, TestOutput
 
 class Task(object):
     def __init__(self, test, prefix, pid, stdout, stderr):
@@ -18,15 +18,8 @@ class Task(object):
         self.out = []
         self.err = []
 
-def spawn_test(test, prefix, passthrough, run_skipped, show_cmd):
+def spawn_test(test, prefix, passthrough=False):
     """Spawn one child, return a task struct."""
-    if not test.enable and not run_skipped:
-        return None
-
-    cmd = test.get_command(prefix)
-    if show_cmd:
-        print(escape_cmdline(cmd))
-
     if not passthrough:
         (rout, wout) = os.pipe()
         (rerr, werr) = os.pipe()
@@ -46,7 +39,15 @@ def spawn_test(test, prefix, passthrough, run_skipped, show_cmd):
         os.dup2(wout, 1)
         os.dup2(werr, 2)
 
+    cmd = test.get_command(prefix)
     os.execvp(cmd[0], cmd)
+
+def total_seconds(td):
+    """
+    Return the total number of seconds contained in the duration as a float
+    """
+    return (float(td.microseconds) \
+            + (td.seconds + td.days * 24 * 3600) * 10**6) / 10**6
 
 def get_max_wait(tasks, timeout):
     """
@@ -66,8 +67,8 @@ def get_max_wait(tasks, timeout):
             if remaining < wait:
                 wait = remaining
 
-    # Return the wait time in seconds, clamped between zero and max_wait.
-    return max(wait.total_seconds(), 0)
+    # Return the wait time in seconds, clamped to zero.
+    return max(total_seconds(wait), 0)
 
 def flush_input(fd, frags):
     """
@@ -103,13 +104,7 @@ def read_input(tasks, timeout):
         # us to respond immediately and not leave cores idle.
         exlist.append(t.stdout)
 
-    readable = []
-    try:
-        readable, _, _ = select.select(rlist, [], exlist, timeout)
-    except OverflowError as e:
-        print >> sys.stderr, "timeout value", timeout
-        raise
-
+    readable, _, _ = select.select(rlist, [], exlist, timeout)
     for fd in readable:
         flush_input(fd, outmap[fd])
 
@@ -142,10 +137,10 @@ def timed_out(task, timeout):
 
 def reap_zombies(tasks, timeout):
     """
-    Search for children of this process that have finished. If they are tasks,
-    then this routine will clean up the child. This method returns a new task
-    list that has had the ended tasks removed, followed by the list of finished
-    tasks.
+    Search for children of this process that have finished.  If they are tasks,
+    then this routine will clean up the child and send a TestOutput to the
+    results channel.  This method returns a new task list that has had the ended
+    tasks removed.
     """
     finished = []
     while True:
@@ -175,7 +170,7 @@ def reap_zombies(tasks, timeout):
                 ''.join(ended.out),
                 ''.join(ended.err),
                 returncode,
-                (datetime.now() - ended.start).total_seconds(),
+                total_seconds(datetime.now() - ended.start),
                 timed_out(ended, timeout)))
     return tasks, finished
 
@@ -187,7 +182,7 @@ def kill_undead(tasks, timeout):
         if timed_out(task, timeout):
             os.kill(task.pid, 9)
 
-def run_all_tests(tests, prefix, pb, options):
+def run_all_tests(tests, prefix, results, options):
     # Copy and reverse for fast pop off end.
     tests = list(tests)
     tests = tests[:]
@@ -199,12 +194,10 @@ def run_all_tests(tests, prefix, pb, options):
     while len(tests) or len(tasks):
         while len(tests) and len(tasks) < options.worker_count:
             test = tests.pop()
-            task = spawn_test(test, prefix,
-                    options.passthrough, options.run_skipped, options.show_cmd)
-            if task:
-                tasks.append(task)
-            else:
+            if not test.enable and not options.run_skipped:
                 yield NullTestOutput(test)
+            else:
+                tasks.append(spawn_test(test, prefix, options.passthrough))
 
         timeout = get_max_wait(tasks, options.timeout)
         read_input(tasks, timeout)
@@ -215,9 +208,3 @@ def run_all_tests(tests, prefix, pb, options):
         # With Python3.4+ we could use yield from to remove this loop.
         for out in finished:
             yield out
-
-        # If we did not finish any tasks, poke the progress bar to show that
-        # the test harness is at least not frozen.
-        if len(finished) == 0:
-            pb.poke()
-

@@ -95,7 +95,7 @@ http://example.org:80           privileged
         exc = None
         try:
             ServerLocations(f.name)
-        except LocationsSyntaxError as e:
+        except LocationsSyntaxError, e:
             exc = e
         self.assertNotEqual(exc, None)
         self.assertEqual(exc.err.__class__, MissingPrimaryLocationError)
@@ -108,7 +108,7 @@ http://example.org:80           privileged
         exc = None
         try:
             ServerLocations(f.name)
-        except LocationsSyntaxError as e:
+        except LocationsSyntaxError, e:
             exc = e
         self.assertNotEqual(exc, None)
         self.assertEqual(exc.err.__class__, BadPortLocationError)

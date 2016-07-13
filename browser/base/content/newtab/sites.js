@@ -50,19 +50,13 @@ Site.prototype = {
   /**
    * Pins the site on its current or a given index.
    * @param aIndex The pinned index (optional).
-   * @return true if link changed type after pin
    */
   pin: function Site_pin(aIndex) {
     if (typeof aIndex == "undefined")
       aIndex = this.cell.index;
 
     this._updateAttributes(true);
-    let changed = gPinnedLinks.pin(this._link, aIndex);
-    if (changed) {
-      // render site again to remove suggested/sponsored tags
-      this._render();
-    }
-    return changed;
+    gPinnedLinks.pin(this._link, aIndex);
   },
 
   /**
@@ -125,7 +119,7 @@ Site.prototype = {
   _newTabString: function(str, substrArr) {
     let regExp = /%[0-9]\$S/g;
     let matches;
-    while ((matches = regExp.exec(str))) {
+    while (matches = regExp.exec(str)) {
       let match = matches[0];
       let index = match.charAt(1); // Get the digit in the regExp.
       str = str.replace(match, substrArr[index - 1]);
@@ -178,17 +172,8 @@ Site.prototype = {
     let link = this._querySelector(".newtab-link");
     link.setAttribute("title", tooltip);
     link.setAttribute("href", url);
+    this._querySelector(".newtab-title").textContent = title;
     this.node.setAttribute("type", this.link.type);
-
-    let titleNode = this._querySelector(".newtab-title");
-    titleNode.textContent = title;
-    if (this.link.titleBgColor) {
-      titleNode.style.backgroundColor = this.link.titleBgColor;
-    }
-
-    // remove "suggested" attribute to avoid showing "suggested" tag
-    // after site was pinned or dropped
-    this.node.removeAttribute("suggested");
 
     if (this.link.targetedSite) {
       if (this.node.getAttribute("type") != "sponsored") {
@@ -295,11 +280,7 @@ Site.prototype = {
   _speculativeConnect: function Site_speculativeConnect() {
     let sc = Services.io.QueryInterface(Ci.nsISpeculativeConnect);
     let uri = Services.io.newURI(this.url, null, null);
-    try {
-      // This can throw for certain internal URLs, when they wind up in
-      // about:newtab. Be sure not to propagate the error.
-      sc.speculativeConnect(uri, null);
-    } catch (e) {}
+    sc.speculativeConnect(uri, null);
   },
 
   /**
@@ -371,12 +352,6 @@ Site.prototype = {
     else if (button == 0) {
       aEvent.preventDefault();
       if (target.classList.contains("newtab-control-block")) {
-        // Notify DirectoryLinksProvider of suggested tile block, this may
-        // affect if and how suggested tiles are recommended and needs to
-        // be reported before pages are updated inside block() call
-        if (this.link.targetedSite) {
-          DirectoryLinksProvider.handleSuggestedTileBlock();
-        }
         this.block();
         action = "block";
       }
@@ -390,10 +365,7 @@ Site.prototype = {
         action = "unpin";
       }
       else if (!pinned && target.classList.contains("newtab-control-pin")) {
-        if (this.pin()) {
-          // suggested link has changed - update rest of the pages
-          gAllPages.update(gPage);
-        }
+        this.pin();
         action = "pin";
       }
     }

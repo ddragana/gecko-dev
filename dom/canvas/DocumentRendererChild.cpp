@@ -37,7 +37,7 @@ DocumentRendererChild::~DocumentRendererChild()
 {}
 
 bool
-DocumentRendererChild::RenderDocument(nsPIDOMWindowOuter* window,
+DocumentRendererChild::RenderDocument(nsIDOMWindow *window,
                                       const nsRect& documentRect,
                                       const mozilla::gfx::Matrix& transform,
                                       const nsString& aBGColor,
@@ -49,9 +49,10 @@ DocumentRendererChild::RenderDocument(nsPIDOMWindowOuter* window,
     if (flushLayout)
         nsContentUtils::FlushLayoutForTree(window);
 
-    RefPtr<nsPresContext> presContext;
-    if (window) {
-        nsIDocShell* docshell = window->GetDocShell();
+    nsRefPtr<nsPresContext> presContext;
+    nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(window);
+    if (win) {
+        nsIDocShell* docshell = win->GetDocShell();
         if (docshell) {
             docshell->GetPresContext(getter_AddRefs(presContext));
         }
@@ -79,12 +80,11 @@ DocumentRendererChild::RenderDocument(nsPIDOMWindowOuter* window,
                                          IntSize(renderSize.width, renderSize.height),
                                          4 * renderSize.width,
                                          SurfaceFormat::B8G8R8A8);
-    if (!dt || !dt->IsValid()) {
+    if (!dt) {
         gfxWarning() << "DocumentRendererChild::RenderDocument failed to Factory::CreateDrawTargetForData";
         return false;
     }
-    RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(dt);
-    MOZ_ASSERT(ctx); // already checked the draw target above
+    nsRefPtr<gfxContext> ctx = new gfxContext(dt);
     ctx->SetMatrix(mozilla::gfx::ThebesMatrix(transform));
 
     nsCOMPtr<nsIPresShell> shell = presContext->PresShell();

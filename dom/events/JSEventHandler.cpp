@@ -143,7 +143,7 @@ JSEventHandler::HandleEvent(nsIDOMEvent* aEvent)
     ErrorEvent* scriptEvent = aEvent->InternalDOMEvent()->AsErrorEvent();
     if (scriptEvent) {
       scriptEvent->GetMessage(errorMsg);
-      msgOrEvent.SetAsString().ShareOrDependUpon(errorMsg);
+      msgOrEvent.SetAsString().Rebind(errorMsg.Data(), errorMsg.Length());
 
       scriptEvent->GetFilename(file);
       fileName = &file;
@@ -154,13 +154,14 @@ JSEventHandler::HandleEvent(nsIDOMEvent* aEvent)
       columnNumber.Construct();
       columnNumber.Value() = scriptEvent->Colno();
 
-      error.Construct(nsContentUtils::RootingCxForThread());
-      scriptEvent->GetError(&error.Value());
+      ThreadsafeAutoJSContext cx;
+      error.Construct(cx);
+      scriptEvent->GetError(cx, &error.Value());
     } else {
       msgOrEvent.SetAsEvent() = aEvent->InternalDOMEvent();
     }
 
-    RefPtr<OnErrorEventHandlerNonNull> handler =
+    nsRefPtr<OnErrorEventHandlerNonNull> handler =
       mTypedHandler.OnErrorEventHandler();
     ErrorResult rv;
     bool handled = handler->Call(mTarget, msgOrEvent, fileName, lineNumber,
@@ -178,7 +179,7 @@ JSEventHandler::HandleEvent(nsIDOMEvent* aEvent)
   if (mTypedHandler.Type() == TypedEventHandler::eOnBeforeUnload) {
     MOZ_ASSERT(mEventName == nsGkAtoms::onbeforeunload);
 
-    RefPtr<OnBeforeUnloadEventHandlerNonNull> handler =
+    nsRefPtr<OnBeforeUnloadEventHandlerNonNull> handler =
       mTypedHandler.OnBeforeUnloadEventHandler();
     ErrorResult rv;
     nsString retval;
@@ -209,7 +210,7 @@ JSEventHandler::HandleEvent(nsIDOMEvent* aEvent)
 
   MOZ_ASSERT(mTypedHandler.Type() == TypedEventHandler::eNormal);
   ErrorResult rv;
-  RefPtr<EventHandlerNonNull> handler = mTypedHandler.NormalEventHandler();
+  nsRefPtr<EventHandlerNonNull> handler = mTypedHandler.NormalEventHandler();
   JS::Rooted<JS::Value> retval(CycleCollectedJSRuntime::Get()->Runtime());
   handler->Call(mTarget, *(aEvent->InternalDOMEvent()), &retval, rv);
   if (rv.Failed()) {

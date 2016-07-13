@@ -38,7 +38,7 @@ function getCert() {
   return deferred.promise;
 }
 
-function startServer(cert, expectingPeerCert, clientCertificateConfig) {
+function startServer(cert) {
   let tlsServer = Cc["@mozilla.org/network/tls-server-socket;1"]
                   .createInstance(Ci.nsITLSServerSocket);
   tlsServer.init(-1, true, -1);
@@ -57,12 +57,8 @@ function startServer(cert, expectingPeerCert, clientCertificateConfig) {
     },
     onHandshakeDone: function(socket, status) {
       do_print("TLS handshake done");
-      if (expectingPeerCert) {
-        ok(!!status.peerCert, "Has peer cert");
-        ok(status.peerCert.equals(cert), "Peer cert matches expected cert");
-      } else {
-        ok(!status.peerCert, "No peer cert (as expected)");
-      }
+      ok(!!status.peerCert, "Has peer cert");
+      ok(status.peerCert.equals(cert), "Peer cert matches expected cert");
 
       equal(status.tlsVersionUsed, Ci.nsITLSClientStatus.TLS_VERSION_1_2,
             "Using TLS 1.2");
@@ -82,7 +78,7 @@ function startServer(cert, expectingPeerCert, clientCertificateConfig) {
 
   tlsServer.setSessionCache(false);
   tlsServer.setSessionTickets(false);
-  tlsServer.setRequestClientCertificate(clientCertificateConfig);
+  tlsServer.setRequestClientCertificate(Ci.nsITLSServerSocket.REQUIRE_ALWAYS);
 
   tlsServer.asyncListen(listener);
 
@@ -96,9 +92,7 @@ function storeCertOverride(port, cert) {
                                                overrideBits, true);
 }
 
-function startClient(port, cert, expectingBadCertAlert) {
-  let SSL_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SSL_ERROR_BASE;
-  let SSL_ERROR_BAD_CERT_ALERT = SSL_ERROR_BASE + 17;
+function startClient(port, cert) {
   let transport =
     socketTransportService.createTransport(["ssl"], 1, "127.0.0.1", port, null);
   let input;
@@ -123,23 +117,22 @@ function startClient(port, cert, expectingBadCertAlert) {
         output.close();
         inputDeferred.resolve();
       } catch (e) {
+        let SEC_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SEC_ERROR_BASE;
+        let SEC_ERROR_UNKNOWN_ISSUER = SEC_ERROR_BASE + 13;
         let errorCode = -1 * (e.result & 0xFFFF);
-        if (expectingBadCertAlert && errorCode == SSL_ERROR_BAD_CERT_ALERT) {
-          inputDeferred.resolve();
-        } else {
-          inputDeferred.reject(e);
+        if (errorCode == SEC_ERROR_UNKNOWN_ISSUER) {
+          do_print("Client doesn't like server cert");
         }
+        inputDeferred.reject(e);
       }
     },
 
     onOutputStreamReady: function(output) {
       try {
-        // Set the client certificate as appropriate.
-        if (cert) {
-          let clientSecInfo = transport.securityInfo;
-          let tlsControl = clientSecInfo.QueryInterface(Ci.nsISSLSocketControl);
-          tlsControl.clientCert = cert;
-        }
+        // Set the cert we want to avoid any cert UI prompts
+        let clientSecInfo = transport.securityInfo;
+        let tlsControl = clientSecInfo.QueryInterface(Ci.nsISSLSocketControl);
+        tlsControl.clientCert = cert;
 
         output.write("HELLO", 5);
         do_print("Output to server written");
@@ -147,6 +140,8 @@ function startClient(port, cert, expectingBadCertAlert) {
         input = transport.openInputStream(0, 0, 0);
         input.asyncWait(handler, 0, 0, Services.tm.currentThread);
       } catch (e) {
+        let SSL_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SSL_ERROR_BASE;
+        let SSL_ERROR_BAD_CERT_ALERT = SSL_ERROR_BASE + 17;
         let errorCode = -1 * (e.result & 0xFFFF);
         if (errorCode == SSL_ERROR_BAD_CERT_ALERT) {
           do_print("Server doesn't like client cert");
@@ -163,53 +158,10 @@ function startClient(port, cert, expectingBadCertAlert) {
   return promise.all([inputDeferred.promise, outputDeferred.promise]);
 }
 
-// Replace the UI dialog that prompts the user to pick a client certificate.
-do_load_manifest("client_cert_chooser.manifest");
-
 add_task(function*() {
   let cert = yield getCert();
   ok(!!cert, "Got self-signed cert");
-  let port = startServer(cert, true, Ci.nsITLSServerSocket.REQUIRE_ALWAYS);
+  let port = startServer(cert);
   storeCertOverride(port, cert);
-  yield startClient(port, cert, false);
-});
-
-add_task(function*() {
-  let cert = yield getCert();
-  ok(!!cert, "Got self-signed cert");
-  let port = startServer(cert, true, Ci.nsITLSServerSocket.REQUIRE_ALWAYS);
-  storeCertOverride(port, cert);
-  yield startClient(port, null, true);
-});
-
-add_task(function*() {
-  let cert = yield getCert();
-  ok(!!cert, "Got self-signed cert");
-  let port = startServer(cert, true, Ci.nsITLSServerSocket.REQUEST_ALWAYS);
-  storeCertOverride(port, cert);
-  yield startClient(port, cert, false);
-});
-
-add_task(function*() {
-  let cert = yield getCert();
-  ok(!!cert, "Got self-signed cert");
-  let port = startServer(cert, false, Ci.nsITLSServerSocket.REQUEST_ALWAYS);
-  storeCertOverride(port, cert);
-  yield startClient(port, null, false);
-});
-
-add_task(function*() {
-  let cert = yield getCert();
-  ok(!!cert, "Got self-signed cert");
-  let port = startServer(cert, false, Ci.nsITLSServerSocket.REQUEST_NEVER);
-  storeCertOverride(port, cert);
-  yield startClient(port, cert, false);
-});
-
-add_task(function*() {
-  let cert = yield getCert();
-  ok(!!cert, "Got self-signed cert");
-  let port = startServer(cert, false, Ci.nsITLSServerSocket.REQUEST_NEVER);
-  storeCertOverride(port, cert);
-  yield startClient(port, null, false);
+  yield startClient(port, cert);
 });

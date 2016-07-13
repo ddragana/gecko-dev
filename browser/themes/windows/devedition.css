@@ -4,10 +4,6 @@
 
 %include ../shared/devedition.inc.css
 
-:root {
-  --forwardbutton-width: 29px;
-}
-
 :root[devtoolstheme="dark"],
 :root[devtoolstheme="light"] {
    /* Matches the #browser-border-start, #browser-border-end color */
@@ -51,10 +47,6 @@
   box-shadow: none !important;
 }
 
-/* the normal theme adds box-shadow: <stuff> !important when the back-button is [open]. Fix: */
-#back-button[open="true"] > .toolbarbutton-icon {
-  box-shadow: none !important;
-}
 
 /* Force 1x image for back/forward button for now, otherwise it breaks the
    layout - Bug 1165360. */
@@ -63,12 +55,6 @@
   #forward-button {
     list-style-image: url("chrome://browser/skin/Toolbar.png");
   }
-
-  toolbar[brighttext] #back-button,
-  toolbar[brighttext] #forward-button {
-    list-style-image: url("chrome://browser/skin/Toolbar-inverted.png");
-  }
-
   /* The back button region is already set in devedition.inc.css */
   #forward-button {
     -moz-image-region: rect(0px, 72px, 18px, 54px);
@@ -76,7 +62,7 @@
 }
 
 #forward-button > .toolbarbutton-icon {
-  border-inline-start: none !important;
+  -moz-border-start: none !important;
 }
 
 /* Override a box shadow for disabled back button */
@@ -110,8 +96,14 @@
   text-shadow: none !important;
 }
 
-:root[devtoolstheme="dark"] .findbar-closebutton,
-:root[devtoolstheme="dark"] #sidebar-header > .close-icon,
+/* This rule is specific to the dark theme, because we only set the dropdown image there */
+:root[devtoolstheme="dark"] .searchbar-dropmarker-image {
+  /* Reset image-region from the windows theme */
+  -moz-image-region: auto !important;
+  /* Add margin otherwise it looks weird */
+  -moz-margin-start: 2px;
+}
+
 /* Tab styling - make sure to use an inverted icon for the selected tab
    (brighttext only covers the unselected tabs) */
 .tab-close-button[visuallyselected=true] {
@@ -119,8 +111,6 @@
 }
 
 @media (min-resolution: 1.1dppx) {
-  :root[devtoolstheme="dark"] .findbar-closebutton,
-  :root[devtoolstheme="dark"] #sidebar-header > .close-icon,
   .tab-close-button[visuallyselected=true] {
     list-style-image: url("chrome://global/skin/icons/close-inverted@2x.png");
   }
@@ -143,7 +133,7 @@
   #main-window[sizemode=normal] .tabbrowser-tabs[overflow="true"] {
     background-clip: padding-box;
     border-top: 1px solid var(--chrome-nav-bar-separator-color);
-    border-inline-end: 1px solid var(--chrome-nav-bar-separator-color);
+    -moz-border-end: 1px solid var(--chrome-nav-bar-separator-color);
     background-color: var(--tab-background-color); /* Make sure there is no transparent gap during tab close animation */
   }
 
@@ -151,8 +141,8 @@
      instead of #TabsToolbar because it will work even in customize mode. */
   #main-window[sizemode=normal] .tabbrowser-tabs {
     background-clip: padding-box;
-    border-inline-start: 1px solid var(--chrome-nav-bar-separator-color);
-    border-inline-end: 1px solid transparent;
+    -moz-border-start: 1px solid var(--chrome-nav-bar-separator-color);
+    -moz-border-end: 1px solid transparent;
   }
 
   #main-window[sizemode=normal] .tabbrowser-tabs:not([overflow="true"]) .tabbrowser-tab,
@@ -170,7 +160,7 @@
 
   #main-window[sizemode=normal] .tabbrowser-tabs:not([overflow="true"]) .closing-tabs-spacer {
     background-clip: padding-box;
-    border-inline-start: 1px solid var(--chrome-nav-bar-separator-color);
+    -moz-border-start: 1px solid var(--chrome-nav-bar-separator-color);
   }
 
   .tabs-newtab-button {
@@ -185,13 +175,13 @@
     background: transparent;
   }
 
-  /* Ensure that the entire background is styled when maximized/fullscreen */
-  #main-window:not([sizemode="normal"]):not([customizing]) #browser-panel {
+  /* Ensure that the entire background is styled when maximized */
+  #main-window[sizemode="maximized"]:not([customizing]) #browser-panel {
     background: var(--chrome-background-color) !important;
   }
 
   /* The menu items need to be visible when the entire background is styled */
-  #main-window:not([sizemode="normal"]) #main-menubar {
+  #main-window[sizemode="maximized"] #main-menubar {
     color: var(--chrome-color);
     background-color: transparent;
   }
@@ -244,46 +234,6 @@
   }
 }
 
-/* Restored windows get an artificial border on windows, because the lwtheme background
- * overlaps the regular window border. That isn't the case for us, so we avoid painting
- * over the native border with our custom borders: */
-#browser-panel {
-  /* These are !important to avoid specificity-wars with the selectors that add borders here. */
-  background-image: none !important;
-  border-top: none !important;
-}
-
-#navigator-toolbox {
-  /* The side borders on the toolbox also look out-of-place because we don't paint over
-   * the native background color at all, and these are !important for the same reason as above. */
-  border-left: none !important;
-  border-right: none !important;
-}
-
-/* Disable dragging like in the default theme: */
-#main-window[tabsintitlebar] #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):-moz-lwtheme {
-  -moz-window-dragging: no-drag;
-}
-
-/* The sidebar header has no background now that the background of the #browser-panel
- * has no image and is transparent. Fix: */
-.sidebar-header:-moz-lwtheme,
-#sidebar-header {
-  background-color: var(--chrome-background-color);
-  color: var(--chrome-color);
-}
-
-@media (-moz-os-version: windows-vista),
-       (-moz-os-version: windows-win7),
-       (-moz-os-version: windows-win8) {
-  /* And then we add them back on toolbars so that they don't look borderless: */
-  #main-window:not([customizing])[sizemode=normal] #navigator-toolbox::after,
-  #main-window:not([customizing])[sizemode=normal] #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar) {
-    border-left: 1px solid hsla(209,67%,12%,0.35);
-    border-right: 1px solid hsla(209,67%,12%,0.35);
-  }
-}
-
 @media (-moz-os-version: windows-win10) {
   /* Always keep draggable space on the sides of tabs since there is no top margin on Win10 */
   #main-window .tabbrowser-arrowscrollbox > .arrowscrollbox-scrollbox {
@@ -304,28 +254,4 @@
   :root[devtoolstheme="dark"] #titlebar-close {
     list-style-image: url(chrome://browser/skin/caption-buttons.svg#close-white);
   }
-
-  /* ... and normal ones for the light theme on Windows 10 */
-  :root[devtoolstheme="light"] #titlebar-min {
-    list-style-image: url(chrome://browser/skin/caption-buttons.svg#minimize);
-  }
-  :root[devtoolstheme="light"] #titlebar-max {
-    list-style-image: url(chrome://browser/skin/caption-buttons.svg#maximize);
-  }
-  #main-window[devtoolstheme="light"][sizemode="maximized"] #titlebar-max {
-    list-style-image: url(chrome://browser/skin/caption-buttons.svg#restore);
-  }
-  :root[devtoolstheme="light"] #titlebar-close {
-    list-style-image: url(chrome://browser/skin/caption-buttons.svg#close);
-  }
-
-  :root[devtoolstheme="light"] #titlebar-close:hover {
-    list-style-image: url(chrome://browser/skin/caption-buttons.svg#close-white);
-  }
-}
-
-.ac-type-icon {
-  /* Left-align the type icon in awesomebar popup results with the icon in the
-     urlbar. */
-  margin-inline-start: 13px;
 }

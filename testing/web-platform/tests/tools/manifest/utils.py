@@ -1,5 +1,6 @@
 import os
-from six import StringIO
+import urlparse
+from StringIO import StringIO
 
 blacklist = ["/", "/tools/", "/resources/", "/common/", "/conformance-checkers/", "_certs"]
 
@@ -19,12 +20,6 @@ def is_blacklisted(url):
         elif url.startswith(item):
             return True
     return False
-
-def from_os_path(path):
-    return path.replace(os.path.sep, "/")
-
-def to_os_path(path):
-    return path.replace("/", os.path.sep)
 
 class ContextManagerStringIO(StringIO):
     def __enter__(self):

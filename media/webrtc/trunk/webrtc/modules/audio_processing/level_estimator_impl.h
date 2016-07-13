@@ -30,20 +30,20 @@ class LevelEstimatorImpl : public LevelEstimator,
   int ProcessStream(AudioBuffer* audio);
 
   // LevelEstimator implementation.
-  bool is_enabled() const override;
+  virtual bool is_enabled() const OVERRIDE;
 
  private:
   // LevelEstimator implementation.
-  int Enable(bool enable) override;
-  int RMS() override;
+  virtual int Enable(bool enable) OVERRIDE;
+  virtual int RMS() OVERRIDE;
 
   // ProcessingComponent implementation.
-  void* CreateHandle() const override;
-  int InitializeHandle(void* handle) const override;
-  int ConfigureHandle(void* handle) const override;
-  void DestroyHandle(void* handle) const override;
-  int num_handles_required() const override;
-  int GetHandleError(void* handle) const override;
+  virtual void* CreateHandle() const OVERRIDE;
+  virtual int InitializeHandle(void* handle) const OVERRIDE;
+  virtual int ConfigureHandle(void* handle) const OVERRIDE;
+  virtual void DestroyHandle(void* handle) const OVERRIDE;
+  virtual int num_handles_required() const OVERRIDE;
+  virtual int GetHandleError(void* handle) const OVERRIDE;
 
   CriticalSectionWrapper* crit_;
 };

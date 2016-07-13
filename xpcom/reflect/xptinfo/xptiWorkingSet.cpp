@@ -13,10 +13,8 @@
 
 using namespace mozilla;
 
-static const size_t XPTI_ARENA8_BLOCK_SIZE = 16 * 1024;
-static const size_t XPTI_ARENA1_BLOCK_SIZE =  8 * 1024;
-
-static const uint32_t XPTI_HASHTABLE_LENGTH = 1024;
+#define XPTI_STRUCT_ARENA_BLOCK_SIZE    (1024 * 16)
+#define XPTI_HASHTABLE_LENGTH           1024
 
 XPTInterfaceInfoManager::xptiWorkingSet::xptiWorkingSet()
     : mTableReentrantMonitor("xptiWorkingSet::mTableReentrantMonitor")
@@ -25,8 +23,8 @@ XPTInterfaceInfoManager::xptiWorkingSet::xptiWorkingSet()
 {
     MOZ_COUNT_CTOR(xptiWorkingSet);
 
-    gXPTIStructArena = XPT_NewArena(XPTI_ARENA8_BLOCK_SIZE,
-                                    XPTI_ARENA1_BLOCK_SIZE);
+    gXPTIStructArena = XPT_NewArena(XPTI_STRUCT_ARENA_BLOCK_SIZE, sizeof(double),
+                                    "xptiWorkingSet structs");
 }
 
 void

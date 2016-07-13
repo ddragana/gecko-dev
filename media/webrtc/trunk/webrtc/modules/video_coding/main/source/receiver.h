@@ -44,27 +44,33 @@ class VCMReceiver {
 
   void Reset();
   int32_t Initialize();
-  void UpdateRtt(int64_t rtt);
+  void UpdateRtt(uint32_t rtt);
   int32_t InsertPacket(const VCMPacket& packet,
                        uint16_t frame_width,
                        uint16_t frame_height);
   VCMEncodedFrame* FrameForDecoding(uint16_t max_wait_time_ms,
                                     int64_t& next_render_time_ms,
-                                    bool render_timing = true);
+                                    bool render_timing = true,
+                                    VCMReceiver* dual_receiver = NULL);
   void ReleaseFrame(VCMEncodedFrame* frame);
   void ReceiveStatistics(uint32_t* bitrate, uint32_t* framerate);
+  void ReceivedFrameCount(VCMFrameCount* frame_count) const;
   uint32_t DiscardedPackets() const;
 
   // NACK.
   void SetNackMode(VCMNackMode nackMode,
-                   int64_t low_rtt_nack_threshold_ms,
-                   int64_t high_rtt_nack_threshold_ms);
+                   int low_rtt_nack_threshold_ms,
+                   int high_rtt_nack_threshold_ms);
   void SetNackSettings(size_t max_nack_list_size,
                        int max_packet_age_to_nack,
                        int max_incomplete_time_ms);
   VCMNackMode NackMode() const;
   VCMNackStatus NackList(uint16_t* nackList, uint16_t size,
                          uint16_t* nack_list_length);
+
+  // Dual decoder.
+  bool DualDecoderCaughtUp(VCMEncodedFrame* dual_frame,
+                           VCMReceiver& dual_receiver) const;
   VCMReceiverState State() const;
   VideoReceiveState ReceiveState() const;
 
@@ -80,19 +86,19 @@ class VCMReceiver {
   // the time this function is called.
   int RenderBufferSizeMs();
 
-  void RegisterStatsCallback(VCMReceiveStatisticsCallback* callback);
-
-  void TriggerDecoderShutdown();
-
  private:
+  void CopyJitterBufferStateFromReceiver(const VCMReceiver& receiver);
+  void UpdateState(VCMReceiverState new_state);
   void UpdateReceiveState(const VCMEncodedFrame& frame);
+  void UpdateDualState(const VCMEncodedFrame& frame);
   static int32_t GenerateReceiverId();
 
   CriticalSectionWrapper* crit_sect_;
-  Clock* const clock_;
+  Clock* clock_;
+  bool master_;
   VCMJitterBuffer jitter_buffer_;
   VCMTiming* timing_;
-  rtc::scoped_ptr<EventWrapper> render_wait_event_;
+  scoped_ptr<EventWrapper> render_wait_event_;
   VCMReceiverState state_;
   VideoReceiveState receiveState_;
   int max_video_delay_ms_;

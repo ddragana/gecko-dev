@@ -35,12 +35,13 @@ function run_test() {
 
   var added = doAddIdleObserver(this.idleObserver, false);
   ok(!added, "Should not be able to add idle observer without permission");
+  
+  SpecialPowers.addPermission("idle", true, document);
 
-  SpecialPowers.pushPermissions([{type: "idle", allow: true, context: document}], () => {
-    added = doAddIdleObserver(this.idleObserver, true);
-    ok(added, "Should be able to add idle observer with permission.");
-    SimpleTest.finish();
-  });
+  added = doAddIdleObserver(this.idleObserver, true);
+  ok(added, "Should be able to add idle observer with permission.");
+  
+  SimpleTest.finish();
 }
 
 SimpleTest.waitForExplicitFinish();

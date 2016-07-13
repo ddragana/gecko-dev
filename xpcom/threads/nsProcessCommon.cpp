@@ -234,7 +234,7 @@ assembleCmdLine(char* const* aArgv, wchar_t** aWideCmdLine, UINT aCodePage)
 void
 nsProcess::Monitor(void* aArg)
 {
-  RefPtr<nsProcess> process = dont_AddRef(static_cast<nsProcess*>(aArg));
+  nsRefPtr<nsProcess> process = dont_AddRef(static_cast<nsProcess*>(aArg));
 
   if (!process->mBlocking) {
     PR_SetCurrentThreadName("RunProcess");
@@ -301,7 +301,9 @@ nsProcess::Monitor(void* aArg)
   if (NS_IsMainThread()) {
     process->ProcessComplete();
   } else {
-    NS_DispatchToMainThread(NewRunnableMethod(process, &nsProcess::ProcessComplete));
+    nsCOMPtr<nsIRunnable> event =
+      NS_NewRunnableMethod(process, &nsProcess::ProcessComplete);
+    NS_DispatchToMainThread(event);
   }
 }
 

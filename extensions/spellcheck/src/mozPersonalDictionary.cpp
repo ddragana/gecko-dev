@@ -53,7 +53,7 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION(mozPersonalDictionary, mEncoder)
 
-class mozPersonalDictionaryLoader final : public mozilla::Runnable
+class mozPersonalDictionaryLoader final : public nsRunnable
 {
 public:
   explicit mozPersonalDictionaryLoader(mozPersonalDictionary *dict) : mDict(dict)
@@ -65,16 +65,25 @@ public:
     mDict->SyncLoad();
 
     // Release the dictionary on the main thread
-    NS_ReleaseOnMainThread(mDict.forget());
+    mozPersonalDictionary *dict;
+    mDict.forget(&dict);
+
+    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+    if (mainThread) {
+      NS_ProxyRelease(mainThread, static_cast<mozIPersonalDictionary *>(dict));
+    } else {
+      // It's better to leak the dictionary than to release it on a wrong thread
+      NS_WARNING("Cannot get main thread, leaking mozPersonalDictionary.");
+    }
 
     return NS_OK;
   }
 
 private:
-  RefPtr<mozPersonalDictionary> mDict;
+  nsRefPtr<mozPersonalDictionary> mDict;
 };
 
-class mozPersonalDictionarySave final : public mozilla::Runnable
+class mozPersonalDictionarySave final : public nsRunnable
 {
 public:
   explicit mozPersonalDictionarySave(mozPersonalDictionary *aDict,
@@ -136,15 +145,23 @@ public:
     }
 
     // Release the dictionary on the main thread.
-    NS_ReleaseOnMainThread(mDict.forget());
+    mozPersonalDictionary *dict;
+    mDict.forget(&dict);
 
+    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+    if (mainThread) {
+      NS_ProxyRelease(mainThread, static_cast<mozIPersonalDictionary *>(dict));
+    } else {
+      // It's better to leak the dictionary than to release it on a wrong thread.
+      NS_WARNING("Cannot get main thread, leaking mozPersonalDictionary.");
+    }
     return NS_OK;
   }
 
 private:
   nsTArray<nsString> mDictWords;
   nsCOMPtr<nsIFile> mFile;
-  RefPtr<mozPersonalDictionary> mDict;
+  nsRefPtr<mozPersonalDictionary> mDict;
 };
 
 mozPersonalDictionary::mozPersonalDictionary()
@@ -287,7 +304,8 @@ void mozPersonalDictionary::SyncLoadInternal()
   NS_NewLocalFileInputStream(getter_AddRefs(inStream), mFile);
 
   nsCOMPtr<nsIUnicharInputStream> convStream;
-  rv = NS_NewUnicharInputStream(inStream, getter_AddRefs(convStream));
+  rv = nsSimpleUnicharStreamFactory::GetInstance()->
+    CreateInstanceFromUTF8Stream(inStream, getter_AddRefs(convStream));
   if (NS_FAILED(rv)) {
     return;
   }
@@ -357,11 +375,9 @@ NS_IMETHODIMP mozPersonalDictionary::Save()
     return res;
   }
 
-  nsTArray<nsString> array;
-  nsString* elems = array.AppendElements(mDictionaryTable.Count());
+  nsTArray<nsString> array(mDictionaryTable.Count());
   for (auto iter = mDictionaryTable.Iter(); !iter.Done(); iter.Next()) {
-    elems->Assign(iter.Get()->GetKey());
-    elems++;
+    array.AppendElement(nsDependentString(iter.Get()->GetKey()));
   }
 
   nsCOMPtr<nsIRunnable> runnable =
@@ -373,6 +389,7 @@ NS_IMETHODIMP mozPersonalDictionary::Save()
   return res;
 }
 
+/* readonly attribute nsIStringEnumerator GetWordList() */
 NS_IMETHODIMP mozPersonalDictionary::GetWordList(nsIStringEnumerator **aWords)
 {
   NS_ENSURE_ARG_POINTER(aWords);
@@ -380,11 +397,9 @@ NS_IMETHODIMP mozPersonalDictionary::GetWordList(nsIStringEnumerator **aWords)
 
   WaitForLoad();
 
-  nsTArray<nsString> *array = new nsTArray<nsString>();
-  nsString* elems = array->AppendElements(mDictionaryTable.Count());
+  nsTArray<nsString> *array = new nsTArray<nsString>(mDictionaryTable.Count());
   for (auto iter = mDictionaryTable.Iter(); !iter.Done(); iter.Next()) {
-    elems->Assign(iter.Get()->GetKey());
-    elems++;
+    array->AppendElement(nsDependentString(iter.Get()->GetKey()));
   }
 
   array->Sort();
@@ -392,6 +407,7 @@ NS_IMETHODIMP mozPersonalDictionary::GetWordList(nsIStringEnumerator **aWords)
   return NS_NewAdoptingStringEnumerator(aWords, array);
 }
 
+/* boolean Check (in wstring word, in wstring language); */
 NS_IMETHODIMP mozPersonalDictionary::Check(const char16_t *aWord, const char16_t *aLanguage, bool *aResult)
 {
   NS_ENSURE_ARG_POINTER(aWord);
@@ -403,6 +419,7 @@ NS_IMETHODIMP mozPersonalDictionary::Check(const char16_t *aWord, const char16_t
   return NS_OK;
 }
 
+/* void AddWord (in wstring word); */
 NS_IMETHODIMP mozPersonalDictionary::AddWord(const char16_t *aWord, const char16_t *aLang)
 {
   nsresult res;
@@ -413,6 +430,7 @@ NS_IMETHODIMP mozPersonalDictionary::AddWord(const char16_t *aWord, const char16
   return res;
 }
 
+/* void RemoveWord (in wstring word); */
 NS_IMETHODIMP mozPersonalDictionary::RemoveWord(const char16_t *aWord, const char16_t *aLang)
 {
   nsresult res;
@@ -423,6 +441,7 @@ NS_IMETHODIMP mozPersonalDictionary::RemoveWord(const char16_t *aWord, const cha
   return res;
 }
 
+/* void IgnoreWord (in wstring word); */
 NS_IMETHODIMP mozPersonalDictionary::IgnoreWord(const char16_t *aWord)
 {
   // avoid adding duplicate words to the ignore list
@@ -431,6 +450,7 @@ NS_IMETHODIMP mozPersonalDictionary::IgnoreWord(const char16_t *aWord)
   return NS_OK;
 }
 
+/* void EndSession (); */
 NS_IMETHODIMP mozPersonalDictionary::EndSession()
 {
   WaitForLoad();
@@ -440,21 +460,25 @@ NS_IMETHODIMP mozPersonalDictionary::EndSession()
   return NS_OK;
 }
 
+/* void AddCorrection (in wstring word, in wstring correction); */
 NS_IMETHODIMP mozPersonalDictionary::AddCorrection(const char16_t *word, const char16_t *correction, const char16_t *lang)
 {
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void RemoveCorrection (in wstring word, in wstring correction); */
 NS_IMETHODIMP mozPersonalDictionary::RemoveCorrection(const char16_t *word, const char16_t *correction, const char16_t *lang)
 {
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void GetCorrection (in wstring word, [array, size_is (count)] out wstring words, out uint32_t count); */
 NS_IMETHODIMP mozPersonalDictionary::GetCorrection(const char16_t *word, char16_t ***words, uint32_t *count)
 {
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void observe (in nsISupports aSubject, in string aTopic, in wstring aData); */
 NS_IMETHODIMP mozPersonalDictionary::Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData)
 {
   if (!nsCRT::strcmp(aTopic, "profile-do-change")) {

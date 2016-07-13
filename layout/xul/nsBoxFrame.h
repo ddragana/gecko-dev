@@ -56,23 +56,23 @@ public:
   // gets the rect inside our border and debug border. If you wish to paint inside a box
   // call this method to get the rect so you don't draw on the debug border or outer border.
 
-  virtual void SetXULLayoutManager(nsBoxLayout* aLayout) override { mLayoutManager = aLayout; }
-  virtual nsBoxLayout* GetXULLayoutManager() override { return mLayoutManager; }
+  virtual void SetLayoutManager(nsBoxLayout* aLayout) override { mLayoutManager = aLayout; }
+  virtual nsBoxLayout* GetLayoutManager() override { return mLayoutManager; }
 
-  virtual nsresult XULRelayoutChildAtOrdinal(nsIFrame* aChild) override;
+  virtual nsresult RelayoutChildAtOrdinal(nsBoxLayoutState& aState, nsIFrame* aChild) override;
 
-  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nscoord GetXULFlex() override;
-  virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nscoord GetFlex(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nscoord GetBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
 #ifdef DEBUG_LAYOUT
-  virtual nsresult SetXULDebug(nsBoxLayoutState& aBoxLayoutState, bool aDebug) override;
-  virtual nsresult GetXULDebug(bool& aDebug) override;
+  virtual nsresult SetDebug(nsBoxLayoutState& aBoxLayoutState, bool aDebug) override;
+  virtual nsresult GetDebug(bool& aDebug) override;
 #endif
-  virtual Valignment GetXULVAlign() const override { return mValign; }
-  virtual Halignment GetXULHAlign() const override { return mHalign; }
-  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual Valignment GetVAlign() const override { return mValign; }
+  virtual Halignment GetHAlign() const override { return mHalign; }
+  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
 
   virtual bool ComputesOwnOverflowArea() override { return false; }
 
@@ -220,9 +220,9 @@ protected:
 private: 
 
 #ifdef DEBUG_LAYOUT
-    nsresult SetXULDebug(nsPresContext* aPresContext, bool aDebug);
+    nsresult SetDebug(nsPresContext* aPresContext, bool aDebug);
     bool GetInitialDebug(bool& aDebug);
-    void GetDebugPref();
+    void GetDebugPref(nsPresContext* aPresContext);
 
     void GetDebugBorder(nsMargin& aInset);
     void GetDebugPadding(nsMargin& aInset);
@@ -230,7 +230,7 @@ private:
 
     nsresult GetFrameSizeWithMargin(nsIFrame* aBox, nsSize& aSize);
 
-    void PixelMarginToTwips(nsMargin& aMarginPixels);
+    void PixelMarginToTwips(nsPresContext* aPresContext, nsMargin& aMarginPixels);
 
     void GetValue(nsPresContext* aPresContext, const nsSize& a, const nsSize& b, char* value);
     void GetValue(nsPresContext* aPresContext, int32_t a, int32_t b, char* value);

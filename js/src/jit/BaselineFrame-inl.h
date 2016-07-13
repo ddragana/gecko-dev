@@ -53,7 +53,7 @@ BaselineFrame::replaceInnermostScope(ScopeObject& scope)
 }
 
 inline bool
-BaselineFrame::pushBlock(JSContext* cx, Handle<StaticBlockScope*> block)
+BaselineFrame::pushBlock(JSContext* cx, Handle<StaticBlockObject*> block)
 {
     MOZ_ASSERT(block->needsClone());
 
@@ -89,7 +89,7 @@ inline CallObject&
 BaselineFrame::callObj() const
 {
     MOZ_ASSERT(hasCallObj());
-    MOZ_ASSERT(callee()->needsCallObject());
+    MOZ_ASSERT(fun()->isHeavyweight());
 
     JSObject* obj = scopeChain();
     while (!obj->is<CallObject>())

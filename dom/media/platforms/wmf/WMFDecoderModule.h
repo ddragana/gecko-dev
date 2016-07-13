@@ -17,35 +17,42 @@ public:
   virtual ~WMFDecoderModule();
 
   // Initializes the module, loads required dynamic libraries, etc.
-  nsresult Startup() override;
+  virtual nsresult Startup() override;
 
-  already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const CreateDecoderParams& aParams) override;
+  virtual already_AddRefed<MediaDataDecoder>
+  CreateVideoDecoder(const VideoInfo& aConfig,
+                     layers::LayersBackend aLayersBackend,
+                     layers::ImageContainer* aImageContainer,
+                     FlushableTaskQueue* aVideoTaskQueue,
+                     MediaDataDecoderCallback* aCallback) override;
 
-  already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const CreateDecoderParams& aParams) override;
+  virtual already_AddRefed<MediaDataDecoder>
+  CreateAudioDecoder(const AudioInfo& aConfig,
+                     FlushableTaskQueue* aAudioTaskQueue,
+                     MediaDataDecoderCallback* aCallback) override;
 
-  bool SupportsMimeType(const nsACString& aMimeType,
-                        DecoderDoctorDiagnostics* aDiagnostics) const override;
+  bool SupportsMimeType(const nsACString& aMimeType) override;
 
-  ConversionRequired
+  virtual void DisableHardwareAcceleration() override;
+  virtual bool SupportsSharedDecoders(const VideoInfo& aConfig) const override;
+
+  virtual ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override;
+
+  // Accessors that report whether we have the required MFTs available
+  // on the system to play various codecs. Windows Vista doesn't have the
+  // H.264/AAC decoders if the "Platform Update Supplement for Windows Vista"
+  // is not installed.
+  static bool HasAAC();
+  static bool HasH264();
 
   // Called on main thread.
   static void Init();
 
   // Called from any thread, must call init first
   static int GetNumDecoderThreads();
-
-  // Accessors that report whether we have the required MFTs available
-  // on the system to play various codecs. Windows Vista doesn't have the
-  // H.264/AAC decoders if the "Platform Update Supplement for Windows Vista"
-  // is not installed, and Window N and KN variants also require a "Media
-  // Feature Pack" to be installed. Windows XP doesn't have WMF.
-  static bool HasAAC();
-  static bool HasH264();
-
 private:
+  bool ShouldUseDXVA(const VideoInfo& aConfig) const;
   bool mWMFInitialized;
 };
 

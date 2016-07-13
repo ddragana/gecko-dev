@@ -27,10 +27,6 @@ function isUTF8(charset) {
   throw new Error("The charset argument can be only 'utf-8'");
 }
 
-function toOctetChar(c) {
-  return String.fromCharCode(c.charCodeAt(0) & 0xFF);
-}
-
 exports.decode = function (data, charset) {
   if (isUTF8(charset))
     return decodeURIComponent(escape(atob(data)))
@@ -42,6 +38,6 @@ exports.encode = function (data, charset) {
   if (isUTF8(charset))
     return btoa(unescape(encodeURIComponent(data)))
 
-  data = data.replace(/[^\x00-\xFF]/g, toOctetChar);
+  data = String.fromCharCode(...[(c.charCodeAt(0) & 0xff) for (c of data)]);
   return btoa(data);
 }

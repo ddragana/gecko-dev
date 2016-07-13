@@ -10,24 +10,27 @@
 #include "mozilla/dom/SVGUseElement.h"
 #include "nsContentList.h"
 
+typedef nsSVGGFrame nsSVGUseFrameBase;
+
 using namespace mozilla::dom;
 
-class nsSVGUseFrame : public nsSVGGFrame
-                    , public nsIAnonymousContentCreator
+class nsSVGUseFrame : public nsSVGUseFrameBase,
+                      public nsIAnonymousContentCreator
 {
   friend nsIFrame*
   NS_NewSVGUseFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 protected:
-  explicit nsSVGUseFrame(nsStyleContext* aContext)
-    : nsSVGGFrame(aContext)
-    , mHasValidDimensions(true)
+  explicit nsSVGUseFrame(nsStyleContext* aContext) :
+    nsSVGUseFrameBase(aContext),
+    mHasValidDimensions(true)
   {}
 
 public:
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
+  
   // nsIFrame interface:
   virtual void Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
@@ -90,7 +93,7 @@ nsSVGUseFrame::GetType() const
 
 NS_QUERYFRAME_HEAD(nsSVGUseFrame)
   NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
-NS_QUERYFRAME_TAIL_INHERITING(nsSVGGFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsSVGUseFrameBase)
 
 //----------------------------------------------------------------------
 // nsIFrame methods:
@@ -106,7 +109,7 @@ nsSVGUseFrame::Init(nsIContent*       aContent,
   mHasValidDimensions =
     static_cast<SVGUseElement*>(aContent)->HasValidDimensions();
 
-  nsSVGGFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGUseFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 
 nsresult
@@ -156,14 +159,15 @@ nsSVGUseFrame::AttributeChanged(int32_t         aNameSpaceID,
     useElement->TriggerReclone();
   }
 
-  return nsSVGGFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+  return nsSVGUseFrameBase::AttributeChanged(aNameSpaceID,
+                                             aAttribute, aModType);
 }
 
 void
 nsSVGUseFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
-  RefPtr<SVGUseElement> use = static_cast<SVGUseElement*>(mContent);
-  nsSVGGFrame::DestroyFrom(aDestructRoot);
+  nsRefPtr<SVGUseElement> use = static_cast<SVGUseElement*>(mContent);
+  nsSVGUseFrameBase::DestroyFrom(aDestructRoot);
   use->DestroyAnonymousContent();
 }
 
@@ -192,11 +196,11 @@ nsSVGUseFrame::ReflowSVG()
 
   // If we have a filter, we need to invalidate ourselves because filter
   // output can change even if none of our descendants need repainting.
-  if (StyleEffects()->HasFilters()) {
+  if (StyleSVGReset()->HasFilters()) {
     InvalidateFrame();
   }
 
-  nsSVGGFrame::ReflowSVG();
+  nsSVGUseFrameBase::ReflowSVG();
 }
 
 void
@@ -224,7 +228,7 @@ nsSVGUseFrame::NotifySVGChanged(uint32_t aFlags)
   // non-percentage width/height, since if they're set then they are cloned to
   // an anonymous child <svg>, and its nsSVGInnerSVGFrame will do that.
 
-  nsSVGGFrame::NotifySVGChanged(aFlags);
+  nsSVGUseFrameBase::NotifySVGChanged(aFlags);
 }
 
 //----------------------------------------------------------------------

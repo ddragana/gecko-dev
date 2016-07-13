@@ -7,10 +7,10 @@
 // Checks various aspects of the OCSP cache, mainly to to ensure we do not fetch
 // responses more than necessary.
 
-var gFetchCount = 0;
-var gGoodOCSPResponse = null;
-var gResponsePattern = [];
-var gMessage = "";
+let gFetchCount = 0;
+let gGoodOCSPResponse = null;
+let gResponsePattern = [];
+let gMessage= "";
 
 function respondWithGoodOCSP(request, response) {
   do_print("returning 200 OK");
@@ -24,8 +24,8 @@ function respondWithSHA1OCSP(request, response) {
   response.setStatusLine(request.httpVersion, 200, "OK");
   response.setHeader("Content-Type", "application/ocsp-response");
 
-  let args = [ ["good-delegated", "default-ee", "delegatedSHA1Signer" ] ];
-  let responses = generateOCSPResponses(args, "ocsp_certs");
+  let args = [ ["good-delegated", "localhostAndExampleCom", "delegatedSHA1Signer" ] ];
+  let responses = generateOCSPResponses(args, "tlsserver");
   response.write(responses[0]);
 }
 
@@ -37,8 +37,8 @@ function respondWithError(request, response) {
 }
 
 function generateGoodOCSPResponse() {
-  let args = [ ["good", "default-ee", "unused" ] ];
-  let responses = generateOCSPResponses(args, "ocsp_certs");
+  let args = [ ["good", "localhostAndExampleCom", "unused" ] ];
+  let responses = generateOCSPResponses(args, "tlsserver");
   return responses[0];
 }
 
@@ -54,7 +54,7 @@ function add_ocsp_test(aHost, aExpectedResult, aResponses, aMessage) {
         // check the number of requests matches the size of aResponses
         equal(gFetchCount, aResponses.length,
               "should have made " + aResponses.length +
-              " OCSP request" + (aResponses.length == 1 ? "" : "s"));
+              " OCSP request" + aResponses.length == 1 ? "" : "s");
       });
 }
 
@@ -62,8 +62,7 @@ function run_test() {
   do_get_profile();
   Services.prefs.setBoolPref("security.ssl.enable_ocsp_stapling", true);
   Services.prefs.setIntPref("security.OCSP.enabled", 1);
-  Services.prefs.setIntPref("security.pki.sha1_enforcement_level", 3);
-  add_tls_server_setup("OCSPStaplingServer", "ocsp_certs");
+  add_tls_server_setup("OCSPStaplingServer");
 
   let ocspResponder = new HttpServer();
   ocspResponder.registerPrefixHandler("/", function(request, response) {
@@ -131,8 +130,6 @@ function add_tests() {
   // response being recognized and honored.
   add_ocsp_test("ocsp-stapling-none.example.com", SEC_ERROR_OCSP_UNKNOWN_CERT,
                 [
-                  respondWithError,
-                  respondWithError,
                   respondWithError,
                   respondWithError,
                   respondWithError,

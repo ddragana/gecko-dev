@@ -9,14 +9,14 @@
 
 "use strict";
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+let Cc = Components.classes;
+let Ci = Components.interfaces;
+let Cu = Components.utils;
 
-var HTMLInputElement = Ci.nsIDOMHTMLInputElement;
-var HTMLTextAreaElement = Ci.nsIDOMHTMLTextAreaElement;
-var HTMLSelectElement = Ci.nsIDOMHTMLSelectElement;
-var HTMLButtonElement = Ci.nsIDOMHTMLButtonElement;
+let HTMLInputElement = Ci.nsIDOMHTMLInputElement;
+let HTMLTextAreaElement = Ci.nsIDOMHTMLTextAreaElement;
+let HTMLSelectElement = Ci.nsIDOMHTMLSelectElement;
+let HTMLButtonElement = Ci.nsIDOMHTMLButtonElement;
 
 this.EXPORTED_SYMBOLS = [ "FormSubmitObserver" ];
 
@@ -42,7 +42,7 @@ FormSubmitObserver.prototype =
   {
     this._content = aWindow;
     this._tab = aTabChildGlobal;
-    this._mm =
+    this._mm = 
       this._content.QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIDocShell)
                    .sameTypeRootTreeItem
@@ -103,23 +103,20 @@ FormSubmitObserver.prototype =
     if (!aInvalidElements.length) {
       return;
     }
-
-    // Insure that this is the FormSubmitObserver associated with the
+    
+    // Insure that this is the FormSubmitObserver associated with the form
     // element / window this notification is about.
-    let element = aInvalidElements.queryElementAt(0, Ci.nsISupports);
-    if (this._content != element.ownerDocument.defaultView.top.document.defaultView) {
+    if (this._content != aFormElement.ownerDocument.defaultView.top.document.defaultView) {
       return;
     }
 
+    let element = aInvalidElements.queryElementAt(0, Ci.nsISupports);
     if (!(element instanceof HTMLInputElement ||
           element instanceof HTMLTextAreaElement ||
           element instanceof HTMLSelectElement ||
           element instanceof HTMLButtonElement)) {
       return;
     }
-
-    // Update validation message before showing notification
-    this._validationMessage = element.validationMessage;
 
     // Don't connect up to the same element more than once.
     if (this._element == element) {
@@ -129,6 +126,8 @@ FormSubmitObserver.prototype =
     this._element = element;
 
     element.focus();
+
+    this._validationMessage = element.validationMessage;
 
     // Watch for input changes which may change the validation message.
     element.addEventListener("input", this, false);
@@ -143,7 +142,7 @@ FormSubmitObserver.prototype =
   /*
    * Internal
    */
-
+  
   /*
    * Handles input changes on the form element we've associated a popup
    * with. Updates the validation message or closes the popup if form data
@@ -190,7 +189,7 @@ FormSubmitObserver.prototype =
 
     // Note, this is relative to the browser and needs to be translated
     // in chrome.
-    panelData.contentRect = BrowserUtils.getElementBoundingRect(aElement);
+    panelData.contentRect = this._msgRect(aElement);
 
     // We want to show the popup at the middle of checkbox and radio buttons
     // and where the content begin for the other elements.
@@ -230,6 +229,22 @@ FormSubmitObserver.prototype =
     let target = aEvent.originalTarget;
     return (target == this._content.document ||
             (target.ownerDocument && target.ownerDocument == this._content.document));
+  },
+
+  /*
+   * Return a message manager rect for the element's bounding client rect
+   * in top level browser coords.
+   */
+  _msgRect: function (aElement) {
+    let domRect = aElement.getBoundingClientRect();
+    let zoomFactor = this._getWindowUtils().fullZoom;
+    let { offsetX, offsetY } = BrowserUtils.offsetToTopLevelWindow(this._content, aElement);
+    return {
+      left: (domRect.left + offsetX) * zoomFactor,
+      top: (domRect.top + offsetY) * zoomFactor,
+      width: domRect.width * zoomFactor,
+      height: domRect.height * zoomFactor
+    };
   },
 
   QueryInterface : XPCOMUtils.generateQI([Ci.nsIFormSubmitObserver])

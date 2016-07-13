@@ -5,14 +5,6 @@
 
 #include "nsISupports.idl"
 
-%{ C++
-namespace mozilla {
-class NeckoOriginAttributes;
-} // mozilla namespace
-%}
-
-[ptr] native NeckoOriginAttributesPtr(mozilla::NeckoOriginAttributes);
-
 interface nsISimpleEnumerator;
 
 /** 
@@ -47,24 +39,11 @@ interface nsICookieManager : nsISupports
    *              dot must be present.
    * @param aName The name specified in the cookie
    * @param aPath The path for which the cookie was set
-   * @param aOriginAttributes The originAttributes of this cookie. This
-   *                          attribute is optional to avoid breaking add-ons.
-   *                          In 1 or 2 releases it will be mandatory: bug 1260399.
-   * @param aBlocked Indicates if cookies from this host should be permanently
-   *                 blocked.
+   * @param aBlocked Indicates if cookies from this host should be permanently blocked
    *
    */
-  [implicit_jscontext, optional_argc]
-  void remove(in AUTF8String   aHost,
-              in ACString      aName,
-              in AUTF8String   aPath,
-              in boolean       aBlocked,
-              [optional] in jsval aOriginAttributes);
-
-  [notxpcom]
-  nsresult removeNative(in AUTF8String   aHost,
-                        in ACString      aName,
-                        in AUTF8String   aPath,
-                        in boolean       aBlocked,
-                        in NeckoOriginAttributesPtr aOriginAttributes);
+  void remove(in AUTF8String aHost,
+              in ACString    aName,
+              in AUTF8String aPath,
+              in boolean     aBlocked);
 };

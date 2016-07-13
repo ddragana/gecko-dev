@@ -21,10 +21,6 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     XPIDL_SOURCES += [
         'nsIMacShellService.idl',
     ]
-elif 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
-    XPIDL_SOURCES += [
-        'nsIGNOMEShellService.idl',
-    ]
 
 XPIDL_MODULE = 'shellservice'
 
@@ -36,7 +32,7 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     SOURCES += [
         'nsMacShellService.cpp',
     ]
-elif 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+elif CONFIG['MOZ_WIDGET_GTK']:
     SOURCES += [
         'nsGNOMEShellService.cpp',
     ]
@@ -49,14 +45,12 @@ EXTRA_COMPONENTS += [
     'nsSetDefaultBrowser.manifest',
 ]
 
-EXTRA_JS_MODULES += [
-    'ShellService.jsm',
-]
-
 for var in ('MOZ_APP_NAME', 'MOZ_APP_VERSION'):
     DEFINES[var] = '"%s"' % CONFIG[var]
 
 CXXFLAGS += CONFIG['TK_CFLAGS']
+
+FAIL_ON_WARNINGS = True
 
 with Files('**'):
     BUG_COMPONENT = ('Firefox', 'Shell Integration')

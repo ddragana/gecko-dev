@@ -5,9 +5,11 @@
 function test() {
   let newTab = gBrowser.addTab("http://example.com");
   waitForExplicitFinish();
-  BrowserTestUtils.browserLoaded(newTab.linkedBrowser).then(mainPart);
+  newTab.linkedBrowser.addEventListener("load", mainPart, true);
 
   function mainPart() {
+    newTab.linkedBrowser.removeEventListener("load", mainPart, true);
+
     gBrowser.pinTab(newTab);
     gBrowser.selectedTab = newTab;
 

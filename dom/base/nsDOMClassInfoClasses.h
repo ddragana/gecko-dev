@@ -32,6 +32,10 @@ DOMCI_CLASS(XULTreeBuilder)
 DOMCI_CLASS(CSSMozDocumentRule)
 DOMCI_CLASS(CSSSupportsRule)
 
+DOMCI_CLASS(MozSmsMessage)
+DOMCI_CLASS(MozMmsMessage)
+DOMCI_CLASS(MozMobileMessageThread)
+
 // @font-face in CSS
 DOMCI_CLASS(CSSFontFaceRule)
 
@@ -40,8 +44,8 @@ DOMCI_CLASS(ContentProcessMessageManager)
 DOMCI_CLASS(ChromeMessageBroadcaster)
 DOMCI_CLASS(ChromeMessageSender)
 
-DOMCI_CLASS(CSSKeyframeRule)
-DOMCI_CLASS(CSSKeyframesRule)
+DOMCI_CLASS(MozCSSKeyframeRule)
+DOMCI_CLASS(MozCSSKeyframesRule)
 
 // @counter-style in CSS
 DOMCI_CLASS(CSSCounterStyleRule)

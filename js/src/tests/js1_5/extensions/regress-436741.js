@@ -26,7 +26,7 @@ function test()
   }
   else
   {
-    try { window.__proto__.__proto__ = [{}]; } catch (e) {}
+    window.__proto__.__proto__ = [{}];
     for (var j in window);
   }
   reportCompare(expect, actual, summary);

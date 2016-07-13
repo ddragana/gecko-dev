@@ -37,6 +37,7 @@ private:
 static volatile ULONGLONG sResolution;
 static volatile ULONGLONG sResolutionSigDigs;
 static const double   kNsPerSecd  = 1000000000.0;
+static const LONGLONG kNsPerSec   = 1000000000;
 static const LONGLONG kNsPerMillisec = 1000000;
 
 // ----------------------------------------------------------------------------

@@ -6,15 +6,16 @@
 
 #include "VorbisDecoder.h"
 #include "VorbisUtils.h"
-#include "XiphExtradata.h"
 
 #include "mozilla/PodOperations.h"
-#include "mozilla/SyncRunnable.h"
+#include "nsAutoPtr.h"
 
 #undef LOG
-#define LOG(type, msg) MOZ_LOG(sPDMLog, type, msg)
+#define LOG(type, msg) MOZ_LOG(gMediaDecoderLog, type, msg)
 
 namespace mozilla {
+
+extern PRLogModuleInfo* gMediaDecoderLog;
 
 ogg_packet InitVorbisPacket(const unsigned char* aData, size_t aLength,
                          bool aBOS, bool aEOS,
@@ -30,13 +31,14 @@ ogg_packet InitVorbisPacket(const unsigned char* aData, size_t aLength,
   return packet;
 }
 
-VorbisDataDecoder::VorbisDataDecoder(const CreateDecoderParams& aParams)
-  : mInfo(aParams.AudioConfig())
-  , mTaskQueue(aParams.mTaskQueue)
-  , mCallback(aParams.mCallback)
+VorbisDataDecoder::VorbisDataDecoder(const AudioInfo& aConfig,
+                                     FlushableTaskQueue* aTaskQueue,
+                                     MediaDataDecoderCallback* aCallback)
+  : mInfo(aConfig)
+  , mTaskQueue(aTaskQueue)
+  , mCallback(aCallback)
   , mPacketCount(0)
   , mFrames(0)
-  , mIsFlushing(false)
 {
   // Zero these member vars to avoid crashes in Vorbis clear functions when
   // destructor is called before |Init|.
@@ -61,7 +63,7 @@ VorbisDataDecoder::Shutdown()
   return NS_OK;
 }
 
-RefPtr<MediaDataDecoder::InitPromise>
+nsresult
 VorbisDataDecoder::Init()
 {
   vorbis_info_init(&mVorbisInfo);
@@ -69,29 +71,35 @@ VorbisDataDecoder::Init()
   PodZero(&mVorbisDsp);
   PodZero(&mVorbisBlock);
 
-  AutoTArray<unsigned char*,4> headers;
-  AutoTArray<size_t,4> headerLens;
-  if (!XiphExtradataToHeaders(headers, headerLens,
-                              mInfo.mCodecSpecificConfig->Elements(),
-                              mInfo.mCodecSpecificConfig->Length())) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
-  }
-  for (size_t i = 0; i < headers.Length(); i++) {
-    if (NS_FAILED(DecodeHeader(headers[i], headerLens[i]))) {
-      return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+  size_t available = mInfo.mCodecSpecificConfig->Length();
+  uint8_t *p = mInfo.mCodecSpecificConfig->Elements();
+  for(int i = 0; i < 3; i++) {
+    if (available < 2) {
+      return NS_ERROR_FAILURE;
     }
+    available -= 2;
+    size_t length = BigEndian::readUint16(p);
+    p += 2;
+    if (available < length) {
+      return NS_ERROR_FAILURE;
+    }
+    available -= length;
+    if (NS_FAILED(DecodeHeader((const unsigned char*)p, length))) {
+        return NS_ERROR_FAILURE;
+    }
+    p += length;
   }
 
   MOZ_ASSERT(mPacketCount == 3);
 
   int r = vorbis_synthesis_init(&mVorbisDsp, &mVorbisInfo);
   if (r) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return NS_ERROR_FAILURE;
   }
 
   r = vorbis_block_init(&mVorbisDsp, &mVorbisBlock);
   if (r) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return NS_ERROR_FAILURE;
   }
 
   if (mInfo.mRate != (uint32_t)mVorbisDsp.vi->rate) {
@@ -103,12 +111,7 @@ VorbisDataDecoder::Init()
         ("Invalid Vorbis header: container and codec channels do not match!"));
   }
 
-  AudioConfig::ChannelLayout layout(mVorbisDsp.vi->channels);
-  if (!layout.IsValid()) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
-  }
-
-  return InitPromise::CreateAndResolve(TrackInfo::kAudioTrack, __func__);
+  return NS_OK;
 }
 
 nsresult
@@ -127,22 +130,20 @@ VorbisDataDecoder::DecodeHeader(const unsigned char* aData, size_t aLength)
 nsresult
 VorbisDataDecoder::Input(MediaRawData* aSample)
 {
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
-  mTaskQueue->Dispatch(NewRunnableMethod<RefPtr<MediaRawData>>(
-                       this, &VorbisDataDecoder::ProcessDecode, aSample));
+  nsCOMPtr<nsIRunnable> runnable(
+    NS_NewRunnableMethodWithArg<nsRefPtr<MediaRawData>>(
+      this, &VorbisDataDecoder::Decode,
+      nsRefPtr<MediaRawData>(aSample)));
+  mTaskQueue->Dispatch(runnable.forget());
 
   return NS_OK;
 }
 
 void
-VorbisDataDecoder::ProcessDecode(MediaRawData* aSample)
+VorbisDataDecoder::Decode(MediaRawData* aSample)
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
-  if (mIsFlushing) {
-    return;
-  }
   if (DoDecode(aSample) == -1) {
-    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
+    mCallback->Error();
   } else if (mTaskQueue->IsEmpty()) {
     mCallback->InputExhausted();
   }
@@ -151,21 +152,13 @@ VorbisDataDecoder::ProcessDecode(MediaRawData* aSample)
 int
 VorbisDataDecoder::DoDecode(MediaRawData* aSample)
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
-
-  const unsigned char* aData = aSample->Data();
-  size_t aLength = aSample->Size();
+  const unsigned char* aData = aSample->mData;
+  size_t aLength = aSample->mSize;
   int64_t aOffset = aSample->mOffset;
   uint64_t aTstampUsecs = aSample->mTime;
   int64_t aTotalFrames = 0;
 
   MOZ_ASSERT(mPacketCount >= 3);
-
-  if (!mLastFrameTime || mLastFrameTime.ref() != aSample->mTime) {
-    // We are starting a new block.
-    mFrames = 0;
-    mLastFrameTime = Some(aSample->mTime);
-  }
 
   ogg_packet pkt = InitVorbisPacket(aData, aLength, false, false, -1, mPacketCount++);
   bool first_packet = mPacketCount == 4;
@@ -191,17 +184,13 @@ VorbisDataDecoder::DoDecode(MediaRawData* aSample)
                                     aTstampUsecs,
                                     0,
                                     0,
-                                    AlignedAudioBuffer(),
+                                    nullptr,
                                     mVorbisDsp.vi->channels,
                                     mVorbisDsp.vi->rate));
   }
   while (frames > 0) {
     uint32_t channels = mVorbisDsp.vi->channels;
-    uint32_t rate = mVorbisDsp.vi->rate;
-    AlignedAudioBuffer buffer(frames*channels);
-    if (!buffer) {
-      return -1;
-    }
+    nsAutoArrayPtr<AudioDataValue> buffer(new AudioDataValue[frames*channels]);
     for (uint32_t j = 0; j < channels; ++j) {
       VorbisPCMValue* channel = pcm[j];
       for (uint32_t i = 0; i < uint32_t(frames); ++i) {
@@ -209,12 +198,13 @@ VorbisDataDecoder::DoDecode(MediaRawData* aSample)
       }
     }
 
-    CheckedInt64 duration = FramesToUsecs(frames, rate);
+    CheckedInt64 duration = FramesToUsecs(frames, mVorbisDsp.vi->rate);
     if (!duration.isValid()) {
       NS_WARNING("Int overflow converting WebM audio duration");
       return -1;
     }
-    CheckedInt64 total_duration = FramesToUsecs(mFrames, rate);
+    CheckedInt64 total_duration = FramesToUsecs(aTotalFrames,
+                                                mVorbisDsp.vi->rate);
     if (!total_duration.isValid()) {
       NS_WARNING("Int overflow converting WebM audio total_duration");
       return -1;
@@ -226,28 +216,15 @@ VorbisDataDecoder::DoDecode(MediaRawData* aSample)
       return -1;
     };
 
-    if (!mAudioConverter) {
-      AudioConfig in(AudioConfig::ChannelLayout(channels, VorbisLayout(channels)),
-                     rate);
-      AudioConfig out(channels, rate);
-      if (!in.IsValid() || !out.IsValid()) {
-       return -1;
-      }
-      mAudioConverter = MakeUnique<AudioConverter>(in, out);
-    }
-    MOZ_ASSERT(mAudioConverter->CanWorkInPlace());
-    AudioSampleBuffer data(Move(buffer));
-    data = mAudioConverter->Process(Move(data));
-
     aTotalFrames += frames;
     mCallback->Output(new AudioData(aOffset,
                                     time.value(),
                                     duration.value(),
                                     frames,
-                                    data.Forget(),
-                                    channels,
-                                    rate));
-    mFrames += frames;
+                                    buffer.forget(),
+                                    mVorbisDsp.vi->channels,
+                                    mVorbisDsp.vi->rate));
+    mFrames += aTotalFrames;
     if (vorbis_synthesis_read(&mVorbisDsp, frames) != 0) {
       return -1;
     }
@@ -259,34 +236,29 @@ VorbisDataDecoder::DoDecode(MediaRawData* aSample)
 }
 
 void
-VorbisDataDecoder::ProcessDrain()
+VorbisDataDecoder::DoDrain()
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
   mCallback->DrainComplete();
 }
 
 nsresult
 VorbisDataDecoder::Drain()
 {
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
-  mTaskQueue->Dispatch(NewRunnableMethod(this, &VorbisDataDecoder::ProcessDrain));
+  nsCOMPtr<nsIRunnable> runnable(
+    NS_NewRunnableMethod(this, &VorbisDataDecoder::DoDrain));
+  mTaskQueue->Dispatch(runnable.forget());
   return NS_OK;
 }
 
 nsresult
 VorbisDataDecoder::Flush()
 {
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
-  mIsFlushing = true;
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([this] () {
-    // Ignore failed results from vorbis_synthesis_restart. They
-    // aren't fatal and it fails when ResetDecode is called at a
-    // time when no vorbis data has been read.
-    vorbis_synthesis_restart(&mVorbisDsp);
-    mLastFrameTime.reset();
-  });
-  SyncRunnable::DispatchToThread(mTaskQueue, r);
-  mIsFlushing = false;
+  mTaskQueue->Flush();
+  // Ignore failed results from vorbis_synthesis_restart. They
+  // aren't fatal and it fails when ResetDecode is called at a
+  // time when no vorbis data has been read.
+  vorbis_synthesis_restart(&mVorbisDsp);
+  mFrames = 0;
   return NS_OK;
 }
 
@@ -294,62 +266,9 @@ VorbisDataDecoder::Flush()
 bool
 VorbisDataDecoder::IsVorbis(const nsACString& aMimeType)
 {
-  return aMimeType.EqualsLiteral("audio/webm; codecs=vorbis") ||
-         aMimeType.EqualsLiteral("audio/ogg; codecs=vorbis");
+  return aMimeType.EqualsLiteral("audio/ogg; codecs=vorbis");
 }
 
-/* static */ const AudioConfig::Channel*
-VorbisDataDecoder::VorbisLayout(uint32_t aChannels)
-{
-  // From https://www.xiph.org/vorbis/doc/Vorbis_I_spec.html
-  // Section 4.3.9.
-  typedef AudioConfig::Channel Channel;
-
-  switch (aChannels) {
-    case 1: // the stream is monophonic
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_MONO };
-      return config;
-    }
-    case 2: // the stream is stereo. channel order: left, right
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_LEFT, AudioConfig::CHANNEL_RIGHT };
-      return config;
-    }
-    case 3: // the stream is a 1d-surround encoding. channel order: left, center, right
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_LEFT, AudioConfig::CHANNEL_CENTER, AudioConfig::CHANNEL_RIGHT };
-      return config;
-    }
-    case 4: // the stream is quadraphonic surround. channel order: front left, front right, rear left, rear right
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_LEFT, AudioConfig::CHANNEL_RIGHT, AudioConfig::CHANNEL_LS, AudioConfig::CHANNEL_RS };
-      return config;
-    }
-    case 5: // the stream is five-channel surround. channel order: front left, center, front right, rear left, rear right
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_LEFT, AudioConfig::CHANNEL_CENTER, AudioConfig::CHANNEL_RIGHT, AudioConfig::CHANNEL_LS, AudioConfig::CHANNEL_RS };
-      return config;
-    }
-    case 6: // the stream is 5.1 surround. channel order: front left, center, front right, rear left, rear right, LFE
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_LEFT, AudioConfig::CHANNEL_CENTER, AudioConfig::CHANNEL_RIGHT, AudioConfig::CHANNEL_LS, AudioConfig::CHANNEL_RS, AudioConfig::CHANNEL_LFE };
-      return config;
-    }
-    case 7: // surround. channel order: front left, center, front right, side left, side right, rear center, LFE
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_LEFT, AudioConfig::CHANNEL_CENTER, AudioConfig::CHANNEL_RIGHT, AudioConfig::CHANNEL_LS, AudioConfig::CHANNEL_RS, AudioConfig::CHANNEL_RCENTER, AudioConfig::CHANNEL_LFE };
-      return config;
-    }
-    case 8: // the stream is 7.1 surround. channel order: front left, center, front right, side left, side right, rear left, rear right, LFE
-    {
-      static const Channel config[] = { AudioConfig::CHANNEL_LEFT, AudioConfig::CHANNEL_CENTER, AudioConfig::CHANNEL_RIGHT, AudioConfig::CHANNEL_LS, AudioConfig::CHANNEL_RS, AudioConfig::CHANNEL_RLS, AudioConfig::CHANNEL_RRS, AudioConfig::CHANNEL_LFE };
-      return config;
-    }
-    default:
-      return nullptr;
-  }
-}
 
 } // namespace mozilla
 #undef LOG

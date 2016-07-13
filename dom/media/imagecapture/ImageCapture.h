@@ -14,7 +14,7 @@
 namespace mozilla {
 
 #ifndef IC_LOG
-LogModule* GetICLog();
+PRLogModuleInfo* GetICLog();
 #define IC_LOG(...) MOZ_LOG(GetICLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
 #endif
 
@@ -53,20 +53,19 @@ public:
   VideoStreamTrack* GetVideoStreamTrack() const;
 
   // nsWrapperCache member
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
     return ImageCaptureBinding::Wrap(aCx, this, aGivenProto);
   }
 
   // ImageCapture class members
-  nsPIDOMWindowInner* GetParentObject() { return GetOwner(); }
+  nsPIDOMWindow* GetParentObject() { return GetOwner(); }
 
   static already_AddRefed<ImageCapture> Constructor(const GlobalObject& aGlobal,
                                                     VideoStreamTrack& aTrack,
                                                     ErrorResult& aRv);
 
-  ImageCapture(VideoStreamTrack* aVideoStreamTrack,
-               nsPIDOMWindowInner* aOwnerWindow);
+  ImageCapture(VideoStreamTrack* aVideoStreamTrack, nsPIDOMWindow* aOwnerWindow);
 
   // Post a Blob event to script.
   nsresult PostBlobEvent(Blob* aBlob);
@@ -85,7 +84,7 @@ protected:
   // should return NS_ERROR_NOT_IMPLEMENTED.
   nsresult TakePhotoByMediaEngine();
 
-  RefPtr<VideoStreamTrack> mVideoStreamTrack;
+  nsRefPtr<VideoStreamTrack> mVideoStreamTrack;
 };
 
 } // namespace dom

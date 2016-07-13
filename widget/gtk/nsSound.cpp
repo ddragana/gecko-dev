@@ -18,6 +18,7 @@
 #include "nsNetUtil.h"
 #include "nsIChannel.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsDirectoryService.h"
 #include "nsDirectoryServiceDefs.h"
@@ -80,7 +81,7 @@ struct ScopedCanberraFile {
     }
 
     void forget() {
-        mozilla::Unused << mFile.forget();
+        mozilla::unused << mFile.forget();
     }
     nsIFile* operator->() { return mFile; }
     operator nsIFile*() { return mFile; }
@@ -351,7 +352,7 @@ NS_METHOD nsSound::Play(nsIURL *aURL)
                                 aURL,
                                 this, // aObserver
                                 nsContentUtils::GetSystemPrincipal(),
-                                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                                nsILoadInfo::SEC_NORMAL,
                                 nsIContentPolicy::TYPE_OTHER);
     }
 

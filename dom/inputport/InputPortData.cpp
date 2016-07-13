@@ -103,7 +103,7 @@ InputPortData::GetId() const
   return mId;
 }
 
-InputPortType
+const InputPortType
 InputPortData::GetType() const
 {
   return ToInputPortType(mType);

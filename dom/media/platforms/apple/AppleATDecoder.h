@@ -12,30 +12,24 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/Vector.h"
 #include "nsIThread.h"
-#include "AudioConverter.h"
 
 namespace mozilla {
 
-class TaskQueue;
+class FlushableTaskQueue;
 class MediaDataDecoderCallback;
 
 class AppleATDecoder : public MediaDataDecoder {
 public:
   AppleATDecoder(const AudioInfo& aConfig,
-                 TaskQueue* aTaskQueue,
+                 FlushableTaskQueue* aVideoTaskQueue,
                  MediaDataDecoderCallback* aCallback);
   virtual ~AppleATDecoder();
 
-  RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
-
-  const char* GetDescriptionName() const override
-  {
-    return "apple CoreMedia decoder";
-  }
+  virtual nsresult Init() override;
+  virtual nsresult Input(MediaRawData* aSample) override;
+  virtual nsresult Flush() override;
+  virtual nsresult Drain() override;
+  virtual nsresult Shutdown() override;
 
   // Callbacks also need access to the config.
   const AudioInfo& mConfig;
@@ -47,18 +41,14 @@ public:
   bool mFileStreamError;
 
 private:
-  const RefPtr<TaskQueue> mTaskQueue;
+  nsRefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
   AudioConverterRef mConverter;
   AudioStreamBasicDescription mOutputFormat;
   UInt32 mFormatID;
   AudioFileStreamID mStream;
-  nsTArray<RefPtr<MediaRawData>> mQueuedSamples;
-  UniquePtr<AudioConfig::ChannelLayout> mChannelLayout;
-  UniquePtr<AudioConverter> mAudioConverter;
-  Atomic<bool> mIsFlushing;
+  nsTArray<nsRefPtr<MediaRawData>> mQueuedSamples;
 
-  void ProcessFlush();
   void SubmitSample(MediaRawData* aSample);
   nsresult DecodeSample(MediaRawData* aSample);
   nsresult GetInputAudioDescription(AudioStreamBasicDescription& aDesc,
@@ -67,7 +57,6 @@ private:
   // Will return NS_ERROR_NOT_INITIALIZED if more data is required.
   nsresult SetupDecoder(MediaRawData* aSample);
   nsresult GetImplicitAACMagicCookie(const MediaRawData* aSample);
-  nsresult SetupChannelLayout();
 };
 
 } // namespace mozilla

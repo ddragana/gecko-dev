@@ -33,16 +33,14 @@ PuppetBidiKeyboard::IsLangRTL(bool* aIsRTL)
 }
 
 void
-PuppetBidiKeyboard::SetBidiKeyboardInfo(bool aIsLangRTL,
-                                        bool aHaveBidiKeyboards)
+PuppetBidiKeyboard::SetIsLangRTL(bool aIsLangRTL)
 {
   mIsLangRTL = aIsLangRTL;
-  mHaveBidiKeyboards = aHaveBidiKeyboards;
 }
 
 NS_IMETHODIMP
 PuppetBidiKeyboard::GetHaveBidiKeyboards(bool* aResult)
 {
-  *aResult = mHaveBidiKeyboards;
-  return NS_OK;
+  // not implemented yet
+  return NS_ERROR_NOT_IMPLEMENTED;
 }

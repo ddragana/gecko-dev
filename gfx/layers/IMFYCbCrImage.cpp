@@ -15,7 +15,7 @@ namespace mozilla {
 namespace layers {
 
 IMFYCbCrImage::IMFYCbCrImage(IMFMediaBuffer* aBuffer, IMF2DBuffer* a2DBuffer)
-  : RecyclingPlanarYCbCrImage(nullptr)
+  : PlanarYCbCrImage(nullptr)
   , mBuffer(aBuffer)
   , m2DBuffer(a2DBuffer)
 {}
@@ -34,10 +34,10 @@ struct AutoLockTexture
 {
   AutoLockTexture(ID3D11Texture2D* aTexture)
   {
-    aTexture->QueryInterface((IDXGIKeyedMutex**)getter_AddRefs(mMutex));
+    aTexture->QueryInterface((IDXGIKeyedMutex**)byRef(mMutex));
     HRESULT hr = mMutex->AcquireSync(0, 10000);
     if (hr == WAIT_TIMEOUT) {
-      MOZ_CRASH("GFX: IMFYCbCrImage timeout");
+      MOZ_CRASH();
     }
 
     if (FAILED(hr)) {
@@ -71,7 +71,7 @@ InitTextures(IDirect3DDevice9* aDevice,
   RefPtr<IDirect3DTexture9> result;
   if (FAILED(aDevice->CreateTexture(aSize.width, aSize.height,
                                     1, 0, aFormat, D3DPOOL_DEFAULT,
-                                    getter_AddRefs(result), &aHandle))) {
+                                    byRef(result), &aHandle))) {
     return nullptr;
   }
   if (!result) {
@@ -81,16 +81,16 @@ InitTextures(IDirect3DDevice9* aDevice,
   RefPtr<IDirect3DTexture9> tmpTexture;
   if (FAILED(aDevice->CreateTexture(aSize.width, aSize.height,
                                     1, 0, aFormat, D3DPOOL_SYSTEMMEM,
-                                    getter_AddRefs(tmpTexture), nullptr))) {
+                                    byRef(tmpTexture), nullptr))) {
     return nullptr;
   }
   if (!tmpTexture) {
     return nullptr;
   }
 
-  tmpTexture->GetSurfaceLevel(0, getter_AddRefs(aSurface));
-  if (FAILED(aSurface->LockRect(&aLockedRect, nullptr, 0)) ||
-      !aLockedRect.pBits) {
+  tmpTexture->GetSurfaceLevel(0, byRef(aSurface));
+  aSurface->LockRect(&aLockedRect, nullptr, 0);
+  if (!aLockedRect.pBits) {
     NS_WARNING("Could not lock surface");
     return nullptr;
   }
@@ -112,7 +112,7 @@ FinishTextures(IDirect3DDevice9* aDevice,
     return false;
   }
 
-  RefPtr<IDirect3DSurface9> dstSurface;
+  nsRefPtr<IDirect3DSurface9> dstSurface;
   hr = aTexture->GetSurfaceLevel(0, getter_AddRefs(dstSurface));
   if (FAILED(hr)) {
     return false;
@@ -156,9 +156,6 @@ TextureClient*
 IMFYCbCrImage::GetD3D9TextureClient(CompositableClient* aClient)
 {
   IDirect3DDevice9* device = gfxWindowsPlatform::GetPlatform()->GetD3D9Device();
-  if (!device) {
-    return nullptr;
-  }
 
   RefPtr<IDirect3DTexture9> textureY;
   HANDLE shareHandleY = 0;
@@ -182,7 +179,7 @@ IMFYCbCrImage::GetD3D9TextureClient(CompositableClient* aClient)
   }
 
   RefPtr<IDirect3DQuery9> query;
-  HRESULT hr = device->CreateQuery(D3DQUERYTYPE_EVENT, getter_AddRefs(query));
+  HRESULT hr = device->CreateQuery(D3DQUERYTYPE_EVENT, byRef(query));
   hr = query->Issue(D3DISSUE_END);
 
   int iterations = 0;
@@ -204,15 +201,17 @@ IMFYCbCrImage::GetD3D9TextureClient(CompositableClient* aClient)
     return nullptr;
   }
 
-  mTextureClient = TextureClient::CreateWithData(
-    DXGIYCbCrTextureData::Create(aClient->GetForwarder(),
-                                 TextureFlags::DEFAULT,
-                                 textureY, textureCb, textureCr,
-                                 shareHandleY, shareHandleCb, shareHandleCr,
-                                 GetSize(), mData.mYSize, mData.mCbCrSize),
-    TextureFlags::DEFAULT,
-    aClient->GetForwarder()
-  );
+  mTextureClient = DXGIYCbCrTextureClient::Create(aClient->GetForwarder(),
+                                                  TextureFlags::DEFAULT,
+                                                  textureY,
+                                                  textureCb,
+                                                  textureCr,
+                                                  shareHandleY,
+                                                  shareHandleCb,
+                                                  shareHandleCr,
+                                                  GetSize(),
+                                                  mData.mYSize,
+                                                  mData.mCbCrSize);
 
   return mTextureClient;
 }
@@ -220,24 +219,23 @@ IMFYCbCrImage::GetD3D9TextureClient(CompositableClient* aClient)
 TextureClient*
 IMFYCbCrImage::GetTextureClient(CompositableClient* aClient)
 {
-  if (mTextureClient) {
-    return mTextureClient;
-  }
+  ID3D11Device* device = gfxWindowsPlatform::GetPlatform()->GetD3D11ImageBridgeDevice();
+  if (!device ||
+      aClient->GetForwarder()->GetCompositorBackendType() != LayersBackend::LAYERS_D3D11) {
 
-  RefPtr<ID3D11Device> device;
-  gfxWindowsPlatform::GetPlatform()->GetD3D11ImageBridgeDevice(&device);
-
-  LayersBackend backend = aClient->GetForwarder()->GetCompositorBackendType();
-  if (!device || backend != LayersBackend::LAYERS_D3D11) {
-    if (backend == LayersBackend::LAYERS_D3D9 ||
-        backend == LayersBackend::LAYERS_D3D11) {
+    IDirect3DDevice9* d3d9device = gfxWindowsPlatform::GetPlatform()->GetD3D9Device();
+    if (d3d9device && aClient->GetForwarder()->GetCompositorBackendType() == LayersBackend::LAYERS_D3D9) {
       return GetD3D9TextureClient(aClient);
     }
     return nullptr;
   }
 
+  if (mTextureClient) {
+    return mTextureClient;
+  }
+
   RefPtr<ID3D11DeviceContext> ctx;
-  device->GetImmediateContext(getter_AddRefs(ctx));
+  device->GetImmediateContext(byRef(ctx));
 
   CD3D11_TEXTURE2D_DESC newDesc(DXGI_FORMAT_R8_UNORM,
                                 mData.mYSize.width, mData.mYSize.height, 1, 1);
@@ -245,18 +243,18 @@ IMFYCbCrImage::GetTextureClient(CompositableClient* aClient)
   newDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
   RefPtr<ID3D11Texture2D> textureY;
-  HRESULT hr = device->CreateTexture2D(&newDesc, nullptr, getter_AddRefs(textureY));
+  HRESULT hr = device->CreateTexture2D(&newDesc, nullptr, byRef(textureY));
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   newDesc.Width = mData.mCbCrSize.width;
   newDesc.Height = mData.mCbCrSize.height;
 
   RefPtr<ID3D11Texture2D> textureCb;
-  hr = device->CreateTexture2D(&newDesc, nullptr, getter_AddRefs(textureCb));
+  hr = device->CreateTexture2D(&newDesc, nullptr, byRef(textureCb));
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   RefPtr<ID3D11Texture2D> textureCr;
-  hr = device->CreateTexture2D(&newDesc, nullptr, getter_AddRefs(textureCr));
+  hr = device->CreateTexture2D(&newDesc, nullptr, byRef(textureCr));
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   {
@@ -272,14 +270,31 @@ IMFYCbCrImage::GetTextureClient(CompositableClient* aClient)
                            mData.mCbCrStride, mData.mCbCrStride * mData.mCbCrSize.height);
   }
 
-  mTextureClient = TextureClient::CreateWithData(
-    DXGIYCbCrTextureData::Create(aClient->GetForwarder(),
-                                 TextureFlags::DEFAULT,
-                                 textureY, textureCb, textureCr,
-                                 GetSize(), mData.mYSize, mData.mCbCrSize),
-    TextureFlags::DEFAULT,
-    aClient->GetForwarder()
-  );
+  RefPtr<IDXGIResource> resource;
+
+  HANDLE shareHandleY;
+  textureY->QueryInterface((IDXGIResource**)byRef(resource));
+  hr = resource->GetSharedHandle(&shareHandleY);
+
+  HANDLE shareHandleCb;
+  textureCb->QueryInterface((IDXGIResource**)byRef(resource));
+  hr = resource->GetSharedHandle(&shareHandleCb);
+
+  HANDLE shareHandleCr;
+  textureCr->QueryInterface((IDXGIResource**)byRef(resource));
+  hr = resource->GetSharedHandle(&shareHandleCr);
+
+  mTextureClient = DXGIYCbCrTextureClient::Create(aClient->GetForwarder(),
+                                                  TextureFlags::DEFAULT,
+                                                  textureY,
+                                                  textureCb,
+                                                  textureCr,
+                                                  shareHandleY,
+                                                  shareHandleCb,
+                                                  shareHandleCr,
+                                                  GetSize(),
+                                                  mData.mYSize,
+                                                  mData.mCbCrSize);
 
   return mTextureClient;
 }

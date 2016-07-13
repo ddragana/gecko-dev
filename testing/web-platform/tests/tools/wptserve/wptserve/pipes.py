@@ -8,7 +8,7 @@ from cStringIO import StringIO
 
 
 def resolve_content(response):
-    rv = "".join(item for item in response.iter_content(read_file=True))
+    rv = "".join(item for item in response.iter_content())
     if type(rv) == unicode:
         rv = rv.encode(response.encoding)
     return rv
@@ -232,26 +232,33 @@ def trickle(request, response, delays):
     if not delays:
         return response
     content = resolve_content(response)
+    modified_content = []
     offset = [0]
+
+    def sleep(seconds):
+        def inner():
+            time.sleep(seconds)
+            return ""
+        return inner
 
     def add_content(delays, repeat=False):
         for i, (item_type, value) in enumerate(delays):
             if item_type == "bytes":
-                yield content[offset[0]:offset[0] + value]
+                modified_content.append(content[offset[0]:offset[0] + value])
                 offset[0] += value
             elif item_type == "delay":
-                time.sleep(value)
+                modified_content.append(sleep(value))
             elif item_type == "repeat":
-                if i != len(delays) - 1:
-                    continue
+                assert i == len(delays) - 1
                 while offset[0] < len(content):
-                    for item in add_content(delays[-(value + 1):-1], True):
-                        yield item
+                    add_content(delays[-(value + 1):-1], True)
 
         if not repeat and offset[0] < len(content):
-            yield content[offset[0]:]
+            modified_content.append(content[offset[0]:])
 
-    response.content = add_content(delays)
+    add_content(delays)
+
+    response.content = modified_content
     return response
 
 
@@ -306,12 +313,9 @@ class FirstWrapper(object):
             return ""
 
 
-@pipe(opt(nullable(str)))
-def sub(request, response, escape_type="html"):
+@pipe()
+def sub(request, response):
     """Substitute environment information about the server and request into the script.
-
-    :param escape_type: String detailing the type of escaping to use. Known values are
-                        "html" and "none", with "html" the default for historic reasons.
 
     The format is a very limited template language. Substitutions are
     enclosed by {{ and }}. There are several avaliable substitutions:
@@ -355,12 +359,12 @@ def sub(request, response, escape_type="html"):
     """
     content = resolve_content(response)
 
-    new_content = template(request, content, escape_type=escape_type)
+    new_content = template(request, content)
 
     response.content = new_content
     return response
 
-def template(request, content, escape_type="html"):
+def template(request, content):
     #TODO: There basically isn't any error handling here
     tokenizer = ReplacementTokenizer()
 
@@ -399,12 +403,9 @@ def template(request, content, escape_type="html"):
                      "hostname": request.url_parts.hostname,
                      "port": request.url_parts.port,
                      "path": request.url_parts.path,
-                     "pathname": request.url_parts.path,
                      "query": "?%s" % request.url_parts.query}
         elif field == "uuid()":
             value = str(uuid.uuid4())
-        elif field == "url_base":
-            value = request.url_base
         else:
             raise Exception("Undefined template variable %s" % field)
 
@@ -416,12 +417,9 @@ def template(request, content, escape_type="html"):
         if variable is not None:
             variables[variable] = value
 
-        escape_func = {"html": lambda x:escape(x, quote=True),
-                       "none": lambda x:x}[escape_type]
-
         #Should possibly support escaping for other contexts e.g. script
         #TODO: read the encoding of the response
-        return escape_func(unicode(value)).encode("utf-8")
+        return escape(unicode(value)).encode("utf-8")
 
     template_regexp = re.compile(r"{{([^}]*)}}")
     new_content, count = template_regexp.subn(config_replacement, content)

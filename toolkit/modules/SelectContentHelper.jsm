@@ -12,18 +12,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
                                   "resource://gre/modules/BrowserUtils.jsm");
-XPCOMUtils.defineLazyServiceGetter(this, "DOMUtils",
-                                   "@mozilla.org/inspector/dom-utils;1", "inIDOMUtils");
-XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask",
-                                  "resource://gre/modules/DeferredTask.jsm");
-
-const kStateHover = 0x00000004; // NS_EVENT_STATE_HOVER
-
-// A process global state for whether or not content thinks
-// that a <select> dropdown is open or not. This is managed
-// entirely within this module, and is read-only accessible
-// via SelectContentHelper.open.
-var gOpen = false;
 
 this.EXPORTED_SYMBOLS = [
   "SelectContentHelper"
@@ -35,57 +23,32 @@ this.SelectContentHelper = function (aElement, aGlobal) {
   this.global = aGlobal;
   this.init();
   this.showDropDown();
-  this._updateTimer = new DeferredTask(this._update.bind(this), 0);
 }
-
-Object.defineProperty(SelectContentHelper, "open", {
-  get: function() {
-    return gOpen;
-  },
-});
 
 this.SelectContentHelper.prototype = {
   init: function() {
     this.global.addMessageListener("Forms:SelectDropDownItem", this);
     this.global.addMessageListener("Forms:DismissedDropDown", this);
-    this.global.addMessageListener("Forms:MouseOver", this);
-    this.global.addMessageListener("Forms:MouseOut", this);
     this.global.addEventListener("pagehide", this);
-    this.global.addEventListener("mozhidedropdown", this);
-    let MutationObserver = this.element.ownerDocument.defaultView.MutationObserver;
-    this.mut = new MutationObserver(mutations => {
-      // Something changed the <select> while it was open, so
-      // we'll poke a DeferredTask to update the parent sometime
-      // in the very near future.
-      this._updateTimer.arm();
-    });
-    this.mut.observe(this.element, {childList: true, subtree: true});
   },
 
   uninit: function() {
     this.global.removeMessageListener("Forms:SelectDropDownItem", this);
     this.global.removeMessageListener("Forms:DismissedDropDown", this);
-    this.global.removeMessageListener("Forms:MouseOver", this);
-    this.global.removeMessageListener("Forms:MouseOut", this);
     this.global.removeEventListener("pagehide", this);
-    this.global.removeEventListener("mozhidedropdown", this);
     this.element = null;
     this.global = null;
-    this.mut.disconnect();
-    this._updateTimer.disarm();
-    this._updateTimer = null;
-    gOpen = false;
   },
 
   showDropDown: function() {
     let rect = this._getBoundingContentRect();
+
     this.global.sendAsyncMessage("Forms:ShowDropDown", {
       rect: rect,
       options: this._buildOptionList(),
       selectedIndex: this.element.selectedIndex,
       direction: getComputedDirection(this.element)
     });
-    gOpen = true;
   },
 
   _getBoundingContentRect: function() {
@@ -96,15 +59,6 @@ this.SelectContentHelper.prototype = {
     return buildOptionListForChildren(this.element);
   },
 
-  _update() {
-    // The <select> was updated while the dropdown was open.
-    // Let's send up a new list of options.
-    this.global.sendAsyncMessage("Forms:UpdateDropDown", {
-      options: this._buildOptionList(),
-      selectedIndex: this.element.selectedIndex,
-    });
-  },
-
   receiveMessage: function(message) {
     switch (message.name) {
       case "Forms:SelectDropDownItem":
@@ -112,61 +66,22 @@ this.SelectContentHelper.prototype = {
         break;
 
       case "Forms:DismissedDropDown":
-        if (this.initialSelection != this.element.item(this.element.selectedIndex)) {
-          let win = this.element.ownerDocument.defaultView;
-          let inputEvent = new win.UIEvent("input", {
-            bubbles: true,
-          });
-          this.element.dispatchEvent(inputEvent);
-
-          let changeEvent = new win.Event("change", {
-            bubbles: true,
-          });
-          this.element.dispatchEvent(changeEvent);
-
-          // Going for mostly-Blink parity here, which (at least on Windows)
-          // fires a mouseup and click event after each selection -
-          // even by keyboard. We're firing a mousedown too, since that
-          // seems to make more sense. Unfortunately, the spec on form
-          // control behaviours for these events is really not clear.
-          const MOUSE_EVENTS = ["mousedown", "mouseup", "click"];
-          for (let eventName of MOUSE_EVENTS) {
-            let mouseEvent = new win.MouseEvent(eventName, {
-              view: win,
-              bubbles: true,
-              cancelable: true,
-            });
-            this.element.dispatchEvent(mouseEvent);
-          }
+        if (this.initialSelection != this.element.item[this.element.selectedIndex]) {
+          let event = this.element.ownerDocument.createEvent("Events");
+          event.initEvent("change", true, true);
+          this.element.dispatchEvent(event);
         }
 
         this.uninit();
         break;
-
-      case "Forms:MouseOver":
-        DOMUtils.setContentState(this.element, kStateHover);
-        break;
-
-      case "Forms:MouseOut":
-        DOMUtils.removeContentState(this.element, kStateHover);
-        break;
-
     }
   },
 
   handleEvent: function(event) {
     switch (event.type) {
       case "pagehide":
-        if (this.element.ownerDocument === event.target) {
-          this.global.sendAsyncMessage("Forms:HideDropDown", {});
-          this.uninit();
-        }
-        break;
-      case "mozhidedropdown":
-        if (this.element === event.target) {
-          this.global.sendAsyncMessage("Forms:HideDropDown", {});
-          this.uninit();
-        }
+        this.global.sendAsyncMessage("Forms:HideDropDown", {});
+        this.uninit();
         break;
     }
   }
@@ -184,23 +99,20 @@ function buildOptionListForChildren(node) {
     let tagName = child.tagName.toUpperCase();
 
     if (tagName == 'OPTION' || tagName == 'OPTGROUP') {
-      if (child.hidden) {
-        continue;
-      }
-
       let textContent =
         tagName == 'OPTGROUP' ? child.getAttribute("label")
-                              : child.text;
-      if (textContent == null) {
-        textContent = "";
+                              : child.textContent;
+
+      if (textContent != null) {
+        textContent = textContent.trim();
+      } else {
+        textContent = ""
       }
 
       let info = {
-        index: child.index,
-        tagName: tagName,
+        tagName: child.tagName,
         textContent: textContent,
         disabled: child.disabled,
-        display: child.style.display,
         // We need to do this for every option element as each one can have
         // an individual style set for direction
         textDirection: getComputedDirection(child),

@@ -13,26 +13,20 @@
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
 #include "mozilla/gfx/Rect.h"           // for Rect, RectTyped
-#include "mozilla/layers/CompositorBridgeChild.h"
+#include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/LayerMetricsWrapper.h" // for LayerMetricsWrapper
 #include "mozilla/layers/LayersMessages.h"
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "LayersLogging.h"
-#include "mozilla/layers/SingleTiledContentClient.h"
 
 namespace mozilla {
 namespace layers {
-
-using gfx::Rect;
-using gfx::IntRect;
-using gfx::IntSize;
 
 ClientTiledPaintedLayer::ClientTiledPaintedLayer(ClientLayerManager* const aManager,
                                                ClientLayerManager::PaintedLayerCreationHint aCreationHint)
   : PaintedLayer(aManager, static_cast<ClientLayer*>(this), aCreationHint)
   , mContentClient()
-  , mHaveSingleTiledContentClient(false)
 {
   MOZ_COUNT_CTOR(ClientTiledPaintedLayer);
   mPaintData.mLastScrollOffset = ParentLayerPoint(0, 0);
@@ -60,15 +54,13 @@ ClientTiledPaintedLayer::FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
   aAttrs = PaintedLayerAttributes(GetValidRegion());
 }
 
-static Maybe<LayerRect>
-ApplyParentLayerToLayerTransform(const ParentLayerToLayerMatrix4x4& aTransform,
-                                 const ParentLayerRect& aParentLayerRect,
-                                 const LayerRect& aClip)
+static LayerRect
+ApplyParentLayerToLayerTransform(const gfx::Matrix4x4& aTransform, const ParentLayerRect& aParentLayerRect)
 {
-  return UntransformBy(aTransform, aParentLayerRect, aClip);
+  return TransformTo<LayerPixel>(aTransform, aParentLayerRect);
 }
 
-static LayerToParentLayerMatrix4x4
+static gfx::Matrix4x4
 GetTransformToAncestorsParentLayer(Layer* aStart, const LayerMetricsWrapper& aAncestor)
 {
   gfx::Matrix4x4 transform;
@@ -89,11 +81,11 @@ GetTransformToAncestorsParentLayer(Layer* aStart, const LayerMetricsWrapper& aAn
       // With containerless scrolling, the offending post-scale is on the
       // parent layer of the displayport-ancestor, which we don't reach in this
       // loop, so we don't need to worry about it.
-      float presShellResolution = iter.GetPresShellResolution();
-      transform.PostScale(presShellResolution, presShellResolution, 1.0f);
+      const FrameMetrics& metrics = iter.Metrics();
+      transform.PostScale(metrics.GetPresShellResolution(), metrics.GetPresShellResolution(), 1.f);
     }
   }
-  return ViewAs<LayerToParentLayerMatrix4x4>(transform);
+  return transform;
 }
 
 void
@@ -131,7 +123,10 @@ ClientTiledPaintedLayer::GetAncestorLayers(LayerMetricsWrapper* aOutScrollAncest
 void
 ClientTiledPaintedLayer::BeginPaint()
 {
-  mPaintData.ResetPaintData();
+  mPaintData.mLowPrecisionPaintCount = 0;
+  mPaintData.mPaintFinished = false;
+  mPaintData.mCompositionBounds.SetEmpty();
+  mPaintData.mCriticalDisplayPort.SetEmpty();
 
   if (!GetBaseTransform().Is2D()) {
     // Give up if there is a complex CSS transform on the layer. We might
@@ -165,33 +160,23 @@ ClientTiledPaintedLayer::BeginPaint()
 
   // Calculate the transform required to convert ParentLayer space of our
   // display port ancestor to the Layer space of this layer.
-  ParentLayerToLayerMatrix4x4 transformDisplayPortToLayer =
-    GetTransformToAncestorsParentLayer(this, displayPortAncestor).Inverse();
-
-  LayerRect layerBounds = ViewAs<LayerPixel>(Rect(GetLayerBounds()));
+  gfx::Matrix4x4 transformDisplayPortToLayer =
+    GetTransformToAncestorsParentLayer(this, displayPortAncestor);
+  transformDisplayPortToLayer.Invert();
 
   // Compute the critical display port that applies to this layer in the
   // LayoutDevice space of this layer, but only if there is no OMT animation
   // on this layer. If there is an OMT animation then we need to draw the whole
   // visible region of this layer as determined by layout, because we don't know
   // what parts of it might move into view in the compositor.
-  mPaintData.mHasTransformAnimation = hasTransformAnimation;
-  if (!mPaintData.mHasTransformAnimation &&
-      mContentClient->GetLowPrecisionTiledBuffer()) {
+  if (!hasTransformAnimation) {
     ParentLayerRect criticalDisplayPort =
       (displayportMetrics.GetCriticalDisplayPort() * displayportMetrics.GetZoom())
       + displayportMetrics.GetCompositionBounds().TopLeft();
-    Maybe<LayerRect> criticalDisplayPortTransformed =
-      ApplyParentLayerToLayerTransform(transformDisplayPortToLayer, criticalDisplayPort, layerBounds);
-    if (criticalDisplayPortTransformed) {
-      mPaintData.mCriticalDisplayPort = Some(RoundedToInt(*criticalDisplayPortTransformed));
-    } else {
-      mPaintData.mCriticalDisplayPort = Some(LayerIntRect(0, 0, 0, 0));
-    }
+    mPaintData.mCriticalDisplayPort = RoundedToInt(
+      ApplyParentLayerToLayerTransform(transformDisplayPortToLayer, criticalDisplayPort));
   }
-  TILING_LOG("TILING %p: Critical displayport %s\n", this,
-             mPaintData.mCriticalDisplayPort ?
-             Stringify(*mPaintData.mCriticalDisplayPort).c_str() : "not set");
+  TILING_LOG("TILING %p: Critical displayport %s\n", this, Stringify(mPaintData.mCriticalDisplayPort).c_str());
 
   // Store the resolution from the displayport ancestor layer. Because this is Gecko-side,
   // before any async transforms have occurred, we can use the zoom for this.
@@ -201,14 +186,10 @@ ClientTiledPaintedLayer::BeginPaint()
   // Store the applicable composition bounds in this layer's Layer units.
   mPaintData.mTransformToCompBounds =
     GetTransformToAncestorsParentLayer(this, scrollAncestor);
-  ParentLayerToLayerMatrix4x4 transformToBounds = mPaintData.mTransformToCompBounds.Inverse();
-  Maybe<LayerRect> compositionBoundsTransformed = ApplyParentLayerToLayerTransform(
-    transformToBounds, scrollMetrics.GetCompositionBounds(), layerBounds);
-  if (compositionBoundsTransformed) {
-    mPaintData.mCompositionBounds = *compositionBoundsTransformed;
-  } else {
-    mPaintData.mCompositionBounds.SetEmpty();
-  }
+  gfx::Matrix4x4 transformToBounds = mPaintData.mTransformToCompBounds;
+  transformToBounds.Invert();
+  mPaintData.mCompositionBounds = ApplyParentLayerToLayerTransform(
+    transformToBounds, scrollMetrics.GetCompositionBounds());
   TILING_LOG("TILING %p: Composition bounds %s\n", this, Stringify(mPaintData.mCompositionBounds).c_str());
 
   // Calculate the scroll offset since the last transaction
@@ -219,9 +200,9 @@ ClientTiledPaintedLayer::BeginPaint()
 bool
 ClientTiledPaintedLayer::IsScrollingOnCompositor(const FrameMetrics& aParentMetrics)
 {
-  CompositorBridgeChild* compositor = nullptr;
+  CompositorChild* compositor = nullptr;
   if (Manager() && Manager()->AsClientLayerManager()) {
-    compositor = Manager()->AsClientLayerManager()->GetCompositorBridgeChild();
+    compositor = Manager()->AsClientLayerManager()->GetCompositorChild();
   }
 
   if (!compositor) {
@@ -253,14 +234,19 @@ ClientTiledPaintedLayer::UseProgressiveDraw() {
     return false;
   }
 
-  if (!mContentClient->GetTiledBuffer()->SupportsProgressiveUpdate()) {
-    return false;
-  }
-
   if (ClientManager()->HasShadowTarget()) {
     // This condition is true when we are in a reftest scenario. We don't want
     // to draw progressively here because it can cause intermittent reftest
     // failures because the harness won't wait for all the tiles to be drawn.
+    return false;
+  }
+
+  if (mPaintData.mCriticalDisplayPort.IsEmpty()) {
+    // This catches three scenarios:
+    // 1) This layer doesn't have a scrolling ancestor
+    // 2) This layer is subject to OMTA transforms
+    // 3) Low-precision painting is disabled
+    // In all of these cases, we don't want to draw this layer progressively.
     return false;
   }
 
@@ -271,19 +257,10 @@ ClientTiledPaintedLayer::UseProgressiveDraw() {
     return false;
   }
 
-  if (mPaintData.mHasTransformAnimation) {
-    // The compositor is going to animate this somehow, so we want it all
-    // on the screen at once.
-    return false;
-  }
-
   if (ClientManager()->AsyncPanZoomEnabled()) {
     LayerMetricsWrapper scrollAncestor;
     GetAncestorLayers(&scrollAncestor, nullptr, nullptr);
-    MOZ_ASSERT(scrollAncestor); // because mPaintData.mCriticalDisplayPort is set
-    if (!scrollAncestor) {
-      return false;
-    }
+    MOZ_ASSERT(scrollAncestor); // because mPaintData.mCriticalDisplayPort is non-empty
     const FrameMetrics& parentMetrics = scrollAncestor.Metrics();
     if (!IsScrollingOnCompositor(parentMetrics)) {
       return false;
@@ -299,46 +276,43 @@ ClientTiledPaintedLayer::RenderHighPrecision(nsIntRegion& aInvalidRegion,
                                             LayerManager::DrawPaintedLayerCallback aCallback,
                                             void* aCallbackData)
 {
-  // If we have started drawing low-precision already, then we
-  // shouldn't do anything there.
-  if (mPaintData.mLowPrecisionPaintCount != 0) {
+  // If we have no high-precision stuff to draw, or we have started drawing low-precision
+  // already, then we shouldn't do anything there.
+  if (aInvalidRegion.IsEmpty() || mPaintData.mLowPrecisionPaintCount != 0) {
     return false;
   }
 
-  // Only draw progressively when there is something to paint and the
-  // resolution is unchanged
-  if (!aInvalidRegion.IsEmpty() &&
-      UseProgressiveDraw() &&
-      mContentClient->GetTiledBuffer()->GetFrameResolution() == mPaintData.mResolution) {
+  // Only draw progressively when the resolution is unchanged
+  if (UseProgressiveDraw() &&
+      mContentClient->mTiledBuffer.GetFrameResolution() == mPaintData.mResolution) {
     // Store the old valid region, then clear it before painting.
     // We clip the old valid region to the visible region, as it only gets
     // used to decide stale content (currently valid and previously visible)
-    nsIntRegion oldValidRegion = mContentClient->GetTiledBuffer()->GetValidRegion();
+    nsIntRegion oldValidRegion = mContentClient->mTiledBuffer.GetValidRegion();
     oldValidRegion.And(oldValidRegion, aVisibleRegion);
-    if (mPaintData.mCriticalDisplayPort) {
-      oldValidRegion.And(oldValidRegion, mPaintData.mCriticalDisplayPort->ToUnknownRect());
+    if (!mPaintData.mCriticalDisplayPort.IsEmpty()) {
+      oldValidRegion.And(oldValidRegion, LayerIntRect::ToUntyped(mPaintData.mCriticalDisplayPort));
     }
 
     TILING_LOG("TILING %p: Progressive update with old valid region %s\n", this, Stringify(oldValidRegion).c_str());
 
-    return mContentClient->GetTiledBuffer()->ProgressiveUpdate(mValidRegion, aInvalidRegion,
+    return mContentClient->mTiledBuffer.ProgressiveUpdate(mValidRegion, aInvalidRegion,
                       oldValidRegion, &mPaintData, aCallback, aCallbackData);
   }
 
-  // Otherwise do a non-progressive paint. We must do this even when
-  // the region to paint is empty as the valid region may have shrunk.
+  // Otherwise do a non-progressive paint
 
   mValidRegion = aVisibleRegion;
-  if (mPaintData.mCriticalDisplayPort) {
-    mValidRegion.And(mValidRegion, mPaintData.mCriticalDisplayPort->ToUnknownRect());
+  if (!mPaintData.mCriticalDisplayPort.IsEmpty()) {
+    mValidRegion.And(mValidRegion, LayerIntRect::ToUntyped(mPaintData.mCriticalDisplayPort));
   }
 
   TILING_LOG("TILING %p: Non-progressive paint invalid region %s\n", this, Stringify(aInvalidRegion).c_str());
   TILING_LOG("TILING %p: Non-progressive paint new valid region %s\n", this, Stringify(mValidRegion).c_str());
 
-  mContentClient->GetTiledBuffer()->SetFrameResolution(mPaintData.mResolution);
-  mContentClient->GetTiledBuffer()->PaintThebes(mValidRegion, aInvalidRegion, aInvalidRegion,
-                                                aCallback, aCallbackData);
+  mContentClient->mTiledBuffer.SetFrameResolution(mPaintData.mResolution);
+  mContentClient->mTiledBuffer.PaintThebes(mValidRegion, aInvalidRegion, aInvalidRegion,
+                                           aCallback, aCallbackData);
   mPaintData.mPaintFinished = true;
   return true;
 }
@@ -351,23 +325,22 @@ ClientTiledPaintedLayer::RenderLowPrecision(nsIntRegion& aInvalidRegion,
 {
   // Render the low precision buffer, if the visible region is larger than the
   // critical display port.
-  if (!mPaintData.mCriticalDisplayPort ||
-      !nsIntRegion(mPaintData.mCriticalDisplayPort->ToUnknownRect()).Contains(aVisibleRegion)) {
-    nsIntRegion oldValidRegion = mContentClient->GetLowPrecisionTiledBuffer()->GetValidRegion();
+  if (!nsIntRegion(LayerIntRect::ToUntyped(mPaintData.mCriticalDisplayPort)).Contains(aVisibleRegion)) {
+    nsIntRegion oldValidRegion = mContentClient->mLowPrecisionTiledBuffer.GetValidRegion();
     oldValidRegion.And(oldValidRegion, aVisibleRegion);
 
     bool updatedBuffer = false;
 
     // If the frame resolution or format have changed, invalidate the buffer
-    if (mContentClient->GetLowPrecisionTiledBuffer()->GetFrameResolution() != mPaintData.mResolution ||
-        mContentClient->GetLowPrecisionTiledBuffer()->HasFormatChanged()) {
+    if (mContentClient->mLowPrecisionTiledBuffer.GetFrameResolution() != mPaintData.mResolution ||
+        mContentClient->mLowPrecisionTiledBuffer.HasFormatChanged()) {
       if (!mLowPrecisionValidRegion.IsEmpty()) {
         updatedBuffer = true;
       }
       oldValidRegion.SetEmpty();
       mLowPrecisionValidRegion.SetEmpty();
-      mContentClient->GetLowPrecisionTiledBuffer()->ResetPaintedAndValidState();
-      mContentClient->GetLowPrecisionTiledBuffer()->SetFrameResolution(mPaintData.mResolution);
+      mContentClient->mLowPrecisionTiledBuffer.ResetPaintedAndValidState();
+      mContentClient->mLowPrecisionTiledBuffer.SetFrameResolution(mPaintData.mResolution);
       aInvalidRegion = aVisibleRegion;
     }
 
@@ -385,7 +358,7 @@ ClientTiledPaintedLayer::RenderLowPrecision(nsIntRegion& aInvalidRegion,
     TILING_LOG("TILING %p: Progressive paint: low-precision old valid region is %s\n", this, Stringify(oldValidRegion).c_str());
 
     if (!aInvalidRegion.IsEmpty()) {
-      updatedBuffer = mContentClient->GetLowPrecisionTiledBuffer()->ProgressiveUpdate(
+      updatedBuffer = mContentClient->mLowPrecisionTiledBuffer.ProgressiveUpdate(
                             mLowPrecisionValidRegion, aInvalidRegion, oldValidRegion,
                             &mPaintData, aCallback, aCallbackData);
     }
@@ -397,7 +370,7 @@ ClientTiledPaintedLayer::RenderLowPrecision(nsIntRegion& aInvalidRegion,
     TILING_LOG("TILING %p: Clearing low-precision buffer\n", this);
     // Clear the low precision tiled buffer.
     mLowPrecisionValidRegion.SetEmpty();
-    mContentClient->GetLowPrecisionTiledBuffer()->ResetPaintedAndValidState();
+    mContentClient->mLowPrecisionTiledBuffer.ResetPaintedAndValidState();
     // Return true here so we send a Painted callback after clearing the valid
     // region of the low precision buffer. This allows the shadow buffer's valid
     // region to be updated and the associated resources to be freed.
@@ -422,51 +395,24 @@ ClientTiledPaintedLayer::RenderLayer()
     ClientManager()->GetPaintedLayerCallback();
   void *data = ClientManager()->GetPaintedLayerCallbackData();
 
-  IntSize layerSize = mVisibleRegion.ToUnknownRegion().GetBounds().Size();
-  IntSize tileSize(gfxPlatform::GetPlatform()->GetTileWidth(),
-                   gfxPlatform::GetPlatform()->GetTileHeight());
-  bool isHalfTileWidthOrHeight = layerSize.width <= tileSize.width / 2 ||
-    layerSize.height <= tileSize.height / 2;
-
-  // Use single tile when layer is not scrollable, is smaller than one
-  // tile, or when more than half of the tiles' pixels in either
-  // dimension would be wasted.
-  bool wantSingleTiledContentClient =
-      (mCreationHint == LayerManager::NONE ||
-       layerSize <= tileSize ||
-       isHalfTileWidthOrHeight) &&
-      SingleTiledContentClient::ClientSupportsLayerSize(layerSize, ClientManager()) &&
-      gfxPrefs::LayersSingleTileEnabled();
-
-  if (mContentClient && mHaveSingleTiledContentClient && !wantSingleTiledContentClient) {
-    mContentClient = nullptr;
-    mValidRegion.SetEmpty();
-  }
-
   if (!mContentClient) {
-    if (wantSingleTiledContentClient) {
-      mContentClient = new SingleTiledContentClient(this, ClientManager());
-      mHaveSingleTiledContentClient = true;
-    } else {
-      mContentClient = new MultiTiledContentClient(this, ClientManager());
-      mHaveSingleTiledContentClient = false;
-    }
+    mContentClient = new TiledContentClient(this, ClientManager());
 
     mContentClient->Connect();
     ClientManager()->AsShadowForwarder()->Attach(mContentClient, this);
     MOZ_ASSERT(mContentClient->GetForwarder());
   }
 
-  if (mContentClient->GetTiledBuffer()->HasFormatChanged()) {
+  if (mContentClient->mTiledBuffer.HasFormatChanged()) {
     mValidRegion = nsIntRegion();
-    mContentClient->GetTiledBuffer()->ResetPaintedAndValidState();
+    mContentClient->mTiledBuffer.ResetPaintedAndValidState();
   }
 
   TILING_LOG("TILING %p: Initial visible region %s\n", this, Stringify(mVisibleRegion).c_str());
   TILING_LOG("TILING %p: Initial valid region %s\n", this, Stringify(mValidRegion).c_str());
   TILING_LOG("TILING %p: Initial low-precision valid region %s\n", this, Stringify(mLowPrecisionValidRegion).c_str());
 
-  nsIntRegion neededRegion = mVisibleRegion.ToUnknownRegion();
+  nsIntRegion neededRegion = mVisibleRegion;
 #ifndef MOZ_IGNORE_PAINT_WILL_RESAMPLE
   // This is handled by PadDrawTargetOutFromRegion in TiledContentClient for mobile
   if (MayResample()) {
@@ -513,22 +459,22 @@ ClientTiledPaintedLayer::RenderLayer()
     // critical displayport are discarded on the first update. Also make sure that we
     // only draw stuff inside the critical displayport on the first update.
     mValidRegion.And(mValidRegion, neededRegion);
-    if (mPaintData.mCriticalDisplayPort) {
-      mValidRegion.And(mValidRegion, mPaintData.mCriticalDisplayPort->ToUnknownRect());
-      invalidRegion.And(invalidRegion, mPaintData.mCriticalDisplayPort->ToUnknownRect());
+    if (!mPaintData.mCriticalDisplayPort.IsEmpty()) {
+      mValidRegion.And(mValidRegion, LayerIntRect::ToUntyped(mPaintData.mCriticalDisplayPort));
+      invalidRegion.And(invalidRegion, LayerIntRect::ToUntyped(mPaintData.mCriticalDisplayPort));
     }
 
     TILING_LOG("TILING %p: First-transaction valid region %s\n", this, Stringify(mValidRegion).c_str());
     TILING_LOG("TILING %p: First-transaction invalid region %s\n", this, Stringify(invalidRegion).c_str());
   } else {
-    if (mPaintData.mCriticalDisplayPort) {
-      invalidRegion.And(invalidRegion, mPaintData.mCriticalDisplayPort->ToUnknownRect());
+    if (!mPaintData.mCriticalDisplayPort.IsEmpty()) {
+      invalidRegion.And(invalidRegion, LayerIntRect::ToUntyped(mPaintData.mCriticalDisplayPort));
     }
     TILING_LOG("TILING %p: Repeat-transaction invalid region %s\n", this, Stringify(invalidRegion).c_str());
   }
 
   nsIntRegion lowPrecisionInvalidRegion;
-  if (mContentClient->GetLowPrecisionTiledBuffer()) {
+  if (gfxPrefs::UseLowPrecisionBuffer()) {
     // Calculate the invalid region for the low precision buffer. Make sure
     // to remove the valid high-precision area so we don't double-paint it.
     lowPrecisionInvalidRegion.Sub(neededRegion, mLowPrecisionValidRegion);
@@ -541,7 +487,7 @@ ClientTiledPaintedLayer::RenderLayer()
                                                   callback, data);
   if (updatedHighPrecision) {
     ClientManager()->Hold(this);
-    mContentClient->UpdatedBuffer(TiledContentClient::TILED_BUFFER);
+    mContentClient->UseTiledLayerBuffer(TiledContentClient::TILED_BUFFER);
 
     if (!mPaintData.mPaintFinished) {
       // There is still more high-res stuff to paint, so we're not
@@ -574,7 +520,7 @@ ClientTiledPaintedLayer::RenderLayer()
                                                 callback, data);
   if (updatedLowPrecision) {
     ClientManager()->Hold(this);
-    mContentClient->UpdatedBuffer(TiledContentClient::LOW_PRECISION_TILED_BUFFER);
+    mContentClient->UseTiledLayerBuffer(TiledContentClient::LOW_PRECISION_TILED_BUFFER);
 
     if (!mPaintData.mPaintFinished) {
       // There is still more low-res stuff to paint, so we're not
@@ -587,18 +533,6 @@ ClientTiledPaintedLayer::RenderLayer()
   // If we get here, we've done all the high- and low-precision
   // paints we wanted to do, so we can finish the paint and chill.
   EndPaint();
-}
-
-bool
-ClientTiledPaintedLayer::IsOptimizedFor(LayerManager::PaintedLayerCreationHint aHint)
-{
-  // The only creation hint is whether the layer is scrollable or not, and this
-  // is only respected on B2G and OSX, where it's used to determine whether to
-  // use a tiled content client or not.
-  // There are pretty nasty performance consequences for not using tiles on
-  // large, scrollable layers, so we want the layer to be recreated in this
-  // situation.
-  return aHint == GetCreationHint();
 }
 
 void

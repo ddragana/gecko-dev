@@ -4,9 +4,7 @@
 #ifndef nsSyncJPAKE_h__
 #define nsSyncJPAKE_h__
 
-#include "ScopedNSSTypes.h"
 #include "nsISyncJPAKE.h"
-#include "nsNSSShutDown.h"
 
 #define NS_SYNCJPAKE_CONTRACTID \
   "@mozilla.org/services-crypto/sync-jpake;1"
@@ -14,10 +12,9 @@
 #define NS_SYNCJPAKE_CID \
   {0x0b9721c0, 0x1805, 0x47c3, {0x86, 0xce, 0x68, 0x13, 0x79, 0x5a, 0x78, 0x3f}}
 
-using namespace mozilla;
+typedef struct PK11SymKeyStr PK11SymKey;
 
 class nsSyncJPAKE : public nsISyncJPAKE
-                  , public nsNSSShutDownObject
 {
 public:
   NS_DECL_ISUPPORTS
@@ -26,11 +23,8 @@ public:
 protected:
   virtual ~nsSyncJPAKE();
 private:
-  virtual void virtualDestroyNSSReference() override;
-  void destructorSafeDestroyNSSReference();
-
   enum { JPAKENotStarted, JPAKEBeforeRound2, JPAKEAfterRound2 } round;
-  ScopedPK11SymKey key;
+  PK11SymKey * key;
 };
 
 NS_IMPL_ISUPPORTS(nsSyncJPAKE, nsISyncJPAKE)

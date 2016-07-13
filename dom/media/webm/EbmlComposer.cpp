@@ -4,8 +4,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EbmlComposer.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/EndianUtils.h"
 #include "libmkv/EbmlIDs.h"
 #include "libmkv/EbmlWriter.h"
 #include "libmkv/WebMElement.h"
@@ -23,8 +21,8 @@ void EbmlComposer::GenerateHeader()
   // Write the EBML header.
   EbmlGlobal ebml;
   // The WEbM header default size usually smaller than 1k.
-  auto buffer = MakeUnique<uint8_t[]>(DEFAULT_HEADER_SIZE +
-                                      mCodecPrivateData.Length());
+  nsAutoArrayPtr<uint8_t> buffer(new uint8_t[DEFAULT_HEADER_SIZE +
+                                             mCodecPrivateData.Length()]);
   ebml.buf = buffer.get();
   ebml.offset = 0;
   writeHeader(&ebml);
@@ -49,17 +47,8 @@ void EbmlComposer::GenerateHeader()
           }
           // Audio
           if (mCodecPrivateData.Length() > 0) {
-            // Extract the pre-skip from mCodecPrivateData
-            // then convert it to nanoseconds.
-            // Details in OpusTrackEncoder.cpp.
-            mCodecDelay =
-              (uint64_t)LittleEndian::readUint16(mCodecPrivateData.Elements() + 10)
-              * PR_NSEC_PER_SEC / 48000;
-            // Fixed 80ms, convert into nanoseconds.
-            uint64_t seekPreRoll = 80 * PR_NSEC_PER_MSEC;
-            writeAudioTrack(&ebml, 0x2, 0x0, "A_OPUS", mSampleFreq,
-                            mChannels, mCodecDelay, seekPreRoll,
-                            mCodecPrivateData.Elements(),
+            writeAudioTrack(&ebml, 0x2, 0x0, "A_VORBIS", mSampleFreq,
+                            mChannels, mCodecPrivateData.Elements(),
                             mCodecPrivateData.Length());
           }
         }
@@ -123,9 +112,7 @@ EbmlComposer::WriteSimpleBlock(EncodedFrame* aFrame)
   EbmlGlobal ebml;
   ebml.offset = 0;
 
-  auto frameType = aFrame->GetFrameType();
-  bool isVP8IFrame = (frameType == EncodedFrame::FrameType::VP8_I_FRAME);
-  if (isVP8IFrame) {
+  if (aFrame->GetFrameType() == EncodedFrame::FrameType::VP8_I_FRAME) {
     FinishCluster();
   }
 
@@ -133,7 +120,7 @@ EbmlComposer::WriteSimpleBlock(EncodedFrame* aFrame)
   block->SetLength(aFrame->GetFrameData().Length() + DEFAULT_HEADER_SIZE);
   ebml.buf = block->Elements();
 
-  if (isVP8IFrame) {
+  if (aFrame->GetFrameType() == EncodedFrame::FrameType::VP8_I_FRAME) {
     EbmlLoc ebmlLoc;
     Ebml_StartSubElement(&ebml, &ebmlLoc, Cluster);
     MOZ_ASSERT(mClusterBuffs.Length() > 0);
@@ -145,14 +132,18 @@ EbmlComposer::WriteSimpleBlock(EncodedFrame* aFrame)
     mFlushState |= FLUSH_CLUSTER;
   }
 
-  bool isOpus = (frameType == EncodedFrame::FrameType::OPUS_AUDIO_FRAME);
-  short timeCode = aFrame->GetTimeStamp() / PR_USEC_PER_MSEC - mClusterTimecode;
-  if (isOpus) {
-    timeCode += mCodecDelay / PR_NSEC_PER_MSEC;
+  if (aFrame->GetFrameType() != EncodedFrame::FrameType::VORBIS_AUDIO_FRAME) {
+    short timeCode = aFrame->GetTimeStamp() / PR_USEC_PER_MSEC
+                     - mClusterTimecode;
+    writeSimpleBlock(&ebml, 0x1, timeCode, aFrame->GetFrameType() ==
+                     EncodedFrame::FrameType::VP8_I_FRAME,
+                     0, 0, (unsigned char*)aFrame->GetFrameData().Elements(),
+                     aFrame->GetFrameData().Length());
+  } else {
+    writeSimpleBlock(&ebml, 0x2, 0, false,
+                     0, 0, (unsigned char*)aFrame->GetFrameData().Elements(),
+                     aFrame->GetFrameData().Length());
   }
-  writeSimpleBlock(&ebml, isOpus ? 0x2 : 0x1, timeCode, isVP8IFrame,
-                   0, 0, (unsigned char*)aFrame->GetFrameData().Elements(),
-                   aFrame->GetFrameData().Length());
   MOZ_ASSERT(ebml.offset <= DEFAULT_HEADER_SIZE +
              aFrame->GetFrameData().Length(),
              "write more data > EBML_BUFFER_SIZE");
@@ -177,11 +168,14 @@ EbmlComposer::SetVideoConfig(uint32_t aWidth, uint32_t aHeight,
 }
 
 void
-EbmlComposer::SetAudioConfig(uint32_t aSampleFreq, uint32_t aChannels)
+EbmlComposer::SetAudioConfig(uint32_t aSampleFreq, uint32_t aChannels,
+                             uint32_t aBitDepth)
 {
   MOZ_ASSERT(aSampleFreq > 0, "SampleFreq should > 0");
+  MOZ_ASSERT(aBitDepth > 0, "BitDepth should > 0");
   MOZ_ASSERT(aChannels > 0, "Channels should > 0");
   mSampleFreq = aSampleFreq;
+  mBitDepth = aBitDepth;
   mChannels = aChannels;
 }
 
@@ -209,12 +203,12 @@ EbmlComposer::EbmlComposer()
   : mFlushState(FLUSH_NONE)
   , mClusterHeaderIndex(0)
   , mClusterLengthLoc(0)
-  , mCodecDelay(0)
   , mClusterTimecode(0)
   , mWidth(0)
   , mHeight(0)
   , mFrameRate(0)
   , mSampleFreq(0)
+  , mBitDepth(0)
   , mChannels(0)
 {}
 

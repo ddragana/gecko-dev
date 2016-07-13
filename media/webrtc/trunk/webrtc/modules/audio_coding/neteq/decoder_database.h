@@ -15,11 +15,14 @@
 
 #include "webrtc/base/constructormagic.h"
 #include "webrtc/common_types.h"  // NULL
-#include "webrtc/modules/audio_coding/neteq/audio_decoder_impl.h"
+#include "webrtc/modules/audio_coding/neteq/interface/audio_decoder.h"
 #include "webrtc/modules/audio_coding/neteq/packet.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
+
+// Forward declaration.
+class AudioDecoder;
 
 class DecoderDatabase {
  public:
@@ -57,6 +60,7 @@ class DecoderDatabase {
     bool external;
   };
 
+  static const uint8_t kMaxRtpPayloadType = 0x7F;  // Max for a 7-bit number.
   // Maximum value for 8 bits, and an invalid RTP payload type (since it is
   // only 7 bits).
   static const uint8_t kRtpPayloadTypeError = 0xFF;

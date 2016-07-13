@@ -52,14 +52,15 @@
 #include "nsIDOMNode.h"
 #include "nsISupportsUtils.h"
 #include "nsString.h"
+#include "nsAutoPtr.h"
 
 // String classes change too often and I can't keep up.
 // Set this macro to this week's approved case-insensitive compare routine.
 #define MATCHES(tagName, str) tagName.EqualsIgnoreCase(str)
 
 nsHTMLURIRefObject::nsHTMLURIRefObject()
-  : mCurAttrIndex(0), mAttributeCnt(0)
 {
+  mCurAttrIndex = mAttributeCnt = 0;
 }
 
 nsHTMLURIRefObject::~nsHTMLURIRefObject()
@@ -247,7 +248,7 @@ nsHTMLURIRefObject::SetNode(nsIDOMNode *aNode)
 
 nsresult NS_NewHTMLURIRefObject(nsIURIRefObject** aResult, nsIDOMNode* aNode)
 {
-  RefPtr<nsHTMLURIRefObject> refObject = new nsHTMLURIRefObject();
+  nsRefPtr<nsHTMLURIRefObject> refObject = new nsHTMLURIRefObject();
   nsresult rv = refObject->SetNode(aNode);
   if (NS_FAILED(rv)) {
     *aResult = 0;

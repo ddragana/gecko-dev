@@ -191,7 +191,7 @@ bool
 nsDownloadScanner::IsAESAvailable()
 {
   // Try to instantiate IAE to see if it's available.    
-  RefPtr<IAttachmentExecute> ae;
+  nsRefPtr<IAttachmentExecute> ae;
   HRESULT hr;
   hr = CoCreateInstance(CLSID_AttachmentServices, nullptr, CLSCTX_INPROC,
                         IID_IAttachmentExecute, getter_AddRefs(ae));
@@ -237,7 +237,7 @@ nsDownloadScanner::CheckPolicy(nsIURI *aSource, nsIURI *aTarget)
   if (isDataScheme)
     return AVPOLICY_DOWNLOAD;
 
-  RefPtr<IAttachmentExecute> ae;
+  nsRefPtr<IAttachmentExecute> ae;
   HRESULT hr;
   hr = CoCreateInstance(CLSID_AttachmentServices, nullptr, CLSCTX_INPROC,
                         IID_IAttachmentExecute, getter_AddRefs(ae));
@@ -289,7 +289,7 @@ nsDownloadScanner::ScannerThreadFunction(void *p)
 // The sole purpose of this class is to release an object on the main thread
 // It assumes that its creator will addref it and it will release itself on
 // the main thread too
-class ReleaseDispatcher : public mozilla::Runnable {
+class ReleaseDispatcher : public nsRunnable {
 public:
   ReleaseDispatcher(nsISupports *ptr)
     : mPtr(ptr) {}
@@ -445,7 +445,7 @@ nsDownloadScanner::Scan::DoScanAES()
   // event of a win32 exception
 #pragma warning(disable: 4509)
   HRESULT hr;
-  RefPtr<IAttachmentExecute> ae;
+  nsRefPtr<IAttachmentExecute> ae;
   MOZ_SEH_TRY {
     hr = CoCreateInstance(CLSID_AttachmentServices, nullptr, CLSCTX_ALL,
                           IID_IAttachmentExecute, getter_AddRefs(ae));

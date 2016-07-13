@@ -7,58 +7,58 @@
 #ifndef mozilla_dom_FileSystemBase_h
 #define mozilla_dom_FileSystemBase_h
 
+#include "nsAutoPtr.h"
 #include "nsString.h"
-#include "Directory.h"
+
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
 
 class BlobImpl;
+class Directory;
 
 class FileSystemBase
 {
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FileSystemBase)
 public:
-  NS_INLINE_DECL_REFCOUNTING(FileSystemBase)
 
   // Create file system object from its string representation.
   static already_AddRefed<FileSystemBase>
-  DeserializeDOMPath(const nsAString& aString);
+  FromString(const nsAString& aString);
 
   FileSystemBase();
 
   virtual void
   Shutdown();
 
-  // SerializeDOMPath the FileSystem to string.
-  virtual void
-  SerializeDOMPath(nsAString& aOutput) const = 0;
+  // Get the string representation of the file system.
+  const nsString&
+  ToString() const
+  {
+    return mString;
+  }
 
-  virtual already_AddRefed<FileSystemBase>
-  Clone() = 0;
+  virtual nsPIDOMWindow*
+  GetWindow() const;
 
-  virtual bool
-  ShouldCreateDirectory() = 0;
-
-  virtual nsISupports*
-  GetParentObject() const;
-
-  virtual void
-  GetDirectoryName(nsIFile* aFile, nsAString& aRetval,
-                   ErrorResult& aRv) const;
-
-  void
-  GetDOMPath(nsIFile* aFile, nsAString& aRetval, ErrorResult& aRv) const;
+  /**
+   * Create nsIFile object from the given real path (absolute DOM path).
+   */
+  already_AddRefed<nsIFile>
+  GetLocalFile(const nsAString& aRealPath) const;
 
   /*
-   * Return the local root path of the FileSystem implementation.
-   * For OSFileSystem, this is equal to the path of the root Directory;
-   * For DeviceStorageFileSystem, this is the path of the SDCard, parent
-   * directory of the exposed root Directory (per type).
+   * Get the virtual name of the root directory. This name will be exposed to
+   * the content page.
    */
+  virtual void
+  GetRootName(nsAString& aRetval) const = 0;
+
   const nsAString&
-  LocalOrDeviceStorageRootPath() const
+  GetLocalRootPath() const
   {
-    return mLocalOrDeviceStorageRootPath;
+    return mLocalRootPath;
   }
 
   bool
@@ -73,8 +73,13 @@ public:
   virtual bool
   IsSafeDirectory(Directory* aDir) const;
 
+  /*
+   * Get the real path (absolute DOM path) of the DOM file in the file system.
+   * If succeeded, returns true. Otherwise, returns false and set aRealPath to
+   * empty string.
+   */
   bool
-  GetRealPath(BlobImpl* aFile, nsIFile** aPath) const;
+  GetRealPath(BlobImpl* aFile, nsAString& aRealPath) const;
 
   /*
    * Get the permission name required to access this file system.
@@ -85,83 +90,35 @@ public:
     return mPermission;
   }
 
-  // The decision about doing or not doing the permission check cannot be done
-  // everywhere because, for some FileSystemBase implementation, this depends on
-  // a preference.
-  // This enum describes all the possible decisions. The implementation will do
-  // the check on the main-thread in the child and in the parent process when
-  // needed.
-  // Note: the permission check should not fail in PBackground because that
-  // means that the child has been compromised. If this happens the child
-  // process is killed.
-  enum ePermissionCheckType {
-    // When on the main-thread, we must check if we have
-    // device.storage.prompt.testing set to true.
-    ePermissionCheckByTestingPref,
-
-    // No permission check must be done.
-    ePermissionCheckNotRequired,
-
-    // Permission check is required.
-    ePermissionCheckRequired,
-
-    // This is the default value. We crash if this is let like this.
-    eNotSet
-  };
-
-  ePermissionCheckType
-  PermissionCheckType() const
+  bool
+  RequiresPermissionChecks() const
   {
-    MOZ_ASSERT(mPermissionCheckType != eNotSet);
-    return mPermissionCheckType;
+    return mRequiresPermissionChecks;
   }
-
-  // IPC initialization
-  // See how these 2 methods are used in FileSystemTaskChildBase.
-
-  virtual bool
-  NeedToGoToMainThread() const { return false; }
-
-  virtual nsresult
-  MainThreadWork() { return NS_ERROR_FAILURE; }
-
-  virtual bool
-  ClonableToDifferentThreadOrProcess() const { return false; }
-
-  // CC methods
-  virtual void Unlink() {}
-  virtual void Traverse(nsCycleCollectionTraversalCallback &cb) {}
-
-  void
-  AssertIsOnOwningThread() const;
-
 protected:
   virtual ~FileSystemBase();
 
+  bool
+  LocalPathToRealPath(const nsAString& aLocalPath, nsAString& aRealPath) const;
+
   // The local path of the root (i.e. the OS path, with OS path separators, of
   // the OS directory that acts as the root of this OSFileSystem).
-  // This path must be set by the FileSystem implementation immediately
-  // because it will be used for the validation of any FileSystemTaskChildBase.
-  // The concept of this path is that, any task will never go out of it and this
-  // must be considered the OS 'root' of the current FileSystem. Different
-  // Directory object can have different OS 'root' path.
-  // To be more clear, any path managed by this FileSystem implementation must
-  // be discendant of this local root path.
-  // The reason why it's not just called 'localRootPath' is because for
-  // DeviceStorage this contains the path of the device storage SDCard, that is
-  // the parent directory of the exposed root path.
-  nsString mLocalOrDeviceStorageRootPath;
+  // Only available in the parent process.
+  // In the child process, we don't use it and its value should be empty.
+  nsString mLocalRootPath;
+
+  // The same, but with path separators normalized to "/".
+  nsString mNormalizedLocalRootPath;
+
+  // The string representation of the file system.
+  nsString mString;
 
   bool mShutdown;
 
   // The permission name required to access the file system.
   nsCString mPermission;
 
-  ePermissionCheckType mPermissionCheckType;
-
-#ifdef DEBUG
-  PRThread* mOwningThread;
-#endif
+  bool mRequiresPermissionChecks;
 };
 
 } // namespace dom

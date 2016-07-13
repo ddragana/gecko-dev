@@ -15,8 +15,6 @@
 #include "jit/MIRGraph.h"
 #include "vm/UnboxedObject.h"
 
-#include "jsobjinlines.h"
-
 namespace js {
 namespace jit {
 
@@ -78,8 +76,6 @@ EmulateStateOf<MemoryView>::run(MemoryView& view)
                 ins->toDefinition()->accept(&view);
             else
                 view.visitResumePoint(ins->toResumePoint());
-            if (view.oom())
-                return false;
         }
 
         // For each successor, merge the current state into the state of the
@@ -142,7 +138,7 @@ IsLambdaEscaped(MLambda* lambda, JSObject* obj)
 static bool
 IsObjectEscaped(MInstruction* ins, JSObject* objDefault)
 {
-    MOZ_ASSERT(ins->type() == MIRType::Object);
+    MOZ_ASSERT(ins->type() == MIRType_Object);
     MOZ_ASSERT(ins->isNewObject() || ins->isGuardShape() || ins->isCreateThisWithTemplate() ||
                ins->isNewCallObject() || ins->isFunctionEnvironment());
 
@@ -275,8 +271,6 @@ class ObjectMemoryView : public MDefinitionVisitorDefaultNoop
     // Used to improve the memory usage by sharing common modification.
     const MResumePoint* lastResumePoint_;
 
-    bool oom_;
-
   public:
     ObjectMemoryView(TempAllocator& alloc, MInstruction* obj);
 
@@ -291,8 +285,6 @@ class ObjectMemoryView : public MDefinitionVisitorDefaultNoop
 #else
     void assertSuccess() {}
 #endif
-
-    bool oom() const { return oom_; }
 
   public:
     void visitResumePoint(MResumePoint* rp);
@@ -324,8 +316,7 @@ ObjectMemoryView::ObjectMemoryView(TempAllocator& alloc, MInstruction* obj)
     obj_(obj),
     startBlock_(obj->block()),
     state_(nullptr),
-    lastResumePoint_(nullptr),
-    oom_(false)
+    lastResumePoint_(nullptr)
 {
     // Annotate snapshots RValue such that we recover the store first.
     obj_->setIncompleteObject();
@@ -349,15 +340,8 @@ ObjectMemoryView::initStartingState(BlockState** pState)
     startBlock_->insertBefore(obj_, undefinedVal_);
 
     // Create a new block state and insert at it at the location of the new object.
-    BlockState* state = BlockState::New(alloc_, obj_);
-    if (!state)
-        return false;
-
+    BlockState* state = BlockState::New(alloc_, obj_, undefinedVal_);
     startBlock_->insertAfter(obj_, state);
-
-    // Initialize the properties of the object state.
-    if (!state->initFromTemplateObject(alloc_, undefinedVal_))
-        return false;
 
     // Hold out of resume point until it is visited.
     state->setInWorklist();
@@ -404,9 +388,6 @@ ObjectMemoryView::mergeIntoSuccessorState(MBasicBlock* curr, MBasicBlock* succ,
         // nodes.  These would later be removed by the removal of redundant phi
         // nodes.
         succState = BlockState::Copy(alloc_, state_);
-        if (!succState)
-            return false;
-
         size_t numPreds = succ->numPredecessors();
         for (size_t slot = 0; slot < state_->numSlots(); slot++) {
             MPhi* phi = MPhi::New(alloc_);
@@ -507,11 +488,6 @@ ObjectMemoryView::visitStoreFixedSlot(MStoreFixedSlot* ins)
     // Clone the state and update the slot value.
     if (state_->hasFixedSlot(ins->slot())) {
         state_ = BlockState::Copy(alloc_, state_);
-        if (!state_) {
-            oom_ = true;
-            return;
-        }
-
         state_->setFixedSlot(ins->slot(), ins->value());
         ins->block()->insertBefore(ins->toInstruction(), state_);
     } else {
@@ -565,18 +541,13 @@ ObjectMemoryView::visitStoreSlot(MStoreSlot* ins)
     MSlots* slots = ins->slots()->toSlots();
     if (slots->object() != obj_) {
         // Guard objects are replaced when they are visited.
-        MOZ_ASSERT(!slots->object()->isGuardShape() || slots->object()->toGuardShape()->object() != obj_);
+        MOZ_ASSERT(!slots->object()->isGuardShape() || slots->object()->toGuardShape()->obj() != obj_);
         return;
     }
 
     // Clone the state and update the slot value.
     if (state_->hasDynamicSlot(ins->slot())) {
         state_ = BlockState::Copy(alloc_, state_);
-        if (!state_) {
-            oom_ = true;
-            return;
-        }
-
         state_->setDynamicSlot(ins->slot(), ins->value());
         ins->block()->insertBefore(ins->toInstruction(), state_);
     } else {
@@ -597,7 +568,7 @@ ObjectMemoryView::visitLoadSlot(MLoadSlot* ins)
     MSlots* slots = ins->slots()->toSlots();
     if (slots->object() != obj_) {
         // Guard objects are replaced when they are visited.
-        MOZ_ASSERT(!slots->object()->isGuardShape() || slots->object()->toGuardShape()->object() != obj_);
+        MOZ_ASSERT(!slots->object()->isGuardShape() || slots->object()->toGuardShape()->obj() != obj_);
         return;
     }
 
@@ -620,7 +591,7 @@ void
 ObjectMemoryView::visitGuardShape(MGuardShape* ins)
 {
     // Skip loads made on other objects.
-    if (ins->object() != obj_)
+    if (ins->obj() != obj_)
         return;
 
     // Replace the shape guard by its object.
@@ -659,7 +630,7 @@ ObjectMemoryView::visitLambda(MLambda* ins)
 static size_t
 GetOffsetOf(MDefinition* index, size_t width, int32_t baseOffset)
 {
-    int32_t idx = index->toConstant()->toInt32();
+    int32_t idx = index->toConstant()->value().toInt32();
     MOZ_ASSERT(idx >= 0);
     MOZ_ASSERT(baseOffset >= 0 && size_t(baseOffset) >= UnboxedPlainObject::offsetOfData());
     return idx * width + baseOffset - UnboxedPlainObject::offsetOfData();
@@ -677,11 +648,6 @@ ObjectMemoryView::storeOffset(MInstruction* ins, size_t offset, MDefinition* val
     // Clone the state and update the slot value.
     MOZ_ASSERT(state_->hasOffset(offset));
     state_ = BlockState::Copy(alloc_, state_);
-    if (!state_) {
-        oom_ = true;
-        return;
-    }
-
     state_->setOffset(offset, value);
     ins->block()->insertBefore(ins, state_);
 
@@ -780,10 +746,13 @@ IndexOf(MDefinition* ins, int32_t* res)
         indexDef = indexDef->toBoundsCheck()->index();
     if (indexDef->isToInt32())
         indexDef = indexDef->toToInt32()->getOperand(0);
-    MConstant* indexDefConst = indexDef->maybeConstantValue();
-    if (!indexDefConst || indexDefConst->type() != MIRType::Int32)
+    if (!indexDef->isConstantValue())
         return false;
-    *res = indexDefConst->toInt32();
+
+    Value index = indexDef->constantValue();
+    if (!index.isInt32())
+        return false;
+    *res = index.toInt32();
     return true;
 }
 
@@ -796,7 +765,7 @@ IsElementEscaped(MElements* def, uint32_t arraySize)
     JitSpewIndent spewIndent(JitSpew_Escape);
 
     for (MUseIterator i(def->usesBegin()); i != def->usesEnd(); i++) {
-        // The MIRType::Elements cannot be captured in a resume point as
+        // The MIRType_Elements cannot be captured in a resume point as
         // it does not represent a value allocation.
         MDefinition* access = (*i)->consumer()->toDefinition();
 
@@ -858,7 +827,7 @@ IsElementEscaped(MElements* def, uint32_t arraySize)
             }
 
             // We are not yet encoding magic hole constants in resume points.
-            if (access->toStoreElement()->value()->type() == MIRType::MagicHole) {
+            if (access->toStoreElement()->value()->type() == MIRType_MagicHole) {
                 JitSpewDef(JitSpew_Escape, "has a store element with an magic-hole constant\n", access);
                 return true;
             }
@@ -894,9 +863,9 @@ IsElementEscaped(MElements* def, uint32_t arraySize)
 static bool
 IsArrayEscaped(MInstruction* ins)
 {
-    MOZ_ASSERT(ins->type() == MIRType::Object);
+    MOZ_ASSERT(ins->type() == MIRType_Object);
     MOZ_ASSERT(ins->isNewArray());
-    uint32_t length = ins->toNewArray()->length();
+    uint32_t count = ins->toNewArray()->count();
 
     JitSpewDef(JitSpew_Escape, "Check array\n", ins);
     JitSpewIndent spewIndent(JitSpew_Escape);
@@ -912,7 +881,7 @@ IsArrayEscaped(MInstruction* ins)
         return true;
     }
 
-    if (length >= 16) {
+    if (count >= 16) {
         JitSpew(JitSpew_Escape, "Array has too many elements");
         return true;
     }
@@ -936,7 +905,7 @@ IsArrayEscaped(MInstruction* ins)
           case MDefinition::Op_Elements: {
             MElements *elem = def->toElements();
             MOZ_ASSERT(elem->object() == ins);
-            if (IsElementEscaped(elem, length)) {
+            if (IsElementEscaped(elem, count)) {
                 JitSpewDef(JitSpew_Escape, "is indirectly escaped by\n", elem);
                 return true;
             }
@@ -982,8 +951,6 @@ class ArrayMemoryView : public MDefinitionVisitorDefaultNoop
     // Used to improve the memory usage by sharing common modification.
     const MResumePoint* lastResumePoint_;
 
-    bool oom_;
-
   public:
     ArrayMemoryView(TempAllocator& alloc, MInstruction* arr);
 
@@ -998,8 +965,6 @@ class ArrayMemoryView : public MDefinitionVisitorDefaultNoop
 #else
     void assertSuccess() {}
 #endif
-
-    bool oom() const { return oom_; }
 
   private:
     bool isArrayStateElements(MDefinition* elements);
@@ -1024,8 +989,7 @@ ArrayMemoryView::ArrayMemoryView(TempAllocator& alloc, MInstruction* arr)
     arr_(arr),
     startBlock_(arr->block()),
     state_(nullptr),
-    lastResumePoint_(nullptr),
-    oom_(false)
+    lastResumePoint_(nullptr)
 {
     // Annotate snapshots RValue such that we recover the store first.
     arr_->setIncompleteObject();
@@ -1052,9 +1016,6 @@ ArrayMemoryView::initStartingState(BlockState** pState)
 
     // Create a new block state and insert at it at the location of the new array.
     BlockState* state = BlockState::New(alloc_, arr_, undefinedVal_, initLength);
-    if (!state)
-        return false;
-
     startBlock_->insertAfter(arr_, state);
 
     // Hold out of resume point until it is visited.
@@ -1102,9 +1063,6 @@ ArrayMemoryView::mergeIntoSuccessorState(MBasicBlock* curr, MBasicBlock* succ,
         // nodes.  These would later be removed by the removal of redundant phi
         // nodes.
         succState = BlockState::Copy(alloc_, state_);
-        if (!succState)
-            return false;
-
         size_t numPreds = succ->numPredecessors();
         for (size_t index = 0; index < state_->numElements(); index++) {
             MPhi* phi = MPhi::New(alloc_);
@@ -1208,11 +1166,6 @@ ArrayMemoryView::visitStoreElement(MStoreElement* ins)
     int32_t index;
     MOZ_ALWAYS_TRUE(IndexOf(ins, &index));
     state_ = BlockState::Copy(alloc_, state_);
-    if (!state_) {
-        oom_ = true;
-        return;
-    }
-
     state_->setElement(index, ins->value());
     ins->block()->insertBefore(ins, state_);
 
@@ -1250,12 +1203,7 @@ ArrayMemoryView::visitSetInitializedLength(MSetInitializedLength* ins)
     // To obtain the length, we need to add 1 to it, and thus we need to create
     // a new constant that we register in the ArrayState.
     state_ = BlockState::Copy(alloc_, state_);
-    if (!state_) {
-        oom_ = true;
-        return;
-    }
-
-    int32_t initLengthValue = ins->index()->maybeConstantValue()->toInt32() + 1;
+    int32_t initLengthValue = ins->index()->constantValue().toInt32() + 1;
     MConstant* initLength = MConstant::New(alloc_, Int32Value(initLengthValue));
     ins->block()->insertBefore(ins, initLength);
     ins->block()->insertBefore(ins, state_);

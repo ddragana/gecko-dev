@@ -26,6 +26,9 @@ nsresult
 RDFBindingSet::AddBinding(nsIAtom* aVar, nsIAtom* aRef, nsIRDFResource* aPredicate)
 {
     RDFBinding* newbinding = new RDFBinding(aRef, aPredicate, aVar);
+    if (! newbinding)
+        return NS_ERROR_OUT_OF_MEMORY;
+
     if (mFirst) {
         RDFBinding* binding = mFirst;
 
@@ -205,6 +208,9 @@ nsBindingValues::SetBindingSet(RDFBindingSet* aBindings)
     int32_t count = aBindings->Count();
     if (count) {
         mValues = new nsCOMPtr<nsIRDFNode>[count];
+        if (!mValues)
+            return NS_ERROR_OUT_OF_MEMORY;
+
         mBindings = aBindings;
     }
     else {

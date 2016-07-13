@@ -9,26 +9,26 @@
 #include "base/basictypes.h"
 #include "mozilla/Logging.h"
 
+extern PRLogModuleInfo* GetDataChannelLog();
+#undef LOG
+#define LOG(args) MOZ_LOG(GetDataChannelLog(), mozilla::LogLevel::Debug, args)
+
+
 #include "nsDOMDataChannelDeclarations.h"
 #include "nsDOMDataChannel.h"
 #include "nsIDOMDataChannel.h"
+#include "nsIDOMMessageEvent.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/MessageEvent.h"
-#include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
 
 #include "nsError.h"
+#include "nsAutoPtr.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIScriptObjectPrincipal.h"
-#include "nsProxyRelease.h"
 
 #include "DataChannel.h"
-#include "DataChannelLog.h"
-
-#undef LOG
-#define LOG(args) MOZ_LOG(mozilla::gDataChannelLog, mozilla::LogLevel::Debug, args)
 
 // Since we've moved the windows.h include down here, we have to explicitly
 // undef GetBinaryType, otherwise we'll get really odd conflicts
@@ -44,7 +44,7 @@ nsDOMDataChannel::~nsDOMDataChannel()
   // Don't call us anymore!  Likely isn't an issue (or maybe just less of
   // one) once we block GC until all the (appropriate) onXxxx handlers
   // are dropped. (See WebRTC spec)
-  LOG(("%p: Close()ing %p", this, mDataChannel.get()));
+  LOG(("Close()ing %p", mDataChannel.get()));
   mDataChannel->SetListener(nullptr, nullptr);
   mDataChannel->Close();
 }
@@ -73,17 +73,16 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsDOMDataChannel)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 nsDOMDataChannel::nsDOMDataChannel(already_AddRefed<mozilla::DataChannel>& aDataChannel,
-                                   nsPIDOMWindowInner* aWindow)
-  : DOMEventTargetHelper(aWindow)
+                                   nsPIDOMWindow* aWindow)
+  : DOMEventTargetHelper(aWindow && aWindow->IsOuterWindow() ?
+                           aWindow->GetCurrentInnerWindow() : aWindow)
   , mDataChannel(aDataChannel)
   , mBinaryType(DC_BINARY_TYPE_BLOB)
-  , mCheckMustKeepAlive(true)
-  , mSentClose(false)
 {
 }
 
 nsresult
-nsDOMDataChannel::Init(nsPIDOMWindowInner* aDOMWindow)
+nsDOMDataChannel::Init(nsPIDOMWindow* aDOMWindow)
 {
   nsresult rv;
   nsAutoString urlParam;
@@ -140,6 +139,19 @@ NS_IMETHODIMP
 nsDOMDataChannel::GetId(uint16_t *aId)
 {
   *aId = Id();
+  return NS_OK;
+}
+
+uint16_t
+nsDOMDataChannel::Stream() const
+{
+  return mDataChannel->GetStream();
+}
+
+NS_IMETHODIMP
+nsDOMDataChannel::GetStream(uint16_t *aStream)
+{
+  *aStream = Stream();
   return NS_OK;
 }
 
@@ -201,23 +213,11 @@ nsDOMDataChannel::BufferedAmount() const
   return mDataChannel->GetBufferedAmount();
 }
 
-uint32_t
-nsDOMDataChannel::BufferedAmountLowThreshold() const
-{
-  return mDataChannel->GetBufferedAmountLowThreshold();
-}
-
 NS_IMETHODIMP
 nsDOMDataChannel::GetBufferedAmount(uint32_t* aBufferedAmount)
 {
   *aBufferedAmount = BufferedAmount();
   return NS_OK;
-}
-
-void
-nsDOMDataChannel::SetBufferedAmountLowThreshold(uint32_t aThreshold)
-{
-  mDataChannel->SetBufferedAmountLowThreshold(aThreshold);
 }
 
 NS_IMETHODIMP nsDOMDataChannel::GetBinaryType(nsAString & aBinaryType)
@@ -252,7 +252,6 @@ NS_IMETHODIMP
 nsDOMDataChannel::Close()
 {
   mDataChannel->Close();
-  UpdateMustKeepAlive();
   return NS_OK;
 }
 
@@ -402,14 +401,20 @@ nsDOMDataChannel::DoOnMessageAvailable(const nsACString& aData,
     jsData.setString(jsString);
   }
 
-  RefPtr<MessageEvent> event = NS_NewDOMMessageEvent(this, nullptr, nullptr);
+  nsCOMPtr<nsIDOMEvent> event;
+  rv = NS_NewDOMMessageEvent(getter_AddRefs(event), this, nullptr, nullptr);
+  NS_ENSURE_SUCCESS(rv,rv);
 
-  event->InitMessageEvent(nullptr, NS_LITERAL_STRING("message"), false, false,
-                          jsData, mOrigin, EmptyString(), nullptr, nullptr);
+  nsCOMPtr<nsIDOMMessageEvent> messageEvent = do_QueryInterface(event);
+  rv = messageEvent->InitMessageEvent(NS_LITERAL_STRING("message"),
+                                      false, false,
+                                      jsData, mOrigin, EmptyString(),
+                                      nullptr);
+  NS_ENSURE_SUCCESS(rv,rv);
   event->SetTrusted(true);
 
   LOG(("%p(%p): %s - Dispatching\n",this,(void*)mDataChannel,__FUNCTION__));
-  rv = DispatchDOMEvent(nullptr, static_cast<Event*>(event), nullptr, nullptr);
+  rv = DispatchDOMEvent(nullptr, event, nullptr, nullptr);
   if (NS_FAILED(rv)) {
     NS_WARNING("Failed to dispatch the message event!!!");
   }
@@ -442,9 +447,13 @@ nsDOMDataChannel::OnSimpleEvent(nsISupports* aContext, const nsAString& aName)
     return NS_OK;
   }
 
-  RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
+  nsCOMPtr<nsIDOMEvent> event;
+  rv = NS_NewDOMEvent(getter_AddRefs(event), this, nullptr, nullptr);
+  NS_ENSURE_SUCCESS(rv,rv);
 
-  event->InitEvent(aName, false, false);
+  rv = event->InitEvent(aName, false, false);
+  NS_ENSURE_SUCCESS(rv,rv);
+
   event->SetTrusted(true);
 
   return DispatchDOMEvent(nullptr, event, nullptr, nullptr);
@@ -461,36 +470,9 @@ nsDOMDataChannel::OnChannelConnected(nsISupports* aContext)
 nsresult
 nsDOMDataChannel::OnChannelClosed(nsISupports* aContext)
 {
-  nsresult rv;
-  // so we don't have to worry if we're notified from different paths in
-  // the underlying code
-  if (!mSentClose) {
-    LOG(("%p(%p): %s - Dispatching\n",this,(void*)mDataChannel,__FUNCTION__));
-
-    rv = OnSimpleEvent(aContext, NS_LITERAL_STRING("close"));
-    // no more events can happen
-    mSentClose = true;
-  } else {
-    rv = NS_OK;
-  }
-  DontKeepAliveAnyMore();
-  return rv;
-}
-
-nsresult
-nsDOMDataChannel::OnBufferLow(nsISupports* aContext)
-{
   LOG(("%p(%p): %s - Dispatching\n",this,(void*)mDataChannel,__FUNCTION__));
 
-  return OnSimpleEvent(aContext, NS_LITERAL_STRING("bufferedamountlow"));
-}
-
-nsresult
-nsDOMDataChannel::NotBuffered(nsISupports* aContext)
-{
-  // In the rare case that we held off GC to let the buffer drain
-  UpdateMustKeepAlive();
-  return NS_OK;
+  return OnSimpleEvent(aContext, NS_LITERAL_STRING("close"));
 }
 
 void
@@ -499,104 +481,13 @@ nsDOMDataChannel::AppReady()
   mDataChannel->AppReady();
 }
 
-//-----------------------------------------------------------------------------
-// Methods that keep alive the DataChannel object when:
-//   1. the object has registered event listeners that can be triggered
-//      ("strong event listeners");
-//   2. there are outgoing not sent messages.
-//-----------------------------------------------------------------------------
-
-void
-nsDOMDataChannel::UpdateMustKeepAlive()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!mCheckMustKeepAlive) {
-    return;
-  }
-
-  bool shouldKeepAlive = false;
-  uint16_t readyState = mDataChannel->GetReadyState();
-
-  switch (readyState)
-  {
-    case DataChannel::CONNECTING:
-    case DataChannel::WAITING_TO_OPEN:
-    {
-      if (mListenerManager &&
-          (mListenerManager->HasListenersFor(nsGkAtoms::onopen) ||
-           mListenerManager->HasListenersFor(nsGkAtoms::onmessage) ||
-           mListenerManager->HasListenersFor(nsGkAtoms::onerror) ||
-           mListenerManager->HasListenersFor(nsGkAtoms::onbufferedamountlow) ||
-           mListenerManager->HasListenersFor(nsGkAtoms::onclose))) {
-        shouldKeepAlive = true;
-      }
-    }
-    break;
-
-    case DataChannel::OPEN:
-    case DataChannel::CLOSING:
-    {
-      if (mDataChannel->GetBufferedAmount() != 0 ||
-          (mListenerManager &&
-           (mListenerManager->HasListenersFor(nsGkAtoms::onmessage) ||
-            mListenerManager->HasListenersFor(nsGkAtoms::onerror) ||
-            mListenerManager->HasListenersFor(nsGkAtoms::onbufferedamountlow) ||
-            mListenerManager->HasListenersFor(nsGkAtoms::onclose)))) {
-        shouldKeepAlive = true;
-      }
-    }
-    break;
-
-    case DataChannel::CLOSED:
-    {
-      shouldKeepAlive = false;
-    }
-  }
-
-  if (mSelfRef && !shouldKeepAlive) {
-    // release our self-reference (safely) by putting it in an event (always)
-    NS_ReleaseOnMainThread(mSelfRef.forget(), true);
-  } else if (!mSelfRef && shouldKeepAlive) {
-    mSelfRef = this;
-  }
-}
-
-void
-nsDOMDataChannel::DontKeepAliveAnyMore()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (mSelfRef) {
-    // Since we're on MainThread, force an eventloop trip to avoid deleting ourselves.
-    NS_ReleaseOnMainThread(mSelfRef.forget(), true);
-  }
-
-  mCheckMustKeepAlive = false;
-}
-
-void
-nsDOMDataChannel::EventListenerAdded(nsIAtom* aType)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  UpdateMustKeepAlive();
-}
-
-void
-nsDOMDataChannel::EventListenerRemoved(nsIAtom* aType)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  UpdateMustKeepAlive();
-}
-
-
 /* static */
 nsresult
 NS_NewDOMDataChannel(already_AddRefed<mozilla::DataChannel>&& aDataChannel,
-                     nsPIDOMWindowInner* aWindow,
+                     nsPIDOMWindow* aWindow,
                      nsIDOMDataChannel** aDomDataChannel)
 {
-  RefPtr<nsDOMDataChannel> domdc =
+  nsRefPtr<nsDOMDataChannel> domdc =
     new nsDOMDataChannel(aDataChannel, aWindow);
 
   nsresult rv = domdc->Init(aWindow);

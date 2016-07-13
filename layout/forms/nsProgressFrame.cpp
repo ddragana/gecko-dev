@@ -19,10 +19,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLProgressElement.h"
 #include "nsContentList.h"
-#include "nsCSSPseudoElements.h"
 #include "nsStyleSet.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "nsThemeConstants.h"
 #include <algorithm>
 
@@ -58,12 +55,6 @@ nsProgressFrame::DestroyFrom(nsIFrame* aDestructRoot)
   nsContainerFrame::DestroyFrom(aDestructRoot);
 }
 
-nsIAtom*
-nsProgressFrame::GetType() const
-{
-  return nsGkAtoms::progressFrame;
-}
-
 nsresult
 nsProgressFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
@@ -72,8 +63,8 @@ nsProgressFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   mBarDiv = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Associate ::-moz-progress-bar pseudo-element to the anonymous child.
-  CSSPseudoElementType pseudoType = CSSPseudoElementType::mozProgressBar;
-  RefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
+  nsCSSPseudoElements::Type pseudoType = nsCSSPseudoElements::ePseudo_mozProgressBar;
+  nsRefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
     ResolvePseudoElementStyle(mContent->AsElement(), pseudoType,
                               StyleContext(), mBarDiv->AsElement());
 
@@ -257,8 +248,9 @@ nsProgressFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
 nscoord
 nsProgressFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 {
-  RefPtr<nsFontMetrics> fontMet =
-    nsLayoutUtils::GetFontMetricsForFrame(this, 1.0f);
+  nsRefPtr<nsFontMetrics> fontMet;
+  NS_ENSURE_SUCCESS(
+      nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fontMet)), 0);
 
   nscoord minISize = fontMet->Font().size; // 1em
 
@@ -279,25 +271,22 @@ nsProgressFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 bool
 nsProgressFrame::ShouldUseNativeStyle() const
 {
-  nsIFrame* barFrame = mBarDiv->GetPrimaryFrame();
-
   // Use the native style if these conditions are satisfied:
   // - both frames use the native appearance;
   // - neither frame has author specified rules setting the border or the
   //   background.
   return StyleDisplay()->mAppearance == NS_THEME_PROGRESSBAR &&
-         !PresContext()->HasAuthorSpecifiedRules(this,
+         mBarDiv->GetPrimaryFrame()->StyleDisplay()->mAppearance == NS_THEME_PROGRESSBAR_CHUNK &&
+         !PresContext()->HasAuthorSpecifiedRules(const_cast<nsProgressFrame*>(this),
                                                  NS_AUTHOR_SPECIFIED_BORDER | NS_AUTHOR_SPECIFIED_BACKGROUND) &&
-         barFrame &&
-         barFrame->StyleDisplay()->mAppearance == NS_THEME_PROGRESSCHUNK &&
-         !PresContext()->HasAuthorSpecifiedRules(barFrame,
+         !PresContext()->HasAuthorSpecifiedRules(mBarDiv->GetPrimaryFrame(),
                                                  NS_AUTHOR_SPECIFIED_BORDER | NS_AUTHOR_SPECIFIED_BACKGROUND);
 }
 
 Element*
-nsProgressFrame::GetPseudoElement(CSSPseudoElementType aType)
+nsProgressFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
 {
-  if (aType == CSSPseudoElementType::mozProgressBar) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozProgressBar) {
     return mBarDiv;
   }
 

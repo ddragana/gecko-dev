@@ -6,7 +6,7 @@
 
 toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
-if 'gtk' in toolkit:
+if CONFIG['MOZ_ENABLE_GTK']:
     DIRS += ['atk']
 elif toolkit == 'windows':
     DIRS += ['windows']
@@ -21,5 +21,3 @@ if CONFIG['MOZ_XUL']:
     DIRS += ['xul']
 
 TEST_DIRS += ['tests/mochitest']
-
-BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']

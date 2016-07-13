@@ -6,8 +6,8 @@ const SUGGEST_PREF = "browser.urlbar.suggest.searches";
 const SUGGEST_ENABLED_PREF = "browser.search.suggest.enabled";
 const SUGGEST_RESTRICT_TOKEN = "$";
 
-var suggestionsFn;
-var previousSuggestionsFn;
+let suggestionsFn;
+let previousSuggestionsFn;
 
 function setSuggestionsFn(fn) {
   previousSuggestionsFn = suggestionsFn;
@@ -52,10 +52,7 @@ add_task(function* disabled_urlbarSuggestions() {
   Services.prefs.setBoolPref(SUGGEST_ENABLED_PREF, true);
   yield check_autocomplete({
     search: "hello",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("hello", { engineName: ENGINE_NAME, heuristic: true }),
-    ],
+    matches: [],
   });
   yield cleanUpSuggestions();
 });
@@ -65,10 +62,7 @@ add_task(function* disabled_allSuggestions() {
   Services.prefs.setBoolPref(SUGGEST_ENABLED_PREF, false);
   yield check_autocomplete({
     search: "hello",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("hello", { engineName: ENGINE_NAME, heuristic: true }),
-    ],
+    matches: [],
   });
   yield cleanUpSuggestions();
 });
@@ -78,10 +72,8 @@ add_task(function* disabled_privateWindow() {
   Services.prefs.setBoolPref(SUGGEST_ENABLED_PREF, true);
   yield check_autocomplete({
     search: "hello",
-    searchParam: "private-window enable-actions",
-    matches: [
-      makeSearchMatch("hello", { engineName: ENGINE_NAME, heuristic: true }),
-    ],
+    matches: [],
+    searchParam: "private-window",
   });
   yield cleanUpSuggestions();
 });
@@ -92,10 +84,8 @@ add_task(function* singleWordQuery() {
 
   yield check_autocomplete({
     search: "hello",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("hello", { engineName: ENGINE_NAME, heuristic: true }),
-      { uri: makeActionURI(("searchengine"), {
+    matches: [{
+      uri: makeActionURI(("searchengine"), {
         engineName: ENGINE_NAME,
         input: "hello foo",
         searchQuery: "hello",
@@ -126,10 +116,8 @@ add_task(function* multiWordQuery() {
 
   yield check_autocomplete({
     search: "hello world",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("hello world", { engineName: ENGINE_NAME, heuristic: true }),
-      { uri: makeActionURI(("searchengine"), {
+    matches: [{
+      uri: makeActionURI(("searchengine"), {
         engineName: ENGINE_NAME,
         input: "hello world foo",
         searchQuery: "hello world",
@@ -165,10 +153,8 @@ add_task(function* suffixMatch() {
 
   yield check_autocomplete({
     search: "hello",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("hello", { engineName: ENGINE_NAME, heuristic: true }),
-      { uri: makeActionURI(("searchengine"), {
+    matches: [{
+      uri: makeActionURI(("searchengine"), {
         engineName: ENGINE_NAME,
         input: "baz hello",
         searchQuery: "hello",
@@ -202,10 +188,8 @@ add_task(function* queryIsNotASubstring() {
 
   yield check_autocomplete({
     search: "hello",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("hello", { engineName: ENGINE_NAME, heuristic: true }),
-      { uri: makeActionURI(("searchengine"), {
+    matches: [{
+      uri: makeActionURI(("searchengine"), {
         engineName: ENGINE_NAME,
         input: "aaa",
         searchQuery: "hello",
@@ -257,9 +241,7 @@ add_task(function* restrictToken() {
   // the visit and bookmark.
   yield check_autocomplete({
     search: "hello",
-    searchParam: "enable-actions",
     matches: [
-      makeSearchMatch("hello", { engineName: ENGINE_NAME, heuristic: true }),
       {
         uri: NetUtil.newURI("http://example.com/hello-visit"),
         title: "hello visit",
@@ -297,10 +279,7 @@ add_task(function* restrictToken() {
   // Now do a restricted search to make sure only suggestions appear.
   yield check_autocomplete({
     search: SUGGEST_RESTRICT_TOKEN + " hello",
-    searchParam: "enable-actions",
     matches: [
-      // TODO (bug 1177895) This is wrong.
-      makeSearchMatch(SUGGEST_RESTRICT_TOKEN + " hello", { engineName: ENGINE_NAME, heuristic: true }),
       {
         uri: makeActionURI(("searchengine"), {
           engineName: ENGINE_NAME,
@@ -385,9 +364,7 @@ add_task(function* mixup_frecency() {
   yield check_autocomplete({
     checkSorting: true,
     search: "frecency",
-    searchParam: "enable-actions",
     matches: [
-      makeSearchMatch("frecency", { engineName: ENGINE_NAME, heuristic: true }),
       { uri: NetUtil.newURI("http://example.com/hi3"),
         title: "high frecency 3",
         style: [ "bookmark" ] },
@@ -432,127 +409,6 @@ add_task(function* mixup_frecency() {
         title: "low frecency 1" },
       { uri: NetUtil.newURI("http://example.com/lo0"),
         title: "low frecency 0" },
-    ],
-  });
-
-  yield cleanUpSuggestions();
-});
-
-add_task(function* prohibit_suggestions() {
-  Services.prefs.setBoolPref(SUGGEST_PREF, true);
-
-  yield check_autocomplete({
-    search: "localhost",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("localhost", { engineName: ENGINE_NAME, heuristic: true }),
-      {
-        uri: makeActionURI(("searchengine"), {
-          engineName: ENGINE_NAME,
-          input: "localhost foo",
-          searchQuery: "localhost",
-          searchSuggestion: "localhost foo",
-        }),
-        title: ENGINE_NAME,
-        style: ["action", "searchengine"],
-        icon: "",
-      },
-      {
-        uri: makeActionURI(("searchengine"), {
-          engineName: ENGINE_NAME,
-          input: "localhost bar",
-          searchQuery: "localhost",
-          searchSuggestion: "localhost bar",
-        }),
-        title: ENGINE_NAME,
-        style: ["action", "searchengine"],
-        icon: "",
-      },
-    ],
-  });
-  Services.prefs.setBoolPref("browser.fixup.domainwhitelist.localhost", true);
-  do_register_cleanup(() => {
-    Services.prefs.clearUserPref("browser.fixup.domainwhitelist.localhost");
-  });
-  yield check_autocomplete({
-    search: "localhost",
-    searchParam: "enable-actions",
-    matches: [
-      makeVisitMatch("localhost", "http://localhost/", { heuristic: true }),
-    ],
-  });
-
-  yield check_autocomplete({
-    search: "1.2.3.4",
-    searchParam: "enable-actions",
-    matches: [
-      makeVisitMatch("1.2.3.4", "http://1.2.3.4/", { heuristic: true }),
-    ],
-  });
-  yield check_autocomplete({
-    search: "[2001::1]:30",
-    searchParam: "enable-actions",
-    matches: [
-      makeVisitMatch("[2001::1]:30", "http://[2001::1]:30/", { heuristic: true }),
-    ],
-  });
-  yield check_autocomplete({
-    search: "user:pass@test",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("user:pass@test", { engineName: ENGINE_NAME, heuristic: true }),
-    ],
-  });
-  yield check_autocomplete({
-    search: "test/test",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("test/test", { engineName: ENGINE_NAME, heuristic: true }),
-    ],
-  });
-  yield check_autocomplete({
-    search: "data:text/plain,Content",
-    searchParam: "enable-actions",
-    matches: [
-      makeVisitMatch("data:text/plain,Content", "data:text/plain,Content", { heuristic: true }),
-    ],
-  });
-
-  yield check_autocomplete({
-    search: "a",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("a", { engineName: ENGINE_NAME, heuristic: true }),
-    ],
-  });
-
-  yield cleanUpSuggestions();
-});
-
-add_task(function* avoid_url_suggestions() {
-  Services.prefs.setBoolPref(SUGGEST_PREF, true);
-
-  setSuggestionsFn(searchStr => {
-    let suffixes = [".com", "/test", ":1]", "@test", ". com"];
-    return suffixes.map(s => searchStr + s);
-  });
-
-  yield check_autocomplete({
-    search: "test",
-    searchParam: "enable-actions",
-    matches: [
-      makeSearchMatch("test", { engineName: ENGINE_NAME, heuristic: true }),
-      {
-        uri: makeActionURI(("searchengine"), {
-          engineName: ENGINE_NAME,
-          input: "test. com",
-          searchQuery: "test",
-          searchSuggestion: "test. com",
-        }),
-        title: ENGINE_NAME,
-        style: ["action", "searchengine"],
-        icon: "",
-      },
     ],
   });
 

@@ -1,11 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-var RIL = {};
+let RIL = {};
 Cu.import("resource://gre/modules/ril_consts.js", RIL);
 
 XPCOMUtils.defineLazyServiceGetter(this, "gStkCmdFactory",
@@ -16,10 +16,10 @@ XPCOMUtils.defineLazyServiceGetter(this, "gStkCmdFactory",
  * Name space for RILSystemMessenger.jsm. Only initialized after first call to
  * newRILSystemMessenger.
  */
-var RSM;
+let RSM;
 
-var gReceivedMsgType = null;
-var gReceivedMessage = null;
+let gReceivedMsgType = null;
+let gReceivedMessage = null;
 
 /**
  * Create a new RILSystemMessenger instance.

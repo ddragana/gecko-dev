@@ -4,10 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/Directory.h"
 #include "mozilla/dom/FileList.h"
 #include "mozilla/dom/FileListBinding.h"
-#include "mozilla/dom/File.h"
 
 namespace mozilla {
 namespace dom {
@@ -22,6 +20,30 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(FileList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(FileList)
+
+/* static */ already_AddRefed<FileList>
+FileList::Create(nsISupports* aParent, FileListClonedData* aData)
+{
+  MOZ_ASSERT(aData);
+
+  nsRefPtr<FileList> fileList = new FileList(aParent);
+
+  const nsTArray<nsRefPtr<BlobImpl>>& blobImpls = aData->BlobImpls();
+  for (uint32_t i = 0; i < blobImpls.Length(); ++i) {
+    const nsRefPtr<BlobImpl>& blobImpl = blobImpls[i];
+    MOZ_ASSERT(blobImpl);
+    MOZ_ASSERT(blobImpl->IsFile());
+
+    nsRefPtr<File> file = File::Create(aParent, blobImpl);
+    MOZ_ASSERT(file);
+
+    if (NS_WARN_IF(!fileList->Append(file))) {
+      return nullptr;
+    }
+  }
+
+  return fileList.forget();
+}
 
 JSObject*
 FileList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
@@ -38,49 +60,26 @@ FileList::GetLength(uint32_t* aLength)
 }
 
 NS_IMETHODIMP
-FileList::Item(uint32_t aIndex, nsISupports** aValue)
+FileList::Item(uint32_t aIndex, nsISupports** aFile)
 {
   nsCOMPtr<nsIDOMBlob> file = Item(aIndex);
-  file.forget(aValue);
+  file.forget(aFile);
   return NS_OK;
 }
 
-File*
-FileList::Item(uint32_t aIndex) const
+already_AddRefed<FileListClonedData>
+FileList::CreateClonedData() const
 {
-  if (aIndex >= mFiles.Length()) {
-    return nullptr;
-  }
-
-  return mFiles[aIndex];
-}
-
-File*
-FileList::IndexedGetter(uint32_t aIndex, bool& aFound) const
-{
-  aFound = aIndex < mFiles.Length();
-  return Item(aIndex);
-}
-
-void
-FileList::ToSequence(Sequence<RefPtr<File>>& aSequence,
-                     ErrorResult& aRv) const
-{
-  MOZ_ASSERT(aSequence.IsEmpty());
-  if (mFiles.IsEmpty()) {
-    return;
-  }
-
-  if (!aSequence.SetLength(mFiles.Length(),
-                           mozilla::fallible_t())) {
-    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return;
-  }
-
+  nsTArray<nsRefPtr<BlobImpl>> blobImpls;
   for (uint32_t i = 0; i < mFiles.Length(); ++i) {
-    aSequence[i] = mFiles[i];
+    blobImpls.AppendElement(mFiles[i]->Impl());
   }
+
+  nsRefPtr<FileListClonedData> data = new FileListClonedData(blobImpls);
+  return data.forget();
 }
+
+NS_IMPL_ISUPPORTS0(FileListClonedData)
 
 } // namespace dom
 } // namespace mozilla

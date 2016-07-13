@@ -115,11 +115,6 @@ DOM4_MSG_DEF(BtAuthFailureError,  "Authentication failure",  NS_ERROR_DOM_BLUETO
 DOM4_MSG_DEF(BtRmtDevDownError,   "Remote device down",  NS_ERROR_DOM_BLUETOOTH_RMT_DEV_DOWN)
 DOM4_MSG_DEF(BtAuthRejectedError, "Authentication rejected",  NS_ERROR_DOM_BLUETOOTH_AUTH_REJECTED)
 
-/* Web Animations errors */
-
-DOM4_MSG_DEF(NotSupportedError, "Animation to or from an underlying value is not yet supported.", NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR)
-DOM4_MSG_DEF(NotSupportedError, "Animation with no effect is not yet supported.", NS_ERROR_DOM_ANIM_NO_EFFECT_ERR)
-
 /* common global codes (from nsError.h) */
 
 DOM_MSG_DEF(NS_OK                                  , "Success")
@@ -151,13 +146,4 @@ DOM4_MSG_DEF(InvalidStateError, "A mutation operation was attempted on a file st
 DOM4_MSG_DEF(AbortError, "A request was aborted, for example through a call to FileHandle.abort.", NS_ERROR_DOM_FILEHANDLE_ABORT_ERR)
 DOM4_MSG_DEF(QuotaExceededError, "The current file handle exceeded its quota limitations.", NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR)
 
-/* Push API errors. */
-DOM4_MSG_DEF(InvalidStateError, "Invalid service worker registration.", NS_ERROR_DOM_PUSH_INVALID_REGISTRATION_ERR)
-DOM4_MSG_DEF(NotAllowedError, "User denied permission to use the Push API.", NS_ERROR_DOM_PUSH_DENIED_ERR)
-DOM4_MSG_DEF(AbortError, "Error retrieving push subscription.", NS_ERROR_DOM_PUSH_ABORT_ERR)
-DOM4_MSG_DEF(NetworkError, "Push service unreachable.", NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE)
-DOM4_MSG_DEF(InvalidAccessError, "Invalid raw ECDSA P-256 public key.", NS_ERROR_DOM_PUSH_INVALID_KEY_ERR)
-DOM4_MSG_DEF(InvalidStateError, "A subscription with a different application server key already exists.", NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR)
-
 DOM_MSG_DEF(NS_ERROR_DOM_JS_EXCEPTION, "A callback threw an exception")
-DOM_MSG_DEF(NS_ERROR_DOM_DOMEXCEPTION, "A DOMException was thrown")

@@ -7,16 +7,17 @@
 #ifndef mozilla_dom_FileSystemPermissionRequest_h
 #define mozilla_dom_FileSystemPermissionRequest_h
 
+#include "nsAutoPtr.h"
 #include "nsIRunnable.h"
 #include "nsIContentPermissionPrompt.h"
 #include "nsString.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
 
-class FileSystemTaskChildBase;
+class FileSystemTaskBase;
 
 class FileSystemPermissionRequest final
   : public nsIContentPermissionRequest
@@ -25,28 +26,21 @@ class FileSystemPermissionRequest final
 public:
   // Request permission for the given task.
   static void
-  RequestForTask(FileSystemTaskChildBase* aTask);
+  RequestForTask(FileSystemTaskBase* aTask);
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICONTENTPERMISSIONREQUEST
   NS_DECL_NSIRUNNABLE
-
 private:
-  explicit FileSystemPermissionRequest(FileSystemTaskChildBase* aTask);
+  explicit FileSystemPermissionRequest(FileSystemTaskBase* aTask);
 
+  virtual
   ~FileSystemPermissionRequest();
-
-  // Once the permission check has been done, we must run the task using IPC and
-  // PBackground. This method checks if the PBackground thread is ready to
-  // receive the task and in case waits for ActorCreated() to be called using
-  // the PBackgroundInitializer class (see FileSystemPermissionRequest.cpp).
-  void
-  ScheduleTask();
 
   nsCString mPermissionType;
   nsCString mPermissionAccess;
-  RefPtr<FileSystemTaskChildBase> mTask;
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsRefPtr<FileSystemTaskBase> mTask;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCOMPtr<nsIContentPermissionRequester> mRequester;
 };

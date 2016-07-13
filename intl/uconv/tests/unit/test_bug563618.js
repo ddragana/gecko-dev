@@ -4,10 +4,10 @@
  *
  */
 
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 const test = [
 // 0: 0x8e followed by hi byte, not valid JIS X 0201
@@ -27,16 +27,27 @@ const test = [
 //    expected: one replacement character, invalid byte not eaten
 	       "abcdefghijklmnopqrstuvwxyz12test03\uFFFDfoobar"]];
 
+const IOService = Components.Constructor("@mozilla.org/network/io-service;1",
+                                         "nsIIOService");
 const ConverterInputStream =
       Components.Constructor("@mozilla.org/intl/converter-input-stream;1",
                              "nsIConverterInputStream",
                              "init");
+const ios = new IOService();
 
 function testCase(testText, expectedText, bufferLength, charset)
 {
   var dataURI = "data:text/plain;charset=" + charset + "," + testText;
-  var channel = NetUtil.newChannel({uri: dataURI, loadUsingSystemPrincipal: true});
-  var testInputStream = channel.open2();
+
+  var channel = ios.newChannel2(dataURI,
+                                "",
+                                null,
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER);
+  var testInputStream = channel.open();
   var testConverter = new ConverterInputStream(testInputStream,
                                                charset,
                                                bufferLength,

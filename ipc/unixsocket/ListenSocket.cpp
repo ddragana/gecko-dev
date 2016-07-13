@@ -10,7 +10,6 @@
 #include "DataSocket.h"
 #include "ListenSocketConsumer.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/unused.h"
 #include "nsISupportsImpl.h" // for MOZ_COUNT_CTOR, MOZ_COUNT_DTOR
 #include "nsXULAppAPI.h"
 #include "UnixSocketConnector.h"
@@ -77,7 +76,7 @@ private:
   /**
    * Connector object used to create the connection we are currently using.
    */
-  UniquePtr<UnixSocketConnector> mConnector;
+  nsAutoPtr<UnixSocketConnector> mConnector;
 
   /**
    * If true, do not requeue whatever task we're running
@@ -126,7 +125,7 @@ ListenSocketIO::~ListenSocketIO()
 UnixSocketConnector*
 ListenSocketIO::GetConnector() const
 {
-  return mConnector.get();
+  return mConnector;
 }
 
 void
@@ -175,7 +174,7 @@ ListenSocketIO::OnListening()
 
   /* We signal a successful 'connection' to a local address for listening. */
   GetConsumerThread()->PostTask(
-    MakeAndAddRef<SocketEventTask>(this, SocketEventTask::CONNECT_SUCCESS));
+    FROM_HERE, new SocketEventTask(this, SocketEventTask::CONNECT_SUCCESS));
 }
 
 void
@@ -197,7 +196,7 @@ ListenSocketIO::FireSocketError()
 
   // Tell the consumer thread we've errored
   GetConsumerThread()->PostTask(
-    MakeAndAddRef<SocketEventTask>(this, SocketEventTask::CONNECT_ERROR));
+    FROM_HERE, new SocketEventTask(this, SocketEventTask::CONNECT_ERROR));
 }
 
 void
@@ -289,14 +288,13 @@ public:
     MOZ_COUNT_DTOR(ListenTask);
   }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(!GetIO()->IsConsumerThread());
 
     if (!IsCanceled()) {
       GetIO()->Listen(mCOSocketIO);
     }
-    return NS_OK;
   }
 
 private:
@@ -362,28 +360,27 @@ ListenSocket::Listen(ConnectionOrientedSocket* aCOSocket)
   // We first prepare the connection-oriented socket with a
   // socket connector and a socket I/O class.
 
-  UniquePtr<UnixSocketConnector> connector;
-  nsresult rv = mIO->GetConnector()->Duplicate(connector);
+  nsAutoPtr<UnixSocketConnector> connector;
+  nsresult rv = mIO->GetConnector()->Duplicate(*connector.StartAssignment());
   if (NS_FAILED(rv)) {
     return rv;
   }
 
-  ConnectionOrientedSocketIO* io;
-  rv = aCOSocket->PrepareAccept(connector.get(),
+  nsAutoPtr<ConnectionOrientedSocketIO> io;
+  rv = aCOSocket->PrepareAccept(connector,
                                 mIO->GetConsumerThread(), mIO->GetIOLoop(),
-                                io);
+                                *io.StartAssignment());
   if (NS_FAILED(rv)) {
     return rv;
   }
-
-  Unused << connector.release(); // now owned by |io|
+  connector.forget(); // now owned by |io|
 
   // Then we start listening for connection requests.
 
   SetConnectionStatus(SOCKET_LISTENING);
 
   mIO->GetIOLoop()->PostTask(
-    MakeAndAddRef<ListenSocketIO::ListenTask>(mIO, io));
+    FROM_HERE, new ListenSocketIO::ListenTask(mIO, io.forget()));
 
   return NS_OK;
 }
@@ -403,7 +400,7 @@ ListenSocket::Close()
   // the relationship here so any future calls to listen or connect
   // will create a new implementation.
   mIO->ShutdownOnConsumerThread();
-  mIO->GetIOLoop()->PostTask(MakeAndAddRef<SocketIOShutdownTask>(mIO));
+  mIO->GetIOLoop()->PostTask(FROM_HERE, new SocketIOShutdownTask(mIO));
   mIO = nullptr;
 
   NotifyDisconnect();

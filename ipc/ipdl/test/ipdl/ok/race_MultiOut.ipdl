@@ -1,10 +1,10 @@
 protocol race_MultiOut {
 child:
-    async Msg1();
-    async Msg1_();
+    Msg1();
+    Msg1_();
 parent:
-    async Msg2();
-    async Msg2_();
+    Msg2();
+    Msg2_();
 
 start state S15:
     send Msg1 goto S16 or S17;

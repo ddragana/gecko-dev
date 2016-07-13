@@ -16,8 +16,7 @@ function checkTabContents(browser) {
     let Ci = Components.interfaces;
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory.QueryInterface(Ci.nsISHistoryInternal);
-    Assert.ok(history && history.count == 1 && content.document.documentURI == "about:mozilla",
-      "expected tab contents found");
+    return history && history.count == 1 && content.document.documentURI == "about:mozilla";
   });
 }
 
@@ -44,13 +43,13 @@ add_task(function* () {
 
   // Purge session history.
   Services.obs.notifyObservers(null, "browser:purge-session-history", "");
-  yield checkTabContents(browser);
+  ok((yield checkTabContents(browser)), "expected tab contents found");
   ok(tab2.hasAttribute("pending"), "tab is still pending");
 
   // Kick off tab restoration.
   gBrowser.selectedTab = tab2;
   yield promiseTabRestored(tab2);
-  yield checkTabContents(browser2);
+  ok((yield checkTabContents(browser2)), "expected tab contents found");
   ok(!tab2.hasAttribute("pending"), "tab is not pending anymore");
 
   // Cleanup.

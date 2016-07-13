@@ -10,9 +10,7 @@
 #include "LayersLogging.h"                              // for Stringify
 #include "mozilla/gfx/Point.h"                          // for Point4D
 #include "mozilla/layers/APZThreadUtils.h"              // for AssertOnCompositorThread
-#include "mozilla/layers/APZUtils.h"                    // for CompleteAsyncTransform
 #include "mozilla/layers/AsyncCompositionManager.h"     // for ViewTransform::operator Matrix4x4()
-#include "mozilla/layers/AsyncDragMetrics.h"            // for AsyncDragMetrics
 #include "nsPrintfCString.h"                            // for nsPrintfCString
 #include "UnitTransforms.h"                             // for ViewAs
 
@@ -25,14 +23,9 @@ HitTestingTreeNode::HitTestingTreeNode(AsyncPanZoomController* aApzc,
   : mApzc(aApzc)
   , mIsPrimaryApzcHolder(aIsPrimaryHolder)
   , mLayersId(aLayersId)
-  , mScrollViewId(FrameMetrics::NULL_SCROLL_ID)
-  , mScrollDir(Layer::NONE)
-  , mScrollSize(0)
-  , mIsScrollbarContainer(false)
-  , mFixedPosTarget(FrameMetrics::NULL_SCROLL_ID)
   , mOverride(EventRegionsOverride::NoOverride)
 {
-if (mIsPrimaryApzcHolder) {
+  if (mIsPrimaryApzcHolder) {
     MOZ_ASSERT(mApzc);
   }
   MOZ_ASSERT(!mApzc || mApzc->GetLayersId() == mLayersId);
@@ -91,52 +84,6 @@ HitTestingTreeNode::SetLastChild(HitTestingTreeNode* aChild)
       aChild->SetApzcParent(parent);
     }
   }
-}
-
-void
-HitTestingTreeNode::SetScrollbarData(FrameMetrics::ViewID aScrollViewId,
-                                     Layer::ScrollDirection aDir,
-                                     int32_t aScrollSize,
-                                     bool aIsScrollContainer)
-{
-  mScrollViewId = aScrollViewId;
-  mScrollDir = aDir;
-  mScrollSize = aScrollSize;;
-  mIsScrollbarContainer = aIsScrollContainer;
-}
-
-bool
-HitTestingTreeNode::MatchesScrollDragMetrics(const AsyncDragMetrics& aDragMetrics) const
-{
-  return ((mScrollDir == Layer::HORIZONTAL &&
-           aDragMetrics.mDirection == AsyncDragMetrics::HORIZONTAL) ||
-          (mScrollDir == Layer::VERTICAL &&
-           aDragMetrics.mDirection == AsyncDragMetrics::VERTICAL)) &&
-         mScrollViewId == aDragMetrics.mViewId;
-}
-
-int32_t
-HitTestingTreeNode::GetScrollSize() const
-{
-  return mScrollSize;
-}
-
-bool
-HitTestingTreeNode::IsScrollbarNode() const
-{
-  return mIsScrollbarContainer || (mScrollDir != Layer::NONE);
-}
-
-void
-HitTestingTreeNode::SetFixedPosData(FrameMetrics::ViewID aFixedPosTarget)
-{
-  mFixedPosTarget = aFixedPosTarget;
-}
-
-FrameMetrics::ViewID
-HitTestingTreeNode::GetFixedPosTarget() const
-{
-  return mFixedPosTarget;
 }
 
 void
@@ -208,6 +155,19 @@ HitTestingTreeNode::GetNearestContainingApzc() const
   return nullptr;
 }
 
+AsyncPanZoomController*
+HitTestingTreeNode::GetNearestContainingApzcWithSameLayersId() const
+{
+  for (const HitTestingTreeNode* n = this;
+       n && n->mLayersId == mLayersId;
+       n = n->GetParent()) {
+    if (n->GetApzc()) {
+      return n->GetApzc();
+    }
+  }
+  return nullptr;
+}
+
 bool
 HitTestingTreeNode::IsPrimaryHolder() const
 {
@@ -222,7 +182,7 @@ HitTestingTreeNode::GetLayersId() const
 
 void
 HitTestingTreeNode::SetHitTestData(const EventRegions& aRegions,
-                                   const CSSTransformMatrix& aTransform,
+                                   const gfx::Matrix4x4& aTransform,
                                    const Maybe<ParentLayerIntRegion>& aClipRegion,
                                    const EventRegionsOverride& aOverride)
 {
@@ -243,12 +203,11 @@ Maybe<LayerPoint>
 HitTestingTreeNode::Untransform(const ParentLayerPoint& aPoint) const
 {
   // convert into Layer coordinate space
-  LayerToParentLayerMatrix4x4 transform = mTransform *
-      CompleteAsyncTransform(
-        mApzc
-      ? mApzc->GetCurrentAsyncTransformWithOverscroll(AsyncPanZoomController::NORMAL)
-      : AsyncTransformComponentMatrix());
-  return UntransformBy(transform.Inverse(), aPoint);
+  gfx::Matrix4x4 localTransform = mTransform;
+  if (mApzc) {
+    localTransform = localTransform * mApzc->GetCurrentAsyncTransformWithOverscroll();
+  }
+  return UntransformTo<LayerPixel>(localTransform.Inverse(), aPoint);
 }
 
 HitTestResult
@@ -278,17 +237,6 @@ HitTestingTreeNode::HitTest(const ParentLayerPoint& aPoint) const
   {
     return HitTestResult::HitDispatchToContentRegion;
   }
-  if (gfxPrefs::TouchActionEnabled()) {
-    if (mEventRegions.mNoActionRegion.Contains(point.x, point.y)) {
-      return HitTestResult::HitLayerTouchActionNone;
-    }
-    if (mEventRegions.mHorizontalPanRegion.Contains(point.x, point.y)) {
-      return HitTestResult::HitLayerTouchActionPanX;
-    }
-    if (mEventRegions.mVerticalPanRegion.Contains(point.x, point.y)) {
-      return HitTestResult::HitLayerTouchActionPanY;
-    }
-  }
   return HitTestResult::HitLayer;
 }
 
@@ -304,12 +252,11 @@ HitTestingTreeNode::Dump(const char* aPrefix) const
   if (mPrevSibling) {
     mPrevSibling->Dump(aPrefix);
   }
-  printf_stderr("%sHitTestingTreeNode (%p) APZC (%p) g=(%s) %s%s%sr=(%s) t=(%s) c=(%s)\n",
+  printf_stderr("%sHitTestingTreeNode (%p) APZC (%p) g=(%s) %s%sr=(%s) t=(%s) c=(%s)\n",
     aPrefix, this, mApzc.get(),
     mApzc ? Stringify(mApzc->GetGuid()).c_str() : nsPrintfCString("l=%" PRIu64, mLayersId).get(),
     (mOverride & EventRegionsOverride::ForceDispatchToContent) ? "fdtc " : "",
     (mOverride & EventRegionsOverride::ForceEmptyHitRegion) ? "fehr " : "",
-    (mFixedPosTarget != FrameMetrics::NULL_SCROLL_ID) ? nsPrintfCString("fixed=%" PRIu64 " ", mFixedPosTarget).get() : "",
     Stringify(mEventRegions).c_str(), Stringify(mTransform).c_str(),
     mClipRegion ? Stringify(mClipRegion.ref()).c_str() : "none");
   if (mLastChild) {

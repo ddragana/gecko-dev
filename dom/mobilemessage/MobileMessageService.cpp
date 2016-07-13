@@ -4,9 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "SmsMessageInternal.h"
-#include "MmsMessageInternal.h"
-#include "MobileMessageThreadInternal.h"
+#include "SmsMessage.h"
+#include "MmsMessage.h"
+#include "MobileMessageThread.h"
 #include "MobileMessageService.h"
 #include "DeletedMessageInfo.h"
 
@@ -31,23 +31,23 @@ MobileMessageService::CreateSmsMessage(int32_t aId,
                                        uint64_t aDeliveryTimestamp,
                                        bool aRead,
                                        JSContext* aCx,
-                                       nsISmsMessage** aMessage)
+                                       nsIDOMMozSmsMessage** aMessage)
 {
-  return SmsMessageInternal::Create(aId,
-                                    aThreadId,
-                                    aIccId,
-                                    aDelivery,
-                                    aDeliveryStatus,
-                                    aSender,
-                                    aReceiver,
-                                    aBody,
-                                    aMessageClass,
-                                    aTimestamp,
-                                    aSentTimestamp,
-                                    aDeliveryTimestamp,
-                                    aRead,
-                                    aCx,
-                                    aMessage);
+  return SmsMessage::Create(aId,
+                            aThreadId,
+                            aIccId,
+                            aDelivery,
+                            aDeliveryStatus,
+                            aSender,
+                            aReceiver,
+                            aBody,
+                            aMessageClass,
+                            aTimestamp,
+                            aSentTimestamp,
+                            aDeliveryTimestamp,
+                            aRead,
+                            aCx,
+                            aMessage);
 }
 
 NS_IMETHODIMP
@@ -67,25 +67,25 @@ MobileMessageService::CreateMmsMessage(int32_t aId,
                                        uint64_t aExpiryDate,
                                        bool aReadReportRequested,
                                        JSContext* aCx,
-                                       nsIMmsMessage** aMessage)
+                                       nsIDOMMozMmsMessage** aMessage)
 {
-  return MmsMessageInternal::Create(aId,
-                                    aThreadId,
-                                    aIccId,
-                                    aDelivery,
-                                    aDeliveryInfo,
-                                    aSender,
-                                    aReceivers,
-                                    aTimestamp,
-                                    aSentTimestamp,
-                                    aRead,
-                                    aSubject,
-                                    aSmil,
-                                    aAttachments,
-                                    aExpiryDate,
-                                    aReadReportRequested,
-                                    aCx,
-                                    aMessage);
+  return MmsMessage::Create(aId,
+                            aThreadId,
+                            aIccId,
+                            aDelivery,
+                            aDeliveryInfo,
+                            aSender,
+                            aReceivers,
+                            aTimestamp,
+                            aSentTimestamp,
+                            aRead,
+                            aSubject,
+                            aSmil,
+                            aAttachments,
+                            aExpiryDate,
+                            aReadReportRequested,
+                            aCx,
+                            aMessage);
 }
 
 NS_IMETHODIMP
@@ -97,17 +97,17 @@ MobileMessageService::CreateThread(uint64_t aId,
                                    uint64_t aUnreadCount,
                                    const nsAString& aLastMessageType,
                                    JSContext* aCx,
-                                   nsIMobileMessageThread** aThread)
+                                   nsIDOMMozMobileMessageThread** aThread)
 {
-  return MobileMessageThreadInternal::Create(aId,
-                                             aParticipants,
-                                             aTimestamp,
-                                             aLastMessageSubject,
-                                             aBody,
-                                             aUnreadCount,
-                                             aLastMessageType,
-                                             aCx,
-                                             aThread);
+  return MobileMessageThread::Create(aId,
+                                     aParticipants,
+                                     aTimestamp,
+                                     aLastMessageSubject,
+                                     aBody,
+                                     aUnreadCount,
+                                     aLastMessageType,
+                                     aCx,
+                                     aThread);
 }
 
 NS_IMETHODIMP

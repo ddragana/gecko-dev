@@ -8,7 +8,7 @@
 #include <string.h>
 #include "nsColor.h"
 #include "nsColorNames.h"
-#include "mozilla/Snprintf.h"
+#include "prprf.h"
 #include "nsString.h"
 #include "mozilla/ArrayUtils.h"
 
@@ -66,15 +66,14 @@ void RunColorTests() {
     uint8_t g = NS_GET_G(rgb);
     uint8_t b = NS_GET_B(rgb);
     uint8_t a = NS_GET_A(rgb);
-    char cbuf[50];
     if (a != UINT8_MAX) {
-      snprintf_literal(cbuf, "%02x%02x%02x%02x", r, g, b, a);
-    } else {
-      snprintf_literal(cbuf, "%02x%02x%02x", r, g, b);
+      // NS_HexToRGB() can not handle a color with alpha channel
+      rgb = NS_RGB(r, g, b);
     }
+    char cbuf[50];
+    PR_snprintf(cbuf, sizeof(cbuf), "%02x%02x%02x", r, g, b);
     nscolor hexrgb;
-    ASSERT_TRUE(NS_HexToRGBA(NS_ConvertASCIItoUTF16(cbuf),
-                             nsHexColorType::AllowAlpha, &hexrgb)) <<
+    ASSERT_TRUE(NS_HexToRGB(NS_ConvertASCIItoUTF16(cbuf), &hexrgb)) <<
       "hex conversion to color of '" << cbuf << "'";
     ASSERT_TRUE(hexrgb == rgb);
   }

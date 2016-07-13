@@ -7,13 +7,14 @@
 //   Methods for GLSL to HLSL translation for uniforms and interface blocks.
 //
 
-#include "compiler/translator/UniformHLSL.h"
-
+#include "OutputHLSL.h"
+#include "common/blocklayout.h"
 #include "common/utilities.h"
+#include "compiler/translator/UniformHLSL.h"
 #include "compiler/translator/StructureHLSL.h"
-#include "compiler/translator/UtilsHLSL.h"
-#include "compiler/translator/blocklayoutHLSL.h"
 #include "compiler/translator/util.h"
+#include "compiler/translator/UtilsHLSL.h"
+#include "compiler/translator/TranslatorHLSL.h"
 
 namespace sh
 {
@@ -60,13 +61,13 @@ static TString InterfaceBlockStructName(const TInterfaceBlock &interfaceBlock)
     return DecoratePrivate(interfaceBlock.name()) + "_type";
 }
 
-UniformHLSL::UniformHLSL(StructureHLSL *structureHLSL, ShShaderOutput outputType, const std::vector<Uniform> &uniforms)
+UniformHLSL::UniformHLSL(StructureHLSL *structureHLSL, TranslatorHLSL *translator)
     : mUniformRegister(0),
       mInterfaceBlockRegister(0),
       mSamplerRegister(0),
       mStructureHLSL(structureHLSL),
-      mOutputType(outputType),
-      mUniforms(uniforms)
+      mOutputType(translator->getOutputType()),
+      mUniforms(translator->getUniforms())
 {}
 
 void UniformHLSL::reserveUniformRegisters(unsigned int registerCount)
@@ -89,12 +90,11 @@ const Uniform *UniformHLSL::findUniformByName(const TString &name) const
         }
     }
 
-    return nullptr;
+    UNREACHABLE();
+    return NULL;
 }
 
-unsigned int UniformHLSL::assignUniformRegister(const TType &type,
-                                                const TString &name,
-                                                unsigned int *outRegisterCount)
+unsigned int UniformHLSL::declareUniformAndAssignRegister(const TType &type, const TString &name)
 {
     unsigned int registerIndex = (IsSampler(type.getBasicType()) ? mSamplerRegister : mUniformRegister);
 
@@ -105,7 +105,7 @@ unsigned int UniformHLSL::assignUniformRegister(const TType &type,
 
     unsigned int registerCount = HLSLVariableRegisterCount(*uniform, mOutputType);
 
-    if (gl::IsSamplerType(uniform->type))
+    if (gl::IsSampler(uniform->type))
     {
         mSamplerRegister += registerCount;
     }
@@ -113,240 +113,48 @@ unsigned int UniformHLSL::assignUniformRegister(const TType &type,
     {
         mUniformRegister += registerCount;
     }
-    if (outRegisterCount)
-    {
-        *outRegisterCount = registerCount;
-    }
+
     return registerIndex;
 }
 
-unsigned int UniformHLSL::assignSamplerInStructUniformRegister(const TType &type,
-                                                               const TString &name,
-                                                               unsigned int *outRegisterCount)
+TString UniformHLSL::uniformsHeader(ShShaderOutput outputType, const ReferencedSymbols &referencedUniforms)
 {
-    // Sampler that is a field of a uniform structure.
-    ASSERT(IsSampler(type.getBasicType()));
-    unsigned int registerIndex = mSamplerRegister;
-    mUniformRegisterMap[std::string(name.c_str())] = registerIndex;
-    unsigned int registerCount = type.isArray() ? type.getArraySize() : 1;
-    mSamplerRegister += registerCount;
-    if (outRegisterCount)
-    {
-        *outRegisterCount = registerCount;
-    }
-    return registerIndex;
-}
+    TString uniforms;
 
-void UniformHLSL::outputHLSLSamplerUniformGroup(
-    TInfoSinkBase &out,
-    const HLSLTextureSamplerGroup textureGroup,
-    const TVector<const TIntermSymbol *> &group,
-    const TMap<const TIntermSymbol *, TString> &samplerInStructSymbolsToAPINames,
-    unsigned int *groupTextureRegisterIndex)
-{
-    if (group.empty())
+    for (ReferencedSymbols::const_iterator uniformIt = referencedUniforms.begin();
+         uniformIt != referencedUniforms.end(); uniformIt++)
     {
-        return;
-    }
-    unsigned int groupRegisterCount = 0;
-    for (const TIntermSymbol *uniform : group)
-    {
-        const TType &type   = uniform->getType();
-        const TString &name = uniform->getSymbol();
-        unsigned int registerCount;
+        const TIntermSymbol &uniform = *uniformIt->second;
+        const TType &type = uniform.getType();
+        const TString &name = uniform.getSymbol();
 
-        // The uniform might be just a regular sampler or one extracted from a struct.
-        unsigned int samplerArrayIndex = 0u;
-        const Uniform *uniformByName = findUniformByName(name);
-        if (uniformByName)
+        unsigned int registerIndex = declareUniformAndAssignRegister(type, name);
+
+        if (outputType == SH_HLSL11_OUTPUT && IsSampler(type.getBasicType()))   // Also declare the texture
         {
-            samplerArrayIndex = assignUniformRegister(type, name, &registerCount);
+            uniforms += "uniform " + SamplerString(type) + " sampler_" + DecorateUniform(name, type) + ArrayString(type) +
+                        " : register(s" + str(registerIndex) + ");\n";
+
+            uniforms += "uniform " + TextureString(type) + " texture_" + DecorateUniform(name, type) + ArrayString(type) +
+                        " : register(t" + str(registerIndex) + ");\n";
         }
         else
         {
-            ASSERT(samplerInStructSymbolsToAPINames.find(uniform) !=
-                   samplerInStructSymbolsToAPINames.end());
-            samplerArrayIndex = assignSamplerInStructUniformRegister(
-                type, samplerInStructSymbolsToAPINames.at(uniform), &registerCount);
-        }
-        groupRegisterCount += registerCount;
+            const TStructure *structure = type.getStruct();
+            // If this is a nameless struct, we need to use its full definition, rather than its (empty) name.
+            // TypeString() will invoke defineNameless in this case; qualifier prefixes are unnecessary for 
+            // nameless structs in ES, as nameless structs cannot be used anywhere that layout qualifiers are
+            // permitted.
+            const TString &typeName = ((structure && !structure->name().empty()) ?
+                                        QualifiedStructNameString(*structure, false, false) : TypeString(type));
 
-        if (type.isArray())
-        {
-            out << "static const uint " << DecorateIfNeeded(uniform->getName()) << ArrayString(type)
-                << " = {";
-            for (int i = 0; i < type.getArraySize(); ++i)
-            {
-                if (i > 0)
-                    out << ", ";
-                out << (samplerArrayIndex + i);
-            }
-            out << "};\n";
-        }
-        else
-        {
-            out << "static const uint " << DecorateIfNeeded(uniform->getName()) << " = "
-                << samplerArrayIndex << ";\n";
-        }
-    }
-    TString suffix = TextureGroupSuffix(textureGroup);
-    // Since HLSL_TEXTURE_2D is the first group, it has a fixed offset of zero.
-    if (textureGroup != HLSL_TEXTURE_2D)
-    {
-        out << "static const uint textureIndexOffset" << suffix << " = "
-            << (*groupTextureRegisterIndex) << ";\n";
-        out << "static const uint samplerIndexOffset" << suffix << " = "
-            << (*groupTextureRegisterIndex) << ";\n";
-    }
-    out << "uniform " << TextureString(textureGroup) << " textures" << suffix << "["
-        << groupRegisterCount << "]"
-        << " : register(t" << (*groupTextureRegisterIndex) << ");\n";
-    out << "uniform " << SamplerString(textureGroup) << " samplers" << suffix << "["
-        << groupRegisterCount << "]"
-        << " : register(s" << (*groupTextureRegisterIndex) << ");\n";
-    *groupTextureRegisterIndex += groupRegisterCount;
-}
+            const TString &registerString = TString("register(") + UniformRegisterPrefix(type) + str(registerIndex) + ")";
 
-void UniformHLSL::outputHLSL4_0_FL9_3Sampler(TInfoSinkBase &out,
-                                             const TType &type,
-                                             const TName &name,
-                                             const unsigned int registerIndex)
-{
-    out << "uniform " << SamplerString(type.getBasicType()) << " sampler_"
-        << DecorateUniform(name, type) << ArrayString(type) << " : register(s" << str(registerIndex)
-        << ");\n";
-    out << "uniform " << TextureString(type.getBasicType()) << " texture_"
-        << DecorateUniform(name, type) << ArrayString(type) << " : register(t" << str(registerIndex)
-        << ");\n";
-}
-
-void UniformHLSL::outputUniform(TInfoSinkBase &out,
-                                const TType &type,
-                                const TName &name,
-                                const unsigned int registerIndex)
-{
-    const TStructure *structure = type.getStruct();
-    // If this is a nameless struct, we need to use its full definition, rather than its (empty)
-    // name.
-    // TypeString() will invoke defineNameless in this case; qualifier prefixes are unnecessary for
-    // nameless structs in ES, as nameless structs cannot be used anywhere that layout qualifiers
-    // are permitted.
-    const TString &typeName = ((structure && !structure->name().empty())
-                                   ? QualifiedStructNameString(*structure, false, false)
-                                   : TypeString(type));
-
-    const TString &registerString =
-        TString("register(") + UniformRegisterPrefix(type) + str(registerIndex) + ")";
-
-    out << "uniform " << typeName << " ";
-
-    out << DecorateUniform(name, type);
-
-    out << ArrayString(type) << " : " << registerString << ";\n";
-}
-
-void UniformHLSL::uniformsHeader(TInfoSinkBase &out,
-                                 ShShaderOutput outputType,
-                                 const ReferencedSymbols &referencedUniforms)
-{
-    if (!referencedUniforms.empty())
-    {
-        out << "// Uniforms\n\n";
-    }
-    // In the case of HLSL 4, sampler uniforms need to be grouped by type before the code is
-    // written. They are grouped based on the combination of the HLSL texture type and
-    // HLSL sampler type, enumerated in HLSLTextureSamplerGroup.
-    TVector<TVector<const TIntermSymbol *>> groupedSamplerUniforms(HLSL_TEXTURE_MAX + 1);
-    TMap<const TIntermSymbol *, TString> samplerInStructSymbolsToAPINames;
-    for (auto &uniformIt : referencedUniforms)
-    {
-        // Output regular uniforms. Group sampler uniforms by type.
-        const TIntermSymbol &uniform = *uniformIt.second;
-        const TType &type            = uniform.getType();
-        const TName &name            = uniform.getName();
-
-        if (outputType == SH_HLSL_4_1_OUTPUT && IsSampler(type.getBasicType()))
-        {
-            HLSLTextureSamplerGroup group = TextureGroup(type.getBasicType());
-            groupedSamplerUniforms[group].push_back(&uniform);
-        }
-        else if (outputType == SH_HLSL_4_0_FL9_3_OUTPUT && IsSampler(type.getBasicType()))
-        {
-            unsigned int registerIndex = assignUniformRegister(type, name.getString(), nullptr);
-            outputHLSL4_0_FL9_3Sampler(out, type, name, registerIndex);
-        }
-        else
-        {
-            if (type.isStructureContainingSamplers())
-            {
-                TVector<TIntermSymbol *> samplerSymbols;
-                TMap<TIntermSymbol *, TString> symbolsToAPINames;
-                int arrayOfStructsSize = type.isArray() ? type.getArraySize() : 0;
-                type.createSamplerSymbols("angle_" + name.getString(), name.getString(),
-                                          arrayOfStructsSize, &samplerSymbols, &symbolsToAPINames);
-                for (TIntermSymbol *sampler : samplerSymbols)
-                {
-                    const TType &samplerType = sampler->getType();
-
-                    // Will use angle_ prefix instead of regular prefix.
-                    sampler->setInternal(true);
-                    const TName &samplerName = sampler->getName();
-
-                    if (outputType == SH_HLSL_4_1_OUTPUT)
-                    {
-                        HLSLTextureSamplerGroup group = TextureGroup(samplerType.getBasicType());
-                        groupedSamplerUniforms[group].push_back(sampler);
-                        samplerInStructSymbolsToAPINames[sampler] = symbolsToAPINames[sampler];
-                    }
-                    else if (outputType == SH_HLSL_4_0_FL9_3_OUTPUT)
-                    {
-                        unsigned int registerIndex = assignSamplerInStructUniformRegister(
-                            samplerType, symbolsToAPINames[sampler], nullptr);
-                        outputHLSL4_0_FL9_3Sampler(out, samplerType, samplerName, registerIndex);
-                    }
-                    else
-                    {
-                        ASSERT(outputType == SH_HLSL_3_0_OUTPUT);
-                        unsigned int registerIndex = assignSamplerInStructUniformRegister(
-                            samplerType, symbolsToAPINames[sampler], nullptr);
-                        outputUniform(out, samplerType, samplerName, registerIndex);
-                    }
-                }
-            }
-            unsigned int registerIndex = assignUniformRegister(type, name.getString(), nullptr);
-            outputUniform(out, type, name, registerIndex);
+            uniforms += "uniform " + typeName + " " + DecorateUniform(name, type) + ArrayString(type) + " : " + registerString + ";\n";
         }
     }
 
-    if (outputType == SH_HLSL_4_1_OUTPUT)
-    {
-        unsigned int groupTextureRegisterIndex = 0;
-        // TEXTURE_2D is special, index offset is assumed to be 0 and omitted in that case.
-        ASSERT(HLSL_TEXTURE_MIN == HLSL_TEXTURE_2D);
-        for (int groupId = HLSL_TEXTURE_MIN; groupId < HLSL_TEXTURE_MAX; ++groupId)
-        {
-            outputHLSLSamplerUniformGroup(
-                out, HLSLTextureSamplerGroup(groupId), groupedSamplerUniforms[groupId],
-                samplerInStructSymbolsToAPINames, &groupTextureRegisterIndex);
-        }
-    }
-}
-
-void UniformHLSL::samplerMetadataUniforms(TInfoSinkBase &out, const char *reg)
-{
-    // If mSamplerRegister is 0 the shader doesn't use any textures.
-    if (mSamplerRegister > 0)
-    {
-        out << "    struct SamplerMetadata\n"
-               "    {\n"
-               "        int baseLevel;\n"
-               "        int internalFormatBits;\n"
-               "        int wrapModes;\n"
-               "        int padding;\n"
-               "    };\n"
-               "    SamplerMetadata samplerMetadata["
-            << mSamplerRegister << "] : packoffset(" << reg << ");\n";
-    }
+    return (uniforms.empty() ? "" : ("// Uniforms\n\n" + uniforms));
 }
 
 TString UniformHLSL::interfaceBlocksHeader(const ReferencedSymbols &referencedInterfaceBlocks)

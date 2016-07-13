@@ -29,13 +29,8 @@ const options = require('@loader/options');
 const loaderModule = require('toolkit/loader');
 const { getTabForBrowser } = require('../tabs/utils');
 
-const appInfo = Cc["@mozilla.org/xre/app-info;1"].
-                getService(Ci.nsIXULRuntime);
-
-exports.useRemoteProcesses = appInfo.browserTabsRemoteAutostart;
-
 // Chose the right function for resolving relative a module id
-var moduleResolve;
+let moduleResolve;
 if (options.isNative) {
   moduleResolve = (id, requirer) => loaderModule.nodeResolve(id, requirer, { rootURI: options.rootURI });
 }
@@ -43,13 +38,13 @@ else {
   moduleResolve = loaderModule.resolve;
 }
 // Build the sorted path mapping structure that resolveURI requires
-var pathMapping = Object.keys(options.paths)
+let pathMapping = Object.keys(options.paths)
                         .sort((a, b) => b.length - a.length)
                         .map(p => [p, options.paths[p]]);
 
 // Load the scripts in the child processes
-var { getNewLoaderID } = require('../../framescript/FrameScriptManager.jsm');
-var PATH = options.paths[''];
+let { getNewLoaderID } = require('../../framescript/FrameScriptManager.jsm');
+let PATH = options.paths[''];
 
 const childOptions = omit(options, ['modules', 'globals', 'resolve', 'load']);
 childOptions.modules = {};
@@ -71,29 +66,13 @@ const gmm = Cc['@mozilla.org/globalmessagemanager;1'].
 
 const ns = Namespace();
 
-var processMap = new Map();
+let processMap = new Map();
 
-function definePort(obj, name) {
-  obj.port.emitCPOW = (event, args, cpows = {}) => {
-    let manager = ns(obj).messageManager;
-    if (!manager)
-      return;
-
-    let method = manager instanceof Ci.nsIMessageBroadcaster ?
-                 "broadcastAsyncMessage" : "sendAsyncMessage";
-
-    manager[method](name, { loaderID, event, args }, cpows);
-  };
-
-  obj.port.emit = (event, ...args) => obj.port.emitCPOW(event, args);
-}
-
-function messageReceived({ target, data }) {
-  // Ignore messages from other loaders
+function processMessageReceived({ target, data }) {
   if (data.loaderID != loaderID)
     return;
-
-  emit(this.port, data.event, this, ...data.args);
+  let [event, ...args] = data.args;
+  emit(this.port, event, this, ...args);
 }
 
 // Process represents a gecko process that can load webpages. Each process
@@ -106,13 +85,18 @@ const Process = Class({
     ns(this).id = id;
     ns(this).isRemote = isRemote;
     ns(this).messageManager = messageManager;
-    ns(this).messageReceived = messageReceived.bind(this);
+    ns(this).messageReceived = processMessageReceived.bind(this);
     this.destroy = this.destroy.bind(this);
     ns(this).messageManager.addMessageListener('sdk/remote/process/message', ns(this).messageReceived);
     ns(this).messageManager.addMessageListener('child-process-shutdown', this.destroy);
 
     this.port = new EventTarget();
-    definePort(this, 'sdk/remote/process/message');
+    this.port.emit = (...args) => {
+      ns(this).messageManager.sendAsyncMessage('sdk/remote/process/message', {
+        loaderID,
+        args
+      });
+    };
 
     // Load any remote modules
     for (let module of remoteModules.values())
@@ -143,19 +127,30 @@ const Processes = Class({
   extends: EventTarget,
   initialize: function() {
     EventParent.prototype.initialize.call(this);
-    ns(this).messageManager = ppmm;
 
     this.port = new EventTarget();
-    definePort(this, 'sdk/remote/process/message');
+    this.port.emit = (...args) => {
+      ppmm.broadcastAsyncMessage('sdk/remote/process/message', {
+        loaderID,
+        args
+      });
+    };
   },
 
   getById: function(id) {
     return processMap.get(id);
   }
 });
-var processes = exports.processes = new Processes();
+let processes = exports.processes = new Processes();
 
-var frameMap = new Map();
+let frameMap = new Map();
+
+function frameMessageReceived({ target, data }) {
+  if (data.loaderID != loaderID)
+    return;
+  let [event, ...args] = data.args;
+  emit(this.port, event, this, ...args);
+}
 
 function setFrameProcess(frame, process) {
   ns(frame).process = process;
@@ -174,11 +169,16 @@ const Frame = Class({
     let frameLoader = node.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader;
     ns(this).messageManager = frameLoader.messageManager;
 
-    ns(this).messageReceived = messageReceived.bind(this);
+    ns(this).messageReceived = frameMessageReceived.bind(this);
     ns(this).messageManager.addMessageListener('sdk/remote/frame/message', ns(this).messageReceived);
 
     this.port = new EventTarget();
-    definePort(this, 'sdk/remote/frame/message');
+    this.port.emit = (...args) => {
+      ns(this).messageManager.sendAsyncMessage('sdk/remote/frame/message', {
+        loaderID,
+        args
+      });
+    };
 
     frameMap.set(ns(this).messageManager, this);
   },
@@ -186,9 +186,9 @@ const Frame = Class({
   dispose: function() {
     emit(this, 'detach', this);
     ns(this).messageManager.removeMessageListener('sdk/remote/frame/message', ns(this).messageReceived);
+    ns(this).messageManager = null;
 
     frameMap.delete(ns(this).messageManager);
-    ns(this).messageManager = null;
   },
 
   // Returns the browser or iframe element this frame displays in
@@ -222,10 +222,14 @@ const FrameList = Class({
   extends: EventTarget,
   initialize: function() {
     EventParent.prototype.initialize.call(this);
-    ns(this).messageManager = gmm;
 
     this.port = new EventTarget();
-    definePort(this, 'sdk/remote/frame/message');
+    this.port.emit = (...args) => {
+      gmm.broadcastAsyncMessage('sdk/remote/frame/message', {
+        loaderID,
+        args
+      });
+    };
   },
 
   // Returns the frame for a browser element
@@ -235,9 +239,9 @@ const FrameList = Class({
         return frame;
     }
     return null;
-  },
+  }
 });
-var frames = exports.frames = new FrameList();
+let frames = exports.frames = new FrameList();
 
 // Create the module loader in any existing processes
 ppmm.broadcastAsyncMessage('sdk/remote/process/load', {
@@ -280,7 +284,7 @@ function processStarted({ target, data: { modulePath } }) {
   });
 }
 
-var pendingFrames = new Map();
+let pendingFrames = new Map();
 
 // A new frame has been created in the remote process
 function frameAttached({ target, data }) {
@@ -317,7 +321,7 @@ when(reason => {
   ppmm.broadcastAsyncMessage('sdk/remote/process/unload', { loaderID, reason });
 });
 
-var remoteModules = new Set();
+let remoteModules = new Set();
 
 // Ensures a module is loaded in every child process. It is safe to send 
 // messages to this module immediately after calling this.

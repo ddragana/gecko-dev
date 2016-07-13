@@ -22,14 +22,6 @@ namespace dom {
 class TabParent;
 } // namespace dom
 
-namespace layers {
-struct TextureFactoryIdentifier;
-} // namespace layers
-
-namespace layout {
-class PRenderFrameParent;
-} // namespace layout
-
 /**
  * BrowserElementParent implements a portion of the parent-process side of
  * <iframe mozbrowser>.
@@ -95,12 +87,9 @@ public:
   static OpenWindowResult
   OpenWindowOOP(dom::TabParent* aOpenerTabParent,
                 dom::TabParent* aPopupTabParent,
-                layout::PRenderFrameParent* aRenderFrame,
                 const nsAString& aURL,
                 const nsAString& aName,
-                const nsAString& aFeatures,
-                layers::TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                uint64_t* aLayersId);
+                const nsAString& aFeatures);
 
   /**
    * Handle a window.open call from an in-process <iframe mozbrowser>.
@@ -114,11 +103,31 @@ public:
    *         the platform from handling the open request
    */
   static OpenWindowResult
-  OpenWindowInProcess(nsPIDOMWindowOuter* aOpenerWindow,
+  OpenWindowInProcess(nsIDOMWindow* aOpenerWindow,
                       nsIURI* aURI,
                       const nsAString& aName,
                       const nsACString& aFeatures,
-                      mozIDOMWindowProxy** aReturnWindow);
+                      nsIDOMWindow** aReturnWindow);
+
+  /**
+   * Fire a mozbrowserasyncscroll CustomEvent on the given TabParent's frame element.
+   * This event's detail is an AsyncScrollEventDetail dictionary.
+   *
+   * @param aContentRect: The portion of the page which is currently visible
+   *                      onscreen in CSS pixels.
+   *
+   * @param aContentSize: The content width/height in CSS pixels.
+   *
+   * aContentRect.top + aContentRect.height may be larger than aContentSize.height.
+   * This indicates that the content is over-scrolled, which occurs when the
+   * page "rubber-bands" after being scrolled all the way to the bottom.
+   * Similarly, aContentRect.left + aContentRect.width may be greater than
+   * contentSize.width, and both left and top may be negative.
+   */
+  static bool
+  DispatchAsyncScrollEvent(dom::TabParent* aTabParent,
+                           const CSSRect& aContentRect,
+                           const CSSSize& aContentSize);
 
 private:
   static OpenWindowResult

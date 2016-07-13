@@ -35,11 +35,9 @@ class nsJSUtils
 {
 public:
   static bool GetCallingLocation(JSContext* aContext, nsACString& aFilename,
-                                 uint32_t* aLineno = nullptr,
-                                 uint32_t* aColumn = nullptr);
+                                 uint32_t* aLineno);
   static bool GetCallingLocation(JSContext* aContext, nsAString& aFilename,
-                                 uint32_t* aLineno = nullptr,
-                                 uint32_t* aColumn = nullptr);
+                                 uint32_t* aLineno);
 
   static nsIScriptGlobalObject *GetStaticScriptGlobal(JSObject* aObj);
 
@@ -65,11 +63,18 @@ public:
                                   JSObject** aFunctionObject);
 
   struct MOZ_STACK_CLASS EvaluateOptions {
+    bool coerceToString;
     JS::AutoObjectVector scopeChain;
 
     explicit EvaluateOptions(JSContext* cx)
-      : scopeChain(cx)
+      : coerceToString(false)
+      , scopeChain(cx)
     {}
+
+    EvaluateOptions& setCoerceToString(bool aCoerce) {
+      coerceToString = aCoerce;
+      return *this;
+    }
   };
 
   // aEvaluationGlobal is the global to evaluate in.  The return value
@@ -103,26 +108,11 @@ public:
                                  JS::CompileOptions &aCompileOptions,
                                  void **aOffThreadToken);
 
-  static nsresult CompileModule(JSContext* aCx,
-                                JS::SourceBufferHolder& aSrcBuf,
-                                JS::Handle<JSObject*> aEvaluationGlobal,
-                                JS::CompileOptions &aCompileOptions,
-                                JS::MutableHandle<JSObject*> aModule);
-
-  static nsresult ModuleDeclarationInstantiation(JSContext* aCx,
-                                                 JS::Handle<JSObject*> aModule);
-
-  static nsresult ModuleEvaluation(JSContext* aCx,
-                                   JS::Handle<JSObject*> aModule);
-
   // Returns false if an exception got thrown on aCx.  Passing a null
   // aElement is allowed; that wil produce an empty aScopeChain.
   static bool GetScopeChainForElement(JSContext* aCx,
                                       mozilla::dom::Element* aElement,
                                       JS::AutoObjectVector& aScopeChain);
-
-  static void ResetTimeZone();
-
 private:
   // Implementation for our EvaluateString bits
   static nsresult EvaluateString(JSContext* aCx,
@@ -132,6 +122,25 @@ private:
                                  const EvaluateOptions& aEvaluateOptions,
                                  JS::MutableHandle<JS::Value> aRetValue,
                                  void **aOffThreadToken);
+};
+
+class MOZ_STACK_CLASS AutoDontReportUncaught {
+  JSContext* mContext;
+  bool mWasSet;
+
+public:
+  explicit AutoDontReportUncaught(JSContext* aContext) : mContext(aContext) {
+    MOZ_ASSERT(aContext);
+    mWasSet = JS::ContextOptionsRef(mContext).dontReportUncaught();
+    if (!mWasSet) {
+      JS::ContextOptionsRef(mContext).setDontReportUncaught(true);
+    }
+  }
+  ~AutoDontReportUncaught() {
+    if (!mWasSet) {
+      JS::ContextOptionsRef(mContext).setDontReportUncaught(false);
+    }
+  }
 };
 
 template<typename T>

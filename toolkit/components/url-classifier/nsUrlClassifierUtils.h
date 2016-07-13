@@ -7,6 +7,9 @@
 
 #include "nsAutoPtr.h"
 #include "nsIUrlClassifierUtils.h"
+#include "nsTArray.h"
+#include "nsDataHashtable.h"
+#include "mozilla/Attributes.h"
 
 class nsUrlClassifierUtils final : public nsIUrlClassifierUtils
 {

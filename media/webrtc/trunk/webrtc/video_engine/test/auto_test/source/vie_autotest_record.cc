@@ -156,8 +156,9 @@ int VideoEngineSampleRecordCode(void* window1, void* window2) {
 
   audio_channel = voe_base->CreateChannel();
 
-  rtc::scoped_ptr<webrtc::test::VoiceChannelTransport> voice_channel_transport(
-      new webrtc::test::VoiceChannelTransport(voe_network, audio_channel));
+  webrtc::scoped_ptr<webrtc::test::VoiceChannelTransport>
+      voice_channel_transport(
+          new webrtc::test::VoiceChannelTransport(voe_network, audio_channel));
 
   voice_channel_transport->SetSendDestination(ipAddress, audio_tx_port);
   voice_channel_transport->SetLocalReceiver(audio_rx_port);

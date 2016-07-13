@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
@@ -46,8 +47,8 @@ nsTextEditRules::CheckBidiLevelForDeletion(Selection* aSelection,
 
   nsBidiLevel levelBefore;
   nsBidiLevel levelAfter;
-  RefPtr<nsFrameSelection> frameSelection =
-    aSelection->AsSelection()->GetFrameSelection();
+  nsRefPtr<nsFrameSelection> frameSelection =
+    static_cast<Selection*>(aSelection)->GetFrameSelection();
   NS_ENSURE_TRUE(frameSelection, NS_ERROR_NULL_POINTER);
 
   nsPrevNextBidiLevels levels = frameSelection->
@@ -90,7 +91,7 @@ nsTextEditRules::UndefineCaretBidiLevel(Selection* aSelection)
    * So we set the caret Bidi level to UNDEFINED here, and the caret code will
    * set it correctly later
    */
-  RefPtr<nsFrameSelection> frameSelection = aSelection->GetFrameSelection();
+  nsRefPtr<nsFrameSelection> frameSelection = aSelection->GetFrameSelection();
   if (frameSelection) {
     frameSelection->UndefineCaretBidiLevel();
   }

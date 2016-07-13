@@ -26,12 +26,12 @@ sync protocol PBlob
   manages PBlobStream;
 
 both:
-  async __delete__();
+  __delete__();
 
 parent:
-  async PBlobStream(uint64_t begin, uint64_t length);
+  PBlobStream(uint64_t begin, uint64_t length);
 
-  async ResolveMystery(ResolveMysteryParams params);
+  ResolveMystery(ResolveMysteryParams params);
 
   sync BlobStreamSync(uint64_t begin, uint64_t length)
     returns (InputStreamParams params, OptionalFileDescriptorSet fds);
@@ -45,11 +45,6 @@ parent:
   // Use only for testing!
   sync GetFilePath()
     returns (nsString filePath);
-
-child:
-  // This method must be called by the parent when the PBlobParent is fully
-  // created in order to release the known blob.
-  async CreatedFromKnownBlob();
 };
 
 } // namespace dom

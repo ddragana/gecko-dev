@@ -11,6 +11,7 @@
 #include "nsAutoPtr.h"
 #include "CacheFileChunk.h"
 
+
 namespace mozilla {
 namespace net {
 
@@ -26,7 +27,7 @@ class CacheFileInputStream : public nsIAsyncInputStream
   NS_DECL_NSISEEKABLESTREAM
 
 public:
-  explicit CacheFileInputStream(CacheFile *aFile, nsISupports *aEntry);
+  explicit CacheFileInputStream(CacheFile *aFile);
 
   NS_IMETHOD OnChunkRead(nsresult aResult, CacheFileChunk *aChunk) override;
   NS_IMETHOD OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk) override;
@@ -52,8 +53,8 @@ private:
   void NotifyListener();
   void MaybeNotifyListener();
 
-  RefPtr<CacheFile>        mFile;
-  RefPtr<CacheFileChunk> mChunk;
+  nsRefPtr<CacheFile>      mFile;
+  nsRefPtr<CacheFileChunk> mChunk;
   int64_t                  mPos;
   bool                     mClosed;
   nsresult                 mStatus;
@@ -63,8 +64,6 @@ private:
   nsCOMPtr<nsIInputStreamCallback> mCallback;
   uint32_t                         mCallbackFlags;
   nsCOMPtr<nsIEventTarget>         mCallbackTarget;
-  // Held purely for referencing purposes
-  RefPtr<nsISupports>              mCacheEntryHandle;
 };
 
 

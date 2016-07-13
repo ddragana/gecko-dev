@@ -13,7 +13,6 @@
 #include "nsISupports.h"
 #include "nsXPCOM.h"
 #include "nsContentPolicyUtils.h"
-#include "mozilla/dom/nsCSPService.h"
 #include "nsContentPolicy.h"
 #include "nsIURI.h"
 #include "nsIDocShell.h"
@@ -24,18 +23,19 @@
 #include "nsILoadContext.h"
 #include "nsCOMArray.h"
 #include "nsContentUtils.h"
-#include "mozilla/dom/nsMixedContentBlocker.h"
 
 using mozilla::LogLevel;
 
 NS_IMPL_ISUPPORTS(nsContentPolicy, nsIContentPolicy)
 
-static mozilla::LazyLogModule gConPolLog("nsContentPolicy");
+static PRLogModuleInfo* gConPolLog;
 
 nsresult
 NS_NewContentPolicy(nsIContentPolicy **aResult)
 {
   *aResult = new nsContentPolicy;
+  if (!*aResult)
+      return NS_ERROR_OUT_OF_MEMORY;
   NS_ADDREF(*aResult);
   return NS_OK;
 }
@@ -44,6 +44,9 @@ nsContentPolicy::nsContentPolicy()
     : mPolicies(NS_CONTENTPOLICY_CATEGORY)
     , mSimplePolicies(NS_SIMPLECONTENTPOLICY_CATEGORY)
 {
+    if (! gConPolLog) {
+        gConPolLog = PR_NewLogModule("nsContentPolicy");
+    }
 }
 
 nsContentPolicy::~nsContentPolicy()
@@ -116,12 +119,6 @@ nsContentPolicy::CheckPolicy(CPMethod          policyMethod,
     nsContentPolicyType externalType =
         nsContentUtils::InternalContentPolicyTypeToExternal(contentType);
 
-    nsCOMPtr<nsIContentPolicy> mixedContentBlocker =
-        do_GetService(NS_MIXEDCONTENTBLOCKER_CONTRACTID);
-
-    nsCOMPtr<nsIContentPolicy> cspService =
-      do_GetService(CSPSERVICE_CONTRACTID);
-
     /* 
      * Enumerate mPolicies and ask each of them, taking the logical AND of
      * their permissions.
@@ -132,12 +129,7 @@ nsContentPolicy::CheckPolicy(CPMethod          policyMethod,
     int32_t count = entries.Count();
     for (int32_t i = 0; i < count; i++) {
         /* check the appropriate policy */
-        // Send internal content policy type to CSP and mixed content blocker
-        nsContentPolicyType type = externalType;
-        if (mixedContentBlocker == entries[i] || cspService == entries[i]) {
-          type = contentType;
-        }
-        rv = (entries[i]->*policyMethod)(type, contentLocation,
+        rv = (entries[i]->*policyMethod)(externalType, contentLocation,
                                          requestingLocation, requestingContext,
                                          mimeType, extra, requestPrincipal,
                                          decision);
@@ -150,7 +142,7 @@ nsContentPolicy::CheckPolicy(CPMethod          policyMethod,
 
     nsCOMPtr<nsIDOMElement> topFrameElement;
     bool isTopLevel = true;
-    nsCOMPtr<nsPIDOMWindowOuter> window;
+    nsCOMPtr<nsPIDOMWindow> window;
     if (nsCOMPtr<nsINode> node = do_QueryInterface(requestingContext)) {
         window = node->OwnerDoc()->GetWindow();
     } else {
@@ -160,15 +152,14 @@ nsContentPolicy::CheckPolicy(CPMethod          policyMethod,
     if (window) {
         nsCOMPtr<nsIDocShell> docShell = window->GetDocShell();
         nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
-        if (loadContext) {
-          loadContext->GetTopFrameElement(getter_AddRefs(topFrameElement));
-        }
+        loadContext->GetTopFrameElement(getter_AddRefs(topFrameElement));
 
         MOZ_ASSERT(window->IsOuterWindow());
 
         if (topFrameElement) {
-            nsCOMPtr<nsPIDOMWindowOuter> topWindow = window->GetScriptableTop();
-            isTopLevel = topWindow == window;
+            nsCOMPtr<nsIDOMWindow> topWindow;
+            window->GetScriptableTop(getter_AddRefs(topWindow));
+            isTopLevel = topWindow == static_cast<nsIDOMWindow*>(window);
         } else {
             // If we don't have a top frame element, then requestingContext is
             // part of the top-level XUL document. Presumably it's the <browser>

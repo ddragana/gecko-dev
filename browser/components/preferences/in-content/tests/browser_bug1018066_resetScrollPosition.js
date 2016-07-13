@@ -1,8 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var originalWindowHeight;
+Services.prefs.setBoolPref("browser.preferences.inContent", true);
+
+let originalWindowHeight;
 registerCleanupFunction(function() {
+  Services.prefs.clearUserPref("browser.preferences.inContent");
   window.resizeTo(window.outerWidth, originalWindowHeight);
   while (gBrowser.tabs[1])
     gBrowser.removeTab(gBrowser.tabs[1]);

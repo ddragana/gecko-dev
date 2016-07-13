@@ -16,8 +16,6 @@ FeatureStatusToString(FeatureStatus aStatus)
       return "unused";
     case FeatureStatus::Unavailable:
       return "unavailable";
-    case FeatureStatus::CrashedInHandler:
-      return "crashed";
     case FeatureStatus::Blocked:
       return "blocked";
     case FeatureStatus::Blacklisted:
@@ -28,31 +26,10 @@ FeatureStatusToString(FeatureStatus aStatus)
       return "disabled";
     case FeatureStatus::Available:
       return "available";
-    case FeatureStatus::ForceEnabled:
-      return "force_enabled";
-    case FeatureStatus::CrashedOnStartup:
-      return "crashed_on_startup";
-    case FeatureStatus::Broken:
-      return "broken";
     default:
       MOZ_ASSERT_UNREACHABLE("missing status case");
       return "unknown";
   }
-}
-
-bool
-IsFeatureStatusFailure(FeatureStatus aStatus)
-{
-  return !(aStatus == FeatureStatus::Unused ||
-           aStatus == FeatureStatus::Available ||
-           aStatus == FeatureStatus::ForceEnabled);
-}
-
-bool
-IsFeatureStatusSuccess(FeatureStatus aStatus)
-{
-  return aStatus == FeatureStatus::Available ||
-         aStatus == FeatureStatus::ForceEnabled;
 }
 
 } // namespace gfx

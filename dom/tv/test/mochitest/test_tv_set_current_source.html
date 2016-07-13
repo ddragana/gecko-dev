@@ -12,44 +12,22 @@
 <script type="application/javascript" src="./head.js"></script>
 <script type="application/javascript">
 
-function runTest() {
-  ok('tv' in navigator, "navigator.tv should exist.");
+var tests = [
+  // Setup preferences and permissions
+  setupPrefsAndPermissions,
 
-  navigator.tv.getTuners().then(
-    function(aTuners) {
-      ok(aTuners.length > 0, "Got at least 1 tuner.");
-      var tuner = aTuners[0];
-      var selectedSourceType = tuner.getSupportedSourceTypes()[0];
+  // Installing the app
+  installApp.bind(this, "file_tv_set_current_source.html", "file_app.template.webapp"),
 
-      tuner.oncurrentsourcechanged = function(aEvent) {
-        ok(aEvent instanceof TVCurrentSourceChangedEvent,
-           "The event is in the right type");
-        ok(aEvent.source instanceof TVSource,
-           "The source is in the right type.");
-        is(aEvent.source, tuner.currentSource,
-           "The current source is set.");
-        is(tuner.currentSource.type, selectedSourceType,
-           "The current source type is correct.");
-        SimpleTest.finish();
-      };
+  // Run tests in app
+  testApp,
 
-      tuner.setCurrentSource(selectedSourceType).then(
-        function() {},
-        function(aError) {
-          ok(false, "Error occurred when setting current source: " + aError);
-          SimpleTest.finish();
-        }
-      );
-    },
-    function(aError) {
-      ok(false, "Error occurred when getting tuners: " + aError);
-      SimpleTest.finish();
-    }
-  );
-}
+  // Uninstall the app
+  uninstallApp
+];
 
 SimpleTest.waitForExplicitFinish();
-prepareTest(runTest);
+runTest();
 
 </script>
 </pre>

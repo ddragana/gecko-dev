@@ -9,6 +9,7 @@ var summary = 'Crash with JIT and json2.js';
 var actual = 'No Crash';
 var expect = 'No Crash';
 
+jit(true);
 
 /*
     json2.js
@@ -279,6 +280,7 @@ replace(/(?:^|:|,)(?:\s*\[)+/g, ''))) {
 test();
 //-----------------------------------------------------------------------------
 
+jit(false);
 
 function test()
 {

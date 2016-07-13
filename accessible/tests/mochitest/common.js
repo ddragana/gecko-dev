@@ -89,11 +89,6 @@ const kSquareBulletText = String.fromCharCode(0x25fe) + " ";
 const MAX_TRIM_LENGTH = 100;
 
 /**
- * Services to determine if e10s is enabled.
- */
-Components.utils.import('resource://gre/modules/Services.jsm');
-
-/**
  * nsIAccessibleRetrieval service.
  */
 var gAccRetrieval = Components.classes["@mozilla.org/accessibleRetrieval;1"].
@@ -113,41 +108,6 @@ function disableLogging()
 function isLogged(aModule)
 {
   return gAccRetrieval.isLogged(aModule);
-}
-
-/**
- * Dumps the accessible tree into console.
- */
-function dumpTree(aId, aMsg)
-{
-  function dumpTreeIntl(acc, indent)
-  {
-    dump(indent + prettyName(acc) + "\n");
-
-    var children = acc.children;
-    for (var i = 0; i < children.length; i++) {
-      var child = children.queryElementAt(i, nsIAccessible);
-      dumpTreeIntl(child, indent + "  ");
-    }
-  }
-
-  function dumpDOMTreeIntl(node, indent)
-  {
-    dump(indent + prettyName(node) + "\n");
-
-    var children = node.childNodes;
-    for (var i = 0; i < children.length; i++) {
-      var child = children.item(i);
-      dumpDOMTreeIntl(child, indent + "  ");
-    }
-  }
-
-  dump(aMsg + "\n");
-  var root = getAccessible(aId);
-  dumpTreeIntl(root, "  ");
-
-  dump("DOM tree:\n");
-  dumpDOMTreeIntl(getNode(aId), "  ");
 }
 
 /**
@@ -291,9 +251,6 @@ function getAccessible(aAccOrElmOrID, aInterfaces, aElmObj, aDoNotFailIf)
     aInterfaces = [ aInterfaces ];
 
   for (var index = 0; index < aInterfaces.length; index++) {
-    if (acc instanceof aInterfaces[index]) {
-      continue;
-    }
     try {
       acc.QueryInterface(aInterfaces[index]);
     } catch (e) {
@@ -402,7 +359,14 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
   var accTree = aAccTree;
 
   // Support of simplified accessible tree object.
-  accTree = normalizeAccTreeObj(accTree);
+  var key = Object.keys(accTree)[0];
+  var roleName = "ROLE_" + key;
+  if (roleName in nsIAccessibleRole) {
+    accTree = {
+      role: nsIAccessibleRole[roleName],
+      children: accTree[key]
+    };
+  }
 
   // Test accessible properties.
   for (var prop in accTree) {
@@ -488,32 +452,26 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
     var children = acc.children;
     var childCount = children.length;
 
+
     if (accTree.children.length != childCount) {
       for (var i = 0; i < Math.max(accTree.children.length, childCount); i++) {
-        var accChild = null, testChild = null;
+        var accChild;
         try {
-          testChild = accTree.children[i];
           accChild = children.queryElementAt(i, nsIAccessible);
-
-          if (!testChild) {
+          if (!accTree.children[i]) {
             ok(false, prettyName(acc) + " has an extra child at index " + i +
               " : " + prettyName(accChild));
-            continue;
           }
-
-          testChild = normalizeAccTreeObj(testChild);
-          if (accChild.role !== testChild.role) {
+          if (accChild.role !== accTree.children[i].role) {
             ok(false, prettyName(accTree) + " and " + prettyName(acc) +
               " have different children at index " + i + " : " +
-              prettyName(testChild) + ", " + prettyName(accChild));
+              prettyName(accTree.children[i]) + ", " + prettyName(accChild));
           }
           info("Matching " + prettyName(accTree) + " and " + prettyName(acc) +
                " child at index " + i + " : " + prettyName(accChild));
-
         } catch (e) {
-          ok(false, prettyName(accTree) + " is expected to have a child at index " + i +
-             " : " + prettyName(testChild) + ", original tested: " +
-             prettyName(aAccOrElmOrID) + ", " + e);
+          ok(false, prettyName(accTree) + " has an extra child at index " + i +
+             " : " + prettyName(accTree.children[i]));
         }
       }
     } else {
@@ -746,31 +704,6 @@ function getTextFromClipboard()
 }
 
 /**
- * Extract DOMNode id from an accessible. If e10s is enabled, DOMNode is not
- * present in parent process but, if available, DOMNode id is attached to an
- * accessible object.
- * @param  {nsIAccessible} accessible  accessible
- * @return {String?}                   DOMNode id if available
- */
-function getAccessibleDOMNodeID(accessible) {
-  if (accessible instanceof nsIAccessibleDocument) {
-    // If accessible is a document, trying to find its document body id.
-    try {
-      return accessible.DOMNode.body.id;
-    } catch (e) { /* This only works if accessible is not a proxy. */ }
-  }
-  try {
-    return accessible.DOMNode.id;
-  } catch (e) { /* This will fail if DOMNode is in different process. */ }
-  try {
-    // When e10s is enabled, accessible will have an "id" property if its
-    // corresponding DOMNode has an id. If accessible is a document, its "id"
-    // property corresponds to the "id" of its body element.
-    return accessible.id;
-  } catch (e) { /* This will fail if accessible is not a proxy. */ }
-}
-
-/**
  * Return pretty name for identifier, it may be ID, DOM node or accessible.
  */
 function prettyName(aIdentifier)
@@ -788,17 +721,10 @@ function prettyName(aIdentifier)
 
   if (aIdentifier instanceof nsIAccessible) {
     var acc = getAccessible(aIdentifier);
-    var domID = getAccessibleDOMNodeID(acc);
     var msg = "[";
     try {
-      if (Services.appinfo.browserTabsRemoteAutostart) {
-        if (domID) {
-          msg += `DOM node id: ${domID}, `;
-        }
-      } else {
-        msg += `${getNodePrettyName(acc.DOMNode)}, `;
-      }
-      msg += "role: " + roleToString(acc.role);
+      msg += getNodePrettyName(acc.DOMNode);
+      msg += ", role: " + roleToString(acc.role);
       if (acc.name)
         msg += ", name: '" + shortenString(acc.name) + "'";
     } catch (e) {
@@ -816,23 +742,6 @@ function prettyName(aIdentifier)
     return "[ " + getNodePrettyName(aIdentifier) + " ]";
 
   if (aIdentifier && typeof aIdentifier === "object" ) {
-    var treeObj = normalizeAccTreeObj(aIdentifier);
-    if ("role" in treeObj) {
-      function stringifyTree(aObj) {
-        var text = roleToString(aObj.role) + ": [ ";
-        if ("children" in aObj) {
-          for (var i = 0; i < aObj.children.length; i++) {
-            var c = normalizeAccTreeObj(aObj.children[i]);
-            text += stringifyTree(c);
-            if (i < aObj.children.length - 1) {
-              text += ", ";
-            }
-          }
-        }
-        return text + "] ";
-      }
-      return `{ ${stringifyTree(treeObj)} }`;
-    }
     return JSON.stringify(aIdentifier);
   }
 
@@ -936,17 +845,4 @@ function getTestPluginTag(aPluginName)
 
   ok(false, "Could not find plugin tag with plugin name '" + name + "'");
   return null;
-}
-
-function normalizeAccTreeObj(aObj)
-{
-  var key = Object.keys(aObj)[0];
-  var roleName = "ROLE_" + key;
-  if (roleName in nsIAccessibleRole) {
-    return {
-      role: nsIAccessibleRole[roleName],
-      children: aObj[key]
-    };
-  }
-  return aObj;
 }

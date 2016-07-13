@@ -1,9 +1,8 @@
 #include "nsISupports.idl"
 
-interface mozIDOMWindow;
-interface nsIPrincipal;
+interface nsIDOMWindow;
 
-[scriptable, uuid(9cf3b48e-361d-486a-8917-55cf8d00bb41)]
+[scriptable, uuid(530db841-1b2c-485a-beeb-f2b1acb9714e)]
 interface nsIWorkerDebuggerListener : nsISupports
 {
   void onClose();
@@ -11,10 +10,14 @@ interface nsIWorkerDebuggerListener : nsISupports
   void onError(in DOMString filename, in unsigned long lineno,
                in DOMString message);
 
+  void onFreeze();
+
   void onMessage(in DOMString message);
+
+  void onThaw();
 };
 
-[scriptable, builtinclass, uuid(22f93aa3-8a05-46be-87e0-fa93bf8a8eff)]
+[scriptable, builtinclass, uuid(bdcaf96f-916a-4b24-bb53-165c1785668b)]
 interface nsIWorkerDebugger : nsISupports
 {
   const unsigned long TYPE_DEDICATED = 0;
@@ -25,6 +28,8 @@ interface nsIWorkerDebugger : nsISupports
 
   readonly attribute bool isChrome;
 
+  readonly attribute bool isFrozen;
+
   readonly attribute bool isInitialized;
 
   readonly attribute nsIWorkerDebugger parent;
@@ -33,15 +38,12 @@ interface nsIWorkerDebugger : nsISupports
 
   readonly attribute DOMString url;
 
-  readonly attribute mozIDOMWindow window;
+  readonly attribute nsIDOMWindow window;
 
-  readonly attribute nsIPrincipal principal;
-
-  readonly attribute unsigned long serviceWorkerID;
-
+  [implicit_jscontext]
   void initialize(in DOMString url);
 
-  [binaryname(PostMessageMoz)]
+  [implicit_jscontext, binaryname(PostMessageMoz)]
   void postMessage(in DOMString message);
 
   void addListener(in nsIWorkerDebuggerListener listener);

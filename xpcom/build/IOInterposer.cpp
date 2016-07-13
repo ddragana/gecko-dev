@@ -16,7 +16,6 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/ThreadLocal.h"
-#include "nscore.h" // for NS_FREE_PERMANENT_DATA
 #if !defined(XP_WIN)
 #include "NSPRInterposer.h"
 #endif // !defined(XP_WIN)
@@ -359,8 +358,7 @@ public:
 
 // List of observers registered
 static StaticAutoPtr<MasterList> sMasterList;
-static MOZ_THREAD_LOCAL(PerThreadData*) sThreadLocalData;
-static bool sThreadLocalDataInitialized;
+static ThreadLocal<PerThreadData*> sThreadLocalData;
 } // namespace
 
 IOInterposeObserver::Observation::Observation(Operation aOperation,
@@ -430,7 +428,6 @@ IOInterposer::Init()
   if (!sThreadLocalData.init()) {
     return false;
   }
-  sThreadLocalDataInitialized = true;
   bool isMainThread = true;
   RegisterCurrentThread(isMainThread);
   sMasterList = new MasterList();
@@ -450,7 +447,7 @@ IOInterposer::Init()
 bool
 IOInterposeObserver::IsMainThread()
 {
-  if (!sThreadLocalDataInitialized) {
+  if (!sThreadLocalData.initialized()) {
     return false;
   }
   PerThreadData* ptd = sThreadLocalData.get();
@@ -463,10 +460,10 @@ IOInterposeObserver::IsMainThread()
 void
 IOInterposer::Clear()
 {
-  /* Clear() is a no-op on release builds so that we may continue to trap I/O
-     until process termination. In leak-checking builds, we need to shut down
-     IOInterposer so that all references are properly released. */
-#ifdef NS_FREE_PERMANENT_DATA
+  /* Clear() is a no-op on opt builds so that we may continue to trap I/O until
+     process termination. In debug builds we need to shut down IOInterposer so
+     that all references are properly released and refcnt log remains clean. */
+#if defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING) || defined(MOZ_ASAN)
   UnregisterCurrentThread();
   sMasterList = nullptr;
 #endif
@@ -540,7 +537,7 @@ IOInterposer::Unregister(IOInterposeObserver::Operation aOp,
 void
 IOInterposer::RegisterCurrentThread(bool aIsMainThread)
 {
-  if (!sThreadLocalDataInitialized) {
+  if (!sThreadLocalData.initialized()) {
     return;
   }
   MOZ_ASSERT(!sThreadLocalData.get());
@@ -551,7 +548,7 @@ IOInterposer::RegisterCurrentThread(bool aIsMainThread)
 void
 IOInterposer::UnregisterCurrentThread()
 {
-  if (!sThreadLocalDataInitialized) {
+  if (!sThreadLocalData.initialized()) {
     return;
   }
   PerThreadData* curThreadData = sThreadLocalData.get();

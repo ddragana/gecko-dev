@@ -27,7 +27,7 @@ class CriticalSectionWrapper;
 // TODO(turajs): Write constructor for this structure.
 struct ACMTestFrameSizeStats {
   uint16_t frameSizeSample;
-  size_t maxPayloadLen;
+  int16_t maxPayloadLen;
   uint32_t numPackets;
   uint64_t totalPayloadLenByte;
   uint64_t totalEncodedSamples;
@@ -39,7 +39,7 @@ struct ACMTestFrameSizeStats {
 struct ACMTestPayloadStats {
   bool newPacket;
   int16_t payloadType;
-  size_t lastPayloadLenByte;
+  int16_t lastPayloadLenByte;
   uint32_t lastTimestamp;
   ACMTestFrameSizeStats frameSizeStats[MAX_NUM_FRAMESIZES];
 };
@@ -50,12 +50,11 @@ class Channel : public AudioPacketizationCallback {
   Channel(int16_t chID = -1);
   ~Channel();
 
-  int32_t SendData(FrameType frameType,
-                   uint8_t payloadType,
-                   uint32_t timeStamp,
-                   const uint8_t* payloadData,
-                   size_t payloadSize,
-                   const RTPFragmentationHeader* fragmentation) override;
+  virtual int32_t SendData(
+      const FrameType frameType, const uint8_t payloadType,
+      const uint32_t timeStamp, const uint8_t* payloadData,
+      const uint16_t payloadSize,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   void RegisterReceiverACM(AudioCodingModule *acm);
 
@@ -65,7 +64,7 @@ class Channel : public AudioPacketizationCallback {
 
   void Stats(uint32_t* numPackets);
 
-  void Stats(uint8_t* payloadType, uint32_t* payloadLenByte);
+  void Stats(uint8_t* payloadLenByte, uint32_t* payloadType);
 
   void PrintStats(CodecInst& codecInst);
 
@@ -94,7 +93,7 @@ class Channel : public AudioPacketizationCallback {
   }
 
  private:
-  void CalcStatistics(WebRtcRTPHeader& rtpInfo, size_t payloadSize);
+  void CalcStatistics(WebRtcRTPHeader& rtpInfo, uint16_t payloadSize);
 
   AudioCodingModule* _receiverACM;
   uint16_t _seqNo;
@@ -110,8 +109,6 @@ class Channel : public AudioPacketizationCallback {
   WebRtcRTPHeader _rtpInfo;
   bool _leftChannel;
   uint32_t _lastInTimestamp;
-  bool _useLastFrameSize;
-  uint32_t _lastFrameSizeSample;
   // FEC Test variables
   int16_t _packetLoss;
   bool _useFECTestWithPacketLoss;

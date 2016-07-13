@@ -11,6 +11,7 @@ import zipfile
 from xml.dom import minidom
 
 import mozfile
+from manifestparser import ManifestParser
 from mozlog.unstructured import getLogger
 
 # Needed for the AMO's rest API - https://developer.mozilla.org/en/addons.mozilla.org_%28AMO%29_API_Developers%27_Guide/The_generic_AMO_API
@@ -184,14 +185,6 @@ class AddonManager(object):
         Installs addons from a manifest
         :param filepath: path to the manifest of addons to install
         """
-        try:
-            from manifestparser import ManifestParser
-        except ImportError:
-            module_logger.critical(
-                "Installing addons from manifest requires the"
-                " manifestparser package to be installed.")
-            raise
-
         manifest = ManifestParser()
         manifest.read(filepath)
         addons = manifest.get()
@@ -286,7 +279,7 @@ class AddonManager(object):
                     manifest = f.read()
             else:
                 raise IOError('Add-on path is neither an XPI nor a directory: %s' % addon_path)
-        except (IOError, KeyError) as e:
+        except (IOError, KeyError), e:
             raise AddonFormatError, str(e), sys.exc_info()[2]
 
         try:
@@ -297,17 +290,12 @@ class AddonManager(object):
             rdf = get_namespace_id(doc, 'http://www.w3.org/1999/02/22-rdf-syntax-ns#')
 
             description = doc.getElementsByTagName(rdf + 'Description').item(0)
-            for entry, value in description.attributes.items():
-                # Remove the namespace prefix from the tag for comparison
-                entry = entry.replace(em, "")
-                if entry in details.keys():
-                    details.update({entry: value})
             for node in description.childNodes:
                 # Remove the namespace prefix from the tag for comparison
                 entry = node.nodeName.replace(em, "")
                 if entry in details.keys():
                     details.update({entry: get_text(node)})
-        except Exception as e:
+        except Exception, e:
             raise AddonFormatError, str(e), sys.exc_info()[2]
 
         # turn unpack into a true/false value
@@ -339,7 +327,7 @@ class AddonManager(object):
         # if path is not an add-on, try to install all contained add-ons
         try:
             self.addon_details(path)
-        except AddonFormatError as e:
+        except AddonFormatError, e:
             module_logger.warning('Could not install %s: %s' % (path, str(e)))
 
             # If the path doesn't exist, then we don't really care, just return

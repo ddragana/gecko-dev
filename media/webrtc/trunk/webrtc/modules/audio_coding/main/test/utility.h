@@ -134,13 +134,13 @@ class VADCallback : public ACMVADCallback {
   ~VADCallback() {
   }
 
-  int32_t InFrameType(FrameType frame_type);
+  int32_t InFrameType(int16_t frameType);
 
   void PrintFrameTypes();
   void Reset();
 
  private:
-  uint32_t _numFrameTypes[5];
+  uint32_t _numFrameTypes[6];
 };
 
 void UseLegacyAcm(webrtc::Config* config);

@@ -47,7 +47,7 @@ class AudioSinkFork : public AudioSink {
   AudioSinkFork(AudioSink* left, AudioSink* right)
       : left_sink_(left), right_sink_(right) {}
 
-  bool WriteArray(const int16_t* audio, size_t num_samples) override {
+  virtual bool WriteArray(const int16_t* audio, size_t num_samples) OVERRIDE {
     return left_sink_->WriteArray(audio, num_samples) &&
            right_sink_->WriteArray(audio, num_samples);
   }

@@ -30,7 +30,6 @@ XPIDL_SOURCES += [
     'nsICaptivePortalService.idl',
     'nsIChannel.idl',
     'nsIChannelEventSink.idl',
-    'nsIChannelWithDivertableParentListener.idl',
     'nsIChildChannel.idl',
     'nsIClassOfService.idl',
     'nsIContentSniffer.idl',
@@ -39,7 +38,6 @@ XPIDL_SOURCES += [
     'nsICryptoHMAC.idl',
     'nsIDashboard.idl',
     'nsIDashboardEventNotifier.idl',
-    'nsIDeprecationWarner.idl',
     'nsIDivertableChannel.idl',
     'nsIDownloader.idl',
     'nsIEncodedChannel.idl',
@@ -47,10 +45,8 @@ XPIDL_SOURCES += [
     'nsIFileStreams.idl',
     'nsIFileURL.idl',
     'nsIForcePendingChannel.idl',
-    'nsIFormPOSTActionChannel.idl',
     'nsIHttpPushListener.idl',
     'nsIIncrementalDownload.idl',
-    'nsIIncrementalStreamLoader.idl',
     'nsIInputStreamChannel.idl',
     'nsIInputStreamPump.idl',
     'nsIIOService.idl',
@@ -64,7 +60,6 @@ XPIDL_SOURCES += [
     'nsINestedURI.idl',
     'nsINetAddr.idl',
     'nsINetUtil.idl',
-    'nsINetworkInfoService.idl',
     'nsINetworkInterceptController.idl',
     'nsINetworkLinkService.idl',
     'nsINetworkPredictor.idl',
@@ -74,8 +69,6 @@ XPIDL_SOURCES += [
     'nsINullChannel.idl',
     'nsIPACGenerator.idl',
     'nsIPackagedAppService.idl',
-    'nsIPackagedAppUtils.idl',
-    'nsIPackagedAppVerifier.idl',
     'nsIParentChannel.idl',
     'nsIParentRedirectingChannel.idl',
     'nsIPermission.idl',
@@ -95,7 +88,6 @@ XPIDL_SOURCES += [
     'nsIRedirectChannelRegistrar.idl',
     'nsIRedirectResultListener.idl',
     'nsIRequest.idl',
-    'nsIRequestContext.idl',
     'nsIRequestObserver.idl',
     'nsIRequestObserverProxy.idl',
     'nsIResponseHeadProvider.idl',
@@ -105,11 +97,9 @@ XPIDL_SOURCES += [
     'nsISecureBrowserUI.idl',
     'nsISecurityEventSink.idl',
     'nsISecurityInfoProvider.idl',
-    'nsISensitiveInfoHiddenURI.idl',
     'nsISerializationHelper.idl',
     'nsIServerSocket.idl',
     'nsISimpleStreamListener.idl',
-    'nsISocketFilter.idl',
     'nsISocketTransport.idl',
     'nsISocketTransportService.idl',
     'nsISpeculativeConnect.idl',
@@ -129,10 +119,12 @@ XPIDL_SOURCES += [
     'nsITraceableChannel.idl',
     'nsITransport.idl',
     'nsIUDPSocket.idl',
+    'nsIUDPSocketFilter.idl',
     'nsIUnicharStreamLoader.idl',
     'nsIUploadChannel.idl',
     'nsIUploadChannel2.idl',
     'nsIURI.idl',
+    'nsIURIChecker.idl',
     'nsIURIClassifier.idl',
     'nsIURIWithPrincipal.idl',
     'nsIURL.idl',
@@ -156,7 +148,7 @@ EXPORTS += [
     'nsInputStreamPump.h',
     'nsMIMEInputStream.h',
     'nsNetUtil.h',
-    'nsNetUtilInlines.h',
+    'nsNetUtil.inl',
     'nsReadLine.h',
     'nsSerializationHelper.h',
     'nsSimpleNestedURI.h',
@@ -169,9 +161,7 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
-    'LoadContextInfo.h',
     'LoadInfo.h',
-    'LoadTainting.h',
 ]
 
 EXPORTS.mozilla.net += [
@@ -182,7 +172,6 @@ EXPORTS.mozilla.net += [
     'DashboardTypes.h',
     'MemoryDownloader.h',
     'OfflineObserver.h',
-    'Predictor.h',
     'ReferrerPolicy.h',
 ]
 
@@ -216,7 +205,6 @@ UNIFIED_SOURCES += [
     'nsDownloader.cpp',
     'nsFileStreams.cpp',
     'nsIncrementalDownload.cpp',
-    'nsIncrementalStreamLoader.cpp',
     'nsInputStreamChannel.cpp',
     'nsInputStreamPump.cpp',
     'nsIOService.cpp',
@@ -248,15 +236,13 @@ UNIFIED_SOURCES += [
     'nsTransportUtils.cpp',
     'nsUDPSocket.cpp',
     'nsUnicharStreamLoader.cpp',
+    'nsURIChecker.cpp',
     'nsURLHelper.cpp',
     'nsURLParsers.cpp',
     'OfflineObserver.cpp',
-    'PollableEvent.cpp',
     'Predictor.cpp',
     'ProxyAutoConfig.cpp',
     'RedirectChannelRegistrar.cpp',
-    'RequestContextService.cpp',
-    'SimpleBuffer.cpp',
     'StreamingProtocolService.cpp',
     'Tickler.cpp',
     'TLSServerSocket.cpp',
@@ -264,8 +250,9 @@ UNIFIED_SOURCES += [
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     SOURCES += [
+        'nsAutodialWin.cpp',
+        'nsNativeConnectionHelper.cpp',
         'nsURLHelperWin.cpp',
-        'ShutdownLayer.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     SOURCES += [
@@ -276,35 +263,9 @@ else:
         'nsURLHelperUnix.cpp',
     ]
 
-# nsINetworkInfoService support.
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
-    SOURCES += [
-        'NetworkInfoServiceWindows.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    SOURCES += [
-        'NetworkInfoServiceCocoa.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['OS_TARGET'] == 'Linux':
-    SOURCES += [
-        'NetworkInfoServiceLinux.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    SOURCES += [
-        'NetworkInfoServiceLinux.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    SOURCES += [
-        'NetworkInfoServiceLinux.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-
 if CONFIG['MOZ_ENABLE_QTNETWORK']:
     SOURCES += [
+        'nsAutodialQt.cpp',
     ]
 
 EXTRA_COMPONENTS += [
@@ -316,12 +277,13 @@ EXTRA_JS_MODULES += [
     'NetUtil.jsm',
 ]
 
+FAIL_ON_WARNINGS = True
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
-    '/docshell/base',
     '/dom/base',
     '/netwerk/protocol/http'
 ]
@@ -337,8 +299,8 @@ if CONFIG['MOZ_ENABLE_QTNETWORK']:
         '/netwerk/system/qt',
     ]
 
+if CONFIG['ENABLE_TESTS']:
+    DEFINES['PREDICTOR_TESTS'] = True
+
 if CONFIG['MOZ_ENABLE_QTNETWORK']:
     CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

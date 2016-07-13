@@ -8,15 +8,13 @@
 #ifndef jit_EagerSimdUnbox_h
 #define jit_EagerSimdUnbox_h
 
-#include "mozilla/Attributes.h"
-
 namespace js {
 namespace jit {
 
 class MIRGenerator;
 class MIRGraph;
 
-MOZ_MUST_USE bool
+bool
 EagerSimdUnbox(MIRGenerator* mir, MIRGraph& graph);
 
 } // namespace jit

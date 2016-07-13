@@ -9,4 +9,3 @@ config.json
 node_modules
 scratch
 testharness_runner.html
-webdriver/.idea

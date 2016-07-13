@@ -11,7 +11,7 @@ this.EXPORTED_SYMBOLS = [
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 // The time to wait before considering a transaction stuck and rejecting it.
-const TRANSACTIONS_QUEUE_TIMEOUT_MS = 240000 // 4 minutes
+const TRANSACTIONS_QUEUE_TIMEOUT_MS = 120000 // 2 minutes
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
@@ -24,6 +24,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Log",
                                   "resource://gre/modules/Log.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
+                                  "resource://services-common/utils.js");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
@@ -34,43 +36,29 @@ XPCOMUtils.defineLazyServiceGetter(this, "FinalizationWitnessService",
 XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
                                   "resource://gre/modules/PromiseUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "console",
-                                  "resource://gre/modules/Console.jsm");
-
-// Regular expression used by isInvalidBoundLikeQuery
-var likeSqlRegex = /\bLIKE\b\s(?![@:?])/i;
+                                  "resource://gre/modules/devtools/Console.jsm");
 
 // Counts the number of created connections per database basename(). This is
 // used for logging to distinguish connection instances.
-var connectionCounters = new Map();
+let connectionCounters = new Map();
 
 // Tracks identifiers of wrapped connections, that are Storage connections
 // opened through mozStorage and then wrapped by Sqlite.jsm to use its syntactic
 // sugar API.  Since these connections have an unknown origin, we use this set
 // to differentiate their behavior.
-var wrappedConnections = new Set();
+let wrappedConnections = new Set();
 
 /**
  * Once `true`, reject any attempt to open or close a database.
  */
-var isClosed = false;
+let isClosed = false;
 
-var Debugging = {
+let Debugging = {
   // Tests should fail if a connection auto closes.  The exception is
   // when finalization itself is tested, in which case this flag
   // should be set to false.
   failTestsOnAutoClose: true
 };
-
-/**
- * Helper function to check whether LIKE is implemented using proper bindings.
- *
- * @param sql
- *        (string) The SQL query to be verified.
- * @return boolean value telling us whether query was correct or not
-*/
-function isInvalidBoundLikeQuery(sql) {
-  return likeSqlRegex.test(sql);
-}
 
 // Displays a script error message
 function logScriptError(message) {
@@ -401,7 +389,7 @@ ConnectionData.prototype = Object.freeze({
 
     return this._barrier.wait().then(() => {
       if (!this._dbConn) {
-        return undefined;
+        return;
       }
       return this._finalize();
     });
@@ -578,12 +566,14 @@ ConnectionData.prototype = Object.freeze({
             // The best we can do is proceed without a transaction and hope
             // things won't break.
             if (wrappedConnections.has(this._identifier)) {
-              this._log.warn("A new transaction could not be started cause the wrapped connection had one in progress", ex);
+              this._log.warn("A new transaction could not be started cause the wrapped connection had one in progress: " +
+                             CommonUtils.exceptionStr(ex));
               // Unmark the in progress transaction, since it's managed by
               // some other non-Sqlite.jsm client.  See the comment above.
               this._hasInProgressTransaction = false;
             } else {
-              this._log.warn("A transaction was already in progress, likely a nested transaction", ex);
+              this._log.warn("A transaction was already in progress, likely a nested transaction: " +
+                             CommonUtils.exceptionStr(ex));
               throw ex;
             }
           }
@@ -595,15 +585,18 @@ ConnectionData.prototype = Object.freeze({
             // It's possible that the exception has been caused by trying to
             // close the connection in the middle of a transaction.
             if (this._closeRequested) {
-              this._log.warn("Connection closed while performing a transaction", ex);
+              this._log.warn("Connection closed while performing a transaction: " +
+                             CommonUtils.exceptionStr(ex));
             } else {
-              this._log.warn("Error during transaction. Rolling back", ex);
+              this._log.warn("Error during transaction. Rolling back: " +
+                             CommonUtils.exceptionStr(ex));
               // If we began a transaction, we must rollback it.
               if (this._hasInProgressTransaction) {
                 try {
                   yield this.execute("ROLLBACK TRANSACTION");
                 } catch (inner) {
-                  this._log.warn("Could not roll back transaction", inner);
+                  this._log.warn("Could not roll back transaction: " +
+                                 CommonUtils.exceptionStr(inner));
                 }
               }
             }
@@ -622,7 +615,8 @@ ConnectionData.prototype = Object.freeze({
             try {
               yield this.execute("COMMIT TRANSACTION");
             } catch (ex) {
-              this._log.warn("Error committing transaction", ex);
+              this._log.warn("Error committing transaction: " +
+                             CommonUtils.exceptionStr(ex));
               throw ex;
             }
           }
@@ -761,14 +755,13 @@ ConnectionData.prototype = Object.freeze({
 
           try {
             onRow(row);
-          } catch (e) {
-            if (e instanceof StopIteration) {
-              userCancelled = true;
-              pending.cancel();
-              break;
-            }
-
-            self._log.warn("Exception when calling onRow callback", e);
+          } catch (e if e instanceof StopIteration) {
+            userCancelled = true;
+            pending.cancel();
+            break;
+          } catch (ex) {
+            self._log.warn("Exception when calling onRow callback: " +
+                           CommonUtils.exceptionStr(ex));
           }
         }
       },
@@ -804,7 +797,7 @@ ConnectionData.prototype = Object.freeze({
             break;
 
           case Ci.mozIStorageStatementCallback.REASON_ERROR:
-            let error = new Error("Error(s) encountered during statement execution: " + errors.map(e => e.message).join(", "));
+            let error = new Error("Error(s) encountered during statement execution: " + [error.message for (error of errors)].join(", "));
             error.errors = errors;
             deferred.reject(error);
             break;
@@ -931,10 +924,9 @@ function openConnection(options) {
       try {
         resolve(
           new OpenedConnection(connection.QueryInterface(Ci.mozIStorageAsyncConnection),
-                               identifier, openedOptions));
+                              identifier, openedOptions));
       } catch (ex) {
-        log.warn("Could not open database", ex);
-        connection.asyncClose();
+        log.warn("Could not open database: " + CommonUtils.exceptionStr(ex));
         reject(ex);
       }
     });
@@ -1012,8 +1004,7 @@ function cloneStorageConnection(options) {
         let conn = connection.QueryInterface(Ci.mozIStorageAsyncConnection);
         resolve(new OpenedConnection(conn, identifier, openedOptions));
       } catch (ex) {
-        log.warn("Could not clone database", ex);
-        connection.asyncClose();
+        log.warn("Could not clone database: " + CommonUtils.exceptionStr(ex));
         reject(ex);
       }
     });
@@ -1063,7 +1054,7 @@ function wrapStorageConnection(options) {
       wrappedConnections.add(identifier);
       resolve(wrapper);
     } catch (ex) {
-      log.warn("Could not wrap database", ex);
+      log.warn("Could not wrap database: " + CommonUtils.exceptionStr(ex));
       throw ex;
     }
   });
@@ -1282,9 +1273,6 @@ OpenedConnection.prototype = Object.freeze({
    *        (function) Callback to receive each row from result.
    */
   executeCached: function (sql, params=null, onRow=null) {
-    if (isInvalidBoundLikeQuery(sql)) {
-      throw new Error("Please enter a LIKE clause with bindings");
-    }
     return this._connectionData.executeCached(sql, params, onRow);
   },
 
@@ -1304,9 +1292,6 @@ OpenedConnection.prototype = Object.freeze({
    *        (function) Callback to receive result of a single row.
    */
   execute: function (sql, params=null, onRow=null) {
-    if (isInvalidBoundLikeQuery(sql)) {
-      throw new Error("Please enter a LIKE clause with bindings");
-    }
     return this._connectionData.execute(sql, params, onRow);
   },
 

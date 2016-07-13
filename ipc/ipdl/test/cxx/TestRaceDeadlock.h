@@ -30,8 +30,7 @@ protected:
     virtual bool AnswerLose() override;
 
     virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const MessageInfo& parent,
-                         const MessageInfo& child) override;
+    MediateInterruptRace(const Message& parent, const Message& child) override;
 
     virtual void ActorDestroy(ActorDestroyReason why) override
     {
@@ -58,8 +57,7 @@ protected:
     virtual bool AnswerRpc() override;
 
     virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const MessageInfo& parent,
-                         const MessageInfo& child) override;
+    MediateInterruptRace(const Message& parent, const Message& child) override;
 
     virtual void ActorDestroy(ActorDestroyReason why) override
     {

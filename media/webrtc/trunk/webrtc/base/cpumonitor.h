@@ -95,7 +95,7 @@ class CpuMonitor
     : public rtc::MessageHandler, public sigslot::has_slots<> {
  public:
   explicit CpuMonitor(Thread* thread);
-  ~CpuMonitor() override;
+  virtual ~CpuMonitor();
   void set_thread(Thread* thread);
 
   bool Start(int period_ms);
@@ -105,7 +105,7 @@ class CpuMonitor
 
  protected:
   // Override virtual method of parent MessageHandler.
-  void OnMessage(rtc::Message* msg) override;
+  virtual void OnMessage(rtc::Message* msg);
   // Clear the monitor thread and stop sending it messages if the thread goes
   // away before our lifetime.
   void OnMessageQueueDestroyed() { monitor_thread_ = NULL; }

@@ -31,7 +31,7 @@ function startTest() {
   source.channelCountMode = 'explicit';
   source.connect(dest);
   var elem = document.createElement('audio');
-  elem.srcObject = dest.stream;
+  elem.mozSrcObject = dest.stream;
   mMediaStream = dest.stream;
   source.start(0);
   elem.play();

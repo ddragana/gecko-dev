@@ -49,7 +49,7 @@ function asyncCallback(ctx, func, args) {
   CommonUtils.nextTick(invoke);
 }
 
-var Record = function (params) {
+let Record = function (params) {
   this.id = params.guid;
   this.parent = params.parent || null;
   this.index = params.position;
@@ -95,7 +95,7 @@ Record.prototype = {
   version: DATA_VERSION,
 };
 
-var Bookmarks = function () {
+let Bookmarks = function () {
   let createRootFolder = function (name) {
     let ROOT_FOLDER_ANNO = "cloudsync/rootFolder/" + name;
     let ROOT_SHORTCUT_ANNO = "cloudsync/rootShortcut/" + name;
@@ -221,7 +221,7 @@ var Bookmarks = function () {
 
 this.Bookmarks = Bookmarks;
 
-var RootFolder = function (rootId, rootName) {
+let RootFolder = function (rootId, rootName) {
   let suspended = true;
   let ignoreAll = false;
 
@@ -294,7 +294,7 @@ var RootFolder = function (rootId, rootName) {
             result.parent = guidResult;
             return Promise.resolve(result);
           },
-          Promise.reject.bind(Promise)
+          Promise.reject
         );
         promises.push(promise);
       });
@@ -310,7 +310,7 @@ var RootFolder = function (rootId, rootName) {
             result.annos = annos;
             return Promise.resolve(result);
           },
-          Promise.reject.bind(Promise)
+          Promise.reject
         );
         promises.push(promise);
       });
@@ -352,7 +352,7 @@ var RootFolder = function (rootId, rootName) {
             result.parent = guidResult;
             return Promise.resolve(result);
           },
-          Promise.reject.bind(Promise)
+          Promise.reject
         );
         promises.push(promise);
       });
@@ -554,12 +554,12 @@ var RootFolder = function (rootId, rootName) {
         }
       }
 
-      for (let item of items) {
+      for each (let item in items) {
         if (!item || 'object' !== typeof(item)) {
           continue;
         }
 
-        let promise = exists(item).then(handleSortedItem, Promise.reject.bind(Promise));
+        let promise = exists(item).then(handleSortedItem, Promise.reject);
         promises.push(promise);
       }
 
@@ -570,7 +570,7 @@ var RootFolder = function (rootId, rootName) {
       let newFolderGuids = Object.keys(newFolders);
       let newFolderRoots = [];
 
-      for (let guid of newFolderGuids) {
+      for each (let guid in newFolderGuids) {
         let item = newFolders[guid];
         if (item.parent && newFolderGuids.indexOf(item.parent) >= 0) {
           let parent = newFolders[item.parent];
@@ -581,14 +581,14 @@ var RootFolder = function (rootId, rootName) {
       };
 
       let promises = [];
-      for (let guid of newFolderRoots) {
+      for each (let guid in newFolderRoots) {
         let root = newFolders[guid];
         let promise = Promise.resolve();
         promise = promise.then(
           function () {
             return _createItem(root);
           },
-          Promise.reject.bind(Promise)
+          Promise.reject
         );
         let items = [].concat(root._children);
 
@@ -599,7 +599,7 @@ var RootFolder = function (rootId, rootName) {
             function () {
               return _createItem(item);
             },
-            Promise.reject.bind(Promise)
+            Promise.reject
           );
         }
         promises.push(promise);
@@ -611,15 +611,15 @@ var RootFolder = function (rootId, rootName) {
     let processItems = function () {
       let promises = [];
 
-      for (let item of newItems) {
+      for each (let item in newItems) {
         promises.push(_createItem(item));
       }
 
-      for (let item of updatedItems) {
+      for each (let item in updatedItems) {
         promises.push(_updateItem(item));
       }
 
-      for (let item of deletedItems) {
+      for each (let item in deletedItems) {
         _deleteItem(item);
       }
 

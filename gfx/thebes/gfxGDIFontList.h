@@ -236,7 +236,7 @@ public:
     // create a font entry for a font with a given name
     static GDIFontEntry* CreateFontEntry(const nsAString& aName,
                                          gfxWindowsFontType aFontType,
-                                         uint8_t aStyle,
+                                         bool aItalic,
                                          uint16_t aWeight, int16_t aStretch,
                                          gfxUserFontData* aUserFontData,
                                          bool aFamilyHasItalicFace);
@@ -245,7 +245,7 @@ public:
     static GDIFontEntry* LoadLocalFont(const nsAString& aFontName,
                                        uint16_t aWeight,
                                        int16_t aStretch,
-                                       uint8_t aStyle);
+                                       bool aItalic);
 
     uint8_t mWindowsFamily;
     uint8_t mWindowsPitch;
@@ -266,7 +266,7 @@ protected:
     friend class gfxWindowsFont;
 
     GDIFontEntry(const nsAString& aFaceName, gfxWindowsFontType aFontType,
-                 uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
+                 bool aItalic, uint16_t aWeight, int16_t aStretch,
                  gfxUserFontData *aUserFontData, bool aFamilyHasItalicFace);
 
     void InitLogFont(const nsAString& aName, gfxWindowsFontType aFontType);
@@ -274,7 +274,7 @@ protected:
     virtual gfxFont *CreateFontInstance(const gfxFontStyle *aFontStyle, bool aNeedsBold);
 
     virtual nsresult CopyFontTable(uint32_t aTableTag,
-                                   nsTArray<uint8_t>& aBuffer) override;
+                                   FallibleTArray<uint8_t>& aBuffer) override;
 
     LOGFONTW mLogFont;
 };
@@ -305,20 +305,19 @@ public:
 
     virtual gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle);
 
-    bool FindAndAddFamilies(const nsAString& aFamily,
-                            nsTArray<gfxFontFamily*>* aOutput,
-                            gfxFontStyle* aStyle = nullptr,
-                            gfxFloat aDevToCssSize = 1.0) override;
+    virtual gfxFontFamily* FindFamily(const nsAString& aFamily,
+                                      nsIAtom* aLanguage = nullptr,
+                                      bool aUseSystemFonts = false);
 
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
                                           uint16_t aWeight,
                                           int16_t aStretch,
-                                          uint8_t aStyle);
+                                          bool aItalic);
 
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
                                            uint16_t aWeight,
                                            int16_t aStretch,
-                                           uint8_t aStyle,
+                                           bool aItalic,
                                            const uint8_t* aFontData,
                                            uint32_t aLength);
 
@@ -345,7 +344,9 @@ private:
     void ActivateBundledFonts();
 #endif
 
-    FontFamilyTable mFontSubstitutes;
+    typedef nsRefPtrHashtable<nsStringHashKey, gfxFontFamily> FontTable;
+
+    FontTable mFontSubstitutes;
     nsTArray<nsString> mNonExistingFonts;
 };
 

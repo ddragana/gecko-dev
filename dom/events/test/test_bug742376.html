@@ -22,9 +22,7 @@ function hasListeners() {
   var Ci = SpecialPowers.Ci;
   var dss = Cc["@mozilla.org/devicesensors;1"].getService(Ci.nsIDeviceSensors);
 
-  return dss.hasWindowListener(Ci.nsIDeviceSensorData.TYPE_ORIENTATION, window) ||
-         dss.hasWindowListener(Ci.nsIDeviceSensorData.TYPE_ROTATION_VECTOR, window) ||
-         dss.hasWindowListener(Ci.nsIDeviceSensorData.TYPE_GAME_ROTATION_VECTOR, window);
+  return dss.hasWindowListener(Ci.nsIDeviceSensorData.TYPE_ORIENTATION, window);
 }
 
 is(hasListeners(), false, "Must not have listeners before tests start");

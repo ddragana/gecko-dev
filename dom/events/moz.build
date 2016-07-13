@@ -4,11 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MOCHITEST_MANIFESTS += [
-    'test/mochitest.ini',
-    'test/pointerevents/mochitest.ini',
-]
-
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
 
 XPIDL_SOURCES += [
@@ -44,8 +40,6 @@ EXPORTS.mozilla.dom += [
     'CustomEvent.h',
     'DataContainerEvent.h',
     'DataTransfer.h',
-    'DataTransferItem.h',
-    'DataTransferItemList.h',
     'DeviceMotionEvent.h',
     'DragEvent.h',
     'Event.h',
@@ -84,7 +78,6 @@ UNIFIED_SOURCES += [
     'CommandEvent.cpp',
     'CompositionEvent.cpp',
     'ContentEventHandler.cpp',
-    'CustomEvent.cpp',
     'DataContainerEvent.cpp',
     'DataTransfer.cpp',
     'DeviceMotionEvent.cpp',
@@ -124,13 +117,14 @@ UNIFIED_SOURCES += [
 
 # nsEventStateManager.cpp should be built separately because of Mac OS X headers.
 SOURCES += [
-    'DataTransferItem.cpp',
-    'DataTransferItemList.cpp',
+    'CustomEvent.cpp',
     'EventStateManager.cpp',
 ]
 
 if CONFIG['MOZ_WEBSPEECH']:
     UNIFIED_SOURCES += ['SpeechRecognitionError.cpp']
+
+FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -141,7 +135,6 @@ LOCAL_INCLUDES += [
     '/dom/html',
     '/dom/settings',
     '/dom/storage',
-    '/dom/svg',
     '/dom/workers',
     '/dom/xml',
     '/dom/xul',
@@ -155,6 +148,3 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     LOCAL_INCLUDES += [
         '/dom/wifi',
     ]
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

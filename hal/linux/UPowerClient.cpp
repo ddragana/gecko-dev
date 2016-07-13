@@ -7,7 +7,6 @@
 #include "HalLog.h"
 #include <dbus/dbus-glib.h>
 #include <dbus/dbus-glib-lowlevel.h>
-#include <mozilla/Attributes.h>
 #include <mozilla/dom/battery/Constants.h>
 #include "nsAutoRef.h"
 #include <cmath>
@@ -418,7 +417,6 @@ UPowerClient::UpdateSavedInfo(GHashTable* aHashTable)
       break;
     case eState_FullyCharged:
       isFull = true;
-      MOZ_FALLTHROUGH;
     case eState_Charging:
     case eState_PendingCharge:
       mCharging = true;

@@ -52,11 +52,6 @@ public:
   nsresult Init();
 
   /**
-   * Returns true if the Preferences service is available, false otherwise.
-   */
-  static bool IsServiceAvailable();
-
-  /**
    * Reset loaded user prefs then read them
    */
   static nsresult ResetAndReadUserPrefs();
@@ -207,7 +202,7 @@ public:
   static nsresult SetFloat(const char* aPref, float aValue);
   static nsresult SetCString(const char* aPref, const char* aValue);
   static nsresult SetCString(const char* aPref, const nsACString &aValue);
-  static nsresult SetString(const char* aPref, const char16ptr_t aValue);
+  static nsresult SetString(const char* aPref, const char16_t* aValue);
   static nsresult SetString(const char* aPref, const nsAString &aValue);
 
   static nsresult SetComplex(const char* aPref, const nsIID &aType,
@@ -251,28 +246,18 @@ public:
 
   /**
    * Registers/Unregisters the callback function for the aPref.
-   *
-   * Pass ExactMatch for aMatchKind to only get callbacks for
-   * exact matches and not prefixes.
    */
-  enum MatchKind {
-    PrefixMatch,
-    ExactMatch,
-  };
   static nsresult RegisterCallback(PrefChangedFunc aCallback,
                                    const char* aPref,
-                                   void* aClosure = nullptr,
-                                   MatchKind aMatchKind = PrefixMatch);
+                                   void* aClosure = nullptr);
   static nsresult UnregisterCallback(PrefChangedFunc aCallback,
                                      const char* aPref,
-                                     void* aClosure = nullptr,
-                                     MatchKind aMatchKind = PrefixMatch);
+                                     void* aClosure = nullptr);
   // Like RegisterCallback, but also calls the callback immediately for
   // initialization.
   static nsresult RegisterCallbackAndCall(PrefChangedFunc aCallback,
                                           const char* aPref,
-                                          void* aClosure = nullptr,
-                                          MatchKind aMatchKind = PrefixMatch);
+                                          void* aClosure = nullptr);
 
   /**
    * Adds the aVariable to cache table.  aVariable must be a pointer for a
@@ -289,10 +274,6 @@ public:
   static nsresult AddUintVarCache(uint32_t* aVariable,
                                   const char* aPref,
                                   uint32_t aDefault = 0);
-  template <MemoryOrdering Order>
-  static nsresult AddAtomicUintVarCache(Atomic<uint32_t, Order>* aVariable,
-                                        const char* aPref,
-                                        uint32_t aDefault = 0);
   static nsresult AddFloatVarCache(float* aVariable,
                                    const char* aPref,
                                    float aDefault = 0.0f);

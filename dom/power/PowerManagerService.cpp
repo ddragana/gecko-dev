@@ -61,7 +61,7 @@ PowerManagerService::GetInstance()
     ClearOnShutdown(&sSingleton);
   }
 
-  RefPtr<PowerManagerService> service = sSingleton.get();
+  nsRefPtr<PowerManagerService> service = sSingleton.get();
   return service.forget();
 }
 
@@ -112,7 +112,7 @@ PowerManagerService::Notify(const WakeLockInformation& aWakeLockInfo)
    * because the callbacks may install new listeners. We expect no
    * more than one listener per window, so it shouldn't be too long.
    */
-  AutoTArray<nsCOMPtr<nsIDOMMozWakeLockListener>, 2> listeners(mWakeLockListeners);
+  nsAutoTArray<nsCOMPtr<nsIDOMMozWakeLockListener>, 2> listeners(mWakeLockListeners);
 
   for (uint32_t i = 0; i < listeners.Length(); ++i) {
     listeners[i]->Callback(aWakeLockInfo.topic(), state);
@@ -128,8 +128,7 @@ PowerManagerService::SyncProfile()
     obsServ->NotifyObservers(nullptr, "profile-change-net-teardown", context.get());
     obsServ->NotifyObservers(nullptr, "profile-change-teardown", context.get());
     obsServ->NotifyObservers(nullptr, "profile-before-change", context.get());
-    obsServ->NotifyObservers(nullptr, "profile-before-change-qm", context.get());
-    obsServ->NotifyObservers(nullptr, "profile-before-change-telemetry", context.get());
+    obsServ->NotifyObservers(nullptr, "profile-before-change2", context.get());
   }
 }
 
@@ -211,10 +210,10 @@ PowerManagerService::GetWakeLockState(const nsAString &aTopic, nsAString &aState
 
 already_AddRefed<WakeLock>
 PowerManagerService::NewWakeLock(const nsAString& aTopic,
-                                 nsPIDOMWindowInner* aWindow,
+                                 nsIDOMWindow* aWindow,
                                  mozilla::ErrorResult& aRv)
 {
-  RefPtr<WakeLock> wakelock = new WakeLock();
+  nsRefPtr<WakeLock> wakelock = new WakeLock();
   aRv = wakelock->Init(aTopic, aWindow);
   if (aRv.Failed()) {
     return nullptr;
@@ -225,12 +224,11 @@ PowerManagerService::NewWakeLock(const nsAString& aTopic,
 
 NS_IMETHODIMP
 PowerManagerService::NewWakeLock(const nsAString &aTopic,
-                                 mozIDOMWindow *aWindow,
+                                 nsIDOMWindow *aWindow,
                                  nsISupports **aWakeLock)
 {
   mozilla::ErrorResult rv;
-  RefPtr<WakeLock> wakelock =
-    NewWakeLock(aTopic, nsPIDOMWindowInner::From(aWindow), rv);
+  nsRefPtr<WakeLock> wakelock = NewWakeLock(aTopic, aWindow, rv);
   if (rv.Failed()) {
     return rv.StealNSResult();
   }
@@ -244,7 +242,7 @@ already_AddRefed<WakeLock>
 PowerManagerService::NewWakeLockOnBehalfOfProcess(const nsAString& aTopic,
                                                   ContentParent* aContentParent)
 {
-  RefPtr<WakeLock> wakelock = new WakeLock();
+  nsRefPtr<WakeLock> wakelock = new WakeLock();
   nsresult rv = wakelock->Init(aTopic, aContentParent);
   NS_ENSURE_SUCCESS(rv, nullptr);
   return wakelock.forget();

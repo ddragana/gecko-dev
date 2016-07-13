@@ -8,6 +8,8 @@ XPIDL_SOURCES += [
     'mozIApplication.idl',
     'mozIApplicationClearPrivateDataParams.idl',
     'nsIAppsService.idl',
+    'nsIInterAppCommService.idl',
+    'nsIInterAppCommUIGlue.idl'
 ]
 
 XPIDL_MODULE = 'dom_apps'

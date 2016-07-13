@@ -7,6 +7,7 @@
 
 #include "base/task.h"                  // for NewRunnableFunction, etc
 #include "base/thread.h"                // for Thread
+#include "base/tracked.h"               // for FROM_HERE
 #include "mozilla/gfx/Logging.h"        // for gfxDebug
 #include "mozilla/layers/SharedBufferManagerChild.h"
 #include "mozilla/layers/SharedBufferManagerParent.h"
@@ -106,7 +107,8 @@ ConnectSharedBufferManagerInChildProcess(mozilla::ipc::Transport* aTransport,
 #ifdef MOZ_NUWA_PROCESS
   if (IsNuwaProcess()) {
     SharedBufferManagerChild::sSharedBufferManagerChildThread
-      ->message_loop()->PostTask(NewRunnableFunction(NuwaMarkCurrentThread,
+      ->message_loop()->PostTask(FROM_HERE,
+                                 NewRunnableFunction(NuwaMarkCurrentThread,
                                                      (void (*)(void *))nullptr,
                                                      (void *)nullptr));
   }
@@ -126,6 +128,7 @@ SharedBufferManagerChild::StartUpInChildProcess(Transport* aTransport,
 
   sSharedBufferManagerChildSingleton = new SharedBufferManagerChild();
   sSharedBufferManagerChildSingleton->GetMessageLoop()->PostTask(
+    FROM_HERE,
     NewRunnableFunction(ConnectSharedBufferManagerInChildProcess,
                         aTransport, aOtherPid));
 
@@ -159,7 +162,7 @@ SharedBufferManagerChild::StartUpOnThread(base::Thread* aThread)
   char thrname[128];
   base::snprintf(thrname, 128, "BufMgrParent#%d", base::Process::Current().pid());
   sSharedBufferManagerParentSingleton = new SharedBufferManagerParent(
-    base::Process::Current().pid(), new base::Thread(thrname));
+    nullptr, base::Process::Current().pid(), new base::Thread(thrname));
   sSharedBufferManagerChildSingleton->ConnectAsync(sSharedBufferManagerParentSingleton);
   return true;
 }
@@ -180,7 +183,7 @@ SharedBufferManagerChild::DestroyManager()
   ReentrantMonitorAutoEnter autoMon(barrier);
 
   bool done = false;
-  sSharedBufferManagerChildSingleton->GetMessageLoop()->PostTask(
+  sSharedBufferManagerChildSingleton->GetMessageLoop()->PostTask(FROM_HERE,
     NewRunnableFunction(&DeleteSharedBufferManagerSync, &barrier, &done));
   while (!done) {
     barrier.Wait();
@@ -199,8 +202,8 @@ SharedBufferManagerChild::GetMessageLoop() const
 void
 SharedBufferManagerChild::ConnectAsync(SharedBufferManagerParent* aParent)
 {
-  GetMessageLoop()->PostTask(NewRunnableFunction(&ConnectSharedBufferManager,
-                                                 this, aParent));
+  GetMessageLoop()->PostTask(FROM_HERE, NewRunnableFunction(&ConnectSharedBufferManager,
+                                                            this, aParent));
 }
 
 // dispatched function
@@ -247,6 +250,7 @@ SharedBufferManagerChild::AllocGrallocBuffer(const gfx::IntSize& aSize,
   bool done = false;
 
   GetMessageLoop()->PostTask(
+    FROM_HERE,
     NewRunnableFunction(&AllocGrallocBufferSync,
                         GrallocParam(aSize, aFormat, aUsage, aBuffer), &barrier, &done));
 
@@ -301,7 +305,8 @@ SharedBufferManagerChild::DeallocGrallocBuffer(const mozilla::layers::MaybeMagic
     return SharedBufferManagerChild::DeallocGrallocBufferNow(aBuffer);
   }
 
-  GetMessageLoop()->PostTask(NewRunnableFunction(&DeallocGrallocBufferSync, aBuffer));
+  GetMessageLoop()->PostTask(FROM_HERE, NewRunnableFunction(&DeallocGrallocBufferSync,
+                                                            aBuffer));
 }
 
 void

@@ -22,8 +22,8 @@ public:
   explicit GMPProcessChild(ProcessId aParentPid);
   ~GMPProcessChild();
 
-  bool Init() override;
-  void CleanUp() override;
+  virtual bool Init() override;
+  virtual void CleanUp() override;
 
   // Set/get the GMPLoader singleton for this child process.
   // Note: The GMPLoader is not deleted by this object, the caller of

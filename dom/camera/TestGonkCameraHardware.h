@@ -18,6 +18,7 @@
 #define DOM_CAMERA_TESTGONKCAMERAHARDWARE_H
 
 #include "GonkCameraHwMgr.h"
+#include "nsAutoPtr.h"
 #include "nsIDOMEventListener.h"
 #include "mozilla/CondVar.h"
 
@@ -60,7 +61,7 @@ protected:
   class PushParametersDelegate;
   class PullParametersDelegate;
 
-  nsresult WaitWhileRunningOnMainThread(RefPtr<ControlMessage> aRunnable);
+  nsresult WaitWhileRunningOnMainThread(nsRefPtr<ControlMessage> aRunnable);
 
   nsCOMPtr<nsIDOMEventListener> mDomListener;
   nsCOMPtr<nsIThread> mCameraThread;

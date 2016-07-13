@@ -22,7 +22,7 @@ child:
   /**
    * Sent when the asynchronous request has completed.
    */
-  async __delete__(MessageReply response);
+  __delete__(MessageReply response);
 };
 
 struct ReplyMessageSend
@@ -87,8 +87,6 @@ struct ReplyGetSegmentInfoForTextFail
 struct ReplyGetSmscAddress
 {
   nsString smscAddress;
-  uint32_t typeOfNumber;
-  uint32_t numberPlanIdentification;
 };
 
 struct ReplyGetSmscAddressFail

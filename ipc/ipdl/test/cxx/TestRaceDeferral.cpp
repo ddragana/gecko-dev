@@ -4,13 +4,12 @@
 
 using namespace mozilla::ipc;
 typedef mozilla::ipc::MessageChannel::Message Message;
-typedef mozilla::ipc::MessageChannel::MessageInfo MessageInfo;
 
 namespace mozilla {
 namespace _ipdltest {
 
 static RacyInterruptPolicy
-MediateRace(const MessageInfo& parent, const MessageInfo& child)
+MediateRace(const Message& parent, const Message& child)
 {
     return (PTestRaceDeferral::Msg_Win__ID == parent.type()) ?
         RIPParentWins : RIPChildWins;
@@ -68,8 +67,8 @@ TestRaceDeferralParent::AnswerLose()
 }
 
 RacyInterruptPolicy
-TestRaceDeferralParent::MediateInterruptRace(const MessageInfo& parent,
-                                             const MessageInfo& child)
+TestRaceDeferralParent::MediateInterruptRace(const Message& parent,
+                                       const Message& child)
 {
     return MediateRace(parent, child);
 }
@@ -108,8 +107,8 @@ TestRaceDeferralChild::AnswerRpc()
 }
 
 RacyInterruptPolicy
-TestRaceDeferralChild::MediateInterruptRace(const MessageInfo& parent,
-                                            const MessageInfo& child)
+TestRaceDeferralChild::MediateInterruptRace(const Message& parent,
+                                      const Message& child)
 {
     return MediateRace(parent, child);
 }

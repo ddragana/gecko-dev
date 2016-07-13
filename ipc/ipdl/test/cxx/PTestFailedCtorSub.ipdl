@@ -11,7 +11,7 @@ intr protocol PTestFailedCtorSub {
 parent:
     async PTestFailedCtorSubsub();
     sync Sync();
-    async __delete__();
+    __delete__();
 };
 
 }

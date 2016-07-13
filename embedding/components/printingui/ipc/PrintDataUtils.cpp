@@ -22,7 +22,7 @@ namespace embedding {
 
 NS_IMPL_ISUPPORTS(MockWebBrowserPrint, nsIWebBrowserPrint);
 
-MockWebBrowserPrint::MockWebBrowserPrint(const PrintData &aData)
+MockWebBrowserPrint::MockWebBrowserPrint(PrintData aData)
   : mData(aData)
 {
   MOZ_COUNT_CTOR(MockWebBrowserPrint);
@@ -46,7 +46,7 @@ MockWebBrowserPrint::GetCurrentPrintSettings(nsIPrintSettings **aCurrentPrintSet
 }
 
 NS_IMETHODIMP
-MockWebBrowserPrint::GetCurrentChildDOMWindow(mozIDOMWindowProxy **aCurrentPrintSettings)
+MockWebBrowserPrint::GetCurrentChildDOMWindow(nsIDOMWindow **aCurrentPrintSettings)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -106,7 +106,7 @@ MockWebBrowserPrint::Print(nsIPrintSettings* aThePrintSettings,
 
 NS_IMETHODIMP
 MockWebBrowserPrint::PrintPreview(nsIPrintSettings* aThePrintSettings,
-                                  mozIDOMWindowProxy* aChildDOMWin,
+                                  nsIDOMWindow* aChildDOMWin,
                                   nsIWebProgressListener* aWPListener)
 {
   return NS_ERROR_NOT_IMPLEMENTED;

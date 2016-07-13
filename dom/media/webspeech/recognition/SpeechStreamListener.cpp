@@ -22,15 +22,18 @@ SpeechStreamListener::~SpeechStreamListener()
   nsCOMPtr<nsIThread> mainThread;
   NS_GetMainThread(getter_AddRefs(mainThread));
 
-  NS_ProxyRelease(mainThread, mRecognition.forget());
+  SpeechRecognition* forgottenRecognition = nullptr;
+  mRecognition.swap(forgottenRecognition);
+  NS_ProxyRelease(mainThread,
+                  static_cast<DOMEventTargetHelper*>(forgottenRecognition));
 }
 
 void
-SpeechStreamListener::NotifyQueuedAudioData(MediaStreamGraph* aGraph, TrackID aID,
-                                            StreamTime aTrackOffset,
-                                            const AudioSegment& aQueuedMedia,
-                                            MediaStream* aInputStream,
-                                            TrackID aInputTrackID)
+SpeechStreamListener::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
+                                               TrackID aID,
+                                               StreamTime aTrackOffset,
+                                               uint32_t aTrackEvents,
+                                               const MediaSegment& aQueuedMedia)
 {
   AudioSegment* audio = const_cast<AudioSegment*>(
     static_cast<const AudioSegment*>(&aQueuedMedia));
@@ -73,7 +76,7 @@ SpeechStreamListener::ConvertAndDispatchAudioChunk(int aDuration, float aVolume,
                                                    SampleFormatType* aData,
                                                    TrackRate aTrackRate)
 {
-  RefPtr<SharedBuffer> samples(SharedBuffer::Create(aDuration *
+  nsRefPtr<SharedBuffer> samples(SharedBuffer::Create(aDuration *
                                                       1 * // channel
                                                       sizeof(int16_t)));
 
@@ -85,7 +88,7 @@ SpeechStreamListener::ConvertAndDispatchAudioChunk(int aDuration, float aVolume,
 
 void
 SpeechStreamListener::NotifyEvent(MediaStreamGraph* aGraph,
-                                  MediaStreamGraphEvent event)
+                                  MediaStreamListener::MediaStreamGraphEvent event)
 {
   // TODO dispatch SpeechEnd event so services can be informed
 }

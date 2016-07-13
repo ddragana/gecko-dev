@@ -1,8 +1,9 @@
 {
- "version": 5,
+ "version": 4,
  "invocation": {
-  "dmdEnvVar": "--mode=live --stacks=full",
-  "mode": "live"
+  "dmdEnvVar": "--mode=live",
+  "mode": "live",
+  "sampleBelowSize": 1
  },
  "blockList": [
   {"req": 4096, "alloc": "A"},

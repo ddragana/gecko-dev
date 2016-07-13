@@ -75,15 +75,14 @@
 
 /*
  * Smart string cat functions. Automatically manage the memory.
- * The first parameter is the destination string. If it's null, we 
+ * The first parameter is the source string. If it's null, we 
  * allocate memory for it. If it's not, we reallocate memory
  * so the the concanenated string fits.
  */
 static char *
 nssutil_DupnCat(char *baseString, const char *str, int str_len)
 {
-    int baseStringLen = baseString ? PORT_Strlen(baseString) : 0;
-    int len = baseStringLen + 1;
+    int len = (baseString ? PORT_Strlen(baseString) : 0) + 1;
     char *newString;
 
     len += str_len;
@@ -92,9 +91,8 @@ nssutil_DupnCat(char *baseString, const char *str, int str_len)
 	PORT_Free(baseString);
 	return NULL;
     }
-    PORT_Memcpy(&newString[baseStringLen], str, str_len);
-    newString[len - 1] = 0;
-    return newString;
+    if (baseString == NULL) *newString = 0;
+    return PORT_Strncat(newString,str, str_len);
 }
 
 /* Same as nssutil_DupnCat except it concatenates the full string, not a
@@ -165,7 +163,7 @@ char *_NSSUTIL_GetOldSecmodName(const char *dbname,const char *filename)
 static SECStatus nssutil_AddSecmodDBEntry(const char *appName,
                                           const char *filename,
                                           const char *dbname,
-                                          const char *module, PRBool rw);
+                                          char *module, PRBool rw);
 
 enum lfopen_mode { lfopen_truncate, lfopen_append };
 
@@ -210,7 +208,7 @@ nssutil_ReadSecmodDB(const char *appName,
     char *paramsValue=NULL;
     PRBool failed = PR_TRUE;
 
-    moduleList = (char **) PORT_ZAlloc(useCount*sizeof(char *));
+    moduleList = (char **) PORT_ZAlloc(useCount*sizeof(char **));
     if (moduleList == NULL) return NULL;
 
     if (dbname == NULL) {
@@ -387,7 +385,7 @@ done:
 	status = PR_Access(olddbname, PR_ACCESS_EXISTS);
 	if (status == PR_SUCCESS) {
 	    PR_smprintf_free(olddbname);
-	    PORT_ZFree(moduleList, useCount*sizeof(char *));
+	    PORT_ZFree(moduleList, useCount*sizeof(char **));
 	    PORT_SetError(SEC_ERROR_LEGACY_DATABASE);
 	    return NULL;
 	}
@@ -469,7 +467,7 @@ static SECStatus
 nssutil_DeleteSecmodDBEntry(const char *appName,
                             const char *filename,
                             const char *dbname,
-                            const char *args,
+                            char *args,
                             PRBool rw)
 {
     /* SHDB_FIXME implement */
@@ -482,7 +480,7 @@ nssutil_DeleteSecmodDBEntry(const char *appName,
     char *block = NULL;
     char *name = NULL;
     char *lib = NULL;
-    int name_len = 0, lib_len = 0;
+    int name_len, lib_len;
     PRBool skip = PR_FALSE;
     PRBool found = PR_FALSE;
 
@@ -610,7 +608,7 @@ loser:
 static SECStatus
 nssutil_AddSecmodDBEntry(const char *appName,
                         const char *filename, const char *dbname,
-                        const char *module, PRBool rw)
+                         char *module, PRBool rw)
 {
     os_stat_type stat_existing;
     os_open_permissions_type file_mode;

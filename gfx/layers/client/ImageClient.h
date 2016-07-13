@@ -29,7 +29,6 @@ class AsyncTransactionTracker;
 class Image;
 class ImageContainer;
 class ShadowableLayer;
-class ImageClientSingle;
 
 /**
  * Image clients are used by basic image layers on the content thread, they
@@ -57,6 +56,8 @@ public:
    */
   virtual bool UpdateImage(ImageContainer* aContainer, uint32_t aContentFlags) = 0;
 
+  virtual already_AddRefed<Image> CreateImage(ImageFormat aFormat) = 0;
+
   void SetLayer(ClientLayer* aLayer) { mLayer = aLayer; }
   ClientLayer* GetLayer() const { return mLayer; }
 
@@ -70,8 +71,6 @@ public:
 
   void RemoveTextureWithWaiter(TextureClient* aTexture,
                                AsyncTransactionWaiter* aAsyncTransactionWaiter = nullptr);
-
-  virtual ImageClientSingle* AsImageClientSingle() { return nullptr; }
 
 protected:
   ImageClient(CompositableForwarder* aFwd, TextureFlags aFlags,
@@ -100,9 +99,9 @@ public:
 
   virtual TextureInfo GetTextureInfo() const override;
 
-  virtual void FlushAllImages(AsyncTransactionWaiter* aAsyncTransactionWaiter) override;
+  virtual already_AddRefed<Image> CreateImage(ImageFormat aFormat) override;
 
-  ImageClientSingle* AsImageClientSingle() override { return this; }
+  virtual void FlushAllImages(AsyncTransactionWaiter* aAsyncTransactionWaiter) override;
 
 protected:
   struct Buffer {
@@ -136,9 +135,38 @@ public:
     MOZ_ASSERT(!aChild, "ImageClientBridge should not have IPDL actor");
   }
 
+  virtual already_AddRefed<Image> CreateImage(ImageFormat aFormat) override
+  {
+    NS_WARNING("Should not create an image through an ImageClientBridge");
+    return nullptr;
+  }
+
 protected:
   uint64_t mAsyncContainerID;
 };
+
+#ifdef MOZ_WIDGET_GONK
+/**
+ * And ImageClient to handle opaque video stream.
+ * Such video stream does not upload new Image for each frame.
+ * Gecko have no way to get the buffer content from the Image, since the Image
+ * does not contain the real buffer.
+ * It need special hardware to display the Image
+ */
+class ImageClientOverlay : public ImageClient
+{
+public:
+  ImageClientOverlay(CompositableForwarder* aFwd,
+                     TextureFlags aFlags);
+
+  virtual bool UpdateImage(ImageContainer* aContainer, uint32_t aContentFlags);
+  virtual already_AddRefed<Image> CreateImage(ImageFormat aFormat);
+  TextureInfo GetTextureInfo() const override
+  {
+    return TextureInfo(CompositableType::IMAGE_OVERLAY);
+  }
+};
+#endif
 
 } // namespace layers
 } // namespace mozilla

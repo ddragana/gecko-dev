@@ -55,7 +55,6 @@ namespace places {
     nsCString property;
     bool isAnnotation;
     nsCString newValue;
-    nsCString oldValue;
   };
 
   typedef void (nsNavBookmarks::*ItemVisitMethod)(const ItemVisitData&);
@@ -264,7 +263,7 @@ private:
   /**
    * This is an handle to the Places database.
    */
-  RefPtr<mozilla::places::Database> mDB;
+  nsRefPtr<mozilla::places::Database> mDB;
 
   int32_t mItemCount;
 

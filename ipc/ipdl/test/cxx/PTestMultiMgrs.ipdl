@@ -9,13 +9,13 @@ protocol PTestMultiMgrs {
     manages PTestMultiMgrsRight;
 
 parent:
-    async OK();
+    OK();
 
 child:
-    async PTestMultiMgrsLeft();
-    async PTestMultiMgrsRight();
-    async Check();
-    async __delete__();
+    PTestMultiMgrsLeft();
+    PTestMultiMgrsRight();
+    Check();
+    __delete__();
 
 state START:
     send PTestMultiMgrsLeft goto CONSTRUCT_RIGHT;

@@ -84,7 +84,7 @@ private:
   _CGLContextObject        *mOpenGLContext;
   CGImageRef                mCGImage;
   void                     *mCGData;
-  RefPtr<MacIOSurface> mIOSurface;
+  mozilla::RefPtr<MacIOSurface> mIOSurface;
   uint32_t                  mFBO;
   uint32_t                  mIOTexture;
   int                       mUnsupportedWidth;

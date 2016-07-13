@@ -7,17 +7,8 @@ const constructors = [
     Int32Array,
     Uint32Array,
     Float32Array,
-    Float64Array ];
-
-if (typeof SharedArrayBuffer != "undefined")
-    constructors.push(sharedConstructor(Int8Array),
-		      sharedConstructor(Uint8Array),
-		      sharedConstructor(Int16Array),
-		      sharedConstructor(Uint16Array),
-		      sharedConstructor(Int32Array),
-		      sharedConstructor(Uint32Array),
-		      sharedConstructor(Float32Array),
-		      sharedConstructor(Float64Array));
+    Float64Array
+];
 
 for (var constructor of constructors) {
     assertEq(constructor.prototype.join.length, 1);
@@ -39,7 +30,7 @@ for (var constructor of constructors) {
     assertThrowsInstanceOf(() => new constructor().join(Symbol()), TypeError);
 
     // Called from other globals.
-    if (typeof newGlobal === "function" && !isSharedConstructor(constructor)) {
+    if (typeof newGlobal === "function") {
         var join = newGlobal()[constructor.name].prototype.join;
         assertEq(join.call(new constructor([1, 2, 3]), "\t"), "1\t2\t3");
     }

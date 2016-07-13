@@ -6,14 +6,13 @@
 #ifndef NativeJSObject_h__
 #define NativeJSObject_h__
 
-#include "GeneratedJNIWrappers.h"
+#include <jni.h>
 #include "jsapi.h"
 
 namespace mozilla {
 namespace widget {
 
-NativeJSContainer::LocalRef CreateNativeJSContainer(
-        JSContext* cx, JS::HandleObject object);
+jobject CreateNativeJSContainer(JNIEnv* env, JSContext* cx, JS::HandleObject object);
 
 } // namespace widget
 } // namespace mozilla

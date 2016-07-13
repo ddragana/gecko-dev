@@ -4,7 +4,9 @@
 const RELATIVE_DIR = "browser/extensions/pdfjs/test/";
 const TESTROOT = "http://example.com/browser/" + RELATIVE_DIR;
 
-add_task(function* test() {
+function test() {
+  var tab;
+
   let handlerService = Cc["@mozilla.org/uriloader/handler-service;1"].getService(Ci.nsIHandlerService);
   let mimeService = Cc["@mozilla.org/mime;1"].getService(Ci.nsIMIMEService);
   let handlerInfo = mimeService.getFromTypeAndExtension('application/pdf', 'pdf');
@@ -15,53 +17,60 @@ add_task(function* test() {
 
   info('Pref action: ' + handlerInfo.preferredAction);
 
-  yield BrowserTestUtils.withNewTab({ gBrowser, url: "about:blank" },
-    function* (browser) {
-      // check that PDF is opened with internal viewer
-      yield waitForPdfJS(browser, TESTROOT + "file_pdfjs_test.pdf");
+  waitForExplicitFinish();
+  registerCleanupFunction(function() {
+    gBrowser.removeTab(tab);
+  });
 
-      yield ContentTask.spawn(browser, null, function* () {
-        Assert.ok(content.document.querySelector("div#viewer"), "document content has viewer UI");
-        Assert.ok("PDFJS" in content.wrappedJSObject, "window content has PDFJS object");
+  tab = gBrowser.addTab(TESTROOT + "file_pdfjs_test.pdf");
+  var newTabBrowser = gBrowser.getBrowserForTab(tab);
+  newTabBrowser.addEventListener("load", function eventHandler() {
+    newTabBrowser.removeEventListener("load", eventHandler, true);
 
-        //open sidebar
-        var sidebar = content.document.querySelector('button#sidebarToggle');
-        var outerContainer = content.document.querySelector('div#outerContainer');
+    var document = newTabBrowser.contentDocument,
+        window = newTabBrowser.contentWindow;
 
-        sidebar.click();
-        Assert.ok(outerContainer.classList.contains("sidebarOpen"), "sidebar opens on click");
+    // Runs tests after all 'load' event handlers have fired off
+    window.addEventListener("documentload", function() {
+      runTests(document, window, finish);
+    }, false, true);
+  }, true);
+}
 
-        // check that thumbnail view is open
-        var thumbnailView = content.document.querySelector('div#thumbnailView');
-        var outlineView = content.document.querySelector('div#outlineView');
+function runTests(document, window, callback) {
+  // check that PDF is opened with internal viewer
+  ok(document.querySelector('div#viewer'), "document content has viewer UI");
+  ok('PDFJS' in window.wrappedJSObject, "window content has PDFJS object");
 
-        Assert.equal(thumbnailView.getAttribute("class"), null,
-          "Initial view is thumbnail view");
-        Assert.equal(outlineView.getAttribute("class"), "hidden",
-          "Outline view is hidden initially");
+  //open sidebar
+  var sidebar = document.querySelector('button#sidebarToggle');
+  var outerContainer = document.querySelector('div#outerContainer');
 
-        //switch to outline view
-        var viewOutlineButton = content.document.querySelector('button#viewOutline');
-        viewOutlineButton.click();
+  sidebar.click();
+  ok(outerContainer.classList.contains('sidebarOpen'), 'sidebar opens on click');
 
-        Assert.equal(thumbnailView.getAttribute("class"), "hidden",
-          "Thumbnail view is hidden when outline is selected");
-        Assert.equal(outlineView.getAttribute("class"), "",
-          "Outline view is visible when selected");
+  // check that thumbnail view is open
+  var thumbnailView = document.querySelector('div#thumbnailView');
+  var outlineView = document.querySelector('div#outlineView');
 
-        //switch back to thumbnail view
-        var viewThumbnailButton = content.document.querySelector('button#viewThumbnail');
-        viewThumbnailButton.click();
+  is(thumbnailView.getAttribute('class'), null, 'Initial view is thumbnail view');
+  is(outlineView.getAttribute('class'), 'hidden', 'Outline view is hidden initially');
 
-        Assert.equal(thumbnailView.getAttribute("class"), "",
-          "Thumbnail view is visible when selected");
-        Assert.equal(outlineView.getAttribute("class"), "hidden",
-          "Outline view is hidden when thumbnail is selected");
+  //switch to outline view
+  var viewOutlineButton = document.querySelector('button#viewOutline');
+  viewOutlineButton.click();
 
-        sidebar.click();
+  is(outlineView.getAttribute('class'), '', 'Outline view is visible when selected');
+  is(thumbnailView.getAttribute('class'), 'hidden', 'Thumbnail view is hidden when outline is selected');
 
-        var viewer = content.wrappedJSObject.PDFViewerApplication;
-        yield viewer.close();
-      });
-    });
-});
+  //switch back to thumbnail view
+  var viewThumbnailButton = document.querySelector('button#viewThumbnail');
+  viewThumbnailButton.click();
+
+  is(thumbnailView.getAttribute('class'), '', 'Thumbnail view is visible when selected');
+  is(outlineView.getAttribute('class'), 'hidden', 'Outline view is hidden when thumbnail is selected');
+
+  sidebar.click();
+
+  callback();
+}

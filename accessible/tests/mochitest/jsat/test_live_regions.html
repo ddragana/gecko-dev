@@ -14,13 +14,13 @@
   <script type="application/javascript">
 
     function startAccessFu() {
-      SpecialPowers.pushPrefEnv({"set": [['accessibility.accessfu.activate', 1]]});
+      SpecialPowers.setIntPref("accessibility.accessfu.activate", 1);
       AccessFuTest.once_log("EventManager.start", AccessFuTest.nextTest);
     }
 
     function stopAccessFu() {
-      SpecialPowers.pushPrefEnv({"set": [['accessibility.accessfu.activate', 0]]});
-      AccessFuTest.once_log("EventManager.stop", () => AccessFuTest.finish());
+      SpecialPowers.setIntPref("accessibility.accessfu.activate", 0);
+      AccessFuTest.once_log("EventManager.stop", AccessFuTest.finish);
     }
 
     function hide(id) {
@@ -65,7 +65,7 @@
         }
       },
       action: function action() {
-        ["to_hide1", "to_hide2", "to_hide3", "to_hide4"].forEach(id => hide(id));
+        [hide(id) for (id of ["to_hide1", "to_hide2", "to_hide3", "to_hide4"])];
       }
     }, {
       expected: {
@@ -76,8 +76,8 @@
         }
       },
       action: function action() {
-        ["to_hide_descendant1", "to_hide_descendant2",
-         "to_hide_descendant3", "to_hide_descendant4"].forEach(id => hide(id));
+        [hide(id) for (id of ["to_hide_descendant1", "to_hide_descendant2",
+          "to_hide_descendant3", "to_hide_descendant4"])];
       }
     }, {
       expected: {
@@ -88,7 +88,7 @@
         }
       },
       action: function action() {
-        ["to_show1", "to_show2", "to_show3", "to_show4"].forEach(id => show(id));
+        [show(id) for (id of ["to_show1", "to_show2", "to_show3", "to_show4"])];
       }
     }, {
       expected: {
@@ -99,8 +99,8 @@
         }
       },
       action: function action() {
-        ["to_show_descendant1", "to_show_descendant2",
-         "to_show_descendant3", "to_show_descendant4"].forEach(id => show(id));
+        [show(id) for (id of ["to_show_descendant1", "to_show_descendant2",
+          "to_show_descendant3", "to_show_descendant4"])];
       }
     }, {
       expected: {
@@ -111,7 +111,8 @@
         }
       },
       action: function action() {
-        ["to_hide5", "to_hide6", "to_hide7", "to_hide8", "to_hide9"].forEach(id => ariaHide(id));
+        [ariaHide(id) for (id of ["to_hide5", "to_hide6", "to_hide7",
+          "to_hide8", "to_hide9"])];
       }
     }, {
       expected: {
@@ -122,8 +123,8 @@
         }
       },
       action: function action() {
-        ["to_hide_descendant5", "to_hide_descendant6",
-         "to_hide_descendant7", "to_hide_descendant8"].forEach(id => ariaHide(id));
+        [ariaHide(id) for (id of ["to_hide_descendant5", "to_hide_descendant6",
+          "to_hide_descendant7", "to_hide_descendant8"])];
       }
     }, {
       expected: {
@@ -134,7 +135,8 @@
         }
       },
       action: function action() {
-        ["to_show5", "to_show6", "to_show7", "to_show8", "to_show9"].forEach(id => ariaShow(id));
+        [ariaShow(id) for (id of ["to_show5", "to_show6", "to_show7",
+          "to_show8", "to_show9"])];
       }
     }, {
       expected: {
@@ -145,8 +147,8 @@
         }
       },
       action: function action() {
-        ["to_show_descendant5", "to_show_descendant6",
-         "to_show_descendant7", "to_show_descendant8"].forEach(id => ariaShow(id));
+        [ariaShow(id) for (id of ["to_show_descendant5", "to_show_descendant6",
+          "to_show_descendant7", "to_show_descendant8"])];
       }
     }, {
       expected: {
@@ -179,7 +181,7 @@
         }
       },
       action: function action() {
-        ["to_show_live_off", "to_show_live_assertive"].forEach(id => show(id));
+        [show(id) for (id of ["to_show_live_off", "to_show_live_assertive"])];
       }
     }, {
       expected: {
@@ -190,7 +192,8 @@
         }
       },
       action: function action() {
-        ["to_show_live_off2", "to_show_live_assertive2"].forEach(id => ariaShow(id));
+        [ariaShow(id) for (id of ["to_show_live_off2",
+          "to_show_live_assertive2"])];
       }
     }, {
       expected: {

@@ -26,11 +26,6 @@ dictionary HitRegionOptions {
   Element? control = null;
 };
 
-typedef (HTMLImageElement or
-         HTMLCanvasElement or
-         HTMLVideoElement or
-         ImageBitmap) CanvasImageSource;
-
 interface CanvasRenderingContext2D {
 
   // back-reference to the canvas.  Might be null if we're not
@@ -69,7 +64,7 @@ interface CanvasRenderingContext2D {
   [NewObject, Throws]
   CanvasGradient createRadialGradient(double x0, double y0, double r0, double x1, double y1, double r1);
   [NewObject, Throws]
-  CanvasPattern? createPattern(CanvasImageSource image, [TreatNullAs=EmptyString] DOMString repetition);
+  CanvasPattern createPattern((HTMLImageElement or HTMLCanvasElement or HTMLVideoElement) image, [TreatNullAs=EmptyString] DOMString repetition);
 
   // shadows
            [LenientFloat]
@@ -121,13 +116,12 @@ interface CanvasRenderingContext2D {
 
   // drawing images
 // NOT IMPLEMENTED           attribute boolean imageSmoothingEnabled; // (default true)
-
   [Throws, LenientFloat]
-  void drawImage(CanvasImageSource image, double dx, double dy);
+  void drawImage((HTMLImageElement or HTMLCanvasElement or HTMLVideoElement) image, double dx, double dy);
   [Throws, LenientFloat]
-  void drawImage(CanvasImageSource image, double dx, double dy, double dw, double dh);
+  void drawImage((HTMLImageElement or HTMLCanvasElement or HTMLVideoElement) image, double dx, double dy, double dw, double dh);
   [Throws, LenientFloat]
-  void drawImage(CanvasImageSource image, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh);
+  void drawImage((HTMLImageElement or HTMLCanvasElement or HTMLVideoElement) image, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh);
 
   // hit regions
   [Pref="canvas.hitregions.enabled", Throws] void addHitRegion(optional HitRegionOptions options);
@@ -232,6 +226,17 @@ interface CanvasRenderingContext2D {
                            optional unsigned long flags = 0);
 
   /**
+   * Render the root widget of a window into the canvas. Unlike drawWindow,
+   * this uses the operating system to snapshot the widget on-screen, rather
+   * than reading from our own compositor.
+   *
+   * Currently, this is only supported on Windows, and only on widgets that
+   * use OMTC, and only from within the chrome process.
+   */
+  [Throws, ChromeOnly]
+  void drawWidgetAsOnScreen(Window window);
+
+  /**
    * This causes a context that is currently using a hardware-accelerated
    * backend to fallback to a software one. All state should be preserved.
    */
@@ -287,9 +292,7 @@ interface CanvasPathMethods {
 
   [Throws, LenientFloat]
   void arc(double x, double y, double radius, double startAngle, double endAngle, optional boolean anticlockwise = false); 
-
-  [Throws, LenientFloat]
-  void ellipse(double x, double y, double radiusX, double radiusY, double rotation, double startAngle, double endAngle, optional boolean anticlockwise = false);
+// NOT IMPLEMENTED  [LenientFloat] void ellipse(double x, double y, double radiusX, double radiusY, double rotation, double startAngle, double endAngle, boolean anticlockwise);
 };
 
 interface CanvasGradient {

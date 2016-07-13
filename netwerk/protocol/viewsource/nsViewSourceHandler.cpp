@@ -11,9 +11,6 @@
 
 #define VIEW_SOURCE "view-source"
 
-namespace mozilla {
-namespace net {
-
 ////////////////////////////////////////////////////////////////////////////////
 
 NS_IMPL_ISUPPORTS(nsViewSourceHandler, nsIProtocolHandler)
@@ -38,7 +35,7 @@ nsViewSourceHandler::GetDefaultPort(int32_t *result)
 NS_IMETHODIMP
 nsViewSourceHandler::GetProtocolFlags(uint32_t *result)
 {
-    *result = URI_NORELATIVE | URI_NOAUTH | URI_DANGEROUS_TO_LOAD |
+    *result = URI_NORELATIVE | URI_NOAUTH | URI_LOADABLE_BY_ANYONE |
         URI_NON_PERSISTABLE;
     return NS_OK;
 }
@@ -73,7 +70,7 @@ nsViewSourceHandler::NewURI(const nsACString &aSpec,
 
     asciiSpec.Insert(VIEW_SOURCE ":", 0);
 
-    // We can't swap() from an RefPtr<nsSimpleNestedURI> to an nsIURI**,
+    // We can't swap() from an nsRefPtr<nsSimpleNestedURI> to an nsIURI**,
     // sadly.
     nsSimpleNestedURI* ourURI = new nsSimpleNestedURI(innerURI);
     nsCOMPtr<nsIURI> uri = ourURI;
@@ -127,21 +124,22 @@ nsViewSourceHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
 }
 
 nsresult
-nsViewSourceHandler::NewSrcdocChannel(nsIURI *aURI,
-                                      nsIURI *aBaseURI,
-                                      const nsAString &aSrcdoc,
-                                      nsILoadInfo* aLoadInfo,
-                                      nsIChannel** outChannel)
+nsViewSourceHandler::NewSrcdocChannel(nsIURI* uri, const nsAString &srcdoc,
+                                      nsIChannel* *result)
 {
-    NS_ENSURE_ARG_POINTER(aURI);
-    RefPtr<nsViewSourceChannel> channel = new nsViewSourceChannel();
+    NS_ENSURE_ARG_POINTER(uri);
+    nsViewSourceChannel *channel = new nsViewSourceChannel();
+    if (!channel)
+        return NS_ERROR_OUT_OF_MEMORY;
+    NS_ADDREF(channel);
 
-    nsresult rv = channel->InitSrcdoc(aURI, aBaseURI, aSrcdoc, aLoadInfo);
+    nsresult rv = channel->InitSrcdoc(uri, srcdoc);
     if (NS_FAILED(rv)) {
+        NS_RELEASE(channel);
         return rv;
     }
 
-    *outChannel = static_cast<nsIViewSourceChannel*>(channel.forget().take());
+    *result = static_cast<nsIViewSourceChannel*>(channel);
     return NS_OK;
 }
 
@@ -170,6 +168,3 @@ nsViewSourceHandler::GetInstance()
 {
     return gInstance;
 }
-
-} // namespace net
-} // namespace mozilla

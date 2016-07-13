@@ -7,6 +7,7 @@
 #include "mozilla/dom/cache/CacheParent.h"
 
 #include "mozilla/dom/cache/CacheOpParent.h"
+#include "mozilla/dom/cache/CachePushStreamParent.h"
 #include "nsCOMPtr.h"
 
 namespace mozilla {
@@ -71,6 +72,19 @@ CacheParent::RecvPCacheOpConstructor(PCacheOpParent* aActor,
 {
   auto actor = static_cast<CacheOpParent*>(aActor);
   actor->Execute(mManager);
+  return true;
+}
+
+PCachePushStreamParent*
+CacheParent::AllocPCachePushStreamParent()
+{
+  return CachePushStreamParent::Create();
+}
+
+bool
+CacheParent::DeallocPCachePushStreamParent(PCachePushStreamParent* aActor)
+{
+  delete aActor;
   return true;
 }
 

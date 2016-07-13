@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -27,12 +25,10 @@ namespace IPC {
 //------------------------------------------------------------------------------
 
 Message::~Message() {
-  MOZ_COUNT_DTOR(IPC::Message);
 }
 
 Message::Message()
     : Pickle(sizeof(Header)) {
-  MOZ_COUNT_CTOR(IPC::Message);
   header()->routing = header()->type = header()->flags = 0;
 #if defined(OS_POSIX)
   header()->num_fds = 0;
@@ -46,9 +42,8 @@ Message::Message()
 }
 
 Message::Message(int32_t routing_id, msgid_t type, PriorityValue priority,
-                 MessageCompression compression, const char* const aName)
+                 MessageCompression compression, const char* const name)
     : Pickle(sizeof(Header)) {
-  MOZ_COUNT_CTOR(IPC::Message);
   header()->routing = routing_id;
   header()->type = type;
   header()->flags = priority;
@@ -70,18 +65,26 @@ Message::Message(int32_t routing_id, msgid_t type, PriorityValue priority,
   header()->parent_task_id = 0;
   header()->source_event_type = SourceEventType::Unknown;
 #endif
-  InitLoggingVariables(aName);
+  InitLoggingVariables(name);
 }
 
-Message::Message(const char* data, int data_len)
-  : Pickle(sizeof(Header), data, data_len)
-{
-  MOZ_COUNT_CTOR(IPC::Message);
+Message::Message(const char* data, int data_len) : Pickle(data, data_len) {
   InitLoggingVariables();
 }
 
+Message::Message(const Message& other) : Pickle(other) {
+  InitLoggingVariables(other.name_);
+#if defined(OS_POSIX)
+  file_descriptor_set_ = other.file_descriptor_set_;
+#endif
+#ifdef MOZ_TASK_TRACER
+  header()->source_event_id = other.header()->source_event_id;
+  header()->parent_task_id = other.header()->parent_task_id;
+  header()->source_event_type = other.header()->source_event_type;
+#endif
+}
+
 Message::Message(Message&& other) : Pickle(mozilla::Move(other)) {
-  MOZ_COUNT_CTOR(IPC::Message);
   InitLoggingVariables(other.name_);
 #if defined(OS_POSIX)
   file_descriptor_set_ = other.file_descriptor_set_.forget();
@@ -93,8 +96,22 @@ Message::Message(Message&& other) : Pickle(mozilla::Move(other)) {
 #endif
 }
 
-void Message::InitLoggingVariables(const char* const aName) {
-  name_ = aName;
+void Message::InitLoggingVariables(const char* const name) {
+  name_ = name;
+}
+
+Message& Message::operator=(const Message& other) {
+  *static_cast<Pickle*>(this) = other;
+  InitLoggingVariables(other.name_);
+#if defined(OS_POSIX)
+  file_descriptor_set_ = other.file_descriptor_set_;
+#endif
+#ifdef MOZ_TASK_TRACER
+  header()->source_event_id = other.header()->source_event_id;
+  header()->parent_task_id = other.header()->parent_task_id;
+  header()->source_event_type = other.header()->source_event_type;
+#endif
+  return *this;
 }
 
 Message& Message::operator=(Message&& other) {
@@ -126,7 +143,7 @@ bool Message::WriteFileDescriptor(const base::FileDescriptor& descriptor) {
   }
 }
 
-bool Message::ReadFileDescriptor(PickleIterator* iter,
+bool Message::ReadFileDescriptor(void** iter,
                                 base::FileDescriptor* descriptor) const {
   int descriptor_index;
   if (!ReadInt(iter, &descriptor_index))

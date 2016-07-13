@@ -319,14 +319,14 @@ nsMathMLmpaddedFrame::Reflow(nsPresContext*          aPresContext,
 }
 
 /* virtual */ nsresult
-nsMathMLmpaddedFrame::Place(DrawTarget*          aDrawTarget,
+nsMathMLmpaddedFrame::Place(nsRenderingContext& aRenderingContext,
                             bool                 aPlaceOrigin,
                             nsHTMLReflowMetrics& aDesiredSize)
 {
   nsresult rv =
-    nsMathMLContainerFrame::Place(aDrawTarget, false, aDesiredSize);
+    nsMathMLContainerFrame::Place(aRenderingContext, false, aDesiredSize);
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags) || NS_FAILED(rv)) {
-    DidReflowChildren(PrincipalChildList().FirstChild());
+    DidReflowChildren(GetFirstPrincipalChild());
     return rv;
   }
 
@@ -441,9 +441,9 @@ nsMathMLmpaddedFrame::Place(DrawTarget*          aDrawTarget,
 }
 
 /* virtual */ nsresult
-nsMathMLmpaddedFrame::MeasureForWidth(DrawTarget* aDrawTarget,
+nsMathMLmpaddedFrame::MeasureForWidth(nsRenderingContext& aRenderingContext,
                                       nsHTMLReflowMetrics& aDesiredSize)
 {
   ProcessAttributes();
-  return Place(aDrawTarget, false, aDesiredSize);
+  return Place(aRenderingContext, false, aDesiredSize);
 }

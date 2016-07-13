@@ -36,9 +36,9 @@ Cu.import("resource://gre/modules/systemlibs.js");
 const NFC_ENABLED = libcutils.property_get("ro.moz.nfc.enabled", "false") === "true";
 
 // set to true in nfc_consts.js to see debug messages
-var DEBUG = NFC.DEBUG_NFC;
+let DEBUG = NFC.DEBUG_NFC;
 
-var debug;
+let debug;
 function updateDebug() {
   if (DEBUG || NFC.DEBUG_NFC) {
     debug = function (s) {
@@ -79,7 +79,7 @@ const NFC_IPC_MSG_ENTRIES = [
                "NFC:NotifyUserAcceptedP2P",
                "NFC:NotifySendFileStatus",
                "NFC:ChangeRFState",
-               "NFC:SetFocusTab"] }
+               "NFC:SetFocusApp"] }
 ];
 
 // Should be consistent with NfcRequestType defined in NfcOptions.webidl.
@@ -148,18 +148,19 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
     eventListeners: {},
 
-    focusId: NFC.SYSTEM_APP_ID,
+    focusApp: NFC.SYSTEM_APP_ID,
 
     init: function init(nfc) {
       this.nfc = nfc;
+
+      if (!NFC.DEBUG_NFC) {
+        let lock = gSettingsService.createLock();
+        lock.get(NFC.SETTING_NFC_DEBUG, this.nfc);
+        Services.obs.addObserver(this, NFC.TOPIC_MOZSETTINGS_CHANGED, false);
+      }
+
       Services.obs.addObserver(this, NFC.TOPIC_XPCOM_SHUTDOWN, false);
       this._registerMessageListeners();
-    },
-
-    listenDebugEvent: function listenDebugEvent() {
-      let lock = gSettingsService.createLock();
-      lock.get(NFC.SETTING_NFC_DEBUG, this.nfc);
-      Services.obs.addObserver(this, NFC.TOPIC_MOZSETTINGS_CHANGED, false);
     },
 
     _shutdown: function _shutdown() {
@@ -213,7 +214,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       });
     },
 
-    notifyFocusTab: function notifyFocusTab(options) {
+    notifyFocusApp: function notifyFocusApp(options) {
       let tabId = this.getFocusTabId();
       options.tabId = tabId;
 
@@ -230,29 +231,29 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
     },
 
     getFocusTabId: function getFocusTabId() {
-      return this.eventListeners[this.focusId] ? this.focusId
-                                               : NFC.SYSTEM_APP_ID;
+      return this.eventListeners[this.focusApp] ? this.focusApp
+                                                : NFC.SYSTEM_APP_ID;
     },
 
-    setFocusTab: function setFocusTab(id, isFocus) {
+    setFocusApp: function setFocusApp(id, isFocus) {
       // if calling setNFCFocus(true) on the browser-element which is already
       // focused, or calling setNFCFocus(false) on the browser-element which has
       // lost focus already, ignore.
-      if (isFocus == (id == this.focusId)) {
+      if (isFocus == (id == this.focusApp)) {
         return;
       }
 
-      if (this.focusId != NFC.SYSTEM_APP_ID) {
-        this.onFocusChanged(this.focusId, false);
+      if (this.focusApp != NFC.SYSTEM_APP_ID) {
+        this.onFocusChanged(this.focusApp, false);
       }
 
       if (isFocus) {
         // Now we only support one focus app.
-        this.focusId = id;
-        this.onFocusChanged(this.focusId, true);
-      } else if (this.focusId == id){
-        // Set focusId to SystemApp means currently there is no foreground app.
-        this.focusId = NFC.SYSTEM_APP_ID;
+        this.focusApp = id;
+        this.onFocusChanged(this.focusApp, true);
+      } else if (this.focusApp == id){
+        // Set focusApp to SystemApp means currently there is no foreground app.
+        this.focusApp = NFC.SYSTEM_APP_ID;
       }
     },
 
@@ -324,17 +325,17 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
     onTagFound: function onTagFound(message) {
       message.event = NFC.TAG_EVENT_FOUND;
-      this.notifyFocusTab(message);
+      this.notifyFocusApp(message);
       delete message.event;
     },
 
     onTagLost: function onTagLost(sessionToken) {
-      this.notifyFocusTab({ event: NFC.TAG_EVENT_LOST,
+      this.notifyFocusApp({ event: NFC.TAG_EVENT_LOST,
                             sessionToken: sessionToken });
     },
 
     onPeerEvent: function onPeerEvent(eventType, sessionToken) {
-      this.notifyFocusTab({ event: eventType,
+      this.notifyFocusApp({ event: eventType,
                             sessionToken: sessionToken });
     },
 
@@ -347,13 +348,13 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       }
     },
 
-    onFocusChanged: function onFocusChanged(focusId, focus) {
-      let target = this.eventListeners[focusId];
+    onFocusChanged: function onFocusChanged(focusApp, focus) {
+      let target = this.eventListeners[focusApp];
       if (!target) {
         return;
       }
 
-      this.notifyDOMEvent(target, { tabId: this.focusId,
+      this.notifyDOMEvent(target, { tabId: this.focusApp,
                                     event: NFC.FOCUS_CHANGED,
                                     focus: focus });
     },
@@ -385,8 +386,8 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       }
 
       switch (message.name) {
-        case "NFC:SetFocusTab":
-          this.setFocusTab(message.data.tabId, message.data.isFocus);
+        case "NFC:SetFocusApp":
+          this.setFocusApp(message.data.tabId, message.data.isFocus);
           return null;
         case "NFC:AddEventListener":
           this.addEventListener(message.target, message.data.tabId);
@@ -458,7 +459,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
   };
 });
 
-var SessionHelper = {
+let SessionHelper = {
   tokenMap: {},
 
   registerSession: function registerSession(id, isP2P) {
@@ -508,15 +509,8 @@ var SessionHelper = {
   }
 };
 
-function Nfc(isXPCShell) {
-  // TODO: Bug 1239954: xpcshell test timed out with
-  // SettingsSevice.createlock().get()
-  // gSettingsService.createLock will cause timeout while running xpshell-test,
-  // so we try to prevent to run gSettingsService under xpcshell-test here.
+function Nfc() {
   gMessageManager.init(this);
-  if (!isXPCShell && !NFC.DEBUG_NFC) {
-    gMessageManager.listenDebugEvent();
-  }
 
   this.targetsByRequestId = {};
 }

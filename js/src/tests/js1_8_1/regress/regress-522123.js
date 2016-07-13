@@ -25,8 +25,7 @@ function test()
   expect = 1;
 
   evil=eval;
-  {
-    let x=2;
+  let (x=2) {
     actual = evil("x");
   };
 

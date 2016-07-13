@@ -5,7 +5,8 @@
 assertEq(Reflect.apply(Math.floor, undefined, [1.75]), 1);
 
 // Reflect.apply requires a target object that's callable.
-var nonCallable = [{}, [], (class clsX { constructor() {} })];
+class clsX { constructor() {} }  // classes are not callable
+var nonCallable = [{}, [], clsX];
 for (var value of nonCallable) {
     assertThrowsInstanceOf(() => Reflect.apply(nonCallable), TypeError);
 }

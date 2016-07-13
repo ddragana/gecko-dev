@@ -14,6 +14,7 @@ printStatus (summary);
 
 expect = '99999';
 
+jit(true);
 
 for (let j = 0; j < 5; ++j) {
   var e;
@@ -25,5 +26,6 @@ for (let j = 0; j < 5; ++j) {
   }
 }
 
+jit(false);
 
 reportCompare(expect, actual, summary);

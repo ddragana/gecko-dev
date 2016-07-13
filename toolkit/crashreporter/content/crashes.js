@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var { classes: Cc, utils: Cu, interfaces: Ci } = Components;
+const { classes: Cc, utils: Cu, interfaces: Ci } = Components;
 
 var reportURL;
 
@@ -50,9 +50,6 @@ function submitPendingReport(event) {
 }
 
 function populateReportList() {
-
-  Services.telemetry.getHistogramById("ABOUTCRASHES_OPENED_COUNT").add(1);
-
   var prefService = Cc["@mozilla.org/preferences-service;1"].
                     getService(Ci.nsIPrefBranch);
 
@@ -124,7 +121,7 @@ function populateReportList() {
   }
 }
 
-var clearReports = Task.async(function*() {
+let clearReports = Task.async(function*() {
   let bundle = Services.strings.createBundle("chrome://global/locale/crashes.properties");
 
   if (!Services.
@@ -142,10 +139,7 @@ var clearReports = Task.async(function*() {
           yield OS.File.remove(aEntry.path);
         }
       }));
-    } catch (e) {
-      if (!(e instanceof OS.File.Error) || !e.becauseNoSuchFile) {
-        throw e;
-      }
+    } catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
     } finally {
       iterator.close();
     }

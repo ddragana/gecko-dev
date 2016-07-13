@@ -27,9 +27,6 @@ class nsViewManager final
 public:
   friend class nsView;
 
-  typedef mozilla::LayoutDeviceIntRect LayoutDeviceIntRect;
-  typedef mozilla::LayoutDeviceIntRegion LayoutDeviceIntRegion;
-
   NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
 
   NS_INLINE_DECL_REFCOUNTING(nsViewManager)
@@ -89,8 +86,7 @@ public:
    * @param aWidth of window in twips
    * @param aHeight of window in twips
    */
-  void SetWindowDimensions(nscoord aWidth, nscoord aHeight,
-                           bool aDelayResize = false);
+  void SetWindowDimensions(nscoord aWidth, nscoord aHeight);
 
   /**
    * Do any resizes that are pending.
@@ -268,7 +264,7 @@ public:
     AutoDisableRefresh(const AutoDisableRefresh& aOther);
     const AutoDisableRefresh& operator=(const AutoDisableRefresh& aOther);
 
-    RefPtr<nsViewManager> mRootVM;
+    nsRefPtr<nsViewManager> mRootVM;
   };
 
 private:
@@ -348,7 +344,7 @@ private:
   void InvalidateViews(nsView *aView);
 
   // aView is the view for aWidget and aRegion is relative to aWidget.
-  void Refresh(nsView* aView, const LayoutDeviceIntRegion& aRegion);
+  void Refresh(nsView *aView, const nsIntRegion& aRegion);
 
   // Utilities
 
@@ -359,10 +355,9 @@ private:
    * coordinate system to the coordinate system of the widget attached to
    * aView.
    */
-  LayoutDeviceIntRect ViewToWidget(nsView* aView, const nsRect& aRect) const;
+  nsIntRect ViewToWidget(nsView *aView, const nsRect &aRect) const;
 
   void DoSetWindowDimensions(nscoord aWidth, nscoord aHeight);
-  bool ShouldDelayResize() const;
 
   bool IsPainting() const {
     return RootViewManager()->mPainting;
@@ -383,14 +378,14 @@ private:
   bool IsPaintingAllowed() { return RootViewManager()->mRefreshDisableCount == 0; }
 
   void WillPaintWindow(nsIWidget* aWidget);
-  bool PaintWindow(nsIWidget* aWidget, LayoutDeviceIntRegion aRegion);
+  bool PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion);
   void DidPaintWindow();
 
   // Call this when you need to let the viewmanager know that it now has
   // pending updates.
   void PostPendingUpdate();
 
-  RefPtr<nsDeviceContext> mContext;
+  nsRefPtr<nsDeviceContext> mContext;
   nsIPresShell   *mPresShell;
 
   // The size for a resize that we delayed until the root view becomes

@@ -21,6 +21,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
  
+  jit(true);
 
   function f() {
     for (var i = 0; i < 200000; i++) {
@@ -30,6 +31,7 @@ function test()
   }
   f();
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

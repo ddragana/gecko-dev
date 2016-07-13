@@ -38,14 +38,14 @@ nsPrintDialogServiceX::Init()
 }
 
 NS_IMETHODIMP
-nsPrintDialogServiceX::Show(nsPIDOMWindowOuter *aParent, nsIPrintSettings *aSettings,
+nsPrintDialogServiceX::Show(nsIDOMWindow *aParent, nsIPrintSettings *aSettings,
                             nsIWebBrowserPrint *aWebBrowserPrint)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
   NS_PRECONDITION(aSettings, "aSettings must not be null");
 
-  RefPtr<nsPrintSettingsX> settingsX(do_QueryObject(aSettings));
+  nsRefPtr<nsPrintSettingsX> settingsX(do_QueryObject(aSettings));
   if (!settingsX)
     return NS_ERROR_FAILURE;
 
@@ -78,11 +78,6 @@ nsPrintDialogServiceX::Show(nsPIDOMWindowOuter *aParent, nsIPrintSettings *aSett
   [NSPrintOperation setCurrentOperation:printOperation];
 
   NSPrintPanel* panel = [NSPrintPanel printPanel];
-  [panel setOptions:NSPrintPanelShowsCopies
-    | NSPrintPanelShowsPageRange
-    | NSPrintPanelShowsPaperSize
-    | NSPrintPanelShowsOrientation
-    | NSPrintPanelShowsScaling ];
   PrintPanelAccessoryController* viewController =
     [[PrintPanelAccessoryController alloc] initWithSettings:aSettings];
   [panel addAccessoryController:viewController];
@@ -103,7 +98,7 @@ nsPrintDialogServiceX::Show(nsPIDOMWindowOuter *aParent, nsIPrintSettings *aSett
   [NSPrintOperation setCurrentOperation:nil];
   [tmpView release];
 
-  if (button != NSFileHandlingPanelOKButton)
+  if (button != NSOKButton)
     return NS_ERROR_ABORT;
 
   // Export settings.
@@ -131,14 +126,14 @@ nsPrintDialogServiceX::Show(nsPIDOMWindowOuter *aParent, nsIPrintSettings *aSett
 }
 
 NS_IMETHODIMP
-nsPrintDialogServiceX::ShowPageSetup(nsPIDOMWindowOuter *aParent,
+nsPrintDialogServiceX::ShowPageSetup(nsIDOMWindow *aParent,
                                      nsIPrintSettings *aNSSettings)
 {
   NS_PRECONDITION(aParent, "aParent must not be null");
   NS_PRECONDITION(aNSSettings, "aSettings must not be null");
   NS_ENSURE_TRUE(aNSSettings, NS_ERROR_FAILURE);
 
-  RefPtr<nsPrintSettingsX> settingsX(do_QueryObject(aNSSettings));
+  nsRefPtr<nsPrintSettingsX> settingsX(do_QueryObject(aNSSettings));
   if (!settingsX)
     return NS_ERROR_FAILURE;
 
@@ -148,7 +143,7 @@ nsPrintDialogServiceX::ShowPageSetup(nsPIDOMWindowOuter *aParent,
   int button = [pageLayout runModalWithPrintInfo:printInfo];
   nsCocoaUtils::CleanUpAfterNativeAppModalDialog();
 
-  return button == NSFileHandlingPanelOKButton ? NS_OK : NS_ERROR_ABORT;
+  return button == NSOKButton ? NS_OK : NS_ERROR_ABORT;
 }
 
 // Accessory view

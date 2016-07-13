@@ -19,7 +19,11 @@ class ProcTestWait(proctest.ProcTest):
         p.run()
         p.wait()
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              p.proc.returncode,
+                              p.didTimeout)
 
     def test_wait(self):
         """Process is started runs to completion while we wait indefinitely"""
@@ -30,7 +34,11 @@ class ProcTestWait(proctest.ProcTest):
         p.run()
         p.wait()
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              p.proc.returncode,
+                              p.didTimeout)
 
 
     def test_timeout(self):
@@ -42,11 +50,18 @@ class ProcTestWait(proctest.ProcTest):
         p.run(timeout=10)
         p.wait()
 
+        detected, output = proctest.check_for_process(self.proclaunch)
+
         if mozinfo.isUnix:
             # process was killed, so returncode should be negative
             self.assertLess(p.proc.returncode, 0)
 
-        self.determine_status(p, False, ['returncode', 'didtimeout'])
+        self.determine_status(detected,
+                              output,
+                              p.proc.returncode,
+                              p.didTimeout,
+                              False,
+                              ['returncode', 'didtimeout'])
 
     def test_waittimeout(self):
         """
@@ -60,7 +75,13 @@ class ProcTestWait(proctest.ProcTest):
         p.run()
         p.wait(timeout=5)
 
-        self.determine_status(p, True, ())
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              p.proc.returncode,
+                              p.didTimeout,
+                              True,
+                              ())
 
     def test_waitnotimeout(self):
         """ Process is started, runs to completion before our wait times out
@@ -71,7 +92,11 @@ class ProcTestWait(proctest.ProcTest):
         p.run(timeout=30)
         p.wait()
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              p.proc.returncode,
+                              p.didTimeout)
 
     def test_wait_twice_after_kill(self):
         """Bug 968718: Process is started and stopped. wait() twice afterward."""
@@ -83,7 +108,11 @@ class ProcTestWait(proctest.ProcTest):
         returncode1 = p.wait()
         returncode2 = p.wait()
 
-        self.determine_status(p)
+        detected, output = proctest.check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              returncode2,
+                              p.didTimeout)
 
         self.assertLess(returncode2, 0,
                         'Negative returncode expected, got "%s"' % returncode2)

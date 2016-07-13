@@ -21,8 +21,7 @@ AC_DEFUN([MOZ_SET_FRAMEPTR_FLAGS], [
     fi
   else
     case "$target" in
-    dnl Oy (Frame-Pointer Omission) is only support on x86 compilers
-    *-mingw32*)
+    *-mingw*)
       MOZ_ENABLE_FRAME_PTR="-Oy-"
       MOZ_DISABLE_FRAME_PTR="-Oy"
     ;;

@@ -59,10 +59,6 @@ add_task(function* test_sync_enabled() {
   Services.prefs.setBoolPref("browser.urlbar.autocomplete.enabled", false);
   Services.prefs.setBoolPref("browser.urlbar.autocomplete.enabled", true);
   for (let type of types.filter(t => t != "history")) {
-    if (type == "searches") {
-      Assert.equal(Services.prefs.getBoolPref("browser.urlbar.suggest." + type), false);
-    } else {
-      Assert.equal(Services.prefs.getBoolPref("browser.urlbar.suggest." + type), true);
-    }
+    Assert.equal(Services.prefs.getBoolPref("browser.urlbar.suggest." + type), true);
   }
 });

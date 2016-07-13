@@ -12,7 +12,7 @@
 #include "nsIPipe.h"
 #include "nsICloneableInputStream.h"
 #include "nsIEventTarget.h"
-#include "nsICancelableRunnable.h"
+#include "nsIRunnable.h"
 #include "nsISafeOutputStream.h"
 #include "nsString.h"
 #include "nsIAsyncInputStream.h"
@@ -20,21 +20,17 @@
 #include "nsIBufferedStreams.h"
 #include "nsNetCID.h"
 #include "nsServiceManagerUtils.h"
-#include "nsThreadUtils.h"
 
 using namespace mozilla;
 
 //-----------------------------------------------------------------------------
 
-// This is a nsICancelableRunnable because we can dispatch it to Workers and
-// those can be shut down at any time, and in these cases, Cancel() is called
-// instead of Run().
 class nsInputStreamReadyEvent final
-  : public CancelableRunnable
+  : public nsIRunnable
   , public nsIInputStreamCallback
 {
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   nsInputStreamReadyEvent(nsIInputStreamCallback* aCallback,
                           nsIEventTarget* aTarget)
@@ -99,32 +95,23 @@ public:
     return NS_OK;
   }
 
-  nsresult Cancel() override
-  {
-    mCallback = nullptr;
-    return NS_OK;
-  }
-
 private:
   nsCOMPtr<nsIAsyncInputStream>    mStream;
   nsCOMPtr<nsIInputStreamCallback> mCallback;
   nsCOMPtr<nsIEventTarget>         mTarget;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(nsInputStreamReadyEvent, CancelableRunnable,
-                            nsIInputStreamCallback)
+NS_IMPL_ISUPPORTS(nsInputStreamReadyEvent, nsIRunnable,
+                  nsIInputStreamCallback)
 
 //-----------------------------------------------------------------------------
 
-// This is a nsICancelableRunnable because we can dispatch it to Workers and
-// those can be shut down at any time, and in these cases, Cancel() is called
-// instead of Run().
 class nsOutputStreamReadyEvent final
-  : public CancelableRunnable
+  : public nsIRunnable
   , public nsIOutputStreamCallback
 {
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   nsOutputStreamReadyEvent(nsIOutputStreamCallback* aCallback,
                            nsIEventTarget* aTarget)
@@ -189,20 +176,14 @@ public:
     return NS_OK;
   }
 
-  nsresult Cancel() override
-  {
-    mCallback = nullptr;
-    return NS_OK;
-  }
-
 private:
   nsCOMPtr<nsIAsyncOutputStream>    mStream;
   nsCOMPtr<nsIOutputStreamCallback> mCallback;
   nsCOMPtr<nsIEventTarget>          mTarget;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(nsOutputStreamReadyEvent, CancelableRunnable,
-                            nsIOutputStreamCallback)
+NS_IMPL_ISUPPORTS(nsOutputStreamReadyEvent, nsIRunnable,
+                  nsIOutputStreamCallback)
 
 //-----------------------------------------------------------------------------
 
@@ -212,7 +193,7 @@ NS_NewInputStreamReadyEvent(nsIInputStreamCallback* aCallback,
 {
   NS_ASSERTION(aCallback, "null callback");
   NS_ASSERTION(aTarget, "null target");
-  RefPtr<nsInputStreamReadyEvent> ev =
+  nsRefPtr<nsInputStreamReadyEvent> ev =
     new nsInputStreamReadyEvent(aCallback, aTarget);
   return ev.forget();
 }
@@ -223,7 +204,7 @@ NS_NewOutputStreamReadyEvent(nsIOutputStreamCallback* aCallback,
 {
   NS_ASSERTION(aCallback, "null callback");
   NS_ASSERTION(aTarget, "null target");
-  RefPtr<nsOutputStreamReadyEvent> ev =
+  nsRefPtr<nsOutputStreamReadyEvent> ev =
     new nsOutputStreamReadyEvent(aCallback, aTarget);
   return ev.forget();
 }
@@ -235,10 +216,10 @@ NS_NewOutputStreamReadyEvent(nsIOutputStreamCallback* aCallback,
 class nsAStreamCopier
   : public nsIInputStreamCallback
   , public nsIOutputStreamCallback
-  , public CancelableRunnable
+  , public nsIRunnable
 {
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   nsAStreamCopier()
     : mLock("nsAStreamCopier.mLock")
@@ -452,8 +433,6 @@ public:
     return NS_OK;
   }
 
-  nsresult Cancel() MOZ_MUST_OVERRIDE override = 0;
-
   nsresult PostContinuationEvent()
   {
     // we cannot post a continuation event if there is currently
@@ -507,10 +486,10 @@ protected:
   }
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(nsAStreamCopier,
-                            CancelableRunnable,
-                            nsIInputStreamCallback,
-                            nsIOutputStreamCallback)
+NS_IMPL_ISUPPORTS(nsAStreamCopier,
+                  nsIInputStreamCallback,
+                  nsIOutputStreamCallback,
+                  nsIRunnable)
 
 class nsStreamCopierIB final : public nsAStreamCopier
 {
@@ -548,8 +527,7 @@ public:
     return state->mSinkCondition;
   }
 
-  uint32_t DoCopy(nsresult* aSourceCondition,
-                  nsresult* aSinkCondition) override
+  uint32_t DoCopy(nsresult* aSourceCondition, nsresult* aSinkCondition)
   {
     ReadSegmentsState state;
     state.mSink = mSink;
@@ -560,11 +538,6 @@ public:
       mSource->ReadSegments(ConsumeInputBuffer, &state, mChunkSize, &n);
     *aSinkCondition = state.mSinkCondition;
     return n;
-  }
-
-  nsresult Cancel() override
-  {
-    return NS_OK;
   }
 };
 
@@ -604,8 +577,7 @@ public:
     return state->mSourceCondition;
   }
 
-  uint32_t DoCopy(nsresult* aSourceCondition,
-                  nsresult* aSinkCondition) override
+  uint32_t DoCopy(nsresult* aSourceCondition, nsresult* aSinkCondition)
   {
     WriteSegmentsState state;
     state.mSource = mSource;
@@ -616,11 +588,6 @@ public:
       mSink->WriteSegments(FillOutputBuffer, &state, mChunkSize, &n);
     *aSourceCondition = state.mSourceCondition;
     return n;
-  }
-
-  nsresult Cancel() override
-  {
-    return NS_OK;
   }
 };
 
@@ -888,17 +855,6 @@ NS_FillArray(FallibleTArray<char>& aDest, nsIInputStream* aInput,
 
   MOZ_ASSERT(aDest.Length() <= aDest.Capacity(), "buffer overflow");
   return rv;
-}
-
-bool
-NS_InputStreamIsCloneable(nsIInputStream* aSource)
-{
-  if (!aSource) {
-    return false;
-  }
-
-  nsCOMPtr<nsICloneableInputStream> cloneable = do_QueryInterface(aSource);
-  return cloneable && cloneable->GetCloneable();
 }
 
 nsresult

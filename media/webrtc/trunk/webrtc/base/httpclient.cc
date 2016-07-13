@@ -9,12 +9,13 @@
  */
 
 #include <time.h>
-#include <algorithm>
+
+#include "webrtc/base/httpcommon-inl.h"
+
 #include "webrtc/base/asyncsocket.h"
 #include "webrtc/base/common.h"
 #include "webrtc/base/diskcache.h"
 #include "webrtc/base/httpclient.h"
-#include "webrtc/base/httpcommon-inl.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/base/pathutils.h"
 #include "webrtc/base/scoped_ptr.h"
@@ -118,7 +119,7 @@ HttpCacheState HttpGetCacheState(const HttpTransaction& t) {
   if (t.response.hasHeader(HH_AGE, &s_temp)
       && HttpStringToUInt(s_temp, (&i_temp))) {
     u_temp = static_cast<time_t>(i_temp);
-    corrected_received_age = std::max(apparent_age, u_temp);
+    corrected_received_age = stdmax(apparent_age, u_temp);
   }
 
   time_t response_delay = response_time - request_time;
@@ -539,7 +540,6 @@ bool HttpClient::CheckCache() {
         return false;
       }
       // Couldn't validate, fall through.
-      FALLTHROUGH();
     case HCS_NONE:
       // Cache content is not useable.  Issue a regular request.
       response().clear(false);

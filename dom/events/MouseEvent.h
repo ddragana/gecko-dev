@@ -57,11 +57,18 @@ public:
   already_AddRefed<EventTarget> GetRelatedTarget();
   void GetRegion(nsAString& aRegion);
   void InitMouseEvent(const nsAString& aType, bool aCanBubble, bool aCancelable,
-                      nsGlobalWindow* aView, int32_t aDetail, int32_t aScreenX,
+                      nsIDOMWindow* aView, int32_t aDetail, int32_t aScreenX,
                       int32_t aScreenY, int32_t aClientX, int32_t aClientY,
                       bool aCtrlKey, bool aAltKey, bool aShiftKey,
                       bool aMetaKey, uint16_t aButton,
-                      EventTarget* aRelatedTarget);
+                      EventTarget* aRelatedTarget, ErrorResult& aRv)
+  {
+    aRv = InitMouseEvent(aType, aCanBubble, aCancelable,
+                         aView, aDetail, aScreenX, aScreenY,
+                         aClientX, aClientY, aCtrlKey, aAltKey,
+                         aShiftKey, aMetaKey, aButton,
+                         aRelatedTarget);
+  }
 
   void InitializeExtraMouseEventDictionaryMembers(const MouseEventInit& aParam);
 
@@ -86,29 +93,36 @@ public:
   uint16_t MozInputSource() const;
   void InitNSMouseEvent(const nsAString& aType,
                         bool aCanBubble, bool aCancelable,
-                        nsGlobalWindow* aView, int32_t aDetail,
-                        int32_t aScreenX, int32_t aScreenY,
-                        int32_t aClientX, int32_t aClientY,
+                        nsIDOMWindow* aView, int32_t aDetail, int32_t aScreenX,
+                        int32_t aScreenY, int32_t aClientX, int32_t aClientY,
                         bool aCtrlKey, bool aAltKey, bool aShiftKey,
                         bool aMetaKey, uint16_t aButton,
                         EventTarget* aRelatedTarget,
-                        float aPressure, uint16_t aInputSource);
+                        float aPressure, uint16_t aInputSource,
+                        ErrorResult& aRv)
+  {
+    aRv = InitNSMouseEvent(aType, aCanBubble, aCancelable,
+                           aView, aDetail, aScreenX, aScreenY,
+                           aClientX, aClientY, aCtrlKey, aAltKey,
+                           aShiftKey, aMetaKey, aButton,
+                           aRelatedTarget, aPressure, aInputSource);
+  }
 
 protected:
   ~MouseEvent() {}
 
-  void InitMouseEvent(const nsAString& aType,
-                      bool aCanBubble,
-                      bool aCancelable,
-                      nsGlobalWindow* aView,
-                      int32_t aDetail,
-                      int32_t aScreenX,
-                      int32_t aScreenY,
-                      int32_t aClientX,
-                      int32_t aClientY,
-                      int16_t aButton,
-                      EventTarget* aRelatedTarget,
-                      const nsAString& aModifiersList);
+  nsresult InitMouseEvent(const nsAString& aType,
+                          bool aCanBubble,
+                          bool aCancelable,
+                          nsIDOMWindow* aView,
+                          int32_t aDetail,
+                          int32_t aScreenX,
+                          int32_t aScreenY,
+                          int32_t aClientX,
+                          int32_t aClientY,
+                          int16_t aButton,
+                          nsIDOMEventTarget* aRelatedTarget,
+                          const nsAString& aModifiersList);
 };
 
 } // namespace dom
@@ -117,10 +131,5 @@ protected:
 #define NS_FORWARD_TO_MOUSEEVENT \
   NS_FORWARD_NSIDOMMOUSEEVENT(MouseEvent::) \
   NS_FORWARD_TO_UIEVENT
-
-already_AddRefed<mozilla::dom::MouseEvent>
-NS_NewDOMMouseEvent(mozilla::dom::EventTarget* aOwner,
-                    nsPresContext* aPresContext,
-                    mozilla::WidgetMouseEvent* aEvent);
 
 #endif // mozilla_dom_MouseEvent_h_

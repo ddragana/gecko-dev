@@ -12,6 +12,7 @@ var expect = '';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
  
+jit(true);
 
 function f() {
   var a = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
@@ -26,5 +27,6 @@ function f() {
 expect = 16;
 f();
 
+jit(false);
 
 reportCompare(expect, actual, summary);

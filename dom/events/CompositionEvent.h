@@ -10,11 +10,13 @@
 #include "mozilla/dom/CompositionEventBinding.h"
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/EventForwards.h"
+#include "nsIDOMCompositionEvent.h"
 
 namespace mozilla {
 namespace dom {
 
-class CompositionEvent : public UIEvent
+class CompositionEvent : public UIEvent,
+                         public nsIDOMCompositionEvent
 {
 public:
   CompositionEvent(EventTarget* aOwner,
@@ -23,6 +25,7 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_FORWARD_TO_UIEVENT
+  NS_DECL_NSIDOMCOMPOSITIONEVENT
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
@@ -32,11 +35,14 @@ public:
   void InitCompositionEvent(const nsAString& aType,
                             bool aCanBubble,
                             bool aCancelable,
-                            nsGlobalWindow* aView,
+                            nsIDOMWindow* aView,
                             const nsAString& aData,
-                            const nsAString& aLocale);
-  void GetData(nsAString&) const;
-  void GetLocale(nsAString&) const;
+                            const nsAString& aLocale,
+                            ErrorResult& aRv)
+  {
+    aRv = InitCompositionEvent(aType, aCanBubble, aCancelable, aView,
+                               aData, aLocale);
+  }
 
 protected:
   ~CompositionEvent() {}
@@ -47,10 +53,5 @@ protected:
 
 } // namespace dom
 } // namespace mozilla
-
-already_AddRefed<mozilla::dom::CompositionEvent>
-NS_NewDOMCompositionEvent(mozilla::dom::EventTarget* aOwner,
-                          nsPresContext* aPresContext,
-                          mozilla::WidgetCompositionEvent* aEvent);
 
 #endif // mozilla_dom_CompositionEvent_h_

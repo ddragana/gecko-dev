@@ -4,10 +4,10 @@
 function f() {
     for (var i=0; i<100; i++) {
 	if (i === 20)
-	    enableShellAllocationMetadataBuilder();
+	    setObjectMetadataCallback(true);
 	var o = {x: 1};
 	if (i >= 20) {
-	    var md = getAllocationMetadata(o);
+	    var md = getObjectMetadata(o);
 	    assertEq(typeof md === "object" && md !== null, true);
 	    assertEq(typeof md.index, "number");
 	}

@@ -11,6 +11,7 @@
 #include "mozilla/Attributes.h"
 #include "nsCoord.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsAutoPtr.h"
 #include "nsWrapperCache.h"
 #include "nsString.h"
 
@@ -143,7 +144,7 @@ private:
   int8_t mCropStyle;
   int8_t mTextAlignment;
 
-  RefPtr<nsTreeColumn> mNext;
+  nsRefPtr<nsTreeColumn> mNext;
   nsTreeColumn* mPrevious;
 };
 
@@ -185,8 +186,9 @@ public:
   nsTreeColumn* IndexedGetter(uint32_t aIndex, bool& aFound);
   nsTreeColumn* GetColumnAt(uint32_t aIndex);
   nsTreeColumn* NamedGetter(const nsAString& aId, bool& aFound);
+  bool NameIsEnumerable(const nsAString& aName);
   nsTreeColumn* GetNamedColumn(const nsAString& aId);
-  void GetSupportedNames(nsTArray<nsString>& aNames);
+  void GetSupportedNames(unsigned, nsTArray<nsString>& aNames);
 
   // Uses XPCOM InvalidateColumns().
   // Uses XPCOM RestoreNaturalOrder().
@@ -209,7 +211,7 @@ private:
    * XXX this means that new nsTreeColumn objects are unnecessarily created
    *     for untouched columns.
    */
-  RefPtr<nsTreeColumn> mFirstColumn;
+  nsRefPtr<nsTreeColumn> mFirstColumn;
 };
 
 #endif // nsTreeColumns_h__

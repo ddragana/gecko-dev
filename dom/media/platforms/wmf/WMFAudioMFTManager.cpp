@@ -10,10 +10,11 @@
 #include "WMFUtils.h"
 #include "nsTArray.h"
 #include "TimeUnits.h"
-#include "mozilla/Telemetry.h"
+
 #include "mozilla/Logging.h"
 
-#define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
+PRLogModuleInfo* GetDemuxerLog();
+#define LOG(...) MOZ_LOG(GetDemuxerLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 namespace mozilla {
 
@@ -60,24 +61,6 @@ AACAudioSpecificConfigToUserData(uint8_t aAACProfileLevelIndication,
   w[1] = aAACProfileLevelIndication;
 
   aOutUserData.AppendElements(heeInfo, heeInfoLen);
-
-  if (aAACProfileLevelIndication == 2 && aConfigLength > 2) {
-    // The AudioSpecificConfig is TTTTTFFF|FCCCCGGG
-    // (T=ObjectType, F=Frequency, C=Channel, G=GASpecificConfig)
-    // If frequency = 0xf, then the frequency is explicitly defined on 24 bits.
-    int8_t profile = (aAudioSpecConfig[0] & 0xF8) >> 3;
-    int8_t frequency =
-      (aAudioSpecConfig[0] & 0x7) << 1 | (aAudioSpecConfig[1] & 0x80) >> 7;
-    int8_t channels = (aAudioSpecConfig[1] & 0x78) >> 3;
-    int8_t gasc = aAudioSpecConfig[1] & 0x7;
-    if (frequency != 0xf && channels && !gasc) {
-      // We enter this condition if the AudioSpecificConfig should theorically
-      // be 2 bytes long but it's not.
-      // The WMF AAC decoder will error if unknown extensions are found,
-      // so remove them.
-      aConfigLength = 2;
-    }
-  }
   aOutUserData.AppendElements(aAudioSpecConfig, aConfigLength);
 }
 
@@ -85,6 +68,7 @@ WMFAudioMFTManager::WMFAudioMFTManager(
   const AudioInfo& aConfig)
   : mAudioChannels(aConfig.mChannels)
   , mAudioRate(aConfig.mRate)
+  , mAudioFrameOffset(0)
   , mAudioFrameSum(0)
   , mMustRecaptureAudioPosition(true)
 {
@@ -94,7 +78,7 @@ WMFAudioMFTManager::WMFAudioMFTManager(
     mStreamType = MP3;
   } else if (aConfig.mMimeType.EqualsLiteral("audio/mp4a-latm")) {
     mStreamType = AAC;
-    AACAudioSpecificConfigToUserData(aConfig.mExtendedProfile,
+    AACAudioSpecificConfigToUserData(aConfig.mProfile,
                                      aConfig.mCodecSpecificConfig->Elements(),
                                      aConfig.mCodecSpecificConfig->Length(),
                                      mUserData);
@@ -130,70 +114,70 @@ WMFAudioMFTManager::GetMediaSubtypeGUID()
   };
 }
 
-bool
+already_AddRefed<MFTDecoder>
 WMFAudioMFTManager::Init()
 {
-  NS_ENSURE_TRUE(mStreamType != Unknown, false);
+  NS_ENSURE_TRUE(mStreamType != Unknown, nullptr);
 
   RefPtr<MFTDecoder> decoder(new MFTDecoder());
 
   HRESULT hr = decoder->Create(GetMFTGUID());
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   // Setup input/output media types
   RefPtr<IMFMediaType> inputType;
 
-  hr = wmf::MFCreateMediaType(getter_AddRefs(inputType));
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  hr = wmf::MFCreateMediaType(byRef(inputType));
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = inputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = inputType->SetGUID(MF_MT_SUBTYPE, GetMediaSubtypeGUID());
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = inputType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, mAudioRate);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = inputType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, mAudioChannels);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   if (mStreamType == AAC) {
     hr = inputType->SetUINT32(MF_MT_AAC_PAYLOAD_TYPE, 0x0); // Raw AAC packet
-    NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+    NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
     hr = inputType->SetBlob(MF_MT_USER_DATA,
                             mUserData.Elements(),
                             mUserData.Length());
-    NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+    NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
   }
 
   RefPtr<IMFMediaType> outputType;
-  hr = wmf::MFCreateMediaType(getter_AddRefs(outputType));
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  hr = wmf::MFCreateMediaType(byRef(outputType));
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = outputType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = outputType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   hr = decoder->SetMediaTypes(inputType, outputType);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), false);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   mDecoder = decoder;
 
-  return true;
+  return decoder.forget();
 }
 
 HRESULT
 WMFAudioMFTManager::Input(MediaRawData* aSample)
 {
-  return mDecoder->Input(aSample->Data(),
-                         uint32_t(aSample->Size()),
+  return mDecoder->Input(aSample->mData,
+                         uint32_t(aSample->mSize),
                          aSample->mTime);
 }
 
@@ -212,17 +196,12 @@ WMFAudioMFTManager::UpdateOutputType()
   hr = type->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &mAudioChannels);
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-  AudioConfig::ChannelLayout layout(mAudioChannels);
-  if (!layout.IsValid()) {
-    return E_FAIL;
-  }
-
   return S_OK;
 }
 
 HRESULT
 WMFAudioMFTManager::Output(int64_t aStreamOffset,
-                           RefPtr<MediaData>& aOutData)
+                           nsRefPtr<MediaData>& aOutData)
 {
   aOutData = nullptr;
   RefPtr<IMFSample> sample;
@@ -248,18 +227,8 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
 
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-  if (!sample) {
-    LOG("Audio MFTDecoder returned success but null output.");
-    nsCOMPtr<nsIRunnable> task = NS_NewRunnableFunction([]() -> void {
-      LOG("Reporting telemetry AUDIO_MFT_OUTPUT_NULL_SAMPLES");
-      Telemetry::Accumulate(Telemetry::ID::AUDIO_MFT_OUTPUT_NULL_SAMPLES, 1);
-    });
-    AbstractThread::MainThread()->Dispatch(task.forget());
-    return E_FAIL;
-  }
-
   RefPtr<IMFMediaBuffer> buffer;
-  hr = sample->ConvertToContiguousBuffer(getter_AddRefs(buffer));
+  hr = sample->ConvertToContiguousBuffer(byRef(buffer));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   BYTE* data = nullptr; // Note: *data will be owned by the IMFMediaBuffer, we don't need to free it.
@@ -298,7 +267,8 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
     LONGLONG timestampHns = 0;
     hr = sample->GetSampleTime(&timestampHns);
     NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-    mAudioTimeOffset = media::TimeUnit::FromMicroseconds(timestampHns / 10);
+    hr = HNsToFrames(timestampHns, mAudioRate, &mAudioFrameOffset);
+    NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
     mMustRecaptureAudioPosition = false;
   }
   // We can assume PCM 16 output.
@@ -312,10 +282,7 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
     return S_OK;
   }
 
-  AlignedAudioBuffer audioData(numSamples);
-  if (!audioData) {
-    return E_OUTOFMEMORY;
-  }
+  nsAutoArrayPtr<AudioDataValue> audioData(new AudioDataValue[numSamples]);
 
   int16_t* pcm = (int16_t*)data;
   for (int32_t i = 0; i < numSamples; ++i) {
@@ -325,7 +292,7 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
   buffer->Unlock();
 
   media::TimeUnit timestamp =
-    mAudioTimeOffset + FramesToTimeUnit(mAudioFrameSum, mAudioRate);
+    FramesToTimeUnit(mAudioFrameOffset + mAudioFrameSum, mAudioRate);
   NS_ENSURE_TRUE(timestamp.IsValid(), E_FAIL);
 
   mAudioFrameSum += numFrames;
@@ -337,7 +304,7 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
                            timestamp.ToMicroseconds(),
                            duration.ToMicroseconds(),
                            numFrames,
-                           Move(audioData),
+                           audioData.forget(),
                            mAudioChannels,
                            mAudioRate);
 

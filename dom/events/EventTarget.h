@@ -11,7 +11,7 @@
 #include "nsWrapperCache.h"
 #include "nsIAtom.h"
 
-class nsPIDOMWindowOuter;
+class nsIDOMWindow;
 class nsIGlobalObject;
 
 namespace mozilla {
@@ -21,18 +21,15 @@ class EventListenerManager;
 
 namespace dom {
 
-class AddEventListenerOptionsOrBoolean;
 class Event;
 class EventListener;
-class EventListenerOptionsOrBoolean;
 class EventHandlerNonNull;
-
 template <class T> struct Nullable;
 
 // IID for the dom::EventTarget interface
 #define NS_EVENTTARGET_IID \
-{ 0xde651c36, 0x0053, 0x4c67, \
-  { 0xb1, 0x3d, 0x67, 0xb9, 0x40, 0xfc, 0x82, 0xe4 } }
+{ 0x605158a9, 0xe229, 0x45b1, \
+ { 0xbc, 0x12, 0x02, 0x9f, 0xa3, 0xa9, 0x3f, 0xcb } }
 
 class EventTarget : public nsIDOMEventTarget,
                     public nsWrapperCache
@@ -46,19 +43,19 @@ public:
   using nsIDOMEventTarget::DispatchEvent;
   virtual void AddEventListener(const nsAString& aType,
                                 EventListener* aCallback,
-                                const AddEventListenerOptionsOrBoolean& aOptions,
+                                bool aCapture,
                                 const Nullable<bool>& aWantsUntrusted,
                                 ErrorResult& aRv) = 0;
   virtual void RemoveEventListener(const nsAString& aType,
                                    EventListener* aCallback,
-                                   const EventListenerOptionsOrBoolean& aOptions,
+                                   bool aCapture,
                                    ErrorResult& aRv);
-  bool DispatchEvent(JSContext* aCx, Event& aEvent, ErrorResult& aRv);
+  bool DispatchEvent(Event& aEvent, ErrorResult& aRv);
 
   // Note, this takes the type in onfoo form!
   EventHandlerNonNull* GetEventHandler(const nsAString& aType)
   {
-    nsCOMPtr<nsIAtom> type = NS_Atomize(aType);
+    nsCOMPtr<nsIAtom> type = do_GetAtom(aType);
     return GetEventHandler(type, EmptyString());
   }
 
@@ -73,7 +70,7 @@ public:
   // Returns an outer window that corresponds to the inner window this event
   // target is associated with.  Will return null if the inner window is not the
   // current inner or if there is no window around at all.
-  virtual nsPIDOMWindowOuter* GetOwnerGlobalForBindings() = 0;
+  virtual nsIDOMWindow* GetOwnerGlobalForBindings() = 0;
 
   // The global object this event target is associated with, if any.
   // This may be an inner window or some other global object.  This
@@ -90,8 +87,6 @@ public:
    * exist.
    */
   virtual EventListenerManager* GetExistingListenerManager() const = 0;
-
-  virtual bool IsApzAware() const;
 
 protected:
   EventHandlerNonNull* GetEventHandler(nsIAtom* aType,

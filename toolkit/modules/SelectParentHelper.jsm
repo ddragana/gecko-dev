@@ -8,50 +8,30 @@ this.EXPORTED_SYMBOLS = [
   "SelectParentHelper"
 ];
 
-var currentBrowser = null;
-var currentMenulist = null;
-var currentZoom = 1;
+let currentBrowser = null;
 
 this.SelectParentHelper = {
   populate: function(menulist, items, selectedIndex, zoom) {
     // Clear the current contents of the popup
     menulist.menupopup.textContent = "";
-    currentZoom = zoom;
-    currentMenulist = menulist;
     populateChildren(menulist, items, selectedIndex, zoom);
   },
 
   open: function(browser, menulist, rect) {
     menulist.hidden = false;
     currentBrowser = browser;
-    this._registerListeners(browser, menulist.menupopup);
+    this._registerListeners(menulist.menupopup);
 
-    let win = browser.ownerDocument.defaultView;
-    let constraintRect = browser.getBoundingClientRect();
-    constraintRect = new win.DOMRect(constraintRect.left + win.mozInnerScreenX,
-                                     constraintRect.top + win.mozInnerScreenY,
-                                     constraintRect.width, constraintRect.height);
-    menulist.menupopup.setConstraintRect(constraintRect);
     menulist.menupopup.openPopupAtScreenRect("after_start", rect.left, rect.top, rect.width, rect.height, false, false);
     menulist.selectedItem.scrollIntoView();
   },
 
-  hide: function(menulist, browser) {
-    if (currentBrowser == browser) {
-      menulist.menupopup.hidePopup();
-    }
+  hide: function(menulist) {
+    menulist.menupopup.hidePopup();
   },
 
   handleEvent: function(event) {
     switch (event.type) {
-      case "mouseover":
-        currentBrowser.messageManager.sendAsyncMessage("Forms:MouseOver", {});
-        break;
-
-      case "mouseout":
-        currentBrowser.messageManager.sendAsyncMessage("Forms:MouseOut", {});
-        break;
-
       case "command":
         if (event.target.hasAttribute("value")) {
           currentBrowser.messageManager.sendAsyncMessage("Forms:SelectDropDownItem", {
@@ -62,50 +42,29 @@ this.SelectParentHelper = {
 
       case "popuphidden":
         currentBrowser.messageManager.sendAsyncMessage("Forms:DismissedDropDown", {});
-        let popup = event.target;
-        this._unregisterListeners(currentBrowser, popup);
-        popup.parentNode.hidden = true;
         currentBrowser = null;
-        currentMenulist = null;
-        currentZoom = 1;
+        let popup = event.target;
+        this._unregisterListeners(popup);
+        popup.parentNode.hidden = true;
         break;
     }
   },
 
-  receiveMessage(msg) {
-    if (msg.name == "Forms:UpdateDropDown") {
-      // Sanity check - we'd better know what the currently
-      // opened menulist is, and what browser it belongs to...
-      if (!currentMenulist || !currentBrowser) {
-        return;
-      }
-
-      let options = msg.data.options;
-      let selectedIndex = msg.data.selectedIndex;
-      this.populate(currentMenulist, options, selectedIndex, currentZoom);
-    }
-  },
-
-  _registerListeners: function(browser, popup) {
+  _registerListeners: function(popup) {
     popup.addEventListener("command", this);
     popup.addEventListener("popuphidden", this);
-    popup.addEventListener("mouseover", this);
-    popup.addEventListener("mouseout", this);
-    browser.messageManager.addMessageListener("Forms:UpdateDropDown", this);
   },
 
-  _unregisterListeners: function(browser, popup) {
+  _unregisterListeners: function(popup) {
     popup.removeEventListener("command", this);
     popup.removeEventListener("popuphidden", this);
-    popup.removeEventListener("mouseover", this);
-    popup.removeEventListener("mouseout", this);
-    browser.messageManager.removeMessageListener("Forms:UpdateDropDown", this);
   },
 
 };
 
-function populateChildren(menulist, options, selectedIndex, zoom,
+function populateChildren(menulist, options, selectedIndex, zoom, startIndex = 0,
                           isInGroup = false, isGroupDisabled = false, adjustedTextSize = -1) {
+  let index = startIndex;
   let element = menulist.menupopup;
 
   // -1 just means we haven't calculated it yet. When we recurse through this function
@@ -127,7 +86,6 @@ function populateChildren(menulist, options, selectedIndex, zoom,
     item.setAttribute("label", option.textContent);
     item.style.direction = option.textDirection;
     item.style.fontSize = adjustedTextSize;
-    item.style.display = option.display;
     item.setAttribute("tooltiptext", option.tooltip);
 
     element.appendChild(item);
@@ -139,30 +97,25 @@ function populateChildren(menulist, options, selectedIndex, zoom,
     }
 
     if (isOptGroup) {
-      populateChildren(menulist, option.children, selectedIndex, zoom,
-                       true, isDisabled, adjustedTextSize);
+      index = populateChildren(menulist, option.children, selectedIndex, zoom,
+                               index, true, isDisabled, adjustedTextSize);
     } else {
-      if (option.index == selectedIndex) {
+      if (index == selectedIndex) {
         // We expect the parent element of the popup to be a <xul:menulist> that
         // has the popuponly attribute set to "true". This is necessary in order
         // for a <xul:menupopup> to act like a proper <html:select> dropdown, as
         // the <xul:menulist> does things like remember state and set the
         // _moz-menuactive attribute on the selected <xul:menuitem>.
         menulist.selectedItem = item;
-
-        // It's hack time. In the event that we've re-populated the menulist due
-        // to a mutation in the <select> in content, that means that the -moz_activemenu
-        // may have been removed from the selected item. Since that's normally only
-        // set for the initially selected on popupshowing for the menulist, and we
-        // don't want to close and re-open the popup, we manually set it here.
-        menulist.menuBoxObject.activeChild = item;
       }
 
-      item.setAttribute("value", option.index);
+      item.setAttribute("value", index++);
 
       if (isInGroup) {
         item.classList.add("contentSelectDropdown-ingroup")
       }
     }
   }
+
+  return index;
 }

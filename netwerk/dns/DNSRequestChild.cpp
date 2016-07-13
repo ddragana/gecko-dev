@@ -159,7 +159,7 @@ ChildDNSRecord::ReportUnusable(uint16_t aPort)
 // CancelDNSRequestEvent
 //-----------------------------------------------------------------------------
 
-class CancelDNSRequestEvent : public Runnable
+class CancelDNSRequestEvent : public nsRunnable
 {
 public:
   CancelDNSRequestEvent(DNSRequestChild* aDnsReq, nsresult aReason)
@@ -178,7 +178,7 @@ public:
     return NS_OK;
   }
 private:
-  RefPtr<DNSRequestChild> mDnsRequest;
+  nsRefPtr<DNSRequestChild> mDnsRequest;
   nsresult mReasonForCancel;
 };
 
@@ -207,7 +207,7 @@ DNSRequestChild::StartRequest()
   // we can only do IPDL on the main thread
   if (!NS_IsMainThread()) {
     NS_DispatchToMainThread(
-      NewRunnableMethod(this, &DNSRequestChild::StartRequest));
+      NS_NewRunnableMethod(this, &DNSRequestChild::StartRequest));
     return;
   }
 
@@ -260,11 +260,11 @@ DNSRequestChild::RecvLookupCompleted(const DNSRequestResponse& reply)
     CallOnLookupComplete();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NewRunnableMethod(this, &DNSRequestChild::CallOnLookupComplete);
+      NS_NewRunnableMethod(this, &DNSRequestChild::CallOnLookupComplete);
     mTarget->Dispatch(event, NS_DISPATCH_NORMAL);
   }
 
-  Unused << Send__delete__(this);
+  unused << Send__delete__(this);
 
   return true;
 }
@@ -273,7 +273,7 @@ void
 DNSRequestChild::ReleaseIPDLReference()
 {
   // Request is done or destroyed. Remove it from the hash table.
-  RefPtr<ChildDNSService> dnsServiceChild =
+  nsRefPtr<ChildDNSService> dnsServiceChild =
     dont_AddRef(ChildDNSService::GetSingleton());
   dnsServiceChild->NotifyRequestDone(this);
 

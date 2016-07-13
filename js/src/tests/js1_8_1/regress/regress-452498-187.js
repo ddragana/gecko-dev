@@ -21,6 +21,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  expect = 'SyntaxError: invalid assignment to const x';
   try
   {
     eval('const x = undefined; for (x in []);');

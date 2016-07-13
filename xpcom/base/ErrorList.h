@@ -118,17 +118,9 @@
   /* 4:  NS_ERROR_MODULE_WIDGET */
   /* ======================================================================= */
 #define MODULE  NS_ERROR_MODULE_WIDGET
-  /* Used by:
-   *   - nsIWidget::NotifyIME()
-   *   - nsIWidget::OnWindowedPluginKeyEvent()
-   * Returned when the notification or the event is handled and it's consumed
-   * by somebody. */
+  /* Used by nsIWidget::NotifyIME(). Returned when the notification is handled
+   * and the notified event is consumed by IME. */
   ERROR(NS_SUCCESS_EVENT_CONSUMED,                        SUCCESS(1)),
-  /* Used by:
-   *   - nsIWidget::OnWindowedPluginKeyEvent()
-   * Returned when the event is handled correctly but the result will be
-   * notified asynchronously. */
-  ERROR(NS_SUCCESS_EVENT_HANDLED_ASYNCHRONOUSLY,          SUCCESS(2)),
 #undef MODULE
 
 
@@ -187,10 +179,6 @@
    * a document with a calculated checksum that does not match the Content-MD5
    * http header. */
   ERROR(NS_ERROR_CORRUPTED_CONTENT,                   FAILURE(29)),
-  /* A content signature verification failed for some reason. This can be either
-   * an actual verification error, or any other error that led to the fact that
-   * a content signature that was expected couldn't be verified. */
-  ERROR(NS_ERROR_INVALID_SIGNATURE,                   FAILURE(58)),
   /* While parsing for the first component of a header field using syntax as in
    * Content-Disposition or Content-Type, the first component was found to be
    * empty, such as in: Content-Disposition: ; filename=foo */
@@ -225,8 +213,6 @@
   ERROR(NS_ERROR_PROXY_CONNECTION_REFUSED,  FAILURE(72)),
   /* A transfer was only partially done when it completed. */
   ERROR(NS_ERROR_NET_PARTIAL_TRANSFER,      FAILURE(76)),
-  /* HTTP/2 detected invalid TLS configuration */
-  ERROR(NS_ERROR_NET_INADEQUATE_SECURITY,   FAILURE(82)),
 
   /* XXX really need to better rationalize these error codes.  are consumers of
    * necko really expected to know how to discern the meaning of these?? */
@@ -245,8 +231,6 @@
   /* The request failed because the user tried to access to a remote XUL
    * document from a website that is not in its white-list. */
   ERROR(NS_ERROR_REMOTE_XUL,           FAILURE(75)),
-  /* The request resulted in an error page being displayed. */
-  ERROR(NS_ERROR_LOAD_SHOWED_ERRORPAGE, FAILURE(77)),
 
 
   /* FTP specific error codes: */
@@ -338,6 +322,17 @@
   /* nsIInterceptedChannel */
   /* Generic error for non-specific failures during service worker interception */
   ERROR(NS_ERROR_INTERCEPTION_FAILED,                  FAILURE(100)),
+  /* Service worker intercepted with an opaque response while
+     dom.serviceWorkers.interception.opaque.enabled pref was set to false */
+  ERROR(NS_ERROR_OPAQUE_INTERCEPTION_DISABLED,         FAILURE(101)),
+  /* Attempt to return opaque response for anything but "non-cors" request */
+  ERROR(NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE, FAILURE(102)),
+  /* Service worker intercepted with an error response */
+  ERROR(NS_ERROR_INTERCEPTED_ERROR_RESPONSE,           FAILURE(103)),
+  /* Service worker intercepted with a response with bodyUsed set to true */
+  ERROR(NS_ERROR_INTERCEPTED_USED_RESPONSE,            FAILURE(104)),
+  /* Service worker intercepted a client request with an opaque response */
+  ERROR(NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION,   FAILURE(105)),
 #undef MODULE
 
 
@@ -542,16 +537,6 @@
   /* A way to represent uncatchable exceptions */
   ERROR(NS_ERROR_UNCATCHABLE_EXCEPTION,            FAILURE(1016)),
 
-  /* An nsresult value to use in ErrorResult to indicate that we want to throw
-     a DOMException */
-  ERROR(NS_ERROR_DOM_DOMEXCEPTION,                 FAILURE(1017)),
-
-  /* An nsresult value to use in ErrorResult to indicate that we
-   * should just rethrow whatever is on the JSContext (which might be
-   * nothing if an uncatchable exception was thrown).
-   */
-  ERROR(NS_ERROR_DOM_EXCEPTION_ON_JSCONTEXT,       FAILURE(1018)),
-
   /* May be used to indicate when e.g. setting a property value didn't
    * actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
    * the second assignment throws NS_SUCCESS_DOM_NO_OPERATION.
@@ -560,17 +545,9 @@
 
   /*
    * A success code that indicates that evaluating a string of JS went
-   * just fine except it threw an exception. Only for legacy use by
-   * nsJSUtils.
+   * just fine except it threw an exception.
    */
   ERROR(NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW,    SUCCESS(2)),
-
-  /*
-   * A success code that indicates that evaluating a string of JS went
-   * just fine except it was killed by an uncatchable exception.
-   * Only for legacy use by nsJSUtils.
-   */
-  ERROR(NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE, SUCCESS(3)),
 #undef MODULE
 
 
@@ -659,6 +636,8 @@
   ERROR(NS_ERROR_XPC_BAD_CONVERT_JS_ZERO_ISNOT_NULL,   FAILURE(53)),
   ERROR(NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE,         FAILURE(54)),
   /* any new errors here should have an associated entry added in xpc.msg */
+
+  ERROR(NS_SUCCESS_I_DID_SOMETHING,      SUCCESS(1)),
 #undef MODULE
 
 
@@ -677,11 +656,6 @@
   /* Error code for CSP */
   ERROR(NS_ERROR_CSP_FORM_ACTION_VIOLATION,        FAILURE(98)),
   ERROR(NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION,     FAILURE(99)),
-
-  /* Error code for Sub-Resource Integrity */
-  ERROR(NS_ERROR_SRI_CORRUPT,                      FAILURE(200)),
-  ERROR(NS_ERROR_SRI_DISABLED,                     FAILURE(201)),
-  ERROR(NS_ERROR_SRI_NOT_ELIGIBLE,                 FAILURE(202)),
 
   /* CMS specific nsresult error codes.  Note: the numbers used here correspond
    * to the values in nsICMSMessageErrors.idl. */
@@ -726,8 +700,6 @@
   ERROR(NS_ERROR_PHISHING_URI,          FAILURE(31)),
   ERROR(NS_ERROR_TRACKING_URI,          FAILURE(34)),
   ERROR(NS_ERROR_UNWANTED_URI,          FAILURE(35)),
-  ERROR(NS_ERROR_FORBIDDEN_URI,         FAILURE(36)),
-  ERROR(NS_ERROR_BLOCKED_URI,           FAILURE(37)),
   /* Used when "Save Link As..." doesn't see the headers quickly enough to
    * choose a filename.  See nsContextMenu.js. */
   ERROR(NS_ERROR_SAVE_LINK_AS_TIMEOUT,  FAILURE(32)),
@@ -807,7 +779,6 @@
   ERROR(NS_ERROR_XPATH_UNBALANCED_CURLY_BRACE,        FAILURE(29)),
   ERROR(NS_ERROR_XSLT_BAD_NODE_NAME,                  FAILURE(30)),
   ERROR(NS_ERROR_XSLT_VAR_ALREADY_SET,                FAILURE(31)),
-  ERROR(NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED,        FAILURE(32)),
 
   ERROR(NS_XSLT_GET_NEW_HANDLER,  SUCCESS(1)),
 #undef MODULE
@@ -946,26 +917,6 @@
   /* ======================================================================= */
 #define MODULE NS_ERROR_MODULE_SIGNED_APP
   ERROR(NS_ERROR_SIGNED_APP_MANIFEST_INVALID,   FAILURE(1)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 39: NS_ERROR_MODULE_DOM_ANIM */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_ANIM
-  ERROR(NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR,              FAILURE(1)),
-  ERROR(NS_ERROR_DOM_ANIM_NO_EFFECT_ERR,                  FAILURE(2)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 40: NS_ERROR_MODULE_DOM_PUSH */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_PUSH
-  ERROR(NS_ERROR_DOM_PUSH_INVALID_REGISTRATION_ERR, FAILURE(1)),
-  ERROR(NS_ERROR_DOM_PUSH_DENIED_ERR,               FAILURE(2)),
-  ERROR(NS_ERROR_DOM_PUSH_ABORT_ERR,                FAILURE(3)),
-  ERROR(NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE,      FAILURE(4)),
-  ERROR(NS_ERROR_DOM_PUSH_INVALID_KEY_ERR,          FAILURE(5)),
-  ERROR(NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR,       FAILURE(6)),
 #undef MODULE
 
   /* ======================================================================= */

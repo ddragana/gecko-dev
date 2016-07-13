@@ -3,7 +3,7 @@
 
 // Test private browsing mode.
 
-var test_generator = do_run_test();
+let test_generator = do_run_test();
 
 function run_test() {
   do_test_pending();
@@ -18,8 +18,16 @@ function finish_test() {
 }
 
 function make_channel(url) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true})
-                .QueryInterface(Ci.nsIHttpChannel);
+  var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
+  var chan = ios.newChannel2(url,
+                             null,
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_OTHER).QueryInterface(Ci.nsIHttpChannel);
+  return chan;
 }
 
 function do_run_test() {

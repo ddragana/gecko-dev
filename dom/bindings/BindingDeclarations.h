@@ -13,18 +13,15 @@
 #ifndef mozilla_dom_BindingDeclarations_h__
 #define mozilla_dom_BindingDeclarations_h__
 
-#include "js/RootingAPI.h"
-#include "js/Value.h"
-
-#include "mozilla/Maybe.h"
-#include "mozilla/RootedOwningNonNull.h"
-#include "mozilla/RootedRefPtr.h"
-
-#include "mozilla/dom/DOMString.h"
-
-#include "nsCOMPtr.h"
 #include "nsStringGlue.h"
+#include "js/Value.h"
+#include "js/RootingAPI.h"
+#include "mozilla/Maybe.h"
+#include "nsCOMPtr.h"
 #include "nsTArray.h"
+#include "nsAutoPtr.h" // for nsRefPtr member variables
+#include "mozilla/dom/DOMString.h"
+#include "mozilla/dom/OwningNonNull.h"
 
 class nsWrapperCache;
 
@@ -40,7 +37,7 @@ protected:
                  JS::MutableHandle<JS::Value> aVal);
 
   bool StringifyToJSON(JSContext* aCx,
-                       JS::Handle<JSObject*> aObj,
+                       JS::MutableHandle<JS::Value> aValue,
                        nsAString& aJSON) const;
 
   // Struct used as a way to force a dictionary constructor to not init the
@@ -50,19 +47,11 @@ protected:
   struct FastDictionaryInitializer {
   };
 
-  bool mIsAnyMemberPresent = false;
-
 private:
   // aString is expected to actually be an nsAString*.  Should only be
   // called from StringifyToJSON.
   static bool AppendJSONToString(const char16_t* aJSONData,
                                  uint32_t aDataLength, void* aString);
-
-public:
-  bool IsAnyMemberPresent() const
-  {
-    return mIsAnyMemberPresent;
-  }
 };
 
 // Struct that serves as a base class for all typed arrays and array buffers and
@@ -147,10 +136,23 @@ public:
   }
 
   // Return InternalType here so we can work with it usefully.
-  template<typename... Args>
-  InternalType& Construct(Args&&... aArgs)
+  InternalType& Construct()
   {
-    mImpl.emplace(Forward<Args>(aArgs)...);
+    mImpl.emplace();
+    return *mImpl;
+  }
+
+  template <class T1>
+  InternalType& Construct(const T1 &t1)
+  {
+    mImpl.emplace(t1);
+    return *mImpl;
+  }
+
+  template <class T1, class T2>
+  InternalType& Construct(const T1 &t1, const T2 &t2)
+  {
+    mImpl.emplace(t1, t2);
     return *mImpl;
   }
 
@@ -474,14 +476,14 @@ GetWrapperCache(const SmartPtr<T>& aObject)
 
 struct MOZ_STACK_CLASS ParentObject {
   template<class T>
-  MOZ_IMPLICIT ParentObject(T* aObject) :
+  ParentObject(T* aObject) :
     mObject(aObject),
     mWrapperCache(GetWrapperCache(aObject)),
     mUseXBLScope(false)
   {}
 
   template<class T, template<typename> class SmartPtr>
-  MOZ_IMPLICIT ParentObject(const SmartPtr<T>& aObject) :
+  ParentObject(const SmartPtr<T>& aObject) :
     mObject(aObject.get()),
     mWrapperCache(GetWrapperCache(aObject.get())),
     mUseXBLScope(false)

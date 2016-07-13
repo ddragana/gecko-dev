@@ -10,13 +10,12 @@
 #include "nsITimer.h"
 #include "mozilla/Monitor.h"
 #include "ProfileEntry.h"
-#include "ThreadProfile.h"
 
 using mozilla::Monitor;
 using mozilla::MonitorAutoLock;
 using mozilla::TimeStamp;
 
-class CheckResponsivenessTask : public mozilla::Runnable,
+class CheckResponsivenessTask : public nsRunnable,
                                 public nsITimerCallback {
 public:
   CheckResponsivenessTask()
@@ -79,8 +78,7 @@ private:
   bool mStop;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(CheckResponsivenessTask, mozilla::Runnable,
-                            nsITimerCallback)
+NS_IMPL_ISUPPORTS_INHERITED(CheckResponsivenessTask, nsRunnable, nsITimerCallback)
 
 ThreadResponsiveness::ThreadResponsiveness(ThreadProfile *aThreadProfile)
   : mThreadProfile(aThreadProfile)

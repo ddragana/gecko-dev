@@ -22,9 +22,6 @@
 
 #include "nsIIPCSerializableURI.h"
 
-namespace mozilla {
-namespace net {
-
 class nsSimpleNestedURI : public nsSimpleURI,
                           public nsINestedURI
 {
@@ -67,8 +64,5 @@ public:
 protected:
     nsCOMPtr<nsIURI> mInnerURI;
 };
-
-} // namespace net
-} // namespace mozilla
 
 #endif /* nsSimpleNestedURI_h__ */

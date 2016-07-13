@@ -40,13 +40,9 @@
 // that Components is not defined in worker threads, so no instance of Cu can
 // be obtained.
 
-var Cu = this.require ? require("chrome").Cu : Components.utils;
-var Cc = this.require ? require("chrome").Cc : Components.classes;
-var Ci = this.require ? require("chrome").Ci : Components.interfaces;
-// If we can access Components, then we use it to capture an async
-// parent stack trace; see scheduleWalkerLoop.  However, as it might
-// not be available (see above), users of this must check it first.
-var Components_ = this.require ? require("chrome").components : Components;
+let Cu = this.require ? require("chrome").Cu : Components.utils;
+let Cc = this.require ? require("chrome").Cc : Components.classes;
+let Ci = this.require ? require("chrome").Ci : Components.interfaces;
 
 // If Cu is defined, use it to lazily define the FinalizationWitnessService.
 if (Cu) {
@@ -56,10 +52,6 @@ if (Cu) {
   XPCOMUtils.defineLazyServiceGetter(this, "FinalizationWitnessService",
                                      "@mozilla.org/toolkit/finalizationwitness;1",
                                      "nsIFinalizationWitnessService");
-
-  // For now, we're worried about add-ons using Promises with CPOWs, so we'll
-  // permit them in this scope, but this support will go away soon.
-  Cu.permitCPOWsInScope(this);
 }
 
 const STATUS_PENDING = 0;
@@ -108,7 +100,7 @@ const DOMPromise = Cu ? Promise : null;
 // In this snippet, the error is reported both by p1 and by p2.
 //
 
-var PendingErrors = {
+let PendingErrors = {
   // An internal counter, used to generate unique id.
   _counter: 0,
   // Functions registered to be notified when a pending error
@@ -192,7 +184,7 @@ var PendingErrors = {
           stack = error.location;
         } else {
           // Components.stack to the rescue!
-          stack = Components_.stack;
+          stack  = Components.stack;
           // Remove those top frames that refer to Promise.jsm.
           while (stack) {
             if (!stack.filename.endsWith("/Promise.jsm")) {
@@ -240,7 +232,8 @@ var PendingErrors = {
   flush: function() {
     // Since we are going to modify the map while walking it,
     // let's copying the keys first.
-    for (let key of Array.from(this._map.keys())) {
+    let keys = [key for (key of this._map.keys())];
+    for (let key of keys) {
       this.report(key);
     }
   },
@@ -744,15 +737,7 @@ this.PromiseWalker = {
     // If Cu is defined, this file is loaded on the main thread. Otherwise, it
     // is loaded on the worker thread.
     if (Cu) {
-      let stack = Components_ ? Components_.stack : null;
-      if (stack) {
-        DOMPromise.resolve().then(() => {
-          Cu.callFunctionWithAsyncStack(this.walkerLoop.bind(this), stack,
-                                        "Promise")
-        });
-      } else {
-        DOMPromise.resolve().then(() => this.walkerLoop());
-      }
+      DOMPromise.resolve().then(() => this.walkerLoop());
     } else {
       setImmediate(this.walkerLoop);
     }

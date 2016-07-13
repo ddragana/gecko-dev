@@ -15,7 +15,6 @@
 #include "nsIMemoryReporter.h"
 #include "nsIServiceManager.h"
 #include "nsIFile.h"
-#include "mozilla/Atomics.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Module.h"
 #include "mozilla/ModuleLoader.h"
@@ -25,7 +24,7 @@
 #include "nsIFactory.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "prtime.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
@@ -69,7 +68,13 @@ extern const char staticComponentType[];
 #endif
 ////////////////////////////////////////////////////////////////////////////////
 
+#if defined(MOZILLA_XPCOMRT_API)
+extern const mozilla::Module kXPCOMRTModule;
+extern const mozilla::Module kNeckoStandaloneModule;
+extern const mozilla::Module kStunUDPSocketFilterHandlerModule;
+#else
 extern const mozilla::Module kXPCOMModule;
+#endif
 
 /**
  * This is a wrapper around mozilla::Mutex which provides runtime
@@ -119,7 +124,7 @@ public:
 
 private:
   mozilla::Mutex mMutex;
-  mozilla::Atomic<PRThread*, mozilla::Relaxed> mOwnerThread;
+  volatile PRThread* mOwnerThread;
 };
 
 typedef mozilla::BaseAutoLock<SafeMutex> SafeMutexAutoLock;
@@ -332,7 +337,7 @@ public:
 
   nsTArray<PendingServiceInfo> mPendingServices;
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 #ifdef MOZ_B2G_LOADER
   // Preload XPT interface info for B2G loader.

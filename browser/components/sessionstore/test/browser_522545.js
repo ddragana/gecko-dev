@@ -6,7 +6,7 @@ function test() {
   /** Test for Bug 522545 **/
 
   waitForExplicitFinish();
-  requestLongerTimeout(4);
+  requestLongerTimeout(2);
 
   // This tests the following use case:
   // User opens a new tab which gets focus. The user types something into the
@@ -28,8 +28,8 @@ function test() {
          "No history entries still sets currentURI to about:blank");
       is(browser.userTypedValue, "example.com",
          "userTypedValue was correctly restored");
-      ok(!browser.didStartLoadSinceLastUserTyping(),
-         "We still know that no load is ongoing");
+      is(browser.userTypedClear, 0,
+         "userTypeClear restored as expected");
       is(gURLBar.value, "example.com",
          "Address bar's value correctly restored");
       // Change tabs to make sure address bar value gets updated
@@ -60,8 +60,8 @@ function test() {
          "No history entries still sets currentURI to about:blank");
       is(browser.userTypedValue, "example.org",
          "userTypedValue was correctly restored");
-      ok(!browser.didStartLoadSinceLastUserTyping(),
-         "We still know that no load is ongoing");
+      is(browser.userTypedClear, 0,
+         "userTypeClear restored as expected");
       is(gURLBar.value, "about:mozilla",
          "Address bar's value correctly restored");
       // Change tabs to make sure address bar value gets updated
@@ -93,8 +93,8 @@ function test() {
          "browser.currentURI set to current entry in SH");
       is(browser.userTypedValue, "example.com",
          "userTypedValue was correctly restored");
-      ok(!browser.didStartLoadSinceLastUserTyping(),
-         "We still know that no load is ongoing");
+      is(browser.userTypedClear, 0,
+         "userTypeClear restored as expected");
       is(gURLBar.value, "example.com",
          "Address bar's value correctly restored to userTypedValue");
       runNextTest();
@@ -122,8 +122,8 @@ function test() {
          "browser.currentURI set to current entry in SH");
       is(browser.userTypedValue, "example.org",
          "userTypedValue was correctly restored");
-      ok(!browser.didStartLoadSinceLastUserTyping(),
-         "We still know that no load is ongoing");
+      is(browser.userTypedClear, 0,
+         "userTypeClear restored as expected");
       is(gURLBar.value, "example.org",
          "Address bar's value correctly restored to userTypedValue");
       runNextTest();
@@ -159,13 +159,18 @@ function test() {
 
       ok(hasUTV, "At least one tab has a userTypedValue with userTypedClear with no loaded URL");
 
-      BrowserTestUtils.waitForMessage(gBrowser.selectedBrowser.messageManager, "SessionStore:update").then(firstLoad);
+      gBrowser.addEventListener("load", firstLoad, true);
     }
 
     function firstLoad() {
-      let state = JSON.parse(ss.getTabState(gBrowser.selectedTab));
-      let hasSH = !("userTypedValue" in state) && state.entries[0].url;
-      ok(hasSH, "The selected tab has its entry in SH");
+      gBrowser.removeEventListener("load", firstLoad, true);
+
+      let state = JSON.parse(ss.getBrowserState());
+      let hasSH = state.windows[0].tabs.some(function(aTab) {
+        return !("userTypedValue" in aTab) && aTab.entries[0].url;
+      });
+
+      ok(hasSH, "At least one tab has its entry in SH");
 
       runNextTest();
     }
@@ -186,8 +191,7 @@ function test() {
       let browser = gBrowser.selectedBrowser;
       // Make sure this tab isn't loading and state is clear before we test.
       is(browser.userTypedValue, null, "userTypedValue is empty to start");
-      ok(!browser.didStartLoadSinceLastUserTyping(),
-         "Initially, no load should be ongoing");
+      is(browser.userTypedClear, 0, "userTypedClear is 0 to start");
 
       let inputText = "example.org";
       gURLBar.focus();
@@ -197,8 +201,8 @@ function test() {
       executeSoon(function () {
         is(browser.userTypedValue, "example.org",
            "userTypedValue was set when changing URLBar value");
-        ok(!browser.didStartLoadSinceLastUserTyping(),
-           "No load started since changing URLBar value");
+        is(browser.userTypedClear, 0,
+           "userTypedClear was not changed when changing URLBar value");
 
         // Now make sure ss gets these values too
         let newState = JSON.parse(ss.getBrowserState());
@@ -229,8 +233,8 @@ function test() {
          "userTypedClear=2 caused userTypedValue to be loaded");
       is(browser.userTypedValue, null,
          "userTypedValue was null after loading a URI");
-      ok(!browser.didStartLoadSinceLastUserTyping(),
-         "We should have reset the load state when the tab loaded");
+      is(browser.userTypedClear, 0,
+         "userTypeClear reset to 0");
       is(gURLBar.textValue, gURLBar.trimValue("http://example.com/"),
          "Address bar's value set after loading URI");
       runNextTest();
@@ -250,17 +254,9 @@ function test() {
   };
   function runNextTest() {
     if (tests.length) {
-      waitForBrowserState(state, function() {
-        gBrowser.selectedBrowser.userTypedValue = null;
-        URLBarSetURI();
-        (tests.shift())();
-      });
+      waitForBrowserState(state, tests.shift());
     } else {
-      waitForBrowserState(originalState, function() {
-        gBrowser.selectedBrowser.userTypedValue = null;
-        URLBarSetURI();
-        finish();
-      });
+      waitForBrowserState(originalState, finish);
     }
   }
 

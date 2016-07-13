@@ -17,7 +17,7 @@ const { Sequence, seq, filter, object, pairs } = require("../util/sequence");
 // When iterated over belowe sequences items will represent
 // state of windows at the time of iteration.
 const opened = seq(function*() {
-  const items = windows("navigator:browser", {includePrivate: true});
+  const items = windows("navigator:browser", {includePrivates: true});
   for (let item of items) {
       yield [getOuterId(item), item];
   }

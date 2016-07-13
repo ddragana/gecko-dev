@@ -1,33 +1,7 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Removes a doorhanger notification if all of the installs it was notifying
-// about have ended in some way.
-function removeNotificationOnEnd(notification, installs) {
-  let count = installs.length;
-
-  function maybeRemove(install) {
-    install.removeListener(this);
-
-    if (--count == 0) {
-      // Check that the notification is still showing
-      let current = PopupNotifications.getNotification(notification.id, notification.browser);
-      if (current === notification)
-        notification.remove();
-    }
-  }
-
-  for (let install of installs) {
-    install.addListener({
-      onDownloadCancelled: maybeRemove,
-      onDownloadFailed: maybeRemove,
-      onInstallFailed: maybeRemove,
-      onInstallEnded: maybeRemove
-    });
-  }
-}
+# -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 const gXPInstallObserver = {
   _findChildShell: function (aDocShell, aSoughtShell)
@@ -69,23 +43,6 @@ const gXPInstallObserver = {
       return;
     }
 
-    let showNextConfirmation = () => {
-      // Make sure the browser is still alive.
-      if (gBrowser.browsers.indexOf(browser) == -1)
-        return;
-
-      let pending = this.pendingInstalls.get(browser);
-      if (pending && pending.length)
-        this.showInstallConfirmation(browser, pending.shift());
-    }
-
-    // If all installs have already been cancelled in some way then just show
-    // the next confirmation
-    if (installInfo.installs.every(i => i.state != AddonManager.STATE_DOWNLOADED)) {
-      showNextConfirmation();
-      return;
-    }
-
     const anchorID = "addons-notification-icon";
 
     // Make notifications persist a minimum of 30 seconds
@@ -96,18 +53,25 @@ const gXPInstallObserver = {
 
     let cancelInstallation = () => {
       if (installInfo) {
-        for (let install of installInfo.installs) {
-          // The notification may have been closed because the add-ons got
-          // cancelled elsewhere, only try to cancel those that are still
-          // pending install.
-          if (install.state != AddonManager.STATE_CANCELLED)
-            install.cancel();
-        }
+        for (let install of installInfo.installs)
+          install.cancel();
       }
 
       this.acceptInstallation = null;
 
-      showNextConfirmation();
+      let tab = gBrowser.getTabForBrowser(browser);
+      if (tab)
+        tab.removeEventListener("TabClose", cancelInstallation);
+
+      window.removeEventListener("unload", cancelInstallation);
+
+      // Make sure the browser is still alive.
+      if (gBrowser.browsers.indexOf(browser) == -1)
+        return;
+
+      let pending = this.pendingInstalls.get(browser);
+      if (pending && pending.length)
+        this.showInstallConfirmation(browser, pending.shift());
     };
 
     let unsigned = installInfo.installs.filter(i => i.addon.signedState <= AddonManager.SIGNEDSTATE_MISSING);
@@ -201,13 +165,13 @@ const gXPInstallObserver = {
     let tab = gBrowser.getTabForBrowser(browser);
     if (tab) {
       gBrowser.selectedTab = tab;
+      tab.addEventListener("TabClose", cancelInstallation);
     }
 
-    let popup = PopupNotifications.show(browser, "addon-install-confirmation",
-                                        messageString, anchorID, null, null,
-                                        options);
+    window.addEventListener("unload", cancelInstallation);
 
-    removeNotificationOnEnd(popup, installInfo.installs);
+    PopupNotifications.show(browser, "addon-install-confirmation", messageString,
+                            anchorID, null, null, options);
 
     Services.telemetry
             .getHistogramById("SECURITY_UI")
@@ -258,17 +222,6 @@ const gXPInstallObserver = {
       PopupNotifications.show(browser, notificationID, messageString, anchorID,
                               action, null, options);
       break; }
-    case "addon-install-origin-blocked": {
-      messageString = gNavigatorBundle.getFormattedString("xpinstallPromptMessage",
-                        [brandShortName]);
-
-      let secHistogram = Components.classes["@mozilla.org/base/telemetry;1"].getService(Ci.nsITelemetry).getHistogramById("SECURITY_UI");
-      secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_ADDON_ASKING_PREVENTED);
-      let popup = PopupNotifications.show(browser, notificationID,
-                                          messageString, anchorID,
-                                          null, null, options);
-      removeNotificationOnEnd(popup, installInfo.installs);
-      break; }
     case "addon-install-blocked": {
       messageString = gNavigatorBundle.getFormattedString("xpinstallPromptMessage",
                         [brandShortName]);
@@ -284,10 +237,8 @@ const gXPInstallObserver = {
       };
 
       secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_ADDON_ASKING_PREVENTED);
-      let popup = PopupNotifications.show(browser, notificationID,
-                                          messageString, anchorID,
-                                          action, null, options);
-      removeNotificationOnEnd(popup, installInfo.installs);
+      PopupNotifications.show(browser, notificationID, messageString, anchorID,
+                              action, null, options);
       break; }
     case "addon-install-started": {
       let needsDownload = function needsDownload(aInstall) {
@@ -650,7 +601,7 @@ var LightWeightThemeWebInstaller = {
 /*
  * Listen for Lightweight Theme styling changes and update the browser's theme accordingly.
  */
-var LightweightThemeListener = {
+let LightweightThemeListener = {
   _modifiedStyles: [],
 
   init: function () {
@@ -660,7 +611,6 @@ var LightweightThemeListener = {
         if (sheet.href == "chrome://browser/skin/browser-lightweightTheme.css")
           return sheet;
       }
-      return undefined;
     });
 
     Services.obs.addObserver(this, "lightweight-theme-styling-update", false);

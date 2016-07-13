@@ -12,7 +12,7 @@
   });
 
   runNetworkTest(function () {
-    var pc = new RTCPeerConnection();
+    var pc = new mozRTCPeerConnection();
     var exception = null;
     var eTimeout = null;
 
@@ -28,16 +28,6 @@
       clearTimeout(eTimeout);
       is(pc.signalingState, "closed", "signalingState is 'closed'");
       is(pc.iceConnectionState, "closed", "iceConnectionState is 'closed'");
-
-      // test that pc is really closed (and doesn't crash, bug 1259728)
-      try {
-        pc.getLocalStreams();
-      } catch (e) {
-        exception = e;
-      }
-      is(exception && exception.name, "InvalidStateError",
-         "pc.getLocalStreams should throw when closed");
-      exception = null;
 
       try {
         pc.close();
@@ -67,9 +57,9 @@
       // These legacy methods fire the error callback instead. This is not
       // entirely to spec but is better than ignoring programming errors.
 
-      var offer = new RTCSessionDescription({ sdp: "sdp", type: "offer" });
-      var answer = new RTCSessionDescription({ sdp: "sdp", type: "answer" });
-      var candidate = new RTCIceCandidate({ candidate: "dummy",
+      var offer = new mozRTCSessionDescription({ sdp: "sdp", type: "offer" });
+      var answer = new mozRTCSessionDescription({ sdp: "sdp", type: "answer" });
+      var candidate = new mozRTCIceCandidate({ candidate: "dummy",
                                                sdpMid: "test",
                                                sdpMLineIndex: 3 });
 
@@ -126,14 +116,6 @@
       finish();
     }, 60000);
 
-    var mustNotSettle = (p, ms, msg) => Promise.race([
-      p.then(() => ok(false, msg + " must not settle"),
-             e => ok(false, msg + " must not settle. Got " + e.name)),
-      wait(ms).then(() => ok(true, msg + " must not settle"))
-    ]);
-
-    var silence = mustNotSettle(pc.createOffer(), 1000,
-                                "createOffer immediately followed by close");
     try {
       pc.close();
     } catch (e) {
@@ -143,7 +125,7 @@
     is(pc.signalingState, "closed", "Final signalingState is 'closed'");
     is(pc.iceConnectionState, "closed", "Final iceConnectionState is 'closed'");
 
-    Promise.all([finished, silence]).then(networkTestFinished);
+    finished.then(networkTestFinished);
   });
 </script>
 </pre>

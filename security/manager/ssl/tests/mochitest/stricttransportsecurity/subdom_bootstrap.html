@@ -7,12 +7,10 @@
   <head>
     <title>STS test iframe</title>
     <script>
-      "use strict";
-      let windowRef = window;
+      var self = window;
       window.addEventListener("load", function() {
-        windowRef.parent.postMessage("BOOTSTRAP subdom",
-                                     "http://mochi.test:8888");
-      }, false);
+          self.parent.postMessage("BOOTSTRAP subdom", "http://mochi.test:8888");
+        }, false);
     </script>
   </head>
   <body>

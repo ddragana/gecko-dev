@@ -143,8 +143,6 @@ protected:
         Close();
     }
 
-    nsresult SeekInternal(int32_t aWhence, int64_t aOffset, bool aClearBuf=true);
-
     nsAutoPtr<nsLineBuffer<char> > mLineBuffer;
 
     /**
@@ -186,7 +184,7 @@ public:
     NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
 
     nsPartialFileInputStream()
-      : mStart(0), mLength(0), mPosition(0), mDeferredSeek(false)
+      : mStart(0), mLength(0), mPosition(0)
     { }
 
     NS_IMETHOD Tell(int64_t *aResult) override;
@@ -201,8 +199,6 @@ protected:
     ~nsPartialFileInputStream()
     { }
 
-    inline nsresult DoPendingSeek();
-
 private:
     uint64_t TruncateSize(uint64_t aSize) {
           return std::min<uint64_t>(mLength - mPosition, aSize);
@@ -211,7 +207,6 @@ private:
     uint64_t mStart;
     uint64_t mLength;
     uint64_t mPosition;
-    bool mDeferredSeek;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

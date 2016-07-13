@@ -948,20 +948,9 @@ NetworkStatsDB.prototype = {
       let request = aStore.openCursor(range).onsuccess = function(event) {
         var cursor = event.target.result;
         if (cursor){
-          // We use rxTotalBytes/txTotalBytes instead of rxBytes/txBytes for
-          // the first (oldest) sample. The rx/txTotalBytes fields record
-          // accumulative usage amount, which means even if old samples were
-          // expired and removed from the Database, we can still obtain the
-          // correct network usage.
-          if (data.length == 0) {
-            data.push({ rxBytes: cursor.value.rxTotalBytes,
-                        txBytes: cursor.value.txTotalBytes,
-                        date: new Date(cursor.value.timestamp + offset) });
-          } else {
-            data.push({ rxBytes: cursor.value.rxBytes,
-                        txBytes: cursor.value.txBytes,
-                        date: new Date(cursor.value.timestamp + offset) });
-          }
+          data.push({ rxBytes: cursor.value.rxBytes,
+                      txBytes: cursor.value.txBytes,
+                      date: new Date(cursor.value.timestamp + offset) });
           cursor.continue();
           return;
         }
@@ -992,20 +981,9 @@ NetworkStatsDB.prototype = {
               foundData.rxBytes += cursor.value.rxBytes;
               foundData.txBytes += cursor.value.txBytes;
             } else {
-              // We use rxTotalBytes/txTotalBytes instead of rxBytes/txBytes
-              // for the first (oldest) sample. The rx/txTotalBytes fields
-              // record accumulative usage amount, which means even if old
-              // samples were expired and removed from the Database, we can
-              // still obtain the correct network usage.
-              if (data.length == 0) {
-                data.push({ rxBytes: cursor.value.rxTotalBytes,
-                            txBytes: cursor.value.txTotalBytes,
-                            date: new Date(cursor.value.timestamp + offset) });
-              } else {
-                data.push({ rxBytes: cursor.value.rxBytes,
-                            txBytes: cursor.value.txBytes,
-                            date: new Date(cursor.value.timestamp + offset) });
-              }
+              data.push({ rxBytes: cursor.value.rxBytes,
+                          txBytes: cursor.value.txBytes,
+                          date: new Date(cursor.value.timestamp + offset) });
             }
             cursor.continue();
             return;

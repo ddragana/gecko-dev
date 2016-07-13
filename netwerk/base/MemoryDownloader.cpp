@@ -6,7 +6,6 @@
 #include "MemoryDownloader.h"
 
 #include "mozilla/Assertions.h"
-#include "nsIInputStream.h"
 
 namespace mozilla {
 namespace net {
@@ -42,7 +41,7 @@ MemoryDownloader::OnStopRequest(nsIRequest* aRequest,
   MOZ_ASSERT(!mData == NS_FAILED(mStatus));
   Data data;
   data.swap(mData);
-  RefPtr<IObserver> observer;
+  nsRefPtr<IObserver> observer;
   observer.swap(mObserver);
   observer->OnDownloadComplete(this, aRequest, aCtxt, aStatus,
                                mozilla::Move(data));

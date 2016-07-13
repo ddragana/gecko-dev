@@ -22,8 +22,7 @@ public:
   nsTArray<uint8_t> mIdHeader;
   // The Comment Header of OggOpus.
   nsTArray<uint8_t> mCommentHeader;
-  int32_t mChannels;
-  float mSamplingFrequency;
+
   MetadataKind GetKind() const override { return METADATA_OPUS; }
 };
 
@@ -81,9 +80,6 @@ private:
    * They will be prepended to the resampled frames next encoding cycle.
    */
   nsTArray<AudioDataValue> mResampledLeftover;
-
-  // TimeStamp in microseconds.
-  uint64_t mOutputTimeStamp;
 };
 
 } // namespace mozilla

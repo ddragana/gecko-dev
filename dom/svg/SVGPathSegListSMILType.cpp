@@ -233,7 +233,7 @@ AddWeightedPathSegs(double aCoeff1,
  *                         identity, in which case we'll grow it to the right
  *                         size. Also allowed to be the same list as aList1.
  */
-static nsresult
+static void
 AddWeightedPathSegLists(double aCoeff1, const SVGPathDataAndInfo& aList1,
                         double aCoeff2, const SVGPathDataAndInfo& aList2,
                         SVGPathDataAndInfo& aResult)
@@ -264,9 +264,8 @@ AddWeightedPathSegLists(double aCoeff1, const SVGPathDataAndInfo& aList1,
   // because in that case, we will have already set iter1 to nullptr above, to
   // record that our first operand is an identity value.)
   if (aResult.IsIdentity()) {
-    if (!aResult.SetLength(aList2.Length())) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    DebugOnly<bool> success = aResult.SetLength(aList2.Length());
+    MOZ_ASSERT(success, "infallible nsTArray::SetLength should succeed");
     aResult.SetElement(aList2.Element()); // propagate target element info!
   }
 
@@ -282,7 +281,6 @@ AddWeightedPathSegLists(double aCoeff1, const SVGPathDataAndInfo& aList1,
              iter2 == end2 &&
              resultIter == aResult.end(),
              "Very, very bad - path data corrupt");
-  return NS_OK;
 }
 
 static void
@@ -352,7 +350,7 @@ ConvertPathSegmentData(SVGPathDataAndInfo::const_iterator& aStart,
       aResult[5] = aStart[5];
       aResult[6] = aStart[6];
       AdjustSegmentForRelativeness(adjustmentType, aResult + 5, aState);
-      MOZ_FALLTHROUGH;
+      // fall through
     case PATHSEG_CURVETO_QUADRATIC_ABS:
     case PATHSEG_CURVETO_QUADRATIC_REL:
     case PATHSEG_CURVETO_CUBIC_SMOOTH_ABS:
@@ -360,7 +358,7 @@ ConvertPathSegmentData(SVGPathDataAndInfo::const_iterator& aStart,
       aResult[3] = aStart[3];
       aResult[4] = aStart[4];
       AdjustSegmentForRelativeness(adjustmentType, aResult + 3, aState);
-      MOZ_FALLTHROUGH;
+      // fall through
     case PATHSEG_MOVETO_ABS:
     case PATHSEG_MOVETO_REL:
     case PATHSEG_LINETO_ABS:
@@ -432,7 +430,9 @@ SVGPathSegListSMILType::Add(nsSMILValue& aDest,
     }
   }
 
-  return AddWeightedPathSegLists(1.0, dest, aCount, valueToAdd, dest);
+  AddWeightedPathSegLists(1.0, dest, aCount, valueToAdd, dest);
+
+  return NS_OK;
 }
 
 nsresult
@@ -483,9 +483,8 @@ SVGPathSegListSMILType::Interpolate(const nsSMILValue& aStartVal,
   if (check == eRequiresConversion) {
     // Can't convert |start| in-place, since it's const. Instead, we copy it
     // into |result|, converting the types as we go, and use that as our start.
-    if (!result.SetLength(end.Length())) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    DebugOnly<bool> success = result.SetLength(end.Length());
+    MOZ_ASSERT(success, "infallible nsTArray::SetLength should succeed");
     result.SetElement(end.Element()); // propagate target element info!
 
     ConvertAllPathSegmentData(start.begin(), start.end(),
@@ -494,8 +493,10 @@ SVGPathSegListSMILType::Interpolate(const nsSMILValue& aStartVal,
     startListToUse = &result;
   }
 
-  return AddWeightedPathSegLists(1.0 - aUnitDistance, *startListToUse,
-                                 aUnitDistance, end, result);
+  AddWeightedPathSegLists(1.0 - aUnitDistance, *startListToUse,
+                          aUnitDistance, end, result);
+
+  return NS_OK;
 }
 
 } // namespace mozilla

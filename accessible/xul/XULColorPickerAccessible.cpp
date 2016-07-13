@@ -130,14 +130,10 @@ XULColorPickerAccessible::AreItemsOperable() const
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// XULColorPickerAccessible: Accessible
+// XULColorPickerAccessible: protected Accessible
 
 bool
-XULColorPickerAccessible::IsAcceptableChild(nsIContent* aEl) const
+XULColorPickerAccessible::IsAcceptableChild(Accessible* aPossibleChild) const
 {
-  nsAutoString role;
-  nsCoreUtils::XBLBindingRole(aEl, role);
-  return role.EqualsLiteral("xul:panel") &&
-    aEl->AttrValueIs(kNameSpaceID_None, nsGkAtoms::noautofocus,
-                     nsGkAtoms::_true, eCaseMatters);
+  return roles::ALERT == aPossibleChild->Role();
 }

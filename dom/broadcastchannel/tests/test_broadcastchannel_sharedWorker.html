@@ -44,7 +44,8 @@ function runTests() {
 }
 
 SimpleTest.waitForExplicitFinish();
-runTests();
+SpecialPowers.pushPrefEnv({"set": [["dom.broadcastChannel.enabled", true],
+                                   ["dom.workers.sharedWorkers.enabled", true]]}, runTests);
 
 </script>
 </pre>

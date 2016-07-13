@@ -3,6 +3,6 @@
 // Binary: cache/js-dbg-64-3dd6ec45084c-linux
 // Flags:
 //
-this.__defineGetter__("x", eval);
+__defineGetter__("x", eval);
 eval.toString = toLocaleString
 eval < x

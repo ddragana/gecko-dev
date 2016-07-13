@@ -17,8 +17,10 @@ test();
 printBugNumber(BUGNUMBER);
 printStatus (summary);
  
+jit(true);
 
 this.watch('x', Math.pow); (function() { for(var j=0;j<4;++j){x=1;} })();
 
+jit(false);
 
 reportCompare(expect, actual, summary);

@@ -58,36 +58,35 @@ def main(request, response):
 
         key = request.GET["key"]
         stash = request.server.stash
-        path = request.GET.get("path", request.url.split('?'))[0]
 
         if action == "put":
             value = request.GET["value"]
-            stash.take(key=key, path=path)
-            stash.put(key=key, value=value, path=path)
+            stash.take(key=key)
+            stash.put(key=key, value=value)
             response_data = json.dumps({"status": "success", "result": key})
         elif action == "purge":
-            value = stash.take(key=key, path=path)
+            value = stash.take(key=key)
             if content_type == "image/png":
                 response_data = open(os.path.join(request.doc_root,
                                                   "images",
-                                                  "smiley.png"), "rb").read()
+                                                  "smiley.png")).read()
             elif content_type == "audio/mpeg":
                 response_data = open(os.path.join(request.doc_root,
                                                   "media",
-                                                  "sound_5.oga"), "rb").read()
+                                                  "sound_5.oga")).read()
             elif content_type == "video/mp4":
                 response_data = open(os.path.join(request.doc_root,
                                                   "media",
-                                                  "movie_5.mp4"), "rb").read()
+                                                  "movie_5.mp4")).read()
             elif content_type == "application/javascript":
                 response_data = open(os.path.join(request.doc_root,
                                                   "mixed-content",
                                                   "generic",
-                                                  "worker.js"), "rb").read()
+                                                  "worker.js")).read()
             else:
                 response_data = "/* purged */"
         elif action == "take":
-            value = stash.take(key=key, path=path)
+            value = stash.take(key=key)
             if value is None:
                 status = "allowed"
             else:

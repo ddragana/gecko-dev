@@ -17,13 +17,6 @@ class nsIAsyncInputStream;
 class nsIInputStream;
 
 namespace mozilla {
-
-namespace ipc {
-class PBackgroundChild;
-class SendStreamChild;
-class AutoIPCStream;
-}
-
 namespace dom {
 
 struct CacheQueryOptions;
@@ -36,6 +29,7 @@ class Response;
 
 namespace cache {
 
+class CachePushStreamChild;
 class CacheQueryParams;
 class CacheReadStream;
 class CacheReadStreamOrVoid;
@@ -66,12 +60,8 @@ public:
   inline void AssertOwningThread() const { }
 #endif
 
-  // This is mainly declared to support serializing body streams.  Some
-  // TypeUtils implementations do not expect to be used for this kind of
-  // serialization.  These classes will MOZ_CRASH() if you try to call
-  // GetIPCManager().
-  virtual mozilla::ipc::PBackgroundChild*
-  GetIPCManager() = 0;
+  virtual CachePushStreamChild*
+  CreatePushStream(nsIAsyncInputStream* aStream) = 0;
 
   already_AddRefed<InternalRequest>
   ToInternalRequest(const RequestOrUSVString& aIn, BodyAction aBodyAction,
@@ -84,7 +74,6 @@ public:
   void
   ToCacheRequest(CacheRequest& aOut, InternalRequest* aIn,
                  BodyAction aBodyAction, SchemeAction aSchemeAction,
-                 nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList,
                  ErrorResult& aRv);
 
   void
@@ -92,9 +81,7 @@ public:
                              ErrorResult& aRv);
 
   void
-  ToCacheResponse(CacheResponse& aOut, Response& aIn,
-                  nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList,
-                  ErrorResult& aRv);
+  ToCacheResponse(CacheResponse& aOut, Response& aIn, ErrorResult& aRv);
 
   void
   ToCacheQueryParams(CacheQueryParams& aOut, const CacheQueryOptions& aIn);
@@ -142,11 +129,10 @@ private:
 
   void
   SerializeCacheStream(nsIInputStream* aStream, CacheReadStreamOrVoid* aStreamOut,
-                       nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList,
                        ErrorResult& aRv);
 
   void
-  SerializeSendStream(nsIInputStream* aStream, CacheReadStream& aReadStreamOut,
+  SerializePushStream(nsIInputStream* aStream, CacheReadStream& aReadStreamOut,
                       ErrorResult& aRv);
 };
 

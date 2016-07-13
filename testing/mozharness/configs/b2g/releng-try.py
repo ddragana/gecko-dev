@@ -22,7 +22,8 @@ config = {
     },
     "gittool_share_base": "/builds/git-shared/git",
     "gittool_base_mirror_urls": [],
-    "vcs_share_base": "/builds/hg-shared",
+    "hgtool_share_base": "/builds/hg-shared",
+    "hgtool_base_bundle_urls": ["https://ftp-ssl.mozilla.org/pub/mozilla.org/firefox/bundles"],
     "sendchange_masters": ["buildbot-master81.build.mozilla.org:9301"],
     "exes": {
         "tooltool.py": "/tools/tooltool.py",
@@ -36,6 +37,7 @@ config = {
         "WGET_OPTS": "-c -q",
         "PATH": "/tools/python27/bin:%(PATH)s",
     },
+    "purge_minsize": 20,
     #"clobberer_url": "https://api-pub-build.allizom.org/clobberer/lastclobber",
     #"clobberer_url": "https://api.pub.build.mozilla.org/clobberer/lastclobber",
     "is_automation": True,

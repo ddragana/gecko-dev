@@ -33,8 +33,6 @@
 #include "opus.h"
 #include "celt.h"
 
-#include <stddef.h> /* offsetof */
-
 struct OpusRepacketizer {
    unsigned char toc;
    int nb_frames;
@@ -88,6 +86,10 @@ typedef void (*downmix_func)(const void *, opus_val32 *, int, int, int, int, int
 void downmix_float(const void *_x, opus_val32 *sub, int subframe, int offset, int c1, int c2, int C);
 void downmix_int(const void *_x, opus_val32 *sub, int subframe, int offset, int c1, int c2, int C);
 
+int optimize_framesize(const opus_val16 *x, int len, int C, opus_int32 Fs,
+                int bitrate, opus_val16 tonality, float *mem, int buffering,
+                downmix_func downmix);
+
 int encode_size(int size, unsigned char *data);
 
 opus_int32 frame_size_select(opus_int32 frame_size, int variable_duration, opus_int32 Fs);
@@ -102,23 +104,16 @@ opus_int32 compute_frame_size(const void *analysis_pcm, int frame_size,
 
 opus_int32 opus_encode_native(OpusEncoder *st, const opus_val16 *pcm, int frame_size,
       unsigned char *data, opus_int32 out_data_bytes, int lsb_depth,
-      const void *analysis_pcm, opus_int32 analysis_size, int c1, int c2,
-      int analysis_channels, downmix_func downmix, int float_api);
+      const void *analysis_pcm, opus_int32 analysis_size, int c1, int c2, int analysis_channels, downmix_func downmix);
 
 int opus_decode_native(OpusDecoder *st, const unsigned char *data, opus_int32 len,
       opus_val16 *pcm, int frame_size, int decode_fec, int self_delimited,
       opus_int32 *packet_offset, int soft_clip);
 
-/* Make sure everything is properly aligned. */
+/* Make sure everything's aligned to sizeof(void *) bytes */
 static OPUS_INLINE int align(int i)
 {
-    struct foo {char c; union { void* p; opus_int32 i; opus_val32 v; } u;};
-
-    unsigned int alignment = offsetof(struct foo, u);
-
-    /* Optimizing compilers should optimize div and multiply into and
-       for all sensible alignment values. */
-    return ((i + alignment - 1) / alignment) * alignment;
+    return (i+(int)sizeof(void *)-1)&-(int)sizeof(void *);
 }
 
 int opus_packet_parse_impl(const unsigned char *data, opus_int32 len,

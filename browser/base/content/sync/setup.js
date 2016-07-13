@@ -3,10 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cc = Components.classes;
+const Cr = Components.results;
+const Cu = Components.utils;
 
 // page consts
 
@@ -51,9 +51,7 @@ var gSyncSetup = {
     server: false
   },
 
-  get _remoteSites() {
-    return [Weave.Service.serverURL, RECAPTCHA_DOMAIN];
-  },
+  get _remoteSites() [Weave.Service.serverURL, RECAPTCHA_DOMAIN],
 
   get _usingMainServers() {
     if (this._settingUpNew)
@@ -81,7 +79,7 @@ var gSyncSetup = {
       });
     };
     addRem(true);
-    window.addEventListener("unload", () => addRem(false), false);
+    window.addEventListener("unload", function() addRem(false), false);
 
     window.setTimeout(function () {
       // Force Service to be loaded so that engines are registered.
@@ -123,14 +121,14 @@ var gSyncSetup = {
 
   startNewAccountSetup: function () {
     if (!Weave.Utils.ensureMPUnlocked())
-      return;
+      return false;
     this._settingUpNew = true;
     this.wizard.pageIndex = NEW_ACCOUNT_START_PAGE;
   },
 
   useExistingAccount: function () {
     if (!Weave.Utils.ensureMPUnlocked())
-      return;
+      return false;
     this._settingUpNew = false;
     if (this.wizardType == "pair") {
       // We're already pairing, so there's no point in pairing again.
@@ -512,6 +510,7 @@ var gSyncSetup = {
   onWizardBack: function () {
     switch (this.wizard.pageIndex) {
       case NEW_ACCOUNT_START_PAGE:
+      case EXISTING_ACCOUNT_LOGIN_PAGE:
         this.wizard.pageIndex = INTRO_PAGE;
         return false;
       case EXISTING_ACCOUNT_CONNECT_PAGE:
@@ -933,7 +932,12 @@ var gSyncSetup = {
         let addonsEngine = Weave.Service.engineManager.get("addons");
         if (addonsEngine.enabled) {
           let ids = addonsEngine._store.getAllIDs();
-          let blessedcount = Object.keys(ids).filter(id => ids[id]).length;
+          let blessedcount = 0;
+          for each (let i in ids) {
+            if (i) {
+              blessedcount++;
+            }
+          }
           // bug 600141 does not apply, as this does not have to support existing strings
           document.getElementById("addonCount").value =
             PluralForm.get(blessedcount,
@@ -957,7 +961,7 @@ var gSyncSetup = {
           box.appendChild(node);
         }
 
-        for (let name of Weave.Service.clientsEngine.stats.names) {
+        for each (let name in Weave.Service.clientsEngine.stats.names) {
           // Don't list the current client
           if (name == Weave.Service.clientsEngine.localName)
             continue;

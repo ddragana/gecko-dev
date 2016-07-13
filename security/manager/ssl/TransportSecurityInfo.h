@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef TransportSecurityInfo_h
-#define TransportSecurityInfo_h
+#ifndef _MOZILLA_PSM_TRANSPORTSECURITYINFO_H
+#define _MOZILLA_PSM_TRANSPORTSECURITYINFO_H
 
 #include "ScopedNSSTypes.h"
 #include "certt.h"
@@ -70,13 +70,13 @@ public:
   
   void SetCanceled(PRErrorCode errorCode,
                    ::mozilla::psm::SSLErrorMessageType errorMessageType);
-
+  
   /* Set SSL Status values */
   nsresult SetSSLStatus(nsSSLStatus *aSSLStatus);
   nsSSLStatus* SSLStatus() { return mSSLStatus; }
   void SetStatusErrorBits(nsNSSCertificate* cert, uint32_t collected_errors);
 
-  nsresult SetFailedCertChain(UniqueCERTCertList certList);
+  nsresult SetFailedCertChain(ScopedCERTCertList& certList);
 
 private:
   mutable ::mozilla::Mutex mMutex;
@@ -102,7 +102,7 @@ private:
   nsXPIDLCString mHostName;
 
   /* SSL Status */
-  RefPtr<nsSSLStatus> mSSLStatus;
+  mozilla::RefPtr<nsSSLStatus> mSSLStatus;
 
   /* Peer cert chain for failed connections (for error reporting) */
   nsCOMPtr<nsIX509CertList> mFailedCertChain;
@@ -161,4 +161,4 @@ private:
 { 0x16786594, 0x0296, 0x4471, \
     { 0x80, 0x96, 0x8f, 0x84, 0x49, 0x7c, 0xa4, 0x28 } }
 
-#endif // TransportSecurityInfo_h
+#endif /* _MOZILLA_PSM_TRANSPORTSECURITYINFO_H */

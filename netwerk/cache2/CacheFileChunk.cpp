@@ -13,7 +13,7 @@ namespace net {
 
 #define kMinBufSize        512
 
-class NotifyUpdateListenerEvent : public Runnable {
+class NotifyUpdateListenerEvent : public nsRunnable {
 public:
   NotifyUpdateListenerEvent(CacheFileChunkListener *aCallback,
                             CacheFileChunk *aChunk)
@@ -44,7 +44,7 @@ public:
 
 protected:
   nsCOMPtr<CacheFileChunkListener> mCallback;
-  RefPtr<CacheFileChunk>           mChunk;
+  nsRefPtr<CacheFileChunk>         mChunk;
 };
 
 bool
@@ -54,7 +54,9 @@ CacheFileChunk::DispatchRelease()
     return false;
   }
 
-  NS_DispatchToMainThread(NewNonOwningRunnableMethod(this, &CacheFileChunk::Release));
+  nsRefPtr<nsRunnableMethod<CacheFileChunk, MozExternalRefCountType, false> > event =
+    NS_NewNonOwningRunnableMethod(this, &CacheFileChunk::Release);
+  NS_DispatchToMainThread(event);
 
   return true;
 }
@@ -131,14 +133,14 @@ CacheFileChunk::~CacheFileChunk()
   MOZ_COUNT_DTOR(CacheFileChunk);
 
   if (mBuf) {
-    CacheFileUtils::FreeBuffer(mBuf);
+    free(mBuf);
     mBuf = nullptr;
     mBufSize = 0;
     ChunkAllocationChanged();
   }
 
   if (mRWBuf) {
-    CacheFileUtils::FreeBuffer(mRWBuf);
+    free(mRWBuf);
     mRWBuf = nullptr;
     mRWBufSize = 0;
     ChunkAllocationChanged();
@@ -325,7 +327,7 @@ CacheFileChunk::NotifyUpdateListeners()
     LOG(("CacheFileChunk::NotifyUpdateListeners() - Notifying listener %p "
          "[this=%p]", item->mCallback.get(), this));
 
-    RefPtr<NotifyUpdateListenerEvent> ev;
+    nsRefPtr<NotifyUpdateListenerEvent> ev;
     ev = new NotifyUpdateListenerEvent(item->mCallback, this);
     rv2 = item->mTarget->Dispatch(ev, NS_DISPATCH_NORMAL);
     if (NS_FAILED(rv2) && NS_SUCCEEDED(rv))
@@ -447,7 +449,7 @@ CacheFileChunk::OnDataWritten(CacheFileHandle *aHandle, const char *aBuf,
       mRWBuf = nullptr;
       mRWBufSize = 0;
     } else {
-      CacheFileUtils::FreeBuffer(mRWBuf);
+      free(mRWBuf);
       mRWBuf = nullptr;
       mRWBufSize = 0;
       ChunkAllocationChanged();
@@ -513,7 +515,7 @@ CacheFileChunk::OnDataRead(CacheFileHandle *aHandle, char *aBuf,
             }
             mValidityMap.Clear();
 
-            CacheFileUtils::FreeBuffer(mBuf);
+            free(mBuf);
             mBuf = mRWBuf;
             mBufSize = mRWBufSize;
             mRWBuf = nullptr;
@@ -545,7 +547,7 @@ CacheFileChunk::OnDataRead(CacheFileHandle *aHandle, char *aBuf,
             }
             mValidityMap.Clear();
 
-            CacheFileUtils::FreeBuffer(mRWBuf);
+            free(mRWBuf);
             mRWBuf = nullptr;
             mRWBufSize = 0;
             ChunkAllocationChanged();
@@ -590,12 +592,6 @@ CacheFileChunk::OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult)
 {
   MOZ_CRASH("CacheFileChunk::OnFileRenamed should not be called!");
   return NS_ERROR_UNEXPECTED;
-}
-
-bool
-CacheFileChunk::IsKilled()
-{
-  return mFile->IsKilled();
 }
 
 bool
@@ -661,7 +657,7 @@ CacheFileChunk::BufForReading() const
   return mBuf ? mBuf : mRWBuf;
 }
 
-MOZ_MUST_USE nsresult
+MOZ_WARN_UNUSED_RESULT nsresult
 CacheFileChunk::EnsureBufSize(uint32_t aBufSize)
 {
   mFile->AssertOwnsLock();

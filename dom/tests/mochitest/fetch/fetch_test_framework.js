@@ -1,21 +1,8 @@
 function testScript(script) {
-
-  // The framework runs the entire test in many different configurations.
-  // On slow platforms and builds this can make the tests likely to
-  // timeout while they are still running.  Lengthen the timeout to
-  // accomodate this.
-  SimpleTest.requestLongerTimeout(2);
-
-  // reroute.html should have set this variable if a service worker is present!
-  if (!("isSWPresent" in window)) {
-    window.isSWPresent = false;
-  }
-
   function setupPrefs() {
     return new Promise(function(resolve, reject) {
       SpecialPowers.pushPrefEnv({
-        "set": [["dom.requestcontext.enabled", true],
-                ["dom.serviceWorkers.enabled", true],
+        "set": [["dom.serviceWorkers.enabled", true],
                 ["dom.serviceWorkers.testing.enabled", true],
                 ["dom.serviceWorkers.exemptFromPerDomainMax", true]]
       }, resolve);
@@ -37,27 +24,6 @@ function testScript(script) {
       }
       worker.onerror = function(event) {
         reject("Worker error: " + event.message);
-      };
-
-      worker.postMessage({ "script": script });
-    });
-  }
-
-  function nestedWorkerTest() {
-    return new Promise(function(resolve, reject) {
-      var worker = new Worker("nested_worker_wrapper.js");
-      worker.onmessage = function(event) {
-        if (event.data.context != "NestedWorker") {
-          return;
-        }
-        if (event.data.type == 'finish') {
-          resolve();
-        } else if (event.data.type == 'status') {
-          ok(event.data.status, event.data.context + ": " + event.data.msg);
-        }
-      }
-      worker.onerror = function(event) {
-        reject("Nested Worker error: " + event.message);
       };
 
       worker.postMessage({ "script": script });
@@ -139,11 +105,6 @@ function testScript(script) {
     })
     .then(function() {
       return workerTest();
-    })
-    .then(function() {
-      // XXX Bug 1281212 - This makes other, unrelated test suites fail, primarily on WinXP.
-      let isWin = navigator.platform.indexOf("Win") == 0;
-      return isWin ? undefined : nestedWorkerTest();
     })
     .then(function() {
       return serviceWorkerTest();

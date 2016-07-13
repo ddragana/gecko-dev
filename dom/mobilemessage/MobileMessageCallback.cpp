@@ -7,12 +7,11 @@
 #include "MobileMessageCallback.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "nsContentUtils.h"
+#include "nsIDOMMozSmsMessage.h"
+#include "nsIDOMMozMmsMessage.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 #include "MmsMessage.h"
-#include "MmsMessageInternal.h"
-#include "SmsMessage.h"
-#include "SmsMessageInternal.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "jsapi.h"
 #include "xpcpublic.h"
@@ -62,24 +61,6 @@ ConvertErrorCodeToErrorString(int32_t aError)
       break;
     case nsIMobileMessageCallback::SIM_NOT_MATCHED_ERROR:
       errorStr = NS_LITERAL_STRING("SimNotMatchedError");
-      break;
-    case nsIMobileMessageCallback::NETWORK_PROBLEMS_ERROR:
-      errorStr = NS_LITERAL_STRING("NetworkProblemsError");
-      break;
-    case nsIMobileMessageCallback::GENERAL_PROBLEMS_ERROR:
-      errorStr = NS_LITERAL_STRING("GeneralProblemsError");
-      break;
-    case nsIMobileMessageCallback::SERVICE_NOT_AVAILABLE_ERROR:
-      errorStr = NS_LITERAL_STRING("ServiceNotAvailableError");
-      break;
-    case nsIMobileMessageCallback::MESSAGE_TOO_LONG_FOR_NETWORK_ERROR:
-      errorStr = NS_LITERAL_STRING("MessageTooLongForNetworkError");
-      break;
-    case nsIMobileMessageCallback::SERVICE_NOT_SUPPORTED_ERROR:
-      errorStr = NS_LITERAL_STRING("ServiceNotSupportedError");
-      break;
-    case nsIMobileMessageCallback::RETRY_REQUIRED_ERROR:
-      errorStr = NS_LITERAL_STRING("RetryRequiredError");
       break;
     default: // SUCCESS_NO_ERROR is handled above.
       MOZ_CRASH("Should never get here!");
@@ -133,36 +114,14 @@ MobileMessageCallback::NotifySuccess(JS::Handle<JS::Value> aResult, bool aAsync)
 nsresult
 MobileMessageCallback::NotifySuccess(nsISupports *aMessage, bool aAsync)
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = mDOMRequest->GetOwner();
-  NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
-
-  nsCOMPtr<nsISupports> result;
-
-  nsCOMPtr<nsISmsMessage> internalSms =
-    do_QueryInterface(aMessage);
-  if (internalSms) {
-    SmsMessageInternal* smsMsg = static_cast<SmsMessageInternal*>(internalSms.get());
-    result = new SmsMessage(window, smsMsg);
-  }
-
-  if (!result) {
-    nsCOMPtr<nsIMmsMessage> internalMms =
-      do_QueryInterface(aMessage);
-    if (internalMms) {
-      MmsMessageInternal* mmsMsg = static_cast<MmsMessageInternal*>(internalMms.get());
-      result = new MmsMessage(window, mmsMsg);
-    }
-  }
-
   AutoJSAPI jsapi;
-  if (NS_WARN_IF(!jsapi.Init(window))) {
+  if (NS_WARN_IF(!jsapi.Init(mDOMRequest->GetOwner()))) {
     return NS_ERROR_FAILURE;
   }
   JSContext* cx = jsapi.cx();
 
   JS::Rooted<JS::Value> wrappedMessage(cx);
-  nsresult rv =
-    nsContentUtils::WrapNative(cx, result, &wrappedMessage);
+  nsresult rv = nsContentUtils::WrapNative(cx, aMessage, &wrappedMessage);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NotifySuccess(wrappedMessage, aAsync);
@@ -205,27 +164,23 @@ MobileMessageCallback::NotifyMessageSent(nsISupports *aMessage)
 NS_IMETHODIMP
 MobileMessageCallback::NotifySendMessageFailed(int32_t aError, nsISupports *aMessage)
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = mDOMRequest->GetOwner();
+  nsCOMPtr<nsPIDOMWindow> window = mDOMRequest->GetOwner();
   if (NS_WARN_IF(!window)) {
     return NS_ERROR_FAILURE;
   }
 
-  RefPtr<DOMMobileMessageError> domMobileMessageError;
+  nsRefPtr<DOMMobileMessageError> domMobileMessageError;
   if (aMessage) {
     nsAutoString errorStr = ConvertErrorCodeToErrorString(aError);
-    nsCOMPtr<nsISmsMessage> internalSms = do_QueryInterface(aMessage);
-    if (internalSms) {
+    nsCOMPtr<nsIDOMMozSmsMessage> smsMsg = do_QueryInterface(aMessage);
+    if (smsMsg) {
       domMobileMessageError =
-        new DOMMobileMessageError(window, errorStr,
-                                  new SmsMessage(window,
-                                  static_cast<SmsMessageInternal*>(internalSms.get())));
+        new DOMMobileMessageError(window, errorStr, smsMsg);
     }
     else {
-      nsCOMPtr<nsIMmsMessage> internalMms = do_QueryInterface(aMessage);
+      nsCOMPtr<nsIDOMMozMmsMessage> mmsMsg = do_QueryInterface(aMessage);
       domMobileMessageError =
-        new DOMMobileMessageError(window, errorStr,
-                                  new MmsMessage(window,
-                                  static_cast<MmsMessageInternal*>(internalMms.get())));
+        new DOMMobileMessageError(window, errorStr, mmsMsg);
     }
     NS_ASSERTION(domMobileMessageError, "Invalid DOMMobileMessageError!");
   }
@@ -261,14 +216,8 @@ MobileMessageCallback::NotifyMessageDeleted(bool *aDeleted, uint32_t aSize)
   JSContext* cx = jsapi.cx();
 
   JS::Rooted<JSObject*> deleteArrayObj(cx, JS_NewArrayObject(cx, aSize));
-  if (!deleteArrayObj) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
   for (uint32_t i = 0; i < aSize; i++) {
-    if (!JS_DefineElement(cx, deleteArrayObj, i, aDeleted[i],
-                          JSPROP_ENUMERATE)) {
-      return NS_ERROR_UNEXPECTED;
-    }
+    JS_DefineElement(cx, deleteArrayObj, i, aDeleted[i], JSPROP_ENUMERATE);
   }
 
   JS::Rooted<JS::Value> deleteArrayVal(cx, JS::ObjectValue(*deleteArrayObj));
@@ -313,7 +262,7 @@ MobileMessageCallback::NotifySegmentInfoForTextGot(int32_t aSegments,
   JSContext* cx = jsapi.cx();
   JS::Rooted<JS::Value> val(cx);
   if (!ToJSValue(cx, info, &val)) {
-    jsapi.ClearException();
+    JS_ClearPendingException(cx);
     return NotifyError(nsIMobileMessageCallback::INTERNAL_ERROR);
   }
 
@@ -327,38 +276,28 @@ MobileMessageCallback::NotifyGetSegmentInfoForTextFailed(int32_t aError)
 }
 
 NS_IMETHODIMP
-MobileMessageCallback::NotifyGetSmscAddress(const nsAString& aSmscAddress,
-                                            uint32_t aTypeOfNumber,
-                                            uint32_t aNumberPlanIdentification)
+MobileMessageCallback::NotifyGetSmscAddress(const nsAString& aSmscAddress)
 {
-  TypeOfAddress toa;
+  AutoJSAPI jsapi;
+  if (NS_WARN_IF(!jsapi.Init(mDOMRequest->GetOwner()))) {
+    return NotifyError(nsIMobileMessageCallback::INTERNAL_ERROR);
+  }
+  JSContext* cx = jsapi.cx();
+  JSString* smsc = JS_NewUCStringCopyN(cx, aSmscAddress.BeginReading(),
+                                       aSmscAddress.Length());
 
-  // Check the value is valid and set TON accordingly.
-  bool isTonValid = aTypeOfNumber < uint32_t(TypeOfNumber::EndGuard_);
-  toa.mTypeOfNumber = (isTonValid) ?
-    static_cast<TypeOfNumber>(aTypeOfNumber) : TypeOfNumber::Unknown;
+  if (!smsc) {
+    return NotifyError(nsIMobileMessageCallback::INTERNAL_ERROR);
+  }
 
-  // Check the value is valid and set NPI accordingly.
-  bool isNpiValid =
-    aNumberPlanIdentification < uint32_t(NumberPlanIdentification::EndGuard_);
-  toa.mNumberPlanIdentification = (isNpiValid) ?
-    static_cast<NumberPlanIdentification>(aNumberPlanIdentification) :
-    NumberPlanIdentification::Unknown;
-
-  SmscAddress smsc;
-  smsc.mTypeOfAddress = toa;
-  smsc.mAddress.Construct(nsString(aSmscAddress));
-
-  mPromise->MaybeResolve(smsc);
-  return NS_OK;
+  JS::Rooted<JS::Value> val(cx, JS::StringValue(smsc));
+  return NotifySuccess(val);
 }
 
 NS_IMETHODIMP
 MobileMessageCallback::NotifyGetSmscAddressFailed(int32_t aError)
 {
-  const nsAString& errorStr = ConvertErrorCodeToErrorString(aError);
-  mPromise->MaybeRejectBrokenly(errorStr);
-  return NS_OK;
+  return NotifyError(aError);
 }
 
 NS_IMETHODIMP

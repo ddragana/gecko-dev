@@ -61,7 +61,7 @@ public:
 
   void SetWidth(uint32_t aValue, ErrorResult& aRv)
   {
-    SetUnsignedIntAttr(nsGkAtoms::width, aValue, 0, aRv);
+    SetHTMLIntAttr(nsGkAtoms::width, aValue, aRv);
   }
 
   uint32_t Height() const
@@ -71,36 +71,17 @@ public:
 
   void SetHeight(uint32_t aValue, ErrorResult& aRv)
   {
-    SetUnsignedIntAttr(nsGkAtoms::height, aValue, 0, aRv);
+    SetHTMLIntAttr(nsGkAtoms::height, aValue, aRv);
   }
 
   uint32_t VideoWidth() const
   {
-    if (mMediaInfo.HasVideo()) {
-      if (mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_90 ||
-          mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_270) {
-        return mMediaInfo.mVideo.mDisplay.height;
-      }
-      return mMediaInfo.mVideo.mDisplay.width;
-    }
-    return 0;
+    return mMediaInfo.HasVideo() ? mMediaInfo.mVideo.mDisplay.width : 0;
   }
 
   uint32_t VideoHeight() const
   {
-    if (mMediaInfo.HasVideo()) {
-      if (mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_90 ||
-          mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_270) {
-        return mMediaInfo.mVideo.mDisplay.width;
-      }
-      return mMediaInfo.mVideo.mDisplay.height;
-    }
-    return 0;
-  }
-
-  VideoInfo::Rotation RotationDegrees() const
-  {
-    return mMediaInfo.mVideo.mRotation;
+    return mMediaInfo.HasVideo() ? mMediaInfo.mVideo.mDisplay.height : 0;
   }
 
   void GetPoster(nsAString& aValue)
@@ -124,10 +105,6 @@ public:
 
   bool MozHasAudio() const;
 
-  bool MozUseScreenWakeLock() const;
-
-  void SetMozUseScreenWakeLock(bool aValue);
-
   bool NotifyOwnerDocumentActivityChangedInternal() override;
 
   already_AddRefed<VideoPlaybackQuality> GetVideoPlaybackQuality();
@@ -141,8 +118,7 @@ protected:
   virtual void WakeLockRelease() override;
   void UpdateScreenWakeLock();
 
-  bool mUseScreenWakeLock;
-  RefPtr<WakeLock> mScreenWakeLock;
+  nsRefPtr<WakeLock> mScreenWakeLock;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,

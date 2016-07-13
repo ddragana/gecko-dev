@@ -9,46 +9,33 @@ BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest/mochitest.ini']
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
 
-TESTING_JS_MODULES += [
-    'tests/PromiseTestUtils.jsm',
-    'tests/xpcshell/TestIntegration.jsm',
-]
-
 SPHINX_TREES['toolkit_modules'] = 'docs'
 
 EXTRA_JS_MODULES += [
     'addons/MatchPattern.jsm',
     'addons/WebNavigation.jsm',
     'addons/WebNavigationContent.js',
-    'addons/WebNavigationFrames.jsm',
     'addons/WebRequest.jsm',
     'addons/WebRequestCommon.jsm',
     'addons/WebRequestContent.js',
-    'AsyncPrefs.jsm',
     'Battery.jsm',
     'BinarySearch.jsm',
     'BrowserUtils.jsm',
-    'CanonicalJSON.jsm',
     'CertUtils.jsm',
     'CharsetMenu.jsm',
     'ClientID.jsm',
-    'Color.jsm',
-    'Console.jsm',
     'debug.js',
     'DeferredTask.jsm',
     'Deprecated.jsm',
     'FileUtils.jsm',
     'Finder.jsm',
-    'FinderHighlighter.jsm',
     'Geometry.jsm',
     'GMPInstallManager.jsm',
     'GMPUtils.jsm',
     'Http.jsm',
     'InlineSpellChecker.jsm',
     'InlineSpellCheckerContent.jsm',
-    'Integration.jsm',
     'LoadContextInfo.jsm',
-    'Locale.jsm',
     'Log.jsm',
     'NewTabUtils.jsm',
     'ObjectUtils.jsm',
@@ -61,22 +48,20 @@ EXTRA_JS_MODULES += [
     'ProfileAge.jsm',
     'Promise-backend.js',
     'Promise.jsm',
-    'PromiseMessage.jsm',
     'PromiseUtils.jsm',
     'PropertyListUtils.jsm',
     'RemoteController.jsm',
     'RemoteFinder.jsm',
     'RemotePageManager.jsm',
     'RemoteSecurityUI.jsm',
+    'RemoteWebNavigation.jsm',
     'RemoteWebProgress.jsm',
     'ResetProfile.jsm',
-    'secondscreen/PresentationApp.jsm',
     'secondscreen/RokuApp.jsm',
     'secondscreen/SimpleServiceDiscovery.jsm',
     'SelectContentHelper.jsm',
     'SelectParentHelper.jsm',
     'Services.jsm',
-    'SessionRecorder.jsm',
     'sessionstore/FormData.jsm',
     'sessionstore/ScrollPosition.jsm',
     'sessionstore/XPathGenerator.jsm',
@@ -85,32 +70,23 @@ EXTRA_JS_MODULES += [
     'SpatialNavigation.jsm',
     'Sqlite.jsm',
     'Task.jsm',
+    'TelemetryTimestamps.jsm',
     'Timer.jsm',
     'Troubleshoot.jsm',
-    'UpdateUtils.jsm',
+    'UpdateChannel.jsm',
     'WebChannel.jsm',
     'WindowDraggingUtils.jsm',
     'ZipUtils.jsm',
 ]
-EXTRA_JS_MODULES.third_party.jsesc += ['third_party/jsesc/jsesc.js']
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('windows', 'cocoa'):
-    DEFINES['CAN_DRAW_IN_TITLEBAR'] = 1
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('windows', 'gtk2', 'gtk3'):
-    DEFINES['MENUBAR_CAN_AUTOHIDE'] = 1
 
 EXTRA_PP_JS_MODULES += [
     'AppConstants.jsm',
+    'SessionRecorder.jsm',
 ]
 
 if 'Android' != CONFIG['OS_TARGET']:
     EXTRA_JS_MODULES += [
         'LightweightThemeConsumer.jsm',
-    ]
-
-    DIRS += [
-        'subprocess',
     ]
 else:
     DEFINES['ANDROID'] = True
@@ -125,19 +101,13 @@ for var in ('ANDROID_PACKAGE_NAME',
             'MOZ_APP_NAME',
             'MOZ_APP_VERSION',
             'MOZ_APP_VERSION_DISPLAY',
-            'MOZ_MACBUNDLE_NAME',
             'MOZ_WIDGET_TOOLKIT',
             'DLL_PREFIX',
-            'DLL_SUFFIX',
-            'DEBUG_JS_MODULES'):
+            'DLL_SUFFIX'):
             DEFINES[var] = CONFIG[var]
 
-for var in ('MOZ_TOOLKIT_SEARCH',
-            'MOZ_SYSTEM_NSS',
-            'MOZ_UPDATER',
-            'MOZ_SWITCHBOARD',
-            'MOZ_SERVICES_CLOUDSYNC'):
+for var in ('MOZILLA_OFFICIAL',
+            'MOZ_TOOLKIT_SEARCH',
+            'MOZ_UPDATER'):
     if CONFIG[var]:
         DEFINES[var] = True
-
-DEFINES['TOPOBJDIR'] = TOPOBJDIR

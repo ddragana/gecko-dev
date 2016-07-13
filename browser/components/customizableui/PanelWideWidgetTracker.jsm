@@ -11,16 +11,19 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
   "resource:///modules/CustomizableUI.jsm");
 
-var gPanel = CustomizableUI.AREA_PANEL;
+let gModuleName = "[PanelWideWidgetTracker]";
+#include logging.js
+
+let gPanel = CustomizableUI.AREA_PANEL;
 // We keep track of the widget placements for the panel locally:
-var gPanelPlacements = [];
+let gPanelPlacements = [];
 
 // All the wide widgets we know of:
-var gWideWidgets = new Set();
+let gWideWidgets = new Set();
 // All the widgets we know of:
-var gSeenWidgets = new Set();
+let gSeenWidgets = new Set();
 
-var PanelWideWidgetTracker = {
+let PanelWideWidgetTracker = {
   // Listeners used to validate panel contents whenever they change:
   onWidgetAdded: function(aWidgetId, aArea, aPosition) {
     if (aArea == gPanel) {
@@ -89,14 +92,14 @@ var PanelWideWidgetTracker = {
       return;
     }
     this.adjusting = true;
-    let widgetsAffected = gPanelPlacements.filter((w) => gWideWidgets.has(w));
+    let widgetsAffected = [w for (w of gPanelPlacements) if (gWideWidgets.has(w))];
     // If we're moving the wide widgets forwards (down/to the right in the panel)
     // we want to start with the last widgets. Otherwise we move widgets over other wide
     // widgets, which might mess up their order. Likewise, if moving backwards we should start with
     // the first widget and work our way down/right from there.
-    let compareFn = aMoveForwards ? ((a, b) => a < b) : ((a, b) => a > b);
-    widgetsAffected.sort((a, b) => compareFn(gPanelPlacements.indexOf(a),
-                                             gPanelPlacements.indexOf(b)));
+    let compareFn = aMoveForwards ? (function(a, b) a < b) : (function(a, b) a > b)
+    widgetsAffected.sort(function(a, b) compareFn(gPanelPlacements.indexOf(a),
+                                                  gPanelPlacements.indexOf(b)));
     for (let widget of widgetsAffected) {
       this.adjustPosition(widget, aMoveForwards);
     }

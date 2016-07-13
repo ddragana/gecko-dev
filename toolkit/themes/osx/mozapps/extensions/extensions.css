@@ -5,18 +5,39 @@
 %include ../../../shared/extensions/extensions.inc.css
 
 .no-auto-hide > .menulist-dropmarker {
-  padding-inline-start: 0px !important;
+  -moz-padding-start: 0px !important;
 }
 
 #header-utils-btn {
   list-style-image: url("chrome://mozapps/skin/extensions/utilities.svg#utilities");
-  margin-inline-end: 18px;
+  -moz-margin-end: 18px;
 }
 
 #header-utils-btn > .toolbarbutton-menu-dropmarker {
   list-style-image: url("chrome://mozapps/skin/extensions/toolbarbutton-dropmarker.png");
   padding: 0;
-  margin-inline-start: 2px;
+  -moz-margin-start: 2px;
+}
+
+.warning-icon {
+  list-style-image: url("chrome://mozapps/skin/extensions/alerticon-warning.png");
+  height: 15px;
+}
+
+.error-icon {
+  list-style-image: url("chrome://mozapps/skin/extensions/alerticon-error.png");
+  height: 15px;
+}
+
+.pending-icon,
+.info-icon {
+  list-style-image: url("chrome://mozapps/skin/extensions/alerticon-info-positive.png");
+  height: 15px;
+}
+
+.addon-view[pending="disable"] .pending-icon,
+.addon-view[pending="uninstall"] .pending-icon {
+  list-style-image: url("chrome://mozapps/skin/extensions/alerticon-info-negative.png");
 }
 
 .sorter[checkState="1"] {

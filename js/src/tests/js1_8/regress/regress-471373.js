@@ -25,6 +25,7 @@ function test()
     expectExitCode(5);
   }
 
+  jit(true);
 
   function g() {
     var x = {};
@@ -36,6 +37,7 @@ function test()
     }
   }
   for (let y in g()) { }
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

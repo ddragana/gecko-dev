@@ -23,8 +23,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(USSDSession)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-USSDSession::USSDSession(nsPIDOMWindowInner* aWindow,
-                         nsITelephonyService* aService,
+USSDSession::USSDSession(nsPIDOMWindow* aWindow, nsITelephonyService* aService,
                          uint32_t aServiceId)
   : mWindow(aWindow), mService(aService), mServiceId(aServiceId)
 {
@@ -34,7 +33,7 @@ USSDSession::~USSDSession()
 {
 }
 
-nsPIDOMWindowInner*
+nsPIDOMWindow*
 USSDSession::GetParentObject() const
 {
   return mWindow;
@@ -60,7 +59,7 @@ USSDSession::CreatePromise(ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<Promise> promise = Promise::Create(global, aRv);
+  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -74,7 +73,7 @@ already_AddRefed<USSDSession>
 USSDSession::Constructor(const GlobalObject& aGlobal, uint32_t aServiceId,
                          ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
@@ -87,14 +86,14 @@ USSDSession::Constructor(const GlobalObject& aGlobal, uint32_t aServiceId,
     return nullptr;
   }
 
-  RefPtr<USSDSession> session = new USSDSession(window, ril, aServiceId);
+  nsRefPtr<USSDSession> session = new USSDSession(window, ril, aServiceId);
   return session.forget();
 }
 
 already_AddRefed<Promise>
 USSDSession::Send(const nsAString& aUssd, ErrorResult& aRv)
 {
-  RefPtr<Promise> promise = CreatePromise(aRv);
+  nsRefPtr<Promise> promise = CreatePromise(aRv);
   if (!promise) {
     return nullptr;
   }
@@ -112,7 +111,7 @@ USSDSession::Send(const nsAString& aUssd, ErrorResult& aRv)
 already_AddRefed<Promise>
 USSDSession::Cancel(ErrorResult& aRv)
 {
-  RefPtr<Promise> promise = CreatePromise(aRv);
+  nsRefPtr<Promise> promise = CreatePromise(aRv);
   if (!promise) {
     return nullptr;
   }

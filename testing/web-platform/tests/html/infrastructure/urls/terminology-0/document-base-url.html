@@ -25,10 +25,6 @@
         var base = document.createElement("base");
         base.setAttribute("href", "/foo/bar");
         document.head.appendChild(base);
-        t1.add_cleanup(function () {
-          document.head.removeChild(base);
-        });
-
         assert_resolve_url(document, location.href.replace(location.pathname, "/foo"));
         assert_equals(document.baseURI, base.href, "The document base URL should be URL of the first base element that has an href attribute.");
       });
@@ -59,10 +55,10 @@
       var iframe = document.createElement("iframe");
       iframe.onload = this.step_func_done(function () {
         var doc = iframe.contentDocument;
-        var base = doc.body.appendChild(doc.createElement("base"));
+        var base = doc.body.appendChild(document.createElement("base"));
         base.href = "sub/";
         assert_resolve_url(doc, location.href.replace("/document-base-url.html", "/sub"));
-        assert_equals(doc.baseURI, document.baseURI.replace("/document-base-url.html", "/sub/"));
+        assert_equals(doc.baseURI, document.baseURI);
       });
       iframe.setAttribute("src", "about:blank");
       document.body.appendChild(iframe);
@@ -77,17 +73,5 @@
       iframe.setAttribute("srcdoc", "<p>foobar</p>");
       document.body.appendChild(iframe);
     }, "The fallback base URL of an iframe srcdoc document is the document base URL of the document's browsing context's browsing context container's document.");
-
-    async_test(function () {
-      var iframe = document.createElement("iframe");
-      iframe.onload = this.step_func_done(function () {
-        var doc = iframe.contentDocument;
-        assert_resolve_url(doc, location.href.replace("/document-base-url.html", "/sub"));
-        assert_equals(doc.baseURI, document.baseURI.replace("/document-base-url.html", "/sub/"),
-                      "The srcdoc document's base URL should be set by the <base> tag.");
-      });
-      iframe.setAttribute("srcdoc", "<base href='sub/'><p>foobar</p>");
-      document.body.appendChild(iframe);
-    }, "The base URL of an iframe srcdoc document with a <base> tag should be set by that tag.");
   </script>
 </body>

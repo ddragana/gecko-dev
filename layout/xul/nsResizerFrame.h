@@ -30,7 +30,8 @@ public:
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
 
-  virtual void MouseClicked(mozilla::WidgetMouseEvent* aEvent) override;
+  virtual void MouseClicked(nsPresContext* aPresContext,
+                            mozilla::WidgetMouseEvent* aEvent) override;
 
 protected:
   nsIContent* GetContentToResize(nsIPresShell* aPresShell, nsIBaseWindow** aWindow);

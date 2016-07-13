@@ -12,7 +12,6 @@
 
 #include <assert.h>
 #include <string.h>
-#include <limits>
 
 // NOTE(ajm): Path provided by gyp.
 #include "libyuv.h"  // NOLINT
@@ -67,20 +66,8 @@ void Calc16ByteAlignedStride(int width, int* stride_y, int* stride_uv) {
   *stride_uv = AlignInt((width + 1) / 2, k16ByteAlignment);
 }
 
-size_t CalcBufferSize(VideoType type, int width, int height) {
-  assert(width >= 0);
-  assert(height >= 0);
-  // Verify we won't overflow; max is width*height*4
-  // 0x7FFF * 0x7FFF * 4 = < 0x100000000
-  assert(width <= 0x7FFF); // guarantees no overflow and cheaper than multiply
-  assert(height <= 0x7FFF);
-  assert(std::numeric_limits<std::size_t>::max() >= 0xFFFFFFFF);
-  // assert() is debug only
-  if (width > 0x7FFF || height > 0x7FFF) {
-    return SIZE_MAX; // very likely forces OOM
-  }
-
-  size_t buffer_size = 0;
+int CalcBufferSize(VideoType type, int width, int height) {
+  int buffer_size = 0;
   switch (type) {
     case kI420:
     case kNV12:
@@ -108,8 +95,7 @@ size_t CalcBufferSize(VideoType type, int width, int height) {
       break;
     default:
       assert(false);
-      buffer_size = SIZE_MAX;
-      break;
+      return -1;
   }
   return buffer_size;
 }
@@ -136,12 +122,11 @@ int PrintI420VideoFrame(const I420VideoFrame& frame, FILE* file) {
 }
 
 int ExtractBuffer(const I420VideoFrame& input_frame,
-                  size_t size, uint8_t* buffer) {
+                  int size, uint8_t* buffer) {
   assert(buffer);
   if (input_frame.IsZeroSize())
     return -1;
-  size_t length =
-      CalcBufferSize(kI420, input_frame.width(), input_frame.height());
+  int length = CalcBufferSize(kI420, input_frame.width(), input_frame.height());
   if (size < length) {
      return -1;
   }
@@ -162,7 +147,7 @@ int ExtractBuffer(const I420VideoFrame& input_frame,
       plane_ptr += input_frame.stride(static_cast<PlaneType>(plane));
     }
   }
-  return static_cast<int>(length);
+  return length;
 }
 
 
@@ -188,15 +173,15 @@ int ConvertRGB24ToARGB(const uint8_t* src_frame, uint8_t* dst_frame,
                              width, height);
 }
 
-libyuv::RotationMode ConvertRotationMode(VideoRotation rotation) {
+libyuv::RotationMode ConvertRotationMode(VideoRotationMode rotation) {
   switch(rotation) {
-    case kVideoRotation_0:
+    case kRotateNone:
       return libyuv::kRotate0;
-    case kVideoRotation_90:
+    case kRotate90:
       return libyuv::kRotate90;
-    case kVideoRotation_180:
+    case kRotate180:
       return libyuv::kRotate180;
-    case kVideoRotation_270:
+    case kRotate270:
       return libyuv::kRotate270;
   }
   assert(false);
@@ -243,18 +228,16 @@ int ConvertVideoType(VideoType video_type) {
 
 int ConvertToI420(VideoType src_video_type,
                   const uint8_t* src_frame,
-                  int crop_x,
-                  int crop_y,
-                  int src_width,
-                  int src_height,
-                  size_t sample_size,
-                  VideoRotation rotation,
+                  int crop_x, int crop_y,
+                  int src_width, int src_height,
+                  int sample_size,
+                  VideoRotationMode rotation,
                   I420VideoFrame* dst_frame) {
   int dst_width = dst_frame->width();
   int dst_height = dst_frame->height();
   // LibYuv expects pre-rotation values for dst.
   // Stride values should correspond to the destination values.
-  if (rotation == kVideoRotation_90 || rotation == kVideoRotation_270) {
+  if (rotation == kRotate90 || rotation == kRotate270) {
     dst_width = dst_frame->height();
     dst_height =dst_frame->width();
   }
@@ -322,6 +305,50 @@ int ConvertFromYV12(const I420VideoFrame& src_frame,
                                  dst_frame, dst_sample_size,
                                  src_frame.width(), src_frame.height(),
                                  ConvertVideoType(dst_video_type));
+}
+
+int MirrorI420LeftRight(const I420VideoFrame* src_frame,
+                        I420VideoFrame* dst_frame) {
+  // Source and destination frames should have equal resolution.
+  if (src_frame->width() != dst_frame->width() ||
+      src_frame->height() != dst_frame->height())
+    return -1;
+  return libyuv::I420Mirror(src_frame->buffer(kYPlane),
+                            src_frame->stride(kYPlane),
+                            src_frame->buffer(kUPlane),
+                            src_frame->stride(kUPlane),
+                            src_frame->buffer(kVPlane),
+                            src_frame->stride(kVPlane),
+                            dst_frame->buffer(kYPlane),
+                            dst_frame->stride(kYPlane),
+                            dst_frame->buffer(kUPlane),
+                            dst_frame->stride(kUPlane),
+                            dst_frame->buffer(kVPlane),
+                            dst_frame->stride(kVPlane),
+                            src_frame->width(), src_frame->height());
+}
+
+int MirrorI420UpDown(const I420VideoFrame* src_frame,
+                     I420VideoFrame* dst_frame) {
+  // Source and destination frames should have equal resolution
+  if (src_frame->width() != dst_frame->width() ||
+      src_frame->height() != dst_frame->height())
+    return -1;
+
+  // Inserting negative height flips the frame.
+  return libyuv::I420Copy(src_frame->buffer(kYPlane),
+                          src_frame->stride(kYPlane),
+                          src_frame->buffer(kUPlane),
+                          src_frame->stride(kUPlane),
+                          src_frame->buffer(kVPlane),
+                          src_frame->stride(kVPlane),
+                          dst_frame->buffer(kYPlane),
+                          dst_frame->stride(kYPlane),
+                          dst_frame->buffer(kUPlane),
+                          dst_frame->stride(kUPlane),
+                          dst_frame->buffer(kVPlane),
+                          dst_frame->stride(kVPlane),
+                          src_frame->width(), -(src_frame->height()));
 }
 
 // Compute PSNR for an I420 frame (all planes)

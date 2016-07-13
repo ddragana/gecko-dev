@@ -24,7 +24,6 @@
 #include "nsITimer.h"
 #include "nsString.h"
 
-#include "mozIDOMWindow.h"
 #include "mozStorageHelper.h"
 #include "nsAutoPtr.h"
 #include "nsCOMArray.h"
@@ -434,7 +433,7 @@ private:
   /**
    * Stores the SHA-256 hash associated with the downloaded file.
    */
-  nsCString mHash;
+  nsAutoCString mHash;
 
   /**
    * Stores the certificate chains in an nsIArray of nsIX509CertList of

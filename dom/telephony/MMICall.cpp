@@ -20,7 +20,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MMICall)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-MMICall::MMICall(nsPIDOMWindowInner* aWindow, const nsAString& aServiceCode)
+MMICall::MMICall(nsPIDOMWindow* aWindow, const nsAString& aServiceCode)
   : mWindow(aWindow), mServiceCode(aServiceCode)
 {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(mWindow);
@@ -29,7 +29,7 @@ MMICall::MMICall(nsPIDOMWindowInner* aWindow, const nsAString& aServiceCode)
   }
 
   ErrorResult rv;
-  RefPtr<Promise> promise = Promise::Create(global, rv);
+  nsRefPtr<Promise> promise = Promise::Create(global, rv);
   if (rv.Failed()) {
     return;
   }
@@ -41,7 +41,7 @@ MMICall::~MMICall()
 {
 }
 
-nsPIDOMWindowInner*
+nsPIDOMWindow*
 MMICall::GetParentObject() const
 {
   return mWindow;
@@ -73,6 +73,6 @@ MMICall::GetResult(ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<Promise> promise = mPromise;
+  nsRefPtr<Promise> promise = mPromise;
   return promise.forget();
 }

@@ -96,16 +96,16 @@ class Preferences(object):
                 return cls.read_ini(path, section)
             except PreferencesReadError:
                 raise
-            except Exception as e:
+            except Exception, e:
                 raise PreferencesReadError(str(e))
 
         # try both JSON and .ini format
         try:
             return cls.read_json(path)
-        except Exception as e:
+        except Exception, e:
             try:
                 return cls.read_ini(path)
-            except Exception as f:
+            except Exception, f:
                 for exception in e, f:
                     if isinstance(exception, PreferencesReadError):
                         raise exception
@@ -165,10 +165,10 @@ class Preferences(object):
         """
 
         marker = '##//' # magical marker
-        lines = [i.strip() for i in mozfile.load(path).readlines()]
+        lines = [i.strip() for i in mozfile.load(path).readlines() if i.strip()]
         _lines = []
         for line in lines:
-            if not line.startswith(pref_setter):
+            if line.startswith(('#', '//')):
                 continue
             if '//' in line:
                 line = line.replace('//', marker)

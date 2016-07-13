@@ -28,7 +28,4 @@ x = JSON.parse('{"foo":[], "bar":[]}');
 if (typeof reportCompare === "function")
   reportCompare(true, true);
 
-if (typeof gczeal === "function")
-  gczeal(0);
-
 print("Tests complete");

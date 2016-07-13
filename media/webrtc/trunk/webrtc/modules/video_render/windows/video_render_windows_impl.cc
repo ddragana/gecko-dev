@@ -23,7 +23,8 @@ namespace webrtc {
 
 VideoRenderWindowsImpl::VideoRenderWindowsImpl(const int32_t id,
     const VideoRenderType videoRenderType, void* window, const bool fullscreen)
-    : _renderWindowsCritsect(*CriticalSectionWrapper::CreateCriticalSection()),
+    : _id(id),
+      _renderWindowsCritsect(*CriticalSectionWrapper::CreateCriticalSection()),
       _prtWindow(window),
       _fullscreen(fullscreen),
       _renderMethod(kVideoRenderWinD3D9),
@@ -69,6 +70,13 @@ int32_t VideoRenderWindowsImpl::Init()
         return _ptrRendererWin->Init();
     else
         return -1;
+}
+
+int32_t VideoRenderWindowsImpl::ChangeUniqueId(const int32_t id)
+{
+    CriticalSectionScoped cs(&_renderWindowsCritsect);
+    _id = id;
+    return 0;
 }
 
 int32_t VideoRenderWindowsImpl::ChangeWindow(void* window)

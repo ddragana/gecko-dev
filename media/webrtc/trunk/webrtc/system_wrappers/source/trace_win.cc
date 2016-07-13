@@ -22,6 +22,7 @@ TraceWindows::TraceWindows()
 }
 
 TraceWindows::~TraceWindows() {
+  StopThread();
 }
 
 int32_t TraceWindows::AddTime(char* trace_message,

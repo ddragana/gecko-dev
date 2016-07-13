@@ -193,7 +193,7 @@ function showResults() {
           var data = ref.__url__ ? ref.__url__ : ref;
           var warning = data == "[object Object]"
             ? "[object " + data.constructor.name + "(" +
-              Object.keys(data).join(", ") + ")]"
+              [p for (p in data)].join(", ") + ")]"
             : data;
           console.warn("LEAK", warning, info.bin);
         }
@@ -327,9 +327,7 @@ function getPotentialLeaks() {
         principal: details[1],
         location: details[2] ? details[2].replace(/\\/g, "/") : undefined,
         source: details[3] ? details[3].split(" -> ").reverse() : undefined,
-        toString: function() {
-          return this.location;
-        }
+        toString: function() this.location
       };
 
       if (!isPossibleLeak(item))
@@ -353,9 +351,7 @@ function getPotentialLeaks() {
         path: matches[1],
         location: details[1].replace(/\\/g, "/"),
         source: [details[1].replace(/\\/g, "/")],
-        toString: function() {
-          return this.location;
-        }
+        toString: function() this.location
       };
 
       if (!isPossibleLeak(item))
@@ -461,7 +457,8 @@ var consoleListener = {
       testConsole.error(message);
       return;
     }
-    var pointless = POINTLESS_ERRORS.filter(err => message.indexOf(err) >= 0);
+    var pointless = [err for (err of POINTLESS_ERRORS)
+                         if (message.indexOf(err) >= 0)];
     if (pointless.length == 0 && message)
       testConsole.log(message);
   }
@@ -634,7 +631,7 @@ var runTests = exports.runTests = function runTests(options) {
       fileName: { value: e.fileName, writable: true, configurable: true },
       lineNumber: { value: e.lineNumber, writable: true, configurable: true },
       stack: { value: stack, writable: true, configurable: true },
-      toString: { value: () => String(e), writable: true, configurable: true },
+      toString: { value: function() String(e), writable: true, configurable: true },
     });
 
     print("Error: " + error + " \n " + format(error));

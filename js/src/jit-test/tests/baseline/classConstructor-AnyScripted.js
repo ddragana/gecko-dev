@@ -1,3 +1,7 @@
+load(libdir + "class.js");
+
+var test = `
+
 function test(fun) {
     fun();
 }
@@ -19,3 +23,8 @@ try {
     test(foo);
     throw new Error("Invoking a class constructor without new must throw");
 } catch (e if e instanceof TypeError) { }
+
+`;
+
+if (classesEnabled())
+    eval(test);

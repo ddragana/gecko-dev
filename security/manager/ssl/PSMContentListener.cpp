@@ -29,7 +29,7 @@
 
 #include "mozilla/Logging.h"
 
-extern mozilla::LazyLogModule gPIPNSSLog;
+extern PRLogModuleInfo* gPIPNSSLog;
 
 namespace mozilla { namespace psm {
 
@@ -152,8 +152,8 @@ PSMContentStreamListener::OnStopRequest(nsIRequest* request,
   // Because importing the cert can spin the event loop (via alerts), we can't
   // do it here. Do it off the event loop instead.
   nsCOMPtr<nsIRunnable> r =
-    NewRunnableMethod(this, &PSMContentStreamListener::ImportCertificate);
-  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(r));
+    NS_NewRunnableMethod(this, &PSMContentStreamListener::ImportCertificate);
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(r)));
 
   return NS_OK;
 }
@@ -182,20 +182,17 @@ PSMContentStreamListener::ImportCertificate()
 
   switch (mType) {
   case X509_CA_CERT:
-    certdb->ImportCertificates(BitwiseCast<uint8_t*, char*>(
-                                 mByteData.BeginWriting()),
+    certdb->ImportCertificates(reinterpret_cast<uint8_t*>(mByteData.BeginWriting()),
                                mByteData.Length(), mType, ctx);
     break;
 
   case X509_USER_CERT:
-    certdb->ImportUserCertificate(BitwiseCast<uint8_t*, char*>(
-                                    mByteData.BeginWriting()),
+    certdb->ImportUserCertificate(reinterpret_cast<uint8_t*>(mByteData.BeginWriting()),
                                   mByteData.Length(), ctx);
     break;
 
   case X509_EMAIL_CERT:
-    certdb->ImportEmailCertificate(BitwiseCast<uint8_t*, char*>(
-                                     mByteData.BeginWriting()),
+    certdb->ImportEmailCertificate(reinterpret_cast<uint8_t*>(mByteData.BeginWriting()),
                                    mByteData.Length(), ctx);
     break;
 
@@ -246,7 +243,7 @@ PSMContentDownloaderParent::RecvOnStopRequest(const nsresult& code)
   }
 
   if (mIPCOpen) {
-    mozilla::Unused << Send__delete__(this);
+    mozilla::unused << Send__delete__(this);
   }
   return true;
 }
@@ -257,7 +254,7 @@ PSMContentDownloaderParent::OnStopRequest(nsIRequest* request, nsISupports* cont
   nsresult rv = PSMContentStreamListener::OnStopRequest(request, context, code);
 
   if (mIPCOpen) {
-    mozilla::Unused << Send__delete__(this);
+    mozilla::unused << Send__delete__(this);
   }
   return rv;
 }
@@ -268,7 +265,7 @@ PSMContentDownloaderParent::RecvDivertToParentUsing(mozilla::net::PChannelDivert
   MOZ_ASSERT(diverter);
   auto p = static_cast<mozilla::net::ChannelDiverterParent*>(diverter);
   p->DivertTo(this);
-  mozilla::Unused << p->Send__delete__(p);
+  mozilla::unused << p->Send__delete__(p);
   return true;
 }
 
@@ -312,7 +309,7 @@ PSMContentDownloaderChild::OnStartRequest(nsIRequest* request, nsISupports* cont
     return NS_ERROR_FAILURE;
   }
 
-  mozilla::Unused << SendOnStartRequest(contentLength);
+  mozilla::unused << SendOnStartRequest(contentLength);
   return NS_OK;
 }
 
@@ -329,7 +326,7 @@ PSMContentDownloaderChild::OnDataAvailable(nsIRequest* request,
     return rv;
   }
 
-  mozilla::Unused << SendOnDataAvailable(chunk, aSourceOffset, aLength);
+  mozilla::unused << SendOnDataAvailable(chunk, aSourceOffset, aLength);
   return NS_OK;
 }
 
@@ -338,7 +335,7 @@ PSMContentDownloaderChild::OnStopRequest(nsIRequest* request,
                                          nsISupports* context,
                                          nsresult aStatus)
 {
-  mozilla::Unused << SendOnStopRequest(aStatus);
+  mozilla::unused << SendOnStopRequest(aStatus);
   return NS_OK;
 }
 

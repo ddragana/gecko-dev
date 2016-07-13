@@ -9,7 +9,6 @@
 
 #include "mozilla/Alignment.h"
 #include "mozilla/Move.h"
-#include "mozilla/TypeTraits.h"
 
 #include "jit/JitFrames.h"
 #include "jit/LIR.h"
@@ -33,7 +32,6 @@ template <class ArgSeq, class StoreOutputTo>
 class OutOfLineCallVM;
 
 class OutOfLineTruncateSlow;
-class OutOfLineWasmTruncateCheck;
 
 struct PatchableBackedgeInfo
 {
@@ -57,8 +55,8 @@ struct ReciprocalMulConstants {
 struct NativeToTrackedOptimizations
 {
     // [startOffset, endOffset]
-    CodeOffset startOffset;
-    CodeOffset endOffset;
+    CodeOffsetLabel startOffset;
+    CodeOffsetLabel endOffset;
     const TrackedOptimizations* optimizations;
 };
 
@@ -85,12 +83,7 @@ class CodeGeneratorShared : public LElementVisitor
     uint32_t lastOsiPointOffset_;
     SafepointWriter safepoints_;
     Label invalidate_;
-    CodeOffset invalidateEpilogueData_;
-
-    // Label for the common return path.
-    NonAssertingLabel returnLabel_;
-
-    FallbackICStubSpace stubSpace_;
+    CodeOffsetLabel invalidateEpilogueData_;
 
     js::Vector<SafepointIndex, 0, SystemAllocPolicy> safepointIndices_;
     js::Vector<OsiIndex, 0, SystemAllocPolicy> osiIndices_;
@@ -108,21 +101,13 @@ class CodeGeneratorShared : public LElementVisitor
     Vector<PatchableBackedgeInfo, 0, SystemAllocPolicy> patchableBackedges_;
 
 #ifdef JS_TRACE_LOGGING
-    struct PatchableTLEvent {
-        CodeOffset offset;
-        const char* event;
-        PatchableTLEvent(CodeOffset offset, const char* event)
-            : offset(offset), event(event)
-        {}
-    };
-    js::Vector<CodeOffset, 0, SystemAllocPolicy> patchableTraceLoggers_;
-    js::Vector<PatchableTLEvent, 0, SystemAllocPolicy> patchableTLEvents_;
-    js::Vector<CodeOffset, 0, SystemAllocPolicy> patchableTLScripts_;
+    js::Vector<CodeOffsetLabel, 0, SystemAllocPolicy> patchableTraceLoggers_;
+    js::Vector<CodeOffsetLabel, 0, SystemAllocPolicy> patchableTLScripts_;
 #endif
 
   public:
     struct NativeToBytecode {
-        CodeOffset nativeOffset;
+        CodeOffsetLabel nativeOffset;
         InlineScriptTree* tree;
         jsbytecode* pc;
     };
@@ -185,7 +170,7 @@ class CodeGeneratorShared : public LElementVisitor
 
   protected:
 #ifdef CHECK_OSIPOINT_REGISTERS
-    // See JitOptions.checkOsiPointRegisters. We set this here to avoid
+    // See js_JitOptions.checkOsiPointRegisters. We set this here to avoid
     // races when enableOsiPointRegisterChecks is called while we're generating
     // code off-thread.
     bool checkOsiPointRegisters;
@@ -219,14 +204,24 @@ class CodeGeneratorShared : public LElementVisitor
     inline int32_t ToStackOffset(LAllocation a) const;
     inline int32_t ToStackOffset(const LAllocation* a) const;
 
-    inline Address ToAddress(const LAllocation& a);
-    inline Address ToAddress(const LAllocation* a);
-
     uint32_t frameSize() const {
         return frameClass_ == FrameSizeClass::None() ? frameDepth_ : frameClass_.frameSize();
     }
 
+    inline Operand ToOperand(const LAllocation& a);
+    inline Operand ToOperand(const LAllocation* a);
+    inline Operand ToOperand(const LDefinition* def);
+
   protected:
+    // Ensure the cache is an IonCache while expecting the size of the derived
+    // class. We only need the cache list at GC time. Everyone else can just take
+    // runtimeData offsets.
+    size_t allocateCache(const IonCache&, size_t size) {
+        size_t dataOffset = allocateData(size);
+        masm.propagateOOM(cacheList_.append(dataOffset));
+        return dataOffset;
+    }
+
 #ifdef CHECK_OSIPOINT_REGISTERS
     void resetOsiPointRegs(LSafepoint* safepoint);
     bool shouldVerifyOsiPointRegs(LSafepoint* safepoint);
@@ -271,23 +266,17 @@ class CodeGeneratorShared : public LElementVisitor
     };
 
   protected:
-    MOZ_MUST_USE
-    bool allocateData(size_t size, size_t* offset) {
+
+    size_t allocateData(size_t size) {
         MOZ_ASSERT(size % sizeof(void*) == 0);
-        *offset = runtimeData_.length();
+        size_t dataOffset = runtimeData_.length();
         masm.propagateOOM(runtimeData_.appendN(0, size));
-        return !masm.oom();
+        return dataOffset;
     }
 
-    // Ensure the cache is an IonCache while expecting the size of the derived
-    // class. We only need the cache list at GC time. Everyone else can just take
-    // runtimeData offsets.
     template <typename T>
     inline size_t allocateCache(const T& cache) {
-        static_assert(mozilla::IsBaseOf<IonCache, T>::value, "T must inherit from IonCache");
-        size_t index;
-        masm.propagateOOM(allocateData(sizeof(mozilla::AlignedStorage2<T>), &index));
-        masm.propagateOOM(cacheList_.append(index));
+        size_t index = allocateCache(cache, sizeof(mozilla::AlignedStorage2<T>));
         if (masm.oom())
             return SIZE_MAX;
         // Use the copy constructor on the allocated space.
@@ -309,7 +298,7 @@ class CodeGeneratorShared : public LElementVisitor
 
     // Encode all encountered safepoints in CG-order, and resolve |indices| for
     // safepoint offsets.
-    bool encodeSafepoints();
+    void encodeSafepoints();
 
     // Fixup offsets of native-to-bytecode map.
     bool createNativeToBytecodeScriptList(JSContext* cx);
@@ -345,7 +334,7 @@ class CodeGeneratorShared : public LElementVisitor
 
     void emitAsmJSCall(LAsmJSCall* ins);
 
-    void emitPreBarrier(Register base, const LAllocation* index, int32_t offsetAdjustment);
+    void emitPreBarrier(Register base, const LAllocation* index);
     void emitPreBarrier(Address address);
 
     // We don't emit code for trivial blocks, so if we want to branch to the
@@ -457,13 +446,10 @@ class CodeGeneratorShared : public LElementVisitor
                                     const StoreOutputTo& out);
 
     void addCache(LInstruction* lir, size_t cacheIndex);
-    bool addCacheLocations(const CacheLocationList& locs, size_t* numLocs, size_t* offset);
+    size_t addCacheLocations(const CacheLocationList& locs, size_t* numLocs);
     ReciprocalMulConstants computeDivisionConstants(uint32_t d, int maxLog);
 
   protected:
-    bool generatePrologue();
-    bool generateEpilogue();
-
     void addOutOfLineCode(OutOfLineCode* code, const MInstruction* mir);
     void addOutOfLineCode(OutOfLineCode* code, const BytecodeSite* site);
     bool generateOutOfLineCode();
@@ -477,7 +463,7 @@ class CodeGeneratorShared : public LElementVisitor
     void jumpToBlock(MBasicBlock* mir);
 
 // This function is not used for MIPS. MIPS has branchToBlock.
-#if !defined(JS_CODEGEN_MIPS32) && !defined(JS_CODEGEN_MIPS64)
+#ifndef JS_CODEGEN_MIPS
     void jumpToBlock(MBasicBlock* mir, Assembler::Condition cond);
 #endif
 
@@ -493,17 +479,12 @@ class CodeGeneratorShared : public LElementVisitor
 
     void visitOutOfLineTruncateSlow(OutOfLineTruncateSlow* ool);
 
-    virtual void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool) {
-        MOZ_CRASH("NYI");
-    }
-
     bool omitOverRecursedCheck() const;
 
 #ifdef JS_TRACE_LOGGING
   protected:
     void emitTracelogScript(bool isStart);
     void emitTracelogTree(bool isStart, uint32_t textId);
-    void emitTracelogTree(bool isStart, const char* text, TraceLoggerTextId enabledTextId);
 
   public:
     void emitTracelogScriptStart() {
@@ -517,15 +498,6 @@ class CodeGeneratorShared : public LElementVisitor
     }
     void emitTracelogStopEvent(uint32_t textId) {
         emitTracelogTree(/* isStart =*/ false, textId);
-    }
-    // Log an arbitrary text. The TraceloggerTextId is used to toggle the
-    // logging on and off.
-    // Note: the text is not copied and need to be kept alive until linking.
-    void emitTracelogStartEvent(const char* text, TraceLoggerTextId enabledTextId) {
-        emitTracelogTree(/* isStart =*/ true, text, enabledTextId);
-    }
-    void emitTracelogStopEvent(const char* text, TraceLoggerTextId enabledTextId) {
-        emitTracelogTree(/* isStart =*/ false, text, enabledTextId);
     }
 #endif
     void emitTracelogIonStart() {
@@ -544,8 +516,6 @@ class CodeGeneratorShared : public LElementVisitor
     inline void verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, bool isLoad,
                                             Scalar::Type type, unsigned numElems,
                                             const Operand& mem, LAllocation alloc);
-
-    bool isGlobalObject(JSObject* object);
 };
 
 // An out-of-line path is generated at the end of the function.
@@ -794,34 +764,6 @@ CodeGeneratorShared::visitOutOfLineCallVM(OutOfLineCallVM<ArgSeq, StoreOutputTo>
     restoreLiveIgnore(lir, ool->out().clobbered());
     masm.jump(ool->rejoin());
 }
-
-class OutOfLineWasmTruncateCheck : public OutOfLineCodeBase<CodeGeneratorShared>
-{
-    MIRType fromType_;
-    MIRType toType_;
-    FloatRegister input_;
-    bool isUnsigned_;
-
-  public:
-    OutOfLineWasmTruncateCheck(MWasmTruncateToInt32* mir, FloatRegister input)
-      : fromType_(mir->input()->type()), toType_(MIRType::Int32), input_(input),
-        isUnsigned_(mir->isUnsigned())
-    { }
-
-    OutOfLineWasmTruncateCheck(MWasmTruncateToInt64* mir, FloatRegister input)
-      : fromType_(mir->input()->type()), toType_(MIRType::Int64), input_(input),
-        isUnsigned_(mir->isUnsigned())
-    { }
-
-    void accept(CodeGeneratorShared* codegen) {
-        codegen->visitOutOfLineWasmTruncateCheck(this);
-    }
-
-    FloatRegister input() const { return input_; }
-    MIRType toType() const { return toType_; }
-    MIRType fromType() const { return fromType_; }
-    bool isUnsigned() const { return isUnsigned_; }
-};
 
 } // namespace jit
 } // namespace js

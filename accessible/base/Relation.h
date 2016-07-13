@@ -9,7 +9,7 @@
 
 #include "AccIterator.h"
 
-#include <memory>
+#include "mozilla/Move.h"
 
 namespace mozilla {
 namespace a11y {
@@ -51,9 +51,9 @@ public:
   inline void AppendIter(AccIterable* aIter)
   {
     if (mLastIter)
-      mLastIter->mNextIter.reset(aIter);
+      mLastIter->mNextIter = aIter;
     else
-      mFirstIter.reset(aIter);
+      mFirstIter = aIter;
 
     mLastIter = aIter;
   }
@@ -84,8 +84,9 @@ public:
   {
     Accessible* target = nullptr;
 
+    // a trick nsAutoPtr deletes what it used to point to when assigned to
     while (mFirstIter && !(target = mFirstIter->Next()))
-      mFirstIter = std::move(mFirstIter->mNextIter);
+      mFirstIter = mFirstIter->mNextIter;
 
     if (!mFirstIter)
       mLastIter = nullptr;
@@ -97,7 +98,7 @@ private:
   Relation& operator = (const Relation&) = delete;
   Relation(const Relation&) = delete;
 
-  std::unique_ptr<AccIterable> mFirstIter;
+  nsAutoPtr<AccIterable> mFirstIter;
   AccIterable* mLastIter;
 };
 

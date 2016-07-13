@@ -799,9 +799,7 @@ exports.testCaching = function (assert, done) {
     off(stream, 'data', handle);
   }).then(done).catch(assert.fail);
 
-  function handle ({data}) {
-    return count++;
-  }
+  function handle ({data}) count++
 };
 
 /*
@@ -940,9 +938,9 @@ before(exports, (name, assert, done) => resetPlaces(done));
 after(exports, (name, assert, done) => resetPlaces(done));
 
 function saveP () {
-  return promisedEmitter(save.apply(null, Array.prototype.slice.call(arguments)));
+  return promisedEmitter(save.apply(null, Array.slice(arguments)));
 }
 
 function searchP () {
-  return promisedEmitter(search.apply(null, Array.prototype.slice.call(arguments)));
+  return promisedEmitter(search.apply(null, Array.slice(arguments)));
 }

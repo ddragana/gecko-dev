@@ -351,8 +351,9 @@ int32_t DeviceInfoImpl::GetExpectedCaptureDelay(
 
 //Default implementation. This should be overridden by Mobile implementations.
 int32_t DeviceInfoImpl::GetOrientation(const char* deviceUniqueIdUTF8,
-                                       VideoRotation& orientation) {
-  orientation = kVideoRotation_0;
+                                       VideoCaptureRotation& orientation)
+{
+    orientation = kCameraRotate0;
     return -1;
 }
 }  // namespace videocapturemodule

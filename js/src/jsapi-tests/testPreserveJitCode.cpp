@@ -2,9 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// For js::jit::IsIonEnabled().
-#include "jit/Ion.h"
-
 #include "jsapi-tests/tests.h"
 
 using namespace JS;
@@ -35,22 +32,13 @@ countIonScripts(JSObject* global)
 bool
 testPreserveJitCode(bool preserveJitCode, unsigned remainingIonScripts)
 {
-    cx->options().setBaseline(true);
-    cx->options().setIon(true);
+    rt->options().setBaseline(true);
+    rt->options().setIon(true);
     rt->setOffthreadIonCompilationEnabled(false);
 
     RootedObject global(cx, createTestGlobal(preserveJitCode));
     CHECK(global);
     JSAutoCompartment ac(cx, global);
-
-#ifdef JS_CODEGEN_ARM64
-    // The ARM64 Ion JIT is not yet enabled, so this test will fail with
-    // countIonScripts(global) == 0. Once Ion is enabled for ARM64, this test
-    // should be passing again, and this code can be deleted.
-    // Bug 1208526 - ARM64: Reenable jsapi-tests/testPreserveJitCode once Ion is enabled
-    if (!js::jit::IsIonEnabled(cx))
-        knownFail = true;
-#endif
 
     CHECK_EQUAL(countIonScripts(global), 0u);
 
@@ -90,8 +78,8 @@ JSObject*
 createTestGlobal(bool preserveJitCode)
 {
     JS::CompartmentOptions options;
-    options.creationOptions().setPreserveJitCode(preserveJitCode);
-    options.behaviors().setVersion(JSVERSION_LATEST);
+    options.setVersion(JSVERSION_LATEST);
+    options.setPreserveJitCode(preserveJitCode);
     return JS_NewGlobalObject(cx, getGlobalClass(), nullptr, JS::FireOnNewGlobalHook, options);
 }
 END_TEST(test_PreserveJitCode)

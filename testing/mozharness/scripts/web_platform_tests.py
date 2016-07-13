@@ -26,12 +26,6 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin):
             "dest": "test_type",
             "help": "Specify the test types to run."}
          ],
-        [['--e10s'], {
-            "action": "store_true",
-            "dest": "e10s",
-            "default": False,
-            "help": "Run with e10s enabled"}
-         ],
         [["--total-chunks"], {
             "action": "store",
             "dest": "total_chunks",
@@ -63,7 +57,6 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin):
         c = self.config
         self.installer_url = c.get('installer_url')
         self.test_url = c.get('test_url')
-        self.test_packages_url = c.get('test_packages_url')
         self.installer_path = c.get('installer_path')
         self.binary_path = c.get('binary_path')
         self.abs_app_dir = None
@@ -116,35 +109,30 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin):
         abs_app_dir = self.query_abs_app_dir()
         run_file_name = "runtests.py"
 
-        cmd = [self.query_python_path('python'), '-u']
-        cmd.append(os.path.join(dirs["abs_wpttest_dir"], run_file_name))
+        base_cmd = [self.query_python_path('python'), '-u']
+        base_cmd.append(os.path.join(dirs["abs_wpttest_dir"], run_file_name))
 
         # Make sure that the logging directory exists
         if self.mkdir_p(dirs["abs_blob_upload_dir"]) == -1:
             self.fatal("Could not create blobber upload directory")
             # Exit
 
-        cmd += ["--log-raw=-",
-                "--log-raw=%s" % os.path.join(dirs["abs_blob_upload_dir"],
-                                              "wpt_raw.log"),
-                "--log-errorsummary=%s" % os.path.join(dirs["abs_blob_upload_dir"],
-                                                       "wpt_errorsummary.log"),
-                "--binary=%s" % self.binary_path,
-                "--symbols-path=%s" % self.query_symbols_url(),
-                "--stackwalk-binary=%s" % self.query_minidump_stackwalk()]
+        base_cmd += ["--log-raw=-",
+                     "--log-raw=%s" % os.path.join(dirs["abs_blob_upload_dir"],
+                                                   "wpt_raw.log"),
+                     "--binary=%s" % self.binary_path,
+                     "--symbols-path=%s" % self.query_symbols_url(),
+                     "--stackwalk-binary=%s" % self.query_minidump_stackwalk()]
 
         for test_type in c.get("test_type", []):
-            cmd.append("--test-type=%s" % test_type)
-
-        if not c["e10s"]:
-            cmd.append("--disable-e10s")
+            base_cmd.append("--test-type=%s" % test_type)
 
         for opt in ["total_chunks", "this_chunk"]:
             val = c.get(opt)
             if val:
-                cmd.append("--%s=%s" % (opt.replace("_", "-"), val))
+                base_cmd.append("--%s=%s" % (opt.replace("_", "-"), val))
 
-        options = list(c.get("options", []))
+        options = list(c.get("options", [])) + list(self.tree_config["options"])
 
         str_format_values = {
             'binary_path': self.binary_path,
@@ -154,15 +142,9 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin):
             'abs_work_dir': dirs["abs_work_dir"]
             }
 
-        try_options, try_tests = self.try_args("web-platform-tests")
+        opt_cmd = [item % str_format_values for item in options]
 
-        cmd.extend(self.query_options(options,
-                                      try_options,
-                                      str_format_values=str_format_values))
-        cmd.extend(self.query_tests_args(try_tests,
-                                         str_format_values=str_format_values))
-
-        return cmd
+        return base_cmd + opt_cmd
 
     def download_and_extract(self):
         super(WebPlatformTest, self).download_and_extract(
@@ -170,17 +152,16 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin):
                                "config/*",
                                "mozbase/*",
                                "marionette/*",
-                               "tools/wptserve/*",
                                "web-platform/*"],
             suite_categories=["web-platform"])
 
     def run_tests(self):
         dirs = self.query_abs_dirs()
         cmd = self._query_cmd()
+        cmd = self.append_harness_extra_args(cmd)
 
         parser = StructuredOutputParser(config=self.config,
-                                        log_obj=self.log_obj,
-                                        log_compact=True)
+                                        log_obj=self.log_obj)
 
         env = {'MINIDUMP_SAVE_PATH': dirs['abs_blob_upload_dir']}
         env = self.query_env(partial_env=env, log_level=INFO)

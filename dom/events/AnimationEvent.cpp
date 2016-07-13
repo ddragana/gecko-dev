@@ -15,14 +15,14 @@ AnimationEvent::AnimationEvent(EventTarget* aOwner,
                                nsPresContext* aPresContext,
                                InternalAnimationEvent* aEvent)
   : Event(aOwner, aPresContext,
-          aEvent ? aEvent : new InternalAnimationEvent(false, eVoidEvent))
+          aEvent ? aEvent : new InternalAnimationEvent(false, 0))
 {
   if (aEvent) {
     mEventIsInternal = false;
   }
   else {
     mEventIsInternal = true;
-    mEvent->mTime = PR_Now();
+    mEvent->time = PR_Now();
   }
 }
 
@@ -41,15 +41,15 @@ AnimationEvent::Constructor(const GlobalObject& aGlobal,
                             ErrorResult& aRv)
 {
   nsCOMPtr<EventTarget> t = do_QueryInterface(aGlobal.GetAsSupports());
-  RefPtr<AnimationEvent> e = new AnimationEvent(t, nullptr, nullptr);
+  nsRefPtr<AnimationEvent> e = new AnimationEvent(t, nullptr, nullptr);
   bool trusted = e->Init(t);
 
-  e->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
+  aRv = e->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
 
   InternalAnimationEvent* internalEvent = e->mEvent->AsAnimationEvent();
-  internalEvent->mAnimationName = aParam.mAnimationName;
-  internalEvent->mElapsedTime = aParam.mElapsedTime;
-  internalEvent->mPseudoElement = aParam.mPseudoElement;
+  internalEvent->animationName = aParam.mAnimationName;
+  internalEvent->elapsedTime = aParam.mElapsedTime;
+  internalEvent->pseudoElement = aParam.mPseudoElement;
 
   e->SetTrusted(trusted);
   return e.forget();
@@ -58,7 +58,7 @@ AnimationEvent::Constructor(const GlobalObject& aGlobal,
 NS_IMETHODIMP
 AnimationEvent::GetAnimationName(nsAString& aAnimationName)
 {
-  aAnimationName = mEvent->AsAnimationEvent()->mAnimationName;
+  aAnimationName = mEvent->AsAnimationEvent()->animationName;
   return NS_OK;
 }
 
@@ -72,13 +72,13 @@ AnimationEvent::GetElapsedTime(float* aElapsedTime)
 float
 AnimationEvent::ElapsedTime()
 {
-  return mEvent->AsAnimationEvent()->mElapsedTime;
+  return mEvent->AsAnimationEvent()->elapsedTime;
 }
 
 NS_IMETHODIMP
 AnimationEvent::GetPseudoElement(nsAString& aPseudoElement)
 {
-  aPseudoElement = mEvent->AsAnimationEvent()->mPseudoElement;
+  aPseudoElement = mEvent->AsAnimationEvent()->pseudoElement;
   return NS_OK;
 }
 
@@ -88,12 +88,14 @@ AnimationEvent::GetPseudoElement(nsAString& aPseudoElement)
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<AnimationEvent>
-NS_NewDOMAnimationEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMAnimationEvent(nsIDOMEvent** aInstancePtrResult,
+                        EventTarget* aOwner,
                         nsPresContext* aPresContext,
                         InternalAnimationEvent* aEvent)
 {
-  RefPtr<AnimationEvent> it =
-    new AnimationEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  AnimationEvent* it = new AnimationEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

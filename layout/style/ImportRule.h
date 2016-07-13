@@ -34,7 +34,7 @@ private:
   ImportRule(const ImportRule& aCopy);
   ~ImportRule();
 public:
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(ImportRule, mozilla::css::Rule)
+  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(ImportRule, nsIStyleRule)
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
   DECL_STYLE_RULE_INHERIT
@@ -43,10 +43,12 @@ public:
   using Rule::GetStyleSheet; // unhide since nsIDOMCSSImportRule has its own GetStyleSheet
 #endif
 
-  // Rule methods
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
   virtual int32_t GetType() const override;
   virtual already_AddRefed<Rule> Clone() const override;
 
@@ -62,8 +64,8 @@ public:
 
 private:
   nsString  mURLSpec;
-  RefPtr<nsMediaList> mMedia;
-  RefPtr<CSSStyleSheet> mChildSheet;
+  nsRefPtr<nsMediaList> mMedia;
+  nsRefPtr<CSSStyleSheet> mChildSheet;
 };
 
 } // namespace css

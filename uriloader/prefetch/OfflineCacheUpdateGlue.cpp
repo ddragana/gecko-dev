@@ -15,15 +15,15 @@
 #include "mozilla/Logging.h"
 
 //
-// To enable logging (see mozilla/Logging.h for full details):
+// To enable logging (see prlog.h for full details):
 //
-//    set MOZ_LOG=nsOfflineCacheUpdate:5
-//    set MOZ_LOG_FILE=offlineupdate.log
+//    set NSPR_LOG_MODULES=nsOfflineCacheUpdate:5
+//    set NSPR_LOG_FILE=offlineupdate.log
 //
 // this enables LogLevel::Info level information and places all output in
 // the file offlineupdate.log
 //
-extern mozilla::LazyLogModule gOfflineCacheUpdateLog;
+extern PRLogModuleInfo *gOfflineCacheUpdateLog;
 
 #undef LOG
 #define LOG(args) MOZ_LOG(gOfflineCacheUpdateLog, mozilla::LogLevel::Debug, args)
@@ -95,22 +95,17 @@ OfflineCacheUpdateGlue::Schedule()
 }
 
 NS_IMETHODIMP
-OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI,
+OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI, 
                              nsIURI *aDocumentURI,
-                             nsIPrincipal* aLoadingPrincipal,
                              nsIDOMDocument *aDocument,
-                             nsIFile *aCustomProfileDir)
+                             nsIFile *aCustomProfileDir,
+                             uint32_t aAppID,
+                             bool aInBrowser)
 {
-    nsresult rv;
-
-    nsAutoCString originSuffix;
-    rv = aLoadingPrincipal->GetOriginSuffix(originSuffix);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     nsOfflineCacheUpdateService* service =
         nsOfflineCacheUpdateService::EnsureService();
     if (service) {
-        service->FindUpdate(aManifestURI, originSuffix, aCustomProfileDir,
+        service->FindUpdate(aManifestURI, aAppID, aInBrowser, aCustomProfileDir,
                             getter_AddRefs(mUpdate));
         mCoalesced = !!mUpdate;
     }
@@ -119,7 +114,6 @@ OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI,
         return NS_ERROR_NULL_POINTER;
 
     mDocumentURI = aDocumentURI;
-    mLoadingPrincipal = aLoadingPrincipal;
 
     if (aDocument)
         SetDocument(aDocument);
@@ -129,8 +123,7 @@ OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI,
         return NS_OK;
     }
 
-    return mUpdate->Init(aManifestURI, aDocumentURI, aLoadingPrincipal, nullptr,
-                         aCustomProfileDir);
+    return mUpdate->Init(aManifestURI, aDocumentURI, nullptr, aCustomProfileDir, aAppID, aInBrowser);
 }
 
 void

@@ -28,7 +28,6 @@ from mozbuild.base import (
 
 from mozbuild.backend.configenvironment import ConfigEnvironment
 from buildconfig import topsrcdir, topobjdir
-import mozpack.path as mozpath
 
 
 curdir = os.path.dirname(__file__)
@@ -41,7 +40,6 @@ class TestMozbuildObject(unittest.TestCase):
         self._old_env = dict(os.environ)
         os.environ.pop('MOZCONFIG', None)
         os.environ.pop('MOZ_OBJDIR', None)
-        os.environ.pop('MOZ_CURRENT_PROJECT', None)
 
     def tearDown(self):
         os.chdir(self._old_cwd)
@@ -61,7 +59,7 @@ class TestMozbuildObject(unittest.TestCase):
             self.assertEqual(len(base.topobjdir.split()), 1)
             self.assertTrue(base.topobjdir.endswith(base._config_guess))
             self.assertTrue(os.path.isabs(base.topobjdir))
-            self.assertTrue(base.topobjdir.startswith(base.topsrcdir))
+            self.assertTrue(base.topobjdir.startswith(topsrcdir))
 
     def test_objdir_trailing_slash(self):
         """Trailing slashes in topobjdir should be removed."""
@@ -72,7 +70,7 @@ class TestMozbuildObject(unittest.TestCase):
             mozconfig.flush()
             os.environ[b'MOZCONFIG'] = mozconfig.name
 
-            self.assertEqual(base.topobjdir, mozpath.join(base.topsrcdir,
+            self.assertEqual(base.topobjdir, os.path.join(base.topsrcdir,
                 'foo'))
             self.assertTrue(base.topobjdir.endswith('foo'))
 
@@ -115,7 +113,7 @@ class TestMozbuildObject(unittest.TestCase):
             obj = MozbuildObject.from_environment(
                 detect_virtualenv_mozinfo=False)
 
-            self.assertEqual(obj.topobjdir, mozpath.normsep(topobjdir))
+            self.assertEqual(obj.topobjdir, topobjdir)
         finally:
             os.chdir(self._old_cwd)
             shutil.rmtree(d)
@@ -128,7 +126,7 @@ class TestMozbuildObject(unittest.TestCase):
             with open(mozconfig, 'wt') as fh:
                 fh.write('mk_add_options MOZ_OBJDIR=./objdir')
 
-            topobjdir = mozpath.join(d, 'objdir')
+            topobjdir = os.path.join(d, 'objdir')
             os.mkdir(topobjdir)
 
             mozinfo = os.path.join(topobjdir, 'mozinfo.json')
@@ -218,8 +216,8 @@ class TestMozbuildObject(unittest.TestCase):
 
             o = MachCommandBase(context)
 
-            self.assertEqual(o.topobjdir, mozpath.normsep(topobjdir))
-            self.assertEqual(o.topsrcdir, mozpath.normsep(topsrcdir))
+            self.assertEqual(o.topobjdir, topobjdir)
+            self.assertEqual(o.topsrcdir, topsrcdir)
 
         finally:
             os.chdir(self._old_cwd)

@@ -70,9 +70,9 @@ txXPathOptimizer::optimize(Expr* aInExpr, Expr** aOutExpr)
     Expr::ExprType exprType = aInExpr->getType();
     if (exprType != Expr::LITERAL_EXPR &&
         !aInExpr->isSensitiveTo(Expr::ANY_CONTEXT)) {
-        RefPtr<txResultRecycler> recycler = new txResultRecycler;
+        nsRefPtr<txResultRecycler> recycler = new txResultRecycler;
         txEarlyEvalContext context(recycler);
-        RefPtr<txAExprResult> exprRes;
+        nsRefPtr<txAExprResult> exprRes;
 
         // Don't throw if this fails since it could be that the expression
         // is or contains an error-expression.
@@ -133,6 +133,8 @@ txXPathOptimizer::optimizeStep(Expr* aInExpr, Expr** aOutExpr)
             *aOutExpr = new txNamedAttributeStep(nameTest->mNamespace,
                                                  nameTest->mPrefix,
                                                  nameTest->mLocalName);
+            NS_ENSURE_TRUE(*aOutExpr, NS_ERROR_OUT_OF_MEMORY);
+
             return NS_OK; // return since we no longer have a step-object.
         }
     }
@@ -143,6 +145,8 @@ txXPathOptimizer::optimizeStep(Expr* aInExpr, Expr** aOutExpr)
            !pred->canReturnType(Expr::NUMBER_RESULT) &&
            !pred->isSensitiveTo(Expr::NODESET_CONTEXT)) {
         txNodeTest* predTest = new txPredicatedNodeTest(step->getNodeTest(), pred);
+        NS_ENSURE_TRUE(predTest, NS_ERROR_OUT_OF_MEMORY);
+
         step->dropFirst();
         step->setNodeTest(predTest);
     }
@@ -248,6 +252,8 @@ txXPathOptimizer::optimizeUnion(Expr* aInExpr, Expr** aOutExpr)
             // Create a txUnionNodeTest if needed
             if (!unionTest) {
                 nsAutoPtr<txNodeTest> owner(unionTest = new txUnionNodeTest);
+                NS_ENSURE_TRUE(unionTest, NS_ERROR_OUT_OF_MEMORY);
+                
                 rv = unionTest->addNodeTest(currentStep->getNodeTest());
                 NS_ENSURE_SUCCESS(rv, rv);
 

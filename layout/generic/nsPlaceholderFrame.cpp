@@ -38,7 +38,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
 #endif
 
 /* virtual */ nsSize
-nsPlaceholderFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState)
+nsPlaceholderFrame::GetMinSize(nsBoxLayoutState& aBoxLayoutState)
 {
   nsSize size(0, 0);
   DISPLAY_MIN_SIZE(this, size);
@@ -46,7 +46,7 @@ nsPlaceholderFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState)
 }
 
 /* virtual */ nsSize
-nsPlaceholderFrame::GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState)
+nsPlaceholderFrame::GetPrefSize(nsBoxLayoutState& aBoxLayoutState)
 {
   nsSize size(0, 0);
   DISPLAY_PREF_SIZE(this, size);
@@ -54,7 +54,7 @@ nsPlaceholderFrame::GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState)
 }
 
 /* virtual */ nsSize
-nsPlaceholderFrame::GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState)
+nsPlaceholderFrame::GetMaxSize(nsBoxLayoutState& aBoxLayoutState)
 {
   nsSize size(NS_INTRINSICSIZE, NS_INTRINSICSIZE);
   DISPLAY_MAX_SIZE(this, size);
@@ -66,9 +66,9 @@ nsPlaceholderFrame::AddInlineMinISize(nsRenderingContext* aRenderingContext,
                                       nsIFrame::InlineMinISizeData* aData)
 {
   // Override AddInlineMinWith so that *nothing* happens.  In
-  // particular, we don't want to zero out |aData->mTrailingWhitespace|,
+  // particular, we don't want to zero out |aData->trailingWhitespace|,
   // since nsLineLayout skips placeholders when trimming trailing
-  // whitespace, and we don't want to set aData->mSkipWhitespace to
+  // whitespace, and we don't want to set aData->skipWhitespace to
   // false.
 
   // ...but push floats onto the list
@@ -77,7 +77,7 @@ nsPlaceholderFrame::AddInlineMinISize(nsRenderingContext* aRenderingContext,
       nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                                            mOutOfFlowFrame,
                                            nsLayoutUtils::MIN_ISIZE);
-    aData->mFloats.AppendElement(
+    aData->floats.AppendElement(
       InlineIntrinsicISizeData::FloatInfo(mOutOfFlowFrame, floatWidth));
   }
 }
@@ -87,9 +87,9 @@ nsPlaceholderFrame::AddInlinePrefISize(nsRenderingContext* aRenderingContext,
                                        nsIFrame::InlinePrefISizeData* aData)
 {
   // Override AddInlinePrefWith so that *nothing* happens.  In
-  // particular, we don't want to zero out |aData->mTrailingWhitespace|,
+  // particular, we don't want to zero out |aData->trailingWhitespace|,
   // since nsLineLayout skips placeholders when trimming trailing
-  // whitespace, and we don't want to set aData->mSkipWhitespace to
+  // whitespace, and we don't want to set aData->skipWhitespace to
   // false.
 
   // ...but push floats onto the list
@@ -98,7 +98,7 @@ nsPlaceholderFrame::AddInlinePrefISize(nsRenderingContext* aRenderingContext,
       nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                                            mOutOfFlowFrame,
                                            nsLayoutUtils::PREF_ISIZE);
-    aData->mFloats.AppendElement(
+    aData->floats.AppendElement(
       InlineIntrinsicISizeData::FloatInfo(mOutOfFlowFrame, floatWidth));
   }
 }
@@ -215,23 +215,24 @@ nsPlaceholderFrame::GetParentStyleContext(nsIFrame** aProviderFrame) const
 
 #ifdef DEBUG
 static void
-PaintDebugPlaceholder(nsIFrame* aFrame, DrawTarget* aDrawTarget,
+PaintDebugPlaceholder(nsIFrame* aFrame, nsRenderingContext* aCtx,
                       const nsRect& aDirtyRect, nsPoint aPt)
 {
   ColorPattern cyan(ToDeviceColor(Color(0.f, 1.f, 1.f, 1.f)));
+  DrawTarget* drawTarget = aCtx->GetDrawTarget();
   int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
 
   nscoord x = nsPresContext::CSSPixelsToAppUnits(-5);
   nsRect r(aPt.x + x, aPt.y,
            nsPresContext::CSSPixelsToAppUnits(13),
            nsPresContext::CSSPixelsToAppUnits(3));
-  aDrawTarget->FillRect(NSRectToRect(r, appUnitsPerDevPixel), cyan);
+  drawTarget->FillRect(NSRectToRect(r, appUnitsPerDevPixel), cyan);
 
   nscoord y = nsPresContext::CSSPixelsToAppUnits(-10);
   r = nsRect(aPt.x, aPt.y + y,
              nsPresContext::CSSPixelsToAppUnits(3),
              nsPresContext::CSSPixelsToAppUnits(10));
-  aDrawTarget->FillRect(NSRectToRect(r, appUnitsPerDevPixel), cyan);
+  drawTarget->FillRect(NSRectToRect(r, appUnitsPerDevPixel), cyan);
 }
 #endif // DEBUG
 

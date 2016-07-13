@@ -18,7 +18,6 @@ EXPORTS += [
 ]
 
 UNIFIED_SOURCES += [
-    'nsCSSClipPathInstance.cpp',
     'nsCSSFilterInstance.cpp',
     'nsFilterInstance.cpp',
     'nsSVGAFrame.cpp',
@@ -37,6 +36,7 @@ UNIFIED_SOURCES += [
     'nsSVGMarkerFrame.cpp',
     'nsSVGMaskFrame.cpp',
     'nsSVGOuterSVGFrame.cpp',
+    'nsSVGPaintServerFrame.cpp',
     'nsSVGPathGeometryFrame.cpp',
     'nsSVGPatternFrame.cpp',
     'nsSVGStopFrame.cpp',
@@ -55,6 +55,8 @@ if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
     SOURCES += ['nsSVGMaskFrameNEON.cpp']
     SOURCES['nsSVGMaskFrameNEON.cpp'].flags += ['-mfpu=neon']
 
+FAIL_ON_WARNINGS = True
+
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '../../widget',
@@ -69,3 +71,4 @@ LOCAL_INCLUDES += [
 RESOURCE_FILES += [
     'svg.css',
 ]
+

@@ -8,6 +8,7 @@ DIRS += ['resources']
 
 XPIDL_SOURCES += [
     'nsIASN1Tree.idl',
+    'nsIPKIParamBlock.idl',
 ]
 
 XPIDL_MODULE = 'pippki'
@@ -17,10 +18,13 @@ UNIFIED_SOURCES += [
     'nsNSSDialogHelper.cpp',
     'nsNSSDialogs.cpp',
     'nsPKIModule.cpp',
+    'nsPKIParamBlock.cpp',
 ]
 
-LOCAL_INCLUDES += [
-    '!/dist/public/nss',
+GENERATED_INCLUDES += [
+    '/dist/public/nss',
 ]
+
+FAIL_ON_WARNINGS = True
 
 FINAL_LIBRARY = 'xul'

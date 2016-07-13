@@ -1,3 +1,5 @@
+var test = `
+
 class base {
     constructor() {}
 
@@ -11,7 +13,7 @@ class base {
 }
 
 class derived extends base {
-    constructor() { super(); }
+    constructor() {}
 
     get a() { return super.getValue(); }
     set a(v) { super.setValue(v); }
@@ -31,6 +33,11 @@ class derived extends base {
 
 var derivedInstance = new derived();
 derivedInstance.test();
+
+`;
+
+if (classesEnabled())
+    eval(test);
 
 if (typeof reportCompare === 'function')
     reportCompare(0,0,"OK");

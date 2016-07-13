@@ -7,7 +7,7 @@ assertExpr("b = { a() { } }", aExpr("=", ident("b"),
               true}])));
 
 assertExpr("b = { *a() { } }", aExpr("=", ident("b"),
-              objExpr([{ key: ident("a"), value: genFunExpr("es6", ident("a"), [], blockStmt([])), method:
+              objExpr([{ key: ident("a"), value: genFunExpr(ident("a"), [], blockStmt([])), method:
               true}])));
 
 // Method definitions without braces
@@ -19,18 +19,18 @@ assertError("({ a() false })", SyntaxError);
 
 assertExpr("({ get x() { return 42 } })",
            objExpr([ { key: ident("x"),
-                       value: funExpr(ident("get x"), [], blockStmt([returnStmt(lit(42))])),
+                       value: funExpr(null, [], blockStmt([returnStmt(lit(42))])),
                        kind: "get" } ]));
 assertExpr("({ set x(v) { return 42 } })",
            objExpr([ { key: ident("x"),
-                       value: funExpr(ident("set x"), [ident("v")], blockStmt([returnStmt(lit(42))])),
+                       value: funExpr(null, [ident("v")], blockStmt([returnStmt(lit(42))])),
                        kind: "set" } ]));
 
 // Bug 1073809 - Getter/setter syntax with generators
 assertExpr("({*get() { }})", objExpr([{ type: "Property", key: ident("get"), method: true,
-                                        value: genFunExpr("es6", ident("get"), [], blockStmt([]))}]));
+                                        value: genFunExpr(ident("get"), [], blockStmt([]))}]));
 assertExpr("({*set() { }})", objExpr([{ type: "Property", key: ident("set"), method: true,
-                                        value: genFunExpr("es6", ident("set"), [], blockStmt([]))}]));
+                                        value: genFunExpr(ident("set"), [], blockStmt([]))}]));
 assertError("({*get foo() { }})", SyntaxError);
 assertError("({*set foo() { }})", SyntaxError);
 

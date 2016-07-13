@@ -7,7 +7,7 @@ import re
 class TPSTestPhase(object):
 
     lineRe = re.compile(
-        r'^(.*?)test phase (?P<matchphase>[^\s]+): (?P<matchstatus>.*)$')
+        r'^(.*?)test phase (?P<matchphase>\d+): (?P<matchstatus>.*)$')
 
     def __init__(self, phase, profile, testname, testpath, logfile, env,
                  firefoxRunner, logfn, ignore_unused_engines=False):
@@ -24,13 +24,19 @@ class TPSTestPhase(object):
         self.errline = ''
 
     @property
+    def phasenum(self):
+        match = re.match('.*?(\d+)', self.phase)
+        if match:
+            return match.group(1)
+
+    @property
     def status(self):
         return self._status if self._status else 'unknown'
 
     def run(self):
         # launch Firefox
         args = [ '-tps', self.testpath,
-                 '-tpsphase', self.phase,
+                 '-tpsphase', self.phasenum,
                  '-tpslogfile', self.logfile ]
 
         if self.ignore_unused_engines:
@@ -57,7 +63,7 @@ class TPSTestPhase(object):
             # look for the status of the current phase
             match = self.lineRe.match(line)
             if match:
-                if match.group('matchphase') == self.phase:
+                if match.group('matchphase') == self.phasenum:
                     self._status = match.group('matchstatus')
                     break
 

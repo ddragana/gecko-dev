@@ -25,8 +25,6 @@
 class nsIURI;
 class nsOfflineCacheDevice;
 class mozIStorageService;
-class nsILoadContextInfo;
-namespace mozilla { class OriginAttributesPattern; }
 
 class nsApplicationCacheNamespace final : public nsIApplicationCacheNamespace
 {
@@ -142,7 +140,7 @@ public:
   nsresult                EvictUnownedEntries(const char *clientID);
 
   static nsresult         BuildApplicationCacheGroupID(nsIURI *aManifestURL,
-                                                       nsACString const &aOriginSuffix,
+                                                       uint32_t appId, bool isInBrowserElement,
                                                        nsACString &_result);
 
   nsresult                ActivateCache(const nsCSubstring &group,
@@ -169,8 +167,7 @@ public:
   nsresult                CacheOpportunistically(nsIApplicationCache* cache,
                                                  const nsACString &key);
 
-  nsresult                Evict(nsILoadContextInfo *aInfo);
-  nsresult                Evict(mozilla::OriginAttributesPattern const &aPattern);
+  nsresult                DiscardByAppId(int32_t appID, bool isInBrowser);
 
   nsresult                GetGroups(uint32_t *count,char ***keys);
 
@@ -200,6 +197,10 @@ private:
   ~nsOfflineCacheDevice();
 
   friend class nsApplicationCache;
+
+  static PLDHashOperator ShutdownApplicationCache(const nsACString &key,
+                                                  nsIWeakReference *weakRef,
+                                                  void *ctx);
 
   static bool GetStrictFileOriginPolicy();
 
@@ -247,7 +248,7 @@ private:
                           char *** values);
 
   nsCOMPtr<mozIStorageConnection>          mDB;
-  RefPtr<nsOfflineCacheEvictionFunction> mEvictionFunction;
+  nsRefPtr<nsOfflineCacheEvictionFunction> mEvictionFunction;
 
   nsCOMPtr<mozIStorageStatement>  mStatement_CacheSize;
   nsCOMPtr<mozIStorageStatement>  mStatement_ApplicationCacheSize;

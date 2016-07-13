@@ -19,7 +19,6 @@
 <script class="testbody" type="text/javascript;version=1.7">
 
 SimpleTest.waitForExplicitFinish();
-SimpleTest.requestLongerTimeout(2);
 
 let index = 0;
 function next() {
@@ -95,7 +94,7 @@ function testShouldIntercept(done) {
   }, {
     status: "swresponse",
     next: function() {
-      iframe.src = thirdPartyOrigin + basePath + "unregister.html";
+      iframe.src = origin + basePath + "unregister.html";
     }
   }, {
     status: "unregistrationdone",
@@ -122,7 +121,7 @@ function testShouldNotIntercept(done) {
   }, {
     status: "networkresponse",
     next: function() {
-      iframe.src = thirdPartyOrigin + basePath + "unregister.html";
+      iframe.src = origin + basePath + "unregister.html";
     }
   }, {
     status: "unregistrationdone",

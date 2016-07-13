@@ -23,8 +23,8 @@ OverscrollHandoffChain::Add(AsyncPanZoomController* aApzc)
 
 struct CompareByScrollPriority
 {
-  bool operator()(const RefPtr<AsyncPanZoomController>& a,
-                  const RefPtr<AsyncPanZoomController>& b) const
+  bool operator()(const nsRefPtr<AsyncPanZoomController>& a,
+                  const nsRefPtr<AsyncPanZoomController>& b) const
   {
     return a->HasScrollgrab() && !b->HasScrollgrab();
   }
@@ -41,7 +41,7 @@ OverscrollHandoffChain::SortByScrollPriority()
   std::stable_sort(mChain.begin(), mChain.end(), CompareByScrollPriority());
 }
 
-const RefPtr<AsyncPanZoomController>&
+const nsRefPtr<AsyncPanZoomController>&
 OverscrollHandoffChain::GetApzcAtIndex(uint32_t aIndex) const
 {
   MOZ_ASSERT(aIndex < Length());
@@ -107,10 +107,23 @@ OverscrollHandoffChain::SnapBackOverscrolledApzc(const AsyncPanZoomController* a
   uint32_t i = IndexOf(aStart);
   for (; i < Length(); ++i) {
     AsyncPanZoomController* apzc = mChain[i];
-    if (!apzc->IsDestroyed()) {
-      apzc->SnapBackIfOverscrolled();
+    if (!apzc->IsDestroyed() && apzc->SnapBackIfOverscrolled()) {
+      // At most one APZC from |aStart| onwards can be overscrolled.
+      break;
     }
   }
+
+  // In debug builds, verify our assumption that only one APZC from |aStart|
+  // onwards is overscrolled.
+#ifdef DEBUG
+  ++i;
+  for (; i < Length(); ++i) {
+    AsyncPanZoomController* apzc = mChain[i];
+    if (!apzc->IsDestroyed()) {
+      MOZ_ASSERT(!apzc->IsOverscrolled());
+    }
+  }
+#endif
 }
 
 bool
@@ -160,8 +173,8 @@ OverscrollHandoffChain::HasFastFlungApzc() const
   return AnyApzc(&AsyncPanZoomController::IsFlingingFast);
 }
 
-RefPtr<AsyncPanZoomController>
-OverscrollHandoffChain::FindFirstScrollable(const InputData& aInput) const
+nsRefPtr<AsyncPanZoomController>
+OverscrollHandoffChain::FindFirstScrollable(const ScrollWheelInput& aInput) const
 {
   for (size_t i = 0; i < Length(); i++) {
     if (mChain[i]->CanScroll(aInput)) {

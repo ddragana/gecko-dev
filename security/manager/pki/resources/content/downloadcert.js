@@ -1,27 +1,29 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* import-globals-from pippki.js */
-"use strict";
 
 const nsIDialogParamBlock = Components.interfaces.nsIDialogParamBlock;
+const nsIPKIParamBlock = Components.interfaces.nsIPKIParamBlock;
 const nsIX509Cert = Components.interfaces.nsIX509Cert;
 
+var pkiParams;
 var params;
 var caName;
 var cert;
 
 function onLoad()
 {
-  params = window.arguments[0].QueryInterface(nsIDialogParamBlock);
-  cert = params.objects.queryElementAt(0, nsIX509Cert);
+  pkiParams = window.arguments[0].QueryInterface(nsIPKIParamBlock);
+  params = pkiParams.QueryInterface(nsIDialogParamBlock);
+  var isupport = pkiParams.getISupportAtIndex(1);
+  cert = isupport.QueryInterface(nsIX509Cert);
+
+  caName = cert.commonName; 
 
   var bundle = document.getElementById("pippki_bundle");
 
-  caName = cert.commonName;
-  if (caName.length == 0) {
+  if (!caName.length)
     caName = bundle.getString("unnamedCA");
-  }
 
   var message2 = bundle.getFormattedString("newCAMessage1", [caName]);
   setText("message2", message2);
@@ -34,22 +36,27 @@ function viewCert()
 
 function doOK()
 {
-  let checkSSL = document.getElementById("trustSSL");
-  let checkEmail = document.getElementById("trustEmail");
-  let checkObjSign = document.getElementById("trustObjSign");
-
-  // Signal which trust bits the user wanted to enable.
-  params.SetInt(2, checkSSL.checked ? 1 : 0);
-  params.SetInt(3, checkEmail.checked ? 1 : 0);
-  params.SetInt(4, checkObjSign.checked ? 1 : 0);
-
-  // Signal that the user accepted.
-  params.SetInt(1, 1);
+  var checkSSL = document.getElementById("trustSSL");
+  var checkEmail = document.getElementById("trustEmail");
+  var checkObjSign = document.getElementById("trustObjSign");
+  if (checkSSL.checked)
+    params.SetInt(2,1);
+  else
+    params.SetInt(2,0);
+  if (checkEmail.checked)
+    params.SetInt(3,1);
+  else
+    params.SetInt(3,0);
+  if (checkObjSign.checked)
+    params.SetInt(4,1);
+  else
+    params.SetInt(4,0);
+  params.SetInt(1,1);
   return true;
 }
 
 function doCancel()
 {
-  params.SetInt(1, 0); // Signal that the user cancelled.
+  params.SetInt(1,0);
   return true;
 }

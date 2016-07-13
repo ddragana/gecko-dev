@@ -1,8 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* import-globals-from pippki.js */
-"use strict";
+
 
 var gDialog;
 var gBundleBrand;
@@ -25,16 +24,14 @@ badCertListener.prototype = {
   QueryInterface: function(aIID) {
     if (aIID.equals(Components.interfaces.nsIBadCertListener2) ||
         aIID.equals(Components.interfaces.nsIInterfaceRequestor) ||
-        aIID.equals(Components.interfaces.nsISupports)) {
+        aIID.equals(Components.interfaces.nsISupports))
       return this;
-    }
 
-    throw new Error(Components.results.NS_ERROR_NO_INTERFACE);
-  },
+    throw Components.results.NS_ERROR_NO_INTERFACE;
+  },  
   handle_test_result: function () {
-    if (gSSLStatus) {
+    if (gSSLStatus)
       gCert = gSSLStatus.QueryInterface(Components.interfaces.nsISSLStatus).serverCert;
-    }
   },
   notifyCertProblem: function MSR_notifyCertProblem(socketInfo, sslStatus, targetHost) {
     gBroken = true;
@@ -42,7 +39,7 @@ badCertListener.prototype = {
     this.handle_test_result();
     return true; // suppress error UI
   }
-};
+}
 
 function initExceptionDialog() {
   gNeedReset = false;
@@ -57,14 +54,14 @@ function initExceptionDialog() {
   var brandName = gBundleBrand.getString("brandShortName");
   setText("warningText", gPKIBundle.getFormattedString("addExceptionBrandedWarning2", [brandName]));
   gDialog.getButton("extra1").disabled = true;
-
+  
   var args = window.arguments;
   if (args && args[0]) {
     if (args[0].location) {
       // We were pre-seeded with a location.
       document.getElementById("locationTextBox").value = args[0].location;
       document.getElementById('checkCertButton').disabled = false;
-
+      
       if (args[0].sslStatus) {
         gSSLStatus = args[0].sslStatus;
         gCert = gSSLStatus.serverCert;
@@ -80,13 +77,13 @@ function initExceptionDialog() {
         document.getElementById("checkCertButton").disabled = true;
         gChecking = true;
         updateCertStatus();
-
+        
         window.setTimeout(checkCert, 0);
       }
     }
-
+    
     // Set out parameter to false by default
-    args[0].exceptionAdded = false;
+    args[0].exceptionAdded = false; 
   }
 }
 
@@ -95,6 +92,7 @@ function initExceptionDialog() {
  * the Certificate Status section with the result.
  */
 function checkCert() {
+  
   gCert = null;
   gSSLStatus = null;
   gChecking = true;
@@ -105,7 +103,7 @@ function checkCert() {
 
   var req = new XMLHttpRequest();
   try {
-    if (uri) {
+    if(uri) {
       req.open('GET', uri.prePath, false);
       req.channel.notificationCallbacks = new badCertListener();
       req.send(null);
@@ -120,15 +118,14 @@ function checkCert() {
   } finally {
     gChecking = false;
   }
-
-  if (req.channel && req.channel.securityInfo) {
+      
+  if(req.channel && req.channel.securityInfo) {
     const Ci = Components.interfaces;
     gSSLStatus = req.channel.securityInfo
                     .QueryInterface(Ci.nsISSLStatusProvider).SSLStatus;
     gCert = gSSLStatus.QueryInterface(Ci.nsISSLStatus).serverCert;
   }
-
-  updateCertStatus();
+  updateCertStatus();  
 }
 
 /**
@@ -136,25 +133,21 @@ function checkCert() {
  * Certificate Location fields
  */
 function getURI() {
-  // Use fixup service instead of just ioservice's newURI since it's quite
-  // likely that the host will be supplied without a protocol prefix, resulting
-  // in malformed uri exceptions being thrown.
-  let fus = Components.classes["@mozilla.org/docshell/urifixup;1"]
+  // Use fixup service instead of just ioservice's newURI since it's quite likely
+  // that the host will be supplied without a protocol prefix, resulting in malformed
+  // uri exceptions being thrown.
+  var fus = Components.classes["@mozilla.org/docshell/urifixup;1"]
                       .getService(Components.interfaces.nsIURIFixup);
-  let locationTextBox = document.getElementById("locationTextBox");
-  let uri = fus.createFixupURI(locationTextBox.value, 0);
-
-  if (!uri) {
+  var uri = fus.createFixupURI(document.getElementById("locationTextBox").value, 0);
+  
+  if(!uri)
     return null;
-  }
 
-  if (uri.scheme == "http") {
+  if(uri.scheme == "http")
     uri.scheme = "https";
-  }
 
-  if (uri.port == -1) {
+  if (uri.port == -1)
     uri.port = 443;
-  }
 
   return uri;
 }
@@ -191,8 +184,8 @@ function updateCertStatus() {
   var use2 = false;
   var use3 = false;
   let bucketId = gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_BASE;
-  if (gCert) {
-    if (gBroken) {
+  if(gCert) {
+    if(gBroken) { 
       var mms = "addExceptionDomainMismatchShort";
       var mml = "addExceptionDomainMismatchLong2";
       var exs = "addExceptionExpiredShort";
@@ -225,11 +218,13 @@ function updateCertStatus() {
           use1 = true;
           shortDesc = uts;
           longDesc  = utl;
-        } else if (!use2) {
+        }
+        else if (!use2) {
           use2 = true;
           shortDesc2 = uts;
           longDesc2  = utl;
-        } else {
+        } 
+        else {
           use3 = true;
           shortDesc3 = uts;
           longDesc3  = utl;
@@ -286,7 +281,7 @@ function updateCertStatus() {
     gDialog.getButton("extra1").disabled = true;
     document.getElementById("permanent").disabled = true;
   }
-
+  
   setText("statusDescription", gPKIBundle.getString(shortDesc));
   setText("statusLongDescription", gPKIBundle.getString(longDesc));
 
@@ -308,18 +303,17 @@ function updateCertStatus() {
  */
 function viewCertButtonClick() {
   gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_TOP_CLICK_VIEW_CERT);
-  if (gCert) {
+  if (gCert)
     viewCertHelper(this, gCert);
-  }
+    
 }
 
 /**
  * Handle user request to add an exception for the specified cert
  */
 function addException() {
-  if (!gCert || !gSSLStatus) {
+  if(!gCert || !gSSLStatus)
     return;
-  }
 
   var overrideService = Components.classes["@mozilla.org/security/certoverride;1"]
                                   .getService(Components.interfaces.nsICertOverrideService);
@@ -337,12 +331,11 @@ function addException() {
     flags |= overrideService.ERROR_TIME;
     confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_TIME;
   }
-
+  
   var permanentCheckbox = document.getElementById("permanent");
   var shouldStorePermanently = permanentCheckbox.checked && !inPrivateBrowsingMode();
-  if (!permanentCheckbox.checked) {
-    gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_TOP_DONT_REMEMBER_EXCEPTION);
-  }
+  if(!permanentCheckbox.checked)
+   gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_TOP_DONT_REMEMBER_EXCEPTION);
 
   gSecHistogram.add(confirmBucketId);
   var uri = getURI();
@@ -351,12 +344,11 @@ function addException() {
     gCert,
     flags,
     !shouldStorePermanently);
-
-  let args = window.arguments;
-  if (args && args[0]) {
+  
+  var args = window.arguments;
+  if (args && args[0])
     args[0].exceptionAdded = true;
-  }
-
+  
   gDialog.acceptDialog();
 }
 

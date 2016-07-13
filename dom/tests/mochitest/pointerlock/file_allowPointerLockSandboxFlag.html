@@ -32,7 +32,7 @@
 
         SimpleTest.waitForExplicitFinish(1);
 
-        var iframe = document.getElementById("iframe")
+        var iframe
           , iframeDiv
           , contentDocument
           , pointerLocked = 0
@@ -46,7 +46,7 @@
         }
 
         function resetIframe () {
-          contentDocument.exitFullscreen();
+          contentDocument.mozCancelFullScreen();
 
           // remove allow-pointer-lock sandbox flag
           iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
@@ -55,9 +55,7 @@
         }
 
         function startTest () {
-          SimpleTest.waitForFocus(doStartTest, iframe.contentWindow);
-        }
-        function doStartTest() {
+          iframe = document.getElementById("iframe");
           contentDocument = iframe.contentDocument;
           iframeDiv = contentDocument.getElementById("div");
 
@@ -66,29 +64,26 @@
           contentDocument.addEventListener("mozpointerlockchange", function () {
             if (contentDocument.mozPointerLockElement === iframeDiv) {
               pointerLocked++;
-              contentDocument.exitFullscreen();
+              resetIframe();
             }
           });
 
           contentDocument.addEventListener("mozpointerlockerror", function () {
-            contentDocument.exitFullscreen();
+            contentDocument.mozCancelFullScreen();
           });
 
-          contentDocument.addEventListener("fullscreenchange", function () {
-            if (contentDocument.fullscreenElement) {
-              ok(contentDocument.fullscreenElement === iframeDiv,
-                 "Fullscreen element can only be iframe div");
+          contentDocument.addEventListener("mozfullscreenchange", function () {
+            if (contentDocument.mozFullScreen &&
+              contentDocument.mozFullScreenElement === iframeDiv) {
               // during second run iframe won't have allow-pointer-lock flag and
               // mozRequestPointerLock will fail, mozpointerlockerror should be fired
               iframeDiv.mozRequestPointerLock();
-            } else if (numberOfRuns === 1) {
-              resetIframe();
             } else if (numberOfRuns === 2) {
               runTests();
             }
           });
 
-        iframeDiv.requestFullscreen();
+        iframeDiv.mozRequestFullScreen();
       }
       </script>
     </pre>

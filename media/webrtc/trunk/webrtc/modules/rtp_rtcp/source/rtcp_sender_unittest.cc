@@ -185,23 +185,23 @@ TEST(NACKStringBuilderTest, TestCase13) {
   EXPECT_EQ(std::string("5-6,9"), builder.GetResult());
 }
 
-void CreateRtpPacket(const bool marker_bit, const uint8_t payload_type,
+void CreateRtpPacket(const bool marker_bit, const uint8_t payload,
     const uint16_t seq_num, const uint32_t timestamp,
     const uint32_t ssrc, uint8_t* array,
-    size_t* cur_pos) {
-  ASSERT_LE(payload_type, 127);
+    uint16_t* cur_pos) {
+  ASSERT_TRUE(payload <= 127);
   array[(*cur_pos)++] = 0x80;
-  array[(*cur_pos)++] = payload_type | (marker_bit ? 0x80 : 0);
+  array[(*cur_pos)++] = payload | (marker_bit ? 0x80 : 0);
   array[(*cur_pos)++] = seq_num >> 8;
-  array[(*cur_pos)++] = seq_num & 0xFF;
+  array[(*cur_pos)++] = seq_num;
   array[(*cur_pos)++] = timestamp >> 24;
-  array[(*cur_pos)++] = (timestamp >> 16) & 0xFF;
-  array[(*cur_pos)++] = (timestamp >> 8) & 0xFF;
-  array[(*cur_pos)++] = timestamp & 0xFF;
+  array[(*cur_pos)++] = timestamp >> 16;
+  array[(*cur_pos)++] = timestamp >> 8;
+  array[(*cur_pos)++] = timestamp;
   array[(*cur_pos)++] = ssrc >> 24;
-  array[(*cur_pos)++] = (ssrc >> 16) & 0xFF;
-  array[(*cur_pos)++] = (ssrc >> 8) & 0xFF;
-  array[(*cur_pos)++] = ssrc & 0xFF;
+  array[(*cur_pos)++] = ssrc >> 16;
+  array[(*cur_pos)++] = ssrc >> 8;
+  array[(*cur_pos)++] = ssrc;
   // VP8 payload header
   array[(*cur_pos)++] = 0x90;  // X bit = 1
   array[(*cur_pos)++] = 0x20;  // T bit = 1
@@ -227,15 +227,17 @@ class TestTransport : public Transport,
   void SetRTCPReceiver(RTCPReceiver* rtcp_receiver) {
     rtcp_receiver_ = rtcp_receiver;
   }
-  int SendPacket(int /*ch*/, const void* /*data*/, size_t /*len*/) override {
+  virtual int SendPacket(int /*ch*/,
+                         const void* /*data*/,
+                         int /*len*/) OVERRIDE {
     return -1;
   }
 
-  int SendRTCPPacket(int /*ch*/,
-                     const void* packet,
-                     size_t packet_len) override {
+  virtual int SendRTCPPacket(int /*ch*/,
+                             const void *packet,
+                             int packet_len) OVERRIDE {
     RTCPUtility::RTCPParserV2 rtcpParser((uint8_t*)packet,
-                                         packet_len,
+                                         (int32_t)packet_len,
                                          true); // Allow non-compound RTCP
 
     EXPECT_TRUE(rtcpParser.IsValid());
@@ -260,12 +262,12 @@ class TestTransport : public Transport,
     rtcp_packet_info_.ntp_frac = rtcpPacketInformation.ntp_frac;
     rtcp_packet_info_.rtp_timestamp = rtcpPacketInformation.rtp_timestamp;
 
-    return static_cast<int>(packet_len);
+    return packet_len;
   }
 
-  int OnReceivedPayloadData(const uint8_t* payloadData,
-                            const size_t payloadSize,
-                            const WebRtcRTPHeader* rtpHeader) override {
+  virtual int OnReceivedPayloadData(const uint8_t* payloadData,
+                                    const uint16_t payloadSize,
+                                    const WebRtcRTPHeader* rtpHeader) OVERRIDE {
     return 0;
   }
   RTCPReceiver* rtcp_receiver_;
@@ -302,9 +304,8 @@ class RtcpSenderTest : public ::testing::Test {
     rtp_receiver_.reset(RtpReceiver::CreateVideoReceiver(
         0, &clock_, test_transport_, NULL, rtp_payload_registry_.get()));
     rtcp_sender_ =
-        new RTCPSender(0, false, &clock_, receive_statistics_.get(), NULL);
-    rtcp_receiver_ = new RTCPReceiver(0, &clock_, NULL, NULL, NULL,
-                                      rtp_rtcp_impl_);
+        new RTCPSender(0, false, &clock_, receive_statistics_.get());
+    rtcp_receiver_ = new RTCPReceiver(0, &clock_, rtp_rtcp_impl_);
     test_transport_->SetRTCPReceiver(rtcp_receiver_);
     // Initialize
     EXPECT_EQ(0, rtcp_sender_->RegisterSendTransport(test_transport_));
@@ -324,47 +325,47 @@ class RtcpSenderTest : public ::testing::Test {
 
   OverUseDetectorOptions over_use_detector_options_;
   SimulatedClock clock_;
-  rtc::scoped_ptr<RTPPayloadRegistry> rtp_payload_registry_;
-  rtc::scoped_ptr<RtpReceiver> rtp_receiver_;
+  scoped_ptr<RTPPayloadRegistry> rtp_payload_registry_;
+  scoped_ptr<RtpReceiver> rtp_receiver_;
   ModuleRtpRtcpImpl* rtp_rtcp_impl_;
   RTCPSender* rtcp_sender_;
   RTCPReceiver* rtcp_receiver_;
   TestTransport* test_transport_;
   MockRemoteBitrateObserver remote_bitrate_observer_;
-  rtc::scoped_ptr<RemoteBitrateEstimator> remote_bitrate_estimator_;
-  rtc::scoped_ptr<ReceiveStatistics> receive_statistics_;
+  scoped_ptr<RemoteBitrateEstimator> remote_bitrate_estimator_;
+  scoped_ptr<ReceiveStatistics> receive_statistics_;
 
   enum {kMaxPacketLength = 1500};
   uint8_t packet_[kMaxPacketLength];
 };
 
 TEST_F(RtcpSenderTest, RtcpOff) {
-  rtcp_sender_->SetRTCPStatus(kRtcpOff);
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpOff));
   RTCPSender::FeedbackState feedback_state = rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(-1, rtcp_sender_->SendRTCP(feedback_state, kRtcpSr));
 }
 
 TEST_F(RtcpSenderTest, IJStatus) {
   ASSERT_FALSE(rtcp_sender_->IJ());
-  rtcp_sender_->SetIJStatus(true);
-  EXPECT_TRUE(rtcp_sender_->IJ());
+  EXPECT_EQ(0, rtcp_sender_->SetIJStatus(true));
+  ASSERT_TRUE(rtcp_sender_->IJ());
 }
 
 TEST_F(RtcpSenderTest, TestCompound) {
   const bool marker_bit = false;
-  const uint8_t payload_type = 100;
+  const uint8_t payload = 100;
   const uint16_t seq_num = 11111;
   const uint32_t timestamp = 1234567;
   const uint32_t ssrc = 0x11111111;
-  size_t packet_length = 0;
-  CreateRtpPacket(marker_bit, payload_type, seq_num, timestamp, ssrc, packet_,
+  uint16_t packet_length = 0;
+  CreateRtpPacket(marker_bit, payload, seq_num, timestamp, ssrc, packet_,
       &packet_length);
-  EXPECT_EQ(25u, packet_length);
+  EXPECT_EQ(25, packet_length);
 
   VideoCodec codec_inst;
   strncpy(codec_inst.plName, "VP8", webrtc::kPayloadNameSize - 1);
   codec_inst.codecType = webrtc::kVideoCodecVP8;
-  codec_inst.plType = payload_type;
+  codec_inst.plType = payload;
   EXPECT_EQ(0, rtp_receiver_->RegisterReceivePayload(codec_inst.plName,
                                                      codec_inst.plType,
                                                      90000,
@@ -372,7 +373,7 @@ TEST_F(RtcpSenderTest, TestCompound) {
                                                      codec_inst.maxBitrate));
 
   // Make sure RTP packet has been received.
-  rtc::scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
+  scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
   RTPHeader header;
   EXPECT_TRUE(parser->Parse(packet_, packet_length, &header));
   PayloadUnion payload_specific;
@@ -382,8 +383,8 @@ TEST_F(RtcpSenderTest, TestCompound) {
   EXPECT_TRUE(rtp_receiver_->IncomingRtpPacket(header, packet_, packet_length,
                                                payload_specific, true));
 
-  rtcp_sender_->SetIJStatus(true);
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetIJStatus(true));
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   RTCPSender::FeedbackState feedback_state = rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SendRTCP(feedback_state, kRtcpRr));
 
@@ -393,8 +394,8 @@ TEST_F(RtcpSenderTest, TestCompound) {
 }
 
 TEST_F(RtcpSenderTest, TestCompound_NoRtpReceived) {
-  rtcp_sender_->SetIJStatus(true);
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetIJStatus(true));
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   RTCPSender::FeedbackState feedback_state = rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SendRTCP(feedback_state, kRtcpRr));
 
@@ -404,7 +405,7 @@ TEST_F(RtcpSenderTest, TestCompound_NoRtpReceived) {
 }
 
 TEST_F(RtcpSenderTest, TestXrReceiverReferenceTime) {
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   RTCPSender::FeedbackState feedback_state = rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SetSendingStatus(feedback_state, false));
   rtcp_sender_->SendRtcpXrReceiverReferenceTime(true);
@@ -415,7 +416,7 @@ TEST_F(RtcpSenderTest, TestXrReceiverReferenceTime) {
 }
 
 TEST_F(RtcpSenderTest, TestNoXrReceiverReferenceTimeIfSending) {
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   RTCPSender::FeedbackState feedback_state = rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SetSendingStatus(feedback_state, true));
   rtcp_sender_->SendRtcpXrReceiverReferenceTime(true);
@@ -426,7 +427,7 @@ TEST_F(RtcpSenderTest, TestNoXrReceiverReferenceTimeIfSending) {
 }
 
 TEST_F(RtcpSenderTest, TestNoXrReceiverReferenceTimeIfNotEnabled) {
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   RTCPSender::FeedbackState feedback_state = rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SetSendingStatus(feedback_state, false));
   rtcp_sender_->SendRtcpXrReceiverReferenceTime(false);
@@ -437,7 +438,7 @@ TEST_F(RtcpSenderTest, TestNoXrReceiverReferenceTimeIfNotEnabled) {
 }
 
 TEST_F(RtcpSenderTest, TestSendTimeOfXrRrReport) {
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   RTCPSender::FeedbackState feedback_state = rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SetSendingStatus(feedback_state, false));
   rtcp_sender_->SendRtcpXrReceiverReferenceTime(true);
@@ -474,7 +475,7 @@ TEST_F(RtcpSenderTest, TestSendTimeOfXrRrReport) {
 // See http://code.google.com/p/webrtc/issues/detail?id=468 for one
 // situation where this caused confusion.
 TEST_F(RtcpSenderTest, SendsTmmbnIfSetAndEmpty) {
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   TMMBRSet bounding_set;
   EXPECT_EQ(0, rtcp_sender_->SetTMMBN(&bounding_set, 3));
   ASSERT_EQ(0U, test_transport_->rtcp_packet_info_.rtcpPacketTypeFlags);
@@ -493,7 +494,7 @@ TEST_F(RtcpSenderTest, SendsTmmbnIfSetAndEmpty) {
 }
 
 TEST_F(RtcpSenderTest, SendsTmmbnIfSetAndValid) {
-  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   TMMBRSet bounding_set;
   bounding_set.VerifyAndAllocateSet(1);
   const uint32_t kSourceSsrc = 12345;

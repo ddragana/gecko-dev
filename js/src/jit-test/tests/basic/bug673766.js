@@ -13,7 +13,7 @@ try {
         valueOf: gc
     } - [])
 } catch (prop) {}
-function addThis() reportCompare(expect, actual, 'ok');
+function addThis() reportCompare(expect, actual, 'RegExp.multiline = 17');
 Object.defineProperty(Object.prototype, "name", {
     set: function (newValue) {}
 });

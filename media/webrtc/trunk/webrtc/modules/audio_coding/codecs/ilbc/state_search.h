@@ -26,7 +26,7 @@
  *---------------------------------------------------------------*/
 
 void WebRtcIlbcfix_StateSearch(
-    IlbcEncoder *iLBCenc_inst,
+    iLBC_Enc_Inst_t *iLBCenc_inst,
     /* (i) Encoder instance */
     iLBC_bits *iLBC_encbits,/* (i/o) Encoded bits (output idxForMax
                                and idxVec, input state_first) */

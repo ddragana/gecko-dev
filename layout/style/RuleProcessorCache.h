@@ -71,8 +71,7 @@ private:
   {
   public:
     explicit ExpirationTracker(RuleProcessorCache* aCache)
-      : nsExpirationTracker<nsCSSRuleProcessor,3>(
-          10000, "RuleProcessorCache::ExpirationTracker")
+      : nsExpirationTracker<nsCSSRuleProcessor,3>(10000)
       , mCache(aCache) {}
 
     void RemoveObjectIfTracked(nsCSSRuleProcessor* aRuleProcessor);
@@ -111,7 +110,7 @@ private:
 
   struct DocumentEntry {
     nsDocumentRuleResultCacheKey mCacheKey;
-    RefPtr<nsCSSRuleProcessor> mRuleProcessor;
+    nsRefPtr<nsCSSRuleProcessor> mRuleProcessor;
   };
 
   struct Entry {

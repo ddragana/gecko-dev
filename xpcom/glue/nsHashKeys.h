@@ -12,7 +12,7 @@
 #include "nsIHashable.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include <new>
 
 #include "nsStringGlue.h"
@@ -97,7 +97,7 @@ public:
   // To avoid double-counting, only measure the string if it is unshared.
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return GetKey().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    return GetKey().SizeOfExcludingThisMustBeUnshared(aMallocSizeOf);
   }
 #endif
 
@@ -152,7 +152,7 @@ public:
   // To avoid double-counting, only measure the string if it is unshared.
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return GetKey().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    return GetKey().SizeOfExcludingThisMustBeUnshared(aMallocSizeOf);
   }
 
 private:
@@ -189,7 +189,7 @@ public:
   // To avoid double-counting, only measure the string if it is unshared.
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return GetKey().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    return GetKey().SizeOfExcludingThisMustBeUnshared(aMallocSizeOf);
   }
 #endif
 
@@ -345,7 +345,7 @@ public:
   enum { ALLOW_MEMMOVE = true };
 
 private:
-  RefPtr<T> mKey;
+  nsRefPtr<T> mKey;
 };
 
 template<class T>
@@ -651,17 +651,6 @@ private:
   nsCOMPtr<nsIHashable> mKey;
 };
 
-namespace mozilla {
-
-template <typename T>
-PLDHashNumber
-Hash(const T& aValue)
-{
-  return aValue.Hash();
-}
-
-} // namespace mozilla
-
 /**
  * Hashtable key class to use with objects for which Hash() and operator==()
  * are defined.
@@ -680,7 +669,7 @@ public:
   bool KeyEquals(KeyTypePointer aKey) const { return *aKey == mKey; }
 
   static KeyTypePointer KeyToPointer(KeyType aKey) { return &aKey; }
-  static PLDHashNumber HashKey(KeyTypePointer aKey) { return ::mozilla::Hash(*aKey); }
+  static PLDHashNumber HashKey(KeyTypePointer aKey) { return aKey->Hash(); }
   enum { ALLOW_MEMMOVE = true };
 
 private:

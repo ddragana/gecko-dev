@@ -12,8 +12,10 @@ var expect = '';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+jit(true);
 
 y = this.watch("x", function(){}); for each (let y in ['', '']) x = y;
 
+jit(true);
 
 reportCompare(expect, actual, summary);

@@ -4,8 +4,8 @@
 // found in the LICENSE file.
 //
 
-#ifndef COMPILER_TRANSLATOR_VARIABLEINFO_H_
-#define COMPILER_TRANSLATOR_VARIABLEINFO_H_
+#ifndef COMPILER_VARIABLE_INFO_H_
+#define COMPILER_VARIABLE_INFO_H_
 
 #include <GLSLANG/ShaderLang.h>
 
@@ -21,16 +21,16 @@ class CollectVariables : public TIntermTraverser
 {
   public:
     CollectVariables(std::vector<Attribute> *attribs,
-                     std::vector<OutputVariable> *outputVariables,
+                     std::vector<Attribute> *outputVariables,
                      std::vector<Uniform> *uniforms,
                      std::vector<Varying> *varyings,
                      std::vector<InterfaceBlock> *interfaceBlocks,
                      ShHashFunction64 hashFunction,
                      const TSymbolTable &symbolTable);
 
-    void visitSymbol(TIntermSymbol *symbol) override;
-    bool visitAggregate(Visit, TIntermAggregate *node) override;
-    bool visitBinary(Visit visit, TIntermBinary *binaryNode) override;
+    virtual void visitSymbol(TIntermSymbol *symbol);
+    virtual bool visitAggregate(Visit, TIntermAggregate *node);
+    virtual bool visitBinary(Visit visit, TIntermBinary *binaryNode);
 
   private:
     template <typename VarT>
@@ -40,29 +40,19 @@ class CollectVariables : public TIntermTraverser
     void visitInfoList(const TIntermSequence &sequence, std::vector<VarT> *infoList) const;
 
     std::vector<Attribute> *mAttribs;
-    std::vector<OutputVariable> *mOutputVariables;
+    std::vector<Attribute> *mOutputVariables;
     std::vector<Uniform> *mUniforms;
     std::vector<Varying> *mVaryings;
     std::vector<InterfaceBlock> *mInterfaceBlocks;
 
     std::map<std::string, InterfaceBlockField *> mInterfaceBlockFields;
 
-    bool mDepthRangeAdded;
     bool mPointCoordAdded;
     bool mFrontFacingAdded;
     bool mFragCoordAdded;
 
-    bool mInstanceIDAdded;
-    bool mVertexIDAdded;
     bool mPositionAdded;
     bool mPointSizeAdded;
-    bool mLastFragDataAdded;
-    bool mFragColorAdded;
-    bool mFragDataAdded;
-    bool mFragDepthEXTAdded;
-    bool mFragDepthAdded;
-    bool mSecondaryFragColorEXTAdded;
-    bool mSecondaryFragDataEXTAdded;
 
     ShHashFunction64 mHashFunction;
 
@@ -75,4 +65,4 @@ void ExpandUniforms(const std::vector<Uniform> &compact,
 
 }
 
-#endif  // COMPILER_TRANSLATOR_VARIABLEINFO_H_
+#endif  // COMPILER_VARIABLE_INFO_H_

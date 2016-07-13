@@ -4,7 +4,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 include $(CORE_DEPTH)/coreconf/UNIX.mk
-include $(CORE_DEPTH)/coreconf/Werror.mk
 
 DEFAULT_COMPILER = gcc
 
@@ -21,12 +20,10 @@ endif
 ifeq (,$(filter-out i%86,$(CPU_ARCH)))
 ifdef USE_64
 CC              += -arch x86_64
-CCC             += -arch x86_64
 override CPU_ARCH	= x86_64
 else
 OS_REL_CFLAGS	= -Di386
 CC              += -arch i386
-CCC             += -arch i386
 override CPU_ARCH	= x86
 endif
 else
@@ -35,7 +32,6 @@ ifeq (arm,$(CPU_ARCH))
 else
 OS_REL_CFLAGS	= -Dppc
 CC              += -arch ppc
-CCC             += -arch ppc
 endif
 endif
 
@@ -85,7 +81,7 @@ endif
 # definitions so that the linker can catch multiply-defined symbols.
 # Also, common symbols are not allowed with Darwin dynamic libraries.
 
-OS_CFLAGS	= $(DSO_CFLAGS) $(OS_REL_CFLAGS) -fno-common -pipe -DDARWIN -DHAVE_STRERROR -DHAVE_BSD_FLOCK $(DARWIN_SDK_CFLAGS)
+OS_CFLAGS	= $(DSO_CFLAGS) $(OS_REL_CFLAGS) -Wall -fno-common -pipe -DDARWIN -DHAVE_STRERROR -DHAVE_BSD_FLOCK $(DARWIN_SDK_CFLAGS)
 
 ifdef BUILD_OPT
 ifeq (11,$(ALLOW_OPT_CODE_SIZE)$(OPT_CODE_SIZE))
@@ -139,6 +135,3 @@ ifeq (3,$(SYS_SQLITE3_VERSION_MAJOR))
         NSS_USE_SYSTEM_SQLITE = 1
     endif
 endif
-
-include $(CORE_DEPTH)/coreconf/sanitizers.mk
-DARWIN_SDK_SHLIBFLAGS += $(SANITIZER_LDFLAGS)

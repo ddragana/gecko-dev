@@ -9,148 +9,96 @@
 #ifndef jit_arm64_AtomicOperations_arm64_h
 #define jit_arm64_AtomicOperations_arm64_h
 
-#include "mozilla/Assertions.h"
-#include "mozilla/Types.h"
+#include "jit/arm64/Architecture-arm64.h"
+#include "jit/AtomicOperations.h"
 
 inline bool
 js::jit::AtomicOperations::isLockfree8()
 {
-    MOZ_ASSERT(__atomic_always_lock_free(sizeof(int8_t), 0));
-    MOZ_ASSERT(__atomic_always_lock_free(sizeof(int16_t), 0));
-    MOZ_ASSERT(__atomic_always_lock_free(sizeof(int32_t), 0));
-    return true;
+    MOZ_CRASH("isLockfree8()");
 }
 
 inline void
 js::jit::AtomicOperations::fenceSeqCst()
 {
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    MOZ_CRASH("fenceSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::loadSeqCst(T* addr)
 {
-    MOZ_ASSERT(sizeof(T) < 8 || isLockfree8());
-    T v;
-    __atomic_load(addr, &v, __ATOMIC_SEQ_CST);
-    return v;
+    MOZ_CRASH("loadSeqCst()");
 }
 
 template<typename T>
 inline void
 js::jit::AtomicOperations::storeSeqCst(T* addr, T val)
 {
-    MOZ_ASSERT(sizeof(T) < 8 || isLockfree8());
-    __atomic_store(addr, &val, __ATOMIC_SEQ_CST);
+    MOZ_CRASH("storeSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::exchangeSeqCst(T* addr, T val)
 {
-    MOZ_ASSERT(sizeof(T) < 8 || isLockfree8());
-    T v;
-    __atomic_exchange(addr, &val, &v, __ATOMIC_SEQ_CST);
-    return v;
+    MOZ_CRASH("exchangeSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::compareExchangeSeqCst(T* addr, T oldval, T newval)
 {
-    MOZ_ASSERT(sizeof(T) < 8 || isLockfree8());
-    __atomic_compare_exchange(addr, &oldval, &newval, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-    return oldval;
+    MOZ_CRASH("compareExchangeSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::fetchAddSeqCst(T* addr, T val)
 {
-    static_assert(sizeof(T) <= 4, "not available for 8-byte values yet");
-    return __atomic_fetch_add(addr, val, __ATOMIC_SEQ_CST);
+    MOZ_CRASH("fetchAddSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::fetchSubSeqCst(T* addr, T val)
 {
-    static_assert(sizeof(T) <= 4, "not available for 8-byte values yet");
-    return __atomic_fetch_sub(addr, val, __ATOMIC_SEQ_CST);
+    MOZ_CRASH("fetchSubSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::fetchAndSeqCst(T* addr, T val)
 {
-    static_assert(sizeof(T) <= 4, "not available for 8-byte values yet");
-    return __atomic_fetch_and(addr, val, __ATOMIC_SEQ_CST);
+    MOZ_CRASH("fetchAndSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::fetchOrSeqCst(T* addr, T val)
 {
-    static_assert(sizeof(T) <= 4, "not available for 8-byte values yet");
-    return __atomic_fetch_or(addr, val, __ATOMIC_SEQ_CST);
+    MOZ_CRASH("fetchOrSeqCst()");
 }
 
 template<typename T>
 inline T
 js::jit::AtomicOperations::fetchXorSeqCst(T* addr, T val)
 {
-    static_assert(sizeof(T) <= 4, "not available for 8-byte values yet");
-    return __atomic_fetch_xor(addr, val, __ATOMIC_SEQ_CST);
-}
-
-template <typename T>
-inline T
-js::jit::AtomicOperations::loadSafeWhenRacy(T* addr)
-{
-    return *addr; // FIXME (1208663): not yet safe
-}
-
-template <typename T>
-inline void
-js::jit::AtomicOperations::storeSafeWhenRacy(T* addr, T val)
-{
-    *addr = val; // FIXME (1208663): not yet safe
-}
-
-inline void
-js::jit::AtomicOperations::memcpySafeWhenRacy(void* dest, const void* src,
-                                              size_t nbytes)
-{
-    memcpy(dest, src, nbytes); // FIXME (1208663): not yet safe
-}
-
-inline void
-js::jit::AtomicOperations::memmoveSafeWhenRacy(void* dest, const void* src,
-                                               size_t nbytes)
-{
-    memmove(dest, src, nbytes); // FIXME (1208663): not yet safe
+    MOZ_CRASH("fetchXorSeqCst()");
 }
 
 template<size_t nbytes>
 inline void
 js::jit::RegionLock::acquire(void* addr)
 {
-    uint32_t zero = 0;
-    uint32_t one = 1;
-    while (!__atomic_compare_exchange(&spinlock, &zero, &one, false, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) {
-        zero = 0;
-        continue;
-    }
+    MOZ_CRASH("acquire()");
 }
 
 template<size_t nbytes>
 inline void
 js::jit::RegionLock::release(void* addr)
 {
-    MOZ_ASSERT(AtomicOperations::loadSeqCst(&spinlock) == 1, "releasing unlocked region lock");
-    uint32_t zero = 0;
-    __atomic_store(&spinlock, &zero, __ATOMIC_SEQ_CST);
+    MOZ_CRASH("release()");
 }
 
 #endif // jit_arm64_AtomicOperations_arm64_h

@@ -20,15 +20,17 @@ Object.defineProperty(Symbol.prototype, "prop", {
     get: function () {
         "use strict";
         gets++;
-        assertEq(typeof this, "symbol");
-        assertEq(this, sym);
+        assertEq(typeof this, "object");
+        assertEq(this instanceof Symbol, true);
+        assertEq(this.valueOf(), sym);
         return "got";
     },
     set: function (v) {
         "use strict";
         sets++;
-        assertEq(typeof this, "symbol");
-        assertEq(this, sym);
+        assertEq(typeof this, "object");
+        assertEq(this instanceof Symbol, true);
+        assertEq(this.valueOf(), sym);
         assertEq(v, "newvalue");
     }
 });

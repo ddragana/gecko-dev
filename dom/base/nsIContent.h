@@ -40,8 +40,8 @@ enum nsLinkState {
 
 // IID for the nsIContent interface
 #define NS_ICONTENT_IID \
-{ 0x8e1bab9d, 0x8815, 0x4d2c, \
-  { 0xa2, 0x4d, 0x7a, 0xba, 0x52, 0x39, 0xdc, 0x22 } }
+{ 0x70f7e9ea, 0xa9bf, 0x48cc, \
+  { 0xad, 0x9d, 0x8a, 0xca, 0xee, 0xd2, 0x9b, 0x68 } }
 
 /**
  * A node of content in a document's content model. This interface
@@ -74,8 +74,8 @@ public:
    * @param aDocument The new document for the content node.  May not be null
    *                  if aParent is null.  Must match the current document of
    *                  aParent, if aParent is not null (note that
-   *                  aParent->GetUncomposedDoc() can be null, in which case
-   *                  this must also be null).
+   *                  aParent->GetCurrentDoc() can be null, in which case this
+   *                  must also be null).
    * @param aParent The new parent for the content node.  May be null if the
    *                node is being bound as a direct child of the document.
    * @param aBindingParent The new binding parent for the content node.
@@ -229,7 +229,7 @@ public:
   bool IsInAnonymousSubtree() const
   {
     NS_ASSERTION(!IsInNativeAnonymousSubtree() || GetBindingParent() ||
-                 (!IsInUncomposedDoc() &&
+                 (!IsInDoc() &&
                   static_cast<nsIContent*>(SubtreeRoot())->IsInNativeAnonymousSubtree()),
                  "Must have binding parent when in native anonymous subtree which is in document.\n"
                  "Native anonymous subtree which is not in document must have native anonymous root.");
@@ -546,7 +546,7 @@ public:
    * Append the text content to aResult.
    * NOTE: This asserts and returns for elements
    */
-  MOZ_MUST_USE
+  MOZ_WARN_UNUSED_RESULT
   virtual bool AppendTextTo(nsAString& aResult, const mozilla::fallible_t&) = 0;
 
   /**
@@ -581,12 +581,10 @@ public:
    * @param aKeyCausesActivation - if true then element should be activated
    * @param aIsTrustedEvent - if true then event that is cause of accesskey
    *                          execution is trusted.
-   * @return true if the focus was changed.
    */
-  virtual bool PerformAccesskey(bool aKeyCausesActivation,
+  virtual void PerformAccesskey(bool aKeyCausesActivation,
                                 bool aIsTrustedEvent)
   {
-    return false;
   }
 
   /*
@@ -865,9 +863,7 @@ public:
    * Destroy this node and its children. Ideally this shouldn't be needed
    * but for now we need to do it to break cycles.
    */
-  virtual void DestroyContent()
-  {
-  }
+  virtual void DestroyContent() = 0;
 
   /**
    * Saves the form state of this node and its children.
@@ -887,10 +883,10 @@ public:
    */
   nsIFrame* GetPrimaryFrame() const
   {
-    return (IsInUncomposedDoc() || IsInShadowTree()) ? mPrimaryFrame : nullptr;
+    return (IsInDoc() || IsInShadowTree()) ? mPrimaryFrame : nullptr;
   }
   void SetPrimaryFrame(nsIFrame* aFrame) {
-    MOZ_ASSERT(IsInUncomposedDoc() || IsInShadowTree(), "This will end badly!");
+    MOZ_ASSERT(IsInDoc() || IsInShadowTree(), "This will end badly!");
     NS_PRECONDITION(!aFrame || !mPrimaryFrame || aFrame == mPrimaryFrame,
                     "Losing track of existing primary frame");
     mPrimaryFrame = aFrame;
@@ -913,11 +909,11 @@ public:
   mozilla::dom::Element* GetEditingHost();
 
   /**
-   * Determining language. Look at the nearest ancestor element that has a lang
+   * Determing language. Look at the nearest ancestor element that has a lang
    * attribute in the XML namespace or is an HTML/SVG element and has a lang in
-   * no namespace attribute.  Returns false if no language was specified.
+   * no namespace attribute.
    */
-  bool GetLang(nsAString& aResult) const {
+  void GetLang(nsAString& aResult) const {
     for (const nsIContent* content = this; content; content = content->GetParent()) {
       if (content->GetAttrCount() > 0) {
         // xml:lang has precedence over lang on HTML elements (see
@@ -932,11 +928,10 @@ public:
         NS_ASSERTION(hasAttr || aResult.IsEmpty(),
                      "GetAttr that returns false should not make string non-empty");
         if (hasAttr) {
-          return true;
+          return;
         }
       }
     }
-    return false;
   }
 
   // Overloaded from nsINode

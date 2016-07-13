@@ -10,8 +10,6 @@ config = {
         'sendchange',
     ],
     'stage_platform': 'macosx64-mulet',
-    'publish_nightly_en_US_routes': False,
-    'build_type': 'mulet-opt',
     'stage_product': 'b2g',
     'tooltool_manifest_src': "b2g/dev/config/tooltool-manifests/macosx64/releng.manifest",
     'objdir': 'obj-firefox',
@@ -39,5 +37,6 @@ config = {
         ##
     },
     'src_mozconfig': 'b2g/dev/config/mozconfigs/macosx64/mulet',
+    'purge_minsize': 10,
     #######################
 }

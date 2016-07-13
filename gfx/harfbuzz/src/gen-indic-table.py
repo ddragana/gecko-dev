@@ -91,7 +91,6 @@ short = [{
 	"Visarga":		'Vs',
 	"Vowel":		'Vo',
 	"Vowel_Dependent":	'M',
-	"Consonant_Prefixed":	'CPrf',
 	"Other":		'x',
 },{
 	"Not_Applicable":	'x',

@@ -11,9 +11,9 @@
 
 #if defined(WEBRTC_WIN)
 #include "webrtc/base/win32.h"
-#else  // !WEBRTC_WIN
+#else  // !WEBRTC_WIN 
 #define SEC_E_CERT_EXPIRED (-2146893016)
-#endif  // !WEBRTC_WIN
+#endif  // !WEBRTC_WIN 
 
 #include "webrtc/base/common.h"
 #include "webrtc/base/httpbase.h"
@@ -234,7 +234,7 @@ public:
   BlockingMemoryStream(char* buffer, size_t size)
   : ExternalMemoryStream(buffer, size) { }
 
-  StreamResult DoReserve(size_t size, int* error) override {
+  virtual StreamResult DoReserve(size_t size, int* error) {
     return (buffer_length_ >= size) ? SR_SUCCESS : SR_BLOCK;
   }
 };
@@ -243,7 +243,7 @@ class HttpBase::DocumentStream : public StreamInterface {
 public:
   DocumentStream(HttpBase* base) : base_(base), error_(HE_DEFAULT) { }
 
-  StreamState GetState() const override {
+  virtual StreamState GetState() const {
     if (NULL == base_)
       return SS_CLOSED;
     if (HM_RECV == base_->mode_)
@@ -251,10 +251,8 @@ public:
     return SS_OPENING;
   }
 
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override {
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error) {
     if (!base_) {
       if (error) *error = error_;
       return (HE_NONE == error_) ? SR_EOS : SR_ERROR;
@@ -311,15 +309,13 @@ public:
     return result;
   }
 
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override {
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error) {
     if (error) *error = -1;
     return SR_ERROR;
   }
 
-  void Close() override {
+  virtual void Close() {
     if (base_) {
       HttpBase* base = Disconnect(HE_NONE);
       if (HM_RECV == base->mode_ && base->http_stream_) {
@@ -330,7 +326,7 @@ public:
     }
   }
 
-  bool GetAvailable(size_t* size) const override {
+  virtual bool GetAvailable(size_t* size) const {
     if (!base_ || HM_RECV != base_->mode_)
       return false;
     size_t data_size = base_->GetDataRemaining();
@@ -532,9 +528,8 @@ bool HttpBase::DoReceiveLoop(HttpError* error) {
         // Attempt to process the data already in our buffer.
         break;
       case SR_EOS:
-        // Clean close, with no error.
+        // Clean close, with no error.  Fall through to HandleStreamClose.
         read_error = 0;
-        FALLTHROUGH();  // Fall through to HandleStreamClose.
       case SR_ERROR:
         *error = HandleStreamClose(read_error);
         return true;

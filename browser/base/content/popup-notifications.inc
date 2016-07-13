@@ -2,10 +2,10 @@
 
     <panel id="notification-popup"
            type="arrow"
+           footertype="promobox"
            position="after_start"
            hidden="true"
            orient="vertical"
-           noautofocus="true"
            role="alert"/>
 
     <popupnotification id="webRTC-shareDevices-notification" hidden="true">
@@ -38,6 +38,10 @@
       </popupnotificationcontent>
     </popupnotification>
 
+    <popupnotification id="webapps-install-progress-notification" hidden="true">
+      <popupnotificationcontent id="webapps-install-progress-content" orient="vertical" align="start"/>
+    </popupnotification>
+
     <popupnotification id="servicesInstall-notification" hidden="true">
       <popupnotificationcontent orient="vertical" align="start">
         <!-- XXX bug 974146, tests are looking for this, can't remove yet. -->
@@ -54,7 +58,6 @@
       <popupnotificationcontent orient="vertical">
         <textbox id="password-notification-username"/>
         <textbox id="password-notification-password" type="password" show-content=""/>
-        <checkbox id="password-notification-visibilityToggle" hidden="true"/>
       </popupnotificationcontent>
     </popupnotification>
 
@@ -74,6 +77,12 @@
         </hbox>
       </vbox>
     </stack>
+
+#ifdef E10S_TESTING_ONLY
+    <popupnotification id="enable-e10s-notification" hidden="true">
+      <popupnotificationcontent orient="vertical"/>
+    </popupnotification>
+#endif
 
     <popupnotification id="addon-progress-notification" hidden="true">
       <popupnotificationcontent orient="vertical">

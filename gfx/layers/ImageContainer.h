@@ -15,7 +15,6 @@
 #include "mozilla/ReentrantMonitor.h"   // for ReentrantMonitorAutoEnter, etc
 #include "mozilla/TimeStamp.h"          // for TimeStamp
 #include "mozilla/gfx/Point.h"          // For IntSize
-#include "mozilla/layers/GonkNativeHandle.h"
 #include "mozilla/layers/LayersTypes.h"  // for LayersBackend, etc
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoArrayPtr, etc
@@ -31,7 +30,6 @@
 #include "mozilla/gfx/2D.h"
 #include "nsDataHashtable.h"
 #include "mozilla/EnumeratedArray.h"
-#include "mozilla/UniquePtr.h"
 
 #ifndef XPCOM_GLUE_AVOID_NSPR
 /**
@@ -56,7 +54,7 @@ public:
   /**
    * The XPCOM event that will do the actual release on the main thread.
    */
-  class SurfaceReleaser : public mozilla::Runnable {
+  class SurfaceReleaser : public nsRunnable {
   public:
     explicit SurfaceReleaser(RawRef aRef) : mRef(aRef) {}
     NS_IMETHOD Run() {
@@ -84,50 +82,6 @@ public:
   }
 };
 
-class nsOwningThreadSourceSurfaceRef;
-
-template <>
-class nsAutoRefTraits<nsOwningThreadSourceSurfaceRef> {
-public:
-  typedef mozilla::gfx::SourceSurface* RawRef;
-
-  /**
-   * The XPCOM event that will do the actual release on the creation thread.
-   */
-  class SurfaceReleaser : public mozilla::Runnable {
-  public:
-    explicit SurfaceReleaser(RawRef aRef) : mRef(aRef) {}
-    NS_IMETHOD Run() {
-      mRef->Release();
-      return NS_OK;
-    }
-    RawRef mRef;
-  };
-
-  static RawRef Void() { return nullptr; }
-  void Release(RawRef aRawRef)
-  {
-    MOZ_ASSERT(mOwningThread);
-    bool current;
-    mOwningThread->IsOnCurrentThread(&current);
-    if (current) {
-      aRawRef->Release();
-      return;
-    }
-    nsCOMPtr<nsIRunnable> runnable = new SurfaceReleaser(aRawRef);
-    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
-  }
-  void AddRef(RawRef aRawRef)
-  {
-    MOZ_ASSERT(!mOwningThread);
-    NS_GetCurrentThread(getter_AddRefs(mOwningThread));
-    aRawRef->AddRef();
-  }
-
-private:
-  nsCOMPtr<nsIThread> mOwningThread;
-};
-
 #endif
 
 #ifdef XP_WIN
@@ -148,11 +102,9 @@ class ImageCompositeNotification;
 class ImageContainerChild;
 class PImageContainerChild;
 class SharedPlanarYCbCrImage;
-class PlanarYCbCrImage;
 class TextureClient;
 class CompositableClient;
 class GrallocImage;
-class NVImage;
 
 struct ImageBackendData
 {
@@ -161,17 +113,6 @@ struct ImageBackendData
 protected:
   ImageBackendData() {}
 };
-
-/* Forward declarations for Image derivatives. */
-class EGLImageImage;
-class SharedRGBImage;
-#ifdef MOZ_WIDGET_ANDROID
-class SurfaceTextureImage;
-#elif defined(XP_MACOSX)
-class MacIOSurfaceImage;
-#elif defined(MOZ_WIDGET_GONK)
-class OverlayImage;
-#endif
 
 /**
  * A class representing a buffer of pixel data. The data can be in one
@@ -195,13 +136,9 @@ public:
   void* GetImplData() { return mImplData; }
 
   virtual gfx::IntSize GetSize() = 0;
-  virtual gfx::IntPoint GetOrigin()
-  {
-    return gfx::IntPoint(0, 0);
-  }
   virtual gfx::IntRect GetPictureRect()
   {
-    return gfx::IntRect(GetOrigin().x, GetOrigin().y, GetSize().width, GetSize().height);
+    return gfx::IntRect(0, 0, GetSize().width, GetSize().height);
   }
 
   ImageBackendData* GetBackendData(LayersBackend aBackend)
@@ -223,22 +160,10 @@ public:
   virtual uint8_t* GetBuffer() { return nullptr; }
 
   /**
-   * For use with the CompositableClient only (so that the later can
-   * synchronize the TextureClient with the TextureHost).
-   */
+  * For use with the CompositableClient only (so that the later can
+  * synchronize the TextureClient with the TextureHost).
+  */
   virtual TextureClient* GetTextureClient(CompositableClient* aClient) { return nullptr; }
-
-  /* Access to derived classes. */
-  virtual EGLImageImage* AsEGLImageImage() { return nullptr; }
-#ifdef MOZ_WIDGET_ANDROID
-  virtual SurfaceTextureImage* AsSurfaceTextureImage() { return nullptr; }
-#endif
-#ifdef XP_MACOSX
-  virtual MacIOSurfaceImage* AsMacIOSurfaceImage() { return nullptr; }
-#endif
-  virtual PlanarYCbCrImage* AsPlanarYCbCrImage() { return nullptr; }
-
-  virtual NVImage* AsNVImage() { return nullptr; }
 
 protected:
   Image(void* aImplData, ImageFormat aFormat) :
@@ -258,6 +183,7 @@ protected:
   void* mImplData;
   int32_t mSerial;
   ImageFormat mFormat;
+  bool mSent;
 
   static mozilla::Atomic<int32_t> sSerialCounter;
 };
@@ -277,10 +203,10 @@ class BufferRecycleBin final {
 public:
   BufferRecycleBin();
 
-  void RecycleBuffer(mozilla::UniquePtr<uint8_t[]> aBuffer, uint32_t aSize);
+  void RecycleBuffer(uint8_t* aBuffer, uint32_t aSize);
   // Returns a recycled buffer of the right size, or allocates a new buffer.
-  mozilla::UniquePtr<uint8_t[]> GetBuffer(uint32_t aSize);
-  virtual void ClearRecycledBuffers();
+  uint8_t* GetBuffer(uint32_t aSize);
+
 private:
   typedef mozilla::Mutex Mutex;
 
@@ -295,7 +221,7 @@ private:
 
   // We should probably do something to prune this list on a timer so we don't
   // eat excess memory while video is paused...
-  nsTArray<mozilla::UniquePtr<uint8_t[]>> mRecycledBuffers;
+  nsTArray<nsAutoArrayPtr<uint8_t> > mRecycledBuffers;
   // This is only valid if mRecycledBuffers is non-empty
   uint32_t mRecycledBufferSize;
 };
@@ -325,9 +251,10 @@ protected:
   ImageFactory() {}
   virtual ~ImageFactory() {}
 
-  virtual RefPtr<PlanarYCbCrImage> CreatePlanarYCbCrImage(
-    const gfx::IntSize& aScaleHint,
-    BufferRecycleBin *aRecycleBin);
+  virtual already_AddRefed<Image> CreateImage(ImageFormat aFormat,
+                                              const gfx::IntSize &aScaleHint,
+                                              BufferRecycleBin *aRecycleBin);
+
 };
  
 /**
@@ -357,21 +284,23 @@ class ImageContainer final : public SupportsWeakPtr<ImageContainer> {
 public:
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(ImageContainer)
 
-  enum Mode { SYNCHRONOUS = 0x0, ASYNCHRONOUS = 0x01 };
+  enum Mode { SYNCHRONOUS = 0x0, ASYNCHRONOUS = 0x01, ASYNCHRONOUS_OVERLAY = 0x02 };
 
   explicit ImageContainer(ImageContainer::Mode flag = SYNCHRONOUS);
 
-  typedef uint32_t FrameID;
-  typedef uint32_t ProducerID;
+  typedef int32_t FrameID;
+  typedef int32_t ProducerID;
 
-  RefPtr<PlanarYCbCrImage> CreatePlanarYCbCrImage();
 
-  // Factory methods for shared image types.
-  RefPtr<SharedRGBImage> CreateSharedRGBImage();
-
-#ifdef MOZ_WIDGET_GONK
-  RefPtr<OverlayImage> CreateOverlayImage();
-#endif
+  /**
+   * Create an Image in one of the given formats.
+   * Picks the "best" format from the list and creates an Image of that
+   * format.
+   * Returns null if this backend does not support any of the formats.
+   * Can be called on any thread. This method takes mReentrantMonitor
+   * when accessing thread-shared state.
+   */
+  B2G_ACL_EXPORT already_AddRefed<Image> CreateImage(ImageFormat aFormat);
 
   struct NonOwningImage {
     explicit NonOwningImage(Image* aImage = nullptr,
@@ -419,12 +348,6 @@ public:
   void ClearAllImages();
 
   /**
-   * Clear any resources that are not immediately necessary. This may be called
-   * in low-memory conditions.
-   */
-  void ClearCachedResources();
-
-  /**
    * Clear the current images.
    * This function is expect to be called only from a CompositableClient
    * that belongs to ImageBridgeChild. Created to prevent dead lock.
@@ -447,7 +370,6 @@ public:
    * You won't get meaningful painted/dropped counts when using this method.
    */
   void SetCurrentImageInTransaction(Image* aImage);
-  void SetCurrentImagesInTransaction(const nsTArray<NonOwningImage>& aImages);
 
   /**
    * Returns true if this ImageContainer uses the ImageBridge IPDL protocol.
@@ -475,7 +397,7 @@ public:
 
   struct OwningImage {
     OwningImage() : mFrameID(0), mProducerID(0), mComposited(false) {}
-    RefPtr<Image> mImage;
+    nsRefPtr<Image> mImage;
     TimeStamp mTimeStamp;
     FrameID mFrameID;
     ProducerID mProducerID;
@@ -567,17 +489,11 @@ public:
    */
   static ProducerID AllocateProducerID();
 
-  /// ImageBridgeChild thread only.
-  static void AsyncDestroyActor(PImageContainerChild* aActor);
-
-  /// ImageBridgeChild thread only.
-  static void DeallocActor(PImageContainerChild* aActor);
-
 private:
   typedef mozilla::ReentrantMonitor ReentrantMonitor;
 
   // Private destructor, to discourage deletion outside of Release():
-  ~ImageContainer();
+  B2G_ACL_EXPORT ~ImageContainer();
 
   void SetCurrentImageInternal(const nsTArray<NonOwningImage>& aImages);
 
@@ -612,11 +528,11 @@ private:
   // This is the image factory used by this container, layer managers using
   // this container can set an alternative image factory that will be used to
   // create images for this container.
-  RefPtr<ImageFactory> mImageFactory;
+  nsRefPtr<ImageFactory> mImageFactory;
 
   gfx::IntSize mScaleHint;
 
-  RefPtr<BufferRecycleBin> mRecycleBin;
+  nsRefPtr<BufferRecycleBin> mRecycleBin;
 
   // This member points to an ImageClient if this ImageContainer was
   // sucessfully created with ENABLE_ASYNC, or points to null otherwise.
@@ -654,7 +570,7 @@ public:
   }
 
 private:
-  AutoTArray<ImageContainer::OwningImage,4> mImages;
+  nsAutoTArray<ImageContainer::OwningImage,4> mImages;
 };
 
 struct PlanarYCbCrData {
@@ -734,27 +650,27 @@ public:
     MAX_DIMENSION = 16384
   };
 
-  virtual ~PlanarYCbCrImage() {}
+  virtual ~PlanarYCbCrImage();
 
   /**
    * This makes a copy of the data buffers, in order to support functioning
    * in all different layer managers.
    */
-  virtual bool CopyData(const Data& aData) = 0;
+  virtual void SetData(const Data& aData);
 
   /**
    * This doesn't make a copy of the data buffers. Can be used when mBuffer is
-   * pre allocated with AllocateAndGetNewBuffer(size) and then AdoptData is
+   * pre allocated with AllocateAndGetNewBuffer(size) and then SetDataNoCopy is
    * called to only update the picture size, planes etc. fields in mData.
    * The GStreamer media backend uses this to decode into PlanarYCbCrImage(s)
    * directly.
    */
-  virtual bool AdoptData(const Data &aData);
+  virtual void SetDataNoCopy(const Data &aData);
 
   /**
    * This allocates and returns a new buffer
    */
-  virtual uint8_t* AllocateAndGetNewBuffer(uint32_t aSize) = 0;
+  virtual uint8_t* AllocateAndGetNewBuffer(uint32_t aSize);
 
   /**
    * Ask this Image to not convert YUV to RGB during SetData, and make
@@ -777,9 +693,7 @@ public:
 
   virtual gfx::IntSize GetSize() { return mSize; }
 
-  virtual gfx::IntPoint GetOrigin() { return mOrigin; }
-
-  explicit PlanarYCbCrImage();
+  explicit PlanarYCbCrImage(BufferRecycleBin *aRecycleBin);
 
   virtual SharedPlanarYCbCrImage *AsSharedPlanarYCbCrImage() { return nullptr; }
 
@@ -787,91 +701,60 @@ public:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const = 0;
-
-  PlanarYCbCrImage* AsPlanarYCbCrImage() { return this; }
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
 
 protected:
+  /**
+   * Make a copy of the YCbCr data into local storage.
+   *
+   * @param aData           Input image data.
+   */
+  void CopyData(const Data& aData);
+
+  /**
+   * Return a buffer to store image data in.
+   * The default implementation returns memory that can
+   * be freed wit delete[]
+   */
+  virtual uint8_t* AllocateBuffer(uint32_t aSize);
+
   already_AddRefed<gfx::SourceSurface> GetAsSourceSurface();
 
   void SetOffscreenFormat(gfxImageFormat aFormat) { mOffscreenFormat = aFormat; }
   gfxImageFormat GetOffscreenFormat();
 
+  nsAutoArrayPtr<uint8_t> mBuffer;
+  uint32_t mBufferSize;
   Data mData;
-  gfx::IntPoint mOrigin;
   gfx::IntSize mSize;
   gfxImageFormat mOffscreenFormat;
   nsCountedRef<nsMainThreadSourceSurfaceRef> mSourceSurface;
-  uint32_t mBufferSize;
-};
-
-class RecyclingPlanarYCbCrImage: public PlanarYCbCrImage {
-public:
-  explicit RecyclingPlanarYCbCrImage(BufferRecycleBin *aRecycleBin) : mRecycleBin(aRecycleBin) {}
-  virtual ~RecyclingPlanarYCbCrImage() override;
-  virtual bool CopyData(const Data& aData) override;
-  virtual uint8_t* AllocateAndGetNewBuffer(uint32_t aSize) override;
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-protected:
-
-  /**
-   * Return a buffer to store image data in.
-   */
-  mozilla::UniquePtr<uint8_t[]> AllocateBuffer(uint32_t aSize);
-
-  RefPtr<BufferRecycleBin> mRecycleBin;
-  mozilla::UniquePtr<uint8_t[]> mBuffer;
+  nsRefPtr<BufferRecycleBin> mRecycleBin;
 };
 
 /**
- * NVImage is used to store YUV420SP_NV12 and YUV420SP_NV21 data natively, which
- * are not supported by PlanarYCbCrImage. (PlanarYCbCrImage only stores YUV444P,
- * YUV422P and YUV420P, it converts YUV420SP_NV12 and YUV420SP_NV21 data into
- * YUV420P in its PlanarYCbCrImage::SetData() method.)
- *
- * PlanarYCbCrData is able to express all the YUV family and so we keep use it
- * in NVImage.
- */
-class NVImage: public Image {
-  typedef PlanarYCbCrData Data;
-
-public:
-  explicit NVImage();
-  virtual ~NVImage() override;
-
-  // Methods inherited from layers::Image.
-  virtual gfx::IntSize GetSize() override;
-  virtual gfx::IntRect GetPictureRect() override;
-  virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
-  virtual bool IsValid() override;
-  virtual NVImage* AsNVImage() override;
-
-  // Methods mimic layers::PlanarYCbCrImage.
-  virtual bool SetData(const Data& aData);
-  virtual const Data* GetData() const;
-  virtual uint32_t GetBufferSize() const;
-
-protected:
-
-  /**
-   * Return a buffer to store image data in.
-   */
-  mozilla::UniquePtr<uint8_t> AllocateBuffer(uint32_t aSize);
-
-  mozilla::UniquePtr<uint8_t> mBuffer;
-  uint32_t mBufferSize;
-  gfx::IntSize mSize;
-  Data mData;
-  nsCountedRef<nsMainThreadSourceSurfaceRef> mSourceSurface;
-};
-
-/**
- * Currently, the data in a SourceSurfaceImage surface is treated as being in the
+ * Currently, the data in a CairoImage surface is treated as being in the
  * device output color space. This class is very simple as all backends
  * have to know about how to deal with drawing a cairo image.
  */
-class SourceSurfaceImage final : public Image {
+class CairoImage final : public Image {
 public:
+  struct Data {
+    gfx::IntSize mSize;
+    RefPtr<gfx::SourceSurface> mSourceSurface;
+  };
+
+  /**
+   * This can only be called on the main thread. It may add a reference
+   * to the surface (which will eventually be released on the main thread).
+   * The surface must not be modified after this call!!!
+   */
+  void SetData(const Data& aData)
+  {
+    mSize = aData.mSize;
+    mSourceSurface = aData.mSourceSurface;
+  }
+
   virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override
   {
     RefPtr<gfx::SourceSurface> surface(mSourceSurface);
@@ -882,13 +765,12 @@ public:
 
   virtual gfx::IntSize GetSize() override { return mSize; }
 
-  SourceSurfaceImage(const gfx::IntSize& aSize, gfx::SourceSurface* aSourceSurface);
-  explicit SourceSurfaceImage(gfx::SourceSurface* aSourceSurface);
-  ~SourceSurfaceImage();
+  CairoImage();
+  ~CairoImage();
 
-private:
   gfx::IntSize mSize;
-  nsCountedRef<nsOwningThreadSourceSurfaceRef> mSourceSurface;
+
+  nsCountedRef<nsMainThreadSourceSurfaceRef> mSourceSurface;
   nsDataHashtable<nsUint32HashKey, RefPtr<TextureClient> >  mTextureClients;
 };
 
@@ -906,36 +788,21 @@ public:
     gfx::IntSize mSize;
   };
 
-  struct SidebandStreamData {
-    GonkNativeHandle mStream;
-    gfx::IntSize mSize;
-  };
-
   OverlayImage() : Image(nullptr, ImageFormat::OVERLAY_IMAGE) { mOverlayId = INVALID_OVERLAY; }
 
   void SetData(const Data& aData)
   {
     mOverlayId = aData.mOverlayId;
     mSize = aData.mSize;
-    mSidebandStream = GonkNativeHandle();
-  }
-
-  void SetData(const SidebandStreamData& aData)
-  {
-    mSidebandStream = aData.mStream;
-    mSize = aData.mSize;
-    mOverlayId = INVALID_OVERLAY;
   }
 
   already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() { return nullptr; } ;
   int32_t GetOverlayId() { return mOverlayId; }
-  GonkNativeHandle& GetSidebandStream() { return mSidebandStream; }
 
   gfx::IntSize GetSize() { return mSize; }
 
 private:
   int32_t mOverlayId;
-  GonkNativeHandle mSidebandStream;
   gfx::IntSize mSize;
 };
 #endif

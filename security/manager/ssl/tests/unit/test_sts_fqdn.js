@@ -7,44 +7,50 @@
 function run_test() {
   let SSService = Cc["@mozilla.org/ssservice;1"]
                     .getService(Ci.nsISiteSecurityService);
-  ok(!SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                             "example.com", 0));
-  ok(!SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                             "example.com.", 0));
+  do_check_false(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                        "example.com", 0));
+  do_check_false(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                        "example.com.", 0));
   // These cases are only relevant as long as bug 1118522 hasn't been fixed.
-  ok(!SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                             "example.com..", 0));
+  do_check_false(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                        "example.com..", 0));
 
   let uri = Services.io.newURI("https://example.com", null, null);
   let sslStatus = new FakeSSLStatus();
   SSService.processHeader(Ci.nsISiteSecurityService.HEADER_HSTS, uri,
                           "max-age=1000;includeSubdomains", sslStatus, 0);
-  ok(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                            "example.com", 0));
-  ok(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                            "example.com.", 0));
-  ok(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                            "example.com..", 0));
+  do_check_true(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                       "example.com", 0));
+  do_check_true(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                       "example.com.", 0));
+  do_check_true(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                       "example.com..", 0));
 
-  ok(SSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS, uri, 0));
+  do_check_true(SSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                      uri, 0));
   uri = Services.io.newURI("https://example.com.", null, null);
-  ok(SSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS, uri, 0));
+  do_check_true(SSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                      uri, 0));
   uri = Services.io.newURI("https://example.com..", null, null);
-  ok(SSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS, uri, 0));
+  do_check_true(SSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                      uri, 0));
 
   SSService.removeState(Ci.nsISiteSecurityService.HEADER_HSTS, uri, 0);
-  ok(!SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                             "example.com", 0));
-  ok(!SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                             "example.com.", 0));
-  ok(!SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
-                             "example.com..", 0));
+  do_check_false(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                        "example.com", 0));
+  do_check_false(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                        "example.com.", 0));
+  do_check_false(SSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS,
+                                        "example.com..", 0));
 
   // Somehow creating this malformed URI succeeds - we need to handle it
   // gracefully.
   uri = Services.io.newURI("https://../foo", null, null);
-  equal(uri.host, "..");
-  throws(() => {
+  do_check_eq(uri.host, "..");
+  try {
     SSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS, uri, 0);
-  }, /NS_ERROR_UNEXPECTED/, "Malformed URI should be rejected");
+    do_check_false(true); // this shouldn't run
+  } catch (e) {
+    do_check_eq(e.result, Cr.NS_ERROR_UNEXPECTED);
+  }
 }

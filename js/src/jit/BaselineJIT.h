@@ -94,31 +94,23 @@ struct PCMappingIndexEntry
     uint32_t bufferOffset;
 };
 
-// Describes a single wasm::ImportExit which jumps (via an import with
-// the given index) directly to a BaselineScript or IonScript.
-struct DependentWasmImport
+// Describes a single AsmJSModule which jumps (via an FFI exit with the given
+// index) directly to a BaselineScript or IonScript.
+struct DependentAsmJSModuleExit
 {
-    wasm::Instance* instance;
-    size_t importIndex;
+    const AsmJSModule* module;
+    size_t exitIndex;
 
-    DependentWasmImport(wasm::Instance& instance, size_t importIndex)
-      : instance(&instance),
-        importIndex(importIndex)
+    DependentAsmJSModuleExit(const AsmJSModule* module, size_t exitIndex)
+      : module(module),
+        exitIndex(exitIndex)
     { }
 };
 
 struct BaselineScript
 {
   public:
-    // Largest script that the baseline compiler will attempt to compile.
-#if defined(JS_CODEGEN_ARM)
-    // ARM branches can only reach 32MB, and the macroassembler doesn't mitigate
-    // that limitation. Use a stricter limit on the acceptable script size to
-    // avoid crashing when branches go out of range.
-    static const uint32_t MAX_JSSCRIPT_LENGTH = 1000000u;
-#else
     static const uint32_t MAX_JSSCRIPT_LENGTH = 0x0fffffffu;
-#endif
 
     // Limit the locals on a given script so that stack check on baseline frames
     // doesn't overflow a uint32_t value.
@@ -127,19 +119,18 @@ struct BaselineScript
 
   private:
     // Code pointer containing the actual method.
-    HeapPtr<JitCode*> method_;
+    RelocatablePtrJitCode method_;
 
-    // For functions with a call object, template objects to use for the call
-    // object and decl env object (linked via the call object's enclosing
-    // scope).
-    HeapPtr<JSObject*> templateScope_;
+    // For heavyweight scripts, template objects to use for the call object and
+    // decl env object (linked via the call object's enclosing scope).
+    RelocatablePtrObject templateScope_;
 
     // Allocated space for fallback stubs.
     FallbackICStubSpace fallbackStubSpace_;
 
-    // If non-null, the list of wasm::Modules that contain an optimized call
+    // If non-null, the list of AsmJSModules that contain an optimized call
     // directly to this script.
-    Vector<DependentWasmImport>* dependentWasmImports_;
+    Vector<DependentAsmJSModuleExit>* dependentAsmJSModules_;
 
     // Native code offset right before the scope chain is initialized.
     uint32_t prologueOffset_;
@@ -233,9 +224,6 @@ struct BaselineScript
     // more info.
     uint8_t maxInliningDepth_;
 
-    // An ion compilation that is ready, but isn't linked yet.
-    IonBuilder *pendingBuilder_;
-
   public:
     // Do not call directly, use BaselineScript::New. This is public for cx->new_.
     BaselineScript(uint32_t prologueOffset, uint32_t epilogueOffset,
@@ -244,12 +232,6 @@ struct BaselineScript
                    uint32_t traceLoggerEnterToggleOffset,
                    uint32_t traceLoggerExitToggleOffset,
                    uint32_t postDebugPrologueOffset);
-
-    ~BaselineScript() {
-        // The contents of the fallback stub space are removed and freed
-        // separately after the next minor GC. See BaselineScript::Destroy.
-        MOZ_ASSERT(fallbackStubSpace_.isEmpty());
-    }
 
     static BaselineScript* New(JSScript* jsscript, uint32_t prologueOffset,
                                uint32_t epilogueOffset, uint32_t postDebugPrologueOffset,
@@ -370,8 +352,8 @@ struct BaselineScript
         templateScope_ = templateScope;
     }
 
-    void toggleBarriers(bool enabled, ReprotectCode reprotect = Reprotect) {
-        method()->togglePreBarriers(enabled, reprotect);
+    void toggleBarriers(bool enabled) {
+        method()->togglePreBarriers(enabled);
     }
 
     bool containsCodeAddress(uint8_t* addr) const {
@@ -379,12 +361,11 @@ struct BaselineScript
     }
 
     ICEntry& icEntry(size_t index);
-    ICEntry& icEntryFromReturnOffset(CodeOffset returnOffset);
+    ICEntry& icEntryFromReturnOffset(CodeOffsetLabel returnOffset);
     ICEntry& icEntryFromPCOffset(uint32_t pcOffset);
     ICEntry& icEntryFromPCOffset(uint32_t pcOffset, ICEntry* prevLookedUpEntry);
     ICEntry& callVMEntryFromPCOffset(uint32_t pcOffset);
     ICEntry& stackCheckICEntry(bool earlyCheck);
-    ICEntry& warmupCountICEntry();
     ICEntry& icEntryFromReturnAddress(uint8_t* returnAddr);
     uint8_t* returnAddressForIC(const ICEntry& ent);
 
@@ -415,10 +396,9 @@ struct BaselineScript
     // the result may not be accurate.
     jsbytecode* approximatePcForNativeAddress(JSScript* script, uint8_t* nativeAddress);
 
-    MOZ_MUST_USE bool addDependentWasmImport(JSContext* cx, wasm::Instance& instance, uint32_t idx);
-    void removeDependentWasmImport(wasm::Instance& instance, uint32_t idx);
-    void unlinkDependentWasmImports(FreeOp* fop);
-    void clearDependentWasmImports();
+    bool addDependentAsmJSModule(JSContext* cx, DependentAsmJSModuleExit exit);
+    void unlinkDependentAsmJSModules(FreeOp* fop);
+    void removeDependentAsmJSModule(DependentAsmJSModuleExit exit);
 
     // Toggle debug traps (used for breakpoints and step mode) in the script.
     // If |pc| is nullptr, toggle traps for all ops in the script. Else, only
@@ -476,35 +456,6 @@ struct BaselineScript
             len = UINT16_MAX;
         inlinedBytecodeLength_ = len;
     }
-
-    bool hasPendingIonBuilder() const {
-        return !!pendingBuilder_;
-    }
-
-    js::jit::IonBuilder* pendingIonBuilder() {
-        MOZ_ASSERT(hasPendingIonBuilder());
-        return pendingBuilder_;
-    }
-    void setPendingIonBuilder(JSRuntime* maybeRuntime, JSScript* script, js::jit::IonBuilder* builder) {
-        MOZ_ASSERT(script->baselineScript() == this);
-        MOZ_ASSERT(!builder || !hasPendingIonBuilder());
-
-        if (script->isIonCompilingOffThread())
-            script->setIonScript(maybeRuntime, ION_PENDING_SCRIPT);
-
-        pendingBuilder_ = builder;
-
-        // lazy linking cannot happen during asmjs to ion.
-        clearDependentWasmImports();
-
-        script->updateBaselineOrIonRaw(maybeRuntime);
-    }
-    void removePendingIonBuilder(JSScript* script) {
-        setPendingIonBuilder(nullptr, script, nullptr);
-        if (script->maybeIonScript() == ION_PENDING_SCRIPT)
-            script->setIonScript(nullptr, nullptr);
-    }
-
 };
 static_assert(sizeof(BaselineScript) % sizeof(uintptr_t) == 0,
               "The data attached to the script must be aligned for fast JIT access.");
@@ -515,7 +466,7 @@ IsBaselineEnabled(JSContext* cx)
 #ifdef JS_CODEGEN_NONE
     return false;
 #else
-    return cx->options().baseline();
+    return cx->runtime()->options().baseline();
 #endif
 }
 
@@ -603,19 +554,5 @@ BaselineCompile(JSContext* cx, JSScript* script, bool forceDebugInstrumentation 
 
 } // namespace jit
 } // namespace js
-
-namespace JS {
-
-template <>
-struct DeletePolicy<js::jit::BaselineScript>
-{
-    explicit DeletePolicy(JSRuntime* rt) : rt_(rt) {}
-    void operator()(const js::jit::BaselineScript* script);
-
-  private:
-    JSRuntime* rt_;
-};
-
-} // namespace JS
 
 #endif /* jit_BaselineJIT_h */

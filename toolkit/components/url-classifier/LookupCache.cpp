@@ -34,8 +34,8 @@
 // Name of the persistent PrefixSet storage
 #define PREFIXSET_SUFFIX  ".pset"
 
-// MOZ_LOG=UrlClassifierDbService:5
-extern mozilla::LazyLogModule gUrlClassifierDbServiceLog;
+// NSPR_LOG_MODULES=UrlClassifierDbService:5
+extern PRLogModuleInfo *gUrlClassifierDbServiceLog;
 #define LOG(args) MOZ_LOG(gUrlClassifierDbServiceLog, mozilla::LogLevel::Debug, args)
 #define LOG_ENABLED() MOZ_LOG_TEST(gUrlClassifierDbServiceLog, mozilla::LogLevel::Debug)
 
@@ -373,6 +373,51 @@ LookupCache::IsCanonicalizedIP(const nsACString& aHost)
 }
 
 /* static */ nsresult
+LookupCache::GetKey(const nsACString& aSpec,
+                    Completion* aHash,
+                    nsCOMPtr<nsICryptoHash>& aCryptoHash)
+{
+  nsACString::const_iterator begin, end, iter;
+  aSpec.BeginReading(begin);
+  aSpec.EndReading(end);
+
+  iter = begin;
+  if (!FindCharInReadable('/', iter, end)) {
+   return NS_OK;
+  }
+
+  const nsCSubstring& host = Substring(begin, iter);
+
+  if (IsCanonicalizedIP(host)) {
+    nsAutoCString key;
+    key.Assign(host);
+    key.Append('/');
+    return aHash->FromPlaintext(key, aCryptoHash);
+  }
+
+  nsTArray<nsCString> hostComponents;
+  ParseString(PromiseFlatCString(host), '.', hostComponents);
+
+  if (hostComponents.Length() < 2)
+    return NS_ERROR_FAILURE;
+
+  int32_t last = int32_t(hostComponents.Length()) - 1;
+  nsAutoCString lookupHost;
+
+  if (hostComponents.Length() > 2) {
+    lookupHost.Append(hostComponents[last - 2]);
+    lookupHost.Append('.');
+  }
+
+  lookupHost.Append(hostComponents[last - 1]);
+  lookupHost.Append('.');
+  lookupHost.Append(hostComponents[last]);
+  lookupHost.Append('/');
+
+  return aHash->FromPlaintext(lookupHost, aCryptoHash);
+}
+
+/* static */ nsresult
 LookupCache::GetLookupFragments(const nsACString& aSpec,
                                 nsTArray<nsCString>* aFragments)
 
@@ -584,7 +629,7 @@ LookupCache::ConstructPrefixSet(AddPrefixArray& aAddPrefixes)
 
 #ifdef DEBUG
   uint32_t size;
-  size = mPrefixSet->SizeOfIncludingThis(moz_malloc_size_of);
+  size = mPrefixSet->SizeInMemory();
   LOG(("SB tree done, size = %d bytes\n", size));
 #endif
 
@@ -627,7 +672,7 @@ LookupCache::LoadPrefixSet()
 
 #ifdef DEBUG
   if (mPrimed) {
-    uint32_t size = mPrefixSet->SizeOfIncludingThis(moz_malloc_size_of);
+    uint32_t size = mPrefixSet->SizeInMemory();
     LOG(("SB tree done, size = %d bytes\n", size));
   }
 #endif

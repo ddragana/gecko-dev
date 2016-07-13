@@ -10,7 +10,6 @@
 #include "nsContainerFrame.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsCOMPtr.h"
-#include "nsCSSPseudoElements.h"
 
 class nsMeterFrame : public nsContainerFrame,
                      public nsIAnonymousContentCreator
@@ -32,8 +31,6 @@ public:
                       nsHTMLReflowMetrics&     aDesiredSize,
                       const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
-
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override {
@@ -76,7 +73,7 @@ public:
    */
   bool ShouldUseNativeStyle() const;
 
-  virtual Element* GetPseudoElement(mozilla::CSSPseudoElementType aType) override;
+  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) override;
 
 protected:
   // Helper function which reflow the anonymous div frame.

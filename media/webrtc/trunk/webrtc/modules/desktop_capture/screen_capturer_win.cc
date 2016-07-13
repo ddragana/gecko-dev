@@ -18,8 +18,7 @@ namespace webrtc {
 
 // static
 ScreenCapturer* ScreenCapturer::Create(const DesktopCaptureOptions& options) {
-  rtc::scoped_ptr<ScreenCapturer> gdi_capturer(
-      new ScreenCapturerWinGdi(options));
+  scoped_ptr<ScreenCapturer> gdi_capturer(new ScreenCapturerWinGdi(options));
 
   if (options.allow_use_magnification_api())
     return new ScreenCapturerWinMagnifier(gdi_capturer.Pass());

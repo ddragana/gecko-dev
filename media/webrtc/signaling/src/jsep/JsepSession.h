@@ -15,13 +15,13 @@
 #include "signaling/src/jsep/JsepTransport.h"
 #include "signaling/src/sdp/Sdp.h"
 
-#include "JsepTrack.h"
 
 namespace mozilla {
 
 // Forward declarations
-class JsepCodecDescription;
+struct JsepCodecDescription;
 class JsepTrack;
+struct JsepTrackPair;
 
 enum JsepSignalingState {
   kJsepStateStable,
@@ -44,7 +44,6 @@ struct JsepOfferOptions : public JsepOAOptions {
   Maybe<size_t> mOfferToReceiveAudio;
   Maybe<size_t> mOfferToReceiveVideo;
   Maybe<bool> mDontOfferDataChannel;
-  Maybe<bool> mIceRestart; // currently ignored by JsepSession
 };
 struct JsepAnswerOptions : public JsepOAOptions {};
 
@@ -58,7 +57,7 @@ class JsepSession
 {
 public:
   explicit JsepSession(const std::string& name)
-    : mName(name), mState(kJsepStateStable), mNegotiations(0)
+      : mName(name), mState(kJsepStateStable)
   {
   }
   virtual ~JsepSession() {}
@@ -76,20 +75,12 @@ public:
   {
     return mState;
   }
-  virtual uint32_t
-  GetNegotiations() const
-  {
-    return mNegotiations;
-  }
 
   // Set up the ICE And DTLS data.
   virtual nsresult SetIceCredentials(const std::string& ufrag,
                                      const std::string& pwd) = 0;
-  virtual const std::string& GetUfrag() const = 0;
-  virtual const std::string& GetPwd() const = 0;
   virtual nsresult SetBundlePolicy(JsepBundlePolicy policy) = 0;
   virtual bool RemoteIsIceLite() const = 0;
-  virtual bool RemoteIceIsRestarting() const = 0;
   virtual std::vector<std::string> GetIceOptions() const = 0;
 
   virtual nsresult AddDtlsFingerprint(const std::string& algorithm,
@@ -106,30 +97,6 @@ public:
   // that manipulate the data structure (still pretty unwieldy).
   virtual std::vector<JsepCodecDescription*>& Codecs() = 0;
 
-  template <class UnaryFunction>
-  void ForEachCodec(UnaryFunction& function)
-  {
-    std::for_each(Codecs().begin(), Codecs().end(), function);
-    for (RefPtr<JsepTrack>& track : GetLocalTracks()) {
-      track->ForEachCodec(function);
-    }
-    for (RefPtr<JsepTrack>& track : GetRemoteTracks()) {
-      track->ForEachCodec(function);
-    }
-  }
-
-  template <class BinaryPredicate>
-  void SortCodecs(BinaryPredicate& sorter)
-  {
-    std::stable_sort(Codecs().begin(), Codecs().end(), sorter);
-    for (RefPtr<JsepTrack>& track : GetLocalTracks()) {
-      track->SortCodecs(sorter);
-    }
-    for (RefPtr<JsepTrack>& track : GetRemoteTracks()) {
-      track->SortCodecs(sorter);
-    }
-  }
-
   // Manage tracks. We take shared ownership of any track.
   virtual nsresult AddTrack(const RefPtr<JsepTrack>& track) = 0;
   virtual nsresult RemoveTrack(const std::string& streamId,
@@ -138,15 +105,6 @@ public:
                                 const std::string& oldTrackId,
                                 const std::string& newStreamId,
                                 const std::string& newTrackId) = 0;
-  virtual nsresult SetParameters(
-      const std::string& streamId,
-      const std::string& trackId,
-      const std::vector<JsepTrack::JsConstraints>& constraints) = 0;
-
-  virtual nsresult GetParameters(
-      const std::string& streamId,
-      const std::string& trackId,
-      std::vector<JsepTrack::JsConstraints>* outConstraints) = 0;
 
   virtual std::vector<RefPtr<JsepTrack>> GetLocalTracks() const = 0;
 
@@ -177,16 +135,15 @@ public:
                                          const std::string& mid,
                                          uint16_t level) = 0;
   virtual nsresult AddLocalIceCandidate(const std::string& candidate,
+                                        const std::string& mid,
                                         uint16_t level,
-                                        std::string* mid,
                                         bool* skipped) = 0;
-  virtual nsresult UpdateDefaultCandidate(
+  virtual nsresult EndOfLocalCandidates(
       const std::string& defaultCandidateAddr,
       uint16_t defaultCandidatePort,
       const std::string& defaultRtcpCandidateAddr,
       uint16_t defaultRtcpCandidatePort,
       uint16_t level) = 0;
-  virtual nsresult EndOfLocalCandidates(uint16_t level) = 0;
   virtual nsresult Close() = 0;
 
   // ICE controlling or controlled
@@ -210,30 +167,9 @@ public:
 
   virtual bool AllLocalTracksAreAssigned() const = 0;
 
-  void
-  CountTracks(uint16_t (&receiving)[SdpMediaSection::kMediaTypes],
-              uint16_t (&sending)[SdpMediaSection::kMediaTypes]) const
-  {
-    auto trackPairs = GetNegotiatedTrackPairs();
-
-    memset(receiving, 0, sizeof(receiving));
-    memset(sending, 0, sizeof(sending));
-
-    for (auto& pair : trackPairs) {
-      if (pair.mReceiving) {
-        receiving[pair.mReceiving->GetMediaType()]++;
-      }
-
-      if (pair.mSending) {
-        sending[pair.mSending->GetMediaType()]++;
-      }
-    }
-  }
-
 protected:
   const std::string mName;
   JsepSignalingState mState;
-  uint32_t mNegotiations;
 };
 
 } // namespace mozilla

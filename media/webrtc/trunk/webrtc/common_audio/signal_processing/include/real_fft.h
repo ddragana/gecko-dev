@@ -24,8 +24,27 @@ struct RealFFT;
 extern "C" {
 #endif
 
-struct RealFFT* WebRtcSpl_CreateRealFFT(int order);
-void WebRtcSpl_FreeRealFFT(struct RealFFT* self);
+typedef struct RealFFT* (*CreateRealFFT)(int order);
+typedef void (*FreeRealFFT)(struct RealFFT* self);
+typedef int (*RealForwardFFT)(struct RealFFT* self,
+                              const int16_t* real_data_in,
+                              int16_t* complex_data_out);
+typedef int (*RealInverseFFT)(struct RealFFT* self,
+                              const int16_t* complex_data_in,
+                              int16_t* real_data_out);
+
+extern CreateRealFFT WebRtcSpl_CreateRealFFT;
+extern FreeRealFFT WebRtcSpl_FreeRealFFT;
+extern RealForwardFFT WebRtcSpl_RealForwardFFT;
+extern RealInverseFFT WebRtcSpl_RealInverseFFT;
+
+struct RealFFT* WebRtcSpl_CreateRealFFTC(int order);
+void WebRtcSpl_FreeRealFFTC(struct RealFFT* self);
+
+#if (defined WEBRTC_DETECT_ARM_NEON) || (defined WEBRTC_ARCH_ARM_NEON)
+struct RealFFT* WebRtcSpl_CreateRealFFTNeon(int order);
+void WebRtcSpl_FreeRealFFTNeon(struct RealFFT* self);
+#endif
 
 // Compute an FFT for a real-valued signal of length of 2^order,
 // where 1 < order <= MAX_FFT_ORDER. Transform length is determined by the
@@ -58,9 +77,15 @@ void WebRtcSpl_FreeRealFFT(struct RealFFT* self);
 // Return Value:
 //   0  - FFT calculation is successful.
 //   -1 - Error with bad arguments (NULL pointers).
-int WebRtcSpl_RealForwardFFT(struct RealFFT* self,
-                             const int16_t* real_data_in,
-                             int16_t* complex_data_out);
+int WebRtcSpl_RealForwardFFTC(struct RealFFT* self,
+                              const int16_t* real_data_in,
+                              int16_t* complex_data_out);
+
+#if (defined WEBRTC_DETECT_ARM_NEON) || (defined WEBRTC_ARCH_ARM_NEON)
+int WebRtcSpl_RealForwardFFTNeon(struct RealFFT* self,
+                                 const int16_t* real_data_in,
+                                 int16_t* complex_data_out);
+#endif
 
 // Compute the inverse FFT for a conjugate-symmetric input sequence of length of
 // 2^order, where 1 < order <= MAX_FFT_ORDER. Transform length is determined by
@@ -86,9 +111,15 @@ int WebRtcSpl_RealForwardFFT(struct RealFFT* self,
 //                            should be shifted left with in order to get
 //                            correct physical values.
 //   -1 - Error with bad arguments (NULL pointers).
-int WebRtcSpl_RealInverseFFT(struct RealFFT* self,
-                             const int16_t* complex_data_in,
-                             int16_t* real_data_out);
+int WebRtcSpl_RealInverseFFTC(struct RealFFT* self,
+                              const int16_t* complex_data_in,
+                              int16_t* real_data_out);
+
+#if (defined WEBRTC_DETECT_ARM_NEON) || (defined WEBRTC_ARCH_ARM_NEON)
+int WebRtcSpl_RealInverseFFTNeon(struct RealFFT* self,
+                                 const int16_t* complex_data_in,
+                                 int16_t* real_data_out);
+#endif
 
 #ifdef __cplusplus
 }

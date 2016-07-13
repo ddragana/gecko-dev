@@ -7,6 +7,7 @@
 #define nsHTMLEditRules_h__
 
 #include "TypeInState.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsEditor.h"
 #include "nsIEditActionListener.h"
@@ -63,7 +64,6 @@ class nsHTMLEditRules : public nsTextEditRules, public nsIEditActionListener
 public:
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsHTMLEditRules, nsTextEditRules)
 
   nsHTMLEditRules();
 
@@ -74,10 +74,10 @@ public:
                         nsIEditor::EDirection aDirection) override;
   NS_IMETHOD AfterEdit(EditAction action,
                        nsIEditor::EDirection aDirection) override;
-  NS_IMETHOD WillDoAction(Selection* aSelection, nsRulesInfo* aInfo,
+  NS_IMETHOD WillDoAction(mozilla::dom::Selection* aSelection, nsRulesInfo* aInfo,
                           bool* aCancel, bool* aHandled) override;
-  NS_IMETHOD DidDoAction(Selection* aSelection, nsRulesInfo* aInfo,
-                         nsresult aResult) override;
+  NS_IMETHOD DidDoAction(mozilla::dom::Selection* aSelection,
+                         nsRulesInfo* aInfo, nsresult aResult) override;
   NS_IMETHOD DocumentModified() override;
 
   nsresult GetListState(bool *aMixed, bool *aOL, bool *aUL, bool *aDL);
@@ -105,7 +105,6 @@ public:
   NS_IMETHOD DidDeleteText(nsIDOMCharacterData *aTextNode, int32_t aOffset, int32_t aLength, nsresult aResult) override;
   NS_IMETHOD WillDeleteSelection(nsISelection *aSelection) override;
   NS_IMETHOD DidDeleteSelection(nsISelection *aSelection) override;
-  void DeleteNodeIfCollapsedText(nsINode& aNode);
 
 protected:
   virtual ~nsHTMLEditRules();
@@ -116,189 +115,207 @@ protected:
     kEnd
   };
 
+  enum BRLocation
+  {
+    kBeforeBlock,
+    kBlockEnd
+  };
+
   void InitFields();
 
   // nsHTMLEditRules implementation methods
-  void WillInsert(Selection& aSelection, bool* aCancel);
+  nsresult WillInsert(mozilla::dom::Selection* aSelection, bool* aCancel);
   nsresult WillInsertText(  EditAction aAction,
-                            Selection* aSelection,
+                            mozilla::dom::Selection* aSelection,
                             bool            *aCancel,
                             bool            *aHandled,
                             const nsAString *inString,
                             nsAString       *outString,
                             int32_t          aMaxLength);
-  nsresult WillLoadHTML(Selection* aSelection, bool* aCancel);
-  nsresult WillInsertBreak(Selection& aSelection, bool* aCancel,
-                           bool* aHandled);
-  nsresult StandardBreakImpl(nsINode& aNode, int32_t aOffset,
-                             Selection& aSelection);
-  nsresult DidInsertBreak(Selection* aSelection, nsresult aResult);
-  nsresult SplitMailCites(Selection* aSelection, bool* aHandled);
-  nsresult WillDeleteSelection(Selection* aSelection,
+  nsresult WillLoadHTML(mozilla::dom::Selection* aSelection, bool* aCancel);
+  nsresult WillInsertBreak(mozilla::dom::Selection* aSelection,
+                           bool* aCancel, bool* aHandled);
+  nsresult StandardBreakImpl(nsIDOMNode* aNode, int32_t aOffset,
+                             mozilla::dom::Selection* aSelection);
+  nsresult DidInsertBreak(mozilla::dom::Selection* aSelection,
+                          nsresult aResult);
+  nsresult SplitMailCites(mozilla::dom::Selection* aSelection, bool* aHandled);
+  nsresult WillDeleteSelection(mozilla::dom::Selection* aSelection,
                                nsIEditor::EDirection aAction,
                                nsIEditor::EStripWrappers aStripWrappers,
                                bool* aCancel, bool* aHandled);
-  nsresult DidDeleteSelection(Selection* aSelection,
+  nsresult DidDeleteSelection(mozilla::dom::Selection* aSelection,
                               nsIEditor::EDirection aDir,
                               nsresult aResult);
-  nsresult InsertBRIfNeeded(Selection* aSelection);
+  nsresult InsertBRIfNeeded(mozilla::dom::Selection* aSelection);
   ::DOMPoint GetGoodSelPointForNode(nsINode& aNode,
                                     nsIEditor::EDirection aAction);
-  nsresult JoinBlocks(nsIContent& aLeftNode, nsIContent& aRightNode,
-                      bool* aCanceled);
-  nsresult MoveBlock(Element& aLeftBlock, Element& aRightBlock,
-                     int32_t aLeftOffset, int32_t aRightOffset);
-  nsresult MoveNodeSmart(nsIContent& aNode, Element& aDestElement,
-                         int32_t* aOffset);
-  nsresult MoveContents(Element& aElement, Element& aDestElement,
-                        int32_t* aOffset);
+  nsresult JoinBlocks(nsIDOMNode *aLeftNode, nsIDOMNode *aRightNode, bool *aCanceled);
+  nsresult MoveBlock(nsIDOMNode *aLeft, nsIDOMNode *aRight, int32_t aLeftOffset, int32_t aRightOffset);
+  nsresult MoveNodeSmart(nsIDOMNode *aSource, nsIDOMNode *aDest, int32_t *aOffset);
+  nsresult MoveContents(nsIDOMNode *aSource, nsIDOMNode *aDest, int32_t *aOffset);
   nsresult DeleteNonTableElements(nsINode* aNode);
-  nsresult WillMakeList(Selection* aSelection,
+  nsresult WillMakeList(mozilla::dom::Selection* aSelection,
                         const nsAString* aListType,
                         bool aEntireList,
                         const nsAString* aBulletType,
                         bool* aCancel, bool* aHandled,
                         const nsAString* aItemType = nullptr);
-  nsresult WillRemoveList(Selection* aSelection, bool aOrdered, bool* aCancel,
-                          bool* aHandled);
-  nsresult WillIndent(Selection* aSelection, bool* aCancel, bool* aHandled);
-  nsresult WillCSSIndent(Selection* aSelection, bool* aCancel, bool* aHandled);
-  nsresult WillHTMLIndent(Selection* aSelection, bool* aCancel,
-                          bool* aHandled);
-  nsresult WillOutdent(Selection& aSelection, bool* aCancel, bool* aHandled);
-  nsresult WillAlign(Selection& aSelection, const nsAString& aAlignType,
+  nsresult WillRemoveList(mozilla::dom::Selection* aSelection,
+                          bool aOrdered, bool* aCancel, bool* aHandled);
+  nsresult WillIndent(mozilla::dom::Selection* aSelection,
+                      bool* aCancel, bool* aHandled);
+  nsresult WillCSSIndent(mozilla::dom::Selection* aSelection,
+                         bool* aCancel, bool* aHandled);
+  nsresult WillHTMLIndent(mozilla::dom::Selection* aSelection,
+                          bool* aCancel, bool* aHandled);
+  nsresult WillOutdent(mozilla::dom::Selection* aSelection,
+                       bool* aCancel, bool* aHandled);
+  nsresult WillAlign(mozilla::dom::Selection* aSelection,
+                     const nsAString* alignType,
                      bool* aCancel, bool* aHandled);
-  nsresult WillAbsolutePosition(Selection& aSelection, bool* aCancel,
-                                bool* aHandled);
-  nsresult WillRemoveAbsolutePosition(Selection* aSelection, bool* aCancel,
-                                      bool* aHandled);
-  nsresult WillRelativeChangeZIndex(Selection* aSelection, int32_t aChange,
+  nsresult WillAbsolutePosition(mozilla::dom::Selection* aSelection,
+                                bool* aCancel, bool* aHandled);
+  nsresult WillRemoveAbsolutePosition(mozilla::dom::Selection* aSelection,
+                                      bool* aCancel, bool* aHandled);
+  nsresult WillRelativeChangeZIndex(mozilla::dom::Selection* aSelection,
+                                    int32_t aChange,
                                     bool* aCancel, bool* aHandled);
-  nsresult WillMakeDefListItem(Selection* aSelection,
+  nsresult WillMakeDefListItem(mozilla::dom::Selection* aSelection,
                                const nsAString* aBlockType, bool aEntireList,
                                bool* aCancel, bool* aHandled);
-  nsresult WillMakeBasicBlock(Selection& aSelection,
-                              const nsAString& aBlockType,
+  nsresult WillMakeBasicBlock(mozilla::dom::Selection* aSelection,
+                              const nsAString* aBlockType,
                               bool* aCancel, bool* aHandled);
-  nsresult DidMakeBasicBlock(Selection* aSelection, nsRulesInfo* aInfo,
-                             nsresult aResult);
+  nsresult DidMakeBasicBlock(mozilla::dom::Selection* aSelection,
+                             nsRulesInfo* aInfo, nsresult aResult);
   nsresult DidAbsolutePosition();
   nsresult AlignInnerBlocks(nsINode& aNode, const nsAString* alignType);
   nsresult AlignBlockContents(nsIDOMNode *aNode, const nsAString *alignType);
-  nsresult AppendInnerFormatNodes(nsTArray<OwningNonNull<nsINode>>& aArray,
+  nsresult AppendInnerFormatNodes(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aArray,
                                   nsINode* aNode);
   nsresult GetFormatString(nsIDOMNode *aNode, nsAString &outFormat);
   enum class Lists { no, yes };
   enum class Tables { no, yes };
   void GetInnerContent(nsINode& aNode,
-                       nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+                       nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aOutArrayOfNodes,
                        int32_t* aIndex, Lists aLists = Lists::yes,
                        Tables aTables = Tables::yes);
-  Element* IsInListItem(nsINode* aNode);
-  nsresult ReturnInHeader(Selection& aSelection, Element& aHeader,
-                          nsINode& aNode, int32_t aOffset);
-  nsresult ReturnInParagraph(Selection* aSelection, nsIDOMNode* aHeader,
-                             nsIDOMNode* aTextNode, int32_t aOffset,
-                             bool* aCancel, bool* aHandled);
+  already_AddRefed<nsIDOMNode> IsInListItem(nsIDOMNode* aNode);
+  mozilla::dom::Element* IsInListItem(nsINode* aNode);
+  nsresult ReturnInHeader(mozilla::dom::Selection* aSelection,
+                          nsIDOMNode* aHeader, nsIDOMNode* aTextNode,
+                          int32_t aOffset);
+  nsresult ReturnInParagraph(mozilla::dom::Selection* aSelection,
+                             nsIDOMNode* aHeader, nsIDOMNode* aTextNode,
+                             int32_t aOffset, bool* aCancel, bool* aHandled);
   nsresult SplitParagraph(nsIDOMNode *aPara,
-                          nsIContent* aBRNode,
-                          Selection* aSelection,
+                          nsIDOMNode *aBRNode,
+                          mozilla::dom::Selection* aSelection,
                           nsCOMPtr<nsIDOMNode> *aSelNode,
                           int32_t *aOffset);
-  nsresult ReturnInListItem(Selection& aSelection, Element& aHeader,
-                            nsINode& aNode, int32_t aOffset);
+  nsresult ReturnInListItem(mozilla::dom::Selection* aSelection,
+                            nsIDOMNode* aHeader, nsIDOMNode* aTextNode,
+                            int32_t aOffset);
   nsresult AfterEditInner(EditAction action,
                           nsIEditor::EDirection aDirection);
-  nsresult RemovePartOfBlock(Element& aBlock, nsIContent& aStartChild,
+  nsresult RemovePartOfBlock(mozilla::dom::Element& aBlock,
+                             nsIContent& aStartChild,
                              nsIContent& aEndChild);
-  void     SplitBlock(Element& aBlock,
-                      nsIContent& aStartChild,
-                      nsIContent& aEndChild,
-                      nsIContent** aOutLeftNode = nullptr,
-                      nsIContent** aOutRightNode = nullptr,
-                      nsIContent** aOutMiddleNode = nullptr);
-  nsresult OutdentPartOfBlock(Element& aBlock,
-                              nsIContent& aStartChild,
-                              nsIContent& aEndChild,
+  nsresult SplitBlock(nsIDOMNode *aBlock,
+                      nsIDOMNode *aStartChild,
+                      nsIDOMNode *aEndChild,
+                      nsCOMPtr<nsIDOMNode> *aLeftNode = 0,
+                      nsCOMPtr<nsIDOMNode> *aRightNode = 0,
+                      nsCOMPtr<nsIDOMNode> *aMiddleNode = 0);
+  nsresult OutdentPartOfBlock(nsIDOMNode *aBlock,
+                              nsIDOMNode *aStartChild,
+                              nsIDOMNode *aEndChild,
                               bool aIsBlockIndentedWithCSS,
-                              nsIContent** aOutLeftNode,
-                              nsIContent** aOutRightNode);
+                              nsCOMPtr<nsIDOMNode> *aLeftNode = 0,
+                              nsCOMPtr<nsIDOMNode> *aRightNode = 0);
 
-  nsresult ConvertListType(Element* aList, Element** aOutList,
-                           nsIAtom* aListType, nsIAtom* aItemType);
+  nsresult ConvertListType(nsIDOMNode* aList,
+                           nsCOMPtr<nsIDOMNode>* outList,
+                           nsIAtom* aListType,
+                           nsIAtom* aItemType);
+  nsresult ConvertListType(mozilla::dom::Element* aList,
+                           mozilla::dom::Element** aOutList,
+                           nsIAtom* aListType,
+                           nsIAtom* aItemType);
 
-  nsresult CreateStyleForInsertText(Selection& aSelection, nsIDocument& aDoc);
-  enum class MozBRCounts { yes, no };
-  nsresult IsEmptyBlock(Element& aNode, bool* aOutIsEmptyBlock,
-                        MozBRCounts aMozBRCounts = MozBRCounts::yes);
-  nsresult CheckForEmptyBlock(nsINode* aStartNode, Element* aBodyNode,
-                              Selection* aSelection,
-                              nsIEditor::EDirection aAction, bool* aHandled);
-  enum class BRLocation { beforeBlock, blockEnd };
-  Element* CheckForInvisibleBR(Element& aBlock, BRLocation aWhere,
-                               int32_t aOffset = 0);
-  nsresult ExpandSelectionForDeletion(Selection& aSelection);
+  nsresult CreateStyleForInsertText(mozilla::dom::Selection* aSelection,
+                                    nsIDOMDocument* aDoc);
+  nsresult IsEmptyBlock(nsIDOMNode *aNode,
+                        bool *outIsEmptyBlock,
+                        bool aMozBRDoesntCount = false,
+                        bool aListItemsNotEmpty = false);
+  nsresult CheckForEmptyBlock(nsINode* aStartNode,
+                              mozilla::dom::Element* aBodyNode,
+                              mozilla::dom::Selection* aSelection,
+                              bool* aHandled);
+  nsresult CheckForInvisibleBR(nsIDOMNode *aBlock, nsHTMLEditRules::BRLocation aWhere,
+                               nsCOMPtr<nsIDOMNode> *outBRNode, int32_t aOffset=0);
+  nsresult ExpandSelectionForDeletion(mozilla::dom::Selection* aSelection);
   bool IsFirstNode(nsIDOMNode *aNode);
   bool IsLastNode(nsIDOMNode *aNode);
-  nsresult NormalizeSelection(Selection* aSelection);
+  nsresult NormalizeSelection(mozilla::dom::Selection* aSelection);
   void GetPromotedPoint(RulesEndpoint aWhere, nsIDOMNode* aNode,
                         int32_t aOffset, EditAction actionID,
                         nsCOMPtr<nsIDOMNode>* outNode, int32_t* outOffset);
-  void GetPromotedRanges(Selection& aSelection,
-                         nsTArray<RefPtr<nsRange>>& outArrayOfRanges,
+  void GetPromotedRanges(mozilla::dom::Selection& aSelection,
+                         nsTArray<nsRefPtr<nsRange>>& outArrayOfRanges,
                          EditAction inOperationType);
   void PromoteRange(nsRange& aRange, EditAction inOperationType);
   enum class TouchContent { no, yes };
-  nsresult GetNodesForOperation(nsTArray<RefPtr<nsRange>>& aArrayOfRanges,
-                                nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+  nsresult GetNodesForOperation(nsTArray<nsRefPtr<nsRange>>& aArrayOfRanges,
+                                nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aOutArrayOfNodes,
                                 EditAction aOperationType,
                                 TouchContent aTouchContent = TouchContent::yes);
   void GetChildNodesForOperation(nsINode& aNode,
-      nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes);
+      nsTArray<mozilla::dom::OwningNonNull<nsINode>>& outArrayOfNodes);
   nsresult GetNodesFromPoint(::DOMPoint aPoint,
                              EditAction aOperation,
-                             nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
+                             nsTArray<mozilla::dom::OwningNonNull<nsINode>>& outArrayOfNodes,
                              TouchContent aTouchContent);
-  nsresult GetNodesFromSelection(Selection& aSelection,
+  nsresult GetNodesFromSelection(mozilla::dom::Selection& aSelection,
                                  EditAction aOperation,
-                                 nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
+                                 nsTArray<mozilla::dom::OwningNonNull<nsINode>>& outArrayOfNodes,
                                  TouchContent aTouchContent = TouchContent::yes);
   enum class EntireList { no, yes };
-  nsresult GetListActionNodes(nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+  nsresult GetListActionNodes(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aOutArrayOfNodes,
                               EntireList aEntireList,
                               TouchContent aTouchContent = TouchContent::yes);
-  void GetDefinitionListItemTypes(Element* aElement, bool* aDT, bool* aDD);
+  void GetDefinitionListItemTypes(mozilla::dom::Element* aElement, bool* aDT, bool* aDD);
   nsresult GetParagraphFormatNodes(
-      nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
+      nsTArray<mozilla::dom::OwningNonNull<nsINode>>& outArrayOfNodes,
       TouchContent aTouchContent = TouchContent::yes);
-  void LookInsideDivBQandList(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
+  void LookInsideDivBQandList(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodeArray);
   nsresult BustUpInlinesAtRangeEndpoints(nsRangeStore &inRange);
-  nsresult BustUpInlinesAtBRs(nsIContent& aNode,
-                              nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes);
-  nsIContent* GetHighestInlineParent(nsINode& aNode);
-  void MakeTransitionList(nsTArray<OwningNonNull<nsINode>>& aNodeArray,
+  nsresult BustUpInlinesAtBRs(nsINode& aNode,
+                              nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aOutArrayOfNodes);
+  nsCOMPtr<nsIDOMNode> GetHighestInlineParent(nsIDOMNode* aNode);
+  void MakeTransitionList(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodeArray,
                           nsTArray<bool>& aTransitionArray);
-  nsresult RemoveBlockStyle(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
-  nsresult ApplyBlockStyle(nsTArray<OwningNonNull<nsINode>>& aNodeArray,
+  nsresult RemoveBlockStyle(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodeArray);
+  nsresult ApplyBlockStyle(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodeArray,
                            nsIAtom& aBlockTag);
-  nsresult MakeBlockquote(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
-  nsresult SplitAsNeeded(nsIAtom& aTag, OwningNonNull<nsINode>& inOutParent,
-                         int32_t& inOutOffset);
+  nsresult MakeBlockquote(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& aNodeArray);
   nsresult SplitAsNeeded(nsIAtom& aTag, nsCOMPtr<nsINode>& inOutParent,
                          int32_t& inOutOffset);
   nsresult AddTerminatingBR(nsIDOMNode *aBlock);
   ::DOMPoint JoinNodesSmart(nsIContent& aNodeLeft, nsIContent& aNodeRight);
-  Element* GetTopEnclosingMailCite(nsINode& aNode);
+  mozilla::dom::Element* GetTopEnclosingMailCite(nsINode& aNode);
   nsresult PopListItem(nsIDOMNode *aListItem, bool *aOutOfList);
-  nsresult RemoveListStructure(Element& aList);
+  nsresult RemoveListStructure(nsIDOMNode *aList);
   nsresult CacheInlineStyles(nsIDOMNode *aNode);
   nsresult ReapplyCachedStyles();
   void ClearCachedStyles();
   void AdjustSpecialBreaks();
-  nsresult AdjustWhitespace(Selection* aSelection);
-  nsresult PinSelectionToNewBlock(Selection* aSelection);
-  void CheckInterlinePosition(Selection& aSelection);
-  nsresult AdjustSelection(Selection* aSelection,
+  nsresult AdjustWhitespace(mozilla::dom::Selection* aSelection);
+  nsresult PinSelectionToNewBlock(mozilla::dom::Selection* aSelection);
+  nsresult CheckInterlinePosition(mozilla::dom::Selection* aSelection);
+  nsresult AdjustSelection(mozilla::dom::Selection* aSelection,
                            nsIEditor::EDirection aAction);
   nsresult FindNearSelectableNode(nsIDOMNode *aSelNode,
                                   int32_t aSelOffset,
@@ -317,31 +334,28 @@ protected:
   nsresult SelectionEndpointInNode(nsINode *aNode, bool *aResult);
   nsresult UpdateDocChangeRange(nsRange* aRange);
   nsresult ConfirmSelectionInBody();
-  nsresult InsertMozBRIfNeeded(nsINode& aNode);
-  bool     IsEmptyInline(nsINode& aNode);
-  bool     ListIsEmptyLine(nsTArray<OwningNonNull<nsINode>>& arrayOfNodes);
+  nsresult InsertMozBRIfNeeded(nsIDOMNode *aNode);
+  bool     IsEmptyInline(nsIDOMNode *aNode);
+  bool     ListIsEmptyLine(nsTArray<mozilla::dom::OwningNonNull<nsINode>>& arrayOfNodes);
   nsresult RemoveAlignment(nsIDOMNode * aNode, const nsAString & aAlignType, bool aChildrenOnly);
   nsresult MakeSureElemStartsOrEndsOnCR(nsIDOMNode *aNode, bool aStarts);
-  enum class ContentsOnly { no, yes };
-  nsresult AlignBlock(Element& aElement,
-                      const nsAString& aAlignType, ContentsOnly aContentsOnly);
-  enum class Change { minus, plus };
-  nsresult ChangeIndentation(Element& aElement, Change aChange);
+  nsresult AlignBlock(nsIDOMElement * aElement, const nsAString * aAlignType, bool aContentsOnly);
+  nsresult RelativeChangeIndentationOfElementNode(nsIDOMNode *aNode, int8_t aRelativeChange);
   void DocumentModifiedWorker();
 
 // data members
 protected:
   nsHTMLEditor           *mHTMLEditor;
-  RefPtr<nsRange>       mDocChangeRange;
+  nsRefPtr<nsRange>       mDocChangeRange;
   bool                    mListenerEnabled;
   bool                    mReturnInEmptyLIKillsList;
   bool                    mDidDeleteSelection;
   bool                    mDidRangedDelete;
   bool                    mRestoreContentEditableCount;
-  RefPtr<nsRange>       mUtilRange;
+  nsRefPtr<nsRange>       mUtilRange;
   uint32_t                mJoinOffset;  // need to remember an int across willJoin/didJoin...
-  nsCOMPtr<Element>       mNewBlock;
-  RefPtr<nsRangeStore>  mRangeItem;
+  nsCOMPtr<nsIDOMNode>    mNewBlock;
+  nsRefPtr<nsRangeStore>  mRangeItem;
   StyleCache              mCachedStyles[SIZE_STYLE_TABLE];
 };
 

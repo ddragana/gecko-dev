@@ -10,8 +10,8 @@ protocol PTestMultiMgrsRight {
     manages PTestMultiMgrsBottom;
 
 child:
-    async PTestMultiMgrsBottom();
-    async __delete__();
+    PTestMultiMgrsBottom();
+    __delete__();
 
 state START:
     send PTestMultiMgrsBottom goto DONE;

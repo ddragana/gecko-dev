@@ -4,19 +4,29 @@ function test() {
   waitForExplicitFinish();
 
   gBrowser.selectedTab = gBrowser.addTab(rootDir + "file_bug852909.png");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(image);
+  gBrowser.selectedBrowser.addEventListener("load", image, true);
 }
 
 function image(event) {
-  ok(!gBrowser.selectedTab.mayEnableCharacterEncodingMenu, "Docshell should say the menu should be disabled for images.");
+  if (event.target != gBrowser.contentDocument) {
+    return;
+  }
+  gBrowser.selectedBrowser.removeEventListener("load", image, true);
+
+  ok(!gBrowser.docShell.mayEnableCharacterEncodingMenu, "Docshell should say the menu should be disabled for images.");
 
   gBrowser.removeCurrentTab();
   gBrowser.selectedTab = gBrowser.addTab(rootDir + "file_bug852909.pdf");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(pdf);
+  gBrowser.selectedBrowser.addEventListener("load", pdf, true);
 }
 
 function pdf(event) {
-  ok(!gBrowser.selectedTab.mayEnableCharacterEncodingMenu, "Docshell should say the menu should be disabled for PDF.js.");
+  if (event.target != gBrowser.contentDocument) {
+    return;
+  }
+  gBrowser.selectedBrowser.removeEventListener("load", pdf, true);
+
+  ok(!gBrowser.docShell.mayEnableCharacterEncodingMenu, "Docshell should say the menu should be disabled for PDF.js.");
 
   gBrowser.removeCurrentTab();
   finish();

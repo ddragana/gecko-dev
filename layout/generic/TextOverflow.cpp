@@ -28,19 +28,14 @@
 namespace mozilla {
 namespace css {
 
-class LazyReferenceRenderingDrawTargetGetterFromFrame final :
-    public gfxFontGroup::LazyReferenceDrawTargetGetter {
+class LazyReferenceRenderingContextGetterFromFrame final :
+    public gfxFontGroup::LazyReferenceContextGetter {
 public:
-  typedef mozilla::gfx::DrawTarget DrawTarget;
-
-  explicit LazyReferenceRenderingDrawTargetGetterFromFrame(nsIFrame* aFrame)
+  explicit LazyReferenceRenderingContextGetterFromFrame(nsIFrame* aFrame)
     : mFrame(aFrame) {}
-  virtual already_AddRefed<DrawTarget> GetRefDrawTarget() override
+  virtual already_AddRefed<gfxContext> GetRefContext() override
   {
-    RefPtr<gfxContext> ctx =
-      mFrame->PresContext()->PresShell()->CreateReferenceRenderingContext();
-    RefPtr<DrawTarget> dt = ctx->GetDrawTarget();
-    return dt.forget();
+    return mFrame->PresContext()->PresShell()->CreateReferenceRenderingContext();
   }
 private:
   nsIFrame* mFrame;
@@ -49,13 +44,14 @@ private:
 static gfxTextRun*
 GetEllipsisTextRun(nsIFrame* aFrame)
 {
-  RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetInflatedFontMetricsForFrame(aFrame);
-  LazyReferenceRenderingDrawTargetGetterFromFrame lazyRefDrawTargetGetter(aFrame);
+  nsRefPtr<nsFontMetrics> fm;
+  nsLayoutUtils::GetFontMetricsForFrame(aFrame, getter_AddRefs(fm),
+    nsLayoutUtils::FontSizeInflationFor(aFrame));
+  LazyReferenceRenderingContextGetterFromFrame lazyRefContextGetter(aFrame);
   return fm->GetThebesFontGroup()->GetEllipsisTextRun(
     aFrame->PresContext()->AppUnitsPerDevPixel(),
     nsLayoutUtils::GetTextRunOrientFlagsForStyle(aFrame->StyleContext()),
-    lazyRefDrawTargetGetter);
+    lazyRefContextGetter);
 }
 
 static nsIFrame*
@@ -214,14 +210,14 @@ void
 nsDisplayTextOverflowMarker::Paint(nsDisplayListBuilder* aBuilder,
                                    nsRenderingContext*   aCtx)
 {
-  nsCSSProperty colorProp = mFrame->StyleContext()->GetTextFillColorProp();
-  nscolor foregroundColor = nsLayoutUtils::GetColor(mFrame, colorProp);
+  nscolor foregroundColor =
+    nsLayoutUtils::GetColor(mFrame, eCSSProperty_color);
 
   // Paint the text-shadows for the overflow marker
   nsLayoutUtils::PaintTextShadow(mFrame, aCtx, mRect, mVisibleRect,
                                  foregroundColor, PaintTextShadowCallback,
                                  (void*)this);
-  aCtx->ThebesContext()->SetColor(gfx::Color::FromABGR(foregroundColor));
+  aCtx->ThebesContext()->SetColor(foregroundColor);
   PaintTextToContext(aCtx, nsPoint(0, 0));
 }
 
@@ -251,12 +247,13 @@ nsDisplayTextOverflowMarker::PaintTextToContext(nsRenderingContext* aCtx,
       NS_ASSERTION(!textRun->IsRightToLeft(),
                    "Ellipsis textruns should always be LTR!");
       gfxPoint gfxPt(pt.x, pt.y);
-      textRun->Draw(gfxTextRun::Range(textRun), gfxPt,
-                    gfxTextRun::DrawParams(aCtx->ThebesContext()));
+      textRun->Draw(aCtx->ThebesContext(), gfxPt, DrawMode::GLYPH_FILL,
+                    0, textRun->GetLength(), nullptr, nullptr, nullptr);
     }
   } else {
-    RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetInflatedFontMetricsForFrame(mFrame);
+    nsRefPtr<nsFontMetrics> fm;
+    nsLayoutUtils::GetFontMetricsForFrame(mFrame, getter_AddRefs(fm),
+      nsLayoutUtils::FontSizeInflationFor(mFrame));
     nsLayoutUtils::DrawString(mFrame, *fm, aCtx, mStyle->mString.get(),
                               mStyle->mString.Length(), pt);
   }
@@ -378,11 +375,13 @@ TextOverflow::ExamineFrameSubtree(nsIFrame*       aFrame,
     return;
   }
 
-  for (nsIFrame* child : aFrame->PrincipalChildList()) {
+  nsIFrame* child = aFrame->GetFirstPrincipalChild();
+  while (child) {
     ExamineFrameSubtree(child, aContentArea, aInsideMarkersArea,
                         aFramesToHide, aAlignmentEdges,
                         aFoundVisibleTextOrAtomic,
                         aClippedMarkerEdges);
+    child = child->GetNextSibling();
   }
 }
 
@@ -721,11 +720,10 @@ TextOverflow::CanHaveTextOverflow(nsDisplayListBuilder* aBuilder,
                                   nsIFrame*             aBlockFrame)
 {
   // Nothing to do for text-overflow:clip or if 'overflow-x/y:visible' or if
-  // we're just building items for event processing or frame visibility.
+  // we're just building items for event processing or image visibility.
   if (HasClippedOverflow(aBlockFrame) ||
       IsInlineAxisOverflowVisible(aBlockFrame) ||
-      aBuilder->IsForEventDelivery() ||
-      aBuilder->IsForFrameVisibility()) {
+      aBuilder->IsForEventDelivery() || aBuilder->IsForImageVisibility()) {
     return false;
   }
 
@@ -736,7 +734,7 @@ TextOverflow::CanHaveTextOverflow(nsDisplayListBuilder* aBuilder,
   }
 
   // Inhibit the markers if a descendant content owns the caret.
-  RefPtr<nsCaret> caret = aBlockFrame->PresContext()->PresShell()->GetCaret();
+  nsRefPtr<nsCaret> caret = aBlockFrame->PresContext()->PresShell()->GetCaret();
   if (caret && caret->IsVisible()) {
     nsCOMPtr<nsISelection> domSelection = caret->GetSelection();
     if (domSelection) {
@@ -802,15 +800,16 @@ TextOverflow::Marker::SetupString(nsIFrame* aFrame)
   if (mStyle->mType == NS_STYLE_TEXT_OVERFLOW_ELLIPSIS) {
     gfxTextRun* textRun = GetEllipsisTextRun(aFrame);
     if (textRun) {
-      mISize = textRun->GetAdvanceWidth();
+      mISize = textRun->GetAdvanceWidth(0, textRun->GetLength(), nullptr);
     } else {
       mISize = 0;
     }
   } else {
     nsRenderingContext rc(
       aFrame->PresContext()->PresShell()->CreateReferenceRenderingContext());
-    RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetInflatedFontMetricsForFrame(aFrame);
+    nsRefPtr<nsFontMetrics> fm;
+    nsLayoutUtils::GetFontMetricsForFrame(aFrame, getter_AddRefs(fm),
+      nsLayoutUtils::FontSizeInflationFor(aFrame));
     mISize = nsLayoutUtils::AppUnitWidthOfStringBidi(mStyle->mString, aFrame,
                                                      *fm, rc);
   }

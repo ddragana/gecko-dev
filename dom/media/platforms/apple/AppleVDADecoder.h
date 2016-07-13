@@ -8,7 +8,6 @@
 #define mozilla_AppleVDADecoder_h
 
 #include "PlatformDecoderModule.h"
-#include "mozilla/Atomics.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "MP4Decoder.h"
 #include "nsIThread.h"
@@ -19,7 +18,7 @@
 
 namespace mozilla {
 
-class TaskQueue;
+class FlushableTaskQueue;
 class MediaDataDecoderCallback;
 namespace layers {
   class ImageContainer;
@@ -62,96 +61,53 @@ public:
   // not supported by current configuration.
   static already_AddRefed<AppleVDADecoder> CreateVDADecoder(
     const VideoInfo& aConfig,
-    TaskQueue* aTaskQueue,
+    FlushableTaskQueue* aVideoTaskQueue,
     MediaDataDecoderCallback* aCallback,
     layers::ImageContainer* aImageContainer);
 
-  // Access from the taskqueue and the decoder's thread.
-  // OutputFrame is thread-safe.
-  nsresult OutputFrame(CVPixelBufferRef aImage,
-                       AppleFrameRef aFrameRef);
-
-  RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
-  bool IsHardwareAccelerated(nsACString& aFailureReason) const override
+  AppleVDADecoder(const VideoInfo& aConfig,
+                  FlushableTaskQueue* aVideoTaskQueue,
+                  MediaDataDecoderCallback* aCallback,
+                  layers::ImageContainer* aImageContainer);
+  virtual ~AppleVDADecoder();
+  virtual nsresult Init() override;
+  virtual nsresult Input(MediaRawData* aSample) override;
+  virtual nsresult Flush() override;
+  virtual nsresult Drain() override;
+  virtual nsresult Shutdown() override;
+  virtual bool IsHardwareAccelerated() const override
   {
     return true;
   }
 
-  const char* GetDescriptionName() const override
-  {
-    return "apple VDA decoder";
-  }
+  nsresult OutputFrame(CVPixelBufferRef aImage,
+                       nsAutoPtr<AppleFrameRef> aFrameRef);
 
-  void SetSeekThreshold(const media::TimeUnit& aTime) override;
-
-protected:
-  AppleVDADecoder(const VideoInfo& aConfig,
-                  TaskQueue* aTaskQueue,
-                  MediaDataDecoderCallback* aCallback,
-                  layers::ImageContainer* aImageContainer);
-  virtual ~AppleVDADecoder();
-
-  void AssertOnTaskQueueThread()
-  {
-    MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
-  }
-
+ protected:
   AppleFrameRef* CreateAppleFrameRef(const MediaRawData* aSample);
   void DrainReorderedFrames();
   void ClearReorderedFrames();
   CFDictionaryRef CreateOutputConfiguration();
 
-  const RefPtr<MediaByteBuffer> mExtraData;
+  nsRefPtr<MediaByteBuffer> mExtraData;
+  nsRefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
-  const uint32_t mPictureWidth;
-  const uint32_t mPictureHeight;
-  const uint32_t mDisplayWidth;
-  const uint32_t mDisplayHeight;
-
-  // Number of times a sample was queued via Input(). Will be decreased upon
-  // the decoder's callback being invoked.
-  // This is used to calculate how many frames has been buffered by the decoder.
-  Atomic<uint32_t> mQueuedSamples;
+  nsRefPtr<layers::ImageContainer> mImageContainer;
+  ReorderQueue mReorderQueue;
+  uint32_t mPictureWidth;
+  uint32_t mPictureHeight;
+  uint32_t mDisplayWidth;
+  uint32_t mDisplayHeight;
+  uint32_t mMaxRefFrames;
 
 private:
-  // Flush and Drain operation, always run
-  virtual void ProcessFlush();
-  virtual void ProcessDrain();
-  virtual void ProcessShutdown();
-
-  const RefPtr<TaskQueue> mTaskQueue;
   VDADecoder mDecoder;
-  const uint32_t mMaxRefFrames;
-  const RefPtr<layers::ImageContainer> mImageContainer;
-  // Increased when Input is called, and decreased when ProcessFrame runs.
-  // Reaching 0 indicates that there's no pending Input.
-  Atomic<uint32_t> mInputIncoming;
-  Atomic<bool> mIsShutDown;
-  const bool mUseSoftwareImages;
-  const bool mIs106;
-
-  // Protects mReorderQueue.
-  Monitor mMonitor;
-  // Set on reader/decode thread calling Flush() to indicate that output is
-  // not required and so input samples on mTaskQueue need not be processed.
-  // Cleared on mTaskQueue in ProcessDrain().
-  Atomic<bool> mIsFlushing;
-  ReorderQueue mReorderQueue;
-  // Decoded frame will be dropped if its pts is smaller than this
-  // value. It shold be initialized before Input() or after Flush(). So it is
-  // safe to access it in OutputFrame without protecting.
-  Maybe<media::TimeUnit> mSeekTargetThreshold;
-
-  // Method to set up the decompression session.
-  nsresult InitializeSession();
+  bool mIs106;
 
   // Method to pass a frame to VideoToolbox for decoding.
-  nsresult ProcessDecode(MediaRawData* aSample);
-  virtual nsresult DoDecode(MediaRawData* aSample);
+  nsresult SubmitFrame(MediaRawData* aSample);
+  // Method to set up the decompression session.
+  nsresult InitializeSession();
   CFDictionaryRef CreateDecoderSpecification();
 };
 

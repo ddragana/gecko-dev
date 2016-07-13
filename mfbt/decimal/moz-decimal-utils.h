@@ -33,8 +33,6 @@
 
 #define ASSERT_NOT_REACHED() MOZ_ASSERT_UNREACHABLE("moz-decimal-utils.h")
 
-#define STACK_ALLOCATED() DISALLOW_NEW()
-
 #define WTF_MAKE_NONCOPYABLE(ClassName) \
   private: \
     ClassName(const ClassName&) = delete; \

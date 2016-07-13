@@ -169,7 +169,7 @@ void ScreenCapturerWinGdi::PrepareCaptureResources() {
   assert(IsGUIThread(false));
   // Switch to the desktop receiving user input if different from the current
   // one.
-  rtc::scoped_ptr<Desktop> input_desktop(Desktop::GetInputDesktop());
+  scoped_ptr<Desktop> input_desktop(Desktop::GetInputDesktop());
   if (input_desktop.get() != NULL && !desktop_.IsSame(*input_desktop)) {
     // Release GDI resources otherwise SetThreadDesktop will fail.
     if (desktop_dc_) {
@@ -254,7 +254,7 @@ bool ScreenCapturerWinGdi::CaptureImage() {
         DesktopFrame::kBytesPerPixel;
     SharedMemory* shared_memory = callback_->CreateSharedMemory(buffer_size);
 
-    rtc::scoped_ptr<DesktopFrame> buffer;
+    scoped_ptr<DesktopFrame> buffer;
     buffer.reset(
         DesktopFrameWin::Create(size, shared_memory, desktop_dc_));
     queue_.ReplaceCurrentFrame(buffer.release());

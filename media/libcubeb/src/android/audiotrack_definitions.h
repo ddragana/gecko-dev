@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include <stdint.h>
+#include <cubeb/cubeb-stdint.h>
 
 /*
  * The following definitions are copied from the android sources. Only the

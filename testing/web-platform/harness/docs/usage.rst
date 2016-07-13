@@ -28,19 +28,19 @@ environment created as above::
   pip install -e ./
 
 In addition to the dependencies installed by pip, wptrunner requires
-a copy of the web-platform-tests repository. This can be located
-anywhere on the filesystem, but the easiest option is to put it
-under the same parent directory as the wptrunner checkout::
+a copy of the web-platform-tests repository. That can be located
+anywhere on the filesystem, but the easiest option is to put it within
+the wptrunner checkout directory, as a subdirectory named ``tests``::
 
-  git clone https://github.com/w3c/web-platform-tests.git
+  git clone https://github.com/w3c/web-platform-tests.git tests
 
 It is also necessary to generate a web-platform-tests ``MANIFEST.json``
-file. It's recommended to also put that under the same parent directory as
-the wptrunner checkout, in a directory named ``meta``::
+file. It's recommended to put that within the wptrunner
+checkout directory, in a subdirectory named ``meta``::
 
   mkdir meta
-  cd web-platform-tests
-  python manifest --path ../meta/MANIFEST.json
+  cd tests
+  python tools/scripts/manifest.py ../meta/MANIFEST.json
 
 The ``MANIFEST.json`` file needs to be regenerated each time the
 web-platform-tests checkout is updated. To aid with the update process
@@ -74,9 +74,6 @@ takes multiple options, of which the following are most significant:
 ``--prefs-root`` (required only when testing a Firefox binary)
   The path to a directory containing Firefox test-harness preferences. [#]_
 
-``--config`` (should default to `wptrunner.default.ini`)
-  The path to the config (ini) file.
-
 .. [#] The ``--certutil-binary`` option is required when the product is
    ``firefox`` unless ``--ssl-type=none`` is specified.
 
@@ -97,17 +94,10 @@ The following examples show how to start wptrunner with various options.
 Starting wptrunner
 ------------------
 
-The examples below assume the following directory layout,
-though no specific folder structure is required::
-
-  ~/testtwf/wptrunner          # wptrunner checkout
-  ~/testtwf/web-platform-tests # web-platform-tests checkout
-  ~/testtwf/meta               # metadata
-
 To test a Firefox Nightly build in an OS X environment, you might start
 wptrunner using something similar to the following example::
 
-  wptrunner --metadata=~/testtwf/meta/ --tests=~/testtwf/web-platform-tests/ \
+  wptrunner --metadata=~/web-platform-tests/ --tests=~/web-platform-tests/ \
     --binary=~/mozilla-central/obj-x86_64-apple-darwin14.3.0/dist/Nightly.app/Contents/MacOS/firefox \
     --certutil-binary=~/mozilla-central/obj-x86_64-apple-darwin14.3.0/security/nss/cmd/certutil/certutil \
     --prefs-root=~/mozilla-central/testing/profiles
@@ -116,7 +106,7 @@ wptrunner using something similar to the following example::
 And to test a Chromium build in an OS X environment, you might start
 wptrunner using something similar to the following example::
 
-  wptrunner --metadata=~/testtwf/meta/ --tests=~/testtwf/web-platform-tests/ \
+  wptrunner --metadata=~/web-platform-tests/ --tests=~/web-platform-tests/ \
     --binary=~/chromium/src/out/Release/Chromium.app/Contents/MacOS/Chromium \
     --webdriver-binary=/usr/local/bin/chromedriver --product=chrome
 
@@ -128,7 +118,7 @@ To restrict a test run just to tests in a particular web-platform-tests
 subdirectory, specify the directory name in the positional arguments after
 the options; for example, run just the tests in the `dom` subdirectory::
 
-  wptrunner --metadata=~/testtwf/meta --tests=~/testtwf/web-platform-tests/ \
+  wptrunner --metadata=~/web-platform-tests/ --tests=~/web-platform-tests/ \
     --binary=/path/to/firefox --certutil-binary=/path/to/certutil \
     --prefs-root=/path/to/testing/profiles \
     dom
@@ -190,7 +180,7 @@ Configuration File
 
 wptrunner uses a ``.ini`` file to control some configuration
 sections. The file has three sections; ``[products]``,
-``[manifest:default]`` and ``[web-platform-tests]``.
+``[paths]`` and ``[web-platform-tests]``.
 
 ``[products]`` is used to
 define the set of available products. By default this section is empty
@@ -205,12 +195,12 @@ e.g.::
   chrome =
   netscape4 = path/to/netscape.py
 
-``[manifest:default]`` specifies the default paths for the tests and metadata,
+``[paths]`` specifies the default paths for the tests and metadata,
 relative to the config file. For example::
 
-  [manifest:default]
-  tests = ~/testtwf/web-platform-tests
-  metadata = ~/testtwf/meta
+  [paths]
+  tests = checkouts/web-platform-tests
+  metadata = /home/example/wpt/metadata
 
 
 ``[web-platform-tests]`` is used to set the properties of the upstream

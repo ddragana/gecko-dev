@@ -34,9 +34,7 @@
 # NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
 # WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-from __future__ import absolute_import, unicode_literals
-
-import sys
+from __future__ import absolute_import
 
 from ctypes import c_void_p, POINTER, sizeof, Structure, windll, WinError, WINFUNCTYPE, c_ulong
 from ctypes.wintypes import BOOL, BYTE, DWORD, HANDLE, LPCWSTR, LPWSTR, UINT, WORD
@@ -139,18 +137,12 @@ class EnvironmentBlock:
     """An object which can be passed as the lpEnv parameter of CreateProcess.
     It is initialized with a dictionary."""
 
-    def __init__(self, env):
-        if not env:
+    def __init__(self, dict):
+        if not dict:
             self._as_parameter_ = None
         else:
-            values = []
-            fs_encoding = sys.getfilesystemencoding() or 'mbcs'
-            for k, v in env.iteritems():
-                if isinstance(k, bytes):
-                    k = k.decode(fs_encoding, 'replace')
-                if isinstance(v, bytes):
-                    v = v.decode(fs_encoding, 'replace')
-                values.append("{}={}".format(k, v))
+            values = ["%s=%s" % (key, value)
+                      for (key, value) in dict.iteritems()]
             values.append("")
             self._as_parameter_ = LPCWSTR("\0".join(values))
 

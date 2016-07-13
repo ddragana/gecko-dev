@@ -435,7 +435,7 @@ nscoord nsTableRowFrame::GetRowBaseline(WritingMode aWM)
   nsSize containerSize = GetSize();
   for (nsIFrame* childFrame : mFrames) {
     if (IS_TABLE_CELL(childFrame->GetType())) {
-      nsIFrame* firstKid = childFrame->PrincipalChildList().FirstChild();
+      nsIFrame* firstKid = childFrame->GetFirstPrincipalChild();
       ascent = std::max(ascent,
                         LogicalRect(aWM, firstKid->GetNormalRect(),
                                     containerSize).BEnd(aWM));
@@ -546,7 +546,7 @@ nsTableRowFrame::CalcBSize(const nsHTMLReflowState& aReflowState)
       }
       // bsize may have changed, adjust descent to absorb any excess difference
       nscoord ascent;
-       if (!kidFrame->PrincipalChildList().FirstChild()->PrincipalChildList().FirstChild())
+       if (!kidFrame->GetFirstPrincipalChild()->GetFirstPrincipalChild())
          ascent = desSize.BSize(wm);
        else
          ascent = cellFrame->GetCellBaseline();
@@ -659,20 +659,33 @@ nsTableRowFrame::CalculateCellActualBSize(nsTableCellFrame* aCellFrame,
         break;
       }
       // Fall through to the coord case
-      MOZ_FALLTHROUGH;
     }
     case eStyleUnit_Coord: {
+      nscoord outsideBoxSizing = 0;
       // In quirks mode, table cell isize should be content-box, but bsize
       // should be border-box.
       // Because of this historic anomaly, we do not use quirk.css
       // (since we can't specify one value of box-sizing for isize and another
       // for bsize)
-      specifiedBSize = nsRuleNode::ComputeCoordPercentCalc(bsizeStyleCoord, 0);
-      if (PresContext()->CompatibilityMode() != eCompatibility_NavQuirks &&
-          position->mBoxSizing == StyleBoxSizing::Content) {
-        specifiedBSize +=
-          aCellFrame->GetLogicalUsedBorderAndPadding(aWM).BStartEnd(aWM);
+      if (PresContext()->CompatibilityMode() != eCompatibility_NavQuirks) {
+        switch (position->mBoxSizing) {
+          case NS_STYLE_BOX_SIZING_CONTENT:
+            outsideBoxSizing =
+              aCellFrame->GetLogicalUsedBorderAndPadding(aWM).BStartEnd(aWM);
+            break;
+          case NS_STYLE_BOX_SIZING_PADDING:
+            outsideBoxSizing =
+              aCellFrame->GetLogicalUsedBorder(aWM).BStartEnd(aWM);
+            break;
+          default:
+            // NS_STYLE_BOX_SIZING_BORDER
+            break;
+        }
       }
+
+      specifiedBSize =
+        nsRuleNode::ComputeCoordPercentCalc(bsizeStyleCoord, 0) +
+        outsideBoxSizing;
 
       if (1 == rowSpan) {
         SetFixedBSize(specifiedBSize);
@@ -763,14 +776,15 @@ GetSpaceBetween(int32_t       aPrevColIndex,
 
 // subtract the bsizes of aRow's prev in flows from the unpaginated bsize
 static
-nscoord CalcBSizeFromUnpaginatedBSize(nsTableRowFrame& aRow,
+nscoord CalcBSizeFromUnpaginatedBSize(nsPresContext*   aPresContext,
+                                      nsTableRowFrame& aRow,
                                       WritingMode      aWM)
 {
   nscoord bsize = 0;
   nsTableRowFrame* firstInFlow =
     static_cast<nsTableRowFrame*>(aRow.FirstInFlow());
   if (firstInFlow->HasUnpaginatedBSize()) {
-    bsize = firstInFlow->GetUnpaginatedBSize();
+    bsize = firstInFlow->GetUnpaginatedBSize(aPresContext);
     for (nsIFrame* prevInFlow = aRow.GetPrevInFlow(); prevInFlow;
          prevInFlow = prevInFlow->GetPrevInFlow()) {
       bsize -= prevInFlow->BSize(aWM);
@@ -948,7 +962,7 @@ nsTableRowFrame::ReflowChildren(nsPresContext*           aPresContext,
         }
         // bsize may have changed, adjust descent to absorb any excess difference
         nscoord ascent;
-        if (!kidFrame->PrincipalChildList().FirstChild()->PrincipalChildList().FirstChild()) {
+        if (!kidFrame->GetFirstPrincipalChild()->GetFirstPrincipalChild()) {
           ascent = desiredSize.BSize(wm);
         } else {
           ascent = ((nsTableCellFrame *)kidFrame)->GetCellBaseline();
@@ -973,8 +987,8 @@ nsTableRowFrame::ReflowChildren(nsPresContext*           aPresContext,
         // We didn't reflow.  Do the positioning part of what
         // MovePositionBy does internally.  (This codepath should really
         // be merged into the else below if we can.)
-        nsMargin* computedOffsetProp =
-          kidFrame->Properties().Get(nsIFrame::ComputedOffsetProperty());
+        nsMargin* computedOffsetProp = static_cast<nsMargin*>
+          (kidFrame->Properties().Get(nsIFrame::ComputedOffsetProperty()));
         // Bug 975644: a position:sticky kid can end up with a null
         // property value here.
         LogicalMargin computedOffsets(wm, computedOffsetProp ?
@@ -1025,7 +1039,7 @@ nsTableRowFrame::ReflowChildren(nsPresContext*           aPresContext,
   } else if (NS_UNCONSTRAINEDSIZE == aReflowState.AvailableBSize()) {
     aDesiredSize.BSize(wm) = CalcBSize(aReflowState);
     if (GetPrevInFlow()) {
-      nscoord bsize = CalcBSizeFromUnpaginatedBSize(*this, wm);
+      nscoord bsize = CalcBSizeFromUnpaginatedBSize(aPresContext, *this, wm);
       aDesiredSize.BSize(wm) = std::max(aDesiredSize.BSize(wm), bsize);
     } else {
       if (isPaginated && HasStyleBSize()) {
@@ -1035,13 +1049,14 @@ nsTableRowFrame::ReflowChildren(nsPresContext*           aPresContext,
       }
       if (isPaginated && HasUnpaginatedBSize()) {
         aDesiredSize.BSize(wm) = std::max(aDesiredSize.BSize(wm),
-                                          GetUnpaginatedBSize());
+                                          GetUnpaginatedBSize(aPresContext));
       }
     }
   } else { // constrained bsize, paginated
     // Compute the bsize we should have from style (subtracting the
     // bsize from our prev-in-flows from the style bsize)
-    nscoord styleBSize = CalcBSizeFromUnpaginatedBSize(*this, wm);
+    nscoord styleBSize = CalcBSizeFromUnpaginatedBSize(aPresContext, *this,
+                                                       wm);
     if (styleBSize > aReflowState.AvailableBSize()) {
       styleBSize = aReflowState.AvailableBSize();
       NS_FRAME_SET_INCOMPLETE(aStatus);
@@ -1405,7 +1420,7 @@ nsTableRowFrame::GetNextRow() const
   return nullptr;
 }
 
-NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(RowUnpaginatedHeightProperty, nscoord)
+NS_DECLARE_FRAME_PROPERTY(RowUnpaginatedHeightProperty, nullptr)
 
 void
 nsTableRowFrame::SetUnpaginatedBSize(nsPresContext* aPresContext,
@@ -1414,14 +1429,14 @@ nsTableRowFrame::SetUnpaginatedBSize(nsPresContext* aPresContext,
   NS_ASSERTION(!GetPrevInFlow(), "program error");
   // Get the property
   aPresContext->PropertyTable()->
-    Set(this, RowUnpaginatedHeightProperty(), aValue);
+    Set(this, RowUnpaginatedHeightProperty(), NS_INT32_TO_PTR(aValue));
 }
 
 nscoord
-nsTableRowFrame::GetUnpaginatedBSize()
+nsTableRowFrame::GetUnpaginatedBSize(nsPresContext* aPresContext)
 {
   FrameProperties props = FirstInFlow()->Properties();
-  return props.Get(RowUnpaginatedHeightProperty());
+  return NS_PTR_TO_INT32(props.Get(RowUnpaginatedHeightProperty()));
 }
 
 void nsTableRowFrame::SetContinuousBCBorderWidth(LogicalSide aForSide,

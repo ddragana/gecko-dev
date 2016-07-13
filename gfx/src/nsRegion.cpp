@@ -4,16 +4,16 @@
 
 
 #include "nsRegion.h"
+#include "nsPrintfCString.h"
 #include "nsTArray.h"
 #include "gfxUtils.h"
-#include "mozilla/ToString.h"
 
 bool nsRegion::Contains(const nsRegion& aRgn) const
 {
-  // XXX this could be made faster by iterating over
-  // both regions at the same time some how
-  for (auto iter = aRgn.RectIter(); !iter.Done(); iter.Next()) {
-    if (!Contains(iter.Get())) {
+  // XXX this could be made faster
+  nsRegionRectIterator iter(aRgn);
+  while (const nsRect* r = iter.Next()) {
+    if (!Contains (*r)) {
       return false;
     }
   }
@@ -22,9 +22,10 @@ bool nsRegion::Contains(const nsRegion& aRgn) const
 
 bool nsRegion::Intersects(const nsRect& aRect) const
 {
-  // XXX this could be made faster by using pixman_region32_contains_rect
-  for (auto iter = RectIter(); !iter.Done(); iter.Next()) {
-    if (iter.Get().Intersects(aRect)) {
+  // XXX this could be made faster
+  nsRegionRectIterator iter(*this);
+  while (const nsRect* r = iter.Next()) {
+    if (r->Intersects(aRect)) {
       return true;
     }
   }
@@ -305,7 +306,7 @@ void nsRegion::SimplifyOutwardByArea(uint32_t aThreshold)
   pixman_box32_t *topRects = boxes;
 
   // we need some temporary storage for merging both rows of rectangles
-  AutoTArray<pixman_box32_t, 10> tmpStorage;
+  nsAutoTArray<pixman_box32_t, 10> tmpStorage;
   tmpStorage.SetCapacity(n);
   pixman_box32_t *tmpRect = tmpStorage.Elements();
 
@@ -553,9 +554,10 @@ void nsRegion::SimplifyInward (uint32_t aMaxRects)
 uint64_t nsRegion::Area () const
 {
   uint64_t area = 0;
-  for (auto iter = RectIter(); !iter.Done(); iter.Next()) {
-    const nsRect& rect = iter.Get();
-    area += uint64_t(rect.width) * rect.height;
+  nsRegionRectIterator iter(*this);
+  const nsRect* r;
+  while ((r = iter.Next()) != nullptr) {
+    area += uint64_t(r->width)*r->height;
   }
   return area;
 }
@@ -610,12 +612,12 @@ TransformRect(const mozilla::gfx::IntRect& aRect, const mozilla::gfx::Matrix4x4&
         return mozilla::gfx::IntRect();
     }
 
-    mozilla::gfx::RectDouble rect(aRect.x, aRect.y, aRect.width, aRect.height);
-    rect = aTransform.TransformAndClipBounds(rect, mozilla::gfx::RectDouble::MaxIntRect());
+    gfxRect rect(aRect.x, aRect.y, aRect.width, aRect.height);
+    rect.TransformBounds(aTransform);
     rect.RoundOut();
 
     mozilla::gfx::IntRect intRect;
-    if (!gfxUtils::GfxRectToIntRect(ThebesRect(rect), &intRect)) {
+    if (!gfxUtils::GfxRectToIntRect(rect, &intRect)) {
         return mozilla::gfx::IntRect();
     }
 
@@ -727,9 +729,11 @@ nsIntRegion nsRegion::ScaleToNearestPixels (float aScaleX, float aScaleY,
                                             nscoord aAppUnitsPerPixel) const
 {
   nsIntRegion result;
-  for (auto iter = RectIter(); !iter.Done(); iter.Next()) {
+  nsRegionRectIterator rgnIter(*this);
+  const nsRect* currentRect;
+  while ((currentRect = rgnIter.Next())) {
     mozilla::gfx::IntRect deviceRect =
-      iter.Get().ScaleToNearestPixels(aScaleX, aScaleY, aAppUnitsPerPixel);
+      currentRect->ScaleToNearestPixels(aScaleX, aScaleY, aAppUnitsPerPixel);
     result.Or(result, deviceRect);
   }
   return result;
@@ -738,24 +742,15 @@ nsIntRegion nsRegion::ScaleToNearestPixels (float aScaleX, float aScaleY,
 nsIntRegion nsRegion::ScaleToOutsidePixels (float aScaleX, float aScaleY,
                                             nscoord aAppUnitsPerPixel) const
 {
-  // make a copy of the region so that we can mutate it inplace
-  nsRegion region = *this;
-  int n;
-  pixman_box32_t *boxes = pixman_region32_rectangles(&region.mImpl, &n);
-  boxes = pixman_region32_rectangles(&region.mImpl, &n);
-  for (int i=0; i<n; i++) {
-    nsRect rect = BoxToRect(boxes[i]);
-    mozilla::gfx::IntRect irect = rect.ScaleToOutsidePixels(aScaleX, aScaleY, aAppUnitsPerPixel);
-    boxes[i] = RectToBox(irect);
+  nsIntRegion result;
+  nsRegionRectIterator rgnIter(*this);
+  const nsRect* currentRect;
+  while ((currentRect = rgnIter.Next())) {
+    mozilla::gfx::IntRect deviceRect =
+      currentRect->ScaleToOutsidePixels(aScaleX, aScaleY, aAppUnitsPerPixel);
+    result.Or(result, deviceRect);
   }
-
-  nsIntRegion iRegion;
-  // clear out the initial pixman_region so that we can replace it below
-  pixman_region32_fini(&iRegion.mImpl.mImpl);
-  // This will union all of the rectangles and runs in about O(n lg(n))
-  pixman_region32_init_rects(&iRegion.mImpl.mImpl, boxes, n);
-
-  return iRegion;
+  return result;
 }
 
 nsIntRegion nsRegion::ScaleToInsidePixels (float aScaleX, float aScaleY,
@@ -961,6 +956,11 @@ namespace {
       result.mSize = result.mSizeContainingRect = kVeryLargeNegativeNumber;
       return result;
     }
+    SizePair& operator=(const SizePair& aOther) {
+      mSizeContainingRect = aOther.mSizeContainingRect;
+      mSize = aOther.mSize;
+      return *this;
+    }
     bool operator<(const SizePair& aOther) const {
       if (mSizeContainingRect < aOther.mSizeContainingRect)
         return true;
@@ -1026,12 +1026,13 @@ nsRect nsRegion::GetLargestRectangle (const nsRect& aContainingRect) const {
   AxisPartition xaxis, yaxis;
 
   // Step 1: Calculate the grid lines
-  for (auto iter = RectIter(); !iter.Done(); iter.Next()) {
-    const nsRect& rect = iter.Get();
-    xaxis.InsertCoord(rect.x);
-    xaxis.InsertCoord(rect.XMost());
-    yaxis.InsertCoord(rect.y);
-    yaxis.InsertCoord(rect.YMost());
+  nsRegionRectIterator iter(*this);
+  const nsRect *currentRect;
+  while ((currentRect = iter.Next())) {
+    xaxis.InsertCoord(currentRect->x);
+    xaxis.InsertCoord(currentRect->XMost());
+    yaxis.InsertCoord(currentRect->y);
+    yaxis.InsertCoord(currentRect->YMost());
   }
   if (!aContainingRect.IsEmpty()) {
     xaxis.InsertCoord(aContainingRect.x);
@@ -1049,19 +1050,19 @@ nsRect nsRegion::GetLargestRectangle (const nsRect& aContainingRect) const {
   nsTArray<SizePair> areas(matrixSize);
   areas.SetLength(matrixSize);
 
-  for (auto iter = RectIter(); !iter.Done(); iter.Next()) {
-    const nsRect& rect = iter.Get();
-    int32_t xstart = xaxis.IndexOf(rect.x);
-    int32_t xend = xaxis.IndexOf(rect.XMost());
-    int32_t y = yaxis.IndexOf(rect.y);
-    int32_t yend = yaxis.IndexOf(rect.YMost());
+  iter.Reset();
+  while ((currentRect = iter.Next())) {
+    int32_t xstart = xaxis.IndexOf(currentRect->x);
+    int32_t xend = xaxis.IndexOf(currentRect->XMost());
+    int32_t y = yaxis.IndexOf(currentRect->y);
+    int32_t yend = yaxis.IndexOf(currentRect->YMost());
 
     for (; y < yend; y++) {
       nscoord height = yaxis.StopSize(y);
       for (int32_t x = xstart; x < xend; x++) {
         nscoord width = xaxis.StopSize(x);
         int64_t size = width*int64_t(height);
-        if (rect.Intersects(aContainingRect)) {
+        if (currentRect->Intersects(aContainingRect)) {
           areas[y*matrixWidth+x].mSizeContainingRect = size;
         }
         areas[y*matrixWidth+x].mSize = size;

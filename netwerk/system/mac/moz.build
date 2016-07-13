@@ -8,7 +8,6 @@ SOURCES += [
     'nsNetworkLinkService.mm',
 ]
 
-FINAL_LIBRARY = 'xul'
+FAIL_ON_WARNINGS = True
 
-if CONFIG['CLANG_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']
+FINAL_LIBRARY = 'xul'

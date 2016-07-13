@@ -25,6 +25,10 @@
  </head>
  <body>
 
+ <!--
+    Work around our inability to parse -2147483648 as an HTML integer attribute
+    (Bug 586761)
+   -->
  <ol reversed start="-2147483645">
    <li class="hidden">hidden
    <li>Alpha
@@ -37,7 +41,7 @@
    <li class="hidden">hidden
    <li>Charlie
  </ol>
- <ol reversed start="-2147483648">
+ <ol reversed start="-2147483647">
    <li class="hidden">hidden
    <li>Delta
  </ol>

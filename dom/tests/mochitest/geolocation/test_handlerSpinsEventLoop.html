@@ -38,7 +38,7 @@ function spinEventLoopAndSetTimeout() {
     return;
   }
 
-  SpecialPowers.spinEventLoop(window);
+  window.showModalDialog("javascript:window.close()");
 
   setTimeout(function() {
     ok(successCallbackCalled != errorCallbackCalled, "Ensure only one callback is called");

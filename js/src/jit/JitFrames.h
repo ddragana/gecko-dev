@@ -68,12 +68,6 @@ CalleeTokenToScript(CalleeToken token)
     MOZ_ASSERT(GetCalleeTokenTag(token) == CalleeToken_Script);
     return (JSScript*)(uintptr_t(token) & CalleeTokenMask);
 }
-static inline bool
-CalleeTokenIsModuleScript(CalleeToken token)
-{
-    CalleeTokenTag tag = GetCalleeTokenTag(token);
-    return tag == CalleeToken_Script && CalleeTokenToScript(token)->module();
-}
 
 static inline JSScript*
 ScriptFromCalleeToken(CalleeToken token)
@@ -173,6 +167,7 @@ class OsiIndex
     uint32_t snapshotOffset() const {
         return snapshotOffset_;
     }
+    void fixUpOffset(MacroAssembler& masm);
 };
 
 // The layout of an Ion frame on the C stack is roughly:
@@ -185,19 +180,11 @@ class OsiIndex
 //    0 returnAddress
 //   .. locals ..
 
-// The descriptor is organized into four sections:
-// [ frame size | has cached saved frame bit | frame header size | frame type ]
+// The descriptor is organized into three sections:
+// [ frame size | constructing bit | frame type ]
 // < highest - - - - - - - - - - - - - - lowest >
+static const uintptr_t FRAMESIZE_SHIFT = 4;
 static const uintptr_t FRAMETYPE_BITS = 4;
-static const uintptr_t FRAME_HEADER_SIZE_SHIFT = FRAMETYPE_BITS;
-static const uintptr_t FRAME_HEADER_SIZE_BITS = 3;
-static const uintptr_t FRAME_HEADER_SIZE_MASK = (1 << FRAME_HEADER_SIZE_BITS) - 1;
-static const uintptr_t HASCACHEDSAVEDFRAME_BIT = 1 << (FRAMETYPE_BITS + FRAME_HEADER_SIZE_BITS);
-static const uintptr_t FRAMESIZE_SHIFT = FRAMETYPE_BITS +
-                                         FRAME_HEADER_SIZE_BITS +
-                                         1 /* cached saved frame bit */;
-static const uintptr_t FRAMESIZE_BITS = 32 - FRAMESIZE_SHIFT;
-static const uintptr_t FRAMESIZE_MASK = (1 << FRAMESIZE_BITS) - 1;
 
 // Ion frames have a few important numbers associated with them:
 //      Local depth:    The number of bytes required to spill local variables.
@@ -282,9 +269,10 @@ struct ResumeFromException
 
 void HandleException(ResumeFromException* rfe);
 
-void EnsureBareExitFrame(JSContext* cx, JitFrameLayout* frame);
+void EnsureExitFrame(CommonFrameLayout* frame);
 
 void MarkJitActivations(JSRuntime* rt, JSTracer* trc);
+void MarkIonCompilerRoots(JSTracer* trc);
 
 JSCompartment*
 TopmostIonActivationCompartment(JSRuntime* rt);
@@ -292,21 +280,9 @@ TopmostIonActivationCompartment(JSRuntime* rt);
 void UpdateJitActivationsForMinorGC(JSRuntime* rt, JSTracer* trc);
 
 static inline uint32_t
-EncodeFrameHeaderSize(size_t headerSize)
+MakeFrameDescriptor(uint32_t frameSize, FrameType type)
 {
-    MOZ_ASSERT((headerSize % sizeof(uintptr_t)) == 0);
-
-    uint32_t headerSizeWords = headerSize / sizeof(uintptr_t);
-    MOZ_ASSERT(headerSizeWords <= FRAME_HEADER_SIZE_MASK);
-    return headerSizeWords;
-}
-
-static inline uint32_t
-MakeFrameDescriptor(uint32_t frameSize, FrameType type, uint32_t headerSize)
-{
-    MOZ_ASSERT(headerSize < FRAMESIZE_MASK);
-    headerSize = EncodeFrameHeaderSize(headerSize);
-    return 0 | (frameSize << FRAMESIZE_SHIFT) | (headerSize << FRAME_HEADER_SIZE_SHIFT) | type;
+    return (frameSize << FRAMESIZE_SHIFT) | type;
 }
 
 // Returns the JSScript associated with the topmost JIT frame.
@@ -326,7 +302,7 @@ GetTopJitJSScript(JSContext* cx)
     return iter.script();
 }
 
-#ifdef JS_CODEGEN_MIPS32
+#ifdef JS_CODEGEN_MIPS
 uint8_t* alignDoubleSpillWithOffset(uint8_t* pointer, int32_t offset);
 #else
 inline uint8_t*
@@ -366,15 +342,8 @@ class CommonFrameLayout
     size_t prevFrameLocalSize() const {
         return descriptor_ >> FRAMESIZE_SHIFT;
     }
-    size_t headerSize() const {
-        return sizeof(uintptr_t) *
-            ((descriptor_ >> FRAME_HEADER_SIZE_SHIFT) & FRAME_HEADER_SIZE_MASK);
-    }
-    bool hasCachedSavedFrame() const {
-        return descriptor_ & HASCACHEDSAVEDFRAME_BIT;
-    }
-    void setHasCachedSavedFrame() {
-        descriptor_ |= HASCACHEDSAVEDFRAME_BIT;
+    void setFrameDescriptor(size_t size, FrameType type) {
+        descriptor_ = (size << FRAMESIZE_SHIFT) | type;
     }
     uint8_t* returnAddress() const {
         return returnAddress_;
@@ -406,9 +375,6 @@ class JitFrameLayout : public CommonFrameLayout
     static size_t offsetOfThis() {
         return sizeof(JitFrameLayout);
     }
-    static size_t offsetOfEvalNewTarget() {
-        return sizeof(JitFrameLayout);
-    }
     static size_t offsetOfActualArgs() {
         return offsetOfThis() + sizeof(Value);
     }
@@ -417,11 +383,9 @@ class JitFrameLayout : public CommonFrameLayout
     }
 
     Value thisv() {
-        MOZ_ASSERT(CalleeTokenIsFunction(calleeToken()));
         return argv()[0];
     }
     Value* argv() {
-        MOZ_ASSERT(CalleeTokenIsFunction(calleeToken()));
         return (Value*)(this + 1);
     }
     uintptr_t numActualArgs() const {
@@ -470,6 +434,18 @@ class IonAccessorICFrameLayout : public CommonFrameLayout
     }
 };
 
+// The callee token is now dead.
+class IonUnwoundRectifierFrameLayout : public RectifierFrameLayout
+{
+  public:
+    static inline size_t Size() {
+        // It is not necessary to accout for an extra callee token here because
+        // sizeof(ExitFrameLayout) == sizeof(RectifierFrameLayout) due to
+        // extra padding.
+        return sizeof(IonUnwoundRectifierFrameLayout);
+    }
+};
+
 // GC related data used to keep alive data surrounding the Exit frame.
 class ExitFooterFrame
 {
@@ -507,15 +483,14 @@ class IonDOMExitFrameLayout;
 
 enum ExitFrameTokenValues
 {
-    CallNativeExitFrameLayoutToken        = 0x0,
-    ConstructNativeExitFrameLayoutToken   = 0x1,
-    IonDOMExitFrameLayoutGetterToken      = 0x2,
-    IonDOMExitFrameLayoutSetterToken      = 0x3,
-    IonDOMMethodExitFrameLayoutToken      = 0x4,
-    IonOOLNativeExitFrameLayoutToken      = 0x5,
-    IonOOLPropertyOpExitFrameLayoutToken  = 0x6,
-    IonOOLSetterOpExitFrameLayoutToken    = 0x7,
-    IonOOLProxyExitFrameLayoutToken       = 0x8,
+    NativeExitFrameLayoutToken            = 0x0,
+    IonDOMExitFrameLayoutGetterToken      = 0x1,
+    IonDOMExitFrameLayoutSetterToken      = 0x2,
+    IonDOMMethodExitFrameLayoutToken      = 0x3,
+    IonOOLNativeExitFrameLayoutToken      = 0x4,
+    IonOOLPropertyOpExitFrameLayoutToken  = 0x5,
+    IonOOLSetterOpExitFrameLayoutToken    = 0x6,
+    IonOOLProxyExitFrameLayoutToken       = 0x7,
     LazyLinkExitFrameLayoutToken          = 0xFE,
     ExitFrameLayoutBareToken              = 0xFF
 };
@@ -584,6 +559,8 @@ class NativeExitFrameLayout
     uint32_t hiCalleeResult_;
 
   public:
+    static JitCode* Token() { return (JitCode*)NativeExitFrameLayoutToken; }
+
     static inline size_t Size() {
         return sizeof(NativeExitFrameLayout);
     }
@@ -598,25 +575,6 @@ class NativeExitFrameLayout
         return argc_;
     }
 };
-
-class CallNativeExitFrameLayout : public NativeExitFrameLayout
-{
-  public:
-    static JitCode* Token() { return (JitCode*)CallNativeExitFrameLayoutToken; }
-};
-
-class ConstructNativeExitFrameLayout : public NativeExitFrameLayout
-{
-  public:
-    static JitCode* Token() { return (JitCode*)ConstructNativeExitFrameLayoutToken; }
-};
-
-template<>
-inline bool
-ExitFrameLayout::is<NativeExitFrameLayout>()
-{
-    return is<CallNativeExitFrameLayout>() || is<ConstructNativeExitFrameLayout>();
-}
 
 class IonOOLNativeExitFrameLayout
 {
@@ -734,8 +692,8 @@ class IonOOLSetterOpExitFrameLayout : public IonOOLPropertyOpExitFrameLayout
     }
 };
 
-// ProxyGetProperty(JSContext* cx, HandleObject proxy, HandleId id, MutableHandleValue vp)
-// ProxyCallProperty(JSContext* cx, HandleObject proxy, HandleId id, MutableHandleValue vp)
+// Proxy::get(JSContext* cx, HandleObject proxy, HandleObject receiver, HandleId id,
+//            MutableHandleValue vp)
 // ProxySetProperty(JSContext* cx, HandleObject proxy, HandleId id, MutableHandleValue vp,
 //                  bool strict)
 class IonOOLProxyExitFrameLayout
@@ -746,6 +704,9 @@ class IonOOLProxyExitFrameLayout
 
     // The proxy object.
     JSObject* proxy_;
+
+    // Object for HandleObject
+    JSObject* receiver_;
 
     // id for HandleId
     jsid id_;
@@ -777,6 +738,9 @@ class IonOOLProxyExitFrameLayout
     }
     inline jsid* id() {
         return &id_;
+    }
+    inline JSObject** receiver() {
+        return &receiver_;
     }
     inline JSObject** proxy() {
         return &proxy_;
@@ -1034,12 +998,6 @@ GetPcScript(JSContext* cx, JSScript** scriptRes, jsbytecode** pcRes);
 
 CalleeToken
 MarkCalleeToken(JSTracer* trc, CalleeToken token);
-
-// The minimum stack size is two. Two slots are needed because INITGLEXICAL
-// (stack depth 1) is compiled as a SETPROP (stack depth 2) on the global
-// lexical scope. Baseline also requires one slot for this/argument type
-// checks.
-static const uint32_t MinJITStackSize = 2;
 
 } /* namespace jit */
 } /* namespace js */

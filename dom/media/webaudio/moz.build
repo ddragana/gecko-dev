@@ -16,19 +16,11 @@ MOCHITEST_MANIFESTS += [
     'test/mochitest.ini',
 ]
 
-BROWSER_CHROME_MANIFESTS += [
-    'test/browser.ini',
-]
-
-TEST_HARNESS_FILES.testing.mochitest.tests.dom.media.webaudio.test.blink += [
-    'test/blink/audio-testing.js',
-    'test/blink/convolution-testing.js',
-    'test/blink/panner-model-testing.js',
-]
+MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
 
 EXPORTS += [
     'AlignedTArray.h',
-    'AudioBlock.h',
+    'AudioContext.h',
     'AudioEventTimeline.h',
     'AudioNodeEngine.h',
     'AudioNodeExternalInputStream.h',
@@ -61,7 +53,6 @@ EXPORTS.mozilla.dom += [
     'DelayNode.h',
     'DynamicsCompressorNode.h',
     'GainNode.h',
-    'IIRFilterNode.h',
     'MediaElementAudioSourceNode.h',
     'MediaStreamAudioDestinationNode.h',
     'MediaStreamAudioSourceNode.h',
@@ -76,12 +67,10 @@ EXPORTS.mozilla.dom += [
 
 UNIFIED_SOURCES += [
     'AnalyserNode.cpp',
-    'AudioBlock.cpp',
     'AudioBuffer.cpp',
     'AudioBufferSourceNode.cpp',
     'AudioContext.cpp',
     'AudioDestinationNode.cpp',
-    'AudioEventTimeline.cpp',
     'AudioListener.cpp',
     'AudioNode.cpp',
     'AudioNodeEngine.cpp',
@@ -99,7 +88,6 @@ UNIFIED_SOURCES += [
     'DynamicsCompressorNode.cpp',
     'FFTBlock.cpp',
     'GainNode.cpp',
-    'IIRFilterNode.cpp',
     'MediaBufferDecoder.cpp',
     'MediaElementAudioSourceNode.cpp',
     'MediaStreamAudioDestinationNode.cpp',
@@ -122,12 +110,7 @@ if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
         '/media/openmax_dl/dl/api/'
     ]
 
-# Are we targeting x86 or x64?  If so, build SSE2 files.
-if CONFIG['INTEL_ARCHITECTURE']:
-    SOURCES += ['AudioNodeEngineSSE2.cpp']
-    DEFINES['USE_SSE2'] = True
-    SOURCES['AudioNodeEngineSSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-
+FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -136,5 +119,3 @@ LOCAL_INCLUDES += [
     '..'
 ]
 
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

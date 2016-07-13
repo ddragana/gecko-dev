@@ -8,11 +8,12 @@
 #define mozilla_dom_cellbroadcast_CellBroadcastMessage_h
 
 #include "mozilla/dom/MozCellBroadcastMessageBinding.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsWrapperCache.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
@@ -26,7 +27,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CellBroadcastMessage)
 
-  CellBroadcastMessage(nsPIDOMWindowInner* aWindow,
+  CellBroadcastMessage(nsPIDOMWindow* aWindow,
                        uint32_t aServiceId,
                        uint32_t aGsmGeographicalScope,
                        uint16_t aMessageCode,
@@ -41,7 +42,7 @@ public:
                        bool aEtwsEmergencyUserAlert,
                        bool aEtwsPopup);
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const { return mWindow; }
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -78,7 +79,7 @@ private:
   // Don't try to use the default constructor.
   CellBroadcastMessage();
 
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   uint32_t mServiceId;
   Nullable<CellBroadcastGsmGeographicalScope> mGsmGeographicalScope;
   uint16_t mMessageCode;
@@ -88,7 +89,7 @@ private:
   Nullable<CellBroadcastMessageClass> mMessageClass;
   uint64_t mTimestamp;
   Nullable<uint16_t> mCdmaServiceCategory;
-  RefPtr<CellBroadcastEtwsInfo> mEtwsInfo;
+  nsRefPtr<CellBroadcastEtwsInfo> mEtwsInfo;
 };
 
 class CellBroadcastEtwsInfo final : public nsISupports
@@ -98,12 +99,12 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CellBroadcastEtwsInfo)
 
-  CellBroadcastEtwsInfo(nsPIDOMWindowInner* aWindow,
+  CellBroadcastEtwsInfo(nsPIDOMWindow* aWindow,
                         uint32_t aWarningType,
                         bool aEmergencyUserAlert,
                         bool aPopup);
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const { return mWindow; }
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -124,7 +125,7 @@ private:
   // Don't try to use the default constructor.
   CellBroadcastEtwsInfo();
 
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   Nullable<CellBroadcastEtwsWarningType> mWarningType;
   bool mEmergencyUserAlert;
   bool mPopup;

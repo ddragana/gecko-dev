@@ -86,7 +86,7 @@ nsStringBundle::LoadProperties()
   rv = NS_NewChannel(getter_AddRefs(channel),
                      uri,
                      nsContentUtils::GetSystemPrincipal(),
-                     nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                     nsILoadInfo::SEC_NORMAL,
                      nsIContentPolicy::TYPE_OTHER);
 
   if (NS_FAILED(rv)) return rv;
@@ -95,7 +95,7 @@ nsStringBundle::LoadProperties()
   channel->SetContentType(NS_LITERAL_CSTRING("text/plain"));
 
   nsCOMPtr<nsIInputStream> in;
-  rv = channel->Open2(getter_AddRefs(in));
+  rv = channel->Open(getter_AddRefs(in));
   if (NS_FAILED(rv)) return rv;
 
   NS_ASSERTION(NS_SUCCEEDED(rv) && in, "Error in OpenBlockingStream");
@@ -191,6 +191,7 @@ nsStringBundle::FormatStringFromName(const char16_t *aName,
 
 NS_IMPL_ISUPPORTS(nsStringBundle, nsIStringBundle)
 
+/* void GetStringFromID (in long aID, out wstring aResult); */
 NS_IMETHODIMP
 nsStringBundle::GetStringFromID(int32_t aID, char16_t **aResult)
 {
@@ -210,6 +211,7 @@ nsStringBundle::GetStringFromID(int32_t aID, char16_t **aResult)
   return NS_OK;
 }
 
+/* void GetStringFromName (in wstring aName, out wstring aResult); */
 NS_IMETHODIMP
 nsStringBundle::GetStringFromName(const char16_t *aName, char16_t **aResult)
 {
@@ -593,7 +595,7 @@ nsStringBundleService::getStringBundle(const char *aURLSpec,
   } else {
 
     // hasn't been cached, so insert it into the hash table
-    RefPtr<nsStringBundle> bundle = new nsStringBundle(aURLSpec, mOverrideStrings);
+    nsRefPtr<nsStringBundle> bundle = new nsStringBundle(aURLSpec, mOverrideStrings);
     cacheEntry = insertIntoCache(bundle.forget(), key);
   }
 
@@ -655,7 +657,7 @@ nsStringBundleService::CreateExtensibleBundle(const char* aCategory,
   NS_ENSURE_ARG_POINTER(aResult);
   *aResult = nullptr;
 
-  RefPtr<nsExtensibleStringBundle> bundle = new nsExtensibleStringBundle();
+  nsRefPtr<nsExtensibleStringBundle> bundle = new nsExtensibleStringBundle();
 
   nsresult res = bundle->Init(aCategory, this);
   if (NS_FAILED(res)) {

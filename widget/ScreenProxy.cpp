@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/unused.h"
-#include "nsContentUtils.h"
 #include "nsIAppShell.h"
 #include "nsScreenManagerProxy.h"
 #include "nsServiceManagerUtils.h"
@@ -20,11 +19,7 @@ using namespace mozilla::dom;
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 ScreenProxy::ScreenProxy(nsScreenManagerProxy* aScreenManager, ScreenDetails aDetails)
-  : mContentsScaleFactor(0)
-  , mScreenManager(aScreenManager)
-  , mId(0)
-  , mPixelDepth(0)
-  , mColorDepth(0)
+  : mScreenManager(aScreenManager)
   , mCacheValid(false)
   , mCacheWillInvalidate(false)
 {
@@ -152,7 +147,7 @@ ScreenProxy::EnsureCacheIsValid()
   // Kick off a synchronous IPC call to the parent to get the
   // most up-to-date information.
   ScreenDetails details;
-  Unused << mScreenManager->SendScreenRefresh(mId, &details, &success);
+  unused << mScreenManager->SendScreenRefresh(mId, &details, &success);
   if (!success) {
     NS_WARNING("Updating a ScreenProxy in the child process failed on parent side.");
     return false;
@@ -174,7 +169,16 @@ ScreenProxy::InvalidateCacheOnNextTick()
 
   mCacheWillInvalidate = true;
 
-  nsContentUtils::RunInStableState(NewRunnableMethod(this, &ScreenProxy::InvalidateCache));
+  nsCOMPtr<nsIAppShell> appShell = do_GetService(kAppShellCID);
+  if (appShell) {
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableMethod(this, &ScreenProxy::InvalidateCache);
+    appShell->RunInStableState(r.forget());
+  } else {
+    // It's pretty bad news if we can't get the appshell. In that case,
+    // let's just invalidate the cache right away.
+    InvalidateCache();
+  }
 }
 
 void

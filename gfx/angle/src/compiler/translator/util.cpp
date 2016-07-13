@@ -12,7 +12,7 @@
 #include "compiler/translator/SymbolTable.h"
 #include "common/utilities.h"
 
-bool strtof_clamp(const std::string &str, float *value)
+bool atof_clamp(const char *str, float *value)
 {
     bool success = pp::numeric_lex_float(str, value);
     if (!success)
@@ -20,11 +20,11 @@ bool strtof_clamp(const std::string &str, float *value)
     return success;
 }
 
-bool atoi_clamp(const char *str, unsigned int *value)
+bool atoi_clamp(const char *str, int *value)
 {
     bool success = pp::numeric_lex_int(str, value);
     if (!success)
-        *value = std::numeric_limits<unsigned int>::max();
+        *value = std::numeric_limits<int>::max();
     return success;
 }
 
@@ -219,6 +219,7 @@ bool IsVaryingOut(TQualifier qualifier)
     switch (qualifier)
     {
       case EvqVaryingOut:
+      case EvqInvariantVaryingOut:
       case EvqSmoothOut:
       case EvqFlatOut:
       case EvqCentroidOut:
@@ -236,6 +237,7 @@ bool IsVaryingIn(TQualifier qualifier)
     switch (qualifier)
     {
       case EvqVaryingIn:
+      case EvqInvariantVaryingIn:
       case EvqSmoothIn:
       case EvqFlatIn:
       case EvqCentroidIn:
@@ -267,6 +269,8 @@ InterpolationType GetInterpolationType(TQualifier qualifier)
       case EvqFragmentIn:
       case EvqVaryingIn:
       case EvqVaryingOut:
+      case EvqInvariantVaryingIn:
+      case EvqInvariantVaryingOut:
         return INTERPOLATION_SMOOTH;
 
       case EvqCentroidIn:
@@ -297,13 +301,13 @@ void GetVariableTraverser::setTypeSpecificInfo(
     ASSERT(variable);
     switch (type.getQualifier())
     {
+      case EvqInvariantVaryingIn:
+      case EvqInvariantVaryingOut:
+        variable->isInvariant = true;
+        break;
       case EvqVaryingIn:
       case EvqVaryingOut:
-      case EvqVertexOut:
-      case EvqSmoothOut:
-      case EvqFlatOut:
-      case EvqCentroidOut:
-        if (mSymbolTable.isVaryingInvariant(std::string(name.c_str())) || type.isInvariant())
+        if (mSymbolTable.isVaryingInvariant(std::string(name.c_str())))
         {
             variable->isInvariant = true;
         }

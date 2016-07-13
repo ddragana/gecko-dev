@@ -7,6 +7,7 @@
 #include "dmodshow.h"
 #include "wmcodecdsp.h"
 #include "dmoreg.h"
+#include "nsAutoPtr.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/RefPtr.h"
 #include "nsPrintfCString.h"
@@ -49,7 +50,7 @@ GetDirectShowGuidName(const GUID& aGuid)
 void
 RemoveGraphFromRunningObjectTable(DWORD aRotRegister)
 {
-  RefPtr<IRunningObjectTable> runningObjectTable;
+  nsRefPtr<IRunningObjectTable> runningObjectTable;
   if (SUCCEEDED(GetRunningObjectTable(0, getter_AddRefs(runningObjectTable)))) {
     runningObjectTable->Revoke(aRotRegister);
   }
@@ -60,8 +61,8 @@ AddGraphToRunningObjectTable(IUnknown *aUnkGraph, DWORD *aOutRotRegister)
 {
   HRESULT hr;
 
-  RefPtr<IMoniker> moniker;
-  RefPtr<IRunningObjectTable> runningObjectTable;
+  nsRefPtr<IMoniker> moniker;
+  nsRefPtr<IRunningObjectTable> runningObjectTable;
 
   hr = GetRunningObjectTable(0, getter_AddRefs(runningObjectTable));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
@@ -183,7 +184,7 @@ CreateAndAddFilter(IGraphBuilder* aGraph,
   NS_ENSURE_TRUE(aOutFilter, E_POINTER);
   HRESULT hr;
 
-  RefPtr<IBaseFilter> filter;
+  nsRefPtr<IBaseFilter> filter;
   hr = CoCreateInstance(aFilterClsId,
                         nullptr,
                         CLSCTX_INPROC_SERVER,
@@ -207,13 +208,15 @@ CreateAndAddFilter(IGraphBuilder* aGraph,
 }
 
 HRESULT
-CreateMP3DMOWrapperFilter(IBaseFilter **aOutFilter)
+AddMP3DMOWrapperFilter(IGraphBuilder* aGraph,
+                       IBaseFilter **aOutFilter)
 {
+  NS_ENSURE_TRUE(aGraph, E_POINTER);
   NS_ENSURE_TRUE(aOutFilter, E_POINTER);
   HRESULT hr;
 
   // Create the wrapper filter.
-  RefPtr<IBaseFilter> filter;
+  nsRefPtr<IBaseFilter> filter;
   hr = CoCreateInstance(CLSID_DMOWrapperFilter,
                         nullptr,
                         CLSCTX_INPROC_SERVER,
@@ -225,7 +228,7 @@ CreateMP3DMOWrapperFilter(IBaseFilter **aOutFilter)
   }
 
   // Query for IDMOWrapperFilter.
-  RefPtr<IDMOWrapperFilter> dmoWrapper;
+  nsRefPtr<IDMOWrapperFilter> dmoWrapper;
   hr = filter->QueryInterface(IID_IDMOWrapperFilter,
                               getter_AddRefs(dmoWrapper));
   if (FAILED(hr)) {
@@ -242,24 +245,6 @@ CreateMP3DMOWrapperFilter(IBaseFilter **aOutFilter)
     return hr;
   }
 
-  filter.forget(aOutFilter);
-
-  return S_OK;
-}
-
-HRESULT
-AddMP3DMOWrapperFilter(IGraphBuilder* aGraph,
-                       IBaseFilter **aOutFilter)
-{
-  NS_ENSURE_TRUE(aGraph, E_POINTER);
-  NS_ENSURE_TRUE(aOutFilter, E_POINTER);
-  HRESULT hr;
-
-  // Create the wrapper filter.
-  RefPtr<IBaseFilter> filter;
-  hr = CreateMP3DMOWrapperFilter(getter_AddRefs(filter));
-  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-
   // Add the wrapper filter to graph.
   hr = aGraph->AddFilter(filter, L"MP3 Decoder DMO");
   if (FAILED(hr)) {
@@ -270,35 +255,6 @@ AddMP3DMOWrapperFilter(IGraphBuilder* aGraph,
   filter.forget(aOutFilter);
 
   return S_OK;
-}
-
-bool
-CanDecodeMP3UsingDirectShow()
-{
-  RefPtr<IBaseFilter> filter;
-
-  // Can we create the MP3 demuxer filter?
-  if (FAILED(CoCreateInstance(CLSID_MPEG1Splitter,
-                              nullptr,
-                              CLSCTX_INPROC_SERVER,
-                              IID_IBaseFilter,
-                              getter_AddRefs(filter)))) {
-    return false;
-  }
-
-  // Can we create either the WinXP MP3 decoder filter or the MP3 DMO decoder?
-  if (FAILED(CoCreateInstance(CLSID_MPEG_LAYER_3_DECODER_FILTER,
-                              nullptr,
-                              CLSCTX_INPROC_SERVER,
-                              IID_IBaseFilter,
-                              getter_AddRefs(filter))) &&
-      FAILED(CreateMP3DMOWrapperFilter(getter_AddRefs(filter)))) {
-    return false;
-  }
-
-  // Else, we can create all of the components we need. Assume
-  // DirectShow is going to work...
-  return true;
 }
 
 // Match a pin by pin direction and connection state.
@@ -312,7 +268,7 @@ MatchUnconnectedPin(IPin* aPin,
 
   // Ensure the pin is unconnected.
   RefPtr<IPin> peer;
-  HRESULT hr = aPin->ConnectedTo(getter_AddRefs(peer));
+  HRESULT hr = aPin->ConnectedTo(byRef(peer));
   if (hr != VFW_E_NOT_CONNECTED) {
     *aOutMatches = false;
     return hr;
@@ -333,12 +289,12 @@ GetUnconnectedPin(IBaseFilter* aFilter, PIN_DIRECTION aPinDir)
 {
   RefPtr<IEnumPins> enumPins;
 
-  HRESULT hr = aFilter->EnumPins(getter_AddRefs(enumPins));
+  HRESULT hr = aFilter->EnumPins(byRef(enumPins));
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   // Test each pin to see if it matches the direction we're looking for.
   RefPtr<IPin> pin;
-  while (S_OK == enumPins->Next(1, getter_AddRefs(pin), nullptr)) {
+  while (S_OK == enumPins->Next(1, byRef(pin), nullptr)) {
     bool matches = FALSE;
     if (SUCCEEDED(MatchUnconnectedPin(pin, aPinDir, &matches)) &&
         matches) {

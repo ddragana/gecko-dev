@@ -234,7 +234,7 @@ protected:
 
 private:
   Matrix mMatrix;
-  SamplingFilter mSamplingFilter;
+  Filter mFilter;
 };
 
 class FilterNodeBlendSoftware : public FilterNodeSoftware

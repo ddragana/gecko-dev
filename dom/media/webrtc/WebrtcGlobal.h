@@ -8,7 +8,6 @@
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/RTCStatsReportBinding.h"
-#include "nsAutoPtr.h"
 
 typedef mozilla::dom::RTCStatsReportInternal StatsReport;
 typedef nsTArray< nsAutoPtr<StatsReport>> RTCReports;
@@ -32,7 +31,7 @@ struct ParamTraits<mozilla::dom::Optional<T>>
     WriteParam(aMsg, false);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     bool was_passed = false;
 
@@ -62,7 +61,7 @@ struct ParamTraits<mozilla::dom::Sequence<T>>
     WriteParam(aMsg, static_cast<const FallibleTArray<T>&>(aParam));
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     return ReadParam(aMsg, aIter, dynamic_cast<FallibleTArray<T>*>(aResult));
   }
@@ -115,7 +114,7 @@ struct ParamTraits<mozilla::dom::RTCStatsReportInternal>
     WriteParam(aMsg, aParam.mTransportStats);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mClosed)) ||
         !ReadParam(aMsg, aIter, &(aResult->mCodecStats)) ||
@@ -148,7 +147,7 @@ static void WriteRTCStats(Message* aMsg, const RTCStats& aParam)
   WriteParam(aMsg, aParam.mType);
 }
 
-static bool ReadRTCStats(const Message* aMsg, PickleIterator* aIter, RTCStats* aResult)
+static bool ReadRTCStats(const Message* aMsg, void** aIter, RTCStats* aResult)
 {
   // RTCStats base class
   if (!ReadParam(aMsg, aIter, &(aResult->mId)) ||
@@ -175,7 +174,7 @@ struct ParamTraits<mozilla::dom::RTCCodecStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mChannels)) ||
         !ReadParam(aMsg, aIter, &(aResult->mClockRate)) ||
@@ -208,7 +207,7 @@ struct ParamTraits<mozilla::dom::RTCIceCandidatePairStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mComponentId)) ||
         !ReadParam(aMsg, aIter, &(aResult->mLocalCandidateId)) ||
@@ -243,7 +242,7 @@ struct ParamTraits<mozilla::dom::RTCIceCandidateStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mCandidateId)) ||
         !ReadParam(aMsg, aIter, &(aResult->mCandidateType)) ||
@@ -275,7 +274,7 @@ struct ParamTraits<mozilla::dom::RTCIceComponentStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mActiveConnection)) ||
         !ReadParam(aMsg, aIter, &(aResult->mBytesReceived)) ||
@@ -308,7 +307,7 @@ static void WriteRTCRTPStreamStats(
 }
 
 static bool ReadRTCRTPStreamStats(
-              const Message* aMsg, PickleIterator* aIter,
+              const Message* aMsg, void** aIter,
               mozilla::dom::RTCRTPStreamStats* aResult)
 {
   if (!ReadParam(aMsg, aIter, &(aResult->mBitrateMean)) ||
@@ -347,7 +346,7 @@ struct ParamTraits<mozilla::dom::RTCInboundRTPStreamStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mBytesReceived)) ||
         !ReadParam(aMsg, aIter, &(aResult->mDiscardedPackets)) ||
@@ -381,7 +380,7 @@ struct ParamTraits<mozilla::dom::RTCOutboundRTPStreamStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mBytesSent)) ||
         !ReadParam(aMsg, aIter, &(aResult->mDroppedFrames)) ||
@@ -408,7 +407,7 @@ struct ParamTraits<mozilla::dom::RTCMediaStreamStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mStreamIdentifier)) ||
         !ReadParam(aMsg, aIter, &(aResult->mTrackIds)) ||
@@ -432,7 +431,7 @@ struct ParamTraits<mozilla::dom::RTCTransportStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mBytesReceived)) ||
         !ReadParam(aMsg, aIter, &(aResult->mBytesSent)) ||
@@ -468,7 +467,7 @@ struct ParamTraits<mozilla::dom::RTCMediaStreamTrackStats>
     WriteRTCStats(aMsg, aParam);
   }
 
-  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     if (!ReadParam(aMsg, aIter, &(aResult->mAudioLevel)) ||
         !ReadParam(aMsg, aIter, &(aResult->mEchoReturnLoss)) ||

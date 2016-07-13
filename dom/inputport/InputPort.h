@@ -40,7 +40,7 @@ public:
   IMPL_EVENT_HANDLER(disconnect);
 
 protected:
-  explicit InputPort(nsPIDOMWindowInner* aWindow);
+  explicit InputPort(nsPIDOMWindow* aWindow);
 
   virtual ~InputPort();
 
@@ -48,8 +48,8 @@ protected:
   void Shutdown();
 
   nsString mId;
-  RefPtr<DOMMediaStream> mStream;
-  RefPtr<InputPortListener> mInputPortListener;
+  nsRefPtr<DOMMediaStream> mStream;
+  nsRefPtr<InputPortListener> mInputPortListener;
   bool mIsConnected;
 };
 

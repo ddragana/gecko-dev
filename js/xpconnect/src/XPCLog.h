@@ -12,11 +12,12 @@
 #include "mozilla/Logging.h"
 
 /*
- * This uses mozilla/Logging.h. The module name used here is 'xpclog'.
- * These environment settings should work...
+ * This uses prlog.h See prlog.h for environment settings for output.
+ * The module name used here is 'xpclog'. These environment settings
+ * should work...
  *
- * SET MOZ_LOG=xpclog:5
- * SET MOZ_LOG_FILE=logfile.txt
+ * SET NSPR_LOG_MODULES=xpclog:5
+ * SET NSPR_LOG_FILE=logfile.txt
  *
  * usage:
  *   XPC_LOG_ERROR(("my comment number %d", 5))   // note the double parens

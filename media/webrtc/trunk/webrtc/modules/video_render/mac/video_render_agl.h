@@ -16,7 +16,6 @@
 #define WEBRTC_MODULES_VIDEO_RENDER_MAIN_SOURCE_MAC_VIDEO_RENDER_AGL_H_
 
 #include "webrtc/modules/video_render/include/video_render_defines.h"
-#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 
 #define NEW_HIVIEW_PARENT_EVENT_HANDLER 1
 #define NEW_HIVIEW_EVENT_HANDLER 1
@@ -35,6 +34,7 @@ class VideoRenderAGL;
 namespace webrtc {
 class CriticalSectionWrapper;
 class EventWrapper;
+class ThreadWrapper;
 
 class VideoChannelAGL : public VideoRenderCallback {
  public:
@@ -72,8 +72,8 @@ class VideoChannelAGL : public VideoRenderCallback {
   int _oldStretchedHeight;
   int _oldStretchedWidth;
   unsigned char* _buffer;
-  size_t _bufferSize;
-  size_t _incomingBufferSize;
+  int _bufferSize;
+  int _incommingBufferSize;
   bool _bufferIsUpdated;
   bool _sizeInitialized;
   int _numberOfStreams;
@@ -110,6 +110,7 @@ class VideoRenderAGL {
 
   // ********** new module functions ************ //
   int ChangeWindow(void* newWindowRef);
+  int32_t ChangeUniqueID(int32_t id);
   int32_t StartRender();
   int32_t StopRender();
   int32_t DeleteAGLChannel(const uint32_t streamID);
@@ -143,7 +144,7 @@ class VideoRenderAGL {
   bool _fullScreen;
   int _id;
   webrtc::CriticalSectionWrapper& _renderCritSec;
-  rtc::scoped_ptr<webrtc::ThreadWrapper> _screenUpdateThread;
+  webrtc::ThreadWrapper* _screenUpdateThread;
   webrtc::EventWrapper* _screenUpdateEvent;
   bool _isHIViewRef;
   AGLContext _aglContext;
@@ -168,6 +169,8 @@ class VideoRenderAGL {
   HIRect _currentViewBounds;
   HIRect _lastViewBounds;
   bool _renderingIsPaused;
+  unsigned int _threadID;
+
 };
 
 }  // namespace webrtc

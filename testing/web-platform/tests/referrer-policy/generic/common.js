@@ -19,33 +19,21 @@ function parseUrlQueryString(queryString) {
   return params;
 };
 
-function appendIframeToBody(url, attributes) {
+function appendIframeToBody(url) {
   var iframe = document.createElement("iframe");
   iframe.src = url;
-  // Extend element with attributes. (E.g. "referrerPolicy" or "rel")
-  if (attributes) {
-    for (var attr in attributes) {
-      iframe[attr] = attributes[attr];
-    }
-  }
   document.body.appendChild(iframe);
 
   return iframe;
 }
 
-function loadImage(src, callback, attributes) {
+function loadImage(src, callback) {
   var image = new Image();
   image.crossOrigin = "Anonymous";
   image.onload = function() {
     callback(image);
   }
   image.src = src;
-  // Extend element with attributes. (E.g. "referrerPolicy" or "rel")
-  if (attributes) {
-    for (var attr in attributes) {
-      image[attr] = attributes[attr];
-    }
-  }
   document.body.appendChild(image)
 }
 
@@ -73,14 +61,14 @@ function decodeImageData(rgba) {
   return JSON.parse(string_data);
 }
 
-function decodeImage(url, callback, referrer_policy) {
+function decodeImage(url, callback) {
   loadImage(url, function(img) {
     var canvas = document.createElement("canvas");
     var context = canvas.getContext('2d');
     context.drawImage(img, 0, 0);
     var imgData = context.getImageData(0, 0, img.clientWidth, img.clientHeight);
     callback(decodeImageData(imgData.data))
-  }, referrer_policy);
+  });
 }
 
 function normalizePort(targetPort) {
@@ -97,10 +85,12 @@ function wrapResult(url, server_data) {
     referrer: server_data.headers.referer,
     headers: server_data.headers
   }
+
+  return result;
 }
 
-function queryIframe(url, callback, referrer_policy) {
-  var iframe = appendIframeToBody(url, referrer_policy);
+function queryIframe(url, callback) {
+  var iframe = appendIframeToBody(url);
   var listener = function(event) {
     if (event.source != iframe.contentWindow)
       return;
@@ -111,10 +101,10 @@ function queryIframe(url, callback, referrer_policy) {
   window.addEventListener("message", listener);
 }
 
-function queryImage(url, callback, referrer_policy) {
+function queryImage(url, callback) {
   decodeImage(url, function(server_data) {
     callback(wrapResult(url, server_data), url);
-  }, referrer_policy)
+  })
 }
 
 function queryXhr(url, callback) {

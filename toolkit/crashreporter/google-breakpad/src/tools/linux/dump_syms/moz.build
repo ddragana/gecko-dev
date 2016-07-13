@@ -8,10 +8,7 @@ HOST_SOURCES += [
     'dump_syms.cc',
 ]
 
-HOST_CXXFLAGS += [
-    '-O2',
-    '-g',
-]
+HostProgram('dump_syms')
 
 # host_breakpad_linux_common_s needs to come first
 HOST_USE_LIBS += [
@@ -22,12 +19,8 @@ HOST_USE_LIBS += [
     'host_breakpad_dwarf_s',
 ]
 
-# The HostProgram template may append 'host_stdc++compat' to
-# HOST_USE_LIBS, which needs to appear after the entries above.
-HostProgram('dump_syms')
-
 LOCAL_INCLUDES += [
+    '../../..',
     '../../../common/linux',
 ]
 
-include('/toolkit/crashreporter/crashreporter.mozbuild')

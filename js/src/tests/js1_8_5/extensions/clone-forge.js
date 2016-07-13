@@ -15,7 +15,7 @@ function assertThrows(f) {
 }
 
 function byteArray(str) {
-    return str.split('').map(c => c.charCodeAt(0));
+    return [ c.charCodeAt(0) for (c of str.split('')) ];
 }
 
 // Don't allow forging bogus Date objects.

@@ -10,7 +10,6 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace image {
@@ -38,10 +37,6 @@ public:
   NS_IMETHOD GetIntrinsicRatio(nsSize* aRatio) override;
   NS_IMETHOD_(already_AddRefed<SourceSurface>)
     GetFrame(uint32_t aWhichFrame, uint32_t aFlags) override;
-  NS_IMETHOD_(already_AddRefed<SourceSurface>)
-    GetFrameAtSize(const gfx::IntSize& aSize,
-                   uint32_t aWhichFrame,
-                   uint32_t aFlags) override;
   NS_IMETHOD_(bool) IsImageContainerAvailable(layers::LayerManager* aManager,
                                               uint32_t aFlags) override;
   NS_IMETHOD_(already_AddRefed<layers::ImageContainer>)
@@ -51,7 +46,7 @@ public:
                                const nsIntSize& aSize,
                                const ImageRegion& aRegion,
                                uint32_t aWhichFrame,
-                               gfx::SamplingFilter aSamplingFilter,
+                               GraphicsFilter aFilter,
                                const Maybe<SVGImageContext>& aSVGContext,
                                uint32_t aFlags) override;
   NS_IMETHOD RequestDiscard() override;
@@ -60,17 +55,16 @@ public:
     override;
   nsIntSize OptimalImageSizeForDest(const gfxSize& aDest,
                                     uint32_t aWhichFrame,
-                                    gfx::SamplingFilter aSamplingFilter,
+                                    GraphicsFilter aFilter,
                                     uint32_t aFlags) override;
 
 protected:
-  ClippedImage(Image* aImage, nsIntRect aClip,
-               const Maybe<nsSize>& aSVGViewportSize);
+  ClippedImage(Image* aImage, nsIntRect aClip);
 
   virtual ~ClippedImage();
 
 private:
-  Pair<DrawResult, RefPtr<SourceSurface>>
+  already_AddRefed<SourceSurface>
     GetFrameInternal(const nsIntSize& aSize,
                      const Maybe<SVGImageContext>& aSVGContext,
                      uint32_t aWhichFrame,
@@ -80,17 +74,16 @@ private:
                             const nsIntSize& aSize,
                             const ImageRegion& aRegion,
                             uint32_t aWhichFrame,
-                            gfx::SamplingFilter aSamplingFilter,
+                            GraphicsFilter aFilter,
                             const Maybe<SVGImageContext>& aSVGContext,
                             uint32_t aFlags);
 
   // If we are forced to draw a temporary surface, we cache it here.
-  UniquePtr<ClippedImageCachedSurface> mCachedSurface;
+  nsAutoPtr<ClippedImageCachedSurface> mCachedSurface;
 
-  nsIntRect        mClip;            // The region to clip to.
-  Maybe<bool>      mShouldClip;      // Memoized ShouldClip() if present.
-  Maybe<nsIntSize> mSVGViewportSize; // If we're clipping a VectorImage, this
-                                     // is the size of viewport of that image.
+  nsIntRect   mClip;              // The region to clip to.
+  Maybe<bool> mShouldClip;        // Memoized ShouldClip() if present.
+
   friend class DrawSingleTileCallback;
   friend class ImageOps;
 };

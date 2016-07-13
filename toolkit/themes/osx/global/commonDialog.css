@@ -19,7 +19,7 @@
 }
 
 #info\.icon {
-  margin-inline-end: 14px;
+  -moz-margin-end: 14px;
 }
 
 #info\.title,

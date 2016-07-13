@@ -58,41 +58,34 @@ SimpleTest.registerCleanupFunction(() =>
                                   Ci.nsIPermissionManager.ALLOW_ACTION)
 );
 
-var gManifestURL = "http://www.example.com/chrome/dom/apps/tests/apps/basic.webapp";
-
-// Get the permission count before installing the app so we can compare it to
-// the permission count after uninstalling the app.
-var currentPermissionCount = getPermissionCountForApp(-1);
+var gManifestURL = "http://www.example.com/chrome/dom/tests/mochitest/webapps/apps/basic.webapp";
 
 function onInstall() {
   var testAppId = appsService.getAppLocalIdByManifestURL(gManifestURL);
 
-  // PermissionsManager.installPermissions gets run during the install process,
-  // and it adds the "indexedDB" permission by default, so the app should have
-  // that permission.
-  is(getPermissionCountForApp(testAppId), 1, "App should have 1 permission");
+  is(getPermissionCountForApp(testAppId), 0, "App should have no permission");
 
-  var attrs = {appId: testAppId};
-  var principal = secMan.createCodebasePrincipal(ioService.newURI("http://www.example.com", null, null),
-                                                 attrs);
+  var currentPermissionCount = getPermissionCountForApp(-1);
+
+  var principal = secMan.getAppCodebasePrincipal(ioService.newURI("http://www.example.com", null, null),
+                                                 testAppId, false);
 
   permManager.addFromPrincipal(principal, "foobar", Ci.nsIPermissionManager.ALLOW_ACTION);
   permManager.addFromPrincipal(principal, "foo", Ci.nsIPermissionManager.DENY_ACTION);
   permManager.addFromPrincipal(principal, "bar", Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION, 0);
 
-  attrs = {appId: testAppId, inIsolatedMozBrowser: true};
-  principal = secMan.createCodebasePrincipal(ioService.newURI("http://www.example.com", null, null),
-                                             attrs);
+  principal = secMan.getAppCodebasePrincipal(ioService.newURI("http://www.example.com", null, null),
+                                             testAppId, true);
   permManager.addFromPrincipal(principal, "foobar", Ci.nsIPermissionManager.ALLOW_ACTION);
 
-  attrs = {appId: testAppId};
-  principal = secMan.createCodebasePrincipal(ioService.newURI("http://www.example.org", null, null),
-                                             attrs);
+  principal = secMan.getAppCodebasePrincipal(ioService.newURI("http://www.example.org", null, null),
+                                             testAppId, false);
   permManager.addFromPrincipal(principal, "foobar", Ci.nsIPermissionManager.ALLOW_ACTION);
 
-  is(getPermissionCountForApp(testAppId), 6, "App should have 6 permissions");
+  is(getPermissionCountForApp(testAppId), 5, "App should have 5 permissions");
 
-  navigator.mozApps.mgmt.getAll().onsuccess = function() {
+  // Not installed means not installed as native app.
+  navigator.mozApps.mgmt.getNotInstalled().onsuccess = function() {
     for (i in this.result) {
       var app = this.result[i];
       if (app.manifestURL == gManifestURL) {

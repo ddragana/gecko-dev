@@ -5,7 +5,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "nsGConfService.h"
-#include "nsString.h"
+#include "nsStringAPI.h"
 #include "nsCOMPtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsISupportsPrimitives.h"

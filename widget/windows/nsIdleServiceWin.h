@@ -24,11 +24,11 @@ class nsIdleServiceWin : public nsIdleService
 public:
     NS_DECL_ISUPPORTS_INHERITED
 
-    bool PollIdleTime(uint32_t* aIdleTime) override;
+    bool PollIdleTime(uint32_t* aIdleTime);
 
     static already_AddRefed<nsIdleServiceWin> GetInstance()
     {
-        RefPtr<nsIdleServiceWin> idleService =
+        nsRefPtr<nsIdleServiceWin> idleService =
             nsIdleService::GetInstance().downcast<nsIdleServiceWin>();
         if (!idleService) {
             idleService = new nsIdleServiceWin();
@@ -40,7 +40,7 @@ public:
 protected:
     nsIdleServiceWin() { }
     virtual ~nsIdleServiceWin() { }
-    bool UsePollMode() override;
+    bool UsePollMode();
 };
 
 #endif // nsIdleServiceWin_h__

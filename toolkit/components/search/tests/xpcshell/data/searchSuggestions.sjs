@@ -27,8 +27,6 @@ function handleRequest(request, response) {
     writeSuggestions(q);
   } else if (q == "Query Mismatch") {
     writeSuggestions("This is an incorrect query string", ["some result"]);
-  } else if (q == "Query Case Mismatch") {
-    writeSuggestions(q.toUpperCase(), [q]);
   } else if (q == "") {
     writeSuggestions("", ["The server should never be sent an empty query"]);
   } else if (q && q.startsWith("mo")) {
@@ -72,7 +70,7 @@ function parseQueryString(queryString) {
   let query = {};
   queryString.split('&').forEach(function (val) {
     let [name, value] = val.split('=');
-    query[name] = unescape(value).replace(/[+]/g, " ");
+    query[name] = unescape(value).replace("+", " ");
   });
   return query;
 }

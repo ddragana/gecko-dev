@@ -5,33 +5,56 @@
 // This test makes sure that private browsing turns off doesn't cause zoom
 // settings to be reset on tab switch (bug 464962)
 
-add_task(function* test() {
-  let win = (yield BrowserTestUtils.openNewBrowserWindow({ private: true }));
-  let tabAbout = (yield BrowserTestUtils.openNewForegroundTab(win.gBrowser, "about:"));
-  let tabMozilla = (yield BrowserTestUtils.openNewForegroundTab(win.gBrowser, "about:"));
+function test() {
+  waitForExplicitFinish();
 
-  let mozillaZoom = win.ZoomManager.zoom;
+  function testZoom(aWindow, aCallback) {
+    executeSoon(function() {
+      let tabAbout = aWindow.gBrowser.addTab();
+      aWindow.gBrowser.selectedTab = tabAbout;
 
-  // change the zoom on the mozilla page
-  win.FullZoom.enlarge();
-  // make sure the zoom level has been changed
-  isnot(win.ZoomManager.zoom, mozillaZoom, "Zoom level can be changed");
-  mozillaZoom = win.ZoomManager.zoom;
+      let aboutBrowser = aWindow.gBrowser.getBrowserForTab(tabAbout);
+      aboutBrowser.addEventListener("load", function onAboutBrowserLoad() {
+        aboutBrowser.removeEventListener("load", onAboutBrowserLoad, true);
+        let tabMozilla = aWindow.gBrowser.addTab();
+        aWindow.gBrowser.selectedTab = tabMozilla;
 
-  // switch to about: tab
-  yield BrowserTestUtils.switchTab(win.gBrowser, tabAbout);
+        let mozillaBrowser = aWindow.gBrowser.getBrowserForTab(tabMozilla);
+        mozillaBrowser.addEventListener("load", function onMozillaBrowserLoad() {
+          mozillaBrowser.removeEventListener("load", onMozillaBrowserLoad, true);
+          let mozillaZoom = aWindow.ZoomManager.zoom;
 
-  // switch back to mozilla tab
-  yield BrowserTestUtils.switchTab(win.gBrowser, tabMozilla);
+          // change the zoom on the mozilla page
+          aWindow.FullZoom.enlarge();
+          // make sure the zoom level has been changed
+          isnot(aWindow.ZoomManager.zoom, mozillaZoom, "Zoom level can be changed");
+          mozillaZoom = aWindow.ZoomManager.zoom;
 
-  // make sure the zoom level has not changed
-  is(win.ZoomManager.zoom, mozillaZoom,
-     "Entering private browsing should not reset the zoom on a tab");
+          // switch to about: tab
+          aWindow.gBrowser.selectedTab = tabAbout;
 
-  // cleanup
-  win.FullZoom.reset();
-  yield Promise.all([ BrowserTestUtils.removeTab(tabMozilla),
-                      BrowserTestUtils.removeTab(tabAbout) ]);
+          // switch back to mozilla tab
+          aWindow.gBrowser.selectedTab = tabMozilla;
 
-  yield BrowserTestUtils.closeWindow(win);
-});
+          // make sure the zoom level has not changed
+          is(aWindow.ZoomManager.zoom, mozillaZoom,
+            "Entering private browsing should not reset the zoom on a tab");
+
+          // cleanup
+          aWindow.FullZoom.reset();
+          aWindow.gBrowser.removeTab(tabMozilla);
+          aWindow.gBrowser.removeTab(tabAbout);
+          aWindow.close();
+          aCallback();
+
+        }, true);
+        mozillaBrowser.contentWindow.location = "about:mozilla";
+      }, true);
+      aboutBrowser.contentWindow.location = "about:";
+    });
+  }
+
+  whenNewWindowLoaded({private: true}, function(privateWindow) {
+    testZoom(privateWindow, finish);
+  });
+}

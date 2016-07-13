@@ -8,14 +8,9 @@
 
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
-#include "nsIUploadChannel.h"
-#include "nsIUploadChannel2.h"
 #include "nsISecCheckWrapChannel.h"
 #include "nsIWyciwygChannel.h"
 #include "mozilla/LoadInfo.h"
-
-namespace mozilla {
-namespace net {
 
 /*
  * The nsSecCheckWrapChannelBase wraps channels that do *not*
@@ -39,8 +34,6 @@ namespace net {
  *  * nsIChannel
  *  * nsIHttpChannel
  *  * nsIHttpChannelInternal
- *  * nsIUploadChannel
- *  * nsIUploadChannel2
  *
  * In case any addon needs to query the inner channel this class
  * provides a readonly function to query the wrapped channel.
@@ -50,16 +43,12 @@ namespace net {
 class nsSecCheckWrapChannelBase : public nsIHttpChannel
                                 , public nsIHttpChannelInternal
                                 , public nsISecCheckWrapChannel
-                                , public nsIUploadChannel
-                                , public nsIUploadChannel2
 {
 public:
   NS_FORWARD_NSIHTTPCHANNEL(mHttpChannel->)
   NS_FORWARD_NSIHTTPCHANNELINTERNAL(mHttpChannelInternal->)
   NS_FORWARD_NSICHANNEL(mChannel->)
   NS_FORWARD_NSIREQUEST(mRequest->)
-  NS_FORWARD_NSIUPLOADCHANNEL(mUploadChannel->)
-  NS_FORWARD_NSIUPLOADCHANNEL2(mUploadChannel2->)
   NS_DECL_NSISECCHECKWRAPCHANNEL
   NS_DECL_ISUPPORTS
 
@@ -73,13 +62,11 @@ protected:
   nsCOMPtr<nsIHttpChannel>         mHttpChannel;
   nsCOMPtr<nsIHttpChannelInternal> mHttpChannelInternal;
   nsCOMPtr<nsIRequest>             mRequest;
-  nsCOMPtr<nsIUploadChannel>       mUploadChannel;
-  nsCOMPtr<nsIUploadChannel2>      mUploadChannel2;
 };
 
-/* We define a separate class here to make it clear that we're overriding
- * Get/SetLoadInfo as well as AsyncOpen2() and Open2(), rather that using
- * the forwarded implementations provided by NS_FORWARD_NSICHANNEL"
+/* We define a separate class here to make it clear that we're
+ * overriding Get/SetLoadInfo, rather that using the forwarded
+ * implementations provided by NS_FORWARD_NSICHANNEL"
  */
 class nsSecCheckWrapChannel : public nsSecCheckWrapChannelBase
 {
@@ -87,20 +74,12 @@ public:
   NS_IMETHOD GetLoadInfo(nsILoadInfo **aLoadInfo);
   NS_IMETHOD SetLoadInfo(nsILoadInfo *aLoadInfo);
 
-  NS_IMETHOD AsyncOpen2(nsIStreamListener *aListener);
-  NS_IMETHOD Open2(nsIInputStream** aStream);
-
   nsSecCheckWrapChannel(nsIChannel* aChannel, nsILoadInfo* aLoadInfo);
-  static already_AddRefed<nsIChannel> MaybeWrap(nsIChannel* aChannel,
-                                                nsILoadInfo* aLoadInfo);
 
 protected:
   virtual ~nsSecCheckWrapChannel();
 
   nsCOMPtr<nsILoadInfo> mLoadInfo;
 };
-
-} // namespace net
-} // namespace mozilla
 
 #endif // nsSecCheckWrapChannel_h__

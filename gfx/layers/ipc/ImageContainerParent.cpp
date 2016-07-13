@@ -9,7 +9,6 @@
 
 #include "nsThreadUtils.h"
 #include "mozilla/layers/ImageHost.h"
-#include "mozilla/unused.h"
 
 namespace mozilla {
 namespace layers {
@@ -21,9 +20,16 @@ ImageContainerParent::~ImageContainerParent()
   }
 }
 
+static void SendDeleteAndIgnoreResult(ImageContainerParent* self)
+{
+  unused << PImageContainerParent::Send__delete__(self);
+}
+
 bool ImageContainerParent::RecvAsyncDelete()
 {
-  Unused << PImageContainerParent::Send__delete__(this);
+  MessageLoop::current()->PostTask(
+    FROM_HERE, NewRunnableFunction(&SendDeleteAndIgnoreResult, this));
+
   return true;
 }
 

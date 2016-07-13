@@ -8,6 +8,7 @@
 #define nsPicoService_h
 
 #include "mozilla/Mutex.h"
+#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsIObserver.h"
 #include "nsIThread.h"
@@ -15,7 +16,6 @@
 #include "nsRefPtrHashtable.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Monitor.h"
-#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace dom {
@@ -82,7 +82,7 @@ private:
 
   pico_Resource mTaResource;
 
-  mozilla::UniquePtr<uint8_t[]> mPicoMemArea;
+  nsAutoPtr<uint8_t> mPicoMemArea;
 
   static StaticRefPtr<nsPicoService> sSingleton;
 };

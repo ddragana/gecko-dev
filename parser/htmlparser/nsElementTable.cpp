@@ -144,10 +144,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*parent,leaf*/ kFlowEntity, false
   },
   {
-    /*tag*/         eHTMLTag_details,
-    /*parent,leaf*/ kBlock, false
-  },
-  {
     /*tag*/         eHTMLTag_dfn,
     /*parent,leaf*/ kPhrase, false
   },
@@ -174,6 +170,10 @@ const nsHTMLElement gHTMLElements[] = {
   {
     /*tag*/         eHTMLTag_embed,
     /*parent,leaf*/ kSpecial, true
+  },
+  {
+    /*tag*/         eHTMLTag_extapp,
+    /*parent,leaf*/ kNone, false
   },
   {
     /*tag*/         eHTMLTag_fieldset,
@@ -478,10 +478,6 @@ const nsHTMLElement gHTMLElements[] = {
   {
     /*tag*/         eHTMLTag_sub,
     /*parent,leaf*/ kSpecial, false
-  },
-  {
-    /*tag*/         eHTMLTag_summary,
-    /*parent,leaf*/ kBlock, false
   },
   {
     /*tag*/         eHTMLTag_sup,

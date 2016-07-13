@@ -79,11 +79,7 @@ function runTest() {
   tests.shift()();
 }
 
-const uiGlue = SpecialPowers.loadChromeScript(SimpleTest.getTestFileURL('MockPaymentsUIChromeScript.js'));
-SimpleTest.registerCleanupFunction(() => {
- uiGlue.sendAsyncMessage("MockPaymentsUIGlue.cleanup", {});
-});
-uiGlue.sendAsyncMessage("MockPaymentsUIGlue.init", {});
+SpecialPowers.MockPaymentsUIGlue.init(window);
 
 SpecialPowers.pushPrefEnv({
   "set": [
@@ -92,13 +88,13 @@ SpecialPowers.pushPrefEnv({
     ["dom.payment.provider.1.name", "SuccessProvider"],
     ["dom.payment.provider.1.description", ""],
     ["dom.payment.provider.1.uri",
-     "https://example.com:443/tests/dom/payment/tests/mochitest/file_payprovidersuccess.html?req="],
+     "http://mochi.test:8888/tests/dom/payment/tests/mochitest/file_payprovidersuccess.html?req="],
     ["dom.payment.provider.1.type", "mozilla/payments/test/success"],
     ["dom.payment.provider.1.requestMethod", "GET"],
     ["dom.payment.provider.2.name", "FailureProvider"],
     ["dom.payment.provider.2.description", ""],
     ["dom.payment.provider.2.uri",
-     "https://example.com:443/tests/dom/payment/tests/mochitest/file_payproviderfailure.html?req="],
+     "http://mochi.test:8888/tests/dom/payment/tests/mochitest/file_payproviderfailure.html?req="],
     ["dom.payment.provider.2.type", "mozilla/payments/test/failure"],
     ["dom.payment.provider.2.requestMethod", "GET"],
   ]

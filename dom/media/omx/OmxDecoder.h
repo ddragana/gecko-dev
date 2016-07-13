@@ -6,6 +6,7 @@
 #include <stagefright/MediaExtractor.h>
 
 #include "GonkNativeWindow.h"
+#include "GonkNativeWindowClient.h"
 #include "mozilla/layers/FenceUtils.h"
 #include "MP3FrameParser.h"
 #include "MPAPI.h"
@@ -19,7 +20,7 @@ class OmxDecoder;
 
 namespace android {
 
-class OmxDecoder : public RefBase {
+class OmxDecoder : public OMXCodecProxy::CodecResourceListener {
   typedef MPAPI::AudioFrame AudioFrame;
   typedef MPAPI::VideoFrame VideoFrame;
   typedef mozilla::MP3FrameParser MP3FrameParser;
@@ -41,8 +42,7 @@ class OmxDecoder : public RefBase {
 
   AbstractMediaDecoder *mDecoder;
   sp<GonkNativeWindow> mNativeWindow;
-  sp<ANativeWindow> mNativeWindowClient;
-
+  sp<GonkNativeWindowClient> mNativeWindowClient;
   sp<MediaSource> mVideoTrack;
   sp<OMXCodecProxy> mVideoSource;
   sp<MediaSource> mAudioOffloadTrack;
@@ -119,9 +119,6 @@ class OmxDecoder : public RefBase {
   // 'true' if a read from the audio stream was done while reading the metadata
   bool mAudioMetadataRead;
 
-  RefPtr<mozilla::TaskQueue> mTaskQueue;
-
-  mozilla::MozPromiseRequestHolder<OMXCodecProxy::CodecPromise> mVideoCodecRequest;
   mozilla::MozPromiseHolder<MediaResourcePromise> mMediaResourcePromise;
 
   void ReleaseVideoBuffer();
@@ -141,14 +138,13 @@ class OmxDecoder : public RefBase {
   bool mAudioPaused;
   bool mVideoPaused;
 
-  mozilla::TaskQueue* OwnerThread() const
-  {
-    return mTaskQueue;
-  }
-
 public:
-  explicit OmxDecoder(AbstractMediaDecoder *aDecoder, mozilla::TaskQueue* aTaskQueue);
+  explicit OmxDecoder(AbstractMediaDecoder *aDecoder);
   ~OmxDecoder();
+
+  // OMXCodecProxy::CodecResourceListener
+  virtual void codecReserved();
+  virtual void codecCanceled();
 
   // The MediaExtractor provides essential information for creating OMXCodec
   // instance. Such as video/audio codec, we can retrieve them through the
@@ -164,7 +160,7 @@ public:
   // mDurationUs and video/audio metadata.
   bool EnsureMetadata();
 
-  RefPtr<MediaResourcePromise> AllocateMediaResources();
+  nsRefPtr<MediaResourcePromise> AllocateMediaResources();
   void ReleaseMediaResources();
   bool SetVideoFormat();
   bool SetAudioFormat();

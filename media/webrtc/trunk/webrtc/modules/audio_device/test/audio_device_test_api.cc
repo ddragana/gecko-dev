@@ -166,7 +166,7 @@ class AudioDeviceAPITest: public testing::Test {
   virtual ~AudioDeviceAPITest() {}
 
   static void SetUpTestCase() {
-    process_thread_ = ProcessThread::Create();
+    process_thread_ = ProcessThread::CreateProcessThread();
     process_thread_->Start();
 
     // Windows:
@@ -179,8 +179,6 @@ class AudioDeviceAPITest: public testing::Test {
 #if defined(_WIN32)
     EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
                 kId, AudioDeviceModule::kLinuxAlsaAudio)) == NULL);
-    EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
-                kId, AudioDeviceModule::kSndioAudio)) == NULL);
 #if defined(WEBRTC_WINDOWS_CORE_AUDIO_BUILD)
     TEST_LOG("WEBRTC_WINDOWS_CORE_AUDIO_BUILD is defined!\n\n");
     // create default implementation (=Core Audio) instance
@@ -220,8 +218,6 @@ class AudioDeviceAPITest: public testing::Test {
     EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
                 kId, AudioDeviceModule::kLinuxAlsaAudio)) == NULL);
     EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
-                kId, AudioDeviceModule::kSndioAudio)) == NULL);
-    EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
                 kId, AudioDeviceModule::kLinuxPulseAudio)) == NULL);
     // Create default implementation instance
     EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
@@ -252,8 +248,6 @@ class AudioDeviceAPITest: public testing::Test {
                 kId, AudioDeviceModule::kLinuxAlsaAudio)) == NULL);
     EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
                 kId, AudioDeviceModule::kLinuxPulseAudio)) == NULL);
-    EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
-                kId, AudioDeviceModule::kSndioAudio)) == NULL);
     // Create default implementation instance
     EXPECT_TRUE((audio_device_ = AudioDeviceModuleImpl::Create(
                 kId, AudioDeviceModule::kPlatformDefaultAudio)) != NULL);
@@ -280,7 +274,7 @@ class AudioDeviceAPITest: public testing::Test {
     if (process_thread_) {
       process_thread_->DeRegisterModule(audio_device_);
       process_thread_->Stop();
-      process_thread_.reset();
+      ProcessThread::DestroyProcessThread(process_thread_);
     }
     if (event_observer_) {
       delete event_observer_;
@@ -330,9 +324,8 @@ class AudioDeviceAPITest: public testing::Test {
     EXPECT_FALSE(audio_device_->MicrophoneIsInitialized());
   }
 
-  // TODO(henrika): Get rid of globals.
   static bool linux_alsa_;
-  static rtc::scoped_ptr<ProcessThread> process_thread_;
+  static ProcessThread* process_thread_;
   static AudioDeviceModule* audio_device_;
   static AudioTransportAPI* audio_transport_;
   static AudioEventObserverAPI* event_observer_;
@@ -340,7 +333,7 @@ class AudioDeviceAPITest: public testing::Test {
 
 // Must be initialized like this to handle static SetUpTestCase() above.
 bool AudioDeviceAPITest::linux_alsa_ = false;
-rtc::scoped_ptr<ProcessThread> AudioDeviceAPITest::process_thread_;
+ProcessThread* AudioDeviceAPITest::process_thread_ = NULL;
 AudioDeviceModule* AudioDeviceAPITest::audio_device_ = NULL;
 AudioTransportAPI* AudioDeviceAPITest::audio_transport_ = NULL;
 AudioEventObserverAPI* AudioDeviceAPITest::event_observer_ = NULL;

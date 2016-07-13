@@ -13,7 +13,7 @@
 
 #include "webrtc/modules/audio_processing/ns/defines.h"
 
-typedef struct NSParaExtract_ {
+typedef struct NSParaExtract_t_ {
   // Bin size of histogram.
   float binSizeLrt;
   float binSizeSpecFlat;
@@ -47,9 +47,9 @@ typedef struct NSParaExtract_ {
   int thresWeightSpecFlat;
   int thresWeightSpecDiff;
 
-} NSParaExtract;
+} NSParaExtract_t;
 
-typedef struct NoiseSuppressionC_ {
+typedef struct NSinst_t_ {
   uint32_t fs;
   int blockLen;
   int windShift;
@@ -101,17 +101,16 @@ typedef struct NoiseSuppressionC_ {
   float pinkNoiseExp;  // Pink noise parameter: power of frequencies.
   float parametricNoise[HALF_ANAL_BLOCKL];
   // Parameters for feature extraction.
-  NSParaExtract featureExtractionParams;
+  NSParaExtract_t featureExtractionParams;
   // Histograms for parameter estimation.
   int histLrt[HIST_PAR_EST];
   int histSpecFlat[HIST_PAR_EST];
   int histSpecDiff[HIST_PAR_EST];
   // Quantities for high band estimate.
   float speechProb[HALF_ANAL_BLOCKL];  // Final speech/noise prob: prior + LRT.
-  // Buffering data for HB.
-  float dataBufHB[NUM_HIGH_BANDS_MAX][ANAL_BLOCKL_MAX];
+  float dataBufHB[ANAL_BLOCKL_MAX];  // Buffering data for HB.
 
-} NoiseSuppressionC;
+} NSinst_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -132,7 +131,7 @@ extern "C" {
  * Return value         :  0 - Ok
  *                        -1 - Error
  */
-int WebRtcNs_InitCore(NoiseSuppressionC* self, uint32_t fs);
+int WebRtcNs_InitCore(NSinst_t* self, uint32_t fs);
 
 /****************************************************************************
  * WebRtcNs_set_policy_core(...)
@@ -149,7 +148,7 @@ int WebRtcNs_InitCore(NoiseSuppressionC* self, uint32_t fs);
  * Return value         :  0 - Ok
  *                        -1 - Error
  */
-int WebRtcNs_set_policy_core(NoiseSuppressionC* self, int mode);
+int WebRtcNs_set_policy_core(NSinst_t* self, int mode);
 
 /****************************************************************************
  * WebRtcNs_AnalyzeCore
@@ -162,8 +161,11 @@ int WebRtcNs_set_policy_core(NoiseSuppressionC* self, int mode);
  *
  * Output:
  *      - self          : Updated instance
+ *
+ * Return value         :  0 - OK
+ *                        -1 - Error
  */
-void WebRtcNs_AnalyzeCore(NoiseSuppressionC* self, const float* speechFrame);
+int WebRtcNs_AnalyzeCore(NSinst_t* self, float* speechFrame);
 
 /****************************************************************************
  * WebRtcNs_ProcessCore
@@ -172,17 +174,22 @@ void WebRtcNs_AnalyzeCore(NoiseSuppressionC* self, const float* speechFrame);
  *
  * Input:
  *      - self          : Instance that should be initialized
- *      - inFrame       : Input speech frame for each band
- *      - num_bands     : Number of bands
+ *      - inFrameLow    : Input speech frame for lower band
+ *      - inFrameHigh   : Input speech frame for higher band
  *
  * Output:
  *      - self          : Updated instance
- *      - outFrame      : Output speech frame for each band
+ *      - outFrameLow   : Output speech frame for lower band
+ *      - outFrameHigh  : Output speech frame for higher band
+ *
+ * Return value         :  0 - OK
+ *                        -1 - Error
  */
-void WebRtcNs_ProcessCore(NoiseSuppressionC* self,
-                          const float* const* inFrame,
-                          int num_bands,
-                          float* const* outFrame);
+int WebRtcNs_ProcessCore(NSinst_t* self,
+                         float* inFrameLow,
+                         float* inFrameHigh,
+                         float* outFrameLow,
+                         float* outFrameHigh);
 
 #ifdef __cplusplus
 }

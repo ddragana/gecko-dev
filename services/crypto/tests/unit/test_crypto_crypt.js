@@ -1,22 +1,37 @@
 Cu.import("resource://services-crypto/WeaveCrypto.js");
-Cu.importGlobalProperties(['crypto']);
 
-var cryptoSvc = new WeaveCrypto();
+let cryptoSvc = new WeaveCrypto();
 
-add_task(function* test_key_memoization() {
-  let cryptoGlobal = cryptoSvc._getCrypto();
-  let oldImport = cryptoGlobal.subtle.importKey;
+function run_test() {
+  
+  if ("makeSECItem" in cryptoSvc)   // Only for js-ctypes WeaveCrypto.
+    test_makeSECItem();
+  
+  if (this.gczeal) {
+    _("Running crypto tests with gczeal(2).");
+    gczeal(2);
+  }
+  test_bug_617650();
+  test_encrypt_decrypt();
+  test_SECItem_byteCompressInts();
+  test_key_memoization();
+  if (this.gczeal)
+    gczeal(0);
+}
+
+function test_key_memoization() {
+  let oldImport = cryptoSvc.nss && cryptoSvc.nss.PK11_ImportSymKey;
   if (!oldImport) {
-    _("Couldn't swizzle crypto.subtle.importKey; returning.");
+    _("Couldn't swizzle PK11_ImportSymKey; returning.");
     return;
   }
 
   let iv  = cryptoSvc.generateRandomIV();
   let key = cryptoSvc.generateRandomKey();
   let c   = 0;
-  cryptoGlobal.subtle.importKey = function(format, keyData, algo, extractable, usages) {
+  cryptoSvc.nss.PK11_ImportSymKey = function(slot, type, origin, operation, key, wincx) {
     c++;
-    return oldImport.call(cryptoGlobal.subtle, format, keyData, algo, extractable, usages);
+    return oldImport(slot, type, origin, operation, key, wincx);
   }
 
   // Encryption should cause a single counter increment.
@@ -33,20 +48,66 @@ add_task(function* test_key_memoization() {
   do_check_eq(c, 2);
 
   // Un-swizzle.
-  cryptoGlobal.subtle.importKey = oldImport;
-});
+  cryptoSvc.nss.PK11_ImportSymKey = oldImport;
+}
+
+function multiple_decrypts(iterations) {
+  let iv = cryptoSvc.generateRandomIV();
+  let key = cryptoSvc.generateRandomKey();
+  let cipherText = cryptoSvc.encrypt("Hello, world.", key, iv);
+
+  for (let i = 0; i < iterations; ++i) {
+    let clearText = cryptoSvc.decrypt(cipherText, key, iv);
+    do_check_eq(clearText + " " + i, "Hello, world. " + i);
+  }
+  _("Done with multiple_decrypts.");
+}
+
+function test_bug_617650() {
+  if (this.gczeal) {
+    gczeal(2);
+    // Few iterations, because gczeal(2) is expensive... and makes it fail much faster!
+    _("gczeal set to 2; attempting 10 iterations of multiple_decrypts.");
+    multiple_decrypts(10);
+    gczeal(0);
+  } else {
+    // We can't use gczeal on non-debug builds, so try lots of reps instead.
+    _("No gczeal (non-debug build?); attempting 10,000 iterations of multiple_decrypts.");
+    multiple_decrypts(10000);
+  }
+}
 
 // Just verify that it gets populated with the correct bytes.
-add_task(function* test_makeUint8Array() {
+function test_makeSECItem() {
   Components.utils.import("resource://gre/modules/ctypes.jsm");
 
-  let item1 = cryptoSvc.makeUint8Array("abcdefghi", false);
-  do_check_true(item1);
+  let item1 = cryptoSvc.makeSECItem("abcdefghi", false);
+  do_check_true(!item1.isNull());
+  let intData = ctypes.cast(item1.contents.data, ctypes.uint8_t.array(8).ptr).contents;
   for (let i = 0; i < 8; ++i)
-    do_check_eq(item1[i], "abcdefghi".charCodeAt(i));
-});
+    do_check_eq(intData[i], "abcdefghi".charCodeAt(i));
+}
 
-add_task(function* test_encrypt_decrypt() {
+function test_SECItem_byteCompressInts() {
+  Components.utils.import("resource://gre/modules/ctypes.jsm");
+
+  let item1 = cryptoSvc.makeSECItem("abcdefghi", false);
+  do_check_true(!item1.isNull());
+  let intData = ctypes.cast(item1.contents.data, ctypes.uint8_t.array(8).ptr).contents;
+
+  // Fill it too short.
+  cryptoSvc.byteCompressInts("MMM", intData, 8);
+  for (let i = 0; i < 3; ++i)
+    do_check_eq(intData[i], [77, 77, 77][i]);
+
+  // Fill it too much. Doesn't buffer overrun.
+  cryptoSvc.byteCompressInts("NNNNNNNNNNNNNNNN", intData, 8);
+  for (let i = 0; i < 8; ++i)
+    do_check_eq(intData[i], "NNNNNNNNNNNNNNNN".charCodeAt(i));
+}
+
+function test_encrypt_decrypt() {
+
   // First, do a normal run with expected usage... Generate a random key and
   // iv, encrypt and decrypt a string.
   var iv = cryptoSvc.generateRandomIV();
@@ -61,7 +122,7 @@ add_task(function* test_encrypt_decrypt() {
 
   var clearText = cryptoSvc.decrypt(cipherText, key, iv);
   do_check_eq(clearText.length, 20);
-
+  
   // Did the text survive the encryption round-trip?
   do_check_eq(clearText, mySecret);
   do_check_neq(cipherText, mySecret); // just to be explicit
@@ -73,19 +134,10 @@ add_task(function* test_encrypt_decrypt() {
 
   _("Testing small IV.");
   mySecret = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=";
-  let shortiv  = "YWJj";
+  shortiv  = "YWJj";           // "abc": Less than 16.
   let err;
   try {
     cryptoSvc.encrypt(mySecret, key, shortiv);
-  } catch (ex) {
-    err = ex;
-  }
-  do_check_true(!!err);
-
-  _("Testing long IV.");
-  let longiv  = "gsgLRDaxWvIfKt75RjuvFWERt83FFsY2A0TW+0b2iVk=";
-  try {
-    cryptoSvc.encrypt(mySecret, key, longiv);
   } catch (ex) {
     err = ex;
   }
@@ -151,7 +203,7 @@ add_task(function* test_encrypt_decrypt() {
 
 
   key = "iz35tuIMq4/H+IYw2KTgow==";
-  iv  = "TJYrvva2KxvkM8hvOIvWp3==";
+  iv  = "TJYrvva2KxvkM8hvOIvWp3xgjTXgq5Ss";
   mySecret = "i like pie";
 
   cipherText = cryptoSvc.encrypt(mySecret, key, iv);
@@ -160,7 +212,7 @@ add_task(function* test_encrypt_decrypt() {
   do_check_eq(clearText, mySecret);
 
   key = "c5hG3YG+NC61FFy8NOHQak1ZhMEWO79bwiAfar2euzI=";
-  iv  = "gsgLRDaxWvIfKt75RjuvFW==";
+  iv  = "gsgLRDaxWvIfKt75RjuvFWERt83FFsY2A0TW+0b2iVk=";
   mySecret = "i like pie";
 
   cipherText = cryptoSvc.encrypt(mySecret, key, iv);
@@ -210,4 +262,4 @@ add_task(function* test_encrypt_decrypt() {
     failure = true;
   }
   do_check_true(failure);
-});
+}

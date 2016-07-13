@@ -19,7 +19,6 @@ dictionary FontFaceDescriptors {
   DOMString unicodeRange = "U+0-10FFFF";
   DOMString variant = "normal";
   DOMString featureSettings = "normal";
-  DOMString display = "auto";
 };
 
 enum FontFaceLoadStatus { "unloaded", "loading", "loaded", "error" };
@@ -38,7 +37,6 @@ interface FontFace {
   [SetterThrows] attribute DOMString unicodeRange;
   [SetterThrows] attribute DOMString variant;
   [SetterThrows] attribute DOMString featureSettings;
-  [SetterThrows, Pref="layout.css.font-display.enabled"] attribute DOMString display;
 
   readonly attribute FontFaceLoadStatus status;
 

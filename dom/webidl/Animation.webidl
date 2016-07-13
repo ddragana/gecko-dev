@@ -12,16 +12,12 @@
 
 enum AnimationPlayState { "idle", "pending", "running", "paused", "finished" };
 
-[Func="nsDocument::IsElementAnimateEnabled",
- Constructor (optional KeyframeEffectReadOnly? effect = null,
-              optional AnimationTimeline? timeline)]
-interface Animation : EventTarget {
-  attribute DOMString id;
+[Func="nsDocument::IsWebAnimationsEnabled"]
+interface Animation {
   // Bug 1049975: Make 'effect' writeable
-  [Func="nsDocument::IsWebAnimationsEnabled", Pure]
+  [Pure]
   readonly attribute AnimationEffectReadOnly? effect;
-  [Func="nsDocument::IsWebAnimationsEnabled"]
-  attribute AnimationTimeline? timeline;
+  readonly attribute AnimationTimeline? timeline;
   [BinaryName="startTimeAsDouble"]
   attribute double? startTime;
   [SetterThrows, BinaryName="currentTimeAsDouble"]
@@ -30,12 +26,10 @@ interface Animation : EventTarget {
            attribute double             playbackRate;
   [BinaryName="playStateFromJS"]
   readonly attribute AnimationPlayState playState;
-  [Func="nsDocument::IsWebAnimationsEnabled", Throws]
+  [Throws]
   readonly attribute Promise<Animation> ready;
-  [Func="nsDocument::IsWebAnimationsEnabled", Throws]
+  [Throws]
   readonly attribute Promise<Animation> finished;
-           attribute EventHandler       onfinish;
-           attribute EventHandler       oncancel;
   void cancel ();
   [Throws]
   void finish ();

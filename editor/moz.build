@@ -21,7 +21,6 @@ XPIDL_SOURCES += [
     'nsIEditorObserver.idl',
     'nsIEditorSpellCheck.idl',
     'nsIEditorStyleSheets.idl',
-    'nsIEditorUtils.idl',
     'nsIHTMLAbsPosEditor.idl',
     'nsIHTMLEditor.idl',
     'nsIHTMLInlineTableEditor.idl',

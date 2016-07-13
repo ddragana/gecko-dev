@@ -46,7 +46,8 @@
 // Required for using placement new.
 #include <new>
 
-#include "d2d1_1.h"
+// HACK WARNING - Workaround for Windows 8 since we don't have the windows 8 SDK.
+#include "moz-d2d1-1.h"
 
 #define CAIRO_INT_STATUS_SUCCESS (cairo_int_status_t)CAIRO_STATUS_SUCCESS
 

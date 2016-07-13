@@ -7,7 +7,6 @@
 #define mozilla_net_SpdyStream31_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/UniquePtr.h"
 #include "nsAHttpTransaction.h"
 
 namespace mozilla { namespace net {
@@ -43,13 +42,12 @@ public:
   bool HasRegisteredID() { return mStreamID != 0; }
 
   nsAHttpTransaction *Transaction() { return mTransaction; }
-  virtual nsIRequestContext *RequestContext()
+  virtual nsILoadGroupConnectionInfo *LoadGroupConnectionInfo()
   {
-    return mTransaction ? mTransaction->RequestContext() : nullptr;
+    return mTransaction ? mTransaction->LoadGroupConnectionInfo() : nullptr;
   }
 
   void Close(nsresult reason);
-  void SetResponseIsComplete();
 
   void SetRecvdFin(bool aStatus) { mRecvdFin = aStatus ? 1 : 0; }
   bool RecvdFin() { return mRecvdFin; }
@@ -89,7 +87,6 @@ public:
   int64_t  LocalWindow()  { return mLocalWindow; }
 
   bool     BlockedOnRwin() { return mBlockedOnRwin; }
-  bool     ChannelPipeFull();
 
   // A pull stream has an implicit sink, a pushed stream has a sink
   // once it is matched to a pull stream.
@@ -146,6 +143,10 @@ protected:
 private:
   friend class nsAutoPtr<SpdyStream31>;
 
+  static PLDHashOperator hdrHashEnumerate(const nsACString &,
+                                          nsAutoPtr<nsCString> &,
+                                          void *);
+
   nsresult ParseHttpRequestHeaders(const char *, uint32_t, uint32_t *);
   nsresult GenerateSynFrame();
 
@@ -164,7 +165,7 @@ private:
   // in the SpdySession31 mStreamTransactionHash so it is important to
   // keep a reference to it as long as this stream is a member of that hash.
   // (i.e. don't change it or release it after it is set in the ctor).
-  RefPtr<nsAHttpTransaction> mTransaction;
+  nsRefPtr<nsAHttpTransaction> mTransaction;
 
   // The underlying socket transport object is needed to propogate some events
   nsISocketTransport         *mSocketTransport;
@@ -204,7 +205,7 @@ private:
 
   // The InlineFrame and associated data is used for composing control
   // frames and data frame headers.
-  UniquePtr<uint8_t[]>         mTxInlineFrame;
+  nsAutoArrayPtr<uint8_t>      mTxInlineFrame;
   uint32_t                     mTxInlineFrameSize;
   uint32_t                     mTxInlineFrameUsed;
 
@@ -223,7 +224,7 @@ private:
   uint32_t             mDecompressBufferSize;
   uint32_t             mDecompressBufferUsed;
   uint32_t             mDecompressedBytes;
-  UniquePtr<char[]>    mDecompressBuffer;
+  nsAutoArrayPtr<char> mDecompressBuffer;
 
   // Track the content-length of a request body so that we can
   // place the fin flag on the last data packet instead of waiting

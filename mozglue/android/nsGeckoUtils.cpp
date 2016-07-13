@@ -13,7 +13,7 @@
 
 extern "C"
 __attribute__ ((visibility("default")))
-void MOZ_JNICALL
+void JNICALL
 Java_org_mozilla_gecko_mozglue_GeckoLoader_putenv(JNIEnv *jenv, jclass, jstring map)
 {
     const char* str;
@@ -28,7 +28,7 @@ Java_org_mozilla_gecko_mozglue_GeckoLoader_putenv(JNIEnv *jenv, jclass, jstring 
 
 extern "C"
 __attribute__ ((visibility("default")))
-jobject MOZ_JNICALL
+jobject JNICALL
 Java_org_mozilla_gecko_mozglue_DirectBufferAllocator_nativeAllocateDirectBuffer(JNIEnv *jenv, jclass, jlong size)
 {
     jobject buffer = nullptr;
@@ -43,7 +43,7 @@ Java_org_mozilla_gecko_mozglue_DirectBufferAllocator_nativeAllocateDirectBuffer(
 
 extern "C"
 __attribute__ ((visibility("default")))
-void MOZ_JNICALL
+void JNICALL
 Java_org_mozilla_gecko_mozglue_DirectBufferAllocator_nativeFreeDirectBuffer(JNIEnv *jenv, jclass, jobject buf)
 {
     free(jenv->GetDirectBufferAddress(buf));
@@ -51,7 +51,7 @@ Java_org_mozilla_gecko_mozglue_DirectBufferAllocator_nativeFreeDirectBuffer(JNIE
 
 extern "C"
 __attribute__ ((visibility("default")))
-jlong MOZ_JNICALL
+jlong JNICALL
 Java_org_mozilla_gecko_mozglue_NativeZip_getZip(JNIEnv *jenv, jclass, jstring path)
 {
     const char* str;
@@ -62,33 +62,35 @@ Java_org_mozilla_gecko_mozglue_NativeZip_getZip(JNIEnv *jenv, jclass, jstring pa
         JNI_Throw(jenv, "java/lang/IllegalArgumentException", "Invalid path");
         return 0;
     }
-    RefPtr<Zip> zip = ZipCollection::GetZip(str);
+    mozilla::RefPtr<Zip> zip = ZipCollection::GetZip(str);
     jenv->ReleaseStringUTFChars(path, str);
     if (!zip) {
         JNI_Throw(jenv, "java/lang/IllegalArgumentException", "Invalid path or invalid zip");
         return 0;
     }
-    return reinterpret_cast<jlong>(zip.forget().take());
+    zip->AddRef();
+    return (jlong) zip.get();
 }
 
 extern "C"
 __attribute__ ((visibility("default")))
-jlong MOZ_JNICALL
+jlong JNICALL
 Java_org_mozilla_gecko_mozglue_NativeZip_getZipFromByteBuffer(JNIEnv *jenv, jclass, jobject buffer)
 {
     void *buf = jenv->GetDirectBufferAddress(buffer);
     size_t size = jenv->GetDirectBufferCapacity(buffer);
-    RefPtr<Zip> zip = Zip::Create(buf, size);
+    mozilla::RefPtr<Zip> zip = Zip::Create(buf, size);
     if (!zip) {
         JNI_Throw(jenv, "java/lang/IllegalArgumentException", "Invalid zip");
         return 0;
     }
-    return reinterpret_cast<jlong>(zip.forget().take());
+    zip->AddRef();
+    return (jlong) zip.get();
 }
 
  extern "C"
 __attribute__ ((visibility("default")))
-void MOZ_JNICALL
+void JNICALL
 Java_org_mozilla_gecko_mozglue_NativeZip__1release(JNIEnv *jenv, jclass, jlong obj)
 {
     Zip *zip = (Zip *)obj;
@@ -97,7 +99,7 @@ Java_org_mozilla_gecko_mozglue_NativeZip__1release(JNIEnv *jenv, jclass, jlong o
 
 extern "C"
 __attribute__ ((visibility("default")))
-jobject MOZ_JNICALL
+jobject JNICALL
 Java_org_mozilla_gecko_mozglue_NativeZip__1getInputStream(JNIEnv *jenv, jobject jzip, jlong obj, jstring path)
 {
     Zip *zip = (Zip *)obj;

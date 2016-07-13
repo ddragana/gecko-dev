@@ -36,7 +36,6 @@ TextureGarbageBin::EmptyGarbage()
     if (!mGL)
         return;
 
-    MOZ_RELEASE_ASSERT(mGL->IsCurrent(), "GFX: GL context not current.");
     while (!mGarbageTextures.empty()) {
         GLuint tex = mGarbageTextures.top();
         mGarbageTextures.pop();

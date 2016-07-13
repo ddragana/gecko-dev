@@ -38,7 +38,7 @@ public:
     bool mPreserveWhitespace;
     bool mForwardsCompatibleParsing;
     nsString mBaseURI;
-    RefPtr<txNamespaceMap> mMappings;
+    nsRefPtr<txNamespaceMap> mMappings;
     nsTArray<int32_t> mInstructionNamespaces;
     int32_t mDepth;
 };
@@ -140,33 +140,19 @@ public:
 
     void SetErrorOffset(uint32_t aOffset) override;
 
-    bool allowed(Allowed aAllowed) override
-    {
-        return !(mDisAllowed & aAllowed);
-    }
-
-    bool ignoreError(nsresult aResult)
-    {
-        // Some errors shouldn't be ignored even in forwards compatible parsing
-        // mode.
-        return aResult != NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED &&
-               fcp();
-    }
-
     static void shutdown();
 
 
-    RefPtr<txStylesheet> mStylesheet;
+    nsRefPtr<txStylesheet> mStylesheet;
     txHandlerTable* mHandlerTable;
     nsAutoPtr<txElementContext> mElementContext;
     txPushNewContext* mSorter;
     nsAutoPtr<txList> mChooseGotoList;
     bool mDOE;
     bool mSearchingForFallback;
-    uint16_t mDisAllowed;
 
 protected:
-    RefPtr<txACompileObserver> mObserver;
+    nsRefPtr<txACompileObserver> mObserver;
     nsTArray<txInScopeVariable*> mInScopeVariables;
     nsTArray<txStylesheetCompiler*> mChildCompilerList;
     // embed info, target information is the ID

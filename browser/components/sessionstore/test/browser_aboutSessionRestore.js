@@ -3,10 +3,8 @@
 
 "use strict";
 
-const CRASH_URL = "about:mozilla";
-const CRASH_FAVICON = "chrome://branding/content/icon32.png";
-const CRASH_SHENTRY = {url: CRASH_URL};
-const CRASH_TAB = {entries: [CRASH_SHENTRY], image: CRASH_FAVICON};
+const CRASH_SHENTRY = {url: "about:mozilla"};
+const CRASH_TAB = {entries: [CRASH_SHENTRY]};
 const CRASH_STATE = {windows: [{tabs: [CRASH_TAB]}]};
 
 const TAB_URL = "about:sessionrestore";
@@ -28,20 +26,14 @@ add_task(function* () {
   yield promiseTabRestored(tab);
 
   ok(gBrowser.tabs.length > 1, "we have more than one tab");
-
-  let view = browser.contentDocument.getElementById("tabList").view;
-  ok(view.isContainer(0), "first entry is the window");
-  is(view.getCellProperties(1, { id: "title" }), "icon",
-    "second entry is the tab and has a favicon");
-
   browser.messageManager.loadFrameScript(FRAME_SCRIPT, true);
 
   // Wait until the new window was restored.
   let win = yield waitForNewWindow();
-  yield BrowserTestUtils.closeWindow(win);
+  yield promiseWindowClosed(win);
 
   let [{tabs: [{entries: [{url}]}]}] = JSON.parse(ss.getClosedWindowData());
-  is(url, CRASH_URL, "session was restored correctly");
+  is(url, "about:mozilla", "session was restored correctly");
   ss.forgetClosedWindow(0);
 });
 

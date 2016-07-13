@@ -8,6 +8,9 @@
 #include "Logging.h"
 
 #include "SourceSurfaceD2D1.h"
+#include "SourceSurfaceD2D.h"
+#include "SourceSurfaceD2DTarget.h"
+#include "DrawTargetD2D.h"
 #include "DrawTargetD2D1.h"
 #include "ExtendInputEffectD2D1.h"
 
@@ -22,23 +25,23 @@ D2D1_COLORMATRIX_ALPHA_MODE D2DAlphaMode(uint32_t aMode)
   case ALPHA_MODE_STRAIGHT:
     return D2D1_COLORMATRIX_ALPHA_MODE_STRAIGHT;
   default:
-    MOZ_CRASH("GFX: Unknown enum value D2DAlphaMode!");
+    MOZ_CRASH("Unknown enum value!");
   }
 
   return D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED;
 }
 
-D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE D2DAffineTransformInterpolationMode(SamplingFilter aSamplingFilter)
+D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE D2DAffineTransformInterpolationMode(Filter aFilter)
 {
-  switch (aSamplingFilter) {
-  case SamplingFilter::GOOD:
+  switch (aFilter) {
+  case Filter::GOOD:
     return D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_LINEAR;
-  case SamplingFilter::LINEAR:
+  case Filter::LINEAR:
     return D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_LINEAR;
-  case SamplingFilter::POINT:
+  case Filter::POINT:
     return D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
   default:
-    MOZ_CRASH("GFX: Unknown enum value D2DAffineTIM!");
+    MOZ_CRASH("Unknown enum value!");
   }
 
   return D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_LINEAR;
@@ -79,7 +82,7 @@ D2D1_BLEND_MODE D2DBlendMode(uint32_t aMode)
     return D2D1_BLEND_MODE_LUMINOSITY;
 
   default:
-    MOZ_CRASH("GFX: Unknown enum value D2DBlendMode!");
+    MOZ_CRASH("Unknown enum value!");
   }
 
   return D2D1_BLEND_MODE_DARKEN;
@@ -94,7 +97,7 @@ D2D1_MORPHOLOGY_MODE D2DMorphologyMode(uint32_t aMode)
     return D2D1_MORPHOLOGY_MODE_ERODE;
   }
 
-  MOZ_CRASH("GFX: Unknown enum value D2DMorphologyMode!");
+  MOZ_CRASH("Unknown enum value!");
   return D2D1_MORPHOLOGY_MODE_DILATE;
 }
 
@@ -107,7 +110,7 @@ D2D1_TURBULENCE_NOISE D2DTurbulenceNoise(uint32_t aMode)
     return D2D1_TURBULENCE_NOISE_TURBULENCE;
   }
 
-  MOZ_CRASH("GFX: Unknown enum value D2DTurbulenceNoise!");
+  MOZ_CRASH("Unknown enum value!");
   return D2D1_TURBULENCE_NOISE_TURBULENCE;
 }
 
@@ -126,7 +129,7 @@ D2D1_COMPOSITE_MODE D2DFilterCompositionMode(uint32_t aMode)
     return D2D1_COMPOSITE_MODE_XOR;
   }
 
-  MOZ_CRASH("GFX: Unknown enum value D2DFilterCompositionMode!");
+  MOZ_CRASH("Unknown enum value!");
   return D2D1_COMPOSITE_MODE_SOURCE_OVER;
 }
 
@@ -143,21 +146,23 @@ D2D1_CHANNEL_SELECTOR D2DChannelSelector(uint32_t aMode)
     return D2D1_CHANNEL_SELECTOR_A;
   }
 
-  MOZ_CRASH("GFX: Unknown enum value D2DChannelSelector!");
+  MOZ_CRASH("Unknown enum value!");
   return D2D1_CHANNEL_SELECTOR_R;
 }
 
 already_AddRefed<ID2D1Image> GetImageForSourceSurface(DrawTarget *aDT, SourceSurface *aSurface)
 {
   if (aDT->IsTiledDrawTarget() || aDT->IsDualDrawTarget()) {
-    gfxDevCrash(LogReason::FilterNodeD2D1Target) << "Incompatible draw target type! " << (int)aDT->IsTiledDrawTarget() << " " << (int)aDT->IsDualDrawTarget();
-    return nullptr;
+      MOZ_CRASH("Incompatible draw target type!");
+      return nullptr;
   }
   switch (aDT->GetBackendType()) {
     case BackendType::DIRECT2D1_1:
       return static_cast<DrawTargetD2D1*>(aDT)->GetImageForSurface(aSurface, ExtendMode::CLAMP);
+    case BackendType::DIRECT2D:
+      return static_cast<DrawTargetD2D*>(aDT)->GetImageForSurface(aSurface);
     default:
-      gfxDevCrash(LogReason::FilterNodeD2D1Backend) << "Unknown draw target type! " << (int)aDT->GetBackendType();
+      MOZ_CRASH("Unknown draw target type!");
       return nullptr;
   }
 }
@@ -172,7 +177,7 @@ uint32_t ConvertValue(FilterType aType, uint32_t aAttribute, uint32_t aValue)
     break;
   case FilterType::TRANSFORM:
     if (aAttribute == ATT_TRANSFORM_FILTER) {
-      aValue = D2DAffineTransformInterpolationMode(SamplingFilter(aValue));
+      aValue = D2DAffineTransformInterpolationMode(Filter(aValue));
     }
     break;
   case FilterType::BLEND:
@@ -531,27 +536,6 @@ IsTransferFilterType(FilterType aType)
   }
 }
 
-static bool
-HasUnboundedOutputRegion(FilterType aType)
-{
-  if (IsTransferFilterType(aType)) {
-    return true;
-  }
-
-  switch (aType) {
-    case FilterType::COLOR_MATRIX:
-    case FilterType::POINT_DIFFUSE:
-    case FilterType::SPOT_DIFFUSE:
-    case FilterType::DISTANT_DIFFUSE:
-    case FilterType::POINT_SPECULAR:
-    case FilterType::SPOT_SPECULAR:
-    case FilterType::DISTANT_SPECULAR:
-      return true;
-    default:
-      return false;
-  }
-}
-
 /* static */
 already_AddRefed<FilterNode>
 FilterNodeD2D1::Create(ID2D1DeviceContext *aDC, FilterType aType)
@@ -563,20 +547,16 @@ FilterNodeD2D1::Create(ID2D1DeviceContext *aDC, FilterType aType)
   RefPtr<ID2D1Effect> effect;
   HRESULT hr;
 
-  hr = aDC->CreateEffect(GetCLDIDForFilterType(aType), getter_AddRefs(effect));
+  hr = aDC->CreateEffect(GetCLDIDForFilterType(aType), byRef(effect));
 
   if (FAILED(hr) || !effect) {
     gfxCriticalErrorOnce() << "Failed to create effect for FilterType: " << hexa(hr);
     return nullptr;
   }
 
-  if (aType == FilterType::ARITHMETIC_COMBINE) {
-    effect->SetValue(D2D1_ARITHMETICCOMPOSITE_PROP_CLAMP_OUTPUT, TRUE);
-  }
-
   RefPtr<FilterNodeD2D1> filter = new FilterNodeD2D1(effect, aType);
 
-  if (HasUnboundedOutputRegion(aType)) {
+  if (IsTransferFilterType(aType) || aType == FilterType::COLOR_MATRIX) {
     // These filters can produce non-transparent output from transparent
     // input pixels, and we want them to have an unbounded output region.
     filter = new FilterNodeExtendInputAdapterD2D1(aDC, filter, aType);
@@ -877,7 +857,7 @@ FilterNodeConvolveD2D1::FilterNodeConvolveD2D1(ID2D1DeviceContext *aDC)
 
   HRESULT hr;
   
-  hr = aDC->CreateEffect(CLSID_D2D1ConvolveMatrix, getter_AddRefs(mEffect));
+  hr = aDC->CreateEffect(CLSID_D2D1ConvolveMatrix, byRef(mEffect));
 
   if (FAILED(hr) || !mEffect) {
     gfxWarning() << "Failed to create ConvolveMatrix filter!";
@@ -886,14 +866,14 @@ FilterNodeConvolveD2D1::FilterNodeConvolveD2D1(ID2D1DeviceContext *aDC)
 
   mEffect->SetValue(D2D1_CONVOLVEMATRIX_PROP_BORDER_MODE, D2D1_BORDER_MODE_SOFT);
 
-  hr = aDC->CreateEffect(CLSID_ExtendInputEffect, getter_AddRefs(mExtendInputEffect));
+  hr = aDC->CreateEffect(CLSID_ExtendInputEffect, byRef(mExtendInputEffect));
 
   if (FAILED(hr) || !mExtendInputEffect) {
     gfxWarning() << "Failed to create ConvolveMatrix filter!";
     return;
   }
 
-  hr = aDC->CreateEffect(CLSID_D2D1Border, getter_AddRefs(mBorderEffect));
+  hr = aDC->CreateEffect(CLSID_D2D1Border, byRef(mBorderEffect));
 
   if (FAILED(hr) || !mBorderEffect) {
     gfxWarning() << "Failed to create ConvolveMatrix filter!";
@@ -1036,7 +1016,7 @@ FilterNodeExtendInputAdapterD2D1::FilterNodeExtendInputAdapterD2D1(ID2D1DeviceCo
 
   HRESULT hr;
 
-  hr = aDC->CreateEffect(CLSID_ExtendInputEffect, getter_AddRefs(mExtendInputEffect));
+  hr = aDC->CreateEffect(CLSID_ExtendInputEffect, byRef(mExtendInputEffect));
 
   if (FAILED(hr) || !mExtendInputEffect) {
     gfxWarning() << "Failed to create extend input effect for filter: " << hexa(hr);
@@ -1080,14 +1060,14 @@ FilterNodePremultiplyAdapterD2D1::FilterNodePremultiplyAdapterD2D1(ID2D1DeviceCo
   // filters is part of the FilterNode API.
   HRESULT hr;
 
-  hr = aDC->CreateEffect(CLSID_D2D1Premultiply, getter_AddRefs(mPrePremultiplyEffect));
+  hr = aDC->CreateEffect(CLSID_D2D1Premultiply, byRef(mPrePremultiplyEffect));
 
   if (FAILED(hr) || !mPrePremultiplyEffect) {
     gfxWarning() << "Failed to create ComponentTransfer filter!";
     return;
   }
 
-  hr = aDC->CreateEffect(CLSID_D2D1UnPremultiply, getter_AddRefs(mPostUnpremultiplyEffect));
+  hr = aDC->CreateEffect(CLSID_D2D1UnPremultiply, byRef(mPostUnpremultiplyEffect));
 
   if (FAILED(hr) || !mPostUnpremultiplyEffect) {
     gfxWarning() << "Failed to create ComponentTransfer filter!";

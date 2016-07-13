@@ -5,36 +5,26 @@
 /* Replace app binary complete MAR file patch apply success test */
 
 function run_test() {
-  if (!setupTestCommon()) {
+  if (!shouldRunServiceTest()) {
     return;
   }
+
+  setupTestCommon();
   gTestFiles = gTestFilesCompleteSuccess;
   gTestDirs = gTestDirsCompleteSuccess;
+  setupUpdaterTest(FILE_COMPLETE_MAR);
+
   gCallbackBinFile = "exe0.exe";
-  setupUpdaterTest(FILE_COMPLETE_MAR, false);
+
+  setupAppFilesAsync();
 }
 
-/**
- * Called after the call to setupUpdaterTest finishes.
- */
-function setupUpdaterTestFinished() {
-  runUpdate(STATE_SUCCEEDED, false, 0, true);
+function setupAppFilesFinished() {
+  runUpdateUsingService(STATE_PENDING_SVC, STATE_SUCCEEDED);
 }
 
-/**
- * Called after the call to runUpdate finishes.
- */
-function runUpdateFinished() {
-  checkPostUpdateAppLog();
-}
-
-/**
- * Called after the call to checkPostUpdateAppLog finishes.
- */
-function checkPostUpdateAppLogFinished() {
+function checkUpdateFinished() {
+  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
   standardInit();
-  checkPostUpdateRunningFile(true);
-  checkFilesAfterUpdateSuccess(getApplyDirFile);
-  checkUpdateLogContents(LOG_COMPLETE_SUCCESS);
-  checkCallbackLog();
+  checkCallbackServiceLog();
 }

@@ -99,7 +99,7 @@ GMPStringListImpl::GMPStringListImpl(const nsTArray<nsCString>& aStrings)
 {
 }
 
-uint32_t
+const uint32_t
 GMPStringListImpl::Size() const
 {
   return mStrings.Length();

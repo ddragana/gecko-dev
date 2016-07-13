@@ -29,19 +29,19 @@ NetworkStatsServiceProxy.prototype = {
    * Function called in the protocol layer (HTTP, FTP, WebSocket ...etc)
    * to pass the per-app stats to NetworkStatsService.
    */
-  saveAppStats: function saveAppStats(aAppId, aIsInIsolatedMozBrowser, aNetworkInfo, aTimeStamp,
+  saveAppStats: function saveAppStats(aAppId, aIsInBrowser, aNetwork, aTimeStamp,
                                       aRxBytes, aTxBytes, aIsAccumulative,
                                       aCallback) {
-    if (!aNetworkInfo) {
+    if (!aNetwork) {
       if (DEBUG) {
-        debug("|aNetworkInfo| is not specified. Failed to save stats. Returning.");
+        debug("|aNetwork| is not specified. Failed to save stats. Returning.");
       }
       return;
     }
 
     if (DEBUG) {
-      debug("saveAppStats: " + aAppId + " " + aIsInIsolatedMozBrowser + " " +
-            aNetworkInfo.type + " " + aTimeStamp + " " +
+      debug("saveAppStats: " + aAppId + " " + aIsInBrowser + " " +
+            aNetwork.type + " " + aTimeStamp + " " +
             aRxBytes + " " + aTxBytes + " " + aIsAccumulative);
     }
 
@@ -49,7 +49,7 @@ NetworkStatsServiceProxy.prototype = {
       aCallback = aCallback.notify;
     }
 
-    NetworkStatsService.saveStats(aAppId, aIsInIsolatedMozBrowser, "", aNetworkInfo,
+    NetworkStatsService.saveStats(aAppId, aIsInBrowser, "", aNetwork,
                                   aTimeStamp, aRxBytes, aTxBytes,
                                   aIsAccumulative, aCallback);
   },
@@ -58,18 +58,18 @@ NetworkStatsServiceProxy.prototype = {
    * Function called in the points of different system services
    * to pass the per-service stats to NetworkStatsService.
    */
-  saveServiceStats: function saveServiceStats(aServiceType, aNetworkInfo,
+  saveServiceStats: function saveServiceStats(aServiceType, aNetwork,
                                               aTimeStamp, aRxBytes, aTxBytes,
                                               aIsAccumulative, aCallback) {
-    if (!aNetworkInfo) {
+    if (!aNetwork) {
       if (DEBUG) {
-        debug("|aNetworkInfo| is not specified. Failed to save stats. Returning.");
+        debug("|aNetwork| is not specified. Failed to save stats. Returning.");
       }
       return;
     }
 
     if (DEBUG) {
-      debug("saveServiceStats: " + aServiceType + " " + aNetworkInfo.type + " " +
+      debug("saveServiceStats: " + aServiceType + " " + aNetwork.type + " " +
             aTimeStamp + " " + aRxBytes + " " + aTxBytes + " " +
             aIsAccumulative);
     }
@@ -78,7 +78,7 @@ NetworkStatsServiceProxy.prototype = {
       aCallback = aCallback.notify;
     }
 
-    NetworkStatsService.saveStats(0, false, aServiceType , aNetworkInfo, aTimeStamp,
+    NetworkStatsService.saveStats(0, false, aServiceType ,aNetwork, aTimeStamp,
                                   aRxBytes, aTxBytes, aIsAccumulative,
                                   aCallback);
   },

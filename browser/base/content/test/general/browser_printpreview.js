@@ -1,23 +1,14 @@
-let ourTab;
-
 function test() {
   waitForExplicitFinish();
 
-  BrowserTestUtils.openNewForegroundTab(gBrowser, "about:home", true).then(function(tab) {
-    ourTab = tab;
-    ok(!gInPrintPreviewMode,
-       "Should NOT be in print preview mode at starting this tests");
-    // Skip access key test on platforms which don't support access key.
-    if (!/Win|Linux/.test(navigator.platform)) {
-      openPrintPreview(testClosePrintPreviewWithEscKey);
-    } else {
-      openPrintPreview(testClosePrintPreviewWithAccessKey);
-    }
-  });
-}
-
-function tidyUp() {
-  BrowserTestUtils.removeTab(ourTab).then(finish);
+  ok(!gInPrintPreviewMode,
+     "Should NOT be in print preview mode at starting this tests");
+  // Skip access key test on platforms which don't support access key.
+  if (!/Win|Linux/.test(navigator.platform)) {
+    openPrintPreview(testClosePrintPreviewWithEscKey);
+  } else {
+    openPrintPreview(testClosePrintPreviewWithAccessKey);
+  }
 }
 
 function testClosePrintPreviewWithAccessKey() {
@@ -43,7 +34,7 @@ function testClosePrintPreviewWithClosingWindowShortcutKey() {
   checkPrintPreviewClosed(function (aSucceeded) {
     ok(aSucceeded,
        "print preview mode should be finished by closing window shortcut key");
-    tidyUp();
+    finish();
   });
 }
 

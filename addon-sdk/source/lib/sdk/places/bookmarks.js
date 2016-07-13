@@ -62,7 +62,7 @@ const Bookmark = Class({
     merge(this, bookmarkContract(extend(defaults, options)));
   },
   type: 'bookmark',
-  toString: () => '[object Bookmark]'
+  toString: function () '[object Bookmark]'
 });
 exports.Bookmark = Bookmark;
 
@@ -78,7 +78,7 @@ const Group = Class({
       merge(this, groupContract(extend(defaults, options)));
   },
   type: 'group',
-  toString: () => '[object Group]'
+  toString: function () '[object Group]'
 });
 exports.Group = Group;
 
@@ -90,7 +90,7 @@ const Separator = Class({
     merge(this, separatorContract(extend(defaults, options)));
   },
   type: 'separator',
-  toString: () => '[object Separator]'
+  toString: function () '[object Separator]'
 });
 exports.Separator = Separator;
 
@@ -375,13 +375,13 @@ function getId (item) {
  * Set up the default, root groups
  */
 
-var defaultGroupMap = {
+let defaultGroupMap = {
   MENU: bmsrv.bookmarksMenuFolder,
   TOOLBAR: bmsrv.toolbarFolder,
   UNSORTED: bmsrv.unfiledBookmarksFolder
 };
 
-var rootGroups = new Map();
+let rootGroups = new Map();
 
 for (let i in defaultGroupMap) {
   let group = Object.freeze(Group({ title: i, id: defaultGroupMap[i] }));
@@ -389,7 +389,7 @@ for (let i in defaultGroupMap) {
   exports[i] = group;
 }
 
-var defaults = {
+let defaults = {
   group: exports.UNSORTED,
   index: -1
 };

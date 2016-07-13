@@ -24,9 +24,8 @@ add_task(function* ()
         });
       },
       verify: function () {
-        return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
-          Assert.ok(!content.document.body.textContent,
-            "no domain was inherited for view background image");
+        return ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
+          return [content.document.body.textContent, "no domain was inherited for view background image"];
         });
       }
     },
@@ -45,9 +44,8 @@ add_task(function* ()
         });
       },
       verify: function () {
-        return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
-          Assert.ok(!content.document.body.textContent,
-            "no domain was inherited for view image");
+        return ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
+          return [content.document.body.textContent, "no domain was inherited for view image"];
         });
       }
     },
@@ -72,9 +70,8 @@ add_task(function* ()
         });
       },
       verify: function () {
-        return ContentTask.spawn(gBrowser.selectedBrowser, null, function* (arg) {
-          Assert.ok(!content.document.body.textContent,
-            "no domain was inherited for 'show only this frame'");
+        return ContentTask.spawn(gBrowser.selectedBrowser, { writeDomainURL: writeDomainURL }, function* (arg) {
+          return [content.document.body.textContent, "no domain was inherited for 'show only this frame'"];
         });
       }
     }
@@ -99,7 +96,8 @@ add_task(function* ()
     document.getElementById(commandToRun).click();
     yield loadedAfterCommandPromise;
 
-    yield test.verify();
+    let result = yield test.verify();
+    ok(!result[0], result[1]);
 
     let popupHiddenPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popuphidden");
     contentAreaContextMenu.hidePopup();

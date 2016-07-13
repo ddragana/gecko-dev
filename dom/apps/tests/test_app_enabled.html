@@ -7,7 +7,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id={1XXXXXX}
   <title>Test for Bug {1072090}</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -53,6 +52,8 @@ SimpleTest.waitForExplicitFinish();
   * Flip the `enabled` state of an app back and forth.
   */
 function runTest() {
+  SpecialPowers.setAllAppsLaunchable(true);
+
   SpecialPowers.autoConfirmAppInstall(continueTest);
   yield undefined;
 
@@ -120,7 +121,7 @@ function runTest() {
   is(request.result.length, initialAppsCount, "All apps are uninstalled.");
 }
 
-addLoadEvent(() => prepareEnv(go));
+addLoadEvent(go);
 
 </script>
 </pre>

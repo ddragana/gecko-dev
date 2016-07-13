@@ -15,12 +15,11 @@
 
 !define URLStubDownload "http://download.mozilla.org/?os=win&lang=${AB_CD}&product=firefox-nightly-latest"
 !define URLManualDownload "https://www.mozilla.org/${AB_CD}/firefox/installer-help/?channel=nightly&installer_lang=${AB_CD}"
-!define URLSystemRequirements "https://www.mozilla.org/firefox/system-requirements/"
 !define Channel "nightly"
 
 # The installer's certificate name and issuer expected by the stub installer
 !define CertNameDownload   "Mozilla Corporation"
-!define CertIssuerDownload "DigiCert SHA2 Assured ID Code Signing CA"
+!define CertIssuerDownload "DigiCert Assured ID Code Signing CA-1"
 
 # Dialog units are used so the UI displays correctly with the system's DPI
 # settings.

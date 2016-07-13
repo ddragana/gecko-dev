@@ -90,13 +90,17 @@
             info("blocking browserFrame");
             event.preventDefault();
 
-            let appId = SpecialPowers.wrap(document).nodePrincipal.appId;
+            let request = navigator.mozApps.getSelf();
+            request.onsuccess = function() {
+              let app = request.result;
+              ok(app, "got app");
 
-            info("clearing browser data");
-            SpecialPowers.clearAppPrivateData(appId, true);
+              info("clearing browser data");
+              app.clearBrowserData();
 
-            info("unblocking browserFrame");
-            event.detail.unblock();
+              info("unblocking browserFrame");
+              event.detail.unblock();
+            }
             break;
           case "done":
             continueToNextStepSync();

@@ -36,8 +36,6 @@
 #include "nsQueryObject.h"
 
 // form submission
-#include "HTMLFormSubmissionConstants.h"
-#include "mozilla/dom/FormData.h"
 #include "mozilla/Telemetry.h"
 #include "nsIFormSubmitObserver.h"
 #include "nsIObserverService.h"
@@ -51,6 +49,8 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIWebProgress.h"
 #include "nsIDocShell.h"
+#include "nsFormData.h"
+#include "nsFormSubmissionConstants.h"
 #include "nsIPrompt.h"
 #include "nsISecurityUITelemetry.h"
 #include "nsIStringBundle.h"
@@ -132,6 +132,17 @@ HTMLFormElement::~HTMLFormElement()
 
 // nsISupports
 
+static PLDHashOperator
+ElementTraverser(const nsAString& key, HTMLInputElement* element,
+                 void* userArg)
+{
+  nsCycleCollectionTraversalCallback *cb =
+    static_cast<nsCycleCollectionTraversalCallback*>(userArg);
+
+  cb->NoteXPCOMChild(ToSupports(element));
+  return PL_DHASH_NEXT;
+}
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLFormElement)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLFormElement,
@@ -139,7 +150,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLFormElement,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mControls)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mImageNameLookupTable)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPastNameLookupTable)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectedRadioButtons)
+  tmp->mSelectedRadioButtons.EnumerateRead(ElementTraverser, &cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLFormElement,
@@ -151,7 +162,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(HTMLFormElement,
                                                nsGenericHTMLElement)
   if (tmp->PreservingWrapper()) {
-    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mExpandoAndGeneration.expando)
+    NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mExpandoAndGeneration.expando);
   }
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
@@ -256,7 +267,7 @@ HTMLFormElement::Submit(ErrorResult& aRv)
     mPendingSubmission = nullptr;
   }
 
-  aRv = DoSubmitOrReset(nullptr, eFormSubmit);
+  aRv = DoSubmitOrReset(nullptr, NS_FORM_SUBMIT);
 }
 
 NS_IMETHODIMP
@@ -270,7 +281,7 @@ HTMLFormElement::Submit()
 NS_IMETHODIMP
 HTMLFormElement::Reset()
 {
-  InternalFormEvent event(true, eFormReset);
+  InternalFormEvent event(true, NS_FORM_RESET);
   EventDispatcher::Dispatch(static_cast<nsIContent*>(this), nullptr, &event);
   return NS_OK;
 }
@@ -297,7 +308,7 @@ HTMLFormElement::RequestAutocomplete()
     init.mCancelable = false;
     init.mReason = AutoCompleteErrorReason::Disabled;
 
-    RefPtr<AutocompleteErrorEvent> event =
+    nsRefPtr<AutocompleteErrorEvent> event =
       AutocompleteErrorEvent::Constructor(this, NS_LITERAL_STRING("autocompleteerror"), init);
 
     (new AsyncEventDispatcher(this, event))->PostDOMEvent();
@@ -464,7 +475,7 @@ HTMLFormElement::UnbindFromTree(bool aDeep, bool aNullParent)
     }
     ancestor = cur;
   } while (1);
-
+  
   CollectOrphans(ancestor, mControls->mElements
 #ifdef DEBUG
                  , this
@@ -491,9 +502,9 @@ nsresult
 HTMLFormElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mWantsWillHandleEvent = true;
-  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this)) {
-    uint32_t msg = aVisitor.mEvent->mMessage;
-    if (msg == eFormSubmit) {
+  if (aVisitor.mEvent->originalTarget == static_cast<nsIContent*>(this)) {
+    uint32_t msg = aVisitor.mEvent->message;
+    if (msg == NS_FORM_SUBMIT) {
       if (mGeneratingSubmit) {
         aVisitor.mCanHandle = false;
         return NS_OK;
@@ -504,7 +515,8 @@ HTMLFormElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
       // that means that if there are scripted submissions, the
       // latest one will be deferred until after the exit point of the handler.
       mDeferSubmission = true;
-    } else if (msg == eFormReset) {
+    }
+    else if (msg == NS_FORM_RESET) {
       if (mGeneratingReset) {
         aVisitor.mCanHandle = false;
         return NS_OK;
@@ -521,11 +533,11 @@ HTMLFormElement::WillHandleEvent(EventChainPostVisitor& aVisitor)
   // If this is the bubble stage and there is a nested form below us which
   // received a submit event we do *not* want to handle the submit event
   // for this form too.
-  if ((aVisitor.mEvent->mMessage == eFormSubmit ||
-       aVisitor.mEvent->mMessage == eFormReset) &&
+  if ((aVisitor.mEvent->message == NS_FORM_SUBMIT ||
+       aVisitor.mEvent->message == NS_FORM_RESET) &&
       aVisitor.mEvent->mFlags.mInBubblingPhase &&
-      aVisitor.mEvent->mOriginalTarget != static_cast<nsIContent*>(this)) {
-    aVisitor.mEvent->StopPropagation();
+      aVisitor.mEvent->originalTarget != static_cast<nsIContent*>(this)) {
+    aVisitor.mEvent->mFlags.mPropagationStopped = true;
   }
   return NS_OK;
 }
@@ -533,18 +545,19 @@ HTMLFormElement::WillHandleEvent(EventChainPostVisitor& aVisitor)
 nsresult
 HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
-  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this)) {
-    EventMessage msg = aVisitor.mEvent->mMessage;
-    if (msg == eFormSubmit) {
+  if (aVisitor.mEvent->originalTarget == static_cast<nsIContent*>(this)) {
+    uint32_t msg = aVisitor.mEvent->message;
+    if (msg == NS_FORM_SUBMIT) {
       // let the form know not to defer subsequent submissions
       mDeferSubmission = false;
     }
 
     if (aVisitor.mEventStatus == nsEventStatus_eIgnore) {
       switch (msg) {
-        case eFormReset:
-        case eFormSubmit: {
-          if (mPendingSubmission && msg == eFormSubmit) {
+        case NS_FORM_RESET:
+        case NS_FORM_SUBMIT:
+        {
+          if (mPendingSubmission && msg == NS_FORM_SUBMIT) {
             // tell the form to forget a possible pending submission.
             // the reason is that the script returned true (the event was
             // ignored) so if there is a stored submission, it will miss
@@ -553,13 +566,11 @@ HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
             mPendingSubmission = nullptr;
           }
           DoSubmitOrReset(aVisitor.mEvent, msg);
-          break;
         }
-        default:
-          break;
+        break;
       }
     } else {
-      if (msg == eFormSubmit) {
+      if (msg == NS_FORM_SUBMIT) {
         // tell the form to flush a possible pending submission.
         // the reason is that the script returned false (the event was
         // not ignored) so if there is a stored submission, it needs to
@@ -568,9 +579,10 @@ HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
       }
     }
 
-    if (msg == eFormSubmit) {
+    if (msg == NS_FORM_SUBMIT) {
       mGeneratingSubmit = false;
-    } else if (msg == eFormReset) {
+    }
+    else if (msg == NS_FORM_RESET) {
       mGeneratingReset = false;
     }
   }
@@ -579,7 +591,7 @@ HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 
 nsresult
 HTMLFormElement::DoSubmitOrReset(WidgetEvent* aEvent,
-                                 EventMessage aMessage)
+                                 int32_t aMessage)
 {
   // Make sure the presentation is up-to-date
   nsIDocument* doc = GetComposedDoc();
@@ -590,11 +602,11 @@ HTMLFormElement::DoSubmitOrReset(WidgetEvent* aEvent,
   // JBK Don't get form frames anymore - bug 34297
 
   // Submit or Reset the form
-  if (eFormReset == aMessage) {
+  if (NS_FORM_RESET == aMessage) {
     return DoReset();
   }
 
-  if (eFormSubmit == aMessage) {
+  if (NS_FORM_SUBMIT == aMessage) {
     // Don't submit if we're not in a document or if we're in
     // a sandboxed frame and form submit is disabled.
     if (!doc || (doc->GetSandboxFlags() & SANDBOXED_FORMS)) {
@@ -644,7 +656,7 @@ HTMLFormElement::DoSubmit(WidgetEvent* aEvent)
   mIsSubmitting = true;
   NS_ASSERTION(!mWebProgress && !mSubmittingRequest, "Web progress / submitting request should not exist here!");
 
-  nsAutoPtr<HTMLFormSubmission> submission;
+  nsAutoPtr<nsFormSubmission> submission;
 
   //
   // prepare the submission object
@@ -657,7 +669,7 @@ HTMLFormElement::DoSubmit(WidgetEvent* aEvent)
 
   // XXXbz if the script global is that for an sXBL/XBL2 doc, it won't
   // be a window...
-  nsPIDOMWindowOuter *window = OwnerDoc()->GetWindow();
+  nsPIDOMWindow *window = OwnerDoc()->GetWindow();
 
   if (window) {
     mSubmitPopupState = window->GetPopupControlState();
@@ -667,24 +679,24 @@ HTMLFormElement::DoSubmit(WidgetEvent* aEvent)
 
   mSubmitInitiatedFromUserInput = EventStateManager::IsHandlingUserInput();
 
-  if(mDeferSubmission) {
+  if(mDeferSubmission) { 
     // we are in an event handler, JS submitted so we have to
     // defer this submission. let's remember it and return
     // without submitting
     mPendingSubmission = submission;
     // ensure reentrancy
     mIsSubmitting = false;
-    return NS_OK;
-  }
-
-  //
+    return NS_OK; 
+  } 
+  
+  // 
   // perform the submission
   //
-  return SubmitSubmission(submission);
+  return SubmitSubmission(submission); 
 }
 
 nsresult
-HTMLFormElement::BuildSubmission(HTMLFormSubmission** aFormSubmission,
+HTMLFormElement::BuildSubmission(nsFormSubmission** aFormSubmission, 
                                  WidgetEvent* aEvent)
 {
   NS_ASSERTION(!mPendingSubmission, "tried to build two submissions!");
@@ -709,8 +721,7 @@ HTMLFormElement::BuildSubmission(HTMLFormSubmission** aFormSubmission,
   //
   // Get the submission object
   //
-  rv = HTMLFormSubmission::GetFromForm(this, originatingElement,
-                                       aFormSubmission);
+  rv = GetSubmissionFromForm(this, originatingElement, aFormSubmission);
   NS_ENSURE_SUBMIT_SUCCESS(rv);
 
   //
@@ -723,7 +734,7 @@ HTMLFormElement::BuildSubmission(HTMLFormSubmission** aFormSubmission,
 }
 
 nsresult
-HTMLFormElement::SubmitSubmission(HTMLFormSubmission* aFormSubmission)
+HTMLFormElement::SubmitSubmission(nsFormSubmission* aFormSubmission)
 {
   nsresult rv;
   nsIContent* originatingElement = aFormSubmission->GetOriginatingElement();
@@ -904,7 +915,7 @@ HTMLFormElement::DoSecureToInsecureSubmitCheck(nsIURI* aActionURL,
     return NS_OK;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = OwnerDoc()->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> window = OwnerDoc()->GetWindow();
   if (!window) {
     return NS_ERROR_FAILURE;
   }
@@ -1008,7 +1019,7 @@ HTMLFormElement::NotifySubmitObservers(nsIURI* aActionURL,
     // XXXbz what do the submit observers actually want?  The window
     // of the document this is shown in?  Or something else?
     // sXBL/XBL2 issue
-    nsCOMPtr<nsPIDOMWindowOuter> window = OwnerDoc()->GetWindow();
+    nsCOMPtr<nsPIDOMWindow> window = OwnerDoc()->GetWindow();
 
     bool loop = true;
     while (NS_SUCCEEDED(theEnum->HasMoreElements(&loop)) && loop) {
@@ -1018,7 +1029,7 @@ HTMLFormElement::NotifySubmitObservers(nsIURI* aActionURL,
                       do_QueryInterface(inst));
       if (formSubmitObserver) {
         rv = formSubmitObserver->Notify(this,
-                                        window ? window->GetCurrentInnerWindow() : nullptr,
+                                        window,
                                         aActionURL,
                                         aCancelSubmit);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -1034,7 +1045,7 @@ HTMLFormElement::NotifySubmitObservers(nsIURI* aActionURL,
 
 
 nsresult
-HTMLFormElement::WalkFormElements(HTMLFormSubmission* aFormSubmission)
+HTMLFormElement::WalkFormElements(nsFormSubmission* aFormSubmission)
 {
   nsTArray<nsGenericHTMLFormElement*> sortedControls;
   nsresult rv = mControls->GetSortedControls(sortedControls);
@@ -1067,10 +1078,10 @@ HTMLFormElement::WalkFormElements(HTMLFormSubmission* aFormSubmission)
 // nsIForm
 
 NS_IMETHODIMP_(uint32_t)
-HTMLFormElement::GetElementCount() const
+HTMLFormElement::GetElementCount() const 
 {
   uint32_t count = 0;
-  mControls->GetLength(&count);
+  mControls->GetLength(&count); 
   return count;
 }
 
@@ -1263,7 +1274,7 @@ HTMLFormElement::AddElement(nsGenericHTMLFormElement* aChild,
     }
     PostPasswordEvent();
   }
-
+ 
   // Default submit element handling
   if (aChild->IsSubmitControl()) {
     // Update mDefaultSubmitElement, mFirstSubmitInElements,
@@ -1271,7 +1282,7 @@ HTMLFormElement::AddElement(nsGenericHTMLFormElement* aChild,
 
     nsGenericHTMLFormElement** firstSubmitSlot =
       childInElements ? &mFirstSubmitInElements : &mFirstSubmitNotInElements;
-
+    
     // The new child is the new first submit in its list if the firstSubmitSlot
     // is currently empty or if the child is before what's currently in the
     // slot.  Note that if we already have a control in firstSubmitSlot and
@@ -1323,7 +1334,7 @@ HTMLFormElement::AddElement(nsGenericHTMLFormElement* aChild,
   // This has to be done _after_ UpdateValidity() call to prevent the element
   // being count twice.
   if (type == NS_FORM_INPUT_RADIO) {
-    RefPtr<HTMLInputElement> radio =
+    nsRefPtr<HTMLInputElement> radio =
       static_cast<HTMLInputElement*>(aChild);
     radio->AddedToRadioGroup();
   }
@@ -1335,7 +1346,7 @@ nsresult
 HTMLFormElement::AddElementToTable(nsGenericHTMLFormElement* aChild,
                                    const nsAString& aName)
 {
-  return mControls->AddElementToTable(aChild, aName);
+  return mControls->AddElementToTable(aChild, aName);  
 }
 
 
@@ -1348,7 +1359,7 @@ HTMLFormElement::RemoveElement(nsGenericHTMLFormElement* aChild,
   //
   nsresult rv = NS_OK;
   if (aChild->GetType() == NS_FORM_INPUT_RADIO) {
-    RefPtr<HTMLInputElement> radio =
+    nsRefPtr<HTMLInputElement> radio =
       static_cast<HTMLInputElement*>(aChild);
     radio->WillRemoveFromRadioGroup();
   }
@@ -1358,7 +1369,7 @@ HTMLFormElement::RemoveElement(nsGenericHTMLFormElement* aChild,
   bool childInElements = HTMLFormControlsCollection::ShouldBeInElements(aChild);
   nsTArray<nsGenericHTMLFormElement*>& controls = childInElements ?
       mControls->mElements :  mControls->mNotInElements;
-
+  
   // Find the index of the child. This will be used later if necessary
   // to find the default submit.
   size_t index = controls.IndexOf(aChild);
@@ -1491,6 +1502,14 @@ HTMLFormElement::RemoveElementFromTableInternal(
   return NS_OK;
 }
 
+static PLDHashOperator
+RemovePastNames(const nsAString& aName,
+                nsCOMPtr<nsISupports>& aData,
+                void* aClosure)
+{
+  return aClosure == aData ? PL_DHASH_REMOVE : PL_DHASH_NEXT;
+}
+
 nsresult
 HTMLFormElement::RemoveElementFromTable(nsGenericHTMLFormElement* aElement,
                                         const nsAString& aName,
@@ -1500,11 +1519,7 @@ HTMLFormElement::RemoveElementFromTable(nsGenericHTMLFormElement* aElement,
   // the past names map.
   if (aRemoveReason == ElementRemoved) {
     uint32_t oldCount = mPastNameLookupTable.Count();
-    for (auto iter = mPastNameLookupTable.Iter(); !iter.Done(); iter.Next()) {
-      if (static_cast<void*>(aElement) == iter.Data()) {
-        iter.Remove();
-      }
-    }
+    mPastNameLookupTable.Enumerate(RemovePastNames, aElement);
     if (oldCount != mPastNameLookupTable.Count()) {
       ++mExpandoAndGeneration.generation;
     }
@@ -1539,8 +1554,14 @@ HTMLFormElement::NamedGetter(const nsAString& aName, bool &aFound)
   return nullptr;
 }
 
+bool
+HTMLFormElement::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
+}
+
 void
-HTMLFormElement::GetSupportedNames(nsTArray<nsString >& aRetval)
+HTMLFormElement::GetSupportedNames(unsigned, nsTArray<nsString >& aRetval)
 {
   // TODO https://www.w3.org/Bugs/Public/show_bug.cgi?id=22320
 }
@@ -1610,7 +1631,7 @@ HTMLFormElement::FlushPendingSubmission()
   if (mPendingSubmission) {
     // Transfer owning reference so that the submissioin doesn't get deleted
     // if we reenter
-    nsAutoPtr<HTMLFormSubmission> submission = Move(mPendingSubmission);
+    nsAutoPtr<nsFormSubmission> submission = Move(mPendingSubmission);
 
     SubmitSubmission(submission);
   }
@@ -1664,7 +1685,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
   // Get the document to form the URL.
   // We'll also need it later to get the DOM window when notifying form submit
   // observers (bug 33203)
-  if (!IsInUncomposedDoc()) {
+  if (!IsInDoc()) {
     return NS_OK; // No doc means don't submit, see Bug 28988
   }
 
@@ -1727,7 +1748,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
                       true, &permitsFormAction);
     NS_ENSURE_SUCCESS(rv, rv);
     if (!permitsFormAction) {
-      return NS_ERROR_CSP_FORM_ACTION_VIOLATION;
+      rv = NS_ERROR_CSP_FORM_ACTION_VIOLATION;
     }
   }
 
@@ -1737,7 +1758,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
   bool isHttpScheme = false;
   rv = actionURL->SchemeIs("http", &isHttpScheme);
   NS_ENSURE_SUCCESS(rv, rv);
-  if (isHttpScheme && document->GetUpgradeInsecureRequests(false)) {
+  if (isHttpScheme && document->GetUpgradeInsecureRequests()) {
     // let's use the old specification before the upgrade for logging
     nsAutoCString spec;
     rv = actionURL->GetSpec(spec);
@@ -1745,10 +1766,8 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
     NS_ConvertUTF8toUTF16 reportSpec(spec);
 
     // upgrade the actionURL from http:// to use https://
-    nsCOMPtr<nsIURI> upgradedActionURL;
-    rv = NS_GetSecureUpgradedURI(actionURL, getter_AddRefs(upgradedActionURL));
+    rv = actionURL->SetScheme(NS_LITERAL_CSTRING("https"));
     NS_ENSURE_SUCCESS(rv, rv);
-    actionURL = upgradedActionURL.forget();
 
     // let's log a message to the console that we are upgrading a request
     nsAutoCString scheme;
@@ -1757,7 +1776,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
     NS_ConvertUTF8toUTF16 reportScheme(scheme);
 
     const char16_t* params[] = { reportSpec.get(), reportScheme.get() };
-    CSP_LogLocalizedStr(MOZ_UTF16("upgradeInsecureRequest"),
+    CSP_LogLocalizedStr(NS_LITERAL_STRING("upgradeInsecureRequest").get(),
                         params, ArrayLength(params),
                         EmptyString(), // aSourceFile
                         EmptyString(), // aScriptSample
@@ -1781,7 +1800,7 @@ HTMLFormElement::GetDefaultSubmitElement() const
   NS_PRECONDITION(mDefaultSubmitElement == mFirstSubmitInElements ||
                   mDefaultSubmitElement == mFirstSubmitNotInElements,
                   "What happened here?");
-
+  
   return mDefaultSubmitElement;
 }
 
@@ -1840,7 +1859,7 @@ HTMLFormElement::GetEncoding(nsAString& aEncoding)
 {
   return GetEnctype(aEncoding);
 }
-
+ 
 NS_IMETHODIMP
 HTMLFormElement::SetEncoding(const nsAString& aEncoding)
 {
@@ -1853,7 +1872,7 @@ HTMLFormElement::Length()
   return mControls->Length();
 }
 
-NS_IMETHODIMP
+NS_IMETHODIMP    
 HTMLFormElement::GetLength(int32_t* aLength)
 {
   *aLength = Length();
@@ -2173,7 +2192,7 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
   // If no radio is focused, get the radio relative to the selected one.
   *aRadioOut = nullptr;
 
-  RefPtr<HTMLInputElement> currentRadio;
+  nsRefPtr<HTMLInputElement> currentRadio;
   if (aFocusedRadio) {
     currentRadio = aFocusedRadio;
   }
@@ -2195,7 +2214,7 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
 
   uint32_t numRadios;
   radioGroup->GetLength(&numRadios);
-  RefPtr<HTMLInputElement> radio;
+  nsRefPtr<HTMLInputElement> radio;
 
   bool isRadio = false;
   do {
@@ -2522,11 +2541,7 @@ HTMLFormElement::RemoveImageElementFromTable(HTMLImageElement* aElement,
   // If the element is being removed from the form, we have to remove it from
   // the past names map.
   if (aRemoveReason == ElementRemoved) {
-    for (auto iter = mPastNameLookupTable.Iter(); !iter.Done(); iter.Next()) {
-      if (static_cast<void*>(aElement) == iter.Data()) {
-        iter.Remove();
-      }
-    }
+    mPastNameLookupTable.Enumerate(RemovePastNames, aElement);
   }
 
   return RemoveElementFromTableInternal(mImageNameLookupTable, aElement, aName);
@@ -2544,7 +2559,7 @@ HTMLFormElement::AddToPastNamesMap(const nsAString& aName,
     mPastNameLookupTable.Put(aName, aChild);
   }
 }
-
+ 
 JSObject*
 HTMLFormElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {

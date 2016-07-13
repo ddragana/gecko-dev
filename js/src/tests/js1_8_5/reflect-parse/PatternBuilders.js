@@ -38,14 +38,13 @@ function funDecl(id, params, body, defaults=[], rest=null) {
                      rest: rest,
                      generator: false });
 }
-function genFunDecl(style, id, params, body) {
+function genFunDecl(id, params, body) {
     return Pattern({ type: "FunctionDeclaration",
                      id: id,
                      params: params,
                      defaults: [],
                      body: body,
-                     generator: true,
-                     style: style });
+                     generator: true });
 }
 function varDecl(decls) {
     return Pattern({ type: "VariableDeclaration", declarations: decls, kind: "var" });
@@ -125,22 +124,22 @@ function letStmt(head, body) {
 }
 
 function superProp(id) {
-    return dotExpr(Pattern({ type: "Super" }), id);
+    return dotExpr(ident("super"), id);
 }
 function superElem(id) {
-    return memExpr(Pattern({ type: "Super" }), id);
+    return memExpr(ident("super"), id);
 }
 
 function classStmt(id, heritage, body) {
     return Pattern({ type: "ClassStatement",
-                     id: id,
-                     superClass: heritage,
+                     name: id,
+                     heritage: heritage,
                      body: body});
 }
 function classExpr(id, heritage, body) {
     return Pattern({ type: "ClassExpression",
-                     id: id,
-                     superClass: heritage,
+                     name: id,
+                     heritage: heritage,
                      body: body});
 }
 function classMethod(id, body, kind, static) {
@@ -158,13 +157,12 @@ function funExpr(id, args, body, gen) {
                      body: body,
                      generator: false });
 }
-function genFunExpr(style, id, args, body) {
+function genFunExpr(id, args, body) {
     return Pattern({ type: "FunctionExpression",
                      id: id,
                      params: args,
                      body: body,
-                     generator: true,
-                     style: style });
+                     generator: true });
 }
 function arrowExpr(args, body) {
     return Pattern({ type: "ArrowFunctionExpression",
@@ -172,15 +170,9 @@ function arrowExpr(args, body) {
                      body: body });
 }
 
-function metaProperty(meta, property) {
-    return Pattern({ type: "MetaProperty",
-                     meta: meta,
-                     property: property });
-}
 function newTarget() {
-    return metaProperty(ident("new"), ident("target"));
+    return Pattern({ type: "NewTargetExpression" });
 }
-
 function unExpr(op, arg) {
     return Pattern({ type: "UnaryExpression", operator: op, argument: arg });
 }
@@ -208,9 +200,6 @@ function newExpr(callee, args) {
 }
 function callExpr(callee, args) {
     return Pattern({ type: "CallExpression", callee: callee, arguments: args });
-}
-function superCallExpr(args) {
-    return callExpr({ type: "Super" }, args);
 }
 function arrExpr(elts) {
     return Pattern({ type: "ArrayExpression", elements: elts });

@@ -19,17 +19,13 @@
 #include "prio.h"
 #include "mozilla/Attributes.h"
 
-class nsIPrefBranch;
-class nsISystemProxySettings;
-
-namespace mozilla {
-namespace net {
-
 typedef nsDataHashtable<nsCStringHashKey, uint32_t> nsFailedProxyTable;
 
-class nsPACMan;
 class nsProxyInfo;
 struct nsProtocolInfo;
+class nsIPrefBranch;
+class nsISystemProxySettings;
+class nsPACMan;
 
 // CID for the nsProtocolProxyService class
 // 091eedd8-8bae-4fe3-ad62-0c87351e640d
@@ -181,10 +177,6 @@ protected:
      *        The proxy host name (UTF-8 ok).
      * @param port
      *        The proxy port number.
-     * @param username
-     *        The username for the proxy (ASCII). May be "", but not null.
-     * @param password
-     *        The password for the proxy (ASCII). May be "", but not null.
      * @param flags
      *        The proxy flags (nsIProxyInfo::flags).
      * @param timeout
@@ -199,8 +191,6 @@ protected:
     nsresult NewProxyInfo_Internal(const char *type,
                                                const nsACString &host,
                                                int32_t port,
-                                               const nsACString &username,
-                                               const nsACString &password,
                                                uint32_t flags,
                                                uint32_t timeout,
                                                nsIProxyInfo *next,
@@ -338,7 +328,6 @@ protected:
 
         HostInfo()
             : is_ipaddr(false)
-            , port(0)
             { /* other members intentionally uninitialized */ }
        ~HostInfo() {
             if (!is_ipaddr && name.host)
@@ -394,7 +383,7 @@ protected:
     bool                         mSOCKSProxyRemoteDNS;
     bool                         mProxyOverTLS;
 
-    RefPtr<nsPACMan>           mPACMan;  // non-null if we are using PAC
+    nsRefPtr<nsPACMan>           mPACMan;  // non-null if we are using PAC
     nsCOMPtr<nsISystemProxySettings> mSystemProxySettings;
 
     PRTime                       mSessionStart;
@@ -410,8 +399,5 @@ private:
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsProtocolProxyService, NS_PROTOCOL_PROXY_SERVICE_IMPL_CID)
-
-} // namespace net
-} // namespace mozilla
 
 #endif // !nsProtocolProxyService_h__

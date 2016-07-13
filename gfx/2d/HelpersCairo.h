@@ -88,39 +88,23 @@ GfxAntialiasToCairoAntialias(AntialiasMode antialias)
       return CAIRO_ANTIALIAS_GRAY;
     case AntialiasMode::SUBPIXEL:
       return CAIRO_ANTIALIAS_SUBPIXEL;
-    default:
+    case AntialiasMode::DEFAULT:
       return CAIRO_ANTIALIAS_DEFAULT;
   }
-}
-
-static inline AntialiasMode
-CairoAntialiasToGfxAntialias(cairo_antialias_t aAntialias)
-{
-  switch(aAntialias) {
-    case CAIRO_ANTIALIAS_NONE:
-      return AntialiasMode::NONE;
-    case CAIRO_ANTIALIAS_GRAY:
-      return AntialiasMode::GRAY;
-    case CAIRO_ANTIALIAS_SUBPIXEL:
-      return AntialiasMode::SUBPIXEL;
-    default:
-      return AntialiasMode::DEFAULT;
-  }
+  return CAIRO_ANTIALIAS_DEFAULT;
 }
 
 static inline cairo_filter_t
-GfxSamplingFilterToCairoFilter(SamplingFilter filter)
+GfxFilterToCairoFilter(Filter filter)
 {
   switch (filter)
   {
-    case SamplingFilter::GOOD:
+    case Filter::GOOD:
       return CAIRO_FILTER_GOOD;
-    case SamplingFilter::LINEAR:
+    case Filter::LINEAR:
       return CAIRO_FILTER_BILINEAR;
-    case SamplingFilter::POINT:
+    case Filter::POINT:
       return CAIRO_FILTER_NEAREST;
-    default:
-      MOZ_CRASH("GFX: bad Cairo filter");
   }
 
   return CAIRO_FILTER_BILINEAR;
@@ -133,10 +117,6 @@ GfxExtendToCairoExtend(ExtendMode extend)
   {
     case ExtendMode::CLAMP:
       return CAIRO_EXTEND_PAD;
-    // Cairo doesn't support tiling in only 1 direction,
-    // So we have to fallback and tile in both.
-    case ExtendMode::REPEAT_X:
-    case ExtendMode::REPEAT_Y:
     case ExtendMode::REPEAT:
       return CAIRO_EXTEND_REPEAT;
     case ExtendMode::REFLECT:
@@ -151,13 +131,13 @@ GfxFormatToCairoFormat(SurfaceFormat format)
 {
   switch (format)
   {
-    case SurfaceFormat::A8R8G8B8_UINT32:
+    case SurfaceFormat::B8G8R8A8:
       return CAIRO_FORMAT_ARGB32;
-    case SurfaceFormat::X8R8G8B8_UINT32:
+    case SurfaceFormat::B8G8R8X8:
       return CAIRO_FORMAT_RGB24;
     case SurfaceFormat::A8:
       return CAIRO_FORMAT_A8;
-    case SurfaceFormat::R5G6B5_UINT16:
+    case SurfaceFormat::R5G6B5:
       return CAIRO_FORMAT_RGB16_565;
     default:
       gfxCriticalError() << "Unknown image format " << (int)format;
@@ -170,10 +150,10 @@ GfxFormatToCairoContent(SurfaceFormat format)
 {
   switch (format)
   {
-    case SurfaceFormat::A8R8G8B8_UINT32:
+    case SurfaceFormat::B8G8R8A8:
       return CAIRO_CONTENT_COLOR_ALPHA;
-    case SurfaceFormat::X8R8G8B8_UINT32:
-    case SurfaceFormat::R5G6B5_UINT16:  //fall through
+    case SurfaceFormat::B8G8R8X8:
+    case SurfaceFormat::R5G6B5:  //fall through
       return CAIRO_CONTENT_COLOR;
     case SurfaceFormat::A8:
       return CAIRO_CONTENT_ALPHA;
@@ -223,10 +203,10 @@ CairoContentToGfxFormat(cairo_content_t content)
   switch (content)
   {
     case CAIRO_CONTENT_COLOR_ALPHA:
-      return SurfaceFormat::A8R8G8B8_UINT32;
+      return SurfaceFormat::B8G8R8A8;
     case CAIRO_CONTENT_COLOR:
       // BEWARE! format may be 565
-      return SurfaceFormat::X8R8G8B8_UINT32;
+      return SurfaceFormat::B8G8R8X8;
     case CAIRO_CONTENT_ALPHA:
       return SurfaceFormat::A8;
   }
@@ -239,33 +219,16 @@ CairoFormatToGfxFormat(cairo_format_t format)
 {
   switch (format) {
     case CAIRO_FORMAT_ARGB32:
-      return SurfaceFormat::A8R8G8B8_UINT32;
+      return SurfaceFormat::B8G8R8A8;
     case CAIRO_FORMAT_RGB24:
-      return SurfaceFormat::X8R8G8B8_UINT32;
+      return SurfaceFormat::B8G8R8X8;
     case CAIRO_FORMAT_A8:
       return SurfaceFormat::A8;
     case CAIRO_FORMAT_RGB16_565:
-      return SurfaceFormat::R5G6B5_UINT16;
+      return SurfaceFormat::R5G6B5;
     default:
       gfxCriticalError() << "Unknown cairo format " << format;
       return SurfaceFormat::UNKNOWN;
-  }
-}
-
-static inline FontHinting
-CairoHintingToGfxHinting(cairo_hint_style_t aHintStyle)
-{
-  switch (aHintStyle) {
-    case CAIRO_HINT_STYLE_NONE:
-      return FontHinting::NONE;
-    case CAIRO_HINT_STYLE_SLIGHT:
-      return FontHinting::LIGHT;
-    case CAIRO_HINT_STYLE_MEDIUM:
-      return FontHinting::NORMAL;
-    case CAIRO_HINT_STYLE_FULL:
-      return FontHinting::FULL;
-    default:
-      return FontHinting::NORMAL;
   }
 }
 

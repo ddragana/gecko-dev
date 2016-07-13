@@ -16,3 +16,8 @@ interface TouchList {
   readonly attribute unsigned long length;
   getter Touch? item(unsigned long index);
 };
+
+/* Mozilla extension. */
+partial interface TouchList {
+  Touch? identifiedTouch(long identifier);
+};

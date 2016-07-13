@@ -19,12 +19,7 @@ namespace mozilla {
 class NesteggPacketHolder {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(NesteggPacketHolder)
-  NesteggPacketHolder()
-    : mPacket(nullptr)
-    , mOffset(-1)
-    , mTimestamp(-1)
-    , mDuration(-1)
-    , mIsKeyframe(false) {}
+  NesteggPacketHolder() : mPacket(nullptr), mOffset(-1), mTimestamp(-1), mIsKeyframe(false) {}
 
   bool Init(nestegg_packet* aPacket, int64_t aOffset, unsigned aTrack, bool aIsKeyframe)
   {
@@ -41,17 +36,12 @@ public:
     mTrack = aTrack;
     mIsKeyframe = aIsKeyframe;
 
-    uint64_t duration_ns;
-    if (!nestegg_packet_duration(aPacket, &duration_ns)) {
-      mDuration = duration_ns / 1000;
-    }
     return true;
   }
 
   nestegg_packet* Packet() { MOZ_ASSERT(IsInitialized()); return mPacket; }
   int64_t Offset() { MOZ_ASSERT(IsInitialized()); return mOffset; }
   int64_t Timestamp() { MOZ_ASSERT(IsInitialized()); return mTimestamp; }
-  int64_t Duration() { MOZ_ASSERT(IsInitialized()); return mDuration; }
   unsigned Track() { MOZ_ASSERT(IsInitialized()); return mTrack; }
   bool IsKeyframe() { MOZ_ASSERT(IsInitialized()); return mIsKeyframe; }
 
@@ -71,9 +61,6 @@ private:
 
   // Packet presentation timestamp in microseconds.
   int64_t mTimestamp;
-
-  // Packet duration in microseconds; -1 if unknown or retrieval failed.
-  int64_t mDuration;
 
   // Track ID.
   unsigned mTrack;
@@ -101,10 +88,10 @@ class WebMPacketQueue {
     mQueue.push_front(Move(aItem));
   }
 
-  already_AddRefed<NesteggPacketHolder> PopFront() {
-    RefPtr<NesteggPacketHolder> result = mQueue.front().forget();
+  nsRefPtr<NesteggPacketHolder> PopFront() {
+    nsRefPtr<NesteggPacketHolder> result = mQueue.front();
     mQueue.pop_front();
-    return result.forget();
+    return result;
   }
 
   void Reset() {
@@ -114,7 +101,7 @@ class WebMPacketQueue {
   }
 
 private:
-  std::deque<RefPtr<NesteggPacketHolder>> mQueue;
+  std::deque<nsRefPtr<NesteggPacketHolder>> mQueue;
 };
 
 

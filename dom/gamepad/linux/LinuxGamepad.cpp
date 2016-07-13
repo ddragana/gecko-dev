@@ -19,12 +19,12 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include "nscore.h"
-#include "mozilla/dom/GamepadPlatformService.h"
+#include "mozilla/dom/GamepadFunctions.h"
 #include "udev.h"
 
 namespace {
 
-using namespace mozilla::dom;
+using namespace mozilla::dom::GamepadFunctions;
 using mozilla::udev_lib;
 using mozilla::udev_device;
 using mozilla::udev_list_entry;
@@ -77,7 +77,7 @@ private:
   struct udev_monitor* mMonitor;
   guint mMonitorSourceID;
   // Information about currently connected gamepads.
-  AutoTArray<Gamepad,4> mGamepads;
+  nsAutoTArray<Gamepad,4> mGamepads;
 };
 
 // singleton instance
@@ -86,12 +86,6 @@ LinuxGamepadService* gService = nullptr;
 void
 LinuxGamepadService::AddDevice(struct udev_device* dev)
 {
-  RefPtr<GamepadPlatformService> service =
-    GamepadPlatformService::GetParentService();
-  if (!service) {
-    return;
-  }
-
   const char* devpath = mUdev.udev_device_get_devnode(dev);
   if (!devpath) {
     return;
@@ -145,10 +139,10 @@ LinuxGamepadService::AddDevice(struct udev_device* dev)
   ioctl(fd, JSIOCGBUTTONS, &numButtons);
   gamepad.numButtons = numButtons;
 
-  gamepad.index = service->AddGamepad(gamepad.idstring,
-                                      mozilla::dom::GamepadMappingType::_empty,
-                                      gamepad.numButtons,
-                                      gamepad.numAxes);
+  gamepad.index = AddGamepad(gamepad.idstring,
+                             mozilla::dom::GamepadMappingType::_empty,
+                             gamepad.numButtons,
+                             gamepad.numAxes);
 
   gamepad.source_id =
     g_io_add_watch(channel,
@@ -163,12 +157,6 @@ LinuxGamepadService::AddDevice(struct udev_device* dev)
 void
 LinuxGamepadService::RemoveDevice(struct udev_device* dev)
 {
-  RefPtr<GamepadPlatformService> service =
-    GamepadPlatformService::GetParentService();
-  if (!service) {
-    return;
-  }
-
   const char* devpath = mUdev.udev_device_get_devnode(dev);
   if (!devpath) {
     return;
@@ -177,7 +165,7 @@ LinuxGamepadService::RemoveDevice(struct udev_device* dev)
   for (unsigned int i = 0; i < mGamepads.Length(); i++) {
     if (strcmp(mGamepads[i].devpath, devpath) == 0) {
       g_source_remove(mGamepads[i].source_id);
-      service->RemoveGamepad(mGamepads[i].index);
+      RemoveGamepad(mGamepads[i].index);
       mGamepads.RemoveElementAt(i);
       break;
     }
@@ -307,11 +295,6 @@ LinuxGamepadService::OnGamepadData(GIOChannel* source,
                                    GIOCondition condition,
                                    gpointer data)
 {
-  RefPtr<GamepadPlatformService> service =
-    GamepadPlatformService::GetParentService();
-  if (!service) {
-    return TRUE;
-  }
   int index = GPOINTER_TO_INT(data);
   //TODO: remove gamepad?
   if (condition & G_IO_ERR || condition & G_IO_HUP)
@@ -337,11 +320,11 @@ LinuxGamepadService::OnGamepadData(GIOChannel* source,
 
     switch (event.type) {
     case JS_EVENT_BUTTON:
-      service->NewButtonEvent(index, event.number, !!event.value);
+      NewButtonEvent(index, event.number, !!event.value);
       break;
     case JS_EVENT_AXIS:
-      service->NewAxisMoveEvent(index, event.number,
-                                ((float)event.value) / kMaxAxisValue);
+      NewAxisMoveEvent(index, event.number,
+                       ((float)event.value) / kMaxAxisValue);
       break;
     }
   }

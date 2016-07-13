@@ -11,8 +11,6 @@
 // Include TVTunerBinding.h since enum TVSourceType can't be forward declared.
 #include "mozilla/dom/TVTunerBinding.h"
 
-#define VIDEO_TAG NS_LITERAL_STRING("video")
-
 class nsITVService;
 class nsITVTunerData;
 
@@ -31,7 +29,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TVTuner, DOMEventTargetHelper)
 
-  static already_AddRefed<TVTuner> Create(nsPIDOMWindowInner* aWindow,
+  static already_AddRefed<TVTuner> Create(nsPIDOMWindow* aWindow,
                                           nsITVTunerData* aData);
   nsresult NotifyImageSizeChanged(uint32_t aWidth, uint32_t aHeight);
 
@@ -61,10 +59,8 @@ public:
 
   IMPL_EVENT_HANDLER(currentsourcechanged);
 
-  nsresult ReloadMediaStream();
-
 private:
-  explicit TVTuner(nsPIDOMWindowInner* aWindow);
+  explicit TVTuner(nsPIDOMWindow* aWindow);
 
   ~TVTuner();
 
@@ -72,15 +68,12 @@ private:
 
   nsresult InitMediaStream();
 
-  already_AddRefed<DOMMediaStream> CreateSimulatedMediaStream();
-
   nsresult DispatchCurrentSourceChangedEvent(TVSource* aSource);
 
   nsCOMPtr<nsITVService> mTVService;
-  RefPtr<DOMMediaStream> mStream;
-  uint16_t mStreamType;
-  RefPtr<TVSource> mCurrentSource;
-  nsTArray<RefPtr<TVSource>> mSources;
+  nsRefPtr<DOMMediaStream> mStream;
+  nsRefPtr<TVSource> mCurrentSource;
+  nsTArray<nsRefPtr<TVSource>> mSources;
   nsString mId;
   nsTArray<TVSourceType> mSupportedSourceTypes;
 };

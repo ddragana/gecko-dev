@@ -10,6 +10,7 @@
 #include "mozilla/HashFunctions.h"  // for HashGeneric
 
 #include "nsWrapperCache.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/ErrorResult.h"
 #include "nsSVGElement.h"
@@ -53,9 +54,11 @@ class SVGPreserveAspectRatio final
 {
   friend class SVGAnimatedPreserveAspectRatio;
 public:
-  SVGPreserveAspectRatio(SVGAlign aAlign, SVGMeetOrSlice aMeetOrSlice)
+  SVGPreserveAspectRatio(SVGAlign aAlign, SVGMeetOrSlice aMeetOrSlice,
+                         bool aDefer = false)
     : mAlign(aAlign)
     , mMeetOrSlice(aMeetOrSlice)
+    , mDefer(aDefer)
   {}
 
   bool operator==(const SVGPreserveAspectRatio& aOther) const;
@@ -63,6 +66,7 @@ public:
   explicit SVGPreserveAspectRatio()
     : mAlign(SVG_PRESERVEASPECTRATIO_UNKNOWN)
     , mMeetOrSlice(SVG_MEETORSLICE_UNKNOWN)
+    , mDefer(false)
   {}
 
   nsresult SetAlign(uint16_t aAlign) {
@@ -88,14 +92,23 @@ public:
     return static_cast<SVGMeetOrSlice>(mMeetOrSlice);
   }
 
+  void SetDefer(bool aDefer) {
+    mDefer = aDefer;
+  }
+
+  bool GetDefer() const {
+    return mDefer;
+  }
+
   uint32_t Hash() const {
-    return HashGeneric(mAlign, mMeetOrSlice);
+    return HashGeneric(mAlign, mMeetOrSlice, mDefer);
   }
 
 private:
   // We can't use enum types here because some compilers fail to pack them.
   uint8_t mAlign;
   uint8_t mMeetOrSlice;
+  bool mDefer;
 };
 
 namespace dom {
@@ -127,7 +140,7 @@ protected:
   ~DOMSVGPreserveAspectRatio();
 
   SVGAnimatedPreserveAspectRatio* mVal; // kept alive because it belongs to mSVGElement
-  RefPtr<nsSVGElement> mSVGElement;
+  nsRefPtr<nsSVGElement> mSVGElement;
   const bool mIsBaseValue;
 };
 

@@ -31,10 +31,10 @@ class ByteBuffer;
 class BufferedReadAdapter : public AsyncSocketAdapter {
  public:
   BufferedReadAdapter(AsyncSocket* socket, size_t buffer_size);
-  ~BufferedReadAdapter() override;
+  virtual ~BufferedReadAdapter();
 
-  int Send(const void* pv, size_t cb) override;
-  int Recv(void* pv, size_t cb) override;
+  virtual int Send(const void* pv, size_t cb);
+  virtual int Recv(void* pv, size_t cb);
 
  protected:
   int DirectSend(const void* pv, size_t cb) {
@@ -44,7 +44,7 @@ class BufferedReadAdapter : public AsyncSocketAdapter {
   void BufferInput(bool on = true);
   virtual void ProcessInput(char* data, size_t* len) = 0;
 
-  void OnReadEvent(AsyncSocket* socket) override;
+  virtual void OnReadEvent(AsyncSocket * socket);
 
  private:
   char * buffer_;
@@ -58,8 +58,8 @@ class BufferedReadAdapter : public AsyncSocketAdapter {
 // Interface for implementing proxy server sockets.
 class AsyncProxyServerSocket : public BufferedReadAdapter {
  public:
-  AsyncProxyServerSocket(AsyncSocket* socket, size_t buffer_size);
-  ~AsyncProxyServerSocket() override;
+  AsyncProxyServerSocket(AsyncSocket* socket, size_t buffer_size)
+      : BufferedReadAdapter(socket, buffer_size) {}
   sigslot::signal2<AsyncProxyServerSocket*,
                    const SocketAddress&>  SignalConnectRequest;
   virtual void SendConnectResult(int err, const SocketAddress& addr) = 0;
@@ -73,11 +73,11 @@ class AsyncSSLSocket : public BufferedReadAdapter {
  public:
   explicit AsyncSSLSocket(AsyncSocket* socket);
 
-  int Connect(const SocketAddress& addr) override;
+  virtual int Connect(const SocketAddress& addr);
 
  protected:
-  void OnConnectEvent(AsyncSocket* socket) override;
-  void ProcessInput(char* data, size_t* len) override;
+  virtual void OnConnectEvent(AsyncSocket* socket);
+  virtual void ProcessInput(char* data, size_t* len);
   DISALLOW_EVIL_CONSTRUCTORS(AsyncSSLSocket);
 };
 
@@ -88,7 +88,7 @@ class AsyncSSLServerSocket : public BufferedReadAdapter {
   explicit AsyncSSLServerSocket(AsyncSocket* socket);
 
  protected:
-  void ProcessInput(char* data, size_t* len) override;
+  virtual void ProcessInput(char* data, size_t* len);
   DISALLOW_EVIL_CONSTRUCTORS(AsyncSSLServerSocket);
 };
 
@@ -100,22 +100,22 @@ class AsyncHttpsProxySocket : public BufferedReadAdapter {
   AsyncHttpsProxySocket(AsyncSocket* socket, const std::string& user_agent,
     const SocketAddress& proxy,
     const std::string& username, const CryptString& password);
-  ~AsyncHttpsProxySocket() override;
+  virtual ~AsyncHttpsProxySocket();
 
   // If connect is forced, the adapter will always issue an HTTP CONNECT to the
   // target address.  Otherwise, it will connect only if the destination port
   // is not port 80.
   void SetForceConnect(bool force) { force_connect_ = force; }
 
-  int Connect(const SocketAddress& addr) override;
-  SocketAddress GetRemoteAddress() const override;
-  int Close() override;
-  ConnState GetState() const override;
+  virtual int Connect(const SocketAddress& addr);
+  virtual SocketAddress GetRemoteAddress() const;
+  virtual int Close();
+  virtual ConnState GetState() const;
 
  protected:
-  void OnConnectEvent(AsyncSocket* socket) override;
-  void OnCloseEvent(AsyncSocket* socket, int err) override;
-  void ProcessInput(char* data, size_t* len) override;
+  virtual void OnConnectEvent(AsyncSocket* socket);
+  virtual void OnCloseEvent(AsyncSocket* socket, int err);
+  virtual void ProcessInput(char* data, size_t* len);
 
   bool ShouldIssueConnect() const;
   void SendRequest();
@@ -159,16 +159,15 @@ class AsyncSocksProxySocket : public BufferedReadAdapter {
  public:
   AsyncSocksProxySocket(AsyncSocket* socket, const SocketAddress& proxy,
     const std::string& username, const CryptString& password);
-  ~AsyncSocksProxySocket() override;
 
-  int Connect(const SocketAddress& addr) override;
-  SocketAddress GetRemoteAddress() const override;
-  int Close() override;
-  ConnState GetState() const override;
+  virtual int Connect(const SocketAddress& addr);
+  virtual SocketAddress GetRemoteAddress() const;
+  virtual int Close();
+  virtual ConnState GetState() const;
 
  protected:
-  void OnConnectEvent(AsyncSocket* socket) override;
-  void ProcessInput(char* data, size_t* len) override;
+  virtual void OnConnectEvent(AsyncSocket* socket);
+  virtual void ProcessInput(char* data, size_t* len);
 
   void SendHello();
   void SendConnect();
@@ -192,7 +191,7 @@ class AsyncSocksProxyServerSocket : public AsyncProxyServerSocket {
   explicit AsyncSocksProxyServerSocket(AsyncSocket* socket);
 
  private:
-  void ProcessInput(char* data, size_t* len) override;
+  virtual void ProcessInput(char* data, size_t* len);
   void DirectSend(const ByteBuffer& buf);
 
   void HandleHello(ByteBuffer* request);
@@ -200,7 +199,7 @@ class AsyncSocksProxyServerSocket : public AsyncProxyServerSocket {
   void HandleAuth(ByteBuffer* request);
   void SendAuthReply(uint8 result);
   void HandleConnect(ByteBuffer* request);
-  void SendConnectResult(int result, const SocketAddress& addr) override;
+  virtual void SendConnectResult(int result, const SocketAddress& addr);
 
   void Error(int error);
 
@@ -220,15 +219,15 @@ class LoggingSocketAdapter : public AsyncSocketAdapter {
   LoggingSocketAdapter(AsyncSocket* socket, LoggingSeverity level,
                  const char * label, bool hex_mode = false);
 
-  int Send(const void* pv, size_t cb) override;
-  int SendTo(const void* pv, size_t cb, const SocketAddress& addr) override;
-  int Recv(void* pv, size_t cb) override;
-  int RecvFrom(void* pv, size_t cb, SocketAddress* paddr) override;
-  int Close() override;
+  virtual int Send(const void *pv, size_t cb);
+  virtual int SendTo(const void *pv, size_t cb, const SocketAddress& addr);
+  virtual int Recv(void *pv, size_t cb);
+  virtual int RecvFrom(void *pv, size_t cb, SocketAddress *paddr);
+  virtual int Close();
 
  protected:
-  void OnConnectEvent(AsyncSocket* socket) override;
-  void OnCloseEvent(AsyncSocket* socket, int err) override;
+  virtual void OnConnectEvent(AsyncSocket * socket);
+  virtual void OnCloseEvent(AsyncSocket * socket, int err);
 
  private:
   LoggingSeverity level_;

@@ -15,7 +15,6 @@ from .common import CommonBackend
 from ..frontend.data import (
     Defines,
 )
-from mozbuild.base import ExecutionSummary
 
 # TODO Have ./mach eclipse generate the workspace and index it:
 # /Users/bgirard/mozilla/eclipse/eclipse/eclipse/eclipse -application org.eclipse.cdt.managedbuilder.core.headlessbuild -data $PWD/workspace -importAll $PWD/eclipse
@@ -25,12 +24,6 @@ from mozbuild.base import ExecutionSummary
 class CppEclipseBackend(CommonBackend):
     """Backend that generates Cpp Eclipse project files.
     """
-
-    def __init__(self, environment):
-        if os.name == 'nt':
-            raise Exception('Eclipse is not supported on Windows. '
-                            'Consider using Visual Studio instead.')
-        super(CppEclipseBackend, self).__init__(environment)
 
     def _init(self):
         CommonBackend._init(self)
@@ -48,15 +41,15 @@ class CppEclipseBackend(CommonBackend):
         # Note: We need the C Pre Processor (CPP) flags, not the CXX flags
         self._cppflags = self.environment.substs.get('CPPFLAGS', '')
 
-    def summary(self):
-        return ExecutionSummary(
-            'CppEclipse backend executed in {execution_time:.2f}s\n'
-            'Generated Cpp Eclipse workspace in "{workspace:s}".\n'
-            'If missing, import the project using File > Import > General > Existing Project into workspace\n'
-            '\n'
-            'Run with: eclipse -data {workspace:s}\n',
-            execution_time=self._execution_time,
-            workspace=self._workspace_dir)
+        def detailed(summary):
+            return ('Generated Cpp Eclipse workspace in "%s".\n' + \
+                   'If missing, import the project using File > Import > General > Existing Project into workspace\n' + \
+                   '\n' + \
+                   'Run with: eclipse -data %s\n') \
+                   % (self._workspace_dir, self._workspace_dir)
+
+        self.summary.backend_detailed_summary = types.MethodType(detailed,
+            self.summary)
 
     def _get_workspace_path(self):
         return CppEclipseBackend.get_workspace_path(self.environment.topsrcdir, self.environment.topobjdir)
@@ -71,14 +64,14 @@ class CppEclipseBackend(CommonBackend):
         return os.path.join(srcdir_parent, workspace_dirname)
 
     def consume_object(self, obj):
+        obj.ack()
+
         reldir = getattr(obj, 'relativedir', None)
 
         # Note that unlike VS, Eclipse' indexer seem to crawl the headers and
         # isn't picky about the local includes.
         if isinstance(obj, Defines):
             self._paths_to_defines.setdefault(reldir, {}).update(obj.defines)
-
-        return True
 
     def consume_finished(self):
         settings_dir = os.path.join(self._project_dir, '.settings')
@@ -168,6 +161,7 @@ class CppEclipseBackend(CommonBackend):
         settings = settings.replace('@IPDL_INCLUDE_PATH@', os.path.join(self.environment.topobjdir, 'ipc/ipdl/_ipdlheaders'))
         settings = settings.replace('@PREINCLUDE_FILE_PATH@', os.path.join(self.environment.topobjdir, 'dist/include/mozilla-config.h'))
         settings = settings.replace('@DEFINE_MOZILLA_INTERNAL_API@', self._define_entry('MOZILLA_INTERNAL_API', '1'))
+        settings = settings.replace('@DEFINE_MDCPUCFG@', self._define_entry('MDCPUCFG', self.environment.substs['TARGET_NSPR_MDCPUCFG']))
         settings = settings.replace("@COMPILER_FLAGS@", self._cxx + " " + self._cppflags);
 
         fh.write(settings)
@@ -427,6 +421,7 @@ LANGUAGE_SETTINGS_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone=
                                                   MOZILLA_EXTERNAL_API code will suffer.
                                                 -->
                                                 @DEFINE_MOZILLA_INTERNAL_API@
+                                                @DEFINE_MDCPUCFG@
                                         </resource>
                                 </language>
                         </provider>

@@ -8,6 +8,7 @@
 #ifndef mozilla_dom_workers_serviceworkerclients_h
 #define mozilla_dom_workers_serviceworkerclients_h
 
+#include "nsAutoPtr.h"
 #include "nsWrapperCache.h"
 
 #include "mozilla/dom/WorkerScope.h"
@@ -29,13 +30,10 @@ public:
   explicit ServiceWorkerClients(ServiceWorkerGlobalScope* aWorkerScope);
 
   already_AddRefed<Promise>
-  Get(const nsAString& aClientId, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
   MatchAll(const ClientQueryOptions& aOptions, ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  OpenWindow(const nsAString& aUrl, ErrorResult& aRv);
+  OpenWindow(const nsAString& aUrl);
 
   already_AddRefed<Promise>
   Claim(ErrorResult& aRv);
@@ -54,7 +52,7 @@ private:
   {
   }
 
-  RefPtr<ServiceWorkerGlobalScope> mWorkerScope;
+  nsRefPtr<ServiceWorkerGlobalScope> mWorkerScope;
 };
 
 } // namespace workers

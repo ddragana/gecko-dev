@@ -7,7 +7,7 @@
 #include "nsISupports.idl"
 
 %{C++
-#include "nsRegionFwd.h"
+class nsIntRegion;
 %}
 
 native nsIntRegion(nsIntRegion);

@@ -4,6 +4,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+DIRS += [
+    'staticruntime'
+]
+
 SOURCES += [
     '../google-breakpad/src/common/windows/http_upload.cc',
 ]
@@ -12,7 +16,7 @@ Library('google_breakpad_libxul_s')
 
 FINAL_LIBRARY = 'xul'
 
-for var in ('UNICODE', 'UNICODE_', 'BREAKPAD_NO_TERMINATE_THREAD'):
+for var in ('UNICODE', 'UNICODE_', 'BREAKPAD_NO_TERMINATE_THREAD', 'NOMINMAX'):
     DEFINES[var] = True
 
 LOCAL_INCLUDES += [

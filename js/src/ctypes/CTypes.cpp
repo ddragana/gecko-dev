@@ -9,7 +9,6 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/NumericLimits.h"
-#include "mozilla/Vector.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -40,12 +39,9 @@
 
 #include "builtin/TypedObject.h"
 #include "ctypes/Library.h"
-#include "gc/Policy.h"
 #include "gc/Zone.h"
-#include "js/Vector.h"
 
 #include "jsatominlines.h"
-#include "jsobjinlines.h"
 
 using namespace std;
 using mozilla::NumericLimits;
@@ -237,10 +233,10 @@ namespace CType {
   bool IsCType(HandleValue v);
   bool IsCTypeOrProto(HandleValue v);
 
-  bool PrototypeGetter(JSContext* cx, const JS::CallArgs& args);
-  bool NameGetter(JSContext* cx, const JS::CallArgs& args);
-  bool SizeGetter(JSContext* cx, const JS::CallArgs& args);
-  bool PtrGetter(JSContext* cx, const JS::CallArgs& args);
+  bool PrototypeGetter(JSContext* cx, JS::CallArgs args);
+  bool NameGetter(JSContext* cx, JS::CallArgs args);
+  bool SizeGetter(JSContext* cx, JS::CallArgs args);
+  bool PtrGetter(JSContext* cx, JS::CallArgs args);
 
   static bool CreateArray(JSContext* cx, unsigned argc, Value* vp);
   static bool ToString(JSContext* cx, unsigned argc, Value* vp);
@@ -271,9 +267,9 @@ namespace PointerType {
   bool IsPointerType(HandleValue v);
   bool IsPointer(HandleValue v);
 
-  bool TargetTypeGetter(JSContext* cx, const JS::CallArgs& args);
-  bool ContentsGetter(JSContext* cx, const JS::CallArgs& args);
-  bool ContentsSetter(JSContext* cx, const JS::CallArgs& args);
+  bool TargetTypeGetter(JSContext* cx, JS::CallArgs args);
+  bool ContentsGetter(JSContext* cx, JS::CallArgs args);
+  bool ContentsSetter(JSContext* cx, JS::CallArgs args);
 
   static bool IsNull(JSContext* cx, unsigned argc, Value* vp);
   static bool Increment(JSContext* cx, unsigned argc, Value* vp);
@@ -290,8 +286,8 @@ namespace ArrayType {
   static bool Create(JSContext* cx, unsigned argc, Value* vp);
   static bool ConstructData(JSContext* cx, HandleObject obj, const CallArgs& args);
 
-  bool ElementTypeGetter(JSContext* cx, const JS::CallArgs& args);
-  bool LengthGetter(JSContext* cx, const JS::CallArgs& args);
+  bool ElementTypeGetter(JSContext* cx, JS::CallArgs args);
+  bool LengthGetter(JSContext* cx, JS::CallArgs args);
 
   static bool Getter(JSContext* cx, HandleObject obj, HandleId idval, MutableHandleValue vp);
   static bool Setter(JSContext* cx, HandleObject obj, HandleId idval, MutableHandleValue vp,
@@ -305,7 +301,7 @@ namespace StructType {
   static bool Create(JSContext* cx, unsigned argc, Value* vp);
   static bool ConstructData(JSContext* cx, HandleObject obj, const CallArgs& args);
 
-  bool FieldsArrayGetter(JSContext* cx, const JS::CallArgs& args);
+  bool FieldsArrayGetter(JSContext* cx, JS::CallArgs args);
 
   enum {
     SLOT_FIELDNAME
@@ -326,10 +322,10 @@ namespace FunctionType {
 
   bool IsFunctionType(HandleValue v);
 
-  bool ArgTypesGetter(JSContext* cx, const JS::CallArgs& args);
-  bool ReturnTypeGetter(JSContext* cx, const JS::CallArgs& args);
-  bool ABIGetter(JSContext* cx, const JS::CallArgs& args);
-  bool IsVariadicGetter(JSContext* cx, const JS::CallArgs& args);
+  bool ArgTypesGetter(JSContext* cx, JS::CallArgs args);
+  bool ReturnTypeGetter(JSContext* cx, JS::CallArgs args);
+  bool ABIGetter(JSContext* cx, JS::CallArgs args);
+  bool IsVariadicGetter(JSContext* cx, JS::CallArgs args);
 } // namespace FunctionType
 
 namespace CClosure {
@@ -356,8 +352,8 @@ namespace CClosure {
 namespace CData {
   static void Finalize(JSFreeOp* fop, JSObject* obj);
 
-  bool ValueGetter(JSContext* cx, const JS::CallArgs& args);
-  bool ValueSetter(JSContext* cx, const JS::CallArgs& args);
+  bool ValueGetter(JSContext* cx, JS::CallArgs args);
+  bool ValueSetter(JSContext* cx, JS::CallArgs args);
 
   static bool Address(JSContext* cx, unsigned argc, Value* vp);
   static bool ReadString(JSContext* cx, unsigned argc, Value* vp);
@@ -366,10 +362,10 @@ namespace CData {
   static JSString* GetSourceString(JSContext* cx, HandleObject typeObj,
                                    void* data);
 
-  bool ErrnoGetter(JSContext* cx, const JS::CallArgs& args);
+  bool ErrnoGetter(JSContext* cx, JS::CallArgs args);
 
 #if defined(XP_WIN)
-  bool LastErrorGetter(JSContext* cx, const JS::CallArgs& args);
+  bool LastErrorGetter(JSContext* cx, JS::CallArgs args);
 #endif // defined(XP_WIN)
 } // namespace CData
 
@@ -434,7 +430,6 @@ namespace CDataFinalizer {
   namespace Methods {
     static bool Dispose(JSContext* cx, unsigned argc, Value* vp);
     static bool Forget(JSContext* cx, unsigned argc, Value* vp);
-    static bool ReadString(JSContext* cx, unsigned argc, Value* vp);
     static bool ToSource(JSContext* cx, unsigned argc, Value* vp);
     static bool ToString(JSContext* cx, unsigned argc, Value* vp);
   } // namespace Methods
@@ -484,6 +479,7 @@ namespace CDataFinalizer {
    */
   static bool GetValue(JSContext* cx, JSObject* obj, MutableHandleValue result);
 
+  static JSObject* GetCData(JSContext* cx, JSObject* obj);
 } // namespace CDataFinalizer
 
 
@@ -546,15 +542,12 @@ static const JSClass sCABIClass = {
 // Class representing ctypes.{C,Pointer,Array,Struct,Function}Type.prototype.
 // This exists to give said prototypes a class of "CType", and to provide
 // reserved slots for stashing various other prototype objects.
-static const JSClassOps sCTypeProtoClassOps = {
-  nullptr, nullptr, nullptr, nullptr,
-  nullptr, nullptr, nullptr, nullptr,
-  ConstructAbstract, nullptr, ConstructAbstract
-};
 static const JSClass sCTypeProtoClass = {
   "CType",
   JSCLASS_HAS_RESERVED_SLOTS(CTYPEPROTO_SLOTS),
-  &sCTypeProtoClassOps
+  nullptr, nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, nullptr, nullptr,
+  ConstructAbstract, nullptr, ConstructAbstract
 };
 
 // Class representing ctypes.CData.prototype and the 'prototype' properties
@@ -564,38 +557,29 @@ static const JSClass sCDataProtoClass = {
   0
 };
 
-static const JSClassOps sCTypeClassOps = {
-  nullptr, nullptr, nullptr, nullptr,
+static const JSClass sCTypeClass = {
+  "CType",
+  JSCLASS_IMPLEMENTS_BARRIERS | JSCLASS_HAS_RESERVED_SLOTS(CTYPE_SLOTS),
+  nullptr, nullptr, nullptr, nullptr, nullptr,
   nullptr, nullptr, nullptr, CType::Finalize,
   CType::ConstructData, CType::HasInstance, CType::ConstructData,
   CType::Trace
 };
-static const JSClass sCTypeClass = {
-  "CType",
-  JSCLASS_HAS_RESERVED_SLOTS(CTYPE_SLOTS),
-  &sCTypeClassOps
-};
 
-static const JSClassOps sCDataClassOps = {
-  nullptr, nullptr, ArrayType::Getter, ArrayType::Setter,
-  nullptr, nullptr, nullptr, CData::Finalize,
-  FunctionType::Call, nullptr, FunctionType::Call
-};
 static const JSClass sCDataClass = {
   "CData",
   JSCLASS_HAS_RESERVED_SLOTS(CDATA_SLOTS),
-  &sCDataClassOps
+  nullptr, nullptr, ArrayType::Getter, ArrayType::Setter,
+  nullptr, nullptr, nullptr, nullptr, CData::Finalize,
+  FunctionType::Call, nullptr, FunctionType::Call
 };
 
-static const JSClassOps sCClosureClassOps = {
-  nullptr, nullptr, nullptr, nullptr,
-  nullptr, nullptr, nullptr, CClosure::Finalize,
-  nullptr, nullptr, nullptr, CClosure::Trace
-};
 static const JSClass sCClosureClass = {
   "CClosure",
-  JSCLASS_HAS_RESERVED_SLOTS(CCLOSURE_SLOTS),
-  &sCClosureClassOps
+  JSCLASS_IMPLEMENTS_BARRIERS | JSCLASS_HAS_RESERVED_SLOTS(CCLOSURE_SLOTS),
+  nullptr, nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, nullptr, CClosure::Finalize,
+  nullptr, nullptr, nullptr, CClosure::Trace
 };
 
 /*
@@ -612,14 +596,11 @@ static const JSClass sCDataFinalizerProtoClass = {
  * Instances of CDataFinalizer have both private data (with type
  * |CDataFinalizer::Private|) and slots (see |CDataFinalizerSlots|).
  */
-static const JSClassOps sCDataFinalizerClassOps = {
-  nullptr, nullptr, nullptr, nullptr,
-  nullptr, nullptr, nullptr, CDataFinalizer::Finalize
-};
 static const JSClass sCDataFinalizerClass = {
   "CDataFinalizer",
   JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(CDATAFINALIZER_SLOTS),
-  &sCDataFinalizerClassOps
+  nullptr, nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, nullptr, CDataFinalizer::Finalize
 };
 
 
@@ -690,7 +671,7 @@ static const JSFunctionSpec sCDataFunctions[] = {
 static const JSFunctionSpec sCDataFinalizerFunctions[] = {
   JS_FN("dispose",  CDataFinalizer::Methods::Dispose,  0, CDATAFINALIZERFN_FLAGS),
   JS_FN("forget",   CDataFinalizer::Methods::Forget,   0, CDATAFINALIZERFN_FLAGS),
-  JS_FN("readString", CDataFinalizer::Methods::ReadString, 0, CDATAFINALIZERFN_FLAGS),
+  JS_FN("readString",CData::ReadString, 0, CDATAFINALIZERFN_FLAGS),
   JS_FN("toString", CDataFinalizer::Methods::ToString, 0, CDATAFINALIZERFN_FLAGS),
   JS_FN("toSource", CDataFinalizer::Methods::ToSource, 0, CDATAFINALIZERFN_FLAGS),
   JS_FS_END
@@ -801,21 +782,18 @@ static const JSClass sUInt64ProtoClass = {
   0
 };
 
-static const JSClassOps sInt64ClassOps = {
-  nullptr, nullptr, nullptr, nullptr,
-  nullptr, nullptr, nullptr, Int64Base::Finalize
-};
-
 static const JSClass sInt64Class = {
   "Int64",
   JSCLASS_HAS_RESERVED_SLOTS(INT64_SLOTS),
-  &sInt64ClassOps
+  nullptr, nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, nullptr, Int64Base::Finalize
 };
 
 static const JSClass sUInt64Class = {
   "UInt64",
   JSCLASS_HAS_RESERVED_SLOTS(INT64_SLOTS),
-  &sInt64ClassOps
+  nullptr, nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, nullptr, Int64Base::Finalize
 };
 
 static const JSFunctionSpec sInt64StaticFunctions[] = {
@@ -900,7 +878,7 @@ GetABICode(JSObject* obj)
 
 static const JSErrorFormatString ErrorFormatString[CTYPESERR_LIMIT] = {
 #define MSG_DEF(name, count, exception, format) \
-  { #name, format, count, exception } ,
+  { format, count, exception } ,
 #include "ctypes/ctypes.msg"
 #undef MSG_DEF
 };
@@ -1356,35 +1334,6 @@ ArgumentTypeMismatch(JSContext* cx, const char* arg, const char* func,
 }
 
 static bool
-CannotConstructError(JSContext* cx, const char* type)
-{
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_CANNOT_CONSTRUCT, type);
-  return false;
-}
-
-static bool
-DuplicateFieldError(JSContext* cx, Handle<JSFlatString*> name)
-{
-  JSAutoByteString nameBytes;
-  const char* nameStr = nameBytes.encodeLatin1(cx, name);
-  if (!nameStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_DUPLICATE_FIELD, nameStr);
-  return false;
-}
-
-static bool
-EmptyFinalizerCallError(JSContext* cx, const char* funName)
-{
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_EMPTY_FIN_CALL, funName);
-  return false;
-}
-
-static bool
 EmptyFinalizerError(JSContext* cx, ConversionType convType,
                     HandleObject funObj = nullptr, unsigned argIndex = 0)
 {
@@ -1451,110 +1400,6 @@ FieldCountMismatch(JSContext* cx,
 }
 
 static bool
-FieldDescriptorCountError(JSContext* cx, Value val, size_t length)
-{
-  RootedValue typeVal(cx, val);
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, typeVal, valBytes);
-  if (!valStr)
-    return false;
-
-  char lengthStr[16];
-  JS_snprintf(lengthStr, 16, "%u", length);
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_FIELD_DESC_COUNT, valStr, lengthStr);
-  return false;
-}
-
-static bool
-FieldDescriptorNameError(JSContext* cx, HandleId id)
-{
-  JSAutoByteString idBytes;
-  RootedValue idVal(cx, IdToValue(id));
-  const char* propStr = CTypesToSourceForError(cx, idVal, idBytes);
-  if (!propStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_FIELD_DESC_NAME, propStr);
-  return false;
-}
-
-static bool
-FieldDescriptorSizeError(JSContext* cx, HandleObject typeObj, HandleId id)
-{
-  RootedValue typeVal(cx, ObjectValue(*typeObj));
-  JSAutoByteString typeBytes;
-  const char* typeStr = CTypesToSourceForError(cx, typeVal, typeBytes);
-  if (!typeStr)
-    return false;
-
-  RootedString idStr(cx, IdToString(cx, id));
-  JSAutoByteString idBytes;
-  const char* propStr = idBytes.encodeLatin1(cx, idStr);
-  if (!propStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_FIELD_DESC_SIZE, typeStr, propStr);
-  return false;
-}
-
-static bool
-FieldDescriptorNameTypeError(JSContext* cx, Value val)
-{
-  RootedValue typeVal(cx, val);
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, typeVal, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_FIELD_DESC_NAMETYPE, valStr);
-  return false;
-}
-
-static bool
-FieldDescriptorTypeError(JSContext* cx, HandleValue poroVal, HandleId id)
-{
-  JSAutoByteString typeBytes;
-  const char* typeStr = CTypesToSourceForError(cx, poroVal, typeBytes);
-  if (!typeStr)
-    return false;
-
-  RootedString idStr(cx, IdToString(cx, id));
-  JSAutoByteString idBytes;
-  const char* propStr = idBytes.encodeLatin1(cx, idStr);
-  if (!propStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_FIELD_DESC_TYPE, typeStr, propStr);
-  return false;
-}
-
-static bool
-FieldMissingError(JSContext* cx, JSObject* typeObj, JSFlatString* name_)
-{
-  JSAutoByteString typeBytes;
-  RootedString name(cx, name_);
-  RootedValue typeVal(cx, ObjectValue(*typeObj));
-  const char* typeStr = CTypesToSourceForError(cx, typeVal, typeBytes);
-  if (!typeStr)
-    return false;
-
-  JSAutoByteString nameBytes;
-  const char* nameStr = nameBytes.encodeLatin1(cx, name);
-  if (!nameStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_FIELD_MISSING, typeStr, nameStr);
-  return false;
-}
-
-static bool
 FinalizerSizeError(JSContext* cx, HandleObject funObj, HandleValue actual)
 {
   MOZ_ASSERT(CType::IsCType(funObj));
@@ -1577,164 +1422,6 @@ FinalizerSizeError(JSContext* cx, HandleObject funObj, HandleValue actual)
 }
 
 static bool
-FunctionArgumentLengthMismatch(JSContext* cx,
-                               unsigned expectedCount, unsigned actualCount,
-                               HandleObject funObj, HandleObject typeObj,
-                               bool isVariadic)
-{
-  AutoString funSource;
-  JSAutoByteString funBytes;
-  Value slot = JS_GetReservedSlot(funObj, SLOT_REFERENT);
-  if (!slot.isUndefined() && Library::IsLibrary(&slot.toObject())) {
-    BuildFunctionTypeSource(cx, funObj, funSource);
-  } else {
-    BuildFunctionTypeSource(cx, typeObj, funSource);
-  }
-  const char* funStr = EncodeLatin1(cx, funSource, funBytes);
-  if (!funStr)
-    return false;
-
-  char expectedCountStr[16];
-  JS_snprintf(expectedCountStr, 16, "%u", expectedCount);
-  char actualCountStr[16];
-  JS_snprintf(actualCountStr, 16, "%u", actualCount);
-
-  const char* variadicStr = isVariadic ? " or more": "";
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_ARG_COUNT_MISMATCH,
-                       funStr, expectedCountStr, variadicStr, actualCountStr);
-  return false;
-}
-
-static bool
-FunctionArgumentTypeError(JSContext* cx,
-                          uint32_t index, Value type, const char* reason)
-{
-  RootedValue val(cx, type);
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, val, valBytes);
-  if (!valStr)
-    return false;
-
-  char indexStr[16];
-  JS_snprintf(indexStr, 16, "%u", index + 1);
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_ARG_TYPE_ERROR, indexStr, reason, valStr);
-  return false;
-}
-
-static bool
-FunctionReturnTypeError(JSContext* cx, Value type, const char* reason)
-{
-  RootedValue val(cx, type);
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, val, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_RET_TYPE_ERROR, reason, valStr);
-  return false;
-}
-
-static bool
-IncompatibleCallee(JSContext* cx, const char* funName, HandleObject actualObj)
-{
-  JSAutoByteString valBytes;
-  RootedValue val(cx, ObjectValue(*actualObj));
-  const char* valStr = CTypesToSourceForError(cx, val, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_INCOMPATIBLE_CALLEE, funName, valStr);
-  return false;
-}
-
-static bool
-IncompatibleThisProto(JSContext* cx, const char* funName,
-                      const char* actualType)
-{
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_INCOMPATIBLE_THIS,
-                       funName, actualType);
-  return false;
-}
-
-static bool
-IncompatibleThisProto(JSContext* cx, const char* funName, HandleValue actualVal)
-{
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, actualVal, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_INCOMPATIBLE_THIS_VAL,
-                       funName, "incompatible object", valStr);
-  return false;
-}
-
-static bool
-IncompatibleThisType(JSContext* cx, const char* funName, const char* actualType)
-{
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_INCOMPATIBLE_THIS_TYPE, funName, actualType);
-  return false;
-}
-
-static bool
-IncompatibleThisType(JSContext* cx, const char* funName, const char* actualType,
-                     HandleValue actualVal)
-{
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, actualVal, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_INCOMPATIBLE_THIS_VAL,
-                       funName, actualType, valStr);
-  return false;
-}
-
-static bool
-InvalidIndexError(JSContext* cx, HandleValue val)
-{
-  JSAutoByteString idBytes;
-  const char* indexStr = CTypesToSourceForError(cx, val, idBytes);
-  if (!indexStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_INVALID_INDEX, indexStr);
-  return false;
-}
-
-static bool
-InvalidIndexError(JSContext* cx, HandleId id)
-{
-  RootedValue idVal(cx, IdToValue(id));
-  return InvalidIndexError(cx, idVal);
-}
-
-static bool
-InvalidIndexRangeError(JSContext* cx, size_t index, size_t length)
-{
-  char indexStr[16];
-  JS_snprintf(indexStr, 16, "%u", index);
-
-  char lengthStr[16];
-  JS_snprintf(lengthStr, 16, "%u", length);
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_INVALID_RANGE, indexStr, lengthStr);
-  return false;
-}
-
-static bool
 NonPrimitiveError(JSContext* cx, HandleObject typeObj)
 {
   MOZ_ASSERT(CType::IsCType(typeObj));
@@ -1748,33 +1435,6 @@ NonPrimitiveError(JSContext* cx, HandleObject typeObj)
 
   JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                        CTYPESMSG_NON_PRIMITIVE, typeStr);
-  return false;
-}
-
-static bool
-NonStringBaseError(JSContext* cx, HandleValue thisVal)
-{
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, thisVal, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_NON_STRING_BASE, valStr);
-  return false;
-}
-
-static bool
-NullPointerError(JSContext* cx, const char* action, HandleObject obj)
-{
-  JSAutoByteString valBytes;
-  RootedValue val(cx, ObjectValue(*obj));
-  const char* valStr = CTypesToSourceForError(cx, val, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_NULL_POINTER, action, valStr);
   return false;
 }
 
@@ -1812,14 +1472,6 @@ PropNameNonStringError(JSContext* cx, HandleId id, HandleValue actual,
 }
 
 static bool
-SizeOverflow(JSContext* cx, const char* name, const char* limit)
-{
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_SIZE_OVERFLOW, name, limit);
-  return false;
-}
-
-static bool
 TypeError(JSContext* cx, const char* expected, HandleValue actual)
 {
   JSAutoByteString bytes;
@@ -1829,98 +1481,6 @@ TypeError(JSContext* cx, const char* expected, HandleValue actual)
 
   JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                        CTYPESMSG_TYPE_ERROR, expected, src);
-  return false;
-}
-
-static bool
-TypeOverflow(JSContext* cx, const char* expected, HandleValue actual)
-{
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, actual, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_TYPE_OVERFLOW, valStr, expected);
-  return false;
-}
-
-static bool
-UndefinedSizeCastError(JSContext* cx, HandleObject targetTypeObj)
-{
-  AutoString targetTypeSource;
-  JSAutoByteString targetTypeBytes;
-  BuildTypeSource(cx, targetTypeObj, true, targetTypeSource);
-  const char* targetTypeStr = EncodeLatin1(cx, targetTypeSource,
-                                           targetTypeBytes);
-  if (!targetTypeStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_UNDEFINED_SIZE_CAST, targetTypeStr);
-  return false;
-}
-
-static bool
-SizeMismatchCastError(JSContext* cx,
-                      HandleObject sourceTypeObj, HandleObject targetTypeObj,
-                      size_t sourceSize, size_t targetSize)
-{
-  AutoString sourceTypeSource;
-  JSAutoByteString sourceTypeBytes;
-  BuildTypeSource(cx, sourceTypeObj, true, sourceTypeSource);
-  const char* sourceTypeStr = EncodeLatin1(cx, sourceTypeSource,
-                                           sourceTypeBytes);
-  if (!sourceTypeStr)
-    return false;
-
-  AutoString targetTypeSource;
-  JSAutoByteString targetTypeBytes;
-  BuildTypeSource(cx, targetTypeObj, true, targetTypeSource);
-  const char* targetTypeStr = EncodeLatin1(cx, targetTypeSource,
-                                           targetTypeBytes);
-  if (!targetTypeStr)
-    return false;
-
-  char sourceSizeStr[16];
-  char targetSizeStr[16];
-  JS_snprintf(sourceSizeStr, 16, "%u", sourceSize);
-  JS_snprintf(targetSizeStr, 16, "%u", targetSize);
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_SIZE_MISMATCH_CAST,
-                       targetTypeStr, sourceTypeStr,
-                       targetSizeStr, sourceSizeStr);
-  return false;
-}
-
-static bool
-UndefinedSizePointerError(JSContext* cx, const char* action, HandleObject obj)
-{
-  JSAutoByteString valBytes;
-  RootedValue val(cx, ObjectValue(*obj));
-  const char* valStr = CTypesToSourceForError(cx, val, valBytes);
-  if (!valStr)
-    return false;
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_UNDEFINED_SIZE, action, valStr);
-  return false;
-}
-
-static bool
-VariadicArgumentTypeError(JSContext* cx, uint32_t index, HandleValue actual)
-{
-  JSAutoByteString valBytes;
-  const char* valStr = CTypesToSourceForError(cx, actual, valBytes);
-  if (!valStr)
-    return false;
-
-  char indexStr[16];
-  JS_snprintf(indexStr, 16, "%u", index + 1);
-
-  JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                       CTYPESMSG_VARG_TYPE_ERROR, indexStr, valStr);
   return false;
 }
 
@@ -2291,7 +1851,6 @@ InitTypeClasses(JSContext* cx, HandleObject ctypesObj)
   // Attach objects representing ABI constants.
   if (!DefineABIConstant(cx, ctypesObj, "default_abi", ABI_DEFAULT, ABIProto) ||
       !DefineABIConstant(cx, ctypesObj, "stdcall_abi", ABI_STDCALL, ABIProto) ||
-      !DefineABIConstant(cx, ctypesObj, "thiscall_abi", ABI_THISCALL, ABIProto) ||
       !DefineABIConstant(cx, ctypesObj, "winapi_abi", ABI_WINAPI, ABIProto))
     return false;
 
@@ -2826,8 +2385,7 @@ jsvalToFloat(JSContext* cx, Value val, FloatType* result)
 
 template <class IntegerType, class CharT>
 static bool
-StringToInteger(JSContext* cx, CharT* cp, size_t length, IntegerType* result,
-                bool* overflow)
+StringToInteger(JSContext* cx, CharT* cp, size_t length, IntegerType* result)
 {
   JS_STATIC_ASSERT(NumericLimits<IntegerType>::is_exact);
 
@@ -2867,10 +2425,8 @@ StringToInteger(JSContext* cx, CharT* cp, size_t length, IntegerType* result,
 
     IntegerType ii = i;
     i = ii * base + sign * c;
-    if (i / base != ii) {
-      *overflow = true;
+    if (i / base != ii) // overflow
       return false;
-    }
   }
 
   *result = i;
@@ -2879,8 +2435,7 @@ StringToInteger(JSContext* cx, CharT* cp, size_t length, IntegerType* result,
 
 template<class IntegerType>
 static bool
-StringToInteger(JSContext* cx, JSString* string, IntegerType* result,
-                bool* overflow)
+StringToInteger(JSContext* cx, JSString* string, IntegerType* result)
 {
   JSLinearString* linear = string->ensureLinear(cx);
   if (!linear)
@@ -2889,10 +2444,8 @@ StringToInteger(JSContext* cx, JSString* string, IntegerType* result,
   AutoCheckCannotGC nogc;
   size_t length = linear->length();
   return string->hasLatin1Chars()
-         ? StringToInteger<IntegerType>(cx, linear->latin1Chars(nogc), length,
-                                        result, overflow)
-         : StringToInteger<IntegerType>(cx, linear->twoByteChars(nogc), length,
-                                        result, overflow);
+         ? StringToInteger<IntegerType>(cx, linear->latin1Chars(nogc), length, result)
+         : StringToInteger<IntegerType>(cx, linear->twoByteChars(nogc), length, result);
 }
 
 // Implicitly convert val to IntegerType, allowing int, double,
@@ -2903,8 +2456,7 @@ static bool
 jsvalToBigInteger(JSContext* cx,
                   Value val,
                   bool allowString,
-                  IntegerType* result,
-                  bool* overflow)
+                  IntegerType* result)
 {
   JS_STATIC_ASSERT(NumericLimits<IntegerType>::is_exact);
 
@@ -2925,7 +2477,7 @@ jsvalToBigInteger(JSContext* cx,
     // fits in IntegerType. (This allows an Int64 or UInt64 object to be passed
     // to the JS array element operator, which will automatically call
     // toString() on the object for us.)
-    return StringToInteger(cx, val.toString(), result, overflow);
+    return StringToInteger(cx, val.toString(), result);
   }
   if (val.isObject()) {
     // Allow conversion from an Int64 or UInt64 object directly.
@@ -2948,7 +2500,7 @@ jsvalToBigInteger(JSContext* cx,
       if (!CDataFinalizer::GetValue(cx, obj, &innerData)) {
         return false; // Nothing to convert
       }
-      return jsvalToBigInteger(cx, innerData, allowString, result, overflow);
+      return jsvalToBigInteger(cx, innerData, allowString, result);
     }
 
   }
@@ -2960,8 +2512,7 @@ jsvalToBigInteger(JSContext* cx,
 static bool
 jsvalToSize(JSContext* cx, Value val, bool allowString, size_t* result)
 {
-  bool dummy;
-  if (!jsvalToBigInteger(cx, val, allowString, result, &dummy))
+  if (!jsvalToBigInteger(cx, val, allowString, result))
     return false;
 
   // Also check that the result fits in a double.
@@ -2991,8 +2542,7 @@ jsidToBigInteger(JSContext* cx,
     // fits in IntegerType. (This allows an Int64 or UInt64 object to be passed
     // to the JS array element operator, which will automatically call
     // toString() on the object for us.)
-    bool dummy;
-    return StringToInteger(cx, JSID_TO_STRING(val), result, &dummy);
+    return StringToInteger(cx, JSID_TO_STRING(val), result);
   }
   return false;
 }
@@ -3015,6 +2565,7 @@ static bool
 SizeTojsval(JSContext* cx, size_t size, MutableHandleValue result)
 {
   if (Convert<size_t>(double(size)) != size) {
+    JS_ReportError(cx, "size overflow");
     return false;
   }
 
@@ -3106,7 +2657,7 @@ jsvalToPtrExplicit(JSContext* cx, Value val, uintptr_t* result)
 
 template<class IntegerType, class CharType, size_t N, class AP>
 void
-IntegerToString(IntegerType i, int radix, mozilla::Vector<CharType, N, AP>& result)
+IntegerToString(IntegerType i, int radix, Vector<CharType, N, AP>& result)
 {
   JS_STATIC_ASSERT(NumericLimits<IntegerType>::is_exact);
 
@@ -3131,8 +2682,7 @@ IntegerToString(IntegerType i, int radix, mozilla::Vector<CharType, N, AP>& resu
     *--cp = '-';
 
   MOZ_ASSERT(cp >= buffer);
-  if (!result.append(cp, end))
-    return;
+  result.append(cp, end);
 }
 
 template<class CharType>
@@ -3534,9 +3084,7 @@ ImplicitConvert(JSContext* cx,
       void* ptr;
       {
           JS::AutoCheckCannotGC nogc;
-          bool isShared;
-          ptr = JS_GetArrayBufferData(valObj, &isShared, nogc);
-          MOZ_ASSERT(!isShared); // Because ArrayBuffer
+          ptr = JS_GetArrayBufferData(valObj, nogc);
       }
       if (!ptr) {
         return ConvError(cx, targetType, val, convType, funObj, argIndex,
@@ -3544,12 +3092,6 @@ ImplicitConvert(JSContext* cx,
       }
       *static_cast<void**>(buffer) = ptr;
       break;
-    } else if (val.isObject() && JS_IsSharedArrayBufferObject(valObj)) {
-      // CTypes has not yet opted in to allowing shared memory pointers
-      // to escape.  Exporting a pointer to the shared buffer without
-      // indicating sharedness would expose client code to races.
-      return ConvError(cx, targetType, val, convType, funObj, argIndex,
-                       arrObj, arrIndex);
     } else if (val.isObject() && JS_IsArrayBufferViewObject(valObj)) {
       // Same as ArrayBuffer, above, though note that this will take the
       // offset of the view into account.
@@ -3564,14 +3106,7 @@ ImplicitConvert(JSContext* cx,
       void* ptr;
       {
           JS::AutoCheckCannotGC nogc;
-          bool isShared;
-          ptr = JS_GetArrayBufferViewData(valObj, &isShared, nogc);
-          if (isShared) {
-              // Opt out of shared memory, for now.  Exporting a
-              // pointer to the shared buffer without indicating
-              // sharedness would expose client code to races.
-              ptr = nullptr;
-          }
+          ptr = JS_GetArrayBufferViewData(valObj, nogc);
       }
       if (!ptr) {
         return ConvError(cx, targetType, val, convType, funObj, argIndex,
@@ -3648,95 +3183,77 @@ ImplicitConvert(JSContext* cx,
         return ConvError(cx, targetType, val, convType, funObj, argIndex,
                          arrObj, arrIndex);
       }
-    } else {
-      ESClass cls;
-      if (!GetClassOfValue(cx, val, &cls))
+
+    } else if (val.isObject() && JS_IsArrayObject(cx, valObj)) {
+      // Convert each element of the array by calling ImplicitConvert.
+      uint32_t sourceLength;
+      if (!JS_GetArrayLength(cx, valObj, &sourceLength) ||
+          targetLength != size_t(sourceLength)) {
+        MOZ_ASSERT(!funObj);
+        return ArrayLengthMismatch(cx, targetLength, targetType,
+                                   size_t(sourceLength), val, convType);
+      }
+
+      // Convert into an intermediate, in case of failure.
+      size_t elementSize = CType::GetSize(baseType);
+      size_t arraySize = elementSize * targetLength;
+      auto intermediate = cx->make_pod_array<char>(arraySize);
+      if (!intermediate) {
+        JS_ReportAllocationOverflow(cx);
         return false;
+      }
 
-      if (cls == ESClass::Array) {
-        // Convert each element of the array by calling ImplicitConvert.
-        uint32_t sourceLength;
-        if (!JS_GetArrayLength(cx, valObj, &sourceLength) ||
-            targetLength != size_t(sourceLength)) {
-          MOZ_ASSERT(!funObj);
-          return ArrayLengthMismatch(cx, targetLength, targetType,
-                                     size_t(sourceLength), val, convType);
-        }
-
-        // Convert into an intermediate, in case of failure.
-        size_t elementSize = CType::GetSize(baseType);
-        size_t arraySize = elementSize * targetLength;
-        auto intermediate = cx->make_pod_array<char>(arraySize);
-        if (!intermediate) {
-          JS_ReportAllocationOverflow(cx);
-          return false;
-        }
-
+      for (uint32_t i = 0; i < sourceLength; ++i) {
         RootedValue item(cx);
-        for (uint32_t i = 0; i < sourceLength; ++i) {
-          if (!JS_GetElement(cx, valObj, i, &item))
-            return false;
+        if (!JS_GetElement(cx, valObj, i, &item))
+          return false;
 
-          char* data = intermediate.get() + elementSize * i;
-          if (!ImplicitConvert(cx, item, baseType, data, convType, nullptr,
-                               funObj, argIndex, targetType, i))
-            return false;
-        }
+        char* data = intermediate.get() + elementSize * i;
+        if (!ImplicitConvert(cx, item, baseType, data, convType, nullptr,
+                             funObj, argIndex, targetType, i))
+          return false;
+      }
 
-        memcpy(buffer, intermediate.get(), arraySize);
-      } else if (cls == ESClass::ArrayBuffer || cls == ESClass::SharedArrayBuffer) {
-        // Check that array is consistent with type, then
-        // copy the array.
-        const bool bufferShared = cls == ESClass::SharedArrayBuffer;
-        uint32_t sourceLength = bufferShared ? JS_GetSharedArrayBufferByteLength(valObj)
-            : JS_GetArrayBufferByteLength(valObj);
-        size_t elementSize = CType::GetSize(baseType);
-        size_t arraySize = elementSize * targetLength;
-        if (arraySize != size_t(sourceLength)) {
-          MOZ_ASSERT(!funObj);
-          return ArrayLengthMismatch(cx, arraySize, targetType,
-                                     size_t(sourceLength), val, convType);
-        }
-        SharedMem<void*> target = SharedMem<void*>::unshared(buffer);
-        JS::AutoCheckCannotGC nogc;
-        bool isShared;
-        SharedMem<void*> src =
-            (bufferShared ?
-             SharedMem<void*>::shared(JS_GetSharedArrayBufferData(valObj, &isShared, nogc)) :
-             SharedMem<void*>::unshared(JS_GetArrayBufferData(valObj, &isShared, nogc)));
-        MOZ_ASSERT(isShared == bufferShared);
-        jit::AtomicOperations::memcpySafeWhenRacy(target, src, sourceLength);
-        break;
-      } else if (JS_IsTypedArrayObject(valObj)) {
-        // Check that array is consistent with type, then
-        // copy the array.  It is OK to copy from shared to unshared
-        // or vice versa.
-        if (!CanConvertTypedArrayItemTo(baseType, valObj, cx)) {
-          return ConvError(cx, targetType, val, convType, funObj, argIndex,
-                           arrObj, arrIndex);
-        }
+      memcpy(buffer, intermediate.get(), arraySize);
 
-        uint32_t sourceLength = JS_GetTypedArrayByteLength(valObj);
-        size_t elementSize = CType::GetSize(baseType);
-        size_t arraySize = elementSize * targetLength;
-        if (arraySize != size_t(sourceLength)) {
-          MOZ_ASSERT(!funObj);
-          return ArrayLengthMismatch(cx, arraySize, targetType,
-                                     size_t(sourceLength), val, convType);
-        }
-        SharedMem<void*> target = SharedMem<void*>::unshared(buffer);
-        JS::AutoCheckCannotGC nogc;
-        bool isShared;
-        SharedMem<void*> src =
-            SharedMem<void*>::shared(JS_GetArrayBufferViewData(valObj, &isShared, nogc));
-        jit::AtomicOperations::memcpySafeWhenRacy(target, src, sourceLength);
-        break;
-      } else {
-        // Don't implicitly convert to string. Users can implicitly convert
-        // with `String(x)` or `""+x`.
+    } else if (val.isObject() && JS_IsArrayBufferObject(valObj)) {
+      // Check that array is consistent with type, then
+      // copy the array.
+      uint32_t sourceLength = JS_GetArrayBufferByteLength(valObj);
+      size_t elementSize = CType::GetSize(baseType);
+      size_t arraySize = elementSize * targetLength;
+      if (arraySize != size_t(sourceLength)) {
+        MOZ_ASSERT(!funObj);
+        return ArrayLengthMismatch(cx, arraySize, targetType,
+                                   size_t(sourceLength), val, convType);
+      }
+      JS::AutoCheckCannotGC nogc;
+      memcpy(buffer, JS_GetArrayBufferData(valObj, nogc), sourceLength);
+      break;
+    } else if (val.isObject() && JS_IsTypedArrayObject(valObj)) {
+      // Check that array is consistent with type, then
+      // copy the array.
+      if(!CanConvertTypedArrayItemTo(baseType, valObj, cx)) {
         return ConvError(cx, targetType, val, convType, funObj, argIndex,
                          arrObj, arrIndex);
       }
+
+      uint32_t sourceLength = JS_GetTypedArrayByteLength(valObj);
+      size_t elementSize = CType::GetSize(baseType);
+      size_t arraySize = elementSize * targetLength;
+      if (arraySize != size_t(sourceLength)) {
+        MOZ_ASSERT(!funObj);
+        return ArrayLengthMismatch(cx, arraySize, targetType,
+                                   size_t(sourceLength), val, convType);
+      }
+      JS::AutoCheckCannotGC nogc;
+      memcpy(buffer, JS_GetArrayBufferViewData(valObj, nogc), sourceLength);
+      break;
+    } else {
+      // Don't implicitly convert to string. Users can implicitly convert
+      // with `String(x)` or `""+x`.
+      return ConvError(cx, targetType, val, convType, funObj, argIndex,
+                       arrObj, arrIndex);
     }
     break;
   }
@@ -3744,8 +3261,8 @@ ImplicitConvert(JSContext* cx,
     if (val.isObject() && !sourceData) {
       // Enumerate the properties of the object; if they match the struct
       // specification, convert the fields.
-      Rooted<IdVector> props(cx, IdVector(cx));
-      if (!JS_Enumerate(cx, valObj, &props))
+      AutoIdArray props(cx, JS_Enumerate(cx, valObj));
+      if (!props)
         return false;
 
       // Convert into an intermediate, in case of failure.
@@ -3837,15 +3354,10 @@ ExplicitConvert(JSContext* cx, HandleValue val, HandleObject targetType,
     /* Convert numeric values with a C-style cast, and */                      \
     /* allow conversion from a base-10 or base-16 string. */                   \
     type result;                                                               \
-    bool overflow = false;                                                     \
     if (!jsvalToIntegerExplicit(val, &result) &&                               \
         (!val.isString() ||                                                    \
-         !StringToInteger(cx, val.toString(), &result, &overflow))) {          \
-      if (overflow) {                                                          \
-        return TypeOverflow(cx, #name, val);                                   \
-      }                                                                        \
+         !StringToInteger(cx, val.toString(), &result)))                       \
       return ConvError(cx, #name, val, convType);                              \
-    }                                                                          \
     *static_cast<type*>(buffer) = result;                                      \
     break;                                                                     \
   }
@@ -3936,8 +3448,6 @@ BuildTypeName(JSContext* cx, JSObject* typeObj_)
       ABICode abi = GetABICode(fninfo->mABI);
       if (abi == ABI_STDCALL)
         PrependString(result, "__stdcall");
-      else if (abi == ABI_THISCALL)
-        PrependString(result, "__thiscall");
       else if (abi == ABI_WINAPI)
         PrependString(result, "WINAPI");
 
@@ -4043,9 +3553,6 @@ BuildTypeSource(JSContext* cx,
     case ABI_STDCALL:
       AppendString(result, "ctypes.stdcall_abi, ");
       break;
-    case ABI_THISCALL:
-      AppendString(result, "ctypes.thiscall_abi, ");
-      break;
     case ABI_WINAPI:
       AppendString(result, "ctypes.winapi_abi, ");
       break;
@@ -4113,7 +3620,7 @@ BuildTypeSource(JSContext* cx,
 
     const FieldInfoHash* fields = StructType::GetFieldInfo(typeObj);
     size_t length = fields->count();
-    Vector<const FieldInfoHash::Entry*, 64, SystemAllocPolicy> fieldsArray;
+    Array<const FieldInfoHash::Entry*, 64> fieldsArray;
     if (!fieldsArray.resize(length))
       break;
 
@@ -4188,10 +3695,12 @@ BuildDataSource(JSContext* cx,
     double fp = *static_cast<type*>(data);                                     \
     ToCStringBuf cbuf;                                                         \
     char* str = NumberToCString(cx, &cbuf, fp);                                \
-    if (!str || !result.append(str, strlen(str))) {                            \
+    if (!str) {                                                                \
       JS_ReportOutOfMemory(cx);                                                \
       return false;                                                            \
     }                                                                          \
+                                                                               \
+    result.append(str, strlen(str));                                           \
     break;                                                                     \
   }
   CTYPES_FOR_EACH_FLOAT_TYPE(FLOAT_CASE)
@@ -4269,7 +3778,7 @@ BuildDataSource(JSContext* cx,
     // be able to ImplicitConvert successfully.
     const FieldInfoHash* fields = StructType::GetFieldInfo(typeObj);
     size_t length = fields->count();
-    Vector<const FieldInfoHash::Entry*, 64, SystemAllocPolicy> fieldsArray;
+    Array<const FieldInfoHash::Entry*, 64> fieldsArray;
     if (!fieldsArray.resize(length))
       return false;
 
@@ -4316,7 +3825,8 @@ ConstructAbstract(JSContext* cx,
                   Value* vp)
 {
   // Calling an abstract base class constructor is disallowed.
-  return CannotConstructError(cx, "abstract type");
+  JS_ReportError(cx, "cannot construct from abstract type");
+  return false;
 }
 
 /*******************************************************************************
@@ -4332,7 +3842,8 @@ CType::ConstructData(JSContext* cx,
   // get the callee object...
   RootedObject obj(cx, &args.callee());
   if (!CType::IsCType(obj)) {
-    return IncompatibleCallee(cx, "CType constructor", obj);
+    JS_ReportError(cx, "not a CType");
+    return false;
   }
 
   // How we construct the CData object depends on what type we represent.
@@ -4341,10 +3852,10 @@ CType::ConstructData(JSContext* cx,
   //   * __proto__ === t.prototype
   switch (GetTypeCode(obj)) {
   case TYPE_void_t:
-    return CannotConstructError(cx, "void_t");
+    JS_ReportError(cx, "cannot construct from void_t");
+    return false;
   case TYPE_function:
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                         CTYPESMSG_FUNCTION_CONSTRUCT);
+    JS_ReportError(cx, "cannot construct from FunctionType; use FunctionType.ptr instead");
     return false;
   case TYPE_pointer:
     return PointerType::ConstructData(cx, obj, args);
@@ -4512,8 +4023,7 @@ CType::Finalize(JSFreeOp* fop, JSObject* obj)
     }
   }
 
-    MOZ_FALLTHROUGH;
-
+    // Fall through.
   case TYPE_array: {
     // Free the ffi_type info.
     slot = JS_GetReservedSlot(obj, SLOT_FFITYPE);
@@ -4560,10 +4070,10 @@ CType::Trace(JSTracer* trc, JSObject* obj)
     MOZ_ASSERT(fninfo);
 
     // Identify our objects to the tracer.
-    JS::TraceEdge(trc, &fninfo->mABI, "abi");
-    JS::TraceEdge(trc, &fninfo->mReturnType, "returnType");
+    JS_CallObjectTracer(trc, &fninfo->mABI, "abi");
+    JS_CallObjectTracer(trc, &fninfo->mReturnType, "returnType");
     for (size_t i = 0; i < fninfo->mArgTypes.length(); ++i)
-      JS::TraceEdge(trc, &fninfo->mArgTypes[i], "argType");
+      JS_CallObjectTracer(trc, &fninfo->mArgTypes[i], "argType");
 
     break;
   }
@@ -4817,7 +4327,7 @@ CType::IsCTypeOrProto(HandleValue v)
 }
 
 bool
-CType::PrototypeGetter(JSContext* cx, const JS::CallArgs& args)
+CType::PrototypeGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   unsigned slot = CType::IsCTypeProto(obj) ? (unsigned) SLOT_OURDATAPROTO
@@ -4834,7 +4344,7 @@ CType::IsCType(HandleValue v)
 }
 
 bool
-CType::NameGetter(JSContext* cx, const JS::CallArgs& args)
+CType::NameGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   JSString* name = CType::GetName(cx, obj);
@@ -4846,7 +4356,7 @@ CType::NameGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-CType::SizeGetter(JSContext* cx, const JS::CallArgs& args)
+CType::SizeGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   args.rval().set(JS_GetReservedSlot(obj, SLOT_SIZE));
@@ -4855,7 +4365,7 @@ CType::SizeGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-CType::PtrGetter(JSContext* cx, const JS::CallArgs& args)
+CType::PtrGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   JSObject* pointerType = PointerType::CreateInternal(cx, obj);
@@ -4874,7 +4384,8 @@ CType::CreateArray(JSContext* cx, unsigned argc, Value* vp)
   if (!baseType)
     return false;
   if (!CType::IsCType(baseType)) {
-    return IncompatibleThisProto(cx, "CType.prototype.array", args.thisv());
+    JS_ReportError(cx, "not a CType");
+    return false;
   }
 
   // Construct and return a new ArrayType object.
@@ -4905,8 +4416,8 @@ CType::ToString(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!CType::IsCType(obj) && !CType::IsCTypeProto(obj)) {
-    return IncompatibleThisProto(cx, "CType.prototype.toString",
-                                 InformalValueTypeName(args.thisv()));
+    JS_ReportError(cx, "not a CType");
+    return false;
   }
 
   // Create the appropriate string depending on whether we're sCTypeClass or
@@ -4935,9 +4446,10 @@ CType::ToSource(JSContext* cx, unsigned argc, Value* vp)
   JSObject* obj = JS_THIS_OBJECT(cx, vp);
   if (!obj)
     return false;
-  if (!CType::IsCType(obj) && !CType::IsCTypeProto(obj)) {
-    return IncompatibleThisProto(cx, "CType.prototype.toSource",
-                                 InformalValueTypeName(args.thisv()));
+  if (!CType::IsCType(obj) && !CType::IsCTypeProto(obj))
+  {
+    JS_ReportError(cx, "not a CType");
+    return false;
   }
 
   // Create the appropriate string depending on whether we're sCTypeClass or
@@ -5024,8 +4536,8 @@ ABI::ToSource(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!ABI::IsABI(obj)) {
-    return IncompatibleThisProto(cx, "ABI.prototype.toSource",
-                                 InformalValueTypeName(args.thisv()));
+    JS_ReportError(cx, "not an ABI");
+    return false;
   }
 
   JSString* result;
@@ -5035,9 +4547,6 @@ ABI::ToSource(JSContext* cx, unsigned argc, Value* vp)
       break;
     case ABI_STDCALL:
       result = JS_NewStringCopyZ(cx, "ctypes.stdcall_abi");
-      break;
-    case ABI_THISCALL:
-      result = JS_NewStringCopyZ(cx, "ctypes.thiscall_abi");
       break;
     case ABI_WINAPI:
       result = JS_NewStringCopyZ(cx, "ctypes.winapi_abi");
@@ -5123,7 +4632,8 @@ PointerType::ConstructData(JSContext* cx,
                            const CallArgs& args)
 {
   if (!CType::IsCType(obj) || CType::GetTypeCode(obj) != TYPE_pointer) {
-    return IncompatibleCallee(cx, "PointerType constructor", obj);
+    JS_ReportError(cx, "not a PointerType");
+    return false;
   }
 
   if (args.length() > 3) {
@@ -5226,7 +4736,7 @@ PointerType::IsPointer(HandleValue v)
 }
 
 bool
-PointerType::TargetTypeGetter(JSContext* cx, const JS::CallArgs& args)
+PointerType::TargetTypeGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   args.rval().set(JS_GetReservedSlot(obj, SLOT_TARGET_T));
@@ -5242,15 +4752,15 @@ PointerType::IsNull(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!CData::IsCData(obj)) {
-    return IncompatibleThisProto(cx, "PointerType.prototype.isNull",
-                                 args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   // Get pointer type and base type.
   JSObject* typeObj = CData::GetCType(obj);
   if (CType::GetTypeCode(typeObj) != TYPE_pointer) {
-    return IncompatibleThisType(cx, "PointerType.prototype.isNull",
-                                "non-PointerType CData", args.thisv());
+    JS_ReportError(cx, "not a PointerType");
+    return false;
   }
 
   void* data = *static_cast<void**>(CData::GetData(obj));
@@ -5261,31 +4771,24 @@ PointerType::IsNull(JSContext* cx, unsigned argc, Value* vp)
 bool
 PointerType::OffsetBy(JSContext* cx, const CallArgs& args, int offset)
 {
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, args.base()));
+  JSObject* obj = JS_THIS_OBJECT(cx, args.base());
   if (!obj)
     return false;
   if (!CData::IsCData(obj)) {
-    if (offset == 1) {
-      return IncompatibleThisProto(cx, "PointerType.prototype.increment",
-                                   args.thisv());
-    }
-    return IncompatibleThisProto(cx, "PointerType.prototype.decrement",
-                                 args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   RootedObject typeObj(cx, CData::GetCType(obj));
   if (CType::GetTypeCode(typeObj) != TYPE_pointer) {
-    if (offset == 1) {
-      return IncompatibleThisType(cx, "PointerType.prototype.increment",
-                                  "non-PointerType CData", args.thisv());
-    }
-    return IncompatibleThisType(cx, "PointerType.prototype.decrement",
-                                "non-PointerType CData", args.thisv());
+    JS_ReportError(cx, "not a PointerType");
+    return false;
   }
 
   RootedObject baseType(cx, PointerType::GetBaseType(typeObj));
   if (!CType::IsSizeDefined(baseType)) {
-    return UndefinedSizePointerError(cx, "modify", obj);
+    JS_ReportError(cx, "cannot modify pointer of undefined size");
+    return false;
   }
 
   size_t elementSize = CType::GetSize(baseType);
@@ -5316,17 +4819,19 @@ PointerType::Decrement(JSContext* cx, unsigned argc, Value* vp)
 }
 
 bool
-PointerType::ContentsGetter(JSContext* cx, const JS::CallArgs& args)
+PointerType::ContentsGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   RootedObject baseType(cx, GetBaseType(CData::GetCType(obj)));
   if (!CType::IsSizeDefined(baseType)) {
-    return UndefinedSizePointerError(cx, "get contents of", obj);
+    JS_ReportError(cx, "cannot get contents of undefined size");
+    return false;
   }
 
   void* data = *static_cast<void**>(CData::GetData(obj));
   if (data == nullptr) {
-    return NullPointerError(cx, "read contents of", obj);
+    JS_ReportError(cx, "cannot read contents of null pointer");
+    return false;
   }
 
   RootedValue result(cx);
@@ -5338,17 +4843,19 @@ PointerType::ContentsGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-PointerType::ContentsSetter(JSContext* cx, const JS::CallArgs& args)
+PointerType::ContentsSetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   RootedObject baseType(cx, GetBaseType(CData::GetCType(obj)));
   if (!CType::IsSizeDefined(baseType)) {
-    return UndefinedSizePointerError(cx, "set contents of", obj);
+    JS_ReportError(cx, "cannot set contents of undefined size");
+    return false;
   }
 
   void* data = *static_cast<void**>(CData::GetData(obj));
   if (data == nullptr) {
-    return NullPointerError(cx, "write contents to", obj);
+    JS_ReportError(cx, "cannot write contents to null pointer");
+    return false;
   }
 
   args.rval().setUndefined();
@@ -5419,17 +4926,12 @@ ArrayType::CreateInternal(JSContext* cx,
     // Check for overflow, and convert to an int or double as required.
     size_t size = length * baseSize;
     if (length > 0 && size / length != baseSize) {
-      SizeOverflow(cx, "array size", "size_t");
+      JS_ReportError(cx, "size overflow");
       return nullptr;
     }
-    if (!SizeTojsval(cx, size, &sizeVal)) {
-      SizeOverflow(cx, "array size", "JavaScript number");
+    if (!SizeTojsval(cx, size, &sizeVal) ||
+        !SizeTojsval(cx, length, &lengthVal))
       return nullptr;
-    }
-    if (!SizeTojsval(cx, length, &lengthVal)) {
-      SizeOverflow(cx, "array length", "JavaScript number");
-      return nullptr;
-    }
   }
 
   size_t align = CType::GetAlignment(baseType);
@@ -5457,7 +4959,8 @@ ArrayType::ConstructData(JSContext* cx,
   RootedObject obj(cx, obj_); // Make a mutable version
 
   if (!CType::IsCType(obj) || CType::GetTypeCode(obj) != TYPE_array) {
-    return IncompatibleCallee(cx, "ArrayType constructor", obj);
+    JS_ReportError(cx, "not an ArrayType");
+    return false;
   }
 
   // Decide whether we have an object to initialize from. We'll override this
@@ -5673,7 +5176,7 @@ ArrayType::IsArrayOrArrayType(HandleValue v)
 }
 
 bool
-ArrayType::ElementTypeGetter(JSContext* cx, const JS::CallArgs& args)
+ArrayType::ElementTypeGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   args.rval().set(JS_GetReservedSlot(obj, SLOT_ELEMENT_T));
@@ -5682,7 +5185,7 @@ ArrayType::ElementTypeGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-ArrayType::LengthGetter(JSContext* cx, const JS::CallArgs& args)
+ArrayType::LengthGetter(JSContext* cx, JS::CallArgs args)
 {
   JSObject* obj = &args.thisv().toObject();
 
@@ -5701,8 +5204,8 @@ ArrayType::Getter(JSContext* cx, HandleObject obj, HandleId idval, MutableHandle
 {
   // This should never happen, but we'll check to be safe.
   if (!CData::IsCData(obj)) {
-    RootedValue objVal(cx, ObjectValue(*obj));
-    return IncompatibleThisProto(cx, "ArrayType property getter", objVal);
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   // Bail early if we're not an ArrayType. (This setter is present for all
@@ -5716,20 +5219,15 @@ ArrayType::Getter(JSContext* cx, HandleObject obj, HandleId idval, MutableHandle
   size_t length = GetLength(typeObj);
   bool ok = jsidToSize(cx, idval, true, &index);
   int32_t dummy;
-  if (!ok && JSID_IS_SYMBOL(idval))
-    return true;
-  bool dummy2;
   if (!ok && JSID_IS_STRING(idval) &&
-      !StringToInteger(cx, JSID_TO_STRING(idval), &dummy, &dummy2)) {
+      !StringToInteger(cx, JSID_TO_STRING(idval), &dummy)) {
     // String either isn't a number, or doesn't fit in size_t.
     // Chances are it's a regular property lookup, so return.
     return true;
   }
-  if (!ok) {
-    return InvalidIndexError(cx, idval);
-  }
-  if (index >= length) {
-    return InvalidIndexRangeError(cx, index, length);
+  if (!ok || index >= length) {
+    JS_ReportError(cx, "invalid index");
+    return false;
   }
 
   RootedObject baseType(cx, GetBaseType(typeObj));
@@ -5744,8 +5242,8 @@ ArrayType::Setter(JSContext* cx, HandleObject obj, HandleId idval, MutableHandle
 {
   // This should never happen, but we'll check to be safe.
   if (!CData::IsCData(obj)) {
-    RootedValue objVal(cx, ObjectValue(*obj));
-    return IncompatibleThisProto(cx, "ArrayType property setter", objVal);
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   // Bail early if we're not an ArrayType. (This setter is present for all
@@ -5759,20 +5257,15 @@ ArrayType::Setter(JSContext* cx, HandleObject obj, HandleId idval, MutableHandle
   size_t length = GetLength(typeObj);
   bool ok = jsidToSize(cx, idval, true, &index);
   int32_t dummy;
-  if (!ok && JSID_IS_SYMBOL(idval))
-    return true;
-  bool dummy2;
   if (!ok && JSID_IS_STRING(idval) &&
-      !StringToInteger(cx, JSID_TO_STRING(idval), &dummy, &dummy2)) {
+      !StringToInteger(cx, JSID_TO_STRING(idval), &dummy)) {
     // String either isn't a number, or doesn't fit in size_t.
     // Chances are it's a regular property lookup, so return.
     return result.succeed();
   }
-  if (!ok) {
-    return InvalidIndexError(cx, idval);
-  }
-  if (index >= length) {
-    return InvalidIndexRangeError(cx, index, length);
+  if (!ok || index >= length) {
+    JS_ReportError(cx, "invalid index");
+    return false;
   }
 
   RootedObject baseType(cx, GetBaseType(typeObj));
@@ -5792,14 +5285,14 @@ ArrayType::AddressOfElement(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!CData::IsCData(obj)) {
-    return IncompatibleThisProto(cx, "ArrayType.prototype.addressOfElement",
-                                 args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   RootedObject typeObj(cx, CData::GetCType(obj));
   if (CType::GetTypeCode(typeObj) != TYPE_array) {
-    return IncompatibleThisType(cx, "ArrayType.prototype.addressOfElement",
-                                "non-ArrayType CData", args.thisv());
+    JS_ReportError(cx, "not an ArrayType");
+    return false;
   }
 
   if (args.length() != 1) {
@@ -5822,11 +5315,10 @@ ArrayType::AddressOfElement(JSContext* cx, unsigned argc, Value* vp)
   // Convert the index to a size_t and bounds-check it.
   size_t index;
   size_t length = GetLength(typeObj);
-  if (!jsvalToSize(cx, args[0], false, &index)) {
-    return InvalidIndexError(cx, args[0]);
-  }
-  if (index >= length) {
-    return InvalidIndexRangeError(cx, index, length);
+  if (!jsvalToSize(cx, args[0], false, &index) ||
+      index >= length) {
+    JS_ReportError(cx, "invalid index");
+    return false;
   }
 
   // Manually set the pointer inside the object, so we skip the conversion step.
@@ -5843,27 +5335,27 @@ ArrayType::AddressOfElement(JSContext* cx, unsigned argc, Value* vp)
 // For a struct field descriptor 'val' of the form { name : type }, extract
 // 'name' and 'type'.
 static JSFlatString*
-ExtractStructField(JSContext* cx, HandleValue val, MutableHandleObject typeObj)
+ExtractStructField(JSContext* cx, Value val, MutableHandleObject typeObj)
 {
   if (val.isPrimitive()) {
-    FieldDescriptorNameTypeError(cx, val);
+    JS_ReportError(cx, "struct field descriptors require a valid name and type");
     return nullptr;
   }
 
   RootedObject obj(cx, &val.toObject());
-  Rooted<IdVector> props(cx, IdVector(cx));
-  if (!JS_Enumerate(cx, obj, &props))
+  AutoIdArray props(cx, JS_Enumerate(cx, obj));
+  if (!props)
     return nullptr;
 
   // make sure we have one, and only one, property
   if (props.length() != 1) {
-    FieldDescriptorCountError(cx, val, props.length());
+    JS_ReportError(cx, "struct field descriptors must contain one property");
     return nullptr;
   }
 
   RootedId nameid(cx, props[0]);
   if (!JSID_IS_STRING(nameid)) {
-    FieldDescriptorNameError(cx, nameid);
+    JS_ReportError(cx, "struct field descriptors require a valid name and type");
     return nullptr;
   }
 
@@ -5872,7 +5364,7 @@ ExtractStructField(JSContext* cx, HandleValue val, MutableHandleObject typeObj)
     return nullptr;
 
   if (propVal.isPrimitive() || !CType::IsCType(&propVal.toObject())) {
-    FieldDescriptorTypeError(cx, propVal, nameid);
+    JS_ReportError(cx, "struct field descriptors require a valid name and type");
     return nullptr;
   }
 
@@ -5882,7 +5374,7 @@ ExtractStructField(JSContext* cx, HandleValue val, MutableHandleObject typeObj)
   typeObj.set(&propVal.toObject());
   size_t size;
   if (!CType::GetSafeSize(typeObj, &size) || size == 0) {
-    FieldDescriptorSizeError(cx, typeObj, nameid);
+    JS_ReportError(cx, "struct field types must have defined and nonzero size");
     return nullptr;
   }
 
@@ -5946,16 +5438,10 @@ StructType::Create(JSContext* cx, unsigned argc, Value* vp)
     return false;
 
   if (args.length() == 2) {
-    RootedObject arr(cx, args[1].isObject() ? &args[1].toObject() : nullptr);
-    bool isArray;
-    if (!arr) {
-        isArray = false;
-    } else {
-        if (!JS_IsArrayObject(cx, arr, &isArray))
-           return false;
-    }
-    if (!isArray)
+    RootedObject arr(cx, args[1].isPrimitive() ? nullptr : &args[1].toObject());
+    if (!arr || !JS_IsArrayObject(cx, arr)) {
       return ArgumentTypeMismatch(cx, "second ", "StructType", "an array");
+    }
 
     // Define the struct fields.
     if (!DefineInternal(cx, result, arr))
@@ -5964,6 +5450,20 @@ StructType::Create(JSContext* cx, unsigned argc, Value* vp)
 
   args.rval().setObject(*result);
   return true;
+}
+
+static void
+PostBarrierCallback(JSTracer* trc, JSString* key, void* data)
+{
+    typedef HashMap<JSFlatString*,
+                    UnbarrieredFieldInfo,
+                    FieldHashPolicy,
+                    SystemAllocPolicy> UnbarrieredFieldInfoHash;
+
+    UnbarrieredFieldInfoHash* table = reinterpret_cast<UnbarrieredFieldInfoHash*>(data);
+    JSString* prior = key;
+    JS_CallUnbarrieredStringTracer(trc, &key, "CType fieldName");
+    table->rekeyIfMoved(JS_ASSERT_STRING_IS_FLAT(prior), JS_ASSERT_STRING_IS_FLAT(key));
 }
 
 bool
@@ -6018,7 +5518,8 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
       // Make sure each field name is unique
       FieldInfoHash::AddPtr entryPtr = fields.lookupForAdd(name);
       if (entryPtr) {
-        return DuplicateFieldError(cx, name);
+        JS_ReportError(cx, "struct fields must have unique names");
+        return false;
       }
 
       // Add the field to the StructType's 'prototype' property.
@@ -6056,7 +5557,7 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
       // be zero, we can safely check fieldOffset + fieldSize without first
       // checking fieldOffset for overflow.
       if (fieldOffset + fieldSize < structSize) {
-        SizeOverflow(cx, "struct size", "size_t");
+        JS_ReportError(cx, "size overflow");
         return false;
       }
 
@@ -6065,10 +5566,8 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
       info.mType = fieldType;
       info.mIndex = i;
       info.mOffset = fieldOffset;
-      if (!fields.add(entryPtr, name, info)) {
-        JS_ReportOutOfMemory(cx);
-        return false;
-      }
+      ASSERT_OK(fields.add(entryPtr, name, info));
+      JS_StoreStringPostBarrierCallback(cx, PostBarrierCallback, name, fields.address());
 
       structSize = fieldOffset + fieldSize;
 
@@ -6079,7 +5578,7 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
     // Pad the struct tail according to struct alignment.
     size_t structTail = Align(structSize, structAlign);
     if (structTail < structSize) {
-      SizeOverflow(cx, "struct size", "size_t");
+      JS_ReportError(cx, "size overflow");
       return false;
     }
     structSize = structTail;
@@ -6094,10 +5593,8 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
   }
 
   RootedValue sizeVal(cx);
-  if (!SizeTojsval(cx, structSize, &sizeVal)) {
-    SizeOverflow(cx, "struct size", "double");
+  if (!SizeTojsval(cx, structSize, &sizeVal))
     return false;
-  }
 
   // Move the field hash to the heap and store it in the typeObj.
   FieldInfoHash *heapHash = cx->new_<FieldInfoHash>(mozilla::Move(fields.get()));
@@ -6193,13 +5690,10 @@ StructType::Define(JSContext* cx, unsigned argc, Value* vp)
   RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
   if (!obj)
     return false;
-  if (!CType::IsCType(obj)) {
-    return IncompatibleThisProto(cx, "StructType.prototype.define",
-                                 args.thisv());
-  }
-  if (CType::GetTypeCode(obj) != TYPE_struct) {
-    return IncompatibleThisType(cx, "StructType.prototype.define",
-                                "non-StructType", args.thisv());
+  if (!CType::IsCType(obj) ||
+      CType::GetTypeCode(obj) != TYPE_struct) {
+    JS_ReportError(cx, "not a StructType");
+    return false;
   }
 
   if (CType::IsSizeDefined(obj)) {
@@ -6211,26 +5705,17 @@ StructType::Define(JSContext* cx, unsigned argc, Value* vp)
     return ArgumentLengthError(cx, "StructType.prototype.define", "one", "");
   }
 
-  HandleValue arg = args[0];
+  Value arg = args[0];
   if (arg.isPrimitive()) {
     return ArgumentTypeMismatch(cx, "", "StructType.prototype.define",
                                 "an array");
   }
-
-  bool isArray;
-  if (!arg.isObject()) {
-    isArray = false;
-  } else {
-    if (!JS_IsArrayObject(cx, arg, &isArray))
-      return false;
-  }
-
-  if (!isArray) {
+  RootedObject arr(cx, arg.toObjectOrNull());
+  if (!JS_IsArrayObject(cx, arr)) {
     return ArgumentTypeMismatch(cx, "", "StructType.prototype.define",
                                 "an array");
   }
 
-  RootedObject arr(cx, &arg.toObject());
   return DefineInternal(cx, obj, arr);
 }
 
@@ -6240,7 +5725,8 @@ StructType::ConstructData(JSContext* cx,
                           const CallArgs& args)
 {
   if (!CType::IsCType(obj) || CType::GetTypeCode(obj) != TYPE_struct) {
-    return IncompatibleCallee(cx, "StructType constructor", obj);
+    JS_ReportError(cx, "not a StructType");
+    return false;
   }
 
   if (!CType::IsSizeDefined(obj)) {
@@ -6335,7 +5821,11 @@ StructType::LookupField(JSContext* cx, JSObject* obj, JSFlatString* name)
   if (ptr)
     return &ptr->value();
 
-  FieldMissingError(cx, obj, name);
+  JSAutoByteString bytes(cx, name);
+  if (!bytes)
+    return nullptr;
+
+  JS_ReportError(cx, "%s does not name a field", bytes.ptr());
   return nullptr;
 }
 
@@ -6383,7 +5873,7 @@ StructType::IsStruct(HandleValue v)
 }
 
 bool
-StructType::FieldsArrayGetter(JSContext* cx, const JS::CallArgs& args)
+StructType::FieldsArrayGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
 
@@ -6405,6 +5895,7 @@ StructType::FieldsArrayGetter(JSContext* cx, const JS::CallArgs& args)
   }
 
   MOZ_ASSERT(args.rval().isObject());
+  MOZ_ASSERT(JS_IsArrayObject(cx, args.rval()));
   return true;
 }
 
@@ -6414,18 +5905,20 @@ StructType::FieldGetter(JSContext* cx, unsigned argc, Value* vp)
   CallArgs args = CallArgsFromVp(argc, vp);
 
   if (!args.thisv().isObject()) {
-    return IncompatibleThisProto(cx, "StructType property getter", args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   RootedObject obj(cx, &args.thisv().toObject());
   if (!CData::IsCData(obj)) {
-    return IncompatibleThisProto(cx, "StructType property getter", args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   JSObject* typeObj = CData::GetCType(obj);
   if (CType::GetTypeCode(typeObj) != TYPE_struct) {
-    return IncompatibleThisType(cx, "StructType property getter",
-                                "non-StructType CData", args.thisv());
+    JS_ReportError(cx, "not a StructType");
+    return false;
   }
 
   RootedValue nameVal(cx, GetFunctionNativeReserved(&args.callee(), SLOT_FIELDNAME));
@@ -6448,18 +5941,20 @@ StructType::FieldSetter(JSContext* cx, unsigned argc, Value* vp)
   CallArgs args = CallArgsFromVp(argc, vp);
 
   if (!args.thisv().isObject()) {
-    return IncompatibleThisProto(cx, "StructType property setter", args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   RootedObject obj(cx, &args.thisv().toObject());
   if (!CData::IsCData(obj)) {
-    return IncompatibleThisProto(cx, "StructType property setter", args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   RootedObject typeObj(cx, CData::GetCType(obj));
   if (CType::GetTypeCode(typeObj) != TYPE_struct) {
-    return IncompatibleThisType(cx, "StructType property setter",
-                                "non-StructType CData", args.thisv());
+    JS_ReportError(cx, "not a StructType");
+    return false;
   }
 
   RootedValue nameVal(cx, GetFunctionNativeReserved(&args.callee(), SLOT_FIELDNAME));
@@ -6485,15 +5980,15 @@ StructType::AddressOfField(JSContext* cx, unsigned argc, Value* vp)
   RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
   if (!obj)
     return false;
- if (!CData::IsCData(obj)) {
-    return IncompatibleThisProto(cx, "StructType.prototype.addressOfField",
-                                 args.thisv());
+  if (!CData::IsCData(obj)) {
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   JSObject* typeObj = CData::GetCType(obj);
   if (CType::GetTypeCode(typeObj) != TYPE_struct) {
-    return IncompatibleThisType(cx, "StructType.prototype.addressOfField",
-                                "non-StructType CData", args.thisv());
+    JS_ReportError(cx, "not a StructType");
+    return false;
   }
 
   if (args.length() != 1) {
@@ -6574,16 +6069,6 @@ GetABI(JSContext* cx, Value abiType, ffi_abi* result)
   case ABI_DEFAULT:
     *result = FFI_DEFAULT_ABI;
     return true;
-  case ABI_THISCALL:
-#if defined(_WIN64)
-    *result = FFI_WIN64;
-    return true;
-#elif defined(_WIN32)
-    *result = FFI_THISCALL;
-    return true;
-#else
-    break;
-#endif
   case ABI_STDCALL:
   case ABI_WINAPI:
 #if (defined(_WIN32) && !defined(_WIN64)) || defined(_OS2)
@@ -6602,10 +6087,10 @@ GetABI(JSContext* cx, Value abiType, ffi_abi* result)
 }
 
 static JSObject*
-PrepareType(JSContext* cx, uint32_t index, HandleValue type)
+PrepareType(JSContext* cx, Value type)
 {
   if (type.isPrimitive() || !CType::IsCType(type.toObjectOrNull())) {
-    FunctionArgumentTypeError(cx, index, type, "is not a ctypes type");
+    JS_ReportError(cx, "not a ctypes type");
     return nullptr;
   }
 
@@ -6622,12 +6107,12 @@ PrepareType(JSContext* cx, uint32_t index, HandleValue type)
 
   } else if (typeCode == TYPE_void_t || typeCode == TYPE_function) {
     // disallow void or function argument types
-    FunctionArgumentTypeError(cx, index, type, "cannot be void or function");
+    JS_ReportError(cx, "Cannot have void or function argument type");
     return nullptr;
   }
 
   if (!CType::IsSizeDefined(result)) {
-    FunctionArgumentTypeError(cx, index, type, "must have defined size");
+    JS_ReportError(cx, "Argument type must have defined size");
     return nullptr;
   }
 
@@ -6641,7 +6126,7 @@ static JSObject*
 PrepareReturnType(JSContext* cx, Value type)
 {
   if (type.isPrimitive() || !CType::IsCType(type.toObjectOrNull())) {
-    FunctionReturnTypeError(cx, type, "is not a ctypes type");
+    JS_ReportError(cx, "not a ctypes type");
     return nullptr;
   }
 
@@ -6650,12 +6135,12 @@ PrepareReturnType(JSContext* cx, Value type)
 
   // Arrays and functions can never be return types.
   if (typeCode == TYPE_array || typeCode == TYPE_function) {
-    FunctionReturnTypeError(cx, type, "cannot be an array or function");
+    JS_ReportError(cx, "Return type cannot be an array or function");
     return nullptr;
   }
 
   if (typeCode != TYPE_void_t && !CType::IsSizeDefined(result)) {
-    FunctionReturnTypeError(cx, type, "must have defined size");
+    JS_ReportError(cx, "Return type must have defined size");
     return nullptr;
   }
 
@@ -6729,7 +6214,6 @@ FunctionType::BuildSymbolName(JSString* name,
 
   switch (GetABICode(fninfo->mABI)) {
   case ABI_DEFAULT:
-  case ABI_THISCALL:
   case ABI_WINAPI:
     // For cdecl or WINAPI functions, no mangling is necessary.
     AppendString(result, name);
@@ -6824,7 +6308,7 @@ CreateFunctionInfo(JSContext* cx,
       break;
     }
 
-    JSObject* argType = PrepareType(cx, i, args[i]);
+    JSObject* argType = PrepareType(cx, args[i]);
     if (!argType)
       return false;
 
@@ -6861,18 +6345,11 @@ FunctionType::Create(JSContext* cx, unsigned argc, Value* vp)
 
   if (args.length() == 3) {
     // Prepare an array of Values for the arguments.
-    bool isArray;
-    if (!args[2].isObject()) {
-      isArray = false;
-    } else {
-      if (!JS_IsArrayObject(cx, args[2], &isArray))
-        return false;
-    }
-
-    if (!isArray)
+    if (args[2].isObject())
+      arrayObj = &args[2].toObject();
+    if (!arrayObj || !JS_IsArrayObject(cx, arrayObj)) {
       return ArgumentTypeMismatch(cx, "third ", "FunctionType", "an array");
-
-    arrayObj = &args[2].toObject();
+    }
 
     uint32_t len;
     ASSERT_OK(JS_GetArrayLength(cx, arrayObj, &len));
@@ -6974,7 +6451,7 @@ FunctionType::ConstructData(JSContext* cx,
   return JS_FreezeObject(cx, dataObj);
 }
 
-typedef Vector<AutoValue, 16, SystemAllocPolicy> AutoValueAutoArray;
+typedef Array<AutoValue, 16> AutoValueAutoArray;
 
 static bool
 ConvertArgument(JSContext* cx,
@@ -7018,20 +6495,20 @@ FunctionType::Call(JSContext* cx,
   // get the callee object...
   RootedObject obj(cx, &args.callee());
   if (!CData::IsCData(obj)) {
-    return IncompatibleThisProto(cx, "FunctionType.prototype.call",
-                                 args.calleev());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   RootedObject typeObj(cx, CData::GetCType(obj));
   if (CType::GetTypeCode(typeObj) != TYPE_pointer) {
-    return IncompatibleThisType(cx, "FunctionType.prototype.call",
-                                "non-PointerType CData", args.calleev());
+    JS_ReportError(cx, "not a FunctionType.ptr");
+    return false;
   }
 
   typeObj = PointerType::GetBaseType(typeObj);
   if (CType::GetTypeCode(typeObj) != TYPE_function) {
-    return IncompatibleThisType(cx, "FunctionType.prototype.call",
-                                "non-FunctionType pointer", args.calleev());
+    JS_ReportError(cx, "not a FunctionType.ptr");
+    return false;
   }
 
   FunctionInfo* fninfo = GetFunctionInfo(typeObj);
@@ -7039,8 +6516,8 @@ FunctionType::Call(JSContext* cx,
 
   if ((!fninfo->mIsVariadic && args.length() != argcFixed) ||
       (fninfo->mIsVariadic && args.length() < argcFixed)) {
-    return FunctionArgumentLengthMismatch(cx, argcFixed, args.length(),
-                                          obj, typeObj, fninfo->mIsVariadic);
+    JS_ReportError(cx, "Number of arguments does not match declaration");
+    return false;
   }
 
   // Check if we have a Library object. If we do, make sure it's open.
@@ -7080,25 +6557,17 @@ FunctionType::Call(JSContext* cx,
           !CData::IsCData(obj = &args[i].toObject())) {
         // Since we know nothing about the CTypes of the ... arguments,
         // they absolutely must be CData objects already.
-        return VariadicArgumentTypeError(cx, i, args[i]);
+        JS_ReportError(cx, "argument %d of type %s is not a CData object",
+                       i, InformalValueTypeName(args[i]));
+        return false;
       }
-      type = CData::GetCType(obj);
-      if (!type) {
+      if (!(type = CData::GetCType(obj)) ||
+          !(type = PrepareType(cx, ObjectValue(*type))) ||
+          // Relying on ImplicitConvert only for the limited purpose of
+          // converting one CType to another (e.g., T[] to T*).
+          !ConvertArgument(cx, obj, i, args[i], type, &values[i], &strings) ||
+          !(fninfo->mFFITypes[i] = CType::GetFFIType(cx, type))) {
         // These functions report their own errors.
-        return false;
-      }
-      RootedValue typeVal(cx, ObjectValue(*type));
-      type = PrepareType(cx, i, typeVal);
-      if (!type) {
-        return false;
-      }
-      // Relying on ImplicitConvert only for the limited purpose of
-      // converting one CType to another (e.g., T[] to T*).
-      if (!ConvertArgument(cx, obj, i, args[i], type, &values[i], &strings)) {
-        return false;
-      }
-      fninfo->mFFITypes[i] = CType::GetFFIType(cx, type);
-      if (!fninfo->mFFITypes[i]) {
         return false;
       }
     }
@@ -7205,7 +6674,7 @@ FunctionType::IsFunctionType(HandleValue v)
 }
 
 bool
-FunctionType::ArgTypesGetter(JSContext* cx, const JS::CallArgs& args)
+FunctionType::ArgTypesGetter(JSContext* cx, JS::CallArgs args)
 {
   JS::Rooted<JSObject*> obj(cx, &args.thisv().toObject());
 
@@ -7241,7 +6710,7 @@ FunctionType::ArgTypesGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-FunctionType::ReturnTypeGetter(JSContext* cx, const JS::CallArgs& args)
+FunctionType::ReturnTypeGetter(JSContext* cx, JS::CallArgs args)
 {
   // Get the returnType object from the FunctionInfo.
   args.rval().setObject(*GetFunctionInfo(&args.thisv().toObject())->mReturnType);
@@ -7249,7 +6718,7 @@ FunctionType::ReturnTypeGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-FunctionType::ABIGetter(JSContext* cx, const JS::CallArgs& args)
+FunctionType::ABIGetter(JSContext* cx, JS::CallArgs args)
 {
   // Get the abi object from the FunctionInfo.
   args.rval().setObject(*GetFunctionInfo(&args.thisv().toObject())->mABI);
@@ -7257,7 +6726,7 @@ FunctionType::ABIGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-FunctionType::IsVariadicGetter(JSContext* cx, const JS::CallArgs& args)
+FunctionType::IsVariadicGetter(JSContext* cx, JS::CallArgs args)
 {
   args.rval().setBoolean(GetFunctionInfo(&args.thisv().toObject())->mIsVariadic);
   return true;
@@ -7299,7 +6768,7 @@ CClosure::Create(JSContext* cx,
   // we might be unable to convert the value to the proper type. If so, we want
   // the caller to know about it _now_, rather than some uncertain time in the
   // future when the error sentinel is actually needed.
-  UniquePtr<uint8_t[], JS::FreePolicy> errResult;
+  mozilla::UniquePtr<uint8_t[], JS::FreePolicy> errResult;
   if (!errVal.isUndefined()) {
 
     // Make sure the callback returns something.
@@ -7374,10 +6843,10 @@ CClosure::Trace(JSTracer* trc, JSObject* obj)
 
   // Identify our objects to the tracer. (There's no need to identify
   // 'closureObj', since that's us.)
-  JS::TraceEdge(trc, &cinfo->typeObj, "typeObj");
-  JS::TraceEdge(trc, &cinfo->jsfnObj, "jsfnObj");
+  JS_CallObjectTracer(trc, &cinfo->typeObj, "typeObj");
+  JS_CallObjectTracer(trc, &cinfo->jsfnObj, "jsfnObj");
   if (cinfo->thisObj)
-    JS::TraceEdge(trc, &cinfo->thisObj, "thisObj");
+    JS_CallObjectTracer(trc, &cinfo->thisObj, "thisObj");
 }
 
 void
@@ -7404,9 +6873,7 @@ CClosure::ClosureStub(ffi_cif* cif, void* result, void** args, void* userData)
   ArgClosure argClosure(cif, result, args, static_cast<ClosureInfo*>(userData));
   JSRuntime* rt = argClosure.cinfo->rt;
   RootedObject fun(rt, argClosure.cinfo->jsfnObj);
-
-  JSContext* cx = JS_GetContext(rt);
-  js::PrepareScriptEnvironmentAndInvoke(cx, fun, argClosure);
+  (void) js::PrepareScriptEnvironmentAndInvoke(rt, fun, argClosure);
 }
 
 bool CClosure::ArgClosure::operator()(JSContext* cx)
@@ -7422,7 +6889,7 @@ bool CClosure::ArgClosure::operator()(JSContext* cx)
   AssertSameCompartment(cx, cinfo->jsfnObj);
 
 
-  JS_AbortIfWrongThread(cx);
+  JS_AbortIfWrongThread(JS_GetRuntime(cx));
 
   // Assert that our CIFs agree.
   FunctionInfo* fninfo = FunctionType::GetFunctionInfo(typeObj);
@@ -7499,14 +6966,11 @@ bool CClosure::ArgClosure::operator()(JSContext* cx)
       size_t copySize = CType::GetSize(fninfo->mReturnType);
       MOZ_ASSERT(copySize <= rvSize);
       memcpy(result, cinfo->errResult, copySize);
-
-      // We still want to return false here, so that
-      // PrepareScriptEnvironmentAndInvoke will report the exception.
     } else {
       // Bad case: not much we can do here. The rv is already zeroed out, so we
       // just return and hope for the best.
+      return false;
     }
-    return false;
   }
 
   // Small integer types must be returned as a word-sized ffi_arg. Coerce it
@@ -7688,7 +7152,7 @@ CData::IsCDataProto(JSObject* obj)
 }
 
 bool
-CData::ValueGetter(JSContext* cx, const JS::CallArgs& args)
+CData::ValueGetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
 
@@ -7698,7 +7162,7 @@ CData::ValueGetter(JSContext* cx, const JS::CallArgs& args)
 }
 
 bool
-CData::ValueSetter(JSContext* cx, const JS::CallArgs& args)
+CData::ValueSetter(JSContext* cx, JS::CallArgs args)
 {
   RootedObject obj(cx, &args.thisv().toObject());
   args.rval().setUndefined();
@@ -7718,7 +7182,8 @@ CData::Address(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!IsCData(obj)) {
-    return IncompatibleThisProto(cx, "CData.prototype.address", args.thisv());
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   RootedObject typeObj(cx, CData::GetCType(obj));
@@ -7751,7 +7216,7 @@ CData::Cast(JSContext* cx, unsigned argc, Value* vp)
     return ArgumentTypeMismatch(cx, "first ", "ctypes.cast", "a CData");
   }
   RootedObject sourceData(cx, &args[0].toObject());
-  RootedObject sourceType(cx, CData::GetCType(sourceData));
+  JSObject* sourceType = CData::GetCType(sourceData);
 
   if (args[1].isPrimitive() || !CType::IsCType(&args[1].toObject())) {
     return ArgumentTypeMismatch(cx, "second ", "ctypes.cast", "a CType");
@@ -7759,12 +7224,11 @@ CData::Cast(JSContext* cx, unsigned argc, Value* vp)
 
   RootedObject targetType(cx, &args[1].toObject());
   size_t targetSize;
-  if (!CType::GetSafeSize(targetType, &targetSize)) {
-    return UndefinedSizeCastError(cx, targetType);
-  }
-  if (targetSize > CType::GetSize(sourceType)) {
-    return SizeMismatchCastError(cx, sourceType, targetType,
-                                 CType::GetSize(sourceType), targetSize);
+  if (!CType::GetSafeSize(targetType, &targetSize) ||
+      targetSize > CType::GetSize(sourceType)) {
+    JS_ReportError(cx,
+      "target CType has undefined or larger size than source CType");
+    return false;
   }
 
   // Construct a new CData object with a type of 'targetType' and a referent
@@ -7810,42 +7274,21 @@ CData::GetRuntime(JSContext* cx, unsigned argc, Value* vp)
 typedef JS::TwoByteCharsZ (*InflateUTF8Method)(JSContext*, const JS::UTF8Chars, size_t*);
 
 static bool
-ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc,
-                 Value* vp, const char* funName)
+ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
   if (args.length() != 0) {
-    return ArgumentLengthError(cx, funName, "no", "s");
+    if (inflateUTF8 == JS::UTF8CharsToNewTwoByteCharsZ) {
+      return ArgumentLengthError(cx, "CData.prototype.readString", "no", "s");
+    }
+    return ArgumentLengthError(cx, "CData.prototype.readStringReplaceMalformed",
+                               "no", "s");
   }
 
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
-  if (!obj) {
-    return IncompatibleThisProto(cx, funName, args.thisv());
-  }
-  if (!CData::IsCData(obj)) {
-      if (!CDataFinalizer::IsCDataFinalizer(obj)) {
-          return IncompatibleThisProto(cx, funName, args.thisv());
-      }
-
-      CDataFinalizer::Private* p = (CDataFinalizer::Private*)
-                                   JS_GetPrivate(obj);
-      if (!p) {
-          return EmptyFinalizerCallError(cx, funName);
-      }
-
-      RootedValue dataVal(cx);
-      if (!CDataFinalizer::GetValue(cx, obj, &dataVal)) {
-          return IncompatibleThisProto(cx, funName, args.thisv());
-      }
-
-      if (dataVal.isPrimitive()) {
-          return IncompatibleThisProto(cx, funName, args.thisv());
-      }
-
-      obj = dataVal.toObjectOrNull();
-      if (!obj || !CData::IsCData(obj)) {
-          return IncompatibleThisProto(cx, funName, args.thisv());
-      }
+  JSObject* obj = CDataFinalizer::GetCData(cx, JS_THIS_OBJECT(cx, vp));
+  if (!obj || !CData::IsCData(obj)) {
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   // Make sure we are a pointer to, or an array of, an 8-bit or 16-bit
@@ -7860,7 +7303,8 @@ ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc,
     baseType = PointerType::GetBaseType(typeObj);
     data = *static_cast<void**>(CData::GetData(obj));
     if (data == nullptr) {
-      return NullPointerError(cx, "read contents of", obj);
+      JS_ReportError(cx, "cannot read contents of null pointer");
+      return false;
     }
     break;
   case TYPE_array:
@@ -7869,7 +7313,8 @@ ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc,
     maxLength = ArrayType::GetLength(typeObj);
     break;
   default:
-    return TypeError(cx, "PointerType or ArrayType", args.thisv());
+    JS_ReportError(cx, "not a PointerType or ArrayType");
+    return false;
   }
 
   // Convert the string buffer, taking care to determine the correct string
@@ -7903,7 +7348,9 @@ ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc,
     break;
   }
   default:
-    return NonStringBaseError(cx, args.thisv());
+    JS_ReportError(cx,
+      "base type is not an 8-bit or 16-bit integer or character type");
+    return false;
   }
 
   if (!result)
@@ -7916,22 +7363,13 @@ ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc,
 bool
 CData::ReadString(JSContext* cx, unsigned argc, Value* vp)
 {
-  return ReadStringCommon(cx, JS::UTF8CharsToNewTwoByteCharsZ, argc, vp,
-                          "CData.prototype.readString");
-}
-
-bool
-CDataFinalizer::Methods::ReadString(JSContext* cx, unsigned argc, Value* vp)
-{
-  return ReadStringCommon(cx, JS::UTF8CharsToNewTwoByteCharsZ, argc, vp,
-                          "CDataFinalizer.prototype.readString");
+  return ReadStringCommon(cx, JS::UTF8CharsToNewTwoByteCharsZ, argc, vp);
 }
 
 bool
 CData::ReadStringReplaceMalformed(JSContext* cx, unsigned argc, Value* vp)
 {
-  return ReadStringCommon(cx, JS::LossyUTF8CharsToNewTwoByteCharsZ, argc, vp,
-                          "CData.prototype.readStringReplaceMalformed");
+  return ReadStringCommon(cx, JS::LossyUTF8CharsToNewTwoByteCharsZ, argc, vp);
 }
 
 JSString*
@@ -7966,8 +7404,8 @@ CData::ToSource(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!CData::IsCData(obj) && !CData::IsCDataProto(obj)) {
-    return IncompatibleThisProto(cx, "CData.prototype.toSource",
-                                 InformalValueTypeName(args.thisv()));
+    JS_ReportError(cx, "not a CData");
+    return false;
   }
 
   JSString* result;
@@ -7988,7 +7426,7 @@ CData::ToSource(JSContext* cx, unsigned argc, Value* vp)
 }
 
 bool
-CData::ErrnoGetter(JSContext* cx, const JS::CallArgs& args)
+CData::ErrnoGetter(JSContext* cx, JS::CallArgs args)
 {
   args.rval().set(JS_GetReservedSlot(&args.thisv().toObject(), SLOT_ERRNO));
   return true;
@@ -7996,7 +7434,7 @@ CData::ErrnoGetter(JSContext* cx, const JS::CallArgs& args)
 
 #if defined(XP_WIN)
 bool
-CData::LastErrorGetter(JSContext* cx, const JS::CallArgs& args)
+CData::LastErrorGetter(JSContext* cx, JS::CallArgs args)
 {
   args.rval().set(JS_GetReservedSlot(&args.thisv().toObject(), SLOT_LASTERROR));
   return true;
@@ -8011,8 +7449,8 @@ CDataFinalizer::Methods::ToSource(JSContext* cx, unsigned argc, Value* vp)
   if (!objThis)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(objThis)) {
-    return IncompatibleThisProto(cx, "CDataFinalizer.prototype.toSource",
-                                 InformalValueTypeName(args.thisv()));
+    JS_ReportError(cx, "not a CDataFinalizer");
+    return false;
   }
 
   CDataFinalizer::Private* p = (CDataFinalizer::Private*)
@@ -8070,8 +7508,8 @@ CDataFinalizer::Methods::ToString(JSContext* cx, unsigned argc, Value* vp)
   if (!objThis)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(objThis)) {
-    return IncompatibleThisProto(cx, "CDataFinalizer.prototype.toString",
-                                 InformalValueTypeName(args.thisv()));
+    JS_ReportError(cx, "not a CDataFinalizer");
+    return false;
   }
 
   JSString* strMessage;
@@ -8116,9 +7554,30 @@ CDataFinalizer::GetCType(JSContext* cx, JSObject* obj)
   return valData.toObjectOrNull();
 }
 
+JSObject*
+CDataFinalizer::GetCData(JSContext* cx, JSObject* obj)
+{
+  if (!obj) {
+    JS_ReportError(cx, "No C data");
+    return nullptr;
+  }
+  if (CData::IsCData(obj)) {
+    return obj;
+  }
+  if (!CDataFinalizer::IsCDataFinalizer(obj)) {
+    JS_ReportError(cx, "Not C data");
+    return nullptr;
+  }
+  RootedValue val(cx);
+  if (!CDataFinalizer::GetValue(cx, obj, &val) || val.isPrimitive()) {
+    JS_ReportError(cx, "Empty CDataFinalizer");
+    return nullptr;
+  }
+  return val.toObjectOrNull();
+}
+
 bool
-CDataFinalizer::GetValue(JSContext* cx, JSObject* obj,
-                         MutableHandleValue aResult)
+CDataFinalizer::GetValue(JSContext* cx, JSObject* obj, MutableHandleValue aResult)
 {
   MOZ_ASSERT(IsCDataFinalizer(obj));
 
@@ -8126,9 +7585,8 @@ CDataFinalizer::GetValue(JSContext* cx, JSObject* obj,
     JS_GetPrivate(obj);
 
   if (!p) {
-    // We have called |dispose| or |forget| already.
     JS_ReportError(cx, "Attempting to get the value of an empty CDataFinalizer");
-    return false;
+    return false;  // We have called |dispose| or |forget| already.
   }
 
   RootedObject ctype(cx, GetCType(cx, obj));
@@ -8385,19 +7843,20 @@ CDataFinalizer::Methods::Forget(JSContext* cx, unsigned argc, Value* vp)
                                "s");
   }
 
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+  JS::Rooted<JSObject*> obj(cx, args.thisv().toObjectOrNull());
   if (!obj)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(obj)) {
-    return IncompatibleThisProto(cx, "CDataFinalizer.prototype.forget",
-                                 args.thisv());
+    JS_ReportError(cx, "not a CDataFinalizer");
+    return false;
   }
 
   CDataFinalizer::Private* p = (CDataFinalizer::Private*)
     JS_GetPrivate(obj);
 
   if (!p) {
-    return EmptyFinalizerCallError(cx, "CDataFinalizer.prototype.forget");
+    JS_ReportError(cx, "forget called on an empty CDataFinalizer");
+    return false;
   }
 
   RootedValue valJSData(cx);
@@ -8436,15 +7895,16 @@ CDataFinalizer::Methods::Dispose(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!CDataFinalizer::IsCDataFinalizer(obj)) {
-    return IncompatibleThisProto(cx, "CDataFinalizer.prototype.dispose",
-                                 args.thisv());
+    JS_ReportError(cx, "not a CDataFinalizer");
+    return false;
   }
 
   CDataFinalizer::Private* p = (CDataFinalizer::Private*)
     JS_GetPrivate(obj);
 
   if (!p) {
-    return EmptyFinalizerCallError(cx, "CDataFinalizer.prototype.dispose");
+    JS_ReportError(cx, "dispose called on an empty CDataFinalizer.");
+    return false;
   }
 
   Value valType = JS_GetReservedSlot(obj, SLOT_DATAFINALIZER_VALTYPE);
@@ -8682,11 +8142,7 @@ Int64::Construct(JSContext* cx,
   }
 
   int64_t i = 0;
-  bool overflow = false;
-  if (!jsvalToBigInteger(cx, args[0], true, &i, &overflow)) {
-    if (overflow) {
-      return TypeOverflow(cx, "int64", args[0]);
-    }
+  if (!jsvalToBigInteger(cx, args[0], true, &i)) {
     return ArgumentConvError(cx, args[0], "Int64", 0);
   }
 
@@ -8719,12 +8175,8 @@ Int64::ToString(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!Int64::IsInt64(obj)) {
-    if (!CData::IsCData(obj)) {
-      return IncompatibleThisProto(cx, "Int64.prototype.toString",
-                                   InformalValueTypeName(args.thisv()));
-    }
-    return IncompatibleThisType(cx, "Int64.prototype.toString",
-                                "non-Int64 CData");
+    JS_ReportError(cx, "not an Int64");
+    return false;
   }
 
   return Int64Base::ToString(cx, obj, args, false);
@@ -8738,12 +8190,8 @@ Int64::ToSource(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!Int64::IsInt64(obj)) {
-    if (!CData::IsCData(obj)) {
-      return IncompatibleThisProto(cx, "Int64.prototype.toSource",
-                                   InformalValueTypeName(args.thisv()));
-    }
-    return IncompatibleThisType(cx, "Int64.prototype.toSource",
-                                "non-Int64 CData");
+    JS_ReportError(cx, "not an Int64");
+    return false;
   }
 
   return Int64Base::ToSource(cx, obj, args, false);
@@ -8866,11 +8314,7 @@ UInt64::Construct(JSContext* cx,
   }
 
   uint64_t u = 0;
-  bool overflow = false;
-  if (!jsvalToBigInteger(cx, args[0], true, &u, &overflow)) {
-    if (overflow) {
-      return TypeOverflow(cx, "uint64", args[0]);
-    }
+  if (!jsvalToBigInteger(cx, args[0], true, &u)) {
     return ArgumentConvError(cx, args[0], "UInt64", 0);
   }
 
@@ -8903,12 +8347,8 @@ UInt64::ToString(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!UInt64::IsUInt64(obj)) {
-    if (!CData::IsCData(obj)) {
-      return IncompatibleThisProto(cx, "UInt64.prototype.toString",
-                                   InformalValueTypeName(args.thisv()));
-    }
-    return IncompatibleThisType(cx, "UInt64.prototype.toString",
-                                "non-UInt64 CData");
+    JS_ReportError(cx, "not a UInt64");
+    return false;
   }
 
   return Int64Base::ToString(cx, obj, args, true);
@@ -8922,12 +8362,8 @@ UInt64::ToSource(JSContext* cx, unsigned argc, Value* vp)
   if (!obj)
     return false;
   if (!UInt64::IsUInt64(obj)) {
-    if (!CData::IsCData(obj)) {
-      return IncompatibleThisProto(cx, "UInt64.prototype.toSource",
-                                   InformalValueTypeName(args.thisv()));
-    }
-    return IncompatibleThisType(cx, "UInt64.prototype.toSource",
-                                "non-UInt64 CData");
+    JS_ReportError(cx, "not a UInt64");
+    return false;
   }
 
   return Int64Base::ToSource(cx, obj, args, true);

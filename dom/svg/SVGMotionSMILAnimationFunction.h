@@ -9,6 +9,7 @@
 
 #include "mozilla/gfx/2D.h"
 #include "mozilla/RefPtr.h"
+#include "nsAutoPtr.h"
 #include "nsSMILAnimationFunction.h"
 #include "nsTArray.h"
 #include "SVGMotionSMILType.h"  // for RotateType

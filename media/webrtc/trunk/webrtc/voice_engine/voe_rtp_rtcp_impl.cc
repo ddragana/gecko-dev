@@ -249,8 +249,7 @@ int VoERTP_RTCPImpl::SetRTCPStatus(int channel, bool enable)
             "SetRTCPStatus() failed to locate channel");
         return -1;
     }
-    channelPtr->SetRTCPStatus(enable);
-    return 0;
+    return channelPtr->SetRTCPStatus(enable);
 }
 
 int VoERTP_RTCPImpl::GetRTCPStatus(int channel, bool& enabled)

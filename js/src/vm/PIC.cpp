@@ -181,7 +181,14 @@ bool
 js::ForOfPIC::Chain::isOptimizableArray(JSObject* obj)
 {
     MOZ_ASSERT(obj->is<ArrayObject>());
-    return obj->staticPrototype() == arrayProto_;
+
+    // Ensure object's prototype is the actual Array.prototype
+    if (!obj->getTaggedProto().isObject())
+        return false;
+    if (obj->getTaggedProto().toObject() != arrayProto_)
+        return false;
+
+    return true;
 }
 
 bool
@@ -287,8 +294,9 @@ ForOfPIC_traceObject(JSTracer* trc, JSObject* obj)
         chain->mark(trc);
 }
 
-static const ClassOps ForOfPICClassOps = {
-    nullptr, nullptr, nullptr, nullptr,
+const Class ForOfPIC::jsclass = {
+    "ForOfPIC", JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS,
+    nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, ForOfPIC_finalize,
     nullptr,              /* call        */
     nullptr,              /* hasInstance */
@@ -296,16 +304,11 @@ static const ClassOps ForOfPICClassOps = {
     ForOfPIC_traceObject
 };
 
-const Class ForOfPIC::class_ = {
-    "ForOfPIC", JSCLASS_HAS_PRIVATE,
-    &ForOfPICClassOps
-};
-
 /* static */ NativeObject*
 js::ForOfPIC::createForOfPICObject(JSContext* cx, Handle<GlobalObject*> global)
 {
     assertSameCompartment(cx, global);
-    NativeObject* obj = NewNativeObjectWithGivenProto(cx, &ForOfPIC::class_, nullptr);
+    NativeObject* obj = NewNativeObjectWithGivenProto(cx, &ForOfPIC::jsclass, nullptr);
     if (!obj)
         return nullptr;
     ForOfPIC::Chain* chain = cx->new_<ForOfPIC::Chain>();

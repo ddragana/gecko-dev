@@ -44,7 +44,7 @@ protected:
   }
 
 public:
-  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
+  virtual void SetVisibleRegion(const nsIntRegion& aRegion) override
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -54,8 +54,9 @@ public:
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
-    mInvalidRegion.Add(aRegion);
-    mValidRegion.Sub(mValidRegion, mInvalidRegion.GetRegion());
+    mInvalidRegion.Or(mInvalidRegion, aRegion);
+    mInvalidRegion.SimplifyOutward(20);
+    mValidRegion.Sub(mValidRegion, mInvalidRegion);
   }
 
   virtual void PaintThebes(gfxContext* aContext,
@@ -118,7 +119,7 @@ protected:
     // here (OR doesn't automatically simplify to the simplest possible
     // representation of a region.)
     nsIntRegion tmp;
-    tmp.Or(mVisibleRegion.ToUnknownRegion(), aExtendedRegionToDraw);
+    tmp.Or(mVisibleRegion, aExtendedRegionToDraw);
     mValidRegion.Or(mValidRegion, tmp);
   }
 

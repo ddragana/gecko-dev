@@ -9,6 +9,7 @@
 
 #include "nsIFind.h"
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIDOMNode.h"
@@ -44,8 +45,6 @@ protected:
   bool mFindBackward;
   bool mCaseSensitive;
 
-  // Use "find entire words" mode by setting to a word breaker or null, to
-  // disable "entire words" mode.
   nsCOMPtr<nsIWordBreaker> mWordBreaker;
 
   int32_t mIterOffset;
@@ -66,20 +65,13 @@ protected:
                     nsIDOMRange* aStartPoint, nsIDOMRange* aEndPoint,
                     bool aContinueOk);
 
-  // Get the first character from the next node (last if mFindBackward).
-  char16_t PeekNextChar(nsIDOMRange* aSearchRange,
-                        nsIDOMRange* aStartPoint,
-                        nsIDOMRange* aEndPoint);
-
   // Reset variables before returning -- don't hold any references.
   void ResetAll();
 
   // The iterator we use to move through the document:
   nsresult InitIterator(nsIDOMNode* aStartNode, int32_t aStartOffset,
                         nsIDOMNode* aEndNode, int32_t aEndOffset);
-  RefPtr<nsFindContentIterator> mIterator;
-
-  friend class PeekNextCharRestoreState;
+  nsRefPtr<nsFindContentIterator> mIterator;
 };
 
 #endif // nsFind_h__

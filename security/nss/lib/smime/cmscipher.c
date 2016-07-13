@@ -120,7 +120,7 @@ NSSCMSCipherContext *
 NSS_CMSCipherContext_StartEncrypt(PLArenaPool *poolp, PK11SymKey *key, SECAlgorithmID *algid)
 {
     NSSCMSCipherContext *cc;
-    void *ciphercx = NULL;
+    void *ciphercx;
     SECStatus rv;
     CK_MECHANISM_TYPE cryptoMechType;
     PK11SlotInfo *slot;
@@ -186,7 +186,6 @@ NSS_CMSCipherContext_StartEncrypt(PLArenaPool *poolp, PK11SymKey *key, SECAlgori
     }
 
     cc->cx = ciphercx;
-    ciphercx = NULL;
     cc->doit = (nss_cms_cipher_function)PK11_CipherOp;
     cc->destroy = (nss_cms_cipher_destroy)PK11_DestroyContext;
     cc->encrypt = PR_TRUE;
@@ -194,9 +193,6 @@ NSS_CMSCipherContext_StartEncrypt(PLArenaPool *poolp, PK11SymKey *key, SECAlgori
 
 loser:
     SECITEM_FreeItem(param, PR_TRUE);
-    if (ciphercx) {
-        PK11_DestroyContext(ciphercx, PR_TRUE);
-    }
 
     return cc;
 }
@@ -370,7 +366,7 @@ NSS_CMSCipherContext_Decrypt(NSSCMSCipherContext *cc, unsigned char *output,
 		  const unsigned char *input, unsigned int input_len,
 		  PRBool final)
 {
-    unsigned int blocks, bsize, pcount, padsize;
+    int blocks, bsize, pcount, padsize;
     unsigned int max_needed, ifraglen, ofraglen, output_len;
     unsigned char *pbuf;
     SECStatus rv;
@@ -693,12 +689,8 @@ NSS_CMSCipherContext_Encrypt(NSSCMSCipherContext *cc, unsigned char *output,
     }
 
     if (final) {
-	if (padsize <= 0) {
-	    padlen = 0;
-	} else {
-	    padlen = padsize - (pcount % padsize);
-	    PORT_Memset (pbuf + pcount, padlen, padlen);
-	}
+	padlen = padsize - (pcount % padsize);
+	PORT_Memset (pbuf + pcount, padlen, padlen);
 	rv = (* cc->doit) (cc->cx, output, &ofraglen, max_output_len,
 			    pbuf, pcount+padlen);
 	if (rv != SECSuccess)

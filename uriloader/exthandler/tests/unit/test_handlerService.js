@@ -27,7 +27,8 @@ function run_test() {
   const rootPrefBranch = prefSvc.getBranch("");
   
   let noMailto = false;
-  if (mozinfo.os == "win") {
+  let isWindows = ("@mozilla.org/windows-registry-key;1" in Components.classes);
+  if (isWindows) {
     // Check mailto handler from registry.
     // If registry entry is nothing, no mailto handler
     let regSvc = Cc["@mozilla.org/windows-registry-key;1"].
@@ -43,7 +44,8 @@ function run_test() {
     regSvc.close();
   }
 
-  if (mozinfo.os == "linux") {
+  let isLinux = ("@mozilla.org/gio-service;1" in Components.classes);
+  if (isLinux) {
     // Check mailto handler from GIO
     // If there isn't one, then we have no mailto handler
     let gIOSvc = Cc["@mozilla.org/gio-service;1"].
@@ -68,7 +70,7 @@ function run_test() {
   // XXX We could, of course, create an actual executable in the directory:
   //executable.append("localhandler");
   //if (!executable.exists())
-  //  executable.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o755);
+  //  executable.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0755);
 
   var localHandler = {
     name: "Local Handler",
@@ -461,7 +463,7 @@ function run_test() {
   do_check_eq(lolType, "application/lolcat");
 
   // test mailcap entries with needsterminal are ignored on non-Windows non-Mac.
-  if (mozinfo.os != "win" && mozinfo.os != "mac") {
+  if (!("@mozilla.org/windows-registry-key;1" in Cc) && !("nsILocalFileMac" in Ci)) {
     env.set('PERSONAL_MAILCAP', do_get_file('mailcap').path);
     handlerInfo = mimeSvc.getFromTypeAndExtension("text/plain", null);
     do_check_eq(handlerInfo.preferredAction, Ci.nsIHandlerInfo.useSystemDefault);

@@ -27,7 +27,7 @@ public:
   /**
    * Adds a value to this list.
    */
-  void AppendCSSValue(already_AddRefed<CSSValue> aValue);
+  void AppendCSSValue(CSSValue* aValue);
 
   virtual void GetCssText(nsString& aText, mozilla::ErrorResult& aRv)
     override final;
@@ -67,7 +67,7 @@ private:
 
   bool                        mReadonly;    // Are we read-only?
 
-  InfallibleTArray<RefPtr<CSSValue> > mCSSValues;
+  InfallibleTArray<nsRefPtr<CSSValue> > mCSSValues;
 };
 
 #endif /* nsDOMCSSValueList_h___ */

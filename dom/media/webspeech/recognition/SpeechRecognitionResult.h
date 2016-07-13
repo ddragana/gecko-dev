@@ -10,6 +10,7 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
+#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "js/TypeDecls.h"
 
@@ -31,7 +32,7 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   uint32_t Length() const;
 
@@ -41,12 +42,12 @@ public:
 
   already_AddRefed<SpeechRecognitionAlternative> IndexedGetter(uint32_t aIndex, bool& aPresent);
 
-  nsTArray<RefPtr<SpeechRecognitionAlternative>> mItems;
+  nsTArray<nsRefPtr<SpeechRecognitionAlternative>> mItems;
 
 private:
   ~SpeechRecognitionResult();
 
-  RefPtr<SpeechRecognition> mParent;
+  nsRefPtr<SpeechRecognition> mParent;
 };
 
 } // namespace dom

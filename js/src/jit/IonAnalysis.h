@@ -18,13 +18,10 @@ namespace jit {
 class MIRGenerator;
 class MIRGraph;
 
-MOZ_MUST_USE bool
-PruneUnusedBranches(MIRGenerator* mir, MIRGraph& graph);
-
-MOZ_MUST_USE bool
+void
 FoldTests(MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 SplitCriticalEdges(MIRGraph& graph);
 
 enum Observability {
@@ -32,7 +29,7 @@ enum Observability {
     AggressiveObservability
 };
 
-MOZ_MUST_USE bool
+bool
 EliminatePhis(MIRGenerator* mir, MIRGraph& graph, Observability observe);
 
 size_t
@@ -41,38 +38,37 @@ MarkLoopBlocks(MIRGraph& graph, MBasicBlock* header, bool* canOsr);
 void
 UnmarkLoopBlocks(MIRGraph& graph, MBasicBlock* header);
 
-MOZ_MUST_USE bool
+bool
 MakeLoopsContiguous(MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 EliminateDeadResumePointOperands(MIRGenerator* mir, MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 EliminateDeadCode(MIRGenerator* mir, MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 ApplyTypeInformation(MIRGenerator* mir, MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 MakeMRegExpHoistable(MIRGraph& graph);
 
-void
+bool
 RenumberBlocks(MIRGraph& graph);
 
-MOZ_MUST_USE bool
-AccountForCFGChanges(MIRGenerator* mir, MIRGraph& graph, bool updateAliasAnalysis,
-                     bool underValueNumberer = false);
+bool
+AccountForCFGChanges(MIRGenerator* mir, MIRGraph& graph, bool updateAliasAnalysis);
 
-MOZ_MUST_USE bool
+bool
 RemoveUnmarkedBlocks(MIRGenerator* mir, MIRGraph& graph, uint32_t numMarkedBlocks);
 
 void
 ClearDominatorTree(MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 BuildDominatorTree(MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 BuildPhiReverseMapping(MIRGraph& graph);
 
 void
@@ -82,12 +78,12 @@ void
 AssertGraphCoherency(MIRGraph& graph);
 
 void
-AssertExtendedGraphCoherency(MIRGraph& graph, bool underValueNumberer = false);
+AssertExtendedGraphCoherency(MIRGraph& graph);
 
-MOZ_MUST_USE bool
+bool
 EliminateRedundantChecks(MIRGraph& graph);
 
-MOZ_MUST_USE bool
+void
 AddKeepAliveInstructions(MIRGraph& graph);
 
 class MDefinition;
@@ -106,7 +102,7 @@ struct SimpleLinearSum
 SimpleLinearSum
 ExtractLinearSum(MDefinition* ins);
 
-MOZ_MUST_USE bool
+bool
 ExtractLinearInequality(MTest* test, BranchDirection direction,
                         SimpleLinearSum* plhs, MDefinition** prhs, bool* plessEqual);
 
@@ -135,22 +131,20 @@ class LinearSum
       : terms_(other.terms_.allocPolicy()),
         constant_(other.constant_)
     {
-        AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!terms_.appendAll(other.terms_))
-            oomUnsafe.crash("LinearSum::LinearSum");
+        terms_.appendAll(other.terms_);
     }
 
     // These return false on an integer overflow, and afterwards the sum must
     // not be used.
-    MOZ_MUST_USE bool multiply(int32_t scale);
-    MOZ_MUST_USE bool add(const LinearSum& other, int32_t scale = 1);
-    MOZ_MUST_USE bool add(SimpleLinearSum other, int32_t scale = 1);
-    MOZ_MUST_USE bool add(MDefinition* term, int32_t scale);
-    MOZ_MUST_USE bool add(int32_t constant);
+    bool multiply(int32_t scale);
+    bool add(const LinearSum& other, int32_t scale = 1);
+    bool add(SimpleLinearSum other, int32_t scale = 1);
+    bool add(MDefinition* term, int32_t scale);
+    bool add(int32_t constant);
 
     // Unlike the above function, on failure this leaves the sum unchanged and
     // it can still be used.
-    MOZ_MUST_USE bool divide(int32_t scale);
+    bool divide(int32_t scale);
 
     int32_t constant() const { return constant_; }
     size_t numTerms() const { return terms_.length(); }
@@ -176,12 +170,12 @@ ConvertLinearSum(TempAllocator& alloc, MBasicBlock* block, const LinearSum& sum,
 MCompare*
 ConvertLinearInequality(TempAllocator& alloc, MBasicBlock* block, const LinearSum& sum);
 
-MOZ_MUST_USE bool
+bool
 AnalyzeNewScriptDefiniteProperties(JSContext* cx, JSFunction* fun,
                                    ObjectGroup* group, HandlePlainObject baseobj,
                                    Vector<TypeNewScript::Initializer>* initializerList);
 
-MOZ_MUST_USE bool
+bool
 AnalyzeArgumentsUsage(JSContext* cx, JSScript* script);
 
 bool

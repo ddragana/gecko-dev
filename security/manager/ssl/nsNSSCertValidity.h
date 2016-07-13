@@ -2,41 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsNSSCertValidity_h
-#define nsNSSCertValidity_h
+#ifndef _NSX509CERTVALIDITY_H_
+#define _NSX509CERTVALIDITY_H_
 
-#include "ScopedNSSTypes.h"
-#include "nsIDateTimeFormat.h"
 #include "nsIX509CertValidity.h"
-#include "nsNSSShutDown.h"
+
+#include "certt.h"
 
 class nsX509CertValidity : public nsIX509CertValidity
-                         , public nsNSSShutDownObject
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIX509CERTVALIDITY
 
-  explicit nsX509CertValidity(const mozilla::UniqueCERTCertificate& cert);
+  nsX509CertValidity();
+  explicit nsX509CertValidity(CERTCertificate *cert);
 
 protected:
   virtual ~nsX509CertValidity();
-
-  // Nothing to release.
-  virtual void virtualDestroyNSSReference() override {}
+  /* additional members */
 
 private:
-  nsresult FormatTime(const PRTime& aTime,
-                      PRTimeParamFn aParamFn,
-                      const nsTimeFormatSelector aTimeFormatSelector,
-                      nsAString& aFormattedTimeDate);
-
-  PRTime mNotBefore;
-  PRTime mNotAfter;
+  PRTime mNotBefore, mNotAfter;
   bool mTimesInitialized;
-
-  nsX509CertValidity(const nsX509CertValidity& x) = delete;
-  nsX509CertValidity& operator=(const nsX509CertValidity& x) = delete;
 };
 
-#endif // nsNSSCertValidity_h
+#endif

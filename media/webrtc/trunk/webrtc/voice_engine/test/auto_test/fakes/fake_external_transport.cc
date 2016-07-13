@@ -18,6 +18,7 @@
 
 FakeExternalTransport::FakeExternalTransport(webrtc::VoENetwork* ptr)
     : my_network_(ptr),
+      thread_(NULL),
       lock_(NULL),
       event_(NULL),
       length_(0),
@@ -27,21 +28,26 @@ FakeExternalTransport::FakeExternalTransport(webrtc::VoENetwork* ptr)
   const char* thread_name = "external_thread";
   lock_ = webrtc::CriticalSectionWrapper::CreateCriticalSection();
   event_ = webrtc::EventWrapper::Create();
-  thread_ = webrtc::ThreadWrapper::CreateThread(Run, this, thread_name);
+  thread_ = webrtc::ThreadWrapper::CreateThread(
+      Run, this, webrtc::kHighPriority, thread_name);
   if (thread_) {
-    thread_->Start();
-    thread_->SetPriority(webrtc::kHighPriority);
+    unsigned int id;
+    thread_->Start(id);
   }
 }
 
 FakeExternalTransport::~FakeExternalTransport() {
   if (thread_) {
+    thread_->SetNotAlive();
     event_->Set();
-    thread_->Stop();
-    delete event_;
-    event_ = NULL;
-    delete lock_;
-    lock_ = NULL;
+    if (thread_->Stop()) {
+      delete thread_;
+      thread_ = NULL;
+      delete event_;
+      event_ = NULL;
+      delete lock_;
+      lock_ = NULL;
+    }
   }
 }
 
@@ -65,9 +71,7 @@ bool FakeExternalTransport::Process() {
   return true;
 }
 
-int FakeExternalTransport::SendPacket(int channel,
-                                      const void *data,
-                                      size_t len) {
+int FakeExternalTransport::SendPacket(int channel, const void *data, int len) {
   lock_->Enter();
   if (len < 1612) {
     memcpy(packet_buffer_, (const unsigned char*) data, len);
@@ -76,17 +80,17 @@ int FakeExternalTransport::SendPacket(int channel,
   }
   lock_->Leave();
   event_->Set();  // Triggers ReceivedRTPPacket() from worker thread.
-  return static_cast<int>(len);
+  return len;
 }
 
 int FakeExternalTransport::SendRTCPPacket(int channel,
                                           const void *data,
-                                          size_t len) {
+                                          int len) {
   if (delay_is_enabled_) {
     webrtc::SleepMs(delay_time_in_ms_);
   }
   my_network_->ReceivedRTCPPacket(channel, data, len);
-  return static_cast<int>(len);
+  return len;
 }
 
 void FakeExternalTransport::SetDelayStatus(bool enable,

@@ -22,11 +22,8 @@
 #include "nsRepeatService.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/Telemetry.h"
-#include "mozilla/layers/ScrollInputMethods.h"
 
 using namespace mozilla;
-using mozilla::layers::ScrollInputMethod;
 
 //
 // NS_NewToolbarFrame
@@ -55,29 +52,27 @@ nsScrollbarButtonFrame::HandleEvent(nsPresContext* aPresContext,
     return NS_OK;
   }
 
-  switch (aEvent->mMessage) {
-    case eMouseDown:
+  switch (aEvent->message) {
+    case NS_MOUSE_BUTTON_DOWN:
       mCursorOnThis = true;
       // if we didn't handle the press ourselves, pass it on to the superclass
       if (HandleButtonPress(aPresContext, aEvent, aEventStatus)) {
         return NS_OK;
       }
       break;
-    case eMouseUp:
+    case NS_MOUSE_BUTTON_UP:
       HandleRelease(aPresContext, aEvent, aEventStatus);
       break;
-    case eMouseOut:
+    case NS_MOUSE_OUT:
       mCursorOnThis = false;
       break;
-    case eMouseMove: {
+    case NS_MOUSE_MOVE: {
       nsPoint cursor =
         nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this);
       nsRect frameRect(nsPoint(0, 0), GetSize());
       mCursorOnThis = frameRect.Contains(cursor);
       break;
     }
-    default:
-      break;
   }
 
   return nsButtonBoxFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
@@ -170,10 +165,6 @@ nsScrollbarButtonFrame::HandleButtonPress(nsPresContext* aPresContext,
     if (!weakFrame.IsAlive()) {
       return false;
     }
-
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadScrollbarButtonClick);
-
     if (!m) {
       sb->MoveToNewPosition();
       if (!weakFrame.IsAlive()) {
@@ -229,19 +220,22 @@ void nsScrollbarButtonFrame::Notify()
 }
 
 void
-nsScrollbarButtonFrame::MouseClicked(WidgetGUIEvent* aEvent)
+nsScrollbarButtonFrame::MouseClicked(nsPresContext* aPresContext,
+                                     WidgetGUIEvent* aEvent) 
 {
-  nsButtonBoxFrame::MouseClicked(aEvent);
+  nsButtonBoxFrame::MouseClicked(aPresContext, aEvent);
   //MouseClicked();
 }
 
 nsresult
-nsScrollbarButtonFrame::GetChildWithTag(nsIAtom* atom, nsIFrame* start,
+nsScrollbarButtonFrame::GetChildWithTag(nsPresContext* aPresContext,
+                                        nsIAtom* atom, nsIFrame* start,
                                         nsIFrame*& result)
 {
   // recursively search our children
-  for (nsIFrame* childFrame : start->PrincipalChildList())
-  {
+  nsIFrame* childFrame = start->GetFirstPrincipalChild();
+  while (nullptr != childFrame) 
+  {    
     // get the content node
     nsIContent* child = childFrame->GetContent();
 
@@ -256,9 +250,11 @@ nsScrollbarButtonFrame::GetChildWithTag(nsIAtom* atom, nsIFrame* start,
     }
 
      // recursive search the child
-     GetChildWithTag(atom, childFrame, result);
+     GetChildWithTag(aPresContext, atom, childFrame, result);
      if (result != nullptr) 
        return NS_OK;
+
+    childFrame = childFrame->GetNextSibling();
   }
 
   result = nullptr;

@@ -9,13 +9,13 @@
 
 #include "nscore.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace time {
 
-nsresult AddWindowListener(nsPIDOMWindowInner* aWindow);
-nsresult RemoveWindowListener(nsPIDOMWindowInner* aWindow);
+nsresult AddWindowListener(nsPIDOMWindow* aWindow);
+nsresult RemoveWindowListener(nsPIDOMWindow* aWindow);
 
 } // namespace time
 } // namespace mozilla

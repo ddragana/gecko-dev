@@ -7,7 +7,6 @@
 #include "gtest/gtest.h"
 
 #include "SandboxUtil.h"
-#include "SandboxInfo.h"
 
 #include <pthread.h>
 
@@ -33,10 +32,6 @@ static const EarlyTest gEarlyTest;
 
 TEST(SandboxUtil, IsSingleThreaded)
 {
-  // If the test system if affected by kUnexpectedThreads, (1) there's
-  // no point in doing this test, and (2) if that happens on Mozilla
-  // CI then burning the tree is an appropriate response.
-  ASSERT_FALSE(SandboxInfo::Get().Test(SandboxInfo::kUnexpectedThreads));
   EXPECT_TRUE(gEarlyTest.mWasSingleThreaded);
   EXPECT_FALSE(IsSingleThreaded());
 }

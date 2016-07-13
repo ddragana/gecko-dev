@@ -18,7 +18,6 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsTArray.h"
-#include "Units.h"
 
 // translucency level for drag images
 #define DRAG_TRANSLUCENCY 0.65
@@ -54,14 +53,7 @@ public:
   NS_DECL_NSIDRAGSERVICE
   NS_DECL_NSIDRAGSESSION
 
-  void SetDragEndPoint(nsIntPoint aEndDragPoint)
-  {
-    mEndDragPoint = mozilla::LayoutDeviceIntPoint::FromUnknownPoint(aEndDragPoint);
-  }
-  void SetDragEndPoint(mozilla::LayoutDeviceIntPoint aEndDragPoint)
-  {
-    mEndDragPoint = aEndDragPoint;
-  }
+  void SetDragEndPoint(nsIntPoint aEndDragPoint) { mEndDragPoint = aEndDragPoint; }
 
   uint16_t GetInputSource() { return mInputSource; }
 
@@ -69,15 +61,6 @@ public:
 
 protected:
   virtual ~nsBaseDragService();
-
-  /**
-   * Called from nsBaseDragService to initiate a platform drag from a source
-   * in this process.  This is expected to ensure that StartDragSession() and
-   * EndDragSession() get called if the platform drag is successfully invoked.
-   */
-  virtual nsresult InvokeDragSessionImpl(nsISupportsArray* aTransferableArray,
-                                         nsIScriptableRegion* aDragRgn,
-                                         uint32_t aActionType) = 0;
 
   /**
    * Draw the drag image, if any, to a surface and return it. The drag image
@@ -88,7 +71,7 @@ protected:
    * that are relative to the upper-left corner of the window.
    *
    * aScreenX and aScreenY should be the screen coordinates of the mouse click
-   * for the drag. These are in desktop pixels.
+   * for the drag. These are in global display pixels.
    *
    * On return, aScreenDragRect will contain the screen coordinates of the
    * area being dragged. This is used by the platform-specific part of the
@@ -105,18 +88,19 @@ protected:
                     nsIScriptableRegion* aRegion,
                     int32_t aScreenX, int32_t aScreenY,
                     nsIntRect* aScreenDragRect,
-                    RefPtr<SourceSurface>* aSurface,
+                    mozilla::RefPtr<SourceSurface>* aSurface,
                     nsPresContext **aPresContext);
 
   /**
    * Draw a drag image for an image node specified by aImageLoader or aCanvas.
    * This is called by DrawDrag.
    */
-  nsresult DrawDragForImage(nsIImageLoadingContent* aImageLoader,
+  nsresult DrawDragForImage(nsPresContext* aPresContext,
+                            nsIImageLoadingContent* aImageLoader,
                             mozilla::dom::HTMLCanvasElement* aCanvas,
                             int32_t aScreenX, int32_t aScreenY,
                             nsIntRect* aScreenDragRect,
-                            RefPtr<SourceSurface>* aSurface);
+                            mozilla::RefPtr<SourceSurface>* aSurface);
 
   /**
    * Convert aScreenX and aScreenY from CSS pixels into unscaled device pixels.
@@ -156,14 +140,13 @@ protected:
   nsCOMPtr<nsIDOMNode> mSourceNode;
   nsCOMPtr<nsIDOMDocument> mSourceDocument;       // the document at the drag source. will be null
                                                   //  if it came from outside the app.
-  nsContentPolicyType mContentPolicyType;         // the contentpolicy type passed to the channel
-                                                  // when initiating the drag session
   nsCOMPtr<nsIDOMDataTransfer> mDataTransfer;
 
   // used to determine the image to appear on the cursor while dragging
   nsCOMPtr<nsIDOMNode> mImage;
-  // offset of cursor within the image
-  mozilla::CSSIntPoint mImageOffset;
+  // offset of cursor within the image 
+  int32_t mImageX;
+  int32_t mImageY;
 
   // set if a selection is being dragged
   nsCOMPtr<nsISelection> mSelection;
@@ -179,14 +162,14 @@ protected:
   int32_t mScreenY;
 
   // the screen position where the drag ended
-  mozilla::LayoutDeviceIntPoint mEndDragPoint;
+  nsIntPoint mEndDragPoint;
 
   uint32_t mSuppressLevel;
 
   // The input source of the drag event. Possible values are from nsIDOMMouseEvent.
   uint16_t mInputSource;
 
-  nsTArray<RefPtr<mozilla::dom::ContentParent>> mChildProcesses;
+  nsTArray<nsRefPtr<mozilla::dom::ContentParent>> mChildProcesses;
 };
 
 #endif // nsBaseDragService_h__

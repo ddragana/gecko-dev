@@ -12,7 +12,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/unused.h"
 
-#include "CompositorBridgeParent.h"
+#include "CompositorParent.h"
 
 namespace mozilla {
 namespace layers {
@@ -22,7 +22,7 @@ mozilla::StaticRefPtr<CompositorLRU> CompositorLRU::sSingleton;
 void
 CompositorLRU::Init()
 {
-  Unused << GetSingleton();
+  unused << GetSingleton();
 }
 
 CompositorLRU*
@@ -47,7 +47,7 @@ CompositorLRU::~CompositorLRU()
 }
 
 void
-CompositorLRU::Add(PCompositorBridgeParent* aCompositor, const uint64_t& aId)
+CompositorLRU::Add(PCompositorParent* aCompositor, const uint64_t& aId)
 {
   auto index = mLRU.IndexOf(std::make_pair(aCompositor, aId));
   if (index != nsTArray<CompositorLayerPair>::NoIndex) {
@@ -55,20 +55,20 @@ CompositorLRU::Add(PCompositorBridgeParent* aCompositor, const uint64_t& aId)
   }
 
   if (mLRUSize == 0) {
-    Unused << aCompositor->SendClearCachedResources(aId);
+    unused << aCompositor->SendClearCachedResources(aId);
     return;
   }
 
   if (mLRU.Length() == mLRUSize) {
     CompositorLayerPair victim = mLRU.LastElement();
-    Unused << victim.first->SendClearCachedResources(victim.second);
+    unused << victim.first->SendClearCachedResources(victim.second);
     mLRU.RemoveElement(victim);
   }
   mLRU.InsertElementAt(0, std::make_pair(aCompositor, aId));
 }
 
 void
-CompositorLRU::Remove(PCompositorBridgeParent* aCompositor, const uint64_t& aId)
+CompositorLRU::Remove(PCompositorParent* aCompositor, const uint64_t& aId)
 {
   if (mLRUSize == 0) {
     return;
@@ -76,7 +76,7 @@ CompositorLRU::Remove(PCompositorBridgeParent* aCompositor, const uint64_t& aId)
 
   auto index = mLRU.IndexOf(std::make_pair(aCompositor, aId));
 
-  if (index == nsTArray<PCompositorBridgeParent*>::NoIndex) {
+  if (index == nsTArray<PCompositorParent*>::NoIndex) {
     return;
   }
 
@@ -84,7 +84,7 @@ CompositorLRU::Remove(PCompositorBridgeParent* aCompositor, const uint64_t& aId)
 }
 
 void
-CompositorLRU::Remove(PCompositorBridgeParent* aCompositor)
+CompositorLRU::Remove(PCompositorParent* aCompositor)
 {
   if (mLRUSize == 0) {
     return;

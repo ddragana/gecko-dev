@@ -12,11 +12,9 @@
 #include "nsIObserverService.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
-#include "nsIProcess.h"
 #include "nsIPromptService.h"
 #include "nsIStringBundle.h"
 #include "nsISupportsPrimitives.h"
-#include "nsIToolkitProfile.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsIWindowMediator.h"
 #include "nsIWindowWatcher.h"
@@ -32,13 +30,11 @@
 #include "prprf.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsWidgetsCID.h"
-#include "nsAppRunner.h"
 #include "nsAppShellCID.h"
 #include "nsXPCOMCIDInternal.h"
 #include "mozilla/Services.h"
 #include "nsIXPConnect.h"
 #include "jsapi.h"
-#include "js/Date.h"
 #include "prenv.h"
 #include "nsAppDirectoryServiceDefs.h"
 
@@ -100,9 +96,9 @@ using namespace mozilla;
 
 uint32_t gRestartMode = 0;
 
-class nsAppExitEvent : public mozilla::Runnable {
+class nsAppExitEvent : public nsRunnable {
 private:
-  RefPtr<nsAppStartup> mService;
+  nsRefPtr<nsAppStartup> mService;
 
 public:
   explicit nsAppExitEvent(nsAppStartup *service) : mService(service) {}
@@ -364,21 +360,15 @@ nsAppStartup::Quit(uint32_t aMode)
       mediator->GetEnumerator(nullptr, getter_AddRefs(windowEnumerator));
       if (windowEnumerator) {
         bool more;
-        windowEnumerator->HasMoreElements(&more);
-        // If we reported no windows, we definitely shouldn't be
-        // iterating any here.
-        MOZ_ASSERT_IF(!mConsiderQuitStopper, !more);
-
-        while (more) {
+        while (windowEnumerator->HasMoreElements(&more), more) {
           nsCOMPtr<nsISupports> window;
           windowEnumerator->GetNext(getter_AddRefs(window));
-          nsCOMPtr<nsPIDOMWindowOuter> domWindow(do_QueryInterface(window));
+          nsCOMPtr<nsPIDOMWindow> domWindow(do_QueryInterface(window));
           if (domWindow) {
             MOZ_ASSERT(domWindow->IsOuterWindow());
             if (!domWindow->CanClose())
               return NS_OK;
           }
-          windowEnumerator->HasMoreElements(&more);
         }
       }
     }
@@ -442,9 +432,11 @@ nsAppStartup::Quit(uint32_t aMode)
             ferocity = eAttemptQuit;
             nsCOMPtr<nsISupports> window;
             windowEnumerator->GetNext(getter_AddRefs(window));
-            nsCOMPtr<nsPIDOMWindowOuter> domWindow = do_QueryInterface(window);
+            nsCOMPtr<nsIDOMWindow> domWindow = do_QueryInterface(window);
             if (domWindow) {
-              if (!domWindow->Closed()) {
+              bool closed = false;
+              domWindow->GetClosed(&closed);
+              if (!closed) {
                 rv = NS_ERROR_FAILURE;
                 break;
               }
@@ -513,7 +505,7 @@ nsAppStartup::CloseAllWindows()
     if (NS_FAILED(windowEnumerator->GetNext(getter_AddRefs(isupports))))
       break;
 
-    nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(isupports);
+    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(isupports);
     NS_ASSERTION(window, "not an nsPIDOMWindow");
     if (window) {
       MOZ_ASSERT(window->IsOuterWindow());
@@ -788,7 +780,7 @@ nsAppStartup::GetStartupInfo(JSContext* aCx, JS::MutableHandle<JS::Value> aRetva
       if (stamp >= procTime) {
         PRTime prStamp = ComputeAbsoluteTimestamp(absNow, now, stamp)
           / PR_USEC_PER_MSEC;
-        JS::Rooted<JSObject*> date(aCx, JS::NewDateObject(aCx, JS::TimeClip(prStamp)));
+        JS::Rooted<JSObject*> date(aCx, JS_NewDateObjectMsec(aCx, prStamp));
         JS_DefineProperty(aCx, obj, StartupTimeline::Describe(ev), date, JSPROP_ENUMERATE);
       } else {
         Telemetry::Accumulate(Telemetry::STARTUP_MEASUREMENT_ERRORS, ev);
@@ -985,49 +977,6 @@ nsAppStartup::RestartInSafeMode(uint32_t aQuitMode)
 {
   PR_SetEnv("MOZ_SAFE_MODE_RESTART=1");
   this->Quit(aQuitMode | nsIAppStartup::eRestart);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsAppStartup::CreateInstanceWithProfile(nsIToolkitProfile* aProfile)
-{
-  if (NS_WARN_IF(!aProfile)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (NS_WARN_IF(gAbsoluteArgv0Path.IsEmpty())) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsCOMPtr<nsIFile> execPath;
-  nsresult rv = NS_NewNativeLocalFile(NS_ConvertUTF16toUTF8(gAbsoluteArgv0Path),
-                                      true, getter_AddRefs(execPath));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsCOMPtr<nsIProcess> process = do_CreateInstance(NS_PROCESS_CONTRACTID, &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = process->Init(execPath);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsAutoCString profileName;
-  rv = aProfile->GetName(profileName);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  const char *args[] = { "-P", profileName.get() };
-  rv = process->Run(false, args, 2);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
 
   return NS_OK;
 }

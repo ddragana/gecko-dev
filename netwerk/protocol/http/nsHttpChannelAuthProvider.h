@@ -154,11 +154,7 @@ private:
     uint32_t                          mTriedHostAuth            : 1;
     uint32_t                          mSuppressDefensiveAuth    : 1;
 
-    // If a cross-origin sub-resource is being loaded, this flag will be set.
-    // In that case, the prompt text will be different to warn users.
-    uint32_t                          mCrossOrigin              : 1;
-
-    RefPtr<nsHttpHandler>           mHttpHandler;  // keep gHttpHandler alive
+    nsRefPtr<nsHttpHandler>           mHttpHandler;  // keep gHttpHandler alive
 
     // A variable holding the preference settings to whether to open HTTP
     // authentication credentials dialogs for sub-resources and cross-origin

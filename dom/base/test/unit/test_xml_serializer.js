@@ -7,11 +7,10 @@ var LB;
 
 function run_test() {
 
-  if (mozinfo.os == "win") {
+  if(("@mozilla.org/windows-registry-key;1" in C) || ("nsILocalFileOS2" in I))
     LB = "\r\n";
-  } else {
+  else
     LB = "\n";
-  }
 
   for (var i = 0; i < tests.length && tests[i]; ++i) {
     tests[i].call();

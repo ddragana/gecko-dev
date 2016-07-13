@@ -21,7 +21,7 @@ XPCOMUtils.defineLazyGetter(this, "gDecoder", function () {
   return new TextDecoder();
 });
 
-var SessionMigrationInternal = {
+let SessionMigrationInternal = {
   /**
    * Convert the original session restore state into a minimal state. It will
    * only contain:
@@ -32,6 +32,7 @@ var SessionMigrationInternal = {
    *     - with tab group info (hidden + group id)
    *     - with selected tab info
    *   - with selected window info
+   *   - with tabgroups info
    *
    * The complete state is then wrapped into the "about:welcomeback" page as
    * form field info to be restored when restoring the state.
@@ -52,8 +53,21 @@ var SessionMigrationInternal = {
         tab.index = oldTab.index;
         tab.hidden = oldTab.hidden;
         tab.pinned = oldTab.pinned;
+        // The tabgroup info is in the extData, so we need to get it out.
+        if (oldTab.extData && "tabview-tab" in oldTab.extData) {
+          tab.extData = {"tabview-tab": oldTab.extData["tabview-tab"]};
+        }
         return tab;
       });
+      // There are various tabgroup-related attributes that we need to get out
+      // of the session restore data for the window, too.
+      if (oldWin.extData) {
+        for (let k of Object.keys(oldWin.extData)) {
+          if (k.startsWith("tabview-")) {
+            win.extData[k] = oldWin.extData[k];
+          }
+        }
+      }
       win.selected = oldWin.selected;
       win._closedTabs = [];
       return win;
@@ -82,7 +96,7 @@ var SessionMigrationInternal = {
   }
 }
 
-var SessionMigration = {
+let SessionMigration = {
   /**
    * Migrate a limited set of session data from one path to another.
    */

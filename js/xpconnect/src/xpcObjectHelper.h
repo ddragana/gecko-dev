@@ -16,6 +16,7 @@
 
 #include "mozilla/Attributes.h"
 #include <stdint.h>
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIClassInfo.h"
 #include "nsISupports.h"
@@ -131,7 +132,7 @@ private:
                                 "(see bug 565742)") mObject;
     nsWrapperCache*          mCache;
     nsCOMPtr<nsIClassInfo>   mClassInfo;
-    RefPtr<nsXPCClassInfo> mXPCClassInfo;
+    nsRefPtr<nsXPCClassInfo> mXPCClassInfo;
 };
 
 #endif

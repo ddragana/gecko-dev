@@ -1,4 +1,4 @@
-var now = Date.now() * 1000;
+let now = Date.now() * 1000;
 
 // Test that importing bookmark data where a bookmark has a tag longer than 100
 // chars imports everything except the tags for that bookmark.
@@ -21,7 +21,7 @@ add_task(function* () {
       root: "unfiledBookmarksFolder",
       children: [
         {
-          guid: "___guid1____",
+          guid: "guid1",
           index: 0,
           id: 3,
           charset: "UTF-8",
@@ -32,7 +32,7 @@ add_task(function* () {
           uri: "http://test0.com/"
         },
         {
-          guid: "___guid2____",
+          guid: "guid2",
           index: 1,
           id: 4,
           charset: "UTF-8",
@@ -43,7 +43,7 @@ add_task(function* () {
           uri: "http://test1.com/"
         },
         {
-          guid: "___guid3____",
+          guid: "guid3",
           index: 2,
           id: 5,
           charset: "UTF-8",

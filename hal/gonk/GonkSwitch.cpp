@@ -18,7 +18,6 @@
 #include <sysutils/NetlinkEvent.h>
 
 #include "base/message_loop.h"
-#include "base/task.h"
 
 #include "Hal.h"
 #include "HalLog.h"
@@ -68,13 +67,13 @@ public:
         strcmp(mDevPath, aEvent->findParam("DEVPATH"))) {
         return false;
     }
-
+    
     mState = ConvertState(GetStateString(aEvent));
     return mState != SWITCH_STATE_UNKNOWN;
   }
 
   SwitchState GetState()
-  {
+  { 
     return mState;
   }
 
@@ -116,7 +115,7 @@ protected:
     if (state[bytesRead - 1] == '\n') {
       bytesRead--;
     }
-
+    
     state[bytesRead] = '\0';
     mState = ConvertState(state);
   }
@@ -213,7 +212,7 @@ protected:
 
 typedef nsTArray<RefPtr<SwitchHandler> > SwitchHandlerArray;
 
-class SwitchEventRunnable : public Runnable
+class SwitchEventRunnable : public nsRunnable
 {
 public:
   SwitchEventRunnable(SwitchEvent& aEvent) : mEvent(aEvent)
@@ -265,10 +264,10 @@ public:
   void Notify(const NetlinkEvent& aEvent)
   {
     SwitchState currState;
-
+    
     SwitchDevice device = GetEventInfo(aEvent, currState);
     if (device == SWITCH_DEVICE_UNKNOWN) {
-      return;
+      return; 
     }
 
     EventInfo& info = mEventInfo[device];
@@ -373,7 +372,7 @@ private:
   {
     //working around the android code not being const-correct
     NetlinkEvent *e = const_cast<NetlinkEvent*>(&aEvent);
-
+    
     for (size_t i = 0; i < mHandler.Length(); i++) {
       if (mHandler[i]->CheckEvent(e)) {
         aState = mHandler[i]->GetState();
@@ -414,7 +413,7 @@ EnableSwitchNotificationsIOThread(SwitchDevice aDevice, Monitor *aMonitor)
     lock.Notify();
   }
 
-  // Notify the latest state if IO thread has the information.
+  // Notify the latest state if IO thread has the information. 
   if (sSwitchObserver->GetEnableCount() > 1) {
     sSwitchObserver->NotifyAnEvent(aDevice);
   }
@@ -427,6 +426,7 @@ EnableSwitchNotifications(SwitchDevice aDevice)
   {
     MonitorAutoLock lock(monitor);
     XRE_GetIOMessageLoop()->PostTask(
+        FROM_HERE,
         NewRunnableFunction(EnableSwitchNotificationsIOThread, aDevice, &monitor));
     lock.Wait();
   }
@@ -444,6 +444,7 @@ void
 DisableSwitchNotifications(SwitchDevice aDevice)
 {
   XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(DisableSwitchNotificationsIOThread, aDevice));
 }
 
@@ -464,6 +465,7 @@ NotifySwitchStateIOThread(SwitchDevice aDevice, SwitchState aState)
 void NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState)
 {
   XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
       NewRunnableFunction(NotifySwitchStateIOThread, aDevice, aState));
 }
 

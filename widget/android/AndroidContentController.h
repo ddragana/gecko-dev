@@ -7,49 +7,37 @@
 #define AndroidContentController_h__
 
 #include "mozilla/layers/ChromeProcessController.h"
+#include "mozilla/layers/APZEventState.h"
 #include "mozilla/EventForwards.h"  // for Modifiers
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TimeStamp.h"
+#include "GeneratedJNIWrappers.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsTArray.h"
-#include "nsWindow.h"
 
 namespace mozilla {
-namespace layers {
-class APZEventState;
-class APZCTreeManager;
-}
 namespace widget {
+namespace android {
 
-class AndroidContentController final
-    : public mozilla::layers::ChromeProcessController
+class AndroidContentController final : public mozilla::layers::ChromeProcessController
 {
 public:
-    AndroidContentController(nsWindow* aWindow,
-                             mozilla::layers::APZEventState* aAPZEventState,
-                             mozilla::layers::APZCTreeManager* aAPZCTreeManager)
-      : mozilla::layers::ChromeProcessController(aWindow, aAPZEventState, aAPZCTreeManager)
-      , mAndroidWindow(aWindow)
+    AndroidContentController(nsIWidget* aWidget, mozilla::layers::APZEventState* aAPZEventState)
+      : mozilla::layers::ChromeProcessController(aWidget, aAPZEventState)
     {}
 
     // ChromeProcessController methods
-    virtual void Destroy() override;
-    void HandleTap(TapType aType, const CSSPoint& aPoint, Modifiers aModifiers,
-                   const ScrollableLayerGuid& aGuid, uint64_t aInputBlockId) override;
-    void PostDelayedTask(already_AddRefed<Runnable> aTask, int aDelayMs) override;
-    void UpdateOverscrollVelocity(const float aX, const float aY) override;
-    void UpdateOverscrollOffset(const float aX, const float aY) override;
-    void SetScrollingRootContent(const bool isRootContent) override;
-    void NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
-                              APZStateChange aChange,
-                              int aArg) override;
+    void PostDelayedTask(Task* aTask, int aDelayMs) override;
 
-    static void NotifyDefaultPrevented(mozilla::layers::APZCTreeManager* aManager,
-                                       uint64_t aInputBlockId, bool aDefaultPrevented);
+public:
+    static NativePanZoomController::LocalRef SetNativePanZoomController(NativePanZoomController::Param obj);
+    static void NotifyDefaultPrevented(uint64_t aInputBlockId, bool aDefaultPrevented);
+
 private:
-    nsWindow* mAndroidWindow;
+    static NativePanZoomController::GlobalRef sNativePanZoomController;
 };
 
+} // namespace android
 } // namespace widget
 } // namespace mozilla
 

@@ -20,7 +20,6 @@
 
 #include "mozilla/Alignment.h"
 #include "mozilla/Array.h"
-#include "mozilla/EnumeratedArray.h"
 #include "mozilla/TypeTraits.h"
 
 namespace mozilla {
@@ -63,13 +62,6 @@ MOZ_CONSTEXPR size_t
 ArrayLength(const Array<T, N>& aArr)
 {
   return N;
-}
-
-template<typename E, E N, typename T>
-MOZ_CONSTEXPR size_t
-ArrayLength(const EnumeratedArray<E, N, T>& aArr)
-{
-  return size_t(N);
 }
 
 /*

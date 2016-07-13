@@ -21,6 +21,7 @@
 #include "plhash.h"
 
 #include "mozilla/Logging.h"
+extern PRLogModuleInfo* gXULTemplateLog;
 
 #include "nsString.h"
 #include "nsUnicharUtils.h"
@@ -32,7 +33,6 @@
 #include "nsRDFPropertyTestNode.h"
 
 using namespace mozilla;
-extern LazyLogModule gXULTemplateLog;
 
 //----------------------------------------------------------------------
 //
@@ -53,6 +53,9 @@ MemoryElementSet::Add(MemoryElement* aElement)
     }
 
     List* list = new List;
+    if (! list)
+        return NS_ERROR_OUT_OF_MEMORY;
+
     list->mElement = aElement;
     list->mRefCnt  = 1;
     list->mNext    = mElements;
@@ -75,6 +78,9 @@ nsAssignmentSet::Add(const nsAssignment& aAssignment)
         return NS_ERROR_UNEXPECTED;
 
     List* list = new List(aAssignment);
+    if (! list)
+        return NS_ERROR_OUT_OF_MEMORY;
+
     list->mRefCnt     = 1;
     list->mNext       = mAssignments;
 
@@ -315,6 +321,8 @@ TestNode::Propagate(InstantiationSet& aInstantiations,
                 bool owned = false;
                 InstantiationSet* instantiations =
                     new InstantiationSet(aInstantiations);
+                if (!instantiations)
+                    return NS_ERROR_OUT_OF_MEMORY;
                 rv = kid->Propagate(*instantiations, aIsUpdate, owned);
                 if (!owned)
                     delete instantiations;

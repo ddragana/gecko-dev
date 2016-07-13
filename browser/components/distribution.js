@@ -4,10 +4,10 @@
 
 this.EXPORTED_SYMBOLS = [ "DistributionCustomizer" ];
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cc = Components.classes;
+const Cr = Components.results;
+const Cu = Components.utils;
 
 const DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC =
   "distribution-customization-complete";
@@ -15,7 +15,6 @@ const DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC =
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 
@@ -55,7 +54,7 @@ DistributionCustomizer.prototype = {
       // Unable to parse INI.
       Cu.reportError("Unable to parse distribution.ini");
     }
-    this.__defineGetter__("_ini", () => ini);
+    this.__defineGetter__("_ini", function() ini);
     return this._ini;
   },
 
@@ -67,33 +66,27 @@ DistributionCustomizer.prototype = {
     catch (e) {
       locale = "en-US";
     }
-    this.__defineGetter__("_locale", () => locale);
+    this.__defineGetter__("_locale", function() locale);
     return this._locale;
-  },
-
-  get _language() {
-    let language = this._locale.split("-")[0];
-    this.__defineGetter__("_language", () => language);
-    return this._language;
   },
 
   get _prefSvc() {
     let svc = Cc["@mozilla.org/preferences-service;1"].
               getService(Ci.nsIPrefService);
-    this.__defineGetter__("_prefSvc", () => svc);
+    this.__defineGetter__("_prefSvc", function() svc);
     return this._prefSvc;
   },
 
   get _prefs() {
     let branch = this._prefSvc.getBranch(null);
-    this.__defineGetter__("_prefs", () => branch);
+    this.__defineGetter__("_prefs", function() branch);
     return this._prefs;
   },
 
   get _ioSvc() {
     let svc = Cc["@mozilla.org/network/io-service;1"].
               getService(Ci.nsIIOService);
-    this.__defineGetter__("_ioSvc", () => svc);
+    this.__defineGetter__("_ioSvc", function() svc);
     return this._ioSvc;
   },
 
@@ -119,8 +112,6 @@ DistributionCustomizer.prototype = {
 
         if (keys.indexOf(key + "." + this._locale) >= 0) {
           key += "." + this._locale;
-        } else if (keys.indexOf(key + "." + this._language) >= 0) {
-          key += "." + this._language;
         }
 
         if (!items[itemIndex])
@@ -211,44 +202,14 @@ DistributionCustomizer.prototype = {
                                                     PlacesUtils.annotations.EXPIRE_NEVER);
         }
 
-        if (item.icon && item.iconData) {
-          try {
-            let faviconURI = this._makeURI(item.icon);
-            PlacesUtils.favicons.replaceFaviconDataFromDataURL(
-              faviconURI, item.iconData, 0,
-              Services.scriptSecurityManager.getSystemPrincipal());
-
-            PlacesUtils.favicons.setAndFetchFaviconForPage(
-              this._makeURI(item.link), faviconURI, false,
-              PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
-              Services.scriptSecurityManager.getSystemPrincipal());
-          } catch(e) {
-            Cu.reportError(e);
-          }
-        }
-
-        if (item.keyword) {
-          try {
-            yield PlacesUtils.keywords.insert({ keyword: item.keyword,
-                                                url: item.link });
-          } catch(e) {
-            Cu.reportError(e);
-          }
-        }
-
         break;
       }
     }
   }),
 
-  _newProfile: false,
   _customizationsApplied: false,
   applyCustomizations: function DIST_applyCustomizations() {
     this._customizationsApplied = true;
-
-    if (!Services.prefs.prefHasUserValue("browser.migration.version"))
-      this._newProfile = true;
-
     if (!this._ini)
       return this._checkCustomizationComplete();
 
@@ -323,124 +284,76 @@ DistributionCustomizer.prototype = {
     if (!(globalPrefs["id"] && globalPrefs["version"] && globalPrefs["about"]))
       return this._checkCustomizationComplete();
 
-    let defaults = new Preferences({defaultBranch: true});
+    let defaults = this._prefSvc.getDefaultBranch(null);
 
     // Global really contains info we set as prefs.  They're only
     // separate because they are "special" (read: required)
 
-    defaults.set("distribution.id", this._ini.getString("Global", "id"));
-    defaults.set("distribution.version", this._ini.getString("Global", "version"));
+    defaults.setCharPref("distribution.id", this._ini.getString("Global", "id"));
+    defaults.setCharPref("distribution.version",
+                         this._ini.getString("Global", "version"));
 
-    let partnerAbout;
+    let partnerAbout = Cc["@mozilla.org/supports-string;1"].
+      createInstance(Ci.nsISupportsString);
     try {
       if (globalPrefs["about." + this._locale]) {
-        partnerAbout = this._ini.getString("Global", "about." + this._locale);
-      } else if (globalPrefs["about." + this._language]) {
-        partnerAbout = this._ini.getString("Global", "about." + this._language);
+        partnerAbout.data = this._ini.getString("Global", "about." + this._locale);
       } else {
-        partnerAbout = this._ini.getString("Global", "about");
+        partnerAbout.data = this._ini.getString("Global", "about");
       }
-      defaults.set("distribution.about", partnerAbout);
+      defaults.setComplexValue("distribution.about",
+                               Ci.nsISupportsString, partnerAbout);
     } catch (e) {
       /* ignore bad prefs due to bug 895473 and move on */
       Cu.reportError(e);
     }
 
-    var usedPreferences = [];
-
-    if (sections["Preferences-" + this._locale]) {
-      for (let key of enumerate(this._ini.getKeys("Preferences-" + this._locale))) {
-        try {
-          let value = this._ini.getString("Preferences-" + this._locale, key);
-          if (value) {
-            defaults.set(key, parseValue(value));
-          }
-          usedPreferences.push(key);
-        } catch (e) { /* ignore bad prefs and move on */ }
-      }
-    }
-
-    if (sections["Preferences-" + this._language]) {
-      for (let key of enumerate(this._ini.getKeys("Preferences-" + this._language))) {
-        if (usedPreferences.indexOf(key) > -1) {
-          continue;
-        }
-        try {
-          let value = this._ini.getString("Preferences-" + this._language, key);
-          if (value) {
-            defaults.set(key, parseValue(value));
-          }
-          usedPreferences.push(key);
-        } catch (e) { /* ignore bad prefs and move on */ }
-      }
-    }
-
     if (sections["Preferences"]) {
       for (let key of enumerate(this._ini.getKeys("Preferences"))) {
-        if (usedPreferences.indexOf(key) > -1) {
-          continue;
-        }
         try {
-          let value = this._ini.getString("Preferences", key);
-          if (value) {
-            value = value.replace(/%LOCALE%/g, this._locale);
-            value = value.replace(/%LANGUAGE%/g, this._language);
-            defaults.set(key, parseValue(value));
+          let value = eval(this._ini.getString("Preferences", key));
+          switch (typeof value) {
+          case "boolean":
+            defaults.setBoolPref(key, value);
+            break;
+          case "number":
+            defaults.setIntPref(key, value);
+            break;
+          case "string":
+            defaults.setCharPref(key, value);
+            break;
+          case "undefined":
+            defaults.setCharPref(key, value);
+            break;
           }
         } catch (e) { /* ignore bad prefs and move on */ }
       }
     }
+
+    // We eval() the localizable prefs as well (even though they'll
+    // always get set as a string) to keep the INI format consistent:
+    // string prefs always need to be in quotes
 
     let localizedStr = Cc["@mozilla.org/pref-localizedstring;1"].
       createInstance(Ci.nsIPrefLocalizedString);
 
-    var usedLocalizablePreferences = [];
+    if (sections["LocalizablePreferences"]) {
+      for (let key of enumerate(this._ini.getKeys("LocalizablePreferences"))) {
+        try {
+          let value = eval(this._ini.getString("LocalizablePreferences", key));
+          value = value.replace(/%LOCALE%/g, this._locale);
+          localizedStr.data = "data:text/plain," + key + "=" + value;
+          defaults.setComplexValue(key, Ci.nsIPrefLocalizedString, localizedStr);
+        } catch (e) { /* ignore bad prefs and move on */ }
+      }
+    }
 
     if (sections["LocalizablePreferences-" + this._locale]) {
       for (let key of enumerate(this._ini.getKeys("LocalizablePreferences-" + this._locale))) {
         try {
-          let value = this._ini.getString("LocalizablePreferences-" + this._locale, key);
-          if (value) {
-            value = parseValue(value);
-            localizedStr.data = "data:text/plain," + key + "=" + value;
-            defaults._prefBranch.setComplexValue(key, Ci.nsIPrefLocalizedString, localizedStr);
-          }
-          usedLocalizablePreferences.push(key);
-        } catch (e) { /* ignore bad prefs and move on */ }
-      }
-    }
-
-    if (sections["LocalizablePreferences-" + this._language]) {
-      for (let key of enumerate(this._ini.getKeys("LocalizablePreferences-" + this._language))) {
-        if (usedLocalizablePreferences.indexOf(key) > -1) {
-          continue;
-        }
-        try {
-          let value = this._ini.getString("LocalizablePreferences-" + this._language, key);
-          if (value) {
-            value = parseValue(value);
-            localizedStr.data = "data:text/plain," + key + "=" + value;
-            defaults._prefBranch.setComplexValue(key, Ci.nsIPrefLocalizedString, localizedStr);
-          }
-          usedLocalizablePreferences.push(key);
-        } catch (e) { /* ignore bad prefs and move on */ }
-      }
-    }
-
-    if (sections["LocalizablePreferences"]) {
-      for (let key of enumerate(this._ini.getKeys("LocalizablePreferences"))) {
-        if (usedLocalizablePreferences.indexOf(key) > -1) {
-          continue;
-        }
-        try {
-          let value = this._ini.getString("LocalizablePreferences", key);
-          if (value) {
-            value = parseValue(value);
-            value = value.replace(/%LOCALE%/g, this._locale);
-            value = value.replace(/%LANGUAGE%/g, this._language);
-            localizedStr.data = "data:text/plain," + key + "=" + value;
-          }
-          defaults._prefBranch.setComplexValue(key, Ci.nsIPrefLocalizedString, localizedStr);
+          let value = eval(this._ini.getString("LocalizablePreferences-" + this._locale, key));
+          localizedStr.data = "data:text/plain," + key + "=" + value;
+          defaults.setComplexValue(key, Ci.nsIPrefLocalizedString, localizedStr);
         } catch (e) { /* ignore bad prefs and move on */ }
       }
     }
@@ -449,25 +362,6 @@ DistributionCustomizer.prototype = {
   },
 
   _checkCustomizationComplete: function DIST__checkCustomizationComplete() {
-    const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
-
-    if (this._newProfile) {
-      let xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
-
-      try {
-        var showPersonalToolbar = Services.prefs.getBoolPref("browser.showPersonalToolbar");
-        if (showPersonalToolbar) {
-          xulStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
-        }
-      } catch(e) {}
-      try {
-        var showMenubar = Services.prefs.getBoolPref("browser.showMenubar");
-        if (showMenubar) {
-          xulStore.setValue(BROWSER_DOCURL, "toolbar-menubar", "collapsed", "false");
-        }
-      } catch(e) {}
-    }
-
     let prefDefaultsApplied = this._prefDefaultsApplied || !this._ini;
     if (this._customizationsApplied && this._bookmarksApplied &&
         prefDefaultsApplied) {
@@ -477,19 +371,6 @@ DistributionCustomizer.prototype = {
     }
   }
 };
-
-function parseValue(value) {
-  try {
-    value = JSON.parse(value);
-  } catch (e) {
-    // JSON.parse catches numbers and booleans.
-    // Anything else, we assume is a string.
-    // Remove the quotes that aren't needed anymore.
-    value = value.replace(/^"/, "");
-    value = value.replace(/"$/, "");
-  }
-  return value;
-}
 
 function* enumerate(UTF8Enumerator) {
   while (UTF8Enumerator.hasMore())

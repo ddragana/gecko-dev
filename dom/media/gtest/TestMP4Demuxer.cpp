@@ -6,33 +6,32 @@
 #include "gtest/gtest.h"
 #include "MP4Demuxer.h"
 #include "MP4Stream.h"
-#include "mozilla/MozPromise.h"
+#include "MozPromise.h"
 #include "MediaDataDemuxer.h"
-#include "mozilla/SharedThreadPool.h"
-#include "mozilla/TaskQueue.h"
+#include "SharedThreadPool.h"
+#include "TaskQueue.h"
 #include "mozilla/ArrayUtils.h"
 #include "MockMediaResource.h"
-#include "VideoUtils.h"
 
 using namespace mozilla;
 using namespace mp4_demuxer;
 
 class AutoTaskQueue;
 
-#define DO_FAIL [binding]()->void { EXPECT_TRUE(false); binding->mTaskQueue->BeginShutdown(); }
+#define DO_FAIL []()->void { EXPECT_TRUE(false); }
 
 class MP4DemuxerBinding
 {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MP4DemuxerBinding);
 
-  RefPtr<MockMediaResource> resource;
-  RefPtr<MP4Demuxer> mDemuxer;
-  RefPtr<TaskQueue> mTaskQueue;
-  RefPtr<MediaTrackDemuxer> mAudioTrack;
-  RefPtr<MediaTrackDemuxer> mVideoTrack;
+  nsRefPtr<MockMediaResource> resource;
+  nsRefPtr<MP4Demuxer> mDemuxer;
+  nsRefPtr<TaskQueue> mTaskQueue;
+  nsRefPtr<MediaTrackDemuxer> mAudioTrack;
+  nsRefPtr<MediaTrackDemuxer> mVideoTrack;
   uint32_t mIndex;
-  nsTArray<RefPtr<MediaRawData>> mSamples;
+  nsTArray<nsRefPtr<MediaRawData>> mSamples;
   nsTArray<int64_t> mKeyFrameTimecodes;
   MozPromiseHolder<GenericPromise> mCheckTrackKeyFramePromise;
   MozPromiseHolder<GenericPromise> mCheckTrackSamples;
@@ -50,18 +49,17 @@ public:
   void RunTestAndWait(const Function& aFunction)
   {
     Function func(aFunction);
-    RefPtr<MP4DemuxerBinding> binding = this;
     mDemuxer->Init()->Then(mTaskQueue, __func__, Move(func), DO_FAIL);
     mTaskQueue->AwaitShutdownAndIdle();
   }
 
-  RefPtr<GenericPromise>
+  nsRefPtr<GenericPromise>
   CheckTrackKeyFrame(MediaTrackDemuxer* aTrackDemuxer)
   {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
 
-    RefPtr<MediaTrackDemuxer> track = aTrackDemuxer;
-    RefPtr<MP4DemuxerBinding> binding = this;
+    nsRefPtr<MediaTrackDemuxer> track = aTrackDemuxer;
+    nsRefPtr<MP4DemuxerBinding> self = this;
 
     int64_t time = -1;
     while (mIndex < mSamples.Length()) {
@@ -72,7 +70,7 @@ public:
       }
     }
 
-    RefPtr<GenericPromise> p = mCheckTrackKeyFramePromise.Ensure(__func__);
+    nsRefPtr<GenericPromise> p = mCheckTrackKeyFramePromise.Ensure(__func__);
 
     if (time == -1) {
       mCheckTrackKeyFramePromise.Resolve(true, __func__);
@@ -81,13 +79,13 @@ public:
 
 
     DispatchTask(
-      [track, time, binding] () {
-        track->Seek(media::TimeUnit::FromMicroseconds(time))->Then(binding->mTaskQueue, __func__,
-          [track, time, binding] () {
-            track->GetSamples()->Then(binding->mTaskQueue, __func__,
-              [track, time, binding] (RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples) {
+      [track, time, self] () {
+        track->Seek(media::TimeUnit::FromMicroseconds(time))->Then(self->mTaskQueue, __func__,
+          [track, time, self] () {
+            track->GetSamples()->Then(self->mTaskQueue, __func__,
+              [track, time, self] (nsRefPtr<MediaTrackDemuxer::SamplesHolder> aSamples) {
                 EXPECT_EQ(time, aSamples->mSamples[0]->mTime);
-                binding->CheckTrackKeyFrame(track);
+                self->CheckTrackKeyFrame(track);
               },
               DO_FAIL
             );
@@ -100,38 +98,38 @@ public:
     return p;
   }
 
-  RefPtr<GenericPromise>
+  nsRefPtr<GenericPromise>
   CheckTrackSamples(MediaTrackDemuxer* aTrackDemuxer)
   {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
 
-    RefPtr<MediaTrackDemuxer> track = aTrackDemuxer;
-    RefPtr<MP4DemuxerBinding> binding = this;
+    nsRefPtr<MediaTrackDemuxer> track = aTrackDemuxer;
+    nsRefPtr<MP4DemuxerBinding> self = this;
 
-    RefPtr<GenericPromise> p = mCheckTrackSamples.Ensure(__func__);
+    nsRefPtr<GenericPromise> p = mCheckTrackSamples.Ensure(__func__);
 
     DispatchTask(
-      [track, binding] () {
-        track->GetSamples()->Then(binding->mTaskQueue, __func__,
-          [track, binding] (RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples) {
+      [track, self] () {
+        track->GetSamples()->Then(self->mTaskQueue, __func__,
+          [track, self] (nsRefPtr<MediaTrackDemuxer::SamplesHolder> aSamples) {
             if (aSamples->mSamples.Length()) {
-              binding->mSamples.AppendElements(aSamples->mSamples);
-              binding->CheckTrackSamples(track);
+              self->mSamples.AppendElements(aSamples->mSamples);
+              self->CheckTrackSamples(track);
             }
           },
-          [binding] (DemuxerFailureReason aReason) {
+          [self] (DemuxerFailureReason aReason) {
             if (aReason == DemuxerFailureReason::DEMUXER_ERROR) {
               EXPECT_TRUE(false);
-              binding->mCheckTrackSamples.Reject(NS_ERROR_FAILURE, __func__);
+              self->mCheckTrackSamples.Reject(NS_ERROR_FAILURE, __func__);
             } else if (aReason == DemuxerFailureReason::END_OF_STREAM) {
-              EXPECT_TRUE(binding->mSamples.Length() > 1);
-              for (uint32_t i = 0; i < (binding->mSamples.Length() - 1); i++) {
-                EXPECT_LT(binding->mSamples[i]->mTimecode, binding->mSamples[i + 1]->mTimecode);
-                if (binding->mSamples[i]->mKeyframe) {
-                  binding->mKeyFrameTimecodes.AppendElement(binding->mSamples[i]->mTimecode);
+              EXPECT_TRUE(self->mSamples.Length() > 1);
+              for (uint32_t i = 0; i < (self->mSamples.Length() - 1); i++) {
+                EXPECT_LT(self->mSamples[i]->mTimecode, self->mSamples[i + 1]->mTimecode);
+                if (self->mSamples[i]->mKeyframe) {
+                  self->mKeyFrameTimecodes.AppendElement(self->mSamples[i]->mTimecode);
                 }
               }
-              binding->mCheckTrackSamples.Resolve(true, __func__);
+              self->mCheckTrackSamples.Resolve(true, __func__);
             }
           }
         );
@@ -147,7 +145,7 @@ private:
   void
   DispatchTask(FunctionType aFun)
   {
-    RefPtr<Runnable> r = NS_NewRunnableFunction(aFun);
+    nsRefPtr<nsRunnable> r = NS_NewRunnableFunction(aFun);
     mTaskQueue->Dispatch(r.forget());
   }
 
@@ -158,7 +156,7 @@ private:
 
 TEST(MP4Demuxer, Seek)
 {
-  RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding();
+  nsRefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding();
 
   binding->RunTestAndWait([binding] () {
     binding->mVideoTrack = binding->mDemuxer->GetTrackDemuxer(TrackInfo::kVideoTrack, 0);
@@ -200,7 +198,7 @@ ToCryptoString(const CryptoSample& aCrypto)
 
 #ifndef XP_WIN // VC2013 doesn't support C++11 array initialization.
 
-TEST(MP4Demuxer, CENCFragVideo)
+TEST(MP4Demuxer, CENCFrag)
 {
   const char* video[] = {
     "1 16 7e571d037e571d037e571d037e571d03 00000000000000000000000000000000 5,684 5,16980",
@@ -265,7 +263,7 @@ TEST(MP4Demuxer, CENCFragVideo)
     "1 16 7e571d037e571d037e571d037e571d03 000000000000000000000000000019cd 5,2392",
   };
 
-  RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("gizmo-frag.mp4");
+  nsRefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("gizmo-frag.mp4");
 
   binding->RunTestAndWait([binding, video] () {
     // grab all video samples.
@@ -281,10 +279,7 @@ TEST(MP4Demuxer, CENCFragVideo)
           binding->mTaskQueue->BeginShutdown();
         }, DO_FAIL);
   });
-}
 
-TEST(MP4Demuxer, CENCFragAudio)
-{
   const char* audio[] = {
     "1 16 7e571d047e571d047e571d047e571d04 00000000000000000000000000000000 0,281",
     "1 16 7e571d047e571d047e571d047e571d04 00000000000000000000000000000012 0,257",
@@ -381,22 +376,21 @@ TEST(MP4Demuxer, CENCFragAudio)
     "1 16 7e571d047e571d047e571d047e571d04 000000000000000000000000000008cd 0,433",
     "1 16 7e571d047e571d047e571d047e571d04 000000000000000000000000000008e9 0,481",
   };
+  nsRefPtr<MP4DemuxerBinding> audiobinding = new MP4DemuxerBinding("gizmo-frag.mp4");
 
-  RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("gizmo-frag.mp4");
-
-  binding->RunTestAndWait([binding, audio] () {
+  audiobinding->RunTestAndWait([audiobinding, audio] () {
     // grab all audio samples.
-    binding->mAudioTrack = binding->mDemuxer->GetTrackDemuxer(TrackInfo::kAudioTrack, 0);
-    binding->CheckTrackSamples(binding->mAudioTrack)
-      ->Then(binding->mTaskQueue, __func__,
-        [binding, audio] () {
-          EXPECT_TRUE(binding->mSamples.Length() > 1);
-          for (uint32_t i = 0; i < binding->mSamples.Length(); i++) {
-            nsCString text = ToCryptoString(binding->mSamples[i]->mCrypto);
+    audiobinding->mAudioTrack = audiobinding->mDemuxer->GetTrackDemuxer(TrackInfo::kAudioTrack, 0);
+    audiobinding->CheckTrackSamples(audiobinding->mAudioTrack)
+      ->Then(audiobinding->mTaskQueue, __func__,
+        [audiobinding, audio] () {
+          EXPECT_TRUE(audiobinding->mSamples.Length() > 1);
+          for (uint32_t i = 0; i < audiobinding->mSamples.Length(); i++) {
+            nsCString text = ToCryptoString(audiobinding->mSamples[i]->mCrypto);
             EXPECT_STREQ(audio[i++], text.get());
           }
-          EXPECT_EQ(ArrayLength(audio), binding->mSamples.Length());
-          binding->mTaskQueue->BeginShutdown();
+          EXPECT_EQ(ArrayLength(audio), audiobinding->mSamples.Length());
+          audiobinding->mTaskQueue->BeginShutdown();
         }, DO_FAIL);
   });
 }
@@ -405,7 +399,7 @@ TEST(MP4Demuxer, CENCFragAudio)
 
 TEST(MP4Demuxer, GetNextKeyframe)
 {
-  RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("gizmo-frag.mp4");
+  nsRefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("gizmo-frag.mp4");
 
   binding->RunTestAndWait([binding] () {
     // Insert a [0,end] buffered range, to simulate Moof's being buffered
@@ -431,24 +425,3 @@ TEST(MP4Demuxer, GetNextKeyframe)
     );
   });
 }
-
-TEST(MP4Demuxer, ZeroInLastMoov)
-{
-  RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("short-zero-in-moov.mp4");
-  binding->RunTestAndWait([binding] () {
-    // It demuxes without error. That is sufficient.
-    binding->mTaskQueue->BeginShutdown();
-  });
-}
-
-
-TEST(MP4Demuxer, ZeroInMoovQuickTime)
-{
-  RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("short-zero-inband.mov");
-  binding->RunTestAndWait([binding] () {
-    // It demuxes without error. That is sufficient.
-    binding->mTaskQueue->BeginShutdown();
-  });
-}
-
-#undef DO_FAIL

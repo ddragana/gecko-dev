@@ -1,8 +1,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+* License, v. 2.0. If a copy of the MPL was not distributed with this
+* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import "defines.css";
+%filter substitution
+%include defines.inc
 
 html {
   height: 100%;
@@ -35,14 +36,7 @@ body {
 }
 
 .toolbar-buttons {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   list-style: none;
-  margin: 0px;
-  padding: 0px;
-  height: 48px;
-  width: 48px;
 }
 
 .toolbar-buttons > li {
@@ -51,6 +45,7 @@ body {
   background-repeat: no-repeat;
   height: 20px;
   width: 20px;
+  margin: 0 15px;
 }
 
 #filter-input-container {
@@ -59,8 +54,8 @@ body {
   width: 100%;
   padding: 10px 0;
   display: flex;
-  background: var(--color_about_background);
-  border-top: 2px solid var(--color_about_item_border);
+  background: @color_about_background@;
+  border-top: 2px solid @color_about_item_border@;
 }
 
 #filter-input-container[hidden] {
@@ -70,7 +65,7 @@ body {
 #filter-input {
   flex: 1;
   padding: 5px;
-  margin-inline-start: 10px;
+  -moz-margin-start: 10px;
   border-radius: 3px;
 }
 
@@ -103,11 +98,8 @@ body {
   height: 100%;
 }
 
-#edit-login-header {
-  background-color: #F5F5F5;
-}
 
-.update-button {
+#save-btn {
   flex: 1;
   height: 60px;
   background-color: #E66000; /*matched to action_orange in java codebase*/
@@ -117,10 +109,6 @@ body {
   border-radius: 4px;
   border-width: 0px;
   margin-top: 10px;
-}
-
-.disabled-btn {
-  background-color: #BFBFBF; /*matched to disabled_grey in the java codebase,in colors.xml*/
 }
 
 .password-btn-hide {
@@ -205,34 +193,6 @@ body {
 
 #spinner {
   margin-top: 60px;
-}
-
-#empty-body {
-  padding-left: 60px;
-  padding-right: 60px;
-}
-
-#empty-obj-text-container {
-  display: flex;
-  flex-flow: column;
-  align-items: center;
-  text-align: center;
-  justify-content: center;
-}
-
-.empty-text {
-  color: #363B40;
-  font-size: 25px;
-  font-weight: lighter;
-  margin-bottom: 20px;
-}
-
-.empty-hint {
-  color: #777777;
-  font-size: 20px;
-}
-
-#empty-icon {
-  margin-top: 60px;
-  margin-bottom: 20px;
+  height: 60px;
+  width: 60px;
 }

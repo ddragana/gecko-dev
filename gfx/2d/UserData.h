@@ -45,7 +45,7 @@ public:
     entries = static_cast<Entry*>(realloc(entries, sizeof(Entry)*(count+1)));
 
     if (!entries) {
-      MOZ_CRASH("GFX: UserData::Add");
+      MOZ_CRASH();
     }
 
     entries[count].key      = key;

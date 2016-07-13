@@ -47,8 +47,6 @@ private:
     static void IPConfigChanged(SCDynamicStoreRef store,
                                 CFArrayRef changedKeys,
                                 void *info);
-    void calculateNetworkId(void);
-    nsCString mNetworkId;
 };
 
 #endif /* NSNETWORKLINKSERVICEMAC_H_ */

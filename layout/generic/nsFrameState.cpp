@@ -11,7 +11,6 @@
 #include "nsBoxFrame.h"
 #include "nsBulletFrame.h"
 #include "nsFlexContainerFrame.h"
-#include "nsGridContainerFrame.h"
 #include "nsGfxScrollFrame.h"
 #include "nsIFrame.h"
 #include "nsISVGChildFrame.h"
@@ -33,7 +32,7 @@ nsCString
 GetFrameState(nsIFrame* aFrame)
 {
   nsCString result;
-  AutoTArray<const char*,3> groups;
+  nsAutoTArray<const char*,3> groups;
 
   nsFrameState state = aFrame->GetStateBits();
 

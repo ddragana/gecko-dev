@@ -9,10 +9,10 @@
 #include "nsAutoPtr.h"
 #include "nsThreadManager.h"
 #include "nsThreadUtils.h"
+#include "plarena.h"
 #include "pratom.h"
 #include "GeckoProfiler.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Logging.h"
 #ifdef MOZ_NUWA_PROCESS
 #include "ipc/Nuwa.h"
@@ -20,15 +20,6 @@
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracerImpl.h"
 using namespace mozilla::tasktracer;
-#endif
-
-#ifdef XP_WIN
-#include <process.h>
-#ifndef getpid
-#define getpid _getpid
-#endif
-#else
-#include <unistd.h>
 #endif
 
 using mozilla::Atomic;
@@ -39,54 +30,14 @@ using mozilla::TimeStamp;
 static Atomic<int32_t>  gGenerator;
 static TimerThread*     gThread = nullptr;
 
-// This module prints info about the precision of timers.
-static mozilla::LazyLogModule sTimerLog("nsTimerImpl");
-
-mozilla::LogModule*
+PRLogModuleInfo*
 GetTimerLog()
 {
-  return sTimerLog;
-}
-
-// This module prints info about which timers are firing, which is useful for
-// wakeups for the purposes of power profiling. Set the following environment
-// variable before starting the browser.
-//
-//   MOZ_LOG=TimerFirings:4
-//
-// Then a line will be printed for every timer that fires. The name used for a
-// |CallbackType::Function| timer depends on the circumstances.
-//
-// - If it was explicitly named (e.g. it was initialized with
-//   InitWithNamedFuncCallback()) then that explicit name will be shown.
-//
-// - Otherwise, if we are on a platform that supports function name lookup
-//   (Mac or Linux) then the looked-up name will be shown with a
-//   "[from dladdr]" annotation. On Mac the looked-up name will be immediately
-//   useful. On Linux it'll need post-processing with
-//   tools/rb/fix_linux_stack.py.
-//
-// - Otherwise, no name will be printed. If many timers hit this case then
-//   you'll need to re-run the workload on a Mac to find out which timers they
-//   are, and then give them explicit names.
-//
-// If you redirect this output to a file called "out", you can then
-// post-process it with a command something like the following.
-//
-//   cat out | grep timer | sort | uniq -c | sort -r -n
-//
-// This will show how often each unique line appears, with the most common ones
-// first.
-//
-// More detailed docs are here:
-// https://developer.mozilla.org/en-US/docs/Mozilla/Performance/TimerFirings_logging
-//
-static mozilla::LazyLogModule sTimerFiringsLog("TimerFirings");
-
-mozilla::LogModule*
-GetTimerFiringsLog()
-{
-  return sTimerFiringsLog;
+  static PRLogModuleInfo* sLog;
+  if (!sLog) {
+    sLog = PR_NewLogModule("nsTimerImpl");
+  }
+  return sLog;
 }
 
 #include <math.h>
@@ -114,6 +65,155 @@ myNS_MeanAndStdDev(double n, double sumOfValues, double sumOfSquaredValues,
   *meanResult = mean;
   *stdDevResult = stdDev;
 }
+
+namespace {
+
+// TimerEventAllocator is a thread-safe allocator used only for nsTimerEvents.
+// It's needed to avoid contention over the default allocator lock when
+// firing timer events (see bug 733277).  The thread-safety is required because
+// nsTimerEvent objects are allocated on the timer thread, and freed on another
+// thread.  Because TimerEventAllocator has its own lock, contention over that
+// lock is limited to the allocation and deallocation of nsTimerEvent objects.
+//
+// Because this allocator is layered over PLArenaPool, it never shrinks -- even
+// "freed" nsTimerEvents aren't truly freed, they're just put onto a free-list
+// for later recycling.  So the amount of memory consumed will always be equal
+// to the high-water mark consumption.  But nsTimerEvents are small and it's
+// unusual to have more than a few hundred of them, so this shouldn't be a
+// problem in practice.
+
+class TimerEventAllocator
+{
+private:
+  struct FreeEntry
+  {
+    FreeEntry* mNext;
+  };
+
+  PLArenaPool mPool;
+  FreeEntry* mFirstFree;
+  mozilla::Monitor mMonitor;
+
+public:
+  TimerEventAllocator()
+    : mFirstFree(nullptr)
+    , mMonitor("TimerEventAllocator")
+  {
+    PL_InitArenaPool(&mPool, "TimerEventPool", 4096, /* align = */ 0);
+  }
+
+  ~TimerEventAllocator()
+  {
+    PL_FinishArenaPool(&mPool);
+  }
+
+  void* Alloc(size_t aSize);
+  void Free(void* aPtr);
+};
+
+} // namespace
+
+class nsTimerEvent : public nsRunnable
+{
+public:
+  NS_IMETHOD Run();
+
+  nsTimerEvent()
+    : mTimer()
+    , mGeneration(0)
+  {
+    MOZ_COUNT_CTOR(nsTimerEvent);
+
+    MOZ_ASSERT(gThread->IsOnTimerThread(),
+               "nsTimer must always be allocated on the timer thread");
+
+    sAllocatorUsers++;
+  }
+
+  TimeStamp mInitTime;
+
+  static void Init();
+  static void Shutdown();
+  static void DeleteAllocatorIfNeeded();
+
+  static void* operator new(size_t aSize) CPP_THROW_NEW
+  {
+    return sAllocator->Alloc(aSize);
+  }
+  void operator delete(void* aPtr)
+  {
+    sAllocator->Free(aPtr);
+    DeleteAllocatorIfNeeded();
+  }
+
+  already_AddRefed<nsTimerImpl> ForgetTimer()
+  {
+    return mTimer.forget();
+  }
+
+  void SetTimer(already_AddRefed<nsTimerImpl> aTimer)
+  {
+    mTimer = aTimer;
+    mGeneration = mTimer->GetGeneration();
+  }
+
+private:
+  ~nsTimerEvent()
+  {
+    MOZ_COUNT_DTOR(nsTimerEvent);
+
+    MOZ_ASSERT(!sCanDeleteAllocator || sAllocatorUsers > 0,
+               "This will result in us attempting to deallocate the nsTimerEvent allocator twice");
+    sAllocatorUsers--;
+  }
+
+  nsRefPtr<nsTimerImpl> mTimer;
+  int32_t      mGeneration;
+
+  static TimerEventAllocator* sAllocator;
+  static Atomic<int32_t> sAllocatorUsers;
+  static bool sCanDeleteAllocator;
+};
+
+TimerEventAllocator* nsTimerEvent::sAllocator = nullptr;
+Atomic<int32_t> nsTimerEvent::sAllocatorUsers;
+bool nsTimerEvent::sCanDeleteAllocator = false;
+
+namespace {
+
+void*
+TimerEventAllocator::Alloc(size_t aSize)
+{
+  MOZ_ASSERT(aSize == sizeof(nsTimerEvent));
+
+  mozilla::MonitorAutoLock lock(mMonitor);
+
+  void* p;
+  if (mFirstFree) {
+    p = mFirstFree;
+    mFirstFree = mFirstFree->mNext;
+  } else {
+    PL_ARENA_ALLOCATE(p, &mPool, aSize);
+    if (!p) {
+      return nullptr;
+    }
+  }
+
+  return p;
+}
+
+void
+TimerEventAllocator::Free(void* aPtr)
+{
+  mozilla::MonitorAutoLock lock(mMonitor);
+
+  FreeEntry* entry = reinterpret_cast<FreeEntry*>(aPtr);
+
+  entry->mNext = mFirstFree;
+  mFirstFree = entry;
+}
+
+} // namespace
 
 NS_IMPL_QUERY_INTERFACE(nsTimerImpl, nsITimer)
 NS_IMPL_ADDREF(nsTimerImpl)
@@ -178,7 +278,6 @@ nsTimerImpl::Release(void)
 
 nsTimerImpl::nsTimerImpl() :
   mClosure(nullptr),
-  mName(nsTimerImpl::Nothing),
   mCallbackType(CallbackType::Unknown),
   mFiring(false),
   mArmed(false),
@@ -202,6 +301,8 @@ nsresult
 nsTimerImpl::Startup()
 {
   nsresult rv;
+
+  nsTimerEvent::Init();
 
   gThread = new TimerThread();
 
@@ -235,11 +336,13 @@ nsTimerImpl::Shutdown()
 
   gThread->Shutdown();
   NS_RELEASE(gThread);
+
+  nsTimerEvent::Shutdown();
 }
 
 
 nsresult
-nsTimerImpl::InitCommon(uint32_t aDelay, uint32_t aType)
+nsTimerImpl::InitCommon(uint32_t aType, uint32_t aDelay)
 {
   nsresult rv;
 
@@ -256,7 +359,23 @@ nsTimerImpl::InitCommon(uint32_t aDelay, uint32_t aType)
     return rv;
   }
 
-  gThread->RemoveTimer(this);
+  /**
+   * In case of re-Init, both with and without a preceding Cancel, clear the
+   * mCanceled flag and assign a new mGeneration.  But first, remove any armed
+   * timer from the timer thread's list.
+   *
+   * If we are racing with the timer thread to remove this timer and we lose,
+   * the RemoveTimer call made here will fail to find this timer in the timer
+   * thread's list, and will return false harmlessly.  We test mArmed here to
+   * avoid the small overhead in RemoveTimer of locking the timer thread and
+   * checking its list for this timer.  It's safe to test mArmed even though
+   * it might be cleared on another thread in the next cycle (or even already
+   * be cleared by another CPU whose store hasn't reached our CPU's cache),
+   * because RemoveTimer is idempotent.
+   */
+  if (mArmed) {
+    gThread->RemoveTimer(this);
+  }
   mCanceled = false;
   mTimeout = TimeStamp();
   mGeneration = gGenerator++;
@@ -267,12 +386,11 @@ nsTimerImpl::InitCommon(uint32_t aDelay, uint32_t aType)
   return gThread->AddTimer(this);
 }
 
-nsresult
-nsTimerImpl::InitWithFuncCallbackCommon(nsTimerCallbackFunc aFunc,
-                                        void* aClosure,
-                                        uint32_t aDelay,
-                                        uint32_t aType,
-                                        Name aName)
+NS_IMETHODIMP
+nsTimerImpl::InitWithFuncCallback(nsTimerCallbackFunc aFunc,
+                                  void* aClosure,
+                                  uint32_t aDelay,
+                                  uint32_t aType)
 {
   if (NS_WARN_IF(!aFunc)) {
     return NS_ERROR_INVALID_ARG;
@@ -282,41 +400,8 @@ nsTimerImpl::InitWithFuncCallbackCommon(nsTimerCallbackFunc aFunc,
   mCallbackType = CallbackType::Function;
   mCallback.c = aFunc;
   mClosure = aClosure;
-  mName = aName;
 
-  return InitCommon(aDelay, aType);
-}
-
-NS_IMETHODIMP
-nsTimerImpl::InitWithFuncCallback(nsTimerCallbackFunc aFunc,
-                                  void* aClosure,
-                                  uint32_t aDelay,
-                                  uint32_t aType)
-{
-  Name name(nsTimerImpl::Nothing);
-  return InitWithFuncCallbackCommon(aFunc, aClosure, aDelay, aType, name);
-}
-
-NS_IMETHODIMP
-nsTimerImpl::InitWithNamedFuncCallback(nsTimerCallbackFunc aFunc,
-                                       void* aClosure,
-                                       uint32_t aDelay,
-                                       uint32_t aType,
-                                       const char* aNameString)
-{
-  Name name(aNameString);
-  return InitWithFuncCallbackCommon(aFunc, aClosure, aDelay, aType, name);
-}
-
-NS_IMETHODIMP
-nsTimerImpl::InitWithNameableFuncCallback(nsTimerCallbackFunc aFunc,
-                                          void* aClosure,
-                                          uint32_t aDelay,
-                                          uint32_t aType,
-                                          nsTimerNameCallbackFunc aNameFunc)
-{
-  Name name(aNameFunc);
-  return InitWithFuncCallbackCommon(aFunc, aClosure, aDelay, aType, name);
+  return InitCommon(aType, aDelay);
 }
 
 NS_IMETHODIMP
@@ -333,7 +418,7 @@ nsTimerImpl::InitWithCallback(nsITimerCallback* aCallback,
   mCallback.i = aCallback;
   NS_ADDREF(mCallback.i);
 
-  return InitCommon(aDelay, aType);
+  return InitCommon(aType, aDelay);
 }
 
 NS_IMETHODIMP
@@ -348,7 +433,7 @@ nsTimerImpl::Init(nsIObserver* aObserver, uint32_t aDelay, uint32_t aType)
   mCallback.o = aObserver;
   NS_ADDREF(mCallback.o);
 
-  return InitCommon(aDelay, aType);
+  return InitCommon(aType, aDelay);
 }
 
 NS_IMETHODIMP
@@ -374,6 +459,12 @@ nsTimerImpl::SetDelay(uint32_t aDelay)
     NS_ERROR("nsITimer->SetDelay() called when the "
              "one-shot timer is not set up.");
     return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  // If we're already repeating precisely, update mTimeout now so that the
+  // new delay takes effect in the future.
+  if (!mTimeout.IsNull() && mType == TYPE_REPEATING_PRECISE) {
+    mTimeout = TimeStamp::Now();
   }
 
   SetDelayInternal(aDelay);
@@ -464,8 +555,10 @@ nsTimerImpl::Fire()
     return;
   }
 
+#if !defined(MOZILLA_XPCOMRT_API)
   PROFILER_LABEL("Timer", "Fire",
                  js::ProfileEntry::Category::OTHER);
+#endif
 
   TimeStamp now = TimeStamp::Now();
   if (MOZ_LOG_TEST(GetTimerLog(), LogLevel::Debug)) {
@@ -515,10 +608,6 @@ nsTimerImpl::Fire()
   }
   ReleaseCallback();
 
-  if (MOZ_LOG_TEST(GetTimerFiringsLog(), LogLevel::Debug)) {
-    LogFiring(callbackType, callback);
-  }
-
   switch (callbackType) {
     case CallbackType::Function:
       callback.c(this, mClosure);
@@ -557,9 +646,10 @@ nsTimerImpl::Fire()
          ("[this=%p] Took %fms to fire timer callback\n",
           this, (TimeStamp::Now() - now).ToMilliseconds()));
 
-  // Reschedule repeating timers, but make sure that we aren't armed already
-  // (which can happen if the callback reinitialized the timer).
-  if (IsRepeating() && !mArmed) {
+  // Reschedule repeating timers, except REPEATING_PRECISE which already did
+  // that in PostTimerEvent, but make sure that we aren't armed already (which
+  // can happen if the callback reinitialized the timer).
+  if (IsRepeating() && mType != TYPE_REPEATING_PRECISE && !mArmed) {
     if (mType == TYPE_REPEATING_SLACK) {
       SetDelayInternal(mDelay);  // force mTimeout to be recomputed.  For
     }
@@ -571,119 +661,115 @@ nsTimerImpl::Fire()
   }
 }
 
-#if defined(HAVE_DLADDR) && defined(HAVE___CXA_DEMANGLE)
-#define USE_DLADDR 1
-#endif
-
-#ifdef USE_DLADDR
-#include <cxxabi.h>
-#include <dlfcn.h>
-#endif
-
-// See the big comment above GetTimerFiringsLog() to understand this code.
 void
-nsTimerImpl::LogFiring(CallbackType aCallbackType, CallbackUnion aCallback)
+nsTimerEvent::Init()
 {
-  const char* typeStr;
-  switch (mType) {
-    case TYPE_ONE_SHOT:                   typeStr = "ONE_SHOT"; break;
-    case TYPE_REPEATING_SLACK:            typeStr = "SLACK   "; break;
-    case TYPE_REPEATING_PRECISE:          /* fall through */
-    case TYPE_REPEATING_PRECISE_CAN_SKIP: typeStr = "PRECISE "; break;
-    default:                              MOZ_CRASH("bad type");
+  sAllocator = new TimerEventAllocator();
+}
+
+void
+nsTimerEvent::Shutdown()
+{
+  sCanDeleteAllocator = true;
+  DeleteAllocatorIfNeeded();
+}
+
+void
+nsTimerEvent::DeleteAllocatorIfNeeded()
+{
+  if (sCanDeleteAllocator && sAllocatorUsers == 0) {
+    delete sAllocator;
+    sAllocator = nullptr;
+  }
+}
+
+NS_IMETHODIMP
+nsTimerEvent::Run()
+{
+  if (mGeneration != mTimer->GetGeneration()) {
+    return NS_OK;
   }
 
-  switch (aCallbackType) {
-    case CallbackType::Function: {
-      bool needToFreeName = false;
-      const char* annotation = "";
-      const char* name;
-      static const size_t buflen = 1024;
-      char buf[buflen];
+  if (MOZ_LOG_TEST(GetTimerLog(), LogLevel::Debug)) {
+    TimeStamp now = TimeStamp::Now();
+    MOZ_LOG(GetTimerLog(), LogLevel::Debug,
+           ("[this=%p] time between PostTimerEvent() and Fire(): %fms\n",
+            this, (now - mInitTime).ToMilliseconds()));
+  }
 
-      if (mName.is<NameString>()) {
-        name = mName.as<NameString>();
+  mTimer->Fire();
+  // Since nsTimerImpl is not thread-safe, we should release |mTimer|
+  // here in the target thread to avoid race condition. Otherwise,
+  // ~nsTimerEvent() which calls nsTimerImpl::Release() could run in the
+  // timer thread and result in race condition.
+  mTimer = nullptr;
 
-      } else if (mName.is<NameFunc>()) {
-        mName.as<NameFunc>()(this, mClosure, buf, buflen);
-        name = buf;
+  return NS_OK;
+}
 
-      } else {
-        MOZ_ASSERT(mName.is<NameNothing>());
-#ifdef USE_DLADDR
-        annotation = "[from dladdr] ";
+already_AddRefed<nsTimerImpl>
+nsTimerImpl::PostTimerEvent(already_AddRefed<nsTimerImpl> aTimerRef)
+{
+  nsRefPtr<nsTimerImpl> timer(aTimerRef);
+  if (!timer->mEventTarget) {
+    NS_ERROR("Attempt to post timer event to NULL event target");
+    return timer.forget();
+  }
 
-        Dl_info info;
-        void* addr = reinterpret_cast<void*>(aCallback.c);
-        if (dladdr(addr, &info) == 0) {
-          name = "???[dladdr: failed]";
+  // XXX we may want to reuse this nsTimerEvent in the case of repeating timers.
 
-        } else if (info.dli_sname) {
-          int status;
-          name = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
-          if (status == 0) {
-            // Success. Because we didn't pass in a buffer to __cxa_demangle it
-            // allocates its own one with malloc() which we must free() later.
-            MOZ_ASSERT(name);
-            needToFreeName = true;
-          } else if (status == -1) {
-            name = "???[__cxa_demangle: OOM]";
-          } else if (status == -2) {
-            name = "???[__cxa_demangle: invalid mangled name]";
-          } else if (status == -3) {
-            name = "???[__cxa_demangle: invalid argument]";
-          } else {
-            name = "???[__cxa_demangle: unexpected status value]";
-          }
+  // Since TimerThread addref'd 'timer' for us, we don't need to addref here.
+  // We will release either in ~nsTimerEvent(), or pass the reference back to
+  // the caller. We need to copy the generation number from this timer into the
+  // event, so we can avoid firing a timer that was re-initialized after being
+  // canceled.
 
-        } else if (info.dli_fname) {
-          // The "#0: " prefix is necessary for fix_linux_stack.py to interpret
-          // this string as something to convert.
-          snprintf(buf, buflen, "#0: ???[%s +0x%" PRIxPTR "]\n",
-                   info.dli_fname, uintptr_t(addr) - uintptr_t(info.dli_fbase));
-          name = buf;
+  // Note: We override operator new for this class, and the override is
+  // fallible!
+  nsRefPtr<nsTimerEvent> event = new nsTimerEvent;
+  if (!event) {
+    return timer.forget();
+  }
 
-        } else {
-          name = "???[dladdr: no symbol or shared object obtained]";
-        }
-#else
-        name = "???[dladdr is unimplemented or doesn't work well on this OS]";
+  if (MOZ_LOG_TEST(GetTimerLog(), LogLevel::Debug)) {
+    event->mInitTime = TimeStamp::Now();
+  }
+
+  // If this is a repeating precise timer, we need to calculate the time for
+  // the next timer to fire before we make the callback.
+  if (timer->IsRepeatingPrecisely()) {
+    timer->SetDelayInternal(timer->mDelay);
+
+    // But only re-arm REPEATING_PRECISE timers.
+    if (gThread && timer->mType == TYPE_REPEATING_PRECISE) {
+      nsresult rv = gThread->AddTimer(timer);
+      if (NS_FAILED(rv)) {
+        return timer.forget();
+      }
+    }
+  }
+
+#ifdef MOZ_TASK_TRACER
+  // During the dispatch of TimerEvent, we overwrite the current TraceInfo
+  // partially with the info saved in timer earlier, and restore it back by
+  // AutoSaveCurTraceInfo.
+  AutoSaveCurTraceInfo saveCurTraceInfo;
+  (timer->GetTracedTask()).SetTLSTraceInfo();
 #endif
-      }
 
-      MOZ_LOG(GetTimerFiringsLog(), LogLevel::Debug,
-              ("[%d]    fn timer (%s %5d ms): %s%s\n",
-               getpid(), typeStr, mDelay, annotation, name));
+  nsIEventTarget* target = timer->mEventTarget;
+  event->SetTimer(timer.forget());
 
-      if (needToFreeName) {
-        free(const_cast<char*>(name));
-      }
-
-      break;
+  nsresult rv = target->Dispatch(event, NS_DISPATCH_NORMAL);
+  if (NS_FAILED(rv)) {
+    timer = event->ForgetTimer();
+    if (gThread) {
+      gThread->RemoveTimer(timer);
     }
-
-    case CallbackType::Interface: {
-      MOZ_LOG(GetTimerFiringsLog(), LogLevel::Debug,
-              ("[%d] iface timer (%s %5d ms): %p\n",
-               getpid(), typeStr, mDelay, aCallback.i));
-      break;
-    }
-
-    case CallbackType::Observer: {
-      MOZ_LOG(GetTimerFiringsLog(), LogLevel::Debug,
-              ("[%d]   obs timer (%s %5d ms): %p\n",
-               getpid(), typeStr, mDelay, aCallback.o));
-      break;
-    }
-
-    case CallbackType::Unknown:
-    default: {
-      MOZ_LOG(GetTimerFiringsLog(), LogLevel::Debug,
-              ("[%d]   ??? timer (%s, %5d ms)\n",
-               getpid(), typeStr, mDelay));
-      break;
-    }
+    return timer.forget();
   }
+
+  return nullptr;
 }
 
 void
@@ -694,7 +780,9 @@ nsTimerImpl::SetDelayInternal(uint32_t aDelay)
   mDelay = aDelay;
 
   TimeStamp now = TimeStamp::Now();
-  mTimeout = now;
+  if (mTimeout.IsNull() || mType != TYPE_REPEATING_PRECISE) {
+    mTimeout = now;
+  }
 
   mTimeout += delayInterval;
 
@@ -712,8 +800,6 @@ nsTimerImpl::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   return aMallocSizeOf(this);
 }
-
-/* static */ const nsTimerImpl::NameNothing nsTimerImpl::Nothing = 0;
 
 #ifdef MOZ_TASK_TRACER
 void

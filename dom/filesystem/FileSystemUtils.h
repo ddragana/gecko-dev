@@ -7,13 +7,12 @@
 #ifndef mozilla_dom_FileSystemUtils_h
 #define mozilla_dom_FileSystemUtils_h
 
-class nsIFile;
+#include "nsString.h"
 
 namespace mozilla {
 namespace dom {
 
-#define FILESYSTEM_DOM_PATH_SEPARATOR_LITERAL "/"
-#define FILESYSTEM_DOM_PATH_SEPARATOR_CHAR '/'
+#define FILESYSTEM_DOM_PATH_SEPARATOR "/"
 
 /*
  * This class is for error handling.
@@ -23,18 +22,26 @@ class FileSystemUtils
 {
 public:
   /*
-   * Return true if aDescendantPath is a descendant of aPath.
+   * Convert the path separator to "/".
    */
-  static bool
-  IsDescendantPath(nsIFile* aPath, nsIFile* aDescendantPath);
+  static void
+  LocalPathToNormalizedPath(const nsAString& aLocal, nsAString& aNorm);
 
-  /**
-   * Return true if this is valid DOMPath. It also splits the path in
-   * subdirectories and stores them in aParts.
+  /*
+   * Convert the normalized path separator "/" to the system dependent path
+   * separator, which is "/" on Mac and Linux, and "\" on Windows.
+   */
+  static void
+  NormalizedPathToLocalPath(const nsAString& aNorm, nsAString& aLocal);
+
+  /*
+   * Return true if aDescendantPath is a descendant of aPath. Both aPath and
+   * aDescendantPath are absolute DOM path.
    */
   static bool
-  IsValidRelativeDOMPath(const nsAString& aPath,
-                         nsTArray<nsString>& aParts);
+  IsDescendantPath(const nsAString& aPath, const nsAString& aDescendantPath);
+
+  static const char16_t kSeparatorChar = char16_t('/');
 };
 
 } // namespace dom

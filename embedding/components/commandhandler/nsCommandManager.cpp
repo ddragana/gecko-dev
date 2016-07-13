@@ -34,19 +34,29 @@ nsCommandManager::~nsCommandManager()
 {
 }
 
+static PLDHashOperator
+TraverseCommandObservers(const char* aKey,
+                         nsCommandManager::ObserverList* aObservers,
+                         void* aClosure)
+{
+  nsCycleCollectionTraversalCallback* cb =
+    static_cast<nsCycleCollectionTraversalCallback*>(aClosure);
+
+  int32_t i, numItems = aObservers->Length();
+  for (i = 0; i < numItems; ++i) {
+    cb->NoteXPCOMChild(aObservers->ElementAt(i));
+  }
+
+  return PL_DHASH_NEXT;
+}
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsCommandManager)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCommandManager)
   tmp->mObserversTable.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsCommandManager)
-  for (auto iter = tmp->mObserversTable.Iter(); !iter.Done(); iter.Next()) {
-    nsCommandManager::ObserverList* observers = iter.UserData();
-    int32_t numItems = observers->Length();
-    for (int32_t i = 0; i < numItems; ++i) {
-      cb.NoteXPCOMChild(observers->ElementAt(i));
-    }
-  }
+  tmp->mObserversTable.EnumerateRead(TraverseCommandObservers, &cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsCommandManager)
@@ -60,10 +70,11 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCommandManager)
 NS_INTERFACE_MAP_END
 
 NS_IMETHODIMP
-nsCommandManager::Init(mozIDOMWindowProxy* aWindow)
+nsCommandManager::Init(nsIDOMWindow* aWindow)
 {
   NS_ENSURE_ARG_POINTER(aWindow);
 
+  NS_ASSERTION(aWindow, "Need non-null window here");
   mWindow = aWindow; // weak ptr
   return NS_OK;
 }
@@ -139,7 +150,7 @@ nsCommandManager::RemoveCommandObserver(nsIObserver* aCommandObserver,
 
 NS_IMETHODIMP
 nsCommandManager::IsCommandSupported(const char* aCommandName,
-                                     mozIDOMWindowProxy* aTargetWindow,
+                                     nsIDOMWindow* aTargetWindow,
                                      bool* aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
@@ -153,7 +164,7 @@ nsCommandManager::IsCommandSupported(const char* aCommandName,
 
 NS_IMETHODIMP
 nsCommandManager::IsCommandEnabled(const char* aCommandName,
-                                   mozIDOMWindowProxy* aTargetWindow,
+                                   nsIDOMWindow* aTargetWindow,
                                    bool* aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
@@ -172,7 +183,7 @@ nsCommandManager::IsCommandEnabled(const char* aCommandName,
 
 NS_IMETHODIMP
 nsCommandManager::GetCommandState(const char* aCommandName,
-                                  mozIDOMWindowProxy* aTargetWindow,
+                                  nsIDOMWindow* aTargetWindow,
                                   nsICommandParams* aCommandParams)
 {
   nsCOMPtr<nsIController> controller;
@@ -197,7 +208,7 @@ nsCommandManager::GetCommandState(const char* aCommandName,
 NS_IMETHODIMP
 nsCommandManager::DoCommand(const char* aCommandName,
                             nsICommandParams* aCommandParams,
-                            mozIDOMWindowProxy* aTargetWindow)
+                            nsIDOMWindow* aTargetWindow)
 {
   nsCOMPtr<nsIController> controller;
   nsresult rv = GetControllerForCommand(aCommandName, aTargetWindow,
@@ -218,7 +229,7 @@ nsCommandManager::DoCommand(const char* aCommandName,
 
 nsresult
 nsCommandManager::GetControllerForCommand(const char* aCommand,
-                                          mozIDOMWindowProxy* aTargetWindow,
+                                          nsIDOMWindow* aTargetWindow,
                                           nsIController** aResult)
 {
   nsresult rv = NS_ERROR_FAILURE;
@@ -226,7 +237,7 @@ nsCommandManager::GetControllerForCommand(const char* aCommand,
 
   // check if we're in content or chrome
   // if we're not chrome we must have a target window or we bail
-  if (!nsContentUtils::LegacyIsCallerChromeOrNativeCode()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     if (!aTargetWindow) {
       return rv;
     }
@@ -237,10 +248,10 @@ nsCommandManager::GetControllerForCommand(const char* aCommand,
     }
   }
 
-  if (auto* targetWindow = nsPIDOMWindowOuter::From(aTargetWindow)) {
+  if (aTargetWindow) {
     // get the controller for this particular window
     nsCOMPtr<nsIControllers> controllers;
-    rv = targetWindow->GetControllers(getter_AddRefs(controllers));
+    rv = aTargetWindow->GetControllers(getter_AddRefs(controllers));
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -252,7 +263,7 @@ nsCommandManager::GetControllerForCommand(const char* aCommand,
     return controllers->GetControllerForCommand(aCommand, aResult);
   }
 
-  auto* window = nsPIDOMWindowOuter::From(mWindow);
+  nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(mWindow));
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
   nsCOMPtr<nsPIWindowRoot> root = window->GetTopWindowRoot();
   NS_ENSURE_TRUE(root, NS_ERROR_FAILURE);

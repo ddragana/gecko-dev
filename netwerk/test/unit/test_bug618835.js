@@ -12,13 +12,22 @@
 //
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var httpserv;
 
 function setupChannel(path) {
-  return NetUtil.newChannel({uri: path, loadUsingSystemPrincipal: true})
-                .QueryInterface(Ci.nsIHttpChannel);
+    var ios =
+        Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
+    return chan = ios.newChannel2(path,
+                                  "",
+                                  null,
+                                  null,      // aLoadingNode
+                                  Services.scriptSecurityManager.getSystemPrincipal(),
+                                  null,      // aTriggeringPrincipal
+                                  Ci.nsILoadInfo.SEC_NORMAL,
+                                  Ci.nsIContentPolicy.TYPE_OTHER)
+                     .QueryInterface(Ci.nsIHttpChannel);
 }
 
 // Verify that Content-Location-URI has been loaded once, load post_target
@@ -31,7 +40,7 @@ InitialListener.prototype = {
             var channel = setupChannel("http://localhost:" +
                                        httpserv.identity.primaryPort + "/post");
             channel.requestMethod = "POST";
-            channel.asyncOpen2(new RedirectingListener());
+            channel.asyncOpen(new RedirectingListener(), null);
         });
     }
 };
@@ -46,7 +55,7 @@ RedirectingListener.prototype = {
             var channel = setupChannel("http://localhost:" +
                                        httpserv.identity.primaryPort + "/post");
             channel.requestMethod = "POST";
-            channel.asyncOpen2(new VerifyingListener());
+            channel.asyncOpen(new VerifyingListener(), null);
         });
     }
 };
@@ -60,7 +69,7 @@ VerifyingListener.prototype = {
         do_check_eq(2, numberOfHandlerCalls);
         var channel = setupChannel("http://localhost:" +
                                    httpserv.identity.primaryPort + "/cl");
-        channel.asyncOpen2(new FinalListener());
+        channel.asyncOpen(new FinalListener(), null);
     }
 };
 
@@ -88,7 +97,7 @@ function run_test() {
   // Load Content-Location URI into cache and start the chain of loads
   var channel = setupChannel("http://localhost:" +
                              httpserv.identity.primaryPort + "/cl");
-  channel.asyncOpen2(new InitialListener());
+  channel.asyncOpen(new InitialListener(), null);
 
   do_test_pending();
 }

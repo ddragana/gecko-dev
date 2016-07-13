@@ -152,7 +152,7 @@ widget/android/bindings/export: build/annotationProcessors/export
 mobile/android/tests/browser/robocop/roboextender/tools: mobile/android/tests/javaaddons/tools
 
 ifdef ENABLE_CLANG_PLUGIN
-$(filter-out config/host build/unix/stdc++compat/% build/clang-plugin/%,$(compile_targets)): build/clang-plugin/target build/clang-plugin/tests/target
+$(filter-out build/clang-plugin/%,$(compile_targets)): build/clang-plugin/target build/clang-plugin/tests/target
 build/clang-plugin/tests/target: build/clang-plugin/target
 endif
 
@@ -168,11 +168,11 @@ endif
 ifeq ($(MOZ_REPLACE_MALLOC_LINKAGE),dummy library)
 mozglue/build/target memory/replace/logalloc/replay/target: memory/replace/dummy/target
 endif
+ifdef MOZ_CRT
+mozglue/crt/target: mozglue/build/target
+endif
 # js/src/target can end up invoking js/src/host rules (through object files
 # depending on jsautokw.h, which depends on host_jskwgen, and that can't
 # happen at the same time (bug #1146738)
 js/src/target: js/src/host
 endif
-# Most things are built during compile (target/host), but some things happen during export
-# Those need to depend on config/export for system wrappers.
-$(addprefix build/unix/stdc++compat/,target host) build/clang-plugin/target: config/export

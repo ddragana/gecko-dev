@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var EXPORTED_SYMBOLS = [
+let EXPORTED_SYMBOLS = [
   "ContentPrefStore",
 ];
 
@@ -77,12 +77,6 @@ ContentPrefStore.prototype = {
     this._globalNames.clear();
   },
 
-  groupsMatchIncludingSubdomains: function CPS_groupsMatchIncludingSubdomains(group, group2) {
-    let idx = group2.indexOf(group);
-    return (idx == group2.length - group.length &&
-         (idx == 0 || group2[idx - 1] == "."));
-  },
-
   * [Symbol.iterator]() {
     for (let [group, names] of this._groups) {
       for (let [name, val] of names) {
@@ -106,9 +100,10 @@ ContentPrefStore.prototype = {
       if (includeSubdomains) {
         for (let [sgroup, , ] of this) {
           if (sgroup) {
-            if (this.groupsMatchIncludingSubdomains(group, sgroup)) {
+            let idx = sgroup.indexOf(group);
+            if (idx == sgroup.length - group.length &&
+                (idx == 0 || sgroup[idx - 1] == "."))
               yield sgroup;
-            }
           }
         }
       }

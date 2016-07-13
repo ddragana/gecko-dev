@@ -13,7 +13,7 @@ nsCertVerificationThread *nsCertVerificationThread::verification_thread_singleto
 NS_IMPL_ISUPPORTS(nsCertVerificationResult, nsICertVerificationResult)
 
 namespace {
-class DispatchCertVerificationResult : public Runnable
+class DispatchCertVerificationResult : public nsRunnable
 {
 public:
   DispatchCertVerificationResult(const nsMainThreadPtrHandle<nsICertVerificationListener>& aListener,

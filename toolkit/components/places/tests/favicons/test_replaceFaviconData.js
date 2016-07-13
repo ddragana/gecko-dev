@@ -5,18 +5,17 @@
  * Tests for mozIAsyncFavicons::replaceFaviconData()
  */
 
-var iconsvc = PlacesUtils.favicons;
-var histsvc = PlacesUtils.history;
-var systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+let iconsvc = PlacesUtils.favicons;
+let histsvc = PlacesUtils.history;
 
-var originalFavicon = {
+let originalFavicon = {
   file: do_get_file("favicon-normal16.png"),
   uri: uri(do_get_file("favicon-normal16.png")),
   data: readFileData(do_get_file("favicon-normal16.png")),
   mimetype: "image/png"
 };
 
-var uniqueFaviconId = 0;
+let uniqueFaviconId = 0;
 function createFavicon(fileName) {
   let tempdir = Services.dirsvc.get("TmpD", Ci.nsILocalFile);
 
@@ -29,7 +28,7 @@ function createFavicon(fileName) {
 
   let stream = Cc["@mozilla.org/network/file-output-stream;1"]
     .createInstance(Ci.nsIFileOutputStream);
-  stream.init(outfile, 0x02 | 0x08 | 0x10, 0o600, 0);
+  stream.init(outfile, 0x02 | 0x08 | 0x10, 0600, 0);
 
   // append some data that sniffers/encoders will ignore that will distinguish
   // the different favicons we'll create
@@ -57,9 +56,9 @@ function run_test() {
   // check that the favicon loaded correctly
   do_check_eq(originalFavicon.data.length, 286);
   run_next_test();
-}
+};
 
-add_task(function* test_replaceFaviconData_validHistoryURI() {
+add_task(function test_replaceFaviconData_validHistoryURI() {
   do_print("test replaceFaviconData for valid history uri");
 
   let pageURI = uri("http://test1.bar/");
@@ -81,13 +80,13 @@ add_task(function* test_replaceFaviconData_validHistoryURI() {
           favicon.file.remove(false);
           deferSetAndFetchFavicon.resolve();
         });
-    }, systemPrincipal);
+    });
   yield deferSetAndFetchFavicon.promise;
 
   yield PlacesTestUtils.clearHistory();
 });
 
-add_task(function* test_replaceFaviconData_overrideDefaultFavicon() {
+add_task(function test_replaceFaviconData_overrideDefaultFavicon() {
   do_print("test replaceFaviconData to override a later setAndFetchFaviconForPage");
 
   let pageURI = uri("http://test2.bar/");
@@ -113,13 +112,13 @@ add_task(function* test_replaceFaviconData_overrideDefaultFavicon() {
           secondFavicon.file.remove(false);
           deferSetAndFetchFavicon.resolve();
         });
-    }, systemPrincipal);
+    });
   yield deferSetAndFetchFavicon.promise;
 
   yield PlacesTestUtils.clearHistory();
 });
 
-add_task(function* test_replaceFaviconData_replaceExisting() {
+add_task(function test_replaceFaviconData_replaceExisting() {
   do_print("test replaceFaviconData to override a previous setAndFetchFaviconForPage");
 
   let pageURI = uri("http://test3.bar");
@@ -147,16 +146,16 @@ add_task(function* test_replaceFaviconData_replaceExisting() {
                 firstFavicon.file.remove(false);
                 secondFavicon.file.remove(false);
                 deferSetAndFetchFavicon.resolve();
-              }, systemPrincipal);
+              });
           });
         });
-    }, systemPrincipal);
+    });
   yield deferSetAndFetchFavicon.promise;
 
   yield PlacesTestUtils.clearHistory();
 });
 
-add_task(function* test_replaceFaviconData_unrelatedReplace() {
+add_task(function test_replaceFaviconData_unrelatedReplace() {
   do_print("test replaceFaviconData to not make unrelated changes");
 
   let pageURI = uri("http://test4.bar/");
@@ -182,13 +181,13 @@ add_task(function* test_replaceFaviconData_unrelatedReplace() {
           unrelatedFavicon.file.remove(false);
           deferSetAndFetchFavicon.resolve();
         });
-    }, systemPrincipal);
+    });
   yield deferSetAndFetchFavicon.promise;
 
   yield PlacesTestUtils.clearHistory();
 });
 
-add_task(function* test_replaceFaviconData_badInputs() {
+add_task(function test_replaceFaviconData_badInputs() {
   do_print("test replaceFaviconData to throw on bad inputs");
 
   let favicon = createFavicon("favicon8.png");
@@ -228,7 +227,7 @@ add_task(function* test_replaceFaviconData_badInputs() {
   yield PlacesTestUtils.clearHistory();
 });
 
-add_task(function* test_replaceFaviconData_twiceReplace() {
+add_task(function test_replaceFaviconData_twiceReplace() {
   do_print("test replaceFaviconData on multiple replacements");
 
   let pageURI = uri("http://test5.bar/");
@@ -256,8 +255,8 @@ add_task(function* test_replaceFaviconData_twiceReplace() {
           firstFavicon.file.remove(false);
           secondFavicon.file.remove(false);
           deferSetAndFetchFavicon.resolve();
-        }, systemPrincipal);
-    }, systemPrincipal);
+        });
+    });
   yield deferSetAndFetchFavicon.promise;
 
   yield PlacesTestUtils.clearHistory();

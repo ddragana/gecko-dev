@@ -15,6 +15,7 @@
 #include "mozilla/IncrementalClearCOMRuleArray.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/css/Rule.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 
 class nsPresContext;
@@ -41,12 +42,14 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS(GroupRule)
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
-  // implement part of Rule
+  // implement part of nsIStyleRule and Rule
   DECL_STYLE_RULE_INHERIT_NO_DOMRULE
+  virtual void SetStyleSheet(CSSStyleSheet* aSheet) override;
+
+  // to help implement nsIStyleRule
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
-  virtual void SetStyleSheet(CSSStyleSheet* aSheet) override;
 
 public:
   void AppendStyleRule(Rule* aRule);
@@ -64,6 +67,7 @@ public:
    */
   nsresult DeleteStyleRuleAt(uint32_t aIndex);
   nsresult InsertStyleRuleAt(uint32_t aIndex, Rule* aRule);
+  nsresult ReplaceStyleRule(Rule *aOld, Rule *aNew);
 
   virtual bool UseForPresentation(nsPresContext* aPresContext,
                                     nsMediaQueryResultCacheKey& aKey) = 0;
@@ -75,7 +79,7 @@ public:
   static bool
   CloneRuleInto(Rule* aRule, void* aArray)
   {
-    RefPtr<Rule> clone = aRule->Clone();
+    nsRefPtr<Rule> clone = aRule->Clone();
     static_cast<IncrementalClearCOMRuleArray*>(aArray)->AppendObject(clone);
     return true;
   }
@@ -92,7 +96,7 @@ protected:
   nsresult DeleteRule(uint32_t aIndex);
 
   IncrementalClearCOMRuleArray mRules;
-  RefPtr<GroupRuleRuleList> mRuleCollection; // lazily constructed
+  nsRefPtr<GroupRuleRuleList> mRuleCollection; // lazily constructed
 };
 
 } // namespace css

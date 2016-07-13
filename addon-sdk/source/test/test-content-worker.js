@@ -118,15 +118,14 @@ exports["test:sample"] = WorkerTest(
         assert.equal(worker.url, window.location.href,
                          "worker.url still works");
         done();
-      },
-      onAttach: function() {
-        assert.equal(worker.url, window.location.href,
-                         "worker.url works");
-        assert.equal(worker.contentURL, window.location.href,
-                         "worker.contentURL works");
-        worker.postMessage("hi!");
       }
     });
+
+    assert.equal(worker.url, window.location.href,
+                     "worker.url works");
+    assert.equal(worker.contentURL, window.location.href,
+                     "worker.contentURL works");
+    worker.postMessage("hi!");
   }
 );
 
@@ -486,7 +485,7 @@ exports["test:setInterval async Errors passed to .onError"] = WorkerTest(
       onError: function(err) {
         count++;
         assert.equal(err.message, "ubik",
-            "error (correctly) propagated  " + count + " time(s)");
+            "error (corectly) propagated  " + count + " time(s)");
         if (count >= 3) done();
       }
     });
@@ -842,9 +841,10 @@ exports["test:worker events"] = WorkerTest(
       contentScript: 'new ' + function WorkerScope() {
         self.postMessage('start');
       },
-      onAttach: () => {
+      onAttach: win => {
         events.push('attach');
         assert.pass('attach event called when attached');
+        assert.equal(window, win, 'attach event passes in attached window');
       },
       onError: err => {
         assert.equal(err.message, 'Custom',
@@ -876,16 +876,13 @@ exports["test:onDetach in contentScript on destroy"] = WorkerTest(
           window.location.hash += '!' + reason;
         })
       },
-
-      onAttach: function() {
-        browser.contentWindow.addEventListener('hashchange', _ => {
-          assert.equal(browser.contentWindow.location.hash, '#detach!',
-                       "location.href is as expected");
-          done();
-        })
-        worker.destroy();
-      }
     });
+    browser.contentWindow.addEventListener('hashchange', _ => {
+      assert.equal(browser.contentWindow.location.hash, '#detach!',
+                   "location.href is as expected");
+      done();
+    })
+    worker.destroy();
   }
 );
 
@@ -941,7 +938,7 @@ exports["test:console method log functions properly"] = WorkerTest(
         assert.deepEqual(logs, [
           "function Function() { [native code] }",
           "(foo) => foo * foo",
-          "function foo(bar) { return bar + bar }"
+          "function foo(bar) { \"use strict\"; return bar + bar }"
         ]);
 
         done();

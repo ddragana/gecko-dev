@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2007 Henri Sivonen
- * Copyright (c) 2007-2015 Mozilla Foundation
+ * Copyright (c) 2007-2011 Mozilla Foundation
  * Portions of comments Copyright 2004-2008 Apple Computer, Inc., Mozilla
  * Foundation, and Opera Software ASA.
  *
@@ -88,7 +88,7 @@ nsHtml5TreeBuilder::startTokenization(nsHtml5Tokenizer* self)
   deepTreeSurrogateParent = nullptr;
   start(fragment);
   charBufferLen = 0;
-  charBuffer = nullptr;
+  charBuffer = jArray<char16_t,int32_t>::newJArray(1024);
   framesetOk = true;
   if (fragment) {
     nsIContentHandle* elt;
@@ -1102,7 +1102,7 @@ nsHtml5TreeBuilder::startTag(nsHtml5ElementName* elementName, nsHtml5HtmlAttribu
                     pop();
                   }
                   break;
-                } else if (!eltPos || (node->isSpecial() && (node->ns != kNameSpaceID_XHTML || (node->name != nsHtml5Atoms::p && node->name != nsHtml5Atoms::address && node->name != nsHtml5Atoms::div)))) {
+                } else if (node->isSpecial() && (node->ns != kNameSpaceID_XHTML || (node->name != nsHtml5Atoms::p && node->name != nsHtml5Atoms::address && node->name != nsHtml5Atoms::div))) {
                   break;
                 }
                 eltPos--;
@@ -1412,7 +1412,7 @@ nsHtml5TreeBuilder::startTag(nsHtml5ElementName* elementName, nsHtml5HtmlAttribu
               errStrayStartTag(name);
               NS_HTML5_BREAK(starttagloop);
             }
-            case NS_HTML5TREE_BUILDER_OUTPUT: {
+            case NS_HTML5TREE_BUILDER_OUTPUT_OR_LABEL: {
               reconstructTheActiveFormattingElements();
               appendToCurrentNodeAndPushElementMayFoster(elementName, attributes, formPointer);
               attributes = nullptr;
@@ -1991,7 +1991,7 @@ nsHtml5TreeBuilder::isSpecialParentInForeign(nsHtml5StackNode* stackNode)
 }
 
 nsString* 
-nsHtml5TreeBuilder::extractCharsetFromContent(nsString* attributeValue, nsHtml5TreeBuilder* tb)
+nsHtml5TreeBuilder::extractCharsetFromContent(nsString* attributeValue)
 {
   int32_t charsetState = NS_HTML5TREE_BUILDER_CHARSET_INITIAL;
   int32_t start = -1;
@@ -2180,7 +2180,7 @@ nsHtml5TreeBuilder::extractCharsetFromContent(nsString* attributeValue, nsHtml5T
     if (end == -1) {
       end = buffer.length;
     }
-    charset = nsHtml5Portability::newStringFromBuffer(buffer, start, end - start, tb);
+    charset = nsHtml5Portability::newStringFromBuffer(buffer, start, end - start);
   }
   return charset;
 }
@@ -2201,7 +2201,7 @@ nsHtml5TreeBuilder::checkMetaCharset(nsHtml5HtmlAttributes* attributes)
   }
   nsString* content = attributes->getValue(nsHtml5AttributeName::ATTR_CONTENT);
   if (content) {
-    nsString* extract = nsHtml5TreeBuilder::extractCharsetFromContent(content, this);
+    nsString* extract = nsHtml5TreeBuilder::extractCharsetFromContent(content);
     if (extract) {
       if (tokenizer->internalEncodingDeclaration(extract)) {
         requestSuspension();
@@ -2749,7 +2749,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
                   pop();
                 }
                 NS_HTML5_BREAK(endtagloop);
-              } else if (!eltPos || node->isSpecial()) {
+              } else if (node->isSpecial()) {
                 errStrayEndTag(name);
                 NS_HTML5_BREAK(endtagloop);
               }
@@ -3306,7 +3306,7 @@ nsHtml5TreeBuilder::clearStackBackTo(int32_t eltPos)
 {
   int32_t eltGroup = stack[eltPos]->getGroup();
   while (currentPtr > eltPos) {
-    if (stack[currentPtr]->ns == kNameSpaceID_XHTML && stack[currentPtr]->getGroup() == NS_HTML5TREE_BUILDER_TEMPLATE && (eltGroup == NS_HTML5TREE_BUILDER_TABLE || eltGroup == NS_HTML5TREE_BUILDER_TBODY_OR_THEAD_OR_TFOOT || eltGroup == NS_HTML5TREE_BUILDER_TR || !eltPos)) {
+    if (stack[currentPtr]->ns == kNameSpaceID_XHTML && stack[currentPtr]->getGroup() == NS_HTML5TREE_BUILDER_TEMPLATE && (eltGroup == NS_HTML5TREE_BUILDER_TABLE || eltGroup == NS_HTML5TREE_BUILDER_TBODY_OR_THEAD_OR_TFOOT || eltGroup == NS_HTML5TREE_BUILDER_TR || eltGroup == NS_HTML5TREE_BUILDER_HTML)) {
       return;
     }
     pop();
@@ -3593,7 +3593,6 @@ nsHtml5TreeBuilder::adoptionAgencyEndTag(nsIAtom* name)
     int32_t furthestBlockPos = formattingEltStackPos + 1;
     while (furthestBlockPos <= currentPtr) {
       nsHtml5StackNode* node = stack[furthestBlockPos];
-      MOZ_ASSERT(furthestBlockPos > 0, "How is formattingEltStackPos + 1 not > 0?");
       if (node->isSpecial()) {
         break;
       }

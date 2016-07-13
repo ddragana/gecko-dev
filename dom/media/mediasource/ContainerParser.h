@@ -7,7 +7,7 @@
 #ifndef MOZILLA_CONTAINERPARSER_H_
 #define MOZILLA_CONTAINERPARSER_H_
 
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsString.h"
 #include "MediaResource.h"
 
@@ -19,7 +19,7 @@ class SourceBufferResource;
 class ContainerParser {
 public:
   explicit ContainerParser(const nsACString& aType);
-  virtual ~ContainerParser();
+  virtual ~ContainerParser() = default;
 
   // Return true if aData starts with an initialization segment.
   // The base implementation exists only for debug logging and is expected
@@ -51,9 +51,6 @@ public:
     return mHasInitData;
   }
 
-  // Return true if a complete initialization segment has been passed
-  // to ParseStartAndEndTimestamps(). The calls below to retrieve
-  // MediaByteRanges will be valid from when this call first succeeds.
   bool HasCompleteInitData();
   // Returns the byte range of the first complete init segment, or an empty
   // range if not complete.
@@ -68,8 +65,8 @@ public:
   static ContainerParser* CreateForMIMEType(const nsACString& aType);
 
 protected:
-  RefPtr<MediaByteBuffer> mInitData;
-  RefPtr<SourceBufferResource> mResource;
+  nsRefPtr<MediaByteBuffer> mInitData;
+  nsRefPtr<SourceBufferResource> mResource;
   bool mHasInitData;
   MediaByteRange mCompleteInitSegmentRange;
   MediaByteRange mCompleteMediaHeaderRange;

@@ -153,9 +153,16 @@ function startTest() {
   }
 }
 
-// TODO: remove unsetting network.disable.ipc.security as part of bug 820712
-SpecialPowers.pushPrefEnv({
-  "set": [
-    ["network.disable.ipc.security", true],
-  ]
-}, startTest);
+// test_ipc.html executes all the tests in this directory in content process.
+// It will fail on this one for the moment.
+if (!SpecialPowers.isMainProcess()) {
+  todo(false, "We should make this work on content process");
+  SimpleTest.finish();
+} else {
+  // TODO: remove unsetting network.disable.ipc.security as part of bug 820712
+  SpecialPowers.pushPrefEnv({
+    "set": [
+      ["network.disable.ipc.security", true],
+    ]
+  }, startTest);
+}

@@ -63,7 +63,7 @@ XMLStylesheetProcessingInstruction::BindToTree(nsIDocument* aDocument,
 
   void (XMLStylesheetProcessingInstruction::*update)() =
     &XMLStylesheetProcessingInstruction::UpdateStyleSheetInternal;
-  nsContentUtils::AddScriptRunner(NewRunnableMethod(this, update));
+  nsContentUtils::AddScriptRunner(NS_NewRunnableMethod(this, update));
 
   return rv;  
 }
@@ -71,7 +71,7 @@ XMLStylesheetProcessingInstruction::BindToTree(nsIDocument* aDocument,
 void
 XMLStylesheetProcessingInstruction::UnbindFromTree(bool aDeep, bool aNullParent)
 {
-  nsCOMPtr<nsIDocument> oldDoc = GetUncomposedDoc();
+  nsCOMPtr<nsIDocument> oldDoc = GetCurrentDoc();
 
   ProcessingInstruction::UnbindFromTree(aDeep, aNullParent);
   UpdateStyleSheetInternal(oldDoc, nullptr);
@@ -188,7 +188,7 @@ XMLStylesheetProcessingInstruction::CloneDataNode(mozilla::dom::NodeInfo *aNodeI
 {
   nsAutoString data;
   nsGenericDOMDataNode::GetData(data);
-  RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
   return new XMLStylesheetProcessingInstruction(ni.forget(), data);
 }
 

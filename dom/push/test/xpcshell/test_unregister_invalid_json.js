@@ -39,10 +39,11 @@ add_task(function* test_unregister_invalid_json() {
     yield db.put(record);
   }
 
-  let unregisterDone;
-  let unregisterPromise = new Promise(resolve => unregisterDone = after(2, resolve));
+  let unregisterDefer = Promise.defer();
+  let unregisterDone = after(2, unregisterDefer.resolve);
   PushService.init({
     serverURI: "wss://push.example.org/",
+    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -50,8 +51,7 @@ add_task(function* test_unregister_invalid_json() {
           this.serverSendMsg(JSON.stringify({
             messageType: 'hello',
             status: 200,
-            uaid: userAgentID,
-            use_webpush: true,
+            uaid: userAgentID
           }));
         },
         onUnregister(request) {
@@ -62,31 +62,21 @@ add_task(function* test_unregister_invalid_json() {
     }
   });
 
-  yield rejects(
-    PushService.unregister({
-      scope: 'https://example.edu/page/1',
-      originAttributes: '',
-    }),
-    'Expected error for first invalid JSON response'
-  );
-
+  // "unregister" is fire-and-forget: it's sent via _send(), not
+  // _sendRequest().
+  yield PushNotificationService.unregister(
+    'https://example.edu/page/1', '');
   let record = yield db.getByKeyID(
     '87902e90-c57e-4d18-8354-013f4a556559');
   ok(!record, 'Failed to delete unregistered record');
 
-  yield rejects(
-    PushService.unregister({
-      scope: 'https://example.net/page/1',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for second invalid JSON response'
-  );
-
+  yield PushNotificationService.unregister(
+    'https://example.net/page/1', '');
   record = yield db.getByKeyID(
     '057caa8f-9b99-47ff-891c-adad18ce603e');
   ok(!record,
     'Failed to delete unregistered record after receiving invalid JSON');
 
-  yield unregisterPromise;
+  yield waitForPromise(unregisterDefer.promise, DEFAULT_TIMEOUT,
+    'Timed out waiting for unregister');
 });

@@ -20,11 +20,12 @@
 #define _nsFrameManagerBase_h_
 
 #include "nsDebug.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "mozilla/Attributes.h"
 
 class nsIFrame;
 class nsIPresShell;
+class nsStyleSet;
 
 class nsFrameManagerBase
 {
@@ -52,6 +53,8 @@ protected:
 
   // weak link, because the pres shell owns us
   nsIPresShell* MOZ_NON_OWNING_REF mPresShell;
+  // the pres shell owns the style set
+  nsStyleSet*                     mStyleSet;
   nsIFrame*                       mRootFrame;
   PLDHashTable                    mPlaceholderMap;
   UndisplayedMap*                 mUndisplayedMap;

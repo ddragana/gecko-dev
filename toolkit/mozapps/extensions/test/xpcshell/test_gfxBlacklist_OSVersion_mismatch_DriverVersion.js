@@ -3,7 +3,7 @@
  */
 
 // This should eventually be moved to head_addons.js
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 // Test whether blocklists specifying new OSeswcorrectly don't block if driver
 // versions are appropriately up-to-date.
@@ -58,7 +58,7 @@ function run_test() {
       do_test_finished();
       return;
     case "Darwin":
-      gfxInfo.spoofOSVersion(0x1080);
+      gfxInfo.spoofOSVersion(0x1090);
       break;
     case "Android":
       // On Android, the driver version is used as the OS version (because

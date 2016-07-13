@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -50,7 +49,7 @@ UpdategDisableXULCache()
     if (gDisableXULCache) {
         Telemetry::Accumulate(Telemetry::XUL_CACHE_DISABLED, true);
     }
-
+    
 }
 
 static void
@@ -103,10 +102,9 @@ nsXULPrototypeCache::GetInstance()
             nsXULPrototypeCache *p = sInstance;
             obsSvc->AddObserver(p, "chrome-flush-skin-caches", false);
             obsSvc->AddObserver(p, "chrome-flush-caches", false);
-            obsSvc->AddObserver(p, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
             obsSvc->AddObserver(p, "startupcache-invalidate", false);
         }
-
+		
     }
     return sInstance;
 }
@@ -121,8 +119,7 @@ nsXULPrototypeCache::Observe(nsISupports* aSubject,
     if (!strcmp(aTopic, "chrome-flush-skin-caches")) {
         FlushSkinFiles();
     }
-    else if (!strcmp(aTopic, "chrome-flush-caches") ||
-             !strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+    else if (!strcmp(aTopic, "chrome-flush-caches")) {
         Flush();
     }
     else if (!strcmp(aTopic, "startupcache-invalidate")) {
@@ -156,19 +153,19 @@ nsXULPrototypeCache::GetPrototype(nsIURI* aURI)
     rv = GetInputStream(aURI, getter_AddRefs(ois));
     if (NS_FAILED(rv))
         return nullptr;
-
-    RefPtr<nsXULPrototypeDocument> newProto;
+    
+    nsRefPtr<nsXULPrototypeDocument> newProto;
     rv = NS_NewXULPrototypeDocument(getter_AddRefs(newProto));
     if (NS_FAILED(rv))
         return nullptr;
-
+    
     rv = newProto->Read(ois);
     if (NS_SUCCEEDED(rv)) {
         rv = PutPrototype(newProto);
     } else {
         newProto = nullptr;
     }
-
+    
     mInputStreamTable.Remove(aURI);
     return newProto;
 }
@@ -212,7 +209,7 @@ nsXULPrototypeCache::PutScript(nsIURI* aURI,
 {
     MOZ_ASSERT(aScriptObject, "Need a non-NULL script");
 
-#ifdef DEBUG_BUG_392650
+#ifdef DEBUG
     if (mScriptTable.Get(aURI)) {
         nsAutoCString scriptName;
         aURI->GetSpec(scriptName);
@@ -233,7 +230,7 @@ nsXULPrototypeCache::PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo)
 {
     nsIURI* uri = aDocumentInfo->DocumentURI();
 
-    RefPtr<nsXBLDocumentInfo> info;
+    nsRefPtr<nsXBLDocumentInfo> info;
     mXBLDocTable.Get(uri, getter_AddRefs(info));
     if (!info) {
         mXBLDocTable.Put(uri, aDocumentInfo);
@@ -241,33 +238,56 @@ nsXULPrototypeCache::PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo)
     return NS_OK;
 }
 
+static PLDHashOperator
+FlushSkinXBL(nsIURI* aKey, nsRefPtr<nsXBLDocumentInfo>& aDocInfo, void* aClosure)
+{
+  nsAutoCString str;
+  aKey->GetPath(str);
+
+  PLDHashOperator ret = PL_DHASH_NEXT;
+
+  if (!strncmp(str.get(), "/skin", 5)) {
+    ret = PL_DHASH_REMOVE;
+  }
+
+  return ret;
+}
+
+static PLDHashOperator
+FlushSkinSheets(nsIURI* aKey, nsRefPtr<CSSStyleSheet>& aSheet, void* aClosure)
+{
+  nsAutoCString str;
+  aSheet->GetSheetURI()->GetPath(str);
+
+  PLDHashOperator ret = PL_DHASH_NEXT;
+
+  if (!strncmp(str.get(), "/skin", 5)) {
+    // This is a skin binding. Add the key to the list.
+    ret = PL_DHASH_REMOVE;
+  }
+  return ret;
+}
+
+static PLDHashOperator
+FlushScopedSkinStylesheets(nsIURI* aKey, nsRefPtr<nsXBLDocumentInfo> &aDocInfo, void* aClosure)
+{
+  aDocInfo->FlushSkinStylesheets();
+  return PL_DHASH_NEXT;
+}
+
 void
 nsXULPrototypeCache::FlushSkinFiles()
 {
   // Flush out skin XBL files from the cache.
-  for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-    nsAutoCString str;
-    iter.Key()->GetPath(str);
-    if (strncmp(str.get(), "/skin", 5) == 0) {
-      iter.Remove();
-    }
-  }
+  mXBLDocTable.Enumerate(FlushSkinXBL, nullptr);
 
   // Now flush out our skin stylesheets from the cache.
-  for (auto iter = mStyleSheetTable.Iter(); !iter.Done(); iter.Next()) {
-    nsAutoCString str;
-    iter.Data()->GetSheetURI()->GetPath(str);
-    if (strncmp(str.get(), "/skin", 5) == 0) {
-      iter.Remove();
-    }
-  }
+  mStyleSheetTable.Enumerate(FlushSkinSheets, nullptr);
 
   // Iterate over all the remaining XBL and make sure cached
   // scoped skin stylesheets are flushed and refetched by the
   // prototype bindings.
-  for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-    iter.Data()->FlushSkinStylesheets();
-  }
+  mXBLDocTable.Enumerate(FlushScopedSkinStylesheets, nullptr);
 }
 
 void
@@ -329,29 +349,30 @@ nsXULPrototypeCache::WritePrototype(nsXULPrototypeDocument* aPrototypeDocument)
 }
 
 nsresult
-nsXULPrototypeCache::GetInputStream(nsIURI* uri, nsIObjectInputStream** stream)
+nsXULPrototypeCache::GetInputStream(nsIURI* uri, nsIObjectInputStream** stream) 
 {
     nsAutoCString spec(kXULCachePrefix);
     nsresult rv = PathifyURI(uri, spec);
-    if (NS_FAILED(rv))
+    if (NS_FAILED(rv)) 
         return NS_ERROR_NOT_AVAILABLE;
-
-    UniquePtr<char[]> buf;
+    
+    nsAutoArrayPtr<char> buf;
     uint32_t len;
     nsCOMPtr<nsIObjectInputStream> ois;
     StartupCache* sc = StartupCache::GetSingleton();
     if (!sc)
         return NS_ERROR_NOT_AVAILABLE;
 
-    rv = sc->GetBuffer(spec.get(), &buf, &len);
+    rv = sc->GetBuffer(spec.get(), getter_Transfers(buf), &len);
     if (NS_FAILED(rv))
         return NS_ERROR_NOT_AVAILABLE;
 
-    rv = NewObjectInputStreamFromBuffer(Move(buf), len, getter_AddRefs(ois));
+    rv = NewObjectInputStreamFromBuffer(buf, len, getter_AddRefs(ois));
     NS_ENSURE_SUCCESS(rv, rv);
+    buf.forget();
 
     mInputStreamTable.Put(uri, ois);
-
+    
     ois.forget(stream);
     return NS_OK;
 }
@@ -376,7 +397,7 @@ nsXULPrototypeCache::GetOutputStream(nsIURI* uri, nsIObjectOutputStream** stream
             = do_QueryInterface(storageStream);
         objectOutput->SetOutputStream(outputStream);
     } else {
-        rv = NewObjectOutputWrappedStorageStream(getter_AddRefs(objectOutput),
+        rv = NewObjectOutputWrappedStorageStream(getter_AddRefs(objectOutput), 
                                                  getter_AddRefs(storageStream),
                                                  false);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -387,7 +408,7 @@ nsXULPrototypeCache::GetOutputStream(nsIURI* uri, nsIObjectOutputStream** stream
 }
 
 nsresult
-nsXULPrototypeCache::FinishOutputStream(nsIURI* uri)
+nsXULPrototypeCache::FinishOutputStream(nsIURI* uri) 
 {
     nsresult rv;
     StartupCache* sc = StartupCache::GetSingleton();
@@ -401,10 +422,11 @@ nsXULPrototypeCache::FinishOutputStream(nsIURI* uri)
     nsCOMPtr<nsIOutputStream> outputStream
         = do_QueryInterface(storageStream);
     outputStream->Close();
-
-    UniquePtr<char[]> buf;
+    
+    nsAutoArrayPtr<char> buf;
     uint32_t len;
-    rv = NewBufferFromStorageStream(storageStream, &buf, &len);
+    rv = NewBufferFromStorageStream(storageStream, getter_Transfers(buf), 
+                                    &len);
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (!mStartupCacheURITable.GetEntry(uri)) {
@@ -412,7 +434,7 @@ nsXULPrototypeCache::FinishOutputStream(nsIURI* uri)
         rv = PathifyURI(uri, spec);
         if (NS_FAILED(rv))
             return NS_ERROR_NOT_AVAILABLE;
-        rv = sc->PutBuffer(spec.get(), buf.get(), len);
+        rv = sc->PutBuffer(spec.get(), buf, len);
         if (NS_SUCCEEDED(rv)) {
             mOutputStreamTable.Remove(uri);
             mStartupCacheURITable.PutEntry(uri);
@@ -437,12 +459,12 @@ nsXULPrototypeCache::HasData(nsIURI* uri, bool* exists)
         *exists = false;
         return NS_OK;
     }
-    UniquePtr<char[]> buf;
+    nsAutoArrayPtr<char> buf;
     uint32_t len;
     StartupCache* sc = StartupCache::GetSingleton();
-    if (sc) {
-        rv = sc->GetBuffer(spec.get(), &buf, &len);
-    } else {
+    if (sc)
+        rv = sc->GetBuffer(spec.get(), getter_Transfers(buf), &len);
+    else {
         *exists = false;
         return NS_OK;
     }
@@ -492,17 +514,18 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
         return rv;
 
     nsAutoCString fileChromePath, fileLocale;
-
-    UniquePtr<char[]> buf;
+    
+    nsAutoArrayPtr<char> buf;
     uint32_t len, amtRead;
     nsCOMPtr<nsIObjectInputStream> objectInput;
 
-    rv = startupCache->GetBuffer(kXULCacheInfoKey, &buf, &len);
+    rv = startupCache->GetBuffer(kXULCacheInfoKey, getter_Transfers(buf), 
+                                 &len);
     if (NS_SUCCEEDED(rv))
-        rv = NewObjectInputStreamFromBuffer(Move(buf), len,
-                                            getter_AddRefs(objectInput));
-
+        rv = NewObjectInputStreamFromBuffer(buf, len, getter_AddRefs(objectInput));
+    
     if (NS_SUCCEEDED(rv)) {
+        buf.forget();
         rv = objectInput->ReadCString(fileLocale);
         tmp = objectInput->ReadCString(fileChromePath);
         if (NS_FAILED(tmp)) {
@@ -556,12 +579,12 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
                 rv = NS_ERROR_FILE_TOO_BIG;
             }
         }
-
+        
         if (NS_SUCCEEDED(rv)) {
-            buf = MakeUnique<char[]>(len);
-            rv = inputStream->Read(buf.get(), len, &amtRead);
+            buf = new char[len];
+            rv = inputStream->Read(buf, len, &amtRead);
             if (NS_SUCCEEDED(rv) && len == amtRead)
-              rv = startupCache->PutBuffer(kXULCacheInfoKey, buf.get(), len);
+                rv = startupCache->PutBuffer(kXULCacheInfoKey, buf, len);
             else {
                 rv = NS_ERROR_UNEXPECTED;
             }
@@ -578,22 +601,41 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
     return NS_OK;
 }
 
+static PLDHashOperator
+MarkXBLInCCGeneration(nsIURI* aKey, nsRefPtr<nsXBLDocumentInfo> &aDocInfo,
+                      void* aClosure)
+{
+    uint32_t* gen = static_cast<uint32_t*>(aClosure);
+    aDocInfo->MarkInCCGeneration(*gen);
+    return PL_DHASH_NEXT;
+}
+
+static PLDHashOperator
+MarkXULInCCGeneration(nsIURI* aKey, nsRefPtr<nsXULPrototypeDocument> &aDoc,
+                      void* aClosure)
+{
+    uint32_t* gen = static_cast<uint32_t*>(aClosure);
+    aDoc->MarkInCCGeneration(*gen);
+    return PL_DHASH_NEXT;
+}
+
 void
 nsXULPrototypeCache::MarkInCCGeneration(uint32_t aGeneration)
 {
-    for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-        iter.Data()->MarkInCCGeneration(aGeneration);
-    }
-    for (auto iter = mPrototypeTable.Iter(); !iter.Done(); iter.Next()) {
-        iter.Data()->MarkInCCGeneration(aGeneration);
-    }
+    mXBLDocTable.Enumerate(MarkXBLInCCGeneration, &aGeneration);
+    mPrototypeTable.Enumerate(MarkXULInCCGeneration, &aGeneration);
+}
+
+static PLDHashOperator
+MarkScriptsInGC(nsIURI* aKey, JS::Heap<JSScript*>& aScript, void* aClosure)
+{
+    JSTracer* trc = static_cast<JSTracer*>(aClosure);
+    JS_CallScriptTracer(trc, &aScript, "nsXULPrototypeCache script");
+    return PL_DHASH_NEXT;
 }
 
 void
 nsXULPrototypeCache::MarkInGC(JSTracer* aTrc)
 {
-    for (auto iter = mScriptTable.Iter(); !iter.Done(); iter.Next()) {
-        JS::Heap<JSScript*>& script = iter.Data();
-        JS::TraceEdge(aTrc, &script, "nsXULPrototypeCache script");
-    }
+    mScriptTable.Enumerate(MarkScriptsInGC, aTrc);
 }

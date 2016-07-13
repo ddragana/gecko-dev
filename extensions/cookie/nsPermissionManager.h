@@ -16,14 +16,12 @@
 #include "nsString.h"
 #include "nsPermission.h"
 #include "nsHashKeys.h"
+#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsDataHashtable.h"
 
-namespace mozilla {
-class OriginAttributesPattern;
-}
-
 class nsIPermission;
+class nsIIDNService;
 class mozIStorageConnection;
 class mozIStorageAsyncStatement;
 
@@ -120,7 +118,7 @@ public:
     }
 
     // Force the hashtable to use the copy constructor when shuffling entries
-    // around, otherwise the Auto part of our AutoTArray won't be happy!
+    // around, otherwise the Auto part of our nsAutoTArray won't be happy!
     enum { ALLOW_MEMMOVE = false };
 
     inline nsTArray<PermissionEntry> & GetPermissions()
@@ -149,7 +147,7 @@ public:
     }
 
   private:
-    AutoTArray<PermissionEntry, 1> mPermissions;
+    nsAutoTArray<PermissionEntry, 1> mPermissions;
   };
 
   // nsISupports
@@ -197,15 +195,12 @@ public:
                        const bool aIgnoreSessionPermissions = false);
 
   /**
-   * Initialize the "clear-origin-data" observing.
+   * Initialize the "webapp-uninstall" observing.
    * Will create a nsPermissionManager instance if needed.
    * That way, we can prevent have nsPermissionManager created at startup just
    * to be able to clear data when an application is uninstalled.
    */
-  static void ClearOriginDataObserverInit();
-
-  nsresult
-  RemovePermissionsWithAttributes(mozilla::OriginAttributesPattern& aAttrs);
+  static void AppClearDataObserverInit();
 
 private:
   virtual ~nsPermissionManager();
@@ -244,6 +239,7 @@ private:
 
   nsresult RemoveAllInternal(bool aNotifyObservers);
   nsresult RemoveAllFromMemory();
+  nsresult NormalizeToACE(nsCString &aHost);
   static void UpdateDB(OperationType aOp,
                        mozIStorageAsyncStatement* aStmt,
                        int64_t aID,
@@ -267,6 +263,8 @@ private:
    */
   nsresult
   FetchPermissions();
+
+  nsCOMPtr<nsIIDNService>      mIDNService;
 
   nsCOMPtr<mozIStorageConnection> mDBConn;
   nsCOMPtr<mozIStorageAsyncStatement> mStmtInsert;

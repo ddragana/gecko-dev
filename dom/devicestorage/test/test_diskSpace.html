@@ -17,12 +17,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=717103
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=717103">Mozilla Bug 717103</a>
 <p id="display"></p>
 <div id="content" style="display: none">
-
+  
 </div>
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
-devicestorage_setup(function () {
+devicestorage_setup();
+
 
 var freeBytes = -1;
 var stats = 0;
@@ -38,7 +39,7 @@ function stat(s, file_list_length) {
   stats = stats + 1;
 
   if (stats == 2) {
-    SimpleTest.finish();
+    devicestorage_cleanup();
   }
 }
 
@@ -59,7 +60,7 @@ function addSuccess(e) {
 
 function addError(e) {
   ok(false, "addError was called : " + e.target.error.name);
-  SimpleTest.finish();
+  devicestorage_cleanup();
 }
 
 ok(true, "hi");
@@ -93,9 +94,8 @@ for (var i=0; i < music_files.length; i++) {
  request.onerror = addError;
 }
 
-});
-
 </script>
 </pre>
 </body>
 </html>
+

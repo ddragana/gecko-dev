@@ -89,7 +89,11 @@ public:
    * Boolean value corresponding to whether the file location is initialized
    * or not.
    */
+#if defined(MOZILLA_XPCOMRT_API)
+  explicit operator bool() const { return mBaseFile; }
+#else
   explicit operator bool() const { return mBaseFile || mBaseZip; }
+#endif // defined(MOZILLA_XPCOMRT_API)
 
   /**
    * Returns whether another FileLocation points to the same resource
@@ -113,8 +117,10 @@ public:
     nsresult Copy(char* aBuf, uint32_t aLen);
   protected:
     friend class FileLocation;
+#if !defined(MOZILLA_XPCOMRT_API)
     nsZipItem* mItem;
-    RefPtr<nsZipArchive> mZip;
+#endif // !defined(MOZILLA_XPCOMRT_API)
+    nsRefPtr<nsZipArchive> mZip;
     mozilla::AutoFDClose mFd;
   };
 
@@ -125,7 +131,9 @@ public:
   nsresult GetData(Data& aData);
 private:
   nsCOMPtr<nsIFile> mBaseFile;
-  RefPtr<nsZipArchive> mBaseZip;
+#if !defined(MOZILLA_XPCOMRT_API)
+  nsRefPtr<nsZipArchive> mBaseZip;
+#endif // !defined(MOZILLA_XPCOMRT_API)
   nsCString mPath;
 }; /* class FileLocation */
 

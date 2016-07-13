@@ -284,25 +284,25 @@ TEST(ThreadUtils, main)
   static_assert(IsParameterStorageClass<StoreCopyPassByPtr<int>>::value,
                 "StoreCopyPassByPtr<int> should be recognized as Storage Class");
 
-  RefPtr<ThreadUtilsObject> rpt(new ThreadUtilsObject);
+  nsRefPtr<ThreadUtilsObject> rpt(new ThreadUtilsObject);
   int count = 0;
 
   // Test legacy functions.
 
-  nsCOMPtr<nsIRunnable> r1 =
-    NewRunnableMethod(rpt, &ThreadUtilsObject::Test0);
-  r1->Run();
+  nsCOMPtr<nsIRunnable> r =
+    NS_NewRunnableMethod(rpt, &ThreadUtilsObject::Test0);
+  r->Run();
   EXPECT_EQ(count += 1, rpt->mCount);
 
-  r1 = NewRunnableMethod<int>(rpt, &ThreadUtilsObject::Test1i, 11);
-  r1->Run();
+  r = NS_NewRunnableMethodWithArg<int>(rpt, &ThreadUtilsObject::Test1i, 11);
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(11, rpt->mA0);
 
   // Test variadic function with simple POD arguments.
 
-  r1 = NewRunnableMethod(rpt, &ThreadUtilsObject::Test0);
-  r1->Run();
+  r = NS_NewRunnableMethodWithArgs(rpt, &ThreadUtilsObject::Test0);
+  r->Run();
   EXPECT_EQ(count += 1, rpt->mCount);
 
   static_assert(
@@ -314,29 +314,29 @@ TEST(ThreadUtils, main)
                       StoreCopyPassByValue<int>>::value,
       "detail::ParameterStorage<StoreCopyPassByValue<int>>::Type should be StoreCopyPassByValue<int>");
 
-  r1 = NewRunnableMethod<int>(rpt, &ThreadUtilsObject::Test1i, 12);
-  r1->Run();
+  r = NS_NewRunnableMethodWithArgs<int>(rpt, &ThreadUtilsObject::Test1i, 12);
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(12, rpt->mA0);
 
-  r1 = NewRunnableMethod<int, int>(
-       rpt, &ThreadUtilsObject::Test2i, 21, 22);
-  r1->Run();
+  r = NS_NewRunnableMethodWithArgs<int, int>(
+      rpt, &ThreadUtilsObject::Test2i, 21, 22);
+  r->Run();
   EXPECT_EQ(count += 3, rpt->mCount);
   EXPECT_EQ(21, rpt->mA0);
   EXPECT_EQ(22, rpt->mA1);
 
-  r1 = NewRunnableMethod<int, int, int>(
-       rpt, &ThreadUtilsObject::Test3i, 31, 32, 33);
-  r1->Run();
+  r = NS_NewRunnableMethodWithArgs<int, int, int>(
+      rpt, &ThreadUtilsObject::Test3i, 31, 32, 33);
+  r->Run();
   EXPECT_EQ(count += 4, rpt->mCount);
   EXPECT_EQ(31, rpt->mA0);
   EXPECT_EQ(32, rpt->mA1);
   EXPECT_EQ(33, rpt->mA2);
 
-  r1 = NewRunnableMethod<int, int, int, int>(
-       rpt, &ThreadUtilsObject::Test4i, 41, 42, 43, 44);
-  r1->Run();
+  r = NS_NewRunnableMethodWithArgs<int, int, int, int>(
+      rpt, &ThreadUtilsObject::Test4i, 41, 42, 43, 44);
+  r->Run();
   EXPECT_EQ(count += 5, rpt->mCount);
   EXPECT_EQ(41, rpt->mA0);
   EXPECT_EQ(42, rpt->mA1);
@@ -347,8 +347,8 @@ TEST(ThreadUtils, main)
 
   // Passing a short to make sure forwarding works with an inexact type match.
   short int si = 11;
-  r1 = NewRunnableMethod<int>(rpt, &ThreadUtilsObject::Test1i, si);
-  r1->Run();
+  r = NS_NewRunnableMethodWithArgs<int>(rpt, &ThreadUtilsObject::Test1i, si);
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(si, rpt->mA0);
 
@@ -373,8 +373,8 @@ TEST(ThreadUtils, main)
                 "detail::ParameterStorage<int*>::Type::passed_type should be int*");
   {
     int i = 12;
-    r1 = NewRunnableMethod<int*>(rpt, &ThreadUtilsObject::Test1pi, &i);
-    r1->Run();
+    r = NS_NewRunnableMethodWithArgs<int*>(rpt, &ThreadUtilsObject::Test1pi, &i);
+    r->Run();
     EXPECT_EQ(count += 2, rpt->mCount);
     EXPECT_EQ(i, rpt->mA0);
   }
@@ -400,8 +400,8 @@ TEST(ThreadUtils, main)
                 "detail::ParameterStorage<const int*>::Type::passed_type should be const int*");
   {
     int i = 1201;
-    r1 = NewRunnableMethod<const int*>(rpt, &ThreadUtilsObject::Test1pci, &i);
-    r1->Run();
+    r = NS_NewRunnableMethodWithArgs<const int*>(rpt, &ThreadUtilsObject::Test1pci, &i);
+    r->Run();
     EXPECT_EQ(count += 2, rpt->mCount);
     EXPECT_EQ(i, rpt->mA0);
   }
@@ -415,9 +415,9 @@ TEST(ThreadUtils, main)
                 "StoreCopyPassByPtr<int>::passed_type should be int*");
   {
     int i = 1202;
-    r1 = NewRunnableMethod<StoreCopyPassByPtr<int>>(
-         rpt, &ThreadUtilsObject::Test1pi, i);
-    r1->Run();
+    r = NS_NewRunnableMethodWithArgs<StoreCopyPassByPtr<int>>(
+        rpt, &ThreadUtilsObject::Test1pi, i);
+    r->Run();
     EXPECT_EQ(count += 2, rpt->mCount);
     EXPECT_EQ(i, rpt->mA0);
   }
@@ -431,9 +431,9 @@ TEST(ThreadUtils, main)
                 "StoreCopyPassByConstPtr<int>::passed_type should be const int*");
   {
     int i = 1203;
-    r1 = NewRunnableMethod<StoreCopyPassByConstPtr<int>>(
-         rpt, &ThreadUtilsObject::Test1pci, i);
-    r1->Run();
+    r = NS_NewRunnableMethodWithArgs<StoreCopyPassByConstPtr<int>>(
+        rpt, &ThreadUtilsObject::Test1pci, i);
+    r->Run();
     EXPECT_EQ(count += 2, rpt->mCount);
     EXPECT_EQ(i, rpt->mA0);
   }
@@ -446,8 +446,8 @@ TEST(ThreadUtils, main)
                                 StorensRefPtrPassByPtr<SpyWithISupports>>::value,
                 "ParameterStorage<SpyWithISupports*>::Type should be StorensRefPtrPassByPtr<SpyWithISupports>");
   static_assert(mozilla::IsSame<StorensRefPtrPassByPtr<SpyWithISupports>::stored_type,
-                                RefPtr<SpyWithISupports>>::value,
-                "StorensRefPtrPassByPtr<SpyWithISupports>::stored_type should be RefPtr<SpyWithISupports>");
+                                nsRefPtr<SpyWithISupports>>::value,
+                "StorensRefPtrPassByPtr<SpyWithISupports>::stored_type should be nsRefPtr<SpyWithISupports>");
   static_assert(mozilla::IsSame<StorensRefPtrPassByPtr<SpyWithISupports>::passed_type,
                                 SpyWithISupports*>::value,
                 "StorensRefPtrPassByPtr<SpyWithISupports>::passed_type should be SpyWithISupports*");
@@ -491,8 +491,8 @@ TEST(ThreadUtils, main)
                 "ParameterStorage<int&>::Type::passed_type should be int&");
   {
     int i = 13;
-    r1 = NewRunnableMethod<int&>(rpt, &ThreadUtilsObject::Test1ri, i);
-    r1->Run();
+    r = NS_NewRunnableMethodWithArgs<int&>(rpt, &ThreadUtilsObject::Test1ri, i);
+    r->Run();
     EXPECT_EQ(count += 2, rpt->mCount);
     EXPECT_EQ(i, rpt->mA0);
   }
@@ -512,10 +512,10 @@ TEST(ThreadUtils, main)
                 "ParameterStorage<int&&>::Type::passed_type should be int&&");
   {
     int i = 14;
-    r1 = NewRunnableMethod<int&&>(
+    r = NS_NewRunnableMethodWithArgs<int&&>(
           rpt, &ThreadUtilsObject::Test1rri, mozilla::Move(i));
   }
-  r1->Run();
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(14, rpt->mA0);
 
@@ -534,10 +534,10 @@ TEST(ThreadUtils, main)
                 "ParameterStorage<UniquePtr<int>&&>::Type::passed_type should be UniquePtr<int>&&");
   {
     mozilla::UniquePtr<int> upi;
-    r1 = NewRunnableMethod<mozilla::UniquePtr<int>&&>(
+    r = NS_NewRunnableMethodWithArgs<mozilla::UniquePtr<int>&&>(
           rpt, &ThreadUtilsObject::Test1upi, mozilla::Move(upi));
   }
-  r1->Run();
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(-1, rpt->mA0);
   rpt->mA0 = 0;
@@ -557,48 +557,48 @@ TEST(ThreadUtils, main)
                 "ParameterStorage<StoreCopyPassByRRef<UniquePtr<int>>>::Type::passed_type should be UniquePtr<int>&&");
   {
     mozilla::UniquePtr<int> upi;
-    r1 = NewRunnableMethod
-         <StoreCopyPassByRRef<mozilla::UniquePtr<int>>>(
-           rpt, &ThreadUtilsObject::Test1upi, mozilla::Move(upi));
+    r = NS_NewRunnableMethodWithArgs
+        <StoreCopyPassByRRef<mozilla::UniquePtr<int>>>(
+          rpt, &ThreadUtilsObject::Test1upi, mozilla::Move(upi));
   }
-  r1->Run();
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(-1, rpt->mA0);
 
   // Unique pointer as xvalue.
   {
     mozilla::UniquePtr<int> upi = mozilla::MakeUnique<int>(1);
-    r1 = NewRunnableMethod<mozilla::UniquePtr<int>&&>(
-           rpt, &ThreadUtilsObject::Test1upi, mozilla::Move(upi));
+    r = NS_NewRunnableMethodWithArgs<mozilla::UniquePtr<int>&&>(
+          rpt, &ThreadUtilsObject::Test1upi, mozilla::Move(upi));
   }
-  r1->Run();
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(1, rpt->mA0);
 
   {
     mozilla::UniquePtr<int> upi = mozilla::MakeUnique<int>(1);
-    r1 = NewRunnableMethod
-         <StoreCopyPassByRRef<mozilla::UniquePtr<int>>>
-         (rpt, &ThreadUtilsObject::Test1upi, mozilla::Move(upi));
+    r = NS_NewRunnableMethodWithArgs
+        <StoreCopyPassByRRef<mozilla::UniquePtr<int>>>
+        (rpt, &ThreadUtilsObject::Test1upi, mozilla::Move(upi));
   }
-  r1->Run();
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(1, rpt->mA0);
 
   // Unique pointer as prvalue.
-  r1 = NewRunnableMethod<mozilla::UniquePtr<int>&&>(
-         rpt, &ThreadUtilsObject::Test1upi, mozilla::MakeUnique<int>(2));
-  r1->Run();
+  r = NS_NewRunnableMethodWithArgs<mozilla::UniquePtr<int>&&>(
+        rpt, &ThreadUtilsObject::Test1upi, mozilla::MakeUnique<int>(2));
+  r->Run();
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(2, rpt->mA0);
 
   // Unique pointer as lvalue to lref.
   {
     mozilla::UniquePtr<int> upi;
-    r1 = NewRunnableMethod<mozilla::UniquePtr<int>&>(
-           rpt, &ThreadUtilsObject::Test1rupi, upi);
+    r = NS_NewRunnableMethodWithArgs<mozilla::UniquePtr<int>&>(
+          rpt, &ThreadUtilsObject::Test1rupi, upi);
     // Passed as lref, so Run() must be called while local upi is still alive!
-    r1->Run();
+    r->Run();
   }
   EXPECT_EQ(count += 2, rpt->mCount);
   EXPECT_EQ(-1, rpt->mA0);
@@ -608,15 +608,15 @@ TEST(ThreadUtils, main)
   Spy::ClearAll();
   if (gDebug) { printf("%d - Test: Store copy from lvalue, pass by value\n", __LINE__); }
   { // Block around nsCOMPtr lifetime.
-    nsCOMPtr<nsIRunnable> r2;
+    nsCOMPtr<nsIRunnable> r;
     { // Block around Spy lifetime.
       if (gDebug) { printf("%d - Spy s(10)\n", __LINE__); }
       Spy s(10);
       EXPECT_EQ(1, gConstructions);
       EXPECT_EQ(1, gAlive);
-      if (gDebug) { printf("%d - r2 = NewRunnableMethod<StoreCopyPassByValue<Spy>>(&TestByValue, s)\n", __LINE__); }
-      r2 = NewRunnableMethod<StoreCopyPassByValue<Spy>>(
-           rpt, &ThreadUtilsObject::TestByValue, s);
+      if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<StoreCopyPassByValue<Spy>>(&TestByValue, s)\n", __LINE__); }
+      r = NS_NewRunnableMethodWithArgs<StoreCopyPassByValue<Spy>>(
+          rpt, &ThreadUtilsObject::TestByValue, s);
       EXPECT_EQ(2, gAlive);
       EXPECT_LE(1, gCopyConstructions); // At least 1 copy-construction.
       Spy::ClearActions();
@@ -626,7 +626,7 @@ TEST(ThreadUtils, main)
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r2->Run();
+    r->Run();
     EXPECT_LE(1, gCopyConstructions); // Another copy-construction in call.
     EXPECT_EQ(10, rpt->mSpy.mID);
     EXPECT_LE(1, gDestructions);
@@ -641,16 +641,16 @@ TEST(ThreadUtils, main)
   Spy::ClearAll();
   if (gDebug) { printf("%d - Test: Store copy from prvalue, pass by value\n", __LINE__); }
   {
-    if (gDebug) { printf("%d - r3 = NewRunnableMethod<StoreCopyPassByValue<Spy>>(&TestByValue, Spy(11))\n", __LINE__); }
-    nsCOMPtr<nsIRunnable> r3 =
-      NewRunnableMethod<StoreCopyPassByValue<Spy>>(
+    if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<StoreCopyPassByValue<Spy>>(&TestByValue, Spy(11))\n", __LINE__); }
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableMethodWithArgs<StoreCopyPassByValue<Spy>>(
         rpt, &ThreadUtilsObject::TestByValue, Spy(11));
     EXPECT_EQ(1, gAlive);
     EXPECT_EQ(1, gConstructions);
     EXPECT_LE(1, gMoveConstructions);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r3->Run();
+    r->Run();
     EXPECT_LE(1, gCopyConstructions); // Another copy-construction in call.
     EXPECT_EQ(11, rpt->mSpy.mID);
     EXPECT_LE(1, gDestructions);
@@ -664,13 +664,13 @@ TEST(ThreadUtils, main)
 
   Spy::ClearAll();
   { // Store copy from xvalue, pass by value.
-    nsCOMPtr<nsIRunnable> r4;
+    nsCOMPtr<nsIRunnable> r;
     {
       Spy s(12);
       EXPECT_EQ(1, gConstructions);
       EXPECT_EQ(1, gAlive);
       Spy::ClearActions();
-      r4 = NewRunnableMethod<StoreCopyPassByValue<Spy>>(
+      r = NS_NewRunnableMethodWithArgs<StoreCopyPassByValue<Spy>>(
           rpt, &ThreadUtilsObject::TestByValue, mozilla::Move(s));
       EXPECT_LE(1, gMoveConstructions);
       EXPECT_EQ(1, gAlive);
@@ -681,7 +681,7 @@ TEST(ThreadUtils, main)
     EXPECT_EQ(1, gAlive);
     EXPECT_EQ(0, gZombies);
     Spy::ClearActions();
-    r4->Run();
+    r->Run();
     EXPECT_LE(1, gCopyConstructions); // Another copy-construction in call.
     EXPECT_EQ(12, rpt->mSpy.mID);
     EXPECT_LE(1, gDestructions);
@@ -695,15 +695,15 @@ TEST(ThreadUtils, main)
   Spy::ClearAll();
   if (gDebug) { printf("%d - Test: Store copy from lvalue, pass by const lvalue ref\n", __LINE__); }
   { // Block around nsCOMPtr lifetime.
-    nsCOMPtr<nsIRunnable> r5;
+    nsCOMPtr<nsIRunnable> r;
     { // Block around Spy lifetime.
       if (gDebug) { printf("%d - Spy s(20)\n", __LINE__); }
       Spy s(20);
       EXPECT_EQ(1, gConstructions);
       EXPECT_EQ(1, gAlive);
-      if (gDebug) { printf("%d - r5 = NewRunnableMethod<StoreCopyPassByConstLRef<Spy>>(&TestByConstLRef, s)\n", __LINE__); }
-      r5 = NewRunnableMethod<StoreCopyPassByConstLRef<Spy>>(
-           rpt, &ThreadUtilsObject::TestByConstLRef, s);
+      if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<StoreCopyPassByConstLRef<Spy>>(&TestByConstLRef, s)\n", __LINE__); }
+      r = NS_NewRunnableMethodWithArgs<StoreCopyPassByConstLRef<Spy>>(
+          rpt, &ThreadUtilsObject::TestByConstLRef, s);
       EXPECT_EQ(2, gAlive);
       EXPECT_LE(1, gCopyConstructions); // At least 1 copy-construction.
       Spy::ClearActions();
@@ -713,7 +713,7 @@ TEST(ThreadUtils, main)
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r5->Run();
+    r->Run();
     EXPECT_EQ(0, gCopyConstructions); // No copies in call.
     EXPECT_EQ(20, rpt->mSpy.mID);
     EXPECT_EQ(0, gDestructions);
@@ -728,16 +728,16 @@ TEST(ThreadUtils, main)
   Spy::ClearAll();
   if (gDebug) { printf("%d - Test: Store copy from prvalue, pass by const lvalue ref\n", __LINE__); }
   {
-    if (gDebug) { printf("%d - r6 = NewRunnableMethod<StoreCopyPassByConstLRef<Spy>>(&TestByConstLRef, Spy(21))\n", __LINE__); }
-    nsCOMPtr<nsIRunnable> r6 =
-      NewRunnableMethod<StoreCopyPassByConstLRef<Spy>>(
+    if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<StoreCopyPassByConstLRef<Spy>>(&TestByConstLRef, Spy(21))\n", __LINE__); }
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableMethodWithArgs<StoreCopyPassByConstLRef<Spy>>(
         rpt, &ThreadUtilsObject::TestByConstLRef, Spy(21));
     EXPECT_EQ(1, gAlive);
     EXPECT_EQ(1, gConstructions);
     EXPECT_LE(1, gMoveConstructions);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r6->Run();
+    r->Run();
     EXPECT_EQ(0, gCopyConstructions); // No copies in call.
     EXPECT_EQ(21, rpt->mSpy.mID);
     EXPECT_EQ(0, gDestructions);
@@ -752,15 +752,15 @@ TEST(ThreadUtils, main)
   Spy::ClearAll();
   if (gDebug) { printf("%d - Test: Store copy from lvalue, pass by rvalue ref\n", __LINE__); }
   { // Block around nsCOMPtr lifetime.
-    nsCOMPtr<nsIRunnable> r7;
+    nsCOMPtr<nsIRunnable> r;
     { // Block around Spy lifetime.
       if (gDebug) { printf("%d - Spy s(30)\n", __LINE__); }
       Spy s(30);
       EXPECT_EQ(1, gConstructions);
       EXPECT_EQ(1, gAlive);
-      if (gDebug) { printf("%d - r7 = NewRunnableMethod<StoreCopyPassByRRef<Spy>>(&TestByRRef, s)\n", __LINE__); }
-      r7 = NewRunnableMethod<StoreCopyPassByRRef<Spy>>(
-           rpt, &ThreadUtilsObject::TestByRRef, s);
+      if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<StoreCopyPassByRRef<Spy>>(&TestByRRef, s)\n", __LINE__); }
+      r = NS_NewRunnableMethodWithArgs<StoreCopyPassByRRef<Spy>>(
+          rpt, &ThreadUtilsObject::TestByRRef, s);
       EXPECT_EQ(2, gAlive);
       EXPECT_LE(1, gCopyConstructions); // At least 1 copy-construction.
       Spy::ClearActions();
@@ -770,7 +770,7 @@ TEST(ThreadUtils, main)
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r7->Run();
+    r->Run();
     EXPECT_LE(1, gMoves); // Move in call.
     EXPECT_EQ(30, rpt->mSpy.mID);
     EXPECT_EQ(0, gDestructions);
@@ -786,16 +786,16 @@ TEST(ThreadUtils, main)
   Spy::ClearAll();
   if (gDebug) { printf("%d - Test: Store copy from prvalue, pass by rvalue ref\n", __LINE__); }
   {
-    if (gDebug) { printf("%d - r8 = NewRunnableMethod<StoreCopyPassByRRef<Spy>>(&TestByRRef, Spy(31))\n", __LINE__); }
-    nsCOMPtr<nsIRunnable> r8 =
-      NewRunnableMethod<StoreCopyPassByRRef<Spy>>(
+    if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<StoreCopyPassByRRef<Spy>>(&TestByRRef, Spy(31))\n", __LINE__); }
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableMethodWithArgs<StoreCopyPassByRRef<Spy>>(
         rpt, &ThreadUtilsObject::TestByRRef, Spy(31));
     EXPECT_EQ(1, gAlive);
     EXPECT_EQ(1, gConstructions);
     EXPECT_LE(1, gMoveConstructions);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r8->Run();
+    r->Run();
     EXPECT_LE(1, gMoves); // Move in call.
     EXPECT_EQ(31, rpt->mSpy.mID);
     EXPECT_EQ(0, gDestructions);
@@ -816,16 +816,16 @@ TEST(ThreadUtils, main)
     EXPECT_EQ(1, gConstructions);
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
-    if (gDebug) { printf("%d - r9 = NewRunnableMethod<Spy&>(&TestByLRef, s)\n", __LINE__); }
-    nsCOMPtr<nsIRunnable> r9 =
-      NewRunnableMethod<Spy&>(
+    if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<Spy&>(&TestByLRef, s)\n", __LINE__); }
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableMethodWithArgs<Spy&>(
         rpt, &ThreadUtilsObject::TestByLRef, s);
     EXPECT_EQ(0, gAllConstructions);
     EXPECT_EQ(0, gDestructions);
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r9->Run();
+    r->Run();
     EXPECT_LE(1, gAssignments); // Assignment from reference in call.
     EXPECT_EQ(40, rpt->mSpy.mID);
     EXPECT_EQ(&s, rpt->mSpyPtr);
@@ -841,27 +841,27 @@ TEST(ThreadUtils, main)
   Spy::ClearAll();
   if (gDebug) { printf("%d - Test: Store nsRefPtr, pass by pointer\n", __LINE__); }
   { // Block around nsCOMPtr lifetime.
-    nsCOMPtr<nsIRunnable> r10;
+    nsCOMPtr<nsIRunnable> r;
     SpyWithISupports* ptr = 0;
-    { // Block around RefPtr<Spy> lifetime.
-      if (gDebug) { printf("%d - RefPtr<SpyWithISupports> s(new SpyWithISupports(45))\n", __LINE__); }
-      RefPtr<SpyWithISupports> s(new SpyWithISupports(45));
+    { // Block around nsRefPtr<Spy> lifetime.
+      if (gDebug) { printf("%d - nsRefPtr<SpyWithISupports> s(new SpyWithISupports(45))\n", __LINE__); }
+      nsRefPtr<SpyWithISupports> s(new SpyWithISupports(45));
       ptr = s.get();
       EXPECT_EQ(1, gConstructions);
       EXPECT_EQ(1, gAlive);
-      if (gDebug) { printf("%d - r10 = NewRunnableMethod<StorensRefPtrPassByPtr<Spy>>(&TestByRRef, s.get())\n", __LINE__); }
-      r10 = NewRunnableMethod<StorensRefPtrPassByPtr<SpyWithISupports>>(
-            rpt, &ThreadUtilsObject::TestByPointer, s.get());
+      if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<StorensRefPtrPassByPtr<Spy>>(&TestByRRef, s.get())\n", __LINE__); }
+      r = NS_NewRunnableMethodWithArgs<StorensRefPtrPassByPtr<SpyWithISupports>>(
+          rpt, &ThreadUtilsObject::TestByPointer, s.get());
       EXPECT_LE(0, gAllConstructions);
       EXPECT_EQ(1, gAlive);
       Spy::ClearActions();
-      if (gDebug) { printf("%d - End block with RefPtr<Spy> s\n", __LINE__); }
+      if (gDebug) { printf("%d - End block with nsRefPtr<Spy> s\n", __LINE__); }
     }
     EXPECT_EQ(0, gDestructions);
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r10->Run();
+    r->Run();
     EXPECT_LE(1, gAssignments); // Assignment from pointee in call.
     EXPECT_EQ(45, rpt->mSpy.mID);
     EXPECT_EQ(ptr, rpt->mSpyPtr);
@@ -882,16 +882,16 @@ TEST(ThreadUtils, main)
     EXPECT_EQ(1, gConstructions);
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
-    if (gDebug) { printf("%d - r11 = NewRunnableMethod<Spy*>(&TestByPointer, s)\n", __LINE__); }
-    nsCOMPtr<nsIRunnable> r11 =
-      NewRunnableMethod<Spy*>(
+    if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<Spy*>(&TestByPointer, s)\n", __LINE__); }
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableMethodWithArgs<Spy*>(
         rpt, &ThreadUtilsObject::TestByPointer, &s);
     EXPECT_EQ(0, gAllConstructions);
     EXPECT_EQ(0, gDestructions);
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r11->Run();
+    r->Run();
     EXPECT_LE(1, gAssignments); // Assignment from pointee in call.
     EXPECT_EQ(55, rpt->mSpy.mID);
     EXPECT_EQ(&s, rpt->mSpyPtr);
@@ -912,16 +912,16 @@ TEST(ThreadUtils, main)
     EXPECT_EQ(1, gConstructions);
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
-    if (gDebug) { printf("%d - r12 = NewRunnableMethod<Spy*>(&TestByPointer, s)\n", __LINE__); }
-    nsCOMPtr<nsIRunnable> r12 =
-      NewRunnableMethod<const Spy*>(
+    if (gDebug) { printf("%d - r = NS_NewRunnableMethodWithArgs<Spy*>(&TestByPointer, s)\n", __LINE__); }
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableMethodWithArgs<const Spy*>(
         rpt, &ThreadUtilsObject::TestByPointerToConst, &s);
     EXPECT_EQ(0, gAllConstructions);
     EXPECT_EQ(0, gDestructions);
     EXPECT_EQ(1, gAlive);
     Spy::ClearActions();
     if (gDebug) { printf("%d - Run()\n", __LINE__); }
-    r12->Run();
+    r->Run();
     EXPECT_LE(1, gAssignments); // Assignment from pointee in call.
     EXPECT_EQ(60, rpt->mSpy.mID);
     EXPECT_EQ(&s, rpt->mSpyPtr);

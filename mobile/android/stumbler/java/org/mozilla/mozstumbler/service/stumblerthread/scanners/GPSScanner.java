@@ -4,7 +4,6 @@
 
 package org.mozilla.mozstumbler.service.stumblerthread.scanners;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.location.GpsSatellite;
@@ -77,7 +76,6 @@ public class GPSScanner implements LocationListener {
         return true;
     }
 
-    @SuppressLint("MissingPermission") // Permissions are explicitly checked for in StumblerService.onHandleIntent()
     private void startPassiveMode() {
         LocationManager locationManager = (LocationManager) mContext.getSystemService(Context.LOCATION_SERVICE);
         if (!isGpsAvailable(locationManager)) {
@@ -93,7 +91,6 @@ public class GPSScanner implements LocationListener {
         mTelemetry_lastStartedMs = System.currentTimeMillis();
     }
 
-    @SuppressLint("MissingPermission") // Permissions are explicitly checked for in StumblerService.onHandleIntent()
     private void startActiveMode() {
         LocationManager lm = getLocationManager();
         if (!isGpsAvailable(lm)) {
@@ -139,7 +136,6 @@ public class GPSScanner implements LocationListener {
         lm.addGpsStatusListener(mGPSListener);
     }
 
-    @SuppressLint("MissingPermission") // Permissions are explicitly checked for in StumblerService.onHandleIntent()
     public void stop() {
         LocationManager lm = getLocationManager();
         lm.removeUpdates(this);

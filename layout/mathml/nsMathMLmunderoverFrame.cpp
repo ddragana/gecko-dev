@@ -301,7 +301,7 @@ i.e.,:
 */
 
 /* virtual */ nsresult
-nsMathMLmunderoverFrame::Place(DrawTarget*          aDrawTarget,
+nsMathMLmunderoverFrame::Place(nsRenderingContext& aRenderingContext,
                                bool                 aPlaceOrigin,
                                nsHTMLReflowMetrics& aDesiredSize)
 {
@@ -311,14 +311,14 @@ nsMathMLmunderoverFrame::Place(DrawTarget*          aDrawTarget,
     //place like sub sup or subsup
     if (mContent->IsMathMLElement(nsGkAtoms::munderover_)) {
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
-                                                          aDrawTarget,
+                                                          aRenderingContext,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
                                                           fontSizeInflation);
     } else if (mContent->IsMathMLElement( nsGkAtoms::munder_)) {
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
-                                                          aDrawTarget,
+                                                          aRenderingContext,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
@@ -327,7 +327,7 @@ nsMathMLmunderoverFrame::Place(DrawTarget*          aDrawTarget,
       NS_ASSERTION(mContent->IsMathMLElement(nsGkAtoms::mover_),
                    "mContent->NodeInfo()->NameAtom() not recognized");
       return nsMathMLmmultiscriptsFrame::PlaceMultiScript(PresContext(),
-                                                          aDrawTarget,
+                                                          aRenderingContext,
                                                           aPlaceOrigin,
                                                           aDesiredSize,
                                                           this, 0, 0,
@@ -382,8 +382,8 @@ nsMathMLmunderoverFrame::Place(DrawTarget*          aDrawTarget,
   if (haveError) {
     if (aPlaceOrigin) {
       ReportChildCountError();
-    }
-    return ReflowError(aDrawTarget, aDesiredSize);
+    } 
+    return ReflowError(aRenderingContext, aDesiredSize);
   }
   GetReflowAndBoundingMetricsFor(baseFrame, baseSize, bmBase);
   if (underFrame) {
@@ -398,15 +398,16 @@ nsMathMLmunderoverFrame::Place(DrawTarget*          aDrawTarget,
   ////////////////////
   // Place Children
 
-  RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
+  nsRefPtr<nsFontMetrics> fm;
+  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
+                                        fontSizeInflation);
 
   nscoord xHeight = fm->XHeight();
   nscoord oneDevPixel = fm->AppUnitsPerDevPixel();
   gfxFont* mathFont = fm->GetThebesFontGroup()->GetFirstMathFont();
 
   nscoord ruleThickness;
-  GetRuleThickness (aDrawTarget, fm, ruleThickness);
+  GetRuleThickness (aRenderingContext, fm, ruleThickness);
 
   nscoord correction = 0;
   GetItalicCorrection (bmBase, correction);

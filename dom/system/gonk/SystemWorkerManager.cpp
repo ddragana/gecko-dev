@@ -35,6 +35,7 @@
 #include "nsIObserverService.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
+#include "nsRadioInterfaceLayer.h"
 #include "WifiWorker.h"
 #include "mozilla/Services.h"
 
@@ -78,13 +79,15 @@ SystemWorkerManager::Init()
   NS_ASSERTION(NS_IsMainThread(), "We can only initialize on the main thread");
   NS_ASSERTION(!mShutdown, "Already shutdown!");
 
-  nsresult rv = InitWifi();
+  mozilla::AutoSafeJSContext cx;
+
+  nsresult rv = InitWifi(cx);
   if (NS_FAILED(rv)) {
     NS_WARNING("Failed to initialize WiFi Networking!");
     return rv;
   }
 
-  InitKeyStore();
+  InitKeyStore(cx);
 
   InitAutoMounter();
   InitializeTimeZoneSettingObserver();
@@ -143,7 +146,7 @@ SystemWorkerManager::FactoryCreate()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  RefPtr<SystemWorkerManager> instance(gInstance);
+  nsRefPtr<SystemWorkerManager> instance(gInstance);
 
   if (!instance) {
     instance = new SystemWorkerManager();
@@ -203,7 +206,7 @@ SystemWorkerManager::RegisterRilWorker(unsigned int aClientId,
 }
 
 nsresult
-SystemWorkerManager::InitWifi()
+SystemWorkerManager::InitWifi(JSContext *cx)
 {
   nsCOMPtr<nsIWorkerHolder> worker = do_CreateInstance(kWifiWorkerCID);
   NS_ENSURE_TRUE(worker, NS_ERROR_FAILURE);
@@ -213,7 +216,7 @@ SystemWorkerManager::InitWifi()
 }
 
 nsresult
-SystemWorkerManager::InitKeyStore()
+SystemWorkerManager::InitKeyStore(JSContext *cx)
 {
   mKeyStore = new KeyStore();
   return NS_OK;

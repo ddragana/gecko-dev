@@ -15,10 +15,6 @@
 
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 
-namespace {
-const size_t kI420HeaderSize = 4;
-}
-
 namespace webrtc {
 
 I420Encoder::I420Encoder() : _inited(false), _encodedImage(),
@@ -43,7 +39,7 @@ int I420Encoder::Release() {
 
 int I420Encoder::InitEncode(const VideoCodec* codecSettings,
                             int /*numberOfCores*/,
-                            size_t /*maxPayloadSize */) {
+                            uint32_t /*maxPayloadSize */) {
   if (codecSettings == NULL) {
     return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
   }
@@ -57,9 +53,10 @@ int I420Encoder::InitEncode(const VideoCodec* codecSettings,
     _encodedImage._buffer = NULL;
     _encodedImage._size = 0;
   }
-  const size_t newSize =
-      CalcBufferSize(kI420, codecSettings->width, codecSettings->height) +
-      kI420HeaderSize;
+  const uint32_t newSize = CalcBufferSize(kI420,
+                                          codecSettings->width,
+                                          codecSettings->height)
+                           + kI420HeaderSize;
   uint8_t* newBuffer = new uint8_t[newSize];
   if (newBuffer == NULL) {
     return WEBRTC_VIDEO_CODEC_MEMORY;
@@ -98,10 +95,9 @@ int I420Encoder::Encode(const I420VideoFrame& inputImage,
     return WEBRTC_VIDEO_CODEC_ERR_SIZE;
   }
 
-  size_t req_length =
-      CalcBufferSize(kI420, inputImage.width(), inputImage.height()) +
-      kI420HeaderSize;
-  if (_encodedImage._size > req_length) {
+  int req_length = CalcBufferSize(kI420, inputImage.width(),
+                                  inputImage.height()) + kI420HeaderSize;
+  if (_encodedImage._size > static_cast<unsigned int>(req_length)) {
     // Reallocate buffer.
     delete [] _encodedImage._buffer;
 
@@ -119,7 +115,7 @@ int I420Encoder::Encode(const I420VideoFrame& inputImage,
     return WEBRTC_VIDEO_CODEC_MEMORY;
   _encodedImage._length = ret_length + kI420HeaderSize;
 
-  _encodedCompleteCallback->Encoded(_encodedImage, NULL, NULL);
+  _encodedCompleteCallback->Encoded(_encodedImage);
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
@@ -198,7 +194,8 @@ int I420Decoder::Decode(const EncodedImage& inputImage, bool /*missingFrames*/,
   _height = height;
 
   // Verify that the available length is sufficient:
-  size_t req_length = CalcBufferSize(kI420, _width, _height) + kI420HeaderSize;
+  uint32_t req_length = CalcBufferSize(kI420, _width, _height)
+                        + kI420HeaderSize;
 
   if (req_length > inputImage._length) {
     return WEBRTC_VIDEO_CODEC_ERROR;
@@ -208,8 +205,8 @@ int I420Decoder::Decode(const EncodedImage& inputImage, bool /*missingFrames*/,
   _decodedImage.CreateEmptyFrame(_width, _height,
                                  _width, half_width, half_width);
   // Converting from buffer to plane representation.
-  int ret = ConvertToI420(kI420, buffer, 0, 0, _width, _height, 0,
-                          kVideoRotation_0, &_decodedImage);
+  int ret = ConvertToI420(kI420, buffer, 0, 0, _width, _height, 0, kRotateNone,
+                          &_decodedImage);
   if (ret < 0) {
     return WEBRTC_VIDEO_CODEC_MEMORY;
   }

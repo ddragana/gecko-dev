@@ -26,7 +26,7 @@ if CONFIG['MOZ_DEBUG']:
     ]
 
 UNIFIED_SOURCES += [
-    'AccessibleOrProxy.cpp',
+    'AccCollector.cpp',
     'AccEvent.cpp',
     'AccGroupInfo.cpp',
     'AccIterator.cpp',
@@ -34,9 +34,7 @@ UNIFIED_SOURCES += [
     'ARIAStateMap.cpp',
     'Asserts.cpp',
     'DocManager.cpp',
-    'EmbeddedObjCollector.cpp',
     'EventQueue.cpp',
-    'EventTree.cpp',
     'Filters.cpp',
     'FocusManager.cpp',
     'NotificationController.cpp',
@@ -75,11 +73,10 @@ LOCAL_INCLUDES += [
     '/layout/xul/tree/',
 ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_ENABLE_GTK']:
     LOCAL_INCLUDES += [
         '/accessible/atk',
     ]
-    CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     LOCAL_INCLUDES += [
         '/accessible/windows/ia2',
@@ -96,7 +93,9 @@ else:
 
 FINAL_LIBRARY = 'xul'
 
+if CONFIG['MOZ_ENABLE_GTK']:
+    CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']
+FAIL_ON_WARNINGS = True

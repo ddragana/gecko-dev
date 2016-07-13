@@ -3,16 +3,16 @@
 
 "use strict";
 
-var gTestTab;
-var gContentAPI;
-var gContentWindow;
-var button;
+let gTestTab;
+let gContentAPI;
+let gContentWindow;
+let button;
 
 function test() {
   UITourTest();
 }
 
-var tests = [
+let tests = [
   taskify(function* test_menu_show_navbar() {
     is(button.open, false, "Menu should initially be closed");
     gContentAPI.showMenu("pocket");
@@ -62,7 +62,7 @@ function checkPanelIsHidden(aPanel) {
   is(button.hasAttribute("open"), false, "Pocket button should know that the panel is closed");
 }
 
-if (Services.prefs.getBoolPref("extensions.pocket.enabled")) {
+if (Services.prefs.getBoolPref("browser.pocket.enabled")) {
   let placement = CustomizableUI.getPlacementOfWidget("pocket-button");
 
   // Add the button to the nav-bar by default.

@@ -11,12 +11,11 @@
 #include "nsWrapperCache.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
+#include "nsPIDOMWindow.h"
 
 #define DOMERROR_IID \
 { 0x220cb63f, 0xa37d, 0x4ba4, \
  { 0x8e, 0x31, 0xfc, 0xde, 0xec, 0x48, 0xe1, 0x66 } }
-
-class nsPIDOMWindowInner;
 
 namespace mozilla {
 
@@ -29,7 +28,7 @@ class GlobalObject;
 class DOMError : public nsISupports,
                  public nsWrapperCache
 {
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   nsString mName;
   nsString mMessage;
 
@@ -45,16 +44,16 @@ public:
   // aWindow can be null if this DOMError is not associated with a particular
   // window.
 
-  explicit DOMError(nsPIDOMWindowInner* aWindow);
+  explicit DOMError(nsPIDOMWindow* aWindow);
 
-  DOMError(nsPIDOMWindowInner* aWindow, nsresult aValue);
+  DOMError(nsPIDOMWindow* aWindow, nsresult aValue);
 
-  DOMError(nsPIDOMWindowInner* aWindow, const nsAString& aName);
+  DOMError(nsPIDOMWindow* aWindow, const nsAString& aName);
 
-  DOMError(nsPIDOMWindowInner* aWindow, const nsAString& aName,
+  DOMError(nsPIDOMWindow* aWindow, const nsAString& aName,
            const nsAString& aMessage);
 
-  nsPIDOMWindowInner* GetParentObject() const
+  nsPIDOMWindow* GetParentObject() const
   {
     return mWindow;
   }

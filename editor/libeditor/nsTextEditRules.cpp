@@ -12,6 +12,7 @@
 #include "mozilla/TextComposition.h"
 #include "mozilla/dom/Element.h"
 #include "nsAString.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
 #include "nsCRTGlue.h"
@@ -56,15 +57,6 @@ using namespace mozilla::dom;
  ********************************************************/
 
 nsTextEditRules::nsTextEditRules()
-  : mEditor(nullptr)
-  , mPasswordIMEIndex(0)
-  , mCachedSelectionOffset(0)
-  , mActionNesting(0)
-  , mLockRulesSniffing(false)
-  , mDidExplicitlySetInterline(false)
-  , mDeleteBidiImmediately(false)
-  , mLastStart(0)
-  , mLastLength(0)
 {
   InitFields();
 }
@@ -124,7 +116,7 @@ nsTextEditRules::Init(nsPlaintextEditor *aEditor)
   InitFields();
 
   mEditor = aEditor;  // we hold a non-refcounted reference back to our editor
-  RefPtr<Selection> selection = mEditor->GetSelection();
+  nsRefPtr<Selection> selection = mEditor->GetSelection();
   NS_WARN_IF_FALSE(selection, "editor cannot get selection");
 
   // Put in a magic br if needed. This method handles null selection,
@@ -191,7 +183,7 @@ nsTextEditRules::BeforeEdit(EditAction action,
 
   // get the selection and cache the position before editing
   NS_ENSURE_STATE(mEditor);
-  RefPtr<Selection> selection = mEditor->GetSelection();
+  nsRefPtr<Selection> selection = mEditor->GetSelection();
   NS_ENSURE_STATE(selection);
 
   selection->GetAnchorNode(getter_AddRefs(mCachedSelectionNode));
@@ -214,7 +206,7 @@ nsTextEditRules::AfterEdit(EditAction action,
   if (!--mActionNesting)
   {
     NS_ENSURE_STATE(mEditor);
-    RefPtr<Selection> selection = mEditor->GetSelection();
+    nsRefPtr<Selection> selection = mEditor->GetSelection();
     NS_ENSURE_STATE(selection);
 
     NS_ENSURE_STATE(mEditor);
@@ -284,8 +276,7 @@ nsTextEditRules::WillDoAction(Selection* aSelection,
     case EditAction::insertElement:
       // i had thought this would be html rules only.  but we put pre elements
       // into plaintext mail when doing quoting for reply!  doh!
-      WillInsert(*aSelection, aCancel);
-      return NS_OK;
+      return WillInsert(aSelection, aCancel);
     default:
       return NS_ERROR_FAILURE;
   }
@@ -345,25 +336,25 @@ nsTextEditRules::DocumentIsEmpty(bool *aDocumentIsEmpty)
  ********************************************************/
 
 
-void
-nsTextEditRules::WillInsert(Selection& aSelection, bool* aCancel)
+nsresult
+nsTextEditRules::WillInsert(Selection* aSelection, bool* aCancel)
 {
-  MOZ_ASSERT(aCancel);
+  NS_ENSURE_TRUE(aSelection && aCancel, NS_ERROR_NULL_POINTER);
 
-  if (IsReadonly() || IsDisabled()) {
-    *aCancel = true;
-    return;
-  }
+  CANCEL_OPERATION_IF_READONLY_OR_DISABLED
 
   // initialize out param
   *aCancel = false;
 
   // check for the magic content node and delete it if it exists
-  if (mBogusNode) {
-    NS_ENSURE_TRUE_VOID(mEditor);
+  if (mBogusNode)
+  {
+    NS_ENSURE_STATE(mEditor);
     mEditor->DeleteNode(mBogusNode);
     mBogusNode = nullptr;
   }
+
+  return NS_OK;
 }
 
 nsresult
@@ -412,7 +403,8 @@ nsTextEditRules::WillInsertBreak(Selection* aSelection,
       NS_ENSURE_SUCCESS(res, res);
     }
 
-    WillInsert(*aSelection, aCancel);
+    res = WillInsert(aSelection, aCancel);
+    NS_ENSURE_SUCCESS(res, res);
     // initialize out param
     // we want to ignore result of WillInsert()
     *aCancel = false;
@@ -496,7 +488,7 @@ GetTextNode(Selection* selection, nsEditor* editor) {
     NS_ENSURE_TRUE(node, nullptr);
     // This should be the root node, walk the tree looking for text nodes
     NodeFilterHolder filter;
-    RefPtr<NodeIterator> iter = new NodeIterator(node, nsIDOMNodeFilter::SHOW_TEXT, filter);
+    nsRefPtr<NodeIterator> iter = new NodeIterator(node, nsIDOMNodeFilter::SHOW_TEXT, filter);
     while (!editor->IsTextNode(selNode)) {
       if (NS_FAILED(res = iter->NextNode(getter_AddRefs(selNode))) || !selNode) {
         return nullptr;
@@ -650,7 +642,8 @@ nsTextEditRules::WillInsertText(EditAction aAction,
     NS_ENSURE_SUCCESS(res, res);
   }
 
-  WillInsert(*aSelection, aCancel);
+  res = WillInsert(aSelection, aCancel);
+  NS_ENSURE_SUCCESS(res, res);
   // initialize out param
   // we want to ignore result of WillInsert()
   *aCancel = false;
@@ -838,14 +831,6 @@ nsTextEditRules::WillDeleteSelection(Selection* aSelection,
   }
 
   nsresult res = NS_OK;
-  // If the current selection is empty (e.g the user presses backspace with
-  // a collapsed selection), then we want to avoid sending the selectstart
-  // event to the user, so we hide selection changes. However, we still
-  // want to send a single selectionchange event to the document, so we
-  // batch the selectionchange events, such that a single event fires after
-  // the AutoHideSelectionChanges destructor has been run.
-  SelectionBatcher selectionBatcher(aSelection);
-  AutoHideSelectionChanges hideSelection(aSelection);
   nsAutoScriptBlocker scriptBlocker;
 
   if (IsPasswordEditor())
@@ -1091,7 +1076,7 @@ nsTextEditRules::RemoveRedundantTrailingBR()
     return NS_OK;
 
   NS_ENSURE_STATE(mEditor);
-  RefPtr<dom::Element> body = mEditor->GetRoot();
+  nsRefPtr<dom::Element> body = mEditor->GetRoot();
   if (!body)
     return NS_ERROR_NULL_POINTER;
 
@@ -1101,7 +1086,7 @@ nsTextEditRules::RemoveRedundantTrailingBR()
     return NS_OK;
   }
 
-  RefPtr<nsIContent> child = body->GetFirstChild();
+  nsRefPtr<nsIContent> child = body->GetFirstChild();
   if (!child || !child->IsElement()) {
     return NS_OK;
   }
@@ -1348,7 +1333,7 @@ nsresult nsTextEditRules::HideLastPWInput() {
   FillBufWithPWChars(&hiddenText, mLastLength);
 
   NS_ENSURE_STATE(mEditor);
-  RefPtr<Selection> selection = mEditor->GetSelection();
+  nsRefPtr<Selection> selection = mEditor->GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   int32_t start, end;
   nsContentUtils::GetSelectionInTextControl(selection, mEditor->GetRoot(),

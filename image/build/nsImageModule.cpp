@@ -13,7 +13,6 @@
 #include "ImageFactory.h"
 #include "ShutdownTracker.h"
 #include "SurfaceCache.h"
-#include "SurfacePipe.h"
 
 #include "gfxPrefs.h"
 #include "imgLoader.h"
@@ -29,8 +28,6 @@
 // objects that just require generic constructors
 using namespace mozilla::image;
 
-// XXX We would like to get rid of the imgLoader factory constructor.  See the
-// comment documenting the imgLoader constructor.
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(imgLoader, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(imgRequestProxy)
 NS_GENERIC_FACTORY_CONSTRUCTOR(imgTools)
@@ -87,14 +84,9 @@ static const mozilla::Module::CategoryEntry kImageCategories[] = {
 
 static bool sInitialized = false;
 nsresult
-mozilla::image::EnsureModuleInitialized()
+mozilla::image::InitModule()
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  if (sInitialized) {
-    return NS_OK;
-  }
-
   // Make sure the preferences are initialized
   gfxPrefs::GetSingleton();
 
@@ -102,7 +94,6 @@ mozilla::image::EnsureModuleInitialized()
   mozilla::image::ImageFactory::Initialize();
   mozilla::image::DecodePool::Initialize();
   mozilla::image::SurfaceCache::Initialize();
-  mozilla::image::SurfacePipe::Initialize();
   imgLoader::GlobalInit();
   sInitialized = true;
   return NS_OK;
@@ -125,7 +116,7 @@ static const mozilla::Module kImageModule = {
   kImageContracts,
   kImageCategories,
   nullptr,
-  mozilla::image::EnsureModuleInitialized,
+  mozilla::image::InitModule,
   // We need to be careful about shutdown ordering to avoid intermittent crashes
   // when hashtable enumeration decides to destroy modules in an unfortunate
   // order. So our shutdown is invoked explicitly during layout module shutdown.

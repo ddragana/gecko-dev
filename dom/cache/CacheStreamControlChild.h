@@ -13,9 +13,6 @@
 #include "nsTObserverArray.h"
 
 namespace mozilla {
-namespace ipc {
-class AutoIPCStream;
-} // namespace ipc
 namespace dom {
 namespace cache {
 
@@ -37,8 +34,12 @@ public:
   SerializeControl(CacheReadStream* aReadStreamOut) override;
 
   virtual void
-  SerializeStream(CacheReadStream* aReadStreamOut, nsIInputStream* aStream,
-                  nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList) override;
+  SerializeFds(CacheReadStream* aReadStreamOut,
+               const nsTArray<mozilla::ipc::FileDescriptor>& aFds) override;
+
+  virtual void
+  DeserializeFds(const CacheReadStream& aReadStream,
+                 nsTArray<mozilla::ipc::FileDescriptor>& aFdsOut) override;
 
 private:
   virtual void

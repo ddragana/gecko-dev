@@ -45,7 +45,7 @@ BEGIN_TEST(testDefineGetterSetterNonEnumerable)
                             JS_DATA_TO_FUNC_PTR(JSNative, (JSObject*) funGetObj),
                             JS_DATA_TO_FUNC_PTR(JSNative, (JSObject*) funSetObj)));
 
-    JS::Rooted<JS::PropertyDescriptor> desc(cx);
+    JS::Rooted<JSPropertyDescriptor> desc(cx);
     CHECK(JS_GetOwnPropertyDescriptor(cx, vObject, PROPERTY_NAME, &desc));
     CHECK(desc.object());
     CHECK(desc.hasGetterObject());

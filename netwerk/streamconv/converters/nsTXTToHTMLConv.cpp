@@ -10,11 +10,7 @@
 #include "nsIChannel.h"
 #include <algorithm>
 
-#include "mozilla/UniquePtrExtensions.h"
-
 #define TOKEN_DELIMITERS MOZ_UTF16("\t\r\n ")
-
-using namespace mozilla;
 
 // nsISupports methods
 NS_IMPL_ISUPPORTS(nsTXTToHTMLConv,
@@ -73,8 +69,7 @@ nsTXTToHTMLConv::OnStartRequest(nsIRequest* request, nsISupports *aContext)
     if (NS_FAILED(rv)) return rv;
 
     nsCOMPtr<nsIInputStream> inputData;
-    NS_LossyConvertUTF16toASCII asciiData(mBuffer);
-    rv = NS_NewCStringInputStream(getter_AddRefs(inputData), asciiData);
+    rv = NS_NewStringInputStream(getter_AddRefs(inputData), mBuffer);
     if (NS_FAILED(rv)) return rv;
 
     rv = mListener->OnDataAvailable(request, aContext,
@@ -103,8 +98,8 @@ nsTXTToHTMLConv::OnStopRequest(nsIRequest* request, nsISupports *aContext,
     mBuffer.AppendLiteral("\n</body></html>");
 
     nsCOMPtr<nsIInputStream> inputData;
-    NS_LossyConvertUTF16toASCII asciiData(mBuffer);
-    rv = NS_NewCStringInputStream(getter_AddRefs(inputData), asciiData);
+
+    rv = NS_NewStringInputStream(getter_AddRefs(inputData), mBuffer);
     if (NS_FAILED(rv)) return rv;
 
     rv = mListener->OnDataAvailable(request, aContext,
@@ -138,18 +133,18 @@ nsTXTToHTMLConv::OnDataAvailable(nsIRequest* request, nsISupports *aContext,
     nsresult rv = NS_OK;
     nsString pushBuffer;
     uint32_t amtRead = 0;
-    auto buffer = MakeUniqueFallible<char[]>(aCount+1);
+    nsAutoArrayPtr<char> buffer(new char[aCount+1]);
     if (!buffer) return NS_ERROR_OUT_OF_MEMORY;
 
     do {
         uint32_t read = 0;
         // XXX readSegments, to avoid the first copy?
-        rv = aInStream->Read(buffer.get(), aCount-amtRead, &read);
+        rv = aInStream->Read(buffer, aCount-amtRead, &read);
         if (NS_FAILED(rv)) return rv;
 
         buffer[read] = '\0';
         // XXX charsets?? non-latin1 characters?? utf-16??
-        AppendASCIItoUTF16(buffer.get(), mBuffer);
+        AppendASCIItoUTF16(buffer, mBuffer);
         amtRead += read;
 
         int32_t front = -1, back = -1, tokenLoc = -1, cursor = 0;
@@ -180,8 +175,8 @@ nsTXTToHTMLConv::OnDataAvailable(nsIRequest* request, nsISupports *aContext,
 
         if (!pushBuffer.IsEmpty()) {
             nsCOMPtr<nsIInputStream> inputData;
-            NS_LossyConvertUTF16toASCII asciiData(pushBuffer);
-            rv = NS_NewCStringInputStream(getter_AddRefs(inputData), asciiData);
+
+            rv = NS_NewStringInputStream(getter_AddRefs(inputData), pushBuffer);
             if (NS_FAILED(rv))
                 return rv;
 

@@ -10,8 +10,6 @@ http://creativecommons.org/licenses/publicdomain/
 <head>
   <title>Test for Bug 1038811</title>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
-  <script type="text/javascript" src="/tests/dom/push/test/test_utils.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
   <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
 </head>
@@ -29,76 +27,78 @@ http://creativecommons.org/licenses/publicdomain/
   //  console.log(str + "\n");
   }
 
-  var registration;
-  add_task(function* start() {
-    yield setupPrefsAndMockSocket(new MockWebSocket());
-    yield setPushPermission(false);
+  function start() {
+    return navigator.serviceWorker.register("worker.js" + "?" + (Math.random()), {scope: "."})
+    .then((swr) => registration = swr);
+  }
 
-    var url = "worker.js" + "?" + Math.random();
-    registration = yield navigator.serviceWorker.register(url, {scope: "."});
-  });
-
-  add_task(function* denySubscribe() {
-    try {
-      yield registration.pushManager.subscribe();
-      ok(false, "subscribe() should fail because no permission for push");
-    } catch (error) {
-      ok(error instanceof DOMException, "Wrong exception type");
-      is(error.name, "NotAllowedError", "Wrong exception name");
-    }
-  });
-
-  add_task(function* denySubscribeInWorker() {
-    // If permission is revoked, `getSubscription()` should return `null`, and
-    // `subscribe()` should reject immediately. Calling these from the worker
-    // should not deadlock the main thread (see bug 1228723).
-    var errorInfo = yield sendRequestToWorker({
-      type: "denySubscribe",
+  function unregister() {
+    return registration.unregister().then(function(result) {
+      ok(result, "Unregister should return true.");
+    }, function(e) {
+      dump("Unregistering the SW failed with " + e + "\n");
     });
-    ok(errorInfo.isDOMException, "Wrong exception type");
-    is(errorInfo.name, "NotAllowedError", "Wrong exception name");
-  });
+  }
 
-  add_task(function* getEndpoint() {
-    var pushSubscription = yield registration.pushManager.getSubscription();
-    is(pushSubscription, null, "getSubscription() should return null because no permission for push");
-  });
+  function setupPushNotification(swr) {
+    var p = new Promise(function(res, rej) {
+      swr.pushManager.subscribe().then(
+        function(pushSubscription) {
+          ok(false, "subscribe() should fail because no permission for push");
+          res(swr);
+        }, function(error) {
+          ok(true, "subscribe() could not register for push notification");
+          res(swr);
+        }
+        );
+    });
+    return p;
+  }
 
-  add_task(function* checkPermissionState() {
-    var permissionManager = SpecialPowers.Ci.nsIPermissionManager;
-    var tests = [{
-      action: permissionManager.ALLOW_ACTION,
-      state: "granted",
-    }, {
-      action: permissionManager.DENY_ACTION,
-      state: "denied",
-    }, {
-      action: permissionManager.PROMPT_ACTION,
-      state: "prompt",
-    }, {
-      action: permissionManager.UNKNOWN_ACTION,
-      state: "prompt",
-    }];
-    for (var test of tests) {
-      yield setPushPermission(test.action);
-      var state = yield registration.pushManager.permissionState();
-      is(state, test.state, JSON.stringify(test));
-      try {
-        yield SpecialPowers.pushPrefEnv({ set: [
-          ["dom.push.testing.ignorePermission", true]] });
-        state = yield registration.pushManager.permissionState();
-        is(state, "granted", `Should ignore ${
-          test.action} if the override pref is set`);
-      } finally {
-        yield SpecialPowers.flushPrefEnv();
-      }
-    }
-  });
+  function getEndpoint(swr) {
+    var p = new Promise(function(res, rej) {
+      swr.pushManager.getSubscription().then(
+        function(pushSubscription) {
+          ok(false, "getSubscription() should fail because no permission for push");
+          res(swr);
+        }, function(error) {
+          ok(true, "getSubscription() could not register for push notification");
+          res(swr);
+        }
+        );
+    });
+    return p;
+  }
 
-  add_task(function* unregister() {
-    var result = yield registration.unregister();
-    ok(result, "Unregister should return true.");
-  });
+  function checkPermissionState(swr) {
+    return swr.pushManager.permissionState().then(function(state) {
+      ok(state === "denied", "permissionState() should resolve to denied.");
+      return swr;
+    }).catch(function(e) {
+      ok(false, "permissionState() should resolve to denied.");
+      return swr;
+    });
+  }
+
+  function runTest() {
+    start()
+    .then(setupPushNotification)
+    .then(getEndpoint)
+    .then(checkPermissionState)
+    .then(unregister)
+    .catch(function(e) {
+      ok(false, "Some test failed with error " + e);
+    }).then(SimpleTest.finish);
+  }
+
+  SpecialPowers.addPermission('push', false, document);
+  SpecialPowers.pushPrefEnv({"set": [
+    ["dom.push.enabled", true],
+    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+    ["dom.serviceWorkers.enabled", true],
+    ["dom.serviceWorkers.testing.enabled", true]
+    ]}, runTest);
+  SimpleTest.waitForExplicitFinish();
 
 </script>
 </body>

@@ -6,6 +6,8 @@
 
 TEST_DIRS += [
     'browser',
+    'bugs',
     'mixedcontent',
     'stricttransportsecurity',
 ]
+

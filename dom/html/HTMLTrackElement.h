@@ -55,7 +55,7 @@ public:
   {
     GetHTMLAttr(nsGkAtoms::srclang, aSrclang);
   }
-  void GetSrclang(nsAString& aSrclang) const
+  void GetSrclang(nsString& aSrclang) const
   {
     GetHTMLAttr(nsGkAtoms::srclang, aSrclang);
   }
@@ -68,7 +68,7 @@ public:
   {
     GetHTMLAttr(nsGkAtoms::label, aLabel);
   }
-  void GetLabel(nsAString& aLabel) const
+  void GetLabel(nsString& aLabel) const
   {
     GetHTMLAttr(nsGkAtoms::label, aLabel);
   }
@@ -92,6 +92,17 @@ public:
   TextTrack* GetTrack();
 
   virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) const override;
+
+  // For Track, ItemValue reflects the src attribute
+  virtual void GetItemValueText(DOMString& aText) override
+  {
+    GetSrc(aText);
+  }
+  virtual void SetItemValueText(const nsAString& aText) override
+  {
+    ErrorResult rv;
+    SetSrc(aText, rv);
+  }
 
   // Override ParseAttribute() to convert kind strings to enum values.
   virtual bool ParseAttribute(int32_t aNamespaceID,
@@ -128,10 +139,10 @@ protected:
   friend class TextTrackCue;
   friend class WebVTTListener;
 
-  RefPtr<TextTrack> mTrack;
+  nsRefPtr<TextTrack> mTrack;
   nsCOMPtr<nsIChannel> mChannel;
-  RefPtr<HTMLMediaElement> mMediaParent;
-  RefPtr<WebVTTListener> mListener;
+  nsRefPtr<HTMLMediaElement> mMediaParent;
+  nsRefPtr<WebVTTListener> mListener;
 
   void CreateTextTrack();
 };

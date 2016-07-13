@@ -8,11 +8,7 @@
   background: white;
   color: black;
 }
-/*
- * We use step-end with reverse direction to paint the initial state
- * on the first frame, and step to the last state on the next frame.
- */
-#inner { animation: HoldTransform step-end 100s reverse }
+#inner { animation: HoldTransform linear 100s }
 #inner {
   vertical-align: top;
   height: 100px;
@@ -21,11 +17,9 @@
 }
 @keyframes HoldTransform {
   /* need to initially rasterize at non-identity transform to hit the
-   * bug at all
-   * NOTE: These keyframes will be used reverse direction.
-   */
-  0% { transform: none }
-  100% { transform: scale(0.2) }
+     bug at all */
+  0% { transform: scale(0.2) }
+  0.01%, 100% { transform: none }
 }
 
 </style>
@@ -40,8 +34,9 @@
 document.getElementById("inner").addEventListener("animationstart", StartListener, false);
 
 function StartListener(event) {
-  // Animation should be zoomed to transform:none after the first frame.
-  requestAnimationFrame(RemoveReftestWait);
+  // Animation should be zoomed to transform:none after 10ms; give it
+  // longer.
+  setTimeout(RemoveReftestWait, 100);
 }
 
 function RemoveReftestWait() {

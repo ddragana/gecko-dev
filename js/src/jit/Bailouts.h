@@ -151,7 +151,7 @@ class BailoutFrameInfo
     }
 };
 
-MOZ_MUST_USE bool EnsureHasScopeObjects(JSContext* cx, AbstractFramePtr fp);
+bool EnsureHasScopeObjects(JSContext* cx, AbstractFramePtr fp);
 
 struct BaselineBailoutInfo;
 
@@ -211,7 +211,7 @@ uint32_t ExceptionHandlerBailout(JSContext* cx, const InlineFrameIterator& frame
 
 uint32_t FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo);
 
-void CheckFrequentBailouts(JSContext* cx, JSScript* script, BailoutKind bailoutKind);
+bool CheckFrequentBailouts(JSContext* cx, JSScript* script);
 
 } // namespace jit
 } // namespace js

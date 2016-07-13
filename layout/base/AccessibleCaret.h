@@ -15,7 +15,7 @@
 #include "nsISupportsBase.h"
 #include "nsISupportsImpl.h"
 #include "nsRect.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsString.h"
 
 class nsIDocument;
@@ -37,13 +37,11 @@ namespace mozilla {
 // that SetPosition() works correctly, the caller must make sure the layout is
 // up to date.
 //
-// Please see the wiki page for more information.
-// https://wiki.mozilla.org/Copy_n_Paste
-class AccessibleCaret
+class AccessibleCaret final
 {
 public:
   explicit AccessibleCaret(nsIPresShell* aPresShell);
-  virtual ~AccessibleCaret();
+  ~AccessibleCaret();
 
   // This enumeration representing the visibility and visual style of an
   // AccessibleCaret.
@@ -71,15 +69,12 @@ public:
     Right
   };
 
-  friend std::ostream& operator<<(std::ostream& aStream,
-                                  const Appearance& aAppearance);
-
   Appearance GetAppearance() const
   {
     return mAppearance;
   }
 
-  virtual void SetAppearance(Appearance aAppearance);
+  void SetAppearance(Appearance aAppearance);
 
   // Return true if current appearance is either Normal, NormalNotShown, Left,
   // or Right.
@@ -97,24 +92,20 @@ public:
 
   // Set true to enable the "Text Selection Bar" described in "Text Selection
   // Visual Spec" in bug 921965.
-  virtual void SetSelectionBarEnabled(bool aEnabled);
+  void SetSelectionBarEnabled(bool aEnabled);
 
   // This enumeration representing the result returned by SetPosition().
   enum class PositionChangedResult : uint8_t {
     // Position is not changed.
     NotChanged,
 
-    // Position or zoom level is changed.
+    // Position is changed.
     Changed,
 
     // Position is out of scroll port.
     Invisible
   };
-
-  friend std::ostream& operator<<(std::ostream& aStream,
-                                  const PositionChangedResult& aResult);
-
-  virtual PositionChangedResult SetPosition(nsIFrame* aFrame, int32_t aOffset);
+  PositionChangedResult SetPosition(nsIFrame* aFrame, int32_t aOffset);
 
   // Does two AccessibleCarets overlap?
   bool Intersects(const AccessibleCaret& aCaret) const;
@@ -136,10 +127,10 @@ public:
     return mCaretElementHolder->GetContentNode();
   }
 
-protected:
+private:
   // Argument aRect should be relative to CustomContentContainerFrame().
-  void SetCaretElementStyle(const nsRect& aRect, float aZoomLevel);
-  void SetSelectionBarElementStyle(const nsRect& aRect, float aZoomLevel);
+  void SetCaretElementStyle(const nsRect& aRect);
+  void SetSelectionBarElementStyle(const nsRect& aRect);
 
   // Get current zoom level.
   float GetZoomLevel();
@@ -199,23 +190,20 @@ protected:
 
   bool mSelectionBarEnabled = false;
 
-  // AccessibleCaretManager owns us by a UniquePtr. When it's terminated by
+  // AccessibleCaretManager owns us. When it's destroyed by
   // AccessibleCaretEventHub::Terminate() which is called in
-  // PresShell::Destroy(), it frees us automatically. No need to worry if we
+  // PresShell::Destroy(), it frees us automatically. No need to worry we
   // outlive mPresShell.
   nsIPresShell* MOZ_NON_OWNING_REF const mPresShell = nullptr;
 
-  RefPtr<dom::AnonymousContent> mCaretElementHolder;
+  nsRefPtr<dom::AnonymousContent> mCaretElementHolder;
 
   // mImaginaryCaretRect is relative to root frame.
   nsRect mImaginaryCaretRect;
 
-  // Cache current zoom level to determine whether position is changed.
-  float mZoomLevel = 0.0f;
-
   // A no-op touch-start listener which prevents APZ from panning when dragging
   // the caret.
-  RefPtr<DummyTouchListener> mDummyTouchListener{new DummyTouchListener()};
+  nsRefPtr<DummyTouchListener> mDummyTouchListener{new DummyTouchListener()};
 
   // Static class variables
   static float sWidth;
@@ -224,12 +212,6 @@ protected:
   static float sBarWidth;
 
 }; // class AccessibleCaret
-
-std::ostream& operator<<(std::ostream& aStream,
-                         const AccessibleCaret::Appearance& aAppearance);
-
-std::ostream& operator<<(std::ostream& aStream,
-                         const AccessibleCaret::PositionChangedResult& aResult);
 
 } // namespace mozilla
 

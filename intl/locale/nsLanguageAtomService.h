@@ -8,7 +8,6 @@
 #include "nsIStringBundle.h"
 #include "nsInterfaceHashtable.h"
 #include "nsIAtom.h"
-#include "nsUConvPropertySearch.h"
 #include "mozilla/Attributes.h"
 
 #define NS_LANGUAGEATOMSERVICE_CID \

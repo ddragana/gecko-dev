@@ -21,7 +21,6 @@
 #include "mozilla/dom/SVGImageElement.h"
 #include "nsContentUtils.h"
 #include "nsIReflowCallback.h"
-#include "mozilla/unused.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -45,20 +44,17 @@ private:
   nsSVGImageFrame *mFrame;
 };
 
-class nsSVGImageFrame : public nsSVGPathGeometryFrame
-                      , public nsIReflowCallback
+typedef nsSVGPathGeometryFrame nsSVGImageFrameBase;
+
+class nsSVGImageFrame : public nsSVGImageFrameBase,
+                        public nsIReflowCallback
 {
   friend nsIFrame*
   NS_NewSVGImageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 protected:
-  explicit nsSVGImageFrame(nsStyleContext* aContext)
-    : nsSVGPathGeometryFrame(aContext)
-    , mReflowCallbackPosted(false)
-  {
-    EnableVisibilityTracking();
-  }
-
+  explicit nsSVGImageFrame(nsStyleContext* aContext) : nsSVGImageFrameBase(aContext),
+                                                       mReflowCallbackPosted(false) {}
   virtual ~nsSVGImageFrame();
 
 public:
@@ -78,11 +74,6 @@ public:
   virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
                                      nsIAtom*        aAttribute,
                                      int32_t         aModType) override;
-
-  void OnVisibilityChange(Visibility aOldVisibility,
-                          Visibility aNewVisibility,
-                          Maybe<OnNonvisible> aNonvisibleAction = Nothing()) override;
-
   virtual void Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow) override;
@@ -154,13 +145,7 @@ nsSVGImageFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::image),
                "Content is not an SVG image!");
 
-  nsSVGPathGeometryFrame::Init(aContent, aParent, aPrevInFlow);
-
-  if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
-    // Non-display frames are likely to be patterns, masks or the like.
-    // Treat them as always visible.
-    IncVisibilityCount(VisibilityCounter::IN_DISPLAYPORT);
-  }
+  nsSVGImageFrameBase::Init(aContent, aParent, aPrevInFlow);
 
   mListener = new nsSVGImageListener(this);
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
@@ -178,10 +163,6 @@ nsSVGImageFrame::Init(nsIContent*       aContent,
 /* virtual */ void
 nsSVGImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
-  if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
-    DecVisibilityCount(VisibilityCounter::IN_DISPLAYPORT);
-  }
-
   if (mReflowCallbackPosted) {
     PresContext()->PresShell()->CancelReflowCallback(this);
     mReflowCallbackPosted = false;
@@ -227,6 +208,11 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
   }
   if (aNameSpaceID == kNameSpaceID_XLink &&
       aAttribute == nsGkAtoms::href) {
+
+    // Prevent setting image.src by exiting early
+    if (nsContentUtils::IsImageSrcSetDisabled()) {
+      return NS_OK;
+    }
     SVGImageElement *element = static_cast<SVGImageElement*>(mContent);
 
     if (element->mStringAttributes[SVGImageElement::HREF].IsExplicitlySet()) {
@@ -236,27 +222,8 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
     }
   }
 
-  return nsSVGPathGeometryFrame::AttributeChanged(aNameSpaceID,
-                                                  aAttribute, aModType);
-}
-
-void
-nsSVGImageFrame::OnVisibilityChange(Visibility aOldVisibility,
-                                    Visibility aNewVisibility,
-                                    Maybe<OnNonvisible> aNonvisibleAction)
-{
-  nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
-  if (!imageLoader) {
-    nsSVGPathGeometryFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                               aNonvisibleAction);
-    return;
-  }
-
-  imageLoader->OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                  aNonvisibleAction);
-
-  nsSVGPathGeometryFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                             aNonvisibleAction);
+  return nsSVGImageFrameBase::AttributeChanged(aNameSpaceID,
+                                               aAttribute, aModType);
 }
 
 gfx::Matrix
@@ -369,11 +336,11 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
     // image into the current canvas is just the group opacity.
     float opacity = 1.0f;
     if (nsSVGUtils::CanOptimizeOpacity(this)) {
-      opacity = StyleEffects()->mOpacity;
+      opacity = StyleDisplay()->mOpacity;
     }
 
-    if (opacity != 1.0f || StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
-      aContext.PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacity);
+    if (opacity != 1.0f || StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
+      aContext.PushGroup(gfxContentType::COLOR_ALPHA);
     }
 
     nscoord appUnitsPerDevPx = PresContext()->AppUnitsPerDevPixel();
@@ -404,8 +371,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
       // of the SVG image's internal document that is visible, in combination
       // with preserveAspectRatio and viewBox.
       SVGImageContext context(CSSIntSize(width, height),
-                              Some(imgElem->mPreserveAspectRatio.GetAnimValue()),
-                              1.0, true);
+                              Some(imgElem->mPreserveAspectRatio.GetAnimValue()));
 
       // For the actual draw operation to draw crisply (and at the right size),
       // our destination rect needs to be |width|x|height|, *in dev pixels*.
@@ -417,30 +383,30 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
       // Note: Can't use DrawSingleUnscaledImage for the TYPE_VECTOR case.
       // That method needs our image to have a fixed native width & height,
       // and that's not always true for TYPE_VECTOR images.
-      // FIXME We should use the return value, see bug 1258510.
-      Unused << nsLayoutUtils::DrawSingleImage(
+      nsLayoutUtils::DrawSingleImage(
         aContext,
         PresContext(),
         mImageContainer,
-        nsLayoutUtils::GetSamplingFilterForFrame(this),
+        nsLayoutUtils::GetGraphicsFilterForFrame(this),
         destRect,
         aDirtyRect ? dirtyRect : destRect,
         &context,
         drawFlags);
     } else { // mImageContainer->GetType() == TYPE_RASTER
-      // FIXME We should use the return value, see bug 1258510.
-      Unused << nsLayoutUtils::DrawSingleUnscaledImage(
+      nsLayoutUtils::DrawSingleUnscaledImage(
         aContext,
         PresContext(),
         mImageContainer,
-        nsLayoutUtils::GetSamplingFilterForFrame(this),
+        nsLayoutUtils::GetGraphicsFilterForFrame(this),
         nsPoint(0, 0),
         aDirtyRect ? &dirtyRect : nullptr,
         drawFlags);
     }
 
-    if (opacity != 1.0f || StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
-      aContext.PopGroupAndBlend();
+    if (opacity != 1.0f || StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
+      aContext.PopGroupToSource();
+      aContext.SetOperator(gfxContext::OPERATOR_OVER);
+      aContext.Paint(opacity);
     }
     // gfxContextAutoSaveRestore goes out of scope & cleans up our gfxContext
   }
@@ -564,16 +530,7 @@ nsSVGImageFrame::ReflowFinished()
 {
   mReflowCallbackPosted = false;
 
-  // XXX(seth): We don't need this. The purpose of updating visibility
-  // synchronously is to ensure that animated images start animating
-  // immediately. In the short term, however,
-  // nsImageLoadingContent::OnUnlockedDraw() is enough to ensure that
-  // animations start as soon as the image is painted for the first time, and in
-  // the long term we want to update visibility information from the display
-  // list whenever we paint, so we don't actually need to do this. However, to
-  // avoid behavior changes during the transition from the old image visibility
-  // code, we'll leave it in for now.
-  UpdateVisibilitySynchronously();
+  nsLayoutUtils::UpdateImageVisibilityForFrame(this);
 
   return false;
 }
@@ -589,7 +546,7 @@ nsSVGImageFrame::GetHitTestFlags()
 {
   uint16_t flags = 0;
 
-  switch (StyleUserInterface()->mPointerEvents) {
+  switch(StyleVisibility()->mPointerEvents) {
     case NS_STYLE_POINTER_EVENTS_NONE:
       break;
     case NS_STYLE_POINTER_EVENTS_VISIBLEPAINTED:

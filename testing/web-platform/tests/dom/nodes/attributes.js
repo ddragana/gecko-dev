@@ -6,7 +6,6 @@ function attr_is(attr, v, ln, ns, p, n) {
   assert_equals(attr.namespaceURI, ns)
   assert_equals(attr.prefix, p)
   assert_equals(attr.name, n)
-  assert_equals(attr.nodeName, n);
   assert_equals(attr.specified, true)
 }
 

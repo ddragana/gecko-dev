@@ -30,7 +30,7 @@ public:
   NS_DECL_NSIURLCLASSIFIERDBSERVICE
   NS_DECL_NSIURLCLASSIFIERDBSERVICEWORKER
 
-  class LookupRunnable : public mozilla::Runnable
+  class LookupRunnable : public nsRunnable
   {
   public:
     LookupRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -46,13 +46,13 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
     nsCOMPtr<nsIPrincipal> mPrincipal;
     nsCString mLookupTables;
     nsCOMPtr<nsIUrlClassifierCallback> mCB;
   };
 
-  class GetTablesRunnable : public mozilla::Runnable
+  class GetTablesRunnable : public nsRunnable
   {
   public:
     GetTablesRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -64,11 +64,11 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
     nsCOMPtr<nsIUrlClassifierCallback> mCB;
   };
 
-  class BeginUpdateRunnable : public mozilla::Runnable
+  class BeginUpdateRunnable : public nsRunnable
   {
   public:
     BeginUpdateRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -82,12 +82,12 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
     nsCOMPtr<nsIUrlClassifierUpdateObserver> mUpdater;
     nsCString mTables;
   };
 
-  class BeginStreamRunnable : public mozilla::Runnable
+  class BeginStreamRunnable : public nsRunnable
   {
   public:
     BeginStreamRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -99,11 +99,11 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
     nsCString mTable;
   };
 
-  class UpdateStreamRunnable : public mozilla::Runnable
+  class UpdateStreamRunnable : public nsRunnable
   {
   public:
     UpdateStreamRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -115,11 +115,11 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
     nsCString mUpdateChunk;
   };
 
-  class CacheCompletionsRunnable : public mozilla::Runnable
+  class CacheCompletionsRunnable : public nsRunnable
   {
   public:
     CacheCompletionsRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -131,11 +131,11 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
      mozilla::safebrowsing::CacheResultArray *mEntries;
   };
 
-  class CacheMissesRunnable : public mozilla::Runnable
+  class CacheMissesRunnable : public nsRunnable
   {
   public:
     CacheMissesRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -147,11 +147,11 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
     mozilla::safebrowsing::PrefixArray *mEntries;
   };
 
-  class DoLocalLookupRunnable : public mozilla::Runnable
+  class DoLocalLookupRunnable : public nsRunnable
   {
   public:
     DoLocalLookupRunnable(nsUrlClassifierDBServiceWorker* aTarget,
@@ -166,41 +166,11 @@ public:
 
     NS_DECL_NSIRUNNABLE
   private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+    nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
 
     nsCString mSpec;
     nsCString mTables;
     mozilla::safebrowsing::LookupResultArray* mResults;
-  };
-
-  class SetLastUpdateTimeRunnable : public mozilla::Runnable
-  {
-  public:
-    SetLastUpdateTimeRunnable(nsUrlClassifierDBServiceWorker* aTarget,
-                              const nsACString& table,
-                              uint64_t updateTime)
-      : mTarget(aTarget),
-        mTable(table),
-        mUpdateTime(updateTime)
-    { }
-
-    NS_DECL_NSIRUNNABLE
-  private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
-    nsCString mTable;
-    uint64_t mUpdateTime;
-  };
-
-  class ClearLastResultsRunnable : public mozilla::Runnable
-  {
-  public:
-    explicit ClearLastResultsRunnable(nsUrlClassifierDBServiceWorker* aTarget)
-      : mTarget(aTarget)
-    { }
-
-    NS_DECL_NSIRUNNABLE
-  private:
-    RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
   };
 
 public:
@@ -211,7 +181,7 @@ public:
 private:
   ~UrlClassifierDBServiceWorkerProxy() {}
 
-  RefPtr<nsUrlClassifierDBServiceWorker> mTarget;
+  nsRefPtr<nsUrlClassifierDBServiceWorker> mTarget;
 };
 
 // The remaining classes here are all proxies to the main thread
@@ -227,7 +197,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERLOOKUPCALLBACK
 
-  class LookupCompleteRunnable : public mozilla::Runnable
+  class LookupCompleteRunnable : public nsRunnable
   {
   public:
     LookupCompleteRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierLookupCallback>& aTarget,
@@ -259,7 +229,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERCALLBACK
 
-  class HandleEventRunnable : public mozilla::Runnable
+  class HandleEventRunnable : public nsRunnable
   {
   public:
     HandleEventRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierCallback>& aTarget,
@@ -292,7 +262,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERUPDATEOBSERVER
 
-  class UpdateUrlRequestedRunnable : public mozilla::Runnable
+  class UpdateUrlRequestedRunnable : public nsRunnable
   {
   public:
     UpdateUrlRequestedRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,
@@ -310,7 +280,7 @@ public:
     nsCString mURL, mTable;
   };
 
-  class StreamFinishedRunnable : public mozilla::Runnable
+  class StreamFinishedRunnable : public nsRunnable
   {
   public:
     StreamFinishedRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,
@@ -328,7 +298,7 @@ public:
     uint32_t mDelay;
   };
 
-  class UpdateErrorRunnable : public mozilla::Runnable
+  class UpdateErrorRunnable : public nsRunnable
   {
   public:
     UpdateErrorRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,
@@ -344,7 +314,7 @@ public:
     nsresult mError;
   };
 
-  class UpdateSuccessRunnable : public mozilla::Runnable
+  class UpdateSuccessRunnable : public nsRunnable
   {
   public:
     UpdateSuccessRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,

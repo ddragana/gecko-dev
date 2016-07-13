@@ -11,6 +11,7 @@
 #include "nsIObserver.h"
 #include "nsString.h"
 #include "nsTArray.h"
+#include "nsAutoPtr.h"
 #include "nsWeakReference.h"
 
 class nsIVolume;
@@ -44,7 +45,7 @@ private:
   nsresult Init();
   nsresult Lock(nsIVolume* aVolume);
 
-  RefPtr<dom::WakeLock>  mWakeLock;
+  nsRefPtr<dom::WakeLock>  mWakeLock;
   nsString                 mVolumeName;
   int32_t                  mVolumeGeneration;
   bool                     mUnlocked;

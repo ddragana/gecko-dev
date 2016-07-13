@@ -18,19 +18,16 @@ namespace dom {
 NotifyPaintEvent::NotifyPaintEvent(EventTarget* aOwner,
                                    nsPresContext* aPresContext,
                                    WidgetEvent* aEvent,
-                                   EventMessage aEventMessage,
-                                   nsInvalidateRequestList* aInvalidateRequests,
-                                   uint64_t aTransactionId)
+                                   uint32_t aEventType,
+                                   nsInvalidateRequestList* aInvalidateRequests)
   : Event(aOwner, aPresContext, aEvent)
 {
   if (mEvent) {
-    mEvent->mMessage = aEventMessage;
+    mEvent->message = aEventType;
   }
   if (aInvalidateRequests) {
-    mInvalidateRequests.AppendElements(Move(aInvalidateRequests->mRequests));
+    mInvalidateRequests.MoveElementsFrom(aInvalidateRequests->mRequests);
   }
-
-  mTransactionId = aTransactionId;
 }
 
 NS_INTERFACE_MAP_BEGIN(NotifyPaintEvent)
@@ -64,7 +61,7 @@ NotifyPaintEvent::GetBoundingClientRect(nsIDOMClientRect** aResult)
 already_AddRefed<DOMRect>
 NotifyPaintEvent::BoundingClientRect()
 {
-  RefPtr<DOMRect> rect = new DOMRect(ToSupports(this));
+  nsRefPtr<DOMRect> rect = new DOMRect(ToSupports(this));
 
   if (mPresContext) {
     rect->SetLayoutRect(GetRegion().GetBounds());
@@ -84,12 +81,14 @@ already_AddRefed<DOMRectList>
 NotifyPaintEvent::ClientRects()
 {
   nsISupports* parent = ToSupports(this);
-  RefPtr<DOMRectList> rectList = new DOMRectList(parent);
+  nsRefPtr<DOMRectList> rectList = new DOMRectList(parent);
 
   nsRegion r = GetRegion();
-  for (auto iter = r.RectIter(); !iter.Done(); iter.Next()) {
-    RefPtr<DOMRect> rect = new DOMRect(parent);
-    rect->SetLayoutRect(iter.Get());
+  nsRegionRectIterator iter(r);
+  for (const nsRect* rgnRect = iter.Next(); rgnRect; rgnRect = iter.Next()) {
+    nsRefPtr<DOMRect> rect = new DOMRect(parent);
+    
+    rect->SetLayoutRect(*rgnRect);
     rectList->Append(rect);
   }
 
@@ -99,7 +98,7 @@ NotifyPaintEvent::ClientRects()
 NS_IMETHODIMP
 NotifyPaintEvent::GetPaintRequests(nsISupports** aResult)
 {
-  RefPtr<PaintRequestList> requests = PaintRequests();
+  nsRefPtr<PaintRequestList> requests = PaintRequests();
   requests.forget(aResult);
   return NS_OK;
 }
@@ -108,11 +107,11 @@ already_AddRefed<PaintRequestList>
 NotifyPaintEvent::PaintRequests()
 {
   Event* parent = this;
-  RefPtr<PaintRequestList> requests = new PaintRequestList(parent);
+  nsRefPtr<PaintRequestList> requests = new PaintRequestList(parent);
 
   if (nsContentUtils::IsCallerChrome()) {
     for (uint32_t i = 0; i < mInvalidateRequests.Length(); ++i) {
-      RefPtr<PaintRequest> r = new PaintRequest(parent);
+      nsRefPtr<PaintRequest> r = new PaintRequest(parent);
       r->SetRequest(mInvalidateRequests[i]);
       requests->Append(r);
     }
@@ -140,7 +139,7 @@ NotifyPaintEvent::Serialize(IPC::Message* aMsg,
 }
 
 NS_IMETHODIMP_(bool)
-NotifyPaintEvent::Deserialize(const IPC::Message* aMsg, PickleIterator* aIter)
+NotifyPaintEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
 {
   NS_ENSURE_TRUE(Event::Deserialize(aMsg, aIter), false);
 
@@ -157,35 +156,23 @@ NotifyPaintEvent::Deserialize(const IPC::Message* aMsg, PickleIterator* aIter)
   return true;
 }
 
-NS_IMETHODIMP
-NotifyPaintEvent::GetTransactionId(uint64_t* aTransactionId)
-{
-  *aTransactionId = mTransactionId;
-  return NS_OK;
-}
-
-uint64_t
-NotifyPaintEvent::TransactionId()
-{
-  return mTransactionId;
-}
-
 } // namespace dom
 } // namespace mozilla
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<NotifyPaintEvent>
-NS_NewDOMNotifyPaintEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMNotifyPaintEvent(nsIDOMEvent** aInstancePtrResult,
+                          EventTarget* aOwner,
                           nsPresContext* aPresContext,
                           WidgetEvent* aEvent,
-                          EventMessage aEventMessage,
-                          nsInvalidateRequestList* aInvalidateRequests,
-                          uint64_t aTransactionId)
+                          uint32_t aEventType,
+                          nsInvalidateRequestList* aInvalidateRequests) 
 {
-  RefPtr<NotifyPaintEvent> it =
-    new NotifyPaintEvent(aOwner, aPresContext, aEvent, aEventMessage,
-                         aInvalidateRequests, aTransactionId);
-  return it.forget();
+  NotifyPaintEvent* it = new NotifyPaintEvent(aOwner, aPresContext, aEvent,
+                                              aEventType, aInvalidateRequests);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

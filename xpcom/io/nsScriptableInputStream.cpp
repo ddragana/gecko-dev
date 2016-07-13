@@ -81,11 +81,11 @@ nsScriptableInputStream::ReadBytes(uint32_t aCount, nsACString& aResult)
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  if (!aResult.SetLength(aCount, fallible)) {
+  aResult.SetLength(aCount);
+  if (aResult.Length() != aCount) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  MOZ_ASSERT(aResult.Length() == aCount);
   char* ptr = aResult.BeginWriting();
   nsresult rv = ReadHelper(ptr, aCount);
   if (NS_FAILED(rv)) {
@@ -129,6 +129,9 @@ nsScriptableInputStream::Create(nsISupports* aOuter, REFNSIID aIID,
     return NS_ERROR_NO_AGGREGATION;
   }
 
-  RefPtr<nsScriptableInputStream> sis = new nsScriptableInputStream();
-  return sis->QueryInterface(aIID, aResult);
+  nsScriptableInputStream* sis = new nsScriptableInputStream();
+  NS_ADDREF(sis);
+  nsresult rv = sis->QueryInterface(aIID, aResult);
+  NS_RELEASE(sis);
+  return rv;
 }

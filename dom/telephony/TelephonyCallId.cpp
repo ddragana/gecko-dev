@@ -11,7 +11,7 @@
 namespace mozilla {
 namespace dom {
 
-TelephonyCallId::TelephonyCallId(nsPIDOMWindowInner* aWindow,
+TelephonyCallId::TelephonyCallId(nsPIDOMWindow* aWindow,
                                  const nsAString& aNumber,
                                  uint16_t aNumberPresentation,
                                  const nsAString& aName,

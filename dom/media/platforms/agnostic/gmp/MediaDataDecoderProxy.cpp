@@ -10,9 +10,9 @@
 namespace mozilla {
 
 void
-MediaDataDecoderCallbackProxy::Error(MediaDataDecoderError aError)
+MediaDataDecoderCallbackProxy::Error()
 {
-  mProxyCallback->Error(aError);
+  mProxyCallback->Error();
 }
 
 void
@@ -21,21 +21,16 @@ MediaDataDecoderCallbackProxy::FlushComplete()
   mProxyDecoder->FlushComplete();
 }
 
-RefPtr<MediaDataDecoder::InitPromise>
-MediaDataDecoderProxy::InternalInit()
-{
-  MOZ_ASSERT(!mIsShutdown);
-
-  return mProxyDecoder->Init();
-}
-
-RefPtr<MediaDataDecoder::InitPromise>
+nsresult
 MediaDataDecoderProxy::Init()
 {
   MOZ_ASSERT(!mIsShutdown);
+  nsRefPtr<InitTask> task(new InitTask(mProxyDecoder));
+  nsresult rv = mProxyThread->Dispatch(task, NS_DISPATCH_SYNC);
+  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS(task->Result(), task->Result());
 
-  return InvokeAsync(mProxyThread, this, __func__,
-                     &MediaDataDecoderProxy::InternalInit);
+  return NS_OK;
 }
 
 nsresult
@@ -45,7 +40,8 @@ MediaDataDecoderProxy::Input(MediaRawData* aSample)
   MOZ_ASSERT(!mIsShutdown);
 
   nsCOMPtr<nsIRunnable> task(new InputTask(mProxyDecoder, aSample));
-  mProxyThread->Dispatch(task.forget());
+  nsresult rv = mProxyThread->Dispatch(task, NS_DISPATCH_NORMAL);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
@@ -58,7 +54,10 @@ MediaDataDecoderProxy::Flush()
 
   mFlushComplete.Set(false);
 
-  mProxyThread->Dispatch(NewRunnableMethod(mProxyDecoder, &MediaDataDecoder::Flush));
+  nsCOMPtr<nsIRunnable> task;
+  task = NS_NewRunnableMethod(mProxyDecoder, &MediaDataDecoder::Flush);
+  nsresult rv = mProxyThread->Dispatch(task, NS_DISPATCH_NORMAL);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   mFlushComplete.WaitUntil(true);
 
@@ -71,7 +70,10 @@ MediaDataDecoderProxy::Drain()
   MOZ_ASSERT(!IsOnProxyThread());
   MOZ_ASSERT(!mIsShutdown);
 
-  mProxyThread->Dispatch(NewRunnableMethod(mProxyDecoder, &MediaDataDecoder::Drain));
+  nsCOMPtr<nsIRunnable> task;
+  task = NS_NewRunnableMethod(mProxyDecoder, &MediaDataDecoder::Drain);
+  nsresult rv = mProxyThread->Dispatch(task, NS_DISPATCH_NORMAL);
+  NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
 
@@ -83,9 +85,9 @@ MediaDataDecoderProxy::Shutdown()
 #if defined(DEBUG)
   mIsShutdown = true;
 #endif
-  nsresult rv = mProxyThread->AsXPCOMThread()->Dispatch(NewRunnableMethod(mProxyDecoder,
-                                                                          &MediaDataDecoder::Shutdown),
-                                                        NS_DISPATCH_SYNC);
+  nsCOMPtr<nsIRunnable> task;
+  task = NS_NewRunnableMethod(mProxyDecoder, &MediaDataDecoder::Shutdown);
+  nsresult rv = mProxyThread->Dispatch(task, NS_DISPATCH_SYNC);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }

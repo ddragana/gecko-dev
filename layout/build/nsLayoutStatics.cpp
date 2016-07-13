@@ -66,12 +66,12 @@
 #include "ActiveLayerTracker.h"
 #include "CounterStyleManager.h"
 #include "FrameLayerBuilder.h"
+#include "mozilla/dom/RequestSyncWifiService.h"
 #include "AnimationCommon.h"
-#include "LayerAnimationInfo.h"
 
 #include "AudioChannelService.h"
+#include "mozilla/dom/DataStoreService.h"
 #include "mozilla/dom/PromiseDebugging.h"
-#include "mozilla/dom/WebCryptoThreadPool.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -95,6 +95,14 @@
 #include "AndroidMediaPluginHost.h"
 #endif
 
+#ifdef MOZ_GSTREAMER
+#include "GStreamerFormatHelper.h"
+#endif
+
+#ifdef MOZ_FFMPEG
+#include "FFmpegRuntimeLinker.h"
+#endif
+
 #include "CubebUtils.h"
 #include "Latency.h"
 #include "WebAudioUtils.h"
@@ -109,6 +117,7 @@ using namespace mozilla::system;
 #include "nsJSEnvironment.h"
 #include "nsContentSink.h"
 #include "nsFrameMessageManager.h"
+#include "nsRefreshDriver.h"
 #include "nsDOMMutationObserver.h"
 #include "nsHyphenationManager.h"
 #include "nsEditorSpellCheck.h"
@@ -126,16 +135,7 @@ using namespace mozilla::system;
 #include "CameraPreferences.h"
 #include "TouchManager.h"
 #include "MediaDecoder.h"
-#include "MediaPrefs.h"
 #include "mozilla/layers/CompositorLRU.h"
-#include "mozilla/dom/devicestorage/DeviceStorageStatics.h"
-#include "mozilla/ServoBindings.h"
-#include "mozilla/StaticPresData.h"
-#include "mozilla/dom/WebIDLGlobalNameHash.h"
-
-#ifdef MOZ_B2G_BT
-#include "mozilla/dom/BluetoothUUID.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -198,8 +198,9 @@ nsLayoutStatics::Initialize()
 
   nsCellMap::Init();
 
-  StaticPresData::Init();
   nsCSSRendering::Init();
+
+  nsTextFrameTextRunCache::Init();
 
   rv = nsHTMLDNSPrefetch::Initialize();
   if (NS_FAILED(rv)) {
@@ -261,7 +262,6 @@ nsLayoutStatics::Initialize()
   }
 
   AsyncLatencyLogger::InitializeStatics();
-  MediaManager::StartupInit();
   CubebUtils::InitLibrary();
 
   nsContentSink::InitializeStatics();
@@ -270,6 +270,7 @@ nsLayoutStatics::Initialize()
   nsLayoutUtils::Initialize();
   nsIPresShell::InitializeStatics();
   TouchManager::InitializeStatics();
+  nsRefreshDriver::InitializeStatics();
   nsPrincipal::InitializeStatics();
 
   nsCORSListenerProxy::Startup();
@@ -283,7 +284,7 @@ nsLayoutStatics::Initialize()
 
   ProcessPriorityManager::Init();
 
-  nsPermissionManager::ClearOriginDataObserverInit();
+  nsPermissionManager::AppClearDataObserverInit();
   nsCookieService::AppClearDataObserverInit();
   nsApplicationCacheService::AppClearDataObserverInit();
 
@@ -303,9 +304,13 @@ nsLayoutStatics::Initialize()
 
   ServiceWorkerRegistrar::Initialize();
 
+#ifdef MOZ_B2G
+  RequestSyncWifiService::Init();
+#endif
+
 #ifdef DEBUG
   nsStyleContext::Initialize();
-  mozilla::LayerAnimationInfo::Initialize();
+  mozilla::css::CommonAnimationManager::Initialize();
 #endif
 
   MediaDecoder::InitStatics();
@@ -313,19 +318,6 @@ nsLayoutStatics::Initialize()
   PromiseDebugging::Init();
 
   layers::CompositorLRU::Init();
-
-  mozilla::dom::devicestorage::DeviceStorageStatics::Initialize();
-
-  mozilla::dom::WebCryptoThreadPool::Initialize();
-
-#ifdef MOZ_STYLO
-  Servo_Initialize();
-#endif
-
-#ifndef MOZ_WIDGET_ANDROID
-  // On Android, we instantiate it when constructing AndroidBridge.
-  MediaPrefs::GetSingleton();
-#endif
 
   return NS_OK;
 }
@@ -348,9 +340,9 @@ nsLayoutStatics::Shutdown()
   IMEStateManager::Shutdown();
   nsCSSParser::Shutdown();
   nsCSSRuleProcessor::Shutdown();
+  nsTextFrameTextRunCache::Shutdown();
   nsHTMLDNSPrefetch::Shutdown();
   nsCSSRendering::Shutdown();
-  StaticPresData::Shutdown();
 #ifdef DEBUG
   nsFrame::DisplayReflowShutdown();
 #endif
@@ -389,7 +381,6 @@ nsLayoutStatics::Shutdown()
   ShutdownJSEnvironment();
   nsGlobalWindow::ShutDown();
   nsDOMClassInfo::ShutDown();
-  WebIDLGlobalNameHash::Shutdown();
   nsListControlFrame::Shutdown();
   nsXBLService::Shutdown();
   nsAutoCopyListener::Shutdown();
@@ -397,6 +388,14 @@ nsLayoutStatics::Shutdown()
 
 #ifdef MOZ_ANDROID_OMX
   AndroidMediaPluginHost::Shutdown();
+#endif
+
+#ifdef MOZ_GSTREAMER
+  GStreamerFormatHelper::Shutdown();
+#endif
+
+#ifdef MOZ_FFMPEG
+  FFmpegRuntimeLinker::Unlink();
 #endif
 
   CubebUtils::ShutdownLibrary();
@@ -434,7 +433,11 @@ nsLayoutStatics::Shutdown()
   nsHyphenationManager::Shutdown();
   nsDOMMutationObserver::Shutdown();
 
+  DataStoreService::Shutdown();
+
   ContentParent::ShutDown();
+
+  nsRefreshDriver::Shutdown();
 
   DisplayItemClip::Shutdown();
 
@@ -445,8 +448,4 @@ nsLayoutStatics::Shutdown()
   CameraPreferences::Shutdown();
 
   PromiseDebugging::Shutdown();
-
-#ifdef MOZ_B2G_BT
-  BluetoothUUID::HandleShutdown();
-#endif
 }

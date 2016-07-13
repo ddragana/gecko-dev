@@ -21,6 +21,7 @@
 #include "nsWindowsDllInterceptor.h"
 #include "nsPluginNativeWindow.h"
 #include "nsThreadUtils.h"
+#include "nsAutoPtr.h"
 #include "nsTWeakRef.h"
 #include "nsCrashOnException.h"
 
@@ -45,7 +46,7 @@ typedef nsTWeakRef<class nsPluginNativeWindowWin> PluginWindowWeakRef;
 /**
  *  PLEvent handling code
  */
-class PluginWindowEvent : public Runnable {
+class PluginWindowEvent : public nsRunnable {
 public:
   PluginWindowEvent();
   void Init(const PluginWindowWeakRef &ref, HWND hWnd, UINT msg, WPARAM wParam,
@@ -101,7 +102,7 @@ public:
   nsPluginNativeWindowWin();
   virtual ~nsPluginNativeWindowWin();
 
-  virtual nsresult CallSetWindow(RefPtr<nsNPAPIPluginInstance> &aPluginInstance);
+  virtual nsresult CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> &aPluginInstance);
 
 private:
   nsresult SubclassAndAssociateWindow();
@@ -121,7 +122,7 @@ private:
   WNDPROC mPluginWinProc;
   WNDPROC mPrevWinProc;
   PluginWindowWeakRef mWeakRef;
-  RefPtr<PluginWindowEvent> mCachedPluginWindowEvent;
+  nsRefPtr<PluginWindowEvent> mCachedPluginWindowEvent;
 
   HWND mParentWnd;
   LONG_PTR mParentProc;
@@ -158,7 +159,7 @@ static bool ProcessFlashMessageDelayed(nsPluginNativeWindowWin * aWin, nsNPAPIPl
   return false;
 }
 
-class nsDelayedPopupsEnabledEvent : public Runnable
+class nsDelayedPopupsEnabledEvent : public nsRunnable
 {
 public:
   nsDelayedPopupsEnabledEvent(nsNPAPIPluginInstance *inst)
@@ -168,7 +169,7 @@ public:
   NS_DECL_NSIRUNNABLE
 
 private:
-  RefPtr<nsNPAPIPluginInstance> mInst;
+  nsRefPtr<nsNPAPIPluginInstance> mInst;
 };
 
 NS_IMETHODIMP nsDelayedPopupsEnabledEvent::Run()
@@ -195,10 +196,10 @@ static LRESULT CALLBACK PluginWndProcInternal(HWND hWnd, UINT msg, WPARAM wParam
   if (!win)
     return TRUE;
 
-  // The DispatchEvent(ePluginActivate) below can trigger a reentrant focus
+  // The DispatchEvent(NS_PLUGIN_ACTIVATE) below can trigger a reentrant focus
   // event which might destroy us.  Hold a strong ref on the plugin instance
   // to prevent that, bug 374229.
-  RefPtr<nsNPAPIPluginInstance> inst;
+  nsRefPtr<nsNPAPIPluginInstance> inst;
   win->GetPluginInstance(inst);
 
   // Real may go into a state where it recursivly dispatches the same event
@@ -270,7 +271,7 @@ static LRESULT CALLBACK PluginWndProcInternal(HWND hWnd, UINT msg, WPARAM wParam
         nsCOMPtr<nsIWidget> widget;
         win->GetPluginWidget(getter_AddRefs(widget));
         if (widget) {
-          WidgetGUIEvent event(true, ePluginActivate, widget);
+          WidgetGUIEvent event(true, NS_PLUGIN_ACTIVATE, widget);
           nsEventStatus status;
           widget->DispatchEvent(&event, status);
         }
@@ -535,7 +536,7 @@ NS_IMETHODIMP PluginWindowEvent::Run()
   if (!hWnd)
     return NS_OK;
 
-  RefPtr<nsNPAPIPluginInstance> inst;
+  nsRefPtr<nsNPAPIPluginInstance> inst;
   win->GetPluginInstance(inst);
 
   if (GetMsg() == WM_USER_FLASH) {
@@ -574,11 +575,13 @@ nsPluginNativeWindowWin::GetPluginWindowEvent(HWND aWnd, UINT aMsg, WPARAM aWPar
   if (!mCachedPluginWindowEvent)
   {
     event = new PluginWindowEvent();
+    if (!event) return nullptr;
     mCachedPluginWindowEvent = event;
   }
   else if (mCachedPluginWindowEvent->InUse())
   {
     event = new PluginWindowEvent();
+    if (!event) return nullptr;
   }
   else
   {
@@ -589,7 +592,7 @@ nsPluginNativeWindowWin::GetPluginWindowEvent(HWND aWnd, UINT aMsg, WPARAM aWPar
   return event;
 }
 
-nsresult nsPluginNativeWindowWin::CallSetWindow(RefPtr<nsNPAPIPluginInstance> &aPluginInstance)
+nsresult nsPluginNativeWindowWin::CallSetWindow(nsRefPtr<nsNPAPIPluginInstance> &aPluginInstance)
 {
   // Note, 'window' can be null
 
@@ -736,7 +739,8 @@ nsresult PLUG_NewPluginNativeWindow(nsPluginNativeWindow ** aPluginNativeWindow)
   NS_ENSURE_ARG_POINTER(aPluginNativeWindow);
 
   *aPluginNativeWindow = new nsPluginNativeWindowWin();
-  return NS_OK;
+
+  return *aPluginNativeWindow ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
 nsresult PLUG_DeletePluginNativeWindow(nsPluginNativeWindow * aPluginNativeWindow)

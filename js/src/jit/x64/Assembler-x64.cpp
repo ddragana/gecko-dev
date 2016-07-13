@@ -44,28 +44,27 @@ ABIArgGenerator::next(MIRType type)
         return current_;
     }
     switch (type) {
-      case MIRType::Int32:
-      case MIRType::Int64:
-      case MIRType::Pointer:
+      case MIRType_Int32:
+      case MIRType_Pointer:
         current_ = ABIArg(IntArgRegs[regIndex_++]);
         break;
-      case MIRType::Float32:
+      case MIRType_Float32:
         current_ = ABIArg(FloatArgRegs[regIndex_++].asSingle());
         break;
-      case MIRType::Double:
+      case MIRType_Double:
         current_ = ABIArg(FloatArgRegs[regIndex_++]);
         break;
-      case MIRType::Int8x16:
-      case MIRType::Int16x8:
-      case MIRType::Int32x4:
-      case MIRType::Float32x4:
-      case MIRType::Bool8x16:
-      case MIRType::Bool16x8:
-      case MIRType::Bool32x4:
+      case MIRType_Int32x4:
         // On Win64, >64 bit args need to be passed by reference, but asm.js
         // doesn't allow passing SIMD values to FFIs. The only way to reach
         // here is asm to asm calls, so we can break the ABI here.
-        current_ = ABIArg(FloatArgRegs[regIndex_++].asSimd128());
+        current_ = ABIArg(FloatArgRegs[regIndex_++].asInt32x4());
+        break;
+      case MIRType_Float32x4:
+        // On Win64, >64 bit args need to be passed by reference, but asm.js
+        // doesn't allow passing SIMD values to FFIs. The only way to reach
+        // here is asm to asm calls, so we can break the ABI here.
+        current_ = ABIArg(FloatArgRegs[regIndex_++].asFloat32x4());
         break;
       default:
         MOZ_CRASH("Unexpected argument type");
@@ -73,9 +72,8 @@ ABIArgGenerator::next(MIRType type)
     return current_;
 #else
     switch (type) {
-      case MIRType::Int32:
-      case MIRType::Int64:
-      case MIRType::Pointer:
+      case MIRType_Int32:
+      case MIRType_Pointer:
         if (intRegIndex_ == NumIntArgRegs) {
             current_ = ABIArg(stackOffset_);
             stackOffset_ += sizeof(uint64_t);
@@ -83,32 +81,30 @@ ABIArgGenerator::next(MIRType type)
         }
         current_ = ABIArg(IntArgRegs[intRegIndex_++]);
         break;
-      case MIRType::Double:
-      case MIRType::Float32:
+      case MIRType_Double:
+      case MIRType_Float32:
         if (floatRegIndex_ == NumFloatArgRegs) {
             current_ = ABIArg(stackOffset_);
             stackOffset_ += sizeof(uint64_t);
             break;
         }
-        if (type == MIRType::Float32)
+        if (type == MIRType_Float32)
             current_ = ABIArg(FloatArgRegs[floatRegIndex_++].asSingle());
         else
             current_ = ABIArg(FloatArgRegs[floatRegIndex_++]);
         break;
-      case MIRType::Int8x16:
-      case MIRType::Int16x8:
-      case MIRType::Int32x4:
-      case MIRType::Float32x4:
-      case MIRType::Bool8x16:
-      case MIRType::Bool16x8:
-      case MIRType::Bool32x4:
+      case MIRType_Int32x4:
+      case MIRType_Float32x4:
         if (floatRegIndex_ == NumFloatArgRegs) {
             stackOffset_ = AlignBytes(stackOffset_, SimdMemoryAlignment);
             current_ = ABIArg(stackOffset_);
             stackOffset_ += Simd128DataSize;
             break;
         }
-        current_ = ABIArg(FloatArgRegs[floatRegIndex_++].asSimd128());
+        if (type == MIRType_Int32x4)
+            current_ = ABIArg(FloatArgRegs[floatRegIndex_++].asInt32x4());
+        else
+            current_ = ABIArg(FloatArgRegs[floatRegIndex_++].asFloat32x4());
         break;
       default:
         MOZ_CRASH("Unexpected argument type");
@@ -116,6 +112,13 @@ ABIArgGenerator::next(MIRType type)
     return current_;
 #endif
 }
+
+// Avoid r11, which is the MacroAssembler's ScratchReg.
+const Register ABIArgGenerator::NonArgReturnReg0 = jit::r10;
+const Register ABIArgGenerator::NonArgReturnReg1 = jit::r12;
+const Register ABIArgGenerator::NonVolatileReg = jit::r13;
+const Register ABIArgGenerator::NonArg_VolatileReg = jit::rax;
+const Register ABIArgGenerator::NonReturn_VolatileReg0 = jit::rcx;
 
 void
 Assembler::writeRelocation(JmpSrc src, Relocation::Kind reloc)

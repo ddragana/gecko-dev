@@ -4,8 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict"
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+let Cc = Components.classes;
+let Ci = Components.interfaces;
 
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/Messaging.jsm");
@@ -42,9 +42,6 @@ function Prompt(aOptions) {
 
   if ("buttons" in aOptions && aOptions.buttons != null)
     this.msg.buttons = aOptions.buttons;
-
-  if ("doubleTapButton" in aOptions && aOptions.doubleTapButton != null)
-    this.msg.doubleTapButton = aOptions.doubleTapButton;
 
   if ("hint" in aOptions && aOptions.hint != null)
     this.msg.hint = aOptions.hint;
@@ -123,9 +120,7 @@ Prompt.prototype = {
     return this._addInput({
       type: aOptions.type || "date",
       value: aOptions.value,
-      id: aOptions.id,
-      max: aOptions.max,
-      min: aOptions.min
+      id: aOptions.id
     });
   },
 
@@ -190,6 +185,9 @@ Prompt.prototype = {
       let obj = { id: item.id };
 
       obj.label = item.label;
+
+      if (item.icon)
+        obj.icon = item.icon;
 
       if (item.disabled)
         obj.disabled = true;

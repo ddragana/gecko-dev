@@ -65,7 +65,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=851780
     input.focus();
 
     input.addEventListener("input", function (aEvent) {
-      ok(true, "input event should have been dispatched on file input.");
+      ok(false, "input event doesn't apply to type='file'");
     }, false);
 
     input.click();
@@ -135,35 +135,14 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=851780
     textarea.blur();
     is(textareaInput, 3, "input event should not have been dispatched");
 
-    // Non-text input tests:
+    // Some dummy tests for types that do not support the input event.
     for (var i = 0; i < NonTextTypes.length; ++i) {
-      // Button, submit, image and reset input type tests.
-      if (i < 4) {
-        input = document.getElementById("input_" + NonTextTypes[i]);
-        input.focus();
-        input.click();
-        is(NonTextInput[i], 0, "input event doesn't apply");
-        input.blur();
-        is(NonTextInput[i], 0, "input event doesn't apply");
-      }
-      // For radio and checkboxes, input event should be dispatched.
-      else {
-        input = document.getElementById("input_" + NonTextTypes[i]);
-        input.focus();
-        input.click();
-        is(NonTextInput[i], 1, "input event should have been dispatched");
-        input.blur();
-        is(NonTextInput[i], 1, "input event should not have been dispatched");
-
-        // Test that input event is not dispatched if click event is cancelled.
-        function preventDefault(e) {
-          e.preventDefault();
-        }
-        input.addEventListener("click", preventDefault, false);
-        input.click();
-        is(NonTextInput[i], 1, "input event shouldn't be dispatched if click event is cancelled");
-        input.removeEventListener("click", preventDefault, false);
-      }
+      input = document.getElementById("input_" + NonTextTypes[i]);
+      input.focus();
+      input.click();
+      is(NonTextInput[i], 0, "input event doesn't apply");
+      input.blur();
+      is(NonTextInput[i], 0, "input event doesn't apply");
     }
 
     // Type changes.

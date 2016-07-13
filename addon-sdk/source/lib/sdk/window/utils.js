@@ -142,9 +142,7 @@ function getToplevelWindow(window) {
 }
 exports.getToplevelWindow = getToplevelWindow;
 
-function getWindowDocShell(window) {
-  return window.gBrowser.docShell;
-}
+function getWindowDocShell(window) window.gBrowser.docShell;
 exports.getWindowDocShell = getWindowDocShell;
 
 function getWindowLoadingContext(window) {
@@ -223,7 +221,7 @@ function onFocus(window) {
 }
 exports.onFocus = onFocus;
 
-var isFocused = dispatcher("window-isFocused");
+let isFocused = dispatcher("window-isFocused");
 isFocused.when(x => x instanceof Ci.nsIDOMWindow, (window) => {
   const FM = Cc["@mozilla.org/focus-manager;1"].
                 getService(Ci.nsIFocusManager);
@@ -321,17 +319,6 @@ const isInteractive = window =>
   // `"complete"`.
   isXULDocumentWindow(window) && window.document.readyState === "interactive";
 exports.isInteractive = isInteractive;
-
-/**
- * Check if the given browser window has finished the startup.
- * @params {nsIDOMWindow} window
- */
-const isStartupFinished = (window) =>
-  isBrowser(window) &&
-  window.gBrowserInit &&
-  window.gBrowserInit.delayedStartupFinished;
-
-exports.isStartupFinished = isStartupFinished;
 
 const isXULDocumentWindow = ({document}) =>
   document.documentElement &&

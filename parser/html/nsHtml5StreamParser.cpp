@@ -17,7 +17,6 @@
 #include "nsHtml5RefPtr.h"
 #include "nsIScriptError.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/UniquePtrExtensions.h"
 #include "nsHtml5Highlighter.h"
 #include "expat_config.h"
 #include "expat.h"
@@ -114,10 +113,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsHtml5StreamParser)
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-class nsHtml5ExecutorFlusher : public Runnable
+class nsHtml5ExecutorFlusher : public nsRunnable
 {
   private:
-    RefPtr<nsHtml5TreeOpExecutor> mExecutor;
+    nsRefPtr<nsHtml5TreeOpExecutor> mExecutor;
   public:
     explicit nsHtml5ExecutorFlusher(nsHtml5TreeOpExecutor* aExecutor)
       : mExecutor(aExecutor)
@@ -131,10 +130,10 @@ class nsHtml5ExecutorFlusher : public Runnable
     }
 };
 
-class nsHtml5LoadFlusher : public Runnable
+class nsHtml5LoadFlusher : public nsRunnable
 {
   private:
-    RefPtr<nsHtml5TreeOpExecutor> mExecutor;
+    nsRefPtr<nsHtml5TreeOpExecutor> mExecutor;
   public:
     explicit nsHtml5LoadFlusher(nsHtml5TreeOpExecutor* aExecutor)
       : mExecutor(aExecutor)
@@ -301,7 +300,7 @@ nsHtml5StreamParser::SetupDecodingAndWriteSniffingBufferAndCurrentSegment(const 
   mUnicodeDecoder = EncodingUtils::DecoderForEncoding(mCharset);
   if (mSniffingBuffer) {
     uint32_t writeCount;
-    rv = WriteStreamBytes(mSniffingBuffer.get(), mSniffingLength, &writeCount);
+    rv = WriteStreamBytes(mSniffingBuffer, mSniffingLength, &writeCount);
     NS_ENSURE_SUCCESS(rv, rv);
     mSniffingBuffer = nullptr;
   }
@@ -709,7 +708,7 @@ nsHtml5StreamParser::SniffStreamBytes(const uint8_t* aFromSegment,
   if (!mMetaScanner && (mMode == NORMAL ||
                         mMode == VIEW_SOURCE_HTML ||
                         mMode == LOAD_AS_DATA)) {
-    mMetaScanner = new nsHtml5MetaScanner(mTreeBuilder);
+    mMetaScanner = new nsHtml5MetaScanner();
   }
   
   if (mSniffingLength + aCount >= NS_HTML5_STREAM_PARSER_SNIFFING_BUFFER_SIZE) {
@@ -721,12 +720,6 @@ nsHtml5StreamParser::SniffStreamBytes(const uint8_t* aFromSegment,
           countToSniffingLimit);
       nsAutoCString encoding;
       mMetaScanner->sniff(&readable, encoding);
-      // Due to the way nsHtml5Portability reports OOM, ask the tree buider
-      nsresult rv;
-      if (NS_FAILED((rv = mTreeBuilder->IsBroken()))) {
-        MarkAsBroken(rv);
-        return rv;
-      }
       if (!encoding.IsEmpty()) {
         // meta scan successful; honor overrides unless meta is XSS-dangerous
         if ((mCharsetSource == kCharsetFromParentForced ||
@@ -759,12 +752,6 @@ nsHtml5StreamParser::SniffStreamBytes(const uint8_t* aFromSegment,
     nsHtml5ByteReadable readable(aFromSegment, aFromSegment + aCount);
     nsAutoCString encoding;
     mMetaScanner->sniff(&readable, encoding);
-    // Due to the way nsHtml5Portability reports OOM, ask the tree buider
-    nsresult rv;
-    if (NS_FAILED((rv = mTreeBuilder->IsBroken()))) {
-      MarkAsBroken(rv);
-      return rv;
-    }
     if (!encoding.IsEmpty()) {
       // meta scan successful; honor overrides unless meta is XSS-dangerous
       if ((mCharsetSource == kCharsetFromParentForced ||
@@ -784,13 +771,13 @@ nsHtml5StreamParser::SniffStreamBytes(const uint8_t* aFromSegment,
   }
 
   if (!mSniffingBuffer) {
-    mSniffingBuffer =
-      MakeUniqueFallible<uint8_t[]>(NS_HTML5_STREAM_PARSER_SNIFFING_BUFFER_SIZE);
+    mSniffingBuffer = new (mozilla::fallible)
+      uint8_t[NS_HTML5_STREAM_PARSER_SNIFFING_BUFFER_SIZE];
     if (!mSniffingBuffer) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
   }
-  memcpy(&mSniffingBuffer[mSniffingLength], aFromSegment, aCount);
+  memcpy(mSniffingBuffer + mSniffingLength, aFromSegment, aCount);
   mSniffingLength += aCount;
   *aWriteCount = aCount;
   return NS_OK;
@@ -810,7 +797,7 @@ nsHtml5StreamParser::WriteStreamBytes(const uint8_t* aFromSegment,
     return NS_ERROR_NULL_POINTER;
   }
   if (mLastBuffer->getEnd() == NS_HTML5_STREAM_PARSER_READ_BUFFER_SIZE) {
-    RefPtr<nsHtml5OwningUTF16Buffer> newBuf =
+    nsRefPtr<nsHtml5OwningUTF16Buffer> newBuf =
       nsHtml5OwningUTF16Buffer::FalliblyCreate(
         NS_HTML5_STREAM_PARSER_READ_BUFFER_SIZE);
     if (!newBuf) {
@@ -841,7 +828,7 @@ nsHtml5StreamParser::WriteStreamBytes(const uint8_t* aFromSegment,
     NS_ASSERTION(byteCount >= -1, "The decoder consumed fewer than -1 bytes.");
 
     if (convResult == NS_PARTIAL_MORE_OUTPUT) {
-      RefPtr<nsHtml5OwningUTF16Buffer> newBuf =
+      nsRefPtr<nsHtml5OwningUTF16Buffer> newBuf =
         nsHtml5OwningUTF16Buffer::FalliblyCreate(
           NS_HTML5_STREAM_PARSER_READ_BUFFER_SIZE);
       if (!newBuf) {
@@ -903,10 +890,7 @@ nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
     mTreeBuilder->StartPlainText();
     mTokenizer->StartPlainText();
   } else if (mMode == VIEW_SOURCE_PLAIN) {
-    nsAutoString viewSourceTitle;
-    CopyUTF8toUTF16(mViewSourceTitle, viewSourceTitle);
-    mTreeBuilder->EnsureBufferSpace(viewSourceTitle.Length());
-    mTreeBuilder->StartPlainTextViewSource(viewSourceTitle);
+    mTreeBuilder->StartPlainTextViewSource(NS_ConvertUTF8toUTF16(mViewSourceTitle));
     mTokenizer->StartPlainText();
   }
 
@@ -918,7 +902,7 @@ nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
   rv = mExecutor->WillBuildModel(eDTDMode_unknown);
   NS_ENSURE_SUCCESS(rv, rv);
   
-  RefPtr<nsHtml5OwningUTF16Buffer> newBuf =
+  nsRefPtr<nsHtml5OwningUTF16Buffer> newBuf =
     nsHtml5OwningUTF16Buffer::FalliblyCreate(
       NS_HTML5_STREAM_PARSER_READ_BUFFER_SIZE);
   if (!newBuf) {
@@ -1041,7 +1025,7 @@ nsHtml5StreamParser::DoStopRequest()
   ParseAvailableData(); 
 }
 
-class nsHtml5RequestStopper : public Runnable
+class nsHtml5RequestStopper : public nsRunnable
 {
   private:
     nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
@@ -1123,24 +1107,24 @@ nsHtml5StreamParser::DoDataAvailable(const uint8_t* aBuffer, uint32_t aLength)
   mFlushTimerArmed = true;
 }
 
-class nsHtml5DataAvailable : public Runnable
+class nsHtml5DataAvailable : public nsRunnable
 {
   private:
     nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
-    UniquePtr<uint8_t[]>               mData;
+    nsAutoArrayPtr<uint8_t>            mData;
     uint32_t                           mLength;
   public:
     nsHtml5DataAvailable(nsHtml5StreamParser* aStreamParser,
-                         UniquePtr<uint8_t[]> aData,
+                         uint8_t*             aData,
                          uint32_t             aLength)
       : mStreamParser(aStreamParser)
-      , mData(Move(aData))
+      , mData(aData)
       , mLength(aLength)
     {}
     NS_IMETHODIMP Run()
     {
       mozilla::MutexAutoLock autoLock(mStreamParser->mTokenizerMutex);
-      mStreamParser->DoDataAvailable(mData.get(), mLength);
+      mStreamParser->DoDataAvailable(mData, mLength);
       return NS_OK;
     }
 };
@@ -1161,7 +1145,7 @@ nsHtml5StreamParser::OnDataAvailable(nsIRequest* aRequest,
   uint32_t totalRead;
   // Main thread to parser thread dispatch requires copying to buffer first.
   if (NS_IsMainThread()) {
-    auto data = MakeUniqueFallible<uint8_t[]>(aLength);
+    nsAutoArrayPtr<uint8_t> data(new (mozilla::fallible) uint8_t[aLength]);
     if (!data) {
       return mExecutor->MarkAsBroken(NS_ERROR_OUT_OF_MEMORY);
     }
@@ -1171,7 +1155,7 @@ nsHtml5StreamParser::OnDataAvailable(nsIRequest* aRequest,
     NS_ASSERTION(totalRead <= aLength, "Read more bytes than were available?");
 
     nsCOMPtr<nsIRunnable> dataAvailable = new nsHtml5DataAvailable(this,
-                                                                   Move(data),
+                                                                   data.forget(),
                                                                    totalRead);
     if (NS_FAILED(mThread->Dispatch(dataAvailable, nsIThread::DISPATCH_NORMAL))) {
       NS_WARNING("Dispatching DataAvailable event failed.");
@@ -1380,17 +1364,10 @@ nsHtml5StreamParser::ParseAvailableData()
                                                         0);
               }
             }
-            if (NS_SUCCEEDED(mTreeBuilder->IsBroken())) {
-              mTokenizer->eof();
-              nsresult rv;
-              if (NS_FAILED((rv = mTreeBuilder->IsBroken()))) {
-                MarkAsBroken(rv);
-              } else {
-                mTreeBuilder->StreamEnded();
-                if (mMode == VIEW_SOURCE_HTML || mMode == VIEW_SOURCE_XML) {
-                  mTokenizer->EndViewSource();
-                }
-              }
+            mTokenizer->eof();
+            mTreeBuilder->StreamEnded();
+            if (mMode == VIEW_SOURCE_HTML || mMode == VIEW_SOURCE_XML) {
+              mTokenizer->EndViewSource();
             }
             FlushTreeOpsAndDisarmTimer();
             return; // no more data and not expecting more
@@ -1407,16 +1384,7 @@ nsHtml5StreamParser::ParseAvailableData()
     mFirstBuffer->adjust(mLastWasCR);
     mLastWasCR = false;
     if (mFirstBuffer->hasMore()) {
-      if (!mTokenizer->EnsureBufferSpace(mFirstBuffer->getLength())) {
-        MarkAsBroken(NS_ERROR_OUT_OF_MEMORY);
-        return;
-      }
       mLastWasCR = mTokenizer->tokenizeBuffer(mFirstBuffer);
-      nsresult rv;
-      if (NS_FAILED((rv = mTreeBuilder->IsBroken()))) {
-        MarkAsBroken(rv);
-        return;
-      }
       // At this point, internalEncodingDeclaration() may have called 
       // Terminate, but that never happens together with script.
       // Can't assert that here, though, because it's possible that the main
@@ -1446,7 +1414,7 @@ nsHtml5StreamParser::ParseAvailableData()
   }
 }
 
-class nsHtml5StreamParserContinuation : public Runnable
+class nsHtml5StreamParserContinuation : public nsRunnable
 {
 private:
   nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;
@@ -1612,7 +1580,7 @@ nsHtml5StreamParser::ContinueAfterFailedCharsetSwitch()
   }
 }
 
-class nsHtml5TimerKungFu : public Runnable
+class nsHtml5TimerKungFu : public nsRunnable
 {
 private:
   nsHtml5RefPtr<nsHtml5StreamParser> mStreamParser;

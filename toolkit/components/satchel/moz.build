@@ -28,17 +28,25 @@ LOCAL_INCLUDES += [
 EXTRA_COMPONENTS += [
     'FormHistoryStartup.js',
     'nsFormAutoComplete.js',
-    'nsFormHistory.js',
     'nsInputListAutoComplete.js',
     'satchel.manifest',
 ]
 
+EXTRA_PP_COMPONENTS += [
+    'nsFormHistory.js',
+]
+
 EXTRA_JS_MODULES += [
     'AutoCompleteE10S.jsm',
-    'FormHistory.jsm',
     'nsFormAutoCompleteResult.jsm',
+]
+
+EXTRA_PP_JS_MODULES += [
+    'FormHistory.jsm',
 ]
 
 FINAL_LIBRARY = 'xul'
 
 JAR_MANIFESTS += ['jar.mn']
+
+FAIL_ON_WARNINGS = True

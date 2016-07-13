@@ -15,10 +15,8 @@
 #include "mozilla/Preferences.h"
 
 #include "nsIObserver.h"
-#include "nsIEventListenerService.h"
 
 class nsImageFrame;
-class nsIArray;
 class nsIPersistentProperties;
 class nsPluginFrame;
 class nsITreeView;
@@ -69,15 +67,11 @@ class nsAccessibilityService final : public mozilla::a11y::DocManager,
                                      public mozilla::a11y::FocusManager,
                                      public mozilla::a11y::SelectionManager,
                                      public nsIAccessibilityService,
-                                     public nsIListenerChangeListener,
                                      public nsIObserver
 {
 public:
   typedef mozilla::a11y::Accessible Accessible;
   typedef mozilla::a11y::DocAccessible DocAccessible;
-
-  // nsIListenerChangeListener
-  NS_IMETHOD ListenersChanged(nsIArray* aEventChanges) override;
 
 protected:
   virtual ~nsAccessibilityService();
@@ -180,15 +174,16 @@ public:
   static bool IsShutdown() { return gIsShutdown; }
 
   /**
-   * Creates an accessible for the given DOM node.
+   * Return an accessible for the given DOM node from the cache or create new
+   * one.
    *
    * @param  aNode             [in] the given node
    * @param  aContext          [in] context the accessible is created in
    * @param  aIsSubtreeHidden  [out, optional] indicates whether the node's
    *                             frame and its subtree is hidden
    */
-  Accessible* CreateAccessible(nsINode* aNode, Accessible* aContext,
-                               bool* aIsSubtreeHidden = nullptr);
+  Accessible* GetOrCreateAccessible(nsINode* aNode, Accessible* aContext,
+                                    bool* aIsSubtreeHidden = nullptr);
 
   mozilla::a11y::role MarkupRole(const nsIContent* aContent) const
   {
@@ -383,8 +378,7 @@ static const char kEventTypeNames[][40] = {
   "hypertext changed",                       // EVENT_HYPERTEXT_CHANGED
   "hypertext links count changed",           // EVENT_HYPERTEXT_NLINKS_CHANGED
   "object attribute changed",                // EVENT_OBJECT_ATTRIBUTE_CHANGED
-  "virtual cursor changed",                   // EVENT_VIRTUALCURSOR_CHANGED
-  "text value change",                       // EVENT_TEXT_VALUE_CHANGE
+  "virtual cursor changed"                   // EVENT_VIRTUALCURSOR_CHANGED
 };
 
 #endif /* __nsIAccessibilityService_h__ */

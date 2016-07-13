@@ -20,9 +20,7 @@ class nsSupportsArray final : public nsISupportsArray
 
 public:
   nsSupportsArray(void);
-
-  static MOZ_MUST_USE nsresult
-  Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
+  static nsresult Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 
   NS_DECL_THREADSAFE_ISUPPORTS
 
@@ -35,8 +33,7 @@ public:
     return NS_OK;
   }
   NS_IMETHOD GetElementAt(uint32_t aIndex, nsISupports** aResult) override;
-  MOZ_MUST_USE NS_IMETHOD
-  QueryElementAt(uint32_t aIndex, const nsIID& aIID, void** aResult) override
+  NS_IMETHOD QueryElementAt(uint32_t aIndex, const nsIID& aIID, void** aResult) override
   {
     if (aIndex < mCount) {
       nsISupports* element = mArray[aIndex];
@@ -46,19 +43,18 @@ public:
     }
     return NS_ERROR_FAILURE;
   }
-  MOZ_MUST_USE NS_IMETHOD
-  SetElementAt(uint32_t aIndex, nsISupports* aValue) override
+  NS_IMETHOD SetElementAt(uint32_t aIndex, nsISupports* aValue) override
   {
     return ReplaceElementAt(aValue, aIndex) ? NS_OK : NS_ERROR_FAILURE;
   }
-  MOZ_MUST_USE NS_IMETHOD AppendElement(nsISupports* aElement) override
+  NS_IMETHOD AppendElement(nsISupports* aElement) override
   {
     // XXX Invalid cast of bool to nsresult (bug 778110)
     return (nsresult)InsertElementAt(aElement, mCount)/* ? NS_OK : NS_ERROR_FAILURE*/;
   }
   // XXX this is badly named - should be RemoveFirstElement
-  MOZ_MUST_USE NS_IMETHOD RemoveElement(nsISupports* aElement) override;
-  MOZ_MUST_USE NS_IMETHOD_(bool) MoveElement(int32_t aFrom, int32_t aTo) override;
+  NS_IMETHOD RemoveElement(nsISupports* aElement) override;
+  NS_IMETHOD_(bool) MoveElement(int32_t aFrom, int32_t aTo) override;
   NS_IMETHOD Enumerate(nsIEnumerator** aResult) override;
   NS_IMETHOD Clear(void) override;
 
@@ -89,48 +85,41 @@ public:
     return NS_OK;
   }
 
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  InsertElementAt(nsISupports* aElement, uint32_t aIndex) override;
+  NS_IMETHOD_(bool) InsertElementAt(nsISupports* aElement, uint32_t aIndex) override;
 
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  ReplaceElementAt(nsISupports* aElement, uint32_t aIndex) override;
+  NS_IMETHOD_(bool) ReplaceElementAt(nsISupports* aElement, uint32_t aIndex) override;
 
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  RemoveElementAt(uint32_t aIndex) override
+  NS_IMETHOD_(bool) RemoveElementAt(uint32_t aIndex) override
   {
     return RemoveElementsAt(aIndex, 1);
   }
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  RemoveLastElement(const nsISupports* aElement) override;
+  NS_IMETHOD_(bool) RemoveLastElement(const nsISupports* aElement) override;
 
-  MOZ_MUST_USE NS_IMETHOD DeleteLastElement(nsISupports* aElement) override
+  NS_IMETHOD DeleteLastElement(nsISupports* aElement) override
   {
     return (RemoveLastElement(aElement) ? NS_OK : NS_ERROR_FAILURE);
   }
 
-  MOZ_MUST_USE NS_IMETHOD DeleteElementAt(uint32_t aIndex) override
+  NS_IMETHOD DeleteElementAt(uint32_t aIndex) override
   {
     return (RemoveElementAt(aIndex) ? NS_OK : NS_ERROR_FAILURE);
   }
 
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  AppendElements(nsISupportsArray* aElements) override
+  NS_IMETHOD_(bool) AppendElements(nsISupportsArray* aElements) override
   {
     return InsertElementsAt(aElements, mCount);
   }
 
   NS_IMETHOD Compact(void) override;
 
-  MOZ_MUST_USE NS_IMETHOD Clone(nsISupportsArray** aResult) override;
+  NS_IMETHOD Clone(nsISupportsArray** aResult) override;
 
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  InsertElementsAt(nsISupportsArray* aOther, uint32_t aIndex) override;
+  NS_IMETHOD_(bool) InsertElementsAt(nsISupportsArray* aOther,
+                                     uint32_t aIndex) override;
 
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  RemoveElementsAt(uint32_t aIndex, uint32_t aCount) override;
+  NS_IMETHOD_(bool) RemoveElementsAt(uint32_t aIndex, uint32_t aCount) override;
 
-  MOZ_MUST_USE NS_IMETHOD_(bool)
-  SizeTo(int32_t aSize) override;
+  NS_IMETHOD_(bool) SizeTo(int32_t aSize) override;
 protected:
   void DeleteArray(void);
 

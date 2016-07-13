@@ -17,11 +17,7 @@ namespace layers {
 
 class MacIOSurfaceImage : public Image {
 public:
-  explicit MacIOSurfaceImage(MacIOSurface* aSurface)
-   : Image(nullptr, ImageFormat::MAC_IOSURFACE),
-     mSurface(aSurface)
-  {}
-
+  void SetSurface(MacIOSurface* aSurface) { mSurface = aSurface; }
   MacIOSurface* GetSurface() { return mSurface; }
 
   gfx::IntSize GetSize() override {
@@ -32,9 +28,7 @@ public:
 
   virtual TextureClient* GetTextureClient(CompositableClient* aClient) override;
 
-  virtual MacIOSurfaceImage* AsMacIOSurfaceImage() override {
-    return this;
-  }
+  MacIOSurfaceImage() : Image(nullptr, ImageFormat::MAC_IOSURFACE) {}
 
 private:
   RefPtr<MacIOSurface> mSurface;

@@ -218,7 +218,7 @@ FocusManager::DispatchFocusEvent(DocAccessible* aDocument,
 {
   NS_PRECONDITION(aDocument, "No document for focused accessible!");
   if (aDocument) {
-    RefPtr<AccEvent> event =
+    nsRefPtr<AccEvent> event =
       new AccEvent(nsIAccessibleEvent::EVENT_FOCUS, aTarget,
                    eAutoDetect, AccEvent::eCoalesceOfSameType);
     aDocument->FireDelayedEvent(event);
@@ -279,7 +279,7 @@ FocusManager::ProcessFocusEvent(AccEvent* aEvent)
 
     // Check if still focused. Otherwise we can end up with storing the active
     // item for control that isn't focused anymore.
-    DocAccessible* document = aEvent->Document();
+    DocAccessible* document = aEvent->GetDocAccessible();
     nsINode* focusedNode = FocusedDOMNode();
     if (!focusedNode)
       return;
@@ -299,24 +299,39 @@ FocusManager::ProcessFocusEvent(AccEvent* aEvent)
   // Fire menu start/end events for ARIA menus.
   if (target->IsARIARole(nsGkAtoms::menuitem)) {
     // The focus was moved into menu.
+    bool tryOwnsParent = true;
     Accessible* ARIAMenubar = nullptr;
-    for (Accessible* parent = target->Parent(); parent; parent = parent->Parent()) {
-      if (parent->IsARIARole(nsGkAtoms::menubar)) {
-        ARIAMenubar = parent;
-        break;
+    Accessible* child = target;
+    Accessible* parent = child->Parent();
+    while (parent) {
+      nsRoleMapEntry* roleMap = parent->ARIARoleMap();
+      if (roleMap) {
+        if (roleMap->Is(nsGkAtoms::menubar)) {
+          ARIAMenubar = parent;
+          break;
+        }
+
+        // Go up in the parent chain of the menu hierarchy.
+        if (roleMap->Is(nsGkAtoms::menuitem) || roleMap->Is(nsGkAtoms::menu)) {
+          child = parent;
+          parent = child->Parent();
+          tryOwnsParent = true;
+          continue;
+        }
       }
 
-      // Go up in the parent chain of the menu hierarchy.
-      if (!parent->IsARIARole(nsGkAtoms::menuitem) &&
-          !parent->IsARIARole(nsGkAtoms::menu)) {
+      // If no required context role then check aria-owns relation.
+      if (!tryOwnsParent)
         break;
-      }
+
+      parent = ARIAOwnedByIterator(child).Next();
+      tryOwnsParent = false;
     }
 
     if (ARIAMenubar != mActiveARIAMenubar) {
       // Leaving ARIA menu. Fire menu_end event on current menubar.
       if (mActiveARIAMenubar) {
-        RefPtr<AccEvent> menuEndEvent =
+        nsRefPtr<AccEvent> menuEndEvent =
           new AccEvent(nsIAccessibleEvent::EVENT_MENU_END, mActiveARIAMenubar,
                        aEvent->FromUserInput());
         nsEventShell::FireEvent(menuEndEvent);
@@ -326,7 +341,7 @@ FocusManager::ProcessFocusEvent(AccEvent* aEvent)
 
       // Entering ARIA menu. Fire menu_start event.
       if (mActiveARIAMenubar) {
-        RefPtr<AccEvent> menuStartEvent =
+        nsRefPtr<AccEvent> menuStartEvent =
           new AccEvent(nsIAccessibleEvent::EVENT_MENU_START,
                        mActiveARIAMenubar, aEvent->FromUserInput());
         nsEventShell::FireEvent(menuStartEvent);
@@ -334,7 +349,7 @@ FocusManager::ProcessFocusEvent(AccEvent* aEvent)
     }
   } else if (mActiveARIAMenubar) {
     // Focus left a menu. Fire menu_end event.
-    RefPtr<AccEvent> menuEndEvent =
+    nsRefPtr<AccEvent> menuEndEvent =
       new AccEvent(nsIAccessibleEvent::EVENT_MENU_END, mActiveARIAMenubar,
                    aEvent->FromUserInput());
     nsEventShell::FireEvent(menuEndEvent);
@@ -352,7 +367,7 @@ FocusManager::ProcessFocusEvent(AccEvent* aEvent)
   // offset before the caret move event is handled.
   SelectionMgr()->ResetCaretOffset();
 
-  RefPtr<AccEvent> focusEvent =
+  nsRefPtr<AccEvent> focusEvent =
     new AccEvent(nsIAccessibleEvent::EVENT_FOCUS, target, aEvent->FromUserInput());
   nsEventShell::FireEvent(focusEvent);
 
@@ -389,7 +404,7 @@ FocusManager::FocusedDOMNode() const
   }
 
   // Otherwise the focus can be on DOM document.
-  nsPIDOMWindowOuter* focusedWnd = DOMFocusManager->GetFocusedWindow();
+  nsPIDOMWindow* focusedWnd = DOMFocusManager->GetFocusedWindow();
   return focusedWnd ? focusedWnd->GetExtantDoc() : nullptr;
 }
 

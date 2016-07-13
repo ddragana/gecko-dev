@@ -9,7 +9,6 @@
 #include <errno.h>
 #include <cutils/properties.h>
 #include "prinit.h"
-#include "mozilla/Snprintf.h"
 #include "js/CharacterEncoding.h"
 
 using namespace mozilla::dom;
@@ -369,10 +368,10 @@ public:
     char command[COMMAND_SIZE];
     if (!strcmp(iface, "p2p0")) {
       // Commands for p2p0 interface don't need prefix
-      snprintf_literal(command, "%s", cmd);
+      PR_snprintf(command, COMMAND_SIZE, "%s", cmd);
     }
     else {
-      snprintf_literal(command, "IFNAME=%s %s", iface, cmd);
+      PR_snprintf(command, COMMAND_SIZE, "IFNAME=%s %s", iface, cmd);
     }
     USE_DLFUNC(wifi_command)
     return wifi_command(command, buf, len);
@@ -387,13 +386,13 @@ WpaSupplicant::WpaSupplicant()
   mSdkVersion = strtol(propVersion, nullptr, 10);
 
   if (mSdkVersion < 16) {
-    mImpl = MakeUnique<ICSWpaSupplicantImpl>();
+    mImpl = new ICSWpaSupplicantImpl();
   } else if (mSdkVersion < 19) {
-    mImpl = MakeUnique<JBWpaSupplicantImpl>();
+    mImpl = new JBWpaSupplicantImpl();
   } else {
-    mImpl = MakeUnique<KKWpaSupplicantImpl>();
+    mImpl = new KKWpaSupplicantImpl();
   }
-  mWifiHotspotUtils = MakeUnique<WifiHotspotUtils>();
+  mWifiHotspotUtils = new WifiHotspotUtils();
 };
 
 void WpaSupplicant::WaitForEvent(nsAString& aEvent, const nsCString& aInterface)

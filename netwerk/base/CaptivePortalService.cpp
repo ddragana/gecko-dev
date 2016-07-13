@@ -6,7 +6,6 @@
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
 #include "nsIObserverService.h"
-#include "nsServiceManagerUtils.h"
 #include "nsXULAppAPI.h"
 
 #define kInterfaceName "captive-portal-inteface"
@@ -17,12 +16,12 @@ static const char kCaptivePortalLoginSuccessEvent[] = "captive-portal-login-succ
 
 static const uint32_t kDefaultInterval = 60*1000; // check every 60 seconds
 
-namespace mozilla {
-namespace net {
-
-static LazyLogModule gCaptivePortalLog("CaptivePortalService");
+static PRLogModuleInfo *gCaptivePortalLog = nullptr;
 #undef LOG
 #define LOG(args) MOZ_LOG(gCaptivePortalLog, mozilla::LogLevel::Debug, args)
+
+namespace mozilla {
+namespace net {
 
 NS_IMPL_ISUPPORTS(CaptivePortalService, nsICaptivePortalService, nsIObserver,
                   nsISupportsWeakReference, nsITimerCallback,
@@ -70,7 +69,7 @@ CaptivePortalService::PerformCheck()
   LOG(("CaptivePortalService::PerformCheck - Calling CheckCaptivePortal\n"));
   mRequestInProgress = true;
   mCaptivePortalDetector->CheckCaptivePortal(
-    MOZ_UTF16(kInterfaceName), this);
+    NS_LITERAL_STRING(kInterfaceName).get(), this);
   return NS_OK;
 }
 
@@ -101,6 +100,10 @@ CaptivePortalService::Initialize()
     return NS_OK;
   }
   mInitialized = true;
+
+  if (!gCaptivePortalLog) {
+    gCaptivePortalLog = PR_NewLogModule("CaptivePortalService");
+  }
 
   nsCOMPtr<nsIObserverService> observerService =
     mozilla::services::GetObserverService();
@@ -161,7 +164,7 @@ CaptivePortalService::Stop()
   mRequestInProgress = false;
   mStarted = false;
   if (mCaptivePortalDetector) {
-    mCaptivePortalDetector->Abort(MOZ_UTF16(kInterfaceName));
+    mCaptivePortalDetector->Abort(NS_LITERAL_STRING(kInterfaceName).get());
   }
   mCaptivePortalDetector = nullptr;
   return NS_OK;
@@ -278,7 +281,7 @@ CaptivePortalService::Prepare()
   LOG(("CaptivePortalService::Prepare\n"));
   // XXX: Finish preparation shouldn't be called until dns and routing is available.
   if (mCaptivePortalDetector) {
-    mCaptivePortalDetector->FinishPreparation(MOZ_UTF16(kInterfaceName));
+    mCaptivePortalDetector->FinishPreparation(NS_LITERAL_STRING(kInterfaceName).get());
   }
   return NS_OK;
 }

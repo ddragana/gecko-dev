@@ -159,7 +159,7 @@ nsHtml5TreeOperation::AppendText(const char16_t* aBuffer,
   }
 
   nsNodeInfoManager* nodeInfoManager = aParent->OwnerDoc()->NodeInfoManager();
-  RefPtr<nsTextNode> text = new nsTextNode(nodeInfoManager);
+  nsRefPtr<nsTextNode> text = new nsTextNode(nodeInfoManager);
   NS_ASSERTION(text, "Infallible malloc failed?");
   rv = text->SetText(aBuffer, aLength, false);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -345,7 +345,7 @@ nsHtml5TreeOperation::CreateElement(int32_t aNs,
   }
 
   nsCOMPtr<dom::Element> newElement;
-  RefPtr<dom::NodeInfo> nodeInfo = aNodeInfoManager->
+  nsRefPtr<dom::NodeInfo> nodeInfo = aNodeInfoManager->
     GetNodeInfo(aName, nullptr, aNs, nsIDOMNode::ELEMENT_NODE);
   NS_ASSERTION(nodeInfo, "Got null nodeinfo.");
   NS_NewElement(getter_AddRefs(newElement),
@@ -384,7 +384,7 @@ nsHtml5TreeOperation::CreateElement(int32_t aNs,
                         theAttribute,
                         false);
 
-    RefPtr<dom::NodeInfo> optionNodeInfo =
+    nsRefPtr<dom::NodeInfo> optionNodeInfo =
       aNodeInfoManager->GetNodeInfo(nsHtml5Atoms::option,
                                     nullptr,
                                     kNameSpaceID_XHTML,
@@ -392,11 +392,11 @@ nsHtml5TreeOperation::CreateElement(int32_t aNs,
 
     for (uint32_t i = 0; i < theContent.Length(); ++i) {
       nsCOMPtr<dom::Element> optionElt;
-      RefPtr<dom::NodeInfo> ni = optionNodeInfo;
+      nsRefPtr<dom::NodeInfo> ni = optionNodeInfo;
       NS_NewElement(getter_AddRefs(optionElt),
                     ni.forget(),
                     aFromParser);
-      RefPtr<nsTextNode> optionText = new nsTextNode(aNodeInfoManager);
+      nsRefPtr<nsTextNode> optionText = new nsTextNode(aNodeInfoManager);
       (void) optionText->SetText(theContent[i], false);
       optionElt->AppendChildTo(optionText, false);
       newContent->AppendChildTo(optionElt, false);
@@ -410,7 +410,8 @@ nsHtml5TreeOperation::CreateElement(int32_t aNs,
   }
 
   int32_t len = aAttributes->getLength();
-  for (int32_t i = 0; i < len; i++) {
+  for (int32_t i = len; i > 0;) {
+    --i;
     // prefix doesn't need regetting. it is always null or a static atom
     // local name is never null
     nsCOMPtr<nsIAtom> localName =
@@ -463,7 +464,7 @@ nsHtml5TreeOperation::SetFormElement(nsIContent* aNode, nsIContent* aParent)
       !aNode->HasAttr(kNameSpaceID_None, nsGkAtoms::form)) {
     formControl->SetForm(formElement);
   } else if (domImageElement) {
-    RefPtr<dom::HTMLImageElement> imageElement =
+    nsRefPtr<dom::HTMLImageElement> imageElement =
       static_cast<dom::HTMLImageElement*>(domImageElement.get());
     MOZ_ASSERT(imageElement);
     imageElement->SetForm(formElement);
@@ -515,7 +516,7 @@ nsHtml5TreeOperation::FosterParentText(nsIContent* aStackParent,
     }
 
     nsNodeInfoManager* nodeInfoManager = aStackParent->OwnerDoc()->NodeInfoManager();
-    RefPtr<nsTextNode> text = new nsTextNode(nodeInfoManager);
+    nsRefPtr<nsTextNode> text = new nsTextNode(nodeInfoManager);
     NS_ASSERTION(text, "Infallible malloc failed?");
     rv = text->SetText(aBuffer, aLength, false);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -536,7 +537,7 @@ nsHtml5TreeOperation::AppendComment(nsIContent* aParent,
                                     nsHtml5DocumentBuilder* aBuilder)
 {
   nsNodeInfoManager* nodeInfoManager = aParent->OwnerDoc()->NodeInfoManager();
-  RefPtr<dom::Comment> comment = new dom::Comment(nodeInfoManager);
+  nsRefPtr<dom::Comment> comment = new dom::Comment(nodeInfoManager);
   NS_ASSERTION(comment, "Infallible malloc failed?");
   nsresult rv = comment->SetText(aBuffer, aLength, false);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -549,7 +550,7 @@ nsHtml5TreeOperation::AppendCommentToDocument(char16_t* aBuffer,
                                               int32_t aLength,
                                               nsHtml5DocumentBuilder* aBuilder)
 {
-  RefPtr<dom::Comment> comment =
+  nsRefPtr<dom::Comment> comment =
     new dom::Comment(aBuilder->GetNodeInfoManager());
   NS_ASSERTION(comment, "Infallible malloc failed?");
   nsresult rv = comment->SetText(aBuffer, aLength, false);
@@ -585,7 +586,7 @@ nsHtml5TreeOperation::GetDocumentFragmentForTemplate(nsIContent* aNode)
 {
   dom::HTMLTemplateElement* tempElem =
     static_cast<dom::HTMLTemplateElement*>(aNode);
-  RefPtr<dom::DocumentFragment> frag = tempElem->Content();
+  nsRefPtr<dom::DocumentFragment> frag = tempElem->Content();
   return frag;
 }
 
@@ -640,9 +641,6 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
                               nsIContent** aScriptElement)
 {
   switch(mOpCode) {
-    case eTreeOpUninitialized: {
-      MOZ_CRASH("eTreeOpUninitialized");
-    }
     case eTreeOpAppend: {
       nsIContent* node = *(mOne.node);
       nsIContent* parent = *(mTwo.node);
@@ -672,10 +670,6 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       nsIContent* node = *(mOne.node);
       nsHtml5HtmlAttributes* attributes = mTwo.attributes;
       return AddAttributes(node, attributes, aBuilder);
-    }
-    case eTreeOpDocumentMode: {
-      aBuilder->SetDocumentMode(mOne.mode);
-      return NS_OK;
     }
     case eTreeOpCreateElementNetwork:
     case eTreeOpCreateElementNotNetwork: {
@@ -825,6 +819,14 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       aBuilder->DidBuildModel(false); // this causes a notifications flush anyway
       return NS_OK;
     }
+    case eTreeOpStartLayout: {
+      aBuilder->StartLayout(); // this causes a notification flush anyway
+      return NS_OK;
+    }
+    case eTreeOpDocumentMode: {
+      aBuilder->SetDocumentMode(mOne.mode);
+      return NS_OK;
+    }
     case eTreeOpSetStyleLineNumber: {
       nsIContent* node = *(mOne.node);
       nsCOMPtr<nsIStyleSheetLinkingElement> ssle = do_QueryInterface(node);
@@ -866,6 +868,14 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       } else {
         node->SetAttr(kNameSpaceID_None, nsGkAtoms::_class, depStr, true);
       }
+      return NS_OK;
+    }
+    case eTreeOpAddLineNumberId: {
+      nsIContent* node = *(mOne.node);
+      int32_t lineNumber = mFour.integer;
+      nsAutoString val(NS_LITERAL_STRING("line"));
+      val.AppendInt(lineNumber);
+      node->SetAttr(kNameSpaceID_None, nsGkAtoms::id, val, true);
       return NS_OK;
     }
     case eTreeOpAddViewSourceHref: {
@@ -923,13 +933,6 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       node->SetAttr(kNameSpaceID_None, nsGkAtoms::href, utf16, true);
       return rv;
     }
-    case eTreeOpAddViewSourceBase: {
-      char16_t* buffer = mTwo.unicharPtr;
-      int32_t length = mFour.integer;
-      nsDependentString baseUrl(buffer, length);
-      aBuilder->AddBase(baseUrl);
-      return NS_OK;
-    }
     case eTreeOpAddError: {
       nsIContent* node = *(mOne.node);
       char* msgId = mTwo.charPtr;
@@ -978,16 +981,11 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       }
       return rv;
     }
-    case eTreeOpAddLineNumberId: {
-      nsIContent* node = *(mOne.node);
-      int32_t lineNumber = mFour.integer;
-      nsAutoString val(NS_LITERAL_STRING("line"));
-      val.AppendInt(lineNumber);
-      node->SetAttr(kNameSpaceID_None, nsGkAtoms::id, val, true);
-      return NS_OK;
-    }
-    case eTreeOpStartLayout: {
-      aBuilder->StartLayout(); // this causes a notification flush anyway
+    case eTreeOpAddViewSourceBase: {
+      char16_t* buffer = mTwo.unicharPtr;
+      int32_t length = mFour.integer;
+      nsDependentString baseUrl(buffer, length);
+      aBuilder->AddBase(baseUrl);
       return NS_OK;
     }
     default: {

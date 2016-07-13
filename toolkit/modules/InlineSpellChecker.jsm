@@ -248,7 +248,8 @@ InlineSpellChecker.prototype = {
             menu.ownerDocument.dispatchEvent(spellcheckChangeEvent);
           }
         };
-        item.addEventListener("command", callback(this, i, sortedList[i].id), true);
+        item.addEventListener
+          ("command", callback(this, i, sortedList[i].id), true);
       }
       if (insertBefore)
         menu.insertBefore(item, insertBefore);
@@ -428,9 +429,6 @@ var SpellCheckHelper = {
   // Set when over an <input type="number"> or other non-text field.
   NUMERIC: 0x40,
 
-  // Set when over an <input type="password"> field.
-  PASSWORD: 0x80,
-
   isTargetAKeywordField(aNode, window) {
     if (!(aNode instanceof window.HTMLInputElement))
       return false;
@@ -481,9 +479,6 @@ var SpellCheckHelper = {
         }
         if (this.isTargetAKeywordField(element, window))
           flags |= this.KEYWORD;
-        if (element.type == "password") {
-          flags |= this.PASSWORD;
-        }
       }
     } else if (element instanceof window.HTMLTextAreaElement) {
       flags |= this.TEXTINPUT | this.TEXTAREA;

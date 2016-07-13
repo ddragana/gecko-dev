@@ -8,7 +8,6 @@
 
 #include "nsTArrayForwardDeclare.h"
 #include "gfxPlatform.h"
-#include "mozilla/LookAndFeel.h"
 
 namespace mozilla {
 namespace gfx {
@@ -33,28 +32,37 @@ public:
     already_AddRefed<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont) override;
 
+    nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName) override;
+
     gfxFontGroup*
     CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
                     const gfxFontStyle *aStyle,
-                    gfxTextPerfMetrics* aTextPerf,
-                    gfxUserFontSet *aUserFontSet,
-                    gfxFloat aDevToCssSize) override;
+                    gfxUserFontSet *aUserFontSet) override;
+
+    virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
+                                          uint16_t aWeight,
+                                          int16_t aStretch,
+                                          bool aItalic) override;
 
     virtual gfxPlatformFontList* CreatePlatformFontList() override;
 
+    virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
+                                           uint16_t aWeight,
+                                           int16_t aStretch,
+                                           bool aItalic,
+                                           const uint8_t* aFontData,
+                                           uint32_t aLength) override;
+
     bool IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags) override;
 
-    virtual void GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
-                                        Script aRunScript,
-                                        nsTArray<const char*>& aFontList) override;
+    nsresult GetFontList(nsIAtom *aLangGroup,
+                         const nsACString& aGenericFamily,
+                         nsTArray<nsString>& aListOfFonts) override;
+    nsresult UpdateFontList() override;
 
-    // lookup the system font for a particular system font type and set
-    // the name and style characteristics
-    static void
-    LookupSystemFont(mozilla::LookAndFeel::FontID aSystemFontID,
-                     nsAString& aSystemFontName,
-                     gfxFontStyle &aFontStyle,
-                     float aDevPixPerCSSPixel);
+    virtual void GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
+                                        int32_t aRunScript,
+                                        nsTArray<const char*>& aFontList) override;
 
     virtual bool CanRenderContentToDataSurface() const override {
       return true;
@@ -64,17 +72,12 @@ public:
       return true;
     }
 
-    bool RespectsFontStyleSmoothing() const override {
-      // gfxMacFont respects the font smoothing hint.
-      return true;
+    bool SupportsBasicCompositor() const override {
+      // At the moment, BasicCompositor is broken on mac.
+      return false;
     }
 
-    bool RequiresAcceleratedGLContextForCompositorOGL() const override {
-      // On OS X in a VM, unaccelerated CompositorOGL shows black flashes, so we
-      // require accelerated GL for CompositorOGL but allow unaccelerated GL for
-      // BasicCompositor.
-      return true;
-    }
+    bool UseAcceleratedCanvas();
 
     virtual bool UseProgressivePaint() override;
     virtual already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource() override;

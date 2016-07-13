@@ -118,8 +118,7 @@ public:
                      nsRenderingContext* aCtx) override {
     nsListControlFrame* listFrame = GetEnclosingListFrame(Frame());
     // listFrame must be non-null or we wouldn't get called.
-    listFrame->PaintFocus(aCtx->GetDrawTarget(),
-                          aBuilder->ToReferenceFrame(listFrame));
+    listFrame->PaintFocus(*aCtx, aBuilder->ToReferenceFrame(listFrame));
   }
   NS_DISPLAY_DECL_NAME("ListFocus", TYPE_LIST_FOCUS)
 };

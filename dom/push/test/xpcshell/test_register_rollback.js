@@ -15,6 +15,9 @@ function run_test() {
     requestTimeout: 1000,
     retryBaseInterval: 150
   });
+  disableServiceWorkerEvents(
+    'https://example.com/storage-error'
+  );
   run_next_test();
 }
 
@@ -24,11 +27,11 @@ add_task(function* test_register_rollback() {
 
   let handshakes = 0;
   let registers = 0;
-  let unregisterDone;
-  let unregisterPromise = new Promise(resolve => unregisterDone = resolve);
+  let unregisterDefer = Promise.defer();
   PushServiceWebSocket._generateID = () => channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
+    networkInfo: new MockDesktopNetworkInfo(),
     db: makeStub(db, {
       put(prev, record) {
         return Promise.reject('universe has imploded');
@@ -58,13 +61,12 @@ add_task(function* test_register_rollback() {
         },
         onUnregister(request) {
           equal(request.channelID, channelID, 'Unregister: wrong channel ID');
-          equal(request.code, 200, 'Expected manual unregister reason');
           this.serverSendMsg(JSON.stringify({
             messageType: 'unregister',
             status: 200,
             channelID
           }));
-          unregisterDone();
+          unregisterDefer.resolve();
         }
       });
     }
@@ -72,16 +74,17 @@ add_task(function* test_register_rollback() {
 
   // Should return a rejected promise if storage fails.
   yield rejects(
-    PushService.register({
-      scope: 'https://example.com/storage-error',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for unregister database failure'
+    PushNotificationService.register('https://example.com/storage-error',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error == 'universe has imploded';
+    },
+    'Wrong error for unregister database failure'
   );
 
   // Should send an out-of-band unregister request.
-  yield unregisterPromise;
+  yield waitForPromise(unregisterDefer.promise, DEFAULT_TIMEOUT,
+    'Unregister request timed out');
   equal(handshakes, 1, 'Wrong handshake count');
   equal(registers, 1, 'Wrong register count');
 });

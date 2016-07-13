@@ -4,9 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "IccInfo.h"
 #include "mozilla/dom/icc/IccChild.h"
-#include "mozilla/dom/icc/IccIPCUtils.h"
+#include "IccInfo.h"
 #include "nsIStkCmdFactory.h"
 #include "nsIStkProactiveCmd.h"
 
@@ -148,7 +147,7 @@ IccChild::UpdateIccInfo(const OptionalIccInfoData& aInfoData) {
 
   NS_ENSURE_TRUE_VOID(aInfoData.type() == OptionalIccInfoData::TIccInfoData);
 
-  RefPtr<IccInfo> iccInfo;
+  nsRefPtr<IccInfo> iccInfo;
   const IccInfoData& infoData = aInfoData.get_IccInfoData();
   if (infoData.iccType().EqualsLiteral("sim")
       || infoData.iccType().EqualsLiteral("usim")) {
@@ -366,31 +365,6 @@ IccChild::SendStkEventDownload(nsIStkDownloadEvent* aEvent)
   return PIccChild::SendStkEventDownload(event) ? NS_OK : NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
-IccChild::ReadContacts(uint32_t aContactType, nsIIccCallback* aRequestReply)
-{
-  return SendRequest(ReadContactsRequest(aContactType),
-                     aRequestReply)
-    ? NS_OK : NS_ERROR_FAILURE;
-}
-
-NS_IMETHODIMP
-IccChild::UpdateContact(uint32_t aContactType, nsIIccContact* aContact,
-                        const nsAString& aPin2,
-                        nsIIccCallback* aRequestReply)
-{
-  MOZ_ASSERT(aContact);
-
-  IccContactData contactData;
-  IccIPCUtils::GetIccContactDataFromIccContact(aContact, contactData);
-
-  return SendRequest(UpdateContactRequest(aContactType,
-                                          nsAutoString(aPin2),
-                                          contactData),
-                     aRequestReply)
-    ? NS_OK : NS_ERROR_FAILURE;
-}
-
 /**
  * PIccRequestChild Implementation.
  */
@@ -432,42 +406,6 @@ IccRequestChild::Recv__delete__(const IccReply& aResponse)
       return NS_SUCCEEDED(
         mRequestReply->NotifyCardLockError(error.message(),
                                            error.retryCount()));
-    }
-    case IccReply::TIccReplyReadContacts: {
-      const nsTArray<IccContactData>& data
-        = aResponse.get_IccReplyReadContacts().contacts();
-
-      uint32_t count = data.Length();
-      nsCOMArray<nsIIccContact> contactList;
-      nsresult rv;
-      for (uint32_t i = 0; i < count; i++) {
-        nsCOMPtr<nsIIccContact> contact;
-        rv = IccContact::Create(data[i].id(),
-                                data[i].names(),
-                                data[i].numbers(),
-                                data[i].emails(),
-                                getter_AddRefs(contact));
-        NS_ENSURE_SUCCESS(rv, false);
-        contactList.AppendElement(contact);
-      }
-
-      rv = mRequestReply->NotifyRetrievedIccContacts(contactList.Elements(),
-                                                     count);
-
-      return NS_SUCCEEDED(rv);
-    }
-    case IccReply::TIccReplyUpdateContact: {
-      IccContactData data
-        = aResponse.get_IccReplyUpdateContact().contact();
-      nsCOMPtr<nsIIccContact> contact;
-      IccContact::Create(data.id(),
-                         data.names(),
-                         data.numbers(),
-                         data.emails(),
-                         getter_AddRefs(contact));
-
-      return NS_SUCCEEDED(
-        mRequestReply->NotifyUpdatedIccContact(contact));
     }
     default:
       MOZ_CRASH("Received invalid response type!");

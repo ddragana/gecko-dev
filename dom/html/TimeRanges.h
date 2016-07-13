@@ -7,12 +7,12 @@
 #ifndef mozilla_dom_TimeRanges_h_
 #define mozilla_dom_TimeRanges_h_
 
-#include "nsCOMPtr.h"
 #include "nsIDOMTimeRanges.h"
 #include "nsISupports.h"
 #include "nsTArray.h"
 #include "nsWrapperCache.h"
 #include "mozilla/ErrorResult.h"
+#include "nsAutoPtr.h"
 
 namespace mozilla {
 namespace dom {
@@ -25,16 +25,13 @@ namespace dom {
 
 // Implements media TimeRanges:
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/video.html#timeranges
-class TimeRanges final : public nsIDOMTimeRanges,
-                         public nsWrapperCache
+class TimeRanges final : public nsIDOMTimeRanges
 {
 public:
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(TimeRanges)
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMTIMERANGES
 
   TimeRanges();
-  explicit TimeRanges(nsISupports* aParent);
 
   void Add(double aStart, double aEnd);
 
@@ -53,9 +50,7 @@ public:
   // Mutate this TimeRange to be the intersection of this and aOtherRanges.
   void Intersection(const TimeRanges* aOtherRanges);
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
-
-  nsISupports* GetParentObject() const;
+  bool WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto, JS::MutableHandle<JSObject*> aReflector);
 
   uint32_t Length() const
   {
@@ -93,9 +88,7 @@ private:
     }
   };
 
-  AutoTArray<TimeRange,4> mRanges;
-
-  nsCOMPtr<nsISupports> mParent;
+  nsAutoTArray<TimeRange,4> mRanges;
 
 public:
   typedef nsTArray<TimeRange>::index_type index_type;

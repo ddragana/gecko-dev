@@ -16,9 +16,7 @@ dictionary MediaTrackSupportedConstraints {
     boolean volume;             // to be supported
     boolean sampleRate;         // to be supported
     boolean sampleSize;         // to be supported
-    boolean echoCancellation = true;
-    boolean mozNoiseSuppression = true;
-    boolean mozAutoGainControl = true;
+    boolean echoCancellation;   // to be supported
     boolean latency;            // to be supported
     boolean deviceId = true;
     boolean groupId;            // to be supported
@@ -31,12 +29,7 @@ dictionary MediaTrackSupportedConstraints {
     boolean mediaSource = true;
 
     // Experimental https://bugzilla.mozilla.org/show_bug.cgi?id=1131568#c3
-    //              https://bugzilla.mozilla.org/show_bug.cgi?id=1193075
 
     boolean browserWindow = true;
     boolean scrollWithPage = true;
-    boolean viewportOffsetX = true;
-    boolean viewportOffsetY = true;
-    boolean viewportWidth = true;
-    boolean viewportHeight = true;
 };

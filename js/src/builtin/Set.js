@@ -29,7 +29,7 @@ function SetForEach(callbackfn, thisArg = undefined) {
         if (result.done)
             break;
         var value = result.value;
-        callContentFunction(callbackfn, thisArg, value, value, S);
+        callFunction(callbackfn, thisArg, value, value, S);
     }
 }
 
@@ -38,4 +38,3 @@ function SetSpecies() {
     // Step 1.
     return this;
 }
-_SetCanonicalName(SetSpecies, "get [Symbol.species]");

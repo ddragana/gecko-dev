@@ -16,12 +16,6 @@
 
   SimpleTest.waitForExplicitFinish();
 
-  const PREF_UNSAFE_FORBIDDEN = "dom.ipc.cpows.forbid-unsafe-from-browser";
-  SpecialPowers.setBoolPref(PREF_UNSAFE_FORBIDDEN, false);
-  SimpleTest.registerCleanupFunction(() => {
-    SpecialPowers.clearUserPref(PREF_UNSAFE_FORBIDDEN);
-  });
-
   function done() {
     SimpleTest.finish();
   }

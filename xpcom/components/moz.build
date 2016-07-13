@@ -39,10 +39,12 @@ UNIFIED_SOURCES += [
     'nsNativeModuleLoader.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
 FINAL_LIBRARY = 'xul'
 
+GENERATED_INCLUDES += ['..']
 LOCAL_INCLUDES += [
-    '!..',
     '../base',
     '../build',
     '../ds',
@@ -51,5 +53,5 @@ LOCAL_INCLUDES += [
     '/modules/libjar',
 ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_WIDGET_GTK']:
     CXXFLAGS += CONFIG['TK_CFLAGS']

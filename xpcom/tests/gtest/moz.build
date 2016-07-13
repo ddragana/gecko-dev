@@ -6,13 +6,10 @@
 
 UNIFIED_SOURCES += [
     'Helpers.cpp',
-    'TestAtoms.cpp',
     'TestCloneInputStream.cpp',
     'TestCRT.cpp',
     'TestEncoding.cpp',
-    'TestEscapeURL.cpp',
     'TestExpirationTracker.cpp',
-    'TestNSPRLogModulesParser.cpp',
     'TestPipes.cpp',
     'TestPLDHash.cpp',
     'TestPriorityQueue.cpp',
@@ -25,13 +22,10 @@ UNIFIED_SOURCES += [
     'TestThreadPool.cpp',
     'TestThreads.cpp',
     'TestTimeStamp.cpp',
-    'TestTokenizer.cpp',
     'TestUTF.cpp',
     'TestXPIDLString.cpp',
 ]
 
-LOCAL_INCLUDES += [
-    '../../base',
-]
-
 FINAL_LIBRARY = 'xul-gtest'
+
+FAIL_ON_WARNINGS = True

@@ -65,17 +65,6 @@ var gSavePrintSettings = false;
 var gFocusedElement = null;
 
 var PrintUtils = {
-  init() {
-    window.messageManager.addMessageListener("Printing:Error", this);
-  },
-
-  get bundle() {
-    let stringService = Components.classes["@mozilla.org/intl/stringbundle;1"]
-                                  .getService(Components.interfaces.nsIStringBundleService);
-    delete this.bundle;
-    return this.bundle = stringService.createBundle("chrome://global/locale/printing.properties");
-  },
-
   /**
    * Shows the page setup dialog, and saves any settings changed in
    * that dialog if print.save_print_settings is set to true.
@@ -154,7 +143,6 @@ var PrintUtils = {
     Deprecated.warning(msg, url);
 
     this.printWindow(windowID, browser);
-    return undefined;
   },
 
   /**
@@ -197,9 +185,6 @@ var PrintUtils = {
       this._sourceBrowser = aListenerObj.getSourceBrowser();
       this._originalTitle = this._sourceBrowser.contentTitle;
       this._originalURL = this._sourceBrowser.currentURI.spec;
-
-      // Here we log telemetry data for when the user enters print preview.
-      this.logTelemetry("PRINT_PREVIEW_OPENED_COUNT");
     } else {
       // collapse the browser here -- it will be shown in
       // enterPrintPreview; this forces a reflow which fixes display
@@ -302,7 +287,6 @@ var PrintUtils = {
   _sourceBrowser: null,
   _originalTitle: "",
   _originalURL: "",
-  _shouldSimplify: false,
 
   get usingRemoteTabs() {
     // We memoize this, since it's highly unlikely to change over the lifetime
@@ -316,81 +300,11 @@ var PrintUtils = {
     return this.usingRemoteTabs = usingRemoteTabs;
   },
 
-  displayPrintingError(nsresult, isPrinting) {
-    // The nsresults from a printing error are mapped to strings that have
-    // similar names to the errors themselves. For example, for error
-    // NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE, the name of the string
-    // for the error message is: PERR_GFX_PRINTER_NO_PRINTER_AVAILABLE. What's
-    // more, if we're in the process of doing a print preview, it's possible
-    // that there are strings specific for print preview for these errors -
-    // if so, the names of those strings have _PP as a suffix. It's possible
-    // that no print preview specific strings exist, in which case it is fine
-    // to fall back to the original string name.
-    const MSG_CODES = [
-      "GFX_PRINTER_NO_PRINTER_AVAILABLE",
-      "GFX_PRINTER_NAME_NOT_FOUND",
-      "GFX_PRINTER_COULD_NOT_OPEN_FILE",
-      "GFX_PRINTER_STARTDOC",
-      "GFX_PRINTER_ENDDOC",
-      "GFX_PRINTER_STARTPAGE",
-      "GFX_PRINTER_DOC_IS_BUSY",
-      "ABORT",
-      "NOT_AVAILABLE",
-      "NOT_IMPLEMENTED",
-      "OUT_OF_MEMORY",
-      "UNEXPECTED",
-    ];
-
-    // PERR_FAILURE is the catch-all error message if we've gotten one that
-    // we don't recognize.
-    msgName = "PERR_FAILURE";
-
-    for (let code of MSG_CODES) {
-      let nsErrorResult = "NS_ERROR_" + code;
-      if (Components.results[nsErrorResult] == nsresult) {
-        msgName = "PERR_" + code;
-        break;
-      }
-    }
-
-    let msg, title;
-
-    if (!isPrinting) {
-      // Try first with _PP suffix.
-      let ppMsgName = msgName + "_PP";
-      try {
-        msg = this.bundle.GetStringFromName(ppMsgName);
-      } catch(e) {
-        // We allow localizers to not have the print preview error string,
-        // and just fall back to the printing error string.
-      }
-    }
-
-    if (!msg) {
-      msg = this.bundle.GetStringFromName(msgName);
-    }
-
-    title = this.bundle.GetStringFromName(isPrinting ? "print_error_dialog_title"
-                                                     : "printpreview_error_dialog_title");
-
-    let promptSvc = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
-                              .getService(Components.interfaces.nsIPromptService);
-    promptSvc.alert(window, title, msg);
-  },
-
   receiveMessage(aMessage) {
-    if (aMessage.name == "Printing:Error") {
-      this.displayPrintingError(aMessage.data.nsresult,
-                                aMessage.data.isPrinting);
-      return undefined;
-    }
-
-    // If we got here, then the message we've received must involve
-    // updating the print progress UI.
     if (!this._webProgressPP.value) {
       // We somehow didn't get a nsIWebProgressListener to be updated...
       // I guess there's nothing to do.
-      return undefined;
+      return;
     }
 
     let listener = this._webProgressPP.value;
@@ -425,7 +339,6 @@ var PrintUtils = {
         break;
       }
     }
-    return undefined;
   },
 
   setPrinterDefaultsForSelectedPrinter: function (aPSSVC, aPrintSettings)
@@ -433,7 +346,7 @@ var PrintUtils = {
     if (!aPrintSettings.printerName)
       aPrintSettings.printerName = aPSSVC.defaultPrinterName;
 
-    // First get any defaults from the printer
+    // First get any defaults from the printer 
     aPSSVC.initPrintSettingsFromPrinter(aPrintSettings.printerName, aPrintSettings);
     // now augment them with any values from last time
     aPSSVC.initPrintSettingsFromPrefs(aPrintSettings, true,  aPrintSettings.kInitSaveAll);
@@ -483,11 +396,6 @@ var PrintUtils = {
     }
   },
 
-  setSimplifiedMode: function (shouldSimplify)
-  {
-    this._shouldSimplify = shouldSimplify;
-  },
-
   enterPrintPreview: function ()
   {
     // Send a message to the print preview browser to initialize
@@ -497,49 +405,9 @@ var PrintUtils = {
     // listener.
     let ppBrowser = this._listener.getPrintPreviewBrowser();
     let mm = ppBrowser.messageManager;
-
-    let sendEnterPreviewMessage = function (browser, simplified) {
-      mm.sendAsyncMessage("Printing:Preview:Enter", {
-        windowID: browser.outerWindowID,
-        simplifiedMode: simplified,
-      });
-    };
-
-    // If we happen to have gotten simplify page checked, we will lazily
-    // instantiate a new tab that parses the original page using ReaderMode
-    // primitives. When it's ready, and in order to enter on preview, we send
-    // over a message to print preview browser passing up the simplified tab as
-    // reference. If not, we pass the original tab instead as content source.
-    if (this._shouldSimplify) {
-      let simplifiedBrowser = this._listener.getSimplifiedSourceBrowser();
-      if (simplifiedBrowser) {
-        sendEnterPreviewMessage(simplifiedBrowser, true);
-      } else {
-        simplifiedBrowser = this._listener.createSimplifiedBrowser();
-
-        // After instantiating the simplified tab, we attach a listener as
-        // callback. Once we discover reader mode has been loaded, we fire
-        // up a message to enter on print preview.
-        let spMM = simplifiedBrowser.messageManager;
-        spMM.addMessageListener("Printing:Preview:ReaderModeReady", function onReaderReady() {
-          spMM.removeMessageListener("Printing:Preview:ReaderModeReady", onReaderReady);
-          sendEnterPreviewMessage(simplifiedBrowser, true);
-        });
-
-        // Here, we send down a message to simplified browser in order to parse
-        // the original page. After we have parsed it, content will tell parent
-        // that the document is ready for print previewing.
-        spMM.sendAsyncMessage("Printing:Preview:ParseDocument", {
-          URL: this._listener.getSourceBrowser().currentURI.spec,
-          windowID: this._listener.getSourceBrowser().outerWindowID,
-        });
-
-        // Here we log telemetry data for when the user enters simplify mode.
-        this.logTelemetry("PRINT_PREVIEW_SIMPLIFY_PAGE_OPENED_COUNT");
-      }
-    } else {
-      sendEnterPreviewMessage(this._listener.getSourceBrowser(), false);
-    }
+    mm.sendAsyncMessage("Printing:Preview:Enter", {
+      windowID: this._sourceBrowser.outerWindowID,
+    });
 
     if (this._webProgressPP.value) {
       mm.addMessageListener("Printing:Preview:StateChange", this);
@@ -579,18 +447,11 @@ var PrintUtils = {
         "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
       printPreviewTB = document.createElementNS(XUL_NS, "toolbar");
       printPreviewTB.setAttribute("printpreview", true);
-      printPreviewTB.setAttribute("fullscreentoolbar", true);
       printPreviewTB.id = "print-preview-toolbar";
 
       let navToolbox = this._listener.getNavToolbox();
       navToolbox.parentNode.insertBefore(printPreviewTB, navToolbox);
       printPreviewTB.initialize(ppBrowser);
-
-      // Enable simplify page checkbox when the page is an article
-      if (this._sourceBrowser.isArticle)
-        printPreviewTB.enableSimplifyPage();
-      else
-        printPreviewTB.disableSimplifyPage();
 
       // copy the window close handler
       if (document.documentElement.hasAttribute("onclose"))
@@ -636,15 +497,7 @@ var PrintUtils = {
       this._sourceBrowser.focus();
     gFocusedElement = null;
 
-    this.setSimplifiedMode(false);
-
     this._listener.onExit();
-  },
-
-  logTelemetry: function (ID)
-  {
-    let histogram = Services.telemetry.getHistogramById(ID);
-    histogram.add(true);
   },
 
   onKeyDownPP: function (aEvent)
@@ -684,5 +537,3 @@ var PrintUtils = {
     }
   }
 }
-
-PrintUtils.init();

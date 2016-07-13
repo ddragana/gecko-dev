@@ -13,7 +13,7 @@ namespace mozilla {
 namespace dom {
 
 GetUserMediaRequest::GetUserMediaRequest(
-    nsPIDOMWindowInner* aInnerWindow,
+    nsPIDOMWindow* aInnerWindow,
     const nsAString& aCallID,
     const MediaStreamConstraints& aConstraints,
     bool aIsSecure)

@@ -14,8 +14,7 @@
 
 #include "mozilla/media/MediaSystemResourceClient.h"
 #include "mozilla/Monitor.h"
-#include "mozilla/MozPromise.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 namespace android {
 // This class is intended to be a proxy for MediaCodec with codec resource
@@ -28,7 +27,20 @@ class MediaCodecProxy : public RefBase
                       , public mozilla::MediaSystemResourceReservationListener
 {
 public:
-  typedef mozilla::MozPromise<bool /* aIgnored */, bool /* aIgnored */, /* IsExclusive = */ true> CodecPromise;
+  /* Codec resource notification listener.
+   * All functions are called on the Binder thread.
+   */
+  struct CodecResourceListener : public virtual RefBase {
+    /* The codec resource is reserved and can be granted.
+     * The client can allocate the requested resource.
+     */
+    virtual void codecReserved() = 0;
+    /* The codec resource is not reserved any more.
+     * The client should release the resource as soon as possible if the
+     * resource is still being held.
+     */
+    virtual void codecCanceled() = 0;
+  };
 
   enum Capability {
     kEmptyCapability        = 0x00000000,
@@ -46,7 +58,8 @@ public:
   // Only support MediaCodec::CreateByType()
   static sp<MediaCodecProxy> CreateByType(sp<ALooper> aLooper,
                                           const char *aMime,
-                                          bool aEncoder);
+                                          bool aEncoder,
+                                          wp<CodecResourceListener> aListener=nullptr);
 
   // MediaCodec methods
   status_t configure(const sp<AMessage> &aFormat,
@@ -116,7 +129,7 @@ public:
 
   // If aData is null, will notify decoder input EOS
   status_t Input(const uint8_t* aData, uint32_t aDataSize,
-                 int64_t aTimestampUsecs, uint64_t flags, int64_t aTimeoutUs = 0);
+                 int64_t aTimestampUsecs, uint64_t flags);
   status_t Output(MediaBuffer** aBuffer, int64_t aTimeoutUs);
   bool Prepare();
   void ReleaseMediaResources();
@@ -125,11 +138,14 @@ public:
 
   void ReleaseMediaBuffer(MediaBuffer* abuffer);
 
-  // It allocates audio MediaCodec synchronously.
-  bool AllocateAudioMediaCodec();
+  // It asks for the OMX codec and blocked until the resource is grant to be
+  // allocated.
+  // Audio codec allocation should use this.
+  bool AskMediaCodecAndWait();
 
-  // It allocates video MediaCodec asynchronously.
-  RefPtr<CodecPromise> AsyncAllocateVideoMediaCodec();
+  // It asks for the OMX codec asynchronously.
+  // Only video codec is supported.
+  bool AsyncAskMediaCodec();
 
   // Free the OMX codec so others can allocate it.
   void ReleaseMediaCodec();
@@ -150,7 +166,8 @@ private:
   // Constructor for MediaCodecProxy::CreateByType
   MediaCodecProxy(sp<ALooper> aLooper,
                   const char *aMime,
-                  bool aEncoder);
+                  bool aEncoder,
+                  wp<CodecResourceListener> aListener);
 
   // Allocate Codec Resource
   bool allocateCodec();
@@ -162,12 +179,11 @@ private:
   nsCString mCodecMime;
   bool mCodecEncoder;
 
-  mozilla::MozPromiseHolder<CodecPromise> mCodecPromise;
-  // When mPromiseMonitor is held, mResourceClient's functions should not be called.
-  mozilla::Monitor mPromiseMonitor;
+  // Codec Resource Notification Listener
+  wp<CodecResourceListener> mListener;
 
   // Media Resource Management
-  RefPtr<mozilla::MediaSystemResourceClient> mResourceClient;
+  nsRefPtr<mozilla::MediaSystemResourceClient> mResourceClient;
 
   // MediaCodec instance
   mutable RWLock mCodecLock;
@@ -176,6 +192,9 @@ private:
   //MediaCodec buffers to hold input/output data.
   Vector<sp<ABuffer> > mInputBuffers;
   Vector<sp<ABuffer> > mOutputBuffers;
+
+  mozilla::Monitor mMediaCodecLock;
+  bool mPendingRequestMediaResource;
 };
 
 } // namespace android

@@ -8,7 +8,7 @@
  *
  */
 
-[Func="mozilla::dom::ServiceWorkerRegistration::Visible",
+[Func="mozilla::dom::ServiceWorkerRegistrationVisible",
  Exposed=(Window,Worker)]
 interface ServiceWorkerRegistration : EventTarget {
   [Unforgeable] readonly attribute ServiceWorker? installing;
@@ -17,10 +17,9 @@ interface ServiceWorkerRegistration : EventTarget {
 
   readonly attribute USVString scope;
 
-  [Throws, NewObject]
-  Promise<void> update();
+  void update();
 
-  [Throws, NewObject]
+  [Throws]
   Promise<boolean> unregister();
 
   // event
@@ -29,7 +28,7 @@ interface ServiceWorkerRegistration : EventTarget {
 
 partial interface ServiceWorkerRegistration {
 #ifndef MOZ_SIMPLEPUSH
-  [Throws, Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled"]
+  [Throws, Exposed=Window, Pref="dom.push.enabled"]
   readonly attribute PushManager pushManager;
 #endif
 };

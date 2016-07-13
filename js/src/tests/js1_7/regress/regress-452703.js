@@ -12,8 +12,10 @@ var expect = 'No Crash';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+jit(true);
 
 (function() { for(let y in [0,1,2,3,4]) y = NaN; })();
 
+jit(false);
 
 reportCompare(expect, actual, summary);

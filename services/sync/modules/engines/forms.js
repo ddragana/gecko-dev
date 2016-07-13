@@ -4,9 +4,9 @@
 
 this.EXPORTED_SYMBOLS = ['FormEngine', 'FormRec'];
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://services-sync/engines.js");
@@ -16,7 +16,7 @@ Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://gre/modules/Log.jsm");
 
-const FORMS_TTL = 3 * 365 * 24 * 60 * 60;   // Three years in seconds.
+const FORMS_TTL = 5184000; // 60 days
 
 this.FormRec = function FormRec(collection, id) {
   CryptoWrapper.call(this, collection, id);
@@ -30,7 +30,7 @@ FormRec.prototype = {
 Utils.deferGetSet(FormRec, "cleartext", ["name", "value"]);
 
 
-var FormWrapper = {
+let FormWrapper = {
   _log: Log.repository.getLogger("Sync.Engine.Forms"),
 
   _getEntryCols: ["fieldname", "value"],
@@ -109,9 +109,7 @@ FormEngine.prototype = {
 
   syncPriority: 6,
 
-  get prefName() {
-    return "history";
-  },
+  get prefName() "history",
 
   _findDupe: function _findDupe(item) {
     return FormWrapper.getGUID(item.name, item.value);

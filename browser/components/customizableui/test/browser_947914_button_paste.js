@@ -4,38 +4,44 @@
 
 "use strict";
 
-var initialLocation = gBrowser.currentURI.spec;
-var globalClipboard;
+let initialLocation = gBrowser.currentURI.spec;
+let globalClipboard;
 
-add_task(function*() {
-  yield BrowserTestUtils.withNewTab({gBrowser, url: "about:blank"}, function*() {
-    info("Check paste button existence and functionality");
+add_task(function() {
+  info("Check paste button existence and functionality");
 
-    let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
-    globalClipboard = Services.clipboard.kGlobalClipboard;
+  let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
+  globalClipboard = Services.clipboard.kGlobalClipboard;
 
-    yield PanelUI.show();
-    info("Menu panel was opened");
+  yield PanelUI.show();
+  info("Menu panel was opened");
 
-    let pasteButton = document.getElementById("paste-button");
-    ok(pasteButton, "Paste button exists in Panel Menu");
+  let pasteButton = document.getElementById("paste-button");
+  ok(pasteButton, "Paste button exists in Panel Menu");
 
-    // add text to clipboard
-    let text = "Sample text for testing";
-    clipboard.copyString(text);
+  // add text to clipboard
+  let text = "Sample text for testing";
+  clipboard.copyString(text);
 
-    // test paste button by pasting text to URL bar
-    gURLBar.focus();
-    yield PanelUI.show();
-    info("Menu panel was opened");
+  // test paste button by pasting text to URL bar
+  gURLBar.focus();
+  yield PanelUI.show();
+  info("Menu panel was opened");
 
-    ok(!pasteButton.hasAttribute("disabled"), "Paste button is enabled");
-    pasteButton.click();
+  ok(!pasteButton.hasAttribute("disabled"), "Paste button is enabled");
+  pasteButton.click();
 
-    is(gURLBar.value, text, "Text pasted successfully");
-  });
+  is(gURLBar.value, text, "Text pasted successfully");
 });
 
-registerCleanupFunction(function cleanup() {
+add_task(function asyncCleanup() {
+  // clear the clipboard
   Services.clipboard.emptyClipboard(globalClipboard);
+  info("Clipboard was cleared");
+
+  // restore the tab as it was at the begining of the test
+  gBrowser.addTab(initialLocation);
+  gBrowser.removeTab(gBrowser.selectedTab);
+  info("Tabs were restored");
 });
+

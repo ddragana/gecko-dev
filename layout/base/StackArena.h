@@ -60,7 +60,7 @@ private:
 // Individual allocations cannot exceed StackBlock::MAX_USABLE_SIZE
 // bytes.
 //
-class MOZ_RAII AutoStackArena {
+class MOZ_STACK_CLASS AutoStackArena {
 public:
   AutoStackArena()
     : mOwnsStackArena(false)

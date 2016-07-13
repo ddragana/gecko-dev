@@ -17,7 +17,7 @@ add_task(function* () {
   yield testSwitchToTab("about:mozilla?foo=bar", {replaceQueryString: true});
 });
 
-var testSwitchToTab = Task.async(function* (url, options) {
+let testSwitchToTab = Task.async(function* (url, options) {
   // Create a background tab.
   let tab = gBrowser.addTab("about:blank");
   let browser = tab.linkedBrowser;
@@ -34,18 +34,20 @@ var testSwitchToTab = Task.async(function* (url, options) {
 
   // Switch-to-tab with a similar URI.
   switchToTabHavingURI(url, false, options);
+  ok(!tab.hasAttribute("pending"), "tab is no longer pending");
 
-  // Tab should now restore
+  // Wait until the tab is restored.
   yield promiseTabRestored(tab);
   is(browser.currentURI.spec, url, "correct URL loaded");
 
   // Check that we didn't lose any history entries.
-  yield ContentTask.spawn(browser, null, function* () {
+  let count = yield ContentTask.spawn(browser, null, function* () {
     let Ci = Components.interfaces;
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory.QueryInterface(Ci.nsISHistoryInternal);
-    Assert.equal(history && history.count, 3, "three history entries");
+    return history && history.count;
   });
+  is(count, 3, "three history entries");
 
   // Cleanup.
   gBrowser.removeTab(tab);

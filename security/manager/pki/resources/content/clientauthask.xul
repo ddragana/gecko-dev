@@ -20,6 +20,7 @@
 
 <stringbundleset id="stringbundleset">
   <stringbundle id="pippki_bundle" src="chrome://pippki/locale/pippki.properties"/>
+  <stringbundle id="caps_bundle" src="chrome://global/locale/security/caps.properties"/>
 </stringbundleset>
 
 <script type="application/javascript" src="chrome://pippki/content/pippki.js"/>

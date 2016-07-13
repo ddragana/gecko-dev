@@ -1,6 +1,6 @@
 sync protocol media {
 child:
-    async __delete__();
+    __delete__();
 
 state DEAD:
     send __delete__;

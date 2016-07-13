@@ -14,10 +14,8 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/UniquePtr.h"
 #include "nsHttpRequestHead.h"
 #include "nsILoadGroup.h"
-#include "nsIRequestContext.h"
 #include "nsString.h"
 #include "PSpdyPush.h"
 
@@ -46,13 +44,11 @@ public:
   // override of Http2Stream
   nsresult ReadSegments(nsAHttpSegmentReader *,  uint32_t, uint32_t *) override;
   nsresult WriteSegments(nsAHttpSegmentWriter *, uint32_t, uint32_t *) override;
-  void AdjustInitialWindow() override;
 
-  nsIRequestContext *RequestContext() override { return mRequestContext; };
+  nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() override { return mLoadGroupCI; };
   void ConnectPushedStream(Http2Stream *consumer);
 
   bool TryOnPush();
-  static bool TestOnPush(Http2Stream *consumer);
 
   virtual bool DeferCleanup(nsresult status) override;
   void SetDeferCleanupOnSuccess(bool val) { mDeferCleanupOnSuccess = val; }
@@ -72,7 +68,7 @@ private:
   Http2Stream *mConsumerStream; // paired request stream that consumes from
                                 // real http/2 one.. null until a match is made.
 
-  nsCOMPtr<nsIRequestContext> mRequestContext;
+  nsCOMPtr<nsILoadGroupConnectionInfo> mLoadGroupCI;
 
   nsAHttpTransaction *mAssociatedTransaction;
 
@@ -117,7 +113,7 @@ private:
   Http2PushedStream *mPushStream;
   bool mIsDone;
 
-  UniquePtr<char[]> mBufferedHTTP1;
+  nsAutoArrayPtr<char> mBufferedHTTP1;
   uint32_t mBufferedHTTP1Size;
   uint32_t mBufferedHTTP1Used;
   uint32_t mBufferedHTTP1Consumed;

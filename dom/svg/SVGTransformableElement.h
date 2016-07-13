@@ -8,7 +8,6 @@
 #define SVGTransformableElement_h
 
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "nsSVGAnimatedTransformList.h"
 #include "nsSVGElement.h"
 #include "gfxMatrix.h"
@@ -54,9 +53,8 @@ public:
   virtual bool IsEventAttributeName(nsIAtom* aName) override;
 
 
-  virtual gfxMatrix PrependLocalTransformsTo(
-    const gfxMatrix &aMatrix,
-    SVGTransformTypes aWhich = eAllTransforms) const override;
+  virtual gfxMatrix PrependLocalTransformsTo(const gfxMatrix &aMatrix,
+                      TransformTypes aWhich = eAllTransforms) const override;
   virtual const gfx::Matrix* GetAnimateMotionTransform() const override;
   virtual void SetAnimateMotionTransform(const gfx::Matrix* aMatrix) override;
 

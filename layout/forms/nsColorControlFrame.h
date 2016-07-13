@@ -10,16 +10,13 @@
 #include "nsHTMLButtonControlFrame.h"
 #include "nsIAnonymousContentCreator.h"
 
-namespace mozilla {
-enum class CSSPseudoElementType : uint8_t;
-} // namespace mozilla
+typedef nsHTMLButtonControlFrame nsColorControlFrameSuper;
 
 // Class which implements the input type=color
 
-class nsColorControlFrame final : public nsHTMLButtonControlFrame,
+class nsColorControlFrame final : public nsColorControlFrameSuper,
                                   public nsIAnonymousContentCreator
 {
-  typedef mozilla::CSSPseudoElementType CSSPseudoElementType;
   typedef mozilla::dom::Element Element;
 
 public:
@@ -50,7 +47,7 @@ public:
   virtual bool IsLeaf() const override { return true; }
   virtual nsContainerFrame* GetContentInsertionFrame() override;
 
-  virtual Element* GetPseudoElement(CSSPseudoElementType aType) override;
+  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) override;
 
   // Refresh the color swatch, using associated input's value
   nsresult UpdateColor();

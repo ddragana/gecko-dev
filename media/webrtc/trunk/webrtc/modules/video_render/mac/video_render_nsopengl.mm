@@ -36,7 +36,7 @@ _oldStretchedHeight( 0),
 _oldStretchedWidth( 0),
 _buffer( 0),
 _bufferSize( 0),
-_incomingBufferSize( 0),
+_incommingBufferSize( 0),
 _bufferIsUpdated( false),
 _numberOfStreams( 0),
 _pixelFormat( GL_RGBA),
@@ -90,7 +90,7 @@ int32_t VideoChannelNSOpenGL::GetChannelProperties(float& left, float& top,
 }
 
 int32_t VideoChannelNSOpenGL::RenderFrame(
-  const uint32_t /*streamId*/, const I420VideoFrame& videoFrame) {
+  const uint32_t /*streamId*/, I420VideoFrame& videoFrame) {
 
   _owner->LockAGLCntx();
 
@@ -150,7 +150,7 @@ int VideoChannelNSOpenGL::FrameSizeChange(int width, int height, int numberOfStr
         _bufferSize = 0;
     }
 
-    _incomingBufferSize = CalcBufferSize(kI420, _width, _height);
+    _incommingBufferSize = CalcBufferSize(kI420, _width, _height);
     _bufferSize = CalcBufferSize(kARGB, _width, _height);
     _buffer = new unsigned char [_bufferSize];
     memset(_buffer, 0, _bufferSize * sizeof(unsigned char));
@@ -215,8 +215,8 @@ int VideoChannelNSOpenGL::DeliverFrame(const I420VideoFrame& videoFrame) {
     return 0;
   }
 
-  if (CalcBufferSize(kI420, videoFrame.width(), videoFrame.height()) !=
-      _incomingBufferSize) {
+  int length = CalcBufferSize(kI420, videoFrame.width(), videoFrame.height());
+  if (length != _incommingBufferSize) {
     _owner->UnlockAGLCntx();
     return -1;
   }
@@ -367,6 +367,7 @@ _windowRef( (CocoaRenderView*)windowRef),
 _fullScreen( fullScreen),
 _id( iId),
 _nsglContextCritSec( *CriticalSectionWrapper::CreateCriticalSection()),
+_screenUpdateThread( 0),
 _screenUpdateEvent( 0),
 _nsglContext( 0),
 _nsglFullScreenContext( 0),
@@ -376,12 +377,12 @@ _windowWidth( 0),
 _windowHeight( 0),
 _nsglChannels( ),
 _zOrderToChannel( ),
+_threadID (0),
 _renderingIsPaused (FALSE),
 _windowRefSuperView(NULL),
 _windowRefSuperViewFrame(NSMakeRect(0,0,0,0))
 {
-    _screenUpdateThread = ThreadWrapper::CreateThread(ScreenUpdateThreadProc,
-            this, "ScreenUpdateNSOpenGL");
+    _screenUpdateThread = ThreadWrapper::CreateThread(ScreenUpdateThreadProc, this, kRealtimePriority);
     _screenUpdateEvent = EventWrapper::Create();
 }
 
@@ -430,15 +431,13 @@ int32_t VideoRenderNSOpenGL::StartRender()
         WEBRTC_TRACE(kTraceDebug, kTraceVideoRenderer, _id, "Restarting screenUpdateThread");
 
         // we already have the thread. Most likely StopRender() was called and they were paused
-        if(FALSE == _screenUpdateThread->Start() ||
+        if(FALSE == _screenUpdateThread->Start(_threadID) ||
                 FALSE == _screenUpdateEvent->StartTimer(true, 1000/MONITOR_FREQ))
         {
             WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id, "Failed to restart screenUpdateThread or screenUpdateEvent");
             UnlockAGLCntx();
             return -1;
         }
-
-        _screenUpdateThread->SetPriority(kRealtimePriority);
 
         UnlockAGLCntx();
         return 0;
@@ -660,10 +659,12 @@ VideoRenderNSOpenGL::~VideoRenderNSOpenGL()
     }
 
     // Signal event to exit thread, then delete it
-    ThreadWrapper* tmpPtr = _screenUpdateThread.release();
+    ThreadWrapper* tmpPtr = _screenUpdateThread;
+    _screenUpdateThread = NULL;
 
     if (tmpPtr)
     {
+        tmpPtr->SetNotAlive();
         _screenUpdateEvent->Set();
         _screenUpdateEvent->StopTimer();
 
@@ -718,8 +719,7 @@ int VideoRenderNSOpenGL::Init()
         return -1;
     }
 
-    _screenUpdateThread->Start();
-    _screenUpdateThread->SetPriority(kRealtimePriority);
+    _screenUpdateThread->Start(_threadID);
 
     // Start the event triggering the render process
     unsigned int monitorFreq = 60;
@@ -867,12 +867,13 @@ int32_t VideoRenderNSOpenGL::GetChannelProperties(const uint16_t streamId,
 int VideoRenderNSOpenGL::StopThread()
 {
 
-    ThreadWrapper* tmpPtr = _screenUpdateThread.release();
-    WEBRTC_TRACE(kTraceInfo, kTraceVideoRenderer, _id,
-                 "%s Stopping thread ", __FUNCTION__, tmpPtr);
+    ThreadWrapper* tmpPtr = _screenUpdateThread;
+    WEBRTC_TRACE(kTraceInfo, kTraceVideoRenderer, _id, "%s Stopping thread ", __FUNCTION__, _screenUpdateThread);
+    _screenUpdateThread = NULL;
 
     if (tmpPtr)
     {
+        tmpPtr->SetNotAlive();
         _screenUpdateEvent->Set();
         if (tmpPtr->Stop())
         {
@@ -1173,6 +1174,14 @@ int VideoRenderNSOpenGL::GetWindowRect(Rect& rect)
     {
         return -1;
     }
+}
+
+int32_t VideoRenderNSOpenGL::ChangeUniqueID(int32_t id)
+{
+
+    CriticalSectionScoped cs(&_nsglContextCritSec);
+    _id = id;
+    return 0;
 }
 
 int32_t VideoRenderNSOpenGL::SetText(const uint8_t /*textId*/,

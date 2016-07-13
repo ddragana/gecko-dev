@@ -15,19 +15,11 @@
 #include "nsIInterfaceRequestor.h"
 #include "OfflineObserver.h"
 #include "nsIChannelEventSink.h"
-#include "nsIFTPChannelParentInternal.h"
 
 class nsILoadContext;
 
 namespace mozilla {
-
-namespace dom {
-class TabParent;
-class PBrowserOrId;
-} // namespace dom
-
 namespace net {
-class ChannelEventQueue;
 
 class FTPChannelParent final : public PFTPChannelParent
                              , public nsIParentChannel
@@ -35,7 +27,6 @@ class FTPChannelParent final : public PFTPChannelParent
                              , public ADivertableParentChannel
                              , public nsIChannelEventSink
                              , public DisconnectableParent
-                             , public nsIFTPChannelParentInternal
 {
 public:
   NS_DECL_ISUPPORTS
@@ -45,17 +36,13 @@ public:
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSICHANNELEVENTSINK
 
-  FTPChannelParent(const dom::PBrowserOrId& aIframeEmbedding,
-                   nsILoadContext* aLoadContext,
-                   PBOverrideStatus aOverrideStatus);
+  FTPChannelParent(nsILoadContext* aLoadContext, PBOverrideStatus aOverrideStatus);
 
   bool Init(const FTPChannelCreationArgs& aOpenArgs);
 
   // ADivertableParentChannel functions.
   void DivertTo(nsIStreamListener *aListener) override;
   nsresult SuspendForDiversion() override;
-  nsresult SuspendMessageDiversion() override;
-  nsresult ResumeMessageDiversion() override;
 
   // Calls OnStartRequest for "DivertTo" listener, then notifies child channel
   // that it should divert OnDataAvailable and OnStopRequest calls to this
@@ -65,8 +52,6 @@ public:
   // Handles calling OnStart/Stop if there are errors during diversion.
   // Called asynchronously from FailDiversion.
   void NotifyDiversionFailed(nsresult aErrorCode, bool aSkipResume = true);
-
-  NS_IMETHOD SetErrorMsg(const char *aMsg, bool aUseUTF8) override;
 
 protected:
   virtual ~FTPChannelParent();
@@ -86,16 +71,6 @@ protected:
   // ChildChannel.  Used during HTTP->FTP redirects.
   bool ConnectChannel(const uint32_t& channelId);
 
-  void DivertOnDataAvailable(const nsCString& data,
-                             const uint64_t& offset,
-                             const uint32_t& count);
-  void DivertOnStopRequest(const nsresult& statusCode);
-  void DivertComplete();
-
-  friend class FTPDivertDataAvailableEvent;
-  friend class FTPDivertStopRequestEvent;
-  friend class FTPDivertCompleteEvent;
-
   virtual bool RecvCancel(const nsresult& status) override;
   virtual bool RecvSuspend() override;
   virtual bool RecvResume() override;
@@ -104,9 +79,6 @@ protected:
                                          const uint32_t& count) override;
   virtual bool RecvDivertOnStopRequest(const nsresult& statusCode) override;
   virtual bool RecvDivertComplete() override;
-
-  nsresult SuspendChannel();
-  nsresult ResumeChannel();
 
   virtual void ActorDestroy(ActorDestroyReason why) override;
 
@@ -137,13 +109,7 @@ protected:
   // Set if we successfully suspended the nsHttpChannel for diversion. Unset
   // when we call ResumeForDiversion.
   bool mSuspendedForDiversion;
-  RefPtr<OfflineObserver> mObserver;
-  RefPtr<mozilla::dom::TabParent> mTabParent;
-
-  RefPtr<ChannelEventQueue> mEventQ;
-
-  nsCString mErrorMsg;
-  bool mUseUTF8;
+  nsRefPtr<OfflineObserver> mObserver;
 };
 
 } // namespace net

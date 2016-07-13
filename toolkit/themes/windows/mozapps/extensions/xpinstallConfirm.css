@@ -20,7 +20,7 @@
 }
 
 #itemWarningIntro {
-  margin-inline-start: 8px;
+  -moz-margin-start: 8px;
 }
 
 #dialogContentBox {
@@ -30,8 +30,8 @@
 installitem {
   padding-top: 5px;
   padding-bottom: 5px;
-  padding-inline-start: 5px;
-  padding-inline-end: 0;
+  -moz-padding-start: 5px;
+  -moz-padding-end: 0;
   border-bottom: 1px dotted #C0C0C0;
   margin-bottom: 5px;
 }
@@ -42,7 +42,7 @@ installitem {
   width: 48px;
   height: 48px;
 %endif
-  margin-inline-end: 20px;
+  -moz-margin-end: 20px;
 }
 
 .warning {
@@ -54,7 +54,7 @@ installitem {
 .xpinstallIconContainer {
   width: 32px;
   height: 32px;
-  margin-inline-end: 5px;
+  -moz-margin-end: 5px;
 }
 
 .xpinstallItemName {
@@ -74,14 +74,14 @@ installitem {
   color: -moz-FieldText;
   margin-top: 1px;
   margin-bottom: 1px;
-  margin-inline-start: 6px;
-  margin-inline-end: 5px;
+  -moz-margin-start: 6px;
+  -moz-margin-end: 5px;
 }
 
 .xpinstallItemIcon {
   max-width: 32px;
   max-height: 32px;
-  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric.svg");
+  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric.png");
 }
 
 installitem[type="theme"] .xpinstallItemIcon {

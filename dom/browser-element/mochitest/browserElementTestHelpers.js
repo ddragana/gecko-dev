@@ -57,12 +57,12 @@ const browserElementTestHelpers = {
     );
   },
 
-  setClipboardPlainTextOnlyPref: function(value) {
-    this._setPref('clipboard.plainTextOnly', value);
-  },
-
   setEnabledPref: function(value) {
     this._setPref('dom.mozBrowserFramesEnabled', value);
+  },
+
+  setSelectionChangeEnabledPref: function(value) {
+    this._setPref('selectioncaret.enabled', value);
   },
 
   setAccessibleCaretEnabledPref: function(value) {

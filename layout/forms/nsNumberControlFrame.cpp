@@ -20,10 +20,7 @@
 #include "nsContentUtils.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
-#include "nsCSSPseudoElements.h"
 #include "nsStyleSet.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsThreadUtils.h"
 #include "mozilla/FloatingPoint.h"
@@ -300,7 +297,7 @@ nsNumberControlFrame::GetTextFieldFrame()
   return do_QueryFrame(GetAnonTextControl()->GetPrimaryFrame());
 }
 
-class FocusTextField : public Runnable
+class FocusTextField : public nsRunnable
 {
 public:
   FocusTextField(nsIContent* aNumber, nsIContent* aTextField)
@@ -326,21 +323,21 @@ nsresult
 nsNumberControlFrame::MakeAnonymousElement(Element** aResult,
                                            nsTArray<ContentInfo>& aElements,
                                            nsIAtom* aTagName,
-                                           CSSPseudoElementType aPseudoType,
+                                           nsCSSPseudoElements::Type aPseudoType,
                                            nsStyleContext* aParentContext)
 {
   // Get the NodeInfoManager and tag necessary to create the anonymous divs.
   nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
-  RefPtr<Element> resultElement = doc->CreateHTMLElement(aTagName);
+  nsRefPtr<Element> resultElement = doc->CreateHTMLElement(aTagName);
 
   // If we legitimately fail this assertion and need to allow
   // non-pseudo-element anonymous children, then we'll need to add a branch
   // that calls ResolveStyleFor((*aResult)->AsElement(), aParentContext)") to
   // set newStyleContext.
-  NS_ASSERTION(aPseudoType != CSSPseudoElementType::NotPseudo,
+  NS_ASSERTION(aPseudoType != nsCSSPseudoElements::ePseudo_NotPseudoElement,
                "Expecting anonymous children to all be pseudo-elements");
   // Associate the pseudo-element with the anonymous child
-  RefPtr<nsStyleContext> newStyleContext =
+  nsRefPtr<nsStyleContext> newStyleContext =
     PresContext()->StyleSet()->ResolvePseudoElementStyle(mContent->AsElement(),
                                                          aPseudoType,
                                                          aParentContext,
@@ -350,8 +347,8 @@ nsNumberControlFrame::MakeAnonymousElement(Element** aResult,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  if (aPseudoType == CSSPseudoElementType::mozNumberSpinDown ||
-      aPseudoType == CSSPseudoElementType::mozNumberSpinUp) {
+  if (aPseudoType == nsCSSPseudoElements::ePseudo_mozNumberSpinDown ||
+      aPseudoType == nsCSSPseudoElements::ePseudo_mozNumberSpinUp) {
     resultElement->SetAttr(kNameSpaceID_None, nsGkAtoms::role,
                            NS_LITERAL_STRING("button"), false);
   }
@@ -383,7 +380,7 @@ nsNumberControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   rv = MakeAnonymousElement(getter_AddRefs(mOuterWrapper),
                             aElements,
                             nsGkAtoms::div,
-                            CSSPseudoElementType::mozNumberWrapper,
+                            nsCSSPseudoElements::ePseudo_mozNumberWrapper,
                             mStyleContext);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -393,7 +390,7 @@ nsNumberControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   rv = MakeAnonymousElement(getter_AddRefs(mTextField),
                             outerWrapperCI.mChildren,
                             nsGkAtoms::input,
-                            CSSPseudoElementType::mozNumberText,
+                            nsCSSPseudoElements::ePseudo_mozNumberText,
                             outerWrapperCI.mStyleContext);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -427,7 +424,7 @@ nsNumberControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 
   if (mContent->AsElement()->State().HasState(NS_EVENT_STATE_FOCUS)) {
     // We don't want to focus the frame but the text field.
-    RefPtr<FocusTextField> focusJob = new FocusTextField(mContent, mTextField);
+    nsRefPtr<FocusTextField> focusJob = new FocusTextField(mContent, mTextField);
     nsContentUtils::AddScriptRunner(focusJob);
   }
 
@@ -441,7 +438,7 @@ nsNumberControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   rv = MakeAnonymousElement(getter_AddRefs(mSpinBox),
                             outerWrapperCI.mChildren,
                             nsGkAtoms::div,
-                            CSSPseudoElementType::mozNumberSpinBox,
+                            nsCSSPseudoElements::ePseudo_mozNumberSpinBox,
                             outerWrapperCI.mStyleContext);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -451,7 +448,7 @@ nsNumberControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   rv = MakeAnonymousElement(getter_AddRefs(mSpinUp),
                             spinBoxCI.mChildren,
                             nsGkAtoms::div,
-                            CSSPseudoElementType::mozNumberSpinUp,
+                            nsCSSPseudoElements::ePseudo_mozNumberSpinUp,
                             spinBoxCI.mStyleContext);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -459,7 +456,7 @@ nsNumberControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   rv = MakeAnonymousElement(getter_AddRefs(mSpinDown),
                             spinBoxCI.mChildren,
                             nsGkAtoms::div,
-                            CSSPseudoElementType::mozNumberSpinDown,
+                            nsCSSPseudoElements::ePseudo_mozNumberSpinDown,
                             spinBoxCI.mStyleContext);
 
   SyncDisabledState();
@@ -609,19 +606,19 @@ nsNumberControlFrame::GetSpinButtonForPointerEvent(WidgetGUIEvent* aEvent) const
     // we don't have a spinner
     return eSpinButtonNone;
   }
-  if (aEvent->mOriginalTarget == mSpinUp) {
+  if (aEvent->originalTarget == mSpinUp) {
     return eSpinButtonUp;
   }
-  if (aEvent->mOriginalTarget == mSpinDown) {
+  if (aEvent->originalTarget == mSpinDown) {
     return eSpinButtonDown;
   }
-  if (aEvent->mOriginalTarget == mSpinBox) {
+  if (aEvent->originalTarget == mSpinBox) {
     // In the case that the up/down buttons are hidden (display:none) we use
     // just the spin box element, spinning up if the pointer is over the top
     // half of the element, or down if it's over the bottom half. This is
     // important to handle since this is the state things are in for the
     // default UA style sheet. See the comment in forms.css for why.
-    LayoutDeviceIntPoint absPoint = aEvent->mRefPoint;
+    LayoutDeviceIntPoint absPoint = aEvent->refPoint;
     nsPoint point =
       nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
                        absPoint, mSpinBox->GetPrimaryFrame());
@@ -678,7 +675,7 @@ nsNumberControlFrame::IsFocused() const
 void
 nsNumberControlFrame::HandleFocusEvent(WidgetEvent* aEvent)
 {
-  if (aEvent->mOriginalTarget != mTextField) {
+  if (aEvent->originalTarget != mTextField) {
     // Move focus to our text field
     HTMLInputElement::FromContent(mTextField)->Focus();
   }
@@ -705,11 +702,11 @@ nsNumberControlFrame::ShouldUseNativeStyleForSpinner() const
   nsIFrame* spinDownFrame = mSpinDown->GetPrimaryFrame();
 
   return spinUpFrame &&
-    spinUpFrame->StyleDisplay()->mAppearance == NS_THEME_SPINNER_UPBUTTON &&
+    spinUpFrame->StyleDisplay()->mAppearance == NS_THEME_SPINNER_UP_BUTTON &&
     !PresContext()->HasAuthorSpecifiedRules(spinUpFrame,
                                             STYLES_DISABLING_NATIVE_THEMING) &&
     spinDownFrame &&
-    spinDownFrame->StyleDisplay()->mAppearance == NS_THEME_SPINNER_DOWNBUTTON &&
+    spinDownFrame->StyleDisplay()->mAppearance == NS_THEME_SPINNER_DOWN_BUTTON &&
     !PresContext()->HasAuthorSpecifiedRules(spinDownFrame,
                                             STYLES_DISABLING_NATIVE_THEMING);
 }
@@ -779,40 +776,46 @@ nsNumberControlFrame::GetValueOfAnonTextControl(nsAString& aValue)
   //
   //   http://www.whatwg.org/specs/web-apps/current-work/multipage/common-microsyntaxes.html#floating-point-numbers
   //
-  // This is necessary to allow the number that we return to be parsed by
-  // functions like HTMLInputElement::StringToDecimal (the HTML-5-conforming
-  // parsing function) which don't know how to handle numbers that are
-  // formatted differently (for example, with non-ASCII digits, with grouping
-  // separator characters or with a decimal separator character other than
-  // '.').
-
+  // so that it can be parsed by functions like HTMLInputElement::
+  // StringToDecimal (the HTML-5-conforming parsing function) which don't know
+  // how to handle numbers that are formatted differently (for example, with
+  // non-ASCII digits, with grouping separator characters or with a decimal
+  // separator character other than '.').
+  //
+  // We need to be careful to avoid normalizing numbers that are already
+  // formatted for a locale that matches the format of HTML 5's "valid
+  // floating-point number" and have no grouping separator characters. (In
+  // other words we want to return the number as specified by the user, not the
+  // de-localized serialization, since the latter will normalize the value.)
+  // For example, if the user's locale is English and the user types in "2e2"
+  // then inputElement.value should be "2e2" and not "100". This is because
+  // content (and tests) expect us to avoid "normalizing" the number that the
+  // user types in if it's not necessary in order to make sure it conforms to
+  // HTML 5's "valid floating-point number" format.
+  //
+  // Note that we also need to be careful when trying to avoid normalization.
+  // For example, just because "1.234" _looks_ like a valid floating-point
+  // number according to the spec does not mean that it should be returned
+  // as-is. If the user's locale is German, then this represents the value
+  // 1234, not 1.234, so it still needs to be de-localized. Alternatively, if
+  // the user's locale is English and they type in "1,234" we _do_ need to
+  // normalize the number to "1234" because HTML 5's valid floating-point
+  // number format does not allow the ',' grouping separator. We can detect all
+  // the cases where we need to convert by seeing if the locale-specific
+  // parsing function understands the user input to mean the same thing as the
+  // HTML-5-conforming parsing function. If so, then we should return the value
+  // as-is to avoid normalization. Otherwise, we return the de-localized
+  // serialization.
   ICUUtils::LanguageTagIterForContent langTagIter(mContent);
   double value = ICUUtils::ParseNumber(aValue, langTagIter);
-  if (!IsFinite(value)) {
+  if (IsFinite(value) &&
+      value != HTMLInputElement::StringToDecimal(aValue).toDouble()) {
     aValue.Truncate();
-    return;
+    aValue.AppendFloat(value);
   }
-  if (value == HTMLInputElement::StringToDecimal(aValue).toDouble()) {
-    // We want to preserve the formatting of the number as typed in by the user
-    // whenever possible. Since the localized serialization parses to the same
-    // number as the de-localized serialization, we can do that. This helps
-    // prevent normalization of input such as "2e2" (which would otherwise be
-    // converted to "200"). Content relies on this.
-    //
-    // Typically we will only get here for locales in which numbers are
-    // formatted in the same way as they are for HTML5's "valid floating-point
-    // number" format.
-    return;
-  }
-  // We can't preserve the formatting, otherwise functions such as
-  // HTMLInputElement::StringToDecimal would incorrectly process the number
-  // input by the user. For example, "12.345" with lang=de de-localizes as
-  // 12345, but HTMLInputElement::StringToDecimal would mistakenly parse it as
-  // 12.345. Another example would be "12,345" with lang=de which de-localizes
-  // as 12.345, but HTMLInputElement::StringToDecimal would parse it to NaN.
-  aValue.Truncate();
-  aValue.AppendFloat(value);
 #endif
+  // else, we return whatever FromContent put into aValue (the number as typed
+  // in by the user)
 }
 
 bool
@@ -827,27 +830,27 @@ nsNumberControlFrame::AnonTextControlIsEmpty()
 }
 
 Element*
-nsNumberControlFrame::GetPseudoElement(CSSPseudoElementType aType)
+nsNumberControlFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
 {
-  if (aType == CSSPseudoElementType::mozNumberWrapper) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozNumberWrapper) {
     return mOuterWrapper;
   }
 
-  if (aType == CSSPseudoElementType::mozNumberText) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozNumberText) {
     return mTextField;
   }
 
-  if (aType == CSSPseudoElementType::mozNumberSpinBox) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozNumberSpinBox) {
     // Might be null.
     return mSpinBox;
   }
 
-  if (aType == CSSPseudoElementType::mozNumberSpinUp) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozNumberSpinUp) {
     // Might be null.
     return mSpinUp;
   }
 
-  if (aType == CSSPseudoElementType::mozNumberSpinDown) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozNumberSpinDown) {
     // Might be null.
     return mSpinDown;
   }

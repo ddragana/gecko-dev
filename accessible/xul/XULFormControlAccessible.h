@@ -50,7 +50,7 @@ public:
   virtual bool AreItemsOperable() const override;
   virtual Accessible* ContainerWidget() const override;
 
-  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
+  virtual bool IsAcceptableChild(Accessible* aPossibleChild) const override;
 
 protected:
   virtual ~XULButtonAccessible();

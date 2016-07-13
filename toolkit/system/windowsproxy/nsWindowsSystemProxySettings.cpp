@@ -16,8 +16,6 @@
 #include "nsNetCID.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIURI.h"
-#include "GeckoProfiler.h"
-#include "ProxyUtils.h"
 
 class nsWindowsSystemProxySettings final : public nsISystemProxySettings
 {
@@ -169,13 +167,42 @@ bool
 nsWindowsSystemProxySettings::PatternMatch(const nsACString& aHost,
                                            const nsACString& aOverride)
 {
-    return mozilla::toolkit::system::IsHostProxyEntry(aHost, aOverride);
+    nsAutoCString host(aHost);
+    nsAutoCString override(aOverride);
+    int32_t overrideLength = override.Length();
+    int32_t tokenStart = 0;
+    int32_t offset = 0;
+    bool star = false;
+
+    while (tokenStart < overrideLength) {
+        int32_t tokenEnd = override.FindChar('*', tokenStart);
+        if (tokenEnd == tokenStart) {
+            star = true;
+            tokenStart++;
+            // If the character following the '*' is a '.' character then skip
+            // it so that "*.foo.com" allows "foo.com".
+            if (override.FindChar('.', tokenStart) == tokenStart)
+                tokenStart++;
+        } else {
+            if (tokenEnd == -1)
+                tokenEnd = overrideLength;
+            nsAutoCString token(Substring(override, tokenStart,
+                                          tokenEnd - tokenStart));
+            offset = host.Find(token, offset);
+            if (offset == -1 || (!star && offset))
+                return false;
+            star = false;
+            tokenStart = tokenEnd;
+            offset += token.Length();
+        }
+    }
+
+    return (star || (offset == host.Length()));
 }
 
 nsresult
 nsWindowsSystemProxySettings::GetPACURI(nsACString& aResult)
 {
-    PROFILER_LABEL_FUNC(js::ProfileEntry::Category::STORAGE);
     nsresult rv;
     uint32_t flags = 0;
     nsAutoString buf;

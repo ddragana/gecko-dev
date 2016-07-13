@@ -122,7 +122,7 @@ enum {
 , NS_FOLDER_VALUE_CUSTOM = 2
 };
 
-LazyLogModule nsExternalHelperAppService::mLog("HelperAppService");
+PRLogModuleInfo* nsExternalHelperAppService::mLog = nullptr;
 
 // Using level 3 here because the OSHelperAppServices use a log level
 // of LogLevel::Debug (4), and we want less detailed output here
@@ -337,7 +337,7 @@ static nsresult GetDownloadDirectory(nsIFile **_directory,
   nsDOMDeviceStorage::GetDefaultStorageName(NS_LITERAL_STRING("sdcard"),
                                             storageName);
 
-  RefPtr<DeviceStorageFile> dsf(
+  nsRefPtr<DeviceStorageFile> dsf(
     new DeviceStorageFile(NS_LITERAL_STRING("sdcard"),
                           storageName,
                           NS_LITERAL_STRING("downloads")));
@@ -376,20 +376,16 @@ static nsresult GetDownloadDirectory(nsIFile **_directory,
   }
   dir = dsf->mFile;
 #elif defined(ANDROID)
-  // We ask Java for the temporary download directory. The directory will be
-  // different depending on whether we have the permission to write to the
-  // public download directory or not.
-  // In the case where we do not have the permission we will start the
-  // download to the app cache directory and later move it to the final
-  // destination after prompting for the permission.
-  auto downloadDir = widget::DownloadsIntegration::GetTemporaryDownloadDirectory();
+  // On mobile devices, we are avoiding exposing users to the file
+  // system, and don't save downloads to temp directories
 
+  // On Android we only return something if we have and SD-card
+  char* downloadDir = getenv("DOWNLOADS_DIRECTORY");
   nsresult rv;
   if (downloadDir) {
     nsCOMPtr<nsIFile> ldir;
-    rv = NS_NewNativeLocalFile(downloadDir->ToCString(),
+    rv = NS_NewNativeLocalFile(nsDependentCString(downloadDir),
                                true, getter_AddRefs(ldir));
-
     NS_ENSURE_SUCCESS(rv, rv);
     dir = do_QueryInterface(ldir);
 
@@ -406,77 +402,6 @@ static nsresult GetDownloadDirectory(nsIFile **_directory,
   // On all other platforms, we default to the systems temporary directory.
   nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(dir));
   NS_ENSURE_SUCCESS(rv, rv);
-
-#if defined(XP_UNIX)
-  // Ensuring that only the current user can read the file names we end up
-  // creating. Note that Creating directories with specified permission only
-  // supported on Unix platform right now. That's why above if exists.
-
-  uint32_t permissions;
-  rv = dir->GetPermissions(&permissions);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (permissions != PR_IRWXU) {
-    const char* userName = PR_GetEnv("USERNAME");
-    if (!userName || !*userName) {
-      userName = PR_GetEnv("USER");
-    }
-    if (!userName || !*userName) {
-      userName = PR_GetEnv("LOGNAME");
-    }
-    if (!userName || !*userName) {
-      userName = "mozillaUser";
-    }
-
-    nsAutoString userDir;
-    userDir.AssignLiteral("mozilla_");
-    userDir.AppendASCII(userName);
-    userDir.ReplaceChar(FILE_PATH_SEPARATOR FILE_ILLEGAL_CHARACTERS, '_');
-
-    int counter = 0;
-    bool pathExists;
-    nsCOMPtr<nsIFile> finalPath;
-
-    while (true) {
-      nsAutoString countedUserDir(userDir);
-      countedUserDir.AppendInt(counter, 10);
-      dir->Clone(getter_AddRefs(finalPath));
-      finalPath->Append(countedUserDir);
-
-      rv = finalPath->Exists(&pathExists);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      if (pathExists) {
-        // If this path has the right permissions, use it.
-        rv = finalPath->GetPermissions(&permissions);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        // Ensuring the path is writable by the current user.
-        bool isWritable;
-        rv = finalPath->IsWritable(&isWritable);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        if (permissions == PR_IRWXU && isWritable) {
-          dir = finalPath;
-          break;
-        }
-      }
-
-      rv = finalPath->Create(nsIFile::DIRECTORY_TYPE, PR_IRWXU);
-      if (NS_SUCCEEDED(rv)) {
-        dir = finalPath;
-        break;
-      }
-      else if (rv != NS_ERROR_FILE_ALREADY_EXISTS) {
-        // Unexpected error.
-        return rv;
-      }
-
-      counter++;
-    }
-  }
-
-#endif
 #endif
 
   NS_ASSERTION(dir, "Somehow we didn't get a download directory!");
@@ -497,7 +422,7 @@ struct nsDefaultMimeTypeEntry {
  * Default extension->mimetype mappings. These are not overridable.
  * If you add types here, make sure they are lowercase, or you'll regret it.
  */
-static const nsDefaultMimeTypeEntry defaultMimeEntries[] =
+static nsDefaultMimeTypeEntry defaultMimeEntries [] = 
 {
   // The following are those extensions that we're asked about during startup,
   // sorted by order used
@@ -522,9 +447,11 @@ static const nsDefaultMimeTypeEntry defaultMimeEntries[] =
   { APPLICATION_OGG, "ogg" },
   { AUDIO_OGG, "oga" },
   { AUDIO_OGG, "opus" },
+#ifdef MOZ_WEBM
   { VIDEO_WEBM, "webm" },
   { AUDIO_WEBM, "webm" },
-#if defined(MOZ_WMF)
+#endif
+#if defined(MOZ_GSTREAMER) || defined(MOZ_WMF)
   { VIDEO_MP4, "mp4" },
   { AUDIO_MP4, "m4a" },
   { AUDIO_MP3, "mp3" },
@@ -557,9 +484,11 @@ struct nsExtraMimeTypeEntry {
  * overridden by user helper app prefs.
  * If you add types here, make sure they are lowercase, or you'll regret it.
  */
-static const nsExtraMimeTypeEntry extraMimeEntries[] =
+static nsExtraMimeTypeEntry extraMimeEntries [] =
 {
-#if defined(XP_MACOSX) // don't define .bin on the mac...use internet config to look that up...
+#if defined(VMS)
+  { APPLICATION_OCTET_STREAM, "exe,com,bin,sav,bck,pcsi,dcx_axpexe,dcx_vaxexe,sfx_axpexe,sfx_vaxexe", "Binary File" },
+#elif defined(XP_MACOSX) // don't define .bin on the mac...use internet config to look that up...
   { APPLICATION_OCTET_STREAM, "exe,com", "Binary File" },
 #else
   { APPLICATION_OCTET_STREAM, "exe,com,bin", "Binary File" },
@@ -623,7 +552,6 @@ static const nsExtraMimeTypeEntry extraMimeEntries[] =
   // app on Firefox OS depends on the "3gp" extension mapping to the
   // "video/3gpp" MIME type.
   { AUDIO_3GPP, "3gpp,3gp", "3GPP Audio" },
-  { AUDIO_3GPP2, "3g2", "3GPP2 Audio" },
 #endif
   { AUDIO_MIDI, "mid", "Standard MIDI Audio" }
 };
@@ -634,7 +562,7 @@ static const nsExtraMimeTypeEntry extraMimeEntries[] =
  * File extensions for which decoding should be disabled.
  * NOTE: These MUST be lower-case and ASCII.
  */
-static const nsDefaultMimeTypeEntry nonDecodableExtensions[] = {
+static nsDefaultMimeTypeEntry nonDecodableExtensions [] = {
   { APPLICATION_GZIP, "gz" }, 
   { APPLICATION_GZIP, "tgz" },
   { APPLICATION_ZIP, "zip" },
@@ -661,6 +589,12 @@ nsresult nsExternalHelperAppService::Init()
   if (!obs)
     return NS_ERROR_FAILURE;
 
+  if (!mLog) {
+    mLog = PR_NewLogModule("HelperAppService");
+    if (!mLog)
+      return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   nsresult rv = obs->AddObserver(this, "profile-before-change", true);
   NS_ENSURE_SUCCESS(rv, rv);
   return obs->AddObserver(this, "last-pb-context-exited", true);
@@ -679,7 +613,7 @@ nsExternalHelperAppService::DoContentContentProcessHelper(const nsACString& aMim
                                                           nsIInterfaceRequestor *aWindowContext,
                                                           nsIStreamListener ** aStreamListener)
 {
-  nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(aContentContext);
+  nsCOMPtr<nsIDOMWindow> window = do_GetInterface(aContentContext);
   NS_ENSURE_STATE(window);
 
   // We need to get a hold of a ContentChild so that we can begin forwarding
@@ -733,7 +667,7 @@ nsExternalHelperAppService::DoContentContentProcessHelper(const nsACString& aMim
 
   uint32_t reason = nsIHelperAppLauncherDialog::REASON_CANTHANDLE;
 
-  RefPtr<nsExternalAppHandler> handler =
+  nsRefPtr<nsExternalAppHandler> handler =
     new nsExternalAppHandler(nullptr, EmptyCString(), aContentContext, aWindowContext, this,
                              fileName, reason, aForceSave);
   if (!handler) {
@@ -1011,9 +945,7 @@ nsExternalHelperAppService::LoadURI(nsIURI *aURI,
     URIParams uri;
     SerializeURI(aURI, uri);
 
-    nsCOMPtr<nsITabChild> tabChild(do_GetInterface(aWindowContext));
-    mozilla::dom::ContentChild::GetSingleton()->
-      SendLoadURIExternal(uri, static_cast<dom::TabChild*>(tabChild.get()));
+    mozilla::dom::ContentChild::GetSingleton()->SendLoadURIExternal(uri);
     return NS_OK;
   }
 
@@ -1867,7 +1799,7 @@ void nsExternalAppHandler::SendStatusChange(ErrorType type, nsresult rv, nsIRequ
           break;
         }
 #endif
-        MOZ_FALLTHROUGH;
+        // fall through
 
     default:
         // Generic read/write/launch error message.
@@ -1884,11 +1816,9 @@ void nsExternalAppHandler::SendStatusChange(ErrorType type, nsresult rv, nsIRequ
         }
         break;
     }
-
     MOZ_LOG(nsExternalHelperAppService::mLog, LogLevel::Error,
         ("Error: %s, type=%i, listener=0x%p, transfer=0x%p, rv=0x%08X\n",
          NS_LossyConvertUTF16toASCII(msgId).get(), type, mDialogProgressListener.get(), mTransfer.get(), rv));
-
     MOZ_LOG(nsExternalHelperAppService::mLog, LogLevel::Error,
         ("       path='%s'\n", NS_ConvertUTF16toUTF8(path).get()));
 
@@ -1929,7 +1859,7 @@ void nsExternalAppHandler::SendStatusChange(ErrorType type, nsresult rv, nsIRequ
                 // If we didn't have a prompter we will try and get a window
                 // instead, get it's docshell and use it to alert the user.
                 if (!prompter) {
-                  nsCOMPtr<nsPIDOMWindowOuter> window(do_GetInterface(GetDialogParent()));
+                  nsCOMPtr<nsPIDOMWindow> window(do_GetInterface(GetDialogParent()));
                   if (!window || !window->GetDocShell()) {
                     return;
                   }
@@ -2188,10 +2118,13 @@ nsresult nsExternalAppHandler::CreateTransfer()
   // Now let's add the download to history
   nsCOMPtr<nsIDownloadHistory> dh(do_GetService(NS_DOWNLOADHISTORY_CONTRACTID));
   if (dh) {
-    if (channel && !NS_UsePrivateBrowsing(channel)) {
-      nsCOMPtr<nsIURI> referrer;
+    nsCOMPtr<nsIURI> referrer;
+    nsCOMPtr<nsIChannel> channel = do_QueryInterface(mRequest);
+    if (channel) {
       NS_GetReferrerFromChannel(channel, getter_AddRefs(referrer));
+    }
 
+    if (channel && !NS_UsePrivateBrowsing(channel)) {
       dh->AddDownload(mSourceUrl, referrer, mTimeDownloadStarted, target);
     }
   }
@@ -2294,7 +2227,7 @@ void nsExternalAppHandler::RequestSaveDestination(const nsAFlatString &aDefaultF
   // picker is up would cause Cancel() to be called, and the dialog would be
   // released, which would release this object too, which would crash.
   // See Bug 249143
-  RefPtr<nsExternalAppHandler> kungFuDeathGrip(this);
+  nsRefPtr<nsExternalAppHandler> kungFuDeathGrip(this);
   nsCOMPtr<nsIHelperAppLauncherDialog> dlg(mDialog);
 
   rv = mDialog->PromptForSaveToFileAsync(this,
@@ -2554,15 +2487,17 @@ bool nsExternalAppHandler::GetNeverAskFlagFromPref(const char * prefName, const 
 
 nsresult nsExternalAppHandler::MaybeCloseWindow()
 {
-  nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(mContentContext);
+  nsCOMPtr<nsIDOMWindow> window = do_GetInterface(mContentContext);
   NS_ENSURE_STATE(window);
 
   if (mShouldCloseWindow) {
     // Reset the window context to the opener window so that the dependent
     // dialogs have a parent
-    nsCOMPtr<nsPIDOMWindowOuter> opener = window->GetOpener();
+    nsCOMPtr<nsIDOMWindow> opener;
+    window->GetOpener(getter_AddRefs(opener));
 
-    if (opener && !opener->Closed()) {
+    bool isClosed;
+    if (opener && NS_SUCCEEDED(opener->GetClosed(&isClosed)) && !isClosed) {
       mContentContext = do_GetInterface(opener);
 
       // Now close the old window.  Do it on a timer so that we don't run
@@ -2756,7 +2691,7 @@ NS_IMETHODIMP nsExternalHelperAppService::GetTypeFromExtension(const nsACString&
     return NS_OK;
 
   // Try the plugins
-  RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
+  nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
   if (pluginHost &&
       pluginHost->HavePluginForExtension(aFileExt, aContentType)) {
     return NS_OK;

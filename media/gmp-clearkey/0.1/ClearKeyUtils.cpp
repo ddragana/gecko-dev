@@ -25,7 +25,7 @@
 #include "ArrayUtils.h"
 #include <assert.h>
 #include <memory.h>
-#include "BigEndian.h"
+#include "Endian.h"
 #include "openaes/oaes_lib.h"
 
 using namespace std;
@@ -132,9 +132,8 @@ EncodeBase64Web(vector<uint8_t> aBinary, string& aEncoded)
 }
 
 /* static */ void
-ClearKeyUtils::ParseCENCInitData(const uint8_t* aInitData,
-                                 uint32_t aInitDataSize,
-                                 vector<KeyId>& aOutKeyIds)
+ClearKeyUtils::ParseInitData(const uint8_t* aInitData, uint32_t aInitDataSize,
+                             vector<KeyId>& aOutKeys)
 {
   using mozilla::BigEndian;
 
@@ -183,7 +182,7 @@ ClearKeyUtils::ParseCENCInitData(const uint8_t* aInitData,
     }
 
     for (uint32_t i = 0; i < kidCount; i++) {
-      aOutKeyIds.push_back(KeyId(data, data + CLEARKEY_KEY_LEN));
+      aOutKeys.push_back(KeyId(data, data + CLEARKEY_KEY_LEN));
       data += CLEARKEY_KEY_LEN;
     }
   }
@@ -196,7 +195,7 @@ ClearKeyUtils::MakeKeyRequest(const vector<KeyId>& aKeyIDs,
 {
   assert(aKeyIDs.size() && aOutRequest.empty());
 
-  aOutRequest.append("{\"kids\":[");
+  aOutRequest.append("{ \"kids\":[");
   for (size_t i = 0; i < aKeyIDs.size(); i++) {
     if (i) {
       aOutRequest.append(",");
@@ -209,7 +208,7 @@ ClearKeyUtils::MakeKeyRequest(const vector<KeyId>& aKeyIDs,
 
     aOutRequest.append("\"");
   }
-  aOutRequest.append("],\"type\":");
+  aOutRequest.append("], \"type\":");
 
   aOutRequest.append("\"");
   aOutRequest.append(SessionTypeToString(aSessionType));
@@ -412,6 +411,10 @@ ParseKeyObject(ParserContext& aCtx, KeyIdPair& aOutKey)
       if (!GetNextLabel(aCtx, value)) return false;
       // By spec, type must be "oct".
       if (value != "oct") return false;
+    } else if (label == "alg") {
+      if (!GetNextLabel(aCtx, value)) return false;
+      // By spec, alg must be "A128KW".
+      if (value != "A128KW") return false;
     } else if (label == "k" && PeekSymbol(aCtx) == '"') {
       // if this isn't a string we will fall through to the SkipToken() path.
       if (!GetNextLabel(aCtx, key)) return false;
@@ -490,80 +493,6 @@ ClearKeyUtils::ParseJWK(const uint8_t* aKeyData, uint32_t aKeyDataSize,
       if (type != SessionTypeToString(aSessionType)) {
         return false;
       }
-    } else {
-      SkipToken(ctx);
-    }
-
-    // Check for end of object.
-    if (PeekSymbol(ctx) == '}') {
-      break;
-    }
-
-    // Consume ',' between object members.
-    EXPECT_SYMBOL(ctx, ',');
-  }
-
-  // Consume '}' from end of object.
-  EXPECT_SYMBOL(ctx, '}');
-
-  return true;
-}
-
-static bool
-ParseKeyIds(ParserContext& aCtx, vector<KeyId>& aOutKeyIds)
-{
-  // Consume start of array.
-  EXPECT_SYMBOL(aCtx, '[');
-
-  while (true) {
-    string label;
-    vector<uint8_t> keyId;
-    if (!GetNextLabel(aCtx, label) ||
-        !DecodeBase64KeyOrId(label, keyId)) {
-      return false;
-    }
-    assert(!keyId.empty());
-    aOutKeyIds.push_back(keyId);
-
-    uint8_t sym = PeekSymbol(aCtx);
-    if (!sym || sym == ']') {
-      break;
-    }
-
-    EXPECT_SYMBOL(aCtx, ',');
-  }
-
-  return GetNextSymbol(aCtx) == ']';
-}
-
-
-/* static */ bool
-ClearKeyUtils::ParseKeyIdsInitData(const uint8_t* aInitData,
-                                   uint32_t aInitDataSize,
-                                   vector<KeyId>& aOutKeyIds,
-                                   string& aOutSessionType)
-{
-  aOutSessionType = "temporary";
-
-  ParserContext ctx;
-  ctx.mIter = aInitData;
-  ctx.mEnd = aInitData + aInitDataSize;
-
-  // Consume '{' from start of object.
-  EXPECT_SYMBOL(ctx, '{');
-
-  while (true) {
-    string label;
-    // Consume member kids.
-    if (!GetNextLabel(ctx, label)) return false;
-    EXPECT_SYMBOL(ctx, ':');
-
-    if (label == "kids") {
-      // Parse "kids" array.
-      if (!ParseKeyIds(ctx, aOutKeyIds)) return false;
-    } else if (label == "type") {
-      // Consume type string.
-      if (!GetNextLabel(ctx, aOutSessionType)) return false;
     } else {
       SkipToken(ctx);
     }

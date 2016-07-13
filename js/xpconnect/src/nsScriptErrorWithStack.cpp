@@ -6,7 +6,7 @@
 
 /*
  * nsScriptErrorWithStack implementation.
- * a main-thread-only, cycle-collected subclass of nsScriptErrorBase
+ * a main-thread-only, cycle-collected subclass of nsScriptError
  * that can store a SavedFrame stack trace object.
  */
 
@@ -15,28 +15,6 @@
 #include "mozilla/Assertions.h"
 #include "nsGlobalWindow.h"
 #include "nsCycleCollectionParticipant.h"
-
-
-namespace {
-
-static nsCString
-FormatStackString(JSContext* cx, HandleObject aStack) {
-    JS::RootedString formattedStack(cx);
-
-    if (!JS::BuildStackString(cx, aStack, &formattedStack)) {
-        return nsCString();
-    }
-
-    nsAutoJSString stackJSString;
-    if (!stackJSString.init(cx, formattedStack)) {
-        return nsCString();
-    }
-
-    return NS_ConvertUTF16toUTF8(stackJSString.get());
-}
-
-}
-
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsScriptErrorWithStack)
 
@@ -49,7 +27,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsScriptErrorWithStack)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsScriptErrorWithStack)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mStack)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mStack)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsScriptErrorWithStack)
@@ -62,7 +40,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsScriptErrorWithStack)
 NS_INTERFACE_MAP_END
 
 nsScriptErrorWithStack::nsScriptErrorWithStack(JS::HandleObject aStack)
-  : mStack(aStack)
+    :  nsScriptError(),
+       mStack(aStack)
 {
     MOZ_ASSERT(NS_IsMainThread(), "You can't use this class on workers.");
     mozilla::HoldJSObjects(this);
@@ -87,33 +66,5 @@ nsScriptErrorWithStack::Init(const nsAString& message,
 NS_IMETHODIMP
 nsScriptErrorWithStack::GetStack(JS::MutableHandleValue aStack) {
     aStack.setObjectOrNull(mStack);
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsScriptErrorWithStack::ToString(nsACString& /*UTF8*/ aResult)
-{
-    MOZ_ASSERT(NS_IsMainThread());
-
-    nsCString message;
-    nsresult rv = nsScriptErrorBase::ToString(message);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!mStack) {
-        aResult.Assign(message);
-        return NS_OK;
-    }
-
-    AutoJSAPI jsapi;
-    if (!jsapi.Init(mStack)) {
-        return NS_ERROR_FAILURE;
-    }
-
-    JSContext* cx = jsapi.cx();
-    RootedObject stack(cx, mStack);
-    nsCString stackString = FormatStackString(cx, stack);
-    nsCString combined = message + NS_LITERAL_CSTRING("\n") + stackString;
-    aResult.Assign(combined);
-
     return NS_OK;
 }

@@ -13,12 +13,10 @@
 
 #include <math.h>
 
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/modules/audio_coding/main/test/ACMTest.h"
 #include "webrtc/modules/audio_coding/main/test/Channel.h"
 #include "webrtc/modules/audio_coding/main/test/PCMFile.h"
-
-#define PCMA_AND_PCMU
 
 namespace webrtc {
 
@@ -35,12 +33,13 @@ class TestPackStereo : public AudioPacketizationCallback {
 
   void RegisterReceiverACM(AudioCodingModule* acm);
 
-  int32_t SendData(const FrameType frame_type,
-                   const uint8_t payload_type,
-                   const uint32_t timestamp,
-                   const uint8_t* payload_data,
-                   const size_t payload_size,
-                   const RTPFragmentationHeader* fragmentation) override;
+  virtual int32_t SendData(
+      const FrameType frame_type,
+      const uint8_t payload_type,
+      const uint32_t timestamp,
+      const uint8_t* payload_data,
+      const uint16_t payload_size,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   uint16_t payload_size();
   uint32_t timestamp_diff();
@@ -65,8 +64,7 @@ class TestStereo : public ACMTest {
   explicit TestStereo(int test_mode);
   ~TestStereo();
 
-  void Perform() override;
-
+  virtual void Perform() OVERRIDE;
  private:
   // The default value of '-1' indicates that the registration is based only on
   // codec name and a sampling frequncy matching is not required. This is useful
@@ -80,10 +78,15 @@ class TestStereo : public ACMTest {
   void OpenOutFile(int16_t test_number);
   void DisplaySendReceiveCodec();
 
+  int32_t SendData(const FrameType frame_type, const uint8_t payload_type,
+                   const uint32_t timestamp, const uint8_t* payload_data,
+                   const uint16_t payload_size,
+                   const RTPFragmentationHeader* fragmentation);
+
   int test_mode_;
 
-  rtc::scoped_ptr<AudioCodingModule> acm_a_;
-  rtc::scoped_ptr<AudioCodingModule> acm_b_;
+  scoped_ptr<AudioCodingModule> acm_a_;
+  scoped_ptr<AudioCodingModule> acm_b_;
 
   TestPackStereo* channel_a2b_;
 
@@ -97,21 +100,17 @@ class TestStereo : public ACMTest {
   char* send_codec_name_;
 
   // Payload types for stereo codecs and CNG
-#ifdef WEBRTC_CODEC_G722
   int g722_pltype_;
-#endif
-#ifdef WEBRTC_CODEC_PCM16
   int l16_8khz_pltype_;
   int l16_16khz_pltype_;
   int l16_32khz_pltype_;
-#endif
-#ifdef PCMA_AND_PCMU
   int pcma_pltype_;
   int pcmu_pltype_;
-#endif
-#ifdef WEBRTC_CODEC_OPUS
+  int celt_pltype_;
   int opus_pltype_;
-#endif
+  int cn_8khz_pltype_;
+  int cn_16khz_pltype_;
+  int cn_32khz_pltype_;
 };
 
 }  // namespace webrtc

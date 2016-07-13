@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cc = Components.classes;
+const Cu = Components.utils;
 
 Cu.import("resource://services-sync/main.js");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -15,7 +15,7 @@ const ADD_DEVICE_PAGE       = 0;
 const SYNC_KEY_PAGE         = 1;
 const DEVICE_CONNECTED_PAGE = 2;
 
-var gSyncAddDevice = {
+let gSyncAddDevice = {
 
   init: function init() {
     this.pin1.setAttribute("maxlength", PIN_PART_LENGTH);

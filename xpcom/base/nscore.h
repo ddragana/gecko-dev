@@ -121,6 +121,12 @@
 
 #endif
 
+#ifdef MOZ_WIDGET_GONK
+#define B2G_ACL_EXPORT NS_EXPORT
+#else
+#define B2G_ACL_EXPORT
+#endif
+
 /**
  * Macro for creating typedefs for pointer-to-member types which are
  * declared with stdcall.  It is important to use this for any type which is
@@ -228,7 +234,7 @@
  * sense to touch memory pages and free that memory at shutdown,
  * unless we are running leak stats.
  */
-#if defined(NS_BUILD_REFCNT_LOGGING) || defined(MOZ_VALGRIND) || defined(MOZ_ASAN)
+#if defined(NS_BUILD_REFCNT_LOGGING) || defined(MOZ_VALGRIND)
 #define NS_FREE_PERMANENT_DATA
 #endif
 
@@ -242,7 +248,7 @@
 #ifdef NS_NO_VTABLE
 #undef NS_NO_VTABLE
 #endif
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
 #define NS_NO_VTABLE __declspec(novtable)
 #else
 #define NS_NO_VTABLE

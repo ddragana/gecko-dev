@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -45,17 +43,16 @@ class SharedMemory {
 
   // Create a new SharedMemory object from an existing, open
   // shared memory file.
-  SharedMemory(SharedMemoryHandle init_handle, bool read_only)
-    : SharedMemory() {
-    SetHandle(init_handle, read_only);
-  }
+  SharedMemory(SharedMemoryHandle handle, bool read_only);
+
+  // Create a new SharedMemory object from an existing, open
+  // shared memory file that was created by a remote process and not shared
+  // to the current process.
+  SharedMemory(SharedMemoryHandle handle, bool read_only,
+      base::ProcessHandle process);
 
   // Destructor.  Will close any open files.
   ~SharedMemory();
-
-  // Initialize a new SharedMemory object from an existing, open
-  // shared memory file.
-  bool SetHandle(SharedMemoryHandle handle, bool read_only);
 
   // Return true iff the given handle is valid (i.e. not the distingished
   // invalid value; NULL for a HANDLE and -1 for a file descriptor)
@@ -119,7 +116,7 @@ class SharedMemory {
 
   // Closes the open shared memory segment.
   // It is safe to call Close repeatedly.
-  void Close(bool unmap_view = true);
+  void Close();
 
   // Share the shared memory to another process.  Attempts
   // to create a platform-specific new_handle which can be

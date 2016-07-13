@@ -17,8 +17,7 @@ PointerEvent::PointerEvent(EventTarget* aOwner,
                            nsPresContext* aPresContext,
                            WidgetPointerEvent* aEvent)
   : MouseEvent(aOwner, aPresContext,
-               aEvent ? aEvent :
-                        new WidgetPointerEvent(false, eVoidEvent, nullptr))
+               aEvent ? aEvent : new WidgetPointerEvent(false, 0, nullptr))
 {
   NS_ASSERTION(mEvent->mClass == ePointerEventClass,
                "event type mismatch ePointerEventClass");
@@ -28,8 +27,8 @@ PointerEvent::PointerEvent(EventTarget* aOwner,
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->mTime = PR_Now();
-    mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
+    mEvent->time = PR_Now();
+    mEvent->refPoint.x = mEvent->refPoint.y = 0;
     mouseEvent->inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
   }
 }
@@ -75,7 +74,7 @@ PointerEvent::Constructor(EventTarget* aOwner,
                           const nsAString& aType,
                           const PointerEventInit& aParam)
 {
-  RefPtr<PointerEvent> e = new PointerEvent(aOwner, nullptr, nullptr);
+  nsRefPtr<PointerEvent> e = new PointerEvent(aOwner, nullptr, nullptr);
   bool trusted = e->Init(aOwner);
 
   e->InitMouseEvent(aType, aParam.mBubbles, aParam.mCancelable,
@@ -165,11 +164,14 @@ PointerEvent::IsPrimary()
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<PointerEvent>
-NS_NewDOMPointerEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMPointerEvent(nsIDOMEvent** aInstancePtrResult,
+                      EventTarget* aOwner,
                       nsPresContext* aPresContext,
                       WidgetPointerEvent *aEvent)
 {
-  RefPtr<PointerEvent> it = new PointerEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  PointerEvent *it = new PointerEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

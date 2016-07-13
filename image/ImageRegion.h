@@ -7,7 +7,6 @@
 #define mozilla_image_ImageRegion_h
 
 #include "gfxRect.h"
-#include "mozilla/gfx/Types.h"
 
 namespace mozilla {
 namespace image {
@@ -24,37 +23,31 @@ namespace image {
  */
 class ImageRegion
 {
-  typedef mozilla::gfx::ExtendMode ExtendMode;
-
 public:
   static ImageRegion Empty()
   {
-    return ImageRegion(gfxRect(), ExtendMode::CLAMP);
+    return ImageRegion(gfxRect());
   }
 
-  static ImageRegion Create(const gfxRect& aRect,
-                            ExtendMode aExtendMode = ExtendMode::CLAMP)
+  static ImageRegion Create(const gfxRect& aRect)
   {
-    return ImageRegion(aRect, aExtendMode);
+    return ImageRegion(aRect);
   }
 
-  static ImageRegion Create(const gfxSize& aSize,
-                            ExtendMode aExtendMode = ExtendMode::CLAMP)
+  static ImageRegion Create(const gfxSize& aSize)
   {
-    return ImageRegion(gfxRect(0, 0, aSize.width, aSize.height), aExtendMode);
+    return ImageRegion(gfxRect(0, 0, aSize.width, aSize.height));
   }
 
-  static ImageRegion Create(const nsIntSize& aSize,
-                            ExtendMode aExtendMode = ExtendMode::CLAMP)
+  static ImageRegion Create(const nsIntSize& aSize)
   {
-    return ImageRegion(gfxRect(0, 0, aSize.width, aSize.height), aExtendMode);
+    return ImageRegion(gfxRect(0, 0, aSize.width, aSize.height));
   }
 
   static ImageRegion CreateWithSamplingRestriction(const gfxRect& aRect,
-                                                   const gfxRect& aRestriction,
-                                                   ExtendMode aExtendMode = ExtendMode::CLAMP)
+                                                   const gfxRect& aRestriction)
   {
-    return ImageRegion(aRect, aRestriction, aExtendMode);
+    return ImageRegion(aRect, aRestriction);
   }
 
   bool IsRestricted() const { return mIsRestricted; }
@@ -140,30 +133,22 @@ public:
     return Create(mRect + aPt);
   }
 
-  gfx::ExtendMode GetExtendMode() const
-  {
-    return mExtendMode;
-  }
-
   /* ImageRegion() : mIsRestricted(false) { } */
 
 private:
-  explicit ImageRegion(const gfxRect& aRect, ExtendMode aExtendMode)
+  explicit ImageRegion(const gfxRect& aRect)
     : mRect(aRect)
-    , mExtendMode(aExtendMode)
     , mIsRestricted(false)
   { }
 
-  ImageRegion(const gfxRect& aRect, const gfxRect& aRestriction, ExtendMode aExtendMode)
+  ImageRegion(const gfxRect& aRect, const gfxRect& aRestriction)
     : mRect(aRect)
     , mRestriction(aRestriction)
-    , mExtendMode(aExtendMode)
     , mIsRestricted(true)
   { }
 
   gfxRect mRect;
   gfxRect mRestriction;
-  ExtendMode mExtendMode;
   bool    mIsRestricted;
 };
 

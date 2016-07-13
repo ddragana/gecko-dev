@@ -2,6 +2,9 @@ reftest.jar:
 % content reftest %content/
 *  content/reftest-content.js (reftest-content.js)
   content/httpd.jsm (../../../netwerk/test/httpserver/httpd.js)
-  content/StructuredLog.jsm (../../../testing/modules/StructuredLog.jsm)
-*  content/reftest.jsm (reftest.jsm)
+#ifdef BOOTSTRAP
+*  content/reftest.jsm (reftest.js)
+#else
+*  content/reftest.js (reftest.js)
   content/reftest.xul (reftest.xul)
+#endif

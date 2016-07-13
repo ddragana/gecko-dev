@@ -8,37 +8,37 @@ var PermissionsHelper = {
                     "offline-app", "desktop-notification", "plugins", "native-intent"],
   _permissionStrings: {
     "password": {
-      label: "password.logins",
+      label: "password.savePassword",
       allowed: "password.save",
       denied: "password.dontSave"
     },
     "geolocation": {
-      label: "geolocation.location",
+      label: "geolocation.shareLocation",
       allowed: "geolocation.allow",
       denied: "geolocation.dontAllow"
     },
     "popup": {
-      label: "blockPopups.label2",
+      label: "blockPopups.label",
       allowed: "popup.show",
       denied: "popup.dontShow"
     },
     "indexedDB": {
-      label: "offlineApps.offlineData",
+      label: "offlineApps.storeOfflineData",
       allowed: "offlineApps.allow",
       denied: "offlineApps.dontAllow2"
     },
     "offline-app": {
-      label: "offlineApps.offlineData",
+      label: "offlineApps.storeOfflineData",
       allowed: "offlineApps.allow",
       denied: "offlineApps.dontAllow2"
     },
     "desktop-notification": {
-      label: "desktopNotification.notifications",
-      allowed: "desktopNotification2.allow",
-      denied: "desktopNotification2.dontAllow"
+      label: "desktopNotification.useNotifications",
+      allowed: "desktopNotification.allow",
+      denied: "desktopNotification.dontAllow"
     },
     "plugins": {
-      label: "clickToPlayPlugins.plugins",
+      label: "clickToPlayPlugins.activatePlugins",
       allowed: "clickToPlayPlugins.activate",
       denied: "clickToPlayPlugins.dontActivate"
     },
@@ -100,8 +100,15 @@ var PermissionsHelper = {
         // Keep track of permissions, so we know which ones to clear
         this._currentPermissions = permissions;
 
+        let host;
+        try {
+          host = uri.host;
+        } catch(e) {
+          host = uri.spec;
+        }
         Messaging.sendRequest({
           type: "Permissions:Data",
+          host: host,
           permissions: permissions
         });
         break;

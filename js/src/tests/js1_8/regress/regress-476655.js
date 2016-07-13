@@ -20,6 +20,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(true);
 
   try
   {
@@ -32,6 +33,7 @@ function test()
   catch(ex)
   {
   }
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

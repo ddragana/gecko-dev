@@ -9,6 +9,7 @@
 
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Monitor.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIObserverService.h"
 #include "nsIThreadPool.h"
@@ -24,7 +25,6 @@
 #include "gfxPrefs.h"
 
 #include "Decoder.h"
-#include "IDecodingTask.h"
 #include "RasterImage.h"
 
 using std::max;
@@ -32,6 +32,97 @@ using std::min;
 
 namespace mozilla {
 namespace image {
+
+///////////////////////////////////////////////////////////////////////////////
+// Helper runnables.
+///////////////////////////////////////////////////////////////////////////////
+
+class NotifyProgressWorker : public nsRunnable
+{
+public:
+  /**
+   * Called by the DecodePool when it's done some significant portion of
+   * decoding, so that progress can be recorded and notifications can be sent.
+   */
+  static void Dispatch(RasterImage* aImage,
+                       Progress aProgress,
+                       const nsIntRect& aInvalidRect,
+                       uint32_t aFlags)
+  {
+    MOZ_ASSERT(aImage);
+
+    nsCOMPtr<nsIRunnable> worker =
+      new NotifyProgressWorker(aImage, aProgress, aInvalidRect, aFlags);
+    NS_DispatchToMainThread(worker);
+  }
+
+  NS_IMETHOD Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    mImage->NotifyProgress(mProgress, mInvalidRect, mFlags);
+    return NS_OK;
+  }
+
+private:
+  NotifyProgressWorker(RasterImage* aImage, Progress aProgress,
+                       const nsIntRect& aInvalidRect, uint32_t aFlags)
+    : mImage(aImage)
+    , mProgress(aProgress)
+    , mInvalidRect(aInvalidRect)
+    , mFlags(aFlags)
+  { }
+
+  nsRefPtr<RasterImage> mImage;
+  const Progress mProgress;
+  const nsIntRect mInvalidRect;
+  const uint32_t mFlags;
+};
+
+class NotifyDecodeCompleteWorker : public nsRunnable
+{
+public:
+  /**
+   * Called by the DecodePool when decoding is complete, so that final cleanup
+   * can be performed.
+   */
+  static void Dispatch(Decoder* aDecoder)
+  {
+    MOZ_ASSERT(aDecoder);
+
+    nsCOMPtr<nsIRunnable> worker = new NotifyDecodeCompleteWorker(aDecoder);
+    NS_DispatchToMainThread(worker);
+  }
+
+  NS_IMETHOD Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    mDecoder->Finish();
+    mDecoder->GetImage()->FinalizeDecoder(mDecoder);
+    return NS_OK;
+  }
+
+private:
+  explicit NotifyDecodeCompleteWorker(Decoder* aDecoder)
+    : mDecoder(aDecoder)
+  { }
+
+  nsRefPtr<Decoder> mDecoder;
+};
+
+#ifdef MOZ_NUWA_PROCESS
+
+class RegisterDecodeIOThreadWithNuwaRunnable : public nsRunnable
+{
+public:
+  NS_IMETHOD Run()
+  {
+    NuwaMarkCurrentThread(static_cast<void(*)(void*)>(nullptr), nullptr);
+    return NS_OK;
+  }
+};
+
+#endif // MOZ_NUWA_PROCESS
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // DecodePool implementation.
@@ -45,11 +136,11 @@ NS_IMPL_ISUPPORTS(DecodePool, nsIObserver)
 struct Work
 {
   enum class Type {
-    TASK,
+    DECODE,
     SHUTDOWN
   } mType;
 
-  RefPtr<IDecodingTask> mTask;
+  nsRefPtr<Decoder> mDecoder;
 };
 
 class DecodePoolImpl
@@ -82,7 +173,9 @@ public:
   {
     // Threads have to be shut down from another thread, so we'll ask the
     // main thread to do it for us.
-    NS_DispatchToMainThread(NewRunnableMethod(aThisThread, &nsIThread::Shutdown));
+    nsCOMPtr<nsIRunnable> runnable =
+      NS_NewRunnableMethod(aThisThread, &nsIThread::Shutdown);
+    NS_DispatchToMainThread(runnable);
   }
 
   /**
@@ -98,10 +191,10 @@ public:
   }
 
   /// Pushes a new decode work item.
-  void PushWork(IDecodingTask* aTask)
+  void PushWork(Decoder* aDecoder)
   {
-    MOZ_ASSERT(aTask);
-    RefPtr<IDecodingTask> task(aTask);
+    MOZ_ASSERT(aDecoder);
+    nsRefPtr<Decoder> decoder(aDecoder);
 
     MonitorAutoLock lock(mMonitor);
 
@@ -110,10 +203,10 @@ public:
       return;
     }
 
-    if (task->Priority() == TaskPriority::eHigh) {
-      mHighPriorityQueue.AppendElement(Move(task));
+    if (aDecoder->IsMetadataDecode()) {
+      mMetadataDecodeQueue.AppendElement(Move(decoder));
     } else {
-      mLowPriorityQueue.AppendElement(Move(task));
+      mFullDecodeQueue.AppendElement(Move(decoder));
     }
 
     mMonitor.Notify();
@@ -125,12 +218,13 @@ public:
     MonitorAutoLock lock(mMonitor);
 
     do {
-      if (!mHighPriorityQueue.IsEmpty()) {
-        return PopWorkFromQueue(mHighPriorityQueue);
+      // Prioritize metadata decodes over full decodes.
+      if (!mMetadataDecodeQueue.IsEmpty()) {
+        return PopWorkFromQueue(mMetadataDecodeQueue);
       }
 
-      if (!mLowPriorityQueue.IsEmpty()) {
-        return PopWorkFromQueue(mLowPriorityQueue);
+      if (!mFullDecodeQueue.IsEmpty()) {
+        return PopWorkFromQueue(mFullDecodeQueue);
       }
 
       if (mShuttingDown) {
@@ -147,11 +241,11 @@ public:
 private:
   ~DecodePoolImpl() { }
 
-  Work PopWorkFromQueue(nsTArray<RefPtr<IDecodingTask>>& aQueue)
+  Work PopWorkFromQueue(nsTArray<nsRefPtr<Decoder>>& aQueue)
   {
     Work work;
-    work.mType = Work::Type::TASK;
-    work.mTask = aQueue.LastElement().forget();
+    work.mType = Work::Type::DECODE;
+    work.mDecoder = aQueue.LastElement();
     aQueue.RemoveElementAt(aQueue.Length() - 1);
 
     return work;
@@ -161,12 +255,12 @@ private:
 
   // mMonitor guards the queues and mShuttingDown.
   Monitor mMonitor;
-  nsTArray<RefPtr<IDecodingTask>> mHighPriorityQueue;
-  nsTArray<RefPtr<IDecodingTask>> mLowPriorityQueue;
+  nsTArray<nsRefPtr<Decoder>> mMetadataDecodeQueue;
+  nsTArray<nsRefPtr<Decoder>> mFullDecodeQueue;
   bool mShuttingDown;
 };
 
-class DecodePoolWorker : public Runnable
+class DecodePoolWorker : public nsRunnable
 {
 public:
   explicit DecodePoolWorker(DecodePoolImpl* aImpl) : mImpl(aImpl) { }
@@ -183,8 +277,8 @@ public:
     do {
       Work work = mImpl->PopWork();
       switch (work.mType) {
-        case Work::Type::TASK:
-          work.mTask->Run();
+        case Work::Type::DECODE:
+          DecodePool::Singleton()->Decode(work.mDecoder);
           break;
 
         case Work::Type::SHUTDOWN:
@@ -201,14 +295,14 @@ public:
   }
 
 private:
-  RefPtr<DecodePoolImpl> mImpl;
+  nsRefPtr<DecodePoolImpl> mImpl;
 };
 
 /* static */ void
 DecodePool::Initialize()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  sNumCores = max<int32_t>(PR_GetNumberOfProcessors(), 1);
+  sNumCores = PR_GetNumberOfProcessors();
   DecodePool::Singleton();
 }
 
@@ -252,9 +346,6 @@ DecodePool::DecodePool()
   } else {
     limit = static_cast<uint32_t>(prefLimit);
   }
-  if (limit > 32) {
-    limit = 32;
-  }
 
   // Initialize the thread pool.
   for (uint32_t i = 0 ; i < limit ; ++i) {
@@ -272,10 +363,8 @@ DecodePool::DecodePool()
                      "Should successfully create image I/O thread");
 
 #ifdef MOZ_NUWA_PROCESS
-  rv = mIOThread->Dispatch(NS_NewRunnableFunction([]() -> void {
-    NuwaMarkCurrentThread(static_cast<void(*)(void*)>(nullptr), nullptr);
-  }), NS_DISPATCH_NORMAL);
-
+  nsCOMPtr<nsIRunnable> worker = new RegisterDecodeIOThreadWithNuwaRunnable();
+  rv = mIOThread->Dispatch(worker, NS_DISPATCH_NORMAL);
   MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv),
                      "Should register decode IO thread with Nuwa process");
 #endif
@@ -296,18 +385,19 @@ DecodePool::Observe(nsISupports*, const char* aTopic, const char16_t*)
 {
   MOZ_ASSERT(strcmp(aTopic, "xpcom-shutdown-threads") == 0, "Unexpected topic");
 
-  nsTArray<nsCOMPtr<nsIThread>> threads;
+  nsCOMArray<nsIThread> threads;
   nsCOMPtr<nsIThread> ioThread;
 
   {
     MutexAutoLock lock(mMutex);
-    threads.SwapElements(mThreads);
+    threads.AppendElements(mThreads);
+    mThreads.Clear();
     ioThread.swap(mIOThread);
   }
 
   mImpl->RequestShutdown();
 
-  for (uint32_t i = 0 ; i < threads.Length() ; ++i) {
+  for (int32_t i = 0 ; i < threads.Count() ; ++i) {
     threads[i]->Shutdown();
   }
 
@@ -319,32 +409,31 @@ DecodePool::Observe(nsISupports*, const char* aTopic, const char16_t*)
 }
 
 void
-DecodePool::AsyncRun(IDecodingTask* aTask)
+DecodePool::AsyncDecode(Decoder* aDecoder)
 {
-  MOZ_ASSERT(aTask);
-  mImpl->PushWork(aTask);
+  MOZ_ASSERT(aDecoder);
+  mImpl->PushWork(aDecoder);
 }
 
 void
-DecodePool::SyncRunIfPreferred(IDecodingTask* aTask)
+DecodePool::SyncDecodeIfSmall(Decoder* aDecoder)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aTask);
+  MOZ_ASSERT(aDecoder);
 
-  if (aTask->ShouldPreferSyncRun()) {
-    aTask->Run();
+  if (aDecoder->ShouldSyncDecode(gfxPrefs::ImageMemDecodeBytesAtATime())) {
+    Decode(aDecoder);
     return;
   }
 
-  AsyncRun(aTask);
+  AsyncDecode(aDecoder);
 }
 
 void
-DecodePool::SyncRunIfPossible(IDecodingTask* aTask)
+DecodePool::SyncDecodeIfPossible(Decoder* aDecoder)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aTask);
-  aTask->Run();
+  Decode(aDecoder);
 }
 
 already_AddRefed<nsIEventTarget>
@@ -353,6 +442,58 @@ DecodePool::GetIOEventTarget()
   MutexAutoLock threadPoolLock(mMutex);
   nsCOMPtr<nsIEventTarget> target = do_QueryInterface(mIOThread);
   return target.forget();
+}
+
+void
+DecodePool::Decode(Decoder* aDecoder)
+{
+  MOZ_ASSERT(aDecoder);
+
+  nsresult rv = aDecoder->Decode();
+
+  if (NS_SUCCEEDED(rv) && !aDecoder->GetDecodeDone()) {
+    if (aDecoder->HasProgress()) {
+      NotifyProgress(aDecoder);
+    }
+    // The decoder will ensure that a new worker gets enqueued to continue
+    // decoding when more data is available.
+  } else {
+    NotifyDecodeComplete(aDecoder);
+  }
+}
+
+void
+DecodePool::NotifyProgress(Decoder* aDecoder)
+{
+  MOZ_ASSERT(aDecoder);
+
+  if (!NS_IsMainThread() ||
+      (aDecoder->GetFlags() & imgIContainer::FLAG_ASYNC_NOTIFY)) {
+    NotifyProgressWorker::Dispatch(aDecoder->GetImage(),
+                                   aDecoder->TakeProgress(),
+                                   aDecoder->TakeInvalidRect(),
+                                   aDecoder->GetDecodeFlags());
+    return;
+  }
+
+  aDecoder->GetImage()->NotifyProgress(aDecoder->TakeProgress(),
+                                       aDecoder->TakeInvalidRect(),
+                                       aDecoder->GetDecodeFlags());
+}
+
+void
+DecodePool::NotifyDecodeComplete(Decoder* aDecoder)
+{
+  MOZ_ASSERT(aDecoder);
+
+  if (!NS_IsMainThread() ||
+      (aDecoder->GetFlags() & imgIContainer::FLAG_ASYNC_NOTIFY)) {
+    NotifyDecodeCompleteWorker::Dispatch(aDecoder);
+    return;
+  }
+
+  aDecoder->Finish();
+  aDecoder->GetImage()->FinalizeDecoder(aDecoder);
 }
 
 } // namespace image

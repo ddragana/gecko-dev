@@ -207,11 +207,6 @@ public:
   nsresult
   AppendItem(JSContext* aCx, bool aFirstOfArray, JS::Handle<JS::Value> aVal);
 
-#ifdef ENABLE_INTL_API
-  nsresult
-  ToLocaleBasedKey(Key& aTarget, const nsCString& aLocale) const;
-#endif
-
   void
   FinishArray()
   {
@@ -235,7 +230,7 @@ public:
   SetFromValueArray(mozIStorageValueArray* aValues, uint32_t aIndex);
 
   static int16_t
-  CompareKeys(const Key& aFirst, const Key& aSecond)
+  CompareKeys(Key& aFirst, Key& aSecond)
   {
     int32_t result = Compare(aFirst.mBuffer, aSecond.mBuffer);
 
@@ -282,16 +277,6 @@ private:
 
   void
   EncodeString(const nsAString& aString, uint8_t aTypeOffset);
-
-  template <typename T>
-  void
-  EncodeString(const T* aStart, const T* aEnd, uint8_t aTypeOffset);
-
-#ifdef ENABLE_INTL_API
-  nsresult
-  EncodeLocaleString(const nsDependentString& aString, uint8_t aTypeOffset,
-                     const nsCString& aLocale);
-#endif
 
   void
   EncodeNumber(double aFloat, uint8_t aType);

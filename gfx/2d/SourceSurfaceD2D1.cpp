@@ -15,10 +15,10 @@ SourceSurfaceD2D1::SourceSurfaceD2D1(ID2D1Image *aImage, ID2D1DeviceContext *aDC
                                      DrawTargetD2D1 *aDT)
   : mImage(aImage)
   , mDC(aDC)
-  , mDevice(Factory::GetD2D1Device())
   , mDrawTarget(aDT)
+  , mDevice(Factory::GetD2D1Device())
 {
-  aImage->QueryInterface((ID2D1Bitmap1**)getter_AddRefs(mRealizedBitmap));
+  aImage->QueryInterface((ID2D1Bitmap1**)byRef(mRealizedBitmap));
 
   mFormat = aFormat;
   mSize = aSize;
@@ -39,10 +39,7 @@ SourceSurfaceD2D1::GetDataSurface()
 {
   HRESULT hr;
 
-  if (!EnsureRealizedBitmap()) {
-    gfxCriticalError() << "Failed to realize a bitmap, device " << hexa(mDevice);
-    return nullptr;
-  }
+  EnsureRealizedBitmap();
 
   RefPtr<ID2D1Bitmap1> softwareBitmap;
   D2D1_BITMAP_PROPERTIES1 props;
@@ -52,7 +49,7 @@ SourceSurfaceD2D1::GetDataSurface()
   props.colorContext = nullptr;
   props.bitmapOptions = D2D1_BITMAP_OPTIONS_CANNOT_DRAW |
                         D2D1_BITMAP_OPTIONS_CPU_READ;
-  hr = mDC->CreateBitmap(D2DIntSize(mSize), nullptr, 0, props, (ID2D1Bitmap1**)getter_AddRefs(softwareBitmap));
+  hr = mDC->CreateBitmap(D2DIntSize(mSize), nullptr, 0, props, (ID2D1Bitmap1**)byRef(softwareBitmap));
 
   if (FAILED(hr)) {
     gfxCriticalError() << "Failed to create software bitmap: " << mSize << " Code: " << hexa(hr);
@@ -72,21 +69,15 @@ SourceSurfaceD2D1::GetDataSurface()
   return MakeAndAddRef<DataSourceSurfaceD2D1>(softwareBitmap, mFormat);
 }
 
-bool
+void
 SourceSurfaceD2D1::EnsureRealizedBitmap()
 {
   if (mRealizedBitmap) {
-    return true;
-  }
-
-  // Why aren't we using mDevice here or anywhere else?
-  ID2D1Device* device = Factory::GetD2D1Device();
-  if (!device) {
-    return false;
+    return;
   }
 
   RefPtr<ID2D1DeviceContext> dc;
-  device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, getter_AddRefs(dc));
+  Factory::GetD2D1Device()->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, byRef(dc));
 
   D2D1_BITMAP_PROPERTIES1 props;
   props.dpiX = 96;
@@ -94,15 +85,13 @@ SourceSurfaceD2D1::EnsureRealizedBitmap()
   props.pixelFormat = D2DPixelFormat(mFormat);
   props.colorContext = nullptr;
   props.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET;
-  dc->CreateBitmap(D2DIntSize(mSize), nullptr, 0, props, (ID2D1Bitmap1**)getter_AddRefs(mRealizedBitmap));
+  dc->CreateBitmap(D2DIntSize(mSize), nullptr, 0, props, (ID2D1Bitmap1**)byRef(mRealizedBitmap));
 
   dc->SetTarget(mRealizedBitmap);
 
   dc->BeginDraw();
   dc->DrawImage(mImage);
   dc->EndDraw();
-
-  return true;
 }
 
 void
@@ -119,7 +108,7 @@ SourceSurfaceD2D1::DrawTargetWillChange()
   props.pixelFormat = D2DPixelFormat(mFormat);
   props.colorContext = nullptr;
   props.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET;
-  HRESULT hr = mDC->CreateBitmap(D2DIntSize(mSize), nullptr, 0, props, (ID2D1Bitmap1**)getter_AddRefs(mRealizedBitmap));
+  HRESULT hr = mDC->CreateBitmap(D2DIntSize(mSize), nullptr, 0, props, (ID2D1Bitmap1**)byRef(mRealizedBitmap));
 
   if (FAILED(hr)) {
     gfxCriticalError() << "Failed to create bitmap to make DrawTarget copy. Size: " << mSize << " Code: " << hexa(hr);
@@ -189,13 +178,12 @@ DataSourceSurfaceD2D1::Map(MapType aMapType, MappedSurface *aMappedSurface)
   if (aMapType == MapType::READ) {
     options = D2D1_MAP_OPTIONS_READ;
   } else {
-    gfxWarning() << "Attempt to map D2D1 DrawTarget for writing.";
-    return false;
+    MOZ_CRASH("No support for Write maps on D2D1 DataSourceSurfaces yet!");
   }
 
   D2D1_MAPPED_RECT map;
   if (FAILED(mBitmap->Map(D2D1_MAP_OPTIONS_READ, &map))) {
-    gfxCriticalError() << "Failed to map bitmap (M).";
+    gfxCriticalError() << "Failed to map bitmap.";
     return false;
   }
   aMappedSurface->mData = map.bits;
@@ -231,7 +219,7 @@ DataSourceSurfaceD2D1::EnsureMapped()
     return;
   }
   if (FAILED(mBitmap->Map(D2D1_MAP_OPTIONS_READ, &mMap))) {
-    gfxCriticalError() << "Failed to map bitmap (EM).";
+    gfxCriticalError() << "Failed to map bitmap.";
     return;
   }
   mMapped = true;

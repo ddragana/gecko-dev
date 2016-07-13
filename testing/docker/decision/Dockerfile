@@ -1,16 +1,8 @@
-FROM          ubuntu:14.04
-MAINTAINER    Greg Arndt <garndt@mozilla.com>
+FROM          quay.io/mozilla/base-build:0.0.1
+MAINTAINER    Jonas Finnemann Jensen <jopsen@gmail.com>
 
-# install non-build specific dependencies in a single layer
-ADD system-setup.sh   /tmp/system-setup.sh
-RUN bash /tmp/system-setup.sh
+ENV PATH /home/worker/bin/:$PATH
 
-ADD bin /home/worker/bin
-RUN chmod +x /home/worker/bin/*
-
-ENV PATH /home/worker/bin:/usr/local/lib/python2.7.10/bin:$PATH
-ENV SHELL /bin/bash
-ENV HOME /home/worker
-
-# Set a default command useful for debugging
-CMD ["/bin/bash", "--login"]
+# Add utilities and configuration
+RUN           npm install -g taskcluster-vcs@2.3.4
+ADD           bin                   /home/worker/bin

@@ -42,7 +42,7 @@ public:
   nsIThread* GMPThread();
 
   // GMPSharedMem
-  void CheckThread() override;
+  virtual void CheckThread() override;
 
   void SetDisplayName(const nsCString& aDisplayName)
   {
@@ -56,7 +56,7 @@ public:
   {
     mPluginId = aPluginId;
   }
-  uint32_t GetPluginId() const
+  const uint32_t GetPluginId()
   {
     return mPluginId;
   }
@@ -64,34 +64,34 @@ public:
 private:
   ~GMPContentParent();
 
-  void ActorDestroy(ActorDestroyReason aWhy) override;
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  PGMPVideoDecoderParent* AllocPGMPVideoDecoderParent() override;
-  bool DeallocPGMPVideoDecoderParent(PGMPVideoDecoderParent* aActor) override;
+  virtual PGMPVideoDecoderParent* AllocPGMPVideoDecoderParent() override;
+  virtual bool DeallocPGMPVideoDecoderParent(PGMPVideoDecoderParent* aActor) override;
 
-  PGMPVideoEncoderParent* AllocPGMPVideoEncoderParent() override;
-  bool DeallocPGMPVideoEncoderParent(PGMPVideoEncoderParent* aActor) override;
+  virtual PGMPVideoEncoderParent* AllocPGMPVideoEncoderParent() override;
+  virtual bool DeallocPGMPVideoEncoderParent(PGMPVideoEncoderParent* aActor) override;
 
-  PGMPDecryptorParent* AllocPGMPDecryptorParent() override;
-  bool DeallocPGMPDecryptorParent(PGMPDecryptorParent* aActor) override;
+  virtual PGMPDecryptorParent* AllocPGMPDecryptorParent() override;
+  virtual bool DeallocPGMPDecryptorParent(PGMPDecryptorParent* aActor) override;
 
-  PGMPAudioDecoderParent* AllocPGMPAudioDecoderParent() override;
-  bool DeallocPGMPAudioDecoderParent(PGMPAudioDecoderParent* aActor) override;
+  virtual PGMPAudioDecoderParent* AllocPGMPAudioDecoderParent() override;
+  virtual bool DeallocPGMPAudioDecoderParent(PGMPAudioDecoderParent* aActor) override;
 
   void CloseIfUnused();
-  // Needed because NewRunnableMethod tried to use the class that the method
+  // Needed because NS_NewRunnableMethod tried to use the class that the method
   // lives on to store the receiver, but PGMPContentParent isn't refcounted.
   void Close()
   {
     PGMPContentParent::Close();
   }
 
-  nsTArray<RefPtr<GMPVideoDecoderParent>> mVideoDecoders;
-  nsTArray<RefPtr<GMPVideoEncoderParent>> mVideoEncoders;
-  nsTArray<RefPtr<GMPDecryptorParent>> mDecryptors;
-  nsTArray<RefPtr<GMPAudioDecoderParent>> mAudioDecoders;
+  nsTArray<nsRefPtr<GMPVideoDecoderParent>> mVideoDecoders;
+  nsTArray<nsRefPtr<GMPVideoEncoderParent>> mVideoEncoders;
+  nsTArray<nsRefPtr<GMPDecryptorParent>> mDecryptors;
+  nsTArray<nsRefPtr<GMPAudioDecoderParent>> mAudioDecoders;
   nsCOMPtr<nsIThread> mGMPThread;
-  RefPtr<GMPParent> mParent;
+  nsRefPtr<GMPParent> mParent;
   nsCString mDisplayName;
   uint32_t mPluginId;
 };

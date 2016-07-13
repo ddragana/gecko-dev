@@ -221,7 +221,7 @@ InstallXBLField(JSContext* cx,
 }
 
 bool
-FieldGetterImpl(JSContext *cx, const JS::CallArgs& args)
+FieldGetterImpl(JSContext *cx, JS::CallArgs args)
 {
   JS::Handle<JS::Value> thisv = args.thisv();
   MOZ_ASSERT(ValueHasISupportsPrivate(thisv));
@@ -257,7 +257,7 @@ FieldGetter(JSContext *cx, unsigned argc, JS::Value *vp)
 }
 
 bool
-FieldSetterImpl(JSContext *cx, const JS::CallArgs& args)
+FieldSetterImpl(JSContext *cx, JS::CallArgs args)
 {
   JS::Handle<JS::Value> thisv = args.thisv();
   MOZ_ASSERT(ValueHasISupportsPrivate(thisv));
@@ -400,8 +400,9 @@ nsXBLProtoImplField::InstallField(JS::Handle<JSObject*> aBoundNode,
 
   // We are going to run script via EvaluateString, so we need a script entry
   // point, but as this is XBL related it does not appear in the HTML spec.
-  AutoEntryScript aes(globalObject, "XBL <field> initialization", true);
-  JSContext* cx = aes.cx();
+  AutoEntryScript entryScript(globalObject, "XBL <field> initialization", true);
+  entryScript.TakeOwnershipOfErrorReporting();
+  JSContext* cx = entryScript.cx();
 
   NS_ASSERTION(!::JS_IsExceptionPending(cx),
                "Shouldn't get here when an exception is pending!");
@@ -439,7 +440,7 @@ nsXBLProtoImplField::InstallField(JS::Handle<JSObject*> aBoundNode,
   if (rv == NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW) {
     // Report the exception now, before we try using the JSContext for
     // the JS_DefineUCProperty call.
-    aes.ReportException();
+    entryScript.ReportException();
   }
 
   // Now, enter the node's compartment, wrap the eval result, and define it on

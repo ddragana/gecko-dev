@@ -6,6 +6,9 @@
 #define mozilla_dom_MediaKeySystemAccessManager_h
 
 #include "mozilla/dom/MediaKeySystemAccess.h"
+#ifdef XP_WIN
+#include "mozilla/dom/GMPVideoDecoderTrialCreator.h"
+#endif
 #include "nsIObserver.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupportsImpl.h"
@@ -21,7 +24,7 @@ class MediaKeySystemAccessManager final : public nsIObserver
 {
 public:
 
-  explicit MediaKeySystemAccessManager(nsPIDOMWindowInner* aWindow);
+  explicit MediaKeySystemAccessManager(nsPIDOMWindow* aWindow);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(MediaKeySystemAccessManager, nsIObserver)
@@ -29,23 +32,23 @@ public:
 
   void Request(DetailedPromise* aPromise,
                const nsAString& aKeySystem,
-               const Sequence<MediaKeySystemConfiguration>& aConfig);
+               const Optional<Sequence<MediaKeySystemOptions>>& aOptions);
 
   void Shutdown();
 
   struct PendingRequest {
     PendingRequest(DetailedPromise* aPromise,
                    const nsAString& aKeySystem,
-                   const Sequence<MediaKeySystemConfiguration>& aConfig,
+                   const Sequence<MediaKeySystemOptions>& aOptions,
                    nsITimer* aTimer);
     PendingRequest(const PendingRequest& aOther);
     ~PendingRequest();
     void CancelTimer();
     void RejectPromise(const nsCString& aReason);
 
-    RefPtr<DetailedPromise> mPromise;
+    nsRefPtr<DetailedPromise> mPromise;
     const nsString mKeySystem;
-    const Sequence<MediaKeySystemConfiguration> mConfigs;
+    const Sequence<MediaKeySystemOptions> mOptions;
     nsCOMPtr<nsITimer> mTimer;
   };
 
@@ -58,7 +61,7 @@ private:
 
   void Request(DetailedPromise* aPromise,
                const nsAString& aKeySystem,
-               const Sequence<MediaKeySystemConfiguration>& aConfig,
+               const Sequence<MediaKeySystemOptions>& aOptions,
                RequestType aType);
 
   ~MediaKeySystemAccessManager();
@@ -67,14 +70,18 @@ private:
 
   bool AwaitInstall(DetailedPromise* aPromise,
                     const nsAString& aKeySystem,
-                    const Sequence<MediaKeySystemConfiguration>& aConfig);
+                    const Sequence<MediaKeySystemOptions>& aOptions);
 
   void RetryRequest(PendingRequest& aRequest);
 
   nsTArray<PendingRequest> mRequests;
 
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   bool mAddedObservers;
+
+#ifdef XP_WIN
+  nsRefPtr<GMPVideoDecoderTrialCreator> mTrialCreator;
+#endif
 };
 
 } // namespace dom

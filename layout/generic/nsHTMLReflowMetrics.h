@@ -219,29 +219,24 @@ public:
   // width in horizontal writing modes, height in vertical ones), and BSize is
   // the size in the block-progression direction.
   nscoord ISize(mozilla::WritingMode aWritingMode) const {
-    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
-                 "mismatched writing mode");
+    CHECK_WRITING_MODE(aWritingMode);
     return mISize;
   }
   nscoord BSize(mozilla::WritingMode aWritingMode) const {
-    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
-                 "mismatched writing mode");
+    CHECK_WRITING_MODE(aWritingMode);
     return mBSize;
   }
   mozilla::LogicalSize Size(mozilla::WritingMode aWritingMode) const {
-    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
-                 "mismatched writing mode");
+    CHECK_WRITING_MODE(aWritingMode);
     return mozilla::LogicalSize(aWritingMode, mISize, mBSize);
   }
 
   nscoord& ISize(mozilla::WritingMode aWritingMode) {
-    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
-                 "mismatched writing mode");
+    CHECK_WRITING_MODE(aWritingMode);
     return mISize;
   }
   nscoord& BSize(mozilla::WritingMode aWritingMode) {
-    NS_ASSERTION(!aWritingMode.IsOrthogonalTo(mWritingMode),
-                 "mismatched writing mode");
+    CHECK_WRITING_MODE(aWritingMode);
     return mBSize;
   }
 

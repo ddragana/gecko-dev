@@ -22,6 +22,8 @@
 
 namespace webrtc {
 
+enum { kSyncInterval = 1000};
+
 int UpdateMeasurements(StreamSynchronization::Measurements* stream,
                        const RtpRtcp& rtp_rtcp, const RtpReceiver& receiver) {
   if (!receiver.Timestamp(&stream->latest_timestamp))
@@ -91,9 +93,9 @@ int ViESyncModule::VoiceChannel() {
   return voe_channel_id_;
 }
 
-int64_t ViESyncModule::TimeUntilNextProcess() {
-  const int64_t kSyncIntervalMs = 1000;
-  return kSyncIntervalMs - (TickTime::Now() - last_sync_time_).Milliseconds();
+int32_t ViESyncModule::TimeUntilNextProcess() {
+  return static_cast<int32_t>(kSyncInterval -
+      (TickTime::Now() - last_sync_time_).Milliseconds());
 }
 
 int32_t ViESyncModule::Process() {

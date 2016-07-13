@@ -50,15 +50,7 @@ function forceScrollAndWait(scrollbox, callback) {
   let utils = SpecialPowers.getDOMWindowUtils(win);
 
   utils.advanceTimeAndRefresh(1000);
-
-  let postApzFlush = function() {
-    SpecialPowers.Services.obs.removeObserver(postApzFlush, "apz-repaints-flushed", false);
-    waitForPaint(win, utils, callback);
-  }
-  SpecialPowers.Services.obs.addObserver(postApzFlush, "apz-repaints-flushed", false);
-  if (!utils.flushApzRepaints()) {
-    postApzFlush();
-  }
+  waitForPaint(win, utils, callback);
 }
 
 function sendTouchpadScrollMotion(scrollbox, direction, ctrl, momentum, callback) {

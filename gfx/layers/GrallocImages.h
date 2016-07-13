@@ -20,12 +20,7 @@
 namespace mozilla {
 namespace layers {
 
-class TextureClient;
-
-already_AddRefed<gfx::DataSourceSurface>
-GetDataSourceSurfaceFrom(android::sp<android::GraphicBuffer>& aGraphicBuffer,
-                         gfx::IntSize aSize,
-                         const layers::PlanarYCbCrData& aYcbcrData);
+class GrallocTextureClientOGL;
 
 /**
  * The YUV format supported by Android HAL
@@ -48,11 +43,16 @@ GetDataSourceSurfaceFrom(android::sp<android::GraphicBuffer>& aGraphicBuffer,
  * mPicX, mPicY and mPicSize. The size of the rendered image is
  * mPicSize, not mYSize or mCbCrSize.
  */
-class GrallocImage : public RecyclingPlanarYCbCrImage
+class GrallocImage : public PlanarYCbCrImage
 {
   typedef PlanarYCbCrData Data;
   static int32_t sColorIdMap[];
 public:
+  struct GrallocData {
+    nsRefPtr<TextureClient> mGraphicBuffer;
+    gfx::IntSize mPicSize;
+  };
+
   GrallocImage();
 
   virtual ~GrallocImage();
@@ -61,14 +61,13 @@ public:
    * This makes a copy of the data buffers, in order to support functioning
    * in all different layer managers.
    */
-  virtual bool SetData(const Data& aData);
+  virtual void SetData(const Data& aData);
 
-  using RecyclingPlanarYCbCrImage::AdoptData;
   /**
    *  Share the SurfaceDescriptor without making the copy, in order
    *  to support functioning in all different layer managers.
    */
-  void AdoptData(TextureClient* aGraphicBuffer, const gfx::IntSize& aSize);
+  virtual void SetData(const GrallocData& aData);
 
   // From [android 4.0.4]/hardware/msm7k/libgralloc-qsd8k/gralloc_priv.h
   enum {
@@ -125,7 +124,7 @@ public:
   }
 
 private:
-  RefPtr<TextureClient> mTextureClient;
+  RefPtr<GrallocTextureClientOGL> mTextureClient;
 };
 
 } // namespace layers

@@ -20,18 +20,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "webrtc/common_audio/ring_buffer.h"
 #include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
 #include "webrtc/modules/audio_processing/aec/aec_core.h"
 #include "webrtc/modules/audio_processing/aec/aec_resampler.h"
 #include "webrtc/modules/audio_processing/aec/echo_cancellation_internal.h"
+#include "webrtc/modules/audio_processing/utility/ring_buffer.h"
 #include "webrtc/typedefs.h"
 
 extern int AECDebug();
 extern uint32_t AECDebugMaxSize();
 extern void AECDebugEnable(uint32_t enable);
 extern void AECDebugFilenameBase(char *buffer, size_t size);
-static void OpenDebugFiles(Aec* aecpc, int *instance_count);
+static void OpenDebugFiles(aecpc_t* aecpc, int *instance_count);
 
 // Measured delays [ms]
 // Device                Chrome  GTP
@@ -107,39 +107,47 @@ int webrtc_aec_instance_count = 0;
 
 // Estimates delay to set the position of the far-end buffer read pointer
 // (controlled by knownDelay)
-static void EstBufDelayNormal(Aec* aecInst);
-static void EstBufDelayExtended(Aec* aecInst);
-static int ProcessNormal(Aec* self,
-                         const float* const* near,
-                         size_t num_bands,
-                         float* const* out,
-                         size_t num_samples,
+static void EstBufDelayNormal(aecpc_t* aecInst);
+static void EstBufDelayExtended(aecpc_t* aecInst);
+static int ProcessNormal(aecpc_t* self,
+                         const float* near,
+                         const float* near_high,
+                         float* out,
+                         float* out_high,
+                         int16_t num_samples,
                          int16_t reported_delay_ms,
                          int32_t skew);
-static void ProcessExtended(Aec* self,
-                            const float* const* near,
-                            size_t num_bands,
-                            float* const* out,
-                            size_t num_samples,
+static void ProcessExtended(aecpc_t* self,
+                            const float* near,
+                            const float* near_high,
+                            float* out,
+                            float* out_high,
+                            int16_t num_samples,
                             int16_t reported_delay_ms,
                             int32_t skew);
 
-void* WebRtcAec_Create() {
-  Aec* aecpc = malloc(sizeof(Aec));
-
-  if (!aecpc) {
-    return NULL;
+int32_t WebRtcAec_Create(void** aecInst) {
+  aecpc_t* aecpc;
+  if (aecInst == NULL) {
+    return -1;
   }
 
-  aecpc->aec = WebRtcAec_CreateAec();
-  if (!aecpc->aec) {
-    WebRtcAec_Free(aecpc);
-    return NULL;
+  aecpc = malloc(sizeof(aecpc_t));
+  *aecInst = aecpc;
+  if (aecpc == NULL) {
+    return -1;
   }
-  aecpc->resampler = WebRtcAec_CreateResampler();
-  if (!aecpc->resampler) {
+
+  if (WebRtcAec_CreateAec(&aecpc->aec) == -1) {
     WebRtcAec_Free(aecpc);
-    return NULL;
+    aecpc = NULL;
+    return -1;
+  }
+
+  if (WebRtcAec_CreateResampler(&aecpc->resampler) == -1) {
+    WebRtcAec_Free(aecpc);
+    aecpc = NULL;
+    return -1;
   }
   // Create far-end pre-buffer. The buffer size has to be large enough for
   // largest possible drift compensation (kResamplerBufferSize) + "almost" an
@@ -148,24 +156,26 @@ void* WebRtcAec_Create() {
       WebRtc_CreateBuffer(PART_LEN2 + kResamplerBufferSize, sizeof(float));
   if (!aecpc->far_pre_buf) {
     WebRtcAec_Free(aecpc);
-    return NULL;
+    aecpc = NULL;
+    return -1;
   }
 
   aecpc->initFlag = 0;
+  aecpc->lastError = 0;
 
 #ifdef WEBRTC_AEC_DEBUG_DUMP
   aecpc->bufFile = aecpc->skewFile = aecpc->delayFile = NULL;
   OpenDebugFiles(aecpc, &webrtc_aec_instance_count);
 #endif
 
-  return aecpc;
+  return 0;
 }
 
-void WebRtcAec_Free(void* aecInst) {
-  Aec* aecpc = aecInst;
+int32_t WebRtcAec_Free(void* aecInst) {
+  aecpc_t* aecpc = aecInst;
 
   if (aecpc == NULL) {
-    return;
+    return -1;
   }
 
   WebRtc_FreeBuffer(aecpc->far_pre_buf);
@@ -182,40 +192,46 @@ void WebRtcAec_Free(void* aecInst) {
   WebRtcAec_FreeAec(aecpc->aec);
   WebRtcAec_FreeResampler(aecpc->resampler);
   free(aecpc);
+
+  return 0;
 }
 
 int32_t WebRtcAec_Init(void* aecInst, int32_t sampFreq, int32_t scSampFreq) {
-  Aec* aecpc = aecInst;
+  aecpc_t* aecpc = aecInst;
   AecConfig aecConfig;
 
-  if (sampFreq != 8000 &&
-      sampFreq != 16000 &&
-      sampFreq != 32000 &&
-      sampFreq != 48000) {
-    return AEC_BAD_PARAMETER_ERROR;
+  if (sampFreq != 8000 && sampFreq != 16000 && sampFreq != 32000) {
+    aecpc->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
   }
   aecpc->sampFreq = sampFreq;
 
   if (scSampFreq < 1 || scSampFreq > 96000) {
-    return AEC_BAD_PARAMETER_ERROR;
+    aecpc->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
   }
   aecpc->scSampFreq = scSampFreq;
 
   // Initialize echo canceller core
   if (WebRtcAec_InitAec(aecpc->aec, aecpc->sampFreq) == -1) {
-    return AEC_UNSPECIFIED_ERROR;
+    aecpc->lastError = AEC_UNSPECIFIED_ERROR;
+    return -1;
   }
 
   if (WebRtcAec_InitResampler(aecpc->resampler, aecpc->scSampFreq) == -1) {
-    return AEC_UNSPECIFIED_ERROR;
+    aecpc->lastError = AEC_UNSPECIFIED_ERROR;
+    return -1;
   }
 
-  WebRtc_InitBuffer(aecpc->far_pre_buf);
+  if (WebRtc_InitBuffer(aecpc->far_pre_buf) == -1) {
+    aecpc->lastError = AEC_UNSPECIFIED_ERROR;
+    return -1;
+  }
   WebRtc_MoveReadPtr(aecpc->far_pre_buf, -PART_LEN);  // Start overlap.
 
   aecpc->initFlag = initCheck;  // indicates that initialization has been done
 
-  if (aecpc->sampFreq == 32000 || aecpc->sampFreq == 48000) {
+  if (aecpc->sampFreq == 32000) {
     aecpc->splitSampFreq = 16000;
   } else {
     aecpc->splitSampFreq = sampFreq;
@@ -231,10 +247,7 @@ int32_t WebRtcAec_Init(void* aecInst, int32_t sampFreq, int32_t scSampFreq) {
   aecpc->checkBuffSize = 1;
   aecpc->firstVal = 0;
 
-  // We skip the startup_phase completely (setting to 0) if DA-AEC is enabled,
-  // but not extended_filter mode.
-  aecpc->startup_phase = WebRtcAec_extended_filter_enabled(aecpc->aec) ||
-      !WebRtcAec_delay_agnostic_enabled(aecpc->aec);
+  aecpc->startup_phase = WebRtcAec_reported_delay_enabled(aecpc->aec);
   aecpc->bufSizeStart = 0;
   aecpc->checkBufSizeCtr = 0;
   aecpc->msInSndCardBuf = 0;
@@ -257,28 +270,9 @@ int32_t WebRtcAec_Init(void* aecInst, int32_t sampFreq, int32_t scSampFreq) {
   aecConfig.delay_logging = kAecFalse;
 
   if (WebRtcAec_set_config(aecpc, aecConfig) == -1) {
-    return AEC_UNSPECIFIED_ERROR;
+    aecpc->lastError = AEC_UNSPECIFIED_ERROR;
+    return -1;
   }
-
-  return 0;
-  }
-
-// Returns any error that is caused when buffering the
-// far-end signal.
-int32_t WebRtcAec_GetBufferFarendError(void* aecInst,
-                                       const float* farend,
-                                       size_t nrOfSamples) {
-  Aec* aecpc = aecInst;
-
-  if (!farend)
-    return AEC_NULL_POINTER_ERROR;
-
-  if (aecpc->initFlag != initCheck)
-    return AEC_UNINITIALIZED_ERROR;
-
-  // number of samples == 160 for SWB input
-  if (nrOfSamples != 80 && nrOfSamples != 160)
-    return AEC_BAD_PARAMETER_ERROR;
 
   return 0;
 }
@@ -286,19 +280,27 @@ int32_t WebRtcAec_GetBufferFarendError(void* aecInst,
 // only buffer L band for farend
 int32_t WebRtcAec_BufferFarend(void* aecInst,
                                const float* farend,
-                               size_t nrOfSamples) {
-  Aec* aecpc = aecInst;
-  size_t newNrOfSamples = nrOfSamples;
+                               int16_t nrOfSamples) {
+  aecpc_t* aecpc = aecInst;
+  int newNrOfSamples = (int)nrOfSamples;
   float new_farend[MAX_RESAMP_LEN];
   const float* farend_ptr = farend;
 
-  // Get any error caused by buffering the farend signal.
-  int32_t error_code = WebRtcAec_GetBufferFarendError(aecInst, farend,
-                                                      nrOfSamples);
+  if (farend == NULL) {
+    aecpc->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
+  }
 
-  if (error_code != 0)
-    return error_code;
+  if (aecpc->initFlag != initCheck) {
+    aecpc->lastError = AEC_UNINITIALIZED_ERROR;
+    return -1;
+  }
 
+  // number of samples == 160 for SWB input
+  if (nrOfSamples != 80 && nrOfSamples != 160) {
+    aecpc->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
+  }
 
   if (aecpc->skewMode == kAecTrue && aecpc->resample == kAecTrue) {
     // Resample and get a new number of samples
@@ -312,17 +314,17 @@ int32_t WebRtcAec_BufferFarend(void* aecInst,
   }
 
   aecpc->farend_started = 1;
-  WebRtcAec_SetSystemDelay(
-      aecpc->aec, WebRtcAec_system_delay(aecpc->aec) + (int)newNrOfSamples);
+  WebRtcAec_SetSystemDelay(aecpc->aec,
+                           WebRtcAec_system_delay(aecpc->aec) + newNrOfSamples);
 
   // Write the time-domain data to |far_pre_buf|.
-  WebRtc_WriteBuffer(aecpc->far_pre_buf, farend_ptr, newNrOfSamples);
+  WebRtc_WriteBuffer(aecpc->far_pre_buf, farend_ptr, (size_t)newNrOfSamples);
 
   // Transform to frequency domain if we have enough data.
   while (WebRtc_available_read(aecpc->far_pre_buf) >= PART_LEN2) {
     // We have enough data to pass to the FFT, hence read PART_LEN2 samples.
     {
-      float* ptmp = NULL;
+      float* ptmp;
       float tmp[PART_LEN2];
       WebRtc_ReadBuffer(aecpc->far_pre_buf, (void**)&ptmp, tmp, PART_LEN2);
       WebRtcAec_BufferFarendPartition(aecpc->aec, ptmp);
@@ -340,53 +342,67 @@ int32_t WebRtcAec_BufferFarend(void* aecInst,
 }
 
 int32_t WebRtcAec_Process(void* aecInst,
-                          const float* const* nearend,
-                          size_t num_bands,
-                          float* const* out,
-                          size_t nrOfSamples,
+                          const float* nearend,
+                          const float* nearendH,
+                          float* out,
+                          float* outH,
+                          int16_t nrOfSamples,
                           int16_t msInSndCardBuf,
                           int32_t skew) {
-  Aec* aecpc = aecInst;
+  aecpc_t* aecpc = aecInst;
   int32_t retVal = 0;
+  if (nearend == NULL) {
+    aecpc->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
+  }
 
   if (out == NULL) {
-    return AEC_NULL_POINTER_ERROR;
+    aecpc->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
   }
 
   if (aecpc->initFlag != initCheck) {
-    return AEC_UNINITIALIZED_ERROR;
+    aecpc->lastError = AEC_UNINITIALIZED_ERROR;
+    return -1;
   }
 
   // number of samples == 160 for SWB input
   if (nrOfSamples != 80 && nrOfSamples != 160) {
-    return AEC_BAD_PARAMETER_ERROR;
+    aecpc->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
+  }
+
+  // Check for valid pointers based on sampling rate
+  if (aecpc->sampFreq == 32000 && nearendH == NULL) {
+    aecpc->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
   }
 
   if (msInSndCardBuf < 0) {
     msInSndCardBuf = 0;
-    retVal = AEC_BAD_PARAMETER_WARNING;
+    aecpc->lastError = AEC_BAD_PARAMETER_WARNING;
+    retVal = -1;
   } else if (msInSndCardBuf > kMaxTrustedDelayMs) {
     // The clamping is now done in ProcessExtended/Normal().
-    retVal = AEC_BAD_PARAMETER_WARNING;
+    aecpc->lastError = AEC_BAD_PARAMETER_WARNING;
+    retVal = -1;
   }
 
   // This returns the value of aec->extended_filter_enabled.
-  if (WebRtcAec_extended_filter_enabled(aecpc->aec)) {
-    ProcessExtended(aecpc,
-                    nearend,
-                    num_bands,
-                    out,
-                    nrOfSamples,
-                    msInSndCardBuf,
-                    skew);
+  if (WebRtcAec_delay_correction_enabled(aecpc->aec)) {
+    ProcessExtended(
+        aecpc, nearend, nearendH, out, outH, nrOfSamples, msInSndCardBuf, skew);
   } else {
-    retVal = ProcessNormal(aecpc,
-                           nearend,
-                           num_bands,
-                           out,
-                           nrOfSamples,
-                           msInSndCardBuf,
-                           skew);
+    if (ProcessNormal(aecpc,
+                      nearend,
+                      nearendH,
+                      out,
+                      outH,
+                      nrOfSamples,
+                      msInSndCardBuf,
+                      skew) != 0) {
+      retVal = -1;
+    }
   }
 
 #ifdef WEBRTC_AEC_DEBUG_DUMP
@@ -406,28 +422,33 @@ int32_t WebRtcAec_Process(void* aecInst,
 }
 
 int WebRtcAec_set_config(void* handle, AecConfig config) {
-  Aec* self = (Aec*)handle;
+  aecpc_t* self = (aecpc_t*)handle;
   if (self->initFlag != initCheck) {
-    return AEC_UNINITIALIZED_ERROR;
+    self->lastError = AEC_UNINITIALIZED_ERROR;
+    return -1;
   }
 
   if (config.skewMode != kAecFalse && config.skewMode != kAecTrue) {
-    return AEC_BAD_PARAMETER_ERROR;
+    self->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
   }
   self->skewMode = config.skewMode;
 
   if (config.nlpMode != kAecNlpConservative &&
       config.nlpMode != kAecNlpModerate &&
       config.nlpMode != kAecNlpAggressive) {
-    return AEC_BAD_PARAMETER_ERROR;
+    self->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
   }
 
   if (config.metricsMode != kAecFalse && config.metricsMode != kAecTrue) {
-    return AEC_BAD_PARAMETER_ERROR;
+    self->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
   }
 
   if (config.delay_logging != kAecFalse && config.delay_logging != kAecTrue) {
-    return AEC_BAD_PARAMETER_ERROR;
+    self->lastError = AEC_BAD_PARAMETER_ERROR;
+    return -1;
   }
 
   WebRtcAec_SetConfigCore(
@@ -436,12 +457,14 @@ int WebRtcAec_set_config(void* handle, AecConfig config) {
 }
 
 int WebRtcAec_get_echo_status(void* handle, int* status) {
-  Aec* self = (Aec*)handle;
+  aecpc_t* self = (aecpc_t*)handle;
   if (status == NULL) {
-    return AEC_NULL_POINTER_ERROR;
+    self->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
   }
   if (self->initFlag != initCheck) {
-    return AEC_UNINITIALIZED_ERROR;
+    self->lastError = AEC_UNINITIALIZED_ERROR;
+    return -1;
   }
 
   *status = WebRtcAec_echo_state(self->aec);
@@ -453,7 +476,7 @@ int WebRtcAec_GetMetrics(void* handle, AecMetrics* metrics) {
   const float kUpWeight = 0.7f;
   float dtmp;
   int stmp;
-  Aec* self = (Aec*)handle;
+  aecpc_t* self = (aecpc_t*)handle;
   Stats erl;
   Stats erle;
   Stats a_nlp;
@@ -462,10 +485,12 @@ int WebRtcAec_GetMetrics(void* handle, AecMetrics* metrics) {
     return -1;
   }
   if (metrics == NULL) {
-    return AEC_NULL_POINTER_ERROR;
+    self->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
   }
   if (self->initFlag != initCheck) {
-    return AEC_UNINITIALIZED_ERROR;
+    self->lastError = AEC_UNINITIALIZED_ERROR;
+    return -1;
   }
 
   WebRtcAec_GetEchoStats(self->aec, &erl, &erle, &a_nlp);
@@ -544,48 +569,53 @@ int WebRtcAec_GetMetrics(void* handle, AecMetrics* metrics) {
   return 0;
 }
 
-int WebRtcAec_GetDelayMetrics(void* handle,
-                              int* median,
-                              int* std,
-                              float* fraction_poor_delays) {
-  Aec* self = handle;
+int WebRtcAec_GetDelayMetrics(void* handle, int* median, int* std) {
+  aecpc_t* self = handle;
   if (median == NULL) {
-    return AEC_NULL_POINTER_ERROR;
+    self->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
   }
   if (std == NULL) {
-    return AEC_NULL_POINTER_ERROR;
+    self->lastError = AEC_NULL_POINTER_ERROR;
+    return -1;
   }
   if (self->initFlag != initCheck) {
-    return AEC_UNINITIALIZED_ERROR;
+    self->lastError = AEC_UNINITIALIZED_ERROR;
+    return -1;
   }
-  if (WebRtcAec_GetDelayMetricsCore(self->aec, median, std,
-                                    fraction_poor_delays) ==
-      -1) {
+  if (WebRtcAec_GetDelayMetricsCore(self->aec, median, std) == -1) {
     // Logging disabled.
-    return AEC_UNSUPPORTED_FUNCTION_ERROR;
+    self->lastError = AEC_UNSUPPORTED_FUNCTION_ERROR;
+    return -1;
   }
 
   return 0;
 }
 
+int32_t WebRtcAec_get_error_code(void* aecInst) {
+  aecpc_t* aecpc = aecInst;
+  return aecpc->lastError;
+}
 
 AecCore* WebRtcAec_aec_core(void* handle) {
   if (!handle) {
     return NULL;
   }
-  return ((Aec*)handle)->aec;
+  return ((aecpc_t*)handle)->aec;
 }
 
-static int ProcessNormal(Aec* aecpc,
-                         const float* const* nearend,
-                         size_t num_bands,
-                         float* const* out,
-                         size_t nrOfSamples,
+static int ProcessNormal(aecpc_t* aecpc,
+                         const float* nearend,
+                         const float* nearendH,
+                         float* out,
+                         float* outH,
+                         int16_t nrOfSamples,
                          int16_t msInSndCardBuf,
                          int32_t skew) {
   int retVal = 0;
-  size_t i;
-  size_t nBlocks10ms;
+  short i;
+  short nBlocks10ms;
+  short nFrames;
   // Limit resampling to doubling/halving of signal
   const float minSkewEst = -0.5f;
   const float maxSkewEst = 1.0f;
@@ -603,7 +633,7 @@ static int ProcessNormal(Aec* aecpc,
       retVal = WebRtcAec_GetSkew(aecpc->resampler, skew, &aecpc->skew);
       if (retVal == -1) {
         aecpc->skew = 0;
-        retVal = AEC_BAD_PARAMETER_WARNING;
+        aecpc->lastError = AEC_BAD_PARAMETER_WARNING;
       }
 
       aecpc->skew /= aecpc->sampFactor * nrOfSamples;
@@ -629,14 +659,16 @@ static int ProcessNormal(Aec* aecpc,
     }
   }
 
-  nBlocks10ms = nrOfSamples / (FRAME_LEN * aecpc->rate_factor);
+  nFrames = nrOfSamples / FRAME_LEN;
+  nBlocks10ms = nFrames / aecpc->rate_factor;
 
   if (aecpc->startup_phase) {
-    for (i = 0; i < num_bands; ++i) {
-      // Only needed if they don't already point to the same place.
-      if (nearend[i] != out[i]) {
-        memcpy(out[i], nearend[i], sizeof(nearend[i][0]) * nrOfSamples);
-      }
+    // Only needed if they don't already point to the same place.
+    if (nearend != out) {
+      memcpy(out, nearend, sizeof(*out) * nrOfSamples);
+    }
+    if (nearendH != outH) {
+      memcpy(outH, nearendH, sizeof(*outH) * nrOfSamples);
     }
 
     // The AEC is in the start up mode
@@ -710,31 +742,38 @@ static int ProcessNormal(Aec* aecpc,
     }
   } else {
     // AEC is enabled.
+    if (WebRtcAec_reported_delay_enabled(aecpc->aec)) {
       EstBufDelayNormal(aecpc);
+    }
 
-    // Call the AEC.
-    // TODO(bjornv): Re-structure such that we don't have to pass
-    // |aecpc->knownDelay| as input. Change name to something like
-    // |system_buffer_diff|.
-    WebRtcAec_ProcessFrames(aecpc->aec,
-                            nearend,
-                            num_bands,
-                            nrOfSamples,
-                            aecpc->knownDelay,
-                            out);
+    // Note that 1 frame is supported for NB and 2 frames for WB.
+    for (i = 0; i < nFrames; i++) {
+      // Call the AEC.
+      WebRtcAec_ProcessFrame(aecpc->aec,
+                             &nearend[FRAME_LEN * i],
+                             &nearendH[FRAME_LEN * i],
+                             aecpc->knownDelay,
+                             &out[FRAME_LEN * i],
+                             &outH[FRAME_LEN * i]);
+      // TODO(bjornv): Re-structure such that we don't have to pass
+      // |aecpc->knownDelay| as input. Change name to something like
+      // |system_buffer_diff|.
+    }
   }
 
   return retVal;
 }
 
-static void ProcessExtended(Aec* self,
-                            const float* const* near,
-                            size_t num_bands,
-                            float* const* out,
-                            size_t num_samples,
+static void ProcessExtended(aecpc_t* self,
+                            const float* near,
+                            const float* near_high,
+                            float* out,
+                            float* out_high,
+                            int16_t num_samples,
                             int16_t reported_delay_ms,
                             int32_t skew) {
-  size_t i;
+  int i;
+  const int num_frames = num_samples / FRAME_LEN;
   const int delay_diff_offset = kDelayDiffOffsetSamples;
 #if defined(WEBRTC_UNTRUSTED_DELAY)
   reported_delay_ms = kFixedDelayMs;
@@ -757,11 +796,12 @@ static void ProcessExtended(Aec* self,
   self->msInSndCardBuf = reported_delay_ms;
 
   if (!self->farend_started) {
-    for (i = 0; i < num_bands; ++i) {
-      // Only needed if they don't already point to the same place.
-      if (near[i] != out[i]) {
-        memcpy(out[i], near[i], sizeof(near[i][0]) * num_samples);
-      }
+    // Only needed if they don't already point to the same place.
+    if (near != out) {
+      memcpy(out, near, sizeof(*out) * num_samples);
+    }
+    if (near_high != out_high) {
+      memcpy(out_high, near_high, sizeof(*out_high) * num_samples);
     }
     return;
   }
@@ -772,21 +812,16 @@ static void ProcessExtended(Aec* self,
     // measurement.
     int startup_size_ms =
         reported_delay_ms < kFixedDelayMs ? kFixedDelayMs : reported_delay_ms;
-#if defined(WEBRTC_ANDROID) || defined(WEBRTC_GONK)
-    int target_delay = startup_size_ms * self->rate_factor * 8;
-#else
-    // To avoid putting the AEC in a non-causal state we're being slightly
-    // conservative and scale by 2. On Android we use a fixed delay and
-    // therefore there is no need to scale the target_delay.
-    int target_delay = startup_size_ms * self->rate_factor * 8 / 2;
-#endif
-    int overhead_elements =
-        (WebRtcAec_system_delay(self->aec) - target_delay) / PART_LEN;
+    int overhead_elements = (WebRtcAec_system_delay(self->aec) -
+                             startup_size_ms / 2 * self->rate_factor * 8) /
+                            PART_LEN;
     WebRtcAec_MoveFarReadPtr(self->aec, overhead_elements);
     self->startup_phase = 0;
   }
 
-  EstBufDelayExtended(self);
+  if (WebRtcAec_reported_delay_enabled(self->aec)) {
+    EstBufDelayExtended(self);
+  }
 
   {
     // |delay_diff_offset| gives us the option to manually rewind the delay on
@@ -795,16 +830,18 @@ static void ProcessExtended(Aec* self,
     const int adjusted_known_delay =
         WEBRTC_SPL_MAX(0, self->knownDelay + delay_diff_offset);
 
-    WebRtcAec_ProcessFrames(self->aec,
-                            near,
-                            num_bands,
-                            num_samples,
-                            adjusted_known_delay,
-                            out);
+    for (i = 0; i < num_frames; ++i) {
+      WebRtcAec_ProcessFrame(self->aec,
+                             &near[FRAME_LEN * i],
+                             &near_high[FRAME_LEN * i],
+                             adjusted_known_delay,
+                             &out[FRAME_LEN * i],
+                             &out_high[FRAME_LEN * i]);
+    }
   }
 }
 
-static void EstBufDelayNormal(Aec* aecpc) {
+static void EstBufDelayNormal(aecpc_t* aecpc) {
   int nSampSndCard = aecpc->msInSndCardBuf * sampMsNb * aecpc->rate_factor;
   int current_delay = nSampSndCard - WebRtcAec_system_delay(aecpc->aec);
   int delay_difference = 0;
@@ -857,7 +894,7 @@ static void EstBufDelayNormal(Aec* aecpc) {
   }
 }
 
-static void EstBufDelayExtended(Aec* self) {
+static void EstBufDelayExtended(aecpc_t* self) {
   int reported_delay = self->msInSndCardBuf * sampMsNb * self->rate_factor;
   int current_delay = reported_delay - WebRtcAec_system_delay(self->aec);
   int delay_difference = 0;
@@ -913,7 +950,7 @@ static void EstBufDelayExtended(Aec* self) {
 
 #ifdef WEBRTC_AEC_DEBUG_DUMP
 static void
-OpenDebugFiles(Aec* aecpc,
+OpenDebugFiles(aecpc_t* aecpc,
                int *instance_count)
 {
   int error = 0;
@@ -929,7 +966,7 @@ OpenDebugFiles(Aec* aecpc,
       return; // avoid a lot of snprintf's and checks lower
     }
     if (filename > path) {
-#ifdef WEBRTC_WIN
+#ifdef XP_WIN
       if (*(filename-1) != '\\') {
         *filename++ = '\\';
       }

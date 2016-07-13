@@ -41,7 +41,7 @@ GenerateIdFunctionCall::evaluate(txIEvalContext* aContext,
         static_cast<txExecutionState*>(aContext->getPrivateContext());
     if (!es) {
         NS_ERROR(
-            "called xslt extension function \"generate-id\" with wrong context");
+            "called xslt extension function \"current\" with wrong context");
         return NS_ERROR_UNEXPECTED;
     }
 
@@ -60,7 +60,7 @@ GenerateIdFunctionCall::evaluate(txIEvalContext* aContext,
         return NS_OK;
     }
 
-    RefPtr<txNodeSet> nodes;
+    nsRefPtr<txNodeSet> nodes;
     rv = evaluateToNodeSet(mParams[0], aContext,
                            getter_AddRefs(nodes));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -92,10 +92,6 @@ GenerateIdFunctionCall::getReturnType()
 bool
 GenerateIdFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 {
-    if (aContext & PRIVATE_CONTEXT) {
-        return true;
-    }
-
     if (mParams.IsEmpty()) {
         return !!(aContext & NODE_CONTEXT);
     }

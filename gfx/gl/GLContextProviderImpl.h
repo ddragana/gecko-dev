@@ -35,12 +35,11 @@ public:
      * a GL layer manager.
      *
      * @param aWidget Widget whose surface to create a context for
-     * @param aForceAccelerated true if only accelerated contexts are allowed
      *
      * @return Context to use for the window
      */
     static already_AddRefed<GLContext>
-    CreateForWindow(nsIWidget* widget, bool aForceAccelerated);
+    CreateForWindow(nsIWidget* widget);
 
     /**
      * Create a context for offscreen rendering.  The target of this
@@ -55,24 +54,19 @@ public:
      * resource sharing can be avoided on the target platform, it will
      * be, in order to isolate the offscreen context.
      *
-     * @param size    The initial size of this offscreen context.
-     * @param minCaps The required SurfaceCaps for this offscreen context. The resulting
-     *                context *may* have more/better caps than requested, but it cannot
-     *                have fewer/worse caps than requested.
-     * @param flags   The set of CreateContextFlags to be used for this
-     *                offscreen context.
+     * @param aSize The initial size of this offscreen context.
+     * @param aFormat The ContextFormat for this offscreen context.
      *
      * @return Context to use for offscreen rendering
      */
     static already_AddRefed<GLContext>
     CreateOffscreen(const mozilla::gfx::IntSize& size,
-                    const SurfaceCaps& minCaps,
-                    CreateContextFlags flags,
-                    nsACString* const out_failureId);
+                    const SurfaceCaps& caps,
+                    bool requireCompatProfile);
 
     // Just create a context. We'll add offscreen stuff ourselves.
     static already_AddRefed<GLContext>
-    CreateHeadless(CreateContextFlags flags, nsACString* const out_failureId);
+    CreateHeadless(bool requireCompatProfile);
 
     /**
      * Create wrapping Gecko GLContext for external gl context.

@@ -4,7 +4,7 @@
 
 Cu.import("resource://testing-common/ContentTaskUtils.jsm", this);
 
-var content = "line 1\nline 2\nline 3";
+let content = "line 1\nline 2\nline 3";
 
 add_task(function*() {
   // First test with text with the text/html mimetype.
@@ -17,7 +17,7 @@ add_task(function*() {
   yield BrowserTestUtils.closeWindow(win);
 });
 
-var checkViewSource = Task.async(function* (aWindow) {
+let checkViewSource = Task.async(function* (aWindow) {
   is(aWindow.gBrowser.contentDocument.body.textContent, content, "Correct content loaded");
   let selection = aWindow.gBrowser.contentWindow.getSelection();
   let statusPanel = aWindow.document.getElementById("statusbar-line-col");
@@ -25,10 +25,12 @@ var checkViewSource = Task.async(function* (aWindow) {
 
   for (let i = 1; i <= 3; i++) {
     aWindow.viewSourceChrome.goToLine(i);
-    yield ContentTask.spawn(aWindow.gBrowser, i, function*(i) {
+    let result = yield ContentTask.spawn(aWindow.gBrowser, i, function*(i) {
       let selection = content.getSelection();
-      Assert.equal(selection.toString(), "line " + i, "Correct text selected");
+      return (selection.toString() == "line " + i);
     });
+
+    ok(result, "Correct text selected");
 
     yield ContentTaskUtils.waitForCondition(() => {
       return (statusPanel.getAttribute("label") == "Line " + i + ", Col 1");

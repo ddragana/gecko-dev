@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,30 +15,25 @@
 
 @class mozNotificationCenterDelegate;
 
-#if !defined(MAC_OS_X_VERSION_10_8) || (MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8)
-typedef NSInteger NSUserNotificationActivationType;
-#endif
-
 namespace mozilla {
 
 class OSXNotificationInfo;
 
 class OSXNotificationCenter : public nsIAlertsService,
-                              public nsIAlertsIconData,
-                              public nsIAlertNotificationImageListener
+                              public imgINotificationObserver,
+                              public nsITimerCallback
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIALERTSSERVICE
-  NS_DECL_NSIALERTSICONDATA
-  NS_DECL_NSIALERTNOTIFICATIONIMAGELISTENER
+  NS_DECL_IMGINOTIFICATIONOBSERVER
+  NS_DECL_NSITIMERCALLBACK
 
   OSXNotificationCenter();
 
   nsresult Init();
   void CloseAlertCocoaString(NSString *aAlertName);
-  void OnActivate(NSString *aAlertName, NSUserNotificationActivationType aActivationType,
-                  unsigned long long aAdditionalActionIndex);
+  void OnClick(NSString *aAlertName);
   void ShowPendingNotification(OSXNotificationInfo *osxni);
 
 protected:
@@ -46,8 +41,8 @@ protected:
 
 private:
   mozNotificationCenterDelegate *mDelegate;
-  nsTArray<RefPtr<OSXNotificationInfo> > mActiveAlerts;
-  nsTArray<RefPtr<OSXNotificationInfo> > mPendingAlerts;
+  nsTArray<nsRefPtr<OSXNotificationInfo> > mActiveAlerts;
+  nsTArray<nsRefPtr<OSXNotificationInfo> > mPendingAlerts;
 };
 
 } // namespace mozilla

@@ -45,21 +45,17 @@ SandboxLogJSStack(void)
     return;
   }
   nsCOMPtr<nsIStackFrame> frame = dom::GetCurrentJSStack();
-  // If we got a stack, we must have a current JSContext.  This is icky.  :(
-  // Would be better if GetCurrentJSStack() handed out the JSContext it ended up
-  // using or something.
-  JSContext* cx = frame ? nsContentUtils::GetCurrentJSContext() : nullptr;
   for (int i = 0; frame != nullptr; ++i) {
     nsAutoString fileName, funName;
     int32_t lineNumber;
 
     // Don't stop unwinding if an attribute can't be read.
     fileName.SetIsVoid(true);
-    Unused << frame->GetFilename(cx, fileName);
+    unused << frame->GetFilename(fileName);
     lineNumber = 0;
-    Unused << frame->GetLineNumber(cx, &lineNumber);
+    unused << frame->GetLineNumber(&lineNumber);
     funName.SetIsVoid(true);
-    Unused << frame->GetName(cx, funName);
+    unused << frame->GetName(funName);
 
     if (!funName.IsVoid() || !fileName.IsVoid()) {
       SANDBOX_LOG_ERROR("JS frame %d: %s %s line %d", i,
@@ -71,7 +67,7 @@ SandboxLogJSStack(void)
     }
 
     nsCOMPtr<nsIStackFrame> nextFrame;
-    nsresult rv = frame->GetCaller(cx, getter_AddRefs(nextFrame));
+    nsresult rv = frame->GetCaller(getter_AddRefs(nextFrame));
     NS_ENSURE_SUCCESS_VOID(rv);
     frame = nextFrame;
   }

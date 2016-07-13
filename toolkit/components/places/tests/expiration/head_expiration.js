@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
-var Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cc = Components.classes;
+const Cr = Components.results;
+const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -34,9 +34,7 @@ function shutdownExpiration()
  * history notification.
  */
 function force_expiration_start() {
-  Cc["@mozilla.org/places/expiration;1"]
-    .getService(Ci.nsIObserver)
-    .observe(null, "testing-mode", null);
+  Cc["@mozilla.org/places/expiration;1"].getService(Ci.nsISupports);
 }
 
 
@@ -107,18 +105,16 @@ function clearHistoryEnabled() {
 /**
  * Returns a PRTime in the past usable to add expirable visits.
  *
- * param [optional] daysAgo
- *       Expiration ignores any visit added in the last 7 days, so by default
- *       this will be set to 7.
- * @note to be safe against DST issues we go back one day more.
+ * @note Expiration ignores any visit added in the last 7 days, but it's
+ *       better be safe against DST issues, by going back one day more.
  */
-function getExpirablePRTime(daysAgo = 7) {
+function getExpirablePRTime() {
   let dateObj = new Date();
   // Normalize to midnight
   dateObj.setHours(0);
   dateObj.setMinutes(0);
   dateObj.setSeconds(0);
   dateObj.setMilliseconds(0);
-  dateObj = new Date(dateObj.getTime() - (daysAgo + 1) * 86400000);
+  dateObj = new Date(dateObj.getTime() - 8 * 86400000);
   return dateObj.getTime() * 1000;
 }

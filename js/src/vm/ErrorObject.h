@@ -41,10 +41,6 @@ class ErrorObject : public NativeObject
     static bool checkAndUnwrapThis(JSContext* cx, CallArgs& args, const char* fnName,
                                    MutableHandle<ErrorObject*> error);
 
-    static const ClassSpec errorClassSpec_;
-    static const ClassSpec subErrorClassSpec_;
-    static const ClassSpec debuggeeWouldRunClassSpec_;
-
   protected:
     static const uint32_t EXNTYPE_SLOT          = 0;
     static const uint32_t STACK_SLOT            = EXNTYPE_SLOT + 1;
@@ -60,7 +56,8 @@ class ErrorObject : public NativeObject
     static const Class classes[JSEXN_LIMIT];
 
     static const Class * classForType(JSExnType type) {
-        MOZ_ASSERT(type < JSEXN_WARN);
+        MOZ_ASSERT(type != JSEXN_NONE);
+        MOZ_ASSERT(type < JSEXN_LIMIT);
         return &classes[type];
     }
 
@@ -75,7 +72,7 @@ class ErrorObject : public NativeObject
     static ErrorObject*
     create(JSContext* cx, JSExnType type, HandleObject stack, HandleString fileName,
            uint32_t lineNumber, uint32_t columnNumber, ScopedJSFreePtr<JSErrorReport>* report,
-           HandleString message, HandleObject proto = nullptr);
+           HandleString message);
 
     /*
      * Assign the initial error shape to the empty object.  (This shape does
@@ -111,7 +108,7 @@ class ErrorObject : public NativeObject
     // Getter and setter for the Error.prototype.stack accessor.
     static bool getStack(JSContext* cx, unsigned argc, Value* vp);
     static bool setStack(JSContext* cx, unsigned argc, Value* vp);
-    static bool setStack_impl(JSContext* cx, const CallArgs& args);
+    static bool setStack_impl(JSContext* cx, CallArgs args);
 };
 
 } // namespace js

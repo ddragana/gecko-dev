@@ -9,8 +9,6 @@ include protocol PBackgroundIDBFactoryRequest;
 include PBackgroundIDBSharedTypes;
 include PBackgroundSharedTypes;
 
-include "mozilla/dom/quota/SerializationHelpers.h";
-
 using struct mozilla::void_t
   from "ipc/IPCMessageUtils.h";
 
@@ -41,7 +39,7 @@ union FactoryRequestParams
   DeleteDatabaseRequestParams;
 };
 
-sync protocol PBackgroundIDBFactory
+protocol PBackgroundIDBFactory
 {
   manager PBackground;
 
@@ -49,17 +47,17 @@ sync protocol PBackgroundIDBFactory
   manages PBackgroundIDBFactoryRequest;
 
 parent:
-  async DeleteMe();
+  DeleteMe();
 
-  async PBackgroundIDBFactoryRequest(FactoryRequestParams params);
+  PBackgroundIDBFactoryRequest(FactoryRequestParams params);
 
-  async IncrementLoggingRequestSerialNumber();
+  IncrementLoggingRequestSerialNumber();
 
 child:
-  async __delete__();
+  __delete__();
 
-  async PBackgroundIDBDatabase(DatabaseSpec spec,
-                               PBackgroundIDBFactoryRequest request);
+  PBackgroundIDBDatabase(DatabaseSpec spec,
+                         PBackgroundIDBFactoryRequest request);
 };
 
 } // namespace indexedDB

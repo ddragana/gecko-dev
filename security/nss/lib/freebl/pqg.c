@@ -43,8 +43,7 @@ typedef enum {
  * implement Lucas and adjust these two functions.  See FIPS 186-3 Appendix C
  * and F for more information.
  */
-static int
-prime_testcount_p(int L, int N)
+int prime_testcount_p(int L, int N)
 {
     switch (L) {
     case 1024:
@@ -62,8 +61,7 @@ prime_testcount_p(int L, int N)
 /* The q numbers are different if you run M-R followd by Lucas. I created
  * a separate function so if someone wanted to add the Lucas check, they
  * could do so fairly easily */
-static int
-prime_testcount_q(int L, int N)
+int prime_testcount_q(int L, int N)
 {
     return prime_testcount_p(L,N);
 }
@@ -488,7 +486,7 @@ cleanup:
 **                steps 16 through 34 of FIPS 186-2 C.6
 */
 #define MAX_ST_SEED_BITS (HASH_LENGTH_MAX*PR_BITS_PER_BYTE)
-static SECStatus
+SECStatus
 makePrimefromPrimesShaweTaylor(
       HASH_HashType hashtype,	/* selected Hashing algorithm */
       unsigned int  length,     /* input. Length of prime in bits. */
@@ -496,7 +494,7 @@ makePrimefromPrimesShaweTaylor(
       mp_int    *   q,          /* sub prime, can be 1 */
       mp_int    *   prime,      /* output.  */
       SECItem   *   prime_seed, /* input/output.  */
-      unsigned int *prime_gen_counter) /* input/output.  */
+      int       *   prime_gen_counter) /* input/output.  */
 {
     mp_int c;
     mp_int c0_2;
@@ -703,7 +701,6 @@ cleanup:
     mp_clear(&a);
     mp_clear(&z);
     mp_clear(&two_length_minus_1);
-    PORT_Memset(x, 0, sizeof(x));
     if (err) {
 	MP_TO_SEC_ERROR(err);
 	rv = SECFailure;
@@ -723,14 +720,14 @@ cleanup:
 **
 **  This generates a provable prime from a seed
 */
-static SECStatus
+SECStatus
 makePrimefromSeedShaweTaylor(
       HASH_HashType hashtype,	/* selected Hashing algorithm */
       unsigned int  length,     /* input.  Length of prime in bits. */
 const SECItem   *   input_seed,       /* input.  */
       mp_int    *   prime,      /* output.  */
       SECItem   *   prime_seed, /* output.  */
-      unsigned int *prime_gen_counter) /* output.  */
+      int       *   prime_gen_counter) /* output.  */
 {
     mp_int c;
     mp_int c0;
@@ -859,7 +856,6 @@ cleanup:
     mp_clear(&c);
     mp_clear(&c0);
     mp_clear(&one);
-    PORT_Memset(x, 0, sizeof(x));
     if (err) {
 	MP_TO_SEC_ERROR(err);
 	rv = SECFailure;
@@ -886,7 +882,7 @@ findQfromSeed(
 const SECItem   *   seed,       /* input.  */
       mp_int    *   Q,          /* input. */
       mp_int    *   Q_,         /* output. */
-      unsigned int *qseed_len,   /* output */
+      int       *  qseed_len,   /* output */
       HASH_HashType *hashtypePtr,  /* output. Hash uses */
       pqgGenType    *typePtr)      /* output. Generation Type used */
 {
@@ -941,7 +937,7 @@ const SECItem   *   seed,       /* input.  */
     firstseed.len = seed->len/3;
     for (hashtype = getFirstHash(L,N); hashtype != HASH_AlgTOTAL; 
 					hashtype=getNextHash(hashtype)) {
-	unsigned int count;
+	int count;
 
 	rv = makePrimefromSeedShaweTaylor(hashtype, N, &firstseed, Q_, 
 		&qseed, &count);
@@ -1147,7 +1143,7 @@ makeGfromIndex(HASH_HashType hashtype,
     unsigned int len;
     mp_err err = MP_OKAY;
     SECStatus rv = SECSuccess;
-    const SECHashObject *hashobj = NULL;
+    const SECHashObject *hashobj;
     void *hashcx = NULL;
 
     MP_DIGITS(&e) = 0;
@@ -1233,6 +1229,7 @@ pqg_ParamGen(unsigned int L, unsigned int N, pqgGenType type,
 	 unsigned int seedBytes, PQGParams **pParams, PQGVerify **pVfy)
 {
     unsigned int  n;        /* Per FIPS 186, app 2.2. 186-3 app A.1.1.2 */
+    unsigned int  b;        /* Per FIPS 186, app 2.2. 186-3 app A.1.1.2 */
     unsigned int  seedlen;  /* Per FIPS 186-3 app A.1.1.2  (was 'g' 186-1)*/
     unsigned int  counter;  /* Per FIPS 186, app 2.2. 186-3 app A.1.1.2 */
     unsigned int  offset;   /* Per FIPS 186, app 2.2. 186-3 app A.1.1.2 */
@@ -1259,42 +1256,6 @@ pqg_ParamGen(unsigned int L, unsigned int N, pqgGenType type,
     if (seedBytes < N/PR_BITS_PER_BYTE || !pParams || !pVfy) {
 	PORT_SetError(SEC_ERROR_INVALID_ARGS);
 	return SECFailure;
-    }
-
-    /* Initialize bignums */
-    MP_DIGITS(&P) = 0;
-    MP_DIGITS(&Q) = 0;
-    MP_DIGITS(&G) = 0;
-    MP_DIGITS(&H) = 0;
-    MP_DIGITS(&l) = 0;
-    MP_DIGITS(&p0) = 0;
-    CHECK_MPI_OK( mp_init(&P) );
-    CHECK_MPI_OK( mp_init(&Q) );
-    CHECK_MPI_OK( mp_init(&G) );
-    CHECK_MPI_OK( mp_init(&H) );
-    CHECK_MPI_OK( mp_init(&l) );
-    CHECK_MPI_OK( mp_init(&p0) );
-
-    /* parameters have been passed in, only generate G */
-    if (*pParams != NULL) {
-	/* we only support G index generation if generating separate from PQ */
-	if ((*pVfy == NULL) || (type == FIPS186_1_TYPE) || 
-	    ((*pVfy)->h.len != 1) || ((*pVfy)->h.data == NULL) || 
-	    ((*pVfy)->seed.data == NULL) || ((*pVfy)->seed.len == 0)) {
-	    PORT_SetError(SEC_ERROR_INVALID_ARGS);
-	    return SECFailure;
-	}
-	params = *pParams;
-	verify = *pVfy;
-
-	/* fill in P Q,  */
-	SECITEM_TO_MPINT((*pParams)->prime,    &P);
-	SECITEM_TO_MPINT((*pParams)->subPrime, &Q);
-    	hashtype = getFirstHash(L,N);
-	CHECK_SEC_OK(makeGfromIndex(hashtype, &P, &Q, &(*pVfy)->seed, 
-						(*pVfy)->h.data[0], &G) );
-	MPINT_TO_SECITEM(&G, &(*pParams)->base,     (*pParams)->arena);
-	goto cleanup;
     }
     /* Initialize an arena for the params. */
     arena = PORT_NewArena(NSS_FREEBL_DEFAULT_CHUNKSIZE);
@@ -1326,6 +1287,19 @@ pqg_ParamGen(unsigned int L, unsigned int N, pqgGenType type,
     verify->arena = arena;
     seed = &verify->seed;
     arena = NULL;
+    /* Initialize bignums */
+    MP_DIGITS(&P) = 0;
+    MP_DIGITS(&Q) = 0;
+    MP_DIGITS(&G) = 0;
+    MP_DIGITS(&H) = 0;
+    MP_DIGITS(&l) = 0;
+    MP_DIGITS(&p0) = 0;
+    CHECK_MPI_OK( mp_init(&P) );
+    CHECK_MPI_OK( mp_init(&Q) );
+    CHECK_MPI_OK( mp_init(&G) );
+    CHECK_MPI_OK( mp_init(&H) );
+    CHECK_MPI_OK( mp_init(&l) );
+    CHECK_MPI_OK( mp_init(&p0) );
 
     /* Select Hash and Compute lengths. */
     /* getFirstHash gives us the smallest acceptable hash for this key
@@ -1335,7 +1309,8 @@ pqg_ParamGen(unsigned int L, unsigned int N, pqgGenType type,
 
     /* Step 3: n = Ceil(L/outlen)-1; (same as n = Floor((L-1)/outlen)) */
     n = (L - 1) / outlen; 
-    /* Step 4: (skipped since we don't use b): b = L -1 - (n*outlen); */
+    /* Step 4: b = L -1 - (n*outlen); (same as n = (L-1) mod outlen) */
+    b = (L - 1) % outlen;
     seedlen = seedBytes * PR_BITS_PER_BYTE;    /* bits in seed */
 step_5:
     /* ******************************************************************
@@ -1373,7 +1348,7 @@ step_5:
 	CHECK_SEC_OK( makeQ2fromSeed(hashtype, N, seed, &Q) );
     } else {
 	/* FIPS186_3_ST_TYPE */
-	unsigned int qgen_counter, pgen_counter;
+	int qgen_counter, pgen_counter;
 
         /* Step 1 (L,N) already checked for acceptability */
 
@@ -1540,12 +1515,8 @@ cleanup:
 	rv = SECFailure;
     }
     if (rv) {
-	if (params) {
-	    PORT_FreeArena(params->arena, PR_TRUE);
-	}
-	if (verify) {
-	    PORT_FreeArena(verify->arena, PR_TRUE);
-	}
+	PORT_FreeArena(params->arena, PR_TRUE);
+	PORT_FreeArena(verify->arena, PR_TRUE);
     }
     if (hit.data) {
         SECITEM_FreeItem(&hit, PR_FALSE);
@@ -1618,7 +1589,7 @@ PQG_VerifyParams(const PQGParams *params,
     mp_err err = MP_OKAY;
     int j;
     unsigned int counter_max = 0; /* handle legacy L < 1024 */
-    unsigned int qseed_len;
+    int qseed_len;
     SECItem pseed_ = {0, 0, 0};
     HASH_HashType hashtype;
     pqgGenType type;
@@ -1711,8 +1682,8 @@ PQG_VerifyParams(const PQGParams *params,
     if (type == FIPS186_3_ST_TYPE) {
 	SECItem qseed = { 0, 0, 0 };
 	SECItem pseed = { 0, 0, 0 };
-	unsigned int first_seed_len;
-	unsigned int pgen_counter = 0;
+	int first_seed_len;
+	int pgen_counter = 0;
 
 	/* extract pseed and qseed from domain_parameter_seed, which is
 	 * first_seed || pseed || qseed. qseed is first_seed + small_integer

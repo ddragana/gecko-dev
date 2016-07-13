@@ -4,12 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsScreenManagerGtk.h"
-
-#include "mozilla/RefPtr.h"
 #include "nsScreenGtk.h"
 #include "nsIComponentManager.h"
 #include "nsRect.h"
-#include "nsGtkUtils.h"
+#include "nsAutoPtr.h"
 
 #define SCREEN_MANAGER_LIBRARY_LOAD_FAILED ((PRLibrary*)1)
 
@@ -22,12 +20,6 @@ typedef XineramaScreenInfo* (*_XnrmQueryScreens_fn)(Display *dpy, int *number);
 
 #include <gtk/gtk.h>
 
-void
-monitors_changed(GdkScreen* aScreen, gpointer aClosure)
-{
-  nsScreenManagerGtk *manager = static_cast<nsScreenManagerGtk*>(aClosure);
-  manager->Init();
-}
 
 static GdkFilterReturn
 root_window_event_filter(GdkXEvent *aGdkXEvent, GdkEvent *aGdkEvent,
@@ -39,6 +31,9 @@ root_window_event_filter(GdkXEvent *aGdkXEvent, GdkEvent *aGdkEvent,
 
   // See comments in nsScreenGtk::Init below.
   switch (xevent->type) {
+    case ConfigureNotify:
+      manager->Init();
+      break;
     case PropertyNotify:
       {
         XPropertyEvent *propertyEvent = &xevent->xproperty;
@@ -68,10 +63,6 @@ nsScreenManagerGtk :: nsScreenManagerGtk ( )
 
 nsScreenManagerGtk :: ~nsScreenManagerGtk()
 {
-  g_signal_handlers_disconnect_by_func(gdk_screen_get_default(),
-                                       FuncToGpointer(monitors_changed),
-                                       this);
-
   if (mRootWindow) {
     gdk_window_remove_filter(mRootWindow, root_window_event_filter, this);
     g_object_unref(mRootWindow);
@@ -100,22 +91,16 @@ nsScreenManagerGtk :: EnsureInit()
     return NS_OK;
 
   mRootWindow = gdk_get_default_root_window();
-  if (!mRootWindow) {
-    // Sometimes we don't initial X (e.g., xpcshell)
-    return NS_OK;
-  }
-
   g_object_ref(mRootWindow);
 
+  // GDK_STRUCTURE_MASK ==> StructureNotifyMask, for ConfigureNotify
   // GDK_PROPERTY_CHANGE_MASK ==> PropertyChangeMask, for PropertyNotify
   gdk_window_set_events(mRootWindow,
                         GdkEventMask(gdk_window_get_events(mRootWindow) |
+                                     GDK_STRUCTURE_MASK |
                                      GDK_PROPERTY_CHANGE_MASK));
-
-  g_signal_connect(gdk_screen_get_default(), "monitors-changed",
-                   G_CALLBACK(monitors_changed), this);
-#ifdef MOZ_X11
   gdk_window_add_filter(mRootWindow, root_window_event_filter, this);
+#ifdef MOZ_X11
   if (GDK_IS_X11_DISPLAY(gdk_display_get_default()))
       mNetWorkareaAtom =
         XInternAtom(GDK_WINDOW_XDISPLAY(mRootWindow), "_NET_WORKAREA", False);
@@ -158,7 +143,7 @@ nsScreenManagerGtk :: Init()
   if (!screenInfo || numScreens == 1) {
     numScreens = 1;
 #endif
-    RefPtr<nsScreenGtk> screen;
+    nsRefPtr<nsScreenGtk> screen;
 
     if (mCachedScreenArray.Count() > 0) {
       screen = static_cast<nsScreenGtk*>(mCachedScreenArray[0]);
@@ -180,7 +165,7 @@ nsScreenManagerGtk :: Init()
     printf("Xinerama superpowers activated for %d screens!\n", numScreens);
 #endif
     for (int i = 0; i < numScreens; ++i) {
-      RefPtr<nsScreenGtk> screen;
+      nsRefPtr<nsScreenGtk> screen;
       if (mCachedScreenArray.Count() > i) {
         screen = static_cast<nsScreenGtk*>(mCachedScreenArray[i]);
       } else {
@@ -238,12 +223,30 @@ nsScreenManagerGtk :: ScreenForId ( uint32_t aId, nsIScreen **outScreen )
 // Returns the screen that contains the rectangle. If the rect overlaps
 // multiple screens, it picks the screen with the greatest area of intersection.
 //
-// The coordinates are in desktop pixels.
+// The coordinates are in CSS pixels (not app units) and in screen coordinates.
 //
 NS_IMETHODIMP
-nsScreenManagerGtk::ScreenForRect(int32_t aX, int32_t aY,
-                                  int32_t aWidth, int32_t aHeight,
-                                  nsIScreen **aOutScreen)
+nsScreenManagerGtk :: ScreenForRect( int32_t aX, int32_t aY,
+                                     int32_t aWidth, int32_t aHeight,
+                                     nsIScreen **aOutScreen )
+{
+  uint32_t scale = nsScreenGtk::GetDPIScale();
+  return ScreenForRectPix(aX*scale, aY*scale, aWidth*scale, aHeight*scale,
+                          aOutScreen);
+}
+
+//
+// ScreenForRectPix
+//
+// Returns the screen that contains the rectangle. If the rect overlaps
+// multiple screens, it picks the screen with the greatest area of intersection.
+//
+// The coordinates are in device (X11) pixels.
+//
+nsresult
+nsScreenManagerGtk :: ScreenForRectPix( int32_t aX, int32_t aY,
+                                        int32_t aWidth, int32_t aHeight,
+                                        nsIScreen **aOutScreen )
 {
   nsresult rv;
   rv = EnsureInit();
@@ -357,7 +360,7 @@ nsScreenManagerGtk :: ScreenForNativeWidget (void *aWidget, nsIScreen **outScree
     gdk_window_get_geometry(GDK_WINDOW(aWidget), &x, &y, &width, &height);
 #endif
     gdk_window_get_origin(GDK_WINDOW(aWidget), &x, &y);
-    rv = ScreenForRect(x, y, width, height, outScreen);
+    rv = ScreenForRectPix(x, y, width, height, outScreen);
   } else {
     rv = GetPrimaryScreen(outScreen);
   }

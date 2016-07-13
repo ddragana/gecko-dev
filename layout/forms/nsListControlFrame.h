@@ -21,6 +21,7 @@
 #include "nsIFormControlFrame.h"
 #include "nsIListControlFrame.h"
 #include "nsISelectControlFrame.h"
+#include "nsAutoPtr.h"
 #include "nsSelectsAreaFrame.h"
 
 // X.h defines KeyPress
@@ -59,7 +60,7 @@ public:
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
-
+  
   virtual void SetInitialChildList(ChildListID     aListID,
                                    nsFrameList&    aChildList) override;
 
@@ -75,8 +76,8 @@ public:
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow) override;
 
-  virtual void DidReflow(nsPresContext*            aPresContext,
-                         const nsHTMLReflowState*  aReflowState,
+  virtual void DidReflow(nsPresContext*            aPresContext, 
+                         const nsHTMLReflowState*  aReflowState, 
                          nsDidReflowStatus         aStatus) override;
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
@@ -138,10 +139,10 @@ public:
   virtual void AboutToRollup() override;
 
   /**
-   * Dispatch a DOM oninput and onchange event synchroniously.
+   * Dispatch a DOM onchange event synchroniously.
    * @note This method might destroy the frame, pres shell and other objects.
    */
-  virtual void FireOnInputAndOnChange() override;
+  virtual void FireOnChange() override;
 
   /**
    * Makes aIndex the selected option of a combobox list.
@@ -192,8 +193,7 @@ public:
    * @param aPt the offset of this frame, relative to the rendering reference
    * frame
    */
-  void PaintFocus(mozilla::gfx::DrawTarget* aDrawTarget, nsPoint aPt);
-
+  void PaintFocus(nsRenderingContext& aRC, nsPoint aPt);
   /**
    * If this frame IsFocused(), invalidates an area that includes anything
    * that PaintFocus will or could have painted --- basically the whole
@@ -250,7 +250,7 @@ public:
 #ifdef ACCESSIBILITY
   /**
    * Post a custom DOM event for the change, so that accessibility can
-   * fire a native focus event for accessibility
+   * fire a native focus event for accessibility 
    * (Some 3rd party products need to track our focus)
    */
   void FireMenuItemActiveEvent(); // Inform assistive tech what got focused
@@ -318,7 +318,7 @@ protected:
   virtual ~nsListControlFrame();
 
   /**
-   * Sets the mSelectedIndex and mOldSelectedIndex from figuring out what
+   * Sets the mSelectedIndex and mOldSelectedIndex from figuring out what 
    * item was selected using content
    * @param aPoint the event point, in listcontrolframe coordinates
    * @return NS_OK if it successfully found the selection
@@ -388,7 +388,7 @@ protected:
    * @return how many displayable options/optgroups this frame has.
    */
   uint32_t GetNumberOfRows();
-
+  
   // Data Members
   int32_t      mStartSelectionIndex;
   int32_t      mEndSelectionIndex;
@@ -426,7 +426,7 @@ protected:
 
   // True if the selection can be set to nothing or disabled options.
   bool mForceSelection:1;
-
+  
   // The last computed block size we reflowed at if we're a combobox
   // dropdown.
   // XXXbz should we be using a subclass here?  Or just not worry
@@ -436,8 +436,8 @@ protected:
   // At the time of our last dropdown, the backstop color to draw in case we
   // are translucent.
   nscolor mLastDropdownBackstopColor;
-
-  RefPtr<nsListEventListener> mEventListener;
+  
+  nsRefPtr<nsListEventListener> mEventListener;
 
   static nsListControlFrame * mFocused;
   static nsString * sIncrementalString;
@@ -451,7 +451,7 @@ private:
   static nsAString& GetIncrementalString ();
   static DOMTimeStamp gLastKeyTime;
 
-  class MOZ_RAII AutoIncrementalSearchResetter
+  class MOZ_STACK_CLASS AutoIncrementalSearchResetter
   {
   public:
     AutoIncrementalSearchResetter() :

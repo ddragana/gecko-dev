@@ -35,8 +35,7 @@ public:
 
   nsJSScriptTimeoutHandler();
   // This will call SwapElements on aArguments with an empty array.
-  nsJSScriptTimeoutHandler(JSContext* aCx, nsGlobalWindow *aWindow,
-                           Function& aFunction,
+  nsJSScriptTimeoutHandler(nsGlobalWindow *aWindow, Function& aFunction,
                            FallibleTArray<JS::Heap<JS::Value> >& aArguments,
                            ErrorResult& aError);
   nsJSScriptTimeoutHandler(JSContext* aCx, nsGlobalWindow *aWindow,
@@ -48,12 +47,10 @@ public:
   {
     return mFunction;
   }
-  virtual void GetLocation(const char** aFileName, uint32_t* aLineNo,
-                           uint32_t* aColumn) override
+  virtual void GetLocation(const char** aFileName, uint32_t* aLineNo) override
   {
     *aFileName = mFileName.get();
     *aLineNo = mLineNo;
-    *aColumn = mColumn;
   }
 
   virtual const nsTArray<JS::Value>& GetArgs() override
@@ -70,13 +67,12 @@ private:
   // caller of setTimeout()
   nsCString mFileName;
   uint32_t mLineNo;
-  uint32_t mColumn;
   nsTArray<JS::Heap<JS::Value> > mArgs;
 
   // The expression to evaluate or function to call. If mFunction is non-null
   // it should be used, else use mExpr.
   nsString mExpr;
-  RefPtr<Function> mFunction;
+  nsRefPtr<Function> mFunction;
 };
 
 
@@ -110,8 +106,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsJSScriptTimeoutHandler)
       name.Append(tmp->mFileName);
       name.Append(':');
       name.AppendInt(tmp->mLineNo);
-      name.Append(':');
-      name.AppendInt(tmp->mColumn);
       name.Append(']');
     }
     cb.DescribeRefCountedNode(tmp->mRefCnt.get(), name.get());
@@ -129,7 +123,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsJSScriptTimeoutHandler)
   for (uint32_t i = 0; i < tmp->mArgs.Length(); ++i) {
-    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mArgs[i])
+    NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mArgs[i])
   }
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
@@ -189,20 +183,17 @@ CheckCSPForEval(JSContext* aCx, nsGlobalWindow* aWindow, ErrorResult& aError)
   return allowsEval;
 }
 
-nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler()
-  : mLineNo(0)
-  , mColumn(0)
+nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler() :
+  mLineNo(0)
 {
 }
 
-nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
-                                                   nsGlobalWindow *aWindow,
+nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(nsGlobalWindow *aWindow,
                                                    Function& aFunction,
                                                    FallibleTArray<JS::Heap<JS::Value> >& aArguments,
-                                                   ErrorResult& aError)
-  : mLineNo(0)
-  , mColumn(0)
-  , mFunction(&aFunction)
+                                                   ErrorResult& aError) :
+  mLineNo(0),
+  mFunction(&aFunction)
 {
   if (!aWindow->GetContextInternal() || !aWindow->FastGetGlobalJSObject()) {
     // This window was already closed, or never properly initialized,
@@ -213,19 +204,15 @@ nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
 
   mozilla::HoldJSObjects(this);
   mArgs.SwapElements(aArguments);
-
-  // Get the calling location.
-  nsJSUtils::GetCallingLocation(aCx, mFileName, &mLineNo, &mColumn);
 }
 
 nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
                                                    nsGlobalWindow *aWindow,
                                                    const nsAString& aExpression,
                                                    bool* aAllowEval,
-                                                   ErrorResult& aError)
-  : mLineNo(0)
-  , mColumn(0)
-  , mExpr(aExpression)
+                                                   ErrorResult& aError) :
+  mLineNo(0),
+  mExpr(aExpression)
 {
   if (!aWindow->GetContextInternal() || !aWindow->FastGetGlobalJSObject()) {
     // This window was already closed, or never properly initialized,
@@ -240,7 +227,7 @@ nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
   }
 
   // Get the calling location.
-  nsJSUtils::GetCallingLocation(aCx, mFileName, &mLineNo, &mColumn);
+  nsJSUtils::GetCallingLocation(aCx, mFileName, &mLineNo);
 }
 
 nsJSScriptTimeoutHandler::~nsJSScriptTimeoutHandler()
@@ -266,8 +253,7 @@ nsJSScriptTimeoutHandler::GetHandlerText()
 }
 
 already_AddRefed<nsIScriptTimeoutHandler>
-NS_CreateJSTimeoutHandler(JSContext *aCx, nsGlobalWindow *aWindow,
-                          Function& aFunction,
+NS_CreateJSTimeoutHandler(nsGlobalWindow *aWindow, Function& aFunction,
                           const Sequence<JS::Value>& aArguments,
                           ErrorResult& aError)
 {
@@ -277,8 +263,8 @@ NS_CreateJSTimeoutHandler(JSContext *aCx, nsGlobalWindow *aWindow,
     return nullptr;
   }
 
-  RefPtr<nsJSScriptTimeoutHandler> handler =
-    new nsJSScriptTimeoutHandler(aCx, aWindow, aFunction, args, aError);
+  nsRefPtr<nsJSScriptTimeoutHandler> handler =
+    new nsJSScriptTimeoutHandler(aWindow, aFunction, args, aError);
   return aError.Failed() ? nullptr : handler.forget();
 }
 
@@ -286,10 +272,11 @@ already_AddRefed<nsIScriptTimeoutHandler>
 NS_CreateJSTimeoutHandler(JSContext* aCx, nsGlobalWindow *aWindow,
                           const nsAString& aExpression, ErrorResult& aError)
 {
+  ErrorResult rv;
   bool allowEval = false;
-  RefPtr<nsJSScriptTimeoutHandler> handler =
-    new nsJSScriptTimeoutHandler(aCx, aWindow, aExpression, &allowEval, aError);
-  if (aError.Failed() || !allowEval) {
+  nsRefPtr<nsJSScriptTimeoutHandler> handler =
+    new nsJSScriptTimeoutHandler(aCx, aWindow, aExpression, &allowEval, rv);
+  if (rv.Failed() || !allowEval) {
     return nullptr;
   }
 

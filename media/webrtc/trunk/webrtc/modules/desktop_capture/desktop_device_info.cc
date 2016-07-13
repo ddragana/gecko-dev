@@ -4,7 +4,7 @@
 
 #include "webrtc/modules/desktop_capture/desktop_device_info.h"
 #include "webrtc/modules/desktop_capture/window_capturer.h"
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 #include <cstddef>
 #include <cstdlib>
@@ -76,9 +76,6 @@ const char *DesktopDisplayDevice::getUniqueIdName() {
 }
 
 DesktopDisplayDevice& DesktopDisplayDevice::operator= (DesktopDisplayDevice& other) {
-  if (&other == this) {
-    return *this;
-  }
   screenId_ = other.getScreenId();
   setUniqueIdName(other.getUniqueIdName());
   setDeviceName(other.getDeviceName());
@@ -96,21 +93,6 @@ DesktopApplication::DesktopApplication() {
 }
 
 DesktopApplication::~DesktopApplication() {
-  if (processPathNameUTF8_) {
-    delete [] processPathNameUTF8_;
-  }
-
-  if (applicationNameUTF8_) {
-    delete [] applicationNameUTF8_;
-  }
-
-  if (processUniqueIdUTF8_) {
-    delete [] processUniqueIdUTF8_;
-  }
-
-  processPathNameUTF8_= NULL;
-  applicationNameUTF8_= NULL;
-  processUniqueIdUTF8_= NULL;
 }
 
 void DesktopApplication::setProcessId(const ProcessId processId) {
@@ -259,7 +241,7 @@ void DesktopDeviceInfoImpl::CleanUpWindowList() {
   desktop_window_list_.clear();
 }
 void DesktopDeviceInfoImpl::InitializeWindowList() {
-  rtc::scoped_ptr<WindowCapturer> pWinCap(WindowCapturer::Create());
+  scoped_ptr<WindowCapturer> pWinCap(WindowCapturer::Create());
   WindowCapturer::WindowList list;
   if (pWinCap && pWinCap->GetWindowList(&list)) {
     WindowCapturer::WindowList::iterator itr;
@@ -273,7 +255,7 @@ void DesktopDeviceInfoImpl::InitializeWindowList() {
       pWinDevice->setDeviceName(itr->title.c_str());
 
       char idStr[BUFSIZ];
-#if WEBRTC_WIN
+#if XP_WIN
       _snprintf_s(idStr, sizeof(idStr), sizeof(idStr) - 1, "%ld", pWinDevice->getScreenId());
 #else
       snprintf(idStr, sizeof(idStr), "%ld", pWinDevice->getScreenId());

@@ -1,8 +1,8 @@
-add_task(function *() {
-  let browserLoadedPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
-  browserDOMWindow.openURI(makeURI("about:"), null,
-                           Ci.nsIBrowserDOMWindow.OPEN_CURRENTWINDOW, null)
-  yield browserLoadedPromise;
-  is(gBrowser.currentURI.spec, "about:", "page loads in the current content window");
-});
-
+function test() {
+  var currentWin = content;
+  var newWin =
+    browserDOMWindow.openURI(makeURI("about:"), null,
+                             Ci.nsIBrowserDOMWindow.OPEN_CURRENTWINDOW, null)
+  is(newWin, currentWin, "page loads in the current content window");
+  gBrowser.stop();
+}

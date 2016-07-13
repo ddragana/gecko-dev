@@ -3,7 +3,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/TestInterfaceSetlike.h"
-#include "mozilla/dom/TestInterfaceJSMaplikeSetlikeIterableBinding.h"
+#include "mozilla/dom/TestInterfaceJSMaplikeSetlikeBinding.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/dom/BindingUtils.h"
 
@@ -21,7 +21,7 @@ NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 TestInterfaceSetlike::TestInterfaceSetlike(JSContext* aCx,
-                                           nsPIDOMWindowInner* aParent)
+                                           nsPIDOMWindow* aParent)
 : mParent(aParent)
 {
 }
@@ -31,13 +31,13 @@ already_AddRefed<TestInterfaceSetlike>
 TestInterfaceSetlike::Constructor(const GlobalObject& aGlobal,
                                   ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  RefPtr<TestInterfaceSetlike> r = new TestInterfaceSetlike(nullptr, window);
+  nsRefPtr<TestInterfaceSetlike> r = new TestInterfaceSetlike(nullptr, window);
   return r.forget();
 }
 
@@ -48,7 +48,7 @@ TestInterfaceSetlike::WrapObject(JSContext* aCx,
   return TestInterfaceSetlikeBinding::Wrap(aCx, this, aGivenProto);
 }
 
-nsPIDOMWindowInner*
+nsPIDOMWindow*
 TestInterfaceSetlike::GetParentObject() const
 {
   return mParent;

@@ -4,13 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/**
- * [B2G only GATT client API]
- * BluetoothGatt interface is exposed only if
- * "dom.bluetooth.webbluetooth.enabled" preference is false.
- */
-[CheckAnyPermissions="bluetooth",
- Func="mozilla::dom::bluetooth::BluetoothManager::B2GGattClientEnabled"]
+[CheckAnyPermissions="bluetooth"]
 interface BluetoothGatt : EventTarget
 {
   [Cached, Pure]

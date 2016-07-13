@@ -403,8 +403,8 @@ var WifiManager = (function() {
     WifiNetworkInterface.httpProxyHost = network.httpProxyHost;
     WifiNetworkInterface.httpProxyPort = network.httpProxyPort;
 
-    if (WifiNetworkInterface.info.state ==
-        Ci.nsINetworkInfo.NETWORK_STATE_CONNECTED) {
+    if (WifiNetworkInterface.state ==
+        Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED) {
       gNetworkManager.updateNetworkInterface(WifiNetworkInterface);
     }
   }
@@ -1014,17 +1014,16 @@ var WifiManager = (function() {
     if (enabled) {
       manager.state = "INITIALIZING";
       // Register as network interface.
-      WifiNetworkInterface.info.name = manager.ifname;
+      WifiNetworkInterface.name = manager.ifname;
       if (!WifiNetworkInterface.registered) {
         gNetworkManager.registerNetworkInterface(WifiNetworkInterface);
         WifiNetworkInterface.registered = true;
       }
-      WifiNetworkInterface.info.state =
-        Ci.nsINetworkInfo.NETWORK_STATE_DISCONNECTED;
-      WifiNetworkInterface.info.ips = [];
-      WifiNetworkInterface.info.prefixLengths = [];
-      WifiNetworkInterface.info.gateways = [];
-      WifiNetworkInterface.info.dnses = [];
+      WifiNetworkInterface.state = Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
+      WifiNetworkInterface.ips = [];
+      WifiNetworkInterface.prefixLengths = [];
+      WifiNetworkInterface.gateways = [];
+      WifiNetworkInterface.dnses = [];
       gNetworkManager.updateNetworkInterface(WifiNetworkInterface);
 
       prepareForStartup(function() {
@@ -1169,10 +1168,8 @@ var WifiManager = (function() {
 
         function doStartWifiTethering() {
           cancelWaitForDriverReadyTimer();
-          WifiNetworkInterface.info.name =
-            libcutils.property_get("wifi.tethering.interface", manager.ifname);
-          gTetheringService.setWifiTethering(enabled,
-                                             WifiNetworkInterface.info.name,
+          WifiNetworkInterface.name = libcutils.property_get("wifi.tethering.interface", manager.ifname);
+          gTetheringService.setWifiTethering(enabled, WifiNetworkInterface,
                                              configuration, function(result) {
             if (result) {
               manager.tetheringState = "UNINITIALIZED";
@@ -1431,14 +1428,6 @@ var WifiManager = (function() {
   manager.getConnectionInfo = (sdkVersion >= 15)
                               ? wifiCommand.getConnectionInfoICS
                               : wifiCommand.getConnectionInfoGB;
-
-  manager.ensureSupplicantDetached = aCallback => {
-    if (!manager.enabled) {
-      aCallback();
-      return;
-    }
-    wifiCommand.closeSupplicantConnection(aCallback);
-  };
 
   manager.isHandShakeState = function(state) {
     switch (state) {
@@ -1786,7 +1775,7 @@ function isWepHexKey(s) {
 }
 
 
-var WifiNetworkInterface = {
+let WifiNetworkInterface = {
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsINetworkInterface]),
 
@@ -1794,67 +1783,63 @@ var WifiNetworkInterface = {
 
   // nsINetworkInterface
 
-  NETWORK_STATE_UNKNOWN:       Ci.nsINetworkInfo.NETWORK_STATE_UNKNOWN,
-  NETWORK_STATE_CONNECTING:    Ci.nsINetworkInfo.CONNECTING,
-  NETWORK_STATE_CONNECTED:     Ci.nsINetworkInfo.CONNECTED,
-  NETWORK_STATE_DISCONNECTING: Ci.nsINetworkInfo.DISCONNECTING,
-  NETWORK_STATE_DISCONNECTED:  Ci.nsINetworkInfo.DISCONNECTED,
+  NETWORK_STATE_UNKNOWN:       Ci.nsINetworkInterface.NETWORK_STATE_UNKNOWN,
+  NETWORK_STATE_CONNECTING:    Ci.nsINetworkInterface.CONNECTING,
+  NETWORK_STATE_CONNECTED:     Ci.nsINetworkInterface.CONNECTED,
+  NETWORK_STATE_DISCONNECTING: Ci.nsINetworkInterface.DISCONNECTING,
+  NETWORK_STATE_DISCONNECTED:  Ci.nsINetworkInterface.DISCONNECTED,
 
-  NETWORK_TYPE_WIFI:        Ci.nsINetworkInfo.NETWORK_TYPE_WIFI,
-  NETWORK_TYPE_MOBILE:      Ci.nsINetworkInfo.NETWORK_TYPE_MOBILE,
-  NETWORK_TYPE_MOBILE_MMS:  Ci.nsINetworkInfo.NETWORK_TYPE_MOBILE_MMS,
-  NETWORK_TYPE_MOBILE_SUPL: Ci.nsINetworkInfo.NETWORK_TYPE_MOBILE_SUPL,
+  state: Ci.nsINetworkInterface.NETWORK_STATE_UNKNOWN,
 
-  info: {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsINetworkInfo]),
+  NETWORK_TYPE_WIFI:        Ci.nsINetworkInterface.NETWORK_TYPE_WIFI,
+  NETWORK_TYPE_MOBILE:      Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE,
+  NETWORK_TYPE_MOBILE_MMS:  Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_MMS,
+  NETWORK_TYPE_MOBILE_SUPL: Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_SUPL,
 
-    state: Ci.nsINetworkInfo.NETWORK_STATE_UNKNOWN,
+  type: Ci.nsINetworkInterface.NETWORK_TYPE_WIFI,
 
-    type: Ci.nsINetworkInfo.NETWORK_TYPE_WIFI,
+  name: null,
 
-    name: null,
+  ips: [],
 
-    ips: [],
+  prefixLengths: [],
 
-    prefixLengths: [],
+  dnses: [],
 
-    dnses: [],
-
-    gateways: [],
-
-    getAddresses: function (ips, prefixLengths) {
-      ips.value = this.ips.slice();
-      prefixLengths.value = this.prefixLengths.slice();
-
-      return this.ips.length;
-    },
-
-    getGateways: function (count) {
-      if (count) {
-        count.value = this.gateways.length;
-      }
-      return this.gateways.slice();
-    },
-
-    getDnses: function (count) {
-      if (count) {
-        count.value = this.dnses.length;
-      }
-      return this.dnses.slice();
-    }
-  },
+  gateways: [],
 
   httpProxyHost: null,
 
-  httpProxyPort: null
+  httpProxyPort: null,
+
+  getAddresses: function (ips, prefixLengths) {
+    ips.value = this.ips.slice();
+    prefixLengths.value = this.prefixLengths.slice();
+
+    return this.ips.length;
+  },
+
+  getGateways: function (count) {
+    if (count) {
+      count.value = this.gateways.length;
+    }
+    return this.gateways.slice();
+  },
+
+  getDnses: function (count) {
+    if (count) {
+      count.value = this.dnses.length;
+    }
+    return this.dnses.slice();
+  }
 };
 
 function WifiScanResult() {}
 
 // TODO Make the difference between a DOM-based network object and our
 // networks objects much clearer.
-var netToDOM;
-var netFromDOM;
+let netToDOM;
+let netFromDOM;
 
 function WifiWorker() {
   var self = this;
@@ -2267,8 +2252,8 @@ function WifiWorker() {
       case "DISCONNECTED":
         // wpa_supplicant may give us a "DISCONNECTED" event even if
         // we are already in "DISCONNECTED" state.
-        if ((WifiNetworkInterface.info.state ===
-             Ci.nsINetworkInfo.NETWORK_STATE_DISCONNECTED) &&
+        if ((WifiNetworkInterface.state ===
+             Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED) &&
              (this.prevState === "INITIALIZING" ||
               this.prevState === "DISCONNECTED" ||
               this.prevState === "INTERFACE_DISABLED" ||
@@ -2300,16 +2285,13 @@ function WifiWorker() {
           }
         });
 
-        WifiNetworkInterface.info.state =
-          Ci.nsINetworkInfo.NETWORK_STATE_DISCONNECTED;
-
-        // Update network infterface first then clear properties.
+        WifiNetworkInterface.state =
+          Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
+        WifiNetworkInterface.ips = [];
+        WifiNetworkInterface.prefixLengths = [];
+        WifiNetworkInterface.gateways = [];
+        WifiNetworkInterface.dnses = [];
         gNetworkManager.updateNetworkInterface(WifiNetworkInterface);
-        WifiNetworkInterface.info.ips = [];
-        WifiNetworkInterface.info.prefixLengths = [];
-        WifiNetworkInterface.info.gateways = [];
-        WifiNetworkInterface.info.dnses = [];
-
 
         break;
       case "WPS_TIMEOUT":
@@ -2351,18 +2333,18 @@ function WifiWorker() {
       WifiNetworkInterface.httpProxyPort = netConnect.httpProxyPort;
     }
 
-    WifiNetworkInterface.info.state =
-      Ci.nsINetworkInfo.NETWORK_STATE_CONNECTED;
-    WifiNetworkInterface.info.ips = [this.info.ipaddr_str];
-    WifiNetworkInterface.info.prefixLengths = [maskLength];
-    WifiNetworkInterface.info.gateways = [this.info.gateway_str];
+    WifiNetworkInterface.state =
+      Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED;
+    WifiNetworkInterface.ips = [this.info.ipaddr_str];
+    WifiNetworkInterface.prefixLengths = [maskLength];
+    WifiNetworkInterface.gateways = [this.info.gateway_str];
     if (typeof this.info.dns1_str == "string" &&
         this.info.dns1_str.length) {
-      WifiNetworkInterface.info.dnses.push(this.info.dns1_str);
+      WifiNetworkInterface.dnses.push(this.info.dns1_str);
     }
     if (typeof this.info.dns2_str == "string" &&
         this.info.dns2_str.length) {
-      WifiNetworkInterface.info.dnses.push(this.info.dns2_str);
+      WifiNetworkInterface.dnses.push(this.info.dns2_str);
     }
     gNetworkManager.updateNetworkInterface(WifiNetworkInterface);
 
@@ -2608,8 +2590,7 @@ WifiWorker.prototype = {
   // connect to which ever network it thinks is best, so when we select the
   // proper network (or fail to), we need to re-enable the rest.
   _enableAllNetworks: function() {
-    for (let key in this.configuredNetworks) {
-      let net = this.configuredNetworks[key];
+    for each (let net in this.configuredNetworks) {
       WifiManager.enableNetwork(net.netId, false, function(ok) {
         net.disabled = ok ? 1 : 0;
       });
@@ -2645,9 +2626,7 @@ WifiWorker.prototype = {
 
         // Only fire the event if the link speed changed or the signal
         // strength changed by more than 10%.
-        function tensPlace(percent) {
-          return (percent / 10) | 0;
-        }
+        function tensPlace(percent) ((percent / 10) | 0)
 
         if (last && last.linkSpeed === info.linkSpeed &&
             last.ipAddress === info.ipAddress &&
@@ -3829,14 +3808,10 @@ WifiWorker.prototype = {
       break;
 
     case "xpcom-shutdown":
-      // Ensure the supplicant is detached from B2G to avoid XPCOM shutdown
-      // blocks forever.
-      WifiManager.ensureSupplicantDetached(() => {
-        let wifiService = Cc["@mozilla.org/wifi/service;1"].getService(Ci.nsIWifiProxyService);
-        wifiService.shutdown();
-        let wifiCertService = Cc["@mozilla.org/wifi/certservice;1"].getService(Ci.nsIWifiCertService);
-        wifiCertService.shutdown();
-      });
+      let wifiService = Cc["@mozilla.org/wifi/service;1"].getService(Ci.nsIWifiProxyService);
+      wifiService.shutdown();
+      let wifiCertService = Cc["@mozilla.org/wifi/certservice;1"].getService(Ci.nsIWifiCertService);
+      wifiCertService.shutdown();
       break;
     }
   },
@@ -3914,7 +3889,7 @@ WifiWorker.prototype = {
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([WifiWorker]);
 
-var debug;
+let debug;
 function updateDebug() {
   if (DEBUG) {
     debug = function (s) {

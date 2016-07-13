@@ -24,16 +24,12 @@ public:
     : mGlobalOpacity(1.0)
   { }
 
-  // Note: 'aIsPaintingSVGImageElement' should be used to indicate whether
-  // the SVG image in question is being painted for an SVG <image> element.
   SVGImageContext(CSSIntSize aViewportSize,
                   Maybe<SVGPreserveAspectRatio> aPreserveAspectRatio,
-                  gfxFloat aOpacity = 1.0,
-                  bool aIsPaintingSVGImageElement = false)
+                  gfxFloat aOpacity = 1.0)
     : mViewportSize(aViewportSize)
     , mPreserveAspectRatio(aPreserveAspectRatio)
     , mGlobalOpacity(aOpacity)
-    , mIsPaintingSVGImageElement(aIsPaintingSVGImageElement)
   { }
 
   const CSSIntSize& GetViewportSize() const {
@@ -46,10 +42,6 @@ public:
 
   gfxFloat GetGlobalOpacity() const {
     return mGlobalOpacity;
-  }
-
-  bool IsPaintingForSVGImageElement() const {
-    return mIsPaintingSVGImageElement;
   }
 
   bool operator==(const SVGImageContext& aOther) const {
@@ -77,7 +69,6 @@ private:
   CSSIntSize                    mViewportSize;
   Maybe<SVGPreserveAspectRatio> mPreserveAspectRatio;
   gfxFloat                      mGlobalOpacity;
-  bool                          mIsPaintingSVGImageElement;
 };
 
 } // namespace mozilla

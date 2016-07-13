@@ -6,7 +6,8 @@
 
 TEST_DIRS += ['tests']
 
-for var in ('target', 'MOZ_CONFIGURE_OPTIONS', 'CC', 'CC_VERSION', 'CXX'):
+for var in ('target', 'ac_configure_args', 'CC', 'CC_VERSION',
+            'CXX', 'CXX_VERSION'):
     DEFINES[var] = CONFIG[var]
 
 DEFINES['CFLAGS'] = CONFIG['OS_CFLAGS']
@@ -14,13 +15,8 @@ DEFINES['CFLAGS'] = CONFIG['OS_CFLAGS']
 if CONFIG['OS_TARGET'] == 'Android':
     DEFINES['ANDROID_PACKAGE_NAME'] = CONFIG['ANDROID_PACKAGE_NAME']
 
-if CONFIG['MOZ_ANDROID_CXX_STL'] == 'mozstlport':
+if 'stlport' in CONFIG['STLPORT_LIBS']:
     DEFINES['USE_STLPORT'] = True
-if CONFIG['MOZ_ANDROID_CXX_STL'] == 'libc++':
-    DEFINES['MOZ_USE_LIBCXX'] = True
-
-if CONFIG['MOZ_BUILD_APP'] == 'mobile/android':
-    DEFINES['MOZ_FENNEC'] = True
 
 JAR_MANIFESTS += ['jar.mn']
 
@@ -32,5 +28,3 @@ with Files('customizeToolbar.*'):
 
 with Files('widgets/*'):
     BUG_COMPONENT = ('Toolkit', 'XUL Widgets')
-
-DEFINES['TOPOBJDIR'] = TOPOBJDIR

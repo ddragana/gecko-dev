@@ -30,10 +30,15 @@ nsCommandHandler::GetCommandHandler(nsICommandHandler** aCommandHandler)
     return NS_ERROR_FAILURE;
   }
 
+  nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(mWindow));
+  if (!window) {
+    return NS_ERROR_FAILURE;
+  }
+
   // Get the document tree owner
 
   nsCOMPtr<nsIDocShellTreeItem> docShellAsTreeItem =
-    do_QueryInterface(mWindow->GetDocShell());
+    do_QueryInterface(window->GetDocShell());
   nsIDocShellTreeOwner* treeOwner = nullptr;
   docShellAsTreeItem->GetTreeOwner(&treeOwner);
 
@@ -73,19 +78,19 @@ NS_INTERFACE_MAP_END
 // nsICommandHandlerInit implementation
 
 NS_IMETHODIMP
-nsCommandHandler::GetWindow(mozIDOMWindowProxy** aWindow)
+nsCommandHandler::GetWindow(nsIDOMWindow** aWindow)
 {
   *aWindow = nullptr;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsCommandHandler::SetWindow(mozIDOMWindowProxy* aWindow)
+nsCommandHandler::SetWindow(nsIDOMWindow* aWindow)
 {
   if (!aWindow) {
     return NS_ERROR_FAILURE;
   }
-  mWindow = nsPIDOMWindowOuter::From(aWindow);
+  mWindow = aWindow;
   return NS_OK;
 }
 

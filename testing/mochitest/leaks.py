@@ -141,7 +141,7 @@ class ShutdownLeaks(object):
         counted = set()
 
         for url in leakedWindows:
-            if url not in counted:
+            if not url in counted:
                 counts.append((url, leakedWindows.count(url)))
                 counted.add(url)
 
@@ -189,10 +189,16 @@ class LSANLeaks(object):
         if not self.inReport:
             return
 
-        if line.startswith("Direct leak") or line.startswith("Indirect leak"):
+        if line.startswith("Direct leak"):
             self._finishStack()
             self.recordMoreFrames = True
             self.currStack = []
+            return
+
+        if line.startswith("Indirect leak"):
+            self._finishStack()
+            # Only report direct leaks, in the hope that they are less flaky.
+            self.recordMoreFrames = False
             return
 
         if line.startswith("SUMMARY: AddressSanitizer"):

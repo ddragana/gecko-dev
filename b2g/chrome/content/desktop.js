@@ -2,44 +2,36 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var browserWindow = Services.wm.getMostRecentWindow("navigator:browser");
-var isMulet = "ResponsiveUI" in browserWindow;
+let browserWindow = Services.wm.getMostRecentWindow("navigator:browser");
+let isMulet = "ResponsiveUI" in browserWindow;
 
 // Enable touch event shim on desktop that translates mouse events
 // into touch ones
 function enableTouch() {
-  let require = Cu.import('resource://devtools/shared/Loader.jsm', {})
+  let require = Cu.import('resource://gre/modules/devtools/Loader.jsm', {})
                   .devtools.require;
-  let { TouchEventSimulator } = require('devtools/shared/touch/simulator');
+  let { TouchEventSimulator } = require('devtools/toolkit/touch/simulator');
   let touchEventSimulator = new TouchEventSimulator(shell.contentBrowser);
   touchEventSimulator.start();
 }
 
-// Some additional buttons are displayed on simulators to fake hardware buttons.
 function setupButtons() {
-  let link = document.createElement('link');
-  link.type = 'text/css';
-  link.rel = 'stylesheet';
-  link.href = 'chrome://b2g/content/desktop.css';
-  document.head.appendChild(link);
-
-  let footer = document.createElement('footer');
-  footer.id = 'controls';
-  document.body.appendChild(footer);
-  let homeButton = document.createElement('button');
-  homeButton.id = 'home-button';
-  footer.appendChild(homeButton);
-  let rotateButton = document.createElement('button');
-  rotateButton.id = 'rotate-button';
-  footer.appendChild(rotateButton);
-
-  homeButton.addEventListener('mousedown', function() {
+  let homeButton = document.getElementById('home-button');
+  if (!homeButton) {
+    // The toolbar only exists in b2g desktop build with
+    // FXOS_SIMULATOR turned on.
+    return;
+  }
+  // The touch event helper is enabled on shell.html document,
+  // so that click events are delayed and it is better to
+  // listen for touch events.
+  homeButton.addEventListener('touchstart', function() {
     let window = shell.contentBrowser.contentWindow;
     let e = new window.KeyboardEvent('keydown', {key: 'Home'});
     window.dispatchEvent(e);
     homeButton.classList.add('active');
   });
-  homeButton.addEventListener('mouseup', function() {
+  homeButton.addEventListener('touchend', function() {
     let window = shell.contentBrowser.contentWindow;
     let e = new window.KeyboardEvent('keyup', {key: 'Home'});
     window.dispatchEvent(e);
@@ -47,10 +39,11 @@ function setupButtons() {
   });
 
   Cu.import("resource://gre/modules/GlobalSimulatorScreen.jsm");
-  rotateButton.addEventListener('mousedown', function() {
+  let rotateButton = document.getElementById('rotate-button');
+  rotateButton.addEventListener('touchstart', function () {
     rotateButton.classList.add('active');
   });
-  rotateButton.addEventListener('mouseup', function() {
+  rotateButton.addEventListener('touchend', function() {
     GlobalSimulatorScreen.flipScreen();
     rotateButton.classList.remove('active');
   });
@@ -118,7 +111,7 @@ function checkDebuggerPort() {
 
 
 function initResponsiveDesign() {
-  Cu.import('resource://devtools/client/responsivedesign/responsivedesign.jsm');
+  Cu.import('resource:///modules/devtools/responsivedesign.jsm');
   ResponsiveUIManager.on('on', function(event, {tab:tab}) {
     let responsive = ResponsiveUIManager.getResponsiveUIForTab(tab);
     let document = tab.ownerDocument;
@@ -141,6 +134,16 @@ function initResponsiveDesign() {
 
     // Enable touch events
     responsive.enableTouch();
+
+    // Automatically toggle responsive design mode
+    let width = 320, height = 480;
+    // We have to take into account padding and border introduced with the
+    // device look'n feel:
+    width += 15*2; // Horizontal padding
+    width += 1*2; // Vertical border
+    height += 60; // Top Padding
+    height += 1; // Top border
+    responsive.setSize(width, height);
   });
 
 
@@ -154,8 +157,8 @@ function openDevtools() {
   Services.prefs.setIntPref('devtools.toolbox.sidebar.width',
                             browserWindow.outerWidth - 550);
   Services.prefs.setCharPref('devtools.toolbox.host', 'side');
-  let {gDevTools} = Cu.import('resource://devtools/client/framework/gDevTools.jsm', {});
-  let {devtools} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+  let {gDevTools} = Cu.import('resource:///modules/devtools/gDevTools.jsm', {});
+  let {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
   let target = devtools.TargetFactory.forTab(browserWindow.gBrowser.selectedTab);
   gDevTools.showToolbox(target);
 }
@@ -165,9 +168,7 @@ window.addEventListener('ContentStart', function() {
   if (!isMulet) {
     enableTouch();
   }
-  if (Services.prefs.getBoolPref('b2g.software-buttons')) {
-    setupButtons();
-  }
+  setupButtons();
   checkDebuggerPort();
   setupStorage();
   // On Firefox mulet, we automagically enable the responsive mode

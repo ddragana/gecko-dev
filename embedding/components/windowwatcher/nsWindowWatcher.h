@@ -23,7 +23,7 @@
 class nsIURI;
 class nsIDocShellTreeItem;
 class nsIDocShellTreeOwner;
-class nsPIDOMWindowOuter;
+class nsPIDOMWindow;
 class nsWatcherWindowEnumerator;
 class nsPromptService;
 struct nsWatcherWindowEntry;
@@ -47,7 +47,7 @@ public:
   NS_DECL_NSPIWINDOWWATCHER
   NS_DECL_NSIPROMPTFACTORY
 
-  static int32_t GetWindowOpenLocation(nsPIDOMWindowOuter* aParent,
+  static int32_t GetWindowOpenLocation(nsIDOMWindow* aParent,
                                        uint32_t aChromeFlags,
                                        bool aCalledFromJS,
                                        bool aPositionSpecified,
@@ -60,7 +60,7 @@ protected:
   bool AddEnumerator(nsWatcherWindowEnumerator* aEnumerator);
   bool RemoveEnumerator(nsWatcherWindowEnumerator* aEnumerator);
 
-  nsWatcherWindowEntry* FindWindowEntry(mozIDOMWindowProxy* aWindow);
+  nsWatcherWindowEntry* FindWindowEntry(nsIDOMWindow* aWindow);
   nsresult RemoveWindow(nsWatcherWindowEntry* aInfo);
 
   // Get the caller tree item.  Look on the JS stack, then fall back
@@ -70,12 +70,12 @@ protected:
 
   // Unlike GetWindowByName this will look for a caller on the JS
   // stack, and then fall back on aCurrentWindow if it can't find one.
-  nsPIDOMWindowOuter* SafeGetWindowByName(const nsAString& aName,
-                                          mozIDOMWindowProxy* aCurrentWindow);
+  nsPIDOMWindow* SafeGetWindowByName(const nsAString& aName,
+                                     nsIDOMWindow* aCurrentWindow);
 
   // Just like OpenWindowJS, but knows whether it got called via OpenWindowJS
   // (which means called from script) or called via OpenWindow.
-  nsresult OpenWindowInternal(mozIDOMWindowProxy* aParent,
+  nsresult OpenWindowInternal(nsIDOMWindow* aParent,
                               const char* aUrl,
                               const char* aName,
                               const char* aFeatures,
@@ -84,14 +84,13 @@ protected:
                               bool aNavigate,
                               nsITabParent* aOpeningTab,
                               nsIArray* aArgv,
-                              float* aOpenerFullZoom,
-                              mozIDOMWindowProxy** aResult);
+                              nsIDOMWindow** aResult);
 
   static nsresult URIfromURL(const char* aURL,
-                             mozIDOMWindowProxy* aParent,
+                             nsIDOMWindow* aParent,
                              nsIURI** aURI);
 
-  static uint32_t CalculateChromeFlags(mozIDOMWindowProxy* aParent,
+  static uint32_t CalculateChromeFlags(nsIDOMWindow* aParent,
                                        const char* aFeatures,
                                        bool aFeaturesSpecified,
                                        bool aDialog,
@@ -104,17 +103,16 @@ protected:
   /* Compute the right SizeSpec based on aFeatures */
   static void CalcSizeSpec(const char* aFeatures, SizeSpec& aResult);
   static nsresult ReadyOpenedDocShellItem(nsIDocShellTreeItem* aOpenedItem,
-                                          nsPIDOMWindowOuter* aParent,
+                                          nsIDOMWindow* aParent,
                                           bool aWindowIsNew,
-                                          mozIDOMWindowProxy** aOpenedWindow);
+                                          nsIDOMWindow** aOpenedWindow);
   static void SizeOpenedDocShellItem(nsIDocShellTreeItem* aDocShellItem,
-                                     mozIDOMWindowProxy* aParent,
+                                     nsIDOMWindow* aParent,
                                      bool aIsCallerChrome,
-                                     const SizeSpec& aSizeSpec,
-                                     float* aOpenerFullZoom);
-  static void GetWindowTreeItem(mozIDOMWindowProxy* aWindow,
+                                     const SizeSpec& aSizeSpec);
+  static void GetWindowTreeItem(nsIDOMWindow* aWindow,
                                 nsIDocShellTreeItem** aResult);
-  static void GetWindowTreeOwner(nsPIDOMWindowOuter* aWindow,
+  static void GetWindowTreeOwner(nsIDOMWindow* aWindow,
                                  nsIDocShellTreeOwner** aResult);
 
   nsTArray<nsWatcherWindowEnumerator*> mEnumeratorList;

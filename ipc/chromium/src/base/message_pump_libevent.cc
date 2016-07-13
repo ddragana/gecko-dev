@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -17,21 +15,8 @@
 #include "base/scoped_nsautorelease_pool.h"
 #include "base/time.h"
 #include "nsDependentSubstring.h"
-#include "event.h"
+#include "third_party/libevent/event.h"
 #include "mozilla/UniquePtr.h"
-
-// This macro checks that the _EVENT_SIZEOF_* constants defined in
-// ipc/chromiume/src/third_party/<platform>/event2/event-config.h are correct.
-#define CHECK_EVENT_SIZEOF(TYPE, type) \
-    static_assert(_EVENT_SIZEOF_##TYPE == sizeof(type), \
-    "bad _EVENT_SIZEOF_"#TYPE);
-
-CHECK_EVENT_SIZEOF(LONG,      long);
-CHECK_EVENT_SIZEOF(LONG_LONG, long long);
-CHECK_EVENT_SIZEOF(PTHREAD_T, pthread_t);
-CHECK_EVENT_SIZEOF(SHORT,     short);
-CHECK_EVENT_SIZEOF(SIZE_T,    size_t);
-CHECK_EVENT_SIZEOF(VOID_P,    void*);
 
 // Lifecycle of struct event
 // Libevent uses two main data structures:

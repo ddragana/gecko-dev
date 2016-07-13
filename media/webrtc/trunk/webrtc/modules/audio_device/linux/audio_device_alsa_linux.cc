@@ -16,6 +16,7 @@
 
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
 #include "webrtc/system_wrappers/interface/sleep.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 
 #include "Latency.h"
@@ -70,6 +71,10 @@ static const unsigned int ALSA_CAPTURE_WAIT_TIMEOUT = 5; // in ms
 AudioDeviceLinuxALSA::AudioDeviceLinuxALSA(const int32_t id) :
     _ptrAudioBuffer(NULL),
     _critSect(*CriticalSectionWrapper::CreateCriticalSection()),
+    _ptrThreadRec(NULL),
+    _ptrThreadPlay(NULL),
+    _recThreadID(0),
+    _playThreadID(0),
     _id(id),
     _mixerManager(id),
     _inputDeviceIndex(0),
@@ -204,6 +209,7 @@ int32_t AudioDeviceLinuxALSA::Init()
 
 int32_t AudioDeviceLinuxALSA::Terminate()
 {
+
     if (!_initialized)
     {
         return 0;
@@ -216,11 +222,21 @@ int32_t AudioDeviceLinuxALSA::Terminate()
     // RECORDING
     if (_ptrThreadRec)
     {
-        ThreadWrapper* tmpThread = _ptrThreadRec.release();
+        ThreadWrapper* tmpThread = _ptrThreadRec;
+        _ptrThreadRec = NULL;
         _critSect.Leave();
 
-        tmpThread->Stop();
-        delete tmpThread;
+        tmpThread->SetNotAlive();
+
+        if (tmpThread->Stop())
+        {
+            delete tmpThread;
+        }
+        else
+        {
+            WEBRTC_TRACE(kTraceWarning, kTraceAudioDevice, _id,
+                         "  failed to close down the rec audio thread");
+        }
 
         _critSect.Enter();
     }
@@ -228,11 +244,21 @@ int32_t AudioDeviceLinuxALSA::Terminate()
     // PLAYOUT
     if (_ptrThreadPlay)
     {
-        ThreadWrapper* tmpThread = _ptrThreadPlay.release();
+        ThreadWrapper* tmpThread = _ptrThreadPlay;
+        _ptrThreadPlay = NULL;
         _critSect.Leave();
 
-        tmpThread->Stop();
-        delete tmpThread;
+        tmpThread->SetNotAlive();
+
+        if (tmpThread->Stop())
+        {
+            delete tmpThread;
+        }
+        else
+        {
+            WEBRTC_TRACE(kTraceWarning, kTraceAudioDevice, _id,
+                         "  failed to close down the play audio thread");
+        }
 
         _critSect.Enter();
     }
@@ -1375,20 +1401,33 @@ int32_t AudioDeviceLinuxALSA::StartRecording()
     // RECORDING
     const char* threadName = "webrtc_audio_module_capture_thread";
     _firstRecord = true;
-    _ptrThreadRec = ThreadWrapper::CreateThread(
-        RecThreadFunc, this, threadName);
-
-    if (!_ptrThreadRec->Start())
+    _ptrThreadRec = ThreadWrapper::CreateThread(RecThreadFunc,
+                                                this,
+                                                kRealtimePriority,
+                                                threadName);
+    if (_ptrThreadRec == NULL)
     {
         WEBRTC_TRACE(kTraceCritical, kTraceAudioDevice, _id,
-                     "  failed to start the rec audio thread");
+                     "  failed to create the rec audio thread");
         _recording = false;
-        _ptrThreadRec.reset();
         delete [] _recordingBuffer;
         _recordingBuffer = NULL;
         return -1;
     }
-    _ptrThreadRec->SetPriority(kRealtimePriority);
+
+    unsigned int threadID(0);
+    if (!_ptrThreadRec->Start(threadID))
+    {
+        WEBRTC_TRACE(kTraceCritical, kTraceAudioDevice, _id,
+                     "  failed to start the rec audio thread");
+        _recording = false;
+        delete _ptrThreadRec;
+        _ptrThreadRec = NULL;
+        delete [] _recordingBuffer;
+        _recordingBuffer = NULL;
+        return -1;
+    }
+    _recThreadID = threadID;
 
     errVal = LATE(snd_pcm_prepare)(_handleRecord);
     if (errVal < 0)
@@ -1441,10 +1480,15 @@ int32_t AudioDeviceLinuxALSA::StopRecording()
       _recording = false;
     }
 
-    if (_ptrThreadRec)
+    if (_ptrThreadRec && !_ptrThreadRec->Stop())
     {
-        _ptrThreadRec->Stop();
-        _ptrThreadRec.reset();
+        WEBRTC_TRACE(kTraceError, kTraceAudioDevice, _id,
+                     "    failed to stop the rec audio thread");
+        return -1;
+    }
+    else {
+        delete _ptrThreadRec;
+        _ptrThreadRec = NULL;
     }
 
     CriticalSectionScoped lock(&_critSect);
@@ -1529,8 +1573,20 @@ int32_t AudioDeviceLinuxALSA::StartPlayout()
 
     // PLAYOUT
     const char* threadName = "webrtc_audio_module_play_thread";
-    _ptrThreadPlay =  ThreadWrapper::CreateThread(PlayThreadFunc, this,
+    _ptrThreadPlay =  ThreadWrapper::CreateThread(PlayThreadFunc,
+                                                  this,
+                                                  kRealtimePriority,
                                                   threadName);
+    if (_ptrThreadPlay == NULL)
+    {
+        WEBRTC_TRACE(kTraceCritical, kTraceAudioDevice, _id,
+                     "    failed to create the play audio thread");
+        _playing = false;
+        delete [] _playoutBuffer;
+        _playoutBuffer = NULL;
+        return -1;
+    }
+
     int errVal = LATE(snd_pcm_prepare)(_handlePlayout);
     if (errVal < 0)
     {
@@ -1541,17 +1597,20 @@ int32_t AudioDeviceLinuxALSA::StartPlayout()
         // if snd_pcm_open fails will return -1
     }
 
-    if (!_ptrThreadPlay->Start())
+
+    unsigned int threadID(0);
+    if (!_ptrThreadPlay->Start(threadID))
     {
         WEBRTC_TRACE(kTraceCritical, kTraceAudioDevice, _id,
                      "  failed to start the play audio thread");
         _playing = false;
-        _ptrThreadPlay.reset();
+        delete _ptrThreadPlay;
+        _ptrThreadPlay = NULL;
         delete [] _playoutBuffer;
         _playoutBuffer = NULL;
         return -1;
     }
-    _ptrThreadPlay->SetPriority(kRealtimePriority);
+    _playThreadID = threadID;
 
     return 0;
 }
@@ -1576,10 +1635,15 @@ int32_t AudioDeviceLinuxALSA::StopPlayout()
     }
 
     // stop playout thread first
-    if (_ptrThreadPlay)
+    if (_ptrThreadPlay && !_ptrThreadPlay->Stop())
     {
-        _ptrThreadPlay->Stop();
-        _ptrThreadPlay.reset();
+        WEBRTC_TRACE(kTraceError, kTraceAudioDevice, _id,
+                     "  failed to stop the play audio thread");
+        return -1;
+    }
+    else {
+        delete _ptrThreadPlay;
+        _ptrThreadPlay = NULL;
     }
 
     CriticalSectionScoped lock(&_critSect);
@@ -1752,9 +1816,7 @@ int32_t AudioDeviceLinuxALSA::GetDevicesInfo(
     // Don't use snd_device_name_hint(-1,..) since there is a access violation
     // inside this ALSA API with libasound.so.2.0.0.
     int card = -1;
-#ifdef WEBRTC_LINUX
     while (!(LATE(snd_card_next)(&card)) && (card >= 0) && keepSearching) {
-#endif
         void **hints;
         err = LATE(snd_device_name_hint)(card, "pcm", &hints);
         if (err != 0)
@@ -1880,9 +1942,7 @@ int32_t AudioDeviceLinuxALSA::GetDevicesInfo(
                          LATE(snd_strerror)(err));
             // Continue and return true anyway, since we did get the whole list.
         }
-#ifdef WEBRTC_LINUX
       }
-#endif
 
     if (FUNC_GET_NUM_OF_DEVICE == function)
     {

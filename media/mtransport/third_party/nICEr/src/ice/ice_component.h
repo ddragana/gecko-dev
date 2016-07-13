@@ -70,12 +70,9 @@ struct nr_ice_component_ {
   struct nr_ice_cand_pair_ *nominated; /* Highest priority nomninated pair */
   struct nr_ice_cand_pair_ *active;
 
-  nr_stun_client_ctx *consent_ctx;
-  void *consent_timer;
-  void *consent_timeout;
-  void *consent_handle;
-  int can_send;
-  struct timeval consent_last_seen;
+  int keepalive_needed;
+  void *keepalive_timer;
+  nr_stun_client_ctx *keepalive_ctx;
 
   STAILQ_ENTRY(nr_ice_component_)entry;
 };

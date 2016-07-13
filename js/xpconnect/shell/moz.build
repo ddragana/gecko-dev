@@ -6,11 +6,6 @@
 
 GeckoProgram('xpcshell', linkage='dependent')
 
-if CONFIG['COMPILE_ENVIRONMENT']:
-    SDK_FILES.bin += [
-        '!xpcshell%s' % CONFIG['BIN_SUFFIX'],
-    ]
-
 SOURCES += [
     'xpcshell.cpp',
 ]
@@ -19,6 +14,11 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     SOURCES += [
         'xpcshellMacUtils.mm',
     ]
+
+if CONFIG['MOZ_SHARK']:
+    DEFINES['MOZ_SHARK'] = True
+if CONFIG['MOZ_CALLGRIND']:
+    DEFINES['MOZ_CALLGRIND'] = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -34,17 +34,4 @@ if CONFIG['_MSC_VER']:
 if CONFIG['OS_ARCH'] == 'WINNT':
     RCINCLUDE = 'xpcshell.rc'
 
-    if CONFIG['MOZ_SANDBOX']:
-        # For sandbox includes and the include dependencies those have
-        LOCAL_INCLUDES += [
-            '/security/sandbox/chromium',
-            '/security/sandbox/chromium-shim',
-        ]
-
-        USE_LIBS += [
-            'sandbox_s',
-        ]
-
-CFLAGS += CONFIG['TK_CFLAGS']
-CXXFLAGS += CONFIG['TK_CFLAGS']
-OS_LIBS += CONFIG['TK_LIBS']
+FAIL_ON_WARNINGS = True

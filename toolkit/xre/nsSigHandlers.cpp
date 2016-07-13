@@ -37,7 +37,7 @@
 #include <ucontext.h>
 #endif
 
-static const char* gProgname = "huh?";
+static char _progname[1024] = "huh?";
 
 // Note: some tests manipulate this value.
 unsigned int _gdb_sleep_duration = 300;
@@ -84,7 +84,7 @@ void
 ah_crap_handler(int signum)
 {
   printf("\nProgram %s (pid = %d) received signal %d.\n",
-         gProgname,
+         _progname,
          getpid(),
          signum);
 
@@ -94,7 +94,7 @@ ah_crap_handler(int signum)
 
   printf("Sleeping for %d seconds.\n",_gdb_sleep_duration);
   printf("Type 'gdb %s %d' to attach your debugger to this thread.\n",
-         gProgname,
+         _progname,
          getpid());
 
   // Allow us to be ptraced by gdb on Linux with Yama restrictions enabled.
@@ -227,12 +227,9 @@ static void fpehandler(int signum, siginfo_t *si, void *context)
 }
 #endif
 
-void InstallSignalHandlers(const char *aProgname)
+void InstallSignalHandlers(const char *ProgramName)
 {
-  const char* tmp = PL_strdup(aProgname);
-  if (tmp) {
-    gProgname = tmp;
-  }
+  PL_strncpy(_progname,ProgramName, (sizeof(_progname)-1) );
 
   const char *gdbSleep = PR_GetEnv("MOZ_GDB_SLEEP");
   if (gdbSleep && *gdbSleep)
@@ -264,7 +261,7 @@ void InstallSignalHandlers(const char *aProgname)
   sigaction(SIGFPE, &sa, &osa);
 #endif
 
-  if (!XRE_IsParentProcess()) {
+  if (XRE_IsContentProcess()) {
     /*
      * If the user is debugging a Gecko parent process in gdb and hits ^C to
      * suspend, a SIGINT signal will be sent to the child. We ignore this signal
@@ -386,14 +383,14 @@ LONG __stdcall FpeHandler(PEXCEPTION_POINTERS pe)
   return action;
 }
 
-void InstallSignalHandlers(const char *aProgname)
+void InstallSignalHandlers(const char *ProgramName)
 {
   gFPEPreviousFilter = SetUnhandledExceptionFilter(FpeHandler);
 }
 
 #else
 
-void InstallSignalHandlers(const char *aProgname)
+void InstallSignalHandlers(const char *ProgramName)
 {
 }
 

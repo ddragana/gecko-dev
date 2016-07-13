@@ -11,12 +11,13 @@
  * JS bytecode definitions.
  */
 
+#include "mozilla/UniquePtr.h"
+
 #include "jsbytecode.h"
 #include "jstypes.h"
 #include "NamespaceImports.h"
 
 #include "frontend/SourceNotes.h"
-#include "js/UniquePtr.h"
 #include "vm/Opcodes.h"
 #include "vm/Printer.h"
 
@@ -75,7 +76,7 @@ enum {
     JOF_CHECKSLOPPY     = 1 << 19,  /* Op can only be generated in sloppy mode */
     JOF_CHECKSTRICT     = 1 << 20,  /* Op can only be generated in strict mode */
     JOF_INVOKE          = 1 << 21,  /* JSOP_CALL, JSOP_FUNCALL, JSOP_FUNAPPLY,
-                                       JSOP_NEW, JSOP_EVAL, JSOP_CALLITER */
+                                       JSOP_NEW, JSOP_EVAL */
     /* 1 << 22 is unused */
     /* 1 << 23 is unused */
     /* 1 << 24 is unused */
@@ -379,6 +380,18 @@ struct JSCodeSpec {
     uint32_t type() const { return JOF_TYPE(format); }
 };
 
+extern const JSCodeSpec js_CodeSpec[];
+extern const unsigned   js_NumCodeSpecs;
+extern const char       * const js_CodeName[];
+
+/* Shorthand for type from opcode. */
+
+static inline uint32_t
+JOF_OPTYPE(JSOp op)
+{
+    return JOF_TYPE(js_CodeSpec[op].format);
+}
+
 /* Silence unreferenced formal parameter warnings */
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -387,22 +400,10 @@ struct JSCodeSpec {
 
 namespace js {
 
-extern const JSCodeSpec CodeSpec[];
-extern const unsigned   NumCodeSpecs;
-extern const char       * const CodeName[];
-
-/* Shorthand for type from opcode. */
-
-static inline uint32_t
-JOF_OPTYPE(JSOp op)
-{
-    return JOF_TYPE(CodeSpec[op].format);
-}
-
 static inline bool
 IsJumpOpcode(JSOp op)
 {
-    uint32_t type = JOF_TYPE(CodeSpec[op].format);
+    uint32_t type = JOF_TYPE(js_CodeSpec[op].format);
 
     /*
      * LABEL opcodes have type JOF_JUMP but are no-ops, don't treat them as
@@ -428,21 +429,6 @@ BytecodeFallsThrough(JSOp op)
         return true;
       default:
         return true;
-    }
-}
-
-static inline bool
-BytecodeIsJumpTarget(JSOp op)
-{
-    switch (op) {
-      case JSOP_JUMPTARGET:
-      case JSOP_LOOPHEAD:
-      case JSOP_LOOPENTRY:
-      case JSOP_ENDITER:
-      case JSOP_TRY:
-        return true;
-      default:
-        return false;
     }
 }
 
@@ -572,7 +558,7 @@ GetVariableBytecodeLength(jsbytecode* pc);
  *
  * The caller must call JS_free on the result after a successful call.
  */
-UniqueChars
+mozilla::UniquePtr<char[], JS::FreePolicy>
 DecompileValueGenerator(JSContext* cx, int spindex, HandleValue v,
                         HandleString fallback, int skipStackHits = 0);
 
@@ -593,7 +579,7 @@ GetDecomposeLength(jsbytecode* pc, size_t len)
      * The last byte of a DECOMPOSE op stores the decomposed length.  This is a
      * constant: perhaps we should just hardcode values instead?
      */
-    MOZ_ASSERT(size_t(CodeSpec[*pc].length) == len);
+    MOZ_ASSERT(size_t(js_CodeSpec[*pc].length) == len);
     return (unsigned) pc[len - 1];
 }
 
@@ -603,8 +589,8 @@ GetBytecodeLength(jsbytecode* pc)
     JSOp op = (JSOp)*pc;
     MOZ_ASSERT(op < JSOP_LIMIT);
 
-    if (CodeSpec[op].length != -1)
-        return CodeSpec[op].length;
+    if (js_CodeSpec[op].length != -1)
+        return js_CodeSpec[op].length;
     return GetVariableBytecodeLength(pc);
 }
 
@@ -687,7 +673,7 @@ IsAliasedVarOp(JSOp op)
 inline bool
 IsGlobalOp(JSOp op)
 {
-    return CodeSpec[op].format & JOF_GNAME;
+    return js_CodeSpec[op].format & JOF_GNAME;
 }
 
 inline bool
@@ -699,36 +685,22 @@ IsEqualityOp(JSOp op)
 inline bool
 IsCheckStrictOp(JSOp op)
 {
-    return CodeSpec[op].format & JOF_CHECKSTRICT;
+    return js_CodeSpec[op].format & JOF_CHECKSTRICT;
 }
 
 #ifdef DEBUG
 inline bool
 IsCheckSloppyOp(JSOp op)
 {
-    return CodeSpec[op].format & JOF_CHECKSLOPPY;
+    return js_CodeSpec[op].format & JOF_CHECKSLOPPY;
 }
 #endif
-
-inline bool
-IsAtomOp(JSOp op)
-{
-    return JOF_OPTYPE(op) == JOF_ATOM;
-}
 
 inline bool
 IsGetPropPC(jsbytecode* pc)
 {
     JSOp op = JSOp(*pc);
     return op == JSOP_LENGTH  || op == JSOP_GETPROP || op == JSOP_CALLPROP;
-}
-
-inline bool
-IsHiddenInitOp(JSOp op)
-{
-    return op == JSOP_INITHIDDENPROP || op == JSOP_INITHIDDENELEM ||
-           op == JSOP_INITHIDDENPROP_GETTER || op == JSOP_INITHIDDENELEM_GETTER ||
-           op == JSOP_INITHIDDENPROP_SETTER || op == JSOP_INITHIDDENELEM_SETTER;
 }
 
 inline bool
@@ -768,7 +740,7 @@ IsSetElemPC(jsbytecode* pc)
 inline bool
 IsCallPC(jsbytecode* pc)
 {
-    return CodeSpec[*pc].format & JOF_INVOKE;
+    return js_CodeSpec[*pc].format & JOF_INVOKE;
 }
 
 inline bool
@@ -800,42 +772,127 @@ GetBytecodeInteger(jsbytecode* pc)
  */
 class PCCounts
 {
-    /*
-     * Offset of the pc inside the script. This fields is used to lookup opcode
-     * which have annotations.
-     */
-    size_t pcOffset_;
-
-    /*
-     * Record the number of execution of one instruction, or the number of
-     * throws executed.
-     */
-    uint64_t numExec_;
+    friend class ::JSScript;
+    double* counts;
+#ifdef DEBUG
+    size_t capacity;
+#elif JS_BITS_PER_WORD == 32
+    void* padding;
+#endif
 
  public:
-    explicit PCCounts(size_t off)
-      : pcOffset_(off),
-        numExec_(0)
-    {}
 
-    size_t pcOffset() const {
-        return pcOffset_;
+    enum BaseCounts {
+        BASE_INTERP = 0,
+
+        BASE_LIMIT
+    };
+
+    enum AccessCounts {
+        ACCESS_MONOMORPHIC = BASE_LIMIT,
+        ACCESS_DIMORPHIC,
+        ACCESS_POLYMORPHIC,
+
+        ACCESS_BARRIER,
+        ACCESS_NOBARRIER,
+
+        ACCESS_UNDEFINED,
+        ACCESS_NULL,
+        ACCESS_BOOLEAN,
+        ACCESS_INT32,
+        ACCESS_DOUBLE,
+        ACCESS_STRING,
+        ACCESS_OBJECT,
+
+        ACCESS_LIMIT
+    };
+
+    static bool accessOp(JSOp op) {
+        /*
+         * Access ops include all name, element and property reads, as well as
+         * SETELEM and SETPROP (for ElementCounts/PropertyCounts alignment).
+         */
+        if (op == JSOP_SETELEM || op == JSOP_SETPROP)
+            return true;
+        int format = js_CodeSpec[op].format;
+        return !!(format & (JOF_NAME | JOF_GNAME | JOF_ELEM | JOF_PROP))
+            && !(format & JOF_SET);
     }
 
-    // Used for sorting and searching.
-    bool operator<(const PCCounts& rhs) const {
-        return pcOffset_ < rhs.pcOffset_;
+    enum ElementCounts {
+        ELEM_ID_INT = ACCESS_LIMIT,
+        ELEM_ID_DOUBLE,
+        ELEM_ID_OTHER,
+        ELEM_ID_UNKNOWN,
+
+        ELEM_OBJECT_TYPED,
+        ELEM_OBJECT_PACKED,
+        ELEM_OBJECT_DENSE,
+        ELEM_OBJECT_OTHER,
+
+        ELEM_LIMIT
+    };
+
+    static bool elementOp(JSOp op) {
+        return accessOp(op) && (JOF_MODE(js_CodeSpec[op].format) == JOF_ELEM);
     }
 
-    uint64_t& numExec() {
-        return numExec_;
-    }
-    uint64_t numExec() const {
-        return numExec_;
+    enum PropertyCounts {
+        PROP_STATIC = ACCESS_LIMIT,
+        PROP_DEFINITE,
+        PROP_OTHER,
+
+        PROP_LIMIT
+    };
+
+    static bool propertyOp(JSOp op) {
+        return accessOp(op) && (JOF_MODE(js_CodeSpec[op].format) == JOF_PROP);
     }
 
-    static const char* numExecName;
+    enum ArithCounts {
+        ARITH_INT = BASE_LIMIT,
+        ARITH_DOUBLE,
+        ARITH_OTHER,
+        ARITH_UNKNOWN,
+
+        ARITH_LIMIT
+    };
+
+    static bool arithOp(JSOp op) {
+        return !!(js_CodeSpec[op].format & JOF_ARITH);
+    }
+
+    static size_t numCounts(JSOp op)
+    {
+        if (accessOp(op)) {
+            if (elementOp(op))
+                return ELEM_LIMIT;
+            if (propertyOp(op))
+                return PROP_LIMIT;
+            return ACCESS_LIMIT;
+        }
+        if (arithOp(op))
+            return ARITH_LIMIT;
+        return BASE_LIMIT;
+    }
+
+    static const char* countName(JSOp op, size_t which);
+
+    double* rawCounts() const { return counts; }
+
+    double& get(size_t which) {
+        MOZ_ASSERT(which < capacity);
+        return counts[which];
+    }
+
+    /* Boolean conversion, for 'if (counters) ...' */
+    operator void*() const {
+        return counts;
+    }
 };
+
+/* Necessary for alignment with the script. */
+JS_STATIC_ASSERT(sizeof(PCCounts) % sizeof(Value) == 0);
 
 static inline jsbytecode*
 GetNextPc(jsbytecode* pc)
@@ -861,8 +918,7 @@ DumpPCCounts(JSContext* cx, JS::Handle<JSScript*> script, Sprinter* sp);
 
 namespace jit { struct IonScriptCounts; }
 void
-DumpIonScriptCounts(js::Sprinter* sp, HandleScript script,
-                    jit::IonScriptCounts* ionCounts);
+DumpIonScriptCounts(js::Sprinter* sp, jit::IonScriptCounts* ionCounts);
 
 void
 DumpCompartmentPCCounts(JSContext* cx);

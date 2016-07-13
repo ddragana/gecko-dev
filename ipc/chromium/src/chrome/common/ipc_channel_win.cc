@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -14,21 +12,10 @@
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
+#include "base/non_thread_safe.h"
 #include "base/win_util.h"
 #include "chrome/common/ipc_message_utils.h"
 #include "mozilla/ipc/ProtocolUtils.h"
-
-// ChannelImpl is used on the IPC thread, but constructed on a different thread,
-// so it has to hold the nsAutoOwningThread as a pointer, and we need a slightly
-// different macro.
-#ifdef DEBUG
-#define ASSERT_OWNINGTHREAD(_class) \
-  if (nsAutoOwningThread* owningThread = _mOwningThread.get()) {               \
-    NS_CheckThreadSafe(owningThread->GetThread(), #_class " not thread-safe"); \
-  }
-#else
-#define ASSERT_OWNINGTHREAD(_class) ((void)0)
-#endif
 
 namespace IPC {
 //------------------------------------------------------------------------------
@@ -88,7 +75,6 @@ void Channel::ChannelImpl::Init(Mode mode, Listener* listener) {
   processing_incoming_ = false;
   closed_ = false;
   output_queue_length_ = 0;
-  input_buf_offset_ = 0;
 }
 
 void Channel::ChannelImpl::OutputQueuePush(Message* msg)
@@ -108,7 +94,9 @@ HANDLE Channel::ChannelImpl::GetServerPipeHandle() const {
 }
 
 void Channel::ChannelImpl::Close() {
-  ASSERT_OWNINGTHREAD(ChannelImpl);
+  if (thread_check_.get()) {
+    DCHECK(thread_check_->CalledOnValidThread());
+  }
 
   bool waited = false;
   if (input_state_.is_pending || output_state_.is_pending) {
@@ -133,14 +121,16 @@ void Channel::ChannelImpl::Close() {
     delete m;
   }
 
-#ifdef DEBUG
-  _mOwningThread = nullptr;
-#endif
+  if (thread_check_.get())
+    thread_check_.reset();
+
   closed_ = true;
 }
 
 bool Channel::ChannelImpl::Send(Message* message) {
-  ASSERT_OWNINGTHREAD(ChannelImpl);
+  if (thread_check_.get()) {
+    DCHECK(thread_check_->CalledOnValidThread());
+  }
 #ifdef IPC_MESSAGE_DEBUG_EXTRA
   DLOG(INFO) << "sending message @" << message << " on channel @" << this
              << " with type " << message->type()
@@ -249,11 +239,8 @@ bool Channel::ChannelImpl::EnqueueHelloMessage() {
 }
 
 bool Channel::ChannelImpl::Connect() {
-#ifdef DEBUG
-  if (!_mOwningThread) {
-    _mOwningThread = mozilla::MakeUnique<nsAutoOwningThread>();
-  }
-#endif
+  if (!thread_check_.get())
+    thread_check_.reset(new NonThreadSafe());
 
   if (pipe_ == INVALID_HANDLE_VALUE)
     return false;
@@ -268,7 +255,7 @@ bool Channel::ChannelImpl::Connect() {
     // Complete setup asynchronously. By not setting input_state_.is_pending
     // to true, we indicate to OnIOCompleted that this is the special
     // initialization signal.
-    MessageLoopForIO::current()->PostTask(factory_.NewRunnableMethod(
+    MessageLoopForIO::current()->PostTask(FROM_HERE, factory_.NewRunnableMethod(
         &Channel::ChannelImpl::OnIOCompleted, &input_state_.context, 0, 0));
   }
 
@@ -278,7 +265,7 @@ bool Channel::ChannelImpl::Connect() {
 }
 
 bool Channel::ChannelImpl::ProcessConnection() {
-  ASSERT_OWNINGTHREAD(ChannelImpl);
+  DCHECK(thread_check_->CalledOnValidThread());
   if (input_state_.is_pending)
     input_state_.is_pending = false;
 
@@ -314,7 +301,7 @@ bool Channel::ChannelImpl::ProcessConnection() {
 bool Channel::ChannelImpl::ProcessIncomingMessages(
     MessageLoopForIO::IOContext* context,
     DWORD bytes_read) {
-  ASSERT_OWNINGTHREAD(ChannelImpl);
+  DCHECK(thread_check_->CalledOnValidThread());
   if (input_state_.is_pending) {
     input_state_.is_pending = false;
     DCHECK(context);
@@ -333,8 +320,8 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
 
       // Read from pipe...
       BOOL ok = ReadFile(pipe_,
-                         input_buf_ + input_buf_offset_,
-                         Channel::kReadBufferSize - input_buf_offset_,
+                         input_buf_,
+                         Channel::kReadBufferSize,
                          &bytes_read,
                          &input_state_.context.overlapped);
       if (!ok) {
@@ -353,95 +340,55 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
 
     // Process messages from input buffer.
 
-    const char *p = input_buf_;
-    const char *end = input_buf_ + input_buf_offset_ + bytes_read;
+    const char* p, *end;
+    if (input_overflow_buf_.empty()) {
+      p = input_buf_;
+      end = p + bytes_read;
+    } else {
+      if (input_overflow_buf_.size() > (kMaximumMessageSize - bytes_read)) {
+        input_overflow_buf_.clear();
+        CHROMIUM_LOG(ERROR) << "IPC message is too big";
+        return false;
+      }
+      input_overflow_buf_.append(input_buf_, bytes_read);
+      p = input_overflow_buf_.data();
+      end = p + input_overflow_buf_.size();
+    }
 
     while (p < end) {
-      // Try to figure out how big the message is. Size is 0 if we haven't read
-      // enough of the header to know the size.
-      uint32_t message_length = 0;
-      if (incoming_message_.isSome()) {
-        message_length = incoming_message_.ref().size();
-      } else {
-        message_length = Message::MessageSize(p, end);
-      }
-
-      if (!message_length) {
-        // We haven't seen the full message header.
-        MOZ_ASSERT(incoming_message_.isNothing());
-
-        // Move everything we have to the start of the buffer. We'll finish
-        // reading this message when we get more data. For now we leave it in
-        // input_buf_.
-        memmove(input_buf_, p, end - p);
-        input_buf_offset_ = end - p;
-
-        break;
-      }
-
-      input_buf_offset_ = 0;
-
-      bool partial;
-      if (incoming_message_.isSome()) {
-        // We already have some data for this message stored in
-        // incoming_message_. We want to append the new data there.
-        Message& m = incoming_message_.ref();
-
-        // How much data from this message remains to be added to
-        // incoming_message_?
-        MOZ_ASSERT(message_length > m.CurrentSize());
-        uint32_t remaining = message_length - m.CurrentSize();
-
-        // How much data from this message is stored in input_buf_?
-        uint32_t in_buf = std::min(remaining, uint32_t(end - p));
-
-        m.InputBytes(p, in_buf);
-        p += in_buf;
-
-        // Are we done reading this message?
-        partial = in_buf != remaining;
-      } else {
-        // How much data from this message is stored in input_buf_?
-        uint32_t in_buf = std::min(message_length, uint32_t(end - p));
-
-        incoming_message_.emplace(p, in_buf);
-        p += in_buf;
-
-        // Are we done reading this message?
-        partial = in_buf != message_length;
-      }
-
-      if (partial) {
-        break;
-      }
-
-      Message& m = incoming_message_.ref();
-
+      const char* message_tail = Message::FindNext(p, end);
+      if (message_tail) {
+        int len = static_cast<int>(message_tail - p);
+        const Message m(p, len);
 #ifdef IPC_MESSAGE_DEBUG_EXTRA
-      DLOG(INFO) << "received message on channel @" << this <<
-                    " with type " << m.type();
+        DLOG(INFO) << "received message on channel @" << this <<
+                      " with type " << m.type();
 #endif
-      if (m.routing_id() == MSG_ROUTING_NONE &&
-	  m.type() == HELLO_MESSAGE_TYPE) {
-	// The Hello message contains the process id and must include the
-	// shared secret, if we are waiting for it.
-	MessageIterator it = MessageIterator(m);
-	int32_t claimed_pid = it.NextInt();
-	if (waiting_for_shared_secret_ && (it.NextInt() != shared_secret_)) {
-	  NOTREACHED();
-	  // Something went wrong. Abort connection.
-	  Close();
-	  listener_->OnChannelError();
-	  return false;
-	}
-	waiting_for_shared_secret_ = false;
-	listener_->OnChannelConnected(claimed_pid);
+        if (m.routing_id() == MSG_ROUTING_NONE &&
+            m.type() == HELLO_MESSAGE_TYPE) {
+          // The Hello message contains the process id and must include the
+          // shared secret, if we are waiting for it.
+          MessageIterator it = MessageIterator(m);
+          int32_t claimed_pid = it.NextInt();
+          if (waiting_for_shared_secret_ && (it.NextInt() != shared_secret_)) {
+            NOTREACHED();
+            // Something went wrong. Abort connection.
+            Close();
+            listener_->OnChannelError();
+            return false;
+          }
+          waiting_for_shared_secret_ = false;
+          listener_->OnChannelConnected(claimed_pid);
+        } else {
+          listener_->OnMessageReceived(m);
+        }
+        p = message_tail;
       } else {
-	listener_->OnMessageReceived(mozilla::Move(m));
+        // Last message is partial.
+        break;
       }
-
-      incoming_message_.reset();
     }
+    input_overflow_buf_.assign(p, end - p);
 
     bytes_read = 0;  // Get more data.
   }
@@ -454,7 +401,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
     DWORD bytes_written) {
   DCHECK(!waiting_connect_);  // Why are we trying to send messages if there's
                               // no connection?
-  ASSERT_OWNINGTHREAD(ChannelImpl);
+  DCHECK(thread_check_->CalledOnValidThread());
 
   if (output_state_.is_pending) {
     DCHECK(context);
@@ -467,15 +414,8 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
     // Message was sent.
     DCHECK(!output_queue_.empty());
     Message* m = output_queue_.front();
-
-    MOZ_RELEASE_ASSERT(partial_write_iter_.isSome());
-    Pickle::BufferList::IterImpl& iter = partial_write_iter_.ref();
-    iter.Advance(m->Buffers(), bytes_written);
-    if (iter.Done()) {
-      partial_write_iter_.reset();
-      OutputQueuePop();
-      delete m;
-    }
+    OutputQueuePop();
+    delete m;
   }
 
   if (output_queue_.empty())
@@ -486,16 +426,9 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
 
   // Write to pipe...
   Message* m = output_queue_.front();
-
-  if (partial_write_iter_.isNothing()) {
-    Pickle::BufferList::IterImpl iter(m->Buffers());
-    partial_write_iter_.emplace(iter);
-  }
-
-  Pickle::BufferList::IterImpl& iter = partial_write_iter_.ref();
   BOOL ok = WriteFile(pipe_,
-                      iter.Data(),
-                      iter.RemainingInSegment(),
+                      m->data(),
+                      m->size(),
                       &bytes_written,
                       &output_state_.context.overlapped);
   if (!ok) {
@@ -526,7 +459,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
 void Channel::ChannelImpl::OnIOCompleted(MessageLoopForIO::IOContext* context,
                             DWORD bytes_transfered, DWORD error) {
   bool ok;
-  ASSERT_OWNINGTHREAD(ChannelImpl);
+  DCHECK(thread_check_->CalledOnValidThread());
   if (context == &input_state_.context) {
     if (waiting_connect_) {
       if (!ProcessConnection())
@@ -569,17 +502,14 @@ uint32_t Channel::ChannelImpl::Unsound_NumQueuedMessages() const
 Channel::Channel(const std::wstring& channel_id, Mode mode,
                  Listener* listener)
     : channel_impl_(new ChannelImpl(channel_id, mode, listener)) {
-  MOZ_COUNT_CTOR(IPC::Channel);
 }
 
 Channel::Channel(const std::wstring& channel_id, void* server_pipe,
                  Mode mode, Listener* listener)
    : channel_impl_(new ChannelImpl(channel_id, server_pipe, mode, listener)) {
-  MOZ_COUNT_CTOR(IPC::Channel);
 }
 
 Channel::~Channel() {
-  MOZ_COUNT_DTOR(IPC::Channel);
   delete channel_impl_;
 }
 

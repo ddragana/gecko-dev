@@ -3,6 +3,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+if CONFIG['LIBXUL_SDK']:
+    error('toolkit.mozbuild is not compatible with --enable-libxul-sdk=')
+
 if CONFIG['MOZ_SANDBOX']:
     DIRS += ['/security/sandbox']
 
@@ -66,7 +69,15 @@ if CONFIG['MOZ_OMX_PLUGIN']:
         '/media/omx-plugin/lib/ics/libutils',
         '/media/omx-plugin/lib/ics/libstagefright',
         '/media/omx-plugin/lib/ics/libvideoeditorplayer',
+        '/media/omx-plugin/lib/gb/libutils',
+        '/media/omx-plugin/lib/gb/libstagefright',
+        '/media/omx-plugin/lib/gb/libstagefright_color_conversion',
+        '/media/omx-plugin/lib/gb235/libstagefright',
         '/media/omx-plugin',
+        '/media/omx-plugin/gb',
+        '/media/omx-plugin/gb235',
+        '/media/omx-plugin/lib/hc/libstagefright',
+        '/media/omx-plugin/hc',
         '/media/omx-plugin/kk',
     ]
 
@@ -111,9 +122,7 @@ if CONFIG['MOZ_JPROF']:
     DIRS += ['/tools/jprof']
 
 DIRS += [
-    '/tools/power',
     '/tools/profiler',
-    '/tools/memory-profiler',
     '/xpfe/components',
 ]
 
@@ -132,7 +141,6 @@ if CONFIG['MOZ_PREF_EXTENSIONS']:
     DIRS += ['/extensions/pref']
 
 DIRS += [
-    '/devtools',
     '/services',
     '/startupcache',
     '/js/ductwork/debugger',
@@ -147,8 +155,12 @@ DIRS += [
     '/toolkit/library',
 ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_ENABLE_GNOME_COMPONENT']:
     DIRS += ['/toolkit/system/gnome']
+
+# if QtNetwork is present, it will do its own network monitoring
+if not CONFIG['MOZ_ENABLE_QTNETWORK'] and CONFIG['MOZ_ENABLE_DBUS']:
+    DIRS += ['/toolkit/system/dbus']
 
 DIRS += ['/addon-sdk']
 
@@ -164,7 +176,6 @@ if CONFIG['ENABLE_TESTS']:
     DIRS += [
         '/testing/mochitest',
         '/testing/xpcshell',
-        '/testing/tools/minidumpwriter',
         '/testing/tools/screenshot',
         '/testing/profiles',
         '/testing/mozbase',
@@ -173,12 +184,9 @@ if CONFIG['ENABLE_TESTS']:
         '/testing/web-platform',
     ]
 
-    # The file id utility requires breakpad libraries.
-    if CONFIG['MOZ_CRASHREPORTER']:
-        DIRS += ['/testing/tools/fileid']
-
-    if CONFIG['MOZ_WEBRTC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk' and not CONFIG['MOZ_TASK_TRACER']:
+    if CONFIG['MOZ_WEBRTC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
             DIRS += [
                 '/media/webrtc/signaling/test',
+                '/media/webrtc/signaling/test/standalone',
                 '/media/mtransport/test',
             ]

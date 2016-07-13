@@ -8,14 +8,14 @@
   * Test bookmarksService.getBookmarkedURIFor(aURI);
   */
 
-var hs = PlacesUtils.history;
-var bs = PlacesUtils.bookmarks;
+let hs = PlacesUtils.history;
+let bs = PlacesUtils.bookmarks;
 
 function run_test() {
   run_next_test();
 }
 
-add_task(function* test_getBookmarkedURIFor() {
+add_task(function test_getBookmarkedURIFor() {
   let now = Date.now() * 1000;
   const sourceURI = uri("http://test.mozilla.org/");
   // Add a visit and a bookmark.

@@ -79,7 +79,8 @@ bool SSLFingerprint::operator==(const SSLFingerprint& other) const {
 
 std::string SSLFingerprint::GetRfc4572Fingerprint() const {
   std::string fingerprint =
-      rtc::hex_encode_with_delimiter(digest.data(), digest.size(), ':');
+      rtc::hex_encode_with_delimiter(
+          digest.data(), digest.length(), ':');
   std::transform(fingerprint.begin(), fingerprint.end(),
                  fingerprint.begin(), ::toupper);
   return fingerprint;

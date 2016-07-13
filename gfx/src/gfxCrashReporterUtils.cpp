@@ -16,7 +16,7 @@
 #include "mozilla/Services.h"           // for GetObserverService
 #include "mozilla/StaticMutex.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
-#include "mozilla/RefPtr.h"             // for RefPtr
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for nsCOMPtr
 #include "nsError.h"                    // for NS_OK, NS_FAILED, nsresult
 #include "nsExceptionHandler.h"         // for AppendAppNotesToCrashReport
@@ -26,6 +26,7 @@
 #include "nsIObserverService.h"         // for nsIObserverService
 #include "nsIRunnable.h"                // for nsIRunnable
 #include "nsISupports.h"
+#include "nsString.h"               // for nsAutoCString, nsCString, etc
 #include "nsTArray.h"                   // for nsTArray
 #include "nsThreadUtils.h"              // for NS_DispatchToMainThread, etc
 #include "nscore.h"                     // for NS_IMETHOD, NS_IMETHODIMP, etc
@@ -65,7 +66,7 @@ ObserverToDestroyFeaturesAlreadyReported::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
-class RegisterObserverRunnable : public Runnable {
+class RegisterObserverRunnable : public nsRunnable {
 public:
   NS_IMETHOD Run() override {
     // LeakLog made me do this. Basically, I just wanted gFeaturesAlreadyReported to be a static nsTArray<nsCString>,
@@ -77,26 +78,10 @@ public:
     nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
     if (!observerService)
       return NS_OK;
-    RefPtr<ObserverToDestroyFeaturesAlreadyReported> observer = new ObserverToDestroyFeaturesAlreadyReported;
+    nsRefPtr<ObserverToDestroyFeaturesAlreadyReported> observer = new ObserverToDestroyFeaturesAlreadyReported;
     observerService->AddObserver(observer, "xpcom-shutdown", false);
     return NS_OK;
   }
-};
-
-class AppendAppNotesRunnable : public CancelableRunnable {
-public:
-  explicit AppendAppNotesRunnable(const nsACString& aFeatureStr)
-    : mFeatureString(aFeatureStr)
-  {
-  }
-
-  NS_IMETHOD Run() override {
-    CrashReporter::AppendAppNotesToCrashReport(mFeatureString);
-    return NS_OK;
-  }
-
-private:
-  nsAutoCString mFeatureString;
 };
 
 void
@@ -113,33 +98,20 @@ ScopedGfxFeatureReporter::WriteAppNote(char statusChar)
   nsAutoCString featureString;
   featureString.AppendPrintf("%s%c ",
                              mFeature,
-                             statusChar);
+                             mStatusChar);
 
   if (!gFeaturesAlreadyReported->Contains(featureString)) {
     gFeaturesAlreadyReported->AppendElement(featureString);
-    AppNote(featureString);
+    CrashReporter::AppendAppNotesToCrashReport(featureString);
   }
 }
 
-void
-ScopedGfxFeatureReporter::AppNote(const nsACString& aMessage)
-{
-  if (NS_IsMainThread()) {
-    CrashReporter::AppendAppNotesToCrashReport(aMessage);
-  } else {
-    nsCOMPtr<nsIRunnable> r = new AppendAppNotesRunnable(aMessage);
-    NS_DispatchToMainThread(r);
-  }
-}
-  
 } // end namespace mozilla
 
 #else
 
 namespace mozilla {
 void ScopedGfxFeatureReporter::WriteAppNote(char) {}
-void ScopedGfxFeatureReporter::AppNote(const nsACString&) {}
-  
 } // namespace mozilla
 
 #endif

@@ -13,7 +13,7 @@ const PROFILE_DIR= pathFor('ProfD');
 const isWindows = platform.toLowerCase().indexOf('win') === 0;
 const isOSX = platform.toLowerCase().indexOf('darwin') === 0;
 
-var scripts = {
+let scripts = {
   'args.sh': 'echo $1 $2 $3 $4',
   'args.bat': 'echo %1 %2 %3 %4',
   'check-env.sh': 'echo $CHILD_PROCESS_ENV_TEST',
@@ -66,7 +66,7 @@ function makeExecutable (name) {
   let { CC } = require('chrome');
   let nsILocalFile = CC('@mozilla.org/file/local;1', 'nsILocalFile', 'initWithPath');
   let file = nsILocalFile(name);
-  file.permissions = 0o777;
+  file.permissions = parseInt('0777', 8);
 }
 
 function deleteFile (name) {

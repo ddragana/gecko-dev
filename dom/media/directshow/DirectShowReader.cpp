@@ -11,15 +11,20 @@
 #include "AudioSinkFilter.h"
 #include "SourceFilter.h"
 #include "SampleSink.h"
+#include "MediaResource.h"
 #include "VideoUtils.h"
 
 using namespace mozilla::media;
 
 namespace mozilla {
 
-LogModule*
+
+PRLogModuleInfo*
 GetDirectShowLog() {
-  static LazyLogModule log("DirectShowDecoder");
+  static PRLogModuleInfo* log = nullptr;
+  if (!log) {
+    log = PR_NewLogModule("DirectShowDecoder");
+  }
   return log;
 }
 
@@ -28,12 +33,13 @@ GetDirectShowLog() {
 DirectShowReader::DirectShowReader(AbstractMediaDecoder* aDecoder)
   : MediaDecoderReader(aDecoder),
     mMP3FrameParser(aDecoder->GetResource()->GetLength()),
-#ifdef DIRECTSHOW_REGISTER_GRAPH
+#ifdef DEBUG
     mRotRegister(0),
 #endif
     mNumChannels(0),
     mAudioRate(0),
-    mBytesPerSample(0)
+    mBytesPerSample(0),
+    mDuration(0)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
   MOZ_COUNT_CTOR(DirectShowReader);
@@ -43,11 +49,18 @@ DirectShowReader::~DirectShowReader()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
   MOZ_COUNT_DTOR(DirectShowReader);
-#ifdef DIRECTSHOW_REGISTER_GRAPH
+#ifdef DEBUG
   if (mRotRegister) {
     RemoveGraphFromRunningObjectTable(mRotRegister);
   }
 #endif
+}
+
+nsresult
+DirectShowReader::Init(MediaDecoderReader* aCloneDonor)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
+  return NS_OK;
 }
 
 // Try to parse the MP3 stream to make sure this is indeed an MP3, get the
@@ -97,22 +110,26 @@ DirectShowReader::ReadMetadata(MediaInfo* aInfo,
                         nullptr,
                         CLSCTX_INPROC_SERVER,
                         IID_IGraphBuilder,
-                        reinterpret_cast<void**>(static_cast<IGraphBuilder**>(getter_AddRefs(mGraph))));
+                        reinterpret_cast<void**>(static_cast<IGraphBuilder**>(byRef(mGraph))));
   NS_ENSURE_TRUE(SUCCEEDED(hr) && mGraph, NS_ERROR_FAILURE);
 
   rv = ParseMP3Headers(&mMP3FrameParser, mDecoder->GetResource());
   NS_ENSURE_SUCCESS(rv, rv);
 
-  #ifdef DIRECTSHOW_REGISTER_GRAPH
+  #ifdef DEBUG
+  // Add the graph to the Running Object Table so that we can connect
+  // to this graph with GraphEdit/GraphStudio. Note: on Vista and up you must
+  // also regsvr32 proppage.dll from the Windows SDK.
+  // See: http://msdn.microsoft.com/en-us/library/ms787252(VS.85).aspx
   hr = AddGraphToRunningObjectTable(mGraph, &mRotRegister);
   NS_ENSURE_TRUE(SUCCEEDED(hr), NS_ERROR_FAILURE);
   #endif
 
   // Extract the interface pointers we'll need from the filter graph.
-  hr = mGraph->QueryInterface(static_cast<IMediaControl**>(getter_AddRefs(mControl)));
+  hr = mGraph->QueryInterface(static_cast<IMediaControl**>(byRef(mControl)));
   NS_ENSURE_TRUE(SUCCEEDED(hr) && mControl, NS_ERROR_FAILURE);
 
-  hr = mGraph->QueryInterface(static_cast<IMediaSeeking**>(getter_AddRefs(mMediaSeeking)));
+  hr = mGraph->QueryInterface(static_cast<IMediaSeeking**>(byRef(mMediaSeeking)));
   NS_ENSURE_TRUE(SUCCEEDED(hr) && mMediaSeeking, NS_ERROR_FAILURE);
 
   // Build the graph. Create the filters we need, and connect them. We
@@ -134,7 +151,7 @@ DirectShowReader::ReadMetadata(MediaInfo* aInfo,
   hr = CreateAndAddFilter(mGraph,
                           CLSID_MPEG1Splitter,
                           L"MPEG1Splitter",
-                          getter_AddRefs(demuxer));
+                          byRef(demuxer));
   NS_ENSURE_TRUE(SUCCEEDED(hr), NS_ERROR_FAILURE);
 
   // Platform MP3 decoder.
@@ -145,11 +162,11 @@ DirectShowReader::ReadMetadata(MediaInfo* aInfo,
   hr = CreateAndAddFilter(mGraph,
                           CLSID_MPEG_LAYER_3_DECODER_FILTER,
                           L"MPEG Layer 3 Decoder",
-                          getter_AddRefs(decoder));
+                          byRef(decoder));
   if (FAILED(hr)) {
     // Failed to create MP3 decoder filter. Try to instantiate
     // the MP3 decoder DMO.
-    hr = AddMP3DMOWrapperFilter(mGraph, getter_AddRefs(decoder));
+    hr = AddMP3DMOWrapperFilter(mGraph, byRef(decoder));
     NS_ENSURE_TRUE(SUCCEEDED(hr), NS_ERROR_FAILURE);
   }
 
@@ -185,7 +202,6 @@ DirectShowReader::ReadMetadata(MediaInfo* aInfo,
 
   DWORD seekCaps = 0;
   hr = mMediaSeeking->GetCapabilities(&seekCaps);
-  mInfo.mMediaSeekable = SUCCEEDED(hr) && (AM_SEEKING_CanSeekAbsolute & seekCaps);
 
   int64_t duration = mMP3FrameParser.GetDuration();
   if (SUCCEEDED(hr)) {
@@ -206,6 +222,15 @@ DirectShowReader::ReadMetadata(MediaInfo* aInfo,
   return NS_OK;
 }
 
+bool
+DirectShowReader::IsMediaSeekable()
+{
+  DWORD seekCaps = 0;
+  HRESULT hr = mMediaSeeking->GetCapabilities(&seekCaps);
+  return ((AM_SEEKING_CanSeekAbsolute & seekCaps) ==
+          AM_SEEKING_CanSeekAbsolute);
+}
+
 inline float
 UnsignedByteToAudioSample(uint8_t aValue)
 {
@@ -220,7 +245,7 @@ DirectShowReader::Finish(HRESULT aStatus)
   LOG("DirectShowReader::Finish(0x%x)", aStatus);
   // Notify the filter graph of end of stream.
   RefPtr<IMediaEventSink> eventSink;
-  HRESULT hr = mGraph->QueryInterface(static_cast<IMediaEventSink**>(getter_AddRefs(eventSink)));
+  HRESULT hr = mGraph->QueryInterface(static_cast<IMediaEventSink**>(byRef(eventSink)));
   if (SUCCEEDED(hr) && eventSink) {
     eventSink->Notify(EC_COMPLETE, aStatus, 0);
   }
@@ -323,14 +348,28 @@ DirectShowReader::DecodeVideoFrame(bool &aKeyframeSkip,
   return false;
 }
 
-RefPtr<MediaDecoderReader::SeekPromise>
-DirectShowReader::Seek(SeekTarget aTarget, int64_t aEndTime)
+bool
+DirectShowReader::HasAudio()
 {
-  nsresult res = SeekInternal(aTarget.GetTime().ToMicroseconds());
+  MOZ_ASSERT(OnTaskQueue());
+  return true;
+}
+
+bool
+DirectShowReader::HasVideo()
+{
+  MOZ_ASSERT(OnTaskQueue());
+  return false;
+}
+
+nsRefPtr<MediaDecoderReader::SeekPromise>
+DirectShowReader::Seek(int64_t aTargetUs, int64_t aEndTime)
+{
+  nsresult res = SeekInternal(aTargetUs);
   if (NS_FAILED(res)) {
     return SeekPromise::CreateAndReject(res, __func__);
   } else {
-    return SeekPromise::CreateAndResolve(aTarget.GetTime(), __func__);
+    return SeekPromise::CreateAndResolve(aTargetUs, __func__);
   }
 }
 
@@ -359,6 +398,29 @@ DirectShowReader::SeekInternal(int64_t aTargetUs)
   NS_ENSURE_TRUE(SUCCEEDED(hr), NS_ERROR_FAILURE);
 
   return NS_OK;
+}
+
+void
+DirectShowReader::NotifyDataArrivedInternal(uint32_t aLength, int64_t aOffset)
+{
+  MOZ_ASSERT(OnTaskQueue());
+  if (!mMP3FrameParser.NeedsData()) {
+    return;
+  }
+
+  nsRefPtr<MediaByteBuffer> bytes = mDecoder->GetResource()->SilentReadAt(aOffset, aLength);
+  NS_ENSURE_TRUE_VOID(bytes);
+  mMP3FrameParser.Parse(bytes->Elements(), aLength, aOffset);
+  if (!mMP3FrameParser.IsMP3()) {
+    return;
+  }
+
+  int64_t duration = mMP3FrameParser.GetDuration();
+  if (duration != mDuration) {
+    MOZ_ASSERT(mDecoder);
+    mDuration = duration;
+    mDecoder->DispatchUpdateEstimatedMediaDuration(mDuration);
+  }
 }
 
 } // namespace mozilla

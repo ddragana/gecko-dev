@@ -14,8 +14,7 @@
 #include <utils/threads.h>
 
 #include "mozilla/media/MediaSystemResourceClient.h"
-#include "mozilla/MozPromise.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 namespace android {
 
@@ -25,7 +24,20 @@ class OMXCodecProxy : public MediaSource
                     , public mozilla::MediaSystemResourceReservationListener
 {
 public:
-  typedef mozilla::MozPromise<bool /* aIgnored */, bool /* aIgnored */, /* IsExclusive = */ true> CodecPromise;
+  /* Codec resource notification listener.
+   * All functions are called on the Binder thread.
+   */
+  struct CodecResourceListener : public virtual RefBase {
+    /* The codec resource is reserved and can be granted.
+     * The client can allocate the requested resource.
+     */
+    virtual void codecReserved() = 0;
+    /* The codec resource is not reserved any more.
+     * The client should release the resource as soon as possible if the
+     * resource is still being held.
+     */
+    virtual void codecCanceled() = 0;
+  };
 
   // Enumeration for the valid resource allcoation states
   enum class ResourceState : int8_t {
@@ -44,22 +56,24 @@ public:
           uint32_t flags = 0,
           const sp<ANativeWindow> &nativeWindow = nullptr);
 
-    RefPtr<CodecPromise> requestResource();
+    void setListener(const wp<CodecResourceListener>& listener);
+
+    void requestResource();
 
     // MediaSystemResourceReservationListener
     void ResourceReserved() override;
     void ResourceReserveFailed() override;
 
     // MediaSource
-    status_t start(MetaData *params = nullptr) override;
-    status_t stop() override;
+    virtual status_t start(MetaData *params = nullptr);
+    virtual status_t stop();
 
-    sp<MetaData> getFormat() override;
+    virtual sp<MetaData> getFormat();
 
-    status_t read(
-            MediaBuffer **buffer, const ReadOptions *options = nullptr) override;
+    virtual status_t read(
+            MediaBuffer **buffer, const ReadOptions *options = nullptr);
 
-    status_t pause() override;
+    virtual status_t pause();
 
 protected:
     OMXCodecProxy(
@@ -72,6 +86,11 @@ protected:
         const sp<ANativeWindow> &nativeWindow);
 
     virtual ~OMXCodecProxy();
+
+    void notifyResourceReserved();
+    void notifyResourceCanceled();
+
+    void notifyStatusChangedLocked();
 
 private:
     OMXCodecProxy(const OMXCodecProxy &);
@@ -91,9 +110,11 @@ private:
 
     sp<MediaSource> mOMXCodec;
 
-    RefPtr<mozilla::MediaSystemResourceClient> mResourceClient;
+    nsRefPtr<mozilla::MediaSystemResourceClient> mResourceClient;
     ResourceState mState;
-    mozilla::MozPromiseHolder<CodecPromise> mCodecPromise;
+
+    // Codec Resource Notification Listener
+    wp<CodecResourceListener> mListener;
 };
 
 } // namespace android

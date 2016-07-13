@@ -49,7 +49,7 @@ protected:
  * This class runs in a different thread and it calls the 'exec()' method.
  * The exec() must populate mFileList and mStatus then it must call RunShare();
  */
-class ArchiveReaderEvent : public Runnable
+class ArchiveReaderEvent : public nsRunnable
 {
 public:
   NS_DECL_NSIRUNNABLE
@@ -75,7 +75,7 @@ protected: // data
 
   nsCOMPtr<nsIMIMEService> mMimeService;
 
-  nsTArray<RefPtr<ArchiveItem> > mFileList; // this must be populated
+  nsTArray<nsRefPtr<ArchiveItem> > mFileList; // this must be populated
   nsresult mStatus;
 };
 

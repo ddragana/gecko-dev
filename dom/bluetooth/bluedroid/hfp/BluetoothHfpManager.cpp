@@ -108,18 +108,17 @@ protected:
   ~GetVolumeTask() { }
 };
 
-class BluetoothHfpManager::CloseScoTask : public Runnable
+class BluetoothHfpManager::CloseScoTask : public Task
 {
 private:
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(sBluetoothHfpManager);
     sBluetoothHfpManager->DisconnectSco();
-    return NS_OK;
   }
 };
 
-class BluetoothHfpManager::CloseScoRunnable : public Runnable
+class BluetoothHfpManager::CloseScoRunnable : public nsRunnable
 {
 public:
   NS_IMETHOD Run() override
@@ -127,16 +126,16 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
 
     MessageLoop::current()->PostDelayedTask(
-      MakeAndAddRef<CloseScoTask>(), sBusyToneInterval);
+      FROM_HERE, new CloseScoTask(), sBusyToneInterval);
 
     return NS_OK;
   }
 };
 
-class BluetoothHfpManager::RespondToBLDNTask : public Runnable
+class BluetoothHfpManager::RespondToBLDNTask : public Task
 {
 private:
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(sBluetoothHfpManager);
 
@@ -144,7 +143,6 @@ private:
       sBluetoothHfpManager->mDialingRequestProcessed = true;
       sBluetoothHfpManager->SendResponse(HFP_AT_RESPONSE_ERROR);
     }
-    return NS_OK;
   }
 };
 
@@ -222,7 +220,6 @@ BluetoothHfpManager::Cleanup()
   mService = HFP_NETWORK_STATE_NOT_AVAILABLE;
   mRoam = HFP_SERVICE_TYPE_HOME;
   mSignal = 0;
-  mNrecEnabled = HFP_NREC_STARTED;
 
   mController = nullptr;
 }
@@ -260,7 +257,7 @@ BluetoothHfpManager::Init()
   hal::GetCurrentBatteryInformation(&batteryInfo);
   Notify(batteryInfo);
 
-  mListener = MakeUnique<BluetoothRilListener>();
+  mListener = new BluetoothRilListener();
   NS_ENSURE_TRUE(mListener->Listen(true), false);
 
   nsCOMPtr<nsISettingsService> settings =
@@ -271,19 +268,19 @@ BluetoothHfpManager::Init()
   nsresult rv = settings->CreateLock(nullptr, getter_AddRefs(settingsLock));
   NS_ENSURE_SUCCESS(rv, false);
 
-  RefPtr<GetVolumeTask> callback = new GetVolumeTask();
+  nsRefPtr<GetVolumeTask> callback = new GetVolumeTask();
   rv = settingsLock->Get(AUDIO_VOLUME_BT_SCO_ID, callback);
   NS_ENSURE_SUCCESS(rv, false);
 
   return true;
 }
 
-class BluetoothHfpManager::RegisterModuleResultHandler final
-  : public BluetoothSetupResultHandler
+class BluetoothHfpManager::CleanupInitResultHandler final
+  : public BluetoothHandsfreeResultHandler
 {
 public:
-  RegisterModuleResultHandler(BluetoothHandsfreeInterface* aInterface,
-                              BluetoothProfileResultHandler* aRes)
+  CleanupInitResultHandler(BluetoothHandsfreeInterface* aInterface,
+                           BluetoothProfileResultHandler* aRes)
     : mInterface(aInterface)
     , mRes(aRes)
   {
@@ -292,40 +289,68 @@ public:
 
   void OnError(BluetoothStatus aStatus) override
   {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    BT_WARNING("BluetoothSetupInterface::RegisterModule failed for HFP: %d",
-               (int)aStatus);
-
-    mInterface->SetNotificationHandler(nullptr);
-
+    BT_WARNING("BluetoothHandsfreeInterface::Init failed: %d", (int)aStatus);
     if (mRes) {
       mRes->OnError(NS_ERROR_FAILURE);
     }
   }
 
-  void RegisterModule() override
+  void Init() override
   {
-    MOZ_ASSERT(NS_IsMainThread());
-
     sBluetoothHfpInterface = mInterface;
-
     if (mRes) {
       mRes->Init();
     }
   }
 
+  void Cleanup() override
+  {
+    sBluetoothHfpInterface = nullptr;
+    /* During re-initialization, a previouly initialized
+     * |BluetoothHandsfreeInterface| has now been cleaned
+     * up, so we start initialization.
+     */
+    RunInit();
+  }
+
+  void RunInit()
+  {
+    BluetoothHfpManager* hfpManager = BluetoothHfpManager::Get();
+
+    mInterface->Init(hfpManager, BluetoothHfpManager::MAX_NUM_CLIENTS, this);
+  }
+
 private:
   BluetoothHandsfreeInterface* mInterface;
-  RefPtr<BluetoothProfileResultHandler> mRes;
+  nsRefPtr<BluetoothProfileResultHandler> mRes;
 };
 
-class BluetoothHfpManager::InitProfileResultHandlerRunnable final
-  : public Runnable
+class BluetoothHfpManager::InitResultHandlerRunnable final
+  : public nsRunnable
 {
 public:
-  InitProfileResultHandlerRunnable(BluetoothProfileResultHandler* aRes,
-                                   nsresult aRv)
+  InitResultHandlerRunnable(CleanupInitResultHandler* aRes)
+    : mRes(aRes)
+  {
+    MOZ_ASSERT(mRes);
+  }
+
+  NS_IMETHOD Run() override
+  {
+    mRes->RunInit();
+    return NS_OK;
+  }
+
+private:
+  nsRefPtr<CleanupInitResultHandler> mRes;
+};
+
+class BluetoothHfpManager::OnErrorProfileResultHandlerRunnable final
+  : public nsRunnable
+{
+public:
+  OnErrorProfileResultHandlerRunnable(BluetoothProfileResultHandler* aRes,
+                                      nsresult aRv)
     : mRes(aRes)
     , mRv(aRv)
   {
@@ -334,18 +359,12 @@ public:
 
   NS_IMETHOD Run() override
   {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    if (NS_SUCCEEDED(mRv)) {
-      mRes->Init();
-    } else {
-      mRes->OnError(mRv);
-    }
+    mRes->OnError(mRv);
     return NS_OK;
   }
 
 private:
-  RefPtr<BluetoothProfileResultHandler> mRes;
+  nsRefPtr<BluetoothProfileResultHandler> mRes;
   nsresult mRv;
 };
 
@@ -353,64 +372,45 @@ private:
 void
 BluetoothHfpManager::InitHfpInterface(BluetoothProfileResultHandler* aRes)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (sBluetoothHfpInterface) {
-    BT_LOGR("Bluetooth Handsfree interface is already initalized.");
-    RefPtr<Runnable> r =
-      new InitProfileResultHandlerRunnable(aRes, NS_OK);
-    if (NS_FAILED(NS_DispatchToMainThread(r))) {
-      BT_LOGR("Failed to dispatch HFP Init runnable");
-    }
-    return;
-  }
-
-  auto btInf = BluetoothInterface::GetInstance();
-
+  BluetoothInterface* btInf = BluetoothInterface::GetInstance();
   if (NS_WARN_IF(!btInf)) {
     // If there's no backend interface, we dispatch a runnable
     // that calls the profile result handler.
-    RefPtr<Runnable> r =
-      new InitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
+    nsRefPtr<nsRunnable> r =
+      new OnErrorProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
     if (NS_FAILED(NS_DispatchToMainThread(r))) {
       BT_LOGR("Failed to dispatch HFP OnError runnable");
     }
     return;
   }
 
-  auto setupInterface = btInf->GetBluetoothSetupInterface();
-
-  if (NS_WARN_IF(!setupInterface)) {
-    // If there's no Setup interface, we dispatch a runnable
-    // that calls the profile result handler.
-    RefPtr<Runnable> r =
-      new InitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
-    if (NS_FAILED(NS_DispatchToMainThread(r))) {
-      BT_LOGR("Failed to dispatch HFP OnError runnable");
-    }
-    return;
-  }
-
-  auto interface = btInf->GetBluetoothHandsfreeInterface();
-
+  BluetoothHandsfreeInterface *interface =
+    btInf->GetBluetoothHandsfreeInterface();
   if (NS_WARN_IF(!interface)) {
     // If there's no HFP interface, we dispatch a runnable
     // that calls the profile result handler.
-    RefPtr<Runnable> r =
-      new InitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
+    nsRefPtr<nsRunnable> r =
+      new OnErrorProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
     if (NS_FAILED(NS_DispatchToMainThread(r))) {
       BT_LOGR("Failed to dispatch HFP OnError runnable");
     }
     return;
   }
 
-  // Set notification handler _before_ registering the module. It could
-  // happen that we receive notifications, before the result handler runs.
-  interface->SetNotificationHandler(BluetoothHfpManager::Get());
+  nsRefPtr<CleanupInitResultHandler> res =
+    new CleanupInitResultHandler(interface, aRes);
 
-  setupInterface->RegisterModule(
-    SETUP_SERVICE_ID_HANDSFREE, MODE_NARROWBAND_SPEECH, MAX_NUM_CLIENTS,
-    new RegisterModuleResultHandler(interface, aRes));
+  if (sBluetoothHfpInterface) {
+    // Cleanup an initialized HFP before initializing again.
+    sBluetoothHfpInterface->Cleanup(res);
+  } else {
+    // If there's no HFP interface to cleanup first, we dispatch
+    // a runnable that calls the profile result handler.
+    nsRefPtr<nsRunnable> r = new InitResultHandlerRunnable(res);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch HFP init runnable");
+    }
+  }
 }
 
 BluetoothHfpManager::~BluetoothHfpManager()
@@ -431,121 +431,71 @@ BluetoothHfpManager::~BluetoothHfpManager()
   hal::UnregisterBatteryObserver(this);
 }
 
-class BluetoothHfpManager::UnregisterModuleResultHandler final
-  : public BluetoothSetupResultHandler
+class BluetoothHfpManager::CleanupResultHandler final
+  : public BluetoothHandsfreeResultHandler
 {
 public:
-  UnregisterModuleResultHandler(BluetoothProfileResultHandler* aRes)
+  CleanupResultHandler(BluetoothProfileResultHandler* aRes)
     : mRes(aRes)
   { }
 
   void OnError(BluetoothStatus aStatus) override
   {
-    MOZ_ASSERT(NS_IsMainThread());
+    BT_WARNING("BluetoothHandsfreeInterface::Cleanup failed: %d", (int)aStatus);
 
-    BT_WARNING("BluetoothSetupInterface::UnregisterModule failed for HFP: %d",
-               (int)aStatus);
-
-    sBluetoothHfpInterface->SetNotificationHandler(nullptr);
     sBluetoothHfpInterface = nullptr;
-    sBluetoothHfpManager = nullptr;
 
     if (mRes) {
       mRes->OnError(NS_ERROR_FAILURE);
     }
   }
 
-  void UnregisterModule() override
+  void Cleanup() override
   {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    sBluetoothHfpInterface->SetNotificationHandler(nullptr);
     sBluetoothHfpInterface = nullptr;
-    sBluetoothHfpManager = nullptr;
-
     if (mRes) {
       mRes->Deinit();
     }
   }
 
 private:
-  RefPtr<BluetoothProfileResultHandler> mRes;
+  nsRefPtr<BluetoothProfileResultHandler> mRes;
 };
 
-class BluetoothHfpManager::DeinitProfileResultHandlerRunnable final
-  : public Runnable
+class BluetoothHfpManager::DeinitResultHandlerRunnable final
+  : public nsRunnable
 {
 public:
-  DeinitProfileResultHandlerRunnable(BluetoothProfileResultHandler* aRes,
-                                     nsresult aRv)
+  DeinitResultHandlerRunnable(BluetoothProfileResultHandler* aRes)
     : mRes(aRes)
-    , mRv(aRv)
   {
     MOZ_ASSERT(mRes);
   }
 
   NS_IMETHOD Run() override
   {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    if (NS_SUCCEEDED(mRv)) {
-      mRes->Deinit();
-    } else {
-      mRes->OnError(mRv);
-    }
+    mRes->Deinit();
     return NS_OK;
   }
 
 private:
-  RefPtr<BluetoothProfileResultHandler> mRes;
-  nsresult mRv;
+  nsRefPtr<BluetoothProfileResultHandler> mRes;
 };
 
 // static
 void
 BluetoothHfpManager::DeinitHfpInterface(BluetoothProfileResultHandler* aRes)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!sBluetoothHfpInterface) {
-    BT_LOGR("Bluetooth Handsfree interface has not been initialized.");
-    RefPtr<Runnable> r =
-      new DeinitProfileResultHandlerRunnable(aRes, NS_OK);
+  if (sBluetoothHfpInterface) {
+    sBluetoothHfpInterface->Cleanup(new CleanupResultHandler(aRes));
+  } else if (aRes) {
+    // We dispatch a runnable here to make the profile resource handler
+    // behave as if HFP was initialized.
+    nsRefPtr<nsRunnable> r = new DeinitResultHandlerRunnable(aRes);
     if (NS_FAILED(NS_DispatchToMainThread(r))) {
-      BT_LOGR("Failed to dispatch HFP Deinit runnable");
+      BT_LOGR("Failed to dispatch cleanup-result-handler runnable");
     }
-    return;
   }
-
-  auto btInf = BluetoothInterface::GetInstance();
-
-  if (NS_WARN_IF(!btInf)) {
-    // If there's no backend interface, we dispatch a runnable
-    // that calls the profile result handler.
-    RefPtr<Runnable> r =
-      new DeinitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
-    if (NS_FAILED(NS_DispatchToMainThread(r))) {
-      BT_LOGR("Failed to dispatch HFP OnError runnable");
-    }
-    return;
-  }
-
-  auto setupInterface = btInf->GetBluetoothSetupInterface();
-
-  if (NS_WARN_IF(!setupInterface)) {
-    // If there's no Setup interface, we dispatch a runnable
-    // that calls the profile result handler.
-    RefPtr<Runnable> r =
-      new DeinitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
-    if (NS_FAILED(NS_DispatchToMainThread(r))) {
-      BT_LOGR("Failed to dispatch HFP OnError runnable");
-    }
-    return;
-  }
-
-  setupInterface->UnregisterModule(
-    SETUP_SERVICE_ID_HANDSFREE,
-    new UnregisterModuleResultHandler(aRes));
 }
 
 //static
@@ -606,11 +556,8 @@ BluetoothHfpManager::NotifyConnectionStateChanged(const nsAString& aType)
     do_GetService("@mozilla.org/observer-service;1");
   NS_ENSURE_TRUE_VOID(obs);
 
-  nsAutoString deviceAddressStr;
-  AddressToString(mDeviceAddress, deviceAddressStr);
-
   if (NS_FAILED(obs->NotifyObservers(this, NS_ConvertUTF16toUTF8(aType).get(),
-                                     deviceAddressStr.get()))) {
+                                     mDeviceAddress.get()))) {
     BT_WARNING("Failed to notify observsers!");
   }
 
@@ -640,7 +587,7 @@ BluetoothHfpManager::NotifyConnectionStateChanged(const nsAString& aType)
 
       OnConnect(EmptyString());
     } else if (mConnectionState == HFP_CONNECTION_STATE_DISCONNECTED) {
-      mDeviceAddress.Clear();
+      mDeviceAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
       if (mPrevConnectionState == HFP_CONNECTION_STATE_DISCONNECTED) {
         // Bug 979160: This implies the outgoing connection failure.
         // When the outgoing hfp connection fails, state changes to disconnected
@@ -661,7 +608,7 @@ BluetoothHfpManager::NotifyDialer(const nsAString& aCommand)
   NS_NAMED_LITERAL_STRING(type, "bluetooth-dialer-command");
   InfallibleTArray<BluetoothNamedValue> parameters;
 
-  AppendNamedValue(parameters, "command", nsString(aCommand));
+  BT_APPEND_NAMED_VALUE(parameters, "command", nsString(aCommand));
 
   BT_ENSURE_TRUE_VOID_BROADCAST_SYSMSG(type, parameters);
 }
@@ -753,19 +700,15 @@ BluetoothHfpManager::HandleVoiceConnectionChanged(uint32_t aClientId)
   // Signal
   JS::Rooted<JS::Value> value(nsContentUtils::RootingCxForThread());
   voiceInfo->GetRelSignalStrength(&value);
-  if (value.isNumber()) {
-    mSignal = (int)ceil(value.toNumber() / 20.0);
-  }
+  NS_ENSURE_TRUE_VOID(value.isNumber());
+  mSignal = (int)ceil(value.toNumber() / 20.0);
 
   UpdateDeviceCIND();
 
   // Operator name
   nsCOMPtr<nsIMobileNetworkInfo> network;
   voiceInfo->GetNetwork(getter_AddRefs(network));
-  if (!network) {
-    BT_LOGD("Unable to get network information");
-    return;
-  }
+  NS_ENSURE_TRUE_VOID(network);
   network->GetLongName(mOperatorName);
 
   // According to GSM 07.07, "<format> indicates if the format is alphanumeric
@@ -1189,7 +1132,7 @@ BluetoothHfpManager::HandleBackendError()
 
   if (mConnectionState != HFP_CONNECTION_STATE_DISCONNECTED) {
     ConnectionStateNotification(HFP_CONNECTION_STATE_DISCONNECTED,
-                                mDeviceAddress);
+      mDeviceAddress);
   }
 
   if (mAudioState != HFP_AUDIO_STATE_DISCONNECTED) {
@@ -1258,12 +1201,6 @@ BluetoothHfpManager::IsConnected()
   return (mConnectionState == HFP_CONNECTION_STATE_SLC_CONNECTED);
 }
 
-bool
-BluetoothHfpManager::IsNrecEnabled()
-{
-  return mNrecEnabled;
-}
-
 void
 BluetoothHfpManager::OnConnectError()
 {
@@ -1272,7 +1209,7 @@ BluetoothHfpManager::OnConnectError()
   mController->NotifyCompletion(NS_LITERAL_STRING(ERR_CONNECTION_FAILED));
 
   mController = nullptr;
-  mDeviceAddress.Clear();
+  mDeviceAddress.Truncate();
 }
 
 class BluetoothHfpManager::ConnectResultHandler final
@@ -1297,7 +1234,7 @@ private:
 };
 
 void
-BluetoothHfpManager::Connect(const BluetoothAddress& aDeviceAddress,
+BluetoothHfpManager::Connect(const nsAString& aDeviceAddress,
                              BluetoothProfileController* aController)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -1403,25 +1340,23 @@ BluetoothHfpManager::OnDisconnect(const nsAString& aErrorStr)
 }
 
 void
-BluetoothHfpManager::OnUpdateSdpRecords(
-  const BluetoothAddress& aDeviceAddress)
+BluetoothHfpManager::OnUpdateSdpRecords(const nsAString& aDeviceAddress)
 {
   // Bluedroid handles this part
   MOZ_ASSERT(false);
 }
 
 void
-BluetoothHfpManager::OnGetServiceChannel(
-  const BluetoothAddress& aDeviceAddress,
-  const BluetoothUuid& aServiceUuid,
-  int aChannel)
+BluetoothHfpManager::OnGetServiceChannel(const nsAString& aDeviceAddress,
+                                         const nsAString& aServiceUuid,
+                                         int aChannel)
 {
   // Bluedroid handles this part
   MOZ_ASSERT(false);
 }
 
 void
-BluetoothHfpManager::GetAddress(BluetoothAddress& aDeviceAddress)
+BluetoothHfpManager::GetAddress(nsAString& aDeviceAddress)
 {
   aDeviceAddress = mDeviceAddress;
 }
@@ -1432,7 +1367,7 @@ BluetoothHfpManager::GetAddress(BluetoothAddress& aDeviceAddress)
 
 void
 BluetoothHfpManager::ConnectionStateNotification(
-  BluetoothHandsfreeConnectionState aState, const BluetoothAddress& aBdAddress)
+  BluetoothHandsfreeConnectionState aState, const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1450,16 +1385,12 @@ BluetoothHfpManager::ConnectionStateNotification(
     DisconnectSco();
     NotifyConnectionStateChanged(
       NS_LITERAL_STRING(BLUETOOTH_HFP_STATUS_CHANGED_ID));
-
-  } else if (aState == HFP_CONNECTION_STATE_CONNECTED) {
-    // Once RFCOMM is connected, enable NREC before each new SLC connection
-    NRECNotification(HFP_NREC_STARTED, mDeviceAddress);
   }
 }
 
 void
 BluetoothHfpManager::AudioStateNotification(
-  BluetoothHandsfreeAudioState aState, const BluetoothAddress& aBdAddress)
+  BluetoothHandsfreeAudioState aState, const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1475,7 +1406,7 @@ BluetoothHfpManager::AudioStateNotification(
 }
 
 void
-BluetoothHfpManager::AnswerCallNotification(const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::AnswerCallNotification(const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1483,7 +1414,7 @@ BluetoothHfpManager::AnswerCallNotification(const BluetoothAddress& aBdAddress)
 }
 
 void
-BluetoothHfpManager::HangupCallNotification(const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::HangupCallNotification(const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1492,7 +1423,7 @@ BluetoothHfpManager::HangupCallNotification(const BluetoothAddress& aBdAddress)
 
 void
 BluetoothHfpManager::VolumeNotification(
-  BluetoothHandsfreeVolumeType aType, int aVolume, const BluetoothAddress& aBdAddress)
+  BluetoothHandsfreeVolumeType aType, int aVolume, const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1519,7 +1450,7 @@ BluetoothHfpManager::VolumeNotification(
 }
 
 void
-BluetoothHfpManager::DtmfNotification(char aDtmf, const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::DtmfNotification(char aDtmf, const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1530,39 +1461,9 @@ BluetoothHfpManager::DtmfNotification(char aDtmf, const BluetoothAddress& aBdAdd
   NotifyDialer(NS_ConvertUTF8toUTF16(message));
 }
 
-/**
- * NREC status will be set when:
- * 1. Get an AT command from HF device.
- *    (Bluetooth HFP spec v1.6 merely defines for the "Disable" part.)
- * 2. Once RFCOMM is connected, enable NREC before each new SLC connection.
- */
-void
-BluetoothHfpManager::NRECNotification(BluetoothHandsfreeNRECState aNrec,
-                                      const BluetoothAddress& aBdAddr)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  // Notify Gecko observers
-  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  NS_ENSURE_TRUE_VOID(obs);
-
-  mNrecEnabled = static_cast<bool>(aNrec);
-
-  nsAutoString deviceAddressStr;
-  AddressToString(mDeviceAddress, deviceAddressStr);
-
-  // Notify audio manager
-  if (NS_FAILED(obs->NotifyObservers(this,
-                                     BLUETOOTH_HFP_NREC_STATUS_CHANGED_ID,
-                                     deviceAddressStr.get()))) {
-    BT_WARNING("Failed to notify bluetooth-hfp-nrec-status-changed observsers!");
-  }
-
-}
-
 void
 BluetoothHfpManager::CallHoldNotification(BluetoothHandsfreeCallHoldType aChld,
-                                          const BluetoothAddress& aBdAddress)
+                                          const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1581,7 +1482,7 @@ BluetoothHfpManager::CallHoldNotification(BluetoothHandsfreeCallHoldType aChld,
 }
 
 void BluetoothHfpManager::DialCallNotification(const nsAString& aNumber,
-                                               const BluetoothAddress& aBdAddress)
+                                               const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1599,7 +1500,8 @@ void BluetoothHfpManager::DialCallNotification(const nsAString& aNumber,
     mDialingRequestProcessed = false;
     NotifyDialer(NS_LITERAL_STRING("BLDN"));
 
-    MessageLoop::current()->PostDelayedTask(MakeAndAddRef<RespondToBLDNTask>(),
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+                                            new RespondToBLDNTask(),
                                             sWaitingForDialingInterval);
   } else if (message[0] == '>') {
     mDialingRequestProcessed = false;
@@ -1608,7 +1510,8 @@ void BluetoothHfpManager::DialCallNotification(const nsAString& aNumber,
     newMsg += StringHead(message, message.Length() - 1);
     NotifyDialer(NS_ConvertUTF8toUTF16(newMsg));
 
-    MessageLoop::current()->PostDelayedTask(MakeAndAddRef<RespondToBLDNTask>(),
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+                                            new RespondToBLDNTask(),
                                             sWaitingForDialingInterval);
   } else {
     SendResponse(HFP_AT_RESPONSE_OK);
@@ -1620,7 +1523,7 @@ void BluetoothHfpManager::DialCallNotification(const nsAString& aNumber,
 }
 
 void
-BluetoothHfpManager::CnumNotification(const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::CnumNotification(const nsAString& aBdAddress)
 {
   static const uint8_t sAddressType[] {
     [HFP_CALL_ADDRESS_TYPE_UNKNOWN] = 0x81,
@@ -1654,7 +1557,7 @@ public:
 };
 
 void
-BluetoothHfpManager::CindNotification(const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::CindNotification(const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1684,7 +1587,7 @@ public:
 };
 
 void
-BluetoothHfpManager::CopsNotification(const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::CopsNotification(const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1696,7 +1599,7 @@ BluetoothHfpManager::CopsNotification(const BluetoothAddress& aBdAddress)
 }
 
 void
-BluetoothHfpManager::ClccNotification(const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::ClccNotification(const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1718,7 +1621,7 @@ BluetoothHfpManager::ClccNotification(const BluetoothAddress& aBdAddress)
 
 void
 BluetoothHfpManager::UnknownAtNotification(const nsACString& aAtString,
-                                           const BluetoothAddress& aBdAddress)
+                                           const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1728,7 +1631,7 @@ BluetoothHfpManager::UnknownAtNotification(const nsACString& aAtString,
 }
 
 void
-BluetoothHfpManager::KeyPressedNotification(const BluetoothAddress& aBdAddress)
+BluetoothHfpManager::KeyPressedNotification(const nsAString& aBdAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1766,7 +1669,8 @@ BluetoothHfpManager::KeyPressedNotification(const BluetoothAddress& aBdAddress)
 
     NotifyDialer(NS_LITERAL_STRING("BLDN"));
 
-    MessageLoop::current()->PostDelayedTask(MakeAndAddRef<RespondToBLDNTask>(),
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+                                            new RespondToBLDNTask(),
                                             sWaitingForDialingInterval);
   }
 }

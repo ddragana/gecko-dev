@@ -109,8 +109,7 @@ static const char *sPacUtils =
   "    var wd1 = getDay(arguments[0]);\n"
   "    var wd2 = (argc == 2) ? getDay(arguments[1]) : wd1;\n"
   "    return (wd1 == -1 || wd2 == -1) ? false\n"
-  "                                    : (wd1 <= wd2) ? (wd1 <= wday && wday <= wd2)\n"
-  "                                                   : (wd2 >= wday || wday >= wd1);\n"
+  "                                    : (wd1 <= wday && wday <= wd2);\n"
   "}\n"
   ""
   "function dateRange() {\n"
@@ -185,8 +184,7 @@ static const char *sPacUtils =
   "        tmp.setSeconds(date.getUTCSeconds());\n"
   "        date = tmp;\n"
   "    }\n"
-  "    return (date1 <= date2) ? (date1 <= date) && (date <= date2)\n"
-  "                            : (date2 >= date) || (date >= date1);\n"
+  "    return ((date1 <= date) && (date <= date2));\n"
   "}\n"
   ""
   "function timeRange() {\n"
@@ -239,9 +237,7 @@ static const char *sPacUtils =
   "        date.setMinutes(date.getUTCMinutes());\n"
   "        date.setSeconds(date.getUTCSeconds());\n"
   "    }\n"
-  "    return (date1 <= date2) ? (date1 <= date) && (date <= date2)\n"
-  "                            : (date2 >= date) || (date >= date1);\n"
-  "\n"
+  "    return ((date1 <= date) && (date <= date2));\n"
   "}\n"
   "";
 
@@ -319,56 +315,17 @@ void PACLogToConsole(nsString &aMessage)
   consoleService->LogStringMessage(aMessage.get());
 }
 
-// Javascript errors and warnings are logged to the main error console
+// Javascript errors are logged to the main error console
 static void
-PACLogErrorOrWarning(const nsAString& aKind, JSErrorReport* aReport)
+PACErrorReporter(JSContext *cx, const char *message, JSErrorReport *report)
 {
-  nsString formattedMessage(NS_LITERAL_STRING("PAC Execution "));
-  formattedMessage += aKind;
-  formattedMessage += NS_LITERAL_STRING(": ");
-  formattedMessage += aReport->ucmessage;
+  nsString formattedMessage(NS_LITERAL_STRING("PAC Execution Error: "));
+  formattedMessage += report->ucmessage;
   formattedMessage += NS_LITERAL_STRING(" [");
-  formattedMessage.Append(aReport->linebuf(), aReport->linebufLength());
+  formattedMessage += report->uclinebuf;
   formattedMessage += NS_LITERAL_STRING("]");
   PACLogToConsole(formattedMessage);
 }
-
-static void
-PACWarningReporter(JSContext* aCx, const char* aMessage, JSErrorReport* aReport)
-{
-  MOZ_ASSERT(aReport);
-  MOZ_ASSERT(JSREPORT_IS_WARNING(aReport->flags));
-
-  PACLogErrorOrWarning(NS_LITERAL_STRING("Warning"), aReport);
-}
-
-class MOZ_STACK_CLASS AutoPACErrorReporter
-{
-  JSContext* mCx;
-
-public:
-  explicit AutoPACErrorReporter(JSContext* aCx)
-    : mCx(aCx)
-  {}
-  ~AutoPACErrorReporter() {
-    if (!JS_IsExceptionPending(mCx)) {
-      return;
-    }
-    JS::RootedValue exn(mCx);
-    if (!JS_GetPendingException(mCx, &exn)) {
-      return;
-    }
-    JS_ClearPendingException(mCx);
-
-    js::ErrorReport report(mCx);
-    if (!report.init(mCx, exn, js::ErrorReport::WithSideEffects)) {
-      JS_ClearPendingException(mCx);
-      return;
-    }
-
-    PACLogErrorOrWarning(NS_LITERAL_STRING("Error"), report.report());
-  }
-};
 
 // timeout of 0 means the normal necko timeout strategy, otherwise the dns request
 // will be canceled after aTimeout milliseconds
@@ -401,7 +358,7 @@ ProxyAutoConfig::ResolveAddress(const nsCString &aHostName,
   if (!dns)
     return false;
 
-  RefPtr<PACResolver> helper = new PACResolver();
+  nsRefPtr<PACResolver> helper = new PACResolver();
 
   if (NS_FAILED(dns->AsyncResolve(aHostName,
                                   nsIDNSService::RESOLVE_PRIORITY_MEDIUM,
@@ -543,24 +500,23 @@ bool PACMyAppOrigin(JSContext *cx, unsigned int argc, JS::Value *vp)
   return GetRunning()->MyAppOrigin(args);
 }
 
-// IsInIsolatedMozBrowser() javascript implementation
+// IsInBrowser() javascript implementation
 static
-bool PACIsInIsolatedMozBrowser(JSContext *cx, unsigned int argc, JS::Value *vp)
+bool PACIsInBrowser(JSContext *cx, unsigned int argc, JS::Value *vp)
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
   if (NS_IsMainThread()) {
-    NS_WARNING("PACIsInIsolatedMozBrowser on Main Thread. How did that happen?");
+    NS_WARNING("PACIsInBrowser on Main Thread. How did that happen?");
     return false;
   }
 
   if (!GetRunning()) {
-    NS_WARNING("PACIsInIsolatedMozBrowser without a running ProxyAutoConfig"
-               "object");
+    NS_WARNING("PACIsInBrowser without a running ProxyAutoConfig object");
     return false;
   }
 
-  return GetRunning()->IsInIsolatedMozBrowser(args);
+  return GetRunning()->IsInBrowser(args);
 }
 
 // proxyAlert(msg) javascript implementation
@@ -598,7 +554,7 @@ static const JSFunctionSpec PACGlobalFunctions[] = {
   JS_FS("myIpAddress", PACMyIpAddress, 0, 0),
   JS_FS("myAppId", PACMyAppId, 0, 0),
   JS_FS("myAppOrigin", PACMyAppOrigin, 0, 0),
-  JS_FS("isInIsolatedMozBrowser", PACIsInIsolatedMozBrowser, 0, 0),
+  JS_FS("isInBrowser", PACIsInBrowser, 0, 0),
   JS_FS("alert", PACProxyAlert, 1, 0),
   JS_FS_END
 };
@@ -639,6 +595,9 @@ class JSRuntimeWrapper
     mGlobal = nullptr;
 
     MOZ_COUNT_DTOR(JSRuntimeWrapper);
+    if (mContext) {
+      JS_DestroyContext(mContext);
+    }
 
     if (mRuntime) {
       JS_DestroyRuntime(mRuntime);
@@ -656,7 +615,7 @@ class JSRuntimeWrapper
   }
 
 private:
-  static const unsigned sRuntimeHeapSize = 4 << 20; // 4 MB
+  static const unsigned sRuntimeHeapSize = 2 << 20;
 
   JSRuntime *mRuntime;
   JSContext *mContext;
@@ -673,41 +632,32 @@ private:
 
   nsresult Init()
   {
-    mContext = JS_GetContext(mRuntime);
-
     /*
      * Not setting this will cause JS_CHECK_RECURSION to report false
      * positives
      */
-    JS_SetNativeStackQuota(mContext, 128 * sizeof(size_t) * 1024);
+    JS_SetNativeStackQuota(mRuntime, 128 * sizeof(size_t) * 1024); 
 
-    JS::SetWarningReporter(mContext, PACWarningReporter);
+    JS_SetErrorReporter(mRuntime, PACErrorReporter);
 
-    if (!JS::InitSelfHostedCode(mContext)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    mContext = JS_NewContext(mRuntime, 0);
+    NS_ENSURE_TRUE(mContext, NS_ERROR_OUT_OF_MEMORY);
 
     JSAutoRequest ar(mContext);
 
     JS::CompartmentOptions options;
-    options.creationOptions().setZone(JS::SystemZone);
-    options.behaviors().setVersion(JSVERSION_LATEST);
+    options.setZone(JS::SystemZone)
+           .setVersion(JSVERSION_LATEST);
     mGlobal = JS_NewGlobalObject(mContext, &sGlobalClass, nullptr,
                                  JS::DontFireOnNewGlobalHook, options);
-    if (!mGlobal) {
-      JS_ClearPendingException(mContext);
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    NS_ENSURE_TRUE(mGlobal, NS_ERROR_OUT_OF_MEMORY);
     JS::Rooted<JSObject*> global(mContext, mGlobal);
 
     JSAutoCompartment ac(mContext, global);
-    AutoPACErrorReporter aper(mContext);
-    if (!JS_InitStandardClasses(mContext, global)) {
+    JS_InitStandardClasses(mContext, global);
+
+    if (!JS_DefineFunctions(mContext, global, PACGlobalFunctions))
       return NS_ERROR_FAILURE;
-    }
-    if (!JS_DefineFunctions(mContext, global, PACGlobalFunctions)) {
-      return NS_ERROR_FAILURE;
-    }
 
     JS_FireOnNewGlobalObject(mContext, global);
 
@@ -715,17 +665,13 @@ private:
   }
 };
 
-static const JSClassOps sJSRuntimeWrapperGlobalClassOps = {
-  nullptr, nullptr, nullptr, nullptr,
-  nullptr, nullptr, nullptr, nullptr,
-  nullptr, nullptr, nullptr,
-  JS_GlobalObjectTraceHook
-};
-
 const JSClass JSRuntimeWrapper::sGlobalClass = {
   "PACResolutionThreadGlobal",
   JSCLASS_GLOBAL_FLAGS,
-  &sJSRuntimeWrapperGlobalClassOps
+  nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, nullptr, nullptr,
+  JS_GlobalObjectTraceHook
 };
 
 void
@@ -768,7 +714,6 @@ ProxyAutoConfig::SetupJS()
   JSContext* cx = mJSRuntime->Context();
   JSAutoRequest ar(cx);
   JSAutoCompartment ac(cx, mJSRuntime->Global());
-  AutoPACErrorReporter aper(cx);
 
   // check if this is a data: uri so that we don't spam the js console with
   // huge meaningless strings. this is not on the main thread, so it can't
@@ -819,7 +764,7 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
                                 const nsCString &aTestHost,
                                 uint32_t aAppId,
                                 const nsString &aAppOrigin,
-                                bool aIsInIsolatedMozBrowser,
+                                bool aIsInBrowser,
                                 nsACString &result)
 {
   if (mJSNeedsSetup)
@@ -831,7 +776,6 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
   JSContext *cx = mJSRuntime->Context();
   JSAutoRequest ar(cx);
   JSAutoCompartment ac(cx, mJSRuntime->Global());
-  AutoPACErrorReporter aper(cx);
 
   // the sRunning flag keeps a new PAC file from being installed
   // while the event loop is spinning on a DNS function. Don't early return.
@@ -839,7 +783,7 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
   mRunningHost = aTestHost;
   mRunningAppId = aAppId;
   mRunningAppOrigin = aAppOrigin;
-  mRunningIsInIsolatedMozBrowser = aIsInIsolatedMozBrowser;
+  mRunningIsInBrowser = aIsInBrowser;
 
   nsresult rv = NS_ERROR_FAILURE;
   JS::RootedString uriString(cx, JS_NewStringCopyZ(cx, aTestURI.get()));
@@ -921,11 +865,11 @@ ProxyAutoConfig::SrcAddress(const NetAddr *remoteAddress, nsCString &localAddres
   }
 
   PR_Close(fd);
-
+  
   char dottedDecimal[128];
   if (PR_NetAddrToString(&localName, dottedDecimal, sizeof(dottedDecimal)) != PR_SUCCESS)
     return false;
-
+  
   localAddress.Assign(dottedDecimal);
 
   return true;
@@ -1003,7 +947,7 @@ ProxyAutoConfig::MyIPAddress(const JS::CallArgs &aArgs)
       rvalAssigned) {
     return rvalAssigned;
   }
-
+  
   // finally, use the old algorithm based on the local hostname
   nsAutoCString hostName;
   nsCOMPtr<nsIDNSService> dns = do_GetService(NS_DNSSERVICE_CONTRACTID);
@@ -1071,9 +1015,9 @@ ProxyAutoConfig::MyAppOrigin(const JS::CallArgs &aArgs)
 }
 
 bool
-ProxyAutoConfig::IsInIsolatedMozBrowser(const JS::CallArgs &aArgs)
+ProxyAutoConfig::IsInBrowser(const JS::CallArgs &aArgs)
 {
-  aArgs.rval().setBoolean(mRunningIsInIsolatedMozBrowser);
+  aArgs.rval().setBoolean(mRunningIsInBrowser);
   return true;
 }
 

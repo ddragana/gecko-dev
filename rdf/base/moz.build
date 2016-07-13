@@ -53,7 +53,5 @@ UNIFIED_SOURCES += [
     'rdfutil.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
 FINAL_LIBRARY = 'xul'
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

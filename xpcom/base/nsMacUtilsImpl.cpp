@@ -118,6 +118,7 @@ nsMacUtilsImpl::GetArchitecturesInBinary(nsAString& aArchString)
   return GetArchString(aArchString);
 }
 
+/* readonly attribute boolean isTranslated; */
 // True when running under binary translation (Rosetta).
 NS_IMETHODIMP
 nsMacUtilsImpl::GetIsTranslated(bool* aIsTranslated)

@@ -12,6 +12,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/dom/MessagePort.h"
 #include "nsWrapperCache.h"
+#include "nsAutoPtr.h"
 #include "nsTArray.h"
 
 namespace mozilla {
@@ -27,8 +28,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MessagePortList)
 
 public:
-  MessagePortList(nsISupports* aOwner,
-                  const nsTArray<RefPtr<MessagePort>>& aPorts)
+  MessagePortList(nsISupports* aOwner, nsTArray<nsRefPtr<MessagePortBase>>& aPorts)
     : mOwner(aOwner)
     , mPorts(aPorts)
   {
@@ -49,13 +49,13 @@ public:
     return mPorts.Length();
   }
 
-  MessagePort*
+  MessagePortBase*
   Item(uint32_t aIndex)
   {
     return mPorts.SafeElementAt(aIndex);
   }
 
-  MessagePort*
+  MessagePortBase*
   IndexedGetter(uint32_t aIndex, bool &aFound)
   {
     aFound = aIndex < mPorts.Length();
@@ -65,9 +65,9 @@ public:
     return mPorts[aIndex];
   }
 
-private:
+public:
   nsCOMPtr<nsISupports> mOwner;
-  nsTArray<RefPtr<MessagePort>> mPorts;
+  nsTArray<nsRefPtr<MessagePortBase>> mPorts;
 };
 
 } // namespace dom

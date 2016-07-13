@@ -49,10 +49,8 @@ public:
    * Currently, when TryRender() returns true, the entire framebuffer
    * must have been rendered.
    */
-  virtual bool TryRenderWithHwc(Layer* aRoot,
-                                nsIWidget* aWidget,
-                                bool aGeometryChanged,
-                                bool aHasImageHostOverlays) = 0;
+  virtual bool TryRenderWithHwc(Layer* aRoot, nsIWidget* aWidget,
+                                bool aGeometryChanged) = 0;
 
   /**
    * Return true if Composer2D does composition. Return false if Composer2D

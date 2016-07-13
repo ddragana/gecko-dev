@@ -9,6 +9,8 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Quaternion.h"
 #include "mozilla/EnumeratedArray.h"
+#include "mozilla/HalSensor.h"
+#include "mozilla/HalScreenConfiguration.h"
 
 #include "gfxVR.h"
 
@@ -17,7 +19,9 @@ namespace gfx {
 namespace impl {
 
 class HMDInfoCardboard :
-    public VRHMDInfo
+    public VRHMDInfo,
+    public hal::ISensorObserver,
+    public hal::ScreenConfigurationObserver
 {
 public:
   explicit HMDInfoCardboard();
@@ -25,11 +29,10 @@ public:
   bool SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFOVRight,
               double zNear, double zFar) override;
 
-  virtual VRHMDSensorState GetSensorState() override;
-  virtual VRHMDSensorState GetImmediateSensorState() override;
+  bool StartSensorTracking() override;
+  VRHMDSensorState GetSensorState(double timeOffset) override;
+  void StopSensorTracking() override;
   void ZeroSensor() override;
-  bool KeepSensorTracking() override;
-  void NotifyVsync(const TimeStamp& aVsyncTimestamp) override;
 
   void FillDistortionConstants(uint32_t whichEye,
                                const IntSize& textureSize, const IntRect& eyeViewport,
@@ -38,12 +41,12 @@ public:
 
   void Destroy();
 
-protected:
-  virtual ~HMDInfoCardboard() {
-    MOZ_COUNT_DTOR_INHERITED(HMDInfoCardboard, VRHMDInfo);
-    Destroy();
-  }
+  // ISensorObserver interface
+  void Notify(const hal::SensorData& SensorData) override;
+  // ScreenConfigurationObserver interface
+  void Notify(const hal::ScreenConfiguration& ScreenConfiguration) override;
 
+protected:
   // must match the size of VRDistortionVertex
   struct DistortionVertex {
     float pos[2];
@@ -53,6 +56,21 @@ protected:
     float padding[4];
   };
 
+  virtual ~HMDInfoCardboard() {
+    Destroy();
+  }
+
+  void ComputeStateFromLastSensor();
+
+  uint32_t mStartCount;
+  VRHMDSensorState mLastSensorState;
+  uint32_t mOrient;
+  Quaternion mScreenTransform;
+  Quaternion mSensorZeroInverse;
+
+  Quaternion mSavedLastSensor;
+  double mSavedLastSensorTime;
+  bool mNeedsSensorCompute;    // if we need to compute the state from mSavedLastSensor
 };
 
 } // namespace impl
@@ -60,15 +78,16 @@ protected:
 class VRHMDManagerCardboard : public VRHMDManager
 {
 public:
-  static already_AddRefed<VRHMDManagerCardboard> Create();
-  virtual bool Init() override;
-  virtual void Destroy() override;
-  virtual void GetHMDs(nsTArray<RefPtr<VRHMDInfo> >& aHMDResult) override;
-protected:
   VRHMDManagerCardboard()
     : mCardboardInitialized(false)
   { }
-  nsTArray<RefPtr<impl::HMDInfoCardboard>> mCardboardHMDs;
+
+  virtual bool PlatformInit() override;
+  virtual bool Init() override;
+  virtual void Destroy() override;
+  virtual void GetHMDs(nsTArray<nsRefPtr<VRHMDInfo> >& aHMDResult) override;
+protected:
+  nsTArray<nsRefPtr<impl::HMDInfoCardboard>> mCardboardHMDs;
   bool mCardboardInitialized;
 };
 

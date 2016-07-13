@@ -25,7 +25,6 @@ from .mozconfig import (
     MozconfigLoadException,
     MozconfigLoader,
 )
-from .util import memoized_property
 from .virtualenv import VirtualenvManager
 
 
@@ -80,14 +79,14 @@ class MozbuildObject(ProcessExecutionMixin):
         and a LogManager instance. The topobjdir may be passed in as well. If
         it isn't, it will be calculated from the active mozconfig.
         """
-        self.topsrcdir = mozpath.normsep(topsrcdir)
+        self.topsrcdir = topsrcdir
         self.settings = settings
 
         self.populate_logger()
         self.log_manager = log_manager
 
         self._make = None
-        self._topobjdir = mozpath.normsep(topobjdir) if topobjdir else topobjdir
+        self._topobjdir = topobjdir
         self._mozconfig = None
         self._config_guess_output = None
         self._config_environment = None
@@ -184,10 +183,9 @@ class MozbuildObject(ProcessExecutionMixin):
             if not samepath(topobjdir, _config_topobjdir):
                 raise ObjdirMismatchException(topobjdir, _config_topobjdir)
 
-        topsrcdir = mozpath.normsep(topsrcdir)
         topobjdir = topobjdir or config_topobjdir
         if topobjdir:
-            topobjdir = mozpath.normsep(os.path.normpath(topobjdir))
+            topobjdir = os.path.normpath(topobjdir)
 
             if topsrcdir == topobjdir:
                 raise BadEnvironmentException('The object directory appears '
@@ -211,7 +209,7 @@ class MozbuildObject(ProcessExecutionMixin):
         if not os.path.isabs(topobjdir):
             topobjdir = os.path.abspath(os.path.join(topsrcdir, topobjdir))
 
-        return mozpath.normsep(os.path.normpath(topobjdir))
+        return os.path.normpath(topobjdir)
 
     @property
     def topobjdir(self):
@@ -258,7 +256,7 @@ class MozbuildObject(ProcessExecutionMixin):
         config_status = os.path.join(self.topobjdir, 'config.status')
 
         if not os.path.exists(config_status):
-            raise BuildEnvironmentNotFoundException('config.status not available. Run configure.')
+            raise Exception('config.status not available. Run configure.')
 
         self._config_environment = \
             ConfigEnvironment.from_config_status(config_status)
@@ -270,10 +268,6 @@ class MozbuildObject(ProcessExecutionMixin):
         return self.config_environment.defines
 
     @property
-    def non_global_defines(self):
-        return self.config_environment.non_global_defines
-
-    @property
     def substs(self):
         return self.config_environment.substs
 
@@ -283,6 +277,9 @@ class MozbuildObject(ProcessExecutionMixin):
 
     @property
     def bindir(self):
+        from . import mozinfo
+        if mozinfo.os == "mac":
+            return os.path.join(self.topobjdir, 'dist', self.substs['MOZ_MACBUNDLE_NAME'], 'Contents', 'Resources')
         return os.path.join(self.topobjdir, 'dist', 'bin')
 
     @property
@@ -293,23 +290,6 @@ class MozbuildObject(ProcessExecutionMixin):
     def statedir(self):
         return os.path.join(self.topobjdir, '.mozbuild')
 
-    @memoized_property
-    def extra_environment_variables(self):
-        '''Some extra environment variables are stored in .mozconfig.mk.
-        This functions extracts and returns them.'''
-        from mozbuild import shellutil
-        mozconfig_mk = os.path.join(self.topobjdir, '.mozconfig.mk')
-        env = {}
-        with open(mozconfig_mk) as fh:
-            for line in fh:
-                if line.startswith('export '):
-                    exports = shellutil.split(line)[1:]
-                    for e in exports:
-                        if '=' in e:
-                            key, value = e.split('=')
-                            env[key] = value
-        return env
-
     def is_clobber_needed(self):
         if not os.path.exists(self.topobjdir):
             return False
@@ -317,13 +297,10 @@ class MozbuildObject(ProcessExecutionMixin):
 
     def have_winrm(self):
         # `winrm -h` should print 'winrm version ...' and exit 1
-        try:
-            p = subprocess.Popen(['winrm.exe', '-h'],
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT)
-            return p.wait() == 1 and p.stdout.read().startswith('winrm')
-        except:
-            return False
+        p = subprocess.Popen(['winrm.exe', '-h'],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
+        return p.wait() == 1 and p.stdout.read().startswith('winrm')
 
     def remove_objdir(self):
         """Remove the entire object directory."""
@@ -453,15 +430,8 @@ class MozbuildObject(ProcessExecutionMixin):
                 FLASHW_CAPTION = 0x01
                 FLASHW_TRAY = 0x02
                 FLASHW_TIMERNOFG = 0x0C
-
-                # GetConsoleWindows returns NULL if no console is attached. We
-                # can't flash nothing.
-                console = windll.kernel32.GetConsoleWindow()
-                if not console:
-                    return
-
                 params = FLASHWINDOW(sizeof(FLASHWINDOW),
-                                    console,
+                                    windll.kernel32.GetConsoleWindow(),
                                     FLASHW_CAPTION | FLASHW_TRAY | FLASHW_TIMERNOFG, 3, 0)
                 FlashWindowEx(params)
         except Exception as e:
@@ -604,45 +574,36 @@ class MozbuildObject(ProcessExecutionMixin):
     def _make_path(self):
         baseconfig = os.path.join(self.topsrcdir, 'config', 'baseconfig.mk')
 
-        def is_xcode_lisense_error(output):
-            return self._is_osx() and 'Agreeing to the Xcode' in output
-
         def validate_make(make):
             if os.path.exists(baseconfig) and os.path.exists(make):
                 cmd = [make, '-f', baseconfig]
                 if self._is_windows():
                     cmd.append('HOST_OS_ARCH=WINNT')
                 try:
-                    subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError as e:
-                    return False, is_xcode_lisense_error(e.output)
-                return True, False
-            return False, False
+                    subprocess.check_call(cmd, stdout=open(os.devnull, 'wb'),
+                        stderr=subprocess.STDOUT)
+                except subprocess.CalledProcessError:
+                    return False
+                return True
+            return False
 
-        xcode_lisense_error = False
         possible_makes = ['gmake', 'make', 'mozmake', 'gnumake']
 
         if 'MAKE' in os.environ:
             make = os.environ['MAKE']
-            possible_makes.insert(0, make)
+            if os.path.isabs(make):
+                if validate_make(make):
+                    return [make]
+            else:
+                possible_makes.insert(0, make)
 
         for test in possible_makes:
-            if os.path.isabs(test):
-                make = test
-            else:
-                try:
-                    make = which.which(test)
-                except which.WhichError:
-                    continue
-            result, xcode_lisense_error_tmp = validate_make(make)
-            if result:
+            try:
+                make = which.which(test)
+            except which.WhichError:
+                continue
+            if validate_make(make):
                 return [make]
-            if xcode_lisense_error_tmp:
-                xcode_lisense_error = True
-
-        if xcode_lisense_error:
-            raise Exception('Xcode requires accepting to the license agreement.\n'
-                'Please run Xcode and accept the license agreement.')
 
         if self._is_windows():
             raise Exception('Could not find a suitable make implementation.\n'
@@ -658,9 +619,6 @@ class MozbuildObject(ProcessExecutionMixin):
 
     def _is_windows(self):
         return os.name in ('nt', 'ce')
-
-    def _is_osx(self):
-        return 'darwin' in str(sys.platform).lower()
 
     def _spawn(self, cls):
         """Create a new MozbuildObject-derived class instance from ourselves.
@@ -864,22 +822,3 @@ class PathArgument(object):
 
     def objdir_path(self):
         return mozpath.join(self.topobjdir, self.relpath())
-
-
-class ExecutionSummary(dict):
-    """Helper for execution summaries."""
-
-    def __init__(self, summary_format, **data):
-        self._summary_format = ''
-        assert 'execution_time' in data
-        self.extend(summary_format, **data)
-
-    def extend(self, summary_format, **data):
-        self._summary_format += summary_format
-        self.update(data)
-
-    def __str__(self):
-        return self._summary_format.format(**self)
-
-    def __getattr__(self, key):
-        return self[key]

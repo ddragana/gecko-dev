@@ -12,8 +12,6 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
                                   "resource://gre/modules/Deprecated.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
 
 const DB_VERSION = 4;
 const DAY_IN_MS  = 86400000; // 1 day in milliseconds
@@ -351,26 +349,26 @@ FormHistory.prototype = {
     },
 
     moveToDeletedTable : function moveToDeletedTable(values, params) {
-        if (AppConstants.platform == "android") {
-            this.log("Moving entries to deleted table.");
+#ifdef ANDROID
+        this.log("Moving entries to deleted table.");
 
-            let stmt;
+        let stmt;
 
-            try {
-                // Move the entries to the deleted items table.
-                let query = "INSERT INTO moz_deleted_formhistory (guid, timeDeleted) ";
-                if (values) query += values;
-                stmt = this.dbCreateStatement(query, params);
-                stmt.execute();
-            } catch (e) {
-                this.log("Moving deleted entries failed: " + e);
-                throw e;
-            } finally {
-                if (stmt) {
-                    stmt.reset();
-                }
+        try {
+            // Move the entries to the deleted items table.
+            let query = "INSERT INTO moz_deleted_formhistory (guid, timeDeleted) ";
+            if (values) query += values;
+            stmt = this.dbCreateStatement(query, params);
+            stmt.execute();
+        } catch (e) {
+            this.log("Moving deleted entries failed: " + e);
+            throw e;
+        } finally {
+            if (stmt) {
+                stmt.reset();
             }
         }
+#endif
     },
 
     get dbConnection() {
@@ -626,7 +624,7 @@ FormHistory.prototype = {
     },
 
     dbCreateTable: function(name, table) {
-        let tSQL = Object.keys(table).map(col => [col, table[col]].join(" ")).join(", ");
+        let tSQL = [[col, table[col]].join(" ") for (col in table)].join(", ");
         this.log("Creating table " + name + " with " + tSQL);
         this.dbConnection.createTable(name, tSQL);
     },
@@ -768,7 +766,7 @@ FormHistory.prototype = {
 
         // Generate a GUID for each login and update the DB.
         query = "UPDATE moz_formhistory SET guid = :guid WHERE id = :id";
-        for (let id of ids) {
+        for each (let id in ids) {
             let params = {
                 id   : id,
                 guid : this.generateGUID()
@@ -804,7 +802,7 @@ FormHistory.prototype = {
         for (let name in this.dbSchema.tables) {
             let table = this.dbSchema.tables[name];
             let query = "SELECT " +
-                        Object.keys(table).join(", ") +
+                        [col for (col in table)].join(", ") +
                         " FROM " + name;
             try {
                 let stmt = this.dbConnection.createStatement(query);
@@ -846,8 +844,7 @@ FormHistory.prototype = {
       *                    closed.
      */
     _dbClose : function FH__dbClose(aBlocking) {
-        for (let query in this.dbStmts) {
-            let stmt = this.dbStmts[query];
+        for each (let stmt in this.dbStmts) {
             stmt.finalize();
         }
         this.dbStmts = {};
@@ -891,5 +888,5 @@ FormHistory.prototype = {
     }
 };
 
-var component = [FormHistory];
+let component = [FormHistory];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

@@ -7,7 +7,7 @@ const { isChildLoader } = require('./core');
 if (!isChildLoader)
   throw new Error("Cannot load sdk/remote/child in a main process loader.");
 
-const { Ci, Cc, Cu } = require('chrome');
+const { Ci, Cc } = require('chrome');
 const runtime = require('../system/runtime');
 const { Class } = require('../core/heritage');
 const { Namespace } = require('../core/namespace');
@@ -39,37 +39,21 @@ const process = {
 };
 exports.process = process;
 
-function definePort(obj, name) {
-  obj.port.emit = (event, ...args) => {
-    let manager = ns(obj).messageManager;
-    if (!manager)
-      return;
-
-    manager.sendAsyncMessage(name, { loaderID, event, args });
-  };
+process.port.emit = (...args) => {
+  mm.sendAsyncMessage('sdk/remote/process/message', {
+    loaderID,
+    args
+  });
 }
 
-function messageReceived({ data, objects }) {
+function processMessageReceived({ data }) {
   // Ignore messages from other loaders
   if (data.loaderID != loaderID)
     return;
-
-  let keys = Object.keys(objects);
-  if (keys.length) {
-    // If any objects are CPOWs then ignore this message. We don't want child
-    // processes interracting with CPOWs
-    if (!keys.every(name => !Cu.isCrossProcessWrapper(objects[name])))
-      return;
-
-    data.args.push(objects);
-  }
-
-  emit(this.port, data.event, this, ...data.args);
+  let [event, ...args] = data.args;
+  emit(process.port, event, process, ...args);
 }
 
-ns(process).messageManager = mm;
-definePort(process, 'sdk/remote/process/message');
-let processMessageReceived = messageReceived.bind(process);
 mm.addMessageListener('sdk/remote/process/message', processMessageReceived);
 
 when(() => {
@@ -124,8 +108,15 @@ function makeFrameEventListener(frame, callback) {
   return callback.bind(frame);
 }
 
-var FRAME_ID = 0;
-var tabMap = new Map();
+let FRAME_ID = 0;
+let tabMap = new Map();
+
+function frameMessageReceived({ data }) {
+  if (data.loaderID != loaderID)
+    return;
+  let [event, ...args] = data.args;
+  emit(this.port, event, this, ...args);
+}
 
 const Frame = Class({
   implements: [ Disposable ],
@@ -140,11 +131,16 @@ const Frame = Class({
 
     tabMap.set(contentFrame.docShell, this);
 
-    ns(this).messageReceived = messageReceived.bind(this);
+    ns(this).messageReceived = frameMessageReceived.bind(this);
     ns(this).messageManager.addMessageListener('sdk/remote/frame/message', ns(this).messageReceived);
 
     this.port = new EventTarget();
-    definePort(this, 'sdk/remote/frame/message');
+    this.port.emit = (...args) => {
+      ns(this).messageManager.sendAsyncMessage('sdk/remote/frame/message', {
+        loaderID,
+        args
+      });
+    };
 
     ns(this).messageManager.sendAsyncMessage('sdk/remote/frame/attach', {
       loaderID,
@@ -261,7 +257,7 @@ const FrameList = Class({
       frame.removeEventListener(...listener.args);
   }
 });
-var frames = exports.frames = new FrameList();
+let frames = exports.frames = new FrameList();
 
 function registerContentFrame(contentFrame) {
   let frame = new Frame(contentFrame);

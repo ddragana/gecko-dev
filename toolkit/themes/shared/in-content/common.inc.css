@@ -38,9 +38,12 @@
   --in-content-primary-button-background-active: #006b9d;
   --in-content-table-border-dark-color: #d1d1d1;
   --in-content-table-header-background: #0095dd;
+  --in-content-help-button-background: #ffcb00;
+  --in-content-help-button-background-hover: #f4c200;
+  --in-content-help-button-background-active: #eaba00;
 }
 
-html|html,
+html|body,
 xul|page,
 xul|window {
   font: message-box;
@@ -84,9 +87,9 @@ xul|caption > xul|label {
 
 *|*.main-content {
   padding-top: 40px;
-  padding-inline-end: 44px; /* compensate the 4px margin of child elements */
+  -moz-padding-end: 44px; /* compensate the 4px margin of child elements */
   padding-bottom: 48px;
-  padding-inline-start: 48px;
+  -moz-padding-start: 48px;
   overflow: auto;
 }
 
@@ -100,16 +103,16 @@ xul|groupbox {
   -moz-appearance: none;
   border: none;
   margin: 15px 0 0;
-  padding-inline-start: 0;
-  padding-inline-end: 0;
+  -moz-padding-start: 0;
+  -moz-padding-end: 0;
   font-size: 1.25rem;
 }
 
-xul|groupbox xul|label:not(.menu-accel):not(.menu-text):not(.indent),
+xul|groupbox xul|label,
 xul|groupbox xul|description {
   /* !important needed to override toolkit !important rule */
-  margin-inline-start: 0 !important;
-  margin-inline-end: 0 !important;
+  -moz-margin-start: 0 !important;
+  -moz-margin-end: 0 !important;
 }
 
 /* tabpanels and tabs */
@@ -144,8 +147,6 @@ xul|tab {
   color: var(--in-content-tab-color);
   background-color: var(--in-content-page-background);
   border-width: 0;
-  /* !important overrides tabbox.css RTL and visuallyselected rules */
-  border-radius: 0 !important;
   transition: background-color 50ms ease 0s;
 }
 
@@ -175,12 +176,12 @@ html|button {
 /* xul buttons and menulists */
 
 *|button,
-html|select,
 xul|colorpicker[type="button"],
 xul|menulist {
   -moz-appearance: none;
-  min-height: 30px;
+  height: 30px;
   color: var(--in-content-text-color);
+  line-height: 20px;
   border: 1px solid var(--in-content-box-border-color);
   -moz-border-top-colors: none !important;
   -moz-border-right-colors: none !important;
@@ -191,7 +192,6 @@ xul|menulist {
 }
 
 html|button:enabled:hover,
-html|select:enabled:hover,
 xul|button:not([disabled="true"]):hover,
 xul|colorpicker[type="button"]:not([disabled="true"]):hover,
 xul|menulist:not([disabled="true"]):hover {
@@ -199,7 +199,6 @@ xul|menulist:not([disabled="true"]):hover {
 }
 
 html|button:enabled:hover:active,
-html|select:enabled:hover:active,
 xul|button:not([disabled="true"]):hover:active,
 xul|colorpicker[type="button"]:not([disabled="true"]):hover:active,
 xul|menulist[open="true"]:not([disabled="true"]) {
@@ -207,10 +206,10 @@ xul|menulist[open="true"]:not([disabled="true"]) {
 }
 
 html|button:disabled,
-html|select:disabled,
 xul|button[disabled="true"],
 xul|colorpicker[type="button"][disabled="true"],
 xul|menulist[disabled="true"] {
+  cursor: not-allowed;
   opacity: 0.5;
 }
 
@@ -242,13 +241,13 @@ xul|menulist > xul|*.menulist-label-box {
 }
 
 xul|menulist > xul|*.menulist-label-box > xul|*.menulist-icon[src] {
-  margin-inline-end: 5px;
+  -moz-margin-end: 5px;
 }
 
 xul|button[type="menu"] > xul|*.button-box > xul|*.button-menu-dropmarker {
   -moz-appearance: none;
   margin: 1px 0;
-  margin-inline-start: 10px;
+  -moz-margin-start: 10px;
   padding: 0;
   width: 10px;
   height: 16px;
@@ -258,26 +257,23 @@ xul|button[type="menu"] > xul|*.button-box > xul|*.button-menu-dropmarker {
 }
 
 xul|*.help-button {
-  min-width: 16px;
-  margin-inline-end: 0;
+  min-width: 30px;
+  border-radius: 2px;
   border-width: 0;
+  background-color: var(--in-content-help-button-background);
   background-image: none;
   box-shadow: none;
-  list-style-image: url("chrome://global/skin/in-content/help-glyph.svg#help");
+  list-style-image: url("chrome://global/skin/in-content/help-glyph.svg");
 }
 
 xul|*.help-button:not([disabled="true"]):hover {
+  background-color: var(--in-content-help-button-background-hover);
   background-image: none;
-  /* Override default button background */
-  background-color: transparent;
-  list-style-image: url("chrome://global/skin/in-content/help-glyph.svg#help-hover");
 }
 
 xul|*.help-button:not([disabled="true"]):hover:active {
+  background-color: var(--in-content-help-button-background-active);
   background-image: none;
-  /* Override default button background */
-  background-color: transparent;
-  list-style-image: url("chrome://global/skin/in-content/help-glyph.svg#help-pressed");
 }
 
 xul|*.close-icon > xul|*.button-box,
@@ -289,8 +285,8 @@ xul|*.help-button > xul|*.button-box {
 }
 
 xul|*.help-button > xul|*.button-box > xul|*.button-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 xul|*.help-button > xul|*.button-box > xul|*.button-text {
@@ -298,9 +294,8 @@ xul|*.help-button > xul|*.button-box > xul|*.button-text {
 }
 
 xul|*.spinbuttons-button {
-  min-height: initial;
-  margin-inline-start: 10px !important;
-  margin-inline-end: 2px !important;
+  -moz-margin-start: 10px !important;
+  -moz-margin-end: 2px !important;
 }
 
 xul|*.spinbuttons-up {
@@ -335,7 +330,7 @@ xul|*.spinbuttons-down[disabled="true"] > xul|*.button-box > xul|*.button-icon {
 
 xul|menulist:not([editable="true"]) > xul|*.menulist-dropmarker {
   -moz-appearance: none;
-  margin-inline-end: 4px;
+  -moz-margin-end: 4px;
   padding: 0;
   border: none;
   background-color: transparent;
@@ -368,8 +363,8 @@ xul|button[type="menu"] > xul|menupopup xul|menuitem {
   color: var(--in-content-text-color);
   padding-top: 0.2em;
   padding-bottom: 0.2em;
-  padding-inline-start: 10px;
-  padding-inline-end: 30px;
+  -moz-padding-start: 10px;
+  -moz-padding-end: 30px;
 }
 
 xul|menulist > xul|menupopup > xul|menu:not([disabled="true"])[_moz-menuactive="true"],
@@ -409,11 +404,13 @@ xul|button[type="menu"] > xul|menupopup xul|menuseparator {
 
 /* textboxes */
 
-html|input[type="text"],
-html|textarea,
-xul|textbox {
+*|textbox {
   -moz-appearance: none;
+  height: 30px;
   color: var(--in-content-text-color);
+  line-height: 20px;
+  padding-right: 10px;
+  padding-left: 10px;
   border: 1px solid var(--in-content-box-border-color);
   -moz-border-top-colors: none !important;
   -moz-border-right-colors: none !important;
@@ -423,27 +420,12 @@ xul|textbox {
   background-color: var(--in-content-box-background);
 }
 
-xul|textbox {
-  min-height: 30px;
-  padding-right: 10px;
-  padding-left: 10px;
-}
-
-html|input[type="text"],
-html|textarea {
-  font-family: inherit;
-  font-size: inherit;
-  padding: 5px 10px;
-}
-
-html|input[type="text"]:focus,
-html|textarea:focus,
+html|textbox:focus,
 xul|textbox[focused] {
   border-color: var(--in-content-border-focus);
 }
 
-html|input[type="text"]:disabled,
-html|textarea:disabled,
+html|textbox:disabled,
 xul|textbox[disabled="true"] {
   opacity: 0.5;
 }
@@ -451,13 +433,15 @@ xul|textbox[disabled="true"] {
 /* Links */
 
 html|a,
-.text-link {
+.text-link,
+.inline-link {
   color: var(--in-content-link-color);
   text-decoration: none;
 }
 
 html|a:hover,
-.text-link:hover {
+.text-link:hover,
+.inline-link:hover {
   color: var(--in-content-link-color-hover);
   text-decoration: underline;
 }
@@ -467,7 +451,8 @@ html|a:visited {
 }
 
 html|a:hover:active,
-.text-link:hover:active {
+.text-link:hover:active,
+.inline-link:hover:active {
   color: var(--in-content-link-color-active);
   text-decoration: none;
 }
@@ -477,8 +462,6 @@ html|a:hover:active,
 /* Hide the actual checkbox */
 html|input[type="checkbox"] {
   opacity: 0;
-  width: 0;
-  pointer-events: none;
   position: absolute;
 }
 
@@ -494,7 +477,7 @@ html|input[type="checkbox"] + html|label {
 }
 
 xul|checkbox {
-  margin-inline-start: 0;
+  -moz-margin-start: 0;
 }
 
 xul|*.checkbox-check,
@@ -504,7 +487,7 @@ html|input[type="checkbox"] + html|label:before {
   height: 23px;
   border-radius: 2px;
   border: 1px solid var(--in-content-box-border-color);
-  margin-inline-end: 10px;
+  -moz-margin-end: 10px;
   background-color: #f1f1f1;
   /* !important needed to override toolkit checked !important rule */
   background-image: linear-gradient(#fff, rgba(255,255,255,0.8)) !important;
@@ -532,8 +515,8 @@ html|input[type="checkbox"]:disabled + html|label {
 }
 
 xul|*.checkbox-label-box {
-  margin-inline-start: -1px; /* negative margin for the transparent border */
-  padding-inline-start: 0;
+  -moz-margin-start: -1px; /* negative margin for the transparent border */
+  -moz-padding-start: 0;
 }
 
 xul|richlistitem > xul|*.checkbox-check {
@@ -541,7 +524,7 @@ xul|richlistitem > xul|*.checkbox-check {
 }
 
 xul|radio {
-  margin-inline-start: 0;
+  -moz-margin-start: 0;
 }
 
 xul|*.radio-check {
@@ -550,7 +533,7 @@ xul|*.radio-check {
   height: 23px;
   border: 1px solid var(--in-content-box-border-color);
   border-radius: 50%;
-  margin-inline-end: 10px;
+  -moz-margin-end: 10px;
   background-color: #f1f1f1;
   background-image: linear-gradient(#fff, rgba(255,255,255,0.80));
   box-shadow: 0 1px 1px 0 #fff, inset 0 2px 0 0 rgba(0,0,0,0.03);
@@ -569,14 +552,14 @@ xul|radio[disabled="true"] > xul|*.radio-check {
 }
 
 xul|*.radio-label-box {
-  margin-inline-start: -1px; /* negative margin for the transparent border */
-  margin-inline-end: 10px;
-  padding-inline-start: 0;
+  -moz-margin-start: -1px; /* negative margin for the transparent border */
+  -moz-margin-end: 10px;
+  -moz-padding-start: 0;
 }
 
 /* Category List */
 
-*|*#categories {
+xul|*#categories {
   -moz-appearance: none;
   background-color: var(--in-content-category-background);
   padding-top: 39px;
@@ -584,29 +567,28 @@ xul|*.radio-label-box {
   border-width: 0;
 }
 
-*|*.category {
+xul|*.category {
   -moz-appearance: none;
   color: var(--in-content-category-text);
-  border-inline-end-width: 0;
-  padding-inline-start: 15px;
-  padding-inline-end: 21px;
+  -moz-border-end-width: 0;
+  -moz-padding-start: 15px;
+  -moz-padding-end: 21px;
   min-height: 40px;
   transition: background-color 150ms;
 }
 
-*|*.category:hover {
+xul|*.category:hover {
   background-color: var(--in-content-category-background-hover);
 }
 
-*|*.category[selected],
-*|*.category.selected {
+xul|*.category[selected] {
   background-color: var(--in-content-category-background-active);
   color: var(--in-content-category-text-selected);
-  padding-inline-start: 11px; /* compensate the 4px border */
-  border-inline-start: solid 4px var(--in-content-border-highlight);
+  -moz-padding-start: 11px; /* compensate the 4px border */
+  -moz-border-start: solid 4px var(--in-content-border-highlight);
 }
 
-*|*#categories[keyboard-navigation="true"]:-moz-focusring > *|*.category[current] {
+xul|*#categories[keyboard-navigation="true"]:-moz-focusring > xul|*.category[current] {
   border-top: var(--in-content-category-border-focus);
   border-bottom: var(--in-content-category-border-focus);
 }
@@ -615,7 +597,7 @@ xul|*.radio-label-box {
   line-height: 22px;
   font-size: 1.25rem;
   padding-bottom: 2px;
-  padding-inline-start: 9px;
+  -moz-padding-start: 9px;
   margin: 0;
   -moz-user-select: none;
 }
@@ -629,10 +611,9 @@ xul|*.radio-label-box {
 
 *|*.header {
   border-bottom: 1px solid var(--in-content-header-border-color);
-  margin-inline-end: 4px; /* add the 4px end-margin of other elements */
+  -moz-margin-end: 4px; /* add the 4px end-margin of other elements */
   margin-bottom: 15px;
   padding-bottom: 15px;
-  -moz-box-align: baseline;
 }
 
 *|*.header-name {
@@ -657,13 +638,13 @@ xul|*.fileFieldContentBox {
 }
 
 xul|*.fileFieldIcon {
-  margin-inline-start: 10px;
-  margin-inline-end: 0;
+  -moz-margin-start: 10px;
+  -moz-margin-end: 0;
 }
 
 xul|*.fileFieldLabel {
-  margin-inline-start: -26px;
-  padding-inline-start: 36px;
+  -moz-margin-start: -26px;
+  -moz-padding-start: 36px;
 }
 
 xul|textbox:-moz-locale-dir(rtl),
@@ -684,7 +665,7 @@ xul|filefield + xul|button:-moz-locale-dir(rtl) {
 
 xul|textbox + xul|button,
 xul|filefield + xul|button {
-  border-inline-start: none;
+  -moz-border-start: none;
 }
 
 /* List boxes */
@@ -692,7 +673,7 @@ xul|filefield + xul|button {
 xul|richlistbox,
 xul|listbox {
   -moz-appearance: none;
-  margin-inline-start: 0;
+  -moz-margin-start: 0;
   background-color: var(--in-content-box-background);
   border: 1px solid var(--in-content-box-border-color);
   color: var(--in-content-text-color);
@@ -741,10 +722,6 @@ xul|treecols {
   padding: 0;
 }
 
-.autocomplete-tree > xul|treecols {
-  border-bottom: none !important;
-}
-
 xul|treecol:not([hideheader="true"]),
 xul|treecolpicker {
   -moz-appearance: none;
@@ -762,8 +739,8 @@ xul|treecolpicker:hover {
 
 xul|treecol:not([hideheader="true"]):not(:first-child),
 xul|treecolpicker {
-  border-inline-start-width: 1px;
-  border-inline-start-style: solid;
+  -moz-border-start-width: 1px;
+  -moz-border-start-style: solid;
   border-image: linear-gradient(transparent 0%, transparent 20%, #c1c1c1 20%, #c1c1c1 80%, transparent 80%, transparent 100%) 1 1;
 }
 

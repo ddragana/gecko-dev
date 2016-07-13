@@ -9,7 +9,7 @@
 #include "gfxContext.h"
 #include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 
 namespace mozilla {
 namespace gfx {
@@ -22,6 +22,8 @@ class MOZ_STACK_CLASS nsRenderingContext final
     typedef mozilla::gfx::DrawTarget DrawTarget;
 
 public:
+    nsRenderingContext() {}
+
     explicit nsRenderingContext(gfxContext* aThebesContext)
       : mThebes(aThebesContext)
     {}
@@ -30,12 +32,19 @@ public:
       : mThebes(aThebesContext)
     {}
 
+    explicit nsRenderingContext(DrawTarget* aDrawTarget) {
+      Init(aDrawTarget);
+    }
+
+    void Init(gfxContext* aThebesContext);
+    void Init(DrawTarget* aDrawTarget);
+
     // These accessors will never return null.
     gfxContext *ThebesContext() { return mThebes; }
     DrawTarget *GetDrawTarget() { return mThebes->GetDrawTarget(); }
 
 private:
-    RefPtr<gfxContext> mThebes;
+    nsRefPtr<gfxContext> mThebes;
 };
 
 #endif  // NSRENDERINGCONTEXT__H__

@@ -115,9 +115,9 @@ public:
   void AddStorage(MtpStorageID aStorageID, const char* aPath, const char *aName);
   void RemoveStorage(MtpStorageID aStorageID);
 
-  void MtpWatcherUpdate(RefCountedMtpServer* aMtpServer,
-                        DeviceStorageFile* aFile,
-                        const nsACString& aEventType);
+  void FileWatcherUpdate(RefCountedMtpServer* aMtpServer,
+                         DeviceStorageFile* aFile,
+                         const nsACString& aEventType);
 
 protected:
   virtual ~MozMtpDatabase();
@@ -133,8 +133,7 @@ private:
         mParent(0),
         mObjectSize(0),
         mDateCreated(0),
-        mDateModified(0),
-        mDateAdded(0) {}
+        mDateModified(0) {}
 
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DbEntry)
 
@@ -146,9 +145,8 @@ private:
     uint64_t        mObjectSize;
     nsCString       mDisplayName;
     nsCString       mPath;
-    time_t          mDateCreated;
-    time_t          mDateModified;
-    time_t          mDateAdded;
+    PRTime          mDateCreated;
+    PRTime          mDateModified;
 
   protected:
     ~DbEntry() {}
@@ -210,8 +208,8 @@ private:
   private:
     mozilla::Mutex& mMutex;
   };
-  typedef nsTArray<RefPtr<DbEntry> > UnprotectedDbArray;
-  typedef ProtectedTArray<RefPtr<DbEntry> > ProtectedDbArray;
+  typedef nsTArray<mozilla::RefPtr<DbEntry> > UnprotectedDbArray;
+  typedef ProtectedTArray<mozilla::RefPtr<DbEntry> > ProtectedDbArray;
 
   struct StorageEntry final
   {
@@ -224,7 +222,7 @@ private:
   protected:
     ~StorageEntry() {}
   };
-  typedef ProtectedTArray<RefPtr<StorageEntry> > StorageArray;
+  typedef ProtectedTArray<mozilla::RefPtr<StorageEntry> > StorageArray;
 
   enum MatchType
   {
@@ -270,7 +268,7 @@ private:
 
   StorageArray::index_type FindStorage(MtpStorageID aStorageID);
   MtpStorageID FindStorageIDFor(const nsACString& aPath, nsCSubstring& aRemainder);
-  void MtpWatcherNotify(DbEntry* aEntry, const char* aEventType);
+  void FileWatcherNotify(DbEntry* aEntry, const char* aEventType);
 
   // We need a mutex to protext mDb and mStorage. The MTP server runs on a
   // dedicated thread, and it updates/accesses mDb. When files are updated

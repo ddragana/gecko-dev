@@ -14,6 +14,8 @@
 #include "gfx2DGlue.h"
 #include "gfxPlatform.h"
 
+#include "gfxSharedQuartzSurface.h"
+
 using namespace mozilla::gl;
 
 namespace mozilla {

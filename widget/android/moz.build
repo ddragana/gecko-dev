@@ -19,11 +19,10 @@ EXPORTS += [
     'AndroidBridge.h',
     'AndroidJavaWrappers.h',
     'AndroidJNIWrapper.h',
-    'GeneratedJNINatives.h',
     'GeneratedJNIWrappers.h',
 ]
 
-UNIFIED_SOURCES += [
+SOURCES += [
     'AndroidBridge.cpp',
     'AndroidContentController.cpp',
     'AndroidDirectTexture.cpp',
@@ -31,7 +30,6 @@ UNIFIED_SOURCES += [
     'AndroidJavaWrappers.cpp',
     'AndroidJNI.cpp',
     'AndroidJNIWrapper.cpp',
-    'ANRReporter.cpp',
     'GeneratedJNIWrappers.cpp',
     'GfxInfo.cpp',
     'NativeJSContainer.cpp',
@@ -40,12 +38,15 @@ UNIFIED_SOURCES += [
     'nsClipboard.cpp',
     'nsDeviceContextAndroid.cpp',
     'nsIdleServiceAndroid.cpp',
+    'nsIMEPicker.cpp',
     'nsLookAndFeel.cpp',
     'nsPrintOptionsAndroid.cpp',
     'nsScreenManagerAndroid.cpp',
     'nsWidgetFactory.cpp',
     'nsWindow.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -60,7 +61,5 @@ LOCAL_INCLUDES += [
     '/widget',
     '/widget/android/android',
 ]
-
-CXXFLAGS += ['-Wno-error=shadow']
 
 #DEFINES['DEBUG_WIDGETS'] = True

@@ -37,25 +37,25 @@ class ViEImageProcessImpl
   virtual int EnableDeflickering(const int capture_id, const bool enable);
   virtual int EnableColorEnhancement(const int video_channel,
                                      const bool enable);
-  void RegisterPreEncodeCallback(
+  virtual void RegisterPreEncodeCallback(
       int video_channel,
-      I420FrameCallback* pre_encode_callback) override;
-  void DeRegisterPreEncodeCallback(int video_channel) override;
+      I420FrameCallback* pre_encode_callback) OVERRIDE;
+  virtual void DeRegisterPreEncodeCallback(int video_channel) OVERRIDE;
 
-  void RegisterPostEncodeImageCallback(
+  virtual void RegisterPostEncodeImageCallback(
       int video_channel,
-      EncodedImageCallback* post_encode_callback) override;
-  void DeRegisterPostEncodeCallback(int video_channel) override;
+      EncodedImageCallback* post_encode_callback) OVERRIDE;
+  virtual void DeRegisterPostEncodeCallback(int video_channel) OVERRIDE;
 
-  void RegisterPreDecodeImageCallback(
-      int video_channel,
-      EncodedImageCallback* post_encode_callback) override;
-  void DeRegisterPreDecodeCallback(int video_channel) override;
+  virtual void RegisterPreDecodeImageCallback(
+        int video_channel,
+        EncodedImageCallback* post_encode_callback) OVERRIDE;
+  virtual void DeRegisterPreDecodeCallback(int video_channel) OVERRIDE;
 
-  void RegisterPreRenderCallback(
+  virtual void RegisterPreRenderCallback(
       int video_channel,
-      I420FrameCallback* pre_render_callback) override;
-  void DeRegisterPreRenderCallback(int video_channel) override;
+      I420FrameCallback* pre_render_callback) OVERRIDE;
+  virtual void DeRegisterPreRenderCallback(int video_channel) OVERRIDE;
 
  protected:
   explicit ViEImageProcessImpl(ViESharedData* shared_data);

@@ -5,16 +5,12 @@
 // TODO: support multiple device pixels per CSS pixel
 // 
 
-var browserWindow = Services.wm.getMostRecentWindow("navigator:browser");
-var isMulet = "ResponsiveUI" in browserWindow;
+let browserWindow = Services.wm.getMostRecentWindow("navigator:browser");
+let isMulet = "ResponsiveUI" in browserWindow;
 Cu.import("resource://gre/modules/GlobalSimulatorScreen.jsm");
 
-window.addEventListener('ContentStart', onStart);
-window.addEventListener('SafeModeStart', onStart);
-
-// We do this on ContentStart and SafeModeStart because querying the
-// displayDPI fails otherwise.
-function onStart() {
+// We do this on ContentStart because querying the displayDPI fails otherwise.
+window.addEventListener('ContentStart', function() {
   // This is the toplevel <window> element
   let shell = document.getElementById('shell');
 
@@ -104,7 +100,6 @@ function onStart() {
   } 
 
   let width, height, ratio = 1.0;
-  let lastResizedWidth;
 
   if (screenarg in screens) {
     // If this is a named screen, get its data
@@ -155,12 +150,6 @@ function onStart() {
     } else {
       let chromewidth = window.outerWidth - window.innerWidth;
       let chromeheight = window.outerHeight - window.innerHeight + controlsHeight;
-
-      if (lastResizedWidth == width) {
-        return;
-      }
-      lastResizedWidth = width;
-
       window.resizeTo(width + chromewidth,
                       height + chromeheight);
     }
@@ -273,4 +262,4 @@ function onStart() {
     // Exit the b2g client
     Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit);
   }
-}
+});

@@ -20,7 +20,7 @@
 // Maximum number of samples in a low/high-band frame.
 enum
 {
-    kMaxBandFrameLength = 320  // 10 ms at 64 kHz.
+    kMaxBandFrameLength = 240  // 10 ms at 48 kHz.
 };
 
 // QMF filter coefficients in Q16.

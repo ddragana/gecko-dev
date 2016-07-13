@@ -19,10 +19,12 @@
     var constraints = {video: true};
 
     return getUserMedia(constraints).then(stream => {
+      checkMediaStreamTracks(constraints, stream);
+
       var playback = new LocalMediaStreamPlayback(testVideo, stream);
       var video = playback.mediaElement;
 
-      video.srcObject = stream;
+      video.mozSrcObject = stream;
       return new Promise(resolve => {
         ok(playback.mediaElement.paused,
            "Media element should be paused before play()ing");

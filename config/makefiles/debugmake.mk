@@ -57,8 +57,6 @@ ifneq (,$(filter $(PROGRAM) $(HOST_PROGRAM) $(SIMPLE_PROGRAMS) $(HOST_LIBRARY) $
 endif
 	$(LOOP_OVER_DIRS)
 
-showbuild showhost: _DEPEND_CFLAGS=
-showbuild showhost: COMPILE_PDB_FLAG=
 showbuild:
 	$(call print_vars,\
 		MOZ_BUILD_ROOT \
@@ -74,6 +72,7 @@ showbuild:
 		MKSHLIB \
 		MKCSHLIB \
 		RC \
+		MC \
 		CFLAGS \
 		OS_CFLAGS \
 		COMPILE_CFLAGS \

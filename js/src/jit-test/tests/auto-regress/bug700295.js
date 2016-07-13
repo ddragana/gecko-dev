@@ -1,13 +1,9 @@
 // Binary: cache/js-dbg-64-1210706b4576-linux
 // Flags:
 //
-load(libdir + "immutable-prototype.js");
 
-if (globalPrototypeChainIsMutable()) {
-  this.__proto__ = null;
-  Object.prototype.__proto__ = this;
-}
-
+this.__proto__ = null;
+Object.prototype.__proto__ = this;
 function exploreProperties(obj) {
   var props = [];
   for (var o = obj; o; o = Object.getPrototypeOf(o)) {

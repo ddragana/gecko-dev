@@ -30,7 +30,7 @@ WebGL2Context::FenceSync(GLenum condition, GLbitfield flags)
    }
 
    MakeContextCurrent();
-   RefPtr<WebGLSync> globj = new WebGLSync(this, condition, flags);
+   nsRefPtr<WebGLSync> globj = new WebGLSync(this, condition, flags);
    return globj.forget();
 }
 
@@ -125,7 +125,7 @@ WebGL2Context::GetSyncParameter(JSContext*, WebGLSync* sync, GLenum pname, JS::M
         MakeContextCurrent();
         gl->fGetSynciv(sync->mGLName, pname, 1, nullptr, &result);
         retval.set(JS::Int32Value(result));
-        return;
+        break;
     }
 
     ErrorInvalidEnum("getSyncParameter: Invalid pname 0x%04x", pname);

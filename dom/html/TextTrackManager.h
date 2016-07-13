@@ -11,7 +11,6 @@
 #include "mozilla/dom/TextTrackList.h"
 #include "mozilla/dom/TextTrackCueList.h"
 #include "mozilla/StaticPtr.h"
-#include "nsContentUtils.h"
 
 class nsIWebVTTParserWrapper;
 
@@ -23,9 +22,9 @@ class HTMLMediaElement;
 class CompareTextTracks {
 private:
   HTMLMediaElement* mMediaElement;
-  int32_t TrackChildPosition(TextTrack* aTrack) const;
 public:
   explicit CompareTextTracks(HTMLMediaElement* aMediaElement);
+  int32_t TrackChildPosition(TextTrack* aTrack) const;
   bool Equals(TextTrack* aOne, TextTrack* aTwo) const;
   bool LessThan(TextTrack* aOne, TextTrack* aTwo) const;
 };
@@ -56,9 +55,9 @@ public:
   void RemoveTextTrack(TextTrack* aTextTrack, bool aPendingListOnly);
   void DidSeek();
 
-  void NotifyCueAdded(TextTrackCue& aCue);
+  void AddCue(TextTrackCue& aCue);
   void AddCues(TextTrack* aTextTrack);
-  void NotifyCueRemoved(TextTrackCue& aCue);
+
   /**
    * Overview of WebVTT cuetext and anonymous content setup.
    *
@@ -83,51 +82,25 @@ public:
    * Current rules are taken from revision on April 15, 2013.
    */
 
+  /**
+   * Converts the TextTrackCue's cuetext into a tree of DOM objects and attaches
+   * it to a div on it's owning TrackElement's MediaElement's caption overlay.
+   */
+  void UpdateCueDisplay();
+
   void PopulatePendingList();
 
   void AddListeners();
 
   // The HTMLMediaElement that this TextTrackManager manages the TextTracks of.
-  RefPtr<HTMLMediaElement> mMediaElement;
-
-  void DispatchTimeMarchesOn();
-  void TimeMarchesOn();
-
-  void NotifyShutdown()
-  {
-    mShutdown = true;
-  }
-
-  void NotifyCueUpdated(TextTrackCue *aCue);
-
-  void NotifyReset();
-
+  nsRefPtr<HTMLMediaElement> mMediaElement;
 private:
-  /**
-   * Converts the TextTrackCue's cuetext into a tree of DOM objects
-   * and attaches it to a div on its owning TrackElement's
-   * MediaElement's caption overlay.
-   */
-  void UpdateCueDisplay();
-
   // List of the TextTrackManager's owning HTMLMediaElement's TextTracks.
-  RefPtr<TextTrackList> mTextTracks;
+  nsRefPtr<TextTrackList> mTextTracks;
   // List of text track objects awaiting loading.
-  RefPtr<TextTrackList> mPendingTextTracks;
+  nsRefPtr<TextTrackList> mPendingTextTracks;
   // List of newly introduced Text Track cues.
-
-  // Contain all cues for a MediaElement. Not sorted.
-  RefPtr<TextTrackCueList> mNewCues;
-  // The active cues for the last TimeMarchesOn iteration.
-  RefPtr<TextTrackCueList> mLastActiveCues;
-
-  // True if the media player playback changed due to seeking prior to and
-  // during running the "Time Marches On" algorithm.
-  bool mHasSeeked;
-  // Playback position at the time of last "Time Marches On" call
-  double mLastTimeMarchesOnCalled;
-
-  bool mTimeMarchesOnDispatched;
+  nsRefPtr<TextTrackCueList> mNewCues;
 
   static StaticRefPtr<nsIWebVTTParserWrapper> sParserWrapper;
 
@@ -145,35 +118,6 @@ private:
   void GetTextTracksOfKind(TextTrackKind aTextTrackKind,
                            nsTArray<TextTrack*>& aTextTracks);
   bool TrackIsDefault(TextTrack* aTextTrack);
-
-  class ShutdownObserverProxy final : public nsIObserver
-  {
-    NS_DECL_ISUPPORTS
-
-  public:
-    explicit ShutdownObserverProxy(TextTrackManager* aManager)
-      : mManager(aManager)
-    {
-      nsContentUtils::RegisterShutdownObserver(this);
-    }
-
-    NS_IMETHODIMP Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData) override
-    {
-      MOZ_ASSERT(NS_IsMainThread());
-      if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
-        nsContentUtils::UnregisterShutdownObserver(this);
-        mManager->NotifyShutdown();
-      }
-      return NS_OK;
-    }
-
-  private:
-    ~ShutdownObserverProxy() {};
-    TextTrackManager* mManager;
-  };
-
-  RefPtr<ShutdownObserverProxy> mShutdownProxy;
-  bool mShutdown;
 };
 
 } // namespace dom

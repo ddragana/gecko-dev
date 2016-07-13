@@ -6,9 +6,9 @@ AC_DEFUN([MOZ_CONFIG_FFI], [
 
 MOZ_ARG_ENABLE_BOOL(system-ffi,
 [  --enable-system-ffi       Use system libffi (located with pkgconfig)],
-    MOZ_SYSTEM_FFI=1 )
+    MOZ_NATIVE_FFI=1 )
 
-if test -n "$MOZ_SYSTEM_FFI"; then
+if test -n "$MOZ_NATIVE_FFI"; then
     # Vanilla libffi 3.0.9 needs a few patches from upcoming version 3.0.10
     # for non-GCC compilers.
     if test -z "$GNU_CC"; then
@@ -18,14 +18,14 @@ if test -n "$MOZ_SYSTEM_FFI"; then
     fi
 fi
 
-AC_SUBST(MOZ_SYSTEM_FFI)
+AC_SUBST(MOZ_NATIVE_FFI)
 
 ])
 
 AC_DEFUN([MOZ_SUBCONFIGURE_FFI], [
-if test "$MOZ_BUILD_APP" != js -o -n "$JS_STANDALONE"; then
+if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
 
-  if test "$BUILD_CTYPES" -a -z "$MOZ_SYSTEM_FFI"; then
+  if test "$BUILD_CTYPES" -a -z "$MOZ_NATIVE_FFI"; then
     # Run the libffi 'configure' script.
     ac_configure_args="--disable-shared --enable-static --disable-raw-api"
     if test "$MOZ_DEBUG"; then
@@ -37,20 +37,10 @@ if test "$MOZ_BUILD_APP" != js -o -n "$JS_STANDALONE"; then
     for var in AS CC CXX CPP LD AR RANLIB STRIP; do
       ac_configure_args="$ac_configure_args $var='`eval echo \\${${var}}`'"
     done
-    old_cflags="$CFLAGS"
-    # The libffi sources (especially the ARM ones) are written expecting gas
-    # syntax, and clang's integrated assembler doesn't handle all of gas syntax.
-    if test -n "$CLANG_CC" -a "$CPU_ARCH" = arm; then
-      CFLAGS="-no-integrated-as $CFLAGS"
+    if test "$CROSS_COMPILE"; then
+      export CPPFLAGS CFLAGS LDFLAGS
     fi
     ac_configure_args="$ac_configure_args --build=$build --host=$target"
-    if test "$CROSS_COMPILE"; then
-      ac_configure_args="$ac_configure_args \
-                         CFLAGS=\"$CFLAGS\" \
-                         CPPFLAGS=\"$CPPFLAGS\" \
-                         LDFLAGS=\"$LDFLAGS\""
-    fi
-    CFLAGS="$old_cflags"
     if test "$_MSC_VER"; then
       # Use a wrapper script for cl and ml that looks more like gcc.
       # autotools can't quite handle an MSVC build environment yet.
@@ -78,6 +68,22 @@ if test "$MOZ_BUILD_APP" != js -o -n "$JS_STANDALONE"; then
                            CXX=\"$_topsrcdir/js/src/ctypes/libffi/msvcc.sh$flags\""
         ;;
       esac
+    fi
+    if test "$SOLARIS_SUNPRO_CC"; then
+      # Always use gcc for libffi on Solaris
+      if test ! "$HAVE_64BIT_BUILD"; then
+        ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-m32 LD= LDFLAGS="
+      else
+        ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-m64 LD= LDFLAGS="
+      fi
+    fi
+    if test "$AIX_IBM_XLC"; then
+      # Always use gcc for libffi on IBM AIX5/AIX6
+      if test ! "$HAVE_64BIT_BUILD"; then
+        ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-maix32"
+      else
+        ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-maix64"
+      fi
     fi
 
     # Use a separate cache file for libffi, since it does things differently

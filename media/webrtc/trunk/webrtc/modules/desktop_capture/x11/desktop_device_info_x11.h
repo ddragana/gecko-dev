@@ -21,11 +21,13 @@ public:
 
 protected:
   //DesktopDeviceInfo Interfaces
-  virtual void InitializeApplicationList() override;
-  virtual void InitializeScreenList() override;
+  virtual void InitializeApplicationList() OVERRIDE;
+  virtual void InitializeScreenList() OVERRIDE;
 
 private:
+#if !defined(MULTI_MONITOR_SCREENSHARE)
   void MultiMonitorScreenshare();
+#endif
 };
 
 }// namespace webrtc

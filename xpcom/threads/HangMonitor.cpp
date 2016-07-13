@@ -23,10 +23,6 @@
 #include "nsExceptionHandler.h"
 #endif
 
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
-
 #ifdef XP_WIN
 #include <windows.h>
 #endif
@@ -113,12 +109,8 @@ Crash()
 #endif
 
 #ifdef MOZ_CRASHREPORTER
-  // If you change this, you must also deal with the threadsafety of AnnotateCrashReport in
-  // non-chrome processes!
-  if (GeckoProcessType_Default == XRE_GetProcessType()) {
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("Hang"),
-                                       NS_LITERAL_CSTRING("1"));
-  }
+  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("Hang"),
+                                     NS_LITERAL_CSTRING("1"));
 #endif
 
   NS_RUNTIMEABORT("HangMonitor triggered");
@@ -183,12 +175,6 @@ void
 ThreadMain(void*)
 {
   PR_SetCurrentThreadName("Hang Monitor");
-
-#ifdef MOZ_NUWA_PROCESS
-  if (IsNuwaProcess()) {
-    NuwaMarkCurrentThread(nullptr, nullptr);
-  }
-#endif
 
   MonitorAutoLock lock(*gMonitor);
 
@@ -270,8 +256,10 @@ ThreadMain(void*)
 void
 Startup()
 {
-  if (GeckoProcessType_Default != XRE_GetProcessType() &&
-      GeckoProcessType_Content != XRE_GetProcessType()) {
+  // The hang detector only runs in chrome processes. If you change this,
+  // you must also deal with the threadsafety of AnnotateCrashReport in
+  // non-chrome processes!
+  if (GeckoProcessType_Default != XRE_GetProcessType()) {
     return;
   }
 
@@ -305,8 +293,7 @@ Startup()
 void
 Shutdown()
 {
-  if (GeckoProcessType_Default != XRE_GetProcessType() &&
-      GeckoProcessType_Content != XRE_GetProcessType()) {
+  if (GeckoProcessType_Default != XRE_GetProcessType()) {
     return;
   }
 
@@ -383,10 +370,16 @@ NotifyActivity(ActivityType aActivityType)
   // penalties here.
   gTimestamp = PR_IntervalNow();
 
-  // If we have UI activity we should reset the timer and report it
+  // If we have UI activity we should reset the timer and report it if it is
+  // significant enough.
   if (aActivityType == kUIActivity) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::EVENTLOOP_UI_ACTIVITY_EXP_MS,
+    // The minimum amount of lag time that we should report for telemetry data.
+    // Mozilla's UI responsiveness goal is 50ms
+    static const uint32_t kUIResponsivenessThresholdMS = 50;
+    if (cumulativeUILagMS > kUIResponsivenessThresholdMS) {
+      mozilla::Telemetry::Accumulate(mozilla::Telemetry::EVENTLOOP_UI_LAG_EXP_MS,
                                      cumulativeUILagMS);
+    }
     cumulativeUILagMS = 0;
   }
 

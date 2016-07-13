@@ -52,7 +52,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MobileConnectionInfo)
   NS_INTERFACE_MAP_ENTRY(nsIMobileConnectionInfo)
 NS_INTERFACE_MAP_END
 
-MobileConnectionInfo::MobileConnectionInfo(nsPIDOMWindowInner* aWindow)
+MobileConnectionInfo::MobileConnectionInfo(nsPIDOMWindow* aWindow)
   : mConnected(false)
   , mEmergencyCallsOnly(false)
   , mRoaming(false)

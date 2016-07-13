@@ -31,16 +31,8 @@
 #endif
 #include "ProfilerMarkers.h"
 
-#ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracer.h"
-#endif
-
 #if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
   #include "AndroidBridge.h"
-#endif
-
-#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
-#include "GeneratedJNINatives.h"
 #endif
 
 #ifndef SPS_STANDALONE
@@ -51,25 +43,9 @@
 #endif
 #endif
 
-#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
-class GeckoJavaSampler : public widget::GeckoJavaSampler::Natives<GeckoJavaSampler>
-{
-private:
-  GeckoJavaSampler();
-
-public:
-  static double GetProfilerTime() {
-    if (!profiler_is_active()) {
-      return 0.0;
-    }
-    return profiler_time();
-  };
-};
-#endif
-
-MOZ_THREAD_LOCAL(PseudoStack *) tlsPseudoStack;
-MOZ_THREAD_LOCAL(GeckoSampler *) tlsTicker;
-MOZ_THREAD_LOCAL(void *) tlsStackTop;
+mozilla::ThreadLocal<PseudoStack *> tlsPseudoStack;
+mozilla::ThreadLocal<GeckoSampler *> tlsTicker;
+mozilla::ThreadLocal<void *> tlsStackTop;
 // We need to track whether we've been initialized otherwise
 // we end up using tlsStack without initializing it.
 // Because tlsStack is totally opaque to us we can't reuse
@@ -462,10 +438,6 @@ void mozilla_sampler_init(void* stackTop)
   if (stack_key_initialized)
     return;
 
-#ifdef MOZ_TASK_TRACER
-  mozilla::tasktracer::InitTaskTracer();
-#endif
-
 #ifdef SPS_STANDALONE
   mozilla::TimeStamp::Startup();
 #endif
@@ -499,12 +471,6 @@ void mozilla_sampler_init(void* stackTop)
 
 #ifndef SPS_STANDALONE
   set_stderr_callback(mozilla_sampler_log);
-#endif
-
-#if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
-  if (mozilla::jni::IsAvailable()) {
-    GeckoJavaSampler::Init();
-  }
 #endif
 
   // We can't open pref so we use an environment variable
@@ -572,10 +538,6 @@ void mozilla_sampler_shutdown()
   PseudoStack *stack = tlsPseudoStack.get();
   stack->deref();
   tlsPseudoStack.set(nullptr);
-
-#ifdef MOZ_TASK_TRACER
-  mozilla::tasktracer::ShutdownTaskTracer();
-#endif
 }
 
 void mozilla_sampler_save()
@@ -622,58 +584,6 @@ void mozilla_sampler_get_profile_data_async(double aSinceTime,
 
   t->ToJSObjectAsync(aSinceTime, aPromise);
 }
-
-void mozilla_sampler_get_profiler_start_params(int* aEntrySize,
-                                               double* aInterval,
-                                               mozilla::Vector<const char*>* aFilters,
-                                               mozilla::Vector<const char*>* aFeatures)
-{
-  if (NS_WARN_IF(!aEntrySize) || NS_WARN_IF(!aInterval) ||
-      NS_WARN_IF(!aFilters) || NS_WARN_IF(!aFeatures)) {
-    return;
-  }
-
-  GeckoSampler *t = tlsTicker.get();
-  if (NS_WARN_IF(!t)) {
-    return;
-  }
-
-  *aEntrySize = t->EntrySize();
-  *aInterval = t->interval();
-
-  const ThreadNameFilterList& threadNameFilterList = t->ThreadNameFilters();
-  MOZ_ALWAYS_TRUE(aFilters->resize(threadNameFilterList.length()));
-  for (uint32_t i = 0; i < threadNameFilterList.length(); ++i) {
-    (*aFilters)[i] = threadNameFilterList[i].c_str();
-  }
-
-  const FeatureList& featureList = t->Features();
-  MOZ_ALWAYS_TRUE(aFeatures->resize(featureList.length()));
-  for (size_t i = 0; i < featureList.length(); ++i) {
-    (*aFeatures)[i] = featureList[i].c_str();
-  }
-}
-
-void mozilla_sampler_get_gatherer(nsISupports** aRetVal)
-{
-  if (!aRetVal) {
-    return;
-  }
-
-  if (NS_WARN_IF(!profiler_is_active())) {
-    *aRetVal = nullptr;
-    return;
-  }
-
-  GeckoSampler *t = tlsTicker.get();
-  if (NS_WARN_IF(!t)) {
-    *aRetVal = nullptr;
-    return;
-  }
-
-  t->GetGatherer(aRetVal);
-}
-
 #endif
 
 void mozilla_sampler_save_profile_to_file(const char* aFilename)
@@ -1014,7 +924,7 @@ void mozilla_sampler_unlock()
 #endif
 }
 
-bool mozilla_sampler_register_thread(const char* aName, void* aGuessStackTop)
+bool mozilla_sampler_register_thread(const char* aName, void* stackTop)
 {
   if (sInitCount == 0) {
     return false;
@@ -1033,7 +943,6 @@ bool mozilla_sampler_register_thread(const char* aName, void* aGuessStackTop)
   PseudoStack* stack = PseudoStack::create();
   tlsPseudoStack.set(stack);
   bool isMainThread = is_main_thread_name(aName);
-  void* stackTop = GetStackTop(aGuessStackTop);
   return Sampler::RegisterCurrentThread(aName, stack, isMainThread, stackTop);
 }
 
@@ -1116,33 +1025,6 @@ ProfilerBacktrace* mozilla_sampler_get_backtrace()
 void mozilla_sampler_free_backtrace(ProfilerBacktrace* aBacktrace)
 {
   delete aBacktrace;
-}
-
-// Fill the output buffer with the following pattern:
-// "Lable 1" "\0" "Label 2" "\0" ... "Label N" "\0" "\0"
-// TODO: use the unwinder instead of pseudo stack.
-void mozilla_sampler_get_backtrace_noalloc(char *output, size_t outputSize)
-{
-  MOZ_ASSERT(outputSize >= 2);
-  char *bound = output + outputSize - 2;
-  output[0] = output[1] = '\0';
-  PseudoStack *pseudoStack = tlsPseudoStack.get();
-  if (!pseudoStack) {
-    return;
-  }
-
-  volatile StackEntry *pseudoFrames = pseudoStack->mStack;
-  uint32_t pseudoCount = pseudoStack->stackSize();
-
-  for (uint32_t i = 0; i < pseudoCount; i++) {
-    size_t len = strlen(pseudoFrames[i].label());
-    if (output + len >= bound)
-      break;
-    strcpy(output, pseudoFrames[i].label());
-    output += len;
-    *output++ = '\0';
-    *output = '\0';
-  }
 }
 
 void mozilla_sampler_tracing(const char* aCategory, const char* aInfo,

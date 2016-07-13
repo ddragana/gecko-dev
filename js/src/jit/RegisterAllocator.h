@@ -37,13 +37,13 @@ struct AllocationIntegrityState
 
     // Record all virtual registers in the graph. This must be called before
     // register allocation, to pick up the original LUses.
-    MOZ_MUST_USE bool record();
+    bool record();
 
     // Perform the liveness analysis on the graph, and assert on an invalid
     // allocation. This must be called after register allocation, to pick up
     // all assigned physical values. If populateSafepoints is specified,
     // safepoints will be filled in with liveness information.
-    MOZ_MUST_USE bool check(bool populateSafepoints);
+    bool check(bool populateSafepoints);
 
   private:
 
@@ -65,13 +65,9 @@ struct AllocationIntegrityState
 
         InstructionInfo(const InstructionInfo& o)
         {
-            AutoEnterOOMUnsafeRegion oomUnsafe;
-            if (!inputs.appendAll(o.inputs) ||
-                !temps.appendAll(o.temps) ||
-                !outputs.appendAll(o.outputs))
-            {
-                oomUnsafe.crash("InstructionInfo::InstructionInfo");
-            }
+            inputs.appendAll(o.inputs);
+            temps.appendAll(o.temps);
+            outputs.appendAll(o.outputs);
         }
     };
     Vector<InstructionInfo, 0, SystemAllocPolicy> instructions;
@@ -80,9 +76,7 @@ struct AllocationIntegrityState
         Vector<InstructionInfo, 5, SystemAllocPolicy> phis;
         BlockInfo() {}
         BlockInfo(const BlockInfo& o) {
-            AutoEnterOOMUnsafeRegion oomUnsafe;
-            if (!phis.appendAll(o.phis))
-                oomUnsafe.crash("BlockInfo::BlockInfo");
+            phis.appendAll(o.phis);
         }
     };
     Vector<BlockInfo, 0, SystemAllocPolicy> blocks;
@@ -122,11 +116,11 @@ struct AllocationIntegrityState
     typedef HashSet<IntegrityItem, IntegrityItem, SystemAllocPolicy> IntegrityItemSet;
     IntegrityItemSet seen;
 
-    MOZ_MUST_USE bool checkIntegrity(LBlock* block, LInstruction* ins, uint32_t vreg,
-                                     LAllocation alloc, bool populateSafepoints);
-    MOZ_MUST_USE bool checkSafepointAllocation(LInstruction* ins, uint32_t vreg, LAllocation alloc,
-                                               bool populateSafepoints);
-    MOZ_MUST_USE bool addPredecessor(LBlock* block, uint32_t vreg, LAllocation alloc);
+    bool checkIntegrity(LBlock* block, LInstruction* ins, uint32_t vreg, LAllocation alloc,
+                        bool populateSafepoints);
+    bool checkSafepointAllocation(LInstruction* ins, uint32_t vreg, LAllocation alloc,
+                                  bool populateSafepoints);
+    bool addPredecessor(LBlock* block, uint32_t vreg, LAllocation alloc);
 
     void dump();
 };
@@ -233,7 +227,7 @@ class InstructionDataMap
       : insData_()
     { }
 
-    MOZ_MUST_USE bool init(MIRGenerator* gen, uint32_t numInstructions) {
+    bool init(MIRGenerator* gen, uint32_t numInstructions) {
         if (!insData_.init(gen->alloc(), numInstructions))
             return false;
         memset(&insData_[0], 0, sizeof(LNode*) * numInstructions);
@@ -271,8 +265,6 @@ class RegisterAllocator
 
     // Computed data
     InstructionDataMap insData;
-    Vector<CodePosition, 12, SystemAllocPolicy> entryPositions;
-    Vector<CodePosition, 12, SystemAllocPolicy> exitPositions;
 
     RegisterAllocator(MIRGenerator* mir, LIRGenerator* lir, LIRGraph& graph)
       : mir(mir),
@@ -283,7 +275,7 @@ class RegisterAllocator
         if (mir->compilingAsmJS()) {
 #if defined(JS_CODEGEN_X64)
             allRegisters_.take(AnyRegister(HeapReg));
-#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
             allRegisters_.take(AnyRegister(HeapReg));
             allRegisters_.take(AnyRegister(GlobalReg));
 #elif defined(JS_CODEGEN_ARM64)
@@ -297,7 +289,7 @@ class RegisterAllocator
         }
     }
 
-    MOZ_MUST_USE bool init();
+    bool init();
 
     TempAllocator& alloc() const {
         return mir->alloc();
@@ -333,10 +325,12 @@ class RegisterAllocator
         return CodePosition(ins->id(), CodePosition::INPUT);
     }
     CodePosition entryOf(const LBlock* block) {
-        return entryPositions[block->mir()->id()];
+        return block->numPhis() != 0
+               ? CodePosition(block->getPhi(0)->id(), CodePosition::INPUT)
+               : inputOf(block->firstInstructionWithId());
     }
     CodePosition exitOf(const LBlock* block) {
-        return exitPositions[block->mir()->id()];
+        return outputOf(block->lastInstructionWithId());
     }
 
     LMoveGroup* getInputMoveGroup(LInstruction* ins);

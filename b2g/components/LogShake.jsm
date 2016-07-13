@@ -74,7 +74,7 @@ const CAPTURE_LOGS_START_EVENT = "capture-logs-start";
 const CAPTURE_LOGS_ERROR_EVENT = "capture-logs-error";
 const CAPTURE_LOGS_SUCCESS_EVENT = "capture-logs-success";
 
-var LogShake = {
+let LogShake = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
 
   /**
@@ -128,10 +128,7 @@ var LogShake = {
     "/proc/version": LogParser.prettyPrintArray,
     "/proc/vmallocinfo": LogParser.prettyPrintArray,
     "/proc/vmstat": LogParser.prettyPrintArray,
-    "/system/b2g/application.ini": LogParser.prettyPrintArray,
-    "/cache/recovery/last_install": LogParser.prettyPrintArray,
-    "/cache/recovery/last_kmsg": LogParser.prettyPrintArray,
-    "/cache/recovery/last_log": LogParser.prettyPrintArray
+    "/system/b2g/application.ini": LogParser.prettyPrintArray
   },
 
   /**
@@ -280,18 +277,15 @@ var LogShake = {
    * resolve to an array of log filenames.
    */
   captureLogs: function() {
-    return this.readLogs().then(logArrays => {
-      return this.saveLogs(logArrays);
-    });
+    let logArrays = this.readLogs();
+    return this.saveLogs(logArrays);
   },
 
   /**
    * Read in all log files, returning their formatted contents
-   * @return {Promise<Array>}
    */
   readLogs: function() {
     let logArrays = {};
-    let readPromises = [];
 
     try {
       logArrays["properties"] =
@@ -301,15 +295,14 @@ var LogShake = {
     }
 
     // Let Gecko perfom the dump to a file, and just collect it
-    let readAboutMemoryPromise = new Promise(resolve => {
-      // Wrap the readAboutMemory promise to make it infallible
+    try {
       LogCapture.readAboutMemory().then(aboutMemory => {
         let file = OS.Path.basename(aboutMemory);
         let logArray;
         try {
           logArray = LogCapture.readLogFile(aboutMemory);
           if (!logArray) {
-            debug("LogCapture.readLogFile() returned nothing for about:memory");
+            debug("LogCapture.readLogFile() returned nothing about:memory ");
           }
           // We need to remove the dumped file, now that we have it in memory
           OS.File.remove(aboutMemory);
@@ -317,25 +310,18 @@ var LogShake = {
           Cu.reportError("Unable to handle about:memory dump: " + ex);
         }
         logArrays[file] = LogParser.prettyPrintArray(logArray);
-        resolve();
-      }, ex => {
-        Cu.reportError("Unable to get about:memory dump: " + ex);
-        resolve();
       });
-    });
-    readPromises.push(readAboutMemoryPromise);
+    } catch (ex) {
+      Cu.reportError("Unable to get about:memory dump: " + ex);
+    }
 
-    // Wrap the promise to make it infallible
-    let readScreenshotPromise = new Promise(resolve => {
+    try {
       LogCapture.getScreenshot().then(screenshot => {
         logArrays["screenshot.png"] = screenshot;
-        resolve();
-      }, ex => {
-        Cu.reportError("Unable to get screenshot dump: " + ex);
-        resolve();
       });
-    });
-    readPromises.push(readScreenshotPromise);
+    } catch (ex) {
+      Cu.reportError("Unable to get screenshot dump: " + ex);
+    }
 
     for (let loc in this.LOGS_WITH_PARSERS) {
       let logArray;
@@ -357,12 +343,7 @@ var LogShake = {
         continue;
       }
     }
-
-    // Because the promises we depend upon can't fail this means that the
-    // blocking log reads will always be honored.
-    return Promise.all(readPromises).then(() => {
-      return logArrays;
-    });
+    return logArrays;
   },
 
   /**

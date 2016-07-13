@@ -3,27 +3,25 @@
 
 "use strict";
 
-Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://services-sync/addonutils.js");
 Cu.import("resource://services-sync/engines/addons.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
-Cu.import("resource://testing-common/services/sync/utils.js");
 
 const HTTP_PORT = 8888;
 
-var prefs = new Preferences();
+let prefs = new Preferences();
 
 prefs.set("extensions.getAddons.get.url", "http://localhost:8888/search/guid:%IDS%");
 loadAddonTestFunctions();
 startupManager();
 
 Service.engineManager.register(AddonsEngine);
-var engine     = Service.engineManager.get("addons");
-var tracker    = engine._tracker;
-var store      = engine._store;
-var reconciler = engine._reconciler;
+let engine     = Service.engineManager.get("addons");
+let tracker    = engine._tracker;
+let store      = engine._store;
+let reconciler = engine._reconciler;
 
 /**
  * Create a AddonsRec for this application with the fields specified.
@@ -62,7 +60,7 @@ function createAndStartHTTPServer(port) {
     return server;
   } catch (ex) {
     _("Got exception starting HTTP server on port " + port);
-    _("Error: " + Log.exceptionStr(ex));
+    _("Error: " + Utils.exceptionStr(ex));
     do_throw(ex);
   }
 }
@@ -205,7 +203,7 @@ add_test(function test_addon_syncability() {
 
   let dummy = {};
   const KEYS = ["id", "syncGUID", "type", "scope", "foreignInstall"];
-  for (let k of KEYS) {
+  for each (let k in KEYS) {
     dummy[k] = addon[k];
   }
 
@@ -244,16 +242,16 @@ add_test(function test_addon_syncability() {
     "https://untrusted.example.com/foo", // non-trusted hostname`
   ];
 
-  for (let uri of trusted) {
+  for each (let uri in trusted) {
     do_check_true(store.isSourceURITrusted(createURI(uri)));
   }
 
-  for (let uri of untrusted) {
+  for each (let uri in untrusted) {
     do_check_false(store.isSourceURITrusted(createURI(uri)));
   }
 
   Svc.Prefs.set("addons.trustedSourceHostnames", "");
-  for (let uri of trusted) {
+  for each (let uri in trusted) {
     do_check_false(store.isSourceURITrusted(createURI(uri)));
   }
 
@@ -279,7 +277,7 @@ add_test(function test_ignore_hotfixes() {
 
   let dummy = {};
   const KEYS = ["id", "syncGUID", "type", "scope", "foreignInstall"];
-  for (let k of KEYS) {
+  for each (let k in KEYS) {
     dummy[k] = addon[k];
   }
 
@@ -414,9 +412,8 @@ add_test(function test_create_bad_install() {
   let record = createRecordForThisApp(guid, id, true, false);
 
   let failed = store.applyIncomingBatch([record]);
-  // This addon had no source URI so was skipped - but it's not treated as
-  // failure.
-  do_check_eq(0, failed.length);
+  do_check_eq(1, failed.length);
+  do_check_eq(guid, failed[0]);
 
   let addon = getAddonFromAddonManagerByID(id);
   do_check_eq(null, addon);

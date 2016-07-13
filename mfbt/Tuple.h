@@ -10,12 +10,10 @@
 #define mozilla_Tuple_h
 
 #include "mozilla/Move.h"
-#include "mozilla/Pair.h"
 #include "mozilla/TemplateLib.h"
 #include "mozilla/TypeTraits.h"
 
 #include <stddef.h>
-#include <utility>
 
 namespace mozilla {
 
@@ -95,12 +93,7 @@ struct TupleImpl;
  * of an empty tuple).
  */
 template<std::size_t Index>
-struct TupleImpl<Index> {
-  bool operator==(const TupleImpl<Index>& aOther) const
-  {
-    return true;
-  }
-};
+struct TupleImpl<Index> {};
 
 /*
  * One node of the recursive inheritance hierarchy. It stores the element at
@@ -187,10 +180,6 @@ struct TupleImpl<Index, HeadT, TailT...>
     Tail(*this) = Move(Tail(aOther));
     return *this;
   }
-  bool operator==(const TupleImpl& aOther) const
-  {
-    return Head(*this) == Head(aOther) && Tail(*this) == Tail(aOther);
-  }
 private:
   HeadT mHead;  // The element stored at this index in the tuple.
 };
@@ -253,95 +242,6 @@ public:
   Tuple& operator=(Tuple&& aOther)
   {
     static_cast<Impl&>(*this) = Move(aOther);
-    return *this;
-  }
-  bool operator==(const Tuple& aOther) const
-  {
-    return static_cast<const Impl&>(*this) == static_cast<const Impl&>(aOther);
-  }
-};
-
-/**
- * Specialization of Tuple for two elements.
- * This is created to support construction and assignment from a Pair or std::pair.
- */
-template <typename A, typename B>
-class Tuple<A, B> : public detail::TupleImpl<0, A, B>
-{
-  typedef detail::TupleImpl<0, A, B> Impl;
-
-public:
-  // The constructors and assignment operators here are simple wrappers
-  // around those in TupleImpl.
-
-  Tuple() : Impl() { }
-  explicit Tuple(const A& aA, const B& aB) : Impl(aA, aB) { }
-  template <typename AArg, typename BArg,
-            typename = typename EnableIf<
-                detail::CheckConvertibility<
-                    detail::Group<AArg, BArg>,
-                    detail::Group<A, B>>::value>::Type>
-  explicit Tuple(AArg&& aA, BArg&& aB)
-    : Impl(Forward<AArg>(aA), Forward<BArg>(aB)) { }
-  Tuple(const Tuple& aOther) : Impl(aOther) { }
-  Tuple(Tuple&& aOther) : Impl(Move(aOther)) { }
-  explicit Tuple(const Pair<A, B>& aOther)
-    : Impl(aOther.first(), aOther.second()) { }
-  explicit Tuple(Pair<A, B>&& aOther) : Impl(Forward<A>(aOther.first()),
-                                    Forward<B>(aOther.second())) { }
-  explicit Tuple(const std::pair<A, B>& aOther)
-    : Impl(aOther.first, aOther.second) { }
-  explicit Tuple(std::pair<A, B>&& aOther) : Impl(Forward<A>(aOther.first),
-                                    Forward<B>(aOther.second)) { }
-
-  template <typename AArg, typename BArg>
-  Tuple& operator=(const Tuple<AArg, BArg>& aOther)
-  {
-    static_cast<Impl&>(*this) = aOther;
-    return *this;
-  }
-  template <typename AArg, typename BArg>
-  Tuple& operator=(Tuple<AArg, BArg>&& aOther)
-  {
-    static_cast<Impl&>(*this) = Move(aOther);
-    return *this;
-  }
-  Tuple& operator=(const Tuple& aOther)
-  {
-    static_cast<Impl&>(*this) = aOther;
-    return *this;
-  }
-  Tuple& operator=(Tuple&& aOther)
-  {
-    static_cast<Impl&>(*this) = Move(aOther);
-    return *this;
-  }
-  template <typename AArg, typename BArg>
-  Tuple& operator=(const Pair<AArg, BArg>& aOther)
-  {
-    Impl::Head(*this) = aOther.first();
-    Impl::Tail(*this).Head(*this) = aOther.second();
-    return *this;
-  }
-  template <typename AArg, typename BArg>
-  Tuple& operator=(Pair<AArg, BArg>&& aOther)
-  {
-    Impl::Head(*this) = Forward<AArg>(aOther.first());
-    Impl::Tail(*this).Head(*this) = Forward<BArg>(aOther.second());
-    return *this;
-  }
-  template <typename AArg, typename BArg>
-  Tuple& operator=(const std::pair<AArg, BArg>& aOther)
-  {
-    Impl::Head(*this) = aOther.first;
-    Impl::Tail(*this).Head(*this) = aOther.second;
-    return *this;
-  }
-  template <typename AArg, typename BArg>
-  Tuple& operator=(std::pair<AArg, BArg>&& aOther)
-  {
-    Impl::Head(*this) = Forward<AArg>(aOther.first);
-    Impl::Tail(*this).Head(*this) = Forward<BArg>(aOther.second);
     return *this;
   }
 };
@@ -430,10 +330,9 @@ auto Get(Tuple<Elements...>&& aTuple)
  * auto tuple = MakeTuple(42, 0.5f, 'c');  // has type Tuple<int, float, char>
  */
 template<typename... Elements>
-inline Tuple<typename Decay<Elements>::Type...>
-MakeTuple(Elements&&... aElements)
+Tuple<Elements...> MakeTuple(Elements&&... aElements)
 {
-  return Tuple<typename Decay<Elements>::Type...>(Forward<Elements>(aElements)...);
+  return Tuple<Elements...>(Forward<Elements>(aElements)...);
 }
 
 /**
@@ -450,8 +349,7 @@ MakeTuple(Elements&&... aElements)
  * Tie(i, f, c) = FunctionThatReturnsATuple();
  */
 template<typename... Elements>
-inline Tuple<Elements&...>
-Tie(Elements&... aVariables)
+Tuple<Elements&...> Tie(Elements&... aVariables)
 {
   return Tuple<Elements&...>(aVariables...);
 }

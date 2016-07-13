@@ -4,8 +4,12 @@
 
 %include ../shared/devedition.inc.css
 
-:root {
-  --forwardbutton-width: 32px;
+/* Use forward-facing magnifying glasses for the search box */
+:root[devtoolstheme="dark"] {
+  --search-button-image: url("chrome://browser/skin/devedition/search.svg#search-icon-mac-inverted");
+}
+:root[devtoolstheme="light"] {
+  --search-button-image: url("chrome://browser/skin/devedition/search.svg#search-icon-mac");
 }
 
 /* Use only 1px separator between nav toolbox and page content */
@@ -32,16 +36,6 @@
   margin-top: 6px;
 }
 
-/* In private windows, the #titlebar-content is higher because of the
- * private browsing indicator. With the margin-top the titlebar buttons
- * align to the top correctly in that case, but only if we don't stretch
- * the box they're in because the container is too high, so we override
- * the default alignment value (stretch).
- */
-#main-window[tabsintitlebar] > #titlebar > #titlebar-content > #titlebar-buttonbox-container {
-  -moz-box-align: start;
-}
-
 /* Square back and forward buttons.  Need !important on these because there
    are a lot of more specific selectors sprinkled around elsewhere for changing
    background / shadows for different states */
@@ -54,19 +48,7 @@
 }
 
 #forward-button {
-  border-inline-start: none !important;
-  /* browser.css and friends set up the width of the button to be 32px.
-   * They then set margin-left to -2px to ensure the button is not too wide
-   * compared to the back button, and set padding-left to center the icon
-   * correctly.
-   * In our theme, the back and forward buttons are the same width, with the
-   * back button being 32px with 1px border on both sides. To ensure the
-   * forward button's content box looks like it is the same size with width
-   * set to 32px and a 1px border on only 1 side, we overlap by 1px, so both
-   * buttons end up with a content box that looks like it's 30px.
-   */
-  margin-left: -1px;
-  padding-left: 1px;
+  -moz-border-start: none !important;
 }
 
 #forward-button > .toolbarbutton-icon {
@@ -115,25 +97,15 @@
 #identity-box {
   margin-top: -1px !important;
   margin-bottom: -1px !important;
-  padding-top: 3px !important;
-  padding-bottom: 3px !important;
 }
 
-:root[devtoolstheme="dark"] .findbar-closebutton:not(:hover),
 /* Tab styling - make sure to use an inverted icon for the selected tab
    (brighttext only covers the unselected tabs) */
 .tab-close-button[visuallyselected=true]:not(:hover) {
   -moz-image-region: rect(0, 64px, 16px, 48px);
 }
 @media (min-resolution: 2dppx) {
-  :root[devtoolstheme="dark"] .findbar-closebutton:not(:hover),
   .tab-close-button[visuallyselected=true]:not(:hover) {
     -moz-image-region: rect(0, 128px, 32px, 96px);
   }
-}
-
-.ac-type-icon {
-  /* Left-align the type icon in awesomebar popup results with the icon in the
-     urlbar. */
-  margin-inline-start: 14px;
 }

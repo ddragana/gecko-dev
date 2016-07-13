@@ -214,26 +214,23 @@ FormAutoComplete.prototype = {
             // If there were datalist results result is a FormAutoCompleteResult
             // as defined in nsFormAutoCompleteResult.jsm with the entire list
             // of results in wrappedResult._values and only the results from
-            // form history in wrappedResult.entries.
+            // form history in wrappedResults.entries.
             // First, grab the entire list of old results.
             let allResults = wrappedResult._labels;
             let datalistResults, datalistLabels;
             if (allResults) {
                 // We have datalist results, extract them from the values array.
-                // Both allResults and values arrays are in the form of:
-                // |--wR.entries--|
-                // <history entries><datalist entries>
-                let oldLabels = allResults.slice(wrappedResult.entries.length);
-                let oldValues = wrappedResult._values.slice(wrappedResult.entries.length);
-
-                datalistLabels = [];
+                datalistLabels = allResults.slice(wrappedResult.entries.length);
+                let filtered = [];
                 datalistResults = [];
-                for (let i = 0; i < oldLabels.length; ++i) {
-                    if (oldLabels[i].toLowerCase().includes(searchString)) {
-                        datalistLabels.push(oldLabels[i]);
-                        datalistResults.push(oldValues[i]);
+                for (let i = 0; i < datalistLabels.length; ++i) {
+                    if (datalistLabels[i].toLowerCase().includes(searchString)) {
+                        filtered.push(datalistLabels[i]);
+                        datalistResults.push(wrappedResult._values[i]);
                     }
                 }
+
+                datalistLabels = filtered;
             }
 
             let searchTokens = searchString.split(/\s+/);
@@ -245,7 +242,7 @@ FormAutoComplete.prototype = {
                 let entry = entries[i];
                 // Remove results that do not contain the token
                 // XXX bug 394604 -- .toLowerCase can be wrong for some intl chars
-                if(searchTokens.some(tok => entry.textLowerCase.indexOf(tok) < 0))
+                if(searchTokens.some(function (tok) entry.textLowerCase.indexOf(tok) < 0))
                     continue;
                 this._calculateScore(entry, searchString, searchTokens);
                 this.log("Reusing autocomplete entry '" + entry.text +
@@ -263,9 +260,6 @@ FormAutoComplete.prototype = {
                 let comments = new Array(filteredEntries.length + datalistResults.length).fill("");
                 comments[filteredEntries.length] = "separator";
 
-                // History entries don't have labels (their labels would be read
-                // from their values). Pad out the labels array so the datalist
-                // results (which do have separate values and labels) line up.
                 datalistLabels = new Array(filteredEntries.length).fill("").concat(datalistLabels);
                 wrappedResult._values = filteredEntries.concat(datalistResults);
                 wrappedResult._labels = datalistLabels;
@@ -291,7 +285,7 @@ FormAutoComplete.prototype = {
                     result.entries = aEntries;
                 }
 
-                if (aDatalistResult && aDatalistResult.matchCount > 0) {
+                if (aDatalistResult) {
                     result = this.mergeResults(result, aDatalistResult);
                 }
 
@@ -307,18 +301,19 @@ FormAutoComplete.prototype = {
     mergeResults(historyResult, datalistResult) {
         let values = datalistResult.wrappedJSObject._values;
         let labels = datalistResult.wrappedJSObject._labels;
-        let comments = new Array(values.length).fill("");
+        let comments = [];
 
-        // historyResult will be null if form autocomplete is disabled. We
+        // formHistoryResult will be null if form autocomplete is disabled. We
         // still want the list values to display.
         let entries = historyResult.wrappedJSObject.entries;
-        let historyResults = entries.map(entry => entry.text);
+        let historyResults = entries.map(function(entry) { return entry.text });
         let historyComments = new Array(entries.length).fill("");
 
         // fill out the comment column for the suggestions
         // if we have any suggestions, put a label at the top
         if (values.length) {
             comments[0] = "separator";
+            comments.fill(1, "");
         }
 
         // now put the history results above the datalist suggestions
@@ -406,7 +401,7 @@ FormAutoComplete.prototype = {
     _calculateScore : function (entry, aSearchString, searchTokens) {
         let boundaryCalc = 0;
         // for each word, calculate word boundary weights
-        for (let token of searchTokens) {
+        for each (let token in searchTokens) {
             boundaryCalc += (entry.textLowerCase.indexOf(token) == 0);
             boundaryCalc += (entry.textLowerCase.indexOf(" " + token) >= 0);
         }
@@ -502,7 +497,6 @@ FormAutoCompleteChild.prototype = {
         untrimmedSearchString: aUntrimmedSearchString,
         mockField: mockField,
         datalistResult: datalistResult,
-        previousSearchString: aPreviousResult && aPreviousResult.searchString.trim().toLowerCase(),
         left: rect.left,
         top: rect.top,
         width: rect.width,
@@ -523,9 +517,9 @@ FormAutoCompleteChild.prototype = {
 
         let result = new FormAutoCompleteResult(
           null,
-          Array.from(message.data.results, res => ({ text: res })),
+          [for (res of message.data.results) {text: res}],
           null,
-          aUntrimmedSearchString,
+          null,
           mm
         );
         if (aListener) {
@@ -541,17 +535,6 @@ FormAutoCompleteChild.prototype = {
       this.log("stopAutoCompleteSearch");
       this._pendingSearch = null;
     },
-
-    stopControllingInput(aField) {
-      let window = aField.ownerDocument.defaultView;
-      let topLevelDocshell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                   .getInterface(Ci.nsIDocShell)
-                                   .sameTypeRootTreeItem
-                                   .QueryInterface(Ci.nsIDocShell);
-      let mm = topLevelDocshell.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIContentFrameMessageManager);
-      mm.sendAsyncMessage("FormAutoComplete:Disconnect");
-    }
 }; // end of FormAutoCompleteChild implementation
 
 // nsIAutoCompleteResult implementation
@@ -588,7 +571,7 @@ FormAutoCompleteResult.prototype = {
     },
 
     // Interfaces from idl...
-    searchString : "",
+    searchString : null,
     errorDescription : "",
     get defaultIndex() {
         if (this.entries.length == 0)

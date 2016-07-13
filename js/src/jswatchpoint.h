@@ -20,9 +20,6 @@ struct WatchKey {
     WatchKey() {}
     WatchKey(JSObject* obj, jsid id) : object(obj), id(id) {}
     WatchKey(const WatchKey& key) : object(key.object.get()), id(key.id.get()) {}
-
-    // These are traced unconditionally during minor GC, so do not require
-    // post-barriers.
     PreBarrieredObject object;
     PreBarrieredId id;
 
@@ -43,14 +40,14 @@ struct Watchpoint {
       : handler(handler), closure(closure), held(held) {}
 };
 
-struct WatchKeyHasher
+template <>
+struct DefaultHasher<WatchKey>
 {
     typedef WatchKey Lookup;
     static inline js::HashNumber hash(const Lookup& key);
 
     static bool match(const WatchKey& k, const Lookup& l) {
-        return MovableCellHasher<PreBarrieredObject>::match(k.object, l.object) &&
-               DefaultHasher<PreBarrieredId>::match(k.id, l.id);
+        return k.object == l.object && k.id.get() == l.id.get();
     }
 
     static void rekey(WatchKey& k, const WatchKey& newKey) {
@@ -61,7 +58,7 @@ struct WatchKeyHasher
 
 class WatchpointMap {
   public:
-    typedef HashMap<WatchKey, Watchpoint, WatchKeyHasher, SystemAllocPolicy> Map;
+    typedef HashMap<WatchKey, Watchpoint, DefaultHasher<WatchKey>, SystemAllocPolicy> Map;
 
     bool init();
     bool watch(JSContext* cx, HandleObject obj, HandleId id,
@@ -73,6 +70,7 @@ class WatchpointMap {
 
     bool triggerWatchpoint(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue vp);
 
+    static bool markCompartmentIteratively(JSCompartment* c, JSTracer* trc);
     bool markIteratively(JSTracer* trc);
     void markAll(JSTracer* trc);
     static void sweepAll(JSRuntime* rt);

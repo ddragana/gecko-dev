@@ -52,13 +52,11 @@
  */
 #  define MOZ_HAVE_NEVER_INLINE          __declspec(noinline)
 #  define MOZ_HAVE_NORETURN              __declspec(noreturn)
-#  if _MSC_VER >= 1900
-#    define MOZ_HAVE_CXX11_CONSTEXPR
-#    define MOZ_HAVE_CXX11_CONSTEXPR_IN_TEMPLATES
-#    define MOZ_HAVE_EXPLICIT_CONVERSION
-#  endif
 #  ifdef __clang__
-     /* clang-cl probably supports explicit conversions. */
+     /* clang-cl probably supports constexpr and explicit conversions. */
+#    if __has_extension(cxx_constexpr)
+#      define MOZ_HAVE_CXX11_CONSTEXPR
+#    endif
 #    if __has_extension(cxx_explicit_conversions)
 #      define MOZ_HAVE_EXPLICIT_CONVERSION
 #    endif
@@ -87,7 +85,9 @@
 #elif defined(__GNUC__)
 #  if defined(__GXX_EXPERIMENTAL_CXX0X__) || __cplusplus >= 201103L
 #    define MOZ_HAVE_CXX11_CONSTEXPR
-#    define MOZ_HAVE_CXX11_CONSTEXPR_IN_TEMPLATES
+#    if MOZ_GCC_VERSION_AT_LEAST(4, 8, 0)
+#      define MOZ_HAVE_CXX11_CONSTEXPR_IN_TEMPLATES
+#    endif
 #    define MOZ_HAVE_EXPLICIT_CONVERSION
 #  endif
 #  define MOZ_HAVE_NEVER_INLINE          __attribute__((noinline))
@@ -313,62 +313,22 @@
 #endif
 
 /**
- * MOZ_MUST_USE tells the compiler to emit a warning if a function's
+ * MOZ_WARN_UNUSED_RESULT tells the compiler to emit a warning if a function's
  * return value is not used by the caller.
  *
- * Place this attribute at the very beginning of a function declaration. For
+ * Place this attribute at the very beginning of a function definition. For
  * example, write
  *
- *   MOZ_MUST_USE int foo();
+ *   MOZ_WARN_UNUSED_RESULT int foo();
  *
  * or
  *
- *   MOZ_MUST_USE int foo() { return 42; }
+ *   MOZ_WARN_UNUSED_RESULT int foo() { return 42; }
  */
 #if defined(__GNUC__) || defined(__clang__)
-#  define MOZ_MUST_USE __attribute__ ((warn_unused_result))
+#  define MOZ_WARN_UNUSED_RESULT __attribute__ ((warn_unused_result))
 #else
-#  define MOZ_MUST_USE
-#endif
-
-/**
- * MOZ_FALLTHROUGH is an annotation to suppress compiler warnings about switch
- * cases that fall through without a break or return statement. MOZ_FALLTHROUGH
- * is only needed on cases that have code.
- *
- * MOZ_FALLTHROUGH_ASSERT is an annotation to suppress compiler warnings about
- * switch cases that MOZ_ASSERT(false) (or its alias MOZ_ASSERT_UNREACHABLE) in
- * debug builds, but intentionally fall through in release builds. See comment
- * in Assertions.h for more details.
- *
- * switch (foo) {
- *   case 1: // These cases have no code. No fallthrough annotations are needed.
- *   case 2:
- *   case 3: // This case has code, so a fallthrough annotation is needed!
- *     foo++;
- *     MOZ_FALLTHROUGH;
- *   case 4:
- *     return foo;
- *
- *   default:
- *     // This case asserts in debug builds, falls through in release.
- *     MOZ_FALLTHROUGH_ASSERT("Unexpected foo value?!");
- *   case 5:
- *     return 5;
- * }
- */
-#if defined(__clang__) && __cplusplus >= 201103L
-   /* clang's fallthrough annotations are only available starting in C++11. */
-#  define MOZ_FALLTHROUGH [[clang::fallthrough]]
-#elif defined(_MSC_VER)
-   /*
-    * MSVC's __fallthrough annotations are checked by /analyze (Code Analysis):
-    * https://msdn.microsoft.com/en-us/library/ms235402%28VS.80%29.aspx
-    */
-#  include <sal.h>
-#  define MOZ_FALLTHROUGH __fallthrough
-#else
-#  define MOZ_FALLTHROUGH /* FALLTHROUGH */
+#  define MOZ_WARN_UNUSED_RESULT
 #endif
 
 #ifdef __cplusplus
@@ -434,35 +394,18 @@
  * MOZ_NONHEAP_CLASS: Applies to all classes. Any class with this annotation is
  *   expected to live on the stack or in static storage, so it is a compile-time
  *   error to use it, or an array of such objects, as the type of a new
- *   expression. If a member of another class uses this class, or if another
- *   class inherits from this class, then it is considered to be a non-heap class
- *   as well, although this attribute need not be provided in such cases.
- * MOZ_HEAP_CLASS: Applies to all classes. Any class with this annotation is
- *   expected to live on the heap, so it is a compile-time error to use it, or
- *   an array of such objects, as the type of a variable declaration, or as a
- *   temporary object. If a member of another class uses this class, or if
- *   another class inherits from this class, then it is considered to be a heap
- *   class as well, although this attribute need not be provided in such cases.
- * MOZ_NON_TEMPORARY_CLASS: Applies to all classes. Any class with this
- *   annotation is expected not to live in a temporary. If a member of another
- *   class uses this class or if another class inherits from this class, then it
- *   is considered to be a non-temporary class as well, although this attribute
+ *   expression (unless placement new is being used). If a member of another
+ *   class uses this class, or if another class inherits from this class, then
+ *   it is considered to be a non-heap class as well, although this attribute
  *   need not be provided in such cases.
- * MOZ_RAII: Applies to all classes. Any class with this annotation is assumed
- *   to be a RAII guard, which is expected to live on the stack in an automatic
- *   allocation. It is prohibited from being allocated in a temporary, static
- *   storage, or on the heap. This is a combination of MOZ_STACK_CLASS and
- *   MOZ_NON_TEMPORARY_CLASS.
  * MOZ_ONLY_USED_TO_AVOID_STATIC_CONSTRUCTORS: Applies to all classes that are
  *   intended to prevent introducing static initializers.  This attribute
  *   currently makes it a compile-time error to instantiate these classes
  *   anywhere other than at the global scope, or as a static member of a class.
- *   In non-debug mode, it also prohibits non-trivial constructors and
- *   destructors.
  * MOZ_TRIVIAL_CTOR_DTOR: Applies to all classes that must have both a trivial
- *   or constexpr constructor and a trivial destructor. Setting this attribute
- *   on a class makes it a compile-time error for that class to get a
- *   non-trivial constructor or destructor for any reason.
+ *   constructor and a trivial destructor.  Setting this attribute on a class
+ *   makes it a compile-time error for that class to get a non-trivial
+ *   constructor or destructor for any reason.
  * MOZ_HEAP_ALLOCATOR: Applies to any function. This indicates that the return
  *   value is allocated on the heap, and will as a result check such allocations
  *   during MOZ_STACK_CLASS and MOZ_NONHEAP_CLASS annotation checking.
@@ -508,42 +451,14 @@
  *   function.  This is intended to be used with operator->() of our smart
  *   pointer classes to ensure that the refcount of an object wrapped in a
  *   smart pointer is not manipulated directly.
- * MOZ_MUST_USE_TYPE: Applies to type declarations.  Makes it a compile time
- *   error to not use the return value of a function which has this type.  This
- *   is intended to be used with types which it is an error to not use.
- * MOZ_NEEDS_NO_VTABLE_TYPE: Applies to template class declarations.  Makes it
- *   a compile time error to instantiate this template with a type parameter which
- *   has a VTable.
- * MOZ_NON_MEMMOVABLE: Applies to class declarations for types that are not safe
- *   to be moved in memory using memmove().
- * MOZ_NEEDS_MEMMOVABLE_TYPE: Applies to template class declarations where the
- *   template arguments are required to be safe to move in memory using
- *   memmove().  Passing MOZ_NON_MEMMOVABLE types to these templates is a
- *   compile time error.
- * MOZ_NEEDS_MEMMOVABLE_MEMBERS: Applies to class declarations where each member
- *   must be safe to move in memory using memmove().  MOZ_NON_MEMMOVABLE types
- *   used in members of these classes are compile time errors.
- * MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS: Applies to template class
- *   declarations where an instance of the template should be considered, for
- *   static analysis purposes, to inherit any type annotations (such as
- *   MOZ_MUST_USE_TYPE and MOZ_STACK_CLASS) from its template arguments.
- * MOZ_INIT_OUTSIDE_CTOR: Applies to class member declarations. Occasionally
- *   there are class members that are not initialized in the constructor,
- *   but logic elsewhere in the class ensures they are initialized prior to use.
- *   Using this attribute on a member disables the check that this member must be
- *   initialized in constructors via list-initialization, in the constructor body,
- *   or via functions called from the constructor body.
- * MOZ_NON_AUTOABLE: Applies to class declarations. Makes it a compile time error to
- *   use `auto` in place of this type in variable declarations.  This is intended to
- *   be used with types which are intended to be implicitly constructed into other
- *   other types before being assigned to variables.
+ * MOZ_MUST_USE: Applies to type declarations.  Makes it a compile time error to not
+ *   use the return value of a function which has this type.  This is intended to be
+ *   used with types which it is an error to not use.
  */
 #ifdef MOZ_CLANG_PLUGIN
 #  define MOZ_MUST_OVERRIDE __attribute__((annotate("moz_must_override")))
 #  define MOZ_STACK_CLASS __attribute__((annotate("moz_stack_class")))
 #  define MOZ_NONHEAP_CLASS __attribute__((annotate("moz_nonheap_class")))
-#  define MOZ_HEAP_CLASS __attribute__((annotate("moz_heap_class")))
-#  define MOZ_NON_TEMPORARY_CLASS __attribute__((annotate("moz_non_temporary_class")))
 #  define MOZ_TRIVIAL_CTOR_DTOR __attribute__((annotate("moz_trivial_ctor_dtor")))
 #  ifdef DEBUG
      /* in debug builds, these classes do have non-trivial constructors. */
@@ -558,16 +473,7 @@
 #  define MOZ_NON_OWNING_REF __attribute__((annotate("moz_weak_ref")))
 #  define MOZ_UNSAFE_REF(reason) __attribute__((annotate("moz_weak_ref")))
 #  define MOZ_NO_ADDREF_RELEASE_ON_RETURN __attribute__((annotate("moz_no_addref_release_on_return")))
-#  define MOZ_MUST_USE_TYPE __attribute__((annotate("moz_must_use_type")))
-#  define MOZ_NEEDS_NO_VTABLE_TYPE __attribute__((annotate("moz_needs_no_vtable_type")))
-#  define MOZ_NON_MEMMOVABLE __attribute__((annotate("moz_non_memmovable")))
-#  define MOZ_NEEDS_MEMMOVABLE_TYPE __attribute__((annotate("moz_needs_memmovable_type")))
-#  define MOZ_NEEDS_MEMMOVABLE_MEMBERS __attribute__((annotate("moz_needs_memmovable_members")))
-#  define MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS \
-    __attribute__((annotate("moz_inherit_type_annotations_from_template_args")))
-#  define MOZ_NON_AUTOABLE __attribute__((annotate("moz_non_autoable")))
-#  define MOZ_INIT_OUTSIDE_CTOR \
-    __attribute__((annotate("moz_ignore_ctor_initialization")))
+#  define MOZ_MUST_USE __attribute__((annotate("moz_must_use")))
 /*
  * It turns out that clang doesn't like void func() __attribute__ {} without a
  * warning, so use pragmas to disable the warning. This code won't work on GCC
@@ -582,8 +488,6 @@
 #  define MOZ_MUST_OVERRIDE /* nothing */
 #  define MOZ_STACK_CLASS /* nothing */
 #  define MOZ_NONHEAP_CLASS /* nothing */
-#  define MOZ_HEAP_CLASS /* nothing */
-#  define MOZ_NON_TEMPORARY_CLASS /* nothing */
 #  define MOZ_TRIVIAL_CTOR_DTOR /* nothing */
 #  define MOZ_ONLY_USED_TO_AVOID_STATIC_CONSTRUCTORS /* nothing */
 #  define MOZ_IMPLICIT /* nothing */
@@ -593,33 +497,8 @@
 #  define MOZ_NON_OWNING_REF /* nothing */
 #  define MOZ_UNSAFE_REF(reason) /* nothing */
 #  define MOZ_NO_ADDREF_RELEASE_ON_RETURN /* nothing */
-#  define MOZ_MUST_USE_TYPE /* nothing */
-#  define MOZ_NEEDS_NO_VTABLE_TYPE /* nothing */
-#  define MOZ_NON_MEMMOVABLE /* nothing */
-#  define MOZ_NEEDS_MEMMOVABLE_TYPE /* nothing */
-#  define MOZ_NEEDS_MEMMOVABLE_MEMBERS /* nothing */
-#  define MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS /* nothing */
-#  define MOZ_INIT_OUTSIDE_CTOR /* nothing */
-#  define MOZ_NON_AUTOABLE /* nothing */
+#  define MOZ_MUST_USE /* nothing */
 #endif /* MOZ_CLANG_PLUGIN */
-
-#define MOZ_RAII MOZ_NON_TEMPORARY_CLASS MOZ_STACK_CLASS
-
-/*
- * MOZ_HAVE_REF_QUALIFIERS is defined for compilers that support C++11's rvalue
- * qualifier, "&&".
- */
-#if defined(_MSC_VER) && _MSC_VER >= 1900
-#  define MOZ_HAVE_REF_QUALIFIERS
-#elif defined(__clang__)
-// All supported Clang versions
-#  define MOZ_HAVE_REF_QUALIFIERS
-#elif defined(__GNUC__)
-#  include "mozilla/Compiler.h"
-#  if MOZ_GCC_VERSION_AT_LEAST(4, 8, 1)
-#    define MOZ_HAVE_REF_QUALIFIERS
-#  endif
-#endif
 
 #endif /* __cplusplus */
 

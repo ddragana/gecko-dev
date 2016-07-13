@@ -6,30 +6,31 @@
 #ifndef __mozilla_widget_GfxDriverInfo_h__
 #define __mozilla_widget_GfxDriverInfo_h__
 
+#include "mozilla/ArrayUtils.h" // ArrayLength
 #include "nsString.h"
 
 // Macros for adding a blocklist item to the static list.
-#define APPEND_TO_DRIVER_BLOCKLIST(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, ruleId, suggestedVersion) \
-    mDriverInfo->AppendElement(GfxDriverInfo(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, ruleId, suggestedVersion))
-#define APPEND_TO_DRIVER_BLOCKLIST2(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, ruleId) \
-    mDriverInfo->AppendElement(GfxDriverInfo(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, ruleId))
+#define APPEND_TO_DRIVER_BLOCKLIST(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, suggestedVersion) \
+    mDriverInfo->AppendElement(GfxDriverInfo(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, suggestedVersion))
+#define APPEND_TO_DRIVER_BLOCKLIST2(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion) \
+    mDriverInfo->AppendElement(GfxDriverInfo(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion))
 
-#define APPEND_TO_DRIVER_BLOCKLIST_RANGE(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, driverVersionMax, ruleId, suggestedVersion) \
+#define APPEND_TO_DRIVER_BLOCKLIST_RANGE(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, driverVersionMax, suggestedVersion) \
     do { \
       MOZ_ASSERT(driverComparator == DRIVER_BETWEEN_EXCLUSIVE || \
                  driverComparator == DRIVER_BETWEEN_INCLUSIVE || \
                  driverComparator == DRIVER_BETWEEN_INCLUSIVE_START); \
-      GfxDriverInfo info(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, ruleId, suggestedVersion); \
+      GfxDriverInfo info(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, suggestedVersion); \
       info.mDriverVersionMax = driverVersionMax; \
       mDriverInfo->AppendElement(info); \
     } while (false)
 
-#define APPEND_TO_DRIVER_BLOCKLIST_RANGE_GPU2(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, driverVersionMax, ruleId, suggestedVersion) \
+#define APPEND_TO_DRIVER_BLOCKLIST_RANGE_GPU2(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, driverVersionMax, suggestedVersion) \
     do { \
       MOZ_ASSERT(driverComparator == DRIVER_BETWEEN_EXCLUSIVE || \
                  driverComparator == DRIVER_BETWEEN_INCLUSIVE || \
                  driverComparator == DRIVER_BETWEEN_INCLUSIVE_START); \
-      GfxDriverInfo info(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, ruleId, suggestedVersion, false, true); \
+      GfxDriverInfo info(os, vendor, devices, feature, featureStatus, driverComparator, driverVersion, suggestedVersion, false, true); \
       info.mDriverVersionMax = driverVersionMax; \
       mDriverInfo->AppendElement(info); \
     } while (false)
@@ -38,28 +39,25 @@
 namespace mozilla {
 namespace widget {
 
-enum class OperatingSystem {
-  Unknown,
-  Windows,
-  WindowsXP,
-  WindowsServer2003,
-  WindowsVista,
-  Windows7,
-  Windows8,
-  Windows8_1,
-  Windows10,
-  Linux,
-  OSX,
-  OSX10_5,
-  OSX10_6,
-  OSX10_7,
-  OSX10_8,
-  OSX10_9,
-  OSX10_10,
-  OSX10_11,
-  OSX10_12,
-  Android,
-  Ios
+enum OperatingSystem {
+  DRIVER_OS_UNKNOWN = 0,
+  DRIVER_OS_WINDOWS_XP,
+  DRIVER_OS_WINDOWS_SERVER_2003,
+  DRIVER_OS_WINDOWS_VISTA,
+  DRIVER_OS_WINDOWS_7,
+  DRIVER_OS_WINDOWS_8,
+  DRIVER_OS_WINDOWS_8_1,
+  DRIVER_OS_WINDOWS_10,
+  DRIVER_OS_LINUX,
+  DRIVER_OS_OS_X_10_5,
+  DRIVER_OS_OS_X_10_6,
+  DRIVER_OS_OS_X_10_7,
+  DRIVER_OS_OS_X_10_8,
+  DRIVER_OS_OS_X_10_9,
+  DRIVER_OS_OS_X_10_10,
+  DRIVER_OS_ANDROID,
+  DRIVER_OS_IOS,
+  DRIVER_OS_ALL
 };
 
 enum VersionComparisonOp {
@@ -82,7 +80,7 @@ enum DeviceFamily {
   IntelGMA3150,
   IntelGMAX3000,
   IntelGMAX4500HD,
-  IntelHDGraphicsToSandyBridge,
+  IntelHDGraphicsToIvyBridge,
   IntelHD3000,
   IntelMobileHDGraphics,
   NvidiaBlockD3D9Layers,
@@ -90,10 +88,10 @@ enum DeviceFamily {
   Geforce7300GT,
   Nvidia310M,
   Nvidia8800GTS,
+  AMDRadeonHD5800,
   Bug1137716,
   Bug1116812,
   Bug1155608,
-  Bug1207665,
   DeviceFamilyMax
 };
 
@@ -116,8 +114,7 @@ struct GfxDriverInfo
   // array, and it will be deleted when this GfxDriverInfo is destroyed.
   GfxDriverInfo(OperatingSystem os, nsAString& vendor, GfxDeviceFamily* devices,
                 int32_t feature, int32_t featureStatus, VersionComparisonOp op,
-                uint64_t driverVersion, const char *ruleId,
-                const char *suggestedVersion = nullptr,
+                uint64_t driverVersion, const char *suggestedVersion = nullptr,
                 bool ownDevices = false, bool gpu2 = false);
 
   GfxDriverInfo();
@@ -151,7 +148,6 @@ struct GfxDriverInfo
   static uint64_t allDriverVersions;
 
   const char *mSuggestedVersion;
-  nsCString mRuleId;
 
   static const GfxDeviceFamily* GetDeviceFamily(DeviceFamily id);
   static GfxDeviceFamily* mDeviceFamilies[DeviceFamilyMax];
@@ -190,20 +186,17 @@ inline bool SplitDriverVersion(const char *aSource, char *aAStr, char *aBStr, ch
 {
   // sscanf doesn't do what we want here to we parse this manually.
   int len = strlen(aSource);
-
-  // This "4" is hardcoded in a few places, including once as a 3.
   char *dest[4] = { aAStr, aBStr, aCStr, aDStr };
   unsigned destIdx = 0;
   unsigned destPos = 0;
 
   for (int i = 0; i < len; i++) {
-    if (destIdx >= 4) {
+    if (destIdx > ArrayLength(dest)) {
       // Invalid format found. Ensure we don't access dest beyond bounds.
       return false;
     }
 
     if (aSource[i] == '.') {
-      MOZ_ASSERT (destIdx < 4 && destPos <= 4);
       dest[destIdx++][destPos] = 0;
       destPos = 0;
       continue;
@@ -215,20 +208,13 @@ inline bool SplitDriverVersion(const char *aSource, char *aAStr, char *aBStr, ch
       continue;
     }
 
-    MOZ_ASSERT (destIdx < 4 && destPos < 4);
     dest[destIdx][destPos++] = aSource[i];
   }
 
-  // Take care of the trailing period
-  if (destIdx >= 4) {
-    return false;
-  }
-
   // Add last terminator.
-  MOZ_ASSERT (destIdx < 4 && destPos <= 4);
   dest[destIdx][destPos] = 0;
 
-  if (destIdx != 3) {
+  if (destIdx != ArrayLength(dest) - 1) {
     return false;
   }
   return true;
@@ -279,13 +265,11 @@ ParseDriverVersion(const nsAString& aVersion, uint64_t *aNumericVersion)
   if (d < 0 || d > 0xffff) return false;
 
   *aNumericVersion = GFX_DRIVER_VERSION(a, b, c, d);
-  MOZ_ASSERT(*aNumericVersion != GfxDriverInfo::allDriverVersions);
   return true;
 #elif defined(ANDROID)
   // Can't use aVersion.ToInteger() because that's not compiled into our code
   // unless we have XPCOM_GLUE_AVOID_NSPR disabled.
   *aNumericVersion = atoi(NS_LossyConvertUTF16toASCII(aVersion).get());
-  MOZ_ASSERT(*aNumericVersion != GfxDriverInfo::allDriverVersions);
   return true;
 #else
   return false;

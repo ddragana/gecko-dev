@@ -3,10 +3,11 @@ var o0 = Function.prototype;
 o1 = {};
 var o4 = Error.prototype;
 o5 = new Int32Array(100);
-o6 = new Proxy({}, {})
-o8 = new Proxy(function() { return {}; }, {
-    get: function() { return 10; },
+o6 = Proxy.create({
 });
+o8 = Proxy.createFunction({
+    get: function() {return 10; },
+}, function(){ return {}; }, function(){ return {}; });
 o9 = {};
 var o10 = -500;
 var o12 = new Int32Array(100);

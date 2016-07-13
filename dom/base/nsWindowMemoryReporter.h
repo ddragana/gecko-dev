@@ -7,12 +7,12 @@
 #ifndef nsWindowMemoryReporter_h__
 #define nsWindowMemoryReporter_h__
 
-#include "nsGlobalWindow.h"
 #include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "nsITimer.h"
 #include "nsDataHashtable.h"
 #include "nsWeakReference.h"
+#include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/MemoryReporting.h"
@@ -158,9 +158,6 @@ public:
   static void UnlinkGhostWindows();
 #endif
 
-  static nsWindowMemoryReporter* Get();
-  void ObserveDOMWindowDetached(nsGlobalWindow* aWindow);
-
 private:
   ~nsWindowMemoryReporter();
 
@@ -202,6 +199,7 @@ private:
    */
   uint32_t GetGhostTimeout();
 
+  void ObserveDOMWindowDetached(nsISupports* aWindow);
   void ObserveAfterMinimizeMemoryUsage();
 
   /**

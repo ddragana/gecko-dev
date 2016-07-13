@@ -8,8 +8,6 @@
 
 #include "mozilla/plugins/PBrowserStreamChild.h"
 #include "mozilla/plugins/AStream.h"
-#include "base/task.h"
-#include "base/timer.h"
 
 namespace mozilla {
 namespace plugins {
@@ -36,8 +34,8 @@ public:
             uint16_t* stype);
 
   virtual bool RecvWrite(const int32_t& offset,
-                         const uint32_t& newsize,
-                         const Buffer& data) override;
+                         const Buffer& data,
+                         const uint32_t& newsize) override;
   virtual bool RecvNPP_StreamAsFile(const nsCString& fname) override;
   virtual bool RecvNPP_DestroyStream(const NPReason& reason) override;
   virtual bool Recv__delete__() override;

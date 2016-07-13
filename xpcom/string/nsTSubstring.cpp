@@ -308,15 +308,9 @@ nsTSubstring_CharT::Assign(char_type aChar, const fallible_t&)
 void
 nsTSubstring_CharT::Assign(const char_type* aData)
 {
-  if (!Assign(aData, mozilla::fallible)) {
+  if (!Assign(aData, size_type(-1), mozilla::fallible)) {
     AllocFailed(char_traits::length(aData));
   }
-}
-
-bool
-nsTSubstring_CharT::Assign(const char_type* aData, const fallible_t&)
-{
-  return Assign(aData, size_type(-1), mozilla::fallible);
 }
 
 void
@@ -1007,12 +1001,12 @@ nsTSubstring_CharT::AppendFloat(double aFloat)
 }
 
 size_t
-nsTSubstring_CharT::SizeOfExcludingThisIfUnshared(
+nsTSubstring_CharT::SizeOfExcludingThisMustBeUnshared(
     mozilla::MallocSizeOf aMallocSizeOf) const
 {
   if (mFlags & F_SHARED) {
     return nsStringBuffer::FromData(mData)->
-      SizeOfIncludingThisIfUnshared(aMallocSizeOf);
+      SizeOfIncludingThisMustBeUnshared(aMallocSizeOf);
   }
   if (mFlags & F_OWNED) {
     return aMallocSizeOf(mData);
@@ -1030,10 +1024,26 @@ nsTSubstring_CharT::SizeOfExcludingThisIfUnshared(
 }
 
 size_t
+nsTSubstring_CharT::SizeOfExcludingThisIfUnshared(
+    mozilla::MallocSizeOf aMallocSizeOf) const
+{
+  // This is identical to SizeOfExcludingThisMustBeUnshared except for the
+  // F_SHARED case.
+  if (mFlags & F_SHARED) {
+    return nsStringBuffer::FromData(mData)->
+           SizeOfIncludingThisIfUnshared(aMallocSizeOf);
+  }
+  if (mFlags & F_OWNED) {
+    return aMallocSizeOf(mData);
+  }
+  return 0;
+}
+
+size_t
 nsTSubstring_CharT::SizeOfExcludingThisEvenIfShared(
     mozilla::MallocSizeOf aMallocSizeOf) const
 {
-  // This is identical to SizeOfExcludingThisIfUnshared except for the
+  // This is identical to SizeOfExcludingThisMustBeUnshared except for the
   // F_SHARED case.
   if (mFlags & F_SHARED) {
     return nsStringBuffer::FromData(mData)->
@@ -1043,6 +1053,14 @@ nsTSubstring_CharT::SizeOfExcludingThisEvenIfShared(
     return aMallocSizeOf(mData);
   }
   return 0;
+}
+
+size_t
+nsTSubstring_CharT::SizeOfIncludingThisMustBeUnshared(
+    mozilla::MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) +
+         SizeOfExcludingThisMustBeUnshared(aMallocSizeOf);
 }
 
 size_t

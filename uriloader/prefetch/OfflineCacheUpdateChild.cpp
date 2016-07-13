@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BackgroundUtils.h"
 #include "OfflineCacheUpdateChild.h"
 #include "nsOfflineCacheUpdate.h"
 #include "mozilla/dom/ContentChild.h"
@@ -17,7 +16,7 @@
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsPIDOMWindow.h"
+#include "nsIDOMWindow.h"
 #include "nsIDOMOfflineResourceList.h"
 #include "nsIDocument.h"
 #include "nsIObserverService.h"
@@ -38,15 +37,15 @@ using mozilla::dom::TabChild;
 using mozilla::dom::ContentChild;
 
 //
-// To enable logging (see mozilla/Logging.h for full details):
+// To enable logging (see prlog.h for full details):
 //
-//    set MOZ_LOG=nsOfflineCacheUpdate:5
-//    set MOZ_LOG_FILE=offlineupdate.log
+//    set NSPR_LOG_MODULES=nsOfflineCacheUpdate:5
+//    set NSPR_LOG_FILE=offlineupdate.log
 //
 // this enables LogLevel::Debug level information and places all output in
 // the file offlineupdate.log
 //
-extern mozilla::LazyLogModule gOfflineCacheUpdateLog;
+extern PRLogModuleInfo *gOfflineCacheUpdateLog;
 
 #undef LOG
 #define LOG(args) MOZ_LOG(gOfflineCacheUpdateLog, mozilla::LogLevel::Debug, args)
@@ -73,10 +72,11 @@ NS_IMPL_RELEASE(OfflineCacheUpdateChild)
 // OfflineCacheUpdateChild <public>
 //-----------------------------------------------------------------------------
 
-OfflineCacheUpdateChild::OfflineCacheUpdateChild(nsPIDOMWindowInner* aWindow)
+OfflineCacheUpdateChild::OfflineCacheUpdateChild(nsIDOMWindow* aWindow)
     : mState(STATE_UNINITIALIZED)
     , mIsUpgrade(false)
-    , mSucceeded(false)
+    , mAppID(NECKO_NO_APP_ID)
+    , mInBrowser(false)
     , mWindow(aWindow)
     , mByteProgress(0)
 {
@@ -174,9 +174,10 @@ OfflineCacheUpdateChild::AssociateDocument(nsIDOMDocument *aDocument,
 NS_IMETHODIMP
 OfflineCacheUpdateChild::Init(nsIURI *aManifestURI,
                               nsIURI *aDocumentURI,
-                              nsIPrincipal *aLoadingPrincipal,
                               nsIDOMDocument *aDocument,
-                              nsIFile *aCustomProfileDir)
+                              nsIFile *aCustomProfileDir,
+                              uint32_t aAppID,
+                              bool aInBrowser)
 {
     nsresult rv;
 
@@ -211,12 +212,14 @@ OfflineCacheUpdateChild::Init(nsIURI *aManifestURI,
     NS_ENSURE_SUCCESS(rv, rv);
 
     mDocumentURI = aDocumentURI;
-    mLoadingPrincipal = aLoadingPrincipal;
 
     mState = STATE_INITIALIZED;
 
     if (aDocument)
         SetDocument(aDocument);
+
+    mAppID = aAppID;
+    mInBrowser = aInBrowser;
 
     return NS_OK;
 }
@@ -224,8 +227,7 @@ OfflineCacheUpdateChild::Init(nsIURI *aManifestURI,
 NS_IMETHODIMP
 OfflineCacheUpdateChild::InitPartial(nsIURI *aManifestURI,
                                   const nsACString& clientID,
-                                  nsIURI *aDocumentURI,
-                                  nsIPrincipal *aLoadingPrincipal)
+                                  nsIURI *aDocumentURI)
 {
     NS_NOTREACHED("Not expected to do partial offline cache updates"
                   " on the child process");
@@ -235,7 +237,8 @@ OfflineCacheUpdateChild::InitPartial(nsIURI *aManifestURI,
 
 NS_IMETHODIMP
 OfflineCacheUpdateChild::InitForUpdateCheck(nsIURI *aManifestURI,
-                                            nsIPrincipal* aLoadingPrincipal,
+                                            uint32_t aAppID,
+                                            bool aInBrowser,
                                             nsIObserver *aObserver)
 {
     NS_NOTREACHED("Not expected to do only update checks"
@@ -378,14 +381,22 @@ OfflineCacheUpdateChild::Schedule()
 
     NS_ASSERTION(mWindow, "Window must be provided to the offline cache update child");
 
-    nsCOMPtr<nsPIDOMWindowInner> window = mWindow.forget();
-    nsCOMPtr<nsIDocShell >docshell = window->GetDocShell();
-    if (!docshell) {
+    nsCOMPtr<nsPIDOMWindow> piWindow = 
+        do_QueryInterface(mWindow);
+    mWindow = nullptr;
+
+    nsIDocShell *docshell = piWindow->GetDocShell();
+
+    nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(docshell);
+    if (!item) {
       NS_WARNING("doc shell tree item is null");
       return NS_ERROR_FAILURE;
     }
 
-    nsCOMPtr<nsITabChild> tabchild = docshell->GetTabChild();
+    nsCOMPtr<nsIDocShellTreeOwner> owner;
+    item->GetTreeOwner(getter_AddRefs(owner));
+
+    nsCOMPtr<nsITabChild> tabchild = do_GetInterface(owner);
     // because owner implements nsITabChild, we can assume that it is
     // the one and only TabChild.
     TabChild* child = tabchild ? static_cast<TabChild*>(tabchild.get()) : nullptr;
@@ -397,12 +408,6 @@ OfflineCacheUpdateChild::Schedule()
     URIParams manifestURI, documentURI;
     SerializeURI(mManifestURI, manifestURI);
     SerializeURI(mDocumentURI, documentURI);
-
-    nsresult rv = NS_OK;
-    PrincipalInfo loadingPrincipalInfo;
-    rv = PrincipalToPrincipalInfo(mLoadingPrincipal,
-                                  &loadingPrincipalInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
@@ -426,8 +431,8 @@ OfflineCacheUpdateChild::Schedule()
     // a reference to us. Will be released in RecvFinish() that identifies 
     // the work has been done.
     ContentChild::GetSingleton()->SendPOfflineCacheUpdateConstructor(
-        this, manifestURI, documentURI, loadingPrincipalInfo,
-        stickDocument);
+        this, manifestURI, documentURI,
+        stickDocument, child->GetTabId());
 
     // ContentChild::DeallocPOfflineCacheUpdate will release this.
     NS_ADDREF_THIS();
@@ -500,7 +505,7 @@ OfflineCacheUpdateChild::RecvFinish(const bool &succeeded,
 {
     LOG(("OfflineCacheUpdateChild::RecvFinish [%p]", this));
 
-    RefPtr<OfflineCacheUpdateChild> kungFuDeathGrip(this);
+    nsRefPtr<OfflineCacheUpdateChild> kungFuDeathGrip(this);
 
     mState = STATE_FINISHED;
     mSucceeded = succeeded;

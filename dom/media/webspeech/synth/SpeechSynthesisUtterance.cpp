@@ -13,8 +13,6 @@
 #include "SpeechSynthesisUtterance.h"
 #include "SpeechSynthesisVoice.h"
 
-#include <stdlib.h>
-
 namespace mozilla {
 namespace dom {
 
@@ -27,7 +25,7 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(SpeechSynthesisUtterance, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(SpeechSynthesisUtterance, DOMEventTargetHelper)
 
-SpeechSynthesisUtterance::SpeechSynthesisUtterance(nsPIDOMWindowInner* aOwnerWindow,
+SpeechSynthesisUtterance::SpeechSynthesisUtterance(nsPIDOMWindow* aOwnerWindow,
                                                    const nsAString& text)
   : DOMEventTargetHelper(aOwnerWindow)
   , mText(text)
@@ -65,14 +63,14 @@ SpeechSynthesisUtterance::Constructor(GlobalObject& aGlobal,
                                       const nsAString& aText,
                                       ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
 
   if (!win) {
     aRv.Throw(NS_ERROR_FAILURE);
   }
 
   MOZ_ASSERT(win->IsInnerWindow());
-  RefPtr<SpeechSynthesisUtterance> object =
+  nsRefPtr<SpeechSynthesisUtterance> object =
     new SpeechSynthesisUtterance(win, aText);
   return object.forget();
 }
@@ -122,7 +120,7 @@ SpeechSynthesisUtterance::Volume() const
 void
 SpeechSynthesisUtterance::SetVolume(float aVolume)
 {
-  mVolume = std::max<float>(std::min<float>(aVolume, 1), 0);
+  mVolume = aVolume;
 }
 
 float
@@ -134,7 +132,7 @@ SpeechSynthesisUtterance::Rate() const
 void
 SpeechSynthesisUtterance::SetRate(float aRate)
 {
-  mRate = std::max<float>(std::min<float>(aRate, 10), 0.1f);
+  mRate = aRate;
 }
 
 float
@@ -146,7 +144,7 @@ SpeechSynthesisUtterance::Pitch() const
 void
 SpeechSynthesisUtterance::SetPitch(float aPitch)
 {
-  mPitch = std::max<float>(std::min<float>(aPitch, 2), 0);
+  mPitch = aPitch;
 }
 
 void
@@ -169,7 +167,7 @@ SpeechSynthesisUtterance::DispatchSpeechSynthesisEvent(const nsAString& aEventTy
   init.mElapsedTime = aElapsedTime;
   init.mName = aName;
 
-  RefPtr<SpeechSynthesisEvent> event =
+  nsRefPtr<SpeechSynthesisEvent> event =
     SpeechSynthesisEvent::Constructor(this, aEventType, init);
   DispatchTrustedEvent(event);
 }

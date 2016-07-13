@@ -20,6 +20,8 @@
 #include "ScopedNSSTypes.h"
 #include "ssl.h"
 
+extern PRThread *gSocketThread;
+
 namespace mozilla {
 namespace net {
 
@@ -71,13 +73,13 @@ TLSServerSocket::CreateClientTransport(PRFileDesc* aClientFD,
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
   nsresult rv;
 
-  RefPtr<nsSocketTransport> trans = new nsSocketTransport;
+  nsRefPtr<nsSocketTransport> trans = new nsSocketTransport;
   if (NS_WARN_IF(!trans)) {
     mCondition = NS_ERROR_OUT_OF_MEMORY;
     return;
   }
 
-  RefPtr<TLSServerConnectionInfo> info = new TLSServerConnectionInfo();
+  nsRefPtr<TLSServerConnectionInfo> info = new TLSServerConnectionInfo();
   info->mServerSocket = this;
   info->mTransport = trans;
   nsCOMPtr<nsISupports> infoSupports =
@@ -220,31 +222,6 @@ TLSServerSocket::SetRequestClientCertificate(uint32_t aMode)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-TLSServerSocket::SetCipherSuites(uint16_t* aCipherSuites, uint32_t aLength)
-{
-  // If AsyncListen was already called (and set mListener), it's too late to set
-  // this.
-  if (NS_WARN_IF(mListener)) {
-    return NS_ERROR_IN_PROGRESS;
-  }
-
-  for (uint16_t i = 0; i < SSL_NumImplementedCiphers; ++i) {
-    uint16_t cipher_id = SSL_ImplementedCiphers[i];
-    if (SSL_CipherPrefSet(mFD, cipher_id, false) != SECSuccess) {
-      return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
-    }
-  }
-
-  for (uint32_t i = 0; i < aLength; ++i) {
-    if (SSL_CipherPrefSet(mFD, aCipherSuites[i], true) != SECSuccess) {
-      return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
-    }
-  }
-
-  return NS_OK;
-}
-
 //-----------------------------------------------------------------------------
 // TLSServerConnectionInfo
 //-----------------------------------------------------------------------------
@@ -263,7 +240,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITLSSERVERSECURITYOBSERVER
 
-  class OnHandshakeDoneRunnable : public Runnable
+  class OnHandshakeDoneRunnable : public nsRunnable
   {
   public:
     OnHandshakeDoneRunnable(const nsMainThreadPtrHandle<nsITLSServerSecurityObserver>& aListener,
@@ -293,7 +270,7 @@ NS_IMETHODIMP
 TLSServerSecurityObserverProxy::OnHandshakeDone(nsITLSServerSocket* aServer,
                                                 nsITLSClientStatus* aStatus)
 {
-  RefPtr<OnHandshakeDoneRunnable> r =
+  nsRefPtr<OnHandshakeDoneRunnable> r =
     new OnHandshakeDoneRunnable(mListener, aServer, aStatus);
   return NS_DispatchToMainThread(r);
 }
@@ -329,14 +306,16 @@ TLSServerConnectionInfo::~TLSServerConnectionInfo()
     return;
   }
 
-  RefPtr<nsITLSServerSecurityObserver> observer;
+  nsITLSServerSecurityObserver* observer;
   {
     MutexAutoLock lock(mLock);
-    observer = mSecurityObserver.forget();
+    mSecurityObserver.forget(&observer);
   }
 
   if (observer) {
-    NS_ReleaseOnMainThread(observer.forget());
+    nsCOMPtr<nsIThread> mainThread;
+    NS_GetMainThread(getter_AddRefs(mainThread));
+    NS_ProxyRelease(mainThread, observer);
   }
 }
 
@@ -424,7 +403,7 @@ TLSServerConnectionInfo::GetMacLength(uint32_t* aMacLength)
 void
 TLSServerConnectionInfo::HandshakeCallback(PRFileDesc* aFD, void* aArg)
 {
-  RefPtr<TLSServerConnectionInfo> info =
+  nsRefPtr<TLSServerConnectionInfo> info =
     static_cast<TLSServerConnectionInfo*>(aArg);
   nsISocketTransport* transport = info->mTransport;
   // No longer needed outside this function, so clear the weak ref

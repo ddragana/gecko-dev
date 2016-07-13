@@ -8,20 +8,18 @@
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
 #include "nsContentUtils.h"
-#include "nsCSSPseudoElements.h"
 #include "nsFormControlFrame.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMNode.h"
 #include "nsIFormControl.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "nsStyleSet.h"
 #include "nsIDocument.h"
 
 using mozilla::dom::Element;
 
-nsColorControlFrame::nsColorControlFrame(nsStyleContext* aContext)
-  : nsHTMLButtonControlFrame(aContext)
+nsColorControlFrame::nsColorControlFrame(nsStyleContext* aContext):
+  nsColorControlFrameSuper(aContext)
 {
 }
 
@@ -36,14 +34,14 @@ NS_IMPL_FRAMEARENA_HELPERS(nsColorControlFrame)
 NS_QUERYFRAME_HEAD(nsColorControlFrame)
   NS_QUERYFRAME_ENTRY(nsColorControlFrame)
   NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
-NS_QUERYFRAME_TAIL_INHERITING(nsHTMLButtonControlFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsColorControlFrameSuper)
 
 
 void nsColorControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
   nsFormControlFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
   nsContentUtils::DestroyAnonymousContent(&mColorContent);
-  nsHTMLButtonControlFrame::DestroyFrom(aDestructRoot);
+  nsColorControlFrameSuper::DestroyFrom(aDestructRoot);
 }
 
 nsIAtom*
@@ -74,8 +72,8 @@ nsColorControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   nsresult rv = UpdateColor();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  CSSPseudoElementType pseudoType = CSSPseudoElementType::mozColorSwatch;
-  RefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
+  nsCSSPseudoElements::Type pseudoType = nsCSSPseudoElements::ePseudo_mozColorSwatch;
+  nsRefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
     ResolvePseudoElementStyle(mContent->AsElement(), pseudoType,
                               StyleContext(), mColorContent->AsElement());
   if (!aElements.AppendElement(ContentInfo(mColorContent, newStyleContext))) {
@@ -126,7 +124,7 @@ nsColorControlFrame::AttributeChanged(int32_t  aNameSpaceID,
       aNameSpaceID == kNameSpaceID_None && nsGkAtoms::value == aAttribute) {
     UpdateColor();
   }
-  return nsHTMLButtonControlFrame::AttributeChanged(aNameSpaceID, aAttribute,
+  return nsColorControlFrameSuper::AttributeChanged(aNameSpaceID, aAttribute,
                                                     aModType);
 }
 
@@ -137,9 +135,9 @@ nsColorControlFrame::GetContentInsertionFrame()
 }
 
 Element*
-nsColorControlFrame::GetPseudoElement(CSSPseudoElementType aType)
+nsColorControlFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
 {
-  if (aType == CSSPseudoElementType::mozColorSwatch) {
+  if (aType == nsCSSPseudoElements::ePseudo_mozColorSwatch) {
     return mColorContent;
   }
 

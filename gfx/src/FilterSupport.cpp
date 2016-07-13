@@ -310,13 +310,6 @@ FilterCachedColorModels::FilterCachedColorModels(DrawTarget* aDT,
 already_AddRefed<FilterNode>
 FilterCachedColorModels::ForColorModel(ColorModel aColorModel)
 {
-  if (aColorModel == mOriginalColorModel) {
-    // Make sure to not call WrapForColorModel if our original filter node was
-    // null, because then we'd get an infinite recursion.
-    RefPtr<FilterNode> filter = mFilterForColorModel[mOriginalColorModel.ToIndex()];
-    return filter.forget();
-  }
-
   if (!mFilterForColorModel[aColorModel.ToIndex()]) {
     mFilterForColorModel[aColorModel.ToIndex()] = WrapForColorModel(aColorModel);
   }
@@ -354,12 +347,6 @@ FilterCachedColorModels::WrapForColorModel(ColorModel aColorModel)
   return FilterWrappers::LinearRGBToSRGB(mDT, unpremultipliedOriginal);
 }
 
-static const float identityMatrix[] =
-  { 1, 0, 0, 0, 0,
-    0, 1, 0, 0, 0,
-    0, 0, 1, 0, 0,
-    0, 0, 0, 1, 0 };
-
 // When aAmount == 0, the identity matrix is returned.
 // When aAmount == 1, aToMatrix is returned.
 // When aAmount > 1, an exaggerated version of aToMatrix is returned. This can
@@ -376,6 +363,12 @@ static void
 InterpolateFromIdentityMatrix(const float aToMatrix[20], float aAmount,
                               float aOutMatrix[20])
 {
+  static const float identityMatrix[] =
+    { 1, 0, 0, 0, 0,
+      0, 1, 0, 0, 0,
+      0, 0, 1, 0, 0,
+      0, 0, 0, 1, 0 };
+
   PodCopy(aOutMatrix, identityMatrix, 20);
 
   float oneMinusAmount = 1 - aAmount;
@@ -399,6 +392,12 @@ static nsresult
 ComputeColorMatrix(uint32_t aColorMatrixType, const nsTArray<float>& aValues,
                    float aOutMatrix[20])
 {
+  static const float identityMatrix[] =
+    { 1, 0, 0, 0, 0,
+      0, 1, 0, 0, 0,
+      0, 0, 1, 0, 0,
+      0, 0, 0, 1, 0 };
+
   // Luminance coefficients.
   static const float lumR = 0.2126f;
   static const float lumG = 0.7152f;
@@ -748,10 +747,8 @@ FilterNodeFromPrimitiveDescription(const FilterPrimitiveDescription& aDescriptio
           BLEND_MODE_LUMINOSITY
         };
         filter->SetAttribute(ATT_BLEND_BLENDMODE, (uint32_t)blendModes[mode]);
-        // The correct input order for both software and D2D filters is flipped
-        // from our source order, so flip here.
-        filter->SetInput(IN_BLEND_IN, aSources[1]);
-        filter->SetInput(IN_BLEND_IN2, aSources[0]);
+        filter->SetInput(IN_BLEND_IN, aSources[0]);
+        filter->SetInput(IN_BLEND_IN2, aSources[1]);
       }
       return filter.forget();
     }
@@ -761,8 +758,7 @@ FilterNodeFromPrimitiveDescription(const FilterPrimitiveDescription& aDescriptio
       float colorMatrix[20];
       uint32_t type = atts.GetUint(eColorMatrixType);
       const nsTArray<float>& values = atts.GetFloats(eColorMatrixValues);
-      if (NS_FAILED(ComputeColorMatrix(type, values, colorMatrix)) ||
-          PodEqual(colorMatrix, identityMatrix)) {
+      if (NS_FAILED(ComputeColorMatrix(type, values, colorMatrix))) {
         RefPtr<FilterNode> filter(aSources[0]);
         return filter.forget();
       }
@@ -956,15 +952,11 @@ FilterNodeFromPrimitiveDescription(const FilterPrimitiveDescription& aDescriptio
       RefPtr<FilterNode> filter;
       uint32_t op = atts.GetUint(eCompositeOperator);
       if (op == SVG_FECOMPOSITE_OPERATOR_ARITHMETIC) {
-        const nsTArray<float>& coefficients = atts.GetFloats(eCompositeCoefficients);
-        static const float allZero[4] = { 0, 0, 0, 0 };
         filter = aDT->CreateFilter(FilterType::ARITHMETIC_COMBINE);
-        // All-zero coefficients sometimes occur in junk filters.
-        if (!filter ||
-            (coefficients.Length() == ArrayLength(allZero) &&
-             PodEqual(coefficients.Elements(), allZero, ArrayLength(allZero)))) {
+        if (!filter) {
           return nullptr;
         }
+        const nsTArray<float>& coefficients = atts.GetFloats(eCompositeCoefficients);
         filter->SetAttribute(ATT_ARITHMETIC_COMBINE_COEFFICIENTS,
                              coefficients.Elements(), coefficients.Length());
         filter->SetInput(IN_ARITHMETIC_COMBINE_IN, aSources[0]);
@@ -1239,6 +1231,9 @@ FilterNodeGraphFromDescription(DrawTarget* aDT,
 {
   const nsTArray<FilterPrimitiveDescription>& primitives = aFilter.mPrimitives;
 
+  Rect resultNeededRect(aResultNeededRect);
+  resultNeededRect.RoundOut();
+
   RefPtr<FilterCachedColorModels> sourceFilters[4];
   nsTArray<RefPtr<FilterCachedColorModels> > primitiveFilters;
 
@@ -1411,9 +1406,6 @@ ResultChangeRegionForPrimitive(const FilterPrimitiveDescription& aDescription,
 
     case PrimitiveType::ConvolveMatrix:
     {
-      if (atts.GetUint(eConvolveMatrixEdgeMode) != EDGE_MODE_NONE) {
-        return aDescription.PrimitiveSubregion();
-      }
       Size kernelUnitLength = atts.GetSize(eConvolveMatrixKernelUnitLength);
       IntSize kernelSize = atts.GetIntSize(eConvolveMatrixKernelSize);
       IntPoint target = atts.GetIntPoint(eConvolveMatrixTarget);
@@ -1610,8 +1602,6 @@ FilterSupport::PostFilterExtentsForPrimitive(const FilterPrimitiveDescription& a
 
     case PrimitiveType::Turbulence:
     case PrimitiveType::Image:
-    case PrimitiveType::DiffuseLighting:
-    case PrimitiveType::SpecularLighting:
     {
       return aDescription.PrimitiveSubregion();
     }
@@ -1672,7 +1662,7 @@ SourceNeededRegionForPrimitive(const FilterPrimitiveDescription& aDescription,
     case PrimitiveType::Flood:
     case PrimitiveType::Turbulence:
     case PrimitiveType::Image:
-      MOZ_CRASH("GFX: this shouldn't be called for filters without inputs");
+      MOZ_CRASH("this shouldn't be called for filters without inputs");
       return nsIntRegion();
 
     case PrimitiveType::Empty:
@@ -2054,13 +2044,20 @@ AttributeMap::~AttributeMap()
 {
 }
 
+static PLDHashOperator
+CopyAttribute(const uint32_t& aAttributeName,
+              Attribute* aAttribute,
+              void* aAttributes)
+{
+  typedef nsClassHashtable<nsUint32HashKey, Attribute> Map;
+  Map* map = static_cast<Map*>(aAttributes);
+  map->Put(aAttributeName, new Attribute(*aAttribute));
+  return PL_DHASH_NEXT;
+}
+
 AttributeMap::AttributeMap(const AttributeMap& aOther)
 {
-  for (auto iter = aOther.mMap.Iter(); !iter.Done(); iter.Next()) {
-    const uint32_t& attributeName = iter.Key();
-    Attribute* attribute = iter.UserData();
-    mMap.Put(attributeName, new Attribute(*attribute));
-  }
+  aOther.mMap.EnumerateRead(CopyAttribute, &mMap);
 }
 
 AttributeMap&
@@ -2068,13 +2065,32 @@ AttributeMap::operator=(const AttributeMap& aOther)
 {
   if (this != &aOther) {
     mMap.Clear();
-    for (auto iter = aOther.mMap.Iter(); !iter.Done(); iter.Next()) {
-      const uint32_t& attributeName = iter.Key();
-      Attribute* attribute = iter.UserData();
-      mMap.Put(attributeName, new Attribute(*attribute));
-    }
+    aOther.mMap.EnumerateRead(CopyAttribute, &mMap);
   }
   return *this;
+}
+
+namespace {
+  struct MatchingMap {
+    typedef nsClassHashtable<nsUint32HashKey, Attribute> Map;
+    const Map& map;
+    bool matches;
+  };
+} // namespace
+
+static PLDHashOperator
+CheckAttributeEquality(const uint32_t& aAttributeName,
+                       Attribute* aAttribute,
+                       void* aMatchingMap)
+{
+  MatchingMap& matchingMap = *static_cast<MatchingMap*>(aMatchingMap);
+  Attribute* matchingAttribute = matchingMap.map.Get(aAttributeName);
+  if (!matchingAttribute ||
+      *matchingAttribute != *aAttribute) {
+    matchingMap.matches = false;
+    return PL_DHASH_STOP;
+  }
+  return PL_DHASH_NEXT;
 }
 
 bool
@@ -2084,34 +2100,43 @@ AttributeMap::operator==(const AttributeMap& aOther) const
     return false;
   }
 
-  for (auto iter = aOther.mMap.Iter(); !iter.Done(); iter.Next()) {
-    const uint32_t& attributeName = iter.Key();
-    Attribute* attribute = iter.UserData();
-    Attribute* matchingAttribute = mMap.Get(attributeName);
-    if (!matchingAttribute || *matchingAttribute != *attribute) {
-      return false;
-    }
-  }
+  MatchingMap matchingMap = { mMap, true };
+  aOther.mMap.EnumerateRead(CheckAttributeEquality, &matchingMap);
+  return matchingMap.matches;
+}
 
-  return true;
+namespace {
+  struct HandlerWithUserData
+  {
+    AttributeMap::AttributeHandleCallback handler;
+    void* userData;
+  };
+} // namespace
+
+static PLDHashOperator
+PassAttributeToHandleCallback(const uint32_t& aAttributeName,
+                              Attribute* aAttribute,
+                              void* aHandlerWithUserData)
+{
+  HandlerWithUserData* handlerWithUserData =
+    static_cast<HandlerWithUserData*>(aHandlerWithUserData);
+  return handlerWithUserData->handler(AttributeName(aAttributeName),
+                                      aAttribute->Type(),
+                                      handlerWithUserData->userData) ?
+    PL_DHASH_NEXT : PL_DHASH_STOP;
+}
+
+void
+AttributeMap::EnumerateRead(AttributeMap::AttributeHandleCallback aCallback, void* aUserData) const
+{
+  HandlerWithUserData handlerWithUserData = { aCallback, aUserData };
+  mMap.EnumerateRead(PassAttributeToHandleCallback, &handlerWithUserData);
 }
 
 uint32_t
 AttributeMap::Count() const
 {
   return mMap.Count();
-}
-
-nsClassHashtable<nsUint32HashKey, FilterAttribute>::Iterator
-AttributeMap::ConstIter() const
-{
-  return mMap.ConstIter();
-}
-
-/* static */ AttributeType
-AttributeMap::GetType(FilterAttribute* aAttribute)
-{
-  return aAttribute->Type();
 }
 
 #define MAKE_ATTRIBUTE_HANDLERS_BASIC(type, typeLabel, defaultValue) \

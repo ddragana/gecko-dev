@@ -90,13 +90,13 @@ nsPrintingPromptService::Init()
 
 //-----------------------------------------------------------
 HWND
-nsPrintingPromptService::GetHWNDForDOMWindow(mozIDOMWindowProxy *aWindow)
+nsPrintingPromptService::GetHWNDForDOMWindow(nsIDOMWindow *aWindow)
 {
     nsCOMPtr<nsIWebBrowserChrome> chrome;
 
     // We might be embedded so check this path first
     if (mWatcher) {
-        nsCOMPtr<mozIDOMWindowProxy> fosterParent;
+        nsCOMPtr<nsIDOMWindow> fosterParent;
         if (!aWindow) 
         {   // it will be a dependent window. try to find a foster parent.
             mWatcher->GetActiveWindow(getter_AddRefs(fosterParent));
@@ -116,7 +116,7 @@ nsPrintingPromptService::GetHWNDForDOMWindow(mozIDOMWindowProxy *aWindow)
     }
 
     // Now we might be the Browser so check this path
-    nsCOMPtr<nsPIDOMWindowOuter> window = nsPIDOMWindowOuter::From(aWindow);
+    nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aWindow));
 
     nsCOMPtr<nsIDocShellTreeItem> treeItem =
         do_QueryInterface(window->GetDocShell());
@@ -146,7 +146,7 @@ nsPrintingPromptService::GetHWNDForDOMWindow(mozIDOMWindowProxy *aWindow)
 
 //-----------------------------------------------------------
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowPrintDialog(mozIDOMWindowProxy *parent, nsIWebBrowserPrint *webBrowserPrint, nsIPrintSettings *printSettings)
+nsPrintingPromptService::ShowPrintDialog(nsIDOMWindow *parent, nsIWebBrowserPrint *webBrowserPrint, nsIPrintSettings *printSettings)
 {
     NS_ENSURE_ARG(parent);
 
@@ -157,8 +157,9 @@ nsPrintingPromptService::ShowPrintDialog(mozIDOMWindowProxy *parent, nsIWebBrows
 }
 
 
+/* void showProgress (in nsIDOMWindow parent, in nsIWebBrowserPrint webBrowserPrint, in nsIPrintSettings printSettings, in nsIObserver openDialogObserver, in boolean isForPrinting, out nsIWebProgressListener webProgressListener, out nsIPrintProgressParams printProgressParams, out boolean notifyOnOpen); */
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowProgress(mozIDOMWindowProxy*      parent, 
+nsPrintingPromptService::ShowProgress(nsIDOMWindow*            parent, 
                                       nsIWebBrowserPrint*      webBrowserPrint,    // ok to be null
                                       nsIPrintSettings*        printSettings,      // ok to be null
                                       nsIObserver*             openDialogObserver, // ok to be null
@@ -184,7 +185,7 @@ nsPrintingPromptService::ShowProgress(mozIDOMWindowProxy*      parent,
 
     nsCOMPtr<nsIPrintProgressParams> prtProgressParams = new nsPrintProgressParams();
 
-    nsCOMPtr<mozIDOMWindowProxy> parentWindow = parent;
+    nsCOMPtr<nsIDOMWindow> parentWindow = parent;
 
     if (mWatcher && !parentWindow) {
         mWatcher->GetActiveWindow(getter_AddRefs(parentWindow));
@@ -202,8 +203,9 @@ nsPrintingPromptService::ShowProgress(mozIDOMWindowProxy*      parent,
     return NS_OK;
 }
 
+/* void showPageSetup (in nsIDOMWindow parent, in nsIPrintSettings printSettings); */
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowPageSetup(mozIDOMWindowProxy *parent, nsIPrintSettings *printSettings, nsIObserver *aObs)
+nsPrintingPromptService::ShowPageSetup(nsIDOMWindow *parent, nsIPrintSettings *printSettings, nsIObserver *aObs)
 {
     NS_ENSURE_ARG(printSettings);
 
@@ -227,8 +229,9 @@ nsPrintingPromptService::ShowPageSetup(mozIDOMWindowProxy *parent, nsIPrintSetti
     return rv;
 }
 
+/* void showPrinterProperties (in nsIDOMWindow parent, in wstring printerName, in nsIPrintSettings printSettings); */
 NS_IMETHODIMP 
-nsPrintingPromptService::ShowPrinterProperties(mozIDOMWindowProxy *parent, const char16_t *printerName, nsIPrintSettings *printSettings)
+nsPrintingPromptService::ShowPrinterProperties(nsIDOMWindow *parent, const char16_t *printerName, nsIPrintSettings *printSettings)
 {
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -236,7 +239,7 @@ nsPrintingPromptService::ShowPrinterProperties(mozIDOMWindowProxy *parent, const
 //-----------------------------------------------------------
 // Helper to Fly XP Dialog
 nsresult
-nsPrintingPromptService::DoDialog(mozIDOMWindowProxy *aParent,
+nsPrintingPromptService::DoDialog(nsIDOMWindow *aParent,
                                   nsIDialogParamBlock *aParamBlock, 
                                   nsIPrintSettings* aPS,
                                   const char *aChromeURL)
@@ -248,10 +251,12 @@ nsPrintingPromptService::DoDialog(mozIDOMWindowProxy *aParent,
     if (!mWatcher)
         return NS_ERROR_FAILURE;
 
+    nsresult rv = NS_OK;
+
     // get a parent, if at all possible
     // (though we'd rather this didn't fail, it's OK if it does. so there's
     // no failure or null check.)
-    nsCOMPtr<mozIDOMWindowProxy> activeParent; // retain ownership for method lifetime
+    nsCOMPtr<nsIDOMWindow> activeParent; // retain ownership for method lifetime
     if (!aParent) 
     {
         mWatcher->GetActiveWindow(getter_AddRefs(activeParent));
@@ -261,10 +266,8 @@ nsPrintingPromptService::DoDialog(mozIDOMWindowProxy *aParent,
     // create a nsISupportsArray of the parameters 
     // being passed to the window
     nsCOMPtr<nsISupportsArray> array;
-    nsresult rv = NS_NewISupportsArray(getter_AddRefs(array));
-    if (NS_FAILED(rv)) {
-        return NS_ERROR_FAILURE;
-    }
+    NS_NewISupportsArray(getter_AddRefs(array));
+    if (!array) return NS_ERROR_FAILURE;
 
     nsCOMPtr<nsISupports> psSupports(do_QueryInterface(aPS));
     NS_ASSERTION(psSupports, "PrintSettings must be a supports");
@@ -278,7 +281,7 @@ nsPrintingPromptService::DoDialog(mozIDOMWindowProxy *aParent,
     NS_ASSERTION(array, "array must be a supports");
 
 
-    nsCOMPtr<mozIDOMWindowProxy> dialog;
+    nsCOMPtr<nsIDOMWindow> dialog;
     rv = mWatcher->OpenWindow(aParent, aChromeURL, "_blank",
                               "centerscreen,chrome,modal,titlebar", arguments,
                               getter_AddRefs(dialog));
@@ -290,6 +293,7 @@ nsPrintingPromptService::DoDialog(mozIDOMWindowProxy *aParent,
 // nsIWebProgressListener
 //////////////////////////////////////////////////////////////////////
 
+/* void onStateChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in long aStateFlags, in nsresult aStatus); */
 NS_IMETHODIMP 
 nsPrintingPromptService::OnStateChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t aStateFlags, nsresult aStatus)
 {
@@ -306,6 +310,7 @@ nsPrintingPromptService::OnStateChange(nsIWebProgress *aWebProgress, nsIRequest 
     return NS_OK;
 }
 
+/* void onProgressChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in long aCurSelfProgress, in long aMaxSelfProgress, in long aCurTotalProgress, in long aMaxTotalProgress); */
 NS_IMETHODIMP 
 nsPrintingPromptService::OnProgressChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, int32_t aCurSelfProgress, int32_t aMaxSelfProgress, int32_t aCurTotalProgress, int32_t aMaxTotalProgress)
 {
@@ -316,6 +321,7 @@ nsPrintingPromptService::OnProgressChange(nsIWebProgress *aWebProgress, nsIReque
   return NS_ERROR_FAILURE;
 }
 
+/* void onLocationChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in nsIURI location, in unsigned long aFlags); */
 NS_IMETHODIMP 
 nsPrintingPromptService::OnLocationChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, nsIURI *location, uint32_t aFlags)
 {
@@ -326,6 +332,7 @@ nsPrintingPromptService::OnLocationChange(nsIWebProgress *aWebProgress, nsIReque
   return NS_ERROR_FAILURE;
 }
 
+/* void onStatusChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in nsresult aStatus, in wstring aMessage); */
 NS_IMETHODIMP 
 nsPrintingPromptService::OnStatusChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, nsresult aStatus, const char16_t *aMessage)
 {
@@ -336,6 +343,7 @@ nsPrintingPromptService::OnStatusChange(nsIWebProgress *aWebProgress, nsIRequest
   return NS_ERROR_FAILURE;
 }
 
+/* void onSecurityChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in unsigned long state); */
 NS_IMETHODIMP 
 nsPrintingPromptService::OnSecurityChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t state)
 {

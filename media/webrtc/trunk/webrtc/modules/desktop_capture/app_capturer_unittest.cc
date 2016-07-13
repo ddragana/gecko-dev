@@ -14,34 +14,34 @@
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/desktop_region.h"
 #include "webrtc/system_wrappers/interface/logging.h"
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
 class AppCapturerTest : public testing::Test,
                         public DesktopCapturer::Callback {
 public:
-  void SetUp() override {
+  void SetUp() OVERRIDE {
     capturer_.reset(
       AppCapturer::Create(DesktopCaptureOptions::CreateDefault())
     );
   }
 
-  void TearDown() override {
+  void TearDown() OVERRIDE {
   }
 
   // DesktopCapturer::Callback interface
-  virtual SharedMemory* CreateSharedMemory(size_t size) override {
+  virtual SharedMemory* CreateSharedMemory(size_t size) OVERRIDE {
     return NULL;
   }
 
-  virtual void OnCaptureCompleted(DesktopFrame* frame) override {
+  virtual void OnCaptureCompleted(DesktopFrame* frame) OVERRIDE {
     frame_.reset(frame);
   }
 
 protected:
-  rtc::scoped_ptr<AppCapturer> capturer_;
-  rtc::scoped_ptr<DesktopFrame> frame_;
+  scoped_ptr<AppCapturer> capturer_;
+  scoped_ptr<DesktopFrame> frame_;
 };
 
 // Verify that we can enumerate applications.

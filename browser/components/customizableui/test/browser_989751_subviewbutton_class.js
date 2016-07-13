@@ -5,7 +5,7 @@
 "use strict";
 
 const kCustomClass = "acustomclassnoonewilluse";
-var tempElement = null;
+let tempElement = null;
 
 function insertClassNameToMenuChildren(parentMenu) {
   let el = parentMenu.querySelector("menuitem:first-of-type");
@@ -14,7 +14,7 @@ function insertClassNameToMenuChildren(parentMenu) {
 }
 
 function checkSubviewButtonClass(menuId, buttonId, subviewId) {
-  return function*() {
+  return function() {
     info("Checking for items without the subviewbutton class in " + buttonId + " widget");
     let menu = document.getElementById(menuId);
     insertClassNameToMenuChildren(menu);

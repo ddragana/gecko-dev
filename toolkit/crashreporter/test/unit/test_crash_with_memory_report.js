@@ -11,9 +11,6 @@ function run_test()
 
   do_crash(
    function() {
-      // Delay crashing so that the memory report has time to complete.
-      shouldDelay = true;
-
       let Cc = Components.classes;
       let Ci = Components.interfaces;
 

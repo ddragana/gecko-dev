@@ -35,13 +35,8 @@ struct nsPoint : public mozilla::gfx::BasePoint<nscoord, nsPoint> {
    * @param aFromAPP the APP to scale from
    * @param aToAPP the APP to scale to
    */
-  MOZ_MUST_USE inline nsPoint
+  MOZ_WARN_UNUSED_RESULT inline nsPoint
     ScaleToOtherAppUnits(int32_t aFromAPP, int32_t aToAPP) const;
-
-  MOZ_MUST_USE inline nsPoint
-    RemoveResolution(const float resolution) const;
-  MOZ_MUST_USE inline nsPoint
-    ApplyResolution(const float resolution) const;
 };
 
 inline nsPoint ToAppUnits(const nsIntPoint& aPoint, nscoord aAppUnitsPerPixel);
@@ -68,28 +63,6 @@ nsPoint::ScaleToOtherAppUnits(int32_t aFromAPP, int32_t aToAPP) const
     nsPoint point;
     point.x = NSToCoordRound(NSCoordScale(x, aFromAPP, aToAPP));
     point.y = NSToCoordRound(NSCoordScale(y, aFromAPP, aToAPP));
-    return point;
-  }
-  return *this;
-}
-
-inline nsPoint
-nsPoint::RemoveResolution(const float resolution) const {
-  if (resolution != 1.0f) {
-    nsPoint point;
-    point.x = NSToCoordRound(NSCoordToFloat(x) / resolution);
-    point.y = NSToCoordRound(NSCoordToFloat(y) / resolution);
-    return point;
-  }
-  return *this;
-}
-
-inline nsPoint
-nsPoint::ApplyResolution(const float resolution) const {
-  if (resolution != 1.0f) {
-    nsPoint point;
-    point.x = NSToCoordRound(NSCoordToFloat(x) * resolution);
-    point.y = NSToCoordRound(NSCoordToFloat(y) * resolution);
     return point;
   }
   return *this;

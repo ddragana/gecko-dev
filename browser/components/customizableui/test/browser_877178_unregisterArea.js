@@ -8,19 +8,19 @@ registerCleanupFunction(removeCustomToolbars);
 
 // Sanity checks
 add_task(function sanityChecks() {
-  SimpleTest.doesThrow(() => CustomizableUI.registerArea("@foo"),
+  SimpleTest.doesThrow(function() CustomizableUI.registerArea("@foo"),
                        "Registering areas with an invalid ID should throw.");
 
-  SimpleTest.doesThrow(() => CustomizableUI.registerArea([]),
+  SimpleTest.doesThrow(function() CustomizableUI.registerArea([]),
                        "Registering areas with an invalid ID should throw.");
 
-  SimpleTest.doesThrow(() => CustomizableUI.unregisterArea("@foo"),
+  SimpleTest.doesThrow(function() CustomizableUI.unregisterArea("@foo"),
                        "Unregistering areas with an invalid ID should throw.");
 
-  SimpleTest.doesThrow(() => CustomizableUI.unregisterArea([]),
+  SimpleTest.doesThrow(function() CustomizableUI.unregisterArea([]),
                        "Unregistering areas with an invalid ID should throw.");
 
-  SimpleTest.doesThrow(() => CustomizableUI.unregisterArea("unknown"),
+  SimpleTest.doesThrow(function() CustomizableUI.unregisterArea("unknown"),
                        "Unregistering an area that's not registered should throw.");
 });
 
@@ -45,6 +45,6 @@ add_task(function checkRegisteringAndUnregistering() {
      "everything will return to the default state.");
 });
 
-add_task(function* asyncCleanup() {
+add_task(function asyncCleanup() {
   yield resetCustomization();
 });

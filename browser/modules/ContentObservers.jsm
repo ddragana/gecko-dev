@@ -19,19 +19,11 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
 
-var gEMEUIObserver = function(subject, topic, data) {
+let gEMEUIObserver = function(subject, topic, data) {
   let win = subject.top;
   let mm = getMessageManagerForWindow(win);
   if (mm) {
     mm.sendAsyncMessage("EMEVideo:ContentMediaKeysRequest", data);
-  }
-};
-
-var gDecoderDoctorObserver = function(subject, topic, data) {
-  let win = subject.top;
-  let mm = getMessageManagerForWindow(win);
-  if (mm) {
-    mm.sendAsyncMessage("DecoderDoctor:Notification", data);
   }
 };
 
@@ -43,13 +35,9 @@ function getMessageManagerForWindow(aContentWindow) {
   try {
     // If e10s is disabled, this throws NS_NOINTERFACE for closed tabs.
     return ir.getInterface(Ci.nsIContentFrameMessageManager);
-  } catch(e) {
-    if (e.result == Cr.NS_NOINTERFACE) {
-      return null;
-    }
-    throw e;
+  } catch(e if e.result == Cr.NS_NOINTERFACE) {
+    return null;
   }
 }
 
 Services.obs.addObserver(gEMEUIObserver, "mediakeys-request", false);
-Services.obs.addObserver(gDecoderDoctorObserver, "decoder-doctor-notification", false);

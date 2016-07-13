@@ -85,7 +85,7 @@ GetTempDir(nsIFile** aTempDir)
 
 namespace {
 
-class nsRemoteAnonymousTemporaryFileRunnable : public Runnable
+class nsRemoteAnonymousTemporaryFileRunnable : public nsRunnable
 {
 public:
   dom::FileDescOrError *mResultPtr;
@@ -306,7 +306,7 @@ CreateAnonTempFileRemover()
   if (!XRE_IsParentProcess()) {
     return NS_OK;
   }
-  RefPtr<nsAnonTempFileRemover> tempRemover = new nsAnonTempFileRemover();
+  nsRefPtr<nsAnonTempFileRemover> tempRemover = new nsAnonTempFileRemover();
   return tempRemover->Init();
 }
 

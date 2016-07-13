@@ -19,7 +19,7 @@ const STATUS_SUCCESS = 200;
  *        Mocked raw response from the server
  * @returns {Function}
  */
-var mockResponse = function (response) {
+let mockResponse = function (response) {
   let Request = function (requestUri) {
     // Store the request uri so tests can inspect it
     Request._requestUri = requestUri;
@@ -41,7 +41,7 @@ var mockResponse = function (response) {
  *        Error object
  * @returns {Function}
  */
-var mockResponseError = function (error) {
+let mockResponseError = function (error) {
   return function () {
     return {
       setHeader: function () {},
@@ -52,7 +52,7 @@ var mockResponseError = function (error) {
   };
 };
 
-var mockClient = function (fxa) {
+let mockClient = function (fxa) {
   let options = {
     serverURL: "http://127.0.0.1:1111/v1",
     fxa: fxa,
@@ -69,9 +69,7 @@ function FxaMock() {
 FxaMock.prototype = {
   currentAccountState: {
     profile: null,
-    get isCurrent() {
-      return true;
-    }
+    get isCurrent() true,
   },
 
   getSignedInUser: function () {
@@ -79,7 +77,7 @@ FxaMock.prototype = {
   }
 };
 
-var mockFxa = function() {
+let mockFxa = function() {
   return new FxaMock();
 };
 
@@ -168,7 +166,7 @@ add_test(function fetchAndCacheProfile_ok() {
 
 // Check that a second profile request when one is already in-flight reuses
 // the in-flight one.
-add_task(function* fetchAndCacheProfileOnce() {
+add_task(function fetchAndCacheProfileOnce() {
   // A promise that remains unresolved while we fire off 2 requests for
   // a profile.
   let resolveProfile;
@@ -205,7 +203,7 @@ add_task(function* fetchAndCacheProfileOnce() {
 
 // Check that sharing a single fetch promise works correctly when the promise
 // is rejected.
-add_task(function* fetchAndCacheProfileOnce() {
+add_task(function fetchAndCacheProfileOnce() {
   // A promise that remains unresolved while we fire off 2 requests for
   // a profile.
   let rejectProfile;
@@ -234,19 +232,11 @@ add_task(function* fetchAndCacheProfileOnce() {
   try {
     yield request1;
     throw new Error("should have rejected");
-  } catch (ex) {
-    if (ex != "oh noes") {
-      throw ex;
-    }
-  }
+  } catch (ex if ex == "oh noes") {}
   try {
     yield request2;
     throw new Error("should have rejected");
-  } catch (ex) {
-    if (ex != "oh noes") {
-      throw ex;
-    }
-  }
+  } catch (ex if ex == "oh noes") {}
 
   // but a new request should work.
   client.fetchProfile = function () {
@@ -259,7 +249,7 @@ add_task(function* fetchAndCacheProfileOnce() {
 
 // Check that a new profile request within PROFILE_FRESHNESS_THRESHOLD of the
 // last one doesn't kick off a new request to check the cached copy is fresh.
-add_task(function* fetchAndCacheProfileAfterThreshold() {
+add_task(function fetchAndCacheProfileAfterThreshold() {
   let numFetches = 0;
   let client = mockClient(mockFxa());
   client.fetchProfile = function () {
@@ -286,7 +276,7 @@ add_task(function* fetchAndCacheProfileAfterThreshold() {
 // Check that a new profile request within PROFILE_FRESHNESS_THRESHOLD of the
 // last one *does* kick off a new request if ON_PROFILE_CHANGE_NOTIFICATION
 // is sent.
-add_task(function* fetchAndCacheProfileBeforeThresholdOnNotification() {
+add_task(function fetchAndCacheProfileBeforeThresholdOnNotification() {
   let numFetches = 0;
   let client = mockClient(mockFxa());
   client.fetchProfile = function () {

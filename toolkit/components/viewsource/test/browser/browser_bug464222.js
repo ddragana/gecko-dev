@@ -1,12 +1,14 @@
 const source = "http://example.com/browser/toolkit/components/viewsource/test/browser/file_bug464222.html";
 
-add_task(function *() {
-  let viewSourceTab = yield* openDocumentSelect(source, "a");
+function test() {
+  waitForExplicitFinish();
+  testSelection();
+}
 
-  let href = yield ContentTask.spawn(viewSourceTab.linkedBrowser, { }, function* () {
-    return content.document.querySelectorAll("a[href]")[0].href;
+function testSelection() {
+  openDocumentSelect(source, "a", function(aWindow) {
+    let aTags = aWindow.gBrowser.contentDocument.querySelectorAll("a[href]");
+    is(aTags[0].href, "view-source:" + source, "Relative links broken?");
+    closeViewSourceWindow(aWindow, finish);
   });
-
-  is(href, "view-source:" + source, "Relative links broken?");
-  gBrowser.removeTab(viewSourceTab);
-});
+}

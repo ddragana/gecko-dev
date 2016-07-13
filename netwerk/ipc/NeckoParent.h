@@ -5,7 +5,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/BasePrincipal.h"
 #include "mozilla/net/PNeckoParent.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/net/OfflineObserver.h"
@@ -35,11 +34,12 @@ public:
   NeckoParent();
   virtual ~NeckoParent();
 
-  MOZ_MUST_USE
+  MOZ_WARN_UNUSED_RESULT
   static const char *
   GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
                       PContentParent* aBrowser,
-                      mozilla::DocShellOriginAttributes& aAttrs);
+                      uint32_t* aAppId,
+                      bool* aInBrowserElement);
 
   /*
    * Creates LoadContext for parent-side of an e10s channel.
@@ -48,7 +48,7 @@ public:
    *
    * Returns null if successful, or an error string if failed.
    */
-  MOZ_MUST_USE
+  MOZ_WARN_UNUSED_RESULT
   static const char*
   CreateChannelLoadContext(const PBrowserOrId& aBrowser,
                            PContentParent* aContent,
@@ -124,8 +124,7 @@ protected:
   virtual bool DeallocPFTPChannelParent(PFTPChannelParent*) override;
   virtual PWebSocketParent*
     AllocPWebSocketParent(const PBrowserOrId& browser,
-                          const SerializedLoadContext& aSerialized,
-                          const uint32_t& aSerial) override;
+                          const SerializedLoadContext& aSerialized) override;
   virtual bool DeallocPWebSocketParent(PWebSocketParent*) override;
   virtual PTCPSocketParent* AllocPTCPSocketParent(const nsString& host,
                                                   const uint16_t& port) override;
@@ -147,11 +146,11 @@ protected:
   virtual PTCPServerSocketParent*
     AllocPTCPServerSocketParent(const uint16_t& aLocalPort,
                                 const uint16_t& aBacklog,
-                                const bool& aUseArrayBuffers) override;
+                                const nsString& aBinaryType) override;
   virtual bool RecvPTCPServerSocketConstructor(PTCPServerSocketParent*,
                                                const uint16_t& aLocalPort,
                                                const uint16_t& aBacklog,
-                                               const bool& aUseArrayBuffers) override;
+                                               const nsString& aBinaryType) override;
   virtual bool DeallocPTCPServerSocketParent(PTCPServerSocketParent*) override;
   virtual PUDPSocketParent* AllocPUDPSocketParent(const Principal& aPrincipal,
                                                   const nsCString& aFilter) override;
@@ -173,9 +172,6 @@ protected:
   virtual bool RecvCancelHTMLDNSPrefetch(const nsString& hostname,
                                          const uint16_t& flags,
                                          const nsresult& reason) override;
-  virtual PWebSocketEventListenerParent*
-    AllocPWebSocketEventListenerParent(const uint64_t& aInnerWindowID) override;
-  virtual bool DeallocPWebSocketEventListenerParent(PWebSocketEventListenerParent*) override;
 
   virtual mozilla::ipc::IProtocol*
   CloneProtocol(Channel* aChannel,
@@ -207,10 +203,6 @@ protected:
                                   const ChannelDiverterArgs& channel) override;
   virtual bool DeallocPChannelDiverterParent(PChannelDiverterParent* actor)
                                                                 override;
-  virtual PTransportProviderParent*
-  AllocPTransportProviderParent() override;
-  virtual bool
-  DeallocPTransportProviderParent(PTransportProviderParent* aActor) override;
 
   virtual bool RecvOnAuthAvailable(const uint64_t& aCallbackId,
                                    const nsString& aUser,
@@ -232,12 +224,10 @@ protected:
                              const IPC::SerializedLoadContext& aLoadContext) override;
   virtual bool RecvPredReset() override;
 
-  virtual bool RecvRemoveRequestContext(const nsCString& rcid) override;
-
 private:
   nsCString mCoreAppsBasePath;
   nsCString mWebAppsBasePath;
-  RefPtr<OfflineObserver> mObserver;
+  nsRefPtr<OfflineObserver> mObserver;
 };
 
 /**

@@ -22,6 +22,7 @@ function test()
  
   expect = 100;
 
+  jit(true);
 
   function f(i) {
     for (var m = 0; m < 20; ++m)
@@ -32,12 +33,15 @@ function test()
 
   print(actual = f(1));
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 
+  jit(true);
 
   print(actual = f(.5));
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

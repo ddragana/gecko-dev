@@ -16,10 +16,9 @@ using namespace mozilla::gl;
 
 CompositingRenderTargetOGL::~CompositingRenderTargetOGL()
 {
-  if (mGL && mGL->MakeCurrent()) {
-    mGL->fDeleteTextures(1, &mTextureHandle);
-    mGL->fDeleteFramebuffers(1, &mFBO);
-  }
+  mGL->MakeCurrent();
+  mGL->fDeleteTextures(1, &mTextureHandle);
+  mGL->fDeleteFramebuffers(1, &mFBO);
 }
 
 void
@@ -34,14 +33,8 @@ CompositingRenderTargetOGL::BindTexture(GLenum aTextureUnit, GLenum aTextureTarg
 void
 CompositingRenderTargetOGL::BindRenderTarget()
 {
-  bool needsClear = false;
-
   if (mInitParams.mStatus != InitParams::INITIALIZED) {
     InitializeImpl();
-    if (mInitParams.mInit == INIT_MODE_CLEAR) {
-      needsClear = true;
-      mClearOnBind = false;
-    }
   } else {
     MOZ_ASSERT(mInitParams.mStatus == InitParams::INITIALIZED);
     GLuint fbo = mFBO == 0 ? mGL->GetDefaultFramebuffer() : mFBO;
@@ -51,7 +44,7 @@ CompositingRenderTargetOGL::BindRenderTarget()
       // The main framebuffer (0) of non-offscreen contexts
       // might be backed by a EGLSurface that needs to be renewed.
       if (mFBO == 0 && !mGL->IsOffscreen()) {
-        mGL->RenewSurface(mCompositor->GetWidget()->RealWidget());
+        mGL->RenewSurface();
         result = mGL->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
       }
       if (result != LOCAL_GL_FRAMEBUFFER_COMPLETE) {
@@ -65,14 +58,14 @@ CompositingRenderTargetOGL::BindRenderTarget()
       }
     }
 
-    needsClear = mClearOnBind;
+    mCompositor->PrepareViewport(mInitParams.mSize);
   }
 
-  if (needsClear) {
+  if (mClearOnBind) {
     mGL->fScissor(0, 0, mInitParams.mSize.width, mInitParams.mSize.height);
     mGL->fClearColor(0.0, 0.0, 0.0, 0.0);
-    mGL->fClearDepth(0.0);
-    mGL->fClear(LOCAL_GL_COLOR_BUFFER_BIT | LOCAL_GL_DEPTH_BUFFER_BIT);
+    mGL->fClear(LOCAL_GL_COLOR_BUFFER_BIT);
+    mClearOnBind = false;
   }
 }
 
@@ -81,7 +74,7 @@ already_AddRefed<DataSourceSurface>
 CompositingRenderTargetOGL::Dump(Compositor* aCompositor)
 {
   MOZ_ASSERT(mInitParams.mStatus == InitParams::INITIALIZED);
-  CompositorOGL* compositorOGL = aCompositor->AsCompositorOGL();
+  CompositorOGL* compositorOGL = static_cast<CompositorOGL*>(aCompositor);
   return ReadBackSurface(mGL, mTextureHandle, true, compositorOGL->GetFBOFormat());
 }
 #endif
@@ -111,6 +104,15 @@ CompositingRenderTargetOGL::InitializeImpl()
   }
 
   mInitParams.mStatus = InitParams::INITIALIZED;
+
+  mCompositor->PrepareViewport(mInitParams.mSize);
+  mGL->fScissor(0, 0, mInitParams.mSize.width, mInitParams.mSize.height);
+  if (mInitParams.mInit == INIT_MODE_CLEAR) {
+    mGL->fClearColor(0.0, 0.0, 0.0, 0.0);
+    mGL->fClear(LOCAL_GL_COLOR_BUFFER_BIT);
+    mClearOnBind = false;
+  }
+
 }
 
 } // namespace layers

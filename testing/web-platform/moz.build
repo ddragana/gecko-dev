@@ -11,8 +11,11 @@ WEB_PLATFORM_TESTS_MANIFESTS += [
 
 TEST_HARNESS_FILES['web-platform'] += [
     'harness/**',
+    'meta/**',
+    'mozilla/**',
     'outbound/**',
     'runtests.py',
+    'tests/**',
     'wptrunner.ini'
 ]
 

@@ -9,8 +9,7 @@ function test() {
     gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
 
     var doc = gBrowser.contentDocument;
-    var pageInfo = BrowserPageInfo(gBrowser.selectedBrowser.currentURI.spec,
-                                   "mediaTab");
+    var pageInfo = BrowserPageInfo(doc, "mediaTab");
 
     pageInfo.addEventListener("load", function () {
       pageInfo.removeEventListener("load", arguments.callee, true);

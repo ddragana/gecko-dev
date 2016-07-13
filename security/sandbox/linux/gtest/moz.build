@@ -4,13 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+FAIL_ON_WARNINGS = True
+
 Library('sandboxtest')
 
 SOURCES = [
-    '../SandboxBrokerClient.cpp',
     '../SandboxUtil.cpp',
-    'TestBroker.cpp',
-    'TestBrokerPolicy.cpp',
     'TestSandboxUtil.cpp',
 ]
 
@@ -18,9 +17,6 @@ LOCAL_INCLUDES += [
     '/security/sandbox/linux',
     '/security/sandbox/linux/common',
 ]
-
-include('/ipc/chromium/chromium-config.mozbuild')
-
 LOCAL_INCLUDES += [
     '/security/sandbox/chromium',
 ]

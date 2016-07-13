@@ -4,16 +4,16 @@
 
 Components.utils.import("resource://gre/modules/Promise.jsm", this);
 
-var {AddonTestUtils} = Components.utils.import("resource://testing-common/AddonManagerTesting.jsm", {});
-var {HttpServer} = Components.utils.import("resource://testing-common/httpd.js", {});
+let {AddonTestUtils} = Components.utils.import("resource://testing-common/AddonManagerTesting.jsm", {});
+let {HttpServer} = Components.utils.import("resource://testing-common/httpd.js", {});
 
-var gManagerWindow;
-var gCategoryUtilities;
-var gExperiments;
-var gHttpServer;
+let gManagerWindow;
+let gCategoryUtilities;
+let gExperiments;
+let gHttpServer;
 
-var gSavedManifestURI;
-var gIsEnUsLocale;
+let gSavedManifestURI;
+let gIsEnUsLocale;
 
 const SEC_IN_ONE_DAY = 24 * 60 * 60;
 const MS_IN_ONE_DAY  = SEC_IN_ONE_DAY * 1000;
@@ -28,7 +28,7 @@ function getExperimentAddons() {
 
 function getInstallItem() {
   let doc = gManagerWindow.document;
-  let view = get_current_view(gManagerWindow);
+  let view = doc.getElementById("view-port").selectedPanel;
   let list = doc.getElementById("addon-list");
 
   let node = list.firstChild;
@@ -98,7 +98,6 @@ add_task(function* initializeState() {
 
   registerCleanupFunction(() => {
     Services.prefs.clearUserPref("experiments.enabled");
-    Services.prefs.clearUserPref("toolkit.telemetry.enabled");
     if (gHttpServer) {
       gHttpServer.stop(() => {});
       if (gSavedManifestURI !== undefined) {
@@ -225,12 +224,7 @@ add_task(function* testOpenPreferences() {
   }, "advanced-pane-loaded", false);
 
   info("Loading preferences pane.");
-  // We need to focus before synthesizing the mouse event (bug 1240052) as
-  // synthesizeMouseAtCenter currently only synthesizes the mouse in the child process.
-  // This can cause some subtle differences if the child isn't focused.
-  yield SimpleTest.promiseFocus();
-  yield BrowserTestUtils.synthesizeMouseAtCenter("#experiments-change-telemetry", {},
-                                                 gBrowser.selectedBrowser);
+  EventUtils.synthesizeMouseAtCenter(btn, {}, gManagerWindow);
 
   yield deferred.promise;
 });
@@ -300,7 +294,6 @@ add_task(function* testActivateExperiment() {
   // We need to remove the cache file to help ensure consistent state.
   yield OS.File.remove(gExperiments._cacheFilePath);
 
-  Services.prefs.setBoolPref("toolkit.telemetry.enabled", true);
   Services.prefs.setBoolPref("experiments.enabled", true);
 
   info("Initializing experiments service.");
@@ -338,7 +331,7 @@ add_task(function* testActivateExperiment() {
   is_element_visible(el, "Experiment info is visible on experiment tab.");
 });
 
-add_task(function* testDeactivateExperiment() {
+add_task(function testDeactivateExperiment() {
   if (!gExperiments) {
     return;
   }
@@ -386,7 +379,7 @@ add_task(function* testDeactivateExperiment() {
   is_element_hidden(el, "Preferences button is not visible.");
 });
 
-add_task(function* testActivateRealExperiments() {
+add_task(function testActivateRealExperiments() {
   if (!gExperiments) {
     info("Skipping experiments test because that feature isn't available.");
     return;
@@ -539,7 +532,7 @@ add_task(function* testActivateRealExperiments() {
   }
 });
 
-add_task(function* testDetailView() {
+add_task(function testDetailView() {
   if (!gExperiments) {
     info("Skipping experiments test because that feature isn't available.");
     return;
@@ -642,8 +635,6 @@ add_task(function* testCleanup() {
     yield OS.File.remove(gExperiments._cacheFilePath);
     yield gExperiments.uninit();
     yield gExperiments.init();
-
-    Services.prefs.clearUserPref("toolkit.telemetry.enabled");
   }
 
   // Check post-conditions.

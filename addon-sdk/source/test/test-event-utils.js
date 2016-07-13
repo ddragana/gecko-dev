@@ -7,20 +7,16 @@ const { on, emit } = require("sdk/event/core");
 const { filter, map, merge, expand, pipe, stripListeners } = require("sdk/event/utils");
 const $ = require("./event/helpers");
 
-function isEven(x) {
-  return !(x % 2);
-}
-function inc(x) {
-  return x + 1;
-}
+function isEven(x) !(x % 2)
+function inc(x) x + 1
 
 exports["test filter events"] = function(assert) {
   let input = {};
   let evens = filter(input, isEven);
   let actual = [];
-  on(evens, "data", e => actual.push(e));
+  on(evens, "data", function(e) actual.push(e));
 
-  [1, 2, 3, 4, 5, 6, 7].forEach(x => emit(input, "data", x));
+  [1, 2, 3, 4, 5, 6, 7].forEach(function(x) emit(input, "data", x));
 
   assert.deepEqual(actual, [2, 4, 6], "only even numbers passed through");
 };
@@ -49,9 +45,9 @@ exports["test map events"] = function(assert) {
   let input = {};
   let incs = map(input, inc);
   let actual = [];
-  on(incs, "data", e => actual.push(e));
+  on(incs, "data", function(e) actual.push(e));
 
-  [1, 2, 3, 4].forEach(x => emit(input, "data", x));
+  [1, 2, 3, 4].forEach(function(x) emit(input, "data", x));
 
   assert.deepEqual(actual, [2, 3, 4, 5], "all numbers were incremented");
 };
@@ -81,7 +77,7 @@ exports["test merge stream[stream]"] = function(assert) {
   let inputs = {};
   let actual = [];
 
-  on(merge(inputs), "data", $ => actual.push($))
+  on(merge(inputs), "data", function($) actual.push($))
 
   emit(inputs, "data", a);
   emit(a, "data", "a1");
@@ -103,7 +99,7 @@ exports["test merge array[stream]"] = function(assert) {
   let inputs = {};
   let actual = [];
 
-  on(merge([a, b, c]), "data", $ => actual.push($))
+  on(merge([a, b, c]), "data", function($) actual.push($))
 
   emit(a, "data", "a1");
   emit(b, "data", "b1");
@@ -151,14 +147,14 @@ exports["test expand"] = function(assert) {
   let inputs = {};
   let actual = [];
 
-  on(expand(inputs, $ => $()), "data", $ => actual.push($))
+  on(expand(inputs, function($) $()), "data", function($) actual.push($))
 
-  emit(inputs, "data", () => a);
+  emit(inputs, "data", function() a);
   emit(a, "data", "a1");
-  emit(inputs, "data", () => b);
+  emit(inputs, "data", function() b);
   emit(b, "data", "b1");
   emit(a, "data", "a2");
-  emit(inputs, "data", () => c);
+  emit(inputs, "data", function() c);
   emit(c, "data", "c1");
   emit(c, "data", "c2");
   emit(b, "data", "b2");

@@ -10,9 +10,8 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/UniquePtr.h"
 #include "nsHttpRequestHead.h"
-#include "nsIRequestContext.h"
+#include "nsILoadGroup.h"
 #include "nsString.h"
 #include "PSpdyPush.h"
 #include "SpdySession31.h"
@@ -41,7 +40,7 @@ public:
   nsresult ReadSegments(nsAHttpSegmentReader *,  uint32_t, uint32_t *);
   nsresult WriteSegments(nsAHttpSegmentWriter *, uint32_t, uint32_t *);
 
-  nsIRequestContext *RequestContext() { return mRequestContext; };
+  nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() { return mLoadGroupCI; };
   void ConnectPushedStream(SpdyStream31 *consumer);
 
   bool DeferCleanupOnSuccess() { return mDeferCleanupOnSuccess; }
@@ -59,7 +58,7 @@ private:
   SpdyStream31 *mConsumerStream; // paired request stream that consumes from
   // real spdy one.. null until a match is made.
 
-  nsCOMPtr<nsIRequestContext> mRequestContext;
+  nsCOMPtr<nsILoadGroupConnectionInfo> mLoadGroupCI;
 
   SpdyPush31TransactionBuffer *mBufferedPush;
   TimeStamp          mLastRead;
@@ -91,7 +90,7 @@ private:
   SpdyPushedStream31 *mPushStream;
   bool mIsDone;
 
-  UniquePtr<char[]> mBufferedHTTP1;
+  nsAutoArrayPtr<char> mBufferedHTTP1;
   uint32_t mBufferedHTTP1Size;
   uint32_t mBufferedHTTP1Used;
   uint32_t mBufferedHTTP1Consumed;

@@ -21,8 +21,6 @@
 
 #include "nsITimer.h"
 
-#include "Units.h"
-
 class nsIWidget;
 
 // XUL popups can be in several different states. When opening a popup, the
@@ -124,14 +122,20 @@ enum MenuPopupAnchorType {
 #define POPUPPOSITION_HFLIP(v) (v ^ 1)
 #define POPUPPOSITION_VFLIP(v) (v ^ 2)
 
+// XXX, kyle.yuan@sun.com, there are 4 definitions for the same purpose:
+//  nsMenuPopupFrame.h, nsListControlFrame.cpp, listbox.xml, tree.xml
+//  need to find a good place to put them together.
+//  if someone changes one, please also change the other.
+
+#define CONTEXT_MENU_OFFSET_PIXELS 2
+
 nsIFrame* NS_NewMenuPopupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 class nsView;
 class nsMenuPopupFrame;
 
 // this class is used for dispatching popupshown events asynchronously.
-class nsXULPopupShownEvent : public mozilla::Runnable,
-                             public nsIDOMEventListener
+class nsXULPopupShownEvent : public nsRunnable, public nsIDOMEventListener
 {
 public:
   nsXULPopupShownEvent(nsIContent *aPopup, nsPresContext* aPresContext)
@@ -150,7 +154,7 @@ protected:
 
 private:
   nsCOMPtr<nsIContent> mPopup;
-  RefPtr<nsPresContext> mPresContext;
+  nsRefPtr<nsPresContext> mPresContext;
 };
 
 class nsMenuPopupFrame final : public nsBoxFrame, public nsMenuParent,
@@ -310,7 +314,7 @@ public:
                                       int32_t aXPos, int32_t aYPos);
 
   // indicate that the popup should be opened
-  void ShowPopup(bool aIsContextMenu);
+  void ShowPopup(bool aIsContextMenu, bool aSelectFirstItem);
   // indicate that the popup should be hidden. The new state should either be
   // ePopupClosed or ePopupInvisible.
   void HidePopup(bool aDeselectMenu, nsPopupState aNewState);
@@ -338,11 +342,11 @@ public:
 
   void ChangeByPage(bool aIsUp);
 
-  // Move the popup to the screen coordinate |aPos| in CSS pixels.
+  // Move the popup to the screen coordinate (aLeft, aTop) in CSS pixels.
   // If aUpdateAttrs is true, and the popup already has left or top attributes,
   // then those attributes are updated to the new location.
   // The frame may be destroyed by this method.
-  void MoveTo(const mozilla::CSSIntPoint& aPos, bool aUpdateAttrs);
+  void MoveTo(int32_t aLeft, int32_t aTop, bool aUpdateAttrs);
 
   void MoveToAnchor(nsIContent* aAnchorContent,
                     const nsAString& aPosition,
@@ -355,10 +359,6 @@ public:
 
   nsIScrollableFrame* GetScrollFrame(nsIFrame* aStart);
 
-  void SetOverrideConstraintRect(mozilla::LayoutDeviceIntRect aRect) {
-    mOverrideConstraintRect = ToAppUnits(aRect, PresContext()->AppUnitsPerCSSPixel());
-  }
-
   // For a popup that should appear anchored at the given rect, determine
   // the screen area that it is constrained by. This will be the available
   // area of the screen the popup should be displayed on. Content popups,
@@ -367,11 +367,8 @@ public:
   // For non-toplevel popups (which will always be panels), we will also
   // constrain them to the available screen rect, ie they will not fall
   // underneath the taskbar, dock or other fixed OS elements.
-  // This operates in device pixels.
-  mozilla::LayoutDeviceIntRect
-  GetConstraintRect(const mozilla::LayoutDeviceIntRect& aAnchorRect,
-                    const mozilla::LayoutDeviceIntRect& aRootScreenRect,
-                    nsPopupLevel aPopupLevel);
+  nsRect GetConstraintRect(const nsRect& aAnchorRect, const nsRect& aRootScreenRect,
+                           nsPopupLevel aPopupLevel);
 
   // Determines whether the given edges of the popup may be moved, where
   // aHorizontalSide and aVerticalSide are one of the NS_SIDE_* constants, or
@@ -397,10 +394,7 @@ public:
   // or (-1, -1, 0, 0) if anchored.
   nsIntRect GetScreenAnchorRect() const { return mScreenRect; }
 
-  mozilla::LayoutDeviceIntPoint GetLastClientOffset() const
-  {
-    return mLastClientOffset;
-  }
+  nsIntPoint GetLastClientOffset() const { return mLastClientOffset; }
 
   // Return the alignment of the popup
   int8_t GetAlignmentPosition() const;
@@ -431,7 +425,7 @@ protected:
   nsPopupLevel PopupLevel(bool aIsNoAutoHide) const;
 
   // redefine to tell the box system not to move the views.
-  virtual uint32_t GetXULLayoutFlags() override;
+  virtual void GetLayoutFlags(uint32_t& aFlags) override;
 
   void InitPositionFromAnchorAlign(const nsAString& aAnchor,
                                    const nsAString& aAlign);
@@ -514,7 +508,7 @@ protected:
 
   nsMenuFrame* mCurrentMenu; // The current menu that is active.
 
-  RefPtr<nsXULPopupShownEvent> mPopupShownDispatcher;
+  nsRefPtr<nsXULPopupShownEvent> mPopupShownDispatcher;
 
   // A popup's preferred size may be different than its actual size stored in
   // mRect in the case where the popup was resized because it was too large
@@ -537,7 +531,7 @@ protected:
   // The value of the client offset of our widget the last time we positioned
   // ourselves. We store this so that we can detect when it changes but the
   // position of our widget didn't change.
-  mozilla::LayoutDeviceIntPoint mLastClientOffset;
+  nsIntPoint mLastClientOffset;
 
   nsPopupType mPopupType; // type of popup
   nsPopupState mPopupState; // open state of the popup
@@ -591,8 +585,6 @@ protected:
 
   // How the popup is anchored.
   MenuPopupAnchorType mAnchorType;
-
-  nsRect mOverrideConstraintRect;
 
   static int8_t sDefaultLevelIsTop;
 

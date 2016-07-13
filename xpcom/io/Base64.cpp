@@ -8,7 +8,6 @@
 
 #include "nsIInputStream.h"
 #include "nsString.h"
-#include "nsTArray.h"
 
 #include "plbase64.h"
 
@@ -226,39 +225,6 @@ EncodeInputStream(nsIInputStream* aInputStream,
   return NS_OK;
 }
 
-static const char kBase64URLAlphabet[] =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-// Maps an encoded character to a value in the Base64 URL alphabet, per
-// RFC 4648, Table 2. Invalid input characters map to UINT8_MAX.
-static const uint8_t kBase64URLDecodeTable[] = {
-  255, 255, 255, 255, 255, 255, 255, 255,
-  255, 255, 255, 255, 255, 255, 255, 255,
-  255, 255, 255, 255, 255, 255, 255, 255,
-  255, 255, 255, 255, 255, 255, 255, 255,
-  255, 255, 255, 255, 255, 255, 255, 255,
-  255, 255, 255, 255, 255,
-  62 /* - */,
-  255, 255,
-  52, 53, 54, 55, 56, 57, 58, 59, 60, 61, /* 0 - 9 */
-  255, 255, 255, 255, 255, 255, 255,
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-  16, 17, 18, 19, 20, 21, 22, 23, 24, 25, /* A - Z */
-  255, 255, 255, 255,
-  63 /* _ */,
-  255,
-  26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
-  42, 43, 44, 45, 46, 47, 48, 49, 50, 51, /* a - z */
-  255, 255, 255, 255,
-};
-
-bool
-Base64URLCharToValue(char aChar, uint8_t* aValue) {
-  uint8_t index = static_cast<uint8_t>(aChar);
-  *aValue = kBase64URLDecodeTable[index & 0x7f];
-  return (*aValue != 255) && !(index & ~0x7f);
-}
-
 } // namespace
 
 namespace mozilla {
@@ -282,315 +248,111 @@ Base64EncodeInputStream(nsIInputStream* aInputStream,
 }
 
 nsresult
-Base64Encode(const char* aBinary, uint32_t aBinaryLen, char** aBase64)
+Base64Encode(const nsACString& aBinaryData, nsACString& aString)
 {
   // Check for overflow.
-  if (aBinaryLen > (UINT32_MAX / 4) * 3) {
+  if (aBinaryData.Length() > (UINT32_MAX / 4) * 3) {
     return NS_ERROR_FAILURE;
   }
 
-  // Don't ask PR_Base64Encode to encode empty strings.
-  if (aBinaryLen == 0) {
-    char* base64 = (char*)moz_xmalloc(1);
-    base64[0] = '\0';
-    *aBase64 = base64;
+  // Don't ask PR_Base64Encode to encode empty strings
+  if (aBinaryData.IsEmpty()) {
+    aString.Truncate();
     return NS_OK;
   }
 
-  uint32_t base64Len = ((aBinaryLen + 2) / 3) * 4;
+  uint32_t stringLen = ((aBinaryData.Length() + 2) / 3) * 4;
+
+  char* buffer;
 
   // Add one byte for null termination.
-  char* base64 = (char*)malloc(base64Len + 1);
-  if (!base64) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  if (aString.SetCapacity(stringLen + 1, fallible) &&
+      (buffer = aString.BeginWriting()) &&
+      PL_Base64Encode(aBinaryData.BeginReading(), aBinaryData.Length(), buffer)) {
+    // PL_Base64Encode doesn't null terminate the buffer for us when we pass
+    // the buffer in. Do that manually.
+    buffer[stringLen] = '\0';
 
-  if (!PL_Base64Encode(aBinary, aBinaryLen, base64)) {
-    free(base64);
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  // PL_Base64Encode doesn't null terminate the buffer for us when we pass
-  // the buffer in. Do that manually.
-  base64[base64Len] = '\0';
-
-  *aBase64 = base64;
-  return NS_OK;
-}
-
-nsresult
-Base64Encode(const nsACString& aBinary, nsACString& aBase64)
-{
-  // Check for overflow.
-  if (aBinary.Length() > (UINT32_MAX / 4) * 3) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Don't ask PR_Base64Encode to encode empty strings.
-  if (aBinary.IsEmpty()) {
-    aBase64.Truncate();
+    aString.SetLength(stringLen);
     return NS_OK;
   }
 
-  uint32_t base64Len = ((aBinary.Length() + 2) / 3) * 4;
-
-  // Add one byte for null termination.
-  if (!aBase64.SetCapacity(base64Len + 1, fallible)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  char* base64 = aBase64.BeginWriting();
-  if (!base64 ||
-      !PL_Base64Encode(aBinary.BeginReading(), aBinary.Length(), base64)) {
-    aBase64.Truncate();
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  // PL_Base64Encode doesn't null terminate the buffer for us when we pass
-  // the buffer in. Do that manually.
-  base64[base64Len] = '\0';
-
-  aBase64.SetLength(base64Len);
-  return NS_OK;
-}
-
-nsresult
-Base64Encode(const nsAString& aBinary, nsAString& aBase64)
-{
-  NS_LossyConvertUTF16toASCII binary(aBinary);
-  nsAutoCString base64;
-
-  nsresult rv = Base64Encode(binary, base64);
-  if (NS_SUCCEEDED(rv)) {
-    CopyASCIItoUTF16(base64, aBase64);
-  } else {
-    aBase64.Truncate();
-  }
-
-  return rv;
-}
-
-nsresult
-Base64Decode(const nsACString& aBase64, nsACString& aBinary)
-{
-  // Check for overflow.
-  if (aBase64.Length() > UINT32_MAX / 3) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Don't ask PR_Base64Decode to decode the empty string
-  if (aBase64.IsEmpty()) {
-    aBinary.Truncate();
-    return NS_OK;
-  }
-
-  uint32_t binaryLen = ((aBase64.Length() * 3) / 4);
-
-  char* binary;
-
-  // Add one byte for null termination.
-  if (aBinary.SetCapacity(binaryLen + 1, fallible) &&
-      (binary = aBinary.BeginWriting()) &&
-      PL_Base64Decode(aBase64.BeginReading(), aBase64.Length(), binary)) {
-    // PL_Base64Decode doesn't null terminate the buffer for us when we pass
-    // the buffer in. Do that manually, taking into account the number of '='
-    // characters we were passed.
-    if (!aBase64.IsEmpty() && aBase64[aBase64.Length() - 1] == '=') {
-      if (aBase64.Length() > 1 && aBase64[aBase64.Length() - 2] == '=') {
-        binaryLen -= 2;
-      } else {
-        binaryLen -= 1;
-      }
-    }
-    binary[binaryLen] = '\0';
-
-    aBinary.SetLength(binaryLen);
-    return NS_OK;
-  }
-
-  aBinary.Truncate();
+  aString.Truncate();
   return NS_ERROR_INVALID_ARG;
 }
 
 nsresult
-Base64Decode(const nsAString& aBase64, nsAString& aBinary)
+Base64Encode(const nsAString& aString, nsAString& aBinaryData)
 {
-  NS_LossyConvertUTF16toASCII base64(aBase64);
-  nsAutoCString binary;
+  NS_LossyConvertUTF16toASCII string(aString);
+  nsAutoCString binaryData;
 
-  nsresult rv = Base64Decode(base64, binary);
+  nsresult rv = Base64Encode(string, binaryData);
   if (NS_SUCCEEDED(rv)) {
-    CopyASCIItoUTF16(binary, aBinary);
+    CopyASCIItoUTF16(binaryData, aBinaryData);
   } else {
-    aBinary.Truncate();
+    aBinaryData.Truncate();
   }
 
   return rv;
 }
 
 nsresult
-Base64URLDecode(const nsACString& aBase64,
-                Base64URLDecodePaddingPolicy aPaddingPolicy,
-                FallibleTArray<uint8_t>& aBinary)
+Base64Decode(const nsACString& aString, nsACString& aBinaryData)
 {
-  // Don't decode empty strings.
-  if (aBase64.IsEmpty()) {
-    aBinary.Clear();
+  // Check for overflow.
+  if (aString.Length() > UINT32_MAX / 3) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Don't ask PR_Base64Decode to decode the empty string
+  if (aString.IsEmpty()) {
+    aBinaryData.Truncate();
     return NS_OK;
   }
 
-  // Check for overflow.
-  uint32_t base64Len = aBase64.Length();
-  if (base64Len > UINT32_MAX / 3) {
-    return NS_ERROR_FAILURE;
-  }
-  const char* base64 = aBase64.BeginReading();
+  uint32_t binaryDataLen = ((aString.Length() * 3) / 4);
 
-  // The decoded length may be 1-2 bytes over, depending on the final quantum.
-  uint32_t binaryLen = (base64Len * 3) / 4;
+  char* buffer;
 
-  // Determine whether to check for and ignore trailing padding.
-  bool maybePadded = false;
-  switch (aPaddingPolicy) {
-    case Base64URLDecodePaddingPolicy::Require:
-      if (base64Len % 4) {
-        // Padded input length must be a multiple of 4.
-        return NS_ERROR_INVALID_ARG;
+  // Add one byte for null termination.
+  if (aBinaryData.SetCapacity(binaryDataLen + 1, fallible) &&
+      (buffer = aBinaryData.BeginWriting()) &&
+      PL_Base64Decode(aString.BeginReading(), aString.Length(), buffer)) {
+    // PL_Base64Decode doesn't null terminate the buffer for us when we pass
+    // the buffer in. Do that manually, taking into account the number of '='
+    // characters we were passed.
+    if (!aString.IsEmpty() && aString[aString.Length() - 1] == '=') {
+      if (aString.Length() > 1 && aString[aString.Length() - 2] == '=') {
+        binaryDataLen -= 2;
+      } else {
+        binaryDataLen -= 1;
       }
-      maybePadded = true;
-      break;
-
-    case Base64URLDecodePaddingPolicy::Ignore:
-      // Check for padding only if the length is a multiple of 4.
-      maybePadded = !(base64Len % 4);
-      break;
-
-    // If we're expecting unpadded input, no need for additional checks.
-    // `=` isn't in the decode table, so padded strings will fail to decode.
-    default:
-      MOZ_FALLTHROUGH_ASSERT("Invalid decode padding policy");
-    case Base64URLDecodePaddingPolicy::Reject:
-      break;
-  }
-  if (maybePadded && base64[base64Len - 1] == '=') {
-    if (base64[base64Len - 2] == '=') {
-      base64Len -= 2;
-    } else {
-      base64Len -= 1;
     }
+    buffer[binaryDataLen] = '\0';
+
+    aBinaryData.SetLength(binaryDataLen);
+    return NS_OK;
   }
 
-  if (NS_WARN_IF(!aBinary.SetCapacity(binaryLen, mozilla::fallible))) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  aBinary.SetLengthAndRetainStorage(binaryLen);
-  uint8_t* binary = aBinary.Elements();
-
-  for (; base64Len >= 4; base64Len -= 4) {
-    uint8_t w, x, y, z;
-    if (!Base64URLCharToValue(*base64++, &w) ||
-        !Base64URLCharToValue(*base64++, &x) ||
-        !Base64URLCharToValue(*base64++, &y) ||
-        !Base64URLCharToValue(*base64++, &z)) {
-      return NS_ERROR_INVALID_ARG;
-    }
-    *binary++ = w << 2 | x >> 4;
-    *binary++ = x << 4 | y >> 2;
-    *binary++ = y << 6 | z;
-  }
-
-  if (base64Len == 3) {
-    uint8_t w, x, y;
-    if (!Base64URLCharToValue(*base64++, &w) ||
-        !Base64URLCharToValue(*base64++, &x) ||
-        !Base64URLCharToValue(*base64++, &y)) {
-      return NS_ERROR_INVALID_ARG;
-    }
-    *binary++ = w << 2 | x >> 4;
-    *binary++ = x << 4 | y >> 2;
-  } else if (base64Len == 2) {
-    uint8_t w, x;
-    if (!Base64URLCharToValue(*base64++, &w) ||
-        !Base64URLCharToValue(*base64++, &x)) {
-      return NS_ERROR_INVALID_ARG;
-    }
-    *binary++ = w << 2 | x >> 4;
-  } else if (base64Len) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  // Set the length to the actual number of decoded bytes.
-  aBinary.TruncateLength(binary - aBinary.Elements());
-  return NS_OK;
+  aBinaryData.Truncate();
+  return NS_ERROR_INVALID_ARG;
 }
 
 nsresult
-Base64URLEncode(uint32_t aBinaryLen, const uint8_t* aBinary,
-                Base64URLEncodePaddingPolicy aPaddingPolicy,
-                nsACString& aBase64)
+Base64Decode(const nsAString& aBinaryData, nsAString& aString)
 {
-  // Don't encode empty strings.
-  if (aBinaryLen == 0) {
-    aBase64.Truncate();
-    return NS_OK;
-  }
+  NS_LossyConvertUTF16toASCII binaryData(aBinaryData);
+  nsAutoCString string;
 
-  // Check for overflow.
-  if (aBinaryLen > (UINT32_MAX / 4) * 3) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Allocate a buffer large enough to hold the encoded string with padding.
-  // Add one byte for null termination.
-  uint32_t base64Len = ((aBinaryLen + 2) / 3) * 4;
-  if (NS_WARN_IF(!aBase64.SetCapacity(base64Len + 1, fallible))) {
-    aBase64.Truncate();
-    return NS_ERROR_FAILURE;
-  }
-
-  char* base64 = aBase64.BeginWriting();
-
-  uint32_t index = 0;
-  for (; index + 3 <= aBinaryLen; index += 3) {
-    *base64++ = kBase64URLAlphabet[aBinary[index] >> 2];
-    *base64++ = kBase64URLAlphabet[((aBinary[index] & 0x3) << 4) |
-                                   (aBinary[index + 1] >> 4)];
-    *base64++ = kBase64URLAlphabet[((aBinary[index + 1] & 0xf) << 2) |
-                                   (aBinary[index + 2] >> 6)];
-    *base64++ = kBase64URLAlphabet[aBinary[index + 2] & 0x3f];
-  }
-
-  uint32_t remaining = aBinaryLen - index;
-  if (remaining == 1) {
-    *base64++ = kBase64URLAlphabet[aBinary[index] >> 2];
-    *base64++ = kBase64URLAlphabet[((aBinary[index] & 0x3) << 4)];
-  } else if (remaining == 2) {
-    *base64++ = kBase64URLAlphabet[aBinary[index] >> 2];
-    *base64++ = kBase64URLAlphabet[((aBinary[index] & 0x3) << 4) |
-                                   (aBinary[index + 1] >> 4)];
-    *base64++ = kBase64URLAlphabet[((aBinary[index + 1] & 0xf) << 2)];
-  }
-
-  uint32_t length = base64 - aBase64.BeginWriting();
-  if (aPaddingPolicy == Base64URLEncodePaddingPolicy::Include) {
-    if (length % 4 == 2) {
-      *base64++ = '=';
-      *base64++ = '=';
-      length += 2;
-    } else if (length % 4 == 3) {
-      *base64++ = '=';
-      length += 1;
-    }
+  nsresult rv = Base64Decode(binaryData, string);
+  if (NS_SUCCEEDED(rv)) {
+    CopyASCIItoUTF16(string, aString);
   } else {
-    MOZ_ASSERT(aPaddingPolicy == Base64URLEncodePaddingPolicy::Omit,
-               "Invalid encode padding policy");
+    aString.Truncate();
   }
 
-  // Null terminate and truncate to the actual number of characters.
-  *base64 = '\0';
-  aBase64.SetLength(length);
-
-  return NS_OK;
+  return rv;
 }
 
 } // namespace mozilla

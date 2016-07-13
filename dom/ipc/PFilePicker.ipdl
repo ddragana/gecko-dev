@@ -12,20 +12,14 @@ using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
 namespace mozilla {
 namespace dom {
 
-struct InputBlobs
+struct InputFiles
 {
   PBlob[] blobs;
 };
 
-struct InputDirectory
+union MaybeInputFiles
 {
-  nsString directoryPath;
-};
-
-union MaybeInputData
-{
-  InputBlobs;
-  InputDirectory;
+  InputFiles;
   void_t;
 };
 
@@ -34,12 +28,12 @@ protocol PFilePicker
   manager PBrowser;
 
 parent:
-    async Open(int16_t selectedType, bool addToRecentDocs, nsString defaultFile,
-               nsString defaultExtension, nsString[] filters, nsString[] filterNames,
-               nsString displayDirectory);
+    Open(int16_t selectedType, bool addToRecentDocs, nsString defaultFile,
+         nsString defaultExtension, nsString[] filters, nsString[] filterNames,
+         nsString displayDirectory);
 
 child:
-    async __delete__(MaybeInputData data, int16_t result);
+    __delete__(MaybeInputFiles files, int16_t result);
 };
 
 } // namespace dom

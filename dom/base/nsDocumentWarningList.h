@@ -10,5 +10,4 @@
  * designed to be used as input to the C preprocessor *only*.
  */
 
-DOCUMENT_WARNING(IgnoringWillChangeOverBudget)
-DOCUMENT_WARNING(PreventDefaultFromPassiveListener)
+DOCUMENT_WARNING(WillChangeBudget)

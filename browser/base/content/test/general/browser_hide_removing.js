@@ -24,16 +24,12 @@ function test() {
   gBrowser.removeTab(testTab, {animate: true});
 
   // Make sure the tab gets removed at the end of the animation by polling
-  (function checkRemoved() {
-    return setTimeout(function() {
-      if (gBrowser.tabs.length != 1) {
-        checkRemoved();
-        return;
-      }
+  (function checkRemoved() setTimeout(function() {
+    if (gBrowser.tabs.length != 1)
+      return checkRemoved();
 
-      is(numVisBeforeHide, 1, "animated remove has in 1 tab left");
-      is(numVisAfterHide, 1, "hiding a removing tab is also has 1 tab");
-      finish();
-    }, 50);
-  })();
+    is(numVisBeforeHide, 1, "animated remove has in 1 tab left");
+    is(numVisAfterHide, 1, "hiding a removing tab is also has 1 tab");
+    finish();
+  }, 50))();
 }

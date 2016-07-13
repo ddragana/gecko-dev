@@ -95,6 +95,7 @@
 #include "nsIServiceManager.h"
 #include "nsIScriptableInputStream.h"
 #include "nsISimpleEnumerator.h"
+#include "nsISimpleUnicharStreamFactory.h"
 #include "nsIStreamBufferAccess.h"
 #include "nsIStringEnumerator.h"
 #include "nsIStorageStream.h"

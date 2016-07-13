@@ -11,8 +11,6 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_UTILITY_INCLUDE_FRAME_DROPPER_H_
 #define WEBRTC_MODULES_VIDEO_CODING_UTILITY_INCLUDE_FRAME_DROPPER_H_
 
-#include <cstddef>
-
 #include "webrtc/base/exp_filter.h"
 #include "webrtc/typedefs.h"
 
@@ -51,7 +49,7 @@ public:
     //                                returned from the encoder.
     //          - deltaFrame        : True if the encoder returned
     //                                a key frame.
-    virtual void Fill(size_t frameSizeBytes, bool deltaFrame);
+    virtual void Fill(uint32_t frameSizeBytes, bool deltaFrame);
 
     virtual void Leak(uint32_t inputFrameRate);
 

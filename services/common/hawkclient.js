@@ -26,8 +26,9 @@
 
 this.EXPORTED_SYMBOLS = ["HawkClient"];
 
-var {interfaces: Ci, utils: Cu} = Components;
+const {interfaces: Ci, utils: Cu} = Components;
 
+Cu.import("resource://services-common/utils.js");
 Cu.import("resource://services-crypto/utils.js");
 Cu.import("resource://services-common/hawkrequest.js");
 Cu.import("resource://services-common/observers.js");
@@ -99,11 +100,6 @@ this.HawkClient = function(host) {
 }
 
 this.HawkClient.prototype = {
-
-  /*
-   * A boolean for feature detection.
-   */
-  willUTF8EncodeRequests: HAWKAuthenticatedRESTRequest.prototype.willUTF8EncodeObjectRequests,
 
   /*
    * Construct an error message for a response.  Private.
@@ -195,16 +191,13 @@ this.HawkClient.prototype = {
    * @param payloadObj
    *        An object that can be encodable as JSON as the payload of the
    *        request
-   * @param extraHeaders
-   *        An object with header/value pairs to send with the request.
    * @return Promise
    *        Returns a promise that resolves to the response of the API call,
    *        or is rejected with an error.  If the server response can be parsed
    *        as JSON and contains an 'error' property, the promise will be
    *        rejected with this JSON-parsed response.
    */
-  request: function(path, method, credentials=null, payloadObj={}, extraHeaders = {},
-                    retryOK=true) {
+  request: function(path, method, credentials=null, payloadObj={}, retryOK=true) {
     method = method.toLowerCase();
 
     let deferred = Promise.defer();
@@ -245,7 +238,7 @@ this.HawkClient.prototype = {
         // Clock offset is adjusted already in the top of this function.
         log.debug("Received 401 for " + path + ": retrying");
         return deferred.resolve(
-            self.request(path, method, credentials, payloadObj, extraHeaders, false));
+            self.request(path, method, credentials, payloadObj, false));
       }
 
       // If the server returned a json error message, use it in the rejection
@@ -278,7 +271,8 @@ this.HawkClient.prototype = {
         // gets the same one.
         _onComplete.call(this, error);
       } catch (ex) {
-        log.error("Unhandled exception processing response", ex);
+        log.error("Unhandled exception processing response:" +
+                  CommonUtils.exceptionStr(ex));
         deferred.reject(ex);
       }
     }
@@ -286,7 +280,6 @@ this.HawkClient.prototype = {
     let extra = {
       now: this.now(),
       localtimeOffsetMsec: this.localtimeOffsetMsec,
-      headers: extraHeaders
     };
 
     let request = this.newHAWKAuthenticatedRESTRequest(uri, credentials, extra);

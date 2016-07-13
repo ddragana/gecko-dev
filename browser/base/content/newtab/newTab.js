@@ -4,8 +4,8 @@
 
 "use strict";
 
-var Cu = Components.utils;
-var Ci = Components.interfaces;
+let Cu = Components.utils;
+let Ci = Components.interfaces;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -18,8 +18,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "Rect",
   "resource://gre/modules/Geometry.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
+  "resource://gre/modules/UpdateChannel.jsm");
 
-var {
+let {
   links: gLinks,
   allPages: gAllPages,
   linkChecker: gLinkChecker,
@@ -66,6 +68,7 @@ const TILES_PRIVACY_LINK = "https://www.mozilla.org/privacy/";
 #include undo.js
 #include search.js
 #include customize.js
+#include intro.js
 
 // Everything is loaded. Initialize the New Tab Page.
 gPage.init();

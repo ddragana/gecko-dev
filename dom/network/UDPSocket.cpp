@@ -50,7 +50,7 @@ UDPSocket::Constructor(const GlobalObject& aGlobal,
                        const UDPOptions& aOptions,
                        ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> ownerWindow = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> ownerWindow = do_QueryInterface(aGlobal.GetAsSupports());
   if (!ownerWindow) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -102,7 +102,7 @@ UDPSocket::Constructor(const GlobalObject& aGlobal,
     }
   }
 
-  RefPtr<UDPSocket> socket = new UDPSocket(ownerWindow, remoteAddress, remotePort);
+  nsRefPtr<UDPSocket> socket = new UDPSocket(ownerWindow, remoteAddress, remotePort);
   aRv = socket->Init(localAddress, localPort, addressReuse, loopback);
 
   if (NS_WARN_IF(aRv.Failed())) {
@@ -112,14 +112,12 @@ UDPSocket::Constructor(const GlobalObject& aGlobal,
   return socket.forget();
 }
 
-UDPSocket::UDPSocket(nsPIDOMWindowInner* aOwner,
+UDPSocket::UDPSocket(nsPIDOMWindow* aOwner,
                      const nsCString& aRemoteAddress,
                      const Nullable<uint16_t>& aRemotePort)
   : DOMEventTargetHelper(aOwner)
   , mRemoteAddress(aRemoteAddress)
   , mRemotePort(aRemotePort)
-  , mAddressReuse(false)
-  , mLoopback(false)
   , mReadyState(SocketReadyState::Opening)
 {
   MOZ_ASSERT(aOwner);
@@ -154,7 +152,7 @@ UDPSocket::Close()
 {
   MOZ_ASSERT(mClosed);
 
-  RefPtr<Promise> promise = mClosed;
+  nsRefPtr<Promise> promise = mClosed;
 
   if (mReadyState == SocketReadyState::Closed) {
     return promise.forget();
@@ -503,9 +501,7 @@ UDPSocket::InitRemote(const nsAString& aLocalAddress,
                   NS_ConvertUTF16toUTF8(aLocalAddress),
                   aLocalPort,
                   mAddressReuse,
-                  mLoopback,
-                  0,
-                  0);
+                  mLoopback);
 
   if (NS_FAILED(rv)) {
     return rv;
@@ -542,7 +538,7 @@ UDPSocket::Init(const nsString& aLocalAddress,
     return rv.StealNSResult();
   }
 
-  class OpenSocketRunnable final : public Runnable
+  class OpenSocketRunnable final : public nsRunnable
   {
   public:
     explicit OpenSocketRunnable(UDPSocket* aSocket) : mSocket(aSocket)
@@ -576,7 +572,7 @@ UDPSocket::Init(const nsString& aLocalAddress,
     }
 
   private:
-    RefPtr<UDPSocket> mSocket;
+    nsRefPtr<UDPSocket> mSocket;
   };
 
   nsCOMPtr<nsIRunnable> runnable = new OpenSocketRunnable(this);
@@ -632,7 +628,7 @@ UDPSocket::DispatchReceivedData(const nsACString& aRemoteAddress,
   init.mRemotePort = aRemotePort;
   init.mData = jsData;
 
-  RefPtr<UDPMessageEvent> udpEvent =
+  nsRefPtr<UDPMessageEvent> udpEvent =
     UDPMessageEvent::Constructor(this, NS_LITERAL_STRING("message"), init);
 
   if (NS_WARN_IF(!udpEvent)) {
@@ -641,7 +637,7 @@ UDPSocket::DispatchReceivedData(const nsACString& aRemoteAddress,
 
   udpEvent->SetTrusted(true);
 
-  RefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(this, udpEvent);
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(this, udpEvent);
 
   return asyncDispatcher->PostDOMEvent();
 }
@@ -737,15 +733,6 @@ UDPSocket::CallListenerOpened()
   }
 
   mOpened->MaybeResolve(JS::UndefinedHandleValue);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UDPSocket::CallListenerConnected()
-{
-  // This shouldn't be called here.
-  MOZ_CRASH();
 
   return NS_OK;
 }

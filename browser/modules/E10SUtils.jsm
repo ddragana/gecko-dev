@@ -52,30 +52,11 @@ this.E10SUtils = {
     }
 
     if (aURL.startsWith("chrome:")) {
-      let url;
-      try {
-        // This can fail for invalid Chrome URIs, in which case we will end up
-        // not loading anything anyway.
-        url = Services.io.newURI(aURL, null, null);
-      } catch (ex) {
-        canLoadRemote = true;
-        mustLoadRemote = false;
-      }
-      if (url) {
-        let chromeReg = Cc["@mozilla.org/chrome/chrome-registry;1"].
-                        getService(Ci.nsIXULChromeRegistry);
-        canLoadRemote = chromeReg.canLoadURLRemotely(url);
-        mustLoadRemote = chromeReg.mustLoadURLRemotely(url);
-      }
-    }
-
-    if (aURL.startsWith("moz-extension:")) {
-      canLoadRemote = false;
-      mustLoadRemote = false;
-    }
-
-    if (aURL.startsWith("view-source:")) {
-      return this.canLoadURIInProcess(aURL.substr("view-source:".length), aProcess);
+      let url = Services.io.newURI(aURL, null, null);
+      let chromeReg = Cc["@mozilla.org/chrome/chrome-registry;1"].
+                      getService(Ci.nsIXULChromeRegistry);
+      canLoadRemote = chromeReg.canLoadURLRemotely(url);
+      mustLoadRemote = chromeReg.mustLoadURLRemotely(url);
     }
 
     if (mustLoadRemote)
@@ -111,17 +92,5 @@ this.E10SUtils = {
       historyIndex: sessionHistory.requestedIndex,
     });
     return false;
-  },
-
-  wrapHandlingUserInput: function(aWindow, aIsHandling, aCallback) {
-    var handlingUserInput;
-    try {
-      handlingUserInput = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils)
-                                 .setHandlingUserInput(aIsHandling);
-      aCallback();
-    } finally {
-      handlingUserInput.destruct();
-    }
   },
 };

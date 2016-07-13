@@ -45,8 +45,8 @@ HwcUtils::PrepareLayerRects(nsIntRect aVisible,
                             hwc_rect_t* aSourceCrop, hwc_rect_t* aVisibleRegionScreen) {
 
     gfxMatrix aTransform = gfx::ThebesMatrix(aLayerTransform);
-    gfxRect visibleRect(ThebesRect(aVisible));
-    gfxRect clip(ThebesRect(aClip));
+    gfxRect visibleRect(aVisible);
+    gfxRect clip(aClip);
     gfxRect visibleRectScreen = aTransform.TransformBounds(visibleRect);
     // |clip| is guaranteed to be integer
     visibleRectScreen.IntersectRect(visibleRectScreen, clip);
@@ -60,7 +60,7 @@ HwcUtils::PrepareLayerRects(nsIntRect aVisible,
     gfxRect crop = inverse.TransformBounds(visibleRectScreen);
 
     //clip to buffer size
-    crop.IntersectRect(crop, ThebesRect(aBufferRect));
+    crop.IntersectRect(crop, aBufferRect);
     crop.Round();
 
     if (crop.IsEmpty()) {
@@ -103,23 +103,22 @@ HwcUtils::PrepareVisibleRegion(const nsIntRegion& aVisible,
 
     gfxMatrix layerTransform = gfx::ThebesMatrix(aLayerTransform);
     gfxMatrix layerBufferTransform = gfx::ThebesMatrix(aLayerBufferTransform);
-    gfxRect bufferRect =
-        layerBufferTransform.TransformBounds(ThebesRect(aBufferRect));
+    gfxRect bufferRect = layerBufferTransform.TransformBounds(aBufferRect);
     gfxMatrix inverse = gfx::ThebesMatrix(aLayerBufferTransform);
     inverse.Invert();
+    nsIntRegionRectIterator rect(aVisible);
     aIsVisible = false;
+    while (const nsIntRect* visibleRect = rect.Next()) {
+        hwc_rect_t visibleRectScreen;
+        gfxRect screenRect;
 
-    for (auto iter = aVisible.RectIter(); !iter.Done(); iter.Next()) {
-        gfxRect screenRect =
-          layerTransform.TransformBounds(ThebesRect(iter.Get()));
+        screenRect = layerTransform.TransformBounds(gfxRect(*visibleRect));
         screenRect.IntersectRect(screenRect, bufferRect);
-        screenRect.IntersectRect(screenRect, ThebesRect(aClip));
+        screenRect.IntersectRect(screenRect, aClip);
         screenRect.Round();
         if (screenRect.IsEmpty()) {
             continue;
         }
-
-        hwc_rect_t visibleRectScreen;
         visibleRectScreen.left = screenRect.x;
         visibleRectScreen.top  = screenRect.y;
         visibleRectScreen.right  = screenRect.XMost();
@@ -157,7 +156,7 @@ HwcUtils::CalculateClipRect(const gfx::Matrix& transform,
 
     nsIntRect clip = *aLayerClip;
 
-    gfxRect r = ThebesRect(clip);
+    gfxRect r(clip);
     gfxRect trClip = aTransform.TransformBounds(r);
     trClip.Round();
     gfxUtils::GfxRectToIntRect(trClip, &clip);

@@ -632,8 +632,7 @@ inDOMView::NodeWillBeDestroyed(const nsINode* aNode)
 void
 inDOMView::AttributeChanged(nsIDocument* aDocument, dom::Element* aElement,
                             int32_t aNameSpaceID, nsIAtom* aAttribute,
-                            int32_t aModType,
-                            const nsAttrValue* aOldValue)
+                            int32_t aModType)
 {
   if (!mTree) {
     return;
@@ -1262,7 +1261,7 @@ inDOMView::AppendKidsToArray(nsIDOMNodeList* aKids,
         }
       }
 
-      aArray.AppendElement(kid.forget());
+      aArray.AppendObject(kid);
     }
   }
 
@@ -1278,7 +1277,7 @@ inDOMView::AppendAttrsToArray(nsIDOMMozNamedAttrMap* aAttributes,
   nsCOMPtr<nsIDOMAttr> attribute;
   for (uint32_t i = 0; i < l; ++i) {
     aAttributes->Item(i, getter_AddRefs(attribute));
-    aArray.AppendElement(attribute.forget());
+    aArray.AppendObject(attribute);
   }
   return NS_OK;
 }

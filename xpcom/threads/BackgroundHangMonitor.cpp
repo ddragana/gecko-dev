@@ -29,21 +29,7 @@
 #include <algorithm>
 
 // Activate BHR only for one every BHR_BETA_MOD users.
-// This is now 100% of Beta population for the Beta 45/46 e10s A/B trials
-// It can be scaled back again in the future
-#define BHR_BETA_MOD 1;
-
-// Maximum depth of the call stack in the reported thread hangs. This value represents
-// the 99.9th percentile of the thread hangs stack depths reported by Telemetry.
-static const size_t kMaxThreadHangStackDepth = 30;
-
-// An utility comparator function used by std::unique to collapse "(* script)" entries in
-// a vector representing a call stack.
-bool StackScriptEntriesCollapser(const char* aStackEntry, const char *aAnotherStackEntry)
-{
-  return !strcmp(aStackEntry, aAnotherStackEntry) &&
-         (!strcmp(aStackEntry, "(chrome script)") || !strcmp(aStackEntry, "(content script)"));
-}
+#define BHR_BETA_MOD 100;
 
 namespace mozilla {
 
@@ -138,8 +124,7 @@ BackgroundHangManager::Observe(nsISupports* aSubject, const char* aTopic, const 
 class BackgroundHangThread : public LinkedListElement<BackgroundHangThread>
 {
 private:
-  static MOZ_THREAD_LOCAL(BackgroundHangThread*) sTlsKey;
-  static bool sTlsKeyInitialized;
+  static ThreadLocal<BackgroundHangThread*> sTlsKey;
 
   BackgroundHangThread(const BackgroundHangThread&);
   BackgroundHangThread& operator=(const BackgroundHangThread&);
@@ -207,8 +192,8 @@ StaticRefPtr<BackgroundHangManager> BackgroundHangManager::sInstance;
 bool BackgroundHangManager::sProhibited = false;
 bool BackgroundHangManager::sDisabled = false;
 
-MOZ_THREAD_LOCAL(BackgroundHangThread*) BackgroundHangThread::sTlsKey;
-bool BackgroundHangThread::sTlsKeyInitialized;
+ThreadLocal<BackgroundHangThread*> BackgroundHangThread::sTlsKey;
+
 
 BackgroundHangManager::BackgroundHangManager()
   : mShutdown(false)
@@ -340,11 +325,9 @@ BackgroundHangManager::RunMonitorThread()
       }
       recheckTimeout = std::min(recheckTimeout, nextRecheck - hangTime);
 
-      if (currentThread->mTimeout != PR_INTERVAL_NO_TIMEOUT) {
-        /* We wait for a quarter of the shortest timeout
-           value to give mIntervalNow enough granularity. */
-        waitTime = std::min(waitTime, currentThread->mTimeout / 4);
-      }
+      /* We wait for a quarter of the shortest timeout
+         value to give mIntervalNow enough granularity. */
+      waitTime = std::min(waitTime, currentThread->mTimeout / 4);
     }
   }
 
@@ -373,7 +356,7 @@ BackgroundHangThread::BackgroundHangThread(const char* aName,
   , mWaiting(true)
   , mStats(aName)
 {
-  if (sTlsKeyInitialized) {
+  if (sTlsKey.initialized()) {
     sTlsKey.set(this);
   }
   // Lock here because LinkedList is not thread-safe
@@ -394,7 +377,7 @@ BackgroundHangThread::~BackgroundHangThread()
   autoLock.Notify();
 
   // We no longer have a thread
-  if (sTlsKeyInitialized) {
+  if (sTlsKey.initialized()) {
     sTlsKey.set(nullptr);
   }
 
@@ -415,20 +398,6 @@ BackgroundHangThread::ReportHang(PRIntervalTime aHangTime)
     }
   }
 
-  // Collapse duplicated "(chrome script)" and "(content script)" entries in the stack.
-  auto it = std::unique(mHangStack.begin(), mHangStack.end(), StackScriptEntriesCollapser);
-  mHangStack.erase(it, mHangStack.end());
-
-  // Limit the depth of the reported stack if greater than our limit. Only keep its
-  // last entries, since the most recent frames are at the end of the vector.
-  if (mHangStack.length() > kMaxThreadHangStackDepth) {
-    const int elementsToRemove = mHangStack.length() - kMaxThreadHangStackDepth;
-    // Replace the oldest frame with a known label so that we can tell this stack
-    // was limited.
-    mHangStack[0] = "(reduced stack)";
-    mHangStack.erase(mHangStack.begin() + 1, mHangStack.begin() + elementsToRemove);
-  }
-
   Telemetry::HangHistogram newHistogram(Move(mHangStack));
   for (Telemetry::HangHistogram* oldHistogram = mStats.mHangs.begin();
        oldHistogram != mStats.mHangs.end(); oldHistogram++) {
@@ -440,9 +409,7 @@ BackgroundHangThread::ReportHang(PRIntervalTime aHangTime)
   }
   // Add new histogram
   newHistogram.Add(aHangTime, Move(mAnnotations));
-  if (!mStats.mHangs.append(Move(newHistogram))) {
-    MOZ_CRASH();
-  }
+  mStats.mHangs.append(Move(newHistogram));
   return mStats.mHangs.back();
 }
 
@@ -490,7 +457,7 @@ BackgroundHangThread::FindThread()
     return nullptr;
   }
 
-  if (sTlsKeyInitialized) {
+  if (sTlsKey.initialized()) {
     // Use TLS if available
     MOZ_ASSERT(!BackgroundHangManager::sProhibited,
                "BackgroundHandleManager is not initialized");

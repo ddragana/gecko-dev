@@ -8,7 +8,6 @@
 #ifndef mozilla_net_FTPChannelChild_h
 #define mozilla_net_FTPChannelChild_h
 
-#include "mozilla/UniquePtr.h"
 #include "mozilla/net/PFTPChannelChild.h"
 #include "mozilla/net/ChannelEventQueue.h"
 #include "nsBaseChannel.h"
@@ -86,9 +85,7 @@ protected:
                            const nsCString& data,
                            const uint64_t& offset,
                            const uint32_t& count) override;
-  bool RecvOnStopRequest(const nsresult& channelStatus,
-                         const nsCString &aErrorMsg,
-                         const bool &aUseUTF8) override;
+  bool RecvOnStopRequest(const nsresult& channelStatus) override;
   bool RecvFailedAsyncOpen(const nsresult& statusCode) override;
   bool RecvFlushedForDiversion() override;
   bool RecvDivertMessages() override;
@@ -104,21 +101,13 @@ protected:
                          const nsCString& data,
                          const uint64_t& offset,
                          const uint32_t& count);
-  void MaybeDivertOnData(const nsCString& data,
-                         const uint64_t& offset,
-                         const uint32_t& count);
-  void MaybeDivertOnStop(const nsresult& statusCode);
-  void DoOnStopRequest(const nsresult& statusCode,
-                       const nsCString &aErrorMsg,
-                       bool aUseUTF8);
+  void DoOnStopRequest(const nsresult& statusCode);
   void DoFailedAsyncOpen(const nsresult& statusCode);
   void DoDeleteSelf();
 
   friend class FTPStartRequestEvent;
   friend class FTPDataAvailableEvent;
-  friend class MaybeDivertOnDataFTPEvent;
   friend class FTPStopRequestEvent;
-  friend class MaybeDivertOnStopFTPEvent;
   friend class FTPFailedAsyncOpenEvent;
   friend class FTPDeleteSelfEvent;
 
@@ -126,14 +115,7 @@ private:
   nsCOMPtr<nsIInputStream> mUploadStream;
 
   bool mIPCOpen;
-  RefPtr<ChannelEventQueue> mEventQ;
-
-  // If nsUnknownDecoder is involved we queue onDataAvailable (and possibly
-  // OnStopRequest) so that we can divert them if needed when the listener's
-  // OnStartRequest is finally called
-  nsTArray<UniquePtr<ChannelEvent>> mUnknownDecoderEventQ;
-  bool mUnknownDecoderInvolved;
-
+  nsRefPtr<ChannelEventQueue> mEventQ;
   bool mCanceled;
   uint32_t mSuspendCount;
   bool mIsPending;

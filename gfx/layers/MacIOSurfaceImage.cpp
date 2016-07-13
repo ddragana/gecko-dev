@@ -3,34 +3,53 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MacIOSurfaceHelpers.h"
 #include "MacIOSurfaceImage.h"
-#include "gfxPlatform.h"
 #include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/layers/MacIOSurfaceTextureClientOGL.h"
-#include "mozilla/UniquePtr.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
-using namespace mozilla::gfx;
 
 TextureClient*
 MacIOSurfaceImage::GetTextureClient(CompositableClient* aClient)
 {
   if (!mTextureClient) {
-    BackendType backend = BackendType::NONE;
-    mTextureClient = TextureClient::CreateWithData(
-      MacIOSurfaceTextureData::Create(mSurface, backend),
-      TextureFlags::DEFAULT,
-      aClient->GetForwarder()
-    );
+    mTextureClient = MacIOSurfaceTextureClientOGL::Create(aClient->GetForwarder(),
+                                                          TextureFlags::DEFAULT,
+                                                          mSurface);
   }
   return mTextureClient;
 }
 
-already_AddRefed<SourceSurface>
+already_AddRefed<gfx::SourceSurface>
 MacIOSurfaceImage::GetAsSourceSurface()
 {
-  return CreateSourceSurfaceFromMacIOSurface(mSurface);
+  mSurface->Lock();
+  size_t bytesPerRow = mSurface->GetBytesPerRow();
+  size_t ioWidth = mSurface->GetDevicePixelWidth();
+  size_t ioHeight = mSurface->GetDevicePixelHeight();
+
+  unsigned char* ioData = (unsigned char*)mSurface->GetBaseAddress();
+
+  RefPtr<gfx::DataSourceSurface> dataSurface
+    = gfx::Factory::CreateDataSourceSurface(gfx::IntSize(ioWidth, ioHeight), gfx::SurfaceFormat::B8G8R8A8);
+  if (NS_WARN_IF(!dataSurface)) {
+    return nullptr;
+  }
+
+  gfx::DataSourceSurface::MappedSurface mappedSurface;
+  if (!dataSurface->Map(gfx::DataSourceSurface::WRITE, &mappedSurface))
+    return nullptr;
+
+  for (size_t i = 0; i < ioHeight; ++i) {
+    memcpy(mappedSurface.mData + i * mappedSurface.mStride,
+           ioData + i * bytesPerRow,
+           ioWidth * 4);
+  }
+
+  dataSurface->Unmap();
+  mSurface->Unlock();
+
+  return dataSurface.forget();
 }

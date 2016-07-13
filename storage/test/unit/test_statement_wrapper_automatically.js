@@ -129,9 +129,12 @@ function insertAndCheckMultipleParams(aVal)
  */
 function printValDesc(aVal)
 {
-  try {
+  try
+  {
     var toSource = aVal.toSource();
-  } catch (ex) {
+  }
+  catch (exc)
+  {
     toSource = "";
   }
   print("Testing value: toString=" + aVal +
@@ -160,7 +163,7 @@ function run_test()
     print("Single parameter");
     insertAndCheckSingleParam(val);
     print("Multiple parameters");
-    insertAndCheckMultipleParams(val);
+    insertAndCheckMultipleParams(val)
   });
 
   cleanup();

@@ -62,7 +62,6 @@ class MessageListener
   public:
     MOZ_DECLARE_WEAKREFERENCE_TYPENAME(MessageListener)
     typedef IPC::Message Message;
-    typedef IPC::MessageInfo MessageInfo;
 
     virtual ~MessageListener() { }
 
@@ -77,38 +76,6 @@ class MessageListener
         return false;
     }
 
-    // WARNING: This function is called with the MessageChannel monitor held.
-    virtual void IntentionalCrash() {
-        MOZ_CRASH("Intentional IPDL crash");
-    }
-
-    // The code here is only useful for fuzzing. It should not be used for any
-    // other purpose.
-#ifdef DEBUG
-    // Returns true if we should simulate a timeout.
-    // WARNING: This is a testing-only function that is called with the
-    // MessageChannel monitor held. Don't do anything fancy here or we could
-    // deadlock.
-    virtual bool ArtificialTimeout() {
-        return false;
-    }
-
-    // Returns true if we want to cause the worker thread to sleep with the
-    // monitor unlocked.
-    virtual bool NeedArtificialSleep() {
-        return false;
-    }
-
-    // This function should be implemented to sleep for some amount of time on
-    // the worker thread. Will only be called if NeedArtificialSleep() returns
-    // true.
-    virtual void ArtificialSleep() {}
-#else
-    bool ArtificialTimeout() { return false; }
-    bool NeedArtificialSleep() { return false; }
-    void ArtificialSleep() {}
-#endif
-
     virtual void OnEnteredCxxStack() {
         NS_RUNTIMEABORT("default impl shouldn't be invoked");
     }
@@ -121,17 +88,15 @@ class MessageListener
     virtual void OnExitedCall() {
         NS_RUNTIMEABORT("default impl shouldn't be invoked");
     }
-    virtual RacyInterruptPolicy MediateInterruptRace(const MessageInfo& parent,
-                                                     const MessageInfo& child)
+    /* This callback is called when a sync message is sent that begins a new IPC transaction
+       (i.e., when it is not part of an existing sequence of nested messages). */
+    virtual void OnBeginSyncTransaction() {
+    }
+    virtual RacyInterruptPolicy MediateInterruptRace(const Message& parent,
+                                                     const Message& child)
     {
         return RIPChildWins;
     }
-
-    /**
-     * Return true if windows messages can be handled while waiting for a reply
-     * to a sync IPDL message.
-     */
-    virtual bool HandleWindowsMessages(const Message& aMsg) const { return true; }
 
     virtual void OnEnteredSyncSend() {
     }
@@ -162,12 +127,6 @@ class MessageLink
 
     virtual bool Unsound_IsClosed() const = 0;
     virtual uint32_t Unsound_NumQueuedMessages() const = 0;
-
-#ifdef MOZ_NUWA_PROCESS
-    // To be overridden by ProcessLink.
-    virtual void Block() {}
-    virtual void Unblock() {}
-#endif
 
   protected:
     MessageChannel *mChan;
@@ -205,7 +164,7 @@ class ProcessLink
     // These methods acquire the monitor and forward to the
     // similarly named methods in AsyncChannel below
     // (OnMessageReceivedFromLink(), etc)
-    virtual void OnMessageReceived(Message&& msg) override;
+    virtual void OnMessageReceived(const Message& msg) override;
     virtual void OnChannelConnected(int32_t peer_pid) override;
     virtual void OnChannelError() override;
 
@@ -216,22 +175,12 @@ class ProcessLink
     virtual bool Unsound_IsClosed() const override;
     virtual uint32_t Unsound_NumQueuedMessages() const override;
 
-#ifdef MOZ_NUWA_PROCESS
-    void Block() override {
-        mIsBlocked = true;
-    }
-    void Unblock() override {
-        mIsBlocked = false;
-    }
-#endif
-
   protected:
     Transport* mTransport;
     MessageLoop* mIOLoop;       // thread where IO happens
     Transport::Listener* mExistingListener; // channel's previous listener
 #ifdef MOZ_NUWA_PROCESS
     bool mIsToNuwaProcess;
-    bool mIsBlocked;
 #endif
 };
 

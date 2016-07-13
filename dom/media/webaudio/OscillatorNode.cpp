@@ -8,7 +8,6 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "AudioDestinationNode.h"
-#include "nsContentUtils.h"
 #include "WebAudioUtils.h"
 #include "blink/PeriodicWave.h"
 
@@ -38,11 +37,8 @@ public:
     , mDetune(0.f)
     , mType(OscillatorType::Sine)
     , mPhase(0.)
-    , mFinalFrequency(0.)
-    , mPhaseIncrement(0.)
     , mRecomputeParameters(true)
     , mCustomLength(0)
-    , mCustomDisableNormalization(false)
   {
     MOZ_ASSERT(NS_IsMainThread());
     mBasicWaveFormCache = aDestination->Context()->GetBasicWaveFormCache();
@@ -57,47 +53,42 @@ public:
     FREQUENCY,
     DETUNE,
     TYPE,
-    PERIODICWAVE_LENGTH,
-    DISABLE_NORMALIZATION,
+    PERIODICWAVE,
     START,
     STOP,
   };
-  void RecvTimelineEvent(uint32_t aIndex,
-                         AudioTimelineEvent& aEvent) override
+  void SetTimelineParameter(uint32_t aIndex,
+                            const AudioParamTimeline& aValue,
+                            TrackRate aSampleRate) override
   {
     mRecomputeParameters = true;
-
-    MOZ_ASSERT(mDestination);
-
-    WebAudioUtils::ConvertAudioTimelineEventToTicks(aEvent,
-                                                    mDestination);
-
     switch (aIndex) {
     case FREQUENCY:
-      mFrequency.InsertEvent<int64_t>(aEvent);
+      MOZ_ASSERT(mSource && mDestination);
+      mFrequency = aValue;
+      WebAudioUtils::ConvertAudioParamToTicks(mFrequency, mSource, mDestination);
       break;
     case DETUNE:
-      mDetune.InsertEvent<int64_t>(aEvent);
+      MOZ_ASSERT(mSource && mDestination);
+      mDetune = aValue;
+      WebAudioUtils::ConvertAudioParamToTicks(mDetune, mSource, mDestination);
       break;
     default:
       NS_ERROR("Bad OscillatorNodeEngine TimelineParameter");
     }
   }
 
-  void SetStreamTimeParameter(uint32_t aIndex, StreamTime aParam) override
+  virtual void SetStreamTimeParameter(uint32_t aIndex, StreamTime aParam) override
   {
     switch (aIndex) {
-    case START:
-      mStart = aParam;
-      mSource->SetActive();
-      break;
+    case START: mStart = aParam; break;
     case STOP: mStop = aParam; break;
     default:
       NS_ERROR("Bad OscillatorNodeEngine StreamTimeParameter");
     }
   }
 
-  void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override
+  virtual void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override
   {
     switch (aIndex) {
       case TYPE:
@@ -106,7 +97,6 @@ public:
         if (mType == OscillatorType::Sine) {
           // Forget any previous custom data.
           mCustomLength = 0;
-          mCustomDisableNormalization = false;
           mCustom = nullptr;
           mPeriodicWave = nullptr;
           mRecomputeParameters = true;
@@ -127,13 +117,9 @@ public:
         }
         // End type switch.
         break;
-      case PERIODICWAVE_LENGTH:
+      case PERIODICWAVE:
         MOZ_ASSERT(aParam >= 0, "negative custom array length");
         mCustomLength = static_cast<uint32_t>(aParam);
-        break;
-      case DISABLE_NORMALIZATION:
-        MOZ_ASSERT(aParam >= 0, "negative custom array length");
-        mCustomDisableNormalization = static_cast<uint32_t>(aParam);
         break;
       default:
         NS_ERROR("Bad OscillatorNodeEngine Int32Parameter.");
@@ -141,17 +127,14 @@ public:
     // End index switch.
   }
 
-  void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aBuffer) override
+  virtual void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aBuffer) override
   {
     MOZ_ASSERT(mCustomLength, "Custom buffer sent before length");
     mCustom = aBuffer;
     MOZ_ASSERT(mCustom->GetChannels() == 2,
                "PeriodicWave should have sent two channels");
     mPeriodicWave = WebCore::PeriodicWave::create(mSource->SampleRate(),
-                                                  mCustom->GetData(0),
-                                                  mCustom->GetData(1),
-                                                  mCustomLength,
-                                                  mCustomDisableNormalization);
+    mCustom->GetData(0), mCustom->GetData(1), mCustomLength);
   }
 
   void IncrementPhase()
@@ -165,16 +148,14 @@ public:
     }
   }
 
-  // Returns true if the final frequency (and thus the phase increment) changed,
-  // false otherwise. This allow some optimizations at callsite.
-  bool UpdateParametersIfNeeded(StreamTime ticks, size_t count)
+  void UpdateParametersIfNeeded(StreamTime ticks, size_t count)
   {
     double frequency, detune;
 
     // Shortcut if frequency-related AudioParam are not automated, and we
     // already have computed the frequency information and related parameters.
     if (!ParametersMayNeedUpdate()) {
-      return false;
+      return;
     }
 
     bool simpleFrequency = mFrequency.HasSimpleValue();
@@ -191,17 +172,11 @@ public:
       detune = mDetune.GetValueAtTime(ticks, count);
     }
 
-    float finalFrequency = frequency * pow(2., detune / 1200.);
-    float signalPeriod = mSource->SampleRate() / finalFrequency;
+    mFinalFrequency = frequency * pow(2., detune / 1200.);
+    float signalPeriod = mSource->SampleRate() / mFinalFrequency;
     mRecomputeParameters = false;
 
     mPhaseIncrement = 2 * M_PI / signalPeriod;
-
-    if (finalFrequency != mFinalFrequency) {
-      mFinalFrequency = finalFrequency;
-      return true;
-    }
-    return false;
   }
 
   void FillBounds(float* output, StreamTime ticks,
@@ -229,8 +204,6 @@ public:
   void ComputeSine(float * aOutput, StreamTime ticks, uint32_t aStart, uint32_t aEnd)
   {
     for (uint32_t i = aStart; i < aEnd; ++i) {
-      // We ignore the return value, changing the frequency has no impact on
-      // performances here.
       UpdateParametersIfNeeded(ticks, i);
 
       aOutput[i] = sin(mPhase);
@@ -265,7 +238,7 @@ public:
     // mPhase runs [0,periodicWaveSize) here instead of [0,2*M_PI).
     float basePhaseIncrement = mPeriodicWave->rateScale();
 
-    bool needToFetchWaveData = UpdateParametersIfNeeded(ticks, aStart);
+    UpdateParametersIfNeeded(ticks, aStart);
 
     bool parametersMayNeedUpdate = ParametersMayNeedUpdate();
     mPeriodicWave->waveDataForFundamentalFrequency(mFinalFrequency,
@@ -275,13 +248,11 @@ public:
 
     for (uint32_t i = aStart; i < aEnd; ++i) {
       if (parametersMayNeedUpdate) {
-        if (needToFetchWaveData) {
-          mPeriodicWave->waveDataForFundamentalFrequency(mFinalFrequency,
-                                                         lowerWaveData,
-                                                         higherWaveData,
-                                                         tableInterpolationFactor);
-        }
-        needToFetchWaveData = UpdateParametersIfNeeded(ticks, i);
+        mPeriodicWave->waveDataForFundamentalFrequency(mFinalFrequency,
+                                                       lowerWaveData,
+                                                       higherWaveData,
+                                                       tableInterpolationFactor);
+        UpdateParametersIfNeeded(ticks, i);
       }
       // Bilinear interpolation between adjacent samples in each table.
       float floorPhase = floorf(mPhase);
@@ -306,64 +277,61 @@ public:
     }
   }
 
-  void ComputeSilence(AudioBlock *aOutput)
+  void ComputeSilence(AudioChunk *aOutput)
   {
     aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
   }
 
-  void ProcessBlock(AudioNodeStream* aStream,
-                    GraphTime aFrom,
-                    const AudioBlock& aInput,
-                    AudioBlock* aOutput,
-                    bool* aFinished) override
+  virtual void ProcessBlock(AudioNodeStream* aStream,
+                            const AudioChunk& aInput,
+                            AudioChunk* aOutput,
+                            bool* aFinished) override
   {
     MOZ_ASSERT(mSource == aStream, "Invalid source stream");
 
-    StreamTime ticks = mDestination->GraphTimeToStreamTime(aFrom);
+    StreamTime ticks = aStream->GetCurrentPosition();
     if (mStart == -1) {
       ComputeSilence(aOutput);
       return;
     }
 
-    if (ticks + WEBAUDIO_BLOCK_SIZE <= mStart || ticks >= mStop) {
-      ComputeSilence(aOutput);
-
-    } else {
-      aOutput->AllocateChannels(1);
-      float* output = aOutput->ChannelFloatsForWrite(0);
-
-      uint32_t start, end;
-      FillBounds(output, ticks, start, end);
-
-      // Synthesize the correct waveform.
-      switch(mType) {
-        case OscillatorType::Sine:
-          ComputeSine(output, ticks, start, end);
-          break;
-        case OscillatorType::Square:
-        case OscillatorType::Triangle:
-        case OscillatorType::Sawtooth:
-        case OscillatorType::Custom:
-          ComputeCustom(output, ticks, start, end);
-          break;
-        default:
-          ComputeSilence(aOutput);
-      };
-    }
-
-    if (ticks + WEBAUDIO_BLOCK_SIZE >= mStop) {
+    if (ticks >= mStop) {
       // We've finished playing.
+      ComputeSilence(aOutput);
       *aFinished = true;
+      return;
     }
+    if (ticks + WEBAUDIO_BLOCK_SIZE <= mStart) {
+      // We're not playing yet.
+      ComputeSilence(aOutput);
+      return;
+    }
+
+    AllocateAudioBlock(1, aOutput);
+    float* output = static_cast<float*>(
+        const_cast<void*>(aOutput->mChannelData[0]));
+
+    uint32_t start, end;
+    FillBounds(output, ticks, start, end);
+
+    // Synthesize the correct waveform.
+    switch(mType) {
+      case OscillatorType::Sine:
+        ComputeSine(output, ticks, start, end);
+        break;
+      case OscillatorType::Square:
+      case OscillatorType::Triangle:
+      case OscillatorType::Sawtooth:
+      case OscillatorType::Custom:
+        ComputeCustom(output, ticks, start, end);
+        break;
+      default:
+        ComputeSilence(aOutput);
+    };
+
   }
 
-  bool IsActive() const override
-  {
-    // start() has been called.
-    return mStart != -1;
-  }
-
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
 
@@ -384,7 +352,7 @@ public:
     return amount;
   }
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -400,11 +368,10 @@ public:
   float mFinalFrequency;
   float mPhaseIncrement;
   bool mRecomputeParameters;
-  RefPtr<ThreadSharedFloatArrayBufferList> mCustom;
-  RefPtr<BasicWaveFormCache> mBasicWaveFormCache;
+  nsRefPtr<ThreadSharedFloatArrayBufferList> mCustom;
+  nsRefPtr<BasicWaveFormCache> mBasicWaveFormCache;
   uint32_t mCustomLength;
-  bool mCustomDisableNormalization;
-  RefPtr<WebCore::PeriodicWave> mPeriodicWave;
+  nsRefPtr<WebCore::PeriodicWave> mPeriodicWave;
 };
 
 OscillatorNode::OscillatorNode(AudioContext* aContext)
@@ -413,14 +380,12 @@ OscillatorNode::OscillatorNode(AudioContext* aContext)
               ChannelCountMode::Max,
               ChannelInterpretation::Speakers)
   , mType(OscillatorType::Sine)
-  , mFrequency(new AudioParam(this, OscillatorNodeEngine::FREQUENCY,
-                              440.0f, "frequency"))
-  , mDetune(new AudioParam(this, OscillatorNodeEngine::DETUNE, 0.0f, "detune"))
+  , mFrequency(new AudioParam(this, SendFrequencyToStream, 440.0f, "frequency"))
+  , mDetune(new AudioParam(this, SendDetuneToStream, 0.0f, "detune"))
   , mStartCalled(false)
 {
   OscillatorNodeEngine* engine = new OscillatorNodeEngine(this, aContext->Destination());
-  mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NEED_MAIN_THREAD_FINISHED);
+  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::SOURCE_STREAM);
   engine->SetSourceStream(mStream);
   mStream->AddMainThreadListener(this);
 }
@@ -465,6 +430,26 @@ OscillatorNode::DestroyMediaStream()
 }
 
 void
+OscillatorNode::SendFrequencyToStream(AudioNode* aNode)
+{
+  OscillatorNode* This = static_cast<OscillatorNode*>(aNode);
+  if (!This->mStream) {
+    return;
+  }
+  SendTimelineParameterToStream(This, OscillatorNodeEngine::FREQUENCY, *This->mFrequency);
+}
+
+void
+OscillatorNode::SendDetuneToStream(AudioNode* aNode)
+{
+  OscillatorNode* This = static_cast<OscillatorNode*>(aNode);
+  if (!This->mStream) {
+    return;
+  }
+  SendTimelineParameterToStream(This, OscillatorNodeEngine::DETUNE, *This->mDetune);
+}
+
+void
 OscillatorNode::SendTypeToStream()
 {
   if (!mStream) {
@@ -483,11 +468,9 @@ void OscillatorNode::SendPeriodicWaveToStream()
                "Sending custom waveform to engine thread with non-custom type");
   MOZ_ASSERT(mStream, "Missing node stream.");
   MOZ_ASSERT(mPeriodicWave, "Send called without PeriodicWave object.");
-  SendInt32ParameterToStream(OscillatorNodeEngine::PERIODICWAVE_LENGTH,
+  SendInt32ParameterToStream(OscillatorNodeEngine::PERIODICWAVE,
                              mPeriodicWave->DataLength());
-  SendInt32ParameterToStream(OscillatorNodeEngine::DISABLE_NORMALIZATION,
-                             mPeriodicWave->DisableNormalization());
-  RefPtr<ThreadSharedFloatArrayBufferList> data =
+  nsRefPtr<ThreadSharedFloatArrayBufferList> data =
     mPeriodicWave->GetThreadSharedBuffer();
   mStream->SetBuffer(data.forget());
 }
@@ -546,7 +529,7 @@ OscillatorNode::NotifyMainThreadStreamFinished()
 {
   MOZ_ASSERT(mStream->IsFinished());
 
-  class EndedEventDispatcher final : public Runnable
+  class EndedEventDispatcher final : public nsRunnable
   {
   public:
     explicit EndedEventDispatcher(OscillatorNode* aNode)
@@ -565,7 +548,7 @@ OscillatorNode::NotifyMainThreadStreamFinished()
       return NS_OK;
     }
   private:
-    RefPtr<OscillatorNode> mNode;
+    nsRefPtr<OscillatorNode> mNode;
   };
 
   NS_DispatchToMainThread(new EndedEventDispatcher(this));

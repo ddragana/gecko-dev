@@ -10,7 +10,7 @@
 namespace mozilla {
 namespace dom {
 
-HDMIInputPort::HDMIInputPort(nsPIDOMWindowInner* aWindow)
+HDMIInputPort::HDMIInputPort(nsPIDOMWindow* aWindow)
   : InputPort(aWindow)
 {
 }
@@ -20,12 +20,12 @@ HDMIInputPort::~HDMIInputPort()
 }
 
 /* static */ already_AddRefed<HDMIInputPort>
-HDMIInputPort::Create(nsPIDOMWindowInner* aWindow,
+HDMIInputPort::Create(nsPIDOMWindow* aWindow,
                       nsIInputPortListener* aListener,
                       nsIInputPortData* aData,
                       ErrorResult& aRv)
 {
-  RefPtr<HDMIInputPort> inputport = new HDMIInputPort(aWindow);
+  nsRefPtr<HDMIInputPort> inputport = new HDMIInputPort(aWindow);
   inputport->Init(aData, aListener, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;

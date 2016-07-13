@@ -7,6 +7,7 @@
 #define mozilla_a11y_HTMLElementAccessibles_h__
 
 #include "BaseAccessibles.h"
+#include "nsAutoPtr.h"
 
 namespace mozilla {
 namespace a11y {
@@ -35,7 +36,6 @@ public:
     LeafAccessible(aContent, aDoc)
   {
     mType = eHTMLBRType;
-    mGenericTypes |= eText;
   }
 
   // Accessible
@@ -62,11 +62,6 @@ public:
   // Accessible
   virtual Relation RelationByType(RelationType aType) override;
 
-  // ActionAccessible
-  virtual uint8_t ActionCount() override;
-  virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
-  virtual bool DoAction(uint8_t aIndex) override;
-
 protected:
   virtual ~HTMLLabelAccessible() {}
   virtual ENameValueFlag NativeName(nsString& aName) override;
@@ -89,29 +84,6 @@ public:
 
 protected:
   virtual ~HTMLOutputAccessible() {}
-};
-
-/**
- * Accessible for the HTML summary element.
- */
-class HTMLSummaryAccessible : public HyperTextAccessibleWrap
-{
-
-public:
-  enum { eAction_Click = 0 };
-
-  HTMLSummaryAccessible(nsIContent* aContent, DocAccessible* aDoc);
-
-  // Accessible
-  virtual uint64_t NativeState() override;
-
-  // ActionAccessible
-  virtual uint8_t ActionCount() override;
-  virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
-  virtual bool DoAction(uint8_t aIndex) override;
-
-  // Widgets
-  virtual bool IsWidget() const override;
 };
 
 } // namespace a11y

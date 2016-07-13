@@ -65,7 +65,7 @@ HTMLLegendElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
   nsChangeHint retval =
       nsGenericHTMLElement::GetAttributeChangeHint(aAttribute, aModType);
   if (aAttribute == nsGkAtoms::align) {
-    retval |= NS_STYLE_HINT_REFLOW;
+    NS_UpdateHint(retval, NS_STYLE_HINT_REFLOW);
   }
   return retval;
 }
@@ -128,14 +128,13 @@ HTMLLegendElement::Focus(ErrorResult& aError)
                          getter_AddRefs(result));
 }
 
-bool
+void
 HTMLLegendElement::PerformAccesskey(bool aKeyCausesActivation,
                                     bool aIsTrustedEvent)
 {
   // just use the same behaviour as the focus method
   ErrorResult rv;
   Focus(rv);
-  return NS_SUCCEEDED(rv.StealNSResult());
 }
 
 already_AddRefed<HTMLFormElement>
@@ -143,7 +142,7 @@ HTMLLegendElement::GetForm()
 {
   Element* form = GetFormElement();
   MOZ_ASSERT_IF(form, form->IsHTMLElement(nsGkAtoms::form));
-  RefPtr<HTMLFormElement> ret = static_cast<HTMLFormElement*>(form);
+  nsRefPtr<HTMLFormElement> ret = static_cast<HTMLFormElement*>(form);
   return ret.forget();
 }
 

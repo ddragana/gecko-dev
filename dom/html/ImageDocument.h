@@ -62,7 +62,7 @@ public:
   }
   bool ImageIsOverflowing() const
   {
-    return mImageIsOverflowingHorizontally || mImageIsOverflowingVertically;
+    return mImageIsOverflowing;
   }
   bool ImageIsResized() const
   {
@@ -101,8 +101,7 @@ protected:
   enum eModeClasses {
     eNone,
     eShrinkToFit,
-    eOverflowingVertical, // And maybe horizontal too.
-    eOverflowingHorizontalOnly
+    eOverflowing
   };
   void SetModeClass(eModeClasses mode);
 
@@ -110,7 +109,7 @@ protected:
   nsresult OnLoadComplete(imgIRequest* aRequest, nsresult aStatus);
   void OnHasTransparency();
 
-  nsCOMPtr<Element>             mImageContent;
+  nsCOMPtr<nsIContent>          mImageContent;
 
   float                         mVisibleWidth;
   float                         mVisibleHeight;
@@ -119,8 +118,7 @@ protected:
 
   bool                          mResizeImageByDefault;
   bool                          mClickResizingEnabled;
-  bool                          mImageIsOverflowingHorizontally;
-  bool                          mImageIsOverflowingVertically;
+  bool                          mImageIsOverflowing;
   // mImageIsResized is true if the image is currently resized
   bool                          mImageIsResized;
   // mShouldResize is true if the image should be resized when it doesn't fit

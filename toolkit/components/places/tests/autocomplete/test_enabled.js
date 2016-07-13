@@ -8,10 +8,10 @@
  */
 
 // Define some shared uris and titles (each page needs its own uri)
-var kURIs = [
+let kURIs = [
   "http://url/0",
 ];
-var kTitles = [
+let kTitles = [
   "title",
 ];
 
@@ -19,13 +19,13 @@ addPageBook(0, 0); // visited page
 
 // Provide for each test: description; search terms; array of gPages indices of
 // pages that should match; optional function to be run before the test
-var gTests = [
+let gTests = [
   ["1: plain search",
    "url", [0]],
   ["2: search disabled",
-   "url", [], () => setSearch(0)],
+   "url", [], function() setSearch(0)],
   ["3: resume normal search",
-   "url", [0], () => setSearch(1)],
+   "url", [0], function() setSearch(1)],
 ];
 
 function setSearch(aSearch) {
@@ -33,7 +33,7 @@ function setSearch(aSearch) {
 }
 
 add_task(function* test_sync_enabled() {
-  // Initialize autocomplete component.
+  // Initialize unified complete.
   Cc["@mozilla.org/autocomplete/search;1?name=history"]
     .getService(Ci.mozIPlacesAutoComplete);
 

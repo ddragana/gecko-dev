@@ -972,17 +972,7 @@ enum Role {
    */
   TEXT = 166,
 
-  /**
-   * The html:details element.
-   */
-  DETAILS = 167,
-
-  /**
-   * The html:summary element.
-   */
-  SUMMARY = 168,
-
-  LAST_ROLE = SUMMARY
+  LAST_ROLE = TEXT
 };
 
 } // namespace role

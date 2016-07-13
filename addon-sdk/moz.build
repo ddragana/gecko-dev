@@ -9,62 +9,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# Makefile.in uses a misc target through test_addons_TARGET.
-HAS_MISC_RULE = True
-
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 JETPACK_PACKAGE_MANIFESTS += ['source/test/jetpack-package.ini']
 JETPACK_ADDON_MANIFESTS += ['source/test/addons/jetpack-addon.ini']
-
-addons = [
-    'addon-manager',
-    'author-email',
-    'child_process',
-    'chrome',
-    'content-permissions',
-    'content-script-messages-latency',
-    'contributors',
-    'curly-id',
-    'developers',
-    'e10s-content',
-    'e10s-l10n',
-    'e10s-remote',
-    'e10s-tabs',
-    'e10s',
-    'l10n-properties',
-    'l10n',
-    'layout-change',
-    'main',
-    'name-in-numbers-plus',
-    'name-in-numbers',
-    'packaging',
-    'packed',
-    'page-mod-debugger-post',
-    'page-mod-debugger-pre',
-    'page-worker',
-    'places',
-    'predefined-id-with-at',
-    'preferences-branch',
-    'private-browsing-supported',
-    'remote',
-    'require',
-    'self',
-    'simple-prefs-l10n',
-    'simple-prefs-regression',
-    'simple-prefs',
-    'standard-id',
-    'tab-close-on-startup',
-    'toolkit-require-reload',
-    'translators',
-    'unsafe-content-script',
-]
-
-addons = ['source/test/addons/%s.xpi' % f for f in addons]
-GENERATED_FILES += addons
-
-TEST_HARNESS_FILES.testing.mochitest['jetpack-addon']['addon-sdk'].source.test.addons += [
-    '!%s' % f for f in addons
-]
 
 EXTRA_JS_MODULES.sdk += [
     'source/app-extension/bootstrap.js',
@@ -302,7 +249,6 @@ EXTRA_JS_MODULES.commonjs.sdk.content += [
     'source/lib/sdk/content/loader.js',
     'source/lib/sdk/content/mod.js',
     'source/lib/sdk/content/page-mod.js',
-    'source/lib/sdk/content/page-worker.js',
     'source/lib/sdk/content/sandbox.js',
     'source/lib/sdk/content/tab-events.js',
     'source/lib/sdk/content/thumbnail.js',
@@ -335,7 +281,6 @@ EXTRA_JS_MODULES.commonjs.sdk.deprecated.events += [
 ]
 
 EXTRA_JS_MODULES.commonjs.sdk.dom += [
-    'source/lib/sdk/dom/events-shimmed.js',
     'source/lib/sdk/dom/events.js',
 ]
 
@@ -462,7 +407,6 @@ EXTRA_JS_MODULES.commonjs.sdk.stylesheet += [
 EXTRA_JS_MODULES.commonjs.sdk.system += [
     'source/lib/sdk/system/child_process.js',
     'source/lib/sdk/system/environment.js',
-    'source/lib/sdk/system/events-shimmed.js',
     'source/lib/sdk/system/events.js',
     'source/lib/sdk/system/globals.js',
     'source/lib/sdk/system/process.js',

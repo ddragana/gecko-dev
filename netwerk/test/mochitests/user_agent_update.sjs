@@ -8,3 +8,4 @@ function handleRequest(request, response)
   // used by test_user_agent_updates test
   response.write(decodeURIComponent(request.queryString));
 }
+

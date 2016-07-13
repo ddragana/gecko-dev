@@ -5,7 +5,6 @@
 #ifndef THREADSAFEREFCOUNTINGWITHMAINTHREADDESTRUCTION_H_
 #define THREADSAFEREFCOUNTINGWITHMAINTHREADDESTRUCTION_H_
 
-#include "base/message_loop.h"
 #include "MainThreadUtils.h"
 #include "nsThreadUtils.h"
 
@@ -39,7 +38,7 @@ struct HelperForMainThreadDestruction
 };
 
 template<typename T>
-struct DeleteOnMainThreadTask : public Runnable
+struct DeleteOnMainThreadTask: public nsRunnable
 {
   T* mToDelete;
   explicit DeleteOnMainThreadTask(T* aToDelete) : mToDelete(aToDelete) {}

@@ -51,7 +51,6 @@ HTMLLIAccessible::
   if (blockFrame && blockFrame->HasBullet()) {
     mBullet = new HTMLListBulletAccessible(mContent, mDoc);
     Document()->BindToDocument(mBullet, nullptr);
-    AppendChild(mBullet);
   }
 }
 
@@ -92,17 +91,6 @@ HTMLLIAccessible::Bounds() const
   return rect;
 }
 
-bool
-HTMLLIAccessible::InsertChildAt(uint32_t aIndex, Accessible* aChild)
-{
-  // Adjust index if there's a bullet.
-  if (mBullet && aIndex == 0 && aChild != mBullet) {
-    return HyperTextAccessible::InsertChildAt(aIndex + 1, aChild);
-  }
-
-  return HyperTextAccessible::InsertChildAt(aIndex, aChild);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLLIAccessible: public
 
@@ -114,19 +102,41 @@ HTMLLIAccessible::UpdateBullet(bool aHasBullet)
     return;
   }
 
-  TreeMutation mt(this);
+  nsRefPtr<AccReorderEvent> reorderEvent = new AccReorderEvent(this);
+  AutoTreeMutation mut(this);
+
+  DocAccessible* document = Document();
   if (aHasBullet) {
     mBullet = new HTMLListBulletAccessible(mContent, mDoc);
-    mDoc->BindToDocument(mBullet, nullptr);
+    document->BindToDocument(mBullet, nullptr);
     InsertChildAt(0, mBullet);
-    mt.AfterInsertion(mBullet);
-  }
-  else {
-    mt.BeforeRemoval(mBullet);
+
+    nsRefPtr<AccShowEvent> event = new AccShowEvent(mBullet, mBullet->GetContent());
+    mDoc->FireDelayedEvent(event);
+    reorderEvent->AddSubMutationEvent(event);
+  } else {
+    nsRefPtr<AccHideEvent> event = new AccHideEvent(mBullet, mBullet->GetContent());
+    mDoc->FireDelayedEvent(event);
+    reorderEvent->AddSubMutationEvent(event);
+
     RemoveChild(mBullet);
     mBullet = nullptr;
   }
-  mt.Done();
+
+  mDoc->FireDelayedEvent(reorderEvent);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// HTMLLIAccessible: Accessible protected
+
+void
+HTMLLIAccessible::CacheChildren()
+{
+  if (mBullet)
+    AppendChild(mBullet);
+
+  // Cache children from subtree.
+  AccessibleWrap::CacheChildren();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -136,7 +146,6 @@ HTMLListBulletAccessible::
   HTMLListBulletAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   LeafAccessible(aContent, aDoc)
 {
-  mGenericTypes |= eText;
   mStateFlags |= eSharedNode;
 }
 

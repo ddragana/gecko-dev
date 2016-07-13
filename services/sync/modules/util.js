@@ -4,7 +4,7 @@
 
 this.EXPORTED_SYMBOLS = ["XPCOMUtils", "Services", "Utils", "Async", "Svc", "Str"];
 
-var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/observers.js");
@@ -35,6 +35,8 @@ this.Utils = {
   // In the ideal world, references to these would be removed.
   nextTick: CommonUtils.nextTick,
   namedTimer: CommonUtils.namedTimer,
+  exceptionStr: CommonUtils.exceptionStr,
+  stackTrace: CommonUtils.stackTrace,
   makeURI: CommonUtils.makeURI,
   encodeUTF8: CommonUtils.encodeUTF8,
   decodeUTF8: CommonUtils.decodeUTF8,
@@ -60,25 +62,6 @@ this.Utils = {
   getHTTPMACSHA1Header: CryptoUtils.getHTTPMACSHA1Header,
 
   /**
-   * The string to use as the base User-Agent in Sync requests.
-   * This string will look something like
-   *
-   *   Firefox/49.0a1 (Windows NT 6.1; WOW64; rv:46.0) FxSync/1.51.0.20160516142357.desktop
-   */
-  _userAgent: null,
-  get userAgent() {
-    if (!this._userAgent) {
-      let hph = Cc["@mozilla.org/network/protocol;1?name=http"].getService(Ci.nsIHttpProtocolHandler);
-      this._userAgent =
-        Services.appinfo.name + "/" + Services.appinfo.version +  // Product.
-        " (" + hph.oscpu + ")" +                                  // (oscpu)
-        " FxSync/" + WEAVE_VERSION + "." +                        // Sync.
-        Services.appinfo.appBuildID + ".";                        // Build.
-    }
-    return this._userAgent + Svc.Prefs.get("client.type", "desktop");
-  },
-
-  /**
    * Wrap a function to catch all exceptions and log them
    *
    * @usage MyObj._catch = Utils.catch;
@@ -94,7 +77,7 @@ this.Utils = {
         return func.call(thisArg);
       }
       catch(ex) {
-        thisArg._log.debug("Exception", ex);
+        thisArg._log.debug("Exception: " + Utils.exceptionStr(ex));
         if (exceptionCallback) {
           return exceptionCallback.call(thisArg, ex);
         }
@@ -355,13 +338,12 @@ this.Utils = {
 
     try {
       json = yield CommonUtils.readJSON(path);
+    } catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
+      // Ignore non-existent files.
     } catch (e) {
-      if (e instanceof OS.File.Error && e.becauseNoSuchFile) {
-        // Ignore non-existent files.
-      } else {
-        if (that._log) {
-          that._log.debug("Failed to load json", e);
-        }
+      if (that._log) {
+        that._log.debug("Failed to load json: " +
+                        CommonUtils.exceptionStr(e));
       }
     }
 
@@ -495,7 +477,7 @@ this.Utils = {
 
     // 20-char sync key.
     if (pp.length == 23 &&
-        [5, 11, 17].every(i => pp[i] == '-')) {
+        [5, 11, 17].every(function(i) pp[i] == '-')) {
 
       return pp.slice(0, 5) + pp.slice(6, 11)
              + pp.slice(12, 17) + pp.slice(18, 23);
@@ -503,7 +485,7 @@ this.Utils = {
 
     // "Modern" 26-char key.
     if (pp.length == 31 &&
-        [1, 7, 13, 19, 25].every(i => pp[i] == '-')) {
+        [1, 7, 13, 19, 25].every(function(i) pp[i] == '-')) {
 
       return pp.slice(0, 1) + pp.slice(2, 7)
              + pp.slice(8, 13) + pp.slice(14, 19)
@@ -633,12 +615,30 @@ this.Utils = {
    * Get the FxA identity hosts.
    */
   getSyncCredentialsHostsFxA: function() {
+    // This is somewhat expensive and the result static, so we cache the result.
+    if (this._syncCredentialsHostsFxA) {
+      return this._syncCredentialsHostsFxA;
+    }
     let result = new Set();
     // the FxA host
     result.add(FxAccountsCommon.FXA_PWDMGR_HOST);
-    // We used to include the FxA hosts (hence the Set() result) but we now
-    // don't give them special treatment (hence the Set() with exactly 1 item)
-    return result;
+    //
+    // The FxA hosts - these almost certainly all have the same hostname, but
+    // better safe than sorry...
+    for (let prefName of ["identity.fxaccounts.remote.force_auth.uri",
+                          "identity.fxaccounts.remote.signup.uri",
+                          "identity.fxaccounts.remote.signin.uri",
+                          "identity.fxaccounts.settings.uri"]) {
+      let prefVal;
+      try {
+        prefVal = Services.prefs.getCharPref(prefName);
+      } catch (_) {
+        continue;
+      }
+      let uri = Services.io.newURI(prefVal, null, null);
+      result.add(uri.prePath);
+    }
+    return this._syncCredentialsHostsFxA = result;
   },
 
   getDefaultDeviceName() {
@@ -672,20 +672,6 @@ this.Utils = {
       Cc["@mozilla.org/network/protocol;1?name=http"].getService(Ci.nsIHttpProtocolHandler).oscpu;
 
     return Str.sync.get("client.name2", [user, appName, system]);
-  },
-
-  getDeviceName() {
-    const deviceName = Svc.Prefs.get("client.name", "");
-
-    if (deviceName === "") {
-      return this.getDefaultDeviceName();
-    }
-
-    return deviceName;
-  },
-
-  getDeviceType() {
-    return Svc.Prefs.get("client.type", DEVICE_TYPE_DESKTOP);
   }
 };
 
@@ -704,7 +690,7 @@ Svc.Prefs = new Preferences(PREFS_BRANCH);
 Svc.DefaultPrefs = new Preferences({branch: PREFS_BRANCH, defaultBranch: true});
 Svc.Obs = Observers;
 
-var _sessionCID = Services.appinfo.ID == SEAMONKEY_ID ?
+let _sessionCID = Services.appinfo.ID == SEAMONKEY_ID ?
   "@mozilla.org/suite/sessionstore;1" :
   "@mozilla.org/browser/sessionstore;1";
 

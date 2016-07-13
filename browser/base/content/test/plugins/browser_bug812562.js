@@ -1,5 +1,5 @@
-var gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-var gTestBrowser = null;
+let gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
+let gTestBrowser = null;
 
 add_task(function* () {
   registerCleanupFunction(Task.async(function*() {
@@ -41,10 +41,10 @@ add_task(function* () {
   let pluginInfo = yield promiseForPluginInfo("test");
   is(pluginInfo.pluginFallbackType, Ci.nsIObjectLoadingContent.PLUGIN_VULNERABLE_UPDATABLE, "plugin should be marked as VULNERABLE");
 
-  yield ContentTask.spawn(gTestBrowser, null, function* () {
-    Assert.ok(!!content.document.getElementById("test"),
-      "test part 1: plugin should not be activated");
+  let found = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+    return !!content.document.getElementById("test");
   });
+  ok(found, "test part 1: plugin should not be activated");
 
   yield promiseTabLoadEvent(gBrowser.selectedTab, "data:text/html,<html></html>");
 });
@@ -52,10 +52,10 @@ add_task(function* () {
 add_task(function* () {
   let popupNotification = PopupNotifications.getNotification("click-to-play-plugins", gTestBrowser);
   ok(!popupNotification, "test part 2: Should not have a click-to-play notification");
-  yield ContentTask.spawn(gTestBrowser, null, function* () {
-    Assert.ok(!content.document.getElementById("test"),
-      "test part 2: plugin should not be activated");
+  let found = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+    return !!content.document.getElementById("test");
   });
+  ok(!found, "test part 2: plugin should not be activated");
 
   let obsPromise = TestUtils.topicObserved("PopupNotifications-updateNotShowing");
   let overlayPromise = promisePopupNotification("click-to-play-plugins");
@@ -73,8 +73,8 @@ add_task(function* () {
   let pluginInfo = yield promiseForPluginInfo("test");
   is(pluginInfo.pluginFallbackType, Ci.nsIObjectLoadingContent.PLUGIN_VULNERABLE_UPDATABLE, "plugin should be marked as VULNERABLE");
 
-  yield ContentTask.spawn(gTestBrowser, null, function* () {
-    Assert.ok(!!content.document.getElementById("test"),
-      "test part 3: plugin should not be activated");
+  let found = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+    return !!content.document.getElementById("test");
   });
+  ok(found, "test part 3: plugin should not be activated");
 });

@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "AutoTimelineMarker.h"
+#include "mozilla/AutoTimelineMarker.h"
 
-#include "TimelineConsumers.h"
 #include "MainThreadUtils.h"
+#include "nsDocShell.h"
 
 namespace mozilla {
 
@@ -19,33 +19,25 @@ AutoTimelineMarker::AutoTimelineMarker(nsIDocShell* aDocShell, const char* aName
   MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!aDocShell) {
+  if (TimelineConsumers::IsEmpty()) {
     return;
   }
 
-  RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
-  if (!timelines || !timelines->HasConsumer(aDocShell)) {
-    return;
-  }
+  bool isRecordingEnabledForDocShell = false;
+  nsDocShell* docShell = static_cast<nsDocShell*>(aDocShell);
+  aDocShell->GetRecordProfileTimelineMarkers(&isRecordingEnabledForDocShell);
 
-  mDocShell = aDocShell;
-  timelines->AddMarkerForDocShell(mDocShell, mName, MarkerTracingType::START);
+  if (isRecordingEnabledForDocShell) {
+    mDocShell = docShell;
+    mDocShell->AddProfileTimelineMarker(mName, TRACING_INTERVAL_START);
+  }
 }
 
 AutoTimelineMarker::~AutoTimelineMarker()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!mDocShell) {
-    return;
+  if (mDocShell) {
+    mDocShell->AddProfileTimelineMarker(mName, TRACING_INTERVAL_END);
   }
-
-  RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
-  if (!timelines || !timelines->HasConsumer(mDocShell)) {
-    return;
-  }
-
-  timelines->AddMarkerForDocShell(mDocShell, mName, MarkerTracingType::END);
 }
 
 } // namespace mozilla

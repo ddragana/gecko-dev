@@ -14,9 +14,6 @@
 #include "vp8/common/extend.h"
 #include "bitstream.h"
 #include "encodeframe.h"
-#ifdef _MSC_VER
-#include <intrin.h>
-#endif
 
 #if CONFIG_MULTITHREAD
 

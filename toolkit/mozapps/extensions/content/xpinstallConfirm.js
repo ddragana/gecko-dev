@@ -6,10 +6,8 @@
 
 var XPInstallConfirm = {};
 
-XPInstallConfirm.init = function()
+XPInstallConfirm.init = function XPInstallConfirm_init()
 {
-  Components.utils.import("resource://gre/modules/AddonManager.jsm");
-
   var _installCountdown;
   var _installCountdownInterval;
   var _focused;
@@ -22,13 +20,6 @@ XPInstallConfirm.init = function()
 
   let args = window.arguments[0].wrappedJSObject;
 
-  // If all installs have already been cancelled in some way then just close
-  // the window
-  if (args.installs.every(i => i.state != AddonManager.STATE_DOWNLOADED)) {
-    window.close();
-    return;
-  }
-
   var _installCountdownLength = 5;
   try {
     var prefs = Components.classes["@mozilla.org/preferences-service;1"]
@@ -36,18 +27,9 @@ XPInstallConfirm.init = function()
     var delay_in_milliseconds = prefs.getIntPref("security.dialog_enable_delay");
     _installCountdownLength = Math.round(delay_in_milliseconds / 500);
   } catch (ex) { }
-
+  
   var itemList = document.getElementById("itemList");
-
-  let installMap = new WeakMap();
-  let installListener = {
-    onDownloadCancelled: function(install) {
-      itemList.removeChild(installMap.get(install));
-      if (--numItemsToInstall == 0)
-        window.close();
-    }
-  };
-
+  
   var numItemsToInstall = args.installs.length;
   for (let install of args.installs) {
     var installItem = document.createElement("installitem");
@@ -68,11 +50,8 @@ XPInstallConfirm.init = function()
       installItem.cert = bundle.getString("unverified");
     }
     installItem.signed = install.certName ? "true" : "false";
-
-    installMap.set(install, installItem);
-    install.addListener(installListener);
   }
-
+  
   var introString = bundle.getString("itemWarnIntroSingle");
   if (numItemsToInstall > 4)
     introString = bundle.getFormattedString("itemWarnIntroMultiple", [numItemsToInstall]);
@@ -81,7 +60,7 @@ XPInstallConfirm.init = function()
   while (introNode.hasChildNodes())
     introNode.removeChild(introNode.firstChild);
   introNode.appendChild(textNode);
-
+  
   var okButton = document.documentElement.getButton("accept");
   okButton.focus();
 
@@ -147,9 +126,6 @@ XPInstallConfirm.init = function()
     }
     window.removeEventListener("unload", myUnload, false);
 
-    for (let install of args.installs)
-      install.removeListener(installListener);
-
     // Now perform the desired action - either install the
     // addons or cancel the installations
     if (XPInstallConfirm._installOK) {
@@ -157,10 +133,8 @@ XPInstallConfirm.init = function()
         install.install();
     }
     else {
-      for (let install of args.installs) {
-        if (install.state != AddonManager.STATE_CANCELLED)
-          install.cancel();
-      }
+      for (let install of args.installs)
+        install.cancel();
     }
   }
 
@@ -177,7 +151,7 @@ XPInstallConfirm.init = function()
     okButton.label = bundle.getString("installButtonLabel");
 }
 
-XPInstallConfirm.onOK = function()
+XPInstallConfirm.onOK = function XPInstallConfirm_onOk()
 {
   Components.classes["@mozilla.org/base/telemetry;1"].
     getService(Components.interfaces.nsITelemetry).
@@ -188,7 +162,7 @@ XPInstallConfirm.onOK = function()
   return true;
 }
 
-XPInstallConfirm.onCancel = function()
+XPInstallConfirm.onCancel = function XPInstallConfirm_onCancel()
 {
   // Perform the install or cancel after the window has unloaded
   XPInstallConfirm._installOK = false;

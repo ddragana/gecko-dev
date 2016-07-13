@@ -81,10 +81,3 @@ nsBaseScreen::GetContentsScaleFactor(double* aContentsScaleFactor)
   *aContentsScaleFactor = 1.0;
   return NS_OK;
 }
-
-NS_IMETHODIMP
-nsBaseScreen::GetDefaultCSSScaleFactor(double* aScaleFactor)
-{
-  *aScaleFactor = 1.0;
-  return NS_OK;
-}

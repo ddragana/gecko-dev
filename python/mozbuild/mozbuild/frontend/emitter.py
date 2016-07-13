@@ -19,31 +19,28 @@ from mozbuild.util import (
 )
 
 import mozpack.path as mozpath
+import manifestparser
+import reftest
 import mozinfo
 
 from .data import (
-    AndroidAssetsDirs,
-    AndroidExtraPackages,
-    AndroidExtraResDirs,
-    AndroidResDirs,
-    BaseSources,
     BrandingFiles,
-    ChromeManifestEntry,
     ConfigFileSubstitution,
     ContextWrapped,
     Defines,
+    DistFiles,
     DirectoryTraversal,
     Exports,
     FinalTargetFiles,
-    FinalTargetPreprocessedFiles,
     GeneratedEventWebIDLFile,
     GeneratedFile,
+    GeneratedInclude,
     GeneratedSources,
     GeneratedWebIDLFile,
     ExampleWebIDLInterface,
     ExternalStaticLibrary,
     ExternalSharedLibrary,
-    HostDefines,
+    HeaderFileSubstitution,
     HostLibrary,
     HostProgram,
     HostSimpleProgram,
@@ -51,17 +48,18 @@ from .data import (
     InstallationTarget,
     IPDLFile,
     JARManifest,
+    JavaScriptModules,
+    JsPreferenceFile,
     Library,
     Linkable,
+    LinkageWrongKindError,
     LocalInclude,
-    ObjdirFiles,
-    ObjdirPreprocessedFiles,
     PerSourceFlag,
     PreprocessedTestWebIDLFile,
     PreprocessedWebIDLFile,
     Program,
-    RustRlibLibrary,
-    SdkFiles,
+    ReaderSummary,
+    Resources,
     SharedLibrary,
     SimpleProgram,
     Sources,
@@ -74,30 +72,18 @@ from .data import (
     WebIDLFile,
     XPIDLFile,
 )
-from mozpack.chrome.manifest import (
-    ManifestBinaryComponent,
-    Manifest,
-)
 
 from .reader import SandboxValidationError
 
-from ..testing import (
-    TEST_MANIFESTS,
-    REFTEST_FLAVORS,
-    WEB_PLATFORM_TESTS_FLAVORS,
-    SupportFilesConverter,
-)
-
 from .context import (
     Context,
+    ObjDirPath,
     SourcePath,
     ObjDirPath,
     Path,
     SubContext,
     TemplateContext,
 )
-
-from mozbuild.base import ExecutionSummary
 
 
 class TreeMetadataEmitter(LoggingMixin):
@@ -140,29 +126,22 @@ class TreeMetadataEmitter(LoggingMixin):
         # Add security/nss manually, since it doesn't have a subconfigure.
         self._external_paths.add('security/nss')
 
-        self._emitter_time = 0.0
-        self._object_count = 0
-        self._test_files_converter = SupportFilesConverter()
-
-    def summary(self):
-        return ExecutionSummary(
-            'Processed into {object_count:d} build config descriptors in '
-            '{execution_time:.2f}s',
-            execution_time=self._emitter_time,
-            object_count=self._object_count)
-
     def emit(self, output):
         """Convert the BuildReader output into data structures.
 
         The return value from BuildReader.read_topsrcdir() (a generator) is
         typically fed into this function.
         """
+        file_count = 0
+        sandbox_execution_time = 0.0
+        emitter_time = 0.0
         contexts = {}
 
         def emit_objs(objs):
             for o in objs:
-                self._object_count += 1
                 yield o
+                if not o._ack:
+                    raise Exception('Unhandled object of type %s' % type(o))
 
         for out in output:
             # Nothing in sub-contexts is currently of interest to us. Filter
@@ -177,25 +156,32 @@ class TreeMetadataEmitter(LoggingMixin):
                 start = time.time()
                 # We need to expand the generator for the timings to work.
                 objs = list(self.emit_from_context(out))
-                self._emitter_time += time.time() - start
+                emitter_time += time.time() - start
 
                 for o in emit_objs(objs): yield o
+
+                # Update the stats.
+                file_count += len(out.all_paths)
+                sandbox_execution_time += out.execution_time
 
             else:
                 raise Exception('Unhandled output type: %s' % type(out))
 
-        # Don't emit Linkable objects when COMPILE_ENVIRONMENT is not set
-        if self.config.substs.get('COMPILE_ENVIRONMENT'):
+        # Don't emit Linkable objects when COMPILE_ENVIRONMENT is explicitely
+        # set to a value meaning false (usually '').
+        if self.config.substs.get('COMPILE_ENVIRONMENT', True):
             start = time.time()
             objs = list(self._emit_libs_derived(contexts))
-            self._emitter_time += time.time() - start
+            emitter_time += time.time() - start
 
             for o in emit_objs(objs): yield o
+
+        yield ReaderSummary(file_count, sandbox_execution_time, emitter_time)
 
     def _emit_libs_derived(self, contexts):
         # First do FINAL_LIBRARY linkage.
         for lib in (l for libs in self._libs.values() for l in libs):
-            if not isinstance(lib, (StaticLibrary, RustRlibLibrary)) or not lib.link_into:
+            if not isinstance(lib, StaticLibrary) or not lib.link_into:
                 continue
             if lib.link_into not in self._libs:
                 raise SandboxValidationError(
@@ -246,7 +232,7 @@ class TreeMetadataEmitter(LoggingMixin):
 
         # Propagate LIBRARY_DEFINES to all child libraries recursively.
         def propagate_defines(outerlib, defines):
-            outerlib.lib_defines.update(defines)
+            outerlib.defines.update(defines)
             for lib in outerlib.linked_libraries:
                 # Propagate defines only along FINAL_LIBRARY paths, not USE_LIBS
                 # paths.
@@ -256,7 +242,7 @@ class TreeMetadataEmitter(LoggingMixin):
 
         for lib in (l for libs in self._libs.values() for l in libs):
             if isinstance(lib, Library):
-                propagate_defines(lib, lib.lib_defines)
+                propagate_defines(lib, lib.defines)
             yield lib
 
         for obj in self._binaries.values():
@@ -373,39 +359,7 @@ class TreeMetadataEmitter(LoggingMixin):
         else:
             return ExternalSharedLibrary(context, name)
 
-    def _handle_linkables(self, context, passthru, generated_files):
-        has_linkables = False
-
-        for kind, cls in [('PROGRAM', Program), ('HOST_PROGRAM', HostProgram)]:
-            program = context.get(kind)
-            if program:
-                if program in self._binaries:
-                    raise SandboxValidationError(
-                        'Cannot use "%s" as %s name, '
-                        'because it is already used in %s' % (program, kind,
-                        self._binaries[program].relativedir), context)
-                self._binaries[program] = cls(context, program)
-                self._linkage.append((context, self._binaries[program],
-                    kind.replace('PROGRAM', 'USE_LIBS')))
-                has_linkables = True
-
-        for kind, cls in [
-                ('SIMPLE_PROGRAMS', SimpleProgram),
-                ('CPP_UNIT_TESTS', SimpleProgram),
-                ('HOST_SIMPLE_PROGRAMS', HostSimpleProgram)]:
-            for program in context[kind]:
-                if program in self._binaries:
-                    raise SandboxValidationError(
-                        'Cannot use "%s" in %s, '
-                        'because it is already used in %s' % (program, kind,
-                        self._binaries[program].relativedir), context)
-                self._binaries[program] = cls(context, program,
-                    is_unit_test=kind == 'CPP_UNIT_TESTS')
-                self._linkage.append((context, self._binaries[program],
-                    'HOST_USE_LIBS' if kind == 'HOST_SIMPLE_PROGRAMS'
-                    else 'USE_LIBS'))
-                has_linkables = True
-
+    def _handle_libraries(self, context):
         host_libname = context.get('HOST_LIBRARY_NAME')
         libname = context.get('LIBRARY_NAME')
 
@@ -416,7 +370,6 @@ class TreeMetadataEmitter(LoggingMixin):
             lib = HostLibrary(context, host_libname)
             self._libs[host_libname].append(lib)
             self._linkage.append((context, lib, 'HOST_USE_LIBS'))
-            has_linkables = True
 
         final_lib = context.get('FINAL_LIBRARY')
         if not libname and final_lib:
@@ -542,62 +495,226 @@ class TreeMetadataEmitter(LoggingMixin):
                         'STATIC_LIBRARY_NAME. Please change one of them.',
                         context)
 
-            symbols_file = context.get('SYMBOLS_FILE')
-            if symbols_file:
-                if not shared_lib:
-                    raise SandboxValidationError(
-                        'SYMBOLS_FILE can only be used with a SHARED_LIBRARY.',
-                        context)
-                if context.get('DEFFILE') or context.get('LD_VERSION_SCRIPT'):
-                    raise SandboxValidationError(
-                        'SYMBOLS_FILE cannot be used along DEFFILE or '
-                        'LD_VERSION_SCRIPT.', context)
-                if not os.path.exists(symbols_file.full_path):
-                    raise SandboxValidationError(
-                        'Path specified in SYMBOLS_FILE does not exist: %s '
-                        '(resolved to %s)' % (symbols_file,
-                        symbols_file.full_path), context)
-                shared_args['symbols_file'] = True
-
             if shared_lib:
                 lib = SharedLibrary(context, libname, **shared_args)
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
-                has_linkables = True
-                generated_files.add(lib.lib_name)
-                if is_component and not context['NO_COMPONENTS_MANIFEST']:
-                    yield ChromeManifestEntry(context,
-                        'components/components.manifest',
-                        ManifestBinaryComponent('components', lib.lib_name))
-                if symbols_file:
-                    script = mozpath.join(
-                        mozpath.dirname(mozpath.dirname(__file__)),
-                        'action', 'generate_symbols_file.py')
-                    defines = ()
-                    if lib.defines:
-                        defines = lib.defines.get_defines()
-                    yield GeneratedFile(context, script,
-                        'generate_symbols_file', lib.symbols_file,
-                        [symbols_file], defines)
             if static_lib:
                 lib = StaticLibrary(context, libname, **static_args)
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
-                has_linkables = True
 
             if lib_defines:
                 if not libname:
                     raise SandboxValidationError('LIBRARY_DEFINES needs a '
                         'LIBRARY_NAME to take effect', context)
-                lib.lib_defines.update(lib_defines)
+                lib.defines.update(lib_defines)
 
-        # Only emit sources if we have linkables defined in the same context.
-        # Note the linkables are not emitted in this function, but much later,
-        # after aggregation (because of e.g. USE_LIBS processing).
-        if not has_linkables:
-            return
+    def emit_from_context(self, context):
+        """Convert a Context to tree metadata objects.
 
-        rust_sources = []
+        This is a generator of mozbuild.frontend.data.ContextDerived instances.
+        """
+
+        # We only want to emit an InstallationTarget if one of the consulted
+        # variables is defined. Later on, we look up FINAL_TARGET, which has
+        # the side-effect of populating it. So, we need to do this lookup
+        # early.
+        if any(k in context for k in ('FINAL_TARGET', 'XPI_NAME', 'DIST_SUBDIR')):
+            yield InstallationTarget(context)
+
+        # We always emit a directory traversal descriptor. This is needed by
+        # the recursive make backend.
+        for o in self._emit_directory_traversal_from_context(context): yield o
+
+        for path in context['CONFIGURE_SUBST_FILES']:
+            yield self._create_substitution(ConfigFileSubstitution, context,
+                path)
+
+        for path in context['CONFIGURE_DEFINE_FILES']:
+            yield self._create_substitution(HeaderFileSubstitution, context,
+                path)
+
+        for obj in self._process_xpidl(context):
+            yield obj
+
+        # Check for manifest declarations in EXTRA_{PP_,}COMPONENTS.
+        extras = context.get('EXTRA_COMPONENTS', []) + context.get('EXTRA_PP_COMPONENTS', [])
+        if any(e.endswith('.js') for e in extras) and \
+                not any(e.endswith('.manifest') for e in extras) and \
+                not context.get('NO_JS_MANIFEST', False):
+            raise SandboxValidationError('A .js component was specified in EXTRA_COMPONENTS '
+                                         'or EXTRA_PP_COMPONENTS without a matching '
+                                         '.manifest file.  See '
+                                         'https://developer.mozilla.org/en/XPCOM/XPCOM_changes_in_Gecko_2.0 .',
+                                         context);
+
+        # Proxy some variables as-is until we have richer classes to represent
+        # them. We should aim to keep this set small because it violates the
+        # desired abstraction of the build definition away from makefiles.
+        passthru = VariablePassthru(context)
+        varlist = [
+            'ANDROID_GENERATED_RESFILES',
+            'ANDROID_RES_DIRS',
+            'DISABLE_STL_WRAPPING',
+            'EXTRA_COMPONENTS',
+            'EXTRA_DSO_LDOPTS',
+            'EXTRA_PP_COMPONENTS',
+            'FAIL_ON_WARNINGS',
+            'USE_STATIC_LIBS',
+            'PYTHON_UNIT_TESTS',
+            'RCFILE',
+            'RESFILE',
+            'RCINCLUDE',
+            'DEFFILE',
+            'WIN32_EXE_LDFLAGS',
+            'LD_VERSION_SCRIPT',
+            'USE_EXTENSION_MANIFEST',
+            'NO_JS_MANIFEST',
+        ]
+        for v in varlist:
+            if v in context and context[v]:
+                passthru.variables[v] = context[v]
+
+        if context.config.substs.get('OS_TARGET') == 'WINNT' and \
+                context['DELAYLOAD_DLLS']:
+            context['LDFLAGS'].extend([('-DELAYLOAD:%s' % dll)
+                for dll in context['DELAYLOAD_DLLS']])
+            context['OS_LIBS'].append('delayimp')
+
+        for v in ['CFLAGS', 'CXXFLAGS', 'CMFLAGS', 'CMMFLAGS', 'ASFLAGS',
+                  'LDFLAGS']:
+            if v in context and context[v]:
+                passthru.variables['MOZBUILD_' + v] = context[v]
+
+        # NO_VISIBILITY_FLAGS is slightly different
+        if context['NO_VISIBILITY_FLAGS']:
+            passthru.variables['VISIBILITY_FLAGS'] = ''
+
+        if isinstance(context, TemplateContext) and context.template == 'Gyp':
+            passthru.variables['IS_GYP_DIR'] = True
+
+        dist_install = context['DIST_INSTALL']
+        if dist_install is True:
+            passthru.variables['DIST_INSTALL'] = True
+        elif dist_install is False:
+            passthru.variables['NO_DIST_INSTALL'] = True
+
+        for obj in self._process_sources(context, passthru):
+            yield obj
+
+        exports = context.get('EXPORTS')
+        if exports:
+            yield Exports(context, exports,
+                dist_install=dist_install is not False)
+
+        for obj in self._process_generated_files(context):
+            yield obj
+
+        for obj in self._process_test_harness_files(context):
+            yield obj
+
+        defines = context.get('DEFINES')
+        if defines:
+            yield Defines(context, defines)
+
+        resources = context.get('RESOURCE_FILES')
+        if resources:
+            yield Resources(context, resources, defines)
+
+        for pref in sorted(context['JS_PREFERENCE_FILES']):
+            yield JsPreferenceFile(context, pref)
+
+        self._handle_programs(context)
+
+        extra_js_modules = context.get('EXTRA_JS_MODULES')
+        if extra_js_modules:
+            yield JavaScriptModules(context, extra_js_modules, 'extra')
+
+        extra_pp_js_modules = context.get('EXTRA_PP_JS_MODULES')
+        if extra_pp_js_modules:
+            yield JavaScriptModules(context, extra_pp_js_modules, 'extra_pp')
+
+        test_js_modules = context.get('TESTING_JS_MODULES')
+        if test_js_modules:
+            yield JavaScriptModules(context, test_js_modules, 'testing')
+
+        simple_lists = [
+            ('GENERATED_EVENTS_WEBIDL_FILES', GeneratedEventWebIDLFile),
+            ('GENERATED_WEBIDL_FILES', GeneratedWebIDLFile),
+            ('IPDL_SOURCES', IPDLFile),
+            ('GENERATED_INCLUDES', GeneratedInclude),
+            ('PREPROCESSED_TEST_WEBIDL_FILES', PreprocessedTestWebIDLFile),
+            ('PREPROCESSED_WEBIDL_FILES', PreprocessedWebIDLFile),
+            ('TEST_WEBIDL_FILES', TestWebIDLFile),
+            ('WEBIDL_FILES', WebIDLFile),
+            ('WEBIDL_EXAMPLE_INTERFACES', ExampleWebIDLInterface),
+        ]
+        for context_var, klass in simple_lists:
+            for name in context.get(context_var, []):
+                yield klass(context, name)
+
+        for local_include in context.get('LOCAL_INCLUDES', []):
+            if local_include.startswith('/'):
+                path = context.config.topsrcdir
+                relative_include = local_include[1:]
+            else:
+                path = context.srcdir
+                relative_include = local_include
+
+            actual_include = os.path.join(path, relative_include)
+            if not os.path.exists(actual_include):
+                raise SandboxValidationError('Path specified in LOCAL_INCLUDES '
+                    'does not exist: %s (resolved to %s)' % (local_include, actual_include), context)
+            yield LocalInclude(context, local_include)
+
+        final_target_files = context.get('FINAL_TARGET_FILES')
+        if final_target_files:
+            yield FinalTargetFiles(context, final_target_files, context['FINAL_TARGET'])
+
+        dist_files = context.get('DIST_FILES')
+        if dist_files:
+            for f in dist_files:
+                path = os.path.join(context.srcdir, f)
+                if not os.path.exists(path):
+                    raise SandboxValidationError('File listed in DIST_FILES '
+                        'does not exist: %s' % f, context)
+
+            yield DistFiles(context, dist_files, context['FINAL_TARGET'])
+
+        branding_files = context.get('BRANDING_FILES')
+        if branding_files:
+            yield BrandingFiles(context, branding_files)
+
+        self._handle_libraries(context)
+
+        for obj in self._process_test_manifests(context):
+            yield obj
+
+        for obj in self._process_jar_manifests(context):
+            yield obj
+
+        for name, jar in context.get('JAVA_JAR_TARGETS', {}).items():
+            yield ContextWrapped(context, jar)
+
+        for name, data in context.get('ANDROID_ECLIPSE_PROJECT_TARGETS', {}).items():
+            yield ContextWrapped(context, data)
+
+        if passthru.variables:
+            yield passthru
+
+    def _create_substitution(self, cls, context, path):
+        if os.path.isabs(path):
+            path = path[1:]
+
+        sub = cls(context)
+        sub.input_path = mozpath.join(context.srcdir, '%s.in' % path)
+        sub.output_path = mozpath.join(context.objdir, path)
+        sub.relpath = path
+
+        return sub
+
+    def _process_sources(self, context, passthru):
         sources = defaultdict(list)
         gen_sources = defaultdict(list)
         all_flags = {}
@@ -610,7 +727,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 if isinstance(f, SourcePath):
                     srcs.append(full_path)
                 else:
-                    assert isinstance(f, Path)
+                    assert isinstance(f, ObjDirPath)
                     gen_srcs.append(full_path)
                 if symbol == 'SOURCES':
                     flags = context_srcs[f]
@@ -693,317 +810,12 @@ class TreeMetadataEmitter(LoggingMixin):
                     if (variable.startswith('UNIFIED_') and
                             'FILES_PER_UNIFIED_FILE' in context):
                         arglist.append(context['FILES_PER_UNIFIED_FILE'])
-                    obj = cls(*arglist)
-
-                    # Rust is special.  Each Rust file that we compile
-                    # is a separate crate and gets compiled into its own
-                    # rlib file (Rust's equivalent of a .a file).  When
-                    # we go to link Rust sources into a library or
-                    # executable, we have a separate, single crate that
-                    # gets compiled as a staticlib (like a rlib, but
-                    # includes the actual Rust runtime).
-                    if canonical_suffix == '.rs':
-                        if not final_lib:
-                            raise SandboxValidationError(
-                                'Rust sources must be destined for a FINAL_LIBRARY')
-                        # If we're building a shared library, we're going to
-                        # auto-generate a module that includes all of the rlib
-                        # files.  This means we can't permit Rust files as
-                        # immediate inputs of the shared library.
-                        if libname and shared_lib:
-                            raise SandboxValidationError(
-                                'No Rust sources permitted as an immediate input of %s: %s' % (shlib, files))
-                        rust_sources.append(obj)
-                    yield obj
-
-        # Rust sources get translated into rlibs, which are essentially static
-        # libraries.  We need to note all of them for linking, too.
-        if libname and static_lib:
-            for s in rust_sources:
-                for f in s.files:
-                    (base, _) = mozpath.splitext(mozpath.basename(f))
-                    crate_name = context.relsrcdir.replace('/', '_') + '_' + base
-                    rlib_filename = 'lib' + base + '.rlib'
-                    lib = RustRlibLibrary(context, libname, crate_name,
-                                          rlib_filename, final_lib)
-                    self._libs[libname].append(lib)
-                    self._linkage.append((context, lib, 'USE_LIBS'))
+                    yield cls(*arglist)
 
         for f, flags in all_flags.iteritems():
             if flags.flags:
                 ext = mozpath.splitext(f)[1]
                 yield PerSourceFlag(context, f, flags.flags)
-
-
-    def emit_from_context(self, context):
-        """Convert a Context to tree metadata objects.
-
-        This is a generator of mozbuild.frontend.data.ContextDerived instances.
-        """
-
-        # We only want to emit an InstallationTarget if one of the consulted
-        # variables is defined. Later on, we look up FINAL_TARGET, which has
-        # the side-effect of populating it. So, we need to do this lookup
-        # early.
-        if any(k in context for k in ('FINAL_TARGET', 'XPI_NAME', 'DIST_SUBDIR')):
-            yield InstallationTarget(context)
-
-        # We always emit a directory traversal descriptor. This is needed by
-        # the recursive make backend.
-        for o in self._emit_directory_traversal_from_context(context): yield o
-
-        for obj in self._process_xpidl(context):
-            yield obj
-
-        # Proxy some variables as-is until we have richer classes to represent
-        # them. We should aim to keep this set small because it violates the
-        # desired abstraction of the build definition away from makefiles.
-        passthru = VariablePassthru(context)
-        varlist = [
-            'ALLOW_COMPILER_WARNINGS',
-            'ANDROID_APK_NAME',
-            'ANDROID_APK_PACKAGE',
-            'ANDROID_GENERATED_RESFILES',
-            'DISABLE_STL_WRAPPING',
-            'EXTRA_DSO_LDOPTS',
-            'PYTHON_UNIT_TESTS',
-            'RCFILE',
-            'RESFILE',
-            'RCINCLUDE',
-            'DEFFILE',
-            'WIN32_EXE_LDFLAGS',
-            'LD_VERSION_SCRIPT',
-            'USE_EXTENSION_MANIFEST',
-            'NO_JS_MANIFEST',
-            'HAS_MISC_RULE',
-        ]
-        for v in varlist:
-            if v in context and context[v]:
-                passthru.variables[v] = context[v]
-
-        if context.config.substs.get('OS_TARGET') == 'WINNT' and \
-                context['DELAYLOAD_DLLS']:
-            context['LDFLAGS'].extend([('-DELAYLOAD:%s' % dll)
-                for dll in context['DELAYLOAD_DLLS']])
-            context['OS_LIBS'].append('delayimp')
-
-        for v in ['CFLAGS', 'CXXFLAGS', 'CMFLAGS', 'CMMFLAGS', 'ASFLAGS',
-                  'LDFLAGS', 'HOST_CFLAGS', 'HOST_CXXFLAGS']:
-            if v in context and context[v]:
-                passthru.variables['MOZBUILD_' + v] = context[v]
-
-        # NO_VISIBILITY_FLAGS is slightly different
-        if context['NO_VISIBILITY_FLAGS']:
-            passthru.variables['VISIBILITY_FLAGS'] = ''
-
-        if isinstance(context, TemplateContext) and context.template == 'Gyp':
-            passthru.variables['IS_GYP_DIR'] = True
-
-        dist_install = context['DIST_INSTALL']
-        if dist_install is True:
-            passthru.variables['DIST_INSTALL'] = True
-        elif dist_install is False:
-            passthru.variables['NO_DIST_INSTALL'] = True
-
-        # Ideally, this should be done in templates, but this is difficult at
-        # the moment because USE_STATIC_LIBS can be set after a template
-        # returns. Eventually, with context-based templates, it will be
-        # possible.
-        if (context.config.substs.get('OS_ARCH') == 'WINNT' and
-                not context.config.substs.get('GNU_CC')):
-            use_static_lib = (context.get('USE_STATIC_LIBS') and
-                              not context.config.substs.get('MOZ_ASAN'))
-            rtl_flag = '-MT' if use_static_lib else '-MD'
-            if (context.config.substs.get('MOZ_DEBUG') and
-                    not context.config.substs.get('MOZ_NO_DEBUG_RTL')):
-                rtl_flag += 'd'
-            # Use a list, like MOZBUILD_*FLAGS variables
-            passthru.variables['RTL_FLAGS'] = [rtl_flag]
-
-        generated_files = set()
-        for obj in self._process_generated_files(context):
-            for f in obj.outputs:
-                generated_files.add(f)
-            yield obj
-
-        for path in context['CONFIGURE_SUBST_FILES']:
-            sub = self._create_substitution(ConfigFileSubstitution, context,
-                path)
-            generated_files.add(str(sub.relpath))
-            yield sub
-
-        defines = context.get('DEFINES')
-        if defines:
-            yield Defines(context, defines)
-
-        host_defines = context.get('HOST_DEFINES')
-        if host_defines:
-            yield HostDefines(context, host_defines)
-
-        simple_lists = [
-            ('GENERATED_EVENTS_WEBIDL_FILES', GeneratedEventWebIDLFile),
-            ('GENERATED_WEBIDL_FILES', GeneratedWebIDLFile),
-            ('IPDL_SOURCES', IPDLFile),
-            ('PREPROCESSED_TEST_WEBIDL_FILES', PreprocessedTestWebIDLFile),
-            ('PREPROCESSED_WEBIDL_FILES', PreprocessedWebIDLFile),
-            ('TEST_WEBIDL_FILES', TestWebIDLFile),
-            ('WEBIDL_FILES', WebIDLFile),
-            ('WEBIDL_EXAMPLE_INTERFACES', ExampleWebIDLInterface),
-        ]
-        for context_var, klass in simple_lists:
-            for name in context.get(context_var, []):
-                yield klass(context, name)
-
-        for local_include in context.get('LOCAL_INCLUDES', []):
-            if (not isinstance(local_include, ObjDirPath) and
-                    not os.path.exists(local_include.full_path)):
-                raise SandboxValidationError('Path specified in LOCAL_INCLUDES '
-                    'does not exist: %s (resolved to %s)' % (local_include,
-                    local_include.full_path), context)
-            yield LocalInclude(context, local_include)
-
-        for obj in self._handle_linkables(context, passthru, generated_files):
-            yield obj
-
-        generated_files.update(['%s%s' % (k, self.config.substs.get('BIN_SUFFIX', '')) for k in self._binaries.keys()])
-
-        components = []
-        for var, cls in (
-            ('BRANDING_FILES', BrandingFiles),
-            ('EXPORTS', Exports),
-            ('FINAL_TARGET_FILES', FinalTargetFiles),
-            ('FINAL_TARGET_PP_FILES', FinalTargetPreprocessedFiles),
-            ('OBJDIR_FILES', ObjdirFiles),
-            ('OBJDIR_PP_FILES', ObjdirPreprocessedFiles),
-            ('SDK_FILES', SdkFiles),
-            ('TEST_HARNESS_FILES', TestHarnessFiles),
-        ):
-            all_files = context.get(var)
-            if not all_files:
-                continue
-            if dist_install is False and var != 'TEST_HARNESS_FILES':
-                raise SandboxValidationError(
-                    '%s cannot be used with DIST_INSTALL = False' % var,
-                    context)
-            has_prefs = False
-            has_resources = False
-            for base, files in all_files.walk():
-                if var == 'TEST_HARNESS_FILES' and not base:
-                    raise SandboxValidationError(
-                        'Cannot install files to the root of TEST_HARNESS_FILES', context)
-                if base == 'components':
-                    components.extend(files)
-                if base == 'defaults/pref':
-                    has_prefs = True
-                if mozpath.split(base)[0] == 'res':
-                    has_resources = True
-                for f in files:
-                    if ((var == 'FINAL_TARGET_PP_FILES' or
-                         var == 'OBJDIR_PP_FILES') and
-                        not isinstance(f, SourcePath)):
-                        raise SandboxValidationError(
-                                ('Only source directory paths allowed in ' +
-                                 '%s: %s')
-                                % (var, f,), context)
-                    if not isinstance(f, ObjDirPath):
-                        path = f.full_path
-                        if '*' not in path and not os.path.exists(path):
-                            raise SandboxValidationError(
-                                'File listed in %s does not exist: %s'
-                                % (var, path), context)
-                    else:
-                        # TODO: Bug 1254682 - The '/' check is to allow
-                        # installing files generated from other directories,
-                        # which is done occasionally for tests. However, it
-                        # means we don't fail early if the file isn't actually
-                        # created by the other moz.build file.
-                        if f.target_basename not in generated_files and '/' not in f:
-                            raise SandboxValidationError(
-                                ('Objdir file listed in %s not in ' +
-                                 'GENERATED_FILES: %s') % (var, f), context)
-
-            # Addons (when XPI_NAME is defined) and Applications (when
-            # DIST_SUBDIR is defined) use a different preferences directory
-            # (default/preferences) from the one the GRE uses (defaults/pref).
-            # Hence, we move the files from the latter to the former in that
-            # case.
-            if has_prefs and (context.get('XPI_NAME') or
-                              context.get('DIST_SUBDIR')):
-                all_files.defaults.preferences += all_files.defaults.pref
-                del all_files.defaults._children['pref']
-
-            if has_resources and (context.get('DIST_SUBDIR') or
-                                  context.get('XPI_NAME')):
-                raise SandboxValidationError(
-                    'RESOURCES_FILES cannot be used with DIST_SUBDIR or '
-                    'XPI_NAME.', context)
-
-            yield cls(context, all_files)
-
-        # Check for manifest declarations in EXTRA_{PP_,}COMPONENTS.
-        if any(e.endswith('.js') for e in components) and \
-                not any(e.endswith('.manifest') for e in components) and \
-                not context.get('NO_JS_MANIFEST', False):
-            raise SandboxValidationError('A .js component was specified in EXTRA_COMPONENTS '
-                                         'or EXTRA_PP_COMPONENTS without a matching '
-                                         '.manifest file.  See '
-                                         'https://developer.mozilla.org/en/XPCOM/XPCOM_changes_in_Gecko_2.0 .',
-                                         context);
-
-        for c in components:
-            if c.endswith('.manifest'):
-                yield ChromeManifestEntry(context, 'chrome.manifest',
-                                          Manifest('components',
-                                                   mozpath.basename(c)))
-
-        for obj in self._process_test_manifests(context):
-            yield obj
-
-        for obj in self._process_jar_manifests(context):
-            yield obj
-
-        for name, jar in context.get('JAVA_JAR_TARGETS', {}).items():
-            yield ContextWrapped(context, jar)
-
-        for name, data in context.get('ANDROID_ECLIPSE_PROJECT_TARGETS', {}).items():
-            yield ContextWrapped(context, data)
-
-        if context.get('USE_YASM') is True:
-            yasm = context.config.substs.get('YASM')
-            if not yasm:
-                raise SandboxValidationError('yasm is not available', context)
-            passthru.variables['AS'] = yasm
-            passthru.variables['ASFLAGS'] = context.config.substs.get('YASM_ASFLAGS')
-            passthru.variables['AS_DASH_C_FLAG'] = ''
-
-        for (symbol, cls) in [
-                ('ANDROID_RES_DIRS', AndroidResDirs),
-                ('ANDROID_EXTRA_RES_DIRS', AndroidExtraResDirs),
-                ('ANDROID_ASSETS_DIRS', AndroidAssetsDirs)]:
-            paths = context.get(symbol)
-            if not paths:
-                continue
-            for p in paths:
-                if isinstance(p, SourcePath) and not os.path.isdir(p.full_path):
-                    raise SandboxValidationError('Directory listed in '
-                        '%s is not a directory: \'%s\'' %
-                            (symbol, p.full_path), context)
-            yield cls(context, paths)
-
-        android_extra_packages = context.get('ANDROID_EXTRA_PACKAGES')
-        if android_extra_packages:
-            yield AndroidExtraPackages(context, android_extra_packages)
-
-        if passthru.variables:
-            yield passthru
-
-    def _create_substitution(self, cls, context, path):
-        sub = cls(context)
-        sub.input_path = '%s.in' % path.full_path
-        sub.output_path = path.translated
-        sub.relpath = path
-
-        return sub
 
     def _process_xpidl(self, context):
         # XPIDL source files get processed and turned into .h and .xpt files.
@@ -1030,20 +842,13 @@ class TreeMetadataEmitter(LoggingMixin):
                 xpidl_module, add_to_manifest=not context['XPIDL_NO_MANIFEST'])
 
     def _process_generated_files(self, context):
-        for path in context['CONFIGURE_DEFINE_FILES']:
-            script = mozpath.join(mozpath.dirname(mozpath.dirname(__file__)),
-                                  'action', 'process_define_files.py')
-            yield GeneratedFile(context, script, 'process_define_file',
-                                unicode(path),
-                                [Path(context, path + '.in')])
-
         generated_files = context.get('GENERATED_FILES')
         if not generated_files:
             return
 
         for f in generated_files:
             flags = generated_files[f]
-            outputs = f
+            output = f
             inputs = []
             if flags.script:
                 method = "main"
@@ -1070,36 +875,133 @@ class TreeMetadataEmitter(LoggingMixin):
                         raise SandboxValidationError(
                             'Input for generating %s does not exist: %s'
                             % (f, p.full_path), context)
-                    inputs.append(p)
+                    inputs.append(p.full_path)
             else:
                 script = None
                 method = None
-            yield GeneratedFile(context, script, method, outputs, inputs)
+            yield GeneratedFile(context, script, method, output, inputs)
+
+    def _process_test_harness_files(self, context):
+        test_harness_files = context.get('TEST_HARNESS_FILES')
+        if not test_harness_files:
+            return
+
+        srcdir_files = defaultdict(list)
+        srcdir_pattern_files = defaultdict(list)
+        objdir_files = defaultdict(list)
+
+        for path, strings in test_harness_files.walk():
+            if not path and strings:
+                raise SandboxValidationError(
+                    'Cannot install files to the root of TEST_HARNESS_FILES', context)
+
+            for s in strings:
+                # Ideally, TEST_HARNESS_FILES would expose Path instances, but
+                # subclassing HierarchicalStringList to be ContextDerived is
+                # painful, so until we actually kill HierarchicalStringList,
+                # just do Path manipulation here.
+                p = Path(context, s)
+                if isinstance(p, ObjDirPath):
+                    objdir_files[path].append(p.full_path)
+                elif '*' in s:
+                    resolved = p.full_path
+                    if s[0] == '/':
+                        pattern_start = resolved.index('*')
+                        base_path = mozpath.dirname(resolved[:pattern_start])
+                        pattern = resolved[len(base_path)+1:]
+                    else:
+                        base_path = context.srcdir
+                        pattern = s
+                    srcdir_pattern_files[path].append((base_path, pattern));
+                elif not os.path.exists(p.full_path):
+                    raise SandboxValidationError(
+                        'File listed in TEST_HARNESS_FILES does not exist: %s' % s, context)
+                else:
+                    srcdir_files[path].append(p.full_path)
+
+        yield TestHarnessFiles(context, srcdir_files,
+                               srcdir_pattern_files, objdir_files)
+
+    def _handle_programs(self, context):
+        for kind, cls in [('PROGRAM', Program), ('HOST_PROGRAM', HostProgram)]:
+            program = context.get(kind)
+            if program:
+                if program in self._binaries:
+                    raise SandboxValidationError(
+                        'Cannot use "%s" as %s name, '
+                        'because it is already used in %s' % (program, kind,
+                        self._binaries[program].relativedir), context)
+                self._binaries[program] = cls(context, program)
+                self._linkage.append((context, self._binaries[program],
+                    kind.replace('PROGRAM', 'USE_LIBS')))
+
+        for kind, cls in [
+                ('SIMPLE_PROGRAMS', SimpleProgram),
+                ('CPP_UNIT_TESTS', SimpleProgram),
+                ('HOST_SIMPLE_PROGRAMS', HostSimpleProgram)]:
+            for program in context[kind]:
+                if program in self._binaries:
+                    raise SandboxValidationError(
+                        'Cannot use "%s" in %s, '
+                        'because it is already used in %s' % (program, kind,
+                        self._binaries[program].relativedir), context)
+                self._binaries[program] = cls(context, program,
+                    is_unit_test=kind == 'CPP_UNIT_TESTS')
+                self._linkage.append((context, self._binaries[program],
+                    'HOST_USE_LIBS' if kind == 'HOST_SIMPLE_PROGRAMS'
+                    else 'USE_LIBS'))
 
     def _process_test_manifests(self, context):
-        for prefix, info in TEST_MANIFESTS.items():
-            for path, manifest in context.get('%s_MANIFESTS' % prefix, []):
-                for obj in self._process_test_manifest(context, info, path, manifest):
+        # While there are multiple test manifests, the behavior is very similar
+        # across them. We enforce this by having common handling of all
+        # manifests and outputting a single class type with the differences
+        # described inside the instance.
+        #
+        # Keys are variable prefixes and values are tuples describing how these
+        # manifests should be handled:
+        #
+        #    (flavor, install_prefix, package_tests)
+        #
+        # flavor identifies the flavor of this test.
+        # install_prefix is the path prefix of where to install the files in
+        #     the tests directory.
+        # package_tests indicates whether to package test files into the test
+        #     package; suites that compile the test files should not install
+        #     them into the test package.
+        #
+        test_manifests = dict(
+            A11Y=('a11y', 'testing/mochitest', 'a11y', True),
+            BROWSER_CHROME=('browser-chrome', 'testing/mochitest', 'browser', True),
+            ANDROID_INSTRUMENTATION=('instrumentation', 'instrumentation', '.', False),
+            JETPACK_PACKAGE=('jetpack-package', 'testing/mochitest', 'jetpack-package', True),
+            JETPACK_ADDON=('jetpack-addon', 'testing/mochitest', 'jetpack-addon', False),
+            METRO_CHROME=('metro-chrome', 'testing/mochitest', 'metro', True),
+            MOCHITEST=('mochitest', 'testing/mochitest', 'tests', True),
+            MOCHITEST_CHROME=('chrome', 'testing/mochitest', 'chrome', True),
+            MOCHITEST_WEBAPPRT_CONTENT=('webapprt-content', 'testing/mochitest', 'webapprtContent', True),
+            MOCHITEST_WEBAPPRT_CHROME=('webapprt-chrome', 'testing/mochitest', 'webapprtChrome', True),
+            WEBRTC_SIGNALLING_TEST=('steeplechase', 'steeplechase', '.', True),
+            XPCSHELL_TESTS=('xpcshell', 'xpcshell', '.', True),
+        )
+
+        for prefix, info in test_manifests.items():
+            for path in context.get('%s_MANIFESTS' % prefix, []):
+                for obj in self._process_test_manifest(context, info, path):
                     yield obj
 
-        for flavor in REFTEST_FLAVORS:
-            for path, manifest in context.get('%s_MANIFESTS' % flavor.upper(), []):
-                for obj in self._process_reftest_manifest(context, flavor, path, manifest):
+        for flavor in ('crashtest', 'reftest'):
+            for path in context.get('%s_MANIFESTS' % flavor.upper(), []):
+                for obj in self._process_reftest_manifest(context, flavor, path):
                     yield obj
 
-        for flavor in WEB_PLATFORM_TESTS_FLAVORS:
-            for path, manifest in context.get("%s_MANIFESTS" % flavor.upper().replace('-', '_'), []):
-                for obj in self._process_web_platform_tests_manifest(context, path, manifest):
-                    yield obj
-
-        python_tests = context.get('PYTHON_UNIT_TESTS')
-        if python_tests:
-            for obj in self._process_python_tests(context, python_tests):
+        for path in context.get("WEB_PLATFORM_TESTS_MANIFESTS", []):
+            for obj in self._process_web_platform_tests_manifest(context, path):
                 yield obj
 
-    def _process_test_manifest(self, context, info, manifest_path, mpmanifest):
+    def _process_test_manifest(self, context, info, manifest_path):
         flavor, install_root, install_subdir, package_tests = info
 
+        manifest_path = mozpath.normpath(manifest_path)
         path = mozpath.normpath(mozpath.join(context.srcdir, manifest_path))
         manifest_dir = mozpath.dirname(path)
         manifest_reldir = mozpath.dirname(mozpath.relpath(path,
@@ -1107,19 +1009,19 @@ class TreeMetadataEmitter(LoggingMixin):
         install_prefix = mozpath.join(install_root, install_subdir)
 
         try:
-            defaults = mpmanifest.manifest_defaults[os.path.normpath(path)]
-            if not mpmanifest.tests:
+            m = manifestparser.TestManifest(manifests=[path], strict=True,
+                                            rootdir=context.config.topsrcdir)
+            defaults = m.manifest_defaults[os.path.normpath(path)]
+            if not m.tests and not 'support-files' in defaults:
                 raise SandboxValidationError('Empty test manifest: %s'
                     % path, context)
 
-            obj = TestManifest(context, path, mpmanifest, flavor=flavor,
+            obj = TestManifest(context, path, m, flavor=flavor,
                 install_prefix=install_prefix,
                 relpath=mozpath.join(manifest_reldir, mozpath.basename(path)),
                 dupe_manifest='dupe-manifest' in defaults)
 
-            obj.default_support_files = defaults.get('support-files')
-
-            filtered = mpmanifest.tests
+            filtered = m.tests
 
             # Jetpack add-on tests are expected to be generated during the
             # build process so they won't exist here.
@@ -1138,24 +1040,63 @@ class TreeMetadataEmitter(LoggingMixin):
                                                         defaults['install-to-subdir'],
                                                         mozpath.basename(path))
 
+
+            # "head" and "tail" lists.
+            # All manifests support support-files.
+            #
+            # Keep a set of already seen support file patterns, because
+            # repeatedly processing the patterns from the default section
+            # for every test is quite costly (see bug 922517).
+            extras = (('head', set()),
+                      ('tail', set()),
+                      ('support-files', set()))
             def process_support_files(test):
-                install_info = self._test_files_converter.convert_support_files(
-                    test, install_root, manifest_dir, out_dir)
+                for thing, seen in extras:
+                    value = test.get(thing, '')
+                    if value in seen:
+                        continue
+                    seen.add(value)
+                    for pattern in value.split():
+                        # We only support globbing on support-files because
+                        # the harness doesn't support * for head and tail.
+                        if '*' in pattern and thing == 'support-files':
+                            obj.pattern_installs.append(
+                                (manifest_dir, pattern, out_dir))
+                        # "absolute" paths identify files that are to be
+                        # placed in the install_root directory (no globs)
+                        elif pattern[0] == '/':
+                            full = mozpath.normpath(mozpath.join(manifest_dir,
+                                mozpath.basename(pattern)))
+                            obj.installs[full] = (mozpath.join(install_root,
+                                pattern[1:]), False)
+                        else:
+                            full = mozpath.normpath(mozpath.join(manifest_dir,
+                                pattern))
 
-                obj.pattern_installs.extend(install_info.pattern_installs)
-                for source, dest in install_info.installs:
-                    obj.installs[source] = (dest, False)
-                obj.external_installs |= install_info.external_installs
-                for install_path in install_info.deferred_installs:
-                    if all(['*' not in install_path,
-                            not os.path.isfile(mozpath.join(context.config.topsrcdir,
-                                                            install_path[2:])),
-                            install_path not in install_info.external_installs]):
-                        raise SandboxValidationError('Error processing test '
-                           'manifest %s: entry in support-files not present '
-                           'in the srcdir: %s' % (path, install_path), context)
+                            dest_path = mozpath.join(out_dir, pattern)
 
-                obj.deferred_installs |= install_info.deferred_installs
+                            # If the path resolves to a different directory
+                            # tree, we take special behavior depending on the
+                            # entry type.
+                            if not full.startswith(manifest_dir):
+                                # If it's a support file, we install the file
+                                # into the current destination directory.
+                                # This implementation makes installing things
+                                # with custom prefixes impossible. If this is
+                                # needed, we can add support for that via a
+                                # special syntax later.
+                                if thing == 'support-files':
+                                    dest_path = mozpath.join(out_dir,
+                                        os.path.basename(pattern))
+                                # If it's not a support file, we ignore it.
+                                # This preserves old behavior so things like
+                                # head files doesn't get installed multiple
+                                # times.
+                                else:
+                                    continue
+
+                            obj.installs[full] = (mozpath.normpath(dest_path),
+                                False)
 
             for test in filtered:
                 obj.tests.append(test)
@@ -1170,9 +1111,13 @@ class TreeMetadataEmitter(LoggingMixin):
 
                 process_support_files(test)
 
+            if not filtered:
+                # If there are no tests, look for support-files under DEFAULT.
+                process_support_files(defaults)
+
             # We also copy manifests into the output directory,
             # including manifests from [include:foo] directives.
-            for mpath in mpmanifest.manifests():
+            for mpath in m.manifests():
                 mpath = mozpath.normpath(mpath)
                 out_path = mozpath.join(out_dir, mozpath.basename(mpath))
                 obj.installs[mpath] = (out_path, False)
@@ -1188,8 +1133,10 @@ class TreeMetadataEmitter(LoggingMixin):
                     del obj.installs[mozpath.join(manifest_dir, f)]
                 except KeyError:
                     raise SandboxValidationError('Error processing test '
-                       'manifest %s: entry in generated-files not present '
-                       'elsewhere in manifest: %s' % (path, f), context)
+                        'manifest %s: entry in generated-files not present '
+                        'elsewhere in manifest: %s' % (path, f), context)
+
+                obj.external_installs.add(mozpath.join(out_dir, f))
 
             yield obj
         except (AssertionError, Exception):
@@ -1198,11 +1145,15 @@ class TreeMetadataEmitter(LoggingMixin):
                     '\n'.join(traceback.format_exception(*sys.exc_info()))),
                 context)
 
-    def _process_reftest_manifest(self, context, flavor, manifest_path, manifest):
+    def _process_reftest_manifest(self, context, flavor, manifest_path):
+        manifest_path = mozpath.normpath(manifest_path)
         manifest_full_path = mozpath.normpath(mozpath.join(
             context.srcdir, manifest_path))
         manifest_reldir = mozpath.dirname(mozpath.relpath(manifest_full_path,
             context.config.topsrcdir))
+
+        manifest = reftest.ReftestManifest()
+        manifest.load(manifest_full_path)
 
         # reftest manifests don't come from manifest parser. But they are
         # similar enough that we can use the same emitted objects. Note
@@ -1226,13 +1177,36 @@ class TreeMetadataEmitter(LoggingMixin):
 
         yield obj
 
-    def _process_web_platform_tests_manifest(self, context, paths, manifest):
+    def _load_web_platform_tests_manifest(self, context, manifest_path, tests_root):
+        old_path = sys.path[:]
+        try:
+            # Setup sys.path to include all the dependencies required to import
+            # the web-platform-tests manifest parser. web-platform-tests provides
+            # a the localpaths.py to do the path manipulation, which we load,
+            # providing the __file__ variable so it can resolve the relative
+            # paths correctly.
+            paths_file = os.path.join(context.config.topsrcdir, "testing",
+                                      "web-platform", "tests", "tools", "localpaths.py")
+            _globals = {"__file__": paths_file}
+            execfile(paths_file, _globals)
+            import manifest as wptmanifest
+        finally:
+            sys.path = old_path
+
+        return wptmanifest.manifest.load(tests_root, manifest_path)
+
+    def _process_web_platform_tests_manifest(self, context, paths):
         manifest_path, tests_root = paths
+
+        manifest_path = mozpath.normpath(manifest_path)
         manifest_full_path = mozpath.normpath(mozpath.join(
             context.srcdir, manifest_path))
         manifest_reldir = mozpath.dirname(mozpath.relpath(manifest_full_path,
             context.config.topsrcdir))
+
         tests_root = mozpath.normpath(mozpath.join(context.srcdir, tests_root))
+
+        manifest = self._load_web_platform_tests_manifest(context, manifest_full_path, tests_root)
 
         # Create a equivalent TestManifest object
         obj = TestManifest(context, manifest_full_path, manifest,
@@ -1261,36 +1235,6 @@ class TreeMetadataEmitter(LoggingMixin):
 
         yield obj
 
-    def _process_python_tests(self, context, python_tests):
-        manifest_full_path = context.main_path
-        manifest_reldir = mozpath.dirname(mozpath.relpath(manifest_full_path,
-            context.config.topsrcdir))
-
-        obj = TestManifest(context, manifest_full_path,
-                mozpath.basename(manifest_full_path),
-                flavor='python', install_prefix='python/',
-                relpath=mozpath.join(manifest_reldir,
-                    mozpath.basename(manifest_full_path)))
-
-        for test in python_tests:
-            test = mozpath.normpath(mozpath.join(context.srcdir, test))
-            if not os.path.isfile(test):
-                raise SandboxValidationError('Path specified in '
-                   'PYTHON_UNIT_TESTS does not exist: %s' % test,
-                   context)
-            obj.tests.append({
-                'path': test,
-                'here': mozpath.dirname(test),
-                'manifest': manifest_full_path,
-                'name': mozpath.basename(test),
-                'head': '',
-                'tail': '',
-                'support-files': '',
-                'subsuite': '',
-            })
-
-        yield obj
-
     def _process_jar_manifests(self, context):
         jar_manifests = context.get('JAR_MANIFESTS', [])
         if len(jar_manifests) > 1:
@@ -1298,7 +1242,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 'it is currently limited to one value.', context)
 
         for path in jar_manifests:
-            yield JARManifest(context, path)
+            yield JARManifest(context, mozpath.join(context.srcdir, path))
 
         # Temporary test to look for jar.mn files that creep in without using
         # the new declaration. Before, we didn't require jar.mn files to
@@ -1313,10 +1257,11 @@ class TreeMetadataEmitter(LoggingMixin):
     def _emit_directory_traversal_from_context(self, context):
         o = DirectoryTraversal(context)
         o.dirs = context.get('DIRS', [])
+        o.test_dirs = context.get('TEST_DIRS', [])
+        o.affected_tiers = context.get_affected_tiers()
 
         # Some paths have a subconfigure, yet also have a moz.build. Those
         # shouldn't end up in self._external_paths.
-        if o.objdir:
-            self._external_paths -= { o.relobjdir }
+        self._external_paths -= { o.relobjdir }
 
         yield o

@@ -32,7 +32,7 @@ CacheIndexIterator::GetNextHash(SHA1Sum::Hash *aHash)
 {
   LOG(("CacheIndexIterator::GetNextHash() [this=%p]", this));
 
-  StaticMutexAutoLock lock(CacheIndex::sLock);
+  CacheIndexAutoLock lock(mIndex);
 
   if (NS_FAILED(mStatus)) {
     return mStatus;
@@ -54,7 +54,7 @@ CacheIndexIterator::Close()
 {
   LOG(("CacheIndexIterator::Close() [this=%p]", this));
 
-  StaticMutexAutoLock lock(CacheIndex::sLock);
+  CacheIndexAutoLock lock(mIndex);
 
   return CloseInternal(NS_ERROR_NOT_AVAILABLE);
 }

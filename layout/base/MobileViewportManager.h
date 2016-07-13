@@ -8,6 +8,7 @@
 
 #include "mozilla/Maybe.h"
 #include "nsIDOMEventListener.h"
+#include "nsIDocument.h"
 #include "nsIObserver.h"
 #include "Units.h"
 
@@ -27,36 +28,16 @@ public:
                         nsIDocument* aDocument);
   void Destroy();
 
-  /* Provide a resolution to use during the first paint instead of the default
-   * resolution computed from the viewport info metadata. This is in the same
-   * "units" as the argument to nsDOMWindowUtils::SetResolutionAndScaleTo. */
-  void SetRestoreResolution(float aResolution);
-
   /* Notify the MobileViewportManager that a reflow was requested in the
    * presShell.*/
   void RequestReflow();
 
-  /* Notify the MobileViewportManager that the resolution on the presShell was
-   * updated, and the SPCSPS needs to be updated. */
-  void ResolutionUpdated();
-
 private:
   ~MobileViewportManager();
-
-  /* Called to compute the initial viewport on page load or before-first-paint,
-   * whichever happens first. */
-  void SetInitialViewport();
 
   /* Main helper method to update the CSS viewport and any other properties that
    * need updating. */
   void RefreshViewportSize(bool aForceAdjustResolution);
-
-  /* Secondary main helper method to update just the SPCSPS. */
-  void RefreshSPCSPS();
-
-  /* Helper to clamp the given zoom by the min/max in the viewport info. */
-  mozilla::CSSToScreenScale ClampZoom(const mozilla::CSSToScreenScale& aZoom,
-                                      const nsViewportInfo& aViewportInfo);
 
   /* Updates the presShell resolution and returns the new zoom. */
   mozilla::CSSToScreenScale UpdateResolution(const nsViewportInfo& aViewportInfo,
@@ -73,10 +54,8 @@ private:
   nsIPresShell* MOZ_NON_OWNING_REF mPresShell; // raw ref since the presShell owns this
   nsCOMPtr<nsIDOMEventTarget> mEventTarget;
   bool mIsFirstPaint;
-  bool mPainted;
   mozilla::LayoutDeviceIntSize mDisplaySize;
   mozilla::CSSSize mMobileViewportSize;
-  mozilla::Maybe<float> mRestoreResolution;
 };
 
 #endif

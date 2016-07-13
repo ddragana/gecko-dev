@@ -9,7 +9,7 @@ function evalWithCache(code, ctx) {
 
   // We create a new global ...
   if (!("global" in ctx))
-    ctx.global = newGlobal({ cloneSingletons: true });
+    ctx.global = newGlobal();
 
   if (!("isRunOnce" in ctx))
     ctx.isRunOnce = true;

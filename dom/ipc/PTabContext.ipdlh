@@ -7,68 +7,48 @@
 include protocol PBrowser;
 include PBrowserOrId;
 
-using UIStateChangeType from "nsPIDOMWindow.h";
-
 namespace mozilla {
 namespace dom {
 
 // An IPCTabContext which corresponds to a PBrowser opened by a child when it
 // receives window.open().
 //
-// If isMozBrowserElement is false, this PopupIPCTabContext is either a
-// <xul:browser> or an app frame.  The frame's app-id and app-frame-owner-app-id
-// will be equal to the opener's values.  For a <xul:browser>, those app IDs
-// will be NO_APP_ID.
+// If isBrowserElement is false, this PopupIPCTabContext corresponds to an app
+// frame, and the frame's app-id and app-frame-owner-app-id will be equal to the
+// opener's values.
 //
-// If isMozBrowserElement is true, the frame's browserFrameOwnerAppId will be
-// equal to the opener's app-id.
+// If isBrowserElement is true, the frame's browserFrameOwnerAppId will be equal
+// to the opener's app-id.
 //
-// It's an error to set isMozBrowserElement == false if opener is a mozbrowser
+// It's an error to set isBrowserElement == false if opener is a browser
 // element.  Such a PopupIPCTabContext should be rejected by code which receives
 // it.
 struct PopupIPCTabContext
 {
   PBrowserOrId opener;
-  bool isMozBrowserElement;
+  bool isBrowserElement;
 };
 
-// An IPCTabContext which corresponds to an app, browser, or normal frame.
-struct FrameIPCTabContext
+// An IPCTabContext which corresponds to an app frame.
+struct AppFrameIPCTabContext
 {
-  // The stringified originAttributes dictionary.
-  nsCString originSuffix;
+  // The ID of the app this frame corresponds to.  May be NO_APP_ID.
+  uint32_t ownAppId;
 
-  // The ID of the app containing this app/browser frame, if applicable.
-  uint32_t frameOwnerAppId;
-
-  // The origin without originAttribute suffix for a signed package.
-  // This value would be empty if the TabContext doesn't own a signed
-  // package.
-  nsCString signedPkgOriginNoSuffix;
-
-  // Whether this is a mozbrowser frame.  <iframe mozbrowser mozapp> and
-  // <xul:browser> are not considered to be mozbrowser frames.
-  bool isMozBrowserElement;
-
-  // Whether this TabContext should work in prerender mode.
-  bool isPrerendered;
-
-  // The requested presentation URL.
-  // This value would be empty if the TabContext isn't created for
-  // presented content.
-  nsString presentationURL;
-
-  // Keyboard indicator state inherited from the parent.
-  UIStateChangeType showAccelerators;
-  UIStateChangeType showFocusRings;
+  // The ID of the app containing this frame.  May be NO_APP_ID.
+  uint32_t appFrameOwnerAppId;
 };
 
-// XXXcatalinb: This is only used by ServiceWorkerClients::OpenWindow.
-// Because service workers don't have an associated TabChild
-// we can't satisfy the security constraints on b2g. As such, the parent
-// process will accept this tab context only on desktop.
-struct UnsafeIPCTabContext
-{ };
+// An IPCTabContext which corresponds to a browser frame.
+struct BrowserFrameIPCTabContext
+{
+  // The ID of the app which contains this browser frame.  May be NO_APP_ID.
+  uint32_t browserFrameOwnerAppId;
+};
+
+// This is equivalent to AppFrameIPCTabContext with all fields set to NO_APP_ID.
+struct VanillaFrameIPCTabContext
+{};
 
 // IPCTabContext is an analog to mozilla::dom::TabContext.  Both specify an
 // iframe/PBrowser's own and containing app-ids and tell you whether the
@@ -76,12 +56,18 @@ struct UnsafeIPCTabContext
 // travel over IPC.
 //
 // We need IPCTabContext (specifically, PopupIPCTabContext) to prevent a
-// privilege escalation attack by a compromised child process.
-union IPCTabContext
+// privilege escalation attack by a compromised child process.  See the comment
+// on AllocPBrowser for details.
+union IPCTabAppBrowserContext
 {
   PopupIPCTabContext;
-  FrameIPCTabContext;
-  UnsafeIPCTabContext;
+  AppFrameIPCTabContext;
+  BrowserFrameIPCTabContext;
+  VanillaFrameIPCTabContext;
+};
+
+struct IPCTabContext {
+  IPCTabAppBrowserContext appBrowserContext;
 };
 
 }

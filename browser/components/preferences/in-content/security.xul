@@ -20,27 +20,11 @@
   <preference id="xpinstall.whitelist.required"
               name="xpinstall.whitelist.required"
               type="bool"/>
-
   <preference id="browser.safebrowsing.malware.enabled"
               name="browser.safebrowsing.malware.enabled"
               type="bool"/>
-  <preference id="browser.safebrowsing.phishing.enabled"
-              name="browser.safebrowsing.phishing.enabled"
-              type="bool"/>
-
-  <preference id="browser.safebrowsing.downloads.enabled"
-              name="browser.safebrowsing.downloads.enabled"
-              type="bool"/>
-
-  <preference id="urlclassifier.malwareTable"
-              name="urlclassifier.malwareTable"
-              type="string"/>
-
-  <preference id="browser.safebrowsing.downloads.remote.block_potentially_unwanted"
-              name="browser.safebrowsing.downloads.remote.block_potentially_unwanted"
-              type="bool"/>
-  <preference id="browser.safebrowsing.downloads.remote.block_uncommon"
-              name="browser.safebrowsing.downloads.remote.block_uncommon"
+  <preference id="browser.safebrowsing.enabled"
+              name="browser.safebrowsing.enabled"
               type="bool"/>
 
   <!-- Passwords -->
@@ -52,9 +36,7 @@
       class="header"
       hidden="true"
       data-category="paneSecurity">
-  <label class="header-name" flex="1">&paneSecurity.title;</label>
-  <button class="help-button"
-          aria-label="&helpButton.label;"/>
+  <label class="header-name">&paneSecurity.title;</label>
 </hbox>
 
 <!-- addons, forgery (phishing) UI -->
@@ -75,27 +57,24 @@
 
   <separator class="thin"/>
   <vbox align="start">
-    <checkbox id="enableSafeBrowsing"
-              label="&enableSafeBrowsing.label;"
-              accesskey="&enableSafeBrowsing.accesskey;" />
-    <vbox class="indent">
-      <checkbox id="blockDownloads"
-                label="&blockDownloads.label;"
-                accesskey="&blockDownloads.accesskey;" />
-      <checkbox id="blockUncommonUnwanted"
-                label="&blockUncommonUnwanted.label;"
-                accesskey="&blockUncommonUnwanted.accesskey;" />
-    </vbox>
+    <checkbox id="blockAttackSites"
+              label="&blockAttackSites.label;"
+              accesskey="&blockAttackSites.accesskey;"
+              preference="browser.safebrowsing.malware.enabled" />
+    <checkbox id="blockWebForgeries"
+              label="&blockWebForgeries.label;"
+              accesskey="&blockWebForgeries.accesskey;"
+              preference="browser.safebrowsing.enabled" />
   </vbox>
 </groupbox>
 
 <!-- Passwords -->
 <groupbox id="passwordsGroup" orient="vertical" data-category="paneSecurity" hidden="true">
-  <caption><label>&logins.label;</label></caption>
+  <caption><label>&passwords.label;</label></caption>
 
   <hbox id="savePasswordsBox">
     <checkbox id="savePasswords"
-              label="&rememberLogins.label;" accesskey="&rememberLogins.accesskey;"
+              label="&rememberPasswords.label;" accesskey="&rememberPasswords.accesskey;"
               preference="signon.rememberSignons"
               onsyncfrompreference="return gSecurityPane.readSavePasswords();"/>
     <spacer flex="1"/>
@@ -124,7 +103,7 @@
       <row id="showPasswordRow">
         <hbox id="showPasswordsBox"/>
         <button id="showPasswords"
-                label="&savedLogins.label;" accesskey="&savedLogins.accesskey;"
+                label="&savedPasswords.label;" accesskey="&savedPasswords.accesskey;"
                 preference="pref.privacy.disable_button.view_passwords"/>
       </row>
     </rows>

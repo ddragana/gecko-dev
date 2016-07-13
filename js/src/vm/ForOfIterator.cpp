@@ -17,6 +17,8 @@
 using namespace js;
 using JS::ForOfIterator;
 
+using mozilla::UniquePtr;
+
 bool
 ForOfIterator::init(HandleValue iterable, NonIterableBehavior nonIterableBehavior)
 {
@@ -47,6 +49,12 @@ ForOfIterator::init(HandleValue iterable, NonIterableBehavior nonIterableBehavio
 
     MOZ_ASSERT(index == NOT_ARRAY);
 
+    // The iterator is the result of calling obj[@@iterator]().
+    InvokeArgs args(cx);
+    if (!args.init(0))
+        return false;
+    args.setThis(ObjectValue(*iterableObj));
+
     RootedValue callee(cx);
     RootedId iteratorId(cx, SYMBOL_TO_JSID(cx->wellKnownSymbols().iterator));
     if (!GetProperty(cx, iterableObj, iterableObj, iteratorId, &callee))
@@ -63,18 +71,19 @@ ForOfIterator::init(HandleValue iterable, NonIterableBehavior nonIterableBehavio
     // throw an inscrutable error message about |method| rather than this nice
     // one about |obj|.
     if (!callee.isObject() || !callee.toObject().isCallable()) {
-        UniqueChars bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, iterable, nullptr);
+        UniquePtr<char[], JS::FreePolicy> bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK,
+                                                                          iterable, nullptr);
         if (!bytes)
             return false;
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_ITERABLE, bytes.get());
         return false;
     }
 
-    RootedValue res(cx);
-    if (!js::Call(cx, callee, iterable, &res))
+    args.setCallee(callee);
+    if (!Invoke(cx, args))
         return false;
 
-    iterator = ToObject(cx, res);
+    iterator = ToObject(cx, args.rval());
     if (!iterator)
         return false;
 
@@ -114,6 +123,7 @@ bool
 ForOfIterator::next(MutableHandleValue vp, bool* done)
 {
     MOZ_ASSERT(iterator);
+
     if (index != NOT_ARRAY) {
         ForOfPIC::Chain* stubChain = ForOfPIC::getOrCreate(cx_);
         if (!stubChain)
@@ -128,26 +138,30 @@ ForOfIterator::next(MutableHandleValue vp, bool* done)
             return false;
     }
 
-    RootedValue v(cx_);
-    if (!GetProperty(cx_, iterator, iterator, cx_->names().next, &v))
+    RootedValue method(cx_);
+    if (!GetProperty(cx_, iterator, iterator, cx_->names().next, &method))
         return false;
 
-    if (!js::Call(cx_, v, iterator, &v))
+    InvokeArgs args(cx_);
+    if (!args.init(1))
+        return false;
+    args.setCallee(method);
+    args.setThis(ObjectValue(*iterator));
+    args[0].setUndefined();
+    if (!Invoke(cx_, args))
         return false;
 
-    RootedObject resultObj(cx_, ToObject(cx_, v));
+    RootedObject resultObj(cx_, ToObject(cx_, args.rval()));
     if (!resultObj)
         return false;
-
-    if (!GetProperty(cx_, resultObj, resultObj, cx_->names().done, &v))
+    RootedValue doneVal(cx_);
+    if (!GetProperty(cx_, resultObj, resultObj, cx_->names().done, &doneVal))
         return false;
-
-    *done = ToBoolean(v);
+    *done = ToBoolean(doneVal);
     if (*done) {
         vp.setUndefined();
         return true;
     }
-
     return GetProperty(cx_, resultObj, resultObj, cx_->names().value, vp);
 }
 
@@ -161,12 +175,17 @@ ForOfIterator::materializeArrayIterator()
     if (!GlobalObject::getSelfHostedFunction(cx_, cx_->global(), name, name, 1, &val))
         return false;
 
-    RootedValue indexOrRval(cx_, Int32Value(index));
-    if (!js::Call(cx_, val, iterator, indexOrRval, &indexOrRval))
+    InvokeArgs args(cx_);
+    if (!args.init(1))
+        return false;
+    args.setCallee(val);
+    args.setThis(ObjectValue(*iterator));
+    args[0].set(Int32Value(index));
+    if (!Invoke(cx_, args))
         return false;
 
     index = NOT_ARRAY;
     // Result of call to ArrayValuesAt must be an object.
-    iterator = &indexOrRval.toObject();
+    iterator = &args.rval().toObject();
     return true;
 }

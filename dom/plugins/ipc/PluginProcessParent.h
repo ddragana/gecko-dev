@@ -13,10 +13,11 @@
 #include "base/file_path.h"
 #include "base/task.h"
 #include "base/thread.h"
+#include "base/waitable_event.h"
 #include "chrome/common/child_process_host.h"
 
 #include "mozilla/ipc/GeckoChildProcessHost.h"
-#include "mozilla/ipc/TaskFactory.h"
+#include "mozilla/plugins/TaskFactory.h"
 #include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
 #include "nsIRunnable.h"
@@ -24,7 +25,7 @@
 namespace mozilla {
 namespace plugins {
 
-class LaunchCompleteTask : public Runnable
+class LaunchCompleteTask : public Task
 {
 public:
     LaunchCompleteTask()
@@ -65,6 +66,7 @@ public:
 
     const std::string& GetPluginFilePath() { return mPluginFilePath; }
 
+    using mozilla::ipc::GeckoChildProcessHost::GetShutDownEvent;
     using mozilla::ipc::GeckoChildProcessHost::GetChannel;
 
     void SetCallRunnableImmediately(bool aCallImmediately);
@@ -79,7 +81,7 @@ private:
     void RunLaunchCompleteTask();
 
     std::string mPluginFilePath;
-    ipc::TaskFactory<PluginProcessParent> mTaskFactory;
+    TaskFactory<PluginProcessParent> mTaskFactory;
     UniquePtr<LaunchCompleteTask> mLaunchCompleteTask;
     MessageLoop* mMainMsgLoop;
     bool mRunCompleteTaskImmediately;

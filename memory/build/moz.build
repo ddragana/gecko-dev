@@ -19,15 +19,15 @@ if CONFIG['MOZ_REPLACE_MALLOC']:
     ]
 
 SOURCES += [
-    'jemalloc_config.cpp',
+    'jemalloc_config.c',
     'mozmemory_wrap.c',
 ]
 
-if CONFIG['MOZ_JEMALLOC4']:
+if CONFIG['MOZ_JEMALLOC3']:
     SOURCES += [
         'mozjemalloc_compat.c',
     ]
-    LOCAL_INCLUDES += ['!../jemalloc/src/include']
+    GENERATED_INCLUDES += ['../jemalloc/src/include']
     if CONFIG['_MSC_VER']:
         LOCAL_INCLUDES += ['/memory/jemalloc/src/include/msvc_compat']
         if not CONFIG['HAVE_INTTYPES_H']:
@@ -40,8 +40,8 @@ if CONFIG['MOZ_REPLACE_MALLOC']:
 
 Library('memory')
 
-if CONFIG['MOZ_JEMALLOC4']:
-    if not CONFIG['MOZ_SYSTEM_JEMALLOC']:
+if CONFIG['MOZ_JEMALLOC3']:
+    if not CONFIG['MOZ_NATIVE_JEMALLOC']:
         USE_LIBS += [
             'jemalloc',
         ]
@@ -56,9 +56,11 @@ if CONFIG['MOZ_GLUE_IN_PROGRAM']:
 
 # Keep jemalloc separated when mozglue is statically linked
 if CONFIG['MOZ_MEMORY'] and (CONFIG['OS_TARGET'] in ('WINNT', 'Darwin', 'Android') or
-                             CONFIG['MOZ_SYSTEM_JEMALLOC']):
+                             CONFIG['MOZ_NATIVE_JEMALLOC']):
     FINAL_LIBRARY = 'mozglue'
 
 if CONFIG['MOZ_REPLACE_MALLOC'] and CONFIG['OS_TARGET'] == 'Darwin':
     # The zone allocator for OSX needs some jemalloc internal functions
     LOCAL_INCLUDES += ['/memory/jemalloc/src/include']
+
+FAIL_ON_WARNINGS = True

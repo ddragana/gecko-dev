@@ -48,21 +48,16 @@ public:
 
     virtual NativeData GetNativeData(
         GonkDisplay::DisplayType aDisplayType,
-        android::IGraphicBufferProducer* aSink = nullptr);
+        android::IGraphicBufferProducer* aProducer = nullptr);
 
     virtual void NotifyBootAnimationStopped();
 
 private:
-    void CreateFramebufferSurface(android::sp<ANativeWindow>& aNativeWindow,
-                                  android::sp<android::DisplaySurface>& aDisplaySurface,
-                                  uint32_t aWidth, uint32_t aHeight);
-    void CreateVirtualDisplaySurface(android::IGraphicBufferProducer* aSink,
-                                     android::sp<ANativeWindow>& aNativeWindow,
-                                     android::sp<android::DisplaySurface>& aDisplaySurface);
-
+    void StopBootAnim();
+    void CreateSurface(android::sp<ANativeWindow>& aNativeWindow,
+                       android::sp<android::DisplaySurface>& aDisplaySurface,
+                       uint32_t aWidth, uint32_t aHeight);
     void PowerOnDisplay(int aDpy);
-
-    int DoQueueBuffer(ANativeWindowBuffer* buf);
 
     hw_module_t const*        mModule;
     hw_module_t const*        mFBModule;

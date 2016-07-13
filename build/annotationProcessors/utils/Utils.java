@@ -6,7 +6,6 @@ package org.mozilla.gecko.annotationProcessors.utils;
 
 import org.mozilla.gecko.annotationProcessors.AnnotationInfo;
 
-import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Member;
@@ -82,17 +81,17 @@ public class Utils {
             return "mozilla::jni::ObjectArray::Param";
         }
 
-        if (type.equals(String.class) || type.equals(CharSequence.class)) {
+        if (type == String.class || type == CharSequence.class) {
             return "mozilla::jni::String::Param";
         }
 
-        if (type.equals(Class.class)) {
+        if (type == Class.class) {
             // You're doing reflection on Java objects from inside C, returning Class objects
             // to C, generating the corresponding code using this Java program. Really?!
-            return "mozilla::jni::Class::Param";
+            return "mozilla::jni::ClassObject::Param";
         }
 
-        if (type.equals(Throwable.class)) {
+        if (type == Throwable.class) {
             return "mozilla::jni::Throwable::Param";
         }
 
@@ -114,17 +113,17 @@ public class Utils {
             return "mozilla::jni::ObjectArray::LocalRef";
         }
 
-        if (type.equals(String.class)) {
+        if (type == String.class) {
             return "mozilla::jni::String::LocalRef";
         }
 
-        if (type.equals(Class.class)) {
+        if (type == Class.class) {
             // You're doing reflection on Java objects from inside C, returning Class objects
             // to C, generating the corresponding code using this Java program. Really?!
-            return "mozilla::jni::Class::LocalRef";
+            return "mozilla::jni::ClassObject::LocalRef";
         }
 
-        if (type.equals(Throwable.class)) {
+        if (type == Throwable.class) {
             return "mozilla::jni::Throwable::LocalRef";
         }
 
@@ -214,33 +213,6 @@ public class Utils {
     }
 
     /**
-     * Get the C++ name for a member.
-     *
-     * @param member Member to get the name for.
-     * @return JNI name as a string
-     */
-    public static String getNativeName(Class<?> clz) {
-        final String name = clz.getName();
-        return name.substring(0, 1).toUpperCase() + name.substring(1);
-    }
-
-    /**
-     * Get the C++ name for a member.
-     *
-     * @param member Member to get the name for.
-     * @return JNI name as a string
-     */
-    public static String getNativeName(AnnotatedElement element) {
-        if (element instanceof Class<?>) {
-            return getNativeName((Class<?>)element);
-        } else if (element instanceof Member) {
-            return getNativeName((Member)element);
-        } else {
-            return null;
-        }
-    }
-
-    /**
      * Get the JNI name for a member.
      *
      * @param member Member to get the name for.
@@ -251,10 +223,6 @@ public class Utils {
             return "<init>";
         }
         return member.getName();
-    }
-
-    public static String getUnqualifiedName(String name) {
-        return name.substring(name.lastIndexOf(':') + 1);
     }
 
     /**

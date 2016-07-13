@@ -45,7 +45,7 @@ public:
   void         ClearDidSkip() {  mDidSkip = false; }
 
 protected:
-  nsFilteredContentIterator() : mDidSkip(false), mIsOutOfRange(false) { }
+  nsFilteredContentIterator() { }
 
   virtual ~nsFilteredContentIterator();
 
@@ -66,7 +66,7 @@ protected:
   nsCOMPtr<nsIAtom> mMapAtom;
 
   nsCOMPtr<nsITextServicesFilter> mFilter;
-  RefPtr<nsRange>               mRange;
+  nsRefPtr<nsRange>               mRange;
   bool                            mDidSkip;
   bool                            mIsOutOfRange;
   eDirectionType                  mDirection;

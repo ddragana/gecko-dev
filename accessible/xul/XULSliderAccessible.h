@@ -26,6 +26,7 @@ public:
   virtual a11y::role NativeRole() override;
   virtual uint64_t NativeInteractiveState() const override;
   virtual bool NativelyUnavailable() const override;
+  virtual bool CanHaveAnonChildren() override;
 
   // Value
   virtual double MaxValue() const override;

@@ -8,6 +8,7 @@
 #define MOZILLA_DOMSVGTRANSFORMLIST_H__
 
 #include "mozilla/dom/SVGAnimatedTransformList.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
 #include "nsTArray.h"
@@ -90,12 +91,6 @@ public:
   bool IsAnimating() const {
     return mAList->IsAnimating();
   }
-  /**
-   * Returns true if there is an animated list mirroring the base list.
-   */
-  bool AnimListMirrorsBaseList() const {
-    return mAList->mAnimVal && !mAList->IsAnimating();
-  }
 
   uint32_t NumberOfItems() const
   {
@@ -164,7 +159,7 @@ private:
   // of clearing our pointer to them when they die.
   FallibleTArray<dom::SVGTransform*> mItems;
 
-  RefPtr<dom::SVGAnimatedTransformList> mAList;
+  nsRefPtr<dom::SVGAnimatedTransformList> mAList;
 };
 
 } // namespace mozilla

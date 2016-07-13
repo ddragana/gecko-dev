@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -152,11 +150,17 @@ void MessagePumpForUI::PumpOutPendingPaintMessages() {
   // to get the job done.  Actual common max is 4 peeks, but we'll be a little
   // safe here.
   const int kMaxPeekCount = 20;
+  bool win2k = win_util::GetWinVersion() <= win_util::WINVERSION_2000;
   int peek_count;
   for (peek_count = 0; peek_count < kMaxPeekCount; ++peek_count) {
     MSG msg;
-    if (!PeekMessage(&msg, NULL, 0, 0, PM_REMOVE | PM_QS_PAINT))
-      break;
+    if (win2k) {
+      if (!PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE))
+        break;
+    } else {
+      if (!PeekMessage(&msg, NULL, 0, 0, PM_REMOVE | PM_QS_PAINT))
+        break;
+    }
     ProcessMessageHelper(msg);
     if (state_->should_quit)  // Handle WM_QUIT.
       break;

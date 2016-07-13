@@ -2,10 +2,10 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-var {Ci: interfaces, Cc: classes} = Components;
+const {Ci: interfaces, Cc: classes} = Components;
 
-var Clipboard = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
-var HasFindClipboard = Clipboard.supportsFindClipboard();
+let Clipboard = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
+let HasFindClipboard = Clipboard.supportsFindClipboard();
 
 add_task(function* () {
   let newwindow = yield BrowserTestUtils.openNewBrowserWindow();

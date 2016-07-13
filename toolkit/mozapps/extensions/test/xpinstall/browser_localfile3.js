@@ -13,17 +13,13 @@ function test() {
                      .getService(Components.interfaces.nsIChromeRegistry);
 
   var chromeroot = extractChromeRoot(gTestPath);
-  var xpipath = chromeroot + "amosigned.xpi";
   try {
-    xpipath = cr.convertChromeURL(makeURI(xpipath)).spec;
+    var xpipath = cr.convertChromeURL(makeURI(chromeroot + "unsigned.xpi")).spec;
   } catch (ex) {
-    //scenario where we are running from a .jar and already extracted
+    var xpipath = chromeroot + "unsigned.xpi"; //scenario where we are running from a .jar and already extracted
   }
-
-  gBrowser.selectedTab = gBrowser.addTab("about:blank");
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    gBrowser.loadURI(xpipath);
-  });
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.loadURI(xpipath);
 }
 
 function allow_blocked(installInfo) {

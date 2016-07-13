@@ -17,6 +17,7 @@
 @class NSColor;
 @class NSView;
 class nsChildView;
+class nsIntRegion;
 
 namespace mozilla {
 
@@ -26,8 +27,7 @@ enum class VibrancyType {
   TOOLTIP,
   MENU,
   HIGHLIGHTED_MENUITEM,
-  SHEET,
-  SOURCE_LIST
+  SHEET
 };
 
 /**
@@ -69,8 +69,7 @@ public:
    * @param aType   The vibrancy type to use in the region.
    * @param aRegion The vibrant area, in device pixels.
    */
-  void UpdateVibrantRegion(VibrancyType aType,
-                           const LayoutDeviceIntRegion& aRegion);
+  void UpdateVibrantRegion(VibrancyType aType, const nsIntRegion& aRegion);
 
   /**
    * Clear the vibrant areas that we know about.
@@ -104,7 +103,7 @@ public:
   // The following are only public because otherwise ClearVibrantRegionFunc
   // can't see them.
   struct VibrantRegion {
-    LayoutDeviceIntRegion region;
+    nsIntRegion region;
     nsTArray<NSView*> effectViews;
   };
   void ClearVibrantRegion(const VibrantRegion& aVibrantRegion) const;

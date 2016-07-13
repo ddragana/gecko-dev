@@ -5,14 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MobileMessageCursorCallback.h"
-#include "MmsMessage.h"
-#include "MmsMessageInternal.h"
-#include "MobileMessageThread.h"
-#include "MobileMessageThreadInternal.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsIDOMDOMRequest.h"
-#include "SmsMessage.h"
-#include "SmsMessageInternal.h"
+#include "nsIDOMMozSmsMessage.h"
 #include "nsIMobileMessageCallback.h"
 #include "nsServiceManagerUtils.h"      // for do_GetService
 
@@ -28,7 +23,7 @@ NS_INTERFACE_MAP_END_INHERITING(DOMCursor)
 NS_IMPL_ADDREF_INHERITED(MobileMessageCursor, DOMCursor)
 NS_IMPL_RELEASE_INHERITED(MobileMessageCursor, DOMCursor)
 
-MobileMessageCursor::MobileMessageCursor(nsPIDOMWindowInner* aWindow,
+MobileMessageCursor::MobileMessageCursor(nsPIDOMWindow* aWindow,
                                          nsICursorContinueCallback* aCallback)
   : DOMCursor(aWindow, aCallback)
 {
@@ -85,36 +80,6 @@ MobileMessageCursor::FireSuccessWithNextPendingResult()
   // be empty.
   MOZ_ASSERT(mPendingResults.Length());
 
-  nsCOMPtr<nsISupports> result;
-
-  nsCOMPtr<nsIMobileMessageThread> internalThread =
-    do_QueryInterface(mPendingResults.LastElement());
-  if (internalThread) {
-    MobileMessageThreadInternal* thread =
-      static_cast<MobileMessageThreadInternal*>(internalThread.get());
-    result = new MobileMessageThread(GetOwner(), thread);
-  }
-
-  if (!result) {
-    nsCOMPtr<nsISmsMessage> internalSms =
-      do_QueryInterface(mPendingResults.LastElement());
-    if (internalSms) {
-      SmsMessageInternal* sms = static_cast<SmsMessageInternal*>(internalSms.get());
-      result = new SmsMessage(GetOwner(), sms);
-    }
-  }
-
-  if (!result) {
-    nsCOMPtr<nsIMmsMessage> internalMms =
-      do_QueryInterface(mPendingResults.LastElement());
-    if (internalMms) {
-      MmsMessageInternal* mms = static_cast<MmsMessageInternal*>(internalMms.get());
-      result = new MmsMessage(GetOwner(), mms);
-    }
-  }
-
-  MOZ_ASSERT(result);
-
   AutoJSAPI jsapi;
   if (NS_WARN_IF(!jsapi.Init(GetOwner()))) {
     return NS_ERROR_FAILURE;
@@ -123,7 +88,7 @@ MobileMessageCursor::FireSuccessWithNextPendingResult()
   JSContext* cx = jsapi.cx();
   JS::Rooted<JS::Value> val(cx);
   nsresult rv =
-    nsContentUtils::WrapNative(cx, result, &val);
+    nsContentUtils::WrapNative(cx, mPendingResults.LastElement(), &val);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mPendingResults.RemoveElementAt(mPendingResults.Length() - 1);
@@ -151,7 +116,7 @@ MobileMessageCursorCallback::NotifyCursorError(int32_t aError)
 {
   MOZ_ASSERT(mDOMCursor);
 
-  RefPtr<DOMCursor> cursor = mDOMCursor.forget();
+  nsRefPtr<DOMCursor> cursor = mDOMCursor.forget();
 
   switch (aError) {
     case nsIMobileMessageCallback::NO_SIGNAL_ERROR:
@@ -205,7 +170,7 @@ MobileMessageCursorCallback::NotifyCursorDone()
 {
   MOZ_ASSERT(mDOMCursor);
 
-  RefPtr<DOMCursor> cursor = mDOMCursor.forget();
+  nsRefPtr<DOMCursor> cursor = mDOMCursor.forget();
   cursor->FireDone();
 
   return NS_OK;

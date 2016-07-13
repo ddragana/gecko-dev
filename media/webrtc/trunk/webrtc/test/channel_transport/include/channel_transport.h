@@ -28,15 +28,15 @@ class VoiceChannelTransport : public UdpTransportData {
   virtual ~VoiceChannelTransport();
 
   // Start implementation of UdpTransportData.
-  void IncomingRTPPacket(const int8_t* incoming_rtp_packet,
-                         const size_t packet_length,
-                         const char* /*from_ip*/,
-                         const uint16_t /*from_port*/) override;
+  virtual void IncomingRTPPacket(const int8_t* incoming_rtp_packet,
+                                 const int32_t packet_length,
+                                 const char* /*from_ip*/,
+                                 const uint16_t /*from_port*/) OVERRIDE;
 
-  void IncomingRTCPPacket(const int8_t* incoming_rtcp_packet,
-                          const size_t packet_length,
-                          const char* /*from_ip*/,
-                          const uint16_t /*from_port*/) override;
+  virtual void IncomingRTCPPacket(const int8_t* incoming_rtcp_packet,
+                                  const int32_t packet_length,
+                                  const char* /*from_ip*/,
+                                  const uint16_t /*from_port*/) OVERRIDE;
   // End implementation of UdpTransportData.
 
   // Specifies the ports to receive RTP packets on.
@@ -59,15 +59,15 @@ class VideoChannelTransport : public UdpTransportData {
   virtual  ~VideoChannelTransport();
 
   // Start implementation of UdpTransportData.
-  void IncomingRTPPacket(const int8_t* incoming_rtp_packet,
-                         const size_t packet_length,
+  virtual void IncomingRTPPacket(const int8_t* incoming_rtp_packet,
+                         const int32_t packet_length,
                          const char* /*from_ip*/,
-                         const uint16_t /*from_port*/) override;
+                         const uint16_t /*from_port*/) OVERRIDE;
 
-  void IncomingRTCPPacket(const int8_t* incoming_rtcp_packet,
-                          const size_t packet_length,
+  virtual void IncomingRTCPPacket(const int8_t* incoming_rtcp_packet,
+                          const int32_t packet_length,
                           const char* /*from_ip*/,
-                          const uint16_t /*from_port*/) override;
+                          const uint16_t /*from_port*/) OVERRIDE;
   // End implementation of UdpTransportData.
 
   // Specifies the ports to receive RTP packets on.

@@ -20,10 +20,6 @@ template<typename T>
 class Sequence;
 } // namespace dom
 
-namespace webgl {
-class FormatUsageAuthority;
-} // namespace webgl
-
 class WebGLContext;
 class WebGLShader;
 class WebGLQuery;
@@ -38,7 +34,7 @@ public:
     explicit WebGLExtensionBase(WebGLContext* webgl);
 
     WebGLContext* GetParentObject() const {
-        return mContext;
+        return Context();
     }
 
     void MarkLost();
@@ -48,8 +44,6 @@ public:
 
 protected:
     virtual ~WebGLExtensionBase();
-
-    virtual void OnMarkLost() { }
 
     bool mIsLost;
 };
@@ -69,16 +63,6 @@ class WebGLExtensionCompressedTextureATC
 public:
     explicit WebGLExtensionCompressedTextureATC(WebGLContext*);
     virtual ~WebGLExtensionCompressedTextureATC();
-
-    DECL_WEBGL_EXTENSION_GOOP
-};
-
-class WebGLExtensionCompressedTextureES3
-    : public WebGLExtensionBase
-{
-public:
-    explicit WebGLExtensionCompressedTextureES3(WebGLContext*);
-    virtual ~WebGLExtensionCompressedTextureES3();
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -155,18 +139,6 @@ public:
     DECL_WEBGL_EXTENSION_GOOP
 };
 
-class WebGLExtensionEXTColorBufferFloat
-    : public WebGLExtensionBase
-{
-public:
-    explicit WebGLExtensionEXTColorBufferFloat(WebGLContext*);
-    virtual ~WebGLExtensionEXTColorBufferFloat() { }
-
-    static bool IsSupported(const WebGLContext*);
-
-    DECL_WEBGL_EXTENSION_GOOP
-};
-
 class WebGLExtensionFragDepth
     : public WebGLExtensionBase
 {
@@ -238,12 +210,8 @@ class WebGLExtensionTextureFloat
     : public WebGLExtensionBase
 {
 public:
-    static void InitWebGLFormats(webgl::FormatUsageAuthority* authority);
-
     explicit WebGLExtensionTextureFloat(WebGLContext*);
     virtual ~WebGLExtensionTextureFloat();
-
-    static bool IsSupported(const WebGLContext*);
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -262,12 +230,8 @@ class WebGLExtensionTextureHalfFloat
     : public WebGLExtensionBase
 {
 public:
-    static void InitWebGLFormats(webgl::FormatUsageAuthority* authority);
-
     explicit WebGLExtensionTextureHalfFloat(WebGLContext*);
     virtual ~WebGLExtensionTextureHalfFloat();
-
-    static bool IsSupported(const WebGLContext*);
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -316,6 +280,14 @@ public:
     void DrawBuffersWEBGL(const dom::Sequence<GLenum>& buffers);
 
     static bool IsSupported(const WebGLContext*);
+
+    static const size_t kMinColorAttachments = 4;
+    static const size_t kMinDrawBuffers = 4;
+    /*
+     WEBGL_draw_buffers does not give a minal value for GL_MAX_DRAW_BUFFERS. But, we request
+     for GL_MAX_DRAW_BUFFERS = 4 at least to be able to use all requested color attachments.
+     See DrawBuffersWEBGL in WebGLExtensionDrawBuffers.cpp inner comments for more informations.
+     */
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -389,8 +361,6 @@ public:
     DECL_WEBGL_EXTENSION_GOOP
 
 private:
-    virtual void OnMarkLost() override;
-
     /**
      * An active TIME_ELAPSED query participating in a begin/end block.
      */

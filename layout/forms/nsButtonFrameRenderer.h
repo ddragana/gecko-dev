@@ -7,6 +7,7 @@
 #define nsButtonFrameRenderer_h___
 
 #include "imgIContainer.h"
+#include "nsAutoPtr.h"
 #include "nsMargin.h"
 
 class nsIFrame;
@@ -38,17 +39,16 @@ public:
                          nsDisplayList* aBackground, nsDisplayList* aForeground);
 
 
-  DrawResult PaintOutlineAndFocusBorders(nsDisplayListBuilder* aBuilder,
-                                         nsPresContext* aPresContext,
-                                         nsRenderingContext& aRenderingContext,
-                                         const nsRect& aDirtyRect,
-                                         const nsRect& aRect);
+  void PaintOutlineAndFocusBorders(nsPresContext* aPresContext,
+                                   nsRenderingContext& aRenderingContext,
+                                   const nsRect& aDirtyRect,
+                                   const nsRect& aRect);
 
-  DrawResult PaintBorder(nsDisplayListBuilder* aBuilder,
-                         nsPresContext* aPresContext,
-                         nsRenderingContext& aRenderingContext,
-                         const nsRect& aDirtyRect,
-                         const nsRect& aRect);
+  DrawResult PaintBorderAndBackground(nsPresContext* aPresContext,
+                                      nsRenderingContext& aRenderingContext,
+                                      const nsRect& aDirtyRect,
+                                      const nsRect& aRect,
+                                      uint32_t aBGFlags);
 
   void SetFrame(nsFrame* aFrame, nsPresContext* aPresContext);
  
@@ -77,8 +77,8 @@ protected:
 private:
 
   // cached styles for focus and outline.
-  RefPtr<nsStyleContext> mInnerFocusStyle;
-  RefPtr<nsStyleContext> mOuterFocusStyle;
+  nsRefPtr<nsStyleContext> mInnerFocusStyle;
+  nsRefPtr<nsStyleContext> mOuterFocusStyle;
 
   nsFrame* mFrame;
 };

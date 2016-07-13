@@ -13,14 +13,13 @@ function test() {
                      .getService(Components.interfaces.nsIChromeRegistry);
 
   var chromeroot = extractChromeRoot(gTestPath);
-  var xpipath = chromeroot;
   try {
-    xpipath = cr.convertChromeURL(makeURI(chromeroot)).spec;
+    var xpipath = cr.convertChromeURL(makeURI(chromeroot)).spec;
   } catch (ex) {
-    //scenario where we are running from a .jar and already extracted
+    var xpipath = chromeroot; //scenario where we are running from a .jar and already extracted
   }
   var triggers = encodeURIComponent(JSON.stringify({
-    "Unsigned XPI": TESTROOT + "amosigned.xpi"
+    "Unsigned XPI": TESTROOT + "unsigned.xpi"
   }));
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.loadURI(xpipath + "installtrigger.html?" + triggers);

@@ -34,24 +34,12 @@ struct IccReplyCardLockError
   nsString message;
 };
 
-struct IccReplyReadContacts
-{
-  IccContactData[] contacts;
-};
-
-struct IccReplyUpdateContact
-{
-  IccContactData contact;
-};
-
 union IccReply
 {
   // Success
   IccReplySuccess;
   IccReplySuccessWithBoolean;
   IccReplyCardLockRetryCount;
-  IccReplyReadContacts;
-  IccReplyUpdateContact;
   // Error
   IccReplyError;
   IccReplyCardLockError;
@@ -65,7 +53,7 @@ child:
   /**
    * Sent when the asynchronous request has completed.
    */
-  async __delete__(IccReply response);
+  __delete__(IccReply response);
 };
 
 } // namespace icc

@@ -2,9 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict";
-
-add_task(function* () {
+function test() {
   // There should be one tab when we start the test
   let [origTab] = gBrowser.visibleTabs;
 
@@ -29,24 +27,29 @@ add_task(function* () {
   gBrowser.selectedTab = testTab;
   gBrowser.showOnlyTheseTabs([testTab]);
 
+  // if the tabview frame is initialized, we need to move the orignal tab to
+  // another group; otherwise, selecting a tab would make all three tabs in 
+  // the same group to display.
+  let tabViewWindow = TabView.getContentWindow();
+  if (tabViewWindow)
+    tabViewWindow.GroupItems.moveTabToGroupItem(origTab, null);
+
   visible = gBrowser.visibleTabs;
   is(visible.length, 2, "2 tabs should be visible including the pinned");
   is(visible[0], pinned, "first is pinned");
   is(visible[1], testTab, "next is the test tab");
   is(gBrowser.tabs.length, 3, "3 tabs should still be open");
 
-  gBrowser.selectTabAtIndex(1);
-  is(gBrowser.selectedTab, testTab, "second tab is the test tab");
   gBrowser.selectTabAtIndex(0);
   is(gBrowser.selectedTab, pinned, "first tab is pinned");
+  gBrowser.selectTabAtIndex(1);
+  is(gBrowser.selectedTab, testTab, "second tab is the test tab");
   gBrowser.selectTabAtIndex(2);
   is(gBrowser.selectedTab, testTab, "no third tab, so no change");
   gBrowser.selectTabAtIndex(0);
   is(gBrowser.selectedTab, pinned, "switch back to the pinned");
   gBrowser.selectTabAtIndex(2);
-  is(gBrowser.selectedTab, testTab, "no third tab, so select last tab");
-  gBrowser.selectTabAtIndex(-2);
-  is(gBrowser.selectedTab, pinned, "pinned tab is second from left (when orig tab is hidden)");
+  is(gBrowser.selectedTab, pinned, "no third tab, so no change");
   gBrowser.selectTabAtIndex(-1);
   is(gBrowser.selectedTab, testTab, "last tab is the test tab");
 
@@ -94,4 +97,7 @@ add_task(function* () {
   is(gBrowser.tabs.length, 1, "sanity check that it matches");
   is(gBrowser.selectedTab, origTab, "got the orig tab");
   is(origTab.hidden, false, "and it's not hidden -- visible!");
-});
+
+  if (tabViewWindow)
+    tabViewWindow.GroupItems.groupItems[0].close();
+}

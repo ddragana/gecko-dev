@@ -21,7 +21,7 @@ namespace storage {
 /**
  * Used to finalize an asynchronous statement on the background thread.
  */
-class AsyncStatementFinalizer : public Runnable
+class AsyncStatementFinalizer : public nsRunnable
 {
 public:
   /**
@@ -45,24 +45,22 @@ public:
   NS_IMETHOD Run()
   {
     if (mStatement->mAsyncStatement) {
-      sqlite3_finalize(mStatement->mAsyncStatement);
+      (void)::sqlite3_finalize(mStatement->mAsyncStatement);
       mStatement->mAsyncStatement = nullptr;
     }
-
-    nsCOMPtr<nsIThread> targetThread(mConnection->threadOpenedOn);
-    NS_ProxyRelease(targetThread, mStatement.forget());
+    (void)::NS_ProxyRelease(mConnection->threadOpenedOn, mStatement);
     return NS_OK;
   }
 private:
-  RefPtr<StorageBaseStatementInternal> mStatement;
-  RefPtr<Connection> mConnection;
+  nsRefPtr<StorageBaseStatementInternal> mStatement;
+  nsRefPtr<Connection> mConnection;
 };
 
 /**
  * Finalize a sqlite3_stmt on the background thread for a statement whose
  * destructor was invoked and the statement was non-null.
  */
-class LastDitchSqliteStatementFinalizer : public Runnable
+class LastDitchSqliteStatementFinalizer : public nsRunnable
 {
 public:
   /**
@@ -80,7 +78,7 @@ public:
    *        responsibility for the instance and all other references to it
    *        should be forgotten.
    */
-  LastDitchSqliteStatementFinalizer(RefPtr<Connection> &aConnection,
+  LastDitchSqliteStatementFinalizer(nsRefPtr<Connection> &aConnection,
                                     sqlite3_stmt *aStatement)
   : mConnection(aConnection)
   , mAsyncStatement(aStatement)
@@ -93,12 +91,17 @@ public:
     (void)::sqlite3_finalize(mAsyncStatement);
     mAsyncStatement = nullptr;
 
-    nsCOMPtr<nsIThread> target(mConnection->threadOpenedOn);
-    (void)::NS_ProxyRelease(target, mConnection.forget());
+    // Because of our ambiguous nsISupports we cannot use the NS_ProxyRelease
+    // template helpers.
+    Connection *rawConnection = nullptr;
+    mConnection.swap(rawConnection);
+    (void)::NS_ProxyRelease(
+      rawConnection->threadOpenedOn,
+      NS_ISUPPORTS_CAST(mozIStorageConnection *, rawConnection));
     return NS_OK;
   }
 private:
-  RefPtr<Connection> mConnection;
+  nsRefPtr<Connection> mConnection;
   sqlite3_stmt *mAsyncStatement;
 };
 

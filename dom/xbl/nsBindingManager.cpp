@@ -6,7 +6,6 @@
 
 #include "nsBindingManager.h"
 
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsXBLService.h"
 #include "nsIInputStream.h"
@@ -39,6 +38,7 @@
 #include "nsWrapperCacheInlines.h"
 #include "nsIXPConnect.h"
 #include "nsDOMCID.h"
+#include "nsIDOMScriptObjectFactory.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsTHashtable.h"
 
@@ -83,20 +83,36 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsBindingManager)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 
+static PLDHashOperator
+DocumentInfoHashtableTraverser(nsIURI* key,
+                               nsXBLDocumentInfo* di,
+                               void* userArg)
+{
+  nsCycleCollectionTraversalCallback *cb =
+    static_cast<nsCycleCollectionTraversalCallback*>(userArg);
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*cb, "mDocumentTable value");
+  cb->NoteXPCOMChild(di);
+  return PL_DHASH_NEXT;
+}
+
+static PLDHashOperator
+LoadingDocHashtableTraverser(nsIURI* key,
+                             nsIStreamListener* sl,
+                             void* userArg)
+{
+  nsCycleCollectionTraversalCallback *cb =
+    static_cast<nsCycleCollectionTraversalCallback*>(userArg);
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*cb, "mLoadingDocTable value");
+  cb->NoteXPCOMChild(sl);
+  return PL_DHASH_NEXT;
+}
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsBindingManager)
   // The hashes keyed on nsIContent are traversed from the nsIContent itself.
-  if (tmp->mDocumentTable) {
-    for (auto iter = tmp->mDocumentTable->Iter(); !iter.Done(); iter.Next()) {
-      NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mDocumentTable value");
-      cb.NoteXPCOMChild(iter.UserData());
-    }
-  }
-  if (tmp->mLoadingDocTable) {
-    for (auto iter = tmp->mLoadingDocTable->Iter(); !iter.Done(); iter.Next()) {
-      NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mLoadingDocTable value");
-      cb.NoteXPCOMChild(iter.UserData());
-    }
-  }
+  if (tmp->mDocumentTable)
+      tmp->mDocumentTable->EnumerateRead(&DocumentInfoHashtableTraverser, &cb);
+  if (tmp->mLoadingDocTable)
+      tmp->mLoadingDocTable->EnumerateRead(&LoadingDocHashtableTraverser, &cb);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAttachedStack)
   // No need to traverse mProcessAttachedQueueEvent, since it'll just
   // fire at some point or become revoke and drop its ref to us.
@@ -197,19 +213,18 @@ nsBindingManager::SetWrappedJS(nsIContent* aContent, nsIXPConnectWrappedJS* aWra
 
 void
 nsBindingManager::RemovedFromDocumentInternal(nsIContent* aContent,
-                                              nsIDocument* aOldDocument,
-                                              DestructorHandling aDestructorHandling)
+                                              nsIDocument* aOldDocument)
 {
   NS_PRECONDITION(aOldDocument != nullptr, "no old document");
 
-  RefPtr<nsXBLBinding> binding = aContent->GetXBLBinding();
+  nsRefPtr<nsXBLBinding> binding = aContent->GetXBLBinding();
   if (binding) {
     // The binding manager may have been destroyed before a runnable
     // has had a chance to reach this point. If so, we bail out on calling
     // BindingDetached (which may invoke a XBL destructor) and
     // ChangeDocument, but we still want to clear out the binding
     // and insertion parent that may hold references.
-    if (!mDestroyed && aDestructorHandling == eRunDtor) {
+    if (!mDestroyed) {
       binding->PrototypeBinding()->BindingDetached(binding->GetBoundElement());
       binding->ChangeDocument(aOldDocument, nullptr);
     }
@@ -257,7 +272,7 @@ nsresult
 nsBindingManager::ClearBinding(nsIContent* aContent)
 {
   // Hold a ref to the binding so it won't die when we remove it from our table
-  RefPtr<nsXBLBinding> binding =
+  nsRefPtr<nsXBLBinding> binding =
     aContent ? aContent->GetXBLBinding() : nullptr;
 
   if (!binding) {
@@ -305,7 +320,7 @@ nsBindingManager::LoadBindingDocument(nsIDocument* aBoundDoc,
     return NS_ERROR_FAILURE;
 
   // Load the binding doc.
-  RefPtr<nsXBLDocumentInfo> info;
+  nsRefPtr<nsXBLDocumentInfo> info;
   xblService->LoadBindingDocumentInfo(nullptr, aBoundDoc, aURL,
                                       aOriginPrincipal, true,
                                       getter_AddRefs(info));
@@ -348,7 +363,7 @@ void
 nsBindingManager::PostProcessAttachedQueueEvent()
 {
   mProcessAttachedQueueEvent =
-    NewRunnableMethod(this, &nsBindingManager::DoProcessAttachedQueue);
+    NS_NewRunnableMethod(this, &nsBindingManager::DoProcessAttachedQueue);
   nsresult rv = NS_DispatchToCurrentThread(mProcessAttachedQueueEvent);
   if (NS_SUCCEEDED(rv) && mDocument) {
     mDocument->BlockOnload();
@@ -359,7 +374,7 @@ nsBindingManager::PostProcessAttachedQueueEvent()
 void
 nsBindingManager::PostPAQEventCallback(nsITimer* aTimer, void* aClosure)
 {
-  RefPtr<nsBindingManager> mgr = 
+  nsRefPtr<nsBindingManager> mgr = 
     already_AddRefed<nsBindingManager>(static_cast<nsBindingManager*>(aClosure));
   mgr->PostProcessAttachedQueueEvent();
   NS_RELEASE(aTimer);
@@ -392,7 +407,7 @@ nsBindingManager::DoProcessAttachedQueue()
       NS_ADDREF_THIS();
       // We drop our reference to the timer here, since the timer callback is
       // responsible for releasing the object.
-      Unused << timer.forget().take();
+      unused << timer.forget().take();
     }
   }
 
@@ -406,14 +421,17 @@ nsBindingManager::DoProcessAttachedQueue()
 }
 
 void
-nsBindingManager::ProcessAttachedQueueInternal(uint32_t aSkipSize)
+nsBindingManager::ProcessAttachedQueue(uint32_t aSkipSize)
 {
+  if (mProcessingAttachedStack || mAttachedStack.Length() <= aSkipSize)
+    return;
+
   mProcessingAttachedStack = true;
 
   // Excute constructors. Do this from high index to low
   while (mAttachedStack.Length() > aSkipSize) {
     uint32_t lastItem = mAttachedStack.Length() - 1;
-    RefPtr<nsXBLBinding> binding = mAttachedStack.ElementAt(lastItem);
+    nsRefPtr<nsXBLBinding> binding = mAttachedStack.ElementAt(lastItem);
     mAttachedStack.RemoveElementAt(lastItem);
     if (binding) {
       binding->ExecuteAttachedHandler();
@@ -770,7 +788,7 @@ nsBindingManager::MediumFeaturesChanged(nsPresContext* aPresContext,
 }
 
 void
-nsBindingManager::AppendAllSheets(nsTArray<StyleSheetHandle>& aArray)
+nsBindingManager::AppendAllSheets(nsTArray<CSSStyleSheet*>& aArray)
 {
   if (!mBoundContentSet) {
     return;
@@ -1011,6 +1029,21 @@ nsBindingManager::Traverse(nsIContent *aContent,
     cb.NoteXPCOMChild(aContent);
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "[via binding manager] mWrapperTable value");
     cb.NoteXPCOMChild(value);
+  }
+}
+
+void
+nsBindingManager::BeginOutermostUpdate()
+{
+  mAttachedStackSizeOnOutermost = mAttachedStack.Length();
+}
+
+void
+nsBindingManager::EndOutermostUpdate()
+{
+  if (!mProcessingAttachedStack) {
+    ProcessAttachedQueue(mAttachedStackSizeOnOutermost);
+    mAttachedStackSizeOnOutermost = 0;
   }
 }
 

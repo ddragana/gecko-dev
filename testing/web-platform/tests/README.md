@@ -2,10 +2,8 @@ The Web Platform Tests Project [![IRC chat](https://goo.gl/6nCIks)](http://irc.w
 ==============================
 
 The Web Platform Tests Project is a W3C-coordinated attempt to build a
-cross-browser testsuite for the Web-platform stack.  However, for mainly
-historic reasons, the CSS WG testsuite is in a separate repository,
-[csswg-test](https://github.com/w3c/csswg-test). Writing tests in a way
-that allows them to be run in all browsers gives browser projects
+cross-browser testsuite for the Web-platform stack. Writing tests in a
+way that allows them to be run in all browsers gives browser projects
 confidence that they are shipping software that is compatible with other
 implementations, and that later implementations will be compatible with
 their implementations. This in turn gives Web authors/developers
@@ -27,13 +25,12 @@ To get the tests running, you need to set up the test domains in your
 following entries are required:
 
 ```
-127.0.0.1   web-platform.test
-127.0.0.1   www.web-platform.test
-127.0.0.1   www1.web-platform.test
-127.0.0.1   www2.web-platform.test
-127.0.0.1   xn--n8j6ds53lwwkrqhv28a.web-platform.test
-127.0.0.1   xn--lve-6lad.web-platform.test
-0.0.0.0     nonexistent-origin.web-platform.test
+127.0.0.1	web-platform.test
+127.0.0.1	www.web-platform.test
+127.0.0.1	www1.web-platform.test
+127.0.0.1	www2.web-platform.test
+127.0.0.1	xn--n8j6ds53lwwkrqhv28a.web-platform.test
+127.0.0.1	xn--lve-6lad.web-platform.test
 ```
 
 Because web-platform-tests uses git submodules, you must ensure that
@@ -138,6 +135,14 @@ they will be under `html/browsers/history/the-history-interface/`.
 Various resources that tests depend on are in `common`, `images`, and
 `fonts`.
 
+
+If you're looking at a section of the specification and can't figure
+out where the directory is for it in the tree, just run:
+
+```
+node tools/scripts/id2path.js your-id
+```
+
 Branches
 ========
 
@@ -161,7 +166,7 @@ The way to contribute is just as usual:
 * Fork this repository (and make sure you're still relatively in sync
   with it if you forked a while ago).
 * Create a branch for your changes:
-  `git checkout -b topic`.
+  `git checkout -b your-name/topic`.
 * Make your changes.
 * Run the lint script described below.
 * Commit locally and push that to your repo.

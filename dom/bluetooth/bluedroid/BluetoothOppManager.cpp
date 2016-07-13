@@ -10,7 +10,7 @@
 #include "BluetoothService.h"
 #include "BluetoothSocket.h"
 #include "BluetoothUtils.h"
-#include "BluetoothUuidHelper.h"
+#include "BluetoothUuid.h"
 #include "ObexBase.h"
 
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
@@ -19,7 +19,7 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/UniquePtr.h"
+#include "nsAutoPtr.h"
 #include "nsCExternalHandlerService.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
@@ -55,12 +55,13 @@ namespace {
    */
   static const uint32_t kPutRequestAppendHeaderSize = 5;
 
-  // The default timeout we permit to wait for SDP updating if we can't get
-  // service channel.
-  static const double kSdpUpdatingTimeoutMs = 3000.0;
-
   // UUID of OBEX Object Push
-  static const BluetoothUuid kObexObjectPush(OBJECT_PUSH);
+  static const BluetoothUuid kObexObjectPush = {
+    {
+      0x00, 0x00, 0x11, 0x05, 0x00, 0x00, 0x10, 0x00,
+      0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB
+    }
+  };
 
   StaticRefPtr<BluetoothOppManager> sBluetoothOppManager;
   static bool sInShutdown = false;
@@ -71,14 +72,14 @@ BEGIN_BLUETOOTH_NAMESPACE
 class BluetoothOppManager::SendFileBatch final
 {
 public:
-  SendFileBatch(const BluetoothAddress& aDeviceAddress, Blob* aBlob)
+  SendFileBatch(const nsAString& aDeviceAddress, Blob* aBlob)
     : mDeviceAddress(aDeviceAddress)
   {
     mBlobs.AppendElement(aBlob);
   }
 
-  BluetoothAddress mDeviceAddress;
-  nsTArray<RefPtr<Blob>> mBlobs;
+  nsString mDeviceAddress;
+  nsTArray<nsRefPtr<Blob>> mBlobs;
 };
 
 NS_IMETHODIMP
@@ -102,11 +103,11 @@ BluetoothOppManager::Observe(nsISupports* aSubject,
   return NS_ERROR_UNEXPECTED;
 }
 
-class BluetoothOppManager::SendSocketDataTask final : public Runnable
+class BluetoothOppManager::SendSocketDataTask final : public nsRunnable
 {
 public:
-  SendSocketDataTask(UniquePtr<uint8_t[]> aStream, uint32_t aSize)
-    : mStream(Move(aStream))
+  SendSocketDataTask(uint8_t* aStream, uint32_t aSize)
+    : mStream(aStream)
     , mSize(aSize)
   {
     MOZ_ASSERT(!NS_IsMainThread());
@@ -116,17 +117,17 @@ public:
   {
     MOZ_ASSERT(NS_IsMainThread());
 
-    sBluetoothOppManager->SendPutRequest(mStream.get(), mSize);
+    sBluetoothOppManager->SendPutRequest(mStream, mSize);
 
     return NS_OK;
   }
 
 private:
-  UniquePtr<uint8_t[]> mStream;
+  nsAutoArrayPtr<uint8_t> mStream;
   uint32_t mSize;
 };
 
-class BluetoothOppManager::ReadFileTask final : public Runnable
+class BluetoothOppManager::ReadFileTask final : public nsRunnable
 {
 public:
   ReadFileTask(nsIInputStream* aInputStream,
@@ -142,11 +143,10 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
 
     uint32_t numRead;
-    auto buf = MakeUnique<uint8_t[]>(mAvailablePacketSize);
+    nsAutoArrayPtr<char> buf(new char[mAvailablePacketSize]);
 
     // function inputstream->Read() only works on non-main thread
-    nsresult rv = mInputStream->Read((char*)buf.get(), mAvailablePacketSize,
-                                     &numRead);
+    nsresult rv = mInputStream->Read(buf, mAvailablePacketSize, &numRead);
     if (NS_FAILED(rv)) {
       // Needs error handling here
       BT_WARNING("Failed to read from input stream");
@@ -156,8 +156,8 @@ public:
     if (numRead > 0) {
       sBluetoothOppManager->CheckPutFinal(numRead);
 
-      RefPtr<SendSocketDataTask> task =
-        new SendSocketDataTask(Move(buf), numRead);
+      nsRefPtr<SendSocketDataTask> task =
+        new SendSocketDataTask((uint8_t*)buf.forget(), numRead);
       if (NS_FAILED(NS_DispatchToMainThread(task))) {
         BT_WARNING("Failed to dispatch to main thread!");
         return NS_ERROR_FAILURE;
@@ -172,7 +172,7 @@ private:
   uint32_t mAvailablePacketSize;
 };
 
-class BluetoothOppManager::CloseSocketTask final : public Runnable
+class BluetoothOppManager::CloseSocketTask final : public Task
 {
 public:
   CloseSocketTask(BluetoothSocket* aSocket) : mSocket(aSocket)
@@ -180,15 +180,14 @@ public:
     MOZ_ASSERT(aSocket);
   }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     mSocket->Close();
-    return NS_OK;
   }
 
 private:
-  RefPtr<BluetoothSocket> mSocket;
+  nsRefPtr<BluetoothSocket> mSocket;
 };
 
 BluetoothOppManager::BluetoothOppManager() : mConnected(false)
@@ -199,7 +198,6 @@ BluetoothOppManager::BluetoothOppManager() : mConnected(false)
                                            , mPacketLength(0)
                                            , mPutPacketReceivedLength(0)
                                            , mBodySegmentLength(0)
-                                           , mNeedsUpdatingSdpRecords(false)
                                            , mAbortFlag(false)
                                            , mNewFileFlag(false)
                                            , mPutFinalFlag(false)
@@ -211,27 +209,36 @@ BluetoothOppManager::BluetoothOppManager() : mConnected(false)
                                            , mSentFileLength(0)
                                            , mWaitingToSendPutFinal(false)
                                            , mCurrentBlobIndex(-1)
-{ }
+{
+  mDeviceAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
+}
 
 BluetoothOppManager::~BluetoothOppManager()
-{ }
+{
+  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+  NS_ENSURE_TRUE_VOID(obs);
+  if (NS_FAILED(obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID))) {
+    BT_WARNING("Failed to remove shutdown observer!");
+  }
 
-nsresult
+  if (NS_FAILED(obs->RemoveObserver(this, NS_VOLUME_STATE_CHANGED))) {
+    BT_WARNING("Failed to remove volume observer!");
+  }
+}
+
+bool
 BluetoothOppManager::Init()
 {
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  NS_ENSURE_TRUE(obs, NS_ERROR_NOT_AVAILABLE);
-
-  auto rv = obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
-  if (NS_FAILED(rv)) {
+  NS_ENSURE_TRUE(obs, false);
+  if (NS_FAILED(obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false))) {
     BT_WARNING("Failed to add shutdown observer!");
-    return rv;
+    return false;
   }
 
-  rv = obs->AddObserver(this, NS_VOLUME_STATE_CHANGED, false);
-  if (NS_FAILED(rv)) {
+  if (NS_FAILED(obs->AddObserver(this, NS_VOLUME_STATE_CHANGED, false))) {
     BT_WARNING("Failed to add ns volume observer!");
-    return rv;
+    return false;
   }
 
   /**
@@ -243,67 +250,7 @@ BluetoothOppManager::Init()
    * absence of read events when device boots up.
    */
 
-  return NS_OK;
-}
-
-void
-BluetoothOppManager::Uninit()
-{
-  if (mServerSocket) {
-    mServerSocket->SetObserver(nullptr);
-
-    if (mServerSocket->GetConnectionStatus() != SOCKET_DISCONNECTED) {
-      mServerSocket->Close();
-    }
-    mServerSocket = nullptr;
-  }
-
-  if (mSocket) {
-    mSocket->SetObserver(nullptr);
-
-    if (mSocket->GetConnectionStatus() != SOCKET_DISCONNECTED) {
-      mSocket->Close();
-    }
-    mSocket = nullptr;
-  }
-
-  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  NS_ENSURE_TRUE_VOID(obs);
-
-  if (NS_FAILED(obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID))) {
-    BT_WARNING("Failed to remove shutdown observer!");
-  }
-
-  if (NS_FAILED(obs->RemoveObserver(this, NS_VOLUME_STATE_CHANGED))) {
-    BT_WARNING("Failed to remove volume observer!");
-  }
-}
-
-// static
-void
-BluetoothOppManager::InitOppInterface(BluetoothProfileResultHandler* aRes)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (aRes) {
-    aRes->Init();
-  }
-}
-
-// static
-void
-BluetoothOppManager::DeinitOppInterface(BluetoothProfileResultHandler* aRes)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (sBluetoothOppManager) {
-    sBluetoothOppManager->Uninit();
-    sBluetoothOppManager = nullptr;
-  }
-
-  if (aRes) {
-    aRes->Deinit();
-  }
+  return true;
 }
 
 //static
@@ -321,25 +268,23 @@ BluetoothOppManager::Get()
   NS_ENSURE_FALSE(sInShutdown, nullptr);
 
   // Create a new instance, register, and return
-  RefPtr<BluetoothOppManager> manager = new BluetoothOppManager();
-  NS_ENSURE_SUCCESS(manager->Init(), nullptr);
+  BluetoothOppManager *manager = new BluetoothOppManager();
+  NS_ENSURE_TRUE(manager->Init(), nullptr);
 
   sBluetoothOppManager = manager;
-
   return sBluetoothOppManager;
 }
 
 void
-BluetoothOppManager::ConnectInternal(const BluetoothAddress& aDeviceAddress)
+BluetoothOppManager::ConnectInternal(const nsAString& aDeviceAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   // Stop listening because currently we only support one connection at a time.
-  if (mServerSocket &&
-      mServerSocket->GetConnectionStatus() != SOCKET_DISCONNECTED) {
+  if (mServerSocket) {
     mServerSocket->Close();
+    mServerSocket = nullptr;
   }
-  mServerSocket = nullptr;
 
   mIsServer = false;
 
@@ -349,14 +294,10 @@ BluetoothOppManager::ConnectInternal(const BluetoothAddress& aDeviceAddress)
     return;
   }
 
-  mNeedsUpdatingSdpRecords = true;
-
-  if (NS_FAILED(bs->GetServiceChannel(aDeviceAddress, kObexObjectPush, this))) {
-    OnSocketConnectError(mSocket);
-    return;
-  }
-
   mSocket = new BluetoothSocket(this);
+  mSocket->Connect(aDeviceAddress, kObexObjectPush,
+                   BluetoothSocketType::RFCOMM, -1,
+                   false, true);
 }
 
 void
@@ -365,8 +306,6 @@ BluetoothOppManager::HandleShutdown()
   MOZ_ASSERT(NS_IsMainThread());
   sInShutdown = true;
   Disconnect(nullptr);
-  Uninit();
-
   sBluetoothOppManager = nullptr;
 }
 
@@ -413,11 +352,10 @@ BluetoothOppManager::Listen()
    * BT stops; otherwise no more read events would be received even if
    * BT restarts.
    */
-  if (mServerSocket &&
-      mServerSocket->GetConnectionStatus() != SOCKET_DISCONNECTED) {
+  if (mServerSocket) {
     mServerSocket->Close();
+    mServerSocket = nullptr;
   }
-  mServerSocket = nullptr;
 
   mServerSocket = new BluetoothSocket(this);
 
@@ -442,6 +380,7 @@ BluetoothOppManager::StartSendingNextFile()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  MOZ_ASSERT(!IsConnected());
   MOZ_ASSERT(!mBatches.IsEmpty());
   MOZ_ASSERT((int)mBatches[0].mBlobs.Length() > mCurrentBlobIndex + 1);
 
@@ -464,19 +403,19 @@ BluetoothOppManager::StartSendingNextFile()
 }
 
 bool
-BluetoothOppManager::SendFile(const BluetoothAddress& aDeviceAddress,
+BluetoothOppManager::SendFile(const nsAString& aDeviceAddress,
                               BlobParent* aActor)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<BlobImpl> impl = aActor->GetBlobImpl();
-  RefPtr<Blob> blob = Blob::Create(nullptr, impl);
+  nsRefPtr<BlobImpl> impl = aActor->GetBlobImpl();
+  nsRefPtr<Blob> blob = Blob::Create(nullptr, impl);
 
   return SendFile(aDeviceAddress, blob.get());
 }
 
 bool
-BluetoothOppManager::SendFile(const BluetoothAddress& aDeviceAddress,
+BluetoothOppManager::SendFile(const nsAString& aDeviceAddress,
                               Blob* aBlob)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -490,7 +429,7 @@ BluetoothOppManager::SendFile(const BluetoothAddress& aDeviceAddress,
 }
 
 void
-BluetoothOppManager::AppendBlobToSend(const BluetoothAddress& aDeviceAddress,
+BluetoothOppManager::AppendBlobToSend(const nsAString& aDeviceAddress,
                                       Blob* aBlob)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -534,7 +473,6 @@ bool
 BluetoothOppManager::ProcessNextBatch()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!IsConnected());
 
   // Remove the processed batch.
   // A batch is processed if we've incremented mCurrentBlobIndex for it.
@@ -667,11 +605,9 @@ BluetoothOppManager::AfterOppDisconnected()
     mOutputStream = nullptr;
   }
 
-  // Store local pointer of |mReadFileThread| to avoid shutdown reentry crash
-  // See bug 1191715 comment 19 for more details.
-  nsCOMPtr<nsIThread> thread = mReadFileThread.forget();
-  if (thread) {
-    thread->Shutdown();
+  if (mReadFileThread) {
+    mReadFileThread->Shutdown();
+    mReadFileThread = nullptr;
   }
 
   // Release the mount lock if file transfer completed
@@ -803,7 +739,7 @@ BluetoothOppManager::ExtractPacketHeaders(const ObexHeaderSet& aHeader)
       aHeader.Has(ObexHeaderId::EndOfBody)) {
     uint8_t* bodyPtr;
     aHeader.GetBody(&bodyPtr, &mBodySegmentLength);
-    mBodySegment.reset(bodyPtr);
+    mBodySegment = bodyPtr;
   }
 }
 
@@ -848,13 +784,13 @@ BluetoothOppManager::RetrieveSentFileName()
 {
   mFileName.Truncate();
 
-  RefPtr<File> file = static_cast<Blob*>(mBlob.get())->ToFile();
+  nsRefPtr<File> file = static_cast<Blob*>(mBlob.get())->ToFile();
   if (file) {
     file->GetName(mFileName);
   }
 
   /**
-   * We try our best to get the file extension to avoid interoperability issues.
+   * We try our best to get the file extention to avoid interoperability issues.
    * However, once we found that we are unable to get suitable extension or
    * information about the content type, sending a pre-defined file name without
    * extension would be fine.
@@ -926,7 +862,8 @@ BluetoothOppManager::ComposePacket(uint8_t aOpCode, UnixSocketBuffer* aMessage)
     // [opcode:1][length:2][Headers:var]
     frameHeaderLength = 3;
 
-    mPacketLength = BigEndian::readUint16(&data[1]) - frameHeaderLength;
+    mPacketLength = ((static_cast<int>(data[1]) << 8) | data[2]) -
+                    frameHeaderLength;
 
     /**
      * A PUT request from remote devices may be divided into multiple parts.
@@ -934,7 +871,7 @@ BluetoothOppManager::ComposePacket(uint8_t aOpCode, UnixSocketBuffer* aMessage)
      * so here we keep a variable mPutPacketReceivedLength to indicate if
      * current PUT request is done.
      */
-    mReceivedDataBuffer.reset(new uint8_t[mPacketLength]);
+    mReceivedDataBuffer = new uint8_t[mPacketLength];
     mPutFinalFlag = (aOpCode == ObexRequestCode::PutFinal);
   }
 
@@ -1159,8 +1096,8 @@ BluetoothOppManager::ClientDataHandler(UnixSocketBuffer* aMessage)
     // Disconnect request, so we make a delay here. If the socket hasn't been
     // disconnected, we will close it.
     if (mSocket) {
-      MessageLoop::current()->PostDelayedTask(
-        MakeAndAddRef<CloseSocketTask>(mSocket), 1000);
+      MessageLoop::current()->
+        PostDelayedTask(FROM_HERE, new CloseSocketTask(mSocket), 1000);
     }
   } else if (mLastCommand == ObexRequestCode::Connect) {
     MOZ_ASSERT(!mFileName.IsEmpty());
@@ -1178,7 +1115,7 @@ BluetoothOppManager::ClientDataHandler(UnixSocketBuffer* aMessage)
     // Keep remote information
     mRemoteObexVersion = data[3];
     mRemoteConnectionFlags = data[4];
-    mRemoteMaxPacketLength = BigEndian::readUint16(&data[5]);
+    mRemoteMaxPacketLength = ((static_cast<int>(data[5]) << 8) | data[6]);
 
     // The length of file name exceeds maximum length.
     int fileNameByteLen = (mFileName.Length() + 1) * 2;
@@ -1211,7 +1148,7 @@ BluetoothOppManager::ClientDataHandler(UnixSocketBuffer* aMessage)
       }
     }
 
-    RefPtr<ReadFileTask> task = new ReadFileTask(mInputStream,
+    nsRefPtr<ReadFileTask> task = new ReadFileTask(mInputStream,
                                                    mRemoteMaxPacketLength);
     rv = mReadFileThread->Dispatch(task, NS_DISPATCH_NORMAL);
     if (NS_WARN_IF(rv.Failed())) {
@@ -1227,12 +1164,12 @@ BluetoothOppManager::ClientDataHandler(UnixSocketBuffer* aMessage)
 // Virtual function of class SocketConsumer
 void
 BluetoothOppManager::ReceiveSocketData(BluetoothSocket* aSocket,
-                                       UniquePtr<UnixSocketBuffer>& aBuffer)
+                                       nsAutoPtr<UnixSocketBuffer>& aBuffer)
 {
   if (mIsServer) {
-    ServerDataHandler(aBuffer.get());
+    ServerDataHandler(aBuffer);
   } else {
-    ClientDataHandler(aBuffer.get());
+    ClientDataHandler(aBuffer);
   }
 }
 
@@ -1265,25 +1202,32 @@ BluetoothOppManager::SendPutHeaderRequest(const nsAString& aFileName,
     return;
   }
 
+  uint8_t* req = new uint8_t[mRemoteMaxPacketLength];
+
   int len = aFileName.Length();
-  auto fileName = MakeUnique<uint8_t[]>((len + 1) * 2);
+  uint8_t* fileName = new uint8_t[(len + 1) * 2];
+  const char16_t* fileNamePtr = aFileName.BeginReading();
 
   for (int i = 0; i < len; i++) {
-    BigEndian::writeUint16(&fileName[i * 2], aFileName[i]);
+    fileName[i * 2] = (uint8_t)(fileNamePtr[i] >> 8);
+    fileName[i * 2 + 1] = (uint8_t)fileNamePtr[i];
   }
-  BigEndian::writeUint16(&fileName[len * 2], 0);
 
-  // Prepare packet
-  auto req = MakeUnique<uint8_t[]>(mRemoteMaxPacketLength);
+  fileName[len * 2] = 0x00;
+  fileName[len * 2 + 1] = 0x00;
+
   int index = 3;
   index += AppendHeaderName(&req[index], mRemoteMaxPacketLength - index,
-                            fileName.get(), (len + 1) * 2);
+                            fileName, (len + 1) * 2);
   index += AppendHeaderLength(&req[index], aFileSize);
 
   // This is final put packet if file size equals to 0
   uint8_t opcode = (aFileSize > 0) ? ObexRequestCode::Put
                                    : ObexRequestCode::PutFinal;
-  SendObexData(Move(req), opcode, index);
+  SendObexData(req, opcode, index);
+
+  delete [] fileName;
+  delete [] req;
 }
 
 void
@@ -1302,13 +1246,14 @@ BluetoothOppManager::SendPutRequest(uint8_t* aFileBody,
 
   // Section 3.3.3 "Put", IrOBEX 1.2
   // [opcode:1][length:2][Headers:var]
-  auto req = MakeUnique<uint8_t[]>(mRemoteMaxPacketLength);
+  uint8_t* req = new uint8_t[mRemoteMaxPacketLength];
 
   int index = 3;
   index += AppendHeaderBody(&req[index], mRemoteMaxPacketLength - index,
                             aFileBody, aFileBodyLength);
 
-  SendObexData(Move(req), ObexRequestCode::Put, index);
+  SendObexData(req, ObexRequestCode::Put, index);
+  delete [] req;
 
   mSentFileLength += aFileBodyLength;
 }
@@ -1329,10 +1274,11 @@ BluetoothOppManager::SendPutFinalRequest()
 
   // [opcode:1][length:2]
   int index = 3;
-  auto req = MakeUnique<uint8_t[]>(mRemoteMaxPacketLength);
+  uint8_t* req = new uint8_t[mRemoteMaxPacketLength];
   index += AppendHeaderEndOfBody(&req[index]);
 
-  SendObexData(Move(req), ObexRequestCode::PutFinal, index);
+  SendObexData(req, ObexRequestCode::PutFinal, index);
+  delete [] req;
 
   mWaitingToSendPutFinal = false;
 }
@@ -1367,7 +1313,7 @@ BluetoothOppManager::IsConnected()
 }
 
 void
-BluetoothOppManager::GetAddress(BluetoothAddress& aDeviceAddress)
+BluetoothOppManager::GetAddress(nsAString& aDeviceAddress)
 {
   return mSocket->GetAddress(aDeviceAddress);
 }
@@ -1462,18 +1408,6 @@ BluetoothOppManager::SendObexData(uint8_t* aData, uint8_t aOpcode, int aSize)
 }
 
 void
-BluetoothOppManager::SendObexData(UniquePtr<uint8_t[]> aData, uint8_t aOpcode,
-                                  int aSize)
-{
-  if (!mIsServer) {
-    mLastCommand = aOpcode;
-  }
-
-  SetObexPacketInfo(aData.get(), aOpcode, aSize);
-  mSocket->SendSocketData(new UnixSocketRawData(Move(aData), aSize));
-}
-
-void
 BluetoothOppManager::FileTransferComplete()
 {
   if (mSendTransferCompleteFlag) {
@@ -1483,12 +1417,12 @@ BluetoothOppManager::FileTransferComplete()
   NS_NAMED_LITERAL_STRING(type, "bluetooth-opp-transfer-complete");
   InfallibleTArray<BluetoothNamedValue> parameters;
 
-  AppendNamedValue(parameters, "address", mDeviceAddress);
-  AppendNamedValue(parameters, "success", mSuccessFlag);
-  AppendNamedValue(parameters, "received", mIsServer);
-  AppendNamedValue(parameters, "fileName", mFileName);
-  AppendNamedValue(parameters, "fileLength", mSentFileLength);
-  AppendNamedValue(parameters, "contentType", mContentType);
+  BT_APPEND_NAMED_VALUE(parameters, "address", mDeviceAddress);
+  BT_APPEND_NAMED_VALUE(parameters, "success", mSuccessFlag);
+  BT_APPEND_NAMED_VALUE(parameters, "received", mIsServer);
+  BT_APPEND_NAMED_VALUE(parameters, "fileName", mFileName);
+  BT_APPEND_NAMED_VALUE(parameters, "fileLength", mSentFileLength);
+  BT_APPEND_NAMED_VALUE(parameters, "contentType", mContentType);
 
   BT_ENSURE_TRUE_VOID_BROADCAST_SYSMSG(type, parameters);
 
@@ -1501,11 +1435,11 @@ BluetoothOppManager::StartFileTransfer()
   NS_NAMED_LITERAL_STRING(type, "bluetooth-opp-transfer-start");
   InfallibleTArray<BluetoothNamedValue> parameters;
 
-  AppendNamedValue(parameters, "address", mDeviceAddress);
-  AppendNamedValue(parameters, "received", mIsServer);
-  AppendNamedValue(parameters, "fileName", mFileName);
-  AppendNamedValue(parameters, "fileLength", mFileLength);
-  AppendNamedValue(parameters, "contentType", mContentType);
+  BT_APPEND_NAMED_VALUE(parameters, "address", mDeviceAddress);
+  BT_APPEND_NAMED_VALUE(parameters, "received", mIsServer);
+  BT_APPEND_NAMED_VALUE(parameters, "fileName", mFileName);
+  BT_APPEND_NAMED_VALUE(parameters, "fileLength", mFileLength);
+  BT_APPEND_NAMED_VALUE(parameters, "contentType", mContentType);
 
   BT_ENSURE_TRUE_VOID_BROADCAST_SYSMSG(type, parameters);
 
@@ -1518,10 +1452,10 @@ BluetoothOppManager::UpdateProgress()
   NS_NAMED_LITERAL_STRING(type, "bluetooth-opp-update-progress");
   InfallibleTArray<BluetoothNamedValue> parameters;
 
-  AppendNamedValue(parameters, "address", mDeviceAddress);
-  AppendNamedValue(parameters, "received", mIsServer);
-  AppendNamedValue(parameters, "processedLength", mSentFileLength);
-  AppendNamedValue(parameters, "fileLength", mFileLength);
+  BT_APPEND_NAMED_VALUE(parameters, "address", mDeviceAddress);
+  BT_APPEND_NAMED_VALUE(parameters, "received", mIsServer);
+  BT_APPEND_NAMED_VALUE(parameters, "processedLength", mSentFileLength);
+  BT_APPEND_NAMED_VALUE(parameters, "fileLength", mFileLength);
 
   BT_ENSURE_TRUE_VOID_BROADCAST_SYSMSG(type, parameters);
 }
@@ -1532,10 +1466,10 @@ BluetoothOppManager::ReceivingFileConfirmation()
   NS_NAMED_LITERAL_STRING(type, "bluetooth-opp-receiving-file-confirmation");
   InfallibleTArray<BluetoothNamedValue> parameters;
 
-  AppendNamedValue(parameters, "address", mDeviceAddress);
-  AppendNamedValue(parameters, "fileName", mFileName);
-  AppendNamedValue(parameters, "fileLength", mFileLength);
-  AppendNamedValue(parameters, "contentType", mContentType);
+  BT_APPEND_NAMED_VALUE(parameters, "address", mDeviceAddress);
+  BT_APPEND_NAMED_VALUE(parameters, "fileName", mFileName);
+  BT_APPEND_NAMED_VALUE(parameters, "fileLength", mFileLength);
+  BT_APPEND_NAMED_VALUE(parameters, "contentType", mContentType);
 
   BT_ENSURE_TRUE_VOID_BROADCAST_SYSMSG(type, parameters);
 }
@@ -1584,16 +1518,7 @@ BluetoothOppManager::OnSocketConnectError(BluetoothSocket* aSocket)
 {
   BT_LOGR("[%s]", (mIsServer)? "server" : "client");
 
-  if (mServerSocket &&
-      mServerSocket->GetConnectionStatus() != SOCKET_DISCONNECTED) {
-    mServerSocket->Close();
-  }
   mServerSocket = nullptr;
-
-  if (mSocket &&
-      mSocket->GetConnectionStatus() != SOCKET_DISCONNECTED) {
-    mSocket->Close();
-  }
   mSocket = nullptr;
 
   if (!mIsServer) {
@@ -1626,25 +1551,21 @@ BluetoothOppManager::OnSocketDisconnect(BluetoothSocket* aSocket)
    */
   if (!mSuccessFlag) {
     if (mIsServer) {
-      // Remove received file and inform gaia of receiving failure
       DeleteReceivedFile();
-      FileTransferComplete();
-    } else {
-      // Inform gaia of current blob transfer failure
-      if (mCurrentBlobIndex >= 0) {
-        FileTransferComplete();
-      }
+    }
+
+    FileTransferComplete();
+    if (!mIsServer) {
       // Inform gaia of remaining blobs' sending failure
       DiscardBlobsToSend();
     }
   }
 
   AfterOppDisconnected();
-  mDeviceAddress.Clear();
+  mDeviceAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
   mSuccessFlag = false;
 
-  mSocket = nullptr; // should already be closed
-
+  mSocket = nullptr;
   // Listen as a server if there's no more batch to process
   if (!ProcessNextBatch()) {
     Listen();
@@ -1679,61 +1600,21 @@ BluetoothOppManager::AcquireSdcardMountLock()
 }
 
 void
-BluetoothOppManager::OnGetServiceChannel(
-  const BluetoothAddress& aDeviceAddress,
-  const BluetoothUuid& aServiceUuid,
-  int aChannel)
+BluetoothOppManager::OnGetServiceChannel(const nsAString& aDeviceAddress,
+                                         const nsAString& aServiceUuid,
+                                         int aChannel)
 {
-  if (aChannel < 0) {
-    BluetoothService* bs = BluetoothService::Get();
-    if (!bs || sInShutdown) {
-      OnSocketConnectError(mSocket);
-      return;
-    }
-
-    if (mNeedsUpdatingSdpRecords) {
-      mNeedsUpdatingSdpRecords = false;
-      mLastServiceChannelCheck = TimeStamp::Now();
-    } else {
-      // Refresh SDP records until it gets valid service channel
-      // unless timeout is hit.
-      TimeDuration duration = TimeStamp::Now() - mLastServiceChannelCheck;
-      if (duration.ToMilliseconds() >= kSdpUpdatingTimeoutMs) {
-        OnSocketConnectError(mSocket);
-        return;
-      }
-    }
-
-    if (!bs->UpdateSdpRecords(aDeviceAddress, this)) {
-      OnSocketConnectError(mSocket);
-      return;
-    }
-
-    return; // We update the service records before we connect.
-  }
-
-  mSocket->Connect(aDeviceAddress, aServiceUuid,
-                   BluetoothSocketType::RFCOMM, aChannel,
-                   false, true);
+  MOZ_ASSERT(false);
 }
 
 void
-BluetoothOppManager::OnUpdateSdpRecords(const BluetoothAddress& aDeviceAddress)
+BluetoothOppManager::OnUpdateSdpRecords(const nsAString& aDeviceAddress)
 {
-  BluetoothService* bs = BluetoothService::Get();
-  if (!bs || sInShutdown) {
-    OnSocketConnectError(mSocket);
-    return;
-  }
-
-  if (NS_FAILED(bs->GetServiceChannel(aDeviceAddress, kObexObjectPush, this))) {
-    OnSocketConnectError(mSocket);
-    return;
-  }
+  MOZ_ASSERT(false);
 }
 
 void
-BluetoothOppManager::Connect(const BluetoothAddress& aDeviceAddress,
+BluetoothOppManager::Connect(const nsAString& aDeviceAddress,
                              BluetoothProfileController* aController)
 {
   MOZ_ASSERT(false);

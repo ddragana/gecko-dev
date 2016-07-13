@@ -6,9 +6,8 @@
 #include "TestLayers.h"
 #include "gtest/gtest.h"
 #include "gmock/gmock.h"
-#include "LayerUserData.h"
 #include "mozilla/layers/LayerMetricsWrapper.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/CompositorParent.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -60,7 +59,7 @@ public:
 
   virtual bool EndEmptyTransaction(EndTransactionFlags aFlags = END_DEFAULT) { return false; }
   virtual already_AddRefed<ContainerLayer> CreateContainerLayer() {
-    RefPtr<ContainerLayer> layer = new TestContainerLayer(this);
+    nsRefPtr<ContainerLayer> layer = new TestContainerLayer(this);
     return layer.forget();
   }
   virtual void GetBackendName(nsAString& aName) {}
@@ -71,7 +70,7 @@ public:
     return nullptr;
   }
   virtual already_AddRefed<PaintedLayer> CreatePaintedLayer() {
-    RefPtr<PaintedLayer> layer = new TestPaintedLayer(this);
+    nsRefPtr<PaintedLayer> layer = new TestPaintedLayer(this);
     return layer.forget();
   }
   virtual already_AddRefed<ColorLayer> CreateColorLayer() {
@@ -150,9 +149,9 @@ TEST(Layers, UserData) {
   layer.SetUserData(key3, data3);
 
   // Also checking that the user data is returned but not free'd
-  UniquePtr<LayerUserData> d1(layer.RemoveUserData(key1));
-  UniquePtr<LayerUserData> d2(layer.RemoveUserData(key2));
-  UniquePtr<LayerUserData> d3(layer.RemoveUserData(key3));
+  UniquePtr<LayerUserData> d1(layer.RemoveUserData(key1).forget());
+  UniquePtr<LayerUserData> d2(layer.RemoveUserData(key2).forget());
+  UniquePtr<LayerUserData> d3(layer.RemoveUserData(key3).forget());
   ASSERT_EQ(data1, d1.get());
   ASSERT_EQ(data2, d2.get());
   ASSERT_EQ(data3, d3.get());
@@ -169,7 +168,7 @@ TEST(Layers, UserData) {
 
 static
 already_AddRefed<Layer> CreateLayer(char aLayerType, LayerManager* aManager) {
-  RefPtr<Layer> layer = nullptr;
+  nsRefPtr<Layer> layer = nullptr;
   if (aLayerType == 'c') {
     layer = aManager->CreateContainerLayer();
   } else if (aLayerType == 't') {
@@ -184,8 +183,8 @@ already_AddRefed<Layer> CreateLayerTree(
     const char* aLayerTreeDescription,
     nsIntRegion* aVisibleRegions,
     const Matrix4x4* aTransforms,
-    RefPtr<LayerManager>& manager,
-    nsTArray<RefPtr<Layer> >& aLayersOut) {
+    nsRefPtr<LayerManager>& manager,
+    nsTArray<nsRefPtr<Layer> >& aLayersOut) {
 
   aLayersOut.Clear();
 
@@ -193,9 +192,9 @@ already_AddRefed<Layer> CreateLayerTree(
     manager = new TestLayerManager();
   }
 
-  RefPtr<Layer> rootLayer = nullptr;
-  RefPtr<ContainerLayer> parentContainerLayer = nullptr;
-  RefPtr<Layer> lastLayer = nullptr;
+  nsRefPtr<Layer> rootLayer = nullptr;
+  nsRefPtr<ContainerLayer> parentContainerLayer = nullptr;
+  nsRefPtr<Layer> lastLayer = nullptr;
   int layerNumber = 0;
   for (size_t i = 0; i < strlen(aLayerTreeDescription); i++) {
     if (aLayerTreeDescription[i] == '(') {
@@ -212,9 +211,9 @@ already_AddRefed<Layer> CreateLayerTree(
       parentContainerLayer = parentContainerLayer->GetParent();
       lastLayer = nullptr;
     } else {
-      RefPtr<Layer> layer = CreateLayer(aLayerTreeDescription[i], manager.get());
+      nsRefPtr<Layer> layer = CreateLayer(aLayerTreeDescription[i], manager.get());
       if (aVisibleRegions) {
-        layer->SetVisibleRegion(LayerIntRegion::FromUnknownRegion(aVisibleRegions[layerNumber]));
+        layer->SetVisibleRegion(aVisibleRegions[layerNumber]);
         layer->SetEventRegions(EventRegions(aVisibleRegions[layerNumber]));
       }
       if (aTransforms) {
@@ -240,7 +239,7 @@ already_AddRefed<Layer> CreateLayerTree(
     manager->SetRoot(rootLayer);
     if (rootLayer->AsLayerComposite()) {
       // Only perform this for LayerManagerComposite
-      CompositorBridgeParent::SetShadowProperties(rootLayer);
+      CompositorParent::SetShadowProperties(rootLayer);
     }
   }
   return rootLayer.forget();
@@ -260,10 +259,10 @@ TEST(Layers, LayerTree) {
     Matrix4x4(),
     Matrix4x4(),
   };
-  nsTArray<RefPtr<Layer> > layers;
+  nsTArray<nsRefPtr<Layer> > layers;
 
-  RefPtr<LayerManager> lm;
-  RefPtr<Layer> root = CreateLayerTree(layerTreeSyntax, layerVisibleRegion, transforms, lm, layers);
+  nsRefPtr<LayerManager> lm;
+  nsRefPtr<Layer> root = CreateLayerTree(layerTreeSyntax, layerVisibleRegion, transforms, lm, layers);
 
   // B2G g++ doesn't like ASSERT_NE with nullptr directly. It thinks it's
   // an int.
@@ -293,7 +292,7 @@ static void ValidateTreePointers(Layer* aLayer) {
   }
 }
 
-static void ValidateTreePointers(nsTArray<RefPtr<Layer> >& aLayers) {
+static void ValidateTreePointers(nsTArray<nsRefPtr<Layer> >& aLayers) {
   for (uint32_t i = 0; i < aLayers.Length(); i++) {
     ValidateTreePointers(aLayers[i]);
   }
@@ -302,9 +301,9 @@ static void ValidateTreePointers(nsTArray<RefPtr<Layer> >& aLayers) {
 TEST(Layers, RepositionChild) {
   const char* layerTreeSyntax = "c(ttt)";
 
-  nsTArray<RefPtr<Layer> > layers;
-  RefPtr<LayerManager> lm;
-  RefPtr<Layer> root = CreateLayerTree(layerTreeSyntax, nullptr, nullptr, lm, layers);
+  nsTArray<nsRefPtr<Layer> > layers;
+  nsRefPtr<LayerManager> lm;
+  nsRefPtr<Layer> root = CreateLayerTree(layerTreeSyntax, nullptr, nullptr, lm, layers);
   ContainerLayer* parent = root->AsContainerLayer();
   ValidateTreePointers(layers);
 
@@ -352,18 +351,10 @@ TEST(Layers, RepositionChild) {
   ASSERT_EQ(nullptr, layers[1]->GetNextSibling());
 }
 
-class LayerMetricsWrapperTester : public ::testing::Test {
-protected:
-  virtual void SetUp() {
-    // This ensures ScrollMetadata::sNullMetadata is initialized.
-    gfxPlatform::GetPlatform();
-  }
-};
-
-TEST_F(LayerMetricsWrapperTester, SimpleTree) {
-  nsTArray<RefPtr<Layer> > layers;
-  RefPtr<LayerManager> lm;
-  RefPtr<Layer> root = CreateLayerTree("c(c(c(tt)c(t)))", nullptr, nullptr, lm, layers);
+TEST(LayerMetricsWrapper, SimpleTree) {
+  nsTArray<nsRefPtr<Layer> > layers;
+  nsRefPtr<LayerManager> lm;
+  nsRefPtr<Layer> root = CreateLayerTree("c(c(c(tt)c(t)))", nullptr, nullptr, lm, layers);
   LayerMetricsWrapper wrapper(root);
 
   ASSERT_EQ(root.get(), wrapper.GetLayer());
@@ -397,43 +388,43 @@ TEST_F(LayerMetricsWrapperTester, SimpleTree) {
   ASSERT_TRUE(rootWrapper == wrapper.GetParent());
 }
 
-static ScrollMetadata
-MakeMetadata(FrameMetrics::ViewID aId) {
-  ScrollMetadata metadata;
-  metadata.GetMetrics().SetScrollId(aId);
-  return metadata;
+static FrameMetrics
+MakeMetrics(FrameMetrics::ViewID aId) {
+  FrameMetrics metrics;
+  metrics.SetScrollId(aId);
+  return metrics;
 }
 
-TEST_F(LayerMetricsWrapperTester, MultiFramemetricsTree) {
-  nsTArray<RefPtr<Layer> > layers;
-  RefPtr<LayerManager> lm;
-  RefPtr<Layer> root = CreateLayerTree("c(c(c(tt)c(t)))", nullptr, nullptr, lm, layers);
+TEST(LayerMetricsWrapper, MultiFramemetricsTree) {
+  nsTArray<nsRefPtr<Layer> > layers;
+  nsRefPtr<LayerManager> lm;
+  nsRefPtr<Layer> root = CreateLayerTree("c(c(c(tt)c(t)))", nullptr, nullptr, lm, layers);
 
-  nsTArray<ScrollMetadata> metadata;
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::START_SCROLL_ID + 0)); // topmost of root layer
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::NULL_SCROLL_ID));
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::START_SCROLL_ID + 1));
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::START_SCROLL_ID + 2));
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::NULL_SCROLL_ID));
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::NULL_SCROLL_ID));      // bottom of root layer
-  root->SetScrollMetadata(metadata);
+  nsTArray<FrameMetrics> metrics;
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::START_SCROLL_ID + 0)); // topmost of root layer
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::NULL_SCROLL_ID));
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::START_SCROLL_ID + 1));
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::START_SCROLL_ID + 2));
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::NULL_SCROLL_ID));
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::NULL_SCROLL_ID));      // bottom of root layer
+  root->SetFrameMetrics(metrics);
 
-  metadata.Clear();
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::START_SCROLL_ID + 3));
-  layers[1]->SetScrollMetadata(metadata);
+  metrics.Clear();
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::START_SCROLL_ID + 3));
+  layers[1]->SetFrameMetrics(metrics);
 
-  metadata.Clear();
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::NULL_SCROLL_ID));
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::START_SCROLL_ID + 4));
-  layers[2]->SetScrollMetadata(metadata);
+  metrics.Clear();
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::NULL_SCROLL_ID));
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::START_SCROLL_ID + 4));
+  layers[2]->SetFrameMetrics(metrics);
 
-  metadata.Clear();
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::START_SCROLL_ID + 5));
-  layers[4]->SetScrollMetadata(metadata);
+  metrics.Clear();
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::START_SCROLL_ID + 5));
+  layers[4]->SetFrameMetrics(metrics);
 
-  metadata.Clear();
-  metadata.InsertElementAt(0, MakeMetadata(FrameMetrics::START_SCROLL_ID + 6));
-  layers[5]->SetScrollMetadata(metadata);
+  metrics.Clear();
+  metrics.InsertElementAt(0, MakeMetrics(FrameMetrics::START_SCROLL_ID + 6));
+  layers[5]->SetFrameMetrics(metrics);
 
   LayerMetricsWrapper wrapper(root, LayerMetricsWrapper::StartAt::TOP);
   nsTArray<Layer*> expectedLayers;

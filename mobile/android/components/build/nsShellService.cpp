@@ -20,11 +20,11 @@ nsShellService::SwitchTask()
 
 NS_IMETHODIMP
 nsShellService::CreateShortcut(const nsAString& aTitle, const nsAString& aURI,
-                                const nsAString& aIcondata, const nsAString& aIntent)
+                                const nsAString& aIconData, const nsAString& aIntent)
 {
-  if (!aTitle.Length() || !aURI.Length())
+  if (!aTitle.Length() || !aURI.Length() || !aIconData.Length())
     return NS_ERROR_FAILURE;
 
-  widget::GeckoAppShell::CreateShortcut(aTitle, aURI);
+  widget::GeckoAppShell::CreateShortcut(aTitle, aURI, aIconData);
   return NS_OK;
 }

@@ -49,7 +49,6 @@
 <keyset id="configTreeKeyset" disabled="true">
   <key keycode="VK_RETURN" oncommand="ModifySelected();"/>
   <key key="&focusSearch.key;" modifiers="accel" oncommand="document.getElementById('textbox').focus();"/>
-  <key key="&focusSearch2.key;" modifiers="accel" oncommand="document.getElementById('textbox').focus();"/>
 </keyset>
 <deck id="configDeck" flex="1">
   <vbox id="warningScreen" flex="1" align="center" style="overflow: auto;">
@@ -62,7 +61,7 @@
         <label id="warningText">&aboutWarningText.label;</label>
         <checkbox id="showWarningNextTime" label="&aboutWarningCheckbox.label;" checked="true"/>
         <hbox class="button-container">
-          <button id="warningButton" class="primary" oncommand="ShowPrefs();" label="&aboutWarningButton2.label;"/>
+          <button id="warningButton" class="primary" oncommand="ShowPrefs();" label="&aboutWarningButton.label;"/>
         </hbox>
       </vbox>
     </vbox>

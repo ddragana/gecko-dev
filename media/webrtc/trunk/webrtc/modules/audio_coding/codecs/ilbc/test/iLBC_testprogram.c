@@ -40,7 +40,7 @@
  *---------------------------------------------------------------*/
 
 short encode(                         /* (o) Number of bytes encoded */
-    IlbcEncoder *iLBCenc_inst,    /* (i/o) Encoder instance */
+    iLBC_Enc_Inst_t *iLBCenc_inst,    /* (i/o) Encoder instance */
     int16_t *encoded_data,      /* (o) The encoded bytes */
     int16_t *data               /* (i) The signal block to encode */
                                                         ){
@@ -56,7 +56,7 @@ short encode(                         /* (o) Number of bytes encoded */
  *---------------------------------------------------------------*/
 
 short decode( /* (o) Number of decoded samples */
-    IlbcDecoder *iLBCdec_inst, /* (i/o) Decoder instance */
+    iLBC_Dec_Inst_t *iLBCdec_inst, /* (i/o) Decoder instance */
     short *decoded_data, /* (o) Decoded signal block */
     short *encoded_data, /* (i) Encoded bytes */
     short mode           /* (i) 0=PL, 1=Normal */
@@ -100,8 +100,8 @@ int main(int argc, char* argv[])
   short *channeldata;
   int blockcount = 0, noOfBlocks=0, i, noOfLostBlocks=0;
   short mode;
-  IlbcEncoder Enc_Inst;
-  IlbcDecoder Dec_Inst;
+  iLBC_Enc_Inst_t Enc_Inst;
+  iLBC_Dec_Inst_t Dec_Inst;
 
   short frameLen;
   short count;

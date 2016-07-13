@@ -26,7 +26,7 @@ using namespace mozilla;
 
 NS_QUERYFRAME_HEAD(nsRubyFrame)
   NS_QUERYFRAME_ENTRY(nsRubyFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsInlineFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsRubyFrameSuper)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsRubyFrame)
 
@@ -54,7 +54,7 @@ nsRubyFrame::IsFrameOfType(uint32_t aFlags) const
   if (aFlags & eBidiInlineContainer) {
     return false;
   }
-  return nsInlineFrame::IsFrameOfType(aFlags);
+  return nsRubyFrameSuper::IsFrameOfType(aFlags);
 }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -142,8 +142,7 @@ nsRubyFrame::Reflow(nsPresContext* aPresContext,
 
   ContinuationTraversingState pullState(this);
   while (aStatus == NS_FRAME_COMPLETE) {
-    nsRubyBaseContainerFrame* baseContainer =
-      PullOneSegment(aReflowState.mLineLayout, pullState);
+    nsRubyBaseContainerFrame* baseContainer = PullOneSegment(pullState);
     if (!baseContainer) {
       // No more continuations after, finish now.
       break;
@@ -350,33 +349,20 @@ nsRubyFrame::ReflowSegment(nsPresContext* aPresContext,
 }
 
 nsRubyBaseContainerFrame*
-nsRubyFrame::PullOneSegment(const nsLineLayout* aLineLayout,
-                            ContinuationTraversingState& aState)
+nsRubyFrame::PullOneSegment(ContinuationTraversingState& aState)
 {
   // Pull a ruby base container
-  nsIFrame* baseFrame = GetNextInFlowChild(aState);
+  nsIFrame* baseFrame = PullNextInFlowChild(aState);
   if (!baseFrame) {
     return nullptr;
   }
   MOZ_ASSERT(baseFrame->GetType() == nsGkAtoms::rubyBaseContainerFrame);
-
-  // Get the float containing block of the base frame before we pull it.
-  nsBlockFrame* oldFloatCB =
-    nsLayoutUtils::GetFloatContainingBlock(baseFrame);
-  PullNextInFlowChild(aState);
 
   // Pull all ruby text containers following the base container
   nsIFrame* nextFrame;
   while ((nextFrame = GetNextInFlowChild(aState)) != nullptr &&
          nextFrame->GetType() == nsGkAtoms::rubyTextContainerFrame) {
     PullNextInFlowChild(aState);
-  }
-
-  if (nsBlockFrame* newFloatCB =
-      nsLayoutUtils::GetAsBlock(aLineLayout->LineContainerFrame())) {
-    if (oldFloatCB && oldFloatCB != newFloatCB) {
-      newFloatCB->ReparentFloats(baseFrame, oldFloatCB, true);
-    }
   }
 
   return static_cast<nsRubyBaseContainerFrame*>(baseFrame);

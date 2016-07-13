@@ -544,10 +544,6 @@ XULListitemAccessible::
                                       nsGkAtoms::checkbox,
                                       eCaseMatters);
   mType = eXULListItemType;
-
-  // Walk XBL anonymous children for list items. Overrides the flag value from
-  // base XULMenuitemAccessible class.
-  mStateFlags &= ~eNoXBLKids;
 }
 
 XULListitemAccessible::~XULListitemAccessible()
@@ -670,6 +666,13 @@ XULListitemAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
     else
       aName.AssignLiteral("check");
   }
+}
+
+bool
+XULListitemAccessible::CanHaveAnonChildren()
+{
+  // That indicates we should walk anonymous children for listitems
+  return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

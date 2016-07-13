@@ -1,5 +1,5 @@
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpServer.identity.primaryPort;
@@ -14,7 +14,16 @@ XPCOMUtils.defineLazyGetter(this, "randomURI", function() {
 });
 
 function make_channel(url, callback, ctx) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true});
+  var ios = Cc["@mozilla.org/network/io-service;1"].
+            getService(Ci.nsIIOService);
+  return ios.newChannel2(url,
+                         "",
+                         null,
+                         null,      // aLoadingNode
+                         Services.scriptSecurityManager.getSystemPrincipal(),
+                         null,      // aTriggeringPrincipal
+                         Ci.nsILoadInfo.SEC_NORMAL,
+                         Ci.nsIContentPolicy.TYPE_OTHER);
 }
 
 const responseBody = "response body";
@@ -37,7 +46,7 @@ function firstTimeThrough(request, buffer)
 {
   do_check_eq(buffer, responseBody);
   var chan = make_channel(randomURI);
-  chan.asyncOpen2(new ChannelListener(secondTimeThrough, null));
+  chan.asyncOpen(new ChannelListener(secondTimeThrough, null), null);
 }
 
 function secondTimeThrough(request, buffer)
@@ -46,7 +55,7 @@ function secondTimeThrough(request, buffer)
   var chan = make_channel(randomURI);
   chan.loadFlags |= Ci.nsIRequest.LOAD_FROM_CACHE;
   chan.notificationCallbacks = new ChannelEventSink(ES_ABORT_REDIRECT);
-  chan.asyncOpen2(new ChannelListener(finish_test, null, CL_EXPECT_FAILURE));
+  chan.asyncOpen(new ChannelListener(finish_test, null, CL_EXPECT_FAILURE), null);
 }
 
 function finish_test(request, buffer)
@@ -63,6 +72,6 @@ function run_test()
   httpServer.start(-1);
 
   var chan = make_channel(randomURI);
-  chan.asyncOpen2(new ChannelListener(firstTimeThrough, null));
+  chan.asyncOpen(new ChannelListener(firstTimeThrough, null), null);
   do_test_pending();
 }

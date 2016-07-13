@@ -1,6 +1,7 @@
 import os.path
 from mozharness.base.script import ScriptMixin
-from mozharness.base.log import LogMixin
+from mozharness.base.log import LogMixin, OutputParser
+from mozharness.base.errors import VCSException
 
 class TcVCS(ScriptMixin, LogMixin):
     def __init__(self, log_obj=None, config=None, vcs_config=None,

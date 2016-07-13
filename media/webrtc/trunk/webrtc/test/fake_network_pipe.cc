@@ -22,6 +22,7 @@
 namespace webrtc {
 
 const double kPi = 3.14159265;
+const int kDefaultProcessIntervalMs = 30;
 
 static int GaussianRandom(int mean_delay_ms, int standard_deviation_ms) {
   // Creating a Normal distribution variable from two independent uniform
@@ -207,13 +208,12 @@ void FakeNetworkPipe::Process() {
   }
 }
 
-int64_t FakeNetworkPipe::TimeUntilNextProcess() const {
+int FakeNetworkPipe::TimeUntilNextProcess() const {
   CriticalSectionScoped crit(lock_.get());
-  const int64_t kDefaultProcessIntervalMs = 30;
   if (capacity_link_.size() == 0 || delay_link_.size() == 0)
     return kDefaultProcessIntervalMs;
-  return std::max<int64_t>(
-      next_process_time_ - TickTime::MillisecondTimestamp(), 0);
+  return std::max(static_cast<int>(next_process_time_ -
+      TickTime::MillisecondTimestamp()), 0);
 }
 
 }  // namespace webrtc

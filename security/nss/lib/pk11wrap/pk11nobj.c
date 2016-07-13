@@ -21,6 +21,7 @@
 
 #include "certdb.h" 
 #include "secerr.h"
+#include "sslerr.h"
 
 #include "pki3hack.h"
 #include "dev3hack.h" 

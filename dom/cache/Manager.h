@@ -10,7 +10,7 @@
 #include "mozilla/dom/cache/Types.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
@@ -131,11 +131,11 @@ public:
   static nsresult GetOrCreate(ManagerId* aManagerId, Manager** aManagerOut);
   static already_AddRefed<Manager> Get(ManagerId* aManagerId);
 
-  // Synchronously shutdown.  This spins the event loop.
-  static void ShutdownAll();
+  // Synchronously shutdown from main thread.  This spins the event loop.
+  static void ShutdownAllOnMainThread();
 
   // Cancel actions for given origin or all actions if passed string is null.
-  static void Abort(const nsACString& aOrigin);
+  static void AbortOnMainThread(const nsACString& aOrigin);
 
   // Must be called by Listener objects before they are destroyed.
   void RemoveListener(Listener* aListener);
@@ -212,7 +212,7 @@ private:
 
   void MaybeAllowContextToClose();
 
-  RefPtr<ManagerId> mManagerId;
+  nsRefPtr<ManagerId> mManagerId;
   nsCOMPtr<nsIThread> mIOThread;
 
   // Weak reference cleared by RemoveContext() in Context destructor.

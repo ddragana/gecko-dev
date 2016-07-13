@@ -13,7 +13,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "console",
-  "resource://gre/modules/Console.jsm");
+  "resource://gre/modules/devtools/Console.jsm");
 
 // Returns the principal for a given |frame| contained in a given |docShell|.
 function getPrincipalForFrame(docShell, frame) {
@@ -30,8 +30,8 @@ this.SessionStorage = Object.freeze({
    * @param frameTree
    *        The docShell's FrameTree instance.
    * @return Returns a nested object that will have hosts as keys and per-host
-   *         session storage data as strings. For example:
-   *         {"example.com": {"key": "value", "my_number": "123"}}
+   *         session storage data as values. For example:
+   *         {"example.com": {"key": "value", "my_number": 123}}
    */
   collect: function (docShell, frameTree) {
     return SessionStorageInternal.collect(docShell, frameTree);
@@ -43,15 +43,15 @@ this.SessionStorage = Object.freeze({
    *        A tab's docshell (containing the sessionStorage)
    * @param aStorageData
    *        A nested object with storage data to be restored that has hosts as
-   *        keys and per-host session storage data as strings. For example:
-   *        {"example.com": {"key": "value", "my_number": "123"}}
+   *        keys and per-host session storage data as values. For example:
+   *        {"example.com": {"key": "value", "my_number": 123}}
    */
   restore: function (aDocShell, aStorageData) {
     SessionStorageInternal.restore(aDocShell, aStorageData);
-  },
+  }
 });
 
-var SessionStorageInternal = {
+let SessionStorageInternal = {
   /**
    * Reads all session storage data from the given docShell.
    * @param docShell
@@ -59,8 +59,8 @@ var SessionStorageInternal = {
    * @param frameTree
    *        The docShell's FrameTree instance.
    * @return Returns a nested object that will have hosts as keys and per-host
-   *         session storage data as strings. For example:
-   *         {"example.com": {"key": "value", "my_number": "123"}}
+   *         session storage data as values. For example:
+   *         {"example.com": {"key": "value", "my_number": 123}}
    */
   collect: function (docShell, frameTree) {
     let data = {};
@@ -72,9 +72,9 @@ var SessionStorageInternal = {
         return;
       }
 
-      // Get the origin of the current history entry
-      // and use that as a key for the per-principal storage data.
-      let origin = principal.origin;
+      // Get the root domain of the current history entry
+      // and use that as a key for the per-host storage data.
+      let origin = principal.jarPrefix + principal.originNoSuffix;
       if (visitedOrigins.has(origin)) {
         // Don't read a host twice.
         return;
@@ -98,24 +98,14 @@ var SessionStorageInternal = {
    *        A tab's docshell (containing the sessionStorage)
    * @param aStorageData
    *        A nested object with storage data to be restored that has hosts as
-   *        keys and per-host session storage data as strings. For example:
-   *        {"example.com": {"key": "value", "my_number": "123"}}
+   *        keys and per-host session storage data as values. For example:
+   *        {"example.com": {"key": "value", "my_number": 123}}
    */
   restore: function (aDocShell, aStorageData) {
-    for (let origin of Object.keys(aStorageData)) {
-      let data = aStorageData[origin];
-
-      let principal;
-
-      try {
-        let attrs = aDocShell.getOriginAttributes();
-        let originURI = Services.io.newURI(origin, null, null);
-        principal = Services.scriptSecurityManager.createCodebasePrincipal(originURI, attrs);
-      } catch (e) {
-        console.error(e);
-        continue;
-      }
-
+    for (let host of Object.keys(aStorageData)) {
+      let data = aStorageData[host];
+      let uri = Services.io.newURI(host, null, null);
+      let principal = Services.scriptSecurityManager.getDocShellCodebasePrincipal(uri, aDocShell);
       let storageManager = aDocShell.QueryInterface(Ci.nsIDOMStorageManager);
       let window = aDocShell.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
 
@@ -151,10 +141,8 @@ var SessionStorageInternal = {
     try {
       let storageManager = aDocShell.QueryInterface(Ci.nsIDOMStorageManager);
       storage = storageManager.getStorage(window, aPrincipal);
-      storage.length; // XXX: Bug 1232955 - storage.length can throw, catch that failure
     } catch (e) {
       // sessionStorage might throw if it's turned off, see bug 458954
-      storage = null;
     }
 
     if (storage && storage.length) {

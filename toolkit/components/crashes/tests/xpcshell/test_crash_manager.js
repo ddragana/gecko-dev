@@ -3,9 +3,9 @@
 
 "use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-var bsp = Cu.import("resource://gre/modules/CrashManager.jsm", this);
+let bsp = Cu.import("resource://gre/modules/CrashManager.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://gre/modules/osfile.jsm", this);
@@ -96,7 +96,7 @@ add_task(function* test_submitted_dumps() {
   entries = yield m.submittedDumps();
   Assert.equal(entries.length, COUNT + 1, "hr- in filename detected.");
 
-  let gotIDs = new Set(entries.map(e => e.id));
+  let gotIDs = new Set([e.id for (e of entries)]);
   Assert.ok(gotIDs.has(hrID));
 });
 
@@ -213,18 +213,9 @@ add_task(function* test_main_crash_event_file() {
   let ac = new TelemetryArchiveTesting.Checker();
   yield ac.promiseInit();
   let theEnvironment = TelemetryEnvironment.currentEnvironment;
-  let sessionId = "be66af2f-2ee5-4330-ae95-44462dfbdf0c";
-
-  // To test proper escaping, add data to the environment with an embedded
-  // double-quote
-  theEnvironment.testValue = "MyValue\"";
 
   let m = yield getManager();
-  const fileContent = "id1\nk1=v1\nk2=v2\n" +
-    "TelemetryEnvironment=" + JSON.stringify(theEnvironment) + "\n" +
-    "TelemetrySessionId=" + sessionId;
-
-  yield m.createEventsFile("1", "crash.main.2", DUMMY_DATE, fileContent);
+  yield m.createEventsFile("1", "crash.main.2", DUMMY_DATE, "id1\nk1=v1\nk2=v2\nTelemetryEnvironment=" + JSON.stringify(theEnvironment));
   let count = yield m.aggregateEventsFiles();
   Assert.equal(count, 1);
 
@@ -235,14 +226,12 @@ add_task(function* test_main_crash_event_file() {
   Assert.equal(crashes[0].metadata.k1, "v1");
   Assert.equal(crashes[0].metadata.k2, "v2");
   Assert.ok(crashes[0].metadata.TelemetryEnvironment);
-  Assert.equal(Object.getOwnPropertyNames(crashes[0].metadata).length, 4);
-  Assert.equal(crashes[0].metadata.TelemetrySessionId, sessionId);
+  Assert.equal(Object.getOwnPropertyNames(crashes[0].metadata).length, 3);
   Assert.deepEqual(crashes[0].crashDate, DUMMY_DATE);
 
   let found = yield ac.promiseFindPing("crash", [
     [["payload", "hasCrashEnvironment"], true],
     [["payload", "metadata", "k1"], "v1"],
-    [["payload", "sessionId"], sessionId],
   ]);
   Assert.ok(found, "Telemetry ping submitted for found crash");
   Assert.deepEqual(found.environment, theEnvironment, "The saved environment should be present");

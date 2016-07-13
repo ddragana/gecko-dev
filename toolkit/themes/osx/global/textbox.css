@@ -79,9 +79,13 @@ textbox[type="search"] {
 }
 
 .textbox-search-clear {
-  list-style-image: url(chrome://global/skin/icons/searchfield-cancel.svg);
+  list-style-image: url(chrome://global/skin/icons/searchfield-regular-cancel.png);
   -moz-image-region: rect(0, 14px, 14px, 0);
   margin-bottom: 1px;
+}
+
+.textbox-search-clear:active:hover {
+  -moz-image-region: rect(0, 28px, 14px, 14px);
 }
 
 textbox[type="search"].compact {
@@ -90,7 +94,12 @@ textbox[type="search"].compact {
 }
 
 textbox[type="search"].compact > .textbox-input-box > .textbox-search-icons > .textbox-search-clear {
-  width: 11px;
+  list-style-image: url(chrome://global/skin/icons/searchfield-small-cancel.png);
+  -moz-image-region: rect(0, 11px, 11px, 0);
+}
+
+textbox[type="search"].compact > .textbox-input-box > .textbox-search-icons > .textbox-search-clear:active:hover {
+  -moz-image-region: rect(0, 22px, 11px, 11px);
 }
 
 .textbox-search-clear:not([disabled]) {

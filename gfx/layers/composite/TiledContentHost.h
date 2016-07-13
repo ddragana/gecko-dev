@@ -15,15 +15,14 @@
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr
-#include "mozilla/gfx/MatrixFwd.h"      // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for Point
 #include "mozilla/gfx/Rect.h"           // for Rect
-#include "mozilla/gfx/Types.h"          // for SamplingFilter
+#include "mozilla/gfx/Types.h"          // for Filter
 #include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
 #include "mozilla/layers/TextureHost.h"  // for TextureHost
-#include "mozilla/layers/TextureClient.h"
+#include "mozilla/layers/TiledContentClient.h"
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nscore.h"                     // for nsACString
@@ -33,6 +32,9 @@
 #endif
 
 namespace mozilla {
+namespace gfx {
+class Matrix4x4;
+} // namespace gfx
 
 namespace layers {
 
@@ -40,7 +42,6 @@ class Compositor;
 class ISurfaceAllocator;
 class Layer;
 class ThebesBufferData;
-class TextureReadLock;
 struct EffectChain;
 
 
@@ -53,13 +54,14 @@ public:
   TileHost()
   {}
 
-  // Constructs a TileHost from a TextureReadLock and TextureHost.
-  TileHost(TextureReadLock* aSharedLock,
+  // Constructs a TileHost from a gfxSharedReadLock and TextureHost.
+  TileHost(gfxSharedReadLock* aSharedLock,
                TextureHost* aTextureHost,
                TextureHost* aTextureHostOnWhite,
                TextureSource* aSource,
                TextureSource* aSourceOnWhite)
-    : mTextureHost(aTextureHost)
+    : mSharedLock(aSharedLock)
+    , mTextureHost(aTextureHost)
     , mTextureHostOnWhite(aTextureHostOnWhite)
     , mTextureSource(aSource)
     , mTextureSourceOnWhite(aSourceOnWhite)
@@ -70,6 +72,7 @@ public:
     mTextureHostOnWhite = o.mTextureHostOnWhite;
     mTextureSource = o.mTextureSource;
     mTextureSourceOnWhite = o.mTextureSourceOnWhite;
+    mSharedLock = o.mSharedLock;
     mTilePosition = o.mTilePosition;
   }
   TileHost& operator=(const TileHost& o) {
@@ -80,6 +83,7 @@ public:
     mTextureHostOnWhite = o.mTextureHostOnWhite;
     mTextureSource = o.mTextureSource;
     mTextureSourceOnWhite = o.mTextureSourceOnWhite;
+    mSharedLock = o.mSharedLock;
     mTilePosition = o.mTilePosition;
     return *this;
   }
@@ -93,30 +97,29 @@ public:
 
   bool IsPlaceholderTile() const { return mTextureHost == nullptr; }
 
+  void ReadUnlock() {
+    if (mSharedLock) {
+      mSharedLock->ReadUnlock();
+      mSharedLock = nullptr;
+    }
+  }
+
   void Dump(std::stringstream& aStream) {
     aStream << "TileHost(...)"; // fill in as needed
   }
 
-  void DumpTexture(std::stringstream& aStream, TextureDumpMode /* aCompress, ignored for host tiles */) {
+  void DumpTexture(std::stringstream& aStream) {
     // TODO We should combine the OnWhite/OnBlack here an just output a single image.
     CompositableHost::DumpTextureHost(aStream, mTextureHost);
   }
 
-  /**
-   * This does a linear tween of the passed opacity (which is assumed
-   * to be between 0.0 and 1.0). The duration of the fade is controlled
-   * by the 'layers.tiles.fade-in.duration-ms' preference. It is enabled
-   * via 'layers.tiles.fade-in.enabled'
-   */
-  float GetFadeInOpacity(float aOpacity);
-
+  RefPtr<gfxSharedReadLock> mSharedLock;
   CompositableTextureHostRef mTextureHost;
   CompositableTextureHostRef mTextureHostOnWhite;
   mutable CompositableTextureSourceRef mTextureSource;
   mutable CompositableTextureSourceRef mTextureSourceOnWhite;
   // This is not strictly necessary but makes debugging whole lot easier.
   TileIntPoint mTilePosition;
-  TimeStamp mFadeStart;
 };
 
 class TiledLayerBufferComposite
@@ -134,6 +137,9 @@ public:
 
   void Clear();
 
+  void MarkTilesForUnlock();
+  void ProcessDelayedUnlocks();
+
   TileHost GetPlaceholderTile() const { return TileHost(); }
 
   // Stores the absolute resolution of the containing frame, calculated
@@ -142,10 +148,14 @@ public:
 
   void SetCompositor(Compositor* aCompositor);
 
-  void AddAnimationInvalidation(nsIntRegion& aRegion);
+  // Recycle callback for TextureHost.
+  // Used when TiledContentClient is present in client side.
+  static void RecycleCallback(TextureHost* textureHost, void* aClosure);
+
 protected:
 
   CSSToParentLayerScale2D mFrameResolution;
+  nsTArray<RefPtr<gfxSharedReadLock>> mDelayedUnlocks;
 };
 
 /**
@@ -179,30 +189,9 @@ protected:
 public:
   virtual LayerRenderState GetRenderState() override
   {
-    // If we have exactly one high precision tile, then we can support hwc.
-    if (mTiledBuffer.GetTileCount() == 1 &&
-        mLowPrecisionTiledBuffer.GetTileCount() == 0) {
-      TextureHost* host = mTiledBuffer.GetTile(0).mTextureHost;
-      if (host) {
-        MOZ_ASSERT(!mTiledBuffer.GetTile(0).mTextureHostOnWhite, "Component alpha not supported!");
-
-        gfx::IntPoint offset = mTiledBuffer.GetTileOffset(mTiledBuffer.GetPlacement().TilePosition(0));
-
-        // Don't try to use HWC if the content doesn't start at the top-left of the tile.
-        if (offset != GetValidRegion().GetBounds().TopLeft()) {
-          return LayerRenderState();
-        }
-
-        LayerRenderState state = host->GetRenderState();
-        state.SetOffset(offset);
-        return state;
-      }
-    }
     return LayerRenderState();
   }
 
-  // Generate effect for layerscope when using hwc.
-  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::SamplingFilter aSamplingFilter) override;
 
   virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
@@ -238,8 +227,8 @@ public:
                          EffectChain& aEffectChain,
                          float aOpacity,
                          const gfx::Matrix4x4& aTransform,
-                         const gfx::SamplingFilter aSamplingFilter,
-                         const gfx::IntRect& aClipRect,
+                         const gfx::Filter& aFilter,
+                         const gfx::Rect& aClipRect,
                          const nsIntRegion* aVisibleRegion = nullptr) override;
 
   virtual CompositableType GetType() override { return CompositableType::CONTENT_TILED; }
@@ -259,16 +248,14 @@ public:
 
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
 
-  virtual void AddAnimationInvalidation(nsIntRegion& aRegion) override;
-
 private:
 
   void RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
-                         const gfx::Color* aBackgroundColor,
+                         const gfxRGBA* aBackgroundColor,
                          EffectChain& aEffectChain,
                          float aOpacity,
-                         const gfx::SamplingFilter aSamplingFilter,
-                         const gfx::IntRect& aClipRect,
+                         const gfx::Filter& aFilter,
+                         const gfx::Rect& aClipRect,
                          nsIntRegion aMaskRegion,
                          gfx::Matrix4x4 aTransform);
 
@@ -277,8 +264,8 @@ private:
                   EffectChain& aEffectChain,
                   float aOpacity,
                   const gfx::Matrix4x4& aTransform,
-                  const gfx::SamplingFilter aSamplingFilter,
-                  const gfx::IntRect& aClipRect,
+                  const gfx::Filter& aFilter,
+                  const gfx::Rect& aClipRect,
                   const nsIntRegion& aScreenRegion,
                   const gfx::IntPoint& aTextureOffset,
                   const gfx::IntSize& aTextureBounds,

@@ -13,31 +13,30 @@
 #include "mozilla/dom/TelephonyCallId.h"
 #include "mozilla/dom/telephony/TelephonyCommon.h"
 
-#include "nsITelephonyService.h"
-
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
 
 class TelephonyCall final : public DOMEventTargetHelper
 {
-  RefPtr<Telephony> mTelephony;
-  RefPtr<TelephonyCallGroup> mGroup;
+  nsRefPtr<Telephony> mTelephony;
+  nsRefPtr<TelephonyCallGroup> mGroup;
 
-  RefPtr<TelephonyCallId> mId;
-  RefPtr<TelephonyCallId> mSecondId;
+  nsRefPtr<TelephonyCallId> mId;
+  nsRefPtr<TelephonyCallId> mSecondId;
 
   uint32_t mServiceId;
-  TelephonyCallState mState;
+  nsString mState;
   bool mEmergency;
-  RefPtr<DOMError> mError;
+  nsRefPtr<DOMError> mError;
   Nullable<TelephonyCallDisconnectedReason> mDisconnectedReason;
 
   bool mSwitchable;
   bool mMergeable;
 
   uint32_t mCallIndex;
+  uint16_t mCallState;
   bool mLive;
 
 public:
@@ -47,7 +46,7 @@ public:
                                            DOMEventTargetHelper)
   friend class Telephony;
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return GetOwner();
@@ -64,10 +63,10 @@ public:
   already_AddRefed<TelephonyCallId>
   GetSecondId() const;
 
-  TelephonyCallState
-  State() const
+  void
+  GetState(nsString& aState) const
   {
-    return mState;
+    aState.Assign(mState);
   }
 
   bool
@@ -86,14 +85,6 @@ public:
   Mergeable() const
   {
     return mMergeable;
-  }
-
-  bool
-  IsActive() const
-  {
-    return mState == TelephonyCallState::Dialing ||
-           mState == TelephonyCallState::Alerting ||
-           mState == TelephonyCallState::Connected;
   }
 
   already_AddRefed<DOMError>
@@ -129,23 +120,17 @@ public:
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(groupchange)
 
-  static TelephonyCallState
-  ConvertToTelephonyCallState(uint32_t aCallState);
-
   static already_AddRefed<TelephonyCall>
   Create(Telephony* aTelephony, TelephonyCallId* aId,
-         uint32_t aServiceId, uint32_t aCallIndex, TelephonyCallState aState,
+         uint32_t aServiceId, uint32_t aCallIndex, uint16_t aCallState,
          bool aEmergency = false, bool aConference = false,
          bool aSwitchable = true, bool aMergeable = true);
 
   void
-  ChangeState(TelephonyCallState aState)
+  ChangeState(uint16_t aCallState)
   {
-    ChangeStateInternal(aState, true);
+    ChangeStateInternal(aCallState, true);
   }
-
-  nsresult
-  NotifyStateChanged();
 
   uint32_t
   ServiceId() const
@@ -157,6 +142,12 @@ public:
   CallIndex() const
   {
     return mCallIndex;
+  }
+
+  uint16_t
+  CallState() const
+  {
+    return mCallState;
   }
 
   void
@@ -190,18 +181,12 @@ public:
   ChangeGroup(TelephonyCallGroup* aGroup);
 
 private:
-  explicit TelephonyCall(nsPIDOMWindowInner* aOwner);
+  explicit TelephonyCall(nsPIDOMWindow* aOwner);
 
   ~TelephonyCall();
 
-  nsresult
-  Hold(nsITelephonyCallback* aCallback);
-
-  nsresult
-  Resume(nsITelephonyCallback* aCallback);
-
   void
-  ChangeStateInternal(TelephonyCallState aState, bool aFireEvents);
+  ChangeStateInternal(uint16_t aCallState, bool aFireEvents);
 
   nsresult
   DispatchCallEvent(const nsAString& aType,

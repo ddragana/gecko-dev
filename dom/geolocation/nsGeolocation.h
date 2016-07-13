@@ -12,6 +12,7 @@
 
 #include "mozilla/StaticPtr.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsITimer.h"
 #include "nsIObserver.h"
@@ -21,7 +22,6 @@
 #include "nsCycleCollectionParticipant.h"
 
 #include "nsGeoPosition.h"
-#include "nsIDOMEventListener.h"
 #include "nsIDOMGeoGeolocation.h"
 #include "nsIDOMGeoPosition.h"
 #include "nsIDOMGeoPositionError.h"
@@ -33,6 +33,7 @@
 
 #include "nsIGeolocationProvider.h"
 #include "nsIContentPermissionPrompt.h"
+#include "nsIDOMWindow.h"
 #include "mozilla/Attributes.h"
 
 class nsGeolocationService;
@@ -72,6 +73,9 @@ public:
 
   nsresult Init();
 
+  void HandleMozsettingChanged(nsISupports* aSubject);
+  void HandleMozsettingValue(const bool aValue);
+
   // Management of the Geolocation objects
   void AddLocator(mozilla::dom::Geolocation* locator);
   void RemoveLocator(mozilla::dom::Geolocation* locator);
@@ -87,7 +91,6 @@ public:
 
   // create, or reinitalize the callback timer
   void     SetDisconnectTimer();
-  void     StopDisconnectTimer();
 
   // Update the accuracy and notify the provider if changed
   void     UpdateAccuracy(bool aForceHigh = false);
@@ -125,8 +128,7 @@ namespace dom {
  */
 class Geolocation final : public nsIDOMGeoGeolocation,
                           public nsIGeolocationUpdate,
-                          public nsWrapperCache,
-                          public nsIDOMEventListener
+                          public nsWrapperCache
 {
 public:
 
@@ -136,13 +138,11 @@ public:
   NS_DECL_NSIGEOLOCATIONUPDATE
   NS_DECL_NSIDOMGEOGEOLOCATION
 
-  NS_DECL_NSIDOMEVENTLISTENER
-
   Geolocation();
 
-  nsresult Init(nsPIDOMWindowInner* aContentDom = nullptr);
+  nsresult Init(nsIDOMWindow* contentDom=nullptr);
 
-  nsPIDOMWindowInner* GetParentObject() const;
+  nsIDOMWindow* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext *aCtx, JS::Handle<JSObject*> aGivenProto) override;
 
   int32_t WatchPosition(PositionCallback& aCallback, PositionErrorCallback* aErrorCallback, const PositionOptions& aOptions, ErrorResult& aRv);
@@ -153,9 +153,6 @@ public:
 
   // Register an allowed request
   void NotifyAllowedRequest(nsGeolocationRequest* aRequest);
-
-  // Check if callbacks arrays already contain this request
-  bool ContainsRequest(nsGeolocationRequest* aRequest);
 
   // Remove request from all callbacks arrays
   void RemoveRequest(nsGeolocationRequest* request);
@@ -173,7 +170,7 @@ public:
   // Getter for the window that this Geolocation is owned by
   nsIWeakReference* GetOwner() { return mOwner; }
 
-  // Check to see if the window still exists
+  // Check to see if the widnow still exists
   bool WindowOwnerStillExists();
 
   // Check to see if any active request requires high accuracy
@@ -204,8 +201,8 @@ private:
   // there is a page change. All requests held by either array are active, that
   // is, they have been allowed and expect to be fulfilled.
 
-  nsTArray<RefPtr<nsGeolocationRequest> > mPendingCallbacks;
-  nsTArray<RefPtr<nsGeolocationRequest> > mWatchingCallbacks;
+  nsTArray<nsRefPtr<nsGeolocationRequest> > mPendingCallbacks;
+  nsTArray<nsRefPtr<nsGeolocationRequest> > mWatchingCallbacks;
 
   // window that this was created for.  Weak reference.
   nsWeakPtr mOwner;
@@ -213,20 +210,14 @@ private:
   // where the content was loaded from
   nsCOMPtr<nsIPrincipal> mPrincipal;
 
-  // the protocols we want to measure
-  enum class ProtocolType: uint8_t { OTHER, HTTP, HTTPS };
-
-  // the protocol used to load the content
-  ProtocolType mProtocolType;
-
   // owning back pointer.
-  RefPtr<nsGeolocationService> mService;
+  nsRefPtr<nsGeolocationService> mService;
 
   // Watch ID
   uint32_t mLastWatchId;
 
   // Pending requests are used when the service is not ready
-  nsTArray<RefPtr<nsGeolocationRequest> > mPendingRequests;
+  nsTArray<nsRefPtr<nsGeolocationRequest> > mPendingRequests;
 
   // Array containing already cleared watch IDs
   nsTArray<int32_t> mClearedWatchIDs;
@@ -255,7 +246,7 @@ public:
 private:
   ~PositionError();
   int16_t mCode;
-  RefPtr<Geolocation> mParent;
+  nsRefPtr<Geolocation> mParent;
 };
 
 } // namespace dom

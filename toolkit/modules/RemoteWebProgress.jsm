@@ -117,7 +117,6 @@ RemoteWebProgressManager.prototype = {
       this._messageManager.removeMessageListener("Content:SecurityChange", this);
       this._messageManager.removeMessageListener("Content:StatusChange", this);
       this._messageManager.removeMessageListener("Content:ProgressChange", this);
-      this._messageManager.removeMessageListener("Content:LoadURIResult", this);
     }
 
     this._browser = aBrowser;
@@ -127,7 +126,6 @@ RemoteWebProgressManager.prototype = {
     this._messageManager.addMessageListener("Content:SecurityChange", this);
     this._messageManager.addMessageListener("Content:StatusChange", this);
     this._messageManager.addMessageListener("Content:ProgressChange", this);
-    this._messageManager.addMessageListener("Content:LoadURIResult", this);
   },
 
   get topLevelWebProgress() {
@@ -160,8 +158,8 @@ RemoteWebProgressManager.prototype = {
   setCurrentURI: function (aURI) {
     // This function is simpler than nsDocShell::SetCurrentURI since
     // it doesn't have to deal with child docshells.
-    let remoteWebNav = this._browser._remoteWebNavigationImpl;
-    remoteWebNav._currentURI = aURI;
+    let webNavigation = this._browser.webNavigation;
+    webNavigation._currentURI = aURI;
 
     let webProgress = this.topLevelWebProgress;
     for (let p of this._progressListeners) {
@@ -184,13 +182,6 @@ RemoteWebProgressManager.prototype = {
   receiveMessage: function (aMessage) {
     let json = aMessage.json;
     let objects = aMessage.objects;
-    // This message is a custom one we send as a result of a loadURI call.
-    // It shouldn't go through the same processing as all the forwarded
-    // webprogresslistener messages.
-    if (aMessage.name == "Content:LoadURIResult") {
-      this._browser.inLoadURI = false;
-      return;
-    }
 
     let webProgress = null;
     let isTopLevel = json.webProgress && json.webProgress.isTopLevel;
@@ -220,40 +211,30 @@ RemoteWebProgressManager.prototype = {
     if (isTopLevel) {
       this._browser._contentWindow = objects.contentWindow;
       this._browser._documentContentType = json.documentContentType;
-      if (typeof json.inLoadURI != "undefined") {
-        this._browser.inLoadURI = json.inLoadURI;
-      }
-      if (json.charset) {
-        this._browser._characterSet = json.charset;
-        this._browser._mayEnableCharacterEncodingMenu = json.mayEnableCharacterEncodingMenu;
-      }
     }
 
     switch (aMessage.name) {
     case "Content:StateChange":
-      if (isTopLevel) {
-        this._browser._documentURI = newURI(json.documentURI);
-      }
       this._callProgressListeners("onStateChange", webProgress, request, json.stateFlags, json.status);
       break;
 
     case "Content:LocationChange":
       let location = newURI(json.location);
       let flags = json.flags;
-      let remoteWebNav = this._browser._remoteWebNavigationImpl;
 
       // These properties can change even for a sub-frame navigation.
-      remoteWebNav.canGoBack = json.canGoBack;
-      remoteWebNav.canGoForward = json.canGoForward;
+      this._browser.webNavigation.canGoBack = json.canGoBack;
+      this._browser.webNavigation.canGoForward = json.canGoForward;
 
       if (isTopLevel) {
-        remoteWebNav._currentURI = location;
+        this._browser.webNavigation._currentURI = location;
+        this._browser._characterSet = json.charset;
         this._browser._documentURI = newURI(json.documentURI);
         this._browser._contentTitle = json.title;
         this._browser._imageDocument = null;
+        this._browser._mayEnableCharacterEncodingMenu = json.mayEnableCharacterEncodingMenu;
         this._browser._contentPrincipal = json.principal;
         this._browser._isSyntheticDocument = json.synthetic;
-        this._browser._innerWindowID = json.innerWindowID;
       }
 
       this._callProgressListeners("onLocationChange", webProgress, request, location, flags);

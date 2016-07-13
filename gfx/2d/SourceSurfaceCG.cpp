@@ -9,9 +9,7 @@
 #include "DataSurfaceHelpers.h"
 #include "mozilla/Types.h" // for decltype
 
-#ifdef MOZ_WIDGET_COCOA
 #include "MacIOSurface.h"
-#endif
 #include "Tools.h"
 
 namespace mozilla {
@@ -105,7 +103,7 @@ CreateCGImage(CGDataProviderReleaseDataCallback aCallback,
       break;
 
     default:
-      MOZ_CRASH("GFX: CreateCGImage");
+      MOZ_CRASH();
   }
 
   size_t bufLen = BufferSizeFromStrideAndHeight(aStride, aSize.height);
@@ -386,7 +384,6 @@ SourceSurfaceCGBitmapContext::~SourceSurfaceCGBitmapContext()
     CGImageRelease(mImage);
 }
 
-#ifdef MOZ_WIDGET_COCOA
 SourceSurfaceCGIOSurfaceContext::SourceSurfaceCGIOSurfaceContext(DrawTargetCG *aDrawTarget)
 {
   CGContextRef cg = (CGContextRef)aDrawTarget->GetNativeSurface(NativeSurfaceType::CGCONTEXT_ACCELERATED);
@@ -455,7 +452,6 @@ SourceSurfaceCGIOSurfaceContext::GetData()
 {
   return (unsigned char*)mData;
 }
-#endif
 
 } // namespace gfx
 } // namespace mozilla

@@ -124,17 +124,10 @@ public:
                              GdkEventKey* aGdkKeyEvent);
 
     /**
-     * WillDispatchKeyboardEvent() is called via
-     * TextEventDispatcherListener::WillDispatchKeyboardEvent().
-     *
-     * @param aKeyEvent         An instance of KeyboardEvent which will be
-     *                          dispatched.  This method should set charCode
-     *                          and alternative char codes if it's necessary.
-     * @param aGdkKeyEvent      A GdkEventKey instance which caused the
-     *                          aKeyEvent.
+     * IsKeyPressEventNecessary() returns TRUE when aGdkKeyEvent should cause
+     * a DOM keypress event.  Otherwise, FALSE.
      */
-    static void WillDispatchKeyboardEvent(WidgetKeyboardEvent& aKeyEvent,
-                                          GdkEventKey* aGdkKeyEvent);
+    static bool IsKeyPressEventNecessary(GdkEventKey* aGdkKeyEvent);
 
     /**
      * Destroys the singleton KeymapWrapper instance, if it exists.
@@ -337,6 +330,19 @@ protected:
     static uint32_t GetDOMKeyCodeFromKeyPairs(guint aGdkKeyval);
 
     /**
+     * InitKeypressEvent() intializes keyCode, charCode and
+     * alternativeCharCodes of keypress event.
+     *
+     * @param aKeyEvent         An NS_KEY_PRESS event, must not be nullptr.
+     *                          The modifier related members and keyCode must
+     *                          be initialized already.
+     * @param aGdkKeyEvent      A native key event which causes dispatching
+     *                          aKeyEvent.
+     */
+    void InitKeypressEvent(WidgetKeyboardEvent& aKeyEvent,
+                           GdkEventKey* aGdkKeyEvent);
+
+    /**
      * FilterEvents() listens all events on all our windows.
      * Be careful, this may make damage to performance if you add expensive
      * code in this method.
@@ -344,12 +350,6 @@ protected:
     static GdkFilterReturn FilterEvents(GdkXEvent* aXEvent,
                                         GdkEvent* aGdkEvent,
                                         gpointer aData);
-
-    /**
-     * See the document of WillDispatchKeyboardEvent().
-     */
-    void WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
-                                           GdkEventKey* aGdkKeyEvent);
 };
 
 } // namespace widget

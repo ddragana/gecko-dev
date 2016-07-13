@@ -11,7 +11,6 @@ const Cu = Components.utils;
 this.EXPORTED_SYMBOLS = [];
 
 Cu.import("resource://gre/modules/AddonManager.jsm");
-/*globals AddonManagerPrivate*/
 Cu.import("resource://gre/modules/Services.jsm");
 
 const URI_EXTENSION_STRINGS  = "chrome://mozapps/locale/extensions/extensions.properties";
@@ -24,11 +23,12 @@ const LOGGER_ID = "addons.plugins";
 
 // Create a new logger for use by the Addons Plugin Provider
 // (Requires AddonManager.jsm)
-var logger = Log.repository.getLogger(LOGGER_ID);
+let logger = Log.repository.getLogger(LOGGER_ID);
 
 function getIDHashForString(aStr) {
   // return the two-digit hexadecimal code for a byte
-  let toHexString = charCode => ("0" + charCode.toString(16)).slice(-2);
+  function toHexString(charCode)
+    ("0" + charCode.toString(16)).slice(-2);
 
   let hasher = Cc["@mozilla.org/security/hash;1"].
                createInstance(Ci.nsICryptoHash);
@@ -40,8 +40,7 @@ function getIDHashForString(aStr) {
 
   // convert the binary hash data to a hex string.
   let binary = hasher.finish(false);
-  let hash = Array.from(binary, c => toHexString(c.charCodeAt(0)));
-  hash = hash.join("").toLowerCase();
+  let hash = [toHexString(binary.charCodeAt(i)) for (i in binary)].join("").toLowerCase();
   return "{" + hash.substr(0, 8) + "-" +
                hash.substr(8, 4) + "-" +
                hash.substr(12, 4) + "-" +
@@ -50,14 +49,12 @@ function getIDHashForString(aStr) {
 }
 
 var PluginProvider = {
-  get name() {
-    return "PluginProvider";
-  },
+  get name() "PluginProvider",
 
   // A dictionary mapping IDs to names and descriptions
   plugins: null,
 
-  startup: function() {
+  startup: function PL_startup() {
     Services.obs.addObserver(this, LIST_UPDATED_TOPIC, false);
     Services.obs.addObserver(this, AddonManager.OPTIONS_NOTIFICATION_DISPLAYED, false);
   },
@@ -66,7 +63,7 @@ var PluginProvider = {
    * Called when the application is shutting down. Only necessary for tests
    * to be able to simulate a shutdown.
    */
-  shutdown: function() {
+  shutdown: function PL_shutdown() {
     this.plugins = null;
     Services.obs.removeObserver(this, AddonManager.OPTIONS_NOTIFICATION_DISPLAYED);
     Services.obs.removeObserver(this, LIST_UPDATED_TOPIC);
@@ -75,7 +72,7 @@ var PluginProvider = {
   observe: function(aSubject, aTopic, aData) {
     switch (aTopic) {
     case AddonManager.OPTIONS_NOTIFICATION_DISPLAYED:
-      this.getAddonByID(aData, function(plugin) {
+      this.getAddonByID(aData, function PL_displayPluginInfo(plugin) {
         if (!plugin)
           return;
 
@@ -85,7 +82,7 @@ var PluginProvider = {
         let typeLabel = aSubject.getElementById("pluginMimeTypes"), types = [];
         for (let type of plugin.pluginMimeTypes) {
           let extras = [type.description.trim(), type.suffixes].
-                       filter(x => x).join(": ");
+                       filter(function(x) x).join(": ");
           types.push(type.type + (extras ? " (" + extras + ")" : ""));
         }
         typeLabel.textContent = types.join(",\n");
@@ -104,7 +101,7 @@ var PluginProvider = {
   /**
    * Creates a PluginWrapper for a plugin object.
    */
-  buildWrapper: function(aPlugin) {
+  buildWrapper: function PL_buildWrapper(aPlugin) {
     return new PluginWrapper(aPlugin.id,
                              aPlugin.name,
                              aPlugin.description,
@@ -119,7 +116,7 @@ var PluginProvider = {
    * @param  aCallback
    *         A callback to pass the Addon to
    */
-  getAddonByID: function(aId, aCallback) {
+  getAddonByID: function PL_getAddon(aId, aCallback) {
     if (!this.plugins)
       this.buildPluginList();
 
@@ -137,7 +134,7 @@ var PluginProvider = {
    * @param  callback
    *         A callback to pass an array of Addons to
    */
-  getAddonsByTypes: function(aTypes, aCallback) {
+  getAddonsByTypes: function PL_getAddonsByTypes(aTypes, aCallback) {
     if (aTypes && aTypes.indexOf("plugin") < 0) {
       aCallback([]);
       return;
@@ -148,8 +145,11 @@ var PluginProvider = {
 
     let results = [];
 
-    for (let id in this.plugins)
-      this.getAddonByID(id, (addon) => results.push(addon));
+    for (let id in this.plugins) {
+      this.getAddonByID(id, function(aAddon) {
+        results.push(aAddon);
+      });
+    }
 
     aCallback(results);
   },
@@ -162,7 +162,7 @@ var PluginProvider = {
    * @param  aCallback
    *         A callback to pass an array of Addons to
    */
-  getAddonsWithOperationsByTypes: function(aTypes, aCallback) {
+  getAddonsWithOperationsByTypes: function PL_getAddonsWithOperationsByTypes(aTypes, aCallback) {
     aCallback([]);
   },
 
@@ -174,7 +174,7 @@ var PluginProvider = {
    * @param  aCallback
    *         A callback to pass the array of AddonInstalls to
    */
-  getInstallsByTypes: function(aTypes, aCallback) {
+  getInstallsByTypes: function PL_getInstallsByTypes(aTypes, aCallback) {
     aCallback([]);
   },
 
@@ -183,7 +183,7 @@ var PluginProvider = {
    *
    * @return a dictionary of plugins indexed by our generated ID
    */
-  getPluginList: function() {
+  getPluginList: function PL_getPluginList() {
     let tags = Cc["@mozilla.org/plugin/host;1"].
                getService(Ci.nsIPluginHost).
                getPluginTags({});
@@ -215,7 +215,7 @@ var PluginProvider = {
   /**
    * Builds the list of known plugins from the plugin host
    */
-  buildPluginList: function() {
+  buildPluginList: function PL_buildPluginList() {
     this.plugins = this.getPluginList();
   },
 
@@ -224,14 +224,14 @@ var PluginProvider = {
    * to the last known list sending out any necessary API notifications for
    * changes.
    */
-  updatePluginList: function() {
+  updatePluginList: function PL_updatePluginList() {
     let newList = this.getPluginList();
 
-    let lostPlugins = Object.keys(this.plugins).filter(id => !(id in newList)).
-                      map(id => this.buildWrapper(this.plugins[id]));
-    let newPlugins = Object.keys(newList).filter(id => !(id in this.plugins)).
-                     map(id => this.buildWrapper(newList[id]));
-    let matchedIDs = Object.keys(newList).filter(id => id in this.plugins);
+    let lostPlugins = [this.buildWrapper(this.plugins[id])
+                       for each (id in Object.keys(this.plugins)) if (!(id in newList))];
+    let newPlugins = [this.buildWrapper(newList[id])
+                      for each (id in Object.keys(newList)) if (!(id in this.plugins))];
+    let matchedIDs = [id for each (id in Object.keys(newList)) if (id in this.plugins)];
 
     // The plugin host generates new tags for every plugin after a scan and
     // if the plugin's filename has changed then the disabled state won't have
@@ -293,99 +293,63 @@ function canDisableFlashProtectedMode(aPlugin) {
   return isFlashPlugin(aPlugin) && Services.appinfo.XPCOMABI == "x86-msvc";
 }
 
-const wrapperMap = new WeakMap();
-let pluginFor = wrapper => wrapperMap.get(wrapper);
-
 /**
  * The PluginWrapper wraps a set of nsIPluginTags to provide the data visible to
  * public callers through the API.
  */
-function PluginWrapper(id, name, description, tags) {
-  wrapperMap.set(this, { id, name, description, tags });
-}
+function PluginWrapper(aId, aName, aDescription, aTags) {
+  let safedesc = aDescription.replace(/<\/?[a-z][^>]*>/gi, " ");
+  let homepageURL = null;
+  if (/<A\s+HREF=[^>]*>/i.test(aDescription))
+    homepageURL = /<A\s+HREF=["']?([^>"'\s]*)/i.exec(aDescription)[1];
 
-PluginWrapper.prototype = {
-  get id() {
-    return pluginFor(this).id;
-  },
+  this.__defineGetter__("id", function() aId);
+  this.__defineGetter__("type", function() "plugin");
+  this.__defineGetter__("name", function() aName);
+  this.__defineGetter__("creator", function() null);
+  this.__defineGetter__("description", function() safedesc);
+  this.__defineGetter__("version", function() aTags[0].version);
+  this.__defineGetter__("homepageURL", function() homepageURL);
 
-  get type() {
-    return "plugin";
-  },
+  this.__defineGetter__("isActive", function() !aTags[0].blocklisted && !aTags[0].disabled);
+  this.__defineGetter__("appDisabled", function() aTags[0].blocklisted);
 
-  get name() {
-    return pluginFor(this).name;
-  },
-
-  get creator() {
-    return null;
-  },
-
-  get description() {
-    return pluginFor(this).description.replace(/<\/?[a-z][^>]*>/gi, " ");
-  },
-
-  get version() {
-    let { tags: [tag] } = pluginFor(this);
-    return tag.version;
-  },
-
-  get homepageURL() {
-    let { description } = pluginFor(this);
-    if (/<A\s+HREF=[^>]*>/i.test(description))
-      return /<A\s+HREF=["']?([^>"'\s]*)/i.exec(description)[1];
-    return null;
-  },
-
-  get isActive() {
-    let { tags: [tag] } = pluginFor(this);
-    return !tag.blocklisted && !tag.disabled;
-  },
-
-  get appDisabled() {
-    let { tags: [tag] } = pluginFor(this);
-    return tag.blocklisted;
-  },
-
-  get userDisabled() {
-    let { tags: [tag] } = pluginFor(this);
-    if (tag.disabled)
+  this.__defineGetter__("userDisabled", function() {
+    if (aTags[0].disabled)
       return true;
 
-    if ((Services.prefs.getBoolPref("plugins.click_to_play") && tag.clicktoplay) ||
+    if ((Services.prefs.getBoolPref("plugins.click_to_play") && aTags[0].clicktoplay) ||
         this.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE ||
         this.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_NO_UPDATE)
       return AddonManager.STATE_ASK_TO_ACTIVATE;
 
     return false;
-  },
+  });
 
-  set userDisabled(val) {
+  this.__defineSetter__("userDisabled", function(aVal) {
     let previousVal = this.userDisabled;
-    if (val === previousVal)
-      return val;
+    if (aVal === previousVal)
+      return aVal;
 
-    let { tags } = pluginFor(this);
-
-    for (let tag of tags) {
-      if (val === true)
+    for (let tag of aTags) {
+      if (aVal === true)
         tag.enabledState = Ci.nsIPluginTag.STATE_DISABLED;
-      else if (val === false)
+      else if (aVal === false)
         tag.enabledState = Ci.nsIPluginTag.STATE_ENABLED;
-      else if (val == AddonManager.STATE_ASK_TO_ACTIVATE)
+      else if (aVal == AddonManager.STATE_ASK_TO_ACTIVATE)
         tag.enabledState = Ci.nsIPluginTag.STATE_CLICKTOPLAY;
     }
 
     // If 'userDisabled' was 'true' and we're going to a state that's not
     // that, we're enabling, so call those listeners.
-    if (previousVal === true && val !== true) {
+    if (previousVal === true && aVal !== true) {
       AddonManagerPrivate.callAddonListeners("onEnabling", this, false);
       AddonManagerPrivate.callAddonListeners("onEnabled", this);
     }
 
     // If 'userDisabled' was not 'true' and we're going to a state where
     // it is, we're disabling, so call those listeners.
-    if (previousVal !== true && val === true) {
+    if (previousVal !== true && aVal === true) {
       AddonManagerPrivate.callAddonListeners("onDisabling", this, false);
       AddonManagerPrivate.callAddonListeners("onDisabled", this);
     }
@@ -393,28 +357,27 @@ PluginWrapper.prototype = {
     // If the 'userDisabled' value involved AddonManager.STATE_ASK_TO_ACTIVATE,
     // call the onPropertyChanged listeners.
     if (previousVal == AddonManager.STATE_ASK_TO_ACTIVATE ||
-        val == AddonManager.STATE_ASK_TO_ACTIVATE) {
+        aVal == AddonManager.STATE_ASK_TO_ACTIVATE) {
       AddonManagerPrivate.callAddonListeners("onPropertyChanged", this, ["userDisabled"]);
     }
 
-    return val;
-  },
+    return aVal;
+  });
 
-  get blocklistState() {
-    let { tags: [tag] } = pluginFor(this);
+
+  this.__defineGetter__("blocklistState", function() {
     let bs = Cc["@mozilla.org/extensions/blocklist;1"].
              getService(Ci.nsIBlocklistService);
-    return bs.getPluginBlocklistState(tag);
-  },
+    return bs.getPluginBlocklistState(aTags[0]);
+  });
 
-  get blocklistURL() {
-    let { tags: [tag] } = pluginFor(this);
+  this.__defineGetter__("blocklistURL", function() {
     let bs = Cc["@mozilla.org/extensions/blocklist;1"].
              getService(Ci.nsIBlocklistService);
-    return bs.getPluginBlocklistURL(tag);
-  },
+    return bs.getPluginBlocklistURL(aTags[0]);
+  });
 
-  get size() {
+  this.__defineGetter__("size", function() {
     function getDirectorySize(aFile) {
       let size = 0;
       let entries = aFile.directoryEntries.QueryInterface(Ci.nsIDirectoryEnumerator);
@@ -431,7 +394,7 @@ PluginWrapper.prototype = {
 
     let size = 0;
     let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    for (let tag of pluginFor(this).tags) {
+    for (let tag of aTags) {
       file.initWithPath(tag.fullpath);
       if (file.isDirectory())
         size += getDirectorySize(file);
@@ -439,25 +402,25 @@ PluginWrapper.prototype = {
         size += file.fileSize;
     }
     return size;
-  },
+  });
 
-  get pluginLibraries() {
+  this.__defineGetter__("pluginLibraries", function() {
     let libs = [];
-    for (let tag of pluginFor(this).tags)
+    for (let tag of aTags)
       libs.push(tag.filename);
     return libs;
-  },
+  });
 
-  get pluginFullpath() {
+  this.__defineGetter__("pluginFullpath", function() {
     let paths = [];
-    for (let tag of pluginFor(this).tags)
+    for (let tag of aTags)
       paths.push(tag.fullpath);
     return paths;
-  },
+  })
 
-  get pluginMimeTypes() {
+  this.__defineGetter__("pluginMimeTypes", function() {
     let types = [];
-    for (let tag of pluginFor(this).tags) {
+    for (let tag of aTags) {
       let mimeTypes = tag.getMimeTypes({});
       let mimeDescriptions = tag.getMimeDescriptions({});
       let extensions = tag.getExtensions({});
@@ -471,19 +434,18 @@ PluginWrapper.prototype = {
       }
     }
     return types;
-  },
+  });
 
-  get installDate() {
+  this.__defineGetter__("installDate", function() {
     let date = 0;
-    for (let tag of pluginFor(this).tags) {
+    for (let tag of aTags) {
       date = Math.max(date, tag.lastModifiedTime);
     }
     return new Date(date);
-  },
+  });
 
-  get scope() {
-    let { tags: [tag] } = pluginFor(this);
-    let path = tag.fullpath;
+  this.__defineGetter__("scope", function() {
+    let path = aTags[0].fullpath;
     // Plugins inside the application directory are in the application scope
     let dir = Services.dirsvc.get("APlugns", Ci.nsIFile);
     if (path.startsWith(dir.path))
@@ -500,28 +462,25 @@ PluginWrapper.prototype = {
       dir = Services.dirsvc.get("Home", Ci.nsIFile);
       if (path.startsWith(dir.path))
         return AddonManager.SCOPE_USER;
-    } catch (e) {
-      if (!e.result || e.result != Components.results.NS_ERROR_FAILURE)
-        throw e;
+    } catch (e if (e.result && e.result == Components.results.NS_ERROR_FAILURE)) {
       // Do nothing: missing "Home".
     }
 
     // Any other locations are system scope
     return AddonManager.SCOPE_SYSTEM;
-  },
+  });
 
-  get pendingOperations() {
+  this.__defineGetter__("pendingOperations", function() {
     return AddonManager.PENDING_NONE;
-  },
+  });
 
-  get operationsRequiringRestart() {
+  this.__defineGetter__("operationsRequiringRestart", function() {
     return AddonManager.OP_NEEDS_RESTART_NONE;
-  },
+  });
 
-  get permissions() {
-    let { tags: [tag] } = pluginFor(this);
+  this.__defineGetter__("permissions", function() {
     let permissions = 0;
-    if (tag.isEnabledStateLocked) {
+    if (aTags[0].isEnabledStateLocked) {
       return permissions;
     }
     if (!this.appDisabled) {
@@ -545,18 +504,18 @@ PluginWrapper.prototype = {
       }
     }
     return permissions;
-  },
+  });
 
-  get optionsType() {
+  this.__defineGetter__("optionsType", function() {
     if (canDisableFlashProtectedMode(this)) {
       return AddonManager.OPTIONS_TYPE_INLINE;
     }
     return AddonManager.OPTIONS_TYPE_INLINE_INFO;
-  },
+  });
+}
 
-  get optionsURL() {
-    return "chrome://mozapps/content/extensions/pluginPrefs.xul";
-  },
+PluginWrapper.prototype = {
+  optionsURL: "chrome://mozapps/content/extensions/pluginPrefs.xul",
 
   get updateDate() {
     return this.installDate;
@@ -578,7 +537,7 @@ PluginWrapper.prototype = {
     return true;
   },
 
-  isCompatibleWith: function(aAppVersion, aPlatformVersion) {
+  isCompatibleWith: function(aAppVerison, aPlatformVersion) {
     return true;
   },
 

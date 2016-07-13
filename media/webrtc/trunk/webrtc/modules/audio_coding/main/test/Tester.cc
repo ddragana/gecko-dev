@@ -82,19 +82,11 @@ TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestStereo)) {
   Trace::ReturnTrace();
 }
 
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestWebRtcVadDtx)) {
+TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestVADDTX)) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_vaddtx_trace.txt").c_str());
-  webrtc::TestWebRtcVadDtx().Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, TestOpusDtx) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_opusdtx_trace.txt").c_str());
-  webrtc::TestOpusDtx().Perform();
+  webrtc::TestVADDTX().Perform();
   Trace::ReturnTrace();
 }
 

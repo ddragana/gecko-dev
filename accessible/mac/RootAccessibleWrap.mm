@@ -16,8 +16,9 @@
 using namespace mozilla::a11y;
 
 RootAccessibleWrap::
-  RootAccessibleWrap(nsIDocument* aDocument, nsIPresShell* aPresShell) :
-  RootAccessible(aDocument, aPresShell)
+  RootAccessibleWrap(nsIDocument* aDocument, nsIContent* aRootContent,
+                     nsIPresShell* aPresShell) :
+  RootAccessible(aDocument, aRootContent, aPresShell)
 {
 }
 
@@ -40,7 +41,7 @@ RootAccessibleWrap::GetNativeWidget(void** aOutView)
 {
   nsIFrame *frame = GetFrame();
   if (frame) {
-    nsView *view = frame->GetView();
+    nsView *view = frame->GetViewExternal();
     if (view) {
       nsIWidget *widget = view->GetWidget();
       if (widget) {

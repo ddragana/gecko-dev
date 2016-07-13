@@ -42,7 +42,6 @@ add_task(function* test_flush() {
 add_task(function* test_crash() {
   // Create new tab.
   let tab = gBrowser.addTab(URL);
-  gBrowser.selectedTab = tab;
   let browser = tab.linkedBrowser;
   yield promiseBrowserLoaded(browser);
 
@@ -70,7 +69,7 @@ add_task(function* test_crash() {
   // the content process. The "crash" message makes it first so that we don't
   // get a chance to process the flush. The TabStateFlusher however should be
   // notified so that the flush still completes.
-  let promise1 = BrowserTestUtils.crashBrowser(browser);
+  let promise1 = crashBrowser(browser);
   let promise2 = TabStateFlusher.flush(browser);
   yield Promise.all([promise1, promise2]);
 

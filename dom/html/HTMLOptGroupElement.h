@@ -76,7 +76,7 @@ protected:
    * Get the select content element that contains this option
    * @param aSelectElement the select element [OUT]
    */
-  Element* GetSelect();
+  nsIContent* GetSelect();
 };
 
 } // namespace dom

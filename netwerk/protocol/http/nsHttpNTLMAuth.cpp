@@ -9,9 +9,7 @@
 #include "nsHttpNTLMAuth.h"
 #include "nsIAuthModule.h"
 #include "nsCOMPtr.h"
-#include "nsServiceManagerUtils.h"
 #include "plbase64.h"
-#include "plstr.h"
 #include "prnetdb.h"
 
 //-----------------------------------------------------------------------------
@@ -21,14 +19,11 @@
 #include "nsIHttpAuthenticableChannel.h"
 #include "nsIURI.h"
 #ifdef XP_WIN
-#include "nsIChannel.h"
 #include "nsIX509Cert.h"
 #include "nsISSLStatus.h"
 #include "nsISSLStatusProvider.h"
 #endif
 #include "mozilla/Attributes.h"
-#include "nsNetUtil.h"
-#include "nsIChannel.h"
 
 namespace mozilla {
 namespace net {
@@ -108,7 +103,7 @@ IsNonFqdn(nsIURI *uri)
         return false;
 
     // return true if host does not contain a dot and is not an ip address
-    return !host.IsEmpty() && !host.Contains('.') &&
+    return !host.IsEmpty() && host.FindChar('.') == kNotFound &&
            PR_StringToNetAddr(host.BeginReading(), &addr) != PR_SUCCESS;
 }
 
@@ -187,14 +182,6 @@ static bool
 CanUseDefaultCredentials(nsIHttpAuthenticableChannel *channel,
                          bool isProxyAuth)
 {
-    // Prevent using default credentials for authentication when we are in the
-    // private browsing mode.  It would cause a privacy data leak.
-    nsCOMPtr<nsIChannel> bareChannel = do_QueryInterface(channel);
-    MOZ_ASSERT(bareChannel);
-    if (NS_UsePrivateBrowsing(bareChannel)) {
-        return false;
-    }
-
     nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
     if (!prefs)
         return false;

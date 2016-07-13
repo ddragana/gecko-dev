@@ -9,7 +9,7 @@ Cu.import("resource://gre/modules/FxAccountsCommon.js");
 Cu.import("resource://gre/modules/osfile.jsm");
 
 // We grab some additional stuff via backstage passes.
-var {AccountState} = Cu.import("resource://gre/modules/FxAccounts.jsm", {});
+let {AccountState} = Cu.import("resource://gre/modules/FxAccounts.jsm", {});
 
 function promiseNotification(topic) {
   return new Promise(resolve => {
@@ -70,10 +70,6 @@ function MockFxAccountsClient() {
   };
 
   this.signOut = function() { return Promise.resolve(); };
-  this.registerDevice = function() { return Promise.resolve(); };
-  this.updateDevice = function() { return Promise.resolve(); };
-  this.signOutAndDestroyDevice = function() { return Promise.resolve(); };
-  this.getDeviceList = function() { return Promise.resolve(); };
 
   FxAccountsClient.apply(this);
 }
@@ -82,26 +78,14 @@ MockFxAccountsClient.prototype = {
   __proto__: FxAccountsClient.prototype
 }
 
-function MockFxAccounts(device={}) {
+function MockFxAccounts() {
   return new FxAccounts({
     fxAccountsClient: new MockFxAccountsClient(),
     newAccountState(credentials) {
       // we use a real accountState but mocked storage.
       let storage = new MockStorageManager();
       storage.initialize(credentials);
-      return new AccountState(storage);
-    },
-    _getDeviceName() {
-      return "mock device name";
-    },
-    fxaPushService: {
-      registerPushEndpoint() {
-        return new Promise((resolve) => {
-          resolve({
-            endpoint: "http://mochi.test:8888"
-          });
-        });
-      },
+      return new AccountState(this, storage);
     },
   });
 }
@@ -126,7 +110,7 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function* testCacheStorage() {
+add_task(function testCacheStorage() {
   let fxa = yield createMockFxA();
 
   // Hook what the impl calls to save to disk.

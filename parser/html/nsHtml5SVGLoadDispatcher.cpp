@@ -21,13 +21,13 @@ nsHtml5SVGLoadDispatcher::nsHtml5SVGLoadDispatcher(nsIContent* aElement)
 NS_IMETHODIMP
 nsHtml5SVGLoadDispatcher::Run()
 {
-  WidgetEvent event(true, eSVGLoad);
+  WidgetEvent event(true, NS_SVG_LOAD);
   event.mFlags.mBubbles = false;
   // Do we care about forcing presshell creation if it hasn't happened yet?
   // That is, should this code flush or something?  Does it really matter?
   // For that matter, do we really want to try getting the prescontext?
   // Does this event ever want one?
-  RefPtr<nsPresContext> ctx;
+  nsRefPtr<nsPresContext> ctx;
   nsCOMPtr<nsIPresShell> shell = mElement->OwnerDoc()->GetShell();
   if (shell) {
     ctx = shell->GetPresContext();

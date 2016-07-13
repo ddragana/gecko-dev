@@ -47,7 +47,7 @@ void silk_encode_do_VAD_FLP(
     /****************************/
     /* Voice Activity Detection */
     /****************************/
-    silk_VAD_GetSA_Q8( &psEnc->sCmn, psEnc->sCmn.inputBuf + 1, psEnc->sCmn.arch );
+    silk_VAD_GetSA_Q8( &psEnc->sCmn, psEnc->sCmn.inputBuf + 1 );
 
     /**************************************************/
     /* Convert speech activity into VAD and DTX flags */

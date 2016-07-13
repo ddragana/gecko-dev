@@ -38,7 +38,7 @@ const LOGGER_ID = "addons.weblistener";
 
 // Create a new logger for use by the Addons Web Listener
 // (Requires AddonManager.jsm)
-var logger = Log.repository.getLogger(LOGGER_ID);
+let logger = Log.repository.getLogger(LOGGER_ID);
 
 function notifyObservers(aTopic, aBrowser, aUri, aInstalls) {
   let info = {
@@ -70,13 +70,13 @@ function Installer(aBrowser, aUrl, aInstalls) {
 
   notifyObservers("addon-install-started", aBrowser, aUrl, aInstalls);
 
-  for (let install of aInstalls) {
-    install.addListener(this);
+  aInstalls.forEach(function(aInstall) {
+    aInstall.addListener(this);
 
     // Start downloading if it hasn't already begun
-    if (READY_STATES.indexOf(install.state) != -1)
-      install.install();
-  }
+    if (READY_STATES.indexOf(aInstall.state) != -1)
+      aInstall.install();
+  }, this);
 
   this.checkAllDownloaded();
 }
@@ -90,7 +90,7 @@ Installer.prototype = {
   /**
    * Checks if all downloads are now complete and if so prompts to install.
    */
-  checkAllDownloaded: function() {
+  checkAllDownloaded: function Installer_checkAllDownloaded() {
     // Prevent re-entrancy caused by the confirmation dialog cancelling unwanted
     // installs.
     if (!this.isDownloading)
@@ -117,14 +117,14 @@ Installer.prototype = {
           installs.push(install);
 
         if (install.linkedInstalls) {
-          for (let linkedInstall of install.linkedInstalls) {
-            linkedInstall.addListener(this);
-            // Corrupt or incompatible items fail to install
-            if (linkedInstall.state == AddonManager.STATE_DOWNLOAD_FAILED || linkedInstall.addon.appDisabled)
-              failed.push(linkedInstall);
+          install.linkedInstalls.forEach(function(aInstall) {
+            aInstall.addListener(this);
+            // App disabled items are not compatible and so fail to install
+            if (aInstall.addon.appDisabled)
+              failed.push(aInstall);
             else
-              installs.push(linkedInstall);
-          }
+              installs.push(aInstall);
+          }, this);
         }
         break;
       case AddonManager.STATE_CANCELLED:
@@ -132,7 +132,7 @@ Installer.prototype = {
         break;
       default:
         logger.warn("Download of " + install.sourceURI.spec + " in unexpected state " +
-                    install.state);
+             install.state);
       }
     }
 
@@ -142,12 +142,12 @@ Installer.prototype = {
     if (failed.length > 0) {
       // Stop listening and cancel any installs that are failed because of
       // compatibility reasons.
-      for (let install of failed) {
-        if (install.state == AddonManager.STATE_DOWNLOADED) {
-          install.removeListener(this);
-          install.cancel();
+      failed.forEach(function(aInstall) {
+        if (aInstall.state == AddonManager.STATE_DOWNLOADED) {
+          aInstall.removeListener(this);
+          aInstall.cancel();
         }
-      }
+      }, this);
       notifyObservers("addon-install-failed", this.browser, this.url, failed);
     }
 
@@ -191,12 +191,12 @@ Installer.prototype = {
                              null, "chrome,modal,centerscreen", args);
     } catch (e) {
       logger.warn("Exception showing install confirmation dialog", e);
-      for (let install of this.downloads) {
-        install.removeListener(this);
+      this.downloads.forEach(function(aInstall) {
+        aInstall.removeListener(this);
         // Cancel the installs, as currently there is no way to make them fail
         // from here.
-        install.cancel();
-      }
+        aInstall.cancel();
+      }, this);
       notifyObservers("addon-install-cancelled", this.browser, this.url,
                       this.downloads);
     }
@@ -205,7 +205,7 @@ Installer.prototype = {
   /**
    * Checks if all installs are now complete and if so notifies observers.
    */
-  checkAllInstalled: function() {
+  checkAllInstalled: function Installer_checkAllInstalled() {
     var failed = [];
 
     for (let install of this.downloads) {
@@ -231,32 +231,32 @@ Installer.prototype = {
     this.installed = null;
   },
 
-  onDownloadCancelled: function(aInstall) {
+  onDownloadCancelled: function Installer_onDownloadCancelled(aInstall) {
     aInstall.removeListener(this);
     this.checkAllDownloaded();
   },
 
-  onDownloadFailed: function(aInstall) {
+  onDownloadFailed: function Installer_onDownloadFailed(aInstall) {
     aInstall.removeListener(this);
     this.checkAllDownloaded();
   },
 
-  onDownloadEnded: function(aInstall) {
+  onDownloadEnded: function Installer_onDownloadEnded(aInstall) {
     this.checkAllDownloaded();
     return false;
   },
 
-  onInstallCancelled: function(aInstall) {
+  onInstallCancelled: function Installer_onInstallCancelled(aInstall) {
     aInstall.removeListener(this);
     this.checkAllInstalled();
   },
 
-  onInstallFailed: function(aInstall) {
+  onInstallFailed: function Installer_onInstallFailed(aInstall) {
     aInstall.removeListener(this);
     this.checkAllInstalled();
   },
 
-  onInstallEnded: function(aInstall) {
+  onInstallEnded: function Installer_onInstallEnded(aInstall) {
     aInstall.removeListener(this);
     this.installed.push(aInstall);
 
@@ -278,7 +278,7 @@ extWebInstallListener.prototype = {
   /**
    * @see amIWebInstallListener.idl
    */
-  onWebInstallDisabled: function(aBrowser, aUri, aInstalls) {
+  onWebInstallDisabled: function extWebInstallListener_onWebInstallDisabled(aBrowser, aUri, aInstalls) {
     let info = {
       browser: aBrowser,
       originatingURI: aUri,
@@ -292,32 +292,13 @@ extWebInstallListener.prototype = {
   /**
    * @see amIWebInstallListener.idl
    */
-  onWebInstallOriginBlocked: function(aBrowser, aUri, aInstalls) {
+  onWebInstallBlocked: function extWebInstallListener_onWebInstallBlocked(aBrowser, aUri, aInstalls) {
     let info = {
       browser: aBrowser,
       originatingURI: aUri,
       installs: aInstalls,
 
-      install: function() {
-      },
-
-      QueryInterface: XPCOMUtils.generateQI([Ci.amIWebInstallInfo])
-    };
-    Services.obs.notifyObservers(info, "addon-install-origin-blocked", null);
-
-    return false;
-  },
-
-  /**
-   * @see amIWebInstallListener.idl
-   */
-  onWebInstallBlocked: function(aBrowser, aUri, aInstalls) {
-    let info = {
-      browser: aBrowser,
-      originatingURI: aUri,
-      installs: aInstalls,
-
-      install: function() {
+      install: function onWebInstallBlocked_install() {
         new Installer(this.browser, this.originatingURI, this.installs);
       },
 
@@ -331,7 +312,7 @@ extWebInstallListener.prototype = {
   /**
    * @see amIWebInstallListener.idl
    */
-  onWebInstallRequested: function(aBrowser, aUri, aInstalls) {
+  onWebInstallRequested: function extWebInstallListener_onWebInstallRequested(aBrowser, aUri, aInstalls) {
     new Installer(aBrowser, aUri, aInstalls);
 
     // We start the installs ourself
@@ -341,8 +322,7 @@ extWebInstallListener.prototype = {
   classDescription: "XPI Install Handler",
   contractID: "@mozilla.org/addons/web-install-listener;1",
   classID: Components.ID("{0f38e086-89a3-40a5-8ffc-9b694de1d04a}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.amIWebInstallListener,
-                                         Ci.amIWebInstallListener2])
+  QueryInterface: XPCOMUtils.generateQI([Ci.amIWebInstallListener])
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([extWebInstallListener]);

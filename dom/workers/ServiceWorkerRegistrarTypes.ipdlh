@@ -12,9 +12,11 @@ namespace dom {
 struct ServiceWorkerRegistrationData
 {
   nsCString scope;
+  nsCString scriptSpec;
   nsCString currentWorkerURL;
 
-  nsString cacheName;
+  nsString activeCacheName;
+  nsString waitingCacheName;
 
   PrincipalInfo principal;
 };

@@ -48,11 +48,8 @@ function start() {
         sc.UpdateCurrentDictionary(function () {
           is(sc.GetCurrentDictionary(), "",
              "No dictionary should be active after Update.");
-          if (--numCalls == 0) {
-            // This will clear the content preferences and reset "spellchecker.dictionary".
-            sc.SetCurrentDictionary("");
+          if (--numCalls == 0)
             SimpleTest.finish();
-          }
         });
       }
       try {

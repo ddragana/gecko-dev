@@ -34,7 +34,8 @@ function getFileContents(aFile)
 ////////////////////////////////////////////////////////////////////////////////
 //// Tests
 
-add_test(function test_delete_removes_data() {
+function test_delete_removes_data()
+{
   const TEST_STRING = "SomeRandomStringToFind";
 
   let file = getTestDB();
@@ -73,7 +74,14 @@ add_test(function test_delete_removes_data() {
   do_check_eq(-1, contents.indexOf(TEST_STRING));
 
   run_next_test();
-});
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//// Test Runner
+
+[
+  test_delete_removes_data,
+ ].forEach(add_test);
 
 function run_test()
 {

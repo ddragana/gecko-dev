@@ -105,8 +105,8 @@ const TESTS = [ {
 
 const DEBUG_TEST = false;
 
-var gUTM;
-var gNextFunc;
+let gUTM;
+let gNextFunc;
 
 XPCOMUtils.defineLazyServiceGetter(this, "gPref",
                                    "@mozilla.org/preferences-service;1",
@@ -481,14 +481,8 @@ function logTestInfo(aText, aCaller) {
   let ms = now.getMilliseconds();
   let time = (hh < 10 ? "0" + hh : hh) + ":" +
              (mm < 10 ? "0" + mm : mm) + ":" +
-             (ss < 10 ? "0" + ss : ss) + ":";
-  if (ms < 10) {
-    time += "00";
-  }
-  else if (ms < 100) {
-    time += "0";
-  }
-  time += ms;
+             (ss < 10 ? "0" + ss : ss) + ":" +
+             (ms < 10 ? "00" + ms : ms < 100 ? "0" + ms : ms);
   let msg = time + " | TEST-INFO | " + caller.filename + " | [" + caller.name +
             " : " + caller.lineNumber + "] " + aText;
   do_print(msg);

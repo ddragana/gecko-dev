@@ -6,7 +6,6 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Base64.h"
 #include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/UniquePtr.h"
 #include "nsThreadUtils.h"
 #include "nsIServiceManager.h"
 #include "nsISocketTransport.h"
@@ -21,6 +20,9 @@
 
 #if defined(_MSC_VER)
 #define strtoll _strtoi64
+#if _MSC_VER < 1900
+#define snprintf _snprintf_s
+#endif
 #endif
 
 using namespace mozilla;
@@ -103,7 +105,7 @@ ReadCRLF (StreamType* aStream, nsLineBuffer<CharT> * aBuffer,
 // protocol. It parses the headers and forwards data from the MediaResource
 // associated with the URL back to client. When the request is complete it will
 // shutdown the thread.
-class ServeResourceEvent : public Runnable {
+class ServeResourceEvent : public nsRunnable {
 private:
   // Reading from this reads the data sent from the client.
   nsCOMPtr<nsIInputStream> mInput;
@@ -113,7 +115,7 @@ private:
 
   // The AndroidMediaResourceServer that owns the MediaResource instances
   // served. This is used to lookup the MediaResource from the URL.
-  RefPtr<AndroidMediaResourceServer> mServer;
+  nsRefPtr<AndroidMediaResourceServer> mServer;
 
   // Write 'aBufferLength' bytes from 'aBuffer' to 'mOutput'. This
   // method ensures all the data is written by checking the number
@@ -177,7 +179,7 @@ ServeResourceEvent::GetMediaResource(nsCString const& aHTTPRequest)
   // we don't need to do any sanity checking on ".." paths and similar
   // exploits.
   nsCString relative(url_start, url_end - url_start);
-  RefPtr<MediaResource> resource =
+  nsRefPtr<MediaResource> resource =
     mServer->GetResource(mServer->GetURLPrefix() + relative);
   return resource.forget();
 }
@@ -192,7 +194,7 @@ ServeResourceEvent::Run() {
 
   // First line contains the HTTP GET request. Extract the URL and obtain
   // the MediaResource for it.
-  RefPtr<MediaResource> resource = GetMediaResource(line);
+  nsRefPtr<MediaResource> resource = GetMediaResource(line);
   if (!resource) {
     const char* response_404 = "HTTP/1.1 404 Not Found\r\n"
                                "Content-Length: 0\r\n\r\n";
@@ -261,7 +263,7 @@ ServeResourceEvent::Run() {
   // HTTP response headers sent below. A static_assert ensures
   // this where the buffer is used.
   const int buffer_size = 32768;
-  auto b = MakeUnique<char[]>(buffer_size);
+  nsAutoArrayPtr<char> b(new char[buffer_size]);
 
   // If we know the length of the resource, send a Content-Length header.
   int64_t contentlength = resource->GetLength() - start;
@@ -269,8 +271,8 @@ ServeResourceEvent::Run() {
     static_assert (buffer_size > 1024,
                    "buffer_size must be large enough "
                    "to hold response headers");
-    snprintf(b.get(), buffer_size, "Content-Length: %" PRId64 "\r\n", contentlength);
-    rv = WriteAll(b.get(), strlen(b.get()));
+    snprintf(b, buffer_size, "Content-Length: %" PRId64 "\r\n", contentlength);
+    rv = WriteAll(b, strlen(b));
     if (NS_FAILED(rv)) { Shutdown(); return NS_OK; }
   }
 
@@ -280,10 +282,10 @@ ServeResourceEvent::Run() {
     static_assert (buffer_size > 1024,
                    "buffer_size must be large enough "
                    "to hold response headers");
-    snprintf(b.get(), buffer_size, "Content-Range: "
+    snprintf(b, buffer_size, "Content-Range: "
              "bytes %" PRId64 "-%" PRId64 "/%" PRId64 "\r\n",
              start, resource->GetLength() - 1, resource->GetLength());
-    rv = WriteAll(b.get(), strlen(b.get()));
+    rv = WriteAll(b, strlen(b));
     if (NS_FAILED(rv)) { Shutdown(); return NS_OK; }
   }
 
@@ -295,7 +297,7 @@ ServeResourceEvent::Run() {
 
   // Read data from media resource
   uint32_t bytesRead = 0; // Number of bytes read/written to streams
-  rv = resource->ReadAt(start, b.get(), buffer_size, &bytesRead);
+  rv = resource->ReadAt(start, b, buffer_size, &bytesRead);
   while (NS_SUCCEEDED(rv) && bytesRead != 0) {
     // Keep track of what we think the starting position for the next read
     // is. This is used in subsequent ReadAt calls to ensure we are reading
@@ -304,10 +306,10 @@ ServeResourceEvent::Run() {
     start += bytesRead;
 
     // Write data obtained from media resource to output stream
-    rv = WriteAll(b.get(), bytesRead);
+    rv = WriteAll(b, bytesRead);
     if (NS_FAILED (rv)) break;
 
-    rv = resource->ReadAt(start, b.get(), 32768, &bytesRead);
+    rv = resource->ReadAt(start, b, 32768, &bytesRead);
   }
 
   Shutdown();
@@ -344,7 +346,7 @@ class ResourceSocketListener : public nsIServerSocketListener
 public:
   // The AndroidMediaResourceServer used to look up the MediaResource
   // on requests.
-  RefPtr<AndroidMediaResourceServer> mServer;
+  nsRefPtr<AndroidMediaResourceServer> mServer;
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISERVERSOCKETLISTENER
@@ -420,7 +422,7 @@ already_AddRefed<AndroidMediaResourceServer>
 AndroidMediaResourceServer::Start()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  RefPtr<AndroidMediaResourceServer> server = new AndroidMediaResourceServer();
+  nsRefPtr<AndroidMediaResourceServer> server = new AndroidMediaResourceServer();
   server->Run();
   return server.forget();
 }
@@ -459,7 +461,7 @@ AndroidMediaResourceServer::AddResource(mozilla::MediaResource* aResource, nsCSt
     MutexAutoLock lock(mMutex);
 
     // Adding a resource URL that already exists is considered an error.
-    if (mResources.find(url) != mResources.end()) return NS_ERROR_FAILURE;
+    if (mResources.find(aUrl) != mResources.end()) return NS_ERROR_FAILURE;
     mResources[url] = aResource;
   }
 
@@ -498,6 +500,6 @@ AndroidMediaResourceServer::GetResource(nsCString const& aUrl)
   ResourceMap::const_iterator it = mResources.find(aUrl);
   if (it == mResources.end()) return nullptr;
 
-  RefPtr<MediaResource> resource = it->second;
+  nsRefPtr<MediaResource> resource = it->second;
   return resource.forget();
 }

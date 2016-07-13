@@ -8,6 +8,7 @@
 #include "SmsIPCService.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
+#include "SmsMessage.h"
 #include "nsJSUtils.h"
 #include "mozilla/dom/MozMobileMessageManagerBinding.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -66,13 +67,13 @@ SendCursorRequest(const IPCMobileMessageCursor& aRequest,
   PSmsChild* smsChild = GetSmsChild();
   NS_ENSURE_TRUE(smsChild, NS_ERROR_FAILURE);
 
-  RefPtr<MobileMessageCursorChild> actor =
+  nsRefPtr<MobileMessageCursorChild> actor =
     new MobileMessageCursorChild(aRequestReply);
 
   // Add an extra ref for IPDL. Will be released in
   // SmsChild::DeallocPMobileMessageCursor().
-  RefPtr<MobileMessageCursorChild> actorCopy(actor);
-  mozilla::Unused << actorCopy.forget().take();
+  nsRefPtr<MobileMessageCursorChild> actorCopy(actor);
+  mozilla::unused << actorCopy.forget().take();
 
   smsChild->SendPMobileMessageCursorConstructor(actor, aRequest);
 
@@ -111,7 +112,7 @@ SmsIPCService::GetSingleton()
     sSingleton = new SmsIPCService();
   }
 
-  RefPtr<SmsIPCService> service = sSingleton;
+  nsRefPtr<SmsIPCService> service = sSingleton;
   return service.forget();
 }
 
@@ -259,7 +260,6 @@ SmsIPCService::CreateMessageCursor(bool aHasStartDate,
                                    const nsAString& aDelivery,
                                    bool aHasRead,
                                    bool aRead,
-                                   bool aHasThreadId,
                                    uint64_t aThreadId,
                                    bool aReverse,
                                    nsIMobileMessageCursorCallback* aCursorCallback,
@@ -284,7 +284,6 @@ SmsIPCService::CreateMessageCursor(bool aHasStartDate,
   data.delivery() = aDelivery;
   data.hasRead() = aHasRead;
   data.read() = aRead;
-  data.hasThreadId() = aHasThreadId;
   data.threadId() = aThreadId;
 
   return SendCursorRequest(CreateMessageCursorRequest(data, aReverse),

@@ -37,6 +37,7 @@ txNodeSorter::addSortElement(Expr* aSelectExpr, Expr* aLangExpr,
                              Expr* aCaseOrderExpr, txIEvalContext* aContext)
 {
     nsAutoPtr<SortKey> key(new SortKey);
+    NS_ENSURE_TRUE(key, NS_ERROR_OUT_OF_MEMORY);
     nsresult rv = NS_OK;
 
     // Select
@@ -97,10 +98,12 @@ txNodeSorter::addSortElement(Expr* aSelectExpr, Expr* aLangExpr,
         key->mComparator = new txResultStringComparator(ascending,
                                                         upperFirst,
                                                         lang);
+        NS_ENSURE_TRUE(key->mComparator, NS_ERROR_OUT_OF_MEMORY);
     }
     else if (TX_StringEqualsAtom(dataType, nsGkAtoms::number)) {
         // Number comparator
         key->mComparator = new txResultNumberComparator(ascending);
+        NS_ENSURE_TRUE(key->mComparator, NS_ERROR_OUT_OF_MEMORY);
     }
     else {
         // XXX ErrorReport: unknown data-type
@@ -129,7 +132,7 @@ txNodeSorter::sortNodeSet(txNodeSet* aNodes, txExecutionState* aEs,
 
     *aResult = nullptr;
 
-    RefPtr<txNodeSet> sortedNodes;
+    nsRefPtr<txNodeSet> sortedNodes;
     nsresult rv = aEs->recycler()->getNodeSet(getter_AddRefs(sortedNodes));
     NS_ENSURE_SUCCESS(rv, rv);
 

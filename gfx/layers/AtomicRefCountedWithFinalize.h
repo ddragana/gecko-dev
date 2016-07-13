@@ -33,7 +33,7 @@ template<typename T>
 class AtomicRefCountedWithFinalize
 {
 protected:
-    explicit AtomicRefCountedWithFinalize(const char* aName)
+    AtomicRefCountedWithFinalize()
       : mRecycleCallback(nullptr)
       , mRefCount(0)
       , mMessageLoopToPostDestructionTo(nullptr)
@@ -41,7 +41,6 @@ protected:
       , mSpew(false)
       , mManualAddRefs(0)
       , mManualReleases(0)
-      , mName(aName)
 #endif
     {}
 
@@ -63,11 +62,17 @@ protected:
 
 public:
     // Mark user classes that are considered flawless.
+    template<typename U>
+    friend class RefPtr;
+
     template<class U>
     friend class ::mozilla::StaticRefPtr;
 
     template<class U>
-    friend struct mozilla::RefPtrTraits;
+    friend class ::nsRefPtr;
+
+    template<class U>
+    friend struct ::RunnableMethodTraits;
 
     template<typename U>
     friend class ::mozilla::gl::RefSet;
@@ -110,8 +115,7 @@ public:
 private:
     void AddRef() {
       MOZ_ASSERT(mRefCount >= 0, "AddRef() during/after Finalize()/dtor.");
-      DebugOnly<int> count = ++mRefCount;
-      NS_LOG_ADDREF(this, count, mName, sizeof(*this));
+      ++mRefCount;
     }
 
     void Release() {
@@ -127,7 +131,6 @@ private:
         ++mRefCount;
         return;
       }
-      NS_LOG_RELEASE(this, currCount, mName);
 
       if (0 == currCount) {
         mRefCount = detail::DEAD;
@@ -151,6 +154,7 @@ private:
             delete derived;
           } else {
             mMessageLoopToPostDestructionTo->PostTask(
+              FROM_HERE,
               NewRunnableFunction(&DestroyToBeCalledOnMainThread, derived));
           }
         }
@@ -204,7 +208,6 @@ public:
 private:
     Atomic<uint32_t> mManualAddRefs;
     Atomic<uint32_t> mManualReleases;
-    const char* mName;
 #endif
 };
 

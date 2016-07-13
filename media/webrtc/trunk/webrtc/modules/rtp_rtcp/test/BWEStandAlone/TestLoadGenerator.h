@@ -14,13 +14,13 @@
 #include <stdlib.h>
 
 #include "webrtc/modules/interface/module_common_types.h"
-#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/typedefs.h"
 
 class TestSenderReceiver;
 namespace webrtc {
 class CriticalSectionWrapper;
 class EventWrapper;
+class ThreadWrapper;
 }
 
 class TestLoadGenerator
@@ -39,12 +39,12 @@ protected:
     int generatePayload ();
     int sendPayload (const uint32_t timeStamp,
         const uint8_t* payloadData,
-        const size_t payloadSize,
+        const uint32_t payloadSize,
         const webrtc::FrameType frameType = webrtc::kVideoFrameDelta);
 
     webrtc::CriticalSectionWrapper* _critSect;
     webrtc::EventWrapper *_eventPtr;
-    rtc::scoped_ptr<webrtc::ThreadWrapper> _genThread;
+    webrtc::ThreadWrapper* _genThread;
     int32_t _bitrateKbps;
     TestSenderReceiver *_sender;
     bool _running;
@@ -55,10 +55,7 @@ protected:
 class CBRGenerator : public TestLoadGenerator
 {
 public:
-    CBRGenerator (TestSenderReceiver *sender,
-                  size_t payloadSizeBytes,
-                  int32_t bitrateKbps,
-                  int32_t rtpSampleRate = 90000);
+    CBRGenerator (TestSenderReceiver *sender, int32_t payloadSizeBytes, int32_t bitrateKbps, int32_t rtpSampleRate = 90000);
     virtual ~CBRGenerator ();
 
     virtual int32_t Start () {return (TestLoadGenerator::Start("CBRGenerator"));};
@@ -68,7 +65,7 @@ public:
 protected:
     virtual int generatePayload ( uint32_t timestamp );
 
-    size_t _payloadSizeBytes;
+    int32_t _payloadSizeBytes;
     uint8_t *_payload;
 };
 
@@ -85,12 +82,12 @@ public:
     virtual bool GeneratorLoop ();
 
 protected:
-    virtual size_t nextPayloadSize ();
+    virtual int32_t nextPayloadSize ();
     virtual int generatePayload ( uint32_t timestamp );
 
-    size_t _payloadSizeBytes;
+    int32_t _payloadSizeBytes;
     uint8_t *_payload;
-    size_t _payloadAllocLen;
+    int32_t _payloadAllocLen;
     int32_t _frameRateFps;
     double      _spreadFactor;
 };
@@ -103,7 +100,7 @@ public:
     virtual ~PeriodicKeyFixFRGenerator () {}
 
 protected:
-    virtual size_t nextPayloadSize ();
+    virtual int32_t nextPayloadSize ();
 
     double          _keyFactor;
     uint32_t    _keyPeriod;
@@ -123,7 +120,7 @@ public:
 
 protected:
     virtual void ChangeFrameRate();
-    virtual size_t nextPayloadSize ();
+    virtual int32_t nextPayloadSize ();
 
     double       _avgFrPeriodMs;
     double       _frSpreadFactor;
@@ -141,7 +138,7 @@ public:
     ~CBRFrameDropGenerator();
 
 protected:
-    virtual size_t nextPayloadSize();
+    virtual int32_t nextPayloadSize();
 
     double       _accBits;
 };

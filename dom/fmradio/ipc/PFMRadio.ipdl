@@ -71,37 +71,37 @@ child:
   /**
    * Sent when the frequency is changed.
    */
-  async NotifyFrequencyChanged(double frequency);
+  NotifyFrequencyChanged(double frequency);
   /**
    * Sent when the power state of FM radio HW is changed.
    */
-  async NotifyEnabledChanged(bool enabled, double frequency);
+  NotifyEnabledChanged(bool enabled, double frequency);
   /**
    * Sent when RDS is enabled or disabled.
    */
-  async NotifyRDSEnabledChanged(bool enabled);
+  NotifyRDSEnabledChanged(bool enabled);
   /**
    * Sent when we have a new PI code.
    */
-  async NotifyPIChanged(bool valid, uint16_t code);
+  NotifyPIChanged(bool valid, uint16_t code);
   /**
    * Sent when we have a new PTY
    */
-  async NotifyPTYChanged(bool valid, uint8_t pty);
+  NotifyPTYChanged(bool valid, uint8_t pty);
   /**
    * Sent when we have a new PS name.
    */
-  async NotifyPSChanged(nsString psname);
+  NotifyPSChanged(nsString psname);
   /**
    * Sent when we have new radiotext.
    */
-  async NotifyRadiotextChanged(nsString radiotext);
+  NotifyRadiotextChanged(nsString radiotext);
   /**
    * Sent when a full RDS group is received.
    */
-  async NotifyNewRDSGroup(uint64_t data);
+  NotifyNewRDSGroup(uint64_t data);
 
-  async __delete__();
+  __delete__();
 
 parent:
   /**
@@ -119,17 +119,17 @@ parent:
    * on web content, otherwise, we have to do the mapping stuff manually which
    * is more error prone.
    */
-  async PFMRadioRequest(FMRadioRequestArgs requestType);
+  PFMRadioRequest(FMRadioRequestArgs requestType);
 
   /**
    * Enable/Disable audio
    */
-  async EnableAudio(bool audioEnabled);
+  EnableAudio(bool audioEnabled);
 
   /**
    * Set RDS group mask
    */
-  async SetRDSGroupMask(uint32_t groupMask);
+  SetRDSGroupMask(uint32_t groupMask);
 };
 
 } // namespace dom

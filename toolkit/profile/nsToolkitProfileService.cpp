@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/UniquePtr.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,7 +51,7 @@ public:
     NS_DECL_NSITOOLKITPROFILE
 
     friend class nsToolkitProfileService;
-    RefPtr<nsToolkitProfile> mNext;
+    nsRefPtr<nsToolkitProfile> mNext;
     nsToolkitProfile          *mPrev;
 
 private:
@@ -88,7 +87,7 @@ public:
 private:
     ~nsToolkitProfileLock();
 
-    RefPtr<nsToolkitProfile> mProfile;
+    nsRefPtr<nsToolkitProfile> mProfile;
     nsCOMPtr<nsIFile> mDirectory;
     nsCOMPtr<nsIFile> mLocalDirectory;
 
@@ -135,10 +134,11 @@ private:
                                    const nsACString* aProfileName,
                                    const nsACString* aAppName,
                                    const nsACString* aVendorName,
+                                   /*in*/ nsIFile** aProfileDefaultsDir,
                                    bool aForExternalApp,
                                    nsIToolkitProfile** aResult);
 
-    RefPtr<nsToolkitProfile>  mFirst;
+    nsRefPtr<nsToolkitProfile>  mFirst;
     nsCOMPtr<nsIToolkitProfile> mChosen;
     nsCOMPtr<nsIToolkitProfile> mDefault;
     nsCOMPtr<nsIFile>           mAppData;
@@ -160,7 +160,7 @@ private:
           { mCurrent = first; }
     private:
         ~ProfileEnumerator() { }
-        RefPtr<nsToolkitProfile> mCurrent;
+        nsRefPtr<nsToolkitProfile> mCurrent;
     };
 };
 
@@ -278,7 +278,7 @@ nsToolkitProfile::Lock(nsIProfileUnlocker* *aUnlocker, nsIProfileLock* *aResult)
         return NS_OK;
     }
 
-    RefPtr<nsToolkitProfileLock> lock = new nsToolkitProfileLock();
+    nsRefPtr<nsToolkitProfileLock> lock = new nsToolkitProfileLock();
     if (!lock) return NS_ERROR_OUT_OF_MEMORY;
 
     nsresult rv = lock->Init(this, aUnlocker);
@@ -512,7 +512,11 @@ nsToolkitProfileService::Init()
     }
 
 #ifdef MOZ_DEV_EDITION
-    if (!foundAuroraDefault && !shouldIgnoreSeparateProfile) {
+    // Check if we are running Firefox, as we don't want to create a profile
+    // on webapprt.
+    bool isFirefox = strcmp(gAppData->ID,
+                            "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}") == 0;
+    if (!foundAuroraDefault && isFirefox && !shouldIgnoreSeparateProfile) {
         // If a single profile exists, it may not be already marked as default.
         // Do it now to avoid problems when we create the dev-edition-default profile.
         if (!mChosen && mFirst && !mFirst->mNext)
@@ -667,7 +671,7 @@ nsresult
 NS_LockProfilePath(nsIFile* aPath, nsIFile* aTempPath,
                    nsIProfileUnlocker* *aUnlocker, nsIProfileLock* *aResult)
 {
-    RefPtr<nsToolkitProfileLock> lock = new nsToolkitProfileLock();
+    nsRefPtr<nsToolkitProfileLock> lock = new nsToolkitProfileLock();
     if (!lock) return NS_ERROR_OUT_OF_MEMORY;
 
     nsresult rv = lock->Init(aPath, aTempPath, aUnlocker);
@@ -704,6 +708,7 @@ NS_IMETHODIMP
 nsToolkitProfileService::CreateDefaultProfileForApp(const nsACString& aProfileName,
                                                     const nsACString& aAppName,
                                                     const nsACString& aVendorName,
+                                                    nsIFile* aProfileDefaultsDir,
                                                     nsIToolkitProfile** aResult)
 {
     NS_ENSURE_STATE(!aProfileName.IsEmpty() || !aAppName.IsEmpty());
@@ -725,10 +730,11 @@ nsToolkitProfileService::CreateDefaultProfileForApp(const nsACString& aProfileNa
     profilesini->Exists(&exists);
     NS_ENSURE_FALSE(exists, NS_ERROR_ALREADY_INITIALIZED);
 
+    nsIFile* profileDefaultsDir = aProfileDefaultsDir;
     rv = CreateProfileInternal(nullptr,
                                NS_LITERAL_CSTRING("default"),
                                &aProfileName, &aAppName, &aVendorName,
-                               true, aResult);
+                               &profileDefaultsDir, true, aResult);
     NS_ENSURE_SUCCESS(rv, rv);
     NS_ENSURE_STATE(*aResult);
 
@@ -771,7 +777,7 @@ nsToolkitProfileService::CreateProfile(nsIFile* aRootDir,
                                        nsIToolkitProfile** aResult)
 {
     return CreateProfileInternal(aRootDir, aName,
-                                 nullptr, nullptr, nullptr, false, aResult);
+                                 nullptr, nullptr, nullptr, nullptr, false, aResult);
 }
 
 nsresult
@@ -780,6 +786,7 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
                                                const nsACString* aProfileName,
                                                const nsACString* aAppName,
                                                const nsACString* aVendorName,
+                                               nsIFile** aProfileDefaultsDir,
                                                bool aForExternalApp,
                                                nsIToolkitProfile** aResult)
 {
@@ -841,6 +848,7 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
             return NS_ERROR_FILE_NOT_DIRECTORY;
     }
     else {
+        nsCOMPtr<nsIFile> profileDefaultsDir;
         nsCOMPtr<nsIFile> profileDirParent;
         nsAutoString profileDirName;
 
@@ -850,9 +858,22 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
         rv = rootDir->GetLeafName(profileDirName);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        // let's ensure that the profile directory exists.
-        rv = rootDir->Create(nsIFile::DIRECTORY_TYPE, 0700);
-        NS_ENSURE_SUCCESS(rv, rv);
+        if (aProfileDefaultsDir) {
+            profileDefaultsDir = *aProfileDefaultsDir;
+        } else {
+            bool dummy;
+            rv = gDirServiceProvider->GetFile(NS_APP_PROFILE_DEFAULTS_50_DIR, &dummy,
+                                              getter_AddRefs(profileDefaultsDir));
+        }
+
+        if (NS_SUCCEEDED(rv) && profileDefaultsDir)
+            rv = profileDefaultsDir->CopyTo(profileDirParent,
+                                            profileDirName);
+        if (NS_FAILED(rv) || !profileDefaultsDir) {
+            // if copying failed, lets just ensure that the profile directory exists.
+            rv = rootDir->Create(nsIFile::DIRECTORY_TYPE, 0700);
+            NS_ENSURE_SUCCESS(rv, rv);
+        }
         rv = rootDir->SetPermissions(0700);
 #ifndef ANDROID
         // If the profile is on the sdcard, this will fail but its non-fatal
@@ -874,7 +895,7 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
     rv = CreateTimesInternal(rootDir);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsToolkitProfile* last = aForExternalApp ? nullptr : mFirst.get();
+    nsToolkitProfile* last = aForExternalApp ? nullptr : mFirst;
     if (last) {
         while (last->mNext)
             last = last->mNext;
@@ -950,10 +971,12 @@ nsToolkitProfileService::Flush()
 
     uint32_t length;
     const int bufsize = 100+MAXPATHLEN*pCount;
-    auto buffer = MakeUnique<char[]>(bufsize);
+    nsAutoArrayPtr<char> buffer (new char[bufsize]);
 
-    char *pos = buffer.get();
-    char *end = pos + bufsize;
+    NS_ENSURE_TRUE(buffer, NS_ERROR_OUT_OF_MEMORY);
+
+    char *pos = buffer;
+    char *end = buffer + bufsize;
 
     pos += snprintf(pos, end - pos,
                     "[General]\n"
@@ -1001,11 +1024,13 @@ nsToolkitProfileService::Flush()
     rv = mListFile->OpenANSIFileDesc("w", &writeFile);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    length = pos - buffer.get();
+    if (buffer) {
+        length = pos - buffer;
 
-    if (fwrite(buffer.get(), sizeof(char), length, writeFile) != length) {
-        fclose(writeFile);
-        return NS_ERROR_UNEXPECTED;
+        if (fwrite(buffer, sizeof(char), length, writeFile) != length) {
+            fclose(writeFile);
+            return NS_ERROR_UNEXPECTED;
+        }
     }
 
     fclose(writeFile);

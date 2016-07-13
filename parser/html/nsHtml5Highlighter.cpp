@@ -9,8 +9,6 @@
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsHtml5ViewSourceUtils.h"
-
-#include "mozilla/Attributes.h"
 #include "mozilla/Preferences.h"
 
 using namespace mozilla;
@@ -59,7 +57,7 @@ nsHtml5Highlighter::nsHtml5Highlighter(nsAHtml5TreeOpSink* aOpSink)
  , mCurrentRun(nullptr)
  , mAmpersand(nullptr)
  , mSlash(nullptr)
- , mHandles(MakeUnique<nsIContent*[]>(NS_HTML5_HIGHLIGHTER_HANDLE_ARRAY_LENGTH))
+ , mHandles(new nsIContent*[NS_HTML5_HIGHLIGHTER_HANDLE_ARRAY_LENGTH])
  , mHandlesUsed(0)
  , mSeenBase(false)
 {
@@ -570,7 +568,7 @@ nsHtml5Highlighter::FlushChars()
           // the input data, because there are no reparses in the View Source
           // case, so we won't need the original data in the buffer anymore.
           buf[i] = '\n';
-          MOZ_FALLTHROUGH;
+          // fall through
         case '\n': {
           ++i;
           if (mCStart < i) {
@@ -643,12 +641,12 @@ nsIContent**
 nsHtml5Highlighter::AllocateContentHandle()
 {
   if (mHandlesUsed == NS_HTML5_HIGHLIGHTER_HANDLE_ARRAY_LENGTH) {
-    mOldHandles.AppendElement(Move(mHandles));
-    mHandles = MakeUnique<nsIContent*[]>(NS_HTML5_HIGHLIGHTER_HANDLE_ARRAY_LENGTH);
+    mOldHandles.AppendElement(mHandles.forget());
+    mHandles = new nsIContent*[NS_HTML5_HIGHLIGHTER_HANDLE_ARRAY_LENGTH];
     mHandlesUsed = 0;
   }
 #ifdef DEBUG
-  mHandles[mHandlesUsed] = reinterpret_cast<nsIContent*>(uintptr_t(0xC0DEDBAD));
+  mHandles[mHandlesUsed] = (nsIContent*)0xC0DEDBAD;
 #endif
   return &mHandles[mHandlesUsed++];
 }

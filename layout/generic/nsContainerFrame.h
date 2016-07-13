@@ -34,10 +34,7 @@ class FramePropertyTable;
 // dependency on nsDeviceContext.h.  It doesn't matter if it's a
 // little off.
 #ifdef DEBUG
-// 10 million pixels, converted to app units. Note that this a bit larger
-// than 1/4 of nscoord_MAX. So, if any content gets to be this large, we're
-// definitely in danger of grazing up against nscoord_MAX; hence, it's CRAZY.
-#define CRAZY_COORD (10000000*60)
+#define CRAZY_COORD (1000000*60)
 #define CRAZY_SIZE(_x) (((_x) < -CRAZY_COORD) || ((_x) > CRAZY_COORD))
 #endif
 
@@ -47,7 +44,7 @@ class FramePropertyTable;
 class nsContainerFrame : public nsSplittableFrame
 {
 public:
-  NS_DECL_ABSTRACT_FRAME(nsContainerFrame)
+  NS_DECL_FRAMEARENA_HELPERS
   NS_DECL_QUERYFRAME_TARGET(nsContainerFrame)
   NS_DECL_QUERYFRAME
 
@@ -353,15 +350,6 @@ public:
 
   friend class nsOverflowContinuationTracker;
 
-  typedef void (*ChildFrameMerger)(nsFrameList& aDest, nsFrameList& aSrc,
-                                   nsContainerFrame* aParent);
-  static inline void DefaultChildFrameMerge(nsFrameList& aDest,
-                                            nsFrameList& aSrc,
-                                            nsContainerFrame* aParent)
-  {
-    aDest.AppendFrames(nullptr, aSrc);
-  }
-
   /**
    * Reflow overflow container children. They are invisible to normal reflow
    * (i.e. don't affect sizing or placement of other children) and inherit
@@ -384,16 +372,13 @@ public:
    * making sure they are stored properly in the overflow container lists.
    * The nsOverflowContinuationTracker helper class should be used for this.
    *
-   * @param aFlags is passed through to ReflowChild
-   * @param aMergeFunc is passed to DrainExcessOverflowContainersList
+   * (aFlags just gets passed through to ReflowChild)
    */
   void ReflowOverflowContainerChildren(nsPresContext*           aPresContext,
                                        const nsHTMLReflowState& aReflowState,
                                        nsOverflowAreas&         aOverflowRects,
                                        uint32_t                 aFlags,
-                                       nsReflowStatus&          aStatus,
-                                       ChildFrameMerger aMergeFunc =
-                                         DefaultChildFrameMerge);
+                                       nsReflowStatus&          aStatus);
 
   /**
    * Move any frames on our overflow list to the end of our principal list.
@@ -401,25 +386,19 @@ public:
    */
   virtual bool DrainSelfOverflowList() override;
 
-  
-  /**
-   * Move all frames on our prev-in-flow's and our own ExcessOverflowContainers
-   * lists to our OverflowContainers list.  If there are frames on multiple
-   * lists they are merged using aMergeFunc.
-   * @return a pointer to our OverflowContainers list, if any
-   */
-  nsFrameList* DrainExcessOverflowContainersList(ChildFrameMerger aMergeFunc =
-                                                   DefaultChildFrameMerge);
-
   /**
    * Removes aChild without destroying it and without requesting reflow.
-   * Continuations are not affected.  Checks the principal and overflow lists,
-   * and also the [excess] overflow containers lists if the frame bit
-   * NS_FRAME_IS_OVERFLOW_CONTAINER is set.  It does not check any other lists.
-   * Returns NS_ERROR_UNEXPECTED if aChild wasn't found on any of the lists
-   * mentioned above.
+   * Continuations are not affected. Checks the primary and overflow
+   * or overflow containers and excess overflow containers lists, depending
+   * on whether the NS_FRAME_IS_OVERFLOW_CONTAINER flag is set. Does not
+   * check any other auxiliary lists.
+   * Returns NS_ERROR_UNEXPECTED if we failed to remove aChild.
+   * Returns other error codes if we failed to put back a proptable list.
+   * If aForceNormal is true, only checks the primary and overflow lists
+   * even when the NS_FRAME_IS_OVERFLOW_CONTAINER flag is set.
    */
-  virtual nsresult StealFrame(nsIFrame* aChild);
+  virtual nsresult StealFrame(nsIFrame* aChild,
+                              bool      aForceNormal = false);
 
   /**
    * Removes the next-siblings of aChild without destroying them and without
@@ -452,6 +431,15 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
+  /**
+   * Destructor function for the proptable-stored framelists --
+   * it should never be called.
+   */
+  static void DestroyFrameList(void* aPropertyValue)
+  {
+    MOZ_ASSERT(false, "The owning frame should destroy its nsFrameList props");
+  }
+
   static void PlaceFrameView(nsIFrame* aFrame)
   {
     if (aFrame->HasView())
@@ -460,23 +448,12 @@ public:
       nsContainerFrame::PositionChildViews(aFrame);
   }
 
-#define NS_DECLARE_FRAME_PROPERTY_FRAMELIST(prop) \
-  NS_DECLARE_FRAME_PROPERTY_WITH_DTOR_NEVER_CALLED(prop, nsFrameList)
-
-  typedef PropertyDescriptor<nsFrameList> FrameListPropertyDescriptor;
+#define NS_DECLARE_FRAME_PROPERTY_FRAMELIST(prop)                     \
+  NS_DECLARE_FRAME_PROPERTY(prop, nsContainerFrame::DestroyFrameList)
 
   NS_DECLARE_FRAME_PROPERTY_FRAMELIST(OverflowProperty)
   NS_DECLARE_FRAME_PROPERTY_FRAMELIST(OverflowContainersProperty)
   NS_DECLARE_FRAME_PROPERTY_FRAMELIST(ExcessOverflowContainersProperty)
-  NS_DECLARE_FRAME_PROPERTY_FRAMELIST(BackdropProperty)
-
-#ifdef DEBUG
-  // Use this to suppress the CRAZY_SIZE assertions.
-  NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(DebugReflowingWithInfiniteISize, bool)
-  bool IsCrazySizeAssertSuppressed() const {
-    return Properties().Get(DebugReflowingWithInfiniteISize());
-  }
-#endif
 
 protected:
   explicit nsContainerFrame(nsStyleContext* aContext) : nsSplittableFrame(aContext) {}
@@ -489,11 +466,6 @@ protected:
    * See nsBlockFrame::DestroyFrom for an example.
    */
   void DestroyAbsoluteFrames(nsIFrame* aDestructRoot);
-
-  /**
-   * Helper for StealFrame.  Returns true if aChild was removed from its list.
-   */
-  bool MaybeStealOverflowContainerFrame(nsIFrame* aChild);
 
   /**
    * Builds a display list for non-block children that behave like
@@ -620,20 +592,20 @@ protected:
    * Get the PresContext-stored nsFrameList named aPropID for this frame.
    * May return null.
    */
-  nsFrameList* GetPropTableFrames(FrameListPropertyDescriptor aProperty) const;
+  nsFrameList* GetPropTableFrames(const FramePropertyDescriptor* aProperty) const;
 
   /**
    * Remove and return the PresContext-stored nsFrameList named aPropID for
    * this frame. May return null.
    */
-  nsFrameList* RemovePropTableFrames(FrameListPropertyDescriptor aProperty);
+  nsFrameList* RemovePropTableFrames(const FramePropertyDescriptor* aProperty);
 
   /**
    * Set the PresContext-stored nsFrameList named aPropID for this frame
    * to the given aFrameList, which must not be null.
    */
-  void SetPropTableFrames(nsFrameList* aFrameList,
-                          FrameListPropertyDescriptor aProperty);
+  void SetPropTableFrames(nsFrameList*                   aFrameList,
+                          const FramePropertyDescriptor* aProperty);
 
   /**
    * Safely destroy the frames on the nsFrameList stored on aProp for this
@@ -643,7 +615,7 @@ protected:
   void SafelyDestroyFrameListProp(nsIFrame* aDestructRoot,
                                   nsIPresShell* aPresShell,
                                   mozilla::FramePropertyTable* aPropTable,
-                                  FrameListPropertyDescriptor aProp);
+                                  const FramePropertyDescriptor* aProp);
 
   // ==========================================================================
 
@@ -747,7 +719,7 @@ public:
    *   ... DeleteNextInFlowChild/StealFrame(kidNextInFlow) here ...
    * }
    */
-  class MOZ_RAII AutoFinish {
+  class MOZ_STACK_CLASS AutoFinish {
   public:
     AutoFinish(nsOverflowContinuationTracker* aTracker, nsIFrame* aChild)
       : mTracker(aTracker), mChild(aChild)
@@ -824,7 +796,8 @@ inline
 nsFrameList*
 nsContainerFrame::GetOverflowFrames() const
 {
-  nsFrameList* list = Properties().Get(OverflowProperty());
+  nsFrameList* list =
+    static_cast<nsFrameList*>(Properties().Get(OverflowProperty()));
   NS_ASSERTION(!list || !list->IsEmpty(), "Unexpected empty overflow list");
   return list;
 }
@@ -833,7 +806,8 @@ inline
 nsFrameList*
 nsContainerFrame::StealOverflowFrames()
 {
-  nsFrameList* list = Properties().Remove(OverflowProperty());
+  nsFrameList* list =
+    static_cast<nsFrameList*>(Properties().Remove(OverflowProperty()));
   NS_ASSERTION(!list || !list->IsEmpty(), "Unexpected empty overflow list");
   return list;
 }

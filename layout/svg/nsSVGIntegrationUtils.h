@@ -7,14 +7,16 @@
 #define NSSVGINTEGRATIONUTILS_H_
 
 #include "gfxMatrix.h"
+#include "GraphicsFilter.h"
 #include "gfxRect.h"
-#include "nsRegionFwd.h"
+#include "nsAutoPtr.h"
 
 class gfxContext;
 class gfxDrawable;
 class nsDisplayList;
 class nsDisplayListBuilder;
 class nsIFrame;
+class nsIntRegion;
 
 struct nsRect;
 
@@ -122,31 +124,14 @@ public:
   static bool
   HitTestFrameForEffects(nsIFrame* aFrame, const nsPoint& aPt);
 
-  struct PaintFramesParams {
-    gfxContext& ctx;
-    nsIFrame* frame;
-    const nsRect& dirtyRect;
-    const nsRect& borderArea;
-    nsDisplayListBuilder* builder;
-    mozilla::layers::LayerManager* layerManager;
-    bool callerPaintsOpacity;
-    explicit PaintFramesParams(gfxContext& aCtx, nsIFrame* aFrame,
-                               const nsRect& aDirtyRect,
-                               const nsRect& aBorderArea,
-                               nsDisplayListBuilder* aBuilder,
-                               mozilla::layers::LayerManager* aLayerManager,
-                               bool aCallerPaintsOpacity)
-      : ctx(aCtx), frame(aFrame), dirtyRect(aDirtyRect),
-        borderArea(aBorderArea), builder(aBuilder),
-        layerManager(aLayerManager), callerPaintsOpacity(aCallerPaintsOpacity)
-    { }
-  };
-
   /**
    * Paint non-SVG frame with SVG effects.
    */
   static void
-  PaintFramesWithEffects(const PaintFramesParams& aParams);
+  PaintFramesWithEffects(gfxContext& aCtx,
+                         nsIFrame* aFrame, const nsRect& aDirtyRect,
+                         nsDisplayListBuilder* aBuilder,
+                         mozilla::layers::LayerManager* aManager);
 
   /**
    * SVG frames expect to paint in SVG user units, which are equal to CSS px
@@ -181,13 +166,13 @@ public:
   };
 
   static already_AddRefed<gfxDrawable>
-  DrawableFromPaintServer(nsIFrame* aFrame,
-                          nsIFrame* aTarget,
-                          const nsSize& aPaintServerSize,
-                          const mozilla::gfx::IntSize& aRenderSize,
+  DrawableFromPaintServer(nsIFrame*         aFrame,
+                          nsIFrame*         aTarget,
+                          const nsSize&     aPaintServerSize,
+                          const gfxIntSize& aRenderSize,
                           const DrawTarget* aDrawTarget,
-                          const gfxMatrix& aContextMatrix,
-                          uint32_t aFlags);
+                          const gfxMatrix&  aContextMatrix,
+                          uint32_t          aFlags);
 };
 
 #endif /*NSSVGINTEGRATIONUTILS_H_*/

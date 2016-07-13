@@ -9,6 +9,7 @@
 
 #include "nsDisplayList.h"
 #include "nsTHashtable.h"
+#include "nsAutoPtr.h"
 #include "mozilla/Likely.h"
 #include "mozilla/WritingModes.h"
 #include <algorithm>

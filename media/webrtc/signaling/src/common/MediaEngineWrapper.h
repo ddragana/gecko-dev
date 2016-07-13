@@ -19,10 +19,8 @@ namespace mozilla
  *
  */
 template<typename T>
-struct ScopedCustomReleaseTraits0
+struct ScopedCustomReleaseTraits0 : public ScopedFreePtrTraits<T>
 {
-  typedef T* type;
-  static T* empty() { return nullptr; }
   static void release(T* ptr)
   {
     if(ptr)

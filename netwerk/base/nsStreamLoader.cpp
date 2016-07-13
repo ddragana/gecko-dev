@@ -11,9 +11,6 @@
 
 #include <limits>
 
-namespace mozilla {
-namespace net {
-
 nsStreamLoader::nsStreamLoader()
   : mData()
 {
@@ -58,6 +55,7 @@ nsStreamLoader::GetNumBytesRead(uint32_t* aNumBytes)
   return NS_OK;
 }
 
+/* readonly attribute nsIRequest request; */
 NS_IMETHODIMP 
 nsStreamLoader::GetRequest(nsIRequest **aRequest)
 {
@@ -101,7 +99,7 @@ nsStreamLoader::OnStopRequest(nsIRequest* request, nsISupports *ctxt,
     // provide nsIStreamLoader::request during call to OnStreamComplete
     mRequest = request;
     size_t length = mData.length();
-    uint8_t* elems = mData.extractOrCopyRawBuffer();
+    uint8_t* elems = mData.extractRawBuffer();
     nsresult rv = mObserver->OnStreamComplete(this, mContext, aStatus,
                                               length, elems);
     if (rv != NS_SUCCESS_ADOPTED_DATA) {
@@ -164,6 +162,3 @@ nsStreamLoader::CheckListenerChain()
 {
   return NS_OK;
 }
-
-} // namespace net
-} // namespace mozilla

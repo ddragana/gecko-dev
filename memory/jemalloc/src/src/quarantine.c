@@ -23,14 +23,11 @@ static quarantine_t *
 quarantine_init(tsd_t *tsd, size_t lg_maxobjs)
 {
 	quarantine_t *quarantine;
-	size_t size;
 
 	assert(tsd_nominal(tsd));
 
-	size = offsetof(quarantine_t, objs) + ((ZU(1) << lg_maxobjs) *
-	    sizeof(quarantine_obj_t));
-	quarantine = (quarantine_t *)iallocztm(tsd, size, size2index(size),
-	    false, tcache_get(tsd, true), true, NULL, true);
+	quarantine = (quarantine_t *)imalloc(tsd, offsetof(quarantine_t, objs) +
+	    ((ZU(1) << lg_maxobjs) * sizeof(quarantine_obj_t)));
 	if (quarantine == NULL)
 		return (NULL);
 	quarantine->curbytes = 0;
@@ -57,7 +54,7 @@ quarantine_alloc_hook_work(tsd_t *tsd)
 	if (tsd_quarantine_get(tsd) == NULL)
 		tsd_quarantine_set(tsd, quarantine);
 	else
-		idalloctm(tsd, quarantine, tcache_get(tsd, false), true, true);
+		idalloc(tsd, quarantine);
 }
 
 static quarantine_t *
@@ -89,7 +86,7 @@ quarantine_grow(tsd_t *tsd, quarantine_t *quarantine)
 		memcpy(&ret->objs[ncopy_a], quarantine->objs, ncopy_b *
 		    sizeof(quarantine_obj_t));
 	}
-	idalloctm(tsd, quarantine, tcache_get(tsd, false), true, true);
+	idalloc(tsd, quarantine);
 
 	tsd_quarantine_set(tsd, ret);
 	return (ret);
@@ -100,7 +97,7 @@ quarantine_drain_one(tsd_t *tsd, quarantine_t *quarantine)
 {
 	quarantine_obj_t *obj = &quarantine->objs[quarantine->first];
 	assert(obj->usize == isalloc(obj->ptr, config_prof));
-	idalloctm(tsd, obj->ptr, NULL, false, true);
+	idalloc(tsd, obj->ptr);
 	quarantine->curbytes -= obj->usize;
 	quarantine->curobjs--;
 	quarantine->first = (quarantine->first + 1) & ((ZU(1) <<
@@ -125,7 +122,7 @@ quarantine(tsd_t *tsd, void *ptr)
 	assert(opt_quarantine);
 
 	if ((quarantine = tsd_quarantine_get(tsd)) == NULL) {
-		idalloctm(tsd, ptr, NULL, false, true);
+		idalloc(tsd, ptr);
 		return;
 	}
 	/*
@@ -164,7 +161,7 @@ quarantine(tsd_t *tsd, void *ptr)
 		}
 	} else {
 		assert(quarantine->curbytes == 0);
-		idalloctm(tsd, ptr, NULL, false, true);
+		idalloc(tsd, ptr);
 	}
 }
 
@@ -179,7 +176,7 @@ quarantine_cleanup(tsd_t *tsd)
 	quarantine = tsd_quarantine_get(tsd);
 	if (quarantine != NULL) {
 		quarantine_drain(tsd, quarantine, 0);
-		idalloctm(tsd, quarantine, tcache_get(tsd, false), true, true);
+		idalloc(tsd, quarantine);
 		tsd_quarantine_set(tsd, NULL);
 	}
 }

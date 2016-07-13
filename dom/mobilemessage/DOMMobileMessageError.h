@@ -9,12 +9,13 @@
 
 #include "mozilla/dom/DOMError.h"
 
+class nsIDOMMozMmsMessage;
+class nsIDOMMozSmsMessage;
+
 namespace mozilla {
 namespace dom {
 
-class MmsMessage;
-class OwningSmsMessageOrMmsMessage;
-class SmsMessage;
+class OwningMozSmsMessageOrMozMmsMessage;
 
 class DOMMobileMessageError final : public DOMError
 {
@@ -22,22 +23,22 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DOMMobileMessageError, DOMError)
 
-  DOMMobileMessageError(nsPIDOMWindowInner* aWindow, const nsAString& aName,
-                        SmsMessage* aSms);
+  DOMMobileMessageError(nsPIDOMWindow* aWindow, const nsAString& aName,
+                        nsIDOMMozSmsMessage* aSms);
 
-  DOMMobileMessageError(nsPIDOMWindowInner* aWindow, const nsAString& aName,
-                        MmsMessage* aMms);
+  DOMMobileMessageError(nsPIDOMWindow* aWindow, const nsAString& aName,
+                        nsIDOMMozMmsMessage* aMms);
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  void GetData(OwningSmsMessageOrMmsMessage& aRetVal) const;
+  void GetData(OwningMozSmsMessageOrMozMmsMessage& aRetVal) const;
 
 private:
   ~DOMMobileMessageError() {}
 
-  RefPtr<SmsMessage> mSms;
-  RefPtr<MmsMessage> mMms;
+  nsCOMPtr<nsIDOMMozSmsMessage> mSms;
+  nsCOMPtr<nsIDOMMozMmsMessage> mMms;
 };
 
 } // namespace dom

@@ -17,7 +17,7 @@
 #include <map>
 
 #include "webrtc/base/constructormagic.h"
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -54,10 +54,10 @@ class EncoderStateFeedback {
  private:
   typedef std::map<uint32_t,  ViEEncoder*> SsrcEncoderMap;
 
-  rtc::scoped_ptr<CriticalSectionWrapper> crit_;
+  scoped_ptr<CriticalSectionWrapper> crit_;
 
   // Instance registered at the class requesting new key frames.
-  rtc::scoped_ptr<EncoderStateFeedbackObserver> observer_;
+  scoped_ptr<EncoderStateFeedbackObserver> observer_;
 
   // Maps a unique ssrc to the given encoder.
   SsrcEncoderMap encoders_;

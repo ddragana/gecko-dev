@@ -4,14 +4,20 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
+// Notifications we observe.
+const NOTIFICATIONS = [
+    "ActionBar:UpdateState",
+    "TextSelection:Action",
+    "TextSelection:End",
+];
 
+const DEFER_INIT_DELAY_MS = 50; // Delay period before _init() begins.
 const PHONE_REGEX = /^\+?[0-9\s,-.\(\)*#pw]{1,30}$/; // Are we a phone #?
 
 
 /**
  * ActionBarHandler Object and methods. Interface between Gecko Text Selection code
- * (AccessibleCaret, etc) and the Mobile ActionBar UI.
+ * (TouchCaret, SelectionCarets, etc) and the Mobile ActionBar UI.
  */
 var ActionBarHandler = {
   // Error codes returned from _init().
@@ -20,81 +26,39 @@ var ActionBarHandler = {
     NONE: "",
   },
 
-  _nextSelectionID: 1, // Next available.
   _selectionID: null, // Unique Selection ID, assigned each time we _init().
-
-  _boundingClientRect: null, // Current selections boundingClientRect.
   _actionBarActions: null, // Most-recent set of actions sent to ActionBar.
-
-  /**
-   * Receive and act on AccessibleCarets caret state-change
-   * (mozcaretstatechanged) events.
-   */
-  caretStateChangedHandler: function(e) {
-    // Close an open ActionBar, if carets no longer logically visible.
-    if (this._selectionID && !e.caretVisible) {
-      this._uninit(false);
-      return;
-    }
-
-    if (!this._selectionID && e.collapsed) {
-      switch (e.reason) {
-        case 'longpressonemptycontent':
-        case 'taponcaret':
-          // Show ActionBar when long pressing on an empty input or single
-          // tapping on the caret.
-          this._init(e.boundingClientRect);
-          break;
-
-        case 'updateposition':
-          // Do not show ActionBar when single tapping on an non-empty editable
-          // input.
-          break;
-
-        default:
-          break;
-      }
-      return;
-    }
-
-    // Open a closed ActionBar if carets actually visible.
-    if (!this._selectionID && e.caretVisuallyVisible) {
-      this._init(e.boundingClientRect);
-      return;
-    }
-
-    // Else, update an open ActionBar.
-    if (this._selectionID) {
-      if (!this._selectionHasChanged()) {
-        // Still the same active selection.
-        if (e.reason == 'visibilitychange' || e.reason == 'presscaret' ||
-            e.reason == 'scroll' ) {
-          // Visibility changes don't affect boundingClientRect.
-          this._updateVisibility();
-        } else {
-          // Selection changes update boundingClientRect.
-          this._boundingClientRect = e.boundingClientRect;
-          let forceUpdate = e.reason == 'updateposition' || e.reason == 'releasecaret';
-          this._sendActionBarActions(forceUpdate);
-        }
-      } else {
-        // We've started a new selection entirely.
-        this._uninit(false);
-        this._init(e.boundingClientRect);
-      }
-    }
-  },
 
   /**
    * ActionBarHandler notification observers.
    */
   observe: function(subject, topic, data) {
     switch (topic) {
+
+      // Gecko opens the ActionBarHandler.
+      case "ActionBar:OpenNew": {
+        // Always close, then re-open.
+        this._uninit(false);
+        this._init(data);
+        break;
+      }
+
+      // Gecko closes the ActionBarHandler.
+      case "ActionBar:Close": {
+        if (this._selectionID === data) {
+          this._uninit(false);
+        }
+        break;
+      }
+
+      // Update ActionBar when text selection changes.
+      case "ActionBar:UpdateState": {
+        this._sendActionBarActions();
+        break;
+      }
+
       // User click an ActionBar button.
       case "TextSelection:Action": {
-        if (!this._selectionID) {
-          break;
-        }
         for (let type in this.actions) {
           let action = this.actions[type];
           if (action.id == data) {
@@ -112,15 +76,13 @@ var ActionBarHandler = {
           requestId: data,
           text: this._getSelectedText(),
         });
-
-        this._uninit();
         break;
       }
 
       // User closed ActionBar by clicking "checkmark" button.
       case "TextSelection:End": {
         // End the requested selection only.
-        if (this._selectionID == JSON.parse(data).selectionID) {
+        if (this._selectionID === JSON.parse(data).selectionID) {
           this._uninit();
         }
         break;
@@ -129,20 +91,24 @@ var ActionBarHandler = {
   },
 
   /**
-   * Called when Gecko AccessibleCaret becomes visible.
+   * Called when Gecko TouchCaret or SelectionCarets become visible.
    */
-  _init: function(boundingClientRect) {
+  _init: function(actionBarID) {
     let [element, win] = this._getSelectionTargets();
     if (!win) {
       return this.START_TOUCH_ERROR.NO_CONTENT_WINDOW;
     }
 
     // Hold the ActionBar ID provided by Gecko.
-    this._selectionID = this._nextSelectionID++;
+    this._selectionID = actionBarID;
     [this._targetElement, this._contentWindow] = [element, win];
-    this._boundingClientRect = boundingClientRect;
 
-    // Open the ActionBar, send it's actions list.
+    // Add notification observers.
+    NOTIFICATIONS.forEach(notification => {
+      Services.obs.addObserver(this, notification, false);
+    });
+
+    // Open the ActionBar, send it's initial actions list.
     Messaging.sendRequest({
       type: "TextSelection:ActionbarInit",
       selectionID: this._selectionID,
@@ -150,16 +116,6 @@ var ActionBarHandler = {
     this._sendActionBarActions(true);
 
     return this.START_TOUCH_ERROR.NONE;
-  },
-
-  /**
-   * Called when content is scrolled and handles are hidden.
-   */
-  _updateVisibility: function() {
-    Messaging.sendRequest({
-      type: "TextSelection:Visibility",
-      selectionID: this._selectionID,
-    });
   },
 
   /**
@@ -185,18 +141,7 @@ var ActionBarHandler = {
   },
 
   /**
-   * The active Selection has changed, if the current focused element / win,
-   * pair, or state of the win's designMode changes.
-   */
-  _selectionHasChanged: function() {
-    let [element, win] = this._getSelectionTargets();
-    return (this._targetElement !== element ||
-            this._contentWindow !== win ||
-            this._isInDesignMode(this._contentWindow) !== this._isInDesignMode(win));
-  },
-
-  /**
-   * Called when Gecko AccessibleCaret becomes hidden,
+   * Called when Gecko TouchCaret or SelectionCarets become hidden,
    * ActionBar is closed by user "close" request, or as a result of object
    * methods such as SELECT_ALL, PASTE, etc.
    */
@@ -205,6 +150,11 @@ var ActionBarHandler = {
     if (!this._selectionID) {
       return;
     }
+
+    // Remove notification observers.
+    NOTIFICATIONS.forEach(notification => {
+      Services.obs.removeObserver(this, notification);
+    });
 
     // Close the ActionBar.
     Messaging.sendRequest({
@@ -215,10 +165,9 @@ var ActionBarHandler = {
     // to selectionTargets (_targetElement, _contentWindow) in case we need
     // a final clearSelection().
     this._selectionID = null;
-    this._boundingClientRect = null;
 
     // Clear selection required if triggered by self, or TextSelection icon
-    // actions. If called by Gecko CaretStateChangedEvent,
+    // actions. If called by Gecko TouchCaret/SelectionCarets state change,
     // visibility state is already correct.
     if (clearSelection) {
       this._clearSelection();
@@ -258,22 +207,10 @@ var ActionBarHandler = {
   _sendActionBarActions: function(sendAlways) {
     let actions = this._getActionBarActions();
 
-    let actionCountUnchanged = this._actionBarActions &&
-      actions.length === this._actionBarActions.length;
-    let actionsMatch = actionCountUnchanged &&
-      this._actionBarActions.every((e,i) => {
-        return e.id === actions[i].id;
-      });
-
-    if (sendAlways || !actionsMatch) {
+    if (sendAlways || actions !== this._actionBarActions) {
       Messaging.sendRequest({
         type: "TextSelection:ActionbarStatus",
-        selectionID: this._selectionID,
         actions: actions,
-        x: this._boundingClientRect.x,
-        y: this._boundingClientRect.y,
-        width: this._boundingClientRect.width,
-        height: this._boundingClientRect.height
       });
     }
 
@@ -294,7 +231,6 @@ var ActionBarHandler = {
           label: this._getActionValue(action, "label", "", element),
           icon: this._getActionValue(action, "icon", "drawable://ic_status_logo", element),
           order: this._getActionValue(action, "order", 0, element),
-          floatingOrder: this._getActionValue(action, "floatingOrder", 9, element),
           showAsAction: this._getActionValue(action, "showAsAction", true, element),
         };
         actions.push(a);
@@ -330,7 +266,6 @@ var ActionBarHandler = {
       label: Strings.browser.GetStringFromName("contextmenu.selectAll"),
       icon: "drawable://ab_select_all",
       order: 5,
-      floatingOrder: 5,
 
       selector: {
         matches: function(element, win) {
@@ -356,6 +291,9 @@ var ActionBarHandler = {
 
         // Close ActionBarHandler, then selectAll, and display handles.
         ActionBarHandler._getSelectAllController(element, win).selectAll();
+        ActionBarHandler._getSelectionController(element, win).
+          selectionCaretsVisibility = true;
+
         UITelemetry.addEvent("action.1", "actionbar", null, "select_all");
       },
     },
@@ -365,12 +303,11 @@ var ActionBarHandler = {
       label: Strings.browser.GetStringFromName("contextmenu.cut"),
       icon: "drawable://ab_cut",
       order: 4,
-      floatingOrder: 1,
 
       selector: {
         matches: function(element, win) {
-          // Can cut from editable, or design-mode document.
-          if (!element && !ActionBarHandler._isInDesignMode(win)) {
+          // Can't cut from non-editable.
+          if (!element) {
             return false;
           }
           // Don't allow "cut" from password fields.
@@ -379,7 +316,7 @@ var ActionBarHandler = {
             return false;
           }
           // Don't allow "cut" from disabled/readonly fields.
-          if (element && (element.disabled || element.readOnly)) {
+          if (element.disabled || element.readOnly) {
             return false;
           }
           // Allow if selected text exists.
@@ -395,7 +332,7 @@ var ActionBarHandler = {
         clipboard.copyString(selectedText);
 
         let msg = Strings.browser.GetStringFromName("selectionHelper.textCopied");
-        Snackbars.show(msg, Snackbars.LENGTH_LONG);
+        NativeWindow.toast.show(msg, "short");
 
         // Then cut the selection text.
         ActionBarHandler._getSelection(element, win).deleteFromDocument();
@@ -410,7 +347,6 @@ var ActionBarHandler = {
       label: Strings.browser.GetStringFromName("contextmenu.copy"),
       icon: "drawable://ab_copy",
       order: 3,
-      floatingOrder: 2,
 
       selector: {
         matches: function(element, win) {
@@ -431,7 +367,7 @@ var ActionBarHandler = {
         clipboard.copyString(selectedText);
 
         let msg = Strings.browser.GetStringFromName("selectionHelper.textCopied");
-        Snackbars.show(msg, Snackbars.LENGTH_LONG);
+        NativeWindow.toast.show(msg, "short");
 
         ActionBarHandler._uninit();
         UITelemetry.addEvent("action.1", "actionbar", null, "copy");
@@ -443,16 +379,15 @@ var ActionBarHandler = {
       label: Strings.browser.GetStringFromName("contextmenu.paste"),
       icon: "drawable://ab_paste",
       order: 2,
-      floatingOrder: 3,
 
       selector: {
         matches: function(element, win) {
-          // Can paste to editable, or design-mode document.
-          if (!element && !ActionBarHandler._isInDesignMode(win)) {
+          // Can't paste into non-editable.
+          if (!element) {
             return false;
           }
           // Can't paste into disabled/readonly fields.
-          if (element && (element.disabled || element.readOnly)) {
+          if (element.disabled || element.readOnly) {
             return false;
           }
           // Can't paste if Clipboard empty.
@@ -476,7 +411,6 @@ var ActionBarHandler = {
       label: Strings.browser.GetStringFromName("contextmenu.call"),
       icon: "drawable://phone",
       order: 1,
-      floatingOrder: 0,
 
       selector: {
         matches: function(element, win) {
@@ -495,17 +429,16 @@ var ActionBarHandler = {
 
     SEARCH: {
       id: "search_action",
-      label: () => Strings.browser.formatStringFromName("contextmenu.search",
+      label: Strings.browser.formatStringFromName("contextmenu.search",
         [Services.search.defaultEngine.name], 1),
       icon: "drawable://ab_search",
       order: 1,
-      floatingOrder: 6,
 
       selector: {
         matches: function(element, win) {
           // Allow if selected text exists.
           return (ActionBarHandler._getSelectedText().length > 0);
-        },
+        },  
       },
 
       action: function(element, win) {
@@ -530,10 +463,9 @@ var ActionBarHandler = {
 
     SEARCH_ADD: {
       id: "search_add_action",
-      label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine3"),
+      label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine2"),
       icon: "drawable://ab_add_search_engine",
       order: 0,
-      floatingOrder: 8,
 
       selector: {
         matches: function(element, win) {
@@ -544,32 +476,15 @@ var ActionBarHandler = {
           if (!form || element.type == "password") {
             return false;
           }
-
           let method = form.method.toUpperCase();
-          let canAddEngine = (method == "GET") ||
-            (method == "POST" && (form.enctype != "text/plain" && form.enctype != "multipart/form-data"));
-          if (!canAddEngine) {
-            return false;
-          }
-
-          // If SearchEngine query finds it, then we don't want action to add displayed.
-          if (SearchEngines.visibleEngineExists(element)) {
-            return false;
-          }
-
-          return true;
+          return (method == "GET" || method == "") ||
+                 (form.enctype != "text/plain") && (form.enctype != "multipart/form-data");
         },
       },
 
       action: function(element, win) {
         UITelemetry.addEvent("action.1", "actionbar", null, "add_search_engine");
-
-        // Engines are added asynch. If required, update SelectionUI on callback.
-        SearchEngines.addEngine(element, (result) => {
-          if (result) {
-            ActionBarHandler._sendActionBarActions(true);
-          }
-        });
+        SearchEngines.addEngine(element);
       },
     },
 
@@ -578,7 +493,6 @@ var ActionBarHandler = {
       label: Strings.browser.GetStringFromName("contextmenu.share"),
       icon: "drawable://ic_menu_share",
       order: 0,
-      floatingOrder: 4,
 
       selector: {
         matches: function(element, win) {
@@ -640,13 +554,6 @@ var ActionBarHandler = {
   },
 
   /**
-   * If we have an active selection, is it part of a designMode document?
-   */
-  _isInDesignMode: function(win) {
-    return this._selectionID && (win.document.designMode === "on");
-  },
-
-  /**
    * Provides the currently selected text, for either an editable,
    * or for the default contentWindow.
    */
@@ -667,8 +574,8 @@ var ActionBarHandler = {
         toStringWithFormat("text/plain", flags, 0);
     }
 
-    // Return explicitly selected text.
-    return selection.toString();
+    // Selection text gets trimmed up.
+    return selection.toString().trim();
   },
 
   /**

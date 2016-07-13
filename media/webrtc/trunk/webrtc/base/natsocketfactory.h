@@ -40,16 +40,14 @@ class NATSocketFactory : public SocketFactory, public NATInternalSocketFactory {
   NATSocketFactory(SocketFactory* factory, const SocketAddress& nat_addr);
 
   // SocketFactory implementation
-  Socket* CreateSocket(int type) override;
-  Socket* CreateSocket(int family, int type) override;
-  AsyncSocket* CreateAsyncSocket(int type) override;
-  AsyncSocket* CreateAsyncSocket(int family, int type) override;
+  virtual Socket* CreateSocket(int type);
+  virtual Socket* CreateSocket(int family, int type);
+  virtual AsyncSocket* CreateAsyncSocket(int type);
+  virtual AsyncSocket* CreateAsyncSocket(int family, int type);
 
   // NATInternalSocketFactory implementation
-  AsyncSocket* CreateInternalSocket(int family,
-                                    int type,
-                                    const SocketAddress& local_addr,
-                                    SocketAddress* nat_addr) override;
+  virtual AsyncSocket* CreateInternalSocket(int family, int type,
+      const SocketAddress& local_addr, SocketAddress* nat_addr);
 
  private:
   SocketFactory* factory_;
@@ -91,7 +89,6 @@ class NATSocketServer : public SocketServer, public NATInternalSocketFactory {
     Translator(NATSocketServer* server, NATType type,
                const SocketAddress& int_addr, SocketFactory* ext_factory,
                const SocketAddress& ext_addr);
-    ~Translator();
 
     SocketFactory* internal_factory() { return internal_factory_.get(); }
     SocketAddress internal_address() const {
@@ -131,21 +128,26 @@ class NATSocketServer : public SocketServer, public NATInternalSocketFactory {
   void RemoveTranslator(const SocketAddress& ext_ip);
 
   // SocketServer implementation
-  Socket* CreateSocket(int type) override;
-  Socket* CreateSocket(int family, int type) override;
+  virtual Socket* CreateSocket(int type);
+  virtual Socket* CreateSocket(int family, int type);
 
-  AsyncSocket* CreateAsyncSocket(int type) override;
-  AsyncSocket* CreateAsyncSocket(int family, int type) override;
+  virtual AsyncSocket* CreateAsyncSocket(int type);
+  virtual AsyncSocket* CreateAsyncSocket(int family, int type);
 
-  void SetMessageQueue(MessageQueue* queue) override;
-  bool Wait(int cms, bool process_io) override;
-  void WakeUp() override;
+  virtual void SetMessageQueue(MessageQueue* queue) {
+    msg_queue_ = queue;
+    server_->SetMessageQueue(queue);
+  }
+  virtual bool Wait(int cms, bool process_io) {
+    return server_->Wait(cms, process_io);
+  }
+  virtual void WakeUp() {
+    server_->WakeUp();
+  }
 
   // NATInternalSocketFactory implementation
-  AsyncSocket* CreateInternalSocket(int family,
-                                    int type,
-                                    const SocketAddress& local_addr,
-                                    SocketAddress* nat_addr) override;
+  virtual AsyncSocket* CreateInternalSocket(int family, int type,
+      const SocketAddress& local_addr, SocketAddress* nat_addr);
 
  private:
   SocketServer* server_;

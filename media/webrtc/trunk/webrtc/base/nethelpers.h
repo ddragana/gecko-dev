@@ -34,19 +34,19 @@ class AsyncResolverTest;
 class AsyncResolver : public SignalThread, public AsyncResolverInterface {
  public:
   AsyncResolver();
-  ~AsyncResolver() override;
+  virtual ~AsyncResolver() {}
 
-  void Start(const SocketAddress& addr) override;
-  bool GetResolvedAddress(int family, SocketAddress* addr) const override;
-  int GetError() const override;
-  void Destroy(bool wait) override;
+  virtual void Start(const SocketAddress& addr);
+  virtual bool GetResolvedAddress(int family, SocketAddress* addr) const;
+  virtual int GetError() const { return error_; }
+  virtual void Destroy(bool wait) { SignalThread::Destroy(wait); }
 
   const std::vector<IPAddress>& addresses() const { return addresses_; }
   void set_error(int error) { error_ = error; }
 
  protected:
-  void DoWork() override;
-  void OnWorkDone() override;
+  virtual void DoWork();
+  virtual void OnWorkDone();
 
  private:
   SocketAddress addr_;

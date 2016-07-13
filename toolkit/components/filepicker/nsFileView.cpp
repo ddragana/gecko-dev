@@ -15,6 +15,7 @@
 #include "nsCRT.h"
 #include "nsPrintfCString.h"
 #include "nsIDateTimeFormat.h"
+#include "nsDateTimeFormatCID.h"
 #include "nsQuickSort.h"
 #include "nsIAtom.h"
 #include "nsIAutoCompleteResult.h"
@@ -44,7 +45,7 @@ public:
   NS_DECL_NSIAUTOCOMPLETERESULT
 
   nsTArray<nsString> mValues;
-  nsString mSearchString;
+  nsAutoString mSearchString;
   uint16_t mSearchResult;
 private:
   ~nsFileResult() {}
@@ -201,7 +202,7 @@ nsFileComplete::StartSearch(const nsAString& aSearchString,
                             nsIAutoCompleteObserver *aListener)
 {
   NS_ENSURE_ARG_POINTER(aListener);
-  RefPtr<nsFileResult> result = new nsFileResult(aSearchString, aSearchParam);
+  nsRefPtr<nsFileResult> result = new nsFileResult(aSearchString, aSearchParam);
   NS_ENSURE_TRUE(result, NS_ERROR_OUT_OF_MEMORY);
   return aListener->OnSearchResult(this, result);
 }
@@ -298,7 +299,7 @@ nsFileView::~nsFileView()
 nsresult
 nsFileView::Init()
 {
-  mDateFormatter = nsIDateTimeFormat::Create();
+  mDateFormatter = do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID);
   if (!mDateFormatter)
     return NS_ERROR_OUT_OF_MEMORY;
 

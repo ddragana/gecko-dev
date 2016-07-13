@@ -33,6 +33,7 @@
 
 #define DOM_PARSED_RDS_GROUPS ((0x2 << 30) | (0x3 << 4) | (0x3 << 0))
 
+using namespace mozilla::hal;
 using mozilla::Preferences;
 
 BEGIN_FMRADIO_NAMESPACE
@@ -77,9 +78,9 @@ FMRadioService::FMRadioService()
   memset(mTempRadiotext, 0, sizeof(mTempRadiotext));
 
   // Read power state and frequency from Hal.
-  mEnabled = hal::IsFMRadioOn();
+  mEnabled = IsFMRadioOn();
   if (mEnabled) {
-    mPendingFrequencyInKHz = hal::GetFMRadioFrequency();
+    mPendingFrequencyInKHz = GetFMRadioFrequency();
     SetState(Enabled);
   }
 
@@ -132,34 +133,54 @@ FMRadioService::FMRadioService()
     NS_WARNING("Failed to add settings change observer!");
   }
 
-  hal::RegisterFMRadioObserver(this);
-  hal::RegisterFMRadioRDSObserver(this);
+  RegisterFMRadioObserver(this);
+  RegisterFMRadioRDSObserver(this);
 }
 
 FMRadioService::~FMRadioService()
 {
-  hal::UnregisterFMRadioRDSObserver(this);
-  hal::UnregisterFMRadioObserver(this);
+  UnregisterFMRadioRDSObserver(this);
+  UnregisterFMRadioObserver(this);
 }
 
-void
-FMRadioService::EnableFMRadio()
+class EnableRunnable final : public nsRunnable
 {
-  hal::FMRadioSettings info;
-  info.upperLimit() = mUpperBoundInKHz;
-  info.lowerLimit() = mLowerBoundInKHz;
-  info.spaceType() = mChannelWidthInKHz;
-  info.preEmphasis() = mPreemphasis;
-
-  hal::EnableFMRadio(info);
-
-  if (!mTuneThread) {
-    // hal::FMRadioSeek and hal::SetFMRadioFrequency run on this thread. These
-    // call ioctls that can stall the main thread, so we run them here.
-    mTuneThread = new LazyIdleThread(
-      TUNE_THREAD_TIMEOUT_MS, NS_LITERAL_CSTRING("FM Tuning"));
+public:
+  EnableRunnable(uint32_t aUpperLimit, uint32_t aLowerLimit, uint32_t aSpaceType, uint32_t aPreemphasis)
+    : mUpperLimit(aUpperLimit)
+    , mLowerLimit(aLowerLimit)
+    , mSpaceType(aSpaceType)
+    , mPreemphasis(aPreemphasis)
+  {
   }
-}
+
+  NS_IMETHOD Run()
+  {
+    FMRadioSettings info;
+    info.upperLimit() = mUpperLimit;
+    info.lowerLimit() = mLowerLimit;
+    info.spaceType() = mSpaceType;
+    info.preEmphasis() = mPreemphasis;
+
+    EnableFMRadio(info);
+
+    FMRadioService* fmRadioService = FMRadioService::Singleton();
+    if (!fmRadioService->mTuneThread) {
+      // SeekRunnable and SetFrequencyRunnable run on this thread. These
+      // call ioctls that can stall the main thread, so we run them here.
+      fmRadioService->mTuneThread = new LazyIdleThread(
+        TUNE_THREAD_TIMEOUT_MS, NS_LITERAL_CSTRING("FM Tuning"));
+    }
+
+    return NS_OK;
+  }
+
+private:
+  uint32_t mUpperLimit;
+  uint32_t mLowerLimit;
+  uint32_t mSpaceType;
+  uint32_t mPreemphasis;
+};
 
 /**
  * Read the airplane-mode setting, if the airplane-mode is not enabled, we
@@ -170,15 +191,15 @@ class ReadAirplaneModeSettingTask final : public nsISettingsServiceCallback
 public:
   NS_DECL_ISUPPORTS
 
-  ReadAirplaneModeSettingTask(RefPtr<FMRadioReplyRunnable> aPendingRequest)
+  ReadAirplaneModeSettingTask(nsRefPtr<FMRadioReplyRunnable> aPendingRequest)
     : mPendingRequest(aPendingRequest) { }
 
   NS_IMETHOD
   Handle(const nsAString& aName, JS::Handle<JS::Value> aResult)
   {
-    RefPtr<FMRadioService> fmRadioService = FMRadioService::Singleton();
+    FMRadioService* fmRadioService = FMRadioService::Singleton();
     MOZ_ASSERT(mPendingRequest == fmRadioService->mPendingRequest);
-    
+
     fmRadioService->mHasReadAirplaneModeSetting = true;
 
     if (!aResult.isBoolean()) {
@@ -190,11 +211,12 @@ public:
 
     fmRadioService->mAirplaneModeEnabled = aResult.toBoolean();
     if (!fmRadioService->mAirplaneModeEnabled) {
-      NS_DispatchToMainThread(NS_NewRunnableFunction(
-        [fmRadioService] () -> void {
-          fmRadioService->EnableFMRadio();
-        }
-      ));
+      EnableRunnable* runnable =
+        new EnableRunnable(fmRadioService->mUpperBoundInKHz,
+                           fmRadioService->mLowerBoundInKHz,
+                           fmRadioService->mChannelWidthInKHz,
+                           fmRadioService->mPreemphasis);
+      NS_DispatchToMainThread(runnable);
     } else {
       // Airplane mode is enabled, set the state back to Disabled.
       fmRadioService->TransitionState(ErrorResponse(
@@ -220,34 +242,85 @@ protected:
   ~ReadAirplaneModeSettingTask() {}
 
 private:
-  RefPtr<FMRadioReplyRunnable> mPendingRequest;
+  nsRefPtr<FMRadioReplyRunnable> mPendingRequest;
 };
 
 NS_IMPL_ISUPPORTS(ReadAirplaneModeSettingTask, nsISettingsServiceCallback)
 
-void
-FMRadioService::DisableFMRadio()
+class DisableRunnable final : public nsRunnable
 {
-  if (mTuneThread) {
-    mTuneThread->Shutdown();
-    mTuneThread = nullptr;
+public:
+  DisableRunnable() { }
+
+  NS_IMETHOD Run()
+  {
+    FMRadioService* fmRadioService = FMRadioService::Singleton();
+    if (fmRadioService->mTuneThread) {
+      fmRadioService->mTuneThread->Shutdown();
+      fmRadioService->mTuneThread = nullptr;
+    }
+    // Fix Bug 796733. DisableFMRadio should be called before
+    // SetFmRadioAudioEnabled to prevent the annoying beep sound.
+    DisableFMRadio();
+    fmRadioService->EnableAudio(false);
+
+    return NS_OK;
   }
-  // Fix Bug 796733. DisableFMRadio should be called before
-  // SetFmRadioAudioEnabled to prevent the annoying beep sound.
-  hal::DisableFMRadio();
-  EnableAudio(false);
 };
 
-void
-FMRadioService::DispatchFMRadioEventToMainThread(enum FMRadioEventType aType)
+class SetFrequencyRunnable final : public nsRunnable
 {
-  RefPtr<FMRadioService> self = this;
-  NS_DispatchToMainThread(NS_NewRunnableFunction(
-    [self, aType] () -> void {
-      self->NotifyFMRadioEvent(aType);
+public:
+  SetFrequencyRunnable(int32_t aFrequency)
+    : mFrequency(aFrequency) { }
+
+  NS_IMETHOD Run()
+  {
+    SetFMRadioFrequency(mFrequency);
+    return NS_OK;
+  }
+
+private:
+  int32_t mFrequency;
+};
+
+class SeekRunnable final : public nsRunnable
+{
+public:
+  SeekRunnable(FMRadioSeekDirection aDirection) : mDirection(aDirection) { }
+
+  NS_IMETHOD Run()
+  {
+    switch (mDirection) {
+      case FM_RADIO_SEEK_DIRECTION_UP:
+      case FM_RADIO_SEEK_DIRECTION_DOWN:
+        FMRadioSeek(mDirection);
+        break;
+      default:
+        MOZ_CRASH();
     }
-  ));
-}
+
+    return NS_OK;
+  }
+
+private:
+  FMRadioSeekDirection mDirection;
+};
+
+class NotifyRunnable final : public nsRunnable
+{
+public:
+  NotifyRunnable(FMRadioEventType aType) : mType(aType) { }
+
+  NS_IMETHOD Run()
+  {
+    FMRadioService::Singleton()->NotifyFMRadioEvent(mType);
+    return NS_OK;
+  }
+
+private:
+  FMRadioEventType mType;
+};
 
 void
 FMRadioService::TransitionState(const FMRadioResponseType& aResponse,
@@ -284,7 +357,7 @@ FMRadioService::RemoveObserver(FMRadioEventObserver* aObserver)
   if (mObserverList.Length() == 0)
   {
     // Turning off the FM radio HW because observer list is empty.
-    if (hal::IsFMRadioOn()) {
+    if (IsFMRadioOn()) {
       DoDisable();
     }
   }
@@ -343,7 +416,7 @@ bool
 FMRadioService::IsEnabled() const
 {
   MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-  return hal::IsFMRadioOn();
+  return IsFMRadioOn();
 }
 
 bool
@@ -358,7 +431,7 @@ FMRadioService::GetFrequency() const
 {
   MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
   if (IsEnabled()) {
-    int32_t frequencyInKHz = hal::GetFMRadioFrequency();
+    int32_t frequencyInKHz = GetFMRadioFrequency();
     return frequencyInKHz / 1000.0;
   }
 
@@ -498,7 +571,7 @@ FMRadioService::Enable(double aFrequencyInMHz,
       return;
     }
 
-    RefPtr<ReadAirplaneModeSettingTask> callback =
+    nsRefPtr<ReadAirplaneModeSettingTask> callback =
       new ReadAirplaneModeSettingTask(mPendingRequest);
 
     rv = settingsLock->Get(SETTING_KEY_AIRPLANEMODE_ENABLED, callback);
@@ -510,12 +583,10 @@ FMRadioService::Enable(double aFrequencyInMHz,
     return;
   }
 
-  RefPtr<FMRadioService> self = this;
-  NS_DispatchToMainThread(NS_NewRunnableFunction(
-    [self] () -> void {
-      self->EnableFMRadio();
-    }
-  ));
+  NS_DispatchToMainThread(new EnableRunnable(mUpperBoundInKHz,
+                                             mLowerBoundInKHz,
+                                             mChannelWidthInKHz,
+                                             mPreemphasis));
 }
 
 void
@@ -547,7 +618,7 @@ FMRadioService::Disable(FMRadioReplyRunnable* aReplyRunnable)
       break;
   }
 
-  RefPtr<FMRadioReplyRunnable> enablingRequest = mPendingRequest;
+  nsRefPtr<FMRadioReplyRunnable> enablingRequest = mPendingRequest;
 
   // If the FM Radio is currently seeking, no fail-to-seek or similar
   // event will be fired, execute the seek callback manually.
@@ -594,13 +665,8 @@ FMRadioService::DoDisable()
   //      console.log("We will catch disabled event ");
   //    };
   // we need to call hal::DisableFMRadio() asynchronously. Same reason for
-  // EnableFMRadio and hal::SetFMRadioFrequency.
-  RefPtr<FMRadioService> self = this;
-  NS_DispatchToMainThread(NS_NewRunnableFunction(
-    [self] () -> void {
-      self->DisableFMRadio();
-    }
-  ));
+  // EnableRunnable and SetFrequencyRunnable.
+  NS_DispatchToMainThread(new DisableRunnable());
 }
 
 void
@@ -627,7 +693,7 @@ FMRadioService::SetFrequency(double aFrequencyInMHz,
       NS_DispatchToMainThread(aReplyRunnable);
       return;
     case Seeking:
-      hal::CancelFMRadioSeek();
+      CancelFMRadioSeek();
       TransitionState(ErrorResponse(
         NS_LITERAL_STRING("Seek action is cancelled")), Enabled);
       break;
@@ -644,19 +710,15 @@ FMRadioService::SetFrequency(double aFrequencyInMHz,
     return;
   }
 
-  mTuneThread->Dispatch(
-    NS_NewRunnableFunction(
-      [roundedFrequency] () -> void {
-        hal::SetFMRadioFrequency(roundedFrequency);
-      }
-    ), nsIThread::DISPATCH_NORMAL);
+  mTuneThread->Dispatch(new SetFrequencyRunnable(roundedFrequency),
+                        nsIThread::DISPATCH_NORMAL);
 
   aReplyRunnable->SetReply(SuccessResponse());
   NS_DispatchToMainThread(aReplyRunnable);
 }
 
 void
-FMRadioService::Seek(hal::FMRadioSeekDirection aDirection,
+FMRadioService::Seek(FMRadioSeekDirection aDirection,
                      FMRadioReplyRunnable* aReplyRunnable)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
@@ -690,19 +752,7 @@ FMRadioService::Seek(hal::FMRadioSeekDirection aDirection,
   SetState(Seeking);
   mPendingRequest = aReplyRunnable;
 
-  mTuneThread->Dispatch(
-    NS_NewRunnableFunction(
-      [aDirection] () -> void {
-        switch (aDirection) {
-          case hal::FM_RADIO_SEEK_DIRECTION_UP:
-          case hal::FM_RADIO_SEEK_DIRECTION_DOWN:
-            hal::FMRadioSeek(aDirection);
-            break;
-          default:
-            MOZ_CRASH();
-        }
-      }
-    ), nsIThread::DISPATCH_NORMAL);
+  mTuneThread->Dispatch(new SeekRunnable(aDirection), nsIThread::DISPATCH_NORMAL);
 }
 
 void
@@ -720,7 +770,7 @@ FMRadioService::CancelSeek(FMRadioReplyRunnable* aReplyRunnable)
   }
 
   // Cancel the seek immediately to prevent it from completing.
-  hal::CancelFMRadioSeek();
+  CancelFMRadioSeek();
 
   TransitionState(
     ErrorResponse(NS_LITERAL_STRING("Seek action is cancelled")), Enabled);
@@ -733,7 +783,7 @@ void
 FMRadioService::SetRDSGroupMask(uint32_t aRDSGroupMask)
 {
   mRDSGroupMask = aRDSGroupMask;
-  if (hal::IsFMRadioOn() && mRDSEnabled) {
+  if (IsFMRadioOn() && mRDSEnabled) {
     DebugOnly<bool> enabled = hal::EnableRDS(mRDSGroupMask | DOM_PARSED_RDS_GROUPS);
     MOZ_ASSERT(enabled);
   }
@@ -745,7 +795,7 @@ FMRadioService::EnableRDS(FMRadioReplyRunnable* aReplyRunnable)
   MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
   MOZ_ASSERT(aReplyRunnable);
 
-  if (hal::IsFMRadioOn()) {
+  if (IsFMRadioOn()) {
     if (!hal::EnableRDS(mRDSGroupMask | DOM_PARSED_RDS_GROUPS)) {
       aReplyRunnable->SetReply(
         ErrorResponse(NS_LITERAL_STRING("Could not enable RDS")));
@@ -758,8 +808,7 @@ FMRadioService::EnableRDS(FMRadioReplyRunnable* aReplyRunnable)
 
   aReplyRunnable->SetReply(SuccessResponse());
   NS_DispatchToMainThread(aReplyRunnable);
-
-  DispatchFMRadioEventToMainThread(RDSEnabledChanged);
+  NS_DispatchToMainThread(new NotifyRunnable(RDSEnabledChanged));
 }
 
 void
@@ -768,7 +817,7 @@ FMRadioService::DisableRDS(FMRadioReplyRunnable* aReplyRunnable)
   MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
   MOZ_ASSERT(aReplyRunnable);
 
-  if (hal::IsFMRadioOn()) {
+  if (IsFMRadioOn()) {
     hal::DisableRDS();
   }
 
@@ -777,8 +826,7 @@ FMRadioService::DisableRDS(FMRadioReplyRunnable* aReplyRunnable)
 
   if (mRDSEnabled) {
     mRDSEnabled = false;
-
-    DispatchFMRadioEventToMainThread(RDSEnabledChanged);
+    NS_DispatchToMainThread(new NotifyRunnable(RDSEnabledChanged));
   }
 }
 
@@ -825,11 +873,11 @@ FMRadioService::NotifyFMRadioEvent(FMRadioEventType aType)
 }
 
 void
-FMRadioService::Notify(const hal::FMRadioOperationInformation& aInfo)
+FMRadioService::Notify(const FMRadioOperationInformation& aInfo)
 {
   switch (aInfo.operation()) {
-    case hal::FM_RADIO_OPERATION_ENABLE:
-      MOZ_ASSERT(hal::IsFMRadioOn());
+    case FM_RADIO_OPERATION_ENABLE:
+      MOZ_ASSERT(IsFMRadioOn());
       MOZ_ASSERT(mState == Disabling || mState == Enabling);
 
       // If we're disabling, disable the radio right now.
@@ -843,7 +891,7 @@ FMRadioService::Notify(const hal::FMRadioOperationInformation& aInfo)
 
       // To make sure the FM app will get the right frequency after the FM
       // radio is enabled, we have to set the frequency first.
-      hal::SetFMRadioFrequency(mPendingFrequencyInKHz);
+      SetFMRadioFrequency(mPendingFrequencyInKHz);
 
       // Bug 949855: enable audio after the FM radio HW is enabled, to make sure
       // 'hw.fm.isAnalog' could be detected as |true| during first time launch.
@@ -854,7 +902,7 @@ FMRadioService::Notify(const hal::FMRadioOperationInformation& aInfo)
       // Update the current frequency without sending the`FrequencyChanged`
       // event, to make sure the FM app will get the right frequency when the
       // `EnabledChange` event is sent.
-      mPendingFrequencyInKHz = hal::GetFMRadioFrequency();
+      mPendingFrequencyInKHz = GetFMRadioFrequency();
       UpdatePowerState();
 
       // The frequency was changed from '0' to some meaningful number, so we
@@ -868,7 +916,7 @@ FMRadioService::Notify(const hal::FMRadioOperationInformation& aInfo)
         }
       }
       break;
-    case hal::FM_RADIO_OPERATION_DISABLE:
+    case FM_RADIO_OPERATION_DISABLE:
       MOZ_ASSERT(mState == Disabling);
 
       mPISet = false;
@@ -878,7 +926,7 @@ FMRadioService::Notify(const hal::FMRadioOperationInformation& aInfo)
       TransitionState(SuccessResponse(), Disabled);
       UpdatePowerState();
       break;
-    case hal::FM_RADIO_OPERATION_SEEK:
+    case FM_RADIO_OPERATION_SEEK:
 
       // Seek action might be cancelled by SetFrequency(), we need to check if
       // the current state is Seeking.
@@ -888,7 +936,7 @@ FMRadioService::Notify(const hal::FMRadioOperationInformation& aInfo)
 
       UpdateFrequency();
       break;
-    case hal::FM_RADIO_OPERATION_TUNE:
+    case FM_RADIO_OPERATION_TUNE:
       UpdateFrequency();
       break;
     default:
@@ -966,7 +1014,7 @@ static const uint16_t sRDSToUnicodeMap[256] = {
 };
 
 void
-FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
+FMRadioService::Notify(const FMRadioRDSGroup& aRDSGroup)
 {
   uint16_t blocks[4];
   blocks[0] = aRDSGroup.blockA();
@@ -987,8 +1035,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
       memset(mTempRadiotext, 0, sizeof(mTempRadiotext));
     }
     mPISet = true;
-
-    DispatchFMRadioEventToMainThread(PIChanged);
+    NS_DispatchToMainThread(new NotifyRunnable(PIChanged));
   }
   mLastPI = blocks[0];
 
@@ -997,8 +1044,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
   if ((mPTY != pty && pty == mLastPTY) || !mPTYSet) {
     mPTY = pty;
     mPTYSet = true;
-
-    DispatchFMRadioEventToMainThread(PTYChanged);
+    NS_DispatchToMainThread(new NotifyRunnable(PTYChanged));
   }
   mLastPTY = pty;
 
@@ -1029,8 +1075,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
         MutexAutoLock lock(mRDSLock);
         mPSNameSet = true;
         memcpy(mPSName, mTempPSName, sizeof(mTempPSName));
-
-        DispatchFMRadioEventToMainThread(PSChanged);
+        NS_DispatchToMainThread(new NotifyRunnable(PSChanged));
       }
       break;
     }
@@ -1044,8 +1089,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
         mRadiotextAB = textAB;
         MutexAutoLock lock(mRDSLock);
         memset(mRadiotext, 0, sizeof(mRadiotext));
-
-        DispatchFMRadioEventToMainThread(RadiotextChanged);
+        NS_DispatchToMainThread(new NotifyRunnable(RadiotextChanged));
       }
 
       // mRadiotextState is a bitmask that lets us ensure all segments
@@ -1085,8 +1129,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
       MutexAutoLock lock(mRDSLock);
       mRadiotextSet = true;
       memcpy(mRadiotext, mTempRadiotext, sizeof(mTempRadiotext));
-
-      DispatchFMRadioEventToMainThread(RadiotextChanged);
+      NS_DispatchToMainThread(new NotifyRunnable(RadiotextChanged));
       break;
     }
     case 5: // 2b Radiotext
@@ -1099,8 +1142,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
         mRadiotextAB = textAB;
         MutexAutoLock lock(mRDSLock);
         memset(mRadiotext, 0, sizeof(mRadiotext));
-
-        DispatchFMRadioEventToMainThread(RadiotextChanged);
+        NS_DispatchToMainThread(new NotifyRunnable(RadiotextChanged));
       }
 
       if (!segmentAddr) {
@@ -1135,8 +1177,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
       MutexAutoLock lock(mRDSLock);
       mRadiotextSet = true;
       memcpy(mRadiotext, mTempRadiotext, sizeof(mTempRadiotext));
-
-      DispatchFMRadioEventToMainThread(RadiotextChanged);
+      NS_DispatchToMainThread(new NotifyRunnable(RadiotextChanged));
       break;
     }
     case 31: // 15b Fast Tuning and Switching
@@ -1146,8 +1187,7 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
         break;
       }
       mPTY = pty;
-
-      DispatchFMRadioEventToMainThread(PTYChanged);
+      NS_DispatchToMainThread(new NotifyRunnable(PTYChanged));
       break;
     }
   }
@@ -1169,14 +1209,13 @@ FMRadioService::Notify(const hal::FMRadioRDSGroup& aRDSGroup)
   MutexAutoLock lock(mRDSLock);
   mRDSGroup = newgroup;
   mRDSGroupSet = true;
-
-  DispatchFMRadioEventToMainThread(NewRDSGroup);
+  NS_DispatchToMainThread(new NotifyRunnable(NewRDSGroup));
 }
 
 void
 FMRadioService::UpdatePowerState()
 {
-  bool enabled = hal::IsFMRadioOn();
+  bool enabled = IsFMRadioOn();
   if (enabled != mEnabled) {
     mEnabled = enabled;
     NotifyFMRadioEvent(EnabledChanged);
@@ -1186,7 +1225,7 @@ FMRadioService::UpdatePowerState()
 void
 FMRadioService::UpdateFrequency()
 {
-  int32_t frequency = hal::GetFMRadioFrequency();
+  int32_t frequency = GetFMRadioFrequency();
   if (mPendingFrequencyInKHz != frequency) {
     mPendingFrequencyInKHz = frequency;
     NotifyFMRadioEvent(FrequencyChanged);

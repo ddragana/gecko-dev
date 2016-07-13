@@ -201,10 +201,7 @@ mozInlineSpellWordUtil::SetPosition(nsINode* aNode, int32_t aOffset)
   }
   mSoftBegin = NodeOffset(aNode, aOffset);
 
-  nsresult rv = EnsureWords();
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  EnsureWords();
   
   int32_t textOffset = MapDOMPositionToSoftTextOffset(mSoftBegin);
   if (textOffset < 0)
@@ -213,19 +210,14 @@ mozInlineSpellWordUtil::SetPosition(nsINode* aNode, int32_t aOffset)
   return NS_OK;
 }
 
-nsresult
+void
 mozInlineSpellWordUtil::EnsureWords()
 {
   if (mSoftTextValid)
-    return NS_OK;
+    return;
   BuildSoftText();
-  nsresult rv = BuildRealWords();
-  if (NS_FAILED(rv)) {
-    mRealWords.Clear();
-    return rv;
-  }
+  BuildRealWords();
   mSoftTextValid = true;
-  return NS_OK;
 }
 
 nsresult
@@ -246,16 +238,11 @@ mozInlineSpellWordUtil::GetRangeForWord(nsIDOMNode* aWordNode,
   // Set our soft end and start
   nsCOMPtr<nsINode> wordNode = do_QueryInterface(aWordNode);
   NodeOffset pt = NodeOffset(wordNode, aWordOffset);
-
-  if (!mSoftTextValid || pt != mSoftBegin || pt != mSoftEnd) {
-    InvalidateWords();
-    mSoftBegin = mSoftEnd = pt;
-    nsresult rv = EnsureWords();
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-
+  
+  InvalidateWords();
+  mSoftBegin = mSoftEnd = pt;
+  EnsureWords();
+  
   int32_t offset = MapDOMPositionToSoftTextOffset(pt);
   if (offset < 0)
     return MakeRange(pt, pt, aRange);
@@ -335,7 +322,7 @@ mozInlineSpellWordUtil::MakeRange(NodeOffset aBegin, NodeOffset aEnd,
   if (!mDOMDocument)
     return NS_ERROR_NOT_INITIALIZED;
 
-  RefPtr<nsRange> range = new nsRange(aBegin.mNode);
+  nsRefPtr<nsRange> range = new nsRange(aBegin.mNode);
   nsresult rv = range->Set(aBegin.mNode, aBegin.mOffset,
                            aEnd.mNode, aEnd.mOffset);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -618,7 +605,7 @@ mozInlineSpellWordUtil::BuildSoftText()
 #endif
 }
 
-nsresult
+void
 mozInlineSpellWordUtil::BuildRealWords()
 {
   // This is pretty simple. We just have to walk mSoftText, tokenizing it
@@ -630,10 +617,7 @@ mozInlineSpellWordUtil::BuildRealWords()
   for (int32_t i = 0; i < int32_t(mSoftText.Length()); ++i) {
     if (IsDOMWordSeparator(mSoftText.CharAt(i))) {
       if (wordStart >= 0) {
-        nsresult rv = SplitDOMWord(wordStart, i);
-        if (NS_FAILED(rv)) {
-          return rv;
-        }
+        SplitDOMWord(wordStart, i);
         wordStart = -1;
       }
     } else {
@@ -643,13 +627,8 @@ mozInlineSpellWordUtil::BuildRealWords()
     }
   }
   if (wordStart >= 0) {
-    nsresult rv = SplitDOMWord(wordStart, mSoftText.Length());
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
+    SplitDOMWord(wordStart, mSoftText.Length());
   }
-
-  return NS_OK;
 }
 
 /*********** DOM/realwords<->mSoftText mapping functions ************/
@@ -783,7 +762,7 @@ mozInlineSpellWordUtil::FindRealWordContaining(int32_t aSoftTextOffset,
   // point is the start of. I'm not 100% sure this is OK...
   const RealWord& word = mRealWords[index];
   int32_t offset = aSoftTextOffset - word.mSoftTextOffset;
-  if (offset >= 0 && offset <= static_cast<int32_t>(word.mLength))
+  if (offset >= 0 && offset <= word.mLength)
     return index;
 
   if (aSearchForward) {
@@ -1044,7 +1023,7 @@ WordSplitState::ShouldSkipWord(int32_t aStart, int32_t aLength)
 
 // mozInlineSpellWordUtil::SplitDOMWord
 
-nsresult
+void
 mozInlineSpellWordUtil::SplitDOMWord(int32_t aStart, int32_t aEnd)
 {
   WordSplitState state(this, mSoftText, aStart, aEnd - aStart);
@@ -1054,13 +1033,10 @@ mozInlineSpellWordUtil::SplitDOMWord(int32_t aStart, int32_t aEnd)
   if (state.mCurCharClass != CHAR_CLASS_END_OF_INPUT &&
       state.IsSpecialWord()) {
     int32_t specialWordLength = state.mDOMWordText.Length() - state.mDOMWordOffset;
-    if (!mRealWords.AppendElement(
-          RealWord(aStart + state.mDOMWordOffset, specialWordLength, false),
-          fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    mRealWords.AppendElement(
+        RealWord(aStart + state.mDOMWordOffset, specialWordLength, false));
 
-    return NS_OK;
+    return;
   }
 
   while (state.mCurCharClass != CHAR_CLASS_END_OF_INPUT) {
@@ -1074,12 +1050,8 @@ mozInlineSpellWordUtil::SplitDOMWord(int32_t aStart, int32_t aEnd)
     // find the end of the word
     state.AdvanceThroughWord();
     int32_t wordLen = state.mDOMWordOffset - wordOffset;
-    if (!mRealWords.AppendElement(
-        RealWord(aStart + wordOffset, wordLen,
-                 !state.ShouldSkipWord(wordOffset, wordLen)), fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    mRealWords.AppendElement(
+      RealWord(aStart + wordOffset, wordLen,
+               !state.ShouldSkipWord(wordOffset, wordLen)));
   }
-
-  return NS_OK;
 }

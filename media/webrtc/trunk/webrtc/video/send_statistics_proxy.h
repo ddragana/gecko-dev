@@ -13,97 +13,75 @@
 
 #include <string>
 
-#include "webrtc/base/ratetracker.h"
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/base/thread_annotations.h"
 #include "webrtc/common_types.h"
-#include "webrtc/modules/video_coding/codecs/interface/video_codec_interface.h"
-#include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
-#include "webrtc/system_wrappers/interface/clock.h"
-#include "webrtc/video_engine/include/vie_base.h"
-#include "webrtc/video_engine/include/vie_capture.h"
 #include "webrtc/video_engine/include/vie_codec.h"
+#include "webrtc/video_engine/include/vie_capture.h"
 #include "webrtc/video_send_stream.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
 class CriticalSectionWrapper;
 
-class SendStatisticsProxy : public CpuOveruseMetricsObserver,
-                            public RtcpStatisticsCallback,
-                            public RtcpPacketTypeCounterObserver,
+class SendStatisticsProxy : public RtcpStatisticsCallback,
                             public StreamDataCountersCallback,
                             public BitrateStatisticsObserver,
                             public FrameCountObserver,
                             public ViEEncoderObserver,
-                            public VideoEncoderRateObserver,
+                            public ViECaptureObserver,
                             public SendSideDelayObserver {
  public:
-  static const int kStatsTimeoutMs;
-
-  SendStatisticsProxy(Clock* clock, const VideoSendStream::Config& config);
+  explicit SendStatisticsProxy(const VideoSendStream::Config& config);
   virtual ~SendStatisticsProxy();
 
-  VideoSendStream::Stats GetStats();
-
-  virtual void OnSendEncodedImage(const EncodedImage& encoded_image,
-                                  const RTPVideoHeader* rtp_video_header);
-  // Used to update incoming frame rate.
-  void OnIncomingFrame();
-
-  // From VideoEncoderRateObserver.
-  void OnSetRates(uint32_t bitrate_bps, int framerate) override;
+  VideoSendStream::Stats GetStats() const;
 
  protected:
-  // From CpuOveruseMetricsObserver.
-  void CpuOveruseMetricsUpdated(const CpuOveruseMetrics& metrics) override;
   // From RtcpStatisticsCallback.
-  void StatisticsUpdated(const RtcpStatistics& statistics,
-                         uint32_t ssrc) override;
-  void CNameChanged(const char* cname, uint32_t ssrc) override;
-  // From RtcpPacketTypeCounterObserver
-  void RtcpPacketTypesCounterUpdated(
-      uint32_t ssrc,
-      const RtcpPacketTypeCounter& packet_counter) override;
+  virtual void StatisticsUpdated(const RtcpStatistics& statistics,
+                                 uint32_t ssrc) OVERRIDE;
   // From StreamDataCountersCallback.
-  void DataCountersUpdated(const StreamDataCounters& counters,
-                           uint32_t ssrc) override;
+  virtual void DataCountersUpdated(const StreamDataCounters& counters,
+                                   uint32_t ssrc) OVERRIDE;
 
   // From BitrateStatisticsObserver.
-  void Notify(const BitrateStatistics& total_stats,
-              const BitrateStatistics& retransmit_stats,
-              uint32_t ssrc) override;
+  virtual void Notify(const BitrateStatistics& total_stats,
+                      const BitrateStatistics& retransmit_stats,
+                      uint32_t ssrc) OVERRIDE;
 
   // From FrameCountObserver.
-  void FrameCountUpdated(const FrameCounts& frame_counts,
-                         uint32_t ssrc) override;
+  virtual void FrameCountUpdated(FrameType frame_type,
+                                 uint32_t frame_count,
+                                 const unsigned int ssrc) OVERRIDE;
 
   // From ViEEncoderObserver.
-  void OutgoingRate(const int video_channel,
-                    const unsigned int framerate,
-                    const unsigned int bitrate) override;
+  virtual void OutgoingRate(const int video_channel,
+                            const unsigned int framerate,
+                            const unsigned int bitrate) OVERRIDE;
 
-  void SuspendChange(int video_channel, bool is_suspended) override;
+  virtual void SuspendChange(int video_channel, bool is_suspended) OVERRIDE;
 
-  void SendSideDelayUpdated(int avg_delay_ms,
-                            int max_delay_ms,
-                            uint32_t ssrc) override;
+  // From ViECaptureObserver.
+  virtual void BrightnessAlarm(const int capture_id,
+                               const Brightness brightness) OVERRIDE {}
+
+  virtual void CapturedFrameRate(const int capture_id,
+                                 const unsigned char frame_rate) OVERRIDE;
+
+  virtual void NoPictureAlarm(const int capture_id,
+                              const CaptureAlarm alarm) OVERRIDE {}
+
+  virtual void SendSideDelayUpdated(int avg_delay_ms,
+                                    int max_delay_ms,
+                                    uint32_t ssrc) OVERRIDE;
 
  private:
-  struct StatsUpdateTimes {
-    StatsUpdateTimes() : resolution_update_ms(0) {}
-    int64_t resolution_update_ms;
-  };
-  void PurgeOldStats() EXCLUSIVE_LOCKS_REQUIRED(crit_);
-  VideoSendStream::StreamStats* GetStatsEntry(uint32_t ssrc)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_);
+  SsrcStats* GetStatsEntry(uint32_t ssrc) EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
-  Clock* const clock_;
   const VideoSendStream::Config config_;
-  rtc::scoped_ptr<CriticalSectionWrapper> crit_;
+  scoped_ptr<CriticalSectionWrapper> crit_;
   VideoSendStream::Stats stats_ GUARDED_BY(crit_);
-  rtc::RateTracker input_frame_rate_tracker_ GUARDED_BY(crit_);
-  std::map<uint32_t, StatsUpdateTimes> update_times_ GUARDED_BY(crit_);
 };
 
 }  // namespace webrtc

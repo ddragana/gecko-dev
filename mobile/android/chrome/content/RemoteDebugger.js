@@ -5,13 +5,10 @@
 /* globals DebuggerServer */
 "use strict";
 
-XPCOMUtils.defineLazyGetter(this, "DebuggerServer", () => {
-  let { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-  let { DebuggerServer } = require("devtools/server/main");
-  return DebuggerServer;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
+                                  "resource://gre/modules/devtools/dbg-server.jsm");
 
-var RemoteDebugger = {
+let RemoteDebugger = {
   init() {
     USBRemoteDebugger.init();
     WiFiRemoteDebugger.init();
@@ -39,7 +36,7 @@ var RemoteDebugger = {
    *        }
    *        Specific authentication modes may include additional fields.  Check
    *        the different |allowConnection| methods in
-   *        devtools/shared/security/auth.js.
+   *        toolkit/devtools/security/auth.js.
    * @return An AuthenticationResult value.
    *         A promise that will be resolved to the above is also allowed.
    */
@@ -155,19 +152,6 @@ var RemoteDebugger = {
       type: "DevToolsAuth:Scan"
     }).then(data => {
       return JSON.parse(data);
-    }, () => {
-      let title = Strings.browser.GetStringFromName("remoteQRScanFailedPromptTitle");
-      let msg = Strings.browser.GetStringFromName("remoteQRScanFailedPromptMessage");
-      let ok = Strings.browser.GetStringFromName("remoteQRScanFailedPromptOK");
-      let prompt = new Prompt({
-        window: null,
-        hint: "remotedebug",
-        title: title,
-        message: msg,
-        buttons: [ ok ],
-        priority: 1
-      });
-      prompt.show();
     });
 
     this._receivingOOB.then(() => this._receivingOOB = null);
@@ -196,7 +180,7 @@ RemoteDebugger.allowConnection =
 RemoteDebugger.receiveOOB =
   RemoteDebugger.receiveOOB.bind(RemoteDebugger);
 
-var USBRemoteDebugger = {
+let USBRemoteDebugger = {
 
   init() {
     Services.prefs.addObserver("devtools.", this, false);
@@ -276,7 +260,7 @@ var USBRemoteDebugger = {
 
 };
 
-var WiFiRemoteDebugger = {
+let WiFiRemoteDebugger = {
 
   init() {
     Services.prefs.addObserver("devtools.", this, false);

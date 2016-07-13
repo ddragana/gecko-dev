@@ -17,16 +17,17 @@ FocusEvent::FocusEvent(EventTarget* aOwner,
                        nsPresContext* aPresContext,
                        InternalFocusEvent* aEvent)
   : UIEvent(aOwner, aPresContext,
-            aEvent ? aEvent : new InternalFocusEvent(false, eFocus))
+            aEvent ? aEvent : new InternalFocusEvent(false, NS_FOCUS_CONTENT))
 {
   if (aEvent) {
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->mTime = PR_Now();
+    mEvent->time = PR_Now();
   }
 }
 
+/* readonly attribute nsIDOMEventTarget relatedTarget; */
 NS_IMETHODIMP
 FocusEvent::GetRelatedTarget(nsIDOMEventTarget** aRelatedTarget)
 {
@@ -38,19 +39,22 @@ FocusEvent::GetRelatedTarget(nsIDOMEventTarget** aRelatedTarget)
 EventTarget*
 FocusEvent::GetRelatedTarget()
 {
-  return mEvent->AsFocusEvent()->mRelatedTarget;
+  return mEvent->AsFocusEvent()->relatedTarget;
 }
 
-void
+nsresult
 FocusEvent::InitFocusEvent(const nsAString& aType,
                            bool aCanBubble,
                            bool aCancelable,
-                           nsGlobalWindow* aView,
+                           nsIDOMWindow* aView,
                            int32_t aDetail,
                            EventTarget* aRelatedTarget)
 {
-  UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, aDetail);
-  mEvent->AsFocusEvent()->mRelatedTarget = aRelatedTarget;
+  nsresult rv =
+    UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, aDetail);
+  NS_ENSURE_SUCCESS(rv, rv);
+  mEvent->AsFocusEvent()->relatedTarget = aRelatedTarget;
+  return NS_OK;
 }
 
 already_AddRefed<FocusEvent>
@@ -60,10 +64,10 @@ FocusEvent::Constructor(const GlobalObject& aGlobal,
                         ErrorResult& aRv)
 {
   nsCOMPtr<EventTarget> t = do_QueryInterface(aGlobal.GetAsSupports());
-  RefPtr<FocusEvent> e = new FocusEvent(t, nullptr, nullptr);
+  nsRefPtr<FocusEvent> e = new FocusEvent(t, nullptr, nullptr);
   bool trusted = e->Init(t);
-  e->InitFocusEvent(aType, aParam.mBubbles, aParam.mCancelable, aParam.mView,
-                    aParam.mDetail, aParam.mRelatedTarget);
+  aRv = e->InitFocusEvent(aType, aParam.mBubbles, aParam.mCancelable, aParam.mView,
+                          aParam.mDetail, aParam.mRelatedTarget);
   e->SetTrusted(trusted);
   return e.forget();
 }
@@ -74,11 +78,14 @@ FocusEvent::Constructor(const GlobalObject& aGlobal,
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<FocusEvent>
-NS_NewDOMFocusEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMFocusEvent(nsIDOMEvent** aInstancePtrResult,
+                    EventTarget* aOwner,
                     nsPresContext* aPresContext,
                     InternalFocusEvent* aEvent)
 {
-  RefPtr<FocusEvent> it = new FocusEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  FocusEvent* it = new FocusEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

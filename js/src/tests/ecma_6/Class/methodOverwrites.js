@@ -1,15 +1,18 @@
 // Ensure that we can overwrite methods when more tha one is present.
+
+var test = `
+
 {
     var result = 0;
     // Regardless of order, the constructor is overridden by any CPN, because it's
     // processed seperately.
-    class a { ["constructor"]() { result += 1; }; constructor() { result += 2; } }
+    class a { [\"constructor\"]() { result += 1; }; constructor() { result += 2; } }
     var aInst = new a();
     assertEq(result, 2);
     aInst.constructor();
     assertEq(result, 3);
 
-    class b { constructor() { result += 2; } ["constructor"]() { result += 1; }; }
+    class b { constructor() { result += 2; } [\"constructor\"]() { result += 1; }; }
     var bInst = new b();
     assertEq(result, 5);
     bInst.constructor();
@@ -42,13 +45,13 @@
     var result = 0;
     // Regardless of order, the constructor is overridden by any CPN, because it's
     // processed seperately.
-    let a = class { ["constructor"]() { result += 1; }; constructor() { result += 2; } };
+    let a = class { [\"constructor\"]() { result += 1; }; constructor() { result += 2; } };
     var aInst = new a();
     assertEq(result, 2);
     aInst.constructor();
     assertEq(result, 3);
 
-    let b = class { constructor() { result += 2; } ["constructor"]() { result += 1; }; };
+    let b = class { constructor() { result += 2; } [\"constructor\"]() { result += 1; }; };
     var bInst = new b();
     assertEq(result, 5);
     bInst.constructor();
@@ -75,6 +78,10 @@
     new f().method();
     assertEq(result, 12);
 }
+`;
+
+if (classesEnabled())
+    eval(test);
 
 if (typeof reportCompare === "function")
     reportCompare(0, 0, "OK");

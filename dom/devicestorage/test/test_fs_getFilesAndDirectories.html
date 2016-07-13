@@ -21,7 +21,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
-devicestorage_setup(function () {
+devicestorage_setup();
 SimpleTest.requestCompleteLog();
 
 // The root directory object.
@@ -62,12 +62,12 @@ function checkContents1(contents) {
 
 function checkContents2(contents) {
   is(contents[0].name, "c.png", "'sub2' should contain 'c.png'");
-  SimpleTest.finish();
+  devicestorage_cleanup();
 }
 
 function handleError(e) {
   ok(false, "Should not arrive at handleError! Error: " + e.name);
-  SimpleTest.finish();
+  devicestorage_cleanup();
 }
 
 var gStorage = navigator.getDeviceStorage("pictures");
@@ -87,12 +87,11 @@ createTestFiles(gStorage, ["sub/a.png", "sub/b.png", "sub/sub2/c.png", "sub/sub3
   runTests();
 }, function() {
   ok(false, "Failed to created test files.");
-  SimpleTest.finish();
-});
-
+  devicestorage_cleanup();
 });
 
 </script>
 </pre>
 </body>
 </html>
+

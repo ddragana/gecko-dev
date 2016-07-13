@@ -139,10 +139,10 @@ function isArguments(value) {
 }
 exports.isArguments = isArguments;
 
-var isMap = value => Object.prototype.toString.call(value) === "[object Map]"
+let isMap = value => Object.prototype.toString.call(value) === "[object Map]"
 exports.isMap = isMap;
 
-var isSet = value => Object.prototype.toString.call(value) === "[object Set]"
+let isSet = value => Object.prototype.toString.call(value) === "[object Set]"
 exports.isSet = isSet;
 
 /**
@@ -214,20 +214,6 @@ function isJSON(value, visited) {
 exports.isJSON = function (value) {
   return isJSON(value);
 };
-
-/**
- * Returns `true` if `value` is JSONable
- */
-const isJSONable = (value) => {
-  try {
-    JSON.parse(JSON.stringify(value));
-  }
-  catch (e) {
-    return false;
-  }
-  return true;
-};
-exports.isJSONable = isJSONable;
 
 /**
  * Returns if `value` is an instance of a given `Type`. This is exactly same as

@@ -3,12 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #sanitizeDurationChoice {
-  margin-inline-end: 0;
+  -moz-margin-end: 0;
 }
 
 /* Align the duration label with the warning box and item list */
 #sanitizeDurationLabel {
-  margin-inline-start: 3px;
+  -moz-margin-start: 3px;
 }
 
 
@@ -56,15 +56,15 @@
   padding: 0;
   margin-top: 6px;
   margin-bottom: 6px;
-  margin-inline-start: -6px;
-  margin-inline-end: 0;
+  -moz-margin-start: -6px;
+  -moz-margin-end: 0;
 }
 
 .expander-up,
 .expander-down {
   min-width: 0;
   padding: 2px 0;
-  padding-inline-start: 2px;
+  -moz-padding-start: 2px;
 }
 
 .expander-up {
@@ -86,8 +86,8 @@
 
 /* Make the item list the same width as the warning box */
 #itemList {
-  margin-inline-start: 0;
-  margin-inline-end: 0;
+  -moz-margin-start: 0;
+  -moz-margin-end: 0;
 }
 
 /* Without this a useless scrollbar appears in the listbox when its rows
@@ -100,8 +100,8 @@
 
 /* Align the last dialog button with the end of the warning box */
 .prefWindow-dlgbuttons {
-  margin-inline-end: 0;
+  -moz-margin-end: 0;
 }
 .dialog-button[dlgtype="accept"] {
-  margin-inline-end: 0;
+  -moz-margin-end: 0;
 }

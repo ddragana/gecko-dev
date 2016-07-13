@@ -17,9 +17,11 @@ class gfxImageSurface;
 
 class gfxQuartzSurface : public gfxASurface {
 public:
-    gfxQuartzSurface(const mozilla::gfx::IntSize&, gfxImageFormat format);
+    gfxQuartzSurface(const gfxSize& size, gfxImageFormat format);
+    gfxQuartzSurface(CGContextRef context, const gfxSize& size);
     gfxQuartzSurface(CGContextRef context, const mozilla::gfx::IntSize& size);
     gfxQuartzSurface(cairo_surface_t *csurf, const mozilla::gfx::IntSize& aSize);
+    gfxQuartzSurface(unsigned char *data, const gfxSize& size, long stride, gfxImageFormat format);
     gfxQuartzSurface(unsigned char *data, const mozilla::gfx::IntSize& size, long stride, gfxImageFormat format);
 
     virtual ~gfxQuartzSurface();
@@ -31,13 +33,15 @@ public:
 
     CGContextRef GetCGContext() { return mCGContext; }
 
+    CGContextRef GetCGContextWithClip(gfxContext *ctx);
+
     already_AddRefed<gfxImageSurface> GetAsImageSurface();
 
 protected:
     void MakeInvalid();
 
     CGContextRef mCGContext;
-    mozilla::gfx::IntSize mSize;
+    gfxSize      mSize;
 };
 
 #endif /* GFX_QUARTZSURFACE_H */

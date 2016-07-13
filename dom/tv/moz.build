@@ -5,6 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXPORTS.mozilla.dom += [
+    'FakeTVService.h',
     'TVChannel.h',
     'TVListeners.h',
     'TVManager.h',
@@ -19,6 +20,7 @@ EXPORTS.mozilla.dom += [
 ]
 
 UNIFIED_SOURCES += [
+    'FakeTVService.cpp',
     'TVChannel.cpp',
     'TVListeners.cpp',
     'TVManager.cpp',
@@ -32,12 +34,6 @@ UNIFIED_SOURCES += [
 
 XPIDL_SOURCES += [
     'nsITVService.idl',
-    'nsITVSimulatorService.idl',
-]
-
-EXTRA_COMPONENTS += [
-    'TVSimulatorService.js',
-    'TVSimulatorService.manifest',
 ]
 
 XPIDL_MODULE = 'dom_tv'
@@ -49,3 +45,5 @@ XPCSHELL_TESTS_MANIFESTS += ['test/xpcshell/xpcshell.ini']
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
+
+FAIL_ON_WARNINGS = True

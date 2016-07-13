@@ -19,16 +19,13 @@
 struct JSContext;
 
 //
-// set MOZ_LOG=UDPSocket:5
+// set NSPR_LOG_MODULES=UDPSocket:5
 //
+extern PRLogModuleInfo *gUDPSocketLog;
+#define UDPSOCKET_LOG(args)     MOZ_LOG(gUDPSocketLog, mozilla::LogLevel::Debug, args)
+#define UDPSOCKET_LOG_ENABLED() MOZ_LOG_TEST(gUDPSocketLog, mozilla::LogLevel::Debug)
 
 namespace mozilla {
-namespace net {
-extern LazyLogModule gUDPSocketLog;
-#define UDPSOCKET_LOG(args)     MOZ_LOG(gUDPSocketLog, LogLevel::Debug, args)
-#define UDPSOCKET_LOG_ENABLED() MOZ_LOG_TEST(gUDPSocketLog, LogLevel::Debug)
-} // namespace net
-
 namespace dom {
 
 struct UDPOptions;
@@ -46,7 +43,7 @@ public:
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
 
 public:
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return GetOwner();
@@ -162,7 +159,7 @@ private:
     UDPSocket* mSocket;
   };
 
-  UDPSocket(nsPIDOMWindowInner* aOwner,
+  UDPSocket(nsPIDOMWindow* aOwner,
             const nsCString& aRemoteAddress,
             const Nullable<uint16_t>& aRemotePort);
 
@@ -205,12 +202,12 @@ private:
   bool mAddressReuse;
   bool mLoopback;
   SocketReadyState mReadyState;
-  RefPtr<Promise> mOpened;
-  RefPtr<Promise> mClosed;
+  nsRefPtr<Promise> mOpened;
+  nsRefPtr<Promise> mClosed;
 
   nsCOMPtr<nsIUDPSocket> mSocket;
   nsCOMPtr<nsIUDPSocketChild> mSocketChild;
-  RefPtr<ListenerProxy> mListenerProxy;
+  nsRefPtr<ListenerProxy> mListenerProxy;
 
   struct MulticastCommand {
     enum CommandType { Join, Leave };

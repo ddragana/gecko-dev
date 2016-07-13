@@ -27,6 +27,7 @@ public:
 
 private:
   static void* sLink;
+  static nsrefcnt sRefCount;
 
   static enum LinkStatus {
     LinkStatus_INIT = 0,

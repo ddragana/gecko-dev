@@ -334,7 +334,7 @@ RoundedPRNow() {
 void
 ForceWALCheckpoint()
 {
-  RefPtr<Database> DB = Database::GetDatabase();
+  nsRefPtr<Database> DB = Database::GetDatabase();
   if (DB) {
     nsCOMPtr<mozIStorageAsyncStatement> stmt = DB->GetAsyncStatement(
       "pragma wal_checkpoint "
@@ -382,7 +382,7 @@ PlacesEvent::Notify()
 
 NS_IMPL_ISUPPORTS_INHERITED0(
   PlacesEvent
-, Runnable
+, nsRunnable
 )
 
 ////////////////////////////////////////////////////////////////////////////////

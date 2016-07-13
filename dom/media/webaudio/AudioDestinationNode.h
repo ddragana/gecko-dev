@@ -30,22 +30,22 @@ public:
                        uint32_t aLength = 0,
                        float aSampleRate = 0.0f);
 
-  void DestroyMediaStream() override;
+  virtual void DestroyMediaStream() override;
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioDestinationNode, AudioNode)
   NS_DECL_NSIAUDIOCHANNELAGENTCALLBACK
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  uint16_t NumberOfOutputs() const final override
+  virtual uint16_t NumberOfOutputs() const final override
   {
     return 0;
   }
 
   uint32_t MaxChannelCount() const;
-  void SetChannelCount(uint32_t aChannelCount,
-                       ErrorResult& aRv) override;
+  virtual void SetChannelCount(uint32_t aChannelCount,
+                               ErrorResult& aRv) override;
 
   // Returns the stream or null after unlink.
   AudioNodeStream* Stream() { return mStream; }
@@ -53,59 +53,64 @@ public:
   void Mute();
   void Unmute();
 
-  void Suspend();
-  void Resume();
-
   void StartRendering(Promise* aPromise);
 
   void OfflineShutdown();
 
   AudioChannel MozAudioChannelType() const;
+  void SetMozAudioChannelType(AudioChannel aValue, ErrorResult& aRv);
 
-  void NotifyMainThreadStreamFinished() override;
+  virtual void NotifyMainThreadStreamFinished() override;
   void FireOfflineCompletionEvent();
 
-  nsresult CreateAudioChannelAgent();
+  // An amount that should be added to the MediaStream's current time to
+  // get the AudioContext.currentTime.
+  double ExtraCurrentTime();
+
+  // When aIsOnlyNode is true, this is the only node for the AudioContext.
+  void SetIsOnlyNodeForContext(bool aIsOnlyNode);
+
+  void CreateAudioChannelAgent();
   void DestroyAudioChannelAgent();
 
-  const char* NodeType() const override
+  virtual const char* NodeType() const override
   {
     return "AudioDestinationNode";
   }
 
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
   void InputMuted(bool aInputMuted);
   void ResolvePromise(AudioBuffer* aRenderedBuffer);
-
-  unsigned long Length()
-  {
-    MOZ_ASSERT(mIsOffline);
-    return mFramesToProduce;
-  }
 
 protected:
   virtual ~AudioDestinationNode();
 
 private:
-  void SetMozAudioChannelType(AudioChannel aValue, ErrorResult& aRv);
   bool CheckAudioChannelPermissions(AudioChannel aValue);
+
+  void SetCanPlay(float aVolume, bool aMuted);
+
+  void NotifyStableState();
+  void ScheduleStableStateNotification();
 
   SelfReference<AudioDestinationNode> mOfflineRenderingRef;
   uint32_t mFramesToProduce;
 
   nsCOMPtr<nsIAudioChannelAgent> mAudioChannelAgent;
-  RefPtr<MediaInputPort> mCaptureStreamPort;
 
-  RefPtr<Promise> mOfflineRenderingPromise;
+  nsRefPtr<Promise> mOfflineRenderingPromise;
 
   // Audio Channel Type.
   AudioChannel mAudioChannel;
   bool mIsOffline;
-  bool mAudioChannelSuspended;
+  bool mAudioChannelAgentPlaying;
 
-  bool mCaptured;
+  TimeStamp mStartedBlockingDueToBeingOnlyNode;
+  double mExtraCurrentTime;
+  double mExtraCurrentTimeSinceLastStartedBlocking;
+  bool mExtraCurrentTimeUpdatedSinceLastStableState;
 };
 
 } // namespace dom

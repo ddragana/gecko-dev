@@ -9,6 +9,7 @@
  */
 
 #include "nsDOMTokenList.h"
+
 #include "nsAttrValue.h"
 #include "nsContentUtils.h"
 #include "nsError.h"
@@ -19,11 +20,9 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsDOMTokenList::nsDOMTokenList(Element* aElement, nsIAtom* aAttrAtom,
-                               const DOMTokenListSupportedTokenArray aSupportedTokens)
+nsDOMTokenList::nsDOMTokenList(Element* aElement, nsIAtom* aAttrAtom)
   : mElement(aElement),
-    mAttrAtom(aAttrAtom),
-    mSupportedTokens(aSupportedTokens)
+    mAttrAtom(aAttrAtom)
 {
   // We don't add a reference to our element. If it goes away,
   // we'll be told to drop our reference
@@ -75,16 +74,6 @@ nsDOMTokenList::IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aResult)
   }
 }
 
-void
-nsDOMTokenList::SetValue(const nsAString& aValue, ErrorResult& rv)
-{
-  if (!mElement) {
-    return;
-  }
-
-  rv = mElement->SetAttr(kNameSpaceID_None, mAttrAtom, aValue, true);
-}
-
 nsresult
 nsDOMTokenList::CheckToken(const nsAString& aStr)
 {
@@ -119,8 +108,13 @@ nsDOMTokenList::CheckTokens(const nsTArray<nsString>& aTokens)
 }
 
 bool
-nsDOMTokenList::Contains(const nsAString& aToken)
+nsDOMTokenList::Contains(const nsAString& aToken, ErrorResult& aError)
 {
+  aError = CheckToken(aToken);
+  if (aError.Failed()) {
+    return false;
+  }
+
   const nsAttrValue* attr = GetParsedAttr();
   return attr && attr->Contains(aToken);
 }
@@ -140,7 +134,7 @@ nsDOMTokenList::AddInternal(const nsAttrValue* aAttr,
   }
 
   bool oneWasAdded = false;
-  AutoTArray<nsString, 10> addedClasses;
+  nsAutoTArray<nsString, 10> addedClasses;
 
   for (uint32_t i = 0, l = aTokens.Length(); i < l; ++i) {
     const nsString& aToken = aTokens[i];
@@ -179,9 +173,9 @@ nsDOMTokenList::Add(const nsTArray<nsString>& aTokens, ErrorResult& aError)
 }
 
 void
-nsDOMTokenList::Add(const nsAString& aToken, ErrorResult& aError)
+nsDOMTokenList::Add(const nsAString& aToken, mozilla::ErrorResult& aError)
 {
-  AutoTArray<nsString, 1> tokens;
+  nsAutoTArray<nsString, 1> tokens;
   tokens.AppendElement(aToken);
   Add(tokens, aError);
 }
@@ -265,9 +259,9 @@ nsDOMTokenList::Remove(const nsTArray<nsString>& aTokens, ErrorResult& aError)
 }
 
 void
-nsDOMTokenList::Remove(const nsAString& aToken, ErrorResult& aError)
+nsDOMTokenList::Remove(const nsAString& aToken, mozilla::ErrorResult& aError)
 {
-  AutoTArray<nsString, 1> tokens;
+  nsAutoTArray<nsString, 1> tokens;
   tokens.AppendElement(aToken);
   Remove(tokens, aError);
 }
@@ -287,7 +281,7 @@ nsDOMTokenList::Toggle(const nsAString& aToken,
   const bool forceOff = aForce.WasPassed() && !aForce.Value();
 
   bool isPresent = attr && attr->Contains(aToken);
-  AutoTArray<nsString, 1> tokens;
+  nsAutoTArray<nsString, 1> tokens;
   (*tokens.AppendElement()).Rebind(aToken.Data(), aToken.Length());
 
   if (isPresent) {
@@ -303,65 +297,6 @@ nsDOMTokenList::Toggle(const nsAString& aToken,
   }
 
   return isPresent;
-}
-
-void
-nsDOMTokenList::Replace(const nsAString& aToken,
-                        const nsAString& aNewToken,
-                        ErrorResult& aError)
-{
-  // Doing this here instead of using `CheckToken` because if aToken had invalid
-  // characters, and aNewToken is empty, the returned error should be a
-  // SyntaxError, not an InvalidCharacterError.
-  if (aNewToken.IsEmpty()) {
-    aError.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-    return;
-  }
-
-  aError = CheckToken(aToken);
-  if (aError.Failed()) {
-    return;
-  }
-
-  aError = CheckToken(aNewToken);
-  if (aError.Failed()) {
-    return;
-  }
-
-  const nsAttrValue* attr = GetParsedAttr();
-  if (!attr || !attr->Contains(aToken)) {
-    return;
-  }
-
-  AutoTArray<nsString, 1> tokens;
-
-  tokens.AppendElement(aToken);
-  RemoveInternal(attr, tokens);
-
-  tokens[0] = aNewToken;
-  AddInternal(attr, tokens);
-}
-
-bool
-nsDOMTokenList::Supports(const nsAString& aToken,
-                         ErrorResult& aError)
-{
-  if (!mSupportedTokens) {
-    aError.ThrowTypeError<MSG_TOKENLIST_NO_SUPPORTED_TOKENS>(
-      mElement->LocalName(),
-      nsDependentAtomString(mAttrAtom));
-    return false;
-  }
-
-  for (DOMTokenListSupportedToken* supportedToken = mSupportedTokens;
-       *supportedToken;
-       ++supportedToken) {
-    if (aToken.LowerCaseEqualsASCII(*supportedToken)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 void

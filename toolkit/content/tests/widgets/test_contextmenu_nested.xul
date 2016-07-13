@@ -40,7 +40,7 @@ var popupTests = [
 {
   testname: "open outer popup",
   events: [ "popupshowing outermain", "popupshown outermain" ],
-  test: () => synthesizeMouse($("popuparea"), 4, 4, {}),
+  test: function () synthesizeMouse($("popuparea"), 4, 4, {}),
   result: function (testname) {
     is($("outermain").triggerNode, $("popuparea"), testname);
     is(document.popupNode, $("popuparea"), testname + " document.popupNode");
@@ -64,7 +64,7 @@ var popupTests = [
   testname: "open outer context",
   condition: function() { return (navigator.platform.indexOf("Mac") == -1); },
   events: [ "popupshowing outercontext", "popupshown outercontext" ],
-  test: () => synthesizeMouse($("innermenu"), 4, 4, { type: "contextmenu", button: 2 }),
+  test: function () synthesizeMouse($("innermenu"), 4, 4, { type: "contextmenu", button: 2 }),
   result: function (testname) {
     is($("outermain").triggerNode, $("popuparea"), testname + " outer");
     is($("innermain").triggerNode, $("popuparea"), testname + " inner");
@@ -98,7 +98,7 @@ var popupTests = [
             "DOMMenuInactive innercontext",
             "DOMMenuItemInactive outercontextmenu", "DOMMenuItemInactive outercontextmenu",
             "DOMMenuInactive outercontext" ],
-  test: () => $("outercontext").hidePopup(),
+  test: function () $("outercontext").hidePopup(),
   result: function (testname) {
     is($("outermain").triggerNode, $("popuparea"), testname + " outer");
     is($("innermain").triggerNode, $("popuparea"), testname + " inner");
@@ -115,7 +115,7 @@ var popupTests = [
             "DOMMenuItemInactive outermenu", "DOMMenuItemInactive outermenu",
             "DOMMenuInactive outermain" ],
 
-  test: () => $("outermain").hidePopup(),
+  test: function () $("outermain").hidePopup(),
   result: function (testname) {
     is($("outermain").triggerNode, null, testname + " outer");
     is($("innermain").triggerNode, null, testname + " inner");
@@ -126,9 +126,7 @@ var popupTests = [
 }
 ];
 
-SimpleTest.waitForFocus(function runTest() {
-  return startPopupTests(popupTests);
-});
+SimpleTest.waitForFocus(function runTest() startPopupTests(popupTests));
 
 ]]>
 </script>

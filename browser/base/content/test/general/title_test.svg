@@ -22,7 +22,7 @@
     This contains only &lt;desc&gt;
     <desc>This is a desc</desc>
   </text>
-  <text id="text3" x="10px" y="128px" font-size="24px" title="ignored for SVG">
+  <text id="text3" x="10px" y="128px" font-size="24px">
     This contains nothing.
   </text>
   <a id="link1" xlink:href="#">

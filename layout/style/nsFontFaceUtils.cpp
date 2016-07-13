@@ -21,7 +21,7 @@ StyleContextContainsFont(nsStyleContext* aStyleContext,
   // if the font is null, simply check to see whether fontlist includes
   // downloadable fonts
   if (!aFont) {
-    const mozilla::FontFamilyList& fontlist =
+    const FontFamilyList& fontlist =
       aStyleContext->StyleFont()->mFont.fontlist;
     return aUserFontSet->ContainsUserFontSetFonts(fontlist);
   }
@@ -34,8 +34,10 @@ StyleContextContainsFont(nsStyleContext* aStyleContext,
 
   // family name is in the fontlist, check to see if the font group
   // associated with the frame includes the specific userfont
-  RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForStyleContext(aStyleContext, 1.0f);
+  nsRefPtr<nsFontMetrics> fm;
+  nsLayoutUtils::GetFontMetricsForStyleContext(aStyleContext,
+                                               getter_AddRefs(fm),
+                                               1.0f);
 
   if (fm->GetThebesFontGroup()->ContainsUserFont(aFont)) {
     return true;
@@ -105,7 +107,7 @@ ScheduleReflow(nsIPresShell* aShell, nsIFrame* aFrame)
 nsFontFaceUtils::MarkDirtyForFontChange(nsIFrame* aSubtreeRoot,
                                         const gfxUserFontEntry* aFont)
 {
-  AutoTArray<nsIFrame*, 4> subtrees;
+  nsAutoTArray<nsIFrame*, 4> subtrees;
   subtrees.AppendElement(aSubtreeRoot);
 
   nsIPresShell* ps = aSubtreeRoot->PresContext()->PresShell();
@@ -117,7 +119,7 @@ nsFontFaceUtils::MarkDirtyForFontChange(nsIFrame* aSubtreeRoot,
     subtrees.RemoveElementAt(subtrees.Length() - 1);
 
     // Check all descendants to see if they use the font
-    AutoTArray<nsIFrame*, 32> stack;
+    nsAutoTArray<nsIFrame*, 32> stack;
     stack.AppendElement(subtreeRoot);
 
     do {

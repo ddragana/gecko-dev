@@ -4,13 +4,8 @@
 <script>
 var ITERATIONS = 200;
 
-function stoptest (evt)
+function stoptest ()
 {
-   if (evt) {
-     // Note we reset 'src' to release decoder resources and cubeb streams to
-     // prevent OOM or OpenCubeb() failures.
-     evt.target.src = "";
-   }
    document.documentElement.removeAttribute("class");
 }
 

@@ -12,14 +12,11 @@
 
 #include "nsStyleLinkElement.h"
 
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/CSSStyleSheet.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FragmentOrElement.h"
-#include "mozilla/dom/HTMLLinkElement.h"
 #include "mozilla/dom/ShadowRoot.h"
-#include "mozilla/dom/SRILogHelper.h"
 #include "mozilla/Preferences.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
@@ -63,7 +60,7 @@ nsStyleLinkElement::Traverse(nsCycleCollectionTraversalCallback &cb)
 }
 
 NS_IMETHODIMP 
-nsStyleLinkElement::SetStyleSheet(StyleSheetHandle aStyleSheet)
+nsStyleLinkElement::SetStyleSheet(CSSStyleSheet* aStyleSheet)
 {
   if (mStyleSheet) {
     mStyleSheet->SetOwningNode(nullptr);
@@ -80,7 +77,7 @@ nsStyleLinkElement::SetStyleSheet(StyleSheetHandle aStyleSheet)
   return NS_OK;
 }
 
-NS_IMETHODIMP_(StyleSheetHandle)
+NS_IMETHODIMP_(CSSStyleSheet*)
 nsStyleLinkElement::GetStyleSheet()
 {
   return mStyleSheet;
@@ -122,12 +119,6 @@ nsStyleLinkElement::SetLineNumber(uint32_t aLineNumber)
   mLineNumber = aLineNumber;
 }
 
-/* virtual */ uint32_t
-nsStyleLinkElement::GetLineNumber()
-{
-  return mLineNumber;
-}
-
 /* static */ bool
 nsStyleLinkElement::IsImportEnabled()
 {
@@ -145,8 +136,7 @@ nsStyleLinkElement::IsImportEnabled()
 }
 
 static uint32_t ToLinkMask(const nsAString& aLink, nsIPrincipal* aPrincipal)
-{
-  // Keep this in sync with sRelValues in HTMLLinkElement.cpp
+{ 
   if (aLink.EqualsLiteral("prefetch"))
     return nsStyleLinkElement::ePREFETCH;
   else if (aLink.EqualsLiteral("dns-prefetch"))
@@ -215,7 +205,7 @@ nsStyleLinkElement::UpdateStyleSheet(nsICSSLoaderObserver* aObserver,
     nsCOMPtr<nsIDocument> doc = thisContent->IsInShadowTree() ?
       thisContent->OwnerDoc() : thisContent->GetUncomposedDoc();
     if (doc && doc->CSSLoader()->GetEnabled() &&
-        mStyleSheet && !mStyleSheet->IsInline()) {
+        mStyleSheet && mStyleSheet->GetOriginalURI()) {
       doc->CSSLoader()->ObsoleteSheet(mStyleSheet->GetOriginalURI());
     }
   }
@@ -282,6 +272,17 @@ UpdateIsElementInStyleScopeFlagOnSubtree(Element* aElement)
   }
 }
 
+static Element*
+GetScopeElement(nsIStyleSheet* aSheet)
+{
+  nsRefPtr<CSSStyleSheet> cssStyleSheet = do_QueryObject(aSheet);
+  if (!cssStyleSheet) {
+    return nullptr;
+  }
+
+  return cssStyleSheet->GetScopeElement();
+}
+
 nsresult
 nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
                                        ShadowRoot* aOldShadowRoot,
@@ -313,15 +314,7 @@ nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
     return NS_OK;
   }
 
-  // XXXheycam ServoStyleSheets do not support <style scoped>.
-  Element* oldScopeElement = nullptr;
-  if (mStyleSheet) {
-    if (mStyleSheet->IsServo()) {
-      NS_ERROR("stylo: ServoStyleSheets don't support <style scoped>");
-    } else {
-      oldScopeElement = mStyleSheet->AsGecko()->GetScopeElement();
-    }
-  }
+  Element* oldScopeElement = GetScopeElement(mStyleSheet);
 
   if (mStyleSheet && (aOldDocument || aOldShadowRoot)) {
     MOZ_ASSERT(!(aOldDocument && aOldShadowRoot),
@@ -428,30 +421,13 @@ nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
                       scopeElement, aObserver, &doneLoading, &isAlternate);
   }
   else {
-    nsAutoString integrity;
-    thisContent->GetAttr(kNameSpaceID_None, nsGkAtoms::integrity, integrity);
-    if (!integrity.IsEmpty()) {
-      MOZ_LOG(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug,
-              ("nsStyleLinkElement::DoUpdateStyleSheet, integrity=%s",
-               NS_ConvertUTF16toUTF8(integrity).get()));
-    }
-
-    // if referrer attributes are enabled in preferences, load the link's referrer
-    // attribute. If the link does not provide a referrer attribute, ignore this
-    // and use the document's referrer policy
-
-    net::ReferrerPolicy referrerPolicy = GetLinkReferrerPolicy();
-    if (referrerPolicy == net::RP_Unset) {
-      referrerPolicy = doc->GetReferrerPolicy();
-    }
-
     // XXXbz clone the URI here to work around content policies modifying URIs.
     nsCOMPtr<nsIURI> clonedURI;
     uri->Clone(getter_AddRefs(clonedURI));
     NS_ENSURE_TRUE(clonedURI, NS_ERROR_OUT_OF_MEMORY);
     rv = doc->CSSLoader()->
       LoadStyleLink(thisContent, clonedURI, title, media, isAlternate,
-                    GetCORSMode(), referrerPolicy, integrity,
+                    GetCORSMode(), doc->GetReferrerPolicy(),
                     aObserver, &isAlternate);
     if (NS_FAILED(rv)) {
       // Don't propagate LoadStyleLink() errors further than this, since some
@@ -478,18 +454,10 @@ nsStyleLinkElement::UpdateStyleSheetScopedness(bool aIsNowScoped)
     return;
   }
 
-  if (mStyleSheet->IsServo()) {
-    // XXXheycam ServoStyleSheets don't support <style scoped>.
-    NS_ERROR("stylo: ServoStyleSheets don't support <style scoped>");
-    return;
-  }
-
-  CSSStyleSheet* sheet = mStyleSheet->AsGecko();
-
   nsCOMPtr<nsIContent> thisContent;
   CallQueryInterface(this, getter_AddRefs(thisContent));
 
-  Element* oldScopeElement = sheet->GetScopeElement();
+  Element* oldScopeElement = mStyleSheet->GetScopeElement();
   Element* newScopeElement = aIsNowScoped ?
                                thisContent->GetParentElement() :
                                nullptr;
@@ -504,14 +472,14 @@ nsStyleLinkElement::UpdateStyleSheetScopedness(bool aIsNowScoped)
     ShadowRoot* containingShadow = thisContent->GetContainingShadow();
     containingShadow->RemoveSheet(mStyleSheet);
 
-    sheet->SetScopeElement(newScopeElement);
+    mStyleSheet->SetScopeElement(newScopeElement);
 
     containingShadow->InsertSheet(mStyleSheet, thisContent);
   } else {
     document->BeginUpdate(UPDATE_STYLE);
     document->RemoveStyleSheet(mStyleSheet);
 
-    sheet->SetScopeElement(newScopeElement);
+    mStyleSheet->SetScopeElement(newScopeElement);
 
     document->AddStyleSheet(mStyleSheet);
     document->EndUpdate(UPDATE_STYLE);

@@ -59,8 +59,8 @@ private:
     const gfxQuartzNativeDrawing& operator=(const gfxQuartzNativeDrawing&) = delete;
 
     // Final destination context
-    RefPtr<DrawTarget> mDrawTarget;
-    RefPtr<DrawTarget> mTempDrawTarget;
+    mozilla::RefPtr<DrawTarget> mDrawTarget;
+    mozilla::RefPtr<DrawTarget> mTempDrawTarget;
     mozilla::gfx::BorrowedCGContext mBorrowedContext;
     mozilla::gfx::Rect mNativeRect;
 

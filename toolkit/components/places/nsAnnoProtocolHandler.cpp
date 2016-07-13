@@ -42,13 +42,18 @@ using namespace mozilla::places;
  */
 static
 nsresult
-GetDefaultIcon(nsILoadInfo *aLoadInfo, nsIChannel **aChannel)
+GetDefaultIcon(nsIChannel **aChannel)
 {
   nsCOMPtr<nsIURI> defaultIconURI;
   nsresult rv = NS_NewURI(getter_AddRefs(defaultIconURI),
                           NS_LITERAL_CSTRING(FAVICON_DEFAULT_URL));
   NS_ENSURE_SUCCESS(rv, rv);
-  return NS_NewChannelInternal(aChannel, defaultIconURI, aLoadInfo);
+
+  return NS_NewChannel(aChannel,
+                       defaultIconURI,
+                       nsContentUtils::GetSystemPrincipal(),
+                       nsILoadInfo::SEC_NORMAL,
+                       nsIContentPolicy::TYPE_IMAGE);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -151,15 +156,11 @@ public:
                                              mOutputStream, this);
     NS_ENSURE_SUCCESS(rv, mOutputStream->Close());
 
-    // we should pass the loadInfo of the original channel along
-    // to the new channel. Note that mChannel can not be null,
-    // constructor checks that.
-    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
     nsCOMPtr<nsIChannel> newChannel;
-    rv = GetDefaultIcon(loadInfo, getter_AddRefs(newChannel));
+    rv = GetDefaultIcon(getter_AddRefs(newChannel));
     NS_ENSURE_SUCCESS(rv, mOutputStream->Close());
 
-    rv = newChannel->AsyncOpen2(listener);
+    rv = newChannel->AsyncOpen(listener, nullptr);
     NS_ENSURE_SUCCESS(rv, mOutputStream->Close());
 
     return NS_OK;
@@ -336,8 +337,9 @@ nsAnnoProtocolHandler::NewFaviconChannel(nsIURI *aURI, nsIURI *aAnnotationURI,
   nsCOMPtr<nsIOutputStream> outputStream;
   nsresult rv = NS_NewPipe(getter_AddRefs(inputStream),
                            getter_AddRefs(outputStream),
-                           0, nsIFaviconService::MAX_FAVICON_SIZE, true, true);
-  NS_ENSURE_SUCCESS(rv, GetDefaultIcon(aLoadInfo, _channel));
+                           MAX_FAVICON_SIZE, MAX_FAVICON_SIZE, true,
+                           true);
+  NS_ENSURE_SUCCESS(rv, GetDefaultIcon(_channel));
 
   // Create our channel.  We'll call SetContentType with the right type when
   // we know what it actually is.
@@ -348,17 +350,17 @@ nsAnnoProtocolHandler::NewFaviconChannel(nsIURI *aURI, nsIURI *aAnnotationURI,
                                         EmptyCString(), // aContentType
                                         EmptyCString(), // aContentCharset
                                         aLoadInfo);
-  NS_ENSURE_SUCCESS(rv, GetDefaultIcon(aLoadInfo, _channel));
+  NS_ENSURE_SUCCESS(rv, GetDefaultIcon(_channel));
 
   // Now we go ahead and get our data asynchronously for the favicon.
   nsCOMPtr<mozIStorageStatementCallback> callback =
     new faviconAsyncLoader(channel, outputStream);
-  NS_ENSURE_TRUE(callback, GetDefaultIcon(aLoadInfo, _channel));
+  NS_ENSURE_TRUE(callback, GetDefaultIcon(_channel));
   nsFaviconService* faviconService = nsFaviconService::GetFaviconService();
-  NS_ENSURE_TRUE(faviconService, GetDefaultIcon(aLoadInfo, _channel));
+  NS_ENSURE_TRUE(faviconService, GetDefaultIcon(_channel));
 
   rv = faviconService->GetFaviconDataAsync(aAnnotationURI, callback);
-  NS_ENSURE_SUCCESS(rv, GetDefaultIcon(aLoadInfo, _channel));
+  NS_ENSURE_SUCCESS(rv, GetDefaultIcon(_channel));
 
   channel.forget(_channel);
   return NS_OK;

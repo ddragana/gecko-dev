@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -9,51 +7,32 @@
 #include "base/message_loop.h"
 #include "base/object_watcher.h"
 #include "base/sys_info.h"
+#include "chrome/common/env_vars.h"
+#include "chrome/common/result_codes.h"
 
 // Maximum amount of time (in milliseconds) to wait for the process to exit.
 static const int kWaitInterval = 2000;
 
 namespace {
 
-class ChildReaper : public mozilla::Runnable,
-                    public base::ObjectWatcher::Delegate,
-                    public MessageLoop::DestructionObserver {
+class TimerExpiredTask : public Task, public base::ObjectWatcher::Delegate {
  public:
-  explicit ChildReaper(base::ProcessHandle process, bool force)
-   : process_(process), force_(force) {
+  explicit TimerExpiredTask(base::ProcessHandle process) : process_(process) {
     watcher_.StartWatching(process_, this);
   }
 
-  virtual ~ChildReaper() {
+  virtual ~TimerExpiredTask() {
     if (process_) {
       KillProcess();
       DCHECK(!process_) << "Make sure to close the handle.";
     }
   }
 
-  // MessageLoop::DestructionObserver -----------------------------------------
-
-  virtual void WillDestroyCurrentMessageLoop()
-  {
-    MOZ_ASSERT(!force_);
-    if (process_) {
-      WaitForSingleObject(process_, INFINITE);
-      base::CloseProcessHandle(process_);
-      process_ = 0;
-
-      MessageLoop::current()->RemoveDestructionObserver(this);
-      delete this;
-    }
-  }
-
   // Task ---------------------------------------------------------------------
 
-  NS_IMETHOD Run() override {
-    MOZ_ASSERT(force_);
-    if (process_) {
+  virtual void Run() {
+    if (process_)
       KillProcess();
-    }
-    return NS_OK;
   }
 
   // MessageLoop::Watcher -----------------------------------------------------
@@ -64,23 +43,25 @@ class ChildReaper : public mozilla::Runnable,
     watcher_.StopWatching();
 
     base::CloseProcessHandle(process_);
-    process_ = 0;
-
-    if (!force_) {
-      MessageLoop::current()->RemoveDestructionObserver(this);
-      delete this;
-    }
+    process_ = NULL;
   }
 
  private:
   void KillProcess() {
-    MOZ_ASSERT(force_);
+    if (base::SysInfo::HasEnvVar(env_vars::kHeadless)) {
+     // If running the distributed tests, give the renderer a little time
+     // to figure out that the channel is shutdown and unwind.
+     if (WaitForSingleObject(process_, kWaitInterval) == WAIT_OBJECT_0) {
+       OnObjectSignaled(process_);
+       return;
+     }
+    }
 
     // OK, time to get frisky.  We don't actually care when the process
     // terminates.  We just care that it eventually terminates, and that's what
     // TerminateProcess should do for us. Don't check for the result code since
     // it fails quite often. This should be investigated eventually.
-    TerminateProcess(process_, base::PROCESS_END_PROCESS_WAS_HUNG);
+    TerminateProcess(process_, ResultCodes::HUNG);
 
     // Now, just cleanup as if the process exited normally.
     OnObjectSignaled(process_);
@@ -91,16 +72,22 @@ class ChildReaper : public mozilla::Runnable,
 
   base::ObjectWatcher watcher_;
 
-  bool force_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(ChildReaper);
+  DISALLOW_EVIL_CONSTRUCTORS(TimerExpiredTask);
 };
 
 }  // namespace
 
 // static
-void ProcessWatcher::EnsureProcessTerminated(base::ProcessHandle process, bool force) {
+void ProcessWatcher::EnsureProcessTerminated(base::ProcessHandle process
+					     , bool force
+) {
   DCHECK(process != GetCurrentProcess());
+
+  if (!force) {
+    WaitForSingleObject(process, INFINITE);
+    base::CloseProcessHandle(process);
+    return;
+  }
 
   // If already signaled, then we are done!
   if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0) {
@@ -108,11 +95,7 @@ void ProcessWatcher::EnsureProcessTerminated(base::ProcessHandle process, bool f
     return;
   }
 
-  MessageLoopForIO* loop = MessageLoopForIO::current();
-  if (force) {
-    RefPtr<mozilla::Runnable> task = new ChildReaper(process, force);
-    loop->PostDelayedTask(task.forget(), kWaitInterval);
-  } else {
-    loop->AddDestructionObserver(new ChildReaper(process, force));
-  }
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+                                          new TimerExpiredTask(process),
+                                          kWaitInterval);
 }

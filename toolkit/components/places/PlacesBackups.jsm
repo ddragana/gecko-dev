@@ -91,9 +91,7 @@ this.PlacesBackups = {
    *  3: contents hash
    *  4: file extension
    */
-  get filenamesRegex() {
-    return filenamesRegex;
-  },
+  get filenamesRegex() filenamesRegex,
 
   get folder() {
     Deprecated.warning(
@@ -135,9 +133,7 @@ this.PlacesBackups = {
     }.bind(this));
   },
 
-  get profileRelativeFolderPath() {
-    return "bookmarkbackups";
-  },
+  get profileRelativeFolderPath() "bookmarkbackups",
 
   /**
    * Cache current backups in a sorted (by date DESC) array.
@@ -173,7 +169,7 @@ this.PlacesBackups = {
     this._entries.sort((a, b) => {
       let aDate = this.getDateForFile(a);
       let bDate = this.getDateForFile(b);
-      return bDate - aDate;
+      return aDate < bDate ? 1 : aDate > bDate ? -1 : 0;
     });
     return this._entries;
   },
@@ -197,7 +193,7 @@ this.PlacesBackups = {
         // safely remove .tmp files without risking to remove ongoing backups.
         if (aEntry.name.endsWith(".tmp")) {
           OS.File.remove(aEntry.path);
-          return undefined;
+          return;
         }
 
         if (filenamesRegex.test(aEntry.name)) {
@@ -209,15 +205,13 @@ this.PlacesBackups = {
             this._backupFiles.push(filePath);
           }
         }
-
-        return undefined;
       }.bind(this));
       iterator.close();
 
       this._backupFiles.sort((a, b) => {
         let aDate = this.getDateForFile(a);
         let bDate = this.getDateForFile(b);
-        return bDate - aDate;
+        return aDate < bDate ? 1 : aDate > bDate ? -1 : 0;
       });
 
       return this._backupFiles;
@@ -455,10 +449,7 @@ this.PlacesBackups = {
         newFilenameWithMetaData = appendMetaDataToFilename(newBackupFilename,
                                                            { count: nodeCount,
                                                              hash: hash });
-      } catch (ex) {
-        if (!ex.becauseSameHash) {
-          throw ex;
-        }
+      } catch (ex if ex.becauseSameHash) {
         // The last backup already contained up-to-date information, just
         // rename it as if it was today's backup.
         this._backupFiles.shift();
@@ -517,7 +508,7 @@ this.PlacesBackups = {
    *         * index: the position in the parent
    *         * dateAdded: microseconds from the epoch
    *         * lastModified: microseconds from the epoch
-   *         * type: type of the originating node as defined in PlacesUtils
+   *         * type: type of the originating node as defined in PlacesUtils 
    *         The following properties exist only for a subset of bookmarks:
    *         * annos: array of annotations
    *         * uri: url

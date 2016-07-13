@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var CC = Components.classes;
+const CC = Components.classes;
 const CI = Components.interfaces;
 const CR = Components.results;
 const CU = Components.utils;
@@ -119,24 +119,6 @@ function OnInitialLoad()
     LogWarning("Using browser remote="+ gBrowserIsRemote +"\n");
 }
 
-function SetFailureTimeout(cb, timeout)
-{
-  var targetTime = Date.now() + timeout;
-
-  var wrapper = function() {
-    // Timeouts can fire prematurely in some cases (e.g. in chaos mode). If this
-    // happens, set another timeout for the remaining time.
-    let remainingMs = targetTime - Date.now();
-    if (remainingMs > 0) {
-      SetFailureTimeout(cb, remainingMs);
-    } else {
-      cb();
-    }
-  }
-
-  gFailureTimeout = setTimeout(wrapper, timeout);
-}
-
 function StartTestURI(type, uri, timeout)
 {
     // Reset gExplicitPendingPaintCount in case there was a timeout or
@@ -154,7 +136,7 @@ function StartTestURI(type, uri, timeout)
     if (gFailureTimeout != null) {
         SendException("program error managing timeouts\n");
     }
-    SetFailureTimeout(LoadFailed, timeout);
+    gFailureTimeout = setTimeout(LoadFailed, timeout);
 
     LoadURI(gCurrentURL);
 }
@@ -212,6 +194,13 @@ function attrOrDefault(element, attr, def) {
 function setupViewport(contentRootElement) {
     if (!contentRootElement) {
         return;
+    }
+
+    var vw = attrOrDefault(contentRootElement, "reftest-viewport-w", 0);
+    var vh = attrOrDefault(contentRootElement, "reftest-viewport-h", 0);
+    if (vw !== 0 || vh !== 0) {
+        LogInfo("Setting viewport to <w="+ vw +", h="+ vh +">");
+        windowUtils().setCSSViewport(vw, vh);
     }
 
     var sw = attrOrDefault(contentRootElement, "reftest-scrollport-w", 0);
@@ -583,12 +572,7 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
             };
             os.addObserver(flushWaiter, "apz-repaints-flushed", false);
 
-            var willSnapshot = (gCurrentTestType != TYPE_SCRIPT) &&
-                               (gCurrentTestType != TYPE_LOAD);
-            var noFlush =
-                !(contentRootElement &&
-                  contentRootElement.classList.contains("reftest-no-flush"));
-            if (noFlush && willSnapshot && windowUtils().flushApzRepaints()) {
+            if (windowUtils().flushApzRepaints()) {
                 LogInfo("MakeProgress: done requesting APZ flush");
             } else {
                 LogInfo("MakeProgress: APZ flush not required");

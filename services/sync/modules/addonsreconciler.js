@@ -17,7 +17,7 @@
 
 "use strict";
 
-var Cu = Components.utils;
+const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/util.js");
@@ -218,12 +218,11 @@ AddonsReconciler.prototype = {
       }
 
       this._addons = json.addons;
-      for (let id in this._addons) {
-        let record = this._addons[id];
+      for each (let record in this._addons) {
         record.modified = new Date(record.modified);
       }
 
-      for (let [time, change, id] of json.changes) {
+      for each (let [time, change, id] in json.changes) {
         this._changes.push([new Date(time), change, id]);
       }
 
@@ -259,7 +258,7 @@ AddonsReconciler.prototype = {
       }
     }
 
-    for (let [time, change, id] of this._changes) {
+    for each (let [time, change, id] in this._changes) {
       state.changes.push([time.getTime(), change, id]);
     }
 
@@ -351,7 +350,7 @@ AddonsReconciler.prototype = {
     AddonManager.getAllAddons(function (addons) {
       let ids = {};
 
-      for (let addon of addons) {
+      for each (let addon in addons) {
         ids[addon.id] = true;
         this.rectifyStateFromAddon(addon);
       }
@@ -374,7 +373,7 @@ AddonsReconciler.prototype = {
         }
 
         let installFound = false;
-        for (let install of installs) {
+        for each (let install in installs) {
           if (install.addon && install.addon.id == id &&
               install.state == AddonManager.STATE_INSTALLED) {
 
@@ -484,11 +483,12 @@ AddonsReconciler.prototype = {
     this._log.info("Change recorded for " + state.id);
     this._changes.push([date, change, state.id]);
 
-    for (let listener of this._listeners) {
+    for each (let listener in this._listeners) {
       try {
         listener.changeListener.call(listener, date, change, state);
       } catch (ex) {
-        this._log.warn("Exception calling change listener", ex);
+        this._log.warn("Exception calling change listener: " +
+                       Utils.exceptionStr(ex));
       }
     }
   },
@@ -554,8 +554,7 @@ AddonsReconciler.prototype = {
    * @return Object on success on null on failure.
    */
   getAddonStateFromSyncGUID: function getAddonStateFromSyncGUID(guid) {
-    for (let id in this.addons) {
-      let addon = this.addons[id];
+    for each (let addon in this.addons) {
       if (addon.guid == guid) {
         return addon;
       }
@@ -634,7 +633,7 @@ AddonsReconciler.prototype = {
       }
     }
     catch (ex) {
-      this._log.warn("Exception", ex);
+      this._log.warn("Exception: " + Utils.exceptionStr(ex));
     }
   },
 

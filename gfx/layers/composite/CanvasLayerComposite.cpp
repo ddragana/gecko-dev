@@ -6,7 +6,8 @@
 #include "CanvasLayerComposite.h"
 #include "composite/CompositableHost.h"  // for CompositableHost
 #include "gfx2DGlue.h"                  // for ToFilter
-#include "gfxEnv.h"                     // for gfxEnv, etc
+#include "GraphicsFilter.h"             // for GraphicsFilter
+#include "gfxUtils.h"                   // for gfxUtils, etc
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for Point
 #include "mozilla/gfx/Rect.h"           // for Rect
@@ -14,7 +15,7 @@
 #include "mozilla/layers/Effects.h"     // for EffectChain
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsAString.h"
-#include "mozilla/RefPtr.h"                   // for nsRefPtr
+#include "nsRefPtr.h"                   // for nsRefPtr
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsString.h"                   // for nsAutoCString
 #include "gfxVR.h"
@@ -88,18 +89,18 @@ CanvasLayerComposite::RenderLayer(const IntRect& aClipRect)
   mCompositor->MakeCurrent();
 
 #ifdef MOZ_DUMP_PAINTING
-  if (gfxEnv::DumpCompositorTextures()) {
+  if (gfxUtils::sDumpPainting) {
     RefPtr<gfx::DataSourceSurface> surf = mCompositableHost->GetAsSurface();
     WriteSnapshotToDumpFile(this, surf);
   }
 #endif
 
   RenderWithAllMasks(this, mCompositor, aClipRect,
-                     [&](EffectChain& effectChain, const IntRect& clipRect) {
+                     [&](EffectChain& effectChain, const Rect& clipRect) {
     mCompositableHost->Composite(this, effectChain,
                           GetEffectiveOpacity(),
                           GetEffectiveTransform(),
-                          GetSamplingFilter(),
+                          GetEffectFilter(),
                           clipRect);
   });
 
@@ -125,10 +126,10 @@ CanvasLayerComposite::CleanupResources()
   mCompositableHost = nullptr;
 }
 
-gfx::SamplingFilter
-CanvasLayerComposite::GetSamplingFilter()
+gfx::Filter
+CanvasLayerComposite::GetEffectFilter()
 {
-  gfx::SamplingFilter filter = mSamplingFilter;
+  GraphicsFilter filter = mFilter;
 #ifdef ANDROID
   // Bug 691354
   // Using the LINEAR filter we get unexplained artifacts.
@@ -136,17 +137,17 @@ CanvasLayerComposite::GetSamplingFilter()
   Matrix matrix;
   bool is2D = GetEffectiveTransform().Is2D(&matrix);
   if (is2D && !ThebesMatrix(matrix).HasNonTranslationOrFlip()) {
-    filter = SamplingFilter::POINT;
+    filter = GraphicsFilter::FILTER_NEAREST;
   }
 #endif
-  return filter;
+  return gfx::ToFilter(filter);
 }
 
 void
 CanvasLayerComposite::GenEffectChain(EffectChain& aEffect)
 {
   aEffect.mLayerRef = this;
-  aEffect.mPrimaryEffect = mCompositableHost->GenEffect(GetSamplingFilter());
+  aEffect.mPrimaryEffect = mCompositableHost->GenEffect(GetEffectFilter());
 }
 
 void

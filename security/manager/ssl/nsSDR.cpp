@@ -8,7 +8,6 @@
 #include "plstr.h"
 #include "plbase64.h"
 
-#include "mozilla/Base64.h"
 #include "mozilla/Services.h"
 #include "nsMemory.h"
 #include "nsString.h"
@@ -16,7 +15,6 @@
 #include "nsThreadUtils.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIObserverService.h"
 #include "nsIServiceManager.h"
 #include "nsITokenPasswordDialogs.h"
 
@@ -24,7 +22,6 @@
 #include "nsCRT.h"
 #include "nsSDR.h"
 #include "nsNSSComponent.h"
-#include "nsNSSHelper.h"
 #include "nsNSSShutDown.h"
 #include "ScopedNSSTypes.h"
 
@@ -48,105 +45,95 @@ nsSecretDecoderRing::nsSecretDecoderRing()
 // nsSecretDecoderRing destructor
 nsSecretDecoderRing::~nsSecretDecoderRing()
 {
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return;
-  }
-
-  shutdown(calledFromObject);
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::Encrypt(unsigned char* data, int32_t dataLen,
-                             unsigned char** result, int32_t* _retval)
+/* [noscript] long encrypt (in buffer data, in long dataLen, out buffer result); */
+NS_IMETHODIMP nsSecretDecoderRing::
+Encrypt(unsigned char * data, int32_t dataLen, unsigned char * *result, int32_t *_retval)
 {
   nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
+  nsresult rv = NS_OK;
+  ScopedPK11SlotInfo slot;
+  SECItem keyid;
+  SECItem request;
+  SECItem reply;
+  SECStatus s;
   nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
 
-  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
-  if (!slot) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+  slot = PK11_GetInternalKeySlot();
+  if (!slot) { rv = NS_ERROR_NOT_AVAILABLE; goto loser; }
 
   /* Make sure token is initialized. */
-  nsresult rv = setPassword(slot.get(), ctx, locker);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  rv = setPassword(slot, ctx);
+  if (NS_FAILED(rv))
+    goto loser;
 
   /* Force authentication */
-  if (PK11_Authenticate(slot.get(), true, ctx) != SECSuccess) {
-    return NS_ERROR_FAILURE;
-  }
+  s = PK11_Authenticate(slot, true, ctx);
+  if (s != SECSuccess) { rv = NS_ERROR_FAILURE; goto loser; }
 
   /* Use default key id */
-  SECItem keyid;
-  keyid.data = nullptr;
+  keyid.data = 0;
   keyid.len = 0;
-  SECItem request;
   request.data = data;
   request.len = dataLen;
-  SECItem reply;
-  reply.data = nullptr;
+  reply.data = 0;
   reply.len = 0;
-  if (PK11SDR_Encrypt(&keyid, &request, &reply, ctx) != SECSuccess) {
-    return NS_ERROR_FAILURE;
-  }
+  s= PK11SDR_Encrypt(&keyid, &request, &reply, ctx);
+  if (s != SECSuccess) { rv = NS_ERROR_FAILURE; goto loser; }
 
   *result = reply.data;
   *_retval = reply.len;
 
-  return NS_OK;
+loser:
+  return rv;
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::Decrypt(unsigned char* data, int32_t dataLen,
-                             unsigned char** result, int32_t* _retval)
+/* [noscript] long decrypt (in buffer data, in long dataLen, out buffer result); */
+NS_IMETHODIMP nsSecretDecoderRing::
+Decrypt(unsigned char * data, int32_t dataLen, unsigned char * *result, int32_t *_retval)
 {
   nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
+  nsresult rv = NS_OK;
+  ScopedPK11SlotInfo slot;
+  SECStatus s;
+  SECItem request;
+  SECItem reply;
   nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
 
-  *result = nullptr;
+  *result = 0;
   *_retval = 0;
 
   /* Find token with SDR key */
-  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
-  if (!slot) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+  slot = PK11_GetInternalKeySlot();
+  if (!slot) { rv = NS_ERROR_NOT_AVAILABLE; goto loser; }
 
   /* Force authentication */
-  if (PK11_Authenticate(slot.get(), true, ctx) != SECSuccess) {
-    return NS_ERROR_NOT_AVAILABLE;
+  if (PK11_Authenticate(slot, true, ctx) != SECSuccess)
+  {
+    rv = NS_ERROR_NOT_AVAILABLE;
+    goto loser;
   }
 
-  SECItem request;
   request.data = data;
   request.len = dataLen;
-  SECItem reply;
-  reply.data = nullptr;
+  reply.data = 0;
   reply.len = 0;
-  if (PK11SDR_Decrypt(&request, &reply, ctx) != SECSuccess) {
-    return NS_ERROR_FAILURE;
-  }
+  s = PK11SDR_Decrypt(&request, &reply, ctx);
+  if (s != SECSuccess) { rv = NS_ERROR_FAILURE; goto loser; }
 
   *result = reply.data;
   *_retval = reply.len;
 
-  return NS_OK;
+loser:
+  return rv;
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::EncryptString(const char* text, char** _retval)
+/* string encryptString (in string text); */
+NS_IMETHODIMP nsSecretDecoderRing::
+EncryptString(const char *text, char **_retval)
 {
+  nsNSSShutDownPreventionLock locker;
   nsresult rv = NS_OK;
   unsigned char *encrypted = 0;
   int32_t eLen;
@@ -167,9 +154,11 @@ loser:
   return rv;
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::DecryptString(const char* crypt, char** _retval)
+/* string decryptString (in string crypt); */
+NS_IMETHODIMP nsSecretDecoderRing::
+DecryptString(const char *crypt, char **_retval)
 {
+  nsNSSShutDownPreventionLock locker;
   nsresult rv = NS_OK;
   char *r = 0;
   unsigned char *decoded = 0;
@@ -205,36 +194,46 @@ loser:
   return rv;
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::ChangePassword()
+/* void changePassword(); */
+NS_IMETHODIMP nsSecretDecoderRing::
+ChangePassword()
 {
   nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+  nsresult rv;
+  ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
+  if (!slot) return NS_ERROR_NOT_AVAILABLE;
 
-  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
-  if (!slot) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+  /* Convert UTF8 token name to UCS2 */
+  NS_ConvertUTF8toUTF16 tokenName(PK11_GetTokenName(slot));
 
-  NS_ConvertUTF8toUTF16 tokenName(PK11_GetTokenName(slot.get()));
-
+  /* Get the set password dialog handler imlementation */
   nsCOMPtr<nsITokenPasswordDialogs> dialogs;
-  nsresult rv = getNSSDialogs(getter_AddRefs(dialogs),
-                              NS_GET_IID(nsITokenPasswordDialogs),
-                              NS_TOKENPASSWORDSDIALOG_CONTRACTID);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+
+  rv = getNSSDialogs(getter_AddRefs(dialogs),
+                     NS_GET_IID(nsITokenPasswordDialogs),
+                     NS_TOKENPASSWORDSDIALOG_CONTRACTID);
+  if (NS_FAILED(rv)) return rv;
 
   nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
-  bool canceled; // Ignored
-  return dialogs->SetPassword(ctx, tokenName.get(), &canceled);
+  bool canceled;
+
+  {
+    nsPSMUITracker tracker;
+    if (tracker.isUIForbidden()) {
+      rv = NS_ERROR_NOT_AVAILABLE;
+    }
+    else {
+      rv = dialogs->SetPassword(ctx, tokenName.get(), &canceled);
+    }
+  }
+
+  /* canceled is ignored */
+
+  return rv;
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::Logout()
+NS_IMETHODIMP nsSecretDecoderRing::
+Logout()
 {
   static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
@@ -245,10 +244,6 @@ nsSecretDecoderRing::Logout()
 
   {
     nsNSSShutDownPreventionLock locker;
-    if (isAlreadyShutDown()) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-
     PK11_LogoutAll();
     SSL_ClearSessionCache();
   }
@@ -256,8 +251,8 @@ nsSecretDecoderRing::Logout()
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::LogoutAndTeardown()
+NS_IMETHODIMP nsSecretDecoderRing::
+LogoutAndTeardown()
 {
   static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
@@ -268,10 +263,6 @@ nsSecretDecoderRing::LogoutAndTeardown()
 
   {
     nsNSSShutDownPreventionLock locker;
-    if (isAlreadyShutDown()) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-
     PK11_LogoutAll();
     SSL_ClearSessionCache();
   }
@@ -288,46 +279,49 @@ nsSecretDecoderRing::LogoutAndTeardown()
   return rv;
 }
 
-NS_IMETHODIMP
-nsSecretDecoderRing::SetWindow(nsISupports*)
+/* void setWindow(in nsISupports w); */
+NS_IMETHODIMP nsSecretDecoderRing::
+SetWindow(nsISupports *w)
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NS_OK;
 }
 
 // Support routines
 
-nsresult
-nsSecretDecoderRing::encode(const unsigned char* data, int32_t dataLen,
-                            char** _retval)
+nsresult nsSecretDecoderRing::
+encode(const unsigned char *data, int32_t dataLen, char **_retval)
 {
-  if (dataLen < 0) {
-    return NS_ERROR_INVALID_ARG;
-  }
-  return Base64Encode(BitwiseCast<const char*>(data),
-                      AssertedCast<uint32_t>(dataLen), _retval);
+  nsresult rv = NS_OK;
+
+  char *result = PL_Base64Encode((const char *)data, dataLen, nullptr);
+  if (!result) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
+
+  *_retval = NS_strdup(result);
+  PR_DELETE(result);
+  if (!*_retval) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
+
+loser:
+  return rv;
 }
 
-nsresult
-nsSecretDecoderRing::decode(const char* data, unsigned char** result,
-                            int32_t* _retval)
+nsresult nsSecretDecoderRing::
+decode(const char *data, unsigned char **result, int32_t * _retval)
 {
+  nsresult rv = NS_OK;
   uint32_t len = strlen(data);
   int adjust = 0;
 
   /* Compute length adjustment */
   if (data[len-1] == '=') {
     adjust++;
-    if (data[len - 2] == '=') {
-      adjust++;
-    }
+    if (data[len-2] == '=') adjust++;
   }
 
   *result = (unsigned char *)PL_Base64Decode(data, len, nullptr);
-  if (!*result) {
-    return NS_ERROR_ILLEGAL_VALUE;
-  }
+  if (!*result) { rv = NS_ERROR_ILLEGAL_VALUE; goto loser; }
 
   *_retval = (len*3)/4 - adjust;
 
-  return NS_OK;
+loser:
+  return rv;
 }

@@ -37,7 +37,6 @@ EXPORTS += [
     'LayerSorter.h',
     'LayersTypes.h',
     'LayerTreeInvalidation.h',
-    'LayerUserData.h',
     'opengl/Composer2D.h',
     'opengl/OGLShaderProgram.h',
     'opengl/TexturePoolOGL.h',
@@ -92,43 +91,30 @@ EXPORTS.gfxipc += [
     'ipc/ShadowLayerUtils.h',
 ]
 
-EXPORTS.mozilla.dom += [
-    'apz/util/CheckerboardReportService.h',
-]
-
 EXPORTS.mozilla.layers += [
     'apz/public/GeckoContentController.h',
     # exporting things from apz/src is temporary until we extract a
     # proper interface for the code there
     'apz/src/APZCTreeManager.h',
     'apz/src/APZUtils.h',
-    'apz/src/AsyncDragMetrics.h',
     'apz/src/AsyncPanZoomAnimation.h',
-    'apz/src/TouchCounter.h',
     'apz/testutil/APZTestData.h',
     'apz/util/ActiveElementManager.h',
     'apz/util/APZCCallbackHelper.h',
     'apz/util/APZEventState.h',
     'apz/util/APZThreadUtils.h',
     'apz/util/ChromeProcessController.h',
-    'apz/util/DoubleTapToZoom.h',
     'apz/util/InputAPZContext.h',
-    'apz/util/ScrollInputMethods.h',
-    'apz/util/ScrollLinkedEffectDetector.h',
-    'apz/util/TouchActionHelper.h',
-    'AsyncCanvasRenderer.h',
     'AtomicRefCountedWithFinalize.h',
     'AxisPhysicsModel.h',
     'AxisPhysicsMSDModel.h',
     'basic/BasicCompositor.h',
     'basic/MacIOSurfaceTextureHostBasic.h',
     'basic/TextureHostBasic.h',
-    'BufferTexture.h',
     'client/CanvasClient.h',
     'client/CompositableClient.h',
     'client/ContentClient.h',
     'client/ImageClient.h',
-    'client/SingleTiledContentClient.h',
     'client/TextureClient.h',
     'client/TextureClientPool.h',
     'client/TextureClientRecycleAllocator.h',
@@ -152,25 +138,19 @@ EXPORTS.mozilla.layers += [
     'D3D9SurfaceImage.h',
     'Effects.h',
     'ImageDataSerializer.h',
-    'ipc/APZChild.h',
     'ipc/AsyncTransactionTracker.h',
     'ipc/CompositableForwarder.h',
     'ipc/CompositableTransactionParent.h',
-    'ipc/CompositorBridgeChild.h',
-    'ipc/CompositorBridgeParent.h',
+    'ipc/CompositorChild.h',
     'ipc/CompositorLRU.h',
-    'ipc/CompositorThread.h',
+    'ipc/CompositorParent.h',
     'ipc/FenceUtils.h',
-    'ipc/GonkNativeHandle.h',
-    'ipc/GonkNativeHandleUtils.h',
     'ipc/ImageBridgeChild.h',
     'ipc/ImageBridgeParent.h',
     'ipc/ImageContainerParent.h',
     'ipc/ISurfaceAllocator.h',
-    'ipc/LayerAnimationUtils.h',
     'ipc/LayerTransactionChild.h',
     'ipc/LayerTransactionParent.h',
-    'ipc/RemoteContentController.h',
     'ipc/ShadowLayerChild.h',
     'ipc/ShadowLayers.h',
     'ipc/ShadowLayersManager.h',
@@ -178,7 +158,6 @@ EXPORTS.mozilla.layers += [
     'ipc/SharedBufferManagerParent.h',
     'ipc/SharedPlanarYCbCrImage.h',
     'ipc/SharedRGBImage.h',
-    'ipc/TextureForwarder.h',
     'LayerMetricsWrapper.h',
     'LayersTypes.h',
     'opengl/CompositingRenderTargetOGL.h',
@@ -191,8 +170,8 @@ EXPORTS.mozilla.layers += [
     'opengl/TextureHostOGL.h',
     'PersistentBufferProvider.h',
     'RenderTrace.h',
-    'TextureWrapperImage.h',
     'TransactionIdAllocator.h',
+    'YCbCrImageDataSerializer.h',
 ]
 
 if CONFIG['MOZ_X11']:
@@ -217,7 +196,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'opengl/GLManager.h',
     ]
     EXPORTS += [
-        'MacIOSurfaceHelpers.h',
         'MacIOSurfaceImage.h',
     ]
     UNIFIED_SOURCES += [
@@ -225,7 +203,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     ]
     SOURCES += [
         'ipc/ShadowLayerUtilsMac.cpp',
-        'MacIOSurfaceHelpers.cpp',
         'MacIOSurfaceImage.cpp',
     ]
 
@@ -234,60 +211,42 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
 # has full system permissions there.
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     EXPORTS.mozilla.layers += [
-        'basic/GrallocTextureHostBasic.h',
         'ipc/ShadowLayerUtilsGralloc.h',
     ]
     UNIFIED_SOURCES += [
-        'basic/GrallocTextureHostBasic.cpp',
         'GrallocImages.cpp',
         'opengl/EGLImageHelpers.cpp',
         'opengl/GrallocTextureClient.cpp',
         'opengl/GrallocTextureHost.cpp',
     ]
     LOCAL_INCLUDES += ['/widget/gonk']
-    if CONFIG['ANDROID_VERSION'] >= '21':
-        LOCAL_INCLUDES += [
-             '%' + '%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
-                 'system/core/libsync/include'
-             ]
-        ]
-    SOURCES += [
-        'ipc/GonkNativeHandle.cpp',
-        'ipc/GonkNativeHandleUtils.cpp',
-        'ipc/ShadowLayerUtilsGralloc.cpp',
+    CXXFLAGS += [
+         '-I%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
+             'system/core/libsync/include'
+         ]
     ]
-
-if CONFIG['MOZ_ANDROID_APZ']:
-    UNIFIED_SOURCES += [
-        'apz/src/AndroidAPZ.cpp',
+    SOURCES += [
+        'ipc/ShadowLayerUtilsGralloc.cpp',
     ]
 
 UNIFIED_SOURCES += [
     'apz/src/APZCTreeManager.cpp',
     'apz/src/AsyncPanZoomController.cpp',
     'apz/src/Axis.cpp',
-    'apz/src/CheckerboardEvent.cpp',
-    'apz/src/DragTracker.cpp',
     'apz/src/GestureEventListener.cpp',
     'apz/src/HitTestingTreeNode.cpp',
     'apz/src/InputBlockState.cpp',
     'apz/src/InputQueue.cpp',
     'apz/src/OverscrollHandoffState.cpp',
-    'apz/src/PotentialCheckerboardDurationTracker.cpp',
-    'apz/src/TouchCounter.cpp',
+    'apz/src/TaskThrottler.cpp',
     'apz/src/WheelScrollAnimation.cpp',
     'apz/testutil/APZTestData.cpp',
     'apz/util/ActiveElementManager.cpp',
     'apz/util/APZCCallbackHelper.cpp',
     'apz/util/APZEventState.cpp',
     'apz/util/APZThreadUtils.cpp',
-    'apz/util/CheckerboardReportService.cpp',
     'apz/util/ChromeProcessController.cpp',
-    'apz/util/DoubleTapToZoom.cpp',
     'apz/util/InputAPZContext.cpp',
-    'apz/util/ScrollLinkedEffectDetector.cpp',
-    'apz/util/TouchActionHelper.cpp',
-    'AsyncCanvasRenderer.cpp',
     'AxisPhysicsModel.cpp',
     'AxisPhysicsMSDModel.cpp',
     'basic/BasicCanvasLayer.cpp',
@@ -299,7 +258,6 @@ UNIFIED_SOURCES += [
     'basic/BasicLayersImpl.cpp',
     'basic/BasicPaintedLayer.cpp',
     'basic/TextureHostBasic.cpp',
-    'BufferTexture.cpp',
     'BufferUnrotate.cpp',
     'client/CanvasClient.cpp',
     'client/ClientCanvasLayer.cpp',
@@ -312,7 +270,6 @@ UNIFIED_SOURCES += [
     'client/CompositableClient.cpp',
     'client/ContentClient.cpp',
     'client/ImageClient.cpp',
-    'client/SingleTiledContentClient.cpp',
     'client/TextureClient.cpp',
     'client/TextureClientPool.cpp',
     'client/TextureClientRecycleAllocator.cpp',
@@ -340,23 +297,19 @@ UNIFIED_SOURCES += [
     'GLImages.cpp',
     'ImageDataSerializer.cpp',
     'ImageLayers.cpp',
-    'ipc/APZChild.cpp',
     'ipc/AsyncTransactionTracker.cpp',
     'ipc/CompositableTransactionParent.cpp',
     'ipc/CompositorBench.cpp',
-    'ipc/CompositorBridgeChild.cpp',
-    'ipc/CompositorBridgeParent.cpp',
+    'ipc/CompositorChild.cpp',
     'ipc/CompositorLRU.cpp',
-    'ipc/CompositorThread.cpp',
+    'ipc/CompositorParent.cpp',
     'ipc/FenceUtils.cpp',
     'ipc/ImageBridgeChild.cpp',
     'ipc/ImageBridgeParent.cpp',
     'ipc/ImageContainerParent.cpp',
     'ipc/ISurfaceAllocator.cpp',
-    'ipc/LayerAnimationUtils.cpp',
     'ipc/LayerTransactionChild.cpp',
     'ipc/LayerTransactionParent.cpp',
-    'ipc/RemoteContentController.cpp',
     'ipc/ShadowLayerChild.cpp',
     'ipc/ShadowLayerParent.cpp',
     'ipc/ShadowLayers.cpp',
@@ -364,7 +317,6 @@ UNIFIED_SOURCES += [
     'ipc/SharedBufferManagerParent.cpp',
     'ipc/SharedPlanarYCbCrImage.cpp',
     'ipc/SharedRGBImage.cpp',
-    'ipc/TextureForwarder.cpp',
     'LayerScope.cpp',
     'LayersLogging.cpp',
     'LayerSorter.cpp',
@@ -381,7 +333,7 @@ UNIFIED_SOURCES += [
     'ReadbackProcessor.cpp',
     'RenderTrace.cpp',
     'RotatedBuffer.cpp',
-    'TextureWrapperImage.cpp',
+    'YCbCrImageDataSerializer.cpp',
 ]
 
 SOURCES += [
@@ -413,9 +365,8 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
 IPDL_SOURCES = [
     'ipc/LayersMessages.ipdlh',
     'ipc/LayersSurfaces.ipdlh',
-    'ipc/PAPZ.ipdl',
     'ipc/PCompositable.ipdl',
-    'ipc/PCompositorBridge.ipdl',
+    'ipc/PCompositor.ipdl',
     'ipc/PImageBridge.ipdl',
     'ipc/PImageContainer.ipdl',
     'ipc/PLayer.ipdl',
@@ -424,13 +375,13 @@ IPDL_SOURCES = [
     'ipc/PTexture.ipdl',
 ]
 
+FAIL_ON_WARNINGS = True
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
 LOCAL_INCLUDES += [
     '/docshell/base',  # for nsDocShell.h
     '/layout/base',    # for TouchManager.h
-    '/layout/generic', # for nsTextFrame.h
-    '/media/libyuv/include', # for libyuv.h
 ]
 
 FINAL_LIBRARY = 'xul'
@@ -441,32 +392,17 @@ if CONFIG['MOZ_DEBUG']:
 if CONFIG['MOZ_ENABLE_D3D10_LAYER']:
     DEFINES['MOZ_ENABLE_D3D10_LAYER'] = True
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    if CONFIG['ANDROID_VERSION'] >= '17':
-        includes = [
-            'frameworks/av/include/media/stagefright',
-            'frameworks/native/include/media/openmax',
-        ]
-    else:
-        includes = [
-            'frameworks/base/include/media/stagefright',
-            'frameworks/base/include/media/stagefright/openmax',
-        ]
-
-    LOCAL_INCLUDES += [
-        '%' + '%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in includes
+CXXFLAGS += [
+    '-I%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
+        'frameworks/base/include/media/stagefright',
+        'frameworks/base/include/media/stagefright/openmax',
+        'frameworks/av/include/media/stagefright',
+        'frameworks/native/include/media/openmax',
     ]
+]
 
-if CONFIG['ENABLE_TESTS']:
-    DIRS += ['apz/test/gtest']
-
-MOCHITEST_MANIFESTS += ['apz/test/mochitest/mochitest.ini']
-MOCHITEST_CHROME_MANIFESTS += ['apz/test/mochitest/chrome.ini']
+MOCHITEST_MANIFESTS += ['apz/test/mochitest.ini']
+MOCHITEST_CHROME_MANIFESTS += ['apz/test/chrome.ini']
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']
-
-LOCAL_INCLUDES += CONFIG['SKIA_INCLUDES']
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

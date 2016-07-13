@@ -71,6 +71,9 @@ public:
   // Mark all SourceBuffers input buffers as ended.
   void Ended();
 
+  // Evicts data for the given time range from each SourceBuffer in the list.
+  void Evict(double aStart, double aEnd);
+
   // Returns the highest end time of any of the Sourcebuffers.
   double GetHighestBufferedEndTime();
 
@@ -81,6 +84,10 @@ public:
   //  No event is fired and no action is performed on the sourcebuffers.
   void ClearSimple();
 
+#if defined(DEBUG)
+  void Dump(const char* aPath);
+#endif
+
 private:
   ~SourceBufferList();
 
@@ -88,8 +95,8 @@ private:
   void DispatchSimpleEvent(const char* aName);
   void QueueAsyncSimpleEvent(const char* aName);
 
-  RefPtr<MediaSource> mMediaSource;
-  nsTArray<RefPtr<SourceBuffer> > mSourceBuffers;
+  nsRefPtr<MediaSource> mMediaSource;
+  nsTArray<nsRefPtr<SourceBuffer> > mSourceBuffers;
 };
 
 } // namespace dom

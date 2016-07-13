@@ -9,7 +9,6 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
-#include "nsAutoPtr.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsTArray.h"
 
@@ -17,70 +16,100 @@
 #undef PostMessage
 #endif
 
-class nsIGlobalObject;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
 
+class DispatchEventRunnable;
 class MessagePortChild;
 class MessagePortIdentifier;
 class MessagePortMessage;
-class PostMessageRunnable;
 class SharedMessagePortMessage;
 
 namespace workers {
-class WorkerHolder;
+class WorkerFeature;
 } // namespace workers
 
-class MessagePort final : public DOMEventTargetHelper
+class MessagePortBase : public DOMEventTargetHelper
+{
+protected:
+  explicit MessagePortBase(nsPIDOMWindow* aWindow);
+  MessagePortBase();
+
+public:
+
+  virtual void
+  PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
+              const Optional<Sequence<JS::Value>>& aTransferable,
+              ErrorResult& aRv) = 0;
+
+  virtual void
+  Start() = 0;
+
+  virtual void
+  Close() = 0;
+
+  // The 'message' event handler has to call |Start()| method, so we
+  // cannot use IMPL_EVENT_HANDLER macro here.
+  virtual EventHandlerNonNull*
+  GetOnmessage() = 0;
+
+  virtual void
+  SetOnmessage(EventHandlerNonNull* aCallback) = 0;
+
+  // Duplicate this message port. This method is used by the Structured Clone
+  // Algorithm and populates a MessagePortIdentifier object with the information
+  // useful to create new MessagePort.
+  virtual bool
+  CloneAndDisentangle(MessagePortIdentifier& aIdentifier) = 0;
+};
+
+class MessagePort final : public MessagePortBase
                         , public nsIIPCBackgroundChildCreateCallback
                         , public nsIObserver
 {
-  friend class PostMessageRunnable;
+  friend class DispatchEventRunnable;
 
 public:
   NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
   NS_DECL_NSIOBSERVER
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MessagePort,
-                                           DOMEventTargetHelper)
+                                           MessagePortBase)
 
   static already_AddRefed<MessagePort>
-  Create(nsIGlobalObject* aGlobal, const nsID& aUUID,
+  Create(nsPIDOMWindow* aWindow, const nsID& aUUID,
          const nsID& aDestinationUUID, ErrorResult& aRv);
 
   static already_AddRefed<MessagePort>
-  Create(nsIGlobalObject* aGlobal,
-         const MessagePortIdentifier& aIdentifier,
+  Create(nsPIDOMWindow* aWindow, const MessagePortIdentifier& aIdentifier,
          ErrorResult& aRv);
 
-  // For IPC.
   static void
   ForceClose(const MessagePortIdentifier& aIdentifier);
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  void
+  virtual void
   PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
               const Optional<Sequence<JS::Value>>& aTransferable,
-              ErrorResult& aRv);
+              ErrorResult& aRv) override;
 
-  void Start();
+  virtual void Start() override;
 
-  void Close();
+  virtual void Close() override;
 
-  EventHandlerNonNull* GetOnmessage();
+  virtual EventHandlerNonNull* GetOnmessage() override;
 
-  void SetOnmessage(EventHandlerNonNull* aCallback);
+  virtual void SetOnmessage(EventHandlerNonNull* aCallback) override;
 
   // Non WebIDL methods
 
   void UnshippedEntangle(MessagePort* aEntangledPort);
 
-  void CloneAndDisentangle(MessagePortIdentifier& aIdentifier);
-
-  void CloseForced();
+  virtual bool CloneAndDisentangle(MessagePortIdentifier& aIdentifier) override;
 
   // These methods are useful for MessagePortChild
 
@@ -90,7 +119,7 @@ public:
   void Closed();
 
 private:
-  explicit MessagePort(nsIGlobalObject* aGlobal);
+  explicit MessagePort(nsPIDOMWindow* aWindow);
   ~MessagePort();
 
   enum State {
@@ -101,15 +130,10 @@ private:
     // StateEntangling.
     eStateUnshippedEntangled,
 
-    // If the port is closed or cloned when we are in this state, we go in one
-    // of the following 2 steps. EntanglingForClose or ForDisentangle.
+    // If the port is closed or cloned when we are in this state, we set the
+    // mNextStep. This 'next' operation will be done when entangled() message
+    // is received.
     eStateEntangling,
-
-    // We are not fully entangled yet but are already disentangled.
-    eStateEntanglingForDisentangle,
-
-    // We are not fully entangled yet but are already closed.
-    eStateEntanglingForClose,
 
     // When entangled() is received we send all the messages in the
     // mMessagesForTheOtherPort to the actor and we change the state to
@@ -131,11 +155,7 @@ private:
     // don't receive any other message, so nothing will be lost.
     // Disentangling the port we send all the messages from the mMessages
     // though the actor.
-    eStateDisentangled,
-
-    // We are here if Close() has been called. We are disentangled but we can
-    // still send pending messages.
-    eStateDisentangledForClose
+    eStateDisentangled
   };
 
   void Initialize(const nsID& aUUID, const nsID& aDestinationUUID,
@@ -152,8 +172,6 @@ private:
 
   void RemoveDocFromBFCache();
 
-  void CloseInternal(bool aSoftly);
-
   // This method is meant to keep alive the MessagePort when this object is
   // creating the actor and until the actor is entangled.
   // We release the object when the port is closed or disentangled.
@@ -164,22 +182,30 @@ private:
     return mIsKeptAlive;
   }
 
-  nsAutoPtr<workers::WorkerHolder> mWorkerHolder;
+  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
 
-  RefPtr<PostMessageRunnable> mPostMessageRunnable;
+  nsRefPtr<DispatchEventRunnable> mDispatchRunnable;
 
-  RefPtr<MessagePortChild> mActor;
+  nsRefPtr<MessagePortChild> mActor;
 
-  RefPtr<MessagePort> mUnshippedEntangledPort;
+  nsRefPtr<MessagePort> mUnshippedEntangledPort;
 
-  nsTArray<RefPtr<SharedMessagePortMessage>> mMessages;
-  nsTArray<RefPtr<SharedMessagePortMessage>> mMessagesForTheOtherPort;
+  nsTArray<nsRefPtr<SharedMessagePortMessage>> mMessages;
+  nsTArray<nsRefPtr<SharedMessagePortMessage>> mMessagesForTheOtherPort;
 
   nsAutoPtr<MessagePortIdentifier> mIdentifier;
 
   uint64_t mInnerID;
 
   State mState;
+
+  // This 'nextStep' is used when we are waiting to be entangled but the
+  // content has called Clone() or Close().
+  enum {
+    eNextStepNone,
+    eNextStepDisentangle,
+    eNextStepClose
+  } mNextStep;
 
   bool mMessageQueueEnabled;
 

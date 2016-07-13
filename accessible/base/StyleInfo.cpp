@@ -58,7 +58,6 @@ StyleInfo::TextIndent(nsAString& aValue)
     case eStyleUnit_Percent:
     {
       nsIFrame* frame = mElement->GetPrimaryFrame();
-      MOZ_ASSERT(frame, "frame must be a valid pointer.");
       nsIFrame* containerFrame = frame->GetContainingBlock();
       nscoord percentageBase = containerFrame->GetContentRect().width;
       coordVal = NSCoordSaturatingMultiply(percentageBase,
@@ -89,7 +88,6 @@ StyleInfo::TextIndent(nsAString& aValue)
 void
 StyleInfo::Margin(css::Side aSide, nsAString& aValue)
 {
-  MOZ_ASSERT(mElement->GetPrimaryFrame(), " mElement->GetPrimaryFrame() needs to be valid pointer");
   aValue.Truncate();
 
   nscoord coordVal = mElement->GetPrimaryFrame()->GetUsedMargin().Side(aSide);

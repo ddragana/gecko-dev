@@ -9,35 +9,32 @@
 #include "nsError.h"
 #include "txStringUtils.h"
 #include "txXSLTPatterns.h"
-#include "txStylesheetCompiler.h"
+#include "txIXPathContext.h"
 #include "txPatternOptimizer.h"
 
 
-nsresult txPatternParser::createPattern(const nsAFlatString& aPattern,
-                                        txIParseContext* aContext,
-                                        txPattern** aResult)
+txPattern* txPatternParser::createPattern(const nsAFlatString& aPattern,
+                                          txIParseContext* aContext)
 {
     txExprLexer lexer;
     nsresult rv = lexer.parse(aPattern);
     if (NS_FAILED(rv)) {
         // XXX error report parsing error
-        return rv;
+        return 0;
     }
     nsAutoPtr<txPattern> pattern;
     rv = createUnionPattern(lexer, aContext, *getter_Transfers(pattern));
     if (NS_FAILED(rv)) {
         // XXX error report parsing error
-        return rv;
+        return 0;
     }
 
     txPatternOptimizer optimizer;
     txPattern* newPattern = nullptr;
     rv = optimizer.optimize(pattern, &newPattern);
-    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_SUCCESS(rv, nullptr);
 
-    *aResult = newPattern ? newPattern : pattern.forget();
-
-    return NS_OK;
+    return newPattern ? newPattern : pattern.forget();
 }
 
 nsresult txPatternParser::createUnionPattern(txExprLexer& aLexer,
@@ -63,6 +60,10 @@ nsresult txPatternParser::createUnionPattern(txExprLexer& aLexer,
     }
 
     txUnionPattern* unionPattern = new txUnionPattern();
+    if (!unionPattern) {
+        delete locPath;
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
     rv = unionPattern->addPattern(locPath);
 #if 0 // XXX addPattern can't fail yet, it doesn't check for mem
     if (NS_FAILED(rv)) {
@@ -123,14 +124,15 @@ nsresult txPatternParser::createLocPathPattern(txExprLexer& aLexer,
             if (aLexer.peek()->mType == Token::END || 
                 aLexer.peek()->mType == Token::UNION_OP) {
                 aPattern = new txRootPattern();
-                return NS_OK;
+
+                return aPattern ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
             }
             break;
         case Token::FUNCTION_NAME_AND_PAREN:
             // id(Literal) or key(Literal, Literal)
             {
                 nsCOMPtr<nsIAtom> nameAtom =
-                    NS_Atomize(aLexer.nextToken()->Value());
+                    do_GetAtom(aLexer.nextToken()->Value());
                 if (nameAtom == nsGkAtoms::id) {
                     rv = createIdPattern(aLexer, stepPattern);
                 }
@@ -158,8 +160,19 @@ nsresult txPatternParser::createLocPathPattern(txExprLexer& aLexer,
     }
 
     pathPattern = new txLocPathPattern();
+    if (!pathPattern) {
+        delete stepPattern;
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
+
     if (isAbsolute) {
         txRootPattern* root = new txRootPattern();
+        if (!root) {
+            delete stepPattern;
+            delete pathPattern;
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
+
 #ifdef TX_TO_STRING
         root->setSerialize(false);
 #endif
@@ -213,7 +226,7 @@ nsresult txPatternParser::createIdPattern(txExprLexer& aLexer,
     if (aLexer.nextToken()->mType != Token::R_PAREN)
         return NS_ERROR_XPATH_PARSE_FAILURE;
     aPattern  = new txIdPattern(value);
-    return NS_OK;
+    return aPattern ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
 nsresult txPatternParser::createKeyPattern(txExprLexer& aLexer,
@@ -233,9 +246,6 @@ nsresult txPatternParser::createKeyPattern(txExprLexer& aLexer,
     if (aLexer.nextToken()->mType != Token::R_PAREN)
         return NS_ERROR_XPATH_PARSE_FAILURE;
 
-    if (!aContext->allowed(txIParseContext::KEY_FUNCTION))
-        return NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED;
-
     const char16_t* colon;
     if (!XMLUtils::isValidQName(PromiseFlatString(key), &colon))
         return NS_ERROR_XPATH_PARSE_FAILURE;
@@ -247,7 +257,8 @@ nsresult txPatternParser::createKeyPattern(txExprLexer& aLexer,
         return rv;
 
     aPattern  = new txKeyPattern(prefix, localName, namespaceID, value);
-    return NS_OK;
+
+    return aPattern ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
 nsresult txPatternParser::createStepPattern(txExprLexer& aLexer,
@@ -291,6 +302,9 @@ nsresult txPatternParser::createStepPattern(txExprLexer& aLexer,
                             (uint16_t)txXPathNodeType::ATTRIBUTE_NODE :
                             (uint16_t)txXPathNodeType::ELEMENT_NODE;
         nodeTest = new txNameTest(prefix, lName, nspace, nodeType);
+        if (!nodeTest) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
     }
     else {
         rv = createNodeTypeTest(aLexer, &nodeTest);
@@ -298,6 +312,11 @@ nsresult txPatternParser::createStepPattern(txExprLexer& aLexer,
     }
 
     nsAutoPtr<txStepPattern> step(new txStepPattern(nodeTest, isAttr));
+    if (!step) {
+        delete nodeTest;
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
+
     rv = parsePredicates(step, aLexer, aContext);
     NS_ENSURE_SUCCESS(rv, rv);
 

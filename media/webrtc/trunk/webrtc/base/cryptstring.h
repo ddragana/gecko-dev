@@ -33,22 +33,27 @@ public:
 
 class EmptyCryptStringImpl : public CryptStringImpl {
 public:
-  ~EmptyCryptStringImpl() override {}
-  size_t GetLength() const override;
-  void CopyTo(char* dest, bool nullterminate) const override;
-  std::string UrlEncode() const override;
-  CryptStringImpl* Copy() const override;
-  void CopyRawTo(std::vector<unsigned char>* dest) const override;
+  virtual ~EmptyCryptStringImpl() {}
+  virtual size_t GetLength() const { return 0; }
+  virtual void CopyTo(char * dest, bool nullterminate) const {
+    if (nullterminate) {
+      *dest = '\0';
+    }
+  }
+  virtual std::string UrlEncode() const { return ""; }
+  virtual CryptStringImpl * Copy() const { return new EmptyCryptStringImpl(); }
+  virtual void CopyRawTo(std::vector<unsigned char> * dest) const {
+    dest->clear();
+  }
 };
 
 class CryptString {
 public:
- CryptString();
+  CryptString() : impl_(new EmptyCryptStringImpl()) {}
   size_t GetLength() const { return impl_->GetLength(); }
   void CopyTo(char * dest, bool nullterminate) const { impl_->CopyTo(dest, nullterminate); }
-  CryptString(const CryptString& other);
-  explicit CryptString(const CryptStringImpl& impl);
-  ~CryptString();
+  CryptString(const CryptString & other) : impl_(other.impl_->Copy()) {}
+  explicit CryptString(const CryptStringImpl & impl) : impl_(impl.Copy()) {}
   CryptString & operator=(const CryptString & other) {
     if (this != &other) {
       impl_.reset(other.impl_->Copy());
@@ -153,13 +158,22 @@ class InsecureCryptStringImpl : public CryptStringImpl {
   std::string& password() { return password_; }
   const std::string& password() const { return password_; }
 
-  ~InsecureCryptStringImpl() override = default;
-  size_t GetLength() const override;
-  void CopyTo(char* dest, bool nullterminate) const override;
-  std::string UrlEncode() const override;
-  CryptStringImpl* Copy() const override;
-  void CopyRawTo(std::vector<unsigned char>* dest) const override;
-
+  virtual ~InsecureCryptStringImpl() {}
+  virtual size_t GetLength() const { return password_.size(); }
+  virtual void CopyTo(char * dest, bool nullterminate) const {
+    memcpy(dest, password_.data(), password_.size());
+    if (nullterminate) dest[password_.size()] = 0;
+  }
+  virtual std::string UrlEncode() const { return password_; }
+  virtual CryptStringImpl * Copy() const {
+    InsecureCryptStringImpl * copy = new InsecureCryptStringImpl;
+    copy->password() = password_;
+    return copy;
+  }
+  virtual void CopyRawTo(std::vector<unsigned char> * dest) const {
+    dest->resize(password_.size());
+    memcpy(&dest->front(), password_.data(), password_.size());
+  }
  private:
   std::string password_;
 };

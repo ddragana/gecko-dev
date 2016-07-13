@@ -22,11 +22,11 @@
 #include "mozilla/layers/CompositableClient.h"  // for CompositableClient
 #include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
 #include "mozilla/layers/LayersMessages.h" // for TileDescriptor
-#include "mozilla/layers/LayersTypes.h" // for TextureDumpMode
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureClientPool.h"
 #include "ClientLayerManager.h"
 #include "mozilla/mozalloc.h"           // for operator delete
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_DTOR
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
@@ -34,12 +34,112 @@
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
 #include "nsExpirationTracker.h"
 #include "mozilla/layers/ISurfaceAllocator.h"
+#include "gfxReusableSurfaceWrapper.h"
+#include "pratom.h"                     // For PR_ATOMIC_INCREMENT/DECREMENT
 
 namespace mozilla {
 namespace layers {
 
 class ClientTiledPaintedLayer;
 class ClientLayerManager;
+
+
+// A class to help implement copy-on-write semantics for shared tiles.
+class gfxSharedReadLock {
+protected:
+  virtual ~gfxSharedReadLock() {}
+
+public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(gfxSharedReadLock)
+
+  virtual int32_t ReadLock() = 0;
+  virtual int32_t ReadUnlock() = 0;
+  virtual int32_t GetReadCount() = 0;
+  virtual bool IsValid() const = 0;
+
+  enum gfxSharedReadLockType {
+    TYPE_MEMORY,
+    TYPE_SHMEM
+  };
+  virtual gfxSharedReadLockType GetType() = 0;
+
+protected:
+  NS_DECL_OWNINGTHREAD
+};
+
+class gfxMemorySharedReadLock : public gfxSharedReadLock {
+public:
+  gfxMemorySharedReadLock();
+
+protected:
+  ~gfxMemorySharedReadLock();
+
+public:
+  virtual int32_t ReadLock() override;
+
+  virtual int32_t ReadUnlock() override;
+
+  virtual int32_t GetReadCount() override;
+
+  virtual gfxSharedReadLockType GetType() override { return TYPE_MEMORY; }
+
+  virtual bool IsValid() const override { return true; };
+
+private:
+  int32_t mReadCount;
+};
+
+class gfxShmSharedReadLock : public gfxSharedReadLock {
+private:
+  struct ShmReadLockInfo {
+    int32_t readCount;
+  };
+
+public:
+  explicit gfxShmSharedReadLock(ISurfaceAllocator* aAllocator);
+
+protected:
+  ~gfxShmSharedReadLock();
+
+public:
+  virtual int32_t ReadLock() override;
+
+  virtual int32_t ReadUnlock() override;
+
+  virtual int32_t GetReadCount() override;
+
+  virtual bool IsValid() const override { return mAllocSuccess; };
+
+  virtual gfxSharedReadLockType GetType() override { return TYPE_SHMEM; }
+
+  mozilla::layers::ShmemSection& GetShmemSection() { return mShmemSection; }
+
+  static already_AddRefed<gfxShmSharedReadLock>
+  Open(mozilla::layers::ISurfaceAllocator* aAllocator, const mozilla::layers::ShmemSection& aShmemSection)
+  {
+    nsRefPtr<gfxShmSharedReadLock> readLock = new gfxShmSharedReadLock(aAllocator, aShmemSection);
+    return readLock.forget();
+  }
+
+private:
+  gfxShmSharedReadLock(ISurfaceAllocator* aAllocator, const mozilla::layers::ShmemSection& aShmemSection)
+    : mAllocator(aAllocator)
+    , mShmemSection(aShmemSection)
+    , mAllocSuccess(true)
+  {
+    MOZ_COUNT_CTOR(gfxShmSharedReadLock);
+  }
+
+  ShmReadLockInfo* GetShmReadLockInfoPtr()
+  {
+    return reinterpret_cast<ShmReadLockInfo*>
+      (mShmemSection.shmem().get<char>() + mShmemSection.offset());
+  }
+
+  RefPtr<ISurfaceAllocator> mAllocator;
+  mozilla::layers::ShmemSection mShmemSection;
+  bool mAllocSuccess;
+};
 
 /**
  * Represent a single tile in tiled buffer. The buffer keeps tiles,
@@ -74,10 +174,6 @@ struct TileClient
   {
     mManager = aManager;
   }
-  void SetTextureAllocator(TextureClientAllocator* aAllocator)
-  {
-    mAllocator = aAllocator;
-  }
 
   void SetCompositableClient(CompositableClient* aCompositableClient)
   {
@@ -87,6 +183,22 @@ struct TileClient
   bool IsPlaceholderTile() const
   {
     return mBackBuffer == nullptr && mFrontBuffer == nullptr;
+  }
+
+  void ReadUnlock()
+  {
+    MOZ_ASSERT(mFrontLock, "ReadLock with no gfxSharedReadLock");
+    if (mFrontLock) {
+      mFrontLock->ReadUnlock();
+    }
+  }
+
+  void ReadLock()
+  {
+    MOZ_ASSERT(mFrontLock, "ReadLock with no gfxSharedReadLock");
+    if (mFrontLock) {
+      mFrontLock->ReadLock();
+    }
   }
 
   void DiscardBuffers()
@@ -109,9 +221,9 @@ struct TileClient
   */
   void Flip();
 
-  void DumpTexture(std::stringstream& aStream, TextureDumpMode aCompress) {
+  void DumpTexture(std::stringstream& aStream) {
     // TODO We should combine the OnWhite/OnBlack here an just output a single image.
-    CompositableClient::DumpTextureClient(aStream, mFrontBuffer, aCompress);
+    CompositableClient::DumpTextureClient(aStream, mFrontBuffer);
   }
 
   /**
@@ -128,6 +240,7 @@ struct TileClient
   */
   TextureClient* GetBackBuffer(const nsIntRegion& aDirtyRegion,
                                gfxContentType aContent, SurfaceMode aMode,
+                               bool *aCreatedTextureClient,
                                nsIntRegion& aAddPaintedRegion,
                                RefPtr<TextureClient>* aTextureClientOnWhite);
 
@@ -153,17 +266,18 @@ struct TileClient
   RefPtr<TextureClient> mBackBufferOnWhite;
   RefPtr<TextureClient> mFrontBuffer;
   RefPtr<TextureClient> mFrontBufferOnWhite;
+  RefPtr<gfxSharedReadLock> mBackLock;
+  RefPtr<gfxSharedReadLock> mFrontLock;
   RefPtr<ClientLayerManager> mManager;
-  RefPtr<TextureClientAllocator> mAllocator;
   gfx::IntRect mUpdateRect;
   CompositableClient* mCompositableClient;
-  bool mWasPlaceholder;
 #ifdef GFX_TILEDLAYER_DEBUG_OVERLAY
   TimeStamp        mLastUpdate;
 #endif
   nsIntRegion mInvalidFront;
   nsIntRegion mInvalidBack;
   nsExpirationState mExpirationState;
+
 private:
   // Copies dirty pixels from the front buffer into the back buffer,
   // and records the copied region in aAddPaintedRegion.
@@ -195,14 +309,14 @@ struct BasicTiledLayerPaintData {
    * the closest ancestor layer which scrolls, and is used to obtain
    * the composition bounds that are relevant for this layer.
    */
-  LayerToParentLayerMatrix4x4 mTransformToCompBounds;
+  gfx::Matrix4x4 mTransformToCompBounds;
 
   /*
    * The critical displayport of the content from the nearest ancestor layer
-   * that represents scrollable content with a display port set. isNothing()
-   * if a critical displayport is not set.
+   * that represents scrollable content with a display port set. Empty if a
+   * critical displayport is not set.
    */
-  Maybe<LayerIntRect> mCriticalDisplayPort;
+  LayerIntRect mCriticalDisplayPort;
 
   /*
    * The render resolution of the document that the content this layer
@@ -235,16 +349,6 @@ struct BasicTiledLayerPaintData {
    * progressively.
    */
   bool mPaintFinished : 1;
-
-  /*
-   * Whether or not there is an async transform animation active
-   */
-  bool mHasTransformAnimation : 1;
-
-  /*
-   * Initializes/clears data to prepare for paint action.
-   */
-  void ResetPaintData();
 };
 
 class SharedFrameMetricsHelper
@@ -263,7 +367,7 @@ public:
   bool UpdateFromCompositorFrameMetrics(const LayerMetricsWrapper& aLayer,
                                         bool aHasPendingNewThebesContent,
                                         bool aLowPrecision,
-                                        AsyncTransform& aViewTransform);
+                                        ViewTransform& aViewTransform);
 
   /**
    * Determines if the compositor's upcoming composition bounds has fallen
@@ -287,76 +391,23 @@ private:
  * gfxPrefs::PerTileDrawing().
  */
 class ClientTiledLayerBuffer
+  : public TiledLayerBuffer<ClientTiledLayerBuffer, TileClient>
 {
+  friend class TiledLayerBuffer<ClientTiledLayerBuffer, TileClient>;
+
 public:
   ClientTiledLayerBuffer(ClientTiledPaintedLayer* aPaintedLayer,
-                         CompositableClient* aCompositableClient)
-    : mPaintedLayer(aPaintedLayer)
-    , mCompositableClient(aCompositableClient)
-    , mLastPaintContentType(gfxContentType::COLOR)
-    , mLastPaintSurfaceMode(SurfaceMode::SURFACE_OPAQUE)
-    , mWasLastPaintProgressive(false)
-  {}
-
-  virtual void PaintThebes(const nsIntRegion& aNewValidRegion,
-                   const nsIntRegion& aPaintRegion,
-                   const nsIntRegion& aDirtyRegion,
-                   LayerManager::DrawPaintedLayerCallback aCallback,
-                   void* aCallbackData,
-                   bool aIsProgressive = false) = 0;
-
-  virtual bool SupportsProgressiveUpdate() = 0;
-  virtual bool ProgressiveUpdate(nsIntRegion& aValidRegion,
-                         nsIntRegion& aInvalidRegion,
-                         const nsIntRegion& aOldValidRegion,
-                         BasicTiledLayerPaintData* aPaintData,
-                         LayerManager::DrawPaintedLayerCallback aCallback,
-                         void* aCallbackData) = 0;
-  virtual void ResetPaintedAndValidState() = 0;
-
-  virtual const nsIntRegion& GetValidRegion() = 0;
-
-  virtual bool IsLowPrecision() const = 0;
-
-  virtual void Dump(std::stringstream& aStream,
-                    const char* aPrefix,
-                    bool aDumpHtml,
-                    TextureDumpMode aCompress) {}
-
-  const CSSToParentLayerScale2D& GetFrameResolution() { return mFrameResolution; }
-  void SetFrameResolution(const CSSToParentLayerScale2D& aResolution) { mFrameResolution = aResolution; }
-
-  bool HasFormatChanged() const;
-
-protected:
-  void UnlockTile(TileClient& aTile);
-  gfxContentType GetContentType(SurfaceMode* aMode = nullptr) const;
-
-  ClientTiledPaintedLayer* mPaintedLayer;
-  CompositableClient* mCompositableClient;
-
-  gfxContentType mLastPaintContentType;
-  SurfaceMode mLastPaintSurfaceMode;
-  CSSToParentLayerScale2D mFrameResolution;
-
-  bool mWasLastPaintProgressive;
-};
-
-class ClientMultiTiledLayerBuffer
-  : public TiledLayerBuffer<ClientMultiTiledLayerBuffer, TileClient>
-  , public ClientTiledLayerBuffer
-{
-  friend class TiledLayerBuffer<ClientMultiTiledLayerBuffer, TileClient>;
-public:
-  ClientMultiTiledLayerBuffer(ClientTiledPaintedLayer* aPaintedLayer,
-                              CompositableClient* aCompositableClient,
-                              ClientLayerManager* aManager,
-                              SharedFrameMetricsHelper* aHelper);
-  ClientMultiTiledLayerBuffer()
-    : ClientTiledLayerBuffer(nullptr, nullptr)
+                         CompositableClient* aCompositableClient,
+                         ClientLayerManager* aManager,
+                         SharedFrameMetricsHelper* aHelper);
+  ClientTiledLayerBuffer()
+    : mPaintedLayer(nullptr)
+    , mCompositableClient(nullptr)
     , mManager(nullptr)
     , mCallback(nullptr)
     , mCallbackData(nullptr)
+    , mLastPaintContentType(gfxContentType::COLOR)
+    , mLastPaintSurfaceMode(SurfaceMode::SURFACE_OPAQUE)
     , mSharedFrameMetricsHelper(nullptr)
     , mTilingOrigin(std::numeric_limits<int32_t>::max(),
                     std::numeric_limits<int32_t>::max())
@@ -366,10 +417,20 @@ public:
                    const nsIntRegion& aPaintRegion,
                    const nsIntRegion& aDirtyRegion,
                    LayerManager::DrawPaintedLayerCallback aCallback,
-                   void* aCallbackData,
-                   bool aIsProgressive = false) override;
+                   void* aCallbackData);
 
-  virtual bool SupportsProgressiveUpdate() override { return true; }
+  void Update(const nsIntRegion& aNewValidRegion, const nsIntRegion& aPaintRegion);
+
+  void ReadLock();
+
+  void DiscardBuffers();
+
+  const CSSToParentLayerScale2D& GetFrameResolution() { return mFrameResolution; }
+
+  void SetFrameResolution(const CSSToParentLayerScale2D& aResolution) { mFrameResolution = aResolution; }
+
+  bool HasFormatChanged() const;
+
   /**
    * Performs a progressive update of a given tiled buffer.
    * See ComputeProgressiveUpdateRegion below for parameter documentation.
@@ -379,38 +440,7 @@ public:
                          const nsIntRegion& aOldValidRegion,
                          BasicTiledLayerPaintData* aPaintData,
                          LayerManager::DrawPaintedLayerCallback aCallback,
-                         void* aCallbackData) override;
-  
-  void ResetPaintedAndValidState() override {
-    mPaintedRegion.SetEmpty();
-    mValidRegion.SetEmpty();
-    mTiles.mSize.width = 0;
-    mTiles.mSize.height = 0;
-    DiscardBuffers();
-    mRetainedTiles.Clear();
-  }
-
-
-  const nsIntRegion& GetValidRegion() override {
-    return TiledLayerBuffer::GetValidRegion();
-  }
-
-  bool IsLowPrecision() const override {
-    return TiledLayerBuffer::IsLowPrecision();
-  }
-
-  void Dump(std::stringstream& aStream,
-            const char* aPrefix,
-            bool aDumpHtml,
-            TextureDumpMode aCompress) override {
-    TiledLayerBuffer::Dump(aStream, aPrefix, aDumpHtml, aCompress);
-  }
-
-  void ReadLock();
-
-  void Release();
-
-  void DiscardBuffers();
+                         void* aCallbackData);
 
   SurfaceDescriptorTiles GetSurfaceDescriptorTiles();
 
@@ -419,30 +449,48 @@ public:
       return;
     }
 
-    Update(nsIntRegion(), nsIntRegion(), nsIntRegion());
+    Update(nsIntRegion(), nsIntRegion());
     mResolution = aResolution;
+  }
+
+  void ResetPaintedAndValidState() {
+    mPaintedRegion.SetEmpty();
+    mValidRegion.SetEmpty();
+    mTiles.mSize.width = 0;
+    mTiles.mSize.height = 0;
+    DiscardBuffers();
+    mRetainedTiles.Clear();
   }
 
 protected:
   bool ValidateTile(TileClient& aTile,
                     const nsIntPoint& aTileRect,
                     const nsIntRegion& dirtyRect);
-  
-  void Update(const nsIntRegion& aNewValidRegion,
-              const nsIntRegion& aPaintRegion,
-              const nsIntRegion& aDirtyRegion);
+
+  void PostValidate(const nsIntRegion& aPaintRegion);
+
+  void UnlockTile(TileClient& aTile);
 
   TileClient GetPlaceholderTile() const { return TileClient(); }
 
 private:
+  gfxContentType GetContentType(SurfaceMode* aMode = nullptr) const;
+  ClientTiledPaintedLayer* mPaintedLayer;
+  CompositableClient* mCompositableClient;
   ClientLayerManager* mManager;
   LayerManager::DrawPaintedLayerCallback mCallback;
   void* mCallbackData;
+  CSSToParentLayerScale2D mFrameResolution;
+  gfxContentType mLastPaintContentType;
+  SurfaceMode mLastPaintSurfaceMode;
 
   // The region that will be made valid during Update(). Once Update() is
   // completed then this is identical to mValidRegion.
   nsIntRegion mNewValidRegion;
 
+  // The DrawTarget we use when UseSinglePaintBuffer() above is true.
+  RefPtr<gfx::DrawTarget>       mSinglePaintDrawTarget;
+  nsIntPoint                    mSinglePaintBufferOffset;
   SharedFrameMetricsHelper*  mSharedFrameMetricsHelper;
   // When using Moz2D's CreateTiledDrawTarget we maintain a list of gfx::Tiles
   std::vector<gfx::Tile> mMoz2DTiles;
@@ -482,80 +530,50 @@ private:
 
 class TiledContentClient : public CompositableClient
 {
+  // XXX: for now the layer which owns us interacts directly with our buffers.
+  // We should have a content client for each tiled buffer which manages its
+  // own valid region, resolution, etc. Then we could have a much cleaner
+  // interface and tidy up BasicTiledPaintedLayer::PaintThebes (bug 862547).
+  friend class ClientTiledPaintedLayer;
+
 public:
-  TiledContentClient(ClientLayerManager* aManager,
-                     const char* aName = "")
-    : CompositableClient(aManager->AsShadowForwarder())
-    , mName(aName)
-  {}
+  TiledContentClient(ClientTiledPaintedLayer* aPaintedLayer,
+                     ClientLayerManager* aManager);
 
 protected:
   ~TiledContentClient()
-  {}
+  {
+    MOZ_COUNT_DTOR(TiledContentClient);
 
-public:
+    mDestroyed = true;
+    mTiledBuffer.DiscardBuffers();
+    mLowPrecisionTiledBuffer.DiscardBuffers();
+  }
+
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix);
 
   virtual void Dump(std::stringstream& aStream,
                     const char* aPrefix="",
-                    bool aDumpHtml=false,
-                    TextureDumpMode aCompress=TextureDumpMode::Compress) override;
+                    bool aDumpHtml=false);
 
+public:
   virtual TextureInfo GetTextureInfo() const override
   {
     return TextureInfo(CompositableType::CONTENT_TILED);
   }
 
-
-  virtual ClientTiledLayerBuffer* GetTiledBuffer() = 0;
-  virtual ClientTiledLayerBuffer* GetLowPrecisionTiledBuffer() = 0;
+  virtual void ClearCachedResources() override;
 
   enum TiledBufferType {
     TILED_BUFFER,
     LOW_PRECISION_TILED_BUFFER
   };
-  virtual void UpdatedBuffer(TiledBufferType aType) = 0;
-
-private:
-  const char* mName;
-};
-
-/**
- * An implementation of TiledContentClient that supports
- * multiple tiles and a low precision buffer.
- */
-class MultiTiledContentClient : public TiledContentClient
-{
-public:
-  MultiTiledContentClient(ClientTiledPaintedLayer* aPaintedLayer,
-                          ClientLayerManager* aManager);
-
-protected:
-  ~MultiTiledContentClient()
-  {
-    MOZ_COUNT_DTOR(MultiTiledContentClient);
-
-      mTiledBuffer.DiscardBuffers();
-    mLowPrecisionTiledBuffer.DiscardBuffers();
-  }
-
-public:
-  void ClearCachedResources() override;
-  void UpdatedBuffer(TiledBufferType aType) override;
-
-  ClientTiledLayerBuffer* GetTiledBuffer() override { return &mTiledBuffer; }
-  ClientTiledLayerBuffer* GetLowPrecisionTiledBuffer() override {
-    if (mHasLowPrecision) {
-      return &mLowPrecisionTiledBuffer;
-    }
-    return nullptr;
-  }
+  void UseTiledLayerBuffer(TiledBufferType aType);
 
 private:
   SharedFrameMetricsHelper mSharedFrameMetricsHelper;
-  ClientMultiTiledLayerBuffer mTiledBuffer;
-  ClientMultiTiledLayerBuffer mLowPrecisionTiledBuffer;
-  bool mHasLowPrecision;
+  ClientTiledLayerBuffer mTiledBuffer;
+  ClientTiledLayerBuffer mLowPrecisionTiledBuffer;
 };
 
 } // namespace layers

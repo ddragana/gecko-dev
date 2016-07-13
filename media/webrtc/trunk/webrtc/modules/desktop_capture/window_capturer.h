@@ -52,7 +52,11 @@ class WindowCapturer : public DesktopCapturer {
 
   // Bring the selected window to the front. Returns false in case of a
   // failure or no window selected.
-  virtual bool BringSelectedWindowToFront() = 0;
+  // TODO(jiayl): remove the default impl when FakeWindowCapturer is updated in
+  // Chromium.
+  virtual bool BringSelectedWindowToFront() {
+    return true;
+  }
 };
 
 }  // namespace webrtc

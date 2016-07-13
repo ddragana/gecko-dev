@@ -141,21 +141,14 @@ PR_GetCurrentThread()
     if (!gInitialized)
         Initialize();
 
-    PRThread* thread = reinterpret_cast<PRThread*>(pthread_getspecific(gSelfThreadIndex));
-    if (!thread) {
-        thread = js_new<PRThread>(nullptr, nullptr, false);
-        if (!thread)
-            MOZ_CRASH();
-        pthread_setspecific(gSelfThreadIndex, thread);
-    }
-    return thread;
+    return (PRThread*)pthread_getspecific(gSelfThreadIndex);
 }
 
 PRStatus
 PR_SetCurrentThreadName(const char* name)
 {
     int result;
-#ifdef XP_DARWIN
+#ifdef XP_MACOSX
     result = pthread_setname_np(name);
 #elif defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
     pthread_set_name_np(pthread_self(), name);
@@ -277,7 +270,7 @@ class nspr::CondVar
     nspr::Lock* lock_;
 
   public:
-    explicit CondVar(nspr::Lock* lock) : lock_(lock) {}
+    CondVar(nspr::Lock* lock) : lock_(lock) {}
     pthread_cond_t& cond() { return cond_; }
     nspr::Lock* lock() { return lock_; }
 };
@@ -343,7 +336,7 @@ PR_TicksPerSecond()
 }
 
 PRStatus
-PR_WaitCondVar(PRCondVar* cvar, PRIntervalTime timeout)
+PR_WaitCondVar(PRCondVar* cvar, uint32_t timeout)
 {
     if (timeout == PR_INTERVAL_NO_TIMEOUT) {
         if (pthread_cond_wait(&cvar->cond(), &cvar->lock()->mutex()))

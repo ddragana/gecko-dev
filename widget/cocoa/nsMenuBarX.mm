@@ -30,9 +30,9 @@
 #include "nsToolkitCompsCID.h"
 
 NativeMenuItemTarget* nsMenuBarX::sNativeEventTarget = nil;
-nsMenuBarX* nsMenuBarX::sLastGeckoMenuBarPainted = nullptr;
+nsMenuBarX* nsMenuBarX::sLastGeckoMenuBarPainted = nullptr; // Weak
+nsMenuBarX* nsMenuBarX::sCurrentPaintDelayedMenuBar = nullptr; // Weak
 NSMenu* sApplicationMenu = nil;
-BOOL sApplicationMenuIsFallback = NO;
 BOOL gSomeMenuBarPainted = NO;
 
 // We keep references to the first quit and pref item content nodes we find, which
@@ -49,7 +49,7 @@ NS_IMETHODIMP nsNativeMenuServiceX::CreateNativeMenuBar(nsIWidget* aParent, nsIC
 {
   NS_ASSERTION(NS_IsMainThread(), "Attempting to create native menu bar on wrong thread!");
 
-  RefPtr<nsMenuBarX> mb = new nsMenuBarX();
+  nsRefPtr<nsMenuBarX> mb = new nsMenuBarX();
   if (!mb)
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -57,11 +57,11 @@ NS_IMETHODIMP nsNativeMenuServiceX::CreateNativeMenuBar(nsIWidget* aParent, nsIC
 }
 
 nsMenuBarX::nsMenuBarX()
-: nsMenuGroupOwnerX(), mParentWindow(nullptr)
+: nsMenuGroupOwnerX(), mParentWindow(nullptr), mAwaitingDelayedPaint(false)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  mNativeMenu = [[GeckoNSMenu alloc] initWithTitle:@"MainMenuBar"];
+  mNativeMenu = [[GeckoNSMenu alloc] initWithTitle:@"MainMenuBar" andMenuBarOwner:this];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -93,6 +93,7 @@ nsMenuBarX::~nsMenuBarX()
   // before the registration hash table is destroyed.
   mMenuArray.Clear();
 
+  [mNativeMenu resetMenuBarOwner];
   [mNativeMenu release];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -185,7 +186,6 @@ void nsMenuBarX::ConstructFallbackNativeMenus()
   [quitMenuItem setTarget:nsMenuBarX::sNativeEventTarget];
   [quitMenuItem setTag:eCommand_ID_Quit];
   [sApplicationMenu addItem:quitMenuItem];
-  sApplicationMenuIsFallback = YES;
 }
 
 uint32_t nsMenuBarX::GetMenuCount()
@@ -207,11 +207,6 @@ nsresult nsMenuBarX::InsertMenuAtIndex(nsMenuX* aMenu, uint32_t aIndex)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  // If we've only yet created a fallback global Application menu (using
-  // ContructFallbackNativeMenus()), destroy it before recreating it properly.
-  if (sApplicationMenu && sApplicationMenuIsFallback) {
-    ResetNativeApplicationMenu();
-  }
   // If we haven't created a global Application menu yet, do it.
   if (!sApplicationMenu) {
     nsresult rv = NS_OK; // avoid warning about rv being unused
@@ -306,7 +301,7 @@ void nsMenuBarX::ForceUpdateNativeMenuAt(const nsAString& indexString)
   uint32_t length = mMenuArray.Length();
   // first find a menu in the menu bar
   for (unsigned int i = 0; i < length; i++) {
-    nsMenuX* menu = mMenuArray[i].get();
+    nsMenuX* menu = mMenuArray[i];
     if (!nsMenuUtilsX::NodeIsHiddenOrCollapsed(menu->Content())) {
       visible++;
       if (visible == (targetIndex + 1)) {
@@ -366,7 +361,7 @@ nsMenuX* nsMenuBarX::GetMenuAt(uint32_t aIndex)
     NS_ERROR("Requesting menu at invalid index!");
     return NULL;
   }
-  return mMenuArray[aIndex].get();
+  return mMenuArray[aIndex];
 }
 
 nsMenuX* nsMenuBarX::GetXULHelpMenu()
@@ -395,9 +390,14 @@ void nsMenuBarX::SetSystemHelpMenu()
   }
 }
 
-nsresult nsMenuBarX::Paint()
+nsresult nsMenuBarX::Paint(bool aDelayed)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+
+  if (!aDelayed && mAwaitingDelayedPaint) {
+    return NS_OK;
+  }
+  mAwaitingDelayedPaint = false;
 
   // Don't try to optimize anything in this painting by checking
   // sLastGeckoMenuBarPainted because the menubar can be manipulated by
@@ -408,13 +408,36 @@ nsresult nsMenuBarX::Paint()
   NSMenu* outgoingMenu = [NSApp mainMenu];
   NS_ASSERTION([outgoingMenu numberOfItems] > 0, "Main menu does not have any items, something is terribly wrong!");
 
-  NSMenuItem* appMenuItem = [[outgoingMenu itemAtIndex:0] retain];
-  [outgoingMenu removeItemAtIndex:0];
-  [mNativeMenu insertItem:appMenuItem atIndex:0];
-  [appMenuItem release];
+  // To work around bug 722676, we sometimes need to delay making mNativeMenu
+  // the main menu.  This is an Apple bug that sometimes causes a top-level
+  // menu item to remain highlighted after pressing a Cmd+key combination that
+  // opens a new window, then closing the window.  The OS temporarily
+  // highlights the appropriate top-level menu item whenever you press the
+  // Cmd+key combination for one of its submenus.  (It does this by setting a
+  // "pressed" attribute on it.)  The OS then uses a timer to remove this
+  // "pressed" attribute.  But without our workaround we sometimes change the
+  // main menu before the timer has fired, so when it fires the menu item it
+  // was intended to unhighlight is no longer present in the main menu.  This
+  // causes the item to remain semi-permanently highlighted (until you quit
+  // Firefox or navigate the main menu by hand).
+  if ((outgoingMenu != mNativeMenu) &&
+      [outgoingMenu isKindOfClass:[GeckoNSMenu class]]) {
+    if (aDelayed) {
+      [(GeckoNSMenu *)outgoingMenu setDelayResignMainMenu:false];
+    } else if ([(GeckoNSMenu *)outgoingMenu delayResignMainMenu]) {
+      PaintMenuBarAfterDelay();
+      return NS_OK;
+    }
+  }
 
-  // Set menu bar and event target.
-  [NSApp setMainMenu:mNativeMenu];
+  if (outgoingMenu != mNativeMenu) {
+    NSMenuItem* appMenuItem = [[outgoingMenu itemAtIndex:0] retain];
+    [outgoingMenu removeItemAtIndex:0];
+    [mNativeMenu insertItem:appMenuItem atIndex:0];
+    [appMenuItem release];
+    // Set menu bar and event target.
+    [NSApp setMainMenu:mNativeMenu];
+  }
   SetSystemHelpMenu();
   nsMenuBarX::sLastGeckoMenuBarPainted = this;
 
@@ -423,6 +446,19 @@ nsresult nsMenuBarX::Paint()
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
+// Used to delay a call to nsMenuBarX::Paint().  Needed to work around
+// bug 722676.
+void nsMenuBarX::PaintMenuBarAfterDelay()
+{
+  mAwaitingDelayedPaint = true;
+  nsMenuBarX::sCurrentPaintDelayedMenuBar = this;
+  [mNativeMenu retain];
+  // The delay for Apple's unhighlight timer is 0.1f, so we make ours a bit longer.
+  [mNativeMenu performSelector:@selector(delayedPaintMenuBar:)
+                    withObject:nil
+                    afterDelay:0.15f];
 }
 
 // Returns the 'key' attribute of the 'shortcutID' object (if any) in the
@@ -470,7 +506,6 @@ void nsMenuBarX::ResetNativeApplicationMenu()
   [sApplicationMenu removeAllItems];
   [sApplicationMenu release];
   sApplicationMenu = nil;
-  sApplicationMenuIsFallback = NO;
 }
 
 // Hide the item in the menu by setting the 'hidden' attribute. Returns it in |outHiddenNode| so
@@ -774,6 +809,66 @@ static BOOL gMenuItemsExecuteCommands = YES;
 
 @implementation GeckoNSMenu
 
+- (id)initWithTitle:(NSString *)aTitle
+{
+  if ((self = [super initWithTitle:aTitle])) {
+    mMenuBarOwner = nullptr;
+    mDelayResignMainMenu = false;
+  }
+  return self;
+}
+
+- (id)initWithTitle:(NSString *)aTitle andMenuBarOwner:(nsMenuBarX *)aMenuBarOwner
+{
+  if ((self = [super initWithTitle:aTitle])) {
+    mMenuBarOwner = aMenuBarOwner;
+    mDelayResignMainMenu = false;
+  }
+  return self;
+}
+
+- (void)resetMenuBarOwner
+{
+  mMenuBarOwner = nil;
+}
+
+- (bool)delayResignMainMenu
+{
+  return mDelayResignMainMenu;
+}
+
+- (void)setDelayResignMainMenu:(bool)aShouldDelay
+{
+  mDelayResignMainMenu = aShouldDelay;
+}
+
+// Used to delay a call to nsMenuBarX::Paint().  Needed to work around
+// bug 722676.
+- (void)delayedPaintMenuBar:(id)unused
+{
+  if (mMenuBarOwner) {
+    if (mMenuBarOwner == nsMenuBarX::sCurrentPaintDelayedMenuBar) {
+      mMenuBarOwner->Paint(true);
+      nsMenuBarX::sCurrentPaintDelayedMenuBar = nullptr;
+    } else {
+      mMenuBarOwner->ResetAwaitingDelayedPaint();
+    }
+  }
+  [self release];
+}
+
+// Undocumented method, present unchanged since OS X 10.6, used to temporarily
+// highlight a top-level menu item when an appropriate Cmd+key combination is
+// pressed.
+- (void)_performActionWithHighlightingForItemAtIndex:(NSInteger)index
+{
+  NSMenu *mainMenu = [NSApp mainMenu];
+  if ([mainMenu isKindOfClass:[GeckoNSMenu class]]) {
+    [(GeckoNSMenu *)mainMenu setDelayResignMainMenu:true];
+  }
+  [super _performActionWithHighlightingForItemAtIndex:index];
+}
+
 // Keyboard commands should not cause menu items to invoke their
 // commands when there is a key window because we'd rather send
 // the keyboard command to the window. We still have the menus
@@ -829,11 +924,28 @@ static BOOL gMenuItemsExecuteCommands = YES;
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if (!gMenuItemsExecuteCommands) {
+  // menuGroupOwner below is an nsMenuBarX object, which we sometimes access
+  // after it's been deleted, causing crashes (see bug 704866 and bug 670914).
+  // To fix this "correctly", in nsMenuBarX::~nsMenuBarX() we'd need to
+  // iterate through every NSMenuItem in nsMenuBarX::mNativeMenu and its
+  // submenus, which might be quite time consuming.  (For every NSMenuItem
+  // that has a "representedObject" that's a MenuItemInfo object, we'd need
+  // need to null out its "menuGroupOwner" if it's the same as the nsMenuBarX
+  // object being destroyed.)  But if the nsMenuBarX object being destroyed
+  // corresponds to the currently focused window, it's likely that the
+  // nsMenuBarX destructor will null out sLastGeckoMenuBarPainted.  So we can
+  // probably eliminate most of these crashes if we use this variable being
+  // null as an indicator that we're likely to crash below when we dereference
+  // menuGroupOwner.
+  if (!nsMenuBarX::sLastGeckoMenuBarPainted) {
     return;
   }
 
   int tag = [sender tag];
+
+  if (!gMenuItemsExecuteCommands) {
+    return;
+  }
 
   nsMenuGroupOwnerX* menuGroupOwner = nullptr;
   nsMenuBarX* menuBar = nullptr;

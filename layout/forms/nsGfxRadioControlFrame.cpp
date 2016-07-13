@@ -45,7 +45,7 @@ nsGfxRadioControlFrame::AccessibleType()
 // Draw the dot for a non-native radio button in the checked state.
 static void
 PaintCheckedRadioButton(nsIFrame* aFrame,
-                        DrawTarget* aDrawTarget,
+                        nsRenderingContext* aCtx,
                         const nsRect& aDirtyRect,
                         nsPoint aPt)
 {
@@ -62,10 +62,11 @@ PaintCheckedRadioButton(nsIFrame* aFrame,
 
   ColorPattern color(ToDeviceColor(aFrame->StyleColor()->mColor));
 
-  RefPtr<PathBuilder> builder = aDrawTarget->CreatePathBuilder();
+  DrawTarget* drawTarget = aCtx->GetDrawTarget();
+  RefPtr<PathBuilder> builder = drawTarget->CreatePathBuilder();
   AppendEllipseToPath(builder, devPxRect.Center(), devPxRect.Size());
   RefPtr<Path> ellipse = builder->Finish();
-  aDrawTarget->Fill(ellipse, color);
+  drawTarget->Fill(ellipse, color);
 }
 
 void

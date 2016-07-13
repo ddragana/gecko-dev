@@ -6,7 +6,7 @@
 const { Class } = require('../core/heritage');
 const { observer } = require('./observer');
 const { isBrowser, getMostRecentBrowserWindow, windows, open, getInnerId,
-        getWindowTitle, getToplevelWindow, isFocused, isWindowPrivate } = require('../window/utils');
+        getWindowTitle, isFocused, isWindowPrivate } = require('../window/utils');
 const { List, addListItem, removeListItem } = require('../util/list');
 const { viewFor } = require('../view/core');
 const { modelFor } = require('../model/core');
@@ -188,17 +188,15 @@ for (let domWindow of windows()) {
     addListItem(browserWindows, window);
 }
 
-var windowEventListener = (event, domWindow, ...args) => {
-  let toplevelWindow = getToplevelWindow(domWindow);
-
-  if (ignoreWindow(toplevelWindow))
+let windowEventListener = (event, domWindow, ...args) => {
+  if (ignoreWindow(domWindow))
     return;
 
-  let window = modelsFor.get(toplevelWindow);
+  let window = modelsFor.get(domWindow);
   if (!window)
-    window = makeNewWindow(toplevelWindow);
+    window = makeNewWindow(domWindow);
 
-  if (isBrowser(toplevelWindow)) {
+  if (isBrowser(domWindow)) {
     if (event == "open")
       addListItem(browserWindows, window);
     else if (event == "close")
@@ -210,7 +208,7 @@ var windowEventListener = (event, domWindow, ...args) => {
   // The window object shouldn't be reachable after closed
   if (event == "close") {
     viewsFor.delete(window);
-    modelsFor.delete(toplevelWindow);
+    modelsFor.delete(domWindow);
   }
 };
 observer.on("*", windowEventListener);

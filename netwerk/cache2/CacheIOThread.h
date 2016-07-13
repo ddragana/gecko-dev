@@ -29,16 +29,14 @@ public:
 
   CacheIOThread();
 
-  typedef nsTArray<nsCOMPtr<nsIRunnable>> EventQueue;
-
-  enum ELevel : uint32_t {
+  enum ELevel {
     OPEN_PRIORITY,
     READ_PRIORITY,
     OPEN,
     READ,
     MANAGEMENT,
     WRITE,
-    CLOSE = WRITE,
+    CLOSE,
     INDEX,
     EVICT,
     LAST_LEVEL,
@@ -51,7 +49,6 @@ public:
 
   nsresult Init();
   nsresult Dispatch(nsIRunnable* aRunnable, uint32_t aLevel);
-  nsresult Dispatch(already_AddRefed<nsIRunnable>, uint32_t aLevel);
   // Makes sure that any previously posted event to OPEN or OPEN_PRIORITY
   // levels (such as file opennings and dooms) are executed before aRunnable
   // that is intended to evict stuff from the cache.
@@ -84,25 +81,22 @@ private:
   void ThreadFunc();
   void LoopOneLevel(uint32_t aLevel);
   bool EventsPending(uint32_t aLastLevel = LAST_LEVEL);
-  nsresult DispatchInternal(already_AddRefed<nsIRunnable> aRunnable, uint32_t aLevel);
+  nsresult DispatchInternal(nsIRunnable* aRunnable, uint32_t aLevel);
   bool YieldInternal();
 
   static CacheIOThread* sSelf;
 
   mozilla::Monitor mMonitor;
   PRThread* mThread;
-  Atomic<nsIThread *> mXPCOMThread;
+  nsCOMPtr<nsIThread> mXPCOMThread;
   Atomic<uint32_t, Relaxed> mLowestLevelWaiting;
   uint32_t mCurrentlyExecutingLevel;
-
-  EventQueue mEventQueue[LAST_LEVEL];
+  nsTArray<nsCOMPtr<nsIRunnable> > mEventQueue[LAST_LEVEL];
 
   Atomic<bool, Relaxed> mHasXPCOMEvents;
   bool mRerunCurrentEvent;
   bool mShutdown;
-#ifdef DEBUG
-  bool mInsideLoop;
-#endif
+  DebugOnly<bool> mInsideLoop;
 };
 
 } // namespace net

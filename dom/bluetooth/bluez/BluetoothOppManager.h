@@ -4,15 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_bluetooth_bluez_BluetoothOppManager_h
-#define mozilla_dom_bluetooth_bluez_BluetoothOppManager_h
+#ifndef mozilla_dom_bluetooth_bluetoothoppmanager_h__
+#define mozilla_dom_bluetooth_bluetoothoppmanager_h__
 
 #include "BluetoothCommon.h"
 #include "BluetoothProfileManagerBase.h"
 #include "BluetoothSocketObserver.h"
 #include "DeviceStorage.h"
 #include "mozilla/ipc/SocketBase.h"
-#include "mozilla/UniquePtr.h"
 #include "nsCOMArray.h"
 
 class nsIOutputStream;
@@ -51,8 +50,8 @@ public:
 
   bool Listen();
 
-  bool SendFile(const BluetoothAddress& aDeviceAddress, BlobParent* aActor);
-  bool SendFile(const BluetoothAddress& aDeviceAddress, Blob* aBlob);
+  bool SendFile(const nsAString& aDeviceAddress, BlobParent* aActor);
+  bool SendFile(const nsAString& aDeviceAddress, Blob* aBlob);
   bool StopSendingFile();
   bool ConfirmReceivingFile(bool aConfirm);
 
@@ -97,11 +96,10 @@ private:
   void NotifyAboutFileChange();
   bool AcquireSdcardMountLock();
   void SendObexData(uint8_t* aData, uint8_t aOpcode, int aSize);
-  void SendObexData(UniquePtr<uint8_t[]> aData, uint8_t aOpcode, int aSize);
-  void AppendBlobToSend(const BluetoothAddress& aDeviceAddress, Blob* aBlob);
+  void AppendBlobToSend(const nsAString& aDeviceAddress, Blob* aBlob);
   void DiscardBlobsToSend();
   bool ProcessNextBatch();
-  void ConnectInternal(const BluetoothAddress& aDeviceAddress);
+  void ConnectInternal(const nsAString& aDeviceAddress);
 
   /**
    * Usually we won't get a full PUT packet in one operation, which means that
@@ -120,7 +118,7 @@ private:
    * Set when OBEX session is established.
    */
   bool mConnected;
-  BluetoothAddress mConnectedDeviceAddress;
+  nsString mConnectedDeviceAddress;
 
   /**
    * Remote information
@@ -191,11 +189,11 @@ private:
   uint32_t mSentFileLength;
   bool mWaitingToSendPutFinal;
 
-  UniquePtr<uint8_t[]> mBodySegment;
-  UniquePtr<uint8_t[]> mReceivedDataBuffer;
+  nsAutoArrayPtr<uint8_t> mBodySegment;
+  nsAutoArrayPtr<uint8_t> mReceivedDataBuffer;
 
   int mCurrentBlobIndex;
-  RefPtr<Blob> mBlob;
+  nsRefPtr<Blob> mBlob;
   nsTArray<SendFileBatch> mBatches;
 
   /**
@@ -206,20 +204,20 @@ private:
   nsCOMPtr<nsIOutputStream> mOutputStream;
   nsCOMPtr<nsIInputStream> mInputStream;
   nsCOMPtr<nsIVolumeMountLock> mMountLock;
-  RefPtr<DeviceStorageFile> mDsFile;
-  RefPtr<DeviceStorageFile> mDummyDsFile;
+  nsRefPtr<DeviceStorageFile> mDsFile;
+  nsRefPtr<DeviceStorageFile> mDummyDsFile;
 
   // If a connection has been established, mSocket will be the socket
   // communicating with the remote socket. We maintain the invariant that if
   // mSocket is non-null, mRfcommSocket and mL2capSocket must be null (and vice
   // versa).
-  RefPtr<BluetoothSocket> mSocket;
+  nsRefPtr<BluetoothSocket> mSocket;
 
   // Server sockets. Once an inbound connection is established, it will hand
   // over the ownership to mSocket, and get a new server socket while Listen()
   // is called.
-  RefPtr<BluetoothSocket> mRfcommSocket;
-  RefPtr<BluetoothSocket> mL2capSocket;
+  nsRefPtr<BluetoothSocket> mRfcommSocket;
+  nsRefPtr<BluetoothSocket> mL2capSocket;
 
   BluetoothSocketType mSocketType;
 
@@ -230,4 +228,4 @@ private:
 
 END_BLUETOOTH_NAMESPACE
 
-#endif // mozilla_dom_bluetooth_bluez_BluetoothOppManager_h
+#endif

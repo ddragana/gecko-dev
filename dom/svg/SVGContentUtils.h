@@ -8,6 +8,7 @@
 #define MOZILLA_SVGCONTENTUTILS_H
 
 // include math.h to pick up definition of M_ maths defines e.g. M_PI
+#define _USE_MATH_DEFINES
 #include <math.h>
 
 #include "mozilla/gfx/2D.h" // for StrokeOptions
@@ -26,7 +27,6 @@ class nsStyleCoord;
 class nsSVGElement;
 
 namespace mozilla {
-class nsSVGAnimatedTransformList;
 class SVGAnimatedPreserveAspectRatio;
 class SVGPreserveAspectRatio;
 namespace dom {
@@ -38,37 +38,6 @@ namespace gfx {
 class Matrix;
 } // namespace gfx
 } // namespace mozilla
-
-#define SVG_ZERO_LENGTH_PATH_FIX_FACTOR 512
-
-/**
- * SVGTransformTypes controls the transforms that PrependLocalTransformsTo
- * applies.
- *
- * If aWhich is eAllTransforms, then all the transforms from the coordinate
- * space established by this element for its children to the coordinate
- * space established by this element's parent element for this element, are
- * included.
- *
- * If aWhich is eUserSpaceToParent, then only the transforms from this
- * element's userspace to the coordinate space established by its parent is
- * included. This includes any transforms introduced by the 'transform'
- * attribute, transform animations and animateMotion, but not any offsets
- * due to e.g. 'x'/'y' attributes, or any transform due to a 'viewBox'
- * attribute. (SVG userspace is defined to be the coordinate space in which
- * coordinates on an element apply.)
- *
- * If aWhich is eChildToUserSpace, then only the transforms from the
- * coordinate space established by this element for its childre to this
- * elements userspace are included. This includes any offsets due to e.g.
- * 'x'/'y' attributes, and any transform due to a 'viewBox' attribute, but
- * does not include any transforms due to the 'transform' attribute.
- */
-enum SVGTransformTypes {
-   eAllTransforms,
-   eUserSpaceToParent,
-   eChildToUserSpace
-};
 
 inline bool
 IsSVGWhitespace(char aChar)
@@ -92,8 +61,6 @@ class SVGContentUtils
 {
 public:
   typedef mozilla::gfx::Float Float;
-  typedef mozilla::gfx::Matrix Matrix;
-  typedef mozilla::gfx::Rect Rect;
   typedef mozilla::gfx::StrokeOptions StrokeOptions;
   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
   typedef mozilla::SVGPreserveAspectRatio SVGPreserveAspectRatio;
@@ -163,12 +130,6 @@ public:
     eAllStrokeOptions,
     eIgnoreStrokeDashing
   };
-  /**
-   * Note: the linecap style returned in aStrokeOptions is not valid when
-   * ShapeTypeHasNoCorners(aElement) == true && aFlags == eIgnoreStrokeDashing,
-   * since when aElement has no corners the rendered linecap style depends on
-   * whether or not the stroke is dashed.
-   */
   static void GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
                                nsSVGElement* aElement,
                                nsStyleContext* aStyleContext,
@@ -217,23 +178,7 @@ public:
                                   const char16_t **aParams,
                                   uint32_t aParamsLength);
 
-  static Matrix GetCTM(nsSVGElement *aElement, bool aScreenCTM);
-
-  /**
-   * Gets the tight bounds-space stroke bounds of the non-scaling-stroked rect
-   * aRect.
-   * @param aToBoundsSpace transforms from source space to the space aBounds
-   *        should be computed in.  Must be rectilinear.
-   * @param aToNonScalingStrokeSpace transforms from source
-   *        space to the space in which non-scaling stroke should be applied.
-   *        Must be rectilinear.
-   */
-  static void
-  RectilinearGetStrokeBounds(const Rect& aRect,
-                             const Matrix& aToBoundsSpace,
-                             const Matrix& aToNonScalingStrokeSpace,
-                             float aStrokeWidth,
-                             Rect* aBounds);
+  static mozilla::gfx::Matrix GetCTM(nsSVGElement *aElement, bool aScreenCTM);
 
   /**
    * Check if this is one of the SVG elements that SVG 1.1 Full says
@@ -258,13 +203,13 @@ public:
 
   /* Generate a viewbox to viewport tranformation matrix */
 
-  static Matrix
+  static mozilla::gfx::Matrix
   GetViewBoxTransform(float aViewportWidth, float aViewportHeight,
                       float aViewboxX, float aViewboxY,
                       float aViewboxWidth, float aViewboxHeight,
                       const SVGAnimatedPreserveAspectRatio &aPreserveAspectRatio);
 
-  static Matrix
+  static mozilla::gfx::Matrix
   GetViewBoxTransform(float aViewportWidth, float aViewportHeight,
                       float aViewboxX, float aViewboxY,
                       float aViewboxWidth, float aViewboxHeight,
@@ -384,17 +329,6 @@ public:
    *  to have no corners: circle or ellipse
    */
   static bool ShapeTypeHasNoCorners(const nsIContent* aContent);
-
-  /**
-   *  Prepends an element's local transforms to the transform matrix.
-   *  This is a helper for nsSVGElement::PrependLocalTransformsTo.
-   *  Any callers probably really want to call that method instead of this one.
-   */
-  static gfxMatrix PrependLocalTransformsTo(
-    const gfxMatrix &aMatrix,
-    SVGTransformTypes aWhich,
-    const Matrix* aAnimateMotionTransform,
-    const mozilla::nsSVGAnimatedTransformList* aTransforms);
 };
 
 #endif

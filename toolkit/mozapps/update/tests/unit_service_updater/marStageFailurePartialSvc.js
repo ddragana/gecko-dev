@@ -5,33 +5,37 @@
 
 /* General Partial MAR File Staged Patch Apply Failure Test */
 
-const STATE_AFTER_STAGE = IS_SERVICE_TEST ? STATE_PENDING : STATE_APPLYING;
-
 function run_test() {
-  if (!setupTestCommon()) {
+  if (!shouldRunServiceTest()) {
     return;
   }
+
+  gStageUpdate = true;
+  setupTestCommon();
   gTestFiles = gTestFilesPartialSuccess;
   gTestFiles[11].originalFile = "partial.png";
   gTestDirs = gTestDirsPartialSuccess;
   setTestFilesAndDirsForFailure();
-  setupUpdaterTest(FILE_PARTIAL_MAR, false);
+  setupUpdaterTest(FILE_PARTIAL_MAR);
+
+  createUpdaterINI(true);
+
+  setupAppFilesAsync();
+}
+
+function setupAppFilesFinished() {
+  runUpdateUsingService(STATE_PENDING_SVC,
+                        STATE_FAILED_LOADSOURCE_ERROR_WRONG_SIZE);
 }
 
 /**
- * Called after the call to setupUpdaterTest finishes.
+ * Checks if the update has finished and if it has finished performs checks for
+ * the test.
  */
-function setupUpdaterTestFinished() {
-  stageUpdate();
-}
-
-/**
- * Called after the call to stageUpdate finishes.
- */
-function stageUpdateFinished() {
-  standardInit();
+function checkUpdateFinished() {
   checkPostUpdateRunningFile(false);
-  checkFilesAfterUpdateFailure(getApplyDirFile);
-  checkUpdateLogContains(ERR_LOADSOURCEFILE_FAILED);
+  checkFilesAfterUpdateFailure(getApplyDirFile, true, false);
+  checkUpdateLogContents(LOG_PARTIAL_FAILURE);
+  standardInit();
   waitForFilesInUse();
 }

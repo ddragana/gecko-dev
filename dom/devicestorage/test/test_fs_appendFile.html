@@ -26,15 +26,15 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=855952
 var file   = new Blob(["This is a text file."], {type: "text/plain"});
 var appendFile   = new Blob([" Another text file."], {type: "text/plain"});
 
-devicestorage_setup(function () {
+devicestorage_setup();
 
 function deleteSuccess(e) {
-  SimpleTest.finish();
+  devicestorage_cleanup();
 }
 
 function deleteError(e) {
   ok(false, "deleteError was called : " + e.target.error.name);
-  SimpleTest.finish();
+  devicestorage_cleanup();
 }
 
 function appendSuccess(e) {
@@ -47,7 +47,7 @@ function appendSuccess(e) {
 
 function appendError(e) {
   ok(false, "appendError was called.");
-  SimpleTest.finish();
+  devicestorage_cleanup();
 }
 
 function addSuccess(e) {
@@ -83,9 +83,8 @@ ok(navigator.getDeviceStorage, "Should have getDeviceStorage");
 ok(gStorage, "Should get storage from sdcard");
 runtest();
 
-});
-
 </script>
 </pre>
 </body>
 </html>
+

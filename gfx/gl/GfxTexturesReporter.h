@@ -41,9 +41,10 @@ public:
 
     // When memory is used/freed for tile textures, call this method to update
     // the value reported by this memory reporter.
-    static void UpdateAmount(MemoryUse action, size_t amount);
+    static void UpdateAmount(MemoryUse action, GLenum format, GLenum type,
+                             int32_t tileWidth, int32_t tileHeight);
 
-    static void UpdateWasteAmount(size_t delta) {
+    static void UpdateWasteAmount(int32_t delta) {
       sTileWasteAmount += delta;
     }
 
@@ -51,22 +52,17 @@ public:
                               nsISupports* aData, bool aAnonymize) override
     {
         MOZ_COLLECT_REPORT("gfx-tiles-waste", KIND_OTHER, UNITS_BYTES,
-            int64_t(sTileWasteAmount),
+            sTileWasteAmount,
             "Memory lost due to tiles extending past content boundaries");
-        MOZ_COLLECT_REPORT(
-            "gfx-textures", KIND_OTHER, UNITS_BYTES, int64_t(sAmount),
+        return MOZ_COLLECT_REPORT(
+            "gfx-textures", KIND_OTHER, UNITS_BYTES, sAmount,
             "Memory used for storing GL textures.");
-        MOZ_COLLECT_REPORT(
-            "gfx-textures-peak", KIND_OTHER, UNITS_BYTES, int64_t(sPeakAmount),
-            "Peak memory used for storing GL textures.");
-        return NS_OK;
     }
 
 private:
-    static Atomic<size_t> sAmount;
-    static Atomic<size_t> sPeakAmount;
+    static Atomic<int32_t> sAmount;
     // Count the amount of memory lost to tile waste
-    static Atomic<size_t> sTileWasteAmount;
+    static Atomic<int32_t> sTileWasteAmount;
 };
 
 class GfxTextureWasteTracker {

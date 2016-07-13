@@ -18,38 +18,70 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "webrtc/base/checks.h"
-
 namespace webrtc {
 
 const long int E6 = 1000000;
 const long int E9 = 1000 * E6;
 
 EventWrapper* EventPosix::Create() {
-  return new EventPosix();
+  EventPosix* ptr = new EventPosix;
+  if (!ptr) {
+    return NULL;
+  }
+
+  const int error = ptr->Construct();
+  if (error) {
+    delete ptr;
+    return NULL;
+  }
+  return ptr;
 }
 
 EventPosix::EventPosix()
-    : event_set_(false),
-      timer_thread_(nullptr),
+    : timer_thread_(0),
       timer_event_(0),
-      created_at_(),
       periodic_(false),
       time_(0),
-      count_(0) {
+      count_(0),
+      state_(kDown) {
+}
+
+int EventPosix::Construct() {
+  // Set start time to zero
+  memset(&created_at_, 0, sizeof(created_at_));
+
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr);
   pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutex_init(&mutex_, &attr);
+  int result = pthread_mutex_init(&mutex_, &attr);
+  if (result != 0) {
+    return -1;
+  }
 #ifdef WEBRTC_CLOCK_TYPE_REALTIME
-  pthread_cond_init(&cond_, 0);
+  result = pthread_cond_init(&cond_, 0);
+  if (result != 0) {
+    return -1;
+  }
 #else
   pthread_condattr_t cond_attr;
-  pthread_condattr_init(&cond_attr);
-  pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
-  pthread_cond_init(&cond_, &cond_attr);
-  pthread_condattr_destroy(&cond_attr);
+  result = pthread_condattr_init(&cond_attr);
+  if (result != 0) {
+    return -1;
+  }
+  result = pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
+  if (result != 0) {
+    return -1;
+  }
+  result = pthread_cond_init(&cond_, &cond_attr);
+  if (result != 0) {
+    return -1;
+  }
+  result = pthread_condattr_destroy(&cond_attr);
+  if (result != 0) {
+    return -1;
+  }
 #endif
+  return 0;
 }
 
 EventPosix::~EventPosix() {
@@ -58,20 +90,33 @@ EventPosix::~EventPosix() {
   pthread_mutex_destroy(&mutex_);
 }
 
-// TODO(pbos): Make this void.
+bool EventPosix::Reset() {
+  if (0 != pthread_mutex_lock(&mutex_)) {
+    return false;
+  }
+  state_ = kDown;
+  pthread_mutex_unlock(&mutex_);
+  return true;
+}
+
 bool EventPosix::Set() {
-  CHECK_EQ(0, pthread_mutex_lock(&mutex_));
-  event_set_ = true;
-  pthread_cond_signal(&cond_);
+  if (0 != pthread_mutex_lock(&mutex_)) {
+    return false;
+  }
+  state_ = kUp;
+  // Release all waiting threads
+  pthread_cond_broadcast(&cond_);
   pthread_mutex_unlock(&mutex_);
   return true;
 }
 
 EventTypeWrapper EventPosix::Wait(unsigned long timeout) {
   int ret_val = 0;
-  CHECK_EQ(0, pthread_mutex_lock(&mutex_));
+  if (0 != pthread_mutex_lock(&mutex_)) {
+    return kEventError;
+  }
 
-  if (!event_set_) {
+  if (kDown == state_) {
     if (WEBRTC_EVENT_INFINITE != timeout) {
       timespec end_at;
 #ifndef WEBRTC_MAC
@@ -95,43 +140,46 @@ EventTypeWrapper EventPosix::Wait(unsigned long timeout) {
         end_at.tv_sec++;
         end_at.tv_nsec -= E9;
       }
-      while (ret_val == 0 && !event_set_)
-        ret_val = pthread_cond_timedwait(&cond_, &mutex_, &end_at);
+      ret_val = pthread_cond_timedwait(&cond_, &mutex_, &end_at);
     } else {
-      while (ret_val == 0 && !event_set_)
-        ret_val = pthread_cond_wait(&cond_, &mutex_);
+      ret_val = pthread_cond_wait(&cond_, &mutex_);
     }
   }
 
-  DCHECK(ret_val == 0 || ret_val == ETIMEDOUT);
-
-  // Reset and signal if set, regardless of why the thread woke up.
-  if (event_set_) {
-    ret_val = 0;
-    event_set_ = false;
-  }
+  state_ = kDown;
   pthread_mutex_unlock(&mutex_);
 
-  return ret_val == 0 ? kEventSignaled : kEventTimeout;
+  switch (ret_val) {
+    case 0:
+      return kEventSignaled;
+    case ETIMEDOUT:
+      return kEventTimeout;
+    default:
+      return kEventError;
+  }
 }
 
-EventTypeWrapper EventPosix::Wait(timespec* end_at) {
+EventTypeWrapper EventPosix::Wait(timespec& wake_at) {
   int ret_val = 0;
-  CHECK_EQ(0, pthread_mutex_lock(&mutex_));
-
-  while (ret_val == 0 && !event_set_)
-    ret_val = pthread_cond_timedwait(&cond_, &mutex_, end_at);
-
-  DCHECK(ret_val == 0 || ret_val == ETIMEDOUT);
-
-  // Reset and signal if set, regardless of why the thread woke up.
-  if (event_set_) {
-    ret_val = 0;
-    event_set_ = false;
+  if (0 != pthread_mutex_lock(&mutex_)) {
+    return kEventError;
   }
+
+  if (kUp != state_) {
+    ret_val = pthread_cond_timedwait(&cond_, &mutex_, &wake_at);
+  }
+  state_ = kDown;
+
   pthread_mutex_unlock(&mutex_);
 
-  return ret_val == 0 ? kEventSignaled : kEventTimeout;
+  switch (ret_val) {
+    case 0:
+      return kEventSignaled;
+    case ETIMEDOUT:
+      return kEventTimeout;
+    default:
+      return kEventError;
+  }
 }
 
 bool EventPosix::StartTimer(bool periodic, unsigned long time) {
@@ -154,17 +202,18 @@ bool EventPosix::StartTimer(bool periodic, unsigned long time) {
   // Start the timer thread
   timer_event_ = static_cast<EventPosix*>(EventWrapper::Create());
   const char* thread_name = "WebRtc_event_timer_thread";
-  timer_thread_ = ThreadWrapper::CreateThread(Run, this, thread_name);
+  timer_thread_ = ThreadWrapper::CreateThread(Run, this, kRealtimePriority,
+                                              thread_name);
   periodic_ = periodic;
   time_ = time;
-  bool started = timer_thread_->Start();
-  timer_thread_->SetPriority(kRealtimePriority);
+  unsigned int id = 0;
+  bool started = timer_thread_->Start(id);
   pthread_mutex_unlock(&mutex_);
 
   return started;
 }
 
-bool EventPosix::Run(void* obj) {
+bool EventPosix::Run(ThreadObj obj) {
   return static_cast<EventPosix*>(obj)->Process();
 }
 
@@ -199,8 +248,14 @@ bool EventPosix::Process() {
   }
 
   pthread_mutex_unlock(&mutex_);
-  if (timer_event_->Wait(&end_at) == kEventSignaled)
-    return true;
+  switch (timer_event_->Wait(end_at)) {
+    case kEventSignaled:
+      return true;
+    case kEventError:
+      return false;
+    case kEventTimeout:
+      break;
+  }
 
   pthread_mutex_lock(&mutex_);
   if (periodic_ || count_ == 1)
@@ -211,6 +266,9 @@ bool EventPosix::Process() {
 }
 
 bool EventPosix::StopTimer() {
+  if (timer_thread_) {
+    timer_thread_->SetNotAlive();
+  }
   if (timer_event_) {
     timer_event_->Set();
   }
@@ -218,7 +276,9 @@ bool EventPosix::StopTimer() {
     if (!timer_thread_->Stop()) {
       return false;
     }
-    timer_thread_.reset();
+
+    delete timer_thread_;
+    timer_thread_ = 0;
   }
   if (timer_event_) {
     delete timer_event_;

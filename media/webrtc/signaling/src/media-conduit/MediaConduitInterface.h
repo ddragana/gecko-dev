@@ -16,9 +16,6 @@
 #include "ImageContainer.h"
 
 #include "webrtc/common_types.h"
-namespace webrtc {
-class I420VideoFrame;
-}
 
 #include <vector>
 
@@ -109,14 +106,7 @@ public:
    * inside until it's no longer needed.
    */
   virtual void RenderVideoFrame(const unsigned char* buffer,
-                                size_t buffer_size,
-                                uint32_t time_stamp,
-                                int64_t render_time,
-                                const ImageHandle& handle) = 0;
-  virtual void RenderVideoFrame(const unsigned char* buffer,
-                                size_t buffer_size,
-                                uint32_t y_stride,
-                                uint32_t cbcr_stride,
+                                unsigned int buffer_size,
                                 uint32_t time_stamp,
                                 int64_t render_time,
                                 const ImageHandle& handle) = 0;
@@ -238,7 +228,7 @@ class CodecPluginID
 public:
   virtual ~CodecPluginID() {}
 
-  virtual uint64_t PluginID() const = 0;
+  virtual const uint64_t PluginID() = 0;
 };
 
 class VideoEncoder : public CodecPluginID
@@ -278,8 +268,7 @@ public:
 
   VideoSessionConduit() : mFrameRequestMethod(FrameRequestNone),
                           mUsingNackBasic(false),
-                          mUsingTmmbr(false),
-                          mUsingFEC(false) {}
+                          mUsingTmmbr(false) {}
 
   virtual ~VideoSessionConduit() {}
 
@@ -311,7 +300,6 @@ public:
                                                unsigned short height,
                                                VideoType video_type,
                                                uint64_t capture_time) = 0;
-  virtual MediaConduitErrorCode SendVideoFrame(webrtc::I420VideoFrame& frame) = 0;
 
   virtual MediaConduitErrorCode ConfigureCodecMode(webrtc::VideoCodecMode) = 0;
   /**
@@ -378,17 +366,11 @@ public:
     bool UsingTmmbr() const {
       return mUsingTmmbr;
     }
-
-    bool UsingFEC() const {
-      return mUsingFEC;
-    }
-
    protected:
      /* RTCP feedback settings, for unit testing purposes */
      FrameRequestType mFrameRequestMethod;
      bool mUsingNackBasic;
      bool mUsingTmmbr;
-     bool mUsingFEC;
 };
 
 /**
@@ -405,7 +387,7 @@ public:
     * return: Concrete AudioSessionConduitObject or nullptr in the case
     *         of failure
     */
-  static RefPtr<AudioSessionConduit> Create();
+  static mozilla::RefPtr<AudioSessionConduit> Create();
 
   virtual ~AudioSessionConduit() {}
 

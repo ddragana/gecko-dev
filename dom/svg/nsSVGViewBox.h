@@ -47,25 +47,24 @@ public:
 
   /**
    * Returns true if the corresponding "viewBox" attribute defined a rectangle
-   * with finite values and nonnegative width/height.
-   * Returns false if the viewBox was set to an invalid
+   * with finite values. Returns false if the viewBox was set to an invalid
    * string, or if any of the four rect values were too big to store in a
-   * float, or the width/height are negative.
+   * float.
+   *
+   * This method does not check whether the width or height values are
+   * positive, so callers must check whether the viewBox rect is valid where
+   * necessary!
    */
-  bool HasRect() const;
+  bool HasRect() const
+    { return (mAnimVal && !mAnimVal->none) ||
+             (!mAnimVal && mHasBaseVal && !mBaseVal.none); }
 
   /**
    * Returns true if the corresponding "viewBox" attribute either defined a
    * rectangle with finite values or the special "none" value.
    */
   bool IsExplicitlySet() const
-    {
-      if (mAnimVal || mHasBaseVal) {
-        const nsSVGViewBoxRect& rect = GetAnimValue();
-        return rect.none || (rect.width >= 0 && rect.height >= 0);
-      }
-      return false;
-    }
+    { return mAnimVal || mHasBaseVal; }
 
   const nsSVGViewBoxRect& GetBaseValue() const
     { return mBaseVal; }
@@ -112,7 +111,7 @@ public:
     {}
 
     nsSVGViewBox* mVal; // kept alive because it belongs to content
-    RefPtr<nsSVGElement> mSVGElement;
+    nsRefPtr<nsSVGElement> mSVGElement;
 
     float X() const override final
     {
@@ -160,7 +159,7 @@ public:
     {}
 
     nsSVGViewBox* mVal; // kept alive because it belongs to content
-    RefPtr<nsSVGElement> mSVGElement;
+    nsRefPtr<nsSVGElement> mSVGElement;
 
     // Script may have modified animation parameters or timeline -- DOM getters
     // need to flush any resample requests to reflect these modifications.

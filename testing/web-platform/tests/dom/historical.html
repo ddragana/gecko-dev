@@ -18,7 +18,6 @@ var nukedInterfaces = [
   "DOMImplementationSource",
   "DOMLocator",
   "DOMObject",
-  "DOMSettableTokenList",
   "DOMUserData",
   "Entity",
   "EntityReference",
@@ -48,6 +47,7 @@ var documentNuked = [
   "domConfig",
   "normalizeDocument",
   "renameNode",
+  "charset",
   "defaultCharset",
   "height",
   "width"
@@ -117,8 +117,7 @@ var nodeNuked = [
   "isSupported",
   "getFeature",
   "getUserData",
-  "setUserData",
-  "rootNode",
+  "setUserData"
 ]
 nodeNuked.forEach(isNukedFromNode)
 

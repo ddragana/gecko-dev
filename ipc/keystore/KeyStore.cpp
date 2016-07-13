@@ -882,7 +882,7 @@ KeyStore::SendData(const uint8_t *aData, int aLength)
 // |StreamSocketConsumer|, |ListenSocketConsumer|
 
 void
-KeyStore::ReceiveSocketData(int aIndex, UniquePtr<UnixSocketBuffer>& aMessage)
+KeyStore::ReceiveSocketData(int aIndex, nsAutoPtr<UnixSocketBuffer>& aMessage)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -892,13 +892,13 @@ KeyStore::ReceiveSocketData(int aIndex, UniquePtr<UnixSocketBuffer>& aMessage)
          mHandlerInfo.state == STATE_PROCESSING) {
     switch (mHandlerInfo.state) {
       case STATE_IDLE:
-        result = ReadCommand(aMessage.get());
+        result = ReadCommand(aMessage);
         break;
       case STATE_READ_PARAM_LEN:
-        result = ReadLength(aMessage.get());
+        result = ReadLength(aMessage);
         break;
       case STATE_READ_PARAM_DATA:
-        result = ReadData(aMessage.get());
+        result = ReadData(aMessage);
         break;
       case STATE_PROCESSING:
         if (mHandlerInfo.command == 'g') {

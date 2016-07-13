@@ -7,8 +7,6 @@
 #define MOZILLA_MEDIASEGMENT_H_
 
 #include "nsTArray.h"
-#include "nsIPrincipal.h"
-#include "nsProxyRelease.h"
 #ifdef MOZILLA_INTERNAL_API
 #include "mozilla/TimeStamp.h"
 #endif
@@ -45,60 +43,10 @@ typedef int64_t MediaTime;
 const int64_t MEDIA_TIME_MAX = TRACK_TICKS_MAX;
 
 /**
- * Media time relative to the start of a StreamTracks.
+ * Media time relative to the start of a StreamBuffer.
  */
 typedef MediaTime StreamTime;
 const StreamTime STREAM_TIME_MAX = MEDIA_TIME_MAX;
-
-/**
- * Media time relative to the start of the graph timeline.
- */
-typedef MediaTime GraphTime;
-const GraphTime GRAPH_TIME_MAX = MEDIA_TIME_MAX;
-
-/**
- * We pass the principal through the MediaStreamGraph by wrapping it in a thread
- * safe nsMainThreadPtrHandle, since it cannot be used directly off the main
- * thread. We can compare two PrincipalHandles to each other on any thread, but
- * they can only be created and converted back to nsIPrincipal* on main thread.
- */
-typedef nsMainThreadPtrHandle<nsIPrincipal> PrincipalHandle;
-
-inline PrincipalHandle MakePrincipalHandle(nsIPrincipal* aPrincipal)
-{
-  RefPtr<nsMainThreadPtrHolder<nsIPrincipal>> holder =
-    new nsMainThreadPtrHolder<nsIPrincipal>(aPrincipal);
-  return PrincipalHandle(holder);
-}
-
-#define PRINCIPAL_HANDLE_NONE nullptr
-
-inline nsIPrincipal* GetPrincipalFromHandle(PrincipalHandle& aPrincipalHandle)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  return aPrincipalHandle.get();
-}
-
-inline bool PrincipalHandleMatches(PrincipalHandle& aPrincipalHandle,
-                                   nsIPrincipal* aOther)
-{
-  if (!aOther) {
-    return false;
-  }
-
-  nsIPrincipal* principal = GetPrincipalFromHandle(aPrincipalHandle);
-  if (!principal) {
-    return false;
-  }
-
-  bool result;
-  if (NS_FAILED(principal->Equals(aOther, &result))) {
-    NS_ERROR("Principal check failed");
-    return false;
-  }
-
-  return result;
-}
 
 /**
  * A MediaSegment is a chunk of media data sequential in time. Different
@@ -130,19 +78,6 @@ public:
    */
   StreamTime GetDuration() const { return mDuration; }
   Type GetType() const { return mType; }
-
-  /**
-   * Gets the last principal id that was appended to this segment.
-   */
-  PrincipalHandle GetLastPrincipalHandle() const { return mLastPrincipalHandle; }
-  /**
-   * Called by the MediaStreamGraph as it appends a chunk with a different
-   * principal id than the current one.
-   */
-  void SetLastPrincipalHandle(PrincipalHandle aLastPrincipalHandle)
-  {
-    mLastPrincipalHandle = aLastPrincipalHandle;
-  }
 
   /**
    * Create a MediaSegment of the same type.
@@ -193,18 +128,13 @@ public:
   }
 
 protected:
-  explicit MediaSegment(Type aType)
-    : mDuration(0), mType(aType), mLastPrincipalHandle(PRINCIPAL_HANDLE_NONE)
+  explicit MediaSegment(Type aType) : mDuration(0), mType(aType)
   {
     MOZ_COUNT_CTOR(MediaSegment);
   }
 
   StreamTime mDuration; // total of mDurations of all chunks
   Type mType;
-
-  // The latest principal handle that the MediaStreamGraph has processed for
-  // this segment.
-  PrincipalHandle mLastPrincipalHandle;
 };
 
 /**
@@ -213,11 +143,11 @@ protected:
  */
 template <class C, class Chunk> class MediaSegmentBase : public MediaSegment {
 public:
-  MediaSegment* CreateEmptyClone() const override
+  virtual MediaSegment* CreateEmptyClone() const override
   {
     return new C();
   }
-  void AppendFrom(MediaSegment* aSource) override
+  virtual void AppendFrom(MediaSegment* aSource) override
   {
     NS_ASSERTION(aSource->GetType() == C::StaticType(), "Wrong type");
     AppendFromInternal(static_cast<C*>(aSource));
@@ -226,8 +156,8 @@ public:
   {
     AppendFromInternal(aSource);
   }
-  void AppendSlice(const MediaSegment& aSource,
-                   StreamTime aStart, StreamTime aEnd) override
+  virtual void AppendSlice(const MediaSegment& aSource,
+                           StreamTime aStart, StreamTime aEnd) override
   {
     NS_ASSERTION(aSource.GetType() == C::StaticType(), "Wrong type");
     AppendSliceInternal(static_cast<const C&>(aSource), aStart, aEnd);
@@ -240,7 +170,7 @@ public:
    * Replace the first aDuration ticks with null media data, because the data
    * will not be required again.
    */
-  void ForgetUpTo(StreamTime aDuration) override
+  virtual void ForgetUpTo(StreamTime aDuration) override
   {
     if (mChunks.IsEmpty() || aDuration <= 0) {
       return;
@@ -258,7 +188,7 @@ public:
     mChunks.InsertElementAt(0)->SetNull(aDuration);
     mDuration += aDuration;
   }
-  void FlushAfter(StreamTime aNewEnd) override
+  virtual void FlushAfter(StreamTime aNewEnd) override
   {
     if (mChunks.IsEmpty()) {
       return;
@@ -281,7 +211,7 @@ public:
     }
     mDuration = aNewEnd;
   }
-  void InsertNullDataAtStart(StreamTime aDuration) override
+  virtual void InsertNullDataAtStart(StreamTime aDuration) override
   {
     if (aDuration <= 0) {
       return;
@@ -296,7 +226,7 @@ public:
 #endif
     mDuration += aDuration;
   }
-  void AppendNullData(StreamTime aDuration) override
+  virtual void AppendNullData(StreamTime aDuration) override
   {
     if (aDuration <= 0) {
       return;
@@ -308,7 +238,7 @@ public:
     }
     mDuration += aDuration;
   }
-  void ReplaceWithDisabled() override
+  virtual void ReplaceWithDisabled() override
   {
     if (GetType() != AUDIO) {
       MOZ_CRASH("Disabling unknown segment type");
@@ -317,7 +247,7 @@ public:
     Clear();
     AppendNullData(duration);
   }
-  void Clear() override
+  virtual void Clear() override
   {
     mDuration = 0;
     mChunks.Clear();
@@ -348,26 +278,6 @@ public:
     uint32_t mIndex;
   };
 
-  Chunk* FindChunkContaining(StreamTime aOffset, StreamTime* aStart = nullptr)
-  {
-    if (aOffset < 0) {
-      return nullptr;
-    }
-    StreamTime offset = 0;
-    for (uint32_t i = 0; i < mChunks.Length(); ++i) {
-      Chunk& c = mChunks[i];
-      StreamTime nextOffset = offset + c.GetDuration();
-      if (aOffset < nextOffset) {
-        if (aStart) {
-          *aStart = offset;
-        }
-        return &c;
-      }
-      offset = nextOffset;
-    }
-    return nullptr;
-  }
-
   void RemoveLeading(StreamTime aDuration)
   {
     RemoveLeading(aDuration, 0);
@@ -379,16 +289,16 @@ public:
   }
 #endif
 
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
-    size_t amount = mChunks.ShallowSizeOfExcludingThis(aMallocSizeOf);
+    size_t amount = mChunks.SizeOfExcludingThis(aMallocSizeOf);
     for (size_t i = 0; i < mChunks.Length(); i++) {
       amount += mChunks[i].SizeOfExcludingThisIfUnshared(aMallocSizeOf);
     }
     return amount;
   }
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -409,14 +319,14 @@ protected:
       mChunks[mChunks.Length() - 1].mDuration += aSource->mChunks[0].mDuration;
       aSource->mChunks.RemoveElementAt(0);
     }
-    mChunks.AppendElements(Move(aSource->mChunks));
+    mChunks.MoveElementsFrom(aSource->mChunks);
   }
 
   void AppendSliceInternal(const MediaSegmentBase<C, Chunk>& aSource,
                            StreamTime aStart, StreamTime aEnd)
   {
     MOZ_ASSERT(aStart <= aEnd, "Endpoints inverted");
-    NS_ASSERTION(aStart >= 0 && aEnd <= aSource.mDuration, "Slice out of range");
+    NS_WARN_IF_FALSE(aStart >= 0 && aEnd <= aSource.mDuration, "Slice out of range");
     mDuration += aEnd - aStart;
     StreamTime offset = 0;
     for (uint32_t i = 0; i < aSource.mChunks.Length() && offset < aEnd; ++i) {
@@ -438,6 +348,26 @@ protected:
     c->mDuration = aDuration;
     mDuration += aDuration;
     return c;
+  }
+
+  Chunk* FindChunkContaining(StreamTime aOffset, StreamTime* aStart = nullptr)
+  {
+    if (aOffset < 0) {
+      return nullptr;
+    }
+    StreamTime offset = 0;
+    for (uint32_t i = 0; i < mChunks.Length(); ++i) {
+      Chunk& c = mChunks[i];
+      StreamTime nextOffset = offset + c.GetDuration();
+      if (aOffset < nextOffset) {
+        if (aStart) {
+          *aStart = offset;
+        }
+        return &c;
+      }
+      offset = nextOffset;
+    }
+    return nullptr;
   }
 
   Chunk* GetLastChunk()

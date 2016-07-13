@@ -45,11 +45,7 @@
 
 #include "datatypes.h"
 
-// MOZILLA: upstream code lacks |static const| and uses |int| elements, which
-// means it isn't read-only and so cannot be shared between processes, and is
-// four times bigger than necessary. Please preserve these changes until they
-// are upstreamed.
-static const int8_t
+int 
 octet_weight[256] = {
   0, 1, 1, 2, 1, 2, 2, 3,
   1, 2, 2, 3, 2, 3, 3, 4,
@@ -87,10 +83,10 @@ octet_weight[256] = {
 
 int
 octet_get_weight(uint8_t octet) {
-  // MOZILLA: upstream code here is slightly different due to the changes we've
-  // made to octet_weight's declaration above
-  return (int)octet_weight[octet];
-}
+  extern int octet_weight[256];
+
+  return octet_weight[octet];
+}  
 
 /*
  * bit_string is a buffer that is used to hold output strings, e.g.

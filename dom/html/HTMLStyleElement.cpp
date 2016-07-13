@@ -8,6 +8,7 @@
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsIDOMStyleSheet.h"
+#include "nsIStyleSheet.h"
 #include "nsIDocument.h"
 #include "nsUnicharUtils.h"
 #include "nsThreadUtils.h"
@@ -147,7 +148,7 @@ HTMLStyleElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   NS_ENSURE_SUCCESS(rv, rv);
 
   void (HTMLStyleElement::*update)() = &HTMLStyleElement::UpdateStyleSheetInternal;
-  nsContentUtils::AddScriptRunner(NewRunnableMethod(this, update));
+  nsContentUtils::AddScriptRunner(NS_NewRunnableMethod(this, update));
 
   return rv;  
 }
@@ -171,22 +172,42 @@ HTMLStyleElement::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 nsresult
-HTMLStyleElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                               const nsAttrValue* aValue, bool aNotify)
+HTMLStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                          nsIAtom* aPrefix, const nsAString& aValue,
+                          bool aNotify)
 {
-  if (aNameSpaceID == kNameSpaceID_None) {
+  nsresult rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix,
+                                              aValue, aNotify);
+  if (NS_SUCCEEDED(rv) && aNameSpaceID == kNameSpaceID_None) {
     if (aName == nsGkAtoms::title ||
         aName == nsGkAtoms::media ||
         aName == nsGkAtoms::type) {
       UpdateStyleSheetInternal(nullptr, nullptr, true);
     } else if (aName == nsGkAtoms::scoped) {
-      bool isScoped = aValue;
-      UpdateStyleSheetScopedness(isScoped);
+      UpdateStyleSheetScopedness(true);
     }
   }
 
-  return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName, aValue,
-                                            aNotify);
+  return rv;
+}
+
+nsresult
+HTMLStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+                            bool aNotify)
+{
+  nsresult rv = nsGenericHTMLElement::UnsetAttr(aNameSpaceID, aAttribute,
+                                                aNotify);
+  if (NS_SUCCEEDED(rv) && aNameSpaceID == kNameSpaceID_None) {
+    if (aAttribute == nsGkAtoms::title ||
+        aAttribute == nsGkAtoms::media ||
+        aAttribute == nsGkAtoms::type) {
+      UpdateStyleSheetInternal(nullptr, nullptr, true);
+    } else if (aAttribute == nsGkAtoms::scoped) {
+      UpdateStyleSheetScopedness(false);
+    }
+  }
+
+  return rv;
 }
 
 NS_IMETHODIMP

@@ -8,18 +8,22 @@
 
 #include "nsISupports.h"
 #include "MediaResource.h"
-#include "GMPService.h"
 
 namespace mozilla {
 
+extern PRLogModuleInfo* gMediaDecoderLog;
+
 NS_IMPL_ISUPPORTS0(BufferDecoder)
 
-BufferDecoder::BufferDecoder(MediaResource* aResource, GMPCrashHelper* aCrashHelper)
-  : mResource(aResource)
-  , mCrashHelper(aCrashHelper)
+BufferDecoder::BufferDecoder(MediaResource* aResource)
+  : mReentrantMonitor("BufferDecoder")
+  , mResource(aResource)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_COUNT_CTOR(BufferDecoder);
+  if (!gMediaDecoderLog) {
+    gMediaDecoderLog = PR_NewLogModule("MediaDecoder");
+  }
 }
 
 BufferDecoder::~BufferDecoder()
@@ -35,6 +39,33 @@ BufferDecoder::BeginDecoding(TaskQueue* aTaskQueueIdentity)
   mTaskQueueIdentity = aTaskQueueIdentity;
 }
 
+ReentrantMonitor&
+BufferDecoder::GetReentrantMonitor()
+{
+  return mReentrantMonitor;
+}
+
+bool
+BufferDecoder::IsShutdown() const
+{
+  // BufferDecoder cannot be shut down.
+  return false;
+}
+
+bool
+BufferDecoder::OnStateMachineTaskQueue() const
+{
+  // BufferDecoder doesn't have the concept of a state machine.
+  return true;
+}
+
+bool
+BufferDecoder::OnDecodeTaskQueue() const
+{
+  MOZ_ASSERT(mTaskQueueIdentity, "Forgot to call BeginDecoding?");
+  return mTaskQueueIdentity->IsCurrentThreadIn();
+}
+
 MediaResource*
 BufferDecoder::GetResource() const
 {
@@ -42,8 +73,20 @@ BufferDecoder::GetResource() const
 }
 
 void
+BufferDecoder::NotifyBytesConsumed(int64_t aBytes, int64_t aOffset)
+{
+  // ignore
+}
+
+void
 BufferDecoder::NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded,
                                    uint32_t aDropped)
+{
+  // ignore
+}
+
+void
+BufferDecoder::SetMediaSeekable(bool aMediaSeekable)
 {
   // ignore
 }
@@ -62,17 +105,59 @@ BufferDecoder::GetImageContainer()
   return nullptr;
 }
 
+bool
+BufferDecoder::IsTransportSeekable()
+{
+  return false;
+}
+
+bool
+BufferDecoder::IsMediaSeekable()
+{
+  return false;
+}
+
+void
+BufferDecoder::MetadataLoaded(nsAutoPtr<MediaInfo> aInfo, nsAutoPtr<MetadataTags> aTags, MediaDecoderEventVisibility aEventVisibility)
+{
+  // ignore
+}
+
+void
+BufferDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo, MediaDecoderEventVisibility aEventVisibility)
+{
+  // ignore
+}
+
+void
+BufferDecoder::QueueMetadata(int64_t aTime, nsAutoPtr<MediaInfo> aInfo, nsAutoPtr<MetadataTags> aTags)
+{
+  // ignore
+}
+
+void
+BufferDecoder::RemoveMediaTracks()
+{
+  // ignore
+}
+
+void
+BufferDecoder::OnReadMetadataCompleted()
+{
+  // ignore
+}
+
+void
+BufferDecoder::NotifyWaitingForResourcesStatusChanged()
+{
+  // ignore
+}
+
 MediaDecoderOwner*
 BufferDecoder::GetOwner()
 {
   // unknown
   return nullptr;
-}
-
-already_AddRefed<GMPCrashHelper>
-BufferDecoder::GetCrashHelper()
-{
-  return do_AddRef(mCrashHelper);
 }
 
 } // namespace mozilla

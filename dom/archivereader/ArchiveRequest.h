@@ -34,7 +34,7 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ArchiveRequest, DOMRequest)
 
-  ArchiveRequest(nsPIDOMWindowInner* aWindow,
+  ArchiveRequest(nsPIDOMWindow* aWindow,
                  ArchiveReader* aReader);
 
   // nsIDOMEventTarget
@@ -49,10 +49,10 @@ public:
   void OpGetFile(const nsAString& aFilename);
   void OpGetFiles();
 
-  nsresult ReaderReady(nsTArray<RefPtr<File>>& aFileList, nsresult aStatus);
+  nsresult ReaderReady(nsTArray<nsRefPtr<File>>& aFileList, nsresult aStatus);
 
 public: // static
-  static already_AddRefed<ArchiveRequest> Create(nsPIDOMWindowInner* aOwner,
+  static already_AddRefed<ArchiveRequest> Create(nsPIDOMWindow* aOwner,
                                                  ArchiveReader* aReader);
 
 private:
@@ -60,17 +60,17 @@ private:
 
   nsresult GetFilenamesResult(JSContext* aCx,
                               JS::Value* aValue,
-                              nsTArray<RefPtr<File>>& aFileList);
+                              nsTArray<nsRefPtr<File>>& aFileList);
   nsresult GetFileResult(JSContext* aCx,
                          JS::MutableHandle<JS::Value> aValue,
-                         nsTArray<RefPtr<File>>& aFileList);
+                         nsTArray<nsRefPtr<File>>& aFileList);
   nsresult GetFilesResult(JSContext* aCx,
                           JS::MutableHandle<JS::Value> aValue,
-                          nsTArray<RefPtr<File>>& aFileList);
+                          nsTArray<nsRefPtr<File>>& aFileList);
 
 protected:
   // The reader:
-  RefPtr<ArchiveReader> mArchiveReader;
+  nsRefPtr<ArchiveReader> mArchiveReader;
 
   // The operation:
   enum {

@@ -6,16 +6,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/WidgetUtils.h"
-#include "mozilla/dom/ContentParent.h"
-#include "mozilla/unused.h"
-#include "nsContentUtils.h"
-#include "nsIBidiKeyboard.h"
-#include "nsTArray.h"
 #ifdef XP_WIN
 #include "WinUtils.h"
-#endif
-#if MOZ_WIDGET_GTK == 3
-#include "mozilla/WidgetUtilsGtk.h"
 #endif
 
 namespace mozilla {
@@ -97,6 +89,7 @@ nsIntRect RotateRect(nsIntRect aRect,
                        aRect.height, aRect.width);
     default:
       MOZ_CRASH("Unknown rotation");
+      return aRect;
   }
 }
 
@@ -107,34 +100,9 @@ WidgetUtils::IsTouchDeviceSupportPresent()
 {
 #ifdef XP_WIN
   return WinUtils::IsTouchDeviceSupportPresent();
-#elif MOZ_WIDGET_GTK == 3
-  return WidgetUtilsGTK::IsTouchDeviceSupportPresent();
 #else
   return 0;
 #endif
-}
-
-// static
-void
-WidgetUtils::SendBidiKeyboardInfoToContent()
-{
-  nsCOMPtr<nsIBidiKeyboard> bidiKeyboard = nsContentUtils::GetBidiKeyboard();
-  if (!bidiKeyboard) {
-    return;
-  }
-
-  bool rtl;
-  if (NS_FAILED(bidiKeyboard->IsLangRTL(&rtl))) {
-    return;
-  }
-  bool bidiKeyboards = false;
-  bidiKeyboard->GetHaveBidiKeyboards(&bidiKeyboards);
-
-  nsTArray<dom::ContentParent*> children;
-  dom::ContentParent::GetAll(children);
-  for (uint32_t i = 0; i < children.Length(); i++) {
-    Unused << children[i]->SendBidiKeyboardNotify(rtl, bidiKeyboards);
-  }
 }
 
 } // namespace widget

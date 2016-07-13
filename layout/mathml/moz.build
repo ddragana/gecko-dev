@@ -8,10 +8,7 @@ with Files('**'):
     BUG_COMPONENT = ('Core', 'MathML')
 
 if CONFIG['ENABLE_TESTS']:
-    MOCHITEST_MANIFESTS += [
-        'imptests/mochitest.ini',
-        'tests/mochitest.ini',
-]
+    MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
 
 UNIFIED_SOURCES += [
     'nsMathMLChar.cpp',
@@ -41,6 +38,8 @@ EXPORTS += [
     'nsMathMLOperators.h'
 ]
 
+FAIL_ON_WARNINGS = True
+
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '../base',
@@ -60,10 +59,7 @@ RESOURCE_FILES.fonts += [
     'mathfontUnicode.properties',
 ]
 
-if CONFIG['OS_TARGET'] == 'WINNT':
+if CONFIG['TARGET_MD_ARCH'] == 'win32':
     RESOURCE_FILES.fonts += [
         'mathfontSymbol.properties',
     ]
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']

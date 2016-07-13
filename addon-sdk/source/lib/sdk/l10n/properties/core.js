@@ -80,4 +80,4 @@ function get(key, n, locales) {
 
   return undefined;
 }
-exports.get = (k, n) => get(k, n, Array.slice(preferedLocales));
+exports.get = function(k, n) get(k, n, Array.slice(preferedLocales));

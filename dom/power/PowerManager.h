@@ -15,7 +15,7 @@
 #include "nsWrapperCache.h"
 #include "mozilla/dom/MozPowerManagerBinding.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 class ErrorResult;
@@ -30,13 +30,13 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PowerManager)
   NS_DECL_NSIDOMMOZWAKELOCKLISTENER
 
-  nsresult Init(nsPIDOMWindowInner* aWindow);
+  nsresult Init(nsIDOMWindow *aWindow);
   nsresult Shutdown();
 
-  static already_AddRefed<PowerManager> CreateInstance(nsPIDOMWindowInner*);
+  static already_AddRefed<PowerManager> CreateInstance(nsPIDOMWindow*);
 
   // WebIDL
-  nsPIDOMWindowInner* GetParentObject() const
+  nsIDOMWindow* GetParentObject() const
   {
     return mWindow;
   }
@@ -60,7 +60,7 @@ public:
 private:
   ~PowerManager() {}
 
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsIDOMWindow> mWindow;
   nsTArray<nsCOMPtr<nsIDOMMozWakeLockListener> > mListeners;
 };
 

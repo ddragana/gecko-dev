@@ -10,7 +10,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/BrowserUtils.jsm")
 
 
-var gImportedPrefBranches = new Set();
+let gImportedPrefBranches = new Set();
 
 function importPrefBranch(aPrefBranch, aPermission, aAction) {
   let list = Services.prefs.getChildList(aPrefBranch, {});
@@ -29,7 +29,7 @@ function importPrefBranch(aPrefBranch, aPermission, aAction) {
     for (let origin of origins) {
       let principals = [];
       try {
-        principals = [ Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(origin) ];
+        principals = [ BrowserUtils.principalFromOrigin(origin) ];
       } catch (e) {
         // This preference used to contain a list of hosts. For back-compat
         // reasons, we convert these hosts into http:// and https:// permissions
@@ -39,8 +39,8 @@ function importPrefBranch(aPrefBranch, aPermission, aAction) {
           let httpsURI = Services.io.newURI("https://" + origin, null, null);
 
           principals = [
-            Services.scriptSecurityManager.createCodebasePrincipal(httpURI, {}),
-            Services.scriptSecurityManager.createCodebasePrincipal(httpsURI, {})
+            Services.scriptSecurityManager.getNoAppCodebasePrincipal(httpURI),
+            Services.scriptSecurityManager.getNoAppCodebasePrincipal(httpsURI)
           ];
         } catch (e2) {}
       }

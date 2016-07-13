@@ -16,7 +16,7 @@
 
 using namespace mozilla;
 
-class psm_DataStorageTest : public ::testing::Test
+class DataStorageTest : public ::testing::Test
 {
 protected:
   virtual void SetUp()
@@ -24,11 +24,11 @@ protected:
     const ::testing::TestInfo* const testInfo =
       ::testing::UnitTest::GetInstance()->current_test_info();
     NS_ConvertUTF8toUTF16 testName(testInfo->name());
-    storage = DataStorage::Get(testName);
+    storage = new DataStorage(testName);
     storage->Init(dataWillPersist);
   }
 
-  RefPtr<DataStorage> storage;
+  nsRefPtr<DataStorage> storage;
   bool dataWillPersist;
 };
 
@@ -36,7 +36,7 @@ NS_NAMED_LITERAL_CSTRING(testKey, "test");
 NS_NAMED_LITERAL_CSTRING(testValue, "value");
 NS_NAMED_LITERAL_CSTRING(privateTestValue, "private");
 
-TEST_F(psm_DataStorageTest, GetPutRemove)
+TEST_F(DataStorageTest, GetPutRemove)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -92,7 +92,7 @@ TEST_F(psm_DataStorageTest, GetPutRemove)
   EXPECT_TRUE(result.IsEmpty());
 }
 
-TEST_F(psm_DataStorageTest, InputValidation)
+TEST_F(DataStorageTest, InputValidation)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -154,7 +154,7 @@ TEST_F(psm_DataStorageTest, InputValidation)
   EXPECT_TRUE(result.IsEmpty());
 }
 
-TEST_F(psm_DataStorageTest, Eviction)
+TEST_F(DataStorageTest, Eviction)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -182,7 +182,7 @@ TEST_F(psm_DataStorageTest, Eviction)
   EXPECT_STREQ("value", result.get());
 }
 
-TEST_F(psm_DataStorageTest, ClearPrivateData)
+TEST_F(DataStorageTest, ClearPrivateData)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -195,7 +195,7 @@ TEST_F(psm_DataStorageTest, ClearPrivateData)
   EXPECT_TRUE(result.IsEmpty());
 }
 
-TEST_F(psm_DataStorageTest, Shutdown)
+TEST_F(DataStorageTest, Shutdown)
 {
   EXPECT_TRUE(dataWillPersist);
 

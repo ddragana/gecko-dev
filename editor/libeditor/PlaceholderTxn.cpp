@@ -32,18 +32,14 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(PlaceholderTxn)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PlaceholderTxn,
                                                 EditAggregateTxn)
-  if (tmp->mStartSel) {
-    ImplCycleCollectionUnlink(*tmp->mStartSel);
-  }
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mEndSel);
+  tmp->mStartSel->DoUnlink();
+  tmp->mEndSel.DoUnlink();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(PlaceholderTxn,
                                                   EditAggregateTxn)
-  if (tmp->mStartSel) {
-    ImplCycleCollectionTraverse(cb, *tmp->mStartSel, "mStartSel", 0);
-  }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEndSel);
+  tmp->mStartSel->DoTraverse(cb);
+  tmp->mEndSel.DoTraverse(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PlaceholderTxn)
@@ -80,7 +76,7 @@ NS_IMETHODIMP PlaceholderTxn::UndoTransaction(void)
   NS_ENSURE_TRUE(mStartSel, NS_ERROR_NULL_POINTER);
 
   // now restore selection
-  RefPtr<Selection> selection = mEditor->GetSelection();
+  nsRefPtr<Selection> selection = mEditor->GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   return mStartSel->RestoreSelection(selection);
 }
@@ -93,7 +89,7 @@ NS_IMETHODIMP PlaceholderTxn::RedoTransaction(void)
   NS_ENSURE_SUCCESS(res, res);
 
   // now restore selection
-  RefPtr<Selection> selection = mEditor->GetSelection();
+  nsRefPtr<Selection> selection = mEditor->GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   return mEndSel.RestoreSelection(selection);
 }
@@ -127,7 +123,7 @@ NS_IMETHODIMP PlaceholderTxn::Merge(nsITransaction *aTransaction, bool *aDidMerg
   // we are absorbing all txn's if mAbsorb is lit.
   if (mAbsorb)
   {
-    RefPtr<IMETextTxn> otherTxn = do_QueryObject(aTransaction);
+    nsRefPtr<IMETextTxn> otherTxn = do_QueryObject(aTransaction);
     if (otherTxn) {
       // special handling for IMETextTxn's: they need to merge with any previous
       // IMETextTxn in this placeholder, if possible.
@@ -258,7 +254,7 @@ NS_IMETHODIMP PlaceholderTxn::Commit()
 
 nsresult PlaceholderTxn::RememberEndingSelection()
 {
-  RefPtr<Selection> selection = mEditor->GetSelection();
+  nsRefPtr<Selection> selection = mEditor->GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   mEndSel.SaveSelection(selection);
   return NS_OK;

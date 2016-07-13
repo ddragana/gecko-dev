@@ -18,12 +18,7 @@ namespace gfx {
  */
 template <class T, class Sub>
 struct BasePoint4D {
-  union {
-    struct {
-      T x, y, z, w;
-    };
-    T components[4];
-  };
+  T x, y, z, w;
 
   // Constructors
   BasePoint4D() : x(0), y(0), z(0), w(0) {}

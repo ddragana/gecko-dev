@@ -47,13 +47,13 @@ class Loader;
 
 #ifdef DEBUG
 
-extern mozilla::LazyLogModule gContentSinkLogModuleInfo;
+extern PRLogModuleInfo* gContentSinkLogModuleInfo;
 
 #define SINK_TRACE_CALLS              0x1
 #define SINK_TRACE_REFLOW             0x2
 #define SINK_ALWAYS_REFLOW            0x4
 
-#define SINK_LOG_TEST(_lm, _bit) (int((_lm)->Level()) & (_bit))
+#define SINK_LOG_TEST(_lm, _bit) (int((_lm)->level) & (_bit))
 
 #define SINK_TRACE(_lm, _bit, _args) \
   PR_BEGIN_MACRO                     \
@@ -85,7 +85,7 @@ class nsContentSink : public nsICSSLoaderObserver,
   NS_DECL_NSITIMERCALLBACK
 
   // nsICSSLoaderObserver
-  NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheetHandle aSheet,
+  NS_IMETHOD StyleSheetLoaded(mozilla::CSSStyleSheet* aSheet,
                               bool aWasAlternate,
                               nsresult aStatus) override;
 
@@ -273,12 +273,12 @@ private:
 protected:
 
   nsCOMPtr<nsIDocument>         mDocument;
-  RefPtr<nsParserBase>        mParser;
+  nsRefPtr<nsParserBase>        mParser;
   nsCOMPtr<nsIURI>              mDocumentURI;
   nsCOMPtr<nsIDocShell>         mDocShell;
-  RefPtr<mozilla::css::Loader> mCSSLoader;
-  RefPtr<nsNodeInfoManager>   mNodeInfoManager;
-  RefPtr<nsScriptLoader>      mScriptLoader;
+  nsRefPtr<mozilla::css::Loader> mCSSLoader;
+  nsRefPtr<nsNodeInfoManager>   mNodeInfoManager;
+  nsRefPtr<nsScriptLoader>      mScriptLoader;
 
   // back off timer notification after count
   int32_t mBackoffCount;

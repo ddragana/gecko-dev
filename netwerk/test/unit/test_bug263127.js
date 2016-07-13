@@ -1,5 +1,5 @@
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var server;
 const BUGID = "263127";
@@ -39,10 +39,18 @@ function run_test() {
   server.start(-1);
 
   // Initialize downloader
-  var channel = NetUtil.newChannel({
-    uri: "http://localhost:" + server.identity.primaryPort + "/",
-    loadUsingSystemPrincipal: true
-  });
+  var channel = Cc["@mozilla.org/network/io-service;1"]
+                  .getService(Ci.nsIIOService)
+                  .newChannel2("http://localhost:" +
+                               server.identity.primaryPort + "/",
+                               null,
+                               null,
+                               null,      // aLoadingNode
+                               Services.scriptSecurityManager.getSystemPrincipal(),
+                               null,      // aTriggeringPrincipal
+                               Ci.nsILoadInfo.SEC_NORMAL,
+                               Ci.nsIContentPolicy.TYPE_OTHER);
+
   var targetFile = Cc["@mozilla.org/file/directory_service;1"]
                      .getService(Ci.nsIProperties)
                      .get("TmpD", Ci.nsIFile);
@@ -55,7 +63,7 @@ function run_test() {
   downloader.init(listener, targetFile);
 
   // Start download
-  channel.asyncOpen2(downloader);
+  channel.asyncOpen(downloader, null);
 
   do_test_pending();
 }

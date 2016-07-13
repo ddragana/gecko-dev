@@ -1,6 +1,6 @@
-var gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-var gTestBrowser = null;
-var gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
+let gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
+let gTestBrowser = null;
+let gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
 
 function updateAllTestPlugins(aState) {
   setTestPluginEnabledState(aState, "Test Plug-in");
@@ -83,17 +83,21 @@ add_task(function* () {
      "Test 18a, plugin fallback type should be PLUGIN_VULNERABLE_UPDATABLE");
   ok(!pluginInfo.activated, "Test 18a, Plugin should not be activated");
 
-  yield ContentTask.spawn(gTestBrowser, null, function* () {
+  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+    let plugin = content.document.getElementById("test");
+    let doc = content.document;
+    let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
+    return overlay && overlay.classList.contains("visible");
+  });
+  ok(result, "Test 18a, Plugin overlay should exist, not be hidden");
+
+  result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
     let doc = content.document;
     let plugin = doc.getElementById("test");
-    let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
-    Assert.ok(overlay && overlay.classList.contains("visible"),
-      "Test 18a, Plugin overlay should exist, not be hidden");
-
     let updateLink = doc.getAnonymousElementByAttribute(plugin, "anonid", "checkForUpdatesLink");
-    Assert.ok(updateLink.style.visibility != "hidden",
-      "Test 18a, Plugin should have an update link");
+    return updateLink.style.visibility != "hidden";
   });
+  ok(result, "Test 18a, Plugin should have an update link");
 
   let promise = waitForEvent(gBrowser.tabContainer, "TabOpen", null, true);
   let pluginUpdateURL = Services.urlFormatter.formatURLPref("plugins.update.url");
@@ -125,13 +129,13 @@ add_task(function* () {
      "Test 18a, plugin fallback type should be PLUGIN_VULNERABLE_UPDATABLE");
   ok(!pluginInfo.activated, "Test 18b, Plugin should not be activated");
 
-  yield ContentTask.spawn(gTestBrowser, null, function* () {
+  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
     let doc = content.document;
     let plugin = doc.getElementById("test");
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
-    Assert.ok(overlay && overlay.classList.contains("visible"),
-      "Test 18b, Plugin overlay should exist, not be hidden");
+    return overlay && overlay.classList.contains("visible");
   });
+  ok(result, "Test 18b, Plugin overlay should exist, not be hidden");
 });
 
 // Tests a vulnerable plugin with no update
@@ -153,17 +157,21 @@ add_task(function* () {
      "Test 18c, plugin fallback type should be PLUGIN_VULNERABLE_NO_UPDATE");
   ok(!pluginInfo.activated, "Test 18c, Plugin should not be activated");
 
-  yield ContentTask.spawn(gTestBrowser, null, function* () {
+  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
     let doc = content.document;
     let plugin = doc.getElementById("test");
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
-    Assert.ok(overlay && overlay.classList.contains("visible"),
-      "Test 18c, Plugin overlay should exist, not be hidden");
-
-    let updateLink = doc.getAnonymousElementByAttribute(plugin, "anonid", "checkForUpdatesLink");
-    Assert.ok(updateLink && updateLink.style.display != "block",
-      "Test 18c, Plugin should not have an update link");
+    return overlay && overlay.classList.contains("visible");
   });
+  ok(result, "Test 18c, Plugin overlay should exist, not be hidden");
+
+  result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+    let doc = content.document;
+    let plugin = doc.getElementById("test");
+    let updateLink = doc.getAnonymousElementByAttribute(plugin, "anonid", "checkForUpdatesLink");
+    return updateLink && updateLink.style.display != "block";
+  });
+  ok(result, "Test 18c, Plugin should not have an update link");
 
   // check that click "Always allow" works with blocked plugins
   yield promiseForNotificationShown(notification);
@@ -334,11 +342,12 @@ add_task(function* () {
   is(pluginInfo.pluginFallbackType, Ci.nsIObjectLoadingContent.PLUGIN_BLOCKLISTED,
      "Test 26, plugin fallback type should be PLUGIN_BLOCKLISTED");
 
-  yield ContentTask.spawn(gTestBrowser, null, function* () {
+  let result = ContentTask.spawn(gTestBrowser, {}, function* () {
     let plugin = content.document.getElementById("test");
     let objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
-    Assert.ok(!objLoadingContent.activated, "Plugin should not be activated.");
+    return objLoadingContent.activated;
   });
+  ok(result, "Plugin should be activated.");
 
   const testUrl = "http://test.url.com/";
 

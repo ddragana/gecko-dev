@@ -19,6 +19,17 @@ Components.utils.import("resource://gre/modules/accessibility/Utils.jsm");
 Components.utils.import("resource://gre/modules/accessibility/EventManager.jsm");
 Components.utils.import("resource://gre/modules/accessibility/Gestures.jsm");
 
+const dwellThreshold = GestureSettings.dwellThreshold;
+const swipeMaxDuration = GestureSettings.swipeMaxDuration;
+const maxConsecutiveGestureDelay = GestureSettings.maxConsecutiveGestureDelay;
+
+// https://bugzilla.mozilla.org/show_bug.cgi?id=1001945 - sometimes
+// SimpleTest.executeSoon timeout is bigger than the timer settings in
+// GestureSettings that causes intermittents.
+GestureSettings.dwellThreshold = dwellThreshold * 10;
+GestureSettings.swipeMaxDuration = swipeMaxDuration * 10;
+GestureSettings.maxConsecutiveGestureDelay = maxConsecutiveGestureDelay * 10;
+
 var AccessFuTest = {
 
   addFunc: function AccessFuTest_addFunc(aFunc) {
@@ -100,13 +111,9 @@ var AccessFuTest = {
     Logger.test = false;
     Logger.logLevel = Logger.INFO;
     // Reset Gesture Settings.
-    GestureSettings.dwellThreshold = this.dwellThreshold =
-      this.originalDwellThreshold;
-    GestureSettings.swipeMaxDuration = this.swipeMaxDuration =
-      this.originalSwipeMaxDuration;
-    GestureSettings.maxGestureResolveTimeout =
-      this.maxGestureResolveTimeout =
-      this.originalMaxGestureResolveTimeout;
+    GestureSettings.dwellThreshold = dwellThreshold;
+    GestureSettings.swipeMaxDuration = swipeMaxDuration;
+    GestureSettings.maxConsecutiveGestureDelay = maxConsecutiveGestureDelay;
     // Finish through idle callback to let AccessFu._disable complete.
     SimpleTest.executeSoon(function () {
       AccessFu.detach();
@@ -153,27 +160,13 @@ var AccessFuTest = {
       ['dom.mozSettings.enabled', true]];
     prefs.push.apply(prefs, aAdditionalPrefs);
 
-    this.originalDwellThreshold = GestureSettings.dwellThreshold;
-    this.originalSwipeMaxDuration = GestureSettings.swipeMaxDuration;
-    this.originalMaxGestureResolveTimeout =
-      GestureSettings.maxGestureResolveTimeout;
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1001945 - sometimes
-    // SimpleTest.executeSoon timeout is bigger than the timer settings in
-    // GestureSettings that causes intermittents.
-    this.dwellThreshold = GestureSettings.dwellThreshold =
-      GestureSettings.dwellThreshold * 10;
-    this.swipeMaxDuration = GestureSettings.swipeMaxDuration =
-      GestureSettings.swipeMaxDuration * 10;
-    this.maxGestureResolveTimeout = GestureSettings.maxGestureResolveTimeout =
-      GestureSettings.maxGestureResolveTimeout * 10;
-
     SpecialPowers.pushPrefEnv({ 'set': prefs }, function () {
       if (AccessFuTest._waitForExplicitFinish) {
         // Run all test functions asynchronously.
         AccessFuTest.nextTest();
       } else {
         // Run all test functions synchronously.
-        gTestFuncs.forEach(testFunc => testFunc());
+        [testFunc() for (testFunc of gTestFuncs)]; // jshint ignore:line
         AccessFuTest.finish();
       }
     });
@@ -396,20 +389,6 @@ var ContentMessages = {
         adjustRange: true
       }
     }
-  },
-
-  androidScrollForward: function adjustUp() {
-    return {
-      name: 'AccessFu:AndroidScroll',
-      json: { origin: 'top', direction: 'forward' }
-    };
-  },
-
-  androidScrollBackward: function adjustDown() {
-    return {
-      name: 'AccessFu:AndroidScroll',
-      json: { origin: 'top', direction: 'backward' }
-    };
   },
 
   focusSelector: function focusSelector(aSelector, aBlur) {

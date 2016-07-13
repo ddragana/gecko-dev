@@ -8,9 +8,6 @@ module.metadata = {
   "stability": "unstable"
 };
 
-const { Cu } = require("chrome");
-const { ShimWaiver } = Cu.import("resource://gre/modules/ShimWaiver.jsm");
-
 // Utility function that returns copy of the given `text` with last character
 // removed if it is `"s"`.
 function singularify(text) {
@@ -47,14 +44,10 @@ function getInitializerName(category) {
  *    See [DOM Level 3 Events](http://www.w3.org/TR/DOM-Level-3-Events/#event-flow)
  *    for a detailed explanation.
  */
-function on(element, type, listener, capture, shimmed = false) {
+function on(element, type, listener, capture) {
   // `capture` defaults to `false`.
   capture = capture || false;
-  if (shimmed) {
-    element.addEventListener(type, listener, capture);
-  } else {
-    ShimWaiver.getProperty(element, "addEventListener")(type, listener, capture);
-  }
+  element.addEventListener(type, listener, capture);
 }
 exports.on = on;
 
@@ -80,11 +73,11 @@ exports.on = on;
  *    See [DOM Level 3 Events](http://www.w3.org/TR/DOM-Level-3-Events/#event-flow)
  *    for a detailed explanation.
  */
-function once(element, type, listener, capture, shimmed = false) {
+function once(element, type, listener, capture) {
   on(element, type, function selfRemovableListener(event) {
-    removeListener(element, type, selfRemovableListener, capture, shimmed);
+    removeListener(element, type, selfRemovableListener, capture);
     listener.apply(this, arguments);
-  }, capture, shimmed);
+  }, capture);
 }
 exports.once = once;
 
@@ -110,12 +103,8 @@ exports.once = once;
  *    See [DOM Level 3 Events](http://www.w3.org/TR/DOM-Level-3-Events/#event-flow)
  *    for a detailed explanation.
  */
-function removeListener(element, type, listener, capture, shimmed = false) {
-  if (shimmed) {
-    element.removeEventListener(type, listener, capture);
-  } else {
-    ShimWaiver.getProperty(element, "removeEventListener")(type, listener, capture);
-  }
+function removeListener(element, type, listener, capture) {
+  element.removeEventListener(type, listener, capture);
 }
 exports.removeListener = removeListener;
 
@@ -139,17 +128,13 @@ exports.removeListener = removeListener;
  *      initializer after firs `type` argument.
  * @see https://developer.mozilla.org/En/DOM/Document.createEvent
  */
-function emit(element, type, { category, initializer, settings }, shimmed = false) {
+function emit(element, type, { category, initializer, settings }) {
   category = category || "UIEvents";
   initializer = initializer || getInitializerName(category);
   let document = element.ownerDocument;
   let event = document.createEvent(category);
   event[initializer].apply(event, [type].concat(settings));
-  if (shimmed) {
-    element.dispatchEvent(event);
-  } else {
-    ShimWaiver.getProperty(element, "dispatchEvent")(event);
-  }
+  element.dispatchEvent(event);
 };
 exports.emit = emit;
 
@@ -173,20 +158,12 @@ const removed = element => {
 };
 exports.removed = removed;
 
-const when = (element, eventName, capture=false, shimmed=false) => new Promise(resolve => {
+const when = (element, eventName, capture=false) => new Promise(resolve => {
   const listener = event => {
-    if (shimmed) {
-      element.removeEventListener(eventName, listener, capture);
-    } else {
-      ShimWaiver.getProperty(element, "removeEventListener")(eventName, listener, capture);
-    }
+    element.removeEventListener(eventName, listener, capture);
     resolve(event);
   };
 
-  if (shimmed) {
-    element.addEventListener(eventName, listener, capture);
-  } else {
-    ShimWaiver.getProperty(element, "addEventListener")(eventName, listener, capture);
-  }
+  element.addEventListener(eventName, listener, capture);
 });
 exports.when = when;

@@ -5,6 +5,6 @@ protocol cyclecheck_Parent {
 
 child:
     cyclecheck_Child();
-    async __delete__();
+    __delete__();
 };
 

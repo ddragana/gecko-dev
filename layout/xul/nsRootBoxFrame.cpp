@@ -34,7 +34,7 @@ nsIRootBox::GetRootBox(nsIPresShell* aShell)
   }
 
   if (rootFrame) {
-    rootFrame = rootFrame->PrincipalChildList().FirstChild();
+    rootFrame = rootFrame->GetFirstPrincipalChild();
   }
 
   nsIRootBox* rootBox = do_QueryFrame(rootFrame);
@@ -119,8 +119,8 @@ nsRootBoxFrame::nsRootBoxFrame(nsStyleContext* aContext):
   mPopupSetFrame = nullptr;
 
   nsCOMPtr<nsBoxLayout> layout;
-  NS_NewStackLayout(layout);
-  SetXULLayoutManager(layout);
+  NS_NewStackLayout(PresContext()->PresShell(), layout);
+  SetLayoutManager(layout);
 }
 
 void
@@ -205,7 +205,7 @@ nsRootBoxFrame::HandleEvent(nsPresContext* aPresContext,
     return NS_OK;
   }
 
-  if (aEvent->mMessage == eMouseUp) {
+  if (aEvent->message == NS_MOUSE_BUTTON_UP) {
     nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
   }
 

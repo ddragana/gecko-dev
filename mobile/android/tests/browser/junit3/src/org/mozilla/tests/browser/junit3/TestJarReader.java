@@ -40,12 +40,6 @@ public class TestJarReader extends InstrumentationTestCase {
         stream = GeckoJarReader.getStream(context, "jar:" + url + "!/chrome/chrome/content/branding/favicon32.png");
         assertNull(stream);
 
-        // Test looking for a file that doesn't exist in the APK.
-        // Bug 1174922, prefixed string / length error.
-        url = "jar:file://" + appPath + "!/" + AppConstants.OMNIJAR_NAME + "BAD";
-        stream = GeckoJarReader.getStream(context, "jar:" + url + "!/chrome/chrome/content/branding/favicon32.png");
-        assertNull(stream);
-
         // Test looking for an jar with an invalid url.
         url = "jar:file://" + appPath + "!" + "!/" + AppConstants.OMNIJAR_NAME;
         stream = GeckoJarReader.getStream(context, "jar:" + url + "!/chrome/chrome/content/branding/nonexistent_file.png");
@@ -61,8 +55,8 @@ public class TestJarReader extends InstrumentationTestCase {
         final File file = GeckoJarReader.extractStream(getInstrumentation().getTargetContext(), url, getInstrumentation().getContext().getCacheDir(), ".test");
         assertNotNull(file);
         try {
-            assertTrue(file.getName().endsWith("test"));
-            final String contents = FileUtils.readStringFromFile(file);
+            assertTrue(file.getName().endsWith("temp"));
+            final String contents = FileUtils.getFileContents(file);
             assertNotNull(contents);
             assertTrue(contents.length() > 0);
         } finally {

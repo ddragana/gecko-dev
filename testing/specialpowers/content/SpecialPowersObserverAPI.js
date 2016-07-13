@@ -5,7 +5,6 @@
 "use strict";
 
 Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/NetUtil.jsm");
 
 if (typeof(Ci) == 'undefined') {
   var Ci = Components.interfaces;
@@ -31,7 +30,6 @@ this.SpecialPowersObserverAPI = function SpecialPowersObserverAPI() {
   this._crashDumpDir = null;
   this._processCrashObserversRegistered = false;
   this._chromeScriptListeners = [];
-  this._extensions = new Map();
 }
 
 function parseKeyValuePairs(text) {
@@ -187,12 +185,15 @@ SpecialPowersObserverAPI.prototype = {
     // to evaluate http:// urls...
     var scriptableStream = Cc["@mozilla.org/scriptableinputstream;1"]
                              .getService(Ci.nsIScriptableInputStream);
-
-    var channel = NetUtil.newChannel({
-      uri: aUrl,
-      loadUsingSystemPrincipal: true
-    });
-    var input = channel.open2();
+    var channel = Services.io.newChannel2(aUrl,
+                                          null,
+                                          null,
+                                          null,      // aLoadingNode
+                                          Services.scriptSecurityManager.getSystemPrincipal(),
+                                          null,      // aTriggeringPrincipal
+                                          Ci.nsILoadInfo.SEC_NORMAL,
+                                          Ci.nsIContentPolicy.TYPE_OTHER);
+    var input = channel.open();
     scriptableStream.init(input);
 
     var str;
@@ -226,65 +227,6 @@ SpecialPowersObserverAPI.prototype = {
     }
 
     return output;
-  },
-
-  _sendReply: function(aMessage, aReplyName, aReplyMsg) {
-    let mm = aMessage.target
-                     .QueryInterface(Ci.nsIFrameLoaderOwner)
-                     .frameLoader
-                     .messageManager;
-    mm.sendAsyncMessage(aReplyName, aReplyMsg);
-  },
-
-  _notifyCategoryAndObservers: function(subject, topic, data) {
-    const serviceMarker = "service,";
-
-    // First create observers from the category manager.
-    let cm =
-      Cc["@mozilla.org/categorymanager;1"].getService(Ci.nsICategoryManager);
-    let enumerator = cm.enumerateCategory(topic);
-
-    let observers = [];
-
-    while (enumerator.hasMoreElements()) {
-      let entry =
-        enumerator.getNext().QueryInterface(Ci.nsISupportsCString).data;
-      let contractID = cm.getCategoryEntry(topic, entry);
-
-      let factoryFunction;
-      if (contractID.substring(0, serviceMarker.length) == serviceMarker) {
-        contractID = contractID.substring(serviceMarker.length);
-        factoryFunction = "getService";
-      }
-      else {
-        factoryFunction = "createInstance";
-      }
-
-      try {
-        let handler = Cc[contractID][factoryFunction]();
-        if (handler) {
-          let observer = handler.QueryInterface(Ci.nsIObserver);
-          observers.push(observer);
-        }
-      } catch(e) { }
-    }
-
-    // Next enumerate the registered observers.
-    enumerator = Services.obs.enumerateObservers(topic);
-    while (enumerator.hasMoreElements()) {
-      try {
-        let observer = enumerator.getNext().QueryInterface(Ci.nsIObserver);
-        if (observers.indexOf(observer) == -1) {
-          observers.push(observer);
-        }
-      } catch (e) { }
-    }
-
-    observers.forEach(function (observer) {
-      try {
-        observer.observe(subject, topic, data);
-      } catch(e) { }
-    });
   },
 
   /**
@@ -370,7 +312,9 @@ SpecialPowersObserverAPI.prototype = {
 
       case "SPPermissionManager": {
         let msg = aMessage.json;
-        let principal = msg.principal;
+
+        let secMan = Services.scriptSecurityManager;
+        let principal = secMan.getAppCodebasePrincipal(this._getURI(msg.url), msg.appId, msg.isInBrowserElement);
 
         switch (msg.op) {
           case "add":
@@ -381,10 +325,17 @@ SpecialPowersObserverAPI.prototype = {
             break;
           case "has":
             let hasPerm = Services.perms.testPermissionFromPrincipal(principal, msg.type);
-            return hasPerm == Ci.nsIPermissionManager.ALLOW_ACTION;
+            if (hasPerm == Ci.nsIPermissionManager.ALLOW_ACTION) 
+              return true;
+            return false;
+            break;
           case "test":
             let testPerm = Services.perms.testPermissionFromPrincipal(principal, msg.type, msg.value);
-            return testPerm == msg.value;
+            if (testPerm == msg.value)  {
+              return true;
+            }
+            return false;
+            break;
           default:
             throw new SpecialPowersError(
               "Invalid operation for SPPermissionManager");
@@ -406,6 +357,10 @@ SpecialPowersObserverAPI.prototype = {
         let Webapps = {};
         Components.utils.import("resource://gre/modules/Webapps.jsm", Webapps);
         switch (aMessage.json.op) {
+          case "set-launchable":
+            let val = Webapps.DOMApplicationRegistry.allAppsLaunchable;
+            Webapps.DOMApplicationRegistry.allAppsLaunchable = aMessage.json.launchable;
+            return val;
           case "allow-unsigned-addons":
             {
               let utils = {};
@@ -471,20 +426,10 @@ SpecialPowersObserverAPI.prototype = {
       }
 
       case "SPLoadChromeScript": {
+        let url = aMessage.json.url;
         let id = aMessage.json.id;
-        let jsScript;
-        let scriptName;
 
-        if (aMessage.json.url) {
-          jsScript = this._readUrlAsString(aMessage.json.url);
-          scriptName = aMessage.json.url;
-        } else if (aMessage.json.function) {
-          jsScript = aMessage.json.function.body;
-          scriptName = aMessage.json.function.name
-            || "<loadChromeScript anonymous function>";
-        } else {
-          throw new SpecialPowersError("SPLoadChromeScript: Invalid script");
-        }
+        let jsScript = this._readUrlAsString(url);
 
         // Setup a chrome sandbox that has access to sendAsyncMessage
         // and addMessageListener in order to communicate with
@@ -508,13 +453,13 @@ SpecialPowersObserverAPI.prototype = {
         let reporter = function (err, message, stack) {
           // Pipe assertions back to parent process
           mm.sendAsyncMessage("SPChromeScriptAssert",
-                              { id, name: scriptName, err, message,
-                                stack });
+                              { id: id, url: url, err: err, message: message,
+                                stack: stack });
         };
         Object.defineProperty(sb, "assert", {
           get: function () {
             let scope = Components.utils.createObjectIn(sb);
-            Services.scriptloader.loadSubScript("chrome://specialpowers/content/Assert.jsm",
+            Services.scriptloader.loadSubScript("resource://specialpowers/Assert.jsm",
                                                 scope);
 
             let assert = new scope.Assert(reporter);
@@ -526,10 +471,10 @@ SpecialPowersObserverAPI.prototype = {
 
         // Evaluate the chrome script
         try {
-          Components.utils.evalInSandbox(jsScript, sb, "1.8", scriptName, 1);
+          Components.utils.evalInSandbox(jsScript, sb, "1.8", url, 1);
         } catch(e) {
           throw new SpecialPowersError(
-            "Error while executing chrome script '" + scriptName + "':\n" +
+            "Error while executing chrome script '" + url + "':\n" +
             e + "\n" +
             e.fileName + ":" + e.lineNumber);
         }
@@ -540,134 +485,72 @@ SpecialPowersObserverAPI.prototype = {
         let id = aMessage.json.id;
         let name = aMessage.json.name;
         let message = aMessage.json.message;
-        return this._chromeScriptListeners
-                   .filter(o => (o.name == name && o.id == id))
-                   .map(o => o.listener(message));
+        this._chromeScriptListeners
+            .filter(o => (o.name == name && o.id == id))
+            .forEach(o => o.listener(message));
+        return undefined;	// See comment at the beginning of this function.
       }
 
-      case "SPImportInMainProcess": {
-        var message = { hadError: false, errorMessage: null };
-        try {
-          Components.utils.import(aMessage.data);
-        } catch (e) {
-          message.hadError = true;
-          message.errorMessage = e.toString();
-        }
-        return message;
-      }
+      case 'SPQuotaManager': {
+        let qm = Cc['@mozilla.org/dom/quota/manager;1']
+                   .getService(Ci.nsIQuotaManager);
+        let mm = aMessage.target
+                         .QueryInterface(Ci.nsIFrameLoaderOwner)
+                         .frameLoader
+                         .messageManager;
+        let msg = aMessage.data;
+        let op = msg.op;
 
-      case "SPCleanUpSTSData": {
-        let origin = aMessage.data.origin;
-        let flags = aMessage.data.flags;
-        let uri = Services.io.newURI(origin, null, null);
-        let sss = Cc["@mozilla.org/ssservice;1"].
-                  getService(Ci.nsISiteSecurityService);
-        sss.removeState(Ci.nsISiteSecurityService.HEADER_HSTS, uri, flags);
-      }
-
-      case "SPLoadExtension": {
-        let {Extension} = Components.utils.import("resource://gre/modules/Extension.jsm", {});
-
-        let id = aMessage.data.id;
-        let ext = aMessage.data.ext;
-        let extension;
-        if (typeof(ext) == "string") {
-          let target = "resource://testing-common/extensions/" + ext + "/";
-          let resourceHandler = Services.io.getProtocolHandler("resource")
-                                        .QueryInterface(Ci.nsISubstitutingProtocolHandler);
-          let resURI = Services.io.newURI(target, null, null);
-          let uri = Services.io.newURI(resourceHandler.resolveURI(resURI), null, null);
-          extension = new Extension({
-            id,
-            resourceURI: uri
-          });
-        } else {
-          extension = Extension.generate(id, ext);
+        if (op != 'clear' && op != 'getUsage' && op != 'reset') {
+          throw new SpecialPowersError('Invalid operation for SPQuotaManager');
         }
 
-        let resultListener = (...args) => {
-          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "testResult", args});
-        };
+        let uri = this._getURI(msg.uri);
 
-        let messageListener = (...args) => {
-          args.shift();
-          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "testMessage", args});
-        };
-
-        // Register pass/fail handlers.
-        extension.on("test-result", resultListener);
-        extension.on("test-eq", resultListener);
-        extension.on("test-log", resultListener);
-        extension.on("test-done", resultListener);
-
-        extension.on("test-message", messageListener);
-
-        this._extensions.set(id, extension);
-        return undefined;
-      }
-
-      case "SPStartupExtension": {
-        let {ExtensionData} = Components.utils.import("resource://gre/modules/Extension.jsm", {});
-
-        let id = aMessage.data.id;
-        let extension = this._extensions.get(id);
-
-        // Make sure the extension passes the packaging checks when
-        // they're run on a bare archive rather than a running instance,
-        // as the add-on manager runs them.
-        let extensionData = new ExtensionData(extension.rootURI);
-        extensionData.readManifest().then(() => {
-          return extensionData.initAllLocales();
-        }).then(() => {
-          if (extensionData.errors.length) {
-            return Promise.reject("Extension contains packaging errors");
+        if (op == 'clear') {
+          if (('inBrowser' in msg) && msg.inBrowser !== undefined) {
+            qm.clearStoragesForURI(uri, msg.appId, msg.inBrowser);
+          } else if (('appId' in msg) && msg.appId !== undefined) {
+            qm.clearStoragesForURI(uri, msg.appId);
+          } else {
+            qm.clearStoragesForURI(uri);
           }
-          return extension.startup();
-        }).then(() => {
-          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionStarted", args: []});
-        }).catch(e => {
-          dump(`Extension startup failed: ${e}\n${e.stack}`);
-          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionFailed", args: []});
-        });
-        return undefined;
-      }
-
-      case "SPExtensionMessage": {
-        let id = aMessage.data.id;
-        let extension = this._extensions.get(id);
-        extension.testMessage(...aMessage.data.args);
-        return undefined;
-      }
-
-      case "SPUnloadExtension": {
-        let id = aMessage.data.id;
-        let extension = this._extensions.get(id);
-        this._extensions.delete(id);
-        extension.shutdown();
-        this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionUnloaded", args: []});
-        return undefined;
-      }
-
-      case "SPClearAppPrivateData": {
-        let appId = aMessage.data.appId;
-        let browserOnly = aMessage.data.browserOnly;
-
-        let attributes = { appId: appId };
-        if (browserOnly) {
-          attributes.inIsolatedMozBrowser = true;
+        } else if (op == 'reset') {
+          qm.reset();
         }
-        this._notifyCategoryAndObservers(null,
-                                         "clear-origin-data",
-                                         JSON.stringify(attributes));
 
-        let subject = {
-          appId: appId,
-          browserOnly: browserOnly,
-          QueryInterface: XPCOMUtils.generateQI([Ci.mozIApplicationClearPrivateDataParams])
+        // We always use the getUsageForURI callback even if we're clearing
+        // since we know that clear and getUsageForURI are synchronized by the
+        // QuotaManager.
+        let callback = function(uri, usage, fileUsage) {
+          let reply = { id: msg.id };
+          if (op == 'getUsage') {
+            reply.usage = usage;
+            reply.fileUsage = fileUsage;
+          }
+          mm.sendAsyncMessage(aMessage.name, reply);
         };
-        this._notifyCategoryAndObservers(subject, "webapps-clear-data", null);
 
-        return undefined;
+        if (('inBrowser' in msg) && msg.inBrowser !== undefined) {
+          qm.getUsageForURI(uri, callback, msg.appId, msg.inBrowser);
+        } else if (('appId' in msg) && msg.appId !== undefined) {
+          qm.getUsageForURI(uri, callback, msg.appId);
+        } else {
+          qm.getUsageForURI(uri, callback);
+        }
+
+        return undefined;	// See comment at the beginning of this function.
+      }
+
+      case "SPPeriodicServiceWorkerUpdates": {
+        // We could just dispatch a generic idle-daily notification here, but
+        // this is better since it avoids invoking other idle daily observers
+        // at the cost of hard-coding the usage of PeriodicServiceWorkerUpdater.
+        Cc["@mozilla.org/service-worker-periodic-updater;1"].
+          getService(Ci.nsIObserver).
+          observe(null, "idle-daily", "Caller:SpecialPowers");
+
+        return undefined;	// See comment at the beginning of this function.
       }
 
       default:

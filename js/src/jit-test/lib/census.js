@@ -4,7 +4,7 @@ const Census = {};
 
 (function () {
 
-  // Census.walkCensus(subject, name, walker[, ignore])
+  // Census.walkCensus(subject, name, walker)
   //
   // Use |walker| to check |subject|, a census object of the sort returned by
   // Debugger.Memory.prototype.takeCensus: a tree of objects with integers at the
@@ -17,34 +17,24 @@ const Census = {};
   //   subject census named |prop|. This is for recursing into the subobjects of
   //   the subject.
   //
-  // - done(ignore): Called after we have called 'enter' on every property of
-  //   the subject. Passed the |ignore| set of properties.
+  // - done(): Called after we have called 'enter' on every property of the
+  //   subject.
   //
   // - check(value): Check |value|, a leaf in the subject.
   //
   // Walker methods are expected to simply throw if a node we visit doesn't look
   // right.
-  //
-  // The optional |ignore| parameter allows you to specify a |Set| of property
-  // names which should be ignored. The walker will not traverse such
-  // properties.
-  Census.walkCensus = (subject, name, walker, ignore = new Set()) =>
-    walk(subject, name, walker, ignore, 0);
-
-  function walk(subject, name, walker, ignore, count) {
+  Census.walkCensus = (subject, name, walker) => walk(subject, name, walker, 0);
+  function walk(subject, name, walker, count) {
     if (typeof subject === 'object') {
       print(name);
       for (let prop in subject) {
-        if (ignore.has(prop)) {
-          continue;
-        }
         count = walk(subject[prop],
                      name + "[" + uneval(prop) + "]",
                      walker.enter(prop),
-                     ignore,
                      count);
       }
-      walker.done(ignore);
+      walker.done();
     } else {
       print(name + " = " + uneval(subject));
       walker.check(subject);
@@ -103,7 +93,7 @@ const Census = {};
             }
           },
 
-          done: ignore => [...unvisited].filter(p => !ignore.has(p)).forEach(p => missing(p, basis[p])),
+          done: () => unvisited.forEach(prop => missing(prop, basis[prop])),
           check: expectedObject
         };
       } else {

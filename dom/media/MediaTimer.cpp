@@ -12,7 +12,7 @@
 #include "nsThreadUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/SharedThreadPool.h"
+#include "SharedThreadPool.h"
 
 namespace mozilla {
 
@@ -38,12 +38,12 @@ MediaTimer::MediaTimer()
 void
 MediaTimer::DispatchDestroy()
 {
+  nsCOMPtr<nsIRunnable> task = NS_NewNonOwningRunnableMethod(this, &MediaTimer::Destroy);
   // Hold a strong reference to the thread so that it doesn't get deleted in
   // Destroy(), which may run completely before the stack if Dispatch() begins
   // to unwind.
   nsCOMPtr<nsIEventTarget> thread = mThread;
-  nsresult rv = thread->Dispatch(NewNonOwningRunnableMethod(this, &MediaTimer::Destroy),
-                                 NS_DISPATCH_NORMAL);
+  nsresult rv = thread->Dispatch(task, NS_DISPATCH_NORMAL);
   MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
   (void) rv;
 }
@@ -76,13 +76,13 @@ MediaTimer::OnMediaTimerThread()
   return rv;
 }
 
-RefPtr<MediaTimerPromise>
+nsRefPtr<MediaTimerPromise>
 MediaTimer::WaitUntil(const TimeStamp& aTimeStamp, const char* aCallSite)
 {
   MonitorAutoLock mon(mMonitor);
   TIMER_LOG("MediaTimer::WaitUntil %lld", RelativeMicroseconds(aTimeStamp));
   Entry e(aTimeStamp, aCallSite);
-  RefPtr<MediaTimerPromise> p = e.mPromise.get();
+  nsRefPtr<MediaTimerPromise> p = e.mPromise.get();
   mEntries.push(e);
   ScheduleUpdate();
   return p;
@@ -97,8 +97,8 @@ MediaTimer::ScheduleUpdate()
   }
   mUpdateScheduled = true;
 
-  nsresult rv = mThread->Dispatch(NewRunnableMethod(this, &MediaTimer::Update),
-                                  NS_DISPATCH_NORMAL);
+  nsCOMPtr<nsIRunnable> task = NS_NewRunnableMethod(this, &MediaTimer::Update);
+  nsresult rv = mThread->Dispatch(task, NS_DISPATCH_NORMAL);
   MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
   (void) rv;
 }
@@ -174,9 +174,7 @@ MediaTimer::ArmTimer(const TimeStamp& aTarget, const TimeStamp& aNow)
   unsigned long delay = std::ceil((aTarget - aNow).ToMilliseconds());
   TIMER_LOG("MediaTimer::ArmTimer delay=%lu", delay);
   mCurrentTimerTarget = aTarget;
-  nsresult rv = mTimer->InitWithNamedFuncCallback(&TimerCallback, this, delay,
-                                                  nsITimer::TYPE_ONE_SHOT,
-                                                  "MediaTimer::TimerCallback");
+  nsresult rv = mTimer->InitWithFuncCallback(&TimerCallback, this, delay, nsITimer::TYPE_ONE_SHOT);
   MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
   (void) rv;
 }

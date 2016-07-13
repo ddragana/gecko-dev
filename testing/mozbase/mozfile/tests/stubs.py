@@ -29,9 +29,9 @@ def create_stub():
             f.write(contents)
             f.close()
         return tempdir
-    except Exception:
+    except Exception, e:
         try:
             shutil.rmtree(tempdir)
         except:
             pass
-        raise
+        raise e

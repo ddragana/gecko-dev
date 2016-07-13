@@ -9,19 +9,12 @@
 #ifndef nsCSSRules_h_
 #define nsCSSRules_h_
 
-#include "Declaration.h"
-#include "StyleRule.h"
-#include "gfxFontFeatures.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
-#include "mozilla/SheetType.h"
+
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/css/GroupRule.h"
 #include "mozilla/dom/FontFace.h"
-#include "nsAutoPtr.h"
-#include "nsCSSProperty.h"
-#include "nsCSSValue.h"
-#include "nsDOMCSSDeclaration.h"
 #include "nsIDOMCSSConditionRule.h"
 #include "nsIDOMCSSCounterStyleRule.h"
 #include "nsIDOMCSSFontFaceRule.h"
@@ -29,11 +22,18 @@
 #include "nsIDOMCSSGroupingRule.h"
 #include "nsIDOMCSSMediaRule.h"
 #include "nsIDOMCSSMozDocumentRule.h"
-#include "nsIDOMCSSPageRule.h"
 #include "nsIDOMCSSSupportsRule.h"
-#include "nsIDOMCSSKeyframeRule.h"
-#include "nsIDOMCSSKeyframesRule.h"
+#include "nsIDOMMozCSSKeyframeRule.h"
+#include "nsIDOMMozCSSKeyframesRule.h"
+#include "nsAutoPtr.h"
+#include "nsCSSProperty.h"
+#include "nsCSSValue.h"
 #include "nsTArray.h"
+#include "nsDOMCSSDeclaration.h"
+#include "Declaration.h"
+#include "nsIDOMCSSPageRule.h"
+#include "StyleRule.h"
+#include "gfxFontFeatures.h"
 
 class nsMediaList;
 
@@ -55,10 +55,12 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  // Rule methods
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
   virtual void SetStyleSheet(mozilla::CSSStyleSheet* aSheet) override; //override GroupRule
   virtual int32_t GetType() const override;
   virtual already_AddRefed<Rule> Clone() const override;
@@ -96,7 +98,7 @@ public:
 protected:
   void AppendConditionText(nsAString& aOutput);
 
-  RefPtr<nsMediaList> mMedia;
+  nsRefPtr<nsMediaList> mMedia;
 };
 
 class DocumentRule final : public GroupRule,
@@ -111,10 +113,12 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  // Rule methods
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
   virtual int32_t GetType() const override;
   virtual already_AddRefed<Rule> Clone() const override;
   virtual nsIDOMCSSRule* GetDOMRule() override
@@ -247,11 +251,14 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsCSSFontFaceRule,
                                                          mozilla::css::Rule)
 
-  // Rule methods
-  DECL_STYLE_RULE_INHERIT
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
+  DECL_STYLE_RULE_INHERIT
+
   virtual int32_t GetType() const override;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 
@@ -279,8 +286,8 @@ protected:
 // nsFontFaceRuleContainer - used for associating sheet type with
 // specific @font-face rules
 struct nsFontFaceRuleContainer {
-  RefPtr<nsCSSFontFaceRule> mRule;
-  mozilla::SheetType mSheetType;
+  nsRefPtr<nsCSSFontFaceRule> mRule;
+  uint8_t mSheetType;
 };
 
 inline nsCSSFontFaceRule*
@@ -312,11 +319,14 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  // Rule methods
-  DECL_STYLE_RULE_INHERIT
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
+  DECL_STYLE_RULE_INHERIT
+
   virtual int32_t GetType() const override;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 
@@ -375,39 +385,40 @@ protected:
 };
 
 class nsCSSKeyframeRule final : public mozilla::css::Rule,
-                                public nsIDOMCSSKeyframeRule
+                                public nsIDOMMozCSSKeyframeRule
 {
 public:
-  // Steals the contents of aKeys, and takes the reference in Declaration
-  nsCSSKeyframeRule(InfallibleTArray<float>&& aKeys,
-                    already_AddRefed<mozilla::css::Declaration>&& aDeclaration,
+  // WARNING: Steals the contents of aKeys *and* aDeclaration
+  nsCSSKeyframeRule(InfallibleTArray<float>& aKeys,
+                    nsAutoPtr<mozilla::css::Declaration>&& aDeclaration,
                     uint32_t aLineNumber, uint32_t aColumnNumber)
     : mozilla::css::Rule(aLineNumber, aColumnNumber)
-    , mKeys(mozilla::Move(aKeys))
     , mDeclaration(mozilla::Move(aDeclaration))
   {
-    mDeclaration->SetOwningRule(this);
+    mKeys.SwapElements(aKeys);
   }
 private:
   nsCSSKeyframeRule(const nsCSSKeyframeRule& aCopy);
   ~nsCSSKeyframeRule();
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsCSSKeyframeRule, mozilla::css::Rule)
+  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsCSSKeyframeRule, nsIStyleRule)
 
-  // Rule methods
-  DECL_STYLE_RULE_INHERIT
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
+  DECL_STYLE_RULE_INHERIT
   virtual int32_t GetType() const override;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 
   // nsIDOMCSSRule interface
   NS_DECL_NSIDOMCSSRULE
 
-  // nsIDOMCSSKeyframeRule interface
-  NS_DECL_NSIDOMCSSKEYFRAMERULE
+  // nsIDOMMozCSSKeyframeRule interface
+  NS_DECL_NSIDOMMOZCSSKEYFRAMERULE
 
   const nsTArray<float>& GetKeys() const     { return mKeys; }
   mozilla::css::Declaration* Declaration()   { return mDeclaration; }
@@ -420,13 +431,13 @@ public:
 
 private:
   nsTArray<float>                            mKeys;
-  RefPtr<mozilla::css::Declaration>          mDeclaration;
+  nsAutoPtr<mozilla::css::Declaration>       mDeclaration;
   // lazily created when needed:
-  RefPtr<nsCSSKeyframeStyleDeclaration>    mDOMDeclaration;
+  nsRefPtr<nsCSSKeyframeStyleDeclaration>    mDOMDeclaration;
 };
 
 class nsCSSKeyframesRule final : public mozilla::css::GroupRule,
-                                 public nsIDOMCSSKeyframesRule
+                                 public nsIDOMMozCSSKeyframesRule
 {
 public:
   nsCSSKeyframesRule(const nsSubstring& aName,
@@ -441,10 +452,12 @@ private:
 public:
   NS_DECL_ISUPPORTS_INHERITED
 
-  // Rule methods
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
   virtual int32_t GetType() const override;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
   virtual nsIDOMCSSRule* GetDOMRule() override
@@ -459,8 +472,8 @@ public:
   // nsIDOMCSSRule interface
   NS_DECL_NSIDOMCSSRULE
 
-  // nsIDOMCSSKeyframesRule interface
-  NS_DECL_NSIDOMCSSKEYFRAMESRULE
+  // nsIDOMMozCSSKeyframesRule interface
+  NS_DECL_NSIDOMMOZCSSKEYFRAMESRULE
 
   // rest of GroupRule
   virtual bool UseForPresentation(nsPresContext* aPresContext,
@@ -508,12 +521,13 @@ class nsCSSPageRule final : public mozilla::css::Rule,
                             public nsIDOMCSSPageRule
 {
 public:
-  nsCSSPageRule(mozilla::css::Declaration* aDeclaration,
+  // WARNING: Steals the contents of aDeclaration
+  nsCSSPageRule(nsAutoPtr<mozilla::css::Declaration>&& aDeclaration,
                 uint32_t aLineNumber, uint32_t aColumnNumber)
     : mozilla::css::Rule(aLineNumber, aColumnNumber)
-    , mDeclaration(aDeclaration)
+    , mDeclaration(mozilla::Move(aDeclaration))
+    , mImportantRule(nullptr)
   {
-    mDeclaration->SetOwningRule(this);
   }
 private:
   nsCSSPageRule(const nsCSSPageRule& aCopy);
@@ -522,11 +536,13 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsCSSPageRule, nsIDOMCSSPageRule)
 
-  // Rule methods
-  DECL_STYLE_RULE_INHERIT
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
+  DECL_STYLE_RULE_INHERIT
   virtual int32_t GetType() const override;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 
@@ -540,11 +556,14 @@ public:
 
   void ChangeDeclaration(mozilla::css::Declaration* aDeclaration);
 
+  mozilla::css::ImportantRule* GetImportantRule();
+
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
 private:
-  RefPtr<mozilla::css::Declaration>     mDeclaration;
+  nsAutoPtr<mozilla::css::Declaration>    mDeclaration;
   // lazily created when needed:
-  RefPtr<nsCSSPageStyleDeclaration>     mDOMDeclaration;
+  nsRefPtr<nsCSSPageStyleDeclaration>     mDOMDeclaration;
+  nsRefPtr<mozilla::css::ImportantRule>   mImportantRule;
 };
 
 namespace mozilla {
@@ -557,10 +576,12 @@ public:
                   uint32_t aLineNumber, uint32_t aColumnNumber);
   CSSSupportsRule(const CSSSupportsRule& aCopy);
 
-  // Rule methods
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
   virtual int32_t GetType() const override;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
   virtual bool UseForPresentation(nsPresContext* aPresContext,
@@ -618,11 +639,13 @@ private:
 public:
   NS_DECL_ISUPPORTS
 
-  // Rule methods
-  DECL_STYLE_RULE_INHERIT
+  // nsIStyleRule methods
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
+
+  // Rule methods
+  DECL_STYLE_RULE_INHERIT
   virtual int32_t GetType() const override;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 

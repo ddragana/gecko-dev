@@ -1,6 +1,6 @@
 // Exercise Unix domain sockets.
 
-var CC = Components.Constructor;
+const CC = Components.Constructor;
 
 const UnixServerSocket = CC("@mozilla.org/network/server-socket;1",
                             "nsIServerSocket",
@@ -22,7 +22,7 @@ const allPermissions = parseInt("777", 8);
 function run_test()
 {
   // If we're on Windows, simply check for graceful failure.
-  if (mozinfo.os == "win") {
+  if ("@mozilla.org/windows-registry-key;1" in Cc) {
     test_not_supported();
     return;
   }

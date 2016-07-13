@@ -23,11 +23,13 @@ public:
     NS_DECL_NSITRANSPORTEVENTSINK
 
     nsTransportEventSinkProxy(nsITransportEventSink *sink,
-                              nsIEventTarget *target)
+                              nsIEventTarget *target,
+                              bool coalesceAll)
         : mSink(sink)
         , mTarget(target)
         , mLock("nsTransportEventSinkProxy.mLock")
         , mLastEvent(nullptr)
+        , mCoalesceAll(coalesceAll)
     {
         NS_ADDREF(mSink);
     }
@@ -37,7 +39,7 @@ private:
     {
         // our reference to mSink could be the last, so be sure to release
         // it on the target thread.  otherwise, we could get into trouble.
-        NS_ProxyRelease(mTarget, dont_AddRef(mSink));
+        NS_ProxyRelease(mTarget, mSink);
     }
 
 public:
@@ -45,9 +47,10 @@ public:
     nsCOMPtr<nsIEventTarget>         mTarget;
     Mutex                            mLock;
     nsTransportStatusEvent          *mLastEvent;
+    bool                             mCoalesceAll;
 };
 
-class nsTransportStatusEvent : public Runnable
+class nsTransportStatusEvent : public nsRunnable
 {
 public:
     nsTransportStatusEvent(nsTransportEventSinkProxy *proxy,
@@ -79,7 +82,7 @@ public:
         return NS_OK;
     }
 
-    RefPtr<nsTransportEventSinkProxy> mProxy;
+    nsRefPtr<nsTransportEventSinkProxy> mProxy;
 
     // parameters to OnTransportStatus
     nsCOMPtr<nsITransport> mTransport;
@@ -97,12 +100,12 @@ nsTransportEventSinkProxy::OnTransportStatus(nsITransport *transport,
                                              int64_t progressMax)
 {
     nsresult rv = NS_OK;
-    RefPtr<nsTransportStatusEvent> event;
+    nsRefPtr<nsTransportStatusEvent> event;
     {
         MutexAutoLock lock(mLock);
 
         // try to coalesce events! ;-)
-        if (mLastEvent && (mLastEvent->mStatus == status)) {
+        if (mLastEvent && (mCoalesceAll || mLastEvent->mStatus == status)) {
             mLastEvent->mStatus = status;
             mLastEvent->mProgress = progress;
             mLastEvent->mProgressMax = progressMax;
@@ -132,9 +135,10 @@ nsTransportEventSinkProxy::OnTransportStatus(nsITransport *transport,
 nsresult
 net_NewTransportEventSinkProxy(nsITransportEventSink **result,
                                nsITransportEventSink *sink,
-                               nsIEventTarget *target)
+                               nsIEventTarget *target,
+                               bool coalesceAll)
 {
-    *result = new nsTransportEventSinkProxy(sink, target);
+    *result = new nsTransportEventSinkProxy(sink, target, coalesceAll);
     if (!*result)
         return NS_ERROR_OUT_OF_MEMORY;
     NS_ADDREF(*result);

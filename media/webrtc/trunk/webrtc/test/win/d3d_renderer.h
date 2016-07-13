@@ -27,9 +27,8 @@ class D3dRenderer : public VideoRenderer {
                              size_t height);
   virtual ~D3dRenderer();
 
-  void RenderFrame(const webrtc::I420VideoFrame& frame, int delta) override;
-  bool IsTextureSupported() const override { return false; }
-
+  virtual void RenderFrame(const webrtc::I420VideoFrame& frame, int delta)
+      OVERRIDE;
  private:
   D3dRenderer(size_t width, size_t height);
 

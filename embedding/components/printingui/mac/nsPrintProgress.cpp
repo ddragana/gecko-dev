@@ -10,7 +10,6 @@
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIComponentManager.h"
-#include "nsPIDOMWindow.h"
 
 NS_IMPL_ADDREF(nsPrintProgress)
 NS_IMPL_RELEASE(nsPrintProgress)
@@ -36,7 +35,8 @@ nsPrintProgress::~nsPrintProgress()
   (void)ReleaseListeners();
 }
 
-NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(mozIDOMWindowProxy *parent,
+/* void openProgressDialog (in nsIDOMWindow parent, in string dialogURL, in nsISupports parameters); */
+NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(nsIDOMWindow *parent,
                                                   const char *dialogURL,
                                                   nsISupports *parameters, 
                                                   nsIObserver *openDialogObserver,
@@ -49,6 +49,7 @@ NS_IMETHODIMP nsPrintProgress::OpenProgressDialog(mozIDOMWindowProxy *parent,
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void closeProgressDialog (in boolean forceClose); */
 NS_IMETHODIMP nsPrintProgress::CloseProgressDialog(bool forceClose)
 {
   MOZ_ASSERT_UNREACHABLE("The nsPrintingPromptService::ShowProgress "
@@ -58,20 +59,19 @@ NS_IMETHODIMP nsPrintProgress::CloseProgressDialog(bool forceClose)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* nsIPrompt GetPrompter (); */
 NS_IMETHODIMP nsPrintProgress::GetPrompter(nsIPrompt **_retval)
 {
   NS_ENSURE_ARG_POINTER(_retval);
   *_retval = nullptr;
 
-  if (! m_closeProgress && m_dialog) {
-    nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(m_dialog);
-    MOZ_ASSERT(window);
-    return window->GetPrompter(_retval);
-  }
-
+  if (! m_closeProgress && m_dialog)
+    return m_dialog->GetPrompter(_retval);
+    
   return NS_ERROR_FAILURE;
 }
 
+/* attribute boolean processCanceledByUser; */
 NS_IMETHODIMP nsPrintProgress::GetProcessCanceledByUser(bool *aProcessCanceledByUser)
 {
   NS_ENSURE_ARG_POINTER(aProcessCanceledByUser);
@@ -85,6 +85,7 @@ NS_IMETHODIMP nsPrintProgress::SetProcessCanceledByUser(bool aProcessCanceledByU
   return NS_OK;
 }
 
+/* void RegisterListener (in nsIWebProgressListener listener); */
 NS_IMETHODIMP nsPrintProgress::RegisterListener(nsIWebProgressListener * listener)
 {
   if (!listener) //Nothing to do with a null listener!
@@ -104,6 +105,7 @@ NS_IMETHODIMP nsPrintProgress::RegisterListener(nsIWebProgressListener * listene
   return NS_OK;
 }
 
+/* void UnregisterListener (in nsIWebProgressListener listener); */
 NS_IMETHODIMP nsPrintProgress::UnregisterListener(nsIWebProgressListener *listener)
 {
   if (listener)
@@ -112,6 +114,7 @@ NS_IMETHODIMP nsPrintProgress::UnregisterListener(nsIWebProgressListener *listen
   return NS_OK;
 }
 
+/* void doneIniting (); */
 NS_IMETHODIMP nsPrintProgress::DoneIniting()
 {
   if (m_observer) {
@@ -120,6 +123,7 @@ NS_IMETHODIMP nsPrintProgress::DoneIniting()
   return NS_OK;
 }
 
+/* void onStateChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in unsigned long aStateFlags, in nsresult aStatus); */
 NS_IMETHODIMP nsPrintProgress::OnStateChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t aStateFlags, nsresult aStatus)
 {
   m_pendingStateFlags = aStateFlags;
@@ -136,6 +140,7 @@ NS_IMETHODIMP nsPrintProgress::OnStateChange(nsIWebProgress *aWebProgress, nsIRe
   return NS_OK;
 }
 
+/* void onProgressChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in long aCurSelfProgress, in long aMaxSelfProgress, in long aCurTotalProgress, in long aMaxTotalProgress); */
 NS_IMETHODIMP nsPrintProgress::OnProgressChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, int32_t aCurSelfProgress, int32_t aMaxSelfProgress, int32_t aCurTotalProgress, int32_t aMaxTotalProgress)
 {
   uint32_t count = m_listenerList.Count();
@@ -149,11 +154,13 @@ NS_IMETHODIMP nsPrintProgress::OnProgressChange(nsIWebProgress *aWebProgress, ns
   return NS_OK;
 }
 
+/* void onLocationChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in nsIURI location, in unsigned long aFlags); */
 NS_IMETHODIMP nsPrintProgress::OnLocationChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, nsIURI *location, uint32_t aFlags)
 {
     return NS_OK;
 }
 
+/* void onStatusChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in nsresult aStatus, in wstring aMessage); */
 NS_IMETHODIMP nsPrintProgress::OnStatusChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, nsresult aStatus, const char16_t *aMessage)
 {
   if (aMessage && *aMessage)
@@ -170,6 +177,7 @@ NS_IMETHODIMP nsPrintProgress::OnStatusChange(nsIWebProgress *aWebProgress, nsIR
   return NS_OK;
 }
 
+/* void onSecurityChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in unsigned long state); */
 NS_IMETHODIMP nsPrintProgress::OnSecurityChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t state)
 {
     return NS_OK;
@@ -186,27 +194,31 @@ NS_IMETHODIMP nsPrintProgress::ShowStatusString(const char16_t *status)
   return OnStatusChange(nullptr, nullptr, NS_OK, status);
 }
 
+/* void startMeteors (); */
 NS_IMETHODIMP nsPrintProgress::StartMeteors()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void stopMeteors (); */
 NS_IMETHODIMP nsPrintProgress::StopMeteors()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void showProgress (in long percent); */
 NS_IMETHODIMP nsPrintProgress::ShowProgress(int32_t percent)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP nsPrintProgress::SetDocShell(nsIDocShell *shell,
-                                           mozIDOMWindowProxy *window)
+/* [noscript] void setDocShell (in nsIDocShell shell, in nsIDOMWindow window); */
+NS_IMETHODIMP nsPrintProgress::SetDocShell(nsIDocShell *shell, nsIDOMWindow *window)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+/* void closeWindow (); */
 NS_IMETHODIMP nsPrintProgress::CloseWindow()
 {
   return NS_ERROR_NOT_IMPLEMENTED;

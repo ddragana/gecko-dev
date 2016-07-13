@@ -13,13 +13,6 @@
 #include <stddef.h>	/* for ptrdiff_t */
 /* #define USE_INDEXING 1 */
 
-/* Some processors automatically fix up unaligned memory access, so they can
- * read or write a HALF (4 bytes) at a time whether the address is 4-byte
- * aligned or not. */
-#if defined(NSS_X86_OR_X64)
-#define HAVE_UNALIGNED_ACCESS 1
-#endif
-
 /*
  * The tables below are the 8 sbox functions, with the 6-bit input permutation 
  * and the 32-bit output permutation pre-computed.
@@ -428,13 +421,11 @@ DES_MakeSchedule( HALF * ks, const BYTE * key,   DESDirection direction)
     int           delta;
     unsigned int  ls;
 
-#if defined(HAVE_UNALIGNED_ACCESS)
+#if defined(NSS_X86_OR_X64)
     left  = HALFPTR(key)[0]; 
     right = HALFPTR(key)[1]; 
-#if defined(IS_LITTLE_ENDIAN)
     BYTESWAP(left, temp);
     BYTESWAP(right, temp);
-#endif
 #else
     if (((ptrdiff_t)key & 0x03) == 0) {
 	left  = HALFPTR(key)[0]; 
@@ -581,13 +572,11 @@ DES_Do1Block(HALF * ks, const BYTE * inbuf, BYTE * outbuf)
     register HALF left, right;
     register HALF temp;
 
-#if defined(HAVE_UNALIGNED_ACCESS)
+#if defined(NSS_X86_OR_X64)
     left  = HALFPTR(inbuf)[0]; 
     right = HALFPTR(inbuf)[1]; 
-#if defined(IS_LITTLE_ENDIAN)
     BYTESWAP(left, temp);
     BYTESWAP(right, temp);
-#endif
 #else
     if (((ptrdiff_t)inbuf & 0x03) == 0) {
 	left  = HALFPTR(inbuf)[0]; 
@@ -654,11 +643,9 @@ DES_Do1Block(HALF * ks, const BYTE * inbuf, BYTE * outbuf)
 
     FP(left, right, temp);
 
-#if defined(HAVE_UNALIGNED_ACCESS)
-#if defined(IS_LITTLE_ENDIAN)
+#if defined(NSS_X86_OR_X64)
     BYTESWAP(left, temp);
     BYTESWAP(right, temp);
-#endif
     HALFPTR(outbuf)[0]  = left; 
     HALFPTR(outbuf)[1]  = right; 
 #else

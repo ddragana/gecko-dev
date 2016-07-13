@@ -8,8 +8,6 @@
 
 #include <stdint.h>
 
-#include "nsTArray.h"
-
 /**
  * XXX Following enums should be in BasicEvents.h.  However, currently, it's
  *     impossible to use foward delearation for enum.
@@ -32,34 +30,6 @@ enum nsEventStatus
 
 namespace mozilla {
 
-/**
- * Event messages
- */
-
-typedef uint16_t EventMessageType;
-
-enum EventMessage : EventMessageType
-{
-
-#define NS_EVENT_MESSAGE(aMessage) aMessage,
-#define NS_EVENT_MESSAGE_FIRST_LAST(aMessage, aFirst, aLast) \
-  aMessage##First = aFirst, aMessage##Last = aLast,
-
-#include "mozilla/EventMessageList.h"
-
-#undef NS_EVENT_MESSAGE
-#undef NS_EVENT_MESSAGE_FIRST_LAST
-
-  // For preventing bustage due to "," after the last item.
-  eEventMessage_MaxValue
-};
-
-const char* ToChar(EventMessage aEventMessage);
-
-/**
- * Event class IDs
- */
-
 typedef uint8_t EventClassIDType;
 
 enum EventClassID : EventClassIDType
@@ -76,15 +46,12 @@ enum EventClassID : EventClassIDType
 #undef NS_ROOT_EVENT_CLASS
 };
 
-const char* ToChar(EventClassID aEventClassID);
-
 typedef uint16_t Modifiers;
 
 #define NS_DEFINE_KEYNAME(aCPPName, aDOMKeyName) \
   KEY_NAME_INDEX_##aCPPName,
 
-typedef uint16_t KeyNameIndexType;
-enum KeyNameIndex : KeyNameIndexType
+enum KeyNameIndex
 {
 #include "mozilla/KeyNameList.h"
   // If a DOM keyboard event is synthesized by script, this is used.  Then,
@@ -97,8 +64,7 @@ enum KeyNameIndex : KeyNameIndexType
 #define NS_DEFINE_PHYSICAL_KEY_CODE_NAME(aCPPName, aDOMCodeName) \
   CODE_NAME_INDEX_##aCPPName,
 
-typedef uint8_t CodeNameIndexType;
-enum CodeNameIndex : CodeNameIndexType
+enum CodeNameIndex
 {
 #include "mozilla/PhysicalKeyCodeNameList.h"
   // If a DOM keyboard event is synthesized by script, this is used.  Then,
@@ -139,21 +105,10 @@ namespace mozilla {
 struct BaseEventFlags;
 struct EventFlags;
 
-class WidgetEventTime;
-
-class NativeEventData;
-
 // TextEvents.h
 struct AlternativeCharCode;
-struct ShortcutKeyCandidate;
-
-typedef nsTArray<ShortcutKeyCandidate> ShortcutKeyCandidateArray;
-typedef AutoTArray<ShortcutKeyCandidate, 10> AutoShortcutKeyCandidateArray;
 
 // TextRange.h
-typedef uint8_t RawTextRangeType;
-enum class TextRangeType : RawTextRangeType;
-
 struct TextRangeStyle;
 struct TextRange;
 

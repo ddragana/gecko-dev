@@ -7,7 +7,7 @@
 //       do_check_eq(a, b) to avoid outputting characters which confuse
 //       the console
 
-var CC = Components.Constructor;
+const CC = Components.Constructor;
 const BinaryInputStream = CC("@mozilla.org/binaryinputstream;1",
                              "nsIBinaryInputStream",
                              "setInputStream");
@@ -118,7 +118,7 @@ function run_test()
   let ostream = Cc["@mozilla.org/network/file-output-stream;1"].
                 createInstance(Ci.nsIFileOutputStream);
   ostream.init(tempFile, 0x02 | 0x08 | 0x20, // write, create, truncate
-               0o666, 0);
+               0666, 0);
   let newData = "abcdefghijklmnopqrstuvwxyz";
   ostream.write(newData, newData.length);
   ostream.close();
@@ -146,7 +146,7 @@ function test_binary_portion(start, length) {
     test_seek_then_read,
   ];
 
-  for (var test of streamTests) {
+  for each(test in streamTests) {
     let fileStream = new_file_input_stream(subFile);
     let partialStream = new_partial_file_input_stream(do_get_file(binary_test_file_name),
                                                       start, length);
@@ -207,7 +207,7 @@ function test_seek(dummy, partialFileStream, size) {
 
   partialFileStream.QueryInterface(Ci.nsISeekableStream);
 
-  var tests = [
+  tests = [
     [SET, 0],
     [SET, 5],
     [SET, 1000],
@@ -259,7 +259,7 @@ function test_seek(dummy, partialFileStream, size) {
   ];
 
   let pos = 0;
-  for (var test of tests) {
+  for each(test in tests) {
     let didThrow = false;
     try {
       partialFileStream.seek(test[0], test[1]);
@@ -298,7 +298,7 @@ function test_seek_then_read(fileStreamA, fileStreamB, size) {
 
   let read = {};
 
-  var tests = [
+  tests = [
     [SET, 0],
     [read, 1000],
     [read, 1000],
@@ -324,7 +324,7 @@ function test_seek_then_read(fileStreamA, fileStreamB, size) {
     [read, 100],
   ];
 
-  for (var test of tests) {
+  for each(test in tests) {
     if (test[0] === read) {
   
       let didThrowA = false;
@@ -364,7 +364,7 @@ function test_text_portion(start, length) {
     test_seek_then_readline,
   ];
 
-  for (var test of streamTests) {
+  for each(test in streamTests) {
     let fileStream = new_file_input_stream(subFile)
                      .QueryInterface(Ci.nsILineInputStream);
     let partialStream = new_partial_file_input_stream(do_get_file(binary_test_file_name),
@@ -400,7 +400,7 @@ function test_seek_then_readline(fileStreamA, fileStreamB, size) {
 
   let read = {};
 
-  var tests = [
+  tests = [
     [SET, 0],
     [read, 5],
     [read, 5],
@@ -430,7 +430,7 @@ function test_seek_then_readline(fileStreamA, fileStreamB, size) {
     [read, 1],
   ];
 
-  for (var test of tests) {
+  for each(test in tests) {
     if (test[0] === read) {
 
       for (let i = 0; i < test[1]; ++i) {
@@ -499,12 +499,12 @@ function create_temp_file(data) {
              getService(Ci.nsIProperties).
              get("ProfD", Ci.nsIFile);
   file.append("fileinputstream-test-file.tmp");
-  file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, 0o666);
+  file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
 
   let ostream = Cc["@mozilla.org/network/file-output-stream;1"].
                 createInstance(Ci.nsIFileOutputStream);
   ostream.init(file, 0x02 | 0x08 | 0x20, // write, create, truncate
-               0o666, 0);
+               0666, 0);
   do_check_eq(ostream.write(data, data.length), data.length);
   ostream.close();
 

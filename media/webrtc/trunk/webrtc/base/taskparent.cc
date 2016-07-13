@@ -12,7 +12,6 @@
 
 #include "webrtc/base/taskparent.h"
 
-#include "webrtc/base/common.h"
 #include "webrtc/base/task.h"
 #include "webrtc/base/taskrunner.h"
 
@@ -33,8 +32,6 @@ TaskParent::TaskParent(TaskRunner *derived_instance)
   ASSERT(derived_instance != NULL);
   Initialize();
 }
-
-TaskParent::~TaskParent() = default;
 
 // Does common initialization of member variables
 void TaskParent::Initialize() {

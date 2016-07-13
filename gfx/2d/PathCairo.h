@@ -57,9 +57,9 @@ public:
 
   virtual BackendType GetBackendType() const { return BackendType::CAIRO; }
 
-  virtual already_AddRefed<PathBuilder> CopyToBuilder(FillRule aFillRule) const;
+  virtual already_AddRefed<PathBuilder> CopyToBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
   virtual already_AddRefed<PathBuilder> TransformedCopyToBuilder(const Matrix &aTransform,
-                                                             FillRule aFillRule) const;
+                                                             FillRule aFillRule = FillRule::FILL_WINDING) const;
 
   virtual bool ContainsPoint(const Point &aPoint, const Matrix &aTransform) const;
 
@@ -80,12 +80,11 @@ public:
 
   void AppendPathToBuilder(PathBuilderCairo *aBuilder, const Matrix *aTransform = nullptr) const;
 private:
-  void EnsureContainingContext(const Matrix &aTransform) const;
+  void EnsureContainingContext() const;
 
   FillRule mFillRule;
   std::vector<cairo_path_data_t> mPathData;
   mutable cairo_t *mContainingContext;
-  mutable Matrix mContainingTransform;
   Point mCurrentPoint;
 };
 

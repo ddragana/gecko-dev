@@ -272,21 +272,21 @@ int SzipCompress::run(const char *name, Buffer &origBuf,
     scanFilters = false;
   }
 
-  mozilla::UniquePtr<Buffer> filteredBuf;
+  mozilla::ScopedDeletePtr<Buffer> filteredBuf;
   Buffer *origData;
   for (SeekableZStream::FilterId f = firstFilter; f < lastFilter; ++f) {
-    mozilla::UniquePtr<FilteredBuffer> filteredTmp;
+    FilteredBuffer *filteredTmp = nullptr;
     Buffer tmpBuf;
     if (f != SeekableZStream::NONE) {
       DEBUG_LOG("Applying filter \"%s\"", filterName[f]);
-      filteredTmp = mozilla::MakeUnique<FilteredBuffer>();
+      filteredTmp = new FilteredBuffer();
       filteredTmp->Filter(origBuf, f, chunkSize);
-      origData = filteredTmp.get();
+      origData = filteredTmp;
     } else {
       origData = &origBuf;
     }
     if (dictSize  && !scanFilters) {
-      filteredBuf = mozilla::Move(filteredTmp);
+      filteredBuf = filteredTmp;
       break;
     }
     DEBUG_LOG("Compressing with no dictionary");
@@ -295,13 +295,14 @@ int SzipCompress::run(const char *name, Buffer &origBuf,
         outBuf.Fill(tmpBuf);
         compressed = true;
         filter = f;
-        filteredBuf = mozilla::Move(filteredTmp);
+        filteredBuf = filteredTmp;
         continue;
       }
     }
+    delete filteredTmp;
   }
 
-  origData = filteredBuf ? filteredBuf.get() : &origBuf;
+  origData = filteredBuf ? filteredBuf : &origBuf;
 
   if (dictSize) {
     Dictionary<uint64_t> dict(*origData, dictSize ? SzipCompress::winSize : 0);
@@ -424,11 +425,7 @@ int SzipCompress::do_compress(Buffer &origBuf, Buffer &outBuf,
     zStream.avail_in = avail;
     zStream.next_in = data;
     ret = deflate(&zStream, Z_FINISH);
-    /* Under normal conditions, deflate returns Z_STREAM_END. If there is not
-     * enough room to compress, deflate returns Z_OK and avail_out is 0. We
-     * still want to deflateEnd in that case, so fall through. It will bail
-     * on the avail_out test that follows. */
-    MOZ_ASSERT(ret == Z_STREAM_END || ret == Z_OK);
+    MOZ_ASSERT(ret == Z_STREAM_END);
     ret = deflateEnd(&zStream);
     MOZ_ASSERT(ret == Z_OK);
     if (zStream.avail_out <= 0)

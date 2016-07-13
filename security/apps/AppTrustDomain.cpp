@@ -5,18 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AppTrustDomain.h"
-#include "MainThreadUtils.h"
 #include "certdb.h"
+#include "pkix/pkixnss.h"
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/Casting.h"
-#include "mozilla/Preferences.h"
-#include "nsComponentManagerUtils.h"
-#include "nsIFile.h"
-#include "nsIFileStreams.h"
 #include "nsIX509CertDB.h"
 #include "nsNSSCertificate.h"
-#include "nsNetUtil.h"
-#include "pkix/pkixnss.h"
 #include "prerror.h"
 #include "secerr.h"
 
@@ -33,24 +26,16 @@
 // Add-on signing Certificates
 #include "addons-public.inc"
 #include "addons-stage.inc"
-// Privileged Package Certificates
-#include "privileged-package-root.inc"
 
 using namespace mozilla::pkix;
 
-extern mozilla::LazyLogModule gPIPNSSLog;
+extern PRLogModuleInfo* gPIPNSSLog;
 
 static const unsigned int DEFAULT_MIN_RSA_BITS = 2048;
-static char kDevImportedDER[] =
-  "network.http.signed-packages.developer-root";
 
 namespace mozilla { namespace psm {
 
-StaticMutex AppTrustDomain::sMutex;
-UniquePtr<unsigned char[]> AppTrustDomain::sDevImportedDERData;
-unsigned int AppTrustDomain::sDevImportedDERLen = 0;
-
-AppTrustDomain::AppTrustDomain(UniqueCERTCertList& certChain, void* pinArg)
+AppTrustDomain::AppTrustDomain(ScopedCERTCertList& certChain, void* pinArg)
   : mCertChain(certChain)
   , mPinArg(pinArg)
   , mMinRSABits(DEFAULT_MIN_RSA_BITS)
@@ -99,6 +84,16 @@ AppTrustDomain::SetTrustedRoot(AppTrustedRoot trustedRoot)
       trustedDER.len = mozilla::ArrayLength(xpcshellRoot);
       break;
 
+    case nsIX509CertDB::TrustedHostedAppPublicRoot:
+      trustedDER.data = const_cast<uint8_t*>(trustedAppPublicRoot);
+      trustedDER.len = mozilla::ArrayLength(trustedAppPublicRoot);
+      break;
+
+    case nsIX509CertDB::TrustedHostedAppTestRoot:
+      trustedDER.data = const_cast<uint8_t*>(trustedAppTestRoot);
+      trustedDER.len = mozilla::ArrayLength(trustedAppTestRoot);
+      break;
+
     case nsIX509CertDB::AddonsPublicRoot:
       trustedDER.data = const_cast<uint8_t*>(addonsPublicRoot);
       trustedDER.len = mozilla::ArrayLength(addonsPublicRoot);
@@ -109,66 +104,13 @@ AppTrustDomain::SetTrustedRoot(AppTrustedRoot trustedRoot)
       trustedDER.len = mozilla::ArrayLength(addonsStageRoot);
       break;
 
-    case nsIX509CertDB::PrivilegedPackageRoot:
-      trustedDER.data = const_cast<uint8_t*>(privilegedPackageRoot);
-      trustedDER.len = mozilla::ArrayLength(privilegedPackageRoot);
-      break;
-
-    case nsIX509CertDB::DeveloperImportedRoot: {
-      StaticMutexAutoLock lock(sMutex);
-      if (!sDevImportedDERData) {
-        MOZ_ASSERT(!NS_IsMainThread());
-        nsCOMPtr<nsIFile> file(do_CreateInstance("@mozilla.org/file/local;1"));
-        if (!file) {
-          PR_SetError(SEC_ERROR_IO, 0);
-          return SECFailure;
-        }
-        nsresult rv = file->InitWithNativePath(
-            Preferences::GetCString(kDevImportedDER));
-        if (NS_FAILED(rv)) {
-          PR_SetError(SEC_ERROR_IO, 0);
-          return SECFailure;
-        }
-
-        nsCOMPtr<nsIInputStream> inputStream;
-        NS_NewLocalFileInputStream(getter_AddRefs(inputStream), file, -1, -1,
-                                   nsIFileInputStream::CLOSE_ON_EOF);
-        if (!inputStream) {
-          PR_SetError(SEC_ERROR_IO, 0);
-          return SECFailure;
-        }
-
-        uint64_t length;
-        rv = inputStream->Available(&length);
-        if (NS_FAILED(rv)) {
-          PR_SetError(SEC_ERROR_IO, 0);
-          return SECFailure;
-        }
-
-        auto data = MakeUnique<char[]>(length);
-        rv = inputStream->Read(data.get(), length, &sDevImportedDERLen);
-        if (NS_FAILED(rv)) {
-          PR_SetError(SEC_ERROR_IO, 0);
-          return SECFailure;
-        }
-
-        MOZ_ASSERT(length == sDevImportedDERLen);
-        sDevImportedDERData.reset(
-          BitwiseCast<unsigned char*, char*>(data.release()));
-      }
-
-      trustedDER.data = sDevImportedDERData.get();
-      trustedDER.len = sDevImportedDERLen;
-      break;
-    }
-
     default:
       PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
       return SECFailure;
   }
 
-  mTrustedRoot.reset(CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
-                                             &trustedDER, nullptr, false, true));
+  mTrustedRoot = CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
+                                         &trustedDER, nullptr, false, true);
   if (!mTrustedRoot) {
     return SECFailure;
   }
@@ -196,7 +138,7 @@ AppTrustDomain::FindIssuer(Input encodedIssuerName, IssuerChecker& checker,
   //    message, passing each one to checker.Check.
   SECItem encodedIssuerNameSECItem =
     UnsafeMapInputToSECItem(encodedIssuerName);
-  UniqueCERTCertList
+  ScopedCERTCertList
     candidates(CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
                                           &encodedIssuerNameSECItem, 0,
                                           false));
@@ -246,7 +188,7 @@ AppTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   // expose it in any other easy-to-use fashion.
   SECItem candidateCertDERSECItem =
     UnsafeMapInputToSECItem(candidateCertDER);
-  UniqueCERTCertificate candidateCert(
+  ScopedCERTCertificate candidateCert(
     CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &candidateCertDERSECItem,
                             nullptr, false, true));
   if (!candidateCert) {
@@ -313,9 +255,7 @@ AppTrustDomain::IsChainValid(const DERArray& certChain, Time time)
 }
 
 Result
-AppTrustDomain::CheckSignatureDigestAlgorithm(DigestAlgorithm,
-                                              EndEntityOrCA,
-                                              Time)
+AppTrustDomain::CheckSignatureDigestAlgorithm(DigestAlgorithm, EndEntityOrCA)
 {
   // TODO: We should restrict signatures to SHA-256 or better.
   return Success;
@@ -368,20 +308,6 @@ AppTrustDomain::CheckValidityIsAcceptable(Time /*notBefore*/, Time /*notAfter*/,
                                           KeyPurposeId /*keyPurpose*/)
 {
   return Success;
-}
-
-Result
-AppTrustDomain::NetscapeStepUpMatchesServerAuth(Time /*notBefore*/,
-                                                /*out*/ bool& matches)
-{
-  matches = false;
-  return Success;
-}
-
-void
-AppTrustDomain::NoteAuxiliaryExtension(AuxiliaryExtension /*extension*/,
-                                       Input /*extensionData*/)
-{
 }
 
 } } // namespace mozilla::psm

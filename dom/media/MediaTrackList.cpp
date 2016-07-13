@@ -9,7 +9,6 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/AudioTrack.h"
-#include "mozilla/dom/VideoStreamTrack.h"
 #include "mozilla/dom/VideoTrack.h"
 #include "mozilla/dom/TrackEvent.h"
 #include "nsThreadUtils.h"
@@ -17,7 +16,34 @@
 namespace mozilla {
 namespace dom {
 
-MediaTrackList::MediaTrackList(nsPIDOMWindowInner* aOwnerWindow,
+void
+MediaTrackListListener::NotifyMediaTrackCreated(MediaTrack* aTrack)
+{
+  if (!mMediaTrackList && !aTrack) {
+    return;
+  }
+
+  if (aTrack->AsAudioTrack() && mMediaTrackList->AsAudioTrackList()) {
+    mMediaTrackList->AddTrack(aTrack);
+  } else if (aTrack->AsVideoTrack() && mMediaTrackList->AsVideoTrackList()) {
+    mMediaTrackList->AddTrack(aTrack);
+  }
+}
+
+void
+MediaTrackListListener::NotifyMediaTrackEnded(const nsAString& aId)
+{
+  if (!mMediaTrackList) {
+    return;
+  }
+
+  const nsRefPtr<MediaTrack> track = mMediaTrackList->GetTrackById(aId);
+  if (track) {
+    mMediaTrackList->RemoveTrack(track);
+  }
+}
+
+MediaTrackList::MediaTrackList(nsPIDOMWindow* aOwnerWindow,
                                HTMLMediaElement* aMediaElement)
   : DOMEventTargetHelper(aOwnerWindow)
   , mMediaElement(aMediaElement)
@@ -48,10 +74,7 @@ MediaTrack*
 MediaTrackList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   aFound = aIndex < mTracks.Length();
-  if (!aFound) {
-    return nullptr;
-  }
-  return mTracks[aIndex];
+  return aFound ? mTracks[aIndex] : nullptr;
 }
 
 MediaTrack*
@@ -75,7 +98,7 @@ MediaTrackList::AddTrack(MediaTrack* aTrack)
 }
 
 void
-MediaTrackList::RemoveTrack(const RefPtr<MediaTrack>& aTrack)
+MediaTrackList::RemoveTrack(const nsRefPtr<MediaTrack>& aTrack)
 {
   mTracks.RemoveElement(aTrack);
   aTrack->SetTrackList(nullptr);
@@ -86,7 +109,7 @@ void
 MediaTrackList::RemoveTracks()
 {
   while (!mTracks.IsEmpty()) {
-    RefPtr<MediaTrack> track = mTracks.LastElement();
+    nsRefPtr<MediaTrack> track = mTracks.LastElement();
     RemoveTrack(track);
   }
 }
@@ -98,7 +121,7 @@ MediaTrackList::CreateAudioTrack(const nsAString& aId,
                                  const nsAString& aLanguage,
                                  bool aEnabled)
 {
-  RefPtr<AudioTrack> track = new AudioTrack(aId, aKind, aLabel, aLanguage,
+  nsRefPtr<AudioTrack> track = new AudioTrack(aId, aKind, aLabel, aLanguage,
                                               aEnabled);
   return track.forget();
 }
@@ -107,10 +130,9 @@ already_AddRefed<VideoTrack>
 MediaTrackList::CreateVideoTrack(const nsAString& aId,
                                  const nsAString& aKind,
                                  const nsAString& aLabel,
-                                 const nsAString& aLanguage,
-                                 VideoStreamTrack* aVideoTrack)
+                                 const nsAString& aLanguage)
 {
-  RefPtr<VideoTrack> track = new VideoTrack(aId, aKind, aLabel, aLanguage, aVideoTrack);
+  nsRefPtr<VideoTrack> track = new VideoTrack(aId, aKind, aLabel, aLanguage);
   return track.forget();
 }
 
@@ -126,7 +148,7 @@ MediaTrackList::EmptyTracks()
 void
 MediaTrackList::CreateAndDispatchChangeEvent()
 {
-  RefPtr<AsyncEventDispatcher> asyncDispatcher =
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this, NS_LITERAL_STRING("change"), false);
   asyncDispatcher->PostDOMEvent();
 }
@@ -143,10 +165,10 @@ MediaTrackList::CreateAndDispatchTrackEventRunner(MediaTrack* aTrack,
     eventInit.mTrack.SetValue().SetAsVideoTrack() = aTrack->AsVideoTrack();
   }
 
-  RefPtr<TrackEvent> event =
+  nsRefPtr<TrackEvent> event =
     TrackEvent::Constructor(this, aEventName, eventInit);
 
-  RefPtr<AsyncEventDispatcher> asyncDispatcher =
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this, event);
   asyncDispatcher->PostDOMEvent();
 }

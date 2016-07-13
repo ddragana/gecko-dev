@@ -70,7 +70,6 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/RefCounted.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TypeTraits.h"
 
@@ -173,13 +172,7 @@ public:
 
   WeakPtr& operator=(T* aOther)
   {
-    if (aOther) {
-      *this = aOther->SelfReferencingWeakPtr();
-    } else if (!mRef || mRef->get()) {
-      // Ensure that mRef is dereferenceable in the uninitialized state.
-      mRef = new WeakReference(nullptr);
-    }
-    return *this;
+    return *this = aOther->SelfReferencingWeakPtr();
   }
 
   MOZ_IMPLICIT WeakPtr(T* aOther)

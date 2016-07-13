@@ -9,6 +9,7 @@
 
 #include "xpcObjectHelper.h"
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsWrapperCache.h"
 #include "mozilla/TypeTraits.h"
@@ -38,7 +39,7 @@ public:
 
     template <class T>
     inline
-    qsObjectHelper(RefPtr<T>& aObject, nsWrapperCache* aCache)
+    qsObjectHelper(nsRefPtr<T>& aObject, nsWrapperCache* aCache)
         : xpcObjectHelper(ToSupports(aObject.get()),
                           ToCanonicalSupports(aObject.get()), aCache)
     {

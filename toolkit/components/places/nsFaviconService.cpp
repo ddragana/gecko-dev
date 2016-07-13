@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -18,6 +17,7 @@
 #include "nsNavHistory.h"
 #include "nsPlacesMacros.h"
 #include "Helpers.h"
+#include "AsyncFaviconHelpers.h"
 
 #include "nsNetUtil.h"
 #include "nsReadableUtils.h"
@@ -136,7 +136,7 @@ nsFaviconService::ExpireAllFavicons()
   , removeIconsStmt.get()
   };
   nsCOMPtr<mozIStoragePendingStatement> ps;
-  RefPtr<ExpireFaviconsStatementCallbackNotifier> callback =
+  nsRefPtr<ExpireFaviconsStatementCallbackNotifier> callback =
     new ExpireFaviconsStatementCallbackNotifier();
   nsresult rv = mDB->MainConn()->ExecuteAsync(
     stmts, ArrayLength(stmts), callback, getter_AddRefs(ps)
@@ -210,14 +210,10 @@ nsFaviconService::SetAndFetchFaviconForPage(nsIURI* aPageURI,
                                             nsIURI* aFaviconURI,
                                             bool aForceReload,
                                             uint32_t aFaviconLoadType,
-                                            nsIFaviconDataCallback* aCallback,
-                                            nsIPrincipal* aLoadingPrincipal,
-                                            mozIPlacesPendingOperation **_canceler)
+                                            nsIFaviconDataCallback* aCallback)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   NS_ENSURE_ARG(aPageURI);
   NS_ENSURE_ARG(aFaviconURI);
-  NS_ENSURE_ARG_POINTER(_canceler);
 
   // If a favicon is in the failed cache, only load it during a forced reload.
   bool previouslyFailed;
@@ -230,74 +226,15 @@ nsFaviconService::SetAndFetchFaviconForPage(nsIURI* aPageURI,
       return NS_OK;
   }
 
-  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadingPrincipal;
-  MOZ_ASSERT(loadingPrincipal, "please provide aLoadingPrincipal for this favicon");
-  if (!loadingPrincipal) {
-    // Bug 1227289 : Let's default to the systemPrincipal if no loadingPrincipal is provided
-    // so addons not providing a loadingPrincipal do not break in release builds.
-    const char16_t* params[] = {
-      MOZ_UTF16("nsFaviconService::setAndFetchFaviconForPage()"),
-      MOZ_UTF16("nsFaviconService::setAndFetchFaviconForPage(..., [optional aLoadingPrincipal])")
-    };
-    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                    NS_LITERAL_CSTRING("Security by Default"),
-                                    nullptr, // aDocument
-                                    nsContentUtils::eNECKO_PROPERTIES,
-                                    "APIDeprecationWarning",
-                                    params, ArrayLength(params));
-    loadingPrincipal = nsContentUtils::GetSystemPrincipal();
-  }
-  NS_ENSURE_TRUE(loadingPrincipal, NS_ERROR_FAILURE);
-
   // Check if the icon already exists and fetch it from the network, if needed.
   // Finally associate the icon to the requested page if not yet associated.
-  bool loadPrivate = aFaviconLoadType == nsIFaviconService::FAVICON_LOAD_PRIVATE;
-
-  PageData page;
-  rv = aPageURI->GetSpec(page.spec);
+  rv = AsyncFetchAndSetIconForPage::start(
+    aFaviconURI, aPageURI, aForceReload ? FETCH_ALWAYS : FETCH_IF_MISSING,
+    aFaviconLoadType, aCallback
+  );
   NS_ENSURE_SUCCESS(rv, rv);
-  // URIs can arguably miss a host.
-  (void)GetReversedHostname(aPageURI, page.revHost);
-  bool canAddToHistory;
-  nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
-  NS_ENSURE_TRUE(navHistory, NS_ERROR_OUT_OF_MEMORY);
-  rv = navHistory->CanAddURI(aPageURI, &canAddToHistory);
-  NS_ENSURE_SUCCESS(rv, rv);
-  page.canAddToHistory = !!canAddToHistory && !loadPrivate;
 
-  IconData icon;
-  UnassociatedIconHashKey* iconKey = mUnassociatedIcons.GetEntry(aFaviconURI);
-  if (iconKey) {
-    icon = iconKey->iconData;
-    mUnassociatedIcons.RemoveEntry(iconKey);
-  } else {
-    icon.fetchMode = aForceReload ? FETCH_ALWAYS : FETCH_IF_MISSING;
-    rv = aFaviconURI->GetSpec(icon.spec);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  // If the page url points to an image, the icon's url will be the same.
-  // In future evaluate to store a resample of the image.  For now avoid that
-  // for database size concerns.
-  // Don't store favicons for error pages too.
-  if (icon.spec.Equals(page.spec) ||
-      icon.spec.Equals(FAVICON_ERRORPAGE_URL)) {
-    return NS_OK;
-  }
-
-  RefPtr<AsyncFetchAndSetIconForPage> event =
-    new AsyncFetchAndSetIconForPage(icon, page, loadPrivate,
-                                    aCallback, aLoadingPrincipal);
-
-  // Get the target thread and start the work.
   // DB will be updated and observers notified when data has finished loading.
-  RefPtr<Database> DB = Database::GetDatabase();
-  NS_ENSURE_STATE(DB);
-  DB->DispatchToAsyncThread(event);
-
-  // Return this event to the caller to allow aborting an eventual fetch.
-  event.forget(_canceler);
-
   return NS_OK;
 }
 
@@ -308,7 +245,6 @@ nsFaviconService::ReplaceFaviconData(nsIURI* aFaviconURI,
                                     const nsACString& aMimeType,
                                     PRTime aExpiration)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   NS_ENSURE_ARG(aFaviconURI);
   NS_ENSURE_ARG(aData);
   NS_ENSURE_TRUE(aDataLen > 0, NS_ERROR_INVALID_ARG);
@@ -347,7 +283,7 @@ nsFaviconService::ReplaceFaviconData(nsIURI* aFaviconURI,
     rv = OptimizeFaviconImage(aData, aDataLen, aMimeType, iconData->data, iconData->mimeType);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (iconData->data.Length() > nsIFaviconService::MAX_FAVICON_SIZE) {
+    if (iconData->data.Length() > MAX_FAVICON_SIZE) {
       // We cannot optimize this favicon size and we are over the maximum size
       // allowed, so we will not save data to the db to avoid bloating it.
       mUnassociatedIcons.RemoveEntry(aFaviconURI);
@@ -361,10 +297,8 @@ nsFaviconService::ReplaceFaviconData(nsIURI* aFaviconURI,
   // If the database contains an icon at the given url, we will update the
   // database immediately so that the associated pages are kept in sync.
   // Otherwise, do nothing and let the icon be picked up from the memory hash.
-  RefPtr<AsyncReplaceFaviconData> event = new AsyncReplaceFaviconData(*iconData);
-  RefPtr<Database> DB = Database::GetDatabase();
-  NS_ENSURE_STATE(DB);
-  DB->DispatchToAsyncThread(event);
+  rv = AsyncReplaceFaviconData::start(iconData);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
@@ -372,8 +306,7 @@ nsFaviconService::ReplaceFaviconData(nsIURI* aFaviconURI,
 NS_IMETHODIMP
 nsFaviconService::ReplaceFaviconDataFromDataURL(nsIURI* aFaviconURI,
                                                const nsAString& aDataURL,
-                                               PRTime aExpiration,
-                                               nsIPrincipal* aLoadingPrincipal)
+                                               PRTime aExpiration)
 {
   NS_ENSURE_ARG(aFaviconURI);
   NS_ENSURE_TRUE(aDataURL.Length() > 0, NS_ERROR_INVALID_ARG);
@@ -392,34 +325,12 @@ nsFaviconService::ReplaceFaviconDataFromDataURL(nsIURI* aFaviconURI,
   rv = ioService->GetProtocolHandler("data", getter_AddRefs(protocolHandler));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadingPrincipal;
-  MOZ_ASSERT(loadingPrincipal, "please provide aLoadingPrincipal for this favicon");
-  if (!loadingPrincipal) {
-    // Bug 1227289 : Let's default to the systemPrincipal if no loadingPrincipal is provided
-    // so addons not providing a loadingPrincipal do not break in release builds.
-    const char16_t* params[] = {
-      MOZ_UTF16("nsFaviconService::ReplaceFaviconDataFromDataURL()"),
-      MOZ_UTF16("nsFaviconService::ReplaceFaviconDataFromDataURL(..., [optional aLoadingPrincipal])")
-    };
-    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                    NS_LITERAL_CSTRING("Security by Default"),
-                                    nullptr, // aDocument
-                                    nsContentUtils::eNECKO_PROPERTIES,
-                                    "APIDeprecationWarning",
-                                    params, ArrayLength(params));
-
-    loadingPrincipal = nsContentUtils::GetSystemPrincipal();
-  }
-  NS_ENSURE_TRUE(loadingPrincipal, NS_ERROR_FAILURE);
-
   nsCOMPtr<nsILoadInfo> loadInfo =
-    new mozilla::LoadInfo(loadingPrincipal,
+    new mozilla::LoadInfo(nsContentUtils::GetSystemPrincipal(),
                           nullptr, // aTriggeringPrincipal
                           nullptr, // aLoadingNode
-                          nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS |
-                          nsILoadInfo::SEC_ALLOW_CHROME |
-                          nsILoadInfo::SEC_DISALLOW_SCRIPT,
-                          nsIContentPolicy::TYPE_INTERNAL_IMAGE);
+                          nsILoadInfo::SEC_NORMAL,
+                          nsIContentPolicy::TYPE_IMAGE);
 
   nsCOMPtr<nsIChannel> channel;
   rv = protocolHandler->NewChannel2(dataURI, loadInfo, getter_AddRefs(channel));
@@ -427,7 +338,7 @@ nsFaviconService::ReplaceFaviconDataFromDataURL(nsIURI* aFaviconURI,
 
   // Blocking stream is OK for data URIs.
   nsCOMPtr<nsIInputStream> stream;
-  rv = channel->Open2(getter_AddRefs(stream));
+  rv = channel->Open(getter_AddRefs(stream));
   NS_ENSURE_SUCCESS(rv, rv);
 
   uint64_t available64;
@@ -468,21 +379,11 @@ NS_IMETHODIMP
 nsFaviconService::GetFaviconURLForPage(nsIURI *aPageURI,
                                        nsIFaviconDataCallback* aCallback)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   NS_ENSURE_ARG(aPageURI);
   NS_ENSURE_ARG(aCallback);
 
-  nsAutoCString pageSpec;
-  nsresult rv = aPageURI->GetSpec(pageSpec);
+  nsresult rv = AsyncGetFaviconURLForPage::start(aPageURI, aCallback);
   NS_ENSURE_SUCCESS(rv, rv);
-
-  RefPtr<AsyncGetFaviconURLForPage> event =
-    new AsyncGetFaviconURLForPage(pageSpec, aCallback);
-
-  RefPtr<Database> DB = Database::GetDatabase();
-  NS_ENSURE_STATE(DB);
-  DB->DispatchToAsyncThread(event);
-
   return NS_OK;
 }
 
@@ -490,20 +391,11 @@ NS_IMETHODIMP
 nsFaviconService::GetFaviconDataForPage(nsIURI* aPageURI,
                                         nsIFaviconDataCallback* aCallback)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   NS_ENSURE_ARG(aPageURI);
   NS_ENSURE_ARG(aCallback);
 
-  nsAutoCString pageSpec;
-  nsresult rv = aPageURI->GetSpec(pageSpec);
+  nsresult rv = AsyncGetFaviconDataForPage::start(aPageURI, aCallback);
   NS_ENSURE_SUCCESS(rv, rv);
-
-  RefPtr<AsyncGetFaviconDataForPage> event =
-    new AsyncGetFaviconDataForPage(pageSpec, aCallback);
-  RefPtr<Database> DB = Database::GetDatabase();
-  NS_ENSURE_STATE(DB);
-  DB->DispatchToAsyncThread(event);
-
   return NS_OK;
 }
 
@@ -520,6 +412,18 @@ nsFaviconService::GetFaviconLinkForIcon(nsIURI* aFaviconURI,
     NS_ENSURE_SUCCESS(rv, rv);
   }
   return GetFaviconLinkForIconString(spec, aOutputURI);
+}
+
+
+static PLDHashOperator
+ExpireFailedFaviconsCallback(nsCStringHashKey::KeyType aKey,
+                             uint32_t& aData,
+                             void* userArg)
+{
+  uint32_t* threshold = reinterpret_cast<uint32_t*>(userArg);
+  if (aData < *threshold)
+    return PL_DHASH_REMOVE;
+  return PL_DHASH_NEXT;
 }
 
 
@@ -540,11 +444,7 @@ nsFaviconService::AddFailedFavicon(nsIURI* aFaviconURI)
     // of items that are the oldest
     uint32_t threshold = mFailedFaviconSerial -
                          MAX_FAILED_FAVICONS + FAVICON_CACHE_REDUCE_COUNT;
-    for (auto iter = mFailedFavicons.Iter(); !iter.Done(); iter.Next()) {
-      if (iter.Data() < threshold) {
-        iter.Remove();
-      }
-    }
+    mFailedFavicons.Enumerate(ExpireFailedFaviconsCallback, &threshold);
   }
   return NS_OK;
 }
@@ -684,7 +584,7 @@ nsFaviconService::GetFaviconDataAsync(nsIURI* aFaviconURI,
   NS_ENSURE_STATE(stmt);
 
   // Ignore the ref part of the URI before querying the database because
-  // we may have added a media fragment for rendering purposes.
+  // we may have added the #-moz-resolution ref for rendering purposes.
 
   nsAutoCString faviconURI;
   aFaviconURI->GetSpecIgnoringRef(faviconURI);

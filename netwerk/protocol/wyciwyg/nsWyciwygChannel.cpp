@@ -26,24 +26,28 @@
 #include "nsIURI.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/unused.h"
-#include "mozilla/BasePrincipal.h"
 #include "nsProxyRelease.h"
 #include "nsContentSecurityManager.h"
-#include "nsContentUtils.h"
 
 typedef mozilla::net::LoadContextInfo LoadContextInfo;
 
 // Must release mChannel on the main thread
-class nsWyciwygAsyncEvent : public mozilla::Runnable {
+class nsWyciwygAsyncEvent : public nsRunnable {
 public:
   explicit nsWyciwygAsyncEvent(nsWyciwygChannel *aChannel) : mChannel(aChannel) {}
 
   ~nsWyciwygAsyncEvent()
   {
-    NS_ReleaseOnMainThread(mChannel.forget());
+    nsCOMPtr<nsIThread> thread = do_GetMainThread();
+    NS_WARN_IF_FALSE(thread, "Couldn't get the main thread!");
+    if (thread) {
+      nsIWyciwygChannel *chan = static_cast<nsIWyciwygChannel *>(mChannel);
+      mozilla::unused << mChannel.forget();
+      NS_ProxyRelease(thread, chan);
+    }
   }
 protected:
-  RefPtr<nsWyciwygChannel> mChannel;
+  nsRefPtr<nsWyciwygChannel> mChannel;
 };
 
 class nsWyciwygSetCharsetandSourceEvent : public nsWyciwygAsyncEvent {
@@ -96,14 +100,21 @@ nsWyciwygChannel::nsWyciwygChannel()
     mNeedToWriteCharset(false),
     mCharsetSource(kCharsetUninitialized),
     mContentLength(-1),
-    mLoadFlags(LOAD_NORMAL)
+    mLoadFlags(LOAD_NORMAL),
+    mAppId(NECKO_NO_APP_ID),
+    mInBrowser(false)
 {
 }
 
 nsWyciwygChannel::~nsWyciwygChannel() 
 {
   if (mLoadInfo) {
-    NS_ReleaseOnMainThread(mLoadInfo.forget(), false);
+    nsCOMPtr<nsIThread> mainThread;
+    NS_GetMainThread(getter_AddRefs(mainThread));
+
+    nsILoadInfo *forgetableLoadInfo;
+    mLoadInfo.forget(&forgetableLoadInfo);
+    NS_ProxyRelease(mainThread, forgetableLoadInfo, false);
   }
 }
 
@@ -221,9 +232,8 @@ nsWyciwygChannel::SetLoadGroup(nsILoadGroup* aLoadGroup)
                                 mLoadGroup,
                                 NS_GET_IID(nsIProgressEventSink),
                                 getter_AddRefs(mProgressSink));
-  UpdatePrivateBrowsing();
-  NS_GetOriginAttributes(this, mOriginAttributes);
-
+  mPrivateBrowsing = NS_UsePrivateBrowsing(this);
+  NS_GetAppInfo(this, &mAppId, &mInBrowser);
   return NS_OK;
 }
 
@@ -318,8 +328,8 @@ nsWyciwygChannel::SetNotificationCallbacks(nsIInterfaceRequestor* aNotificationC
                                 NS_GET_IID(nsIProgressEventSink),
                                 getter_AddRefs(mProgressSink));
 
-  UpdatePrivateBrowsing();
-  NS_GetOriginAttributes(this, mOriginAttributes);
+  mPrivateBrowsing = NS_UsePrivateBrowsing(this);
+  NS_GetAppInfo(this, &mAppId, &mInBrowser);
 
   return NS_OK;
 }
@@ -421,13 +431,6 @@ nsWyciwygChannel::Open2(nsIInputStream** aStream)
 NS_IMETHODIMP
 nsWyciwygChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
 {
-  MOZ_ASSERT(!mLoadInfo ||
-             mLoadInfo->GetSecurityMode() == 0 ||
-             mLoadInfo->GetInitialSecurityCheckDone() ||
-             (mLoadInfo->GetSecurityMode() == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
-              nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
-             "security flags in loadInfo but asyncOpen2() not called");
-
   LOG(("nsWyciwygChannel::AsyncOpen [this=%p]\n", this));
   MOZ_ASSERT(mMode == NONE, "nsWyciwygChannel already open");
 
@@ -700,7 +703,7 @@ nsWyciwygChannel::OnCacheEntryAvailable(nsICacheEntry *aCacheEntry,
     if (!aNew) {
       // Since OnCacheEntryAvailable can be called directly from AsyncOpen
       // we must dispatch.
-      NS_DispatchToCurrentThread(mozilla::NewRunnableMethod(
+      NS_DispatchToCurrentThread(NS_NewRunnableMethod(
         this, &nsWyciwygChannel::NotifyListener));
     }
   }
@@ -788,8 +791,8 @@ nsWyciwygChannel::OpenCacheEntry(nsIURI *aURI,
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool anonymous = mLoadFlags & LOAD_ANONYMOUS;
-  RefPtr<LoadContextInfo> loadInfo = mozilla::net::GetLoadContextInfo(
-    mPrivateBrowsing, anonymous, mOriginAttributes);
+  nsRefPtr<LoadContextInfo> loadInfo = mozilla::net::GetLoadContextInfo(
+    mPrivateBrowsing, mAppId, mInBrowser, anonymous);
 
   nsCOMPtr<nsICacheStorage> cacheStorage;
   if (mLoadFlags & INHIBIT_PERSISTENT_CACHING)

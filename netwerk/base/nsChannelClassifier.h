@@ -11,10 +11,6 @@
 
 class nsIChannel;
 class nsIHttpChannelInternal;
-class nsIDocument;
-
-namespace mozilla {
-namespace net {
 
 class nsChannelClassifier final : public nsIURIClassifierCallback
 {
@@ -45,12 +41,6 @@ private:
     // Start is called. Returns NS_OK if and only if we will get a callback
     // from the classifier service.
     nsresult StartInternal();
-    // Helper function to check a tracking URI against the whitelist
-    nsresult IsTrackerWhitelisted();
-    // Helper function to check a URI against the hostname whitelist
-    bool IsHostnameWhitelisted(nsIURI *aUri, const nsACString &aWhitelisted);
-    // Checks that the channel was loaded by the URI currently loaded in aDoc
-    static bool SameLoadingURI(nsIDocument *aDoc, nsIChannel *aChannel);
 
 public:
     // If we are blocking tracking content, update the corresponding flag in
@@ -58,8 +48,5 @@ public:
     static nsresult SetBlockedTrackingContent(nsIChannel *channel);
     static nsresult NotifyTrackingProtectionDisabled(nsIChannel *aChannel);
 };
-
-} // namespace net
-} // namespace mozilla
 
 #endif

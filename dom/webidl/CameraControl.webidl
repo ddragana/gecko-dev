@@ -110,10 +110,11 @@ dictionary CameraStartRecordingOptions
      support this setting, it will be ignored. */
   boolean autoEnableLowLightTorch = false;
 
-  /* If true, a poster JPG will be created from the recording and issued
-     via the poster event. PosterCreated or PosterFailed recording state
+  /* If given, a poster JPG will be created from the recording and saved
+     at the given path. PosterCreated or PosterFailed recording state
      changes will indicate whether or not it was created. */
-  boolean createPoster = false;
+  DOMString posterFilepath = "";
+  DeviceStorage? posterStorageArea = null;
 };
 
 /*
@@ -248,24 +249,8 @@ interface CameraControl : MediaStream
      recording limits (see CameraStartRecordingOptions) was reached.
 
      event type is CameraStateChangeEvent where:
-         'newState' is one of the following states:
-             'Started' if the recording has begun capturing data
-             'Stopped' when the recording has completed (success and failure)
-             'Paused' if the recording is paused
-             'Resumed' if the recording is resumed after pausing
-             'PosterCreated' if a poster was requested and created
-             'PosterFailed' if a poster was requested and failed to create
-             'FileSizeLimitReached' if stopped due to file size limit
-             'VideoLengthLimitReached' if stopped due to a time limit
-             'TrackCompleted' if audio or video track complete when stopping
-             'TrackFailed' if audio or video track incomplete when stopping
-             'MediaRecorderFailed' if failed due to local error
-             'MediaServerFailed' if failed due to media server */
+         'newState' is the new recorder state */
   attribute EventHandler    onrecorderstatechange;
-
-  /* the event dispatched when a poster is successfully captured; it is of the
-     type BlobEvent, where the data attribute contains the poster. */
-  attribute EventHandler    onposter;
 
   /* the event dispatched when the viewfinder stops or starts,
      useful for synchronizing other UI elements.
@@ -361,20 +346,9 @@ interface CameraControl : MediaStream
                                DeviceStorage storageArea,
                                DOMString filename);
 
-  /* stop recording video. */
+  /* stop precording video. */
   [Throws]
   void stopRecording();
-
-  /* pause recording video. The camera remains active but audio and video
-     frames are no longer saved in the output file. If called when not
-     recording or already paused, it fails silently. */
-  [Throws]
-  void pauseRecording();
-
-  /* resume recording video while paused. If called when not recording or
-     not paused, it fails silently. */
-  [Throws]
-  void resumeRecording();
 
   /* call in or after the takePicture() onSuccess callback to
      resume the camera preview stream. */

@@ -12,7 +12,6 @@
 // vie_autotest_render.cc
 //
 
-#include "webrtc/base/format_macros.h"
 #include "webrtc/engine_configurations.h"
 #include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
 #include "webrtc/video_engine/test/auto_test/interface/vie_autotest_defines.h"
@@ -58,22 +57,16 @@ public:
     }
 
     virtual int DeliverFrame(unsigned char* buffer,
-                             size_t bufferSize,
+                             int bufferSize,
                              uint32_t time_stamp,
                              int64_t ntp_time_ms,
                              int64_t render_time,
                              void* /*handle*/) {
       if (bufferSize != CalcBufferSize(webrtc::kI420, _width, _height)) {
-        ViETest::Log("Incorrect render buffer received, of length = %" PRIuS
-                     "\n", bufferSize);
+        ViETest::Log("Incorrect render buffer received, of length = %d\n",
+                     bufferSize);
         return 0;
       }
-      return 0;
-    }
-
-    virtual int DeliverI420Frame(const webrtc::I420VideoFrame& webrtc_frame) {
-      EXPECT_EQ(webrtc_frame.width(), _width);
-      EXPECT_EQ(webrtc_frame.height(), _height);
       return 0;
     }
 
@@ -220,6 +213,29 @@ void ViEAutoTest::ViERenderExtendedTest()
     AutoTestSleep(kAutoTestSleepTimeMs);
 #endif
 
+    ViETest::Log("Mirroring Local Preview (Window1) Left-Right");
+    EXPECT_EQ(0, ViE.render->MirrorRenderStream(
+        tbCapture.captureId, true, false, true));
+    AutoTestSleep(kAutoTestSleepTimeMs);
+
+    ViETest::Log("\nMirroring Local Preview (Window1) Left-Right and Up-Down");
+    EXPECT_EQ(0, ViE.render->MirrorRenderStream(
+        tbCapture.captureId, true, true, true));
+    AutoTestSleep(kAutoTestSleepTimeMs);
+
+    ViETest::Log("\nMirroring Remote Window(Window2) Up-Down");
+    EXPECT_EQ(0, ViE.render->MirrorRenderStream(
+        tbChannel.videoChannel, true, true, false));
+    AutoTestSleep(kAutoTestSleepTimeMs);
+
+    ViETest::Log("Disabling Mirroing on Window1 and Window2");
+    EXPECT_EQ(0, ViE.render->MirrorRenderStream(
+        tbCapture.captureId, false, false, false));
+    AutoTestSleep(kAutoTestSleepTimeMs);
+    EXPECT_EQ(0, ViE.render->MirrorRenderStream(
+        tbChannel.videoChannel, false, false, false));
+    AutoTestSleep(kAutoTestSleepTimeMs);
+
     ViETest::Log("\nEnabling Full Screen render in 5 sec");
 
     EXPECT_EQ(0, ViE.render->RemoveRenderer(tbCapture.captureId));
@@ -297,7 +313,6 @@ void ViEAutoTest::ViERenderAPITest() {
   // Already started.
   EXPECT_EQ(-1, ViE.render->SetExpectedRenderDelay(tbChannel.videoChannel, 50));
   EXPECT_EQ(0, ViE.render->StopRender(tbChannel.videoChannel));
-
   // Invalid values.
   EXPECT_EQ(-1, ViE.render->SetExpectedRenderDelay(tbChannel.videoChannel, 9));
   EXPECT_EQ(-1, ViE.render->SetExpectedRenderDelay(tbChannel.videoChannel,
@@ -305,8 +320,4 @@ void ViEAutoTest::ViERenderAPITest() {
   // Valid values.
   EXPECT_EQ(0, ViE.render->SetExpectedRenderDelay(tbChannel.videoChannel, 11));
   EXPECT_EQ(0, ViE.render->SetExpectedRenderDelay(tbChannel.videoChannel, 499));
-
-  EXPECT_EQ(0, ViE.render->RemoveRenderer(tbChannel.videoChannel));
-  EXPECT_EQ(0, ViE.render->RemoveRenderer(tbCapture.captureId));
-  tbCapture.Disconnect(tbChannel.videoChannel);
 }

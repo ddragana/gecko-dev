@@ -8,8 +8,6 @@
 #define __DetailedPromise_h__
 
 #include "mozilla/dom/Promise.h"
-#include "mozilla/Telemetry.h"
-#include "EMEUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -23,21 +21,12 @@ class DetailedPromise : public Promise
 {
 public:
   static already_AddRefed<DetailedPromise>
-  Create(nsIGlobalObject* aGlobal,
-         ErrorResult& aRv,
-         const nsACString& aName);
-
-  static already_AddRefed<DetailedPromise>
-  Create(nsIGlobalObject* aGlobal, ErrorResult& aRv,
-         const nsACString& aName,
-         Telemetry::ID aSuccessLatencyProbe,
-         Telemetry::ID aFailureLatencyProbe);
+  Create(nsIGlobalObject* aGlobal, ErrorResult& aRv);
 
   template <typename T>
   void MaybeResolve(const T& aArg)
   {
-    EME_LOG("%s promise resolved", mName.get());
-    MaybeReportTelemetry(Succeeded);
+    mResponded = true;
     Promise::MaybeResolve<T>(aArg);
   }
 
@@ -48,23 +37,10 @@ public:
   void MaybeReject(ErrorResult&, const nsACString& aReason);
 
 private:
-  explicit DetailedPromise(nsIGlobalObject* aGlobal,
-                           const nsACString& aName);
-
-  explicit DetailedPromise(nsIGlobalObject* aGlobal,
-                           const nsACString& aName,
-                           Telemetry::ID aSuccessLatencyProbe,
-                           Telemetry::ID aFailureLatencyProbe);
+  explicit DetailedPromise(nsIGlobalObject* aGlobal);
   virtual ~DetailedPromise();
 
-  enum Status { Succeeded, Failed };
-  void MaybeReportTelemetry(Status aStatus);
-
-  nsCString mName;
   bool mResponded;
-  TimeStamp mStartTime;
-  Optional<Telemetry::ID> mSuccessLatencyProbe;
-  Optional<Telemetry::ID> mFailureLatencyProbe;
 };
 
 } // namespace dom

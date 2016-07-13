@@ -5,7 +5,6 @@
 
 #include "mozilla/dom/HTMLTrackElement.h"
 #include "mozilla/dom/TextTrackCue.h"
-#include "mozilla/dom/TextTrackList.h"
 #include "mozilla/dom/TextTrackRegion.h"
 #include "nsComponentManagerUtils.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -33,19 +32,18 @@ StaticRefPtr<nsIWebVTTParserWrapper> TextTrackCue::sParserWrapper;
 void
 TextTrackCue::SetDefaultCueSettings()
 {
-  mPositionIsAutoKeyword = true;
-  mPositionAlign = PositionAlignSetting::Center;
-  mSize = 100.0;
+  mPosition = 50;
+  mPositionAlign = AlignSetting::Middle;
+  mSize = 100;
   mPauseOnExit = false;
   mSnapToLines = true;
   mLineIsAutoKeyword = true;
-  mAlign = AlignSetting::Center;
-  mLineAlign = LineAlignSetting::Start;
+  mAlign = AlignSetting::Middle;
+  mLineAlign = AlignSetting::Start;
   mVertical = DirectionSetting::_empty;
-  mActive = false;
 }
 
-TextTrackCue::TextTrackCue(nsPIDOMWindowInner* aOwnerWindow,
+TextTrackCue::TextTrackCue(nsPIDOMWindow* aOwnerWindow,
                            double aStartTime,
                            double aEndTime,
                            const nsAString& aText,
@@ -63,7 +61,7 @@ TextTrackCue::TextTrackCue(nsPIDOMWindowInner* aOwnerWindow,
   }
 }
 
-TextTrackCue::TextTrackCue(nsPIDOMWindowInner* aOwnerWindow,
+TextTrackCue::TextTrackCue(nsPIDOMWindow* aOwnerWindow,
                            double aStartTime,
                            double aEndTime,
                            const nsAString& aText,
@@ -93,7 +91,7 @@ TextTrackCue::~TextTrackCue()
 nsresult
 TextTrackCue::StashDocument()
 {
-  nsPIDOMWindowInner* window = GetOwner();
+  nsPIDOMWindow* window = GetOwner();
   if (!window) {
     return NS_ERROR_NO_INTERFACE;
   }
@@ -124,7 +122,7 @@ TextTrackCue::GetCueAsHTML()
     ClearOnShutdown(&sParserWrapper);
   }
 
-  nsPIDOMWindowInner* window = mDocument->GetInnerWindow();
+  nsPIDOMWindow* window = mDocument->GetWindow();
   if (!window) {
     return mDocument->CreateDocumentFragment();
   }
@@ -135,7 +133,7 @@ TextTrackCue::GetCueAsHTML()
   if (!div) {
     return mDocument->CreateDocumentFragment();
   }
-  RefPtr<DocumentFragment> docFrag = mDocument->CreateDocumentFragment();
+  nsRefPtr<DocumentFragment> docFrag = mDocument->CreateDocumentFragment();
   nsCOMPtr<nsIDOMNode> throwAway;
   docFrag->AppendChild(div, getter_AddRefs(throwAway));
 
@@ -168,68 +166,6 @@ TextTrackCue::SetRegion(TextTrackRegion* aRegion)
   }
   mRegion = aRegion;
   mReset = true;
-}
-
-double
-TextTrackCue::ComputedLine()
-{
-  // See spec https://w3c.github.io/webvtt/#cue-computed-line
-  if (!mLineIsAutoKeyword && !mSnapToLines &&
-      (mLine < 0.0 || mLine > 100.0)) {
-    return 100.0;
-  } else if (!mLineIsAutoKeyword) {
-    return mLine;
-  } else if (mLineIsAutoKeyword && !mSnapToLines) {
-    return 100.0;
-  } else if (!mTrack ||
-             !mTrack->GetTextTrackList() ||
-             !mTrack->GetTextTrackList()->GetMediaElement()) {
-    return -1.0;
-  }
-
-  RefPtr<TextTrackList> trackList = mTrack->GetTextTrackList();
-  bool dummy;
-  uint32_t showingTracksNum = 0;
-  for (uint32_t idx = 0; idx < trackList->Length(); idx++) {
-    RefPtr<TextTrack> track = trackList->IndexedGetter(idx, dummy);
-    if (track->Mode() == TextTrackMode::Showing) {
-      showingTracksNum++;
-    }
-
-    if (mTrack == track) {
-      break;
-    }
-  }
-
-  return (-1.0) * showingTracksNum;
-}
-
-double
-TextTrackCue::ComputedPosition()
-{
-  // See spec https://w3c.github.io/webvtt/#cue-computed-position
-  if (!mPositionIsAutoKeyword) {
-    return mPosition;
-  } else if (mAlign == AlignSetting::Left) {
-    return 0.0;
-  } else if (mAlign == AlignSetting::Right) {
-    return 100.0;
-  }
-  return 50.0;
-}
-
-PositionAlignSetting
-TextTrackCue::ComputedPositionAlign()
-{
-  // See spec https://w3c.github.io/webvtt/#cue-computed-position-alignment
-  if (mPositionAlign != PositionAlignSetting::Auto) {
-    return mPositionAlign;
-  } else if (mAlign == AlignSetting::Left) {
-    return PositionAlignSetting::Line_left;
-  } else if (mAlign == AlignSetting::Right) {
-    return PositionAlignSetting::Line_right;
-  }
-  return PositionAlignSetting::Center;
 }
 
 } // namespace dom

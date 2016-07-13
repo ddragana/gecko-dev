@@ -82,7 +82,7 @@ nsDOMWindowList::GetLength(uint32_t* aLength)
   return NS_OK;
 }
 
-already_AddRefed<nsPIDOMWindowOuter>
+already_AddRefed<nsIDOMWindow>
 nsDOMWindowList::IndexedGetter(uint32_t aIndex)
 {
   nsCOMPtr<nsIDocShellTreeItem> item = GetDocShellTreeItemAt(aIndex);
@@ -90,22 +90,22 @@ nsDOMWindowList::IndexedGetter(uint32_t aIndex)
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = item->GetWindow();
+  nsCOMPtr<nsIDOMWindow> window = item->GetWindow();
   MOZ_ASSERT(window);
 
   return window.forget();
 }
 
 NS_IMETHODIMP 
-nsDOMWindowList::Item(uint32_t aIndex, mozIDOMWindowProxy** aReturn)
+nsDOMWindowList::Item(uint32_t aIndex, nsIDOMWindow** aReturn)
 {
-  nsCOMPtr<nsPIDOMWindowOuter> window = IndexedGetter(aIndex);
+  nsCOMPtr<nsIDOMWindow> window = IndexedGetter(aIndex);
   window.forget(aReturn);
   return NS_OK;
 }
 
 NS_IMETHODIMP 
-nsDOMWindowList::NamedItem(const nsAString& aName, mozIDOMWindowProxy** aReturn)
+nsDOMWindowList::NamedItem(const nsAString& aName, nsIDOMWindow** aReturn)
 {
   nsCOMPtr<nsIDocShellTreeItem> item;
 

@@ -23,22 +23,22 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  void ProcessBlocksOnPorts(AudioNodeStream* aStream,
-                            const OutputChunks& aInput,
-                            OutputChunks& aOutput,
-                            bool* aFinished) override
+  virtual void ProcessBlocksOnPorts(AudioNodeStream* aStream,
+                                    const OutputChunks& aInput,
+                                    OutputChunks& aOutput,
+                                    bool* aFinished) override
   {
     MOZ_ASSERT(aInput.Length() == 1, "Should only have one input port");
 
     aOutput.SetLength(OutputCount());
     for (uint16_t i = 0; i < OutputCount(); ++i) {
-      if (i < aInput[0].ChannelCount()) {
+      if (i < aInput[0].mChannelData.Length()) {
         // Split out existing channels
-        aOutput[i].AllocateChannels(1);
+        AllocateAudioBlock(1, &aOutput[i]);
         AudioBlockCopyChannelWithScale(
             static_cast<const float*>(aInput[0].mChannelData[i]),
             aInput[0].mVolume,
-            aOutput[i].ChannelFloatsForWrite(0));
+            static_cast<float*>(const_cast<void*>(aOutput[i].mChannelData[0])));
       } else {
         // Pad with silent channels if needed
         aOutput[i].SetNull(WEBAUDIO_BLOCK_SIZE);
@@ -46,7 +46,7 @@ public:
     }
   }
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -60,9 +60,8 @@ ChannelSplitterNode::ChannelSplitterNode(AudioContext* aContext,
               ChannelInterpretation::Speakers)
   , mOutputCount(aOutputCount)
 {
-  mStream = AudioNodeStream::Create(aContext,
-                                    new ChannelSplitterNodeEngine(this),
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+  mStream = aContext->Graph()->CreateAudioNodeStream(new ChannelSplitterNodeEngine(this),
+                                                     MediaStreamGraph::INTERNAL_STREAM);
 }
 
 ChannelSplitterNode::~ChannelSplitterNode()

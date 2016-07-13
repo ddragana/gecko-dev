@@ -20,17 +20,20 @@ using namespace android;
 
 namespace mozilla {
 
-extern LazyLogModule gMediaDecoderLog;
+extern PRLogModuleInfo* gMediaDecoderLog;
 #define DECODER_LOG(type, msg) MOZ_LOG(gMediaDecoderLog, type, msg)
 
-MediaOmxCommonDecoder::MediaOmxCommonDecoder(MediaDecoderOwner* aOwner)
-  : MediaDecoder(aOwner)
+MediaOmxCommonDecoder::MediaOmxCommonDecoder()
+  : MediaDecoder()
   , mReader(nullptr)
   , mCanOffloadAudio(false)
   , mFallbackToStateMachine(false)
   , mIsCaptured(false)
 {
   mDormantSupported = true;
+  if (!gMediaDecoderLog) {
+    gMediaDecoderLog = PR_NewLogModule("MediaDecoder");
+  }
 }
 
 MediaOmxCommonDecoder::~MediaOmxCommonDecoder() {}
@@ -38,38 +41,13 @@ MediaOmxCommonDecoder::~MediaOmxCommonDecoder() {}
 void
 MediaOmxCommonDecoder::SetPlatformCanOffloadAudio(bool aCanOffloadAudio)
 {
-  if (!aCanOffloadAudio) {
-    return;
-  }
-
-  // Stop MDSM from playing to avoid startup glitch (bug 1053186).
-  GetStateMachine()->DispatchAudioOffloading(true);
-
-  // Modify mCanOffloadAudio in the main thread.
-  RefPtr<MediaOmxCommonDecoder> self = this;
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
-    self->mCanOffloadAudio = true;
-  });
-  AbstractThread::MainThread()->Dispatch(r.forget());
-}
-
-void
-MediaOmxCommonDecoder::DisableStateMachineAudioOffloading()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (mCanOffloadAudio) {
-    // mCanOffloadAudio is true implies we've called
-    // |GetStateMachine()->DispatchAudioOffloading(true)| in
-    // SetPlatformCanOffloadAudio(). We need to turn off audio offloading
-    // for MDSM so it can start playback.
-    GetStateMachine()->DispatchAudioOffloading(false);
-  }
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
+  mCanOffloadAudio = aCanOffloadAudio;
 }
 
 bool
 MediaOmxCommonDecoder::CheckDecoderCanOffloadAudio()
 {
-  MOZ_ASSERT(NS_IsMainThread());
   return (mCanOffloadAudio && !mFallbackToStateMachine &&
           !mIsCaptured && mPlaybackRate == 1.0);
 }
@@ -80,12 +58,16 @@ MediaOmxCommonDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (mShuttingDown) {
+    return;
+  }
+
   MediaDecoder::FirstFrameLoaded(aInfo, aEventVisibility);
 
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   if (!CheckDecoderCanOffloadAudio()) {
     DECODER_LOG(LogLevel::Debug, ("In %s Offload Audio check failed",
         __PRETTY_FUNCTION__));
-    DisableStateMachineAudioOffloading();
     return;
   }
 
@@ -93,7 +75,6 @@ MediaOmxCommonDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
   mAudioOffloadPlayer = new AudioOffloadPlayer(this);
 #endif
   if (!mAudioOffloadPlayer) {
-    DisableStateMachineAudioOffloading();
     return;
   }
 
@@ -104,7 +85,6 @@ MediaOmxCommonDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
     mFallbackToStateMachine = true;
     DECODER_LOG(LogLevel::Debug, ("In %s Unable to start offload audio %d."
       "Switching to normal mode", __PRETTY_FUNCTION__, err));
-    DisableStateMachineAudioOffloading();
     return;
   }
   PauseStateMachine();
@@ -125,17 +105,30 @@ void
 MediaOmxCommonDecoder::PauseStateMachine()
 {
   MOZ_ASSERT(NS_IsMainThread());
+  GetReentrantMonitor().AssertCurrentThreadIn();
   DECODER_LOG(LogLevel::Debug, ("%s", __PRETTY_FUNCTION__));
 
-  MOZ_ASSERT(GetStateMachine());
+  if (mShuttingDown) {
+    return;
+  }
+
+  if (!GetStateMachine()) {
+    return;
+  }
   // enter dormant state
-  GetStateMachine()->DispatchSetDormant(true);
+  RefPtr<nsRunnable> event =
+    NS_NewRunnableMethodWithArg<bool>(
+      GetStateMachine(),
+      &MediaDecoderStateMachine::SetDormant,
+      true);
+  GetStateMachine()->OwnerThread()->Dispatch(event.forget());
 }
 
 void
 MediaOmxCommonDecoder::ResumeStateMachine()
 {
   MOZ_ASSERT(NS_IsMainThread());
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   DECODER_LOG(LogLevel::Debug, ("%s current time %f", __PRETTY_FUNCTION__, mLogicalPosition));
 
   if (mShuttingDown) {
@@ -146,20 +139,28 @@ MediaOmxCommonDecoder::ResumeStateMachine()
     return;
   }
 
-  GetStateMachine()->DispatchAudioOffloading(false);
-
   mFallbackToStateMachine = true;
   mAudioOffloadPlayer = nullptr;
   SeekTarget target = SeekTarget(mLogicalPosition,
                                  SeekTarget::Accurate,
                                  MediaDecoderEventVisibility::Suppressed);
   // Call Seek of MediaDecoderStateMachine to suppress seek events.
-  GetStateMachine()->InvokeSeek(target);
+  RefPtr<nsRunnable> event =
+    NS_NewRunnableMethodWithArg<SeekTarget>(
+      GetStateMachine(),
+      &MediaDecoderStateMachine::Seek,
+      target);
+  GetStateMachine()->OwnerThread()->Dispatch(event.forget());
 
   mNextState = mPlayState;
   ChangeState(PLAY_STATE_LOADING);
   // exit dormant state
-  GetStateMachine()->DispatchSetDormant(false);
+  event =
+    NS_NewRunnableMethodWithArg<bool>(
+      GetStateMachine(),
+      &MediaDecoderStateMachine::SetDormant,
+      false);
+  GetStateMachine()->OwnerThread()->Dispatch(event.forget());
   UpdateLogicalPosition();
 }
 
@@ -225,14 +226,13 @@ MediaOmxCommonDecoder::ChangeState(PlayState aState)
 }
 
 void
-MediaOmxCommonDecoder::CallSeek(const SeekTarget& aTarget, dom::Promise* aPromise)
+MediaOmxCommonDecoder::CallSeek(const SeekTarget& aTarget)
 {
   if (!mAudioOffloadPlayer) {
-    MediaDecoder::CallSeek(aTarget, aPromise);
+    MediaDecoder::CallSeek(aTarget);
     return;
   }
 
-  mSeekDOMPromise = aPromise;
   mSeekRequest.DisconnectIfExists();
   mSeekRequest.Begin(mAudioOffloadPlayer->Seek(aTarget)
     ->Then(AbstractThread::MainThread(), __func__, static_cast<MediaDecoder*>(this),
@@ -246,6 +246,8 @@ MediaOmxCommonDecoder::CurrentPosition()
   if (!mAudioOffloadPlayer) {
     return MediaDecoder::CurrentPosition();
   }
+
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   return mAudioOffloadPlayer->GetMediaTimeUs();
 }
 
@@ -253,7 +255,6 @@ void
 MediaOmxCommonDecoder::SetElementVisibility(bool aIsVisible)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MediaDecoder::SetElementVisibility(aIsVisible);
   if (mAudioOffloadPlayer) {
     mAudioOffloadPlayer->SetElementVisibility(aIsVisible);
   }

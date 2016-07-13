@@ -11,13 +11,9 @@
  * and create derivative works of this document.
  */
 
-enum ScrollRestoration { "auto", "manual" };
-
 interface History {
   [Throws]
   readonly attribute unsigned long length;
-  [Throws]
-  attribute ScrollRestoration scrollRestoration;
   [Throws]
   readonly attribute any state;
   [Throws, UnsafeInPrerendering]

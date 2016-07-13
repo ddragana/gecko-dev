@@ -18,10 +18,10 @@ InitReflect(JSContext* cx, js::HandleObject obj);
 
 namespace js {
 
-extern MOZ_MUST_USE bool
+extern bool
 Reflect_getPrototypeOf(JSContext* cx, unsigned argc, Value* vp);
 
-extern MOZ_MUST_USE bool
+extern bool
 Reflect_isExtensible(JSContext* cx, unsigned argc, Value* vp);
 
 }

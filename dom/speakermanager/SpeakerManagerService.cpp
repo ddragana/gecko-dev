@@ -40,7 +40,7 @@ SpeakerManagerService::GetOrCreateSpeakerManagerService()
   }
 
   // Create new instance, register, return
-  RefPtr<SpeakerManagerService> service = new SpeakerManagerService();
+  nsRefPtr<SpeakerManagerService> service = new SpeakerManagerService();
 
   gSpeakerManagerService = service;
 
@@ -133,7 +133,7 @@ SpeakerManagerService::Notify()
   nsTArray<ContentParent*> children;
   ContentParent::GetAll(children);
   for (uint32_t i = 0; i < children.Length(); i++) {
-    Unused << children[i]->SendSpeakerManagerNotify();
+    unused << children[i]->SendSpeakerManagerNotify();
   }
 
   for (uint32_t i = 0; i < mRegisteredSpeakerManagers.Length(); i++) {
@@ -182,11 +182,9 @@ SpeakerManagerService::Observe(nsISupports* aSubject,
   } else if (!strcmp(aTopic, "xpcom-will-shutdown")) {
     // Note that we need to do this before xpcom-shutdown, since the
     // AudioChannelService cannot be used past that point.
-    RefPtr<AudioChannelService> audioChannelService =
+    nsRefPtr<AudioChannelService> audioChannelService =
       AudioChannelService::GetOrCreate();
-    if (audioChannelService) {
-      audioChannelService->UnregisterSpeakerManager(this);
-    }
+    audioChannelService->UnregisterSpeakerManager(this);
 
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
     if (obs) {
@@ -211,11 +209,9 @@ SpeakerManagerService::SpeakerManagerService()
       obs->AddObserver(this, "xpcom-will-shutdown", false);
     }
   }
-  RefPtr<AudioChannelService> audioChannelService =
+  nsRefPtr<AudioChannelService> audioChannelService =
     AudioChannelService::GetOrCreate();
-  if (audioChannelService) {
-    audioChannelService->RegisterSpeakerManager(this);
-  }
+  audioChannelService->RegisterSpeakerManager(this);
 }
 
 SpeakerManagerService::~SpeakerManagerService()

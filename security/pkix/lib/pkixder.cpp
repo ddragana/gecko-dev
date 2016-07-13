@@ -104,7 +104,7 @@ AlgorithmIdentifierValue(Reader& input, /*out*/ Reader& algorithmOIDValue)
   return OptionalNull(input);
 }
 
-} // namespace
+} // unnamed namespace
 
 Result
 SignatureAlgorithmIdentifierValue(Reader& input,
@@ -502,10 +502,6 @@ IntegralBytes(Reader& input, uint8_t tag,
   uint8_t firstByte;
   rv = reader.Read(firstByte);
   if (rv != Success) {
-    if (rv == Result::ERROR_BAD_DER) {
-      return Result::ERROR_INVALID_INTEGER_ENCODING;
-    }
-
     return rv;
   }
 
@@ -520,21 +516,21 @@ IntegralBytes(Reader& input, uint8_t tag,
                         Result::FATAL_ERROR_LIBRARY_FAILURE);
     }
     if ((firstByte & 0x80) == (nextByte & 0x80)) {
-      return Result::ERROR_INVALID_INTEGER_ENCODING;
+      return Result::ERROR_BAD_DER;
     }
   }
 
   switch (valueRestriction) {
     case IntegralValueRestriction::MustBe0To127:
       if (value.GetLength() != 1 || (firstByte & 0x80) != 0) {
-        return Result::ERROR_INVALID_INTEGER_ENCODING;
+        return Result::ERROR_BAD_DER;
       }
       break;
 
     case IntegralValueRestriction::MustBePositive:
       if ((value.GetLength() == 1 && firstByte == 0) ||
           (firstByte & 0x80) != 0) {
-        return Result::ERROR_INVALID_INTEGER_ENCODING;
+        return Result::ERROR_BAD_DER;
       }
       break;
 

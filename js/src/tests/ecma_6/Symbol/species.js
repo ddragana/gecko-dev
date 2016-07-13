@@ -3,19 +3,11 @@ var summary = "Implement @@species getter for builtin types";
 
 print(BUGNUMBER + ": " + summary);
 
-var TypedArray = Object.getPrototypeOf(Int8Array);
-
-for (var C of [Array, Map, Set, RegExp,
-               Int8Array, Uint8Array, Uint8ClampedArray,
-               Int16Array, Uint16Array, Int32Array, Uint32Array,
-               Float32Array, Float64Array,
-               ArrayBuffer]) {
+for (var C of [Map, Set]) {
   assertEq(C[Symbol.species], C);
 }
 
-for (C of [Array, Map, Set, RegExp,
-           TypedArray,
-           ArrayBuffer]) {
+for (C of [Map, Set]) {
   var desc = Object.getOwnPropertyDescriptor(C, Symbol.species);
   assertDeepEq(Object.keys(desc).sort(), ["configurable", "enumerable", "get", "set"]);
   assertEq(desc.set, undefined);

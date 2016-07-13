@@ -58,8 +58,8 @@ const PREF_DISPLAY = "security.mixed_content.block_display_content";
 const gHttpsTestRoot = "https://example.com/browser/browser/base/content/test/general/";
 const gHttpTestRoot = "http://example.com/browser/browser/base/content/test/general/";
 
-var origBlockActive;
-var origBlockDisplay;
+let origBlockActive;
+let origBlockDisplay;
 var gTestBrowser = null;
 
 //------------------------ Helper Functions ---------------------
@@ -100,19 +100,20 @@ function waitForCondition(condition, nextTest, errorMsg, okMsg) {
 //------------------------ Test 1 ------------------------------
 
 function test1() {
-  gTestBrowser.addEventListener("load", checkUIForTest1, true);
+  gTestBrowser.addEventListener("load", checkPopUpNotificationsForTest1, true);
   var url = gHttpsTestRoot + "test_mcb_redirect.html"
   gTestBrowser.contentWindow.location = url;
 }
 
-function checkUIForTest1() {
-  gTestBrowser.removeEventListener("load", checkUIForTest1, true);
+function checkPopUpNotificationsForTest1() {
+  gTestBrowser.removeEventListener("load", checkPopUpNotificationsForTest1, true);
 
-  assertMixedContentBlockingState(gTestBrowser, {activeLoaded: false, activeBlocked: true, passiveLoaded: false});
+  var notification = PopupNotifications.getNotification("bad-content", gTestBrowser.selectedBrowser);
+  ok(notification, "OK: Mixed Content Doorhanger appeared in Test1!");
 
   var expected = "script blocked";
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test2, "Error: Waited too long for status in Test 1!",
     "OK: Expected result in innerHTML for Test1!");
 }
@@ -120,19 +121,20 @@ function checkUIForTest1() {
 //------------------------ Test 2 ------------------------------
 
 function test2() {
-  gTestBrowser.addEventListener("load", checkUIForTest2, true);
+  gTestBrowser.addEventListener("load", checkPopUpNotificationsForTest2, true);
   var url = gHttpTestRoot + "test_mcb_redirect.html"
   gTestBrowser.contentWindow.location = url;
 }
 
-function checkUIForTest2() {
-  gTestBrowser.removeEventListener("load", checkUIForTest2, true);
+function checkPopUpNotificationsForTest2() {
+  gTestBrowser.removeEventListener("load", checkPopUpNotificationsForTest2, true);
 
-  assertMixedContentBlockingState(gTestBrowser, {activeLoaded: false, activeBlocked: false, passiveLoaded: false});
+  var notification = PopupNotifications.getNotification("bad-content", gTestBrowser.selectedBrowser);
+  ok(!notification, "OK: Mixed Content Doorhanger did not appear in 2!");
 
   var expected = "script executed";
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test3, "Error: Waited too long for status in Test 2!",
     "OK: Expected result in innerHTML for Test2!");
 }
@@ -150,7 +152,7 @@ function checkLoadEventForTest3() {
 
   var expected = "image blocked"
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test4, "Error: Waited too long for status in Test 3!",
     "OK: Expected result in innerHTML for Test3!");
 }
@@ -168,7 +170,7 @@ function checkLoadEventForTest4() {
 
   var expected = "image loaded"
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test5, "Error: Waited too long for status in Test 4!",
     "OK: Expected result in innerHTML for Test4!");
 }
@@ -191,7 +193,7 @@ function checkLoadEventForTest5() {
 
   var expected = "image loaded"
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test6, "Error: Waited too long for status in Test 5!",
     "OK: Expected result in innerHTML for Test5!");
   // Go back online
@@ -216,7 +218,7 @@ function checkLoadEventForTest6() {
 
   var expected = "image blocked"
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test7, "Error: Waited too long for status in Test 6!",
     "OK: Expected result in innerHTML for Test6!");
   // Go back online
@@ -236,7 +238,7 @@ function checkLoadEventForTest7() {
 
   var expected = "image loaded"
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test8, "Error: Waited too long for status in Test 7!",
     "OK: Expected result in innerHTML for Test7!");
 }
@@ -259,7 +261,7 @@ function checkLoadEventForTest8() {
 
   var expected = "image loaded"
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     test9, "Error: Waited too long for status in Test 8!",
     "OK: Expected result in innerHTML for Test8!");
   // Go back online
@@ -284,7 +286,7 @@ function checkLoadEventForTest9() {
 
   var expected = "image blocked"
   waitForCondition(
-    () => content.document.getElementById('mctestdiv').innerHTML == expected,
+    function() content.document.getElementById('mctestdiv').innerHTML == expected,
     cleanUpAfterTests, "Error: Waited too long for status in Test 9!",
     "OK: Expected result in innerHTML for Test9!");
   // Go back online

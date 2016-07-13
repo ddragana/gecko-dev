@@ -90,9 +90,8 @@ class Empty : public RtcpPacket {
   virtual ~Empty() {}
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Empty);
@@ -205,9 +204,8 @@ class SenderReport : public RtcpPacket {
   void WithReportBlock(ReportBlock* block);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfReportBlocks = 0x1f };
@@ -252,9 +250,8 @@ class ReceiverReport : public RtcpPacket {
   void WithReportBlock(ReportBlock* block);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfReportBlocks = 0x1f };
@@ -298,9 +295,8 @@ class Ij : public RtcpPacket {
   void WithJitterItem(uint32_t jitter);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfIjItems = 0x1f };
@@ -355,9 +351,8 @@ class Sdes : public RtcpPacket {
   };
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfChunks = 0x1f };
@@ -397,9 +392,8 @@ class Bye : public RtcpPacket {
   void WithCsrc(uint32_t csrc);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfCsrcs = 0x1f - 1 };
@@ -458,9 +452,8 @@ class App : public RtcpPacket {
   }
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   size_t BlockLength() const {
@@ -509,9 +502,8 @@ class Pli : public RtcpPacket {
   }
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   size_t BlockLength() const {
@@ -561,9 +553,8 @@ class Sli : public RtcpPacket {
   }
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   size_t BlockLength() const {
@@ -603,9 +594,8 @@ class Nack : public RtcpPacket {
   void WithList(const uint16_t* nack_list, int length);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   size_t BlockLength() const {
@@ -654,9 +644,8 @@ class Rpsi : public RtcpPacket {
   void WithPictureId(uint64_t picture_id);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   size_t BlockLength() const {
@@ -702,9 +691,8 @@ class Fir : public RtcpPacket {
   }
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   size_t BlockLength() const {
@@ -752,9 +740,8 @@ class Tmmbr : public RtcpPacket {
   }
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   size_t BlockLength() const {
@@ -794,9 +781,8 @@ class Tmmbn : public RtcpPacket {
   void WithTmmbr(uint32_t ssrc, uint32_t bitrate_kbps, uint16_t overhead);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfTmmbrs = 50 };
@@ -850,9 +836,8 @@ class Remb : public RtcpPacket {
   }
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfSsrcs = 0xff };
@@ -898,9 +883,8 @@ class Xr : public RtcpPacket {
   void WithVoipMetric(VoipMetric* voip_metric);
 
  protected:
-  void Create(uint8_t* packet,
-              size_t* length,
-              size_t max_length) const override;
+  virtual void Create(
+      uint8_t* packet, size_t* length, size_t max_length) const OVERRIDE;
 
  private:
   enum { kMaxNumberOfRrtrBlocks = 50 };

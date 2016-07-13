@@ -37,37 +37,35 @@ AnalyzeAsmHeapAddress(MDefinition* ptr, MIRGraph& graph)
     // Putting the add on the outside might seem like it exposes other users of
     // the expression to the possibility of i32 overflow, if we aren't in asm.js
     // and they aren't naturally truncating. However, since we use MAdd::NewAsmJS
-    // with MIRType::Int32, we make sure that the value is truncated, just as it
+    // with MIRType_Int32, we make sure that the value is truncated, just as it
     // would be by the MBitAnd.
-
-    MOZ_ASSERT(IsCompilingAsmJS());
 
     if (!ptr->isBitAnd())
         return;
 
     MDefinition* lhs = ptr->toBitAnd()->getOperand(0);
     MDefinition* rhs = ptr->toBitAnd()->getOperand(1);
-    if (lhs->isConstant())
+    if (lhs->isConstantValue())
         mozilla::Swap(lhs, rhs);
-    if (!lhs->isAdd() || !rhs->isConstant())
+    if (!lhs->isAdd() || !rhs->isConstantValue())
         return;
 
     MDefinition* op0 = lhs->toAdd()->getOperand(0);
     MDefinition* op1 = lhs->toAdd()->getOperand(1);
-    if (op0->isConstant())
+    if (op0->isConstantValue())
         mozilla::Swap(op0, op1);
-    if (!op1->isConstant())
+    if (!op1->isConstantValue())
         return;
 
-    uint32_t i = op1->toConstant()->toInt32();
-    uint32_t m = rhs->toConstant()->toInt32();
+    uint32_t i = op1->constantValue().toInt32();
+    uint32_t m = rhs->constantValue().toInt32();
     if (!IsAlignmentMask(m) || (i & m) != i)
         return;
 
     // The pattern was matched! Produce the replacement expression.
-    MInstruction* and_ = MBitAnd::NewAsmJS(graph.alloc(), op0, rhs, MIRType::Int32);
+    MInstruction* and_ = MBitAnd::NewAsmJS(graph.alloc(), op0, rhs);
     ptr->block()->insertBefore(ptr->toBitAnd(), and_);
-    MInstruction* add = MAdd::NewAsmJS(graph.alloc(), and_, op1, MIRType::Int32);
+    MInstruction* add = MAdd::NewAsmJS(graph.alloc(), and_, op1, MIRType_Int32);
     ptr->block()->insertBefore(ptr->toBitAnd(), add);
     ptr->replaceAllUsesWith(add);
     ptr->block()->discard(ptr->toBitAnd());
@@ -78,16 +76,13 @@ AlignmentMaskAnalysis::analyze()
 {
     for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
         for (MInstructionIterator i = block->begin(); i != block->end(); i++) {
-            if (!graph_.alloc().ensureBallast())
-                return false;
-
             // Note that we don't check for MAsmJSCompareExchangeHeap
             // or MAsmJSAtomicBinopHeap, because the backend and the OOB
             // mechanism don't support non-zero offsets for them yet.
             if (i->isAsmJSLoadHeap())
-                AnalyzeAsmHeapAddress(i->toAsmJSLoadHeap()->base(), graph_);
+                AnalyzeAsmHeapAddress(i->toAsmJSLoadHeap()->ptr(), graph_);
             else if (i->isAsmJSStoreHeap())
-                AnalyzeAsmHeapAddress(i->toAsmJSStoreHeap()->base(), graph_);
+                AnalyzeAsmHeapAddress(i->toAsmJSStoreHeap()->ptr(), graph_);
         }
     }
     return true;

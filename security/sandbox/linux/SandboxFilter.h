@@ -19,9 +19,7 @@ class Policy;
 namespace mozilla {
 
 #ifdef MOZ_CONTENT_SANDBOX
-class SandboxBrokerClient;
-
-UniquePtr<sandbox::bpf_dsl::Policy> GetContentSandboxPolicy(SandboxBrokerClient* aMaybeBroker);
+UniquePtr<sandbox::bpf_dsl::Policy> GetContentSandboxPolicy();
 #endif
 
 #ifdef MOZ_GMP_SANDBOX

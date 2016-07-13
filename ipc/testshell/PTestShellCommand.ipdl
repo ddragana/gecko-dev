@@ -13,7 +13,7 @@ protocol PTestShellCommand
   manager PTestShell;
 
 parent:
-  async __delete__(nsString aResponse);
+  __delete__(nsString aResponse);
 };
 
 } // namespace ipc

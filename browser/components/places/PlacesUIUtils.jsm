@@ -12,7 +12,6 @@ var Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Timer.jsm");
 
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
@@ -32,16 +31,17 @@ Cu.import("resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesTransactions",
                                   "resource://gre/modules/PlacesTransactions.jsm");
 
+#ifdef MOZ_SERVICES_CLOUDSYNC
 XPCOMUtils.defineLazyModuleGetter(this, "CloudSync",
                                   "resource://gre/modules/CloudSync.jsm");
+#else
+let CloudSync = null;
+#endif
 
+#ifdef MOZ_SERVICES_SYNC
 XPCOMUtils.defineLazyModuleGetter(this, "Weave",
                                   "resource://services-sync/main.js");
-
-const gInContentProcess = Services.appinfo.processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
-const FAVICON_REQUEST_TIMEOUT = 60 * 1000;
-// Map from windows to arrays of data about pending favicon loads.
-let gFaviconLoadDataMap = new Map();
+#endif
 
 // copied from utilityOverlay.js
 const TAB_DROP_TYPE = "application/x-moz-tabbrowser-tab";
@@ -82,153 +82,6 @@ function IsLivemark(aItemId) {
   }
   return self.ids.has(aItemId);
 }
-
-let InternalFaviconLoader = {
-  /**
-   * This gets called for every inner window that is destroyed.
-   * In the parent process, we process the destruction ourselves. In the child process,
-   * we notify the parent which will then process it based on that message.
-   */
-  observe(subject, topic, data) {
-    let innerWindowID = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
-    this.removeRequestsForInner(innerWindowID);
-  },
-
-  /**
-   * Actually cancel the request, and clear the timeout for cancelling it.
-   */
-  _cancelRequest({uri, innerWindowID, timerID, callback}, reason) {
-    // Break cycle
-    let request = callback.request;
-    delete callback.request;
-    // Ensure we don't time out.
-    clearTimeout(timerID);
-    try {
-      request.cancel();
-    } catch (ex) {
-      Cu.reportError("When cancelling a request for " + uri.spec + " because " + reason + ", it was already canceled!");
-    }
-  },
-
-  /**
-   * Called for every inner that gets destroyed, only in the parent process.
-   */
-  removeRequestsForInner(innerID) {
-    for (let [window, loadDataForWindow] of gFaviconLoadDataMap) {
-      let newLoadDataForWindow = loadDataForWindow.filter(loadData => {
-        let innerWasDestroyed = loadData.innerWindowID == innerID;
-        if (innerWasDestroyed) {
-          this._cancelRequest(loadData, "the inner window was destroyed or a new favicon was loaded for it");
-        }
-        // Keep the items whose inner is still alive.
-        return !innerWasDestroyed;
-      });
-      // Map iteration with for...of is safe against modification, so
-      // now just replace the old value:
-      gFaviconLoadDataMap.set(window, newLoadDataForWindow);
-    }
-  },
-
-  /**
-   * Called when a toplevel chrome window unloads. We use this to tidy up after ourselves,
-   * avoid leaks, and cancel any remaining requests. The last part should in theory be
-   * handled by the inner-window-destroyed handlers. We clean up just to be on the safe side.
-   */
-  onUnload(win) {
-    let loadDataForWindow = gFaviconLoadDataMap.get(win);
-    if (loadDataForWindow) {
-      for (let loadData of loadDataForWindow) {
-        this._cancelRequest(loadData, "the chrome window went away");
-      }
-    }
-    gFaviconLoadDataMap.delete(win);
-  },
-
-  /**
-   * Create a function to use as a nsIFaviconDataCallback, so we can remove cancelling
-   * information when the request succeeds. Note that right now there are some edge-cases,
-   * such as about: URIs with chrome:// favicons where the success callback is not invoked.
-   * This is OK: we will 'cancel' the request after the timeout (or when the window goes
-   * away) but that will be a no-op in such cases.
-   */
-  _makeCompletionCallback(win, id) {
-    return {
-      onComplete(uri) {
-        let loadDataForWindow = gFaviconLoadDataMap.get(win);
-        if (loadDataForWindow) {
-          let itemIndex = loadDataForWindow.findIndex(loadData => {
-            return loadData.innerWindowID == id &&
-                   loadData.uri.equals(uri) &&
-                   loadData.callback.request == this.request;
-          });
-          if (itemIndex != -1) {
-            let loadData = loadDataForWindow[itemIndex];
-            clearTimeout(loadData.timerID);
-            loadDataForWindow.splice(itemIndex, 1);
-          }
-        }
-        delete this.request;
-      },
-    };
-  },
-
-  ensureInitialized() {
-    if (this._initialized) {
-      return;
-    }
-    this._initialized = true;
-
-    Services.obs.addObserver(this, "inner-window-destroyed", false);
-    Services.ppmm.addMessageListener("Toolkit:inner-window-destroyed", msg => {
-      this.removeRequestsForInner(msg.data);
-    });
-  },
-
-  loadFavicon(browser, principal, uri) {
-    this.ensureInitialized();
-    let win = browser.ownerDocument.defaultView;
-    if (!gFaviconLoadDataMap.has(win)) {
-      gFaviconLoadDataMap.set(win, []);
-      let unloadHandler = event => {
-        let doc = event.target;
-        let eventWin = doc.defaultView;
-        if (eventWin == win) {
-          win.removeEventListener("unload", unloadHandler);
-          this.onUnload(win);
-        }
-      };
-      win.addEventListener("unload", unloadHandler, true);
-    }
-
-    let {innerWindowID, currentURI} = browser;
-
-    // Immediately cancel any earlier requests
-    this.removeRequestsForInner(innerWindowID);
-
-    // First we do the actual setAndFetch call:
-    let loadType = PrivateBrowsingUtils.isWindowPrivate(win)
-      ? PlacesUtils.favicons.FAVICON_LOAD_PRIVATE
-      : PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE;
-    let callback = this._makeCompletionCallback(win, innerWindowID);
-    let request = PlacesUtils.favicons.setAndFetchFaviconForPage(currentURI, uri, false,
-                                                                 loadType, callback, principal);
-
-    // Now register the result so we can cancel it if/when necessary.
-    if (!request) {
-      // The favicon service can return with success but no-op (and leave request
-      // as null) if the icon is the same as the page (e.g. for images) or if it is
-      // the favicon for an error page. In this case, we do not need to do anything else.
-      return;
-    }
-    callback.request = request;
-    let loadData = {innerWindowID, uri, callback};
-    loadData.timerID = setTimeout(() => {
-      this._cancelRequest(loadData, "it timed out");
-    }, FAVICON_REQUEST_TIMEOUT);
-    let loadDataForWindow = gFaviconLoadDataMap.get(win);
-    loadDataForWindow.push(loadData);
-  },
-};
 
 this.PlacesUIUtils = {
   ORGANIZER_LEFTPANE_VERSION: 7,
@@ -281,13 +134,11 @@ this.PlacesUIUtils = {
     return bundle.GetStringFromName(key);
   },
 
-  get _copyableAnnotations() {
-    return [
-      this.DESCRIPTION_ANNO,
-      this.LOAD_IN_SIDEBAR_ANNO,
-      PlacesUtils.READ_ONLY_ANNO,
-    ];
-  },
+  get _copyableAnnotations() [
+    this.DESCRIPTION_ANNO,
+    this.LOAD_IN_SIDEBAR_ANNO,
+    PlacesUtils.READ_ONLY_ANNO,
+  ],
 
   /**
    * Get a transaction for copying a uri item (either a bookmark or a history
@@ -323,7 +174,7 @@ this.PlacesUIUtils = {
     let annos = [];
     if (aData.annos) {
       annos = aData.annos.filter(function (aAnno) {
-        return this._copyableAnnotations.includes(aAnno.name);
+        return this._copyableAnnotations.indexOf(aAnno.name) != -1;
       }, this);
     }
 
@@ -435,7 +286,7 @@ this.PlacesUIUtils = {
     let annos = [];
     if (aData.annos) {
       annos = aData.annos.filter(function (aAnno) {
-        return this._copyableAnnotations.includes(aAnno.name);
+        return this._copyableAnnotations.indexOf(aAnno.name) != -1;
       }, this);
     }
 
@@ -476,7 +327,7 @@ this.PlacesUIUtils = {
         else if (aAnno.name == PlacesUtils.LMANNO_SITEURI) {
           siteURI = PlacesUtils._uri(aAnno.value);
         }
-        return this._copyableAnnotations.includes(aAnno.name)
+        return this._copyableAnnotations.indexOf(aAnno.name) != -1
       }, this);
     }
 
@@ -564,11 +415,11 @@ this.PlacesUIUtils = {
    *          move/insert command.
    */
   getTransactionForData: function(aData, aType, aNewParentGuid, aIndex, aCopy) {
-    if (!this.SUPPORTED_FLAVORS.includes(aData.type))
+    if (this.SUPPORTED_FLAVORS.indexOf(aData.type) == -1)
       throw new Error(`Unsupported '${aData.type}' data type`);
 
     if ("itemGuid" in aData) {
-      if (!this.PLACES_FLAVORS.includes(aData.type))
+      if (this.PLACES_FLAVORS.indexOf(aData.type) == -1)
         throw new Error (`itemGuid unexpectedly set on ${aData.type} data`);
 
       let info = { guid: aData.itemGuid
@@ -616,35 +467,26 @@ this.PlacesUIUtils = {
   showBookmarkDialog:
   function PUIU_showBookmarkDialog(aInfo, aParentWindow) {
     // Preserve size attributes differently based on the fact the dialog has
-    // a folder picker or not, since it needs more horizontal space than the
-    // other controls.
+    // a folder picker or not.  If the picker is visible, the dialog should
+    // be resizable since it may not show enough content for the folders
+    // hierarchy.
     let hasFolderPicker = !("hiddenRows" in aInfo) ||
-                          !aInfo.hiddenRows.includes("folderPicker");
-    // Use a different chrome url to persist different sizes.
+                          aInfo.hiddenRows.indexOf("folderPicker") == -1;
+    // Use a different chrome url, since this allows to persist different sizes,
+    // based on resizability of the dialog.
     let dialogURL = hasFolderPicker ?
                     "chrome://browser/content/places/bookmarkProperties2.xul" :
                     "chrome://browser/content/places/bookmarkProperties.xul";
 
-    let features = "centerscreen,chrome,modal,resizable=yes";
-    aParentWindow.openDialog(dialogURL, "", features, aInfo);
+    let features =
+      "centerscreen,chrome,modal,resizable=" + (hasFolderPicker ? "yes" : "no");
+
+    aParentWindow.openDialog(dialogURL, "",  features, aInfo);
     return ("performed" in aInfo && aInfo.performed);
   },
 
   _getTopBrowserWin: function PUIU__getTopBrowserWin() {
     return RecentWindow.getMostRecentBrowserWindow();
-  },
-
-  /**
-   * set and fetch a favicon. Can only be used from the parent process.
-   * @param browser   {Browser}   The XUL browser element for which we're fetching a favicon.
-   * @param principal {Principal} The loading principal to use for the fetch.
-   * @param uri       {URI}       The URI to fetch.
-   */
-  loadFavicon(browser, principal, uri) {
-    if (gInContentProcess) {
-      throw new Error("Can't track loads from within the child process!");
-    }
-    InternalFaviconLoader.loadFavicon(browser, principal, uri);
   },
 
   /**
@@ -778,10 +620,8 @@ this.PlacesUIUtils = {
    */
   canUserRemove: function (aNode) {
     let parentNode = aNode.parent;
-    if (!parentNode) {
-      // canUserRemove doesn't accept root nodes.
-      return false;
-    }
+    if (!parentNode)
+      throw new Error("canUserRemove doesn't accept root nodes");
 
     // If it's not a bookmark, we can remove it unless it's a child of a
     // livemark.
@@ -1128,7 +968,7 @@ this.PlacesUIUtils = {
           concreteId: PlacesUtils.bookmarksMenuFolderId },
       "UnfiledBookmarks":
         { title: null,
-          concreteTitle: PlacesUtils.getString("OtherBookmarksFolderTitle"),
+          concreteTitle: PlacesUtils.getString("UnsortedBookmarksFolderTitle"),
           concreteId: PlacesUtils.unfiledBookmarksFolderId },
     };
     // All queries but PlacesRoot.
@@ -1213,7 +1053,7 @@ this.PlacesUIUtils = {
 
         // Check that all queries have valid parents.
         let parentId = bs.getFolderIdForItem(query.itemId);
-        if (!items.includes(parentId) && parentId != leftPaneRoot) {
+        if (items.indexOf(parentId) == -1 && parentId != leftPaneRoot) {
           // The parent is not part of the left pane, bail out and create a new
           // left pane root.
           corrupt = true;
@@ -1391,7 +1231,16 @@ this.PlacesUIUtils = {
   shouldShowTabsFromOtherComputersMenuitem: function() {
     let weaveOK = Weave.Status.checkSetup() != Weave.CLIENT_NOT_CONFIGURED &&
                   Weave.Svc.Prefs.get("firstSync", "") != "notReady";
-    return weaveOK;
+    let cloudSyncOK = CloudSync && CloudSync.ready && CloudSync().tabsReady && CloudSync().tabs.hasRemoteTabs();
+    return weaveOK || cloudSyncOK;
+  },
+
+  shouldEnableTabsFromOtherComputersMenuitem: function() {
+    let weaveEnabled = Weave.Service.isLoggedIn &&
+                       Weave.Service.engineManager.get("tabs") &&
+                       Weave.Service.engineManager.get("tabs").enabled;
+    let cloudSyncEnabled = CloudSync && CloudSync.ready && CloudSync().tabsReady && CloudSync().tabs.hasRemoteTabs();
+    return weaveEnabled || cloudSyncEnabled;
   },
 
   /**
@@ -1598,68 +1447,68 @@ XPCOMUtils.defineLazyGetter(PlacesUIUtils, "ptm", function() {
   PlacesUtils;
 
   return {
-    aggregateTransactions: (aName, aTransactions) =>
+    aggregateTransactions: function(aName, aTransactions)
       new PlacesAggregatedTransaction(aName, aTransactions),
 
-    createFolder: (aName, aContainer, aIndex, aAnnotations,
-                   aChildItemsTransactions) =>
+    createFolder: function(aName, aContainer, aIndex, aAnnotations,
+                           aChildItemsTransactions)
       new PlacesCreateFolderTransaction(aName, aContainer, aIndex, aAnnotations,
                                         aChildItemsTransactions),
 
-    createItem: (aURI, aContainer, aIndex, aTitle, aKeyword,
-                 aAnnotations, aChildTransactions) =>
+    createItem: function(aURI, aContainer, aIndex, aTitle, aKeyword,
+                         aAnnotations, aChildTransactions)
       new PlacesCreateBookmarkTransaction(aURI, aContainer, aIndex, aTitle,
                                           aKeyword, aAnnotations,
                                           aChildTransactions),
 
-    createSeparator: (aContainer, aIndex) =>
+    createSeparator: function(aContainer, aIndex)
       new PlacesCreateSeparatorTransaction(aContainer, aIndex),
 
-    createLivemark: (aFeedURI, aSiteURI, aName, aContainer, aIndex,
-                     aAnnotations) =>
+    createLivemark: function(aFeedURI, aSiteURI, aName, aContainer, aIndex,
+                             aAnnotations)
       new PlacesCreateLivemarkTransaction(aFeedURI, aSiteURI, aName, aContainer,
                                           aIndex, aAnnotations),
 
-    moveItem: (aItemId, aNewContainer, aNewIndex) =>
+    moveItem: function(aItemId, aNewContainer, aNewIndex)
       new PlacesMoveItemTransaction(aItemId, aNewContainer, aNewIndex),
 
-    removeItem: (aItemId) =>
+    removeItem: function(aItemId)
       new PlacesRemoveItemTransaction(aItemId),
 
-    editItemTitle: (aItemId, aNewTitle) =>
+    editItemTitle: function(aItemId, aNewTitle)
       new PlacesEditItemTitleTransaction(aItemId, aNewTitle),
 
-    editBookmarkURI: (aItemId, aNewURI) =>
+    editBookmarkURI: function(aItemId, aNewURI)
       new PlacesEditBookmarkURITransaction(aItemId, aNewURI),
 
-    setItemAnnotation: (aItemId, aAnnotationObject) =>
+    setItemAnnotation: function(aItemId, aAnnotationObject)
       new PlacesSetItemAnnotationTransaction(aItemId, aAnnotationObject),
 
-    setPageAnnotation: (aURI, aAnnotationObject) =>
+    setPageAnnotation: function(aURI, aAnnotationObject)
       new PlacesSetPageAnnotationTransaction(aURI, aAnnotationObject),
 
-    editBookmarkKeyword: (aItemId, aNewKeyword) =>
+    editBookmarkKeyword: function(aItemId, aNewKeyword)
       new PlacesEditBookmarkKeywordTransaction(aItemId, aNewKeyword),
 
-    editLivemarkSiteURI: (aLivemarkId, aSiteURI) =>
+    editLivemarkSiteURI: function(aLivemarkId, aSiteURI)
       new PlacesEditLivemarkSiteURITransaction(aLivemarkId, aSiteURI),
 
-    editLivemarkFeedURI: (aLivemarkId, aFeedURI) =>
+    editLivemarkFeedURI: function(aLivemarkId, aFeedURI)
       new PlacesEditLivemarkFeedURITransaction(aLivemarkId, aFeedURI),
 
-    editItemDateAdded: (aItemId, aNewDateAdded) =>
+    editItemDateAdded: function(aItemId, aNewDateAdded)
       new PlacesEditItemDateAddedTransaction(aItemId, aNewDateAdded),
 
-    editItemLastModified: (aItemId, aNewLastModified) =>
+    editItemLastModified: function(aItemId, aNewLastModified)
       new PlacesEditItemLastModifiedTransaction(aItemId, aNewLastModified),
 
-    sortFolderByName: (aFolderId) =>
+    sortFolderByName: function(aFolderId)
       new PlacesSortFolderByNameTransaction(aFolderId),
 
-    tagURI: (aURI, aTags) =>
+    tagURI: function(aURI, aTags)
       new PlacesTagURITransaction(aURI, aTags),
 
-    untagURI: (aURI, aTags) =>
+    untagURI: function(aURI, aTags)
       new PlacesUntagURITransaction(aURI, aTags),
 
     /**
@@ -1703,53 +1552,49 @@ XPCOMUtils.defineLazyGetter(PlacesUIUtils, "ptm", function() {
     ////////////////////////////////////////////////////////////////////////////
     //// nsITransactionManager forwarders.
 
-    beginBatch: () =>
+    beginBatch: function()
       PlacesUtils.transactionManager.beginBatch(null),
 
-    endBatch: () =>
+    endBatch: function()
       PlacesUtils.transactionManager.endBatch(false),
 
-    doTransaction: (txn) =>
+    doTransaction: function(txn)
       PlacesUtils.transactionManager.doTransaction(txn),
 
-    undoTransaction: () =>
+    undoTransaction: function()
       PlacesUtils.transactionManager.undoTransaction(),
 
-    redoTransaction: () =>
+    redoTransaction: function()
       PlacesUtils.transactionManager.redoTransaction(),
 
-    get numberOfUndoItems() {
-      return PlacesUtils.transactionManager.numberOfUndoItems;
-    },
-    get numberOfRedoItems() {
-      return PlacesUtils.transactionManager.numberOfRedoItems;
-    },
-    get maxTransactionCount() {
-      return PlacesUtils.transactionManager.maxTransactionCount;
-    },
-    set maxTransactionCount(val) {
-      PlacesUtils.transactionManager.maxTransactionCount = val;
-    },
+    get numberOfUndoItems()
+      PlacesUtils.transactionManager.numberOfUndoItems,
+    get numberOfRedoItems()
+      PlacesUtils.transactionManager.numberOfRedoItems,
+    get maxTransactionCount()
+      PlacesUtils.transactionManager.maxTransactionCount,
+    set maxTransactionCount(val)
+      PlacesUtils.transactionManager.maxTransactionCount = val,
 
-    clear: () =>
+    clear: function()
       PlacesUtils.transactionManager.clear(),
 
-    peekUndoStack: () =>
+    peekUndoStack: function()
       PlacesUtils.transactionManager.peekUndoStack(),
 
-    peekRedoStack: () =>
+    peekRedoStack: function()
       PlacesUtils.transactionManager.peekRedoStack(),
 
-    getUndoStack: () =>
+    getUndoStack: function()
       PlacesUtils.transactionManager.getUndoStack(),
 
-    getRedoStack: () =>
+    getRedoStack: function()
       PlacesUtils.transactionManager.getRedoStack(),
 
-    AddListener: (aListener) =>
+    AddListener: function(aListener)
       PlacesUtils.transactionManager.AddListener(aListener),
 
-    RemoveListener: (aListener) =>
+    RemoveListener: function(aListener)
       PlacesUtils.transactionManager.RemoveListener(aListener)
   }
 });

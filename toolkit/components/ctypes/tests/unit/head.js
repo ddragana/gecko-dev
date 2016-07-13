@@ -23,7 +23,7 @@ ResourceCleaner.prototype = {
     return v;
   },
   cleanup: function ResourceCleaner_cleanup() {
-    let keys = ThreadSafeChromeUtils.nondeterministicGetWeakMapKeys(this._map);
+    let keys = Components.utils.nondeterministicGetWeakMapKeys(this._map);
     keys.forEach((function cleaner(k) {
       try {
         k.dispose();
@@ -74,8 +74,7 @@ function structural_check_eq(a, b) {
   } catch (x) {
   }
   if (finished) {
-    do_check_eq(asource, bsource);
-    return;
+    return do_check_eq(asource, bsource);
   }
 
   // 2. Otherwise, perform slower comparison

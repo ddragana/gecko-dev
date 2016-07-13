@@ -78,21 +78,6 @@ ReturnLocalA()
   return Move(a);
 }
 
-static void
-TestDeleterType()
-{
-  // Make sure UniquePtr will use its deleter's pointer type if it defines one.
-  typedef int* Ptr;
-  struct Deleter {
-    typedef Ptr pointer;
-    Deleter() {}
-    void operator()(int*p) {
-      delete p;
-    }
-  };
-  UniquePtr<Ptr, Deleter> u(new int, Deleter());
-}
-
 static bool
 TestDefaultFreeGuts()
 {
@@ -307,7 +292,7 @@ TestReferenceDeleterGuts()
   IntDeleterRef id2(Move(id1));
   CHECK(id1 == nullptr);
   CHECK(nullptr != id2);
-  CHECK(&id1.get_deleter() == &id2.get_deleter());
+  CHECK(&id1.getDeleter() == &id2.getDeleter());
 
   IntDeleterRef id3(Move(id2));
 
@@ -565,8 +550,6 @@ TestMakeUnique()
 int
 main()
 {
-  TestDeleterType();
-
   if (!TestDefaultFree()) {
     return 1;
   }

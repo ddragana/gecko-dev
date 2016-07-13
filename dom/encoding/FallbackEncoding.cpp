@@ -15,15 +15,15 @@
 namespace mozilla {
 namespace dom {
 
-static const nsUConvProp localesFallbacks[] = {
+static const char* localesFallbacks[][3] = {
 #include "localesfallbacks.properties.h"
 };
 
-static const nsUConvProp domainsFallbacks[] = {
+static const char* domainsFallbacks[][3] = {
 #include "domainsfallbacks.properties.h"
 };
 
-static const nsUConvProp nonParticipatingDomains[] = {
+static const char* nonParticipatingDomains[][3] = {
 #include "nonparticipatingdomains.properties.h"
 };
 

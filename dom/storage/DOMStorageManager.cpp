@@ -124,54 +124,64 @@ DOMStorageManager::~DOMStorageManager()
 namespace {
 
 nsresult
-AppendOriginNoSuffix(nsIPrincipal* aPrincipal,
-                nsACString& aKey)
+CreateScopeKey(nsIPrincipal* aPrincipal,
+               nsACString& aKey)
 {
-  nsresult rv;
-
   nsCOMPtr<nsIURI> uri;
-  rv = aPrincipal->GetURI(getter_AddRefs(uri));
+  nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
   if (!uri) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsAutoCString domainOrigin;
-  rv = uri->GetAsciiHost(domainOrigin);
+  nsAutoCString domainScope;
+  rv = uri->GetAsciiHost(domainScope);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (domainOrigin.IsEmpty()) {
+  if (domainScope.IsEmpty()) {
     // For the file:/// protocol use the exact directory as domain.
     bool isScheme = false;
     if (NS_SUCCEEDED(uri->SchemeIs("file", &isScheme)) && isScheme) {
       nsCOMPtr<nsIURL> url = do_QueryInterface(uri, &rv);
       NS_ENSURE_SUCCESS(rv, rv);
-      rv = url->GetDirectory(domainOrigin);
+      rv = url->GetDirectory(domainScope);
       NS_ENSURE_SUCCESS(rv, rv);
     }
   }
 
-  // Append reversed domain
-  nsAutoCString reverseDomain;
-  rv = CreateReversedDomain(domainOrigin, reverseDomain);
+  nsAutoCString key;
+
+  rv = CreateReversedDomain(domainScope, key);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
-  aKey.Append(reverseDomain);
-
-  // Append scheme
   nsAutoCString scheme;
   rv = uri->GetScheme(scheme);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  aKey.Append(':');
-  aKey.Append(scheme);
+  key.Append(':');
+  key.Append(scheme);
 
-  // Append port if any
   int32_t port = NS_GetRealPort(uri);
   if (port != -1) {
-    aKey.Append(nsPrintfCString(":%d", port));
+    key.Append(nsPrintfCString(":%d", port));
+  }
+
+  if (!aPrincipal->GetUnknownAppId()) {
+    uint32_t appId = aPrincipal->GetAppId();
+    bool isInBrowserElement = aPrincipal->GetIsInBrowserElement();
+    if (appId == nsIScriptSecurityManager::NO_APP_ID && !isInBrowserElement) {
+      aKey.Assign(key);
+      return NS_OK;
+    }
+
+    aKey.Truncate();
+    aKey.AppendInt(appId);
+    aKey.Append(':');
+    aKey.Append(isInBrowserElement ? 't' : 'f');
+    aKey.Append(':');
+    aKey.Append(key);
   }
 
   return NS_OK;
@@ -183,6 +193,7 @@ CreateQuotaDBKey(nsIPrincipal* aPrincipal,
 {
   nsresult rv;
 
+  nsAutoCString subdomainsDBKey;
   nsCOMPtr<nsIEffectiveTLDService> eTLDService(do_GetService(
     NS_EFFECTIVETLDSERVICE_CONTRACTID, &rv));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -200,40 +211,33 @@ CreateQuotaDBKey(nsIPrincipal* aPrincipal,
   }
   NS_ENSURE_SUCCESS(rv, rv);
 
-  aKey.Truncate();
-  BasePrincipal::Cast(aPrincipal)->OriginAttributesRef().CreateSuffix(aKey);
-
-  nsAutoCString subdomainsDBKey;
   CreateReversedDomain(eTLDplusOne, subdomainsDBKey);
 
-  aKey.Append(':');
-  aKey.Append(subdomainsDBKey);
+  if (!aPrincipal->GetUnknownAppId()) {
+    uint32_t appId = aPrincipal->GetAppId();
+    bool isInBrowserElement = aPrincipal->GetIsInBrowserElement();
+    if (appId == nsIScriptSecurityManager::NO_APP_ID && !isInBrowserElement) {
+      aKey.Assign(subdomainsDBKey);
+      return NS_OK;
+    }
+
+    aKey.Truncate();
+    aKey.AppendInt(appId);
+    aKey.Append(':');
+    aKey.Append(isInBrowserElement ? 't' : 'f');
+    aKey.Append(':');
+    aKey.Append(subdomainsDBKey);
+  }
 
   return NS_OK;
 }
 
 } // namespace
 
-// static
-nsCString
-DOMStorageManager::CreateOrigin(const nsACString& aOriginSuffix, const nsACString& aOriginNoSuffix)
-{
-  // Note: some hard-coded sqlite statements are dependent on the format this
-  // method returns.  Changing this without updating those sqlite statements
-  // will cause malfunction.
-
-  nsAutoCString scope;
-  scope.Append(aOriginSuffix);
-  scope.Append(':');
-  scope.Append(aOriginNoSuffix);
-  return scope;
-}
-
 DOMStorageCache*
-DOMStorageManager::GetCache(const nsACString& aOriginSuffix, const nsACString& aOriginNoSuffix)
+DOMStorageManager::GetCache(const nsACString& aScope) const
 {
-  CacheOriginHashtable* table = mCaches.LookupOrAdd(aOriginSuffix);
-  DOMStorageCacheHashKey* entry = table->GetEntry(aOriginNoSuffix);
+  DOMStorageCacheHashKey* entry = mCaches.GetEntry(aScope);
   if (!entry) {
     return nullptr;
   }
@@ -242,14 +246,14 @@ DOMStorageManager::GetCache(const nsACString& aOriginSuffix, const nsACString& a
 }
 
 already_AddRefed<DOMStorageUsage>
-DOMStorageManager::GetOriginUsage(const nsACString& aOriginNoSuffix)
+DOMStorageManager::GetScopeUsage(const nsACString& aScope)
 {
-  RefPtr<DOMStorageUsage> usage;
-  if (mUsages.Get(aOriginNoSuffix, &usage)) {
+  nsRefPtr<DOMStorageUsage> usage;
+  if (mUsages.Get(aScope, &usage)) {
     return usage.forget();
   }
 
-  usage = new DOMStorageUsage(aOriginNoSuffix);
+  usage = new DOMStorageUsage(aScope);
 
   if (mType == LocalStorage) {
     DOMStorageDBBridge* db = DOMStorageCache::StartDatabase();
@@ -258,33 +262,31 @@ DOMStorageManager::GetOriginUsage(const nsACString& aOriginNoSuffix)
     }
   }
 
-  mUsages.Put(aOriginNoSuffix, usage);
+  mUsages.Put(aScope, usage);
 
   return usage.forget();
 }
 
 already_AddRefed<DOMStorageCache>
-DOMStorageManager::PutCache(const nsACString& aOriginSuffix,
-                            const nsACString& aOriginNoSuffix,
+DOMStorageManager::PutCache(const nsACString& aScope,
                             nsIPrincipal* aPrincipal)
 {
-  CacheOriginHashtable* table = mCaches.LookupOrAdd(aOriginSuffix);
-  DOMStorageCacheHashKey* entry = table->PutEntry(aOriginNoSuffix);
-  RefPtr<DOMStorageCache> cache = entry->cache();
+  DOMStorageCacheHashKey* entry = mCaches.PutEntry(aScope);
+  nsRefPtr<DOMStorageCache> cache = entry->cache();
 
-  nsAutoCString quotaOrigin;
-  CreateQuotaDBKey(aPrincipal, quotaOrigin);
+  nsAutoCString quotaScope;
+  CreateQuotaDBKey(aPrincipal, quotaScope);
 
   switch (mType) {
   case SessionStorage:
     // Lifetime handled by the manager, don't persist
     entry->HardRef();
-    cache->Init(this, false, aPrincipal, quotaOrigin);
+    cache->Init(this, false, aPrincipal, quotaScope);
     break;
 
   case LocalStorage:
     // Lifetime handled by the cache, do persist
-    cache->Init(this, true, aPrincipal, quotaOrigin);
+    cache->Init(this, true, aPrincipal, quotaScope);
     break;
 
   default:
@@ -301,13 +303,12 @@ DOMStorageManager::DropCache(DOMStorageCache* aCache)
     NS_WARNING("DOMStorageManager::DropCache called on a non-main thread, shutting down?");
   }
 
-  CacheOriginHashtable* table = mCaches.LookupOrAdd(aCache->OriginSuffix());
-  table->RemoveEntry(aCache->OriginNoSuffix());
+  mCaches.RemoveEntry(aCache->Scope());
 }
 
 nsresult
 DOMStorageManager::GetStorageInternal(bool aCreate,
-                                      mozIDOMWindow* aWindow,
+                                      nsIDOMWindow* aWindow,
                                       nsIPrincipal* aPrincipal,
                                       const nsAString& aDocumentURI,
                                       bool aPrivate,
@@ -315,16 +316,13 @@ DOMStorageManager::GetStorageInternal(bool aCreate,
 {
   nsresult rv;
 
-  nsAutoCString originAttrSuffix;
-  BasePrincipal::Cast(aPrincipal)->OriginAttributesRef().CreateSuffix(originAttrSuffix);
-
-  nsAutoCString originKey;
-  rv = AppendOriginNoSuffix(aPrincipal, originKey);
+  nsAutoCString scope;
+  rv = CreateScopeKey(aPrincipal, scope);
   if (NS_FAILED(rv)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  RefPtr<DOMStorageCache> cache = GetCache(originAttrSuffix, originKey);
+  nsRefPtr<DOMStorageCache> cache = GetCache(scope);
 
   // Get or create a cache for the given scope
   if (!cache) {
@@ -334,15 +332,15 @@ DOMStorageManager::GetStorageInternal(bool aCreate,
     }
 
     if (!aRetval) {
-      // This is a demand to just preload the cache, if the scope has
+      // This is demand to just preload the cache, if the scope has
       // no data stored, bypass creation and preload of the cache.
       DOMStorageDBBridge* db = DOMStorageCache::GetDatabase();
       if (db) {
-        if (!db->ShouldPreloadOrigin(DOMStorageManager::CreateOrigin(originAttrSuffix, originKey))) {
+        if (!db->ShouldPreloadScope(scope)) {
           return NS_OK;
         }
       } else {
-        if (originKey.EqualsLiteral("knalb.:about")) {
+        if (scope.EqualsLiteral("knalb.:about")) {
           return NS_OK;
         }
       }
@@ -350,7 +348,7 @@ DOMStorageManager::GetStorageInternal(bool aCreate,
 
     // There is always a single instance of a cache per scope
     // in a single instance of a DOM storage manager.
-    cache = PutCache(originAttrSuffix, originKey, aPrincipal);
+    cache = PutCache(scope, aPrincipal);
   } else if (mType == SessionStorage) {
     if (!cache->CheckPrincipal(aPrincipal)) {
       return NS_ERROR_DOM_SECURITY_ERR;
@@ -358,10 +356,8 @@ DOMStorageManager::GetStorageInternal(bool aCreate,
   }
 
   if (aRetval) {
-    nsCOMPtr<nsPIDOMWindowInner> inner = nsPIDOMWindowInner::From(aWindow);
-
     nsCOMPtr<nsIDOMStorage> storage = new DOMStorage(
-      inner, this, cache, aDocumentURI, aPrincipal, aPrivate);
+      aWindow, this, cache, aDocumentURI, aPrincipal, aPrivate);
     storage.forget(aRetval);
   }
 
@@ -376,7 +372,7 @@ DOMStorageManager::PrecacheStorage(nsIPrincipal* aPrincipal)
 }
 
 NS_IMETHODIMP
-DOMStorageManager::CreateStorage(mozIDOMWindow* aWindow,
+DOMStorageManager::CreateStorage(nsIDOMWindow* aWindow,
                                  nsIPrincipal* aPrincipal,
                                  const nsAString& aDocumentURI,
                                  bool aPrivate,
@@ -387,7 +383,7 @@ DOMStorageManager::CreateStorage(mozIDOMWindow* aWindow,
 }
 
 NS_IMETHODIMP
-DOMStorageManager::GetStorage(mozIDOMWindow* aWindow,
+DOMStorageManager::GetStorage(nsIDOMWindow* aWindow,
                               nsIPrincipal* aPrincipal,
                               bool aPrivate,
                               nsIDOMStorage** aRetval)
@@ -404,15 +400,14 @@ DOMStorageManager::CloneStorage(nsIDOMStorage* aStorage)
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
-  RefPtr<DOMStorage> storage = static_cast<DOMStorage*>(aStorage);
+  nsRefPtr<DOMStorage> storage = static_cast<DOMStorage*>(aStorage);
   if (!storage) {
     return NS_ERROR_UNEXPECTED;
   }
 
   const DOMStorageCache* origCache = storage->GetCache();
 
-  DOMStorageCache* existingCache = GetCache(origCache->OriginSuffix(),
-                                            origCache->OriginNoSuffix());
+  DOMStorageCache* existingCache = GetCache(origCache->Scope());
   if (existingCache) {
     // Do not replace an existing sessionStorage.
     return NS_ERROR_NOT_AVAILABLE;
@@ -420,9 +415,8 @@ DOMStorageManager::CloneStorage(nsIDOMStorage* aStorage)
 
   // Since this manager is sessionStorage manager, PutCache hard references
   // the cache in our hashtable.
-  RefPtr<DOMStorageCache> newCache = PutCache(origCache->OriginSuffix(),
-                                              origCache->OriginNoSuffix(),
-                                              origCache->Principal());
+  nsRefPtr<DOMStorageCache> newCache = PutCache(origCache->Scope(),
+                                                origCache->Principal());
 
   newCache->CloneFrom(origCache);
   return NS_OK;
@@ -433,9 +427,7 @@ DOMStorageManager::CheckStorage(nsIPrincipal* aPrincipal,
                                 nsIDOMStorage* aStorage,
                                 bool* aRetval)
 {
-  nsresult rv;
-
-  RefPtr<DOMStorage> storage = static_cast<DOMStorage*>(aStorage);
+  nsRefPtr<DOMStorage> storage = static_cast<DOMStorage*>(aStorage);
   if (!storage) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -446,16 +438,13 @@ DOMStorageManager::CheckStorage(nsIPrincipal* aPrincipal,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsAutoCString suffix;
-  BasePrincipal::Cast(aPrincipal)->OriginAttributesRef().CreateSuffix(suffix);
-
-  nsAutoCString origin;
-  rv = AppendOriginNoSuffix(aPrincipal, origin);
+  nsAutoCString scope;
+  nsresult rv = CreateScopeKey(aPrincipal, scope);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
-  DOMStorageCache* cache = GetCache(suffix, origin);
+  DOMStorageCache* cache = GetCache(scope);
   if (cache != storage->GetCache()) {
     return NS_OK;
   }
@@ -485,82 +474,62 @@ DOMStorageManager::GetLocalStorageForPrincipal(nsIPrincipal* aPrincipal,
 
 void
 DOMStorageManager::ClearCaches(uint32_t aUnloadFlags,
-                               const OriginAttributesPattern& aPattern,
-                               const nsACString& aOriginScope)
+                               const nsACString& aKeyPrefix)
 {
-  for (auto iter1 = mCaches.Iter(); !iter1.Done(); iter1.Next()) {
-    PrincipalOriginAttributes oa;
-    DebugOnly<bool> rv = oa.PopulateFromSuffix(iter1.Key());
-    MOZ_ASSERT(rv);
-    if (!aPattern.Matches(oa)) {
-      // This table doesn't match the given origin attributes pattern
-      continue;
-    }
+  for (auto iter = mCaches.Iter(); !iter.Done(); iter.Next()) {
+    DOMStorageCache* cache = iter.Get()->cache();
+    nsCString& key = const_cast<nsCString&>(cache->Scope());
 
-    CacheOriginHashtable* table = iter1.Data();
-
-    for (auto iter2 = table->Iter(); !iter2.Done(); iter2.Next()) {
-      DOMStorageCache* cache = iter2.Get()->cache();
-
-      if (aOriginScope.IsEmpty() ||
-          StringBeginsWith(cache->OriginNoSuffix(), aOriginScope)) {
-        cache->UnloadItems(aUnloadFlags);
-      }
+    if (aKeyPrefix.IsEmpty() || StringBeginsWith(key, aKeyPrefix)) {
+      cache->UnloadItems(aUnloadFlags);
     }
   }
 }
 
 nsresult
-DOMStorageManager::Observe(const char* aTopic,
-                           const nsAString& aOriginAttributesPattern,
-                           const nsACString& aOriginScope)
+DOMStorageManager::Observe(const char* aTopic, const nsACString& aScopePrefix)
 {
-  OriginAttributesPattern pattern;
-  if (!pattern.Init(aOriginAttributesPattern)) {
-    NS_ERROR("Cannot parse origin attributes pattern");
-    return NS_ERROR_FAILURE;
-  }
-
   // Clear everything, caches + database
   if (!strcmp(aTopic, "cookie-cleared")) {
-    ClearCaches(DOMStorageCache::kUnloadComplete, pattern, EmptyCString());
+    ClearCaches(DOMStorageCache::kUnloadComplete, EmptyCString());
     return NS_OK;
   }
 
   // Clear from caches everything that has been stored
   // while in session-only mode
   if (!strcmp(aTopic, "session-only-cleared")) {
-    ClearCaches(DOMStorageCache::kUnloadSession, pattern, aOriginScope);
+    ClearCaches(DOMStorageCache::kUnloadSession, aScopePrefix);
     return NS_OK;
   }
 
   // Clear everything (including so and pb data) from caches and database
   // for the gived domain and subdomains.
   if (!strcmp(aTopic, "domain-data-cleared")) {
-    ClearCaches(DOMStorageCache::kUnloadComplete, pattern, aOriginScope);
+    ClearCaches(DOMStorageCache::kUnloadComplete, aScopePrefix);
     return NS_OK;
   }
 
   // Clear all private-browsing caches
   if (!strcmp(aTopic, "private-browsing-data-cleared")) {
-    ClearCaches(DOMStorageCache::kUnloadPrivate, pattern, EmptyCString());
+    ClearCaches(DOMStorageCache::kUnloadPrivate, EmptyCString());
     return NS_OK;
   }
 
-  // Clear localStorage data beloging to an origin pattern
-  if (!strcmp(aTopic, "origin-attr-pattern-cleared")) {
+  // Clear localStorage data beloging to an app.
+  if (!strcmp(aTopic, "app-data-cleared")) {
+
     // sessionStorage is expected to stay
     if (mType == SessionStorage) {
       return NS_OK;
     }
 
-    ClearCaches(DOMStorageCache::kUnloadComplete, pattern, EmptyCString());
+    ClearCaches(DOMStorageCache::kUnloadComplete, aScopePrefix);
     return NS_OK;
   }
 
   if (!strcmp(aTopic, "profile-change")) {
     // For case caches are still referenced - clear them completely
-    ClearCaches(DOMStorageCache::kUnloadComplete, pattern, EmptyCString());
+    ClearCaches(DOMStorageCache::kUnloadComplete, EmptyCString());
     mCaches.Clear();
     return NS_OK;
   }
@@ -588,7 +557,7 @@ DOMStorageManager::Observe(const char* aTopic,
     }
 
     // This immediately completely reloads all caches from the database.
-    ClearCaches(DOMStorageCache::kTestReload, pattern, EmptyCString());
+    ClearCaches(DOMStorageCache::kTestReload, EmptyCString());
     return NS_OK;
   }
 

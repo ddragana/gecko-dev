@@ -79,12 +79,6 @@ public:
   virtual void ScrollbarActivityStopped() const = 0;
 
   virtual bool IsScrollbarOnRight() const = 0;
-
-  /**
-   * Returns true if the mediator is asking the scrollbar to suppress
-   * repainting itself on changes.
-   */
-  virtual bool ShouldSuppressScrollbarRepaints() const = 0;
 };
 
 #endif

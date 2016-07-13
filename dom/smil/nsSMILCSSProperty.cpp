@@ -30,7 +30,7 @@ GetCSSComputedValue(Element* aElem,
   MOZ_ASSERT(nsSMILCSSProperty::IsPropertyAnimatable(aPropID),
              "Shouldn't get here for non-animatable properties");
 
-  nsIDocument* doc = aElem->GetUncomposedDoc();
+  nsIDocument* doc = aElem->GetCurrentDoc();
   if (!doc) {
     // This can happen if we process certain types of restyles mid-sample
     // and remove anonymous animated content from the document as a result.
@@ -44,7 +44,7 @@ GetCSSComputedValue(Element* aElem,
     return false;
   }
 
-  RefPtr<nsComputedDOMStyle> computedStyle =
+  nsRefPtr<nsComputedDOMStyle> computedStyle =
     NS_NewComputedDOMStyle(aElem, EmptyString(), shell);
 
   computedStyle->GetPropertyValue(aPropID, aResult);

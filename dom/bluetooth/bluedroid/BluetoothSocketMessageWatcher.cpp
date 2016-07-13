@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include "BluetoothInterface.h"
-#include "mozilla/EndianUtils.h"
 #include "nsClassHashtable.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
@@ -136,10 +135,10 @@ SocketMessageWatcher::GetSize() const
   return ReadInt16(OFF_SIZE);
 }
 
-BluetoothAddress
+nsString
 SocketMessageWatcher::GetBdAddress() const
 {
-  BluetoothAddress bdAddress;
+  nsString bdAddress;
   ReadBdAddress(OFF_BDADDRESS, bdAddress);
   return bdAddress;
 }
@@ -244,26 +243,40 @@ int16_t
 SocketMessageWatcher::ReadInt16(unsigned long aOffset) const
 {
   /* little-endian buffer */
-  return LittleEndian::readInt16(&mBuf[aOffset]);
+  return (static_cast<int16_t>(mBuf[aOffset + 1]) << 8) |
+          static_cast<int16_t>(mBuf[aOffset]);
 }
 
 int32_t
 SocketMessageWatcher::ReadInt32(unsigned long aOffset) const
 {
   /* little-endian buffer */
-  return LittleEndian::readInt32(&mBuf[aOffset]);
+  return (static_cast<int32_t>(mBuf[aOffset + 3]) << 24) |
+         (static_cast<int32_t>(mBuf[aOffset + 2]) << 16) |
+         (static_cast<int32_t>(mBuf[aOffset + 1]) << 8) |
+          static_cast<int32_t>(mBuf[aOffset]);
 }
 
 void
 SocketMessageWatcher::ReadBdAddress(unsigned long aOffset,
-                                    BluetoothAddress& aBdAddress) const
+                                    nsAString& aBdAddress) const
 {
-  aBdAddress = BluetoothAddress(mBuf[aOffset + 0],
-                                mBuf[aOffset + 1],
-                                mBuf[aOffset + 2],
-                                mBuf[aOffset + 3],
-                                mBuf[aOffset + 4],
-                                mBuf[aOffset + 5]);
+  char str[BLUETOOTH_ADDRESS_LENGTH + 1];
+
+  int res = snprintf(str, sizeof(str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                     static_cast<int>(mBuf[aOffset + 0]),
+                     static_cast<int>(mBuf[aOffset + 1]),
+                     static_cast<int>(mBuf[aOffset + 2]),
+                     static_cast<int>(mBuf[aOffset + 3]),
+                     static_cast<int>(mBuf[aOffset + 4]),
+                     static_cast<int>(mBuf[aOffset + 5]));
+  if (res < 0) {
+    aBdAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
+  } else if ((size_t)res >= sizeof(str)) { /* string buffer too small */
+    aBdAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
+  } else {
+    aBdAddress = NS_ConvertUTF8toUTF16(str);
+  }
 }
 
 //
@@ -277,11 +290,10 @@ SocketMessageWatcherTask::SocketMessageWatcherTask(
   MOZ_ASSERT(mWatcher);
 }
 
-NS_IMETHODIMP
+void
 SocketMessageWatcherTask::Run()
 {
   mWatcher->Watch();
-  return NS_OK;
 }
 
 //
@@ -295,20 +307,19 @@ DeleteSocketMessageWatcherTask::DeleteSocketMessageWatcherTask(
   MOZ_ASSERT(mRes);
 }
 
-NS_IMETHODIMP
+void
 DeleteSocketMessageWatcherTask::Run()
 {
   // look up hash table for the watcher corresponding to |mRes|
   SocketMessageWatcherWrapper* wrapper = sWatcherHashtable.Get(mRes);
   if (!wrapper) {
-    return NS_OK;
+    return;
   }
 
   // stop the watcher if it exists
   SocketMessageWatcher* watcher = wrapper->GetSocketMessageWatcher();
   watcher->StopWatching();
   watcher->Proceed(STATUS_DONE);
-  return NS_OK;
 }
 
 END_BLUETOOTH_NAMESPACE

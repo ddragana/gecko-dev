@@ -1,8 +1,8 @@
 var rootDir = getRootDirectory(gTestPath);
 const gTestRoot = rootDir.replace("chrome://mochitests/content/", "http://mochi.test:8888/");
-var gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
+let gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
 
-var gTestBrowser = null;
+let gTestBrowser = null;
 
 add_task(function* () {
   registerCleanupFunction(Task.async(function*() {
@@ -114,7 +114,7 @@ add_task(function* () {
   let pluginInfo = yield promiseForPluginInfo("pluginone");
   ok(!pluginInfo.activated, "Test 8, test plugin should be activated");
 
-  let condition = () => !notification.dismissed &&
+  let condition = function() !notification.dismissed &&
     PopupNotifications.panel.firstChild;
   yield promiseForCondition(condition);
 

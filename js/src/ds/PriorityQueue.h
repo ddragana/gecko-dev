@@ -35,7 +35,7 @@ class PriorityQueue
       : heap(ap)
     {}
 
-    MOZ_MUST_USE bool reserve(size_t capacity) {
+    bool reserve(size_t capacity) {
         return heap.reserve(capacity);
     }
 
@@ -57,7 +57,7 @@ class PriorityQueue
         return highest;
     }
 
-    MOZ_MUST_USE bool insert(const T& v) {
+    bool insert(const T& v) {
         if (!heap.append(v))
             return false;
         siftUp(heap.length() - 1);

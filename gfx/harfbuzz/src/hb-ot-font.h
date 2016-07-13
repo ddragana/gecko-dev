@@ -24,10 +24,6 @@
  * Google Author(s): Behdad Esfahbod, Roozbeh Pournader
  */
 
-#ifndef HB_OT_H_IN
-#error "Include <hb-ot.h> instead."
-#endif
-
 #ifndef HB_OT_FONT_H
 #define HB_OT_FONT_H
 
@@ -36,7 +32,7 @@
 HB_BEGIN_DECLS
 
 
-HB_EXTERN void
+void
 hb_ot_font_set_funcs (hb_font_t *font);
 
 

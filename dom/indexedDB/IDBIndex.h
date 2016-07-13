@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_idbindex_h__
-#define mozilla_dom_idbindex_h__
+#ifndef mozilla_dom_indexeddb_idbindex_h__
+#define mozilla_dom_indexeddb_idbindex_h__
 
 #include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
@@ -16,7 +16,7 @@
 #include "nsTArrayForwardDeclare.h"
 #include "nsWrapperCache.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 
@@ -24,20 +24,21 @@ class ErrorResult;
 
 namespace dom {
 
-class IDBObjectStore;
-class IDBRequest;
 template <typename> class Sequence;
 
 namespace indexedDB {
+
+class IDBObjectStore;
+class IDBRequest;
 class IndexMetadata;
+class Key;
 class KeyPath;
-} // namespace indexedDB
 
 class IDBIndex final
   : public nsISupports
   , public nsWrapperCache
 {
-  RefPtr<IDBObjectStore> mObjectStore;
+  nsRefPtr<IDBObjectStore> mObjectStore;
 
   JS::Heap<JS::Value> mCachedKeyPath;
 
@@ -45,8 +46,8 @@ class IDBIndex final
   // object. However, if this index is part of a versionchange transaction and
   // it gets deleted then the metadata is copied into mDeletedMetadata and
   // mMetadata is set to point at mDeletedMetadata.
-  const indexedDB::IndexMetadata* mMetadata;
-  nsAutoPtr<indexedDB::IndexMetadata> mDeletedMetadata;
+  const IndexMetadata* mMetadata;
+  nsAutoPtr<IndexMetadata> mDeletedMetadata;
 
   const int64_t mId;
   bool mRooted;
@@ -56,7 +57,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBIndex)
 
   static already_AddRefed<IDBIndex>
-  Create(IDBObjectStore* aObjectStore, const indexedDB::IndexMetadata& aMetadata);
+  Create(IDBObjectStore* aObjectStore, const IndexMetadata& aMetadata);
 
   int64_t
   Id() const
@@ -75,20 +76,8 @@ public:
   bool
   MultiEntry() const;
 
-  bool
-  LocaleAware() const;
-
-  const indexedDB::KeyPath&
+  const KeyPath&
   GetKeyPath() const;
-
-  void
-  GetLocale(nsString& aLocale) const;
-
-  const nsCString&
-  Locale() const;
-
-  bool
-  IsAutoLocale() const;
 
   IDBObjectStore*
   ObjectStore() const
@@ -97,7 +86,7 @@ public:
     return mObjectStore;
   }
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const;
 
   void
@@ -105,9 +94,6 @@ public:
   {
     aName = Name();
   }
-
-  void
-  SetName(const nsAString& aName, ErrorResult& aRv);
 
   void
   GetKeyPath(JSContext* aCx,
@@ -203,7 +189,7 @@ public:
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 private:
-  IDBIndex(IDBObjectStore* aObjectStore, const indexedDB::IndexMetadata* aMetadata);
+  IDBIndex(IDBObjectStore* aObjectStore, const IndexMetadata* aMetadata);
 
   ~IDBIndex();
 
@@ -228,7 +214,8 @@ private:
                      ErrorResult& aRv);
 };
 
+} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_idbindex_h__
+#endif // mozilla_dom_indexeddb_idbindex_h__

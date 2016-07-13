@@ -17,21 +17,21 @@ namespace js {
 // JSOP_EVAL which in turn calls DirectEval. Thus, even though IndirectEval is
 // the callee function object for *all* calls to eval, it is by construction
 // only ever called in the case indirect eval.
-extern MOZ_MUST_USE bool
+extern bool
 IndirectEval(JSContext* cx, unsigned argc, Value* vp);
 
-// Performs a direct eval of |v| (a string containing code, or another value
-// that will be vacuously returned), which must correspond to the currently-
-// executing stack frame, which must be a script frame.
-extern MOZ_MUST_USE bool
-DirectEval(JSContext* cx, HandleValue v, MutableHandleValue vp);
+// Performs a direct eval for the given arguments, which must correspond to the
+// currently-executing stack frame, which must be a script frame. On completion
+// the result is returned in args.rval.
+extern bool
+DirectEval(JSContext* cx, const CallArgs& args);
 
 // Performs a direct eval called from Ion code.
-extern MOZ_MUST_USE bool
+extern bool
 DirectEvalStringFromIon(JSContext* cx,
                         HandleObject scopeObj, HandleScript callerScript,
-                        HandleValue newTargetValue, HandleString str,
-                        jsbytecode* pc, MutableHandleValue vp);
+                        HandleValue thisValue, HandleValue newTargetValue,
+                        HandleString str, jsbytecode * pc, MutableHandleValue vp);
 
 // True iff fun is a built-in eval function.
 extern bool

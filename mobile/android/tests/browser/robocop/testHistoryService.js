@@ -5,13 +5,13 @@
 
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 // Make the timer global so it doesn't get GC'd
-var gTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+let gTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
 
 function sleep(wait) {
   return new Promise((resolve, reject) => {
@@ -48,13 +48,11 @@ function promiseLoadEvent(browser, url, eventType="load") {
   });
 }
 
-// Wait 6 seconds for the pending visits to flush (which should happen in 3 seconds)
-const PENDING_VISIT_WAIT = 6000;
-// Longer wait required after first load
-const PENDING_VISIT_WAIT_LONG = 20000;
+// Wait 4 seconds for the pending visits to flush (which should happen in 3 seconds)
+const PENDING_VISIT_WAIT = 4000;
 
 // Manage the saved history visits so we can compare in the tests
-var gVisitURLs = [];
+let gVisitURLs = [];
 function visitObserver(subject, topic, data) {
   let uri = subject.QueryInterface(Ci.nsIURI);
   do_print("Observer: " + uri.spec);
@@ -62,7 +60,7 @@ function visitObserver(subject, topic, data) {
 };
 
 // Track the <browser> where the tests are happening
-var gBrowser;
+let gBrowser;
 
 add_test(function setup_browser() {
   let chromeWin = Services.wm.getMostRecentWindow("navigator:browser");
@@ -91,7 +89,7 @@ add_task(function* () {
   // Load a simple HTML page with no redirects
   gVisitURLs = [];
   yield promiseLoadEvent(gBrowser, "http://example.org/tests/robocop/robocop_blank_01.html");
-  yield sleep(PENDING_VISIT_WAIT_LONG);
+  yield sleep(PENDING_VISIT_WAIT);
 
   do_print("visit counts: " + gVisitURLs.length);
   ok(gVisitURLs.length == 1, "Simple visit makes 1 history item");

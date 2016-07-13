@@ -4,7 +4,7 @@
  */
 "use strict";
 
-var disableWorkerTest = "This test uses SpecialPowers";
+let disableWorkerTest = "This test uses SpecialPowers";
 
 var self = this;
 
@@ -164,7 +164,7 @@ function testSteps()
     setLowDiskMode(true);
 
     let request = indexedDB.open(dbName, dbVersion + 2);
-    request.onerror = errorHandler;
+    request.onerror = expectedErrorHandler("QuotaExceededError");
     request.onupgradeneeded = grabEventAndContinueHandler;
     request.onsuccess = unexpectedSuccessHandler;
 
@@ -175,20 +175,12 @@ function testSteps()
     let db = event.target.result;
     db.onerror = errorHandler;
 
-    let txn = event.target.transaction;
-    txn.onerror = expectedErrorHandler("AbortError");
-    txn.onabort = grabEventAndContinueHandler;
-
     let objectStore = db.createObjectStore(objectStoreName, objectStoreOptions);
 
     request.onupgradeneeded = unexpectedSuccessHandler;
     event = yield undefined;
 
-    is(event.type, "abort", "Got correct event type");
-    is(event.target.error.name, "QuotaExceededError", "Got correct error type");
-
-    request.onerror = expectedErrorHandler("AbortError");
-    event = yield undefined;
+    is(event.type, "error", "Failed database upgrade");
   }
 
   { // Make sure creating indexes in low disk mode fails.
@@ -222,7 +214,7 @@ function testSteps()
     setLowDiskMode(true);
 
     request = indexedDB.open(dbName, dbVersion + 3);
-    request.onerror = errorHandler;
+    request.onerror = expectedErrorHandler("QuotaExceededError");
     request.onupgradeneeded = grabEventAndContinueHandler;
     request.onsuccess = unexpectedSuccessHandler;
     event = yield undefined;
@@ -231,9 +223,6 @@ function testSteps()
 
     db = event.target.result;
     db.onerror = errorHandler;
-    let txn = event.target.transaction;
-    txn.onerror = expectedErrorHandler("AbortError");
-    txn.onabort = grabEventAndContinueHandler;
 
     objectStore = event.target.transaction.objectStore(objectStoreName);
     let index = objectStore.createIndex(indexName, indexName, indexOptions);
@@ -241,11 +230,7 @@ function testSteps()
     request.onupgradeneeded = unexpectedSuccessHandler;
     event = yield undefined;
 
-    is(event.type, "abort", "Got correct event type");
-    is(event.target.error.name, "QuotaExceededError", "Got correct error type");
-
-    request.onerror = expectedErrorHandler("AbortError");
-    event = yield undefined;
+    is(event.type, "error", "Failed database upgrade");
   }
 
   { // Make sure deleting indexes in low disk mode succeeds.

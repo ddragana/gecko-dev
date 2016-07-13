@@ -18,11 +18,7 @@ log_manager.add_terminal_logging()
 # mozconfig is not a reusable type (it's actually a module) so, we
 # have to mock it.
 class MockConfig(object):
-    def __init__(self,
-                 topsrcdir='/path/to/topsrcdir',
-                 extra_substs={},
-                 error_is_fatal=True,
-             ):
+    def __init__(self, topsrcdir='/path/to/topsrcdir', extra_substs={}):
         self.topsrcdir = mozpath.abspath(topsrcdir)
         self.topobjdir = mozpath.abspath('/path/to/topobjdir')
 
@@ -31,8 +27,6 @@ class MockConfig(object):
             'MOZ_BAR': 'bar',
             'MOZ_TRUE': '1',
             'MOZ_FALSE': '',
-            'DLL_PREFIX': 'lib',
-            'DLL_SUFFIX': '.so'
         }, **extra_substs)
 
         self.substs_unicode = ReadOnlyDict({k.decode('utf-8'): v.decode('utf-8',
@@ -42,9 +36,4 @@ class MockConfig(object):
 
         self.external_source_dir = None
         self.lib_prefix = 'lib'
-        self.lib_suffix = '.a'
-        self.import_prefix = 'lib'
-        self.import_suffix = '.so'
-        self.dll_prefix = 'lib'
-        self.dll_suffix = '.so'
-        self.error_is_fatal = error_is_fatal
+        self.lib_suffix = '.so'

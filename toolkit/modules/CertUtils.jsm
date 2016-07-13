@@ -43,7 +43,7 @@ this.readCertPrefs =
       break;
 
     let certAttrs = {};
-    for (let prefCertAttr of prefCertAttrs)
+    for each (let prefCertAttr in prefCertAttrs)
       certAttrs[prefCertAttr] = prefBranchCert.getCharPref(prefCertAttr);
 
     certs.push(certAttrs);
@@ -202,7 +202,7 @@ BadCertHandler.prototype = {
     // Don't call checkCert for internal redirects. See bug 569648.
     if (!(flags & Ci.nsIChannelEventSink.REDIRECT_INTERNAL))
       checkCert(oldChannel);
-
+    
     callback.onRedirectVerifyCallback(Components.results.NS_OK);
   },
 

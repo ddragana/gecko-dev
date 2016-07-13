@@ -7,7 +7,7 @@
 
 #include "GLContext.h"
 #include "mozilla/dom/WebGL2RenderingContextBinding.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "WebGLBuffer.h"
 #include "WebGLContext.h"
 #include "WebGLProgram.h"
@@ -273,10 +273,8 @@ WebGL2Context::GetIndexedParameter(GLenum target, GLuint index,
             return ErrorInvalidValue("getIndexedParameter: index should be less than "
                                      "MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS");
 
-        if (mBoundTransformFeedbackBuffers[index].get()) {
-            retval.SetValue().SetAsWebGLBuffer() =
-                mBoundTransformFeedbackBuffers[index].get();
-        }
+        retval.SetValue().SetAsWebGLBuffer() =
+            mBoundTransformFeedbackBuffers[index].get();
         return;
 
     case LOCAL_GL_UNIFORM_BUFFER_BINDING:
@@ -284,8 +282,7 @@ WebGL2Context::GetIndexedParameter(GLenum target, GLuint index,
             return ErrorInvalidValue("getIndexedParameter: index should be than "
                                      "MAX_UNIFORM_BUFFER_BINDINGS");
 
-        if (mBoundUniformBuffers[index].get())
-            retval.SetValue().SetAsWebGLBuffer() = mBoundUniformBuffers[index].get();
+        retval.SetValue().SetAsWebGLBuffer() = mBoundUniformBuffers[index].get();
         return;
 
     case LOCAL_GL_TRANSFORM_FEEDBACK_BUFFER_START:
@@ -315,40 +312,32 @@ WebGL2Context::GetUniformIndices(WebGLProgram* program,
     if (!uniformNames.Length())
         return;
 
-    program->GetUniformIndices(uniformNames, retval);
-}
+    GLuint progname = program->mGLName;
+    size_t count = uniformNames.Length();
+    nsTArray<GLuint>& arr = retval.SetValue();
 
-static bool
-ValidateUniformEnum(WebGLContext* webgl, GLenum pname, const char* info)
-{
-    switch (pname) {
-    case LOCAL_GL_UNIFORM_TYPE:
-    case LOCAL_GL_UNIFORM_SIZE:
-    case LOCAL_GL_UNIFORM_BLOCK_INDEX:
-    case LOCAL_GL_UNIFORM_OFFSET:
-    case LOCAL_GL_UNIFORM_ARRAY_STRIDE:
-    case LOCAL_GL_UNIFORM_MATRIX_STRIDE:
-    case LOCAL_GL_UNIFORM_IS_ROW_MAJOR:
-        return true;
+    MakeContextCurrent();
 
-    default:
-        webgl->ErrorInvalidEnum("%s: invalid pname: %s", info, webgl->EnumName(pname));
-        return false;
+    for (size_t n = 0; n < count; n++) {
+        NS_LossyConvertUTF16toASCII name(uniformNames[n]);
+        //        const GLchar* glname = name.get();
+        const GLchar* glname = nullptr;
+        name.BeginReading(glname);
+
+        GLuint index = 0;
+        gl->fGetUniformIndices(progname, 1, &glname, &index);
+        arr.AppendElement(index);
     }
 }
 
 void
-WebGL2Context::GetActiveUniforms(JSContext* cx,
-                                 WebGLProgram* program,
+WebGL2Context::GetActiveUniforms(WebGLProgram* program,
                                  const dom::Sequence<GLuint>& uniformIndices,
                                  GLenum pname,
-                                 JS::MutableHandleValue retval)
+                                 dom::Nullable< nsTArray<GLint> >& retval)
 {
-    retval.set(JS::NullValue());
+    retval.SetNull();
     if (IsContextLost())
-        return;
-
-    if (!ValidateUniformEnum(this, pname, "getActiveUniforms"))
         return;
 
     if (!ValidateObject("getActiveUniforms: program", program))
@@ -359,50 +348,12 @@ WebGL2Context::GetActiveUniforms(JSContext* cx,
         return;
 
     GLuint progname = program->mGLName;
-    Vector<GLint> samples;
-    if (!samples.resize(count)) {
-        return;
-    }
+    nsTArray<GLint>& arr = retval.SetValue();
+    arr.SetLength(count);
 
     MakeContextCurrent();
     gl->fGetActiveUniformsiv(progname, count, uniformIndices.Elements(), pname,
-                             samples.begin());
-
-    JS::Rooted<JSObject*> array(cx, JS_NewArrayObject(cx, count));
-    if (!array) {
-        return;
-    }
-
-    switch (pname) {
-    case LOCAL_GL_UNIFORM_TYPE:
-    case LOCAL_GL_UNIFORM_SIZE:
-    case LOCAL_GL_UNIFORM_BLOCK_INDEX:
-    case LOCAL_GL_UNIFORM_OFFSET:
-    case LOCAL_GL_UNIFORM_ARRAY_STRIDE:
-    case LOCAL_GL_UNIFORM_MATRIX_STRIDE:
-        for (uint32_t i = 0; i < count; ++i) {
-            JS::RootedValue value(cx);
-            value = JS::Int32Value(samples[i]);
-            if (!JS_DefineElement(cx, array, i, value, JSPROP_ENUMERATE)) {
-                return;
-            }
-        }
-        break;
-    case LOCAL_GL_UNIFORM_IS_ROW_MAJOR:
-        for (uint32_t i = 0; i < count; ++i) {
-            JS::RootedValue value(cx);
-            value = JS::BooleanValue(samples[i]);
-            if (!JS_DefineElement(cx, array, i, value, JSPROP_ENUMERATE)) {
-                return;
-            }
-        }
-        break;
-
-    default:
-        return;
-    }
-
-    retval.setObjectOrNull(array);
+                             arr.Elements());
 }
 
 GLuint

@@ -4,20 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += [
-    'compiledtest', 
-    'gtest'
-]
-
-# Change the following line(s) to avoid bug 1081323 (clobber after changing a manifest):
-# * Add a regression test for triangle-then-point rendering.
+TEST_DIRS += ['compiledtest']
 
 MOCHITEST_MANIFESTS += [
-    'test/crash/mochitest.ini',
     'test/crossorigin/mochitest.ini',
+    'test/mochitest-subsuite-webgl.ini',
     'test/mochitest.ini',
-    'test/webgl-conf/generated-mochitest.ini',
-    'test/webgl-mochitest/mochitest.ini',
 ]
 
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome/chrome.ini']
@@ -36,40 +28,28 @@ EXPORTS.mozilla.dom += [
     'CanvasPath.h',
     'CanvasPattern.h',
     'CanvasRenderingContext2D.h',
-    'CanvasRenderingContextHelper.h',
     'CanvasUtils.h',
-    'ImageBitmap.h',
-    'ImageBitmapRenderingContext.h',
-    'ImageBitmapSource.h',
     'ImageData.h',
-    'OffscreenCanvas.h',
     'TextMetrics.h',
     'WebGLVertexArrayObject.h',
 ]
+
+# http://support.microsoft.com/kb/143208
+DEFINES['NOMINMAX'] = True
 
 # Canvas 2D and common sources
 UNIFIED_SOURCES += [
     'CanvasImageCache.cpp',
     'CanvasRenderingContext2D.cpp',
-    'CanvasRenderingContextHelper.cpp',
     'CanvasUtils.cpp',
     'DocumentRendererChild.cpp',
     'DocumentRendererParent.cpp',
-    'ImageBitmap.cpp',
-    'ImageBitmapColorUtils.cpp',
-    'ImageBitmapRenderingContext.cpp',
-    'ImageBitmapUtils.cpp',
     'ImageData.cpp',
-    'OffscreenCanvas.cpp',
-]
-
-SOURCES += [
-    'ImageUtils.cpp',
 ]
 
 # WebGL Sources
 UNIFIED_SOURCES += [
-    'TexUnpackBlob.cpp',
+    'MurmurHash3.cpp',
     'WebGL1Context.cpp',
     'WebGL1ContextBuffers.cpp',
     'WebGL1ContextUniforms.cpp',
@@ -80,7 +60,6 @@ UNIFIED_SOURCES += [
     'WebGL2ContextMRTs.cpp',
     'WebGL2ContextPrograms.cpp',
     'WebGL2ContextQueries.cpp',
-    'WebGL2ContextRenderbuffers.cpp',
     'WebGL2ContextSamplers.cpp',
     'WebGL2ContextState.cpp',
     'WebGL2ContextSync.cpp',
@@ -99,7 +78,6 @@ UNIFIED_SOURCES += [
     'WebGLContextGL.cpp',
     'WebGLContextLossHandler.cpp',
     'WebGLContextState.cpp',
-    'WebGLContextTextures.cpp',
     'WebGLContextUnchecked.cpp',
     'WebGLContextUtils.cpp',
     'WebGLContextValidate.cpp',
@@ -111,7 +89,6 @@ UNIFIED_SOURCES += [
     'WebGLExtensionColorBufferFloat.cpp',
     'WebGLExtensionColorBufferHalfFloat.cpp',
     'WebGLExtensionCompressedTextureATC.cpp',
-    'WebGLExtensionCompressedTextureES3.cpp',
     'WebGLExtensionCompressedTextureETC1.cpp',
     'WebGLExtensionCompressedTexturePVRTC.cpp',
     'WebGLExtensionCompressedTextureS3TC.cpp',
@@ -121,7 +98,6 @@ UNIFIED_SOURCES += [
     'WebGLExtensionDisjointTimerQuery.cpp',
     'WebGLExtensionDrawBuffers.cpp',
     'WebGLExtensionElementIndexUint.cpp',
-    'WebGLExtensionEXTColorBufferFloat.cpp',
     'WebGLExtensionFragDepth.cpp',
     'WebGLExtensionInstancedArrays.cpp',
     'WebGLExtensionLoseContext.cpp',
@@ -149,7 +125,6 @@ UNIFIED_SOURCES += [
     'WebGLSync.cpp',
     'WebGLTexelConversions.cpp',
     'WebGLTexture.cpp',
-    'WebGLTextureUpload.cpp',
     'WebGLTimerQuery.cpp',
     'WebGLTransformFeedback.cpp',
     'WebGLUniformLocation.cpp',
@@ -160,27 +135,20 @@ UNIFIED_SOURCES += [
     'WebGLVertexArrayObject.cpp',
 ]
 
-SOURCES += [
-    'MurmurHash3.cpp',
-]
-
-# Suppress warnings from third-party code.
-if CONFIG['CLANG_CXX']:
-    SOURCES['MurmurHash3.cpp'].flags += ['-Wno-implicit-fallthrough']
-
 LOCAL_INCLUDES += [
+    '../..', # Support `#include "mfbt/RefPtr.h"`
     '/js/xpconnect/wrappers',
 ]
+
+FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
-    '../workers',
     '/dom/base',
     '/dom/html',
     '/dom/svg',
-    '/dom/workers',
     '/dom/xul',
     '/gfx/gl',
     '/image',
@@ -188,18 +156,7 @@ LOCAL_INCLUDES += [
     '/layout/generic',
     '/layout/style',
     '/layout/xul',
-    '/media/libyuv/include',
 ]
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']
-
-LOCAL_INCLUDES += CONFIG['SKIA_INCLUDES']
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wno-error=shadow']
-
-if CONFIG['_MSC_VER']:
-    # This is intended as a temporary workaround to unblock compilation
-    # on VS2015 in warnings as errors mode.
-    CXXFLAGS += ['-wd4312']

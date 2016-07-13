@@ -12,8 +12,7 @@
 #include "nsCRT.h"
 #include "plstr.h"
 
-static const char hexCharsUpper[] = "0123456789ABCDEF";
-static const char hexCharsUpperLower[] = "0123456789ABCDEFabcdef";
+static const char hexChars[] = "0123456789ABCDEF";
 
 static const int netCharType[256] =
 /*  Bit 0       xalpha      -- the alphas
@@ -52,8 +51,8 @@ AppendPercentHex(char* aBuffer, unsigned char aChar)
 {
   uint32_t i = 0;
   aBuffer[i++] = '%';
-  aBuffer[i++] = hexCharsUpper[aChar >> 4]; // high nibble
-  aBuffer[i++] = hexCharsUpper[aChar & 0xF]; // low nibble
+  aBuffer[i++] = hexChars[aChar >> 4]; // high nibble
+  aBuffer[i++] = hexChars[aChar & 0xF]; // low nibble
   return i;
 }
 
@@ -64,29 +63,30 @@ AppendPercentHex(char16_t* aBuffer, char16_t aChar)
   aBuffer[i++] = '%';
   if (aChar & 0xff00) {
     aBuffer[i++] = 'u';
-    aBuffer[i++] = hexCharsUpper[aChar >> 12]; // high-byte high nibble
-    aBuffer[i++] = hexCharsUpper[(aChar >> 8) & 0xF]; // high-byte low nibble
+    aBuffer[i++] = hexChars[aChar >> 12]; // high-byte high nibble
+    aBuffer[i++] = hexChars[(aChar >> 8) & 0xF]; // high-byte low nibble
   }
-  aBuffer[i++] = hexCharsUpper[(aChar >> 4) & 0xF]; // low-byte high nibble
-  aBuffer[i++] = hexCharsUpper[aChar & 0xF]; // low-byte low nibble
+  aBuffer[i++] = hexChars[(aChar >> 4) & 0xF]; // low-byte high nibble
+  aBuffer[i++] = hexChars[aChar & 0xF]; // low-byte low nibble
   return i;
 }
 
 //----------------------------------------------------------------------------------------
-char*
-nsEscape(const char* aStr, size_t aLength, size_t* aOutputLength,
-         nsEscapeMask aFlags)
+static char*
+nsEscapeCount(const char* aStr, nsEscapeMask aFlags, size_t* aOutLen)
 //----------------------------------------------------------------------------------------
 {
   if (!aStr) {
-    return nullptr;
+    return 0;
   }
 
+  size_t len = 0;
   size_t charsToEscape = 0;
 
   const unsigned char* src = (const unsigned char*)aStr;
-  for (size_t i = 0; i < aLength; ++i) {
-    if (!IS_OK(src[i])) {
+  while (*src) {
+    len++;
+    if (!IS_OK(*src++)) {
       charsToEscape++;
     }
   }
@@ -94,29 +94,29 @@ nsEscape(const char* aStr, size_t aLength, size_t* aOutputLength,
   // calculate how much memory should be allocated
   // original length + 2 bytes for each escaped character + terminating '\0'
   // do the sum in steps to check for overflow
-  size_t dstSize = aLength + 1 + charsToEscape;
-  if (dstSize <= aLength) {
-    return nullptr;
+  size_t dstSize = len + 1 + charsToEscape;
+  if (dstSize <= len) {
+    return 0;
   }
   dstSize += charsToEscape;
-  if (dstSize < aLength) {
-    return nullptr;
+  if (dstSize < len) {
+    return 0;
   }
 
   // fail if we need more than 4GB
   if (dstSize > UINT32_MAX) {
-    return nullptr;
+    return 0;
   }
 
   char* result = (char*)moz_xmalloc(dstSize);
   if (!result) {
-    return nullptr;
+    return 0;
   }
 
   unsigned char* dst = (unsigned char*)result;
   src = (const unsigned char*)aStr;
   if (aFlags == url_XPAlphas) {
-    for (size_t i = 0; i < aLength; ++i) {
+    for (size_t i = 0; i < len; ++i) {
       unsigned char c = *src++;
       if (IS_OK(c)) {
         *dst++ = c;
@@ -124,29 +124,39 @@ nsEscape(const char* aStr, size_t aLength, size_t* aOutputLength,
         *dst++ = '+';  /* convert spaces to pluses */
       } else {
         *dst++ = HEX_ESCAPE;
-        *dst++ = hexCharsUpper[c >> 4];  /* high nibble */
-        *dst++ = hexCharsUpper[c & 0x0f];  /* low nibble */
+        *dst++ = hexChars[c >> 4];  /* high nibble */
+        *dst++ = hexChars[c & 0x0f];  /* low nibble */
       }
     }
   } else {
-    for (size_t i = 0; i < aLength; ++i) {
+    for (size_t i = 0; i < len; ++i) {
       unsigned char c = *src++;
       if (IS_OK(c)) {
         *dst++ = c;
       } else {
         *dst++ = HEX_ESCAPE;
-        *dst++ = hexCharsUpper[c >> 4];  /* high nibble */
-        *dst++ = hexCharsUpper[c & 0x0f];  /* low nibble */
+        *dst++ = hexChars[c >> 4];  /* high nibble */
+        *dst++ = hexChars[c & 0x0f];  /* low nibble */
       }
     }
   }
 
   *dst = '\0';     /* tack on eos */
-  if (aOutputLength) {
-    *aOutputLength = dst - (unsigned char*)result;
+  if (aOutLen) {
+    *aOutLen = dst - (unsigned char*)result;
   }
-
   return result;
+}
+
+//----------------------------------------------------------------------------------------
+char*
+nsEscape(const char* aStr, nsEscapeMask aFlags)
+//----------------------------------------------------------------------------------------
+{
+  if (!aStr) {
+    return nullptr;
+  }
+  return nsEscapeCount(aStr, aFlags, nullptr);
 }
 
 //----------------------------------------------------------------------------------------
@@ -165,6 +175,7 @@ nsUnescapeCount(char* aStr)
 {
   char* src = aStr;
   char* dst = aStr;
+  static const char hexChars[] = "0123456789ABCDEFabcdef";
 
   char c1[] = " ";
   char c2[] = " ";
@@ -186,8 +197,8 @@ nsUnescapeCount(char* aStr)
       c2[0] = *(src + 2);
     }
 
-    if (*src != HEX_ESCAPE || PL_strpbrk(pc1, hexCharsUpperLower) == 0 ||
-        PL_strpbrk(pc2, hexCharsUpperLower) == 0) {
+    if (*src != HEX_ESCAPE || PL_strpbrk(pc1, hexChars) == 0 ||
+        PL_strpbrk(pc2, hexChars) == 0) {
       *dst++ = *src++;
     } else {
       src++; /* walk over escape */
@@ -349,8 +360,8 @@ static const uint32_t EscapeChars[256] =
      0,1023,   0, 512,1023,   0,1023, 112,1023,1023,1023,1023,1023,1023, 953, 784,  // 2x   !"#$%&'()*+,-./
   1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1008,1008,   0,1008,   0, 768,  // 3x  0123456789:;<=>?
   1008,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,  // 4x  @ABCDEFGHIJKLMNO
-  1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1008, 896,1008, 896,1023,  // 5x  PQRSTUVWXYZ[\]^_
-   384,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,  // 6x  `abcdefghijklmno
+  1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023, 896, 896, 896, 896,1023,  // 5x  PQRSTUVWXYZ[\]^_
+     0,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,  // 6x  `abcdefghijklmno
   1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023, 896,1012, 896,1023,   0,  // 7x  pqrstuvwxyz{|}~ DEL
      0                                                                              // 80 to FF are zero
 };
@@ -367,22 +378,10 @@ static uint16_t dontNeedEscape(uint16_t aChar, uint32_t aFlags)
 
 //----------------------------------------------------------------------------------------
 
-/**
- * Templated helper for URL escaping a portion of a string.
- *
- * @param aPart The pointer to the beginning of the portion of the string to
- *  escape.
- * @param aPartLen The length of the string to escape.
- * @param aFlags Flags used to configure escaping. @see EscapeMask
- * @param aResult String that has the URL escaped portion appended to. Only
- *  altered if the string is URL escaped or |esc_AlwaysCopy| is specified.
- * @param aDidAppend Indicates whether or not data was appended to |aResult|.
- * @return NS_ERROR_INVALID_ARG, NS_ERROR_OUT_OF_MEMORY on failure.
- */
 template<class T>
-static nsresult
+static bool
 T_EscapeURL(const typename T::char_type* aPart, size_t aPartLen,
-            uint32_t aFlags, T& aResult, bool& aDidAppend)
+            uint32_t aFlags, T& aResult)
 {
   typedef nsCharTraits<typename T::char_type> traits;
   typedef typename traits::unsigned_char_type unsigned_char_type;
@@ -391,7 +390,7 @@ T_EscapeURL(const typename T::char_type* aPart, size_t aPartLen,
 
   if (!aPart) {
     NS_NOTREACHED("null pointer");
-    return NS_ERROR_INVALID_ARG;
+    return false;
   }
 
   bool forced = !!(aFlags & esc_Forced);
@@ -435,9 +434,7 @@ T_EscapeURL(const typename T::char_type* aPart, size_t aPartLen,
       }
     } else { /* do the escape magic */
       if (!writing) {
-        if (!aResult.Append(aPart, i, fallible)) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
+        aResult.Append(aPart, i);
         writing = true;
       }
       uint32_t len = ::AppendPercentHex(tempBuffer + tempBufferPos, c);
@@ -448,21 +445,16 @@ T_EscapeURL(const typename T::char_type* aPart, size_t aPartLen,
     // Flush the temp buffer if it doesnt't have room for another encoded char.
     if (tempBufferPos >= mozilla::ArrayLength(tempBuffer) - ENCODE_MAX_LEN) {
       NS_ASSERTION(writing, "should be writing");
-      if (!aResult.Append(tempBuffer, tempBufferPos, fallible)) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
+      aResult.Append(tempBuffer, tempBufferPos);
       tempBufferPos = 0;
     }
 
     previousIsNonASCII = (c > 0x7f);
   }
   if (writing) {
-    if (!aResult.Append(tempBuffer, tempBufferPos, fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    aResult.Append(tempBuffer, tempBufferPos);
   }
-  aDidAppend = writing;
-  return NS_OK;
+  return writing;
 }
 
 bool
@@ -472,45 +464,13 @@ NS_EscapeURL(const char* aPart, int32_t aPartLen, uint32_t aFlags,
   if (aPartLen < 0) {
     aPartLen = strlen(aPart);
   }
-
-  bool result = false;
-  nsresult rv = T_EscapeURL(aPart, aPartLen, aFlags, aResult, result);
-  if (NS_FAILED(rv)) {
-    ::NS_ABORT_OOM(aResult.Length() * sizeof(nsACString::char_type));
-  }
-
-  return result;
-}
-
-nsresult
-NS_EscapeURL(const nsCSubstring& aStr, uint32_t aFlags, nsCSubstring& aResult,
-             const mozilla::fallible_t&)
-{
-  bool appended = false;
-  nsresult rv = T_EscapeURL(aStr.Data(), aStr.Length(), aFlags, aResult, appended);
-  if (NS_FAILED(rv)) {
-    aResult.Truncate();
-    return rv;
-  }
-
-  if (!appended) {
-    aResult = aStr;
-  }
-
-  return rv;
+  return T_EscapeURL(aPart, aPartLen, aFlags, aResult);
 }
 
 const nsSubstring&
 NS_EscapeURL(const nsSubstring& aStr, uint32_t aFlags, nsSubstring& aResult)
 {
-  bool result = false;
-  nsresult rv = T_EscapeURL<nsSubstring>(aStr.Data(), aStr.Length(), aFlags, aResult, result);
-
-  if (NS_FAILED(rv)) {
-    ::NS_ABORT_OOM(aResult.Length() * sizeof(nsSubstring::char_type));
-  }
-
-  if (result) {
+  if (T_EscapeURL<nsSubstring>(aStr.Data(), aStr.Length(), aFlags, aResult)) {
     return aResult;
   }
   return aStr;
@@ -538,7 +498,7 @@ NS_EscapeURL(const nsAFlatString& aStr, const nsTArray<char16_t>& aForbidden,
              nsSubstring& aResult)
 {
   bool didEscape = false;
-  for (size_t i = 0, strLen = aStr.Length(); i < strLen; ) {
+  for (size_t i = 0, len = aStr.Length(); i < len; ) {
     size_t j;
     if (MOZ_UNLIKELY(FindFirstMatchFrom(aStr, i, aForbidden, &j))) {
       if (i == 0) {
@@ -551,14 +511,14 @@ NS_EscapeURL(const nsAFlatString& aStr, const nsTArray<char16_t>& aForbidden,
         aResult.Append(nsDependentSubstring(aStr, i, j - i));
       }
       char16_t buffer[ENCODE_MAX_LEN];
-      uint32_t bufferLen = ::AppendPercentHex(buffer, aStr[j]);
-      MOZ_ASSERT(bufferLen <= ENCODE_MAX_LEN, "buffer overflow");
-      aResult.Append(buffer, bufferLen);
+      uint32_t len = ::AppendPercentHex(buffer, aStr[j]);
+      MOZ_ASSERT(len <= ENCODE_MAX_LEN, "buffer overflow");
+      aResult.Append(buffer, len);
       i = j + 1;
     } else {
       if (MOZ_UNLIKELY(didEscape)) {
         // The tail of the string that needs no escaping.
-        aResult.Append(nsDependentSubstring(aStr, i, strLen - i));
+        aResult.Append(nsDependentSubstring(aStr, i, len - i));
       }
       break;
     }
@@ -569,7 +529,7 @@ NS_EscapeURL(const nsAFlatString& aStr, const nsTArray<char16_t>& aForbidden,
   return aStr;
 }
 
-#define ISHEX(c) memchr(hexCharsUpperLower, c, sizeof(hexCharsUpperLower)-1)
+#define ISHEX(c) memchr(hexChars, c, sizeof(hexChars)-1)
 
 bool
 NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
@@ -588,26 +548,30 @@ NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
   bool ignoreAscii = !!(aFlags & esc_OnlyNonASCII);
   bool writing = !!(aFlags & esc_AlwaysCopy);
   bool skipControl = !!(aFlags & esc_SkipControl);
-  bool skipInvalidHostChar = !!(aFlags & esc_Host);
+
+  static const char hexChars[] = "0123456789ABCDEFabcdef";
 
   const char* last = aStr;
   const char* p = aStr;
 
   for (int i = 0; i < aLen; ++i, ++p) {
+    //printf("%c [i=%d of aLen=%d]\n", *p, i, aLen);
     if (*p == HEX_ESCAPE && i < aLen - 2) {
-      unsigned char c1 = *((unsigned char*)p + 1);
-      unsigned char c2 = *((unsigned char*)p + 2);
-      unsigned char u = (UNHEX(c1) << 4) + UNHEX(c2);
-      if (ISHEX(c1) && ISHEX(c2) &&
-          (!skipInvalidHostChar || dontNeedEscape(u, aFlags) || c1 >= '8') &&
-          ((c1 < '8' && !ignoreAscii) || (c1 >= '8' && !ignoreNonAscii)) &&
+      unsigned char* p1 = (unsigned char*)p + 1;
+      unsigned char* p2 = (unsigned char*)p + 2;
+      if (ISHEX(*p1) && ISHEX(*p2) &&
+          ((*p1 < '8' && !ignoreAscii) || (*p1 >= '8' && !ignoreNonAscii)) &&
           !(skipControl &&
-            (c1 < '2' || (c1 == '7' && (c2 == 'f' || c2 == 'F'))))) {
+            (*p1 < '2' || (*p1 == '7' && (*p2 == 'f' || *p2 == 'F'))))) {
+        //printf("- p1=%c p2=%c\n", *p1, *p2);
         writing = true;
         if (p > last) {
+          //printf("- p=%p, last=%p\n", p, last);
           aResult.Append(last, p - last);
           last = p;
         }
+        char u = (UNHEX(*p1) << 4) + UNHEX(*p2);
+        //printf("- u=%c\n", u);
         aResult.Append(u);
         i += 2;
         p += 2;

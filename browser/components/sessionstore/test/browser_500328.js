@@ -42,10 +42,11 @@ function checkState(tab) {
       // deserialized in the content scope. And in this case, since RegExps are
       // not currently Xrayable (see bug 1014991), trying to pull |obj3| (a RegExp)
       // off of an Xrayed Object won't work. So we need to waive.
-      ContentTask.spawn(tab.linkedBrowser, aEvent.state, function(state) {
-        Assert.equal(Cu.waiveXrays(state).obj3.toString(),
-          "/^a$/", "second popstate object.");
-      }).then(function() {
+      runInContent(tab.linkedBrowser, function(win, state) {
+        return Cu.waiveXrays(state).obj3.toString();
+      }, aEvent.state).then(function(stateStr) {
+        is(stateStr, '/^a$/', "second popstate object.");
+
         // Make sure that the new-elem node is present in the document.  If it's
         // not, then this history entry has a different doc identifier than the
         // previous entry, which is bad.
@@ -91,13 +92,13 @@ function test() {
       //   testURL        (state object: null)          <-- oldest
       //   testURL        (state object: {obj1:1})
       //   testURL?page2  (state object: {obj3:/^a$/})  <-- newest
-      function contentTest() {
-        let history = content.window.history;
+      function contentTest(win) {
+        let history = win.history;
         history.pushState({obj1:1}, "title-obj1");
         history.pushState({obj2:2}, "title-obj2", "?page2");
         history.replaceState({obj3:/^a$/}, "title-obj3");
       }
-      ContentTask.spawn(browser, null, contentTest).then(function() {
+      runInContent(browser, contentTest, null).then(function() {
         return TabStateFlusher.flush(tab.linkedBrowser);
       }).then(() => {
         let state = ss.getTabState(tab);

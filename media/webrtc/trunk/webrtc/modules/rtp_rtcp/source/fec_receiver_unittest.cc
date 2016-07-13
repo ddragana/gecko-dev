@@ -14,7 +14,6 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/rtp_rtcp/interface/fec_receiver.h"
 #include "webrtc/modules/rtp_rtcp/mocks/mock_rtp_rtcp.h"
 #include "webrtc/modules/rtp_rtcp/source/fec_test_helper.h"
@@ -30,9 +29,15 @@ namespace webrtc {
 class ReceiverFecTest : public ::testing::Test {
  protected:
   virtual void SetUp() {
-    fec_.reset(new ForwardErrorCorrection());
-    receiver_fec_.reset(FecReceiver::Create(&rtp_data_callback_));
-    generator_.reset(new FrameGenerator());
+    fec_ = new ForwardErrorCorrection();
+    receiver_fec_ = FecReceiver::Create(&rtp_data_callback_);
+    generator_ = new FrameGenerator();
+  }
+
+  virtual void TearDown() {
+    delete fec_;
+    delete receiver_fec_;
+    delete generator_;
   }
 
   void GenerateFEC(std::list<Packet*>* media_packets,
@@ -81,10 +86,10 @@ class ReceiverFecTest : public ::testing::Test {
     delete red_packet;
   }
 
+  ForwardErrorCorrection* fec_;
   MockRtpData rtp_data_callback_;
-  rtc::scoped_ptr<ForwardErrorCorrection> fec_;
-  rtc::scoped_ptr<FecReceiver> receiver_fec_;
-  rtc::scoped_ptr<FrameGenerator> generator_;
+  FecReceiver* receiver_fec_;
+  FrameGenerator* generator_;
 };
 
 void DeletePackets(std::list<Packet*>* packets) {
@@ -114,11 +119,6 @@ TEST_F(ReceiverFecTest, TwoMediaOneFec) {
   ++it;
   VerifyReconstructedMediaPacket(*it, 1);
   EXPECT_EQ(0, receiver_fec_->ProcessReceivedFec());
-
-  FecPacketCounter counter = receiver_fec_->GetPacketCounter();
-  EXPECT_EQ(2U, counter.num_packets);
-  EXPECT_EQ(1U, counter.num_fec_packets);
-  EXPECT_EQ(1U, counter.num_recovered_packets);
 
   DeletePackets(&media_packets);
 }

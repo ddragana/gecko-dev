@@ -12,13 +12,15 @@
 
 using namespace mozilla::gfx;
 
-class nsSVGSwitchFrame : public nsSVGGFrame
+typedef nsSVGGFrame nsSVGSwitchFrameBase;
+
+class nsSVGSwitchFrame : public nsSVGSwitchFrameBase
 {
   friend nsIFrame*
   NS_NewSVGSwitchFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
-  explicit nsSVGSwitchFrame(nsStyleContext* aContext)
-    : nsSVGGFrame(aContext) {}
+  explicit nsSVGSwitchFrame(nsStyleContext* aContext) :
+    nsSVGSwitchFrameBase(aContext) {}
 
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -81,7 +83,7 @@ nsSVGSwitchFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::svgSwitch),
                "Content is not an SVG switch");
 
-  nsSVGGFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGSwitchFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -112,7 +114,7 @@ nsSVGSwitchFrame::PaintSVG(gfxContext& aContext,
                "If display lists are enabled, only painting of non-display "
                "SVG should take this code path");
 
-  if (StyleEffects()->mOpacity == 0.0)
+  if (StyleDisplay()->mOpacity == 0.0)
     return NS_OK;
 
   nsIFrame *kid = GetActiveChildFrame();
@@ -120,7 +122,7 @@ nsSVGSwitchFrame::PaintSVG(gfxContext& aContext,
     gfxMatrix tm = aTransform;
     if (kid->GetContent()->IsSVGElement()) {
       tm = static_cast<nsSVGElement*>(kid->GetContent())->
-             PrependLocalTransformsTo(tm, eUserSpaceToParent);
+             PrependLocalTransformsTo(tm, nsSVGElement::eUserSpaceToParent);
     }
     nsSVGUtils::PaintFrameWithEffects(kid, aContext, tm, aDirtyRect);
   }
@@ -143,9 +145,9 @@ nsSVGSwitchFrame::GetFrameForPoint(const gfxPoint& aPoint)
     gfxPoint point = aPoint;
     gfxMatrix m =
       static_cast<const nsSVGElement*>(mContent)->
-        PrependLocalTransformsTo(gfxMatrix(), eChildToUserSpace);
+        PrependLocalTransformsTo(gfxMatrix(), nsSVGElement::eChildToUserSpace);
     m = static_cast<const nsSVGElement*>(kid->GetContent())->
-          PrependLocalTransformsTo(m, eUserSpaceToParent);
+          PrependLocalTransformsTo(m, nsSVGElement::eUserSpaceToParent);
     if (!m.IsIdentity()) {
       if (!m.Invert()) {
         return nullptr;

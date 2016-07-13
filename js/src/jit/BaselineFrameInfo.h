@@ -179,7 +179,7 @@ class FrameInfo
         spIndex(0)
     { }
 
-    MOZ_MUST_USE bool init(TempAllocator& alloc);
+    bool init(TempAllocator& alloc);
 
     size_t nlocals() const {
         return script->nfixed();
@@ -223,8 +223,26 @@ class FrameInfo
         return const_cast<StackValue*>(&stack[spIndex + index]);
     }
 
-    inline void pop(StackAdjustment adjust = AdjustStack);
-    inline void popn(uint32_t n, StackAdjustment adjust = AdjustStack);
+    inline void pop(StackAdjustment adjust = AdjustStack) {
+        spIndex--;
+        StackValue* popped = &stack[spIndex];
+
+        if (adjust == AdjustStack && popped->kind() == StackValue::Stack)
+            masm.addToStackPtr(Imm32(sizeof(Value)));
+
+        // Assert when anything uses this value.
+        popped->reset();
+    }
+    inline void popn(uint32_t n, StackAdjustment adjust = AdjustStack) {
+        uint32_t poppedStack = 0;
+        for (uint32_t i = 0; i < n; i++) {
+            if (peek(-1)->kind() == StackValue::Stack)
+                poppedStack++;
+            pop(DontAdjustStack);
+        }
+        if (adjust == AdjustStack && poppedStack > 0)
+            masm.addToStackPtr(Imm32(sizeof(Value) * poppedStack));
+    }
     inline void push(const Value& val) {
         StackValue* sv = rawPush();
         sv->setConstant(val);
@@ -279,6 +297,9 @@ class FrameInfo
     }
     Address addressOfFlags() const {
         return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFlags());
+    }
+    Address addressOfEvalScript() const {
+        return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfEvalScript());
     }
     Address addressOfReturnValue() const {
         return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfReturnValue());

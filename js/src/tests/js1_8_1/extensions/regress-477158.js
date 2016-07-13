@@ -19,11 +19,13 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(true);
 
   x = 0;
   x = x.prop;
   for each (let [] in ['', '']) { switch(x) { default: (function(){}); } };
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

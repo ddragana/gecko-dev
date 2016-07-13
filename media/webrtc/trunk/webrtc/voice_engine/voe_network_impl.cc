@@ -10,7 +10,6 @@
 
 #include "webrtc/voice_engine/voe_network_impl.h"
 
-#include "webrtc/base/format_macros.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -89,18 +88,17 @@ int VoENetworkImpl::DeRegisterExternalTransport(int channel)
 
 int VoENetworkImpl::ReceivedRTPPacket(int channel,
                                       const void* data,
-                                      size_t length) {
+                                      unsigned int length) {
   return ReceivedRTPPacket(channel, data, length, webrtc::PacketTime());
 }
 
 int VoENetworkImpl::ReceivedRTPPacket(int channel,
                                       const void* data,
-                                      size_t length,
+                                      unsigned int length,
                                       const PacketTime& packet_time)
 {
     WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_shared->instance_id(), -1),
-                 "ReceivedRTPPacket(channel=%d, length=%" PRIuS ")", channel,
-                 length);
+                 "ReceivedRTPPacket(channel=%d, length=%u)", channel, length);
     if (!_shared->statistics().Initialized())
     {
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
@@ -139,11 +137,10 @@ int VoENetworkImpl::ReceivedRTPPacket(int channel,
 }
 
 int VoENetworkImpl::ReceivedRTCPPacket(int channel, const void* data,
-                                       size_t length)
+                                       unsigned int length)
 {
     WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_shared->instance_id(), -1),
-                 "ReceivedRTCPPacket(channel=%d, length=%" PRIuS ")", channel,
-                 length);
+                 "ReceivedRTCPPacket(channel=%d, length=%u)", channel, length);
     if (!_shared->statistics().Initialized())
     {
         _shared->SetLastError(VE_NOT_INITED, kTraceError);

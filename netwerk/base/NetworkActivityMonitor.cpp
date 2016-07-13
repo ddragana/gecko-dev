@@ -149,7 +149,7 @@ nsNetMon_AcceptRead(PRFileDesc *listenSock,
 }
 
 
-class NotifyNetworkActivity : public mozilla::Runnable {
+class NotifyNetworkActivity : public nsRunnable {
 public:
   explicit NotifyNetworkActivity(NetworkActivityMonitor::Direction aDirection)
     : mDirection(aDirection)
@@ -170,6 +170,7 @@ public:
     return NS_OK;
   }
 private:
+  nsCOMPtr<nsIObserverService>      mObs;
   NetworkActivityMonitor::Direction mDirection;
 };
 

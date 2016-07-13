@@ -28,7 +28,7 @@ class TraceToStderr : public TraceCallback {
   // This is useful for offline test tools, where the file time is much more
   // informative than the real time.
   explicit TraceToStderr(bool override_time);
-  ~TraceToStderr() override;
+  virtual ~TraceToStderr();
 
   // Every subsequent trace printout will use |time|. Has no effect if
   // |override_time| in the constructor was set to false.
@@ -39,7 +39,9 @@ class TraceToStderr : public TraceCallback {
   virtual void SetTimeSeconds(float time);
 
   // Implements TraceCallback.
-  void Print(TraceLevel level, const char* msg_array, int length) override;
+  virtual void Print(TraceLevel level,
+                     const char* msg_array,
+                     int length) OVERRIDE;
 
  private:
   bool override_time_;

@@ -13,11 +13,12 @@
  */
 #include "cairo-win32.h"
 
-#include "gfxCrashReporterUtils.h"
 #include "gfxFontUtils.h"
 #include "gfxWindowsSurface.h"
 #include "gfxFont.h"
+#ifdef CAIRO_HAS_DWRITE_FONT
 #include "gfxDWriteFonts.h"
+#endif
 #include "gfxPlatform.h"
 #include "gfxTelemetry.h"
 #include "gfxTypes.h"
@@ -26,13 +27,14 @@
 #include "nsTArray.h"
 #include "nsDataHashtable.h"
 
-#include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
 
 #include <windows.h>
 #include <objbase.h>
 
+#ifdef CAIRO_HAS_D2D_SURFACE
 #include <dxgi.h>
+#endif
 
 // This header is available in the June 2010 SDK and in the Win8 SDK
 #include <d3dcommon.h>
@@ -46,7 +48,6 @@
 namespace mozilla {
 namespace gfx {
 class DrawTarget;
-class FeatureState;
 }
 namespace layers {
 class DeviceManagerD3D9;
@@ -112,14 +113,14 @@ public:
         return (gfxWindowsPlatform*) gfxPlatform::GetPlatform();
     }
 
-    virtual gfxPlatformFontList* CreatePlatformFontList() override;
+    virtual gfxPlatformFontList* CreatePlatformFontList();
 
     virtual already_AddRefed<gfxASurface>
       CreateOffscreenSurface(const IntSize& aSize,
                              gfxImageFormat aFormat) override;
 
     virtual already_AddRefed<mozilla::gfx::ScaledFont>
-      GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont) override;
+      GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
 
     enum RenderMode {
         /* Use GDI and windows surfaces */
@@ -138,18 +139,16 @@ public:
         RENDER_MODE_MAX
     };
 
-    bool IsDirect2DBackend();
+    int GetScreenDepth() const;
+
+    RenderMode GetRenderMode() { return mRenderMode; }
+    void SetRenderMode(RenderMode rmode) { mRenderMode = rmode; }
 
     /**
      * Updates render mode with relation to the current preferences and
      * available devices.
      */
     void UpdateRenderMode();
-
-    /**
-     * Forces all GPU resources to be recreated on the next frame.
-     */
-    void ForceDeviceReset(ForcedDeviceResetReason aReason);
 
     /**
      * Verifies a D2D device is present and working, will attempt to create one
@@ -160,30 +159,59 @@ public:
      */
     void VerifyD2DDevice(bool aAttemptForce);
 
-    virtual void GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
-                                        Script aRunScript,
-                                        nsTArray<const char*>& aFontList) override;
+#ifdef CAIRO_HAS_D2D_SURFACE
+    HRESULT CreateDevice(nsRefPtr<IDXGIAdapter1> &adapter1, int featureLevelIndex);
+#endif
 
-    gfxFontGroup*
-    CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
-                    const gfxFontStyle *aStyle,
-                    gfxTextPerfMetrics* aTextPerf,
-                    gfxUserFontSet *aUserFontSet,
-                    gfxFloat aDevToCssSize) override;
+    /**
+     * Return the resolution scaling factor to convert between "logical" or
+     * "screen" pixels as used by Windows (dependent on the DPI scaling option
+     * in the Display control panel) and actual device pixels.
+     */
+    double GetDPIScale();
+
+    nsresult GetFontList(nsIAtom *aLangGroup,
+                         const nsACString& aGenericFamily,
+                         nsTArray<nsString>& aListOfFonts);
+
+    nsresult UpdateFontList();
+
+    virtual void GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
+                                        int32_t aRunScript,
+                                        nsTArray<const char*>& aFontList);
+
+    nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
+
+    gfxFontGroup *CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
+                                  const gfxFontStyle *aStyle,
+                                  gfxUserFontSet *aUserFontSet);
+
+    /**
+     * Look up a local platform font using the full font face name (needed to support @font-face src local() )
+     */
+    virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
+                                          uint16_t aWeight,
+                                          int16_t aStretch,
+                                          bool aItalic);
+
+    /**
+     * Activate a platform font (needed to support @font-face src url() )
+     */
+    virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
+                                           uint16_t aWeight,
+                                           int16_t aStretch,
+                                           bool aItalic,
+                                           const uint8_t* aFontData,
+                                           uint32_t aLength);
 
     virtual bool CanUseHardwareVideoDecoding() override;
 
     /**
      * Check whether format is supported on a platform or not (if unclear, returns true)
      */
-    virtual bool IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags) override;
+    virtual bool IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags);
 
-    virtual void CompositorUpdated() override;
-
-    bool DidRenderingDeviceReset(DeviceResetReason* aResetReason = nullptr) override;
-    void SchedulePaintIfDeviceReset() override;
-
-    mozilla::gfx::BackendType GetContentBackendFor(mozilla::layers::LayersBackend aLayers) override;
+    virtual bool DidRenderingDeviceReset(DeviceResetReason* aResetReason = nullptr);
 
     // ClearType is not always enabled even when available (e.g. Windows XP)
     // if either of these prefs are enabled and apply, use ClearType rendering
@@ -195,78 +223,68 @@ public:
     // returns ClearType tuning information for each display
     static void GetCleartypeParams(nsTArray<ClearTypeParameterInfo>& aParams);
 
-    virtual void FontsPrefsChanged(const char *aPref) override;
+    virtual void FontsPrefsChanged(const char *aPref);
 
     void SetupClearTypeParams();
 
+#ifdef CAIRO_HAS_DWRITE_FONT
     IDWriteFactory *GetDWriteFactory() { return mDWriteFactory; }
-    inline bool DWriteEnabled() { return !!mDWriteFactory; }
+    inline bool DWriteEnabled() { return mUseDirectWrite; }
     inline DWRITE_MEASURING_MODE DWriteMeasuringMode() { return mMeasuringMode; }
+    IDWriteTextAnalyzer *GetDWriteAnalyzer() { return mDWriteAnalyzer; }
 
     IDWriteRenderingParams *GetRenderingParams(TextRenderingMode aRenderMode)
     { return mRenderingParams[aRenderMode]; }
-
-    bool GetD3D11Device(RefPtr<ID3D11Device>* aOutDevice);
-    bool GetD3D11DeviceForCurrentThread(RefPtr<ID3D11Device>* aOutDevice);
-    bool GetD3D11ImageBridgeDevice(RefPtr<ID3D11Device>* aOutDevice);
-
+#else
+    inline bool DWriteEnabled() { return false; }
+#endif
     void OnDeviceManagerDestroy(mozilla::layers::DeviceManagerD3D9* aDeviceManager);
-    already_AddRefed<mozilla::layers::DeviceManagerD3D9> GetD3D9DeviceManager();
+    mozilla::layers::DeviceManagerD3D9* GetD3D9DeviceManager();
     IDirect3DDevice9* GetD3D9Device();
-    void D3D9DeviceReset();
+    ID3D10Device1 *GetD3D10Device() { return mD3D10Device; }
+    ID3D11Device *GetD3D11Device();
     ID3D11Device *GetD3D11ContentDevice();
+    // Device to be used on the ImageBridge thread
+    ID3D11Device *GetD3D11ImageBridgeDevice();
 
     // Create a D3D11 device to be used for DXVA decoding.
     already_AddRefed<ID3D11Device> CreateD3D11DecoderDevice();
-    bool CreateD3D11DecoderDeviceHelper(
-      IDXGIAdapter1* aAdapter, RefPtr<ID3D11Device>& aDevice,
-      HRESULT& aResOut);
-
-    bool DwmCompositionEnabled();
 
     mozilla::layers::ReadbackManagerD3D11* GetReadbackManager();
 
     static bool IsOptimus();
 
-    bool IsWARP() const { return mIsWARP; }
-
-    // Returns whether the compositor's D3D11 device supports texture sharing.
-    bool CompositorD3D11TextureSharingWorks() const {
-      return mCompositorD3D11TextureSharingWorks;
-    }
+    bool IsWARP() { return mIsWARP; }
+    bool DoesD3D11TextureSharingWork() { return mDoesD3D11TextureSharingWork; }
 
     bool SupportsApzWheelInput() const override {
       return true;
     }
     bool SupportsApzTouchInput() const override;
 
-    // Recreate devices as needed for a device reset. Returns true if a device
-    // reset occurred.
-    bool HandleDeviceReset();
-    void UpdateBackendPrefs();
-
+    // Return the diagnostic status of DirectX initialization. If
+    // initialization has not been attempted, this returns
+    // FeatureStatus::Unused.
+    mozilla::gfx::FeatureStatus GetD3D11Status() const {
+      return mD3D11Status;
+    }
+    mozilla::gfx::FeatureStatus GetD2DStatus() const {
+      return mD2DStatus;
+    }
     unsigned GetD3D11Version();
-
-    void TestDeviceReset(DeviceResetReason aReason);
+    mozilla::gfx::FeatureStatus GetD2D1Status();
 
     virtual already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource() override;
-    static mozilla::Atomic<size_t> sD3D11SharedTextures;
-    static mozilla::Atomic<size_t> sD3D9SharedTextures;
-
-    void GetDeviceInitData(mozilla::gfx::DeviceInitData* aOut) override;
-
-    bool SupportsPluginDirectBitmapDrawing() override {
-      return true;
-    }
-    bool SupportsPluginDirectDXGIDrawing();
+    static mozilla::Atomic<size_t> sD3D11MemoryUsed;
+    static mozilla::Atomic<size_t> sD3D9MemoryUsed;
+    static mozilla::Atomic<size_t> sD3D9SurfaceImageUsed;
+    static mozilla::Atomic<size_t> sD3D9SharedTextureUsed;
 
 protected:
     bool AccelerateLayersByDefault() override {
       return true;
     }
-    void GetAcceleratedCompositorBackends(nsTArray<mozilla::layers::LayersBackend>& aBackends) override;
-    virtual void GetPlatformCMSOutputProfile(void* &mem, size_t &size) override;
-    bool UpdateDeviceInitData() override;
+    void GetAcceleratedCompositorBackends(nsTArray<mozilla::layers::LayersBackend>& aBackends);
 
 protected:
     RenderMode mRenderMode;
@@ -276,71 +294,55 @@ protected:
 
 private:
     void Init();
-    void InitAcceleration() override;
 
-    void InitializeDevices();
-    void InitializeD3D11();
-    void InitializeD2D();
-    bool InitDWriteSupport();
+    void InitD3D11Devices();
 
-    void DisableD2D(mozilla::gfx::FeatureStatus aStatus, const char* aMessage,
-                    const nsACString& aFailureId);
+    // Used by InitD3D11Devices().
+    enum class D3D11Status {
+      Ok,
+      TryWARP,
+      ForceWARP,
+      Blocked
+    };
+    D3D11Status CheckD3D11Support();
+    bool AttemptD3D11DeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptWARPDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptD3D11ImageBridgeDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptD3D11ContentDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
 
-    void InitializeConfig();
-    void InitializeD3D9Config();
-    void InitializeD3D11Config();
-    void InitializeD2DConfig();
-
-    void AttemptD3D11DeviceCreation(mozilla::gfx::FeatureState& d3d11);
-    bool AttemptD3D11DeviceCreationHelper(
-        IDXGIAdapter1* aAdapter,
-        RefPtr<ID3D11Device>& aOutDevice,
-        HRESULT& aResOut);
-
-    void AttemptWARPDeviceCreation();
-    bool AttemptWARPDeviceCreationHelper(
-        mozilla::ScopedGfxFeatureReporter& aReporterWARP,
-        RefPtr<ID3D11Device>& aOutDevice,
-        HRESULT& aResOut);
-
-    bool AttemptD3D11ImageBridgeDeviceCreationHelper(
-        IDXGIAdapter1* aAdapter, HRESULT& aResOut);
-    mozilla::gfx::FeatureStatus AttemptD3D11ImageBridgeDeviceCreation();
-
-    mozilla::gfx::FeatureStatus AttemptD3D11ContentDeviceCreation();
-    bool AttemptD3D11ContentDeviceCreationHelper(
-        IDXGIAdapter1* aAdapter, HRESULT& aResOut);
-
-    bool CanUseWARP();
-    bool CanUseD3D11ImageBridge();
-    bool ContentAdapterIsParentAdapter(ID3D11Device* device);
-
-    void DisableD3D11AfterCrash();
-    void ResetD3D11Devices();
+    // Used by UpdateRenderMode().
+    mozilla::gfx::FeatureStatus InitD2DSupport();
+    void InitDWriteSupport();
 
     IDXGIAdapter1 *GetDXGIAdapter();
     bool IsDeviceReset(HRESULT hr, DeviceResetReason* aReason);
 
-    RefPtr<IDWriteFactory> mDWriteFactory;
-    RefPtr<IDWriteRenderingParams> mRenderingParams[TEXT_RENDERING_COUNT];
-    DWRITE_MEASURING_MODE mMeasuringMode;
+    bool mUseDirectWrite;
+    bool mUsingGDIFonts;
 
-    mozilla::Mutex mDeviceLock;
-    RefPtr<IDXGIAdapter1> mAdapter;
-    RefPtr<ID3D11Device> mD3D11Device;
-    RefPtr<ID3D11Device> mD3D11ContentDevice;
-    RefPtr<ID3D11Device> mD3D11ImageBridgeDevice;
-    RefPtr<mozilla::layers::DeviceManagerD3D9> mDeviceManager;
-    mozilla::Atomic<bool> mIsWARP;
+#ifdef CAIRO_HAS_DWRITE_FONT
+    nsRefPtr<IDWriteFactory> mDWriteFactory;
+    nsRefPtr<IDWriteTextAnalyzer> mDWriteAnalyzer;
+    nsRefPtr<IDWriteRenderingParams> mRenderingParams[TEXT_RENDERING_COUNT];
+    DWRITE_MEASURING_MODE mMeasuringMode;
+#endif
+    mozilla::RefPtr<IDXGIAdapter1> mAdapter;
+    nsRefPtr<mozilla::layers::DeviceManagerD3D9> mDeviceManager;
+    mozilla::RefPtr<ID3D10Device1> mD3D10Device;
+    mozilla::RefPtr<ID3D11Device> mD3D11Device;
+    mozilla::RefPtr<ID3D11Device> mD3D11ContentDevice;
+    mozilla::RefPtr<ID3D11Device> mD3D11ImageBridgeDevice;
+    bool mD3D11DeviceInitialized;
+    mozilla::RefPtr<mozilla::layers::ReadbackManagerD3D11> mD3D11ReadbackManager;
+    bool mIsWARP;
     bool mHasDeviceReset;
-    bool mHasFakeDeviceReset;
-    mozilla::Atomic<bool> mCompositorD3D11TextureSharingWorks;
-    mozilla::Atomic<bool> mHasD3D9DeviceReset;
+    bool mDoesD3D11TextureSharingWork;
     DeviceResetReason mDeviceResetReason;
 
-    RefPtr<mozilla::layers::ReadbackManagerD3D11> mD3D11ReadbackManager;
+    mozilla::gfx::FeatureStatus mD3D11Status;
+    mozilla::gfx::FeatureStatus mD2DStatus;
 
-    nsTArray<D3D_FEATURE_LEVEL> mFeatureLevels;
+    virtual void GetPlatformCMSOutputProfile(void* &mem, size_t &size);
 };
 
 #endif /* GFX_WINDOWS_PLATFORM_H */

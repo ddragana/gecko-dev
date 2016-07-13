@@ -15,7 +15,7 @@
 #include "nsIHttpChannelInternal.h"
 #include "nsICachingChannel.h"
 #include "nsIApplicationCacheChannel.h"
-#include "nsIFormPOSTActionChannel.h"
+#include "nsIUploadChannel.h"
 #include "mozilla/Attributes.h"
 
 class nsViewSourceChannel final : public nsIViewSourceChannel,
@@ -24,7 +24,7 @@ class nsViewSourceChannel final : public nsIViewSourceChannel,
                                   public nsIHttpChannelInternal,
                                   public nsICachingChannel,
                                   public nsIApplicationCacheChannel,
-                                  public nsIFormPOSTActionChannel
+                                  public nsIUploadChannel
 {
 
 public:
@@ -40,7 +40,6 @@ public:
     NS_FORWARD_SAFE_NSIAPPLICATIONCACHECHANNEL(mApplicationCacheChannel)
     NS_FORWARD_SAFE_NSIAPPLICATIONCACHECONTAINER(mApplicationCacheChannel)
     NS_FORWARD_SAFE_NSIUPLOADCHANNEL(mUploadChannel)
-    NS_FORWARD_SAFE_NSIFORMPOSTACTIONCHANNEL(mPostChannel)
     NS_FORWARD_SAFE_NSIHTTPCHANNELINTERNAL(mHttpChannelInternal)
 
     // nsViewSourceChannel methods:
@@ -50,10 +49,7 @@ public:
 
     nsresult Init(nsIURI* uri);
 
-    nsresult InitSrcdoc(nsIURI* aURI,
-                        nsIURI* aBaseURI,
-                        const nsAString &aSrcdoc,
-                        nsILoadInfo* aLoadInfo);
+    nsresult InitSrcdoc(nsIURI* aURI, const nsAString &aSrcdoc);
 
 protected:
     ~nsViewSourceChannel() {}
@@ -65,10 +61,8 @@ protected:
     nsCOMPtr<nsICacheInfoChannel> mCacheInfoChannel;
     nsCOMPtr<nsIApplicationCacheChannel> mApplicationCacheChannel;
     nsCOMPtr<nsIUploadChannel>  mUploadChannel;
-    nsCOMPtr<nsIFormPOSTActionChannel> mPostChannel;
     nsCOMPtr<nsIStreamListener> mListener;
     nsCOMPtr<nsIURI>            mOriginalURI;
-    nsCOMPtr<nsIURI>            mBaseURI;
     nsCString                   mContentType;
     bool                        mIsDocument; // keeps track of the LOAD_DOCUMENT_URI flag
     bool                        mOpened;

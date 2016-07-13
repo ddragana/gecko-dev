@@ -18,7 +18,6 @@ sys.path.insert(1, os.path.dirname(sys.path[0]))
 # import the guts
 from mozharness.base.script import BaseScript
 from mozharness.mozilla.googleplay import GooglePlayMixin
-from mozharness.mozilla.storel10n import storel10n
 from mozharness.base.python import VirtualenvMixin
 
 
@@ -51,7 +50,7 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
         [["--l10n-api-url"], {
             "dest": "l10n_api_url",
             "help": "The L10N URL",
-            "default": "https://l10n.mozilla-community.org/stores_l10n/"
+            "default": "https://l10n.mozilla-community.org/~pascalc/google_play_description/"
         }],
         [["--force-locale"], {
             "dest": "force_locale",
@@ -60,9 +59,9 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
     ]
 
     # We have 3 apps. Make sure that their names are correct
-    package_name_values = {"org.mozilla.fennec_aurora": "aurora",
-                           "org.mozilla.firefox_beta": "beta",
-                           "org.mozilla.firefox": "release"}
+    package_name_values = ("org.mozilla.fennec_aurora",
+                           "org.mozilla.firefox_beta",
+                           "org.mozilla.firefox")
 
     def __init__(self, require_config_file=False, config={},
                  all_actions=all_actions,
@@ -95,7 +94,6 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
         self.all_locales_url = self.config['l10n_api_url'] + "api/?done&channel={channel}"
         self.locale_url = self.config['l10n_api_url'] + "api/?locale={locale}&channel={channel}"
         self.mapping_url = self.config['l10n_api_url'] + "api/?locale_mapping&reverse"
-        self.translationMgmt = storel10n(config, {})
 
     def check_argument(self):
         """ Check that the given values are correct,
@@ -108,6 +106,46 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
         if not os.path.isfile(self.config['google_play_credentials_file']):
             self.fatal("Could not find " + self.config['google_play_credentials_file'])
 
+    def get_list_locales(self, package_name):
+
+        """ Get all the translated locales supported by Google play
+        So, locale unsupported by Google play won't be downloaded
+        Idem for not translated locale
+        """
+        try:
+            response = urllib2.urlopen(self.all_locales_url.format(channel=package_name))
+        except urllib2.HTTPError:
+            self.fatal("Could not download the locale list. Channel: '" + package_name + "', URL: '" + self.all_locales_url + "'")
+
+        return json.load(response)
+
+    def get_mapping(self):
+        """ Download and load the locale mapping
+        """
+        try:
+            response = urllib2.urlopen(self.mapping_url)
+        except urllib2.HTTPError:
+            self.fatal("Could not download the locale mapping list. URL: '" + self.mapping_url + "'")
+        self.mappings = json.load(response)
+
+    def locale_mapping(self, locale):
+        """ Google play and Mozilla don't have the exact locale code
+        Translate them
+        """
+        if locale in self.mappings:
+            return self.mappings[locale]
+        else:
+            return locale
+
+    def get_translation(self, package_name, locale):
+        """ Get the translation for a locale
+        """
+        localeURL = self.locale_url.format(channel=package_name, locale=locale)
+        try:
+            response = urllib2.urlopen(localeURL)
+        except urllib2.HTTPError:
+            self.fatal("Could not download the locale translation. Locale: '" + locale + "', Channel: '" + package_name + "', URL: '" + localeURL + "'")
+        return json.load(response)
 
     def update_desc(self, service, package_name):
         """ Update the desc on google play
@@ -124,31 +162,30 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
         edit_id = result['id']
 
         # Retrieve the mapping
-        self.translationMgmt.load_mapping()
-        package_code = self.package_name_values[self.config['package_name']]
+        self.get_mapping()
 
         if self.config.get("force_locale"):
             # The user forced a locale, don't need to retrieve the full list
             locales = [self.config.get("force_locale")]
         else:
             # Get all the locales from the web interface
-            locales = self.translationMgmt.get_list_locales(package_code)
+            locales = self.get_list_locales(package_name)
         nb_locales = 0
         for locale in locales:
-            translation = self.translationMgmt.get_translation(package_code, locale)
+            translation = self.get_translation(package_name, locale)
             title = translation.get("title")
             short_desc = translation.get("short_desc")
             long_desc = translation.get("long_desc")
 
             # Google play expects some locales codes (de-DE instead of de)
-            locale = self.translationMgmt.locale_mapping(locale)
+            locale = self.locale_mapping(locale)
 
             try:
-                self.log("Updating " + package_code + " for '" + locale +
+                self.log("Updating " + package_name + " for '" + locale +
                          "' /  title: '" + title + "', short_desc: '" +
                          short_desc[0:20] + "'..., long_desc: '" +
                          long_desc[0:20] + "...'")
-                service.edits().listings().update(
+                listing_response = service.edits().listings().update(
                     editId=edit_id, packageName=package_name, language=locale,
                     body={'fullDescription': long_desc,
                           'shortDescription': short_desc,
@@ -177,22 +214,22 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
         self.check_argument()
         self.connect_to_play()
         package_name = 'org.mozilla.fennec_aurora'
-        locales = self.translationMgmt.get_list_locales(package_name)
+        locales = self.get_list_locales(package_name)
         if not locales:
             self.fatal("get_list_locales() failed")
 
-        self.translationMgmt.get_mapping()
+        self.get_mapping()
         if not self.mappings:
             self.fatal("get_mapping() failed")
 
-        loca = self.translationMgmt.locale_mapping("fr")
+        loca = self.locale_mapping("fr")
         if loca != "fr-FR":
             self.fatal("fr locale_mapping failed")
-        loca = self.translationMgmt.locale_mapping("hr")
+        loca = self.locale_mapping("hr")
         if loca != "hr":
             self.fatal("hr locale_mapping failed")
 
-        translation = self.translationMgmt.get_translation(package_name, 'cs')
+        translation = self.get_translation(package_name, 'cs')
         if len(translation.get('title')) < 5:
             self.fatal("get_translation title failed for the 'cs' locale")
         if len(translation.get('short_desc')) < 5:
@@ -201,7 +238,7 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
             self.fatal("get_translation long_desc failed for the 'cs' locale")
 
         package_name = "org.mozilla.firefox_beta"
-        translation = self.translationMgmt.get_translation(package_name, 'fr')
+        translation = self.get_translation(package_name, 'fr')
         if len(translation.get('title')) < 5:
             self.fatal("get_translation title failed for the 'fr' locale")
         if len(translation.get('short_desc')) < 5:
@@ -210,7 +247,7 @@ class UpdateDescriptionAPK(BaseScript, GooglePlayMixin, VirtualenvMixin):
             self.fatal("get_translation long_desc failed for the 'fr' locale")
 
         package_name = "org.mozilla.firefox"
-        translation = self.translationMgmt.get_translation(package_name, 'de')
+        translation = self.get_translation(package_name, 'de')
         if len(translation.get('title')) < 5:
             self.fatal("get_translation title failed for the 'de' locale")
         if len(translation.get('short_desc')) < 5:

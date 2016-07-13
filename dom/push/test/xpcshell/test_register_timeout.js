@@ -14,13 +14,15 @@ function run_test() {
     requestTimeout: 1000,
     retryBaseInterval: 150
   });
+  disableServiceWorkerEvents(
+    'https://example.net/page/timeout'
+  );
   run_next_test();
 }
 
 add_task(function* test_register_timeout() {
   let handshakes = 0;
-  let timeoutDone;
-  let timeoutPromise = new Promise(resolve => timeoutDone = resolve);
+  let timeoutDefer = Promise.defer();
   let registers = 0;
 
   let db = PushServiceWebSocket.newPushDB();
@@ -29,18 +31,28 @@ add_task(function* test_register_timeout() {
   PushServiceWebSocket._generateID = () => channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
+    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
         onHello(request) {
-          if (handshakes === 0) {
+          switch (handshakes) {
+          case 0:
             equal(request.uaid, null, 'Should not include device ID');
-          } else if (handshakes === 1) {
+            deepEqual(request.channelIDs, [],
+              'Should include empty channel list');
+            break;
+
+          case 1:
             // Should use the previously-issued device ID when reconnecting,
             // but should not include the timed-out channel ID.
             equal(request.uaid, userAgentID,
               'Should include device ID on reconnect');
-          } else {
+            deepEqual(request.channelIDs, [],
+              'Should not include failed channel ID');
+            break;
+
+          default:
             ok(false, 'Unexpected reconnect attempt ' + handshakes);
           }
           handshakes++;
@@ -62,7 +74,7 @@ add_task(function* test_register_timeout() {
               uaid: userAgentID,
               pushEndpoint: 'https://example.com/update/timeout',
             }));
-            timeoutDone();
+            timeoutDefer.resolve();
           }, 2000);
           registers++;
         }
@@ -71,17 +83,21 @@ add_task(function* test_register_timeout() {
   });
 
   yield rejects(
-    PushService.register({
-      scope: 'https://example.net/page/timeout',
-      originAttributes: ChromeUtils.originAttributesToSuffix(
-        { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
-    }),
-    'Expected error for request timeout'
+    PushNotificationService.register('https://example.net/page/timeout',
+      ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })),
+    function(error) {
+      return error == 'TimeoutError';
+    },
+    'Wrong error for request timeout'
   );
 
   let record = yield db.getByKeyID(channelID);
   ok(!record, 'Should not store records for timed-out responses');
 
-  yield timeoutPromise;
+  yield waitForPromise(
+    timeoutDefer.promise,
+    DEFAULT_TIMEOUT,
+    'Reconnect timed out'
+  );
   equal(registers, 1, 'Should not handle timed-out register requests');
 });

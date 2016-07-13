@@ -55,7 +55,7 @@ div.opsRowLabel {
 }
 
 div.non-verbose pre.entries {
-  overflow-x: auto;
+  overflow-x: hidden;
   text-overflow: ellipsis;
 }
 

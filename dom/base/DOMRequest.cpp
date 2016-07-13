@@ -9,12 +9,10 @@
 #include "DOMError.h"
 #include "nsThreadUtils.h"
 #include "DOMCursor.h"
+#include "nsIDOMEvent.h"
 #include "mozilla/ErrorResult.h"
-#include "mozilla/dom/Event.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ScriptSettings.h"
-#include "jsfriendapi.h"
-#include "nsContentUtils.h"
 
 using mozilla::dom::AnyCallback;
 using mozilla::dom::DOMError;
@@ -24,8 +22,9 @@ using mozilla::dom::DOMCursor;
 using mozilla::dom::Promise;
 using mozilla::dom::AutoJSAPI;
 
-DOMRequest::DOMRequest(nsPIDOMWindowInner* aWindow)
-  : DOMEventTargetHelper(aWindow)
+DOMRequest::DOMRequest(nsPIDOMWindow* aWindow)
+  : DOMEventTargetHelper(aWindow->IsInnerWindow() ?
+                           aWindow : aWindow->GetCurrentInnerWindow())
   , mResult(JS::UndefinedValue())
   , mDone(false)
 {
@@ -63,7 +62,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(DOMRequest,
                                                DOMEventTargetHelper)
   // Don't need NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER because
   // DOMEventTargetHelper does it for us.
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mResult)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mResult)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DOMRequest)
@@ -193,8 +192,13 @@ DOMRequest::FireEvent(const nsAString& aType, bool aBubble, bool aCancelable)
     return;
   }
 
-  RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
-  event->InitEvent(aType, aBubble, aCancelable);
+  nsCOMPtr<nsIDOMEvent> event;
+  NS_NewDOMEvent(getter_AddRefs(event), this, nullptr, nullptr);
+  nsresult rv = event->InitEvent(aType, aBubble, aCancelable);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
   event->SetTrusted(true);
 
   bool dummy;
@@ -207,16 +211,14 @@ DOMRequest::RootResultVal()
   mozilla::HoldJSObjects(this);
 }
 
-void
+already_AddRefed<Promise>
 DOMRequest::Then(JSContext* aCx, AnyCallback* aResolveCallback,
-                 AnyCallback* aRejectCallback,
-                 JS::MutableHandle<JS::Value> aRetval,
-                 mozilla::ErrorResult& aRv)
+                 AnyCallback* aRejectCallback, mozilla::ErrorResult& aRv)
 {
   if (!mPromise) {
     mPromise = Promise::Create(DOMEventTargetHelper::GetParentObject(), aRv);
     if (aRv.Failed()) {
-      return;
+      return nullptr;
     }
     if (mDone) {
       // Since we create mPromise lazily, it's possible that the DOMRequest object
@@ -231,33 +233,30 @@ DOMRequest::Then(JSContext* aCx, AnyCallback* aResolveCallback,
     }
   }
 
-  // Just use the global of the Promise itself as the callee global.
-  JS::Rooted<JSObject*> global(aCx, mPromise->PromiseObj());
-  global = js::GetGlobalForObjectCrossCompartment(global);
-  mPromise->Then(aCx, global, aResolveCallback, aRejectCallback, aRetval, aRv);
+  return mPromise->Then(aCx, aResolveCallback, aRejectCallback, aRv);
 }
 
 NS_IMPL_ISUPPORTS(DOMRequestService, nsIDOMRequestService)
 
 NS_IMETHODIMP
-DOMRequestService::CreateRequest(mozIDOMWindow* aWindow,
+DOMRequestService::CreateRequest(nsIDOMWindow* aWindow,
                                  nsIDOMDOMRequest** aRequest)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_ENSURE_STATE(aWindow);
-  auto* win = nsPIDOMWindowInner::From(aWindow);
+  nsCOMPtr<nsPIDOMWindow> win(do_QueryInterface(aWindow));
+  NS_ENSURE_STATE(win);
   NS_ADDREF(*aRequest = new DOMRequest(win));
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-DOMRequestService::CreateCursor(mozIDOMWindow* aWindow,
+DOMRequestService::CreateCursor(nsIDOMWindow* aWindow,
                                 nsICursorContinueCallback* aCallback,
                                 nsIDOMDOMCursor** aCursor)
 {
-  NS_ENSURE_STATE(aWindow);
-  auto* win = nsPIDOMWindowInner::From(aWindow);
+  nsCOMPtr<nsPIDOMWindow> win(do_QueryInterface(aWindow));
+  NS_ENSURE_STATE(win);
   NS_ADDREF(*aCursor = new DOMCursor(win, aCallback));
 
   return NS_OK;
@@ -295,13 +294,14 @@ DOMRequestService::FireDetailedError(nsIDOMDOMRequest* aRequest,
   return NS_OK;
 }
 
-class FireSuccessAsyncTask : public mozilla::Runnable
+class FireSuccessAsyncTask : public nsRunnable
 {
 
-  FireSuccessAsyncTask(DOMRequest* aRequest,
+  FireSuccessAsyncTask(JSContext* aCx,
+                       DOMRequest* aRequest,
                        const JS::Value& aResult) :
     mReq(aRequest),
-    mResult(nsContentUtils::RootingCxForThread(), aResult)
+    mResult(aCx, aResult)
   {
   }
 
@@ -314,9 +314,9 @@ public:
   Dispatch(DOMRequest* aRequest,
            const JS::Value& aResult)
   {
-    RefPtr<FireSuccessAsyncTask> asyncTask =
-      new FireSuccessAsyncTask(aRequest, aResult);
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(asyncTask));
+    mozilla::ThreadsafeAutoSafeJSContext cx;
+    nsRefPtr<FireSuccessAsyncTask> asyncTask = new FireSuccessAsyncTask(cx, aRequest, aResult);
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(asyncTask)));
     return NS_OK;
   }
 
@@ -328,11 +328,11 @@ public:
   }
 
 private:
-  RefPtr<DOMRequest> mReq;
+  nsRefPtr<DOMRequest> mReq;
   JS::PersistentRooted<JS::Value> mResult;
 };
 
-class FireErrorAsyncTask : public mozilla::Runnable
+class FireErrorAsyncTask : public nsRunnable
 {
 public:
   FireErrorAsyncTask(DOMRequest* aRequest,
@@ -349,7 +349,7 @@ public:
     return NS_OK;
   }
 private:
-  RefPtr<DOMRequest> mReq;
+  nsRefPtr<DOMRequest> mReq;
   nsString mError;
 };
 
@@ -368,7 +368,7 @@ DOMRequestService::FireErrorAsync(nsIDOMDOMRequest* aRequest,
   NS_ENSURE_STATE(aRequest);
   nsCOMPtr<nsIRunnable> asyncTask =
     new FireErrorAsyncTask(static_cast<DOMRequest*>(aRequest), aError);
-  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(asyncTask));
+  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(asyncTask)));
   return NS_OK;
 }
 

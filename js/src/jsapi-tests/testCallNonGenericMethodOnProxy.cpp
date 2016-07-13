@@ -20,7 +20,7 @@ IsCustomClass(JS::Handle<JS::Value> v)
 }
 
 static bool
-CustomMethodImpl(JSContext* cx, const CallArgs& args)
+CustomMethodImpl(JSContext* cx, CallArgs args)
 {
   MOZ_RELEASE_ASSERT(IsCustomClass(args.thisv()));
   args.rval().set(JS_GetReservedSlot(&args.thisv().toObject(), CUSTOM_SLOT));
@@ -37,9 +37,7 @@ CustomMethod(JSContext* cx, unsigned argc, Value* vp)
 BEGIN_TEST(test_CallNonGenericMethodOnProxy)
 {
   // Create the first global object and compartment
-  JS::CompartmentOptions options;
-  JS::RootedObject globalA(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
-						  JS::FireOnNewGlobalHook, options));
+  JS::RootedObject globalA(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr, JS::FireOnNewGlobalHook));
   CHECK(globalA);
 
   JS::RootedObject customA(cx, JS_NewObject(cx, &CustomClass));
@@ -57,9 +55,7 @@ BEGIN_TEST(test_CallNonGenericMethodOnProxy)
 
   // Now create the second global object and compartment...
   {
-    JS::CompartmentOptions options;
-    JS::RootedObject globalB(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
-						    JS::FireOnNewGlobalHook, options));
+    JS::RootedObject globalB(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr, JS::FireOnNewGlobalHook));
     CHECK(globalB);
 
     // ...and enter it.

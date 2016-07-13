@@ -11,7 +11,5 @@ addEventListener("mozshowdropdown", event => {
   if (!event.isTrusted)
     return;
 
-  if (!SelectContentHelper.open) {
-    new SelectContentHelper(event.target, this);
-  }
+  new SelectContentHelper(event.target, this);
 });

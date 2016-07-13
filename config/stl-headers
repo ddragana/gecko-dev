@@ -20,11 +20,9 @@ new
 algorithm
 atomic
 deque
-functional
 ios
 iosfwd
 iostream
-istream
 iterator
 limits
 list
@@ -34,12 +32,10 @@ ostream
 set
 stack
 string
-type_traits
 utility
 vector
 cassert
 climits
-cmath
 cstdarg
 cstdio
 cstdlib

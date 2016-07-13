@@ -11,30 +11,19 @@
 
 #include "common/platform.h"
 
-#include <climits>
-#include <cstdarg>
-#include <cstddef>
+#include <stddef.h>
+#include <limits.h>
 #include <string>
 #include <set>
 #include <sstream>
+#include <cstdarg>
 #include <vector>
 
-// A helper class to disallow copy and assignment operators
-namespace angle
-{
-
-class NonCopyable
-{
-  public:
-    NonCopyable() = default;
-    ~NonCopyable() = default;
-  protected:
-    NonCopyable(const NonCopyable&) = delete;
-    void operator=(const NonCopyable&) = delete;
-};
-
-extern const uintptr_t DirtyPointer;
-}
+// A macro to disallow the copy constructor and operator= functions
+// This must be used in the private: declarations for a class
+#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
+  TypeName(const TypeName&);               \
+  void operator=(const TypeName&)
 
 template <typename T, size_t N>
 inline size_t ArraySize(T(&)[N])
@@ -71,9 +60,9 @@ void SafeDelete(T*& resource)
 template <typename T>
 void SafeDeleteContainer(T& resource)
 {
-    for (auto &element : resource)
+    for (typename T::iterator i = resource.begin(); i != resource.end(); i++)
     {
-        SafeDelete(element);
+        SafeDelete(*i);
     }
     resource.clear();
 }
@@ -156,23 +145,17 @@ size_t FormatStringIntoVector(const char *fmt, va_list vararg, std::vector<char>
 std::string FormatString(const char *fmt, va_list vararg);
 std::string FormatString(const char *fmt, ...);
 
-// snprintf is not defined with MSVC prior to to msvc14
 #if defined(_MSC_VER) && _MSC_VER < 1900
 #define snprintf _snprintf
 #endif
+
+#define VENDOR_ID_AMD 0x1002
+#define VENDOR_ID_INTEL 0x8086
+#define VENDOR_ID_NVIDIA 0x10DE
 
 #define GL_BGRA4_ANGLEX 0x6ABC
 #define GL_BGR5_A1_ANGLEX 0x6ABD
 #define GL_INT_64_ANGLEX 0x6ABE
 #define GL_STRUCT_ANGLEX 0x6ABF
-
-// Hidden enum for the NULL D3D device type.
-#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_NULL_ANGLE 0x6AC0
-
-#define ANGLE_TRY_CHECKED_MATH(result)                               \
-    if (!result.IsValid())                                           \
-    {                                                                \
-        return gl::Error(GL_INVALID_OPERATION, "Integer overflow."); \
-    }
 
 #endif // COMMON_ANGLEUTILS_H_

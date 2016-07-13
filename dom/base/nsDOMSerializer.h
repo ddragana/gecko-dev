@@ -11,6 +11,7 @@
 #include "nsWrapperCache.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/XMLSerializerBinding.h"
+#include "nsAutoPtr.h"
 
 class nsINode;
 
@@ -31,7 +32,7 @@ public:
   Constructor(const mozilla::dom::GlobalObject& aOwner,
               mozilla::ErrorResult& rv)
   {
-    RefPtr<nsDOMSerializer> domSerializer = new nsDOMSerializer(aOwner.GetAsSupports());
+    nsRefPtr<nsDOMSerializer> domSerializer = new nsDOMSerializer(aOwner.GetAsSupports());
     return domSerializer.forget();
   }
 

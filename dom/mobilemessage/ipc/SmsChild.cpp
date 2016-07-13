@@ -5,15 +5,14 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SmsChild.h"
-
-#include "SmsMessageInternal.h"
-#include "MmsMessageInternal.h"
+#include "SmsMessage.h"
+#include "MmsMessage.h"
 #include "DeletedMessageInfo.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
-#include "MobileMessageThreadInternal.h"
+#include "MobileMessageThread.h"
 #include "MainThreadUtils.h"
 
 using namespace mozilla;
@@ -29,10 +28,10 @@ CreateMessageFromMessageData(const MobileMessageData& aData)
 
   switch(aData.type()) {
     case MobileMessageData::TMmsMessageData:
-      message = new MmsMessageInternal(aData.get_MmsMessageData());
+      message = new MmsMessage(aData.get_MmsMessageData());
       break;
     case MobileMessageData::TSmsMessageData:
-      message = new SmsMessageInternal(aData.get_SmsMessageData());
+      message = new SmsMessage(aData.get_SmsMessageData());
       break;
     default:
       MOZ_CRASH("Unexpected type of MobileMessageData");
@@ -200,6 +199,7 @@ SmsRequestChild::Recv__delete__(const MessageReply& aReply)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mReplyRequest);
+  nsCOMPtr<SmsMessage> message;
   switch(aReply.type()) {
     case MessageReply::TReplyMessageSend: {
         const MobileMessageData& data =
@@ -259,9 +259,7 @@ SmsRequestChild::Recv__delete__(const MessageReply& aReply)
         aReply.get_ReplyGetSegmentInfoForTextFail().error());
       break;
     case MessageReply::TReplyGetSmscAddress:
-      mReplyRequest->NotifyGetSmscAddress(aReply.get_ReplyGetSmscAddress().smscAddress(),
-                                          aReply.get_ReplyGetSmscAddress().typeOfNumber(),
-                                          aReply.get_ReplyGetSmscAddress().numberPlanIdentification());
+      mReplyRequest->NotifyGetSmscAddress(aReply.get_ReplyGetSmscAddress().smscAddress());
       break;
     case MessageReply::TReplyGetSmscAddressFail:
       mReplyRequest->NotifyGetSmscAddressFailed(aReply.get_ReplyGetSmscAddressFail().error());
@@ -349,10 +347,10 @@ MobileMessageCursorChild::DoNotifyResult(const nsTArray<MobileMessageData>& aDat
   const uint32_t length = aDataArray.Length();
   MOZ_ASSERT(length);
 
-  AutoTArray<nsISupports*, 1> autoArray;
+  AutoFallibleTArray<nsISupports*, 1> autoArray;
   NS_ENSURE_TRUE_VOID(autoArray.SetCapacity(length, fallible));
 
-  AutoTArray<nsCOMPtr<nsISupports>, 1> messages;
+  AutoFallibleTArray<nsCOMPtr<nsISupports>, 1> messages;
   NS_ENSURE_TRUE_VOID(messages.SetCapacity(length, fallible));
 
   for (uint32_t i = 0; i < length; i++) {
@@ -370,15 +368,14 @@ MobileMessageCursorChild::DoNotifyResult(const nsTArray<ThreadData>& aDataArray)
   const uint32_t length = aDataArray.Length();
   MOZ_ASSERT(length);
 
-  AutoTArray<nsISupports*, 1> autoArray;
+  AutoFallibleTArray<nsISupports*, 1> autoArray;
   NS_ENSURE_TRUE_VOID(autoArray.SetCapacity(length, fallible));
 
-  AutoTArray<nsCOMPtr<nsISupports>, 1> threads;
+  AutoFallibleTArray<nsCOMPtr<nsISupports>, 1> threads;
   NS_ENSURE_TRUE_VOID(threads.SetCapacity(length, fallible));
 
   for (uint32_t i = 0; i < length; i++) {
-    nsCOMPtr<nsISupports> thread =
-      new MobileMessageThreadInternal(aDataArray[i]);
+    nsCOMPtr<nsISupports> thread = new MobileMessageThread(aDataArray[i]);
     NS_ENSURE_TRUE_VOID(threads.AppendElement(thread, fallible));
     NS_ENSURE_TRUE_VOID(autoArray.AppendElement(thread.get(), fallible));
   }

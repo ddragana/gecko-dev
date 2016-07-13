@@ -5,15 +5,6 @@ struct MOZ_TRIVIAL_CTOR_DTOR EmptyClass{};
 template <class T>
 struct MOZ_TRIVIAL_CTOR_DTOR TemplateEmptyClass{};
 
-struct MOZ_TRIVIAL_CTOR_DTOR NonEmptyClass {
-  void *m;
-};
-
-template <class T>
-struct MOZ_TRIVIAL_CTOR_DTOR TemplateNonEmptyClass {
-  T* m;
-};
-
 struct MOZ_TRIVIAL_CTOR_DTOR BadUserDefinedCtor { // expected-error {{class 'BadUserDefinedCtor' must have trivial constructors and destructors}}
   BadUserDefinedCtor() {}
 };
@@ -26,7 +17,7 @@ struct MOZ_TRIVIAL_CTOR_DTOR BadVirtualDtor { // expected-error {{class 'BadVirt
   virtual ~BadVirtualDtor() {}
 };
 
-struct MOZ_TRIVIAL_CTOR_DTOR OkVirtualMember {
+struct MOZ_TRIVIAL_CTOR_DTOR BadVirtualMember { // expected-error {{class 'BadVirtualMember' must have trivial constructors and destructors}}
   virtual void f();
 };
 
@@ -62,22 +53,6 @@ struct MOZ_TRIVIAL_CTOR_DTOR BadNonTrivialDtorInMember { // expected-error {{cla
   NonTrivialDtor m;
 };
 
-struct MOZ_TRIVIAL_CTOR_DTOR OkVirtualMemberInMember {
+struct MOZ_TRIVIAL_CTOR_DTOR BadVirtualMemberInMember { // expected-error {{class 'BadVirtualMemberInMember' must have trivial constructors and destructors}}
   VirtualMember m;
-};
-
-struct MOZ_TRIVIAL_CTOR_DTOR OkConstExprConstructor {
-  constexpr OkConstExprConstructor() {}
-};
-
-struct MOZ_TRIVIAL_CTOR_DTOR OkConstExprConstructorInMember {
-  OkConstExprConstructor m;
-};
-
-// XXX: This error is unfortunate, but is unlikely to come up in real code.
-// In this situation, it should be possible to define a constexpr constructor
-// which explicitly initializes the members.
-struct MOZ_TRIVIAL_CTOR_DTOR BadUnfortunateError { // expected-error {{class 'BadUnfortunateError' must have trivial constructors and destructors}}
-  OkConstExprConstructor m;
-  void *n;
 };

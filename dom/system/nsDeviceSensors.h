@@ -55,15 +55,13 @@ private:
                                  bool aNear);
 
   void FireDOMOrientationEvent(mozilla::dom::EventTarget* target,
-                               double aAlpha,
-                               double aBeta,
-                               double aGamma,
-                               bool aIsAbsolute);
+                               double alpha,
+                               double beta,
+                               double gamma);
 
   void FireDOMMotionEvent(class nsIDOMDocument *domDoc,
                           mozilla::dom::EventTarget* target,
                           uint32_t type,
-                          PRTime timestamp,
                           double x,
                           double y,
                           double z);

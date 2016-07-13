@@ -6,14 +6,7 @@
 #ifndef mozilla_gfx_DrawTargetCG_h
 #define mozilla_gfx_DrawTargetCG_h
 
-#ifdef MOZ_WIDGET_COCOA
 #include <ApplicationServices/ApplicationServices.h>
-#import <OpenGL/OpenGL.h>
-#else
-#include <CoreGraphics/CoreGraphics.h>
-#include <OpenGLES/ES2/gl.h>
-#include <OpenGLES/ES2/glext.h>
-#endif
 
 #include "2D.h"
 #include "Rect.h"
@@ -128,7 +121,6 @@ public:
   virtual DrawTargetType GetType() const override;
   virtual BackendType GetBackendType() const override;
   virtual already_AddRefed<SourceSurface> Snapshot() override;
-  virtual void DetachAllSnapshots() override { MarkChanged(); }
 
   virtual void DrawSurface(SourceSurface *aSurface,
                            const Rect &aDest,

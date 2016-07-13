@@ -4,16 +4,22 @@ const FRAME = "https://example.com/browser/toolkit/content/tests/browser/file_me
 function wait_for_event(browser, event) {
   return BrowserTestUtils.waitForEvent(browser, event, false, (event) => {
     is(event.originalTarget, browser, "Event must be dispatched to correct browser.");
-    ok(!event.cancelable, "The event should not be cancelable");
     return true;
   });
 }
 
 function* test_on_browser(url, browser) {
   browser.loadURI(url);
-  yield wait_for_event(browser, "DOMAudioPlaybackStarted");
-  yield wait_for_event(browser, "DOMAudioPlaybackStopped");
+  yield wait_for_event(browser, "DOMMediaPlaybackStarted");
+  yield wait_for_event(browser, "DOMMediaPlaybackStopped");
 }
+
+add_task(function*() {
+  yield new Promise((resolve) => {
+    SpecialPowers.pushPrefEnv({"set": [["media.useAudioChannelService", true]]},
+                              resolve);
+  });
+});
 
 add_task(function* test_page() {
   yield BrowserTestUtils.withNewTab({

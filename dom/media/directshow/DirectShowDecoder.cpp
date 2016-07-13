@@ -45,12 +45,10 @@ DirectShowDecoder::GetSupportedCodecs(const nsACString& aType,
 bool
 DirectShowDecoder::IsEnabled()
 {
-  return CanDecodeMP3UsingDirectShow() &&
-         Preferences::GetBool("media.directshow.enabled");
+  return Preferences::GetBool("media.directshow.enabled");
 }
 
-DirectShowDecoder::DirectShowDecoder(MediaDecoderOwner* aOwner)
-  : MediaDecoder(aOwner)
+DirectShowDecoder::DirectShowDecoder()
 {
   MOZ_COUNT_CTOR(DirectShowDecoder);
 }

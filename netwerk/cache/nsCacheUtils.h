@@ -9,14 +9,15 @@
 
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
-#include "mozilla/Monitor.h"
+#include "mozilla/Mutex.h"
+#include "mozilla/CondVar.h"
 
 class nsIThread;
 
 /**
  * A class with utility methods for shutting down nsIThreads easily.
   */
-class nsShutdownThread : public mozilla::Runnable {
+class nsShutdownThread : public nsRunnable {
 public:
   explicit nsShutdownThread(nsIThread *aThread);
   ~nsShutdownThread();
@@ -35,8 +36,8 @@ public:
   static nsresult BlockingShutdown(nsIThread *aThread);
 
 private:
-  mozilla::Monitor    mMonitor;
-  bool                mShuttingDown;
+  mozilla::Mutex      mLock;
+  mozilla::CondVar    mCondVar;
   nsCOMPtr<nsIThread> mThread;
 };
 

@@ -5,6 +5,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Gamepad.h"
+#include "nsAutoPtr.h"
 #include "nsPIDOMWindow.h"
 #include "nsTArray.h"
 #include "nsVariant.h"
@@ -26,11 +27,11 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Gamepad, mParent, mButtons)
 void
 Gamepad::UpdateTimestamp()
 {
-  nsCOMPtr<nsPIDOMWindowInner> newWindow(do_QueryInterface(mParent));
+  nsCOMPtr<nsPIDOMWindow> newWindow(do_QueryInterface(mParent));
   if(newWindow) {
-    Performance* perf = newWindow->GetPerformance();
+    nsPerformance* perf = newWindow->GetPerformance();
     if (perf) {
-      mTimestamp =  perf->Now();
+      mTimestamp =  perf->GetDOMTiming()->TimeStampToDOMHighRes(TimeStamp::Now());
     }
   }
 }
@@ -45,8 +46,7 @@ Gamepad::Gamepad(nsISupports* aParent,
     mMapping(aMapping),
     mConnected(true),
     mButtons(aNumButtons),
-    mAxes(aNumAxes),
-    mTimestamp(0)
+    mAxes(aNumAxes)
 {
   for (unsigned i = 0; i < aNumButtons; i++) {
     mButtons.InsertElementAt(i, new GamepadButton(mParent));
@@ -114,7 +114,7 @@ Gamepad::SyncState(Gamepad* aOther)
 already_AddRefed<Gamepad>
 Gamepad::Clone(nsISupports* aParent)
 {
-  RefPtr<Gamepad> out =
+  nsRefPtr<Gamepad> out =
     new Gamepad(aParent, mID, mIndex, mMapping,
                 mButtons.Length(), mAxes.Length());
   out->SyncState(this);

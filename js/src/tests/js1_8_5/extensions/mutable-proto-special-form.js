@@ -64,26 +64,24 @@ Object.defineProperty(Object.prototype, "__proto__", { set: undefined });
 performProtoTests("behavior after making Object.prototype.__proto__'s " +
                   "[[Set]] === undefined");
 
-try
-{
-  var superProto = Object.create(null);
-  poisonProto(superProto);
-  setProto.call(Object.prototype, superProto);
 
-  performProtoTests("behavior after mutating Object.prototype.[[Prototype]]");
+var superProto = Object.create(null);
+poisonProto(superProto);
+setProto.call(Object.prototype, superProto);
 
-  // Note: The handler below will have to be updated to exempt a scriptable
-  //       getPrototypeOf trap (to instead consult the target whose [[Prototype]]
-  //       is safely non-recursive), if we ever implement one.
-  var death = new Proxy(Object.create(null),
-                        new Proxy({}, { get: function() { passed = false; } }));
+performProtoTests("behavior after mutating Object.prototype.[[Prototype]]");
 
-  setProto.call(Object.prototype, death);
+// Note: The handler below will have to be updated to exempt a scriptable
+//       getPrototypeOf trap (to instead consult the target whose [[Prototype]]
+//       is safely non-recursive), if we ever implement one.
+var death = new Proxy(Object.create(null),
+                      new Proxy({}, { get: function() { passed = false; } }));
 
-  performProtoTests("behavior after making Object.prototype.[[Prototype]] a " +
-                    "proxy that throws for any access");
-}
-catch (e) {}
+setProto.call(Object.prototype, death);
+
+performProtoTests("behavior after making Object.prototype.[[Prototype]] a " +
+                  "proxy that throws for any access");
+
 
 if (typeof reportCompare === "function")
   reportCompare(true, true);

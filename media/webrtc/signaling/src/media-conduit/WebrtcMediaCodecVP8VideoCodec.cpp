@@ -12,6 +12,7 @@
 #include "MediaCodec.h"
 #include "WebrtcMediaCodecVP8VideoCodec.h"
 #include "AndroidJNIWrapper.h"
+#include "mozilla/Scoped.h"
 #include "mozilla/ArrayUtils.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Monitor.h"
@@ -71,7 +72,7 @@ ShutdownThread(nsCOMPtr<nsIThread>& aThread)
 //   should contains corresponding info such as image size and timestamps for
 //   DrainOutput() implementation to construct data needed by encoded/decoded
 //   callbacks.
-class MediaCodecOutputDrain : public Runnable
+class MediaCodecOutputDrain : public nsRunnable
 {
 public:
   void Start() {
@@ -622,7 +623,7 @@ WebrtcMediaCodecVP8VideoEncoder::VerifyAndAllocate(const uint32_t minimumSize)
 int32_t WebrtcMediaCodecVP8VideoEncoder::InitEncode(
     const webrtc::VideoCodec* codecSettings,
     int32_t numberOfCores,
-    size_t maxPayloadSize) {
+    uint32_t maxPayloadSize) {
   mMaxPayloadSize = maxPayloadSize;
   CSFLogDebug(logTag,  "%s, w = %d, h = %d", __FUNCTION__, codecSettings->width, codecSettings->height);
 
@@ -838,7 +839,7 @@ WebrtcMediaCodecVP8VideoEncoder::~WebrtcMediaCodecVP8VideoEncoder() {
   Release();
 }
 
-int32_t WebrtcMediaCodecVP8VideoEncoder::SetChannelParameters(uint32_t packetLoss, int64_t rtt) {
+int32_t WebrtcMediaCodecVP8VideoEncoder::SetChannelParameters(uint32_t packetLoss, int rtt) {
   CSFLogDebug(logTag,  "%s ", __FUNCTION__);
   return WEBRTC_VIDEO_CODEC_OK;
 }

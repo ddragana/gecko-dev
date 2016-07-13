@@ -20,19 +20,5 @@ UnixSocketConnector::~UnixSocketConnector()
   MOZ_COUNT_DTOR(UnixSocketConnector);
 }
 
-nsresult
-UnixSocketConnector::Duplicate(UniquePtr<UnixSocketConnector>& aConnector)
-{
-  UnixSocketConnector* connectorPtr;
-  auto rv = Duplicate(connectorPtr);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  aConnector = Move(UniquePtr<UnixSocketConnector>(connectorPtr));
-
-  return NS_OK;
-}
-
 }
 }

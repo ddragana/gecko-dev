@@ -14,7 +14,7 @@ from mozbuild.base import (
     MachCommandBase,
 )
 
-import mozpack.path as mozpath
+import mozpack
 
 
 MERGE_HELP = '''Directory to merge to. Will be removed to before running

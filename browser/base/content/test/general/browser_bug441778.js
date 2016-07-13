@@ -30,16 +30,16 @@ function test() {
     // Start the sub-document load.
     let deferred = Promise.defer();
     executeSoon(function () {
-      BrowserTestUtils.browserLoaded(testBrowser, true).then(url => {
-        is(url, TEST_IFRAME_URL, "got the load event for the iframe");
+      testBrowser.addEventListener("load", function (e) {
+        testBrowser.removeEventListener("load", arguments.callee, true);
+
+        is(e.target.defaultView.location, TEST_IFRAME_URL, "got the load event for the iframe");
         is(ZoomManager.zoom, zoomLevel, "zoom is retained after sub-document load");
 
         FullZoomHelper.removeTabAndWaitForLocationChange().
           then(() => deferred.resolve());
-      });
-      ContentTask.spawn(testBrowser, TEST_IFRAME_URL, url => {
-        content.document.querySelector("iframe").src = url;
-      });
+      }, true);
+      content.document.querySelector("iframe").src = TEST_IFRAME_URL;
     });
     yield deferred.promise;
   }).then(finish, FullZoomHelper.failAndContinue(finish));

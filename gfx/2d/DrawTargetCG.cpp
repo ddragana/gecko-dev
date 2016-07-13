@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <dlfcn.h>
 #include "BorrowedContext.h"
 #include "DataSurfaceHelpers.h"
 #include "DrawTargetCG.h"
@@ -21,7 +20,6 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Types.h" // for decltype
 #include "mozilla/Vector.h"
-#include "CGTextDrawing.h"
 
 using namespace std;
 
@@ -132,15 +130,15 @@ CGBlendMode ToBlendMode(CompositionOp op)
 }
 
 static CGInterpolationQuality
-InterpolationQualityFromSamplingFilter(SamplingFilter aSamplingFilter)
+InterpolationQualityFromFilter(Filter aFilter)
 {
-  switch (aSamplingFilter) {
+  switch (aFilter) {
     default:
-    case SamplingFilter::LINEAR:
+    case Filter::LINEAR:
       return kCGInterpolationLow;
-    case SamplingFilter::POINT:
+    case Filter::POINT:
       return kCGInterpolationNone;
-    case SamplingFilter::GOOD:
+    case Filter::GOOD:
       return kCGInterpolationLow;
   }
 }
@@ -179,7 +177,6 @@ DrawTargetCG::GetType() const
 BackendType
 DrawTargetCG::GetBackendType() const
 {
-#ifdef MOZ_WIDGET_COCOA
   // It may be worth spliting Bitmap and IOSurface DrawTarget
   // into seperate classes.
   if (GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE) {
@@ -187,20 +184,15 @@ DrawTargetCG::GetBackendType() const
   } else {
     return BackendType::COREGRAPHICS;
   }
-#else
-  return BackendType::COREGRAPHICS;
-#endif
 }
 
 already_AddRefed<SourceSurface>
 DrawTargetCG::Snapshot()
 {
   if (!mSnapshot) {
-#ifdef MOZ_WIDGET_COCOA
     if (GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE) {
       return MakeAndAddRef<SourceSurfaceCGIOSurfaceContext>(this);
     }
-#endif
     Flush();
     mSnapshot = new SourceSurfaceCGBitmapContext(this);
   }
@@ -258,7 +250,7 @@ GetRetainedImageFromSourceSurface(SourceSurface *aSurface)
     {
       RefPtr<DataSourceSurface> data = aSurface->GetDataSurface();
       if (!data) {
-        MOZ_CRASH("GFX: unsupported source CG surface");
+        MOZ_CRASH("unsupported source surface");
       }
       data.get()->AddRef();
       return CreateCGImage(releaseDataSurface, data.get(),
@@ -362,11 +354,11 @@ DrawTargetCG::DrawSurface(SourceSurface *aSurface,
   CGContextSetAlpha(cg, aDrawOptions.mAlpha);
   CGContextSetShouldAntialias(cg, aDrawOptions.mAntialiasMode != AntialiasMode::NONE);
 
-  CGContextSetInterpolationQuality(cg, InterpolationQualityFromSamplingFilter(aSurfOptions.mSamplingFilter));
+  CGContextSetInterpolationQuality(cg, InterpolationQualityFromFilter(aSurfOptions.mFilter));
 
   CGImageRef image = GetRetainedImageFromSourceSurface(aSurface);
 
-  if (aSurfOptions.mSamplingFilter == SamplingFilter::POINT) {
+  if (aSurfOptions.mFilter == Filter::POINT) {
     CGImageRef subimage = CGImageCreateWithImageInRect(image, RectToCGRect(aSource));
     CGImageRelease(image);
 
@@ -414,6 +406,12 @@ DrawTargetCG::DrawFilter(FilterNode *aNode,
 {
   FilterNodeSoftware* filter = static_cast<FilterNodeSoftware*>(aNode);
   filter->Draw(this, aSourceRect, aDestPoint, aOptions);
+}
+
+static CGColorRef ColorToCGColor(CGColorSpaceRef aColorSpace, const Color& aColor)
+{
+  CGFloat components[4] = {aColor.r, aColor.g, aColor.b, aColor.a};
+  return CGColorCreate(aColorSpace, components);
 }
 
 class GradientStopsCG : public GradientStops
@@ -709,7 +707,7 @@ DrawGradient(CGColorSpaceRef aColorSpace,
 
       CGContextDrawLinearGradient(cg, stops->mGradient, startPoint, endPoint,
                                   kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-    } else {
+    } else if (stops->mExtend == ExtendMode::REPEAT || stops->mExtend == ExtendMode::REFLECT) {
       DrawLinearRepeatingGradient(aColorSpace, cg, pat, extents, stops->mExtend == ExtendMode::REFLECT);
     }
   } else if (aPattern.GetType() == PatternType::RADIAL_GRADIENT) {
@@ -729,7 +727,7 @@ DrawGradient(CGColorSpaceRef aColorSpace,
       //XXX: are there degenerate radial gradients that we should avoid drawing?
       CGContextDrawRadialGradient(cg, stops->mGradient, startCenter, startRadius, endCenter, endRadius,
                                   kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-    } else {
+    } else if (stops->mExtend == ExtendMode::REPEAT || stops->mExtend == ExtendMode::REFLECT) {
       DrawRadialRepeatingGradient(aColorSpace, cg, pat, extents, stops->mExtend == ExtendMode::REFLECT);
     }
   } else {
@@ -770,14 +768,8 @@ isGradient(const Pattern &aPattern)
 static bool
 isNonRepeatingSurface(const Pattern& aPattern)
 {
-  if (aPattern.GetType() != PatternType::SURFACE) {
-    return false;
-  }
-
-  const SurfacePattern& surfacePattern = static_cast<const SurfacePattern&>(aPattern);
-  return surfacePattern.mExtendMode != ExtendMode::REPEAT &&
-         surfacePattern.mExtendMode != ExtendMode::REPEAT_X &&
-         surfacePattern.mExtendMode != ExtendMode::REPEAT_Y;
+  return aPattern.GetType() == PatternType::SURFACE &&
+    static_cast<const SurfacePattern&>(aPattern).mExtendMode != ExtendMode::REPEAT;
 }
 
 /* CoreGraphics patterns ignore the userspace transform so
@@ -803,7 +795,7 @@ CreateCGPattern(const Pattern &aPattern, CGAffineTransform aUserSpace)
       yStep = static_cast<CGFloat>(1 << 22);
       break;
     case ExtendMode::REFLECT:
-      MOZ_FALLTHROUGH_ASSERT("ExtendMode::REFLECT");
+      assert(0);
     case ExtendMode::REPEAT:
       xStep = static_cast<CGFloat>(CGImageGetWidth(image));
       yStep = static_cast<CGFloat>(CGImageGetHeight(image));
@@ -816,15 +808,6 @@ CreateCGPattern(const Pattern &aPattern, CGAffineTransform aUserSpace)
       //    wkPatternTilingConstantSpacing
       // } wkPatternTiling;
       // extern CGPatternRef (*wkCGPatternCreateWithImageAndTransform)(CGImageRef, CGAffineTransform, int);
-      break;
-    case ExtendMode::REPEAT_X:
-      xStep = static_cast<CGFloat>(CGImageGetWidth(image));
-      yStep = static_cast<CGFloat>(1 << 22);
-      break;
-    case ExtendMode::REPEAT_Y:
-      yStep = static_cast<CGFloat>(CGImageGetHeight(image));
-      xStep = static_cast<CGFloat>(1 << 22);
-      break;
   }
 
   //XXX: We should be using CGContextDrawTiledImage when we can. Even though it
@@ -868,7 +851,7 @@ SetFillFromPattern(CGContextRef cg, CGColorSpaceRef aColorSpace, const Pattern &
 
     CGPatternRef pattern = CreateCGPattern(aPattern, CGContextGetCTM(cg));
     const SurfacePattern& pat = static_cast<const SurfacePattern&>(aPattern);
-    CGContextSetInterpolationQuality(cg, InterpolationQualityFromSamplingFilter(pat.mSamplingFilter));
+    CGContextSetInterpolationQuality(cg, InterpolationQualityFromFilter(pat.mFilter));
     CGFloat alpha = 1.;
     CGContextSetFillPattern(cg, pattern, &alpha);
     CGPatternRelease(pattern);
@@ -893,7 +876,7 @@ SetStrokeFromPattern(CGContextRef cg, CGColorSpaceRef aColorSpace, const Pattern
 
     CGPatternRef pattern = CreateCGPattern(aPattern, CGContextGetCTM(cg));
     const SurfacePattern& pat = static_cast<const SurfacePattern&>(aPattern);
-    CGContextSetInterpolationQuality(cg, InterpolationQualityFromSamplingFilter(pat.mSamplingFilter));
+    CGContextSetInterpolationQuality(cg, InterpolationQualityFromFilter(pat.mFilter));
     CGFloat alpha = 1.;
     CGContextSetStrokePattern(cg, pattern, &alpha);
     CGPatternRelease(pattern);
@@ -1006,7 +989,7 @@ DrawTargetCG::FillRect(const Rect &aRect,
 
     CGRect imageRect = CGRectMake(0, 0, CGImageGetWidth(image), CGImageGetHeight(image));
 
-    CGContextSetInterpolationQuality(cg, InterpolationQualityFromSamplingFilter(pat.mSamplingFilter));
+    CGContextSetInterpolationQuality(cg, InterpolationQualityFromFilter(pat.mFilter));
 
     CGContextDrawImage(cg, imageRect, image);
     CGImageRelease(image);
@@ -1446,6 +1429,44 @@ DrawTargetCG::Fill(const Path *aPath, const Pattern &aPattern, const DrawOptions
   CGContextRestoreGState(mCg);
 }
 
+CGRect ComputeGlyphsExtents(CGRect *bboxes, CGPoint *positions, CFIndex count, float scale)
+{
+  CGFloat x1, x2, y1, y2;
+  if (count < 1)
+    return CGRectZero;
+
+  x1 = bboxes[0].origin.x + positions[0].x;
+  x2 = bboxes[0].origin.x + positions[0].x + scale*bboxes[0].size.width;
+  y1 = bboxes[0].origin.y + positions[0].y;
+  y2 = bboxes[0].origin.y + positions[0].y + scale*bboxes[0].size.height;
+
+  // accumulate max and minimum coordinates
+  for (int i = 1; i < count; i++) {
+    x1 = min(x1, bboxes[i].origin.x + positions[i].x);
+    y1 = min(y1, bboxes[i].origin.y + positions[i].y);
+    x2 = max(x2, bboxes[i].origin.x + positions[i].x + scale*bboxes[i].size.width);
+    y2 = max(y2, bboxes[i].origin.y + positions[i].y + scale*bboxes[i].size.height);
+  }
+
+  CGRect extents = {{x1, y1}, {x2-x1, y2-y1}};
+  return extents;
+}
+
+typedef void (*CGContextSetFontSmoothingBackgroundColorFunc) (CGContextRef cgContext, CGColorRef color);
+
+static CGContextSetFontSmoothingBackgroundColorFunc
+GetCGContextSetFontSmoothingBackgroundColorFunc()
+{
+  static CGContextSetFontSmoothingBackgroundColorFunc func = nullptr;
+  static bool lookedUpFunc = false;
+  if (!lookedUpFunc) {
+    func = (CGContextSetFontSmoothingBackgroundColorFunc)dlsym(
+      RTLD_DEFAULT, "CGContextSetFontSmoothingBackgroundColor");
+    lookedUpFunc = true;
+  }
+  return func;
+}
+
 void
 DrawTargetCG::FillGlyphs(ScaledFont *aFont, const GlyphBuffer &aBuffer, const Pattern &aPattern, const DrawOptions &aDrawOptions,
                          const GlyphRenderingOptions *aGlyphRenderingOptions)
@@ -1459,21 +1480,33 @@ DrawTargetCG::FillGlyphs(ScaledFont *aFont, const GlyphBuffer &aBuffer, const Pa
   assert(aBuffer.mNumGlyphs);
   CGContextSaveGState(mCg);
 
-  if (SetFontSmoothingBackgroundColor(mCg, mColorSpace, aGlyphRenderingOptions)) {
-    // Font rendering with a non-transparent font smoothing background color
-    // can leave pixels in our buffer where the rgb components exceed the alpha
-    // component. When this happens we need to clean up the data afterwards.
-    // The purpose of this is probably the following: Correct compositing of
-    // subpixel anti-aliased fonts on transparent backgrounds requires
-    // different alpha values per RGB component. Usually, premultiplied color
-    // values are derived by multiplying all components with the same per-pixel
-    // alpha value. However, if you multiply each component with a *different*
-    // alpha, and set the alpha component of the pixel to, say, the average
-    // of the alpha values that you used during the premultiplication of the
-    // RGB components, you can trick OVER compositing into doing a simplified
-    // form of component alpha compositing. (You just need to make sure to
-    // clamp the components of the result pixel to [0,255] afterwards.)
-    mMayContainInvalidPremultipliedData = true;
+  if (aGlyphRenderingOptions && aGlyphRenderingOptions->GetType() == FontType::MAC) {
+    Color fontSmoothingBackgroundColor =
+      static_cast<const GlyphRenderingOptionsCG*>(aGlyphRenderingOptions)->FontSmoothingBackgroundColor();
+    if (fontSmoothingBackgroundColor.a > 0) {
+      CGContextSetFontSmoothingBackgroundColorFunc setFontSmoothingBGColorFunc =
+        GetCGContextSetFontSmoothingBackgroundColorFunc();
+      if (setFontSmoothingBGColorFunc) {
+        CGColorRef color = ColorToCGColor(mColorSpace, fontSmoothingBackgroundColor);
+        setFontSmoothingBGColorFunc(mCg, color);
+        CGColorRelease(color);
+
+        // Font rendering with a non-transparent font smoothing background color
+        // can leave pixels in our buffer where the rgb components exceed the alpha
+        // component. When this happens we need to clean up the data afterwards.
+        // The purpose of this is probably the following: Correct compositing of
+        // subpixel anti-aliased fonts on transparent backgrounds requires
+        // different alpha values per RGB component. Usually, premultiplied color
+        // values are derived by multiplying all components with the same per-pixel
+        // alpha value. However, if you multiply each component with a *different*
+        // alpha, and set the alpha component of the pixel to, say, the average
+        // of the alpha values that you used during the premultiplication of the
+        // RGB components, you can trick OVER compositing into doing a simplified
+        // form of component alpha compositing. (You just need to make sure to
+        // clamp the components of the result pixel to [0,255] afterwards.)
+        mMayContainInvalidPremultipliedData = true;
+      }
+    }
   }
 
   CGContextSetBlendMode(mCg, ToBlendMode(aDrawOptions.mCompositionOp));
@@ -1499,26 +1532,22 @@ DrawTargetCG::FillGlyphs(ScaledFont *aFont, const GlyphBuffer &aBuffer, const Pa
   Vector<CGPoint, 64> positions;
   if (!glyphs.resizeUninitialized(aBuffer.mNumGlyphs) ||
       !positions.resizeUninitialized(aBuffer.mNumGlyphs)) {
-    gfxDevCrash(LogReason::GlyphAllocFailedCG) << "glyphs/positions allocation failed";
-    return;
+    MOZ_CRASH("glyphs/positions allocation failed");
   }
 
   // Handle the flip
   CGContextScaleCTM(cg, 1, -1);
-
-  for (unsigned int i = 0; i < aBuffer.mNumGlyphs; i++) {
-    glyphs[i] = aBuffer.mGlyphs[i].mIndex;
-
-    // Negative Y axis since glyph positions assume top left is at (0, 0)
-    // whereas CG is bottom left.
-    positions[i] = CGPointMake(aBuffer.mGlyphs[i].mPosition.x,
-                               -aBuffer.mGlyphs[i].mPosition.y);
-  }
-
   // CGContextSetTextMatrix works differently with kCGTextClip && kCGTextFill
   // It seems that it transforms the positions with TextFill and not with TextClip
   // Therefore we'll avoid it. See also:
   // http://cgit.freedesktop.org/cairo/commit/?id=9c0d761bfcdd28d52c83d74f46dd3c709ae0fa69
+
+  for (unsigned int i = 0; i < aBuffer.mNumGlyphs; i++) {
+    glyphs[i] = aBuffer.mGlyphs[i].mIndex;
+    // XXX: CGPointMake might not be inlined
+    positions[i] = CGPointMake(aBuffer.mGlyphs[i].mPosition.x,
+                              -aBuffer.mGlyphs[i].mPosition.y);
+  }
 
   //XXX: CGContextShowGlyphsAtPositions is 10.5+ for older versions use CGContextShowGlyphsWithAdvances
   if (isGradient(aPattern)) {
@@ -1688,14 +1717,12 @@ DrawTargetCG::Init(BackendType aType,
 
   mSize = aSize;
 
-#ifdef MOZ_WIDGET_COCOA
   if (aType == BackendType::COREGRAPHICS_ACCELERATED) {
     RefPtr<MacIOSurface> ioSurface = MacIOSurface::CreateIOSurface(aSize.width, aSize.height);
     mCg = ioSurface->CreateIOSurfaceContext();
     // If we don't have the symbol for 'CreateIOSurfaceContext' mCg will be null
     // and we will fallback to software below
   }
-#endif
 
   mFormat = SurfaceFormat::B8G8R8A8;
 
@@ -1759,10 +1786,40 @@ DrawTargetCG::Init(BackendType aType,
   return true;
 }
 
+static void
+EnsureValidPremultipliedData(CGContextRef aContext)
+{
+  if (CGBitmapContextGetBitsPerPixel(aContext) != 32 ||
+      CGBitmapContextGetAlphaInfo(aContext) != kCGImageAlphaPremultipliedFirst) {
+    return;
+  }
+
+  uint8_t* bitmapData = (uint8_t*)CGBitmapContextGetData(aContext);
+  int w = CGBitmapContextGetWidth(aContext);
+  int h = CGBitmapContextGetHeight(aContext);
+  int stride = CGBitmapContextGetBytesPerRow(aContext);
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      int i = y * stride + x * 4;
+      uint8_t a = bitmapData[i + 3];
+
+      // Clamp rgb components to the alpha component.
+      if (bitmapData[i + 0] > a) {
+        bitmapData[i + 0] = a;
+      }
+      if (bitmapData[i + 1] > a) {
+        bitmapData[i + 1] = a;
+      }
+      if (bitmapData[i + 2] > a) {
+        bitmapData[i + 2] = a;
+      }
+    }
+  }
+}
+
 void
 DrawTargetCG::Flush()
 {
-#ifdef MOZ_WIDGET_COCOA
   if (GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE) {
     CGContextFlush(mCg);
   } else if (GetContextType(mCg) == CG_CONTEXT_TYPE_BITMAP &&
@@ -1778,9 +1835,6 @@ DrawTargetCG::Flush()
     EnsureValidPremultipliedData(mCg);
     mMayContainInvalidPremultipliedData = false;
   }
-#else
-  //TODO
-#endif
 }
 
 bool
@@ -1820,9 +1874,7 @@ DrawTargetCG::Init(CGContextRef cgContext, const IntSize &aSize)
   mOriginalTransform = CGContextGetCTM(mCg);
 
   mFormat = SurfaceFormat::B8G8R8A8;
-#ifdef MOZ_WIDGET_COCOA
   if (GetContextType(mCg) == CG_CONTEXT_TYPE_BITMAP) {
-#endif
     CGColorSpaceRef colorspace;
     CGBitmapInfo bitinfo = CGBitmapContextGetBitmapInfo(mCg);
     colorspace = CGBitmapContextGetColorSpace (mCg);
@@ -1831,9 +1883,7 @@ DrawTargetCG::Init(CGContextRef cgContext, const IntSize &aSize)
     } else if ((bitinfo & kCGBitmapAlphaInfoMask) == kCGImageAlphaNoneSkipFirst) {
       mFormat = SurfaceFormat::B8G8R8X8;
     }
-#ifdef MOZ_WIDGET_COCOA
   }
-#endif
 
   return true;
 }
@@ -1856,16 +1906,12 @@ DrawTargetCG::CreatePathBuilder(FillRule aFillRule) const
 void*
 DrawTargetCG::GetNativeSurface(NativeSurfaceType aType)
 {
-#ifdef MOZ_WIDGET_COCOA
   if ((aType == NativeSurfaceType::CGCONTEXT && GetContextType(mCg) == CG_CONTEXT_TYPE_BITMAP) ||
       (aType == NativeSurfaceType::CGCONTEXT_ACCELERATED && GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE)) {
     return mCg;
   } else {
     return nullptr;
   }
-#else
-  return mCg;
-#endif
 }
 
 void
@@ -1873,7 +1919,6 @@ DrawTargetCG::Mask(const Pattern &aSource,
                    const Pattern &aMask,
                    const DrawOptions &aDrawOptions)
 {
-  MOZ_CRASH("GFX: not completely implemented");
   MarkChanged();
 
   CGContextSaveGState(mCg);
@@ -1925,6 +1970,8 @@ DrawTargetCG::PushClip(const Path *aPath)
   }
 
   CGContextSaveGState(mCg);
+
+  CGContextBeginPath(mCg);
   assert(aPath->GetBackendType() == BackendType::COREGRAPHICS);
 
   const PathCG *cgPath = static_cast<const PathCG*>(aPath);
@@ -1933,11 +1980,10 @@ DrawTargetCG::PushClip(const Path *aPath)
   // but emtpy rects as all clipped.  We detect this situation and
   // workaround it appropriately
   if (CGPathIsEmpty(cgPath->GetPath())) {
+    // XXX: should we return here?
     CGContextClipToRect(mCg, CGRectZero);
-    return;
   }
 
-  CGContextBeginPath(mCg);
 
   /* We go through a bit of trouble to temporarilly set the transform
    * while we add the path. XXX: this could be improved if we keep

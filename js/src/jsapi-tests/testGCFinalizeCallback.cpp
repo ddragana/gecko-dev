@@ -11,11 +11,11 @@ static bool IsCompartmentGCBuffer[BufferSize];
 
 BEGIN_TEST(testGCFinalizeCallback)
 {
-    JS_SetGCParameter(cx, JSGC_MODE, JSGC_MODE_INCREMENTAL);
+    JS_SetGCParameter(rt, JSGC_MODE, JSGC_MODE_INCREMENTAL);
 
     /* Full GC, non-incremental. */
     FinalizeCalls = 0;
-    JS_GC(cx);
+    JS_GC(rt);
     CHECK(rt->gc.isFullGc());
     CHECK(checkSingleGroup());
     CHECK(checkFinalizeStatus());
@@ -25,10 +25,6 @@ BEGIN_TEST(testGCFinalizeCallback)
     FinalizeCalls = 0;
     JS::PrepareForFullGC(rt);
     JS::StartIncrementalGC(rt, GC_NORMAL, JS::gcreason::API, 1000000);
-    while (rt->gc.isIncrementalGCInProgress()) {
-        JS::PrepareForFullGC(rt);
-        JS::IncrementalGCSlice(rt, JS::gcreason::API, 1000000);
-    }
     CHECK(!rt->gc.isIncrementalGCInProgress());
     CHECK(rt->gc.isFullGc());
     CHECK(checkMultipleGroups());
@@ -66,10 +62,6 @@ BEGIN_TEST(testGCFinalizeCallback)
     FinalizeCalls = 0;
     JS::PrepareZoneForGC(global1->zone());
     JS::StartIncrementalGC(rt, GC_NORMAL, JS::gcreason::API, 1000000);
-    while (rt->gc.isIncrementalGCInProgress()) {
-        JS::PrepareZoneForGC(global1->zone());
-        JS::IncrementalGCSlice(rt, JS::gcreason::API, 1000000);
-    }
     CHECK(!rt->gc.isIncrementalGCInProgress());
     CHECK(!rt->gc.isFullGc());
     CHECK(checkSingleGroup());
@@ -82,12 +74,6 @@ BEGIN_TEST(testGCFinalizeCallback)
     JS::PrepareZoneForGC(global2->zone());
     JS::PrepareZoneForGC(global3->zone());
     JS::StartIncrementalGC(rt, GC_NORMAL, JS::gcreason::API, 1000000);
-    while (rt->gc.isIncrementalGCInProgress()) {
-        JS::PrepareZoneForGC(global1->zone());
-        JS::PrepareZoneForGC(global2->zone());
-        JS::PrepareZoneForGC(global3->zone());
-        JS::IncrementalGCSlice(rt, JS::gcreason::API, 1000000);
-    }
     CHECK(!rt->gc.isIncrementalGCInProgress());
     CHECK(!rt->gc.isFullGc());
     CHECK(checkMultipleGroups());
@@ -109,8 +95,6 @@ BEGIN_TEST(testGCFinalizeCallback)
     JS::RootedObject global4(cx, createTestGlobal());
     budget = js::SliceBudget(js::WorkBudget(1));
     rt->gc.debugGCSlice(budget);
-    while (rt->gc.isIncrementalGCInProgress())
-        rt->gc.debugGCSlice(budget);
     CHECK(!rt->gc.isIncrementalGCInProgress());
     CHECK(!rt->gc.isFullGc());
     CHECK(checkMultipleGroups());
@@ -139,6 +123,7 @@ BEGIN_TEST(testGCFinalizeCallback)
 JSObject* createTestGlobal()
 {
     JS::CompartmentOptions options;
+    options.setVersion(JSVERSION_LATEST);
     return JS_NewGlobalObject(cx, getGlobalClass(), nullptr, JS::FireOnNewGlobalHook, options);
 }
 
@@ -147,13 +132,13 @@ virtual bool init() override
     if (!JSAPITest::init())
         return false;
 
-    JS_AddFinalizeCallback(cx, FinalizeCallback, nullptr);
+    JS_AddFinalizeCallback(rt, FinalizeCallback, nullptr);
     return true;
 }
 
 virtual void uninit() override
 {
-    JS_RemoveFinalizeCallback(cx, FinalizeCallback);
+    JS_RemoveFinalizeCallback(rt, FinalizeCallback);
     JSAPITest::uninit();
 }
 

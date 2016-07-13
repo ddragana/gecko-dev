@@ -4,7 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://webaudio.github.io/web-audio-api/
+ * https://dvcs.w3.org/hg/audio/raw-file/tip/webaudio/specification.html
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
@@ -19,6 +19,5 @@ interface OfflineAudioContext : AudioContext {
     Promise<AudioBuffer> startRendering();
 
     attribute EventHandler oncomplete;
-    readonly attribute unsigned long length;
 
 };

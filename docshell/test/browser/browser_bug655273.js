@@ -14,7 +14,9 @@ function test() {
   let tab = gBrowser.addTab('http://example.com');
   let tabBrowser = tab.linkedBrowser;
 
-  BrowserTestUtils.browserLoaded(tab.linkedBrowser).then(() => {
+  tabBrowser.addEventListener('load', function(aEvent) {
+    tabBrowser.removeEventListener('load', arguments.callee, true);
+
     let cw = tabBrowser.contentWindow;
     let oldTitle = cw.document.title;
     ok(oldTitle, 'Content window should initially have a title.');
@@ -29,5 +31,5 @@ function test() {
 
     gBrowser.removeTab(tab);
     finish();
-  });
+  }, true);
 }

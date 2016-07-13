@@ -7,6 +7,7 @@
 #define dom_plugins_PluginSurfaceParent_h
 
 #include "mozilla/plugins/PPluginSurfaceParent.h"
+#include "nsAutoPtr.h"
 #include "mozilla/plugins/PluginMessageUtils.h"
 
 #ifndef XP_WIN
@@ -22,7 +23,7 @@ class PluginSurfaceParent : public PPluginSurfaceParent
 {
 public:
   PluginSurfaceParent(const WindowsSharedMemoryHandle& handle,
-                      const gfx::IntSize& size,
+                      const gfxIntSize& size,
                       const bool transparent);
   ~PluginSurfaceParent();
 
@@ -31,7 +32,7 @@ public:
   gfxASurface* Surface() { return mSurface; }
 
 private:
-  RefPtr<gfxASurface> mSurface;
+  nsRefPtr<gfxASurface> mSurface;
 };
 
 } // namespace plugins

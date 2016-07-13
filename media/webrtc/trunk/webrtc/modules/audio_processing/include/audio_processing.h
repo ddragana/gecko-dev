@@ -13,11 +13,9 @@
 
 #include <stddef.h>  // size_t
 #include <stdio.h>  // FILE
-#include <vector>
 
 #include "webrtc/base/platform_file.h"
 #include "webrtc/common.h"
-#include "webrtc/modules/audio_processing/beamformer/array_util.h"
 #include "webrtc/typedefs.h"
 
 struct AecCore;
@@ -25,10 +23,6 @@ struct AecCore;
 namespace webrtc {
 
 class AudioFrame;
-
-template<typename T>
-class Beamformer;
-
 class EchoCancellation;
 class EchoControlMobile;
 class GainControl;
@@ -36,18 +30,6 @@ class HighPassFilter;
 class LevelEstimator;
 class NoiseSuppression;
 class VoiceDetection;
-
-struct ExtendedFilter {
-  ExtendedFilter() : enabled(false) {}
-  explicit ExtendedFilter(bool enabled) : enabled(enabled) {}
-  bool enabled;
-};
-
-struct DelayAgnostic {
-  DelayAgnostic() : enabled(false) {}
-  explicit DelayAgnostic(bool enabled) : enabled(enabled) {}
-  bool enabled;
-};
 
 // Use to enable the delay correction feature. This now engages an extended
 // filter mode in the AEC, along with robustness measures around the reported
@@ -97,26 +79,6 @@ struct ExperimentalAgc {
 struct ExperimentalNs {
   ExperimentalNs() : enabled(false) {}
   explicit ExperimentalNs(bool enabled) : enabled(enabled) {}
-  bool enabled;
-};
-
-// Use to enable beamforming. Must be provided through the constructor. It will
-// have no impact if used with AudioProcessing::SetExtraOptions().
-struct Beamforming {
-  Beamforming() : enabled(false) {}
-  Beamforming(bool enabled, const std::vector<Point>& array_geometry)
-      : enabled(enabled),
-        array_geometry(array_geometry) {}
-  const bool enabled;
-  const std::vector<Point> array_geometry;
-};
-
-// Use to enable 48kHz support in audio processing. Must be provided through the
-// constructor. It will have no impact if used with
-// AudioProcessing::SetExtraOptions().
-struct AudioProcessing48kHzSupport {
-  AudioProcessing48kHzSupport() : enabled(false) {}
-  explicit AudioProcessing48kHzSupport(bool enabled) : enabled(enabled) {}
   bool enabled;
 };
 
@@ -215,9 +177,8 @@ class AudioProcessing {
   static AudioProcessing* Create();
   // Allows passing in an optional configuration at create-time.
   static AudioProcessing* Create(const Config& config);
-  // Only for testing.
-  static AudioProcessing* Create(const Config& config,
-                                 Beamformer<float>* beamformer);
+  // TODO(ajm): Deprecated; remove all calls to it.
+  static AudioProcessing* Create(int id);
   virtual ~AudioProcessing() {}
 
   // Initializes internal states, while retaining all user settings. This
@@ -419,8 +380,7 @@ class AudioProcessing {
   enum NativeRate {
     kSampleRate8kHz = 8000,
     kSampleRate16kHz = 16000,
-    kSampleRate32kHz = 32000,
-    kSampleRate48kHz = 48000
+    kSampleRate32kHz = 32000
   };
 
   static const int kChunkSizeMs = 10;
@@ -503,17 +463,9 @@ class EchoCancellation {
   virtual bool is_delay_logging_enabled() const = 0;
 
   // The delay metrics consists of the delay |median| and the delay standard
-  // deviation |std|. It also consists of the fraction of delay estimates
-  // |fraction_poor_delays| that can make the echo cancellation perform poorly.
-  // The values are aggregated until the first call to |GetDelayMetrics()| and
-  // afterwards aggregated and updated every second.
-  // Note that if there are several clients pulling metrics from
-  // |GetDelayMetrics()| during a session the first call from any of them will
-  // change to one second aggregation window for all.
-  // TODO(bjornv): Deprecated, remove.
+  // deviation |std|. The values are averaged over the time period since the
+  // last call to |GetDelayMetrics()|.
   virtual int GetDelayMetrics(int* median, int* std) = 0;
-  virtual int GetDelayMetrics(int* median, int* std,
-                              float* fraction_poor_delays) = 0;
 
   // Returns a pointer to the low level AEC component.  In case of multiple
   // channels, the pointer to the first one is returned.  A NULL pointer is

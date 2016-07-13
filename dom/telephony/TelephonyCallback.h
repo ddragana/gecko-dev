@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_TelephonyCallback_h
 #define mozilla_dom_TelephonyCallback_h
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsITelephonyService.h"
 
@@ -29,7 +30,7 @@ protected:
   virtual ~TelephonyCallback() {}
 
 protected:
-  RefPtr<Promise> mPromise;
+  nsRefPtr<Promise> mPromise;
 };
 
 } // namespace telephony

@@ -11,7 +11,6 @@
 
 #include "nsAttrAndChildArray.h"
 
-#include "mozilla/CheckedInt.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
 
@@ -21,9 +20,8 @@
 #include "nsRuleWalker.h"
 #include "nsMappedAttributes.h"
 #include "nsUnicharUtils.h"
+#include "nsAutoPtr.h"
 #include "nsContentUtils.h" // nsAutoScriptBlocker
-
-using mozilla::CheckedUint32;
 
 /*
 CACHE_POINTER_SHIFT indicates how many steps to downshift the |this| pointer.
@@ -380,21 +378,23 @@ nsAttrAndChildArray::AttrAt(uint32_t aPos) const
   NS_ASSERTION(aPos < AttrCount(),
                "out-of-bounds access in nsAttrAndChildArray");
 
-  uint32_t nonmapped = NonMappedAttrCount();
-  if (aPos < nonmapped) {
-    return &ATTRS(mImpl)[aPos].mValue;
+  uint32_t mapped = MappedAttrCount();
+  if (aPos < mapped) {
+    return mImpl->mMappedAttrs->AttrAt(aPos);
   }
 
-  return mImpl->mMappedAttrs->AttrAt(aPos - nonmapped);
+  return &ATTRS(mImpl)[aPos - mapped].mValue;
 }
 
 nsresult
-nsAttrAndChildArray::SetAndSwapAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
+nsAttrAndChildArray::SetAndTakeAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
 {
   uint32_t i, slotCount = AttrSlotCount();
   for (i = 0; i < slotCount && AttrSlotIsTaken(i); ++i) {
     if (ATTRS(mImpl)[i].mName.Equals(aLocalName)) {
+      ATTRS(mImpl)[i].mValue.Reset();
       ATTRS(mImpl)[i].mValue.SwapValueWith(aValue);
+
       return NS_OK;
     }
   }
@@ -414,12 +414,12 @@ nsAttrAndChildArray::SetAndSwapAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
 }
 
 nsresult
-nsAttrAndChildArray::SetAndSwapAttr(mozilla::dom::NodeInfo* aName, nsAttrValue& aValue)
+nsAttrAndChildArray::SetAndTakeAttr(mozilla::dom::NodeInfo* aName, nsAttrValue& aValue)
 {
   int32_t namespaceID = aName->NamespaceID();
   nsIAtom* localName = aName->NameAtom();
   if (namespaceID == kNameSpaceID_None) {
-    return SetAndSwapAttr(localName, aValue);
+    return SetAndTakeAttr(localName, aValue);
   }
 
   uint32_t i, slotCount = AttrSlotCount();
@@ -453,35 +453,36 @@ nsAttrAndChildArray::RemoveAttrAt(uint32_t aPos, nsAttrValue& aValue)
 {
   NS_ASSERTION(aPos < AttrCount(), "out-of-bounds");
 
-  uint32_t nonmapped = NonMappedAttrCount();
-  if (aPos < nonmapped) {
-    ATTRS(mImpl)[aPos].mValue.SwapValueWith(aValue);
-    ATTRS(mImpl)[aPos].~InternalAttr();
+  uint32_t mapped = MappedAttrCount();
+  if (aPos < mapped) {
+    if (mapped == 1) {
+      // We're removing the last mapped attribute.  Can't swap in this
+      // case; have to copy.
+      aValue.SetTo(*mImpl->mMappedAttrs->AttrAt(0));
+      NS_RELEASE(mImpl->mMappedAttrs);
 
-    uint32_t slotCount = AttrSlotCount();
-    memmove(&ATTRS(mImpl)[aPos],
-            &ATTRS(mImpl)[aPos + 1],
-            (slotCount - aPos - 1) * sizeof(InternalAttr));
-    memset(&ATTRS(mImpl)[slotCount - 1], 0, sizeof(InternalAttr));
+      return NS_OK;
+    }
 
-    return NS_OK;
+    nsRefPtr<nsMappedAttributes> mapped =
+      GetModifiableMapped(nullptr, nullptr, false);
+
+    mapped->RemoveAttrAt(aPos, aValue);
+
+    return MakeMappedUnique(mapped);
   }
 
-  if (MappedAttrCount() == 1) {
-    // We're removing the last mapped attribute.  Can't swap in this
-    // case; have to copy.
-    aValue.SetTo(*mImpl->mMappedAttrs->AttrAt(0));
-    NS_RELEASE(mImpl->mMappedAttrs);
+  aPos -= mapped;
+  ATTRS(mImpl)[aPos].mValue.SwapValueWith(aValue);
+  ATTRS(mImpl)[aPos].~InternalAttr();
 
-    return NS_OK;
-  }
+  uint32_t slotCount = AttrSlotCount();
+  memmove(&ATTRS(mImpl)[aPos],
+          &ATTRS(mImpl)[aPos + 1],
+          (slotCount - aPos - 1) * sizeof(InternalAttr));
+  memset(&ATTRS(mImpl)[slotCount - 1], 0, sizeof(InternalAttr));
 
-  RefPtr<nsMappedAttributes> mapped =
-    GetModifiableMapped(nullptr, nullptr, false);
-
-  mapped->RemoveAttrAt(aPos - nonmapped, aValue);
-
-  return MakeMappedUnique(mapped);
+  return NS_OK;
 }
 
 const nsAttrName*
@@ -490,32 +491,33 @@ nsAttrAndChildArray::AttrNameAt(uint32_t aPos) const
   NS_ASSERTION(aPos < AttrCount(),
                "out-of-bounds access in nsAttrAndChildArray");
 
-  uint32_t nonmapped = NonMappedAttrCount();
-  if (aPos < nonmapped) {
-    return &ATTRS(mImpl)[aPos].mName;
+  uint32_t mapped = MappedAttrCount();
+  if (aPos < mapped) {
+    return mImpl->mMappedAttrs->NameAt(aPos);
   }
 
-  return mImpl->mMappedAttrs->NameAt(aPos - nonmapped);
+  return &ATTRS(mImpl)[aPos - mapped].mName;
 }
 
 const nsAttrName*
 nsAttrAndChildArray::GetSafeAttrNameAt(uint32_t aPos) const
 {
-  uint32_t nonmapped = NonMappedAttrCount();
-  if (aPos < nonmapped) {
-    void** pos = mImpl->mBuffer + aPos * ATTRSIZE;
-    if (!*pos) {
-      return nullptr;
-    }
-
-    return &reinterpret_cast<InternalAttr*>(pos)->mName;
+  uint32_t mapped = MappedAttrCount();
+  if (aPos < mapped) {
+    return mImpl->mMappedAttrs->NameAt(aPos);
   }
 
-  if (aPos >= AttrCount()) {
+  aPos -= mapped;
+  if (aPos >= AttrSlotCount()) {
     return nullptr;
   }
 
-  return mImpl->mMappedAttrs->NameAt(aPos - nonmapped);
+  void** pos = mImpl->mBuffer + aPos * ATTRSIZE;
+  if (!*pos) {
+    return nullptr;
+  }
+
+  return &reinterpret_cast<InternalAttr*>(pos)->mName;
 }
 
 const nsAttrName*
@@ -542,24 +544,25 @@ nsAttrAndChildArray::IndexOfAttr(nsIAtom* aLocalName, int32_t aNamespaceID) cons
   if (mImpl && mImpl->mMappedAttrs && aNamespaceID == kNameSpaceID_None) {
     idx = mImpl->mMappedAttrs->IndexOfAttr(aLocalName);
     if (idx >= 0) {
-      return NonMappedAttrCount() + idx;
+      return idx;
     }
   }
 
   uint32_t i;
+  uint32_t mapped = MappedAttrCount();
   uint32_t slotCount = AttrSlotCount();
   if (aNamespaceID == kNameSpaceID_None) {
     // This should be the common case so lets make an optimized loop
     for (i = 0; i < slotCount && AttrSlotIsTaken(i); ++i) {
       if (ATTRS(mImpl)[i].mName.Equals(aLocalName)) {
-        return i;
+        return i + mapped;
       }
     }
   }
   else {
     for (i = 0; i < slotCount && AttrSlotIsTaken(i); ++i) {
       if (ATTRS(mImpl)[i].mName.Equals(aLocalName, aNamespaceID)) {
-        return i;
+        return i + mapped;
       }
     }
   }
@@ -578,7 +581,7 @@ nsAttrAndChildArray::SetAndTakeMappedAttr(nsIAtom* aLocalName,
     willAdd = !mImpl->mMappedAttrs->GetAttr(aLocalName);
   }
 
-  RefPtr<nsMappedAttributes> mapped =
+  nsRefPtr<nsMappedAttributes> mapped =
     GetModifiableMapped(aContent, aSheet, willAdd);
 
   mapped->SetAndTakeAttr(aLocalName, aValue);
@@ -595,7 +598,7 @@ nsAttrAndChildArray::DoSetMappedAttrStyleSheet(nsHTMLStyleSheet* aSheet)
     return NS_OK;
   }
 
-  RefPtr<nsMappedAttributes> mapped =
+  nsRefPtr<nsMappedAttributes> mapped =
     GetModifiableMapped(nullptr, nullptr, false);
 
   mapped->SetStyleSheet(aSheet);
@@ -734,13 +737,13 @@ nsAttrAndChildArray::MakeMappedUnique(nsMappedAttributes* aAttributes)
   if (!aAttributes->GetStyleSheet()) {
     // This doesn't currently happen, but it could if we do loading right
 
-    RefPtr<nsMappedAttributes> mapped(aAttributes);
+    nsRefPtr<nsMappedAttributes> mapped(aAttributes);
     mapped.swap(mImpl->mMappedAttrs);
 
     return NS_OK;
   }
 
-  RefPtr<nsMappedAttributes> mapped =
+  nsRefPtr<nsMappedAttributes> mapped =
     aAttributes->GetStyleSheet()->UniqueMappedAttributes(aAttributes);
   NS_ENSURE_TRUE(mapped, NS_ERROR_OUT_OF_MEMORY);
 

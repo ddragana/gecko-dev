@@ -45,6 +45,12 @@ class DebuggerMemory : public NativeObject {
     static bool getAllocationSamplingProbability(JSContext* cx, unsigned argc, Value* vp);
     static bool getAllocationsLogOverflowed(JSContext* cx, unsigned argc, Value* vp);
 
+    static bool setTrackingTenurePromotions(JSContext* cx, unsigned argc, Value* vp);
+    static bool getTrackingTenurePromotions(JSContext* cx, unsigned argc, Value* vp);
+    static bool setMaxTenurePromotionsLogLength(JSContext* cx, unsigned argc, Value* vp);
+    static bool getMaxTenurePromotionsLogLength(JSContext* cx, unsigned argc, Value* vp);
+    static bool getTenurePromotionsLogOverflowed(JSContext* cx, unsigned argc, Value* vp);
+
     static bool getOnGarbageCollection(JSContext* cx, unsigned argc, Value* vp);
     static bool setOnGarbageCollection(JSContext* cx, unsigned argc, Value* vp);
 
@@ -52,6 +58,7 @@ class DebuggerMemory : public NativeObject {
 
     static bool takeCensus(JSContext* cx, unsigned argc, Value* vp);
     static bool drainAllocationsLog(JSContext* cx, unsigned argc, Value* vp);
+    static bool drainTenurePromotionsLog(JSContext* cx, unsigned argc, Value* vp);
 };
 
 } /* namespace js */

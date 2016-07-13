@@ -26,9 +26,6 @@ nsDNSServiceInfo::nsDNSServiceInfo(nsIDNSServiceInfo* aServiceInfo)
   if (NS_SUCCEEDED(aServiceInfo->GetHost(str))) {
     NS_WARN_IF(NS_FAILED(SetHost(str)));
   }
-  if (NS_SUCCEEDED(aServiceInfo->GetAddress(str))) {
-    NS_WARN_IF(NS_FAILED(SetAddress(str)));
-  }
   if (NS_SUCCEEDED(aServiceInfo->GetPort(&value))) {
     NS_WARN_IF(NS_FAILED(SetPort(value)));
   }
@@ -63,10 +60,7 @@ nsDNSServiceInfo::nsDNSServiceInfo(nsIDNSServiceInfo* aServiceInfo)
       nsCOMPtr<nsIVariant> value;
       NS_WARN_IF(NS_FAILED(property->GetName(name)));
       NS_WARN_IF(NS_FAILED(property->GetValue(getter_AddRefs(value))));
-      nsAutoCString valueStr;
-      NS_WARN_IF(NS_FAILED(value->GetAsACString(valueStr)));
-
-      NS_WARN_IF(NS_FAILED(newAttributes->SetPropertyAsACString(name, valueStr)));
+      NS_WARN_IF(NS_FAILED(newAttributes->SetPropertyAsInterface(name, value)));
     }
 
     NS_WARN_IF(NS_FAILED(SetAttributes(newAttributes)));
@@ -88,24 +82,6 @@ nsDNSServiceInfo::SetHost(const nsACString& aHost)
 {
   mHost = aHost;
   mIsHostSet = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDNSServiceInfo::GetAddress(nsACString& aAddress)
-{
-  if (!mIsAddressSet) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-  aAddress = mAddress;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDNSServiceInfo::SetAddress(const nsACString& aAddress)
-{
-  mAddress = aAddress;
-  mIsAddressSet = true;
   return NS_OK;
 }
 
@@ -199,7 +175,7 @@ NS_IMETHODIMP
 nsDNSServiceInfo::SetAttributes(nsIPropertyBag2* aAttributes)
 {
   mAttributes = aAttributes;
-  mIsAttributesSet = aAttributes ? true : false;
+  mIsAttributesSet = true;
   return NS_OK;
 }
 

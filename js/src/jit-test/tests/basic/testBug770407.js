@@ -1,4 +1,4 @@
 // |jit-test| error:TypeError
 var otherGlobal = newGlobal();
-var proxy = new (otherGlobal.Proxy)({}, {});
+var proxy = otherGlobal.Proxy.create({}, {});
 Int8Array.set(proxy);

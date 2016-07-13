@@ -28,7 +28,6 @@ namespace dom {
 class DocumentFragment;
 class DOMRect;
 class DOMRectList;
-class Selection;
 } // namespace dom
 } // namespace mozilla
 
@@ -43,7 +42,26 @@ class nsRange final : public nsIDOMRange,
   virtual ~nsRange();
 
 public:
-  explicit nsRange(nsINode* aNode);
+  explicit nsRange(nsINode* aNode)
+    : mRoot(nullptr)
+    , mStartOffset(0)
+    , mEndOffset(0)
+    , mIsPositioned(false)
+    , mIsDetached(false)
+    , mMaySpanAnonymousSubtrees(false)
+    , mInSelection(false)
+    , mIsGenerated(false)
+    , mStartOffsetWasIncremented(false)
+    , mEndOffsetWasIncremented(false)
+    , mEnableGravitationOnElementRemoval(true)
+#ifdef DEBUG
+    , mAssertNextInsertOrAppendIndex(-1)
+    , mAssertNextInsertOrAppendNode(nullptr)
+#endif
+  {
+    MOZ_ASSERT(aNode, "range isn't in a document!");
+    mOwner = aNode->OwnerDoc();
+  }
 
   static nsresult CreateRange(nsIDOMNode* aStartParent, int32_t aStartOffset,
                               nsIDOMNode* aEndParent, int32_t aEndOffset,
@@ -111,18 +129,31 @@ public:
   }
   
   /**
-   * Return true iff this range is part of a Selection object
+   * Return true iff this range is part of at least one Selection object
    * and isn't detached.
    */
   bool IsInSelection() const
   {
-    return !!mSelection;
+    return mInSelection;
   }
 
   /**
    * Called when the range is added/removed from a Selection.
    */
-  void SetSelection(mozilla::dom::Selection* aSelection);
+  void SetInSelection(bool aInSelection)
+  {
+    if (mInSelection == aInSelection) {
+      return;
+    }
+    mInSelection = aInSelection;
+    nsINode* commonAncestor = GetCommonAncestor();
+    NS_ASSERTION(commonAncestor, "unexpected disconnected nodes");
+    if (mInSelection) {
+      RegisterCommonAncestor(commonAncestor);
+    } else {
+      UnregisterCommonAncestor(commonAncestor);
+    }
+  }
 
   /**
    * Return true if this range was generated.
@@ -212,12 +243,6 @@ public:
                                                   bool aFlushLayout = true);
   already_AddRefed<DOMRectList> GetClientRects(bool aClampToEdge = true,
                                                bool aFlushLayout = true);
-  static void GetInnerTextNoFlush(mozilla::dom::DOMString& aValue,
-                                  mozilla::ErrorResult& aError,
-                                  nsIContent* aStartParent,
-                                  uint32_t aStartOffset,
-                                  nsIContent* aEndParent,
-                                  uint32_t aEndOffset);
 
   nsINode* GetParentObject() const { return mOwner; }
   virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override final;
@@ -252,14 +277,6 @@ public:
                                      bool *outNodeBefore,
                                      bool *outNodeAfter);
 
-  /**
-   * Return true if any part of (aNode, aStartOffset) .. (aNode, aEndOffset)
-   * overlaps any nsRange in aNode's GetNextRangeCommonAncestor ranges (i.e.
-   * where aNode is a descendant of a range's common ancestor node).
-   * If a nsRange starts in (aNode, aEndOffset) or if it ends in
-   * (aNode, aStartOffset) then it is non-overlapping and the result is false
-   * for that nsRange.  Collapsed ranges always counts as non-overlapping.
-   */
   static bool IsNodeSelected(nsINode* aNode, uint32_t aStartOffset,
                              uint32_t aEndOffset);
 
@@ -280,7 +297,7 @@ public:
    * will be empty.
    * @param aOutRanges the resulting set of ranges
    */
-  void ExcludeNonSelectableNodes(nsTArray<RefPtr<nsRange>>* aOutRanges);
+  void ExcludeNonSelectableNodes(nsTArray<nsRefPtr<nsRange>>* aOutRanges);
 
   typedef nsTHashtable<nsPtrHashKey<nsRange> > RangeHashTable;
 protected:
@@ -306,14 +323,6 @@ protected:
    */
   nsINode* GetRegisteredCommonAncestor();
 
-  // Helper to IsNodeSelected.
-  static bool IsNodeInSortedRanges(nsINode* aNode,
-                                   uint32_t aStartOffset,
-                                   uint32_t aEndOffset,
-                                   const nsTArray<const nsRange*>& aRanges,
-                                   size_t aRangeStart,
-                                   size_t aRangeEnd);
-
   struct MOZ_STACK_CLASS AutoInvalidateSelection
   {
     explicit AutoInvalidateSelection(nsRange* aRange) : mRange(aRange)
@@ -329,7 +338,7 @@ protected:
     }
     ~AutoInvalidateSelection();
     nsRange* mRange;
-    RefPtr<nsINode> mCommonAncestor;
+    nsRefPtr<nsINode> mCommonAncestor;
 #ifdef DEBUG
     bool mWasInSelection;
 #endif
@@ -340,12 +349,13 @@ protected:
   nsCOMPtr<nsINode> mRoot;
   nsCOMPtr<nsINode> mStartParent;
   nsCOMPtr<nsINode> mEndParent;
-  RefPtr<mozilla::dom::Selection> mSelection;
   int32_t mStartOffset;
   int32_t mEndOffset;
 
   bool mIsPositioned : 1;
+  bool mIsDetached : 1;
   bool mMaySpanAnonymousSubtrees : 1;
+  bool mInSelection : 1;
   bool mIsGenerated : 1;
   bool mStartOffsetWasIncremented : 1;
   bool mEndOffsetWasIncremented : 1;

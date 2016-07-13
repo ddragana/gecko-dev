@@ -1,18 +1,24 @@
-add_task(function* () {
-  yield new Promise(resolve => {
-    SpecialPowers.pushPrefEnv({"set": [["browser.autofocus", false]]}, resolve);
-  });
+function test() {
+  waitForExplicitFinish();
 
-  const url = "data:text/html,<!DOCTYPE html><html><body><input autofocus><button autofocus></button><textarea autofocus></textarea><select autofocus></select></body></html>";
+  var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+            .getService(Components.interfaces.nsIPrefBranch);
+  var gAutofocusPref = prefs.getBoolPref("browser.autofocus");
+  prefs.setBoolPref("browser.autofocus", false);
 
-  let loadedPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
-  gBrowser.selectedBrowser.loadURI(url);
-  yield loadedPromise;
+  gBrowser.selectedBrowser.addEventListener("load", function () {
+    gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
 
-  yield new Promise(resolve => executeSoon(resolve));
+    executeSoon(function () {
+      is(gBrowser.selectedBrowser.contentDocument.activeElement,
+         gBrowser.selectedBrowser.contentDocument.body,
+         "foo");
 
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
-    is(content.document.activeElement, content.document.body, "body focused");
-  });
-});
+      prefs.setBoolPref("browser.autofocus", gAutofocusPref);
 
+      finish();
+    });
+  }, true);
+
+  gBrowser.selectedBrowser.loadURI("data:text/html,<!DOCTYPE html><html><body><input autofocus><button autofocus></button><textarea autofocus></textarea><select autofocus></select></body></html>");
+}

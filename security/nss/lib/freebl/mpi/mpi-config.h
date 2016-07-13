@@ -40,6 +40,10 @@
 #define MP_MEMCPY     1  /* use memcpy() to copy buffers?       */
 #endif
 
+#ifndef MP_CRYPTO
+#define MP_CRYPTO     1  /* erase memory on free?               */
+#endif
+
 #ifndef MP_ARGCHK
 /*
   0 = no parameter checks
@@ -59,6 +63,10 @@
 
 #ifndef MP_DEFPREC
 #define MP_DEFPREC    64 /* default precision, in digits        */
+#endif
+
+#ifndef MP_MACRO
+#define MP_MACRO      1  /* use macros for frequent calls?      */
 #endif
 
 #ifndef MP_SQUARE

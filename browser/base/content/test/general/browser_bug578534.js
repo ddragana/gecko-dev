@@ -8,18 +8,19 @@ function test() {
   let uriObj = Services.io.newURI(uriString, null, null)
   let cp = Components.classes["@mozilla.org/cookie/permission;1"]
                      .getService(Components.interfaces.nsICookiePermission);
-
+  
   Services.prefs.setIntPref(cookieBehavior, 2);
 
   cp.setAccess(uriObj, cp.ACCESS_ALLOW);
   gBrowser.selectedTab = gBrowser.addTab(uriString);
   waitForExplicitFinish();
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(onTabLoaded);
-
+  gBrowser.selectedBrowser.addEventListener("load", onTabLoaded, true);
+  
   function onTabLoaded() {
     is(gBrowser.selectedBrowser.contentWindow.navigator.cookieEnabled, true,
        "navigator.cookieEnabled should be true");
     // Clean up
+    gBrowser.selectedBrowser.removeEventListener("load", onTabLoaded, true);
     gBrowser.removeTab(gBrowser.selectedTab);
     Services.prefs.setIntPref(cookieBehavior, 0);
     cp.setAccess(uriObj, cp.ACCESS_DEFAULT);

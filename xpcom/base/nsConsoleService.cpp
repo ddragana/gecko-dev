@@ -22,7 +22,6 @@
 #include "nsPrintfCString.h"
 #include "nsProxyRelease.h"
 #include "nsIScriptError.h"
-#include "nsISupportsPrimitives.h"
 
 #include "mozilla/Preferences.h"
 
@@ -46,8 +45,8 @@ NS_IMPL_RELEASE(nsConsoleService)
 NS_IMPL_CLASSINFO(nsConsoleService, nullptr,
                   nsIClassInfo::THREADSAFE | nsIClassInfo::SINGLETON,
                   NS_CONSOLESERVICE_CID)
-NS_IMPL_QUERY_INTERFACE_CI(nsConsoleService, nsIConsoleService, nsIObserver)
-NS_IMPL_CI_INTERFACE_GETTER(nsConsoleService, nsIConsoleService, nsIObserver)
+NS_IMPL_QUERY_INTERFACE_CI(nsConsoleService, nsIConsoleService)
+NS_IMPL_CI_INTERFACE_GETTER(nsConsoleService, nsIConsoleService)
 
 static bool sLoggingEnabled = true;
 static bool sLoggingBuffered = true;
@@ -55,73 +54,77 @@ static bool sLoggingBuffered = true;
 static bool sLoggingLogcat = true;
 #endif // defined(ANDROID)
 
-nsConsoleService::MessageElement::~MessageElement()
-{
-}
 
 nsConsoleService::nsConsoleService()
-  : mCurrentSize(0)
+  : mMessages(nullptr)
+  , mCurrent(0)
+  , mFull(false)
   , mDeliveringMessage(false)
   , mLock("nsConsoleService.mLock")
 {
   // XXX grab this from a pref!
   // hm, but worry about circularity, bc we want to be able to report
   // prefs errs...
-  mMaximumSize = 250;
+  mBufferSize = 250;
 }
 
 
-void
+NS_IMETHODIMP
 nsConsoleService::ClearMessagesForWindowID(const uint64_t innerID)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  MutexAutoLock lock(mLock);
 
-  for (MessageElement* e = mMessages.getFirst(); e != nullptr; ) {
-    // Only messages implementing nsIScriptError interface expose the
-    // inner window ID.
-    nsCOMPtr<nsIScriptError> scriptError = do_QueryInterface(e->Get());
+  // Remove the messages related to this window
+  for (uint32_t i = 0; i < mBufferSize && mMessages[i]; i++) {
+    // Only messages implementing nsIScriptError interface exposes the inner window ID
+    nsCOMPtr<nsIScriptError> scriptError = do_QueryInterface(mMessages[i]);
     if (!scriptError) {
-      e = e->getNext();
       continue;
     }
     uint64_t innerWindowID;
     nsresult rv = scriptError->GetInnerWindowID(&innerWindowID);
     if (NS_FAILED(rv) || innerWindowID != innerID) {
-      e = e->getNext();
       continue;
     }
 
-    MessageElement* next = e->getNext();
-    e->remove();
-    delete e;
-    mCurrentSize--;
-    MOZ_ASSERT(mCurrentSize < mMaximumSize);
+    // Free this matching message!
+    NS_RELEASE(mMessages[i]);
 
-    e = next;
-  }
-}
+    uint32_t j = i;
+    // Now shift all the following messages
+    for (; j < mBufferSize - 1 && mMessages[j + 1]; j++) {
+      mMessages[j] = mMessages[j + 1];
+    }
+    // Nullify the current slot
+    mMessages[j] = nullptr;
+    mCurrent = j;
 
-void
-nsConsoleService::ClearMessages()
-{
-  // NB: A lock is not required here as it's only called from |Reset| which
-  //     locks for us and from the dtor.
-  while (!mMessages.isEmpty()) {
-    MessageElement* e = mMessages.popFirst();
-    delete e;
+    // The array is no longer full
+    mFull = false;
+
+    // Ensure the next iteration handles the messages we just shifted down
+    i--;
   }
-  mCurrentSize = 0;
+
+  return NS_OK;
 }
 
 nsConsoleService::~nsConsoleService()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  ClearMessages();
+  uint32_t i = 0;
+  while (i < mBufferSize && mMessages[i]) {
+    NS_RELEASE(mMessages[i]);
+    i++;
+  }
+
+  if (mMessages) {
+    free(mMessages);
+  }
 }
 
-class AddConsolePrefWatchers : public Runnable
+class AddConsolePrefWatchers : public nsRunnable
 {
 public:
   explicit AddConsolePrefWatchers(nsConsoleService* aConsole) : mConsole(aConsole)
@@ -135,12 +138,6 @@ public:
 #if defined(ANDROID)
     Preferences::AddBoolVarCache(&sLoggingLogcat, "consoleservice.logcat", true);
 #endif // defined(ANDROID)
-
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    MOZ_ASSERT(obs);
-    obs->AddObserver(mConsole, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
-    obs->AddObserver(mConsole, "inner-window-destroyed", false);
-
     if (!sLoggingBuffered) {
       mConsole->Reset();
     }
@@ -148,12 +145,21 @@ public:
   }
 
 private:
-  RefPtr<nsConsoleService> mConsole;
+  nsRefPtr<nsConsoleService> mConsole;
 };
 
 nsresult
 nsConsoleService::Init()
 {
+  mMessages = (nsIConsoleMessage**)
+    moz_xmalloc(mBufferSize * sizeof(nsIConsoleMessage*));
+  if (!mMessages) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  // Array elements should be 0 initially for circular buffer algorithm.
+  memset(mMessages, 0, mBufferSize * sizeof(nsIConsoleMessage*));
+
   NS_DispatchToMainThread(new AddConsolePrefWatchers(this));
 
   return NS_OK;
@@ -161,7 +167,7 @@ nsConsoleService::Init()
 
 namespace {
 
-class LogMessageRunnable : public Runnable
+class LogMessageRunnable : public nsRunnable
 {
 public:
   LogMessageRunnable(nsIConsoleMessage* aMessage, nsConsoleService* aService)
@@ -173,7 +179,7 @@ public:
 
 private:
   nsCOMPtr<nsIConsoleMessage> mMessage;
-  RefPtr<nsConsoleService> mService;
+  nsRefPtr<nsConsoleService> mService;
 };
 
 NS_IMETHODIMP
@@ -228,8 +234,12 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     return NS_ERROR_FAILURE;
   }
 
-  RefPtr<LogMessageRunnable> r;
-  nsCOMPtr<nsIConsoleMessage> retiredMessage;
+  nsRefPtr<LogMessageRunnable> r;
+  nsIConsoleMessage* retiredMessage;
+
+  if (sLoggingBuffered) {
+    NS_ADDREF(aMessage); // early, in case it's same as replaced below.
+  }
 
   /*
    * Lock while updating buffer, and while taking snapshot of
@@ -295,16 +305,18 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     }
 #endif
 
+    /*
+     * If there's already a message in the slot we're about to replace,
+     * we've wrapped around, and we need to release the old message.  We
+     * save a pointer to it, so we can release below outside the lock.
+     */
+    retiredMessage = mMessages[mCurrent];
+
     if (sLoggingBuffered) {
-      MessageElement* e = new MessageElement(aMessage);
-      mMessages.insertBack(e);
-      if (mCurrentSize != mMaximumSize) {
-        mCurrentSize++;
-      } else {
-        MessageElement* p = mMessages.popFirst();
-        MOZ_ASSERT(p);
-        p->swapMessage(retiredMessage);
-        delete p;
+      mMessages[mCurrent++] = aMessage;
+      if (mCurrent == mBufferSize) {
+        mCurrent = 0; // wrap around.
+        mFull = true;
       }
     }
 
@@ -317,7 +329,7 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     // Release |retiredMessage| on the main thread in case it is an instance of
     // a mainthread-only class like nsScriptErrorWithStack and we're off the
     // main thread.
-    NS_ReleaseOnMainThread(retiredMessage.forget());
+    NS_ReleaseOnMainThread(retiredMessage);
   }
 
   if (r) {
@@ -349,7 +361,7 @@ nsConsoleService::LogStringMessage(const char16_t* aMessage)
     return NS_OK;
   }
 
-  RefPtr<nsConsoleMessage> msg(new nsConsoleMessage(aMessage));
+  nsRefPtr<nsConsoleMessage> msg(new nsConsoleMessage(aMessage));
   return this->LogMessage(msg);
 }
 
@@ -359,15 +371,21 @@ nsConsoleService::GetMessageArray(uint32_t* aCount,
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
+  nsIConsoleMessage** messageArray;
+
+  /*
+   * Lock the whole method, as we don't want anyone mucking with mCurrent or
+   * mFull while we're copying out the buffer.
+   */
   MutexAutoLock lock(mLock);
 
-  if (mMessages.isEmpty()) {
+  if (mCurrent == 0 && !mFull) {
     /*
      * Make a 1-length output array so that nobody gets confused,
      * and return a count of 0.  This should result in a 0-length
      * array object when called from script.
      */
-    nsIConsoleMessage** messageArray = (nsIConsoleMessage**)
+    messageArray = (nsIConsoleMessage**)
       moz_xmalloc(sizeof(nsIConsoleMessage*));
     *messageArray = nullptr;
     *aMessages = messageArray;
@@ -376,21 +394,32 @@ nsConsoleService::GetMessageArray(uint32_t* aCount,
     return NS_OK;
   }
 
-  MOZ_ASSERT(mCurrentSize <= mMaximumSize);
-  nsIConsoleMessage** messageArray =
-    static_cast<nsIConsoleMessage**>(moz_xmalloc(sizeof(nsIConsoleMessage*)
-                                                 * mCurrentSize));
+  uint32_t resultSize = mFull ? mBufferSize : mCurrent;
+  messageArray =
+    (nsIConsoleMessage**)moz_xmalloc((sizeof(nsIConsoleMessage*))
+                                         * resultSize);
 
-  uint32_t i = 0;
-  for (MessageElement* e = mMessages.getFirst(); e != nullptr; e = e->getNext()) {
-    nsCOMPtr<nsIConsoleMessage> m = e->Get();
-    m.forget(&messageArray[i]);
-    i++;
+  if (!messageArray) {
+    *aMessages = nullptr;
+    *aCount = 0;
+    return NS_ERROR_FAILURE;
   }
 
-  MOZ_ASSERT(i == mCurrentSize);
-
-  *aCount = i;
+  uint32_t i;
+  if (mFull) {
+    for (i = 0; i < mBufferSize; i++) {
+      // if full, fill the buffer starting from mCurrent (which'll be
+      // oldest) wrapping around the buffer to the most recent.
+      messageArray[i] = mMessages[(mCurrent + i) % mBufferSize];
+      NS_ADDREF(messageArray[i]);
+    }
+  } else {
+    for (i = 0; i < mCurrent; i++) {
+      messageArray[i] = mMessages[i];
+      NS_ADDREF(messageArray[i]);
+    }
+  }
+  *aCount = resultSize;
   *aMessages = messageArray;
 
   return NS_OK;
@@ -445,29 +474,15 @@ nsConsoleService::Reset()
    */
   MutexAutoLock lock(mLock);
 
-  ClearMessages();
-  return NS_OK;
-}
+  mCurrent = 0;
+  mFull = false;
 
-NS_IMETHODIMP
-nsConsoleService::Observe(nsISupports* aSubject, const char* aTopic,
-                          const char16_t* aData)
-{
-  if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
-    // Dump all our messages, in case any are cycle collected.
-    Reset();
-    // We could remove ourselves from the observer service, but it is about to
-    // drop all observers anyways, so why bother.
-  } else if (!strcmp(aTopic, "inner-window-destroyed")) {
-    nsCOMPtr<nsISupportsPRUint64> supportsInt = do_QueryInterface(aSubject);
-    MOZ_ASSERT(supportsInt);
-
-    uint64_t windowId;
-    MOZ_ALWAYS_SUCCEEDS(supportsInt->GetData(&windowId));
-
-    ClearMessagesForWindowID(windowId);
-  } else {
-    MOZ_CRASH();
+  /*
+   * Free all messages stored so far (cf. destructor)
+   */
+  for (uint32_t i = 0; i < mBufferSize && mMessages[i]; i++) {
+    NS_RELEASE(mMessages[i]);
   }
+
   return NS_OK;
 }

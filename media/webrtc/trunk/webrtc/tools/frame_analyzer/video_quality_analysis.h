@@ -14,8 +14,8 @@
 #include <string>
 #include <vector>
 
-#include "libyuv/compare.h"  // NOLINT
-#include "libyuv/convert.h"  // NOLINT
+#include "third_party/libyuv/include/libyuv/compare.h"
+#include "third_party/libyuv/include/libyuv/convert.h"
 
 namespace webrtc {
 namespace test {

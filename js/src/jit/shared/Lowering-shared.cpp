@@ -74,35 +74,22 @@ LIRGeneratorShared::ReorderCommutative(MDefinition** lhsp, MDefinition** rhsp, M
 void
 LIRGeneratorShared::visitConstant(MConstant* ins)
 {
-    if (!IsFloatingPointType(ins->type()) && ins->canEmitAtUses()) {
-        emitAtUses(ins);
-        return;
-    }
-
+    const Value& v = ins->value();
     switch (ins->type()) {
-      case MIRType::Double:
-        define(new(alloc()) LDouble(ins->toDouble()), ins);
+      case MIRType_Boolean:
+        define(new(alloc()) LInteger(v.toBoolean()), ins);
         break;
-      case MIRType::Float32:
-        define(new(alloc()) LFloat32(ins->toFloat32()), ins);
+      case MIRType_Int32:
+        define(new(alloc()) LInteger(v.toInt32()), ins);
         break;
-      case MIRType::Boolean:
-        define(new(alloc()) LInteger(ins->toBoolean()), ins);
+      case MIRType_String:
+        define(new(alloc()) LPointer(v.toString()), ins);
         break;
-      case MIRType::Int32:
-        define(new(alloc()) LInteger(ins->toInt32()), ins);
+      case MIRType_Symbol:
+        define(new(alloc()) LPointer(v.toSymbol()), ins);
         break;
-      case MIRType::Int64:
-        defineInt64(new(alloc()) LInteger64(ins->toInt64()), ins);
-        break;
-      case MIRType::String:
-        define(new(alloc()) LPointer(ins->toString()), ins);
-        break;
-      case MIRType::Symbol:
-        define(new(alloc()) LPointer(ins->toSymbol()), ins);
-        break;
-      case MIRType::Object:
-        define(new(alloc()) LPointer(&ins->toObject()), ins);
+      case MIRType_Object:
+        define(new(alloc()) LPointer(&v.toObject()), ins);
         break;
       default:
         // Constants of special types (undefined, null) should never flow into
@@ -154,7 +141,7 @@ LRecoverInfo::OperandIter::canOptimizeOutIfUnused()
     // We check ins->type() in addition to ins->isUnused() because
     // EliminateDeadResumePointOperands may replace nodes with the constant
     // MagicValue(JS_OPTIMIZED_OUT).
-    if ((ins->isUnused() || ins->type() == MIRType::MagicOptimizedOut) &&
+    if ((ins->isUnused() || ins->type() == MIRType_MagicOptimizedOut) &&
         (*it_)->isResumePoint())
     {
         return !(*it_)->toResumePoint()->isObservableOperand(op_);
@@ -209,7 +196,7 @@ LIRGeneratorShared::buildSnapshot(LInstruction* ins, MResumePoint* rp, BailoutKi
         if (ins->isConstant() || ins->isUnused()) {
             *type = LAllocation();
             *payload = LAllocation();
-        } else if (ins->type() != MIRType::Value) {
+        } else if (ins->type() != MIRType_Value) {
             *type = LAllocation();
             *payload = use(ins, LUse(LUse::KEEPALIVE));
         } else {

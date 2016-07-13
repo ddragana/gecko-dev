@@ -7,7 +7,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from progressbar import ProgressBar
-from results import NullTestOutput, TestOutput, escape_cmdline
+from results import NullTestOutput, TestOutput
 from threading import Thread
 from Queue import Queue, Empty
 
@@ -20,7 +20,7 @@ class TaskFinishedMarker:
     pass
 
 
-def _do_work(qTasks, qResults, qWatch, prefix, run_skipped, timeout, show_cmd):
+def _do_work(qTasks, qResults, qWatch, prefix, run_skipped, timeout):
     while True:
         test = qTasks.get(block=True, timeout=sys.maxint)
         if test is EndMarker:
@@ -34,8 +34,6 @@ def _do_work(qTasks, qResults, qWatch, prefix, run_skipped, timeout, show_cmd):
 
         # Spawn the test task.
         cmd = test.get_command(prefix)
-        if show_cmd:
-            print(escape_cmdline(cmd))
         tStart = datetime.now()
         proc = subprocess.Popen(cmd,
                                 stdout=subprocess.PIPE,
@@ -65,19 +63,12 @@ def _do_watch(qWatch, timeout):
             assert fin is TaskFinishedMarker, "invalid finish marker"
         except Empty:
             # Timed out, force-kill the test.
-            try:
-                proc.terminate()
-            except WindowsError as ex:
-                # If the process finishes after we time out but before we
-                # terminate, the terminate call will fail. We can safely
-                # ignore this.
-                if ex.winerror != 5:
-                    raise
+            proc.terminate()
             fin = qWatch.get(block=True, timeout=sys.maxint)
             assert fin is TaskFinishedMarker, "invalid finish marker"
 
 
-def run_all_tests(tests, prefix, pb, options):
+def run_all_tests(tests, prefix, results, options):
     """
     Uses scatter-gather to a thread-pool to manage children.
     """
@@ -93,7 +84,7 @@ def run_all_tests(tests, prefix, pb, options):
         watchdogs.append(watcher)
         worker = Thread(target=_do_work, args=(qTasks, qResults, qWatch,
                                                prefix, options.run_skipped,
-                                               options.timeout, options.show_cmd))
+                                               options.timeout))
         worker.setDaemon(True)
         worker.start()
         workers.append(worker)
@@ -123,7 +114,7 @@ def run_all_tests(tests, prefix, pb, options):
             else:
                 yield result
         except Empty:
-            pb.poke()
+            results.pb.poke()
 
     # Cleanup and exit.
     pusher.join()

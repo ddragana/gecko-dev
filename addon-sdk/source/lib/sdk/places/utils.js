@@ -12,7 +12,7 @@ module.metadata = {
   }
 };
 
-const { Cc, Ci, Cu } = require('chrome');
+const { Cc, Ci } = require('chrome');
 const { Class } = require('../core/heritage');
 const { method } = require('../lang/functional');
 const { defer, promised, all } = require('../core/promise');
@@ -22,13 +22,11 @@ const { merge } = require('../util/object');
 const bmsrv = Cc["@mozilla.org/browser/nav-bookmarks-service;1"].
                 getService(Ci.nsINavBookmarksService);
 
-Cu.importGlobalProperties(["URL"]);
-
 /*
  * TreeNodes are used to construct dependency trees
  * for BookmarkItems
  */
-var TreeNode = Class({
+let TreeNode = Class({
   initialize: function (value) {
     this.value = value;
     this.children = [];
@@ -46,7 +44,7 @@ var TreeNode = Class({
   },
   get: method(get),
   walk: method(walk),
-  toString: () => '[object TreeNode]'
+  toString: function () '[object TreeNode]'
 });
 exports.TreeNode = TreeNode;
 
@@ -105,9 +103,8 @@ exports.constructTree = constructTree;
  * Shortcut for converting an id, or an object with an id, into
  * an object with corresponding bookmark data
  */
-function fetchItem (item) {
-  return send('sdk-places-bookmarks-get', { id: item.id || item });
-}
+function fetchItem (item)
+  send('sdk-places-bookmarks-get', { id: item.id || item })
 exports.fetchItem = fetchItem;
 
 /*
@@ -130,9 +127,9 @@ exports.isRootGroup = isRootGroup;
  *    --> 'http://moz.com', 'http://moz.com/thunderbird'
  * '*.moz.com' // domain: moz.com, domainIsHost: false
  *    --> 'http://moz.com', 'http://moz.com/index', 'http://ff.moz.com/test'
- * 'http://moz.com' // uri: http://moz.com/
+ * 'http://moz.com' // url: http://moz.com/, urlIsPrefix: false
  *    --> 'http://moz.com/'
- * 'http://moz.com/*' // uri: http://moz.com/, domain: moz.com, domainIsHost: true
+ * 'http://moz.com/*' // url: http://moz.com/, urlIsPrefix: true
  *    --> 'http://moz.com/', 'http://moz.com/thunderbird'
  */
 
@@ -141,21 +138,8 @@ function urlQueryParser (query, url) {
   if (/^https?:\/\//.test(url)) {
     query.uri = url.charAt(url.length - 1) === '/' ? url : url + '/';
     if (/\*$/.test(url)) {
-      // Wildcard searches on URIs are not supported, so try to extract a
-      // domain and filter the data later.
-      url = url.replace(/\*$/, '');
-      try {
-        query.domain = new URL(url).hostname;
-        query.domainIsHost = true;
-        // Unfortunately here we cannot use an expando to store the wildcard,
-        // cause the query is a wrapped native XPCOM object, so we reuse uri.
-        // We clearly don't want to query for both uri and domain, thus we'll
-        // have to handle this in host-query.js::execute()
-        query.uri = url;
-      } catch (ex) {
-        // Cannot extract an host cause it's not a valid uri, the query will
-        // just return nothing.
-      }
+      query.uri = url.replace(/\*$/, '');
+      query.uriIsPrefix = true;
     }
   } else {
     if (/^\*/.test(url)) {

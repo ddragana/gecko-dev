@@ -11,9 +11,7 @@
 
 #include "mozilla/MemoryReporting.h"
 
-#include "js/GCVector.h"
 #include "js/Vector.h"
-#include "vm/Caches.h"
 #include "vm/Runtime.h"
 
 #ifdef _MSC_VER
@@ -30,14 +28,20 @@ class JitContext;
 class DebugModeOSRVolatileJitFrameIterator;
 } // namespace jit
 
+typedef HashSet<JSObject*> ObjectSet;
 typedef HashSet<Shape*> ShapeSet;
 
 /* Detects cycles when traversing an object graph. */
-class MOZ_RAII AutoCycleDetector
+class AutoCycleDetector
 {
-  public:
-    using Set = HashSet<JSObject*, MovableCellHasher<JSObject*>>;
+    JSContext* cx;
+    RootedObject obj;
+    bool cyclic;
+    uint32_t hashsetGenerationAtInit;
+    ObjectSet::AddPtr hashsetAddPointer;
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
+  public:
     AutoCycleDetector(JSContext* cx, HandleObject objArg
                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : cx(cx), obj(cx, objArg), cyclic(true)
@@ -50,19 +54,11 @@ class MOZ_RAII AutoCycleDetector
     bool init();
 
     bool foundCycle() { return cyclic; }
-
-  private:
-    Generation hashsetGenerationAtInit;
-    JSContext* cx;
-    RootedObject obj;
-    Set::AddPtr hashsetAddPointer;
-    bool cyclic;
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 /* Updates references in the cycle detection set if the GC moves them. */
 extern void
-TraceCycleDetectionSet(JSTracer* trc, AutoCycleDetector::Set& set);
+TraceCycleDetectionSet(JSTracer* trc, ObjectSet& set);
 
 struct AutoResolving;
 
@@ -104,10 +100,6 @@ class ExclusiveContext : public ContextFriendFields,
     // The thread on which this context is running, if this is not a JSContext.
     HelperThread* helperThread_;
 
-    // Hide runtime_ from JSContext. JSContext inherits from JSRuntime, so it's
-    // more efficient to use |this|.
-    using ContextFriendFields::runtime_;
-
   public:
     enum ContextKind {
         Context_JS,
@@ -117,16 +109,10 @@ class ExclusiveContext : public ContextFriendFields,
   private:
     ContextKind contextKind_;
 
-  protected:
-    // Background threads get a read-only copy of the main thread's
-    // ContextOptions.
-    JS::ContextOptions options_;
-
   public:
     PerThreadData* perThreadData;
 
-    ExclusiveContext(JSRuntime* rt, PerThreadData* pt, ContextKind kind,
-                     const JS::ContextOptions& options);
+    ExclusiveContext(JSRuntime* rt, PerThreadData* pt, ContextKind kind);
 
     bool isJSContext() const {
         return contextKind_ == Context_JS;
@@ -159,10 +145,6 @@ class ExclusiveContext : public ContextFriendFields,
         return isJSContext();
     }
 
-    const JS::ContextOptions& options() const {
-        return options_;
-    }
-
   protected:
     js::gc::ArenaLists* arenas_;
 
@@ -180,11 +162,7 @@ class ExclusiveContext : public ContextFriendFields,
     }
 
     void* onOutOfMemory(js::AllocFunction allocFunc, size_t nbytes, void* reallocPtr = nullptr) {
-        if (!isJSContext()) {
-            addPendingOutOfMemory();
-            return nullptr;
-        }
-        return runtime_->onOutOfMemory(allocFunc, nbytes, reallocPtr, asJSContext());
+        return runtime_->onOutOfMemory(allocFunc, nbytes, reallocPtr, maybeJSContext());
     }
 
     /* Clear the pending exception (if any) due to OOM. */
@@ -202,13 +180,9 @@ class ExclusiveContext : public ContextFriendFields,
     // Accessors for immutable runtime data.
     JSAtomState& names() { return *runtime_->commonNames; }
     StaticStrings& staticStrings() { return *runtime_->staticStrings; }
-    SharedImmutableStringsCache& sharedImmutableStrings() {
-        return runtime_->sharedImmutableStrings();
-    }
     bool isPermanentAtomsInitialized() { return !!runtime_->permanentAtoms; }
     FrozenAtomSet& permanentAtoms() { return *runtime_->permanentAtoms; }
     WellKnownSymbols& wellKnownSymbols() { return *runtime_->wellKnownSymbols; }
-    JS::BuildIdOp buildIdOp() { return runtime_->buildIdOp; }
     const JS::AsmJSCacheOps& asmJSCacheOps() { return runtime_->asmJSCacheOps; }
     PropertyName* emptyString() { return runtime_->emptyString; }
     FreeOp* defaultFreeOp() { return runtime_->defaultFreeOp(); }
@@ -220,9 +194,7 @@ class ExclusiveContext : public ContextFriendFields,
     size_t gcSystemPageSize() { return gc::SystemPageSize(); }
     bool canUseSignalHandlers() const { return runtime_->canUseSignalHandlers(); }
     bool jitSupportsFloatingPoint() const { return runtime_->jitSupportsFloatingPoint; }
-    bool jitSupportsUnalignedAccesses() const { return runtime_->jitSupportsUnalignedAccesses; }
     bool jitSupportsSimd() const { return runtime_->jitSupportsSimd; }
-    bool lcovEnabled() const { return runtime_->lcovOutput.isEnabled(); }
 
     // Thread local data that may be accessed freely.
     DtoaState* dtoaState() {
@@ -285,65 +257,41 @@ class ExclusiveContext : public ContextFriendFields,
     inline js::Handle<js::GlobalObject*> global() const;
 
     // Methods to access runtime data that must be protected by locks.
-    frontend::ParseMapPool& parseMapPool(AutoLockForExclusiveAccess& lock) {
-        return runtime_->parseMapPool(lock);
+    frontend::ParseMapPool& parseMapPool() {
+        return runtime_->parseMapPool();
     }
-    AtomSet& atoms(js::AutoLockForExclusiveAccess& lock) {
-        return runtime_->atoms(lock);
+    AtomSet& atoms() {
+        return runtime_->atoms();
     }
-    JSCompartment* atomsCompartment(js::AutoLockForExclusiveAccess& lock) {
-        return runtime_->atomsCompartment(lock);
+    JSCompartment* atomsCompartment() {
+        return runtime_->atomsCompartment();
     }
-    SymbolRegistry& symbolRegistry(js::AutoLockForExclusiveAccess& lock) {
-        return runtime_->symbolRegistry(lock);
+    SymbolRegistry& symbolRegistry() {
+        return runtime_->symbolRegistry();
     }
-    ScriptDataTable& scriptDataTable(AutoLockForExclusiveAccess& lock) {
-        return runtime_->scriptDataTable(lock);
+    ScriptDataTable& scriptDataTable() {
+        return runtime_->scriptDataTable();
     }
 
     // Methods specific to any HelperThread for the context.
-    bool addPendingCompileError(frontend::CompileError** err);
+    frontend::CompileError& addPendingCompileError();
     void addPendingOverRecursed();
-    void addPendingOutOfMemory();
 };
-
-void ReportOverRecursed(JSContext* cx, unsigned errorNumber);
 
 } /* namespace js */
 
 struct JSContext : public js::ExclusiveContext,
-                   public JSRuntime
+                   public mozilla::LinkedListElement<JSContext>
 {
-    explicit JSContext(JSRuntime* parentRuntime);
+    explicit JSContext(JSRuntime* rt);
     ~JSContext();
 
-    bool init(uint32_t maxBytes, uint32_t maxNurseryBytes);
+    JSRuntime* runtime() const { return runtime_; }
+    js::PerThreadData& mainThread() const { return runtime()->mainThread; }
 
-    // For names that exist in both ExclusiveContext and JSRuntime, pick the
-    // ExclusiveContext version.
-    using ExclusiveContext::atomsCompartment;
-    using ExclusiveContext::buildIdOp;
-    using ExclusiveContext::emptyString;
-    using ExclusiveContext::jitSupportsSimd;
-    using ExclusiveContext::make_pod_array;
-    using ExclusiveContext::make_unique;
-    using ExclusiveContext::new_;
-    using ExclusiveContext::permanentAtoms;
-    using ExclusiveContext::pod_calloc;
-    using ExclusiveContext::pod_malloc;
-    using ExclusiveContext::staticStrings;
-    using ExclusiveContext::updateMallocCounter;
-    using ExclusiveContext::wellKnownSymbols;
-
-    JSRuntime* runtime() { return this; }
-    js::PerThreadData& mainThread() { return this->JSRuntime::mainThread; }
-
-    static size_t offsetOfActivation() {
-        return offsetof(JSContext, activation_);
+    static size_t offsetOfRuntime() {
+        return offsetof(JSContext, runtime_);
     }
-    static size_t offsetOfProfilingActivation() {
-        return offsetof(JSContext, profilingActivation_);
-     }
     static size_t offsetOfCompartment() {
         return offsetof(JSContext, compartment_);
     }
@@ -351,12 +299,15 @@ struct JSContext : public js::ExclusiveContext,
     friend class js::ExclusiveContext;
     friend class JS::AutoSaveExceptionState;
     friend class js::jit::DebugModeOSRVolatileJitFrameIterator;
-    friend void js::ReportOverRecursed(JSContext*, unsigned errorNumber);
+    friend void js::ReportOverRecursed(JSContext*);
 
   private:
     /* Exception state -- the exception member is a GC root by definition. */
     bool                throwing;            /* is there a pending exception? */
-    JS::PersistentRooted<JS::Value> unwrappedException_; /* most-recently-thrown exception */
+    js::Value           unwrappedException_; /* most-recently-thrown exception */
+
+    /* Per-context options. */
+    JS::ContextOptions  options_;
 
     // True if the exception currently being thrown is by result of
     // ReportOverRecursed. See Debugger::slowPathOnExceptionUnwind.
@@ -371,8 +322,6 @@ struct JSContext : public js::ExclusiveContext,
     js::jit::DebugModeOSRVolatileJitFrameIterator* liveVolatileJitFrameIterators_;
 
   public:
-    js::ContextCaches caches;
-
     int32_t             reportGranularity;  /* see vm/Probes.h */
 
     js::AutoResolving*  resolvingList;
@@ -380,8 +329,27 @@ struct JSContext : public js::ExclusiveContext,
     /* True if generating an error, to prevent runaway recursion. */
     bool                generatingError;
 
+    /* See JS_SaveFrameChain/JS_RestoreFrameChain. */
+  private:
+    struct SavedFrameChain {
+        SavedFrameChain(JSCompartment* comp, unsigned count)
+          : compartment(comp), enterCompartmentCount(count) {}
+        JSCompartment* compartment;
+        unsigned enterCompartmentCount;
+    };
+    typedef js::Vector<SavedFrameChain, 1, js::SystemAllocPolicy> SaveStack;
+    SaveStack           savedFrameChains_;
+  public:
+    bool saveFrameChain();
+    void restoreFrameChain();
+
+  public:
     /* State for object and array toSource conversion. */
-    js::AutoCycleDetector::Set cycleDetectorSet;
+    js::ObjectSet       cycleDetectorSet;
+
+    /* Client opaque pointers. */
+    void*               data;
+    void*               data2;
 
   public:
 
@@ -394,6 +362,10 @@ struct JSContext : public js::ExclusiveContext,
      * Note: if this ever shows up in a profile, just add caching!
      */
     JSVersion findVersion() const;
+
+    const JS::ContextOptions& options() const {
+        return options_;
+    }
 
     JS::ContextOptions& options() {
         return options_;
@@ -413,16 +385,16 @@ struct JSContext : public js::ExclusiveContext,
     bool currentlyRunning() const;
 
     bool currentlyRunningInInterpreter() const {
-        return activation()->isInterpreter();
+        return runtime_->activation()->isInterpreter();
     }
     bool currentlyRunningInJit() const {
-        return activation()->isJit();
+        return runtime_->activation()->isJit();
     }
     js::InterpreterFrame* interpreterFrame() const {
-        return activation()->asInterpreter()->current();
+        return runtime_->activation()->asInterpreter()->current();
     }
     js::InterpreterRegs& interpreterRegs() const {
-        return activation()->asInterpreter()->regs();
+        return runtime_->activation()->asInterpreter()->regs();
     }
 
     /*
@@ -440,11 +412,11 @@ struct JSContext : public js::ExclusiveContext,
 
     // The generational GC nursery may only be used on the main thread.
     inline js::Nursery& nursery() {
-        return gc.nursery;
+        return runtime_->gc.nursery;
     }
 
     void minorGC(JS::gcreason::Reason reason) {
-        gc.minorGC(this, reason);
+        runtime_->gc.minorGC(this, reason);
     }
 
   public:
@@ -452,11 +424,10 @@ struct JSContext : public js::ExclusiveContext,
         return throwing;
     }
 
-    MOZ_MUST_USE
+    MOZ_WARN_UNUSED_RESULT
     bool getPendingException(JS::MutableHandleValue rval);
 
     bool isThrowingOutOfMemory();
-    bool isThrowingDebuggeeWouldRun();
     bool isClosingGenerator();
 
     void setPendingException(js::Value v);
@@ -478,7 +449,7 @@ struct JSContext : public js::ExclusiveContext,
      */
     inline bool runningWithTrustedPrincipals() const;
 
-    JS_FRIEND_API(size_t) sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+    JS_FRIEND_API(size_t) sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
     void mark(JSTracer* trc);
 
@@ -494,7 +465,7 @@ struct JSContext : public js::ExclusiveContext,
 
 namespace js {
 
-struct MOZ_RAII AutoResolving {
+struct AutoResolving {
   public:
     enum Kind {
         LOOKUP,
@@ -531,14 +502,54 @@ struct MOZ_RAII AutoResolving {
 };
 
 /*
+ * Enumerate all contexts in a runtime.
+ */
+class ContextIter {
+    JSContext* iter;
+
+public:
+    explicit ContextIter(JSRuntime* rt) {
+        iter = rt->contextList.getFirst();
+    }
+
+    bool done() const {
+        return !iter;
+    }
+
+    void next() {
+        MOZ_ASSERT(!done());
+        iter = iter->getNext();
+    }
+
+    JSContext* get() const {
+        MOZ_ASSERT(!done());
+        return iter;
+    }
+
+    operator JSContext*() const {
+        return get();
+    }
+
+    JSContext* operator ->() const {
+        return get();
+    }
+};
+
+/*
  * Create and destroy functions for JSContext, which is manually allocated
  * and exclusively owned.
  */
 extern JSContext*
-NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes, JSRuntime* parentRuntime);
+NewContext(JSRuntime* rt, size_t stackChunkSize);
+
+enum DestroyContextMode {
+    DCM_NO_GC,
+    DCM_FORCE_GC,
+    DCM_NEW_FAILED
+};
 
 extern void
-DestroyContext(JSContext* cx);
+DestroyContext(JSContext* cx, DestroyContextMode mode);
 
 enum ErrorArgumentsType {
     ArgumentsAreUnicode,
@@ -572,8 +583,8 @@ ReportErrorNumberUCArray(JSContext* cx, unsigned flags, JSErrorCallback callback
 extern bool
 ExpandErrorArgumentsVA(ExclusiveContext* cx, JSErrorCallback callback,
                        void* userRef, const unsigned errorNumber,
-                       char** message, ErrorArgumentsType argumentsType,
-                       JSErrorReport* reportp, va_list ap);
+                       char** message, JSErrorReport* reportp,
+                       ErrorArgumentsType argumentsType, va_list ap);
 
 /* |callee| requires a usage string provided by JS_DefineFunctionsWithHelp. */
 extern void
@@ -590,10 +601,10 @@ PrintError(JSContext* cx, FILE* file, const char* message, JSErrorReport* report
            bool reportWarnings);
 
 /*
- * Send a JSErrorReport to the warningReporter callback.
+ * Send a JSErrorReport to the errorReporter callback.
  */
 void
-CallWarningReporter(JSContext* cx, const char* message, JSErrorReport* report);
+CallErrorReporter(JSContext* cx, const char* message, JSErrorReport* report);
 
 extern bool
 ReportIsNotDefined(JSContext* cx, HandlePropertyName name);
@@ -641,7 +652,6 @@ namespace js {
 MOZ_ALWAYS_INLINE bool
 CheckForInterrupt(JSContext* cx)
 {
-    MOZ_ASSERT(!cx->isExceptionPending());
     // Add an inline fast-path since we have to check for interrupts in some hot
     // C++ loops of library builtins.
     JSRuntime* rt = cx->runtime();
@@ -652,8 +662,12 @@ CheckForInterrupt(JSContext* cx)
 
 /************************************************************************/
 
+typedef JS::AutoVectorRooter<JSString*> AutoStringVector;
+typedef JS::AutoVectorRooter<PropertyName*> AutoPropertyNameVector;
+typedef JS::AutoVectorRooter<Shape*> AutoShapeVector;
+
 /* AutoArrayRooter roots an external array of Values. */
-class MOZ_RAII AutoArrayRooter : private JS::AutoGCRooter
+class AutoArrayRooter : private JS::AutoGCRooter
 {
   public:
     AutoArrayRooter(JSContext* cx, size_t len, Value* vec
@@ -729,10 +743,46 @@ class AutoAssertNoException
     }
 };
 
-/* Exposed intrinsics for the JITs. */
-bool intrinsic_IsSuspendedStarGenerator(JSContext* cx, unsigned argc, Value* vp);
+/* Exposed intrinsics so that Ion may inline them. */
+bool intrinsic_ToObject(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_IsObject(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_ToInteger(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_ToString(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_IsCallable(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_ThrowRangeError(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_ThrowTypeError(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_NewDenseArray(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_IsConstructing(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_SubstringKernel(JSContext* cx, unsigned argc, Value* vp);
 
-class MOZ_RAII AutoLockForExclusiveAccess
+bool intrinsic_DefineDataProperty(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_UnsafeSetReservedSlot(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_UnsafeGetReservedSlot(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_UnsafeGetObjectFromReservedSlot(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_UnsafeGetInt32FromReservedSlot(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_UnsafeGetStringFromReservedSlot(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_UnsafeGetBooleanFromReservedSlot(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_IsPackedArray(JSContext* cx, unsigned argc, Value* vp);
+
+bool intrinsic_IsSuspendedStarGenerator(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_IsArrayIterator(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_IsStringIterator(JSContext* cx, unsigned argc, Value* vp);
+
+bool intrinsic_IsArrayBuffer(JSContext* cx, unsigned argc, Value* vp);
+
+bool intrinsic_IsTypedArray(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_IsPossiblyWrappedTypedArray(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_TypedArrayBuffer(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_TypedArrayByteOffset(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_TypedArrayElementShift(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_TypedArrayLength(JSContext* cx, unsigned argc, Value* vp);
+
+bool intrinsic_MoveTypedArrayElements(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_SetFromTypedArrayApproach(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_SetDisjointTypedElements(JSContext* cx, unsigned argc, Value* vp);
+bool intrinsic_SetOverlappingTypedElements(JSContext* cx, unsigned argc, Value* vp);
+
+class AutoLockForExclusiveAccess
 {
     JSRuntime* runtime;
 
@@ -740,15 +790,13 @@ class MOZ_RAII AutoLockForExclusiveAccess
         runtime = rt;
         if (runtime->numExclusiveThreads) {
             runtime->assertCanLock(ExclusiveAccessLock);
-            runtime->exclusiveAccessLock.lock();
+            PR_Lock(runtime->exclusiveAccessLock);
 #ifdef DEBUG
             runtime->exclusiveAccessOwner = PR_GetCurrentThread();
 #endif
         } else {
             MOZ_ASSERT(!runtime->mainThreadHasExclusiveAccess);
-#ifdef DEBUG
             runtime->mainThreadHasExclusiveAccess = true;
-#endif
         }
     }
 
@@ -761,22 +809,14 @@ class MOZ_RAII AutoLockForExclusiveAccess
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         init(rt);
     }
-    explicit AutoLockForExclusiveAccess(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(cx->runtime());
-    }
     ~AutoLockForExclusiveAccess() {
         if (runtime->numExclusiveThreads) {
-#ifdef DEBUG
             MOZ_ASSERT(runtime->exclusiveAccessOwner == PR_GetCurrentThread());
             runtime->exclusiveAccessOwner = nullptr;
-#endif
-            runtime->exclusiveAccessLock.unlock();
+            PR_Unlock(runtime->exclusiveAccessLock);
         } else {
             MOZ_ASSERT(runtime->mainThreadHasExclusiveAccess);
-#ifdef DEBUG
             runtime->mainThreadHasExclusiveAccess = false;
-#endif
         }
     }
 
@@ -788,18 +828,5 @@ class MOZ_RAII AutoLockForExclusiveAccess
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
-
-inline JSContext*
-JSRuntime::unsafeContextFromAnyThread()
-{
-    return static_cast<JSContext*>(this);
-}
-
-inline JSContext*
-JSRuntime::contextFromMainThread()
-{
-    MOZ_ASSERT(CurrentThreadCanAccessRuntime(this));
-    return unsafeContextFromAnyThread();
-}
 
 #endif /* jscntxt_h */

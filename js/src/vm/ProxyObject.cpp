@@ -20,7 +20,7 @@ ProxyObject::New(JSContext* cx, const BaseProxyHandler* handler, HandleValue pri
     const Class* clasp = options.clasp();
 
     MOZ_ASSERT(isValidProxyClass(clasp));
-    MOZ_ASSERT(clasp->shouldDelayMetadataBuilder());
+    MOZ_ASSERT(clasp->shouldDelayMetadataCallback());
     MOZ_ASSERT_IF(proto.isObject(), cx->compartment() == proto.toObject()->compartment());
 
     /*
@@ -42,17 +42,27 @@ ProxyObject::New(JSContext* cx, const BaseProxyHandler* handler, HandleValue pri
     if (handler->finalizeInBackground(priv))
         allocKind = GetBackgroundAllocKind(allocKind);
 
+    ProxyValueArray* values = cx->zone()->new_<ProxyValueArray>();
+    if (!values) {
+        ReportOutOfMemory(cx);
+        return nullptr;
+    }
+
     AutoSetNewObjectMetadata metadata(cx);
     // Note: this will initialize the object's |data| to strange values, but we
     // will immediately overwrite those below.
     RootedObject obj(cx, NewObjectWithGivenTaggedProto(cx, clasp, proto, allocKind,
                                                        newKind));
-    if (!obj)
+    if (!obj) {
+        js_free(values);
         return nullptr;
+    }
 
     Rooted<ProxyObject*> proxy(cx, &obj->as<ProxyObject>());
-    new (proxy->data.values) detail::ProxyValueArray;
+
+    proxy->data.values = values;
     proxy->data.handler = handler;
+
     proxy->setCrossCompartmentPrivate(priv);
 
     /* Don't track types of properties of non-DOM and non-singleton proxies. */
@@ -79,7 +89,7 @@ void
 ProxyObject::nuke(const BaseProxyHandler* handler)
 {
     setSameCompartmentPrivate(NullValue());
-    for (size_t i = 0; i < detail::PROXY_EXTRA_SLOTS; i++)
+    for (size_t i = 0; i < PROXY_EXTRA_SLOTS; i++)
         SetProxyExtra(this, i, NullValue());
 
     /* Restore the handler as requested after nuking. */
@@ -89,7 +99,7 @@ ProxyObject::nuke(const BaseProxyHandler* handler)
 JS_FRIEND_API(void)
 js::SetValueInProxy(Value* slot, const Value& value)
 {
-    // Slots in proxies are not GCPtrValues, so do a cast whenever assigning
+    // Slots in proxies are not HeapValues, so do a cast whenever assigning
     // values to them which might trigger a barrier.
-    *reinterpret_cast<GCPtrValue*>(slot) = value;
+    *reinterpret_cast<HeapValue*>(slot) = value;
 }

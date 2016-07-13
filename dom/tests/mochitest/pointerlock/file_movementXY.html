@@ -30,7 +30,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
          */
 
         SimpleTest.waitForExplicitFinish();
-        SimpleTest.requestFlakyTimeout("We may need to wait for window's moving");
 
         function MouseMovementStats() {
           this.screenX = false;
@@ -57,7 +56,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
         }
 
         var moveMouse = function(e) {
-          info("Got mouse move");
           mozMovementX = ("mozMovementX" in e);
           mozMovementY = ("mozMovementY" in e);
 
@@ -76,29 +74,38 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
         };
 
         var moveMouseAgain = function(e) {
-          info("Got mouse move again");
           secondMove.screenX = e.screenX;
           secondMove.screenY = e.screenY;
           secondMove.mozMovementX = e.mozMovementX;
           secondMove.mozMovementY = e.mozMovementY;
 
           div.removeEventListener("mousemove", moveMouseAgain, false);
-          addFullscreenChangeContinuation("exit", function() {
-            info("Got fullscreenchange for exiting");
-            runTests();
-            SimpleTest.finish();
-          });
-          document.exitFullscreen();
+          document.mozCancelFullScreen();
         };
 
-        function start() {
-          info("Requesting fullscreen on parent");
-          addFullscreenChangeContinuation("enter", function() {
-            info("Got fullscreenchange for entering");
+        function fullscreenchange() {
+          if (document.mozFullScreenElement === div) {
+            var screenX = window.screenX;
+            var screenY = window.screenY;
+            if (screenX != 0 || screenY != 0) {
+              todo(screenX == 0 && screenY == 0,
+                "We should only receive fullscreenchange once we've finished fullscreen transition");
+              setTimeout(fullscreenchange, 250);
+              return;
+            } 
             div.addEventListener("mousemove", moveMouse, false);
             synthesizeMouseAtCenter(div, {type: "mousemove"}, window);
-          });
-          div.requestFullscreen();
+          }
+          else {
+            runTests();
+            SimpleTest.finish();
+          }
+        }
+        
+        document.addEventListener("mozfullscreenchange", fullscreenchange, false);
+
+        function start() {
+          div.mozRequestFullScreen();
         }
       </script>
     </pre>

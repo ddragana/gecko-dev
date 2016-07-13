@@ -9,24 +9,24 @@ Cu.import("resource://gre/modules/Messaging.jsm");
 
 const CONFIG = { iceServers: [{ "urls": ["stun:stun.services.mozilla.com"] }] };
 
-var log = Cu.import("resource://gre/modules/AndroidLog.jsm",
+let log = Cu.import("resource://gre/modules/AndroidLog.jsm",
                     {}).AndroidLog.d.bind(null, "TabMirror");
 
-var failure = function(x) {
+let failure = function(x) {
   log("ERROR: " + JSON.stringify(x));
 };
 
-var TabMirror = function(deviceId, window) {
+let TabMirror = function(deviceId, window) {
 
   this.deviceId = deviceId;
-  // Save RTCSessionDescription and RTCIceCandidate for later when the window object is not available.
-  this.RTCSessionDescription = window.RTCSessionDescription;
-  this.RTCIceCandidate = window.RTCIceCandidate;
+  // Save mozRTCSessionDescription and mozRTCIceCandidate for later when the window object is not available.
+  this.RTCSessionDescription = window.mozRTCSessionDescription;
+  this.RTCIceCandidate = window.mozRTCIceCandidate;
 
   Services.obs.addObserver((aSubject, aTopic, aData) => this._processMessage(aData), "MediaPlayer:Response", false);
   this._sendMessage({ start: true });
   this._window = window;
-  this._pc = new window.RTCPeerConnection(CONFIG, {});
+  this._pc = new window.mozRTCPeerConnection(CONFIG, {});
   if (!this._pc) {
     throw "Failure creating Webrtc object";
   }

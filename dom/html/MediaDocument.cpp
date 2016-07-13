@@ -59,7 +59,7 @@ MediaDocumentStreamListener::OnStartRequest(nsIRequest* request, nsISupports *ct
     return mNextStream->OnStartRequest(request, ctxt);
   }
 
-  return NS_ERROR_PARSED_DATA_CACHED;
+  return NS_BINDING_ABORTED;
 }
 
 NS_IMETHODIMP
@@ -190,10 +190,17 @@ MediaDocument::StartDocumentLoad(const char*         aCommand,
 void
 MediaDocument::BecomeInteractive()
 {
-  // Even though our readyState code isn't really reliable, here we pretend
-  // that it is and conclude that we are restoring from the b/f cache if
-  // GetReadyStateEnum() == nsIDocument::READYSTATE_COMPLETE.
-  if (GetReadyStateEnum() != nsIDocument::READYSTATE_COMPLETE) {
+  // In principle, if we knew the readyState code to work, we could infer
+  // restoration from GetReadyStateEnum() == nsIDocument::READYSTATE_COMPLETE.
+  bool restoring = false;
+  nsPIDOMWindow* window = GetWindow();
+  if (window) {
+    nsIDocShell* docShell = window->GetDocShell();
+    if (docShell) {
+      docShell->GetRestoringDocument(&restoring);
+    }
+  }
+  if (!restoring) {
     MOZ_ASSERT(GetReadyStateEnum() == nsIDocument::READYSTATE_LOADING,
                "Bad readyState");
     SetReadyStateInternal(nsIDocument::READYSTATE_INTERACTIVE);
@@ -206,12 +213,12 @@ MediaDocument::CreateSyntheticDocument()
   // Synthesize an empty html document
   nsresult rv;
 
-  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::html, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  RefPtr<nsGenericHTMLElement> root = NS_NewHTMLHtmlElement(nodeInfo.forget());
+  nsRefPtr<nsGenericHTMLElement> root = NS_NewHTMLHtmlElement(nodeInfo.forget());
   NS_ENSURE_TRUE(root, NS_ERROR_OUT_OF_MEMORY);
 
   NS_ASSERTION(GetChildCount() == 0, "Shouldn't have any kids");
@@ -223,14 +230,14 @@ MediaDocument::CreateSyntheticDocument()
                                            nsIDOMNode::ELEMENT_NODE);
 
   // Create a <head> so our title has somewhere to live
-  RefPtr<nsGenericHTMLElement> head = NS_NewHTMLHeadElement(nodeInfo.forget());
+  nsRefPtr<nsGenericHTMLElement> head = NS_NewHTMLHeadElement(nodeInfo.forget());
   NS_ENSURE_TRUE(head, NS_ERROR_OUT_OF_MEMORY);
 
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::meta, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  RefPtr<nsGenericHTMLElement> metaContent = NS_NewHTMLMetaElement(nodeInfo.forget());
+  nsRefPtr<nsGenericHTMLElement> metaContent = NS_NewHTMLMetaElement(nodeInfo.forget());
   NS_ENSURE_TRUE(metaContent, NS_ERROR_OUT_OF_MEMORY);
   metaContent->SetAttr(kNameSpaceID_None, nsGkAtoms::name,
                        NS_LITERAL_STRING("viewport"),
@@ -247,7 +254,7 @@ MediaDocument::CreateSyntheticDocument()
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  RefPtr<nsGenericHTMLElement> body = NS_NewHTMLBodyElement(nodeInfo.forget());
+  nsRefPtr<nsGenericHTMLElement> body = NS_NewHTMLBodyElement(nodeInfo.forget());
   NS_ENSURE_TRUE(body, NS_ERROR_OUT_OF_MEMORY);
 
   root->AppendChildTo(body, false);
@@ -320,12 +327,12 @@ MediaDocument::GetFileName(nsAString& aResult, nsIChannel* aChannel)
 nsresult
 MediaDocument::LinkStylesheet(const nsAString& aStylesheet)
 {
-  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::link, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
 
-  RefPtr<nsGenericHTMLElement> link = NS_NewHTMLLinkElement(nodeInfo.forget());
+  nsRefPtr<nsGenericHTMLElement> link = NS_NewHTMLLinkElement(nodeInfo.forget());
   NS_ENSURE_TRUE(link, NS_ERROR_OUT_OF_MEMORY);
 
   link->SetAttr(kNameSpaceID_None, nsGkAtoms::rel, 
@@ -335,26 +342,6 @@ MediaDocument::LinkStylesheet(const nsAString& aStylesheet)
 
   Element* head = GetHeadElement();
   return head->AppendChildTo(link, false);
-}
-
-nsresult
-MediaDocument::LinkScript(const nsAString& aScript)
-{
-  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
-  nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::script, nullptr,
-                                           kNameSpaceID_XHTML,
-                                           nsIDOMNode::ELEMENT_NODE);
-
-  RefPtr<nsGenericHTMLElement> script = NS_NewHTMLScriptElement(nodeInfo.forget());
-  NS_ENSURE_TRUE(script, NS_ERROR_OUT_OF_MEMORY);
-
-  script->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
-                  NS_LITERAL_STRING("text/javascript;version=1.8"), true);
-
-  script->SetAttr(kNameSpaceID_None, nsGkAtoms::src, aScript, true);
-
-  Element* head = GetHeadElement();
-  return head->AppendChildTo(script, false);
 }
 
 void 

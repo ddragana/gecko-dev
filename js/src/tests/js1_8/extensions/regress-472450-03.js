@@ -20,6 +20,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
  
+  jit(true);
 
   var cyclic = [];
   cyclic[0] = cyclic;
@@ -27,6 +28,7 @@ function test()
     for (var y = 0; y < 3; ++y) { for each (let z in ['', function(){}]) { let x =
                                                1, c = []; } }
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

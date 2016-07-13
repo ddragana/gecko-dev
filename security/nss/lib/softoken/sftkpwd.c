@@ -277,8 +277,7 @@ sftkdb_EncryptAttribute(PLArenaPool *arena, SECItem *passKey,
     cipherValue.salt.data = saltData;
     RNG_GenerateGlobalRandomBytes(saltData,cipherValue.salt.len);
 
-    param = nsspkcs5_NewParam(cipherValue.alg, HASH_AlgSHA1, &cipherValue.salt,
-                              1);
+    param = nsspkcs5_NewParam(cipherValue.alg, &cipherValue.salt, 1);
     if (param == NULL) {
 	rv = SECFailure;
 	goto loser;
@@ -450,7 +449,7 @@ sftkdb_SignAttribute(PLArenaPool *arena, SECItem *passKey,
     RNG_GenerateGlobalRandomBytes(saltData,prfLength);
 
     /* initialize our pkcs5 parameter */
-    param = nsspkcs5_NewParam(signValue.alg, HASH_AlgSHA1, &signValue.salt, 1);
+    param = nsspkcs5_NewParam(signValue.alg, &signValue.salt, 1);
     if (param == NULL) {
 	rv = SECFailure;
 	goto loser;
@@ -865,6 +864,8 @@ static CK_RV
 sftk_updateMacs(PLArenaPool *arena, SFTKDBHandle *handle,
 		       CK_OBJECT_HANDLE id, SECItem *newKey)
 {
+    CK_RV crv = CKR_OK;
+    CK_RV crv2;
     CK_ATTRIBUTE authAttrs[] = {
 	{CKA_MODULUS, NULL, 0},
 	{CKA_PUBLIC_EXPONENT, NULL, 0},
@@ -878,7 +879,7 @@ sftk_updateMacs(PLArenaPool *arena, SFTKDBHandle *handle,
 	{CKA_NSS_OVERRIDE_EXTENSIONS, NULL, 0},
     };
     CK_ULONG authAttrCount = sizeof(authAttrs)/sizeof(CK_ATTRIBUTE);
-    unsigned int i, count;
+    int i, count;
     SFTKDBHandle *keyHandle = handle;
     SDB *keyTarget = NULL;
 
@@ -901,7 +902,7 @@ sftk_updateMacs(PLArenaPool *arena, SFTKDBHandle *handle,
     /*
      * STEP 1: find the MACed attributes of this object 
      */
-    (void)sftkdb_GetAttributeValue(handle, id, authAttrs, authAttrCount);
+    crv2 = sftkdb_GetAttributeValue(handle, id, authAttrs, authAttrCount);
     count = 0;
     /* allocate space for the attributes */
     for (i=0; i < authAttrCount; i++) {
@@ -911,6 +912,7 @@ sftk_updateMacs(PLArenaPool *arena, SFTKDBHandle *handle,
 	count++;
         authAttrs[i].pValue = PORT_ArenaAlloc(arena,authAttrs[i].ulValueLen);
 	if (authAttrs[i].pValue == NULL) {
+	    crv = CKR_HOST_MEMORY;
 	    break;
 	}
     }
@@ -920,7 +922,7 @@ sftk_updateMacs(PLArenaPool *arena, SFTKDBHandle *handle,
 	return CKR_OK;
     }
 
-    (void)sftkdb_GetAttributeValue(handle, id, authAttrs, authAttrCount);
+    crv = sftkdb_GetAttributeValue(handle, id, authAttrs, authAttrCount);
     /* ignore error code, we expect some possible errors */
 
     /* GetAttributeValue just verified the old macs, safe to write
@@ -967,7 +969,7 @@ sftk_updateEncrypted(PLArenaPool *arena, SFTKDBHandle *keydb,
 	{CKA_EXPONENT_2, NULL, 0},
 	{CKA_COEFFICIENT, NULL, 0} };
     CK_ULONG privAttrCount = sizeof(privAttrs)/sizeof(CK_ATTRIBUTE);
-    unsigned int i, count;
+    int i, count;
 
     /*
      * STEP 1. Read the old attributes in the clear.
@@ -1111,7 +1113,7 @@ sftkdb_convertObjects(SFTKDBHandle *handle, CK_ATTRIBUTE *template,
     CK_ULONG idCount = SFTK_MAX_IDS;
     CK_OBJECT_HANDLE ids[SFTK_MAX_IDS];
     CK_RV crv, crv2;
-    unsigned int i;
+    int i;
 
     crv = sftkdb_FindObjectsInit(handle, template, count, &find);
 

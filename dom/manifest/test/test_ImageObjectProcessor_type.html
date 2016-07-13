@@ -23,13 +23,7 @@ var testIcon = {
   }]
 };
 
-var invalidMimeTypes = [
-  'application / text',
-  'test;test',
-  ';test?test',
-  'application\\text',
-  'image/jpeg, image/gif'
-];
+var invalidMimeTypes = ['application / text', 'test;test', ';test?test', 'application\\text'];
 invalidMimeTypes.forEach((invalidMime) => {
   var expected = `Expect invalid mime to be treated like undefined.`;
   testIcon.icons[0].type = invalidMime;

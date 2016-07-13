@@ -87,6 +87,7 @@ public:
 
 #if !defined(WEBRTC_CHROMIUM_BUILD)
     static int SetAndroidObjects(void* javaVM, void* context);
+    static int SetAndroidObjects(void* javaVM, void* env, void* context);
 #endif
 
 protected:

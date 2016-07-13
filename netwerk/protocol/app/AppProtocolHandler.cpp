@@ -15,7 +15,6 @@
 #include "nsXULAppAPI.h"
 #include "nsPrincipal.h"
 #include "nsContentSecurityManager.h"
-#include "nsContentUtils.h"
 
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/Preferences.h"
@@ -28,7 +27,7 @@ using namespace mozilla;
   * containing an unknown appId.
   */
 class DummyChannel : public nsIJARChannel
-                          , Runnable
+                          , nsRunnable
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -52,7 +51,7 @@ private:
   nsCOMPtr<nsILoadInfo>       mLoadInfo;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(DummyChannel, Runnable, nsIRequest, nsIChannel, nsIJARChannel)
+NS_IMPL_ISUPPORTS_INHERITED(DummyChannel, nsRunnable, nsIRequest, nsIChannel, nsIJARChannel)
 
 DummyChannel::DummyChannel() : mPending(false)
                              , mSuspendCount(0)
@@ -112,13 +111,6 @@ DummyChannel::Open2(nsIInputStream** aStream)
 
 NS_IMETHODIMP DummyChannel::AsyncOpen(nsIStreamListener* aListener, nsISupports* aContext)
 {
-  MOZ_ASSERT(!mLoadInfo ||
-             mLoadInfo->GetSecurityMode() == 0 ||
-             mLoadInfo->GetInitialSecurityCheckDone() ||
-             (mLoadInfo->GetSecurityMode() == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
-              nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
-             "security flags in loadInfo but asyncOpen2() not called");
-
   mListener = aListener;
   mListenerContext = aContext;
   mPending = true;
@@ -162,6 +154,11 @@ NS_IMETHODIMP DummyChannel::GetJarFile(nsIFile* *aFile)
 }
 
 NS_IMETHODIMP DummyChannel::GetZipEntry(nsIZipEntry* *aEntry)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DummyChannel::EnsureChildFd()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -320,6 +317,11 @@ NS_IMETHODIMP DummyChannel::GetContentDispositionHeader(nsACString&)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+NS_IMETHODIMP DummyChannel::ForceNoIntercept()
+{
+  return NS_OK;
+}
+
 /**
   * app:// protocol implementation.
   */
@@ -403,7 +405,7 @@ AppProtocolHandler::NewChannel2(nsIURI* aUri,
                                 nsIChannel** aResult)
 {
   NS_ENSURE_ARG_POINTER(aUri);
-  RefPtr<nsJARChannel> channel = new nsJARChannel();
+  nsRefPtr<nsJARChannel> channel = new nsJARChannel();
 
   nsAutoCString host;
   nsresult rv = aUri->GetHost(host);
@@ -445,7 +447,7 @@ AppProtocolHandler::NewChannel2(nsIURI* aUri,
     if (NS_FAILED(rv) || !jsInfo.isObject()) {
       // Return a DummyChannel.
       printf_stderr("!! Creating a dummy channel for %s (no appInfo)\n", host.get());
-      RefPtr<nsIChannel> dummyChannel = new DummyChannel();
+      nsRefPtr<nsIChannel> dummyChannel = new DummyChannel();
       dummyChannel->SetLoadInfo(aLoadInfo);
       dummyChannel.forget(aResult);
       return NS_OK;
@@ -456,7 +458,7 @@ AppProtocolHandler::NewChannel2(nsIURI* aUri,
     if (!appInfo->Init(cx, jsInfo) || appInfo->mPath.IsEmpty()) {
       // Return a DummyChannel.
       printf_stderr("!! Creating a dummy channel for %s (invalid appInfo)\n", host.get());
-      RefPtr<nsIChannel> dummyChannel = new DummyChannel();
+      nsRefPtr<nsIChannel> dummyChannel = new DummyChannel();
       dummyChannel->SetLoadInfo(aLoadInfo);
       dummyChannel.forget(aResult);
       return NS_OK;
@@ -464,11 +466,12 @@ AppProtocolHandler::NewChannel2(nsIURI* aUri,
     mAppInfoCache.Put(host, appInfo);
   }
 
-  // Even core apps are on /system partition and can be accessed directly, but
-  // to ease sandboxing code not to handle the special case of core apps, only
-  // use scheme jar:file in parent, see bug 1119692 comment 20.
-  nsAutoCString jarSpec(XRE_IsParentProcess() ? "jar:file://"
-                                              : "jar:remoteopenfile://");
+  bool noRemote = (appInfo->mIsCoreApp ||
+                   XRE_IsParentProcess());
+
+  // In-parent and CoreApps can directly access files, so use jar:file://
+  nsAutoCString jarSpec(noRemote ? "jar:file://"
+                                 : "jar:remoteopenfile://");
   jarSpec += NS_ConvertUTF16toUTF8(appInfo->mPath) +
              NS_LITERAL_CSTRING("/application.zip!") +
              fileSpec;

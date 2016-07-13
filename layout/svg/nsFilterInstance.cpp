@@ -34,7 +34,7 @@ nsFilterInstance::GetFilterDescription(nsIContent* aFilteredElement,
                                        const nsTArray<nsStyleFilter>& aFilterChain,
                                        const UserSpaceMetrics& aMetrics,
                                        const gfxRect& aBBox,
-                                       nsTArray<RefPtr<SourceSurface>>& aOutAdditionalImages)
+                                       nsTArray<mozilla::RefPtr<SourceSurface>>& aOutAdditionalImages)
 {
   gfxMatrix unused; // aPaintTransform arg not used since we're not painting
   nsFilterInstance instance(nullptr, aFilteredElement, aMetrics,
@@ -58,12 +58,12 @@ UserSpaceMetricsForFrame(nsIFrame* aFrame)
 
 nsresult
 nsFilterInstance::PaintFilteredFrame(nsIFrame *aFilteredFrame,
-                                     DrawTarget* aDrawTarget,
+                                     gfxContext& aContext,
                                      const gfxMatrix& aTransform,
                                      nsSVGFilterPaintCallback *aPaintCallback,
                                      const nsRegion *aDirtyArea)
 {
-  auto& filterChain = aFilteredFrame->StyleEffects()->mFilters;
+  auto& filterChain = aFilteredFrame->StyleSVGReset()->mFilters;
   UniquePtr<UserSpaceMetrics> metrics = UserSpaceMetricsForFrame(aFilteredFrame);
   nsFilterInstance instance(aFilteredFrame, aFilteredFrame->GetContent(), *metrics,
                             filterChain, aPaintCallback, aTransform,
@@ -71,7 +71,7 @@ nsFilterInstance::PaintFilteredFrame(nsIFrame *aFilteredFrame,
   if (!instance.IsInitialized()) {
     return NS_OK;
   }
-  return instance.Render(aDrawTarget);
+  return instance.Render(&aContext);
 }
 
 nsRegion
@@ -83,7 +83,7 @@ nsFilterInstance::GetPostFilterDirtyArea(nsIFrame *aFilteredFrame,
   }
 
   gfxMatrix unused; // aPaintTransform arg not used since we're not painting
-  auto& filterChain = aFilteredFrame->StyleEffects()->mFilters;
+  auto& filterChain = aFilteredFrame->StyleSVGReset()->mFilters;
   UniquePtr<UserSpaceMetrics> metrics = UserSpaceMetricsForFrame(aFilteredFrame);
   nsFilterInstance instance(aFilteredFrame, aFilteredFrame->GetContent(), *metrics,
                             filterChain, nullptr, unused, nullptr,
@@ -103,7 +103,7 @@ nsFilterInstance::GetPreFilterNeededArea(nsIFrame *aFilteredFrame,
                                          const nsRegion& aPostFilterDirtyRegion)
 {
   gfxMatrix unused; // aPaintTransform arg not used since we're not painting
-  auto& filterChain = aFilteredFrame->StyleEffects()->mFilters;
+  auto& filterChain = aFilteredFrame->StyleSVGReset()->mFilters;
   UniquePtr<UserSpaceMetrics> metrics = UserSpaceMetricsForFrame(aFilteredFrame);
   nsFilterInstance instance(aFilteredFrame, aFilteredFrame->GetContent(), *metrics,
                             filterChain, nullptr, unused,
@@ -134,7 +134,7 @@ nsFilterInstance::GetPostFilterBounds(nsIFrame *aFilteredFrame,
   }
 
   gfxMatrix unused; // aPaintTransform arg not used since we're not painting
-  auto& filterChain = aFilteredFrame->StyleEffects()->mFilters;
+  auto& filterChain = aFilteredFrame->StyleSVGReset()->mFilters;
   UniquePtr<UserSpaceMetrics> metrics = UserSpaceMetricsForFrame(aFilteredFrame);
   nsFilterInstance instance(aFilteredFrame, aFilteredFrame->GetContent(), *metrics,
                             filterChain, nullptr, unused, nullptr,
@@ -354,7 +354,7 @@ nsFilterInstance::BuildSourcePaint(SourceInfo *aSource,
   RefPtr<DrawTarget> offscreenDT =
     gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
       neededRect.Size(), SurfaceFormat::B8G8R8A8);
-  if (!offscreenDT || !offscreenDT->IsValid()) {
+  if (!offscreenDT) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -364,8 +364,7 @@ nsFilterInstance::BuildSourcePaint(SourceInfo *aSource,
   }
 
   if (!mPaintTransform.IsSingular()) {
-    RefPtr<gfxContext> gfx = gfxContext::CreateOrNull(offscreenDT);
-    MOZ_ASSERT(gfx); // already checked the draw target above
+    nsRefPtr<gfxContext> gfx = new gfxContext(offscreenDT);
     gfx->Save();
     gfx->Multiply(mPaintTransform *
                   deviceToFilterSpace *
@@ -377,7 +376,7 @@ nsFilterInstance::BuildSourcePaint(SourceInfo *aSource,
       nsSVGUtils::MakeStrokePatternFor(mTargetFrame, gfx, &pattern);
     }
     if (pattern.GetPattern()) {
-      offscreenDT->FillRect(ToRect(FilterSpaceToUserSpace(ThebesRect(neededRect))),
+      offscreenDT->FillRect(ToRect(FilterSpaceToUserSpace(neededRect)),
                             pattern);
     }
     gfx->Restore();
@@ -419,11 +418,11 @@ nsFilterInstance::BuildSourceImage(DrawTarget* aTargetDT)
   RefPtr<DrawTarget> offscreenDT =
     gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
       neededRect.Size(), SurfaceFormat::B8G8R8A8);
-  if (!offscreenDT || !offscreenDT->IsValid()) {
+  if (!offscreenDT) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  gfxRect r = FilterSpaceToUserSpace(ThebesRect(neededRect));
+  gfxRect r = FilterSpaceToUserSpace(neededRect);
   r.RoundOut();
   nsIntRect dirty;
   if (!gfxUtils::GfxRectToIntRect(r, &dirty))
@@ -444,8 +443,7 @@ nsFilterInstance::BuildSourceImage(DrawTarget* aTargetDT)
   if (!deviceToFilterSpace.Invert()) {
     return NS_ERROR_FAILURE;
   }
-  RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(offscreenDT);
-  MOZ_ASSERT(ctx); // already checked the draw target above
+  nsRefPtr<gfxContext> ctx = new gfxContext(offscreenDT);
   ctx->SetMatrix(
     ctx->CurrentMatrix().Translate(-neededRect.TopLeft()).
                          PreMultiply(deviceToFilterSpace));
@@ -459,34 +457,34 @@ nsFilterInstance::BuildSourceImage(DrawTarget* aTargetDT)
 }
 
 nsresult
-nsFilterInstance::Render(DrawTarget* aDrawTarget)
+nsFilterInstance::Render(gfxContext* aContext)
 {
   MOZ_ASSERT(mTargetFrame, "Need a frame for rendering");
 
-  nsIntRect filterRect =
-    mPostFilterDirtyRegion.GetBounds().Intersect(OutputFilterSpaceBounds());
+  nsIntRect filterRect = mPostFilterDirtyRegion.GetBounds().Intersect(OutputFilterSpaceBounds());
   gfxMatrix ctm = GetFilterSpaceToDeviceSpaceTransform();
 
   if (filterRect.IsEmpty() || ctm.IsSingular()) {
     return NS_OK;
   }
 
-  AutoRestoreTransform autoRestoreTransform(aDrawTarget);
-  Matrix newTM = ToMatrix(ctm).PreTranslate(filterRect.x, filterRect.y) *
-                 aDrawTarget->GetTransform();
-  aDrawTarget->SetTransform(newTM);
+  RefPtr<DrawTarget> dt = aContext->GetDrawTarget();
+
+  AutoRestoreTransform autoRestoreTransform(dt);
+  Matrix newTM = ToMatrix(ctm).PreTranslate(filterRect.x, filterRect.y) * dt->GetTransform();
+  dt->SetTransform(newTM);
 
   ComputeNeededBoxes();
 
-  nsresult rv = BuildSourceImage(aDrawTarget);
+  nsresult rv = BuildSourceImage(dt);
   if (NS_FAILED(rv))
     return rv;
-  rv = BuildSourcePaints(aDrawTarget);
+  rv = BuildSourcePaints(dt);
   if (NS_FAILED(rv))
     return rv;
 
   FilterSupport::RenderFilterDescription(
-    aDrawTarget, mFilterDescription, IntRectToRect(filterRect),
+    dt, mFilterDescription, ToRect(filterRect),
     mSourceGraphic.mSourceSurface, mSourceGraphic.mSurfaceRect,
     mFillPaint.mSourceSurface, mFillPaint.mSurfaceRect,
     mStrokePaint.mSourceSurface, mStrokePaint.mSurfaceRect,
@@ -533,7 +531,7 @@ nsFilterInstance::OutputFilterSpaceBounds() const
   nsIntRect bounds =
     mPrimitiveDescriptions[numPrimitives - 1].PrimitiveSubregion();
   bool overflow;
-  IntSize surfaceSize =
+  gfxIntSize surfaceSize =
     nsSVGUtils::ConvertToSurfaceSize(bounds.Size(), &overflow);
   bounds.SizeTo(surfaceSize);
   return bounds;
@@ -579,9 +577,10 @@ nsFilterInstance::FrameSpaceToFilterSpace(const nsRegion* aRegion) const
     return OutputFilterSpaceBounds();
   }
   nsIntRegion result;
-  for (auto iter = aRegion->RectIter(); !iter.Done(); iter.Next()) {
+  nsRegionRectIterator it(*aRegion);
+  while (const nsRect* r = it.Next()) {
     // FrameSpaceToFilterSpace rounds out, so this works.
-    result.Or(result, FrameSpaceToFilterSpace(&iter.Get()));
+    result.Or(result, FrameSpaceToFilterSpace(r));
   }
   return result;
 }
@@ -590,9 +589,10 @@ nsRegion
 nsFilterInstance::FilterSpaceToFrameSpace(const nsIntRegion& aRegion) const
 {
   nsRegion result;
-  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+  nsIntRegionRectIterator it(aRegion);
+  while (const nsIntRect* r = it.Next()) {
     // FilterSpaceToFrameSpace rounds out, so this works.
-    result.Or(result, FilterSpaceToFrameSpace(iter.Get()));
+    result.Or(result, FilterSpaceToFrameSpace(*r));
   }
   return result;
 }

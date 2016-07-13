@@ -15,44 +15,64 @@
 
 #include <windows.h>
 
-#include "webrtc/base/thread_checker.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/event_wrapper.h"
 
 namespace webrtc {
 
 class ThreadWindows : public ThreadWrapper {
  public:
-  ThreadWindows(ThreadRunFunction func, void* obj, const char* thread_name);
-  ~ThreadWindows() override;
+  ThreadWindows(ThreadRunFunction func, ThreadObj obj, ThreadPriority prio,
+                const char* thread_name);
+  virtual ~ThreadWindows();
 
-  virtual bool Start() override;
-  virtual bool Stop() override;
+  virtual bool Start(unsigned int& id);
+  bool SetAffinity(const int* processor_numbers,
+                   const unsigned int amount_of_processors);
+  virtual bool Stop();
+  virtual void SetNotAlive();
 
-  bool SetPriority(ThreadPriority priority) override;
+  static unsigned int WINAPI StartThread(LPVOID lp_parameter);
 
  protected:
   virtual void Run();
 
-  static DWORD WINAPI StartThread(void* param);
+  void SetThreadNameHelper();
+  void ThreadStoppedHelper();
 
-  ThreadRunFunction const run_function_;
-  void* const obj_;
-  bool stop_;
-  HANDLE thread_;
-  const std::string name_;
-  rtc::ThreadChecker main_thread_;
+  ThreadRunFunction    run_function_;
+  ThreadObj            obj_;
+
+  bool                    alive_;
+  bool                    dead_;
+
+  // TODO(hellner)
+  // do_not_close_handle_ member seem pretty redundant. Should be able to remove
+  // it. Basically it should be fine to reclaim the handle when calling stop
+  // and in the destructor.
+  bool                    do_not_close_handle_;
+  ThreadPriority          prio_;
+  EventWrapper*           event_;
+  CriticalSectionWrapper* critsect_stop_;
+
+  HANDLE                  thread_;
+  unsigned int            id_;
+  char                    name_[kThreadMaxNameLength];
+  bool                    set_thread_name_;
+
 };
 
 class ThreadWindowsUI : public ThreadWindows {
  public:
-  ThreadWindowsUI(ThreadRunFunction func, void* obj,
-		  const char* thread_name) :
-  ThreadWindows(func, obj, thread_name),
+  ThreadWindowsUI(ThreadRunFunction func, ThreadObj obj, ThreadPriority prio,
+                  const char* thread_name) :
+  ThreadWindows(func, obj, prio, thread_name),
   hwnd_(nullptr),
-  timerid_(0),
-  timeout_(0) {
+  timerid_(0) {
  }
 
- virtual bool Stop() override;
+ virtual bool Start(unsigned int& id);
+ virtual bool Stop();
 
  /**
   * Request an async callback soon.
@@ -65,7 +85,7 @@ class ThreadWindowsUI : public ThreadWindows {
  bool RequestCallbackTimer(unsigned int milliseconds);
 
  protected:
-  virtual void Run() override;
+  virtual void Run();
 
  private:
   static LRESULT CALLBACK EventWindowProc(HWND, UINT, WPARAM, LPARAM);
@@ -74,7 +94,6 @@ class ThreadWindowsUI : public ThreadWindows {
 
   HWND hwnd_;
   UINT_PTR timerid_;
-  unsigned int timeout_;
 };
 
 

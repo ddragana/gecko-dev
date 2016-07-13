@@ -316,7 +316,7 @@ after(exports, (name, assert, done) => setTimeout(() => resetPlaces(done), 1));
 before(exports, (name, assert, done) => resetPlaces(done));
 
 function saveP () {
-  return promisedEmitter(save.apply(null, Array.prototype.slice.call(arguments)));
+  return promisedEmitter(save.apply(null, Array.slice(arguments)));
 }
 
 function makeCompleted (done, countTo) {

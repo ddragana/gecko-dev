@@ -12,6 +12,7 @@
 #include "nsPresContext.h"
 #include "nsScriptLoader.h"
 #include "nsIParser.h"
+#include "nsAutoPtr.h"
 #include "nsGkAtoms.h"
 #include "nsContentSink.h"
 
@@ -54,14 +55,14 @@ nsScriptElement::ScriptEvaluated(nsresult aResult,
     nsCOMPtr<nsIContent> cont =
       do_QueryInterface((nsIScriptElement*) this);
 
-    RefPtr<nsPresContext> presContext =
+    nsRefPtr<nsPresContext> presContext =
       nsContentUtils::GetContextForContent(cont);
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    EventMessage message = NS_SUCCEEDED(aResult) ? eLoad : eLoadError;
-    WidgetEvent event(true, message);
+    uint32_t type = NS_SUCCEEDED(aResult) ? NS_LOAD : NS_LOAD_ERROR;
+    WidgetEvent event(true, type);
     // Load event doesn't bubble.
-    event.mFlags.mBubbles = (message != eLoad);
+    event.mFlags.mBubbles = (type != NS_LOAD);
 
     EventDispatcher::Dispatch(cont, presContext, &event, nullptr, &status);
   }
@@ -82,8 +83,7 @@ nsScriptElement::AttributeChanged(nsIDocument* aDocument,
                                   Element* aElement,
                                   int32_t aNameSpaceID,
                                   nsIAtom* aAttribute,
-                                  int32_t aModType,
-                                  const nsAttrValue* aOldValue)
+                                  int32_t aModType)
 {
   MaybeProcessScript();
 }
@@ -116,7 +116,7 @@ nsScriptElement::MaybeProcessScript()
                "You forgot to add self as observer");
 
   if (mAlreadyStarted || !mDoneAddingChildren ||
-      !cont->GetComposedDoc() || mMalformed || !HasScriptContent()) {
+      !cont->GetCrossShadowCurrentDoc() || mMalformed || !HasScriptContent()) {
     return false;
   }
 
@@ -137,6 +137,6 @@ nsScriptElement::MaybeProcessScript()
     }
   }
 
-  RefPtr<nsScriptLoader> loader = ownerDoc->ScriptLoader();
+  nsRefPtr<nsScriptLoader> loader = ownerDoc->ScriptLoader();
   return loader->ProcessScriptElement(this);
 }

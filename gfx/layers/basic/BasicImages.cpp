@@ -12,8 +12,7 @@
 #include "gfxPlatform.h"                // for gfxPlatform, gfxImageFormat
 #include "gfxUtils.h"                   // for gfxUtils
 #include "mozilla/mozalloc.h"           // for operator delete[], etc
-#include "mozilla/RefPtr.h"
-#include "mozilla/UniquePtr.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoArrayPtr
 #include "nsAutoRef.h"                  // for nsCountedRef
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ERROR, NS_ASSERTION
@@ -22,17 +21,19 @@
 #include "mozilla/gfx/Point.h"          // for IntSize
 #include "gfx2DGlue.h"
 #include "YCbCrUtils.h"                 // for YCbCr conversions
+#ifdef XP_MACOSX
+#include "gfxQuartzImageSurface.h"
+#endif
 
 namespace mozilla {
 namespace layers {
 
-class BasicPlanarYCbCrImage : public RecyclingPlanarYCbCrImage
+class BasicPlanarYCbCrImage : public PlanarYCbCrImage
 {
 public:
   BasicPlanarYCbCrImage(const gfx::IntSize& aScaleHint, gfxImageFormat aOffscreenFormat, BufferRecycleBin *aRecycleBin)
-    : RecyclingPlanarYCbCrImage(aRecycleBin)
+    : PlanarYCbCrImage(aRecycleBin)
     , mScaleHint(aScaleHint)
-    , mStride(0)
     , mDelayedConversion(false)
   {
     SetOffscreenFormat(aOffscreenFormat);
@@ -43,11 +44,11 @@ public:
     if (mDecodedBuffer) {
       // Right now this only happens if the Image was never drawn, otherwise
       // this will have been tossed away at surface destruction.
-      mRecycleBin->RecycleBuffer(Move(mDecodedBuffer), mSize.height * mStride);
+      mRecycleBin->RecycleBuffer(mDecodedBuffer.forget(), mSize.height * mStride);
     }
   }
 
-  virtual bool CopyData(const Data& aData) override;
+  virtual void SetData(const Data& aData) override;
   virtual void SetDelayedConversion(bool aDelayed) override { mDelayedConversion = aDelayed; }
 
   already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
@@ -59,13 +60,13 @@ public:
 
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
-    size_t size = RecyclingPlanarYCbCrImage::SizeOfExcludingThis(aMallocSizeOf);
-    size += aMallocSizeOf(mDecodedBuffer.get());
+    size_t size = PlanarYCbCrImage::SizeOfExcludingThis(aMallocSizeOf);
+    size += mDecodedBuffer.SizeOfExcludingThis(aMallocSizeOf);
     return size;
   }
 
 private:
-  UniquePtr<uint8_t[]> mDecodedBuffer;
+  nsAutoArrayPtr<uint8_t> mDecodedBuffer;
   gfx::IntSize mScaleHint;
   int mStride;
   bool mDelayedConversion;
@@ -76,27 +77,34 @@ class BasicImageFactory : public ImageFactory
 public:
   BasicImageFactory() {}
 
-  virtual RefPtr<PlanarYCbCrImage>
-  CreatePlanarYCbCrImage(const gfx::IntSize& aScaleHint, BufferRecycleBin* aRecycleBin)
+  virtual already_AddRefed<Image> CreateImage(ImageFormat aFormat,
+                                              const gfx::IntSize &aScaleHint,
+                                              BufferRecycleBin *aRecycleBin)
   {
-    return new BasicPlanarYCbCrImage(aScaleHint, gfxPlatform::GetPlatform()->GetOffscreenFormat(), aRecycleBin);
+    nsRefPtr<Image> image;
+    if (aFormat == ImageFormat::PLANAR_YCBCR) {
+      image = new BasicPlanarYCbCrImage(aScaleHint, gfxPlatform::GetPlatform()->GetOffscreenFormat(), aRecycleBin);
+      return image.forget();
+    }
+
+    return ImageFactory::CreateImage(aFormat, aScaleHint, aRecycleBin);
   }
 };
 
-bool
-BasicPlanarYCbCrImage::CopyData(const Data& aData)
+void
+BasicPlanarYCbCrImage::SetData(const Data& aData)
 {
-  RecyclingPlanarYCbCrImage::CopyData(aData);
+  PlanarYCbCrImage::SetData(aData);
 
   if (mDelayedConversion) {
-    return false;
+    return;
   }
 
   // Do some sanity checks to prevent integer overflow
   if (aData.mYSize.width > PlanarYCbCrImage::MAX_DIMENSION ||
       aData.mYSize.height > PlanarYCbCrImage::MAX_DIMENSION) {
     NS_ERROR("Illegal image source width or height");
-    return false;
+    return;
   }
 
   gfx::SurfaceFormat format = gfx::ImageFormatToSurfaceFormat(GetOffscreenFormat());
@@ -106,7 +114,7 @@ BasicPlanarYCbCrImage::CopyData(const Data& aData)
   if (size.width > PlanarYCbCrImage::MAX_DIMENSION ||
       size.height > PlanarYCbCrImage::MAX_DIMENSION) {
     NS_ERROR("Illegal image dest width or height");
-    return false;
+    return;
   }
 
   gfxImageFormat iFormat = gfx::SurfaceFormatToImageFormat(format);
@@ -114,14 +122,12 @@ BasicPlanarYCbCrImage::CopyData(const Data& aData)
   mDecodedBuffer = AllocateBuffer(size.height * mStride);
   if (!mDecodedBuffer) {
     // out of memory
-    return false;
+    return;
   }
 
-  gfx::ConvertYCbCrToRGB(aData, format, size, mDecodedBuffer.get(), mStride);
+  gfx::ConvertYCbCrToRGB(aData, format, size, mDecodedBuffer, mStride);
   SetOffscreenFormat(iFormat);
   mSize = size;
-
-  return true;
 }
 
 already_AddRefed<gfx::SourceSurface>
@@ -146,7 +152,7 @@ BasicPlanarYCbCrImage::GetAsSourceSurface()
     // We create the target out of mDecodedBuffer, and get a snapshot from it.
     // The draw target is destroyed on scope exit and the surface owns the data.
     RefPtr<gfx::DrawTarget> drawTarget
-      = gfxPlatform::GetPlatform()->CreateDrawTargetForData(mDecodedBuffer.get(),
+      = gfxPlatform::GetPlatform()->CreateDrawTargetForData(mDecodedBuffer,
                                                             mSize,
                                                             mStride,
                                                             gfx::ImageFormatToSurfaceFormat(format));
@@ -157,7 +163,7 @@ BasicPlanarYCbCrImage::GetAsSourceSurface()
     surface = drawTarget->Snapshot();
   }
 
-  mRecycleBin->RecycleBuffer(Move(mDecodedBuffer), mSize.height * mStride);
+  mRecycleBin->RecycleBuffer(mDecodedBuffer.forget(), mSize.height * mStride);
 
   mSourceSurface = surface;
   return surface.forget();

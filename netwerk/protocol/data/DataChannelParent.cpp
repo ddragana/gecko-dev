@@ -7,7 +7,6 @@
 #include "DataChannelParent.h"
 #include "mozilla/Assertions.h"
 #include "nsNetUtil.h"
-#include "nsIChannel.h"
 
 namespace mozilla {
 namespace net {
@@ -22,8 +21,8 @@ bool
 DataChannelParent::Init(const uint32_t &channelId)
 {
     nsCOMPtr<nsIChannel> channel;
-    MOZ_ALWAYS_SUCCEEDS(
-        NS_LinkRedirectChannels(channelId, this, getter_AddRefs(channel)));
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+        NS_LinkRedirectChannels(channelId, this, getter_AddRefs(channel))));
 
     return true;
 }

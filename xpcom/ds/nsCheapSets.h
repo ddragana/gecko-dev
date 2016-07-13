@@ -10,12 +10,6 @@
 #include "nsTHashtable.h"
 #include <stdint.h>
 
-enum nsCheapSetOperator
-{
-  OpNext = 0,   // enumerator says continue
-  OpRemove = 1, // enumerator says remove and continue
-};
-
 /**
  * A set that takes up minimal size when there are 0 or 1 entries in the set.
  * Use for cases where sizes of 0 and 1 are even slightly common.
@@ -25,7 +19,7 @@ class nsCheapSet
 {
 public:
   typedef typename EntryType::KeyType KeyType;
-  typedef nsCheapSetOperator (*Enumerator)(EntryType* aEntry, void* userArg);
+  typedef PLDHashOperator (*Enumerator)(EntryType* aEntry, void* userArg);
 
   nsCheapSet() : mState(ZERO) {}
   ~nsCheapSet() { Clear(); }
@@ -51,7 +45,7 @@ public:
     mState = ZERO;
   }
 
-  void Put(const KeyType aVal);
+  nsresult Put(const KeyType aVal);
 
   void Remove(const KeyType aVal);
 
@@ -76,21 +70,13 @@ public:
       case ZERO:
         return 0;
       case ONE:
-        if (aEnumFunc(GetSingleEntry(), aUserArg) == OpRemove) {
+        if (aEnumFunc(GetSingleEntry(), aUserArg) == PL_DHASH_REMOVE) {
           GetSingleEntry()->~EntryType();
           mState = ZERO;
         }
         return 1;
-      case MANY: {
-        uint32_t n = mUnion.table->Count();
-        for (auto iter = mUnion.table->Iter(); !iter.Done(); iter.Next()) {
-          auto entry = static_cast<EntryType*>(iter.Get());
-          if (aEnumFunc(entry, aUserArg) == OpRemove) {
-            iter.Remove();
-          }
-        }
-        return n;
-      }
+      case MANY:
+        return mUnion.table->EnumerateEntries(aEnumFunc, aUserArg);
       default:
         NS_NOTREACHED("bogus state");
         return 0;
@@ -119,14 +105,14 @@ private:
 };
 
 template<typename EntryType>
-void
+nsresult
 nsCheapSet<EntryType>::Put(const KeyType aVal)
 {
   switch (mState) {
     case ZERO:
       new (GetSingleEntry()) EntryType(EntryType::KeyToPointer(aVal));
       mState = ONE;
-      return;
+      return NS_OK;
     case ONE: {
       nsTHashtable<EntryType>* table = new nsTHashtable<EntryType>();
       EntryType* entry = GetSingleEntry();
@@ -135,14 +121,13 @@ nsCheapSet<EntryType>::Put(const KeyType aVal)
       mUnion.table = table;
       mState = MANY;
     }
-    MOZ_FALLTHROUGH;
-
+    // Fall through.
     case MANY:
       mUnion.table->PutEntry(aVal);
-      return;
+      return NS_OK;
     default:
       NS_NOTREACHED("bogus state");
-      return;
+      return NS_OK;
   }
 }
 

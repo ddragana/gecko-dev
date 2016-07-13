@@ -54,7 +54,7 @@ class nsMenuBarFrame;
 class nsMenuParent;
 class nsIDOMKeyEvent;
 class nsIDocShellTreeItem;
-class nsPIDOMWindowOuter;
+class nsPIDOMWindow;
 
 // when a menu command is executed, the closemenu attribute may be used
 // to define how the menu should be closed up
@@ -99,12 +99,6 @@ enum nsNavigationDirection {
   eNavigationDirection_After
 };
 
-enum nsIgnoreKeys {
-  eIgnoreKeys_False,
-  eIgnoreKeys_True,
-  eIgnoreKeys_Handled,
-};
-
 #define NS_DIRECTION_IS_INLINE(dir) (dir == eNavigationDirection_Start ||     \
                                      dir == eNavigationDirection_End)
 #define NS_DIRECTION_IS_BLOCK(dir) (dir == eNavigationDirection_Before || \
@@ -135,7 +129,7 @@ private:
   nsPopupType mPopupType; // the popup type of the frame
   bool mIsContext; // true for context menus
   bool mOnMenuBar; // true if the menu is on a menu bar
-  nsIgnoreKeys mIgnoreKeys; // indicates how keyboard listeners should be used
+  bool mIgnoreKeys; // true if keyboard listeners should not be used
 
   nsMenuChainItem* mParent;
   nsMenuChainItem* mChild;
@@ -146,7 +140,7 @@ public:
       mPopupType(aPopupType),
       mIsContext(aIsContext),
       mOnMenuBar(false),
-      mIgnoreKeys(eIgnoreKeys_False),
+      mIgnoreKeys(false),
       mParent(nullptr),
       mChild(nullptr)
   {
@@ -164,9 +158,9 @@ public:
   nsPopupType PopupType() { return mPopupType; }
   bool IsMenu() { return mPopupType == ePopupTypeMenu; }
   bool IsContextMenu() { return mIsContext; }
-  nsIgnoreKeys IgnoreKeys() { return mIgnoreKeys; }
-  void SetIgnoreKeys(nsIgnoreKeys aIgnoreKeys) { mIgnoreKeys = aIgnoreKeys; }
+  bool IgnoreKeys() { return mIgnoreKeys; }
   bool IsOnMenuBar() { return mOnMenuBar; }
+  void SetIgnoreKeys(bool aIgnoreKeys) { mIgnoreKeys = aIgnoreKeys; }
   void SetOnMenuBar(bool aOnMenuBar) { mOnMenuBar = aOnMenuBar; }
   nsMenuChainItem* GetParent() { return mParent; }
   nsMenuChainItem* GetChild() { return mChild; }
@@ -183,7 +177,7 @@ public:
 };
 
 // this class is used for dispatching popupshowing events asynchronously.
-class nsXULPopupShowingEvent : public mozilla::Runnable
+class nsXULPopupShowingEvent : public nsRunnable
 {
 public:
   nsXULPopupShowingEvent(nsIContent *aPopup,
@@ -205,7 +199,7 @@ private:
 };
 
 // this class is used for dispatching popuphiding events asynchronously.
-class nsXULPopupHidingEvent : public mozilla::Runnable
+class nsXULPopupHidingEvent : public nsRunnable
 {
 public:
   nsXULPopupHidingEvent(nsIContent *aPopup,
@@ -237,7 +231,7 @@ private:
 };
 
 // this class is used for dispatching menu command events asynchronously.
-class nsXULMenuCommandEvent : public mozilla::Runnable
+class nsXULMenuCommandEvent : public nsRunnable
 {
 public:
   nsXULMenuCommandEvent(nsIContent *aMenu,
@@ -316,7 +310,7 @@ public:
 
   // This should be called when a window is moved or resized to adjust the
   // popups accordingly.
-  void AdjustPopupsOnWindowChange(nsPIDOMWindowOuter* aWindow);
+  void AdjustPopupsOnWindowChange(nsPIDOMWindow* aWindow);
   void AdjustPopupsOnWindowChange(nsIPresShell* aPresShell);
 
   // given a menu frame, find the prevous or next menu frame. If aPopup is
@@ -348,7 +342,9 @@ public:
   // returns true if the menu item aContent is a valid menuitem which may
   // be navigated to. aIsPopup should be true for items on a popup, or false
   // for items on a menubar.
-  static bool IsValidMenuItem(nsIContent* aContent, bool aOnPopup);
+  static bool IsValidMenuItem(nsPresContext* aPresContext,
+                                nsIContent* aContent,
+                                bool aOnPopup);
 
   // inform the popup manager that a menu bar has been activated or deactivated,
   // either because one of its menus has opened or closed, or that the menubar
@@ -483,14 +479,6 @@ public:
    * document is hidden.
    */
   void HidePopupsInDocShell(nsIDocShellTreeItem* aDocShellToHide);
-
-  /**
-   * Enable or disable the dynamic noautohide state of a panel.
-   *
-   * aPanel - the panel whose state is to change
-   * aShouldRollup - whether the panel is no longer noautohide
-   */
-  void EnableRollup(nsIContent* aPopup, bool aShouldRollup);
 
   /**
    * Execute a menu command from the triggering event aEvent.
@@ -644,9 +632,12 @@ protected:
   // return the topmost menu, skipping over invisible popups
   nsMenuChainItem* GetTopVisibleMenu();
 
-  // Hide all of the visible popups from the given list. This function can
-  // cause style changes and frame destruction.
-  void HidePopupsInList(const nsTArray<nsMenuPopupFrame *> &aFrames);
+  // Hide all of the visible popups from the given list. aDeselectMenu
+  // indicates whether to deselect the menu of popups when hiding; this
+  // flag is passed as the first argument to HidePopup. This function
+  // can cause style changes and frame destruction.
+  void HidePopupsInList(const nsTArray<nsMenuPopupFrame *> &aFrames,
+                        bool aDeselectMenu);
 
   // set the event that was used to trigger the popup, or null to clear the
   // event details. aTriggerContent will be set to the target of the event.
@@ -786,9 +777,6 @@ protected:
   // the popup that is currently being opened, stored only during the
   // popupshowing event
   nsCOMPtr<nsIContent> mOpeningPopup;
-
-  // If true, all popups won't hide automatically on blur
-  static bool sDevtoolsDisableAutoHide;
 };
 
 #endif

@@ -11,8 +11,6 @@ const SEARCH_URL = TESTROOT + "browser_searching.xml";
 const SEARCH_EXPECTED_TOTAL = 100;
 const SEARCH_QUERY = "search";
 
-const SEARCHABLE_PAGE = "addons://list/extension";
-
 var gManagerWindow;
 
 
@@ -22,7 +20,7 @@ function test() {
 
   waitForExplicitFinish();
 
-  open_manager(SEARCHABLE_PAGE, function(aWindow) {
+  open_manager("addons://list/extension", function(aWindow) {
     gManagerWindow = aWindow;
     run_next_test();
   });
@@ -47,11 +45,10 @@ function search(aRemoteSearch, aCallback) {
     EventUtils.synthesizeKey("VK_RETURN", { }, gManagerWindow);
 
     wait_for_view_load(gManagerWindow, function() {
-      let filter;
       if (aRemoteSearch)
-        filter = gManagerWindow.document.getElementById("search-filter-remote");
+        var filter = gManagerWindow.document.getElementById("search-filter-remote");
       else
-        filter = gManagerWindow.document.getElementById("search-filter-local");
+        var filter = gManagerWindow.document.getElementById("search-filter-local");
       EventUtils.synthesizeMouseAtCenter(filter, { }, gManagerWindow);
 
       executeSoon(aCallback);
@@ -78,7 +75,7 @@ add_test(function() {
   info("Searching locally");
   search(false, function() {
     check_allresultslink(false);
-    restart_manager(gManagerWindow, SEARCHABLE_PAGE, function(aManager) {
+    restart_manager(gManagerWindow, null, function(aManager) {
       gManagerWindow = aManager;
       run_next_test();
     });
@@ -86,12 +83,11 @@ add_test(function() {
 });
 
 add_test(function() {
-    debugger;
   info("Searching remotely - more results than cap");
   Services.prefs.setIntPref(PREF_GETADDONS_MAXRESULTS, 3);
   search(true, function() {
     check_allresultslink(true);
-    restart_manager(gManagerWindow, SEARCHABLE_PAGE, function(aManager) {
+    restart_manager(gManagerWindow, null, function(aManager) {
       gManagerWindow = aManager;
       run_next_test();
     });
@@ -103,7 +99,7 @@ add_test(function() {
   Services.prefs.setIntPref(PREF_GETADDONS_MAXRESULTS, 200);
   search(true, function() {
     check_allresultslink(false);
-    restart_manager(gManagerWindow, SEARCHABLE_PAGE, function(aManager) {
+    restart_manager(gManagerWindow, null, function(aManager) {
       gManagerWindow = aManager;
       run_next_test();
     });

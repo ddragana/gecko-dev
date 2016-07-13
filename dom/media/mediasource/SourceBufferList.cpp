@@ -16,8 +16,8 @@
 #include "nsThreadUtils.h"
 #include "mozilla/Logging.h"
 
-extern mozilla::LogModule* GetMediaSourceLog();
-extern mozilla::LogModule* GetMediaSourceAPILog();
+extern PRLogModuleInfo* GetMediaSourceLog();
+extern PRLogModuleInfo* GetMediaSourceAPILog();
 
 #define MSE_API(arg, ...) MOZ_LOG(GetMediaSourceAPILog(), mozilla::LogLevel::Debug, ("SourceBufferList(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #define MSE_DEBUG(arg, ...) MOZ_LOG(GetMediaSourceLog(), mozilla::LogLevel::Debug, ("SourceBufferList(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
@@ -38,11 +38,7 @@ SourceBufferList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   MOZ_ASSERT(NS_IsMainThread());
   aFound = aIndex < mSourceBuffers.Length();
-
-  if (!aFound) {
-    return nullptr;
-  }
-  return mSourceBuffers[aIndex];
+  return aFound ? mSourceBuffers[aIndex] : nullptr;
 }
 
 uint32_t
@@ -131,6 +127,16 @@ SourceBufferList::RangeRemoval(double aStart, double aEnd)
 }
 
 void
+SourceBufferList::Evict(double aStart, double aEnd)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MSE_DEBUG("Evict(aStart=%f, aEnd=%f)", aStart, aEnd);
+  for (uint32_t i = 0; i < mSourceBuffers.Length(); ++i) {
+    mSourceBuffers[i]->Evict(aStart, aEnd);
+  }
+}
+
+void
 SourceBufferList::Ended()
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -165,6 +171,16 @@ SourceBufferList::QueueAsyncSimpleEvent(const char* aName)
   nsCOMPtr<nsIRunnable> event = new AsyncEventRunner<SourceBufferList>(this, aName);
   NS_DispatchToMainThread(event);
 }
+
+#if defined(DEBUG)
+void
+SourceBufferList::Dump(const char* aPath)
+{
+  for (uint32_t i = 0; i < mSourceBuffers.Length(); ++i) {
+    mSourceBuffers[i]->Dump(aPath);
+  }
+}
+#endif
 
 SourceBufferList::SourceBufferList(MediaSource* aMediaSource)
   : DOMEventTargetHelper(aMediaSource->GetParentObject())

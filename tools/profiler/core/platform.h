@@ -57,19 +57,16 @@
 #include "PlatformMacros.h"
 #include "v8-support.h"
 #include <vector>
-#include "StackTop.h"
 
-// We need a definition of gettid(), but Linux libc implementations don't
-// provide a wrapper for it (except for Bionic)
-#if defined(__linux__)
+// We need a definition of gettid(), but glibc doesn't provide a
+// wrapper for it.
+#if defined(__GLIBC__)
 #include <unistd.h>
-#if !defined(__BIONIC__)
 #include <sys/syscall.h>
 static inline pid_t gettid()
 {
   return (pid_t) syscall(SYS_gettid);
 }
-#endif
 #endif
 
 #ifdef XP_WIN
@@ -246,7 +243,6 @@ class Thread {
 #undef HAVE_NATIVE_UNWIND
 #if defined(MOZ_PROFILING) \
     && (defined(SPS_PLAT_amd64_linux) || defined(SPS_PLAT_arm_android) \
-        || (defined(MOZ_WIDGET_ANDROID) && defined(__arm__)) \
         || defined(SPS_PLAT_x86_linux) \
         || defined(SPS_OS_windows) \
         || defined(SPS_OS_darwin))
@@ -285,18 +281,18 @@ class ThreadProfile;
 class TickSample {
  public:
   TickSample()
-      : pc(NULL)
-      , sp(NULL)
-      , fp(NULL)
+      :
+        pc(NULL),
+        sp(NULL),
+        fp(NULL),
 #ifdef ENABLE_ARM_LR_SAVING
-      , lr(NULL)
+        lr(NULL),
 #endif
-      , context(NULL)
-      , isSamplingCurrentThread(false)
-      , threadProfile(nullptr)
-      , rssMemory(0)
-      , ussMemory(0)
-  {}
+        context(NULL),
+        isSamplingCurrentThread(false),
+        threadProfile(nullptr),
+        rssMemory(0),
+        ussMemory(0) {}
 
   void PopulateContext(void* aContext);
 

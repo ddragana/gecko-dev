@@ -10,8 +10,8 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/dom/TouchBinding.h"
 #include "nsWrapperCache.h"
+#include "nsAutoPtr.h"
 #include "Units.h"
 
 class nsPresContext;
@@ -28,10 +28,6 @@ class Touch final : public nsISupports
 public:
   static bool PrefEnabled(JSContext* aCx, JSObject* aGlobal);
 
-  static already_AddRefed<Touch> Constructor(const GlobalObject& aGlobal,
-                                             const TouchInit& aParam,
-                                             ErrorResult& aRv);
-
   Touch(EventTarget* aTarget,
         int32_t aIdentifier,
         int32_t aPageX,
@@ -46,10 +42,9 @@ public:
         float aForce);
   Touch(int32_t aIdentifier,
         LayoutDeviceIntPoint aPoint,
-        LayoutDeviceIntPoint aRadius,
+        nsIntPoint aRadius,
         float aRotationAngle,
         float aForce);
-  Touch(const Touch& aOther);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Touch)
@@ -85,8 +80,8 @@ public:
   int32_t mIdentifier;
   CSSIntPoint mPagePoint;
   CSSIntPoint mClientPoint;
-  CSSIntPoint mScreenPoint;
-  LayoutDeviceIntPoint mRadius;
+  LayoutDeviceIntPoint mScreenPoint;
+  nsIntPoint mRadius;
   float mRotationAngle;
   float mForce;
 protected:

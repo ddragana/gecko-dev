@@ -40,13 +40,12 @@ class ReftestManifest(object):
     We currently only capture file information because that is the only thing
     tools require.
     """
-    def __init__(self, finder=None):
+    def __init__(self):
         self.path = None
         self.dirs = set()
         self.files = set()
         self.manifests = set()
         self.tests = set()
-        self.finder = finder
 
     def load(self, path):
         """Parse a reftest manifest file."""
@@ -58,75 +57,71 @@ class ReftestManifest(object):
         mdir = os.path.dirname(normalized_path)
         self.dirs.add(mdir)
 
-        if self.finder:
-            lines = self.finder.get(path).read().splitlines()
-        else:
-            with open(path, 'r') as fh:
-                lines = fh.read().splitlines()
+        with open(path, 'r') as fh:
+            urlprefix = ''
+            for line in fh:
+                line = line.decode('utf-8')
 
-        urlprefix = ''
-        for line in lines:
-            line = line.decode('utf-8')
-
-            # Entire line is a comment.
-            if line.startswith('#'):
-                continue
-
-            # Comments can begin mid line. Strip them.
-            m = RE_COMMENT.search(line)
-            if m:
-                line = line[:m.start()]
-            line = line.strip()
-            if not line:
-                continue
-
-            items = line.split()
-            tests = []
-
-            for i in range(len(items)):
-                item = items[i]
-
-                if item.startswith(FAILURE_TYPES):
-                    continue
-                if item.startswith(PREF_ITEMS):
-                    continue
-                if item == 'HTTP':
+                # Entire line is a comment.
+                if line.startswith('#'):
                     continue
 
-                m = RE_HTTP.match(item)
+                # Comments can begin mid line. Strip them.
+                m = RE_COMMENT.search(line)
                 if m:
-                    # Need to package the referenced directory.
-                    self.dirs.add(os.path.normpath(os.path.join(
-                        mdir, m.group(1))))
+                    line = line[:m.start()]
+
+                line = line.strip()
+                if not line:
                     continue
 
-                if item == 'url-prefix':
-                    urlprefix = items[i+1]
-                    break
+                items = line.split()
+                tests = []
 
-                if item == 'default-preferences':
-                    break
+                for i in range(len(items)):
+                    item = items[i]
 
-                if item == 'include':
-                    self.load(os.path.join(mdir, items[i+1]))
-                    break
+                    if item.startswith(FAILURE_TYPES):
+                        continue
+                    if item.startswith(PREF_ITEMS):
+                        continue
+                    if item == 'HTTP':
+                        continue
 
-                if item == 'load' or item == 'script':
-                    tests.append(items[i+1])
-                    break
+                    m = RE_HTTP.match(item)
+                    if m:
+                        # Need to package the referenced directory.
+                        self.dirs.add(os.path.normpath(os.path.join(
+                            mdir, m.group(1))))
+                        continue
 
-                if item == '==' or item == '!=':
-                    tests.extend(items[i+1:i+3])
-                    break
+                    if item == 'url-prefix':
+                        urlprefix = items[i+1]
+                        break
 
-            for f in tests:
-                # We can't package about: or data: URIs.
-                # Discarding data isn't correct for a parser. But retaining
-                # all data isn't currently a requirement.
-                if RE_PROTOCOL.match(f):
-                    continue
+                    if item == 'default-preferences':
+                        break
 
-                test = os.path.normpath(os.path.join(mdir, urlprefix + f))
-                self.files.add(test)
-                self.dirs.add(os.path.dirname(test))
-                self.tests.add((test, normalized_path))
+                    if item == 'include':
+                        self.load(os.path.join(mdir, items[i+1]))
+                        break
+
+                    if item == 'load' or item == 'script':
+                        tests.append(items[i+1])
+                        break
+
+                    if item == '==' or item == '!=':
+                        tests.extend(items[i+1:i+3])
+                        break
+
+                for f in tests:
+                    # We can't package about: or data: URIs.
+                    # Discarding data isn't correct for a parser. But retaining
+                    # all data isn't currently a requirement.
+                    if RE_PROTOCOL.match(f):
+                        continue
+
+                    test = os.path.normpath(os.path.join(mdir, urlprefix + f))
+                    self.files.add(test)
+                    self.dirs.add(os.path.dirname(test))
+                    self.tests.add((test, normalized_path))

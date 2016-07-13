@@ -4,8 +4,6 @@ config = {
     "products": {
         "installer": {
             "product-name": "Firefox-%(version)s",
-            "check_uptake": True,
-            "alias": "firefox-latest",
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -24,10 +22,6 @@ config = {
                 "win32": {
                     "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Setup%%20%(version)s.exe",
                     "bouncer-platform": "win",
-                },
-                "win64": {
-                    "path": "/firefox/releases/%(version)s/win64/:lang/Firefox%%20Setup%%20%(version)s.exe",
-                    "bouncer-platform": "win64",
                 },
                 "opensolaris-i386": {
                     "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-i386.tar.bz2",
@@ -49,7 +43,6 @@ config = {
         },
         "installer-ssl": {
             "product-name": "Firefox-%(version)s-SSL",
-            "check_uptake": True,
             "ssl-only": True,
             "add-locales": True,
             "paths": {
@@ -68,10 +61,6 @@ config = {
                 "win32": {
                     "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Setup%%20%(version)s.exe",
                     "bouncer-platform": "win",
-                },
-                "win64": {
-                    "path": "/firefox/releases/%(version)s/win64/:lang/Firefox%%20Setup%%20%(version)s.exe",
-                    "bouncer-platform": "win64",
                 },
                 "opensolaris-i386": {
                     "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-i386.tar.bz2",
@@ -93,8 +82,6 @@ config = {
         },
         "stub-installer": {
             "product-name": "Firefox-%(version)s-stub",
-            "check_uptake": True,
-            "alias": "firefox-stub",
             "ssl-only": True,
             "add-locales": True,
             "paths": {
@@ -106,7 +93,6 @@ config = {
         },
         "complete-mar": {
             "product-name": "Firefox-%(version)s-Complete",
-            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -125,10 +111,6 @@ config = {
                 "win32": {
                     "path": "/firefox/releases/%(version)s/update/win32/:lang/firefox-%(version)s.complete.mar",
                     "bouncer-platform": "win",
-                },
-                "win64": {
-                    "path": "/firefox/releases/%(version)s/update/win64/:lang/firefox-%(version)s.complete.mar",
-                    "bouncer-platform": "win64",
                 },
                 "opensolaris-i386": {
                     "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-i386.complete.mar",
@@ -150,7 +132,6 @@ config = {
         },
         "complete-mar-candidates": {
             "product-name": "Firefox-%(version)sbuild%(build_number)s-Complete",
-            "check_uptake": False,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -170,17 +151,12 @@ config = {
                     "path": "/firefox/candidates/%(version)s-candidates/build%(build_number)s/update/win32/:lang/firefox-%(version)s.complete.mar",
                     "bouncer-platform": "win",
                 },
-                "win64": {
-                    "path": "/firefox/candidates/%(version)s-candidates/build%(build_number)s/update/win64/:lang/firefox-%(version)s.complete.mar",
-                    "bouncer-platform": "win64",
-                },
             },
         },
     },
     "partials": {
         "releases-dir": {
             "product-name": "Firefox-%(version)s-Partial-%(prev_version)s",
-            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -199,10 +175,6 @@ config = {
                 "win32": {
                     "path": "/firefox/releases/%(version)s/update/win32/:lang/firefox-%(prev_version)s-%(version)s.partial.mar",
                     "bouncer-platform": "win",
-                },
-                "win64": {
-                    "path": "/firefox/releases/%(version)s/update/win64/:lang/firefox-%(prev_version)s-%(version)s.partial.mar",
-                    "bouncer-platform": "win64",
                 },
                 "opensolaris-i386": {
                     "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(prev_version)s-%(version)s.en-US.opensolaris-i386.partial.mar",
@@ -224,7 +196,6 @@ config = {
         },
         "candidates-dir": {
             "product-name": "Firefox-%(version)sbuild%(build_number)s-Partial-%(prev_version)sbuild%(prev_build_number)s",
-            "check_uptake": False,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -243,10 +214,6 @@ config = {
                 "win32": {
                     "path": "/firefox/candidates/%(version)s-candidates/build%(build_number)s/update/win32/:lang/firefox-%(prev_version)s-%(version)s.partial.mar",
                     "bouncer-platform": "win",
-                },
-                "win64": {
-                    "path": "/firefox/candidates/%(version)s-candidates/build%(build_number)s/update/win64/:lang/firefox-%(prev_version)s-%(version)s.partial.mar",
-                    "bouncer-platform": "win64",
                 },
             },
         },

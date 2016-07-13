@@ -11,7 +11,6 @@
 #include "nsBidiUtils.h"
 #include "nsHashKeys.h"
 #include "nsCoord.h"
-#include "nsRenderingContext.h"
 
 #ifdef DrawText
 #undef DrawText
@@ -94,8 +93,6 @@ struct nsBidiPositionResolve
 
 class nsBidiPresUtils {
 public:
-  typedef mozilla::gfx::DrawTarget DrawTarget;
-
   nsBidiPresUtils();
   ~nsBidiPresUtils();
   
@@ -183,7 +180,8 @@ public:
   static nsresult FormatUnicodeText(nsPresContext*  aPresContext,
                                     char16_t*       aText,
                                     int32_t&        aTextLength,
-                                    nsCharType      aCharType);
+                                    nsCharType      aCharType,
+                                    nsBidiDirection aDir);
 
   /**
    * Reorder plain text using the Unicode Bidi algorithm and send it to
@@ -214,7 +212,7 @@ public:
                              nsBidiLevel            aBaseLevel,
                              nsPresContext*         aPresContext,
                              nsRenderingContext&    aRenderingContext,
-                             DrawTarget*            aTextRunConstructionDrawTarget,
+                             nsRenderingContext&    aTextRunConstructionContext,
                              nsFontMetrics&         aFontMetrics,
                              nscoord                aX,
                              nscoord                aY,
@@ -222,7 +220,7 @@ public:
                              int32_t                aPosResolveCount = 0)
   {
     return ProcessTextForRenderingContext(aText, aLength, aBaseLevel, aPresContext, aRenderingContext,
-                                          aTextRunConstructionDrawTarget,
+                                          aTextRunConstructionContext,
                                           aFontMetrics,
                                           MODE_DRAW, aX, aY, aPosResolve, aPosResolveCount, nullptr);
   }
@@ -236,8 +234,7 @@ public:
   {
     nscoord length;
     nsresult rv = ProcessTextForRenderingContext(aText, aLength, aBaseLevel, aPresContext,
-                                                 aRenderingContext,
-                                                 aRenderingContext.GetDrawTarget(),
+                                                 aRenderingContext, aRenderingContext,
                                                  aFontMetrics,
                                                  MODE_MEASURE, 0, 0, nullptr, 0, &length);
     return NS_SUCCEEDED(rv) ? length : 0;
@@ -281,14 +278,14 @@ public:
   static nsIFrame* GetFirstLeaf(nsIFrame* aFrame);
     
   /**
-   * Get the bidi data of the given (inline) frame.
-   */
-  static mozilla::FrameBidiData GetFrameBidiData(nsIFrame* aFrame);
-
-  /**
    * Get the bidi embedding level of the given (inline) frame.
    */
   static nsBidiLevel GetFrameEmbeddingLevel(nsIFrame* aFrame);
+    
+  /**
+   * Get the paragraph depth of the given (inline) frame.
+   */
+  static uint8_t GetParagraphDepth(nsIFrame* aFrame);
 
   /**
    * Get the bidi base level of the given (inline) frame.
@@ -380,7 +377,7 @@ private:
                                  nsBidiLevel            aBaseLevel,
                                  nsPresContext*         aPresContext,
                                  nsRenderingContext&    aRenderingContext,
-                                 DrawTarget*            aTextRunConstructionDrawTarget,
+                                 nsRenderingContext&    aTextRunConstructionContext,
                                  nsFontMetrics&         aFontMetrics,
                                  Mode                   aMode,
                                  nscoord                aX, // DRAW only
@@ -493,6 +490,7 @@ private:
    *  @lina 04/11/2000
    */
   static nscoord RepositionInlineFrames(BidiLineData* aBld,
+                                        nsIFrame* aFirstChild,
                                         mozilla::WritingMode aLineWM,
                                         const nsSize& aContainerSize,
                                         nscoord aStart);
@@ -504,6 +502,7 @@ private:
    *
    * @param aFrame       the original frame
    * @param aNewFrame    [OUT] the new frame that was created
+   * @param aFrameIndex  [IN/OUT] index of aFrame in mLogicalFrames
    * @param aStart       [IN] the start of the content mapped by aFrame (and 
    *                          any fluid continuations)
    * @param aEnd         [IN] the offset of the end of the single-directional
@@ -514,6 +513,7 @@ private:
   static inline
   nsresult EnsureBidiContinuation(nsIFrame*       aFrame,
                                   nsIFrame**      aNewFrame,
+                                  int32_t&        aFrameIndex,
                                   int32_t         aStart,
                                   int32_t         aEnd);
 
@@ -524,6 +524,11 @@ private:
    * @param aFrame       the frame whose continuations are to be removed
    * @param aFirstIndex  index of aFrame in mLogicalFrames
    * @param aLastIndex   index of the last frame to be removed
+   * @param aOffset      [OUT] count of directional frames removed. Since
+   *                     directional frames have control characters
+   *                     corresponding to them in mBuffer, the pointers to
+   *                     mBuffer in Resolve() will need to be updated after
+   *                     deleting the frames.
    *
    * @see Resolve()
    * @see EnsureBidiContinuation()
@@ -531,7 +536,8 @@ private:
   static void RemoveBidiContinuation(BidiParagraphData* aBpd,
                                      nsIFrame*          aFrame,
                                      int32_t            aFirstIndex,
-                                     int32_t            aLastIndex);
+                                     int32_t            aLastIndex,
+                                     int32_t&           aOffset);
   static void CalculateCharType(nsBidi*          aBidiEngine,
                                 const char16_t* aText,
                                 int32_t&         aOffset,

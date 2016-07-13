@@ -9,7 +9,6 @@
 #include "OpusParser.h"
 #include "PlatformDecoderModule.h"
 
-#include "mozilla/Maybe.h"
 #include "nsAutoPtr.h"
 
 namespace mozilla {
@@ -17,44 +16,29 @@ namespace mozilla {
 class OpusDataDecoder : public MediaDataDecoder
 {
 public:
-  explicit OpusDataDecoder(const CreateDecoderParams& aParams);
+  OpusDataDecoder(const AudioInfo& aConfig,
+                  FlushableTaskQueue* aTaskQueue,
+                  MediaDataDecoderCallback* aCallback);
   ~OpusDataDecoder();
 
-  RefPtr<InitPromise> Init() override;
+  nsresult Init() override;
   nsresult Input(MediaRawData* aSample) override;
   nsresult Flush() override;
   nsresult Drain() override;
   nsresult Shutdown() override;
-  const char* GetDescriptionName() const override
-  {
-    return "opus audio decoder";
-  }
 
   // Return true if mimetype is Opus
   static bool IsOpus(const nsACString& aMimeType);
 
-  // Pack pre-skip/CodecDelay, given in microseconds, into a
-  // MediaByteBuffer. The decoder expects this value to come
-  // from the container (if any) and to precede the OpusHead
-  // block in the CodecSpecificConfig buffer to verify the
-  // values match.
-  static void AppendCodecDelay(MediaByteBuffer* config, uint64_t codecDelayUS);
-
 private:
-  enum DecodeError {
-    DECODE_SUCCESS,
-    DECODE_ERROR,
-    FATAL_ERROR
-  };
-
   nsresult DecodeHeader(const unsigned char* aData, size_t aLength);
 
-  void ProcessDecode(MediaRawData* aSample);
-  DecodeError DoDecode(MediaRawData* aSample);
-  void ProcessDrain();
+  void Decode (MediaRawData* aSample);
+  int DoDecode (MediaRawData* aSample);
+  void DoDrain ();
 
   const AudioInfo& mInfo;
-  const RefPtr<TaskQueue> mTaskQueue;
+  RefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
 
   // Opus decoder state
@@ -69,10 +53,6 @@ private:
   // will raise an error so we can indicate that the file is invalid.
   bool mPaddingDiscarded;
   int64_t mFrames;
-  Maybe<int64_t> mLastFrameTime;
-  uint8_t mMappingTable[MAX_AUDIO_CHANNELS]; // Channel mapping table.
-
-  Atomic<bool> mIsFlushing;
 };
 
 } // namespace mozilla

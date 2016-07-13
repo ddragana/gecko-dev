@@ -8,9 +8,7 @@
 
 dump("###################################### BrowserElementCopyPaste.js loaded\n");
 
-var { classes: Cc, interfaces: Ci, results: Cr, utils: Cu }  = Components;
-
-var CopyPasteAssistent = {
+let CopyPasteAssistent = {
   COMMAND_MAP: {
     'cut': 'cmd_cut',
     'copy': 'cmd_copyAndCollapseToEnd',
@@ -30,7 +28,7 @@ var CopyPasteAssistent = {
     switch (e.data.msg_name) {
       case 'copypaste-do-command':
         if (this._isCommandEnabled(e.data.command)) {
-          docShell.doCommand(this.COMMAND_MAP[e.data.command]);
+          docShell.doCommand(COMMAND_MAP[e.data.command]);
         }
         break;
     }
@@ -71,9 +69,7 @@ var CopyPasteAssistent = {
       reason: e.reason,
       collapsed: e.collapsed,
       caretVisible: e.caretVisible,
-      selectionVisible: e.selectionVisible,
-      selectionEditable: e.selectionEditable,
-      selectedTextContent: e.selectedTextContent
+      selectionVisible: e.selectionVisible
     };
 
     // Get correct geometry information if we have nested iframe.
@@ -85,13 +81,6 @@ var CopyPasteAssistent = {
       detail.rect.left += currentRect.left;
       detail.rect.right += currentRect.left;
       currentWindow = currentWindow.realFrameElement.ownerDocument.defaultView;
-
-      let targetDocShell = currentWindow
-          .QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(Ci.nsIWebNavigation);
-      if(targetDocShell.isMozBrowserOrApp) {
-        break;
-      }
     }
 
     sendAsyncMsg('caretstatechanged', detail);

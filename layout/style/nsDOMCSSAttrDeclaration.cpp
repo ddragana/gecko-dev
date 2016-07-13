@@ -72,15 +72,26 @@ nsresult
 nsDOMCSSAttributeDeclaration::SetCSSDeclaration(css::Declaration* aDecl)
 {
   NS_ASSERTION(mElement, "Must have Element to set the declaration!");
+  css::StyleRule* oldRule =
+    mIsSMILOverride ? mElement->GetSMILOverrideStyleRule() :
+    mElement->GetInlineStyleRule();
+  NS_ASSERTION(oldRule, "Element must have rule");
+
+  nsRefPtr<css::StyleRule> newRule =
+    oldRule->DeclarationChanged(aDecl, false);
+  if (!newRule) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   return
-    mIsSMILOverride ? mElement->SetSMILOverrideStyleDeclaration(aDecl, true) :
-    mElement->SetInlineStyleDeclaration(aDecl, nullptr, true);
+    mIsSMILOverride ? mElement->SetSMILOverrideStyleRule(newRule, true) :
+    mElement->SetInlineStyleRule(newRule, nullptr, true);
 }
 
 nsIDocument*
 nsDOMCSSAttributeDeclaration::DocToUpdate()
 {
-  // We need OwnerDoc() rather than GetUncomposedDoc() because it might
+  // We need OwnerDoc() rather than GetCurrentDoc() because it might
   // be the BeginUpdate call that inserts mElement into the document.
   return mElement->OwnerDoc();
 }
@@ -91,11 +102,11 @@ nsDOMCSSAttributeDeclaration::GetCSSDeclaration(Operation aOperation)
   if (!mElement)
     return nullptr;
 
-  css::Declaration* declaration;
+  css::StyleRule* cssRule;
   if (mIsSMILOverride)
-    declaration = mElement->GetSMILOverrideStyleDeclaration();
+    cssRule = mElement->GetSMILOverrideStyleRule();
   else
-    declaration = mElement->GetInlineStyleDeclaration();
+    cssRule = mElement->GetInlineStyleRule();
 
   // Notify observers that our style="" attribute is going to change
   // unless:
@@ -111,15 +122,14 @@ nsDOMCSSAttributeDeclaration::GetCSSDeclaration(Operation aOperation)
   // AttributeWillChange if this is inline style.
   if (!mIsSMILOverride &&
       ((aOperation == eOperation_Modify) ||
-       (aOperation == eOperation_RemoveProperty && declaration))) {
+       (aOperation == eOperation_RemoveProperty && cssRule))) {
     nsNodeUtils::AttributeWillChange(mElement, kNameSpaceID_None,
                                      nsGkAtoms::style,
-                                     nsIDOMMutationEvent::MODIFICATION,
-                                     nullptr);
+                                     nsIDOMMutationEvent::MODIFICATION);
   }
 
-  if (declaration) {
-    return declaration;
+  if (cssRule) {
+    return cssRule->GetDeclaration();
   }
 
   if (aOperation != eOperation_Modify) {
@@ -127,15 +137,16 @@ nsDOMCSSAttributeDeclaration::GetCSSDeclaration(Operation aOperation)
   }
 
   // cannot fail
-  RefPtr<css::Declaration> decl = new css::Declaration();
+  css::Declaration *decl = new css::Declaration();
   decl->InitializeEmpty();
+  nsRefPtr<css::StyleRule> newRule = new css::StyleRule(nullptr, decl, 0, 0);
 
   // this *can* fail (inside SetAttrAndNotify, at least).
   nsresult rv;
   if (mIsSMILOverride)
-    rv = mElement->SetSMILOverrideStyleDeclaration(decl, false);
+    rv = mElement->SetSMILOverrideStyleRule(newRule, false);
   else
-    rv = mElement->SetInlineStyleDeclaration(decl, nullptr, false);
+    rv = mElement->SetInlineStyleRule(newRule, nullptr, false);
 
   if (NS_FAILED(rv)) {
     return nullptr; // the decl will be destroyed along with the style rule
@@ -178,19 +189,14 @@ nsDOMCSSAttributeDeclaration::SetPropertyValue(const nsCSSProperty aPropID,
   // Scripted modifications to style.opacity or style.transform
   // could immediately force us into the animated state if heuristics suggest
   // this is scripted animation.
-  // FIXME: This is missing the margin shorthand and the logical versions of
-  // the margin properties, see bug 1266287.
   if (aPropID == eCSSProperty_opacity || aPropID == eCSSProperty_transform ||
       aPropID == eCSSProperty_left || aPropID == eCSSProperty_top ||
       aPropID == eCSSProperty_right || aPropID == eCSSProperty_bottom ||
       aPropID == eCSSProperty_margin_left || aPropID == eCSSProperty_margin_top ||
-      aPropID == eCSSProperty_margin_right || aPropID == eCSSProperty_margin_bottom ||
-      aPropID == eCSSProperty_background_position_x ||
-      aPropID == eCSSProperty_background_position_y ||
-      aPropID == eCSSProperty_background_position) {
+      aPropID == eCSSProperty_margin_right || aPropID == eCSSProperty_margin_bottom) {
     nsIFrame* frame = mElement->GetPrimaryFrame();
     if (frame) {
-      ActiveLayerTracker::NotifyInlineStyleRuleModified(frame, aPropID, aValue, this);
+      ActiveLayerTracker::NotifyInlineStyleRuleModified(frame, aPropID);
     }
   }
   return nsDOMCSSDeclaration::SetPropertyValue(aPropID, aValue);

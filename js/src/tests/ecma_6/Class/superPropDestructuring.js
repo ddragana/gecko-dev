@@ -1,3 +1,5 @@
+var test = `
+
 class base {
     constructor() { }
 }
@@ -20,7 +22,7 @@ Object.defineProperty(base.prototype, "intendent",
 
 const testArr = [525600, "Fred"];
 class derived extends base {
-    constructor() { super(); }
+    constructor() { }
     prepForTest() { seenValues = []; }
     testAsserts() { assertDeepEq(seenValues, testArr); }
     testProps() {
@@ -38,6 +40,11 @@ class derived extends base {
 let d = new derived();
 d.testProps();
 d.testElems();
+
+`;
+
+if (classesEnabled())
+    eval(test);
 
 if (typeof reportCompare === 'function')
     reportCompare(0,0,"OK");

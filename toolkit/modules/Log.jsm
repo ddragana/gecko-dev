@@ -280,9 +280,7 @@ Logger.prototype = {
   },
 
   _parent: null,
-  get parent() {
-    return this._parent;
-  },
+  get parent() this._parent,
   set parent(parent) {
     if (this._parent == parent) {
       return;
@@ -350,8 +348,7 @@ Logger.prototype = {
       throw "An action is required when logging a structured message.";
     }
     if (!params) {
-      this.log(this.level, undefined, {"action": action});
-      return;
+      return this.log(this.level, undefined, {"action": action});
     }
     if (typeof(params) != "object") {
       throw "The params argument is required to be an object.";
@@ -576,7 +573,6 @@ BasicFormatter.prototype = {
       }
       return textParts.join(': ');
     }
-    return undefined;
   },
 
   format: function BF_format(message) {
@@ -636,7 +632,7 @@ StructuredFormatter.prototype = {
 function isError(aObj) {
   return (aObj && typeof(aObj) == 'object' && "name" in aObj && "message" in aObj &&
           "fileName" in aObj && "lineNumber" in aObj && "stack" in aObj);
-}
+};
 
 /*
  * Parameter Formatters
@@ -869,7 +865,7 @@ FileAppender.prototype = {
   __proto__: Appender.prototype,
 
   _openFile: function () {
-    return Task.spawn(function* _openFile() {
+    return Task.spawn(function _openFile() {
       try {
         this._file = yield OS.File.open(this._path,
                                         {truncate: true});
@@ -901,7 +897,6 @@ FileAppender.prototype = {
         if (this._file) {
           return this._file.write(array);
         }
-        return undefined;
       });
     }
   },
@@ -945,7 +940,6 @@ BoundedFileAppender.prototype = {
       this._removeFilePromise = null;
       this.doAppend(formatted);
     });
-    return undefined;
   },
 
   reset: function () {

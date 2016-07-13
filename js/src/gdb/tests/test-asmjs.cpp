@@ -24,7 +24,7 @@ FRAGMENT(asmjs, segfault) {
 
     CompileOptions opts(cx);
     opts.setFileAndLine(__FILE__, line0 + 1);
-    opts.asmJSOption = JS::AsmJSOption::Enabled;
+    opts.asmJSOption = true;
     RootedValue rval(cx);
     bool ok;
     ok = false;

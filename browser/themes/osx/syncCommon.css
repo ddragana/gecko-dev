@@ -8,19 +8,13 @@
 }
 
 .statusIcon {
-  margin-inline-start: 4px;
+  -moz-margin-start: 4px;
   max-height: 16px;
   max-width: 16px;
 }
 
 .statusIcon[status="active"] {
-  list-style-image: url("chrome://global/skin/icons/loading.png");
-}
-
-@media (min-resolution: 2dppx) {
-  .statusIcon[status="active"] {
-    list-style-image: url("chrome://global/skin/icons/loading@2x.png");
-  }
+  list-style-image: url("chrome://global/skin/icons/loading_16.png");
 }
 
 .statusIcon[status="error"] {

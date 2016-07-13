@@ -1,7 +1,8 @@
+// |jit-test| error: TypeError
+//
 // Make sure we can recover missing arguments even when it gets assigned to
 // another slot.
 
-load(libdir + "asserts.js");
 load(libdir + "evalInFrame.js");
 
 function h() {
@@ -13,13 +14,4 @@ function f() {
   h();
 }
 
-assertThrowsInstanceOf(f, TypeError);
-
-function g() {
-  {
-    let a = arguments;
-    h();
-  }
-}
-
-assertThrowsInstanceOf(g, TypeError);
+f();

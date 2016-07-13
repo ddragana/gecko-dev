@@ -12,6 +12,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/ErrorResult.h"
 #include "Units.h"
@@ -60,8 +61,8 @@ protected:
   class QuadBounds;
 
   nsCOMPtr<nsISupports> mParent;
-  RefPtr<DOMPoint> mPoints[4];
-  mutable RefPtr<QuadBounds> mBounds; // allocated lazily
+  nsRefPtr<DOMPoint> mPoints[4];
+  mutable nsRefPtr<QuadBounds> mBounds; // allocated lazily
 };
 
 } // namespace dom

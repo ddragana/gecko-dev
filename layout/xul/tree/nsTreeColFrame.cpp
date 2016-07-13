@@ -143,13 +143,12 @@ nsTreeColFrame::AttributeChanged(int32_t aNameSpaceID,
 }
 
 void
-nsTreeColFrame::SetXULBounds(nsBoxLayoutState& aBoxLayoutState,
-                             const nsRect& aRect,
-                             bool aRemoveOverflowArea)
-{
+nsTreeColFrame::SetBounds(nsBoxLayoutState& aBoxLayoutState,
+                          const nsRect& aRect,
+                          bool aRemoveOverflowArea) {
   nscoord oldWidth = mRect.width;
 
-  nsBoxFrame::SetXULBounds(aBoxLayoutState, aRect, aRemoveOverflowArea);
+  nsBoxFrame::SetBounds(aBoxLayoutState, aRect, aRemoveOverflowArea);
   if (mRect.width != oldWidth) {
     nsITreeBoxObject* treeBoxObject = GetTreeBoxObject();
     if (treeBoxObject) {

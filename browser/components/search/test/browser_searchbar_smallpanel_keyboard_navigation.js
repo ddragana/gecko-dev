@@ -309,8 +309,20 @@ add_task(function* test_tab_and_arrows() {
 });
 
 add_task(function* test_open_search() {
+  let tab = gBrowser.addTab();
+  gBrowser.selectedTab = tab;
+
+  let deferred = Promise.defer();
+  let browser = gBrowser.selectedBrowser;
+  browser.addEventListener("load", function onload() {
+    browser.removeEventListener("load", onload, true);
+    deferred.resolve();
+  }, true);
+
   let rootDir = getRootDirectory(gTestPath);
-  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, rootDir + "opensearch.html");
+  content.location = rootDir + "opensearch.html";
+
+  yield deferred.promise;
 
   let promise = promiseEvent(searchPopup, "popupshown");
   info("Opening search panel");

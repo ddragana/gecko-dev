@@ -93,7 +93,7 @@ namespace rtc {
 class Task : public TaskParent {
  public:
   Task(TaskParent *parent);
-  ~Task() override;
+  virtual ~Task();
 
   int32 unique_id() { return unique_id_; }
 
@@ -140,7 +140,7 @@ class Task : public TaskParent {
   virtual int Process(int state);
   virtual void Stop();
   virtual int ProcessStart() = 0;
-  virtual int ProcessResponse();
+  virtual int ProcessResponse() { return STATE_DONE; }
 
   void ResetTimeout();
   void ClearTimeout();
@@ -149,7 +149,10 @@ class Task : public TaskParent {
   void ResumeTimeout();
 
  protected:
-  virtual int OnTimeout();
+  virtual int OnTimeout() {
+    // by default, we are finished after timing out
+    return STATE_DONE;
+  }
 
  private:
   void Done();

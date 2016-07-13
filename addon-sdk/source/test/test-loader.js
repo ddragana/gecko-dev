@@ -3,13 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 'use strict';
 
-var {
+let {
   Loader, main, unload, parseStack, generateMap, resolve, join,
   Require, Module
 } = require('toolkit/loader');
-var { readURI } = require('sdk/net/url');
+let { readURI } = require('sdk/net/url');
 
-var root = module.uri.substr(0, module.uri.lastIndexOf('/'));
+let root = module.uri.substr(0, module.uri.lastIndexOf('/'));
 
 const app = require('sdk/system/xul-app');
 
@@ -57,10 +57,6 @@ exports['test join'] = function (assert) {
     'resource://my/path/yeah/whoa');
   assert.equal(join('resource://my/path/yeah/yuh', './whoa'),
     'resource://my/path/yeah/yuh/whoa');
-  assert.equal(join('resource:///my/path/yeah/yuh', '../whoa'),
-    'resource:///my/path/yeah/whoa');
-  assert.equal(join('resource:///my/path/yeah/yuh', './whoa'),
-    'resource:///my/path/yeah/yuh/whoa');
   assert.equal(join('file:///my/path/yeah/yuh', '../whoa'),
     'file:///my/path/yeah/whoa');
   assert.equal(join('file:///my/path/yeah/yuh', './whoa'),
@@ -351,38 +347,9 @@ exports['test console global by default'] = function (assert) {
 exports['test shared globals'] = function(assert) {
   let uri = root + '/fixtures/loader/cycles/';
   let loader = Loader({ paths: { '': uri }, sharedGlobal: true,
-                        sharedGlobalBlocklist: ['b'] });
-
-  let program = main(loader, 'main');
-
-  // As it is hard to verify what is the global of an object
-  // (due to wrappers) we check that we see the `foo` symbol
-  // being manually injected into the shared global object
-  loader.sharedGlobalSandbox.foo = true;
-
-  let m = loader.sandboxes[uri + 'main.js'];
-  let a = loader.sandboxes[uri + 'a.js'];
-  let b = loader.sandboxes[uri + 'b.js'];
-
-  assert.ok(Cu.getGlobalForObject(m).foo, "main is shared");
-  assert.ok(Cu.getGlobalForObject(a).foo, "a is shared");
-  assert.ok(!Cu.getGlobalForObject(b).foo, "b isn't shared");
-
-  unload(loader);
-}
-
-exports['test deprecated shared globals exception name'] = function(assert) {
-  let uri = root + '/fixtures/loader/cycles/';
-  let loader = Loader({ paths: { '': uri }, sharedGlobal: true,
                         sharedGlobalBlacklist: ['b'] });
 
   let program = main(loader, 'main');
-
-  assert.ok(loader.sharedGlobalBlocklist.includes("b"), "b should be in the blocklist");
-  assert.equal(loader.sharedGlobalBlocklist.length, loader.sharedGlobalBlacklist.length,
-               "both blocklists should have the same number of items.");
-  assert.equal(loader.sharedGlobalBlocklist.join(","), loader.sharedGlobalBlacklist.join(","),
-               "both blocklists should have the same items.");
 
   // As it is hard to verify what is the global of an object
   // (due to wrappers) we check that we see the `foo` symbol
@@ -416,19 +383,6 @@ exports["test require#resolve"] = function(assert) {
 
   assert.equal(foundRoot + "sdk/tabs.js", require.resolve("sdk/tabs"), "correct resolution of sdk module");
   assert.equal(foundRoot + "toolkit/loader.js", require.resolve("toolkit/loader"), "correct resolution of sdk module");
-
-  const localLoader = Loader({
-    paths: { "foo/bar": "bizzle",
-             "foo/bar2/": "bizzle2",
-             // Just to make sure this doesn't match the first entry,
-             // let use resolve this module
-             "foo/bar-bar": "foo/bar-bar" }
-  });
-  const localRequire = Require(localLoader, module);
-  assert.equal(localRequire.resolve("foo/bar"), "bizzle.js");
-  assert.equal(localRequire.resolve("foo/bar/baz"), "bizzle/baz.js");
-  assert.equal(localRequire.resolve("foo/bar-bar"), "foo/bar-bar.js");
-  assert.equal(localRequire.resolve("foo/bar2/"), "bizzle2.js");
 };
 
 const modulesURI = require.resolve("toolkit/loader").replace("toolkit/loader.js", "");
@@ -597,61 +551,5 @@ exports['test user global'] = function(assert) {
   assert.equal(userModule.getCom(), com,
                "user module returns expected `com` global");
 };
-
-exports['test custom require caching'] = function(assert) {
-  const loader = Loader({
-    paths: { '': root + "/" },
-    requireHook: (id, require) => {
-      // Just load it normally
-      return require(id);
-    }
-  });
-  const require = Require(loader, module);
-
-  let data = require('fixtures/loader/json/mutation.json');
-  assert.equal(data.value, 1, 'has initial value');
-  data.value = 2;
-  let newdata = require('fixtures/loader/json/mutation.json');
-  assert.equal(
-    newdata.value,
-    2,
-    'JSON objects returned should be cached and the same instance'
-  );
-};
-
-exports['test caching when proxying a loader'] = function(assert) {
-  const parentRequire = require;
-  const loader = Loader({
-    paths: { '': root + "/" },
-    requireHook: (id, childRequire) => {
-      if(id === 'gimmejson') {
-        return childRequire('fixtures/loader/json/mutation.json')
-      }
-      // Load it with the original (global) require
-      return parentRequire(id);
-    }
-  });
-  const childRequire = Require(loader, module);
-
-  let data = childRequire('./fixtures/loader/json/mutation.json');
-  assert.equal(data.value, 1, 'data has initial value');
-  data.value = 2;
-
-  let newdata = childRequire('./fixtures/loader/json/mutation.json');
-  assert.equal(newdata.value, 2, 'data has changed');
-
-  let childData = childRequire('gimmejson');
-  assert.equal(childData.value, 1, 'data from child loader has initial value');
-  childData.value = 3;
-  let newChildData = childRequire('gimmejson');
-  assert.equal(newChildData.value, 3, 'data from child loader has changed');
-
-  data = childRequire('./fixtures/loader/json/mutation.json');
-  assert.equal(data.value, 2, 'data from parent loader has not changed');
-
-  // Set it back to the original value just in case (this instance
-  // will be shared across tests)
-  data.value = 1;
-}
 
 require('sdk/test').run(exports);

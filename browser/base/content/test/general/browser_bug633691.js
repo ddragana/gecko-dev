@@ -4,33 +4,25 @@
 
 function test() {
   waitForExplicitFinish();
-  gBrowser.selectedTab = gBrowser.addTab("data:text/html,<iframe width='700' height='700'></iframe>");
+  gBrowser.selectedTab = gBrowser.addTab();
   // Open a html page with about:certerror in an iframe
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function() {
-    return ContentTask.spawn(gBrowser.selectedBrowser, "", function() {
-      return new Promise(resolve => {
-        info("Running content task");
-        let listener = e => {
-          removeEventListener('AboutNetErrorLoad', listener, false, true);
-          resolve();
-        };
-        addEventListener('AboutNetErrorLoad', listener, false, true);
-        let iframe = content.document.querySelector("iframe");
-        iframe.src = "https://expired.example.com/";
-      });
-    }).then(testIframeCert);
-  });
+  gBrowser.selectedBrowser.addEventListener("load", testIframeCert, true);
+  content.location = "data:text/html,<iframe width='700' height='700' src='about:certerror'></iframe>";
 }
 
 function testIframeCert(e) {
+  if (e.target.location.href == "about:blank") {
+    return;
+  }
+  gBrowser.selectedBrowser.removeEventListener("load", testIframeCert, true);
   // Confirm that the expert section is hidden
   var doc = gBrowser.contentDocument.getElementsByTagName('iframe')[0].contentDocument;
-  var aP = doc.getElementById("badCertAdvancedPanel");
-  ok(aP, "Advanced content should exist");
-  is_element_hidden(aP, "Advanced content should not be visible by default")
+  var eC = doc.getElementById("expertContent");
+  ok(eC, "Expert content should exist")
+  ok(eC.hasAttribute("hidden"), "Expert content should be hidded by default");
 
   // Clean up
   gBrowser.removeCurrentTab();
-
+  
   finish();
 }

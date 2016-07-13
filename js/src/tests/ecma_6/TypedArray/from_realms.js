@@ -7,20 +7,11 @@ const constructors = [
     Int32Array,
     Uint32Array,
     Float32Array,
-    Float64Array ];
-
-if (typeof SharedArrayBuffer != "undefined")
-    constructors.push(sharedConstructor(Int8Array),
-		      sharedConstructor(Uint8Array),
-		      sharedConstructor(Int16Array),
-		      sharedConstructor(Uint16Array),
-		      sharedConstructor(Int32Array),
-		      sharedConstructor(Uint32Array),
-		      sharedConstructor(Float32Array),
-		      sharedConstructor(Float64Array));
+    Float64Array
+];
 
 for (var constructor of constructors) {
-    if (typeof newGlobal !== 'function' || isSharedConstructor(constructor))
+    if (typeof newGlobal !== 'function')
         break;
 
     // G[constructor.name].from, where G is any global, produces an array whose prototype

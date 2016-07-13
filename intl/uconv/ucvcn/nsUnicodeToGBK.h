@@ -40,13 +40,16 @@ protected:
                                 char * aDest,
                                 int32_t * aDestLength);
 
+  virtual void CreateExtensionEncoder();
+  virtual void Create4BytesEncoder();
+
+  nsCOMPtr<nsIUnicodeEncoder> mExtensionEncoder;
+  nsCOMPtr<nsIUnicodeEncoder> m4BytesEncoder;
 protected:
   char16_t mSurrogateHigh;
   nsGBKConvUtil mUtil;
-  virtual nsresult TryExtensionEncoder(char16_t aChar, char* aDest,
-                                       int32_t* aOutLen);
-  virtual nsresult Try4BytesEncoder(char16_t aChar, char* aDest,
-                                    int32_t* aOutLen);
+  nsresult TryExtensionEncoder(char16_t aChar, char* aDest, int32_t* aOutLen);
+  nsresult Try4BytesEncoder(char16_t aChar, char* aDest, int32_t* aOutLen);
   virtual nsresult EncodeSurrogate(char16_t aSurrogateHigh,
                                    char16_t aSurrogateLow, char* aDest,
                                    int32_t aDestLength, int32_t aBufferLength);
@@ -58,14 +61,11 @@ public:
   nsUnicodeToGB18030() : nsUnicodeToGBK(4) {}
   virtual ~nsUnicodeToGB18030() {}
 protected:
-  virtual nsresult TryExtensionEncoder(char16_t aChar, char* aDest,
-                                       int32_t* aOutLen) override;
-  virtual nsresult Try4BytesEncoder(char16_t aChar, char* aDest,
-                                    int32_t* aOutLen) override;
+  virtual void CreateExtensionEncoder();
+  virtual void Create4BytesEncoder();
   virtual nsresult EncodeSurrogate(char16_t aSurrogateHigh,
                                    char16_t aSurrogateLow, char* aDest,
-                                   int32_t aDestLength,
-                                   int32_t aBufferLength) override;
+                                   int32_t aDestLength, int32_t aBufferLength);
 };
 
 #endif /* nsUnicodeToGBK_h___ */

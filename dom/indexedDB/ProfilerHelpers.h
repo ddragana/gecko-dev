@@ -129,9 +129,6 @@ public:
       case IDBTransaction::READ_WRITE_FLUSH:
         AppendLiteral("\"readwriteflush\"");
         break;
-      case IDBTransaction::CLEANUP:
-        AppendLiteral("\"cleanup\"");
-        break;
       case IDBTransaction::VERSION_CHANGE:
         AppendLiteral("\"versionchange\"");
         break;
@@ -265,7 +262,7 @@ public:
     nsString eventType;
 
     if (aEvent) {
-      MOZ_ALWAYS_SUCCEEDS(aEvent->GetType(eventType));
+      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(aEvent->GetType(eventType)));
     } else {
       eventType = nsDependentString(aDefault);
     }
@@ -282,7 +279,7 @@ LoggingHelper(bool aUseProfiler, const char* aFmt, ...)
                IndexedDatabaseManager::Logging_Disabled);
   MOZ_ASSERT(aFmt);
 
-  mozilla::LogModule* logModule = IndexedDatabaseManager::GetLoggingModule();
+  PRLogModuleInfo* logModule = IndexedDatabaseManager::GetLoggingModule();
   MOZ_ASSERT(logModule);
 
   static const mozilla::LogLevel logLevel = LogLevel::Warning;

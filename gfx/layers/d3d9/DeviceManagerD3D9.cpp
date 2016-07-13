@@ -79,7 +79,7 @@ SwapChainD3D9::Init(HWND hWnd)
 already_AddRefed<IDirect3DSurface9>
 SwapChainD3D9::GetBackBuffer()
 {
-  RefPtr<IDirect3DSurface9> backBuffer;
+  nsRefPtr<IDirect3DSurface9> backBuffer;
     mSwapChain->GetBackBuffer(0,
                               D3DBACKBUFFER_TYPE_MONO,
                               getter_AddRefs(backBuffer));
@@ -104,7 +104,7 @@ SwapChainD3D9::PrepareForRendering()
   }
 
   if (mSwapChain) {
-    RefPtr<IDirect3DSurface9> backBuffer = GetBackBuffer();
+    nsRefPtr<IDirect3DSurface9> backBuffer = GetBackBuffer();
 
     D3DSURFACE_DESC desc;
     backBuffer->GetDesc(&desc);
@@ -331,13 +331,13 @@ DeviceManagerD3D9::Init()
     mNv3DVUtils->SetDeviceInfo(devUnknown); 
   } 
 
-  auto failCreateShaderMsg = "[D3D9] failed to create a critical resource (shader) code";
+  auto failCreateShaderMsg = "[D3D9] failed to create a critical resource (shader) code: ";
 
   hr = mDevice->CreateVertexShader((DWORD*)LayerQuadVS,
                                    getter_AddRefs(mLayerVS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "LayerQuadVS: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -345,7 +345,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "RGBShaderPS: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -353,7 +353,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBAPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "RGBAShaderPS: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -361,7 +361,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass1PS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "ComponentPass1ShaderPS: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -369,7 +369,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass2PS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "ComponentPass2ShaderPS: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -377,7 +377,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mYCbCrPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "YCbCrShaderPS: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -385,7 +385,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mSolidColorPS));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "SolidColorShaderPS" << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg;
     return false;
   }
 
@@ -393,7 +393,14 @@ DeviceManagerD3D9::Init()
                                    getter_AddRefs(mLayerVSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "LayerQuadVSMask: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    return false;
+  }
+  hr = mDevice->CreateVertexShader((DWORD*)LayerQuadVSMask3D,
+                                   getter_AddRefs(mLayerVSMask3D));
+
+  if (FAILED(hr)) {
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -401,7 +408,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "RGBShaderPSMask " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -409,7 +416,15 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mRGBAPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "RGBAShaderPSMask: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
+    return false;
+  }
+
+  hr = mDevice->CreatePixelShader((DWORD*)RGBAShaderPSMask3D,
+                                  getter_AddRefs(mRGBAPSMask3D));
+
+  if (FAILED(hr)) {
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -417,7 +432,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass1PSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "ComponentPass1ShaderPSMask: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -425,7 +440,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mComponentPass2PSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "ComponentPass2ShaderPSMask: ";
+    gfxCriticalError() << failCreateShaderMsg;
     return false;
   }
 
@@ -433,7 +448,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mYCbCrPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "YCbCrShaderPSMask: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -441,7 +456,7 @@ DeviceManagerD3D9::Init()
                                   getter_AddRefs(mSolidColorPSMask));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << failCreateShaderMsg << "SolidColorShaderPSMask: " << gfx::hexa(hr);
+    gfxCriticalError() << failCreateShaderMsg << gfx::hexa(hr);
     return false;
   }
 
@@ -523,7 +538,7 @@ DeviceManagerD3D9::SetupRenderState()
 already_AddRefed<SwapChainD3D9>
 DeviceManagerD3D9::CreateSwapChain(HWND hWnd)
 {
-  RefPtr<SwapChainD3D9> swapChain = new SwapChainD3D9(this);
+  nsRefPtr<SwapChainD3D9> swapChain = new SwapChainD3D9(this);
   
   // See bug 604647. This line means that if we create a window while the
   // device is lost LayerManager initialization will fail, this window
@@ -582,8 +597,13 @@ DeviceManagerD3D9::SetShaderMode(ShaderMode aMode, MaskType aMaskType)
       maskTexRegister = 1;
       break;
     case RGBALAYER:
-      mDevice->SetVertexShader(mLayerVSMask);
-      mDevice->SetPixelShader(mRGBAPSMask);
+      if (aMaskType == MaskType::Mask2d) {
+        mDevice->SetVertexShader(mLayerVSMask);
+        mDevice->SetPixelShader(mRGBAPSMask);
+      } else {
+        mDevice->SetVertexShader(mLayerVSMask3D);
+        mDevice->SetPixelShader(mRGBAPSMask3D);
+      }
       maskTexRegister = 1;
       break;
     case COMPONENTLAYERPASS1:
@@ -813,7 +833,7 @@ DeviceManagerD3D9::CreateTexture(const IntSize &aSize,
   RefPtr<IDirect3DTexture9> result;
   if (FAILED(device()->CreateTexture(aSize.width, aSize.height,
                                      1, 0, aFormat, aPool,
-                                     getter_AddRefs(result), nullptr))) {
+                                     byRef(result), nullptr))) {
     return nullptr;
   }
 

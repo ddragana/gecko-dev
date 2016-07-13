@@ -55,8 +55,7 @@ public:
 
   // nsSVGPathGeometryElement methods:
   virtual bool GetGeometryBounds(Rect* aBounds, const StrokeOptions& aStrokeOptions,
-                                 const Matrix& aToBoundsSpace,
-                                 const Matrix* aToNonScalingStrokeSpace = nullptr) override;
+                                 const Matrix& aTransform) override;
   virtual already_AddRefed<Path> BuildPath(PathBuilder* aBuilder) override;
 
   // nsSVGSVGElement methods:
@@ -67,6 +66,8 @@ public:
   nsresult CopyInnerTo(mozilla::dom::Element* aDest);
 
   void MaybeLoadSVGImage();
+
+  bool IsImageSrcSetDisabled() const;
 
   // WebIDL
   already_AddRefed<SVGAnimatedLength> X();

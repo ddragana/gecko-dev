@@ -5,7 +5,7 @@ intr protocol jetpackContent {
     bridges jetpack, content;
 
 child:
-    async __delete__();
+    __delete__();
 
 state DEAD:
     send __delete__;

@@ -6,8 +6,6 @@
 (?i)(^|/)TAGS$
 (^|/)ID$
 (^|/)\.DS_Store$
-\.pdb
-\.egg-info
 
 # Vim swap files.
 ^\.sw.$
@@ -20,11 +18,10 @@
 ^\.mozconfig
 ^mozconfig*
 ^configure$
-^old-configure$
 ^config\.cache$
 ^config\.log$
 ^\.clang_complete
-^\.?machrc$
+^mach.ini$
 
 # Empty marker file that's generated when we check out NSS
 ^security/manager/\.nss\.checkout$
@@ -39,11 +36,9 @@ _OPT\.OBJ/
 
 # SpiderMonkey configury
 ^js/src/configure$
-^js/src/old-configure$
 ^js/src/autom4te.cache$
 # SpiderMonkey test result logs
 ^js/src/tests/results-.*\.(html|txt)$
-^js/src/devtools/rootAnalysis/t/out
 
 # Java HTML5 parser classes
 ^parser/html/java/(html|java)parser/
@@ -56,15 +51,8 @@ _OPT\.OBJ/
 \.cproject$
 \.settings/
 
-# Ignore the files and directory that JetBrains IDEs create.
+# Ignore the directory that JetBrains IDEs create
 \.idea/
-\.iml$
-
-# Gradle cache.
-^.gradle/
-
-# Local Gradle configuration properties.
-^local.properties$
 
 # Python stuff installed at build time.
 ^python/psutil/.*\.so
@@ -75,8 +63,8 @@ _OPT\.OBJ/
 .git/
 
 # Ignore chrome.manifest files from the devtools loader
-^devtools/client/chrome.manifest$
-^devtools/shared/chrome.manifest$
+^browser/devtools/chrome.manifest$
+^toolkit/devtools/chrome.manifest$
 
 # git checkout of libstagefright
 ^media/libstagefright/android$
@@ -87,15 +75,9 @@ GRTAGS
 GSYMS
 GPATH
 
-# Various items for Loop
+# Unit tests for Loop
 ^browser/components/loop/standalone/content/config\.js$
-^browser/extensions/loop/.*/node_modules/
-^browser/extensions/loop/.*\.module-cache
-^browser/extensions/loop/test/coverage/desktop
-^browser/extensions/loop/test/coverage/shared_standalone
-^browser/extensions/loop/test/visual-regression/diff
-^browser/extensions/loop/test/visual-regression/new
-^browser/extensions/loop/test/visual-regression/refs
+^browser/components/loop/standalone/node_modules/
 
 # Git clone directory for updating web-platform-tests
 ^testing/web-platform/sync/
@@ -106,33 +88,3 @@ GPATH
 # XCode project cruft
 ^embedding/ios/GeckoEmbed/GeckoEmbed.xcodeproj/project.xcworkspace/xcuserdata
 ^embedding/ios/GeckoEmbed/GeckoEmbed.xcodeproj/xcuserdata
-
-# Ignore mozharness execution files
-^testing/mozharness/.tox/
-^testing/mozharness/build/
-^testing/mozharness/logs/
-^testing/mozharness/.coverage
-^testing/mozharness/nosetests.xml
-
-# Ignore tox generated dir
-.tox/
-
-# Ignore node_modules
-^tools/lint/eslint/node_modules/
-
-# Ignore talos virtualenv and tp5n files.
-# The tp5n set is supposed to be decompressed at
-# testing/talos/talos/page_load_test/tp5n in order to run tests like tps
-# locally. Similarly, running talos requires a Python package virtual
-# environment. Both the virtual environment and tp5n files end up littering
-# the status command, so we ignore them.
-^testing/talos/.Python
-^testing/talos/bin/
-^testing/talos/include/
-^testing/talos/lib/
-^testing/talos/talos/tests/tp5n.zip
-^testing/talos/talos/tests/tp5n
-^testing/talos/talos/tests/devtools/damp.manifest.develop
-
-# Ignore files created when running a reftest.
-^lextab.py$

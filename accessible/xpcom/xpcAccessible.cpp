@@ -5,7 +5,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Accessible-inl.h"
-#include "mozilla/a11y/DocAccessibleParent.h"
 #include "nsAccUtils.h"
 #include "nsIAccessibleRelation.h"
 #include "nsIAccessibleRole.h"
@@ -25,11 +24,10 @@ xpcAccessible::GetParent(nsIAccessible** aParent)
 {
   NS_ENSURE_ARG_POINTER(aParent);
   *aParent = nullptr;
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  AccessibleOrProxy parent = IntlGeneric().Parent();
-  NS_IF_ADDREF(*aParent = ToXPC(parent));
+  NS_IF_ADDREF(*aParent = ToXPC(Intl()->Parent()));
   return NS_OK;
 }
 
@@ -38,20 +36,13 @@ xpcAccessible::GetNextSibling(nsIAccessible** aNextSibling)
 {
   NS_ENSURE_ARG_POINTER(aNextSibling);
   *aNextSibling = nullptr;
-  if (IntlGeneric().IsNull())
+
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  if (IntlGeneric().IsAccessible()) {
-    nsresult rv = NS_OK;
-    NS_IF_ADDREF(*aNextSibling = ToXPC(Intl()->GetSiblingAtOffset(1, &rv)));
-    return rv;
-  }
-
-  ProxyAccessible* proxy = IntlGeneric().AsProxy();
-  NS_ENSURE_STATE(proxy);
-
-  NS_IF_ADDREF(*aNextSibling = ToXPC(proxy->NextSibling()));
-  return *aNextSibling ? NS_OK : NS_ERROR_FAILURE;
+  nsresult rv = NS_OK;
+  NS_IF_ADDREF(*aNextSibling = ToXPC(Intl()->GetSiblingAtOffset(1, &rv)));
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -59,20 +50,13 @@ xpcAccessible::GetPreviousSibling(nsIAccessible** aPreviousSibling)
 {
   NS_ENSURE_ARG_POINTER(aPreviousSibling);
   *aPreviousSibling = nullptr;
-  if (IntlGeneric().IsNull())
+
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  if (IntlGeneric().IsAccessible()) {
-    nsresult rv = NS_OK;
-    NS_IF_ADDREF(*aPreviousSibling = ToXPC(Intl()->GetSiblingAtOffset(-1, &rv)));
-    return rv;
-  }
-
-  ProxyAccessible* proxy = IntlGeneric().AsProxy();
-  NS_ENSURE_STATE(proxy);
-
-  NS_IF_ADDREF(*aPreviousSibling = ToXPC(proxy->PrevSibling()));
-  return *aPreviousSibling ? NS_OK : NS_ERROR_FAILURE;
+  nsresult rv = NS_OK;
+  NS_IF_ADDREF(*aPreviousSibling = ToXPC(Intl()->GetSiblingAtOffset(-1, &rv)));
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -81,10 +65,10 @@ xpcAccessible::GetFirstChild(nsIAccessible** aFirstChild)
   NS_ENSURE_ARG_POINTER(aFirstChild);
   *aFirstChild = nullptr;
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  NS_IF_ADDREF(*aFirstChild = ToXPC(IntlGeneric().FirstChild()));
+  NS_IF_ADDREF(*aFirstChild = ToXPC(Intl()->FirstChild()));
   return NS_OK;
 }
 
@@ -94,10 +78,10 @@ xpcAccessible::GetLastChild(nsIAccessible** aLastChild)
   NS_ENSURE_ARG_POINTER(aLastChild);
   *aLastChild = nullptr;
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  NS_IF_ADDREF(*aLastChild = ToXPC(IntlGeneric().LastChild()));
+  NS_IF_ADDREF(*aLastChild = ToXPC(Intl()->LastChild()));
   return NS_OK;
 }
 
@@ -106,10 +90,10 @@ xpcAccessible::GetChildCount(int32_t* aChildCount)
 {
   NS_ENSURE_ARG_POINTER(aChildCount);
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  *aChildCount = IntlGeneric().ChildCount();
+  *aChildCount = Intl()->ChildCount();
   return NS_OK;
 }
 
@@ -119,16 +103,16 @@ xpcAccessible::GetChildAt(int32_t aChildIndex, nsIAccessible** aChild)
   NS_ENSURE_ARG_POINTER(aChild);
   *aChild = nullptr;
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
   // If child index is negative, then return last child.
   // XXX: do we really need this?
   if (aChildIndex < 0)
-    aChildIndex = IntlGeneric().ChildCount() - 1;
+    aChildIndex = Intl()->ChildCount() - 1;
 
-  AccessibleOrProxy child = IntlGeneric().ChildAt(aChildIndex);
-  if (child.IsNull())
+  Accessible* child = Intl()->GetChildAt(aChildIndex);
+  if (!child)
     return NS_ERROR_INVALID_ARG;
 
   NS_ADDREF(*aChild = ToXPC(child));
@@ -141,7 +125,7 @@ xpcAccessible::GetChildren(nsIArray** aChildren)
   NS_ENSURE_ARG_POINTER(aChildren);
   *aChildren = nullptr;
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
   nsresult rv = NS_OK;
@@ -149,13 +133,13 @@ xpcAccessible::GetChildren(nsIArray** aChildren)
     do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  uint32_t childCount = IntlGeneric().ChildCount();
+  uint32_t childCount = Intl()->ChildCount();
   for (uint32_t childIdx = 0; childIdx < childCount; childIdx++) {
-    AccessibleOrProxy child = IntlGeneric().ChildAt(childIdx);
+    Accessible* child = Intl()->GetChildAt(childIdx);
     children->AppendElement(static_cast<nsIAccessible*>(ToXPC(child)), false);
   }
 
-  children.forget(aChildren);
+  NS_ADDREF(*aChildren = children);
   return NS_OK;
 }
 
@@ -164,15 +148,11 @@ xpcAccessible::GetIndexInParent(int32_t* aIndexInParent)
 {
   NS_ENSURE_ARG_POINTER(aIndexInParent);
   *aIndexInParent = -1;
-  if (IntlGeneric().IsNull())
+
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  if (IntlGeneric().IsAccessible()) {
-    *aIndexInParent = Intl()->IndexInParent();
-  } else if (IntlGeneric().IsProxy()) {
-    *aIndexInParent = IntlGeneric().AsProxy()->IndexInParent();
-  }
-
+  *aIndexInParent = Intl()->IndexInParent();
   return *aIndexInParent != -1 ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -188,21 +168,6 @@ xpcAccessible::GetDOMNode(nsIDOMNode** aDOMNode)
   nsINode* node = Intl()->GetNode();
   if (node)
     CallQueryInterface(node, aDOMNode);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-xpcAccessible::GetId(nsAString& aID)
-{
-  ProxyAccessible* proxy = IntlGeneric().AsProxy();
-  if (!proxy) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsString id;
-  proxy->DOMNodeID(id);
-  aID.Assign(id);
 
   return NS_OK;
 }
@@ -239,10 +204,10 @@ xpcAccessible::GetRole(uint32_t* aRole)
   NS_ENSURE_ARG_POINTER(aRole);
   *aRole = nsIAccessibleRole::ROLE_NOTHING;
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  *aRole = IntlGeneric().Role();
+  *aRole = Intl()->Role();
   return NS_OK;
 }
 
@@ -251,13 +216,10 @@ xpcAccessible::GetState(uint32_t* aState, uint32_t* aExtraState)
 {
   NS_ENSURE_ARG_POINTER(aState);
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     nsAccUtils::To32States(states::DEFUNCT, aState, aExtraState);
-  else if (Intl())
-    nsAccUtils::To32States(Intl()->State(), aState, aExtraState);
   else
-    nsAccUtils::To32States(IntlGeneric().AsProxy()->State(), aState,
-                           aExtraState);
+    nsAccUtils::To32States(Intl()->State(), aState, aExtraState);
 
   return NS_OK;
 }
@@ -267,16 +229,11 @@ xpcAccessible::GetName(nsAString& aName)
 {
   aName.Truncate();
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
   nsAutoString name;
-  if (ProxyAccessible* proxy = IntlGeneric().AsProxy()) {
-    proxy->Name(name);
-  } else {
-    Intl()->Name(name);
-  }
-
+  Intl()->Name(name);
   aName.Assign(name);
 
   return NS_OK;
@@ -285,16 +242,11 @@ xpcAccessible::GetName(nsAString& aName)
 NS_IMETHODIMP
 xpcAccessible::GetDescription(nsAString& aDescription)
 {
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
   nsAutoString desc;
-  if (ProxyAccessible* proxy = IntlGeneric().AsProxy()) {
-    proxy->Description(desc);
-  } else {
-    Intl()->Description(desc);
-  }
-
+  Intl()->Description(desc);
   aDescription.Assign(desc);
 
   return NS_OK;
@@ -303,33 +255,21 @@ xpcAccessible::GetDescription(nsAString& aDescription)
 NS_IMETHODIMP
 xpcAccessible::GetLanguage(nsAString& aLanguage)
 {
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  nsAutoString lang;
-  if (ProxyAccessible* proxy = IntlGeneric().AsProxy()) {
-    proxy->Language(lang);
-  } else {
-    Intl()->Language(lang);
-  }
-
-  aLanguage.Assign(lang);
+  Intl()->Language(aLanguage);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 xpcAccessible::GetValue(nsAString& aValue)
 {
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
   nsAutoString value;
-  if (ProxyAccessible* proxy = IntlGeneric().AsProxy()) {
-    proxy->Value(value);
-  } else {
-    Intl()->Value(value);
-  }
-
+  Intl()->Value(value);
   aValue.Assign(value);
 
   return NS_OK;
@@ -377,29 +317,12 @@ xpcAccessible::GetAttributes(nsIPersistentProperties** aAttributes)
   NS_ENSURE_ARG_POINTER(aAttributes);
   *aAttributes = nullptr;
 
-  if (IntlGeneric().IsNull()) {
+  if (!Intl())
     return NS_ERROR_FAILURE;
-  }
 
-  if (Accessible* acc = Intl()) {
-    nsCOMPtr<nsIPersistentProperties> attributes = acc->Attributes();
-    attributes.swap(*aAttributes);
-    return NS_OK;
-  }
+  nsCOMPtr<nsIPersistentProperties> attributes = Intl()->Attributes();
+  attributes.swap(*aAttributes);
 
-  ProxyAccessible* proxy = IntlGeneric().AsProxy();
-  AutoTArray<Attribute, 10> attrs;
-  proxy->Attributes(&attrs);
-
-  nsCOMPtr<nsIPersistentProperties> props =
-    do_CreateInstance(NS_PERSISTENTPROPERTIES_CONTRACTID);
-  uint32_t attrCount = attrs.Length();
-  nsAutoString unused;
-  for (uint32_t i = 0; i < attrCount; i++) {
-    props->SetStringProperty(attrs[i].Name(), attrs[i].Value(), unused);
-  }
-
-  props.forget(aAttributes);
   return NS_OK;
 }
 
@@ -416,20 +339,14 @@ xpcAccessible::GetBounds(int32_t* aX, int32_t* aY,
   NS_ENSURE_ARG_POINTER(aHeight);
   *aHeight = 0;
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  nsIntRect rect;
-  if (Accessible* acc = IntlGeneric().AsAccessible()) {
-    rect = acc->Bounds();
-  } else {
-    rect = IntlGeneric().AsProxy()->Bounds();
-  }
-
+  nsIntRect rect = Intl()->Bounds();
   *aX = rect.x;
   *aY = rect.y;
   *aWidth = rect.width;
-  *aHeight = rect.height;
+  *aHeight = rect.height;;
 
   return NS_OK;
 }
@@ -469,21 +386,12 @@ xpcAccessible::GetRelationByType(uint32_t aType,
 
   NS_ENSURE_ARG(aType <= static_cast<uint32_t>(RelationType::LAST));
 
-  if (IntlGeneric().IsNull())
+  if (!Intl())
     return NS_ERROR_FAILURE;
 
-  if (IntlGeneric().IsAccessible()) {
-    Relation rel = Intl()->RelationByType(static_cast<RelationType>(aType));
-    NS_ADDREF(*aRelation = new nsAccessibleRelation(aType, &rel));
-    return NS_OK;
-  }
-
-  ProxyAccessible* proxy = IntlGeneric().AsProxy();
-  nsTArray<ProxyAccessible*> targets =
-    proxy->RelationByType(static_cast<RelationType>(aType));
-  NS_ADDREF(*aRelation = new nsAccessibleRelation(aType, &targets));
-
-  return NS_OK;
+  Relation rel = Intl()->RelationByType(static_cast<RelationType>(aType));
+  NS_ADDREF(*aRelation = new nsAccessibleRelation(aType, &rel));
+  return *aRelation ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -587,6 +495,16 @@ xpcAccessible::SetSelected(bool aSelect)
     return NS_ERROR_FAILURE;
 
   Intl()->SetSelected(aSelect);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+xpcAccessible::ExtendSelection()
+{
+  if (!Intl())
+    return NS_ERROR_FAILURE;
+
+  Intl()->ExtendSelection();
   return NS_OK;
 }
 

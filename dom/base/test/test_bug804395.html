@@ -64,9 +64,7 @@ function runTests() {
 SimpleTest.waitForExplicitFinish();
 
 addLoadEvent(function() {
-  SpecialPowers.pushPrefEnv({"set": [["network.jar.block-remote-files", false]]}, function() {
-    SpecialPowers.pushPermissions([{'type': 'systemXHR', 'allow': true, 'context': document}], runTests);
-  });
+   SpecialPowers.pushPermissions([{'type': 'systemXHR', 'allow': true, 'context': document}], runTests);
 });
 </script>
 </pre>

@@ -4,14 +4,12 @@
 
 Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-var ContentAreaDownloadsView = {
+let ContentAreaDownloadsView = {
   init() {
     let view = new DownloadsPlacesView(document.getElementById("downloadsRichListBox"));
     // Do not display the Places downloads in private windows
-    if (!PrivateBrowsingUtils.isContentWindowPrivate(window)) {
+    if (!PrivateBrowsingUtils.isWindowPrivate(window)) {
       view.place = "place:transition=7&sort=4";
     }
-    // Set focus to Downloads list once it is created
-    document.getElementById("downloadsRichListBox").focus();
   },
 };

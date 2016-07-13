@@ -6,18 +6,17 @@
 #ifndef nsgnomeshellservice_h____
 #define nsgnomeshellservice_h____
 
-#include "nsIGNOMEShellService.h"
+#include "nsIShellService.h"
 #include "nsStringAPI.h"
 #include "mozilla/Attributes.h"
 
-class nsGNOMEShellService final : public nsIGNOMEShellService
+class nsGNOMEShellService final : public nsIShellService
 {
 public:
-  nsGNOMEShellService() : mAppIsInPath(false) { }
+  nsGNOMEShellService() : mCheckedThisSession(false), mAppIsInPath(false) { }
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSISHELLSERVICE
-  NS_DECL_NSIGNOMESHELLSERVICE
 
   nsresult Init();
 
@@ -28,6 +27,7 @@ private:
   bool CheckHandlerMatchesAppName(const nsACString& handler) const;
 
   bool GetAppPathFromLauncher();
+  bool mCheckedThisSession;
   bool mUseLocaleFilenames;
   nsCString    mAppPath;
   bool mAppIsInPath;

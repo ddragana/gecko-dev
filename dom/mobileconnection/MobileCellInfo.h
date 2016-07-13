@@ -22,7 +22,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MobileCellInfo)
 
-  explicit MobileCellInfo(nsPIDOMWindowInner* aWindow);
+  explicit MobileCellInfo(nsPIDOMWindow* aWindow);
 
   MobileCellInfo(int32_t aGsmLocationAreaCode, int64_t aGsmCellId,
                  int32_t aCdmaBaseStationId, int32_t aCdmaBaseStationLatitude,
@@ -32,7 +32,7 @@ public:
   void
   Update(nsIMobileCellInfo* aInfo);
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return mWindow;
@@ -88,7 +88,7 @@ private:
   ~MobileCellInfo() {}
 
 private:
-  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   int32_t mGsmLocationAreaCode;
   int64_t mGsmCellId;
   int32_t mCdmaBaseStationId;

@@ -16,8 +16,4 @@ let proxy = new Proxy({
 let object = Object.create(proxy);
 object.d = 4;
 
-let a = [];
-for (let x in object) {
-  a.push(x);
-}
-assertEq(a.toString(), "d,a,b");
+assertEq([x for (x in object)].toString(), "d,a,b");

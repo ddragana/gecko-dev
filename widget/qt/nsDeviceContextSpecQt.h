@@ -22,13 +22,13 @@ public:
 
     NS_DECL_ISUPPORTS
 
-    virtual already_AddRefed<PrintTarget> MakePrintTarget() final;
+    NS_IMETHOD GetSurfaceForPrinter(gfxASurface** surface);
 
     NS_IMETHOD Init(nsIWidget* aWidget,
                     nsIPrintSettings* aPS,
                     bool aIsPrintPreview);
     NS_IMETHOD BeginDocument(const nsAString& aTitle,
-                             const nsAString& aPrintToFileName,
+                             char16_t* aPrintToFileName,
                              int32_t aStartPage,
                              int32_t aEndPage);
     NS_IMETHOD EndDocument();

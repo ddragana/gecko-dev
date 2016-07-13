@@ -12,7 +12,6 @@
 
 #include "mozilla/ArrayUtils.h"
 
-#include "nsDocShell.h"
 #include "nsNullPrincipal.h"
 #include "nsNullPrincipalURI.h"
 #include "nsMemory.h"
@@ -39,38 +38,26 @@ NS_IMPL_CI_INTERFACE_GETTER(nsNullPrincipal,
 /* static */ already_AddRefed<nsNullPrincipal>
 nsNullPrincipal::CreateWithInheritedAttributes(nsIPrincipal* aInheritFrom)
 {
-  RefPtr<nsNullPrincipal> nullPrin = new nsNullPrincipal();
+  nsRefPtr<nsNullPrincipal> nullPrin = new nsNullPrincipal();
   nsresult rv = nullPrin->Init(Cast(aInheritFrom)->OriginAttributesRef());
-  MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-  return nullPrin.forget();
+  return NS_SUCCEEDED(rv) ? nullPrin.forget() : nullptr;
 }
 
 /* static */ already_AddRefed<nsNullPrincipal>
-nsNullPrincipal::CreateWithInheritedAttributes(nsIDocShell* aDocShell)
+nsNullPrincipal::Create(const OriginAttributes& aOriginAttributes)
 {
-  PrincipalOriginAttributes attrs;
-  attrs.InheritFromDocShellToDoc(nsDocShell::Cast(aDocShell)->GetOriginAttributes(), nullptr);
-
-  RefPtr<nsNullPrincipal> nullPrin = new nsNullPrincipal();
-  nsresult rv = nullPrin->Init(attrs);
-  MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-  return nullPrin.forget();
-}
-
-/* static */ already_AddRefed<nsNullPrincipal>
-nsNullPrincipal::Create(const PrincipalOriginAttributes& aOriginAttributes)
-{
-  RefPtr<nsNullPrincipal> nullPrin = new nsNullPrincipal();
+  nsRefPtr<nsNullPrincipal> nullPrin = new nsNullPrincipal();
   nsresult rv = nullPrin->Init(aOriginAttributes);
-  MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+  NS_ENSURE_SUCCESS(rv, nullptr);
 
   return nullPrin.forget();
 }
 
 nsresult
-nsNullPrincipal::Init(const PrincipalOriginAttributes& aOriginAttributes)
+nsNullPrincipal::Init(const OriginAttributes& aOriginAttributes)
 {
   mOriginAttributes = aOriginAttributes;
+  MOZ_ASSERT(AppId() != nsIScriptSecurityManager::UNKNOWN_APP_ID);
 
   mURI = nsNullPrincipalURI::Create();
   NS_ENSURE_TRUE(mURI, NS_ERROR_NOT_AVAILABLE);
@@ -121,9 +108,15 @@ nsNullPrincipal::GetOriginInternal(nsACString& aOrigin)
   return mURI->GetSpec(aOrigin);
 }
 
-bool
-nsNullPrincipal::MayLoadInternal(nsIURI* aURI)
-{
+NS_IMETHODIMP
+nsNullPrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsPrincipal)
+ {
+  if (aAllowIfInheritsPrincipal) {
+    if (nsPrincipal::IsPrincipalInherited(aURI)) {
+      return NS_OK;
+    }
+  }
+
   // Also allow the load if we are the principal of the URI being checked.
   nsCOMPtr<nsIURIWithPrincipal> uriPrinc = do_QueryInterface(aURI);
   if (uriPrinc) {
@@ -131,11 +124,23 @@ nsNullPrincipal::MayLoadInternal(nsIURI* aURI)
     uriPrinc->GetPrincipal(getter_AddRefs(principal));
 
     if (principal == this) {
-      return true;
+      return NS_OK;
     }
   }
 
-  return false;
+  if (aReport) {
+    nsScriptSecurityManager::ReportError(
+      nullptr, NS_LITERAL_STRING("CheckSameOriginError"), mURI, aURI);
+  }
+
+  return NS_ERROR_DOM_BAD_URI;
+}
+
+NS_IMETHODIMP
+nsNullPrincipal::GetIsNullPrincipal(bool* aIsNullPrincipal)
+{
+  *aIsNullPrincipal = true;
+  return NS_OK;
 }
 
 NS_IMETHODIMP

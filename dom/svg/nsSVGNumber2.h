@@ -7,6 +7,7 @@
 #ifndef __NS_SVGNUMBER2_H__
 #define __NS_SVGNUMBER2_H__
 
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
 #include "nsISMILAttr.h"

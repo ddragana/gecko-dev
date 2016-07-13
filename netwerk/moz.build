@@ -34,4 +34,3 @@ DIRS += ['build']
 TEST_DIRS += ['test']
 
 CONFIGURE_DEFINE_FILES += ['necko-config.h']
-EXPORTS += ['!necko-config.h']

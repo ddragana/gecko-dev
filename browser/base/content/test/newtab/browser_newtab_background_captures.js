@@ -8,12 +8,13 @@
 
 const CAPTURE_PREF = "browser.pagethumbnails.capturing_disabled";
 
-add_task(function* () {
+function runTests() {
   let imports = {};
   Cu.import("resource://gre/modules/PageThumbs.jsm", imports);
 
   // Disable captures.
-  yield pushPrefs([CAPTURE_PREF, false]);
+  let originalDisabledState = Services.prefs.getBoolPref(CAPTURE_PREF);
+  Services.prefs.setBoolPref(CAPTURE_PREF, true);
 
   // Make sure the thumbnail doesn't exist yet.
   let url = "http://example.com/";
@@ -33,32 +34,30 @@ add_task(function* () {
   gBrowser._createPreloadBrowser();
 
   // Wait for the preloaded browser to load.
-  if (gBrowser._preloadedBrowser.contentDocument.readyState != "complete") {
-    yield BrowserTestUtils.waitForEvent(gBrowser._preloadedBrowser, "load", true);
-  }
+  yield waitForBrowserLoad(gBrowser._preloadedBrowser);
 
   // We're now ready to use the preloaded browser.
   BrowserOpenTab();
   let tab = gBrowser.selectedTab;
-
-  let thumbnailCreatedPromise = new Promise(resolve => {
-    // Showing the preloaded tab should trigger thumbnail capture.
-    Services.obs.addObserver(function onCreate(subj, topic, data) {
-      if (data != url)
-        return;
-      Services.obs.removeObserver(onCreate, "page-thumbnail:create");
-      ok(true, "thumbnail created after preloaded tab was shown");
-
-      resolve();
-    }, "page-thumbnail:create", false);
-  });
+  let doc = tab.linkedBrowser.contentDocument;
 
   // Enable captures.
-  yield pushPrefs([CAPTURE_PREF, false]);
+  Services.prefs.setBoolPref(CAPTURE_PREF, false);
 
-  yield thumbnailCreatedPromise;
+  // Showing the preloaded tab should trigger thumbnail capture.
+  Services.obs.addObserver(function onCreate(subj, topic, data) {
+    if (data != url)
+      return;
+    Services.obs.removeObserver(onCreate, "page-thumbnail:create");
+    ok(true, "thumbnail created after preloaded tab was shown");
 
-  // Test finished!
-  gBrowser.removeTab(tab);
-  file.remove(false);
-});
+    // Test finished!
+    Services.prefs.setBoolPref(CAPTURE_PREF, originalDisabledState);
+    gBrowser.removeTab(tab);
+    file.remove(false);
+    TestRunner.next();
+  }, "page-thumbnail:create", false);
+
+  info("Waiting for thumbnail capture");
+  yield true;
+}

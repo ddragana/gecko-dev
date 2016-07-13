@@ -10,6 +10,7 @@
 
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
+#include "nsIDOMWindow.h"
 #include "nsIPrintStatusFeedback.h"
 #include "nsIObserver.h"
 #include "nsString.h"
@@ -35,8 +36,7 @@ private:
   nsString                          m_pendingStatus;
   int32_t                           m_pendingStateFlags;
   nsresult                          m_pendingStateValue;
-  // XXX This member is read-only.
-  nsCOMPtr<mozIDOMWindowProxy>      m_dialog;
+  nsCOMPtr<nsIDOMWindow>            m_dialog;
   nsCOMArray<nsIWebProgressListener>        m_listenerList;
   nsCOMPtr<nsIObserver>             m_observer;
 };

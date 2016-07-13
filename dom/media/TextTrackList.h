@@ -26,10 +26,10 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrackList, DOMEventTargetHelper)
 
-  explicit TextTrackList(nsPIDOMWindowInner* aOwnerWindow);
-  TextTrackList(nsPIDOMWindowInner* aOwnerWindow, TextTrackManager* aTextTrackManager);
+  explicit TextTrackList(nsPIDOMWindow* aOwnerWindow);
+  TextTrackList(nsPIDOMWindow* aOwnerWindow, TextTrackManager* aTextTrackManager);
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   uint32_t Length() const
   {
@@ -37,7 +37,7 @@ public:
   }
 
   // Get all the current active cues.
-  void UpdateAndGetShowingCues(nsTArray<RefPtr<TextTrackCue> >& aCues);
+  void UpdateAndGetShowingCues(nsTArray<nsRefPtr<TextTrackCue> >& aCues);
 
   TextTrack* IndexedGetter(uint32_t aIndex, bool& aFound);
   TextTrack* operator[](uint32_t aIndex);
@@ -61,7 +61,6 @@ public:
 
   nsresult DispatchTrackEvent(nsIDOMEvent* aEvent);
   void CreateAndDispatchChangeEvent();
-  void SetCuesInactive();
 
   IMPL_EVENT_HANDLER(change)
   IMPL_EVENT_HANDLER(addtrack)
@@ -70,8 +69,8 @@ public:
 private:
   ~TextTrackList();
 
-  nsTArray< RefPtr<TextTrack> > mTextTracks;
-  RefPtr<TextTrackManager> mTextTrackManager;
+  nsTArray< nsRefPtr<TextTrack> > mTextTracks;
+  nsRefPtr<TextTrackManager> mTextTrackManager;
 
   void CreateAndDispatchTrackEventRunner(TextTrack* aTrack,
                                          const nsAString& aEventName);

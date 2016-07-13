@@ -21,7 +21,6 @@ interface HTMLLinkElement : HTMLElement {
            attribute DOMString? crossOrigin;
   [SetterThrows, Pure]
            attribute DOMString rel;
-  [PutForwards=value]
   readonly attribute DOMTokenList relList;
   [SetterThrows, Pure]
            attribute DOMString media;
@@ -29,9 +28,7 @@ interface HTMLLinkElement : HTMLElement {
            attribute DOMString hreflang;
   [SetterThrows, Pure]
            attribute DOMString type;
-  [SetterThrows, Pure, Pref="network.http.enablePerElementReferrer"]
-           attribute DOMString referrerPolicy;
-  [PutForwards=value] readonly attribute DOMTokenList sizes;
+  [PutForwards=value] readonly attribute DOMSettableTokenList sizes;
 };
 HTMLLinkElement implements LinkStyle;
 
@@ -51,8 +48,3 @@ partial interface HTMLLinkElement {
     readonly attribute Document? import;
 };
 
-// https://w3c.github.io/webappsec/specs/subresourceintegrity/#htmllinkelement-1
-partial interface HTMLLinkElement {
-  [SetterThrows]
-  attribute DOMString integrity;
-};

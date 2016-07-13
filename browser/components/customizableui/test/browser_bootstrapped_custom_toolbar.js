@@ -4,8 +4,6 @@
 
 "use strict";
 
-requestLongerTimeout(2);
-
 const kTestBarID = "testBar";
 const kWidgetID = "characterencoding-button";
 

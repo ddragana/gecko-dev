@@ -50,7 +50,6 @@ XULLabelAccessible::
     nsAutoString text;
     textBoxFrame->GetCroppedTitle(text);
     mValueTextLeaf->SetText(text);
-    AppendChild(mValueTextLeaf);
   }
 }
 
@@ -69,7 +68,7 @@ XULLabelAccessible::NativeName(nsString& aName)
   if (mValueTextLeaf)
     return mValueTextLeaf->Name(aName);
 
-  return Accessible::NativeName(aName);
+  return eNameOK;
 }
 
 role
@@ -119,6 +118,18 @@ XULLabelAccessible::UpdateLabelValue(const nsString& aValue)
 #endif
 
   TextUpdater::Run(mDoc, mValueTextLeaf, aValue);
+}
+
+void
+XULLabelAccessible::CacheChildren()
+{
+  if (mValueTextLeaf) {
+    AppendChild(mValueTextLeaf);
+    return;
+  }
+
+  // Cache children from subtree.
+  AccessibleWrap::CacheChildren();
 }
 
 

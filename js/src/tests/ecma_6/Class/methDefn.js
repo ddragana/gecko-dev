@@ -200,5 +200,5 @@ testStrictMode();
 assertEq(({ method() {} }).method.name, "method");
 assertThrowsInstanceOf(function() {({ method() { method() } }).method() }, ReferenceError);
 
-if (typeof reportCompare === 'function')
-    reportCompare(0, 0, "ok");
+
+reportCompare(0, 0, "ok");

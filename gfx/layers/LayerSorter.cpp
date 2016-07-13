@@ -10,7 +10,6 @@
 #include <stdlib.h>                     // for getenv
 #include "DirectedGraph.h"              // for DirectedGraph
 #include "Layers.h"                     // for Layer
-#include "gfxEnv.h"                     // for gfxEnv
 #include "gfxLineSegment.h"             // for gfxLineSegment
 #include "gfxPoint.h"                   // for gfxPoint
 #include "gfxQuad.h"                    // for gfxQuad
@@ -76,16 +75,11 @@ static gfxFloat RecoverZDepth(const Matrix4x4& aTransform, const gfxPoint& aPoin
  * unsolved without changing our rendering code.
  */
 static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
-  gfxRect ourRect = ThebesRect(aOne->GetLocalVisibleRegion().ToUnknownRegion().GetBounds());
-  gfxRect otherRect = ThebesRect(aTwo->GetLocalVisibleRegion().ToUnknownRegion().GetBounds());
+  gfxRect ourRect = aOne->GetEffectiveVisibleRegion().GetBounds();
+  gfxRect otherRect = aTwo->GetEffectiveVisibleRegion().GetBounds();
 
-  MOZ_ASSERT(aOne->GetParent() && aOne->GetParent()->Extend3DContext() &&
-             aTwo->GetParent() && aTwo->GetParent()->Extend3DContext());
-  // Effective transform of leaves may had been projected to 2D.
-  Matrix4x4 ourTransform =
-    aOne->GetLocalTransform() * aOne->GetParent()->GetEffectiveTransform();
-  Matrix4x4 otherTransform =
-    aTwo->GetLocalTransform() * aTwo->GetParent()->GetEffectiveTransform();
+  Matrix4x4 ourTransform = aOne->GetTransform();
+  Matrix4x4 otherTransform = aTwo->GetTransform();
 
   // Transform both rectangles and project into 2d space.
   gfxQuad ourTransformedRect = ourRect.TransformToQuad(ourTransform);
@@ -153,6 +147,8 @@ static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
 }
 
 #ifdef DEBUG
+static bool gDumpLayerSortList = getenv("MOZ_DUMP_LAYER_SORT_LIST") != 0;
+
 // #define USE_XTERM_COLORING
 #ifdef USE_XTERM_COLORING
 // List of color values, which can be added to the xterm foreground offset or
@@ -250,7 +246,7 @@ void SortLayersBy3DZOrder(nsTArray<Layer*>& aLayers)
   DirectedGraph<Layer*> graph;
 
 #ifdef DEBUG
-  if (gfxEnv::DumpLayerSortList()) {
+  if (gDumpLayerSortList) {
     for (uint32_t i = 0; i < nodeCount; i++) {
       if (aLayers.ElementAt(i)->GetDebugColorIndex() == 0) {
         aLayers.ElementAt(i)->SetDebugColorIndex(gColorIndex++);
@@ -279,7 +275,7 @@ void SortLayersBy3DZOrder(nsTArray<Layer*>& aLayers)
   }
 
 #ifdef DEBUG
-  if (gfxEnv::DumpLayerSortList()) {
+  if (gDumpLayerSortList) {
     fprintf(stderr, " --- Edge List: --- \n");
     DumpEdgeList(graph);
   }
@@ -346,7 +342,7 @@ void SortLayersBy3DZOrder(nsTArray<Layer*>& aLayers)
   } while (!noIncoming.IsEmpty());
   NS_ASSERTION(!graph.GetEdgeCount(), "Cycles detected!");
 #ifdef DEBUG
-  if (gfxEnv::DumpLayerSortList()) {
+  if (gDumpLayerSortList) {
     fprintf(stderr, " --- Layers after sorting: --- \n");
     DumpLayerList(sortedList);
   }

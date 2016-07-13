@@ -2,9 +2,10 @@
 ; jcsample.asm - downsampling (64-bit SSE2)
 ;
 ; Copyright 2009 Pierre Ossman <ossman@cendio.se> for Cendio AB
-; Copyright (C) 2009, D. R. Commander.
+; Copyright 2009 D. R. Commander
 ;
-; Based on the x86 SIMD extension for IJG JPEG library
+; Based on
+; x86 SIMD extension for IJG JPEG library
 ; Copyright (C) 1999-2006, MIYASAKA Masaru.
 ; For conditions of distribution and use, see copyright notice in jsimdext.inc
 ;
@@ -48,11 +49,11 @@ EXTN(jsimd_h2v1_downsample_sse2):
         mov     rbp,rsp
         collect_args
 
-        mov ecx, r13d
+        mov rcx, r13
         shl     rcx,3                   ; imul rcx,DCTSIZE (rcx = output_cols)
         jz      near .return
 
-        mov edx, r10d
+        mov rdx, r10
 
         ; -- expand_right_edge
 
@@ -89,7 +90,7 @@ EXTN(jsimd_h2v1_downsample_sse2):
 
         ; -- h2v1_downsample
 
-        mov     eax, r12d        ; rowctr
+        mov     rax, r12        ; rowctr
         test    eax,eax
         jle     near .return
 
@@ -192,11 +193,11 @@ EXTN(jsimd_h2v2_downsample_sse2):
         mov     rbp,rsp
         collect_args
 
-        mov     ecx, r13d
+        mov     rcx, r13
         shl     rcx,3                   ; imul rcx,DCTSIZE (rcx = output_cols)
         jz      near .return
 
-        mov     edx, r10d
+        mov     rdx, r10
 
         ; -- expand_right_edge
 
@@ -233,7 +234,7 @@ EXTN(jsimd_h2v2_downsample_sse2):
 
         ; -- h2v2_downsample
 
-        mov     eax, r12d        ; rowctr
+        mov     rax, r12        ; rowctr
         test    rax,rax
         jle     near .return
 

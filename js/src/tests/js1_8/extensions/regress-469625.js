@@ -24,6 +24,7 @@ function test()
  
   expect = 'TypeError: [].__proto__ is not a function';
 
+  jit(true);
 
   Array.prototype.__proto__ = function () 3; 
 
@@ -35,6 +36,7 @@ function test()
   {
     print(actual = ex + '');
   }
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

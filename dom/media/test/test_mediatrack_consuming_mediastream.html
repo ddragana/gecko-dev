@@ -128,7 +128,7 @@ function startTest() {
       }
 
       var steps = 0;
-      element.srcObject = stream;
+      element.mozSrcObject = stream;
       element.onplaying = onplaying;
       element.onended = onended;
       element.play();

@@ -17,14 +17,14 @@
 #endif
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
 
 // Returns true if |size| and |alignment| are valid combinations.
 bool CorrectUsage(size_t size, size_t alignment) {
-  rtc::scoped_ptr<char, AlignedFreeDeleter> scoped(
+  scoped_ptr<char, AlignedFreeDeleter> scoped(
       static_cast<char*>(AlignedMalloc(size, alignment)));
   if (scoped.get() == NULL) {
     return false;
@@ -37,7 +37,7 @@ TEST(AlignedMalloc, GetRightAlign) {
   const size_t size = 100;
   const size_t alignment = 32;
   const size_t left_misalignment = 1;
-  rtc::scoped_ptr<char, AlignedFreeDeleter> scoped(
+  scoped_ptr<char, AlignedFreeDeleter> scoped(
       static_cast<char*>(AlignedMalloc(size, alignment)));
   EXPECT_TRUE(scoped.get() != NULL);
   const uintptr_t aligned_address = reinterpret_cast<uintptr_t> (scoped.get());

@@ -42,11 +42,11 @@ struct NetworkingConfig {
   }
 
   // Packet size in bytes. Default: 1500 bytes.
-  size_t packet_size_in_bytes;
+  int packet_size_in_bytes;
 
   // Encoder specific setting of maximum size in bytes of each payload.
   // Default: 1440 bytes.
-  size_t max_payload_size_in_bytes;
+  int max_payload_size_in_bytes;
 
   // Packet loss mode. Two different packet loss models are supported:
   // uniform or burst. This setting has no effect unless
@@ -82,7 +82,8 @@ class PacketManipulator {
   // If packets are dropped from frame data, the completedFrame field will be
   // set to false.
   // Returns the number of packets being dropped.
-  virtual int ManipulatePackets(webrtc::EncodedImage* encoded_image) = 0;
+  virtual int
+    ManipulatePackets(webrtc::EncodedImage* encoded_image) = 0;
 };
 
 class PacketManipulatorImpl : public PacketManipulator {
@@ -91,7 +92,7 @@ class PacketManipulatorImpl : public PacketManipulator {
                         const NetworkingConfig& config,
                         bool verbose);
   virtual ~PacketManipulatorImpl();
-  int ManipulatePackets(webrtc::EncodedImage* encoded_image) override;
+  virtual int ManipulatePackets(webrtc::EncodedImage* encoded_image) OVERRIDE;
   virtual void InitializeRandomSeed(unsigned int seed);
  protected:
   // Returns a uniformly distributed random value between 0.0 and 1.0

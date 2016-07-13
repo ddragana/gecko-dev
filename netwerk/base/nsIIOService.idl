@@ -141,6 +141,14 @@ interface nsIIOService : nsISupports
                                              in nsILoadInfo aLoadInfo);
 
     /**
+     * Creates a channel for a given URI.
+     *
+     * @param aURI nsIURI from which to make a channel
+     * @return reference to the new nsIChannel object
+     */
+    nsIChannel newChannelFromURI(in nsIURI aURI);
+
+    /**
      * Equivalent to newChannelFromURI2(newURI(...))
      */
     nsIChannel newChannel2(in AUTF8String aSpec,
@@ -153,26 +161,11 @@ interface nsIIOService : nsISupports
                            in unsigned long aContentPolicyType);
 
     /**
-     * ***** DEPRECATED *****
-     * Please use NewChannelFromURI2()
-     *
-     * Creates a channel for a given URI.
-     *
-     * @param aURI nsIURI from which to make a channel
-     * @return reference to the new nsIChannel object
-     */
-    nsIChannel newChannelFromURI(in nsIURI aURI);
-
-    /**
-     * ***** DEPRECATED *****
-     * Please use newChannel2().
-     *
      * Equivalent to newChannelFromURI(newURI(...))
      */
     nsIChannel newChannel(in AUTF8String aSpec,
                           in string aOriginCharset,
                           in nsIURI aBaseURI);
-
 
     /**
      * Returns true if networking is in "offline" mode. When in offline mode, 
@@ -282,7 +275,7 @@ interface nsIAppOfflineInfo : nsISupports
 #define NS_IOSERVICE_APP_OFFLINE_STATUS_TOPIC "network:app-offline-status-changed"
 %}
 
-[builtinclass, uuid(6633c0bf-d97a-428f-8ece-cb6a655fb95a)]
+[builtinclass, uuid(cd66ffef-3bc3-40de-841a-e2dcbea213a2)]
 interface nsIIOServiceInternal : nsISupports
 {
     /**
@@ -291,10 +284,4 @@ interface nsIIOServiceInternal : nsISupports
      * content process. It throws if called outside the content process.
      */
     void SetConnectivity(in boolean connectivity);
-
-    /**
-     * An internal method to asynchronously run our notifications that happen
-     * when we wake from sleep
-     */
-    void NotifyWakeup();
 };

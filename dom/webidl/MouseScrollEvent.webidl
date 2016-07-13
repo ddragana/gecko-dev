@@ -11,6 +11,7 @@ interface MouseScrollEvent : MouseEvent
 
   readonly attribute long axis;
 
+  [Throws]
   void initMouseScrollEvent(DOMString type,
                             boolean canBubble,
                             boolean cancelable,

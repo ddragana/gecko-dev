@@ -21,7 +21,6 @@ function waitForConditionPromise(condition, timeoutMsg, tryCount=NUMBER_OF_TRIES
     }
     tries++;
     setTimeout(checkCondition, SINGLE_TRY_TIMEOUT);
-    return undefined;
   }
   setTimeout(checkCondition, SINGLE_TRY_TIMEOUT);
   return defer.promise;

@@ -6,15 +6,15 @@
 
 "use strict";
 
-XPCOMUtils.defineLazyGetter(this, "devtools", function() {
-  const { devtools } =
-    Cu.import("resource://devtools/shared/Loader.jsm", {});
-  return devtools;
+XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function() {
+  Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
+  return DebuggerServer;
 });
 
-XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function() {
-  const { DebuggerServer } = devtools.require("devtools/server/main");
-  return DebuggerServer;
+XPCOMUtils.defineLazyGetter(this, "devtools", function() {
+  const { devtools } =
+    Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+  return devtools;
 });
 
 XPCOMUtils.defineLazyGetter(this, "B2GTabList", function() {
@@ -26,9 +26,9 @@ XPCOMUtils.defineLazyGetter(this, "B2GTabList", function() {
 // Load the discovery module eagerly, so that it can set a device name at
 // startup.  This does not cause discovery to start listening for packets, as
 // that only happens once DevTools is enabled.
-devtools.require("devtools/shared/discovery/discovery");
+devtools.require("devtools/toolkit/discovery/discovery");
 
-var RemoteDebugger = {
+let RemoteDebugger = {
   _listening: false,
 
   /**
@@ -49,7 +49,7 @@ var RemoteDebugger = {
    *        }
    *        Specific authentication modes may include additional fields.  Check
    *        the different |allowConnection| methods in
-   *        devtools/shared/security/auth.js.
+   *        toolkit/devtools/security/auth.js.
    * @return An AuthenticationResult value.
    *         A promise that will be resolved to the above is also allowed.
    */
@@ -103,7 +103,7 @@ var RemoteDebugger = {
     }
     this._listen();
 
-    const QR = devtools.require("devtools/shared/qrcode/index");
+    const QR = devtools.require("devtools/toolkit/qrcode/index");
     this._receivingOOB = new Promise((resolve, reject) => {
       this._handleAuthEvent = detail => {
         debug(detail.action);
@@ -219,11 +219,11 @@ var RemoteDebugger = {
       return root;
     };
 
-    if (isGonk) {
-      DebuggerServer.on("connectionchange", function() {
-        AdbController.updateState();
-      });
-    }
+#ifdef MOZ_WIDGET_GONK
+    DebuggerServer.on("connectionchange", function() {
+      AdbController.updateState();
+    });
+#endif
   }
 };
 
@@ -232,7 +232,7 @@ RemoteDebugger.allowConnection =
 RemoteDebugger.receiveOOB =
   RemoteDebugger.receiveOOB.bind(RemoteDebugger);
 
-var USBRemoteDebugger = {
+let USBRemoteDebugger = {
 
   get isDebugging() {
     if (!this._listener) {
@@ -286,7 +286,7 @@ var USBRemoteDebugger = {
 
 };
 
-var WiFiRemoteDebugger = {
+let WiFiRemoteDebugger = {
 
   start: function() {
     if (this._listener) {
@@ -373,7 +373,9 @@ var WiFiRemoteDebugger = {
            e + "\n" + e.stack + "\n");
     }
 
-    isGonk && AdbController.setRemoteDebuggerState(value != "disabled");
+#ifdef MOZ_WIDGET_GONK
+    AdbController.setRemoteDebuggerState(value != "disabled");
+#endif
   });
 
   SettingsListener.observe("devtools.remote.wifi.enabled", false,

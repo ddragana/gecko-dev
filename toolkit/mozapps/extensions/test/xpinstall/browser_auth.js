@@ -10,13 +10,13 @@ function test() {
 
   var prefs = Cc["@mozilla.org/preferences-service;1"].
                         getService(Ci.nsIPrefBranch);
-  prefs.setIntPref("network.auth.subresource-http-auth-allow", 2);
+  prefs.setIntPref("network.auth.allow-subresource-auth", 2);
 
   var pm = Services.perms;
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Unsigned XPI": TESTROOT + "authRedirect.sjs?" + TESTROOT + "amosigned.xpi"
+    "Unsigned XPI": TESTROOT + "authRedirect.sjs?" + TESTROOT + "unsigned.xpi"
   }));
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);

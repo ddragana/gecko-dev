@@ -190,13 +190,13 @@ nsColorPicker::~nsColorPicker()
 NS_IMPL_ISUPPORTS(nsColorPicker, nsIColorPicker)
 
 NS_IMETHODIMP
-nsColorPicker::Init(mozIDOMWindowProxy* parent,
+nsColorPicker::Init(nsIDOMWindow* parent,
                     const nsAString& title,
                     const nsAString& aInitialColor)
 {
   NS_PRECONDITION(parent,
       "Null parent passed to colorpicker, no color picker for you!");
-  mParentWidget =  WidgetUtils::DOMWindowToWidget(nsPIDOMWindowOuter::From(parent));
+  mParentWidget =  WidgetUtils::DOMWindowToWidget(parent);
   mInitialColor = ColorStringToRGB(aInitialColor);
   return NS_OK;
 }

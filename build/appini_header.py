@@ -8,7 +8,7 @@
 import ConfigParser
 import sys
 
-def main(output, file):
+def main(file):
     config = ConfigParser.RawConfigParser()
     config.read(file)
     flags = set()
@@ -34,7 +34,7 @@ def main(output, file):
     if not 'Crash Reporter:serverurl' in appdata:
         appdata['Crash Reporter:serverurl'] = ''
 
-    output.write('''#include "nsXREAppData.h"
+    print '''#include "nsXREAppData.h"
              static const nsXREAppData sAppData = {
                  sizeof(nsXREAppData),
                  NULL, // directory
@@ -51,10 +51,10 @@ def main(output, file):
                  "%(Gecko:maxversion)s",
                  "%(Crash Reporter:serverurl)s",
                  %(App:profile)s
-             };''' % appdata)
+             };''' % appdata
 
 if __name__ == '__main__':
     if len(sys.argv) != 1:
-        main(sys.stdout, sys.argv[1])
+        main(sys.argv[1])
     else:
         print >>sys.stderr, "Usage: %s /path/to/application.ini" % sys.argv[0]

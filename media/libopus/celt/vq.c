@@ -37,23 +37,19 @@
 #include "os_support.h"
 #include "bands.h"
 #include "rate.h"
-#include "pitch.h"
 
-#ifndef OVERRIDE_vq_exp_rotation1
 static void exp_rotation1(celt_norm *X, int len, int stride, opus_val16 c, opus_val16 s)
 {
    int i;
-   opus_val16 ms;
    celt_norm *Xptr;
    Xptr = X;
-   ms = NEG16(s);
    for (i=0;i<len-stride;i++)
    {
       celt_norm x1, x2;
       x1 = Xptr[0];
       x2 = Xptr[stride];
-      Xptr[stride] = EXTRACT16(PSHR32(MAC16_16(MULT16_16(c, x2),  s, x1), 15));
-      *Xptr++      = EXTRACT16(PSHR32(MAC16_16(MULT16_16(c, x1), ms, x2), 15));
+      Xptr[stride] = EXTRACT16(SHR32(MULT16_16(c,x2) + MULT16_16(s,x1), 15));
+      *Xptr++      = EXTRACT16(SHR32(MULT16_16(c,x1) - MULT16_16(s,x2), 15));
    }
    Xptr = &X[len-2*stride-1];
    for (i=len-2*stride-1;i>=0;i--)
@@ -61,11 +57,10 @@ static void exp_rotation1(celt_norm *X, int len, int stride, opus_val16 c, opus_
       celt_norm x1, x2;
       x1 = Xptr[0];
       x2 = Xptr[stride];
-      Xptr[stride] = EXTRACT16(PSHR32(MAC16_16(MULT16_16(c, x2),  s, x1), 15));
-      *Xptr--      = EXTRACT16(PSHR32(MAC16_16(MULT16_16(c, x1), ms, x2), 15));
+      Xptr[stride] = EXTRACT16(SHR32(MULT16_16(c,x2) + MULT16_16(s,x1), 15));
+      *Xptr--      = EXTRACT16(SHR32(MULT16_16(c,x1) - MULT16_16(s,x2), 15));
    }
 }
-#endif /* OVERRIDE_vq_exp_rotation1 */
 
 static void exp_rotation(celt_norm *X, int len, int dir, int stride, int K, int spread)
 {
@@ -96,7 +91,7 @@ static void exp_rotation(celt_norm *X, int len, int dir, int stride, int K, int 
    }
    /*NOTE: As a minor optimization, we could be passing around log2(B), not B, for both this and for
       extract_collapse_mask().*/
-   len = celt_udiv(len, stride);
+   len /= stride;
    for (i=0;i<stride;i++)
    {
       if (dir < 0)
@@ -145,15 +140,13 @@ static unsigned extract_collapse_mask(int *iy, int N, int B)
       return 1;
    /*NOTE: As a minor optimization, we could be passing around log2(B), not B, for both this and for
       exp_rotation().*/
-   N0 = celt_udiv(N, B);
+   N0 = N/B;
    collapse_mask = 0;
    i=0; do {
       int j;
-      unsigned tmp=0;
       j=0; do {
-         tmp |= iy[i*N0+j];
+         collapse_mask |= (iy[i*N0+j]!=0)<<i;
       } while (++j<N0);
-      collapse_mask |= (tmp!=0)<<i;
    } while (++i<B);
    return collapse_mask;
 }
@@ -329,6 +322,7 @@ unsigned alg_quant(celt_norm *X, int N, int K, int spread, int B, ec_enc *enc
 unsigned alg_unquant(celt_norm *X, int N, int K, int spread, int B,
       ec_dec *dec, opus_val16 gain)
 {
+   int i;
    opus_val32 Ryy;
    unsigned collapse_mask;
    VARDECL(int, iy);
@@ -337,7 +331,12 @@ unsigned alg_unquant(celt_norm *X, int N, int K, int spread, int B,
    celt_assert2(K>0, "alg_unquant() needs at least one pulse");
    celt_assert2(N>1, "alg_unquant() needs at least two dimensions");
    ALLOC(iy, N, int);
-   Ryy = decode_pulses(iy, N, K, dec);
+   decode_pulses(iy, N, K, dec);
+   Ryy = 0;
+   i=0;
+   do {
+      Ryy = MAC16_16(Ryy, iy[i], iy[i]);
+   } while (++i < N);
    normalise_residual(iy, X, N, Ryy, gain);
    exp_rotation(X, N, -1, B, K, spread);
    collapse_mask = extract_collapse_mask(iy, N, B);
@@ -345,18 +344,21 @@ unsigned alg_unquant(celt_norm *X, int N, int K, int spread, int B,
    return collapse_mask;
 }
 
-#ifndef OVERRIDE_renormalise_vector
-void renormalise_vector(celt_norm *X, int N, opus_val16 gain, int arch)
+void renormalise_vector(celt_norm *X, int N, opus_val16 gain)
 {
    int i;
 #ifdef FIXED_POINT
    int k;
 #endif
-   opus_val32 E;
+   opus_val32 E = EPSILON;
    opus_val16 g;
    opus_val32 t;
-   celt_norm *xptr;
-   E = EPSILON + celt_inner_prod(X, X, N, arch);
+   celt_norm *xptr = X;
+   for (i=0;i<N;i++)
+   {
+      E = MAC16_16(E, *xptr, *xptr);
+      xptr++;
+   }
 #ifdef FIXED_POINT
    k = celt_ilog2(E)>>1;
 #endif
@@ -371,9 +373,8 @@ void renormalise_vector(celt_norm *X, int N, opus_val16 gain, int arch)
    }
    /*return celt_sqrt(E);*/
 }
-#endif /* OVERRIDE_renormalise_vector */
 
-int stereo_itheta(const celt_norm *X, const celt_norm *Y, int stereo, int N, int arch)
+int stereo_itheta(celt_norm *X, celt_norm *Y, int stereo, int N)
 {
    int i;
    int itheta;
@@ -392,8 +393,14 @@ int stereo_itheta(const celt_norm *X, const celt_norm *Y, int stereo, int N, int
          Eside = MAC16_16(Eside, s, s);
       }
    } else {
-      Emid += celt_inner_prod(X, X, N, arch);
-      Eside += celt_inner_prod(Y, Y, N, arch);
+      for (i=0;i<N;i++)
+      {
+         celt_norm m, s;
+         m = X[i];
+         s = Y[i];
+         Emid = MAC16_16(Emid, m, m);
+         Eside = MAC16_16(Eside, s, s);
+      }
    }
    mid = celt_sqrt(Emid);
    side = celt_sqrt(Eside);

@@ -116,8 +116,7 @@ Result BuildCertChain(TrustDomain& trustDomain, Input cert,
 // - IP addresses are out of scope of RFC 6125, but this method accepts them for
 //   backward compatibility (see SearchNames in pkixnames.cpp)
 // - A wildcard in a DNS-ID may only appear as the entirety of the first label.
-Result CheckCertHostname(Input cert, Input hostname,
-                         NameMatchingPolicy& nameMatchingPolicy);
+Result CheckCertHostname(Input cert, Input hostname);
 
 // Construct an RFC-6960-encoded OCSP request, ready for submission to a
 // responder, for the provided CertID. The request has no extensions.
@@ -147,14 +146,6 @@ Result VerifyEncodedOCSPResponse(TrustDomain& trustDomain,
                        /* out */ bool& expired,
               /* optional out */ Time* thisUpdate = nullptr,
               /* optional out */ Time* validThrough = nullptr);
-
-// Check that the TLSFeature extensions in a given end-entity cert (which is
-// assumed to have been already validated with BuildCertChain) are satisfied.
-// The only feature which we cancurrently process a requirement for is
-// status_request (OCSP stapling) so we reject any extension that specifies a
-// requirement for another value. Empty extensions are also rejected.
-Result CheckTLSFeaturesAreSatisfied(Input& cert,
-                                    const Input* stapledOCSPResponse);
 
 } } // namespace mozilla::pkix
 

@@ -36,8 +36,7 @@ public:
   HasStates() const override;
   virtual void
   SetScrollPositionOnly(const bool aFlag) override;
-  virtual void
-  ResetScrollState() override;
+
 
 private:
   ~nsLayoutHistoryState() {}
@@ -50,7 +49,7 @@ private:
 already_AddRefed<nsILayoutHistoryState>
 NS_NewLayoutHistoryState()
 {
-  RefPtr<nsLayoutHistoryState> state = new nsLayoutHistoryState();
+  nsRefPtr<nsLayoutHistoryState> state = new nsLayoutHistoryState();
   return state.forget();
 }
 
@@ -94,15 +93,4 @@ void
 nsLayoutHistoryState::SetScrollPositionOnly(const bool aFlag)
 {
   mScrollPositionOnly = aFlag;
-}
-
-void
-nsLayoutHistoryState::ResetScrollState()
-{
-  for (auto iter = mStates.Iter(); !iter.Done(); iter.Next()) {
-    nsPresState* state = iter.UserData();
-    if (state) {
-      state->SetScrollState(nsPoint(0, 0));
-    }
-  }
 }

@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -70,6 +68,19 @@ std::string SysInfo::OperatingSystemName() {
 }
 
 // static
+std::string SysInfo::OperatingSystemVersion() {
+  OSVERSIONINFO info = {0};
+  info.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+  GetVersionEx(&info);
+
+  return StringPrintf("%lu.%lu", info.dwMajorVersion, info.dwMinorVersion);
+}
+
+// TODO: Implement OperatingSystemVersionComplete, which would include
+// patchlevel/service pack number. See chrome/browser/views/bug_report_view.cc,
+// BugReportView::SetOSVersion.
+
+// static
 std::string SysInfo::CPUArchitecture() {
   // TODO: Make this vary when we support any other architectures.
   return "x86";
@@ -95,6 +106,18 @@ size_t SysInfo::VMAllocationGranularity() {
   GetSystemInfo(&sysinfo);
 
   return sysinfo.dwAllocationGranularity;
+}
+
+// static
+void SysInfo::OperatingSystemVersionNumbers(int32_t *major_version,
+                                            int32_t *minor_version,
+                                            int32_t *bugfix_version) {
+  OSVERSIONINFO info = {0};
+  info.dwOSVersionInfoSize = sizeof(info);
+  GetVersionEx(&info);
+  *major_version = info.dwMajorVersion;
+  *minor_version = info.dwMinorVersion;
+  *bugfix_version = 0;
 }
 
 }  // namespace base

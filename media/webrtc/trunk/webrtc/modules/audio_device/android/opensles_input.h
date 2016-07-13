@@ -15,7 +15,6 @@
 #include <SLES/OpenSLES_Android.h>
 #include <SLES/OpenSLES_AndroidConfiguration.h>
 
-#include "webrtc/base/scoped_ptr.h"
 // Not defined in the android version we use to build with
 #define SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION ((SLuint32) 0x00000004)
 
@@ -27,11 +26,11 @@
 #include "webrtc/modules/audio_device/android/low_latency_event.h"
 #include "webrtc/modules/audio_device/include/audio_device.h"
 #include "webrtc/modules/audio_device/include/audio_device_defines.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
 class AudioDeviceBuffer;
-class AudioManager;
 class CriticalSectionWrapper;
 class PlayoutDelayProvider;
 class SingleRwFifo;
@@ -43,11 +42,11 @@ class ThreadWrapper;
 // to non-const methods require exclusive access to the object.
 class OpenSlesInput {
  public:
-  OpenSlesInput(
-      PlayoutDelayProvider* delay_provider, AudioManager* audio_manager);
+  OpenSlesInput(const int32_t id, PlayoutDelayProvider* delay_provider);
   ~OpenSlesInput();
 
   static int32_t SetAndroidAudioDeviceObjects(void* javaVM,
+                                              void* env,
                                               void* context);
   static void ClearAndroidAudioDeviceObjects();
 
@@ -126,10 +125,6 @@ class OpenSlesInput {
   // Attach audio buffer
   void AttachAudioBuffer(AudioDeviceBuffer* audioBuffer);
 
-  // Built-in AEC is only supported in combination with Java/AudioRecord.
-  bool BuiltInAECIsAvailable() const { return false; }
-  int32_t EnableBuiltInAEC(bool enable) { return -1; }
-
  private:
   enum {
     kNumInterfaces = 2,
@@ -187,24 +182,21 @@ class OpenSlesInput {
   // Thread-compatible.
   bool CbThreadImpl();
 
-  PlayoutDelayProvider* delay_provider_;
-
 #if !defined(WEBRTC_GONK)
   // Java API handle
   AudioManagerJni audio_manager_;
 #endif
 
-  // TODO(henrika): improve this area
-  // PlayoutDelayProvider* delay_provider_;
-
+  int id_;
+  PlayoutDelayProvider* delay_provider_;
   bool initialized_;
   bool mic_initialized_;
   bool rec_initialized_;
 
   // Members that are read/write accessed concurrently by the process thread and
   // threads calling public functions of this class.
-  rtc::scoped_ptr<ThreadWrapper> rec_thread_;  // Processing thread
-  rtc::scoped_ptr<CriticalSectionWrapper> crit_sect_;
+  scoped_ptr<ThreadWrapper> rec_thread_;  // Processing thread
+  scoped_ptr<CriticalSectionWrapper> crit_sect_;
   // This member controls the starting and stopping of recording audio to the
   // the device.
   bool recording_;
@@ -212,7 +204,7 @@ class OpenSlesInput {
   // Only one thread, T1, may push and only one thread, T2, may pull. T1 may or
   // may not be the same thread as T2. T2 is the process thread and T1 is the
   // OpenSL thread.
-  rtc::scoped_ptr<SingleRwFifo> fifo_;
+  scoped_ptr<SingleRwFifo> fifo_;
   int num_fifo_buffers_needed_;
   LowLatencyEvent event_;
   int number_overruns_;
@@ -227,7 +219,7 @@ class OpenSlesInput {
   // Audio buffers
   AudioDeviceBuffer* audio_buffer_;
   // Holds all allocated memory such that it is deallocated properly.
-  rtc::scoped_ptr<rtc::scoped_ptr<int8_t[]>[]> rec_buf_;
+  scoped_ptr<scoped_ptr<int8_t[]>[]> rec_buf_;
   // Index in |rec_buf_| pointing to the audio buffer that will be ready the
   // next time RecorderSimpleBufferQueueCallbackHandler is invoked.
   // Ready means buffer contains audio data from the device.

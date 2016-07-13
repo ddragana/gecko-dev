@@ -28,7 +28,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
-#include "mozilla/dom/Performance.h"
+#include "nsPerformance.h"
 #include "mozilla/dom/VideoPlaybackQuality.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Video)
@@ -42,7 +42,6 @@ NS_IMPL_ELEMENT_CLONE(HTMLVideoElement)
 
 HTMLVideoElement::HTMLVideoElement(already_AddRefed<NodeInfo>& aNodeInfo)
   : HTMLMediaElement(aNodeInfo)
-  , mUseScreenWakeLock(true)
 {
 }
 
@@ -60,21 +59,8 @@ nsresult HTMLVideoElement::GetVideoSize(nsIntSize* size)
     return NS_ERROR_FAILURE;
   }
 
-  switch (mMediaInfo.mVideo.mRotation) {
-    case VideoInfo::Rotation::kDegree_90:
-    case VideoInfo::Rotation::kDegree_270: {
-      size->width = mMediaInfo.mVideo.mDisplay.height;
-      size->height = mMediaInfo.mVideo.mDisplay.width;
-      break;
-    }
-    case VideoInfo::Rotation::kDegree_0:
-    case VideoInfo::Rotation::kDegree_180:
-    default: {
-      size->height = mMediaInfo.mVideo.mDisplay.height;
-      size->width = mMediaInfo.mVideo.mDisplay.width;
-      break;
-    }
-  }
+  size->height = mMediaInfo.mVideo.mDisplay.height;
+  size->width = mMediaInfo.mVideo.mDisplay.width;
   return NS_OK;
 }
 
@@ -126,7 +112,9 @@ HTMLVideoElement::GetAttributeMappingFunction() const
 nsresult HTMLVideoElement::SetAcceptHeader(nsIHttpChannel* aChannel)
 {
   nsAutoCString value(
+#ifdef MOZ_WEBM
       "video/webm,"
+#endif
       "video/ogg,"
       "video/*;q=0.9,"
       "application/ogg;q=0.7,"
@@ -198,19 +186,6 @@ bool HTMLVideoElement::MozHasAudio() const
   return HasAudio();
 }
 
-bool HTMLVideoElement::MozUseScreenWakeLock() const
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Should be on main thread.");
-  return mUseScreenWakeLock;
-}
-
-void HTMLVideoElement::SetMozUseScreenWakeLock(bool aValue)
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Should be on main thread.");
-  mUseScreenWakeLock = aValue;
-  UpdateScreenWakeLock();
-}
-
 JSObject*
 HTMLVideoElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
@@ -234,22 +209,23 @@ HTMLVideoElement::GetVideoPlaybackQuality()
   uint64_t corruptedFrames = 0;
 
   if (sVideoStatsEnabled) {
-    if (nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow()) {
-      Performance* perf = window->GetPerformance();
+    nsPIDOMWindow* window = OwnerDoc()->GetInnerWindow();
+    if (window) {
+      nsPerformance* perf = window->GetPerformance();
       if (perf) {
-        creationTime = perf->Now();
+        creationTime = perf->GetDOMTiming()->TimeStampToDOMHighRes(TimeStamp::Now());
       }
     }
 
     if (mDecoder) {
-      FrameStatistics& stats = mDecoder->GetFrameStatistics();
+      MediaDecoder::FrameStatistics& stats = mDecoder->GetFrameStatistics();
       totalFrames = stats.GetParsedFrames();
       droppedFrames = stats.GetDroppedFrames();
       corruptedFrames = 0;
     }
   }
 
-  RefPtr<VideoPlaybackQuality> playbackQuality =
+  nsRefPtr<VideoPlaybackQuality> playbackQuality =
     new VideoPlaybackQuality(this, creationTime, totalFrames, droppedFrames,
                              corruptedFrames);
   return playbackQuality.forget();
@@ -274,17 +250,16 @@ HTMLVideoElement::UpdateScreenWakeLock()
 {
   bool hidden = OwnerDoc()->Hidden();
 
-  if (mScreenWakeLock && (mPaused || hidden || !mUseScreenWakeLock)) {
+  if (mScreenWakeLock && (mPaused || hidden)) {
     ErrorResult rv;
     mScreenWakeLock->Unlock(rv);
-    rv.SuppressException();
+    NS_WARN_IF_FALSE(!rv.Failed(), "Failed to unlock the wakelock.");
     mScreenWakeLock = nullptr;
     return;
   }
 
-  if (!mScreenWakeLock && !mPaused && !hidden &&
-      mUseScreenWakeLock && HasVideo()) {
-    RefPtr<power::PowerManagerService> pmService =
+  if (!mScreenWakeLock && !mPaused && !hidden && HasVideo()) {
+    nsRefPtr<power::PowerManagerService> pmService =
       power::PowerManagerService::GetInstance();
     NS_ENSURE_TRUE_VOID(pmService);
 

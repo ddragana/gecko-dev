@@ -11,7 +11,6 @@
 #include "nsIParentChannel.h"
 #include "nsInterfaceHashtable.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Mutex.h"
 
 namespace mozilla {
 namespace net {
@@ -35,7 +34,6 @@ protected:
   ChannelHashtable mRealChannels;
   ParentChannelHashtable mParentChannels;
   uint32_t mId;
-  Mutex mLock;
 };
 
 } // namespace net

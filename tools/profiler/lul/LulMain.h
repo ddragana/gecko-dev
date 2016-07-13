@@ -185,7 +185,7 @@ public:
   {}
 
   template <typename S>
-  explicit LULStats(const LULStats<S>& aOther)
+  LULStats(const LULStats<S>& aOther)
     : mContext(aOther.mContext)
     , mCFI(aOther.mCFI)
     , mScanned(aOther.mScanned)

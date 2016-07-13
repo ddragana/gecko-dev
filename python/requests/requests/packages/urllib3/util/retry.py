@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 import time
 import logging
 
@@ -95,7 +94,7 @@ class Retry(object):
 
         seconds. If the backoff_factor is 0.1, then :func:`.sleep` will sleep
         for [0.1s, 0.2s, 0.4s, ...] between retries. It will never be longer
-        than :attr:`Retry.BACKOFF_MAX`.
+        than :attr:`Retry.MAX_BACKOFF`.
 
         By default, backoff is disabled (set to 0).
 
@@ -127,7 +126,7 @@ class Retry(object):
         self.method_whitelist = method_whitelist
         self.backoff_factor = backoff_factor
         self.raise_on_redirect = raise_on_redirect
-        self._observed_errors = _observed_errors  # TODO: use .history instead?
+        self._observed_errors = _observed_errors # TODO: use .history instead?
 
     def new(self, **kw):
         params = dict(
@@ -191,7 +190,7 @@ class Retry(object):
         return isinstance(err, (ReadTimeoutError, ProtocolError))
 
     def is_forced_retry(self, method, status_code):
-        """ Is this method/status code retryable? (Based on method/codes whitelists)
+        """ Is this method/response retryable? (Based on method/codes whitelists)
         """
         if self.method_whitelist and method.upper() not in self.method_whitelist:
             return False
@@ -207,8 +206,7 @@ class Retry(object):
 
         return min(retry_counts) < 0
 
-    def increment(self, method=None, url=None, response=None, error=None,
-                  _pool=None, _stacktrace=None):
+    def increment(self, method=None, url=None, response=None, error=None, _pool=None, _stacktrace=None):
         """ Return a new Retry object with incremented retry counters.
 
         :param response: A response object, or None, if the server did not
@@ -275,6 +273,7 @@ class Retry(object):
         log.debug("Incremented Retry for (url='%s'): %r" % (url, new_retry))
 
         return new_retry
+
 
     def __repr__(self):
         return ('{cls.__name__}(total={self.total}, connect={self.connect}, '

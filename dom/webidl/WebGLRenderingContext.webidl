@@ -45,38 +45,24 @@ dictionary WebGLContextAttributes {
     boolean failIfMajorPerformanceCaveat = false;
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLBuffer {
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLFramebuffer {
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLProgram {
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLRenderbuffer {
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLShader {
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLTexture {
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLUniformLocation {
 };
 
@@ -84,24 +70,18 @@ interface WebGLUniformLocation {
 interface WebGLVertexArrayObjectOES {
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLActiveInfo {
     readonly attribute GLint size;
     readonly attribute GLenum type;
     readonly attribute DOMString name;
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLShaderPrecisionFormat {
     readonly attribute GLint rangeMin;
     readonly attribute GLint rangeMax;
     readonly attribute GLint precision;
 };
 
-[Exposed=(Window,Worker),
- Func="mozilla::dom::OffscreenCanvas::PrefEnabledOnWorkerThread"]
 interface WebGLRenderingContext {
 
     /* ClearBufferMask */
@@ -524,7 +504,7 @@ interface WebGLRenderingContext {
     const GLenum BROWSER_DEFAULT_WEBGL          = 0x9244;
 
     // The canvas might actually be null in some cases, apparently.
-    readonly attribute (HTMLCanvasElement or OffscreenCanvas)? canvas;
+    readonly attribute HTMLCanvasElement? canvas;
     readonly attribute GLsizei drawingBufferWidth;
     readonly attribute GLsizei drawingBufferHeight;
 
@@ -553,10 +533,8 @@ interface WebGLRenderingContext {
     void bufferData(GLenum target, GLsizeiptr size, GLenum usage);
     void bufferData(GLenum target, ArrayBufferView data, GLenum usage);
     void bufferData(GLenum target, ArrayBuffer? data, GLenum usage);
-    void bufferData(GLenum target, SharedArrayBuffer data, GLenum usage);
     void bufferSubData(GLenum target, GLintptr offset, ArrayBufferView data);
     void bufferSubData(GLenum target, GLintptr offset, ArrayBuffer? data);
-    void bufferSubData(GLenum target, GLintptr offset, SharedArrayBuffer data);
 
     [WebGLHandlesContextLoss] GLenum checkFramebufferStatus(GLenum target);
     void clear(GLbitfield mask);
@@ -692,12 +670,11 @@ interface WebGLRenderingContext {
     void stencilOpSeparate(GLenum face, GLenum fail, GLenum zfail, GLenum zpass);
 
 
-    // Overloads must share [Throws].
-    [Throws] // Can't actually throw.
+    [Throws]
     void texImage2D(GLenum target, GLint level, GLenum internalformat,
                     GLsizei width, GLsizei height, GLint border, GLenum format,
                     GLenum type, ArrayBufferView? pixels);
-    [Throws] // Can't actually throw.
+    [Throws]
     void texImage2D(GLenum target, GLint level, GLenum internalformat,
                     GLenum format, GLenum type, ImageData? pixels);
     [Throws]
@@ -713,11 +690,11 @@ interface WebGLRenderingContext {
     void texParameterf(GLenum target, GLenum pname, GLfloat param);
     void texParameteri(GLenum target, GLenum pname, GLint param);
 
-    [Throws] // Can't actually throw.
+    [Throws]
     void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
-                       GLsizei width, GLsizei height, GLenum format, GLenum type,
-                       ArrayBufferView? pixels);
-    [Throws] // Can't actually throw.
+                       GLsizei width, GLsizei height,
+                       GLenum format, GLenum type, ArrayBufferView? pixels);
+    [Throws]
     void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                        GLenum format, GLenum type, ImageData? pixels);
     [Throws]
@@ -789,15 +766,17 @@ interface WebGLRenderingContext {
     void viewport(GLint x, GLint y, GLsizei width, GLsizei height);
 };
 
-// For OffscreenCanvas
-// Reference: https://wiki.whatwg.org/wiki/OffscreenCanvas
-[Exposed=(Window,Worker)]
-partial interface WebGLRenderingContext {
-    [Func="mozilla::dom::OffscreenCanvas::PrefEnabled"]
-    void commit();
-};
+/*[Constructor(DOMString type, optional WebGLContextEventInit eventInit)]
+interface WebGLContextEvent : Event {
+    readonly attribute DOMString statusMessage;
+    };*/
 
-////////////////////////////////////////
+// EventInit is defined in the DOM4 specification.
+/*dictionary WebGLContextEventInit : EventInit {
+    DOMString statusMessage;
+    };*/
+
+
 // specific extension interfaces
 
 [NoInterfaceObject]
@@ -815,21 +794,6 @@ interface WEBGL_compressed_texture_atc
     const GLenum COMPRESSED_RGB_ATC_WEBGL                     = 0x8C92;
     const GLenum COMPRESSED_RGBA_ATC_EXPLICIT_ALPHA_WEBGL     = 0x8C93;
     const GLenum COMPRESSED_RGBA_ATC_INTERPOLATED_ALPHA_WEBGL = 0x87EE;
-};
-
-[NoInterfaceObject]
-interface WEBGL_compressed_texture_es3
-{
-    const GLenum COMPRESSED_R11_EAC                                 = 0x9270;
-    const GLenum COMPRESSED_SIGNED_R11_EAC                          = 0x9271;
-    const GLenum COMPRESSED_RG11_EAC                                = 0x9272;
-    const GLenum COMPRESSED_SIGNED_RG11_EAC                         = 0x9273;
-    const GLenum COMPRESSED_RGB8_ETC2                               = 0x9274;
-    const GLenum COMPRESSED_SRGB8_ETC2                              = 0x9275;
-    const GLenum COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2           = 0x9276;
-    const GLenum COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2          = 0x9277;
-    const GLenum COMPRESSED_RGBA8_ETC2_EAC                          = 0x9278;
-    const GLenum COMPRESSED_SRGB8_ALPHA8_ETC2_EAC                   = 0x9279;
 };
 
 [NoInterfaceObject]

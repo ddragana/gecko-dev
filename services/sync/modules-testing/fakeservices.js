@@ -11,12 +11,12 @@ this.EXPORTED_SYMBOLS = [
   "fakeSHA256HMAC",
 ];
 
-var {utils: Cu} = Components;
+const {utils: Cu} = Components;
 
 Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/util.js");
 
-var btoa = Cu.import("resource://gre/modules/Log.jsm").btoa;
+let btoa = Cu.import("resource://gre/modules/Log.jsm").btoa;
 
 this.FakeFilesystemService = function FakeFilesystemService(contents) {
   this.fakeContents = contents;
@@ -50,9 +50,7 @@ this.FakeGUIDService = function FakeGUIDService() {
   let latestGUID = 0;
 
   Utils.makeGUID = function makeGUID() {
-    // ensure that this always returns a unique 12 character string
-    let nextGUID = "fake-guid-" + String(latestGUID++).padStart(2, "0");
-    return nextGUID.slice(nextGUID.length-12, nextGUID.length);
+    return "fake-guid-" + latestGUID++;
   };
 }
 

@@ -12,7 +12,7 @@ function test() {
   goNext();
 }
 
-var tests = [
+let tests = [
   // Popup Notifications main actions should catch exceptions from callbacks
   { id: "Test#1",
     run: function () {
@@ -117,7 +117,7 @@ var tests = [
   },
   // Moving a tab to a new window should preserve swappable notifications.
   { id: "Test#6",
-    run: function* () {
+    run: function() {
       gBrowser.selectedTab = gBrowser.addTab("about:blank");
       let notifyObj = new BasicNotification(this.id);
       let originalCallback = notifyObj.options.eventCallback;
@@ -126,26 +126,17 @@ var tests = [
         return eventName == "swapping";
       };
 
-      let notification = showNotification(notifyObj);
+      showNotification(notifyObj);
       let win = gBrowser.replaceTabWithWindow(gBrowser.selectedTab);
-      yield whenDelayedStartupFinished(win);
-      let [tab] = win.gBrowser.tabs;
-      let anchor = win.document.getElementById("default-notification-icon");
-
-      yield new Promise(resolve => {
-        notification.options.eventCallback = function (eventName) {
-          if (eventName == "shown") {
-            resolve();
-          }
-        };
-        info("Showing the notification again");
-        notification.reshow();
+      whenDelayedStartupFinished(win, function() {
+        let [tab] = win.gBrowser.tabs;
+        let anchor = win.document.getElementById("default-notification-icon");
+        win.PopupNotifications._reshowNotifications(anchor);
+        checkPopup(win.PopupNotifications.panel, notifyObj);
+        ok(notifyObj.swappingCallbackTriggered, "the swapping callback was triggered");
+        win.close();
+        goNext();
       });
-
-      checkPopup(win.PopupNotifications.panel, notifyObj);
-      ok(notifyObj.swappingCallbackTriggered, "the swapping callback was triggered");
-      win.close();
-      goNext();
     }
   },
   // the hideNotNow option

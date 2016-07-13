@@ -13,7 +13,6 @@
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/Logging.h"
 #include "mozilla/unused.h"
-#include "base/task.h"
 
 namespace mozilla {
 
@@ -21,7 +20,7 @@ namespace mozilla {
 #undef LOG
 #endif
 
-extern LogModule* GetGMPLog();
+extern PRLogModuleInfo* GetGMPLog();
 
 #define LOGD(msg) MOZ_LOG(GetGMPLog(), mozilla::LogLevel::Debug, msg)
 #define LOG(level, msg) MOZ_LOG(GetGMPLog(), (level), msg)
@@ -44,9 +43,11 @@ GMPContentParent::GMPContentParent(GMPParent* aParent)
 
 GMPContentParent::~GMPContentParent()
 {
+  XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
+                                   new DeleteTask<Transport>(GetTransport()));
 }
 
-class ReleaseGMPContentParent : public Runnable
+class ReleaseGMPContentParent : public nsRunnable
 {
 public:
   explicit ReleaseGMPContentParent(GMPContentParent* aToRelease)
@@ -60,7 +61,7 @@ public:
   }
 
 private:
-  RefPtr<GMPContentParent> mToRelease;
+  nsRefPtr<GMPContentParent> mToRelease;
 };
 
 void
@@ -94,7 +95,7 @@ GMPContentParent::VideoDecoderDestroyed(GMPVideoDecoderParent* aDecoder)
   MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
 
   // If the constructor fails, we'll get called before it's added
-  Unused << NS_WARN_IF(!mVideoDecoders.RemoveElement(aDecoder));
+  unused << NS_WARN_IF(!mVideoDecoders.RemoveElement(aDecoder));
   CloseIfUnused();
 }
 
@@ -104,7 +105,7 @@ GMPContentParent::VideoEncoderDestroyed(GMPVideoEncoderParent* aEncoder)
   MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
 
   // If the constructor fails, we'll get called before it's added
-  Unused << NS_WARN_IF(!mVideoEncoders.RemoveElement(aEncoder));
+  unused << NS_WARN_IF(!mVideoEncoders.RemoveElement(aEncoder));
   CloseIfUnused();
 }
 
@@ -124,17 +125,17 @@ GMPContentParent::CloseIfUnused()
       mDecryptors.IsEmpty() &&
       mVideoDecoders.IsEmpty() &&
       mVideoEncoders.IsEmpty()) {
-    RefPtr<GMPContentParent> toClose;
+    nsRefPtr<GMPContentParent> toClose;
     if (mParent) {
       toClose = mParent->ForgetGMPContentParent();
     } else {
       toClose = this;
-      RefPtr<GeckoMediaPluginServiceChild> gmp(
+      nsRefPtr<GeckoMediaPluginServiceChild> gmp(
         GeckoMediaPluginServiceChild::GetSingleton());
       gmp->RemoveGMPContentParent(toClose);
     }
-    NS_DispatchToCurrentThread(NewRunnableMethod(toClose,
-                                                 &GMPContentParent::Close));
+    NS_DispatchToCurrentThread(NS_NewRunnableMethod(toClose,
+                                                    &GMPContentParent::Close));
   }
 }
 

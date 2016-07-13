@@ -88,8 +88,8 @@ static const bool runtime_dummy =
 class NetEqIsacQualityTest : public NetEqQualityTest {
  protected:
   NetEqIsacQualityTest();
-  void SetUp() override;
-  void TearDown() override;
+  virtual void SetUp() OVERRIDE;
+  virtual void TearDown() OVERRIDE;
   virtual int EncodeBlock(int16_t* in_data, int block_size_samples,
                           uint8_t* payload, int max_bytes);
  private:

@@ -211,7 +211,7 @@ NS_IMETHODIMP nsASDOMWindowEnumerator::GetNext(nsISupports **retval)
 
   *retval = nullptr;
   while (mCurrentPosition) {
-    nsCOMPtr<nsPIDOMWindowOuter> domWindow;
+    nsCOMPtr<nsIDOMWindow> domWindow;
     nsWindowMediator::GetDOMWindow(mCurrentPosition->mWindow, domWindow);
     mCurrentPosition = FindNext();
     if (domWindow)

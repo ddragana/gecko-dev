@@ -6,18 +6,16 @@
 #include "nsISupports.idl"
 
 interface nsIDocShell;
-interface mozIDOMWindowProxy;
+interface nsIDOMWindow;
 
-/**
- * XXX This interface seems to be unimplemented and unused.
- */
-[scriptable, uuid(8eb6ffc9-715c-487e-927c-c56139229548)]
+[scriptable, uuid(e439d3eb-b1ed-449c-aaf7-c693e399b16f)]
 interface nsIPrintStatusFeedback : nsISupports {
+
 	void showStatusString(in wstring status);
 	void startMeteors();
 	void stopMeteors();
 	void showProgress(in long percent);
-	[noscript] void setDocShell(in nsIDocShell shell, in mozIDOMWindowProxy window);
+	[noscript] void setDocShell(in nsIDocShell shell, in nsIDOMWindow window);
 	void closeWindow();
 };
 

@@ -134,6 +134,7 @@ typedef struct nr_socket_multi_tcp_ {
   NR_async_cb readable_cb;
   void *readable_cb_arg;
   int max_pending;
+  int use_framing;
 } nr_socket_multi_tcp;
 
 static int nr_socket_multi_tcp_destroy(void **objp);
@@ -169,16 +170,8 @@ static int nr_socket_multi_tcp_create_stun_server_socket(
     nr_tcp_socket_ctx *tcp_socket_ctx=0;
     nr_socket * nrsock;
 
-    if (stun_server->transport!=IPPROTO_TCP) {
-      r_log(LOG_ICE,LOG_INFO,"%s:%d function %s skipping UDP STUN server(addr:%s)",__FILE__,__LINE__,__FUNCTION__,stun_server->u.addr.as_string);
+    if (stun_server->transport!=IPPROTO_TCP)
       ABORT(R_BAD_ARGS);
-    }
-
-    if (stun_server->type == NR_ICE_STUN_SERVER_TYPE_ADDR &&
-        nr_transport_addr_cmp(&stun_server->u.addr,addr,NR_TRANSPORT_ADDR_CMP_MODE_VERSION)) {
-      r_log(LOG_ICE,LOG_INFO,"%s:%d function %s skipping STUN with different IP version (%u) than local socket (%u),",__FILE__,__LINE__,__FUNCTION__,stun_server->u.addr.ip_version,addr->ip_version);
-      ABORT(R_BAD_ARGS);
-    }
 
     if ((r=nr_socket_factory_create_socket(sock->ctx->socket_factory,addr, &nrsock)))
       ABORT(r);
@@ -214,7 +207,8 @@ static int nr_socket_multi_tcp_create_stun_server_socket(
 
 int nr_socket_multi_tcp_create(struct nr_ice_ctx_ *ctx,
     nr_transport_addr *addr, nr_socket_tcp_type tcp_type,
-    int precreated_so_count, int max_pending, nr_socket **sockp)
+    int precreated_so_count, int use_framing, int max_pending,
+    nr_socket **sockp)
   {
     int i=0;
     int r, _status;
@@ -230,6 +224,7 @@ int nr_socket_multi_tcp_create(struct nr_ice_ctx_ *ctx,
     sock->ctx=ctx;
     sock->max_pending=max_pending;
     sock->tcp_type=tcp_type;
+    sock->use_framing=use_framing;
     nr_transport_addr_copy(&sock->addr, addr);
 
     if((tcp_type==TCP_TYPE_PASSIVE) &&
@@ -266,7 +261,7 @@ int nr_socket_multi_tcp_create(struct nr_ice_ctx_ *ctx,
           ABORT(r);
 
         /* This takes ownership of nrsock whether it fails or not. */
-        if ((r=nr_tcp_socket_ctx_create(nrsock, 1, max_pending, &tcp_socket_ctx))){
+        if ((r=nr_tcp_socket_ctx_create(nrsock, use_framing, max_pending, &tcp_socket_ctx))){
           ABORT(r);
         }
         TAILQ_INSERT_TAIL(&sock->sockets, tcp_socket_ctx, entry);
@@ -351,6 +346,8 @@ static int nr_socket_multi_tcp_get_sock_connected_to(nr_socket_multi_tcp *sock,
 
     /* if active type - create new socket for each new remote addr */
     assert(sock->tcp_type == TCP_TYPE_ACTIVE);
+    /* ICE-TCP active type should always use framing */
+    assert(sock->use_framing);
 
     if ((r=nr_socket_factory_create_socket(sock->ctx->socket_factory, &sock->addr, &nrsock)))
       ABORT(r);
@@ -486,9 +483,7 @@ static int nr_socket_multi_tcp_recvfrom(void *obj,void * restrict buf,
 
       if (r!=R_WOULDBLOCK) {
         NR_SOCKET fd;
-        r_log(LOG_ICE,LOG_DEBUG,
-              "%s:%d function %s(to:%s) failed with error %d",__FILE__,
-              __LINE__,__FUNCTION__,tcpsock->remote_addr.as_string,r);
+
         if (!nr_socket_getfd(tcpsock->inner, &fd)) {
           NR_ASYNC_CANCEL(fd, NR_ASYNC_WAIT_READ);
           NR_ASYNC_CANCEL(fd, NR_ASYNC_WAIT_WRITE);
@@ -496,6 +491,7 @@ static int nr_socket_multi_tcp_recvfrom(void *obj,void * restrict buf,
 
         TAILQ_REMOVE(&sock->sockets, tcpsock, entry);
         nr_tcp_socket_ctx_destroy(&tcpsock);
+        r_log(LOG_ICE,LOG_DEBUG,"%s:%d function %s(from:%s) failed with error %d",__FILE__,__LINE__,__FUNCTION__,from->as_string,r);
         ABORT(r);
       }
     }
@@ -563,35 +559,27 @@ static void nr_tcp_multi_lsocket_readable_cb(NR_SOCKET s, int how, void *arg)
     nr_socket *newsock;
     nr_transport_addr remote_addr;
     nr_tcp_socket_ctx *tcp_sock_ctx;
-    int r, _status;
+    int r;
 
     // rearm
     NR_ASYNC_WAIT(s, NR_ASYNC_WAIT_READ, nr_tcp_multi_lsocket_readable_cb, arg);
 
     /* accept */
-    if ((r=nr_socket_accept(sock->listen_socket, &remote_addr, &newsock)))
-      ABORT(r);
+    if (nr_socket_accept(sock->listen_socket, &remote_addr, &newsock))
+      return;
 
     /* This takes ownership of newsock whether it fails or not. */
-    if ((r=nr_tcp_socket_ctx_create(newsock, 1, sock->max_pending, &tcp_sock_ctx)))
-      ABORT(r);
+    if ((r=nr_tcp_socket_ctx_create(newsock, sock->use_framing, sock->max_pending, &tcp_sock_ctx)))
+      return;
 
     nr_socket_buffered_set_connected_to(tcp_sock_ctx->inner, &remote_addr);
 
-    if ((r=nr_tcp_socket_ctx_initialize(tcp_sock_ctx, &remote_addr, sock))) {
+    if (nr_tcp_socket_ctx_initialize(tcp_sock_ctx, &remote_addr, sock)) {
       nr_tcp_socket_ctx_destroy(&tcp_sock_ctx);
-      ABORT(r);
+      return;
     }
 
     TAILQ_INSERT_HEAD(&sock->sockets, tcp_sock_ctx, entry);
-
-    _status=0;
-abort:
-    if (_status) {
-      r_log(LOG_ICE,LOG_WARNING,"%s:%d %s failed to accept new TCP connection: %d",__FILE__,__LINE__,__FUNCTION__,_status);
-    } else {
-      r_log(LOG_ICE,LOG_INFO,"%s:%d %s accepted new TCP connection from %s",__FILE__,__LINE__,__FUNCTION__,remote_addr.as_string);
-    }
   }
 
 static int nr_socket_multi_tcp_listen(void *obj, int backlog)
@@ -614,7 +602,7 @@ static int nr_socket_multi_tcp_listen(void *obj, int backlog)
     _status=0;
   abort:
     if (_status)
-      r_log(LOG_ICE,LOG_WARNING,"%s:%d function %s failed with error %d",__FILE__,__LINE__,__FUNCTION__,_status);
+      r_log(LOG_ICE,LOG_DEBUG,"%s:%d function %s failed with error %d",__FILE__,__LINE__,__FUNCTION__,_status);
 
     return(_status);
   }

@@ -31,6 +31,8 @@ UNIFIED_SOURCES += [
     'XMLStylesheetProcessingInstruction.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
 FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [

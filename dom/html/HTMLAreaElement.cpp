@@ -7,7 +7,6 @@
 #include "mozilla/dom/HTMLAreaElement.h"
 
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/HTMLAnchorElement.h"
 #include "mozilla/dom/HTMLAreaElementBinding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStates.h"
@@ -41,11 +40,13 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLAreaElement)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLAreaElement,
                                                   nsGenericHTMLElement)
+  tmp->Link::Traverse(cb);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRelList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLAreaElement,
                                                 nsGenericHTMLElement)
+  tmp->Link::Unlink();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRelList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -63,6 +64,18 @@ int32_t
 HTMLAreaElement::TabIndexDefault()
 {
   return 0;
+}
+
+void
+HTMLAreaElement::GetItemValueText(DOMString& aValue)
+{
+  GetHref(aValue);
+}
+
+void
+HTMLAreaElement::SetItemValueText(const nsAString& aValue)
+{
+  SetHref(aValue);
 }
 
 NS_IMETHODIMP
@@ -111,8 +124,7 @@ nsDOMTokenList*
 HTMLAreaElement::RelList()
 {
   if (!mRelList) {
-    mRelList = new nsDOMTokenList(this, nsGkAtoms::rel,
-                                  HTMLAnchorElement::sSupportedRelValues);
+    mRelList = new nsDOMTokenList(this, nsGkAtoms::rel);
   }
   return mRelList;
 }
@@ -195,13 +207,17 @@ HTMLAreaElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
   NS_IMETHODIMP                                              \
   HTMLAreaElement::Get##_part(nsAString& a##_part)           \
   {                                                          \
-    Link::Get##_part(a##_part);                              \
+    ErrorResult rv;                                          \
+    Link::Get##_part(a##_part, rv);                          \
+    MOZ_ASSERT(!rv.Failed());                                \
     return NS_OK;                                            \
   }                                                          \
   NS_IMETHODIMP                                              \
   HTMLAreaElement::Set##_part(const nsAString& a##_part)     \
   {                                                          \
-    Link::Set##_part(a##_part);                              \
+    ErrorResult rv;                                          \
+    Link::Set##_part(a##_part, rv);                          \
+    MOZ_ASSERT(!rv.Failed());                                \
     return NS_OK;                                            \
   }
 

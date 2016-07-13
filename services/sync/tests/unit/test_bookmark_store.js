@@ -11,15 +11,15 @@ const PARENT_ANNO = "sync/parent";
 
 Service.engineManager.register(BookmarksEngine);
 
-var engine = Service.engineManager.get("bookmarks");
-var store = engine._store;
-var tracker = engine._tracker;
+let engine = Service.engineManager.get("bookmarks");
+let store = engine._store;
+let tracker = engine._tracker;
 
 // Don't write some persistence files asynchronously.
 tracker.persistChangedIDs = false;
 
-var fxuri = Utils.makeURI("http://getfirefox.com/");
-var tburi = Utils.makeURI("http://getthunderbird.com/");
+let fxuri = Utils.makeURI("http://getfirefox.com/");
+let tburi = Utils.makeURI("http://getthunderbird.com/");
 
 add_test(function test_ignore_specials() {
   _("Ensure that we can't delete bookmark roots.");
@@ -80,8 +80,8 @@ add_test(function test_bookmark_create() {
     _("Have the store create a new record object. Verify that it has the same data.");
     let newrecord = store.createRecord(fxrecord.id);
     do_check_true(newrecord instanceof Bookmark);
-    for (let property of ["type", "bmkUri", "description", "title",
-                          "keyword", "parentName", "parentid"]) {
+    for each (let property in ["type", "bmkUri", "description", "title",
+                               "keyword", "parentName", "parentid"]) {
       do_check_eq(newrecord[property], fxrecord[property]);
     }
     do_check_true(Utils.deepEquals(newrecord.tags.sort(),
@@ -197,7 +197,7 @@ add_test(function test_folder_create() {
     _("Have the store create a new record object. Verify that it has the same data.");
     let newrecord = store.createRecord(folder.id);
     do_check_true(newrecord instanceof BookmarkFolder);
-    for (let property of ["title", "parentName", "parentid"])
+    for each (let property in ["title", "parentName", "parentid"])
       do_check_eq(newrecord[property], folder[property]);
 
     _("Folders have high sort index to ensure they're synced first.");

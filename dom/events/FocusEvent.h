@@ -42,20 +42,15 @@ public:
 protected:
   ~FocusEvent() {}
 
-  void InitFocusEvent(const nsAString& aType,
-                      bool aCanBubble,
-                      bool aCancelable,
-                      nsGlobalWindow* aView,
-                      int32_t aDetail,
-                      EventTarget* aRelatedTarget);
+  nsresult InitFocusEvent(const nsAString& aType,
+                          bool aCanBubble,
+                          bool aCancelable,
+                          nsIDOMWindow* aView,
+                          int32_t aDetail,
+                          EventTarget* aRelatedTarget);
 };
 
 } // namespace dom
 } // namespace mozilla
-
-already_AddRefed<mozilla::dom::FocusEvent>
-NS_NewDOMFocusEvent(mozilla::dom::EventTarget* aOwner,
-                    nsPresContext* aPresContext,
-                    mozilla::InternalFocusEvent* aEvent);
 
 #endif // mozilla_dom_FocusEvent_h_

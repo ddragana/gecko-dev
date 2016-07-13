@@ -44,7 +44,7 @@
 
     function onLoad() {
       foo();
-      setTimeout(() => foo(), 0);
+      setTimeout(function() foo(), 0);
     }
   ]]></script>
 </window>

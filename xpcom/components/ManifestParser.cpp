@@ -572,7 +572,7 @@ ParseManifest(NSLocationType aType, FileLocation& aFile, char* aBuf,
 #elif defined(MOZ_WIDGET_COCOA)
   SInt32 majorVersion = nsCocoaFeatures::OSXVersionMajor();
   SInt32 minorVersion = nsCocoaFeatures::OSXVersionMinor();
-  nsTextFormatter::ssprintf(osVersion, MOZ_UTF16("%ld.%ld"),
+  nsTextFormatter::ssprintf(osVersion, NS_LITERAL_STRING("%ld.%ld").get(),
                             majorVersion,
                             minorVersion);
 #elif defined(MOZ_WIDGET_GTK)

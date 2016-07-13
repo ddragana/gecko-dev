@@ -13,7 +13,6 @@
 #include "xpcAccessibleValue.h"
 
 #include "Accessible.h"
-#include "AccessibleOrProxy.h"
 
 namespace mozilla {
 namespace a11y {
@@ -30,16 +29,13 @@ public:
   explicit xpcAccessibleGeneric(Accessible* aInternal) :
     mIntl(aInternal), mSupportedIfaces(0)
   {
-    if (aInternal->IsSelect())
+    if (mIntl->IsSelect())
       mSupportedIfaces |= eSelectable;
-    if (aInternal->HasNumericValue())
+    if (mIntl->HasNumericValue())
       mSupportedIfaces |= eValue;
-    if (aInternal->IsLink())
+    if (mIntl->IsLink())
       mSupportedIfaces |= eHyperLink;
   }
-
-  xpcAccessibleGeneric(ProxyAccessible* aProxy, uint8_t aInterfaces) :
-    mIntl(aProxy), mSupportedIfaces(aInterfaces) {}
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(xpcAccessibleGeneric, nsIAccessible)
@@ -53,7 +49,7 @@ public:
 protected:
   virtual ~xpcAccessibleGeneric() {}
 
-  AccessibleOrProxy mIntl;
+  Accessible* mIntl;
 
   enum {
     eSelectable = 1 << 0,
@@ -77,31 +73,25 @@ private:
 inline Accessible*
 xpcAccessible::Intl()
 {
-  return static_cast<xpcAccessibleGeneric*>(this)->mIntl.AsAccessible();
-}
-
-inline AccessibleOrProxy
-xpcAccessible::IntlGeneric()
-{
   return static_cast<xpcAccessibleGeneric*>(this)->mIntl;
 }
 
 inline Accessible*
 xpcAccessibleHyperLink::Intl()
 {
-  return static_cast<xpcAccessibleGeneric*>(this)->mIntl.AsAccessible();
+  return static_cast<xpcAccessibleGeneric*>(this)->mIntl;
 }
 
 inline Accessible*
 xpcAccessibleSelectable::Intl()
 {
-  return static_cast<xpcAccessibleGeneric*>(this)->mIntl.AsAccessible();
+  return static_cast<xpcAccessibleGeneric*>(this)->mIntl;
 }
 
 inline Accessible*
 xpcAccessibleValue::Intl()
 {
-  return static_cast<xpcAccessibleGeneric*>(this)->mIntl.AsAccessible();
+  return static_cast<xpcAccessibleGeneric*>(this)->mIntl;
 }
 
 } // namespace a11y

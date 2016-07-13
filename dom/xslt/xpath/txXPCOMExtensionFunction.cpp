@@ -17,11 +17,8 @@
 #include "xptcall.h"
 #include "txXPathObjectAdaptor.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/UniquePtr.h"
-#include "nsContentUtils.h"
 #include "nsIClassInfo.h"
 #include "nsIInterfaceInfo.h"
-#include "js/RootingAPI.h"
 
 NS_IMPL_ISUPPORTS(txXPathObjectAdaptor, txIXPathObject)
 
@@ -259,7 +256,8 @@ TX_ResolveFunctionCallXPCOM(const nsCString &aContractID, int32_t aNamespaceID,
                                                   aName,
 #endif
                                                   aState);
-    return NS_OK;
+
+    return *aFunction ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
 txArgumentType
@@ -288,8 +286,8 @@ txXPCOMExtensionFunctionCall::GetParamType(const nsXPTParamInfo &aParam,
             if (iid.Equals(NS_GET_IID(txIXPathObject))) {
                 return eOBJECT;
             }
-            return eUNKNOWN;
         }
+        // FALLTHROUGH
         default:
         {
             // XXX Error!
@@ -305,30 +303,16 @@ public:
         : mCount(0)
     {
     }
-    txParamArrayHolder(txParamArrayHolder&& rhs)
-      : mArray(mozilla::Move(rhs.mArray))
-      , mCount(rhs.mCount)
-    {
-        rhs.mCount = 0;
-    }
     ~txParamArrayHolder();
 
     bool Init(uint8_t aCount);
     operator nsXPTCVariant*() const
     {
-      return mArray.get();
-    }
-
-    void trace(JSTracer* trc) {
-        for (uint8_t i = 0; i < mCount; ++i) {
-            if (mArray[i].type == nsXPTType::T_JSVAL) {
-                JS::UnsafeTraceRoot(trc, &mArray[i].val.j, "txParam value");
-            }
-        }
+      return mArray;
     }
 
 private:
-    mozilla::UniquePtr<nsXPTCVariant[]> mArray;
+    nsAutoArrayPtr<nsXPTCVariant> mArray;
     uint8_t mCount;
 };
 
@@ -355,12 +339,12 @@ bool
 txParamArrayHolder::Init(uint8_t aCount)
 {
     mCount = aCount;
-    mArray = mozilla::MakeUnique<nsXPTCVariant[]>(mCount);
+    mArray = new nsXPTCVariant[mCount];
     if (!mArray) {
         return false;
     }
 
-    memset(mArray.get(), 0, mCount * sizeof(nsXPTCVariant));
+    memset(mArray, 0, mCount * sizeof(nsXPTCVariant));
 
     return true;
 }
@@ -384,8 +368,8 @@ txXPCOMExtensionFunctionCall::evaluate(txIEvalContext* aContext,
     uint8_t paramCount = methodInfo->GetParamCount();
     uint8_t inArgs = paramCount - 1;
 
-    JS::Rooted<txParamArrayHolder> invokeParams(nsContentUtils::RootingCxForThread());
-    if (!invokeParams.get().Init(paramCount)) {
+    txParamArrayHolder invokeParams;
+    if (!invokeParams.Init(paramCount)) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
 
@@ -405,8 +389,11 @@ txXPCOMExtensionFunctionCall::evaluate(txIEvalContext* aContext,
 
         // Create context wrapper.
         context = new txFunctionEvaluationContext(aContext, mState);
+        if (!context) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
 
-        nsXPTCVariant &invokeParam = invokeParams.get()[0];
+        nsXPTCVariant &invokeParam = invokeParams[0];
         invokeParam.type = paramInfo.GetType();
         invokeParam.SetValNeedsCleanup();
         NS_ADDREF((txIFunctionEvaluationContext*&)invokeParam.val.p = context);
@@ -433,7 +420,7 @@ txXPCOMExtensionFunctionCall::evaluate(txIEvalContext* aContext,
             return NS_ERROR_FAILURE;
         }
 
-        nsXPTCVariant &invokeParam = invokeParams.get()[i];
+        nsXPTCVariant &invokeParam = invokeParams[i];
         if (paramInfo.IsOut()) {
             // We don't support out values.
             return NS_ERROR_FAILURE;
@@ -443,7 +430,7 @@ txXPCOMExtensionFunctionCall::evaluate(txIEvalContext* aContext,
         switch (type) {
             case eNODESET:
             {
-                RefPtr<txNodeSet> nodes;
+                nsRefPtr<txNodeSet> nodes;
                 rv = evaluateToNodeSet(expr, aContext, getter_AddRefs(nodes));
                 NS_ENSURE_SUCCESS(rv, rv);
 
@@ -492,7 +479,7 @@ txXPCOMExtensionFunctionCall::evaluate(txIEvalContext* aContext,
             }
             case eOBJECT:
             {
-              RefPtr<txAExprResult> exprRes;
+              nsRefPtr<txAExprResult> exprRes;
               rv = expr->evaluate(aContext, getter_AddRefs(exprRes));
               NS_ENSURE_SUCCESS(rv, rv);
 
@@ -521,10 +508,14 @@ txXPCOMExtensionFunctionCall::evaluate(txIEvalContext* aContext,
         return NS_ERROR_FAILURE;
     }
 
-    nsXPTCVariant &returnParam = invokeParams.get()[inArgs];
+    nsXPTCVariant &returnParam = invokeParams[inArgs];
     returnParam.type = returnInfo.GetType();
     if (returnType == eSTRING) {
         nsString *value = new nsString();
+        if (!value) {
+            return NS_ERROR_FAILURE;
+        }
+
         returnParam.SetValNeedsCleanup();
         returnParam.val.p = value;
     }
@@ -535,7 +526,7 @@ txXPCOMExtensionFunctionCall::evaluate(txIEvalContext* aContext,
         }
     }
 
-    rv = NS_InvokeByIndex(mHelper, mMethodIndex, paramCount, invokeParams.get());
+    rv = NS_InvokeByIndex(mHelper, mMethodIndex, paramCount, invokeParams);
 
     // In case someone is holding on to the txFunctionEvaluationContext which
     // could thus stay alive longer than this function.

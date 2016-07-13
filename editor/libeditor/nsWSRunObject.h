@@ -203,9 +203,9 @@ class MOZ_STACK_CLASS nsWSRunObject
     // and makes any needed adjustments to ws around that point.
     // example of fixup: normalws after {aInOutParent,aInOutOffset}
     //                   needs to begin with nbsp.
-    mozilla::dom::Element* InsertBreak(nsCOMPtr<nsINode>* aInOutParent,
-                                       int32_t* aInOutOffset,
-                                       nsIEditor::EDirection aSelect);
+    already_AddRefed<mozilla::dom::Element>
+      InsertBreak(nsCOMPtr<nsINode>* aInOutParent, int32_t* aInOutOffset,
+                  nsIEditor::EDirection aSelect);
 
     // InsertText inserts a string at {aInOutParent,aInOutOffset} and makes any
     // needed adjustments to ws around that point.  Example of fixup:
@@ -282,7 +282,7 @@ class MOZ_STACK_CLASS nsWSRunObject
     // stored in the struct.
     struct MOZ_STACK_CLASS WSPoint
     {
-      RefPtr<mozilla::dom::Text> mTextNode;
+      nsRefPtr<mozilla::dom::Text> mTextNode;
       uint32_t mOffset;
       char16_t mChar;
 
@@ -304,7 +304,7 @@ class MOZ_STACK_CLASS nsWSRunObject
      * closest block within the DOM subtree we're editing, or if none is
      * found, the (inline) root of the editable subtree.
      */
-    nsINode* GetWSBoundingParent();
+    already_AddRefed<nsINode> GetWSBoundingParent();
 
     nsresult GetWSNodes();
     void     GetRuns();
@@ -361,14 +361,14 @@ class MOZ_STACK_CLASS nsWSRunObject
     WSType mEndReason;                 // reason why ws ends (eText, eOtherBlock, etc)
     nsCOMPtr<nsINode> mEndReasonNode;  // the node that implicated by end reason
 
-    RefPtr<mozilla::dom::Text> mFirstNBSPNode; // location of first nbsp in ws run, if any
+    nsRefPtr<mozilla::dom::Text> mFirstNBSPNode; // location of first nbsp in ws run, if any
     int32_t mFirstNBSPOffset;          // ...
 
-    RefPtr<mozilla::dom::Text> mLastNBSPNode; // location of last nbsp in ws run, if any
+    nsRefPtr<mozilla::dom::Text> mLastNBSPNode; // location of last nbsp in ws run, if any
     int32_t mLastNBSPOffset;           // ...
 
     // the list of nodes containing ws in this run
-    nsTArray<RefPtr<mozilla::dom::Text>> mNodeArray;
+    nsTArray<nsRefPtr<mozilla::dom::Text>> mNodeArray;
 
     WSFragment *mStartRun;             // the first WSFragment in the run
     WSFragment *mEndRun;               // the last WSFragment in the run, may be same as first

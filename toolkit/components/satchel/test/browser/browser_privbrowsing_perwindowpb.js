@@ -2,62 +2,81 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var FormHistory = (Components.utils.import("resource://gre/modules/FormHistory.jsm", {})).FormHistory;
+let FormHistory = (Components.utils.import("resource://gre/modules/FormHistory.jsm", {})).FormHistory;
 
 /** Test for Bug 472396 **/
-add_task(function* test() {
+function test() {
   // initialization
+  waitForExplicitFinish();
   let windowsToClose = [];
   let testURI =
     "http://example.com/tests/toolkit/components/satchel/test/subtst_privbrowsing.html";
 
-  function* doTest(aShouldValueExist, aWindow) {
-    let browser = aWindow.gBrowser.selectedBrowser;
-    BrowserTestUtils.loadURI(browser, testURI);
-    yield BrowserTestUtils.browserLoaded(browser);
+  function doTest(aIsPrivateMode, aShouldValueExist, aWindow, aCallback) {
+    aWindow.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+      if (aWindow.content.location != testURI) {
+        aWindow.gBrowser.selectedBrowser.loadURI(testURI);
+        return;
+      }
+      aWindow.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
 
-    // Wait for the page to reload itself.
-    yield BrowserTestUtils.browserLoaded(browser);
+      let checks = 0;
+      function doneCheck() {
+        checks++;
+        if (checks == 2) {
+          executeSoon(aCallback);
+        }
+      }
 
-    let count = 0;
-    let doneCounting = {};
-    doneCounting.promise = new Promise(resolve => doneCounting.resolve = resolve);
-    FormHistory.count({ fieldname: "field", value: "value" },
-                      {
-                        handleResult(result) {
-                          count = result;
-                        },
-                        handleError(error) {
-                          do_throw("Error occurred searching form history: " + error);
-                        },
-                        handleCompletion(num) {
-                          if (aShouldValueExist) {
-                            is(count, 1, "In non-PB mode, we add a single entry");
-                          } else {
-                            is(count, 0, "In PB mode, we don't add any entries");
-                          }
+      // Wait for the second load of the page to call the callback,
+      // because the first load submits the form and the page reloads after
+      // the form submission.
+      aWindow.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+        aWindow.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+        doneCheck();
+      }, true);
 
-                          doneCounting.resolve();
-                        }
-                      });
-    yield doneCounting.promise;
+      let count = 0;
+      FormHistory.count({ fieldname: "field", value: "value" },
+        { handleResult: function(result) {
+            count = result;
+          },
+          handleError: function (error) {
+            do_throw("Error occurred searching form history: " + error);
+          },
+          handleCompletion: function(num) {
+            is(count >= 1, aShouldValueExist, "Checking value exists in form history");
+            doneCheck();
+          }
+        });
+    }, true);
+
+    aWindow.gBrowser.selectedBrowser.loadURI(testURI);
   }
 
   function testOnWindow(aOptions, aCallback) {
-    return BrowserTestUtils.openNewBrowserWindow(aOptions)
-                           .then(win => { windowsToClose.push(win); return win; });
-  }
+    whenNewWindowLoaded(aOptions, function(aWin) {
+      windowsToClose.push(aWin);
+      executeSoon(function() aCallback(aWin));
+    });
+  };
 
-
-  yield testOnWindow({private: true}).then((aWin) => {
-    return Task.spawn(doTest(false, aWin));
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(aWin) {
+      aWin.close();
+    });
   });
 
-  // Test when not on private mode after visiting a site on private
-  // mode. The form history should not exist.
-  yield testOnWindow({}).then((aWin) => {
-    return Task.spawn(doTest(true, aWin));
-  });
 
-  yield Promise.all(windowsToClose.map(win => BrowserTestUtils.closeWindow(win)));
-});
+  testOnWindow({private: true}, function(aWin) {
+    doTest(true, false, aWin, function() {
+      // Test when not on private mode after visiting a site on private
+      // mode. The form history should no exist.
+      testOnWindow({}, function(aWin) {
+        doTest(false, false, aWin, function() {
+          finish();
+        });
+      });
+    });
+  });
+}

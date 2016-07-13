@@ -22,6 +22,7 @@ function test()
 
   expect = 'TypeError: can\'t convert o to primitive type';
 
+  jit(true);
  
   try
   {
@@ -36,6 +37,7 @@ function test()
   {
     actual = 'TypeError: can\'t convert o to primitive type';
   }
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

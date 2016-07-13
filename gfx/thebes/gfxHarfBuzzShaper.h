@@ -10,7 +10,6 @@
 
 #include "harfbuzz/hb.h"
 #include "nsUnicodeProperties.h"
-#include "mozilla/gfx/2D.h"
 
 class gfxHarfBuzzShaper : public gfxFontShaper {
 public:
@@ -22,16 +21,16 @@ public:
      * FontCallbackData struct
      */
     struct FontCallbackData {
-        gfxHarfBuzzShaper* mShaper;
-        mozilla::gfx::DrawTarget* mDrawTarget;
+        gfxHarfBuzzShaper *mShaper;
+        gfxContext        *mContext;
     };
 
     bool Initialize();
-    virtual bool ShapeText(DrawTarget      *aDrawTarget,
+    virtual bool ShapeText(gfxContext      *aContext,
                            const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
-                           Script           aScript,
+                           int32_t          aScript,
                            bool             aVertical,
                            gfxShapedText   *aShapedText);
 
@@ -39,9 +38,8 @@ public:
     hb_blob_t * GetFontTable(hb_tag_t aTag) const;
 
     // map unicode character to glyph ID
-    hb_codepoint_t GetNominalGlyph(hb_codepoint_t unicode) const;
-    hb_codepoint_t GetVariationGlyph(hb_codepoint_t unicode,
-                                     hb_codepoint_t variation_selector) const;
+    hb_codepoint_t GetGlyph(hb_codepoint_t unicode,
+                            hb_codepoint_t variation_selector) const;
 
     // get harfbuzz glyph advance, in font design units
     hb_position_t GetGlyphHAdvance(hb_codepoint_t glyph) const;
@@ -62,6 +60,11 @@ public:
                        hb_codepoint_t glyph, void *user_data);
 
     static hb_bool_t
+    HBGetGlyphHOrigin(hb_font_t *font, void *font_data,
+                      hb_codepoint_t glyph,
+                      hb_position_t *x, hb_position_t *y,
+                      void *user_data);
+    static hb_bool_t
     HBGetGlyphVOrigin(hb_font_t *font, void *font_data,
                       hb_codepoint_t glyph,
                       hb_position_t *x, hb_position_t *y,
@@ -79,10 +82,10 @@ public:
     }
 
     static hb_script_t
-    GetHBScriptUsedForShaping(Script aScript) {
+    GetHBScriptUsedForShaping(int32_t aScript) {
         // Decide what harfbuzz script code will be used for shaping
         hb_script_t hbScript;
-        if (aScript <= Script::INHERITED) {
+        if (aScript <= MOZ_SCRIPT_INHERITED) {
             // For unresolved "common" or "inherited" runs,
             // default to Latin for now.
             hbScript = HB_SCRIPT_LATIN;
@@ -94,7 +97,7 @@ public:
     }
 
 protected:
-    nsresult SetGlyphsFromRun(DrawTarget     *aDrawTarget,
+    nsresult SetGlyphsFromRun(gfxContext     *aContext,
                               gfxShapedText  *aShapedText,
                               uint32_t        aOffset,
                               uint32_t        aLength,

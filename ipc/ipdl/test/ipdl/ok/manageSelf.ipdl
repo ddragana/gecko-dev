@@ -6,5 +6,5 @@ protocol manageSelf {
 
 child:
     manageSelf();
-    async __delete__();
+    __delete__();
 };

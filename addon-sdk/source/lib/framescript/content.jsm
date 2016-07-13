@@ -18,7 +18,7 @@ const PATH = __URI__.replace('framescript/content.jsm', '');
 const { Loader } = Cu.import(PATH + 'toolkit/loader.js', {});
 
 // one Loader instance per addon (per @loader/options to be precise)
-var addons = new Map();
+let addons = new Map();
 
 // Tell the parent that a new process is ready
 cpmm.sendAsyncMessage('sdk/remote/process/start', {
@@ -33,8 +33,6 @@ cpmm.addMessageListener('sdk/remote/process/load', ({ data: { modulePath, loader
   // During startup races can mean we get a second load message
   if (addons.has(loaderID))
     return;
-
-  options.waiveInterposition = true;
 
   let loader = Loader.Loader(options);
   let addon = {
@@ -69,7 +67,7 @@ cpmm.addMessageListener('sdk/remote/process/unload', ({ data: { loaderID, reason
 })
 
 
-var frames = new Set();
+let frames = new Set();
 
 this.registerContentFrame = contentFrame => {
   contentFrame.addEventListener("unload", () => {

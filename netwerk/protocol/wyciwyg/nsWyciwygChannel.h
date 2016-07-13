@@ -15,7 +15,6 @@
 #include "nsIStreamListener.h"
 #include "nsICacheEntryOpenCallback.h"
 #include "PrivateBrowsingChannel.h"
-#include "mozilla/BasePrincipal.h"
 
 class nsICacheEntry;
 class nsIEventTarget;
@@ -26,7 +25,7 @@ class nsIOutputStream;
 class nsIProgressEventSink;
 class nsIURI;
 
-extern mozilla::LazyLogModule gWyciwygLog;
+extern PRLogModuleInfo * gWyciwygLog;
 
 //-----------------------------------------------------------------------------
 
@@ -87,7 +86,8 @@ protected:
     nsCString                           mCharset;
     int64_t                             mContentLength;
     uint32_t                            mLoadFlags;
-    mozilla::NeckoOriginAttributes      mOriginAttributes;
+    uint32_t                            mAppId;
+    bool                                mInBrowser;
     nsCOMPtr<nsIURI>                    mURI;
     nsCOMPtr<nsIURI>                    mOriginalURI;
     nsCOMPtr<nsISupports>               mOwner;
@@ -109,15 +109,5 @@ protected:
 
     nsCOMPtr<nsISupports>               mSecurityInfo;
 };
-
-/**
- * Casting nsWyciwygChannel to nsISupports is ambiguous.
- * This method handles that.
- */
-inline nsISupports*
-ToSupports(nsWyciwygChannel* p)
-{
-  return NS_ISUPPORTS_CAST(nsIStreamListener*, p);
-}
 
 #endif /* nsWyciwygChannel_h___ */

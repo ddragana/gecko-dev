@@ -13,8 +13,6 @@
 #include "nsIChannelEventSink.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsIInterfaceRequestor.h"
-#include "nsIStreamListener.h"
-#include "nsIURI.h"
 #include "nsString.h"
 #include "nsWeakReference.h"
 #include "nsIDocument.h"
@@ -23,7 +21,9 @@
 #include "nsContentUtils.h" // for kLoadAsData
 #include "nsThreadUtils.h"
 #include "nsNetUtil.h"
+#include "nsAutoPtr.h"
 #include "nsStreamUtils.h"
+#include "nsCORSListenerProxy.h"
 #include <algorithm>
 
 using mozilla::net::ReferrerPolicy;
@@ -42,7 +42,7 @@ public:
 
     NS_DECL_ISUPPORTS
 
-    nsresult LoadDocument(nsIChannel* aChannel,
+    nsresult LoadDocument(nsIChannel* aChannel, nsIPrincipal *aLoaderPrincipal,
                           bool aChannelIsSync, bool aForceToXML,
                           ReferrerPolicy aReferrerPolicy,
                           nsIDOMDocument** aResult);
@@ -130,15 +130,20 @@ NS_IMPL_ISUPPORTS(nsSyncLoader,
 
 nsresult
 nsSyncLoader::LoadDocument(nsIChannel* aChannel,
+                           nsIPrincipal *aLoaderPrincipal,
                            bool aChannelIsSync,
                            bool aForceToXML,
                            ReferrerPolicy aReferrerPolicy,
                            nsIDOMDocument **aResult)
 {
-    NS_ENSURE_ARG(aChannel);
     NS_ENSURE_ARG_POINTER(aResult);
     *aResult = nullptr;
     nsresult rv = NS_OK;
+
+    nsCOMPtr<nsIURI> loaderUri;
+    if (aLoaderPrincipal) {
+        aLoaderPrincipal->GetURI(getter_AddRefs(loaderUri));
+    }
 
     mChannel = aChannel;
     nsCOMPtr<nsIHttpChannel> http = do_QueryInterface(mChannel);
@@ -146,13 +151,8 @@ nsSyncLoader::LoadDocument(nsIChannel* aChannel,
         http->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
                                NS_LITERAL_CSTRING("text/xml,application/xml,application/xhtml+xml,*/*;q=0.1"),
                                false);
-        nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-        if (loadInfo) {
-            nsCOMPtr<nsIURI> loaderUri;
-            loadInfo->TriggeringPrincipal()->GetURI(getter_AddRefs(loaderUri));
-            if (loaderUri) {
-              http->SetReferrerWithPolicy(loaderUri, aReferrerPolicy);
-            }
+        if (loaderUri) {
+            http->SetReferrerWithPolicy(loaderUri, aReferrerPolicy);
         }
     }
 
@@ -184,6 +184,14 @@ nsSyncLoader::LoadDocument(nsIChannel* aChannel,
         nsCOMPtr<nsIStreamListener> forceListener =
             new nsForceXMLListener(listener);
         listener.swap(forceListener);
+    }
+
+    if (aLoaderPrincipal) {
+        nsRefPtr<nsCORSListenerProxy> corsListener =
+          new nsCORSListenerProxy(listener, aLoaderPrincipal, false);
+        rv = corsListener->Init(mChannel, DataURIHandling::Disallow);
+        NS_ENSURE_SUCCESS(rv, rv);
+        listener = corsListener;
     }
 
     if (aChannelIsSync) {
@@ -218,7 +226,7 @@ nsSyncLoader::PushAsyncStream(nsIStreamListener* aListener)
     mAsyncLoadStatus = NS_OK;
 
     // Start reading from the channel
-    nsresult rv = mChannel->AsyncOpen2(this);
+    nsresult rv = mChannel->AsyncOpen(this, nullptr);
 
     if (NS_SUCCEEDED(rv)) {
         // process events until we're finished.
@@ -246,7 +254,7 @@ nsresult
 nsSyncLoader::PushSyncStream(nsIStreamListener* aListener)
 {
     nsCOMPtr<nsIInputStream> in;
-    nsresult rv = mChannel->Open2(getter_AddRefs(in));
+    nsresult rv = mChannel->Open(getter_AddRefs(in));
     NS_ENSURE_SUCCESS(rv, rv);
 
     mLoading = true;
@@ -301,12 +309,8 @@ nsSyncLoader::GetInterface(const nsIID & aIID,
 
 /* static */
 nsresult
-nsSyncLoadService::LoadDocument(nsIURI *aURI,
-                                nsContentPolicyType aContentPolicyType,
-                                nsIPrincipal *aLoaderPrincipal,
-                                nsSecurityFlags aSecurityFlags,
-                                nsILoadGroup *aLoadGroup,
-                                bool aForceToXML,
+nsSyncLoadService::LoadDocument(nsIURI *aURI, nsIPrincipal *aLoaderPrincipal,
+                                nsILoadGroup *aLoadGroup, bool aForceToXML,
                                 ReferrerPolicy aReferrerPolicy,
                                 nsIDOMDocument** aResult)
 {
@@ -314,8 +318,8 @@ nsSyncLoadService::LoadDocument(nsIURI *aURI,
     nsresult rv = NS_NewChannel(getter_AddRefs(channel),
                                 aURI,
                                 aLoaderPrincipal,
-                                aSecurityFlags,
-                                aContentPolicyType,
+                                nsILoadInfo::SEC_NORMAL,
+                                nsIContentPolicy::TYPE_OTHER,
                                 aLoadGroup);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -324,14 +328,15 @@ nsSyncLoadService::LoadDocument(nsIURI *aURI,
     }
 
     bool isChrome = false, isResource = false;
-    // if the load needs to enforce CORS, then force the load to be async
-    bool isSync =
-      !(aSecurityFlags & nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS) &&
-      ((NS_SUCCEEDED(aURI->SchemeIs("chrome", &isChrome)) && isChrome) ||
-       (NS_SUCCEEDED(aURI->SchemeIs("resource", &isResource)) && isResource));
-    RefPtr<nsSyncLoader> loader = new nsSyncLoader();
-    return loader->LoadDocument(channel, isSync, aForceToXML,
-                                aReferrerPolicy, aResult);
+    bool isSync = (NS_SUCCEEDED(aURI->SchemeIs("chrome", &isChrome)) &&
+                     isChrome) ||
+                    (NS_SUCCEEDED(aURI->SchemeIs("resource", &isResource)) &&
+                     isResource);
+
+    nsRefPtr<nsSyncLoader> loader = new nsSyncLoader();
+    return loader->LoadDocument(channel, aLoaderPrincipal, isSync,
+                                aForceToXML, aReferrerPolicy, aResult);
+
 }
 
 /* static */

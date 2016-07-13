@@ -10,8 +10,8 @@ intr protocol PTestBadActor {
   manages PTestBadActorSub;
 
 child:
-  async PTestBadActorSub();
-  async __delete__();
+  PTestBadActorSub();
+  __delete__();
 };
 
 } // namespace _ipdltest

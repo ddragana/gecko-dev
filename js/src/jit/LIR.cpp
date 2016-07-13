@@ -89,7 +89,7 @@ LBlock::init(TempAllocator& alloc)
     size_t numLPhis = 0;
     for (MPhiIterator i(block_->phisBegin()), e(block_->phisEnd()); i != e; ++i) {
         MPhi* phi = *i;
-        numLPhis += (phi->type() == MIRType::Value) ? BOX_PIECES : 1;
+        numLPhis += (phi->type() == MIRType_Value) ? BOX_PIECES : 1;
     }
 
     // Allocate space for the LPhis.
@@ -105,9 +105,10 @@ LBlock::init(TempAllocator& alloc)
         MPhi* phi = *i;
         MOZ_ASSERT(phi->numOperands() == numPreds);
 
-        int numPhis = (phi->type() == MIRType::Value) ? BOX_PIECES : 1;
+        int numPhis = (phi->type() == MIRType_Value) ? BOX_PIECES : 1;
         for (int i = 0; i < numPhis; i++) {
-            LAllocation* inputs = alloc.allocateArray<LAllocation>(numPreds);
+            void* array = alloc.allocateArray<sizeof(LAllocation)>(numPreds);
+            LAllocation* inputs = static_cast<LAllocation*>(array);
             if (!inputs)
                 return false;
 
@@ -347,9 +348,8 @@ static const char * const TypeChars[] =
     "s",            // SLOTS
     "f",            // FLOAT32
     "d",            // DOUBLE
-    "simd128int",   // SIMD128INT
-    "simd128float", // SIMD128FLOAT
-    "sincos",       // SINCOS
+    "i32x4",        // INT32X4
+    "f32x4",        // FLOAT32X4
 #ifdef JS_NUNBOX32
     "t",            // TYPE
     "p"             // PAYLOAD
@@ -358,107 +358,109 @@ static const char * const TypeChars[] =
 #endif
 };
 
-UniqueChars
-LDefinition::toString() const
+static void
+PrintDefinition(char* buf, size_t size, const LDefinition& def)
 {
-    AutoEnterOOMUnsafeRegion oomUnsafe;
+    char* cursor = buf;
+    char* end = buf + size;
 
-    char* buf;
-    if (isBogusTemp()) {
-        buf = JS_smprintf("bogus");
-    } else {
-        buf = JS_smprintf("v%u<%s>", virtualRegister(), TypeChars[type()]);
-        if (buf) {
-            if (policy() == LDefinition::FIXED)
-                buf = JS_sprintf_append(buf, ":%s", output()->toString().get());
-            else if (policy() == LDefinition::MUST_REUSE_INPUT)
-                buf = JS_sprintf_append(buf, ":tied(%u)", getReusedInput());
-        }
-    }
+    cursor += JS_snprintf(cursor, end - cursor, "v%u", def.virtualRegister());
+    cursor += JS_snprintf(cursor, end - cursor, "<%s>", TypeChars[def.type()]);
 
-    if (!buf)
-        oomUnsafe.crash("LDefinition::toString()");
-
-    return UniqueChars(buf);
+    if (def.policy() == LDefinition::FIXED)
+        cursor += JS_snprintf(cursor, end - cursor, ":%s", def.output()->toString());
+    else if (def.policy() == LDefinition::MUST_REUSE_INPUT)
+        cursor += JS_snprintf(cursor, end - cursor, ":tied(%u)", def.getReusedInput());
 }
 
-static char*
-PrintUse(const LUse* use)
+const char*
+LDefinition::toString() const
+{
+    // Not reentrant!
+    static char buf[40];
+
+    if (isBogusTemp())
+        return "bogus";
+
+    PrintDefinition(buf, sizeof(buf), *this);
+    return buf;
+}
+
+static void
+PrintUse(char* buf, size_t size, const LUse* use)
 {
     switch (use->policy()) {
       case LUse::REGISTER:
-        return JS_smprintf("v%d:r", use->virtualRegister());
+        JS_snprintf(buf, size, "v%d:r", use->virtualRegister());
+        break;
       case LUse::FIXED:
-        return JS_smprintf("v%d:%s", use->virtualRegister(),
-                           AnyRegister::FromCode(use->registerCode()).name());
+        JS_snprintf(buf, size, "v%d:%s", use->virtualRegister(),
+                    AnyRegister::FromCode(use->registerCode()).name());
+        break;
       case LUse::ANY:
-        return JS_smprintf("v%d:r?", use->virtualRegister());
+        JS_snprintf(buf, size, "v%d:r?", use->virtualRegister());
+        break;
       case LUse::KEEPALIVE:
-        return JS_smprintf("v%d:*", use->virtualRegister());
+        JS_snprintf(buf, size, "v%d:*", use->virtualRegister());
+        break;
       case LUse::RECOVERED_INPUT:
-        return JS_smprintf("v%d:**", use->virtualRegister());
+        JS_snprintf(buf, size, "v%d:**", use->virtualRegister());
+        break;
       default:
         MOZ_CRASH("invalid use policy");
     }
 }
 
-UniqueChars
+const char*
 LAllocation::toString() const
 {
-    AutoEnterOOMUnsafeRegion oomUnsafe;
+    // Not reentrant!
+    static char buf[40];
 
-    char* buf;
-    if (isBogus()) {
-        buf = JS_smprintf("bogus");
-    } else {
-        switch (kind()) {
-          case LAllocation::CONSTANT_VALUE:
-          case LAllocation::CONSTANT_INDEX:
-            buf = JS_smprintf("c");
-            break;
-          case LAllocation::GPR:
-            buf = JS_smprintf("%s", toGeneralReg()->reg().name());
-            break;
-          case LAllocation::FPU:
-            buf = JS_smprintf("%s", toFloatReg()->reg().name());
-            break;
-          case LAllocation::STACK_SLOT:
-            buf = JS_smprintf("stack:%d", toStackSlot()->slot());
-            break;
-          case LAllocation::ARGUMENT_SLOT:
-            buf = JS_smprintf("arg:%d", toArgument()->index());
-            break;
-          case LAllocation::USE:
-            buf = PrintUse(toUse());
-            break;
-          default:
-            MOZ_CRASH("what?");
-        }
+    if (isBogus())
+        return "bogus";
+
+    switch (kind()) {
+      case LAllocation::CONSTANT_VALUE:
+      case LAllocation::CONSTANT_INDEX:
+        return "c";
+      case LAllocation::GPR:
+        JS_snprintf(buf, sizeof(buf), "%s", toGeneralReg()->reg().name());
+        return buf;
+      case LAllocation::FPU:
+        JS_snprintf(buf, sizeof(buf), "%s", toFloatReg()->reg().name());
+        return buf;
+      case LAllocation::STACK_SLOT:
+        JS_snprintf(buf, sizeof(buf), "stack:%d", toStackSlot()->slot());
+        return buf;
+      case LAllocation::ARGUMENT_SLOT:
+        JS_snprintf(buf, sizeof(buf), "arg:%d", toArgument()->index());
+        return buf;
+      case LAllocation::USE:
+        PrintUse(buf, sizeof(buf), toUse());
+        return buf;
+      default:
+        MOZ_CRASH("what?");
     }
-
-    if (!buf)
-        oomUnsafe.crash("LAllocation::toString()");
-
-    return UniqueChars(buf);
 }
 
 void
 LAllocation::dump() const
 {
-    fprintf(stderr, "%s\n", toString().get());
+    fprintf(stderr, "%s\n", toString());
 }
 
 void
 LDefinition::dump() const
 {
-    fprintf(stderr, "%s\n", toString().get());
+    fprintf(stderr, "%s\n", toString());
 }
 
 void
 LNode::printOperands(GenericPrinter& out)
 {
     for (size_t i = 0, e = numOperands(); i < e; i++) {
-        out.printf(" (%s)", getOperand(i)->toString().get());
+        out.printf(" (%s)", getOperand(i)->toString());
         if (i != numOperands() - 1)
             out.printf(",");
     }
@@ -470,7 +472,7 @@ LInstruction::assignSnapshot(LSnapshot* snapshot)
     MOZ_ASSERT(!snapshot_);
     snapshot_ = snapshot;
 
-#ifdef JS_JITSPEW
+#ifdef DEBUG
     if (JitSpewEnabled(JitSpew_IonSnapshots)) {
         JitSpewHeader(JitSpew_IonSnapshots);
         Fprinter& out = JitSpewPrinter();
@@ -488,7 +490,7 @@ LNode::dump(GenericPrinter& out)
     if (numDefs() != 0) {
         out.printf("{");
         for (size_t i = 0; i < numDefs(); i++) {
-            out.printf("%s", getDef(i)->toString().get());
+            out.printf("%s", getDef(i)->toString());
             if (i != numDefs() - 1)
                 out.printf(", ");
         }
@@ -501,7 +503,7 @@ LNode::dump(GenericPrinter& out)
     if (numTemps()) {
         out.printf(" t=(");
         for (size_t i = 0; i < numTemps(); i++) {
-            out.printf("%s", getTemp(i)->toString().get());
+            out.printf("%s", getTemp(i)->toString());
             if (i != numTemps() - 1)
                 out.printf(", ");
         }
@@ -597,7 +599,9 @@ LMoveGroup::printOperands(GenericPrinter& out)
 {
     for (size_t i = 0; i < numMoves(); i++) {
         const LMove& move = getMove(i);
-        out.printf(" [%s -> %s", move.from().toString().get(), move.to().toString().get());
+        // Use two printfs, as LAllocation::toString is not reentrant.
+        out.printf(" [%s", move.from().toString());
+        out.printf(" -> %s", move.to().toString());
 #ifdef DEBUG
         out.printf(", %s", TypeChars[move.type()]);
 #endif

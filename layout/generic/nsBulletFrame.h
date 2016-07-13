@@ -76,16 +76,13 @@ public:
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
 
+  // nsIHTMLReflow
   virtual void Reflow(nsPresContext* aPresContext,
                       nsHTMLReflowMetrics& aMetrics,
                       const nsHTMLReflowState& aReflowState,
                       nsReflowStatus& aStatus) override;
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
-  void AddInlineMinISize(nsRenderingContext* aRenderingContext,
-                         nsIFrame::InlineMinISizeData* aData) override;
-  void AddInlinePrefISize(nsRenderingContext* aRenderingContext,
-                          nsIFrame::InlinePrefISizeData* aData) override;
 
   // nsBulletFrame
   int32_t SetListItemOrdinal(int32_t aNextOrdinal, bool* aChanged,
@@ -97,8 +94,7 @@ public:
   void GetSpokenText(nsAString& aText);
                          
   DrawResult PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
-                         const nsRect& aDirtyRect, uint32_t aFlags,
-                         bool aDisableSubpixelAA);
+                         const nsRect& aDirtyRect, uint32_t aFlags);
   
   virtual bool IsEmpty() override;
   virtual bool IsSelfEmpty() override;
@@ -129,8 +125,8 @@ protected:
   nsIDocument* GetOurCurrentDoc() const;
 
   mozilla::LogicalMargin mPadding;
-  RefPtr<imgRequestProxy> mImageRequest;
-  RefPtr<nsBulletListener> mListener;
+  nsRefPtr<imgRequestProxy> mImageRequest;
+  nsRefPtr<nsBulletListener> mListener;
 
   mozilla::LogicalSize mIntrinsicSize;
   int32_t mOrdinal;

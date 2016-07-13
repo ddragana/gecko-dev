@@ -66,7 +66,6 @@ included_inclnames_to_ignore = set([
     'jsautokw.h',               # generated in $OBJDIR
     'jscustomallocator.h',      # provided by embedders;  allowed to be missing
     'js-config.h',              # generated in $OBJDIR
-    'fdlibm.h',                 # fdlibm
     'pratom.h',                 # NSPR
     'prcvar.h',                 # NSPR
     'prerror.h',                # NSPR
@@ -77,10 +76,8 @@ included_inclnames_to_ignore = set([
     'prthread.h',               # NSPR
     'prtypes.h',                # NSPR
     'selfhosted.out.h',         # generated in $OBJDIR
-    'shellmoduleloader.out.h',  # generated in $OBJDIR
     'unicode/locid.h',          # ICU
     'unicode/numsys.h',         # ICU
-    'unicode/timezone.h',       # ICU
     'unicode/ucal.h',           # ICU
     'unicode/uclean.h',         # ICU
     'unicode/ucol.h',           # ICU
@@ -227,25 +224,24 @@ def check_style():
     # - An "inclname" is how a file is referred to in a #include statement.
     #
     # Examples (filename -> inclname)
-    # - "mfbt/Attributes.h"         -> "mozilla/Attributes.h"
-    # - "mfbt/decimal/Decimal.h     -> "mozilla/Decimal.h"
-    # - "mozglue/misc/TimeStamp.h   -> "mozilla/TimeStamp.h"
-    # - "memory/mozalloc/mozalloc.h -> "mozilla/mozalloc.h"
-    # - "js/public/Vector.h"        -> "js/Vector.h"
-    # - "js/src/vm/String.h"        -> "vm/String.h"
+    # - "mfbt/Attributes.h"     -> "mozilla/Attributes.h"
+    # - "mfbt/decimal/Decimal.h -> "mozilla/Decimal.h"
+    # - "js/public/Vector.h"    -> "js/Vector.h"
+    # - "js/src/vm/String.h"    -> "vm/String.h"
 
-    non_js_dirnames = ('mfbt/',
-                       'memory/mozalloc/',
-                       'mozglue/')  # type: tuple(str)
-    non_js_inclnames = set()        # type: set(inclname)
-    js_names = dict()               # type: dict(filename, inclname)
+    mfbt_inclnames = set()      # type: set(inclname)
+    mozalloc_inclnames = set()  # type: set(inclname)
+    js_names = dict()           # type: dict(filename, inclname)
 
     # Select the appropriate files.
     for filename in get_all_toplevel_filenames():
-        for non_js_dir in non_js_dirnames:
-            if filename.startswith(non_js_dir) and filename.endswith('.h'):
-                inclname = 'mozilla/' + filename.split('/')[-1]
-                non_js_inclnames.add(inclname)
+        if filename.startswith('mfbt/') and filename.endswith('.h'):
+            inclname = 'mozilla/' + filename.split('/')[-1]
+            mfbt_inclnames.add(inclname)
+
+        if filename.startswith('memory/mozalloc/') and filename.endswith('.h'):
+            inclname = 'mozilla/' + filename.split('/')[-1]
+            mozalloc_inclnames.add(inclname)
 
         if filename.startswith('js/public/') and filename.endswith('.h'):
             inclname = 'js/' + filename[len('js/public/'):]
@@ -257,13 +253,13 @@ def check_style():
             inclname = filename[len('js/src/'):]
             js_names[filename] = inclname
 
-    all_inclnames = non_js_inclnames | set(js_names.values())
+    all_inclnames = mfbt_inclnames | mozalloc_inclnames | set(js_names.values())
 
     edges = dict()      # type: dict(inclname, set(inclname))
 
     # We don't care what's inside the MFBT and MOZALLOC files, but because they
     # are #included from JS files we have to add them to the inclusion graph.
-    for inclname in non_js_inclnames:
+    for inclname in mfbt_inclnames | mozalloc_inclnames:
         edges[inclname] = set()
 
     # Process all the JS files.

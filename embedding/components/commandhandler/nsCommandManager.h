@@ -38,13 +38,13 @@ protected:
   virtual ~nsCommandManager();
 
   nsresult GetControllerForCommand(const char* aCommand,
-                                   mozIDOMWindowProxy* aDirectedToThisWindow,
+                                   nsIDOMWindow* aDirectedToThisWindow,
                                    nsIController** aResult);
 
 protected:
   nsClassHashtable<nsCharPtrHashKey, ObserverList> mObserversTable;
 
-  mozIDOMWindowProxy* mWindow; // weak ptr. The window should always outlive us
+  nsIDOMWindow* mWindow; // weak ptr. The window should always outlive us
 };
 
 #endif // nsCommandManager_h__

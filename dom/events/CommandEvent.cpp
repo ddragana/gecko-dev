@@ -18,7 +18,7 @@ CommandEvent::CommandEvent(EventTarget* aOwner,
           aEvent ? aEvent :
                    new WidgetCommandEvent(false, nullptr, nullptr, nullptr))
 {
-  mEvent->mTime = PR_Now();
+  mEvent->time = PR_Now();
   if (aEvent) {
     mEventIsInternal = false;
   } else {
@@ -36,7 +36,7 @@ NS_IMPL_RELEASE_INHERITED(CommandEvent, Event)
 NS_IMETHODIMP
 CommandEvent::GetCommand(nsAString& aCommand)
 {
-  nsIAtom* command = mEvent->AsCommandEvent()->mCommand;
+  nsIAtom* command = mEvent->AsCommandEvent()->command;
   if (command) {
     command->ToString(aCommand);
   } else {
@@ -51,9 +51,10 @@ CommandEvent::InitCommandEvent(const nsAString& aTypeArg,
                                bool aCancelableArg,
                                const nsAString& aCommand)
 {
-  Event::InitEvent(aTypeArg, aCanBubbleArg, aCancelableArg);
+  nsresult rv = Event::InitEvent(aTypeArg, aCanBubbleArg, aCancelableArg);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  mEvent->AsCommandEvent()->mCommand = NS_Atomize(aCommand);
+  mEvent->AsCommandEvent()->command = do_GetAtom(aCommand);
   return NS_OK;
 }
 
@@ -63,12 +64,14 @@ CommandEvent::InitCommandEvent(const nsAString& aTypeArg,
 using namespace mozilla;
 using namespace mozilla::dom;
 
-already_AddRefed<CommandEvent>
-NS_NewDOMCommandEvent(EventTarget* aOwner,
+nsresult
+NS_NewDOMCommandEvent(nsIDOMEvent** aInstancePtrResult,
+                      EventTarget* aOwner,
                       nsPresContext* aPresContext,
                       WidgetCommandEvent* aEvent)
 {
-  RefPtr<CommandEvent> it =
-    new CommandEvent(aOwner, aPresContext, aEvent);
-  return it.forget();
+  CommandEvent* it = new CommandEvent(aOwner, aPresContext, aEvent);
+  NS_ADDREF(it);
+  *aInstancePtrResult = static_cast<Event*>(it);
+  return NS_OK;
 }

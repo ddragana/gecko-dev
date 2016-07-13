@@ -25,7 +25,8 @@ bool
 SVGPreserveAspectRatio::operator==(const SVGPreserveAspectRatio& aOther) const
 {
   return mAlign == aOther.mAlign &&
-    mMeetOrSlice == aOther.mMeetOrSlice;
+    mMeetOrSlice == aOther.mMeetOrSlice &&
+    mDefer == aOther.mDefer;
 }
 
 JSObject*

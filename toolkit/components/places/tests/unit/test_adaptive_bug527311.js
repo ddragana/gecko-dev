@@ -10,13 +10,13 @@ const SUGGEST_TYPES = ["history", "bookmark", "openpage"];
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-var hs = Cc["@mozilla.org/browser/nav-history-service;1"].
+let hs = Cc["@mozilla.org/browser/nav-history-service;1"].
          getService(Ci.nsINavHistoryService);
-var bs = Cc["@mozilla.org/browser/nav-bookmarks-service;1"].
+let bs = Cc["@mozilla.org/browser/nav-bookmarks-service;1"].
          getService(Ci.nsINavBookmarksService);
-var os = Cc["@mozilla.org/observer-service;1"].
+let os = Cc["@mozilla.org/observer-service;1"].
          getService(Ci.nsIObserverService);
-var ps = Cc["@mozilla.org/preferences-service;1"].
+let ps = Cc["@mozilla.org/preferences-service;1"].
          getService(Ci.nsIPrefBranch);
 
 const PLACES_AUTOCOMPLETE_FEEDBACK_UPDATED_TOPIC =
@@ -81,7 +81,7 @@ AutoCompleteInput.prototype = {
 function check_results() {
   let controller = Cc["@mozilla.org/autocomplete/controller;1"].
                    getService(Ci.nsIAutoCompleteController);
-  let input = new AutoCompleteInput(["unifiedcomplete"]);
+  let input = new AutoCompleteInput(["history"]);
   controller.input = input;
 
   input.onSearchComplete = function() {
@@ -116,7 +116,7 @@ function addAdaptiveFeedback(aUrl, aSearch, aCallback) {
     get controller() { return thing; },
     popupOpen: true,
     selectedIndex: 0,
-    getValueAt: () => aUrl,
+    getValueAt: function() aUrl,
     searchString: aSearch
   };
 
@@ -128,7 +128,7 @@ function run_test() {
   do_test_pending();
 
   // Add a bookmark to our url.
-  bs.insertBookmark(bs.unfiledBookmarksFolder, uri(TEST_URL),
+  bs.insertBookmark(bs.unfiledBookmarksFolder, uri(TEST_URL),                   
                     bs.DEFAULT_INDEX, "test_book");
   // We want to search only history.
   for (let type of SUGGEST_TYPES) {

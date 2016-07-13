@@ -121,6 +121,8 @@ txExprParser::createAVT(const nsSubstring& aAttrValue,
         else {
             if (!concat) {
                 concat = new txCoreFunctionCall(txCoreFunctionCall::CONCAT);
+                NS_ENSURE_TRUE(concat, NS_ERROR_OUT_OF_MEMORY);
+
                 rv = concat->addParam(expr.forget());
                 expr = concat;
                 NS_ENSURE_SUCCESS(rv, rv);
@@ -482,7 +484,7 @@ txExprParser::createLocationStep(txExprLexer& lexer, txIParseContext* aContext,
         {
             //-- eat token
             lexer.nextToken();
-            nsCOMPtr<nsIAtom> axis = NS_Atomize(tok->Value());
+            nsCOMPtr<nsIAtom> axis = do_GetAtom(tok->Value());
             if (axis == nsGkAtoms::ancestor) {
                 axisIdentifier = LocationStep::ANCESTOR_AXIS;
             }
@@ -894,11 +896,11 @@ txExprParser::resolveQName(const nsAString& aQName,
     aNamespace = kNameSpaceID_None;
     int32_t idx = aQName.FindChar(':');
     if (idx > 0) {
-        *aPrefix = NS_Atomize(StringHead(aQName, (uint32_t)idx)).take();
+        *aPrefix = NS_NewAtom(StringHead(aQName, (uint32_t)idx)).take();
         if (!*aPrefix) {
             return NS_ERROR_OUT_OF_MEMORY;
         }
-        *aLocalName = NS_Atomize(Substring(aQName, (uint32_t)idx + 1,
+        *aLocalName = NS_NewAtom(Substring(aQName, (uint32_t)idx + 1,
                                            aQName.Length() - (idx + 1))).take();
         if (!*aLocalName) {
             NS_RELEASE(*aPrefix);
@@ -911,10 +913,10 @@ txExprParser::resolveQName(const nsAString& aQName,
     if (aIsNameTest && aContext->caseInsensitiveNameTests()) {
         nsAutoString lcname;
         nsContentUtils::ASCIIToLower(aQName, lcname);
-        *aLocalName = NS_Atomize(lcname).take();
+        *aLocalName = NS_NewAtom(lcname).take();
     }
     else {
-        *aLocalName = NS_Atomize(aQName).take();
+        *aLocalName = NS_NewAtom(aQName).take();
     }
     if (!*aLocalName) {
         return NS_ERROR_OUT_OF_MEMORY;

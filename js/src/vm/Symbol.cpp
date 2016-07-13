@@ -20,10 +20,10 @@ using JS::Symbol;
 using namespace js;
 
 Symbol*
-Symbol::newInternal(ExclusiveContext* cx, JS::SymbolCode code, JSAtom* description,
-                    AutoLockForExclusiveAccess& lock)
+Symbol::newInternal(ExclusiveContext* cx, JS::SymbolCode code, JSAtom* description)
 {
-    MOZ_ASSERT(cx->compartment() == cx->atomsCompartment(lock));
+    MOZ_ASSERT(cx->compartment() == cx->atomsCompartment());
+    MOZ_ASSERT(cx->atomsCompartment()->runtimeFromAnyThread()->currentThreadHasExclusiveAccess());
 
     // Following js::AtomizeString, we grudgingly forgo last-ditch GC here.
     Symbol* p = Allocate<JS::Symbol, NoGC>(cx);
@@ -37,7 +37,7 @@ Symbol::newInternal(ExclusiveContext* cx, JS::SymbolCode code, JSAtom* descripti
 Symbol*
 Symbol::new_(ExclusiveContext* cx, JS::SymbolCode code, JSString* description)
 {
-    JSAtom* atom = nullptr;
+    RootedAtom atom(cx);
     if (description) {
         atom = AtomizeString(cx, description);
         if (!atom)
@@ -47,8 +47,8 @@ Symbol::new_(ExclusiveContext* cx, JS::SymbolCode code, JSString* description)
     // Lock to allocate. If symbol allocation becomes a bottleneck, this can
     // probably be replaced with an assertion that we're on the main thread.
     AutoLockForExclusiveAccess lock(cx);
-    AutoCompartment ac(cx, cx->atomsCompartment(lock));
-    return newInternal(cx, code, atom, lock);
+    AutoCompartment ac(cx, cx->atomsCompartment());
+    return newInternal(cx, code, atom);
 }
 
 Symbol*
@@ -60,13 +60,13 @@ Symbol::for_(js::ExclusiveContext* cx, HandleString description)
 
     AutoLockForExclusiveAccess lock(cx);
 
-    SymbolRegistry& registry = cx->symbolRegistry(lock);
+    SymbolRegistry& registry = cx->symbolRegistry();
     SymbolRegistry::AddPtr p = registry.lookupForAdd(atom);
     if (p)
         return *p;
 
-    AutoCompartment ac(cx, cx->atomsCompartment(lock));
-    Symbol* sym = newInternal(cx, SymbolCode::InSymbolRegistry, atom, lock);
+    AutoCompartment ac(cx, cx->atomsCompartment());
+    Symbol* sym = newInternal(cx, SymbolCode::InSymbolRegistry, atom);
     if (!sym)
         return nullptr;
 
@@ -105,6 +105,18 @@ Symbol::dump(FILE* fp)
 }
 #endif  // DEBUG
 
+void
+SymbolRegistry::sweep()
+{
+    for (Enum e(*this); !e.empty(); e.popFront()) {
+        Symbol* sym = e.front();
+        if (IsAboutToBeFinalizedUnbarriered(&sym))
+            e.removeFront();
+        else
+            MOZ_ASSERT(sym == e.front());
+    }
+}
+
 bool
 js::SymbolDescriptiveString(JSContext* cx, Symbol* sym, MutableHandleValue result)
 {
@@ -139,14 +151,4 @@ js::ToSymbolPrimitive(Value v)
 {
     MOZ_ASSERT(IsSymbolOrSymbolWrapper(v));
     return v.isSymbol() ? v.toSymbol() : v.toObject().as<SymbolObject>().unbox();
-}
-
-
-JS::ubi::Node::Size
-JS::ubi::Concrete<JS::Symbol>::size(mozilla::MallocSizeOf mallocSizeOf) const
-{
-    // If we start allocating symbols in the nursery, we will need to update
-    // this method.
-    MOZ_ASSERT(get().isTenured());
-    return js::gc::Arena::thingSize(get().asTenured().getAllocKind());
 }

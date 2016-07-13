@@ -15,6 +15,10 @@
 #include "nsStringStream.h"
 #include "mozilla/Logging.h"
 
+PRLogModuleInfo* gRtspChildLog = nullptr;
+#undef LOG
+#define LOG(args) MOZ_LOG(gRtspChildLog, mozilla::LogLevel::Debug, args)
+
 const uint32_t kRtspTotalTracks = 2;
 const unsigned long kRtspCommandDelayMs = 200;
 
@@ -22,10 +26,6 @@ using namespace mozilla::ipc;
 
 namespace mozilla {
 namespace net {
-
-static LazyLogModule gRtspChildLog("nsRtspChild");
-#undef LOG
-#define LOG(args) MOZ_LOG(mozilla::net::gRtspChildLog, mozilla::LogLevel::Debug, args)
 
 NS_IMPL_ADDREF(RtspControllerChild)
 
@@ -69,6 +69,8 @@ RtspControllerChild::RtspControllerChild(nsIChannel *channel)
   , mPlayTimer(nullptr)
   , mPauseTimer(nullptr)
 {
+  if (!gRtspChildLog)
+    gRtspChildLog = PR_NewLogModule("nsRtspChild");
   AddIPDLReference();
   gNeckoChild->SendPRtspControllerConstructor(this);
 }
@@ -133,7 +135,7 @@ RtspControllerChild::RecvOnMediaDataAvailable(
                        const uint32_t& offset,
                        InfallibleTArray<RtspMetadataParam>&& metaArray)
 {
-  RefPtr<RtspMetaData> meta = new RtspMetaData();
+  nsRefPtr<RtspMetaData> meta = new RtspMetaData();
   nsresult rv = meta->DeserializeRtspMetaData(metaArray);
   NS_ENSURE_SUCCESS(rv, true);
 
@@ -162,7 +164,7 @@ RtspControllerChild::RecvOnConnected(
                        InfallibleTArray<RtspMetadataParam>&& metaArray)
 {
   // Deserialize meta data.
-  RefPtr<RtspMetaData> meta = new RtspMetaData();
+  nsRefPtr<RtspMetaData> meta = new RtspMetaData();
   nsresult rv = meta->DeserializeRtspMetaData(metaArray);
   NS_ENSURE_SUCCESS(rv, true);
   meta->GetTotalTracks(&mTotalTracks);
@@ -254,7 +256,7 @@ enum IPCEvent
   SendPlaybackEndedEvent
 };
 
-class SendIPCEvent : public Runnable
+class SendIPCEvent : public nsRunnable
 {
 public:
   SendIPCEvent(RtspControllerChild *aController, IPCEvent aEvent)
@@ -302,7 +304,7 @@ public:
     return NS_OK;
   }
 private:
-  RefPtr<RtspControllerChild> mController;
+  nsRefPtr<RtspControllerChild> mController;
   IPCEvent mEvent;
   uint64_t mSeekTime;
 };

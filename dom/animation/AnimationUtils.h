@@ -9,23 +9,17 @@
 
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/Nullable.h"
-#include "nsStringFwd.h"
-
-class nsIContent;
-class nsIDocument;
-struct JSContext;
 
 namespace mozilla {
-
-class ComputedTimingFunction;
+namespace dom {
 
 class AnimationUtils
 {
 public:
-  static dom::Nullable<double>
-  TimeDurationToDouble(const dom::Nullable<TimeDuration>& aTime)
+  static Nullable<double>
+    TimeDurationToDouble(const Nullable<TimeDuration>& aTime)
   {
-    dom::Nullable<double> result;
+    Nullable<double> result;
 
     if (!aTime.IsNull()) {
       result.SetValue(aTime.Value().ToMilliseconds());
@@ -34,10 +28,10 @@ public:
     return result;
   }
 
-  static dom::Nullable<TimeDuration>
-  DoubleToTimeDuration(const dom::Nullable<double>& aTime)
+  static Nullable<TimeDuration>
+    DoubleToTimeDuration(const Nullable<double>& aTime)
   {
-    dom::Nullable<TimeDuration> result;
+    Nullable<TimeDuration> result;
 
     if (!aTime.IsNull()) {
       result.SetValue(TimeDuration::FromMilliseconds(aTime.Value()));
@@ -45,23 +39,9 @@ public:
 
     return result;
   }
-
-  static void LogAsyncAnimationFailure(nsCString& aMessage,
-                                       const nsIContent* aContent = nullptr);
-
-  /**
-   * Get the document from the JS context to use when parsing CSS properties.
-   */
-  static nsIDocument*
-  GetCurrentRealmDocument(JSContext* aCx);
-
-  /**
-   * Checks if offscreen animation throttling is enabled.
-   */
-  static bool
-  IsOffscreenThrottlingEnabled();
 };
 
+} // namespace dom
 } // namespace mozilla
 
 #endif

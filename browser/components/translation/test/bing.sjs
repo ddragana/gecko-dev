@@ -94,7 +94,7 @@ function sha1(str) {
   }
 
   // Convert the binary hash data to a hex string.
-  return Array.from(hash, (c, i) => toHexString(hash.charCodeAt(i))).join("");
+  return [toHexString(hash.charCodeAt(i)) for (i in hash)].join("");
 }
 
 function parseXml(body) {

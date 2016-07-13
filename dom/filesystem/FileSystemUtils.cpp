@@ -6,78 +6,60 @@
 
 #include "mozilla/dom/FileSystemUtils.h"
 
+#include "nsXULAppAPI.h"
+
 namespace mozilla {
 namespace dom {
 
-namespace {
-
-bool
-TokenizerIgnoreNothing(char16_t /* aChar */)
+// static
+void
+FileSystemUtils::LocalPathToNormalizedPath(const nsAString& aLocal,
+                                           nsAString& aNorm)
 {
-  return false;
+  nsString result;
+  result = aLocal;
+#if defined(XP_WIN)
+  char16_t* cur = result.BeginWriting();
+  char16_t* end = result.EndWriting();
+  for (; cur < end; ++cur) {
+    if (char16_t('\\') == *cur)
+      *cur = char16_t('/');
+  }
+#endif
+  aNorm = result;
 }
 
-} // anonymous namespace
-
-/* static */ bool
-FileSystemUtils::IsDescendantPath(nsIFile* aFile,
-                                  nsIFile* aDescendantFile)
+// static
+void
+FileSystemUtils::NormalizedPathToLocalPath(const nsAString& aNorm,
+                                           nsAString& aLocal)
 {
-  nsAutoString path;
-  nsresult rv = aFile->GetPath(path);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
+  nsString result;
+  result = aNorm;
+#if defined(XP_WIN)
+  char16_t* cur = result.BeginWriting();
+  char16_t* end = result.EndWriting();
+  for (; cur < end; ++cur) {
+    if (char16_t('/') == *cur)
+      *cur = char16_t('\\');
   }
+#endif
+  aLocal = result;
+}
 
-  nsAutoString descendantPath;
-  rv = aDescendantFile->GetPath(descendantPath);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
+// static
+bool
+FileSystemUtils::IsDescendantPath(const nsAString& aPath,
+                                  const nsAString& aDescendantPath)
+{
+  // The descendant path should begin with its ancestor path.
+  nsAutoString prefix;
+  prefix = aPath + NS_LITERAL_STRING(FILESYSTEM_DOM_PATH_SEPARATOR);
 
   // Check the sub-directory path to see if it has the parent path as prefix.
-  if (descendantPath.Length() <= path.Length() ||
-      !StringBeginsWith(descendantPath, path)) {
+  if (aDescendantPath.Length() < prefix.Length() ||
+      !StringBeginsWith(aDescendantPath, prefix)) {
     return false;
-  }
-
-  return true;
-}
-
-/* static */ bool
-FileSystemUtils::IsValidRelativeDOMPath(const nsAString& aPath,
-                                        nsTArray<nsString>& aParts)
-{
-  // We don't allow empty relative path to access the root.
-  if (aPath.IsEmpty()) {
-    return false;
-  }
-
-  // Leading and trailing "/" are not allowed.
-  if (aPath.First() == FILESYSTEM_DOM_PATH_SEPARATOR_CHAR ||
-      aPath.Last() == FILESYSTEM_DOM_PATH_SEPARATOR_CHAR) {
-    return false;
-  }
-
-  NS_NAMED_LITERAL_STRING(kCurrentDir, ".");
-  NS_NAMED_LITERAL_STRING(kParentDir, "..");
-
-  // Split path and check each path component.
-  nsCharSeparatedTokenizerTemplate<TokenizerIgnoreNothing>
-    tokenizer(aPath, FILESYSTEM_DOM_PATH_SEPARATOR_CHAR);
-
-  while (tokenizer.hasMoreTokens()) {
-    nsDependentSubstring pathComponent = tokenizer.nextToken();
-    // The path containing empty components, such as "foo//bar", is invalid.
-    // We don't allow paths, such as "../foo", "foo/./bar" and "foo/../bar",
-    // to walk up the directory.
-    if (pathComponent.IsEmpty() ||
-        pathComponent.Equals(kCurrentDir) ||
-        pathComponent.Equals(kParentDir)) {
-      return false;
-    }
-
-    aParts.AppendElement(pathComponent);
   }
 
   return true;

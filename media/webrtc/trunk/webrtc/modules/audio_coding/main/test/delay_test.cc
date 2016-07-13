@@ -15,7 +15,6 @@
 
 #include "gflags/gflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common.h"
 #include "webrtc/common_types.h"
 #include "webrtc/engine_configurations.h"
@@ -26,6 +25,7 @@
 #include "webrtc/modules/audio_coding/main/test/PCMFile.h"
 #include "webrtc/modules/audio_coding/main/test/utility.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/test/testsupport/fileutils.h"
 
 DEFINE_string(codec, "isac", "Codec Name");
@@ -196,8 +196,8 @@ class DelayTest {
 
       // Print delay information every 16 frame
       if ((num_frames & 0x3F) == 0x3F) {
-        NetworkStatistics statistics;
-        acm_b_->GetNetworkStatistics(&statistics);
+        ACMNetworkStatistics statistics;
+        acm_b_->NetworkStatistics(&statistics);
         fprintf(stdout, "delay: min=%3d  max=%3d  mean=%3d  median=%3d"
                 " ts-based average = %6.3f, "
                 "curr buff-lev = %4u opt buff-lev = %4u \n",
@@ -209,7 +209,8 @@ class DelayTest {
       }
 
       in_file_a_.Read10MsData(audio_frame);
-      ASSERT_GE(acm_a_->Add10MsData(audio_frame), 0);
+      ASSERT_EQ(0, acm_a_->Add10MsData(audio_frame));
+      ASSERT_LE(0, acm_a_->Process());
       ASSERT_EQ(0, acm_b_->PlayoutData10Ms(out_freq_hz_b, &audio_frame));
       out_file_b_.Write10MsData(
           audio_frame.data_,
@@ -228,8 +229,8 @@ class DelayTest {
     out_file_b_.Close();
   }
 
-  rtc::scoped_ptr<AudioCodingModule> acm_a_;
-  rtc::scoped_ptr<AudioCodingModule> acm_b_;
+  scoped_ptr<AudioCodingModule> acm_a_;
+  scoped_ptr<AudioCodingModule> acm_b_;
 
   Channel* channel_a2b_;
 

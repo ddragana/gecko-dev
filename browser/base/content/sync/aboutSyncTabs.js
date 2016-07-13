@@ -2,12 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cu = Components.utils;
+const Cu = Components.utils;
 
 Cu.import("resource://services-common/utils.js");
 Cu.import("resource://services-sync/main.js");
 Cu.import("resource:///modules/PlacesUIUtils.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/PlacesUtils.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -15,12 +14,14 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
 
-if (AppConstants.MOZ_SERVICES_CLOUDSYNC) {
-  XPCOMUtils.defineLazyModuleGetter(this, "CloudSync",
-                                    "resource://gre/modules/CloudSync.jsm");
-}
+#ifdef MOZ_SERVICES_CLOUDSYNC
+XPCOMUtils.defineLazyModuleGetter(this, "CloudSync",
+                                  "resource://gre/modules/CloudSync.jsm");
+#else
+let CloudSync = null;
+#endif
 
-var RemoteTabViewer = {
+let RemoteTabViewer = {
   _tabsList: null,
 
   init: function () {
@@ -158,7 +159,7 @@ var RemoteTabViewer = {
 
   _buildListRequested: false,
 
-  buildList: function (forceSync) {
+  buildList: function (force) {
     if (this._waitingForBuildList) {
       this._buildListRequested = true;
       return;
@@ -169,15 +170,14 @@ var RemoteTabViewer = {
 
     this._clearTabList();
 
-    if (Weave.Service.isLoggedIn) {
-      this._refetchTabs(forceSync);
+    if (Weave.Service.isLoggedIn && this._refetchTabs(force)) {
       this._generateWeaveTabList();
     } else {
       //XXXzpao We should say something about not being logged in & not having data
       //        or tell the appropriate condition. (bug 583344)
     }
 
-    let complete = () => {
+    function complete() {
       this._waitingForBuildList = false;
       if (this._buildListRequested) {
         CommonUtils.nextTick(this.buildList, this);
@@ -272,7 +272,7 @@ var RemoteTabViewer = {
     }.bind(this);
 
     return CloudSync().tabs.getRemoteTabs()
-                           .then(updateTabList, Promise.reject.bind(Promise));
+                           .then(updateTabList, Promise.reject);
   },
 
   adjustContextMenu: function (event) {
@@ -317,8 +317,15 @@ var RemoteTabViewer = {
       }
     }
 
-    // Ask Sync to just do the tabs engine if it can.
-    Weave.Service.sync(["tabs"]);
+    // if Clients hasn't synced yet this session, we need to sync it as well.
+    if (Weave.Service.clientsEngine.lastSync == 0) {
+      Weave.Service.clientsEngine.sync();
+    }
+
+    // Force a sync only for the tabs engine
+    let engine = Weave.Service.engineManager.get("tabs");
+    engine.lastModified = null;
+    engine.sync();
     Services.prefs.setIntPref("services.sync.lastTabFetch",
                               Math.floor(Date.now() / 1000));
 
@@ -328,15 +335,10 @@ var RemoteTabViewer = {
   observe: function (subject, topic, data) {
     switch (topic) {
       case "weave:service:login:finish":
-        // A login has finished, which means that a Sync is about to start and
-        // we will eventually get to the "tabs" engine - but try and force the
-        // tab engine to sync first by passing |true| for the forceSync param.
         this.buildList(true);
         break;
       case "weave:engine:sync:finish":
-        if (data == "tabs") {
-          // The tabs engine just finished, so re-build the list without
-          // forcing a new sync of the tabs engine.
+        if (subject == "tabs") {
           this.buildList(false);
         }
         break;

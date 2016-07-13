@@ -12,10 +12,10 @@ protocol PCycleCollectWithLogs {
     manager PContent;
 
 parent:
-    async CloseGCLog();
-    async CloseCCLog();
+    CloseGCLog();
+    CloseCCLog();
 
-    async __delete__();
+    __delete__();
 };
 
 }

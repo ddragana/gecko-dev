@@ -25,8 +25,13 @@
 }
 
 /* Style Places sidebars as Vista media collection */
-@media (-moz-windows-default-theme) {
-  @media not all and (-moz-os-version: windows-xp) {
+@media not all and (-moz-os-version: windows-xp) {
+  @media (-moz-windows-default-theme) {
+    #bookmarksPanel,
+    #history-panel {
+      background-color: #EEF3FA;
+    }
+
     .sidebar-placesTree {
       background-color: transparent;
       border-top: none;
@@ -34,15 +39,6 @@
 
     .sidebar-placesTreechildren::-moz-tree-cell-text(leaf, hover) {
       text-decoration: none;
-    }
-  }
-
-  @media (-moz-os-version: windows-vista),
-         (-moz-os-version: windows-win7) {
-    #bookmarksPanel,
-    #history-panel,
-    #tabs-panel {
-      background-color: #EEF3FA;
     }
   }
 }
@@ -172,5 +168,5 @@ treechildren::-moz-tree-cell-text(cutting) {
 #viewButton > .button-box > .button-menu-dropmarker {
   height: auto;
   width: auto;
-  margin-inline-end: -3px;
+  -moz-margin-end: -3px;
 }

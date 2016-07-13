@@ -81,8 +81,8 @@ BrowserStreamChild::~BrowserStreamChild()
 
 bool
 BrowserStreamChild::RecvWrite(const int32_t& offset,
-                              const uint32_t& newlength,
-                              const Buffer& data)
+                              const Buffer& data,
+                              const uint32_t& newlength)
 {
   PLUGIN_LOG_DEBUG_FUNCTION;
 
@@ -190,7 +190,7 @@ BrowserStreamChild::NPN_DestroyStream(NPReason reason)
 void
 BrowserStreamChild::EnsureDeliveryPending()
 {
-  MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(FROM_HERE,
     mDeliveryTracker.NewRunnableMethod(&BrowserStreamChild::Deliver));
 }
 

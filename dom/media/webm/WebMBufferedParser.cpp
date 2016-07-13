@@ -9,11 +9,7 @@
 #include "nsThreadUtils.h"
 #include <algorithm>
 
-#define WEBM_DEBUG(arg, ...) MOZ_LOG(gWebMDemuxerLog, mozilla::LogLevel::Debug, ("WebMBufferedParser(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
-
 namespace mozilla {
-
-extern LazyLogModule gWebMDemuxerLog;
 
 static uint32_t
 VIntLength(unsigned char aFirstByte, uint32_t* aMask)
@@ -38,14 +34,12 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
                                 nsTArray<WebMTimeDataOffset>& aMapping,
                                 ReentrantMonitor& aReentrantMonitor)
 {
-  static const uint32_t EBML_ID = 0x1a45dfa3;
   static const uint32_t SEGMENT_ID = 0x18538067;
   static const uint32_t SEGINFO_ID = 0x1549a966;
   static const uint32_t TRACKS_ID = 0x1654AE6B;
   static const uint32_t CLUSTER_ID = 0x1f43b675;
   static const uint32_t TIMECODESCALE_ID = 0x2ad7b1;
   static const unsigned char TIMECODE_ID = 0xe7;
-  static const unsigned char BLOCKGROUP_ID = 0xa0;
   static const unsigned char BLOCK_ID = 0xa1;
   static const unsigned char SIMPLEBLOCK_ID = 0xa3;
   static const uint32_t BLOCK_TIMECODE_LENGTH = 2;
@@ -108,15 +102,6 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
       case CLUSTER_ID:
         mClusterOffset = mCurrentOffset + (p - aBuffer) -
                         (mElement.mID.mLength + mElement.mSize.mLength);
-        // Handle "unknown" length;
-        if (mElement.mSize.mValue + 1 != uint64_t(1) << (mElement.mSize.mLength * 7)) {
-          mClusterEndOffset = mClusterOffset + mElement.mID.mLength + mElement.mSize.mLength + mElement.mSize.mValue;
-        } else {
-          mClusterEndOffset = -1;
-        }
-        mState = READ_ELEMENT_ID;
-        break;
-      case BLOCKGROUP_ID:
         mState = READ_ELEMENT_ID;
         break;
       case SIMPLEBLOCK_ID:
@@ -134,10 +119,6 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
         mSkipBytes = mElement.mSize.mValue;
         mState = CHECK_INIT_FOUND;
         break;
-      case EBML_ID:
-        mLastInitStartOffset = mCurrentOffset + (p - aBuffer) -
-                            (mElement.mID.mLength + mElement.mSize.mLength);
-        MOZ_FALLTHROUGH;
       default:
         mSkipBytes = mElement.mSize.mValue;
         mState = SKIP_DATA;
@@ -191,20 +172,8 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
               MOZ_ASSERT(mGotTimecodeScale);
               uint64_t absTimecode = mClusterTimecode + mBlockTimecode;
               absTimecode *= mTimecodeScale;
-              // Avoid creating an entry if the timecode is out of order
-              // (invalid according to the WebM specification) so that
-              // ordering invariants of aMapping are not violated.
-              if (idx == 0 ||
-                  aMapping[idx - 1].mTimecode <= absTimecode ||
-                  (idx + 1 < aMapping.Length() &&
-                   aMapping[idx + 1].mTimecode >= absTimecode)) {
-                WebMTimeDataOffset entry(endOffset, absTimecode, mLastInitStartOffset,
-                                         mClusterOffset, mClusterEndOffset);
-                aMapping.InsertElementAt(idx, entry);
-              } else {
-                WEBM_DEBUG("Out of order timecode %llu in Cluster at %lld ignored",
-                           absTimecode, mClusterOffset);
-              }
+              WebMTimeDataOffset entry(endOffset, absTimecode, mClusterOffset);
+              aMapping.InsertElementAt(idx, entry);
             }
           }
         }
@@ -223,9 +192,7 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
         left = std::min(left, mSkipBytes);
         p += left;
         mSkipBytes -= left;
-      }
-      if (!mSkipBytes) {
-        mBlockEndOffset = mCurrentOffset + (p - aBuffer);
+      } else {
         mState = mNextState;
       }
       break;
@@ -239,7 +206,6 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
       if (!mSkipBytes) {
         if (mInitEndOffset < 0) {
           mInitEndOffset = mCurrentOffset + (p - aBuffer);
-          mBlockEndOffset = mCurrentOffset + (p - aBuffer);
         }
         mState = READ_ELEMENT_ID;
       }
@@ -249,16 +215,6 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
 
   NS_ASSERTION(p == aBuffer + aLength, "Must have parsed to end of data.");
   mCurrentOffset += aLength;
-}
-
-int64_t
-WebMBufferedParser::EndSegmentOffset(int64_t aOffset)
-{
-  if (mLastInitStartOffset > aOffset || mClusterOffset > aOffset) {
-    return std::min(mLastInitStartOffset >= 0 ? mLastInitStartOffset : INT64_MAX,
-                    mClusterOffset >= 0 ? mClusterOffset : INT64_MAX);
-  }
-  return mBlockEndOffset;
 }
 
 // SyncOffsetComparator and TimeComparator are slightly confusing, in that
@@ -321,7 +277,6 @@ bool WebMBufferedState::CalculateBufferedForRange(int64_t aStartOffset, int64_t 
                  "Must have found greatest WebMTimeDataOffset for end");
   }
 
-  MOZ_ASSERT(mTimeMapping[end].mTimecode >= mTimeMapping[end - 1].mTimecode);
   uint64_t frameDuration = mTimeMapping[end].mTimecode - mTimeMapping[end - 1].mTimecode;
   *aStartTime = mTimeMapping[start].mTimecode;
   *aEndTime = mTimeMapping[end].mTimecode + frameDuration;
@@ -332,22 +287,16 @@ bool WebMBufferedState::GetOffsetForTime(uint64_t aTime, int64_t* aOffset)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
 
-  if(mTimeMapping.IsEmpty()) {
-    return false;
-  }
-
   uint64_t time = aTime;
   if (time > 0) {
     time = time - 1;
   }
   uint32_t idx = mTimeMapping.IndexOfFirstElementGt(time, TimeComparator());
   if (idx == mTimeMapping.Length()) {
-    // Clamp to end
-    *aOffset = mTimeMapping[mTimeMapping.Length() - 1].mSyncOffset;
-  } else {
-    // Idx is within array or has been clamped to start
-    *aOffset = mTimeMapping[idx].mSyncOffset;
+    return false;
   }
+
+  *aOffset = mTimeMapping[idx].mSyncOffset;
   return true;
 }
 
@@ -395,13 +344,6 @@ void WebMBufferedState::NotifyDataArrived(const unsigned char* aBuffer, uint32_t
       i += 1;
     }
   }
-
-  if (mRangeParsers.IsEmpty()) {
-    return;
-  }
-
-  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-  mLastBlockOffset = mRangeParsers.LastElement().mBlockEndOffset;
 }
 
 void WebMBufferedState::Reset() {
@@ -409,7 +351,7 @@ void WebMBufferedState::Reset() {
   mTimeMapping.Clear();
 }
 
-void WebMBufferedState::UpdateIndex(const MediaByteRangeSet& aRanges, MediaResource* aResource)
+void WebMBufferedState::UpdateIndex(const nsTArray<MediaByteRange>& aRanges, MediaResource* aResource)
 {
   for (uint32_t index = 0; index < aRanges.Length(); index++) {
     const MediaByteRange& range = aRanges[index];
@@ -441,16 +383,9 @@ void WebMBufferedState::UpdateIndex(const MediaByteRangeSet& aRanges, MediaResou
         }
       }
     }
-    while (length > 0) {
-      static const uint32_t BLOCK_SIZE = 1048576;
-      uint32_t block = std::min(length, BLOCK_SIZE);
-      RefPtr<MediaByteBuffer> bytes = aResource->MediaReadAt(offset, block);
-      if (!bytes) {
-        break;
-      }
+    nsRefPtr<MediaByteBuffer> bytes = aResource->MediaReadAt(offset, length);
+    if(bytes) {
       NotifyDataArrived(bytes->Elements(), bytes->Length(), offset);
-      length -= bytes->Length();
-      offset += bytes->Length();
     }
   }
 }
@@ -461,13 +396,6 @@ int64_t WebMBufferedState::GetInitEndOffset()
     return -1;
   }
   return mRangeParsers[0].mInitEndOffset;
-}
-
-int64_t WebMBufferedState::GetLastBlockOffset()
-{
-  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-
-  return mLastBlockOffset;
 }
 
 bool WebMBufferedState::GetStartTime(uint64_t *aTime)
@@ -504,6 +432,3 @@ WebMBufferedState::GetNextKeyframeTime(uint64_t aTime, uint64_t* aKeyframeTime)
   return true;
 }
 } // namespace mozilla
-
-#undef WEBM_DEBUG
-

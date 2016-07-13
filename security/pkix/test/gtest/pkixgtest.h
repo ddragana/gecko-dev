@@ -77,12 +77,11 @@ PrintTo(const Result& result, ::std::ostream* os)
 
 namespace mozilla { namespace pkix { namespace test {
 
+extern const std::time_t ONE_DAY_IN_SECONDS_AS_TIME_T;
+
+extern const std::time_t now;
 extern const std::time_t oneDayBeforeNow;
 extern const std::time_t oneDayAfterNow;
-extern const std::time_t twoDaysBeforeNow;
-extern const std::time_t twoDaysAfterNow;
-extern const std::time_t tenDaysBeforeNow;
-extern const std::time_t tenDaysAfterNow;
 
 
 class EverythingFailsByDefaultTrustDomain : public TrustDomain
@@ -127,8 +126,7 @@ public:
   }
 
   Result CheckSignatureDigestAlgorithm(DigestAlgorithm,
-                                       EndEntityOrCA,
-                                       Time) override
+                                       EndEntityOrCA) override
   {
     ADD_FAILURE();
     return NotReached("CheckSignatureDigestAlgorithm should not be called",
@@ -171,18 +169,6 @@ public:
     return NotReached("CheckValidityIsAcceptable should not be called",
                       Result::FATAL_ERROR_LIBRARY_FAILURE);
   }
-
-  Result NetscapeStepUpMatchesServerAuth(Time, bool&) override
-  {
-    ADD_FAILURE();
-    return NotReached("NetscapeStepUpMatchesServerAuth should not be called",
-                      Result::FATAL_ERROR_LIBRARY_FAILURE);
-  }
-
-  virtual void NoteAuxiliaryExtension(AuxiliaryExtension, Input) override
-  {
-    ADD_FAILURE();
-  }
 };
 
 class DefaultCryptoTrustDomain : public EverythingFailsByDefaultTrustDomain
@@ -193,8 +179,7 @@ class DefaultCryptoTrustDomain : public EverythingFailsByDefaultTrustDomain
     return TestDigestBuf(item, digestAlg, digestBuf, digestBufLen);
   }
 
-  Result CheckSignatureDigestAlgorithm(DigestAlgorithm, EndEntityOrCA, Time)
-                                       override
+  Result CheckSignatureDigestAlgorithm(DigestAlgorithm, EndEntityOrCA) override
   {
     return Success;
   }
@@ -225,27 +210,6 @@ class DefaultCryptoTrustDomain : public EverythingFailsByDefaultTrustDomain
   Result CheckValidityIsAcceptable(Time, Time, EndEntityOrCA, KeyPurposeId)
                                    override
   {
-    return Success;
-  }
-
-  Result NetscapeStepUpMatchesServerAuth(Time, /*out*/ bool& matches) override
-  {
-    matches = true;
-    return Success;
-  }
-
-  void NoteAuxiliaryExtension(AuxiliaryExtension, Input) override
-  {
-  }
-};
-
-class DefaultNameMatchingPolicy : public NameMatchingPolicy
-{
-public:
-  virtual Result FallBackToCommonName(
-    Time, /*out*/ FallBackToSearchWithinSubject& fallBackToCommonName) override
-  {
-    fallBackToCommonName = FallBackToSearchWithinSubject::Yes;
     return Success;
   }
 };

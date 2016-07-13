@@ -1,5 +1,4 @@
 /* -*- Mode: Objective-C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -34,7 +33,6 @@
 #include "nsIScreenManager.h"
 #include "nsIWidgetListener.h"
 #include "nsIPresShell.h"
-#include "nsScreenCocoa.h"
 
 #include "gfxPlatform.h"
 #include "qcms.h"
@@ -99,12 +97,10 @@ static void RollUpPopups()
 
 nsCocoaWindow::nsCocoaWindow()
 : mParent(nullptr)
-, mAncestorLink(nullptr)
 , mWindow(nil)
 , mDelegate(nil)
 , mSheetWindowParent(nil)
 , mPopupContentView(nil)
-, mFullscreenTransitionAnimation(nil)
 , mShadowStyle(NS_STYLE_WINDOW_SHADOW_DEFAULT)
 , mBackingScaleFactor(0.0)
 , mAnimationType(nsIWidget::eGenericWindowAnimation)
@@ -113,7 +109,6 @@ nsCocoaWindow::nsCocoaWindow()
 , mInFullScreenMode(false)
 , mInFullScreenTransition(false)
 , mModal(false)
-, mFakeModal(false)
 , mSupportsNativeFullScreen(false)
 , mInNativeFullScreenMode(false)
 , mIsAnimationSuppressed(false)
@@ -159,7 +154,6 @@ nsCocoaWindow::~nsCocoaWindow()
     } else {
       nsCocoaWindow* childWindow = static_cast<nsCocoaWindow*>(kid);
       childWindow->mParent = nullptr;
-      childWindow->mAncestorLink = mAncestorLink;
       kid = kid->GetPrevSibling();
     }
   }
@@ -174,7 +168,7 @@ nsCocoaWindow::~nsCocoaWindow()
   if (mModal) {
     NS_WARNING("Widget destroyed while running modal!");
     --gXULModalLevel;
-    NS_ASSERTION(gXULModalLevel >= 0, "Weirdness setting modality!");
+    NS_ASSERTION(gXULModalLevel >= 0, "Wierdness setting modality!");
   }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -182,15 +176,13 @@ nsCocoaWindow::~nsCocoaWindow()
 
 // Find the screen that overlaps aRect the most,
 // if none are found default to the mainScreen.
-static NSScreen*
-FindTargetScreenForRect(const DesktopIntRect& aRect)
+static NSScreen *FindTargetScreenForRect(const nsIntRect& aRect)
 {
   NSScreen *targetScreen = [NSScreen mainScreen];
   NSEnumerator *screenEnum = [[NSScreen screens] objectEnumerator];
   int largestIntersectArea = 0;
   while (NSScreen *screen = [screenEnum nextObject]) {
-    DesktopIntRect screenRect =
-      nsCocoaUtils::CocoaRectToGeckoRect([screen visibleFrame]);
+    nsIntRect screenRect(nsCocoaUtils::CocoaRectToGeckoRect([screen visibleFrame]));
     screenRect = screenRect.Intersect(aRect);
     int area = screenRect.width * screenRect.height;
     if (area > largestIntersectArea) {
@@ -203,16 +195,14 @@ FindTargetScreenForRect(const DesktopIntRect& aRect)
 
 // fits the rect to the screen that contains the largest area of it,
 // or to aScreen if a screen is passed in
-// NB: this operates with aRect in desktop pixels
-static void
-FitRectToVisibleAreaForScreen(DesktopIntRect& aRect, NSScreen* aScreen)
+// NB: this operates with aRect in global display pixels
+static void FitRectToVisibleAreaForScreen(nsIntRect &aRect, NSScreen *aScreen)
 {
   if (!aScreen) {
     aScreen = FindTargetScreenForRect(aRect);
   }
 
-  DesktopIntRect screenBounds =
-    nsCocoaUtils::CocoaRectToGeckoRect([aScreen visibleFrame]);
+  nsIntRect screenBounds(nsCocoaUtils::CocoaRectToGeckoRect([aScreen visibleFrame]));
 
   if (aRect.width > screenBounds.width) {
     aRect.width = screenBounds.width;
@@ -249,11 +239,11 @@ static bool UseNativePopupWindows()
 #endif /* MOZ_USE_NATIVE_POPUP_WINDOWS */
 }
 
-// aRect here is specified in desktop pixels
-nsresult nsCocoaWindow::Create(nsIWidget* aParent,
+// aRect here is specified in global display pixels
+nsresult nsCocoaWindow::Create(nsIWidget *aParent,
                                nsNativeWidget aNativeParent,
-                               const DesktopIntRect& aRect,
-                               nsWidgetInitData* aInitData)
+                               const nsIntRect &aRect,
+                               nsWidgetInitData *aInitData)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
@@ -261,7 +251,7 @@ nsresult nsCocoaWindow::Create(nsIWidget* aParent,
   // we have to provide an autorelease pool (see bug 559075).
   nsAutoreleasePool localPool;
 
-  DesktopIntRect newBounds = aRect;
+  nsIntRect newBounds = aRect;
   FitRectToVisibleAreaForScreen(newBounds, nullptr);
 
   // Set defaults which can be overriden from aInitData in BaseCreate
@@ -271,10 +261,13 @@ nsresult nsCocoaWindow::Create(nsIWidget* aParent,
   // Ensure that the toolkit is created.
   nsToolkit::GetToolkit();
 
-  Inherited::BaseCreate(aParent, aInitData);
+  // newBounds is still display (global screen) pixels at this point;
+  // fortunately, BaseCreate doesn't actually use it so we don't
+  // need to worry about trying to convert it to device pixels
+  // when we don't have a window (or dev context, perhaps) yet
+  Inherited::BaseCreate(aParent, newBounds, aInitData);
 
   mParent = aParent;
-  mAncestorLink = aParent;
 
   // Applications that use native popups don't want us to create popup windows.
   if ((mWindowType == eWindowType_popup) && UseNativePopupWindows())
@@ -291,9 +284,12 @@ nsresult nsCocoaWindow::Create(nsIWidget* aParent,
     }
     // now we can convert newBounds to device pixels for the window we created,
     // as the child view expects a rect expressed in the dev pix of its parent
-    LayoutDeviceIntRect devRect =
-      RoundedToInt(newBounds * GetDesktopToDeviceScale());
-    return CreatePopupContentView(devRect);
+    double scale = BackingScaleFactor();
+    newBounds.x *= scale;
+    newBounds.y *= scale;
+    newBounds.width *= scale;
+    newBounds.height *= scale;
+    return CreatePopupContentView(newBounds);
   }
 
   mIsAnimationSuppressed = aInitData->mIsAnimationSuppressed;
@@ -301,16 +297,6 @@ nsresult nsCocoaWindow::Create(nsIWidget* aParent,
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
-}
-
-nsresult nsCocoaWindow::Create(nsIWidget* aParent,
-                               nsNativeWidget aNativeParent,
-                               const LayoutDeviceIntRect& aRect,
-                               nsWidgetInitData* aInitData)
-{
-  DesktopIntRect desktopRect =
-    RoundedToInt(aRect / GetDesktopToDeviceScale());
-  return Create(aParent, aNativeParent, desktopRect, aInitData);
 }
 
 static unsigned int WindowMaskForBorderStyle(nsBorderStyle aBorderStyle)
@@ -488,8 +474,7 @@ nsresult nsCocoaWindow::CreateNativeWindow(const NSRect &aRect,
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-NS_IMETHODIMP
-nsCocoaWindow::CreatePopupContentView(const LayoutDeviceIntRect &aRect)
+NS_IMETHODIMP nsCocoaWindow::CreatePopupContentView(const nsIntRect &aRect)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
@@ -513,28 +498,12 @@ nsCocoaWindow::CreatePopupContentView(const LayoutDeviceIntRect &aRect)
 
 NS_IMETHODIMP nsCocoaWindow::Destroy()
 {
-  if (mOnDestroyCalled)
-    return NS_OK;
-  mOnDestroyCalled = true;
-
-  // SetFakeModal(true) is called for non-modal window opened by modal window.
-  // On Cocoa, it needs corresponding SetFakeModal(false) on destroy to restore
-  // ancestor windows' state.
-  if (mFakeModal) {
-    SetFakeModal(false);
-  }
-
   // If we don't hide here we run into problems with panels, this is not ideal.
   // (Bug 891424)
   Show(false);
 
   if (mPopupContentView)
     mPopupContentView->Destroy();
-
-  if (mFullscreenTransitionAnimation) {
-    [mFullscreenTransitionAnimation stopAnimation];
-    ReleaseFullscreenTransitionAnimation();
-  }
 
   nsBaseWidget::Destroy();
   // nsBaseWidget::Destroy() calls GetParent()->RemoveChild(this). But we
@@ -555,7 +524,7 @@ NS_IMETHODIMP nsCocoaWindow::Destroy()
     if (mInNativeFullScreenMode) {
       DestroyNativeWindow();
     } else if (mWindow) {
-      nsCocoaUtils::HideOSChromeOnScreen(false);
+      nsCocoaUtils::HideOSChromeOnScreen(false, [mWindow screen]);
     }
   }
 
@@ -595,24 +564,6 @@ void* nsCocoaWindow::GetNativeData(uint32_t aDataType)
       // and it doesn't matter so just return nullptr.
       NS_ERROR("Requesting NS_NATIVE_GRAPHIC on a top-level window!");
       break;
-    case NS_RAW_NATIVE_IME_CONTEXT: {
-      retVal = GetPseudoIMEContext();
-      if (retVal) {
-        break;
-      }
-      NSView* view = mWindow ? [mWindow contentView] : nil;
-      if (view) {
-        retVal = [view inputContext];
-      }
-      // If inputContext isn't available on this window, return this window's
-      // pointer instead of nullptr since if this returns nullptr,
-      // IMEStateManager cannot manage composition with TextComposition
-      // instance.  Although, this case shouldn't occur.
-      if (NS_WARN_IF(!retVal)) {
-        retVal = this;
-      }
-      break;
-    }
   }
 
   return retVal;
@@ -641,7 +592,7 @@ NS_IMETHODIMP nsCocoaWindow::SetModal(bool aState)
   nsAutoreleasePool localPool;
 
   mModal = aState;
-  nsCocoaWindow *ancestor = static_cast<nsCocoaWindow*>(mAncestorLink);
+  nsCocoaWindow *aParent = static_cast<nsCocoaWindow*>(mParent);
   if (aState) {
     ++gXULModalLevel;
     // When a non-sheet window gets "set modal", make the window(s) that it
@@ -652,16 +603,16 @@ NS_IMETHODIMP nsCocoaWindow::SetModal(bool aState)
     // ShowModal() (each of these event loops is "exclusive", and can't run at
     // the same time as other (similar) event loops).
     if (mWindowType != eWindowType_sheet) {
-      while (ancestor) {
-        if (ancestor->mNumModalDescendents++ == 0) {
-          NSWindow *aWindow = ancestor->GetCocoaWindow();
-          if (ancestor->mWindowType != eWindowType_invisible) {
+      while (aParent) {
+        if (aParent->mNumModalDescendents++ == 0) {
+          NSWindow *aWindow = aParent->GetCocoaWindow();
+          if (aParent->mWindowType != eWindowType_invisible) {
             [[aWindow standardWindowButton:NSWindowCloseButton] setEnabled:NO];
             [[aWindow standardWindowButton:NSWindowMiniaturizeButton] setEnabled:NO];
             [[aWindow standardWindowButton:NSWindowZoomButton] setEnabled:NO];
           }
         }
-        ancestor = static_cast<nsCocoaWindow*>(ancestor->mParent);
+        aParent = static_cast<nsCocoaWindow*>(aParent->mParent);
       }
       [mWindow setLevel:NSModalPanelWindowLevel];
       nsCocoaWindowList *windowList = new nsCocoaWindowList;
@@ -676,17 +627,17 @@ NS_IMETHODIMP nsCocoaWindow::SetModal(bool aState)
     --gXULModalLevel;
     NS_ASSERTION(gXULModalLevel >= 0, "Mismatched call to nsCocoaWindow::SetModal(false)!");
     if (mWindowType != eWindowType_sheet) {
-      while (ancestor) {
-        if (--ancestor->mNumModalDescendents == 0) {
-          NSWindow *aWindow = ancestor->GetCocoaWindow();
-          if (ancestor->mWindowType != eWindowType_invisible) {
+      while (aParent) {
+        if (--aParent->mNumModalDescendents == 0) {
+          NSWindow *aWindow = aParent->GetCocoaWindow();
+          if (aParent->mWindowType != eWindowType_invisible) {
             [[aWindow standardWindowButton:NSWindowCloseButton] setEnabled:YES];
             [[aWindow standardWindowButton:NSWindowMiniaturizeButton] setEnabled:YES];
             [[aWindow standardWindowButton:NSWindowZoomButton] setEnabled:YES];
           }
         }
-        NS_ASSERTION(ancestor->mNumModalDescendents >= 0, "Widget hierarchy changed while modal!");
-        ancestor = static_cast<nsCocoaWindow*>(ancestor->mParent);
+        NS_ASSERTION(aParent->mNumModalDescendents >= 0, "Widget hierarchy changed while modal!");
+        aParent = static_cast<nsCocoaWindow*>(aParent->mParent);
       }
       if (gGeckoAppModalWindowList) {
         NS_ASSERTION(gGeckoAppModalWindowList->window == this, "Widget hierarchy changed while modal!");
@@ -701,12 +652,6 @@ NS_IMETHODIMP nsCocoaWindow::SetModal(bool aState)
     }
   }
   return NS_OK;
-}
-
-NS_IMETHODIMP nsCocoaWindow::SetFakeModal(bool aState)
-{
-    mFakeModal = aState;
-    return SetModal(aState);
 }
 
 // Hide or show this window
@@ -1041,12 +986,14 @@ nsCocoaWindow::ConfigureChildren(const nsTArray<Configuration>& aConfigurations)
 LayerManager*
 nsCocoaWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
                                LayersBackend aBackendHint,
-                               LayerManagerPersistence aPersistence)
+                               LayerManagerPersistence aPersistence,
+                               bool* aAllowRetaining)
 {
   if (mPopupContentView) {
     return mPopupContentView->GetLayerManager(aShadowManager,
                                               aBackendHint,
-                                              aPersistence);
+                                              aPersistence,
+                                              aAllowRetaining);
   }
   return nullptr;
 }
@@ -1188,7 +1135,7 @@ void nsCocoaWindow::SetSizeConstraints(const SizeConstraints& aConstraints)
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-// Coordinates are desktop pixels
+// Coordinates are global display pixels
 NS_IMETHODIMP nsCocoaWindow::Move(double aX, double aY)
 {
   if (!mWindow) {
@@ -1218,7 +1165,7 @@ NS_METHOD nsCocoaWindow::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
   return NS_OK;
 }
 
-NS_METHOD nsCocoaWindow::SetSizeMode(nsSizeMode aMode)
+NS_METHOD nsCocoaWindow::SetSizeMode(int32_t aMode)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
@@ -1318,120 +1265,15 @@ NS_IMETHODIMP nsCocoaWindow::HideWindowChrome(bool aShouldHide)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-class FullscreenTransitionData : public nsISupports
-{
-public:
-  NS_DECL_ISUPPORTS
-
-  explicit FullscreenTransitionData(NSWindow* aWindow)
-    : mTransitionWindow(aWindow) { }
-
-  NSWindow* mTransitionWindow;
-
-private:
-  virtual ~FullscreenTransitionData()
-  {
-    [mTransitionWindow close];
-  }
-};
-
-NS_IMPL_ISUPPORTS0(FullscreenTransitionData)
-
-@interface FullscreenTransitionDelegate : NSObject <NSAnimationDelegate>
-{
-@public
-  nsCocoaWindow* mWindow;
-  nsIRunnable* mCallback;
-}
-@end
-
-@implementation FullscreenTransitionDelegate
-- (void)cleanupAndDispatch:(NSAnimation* )animation
-{
-  [animation setDelegate:nil];
-  [self autorelease];
-  // The caller should have added ref for us.
-  NS_DispatchToMainThread(already_AddRefed<nsIRunnable>(mCallback));
-}
-
-- (void)animationDidEnd:(NSAnimation *)animation
-{
-  MOZ_ASSERT(animation == mWindow->FullscreenTransitionAnimation(),
-             "Should be handling the only animation on the window");
-  mWindow->ReleaseFullscreenTransitionAnimation();
-  [self cleanupAndDispatch:animation];
-}
-
-- (void)animationDidStop:(NSAnimation *)animation
-{
-  [self cleanupAndDispatch:animation];
-}
-@end
-
-/* virtual */ bool
-nsCocoaWindow::PrepareForFullscreenTransition(nsISupports** aData)
-{
-  nsCOMPtr<nsIScreen> widgetScreen = GetWidgetScreen();
-  nsScreenCocoa* screen = static_cast<nsScreenCocoa*>(widgetScreen.get());
-  NSScreen* cocoaScreen = screen->CocoaScreen();
-
-  NSWindow* win =
-    [[NSWindow alloc] initWithContentRect:[cocoaScreen frame]
-                                styleMask:NSBorderlessWindowMask
-                                  backing:NSBackingStoreBuffered
-                                    defer:YES];
-  [win setBackgroundColor:[NSColor blackColor]];
-  [win setAlphaValue:0];
-  [win setIgnoresMouseEvents:YES];
-  [win setLevel:NSScreenSaverWindowLevel];
-  [win makeKeyAndOrderFront:nil];
-
-  auto data = new FullscreenTransitionData(win);
-  *aData = data;
-  NS_ADDREF(data);
-  return true;
-}
-
-/* virtual */ void
-nsCocoaWindow::PerformFullscreenTransition(FullscreenTransitionStage aStage,
-                                           uint16_t aDuration,
-                                           nsISupports* aData,
-                                           nsIRunnable* aCallback)
-{
-  auto data = static_cast<FullscreenTransitionData*>(aData);
-  FullscreenTransitionDelegate* delegate =
-    [[FullscreenTransitionDelegate alloc] init];
-  delegate->mWindow = this;
-  // Storing already_AddRefed directly could cause static checking fail.
-  delegate->mCallback = nsCOMPtr<nsIRunnable>(aCallback).forget().take();
-
-  if (mFullscreenTransitionAnimation) {
-    [mFullscreenTransitionAnimation stopAnimation];
-    ReleaseFullscreenTransitionAnimation();
-  }
-
-  NSDictionary* dict = @{
-    NSViewAnimationTargetKey: data->mTransitionWindow,
-    NSViewAnimationEffectKey: aStage == eBeforeFullscreenToggle ?
-      NSViewAnimationFadeInEffect : NSViewAnimationFadeOutEffect
-  };
-  mFullscreenTransitionAnimation =
-    [[NSViewAnimation alloc] initWithViewAnimations:@[dict]];
-  [mFullscreenTransitionAnimation setDelegate:delegate];
-  [mFullscreenTransitionAnimation setDuration:aDuration / 1000.0];
-  [mFullscreenTransitionAnimation startAnimation];
-}
-
 void nsCocoaWindow::EnteredFullScreen(bool aFullScreen, bool aNativeMode)
 {
   mInFullScreenTransition = false;
-  bool wasInFullscreen = mInFullScreenMode;
   mInFullScreenMode = aFullScreen;
   if (aNativeMode || mInNativeFullScreenMode) {
     mInNativeFullScreenMode = aFullScreen;
   }
   DispatchSizeModeEvent();
-  if (mWidgetListener && wasInFullscreen != aFullScreen) {
+  if (mWidgetListener) {
     mWidgetListener->FullscreenChanged(aFullScreen);
   }
 }
@@ -1509,7 +1351,7 @@ nsCocoaWindow::DoMakeFullScreen(bool aFullScreen, bool aUseSystemTransition)
     // The order here matters. When we exit full screen mode, we need to show the
     // Dock first, otherwise the newly-created window won't have its minimize
     // button enabled. See bug 526282.
-    nsCocoaUtils::HideOSChromeOnScreen(aFullScreen);
+    nsCocoaUtils::HideOSChromeOnScreen(aFullScreen, [mWindow screen]);
     nsresult rv = nsBaseWidget::MakeFullScreen(aFullScreen);
     NSEnableScreenUpdates();
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1522,7 +1364,7 @@ nsCocoaWindow::DoMakeFullScreen(bool aFullScreen, bool aUseSystemTransition)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-// Coordinates are desktop pixels
+// Coordinates are global display pixels
 nsresult nsCocoaWindow::DoResize(double aX, double aY,
                                  double aWidth, double aHeight,
                                  bool aRepaint,
@@ -1544,9 +1386,9 @@ nsresult nsCocoaWindow::DoResize(double aX, double aY,
   int32_t height = NSToIntRound(aHeight * scale);
   ConstrainSize(&width, &height);
 
-  DesktopIntRect newBounds(NSToIntRound(aX), NSToIntRound(aY),
-                           NSToIntRound(width / scale),
-                           NSToIntRound(height / scale));
+  nsIntRect newBounds(NSToIntRound(aX), NSToIntRound(aY),
+                      NSToIntRound(width / scale),
+                      NSToIntRound(height / scale));
 
   // constrain to the screen that contains the largest area of the new rect
   FitRectToVisibleAreaForScreen(newBounds, aConstrainToCurrentScreen ?
@@ -1575,7 +1417,7 @@ nsresult nsCocoaWindow::DoResize(double aX, double aY,
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-// Coordinates are desktop pixels
+// Coordinates are global display pixels
 NS_IMETHODIMP nsCocoaWindow::Resize(double aX, double aY,
                                     double aWidth, double aHeight,
                                     bool aRepaint)
@@ -1583,15 +1425,15 @@ NS_IMETHODIMP nsCocoaWindow::Resize(double aX, double aY,
   return DoResize(aX, aY, aWidth, aHeight, aRepaint, false);
 }
 
-// Coordinates are desktop pixels
+// Coordinates are global display pixels
 NS_IMETHODIMP nsCocoaWindow::Resize(double aWidth, double aHeight, bool aRepaint)
 {
-  double invScale = 1.0 / BackingScaleFactor();
+  double invScale = 1.0 / GetDefaultScale().scale;
   return DoResize(mBounds.x * invScale, mBounds.y * invScale,
                   aWidth, aHeight, aRepaint, true);
 }
 
-NS_IMETHODIMP nsCocoaWindow::GetClientBounds(mozilla::LayoutDeviceIntRect& aRect)
+NS_IMETHODIMP nsCocoaWindow::GetClientBounds(nsIntRect &aRect)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
@@ -1623,16 +1465,15 @@ nsCocoaWindow::UpdateBounds()
   if (mWindow) {
     frame = [mWindow frame];
   }
-  mBounds =
-    nsCocoaUtils::CocoaRectToGeckoRectDevPix(frame, BackingScaleFactor());
+  mBounds = nsCocoaUtils::CocoaRectToGeckoRectDevPix(frame, BackingScaleFactor());
 }
 
-NS_IMETHODIMP nsCocoaWindow::GetScreenBounds(LayoutDeviceIntRect &aRect)
+NS_IMETHODIMP nsCocoaWindow::GetScreenBounds(nsIntRect &aRect)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
 #ifdef DEBUG
-  LayoutDeviceIntRect r = nsCocoaUtils::CocoaRectToGeckoRectDevPix([mWindow frame], BackingScaleFactor());
+  nsIntRect r = nsCocoaUtils::CocoaRectToGeckoRectDevPix([mWindow frame], BackingScaleFactor());
   NS_ASSERTION(mWindow && mBounds == r, "mBounds out of sync!");
 #endif
 
@@ -1799,7 +1640,7 @@ NS_IMETHODIMP nsCocoaWindow::SetTitle(const nsAString& aTitle)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-NS_IMETHODIMP nsCocoaWindow::Invalidate(const LayoutDeviceIntRect& aRect)
+NS_IMETHODIMP nsCocoaWindow::Invalidate(const nsIntRect & aRect)
 {
   if (mPopupContentView) {
     return mPopupContentView->Invalidate(aRect);
@@ -1815,7 +1656,7 @@ NS_IMETHODIMP nsCocoaWindow::Invalidate(const LayoutDeviceIntRect& aRect)
 // a drop, to a drag enter/leave, or a drag over event. The actual event
 // is passed in |aMessage| and is passed along to our event hanlder so Gecko
 // knows about it.
-bool nsCocoaWindow::DragEvent(unsigned int aMessage, mozilla::gfx::Point aMouseGlobal, UInt16 aKeyModifiers)
+bool nsCocoaWindow::DragEvent(unsigned int aMessage, Point aMouseGlobal, UInt16 aKeyModifiers)
 {
   return false;
 }
@@ -1876,10 +1717,13 @@ nsCocoaWindow::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
 {
   aStatus = nsEventStatus_eIgnore;
 
-  nsCOMPtr<nsIWidget> kungFuDeathGrip(event->mWidget);
+  nsIWidget* aWidget = event->widget;
+  NS_IF_ADDREF(aWidget);
 
   if (mWidgetListener)
     aStatus = mWidgetListener->HandleEvent(event, mUseAttachedEvents);
+
+  NS_IF_RELEASE(aWidget);
 
   return NS_OK;
 }
@@ -1953,7 +1797,7 @@ nsCocoaWindow::ReportSizeEvent()
   UpdateBounds();
 
   if (mWidgetListener) {
-    LayoutDeviceIntRect innerBounds;
+    nsIntRect innerBounds;
     GetClientBounds(innerBounds);
     mWidgetListener->WindowResized(this, innerBounds.width, innerBounds.height);
   }
@@ -2006,27 +1850,27 @@ LayoutDeviceIntPoint nsCocoaWindow::WidgetToScreenOffset()
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
   NSRect rect = NSZeroRect;
-  LayoutDeviceIntRect r;
+  nsIntRect r;
   if (mWindow) {
     rect = [mWindow contentRectForFrameRect:[mWindow frame]];
   }
   r = nsCocoaUtils::CocoaRectToGeckoRectDevPix(rect, BackingScaleFactor());
 
-  return r.TopLeft();
+  return LayoutDeviceIntPoint::FromUntyped(r.TopLeft());
 
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntPoint(0,0));
 }
 
-LayoutDeviceIntPoint nsCocoaWindow::GetClientOffset()
+nsIntPoint nsCocoaWindow::GetClientOffset()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
-  LayoutDeviceIntRect clientRect;
+  nsIntRect clientRect;
   GetClientBounds(clientRect);
 
   return clientRect.TopLeft() - mBounds.TopLeft();
 
-  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntPoint(0, 0));
+  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(nsIntPoint(0, 0));
 }
 
 LayoutDeviceIntSize
@@ -2038,12 +1882,12 @@ nsCocoaWindow::ClientToWindowSize(const LayoutDeviceIntSize& aClientSize)
     return LayoutDeviceIntSize(0, 0);
 
   CGFloat backingScale = BackingScaleFactor();
-  LayoutDeviceIntRect r(0, 0, aClientSize.width, aClientSize.height);
+  nsIntRect r(0, 0, aClientSize.width, aClientSize.height);
   NSRect rect = nsCocoaUtils::DevPixelsToCocoaPoints(r, backingScale);
 
   NSRect inflatedRect = [mWindow frameRectForContentRect:rect];
   r = nsCocoaUtils::CocoaRectToGeckoRectDevPix(inflatedRect, backingScale);
-  return r.Size();
+  return LayoutDeviceIntSize(r.width, r.height);
 
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntSize(0,0));
 }
@@ -2206,7 +2050,7 @@ nsCocoaWindow::SetUseBrightTitlebarForeground(bool aBrightForeground)
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-NS_IMETHODIMP nsCocoaWindow::SetNonClientMargins(LayoutDeviceIntMargin &margins)
+NS_IMETHODIMP nsCocoaWindow::SetNonClientMargins(nsIntMargin &margins)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
@@ -2311,12 +2155,40 @@ void nsCocoaWindow::SetPopupWindowLevel()
   }
 }
 
+nsresult
+nsCocoaWindow::NotifyIMEInternal(const IMENotification& aIMENotification)
+{
+  switch (aIMENotification.mMessage) {
+    case NOTIFY_IME_OF_FOCUS:
+      if (mInputContext.IsPasswordEditor()) {
+        TextInputHandler::EnableSecureEventInput();
+      } else {
+        TextInputHandler::EnsureSecureEventInputDisabled();
+      }
+      return NS_OK;
+    case NOTIFY_IME_OF_BLUR:
+      return NS_OK;
+    default:
+      return NS_ERROR_NOT_IMPLEMENTED;
+  }
+}
+
 NS_IMETHODIMP_(void)
 nsCocoaWindow::SetInputContext(const InputContext& aContext,
                                const InputContextAction& aAction)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
+  if (mWindow &&
+      [mWindow firstResponder] == mWindow &&
+      [mWindow isKeyWindow] &&
+      [[NSApplication sharedApplication] isActive]) {
+    if (aContext.IsPasswordEditor()) {
+      TextInputHandler::EnableSecureEventInput();
+    } else {
+      TextInputHandler::EnsureSecureEventInputDisabled();
+    }
+  }
   mInputContext = aContext;
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -2535,7 +2407,7 @@ nsCocoaWindow::ExecuteNativeKeyBinding(NativeKeyBindingsType aType,
   // app modally. If one of those is up then we want it to retain its menu bar.
   if ([NSApp _isRunningAppModal])
     return;
-  RefPtr<nsMenuBarX> hiddenWindowMenuBar = nsMenuUtilsX::GetHiddenWindowMenuBar();
+  nsRefPtr<nsMenuBarX> hiddenWindowMenuBar = nsMenuUtilsX::GetHiddenWindowMenuBar();
   if (hiddenWindowMenuBar) {
     // printf("painting hidden window menu bar due to window losing main status\n");
     hiddenWindowMenuBar->Paint();
@@ -2552,16 +2424,6 @@ nsCocoaWindow::ExecuteNativeKeyBinding(NativeKeyBindingsType aType,
   NSWindow* window = [aNotification object];
   if ([window isSheet])
     [WindowDelegate paintMenubarForWindow:window];
-
-  nsChildView* mainChildView =
-    static_cast<nsChildView*>([[(BaseWindow*)window mainChildView] widget]);
-  if (mainChildView) {
-    if (mainChildView->GetInputContext().IsPasswordEditor()) {
-      TextInputHandler::EnableSecureEventInput();
-    } else {
-      TextInputHandler::EnsureSecureEventInputDisabled();
-    }
-  }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -3261,7 +3123,7 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
   // We work around this problem by only returning AXChildren that are
   // mozAccessible object or are one of the titlebar's buttons (which
   // instantiate subclasses of NSButtonCell).
-  if ([retval isKindOfClass:[NSArray class]] &&
+  if (nsCocoaFeatures::OnLionOrLater() && [retval isKindOfClass:[NSArray class]] &&
       [attribute isEqualToString:@"AXChildren"]) {
     NSMutableArray *holder = [NSMutableArray arrayWithCapacity:10];
     [holder addObjectsFromArray:(NSArray *)retval];
@@ -3282,6 +3144,22 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
   return retval;
 }
 
+// If we were built on OS X 10.6 or with the 10.6 SDK and are running on Lion,
+// the OS (specifically -[NSWindow sendEvent:]) won't send NSEventTypeGesture
+// events to -[ChildView magnifyWithEvent:] as it should.  The following code
+// gets around this.  See bug 863841.
+#if !defined( MAC_OS_X_VERSION_10_7 ) || \
+    ( MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7 )
+- (void)sendEvent:(NSEvent *)anEvent
+{
+  if ([ChildView isLionSmartMagnifyEvent: anEvent]) {
+    [[self mainChildView] magnifyWithEvent:anEvent];
+    return;
+  }
+  [super sendEvent:anEvent];
+}
+#endif
+
 @end
 
 // This class allows us to exercise control over the window's title bar. This
@@ -3301,10 +3179,12 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
 // This class also provides us with a pill button to show/hide the toolbar up to 10.6.
 //
 // Drawing the unified gradient in the titlebar and the toolbar works like this:
-// 1) In the style sheet we set the toolbar's -moz-appearance to toolbar.
+// 1) In the style sheet we set the toolbar's -moz-appearance to toolbar or
+//    -moz-mac-unified-toolbar.
 // 2) When the toolbar is visible and we paint the application chrome
 //    window, the array that Gecko passes nsChildView::UpdateThemeGeometries
-//    will contain an entry for the widget type NS_THEME_TOOLBAR.
+//    will contain an entry for the widget type NS_THEME_TOOLBAR or
+//    NS_THEME_MOZ_MAC_UNIFIED_TOOLBAR.
 // 3) nsChildView::UpdateThemeGeometries finds the toolbar frame's ToolbarWindow
 //    and passes the toolbar frame's height to setUnifiedToolbarHeight.
 // 4) If the toolbar height has changed, a titlebar redraw is triggered and the
@@ -3343,7 +3223,7 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
     // setBottomCornerRounded: is a private API call, so we check to make sure
     // we respond to it just in case.
     if ([self respondsToSelector:@selector(setBottomCornerRounded:)])
-      [self setBottomCornerRounded:YES];
+      [self setBottomCornerRounded:nsCocoaFeatures::OnLionOrLater()];
 
     [self setAutorecalculatesContentBorderThickness:NO forEdge:NSMaxYEdge];
     [self setContentBorderThickness:0.0f forEdge:NSMaxYEdge];
@@ -3381,16 +3261,6 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
 - (NSColor*)windowBackgroundColor
 {
   return mBackgroundColor;
-}
-
-- (void)setTemporaryBackgroundColor
-{
-  [super setBackgroundColor:[NSColor whiteColor]];
-}
-
-- (void)restoreBackgroundColor
-{
-  [super setBackgroundColor:mBackgroundColor];
 }
 
 - (void)setTitlebarNeedsDisplayInRect:(NSRect)aRect
@@ -3639,11 +3509,14 @@ DrawNativeTitlebar(CGContextRef aContext, CGRect aTitlebarRect,
 {
   nsNativeThemeCocoa::DrawNativeTitlebar(aContext, aTitlebarRect, aUnifiedToolbarHeight, aIsMain, NO);
 
-  // The call to CUIDraw doesn't draw the top pixel strip at some window widths.
-  // We don't want to have a flickering transparent line, so we overdraw it.
-  CGContextSetRGBFillColor(aContext, 0.95, 0.95, 0.95, 1);
-  CGContextFillRect(aContext, CGRectMake(0, CGRectGetMaxY(aTitlebarRect) - 1,
+  if (nsCocoaFeatures::OnLionOrLater()) {
+    // On Lion the call to CUIDraw doesn't draw the top pixel strip at some
+    // window widths. We don't want to have a flickering transparent line, so
+    // we overdraw it.
+    CGContextSetRGBFillColor(aContext, 0.95, 0.95, 0.95, 1);
+    CGContextFillRect(aContext, CGRectMake(0, CGRectGetMaxY(aTitlebarRect) - 1,
                                            aTitlebarRect.size.width, 1));
+  }
 }
 
 // Pattern draw callback for standard titlebar gradients and solid titlebar colors

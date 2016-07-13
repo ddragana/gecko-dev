@@ -2,10 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
+let Cc = Components.classes;
+let Ci = Components.interfaces;
+let Cu = Components.utils;
 
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -29,7 +28,7 @@ function makeInputStream(aString) {
   return stream; // XPConnect will QI this to nsIInputStream for us.
 }
 
-var WebProgressListener = {
+let WebProgressListener = {
   init: function() {
     this._filter = Cc["@mozilla.org/appshell/component/browser-status-filter;1"]
                      .createInstance(Ci.nsIWebProgress);
@@ -56,19 +55,14 @@ var WebProgressListener = {
   },
 
   _setupJSON: function setupJSON(aWebProgress, aRequest) {
-    let innerWindowID = null;
     if (aWebProgress) {
-      let domWindowID = null;
+      let domWindowID;
       try {
-        let utils = aWebProgress.DOMWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindowUtils);
-        domWindowID = utils.outerWindowID;
-        innerWindowID = utils.currentInnerWindowID;
+        domWindowID = aWebProgress && aWebProgress.DOMWindowID;
       } catch (e) {
         // If nsDocShell::Destroy has already been called, then we'll
-        // get NS_NOINTERFACE when trying to get the DOM window.
-        // If there is no current inner window, we'll get
-        // NS_ERROR_NOT_AVAILABLE.
+        // get NS_NOINTERFACE when trying to get the DOM window ID.
+        domWindowID = null;
       }
 
       aWebProgress = {
@@ -83,8 +77,7 @@ var WebProgressListener = {
       webProgress: aWebProgress || null,
       requestURI: this._requestSpec(aRequest, "URI"),
       originalRequestURI: this._requestSpec(aRequest, "originalURI"),
-      documentContentType: content.document && content.document.contentType,
-      innerWindowID,
+      documentContentType: content.document && content.document.contentType
     };
   },
 
@@ -122,17 +115,6 @@ var WebProgressListener = {
 
     json.stateFlags = aStateFlags;
     json.status = aStatus;
-
-    // It's possible that this state change was triggered by
-    // loading an internal error page, for which the parent
-    // will want to know some details, so we'll update it with
-    // the documentURI.
-    if (aWebProgress && aWebProgress.isTopLevel) {
-      json.documentURI = content.document.documentURIObject.spec;
-      json.charset = content.document.characterSet;
-      json.mayEnableCharacterEncodingMenu = docShell.mayEnableCharacterEncodingMenu;
-      json.inLoadURI = WebNavigation.inLoadURI;
-    }
 
     this._send("Content:StateChange", json, objects);
   },
@@ -172,7 +154,6 @@ var WebProgressListener = {
       json.mayEnableCharacterEncodingMenu = docShell.mayEnableCharacterEncodingMenu;
       json.principal = content.document.nodePrincipal;
       json.synthetic = content.document.mozSyntheticDocument;
-      json.inLoadURI = WebNavigation.inLoadURI;
 
       if (AppConstants.MOZ_CRASHREPORTER && CrashReporter.enabled) {
         let uri = aLocationURI.clone();
@@ -211,10 +192,6 @@ var WebProgressListener = {
     return true;
   },
 
-  sendLoadCallResult() {
-    sendAsyncMessage("Content:LoadURIResult");
-  },
-
   QueryInterface: function QueryInterface(aIID) {
     if (aIID.equals(Ci.nsIWebProgressListener) ||
         aIID.equals(Ci.nsIWebProgressListener2) ||
@@ -232,25 +209,31 @@ addEventListener("unload", () => {
   WebProgressListener.uninit();
 });
 
-var WebNavigation =  {
+let WebNavigation =  {
   init: function() {
     addMessageListener("WebNavigation:GoBack", this);
     addMessageListener("WebNavigation:GoForward", this);
     addMessageListener("WebNavigation:GotoIndex", this);
     addMessageListener("WebNavigation:LoadURI", this);
-    addMessageListener("WebNavigation:SetOriginAttributes", this);
     addMessageListener("WebNavigation:Reload", this);
     addMessageListener("WebNavigation:Stop", this);
+
+    // Send a CPOW for the sessionHistory object. We need to make sure
+    // it stays alive as long as the content script since CPOWs are
+    // weakly held.
+    let history = this.webNavigation.sessionHistory;
+    this._sessionHistory = history;
+    sendAsyncMessage("WebNavigation:setHistory", {}, {history: history});
+
+    addEventListener("unload", this.uninit);
+  },
+
+  uninit: function() {
+    this._sessionHistory = null;
   },
 
   get webNavigation() {
     return docShell.QueryInterface(Ci.nsIWebNavigation);
-  },
-
-  _inLoadURI: false,
-
-  get inLoadURI() {
-    return this._inLoadURI;
   },
 
   receiveMessage: function(message) {
@@ -270,9 +253,6 @@ var WebNavigation =  {
                      message.data.postData, message.data.headers,
                      message.data.baseURI);
         break;
-      case "WebNavigation:SetOriginAttributes":
-        this.setOriginAttributes(message.data.originAttributes);
-        break;
       case "WebNavigation:Reload":
         this.reload(message.data.flags);
         break;
@@ -282,30 +262,19 @@ var WebNavigation =  {
     }
   },
 
-  _wrapURIChangeCall(fn) {
-    this._inLoadURI = true;
-    try {
-      fn();
-    } finally {
-      this._inLoadURI = false;
-      WebProgressListener.sendLoadCallResult();
-    }
-  },
-
   goBack: function() {
     if (this.webNavigation.canGoBack) {
-      this._wrapURIChangeCall(() => this.webNavigation.goBack());
+      this.webNavigation.goBack();
     }
   },
 
   goForward: function() {
-    if (this.webNavigation.canGoForward) {
-      this._wrapURIChangeCall(() => this.webNavigation.goForward());
-    }
+    if (this.webNavigation.canGoForward)
+      this.webNavigation.goForward();
   },
 
   gotoIndex: function(index) {
-    this._wrapURIChangeCall(() => this.webNavigation.gotoIndex(index));
+    this.webNavigation.gotoIndex(index);
   },
 
   loadURI: function(uri, flags, referrer, referrerPolicy, postData, headers, baseURI) {
@@ -328,16 +297,8 @@ var WebNavigation =  {
       headers = makeInputStream(headers);
     if (baseURI)
       baseURI = Services.io.newURI(baseURI, null, null);
-    this._wrapURIChangeCall(() => {
-      return this.webNavigation.loadURIWithOptions(uri, flags, referrer, referrerPolicy,
-                                                   postData, headers, baseURI);
-    });
-  },
-
-  setOriginAttributes: function(originAttributes) {
-    if (originAttributes) {
-      this.webNavigation.setOriginAttributesBeforeLoading(originAttributes);
-    }
+    this.webNavigation.loadURIWithOptions(uri, flags, referrer, referrerPolicy,
+                                          postData, headers, baseURI);
   },
 
   reload: function(flags) {
@@ -351,7 +312,7 @@ var WebNavigation =  {
 
 WebNavigation.init();
 
-var SecurityUI = {
+let SecurityUI = {
   getSSLStatusAsString: function() {
     let status = docShell.securityUI.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus;
 
@@ -367,10 +328,9 @@ var SecurityUI = {
   }
 };
 
-var ControllerCommands = {
+let ControllerCommands = {
   init: function () {
     addMessageListener("ControllerCommands:Do", this);
-    addMessageListener("ControllerCommands:DoWithParams", this);
   },
 
   receiveMessage: function(message) {
@@ -378,23 +338,6 @@ var ControllerCommands = {
       case "ControllerCommands:Do":
         if (docShell.isCommandEnabled(message.data))
           docShell.doCommand(message.data);
-        break;
-
-      case "ControllerCommands:DoWithParams":
-        var data = message.data;
-        if (docShell.isCommandEnabled(data.cmd)) {
-          var params = Cc["@mozilla.org/embedcomp/command-params;1"].
-                       createInstance(Ci.nsICommandParams);
-          for (var name in data.params) {
-            var value = data.params[name];
-            if (value.type == "long") {
-              params.setLongValue(name, parseInt(value.value));
-            } else {
-              throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-            }
-          }
-          docShell.doCommandWithParams(data.cmd, params);
-        }
         break;
     }
   }
@@ -418,6 +361,7 @@ addEventListener("DOMWindowClose", function (aEvent) {
   if (!aEvent.isTrusted)
     return;
   sendAsyncMessage("DOMWindowClose");
+  aEvent.preventDefault();
 }, false);
 
 addEventListener("ImageContentLoaded", function (aEvent) {
@@ -495,13 +439,13 @@ addMessageListener("TextZoom", function (aMessage) {
 
 addEventListener("FullZoomChange", function () {
   if (ZoomManager.refreshFullZoom()) {
-    sendAsyncMessage("FullZoomChange", { value: ZoomManager.fullZoom });
+    sendAsyncMessage("FullZoomChange", { value:  ZoomManager.fullZoom});
   }
 }, false);
 
 addEventListener("TextZoomChange", function (aEvent) {
   if (ZoomManager.refreshTextZoom()) {
-    sendAsyncMessage("TextZoomChange", { value: ZoomManager.textZoom });
+    sendAsyncMessage("TextZoomChange", { value:  ZoomManager.textZoom});
   }
 }, false);
 
@@ -518,20 +462,26 @@ addMessageListener("UpdateCharacterSet", function (aMessage) {
  * Remote thumbnail request handler for PageThumbs thumbnails.
  */
 addMessageListener("Browser:Thumbnail:Request", function (aMessage) {
-  let snapshot;
-  let args = aMessage.data.additionalArgs;
-  let fullScale = args ? args.fullScale : false;
-  if (fullScale) {
-    snapshot = PageThumbUtils.createSnapshotThumbnail(content, null, args);
-  } else {
-    let snapshotWidth = aMessage.data.canvasWidth;
-    let snapshotHeight = aMessage.data.canvasHeight;
-    snapshot =
-      PageThumbUtils.createCanvas(content, snapshotWidth, snapshotHeight);
-    PageThumbUtils.createSnapshotThumbnail(content, snapshot, args);
-  }
+  let thumbnail = content.document.createElementNS(PageThumbUtils.HTML_NAMESPACE,
+                                                   "canvas");
+  thumbnail.mozOpaque = true;
+  thumbnail.mozImageSmoothingEnabled = true;
 
-  snapshot.toBlob(function (aBlob) {
+  thumbnail.width = aMessage.data.canvasWidth;
+  thumbnail.height = aMessage.data.canvasHeight;
+
+  let [width, height, scale] =
+    PageThumbUtils.determineCropSize(content, thumbnail);
+
+  let ctx = thumbnail.getContext("2d");
+  ctx.save();
+  ctx.scale(scale, scale);
+  ctx.drawWindow(content, 0, 0, width, height,
+                 aMessage.data.background,
+                 ctx.DRAWWINDOW_DO_NOT_FLUSH);
+  ctx.restore();
+
+  thumbnail.toBlob(function (aBlob) {
     sendAsyncMessage("Browser:Thumbnail:Response", {
       thumbnail: aBlob,
       id: aMessage.data.id
@@ -551,7 +501,7 @@ addMessageListener("Browser:Thumbnail:CheckState", function (aMessage) {
 
 // The AddonsChild needs to be rooted so that it stays alive as long as
 // the tab.
-var AddonsChild = RemoteAddonsChild.init(this);
+let AddonsChild = RemoteAddonsChild.init(this);
 if (AddonsChild) {
   addEventListener("unload", () => {
     RemoteAddonsChild.uninit(AddonsChild);
@@ -565,14 +515,7 @@ addMessageListener("NetworkPrioritizer:AdjustPriority", (msg) => {
   loadGroup.adjustPriority(msg.data.adjustment);
 });
 
-addMessageListener("NetworkPrioritizer:SetPriority", (msg) => {
-  let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
-  let loadGroup = webNav.QueryInterface(Ci.nsIDocumentLoader)
-                        .loadGroup.QueryInterface(Ci.nsISupportsPriority);
-  loadGroup.priority = msg.data.priority;
-});
-
-var AutoCompletePopup = {
+let AutoCompletePopup = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompletePopup]),
 
   init: function() {
@@ -648,31 +591,15 @@ var AutoCompletePopup = {
   }
 }
 
-addMessageListener("InPermitUnload", msg => {
-  let inPermitUnload = docShell.contentViewer && docShell.contentViewer.inPermitUnload;
-  sendAsyncMessage("InPermitUnload", {id: msg.data.id, inPermitUnload});
-});
-
-addMessageListener("PermitUnload", msg => {
-  sendAsyncMessage("PermitUnload", {id: msg.data.id, kind: "start"});
-
-  let permitUnload = true;
-  if (docShell && docShell.contentViewer) {
-    permitUnload = docShell.contentViewer.permitUnload();
-  }
-
-  sendAsyncMessage("PermitUnload", {id: msg.data.id, kind: "end", permitUnload});
-});
-
 // We may not get any responses to Browser:Init if the browser element
 // is torn down too quickly.
-var outerWindowID = content.QueryInterface(Ci.nsIInterfaceRequestor)
+let outerWindowID = content.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils)
                            .outerWindowID;
-sendAsyncMessage("Browser:Init", {outerWindowID: outerWindowID});
-addMessageListener("Browser:InitReceived", function onInitReceived(msg) {
-  removeMessageListener("Browser:InitReceived", onInitReceived);
-  if (msg.data.initPopup) {
-    AutoCompletePopup.init();
+let initData = sendSyncMessage("Browser:Init", {outerWindowID: outerWindowID});
+if (initData.length) {
+  docShell.useGlobalHistory = initData[0].useGlobalHistory;
+  if (initData[0].initPopup) {
+    setTimeout(() => AutoCompletePopup.init(), 0);
   }
-});
+}

@@ -20,34 +20,25 @@ class JS_PUBLIC_API(CallbackTracer);
 template <typename T> class Heap;
 template <typename T> class TenuredHeap;
 
-/** Returns a static string equivalent of |kind|. */
+// Returns a static string equivalent of |kind|.
 JS_FRIEND_API(const char*)
 GCTraceKindToAscii(JS::TraceKind kind);
 
 } // namespace JS
 
+namespace js {
+class BaseShape;
+class LazyScript;
+class ObjectGroup;
+namespace jit {
+class JitCode;
+} // namespace jit
+} // namespace js
+
 enum WeakMapTraceKind {
-    /** Do true ephemeron marking with an iterative weak marking phase. */
-    DoNotTraceWeakMaps,
-
-    /**
-     * Do true ephemeron marking with a weak key lookup marking phase. This is
-     * expected to be constant for the lifetime of a JSTracer; it does not
-     * change when switching from "plain" marking to weak marking.
-     */
-    ExpandWeakMaps,
-
-    /**
-     * Trace through to all values, irrespective of whether the keys are live
-     * or not. Used for non-marking tracers.
-     */
-    TraceWeakMapValues,
-
-    /**
-     * Trace through to all keys and values, irrespective of whether the keys
-     * are live or not. Used for non-marking tracers.
-     */
-    TraceWeakMapKeysValues
+    DoNotTraceWeakMaps = 0,
+    TraceWeakMapValues = 1,
+    TraceWeakMapKeysValues = 2
 };
 
 class JS_PUBLIC_API(JSTracer)
@@ -56,52 +47,30 @@ class JS_PUBLIC_API(JSTracer)
     // Return the runtime set on the tracer.
     JSRuntime* runtime() const { return runtime_; }
 
-    // Return the weak map tracing behavior currently set on this tracer.
-    WeakMapTraceKind weakMapAction() const { return weakMapAction_; }
+    // Return the weak map tracing behavior set on this tracer.
+    WeakMapTraceKind eagerlyTraceWeakMaps() const { return eagerlyTraceWeakMaps_; }
 
     // An intermediate state on the road from C to C++ style dispatch.
     enum class TracerKindTag {
         Marking,
-        WeakMarking, // In weak marking phase: looking up every marked obj/script.
         Tenuring,
         Callback
     };
-    bool isMarkingTracer() const { return tag_ == TracerKindTag::Marking || tag_ == TracerKindTag::WeakMarking; }
-    bool isWeakMarkingTracer() const { return tag_ == TracerKindTag::WeakMarking; }
+    bool isMarkingTracer() const { return tag_ == TracerKindTag::Marking; }
     bool isTenuringTracer() const { return tag_ == TracerKindTag::Tenuring; }
     bool isCallbackTracer() const { return tag_ == TracerKindTag::Callback; }
     inline JS::CallbackTracer* asCallbackTracer();
-#ifdef DEBUG
-    bool checkEdges() { return checkEdges_; }
-#endif
 
   protected:
     JSTracer(JSRuntime* rt, TracerKindTag tag,
              WeakMapTraceKind weakTraceKind = TraceWeakMapValues)
-      : runtime_(rt)
-      , weakMapAction_(weakTraceKind)
-#ifdef DEBUG
-      , checkEdges_(true)
-#endif
-      , tag_(tag)
+      : runtime_(rt), tag_(tag), eagerlyTraceWeakMaps_(weakTraceKind)
     {}
 
-#ifdef DEBUG
-    // Set whether to check edges are valid in debug builds.
-    void setCheckEdges(bool check) {
-        checkEdges_ = check;
-    }
-#endif
-
   private:
-    JSRuntime* runtime_;
-    WeakMapTraceKind weakMapAction_;
-#ifdef DEBUG
-    bool checkEdges_;
-#endif
-
-  protected:
-    TracerKindTag tag_;
+    JSRuntime*          runtime_;
+    TracerKindTag       tag_;
+    WeakMapTraceKind    eagerlyTraceWeakMaps_;
 };
 
 namespace JS {
@@ -224,7 +193,7 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
 };
 
 // Set the name portion of the tracer's context for the current edge.
-class MOZ_RAII AutoTracingName
+class AutoTracingName
 {
     CallbackTracer* trc_;
     const char* prior_;
@@ -241,7 +210,7 @@ class MOZ_RAII AutoTracingName
 };
 
 // Set the index portion of the tracer's context for the current range.
-class MOZ_RAII AutoTracingIndex
+class AutoTracingIndex
 {
     CallbackTracer* trc_;
 
@@ -270,7 +239,7 @@ class MOZ_RAII AutoTracingIndex
 
 // Set a context callback for the trace callback to use, if it needs a detailed
 // edge description.
-class MOZ_RAII AutoTracingDetails
+class AutoTracingDetails
 {
     CallbackTracer* trc_;
 
@@ -299,77 +268,86 @@ JSTracer::asCallbackTracer()
     return static_cast<JS::CallbackTracer*>(this);
 }
 
+// The JS_Call*Tracer family of functions traces the given GC thing reference.
+// This performs the tracing action configured on the given JSTracer:
+// typically calling the JSTracer::callback or marking the thing as live.
+//
+// The argument to JS_Call*Tracer is an in-out param: when the function
+// returns, the garbage collector might have moved the GC thing. In this case,
+// the reference passed to JS_Call*Tracer will be updated to the object's new
+// location. Callers of this method are responsible for updating any state
+// that is dependent on the object's address. For example, if the object's
+// address is used as a key in a hashtable, then the object must be removed
+// and re-inserted with the correct hash.
+//
+extern JS_PUBLIC_API(void)
+JS_CallValueTracer(JSTracer* trc, JS::Heap<JS::Value>* valuep, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallIdTracer(JSTracer* trc, JS::Heap<jsid>* idp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallObjectTracer(JSTracer* trc, JS::Heap<JSObject*>* objp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallStringTracer(JSTracer* trc, JS::Heap<JSString*>* strp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallScriptTracer(JSTracer* trc, JS::Heap<JSScript*>* scriptp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallFunctionTracer(JSTracer* trc, JS::Heap<JSFunction*>* funp, const char* name);
+
+// The following JS_CallUnbarriered*Tracer functions should only be called where
+// you know for sure that a heap post barrier is not required.  Use with extreme
+// caution!
+extern JS_PUBLIC_API(void)
+JS_CallUnbarrieredValueTracer(JSTracer* trc, JS::Value* valuep, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallUnbarrieredIdTracer(JSTracer* trc, jsid* idp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallUnbarrieredObjectTracer(JSTracer* trc, JSObject** objp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallUnbarrieredStringTracer(JSTracer* trc, JSString** strp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_CallUnbarrieredScriptTracer(JSTracer* trc, JSScript** scriptp, const char* name);
+
+template <typename HashSetEnum>
+inline void
+JS_CallHashSetObjectTracer(JSTracer* trc, HashSetEnum& e, JSObject* const& key, const char* name)
+{
+    JSObject* updated = key;
+    JS_CallUnbarrieredObjectTracer(trc, &updated, name);
+    if (updated != key)
+        e.rekeyFront(updated);
+}
+
+// Trace an object that is known to always be tenured.  No post barriers are
+// required in this case.
+extern JS_PUBLIC_API(void)
+JS_CallTenuredObjectTracer(JSTracer* trc, JS::TenuredHeap<JSObject*>* objp, const char* name);
+
+extern JS_PUBLIC_API(void)
+JS_TraceChildren(JSTracer* trc, void* thing, JS::TraceKind kind);
+
+extern JS_PUBLIC_API(void)
+JS_TraceRuntime(JSTracer* trc);
+
 namespace JS {
-
-// The JS::TraceEdge family of functions traces the given GC thing reference.
-// This performs the tracing action configured on the given JSTracer: typically
-// calling the JSTracer::callback or marking the thing as live.
-//
-// The argument to JS::TraceEdge is an in-out param: when the function returns,
-// the garbage collector might have moved the GC thing. In this case, the
-// reference passed to JS::TraceEdge will be updated to the thing's new
-// location. Callers of this method are responsible for updating any state that
-// is dependent on the object's address. For example, if the object's address
-// is used as a key in a hashtable, then the object must be removed and
-// re-inserted with the correct hash.
-//
-// Note that while |edgep| must never be null, it is fine for |*edgep| to be
-// nullptr.
-template <typename T>
-extern JS_PUBLIC_API(void)
-TraceEdge(JSTracer* trc, JS::Heap<T>* edgep, const char* name);
-
-extern JS_PUBLIC_API(void)
-TraceEdge(JSTracer* trc, JS::TenuredHeap<JSObject*>* edgep, const char* name);
-
-// Edges that are always traced as part of root marking do not require
-// incremental barriers. This function allows for marking non-barriered
-// pointers, but asserts that this happens during root marking.
-//
-// Note that while |edgep| must never be null, it is fine for |*edgep| to be
-// nullptr.
-template <typename T>
-extern JS_PUBLIC_API(void)
-UnsafeTraceRoot(JSTracer* trc, T* edgep, const char* name);
-
-extern JS_PUBLIC_API(void)
-TraceChildren(JSTracer* trc, GCCellPtr thing);
-
-using ZoneSet = js::HashSet<Zone*, js::DefaultHasher<Zone*>, js::SystemAllocPolicy>;
-using CompartmentSet = js::HashSet<JSCompartment*, js::DefaultHasher<JSCompartment*>,
-                                   js::SystemAllocPolicy>;
-
-/**
- * Trace every value within |compartments| that is wrapped by a
- * cross-compartment wrapper from a compartment that is not an element of
- * |compartments|.
- */
-extern JS_PUBLIC_API(void)
-TraceIncomingCCWs(JSTracer* trc, const JS::CompartmentSet& compartments);
-
+typedef js::HashSet<Zone*, js::DefaultHasher<Zone*>, js::SystemAllocPolicy> ZoneSet;
 } // namespace JS
+
+// Trace every value within |zones| that is wrapped by a cross-compartment
+// wrapper from a zone that is not an element of |zones|.
+extern JS_PUBLIC_API(void)
+JS_TraceIncomingCCWs(JSTracer* trc, const JS::ZoneSet& zones);
 
 extern JS_PUBLIC_API(void)
 JS_GetTraceThingInfo(char* buf, size_t bufsize, JSTracer* trc,
                      void* thing, JS::TraceKind kind, bool includeDetails);
-
-namespace js {
-
-// Trace an edge that is not a GC root and is not wrapped in a barriered
-// wrapper for some reason.
-//
-// This method does not check if |*edgep| is non-null before tracing through
-// it, so callers must check any nullable pointer before calling this method.
-template <typename T>
-extern JS_PUBLIC_API(void)
-UnsafeTraceManuallyBarrieredEdge(JSTracer* trc, T* edgep, const char* name);
-
-namespace gc {
-// Return true if the given edge is not live and is about to be swept.
-template <typename T>
-extern JS_PUBLIC_API(bool)
-EdgeNeedsSweep(JS::Heap<T>* edgep);
-} // namespace gc
-} // namespace js
 
 #endif /* js_TracingAPI_h */

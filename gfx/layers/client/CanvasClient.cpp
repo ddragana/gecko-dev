@@ -13,18 +13,16 @@
 #include "gfxPlatform.h"                // for gfxPlatform
 #include "GLReadTexImageHelper.h"
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
-#include "mozilla/layers/BufferTexture.h"
-#include "mozilla/layers/AsyncCanvasRenderer.h"
 #include "mozilla/layers/CompositableForwarder.h"
-#include "mozilla/layers/CompositorBridgeChild.h" // for CompositorBridgeChild
+#include "mozilla/layers/CompositorChild.h" // for CompositorChild
 #include "mozilla/layers/GrallocTextureClient.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/TextureClient.h"  // for TextureClient, etc
 #include "mozilla/layers/TextureClientOGL.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for printf_stderr, NS_ASSERTION
 #include "nsXULAppAPI.h"                // for XRE_GetProcessType, etc
 #include "TextureClientSharedSurface.h"
-#include "VRManagerChild.h"
 
 using namespace mozilla::gfx;
 using namespace mozilla::gl;
@@ -40,8 +38,8 @@ CanvasClient::CreateCanvasClient(CanvasClientType aType,
   switch (aType) {
   case CanvasClientTypeShSurf:
     return MakeAndAddRef<CanvasClientSharedSurface>(aForwarder, aFlags);
-  case CanvasClientAsync:
-    return MakeAndAddRef<CanvasClientBridge>(aForwarder, aFlags);
+    break;
+
   default:
     return MakeAndAddRef<CanvasClient2D>(aForwarder, aFlags);
     break;
@@ -49,59 +47,17 @@ CanvasClient::CreateCanvasClient(CanvasClientType aType,
 }
 
 void
-CanvasClientBridge::UpdateAsync(AsyncCanvasRenderer* aRenderer)
-{
-  if (!GetForwarder() || !mLayer || !aRenderer ||
-      !aRenderer->GetCanvasClient()) {
-    return;
-  }
-
-  uint64_t asyncID = aRenderer->GetCanvasClientAsyncID();
-  if (asyncID == 0 || mAsyncID == asyncID) {
-    return;
-  }
-
-  static_cast<ShadowLayerForwarder*>(GetForwarder())
-    ->AttachAsyncCompositable(asyncID, mLayer);
-  mAsyncID = asyncID;
-}
-
-void
-CanvasClient2D::UpdateFromTexture(TextureClient* aTexture)
-{
-  MOZ_ASSERT(aTexture);
-
-  if (!aTexture->IsSharedWithCompositor()) {
-    if (!AddTextureClient(aTexture)) {
-      return;
-    }
-  }
-
-  mBackBuffer = aTexture;
-
-  AutoTArray<CompositableForwarder::TimedTextureClient,1> textures;
-  CompositableForwarder::TimedTextureClient* t = textures.AppendElement();
-  t->mTextureClient = mBackBuffer;
-  t->mPictureRect = nsIntRect(nsIntPoint(0, 0), aTexture->GetSize());
-  t->mFrameID = mFrameID;
-  t->mInputFrameID = VRManagerChild::Get()->GetInputFrameID();
-
-  GetForwarder()->UseTextures(this, textures);
-  aTexture->SyncWithObject(GetForwarder()->GetSyncObject());
-}
-
-void
 CanvasClient2D::Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer)
 {
   AutoRemoveTexture autoRemove(this);
-  if (mBackBuffer &&
-      (mBackBuffer->IsImmutable() || mBackBuffer->GetSize() != aSize)) {
-    autoRemove.mTexture = mBackBuffer;
-    mBackBuffer = nullptr;
+  if (mBuffer &&
+      (mBuffer->IsImmutable() || mBuffer->GetSize() != aSize)) {
+    autoRemove.mTexture = mBuffer;
+    mBuffer = nullptr;
   }
 
   bool bufferCreated = false;
-  if (!mBackBuffer) {
+  if (!mBuffer) {
     bool isOpaque = (aLayer->GetContentFlags() & Layer::CONTENT_OPAQUE);
     gfxContentType contentType = isOpaque
                                                 ? gfxContentType::COLOR
@@ -113,48 +69,46 @@ CanvasClient2D::Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer)
       flags |= TextureFlags::ORIGIN_BOTTOM_LEFT;
     }
 
-    mBackBuffer = CreateTextureClientForCanvas(surfaceFormat, aSize, flags, aLayer);
-    if (!mBackBuffer) {
+    mBuffer = CreateTextureClientForCanvas(surfaceFormat, aSize, flags, aLayer);
+    if (!mBuffer) {
       NS_WARNING("Failed to allocate the TextureClient");
       return;
     }
-    MOZ_ASSERT(mBackBuffer->CanExposeDrawTarget());
+    MOZ_ASSERT(mBuffer->CanExposeDrawTarget());
 
     bufferCreated = true;
   }
 
+  if (!mBuffer->Lock(OpenMode::OPEN_WRITE_ONLY)) {
+    mBuffer = nullptr;
+    return;
+  }
+
   bool updated = false;
   {
-    TextureClientAutoLock autoLock(mBackBuffer, OpenMode::OPEN_WRITE_ONLY);
-    if (!autoLock.Succeeded()) {
-      mBackBuffer = nullptr;
-      return;
-    }
-
-    RefPtr<DrawTarget> target = mBackBuffer->BorrowDrawTarget();
+    // Restrict drawTarget to a scope so that terminates before Unlock.
+    RefPtr<DrawTarget> target =
+      mBuffer->BorrowDrawTarget();
     if (target) {
       aLayer->UpdateTarget(target);
       updated = true;
     }
   }
+  mBuffer->Unlock();
 
-  if (bufferCreated && !AddTextureClient(mBackBuffer)) {
-    mBackBuffer = nullptr;
+  if (bufferCreated && !AddTextureClient(mBuffer)) {
+    mBuffer = nullptr;
     return;
   }
 
   if (updated) {
-    AutoTArray<CompositableForwarder::TimedTextureClient,1> textures;
+    nsAutoTArray<CompositableForwarder::TimedTextureClient,1> textures;
     CompositableForwarder::TimedTextureClient* t = textures.AppendElement();
-    t->mTextureClient = mBackBuffer;
-    t->mPictureRect = nsIntRect(nsIntPoint(0, 0), mBackBuffer->GetSize());
-    t->mFrameID = mFrameID;
-    t->mInputFrameID = VRManagerChild::Get()->GetInputFrameID();
+    t->mTextureClient = mBuffer;
+    t->mPictureRect = nsIntRect(nsIntPoint(0, 0), mBuffer->GetSize());
     GetForwarder()->UseTextures(this, textures);
-    mBackBuffer->SyncWithObject(GetForwarder()->GetSyncObject());
+    mBuffer->SyncWithObject(GetForwarder()->GetSyncObject());
   }
-
-  mBackBuffer.swap(mFrontBuffer);
 }
 
 already_AddRefed<TextureClient>
@@ -172,12 +126,12 @@ CanvasClient2D::CreateTextureClientForCanvas(gfx::SurfaceFormat aFormat,
                                                    mTextureFlags | aFlags);
   }
 
+  gfx::BackendType backend = gfxPlatform::GetPlatform()->GetPreferredCanvasBackend();
 #ifdef XP_WIN
-  return CreateTextureClientForDrawing(aFormat, aSize, BackendSelector::Canvas, aFlags);
+  return CreateTextureClientForDrawing(aFormat, aSize, backend, aFlags);
 #else
   // XXX - We should use CreateTextureClientForDrawing, but we first need
   // to use double buffering.
-  gfx::BackendType backend = gfxPlatform::GetPlatform()->GetPreferredCanvasBackend();
   return TextureClient::CreateForRawBufferAccess(GetForwarder(),
                                                  aFormat, aSize, backend,
                                                  mTextureFlags | aFlags);
@@ -207,7 +161,7 @@ static inline void SwapRB_R8G8B8A8(uint8_t* pixel) {
 
 class TexClientFactory
 {
-  ClientIPCAllocator* const mAllocator;
+  ISurfaceAllocator* const mAllocator;
   const bool mHasAlpha;
   const gfx::IntSize mSize;
   const gfx::BackendType mBackendType;
@@ -215,7 +169,7 @@ class TexClientFactory
   const LayersBackend mLayersBackend;
 
 public:
-  TexClientFactory(ClientIPCAllocator* allocator, bool hasAlpha,
+  TexClientFactory(ISurfaceAllocator* allocator, bool hasAlpha,
                    const gfx::IntSize& size, gfx::BackendType backendType,
                    TextureFlags baseTexFlags, LayersBackend layersBackend)
     : mAllocator(allocator)
@@ -228,21 +182,21 @@ public:
   }
 
 protected:
-  already_AddRefed<TextureClient> Create(gfx::SurfaceFormat format) {
+  already_AddRefed<BufferTextureClient> Create(gfx::SurfaceFormat format) {
     return TextureClient::CreateForRawBufferAccess(mAllocator, format,
                                                    mSize, mBackendType,
                                                    mBaseTexFlags);
   }
 
 public:
-  already_AddRefed<TextureClient> CreateB8G8R8AX8() {
+  already_AddRefed<BufferTextureClient> CreateB8G8R8AX8() {
     gfx::SurfaceFormat format = mHasAlpha ? gfx::SurfaceFormat::B8G8R8A8
                                           : gfx::SurfaceFormat::B8G8R8X8;
     return Create(format);
   }
 
-  already_AddRefed<TextureClient> CreateR8G8B8AX8() {
-    RefPtr<TextureClient> ret;
+  already_AddRefed<BufferTextureClient> CreateR8G8B8AX8() {
+    RefPtr<BufferTextureClient> ret;
 
     bool areRGBAFormatsBroken = mLayersBackend == LayersBackend::LAYERS_BASIC;
     if (!areRGBAFormatsBroken) {
@@ -263,14 +217,14 @@ public:
 };
 
 static already_AddRefed<TextureClient>
-TexClientFromReadback(SharedSurface* src, ClientIPCAllocator* allocator,
+TexClientFromReadback(SharedSurface* src, ISurfaceAllocator* allocator,
                       TextureFlags baseFlags, LayersBackend layersBackend)
 {
   auto backendType = gfx::BackendType::CAIRO;
   TexClientFactory factory(allocator, src->mHasAlpha, src->mSize, backendType,
                            baseFlags, layersBackend);
 
-  RefPtr<TextureClient> texClient;
+  RefPtr<BufferTextureClient> texClient;
 
   {
     gl::ScopedReadbackFB autoReadback(src);
@@ -304,7 +258,7 @@ TexClientFromReadback(SharedSurface* src, ClientIPCAllocator* allocator,
       // [RR, GG, BB, AA]
       texClient = factory.CreateR8G8B8AX8();
     } else {
-      MOZ_CRASH("GFX: Bad `read{Format,Type}`.");
+      MOZ_CRASH("Bad `read{Format,Type}`.");
     }
 
     MOZ_ASSERT(texClient);
@@ -312,22 +266,18 @@ TexClientFromReadback(SharedSurface* src, ClientIPCAllocator* allocator,
         return nullptr;
 
     // With a texClient, we can lock for writing.
-    TextureClientAutoLock autoLock(texClient, OpenMode::OPEN_WRITE);
-    DebugOnly<bool> succeeded = autoLock.Succeeded();
-    MOZ_ASSERT(succeeded, "texture should have locked");
+    MOZ_ALWAYS_TRUE( texClient->Lock(OpenMode::OPEN_WRITE) );
 
-    MappedTextureData mapped;
-    texClient->BorrowMappedData(mapped);
+    uint8_t* lockedBytes = texClient->GetLockedData();
 
-    // ReadPixels from the current FB into mapped.data.
+    // ReadPixels from the current FB into lockedBits.
     auto width = src->mSize.width;
     auto height = src->mSize.height;
 
     {
       ScopedPackAlignment autoAlign(gl, 4);
 
-      MOZ_ASSERT(mapped.stride/4 == mapped.size.width);
-      gl->raw_fReadPixels(0, 0, width, height, readFormat, readType, mapped.data);
+      gl->raw_fReadPixels(0, 0, width, height, readFormat, readType, lockedBytes);
     }
 
     // RB_SWAPPED doesn't work with D3D11. (bug 1051010)
@@ -340,7 +290,7 @@ TexClientFromReadback(SharedSurface* src, ClientIPCAllocator* allocator,
         layersNeedsManualSwap)
     {
       size_t pixels = width * height;
-      uint8_t* itr = mapped.data;
+      uint8_t* itr = lockedBytes;
       for (size_t i = 0; i < pixels; i++) {
         SwapRB_R8G8B8A8(itr);
         itr += 4;
@@ -348,6 +298,8 @@ TexClientFromReadback(SharedSurface* src, ClientIPCAllocator* allocator,
 
       texClient->RemoveFlags(TextureFlags::RB_SWAPPED);
     }
+
+    texClient->Unlock();
   }
 
   return texClient.forget();
@@ -362,61 +314,27 @@ CloneSurface(gl::SharedSurface* src, gl::SurfaceFactory* factory)
     if (!dest) {
       return nullptr;
     }
-
-    gl::SharedSurface* destSurf = dest->Surf();
-
-    destSurf->ProducerAcquire();
     SharedSurface::ProdCopy(src, dest->Surf(), factory);
-    destSurf->ProducerRelease();
-
+    dest->Surf()->Fence();
     return dest.forget();
 }
 
 void
 CanvasClientSharedSurface::Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer)
 {
-  Renderer renderer;
-  renderer.construct<ClientCanvasLayer*>(aLayer);
-  UpdateRenderer(aSize, renderer);
-}
-
-void
-CanvasClientSharedSurface::UpdateAsync(AsyncCanvasRenderer* aRenderer)
-{
-  Renderer renderer;
-  renderer.construct<AsyncCanvasRenderer*>(aRenderer);
-  UpdateRenderer(aRenderer->GetSize(), renderer);
-}
-
-void
-CanvasClientSharedSurface::UpdateRenderer(gfx::IntSize aSize, Renderer& aRenderer)
-{
-  GLContext* gl = nullptr;
-  ClientCanvasLayer* layer = nullptr;
-  AsyncCanvasRenderer* asyncRenderer = nullptr;
-  if (aRenderer.constructed<ClientCanvasLayer*>()) {
-    layer = aRenderer.ref<ClientCanvasLayer*>();
-    gl = layer->mGLContext;
-  } else {
-    asyncRenderer = aRenderer.ref<AsyncCanvasRenderer*>();
-    gl = asyncRenderer->mGLContext;
-  }
+  auto gl = aLayer->mGLContext;
   gl->MakeCurrent();
 
   RefPtr<TextureClient> newFront;
 
-  if (layer && layer->mGLFrontbuffer) {
-    mShSurfClient = CloneSurface(layer->mGLFrontbuffer.get(), layer->mFactory.get());
+  if (aLayer->mGLFrontbuffer) {
+    mShSurfClient = CloneSurface(aLayer->mGLFrontbuffer.get(), aLayer->mFactory.get());
     if (!mShSurfClient) {
       gfxCriticalError() << "Invalid canvas front buffer";
       return;
     }
   } else {
     mShSurfClient = gl->Screen()->Front();
-    if (mShSurfClient && mShSurfClient->GetAllocator() &&
-        mShSurfClient->GetAllocator()->AsCompositableForwarder() != GetForwarder()) {
-      mShSurfClient = CloneSurface(mShSurfClient->Surf(), gl->Screen()->Factory());
-    }
     if (!mShSurfClient) {
       return;
     }
@@ -434,39 +352,17 @@ CanvasClientSharedSurface::UpdateRenderer(gfx::IntSize aSize, Renderer& aRendere
 
   bool needsReadback = (surf->mType == SharedSurfaceType::Basic);
   if (needsReadback) {
-    TextureFlags flags = TextureFlags::IMMUTABLE;
+    TextureFlags flags = aLayer->Flags() |
+                         TextureFlags::IMMUTABLE;
 
-    CompositableForwarder* shadowForwarder = nullptr;
-    if (layer) {
-      flags |= layer->Flags();
-      shadowForwarder = layer->ClientManager()->AsShadowForwarder();
-    } else {
-      MOZ_ASSERT(asyncRenderer);
-      flags |= mTextureFlags;
-      shadowForwarder = GetForwarder();
-    }
-
+    auto manager = aLayer->ClientManager();
+    auto shadowForwarder = manager->AsShadowForwarder();
     auto layersBackend = shadowForwarder->GetCompositorBackendType();
     mReadbackClient = TexClientFromReadback(surf, forwarder, flags, layersBackend);
 
     newFront = mReadbackClient;
   } else {
     mReadbackClient = nullptr;
-  }
-
-  if (asyncRenderer) {
-    // If surface type is Basic, above codes will readback
-    // the GLContext to mReadbackClient in order to send frame to
-    // compositor. We copy from this TextureClient directly by
-    // calling CopyFromTextureClient().
-    // Therefore, if main-thread want the content of GLContext,
-    // it doesn't have to readback from GLContext again.
-    //
-    // Otherwise, if surface type isn't Basic, we will read from
-    // SharedSurface directly from main-thread. We still pass
-    // mReadbackClient which is nullptr here to tell
-    // AsyncCanvasRenderer reset some properties.
-    asyncRenderer->CopyFromTextureClient(mReadbackClient);
   }
 
   MOZ_ASSERT(newFront);
@@ -476,50 +372,28 @@ CanvasClientSharedSurface::UpdateRenderer(gfx::IntSize aSize, Renderer& aRendere
     return;
   }
 
-  mNewFront = newFront;
-}
-
-void
-CanvasClientSharedSurface::Updated()
-{
-  if (!mNewFront) {
-    return;
+  if (mFront) {
+    if (mFront->GetFlags() & TextureFlags::RECYCLE) {
+      mFront->WaitForCompositorRecycle();
+    }
   }
 
-  auto forwarder = GetForwarder();
-
-  mFront = mNewFront;
-  mNewFront = nullptr;
+  mFront = newFront;
 
   // Add the new TexClient.
   MOZ_ALWAYS_TRUE( AddTextureClient(mFront) );
 
-  AutoTArray<CompositableForwarder::TimedTextureClient,1> textures;
+  nsAutoTArray<CompositableForwarder::TimedTextureClient,1> textures;
   CompositableForwarder::TimedTextureClient* t = textures.AppendElement();
   t->mTextureClient = mFront;
   t->mPictureRect = nsIntRect(nsIntPoint(0, 0), mFront->GetSize());
-  t->mFrameID = mFrameID;
-  // XXX TODO - This reference to VRManagerChild will be moved with the
-  //            implementation of the WebVR 1.0 API, which will enable
-  //            the inputFrameID to be passed through Javascript with
-  //            the new VRDisplay API.
-  t->mInputFrameID = VRManagerChild::Get()->GetInputFrameID();
   forwarder->UseTextures(this, textures);
-}
-
-void
-CanvasClientSharedSurface::OnDetach() {
-  ClearSurfaces();
 }
 
 void
 CanvasClientSharedSurface::ClearSurfaces()
 {
-  if (mFront) {
-    mFront->CancelWaitForRecycle();
-  }
   mFront = nullptr;
-  mNewFront = nullptr;
   mShSurfClient = nullptr;
   mReadbackClient = nullptr;
 }

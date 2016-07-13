@@ -76,16 +76,18 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
   }
 
   if (dirService) {
-    nsCOMPtr<nsIFile> localFile;
+    nsCOMPtr <nsIFile> aLocalFile;
     dirService->Get(NS_XPCOM_INIT_CURRENT_PROCESS_DIR, NS_GET_IID(nsIFile),
-                    getter_AddRefs(localFile));
-    if (localFile) {
-      localFile.forget(aFile);
+                    getter_AddRefs(aLocalFile));
+    if (aLocalFile) {
+      *aFile = aLocalFile;
+      NS_ADDREF(*aFile);
       return NS_OK;
     }
   }
 
-  RefPtr<nsLocalFile> localFile = new nsLocalFile;
+  nsLocalFile* localFile = new nsLocalFile;
+  NS_ADDREF(localFile);
 
 #ifdef XP_WIN
   wchar_t buf[MAX_PATH + 1];
@@ -99,7 +101,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
     }
 
     localFile->InitWithPath(nsDependentString(buf));
-    localFile.forget(aFile);
+    *aFile = localFile;
     return NS_OK;
   }
 
@@ -123,7 +125,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
 #endif
           rv = localFile->InitWithNativePath(nsDependentCString(buffer));
           if (NS_SUCCEEDED(rv)) {
-            localFile.forget(aFile);
+            *aFile = localFile;
           }
         }
         CFRelease(parentURL);
@@ -165,7 +167,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
   if (moz5 && *moz5) {
     if (realpath(moz5, buf)) {
       localFile->InitWithNativePath(nsDependentCString(buf));
-      localFile.forget(aFile);
+      *aFile = localFile;
       return NS_OK;
     }
   }
@@ -182,11 +184,13 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
   // Fall back to current directory.
   if (getcwd(buf, sizeof(buf))) {
     localFile->InitWithNativePath(nsDependentCString(buf));
-    localFile.forget(aFile);
+    *aFile = localFile;
     return NS_OK;
   }
 
 #endif
+
+  NS_RELEASE(localFile);
 
   NS_ERROR("unable to get current process directory");
   return NS_ERROR_FAILURE;
@@ -243,7 +247,7 @@ nsDirectoryService::RealInit()
   NS_ASSERTION(!gService,
                "nsDirectoryService::RealInit Mustn't initialize twice!");
 
-  RefPtr<nsDirectoryService> self = new nsDirectoryService();
+  nsRefPtr<nsDirectoryService> self = new nsDirectoryService();
 
   NS_RegisterStaticAtoms(directory_atoms);
 
@@ -528,7 +532,7 @@ nsDirectoryService::GetFile(const char* aProp, bool* aPersistent,
   *aResult = nullptr;
   *aPersistent = true;
 
-  nsCOMPtr<nsIAtom> inAtom = NS_Atomize(aProp);
+  nsCOMPtr<nsIAtom> inAtom = do_GetAtom(aProp);
 
   // check to see if it is one of our defaults
 

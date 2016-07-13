@@ -30,7 +30,7 @@
 //                used when |multipleCompletions| is set to true.
 
 // Basic prefixes with 2/3 completions.
-var basicCompletionSet = [
+let basicCompletionSet = [
   {
     hash: "abcdefgh",
     expectCompletion: true,
@@ -50,7 +50,7 @@ var basicCompletionSet = [
 ];
 
 // 3 prefixes with 0 completions to test HashCompleter handling a 204 status.
-var falseCompletionSet = [
+let falseCompletionSet = [
   {
     hash: "1234",
     expectCompletion: false,
@@ -67,7 +67,7 @@ var falseCompletionSet = [
 
 // The current implementation (as of Mar 2011) sometimes sends duplicate
 // entries to HashCompleter and even expects responses for duplicated entries.
-var dupedCompletionSet = [
+let dupedCompletionSet = [
   {
     hash: "1234",
     expectCompletion: true,
@@ -96,7 +96,7 @@ var dupedCompletionSet = [
 
 // It is possible for a hash completion request to return with multiple
 // completions, the HashCompleter should return all of these.
-var multipleResponsesCompletionSet = [
+let multipleResponsesCompletionSet = [
   {
     hash: "1234",
     expectCompletion: true,
@@ -115,59 +115,6 @@ var multipleResponsesCompletionSet = [
     ],
   }
 ];
-
-function buildCompletionRequest(aCompletionSet) {
-  let prefixes = [];
-  let prefixSet = new Set();
-  aCompletionSet.forEach(s => {
-    let prefix = s.hash.substring(0, 4);
-    if (prefixSet.has(prefix)) {
-      return;
-    }
-    prefixSet.add(prefix);
-    prefixes.push(prefix);
-  });
-  return 4 + ":" + (4 * prefixes.length) + "\n" + prefixes.join("");
-}
-
-function parseCompletionRequest(aRequest) {
-  // Format: [partial_length]:[num_of_prefix * partial_length]\n[prefixes_data]
-
-  let tokens = /(\d):(\d+)/.exec(aRequest);
-  if (tokens.length < 3) {
-    dump("Request format error.");
-    return null;
-  }
-
-  let partialLength = parseInt(tokens[1]);
-  let payloadLength = parseInt(tokens[2]);
-
-  let payloadStart = tokens[1].length + // partial length
-                     1 +                // ':'
-                     tokens[2].length + // payload length
-                     1;                 // '\n'
-
-  let prefixSet = [];
-  for (let i = payloadStart; i < aRequest.length; i += partialLength) {
-    let prefix = aRequest.substr(i, partialLength);
-    if (prefix.length !== partialLength) {
-      dump("Header info not correct: " + aRequest.substr(0, payloadStart));
-      return null;
-    }
-    prefixSet.push(prefix);
-  }
-  prefixSet.sort();
-
-  return prefixSet;
-}
-
-// Compare the requests in string format.
-function compareCompletionRequest(aRequest1, aRequest2) {
-  let prefixSet1 = parseCompletionRequest(aRequest1);
-  let prefixSet2 = parseCompletionRequest(aRequest2);
-
-  return equal(JSON.stringify(prefixSet1), JSON.stringify(prefixSet2));
-}
 
 // The fifth completion set is added at runtime by getRandomCompletionSet.
 // Each completion in the set only has one response and its purpose is to
@@ -218,28 +165,28 @@ function getRandomCompletionSet(forceServerError) {
   return completionSet;
 }
 
-var completionSets = [basicCompletionSet, falseCompletionSet,
+let completionSets = [basicCompletionSet, falseCompletionSet,
                       dupedCompletionSet, multipleResponsesCompletionSet];
-var currentCompletionSet = -1;
-var finishedCompletions = 0;
+let currentCompletionSet = -1;
+let finishedCompletions = 0;
 
 const SERVER_PORT = 8080;
 const SERVER_PATH = "/hash-completer";
-var server;
+let server;
 
 // Completion hashes are automatically right-padded with null chars to have a
 // length of COMPLETE_LENGTH.
 // Taken from nsUrlClassifierDBService.h
 const COMPLETE_LENGTH = 32;
 
-var completer = Cc["@mozilla.org/url-classifier/hashcompleter;1"].
+let completer = Cc["@mozilla.org/url-classifier/hashcompleter;1"].
                   getService(Ci.nsIUrlClassifierHashCompleter);
 
-var gethashUrl;
+let gethashUrl;
 
 // Expected highest completion set for which the server sends a response.
-var expectedMaxServerCompletionSet = 0;
-var maxServerCompletionSet = 0;
+let expectedMaxServerCompletionSet = 0;
+let maxServerCompletionSet = 0;
 
 function run_test() {
   // Generate a random completion set that return successful responses.
@@ -253,11 +200,11 @@ function run_test() {
   }
 
   // Fix up the completions before running the test.
-  for (let completionSet of completionSets) {
-    for (let completion of completionSet) {
+  for each (let completionSet in completionSets) {
+    for each (let completion in completionSet) {
       // Pad the right of each |hash| so that the length is COMPLETE_LENGTH.
       if (completion.multipleCompletions) {
-        for (let responseCompletion of completion.completions) {
+        for each (let responseCompletion in completion.completions) {
           let numChars = COMPLETE_LENGTH - responseCompletion.hash.length;
           responseCompletion.hash += (new Array(numChars + 1)).join("\u0000");
         }
@@ -294,7 +241,7 @@ function runNextCompletion() {
        completionSets[currentCompletionSet].length + "\n");
   // Number of finished completions for this set.
   finishedCompletions = 0;
-  for (let completion of completionSets[currentCompletionSet]) {
+  for each (let completion in completionSets[currentCompletionSet]) {
     completer.complete(completion.hash.substring(0,4), gethashUrl,
                        (new callback(completion)));
   }
@@ -309,10 +256,6 @@ function hashCompleterServer(aRequest, aResponse) {
   let len = stream.available();
   let data = wrapperStream.readBytes(len);
 
-  // Check if we got the expected completion request.
-  let expectedRequest = buildCompletionRequest(completionSets[currentCompletionSet]);
-  compareCompletionRequest(data, expectedRequest);
-
   // To avoid a response with duplicate hash completions, we keep track of all
   // completed hash prefixes so far.
   let completedHashes = [];
@@ -324,7 +267,7 @@ function hashCompleterServer(aRequest, aResponse) {
   // As per the spec, a server should response with a 204 if there are no
   // full-length hashes that match the prefixes.
   let httpStatus = 204;
-  for (let completion of completionSets[currentCompletionSet]) {
+  for each (let completion in completionSets[currentCompletionSet]) {
     if (completion.expectCompletion &&
         (completedHashes.indexOf(completion.hash) == -1)) {
       completedHashes.push(completion.hash);
@@ -357,7 +300,7 @@ callback.prototype = {
   completion: function completion(hash, table, chunkId, trusted) {
     do_check_true(this._completion.expectCompletion);
     if (this._completion.multipleCompletions) {
-      for (let completion of this._completion.completions) {
+      for each (let completion in this._completion.completions) {
         if (completion.hash == hash) {
           do_check_eq(JSON.stringify(hash), JSON.stringify(completion.hash));
           do_check_eq(table, completion.table);
@@ -365,7 +308,7 @@ callback.prototype = {
 
           completion._completed = true;
 
-          if (this._completion.completions.every(x => x._completed))
+          if (this._completion.completions.every(function(x) x._completed))
             this._completed = true;
 
           break;

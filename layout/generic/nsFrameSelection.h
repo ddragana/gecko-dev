@@ -45,7 +45,7 @@ struct SelectionDetails
 #endif
   int32_t mStart;
   int32_t mEnd;
-  mozilla::SelectionType mSelectionType;
+  SelectionType mType;
   mozilla::TextRangeStyle mTextRangeStyle;
   SelectionDetails *mNext;
 };
@@ -345,16 +345,15 @@ public:
 
   /** GetSelection
    * no query interface for selection. must use this method now.
-   * @param aSelectionType The selection type what you want.
+   * @param aSelectionType enum value defined in nsISelection for the seleciton you want.
    */
-  mozilla::dom::Selection*
-    GetSelection(mozilla::SelectionType aSelectionType) const;
+  mozilla::dom::Selection* GetSelection(SelectionType aType) const;
 
   /**
    * ScrollSelectionIntoView scrolls a region of the selection,
    * so that it is visible in the scrolled view.
    *
-   * @param aSelectionType the selection to scroll into view.
+   * @param aType the selection to scroll into view.
    * @param aRegion the region inside the selection to scroll into view.
    * @param aFlags the scroll flags.  Valid bits include:
    * SCROLL_SYNCHRONOUS: when set, scrolls the selection into view
@@ -362,18 +361,17 @@ public:
    * at some point after the method returns.
    * SCROLL_FIRST_ANCESTOR_ONLY: if set, only the first ancestor will be scrolled
    * into view.
-   *
    */
   /*unsafe*/
-  nsresult ScrollSelectionIntoView(mozilla::SelectionType aSelectionType,
+  nsresult ScrollSelectionIntoView(SelectionType aType,
                                    SelectionRegion aRegion,
                                    int16_t aFlags) const;
 
   /** RepaintSelection repaints the selected frames that are inside the selection
    *  specified by aSelectionType.
-   * @param aSelectionType The selection type what you want to repaint.
+   * @param aSelectionType enum value defined in nsISelection for the seleciton you want.
    */
-  nsresult RepaintSelection(mozilla::SelectionType aSelectionType) const;
+  nsresult RepaintSelection(SelectionType aType) const;
 
   /** GetFrameForNodeOffset given a node and its child offset, return the nsIFrame and
    *  the offset into that frame. 
@@ -599,8 +597,7 @@ public:
   nsFrameSelection();
 
   void StartBatchChanges();
-  void EndBatchChanges(int16_t aReason = nsISelectionListener::NO_REASON);
-
+  void EndBatchChanges();
   /*unsafe*/
   nsresult DeleteFromDocument();
 
@@ -624,7 +621,9 @@ private:
                          uint32_t aContentOffset,
                          nsSelectionAmount aAmount,
                          CaretAssociateHint aHint);
-  void BidiLevelFromClick(nsIContent *aNewFocus, uint32_t aContentOffset);
+  void BidiLevelFromClick(nsIContent *aNewFocus,
+                          uint32_t aContentOffset,
+                          CaretAssociateHint aHint);
   nsPrevNextBidiLevels GetPrevNextBidiLevels(nsIContent *aNode,
                                              uint32_t aContentOffset,
                                              CaretAssociateHint aHint,
@@ -680,10 +679,9 @@ private:
 
   // nsFrameSelection may get deleted when calling this,
   // so remember to use nsCOMPtr when needed.
-  nsresult     NotifySelectionListeners(mozilla::SelectionType aSelectionType);
+  nsresult     NotifySelectionListeners(SelectionType aType);     // add parameters to say collapsed etc?
 
-  RefPtr<mozilla::dom::Selection>
-    mDomSelections[mozilla::kPresentSelectionTypeCount];
+  nsRefPtr<mozilla::dom::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
 
   // Table selection support.
   nsITableCellLayout* GetCellLayout(nsIContent *aCellContent) const;
@@ -721,7 +719,7 @@ private:
   int32_t  mSelectedCellIndex;
 
   // maintain selection
-  RefPtr<nsRange> mMaintainRange;
+  nsRefPtr<nsRange> mMaintainRange;
   nsSelectionAmount mMaintainedAmount;
 
   //batching
@@ -754,8 +752,6 @@ private:
   bool mDesiredPosSet;
 
   int8_t mCaretMovementStyle;
-
-  static bool sSelectionEventsEnabled;
 };
 
 #endif /* nsFrameSelection_h___ */

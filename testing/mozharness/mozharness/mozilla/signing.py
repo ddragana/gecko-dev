@@ -9,7 +9,6 @@
 
 import os
 import re
-import json
 
 from mozharness.base.errors import BaseErrorList
 from mozharness.base.log import ERROR, FATAL
@@ -36,7 +35,7 @@ AndroidSignatureVerificationErrorList = BaseErrorList + [{
 
 class SigningMixin(BaseSigningMixin):
     """Generic signing helper methods."""
-    def query_moz_sign_cmd(self, formats=['gpg']):
+    def query_moz_sign_cmd(self, formats='gpg'):
         if 'MOZ_SIGNING_SERVERS' not in os.environ:
             self.fatal("MOZ_SIGNING_SERVERS not in env; no MOZ_SIGN_CMD for you!")
         dirs = self.query_abs_dirs()
@@ -55,27 +54,10 @@ class SigningMixin(BaseSigningMixin):
             '-c', host_cert,
         ]
         if formats:
-            for f in formats:
-                cmd += ['-f', f]
+            cmd += ['-f', formats]
         for h in os.environ['MOZ_SIGNING_SERVERS'].split(","):
             cmd += ['-H', h]
         return cmd
-
-    def generate_signing_manifest(self, files):
-        """Generate signing manifest for signingworkers
-
-        Every entry in the manifest requires a dictionary of
-        "file_to_sign" (basename) and "hash" (SHA512) of every file to be
-        signed. Signing format is defined in the signing task.
-        """
-        manifest_content = [
-            {
-                "file_to_sign": os.path.basename(f),
-                "hash": self.query_sha512sum(f)
-            }
-            for f in files
-        ]
-        return json.dumps(manifest_content)
 
 
 # MobileSigningMixin {{{1

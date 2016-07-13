@@ -20,27 +20,14 @@
 
 // we want a wmain entry point
 #define XRE_DONT_PROTECT_DLL_LOAD
+#define XRE_DONT_SUPPORT_XPSP2 // xpcshell does not ship
 #define XRE_WANT_ENVIRON
 #include "nsWindowsWMain.cpp"
-#ifdef MOZ_SANDBOX
-#include "mozilla/sandboxing/SandboxInitialization.h"
-#endif
-#endif
-
-#ifdef MOZ_WIDGET_GTK
-#include <gtk/gtk.h>
 #endif
 
 int
 main(int argc, char** argv, char** envp)
 {
-#ifdef MOZ_WIDGET_GTK
-    // A default display may or may not be required for xpcshell tests, and so
-    // is not created here. Instead we set the command line args, which is a
-    // fairly cheap operation.
-    gtk_parse_args(&argc, &argv);
-#endif
-
 #ifdef XP_MACOSX
     InitAutoreleasePool();
 #endif
@@ -53,13 +40,7 @@ main(int argc, char** argv, char** envp)
     DllBlocklist_Initialize();
 #endif
 
-    XREShellData shellData;
-#if defined(XP_WIN) && defined(MOZ_SANDBOX)
-    shellData.sandboxBrokerServices =
-      mozilla::sandboxing::GetInitializedBrokerServices();
-#endif
-
-    int result = XRE_XPCShellMain(argc, argv, envp, &shellData);
+    int result = XRE_XPCShellMain(argc, argv, envp);
 
 #ifdef XP_MACOSX
     FinishAutoreleasePool();

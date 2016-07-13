@@ -2,73 +2,78 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
+let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
 
-var manifest = { // used for testing install
+let manifest = { // used for testing install
   name: "provider test1",
   origin: "https://test1.example.com",
+  workerURL: "https://test1.example.com/browser/browser/base/content/test/social/social_worker.js",
   markURL: "https://test1.example.com/browser/browser/base/content/test/social/social_mark.html?url=%{url}",
   markedIcon: "https://test1.example.com/browser/browser/base/content/test/social/unchecked.jpg",
   unmarkedIcon: "https://test1.example.com/browser/browser/base/content/test/social/checked.jpg",
 
   iconURL: "https://test1.example.com/browser/browser/base/content/test/general/moz.png",
-  version: "1.0"
+  version: 1
 };
 
 function test() {
   waitForExplicitFinish();
-  let frameScript = "data:,(" + function frame_script() {
-    addEventListener("OpenGraphData", function (aEvent) {
-      sendAsyncMessage("sharedata", aEvent.detail);
-    }, true, true);
-  }.toString() + ")();";
-  let mm = getGroupMessageManager("social");
-  mm.loadFrameScript(frameScript, true);
 
   runSocialTestWithProvider(manifest, function (finishcb) {
     runSocialTests(tests, undefined, undefined, function () {
-      mm.removeDelayedFrameScript(frameScript);
       finishcb();
     });
   });
 }
 
 var tests = {
-  testMarkMicroformats: function(next) {
+  testMarkMicrodata: function(next) {
     // emulates context menu action using target element, calling SocialMarks.markLink
     let provider = Social._getProviderFromOrigin(manifest.origin);
+    let port = provider.getWorkerPort();
     let target, testTab;
 
-    // browser_share tests microformats on the full page, this is testing a
+    // browser_share tests microdata on the full page, this is testing a
     // specific target element.
     let expecting = JSON.stringify({
-      "url": "https://example.com/browser/browser/base/content/test/social/microformats.html",
-      "microformats": {
+      "url": "https://example.com/browser/browser/base/content/test/social/microdata.html",
+      "microdata": {
         "items": [{
-            "type": ["h-review"],
+            "types": ["http://schema.org/UserComments"],
             "properties": {
-              "rating": ["4.5"]
+              "url": ["https://example.com/browser/browser/base/content/test/social/microdata.html#c2"],
+              "creator": [{
+                  "types": ["http://schema.org/Person"],
+                  "properties": {
+                    "name": ["Charlotte"]
+                  }
+                }
+              ],
+              "commentTime": ["2013-08-29"]
             }
           }
-        ],
-        "rels": {},
-        "rel-urls": {}
+        ]
       }
     });
 
-    let mm = getGroupMessageManager("social");
-    mm.addMessageListener("sharedata", function handler(msg) {
-      gBrowser.removeTab(testTab);
-      is(msg.data, expecting, "microformats data ok");
-      mm.removeMessageListener("sharedata", handler);
-      next();
-    });
+    port.onmessage = function (e) {
+      let topic = e.data.topic;
+      switch (topic) {
+        case "got-share-data-message":
+          is(JSON.stringify(e.data.result), expecting, "microdata data ok");
+          gBrowser.removeTab(testTab);
+          port.close();
+          next();
+          break;
+      }
+    }
+    port.postMessage({topic: "test-init"});
 
-    let url = "https://example.com/browser/browser/base/content/test/social/microformats.html"
+    let url = "https://example.com/browser/browser/base/content/test/social/microdata.html"
     addTab(url, function(tab) {
       testTab = tab;
       let doc = tab.linkedBrowser.contentDocument;
-      target = doc.getElementById("test-review");
+      target = doc.getElementById("test-comment");
       SocialMarks.markLink(manifest.origin, url, target);
     });
   }

@@ -1,2 +1,2 @@
-this.__defineSetter__("x",Math.max)
+__defineSetter__("x",Math.max)
 Function("({x}=[])")()

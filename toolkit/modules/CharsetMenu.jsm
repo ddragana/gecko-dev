@@ -13,9 +13,6 @@ XPCOMUtils.defineLazyGetter(this, "gBundle", function() {
   return Services.strings.createBundle(kUrl);
 });
 
-XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
-    "resource://gre/modules/Deprecated.jsm");
-
 const kAutoDetectors = [
   ["off", ""],
   ["ja", "ja_parallel_state_machine"],
@@ -117,21 +114,17 @@ function UpdateDetectorMenu(event) {
   }
 }
 
-var gDetectorInfoCache, gCharsetInfoCache, gPinnedInfoCache;
+let gDetectorInfoCache, gCharsetInfoCache, gPinnedInfoCache;
 
-var CharsetMenu = {
-  build: function(parent, deprecatedShowAccessKeys=true, showDetector=true) {
-    if (!deprecatedShowAccessKeys) {
-      Deprecated.warning("CharsetMenu no longer supports building a menu with no access keys.",
-                         "https://bugzilla.mozilla.org/show_bug.cgi?id=1088710");
-    }
+let CharsetMenu = {
+  build: function(parent, showAccessKeys=true, showDetector=true) {
     function createDOMNode(doc, nodeInfo) {
       let node = doc.createElement("menuitem");
       node.setAttribute("type", "radio");
       node.setAttribute("name", nodeInfo.name + "Group");
       node.setAttribute(nodeInfo.name, nodeInfo.value);
       node.setAttribute("label", nodeInfo.label);
-      if (nodeInfo.accesskey) {
+      if (showAccessKeys && nodeInfo.accesskey) {
         node.setAttribute("accesskey", nodeInfo.accesskey);
       }
       return node;
@@ -147,7 +140,9 @@ var CharsetMenu = {
     if (showDetector) {
       let menuNode = doc.createElement("menu");
       menuNode.setAttribute("label", gBundle.GetStringFromName("charsetMenuAutodet"));
-      menuNode.setAttribute("accesskey", gBundle.GetStringFromName("charsetMenuAutodet.key"));
+      if (showAccessKeys) {
+        menuNode.setAttribute("accesskey", gBundle.GetStringFromName("charsetMenuAutodet.key"));
+      }
       parent.appendChild(menuNode);
 
       let menuPopupNode = doc.createElement("menupopup");
@@ -191,12 +186,12 @@ var CharsetMenu = {
   },
 
   getCharsetInfo: function(charsets, sort=true) {
-    let list = Array.from(charsets, charset => ({
+    let list = [{
       label: this._getCharsetLabel(charset),
       accesskey: this._getCharsetAccessKey(charset),
       name: "charset",
       value: charset
-    }));
+    } for (charset of charsets)];
 
     if (sort) {
       list.sort(CharsetComparator);

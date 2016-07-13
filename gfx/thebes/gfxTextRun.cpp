@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=4 et sw=4 tw=80: */
+/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -24,15 +23,9 @@
 #include "nsStyleConsts.h"
 #include "mozilla/Likely.h"
 #include "gfx2DGlue.h"
-#include "mozilla/gfx/Logging.h"        // for gfxCriticalError
-#include "mozilla/UniquePtr.h"
 
 #if defined(MOZ_WIDGET_GTK)
 #include "gfxPlatformGtk.h" // xxx - for UseFcFontList
-#endif
-
-#ifdef XP_WIN
-#include "gfxWindowsPlatform.h"
 #endif
 
 #include "cairo.h"
@@ -131,7 +124,7 @@ gfxTextRun::AllocateStorageForTextRun(size_t aSize, uint32_t aLength)
     return storage;
 }
 
-UniquePtr<gfxTextRun>
+gfxTextRun *
 gfxTextRun::Create(const gfxTextRunFactory::Parameters *aParams,
                    uint32_t aLength, gfxFontGroup *aFontGroup, uint32_t aFlags)
 {
@@ -140,8 +133,7 @@ gfxTextRun::Create(const gfxTextRunFactory::Parameters *aParams,
         return nullptr;
     }
 
-    return UniquePtr<gfxTextRun>(new (storage) gfxTextRun(aParams, aLength,
-                                                          aFontGroup, aFlags));
+    return new (storage) gfxTextRun(aParams, aLength, aFontGroup, aFlags);
 }
 
 gfxTextRun::gfxTextRun(const gfxTextRunFactory::Parameters *aParams,
@@ -211,14 +203,16 @@ gfxTextRun::ReleaseFontGroup()
 }
 
 bool
-gfxTextRun::SetPotentialLineBreaks(Range aRange, uint8_t *aBreakBefore)
+gfxTextRun::SetPotentialLineBreaks(uint32_t aStart, uint32_t aLength,
+                                   uint8_t *aBreakBefore,
+                                   gfxContext *aRefContext)
 {
-    NS_ASSERTION(aRange.end <= GetLength(), "Overflow");
+    NS_ASSERTION(aStart + aLength <= GetLength(), "Overflow");
 
     uint32_t changed = 0;
     uint32_t i;
-    CompressedGlyph *charGlyphs = mCharacterGlyphs + aRange.start;
-    for (i = 0; i < aRange.Length(); ++i) {
+    CompressedGlyph *charGlyphs = mCharacterGlyphs + aStart;
+    for (i = 0; i < aLength; ++i) {
         uint8_t canBreak = aBreakBefore[i];
         if (canBreak && !charGlyphs[i].IsClusterStart()) {
             // This can happen ... there is no guarantee that our linebreaking rules
@@ -231,40 +225,39 @@ gfxTextRun::SetPotentialLineBreaks(Range aRange, uint8_t *aBreakBefore)
 }
 
 gfxTextRun::LigatureData
-gfxTextRun::ComputeLigatureData(Range aPartRange,
-                                PropertyProvider *aProvider) const
+gfxTextRun::ComputeLigatureData(uint32_t aPartStart, uint32_t aPartEnd,
+                                PropertyProvider *aProvider)
 {
-    NS_ASSERTION(aPartRange.start < aPartRange.end,
-                 "Computing ligature data for empty range");
-    NS_ASSERTION(aPartRange.end <= GetLength(), "Character length overflow");
+    NS_ASSERTION(aPartStart < aPartEnd, "Computing ligature data for empty range");
+    NS_ASSERTION(aPartEnd <= GetLength(), "Character length overflow");
   
     LigatureData result;
-    const CompressedGlyph *charGlyphs = mCharacterGlyphs;
+    CompressedGlyph *charGlyphs = mCharacterGlyphs;
 
     uint32_t i;
-    for (i = aPartRange.start; !charGlyphs[i].IsLigatureGroupStart(); --i) {
+    for (i = aPartStart; !charGlyphs[i].IsLigatureGroupStart(); --i) {
         NS_ASSERTION(i > 0, "Ligature at the start of the run??");
     }
-    result.mRange.start = i;
-    for (i = aPartRange.start + 1;
-         i < GetLength() && !charGlyphs[i].IsLigatureGroupStart(); ++i) {
+    result.mLigatureStart = i;
+    for (i = aPartStart + 1; i < GetLength() && !charGlyphs[i].IsLigatureGroupStart(); ++i) {
     }
-    result.mRange.end = i;
+    result.mLigatureEnd = i;
 
-    int32_t ligatureWidth = GetAdvanceForGlyphs(result.mRange);
+    int32_t ligatureWidth =
+        GetAdvanceForGlyphs(result.mLigatureStart, result.mLigatureEnd);
     // Count the number of started clusters we have seen
     uint32_t totalClusterCount = 0;
     uint32_t partClusterIndex = 0;
     uint32_t partClusterCount = 0;
-    for (i = result.mRange.start; i < result.mRange.end; ++i) {
+    for (i = result.mLigatureStart; i < result.mLigatureEnd; ++i) {
         // Treat the first character of the ligature as the start of a
         // cluster for our purposes of allocating ligature width to its
         // characters.
-        if (i == result.mRange.start || charGlyphs[i].IsClusterStart()) {
+        if (i == result.mLigatureStart || charGlyphs[i].IsClusterStart()) {
             ++totalClusterCount;
-            if (i < aPartRange.start) {
+            if (i < aPartStart) {
                 ++partClusterIndex;
-            } else if (i < aPartRange.end) {
+            } else if (i < aPartEnd) {
                 ++partClusterCount;
             }
         }
@@ -276,7 +269,7 @@ gfxTextRun::ComputeLigatureData(Range aPartRange,
     // Any rounding errors are apportioned to the final part of the ligature,
     // so that measuring all parts of a ligature and summing them is equal to
     // the ligature width.
-    if (aPartRange.end == result.mRange.end) {
+    if (aPartEnd == result.mLigatureEnd) {
         gfxFloat allParts = totalClusterCount * (ligatureWidth / totalClusterCount);
         result.mPartWidth += ligatureWidth - allParts;
     }
@@ -297,14 +290,12 @@ gfxTextRun::ComputeLigatureData(Range aPartRange,
 
     if (aProvider && (mFlags & gfxTextRunFactory::TEXT_ENABLE_SPACING)) {
         gfxFont::Spacing spacing;
-        if (aPartRange.start == result.mRange.start) {
-            aProvider->GetSpacing(
-                Range(aPartRange.start, aPartRange.start + 1), &spacing);
+        if (aPartStart == result.mLigatureStart) {
+            aProvider->GetSpacing(aPartStart, 1, &spacing);
             result.mPartWidth += spacing.mBefore;
         }
-        if (aPartRange.end == result.mRange.end) {
-            aProvider->GetSpacing(
-                Range(aPartRange.end - 1, aPartRange.end), &spacing);
+        if (aPartEnd == result.mLigatureEnd) {
+            aProvider->GetSpacing(aPartEnd - 1, 1, &spacing);
             result.mPartWidth += spacing.mAfter;
         }
     }
@@ -313,34 +304,50 @@ gfxTextRun::ComputeLigatureData(Range aPartRange,
 }
 
 gfxFloat
-gfxTextRun::ComputePartialLigatureWidth(Range aPartRange,
-                                        PropertyProvider *aProvider) const
+gfxTextRun::ComputePartialLigatureWidth(uint32_t aPartStart, uint32_t aPartEnd,
+                                        PropertyProvider *aProvider)
 {
-    if (aPartRange.start >= aPartRange.end)
+    if (aPartStart >= aPartEnd)
         return 0;
-    LigatureData data = ComputeLigatureData(aPartRange, aProvider);
+    LigatureData data = ComputeLigatureData(aPartStart, aPartEnd, aProvider);
     return data.mPartWidth;
 }
 
 int32_t
-gfxTextRun::GetAdvanceForGlyphs(Range aRange) const
+gfxTextRun::GetAdvanceForGlyphs(uint32_t aStart, uint32_t aEnd)
 {
+    const CompressedGlyph *glyphData = mCharacterGlyphs + aStart;
     int32_t advance = 0;
-    for (auto i = aRange.start; i < aRange.end; ++i) {
-        advance += GetAdvanceForGlyph(i);
+    uint32_t i;
+    for (i = aStart; i < aEnd; ++i, ++glyphData) {
+        if (glyphData->IsSimpleGlyph()) {
+            advance += glyphData->GetSimpleAdvance();   
+        } else {
+            uint32_t glyphCount = glyphData->GetGlyphCount();
+            if (glyphCount == 0) {
+                continue;
+            }
+            const DetailedGlyph *details = GetDetailedGlyphs(i);
+            if (details) {
+                uint32_t j;
+                for (j = 0; j < glyphCount; ++j, ++details) {
+                    advance += details->mAdvance;
+                }
+            }
+        }
     }
     return advance;
 }
 
 static void
-GetAdjustedSpacing(const gfxTextRun *aTextRun, gfxTextRun::Range aRange,
+GetAdjustedSpacing(gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
                    gfxTextRun::PropertyProvider *aProvider,
                    gfxTextRun::PropertyProvider::Spacing *aSpacing)
 {
-    if (aRange.start >= aRange.end)
+    if (aStart >= aEnd)
         return;
 
-    aProvider->GetSpacing(aRange, aSpacing);
+    aProvider->GetSpacing(aStart, aEnd - aStart, aSpacing);
 
 #ifdef DEBUG
     // Check to see if we have spacing inside ligatures
@@ -348,13 +355,11 @@ GetAdjustedSpacing(const gfxTextRun *aTextRun, gfxTextRun::Range aRange,
     const gfxTextRun::CompressedGlyph *charGlyphs = aTextRun->GetCharacterGlyphs();
     uint32_t i;
 
-    for (i = aRange.start; i < aRange.end; ++i) {
+    for (i = aStart; i < aEnd; ++i) {
         if (!charGlyphs[i].IsLigatureGroupStart()) {
-            NS_ASSERTION(i == aRange.start ||
-                         aSpacing[i - aRange.start].mBefore == 0,
+            NS_ASSERTION(i == aStart || aSpacing[i - aStart].mBefore == 0,
                          "Before-spacing inside a ligature!");
-            NS_ASSERTION(i - 1 <= aRange.start ||
-                         aSpacing[i - 1 - aRange.start].mAfter == 0,
+            NS_ASSERTION(i - 1 <= aStart || aSpacing[i - 1 - aStart].mAfter == 0,
                          "After-spacing inside a ligature!");
         }
     }
@@ -362,54 +367,51 @@ GetAdjustedSpacing(const gfxTextRun *aTextRun, gfxTextRun::Range aRange,
 }
 
 bool
-gfxTextRun::GetAdjustedSpacingArray(Range aRange, PropertyProvider *aProvider,
-                                    Range aSpacingRange,
-                                    nsTArray<PropertyProvider::Spacing>*
-                                        aSpacing) const
+gfxTextRun::GetAdjustedSpacingArray(uint32_t aStart, uint32_t aEnd,
+                                    PropertyProvider *aProvider,
+                                    uint32_t aSpacingStart, uint32_t aSpacingEnd,
+                                    nsTArray<PropertyProvider::Spacing> *aSpacing)
 {
     if (!aProvider || !(mFlags & gfxTextRunFactory::TEXT_ENABLE_SPACING))
         return false;
-    if (!aSpacing->AppendElements(aRange.Length()))
+    if (!aSpacing->AppendElements(aEnd - aStart))
         return false;
-    auto spacingOffset = aSpacingRange.start - aRange.start;
-    memset(aSpacing->Elements(), 0, sizeof(gfxFont::Spacing) * spacingOffset);
-    GetAdjustedSpacing(this, aSpacingRange, aProvider,
-                       aSpacing->Elements() + spacingOffset);
-    memset(aSpacing->Elements() + aSpacingRange.end - aRange.start, 0,
-           sizeof(gfxFont::Spacing) * (aRange.end - aSpacingRange.end));
+    memset(aSpacing->Elements(), 0, sizeof(gfxFont::Spacing)*(aSpacingStart - aStart));
+    GetAdjustedSpacing(this, aSpacingStart, aSpacingEnd, aProvider,
+                       aSpacing->Elements() + aSpacingStart - aStart);
+    memset(aSpacing->Elements() + aSpacingEnd - aStart, 0, sizeof(gfxFont::Spacing)*(aEnd - aSpacingEnd));
     return true;
 }
 
 void
-gfxTextRun::ShrinkToLigatureBoundaries(Range* aRange) const
+gfxTextRun::ShrinkToLigatureBoundaries(uint32_t *aStart, uint32_t *aEnd)
 {
-    if (aRange->start >= aRange->end)
+    if (*aStart >= *aEnd)
         return;
   
-    const CompressedGlyph *charGlyphs = mCharacterGlyphs;
+    CompressedGlyph *charGlyphs = mCharacterGlyphs;
 
-    while (aRange->start < aRange->end &&
-           !charGlyphs[aRange->start].IsLigatureGroupStart()) {
-        ++aRange->start;
+    while (*aStart < *aEnd && !charGlyphs[*aStart].IsLigatureGroupStart()) {
+        ++(*aStart);
     }
-    if (aRange->end < GetLength()) {
-        while (aRange->end > aRange->start &&
-               !charGlyphs[aRange->end].IsLigatureGroupStart()) {
-            --aRange->end;
+    if (*aEnd < GetLength()) {
+        while (*aEnd > *aStart && !charGlyphs[*aEnd].IsLigatureGroupStart()) {
+            --(*aEnd);
         }
     }
 }
 
 void
-gfxTextRun::DrawGlyphs(gfxFont *aFont, Range aRange, gfxPoint *aPt,
-                       PropertyProvider *aProvider, Range aSpacingRange,
-                       TextRunDrawParams& aParams, uint16_t aOrientation) const
+gfxTextRun::DrawGlyphs(gfxFont *aFont, uint32_t aStart, uint32_t aEnd,
+                       gfxPoint *aPt, PropertyProvider *aProvider,
+                       uint32_t aSpacingStart, uint32_t aSpacingEnd,
+                       TextRunDrawParams& aParams, uint16_t aOrientation)
 {
-    AutoTArray<PropertyProvider::Spacing,200> spacingBuffer;
-    bool haveSpacing = GetAdjustedSpacingArray(aRange, aProvider,
-                                               aSpacingRange, &spacingBuffer);
+    nsAutoTArray<PropertyProvider::Spacing,200> spacingBuffer;
+    bool haveSpacing = GetAdjustedSpacingArray(aStart, aEnd, aProvider,
+        aSpacingStart, aSpacingEnd, &spacingBuffer);
     aParams.spacing = haveSpacing ? spacingBuffer.Elements() : nullptr;
-    aFont->Draw(this, aRange.start, aRange.end, aPt, aParams, aOrientation);
+    aFont->Draw(this, aStart, aEnd, aPt, aParams, aOrientation);
 }
 
 static void
@@ -437,17 +439,16 @@ ClipPartialLigature(const gfxTextRun* aTextRun,
 }
 
 void
-gfxTextRun::DrawPartialLigature(gfxFont *aFont, Range aRange,
+gfxTextRun::DrawPartialLigature(gfxFont *aFont, uint32_t aStart, uint32_t aEnd,
                                 gfxPoint *aPt, PropertyProvider *aProvider,
-                                TextRunDrawParams& aParams,
-                                uint16_t aOrientation) const
+                                TextRunDrawParams& aParams, uint16_t aOrientation)
 {
-    if (aRange.start >= aRange.end) {
+    if (aStart >= aEnd) {
         return;
     }
 
     // Draw partial ligature. We hack this by clipping the ligature.
-    LigatureData data = ComputeLigatureData(aRange, aProvider);
+    LigatureData data = ComputeLigatureData(aStart, aEnd, aProvider);
     gfxRect clipExtents = aParams.context->GetClipExtents();
     gfxFloat start, end;
     if (aParams.isVerticalRun) {
@@ -482,8 +483,8 @@ gfxTextRun::DrawPartialLigature(gfxFont *aFont, Range aRange,
         pt = gfxPoint(aPt->x - aParams.direction * data.mPartAdvance, aPt->y);
     }
 
-    DrawGlyphs(aFont, data.mRange, &pt,
-               aProvider, aRange, aParams, aOrientation);
+    DrawGlyphs(aFont, data.mLigatureStart, data.mLigatureEnd, &pt,
+               aProvider, aStart, aEnd, aParams, aOrientation);
     aParams.context->Restore();
 
     if (aParams.isVerticalRun) {
@@ -493,44 +494,32 @@ gfxTextRun::DrawPartialLigature(gfxFont *aFont, Range aRange,
     }
 }
 
-// Returns true if a glyph run is using a font with synthetic bolding enabled,
-// or a color font (COLR/SVG/sbix/CBDT), false otherwise. This is used to
-// check whether the text run needs to be explicitly composited in order to
-// support opacity.
+// returns true if a glyph run is using a font with synthetic bolding enabled, false otherwise
 static bool
-HasSyntheticBoldOrColor(const gfxTextRun *aRun, gfxTextRun::Range aRange)
+HasSyntheticBold(gfxTextRun *aRun, uint32_t aStart, uint32_t aLength)
 {
-    gfxTextRun::GlyphRunIterator iter(aRun, aRange);
+    gfxTextRun::GlyphRunIterator iter(aRun, aStart, aLength);
     while (iter.NextRun()) {
         gfxFont *font = iter.GetGlyphRun()->mFont;
-        if (font) {
-            if (font->IsSyntheticBold()) {
-                return true;
-            }
-            gfxFontEntry* fe = font->GetFontEntry();
-            if (fe->TryGetSVGData(font) || fe->TryGetColorGlyphs()) {
-                return true;
-            }
-#if defined(XP_MACOSX) // sbix fonts only supported via Core Text
-            if (fe->HasFontTable(TRUETYPE_TAG('s', 'b', 'i', 'x'))) {
-                return true;
-            }
-#endif
-        }
-    }
-    return false;
-}
-
-// Returns true if color is neither opaque nor transparent (i.e. alpha is not 0
-// or 1), and false otherwise. If true, aCurrentColorOut is set on output.
-static bool
-HasNonOpaqueNonTransparentColor(gfxContext *aContext, Color& aCurrentColorOut)
-{
-    if (aContext->GetDeviceColor(aCurrentColorOut)) {
-        if (0.f < aCurrentColorOut.a && aCurrentColorOut.a < 1.f) {
+        if (font && font->IsSyntheticBold()) {
             return true;
         }
     }
+
+    return false;
+}
+
+// returns true if color is non-opaque (i.e. alpha != 1.0) or completely transparent, false otherwise
+// if true, color is set on output
+static bool
+HasNonOpaqueColor(gfxContext *aContext, gfxRGBA& aCurrentColor)
+{
+    if (aContext->GetDeviceColor(aCurrentColor)) {
+        if (aCurrentColor.a < 1.0 && aCurrentColor.a > 0.0) {
+            return true;
+        }
+    }
+        
     return false;
 }
 
@@ -538,13 +527,14 @@ HasNonOpaqueNonTransparentColor(gfxContext *aContext, Color& aCurrentColorOut)
 struct BufferAlphaColor {
     explicit BufferAlphaColor(gfxContext *aContext)
         : mContext(aContext)
+        , mAlpha(0.0)
     {
 
     }
 
     ~BufferAlphaColor() {}
 
-    void PushSolidColor(const gfxRect& aBounds, const Color& aAlphaColor, uint32_t appsPerDevUnit)
+    void PushSolidColor(const gfxRect& aBounds, const gfxRGBA& aAlphaColor, uint32_t appsPerDevUnit)
     {
         mContext->Save();
         mContext->NewPath();
@@ -553,35 +543,42 @@ struct BufferAlphaColor {
                     aBounds.Width() / appsPerDevUnit,
                     aBounds.Height() / appsPerDevUnit), true);
         mContext->Clip();
-        mContext->SetColor(Color(aAlphaColor.r, aAlphaColor.g, aAlphaColor.b));
-        mContext->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, aAlphaColor.a);
+        mContext->SetColor(gfxRGBA(aAlphaColor.r, aAlphaColor.g, aAlphaColor.b));
+        mContext->PushGroup(gfxContentType::COLOR_ALPHA);
+        mAlpha = aAlphaColor.a;
     }
 
     void PopAlpha()
     {
         // pop the text, using the color alpha as the opacity
-        mContext->PopGroupAndBlend();
+        mContext->PopGroupToSource();
+        mContext->SetOperator(gfxContext::OPERATOR_OVER);
+        mContext->Paint(mAlpha);
         mContext->Restore();
     }
 
     gfxContext *mContext;
+    gfxFloat mAlpha;
 };
 
 void
-gfxTextRun::Draw(Range aRange, gfxPoint aPt, const DrawParams& aParams) const
+gfxTextRun::Draw(gfxContext *aContext, gfxPoint aPt, DrawMode aDrawMode,
+                 uint32_t aStart, uint32_t aLength,
+                 PropertyProvider *aProvider, gfxFloat *aAdvanceWidth,
+                 gfxTextContextPaint *aContextPaint,
+                 gfxTextRunDrawCallbacks *aCallbacks)
 {
-    NS_ASSERTION(aRange.end <= GetLength(), "Substring out of range");
-    NS_ASSERTION(aParams.drawMode == DrawMode::GLYPH_PATH ||
-                 !(aParams.drawMode & DrawMode::GLYPH_PATH),
+    NS_ASSERTION(aStart + aLength <= GetLength(), "Substring out of range");
+    NS_ASSERTION(aDrawMode == DrawMode::GLYPH_PATH ||
+                 !(int(aDrawMode) & int(DrawMode::GLYPH_PATH)),
                  "GLYPH_PATH cannot be used with GLYPH_FILL, GLYPH_STROKE or GLYPH_STROKE_UNDERNEATH");
-    NS_ASSERTION(aParams.drawMode == DrawMode::GLYPH_PATH || !aParams.callbacks,
+    NS_ASSERTION(aDrawMode == DrawMode::GLYPH_PATH || !aCallbacks,
                  "callback must not be specified unless using GLYPH_PATH");
 
     bool skipDrawing = mSkipDrawing;
-    if (aParams.drawMode & DrawMode::GLYPH_FILL) {
-        Color currentColor;
-        if (aParams.context->GetDeviceColor(currentColor) &&
-            currentColor.a == 0) {
+    if (aDrawMode == DrawMode::GLYPH_FILL) {
+        gfxRGBA currentColor;
+        if (aContext->GetDeviceColor(currentColor) && currentColor.a == 0) {
             skipDrawing = true;
         }
     }
@@ -591,11 +588,11 @@ gfxTextRun::Draw(Range aRange, gfxPoint aPt, const DrawParams& aParams) const
     if (skipDrawing) {
         // We don't need to draw anything;
         // but if the caller wants advance width, we need to compute it here
-        if (aParams.advanceWidth) {
-            gfxTextRun::Metrics metrics = MeasureText(
-                aRange, gfxFont::LOOSE_INK_EXTENTS,
-                aParams.context->GetDrawTarget(), aParams.provider);
-            *aParams.advanceWidth = metrics.mAdvanceWidth * direction;
+        if (aAdvanceWidth) {
+            gfxTextRun::Metrics metrics = MeasureText(aStart, aLength,
+                                                      gfxFont::LOOSE_INK_EXTENTS,
+                                                      aContext, aProvider);
+            *aAdvanceWidth = metrics.mAdvanceWidth * direction;
         }
 
         // return without drawing
@@ -604,18 +601,18 @@ gfxTextRun::Draw(Range aRange, gfxPoint aPt, const DrawParams& aParams) const
 
     // synthetic bolding draws glyphs twice ==> colors with opacity won't draw
     // correctly unless first drawn without alpha
-    BufferAlphaColor syntheticBoldBuffer(aParams.context);
-    Color currentColor;
+    BufferAlphaColor syntheticBoldBuffer(aContext);
+    gfxRGBA currentColor;
     bool needToRestore = false;
 
-    if (aParams.drawMode & DrawMode::GLYPH_FILL &&
-        HasNonOpaqueNonTransparentColor(aParams.context, currentColor) &&
-        HasSyntheticBoldOrColor(this, aRange)) {
+    if (aDrawMode == DrawMode::GLYPH_FILL &&
+        HasNonOpaqueColor(aContext, currentColor) &&
+        HasSyntheticBold(this, aStart, aLength)) {
         needToRestore = true;
         // measure text, use the bounding box
-        gfxTextRun::Metrics metrics = MeasureText(
-            aRange, gfxFont::LOOSE_INK_EXTENTS,
-            aParams.context->GetDrawTarget(), aParams.provider);
+        gfxTextRun::Metrics metrics = MeasureText(aStart, aLength,
+                                                  gfxFont::LOOSE_INK_EXTENTS,
+                                                  aContext, aProvider);
         metrics.mBoundingBox.MoveBy(aPt);
         syntheticBoldBuffer.PushSolidColor(metrics.mBoundingBox, currentColor,
                                            GetAppUnitsPerDevUnit());
@@ -624,50 +621,46 @@ gfxTextRun::Draw(Range aRange, gfxPoint aPt, const DrawParams& aParams) const
     // Set up parameters that will be constant across all glyph runs we need
     // to draw, regardless of the font used.
     TextRunDrawParams params;
-    params.context = aParams.context;
+    params.context = aContext;
     params.devPerApp = 1.0 / double(GetAppUnitsPerDevUnit());
     params.isVerticalRun = IsVertical();
     params.isRTL = IsRightToLeft();
     params.direction = direction;
-    params.textStrokeWidth = aParams.textStrokeWidth;
-    params.textStrokeColor = aParams.textStrokeColor;
-    params.drawMode = aParams.drawMode;
-    params.callbacks = aParams.callbacks;
-    params.runContextPaint = aParams.contextPaint;
-    params.paintSVGGlyphs = !aParams.callbacks ||
-        aParams.callbacks->mShouldPaintSVGGlyphs;
-    params.dt = aParams.context->GetDrawTarget();
-    params.fontSmoothingBGColor =
-        aParams.context->GetFontSmoothingBackgroundColor();
+    params.drawMode = aDrawMode;
+    params.callbacks = aCallbacks;
+    params.runContextPaint = aContextPaint;
+    params.paintSVGGlyphs = !aCallbacks || aCallbacks->mShouldPaintSVGGlyphs;
+    params.dt = aContext->GetDrawTarget();
+    params.fontSmoothingBGColor = aContext->GetFontSmoothingBackgroundColor();
 
-    GlyphRunIterator iter(this, aRange);
+    GlyphRunIterator iter(this, aStart, aLength);
     gfxFloat advance = 0.0;
 
     while (iter.NextRun()) {
         gfxFont *font = iter.GetGlyphRun()->mFont;
         uint32_t start = iter.GetStringStart();
         uint32_t end = iter.GetStringEnd();
-        Range ligatureRange(start, end);
-        ShrinkToLigatureBoundaries(&ligatureRange);
+        uint32_t ligatureRunStart = start;
+        uint32_t ligatureRunEnd = end;
+        ShrinkToLigatureBoundaries(&ligatureRunStart, &ligatureRunEnd);
 
-        bool drawPartial = (aParams.drawMode & DrawMode::GLYPH_FILL) ||
-                           (aParams.drawMode == DrawMode::GLYPH_PATH &&
-                            aParams.callbacks);
+        bool drawPartial = aDrawMode == DrawMode::GLYPH_FILL ||
+                           (aDrawMode == DrawMode::GLYPH_PATH && aCallbacks);
         gfxPoint origPt = aPt;
 
         if (drawPartial) {
-            DrawPartialLigature(font, Range(start, ligatureRange.start),
-                                &aPt, aParams.provider, params,
+            DrawPartialLigature(font, start, ligatureRunStart, &aPt,
+                                aProvider, params,
                                 iter.GetGlyphRun()->mOrientation);
         }
 
-        DrawGlyphs(font, ligatureRange, &aPt,
-                   aParams.provider, ligatureRange, params,
+        DrawGlyphs(font, ligatureRunStart, ligatureRunEnd, &aPt,
+                   aProvider, ligatureRunStart, ligatureRunEnd, params,
                    iter.GetGlyphRun()->mOrientation);
 
         if (drawPartial) {
-            DrawPartialLigature(font, Range(ligatureRange.end, end),
-                                &aPt, aParams.provider, params,
+            DrawPartialLigature(font, ligatureRunEnd, end, &aPt,
+                                aProvider, params,
                                 iter.GetGlyphRun()->mOrientation);
         }
 
@@ -683,89 +676,48 @@ gfxTextRun::Draw(Range aRange, gfxPoint aPt, const DrawParams& aParams) const
         syntheticBoldBuffer.PopAlpha();
     }
 
-    if (aParams.advanceWidth) {
-        *aParams.advanceWidth = advance;
-    }
-}
-
-// This method is mostly parallel to Draw().
-void
-gfxTextRun::DrawEmphasisMarks(gfxContext *aContext, gfxTextRun* aMark,
-                              gfxFloat aMarkAdvance, gfxPoint aPt,
-                              Range aRange, PropertyProvider* aProvider) const
-{
-    MOZ_ASSERT(aRange.end <= GetLength());
-
-    EmphasisMarkDrawParams params;
-    params.context = aContext;
-    params.mark = aMark;
-    params.advance = aMarkAdvance;
-    params.direction = GetDirection();
-    params.isVertical = IsVertical();
-
-    gfxFloat& inlineCoord = params.isVertical ? aPt.y : aPt.x;
-    gfxFloat direction = params.direction;
-
-    GlyphRunIterator iter(this, aRange);
-    while (iter.NextRun()) {
-        gfxFont* font = iter.GetGlyphRun()->mFont;
-        uint32_t start = iter.GetStringStart();
-        uint32_t end = iter.GetStringEnd();
-        Range ligatureRange(start, end);
-        ShrinkToLigatureBoundaries(&ligatureRange);
-
-        inlineCoord += direction * ComputePartialLigatureWidth(
-            Range(start, ligatureRange.start), aProvider);
-
-        AutoTArray<PropertyProvider::Spacing, 200> spacingBuffer;
-        bool haveSpacing = GetAdjustedSpacingArray(
-            ligatureRange, aProvider, ligatureRange, &spacingBuffer);
-        params.spacing = haveSpacing ? spacingBuffer.Elements() : nullptr;
-        font->DrawEmphasisMarks(this, &aPt, ligatureRange.start,
-                                ligatureRange.Length(), params);
-
-        inlineCoord += direction * ComputePartialLigatureWidth(
-            Range(ligatureRange.end, end), aProvider);
+    if (aAdvanceWidth) {
+        *aAdvanceWidth = advance;
     }
 }
 
 void
-gfxTextRun::AccumulateMetricsForRun(gfxFont *aFont, Range aRange,
+gfxTextRun::AccumulateMetricsForRun(gfxFont *aFont,
+                                    uint32_t aStart, uint32_t aEnd,
                                     gfxFont::BoundingBoxType aBoundingBoxType,
-                                    DrawTarget* aRefDrawTarget,
+                                    gfxContext *aRefContext,
                                     PropertyProvider *aProvider,
-                                    Range aSpacingRange,
+                                    uint32_t aSpacingStart, uint32_t aSpacingEnd,
                                     uint16_t aOrientation,
-                                    Metrics *aMetrics) const
+                                    Metrics *aMetrics)
 {
-    AutoTArray<PropertyProvider::Spacing,200> spacingBuffer;
-    bool haveSpacing = GetAdjustedSpacingArray(aRange, aProvider,
-                                               aSpacingRange, &spacingBuffer);
-    Metrics metrics = aFont->Measure(this, aRange.start, aRange.end,
-                                     aBoundingBoxType, aRefDrawTarget,
+    nsAutoTArray<PropertyProvider::Spacing,200> spacingBuffer;
+    bool haveSpacing = GetAdjustedSpacingArray(aStart, aEnd, aProvider,
+        aSpacingStart, aSpacingEnd, &spacingBuffer);
+    Metrics metrics = aFont->Measure(this, aStart, aEnd, aBoundingBoxType, aRefContext,
                                      haveSpacing ? spacingBuffer.Elements() : nullptr,
                                      aOrientation);
     aMetrics->CombineWith(metrics, IsRightToLeft());
 }
 
 void
-gfxTextRun::AccumulatePartialLigatureMetrics(gfxFont *aFont, Range aRange,
-    gfxFont::BoundingBoxType aBoundingBoxType, DrawTarget* aRefDrawTarget,
-    PropertyProvider *aProvider, uint16_t aOrientation,
-    Metrics *aMetrics) const
+gfxTextRun::AccumulatePartialLigatureMetrics(gfxFont *aFont,
+    uint32_t aStart, uint32_t aEnd,
+    gfxFont::BoundingBoxType aBoundingBoxType, gfxContext *aRefContext,
+    PropertyProvider *aProvider, uint16_t aOrientation, Metrics *aMetrics)
 {
-    if (aRange.start >= aRange.end)
+    if (aStart >= aEnd)
         return;
 
     // Measure partial ligature. We hack this by clipping the metrics in the
     // same way we clip the drawing.
-    LigatureData data = ComputeLigatureData(aRange, aProvider);
+    LigatureData data = ComputeLigatureData(aStart, aEnd, aProvider);
 
     // First measure the complete ligature
     Metrics metrics;
-    AccumulateMetricsForRun(aFont, data.mRange,
-                            aBoundingBoxType, aRefDrawTarget,
-                            aProvider, aRange, aOrientation, &metrics);
+    AccumulateMetricsForRun(aFont, data.mLigatureStart, data.mLigatureEnd,
+                            aBoundingBoxType, aRefContext,
+                            aProvider, aStart, aEnd, aOrientation, &metrics);
 
     // Clip the bounding box to the ligature part
     gfxFloat bboxLeft = metrics.mBoundingBox.X();
@@ -787,25 +739,25 @@ gfxTextRun::AccumulatePartialLigatureMetrics(gfxFont *aFont, Range aRange,
 }
 
 gfxTextRun::Metrics
-gfxTextRun::MeasureText(Range aRange,
+gfxTextRun::MeasureText(uint32_t aStart, uint32_t aLength,
                         gfxFont::BoundingBoxType aBoundingBoxType,
-                        DrawTarget* aRefDrawTarget,
-                        PropertyProvider *aProvider) const
+                        gfxContext *aRefContext,
+                        PropertyProvider *aProvider)
 {
-    NS_ASSERTION(aRange.end <= GetLength(), "Substring out of range");
+    NS_ASSERTION(aStart + aLength <= GetLength(), "Substring out of range");
 
     Metrics accumulatedMetrics;
-    GlyphRunIterator iter(this, aRange);
+    GlyphRunIterator iter(this, aStart, aLength);
     while (iter.NextRun()) {
         gfxFont *font = iter.GetGlyphRun()->mFont;
         uint32_t start = iter.GetStringStart();
         uint32_t end = iter.GetStringEnd();
-        Range ligatureRange(start, end);
-        ShrinkToLigatureBoundaries(&ligatureRange);
+        uint32_t ligatureRunStart = start;
+        uint32_t ligatureRunEnd = end;
+        ShrinkToLigatureBoundaries(&ligatureRunStart, &ligatureRunEnd);
 
-        AccumulatePartialLigatureMetrics(
-            font, Range(start, ligatureRange.start),
-            aBoundingBoxType, aRefDrawTarget, aProvider,
+        AccumulatePartialLigatureMetrics(font, start, ligatureRunStart,
+            aBoundingBoxType, aRefContext, aProvider,
             iter.GetGlyphRun()->mOrientation, &accumulatedMetrics);
 
         // XXX This sucks. We have to get glyph extents just so we can detect
@@ -814,13 +766,12 @@ gfxTextRun::MeasureText(Range aRange,
         // by getting some ascent/descent from the font and using our stored
         // advance widths.
         AccumulateMetricsForRun(font,
-            ligatureRange, aBoundingBoxType,
-            aRefDrawTarget, aProvider, ligatureRange,
+            ligatureRunStart, ligatureRunEnd, aBoundingBoxType,
+            aRefContext, aProvider, ligatureRunStart, ligatureRunEnd,
             iter.GetGlyphRun()->mOrientation, &accumulatedMetrics);
 
-        AccumulatePartialLigatureMetrics(
-            font, Range(ligatureRange.end, end),
-            aBoundingBoxType, aRefDrawTarget, aProvider,
+        AccumulatePartialLigatureMetrics(font, ligatureRunEnd, end,
+            aBoundingBoxType, aRefContext, aProvider,
             iter.GetGlyphRun()->mOrientation, &accumulatedMetrics);
     }
 
@@ -837,7 +788,7 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
                                 gfxFloat *aTrimWhitespace,
                                 Metrics *aMetrics,
                                 gfxFont::BoundingBoxType aBoundingBoxType,
-                                DrawTarget* aRefDrawTarget,
+                                gfxContext *aRefContext,
                                 bool *aUsedHyphenation,
                                 uint32_t *aLastBreak,
                                 bool aCanWordWrap,
@@ -847,12 +798,13 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
 
     NS_ASSERTION(aStart + aMaxLength <= GetLength(), "Substring out of range");
 
-    Range bufferRange(aStart, aStart +
-        std::min<uint32_t>(aMaxLength, MEASUREMENT_BUFFER_SIZE));
+    uint32_t bufferStart = aStart;
+    uint32_t bufferLength = std::min<uint32_t>(aMaxLength, MEASUREMENT_BUFFER_SIZE);
     PropertyProvider::Spacing spacingBuffer[MEASUREMENT_BUFFER_SIZE];
     bool haveSpacing = aProvider && (mFlags & gfxTextRunFactory::TEXT_ENABLE_SPACING) != 0;
     if (haveSpacing) {
-        GetAdjustedSpacing(this, bufferRange, aProvider, spacingBuffer);
+        GetAdjustedSpacing(this, bufferStart, bufferStart + bufferLength, aProvider,
+                           spacingBuffer);
     }
     bool hyphenBuffer[MEASUREMENT_BUFFER_SIZE];
     bool haveHyphenation = aProvider &&
@@ -860,7 +812,8 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
          (aProvider->GetHyphensOption() == NS_STYLE_HYPHENS_MANUAL &&
           (mFlags & gfxTextRunFactory::TEXT_ENABLE_HYPHEN_BREAKS) != 0));
     if (haveHyphenation) {
-        aProvider->GetHyphenationBreaks(bufferRange, hyphenBuffer);
+        aProvider->GetHyphenationBreaks(bufferStart, bufferLength,
+                                        hyphenBuffer);
     }
 
     gfxFloat width = 0;
@@ -876,21 +829,23 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
     uint32_t end = aStart + aMaxLength;
     bool lastBreakUsedHyphenation = false;
 
-    Range ligatureRange(aStart, end);
-    ShrinkToLigatureBoundaries(&ligatureRange);
+    uint32_t ligatureRunStart = aStart;
+    uint32_t ligatureRunEnd = end;
+    ShrinkToLigatureBoundaries(&ligatureRunStart, &ligatureRunEnd);
 
     uint32_t i;
     for (i = aStart; i < end; ++i) {
-        if (i >= bufferRange.end) {
+        if (i >= bufferStart + bufferLength) {
             // Fetch more spacing and hyphenation data
-            bufferRange.start = i;
-            bufferRange.end = std::min(aStart + aMaxLength,
-                                       i + MEASUREMENT_BUFFER_SIZE);
+            bufferStart = i;
+            bufferLength = std::min(aStart + aMaxLength, i + MEASUREMENT_BUFFER_SIZE) - i;
             if (haveSpacing) {
-                GetAdjustedSpacing(this, bufferRange, aProvider, spacingBuffer);
+                GetAdjustedSpacing(this, bufferStart, bufferStart + bufferLength, aProvider,
+                                   spacingBuffer);
             }
             if (haveHyphenation) {
-                aProvider->GetHyphenationBreaks(bufferRange, hyphenBuffer);
+                aProvider->GetHyphenationBreaks(bufferStart, bufferLength,
+                                                hyphenBuffer);
             }
         }
 
@@ -901,8 +856,8 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
         if (aSuppressBreak != eSuppressAllBreaks &&
             (aSuppressBreak != eSuppressInitialBreak || i > aStart)) {
             bool atNaturalBreak = mCharacterGlyphs[i].CanBreakBefore() == 1;
-            bool atHyphenationBreak = !atNaturalBreak &&
-                haveHyphenation && hyphenBuffer[i - bufferRange.start];
+            bool atHyphenationBreak =
+                !atNaturalBreak && haveHyphenation && hyphenBuffer[i - bufferStart];
             bool atBreak = atNaturalBreak || atHyphenationBreak;
             bool wordWrapping =
                 aCanWordWrap && mCharacterGlyphs[i].IsClusterStart() &&
@@ -935,16 +890,14 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
         }
         
         gfxFloat charAdvance;
-        if (i >= ligatureRange.start && i < ligatureRange.end) {
-            charAdvance = GetAdvanceForGlyphs(Range(i, i + 1));
+        if (i >= ligatureRunStart && i < ligatureRunEnd) {
+            charAdvance = GetAdvanceForGlyphs(i, i + 1);
             if (haveSpacing) {
-                PropertyProvider::Spacing *space =
-                    &spacingBuffer[i - bufferRange.start];
+                PropertyProvider::Spacing *space = &spacingBuffer[i - bufferStart];
                 charAdvance += space->mBefore + space->mAfter;
             }
         } else {
-            charAdvance =
-                ComputePartialLigatureWidth(Range(i, i + 1), aProvider);
+            charAdvance = ComputePartialLigatureWidth(i, i + 1, aProvider);
         }
         
         advance += charAdvance;
@@ -981,13 +934,13 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
     }
 
     if (aMetrics) {
-        auto fitEnd = aStart + charsFit;
-        *aMetrics = MeasureText(Range(aStart, fitEnd), aBoundingBoxType,
-                                aRefDrawTarget, aProvider);
+        *aMetrics = MeasureText(aStart, charsFit,
+            aBoundingBoxType, aRefContext, aProvider);
         if (trimmableChars) {
             Metrics trimMetrics =
-                MeasureText(Range(fitEnd - trimmableChars, fitEnd),
-                            aBoundingBoxType, aRefDrawTarget, aProvider);
+                MeasureText(aStart + charsFit - trimmableChars,
+                            trimmableChars, aBoundingBoxType,
+                            aRefContext, aProvider);
             aMetrics->mAdvanceWidth -= trimMetrics.mAdvanceWidth;
         }
     }
@@ -1009,19 +962,18 @@ gfxTextRun::BreakAndMeasureText(uint32_t aStart, uint32_t aMaxLength,
 }
 
 gfxFloat
-gfxTextRun::GetAdvanceWidth(Range aRange, PropertyProvider *aProvider,
-                            PropertyProvider::Spacing* aSpacing) const
+gfxTextRun::GetAdvanceWidth(uint32_t aStart, uint32_t aLength,
+                            PropertyProvider *aProvider,
+                            PropertyProvider::Spacing* aSpacing)
 {
-    NS_ASSERTION(aRange.end <= GetLength(), "Substring out of range");
+    NS_ASSERTION(aStart + aLength <= GetLength(), "Substring out of range");
 
-    Range ligatureRange = aRange;
-    ShrinkToLigatureBoundaries(&ligatureRange);
+    uint32_t ligatureRunStart = aStart;
+    uint32_t ligatureRunEnd = aStart + aLength;
+    ShrinkToLigatureBoundaries(&ligatureRunStart, &ligatureRunEnd);
 
-    gfxFloat result =
-        ComputePartialLigatureWidth(Range(aRange.start, ligatureRange.start),
-                                    aProvider) +
-        ComputePartialLigatureWidth(Range(ligatureRange.end, aRange.end),
-                                    aProvider);
+    gfxFloat result = ComputePartialLigatureWidth(aStart, ligatureRunStart, aProvider) +
+                      ComputePartialLigatureWidth(ligatureRunEnd, aStart + aLength, aProvider);
 
     if (aSpacing) {
         aSpacing->mBefore = aSpacing->mAfter = 0;
@@ -1031,11 +983,11 @@ gfxTextRun::GetAdvanceWidth(Range aRange, PropertyProvider *aProvider,
     // processing it along with the glyphs.
     if (aProvider && (mFlags & gfxTextRunFactory::TEXT_ENABLE_SPACING)) {
         uint32_t i;
-        AutoTArray<PropertyProvider::Spacing,200> spacingBuffer;
-        if (spacingBuffer.AppendElements(aRange.Length())) {
-            GetAdjustedSpacing(this, ligatureRange, aProvider,
+        nsAutoTArray<PropertyProvider::Spacing,200> spacingBuffer;
+        if (spacingBuffer.AppendElements(aLength)) {
+            GetAdjustedSpacing(this, ligatureRunStart, ligatureRunEnd, aProvider,
                                spacingBuffer.Elements());
-            for (i = 0; i < ligatureRange.Length(); ++i) {
+            for (i = 0; i < ligatureRunEnd - ligatureRunStart; ++i) {
                 PropertyProvider::Spacing *space = &spacingBuffer[i];
                 result += space->mBefore + space->mAfter;
             }
@@ -1046,13 +998,14 @@ gfxTextRun::GetAdvanceWidth(Range aRange, PropertyProvider *aProvider,
         }
     }
 
-    return result + GetAdvanceForGlyphs(ligatureRange);
+    return result + GetAdvanceForGlyphs(ligatureRunStart, ligatureRunEnd);
 }
 
 bool
-gfxTextRun::SetLineBreaks(Range aRange,
+gfxTextRun::SetLineBreaks(uint32_t aStart, uint32_t aLength,
                           bool aLineBreakBefore, bool aLineBreakAfter,
-                          gfxFloat *aAdvanceWidthDelta)
+                          gfxFloat *aAdvanceWidthDelta,
+                          gfxContext *aRefContext)
 {
     // Do nothing because our shaping does not currently take linebreaks into
     // account. There is no change in advance width.
@@ -1063,7 +1016,7 @@ gfxTextRun::SetLineBreaks(Range aRange,
 }
 
 uint32_t
-gfxTextRun::FindFirstGlyphRunContaining(uint32_t aOffset) const
+gfxTextRun::FindFirstGlyphRunContaining(uint32_t aOffset)
 {
     NS_ASSERTION(aOffset <= GetLength(), "Bad offset looking for glyphrun");
     NS_ASSERTION(GetLength() == 0 || mGlyphRuns.Length() > 0,
@@ -1208,7 +1161,7 @@ gfxTextRun::SanitizeGlyphRuns()
 }
 
 uint32_t
-gfxTextRun::CountMissingGlyphs() const
+gfxTextRun::CountMissingGlyphs()
 {
     uint32_t i;
     uint32_t count = 0;
@@ -1248,11 +1201,12 @@ gfxTextRun::CopyGlyphDataFrom(gfxShapedWord *aShapedWord, uint32_t aOffset)
 }
 
 void
-gfxTextRun::CopyGlyphDataFrom(gfxTextRun *aSource, Range aRange, uint32_t aDest)
+gfxTextRun::CopyGlyphDataFrom(gfxTextRun *aSource, uint32_t aStart,
+                              uint32_t aLength, uint32_t aDest)
 {
-    NS_ASSERTION(aRange.end <= aSource->GetLength(),
+    NS_ASSERTION(aStart + aLength <= aSource->GetLength(),
                  "Source substring out of range");
-    NS_ASSERTION(aDest + aRange.Length() <= GetLength(),
+    NS_ASSERTION(aDest + aLength <= GetLength(),
                  "Destination substring out of range");
 
     if (aSource->mSkipDrawing) {
@@ -1260,9 +1214,9 @@ gfxTextRun::CopyGlyphDataFrom(gfxTextRun *aSource, Range aRange, uint32_t aDest)
     }
 
     // Copy base glyph data, and DetailedGlyph data where present
-    const CompressedGlyph *srcGlyphs = aSource->mCharacterGlyphs + aRange.start;
+    const CompressedGlyph *srcGlyphs = aSource->mCharacterGlyphs + aStart;
     CompressedGlyph *dstGlyphs = mCharacterGlyphs + aDest;
-    for (uint32_t i = 0; i < aRange.Length(); ++i) {
+    for (uint32_t i = 0; i < aLength; ++i) {
         CompressedGlyph g = srcGlyphs[i];
         g.SetCanBreakBefore(!g.IsClusterStart() ?
             CompressedGlyph::FLAG_BREAK_TYPE_NONE :
@@ -1272,8 +1226,7 @@ gfxTextRun::CopyGlyphDataFrom(gfxTextRun *aSource, Range aRange, uint32_t aDest)
             if (count > 0) {
                 DetailedGlyph *dst = AllocateDetailedGlyphs(i + aDest, count);
                 if (dst) {
-                    DetailedGlyph *src =
-                        aSource->GetDetailedGlyphs(i + aRange.start);
+                    DetailedGlyph *src = aSource->GetDetailedGlyphs(i + aStart);
                     if (src) {
                         ::memcpy(dst, src, count * sizeof(DetailedGlyph));
                     } else {
@@ -1288,9 +1241,9 @@ gfxTextRun::CopyGlyphDataFrom(gfxTextRun *aSource, Range aRange, uint32_t aDest)
     }
 
     // Copy glyph runs
-    GlyphRunIterator iter(aSource, aRange);
+    GlyphRunIterator iter(aSource, aStart, aLength);
 #ifdef DEBUG
-    const GlyphRun *prevRun = nullptr;
+    GlyphRun *prevRun = nullptr;
 #endif
     while (iter.NextRun()) {
         gfxFont *font = iter.GetGlyphRun()->mFont;
@@ -1319,7 +1272,7 @@ gfxTextRun::CopyGlyphDataFrom(gfxTextRun *aSource, Range aRange, uint32_t aDest)
                          "Ended font run in the middle of a cluster");
 
         nsresult rv = AddGlyphRun(font, iter.GetGlyphRun()->mMatchType,
-                                  start - aRange.start + aDest, false,
+                                  start - aStart + aDest, false,
                                   iter.GetGlyphRun()->mOrientation);
         if (NS_FAILED(rv))
             return;
@@ -1336,10 +1289,11 @@ gfxTextRun::ClearGlyphsAndCharacters()
 }
 
 void
-gfxTextRun::SetSpaceGlyph(gfxFont* aFont, DrawTarget* aDrawTarget,
+gfxTextRun::SetSpaceGlyph(gfxFont *aFont, gfxContext *aContext,
                           uint32_t aCharIndex, uint16_t aOrientation)
 {
-    if (SetSpaceGlyphIfSimple(aFont, aCharIndex, ' ', aOrientation)) {
+    if (SetSpaceGlyphIfSimple(aFont, aContext, aCharIndex, ' ',
+                              aOrientation)) {
         return;
     }
 
@@ -1351,10 +1305,10 @@ gfxTextRun::SetSpaceGlyph(gfxFont* aFont, DrawTarget* aDrawTarget,
                      aOrientation;
     bool vertical =
         (GetFlags() & gfxTextRunFactory::TEXT_ORIENT_VERTICAL_UPRIGHT) != 0;
-    gfxShapedWord* sw = aFont->GetShapedWord(aDrawTarget,
+    gfxShapedWord *sw = aFont->GetShapedWord(aContext,
                                              &space, 1,
                                              gfxShapedWord::HashMix(0, ' '), 
-                                             Script::LATIN,
+                                             MOZ_SCRIPT_LATIN,
                                              vertical,
                                              mAppUnitsPerDevUnit,
                                              flags,
@@ -1367,8 +1321,9 @@ gfxTextRun::SetSpaceGlyph(gfxFont* aFont, DrawTarget* aDrawTarget,
 }
 
 bool
-gfxTextRun::SetSpaceGlyphIfSimple(gfxFont* aFont, uint32_t aCharIndex,
-                                  char16_t aSpaceChar, uint16_t aOrientation)
+gfxTextRun::SetSpaceGlyphIfSimple(gfxFont *aFont, gfxContext *aContext,
+                                  uint32_t aCharIndex, char16_t aSpaceChar,
+                                  uint16_t aOrientation)
 {
     uint32_t spaceGlyph = aFont->GetSpaceGlyph();
     if (!spaceGlyph || !CompressedGlyph::IsSimpleGlyphID(spaceGlyph)) {
@@ -1397,7 +1352,7 @@ gfxTextRun::SetSpaceGlyphIfSimple(gfxFont* aFont, uint32_t aCharIndex,
 }
 
 void
-gfxTextRun::FetchGlyphExtents(DrawTarget* aRefDrawTarget)
+gfxTextRun::FetchGlyphExtents(gfxContext *aRefContext)
 {
     bool needsGlyphExtents = NeedsGlyphExtents(this);
     if (!needsGlyphExtents && !mDetailedGlyphs)
@@ -1429,7 +1384,7 @@ gfxTextRun::FetchGlyphExtents(DrawTarget* aRefDrawTarget)
                     uint32_t glyphIndex = glyphData->GetSimpleGlyph();
                     if (!extents->IsGlyphKnown(glyphIndex)) {
                         if (!fontIsSetup) {
-                            if (!font->SetupCairoFont(aRefDrawTarget)) {
+                            if (!font->SetupCairoFont(aRefContext)) {
                                 NS_WARNING("failed to set up font for glyph extents");
                                 break;
                             }
@@ -1438,7 +1393,7 @@ gfxTextRun::FetchGlyphExtents(DrawTarget* aRefDrawTarget)
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
                         ++gGlyphExtentsSetupEagerSimple;
 #endif
-                        font->SetupGlyphExtents(aRefDrawTarget,
+                        font->SetupGlyphExtents(aRefContext,
                                                 glyphIndex, false, extents);
                     }
                 }
@@ -1455,7 +1410,7 @@ gfxTextRun::FetchGlyphExtents(DrawTarget* aRefDrawTarget)
                     uint32_t glyphIndex = details->mGlyphID;
                     if (!extents->IsGlyphKnownWithTightExtents(glyphIndex)) {
                         if (!fontIsSetup) {
-                            if (!font->SetupCairoFont(aRefDrawTarget)) {
+                            if (!font->SetupCairoFont(aRefContext)) {
                                 NS_WARNING("failed to set up font for glyph extents");
                                 break;
                             }
@@ -1464,7 +1419,7 @@ gfxTextRun::FetchGlyphExtents(DrawTarget* aRefDrawTarget)
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
                         ++gGlyphExtentsSetupEagerTight;
 #endif
-                        font->SetupGlyphExtents(aRefDrawTarget,
+                        font->SetupGlyphExtents(aRefContext,
                                                 glyphIndex, true, extents);
                     }
                 }
@@ -1499,11 +1454,11 @@ gfxTextRun::ClusterIterator::NextCluster()
     return false;
 }
 
-gfxTextRun::Range
-gfxTextRun::ClusterIterator::ClusterRange() const
+uint32_t
+gfxTextRun::ClusterIterator::ClusterLength() const
 {
     if (mCurrentChar == uint32_t(-1)) {
-        return Range(0, 0);
+        return 0;
     }
 
     uint32_t i = mCurrentChar,
@@ -1514,7 +1469,7 @@ gfxTextRun::ClusterIterator::ClusterRange() const
         }
     }
 
-    return Range(mCurrentChar, i);
+    return i - mCurrentChar;
 }
 
 gfxFloat
@@ -1524,7 +1479,7 @@ gfxTextRun::ClusterIterator::ClusterAdvance(PropertyProvider *aProvider) const
         return 0;
     }
 
-    return mTextRun->GetAdvanceWidth(ClusterRange(), aProvider);
+    return mTextRun->GetAdvanceWidth(mCurrentChar, ClusterLength(), aProvider);
 }
 
 size_t
@@ -1532,7 +1487,7 @@ gfxTextRun::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf)
 {
     // The second arg is how much gfxTextRun::AllocateStorage would have
     // allocated.
-    size_t total = mGlyphRuns.ShallowSizeOfExcludingThis(aMallocSizeOf);
+    size_t total = mGlyphRuns.SizeOfExcludingThis(aMallocSizeOf);
 
     if (mDetailedGlyphs) {
         total += mDetailedGlyphs->SizeOfIncludingThis(aMallocSizeOf);
@@ -1576,19 +1531,14 @@ gfxTextRun::Dump(FILE* aOutput) {
 
 gfxFontGroup::gfxFontGroup(const FontFamilyList& aFontFamilyList,
                            const gfxFontStyle *aStyle,
-                           gfxTextPerfMetrics* aTextPerf,
-                           gfxUserFontSet *aUserFontSet,
-                           gfxFloat aDevToCssSize)
+                           gfxUserFontSet *aUserFontSet)
     : mFamilyList(aFontFamilyList)
     , mStyle(*aStyle)
     , mUnderlineOffset(UNDERLINE_OFFSET_NOT_SET)
     , mHyphenWidth(-1)
-    , mDevToCssSize(aDevToCssSize)
     , mUserFontSet(aUserFontSet)
-    , mTextPerf(aTextPerf)
-    , mLastPrefLang(eFontPrefLang_Western)
-    , mPageLang(gfxPlatformFontList::GetFontPrefLangFor(aStyle->language))
-    , mLastPrefFirstFont(false)
+    , mTextPerf(nullptr)
+    , mPageLang(gfxPlatform::GetFontPrefLangFor(aStyle->language))
     , mSkipDrawing(false)
     , mSkipUpdateUserFonts(false)
 {
@@ -1603,6 +1553,138 @@ gfxFontGroup::~gfxFontGroup()
 }
 
 void
+gfxFontGroup::FindGenericFonts(FontFamilyType aGenericType,
+                               nsIAtom *aLanguage,
+                               void *aClosure)
+{
+    nsAutoTArray<nsString, 5> resolvedGenerics;
+    ResolveGenericFontNames(aGenericType, aLanguage, resolvedGenerics);
+    uint32_t g = 0, numGenerics = resolvedGenerics.Length();
+    for (g = 0; g < numGenerics; g++) {
+        FindPlatformFont(resolvedGenerics[g], false, aClosure);
+    }
+}
+
+/* static */ void
+gfxFontGroup::ResolveGenericFontNames(FontFamilyType aGenericType,
+                                      nsIAtom *aLanguage,
+                                      nsTArray<nsString>& aGenericFamilies)
+{
+    static const char kGeneric_serif[] = "serif";
+    static const char kGeneric_sans_serif[] = "sans-serif";
+    static const char kGeneric_monospace[] = "monospace";
+    static const char kGeneric_cursive[] = "cursive";
+    static const char kGeneric_fantasy[] = "fantasy";
+
+    // treat -moz-fixed as monospace
+    if (aGenericType == eFamily_moz_fixed) {
+        aGenericType = eFamily_monospace;
+    }
+
+    // type should be standard generic type at this point
+    NS_ASSERTION(aGenericType >= eFamily_serif &&
+                 aGenericType <= eFamily_fantasy,
+                 "standard generic font family type required");
+
+    // create the lang string
+    nsIAtom *langGroupAtom = nullptr;
+    nsAutoCString langGroupString;
+    if (aLanguage) {
+        if (!gLangService) {
+            CallGetService(NS_LANGUAGEATOMSERVICE_CONTRACTID, &gLangService);
+        }
+        if (gLangService) {
+            nsresult rv;
+            langGroupAtom = gLangService->GetLanguageGroup(aLanguage, &rv);
+        }
+    }
+    if (!langGroupAtom) {
+        langGroupAtom = nsGkAtoms::Unicode;
+    }
+    langGroupAtom->ToUTF8String(langGroupString);
+
+    // map generic type to string
+    const char *generic = nullptr;
+    switch (aGenericType) {
+        case eFamily_serif:
+            generic = kGeneric_serif;
+            break;
+        case eFamily_sans_serif:
+            generic = kGeneric_sans_serif;
+            break;
+        case eFamily_monospace:
+            generic = kGeneric_monospace;
+            break;
+        case eFamily_cursive:
+            generic = kGeneric_cursive;
+            break;
+        case eFamily_fantasy:
+            generic = kGeneric_fantasy;
+            break;
+        default:
+            break;
+    }
+
+    if (!generic) {
+        return;
+    }
+
+    aGenericFamilies.Clear();
+
+    // load family for "font.name.generic.lang"
+    nsAutoCString prefFontName("font.name.");
+    prefFontName.Append(generic);
+    prefFontName.Append('.');
+    prefFontName.Append(langGroupString);
+    gfxFontUtils::AppendPrefsFontList(prefFontName.get(),
+                                      aGenericFamilies);
+
+    // if lang has pref fonts, also load fonts for "font.name-list.generic.lang"
+    if (!aGenericFamilies.IsEmpty()) {
+        nsAutoCString prefFontListName("font.name-list.");
+        prefFontListName.Append(generic);
+        prefFontListName.Append('.');
+        prefFontListName.Append(langGroupString);
+        gfxFontUtils::AppendPrefsFontList(prefFontListName.get(),
+                                          aGenericFamilies);
+    }
+
+#if 0  // dump out generic mappings
+    printf("%s ===> ", prefFontName.get());
+    for (uint32_t k = 0; k < aGenericFamilies.Length(); k++) {
+        if (k > 0) printf(", ");
+        printf("%s", NS_ConvertUTF16toUTF8(aGenericFamilies[k]).get());
+    }
+    printf("\n");
+#endif
+}
+
+void gfxFontGroup::EnumerateFontList(nsIAtom *aLanguage, void *aClosure)
+{
+    // initialize fonts in the font family list
+    const nsTArray<FontFamilyName>& fontlist = mFamilyList.GetFontlist();
+
+    // lookup fonts in the fontlist
+    uint32_t i, numFonts = fontlist.Length();
+    for (i = 0; i < numFonts; i++) {
+        const FontFamilyName& name = fontlist[i];
+        if (name.IsNamed()) {
+            FindPlatformFont(name.mName, true, aClosure);
+        } else {
+            FindGenericFonts(name.mType, aLanguage, aClosure);
+        }
+    }
+
+    // if necessary, append default generic onto the end
+    if (mFamilyList.GetDefaultFontType() != eFamily_none &&
+        !mFamilyList.HasDefaultGeneric()) {
+        FindGenericFonts(mFamilyList.GetDefaultFontType(),
+                         aLanguage,
+                         aClosure);
+    }
+}
+
+void
 gfxFontGroup::BuildFontList()
 {
     bool enumerateFonts = true;
@@ -1613,87 +1695,53 @@ gfxFontGroup::BuildFontList()
 #elif defined(MOZ_WIDGET_QT)
     enumerateFonts = false;
 #endif
-    if (!enumerateFonts) {
-        return;
-    }
-
-    // initialize fonts in the font family list
-    AutoTArray<gfxFontFamily*,10> fonts;
-    gfxPlatformFontList *pfl = gfxPlatformFontList::PlatformFontList();
-
-    // lookup fonts in the fontlist
-    for (const FontFamilyName& name : mFamilyList.GetFontlist()) {
-        if (name.IsNamed()) {
-            AddPlatformFont(name.mName, fonts);
-        } else {
-            pfl->AddGenericFonts(name.mType, mStyle.language, fonts);
-            if (mTextPerf) {
-                mTextPerf->current.genericLookups++;
-            }
-        }
-    }
-
-    // if necessary, append default generic onto the end
-    if (mFamilyList.GetDefaultFontType() != eFamily_none &&
-        !mFamilyList.HasDefaultGeneric()) {
-        pfl->AddGenericFonts(mFamilyList.GetDefaultFontType(),
-                             mStyle.language, fonts);
-        if (mTextPerf) {
-            mTextPerf->current.genericLookups++;
-        }
-    }
-
-    // build the fontlist from the specified families
-    for (gfxFontFamily* fontFamily : fonts) {
-        AddFamilyToFontList(fontFamily);
+    if (enumerateFonts) {
+        EnumerateFontList(mStyle.language);
     }
 }
 
 void
-gfxFontGroup::AddPlatformFont(const nsAString& aName,
-                              nsTArray<gfxFontFamily*>& aFamilyList)
+gfxFontGroup::FindPlatformFont(const nsAString& aName,
+                               bool aUseFontSet,
+                               void *aClosure)
 {
-    // First, look up in the user font set...
-    // If the fontSet matches the family, we must not look for a platform
-    // font of the same name, even if we fail to actually get a fontEntry
-    // here; we'll fall back to the next name in the CSS font-family list.
-    if (mUserFontSet) {
-        // Add userfonts to the fontlist whether already loaded
-        // or not. Loading is initiated during font matching.
-        gfxFontFamily* family = mUserFontSet->LookupFamily(aName);
-        if (family) {
-            aFamilyList.AppendElement(family);
-            return;
+    bool needsBold;
+    gfxFontFamily *family = nullptr;
+
+    if (aUseFontSet) {
+        // First, look up in the user font set...
+        // If the fontSet matches the family, we must not look for a platform
+        // font of the same name, even if we fail to actually get a fontEntry
+        // here; we'll fall back to the next name in the CSS font-family list.
+        if (mUserFontSet) {
+            // Add userfonts to the fontlist whether already loaded
+            // or not. Loading is initiated during font matching.
+            family = mUserFontSet->LookupFamily(aName);
         }
     }
 
     // Not known in the user font set ==> check system fonts
-    gfxPlatformFontList::PlatformFontList()
-        ->FindAndAddFamilies(aName, &aFamilyList, &mStyle, mDevToCssSize);
-}
-
-void
-gfxFontGroup::AddFamilyToFontList(gfxFontFamily* aFamily)
-{
-    NS_ASSERTION(aFamily, "trying to add a null font family to fontlist");
-    AutoTArray<gfxFontEntry*,4> fontEntryList;
-    bool needsBold;
-    aFamily->FindAllFontsForStyle(mStyle, fontEntryList, needsBold);
-    // add these to the fontlist
-    for (gfxFontEntry* fe : fontEntryList) {
-        if (!HasFont(fe)) {
-            FamilyFace ff(aFamily, fe, needsBold);
-            if (fe->mIsUserFontContainer) {
-                ff.CheckState(mSkipDrawing);
-            }
-            mFonts.AppendElement(ff);
-        }
+    if (!family) {
+        gfxPlatformFontList *fontList = gfxPlatformFontList::PlatformFontList();
+        family = fontList->FindFamily(aName, mStyle.language, mStyle.systemFont);
     }
-    // for a family marked as "check fallback faces", only mark the last
-    // entry so that fallbacks for a family are only checked once
-    if (aFamily->CheckForFallbackFaces() &&
-        !fontEntryList.IsEmpty() && !mFonts.IsEmpty()) {
-        mFonts.LastElement().SetCheckForFallbackFaces();
+
+    // if family found, do style matching and add all font entries to mFonts
+    if (family) {
+        nsAutoTArray<gfxFontEntry*,4> fontEntryList;
+        family->FindAllFontsForStyle(mStyle, fontEntryList, needsBold);
+        // add these to the fontlist
+        uint32_t n = fontEntryList.Length();
+        for (uint32_t i = 0; i < n; i++) {
+            gfxFontEntry* fe = fontEntryList[i];
+            if (!HasFont(fe)) {
+                FamilyFace ff(family, fe, needsBold);
+                if (fe->mIsUserFontContainer) {
+                    ff.CheckState(mSkipDrawing);
+                }
+                mFonts.AppendElement(ff);
+            }
+        }
     }
 }
 
@@ -1721,7 +1769,7 @@ gfxFontGroup::GetFontAt(int32_t i, uint32_t aCh)
         return nullptr;
     }
 
-    RefPtr<gfxFont> font = ff.Font();
+    nsRefPtr<gfxFont> font = ff.Font();
     if (!font) {
         gfxFontEntry* fe = mFonts[i].FontEntry();
         gfxCharacterMap* unicodeRangeMap = nullptr;
@@ -1764,7 +1812,6 @@ gfxFontGroup::FamilyFace::CheckState(bool& aSkipDrawing)
             case gfxUserFontEntry::STATUS_FAILED:
                 SetInvalid();
                 // fall-thru to the default case
-                MOZ_FALLTHROUGH;
             default:
                 SetLoading(false);
         }
@@ -1828,24 +1875,18 @@ gfxFontGroup::GetDefaultFont()
         }
     }
 
-    uint32_t numInits, loaderState;
-    pfl->GetFontlistInitInfo(numInits, loaderState);
-    NS_ASSERTION(numInits != 0,
-                 "must initialize system fontlist before getting default font!");
-
-    uint32_t numFonts = 0;
     if (!mDefaultFont) {
         // Try for a "font of last resort...."
         // Because an empty font list would be Really Bad for later code
         // that assumes it will be able to get valid metrics for layout,
         // just look for the first usable font and put in the list.
         // (see bug 554544)
-        AutoTArray<RefPtr<gfxFontFamily>,200> familyList;
-        pfl->GetFontFamilyList(familyList);
-        numFonts = familyList.Length();
-        for (uint32_t i = 0; i < numFonts; ++i) {
-            gfxFontEntry *fe = familyList[i]->FindFontForStyle(mStyle,
-                                                               needsBold);
+        nsAutoTArray<nsRefPtr<gfxFontFamily>,200> families;
+        pfl->GetFontFamilyList(families);
+        uint32_t count = families.Length();
+        for (uint32_t i = 0; i < count; ++i) {
+            gfxFontEntry *fe = families[i]->FindFontForStyle(mStyle,
+                                                             needsBold);
             if (fe) {
                 mDefaultFont = fe->FindOrMakeFont(&mStyle, needsBold);
                 if (mDefaultFont) {
@@ -1858,29 +1899,17 @@ gfxFontGroup::GetDefaultFont()
     if (!mDefaultFont) {
         // an empty font list at this point is fatal; we're not going to
         // be able to do even the most basic layout operations
-
-        // annotate crash report with fontlist info
-        nsAutoCString fontInitInfo;
-        fontInitInfo.AppendPrintf("no fonts - init: %d fonts: %d loader: %d",
-                                  numInits, numFonts, loaderState);
-#ifdef XP_WIN
-        bool dwriteEnabled = gfxWindowsPlatform::GetPlatform()->DWriteEnabled();
-        double upTime = (double) GetTickCount();
-        fontInitInfo.AppendPrintf(" backend: %s system-uptime: %9.3f sec",
-                                  dwriteEnabled ? "directwrite" : "gdi", upTime/1000);
-#endif
-        gfxCriticalError() << fontInitInfo.get();
-
         char msg[256]; // CHECK buffer length if revising message below
-        nsAutoString familiesString;
-        mFamilyList.ToString(familiesString);
+        nsAutoString families;
+        mFamilyList.ToString(families);
         snprintf_literal(msg, "unable to find a usable font (%.220s)",
-                         NS_ConvertUTF16toUTF8(familiesString).get());
+                         NS_ConvertUTF16toUTF8(families).get());
         NS_RUNTIMEABORT(msg);
     }
 
     return mDefaultFont.get();
 }
+
 
 gfxFont*
 gfxFontGroup::GetFirstValidFont(uint32_t aCh)
@@ -1940,9 +1969,8 @@ gfxFontGroup::GetFirstMathFont()
 gfxFontGroup *
 gfxFontGroup::Copy(const gfxFontStyle *aStyle)
 {
-    gfxFontGroup *fg =
-        new gfxFontGroup(mFamilyList, aStyle, mTextPerf,
-                         mUserFontSet, mDevToCssSize);
+    gfxFontGroup *fg = new gfxFontGroup(mFamilyList, aStyle, mUserFontSet);
+    fg->SetTextPerfMetrics(mTextPerf);
     return fg;
 }
 
@@ -1968,20 +1996,19 @@ gfxFontGroup::IsInvalidChar(char16_t ch)
             IsBidiControl(ch));
 }
 
-UniquePtr<gfxTextRun>
+gfxTextRun *
 gfxFontGroup::MakeEmptyTextRun(const Parameters *aParams, uint32_t aFlags)
 {
     aFlags |= TEXT_IS_8BIT | TEXT_IS_ASCII | TEXT_IS_PERSISTENT;
     return gfxTextRun::Create(aParams, 0, this, aFlags);
 }
 
-UniquePtr<gfxTextRun>
+gfxTextRun *
 gfxFontGroup::MakeSpaceTextRun(const Parameters *aParams, uint32_t aFlags)
 {
     aFlags |= TEXT_IS_8BIT | TEXT_IS_ASCII | TEXT_IS_PERSISTENT;
 
-    UniquePtr<gfxTextRun> textRun =
-        gfxTextRun::Create(aParams, 1, this, aFlags);
+    gfxTextRun *textRun = gfxTextRun::Create(aParams, 1, this, aFlags);
     if (!textRun) {
         return nullptr;
     }
@@ -2004,16 +2031,16 @@ gfxFontGroup::MakeSpaceTextRun(const Parameters *aParams, uint32_t aFlags)
         if (font->GetSpaceGlyph()) {
             // Normally, the font has a cached space glyph, so we can avoid
             // the cost of calling FindFontForChar.
-            textRun->SetSpaceGlyph(font, aParams->mDrawTarget, 0, orientation);
+            textRun->SetSpaceGlyph(font, aParams->mContext, 0, orientation);
         } else {
             // In case the primary font doesn't have <space> (bug 970891),
             // find one that does.
             uint8_t matchType;
-            RefPtr<gfxFont> spaceFont =
-                FindFontForChar(' ', 0, 0, Script::LATIN, nullptr,
+            nsRefPtr<gfxFont> spaceFont =
+                FindFontForChar(' ', 0, 0, MOZ_SCRIPT_LATIN, nullptr,
                                 &matchType);
             if (spaceFont) {
-                textRun->SetSpaceGlyph(spaceFont, aParams->mDrawTarget, 0,
+                textRun->SetSpaceGlyph(spaceFont, aParams->mContext, 0,
                                        orientation);
             }
         }
@@ -2025,11 +2052,11 @@ gfxFontGroup::MakeSpaceTextRun(const Parameters *aParams, uint32_t aFlags)
     return textRun;
 }
 
-UniquePtr<gfxTextRun>
+gfxTextRun *
 gfxFontGroup::MakeBlankTextRun(uint32_t aLength,
                                const Parameters *aParams, uint32_t aFlags)
 {
-    UniquePtr<gfxTextRun> textRun =
+    gfxTextRun *textRun =
         gfxTextRun::Create(aParams, aLength, this, aFlags);
     if (!textRun) {
         return nullptr;
@@ -2044,9 +2071,8 @@ gfxFontGroup::MakeBlankTextRun(uint32_t aLength,
     return textRun;
 }
 
-UniquePtr<gfxTextRun>
-gfxFontGroup::MakeHyphenTextRun(DrawTarget* aDrawTarget,
-                                uint32_t aAppUnitsPerDevUnit)
+gfxTextRun *
+gfxFontGroup::MakeHyphenTextRun(gfxContext *aCtx, uint32_t aAppUnitsPerDevUnit)
 {
     // only use U+2010 if it is supported by the first font in the group;
     // it's better to use ASCII '-' from the primary font than to fall back to
@@ -2054,12 +2080,12 @@ gfxFontGroup::MakeHyphenTextRun(DrawTarget* aDrawTarget,
     static const char16_t hyphen = 0x2010;
     gfxFont *font = GetFirstValidFont(uint32_t(hyphen));
     if (font->HasCharacter(hyphen)) {
-        return MakeTextRun(&hyphen, 1, aDrawTarget, aAppUnitsPerDevUnit,
+        return MakeTextRun(&hyphen, 1, aCtx, aAppUnitsPerDevUnit,
                            gfxFontGroup::TEXT_IS_PERSISTENT, nullptr);
     }
 
     static const uint8_t dash = '-';
-    return MakeTextRun(&dash, 1, aDrawTarget, aAppUnitsPerDevUnit,
+    return MakeTextRun(&dash, 1, aCtx, aAppUnitsPerDevUnit,
                        gfxFontGroup::TEXT_IS_PERSISTENT, nullptr);
 }
 
@@ -2067,18 +2093,19 @@ gfxFloat
 gfxFontGroup::GetHyphenWidth(gfxTextRun::PropertyProvider *aProvider)
 {
     if (mHyphenWidth < 0) {
-        RefPtr<DrawTarget> dt(aProvider->GetDrawTarget());
-        if (dt) {
-            UniquePtr<gfxTextRun>
-                hyphRun(MakeHyphenTextRun(dt,
+        nsRefPtr<gfxContext> ctx(aProvider->GetContext());
+        if (ctx) {
+            nsAutoPtr<gfxTextRun>
+                hyphRun(MakeHyphenTextRun(ctx,
                                           aProvider->GetAppUnitsPerDevUnit()));
-            mHyphenWidth = hyphRun.get() ? hyphRun->GetAdvanceWidth() : 0;
+            mHyphenWidth = hyphRun.get() ?
+                hyphRun->GetAdvanceWidth(0, hyphRun->GetLength(), nullptr) : 0;
         }
     }
     return mHyphenWidth;
 }
 
-UniquePtr<gfxTextRun>
+gfxTextRun *
 gfxFontGroup::MakeTextRun(const uint8_t *aString, uint32_t aLength,
                           const Parameters *aParams, uint32_t aFlags,
                           gfxMissingFontRecorder *aMFR)
@@ -2100,20 +2127,20 @@ gfxFontGroup::MakeTextRun(const uint8_t *aString, uint32_t aLength,
         return MakeBlankTextRun(aLength, aParams, aFlags);
     }
 
-    UniquePtr<gfxTextRun> textRun = gfxTextRun::Create(aParams, aLength,
-                                                       this, aFlags);
+    gfxTextRun *textRun = gfxTextRun::Create(aParams, aLength,
+                                             this, aFlags);
     if (!textRun) {
         return nullptr;
     }
 
-    InitTextRun(aParams->mDrawTarget, textRun.get(), aString, aLength, aMFR);
+    InitTextRun(aParams->mContext, textRun, aString, aLength, aMFR);
 
-    textRun->FetchGlyphExtents(aParams->mDrawTarget);
+    textRun->FetchGlyphExtents(aParams->mContext);
 
     return textRun;
 }
 
-UniquePtr<gfxTextRun>
+gfxTextRun *
 gfxFontGroup::MakeTextRun(const char16_t *aString, uint32_t aLength,
                           const Parameters *aParams, uint32_t aFlags,
                           gfxMissingFontRecorder *aMFR)
@@ -2129,22 +2156,22 @@ gfxFontGroup::MakeTextRun(const char16_t *aString, uint32_t aLength,
         return MakeBlankTextRun(aLength, aParams, aFlags);
     }
 
-    UniquePtr<gfxTextRun> textRun = gfxTextRun::Create(aParams, aLength,
-                                                       this, aFlags);
+    gfxTextRun *textRun = gfxTextRun::Create(aParams, aLength,
+                                             this, aFlags);
     if (!textRun) {
         return nullptr;
     }
 
-    InitTextRun(aParams->mDrawTarget, textRun.get(), aString, aLength, aMFR);
+    InitTextRun(aParams->mContext, textRun, aString, aLength, aMFR);
 
-    textRun->FetchGlyphExtents(aParams->mDrawTarget);
+    textRun->FetchGlyphExtents(aParams->mContext);
 
     return textRun;
 }
 
 template<typename T>
 void
-gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
+gfxFontGroup::InitTextRun(gfxContext *aContext,
                           gfxTextRun *aTextRun,
                           const T *aString,
                           uint32_t aLength,
@@ -2155,7 +2182,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
     // we need to do numeral processing even on 8-bit text,
     // in case we're converting Western to Hindi/Arabic digits
     int32_t numOption = gfxPlatform::GetPlatform()->GetBidiNumeralOption();
-    UniquePtr<char16_t[]> transformedString;
+    nsAutoArrayPtr<char16_t> transformedString;
     if (numOption != IBMBIDI_NUMERAL_NOMINAL) {
         // scan the string for numerals that may need to be transformed;
         // if we find any, we'll make a local copy here and use that for
@@ -2167,7 +2194,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
             char16_t newCh = HandleNumberInChar(origCh, prevIsArabic, numOption);
             if (newCh != origCh) {
                 if (!transformedString) {
-                    transformedString = MakeUnique<char16_t[]>(aLength);
+                    transformedString = new char16_t[aLength];
                     if (sizeof(T) == sizeof(char16_t)) {
                         memcpy(transformedString.get(), aString, i * sizeof(char16_t));
                     } else {
@@ -2184,9 +2211,9 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
         }
     }
 
-    LogModule* log = mStyle.systemFont
-                   ? gfxPlatform::GetLog(eGfxLog_textrunui)
-                   : gfxPlatform::GetLog(eGfxLog_textrun);
+    PRLogModuleInfo *log = (mStyle.systemFont ?
+                            gfxPlatform::GetLog(eGfxLog_textrunui) :
+                            gfxPlatform::GetLog(eGfxLog_textrun));
 
     // variant fallback handling may end up passing through this twice
     bool redo;
@@ -2211,7 +2238,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
                          "serif" :
                          (mFamilyList.GetDefaultFontType() == eFamily_sans_serif ?
                           "sans-serif" : "none")),
-                        lang.get(), Script::LATIN, aLength,
+                        lang.get(), MOZ_SCRIPT_LATIN, aLength,
                         uint32_t(mStyle.weight), uint32_t(mStyle.stretch),
                         (mStyle.style & NS_FONT_STYLE_ITALIC ? "italic" :
                         (mStyle.style & NS_FONT_STYLE_OBLIQUE ? "oblique" :
@@ -2223,8 +2250,8 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
 
             // the text is still purely 8-bit; bypass the script-run itemizer
             // and treat it as a single Latin run
-            InitScriptRun(aDrawTarget, aTextRun, aString,
-                          0, aLength, Script::LATIN, aMFR);
+            InitScriptRun(aContext, aTextRun, aString,
+                          0, aLength, MOZ_SCRIPT_LATIN, aMFR);
         } else {
             const char16_t *textPtr;
             if (transformedString) {
@@ -2240,7 +2267,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
             gfxScriptItemizer scriptRuns(textPtr, aLength);
 
             uint32_t runStart = 0, runLimit = aLength;
-            Script runScript = Script::LATIN;
+            int32_t runScript = MOZ_SCRIPT_LATIN;
             while (scriptRuns.Next(runStart, runLimit, runScript)) {
 
                 if (MOZ_UNLIKELY(MOZ_LOG_TEST(log, LogLevel::Warning))) {
@@ -2269,7 +2296,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
                             NS_ConvertUTF16toUTF8(textPtr + runStart, runLen).get()));
                 }
 
-                InitScriptRun(aDrawTarget, aTextRun, textPtr + runStart,
+                InitScriptRun(aContext, aTextRun, textPtr + runStart,
                               runStart, runLimit - runStart, runScript, aMFR);
             }
         }
@@ -2316,14 +2343,14 @@ IsPUA(uint32_t aUSV)
 
 template<typename T>
 void
-gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget,
+gfxFontGroup::InitScriptRun(gfxContext *aContext,
                             gfxTextRun *aTextRun,
                             const T *aString, // text for this script run,
                                               // not the entire textrun
                             uint32_t aOffset, // position of the script run
                                               // within the textrun
                             uint32_t aLength, // length of the script run
-                            Script aRunScript,
+                            int32_t aRunScript,
                             gfxMissingFontRecorder *aMFR)
 {
     NS_ASSERTION(aLength > 0, "don't call InitScriptRun for a 0-length run");
@@ -2339,7 +2366,7 @@ gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget,
     gfxFont *mainFont = GetFirstValidFont();
 
     uint32_t runStart = 0;
-    AutoTArray<gfxTextRange,3> fontRanges;
+    nsAutoTArray<gfxTextRange,3> fontRanges;
     ComputeRanges(fontRanges, aString, aLength, aRunScript,
                   aTextRun->GetFlags() & gfxTextRunFactory::TEXT_ORIENT_MASK);
     uint32_t numRanges = fontRanges.Length();
@@ -2358,7 +2385,7 @@ gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget,
             aTextRun->AddGlyphRun(matchedFont, range.matchType,
                                   aOffset + runStart, (matchedLength > 0),
                                   range.orientation);
-            if (!matchedFont->SplitAndInitTextRun(aDrawTarget, aTextRun,
+            if (!matchedFont->SplitAndInitTextRun(aContext, aTextRun,
                                                   aString + runStart,
                                                   aOffset + runStart,
                                                   matchedLength,
@@ -2393,12 +2420,12 @@ gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget,
                     return;
                 }
 
-                RefPtr<gfxFont> subSuperFont =
+                nsRefPtr<gfxFont> subSuperFont =
                     matchedFont->GetSubSuperscriptFont(aTextRun->GetAppUnitsPerDevUnit());
                 aTextRun->AddGlyphRun(subSuperFont, range.matchType,
                                       aOffset + runStart, (matchedLength > 0),
                                       range.orientation);
-                if (!subSuperFont->SplitAndInitTextRun(aDrawTarget, aTextRun,
+                if (!subSuperFont->SplitAndInitTextRun(aContext, aTextRun,
                                                        aString + runStart,
                                                        aOffset + runStart,
                                                        matchedLength,
@@ -2415,7 +2442,7 @@ gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget,
                                                          syntheticUpper))
             {
                 // fallback for small-caps variant glyphs
-                if (!matchedFont->InitFakeSmallCapsRun(aDrawTarget, aTextRun,
+                if (!matchedFont->InitFakeSmallCapsRun(aContext, aTextRun,
                                                        aString + runStart,
                                                        aOffset + runStart,
                                                        matchedLength,
@@ -2443,7 +2470,7 @@ gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget,
                 aTextRun->AddGlyphRun(matchedFont, range.matchType,
                                       aOffset + runStart, (matchedLength > 0),
                                       range.orientation);
-                if (!matchedFont->SplitAndInitTextRun(aDrawTarget, aTextRun,
+                if (!matchedFont->SplitAndInitTextRun(aContext, aTextRun,
                                                       aString + runStart,
                                                       aOffset + runStart,
                                                       matchedLength,
@@ -2549,14 +2576,14 @@ gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget,
 
 gfxTextRun *
 gfxFontGroup::GetEllipsisTextRun(int32_t aAppUnitsPerDevPixel, uint32_t aFlags,
-                                 LazyReferenceDrawTargetGetter& aRefDrawTargetGetter)
+                                 LazyReferenceContextGetter& aRefContextGetter)
 {
     MOZ_ASSERT(!(aFlags & ~TEXT_ORIENT_MASK),
                "flags here should only be used to specify orientation");
     if (mCachedEllipsisTextRun &&
         (mCachedEllipsisTextRun->GetFlags() & TEXT_ORIENT_MASK) == aFlags &&
         mCachedEllipsisTextRun->GetAppUnitsPerDevUnit() == aAppUnitsPerDevPixel) {
-        return mCachedEllipsisTextRun.get();
+        return mCachedEllipsisTextRun;
     }
 
     // Use a Unicode ellipsis if the font supports it,
@@ -2568,36 +2595,42 @@ gfxFontGroup::GetEllipsisTextRun(int32_t aAppUnitsPerDevPixel, uint32_t aFlags,
         : nsDependentString(kASCIIPeriodsChar,
                             ArrayLength(kASCIIPeriodsChar) - 1);
 
-    RefPtr<DrawTarget> refDT = aRefDrawTargetGetter.GetRefDrawTarget();
+    nsRefPtr<gfxContext> refCtx = aRefContextGetter.GetRefContext();
     Parameters params = {
-        refDT, nullptr, nullptr, nullptr, 0, aAppUnitsPerDevPixel
+        refCtx, nullptr, nullptr, nullptr, 0, aAppUnitsPerDevPixel
     };
-    mCachedEllipsisTextRun =
+    gfxTextRun* textRun =
         MakeTextRun(ellipsis.get(), ellipsis.Length(), &params,
                     aFlags | TEXT_IS_PERSISTENT, nullptr);
-    if (!mCachedEllipsisTextRun) {
+    if (!textRun) {
         return nullptr;
     }
-    // don't let the presence of a cached ellipsis textrun prolong the
-    // fontgroup's life
-    mCachedEllipsisTextRun->ReleaseFontGroup();
-    return mCachedEllipsisTextRun.get();
+    mCachedEllipsisTextRun = textRun;
+    textRun->ReleaseFontGroup(); // don't let the presence of a cached ellipsis
+                                 // textrun prolong the fontgroup's life
+    return textRun;
 }
 
 already_AddRefed<gfxFont>
-gfxFontGroup::FindFallbackFaceForChar(gfxFontFamily* aFamily, uint32_t aCh,
-                                      Script aRunScript)
+gfxFontGroup::FindNonItalicFaceForChar(gfxFontFamily* aFamily, uint32_t aCh)
 {
-    GlobalFontMatch data(aCh, aRunScript, &mStyle);
-    aFamily->SearchAllFontsForChar(&data);
-    gfxFontEntry* fe = data.mBestMatch;
-    if (!fe) {
+    NS_ASSERTION(mStyle.style != NS_FONT_STYLE_NORMAL,
+                 "should only be called in the italic/oblique case");
+
+    gfxFontStyle regularStyle = mStyle;
+    regularStyle.style = NS_FONT_STYLE_NORMAL;
+    bool needsBold;
+    gfxFontEntry *fe = aFamily->FindFontForStyle(regularStyle, needsBold);
+    NS_ASSERTION(!fe->mIsUserFontContainer,
+                 "should only be searching platform fonts");
+    if (!fe->HasCharacter(aCh)) {
         return nullptr;
     }
 
-    bool needsBold = mStyle.weight >= 600 && !fe->IsBold() &&
-                     mStyle.allowSyntheticWeight;
-    RefPtr<gfxFont> font = fe->FindOrMakeFont(&mStyle, needsBold);
+    nsRefPtr<gfxFont> font = fe->FindOrMakeFont(&mStyle, needsBold);
+    if (!font->Valid()) {
+        return nullptr;
+    }
     return font.forget();
 }
 
@@ -2614,7 +2647,7 @@ gfxFontGroup::GetUnderlineOffset()
                 !ff.FontEntry()->IsUserFont() &&
                 ff.Family() &&
                 ff.Family()->IsBadUnderlineFamily()) {
-                RefPtr<gfxFont> font = GetFontAt(i);
+                nsRefPtr<gfxFont> font = GetFontAt(i);
                 if (!font) {
                     continue;
                 }
@@ -2638,38 +2671,16 @@ gfxFontGroup::GetUnderlineOffset()
 
 already_AddRefed<gfxFont>
 gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
-                              Script aRunScript, gfxFont *aPrevMatchedFont,
+                              int32_t aRunScript, gfxFont *aPrevMatchedFont,
                               uint8_t *aMatchType)
 {
-    // If the char is a cluster extender, we want to use the same font as the
-    // preceding character if possible. This is preferable to using the font
-    // group because it avoids breaks in shaping within a cluster.
+    // If the char is a cluster extender, we want to use the same font
+    // as the preceding character if possible. This is preferable to using
+    // the font group because it avoids breaks in shaping within a cluster.
     if (aPrevMatchedFont && IsClusterExtender(aCh) &&
         aPrevMatchedFont->HasCharacter(aCh)) {
-        RefPtr<gfxFont> ret = aPrevMatchedFont;
+        nsRefPtr<gfxFont> ret = aPrevMatchedFont;
         return ret.forget();
-    }
-
-    // Special cases for NNBSP (as used in Mongolian):
-    const uint32_t NARROW_NO_BREAK_SPACE = 0x202f;
-    if (aCh == NARROW_NO_BREAK_SPACE) {
-        // If there is no preceding character, try the font that we'd use
-        // for the next char (unless it's just another NNBSP; we don't try
-        // to look ahead through a whole run of them).
-        if (!aPrevCh && aNextCh && aNextCh != NARROW_NO_BREAK_SPACE) {
-            RefPtr<gfxFont> nextFont =
-                FindFontForChar(aNextCh, 0, 0, aRunScript, aPrevMatchedFont,
-                                aMatchType);
-            if (nextFont && nextFont->HasCharacter(aCh)) {
-                return nextFont.forget();
-            }
-        }
-        // Otherwise, treat NNBSP like a cluster extender (as above) and try
-        // to continue the preceding font run.
-        if (aPrevMatchedFont && aPrevMatchedFont->HasCharacter(aCh)) {
-            RefPtr<gfxFont> ret = aPrevMatchedFont;
-            return ret.forget();
-        }
     }
 
     // To optimize common cases, try the first font in the font-group
@@ -2680,36 +2691,23 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
     bool isVarSelector = gfxFontUtils::IsVarSelector(aCh);
 
     if (!isJoinControl && !wasJoinCauser && !isVarSelector) {
-        RefPtr<gfxFont> firstFont = GetFontAt(0, aCh);
+        nsRefPtr<gfxFont> firstFont = GetFontAt(0, aCh);
         if (firstFont) {
             if (firstFont->HasCharacter(aCh)) {
                 *aMatchType = gfxTextRange::kFontGroup;
                 return firstFont.forget();
             }
 
-            RefPtr<gfxFont> font;
-            if (mFonts[0].CheckForFallbackFaces()) {
-                font = FindFallbackFaceForChar(mFonts[0].Family(), aCh,
-                                               aRunScript);
-            } else if (!firstFont->GetFontEntry()->IsUserFont()) {
-                // For platform fonts (but not userfonts), we may need to do
-                // fallback within the family to handle cases where some faces
-                // such as Italic or Black have reduced character sets compared
-                // to the family's Regular face.
-                gfxFontEntry* fe = firstFont->GetFontEntry();
-                if (!fe->IsUpright() ||
-                    fe->Weight() != NS_FONT_WEIGHT_NORMAL ||
-                    fe->Stretch() != NS_FONT_STRETCH_NORMAL) {
-                    // If style/weight/stretch was not Normal, see if we can
-                    // fall back to a next-best face (e.g. Arial Black -> Bold,
-                    // or Arial Narrow -> Regular).
-                    font = FindFallbackFaceForChar(mFonts[0].Family(), aCh,
-                                                   aRunScript);
+            // If italic, test the regular face to see if it supports character.
+            // Only do this for platform fonts, not userfonts.
+            if (mStyle.style != NS_FONT_STYLE_NORMAL &&
+                !firstFont->GetFontEntry()->IsUserFont()) {
+                nsRefPtr<gfxFont> font =
+                    FindNonItalicFaceForChar(mFonts[0].Family(), aCh);
+                if (font) {
+                    *aMatchType = gfxTextRange::kFontGroup;
+                    return font.forget();
                 }
-            }
-            if (font) {
-                *aMatchType = gfxTextRange::kFontGroup;
-                return font.forget();
             }
         }
 
@@ -2723,7 +2721,7 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
         // actually be rendered (see bug 716229)
         if (isJoinControl ||
             GetGeneralCategory(aCh) == HB_UNICODE_GENERAL_CATEGORY_CONTROL) {
-            RefPtr<gfxFont> ret = aPrevMatchedFont;
+            nsRefPtr<gfxFont> ret = aPrevMatchedFont;
             return ret.forget();
         }
 
@@ -2731,7 +2729,7 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
         // use the same font as the previous range if we can
         if (wasJoinCauser) {
             if (aPrevMatchedFont->HasCharacter(aCh)) {
-                RefPtr<gfxFont> ret = aPrevMatchedFont;
+                nsRefPtr<gfxFont> ret = aPrevMatchedFont;
                 return ret.forget();
             }
         }
@@ -2742,7 +2740,7 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
     // otherwise the text run will be divided.
     if (isVarSelector) {
         if (aPrevMatchedFont) {
-            RefPtr<gfxFont> ret = aPrevMatchedFont;
+            nsRefPtr<gfxFont> ret = aPrevMatchedFont;
             return ret.forget();
         }
         // VS alone. it's meaningless to search different fonts
@@ -2758,7 +2756,7 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
         }
 
         // if available, use already made gfxFont and check for character
-        RefPtr<gfxFont> font = ff.Font();
+        nsRefPtr<gfxFont> font = ff.Font();
         if (font) {
             if (font->HasCharacter(aCh)) {
                 return font.forget();
@@ -2803,37 +2801,22 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
             }
         }
 
-        // check other family faces if needed
-        if (ff.CheckForFallbackFaces()) {
-            NS_ASSERTION(i == 0 ? true :
-                         !mFonts[i-1].CheckForFallbackFaces() ||
-                         !mFonts[i-1].Family()->Name().Equals(ff.Family()->Name()),
-                         "should only do fallback once per font family");
-            font = FindFallbackFaceForChar(ff.Family(), aCh, aRunScript);
+        // If italic, test the regular face to see if it supports the character.
+        // Only do this for platform fonts, not userfonts.
+        fe = ff.FontEntry();
+        if (mStyle.style != NS_FONT_STYLE_NORMAL &&
+            !fe->mIsUserFontContainer &&
+            !fe->IsUserFont()) {
+            font = FindNonItalicFaceForChar(ff.Family(), aCh);
             if (font) {
                 *aMatchType = gfxTextRange::kFontGroup;
                 return font.forget();
-            }
-        } else {
-            // For platform fonts, but not user fonts, consider intra-family
-            // fallback to handle styles with reduced character sets (see
-            // also above).
-            fe = ff.FontEntry();
-            if (!fe->mIsUserFontContainer && !fe->IsUserFont() &&
-                (!fe->IsUpright() ||
-                 fe->Weight() != NS_FONT_WEIGHT_NORMAL ||
-                 fe->Stretch() != NS_FONT_STRETCH_NORMAL)) {
-                font = FindFallbackFaceForChar(ff.Family(), aCh, aRunScript);
-                if (font) {
-                    *aMatchType = gfxTextRange::kFontGroup;
-                    return font.forget();
-                }
             }
         }
     }
 
     if (fontListLength == 0) {
-        RefPtr<gfxFont> defaultFont = GetDefaultFont();
+        nsRefPtr<gfxFont> defaultFont = GetDefaultFont();
         if (defaultFont->HasCharacter(aCh)) {
             *aMatchType = gfxTextRange::kFontGroup;
             return defaultFont.forget();
@@ -2845,7 +2828,7 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
         return nullptr;
 
     // 2. search pref fonts
-    RefPtr<gfxFont> font = WhichPrefFontSupportsChar(aCh);
+    nsRefPtr<gfxFont> font = WhichPrefFontSupportsChar(aCh);
     if (font) {
         *aMatchType = gfxTextRange::kPrefsFallback;
         return font.forget();
@@ -2855,12 +2838,12 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
     // -- before searching for something else check the font used for the previous character
     if (aPrevMatchedFont && aPrevMatchedFont->HasCharacter(aCh)) {
         *aMatchType = gfxTextRange::kSystemFallback;
-        RefPtr<gfxFont> ret = aPrevMatchedFont;
+        nsRefPtr<gfxFont> ret = aPrevMatchedFont;
         return ret.forget();
     }
 
     // never fall back for characters from unknown scripts
-    if (aRunScript == Script::UNKNOWN) {
+    if (aRunScript == HB_SCRIPT_UNKNOWN) {
         return nullptr;
     }
 
@@ -2882,7 +2865,7 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
 template<typename T>
 void gfxFontGroup::ComputeRanges(nsTArray<gfxTextRange>& aRanges,
                                  const T *aString, uint32_t aLength,
-                                 Script aRunScript, uint16_t aOrientation)
+                                 int32_t aRunScript, uint16_t aOrientation)
 {
     NS_ASSERTION(aRanges.Length() == 0, "aRanges must be initially empty");
     NS_ASSERTION(aLength > 0, "don't call ComputeRanges for zero-length text");
@@ -2940,7 +2923,7 @@ void gfxFontGroup::ComputeRanges(nsTArray<gfxTextRange>& aRanges,
         }
 
         // find the font for this char
-        RefPtr<gfxFont> font =
+        nsRefPtr<gfxFont> font =
             FindFontForChar(ch, prevCh, nextCh, aRunScript, prevFont,
                             &matchType);
 
@@ -2978,11 +2961,10 @@ void gfxFontGroup::ComputeRanges(nsTArray<gfxTextRange>& aRanges,
             lastRangeIndex++;
             prevFont = font;
         } else {
-            // if font or orientation has changed, make a new range...
-            // unless ch is a variation selector (bug 1248248)
+            // if font has changed, make a new range
             gfxTextRange& prevRange = aRanges[lastRangeIndex];
             if (prevRange.font != font || prevRange.matchType != matchType ||
-                (prevRange.orientation != orient && !IsClusterExtender(ch))) {
+                prevRange.orientation != orient) {
                 // close out the previous range
                 prevRange.end = origI;
                 aRanges.AppendElement(gfxTextRange(origI, i + 1,
@@ -3004,9 +2986,9 @@ void gfxFontGroup::ComputeRanges(nsTArray<gfxTextRange>& aRanges,
     aRanges[lastRangeIndex].end = aLength;
 
 #ifndef RELEASE_BUILD
-    LogModule* log = mStyle.systemFont
-                   ? gfxPlatform::GetLog(eGfxLog_textrunui)
-                   : gfxPlatform::GetLog(eGfxLog_textrun);
+    PRLogModuleInfo *log = (mStyle.systemFont ?
+                            gfxPlatform::GetLog(eGfxLog_textrunui) :
+                            gfxPlatform::GetLog(eGfxLog_textrun));
 
     if (MOZ_UNLIKELY(MOZ_LOG_TEST(log, LogLevel::Debug))) {
         nsAutoCString lang;
@@ -3121,15 +3103,36 @@ gfxFontGroup::ContainsUserFont(const gfxUserFontEntry* aUserFont)
     return false;
 }
 
+struct PrefFontCallbackData {
+    explicit PrefFontCallbackData(nsTArray<nsRefPtr<gfxFontFamily> >& aFamiliesArray)
+        : mPrefFamilies(aFamiliesArray)
+    {}
+
+    nsTArray<nsRefPtr<gfxFontFamily> >& mPrefFamilies;
+
+    static bool AddFontFamilyEntry(eFontPrefLang aLang, const nsAString& aName, void *aClosure)
+    {
+        PrefFontCallbackData *prefFontData = static_cast<PrefFontCallbackData*>(aClosure);
+
+        // map pref lang to langGroup for language-sensitive lookups
+        nsIAtom* lang = gfxPlatform::GetLangGroupForPrefLang(aLang);
+        gfxFontFamily *family =
+            gfxPlatformFontList::PlatformFontList()->FindFamily(aName, lang);
+        if (family) {
+            prefFontData->mPrefFamilies.AppendElement(family);
+        }
+        return true;
+    }
+};
+
 already_AddRefed<gfxFont>
 gfxFontGroup::WhichPrefFontSupportsChar(uint32_t aCh)
 {
-    RefPtr<gfxFont> font;
+    nsRefPtr<gfxFont> font;
 
     // get the pref font list if it hasn't been set up already
     uint32_t unicodeRange = FindCharUnicodeRange(aCh);
-    gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
-    eFontPrefLang charLang = pfl->GetFontPrefLangFor(unicodeRange);
+    eFontPrefLang charLang = gfxPlatform::GetPlatform()->GetFontPrefLangFor(unicodeRange);
 
     // if the last pref font was the first family in the pref list, no need to recheck through a list of families
     if (mLastPrefFont && charLang == mLastPrefLang &&
@@ -3142,22 +3145,29 @@ gfxFontGroup::WhichPrefFontSupportsChar(uint32_t aCh)
     eFontPrefLang prefLangs[kMaxLenPrefLangList];
     uint32_t i, numLangs = 0;
 
-    pfl->GetLangPrefs(prefLangs, numLangs, charLang, mPageLang);
+    gfxPlatform::GetPlatform()->GetLangPrefs(prefLangs, numLangs, charLang, mPageLang);
 
     for (i = 0; i < numLangs; i++) {
+        nsAutoTArray<nsRefPtr<gfxFontFamily>, 5> families;
         eFontPrefLang currentLang = prefLangs[i];
-        mozilla::FontFamilyType defaultGeneric =
-            pfl->GetDefaultGeneric(currentLang);
-        nsTArray<RefPtr<gfxFontFamily>>* families =
-            pfl->GetPrefFontsLangGroup(defaultGeneric, currentLang);
-        NS_ASSERTION(families, "no pref font families found");
+
+        gfxPlatformFontList *fontList = gfxPlatformFontList::PlatformFontList();
+
+        // get the pref families for a single pref lang
+        if (!fontList->GetPrefFontFamilyEntries(currentLang, &families)) {
+            eFontPrefLang prefLangsToSearch[1] = { currentLang };
+            PrefFontCallbackData prefFontData(families);
+            gfxPlatform::ForEachPrefFont(prefLangsToSearch, 1, PrefFontCallbackData::AddFontFamilyEntry,
+                                           &prefFontData);
+            fontList->SetPrefFontFamilyEntries(currentLang, families);
+        }
 
         // find the first pref font that includes the character
         uint32_t  j, numPrefs;
-        numPrefs = families->Length();
+        numPrefs = families.Length();
         for (j = 0; j < numPrefs; j++) {
             // look up the appropriate face
-            gfxFontFamily *family = (*families)[j];
+            gfxFontFamily *family = families[j];
             if (!family) continue;
 
             // if a pref font is used, it's likely to be used again in the same text run.
@@ -3173,7 +3183,7 @@ gfxFontGroup::WhichPrefFontSupportsChar(uint32_t aCh)
             gfxFontEntry *fe = family->FindFontForStyle(mStyle, needsBold);
             // if ch in cmap, create and return a gfxFont
             if (fe && fe->HasCharacter(aCh)) {
-                RefPtr<gfxFont> prefFont = fe->FindOrMakeFont(&mStyle, needsBold);
+                nsRefPtr<gfxFont> prefFont = fe->FindOrMakeFont(&mStyle, needsBold);
                 if (!prefFont) continue;
                 mLastPrefFamily = family;
                 mLastPrefFont = prefFont;
@@ -3190,14 +3200,14 @@ gfxFontGroup::WhichPrefFontSupportsChar(uint32_t aCh)
 
 already_AddRefed<gfxFont>
 gfxFontGroup::WhichSystemFontSupportsChar(uint32_t aCh, uint32_t aNextCh,
-                                          Script aRunScript)
+                                          int32_t aRunScript)
 {
     gfxFontEntry *fe = 
         gfxPlatformFontList::PlatformFontList()->
             SystemFindFontForChar(aCh, aNextCh, aRunScript, &mStyle);
     if (fe) {
         bool wantBold = mStyle.ComputeWeight() >= 6;
-        RefPtr<gfxFont> font =
+        nsRefPtr<gfxFont> font =
             fe->FindOrMakeFont(&mStyle, wantBold && !fe->IsBold());
         return font.forget();
     }
@@ -3235,12 +3245,9 @@ gfxMissingFontRecorder::Flush()
             }
             mNotifiedFonts[i] |= (1 << j);
             if (!fontNeeded.IsEmpty()) {
-                fontNeeded.Append(char16_t(','));
+                fontNeeded.Append(PRUnichar(','));
             }
-            uint32_t sc = i * 32 + j;
-            MOZ_ASSERT(sc < static_cast<uint32_t>(Script::NUM_SCRIPT_CODES),
-                       "how did we set the bit for an invalid script code?");
-            uint32_t tag = GetScriptTagForCode(static_cast<Script>(sc));
+            uint32_t tag = GetScriptTagForCode(i * 32 + j);
             fontNeeded.Append(char16_t(tag >> 24));
             fontNeeded.Append(char16_t((tag >> 16) & 0xff));
             fontNeeded.Append(char16_t((tag >> 8) & 0xff));

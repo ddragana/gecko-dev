@@ -109,7 +109,7 @@ protected:
   nsresult GetBinding(nsIContent* aBoundElement, nsIURI* aURI,
                       bool aPeekFlag, nsIPrincipal* aOriginPrincipal,
                       bool* aIsReady, nsXBLBinding** aResult,
-                      nsTArray<nsCOMPtr<nsIURI>>& aDontExtendURIs);
+                      nsTArray<nsIURI*>& aDontExtendURIs);
 
 // MEMBER VARIABLES
 public:

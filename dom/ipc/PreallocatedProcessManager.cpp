@@ -68,11 +68,11 @@ private:
   void NuwaFork();
 
   // initialization off the critical path of app startup.
-  CancelableRunnable* mPreallocateAppProcessTask;
+  CancelableTask* mPreallocateAppProcessTask;
 
   // The array containing the preallocated processes. 4 as the inline storage size
-  // should be enough so we don't need to grow the AutoTArray.
-  AutoTArray<RefPtr<ContentParent>, 4> mSpareProcesses;
+  // should be enough so we don't need to grow the nsAutoTArray.
+  nsAutoTArray<nsRefPtr<ContentParent>, 4> mSpareProcesses;
 
   // Nuwa process is ready for creating new process.
   bool mIsNuwaReady;
@@ -95,7 +95,7 @@ private:
 
   bool mEnabled;
   bool mShutdown;
-  RefPtr<ContentParent> mPreallocatedAppProcess;
+  nsRefPtr<ContentParent> mPreallocatedAppProcess;
 };
 
 /* static */ StaticRefPtr<PreallocatedProcessManagerImpl>
@@ -205,6 +205,7 @@ PreallocatedProcessManagerImpl::AllocateAfterDelay()
   }
 
   MessageLoop::current()->PostDelayedTask(
+    FROM_HERE,
     NewRunnableMethod(this, &PreallocatedProcessManagerImpl::AllocateOnIdle),
     Preferences::GetUint("dom.ipc.processPrelaunch.delayMs",
                          DEFAULT_ALLOCATE_DELAY));
@@ -217,7 +218,9 @@ PreallocatedProcessManagerImpl::AllocateOnIdle()
     return;
   }
 
-  MessageLoop::current()->PostIdleTask(NewRunnableMethod(this, &PreallocatedProcessManagerImpl::AllocateNow));
+  MessageLoop::current()->PostIdleTask(
+    FROM_HERE,
+    NewRunnableMethod(this, &PreallocatedProcessManagerImpl::AllocateNow));
 }
 
 void
@@ -242,10 +245,10 @@ PreallocatedProcessManagerImpl::ScheduleDelayedNuwaFork()
     return;
   }
 
-  RefPtr<CancelableRunnable> task = NewCancelableRunnableMethod(
+  mPreallocateAppProcessTask = NewRunnableMethod(
     this, &PreallocatedProcessManagerImpl::DelayedNuwaFork);
-  mPreallocateAppProcessTask = task;
-  MessageLoop::current()->PostDelayedTask(task.forget(),
+  MessageLoop::current()->PostDelayedTask(
+    FROM_HERE, mPreallocateAppProcessTask,
     Preferences::GetUint("dom.ipc.processPrelaunch.delayMs",
                          DEFAULT_ALLOCATE_DELAY));
 }
@@ -275,16 +278,11 @@ PreallocatedProcessManagerImpl::GetSpareProcess()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!mIsNuwaReady) {
+  if (mSpareProcesses.IsEmpty()) {
     return nullptr;
   }
 
-  if (mSpareProcesses.IsEmpty()) {
-    // After this call, there should be a spare process.
-    mPreallocatedAppProcess->ForkNewProcess(true);
-  }
-
-  RefPtr<ContentParent> process = mSpareProcesses.LastElement();
+  nsRefPtr<ContentParent> process = mSpareProcesses.LastElement();
   mSpareProcesses.RemoveElementAt(mSpareProcesses.Length() - 1);
 
   if (mSpareProcesses.IsEmpty() && mIsNuwaReady) {
@@ -296,43 +294,6 @@ PreallocatedProcessManagerImpl::GetSpareProcess()
   return process.forget();
 }
 
-static bool
-TestCaseEnabled()
-{
-  return Preferences::GetBool("dom.ipc.preallocatedProcessManager.testMode");
-}
-
-static void
-SendTestOnlyNotification(const char* aMessage)
-{
-  if (!TestCaseEnabled()) {
-    return;
-  }
-
-  AutoSafeJSContext cx;
-  nsString message;
-  message.AppendPrintf("%s", aMessage);
-
-  nsCOMPtr<nsIMessageBroadcaster> ppmm =
-    do_GetService("@mozilla.org/parentprocessmessagemanager;1");
-
-  mozilla::Unused << ppmm->BroadcastAsyncMessage(
-      message, JS::NullHandleValue, JS::NullHandleValue, cx, 1);
-}
-
-static void
-KillOrCloseProcess(ContentParent* aProcess)
-{
-  if (TestCaseEnabled()) {
-    // KillHard() the process because we don't want the process to abort when we
-    // close the IPC channel while it's still running and creating actors.
-    aProcess->KillHard("Killed by test case.");
-  }
-  else {
-    aProcess->Close();
-  }
-}
-
 /**
  * Publish a ContentParent to spare process list.
  */
@@ -341,7 +302,14 @@ PreallocatedProcessManagerImpl::PublishSpareProcess(ContentParent* aContent)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  SendTestOnlyNotification("TEST-ONLY:nuwa-add-new-process");
+  if (Preferences::GetBool("dom.ipc.preallocatedProcessManager.testMode")) {
+    AutoJSContext cx;
+    nsCOMPtr<nsIMessageBroadcaster> ppmm =
+      do_GetService("@mozilla.org/parentprocessmessagemanager;1");
+    mozilla::unused << ppmm->BroadcastAsyncMessage(
+      NS_LITERAL_STRING("TEST-ONLY:nuwa-add-new-process"),
+      JS::NullHandleValue, JS::NullHandleValue, cx, 1);
+  }
 
   mSpareProcesses.AppendElement(aContent);
 }
@@ -359,8 +327,8 @@ PreallocatedProcessManagerImpl::MaybeForgetSpare(ContentParent* aContent)
     mPreallocatedAppProcess = nullptr;
     mIsNuwaReady = false;
     while (mSpareProcesses.Length() > 0) {
-      RefPtr<ContentParent> process = mSpareProcesses[mSpareProcesses.Length() - 1];
-      KillOrCloseProcess(aContent);
+      nsRefPtr<ContentParent> process = mSpareProcesses[mSpareProcesses.Length() - 1];
+      process->Close();
       mSpareProcesses.RemoveElementAt(mSpareProcesses.Length() - 1);
     }
     ScheduleDelayedNuwaFork();
@@ -380,8 +348,14 @@ PreallocatedProcessManagerImpl::OnNuwaReady()
   ProcessPriorityManager::SetProcessPriority(mPreallocatedAppProcess,
                                              hal::PROCESS_PRIORITY_MASTER);
   mIsNuwaReady = true;
-  SendTestOnlyNotification("TEST-ONLY:nuwa-ready");
-
+  if (Preferences::GetBool("dom.ipc.preallocatedProcessManager.testMode")) {
+    AutoJSContext cx;
+    nsCOMPtr<nsIMessageBroadcaster> ppmm =
+      do_GetService("@mozilla.org/parentprocessmessagemanager;1");
+    mozilla::unused << ppmm->BroadcastAsyncMessage(
+      NS_LITERAL_STRING("TEST-ONLY:nuwa-ready"),
+      JS::NullHandleValue, JS::NullHandleValue, cx, 1);
+  }
   NuwaFork();
 }
 
@@ -391,10 +365,11 @@ PreallocatedProcessManagerImpl::PreallocatedProcessReady()
   return !mSpareProcesses.IsEmpty();
 }
 
+
 void
 PreallocatedProcessManagerImpl::NuwaFork()
 {
-  mPreallocatedAppProcess->ForkNewProcess(false);
+  mozilla::unused << mPreallocatedAppProcess->SendNuwaFork();
 }
 #endif
 
@@ -418,8 +393,8 @@ PreallocatedProcessManagerImpl::Disable()
   if (mPreallocatedAppProcess) {
 #ifdef MOZ_NUWA_PROCESS
     while (mSpareProcesses.Length() > 0){
-      RefPtr<ContentParent> process = mSpareProcesses[0];
-      KillOrCloseProcess(process);
+      nsRefPtr<ContentParent> process = mSpareProcesses[0];
+      process->Close();
       mSpareProcesses.RemoveElementAt(0);
     }
     mIsNuwaReady = false;

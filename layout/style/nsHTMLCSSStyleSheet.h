@@ -20,7 +20,6 @@ class nsRuleWalker;
 struct MiscContainer;
 
 namespace mozilla {
-enum class CSSPseudoElementType : uint8_t;
 namespace dom {
 class Element;
 } // namespace dom
@@ -44,8 +43,7 @@ public:
   virtual nsRestyleHint HasStateDependentStyle(PseudoElementStateRuleProcessorData* aData) override;
   virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData) override;
   virtual nsRestyleHint
-    HasAttributeDependentStyle(AttributeRuleProcessorData* aData,
-                               mozilla::RestyleHintData& aRestyleHintDataResult) override;
+    HasAttributeDependentStyle(AttributeRuleProcessorData* aData) override;
   virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) override;
   virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
     const MOZ_MUST_OVERRIDE override;
@@ -60,7 +58,7 @@ public:
   // aPseudoElement here is the content node for the pseudo-element, not
   // its corresponding real element.
   void PseudoElementRulesMatching(mozilla::dom::Element* aPseudoElement,
-                                  mozilla::CSSPseudoElementType aPseudoType,
+                                  nsCSSPseudoElements::Type aPseudoType,
                                   nsRuleWalker* aRuleWalker);
 
   void CacheStyleAttr(const nsAString& aSerialized, MiscContainer* aValue);

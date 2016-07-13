@@ -4,136 +4,83 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MacIOSurfaceTextureClientOGL.h"
-#include "mozilla/gfx/MacIOSurface.h" 
-#include "MacIOSurfaceHelpers.h"
-#include "gfxPlatform.h"
+#include "mozilla/gfx/MacIOSurface.h"
 
 namespace mozilla {
 namespace layers {
 
-using namespace gfx;
-
-MacIOSurfaceTextureData::MacIOSurfaceTextureData(MacIOSurface* aSurface,
-                                                 BackendType aBackend)
-  : mSurface(aSurface)
-  , mBackend(aBackend)
-{
-  MOZ_ASSERT(mSurface);
-}
-
-MacIOSurfaceTextureData::~MacIOSurfaceTextureData()
+MacIOSurfaceTextureClientOGL::MacIOSurfaceTextureClientOGL(ISurfaceAllocator* aAllcator,
+                                                           TextureFlags aFlags)
+  : TextureClient(aAllcator, aFlags)
+  , mIsLocked(false)
 {}
 
-// static
-MacIOSurfaceTextureData*
-MacIOSurfaceTextureData::Create(MacIOSurface* aSurface, BackendType aBackend)
+MacIOSurfaceTextureClientOGL::~MacIOSurfaceTextureClientOGL()
 {
-  MOZ_ASSERT(aSurface);
-  if (!aSurface) {
-    return nullptr;
+  if (mActor && mSurface) {
+    KeepUntilFullDeallocation(MakeUnique<TKeepAlive<MacIOSurface>>(mSurface));
   }
-  return new MacIOSurfaceTextureData(aSurface, aBackend);
 }
 
-MacIOSurfaceTextureData*
-MacIOSurfaceTextureData::Create(const IntSize& aSize,
-                                SurfaceFormat aFormat,
-                                BackendType aBackend)
+// static
+already_AddRefed<MacIOSurfaceTextureClientOGL>
+MacIOSurfaceTextureClientOGL::Create(ISurfaceAllocator* aAllocator,
+                                     TextureFlags aFlags,
+                                     MacIOSurface* aSurface)
 {
-  if (aFormat != SurfaceFormat::B8G8R8A8 &&
-      aFormat != SurfaceFormat::B8G8R8X8) {
-    return nullptr;
-  }
-
-  RefPtr<MacIOSurface> surf = MacIOSurface::CreateIOSurface(aSize.width, aSize.height,
-                                                            1.0,
-                                                            aFormat == SurfaceFormat::B8G8R8A8);
-  if (!surf) {
-    return nullptr;
-  }
-
-  return Create(surf, aBackend);
+  RefPtr<MacIOSurfaceTextureClientOGL> texture =
+      new MacIOSurfaceTextureClientOGL(aAllocator, aFlags);
+  MOZ_ASSERT(texture->IsValid());
+  MOZ_ASSERT(!texture->IsAllocated());
+  texture->mSurface = aSurface;
+  return texture.forget();
 }
 
 bool
-MacIOSurfaceTextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
+MacIOSurfaceTextureClientOGL::Lock(OpenMode aMode)
 {
+  MOZ_ASSERT(!mIsLocked);
+  mIsLocked = true;
+  return IsValid() && IsAllocated();
+}
+
+void
+MacIOSurfaceTextureClientOGL::Unlock()
+{
+  MOZ_ASSERT(mIsLocked);
+  mIsLocked = false;
+}
+
+bool
+MacIOSurfaceTextureClientOGL::IsLocked() const
+{
+  return mIsLocked;
+}
+
+bool
+MacIOSurfaceTextureClientOGL::ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor)
+{
+  MOZ_ASSERT(IsValid());
+  if (!IsAllocated()) {
+    return false;
+  }
   aOutDescriptor = SurfaceDescriptorMacIOSurface(mSurface->GetIOSurfaceID(),
                                                  mSurface->GetContentsScaleFactor(),
                                                  !mSurface->HasAlpha());
   return true;
 }
 
-void
-MacIOSurfaceTextureData::FillInfo(TextureData::Info& aInfo) const
+gfx::IntSize
+MacIOSurfaceTextureClientOGL::GetSize() const
 {
-  aInfo.size = gfx::IntSize(mSurface->GetDevicePixelWidth(), mSurface->GetDevicePixelHeight());
-  aInfo.format = mSurface->HasAlpha() ? SurfaceFormat::B8G8R8A8 : SurfaceFormat::B8G8R8X8;
-  aInfo.hasIntermediateBuffer = false;
-  aInfo.hasSynchronization = false;
-  aInfo.supportsMoz2D = true;
-  aInfo.canExposeMappedData = false;
+  return gfx::IntSize(mSurface->GetDevicePixelWidth(), mSurface->GetDevicePixelHeight());
 }
 
-bool
-MacIOSurfaceTextureData::Lock(OpenMode, FenceHandle*)
+already_AddRefed<gfx::DataSourceSurface>
+MacIOSurfaceTextureClientOGL::GetAsSurface()
 {
-  mSurface->Lock(false);
-  return true;
-}
-
-void
-MacIOSurfaceTextureData::Unlock()
-{
-  mSurface->Unlock(false);
-}
-
-already_AddRefed<DataSourceSurface>
-MacIOSurfaceTextureData::GetAsSurface()
-{
-  RefPtr<SourceSurface> surf = CreateSourceSurfaceFromMacIOSurface(mSurface);
+  RefPtr<gfx::SourceSurface> surf = mSurface->GetAsSurface();
   return surf->GetDataSurface();
-}
-
-already_AddRefed<DrawTarget>
-MacIOSurfaceTextureData::BorrowDrawTarget()
-{
-  MOZ_ASSERT(mBackend != BackendType::NONE);
-  if (mBackend == BackendType::NONE) {
-    // shouldn't happen, but degrade gracefully
-    return nullptr;
-  }
-  return Factory::CreateDrawTargetForData(
-      mBackend,
-      (unsigned char*)mSurface->GetBaseAddress(),
-      IntSize(mSurface->GetWidth(), mSurface->GetHeight()),
-      mSurface->GetBytesPerRow(),
-      mSurface->HasAlpha() ? SurfaceFormat::B8G8R8A8 : SurfaceFormat::B8G8R8X8,
-      true);
-}
-
-void
-MacIOSurfaceTextureData::Deallocate(ClientIPCAllocator*)
-{
-  mSurface = nullptr;
-}
-
-void
-MacIOSurfaceTextureData::Forget(ClientIPCAllocator*)
-{
-  mSurface = nullptr;
-}
-
-bool
-MacIOSurfaceTextureData::UpdateFromSurface(gfx::SourceSurface* aSurface)
-{
-  RefPtr<DrawTarget> dt = BorrowDrawTarget();
-  if (!dt) {
-    return false;
-  }
-
-  dt->CopySurface(aSurface, IntRect(IntPoint(), aSurface->GetSize()), IntPoint());
-  return true;
 }
 
 } // namespace layers

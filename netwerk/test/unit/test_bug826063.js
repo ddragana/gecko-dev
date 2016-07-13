@@ -7,8 +7,7 @@
  */
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
-
+Cu.import("resource://gre/modules/Services.jsm");
 
 var URIs = [
   "http://example.org",
@@ -20,17 +19,20 @@ function LoadContext(usePrivateBrowsing) {
   this.usePrivateBrowsing = usePrivateBrowsing;
 }
 LoadContext.prototype = {
-  originAttributes: {},
   QueryInterface: XPCOMUtils.generateQI([Ci.nsILoadContext, Ci.nsIInterfaceRequestor]),
   getInterface: XPCOMUtils.generateQI([Ci.nsILoadContext])
 };
 
 function getChannels() {
   for (let u of URIs) {
-    yield NetUtil.newChannel({
-      uri: u,
-      loadUsingSystemPrincipal: true
-    });
+    yield Services.io.newChannel2(u,
+                                  null,
+                                  null,
+                                  null,      // aLoadingNode
+                                  Services.scriptSecurityManager.getSystemPrincipal(),
+                                  null,      // aTriggeringPrincipal
+                                  Ci.nsILoadInfo.SEC_NORMAL,
+                                  Ci.nsIContentPolicy.TYPE_OTHER);
   }
 }
 

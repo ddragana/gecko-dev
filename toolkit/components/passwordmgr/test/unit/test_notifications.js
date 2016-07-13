@@ -66,8 +66,8 @@ Services.obs.addObserver(TestObserver, "passwordmgr-storage-changed", false);
 
 
 /* ========== 1 ========== */
-testnum = 1;
-testdesc = "Initial connection to storage module"
+var testnum = 1;
+var testdesc = "Initial connection to storage module"
 
 /* ========== 2 ========== */
 testnum++;

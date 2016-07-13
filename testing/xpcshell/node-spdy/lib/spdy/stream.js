@@ -7,8 +7,6 @@ var stream = require('stream');
 var Buffer = require('buffer').Buffer;
 var constants = spdy.protocol.constants;
 
-var empty = new Buffer(0);
-
 if (!/^v(0\.10|0\.8|0\.9)\./.test(process.version))
   var httpCommon = require('_http_common');
 
@@ -52,15 +50,6 @@ function Stream(connection, options) {
   state.id = options.id;
   state.associated = options.associated;
   state.headers = options.headers || {};
-
-  // Protocol standard compliance:
-  // Client does not have to send this header, we must assume,
-  // that it can handle compression
-  if (connection._spdyState.isServer && !state.associated &&
-      !state.headers['accept-encoding']) {
-    state.headers['accept-encoding'] = 'gzip, deflate';
-  }
-
   if (connection._spdyState.xForward !== null)
     state.headers['x-forwarded-for'] = connection._spdyState.xForward;
 
@@ -69,7 +58,6 @@ function Stream(connection, options) {
   connection._spdyState.counters.streamCount++;
   if (state.isPush)
     connection._spdyState.counters.pushCount++;
-  connection._addStream(this);
 
   // Useful for PUSH streams
   state.scheme = state.headers.scheme;
@@ -123,25 +111,8 @@ exports.Stream = Stream;
 
 // Parser lookup methods
 Stream.prototype._parserHeadersComplete = function parserHeadersComplete() {
-  var method;
   if (this.parser)
-    method = this.parser.onHeadersComplete || this.parser[1];
-  if (!method || !utils.isArgvParser)
-    return method;
-
-  return function onHeadersCompleteWrap(info) {
-    // NOTE: shouldKeepAlive = false
-    return method.call(this,
-                       info.versionMajor,
-                       info.versionMinor,
-                       info.headers,
-                       info.method,
-                       info.url,
-                       info.statusCode,
-                       info.statusMessage,
-                       info.upgrade,
-                       false);
-  };
+    return this.parser.onHeadersComplete || this.parser[1];
 };
 
 Stream.prototype._parserBody = function parserBody() {
@@ -183,7 +154,7 @@ Stream.prototype._init = function init() {
       return this.once('_chunkDone', onfinish);
 
     var self = this;
-    this._writeData(true, empty, function() {
+    this._writeData(true, [], function() {
       state.closedBy.us = true;
       if (state.sinkBuffer.length !== 0)
         return;
@@ -745,6 +716,7 @@ Stream.prototype._parseClientRequest = function parseClientRequest(data, cb) {
       }
       connection.write(frame);
       self._unlock();
+      connection._addStream(self);
 
       self.emit('_spdyRequest');
       state.initialized = true;

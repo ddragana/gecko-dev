@@ -51,7 +51,7 @@
 
   To turn on logging for this module, set
 
-    MOZ_LOG=nsRDFXMLDataSource:5
+    NSPR_LOG_MODULES=nsRDFXMLDataSource:5
 
  */
 
@@ -135,7 +135,7 @@ protected:
     static int32_t gRefCnt;
     static nsIRDFService* gRDFService;
 
-    static mozilla::LazyLogModule gLog;
+    static PRLogModuleInfo* gLog;
 
     nsresult Init();
     RDFXMLDataSourceImpl(void);
@@ -359,7 +359,7 @@ protected:
 int32_t         RDFXMLDataSourceImpl::gRefCnt = 0;
 nsIRDFService*  RDFXMLDataSourceImpl::gRDFService;
 
-mozilla::LazyLogModule RDFXMLDataSourceImpl::gLog("nsRDFXMLDataSource");
+PRLogModuleInfo* RDFXMLDataSourceImpl::gLog;
 
 static const char kFileURIPrefix[] = "file:";
 static const char kResourceURIPrefix[] = "resource:";
@@ -397,6 +397,8 @@ RDFXMLDataSourceImpl::RDFXMLDataSourceImpl(void)
       mIsDirty(false),
       mLoadState(eLoadState_Unloaded)
 {
+    if (! gLog)
+        gLog = PR_NewLogModule("nsRDFXMLDataSource");
 }
 
 
@@ -481,12 +483,12 @@ RDFXMLDataSourceImpl::BlockingParse(nsIURI* aURL, nsIStreamListener* aConsumer)
     rv = NS_NewChannel(getter_AddRefs(channel),
                        aURL,
                        nsContentUtils::GetSystemPrincipal(),
-                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                       nsILoadInfo::SEC_NORMAL,
                        nsIContentPolicy::TYPE_OTHER);
 
     if (NS_FAILED(rv)) return rv;
     nsCOMPtr<nsIInputStream> in;
-    rv = channel->Open2(getter_AddRefs(in));
+    rv = channel->Open(getter_AddRefs(in));
 
     // Report success if the file doesn't exist, but propagate other errors.
     if (rv == NS_ERROR_FILE_NOT_FOUND) return NS_OK;
@@ -950,12 +952,12 @@ RDFXMLDataSourceImpl::Refresh(bool aBlocking)
         rv = NS_NewChannel(getter_AddRefs(channel),
                            mURL,
                            nsContentUtils::GetSystemPrincipal(),
-                           nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                           nsILoadInfo::SEC_NORMAL,
                            nsIContentPolicy::TYPE_OTHER,
                            nullptr, // aLoadGroup
                            this);   // aCallbacks
         NS_ENSURE_SUCCESS(rv, rv);
-        rv = channel->AsyncOpen2(this);
+        rv = channel->AsyncOpen(this, nullptr);
         NS_ENSURE_SUCCESS(rv, rv);
 
         // So we don't try to issue two asynchronous loads at once.

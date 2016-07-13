@@ -1,4 +1,4 @@
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var testpath = "/bug1054739";
 
@@ -37,11 +37,15 @@ function run_test() {
 }
 
 function setupChannel(path) {
-  let uri = NetUtil.newURI("http://localhost:4444" + path, "", null);
-  let chan = NetUtil.newChannel({
-    uri: uri,
-    loadUsingSystemPrincipal: true
-  });
+  let ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
+  let chan = ios.newChannel2("http://localhost:4444" + path,
+                             "",
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_OTHER);
   chan.QueryInterface(Ci.nsIHttpChannel);
   return chan;
 }

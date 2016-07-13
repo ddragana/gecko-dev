@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_Context_h
 
 #include "mozilla/dom/cache/Types.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsProxyRelease.h"
@@ -90,7 +91,7 @@ public:
 
     // Cleared to allow the Context to close.  Only safe to access on
     // owning thread.
-    RefPtr<Context> mStrongRef;
+    nsRefPtr<Context> mStrongRef;
 
     // Used to support cancelation even while the Context is already allowed
     // to close.  Cleared by ~Context() calling ContextDestroyed().  Only
@@ -180,7 +181,7 @@ private:
   struct PendingAction
   {
     nsCOMPtr<nsIEventTarget> mTarget;
-    RefPtr<Action> mAction;
+    nsRefPtr<Action> mAction;
   };
 
   Context(Manager* aManager, nsIThread* aTarget, Action* aInitAction);
@@ -189,8 +190,7 @@ private:
   void Start();
   void DispatchAction(Action* aAction, bool aDoomData = false);
   void OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo,
-                   already_AddRefed<DirectoryLock> aDirectoryLock);
-
+                   nsMainThreadPtrHandle<DirectoryLock>& aDirectoryLock);
 
   already_AddRefed<ThreadsafeHandle>
   CreateThreadsafeHandle();
@@ -201,14 +201,14 @@ private:
   void
   DoomTargetData();
 
-  RefPtr<Manager> mManager;
+  nsRefPtr<Manager> mManager;
   nsCOMPtr<nsIThread> mTarget;
-  RefPtr<Data> mData;
+  nsRefPtr<Data> mData;
   State mState;
   bool mOrphanedData;
   QuotaInfo mQuotaInfo;
-  RefPtr<QuotaInitRunnable> mInitRunnable;
-  RefPtr<Action> mInitAction;
+  nsRefPtr<QuotaInitRunnable> mInitRunnable;
+  nsRefPtr<Action> mInitAction;
   nsTArray<PendingAction> mPendingActions;
 
   // Weak refs since activites must remove themselves from this list before
@@ -219,10 +219,10 @@ private:
   // The ThreadsafeHandle may have a strong ref back to us.  This creates
   // a ref-cycle that keeps the Context alive.  The ref-cycle is broken
   // when ThreadsafeHandle::AllowToClose() is called.
-  RefPtr<ThreadsafeHandle> mThreadsafeHandle;
+  nsRefPtr<ThreadsafeHandle> mThreadsafeHandle;
 
-  RefPtr<DirectoryLock> mDirectoryLock;
-  RefPtr<Context> mNextContext;
+  nsMainThreadPtrHandle<DirectoryLock> mDirectoryLock;
+  nsRefPtr<Context> mNextContext;
 
 public:
   NS_INLINE_DECL_REFCOUNTING(cache::Context)

@@ -191,7 +191,8 @@ void BackgroundNoise::IncrementEnergyThreshold(size_t channel,
   assert(channel < num_channels_);
   ChannelParameters& parameters = channel_parameters_[channel];
   int32_t temp_energy =
-    (kThresholdIncrement * parameters.low_energy_update_threshold) >> 16;
+      WEBRTC_SPL_MUL_16_16_RSFT(kThresholdIncrement,
+                                parameters.low_energy_update_threshold, 16);
   temp_energy += kThresholdIncrement *
       (parameters.energy_update_threshold & 0xFF);
   temp_energy += (kThresholdIncrement *

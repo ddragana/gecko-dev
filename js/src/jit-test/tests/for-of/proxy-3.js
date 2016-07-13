@@ -3,9 +3,9 @@
 load(libdir + "asserts.js");
 load(libdir + "iteration.js");
 
-var p = new Proxy({}, {
-    get(target, property) {
-        if (property === Symbol.iterator)
+var p = Proxy.create({
+    getPropertyDescriptor: function (name) {
+        if (name == Symbol.iterator)
             throw "fit";
         return undefined;
     }

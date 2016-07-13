@@ -20,7 +20,6 @@
 
 #if !defined(NO_SIGN_VERIFY) && (!defined(XP_WIN) || defined(MAR_NSS))
 #include "cert.h"
-#include "nss.h"
 #include "pk11pub.h"
 int NSSInitCryptoContext(const char *NSSConfigDir);
 #endif
@@ -126,10 +125,7 @@ int main(int argc, char **argv) {
 #if !defined(NO_SIGN_VERIFY)
   uint32_t fileSizes[MAX_SIGNATURES];
   const uint8_t* certBuffers[MAX_SIGNATURES];
-#if ((!defined(MAR_NSS) && defined(XP_WIN)) || defined(XP_MACOSX)) || \
-    ((defined(XP_WIN) || defined(XP_MACOSX)) && !defined(MAR_NSS))
   char* DERFilePaths[MAX_SIGNATURES];
-#endif
 #if (!defined(XP_WIN) && !defined(XP_MACOSX)) || defined(MAR_NSS)
   CERTCertificate* certs[MAX_SIGNATURES];
 #endif
@@ -165,9 +161,7 @@ int main(int argc, char **argv) {
       break;
     /* -C workingdirectory */
     } else if (argv[1][0] == '-' && argv[1][1] == 'C') {
-      if (chdir(argv[2]) != 0) {
-        return -1;
-      }
+      chdir(argv[2]);
       argv += 2;
       argc -= 2;
     } 
@@ -347,11 +341,6 @@ int main(int argc, char **argv) {
 #if (defined(XP_WIN) || defined(XP_MACOSX)) && !defined(MAR_NSS)
       rv = mar_read_entire_file(DERFilePaths[k], MAR_MAX_CERT_SIZE,
                                 &certBuffers[k], &fileSizes[k]);
-
-      if (rv) {
-        fprintf(stderr, "ERROR: could not read file %s", DERFilePaths[k]);
-        break;
-      }
 #else
       /* It is somewhat circuitous to look up a CERTCertificate and then pass
        * in its DER encoding just so we can later re-create that
@@ -367,10 +356,12 @@ int main(int argc, char **argv) {
         fileSizes[k] = certs[k]->derCert.len;
       } else {
         rv = -1;
-        fprintf(stderr, "ERROR: could not find cert from nickname %s", certNames[k]);
-        break;
       }
 #endif
+      if (rv) {
+        fprintf(stderr, "ERROR: could not read file %s", DERFilePaths[k]);
+        break;
+      }
     }
 
     if (!rv) {
@@ -401,11 +392,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ERROR: The MAR file is in the old format so has"
                         " no signature to verify.\n");
       }
+      return -1;
     }
-#if (!defined(XP_WIN) && !defined(XP_MACOSX)) || defined(MAR_NSS)
-    (void) NSS_Shutdown();
-#endif
-    return rv ? -1 : 0;
+    return 0;
 
   case 's':
     if (!NSSConfigDir || certCount == 0 || argc < 4) {

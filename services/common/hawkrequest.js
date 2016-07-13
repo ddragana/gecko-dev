@@ -4,7 +4,7 @@
 
 "use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 this.EXPORTED_SYMBOLS = [
   "HAWKAuthenticatedRESTRequest",
@@ -42,9 +42,7 @@ const Prefs = new Preferences("services.common.rest.");
  *        Valid properties are:
  *
  *          now:                 <current time in milliseconds>,
- *          localtimeOffsetMsec: <local clock offset vs server>,
- *          headers:             <An object with header/value pairs to be sent
- *                                as headers on the request>
+ *          localtimeOffsetMsec: <local clock offset vs server>
  *
  * extra.localtimeOffsetMsec is the value in milliseconds that must be added to
  * the local clock to make it agree with the server's clock.  For instance, if
@@ -60,7 +58,6 @@ this.HAWKAuthenticatedRESTRequest =
   this.now = extra.now || Date.now();
   this.localtimeOffsetMsec = extra.localtimeOffsetMsec || 0;
   this._log.trace("local time, offset: " + this.now + ", " + (this.localtimeOffsetMsec));
-  this.extraHeaders = extra.headers || {};
 
   // Expose for testing
   this._intl = getIntl();
@@ -84,10 +81,6 @@ HAWKAuthenticatedRESTRequest.prototype = {
       let header = CryptoUtils.computeHAWK(this.uri, method, options);
       this.setHeader("Authorization", header.field);
       this._log.trace("hawk auth header: " + header.field);
-    }
-
-    for (let header in this.extraHeaders) {
-      this.setHeader(header, this.extraHeaders[header]);
     }
 
     this.setHeader("Content-Type", contentType);
@@ -175,7 +168,7 @@ this.Intl.prototype = {
       this._accepted = Services.prefs.getComplexValue(
         "intl.accept_languages", Ci.nsIPrefLocalizedString).data;
     } catch (err) {
-      this._log.error("Error reading intl.accept_languages pref", err);
+      this._log.error("Error reading intl.accept_languages pref: " + CommonUtils.exceptionStr(err));
     }
   },
 
@@ -188,7 +181,7 @@ this.Intl.prototype = {
 };
 
 // Singleton getter for Intl, creating an instance only when we first need it.
-var intl = null;
+let intl = null;
 function getIntl() {
   if (!intl) {
     intl = new Intl();

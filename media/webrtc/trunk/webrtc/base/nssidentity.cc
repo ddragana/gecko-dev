@@ -117,10 +117,6 @@ NSSCertificate::NSSCertificate(CERTCertificate* cert, SSLCertChain* chain)
     chain_.reset(chain->Copy());
 }
 
-NSSCertificate::~NSSCertificate() {
-  if (certificate_)
-    CERT_DestroyCertificate(certificate_);
-}
 
 NSSCertificate *NSSCertificate::FromPEMString(const std::string &pem_string) {
   std::string der;
@@ -333,9 +329,6 @@ bool NSSCertificate::GetDigestObject(const std::string &algorithm,
   return true;
 }
 
-NSSIdentity::NSSIdentity(NSSKeyPair* keypair, NSSCertificate* cert)
-    : keypair_(keypair), certificate_(cert) {
-}
 
 NSSIdentity* NSSIdentity::GenerateInternal(const SSLIdentityParams& params) {
   std::string subject_name_string = "CN=" + params.common_name;
@@ -500,10 +493,6 @@ SSLIdentity* NSSIdentity::FromPEMStrings(const std::string& private_key,
   // TODO(ekr@rtfm.com): Check the public key against the certificate.
 
   return new NSSIdentity(keypair.release(), cert.release());
-}
-
-NSSIdentity::~NSSIdentity() {
-  LOG(LS_INFO) << "Destroying NSS identity";
 }
 
 NSSIdentity *NSSIdentity::GetReference() const {

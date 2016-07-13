@@ -37,8 +37,8 @@ NS_NewSVGForeignObjectFrame(nsIPresShell   *aPresShell,
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGForeignObjectFrame)
 
 nsSVGForeignObjectFrame::nsSVGForeignObjectFrame(nsStyleContext* aContext)
-  : nsContainerFrame(aContext)
-  , mInReflow(false)
+  : nsSVGForeignObjectFrameBase(aContext),
+    mInReflow(false)
 {
   AddStateBits(NS_FRAME_REFLOW_ROOT | NS_FRAME_MAY_BE_TRANSFORMED |
                NS_FRAME_SVG_LAYOUT);
@@ -49,7 +49,7 @@ nsSVGForeignObjectFrame::nsSVGForeignObjectFrame(nsStyleContext* aContext)
 
 NS_QUERYFRAME_HEAD(nsSVGForeignObjectFrame)
   NS_QUERYFRAME_ENTRY(nsISVGChildFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsSVGForeignObjectFrameBase)
 
 void
 nsSVGForeignObjectFrame::Init(nsIContent*       aContent,
@@ -59,7 +59,7 @@ nsSVGForeignObjectFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::foreignObject),
                "Content is not an SVG foreignObject!");
 
-  nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsSVGForeignObjectFrameBase::Init(aContent, aParent, aPrevInFlow);
   AddStateBits(aParent->GetStateBits() & NS_STATE_SVG_CLIPPATH_CHILD);
   AddStateBits(NS_FRAME_FONT_INFLATION_CONTAINER |
                NS_FRAME_FONT_INFLATION_FLOW_ROOT);
@@ -74,7 +74,7 @@ void nsSVGForeignObjectFrame::DestroyFrom(nsIFrame* aDestructRoot)
   if (!(mState & NS_FRAME_IS_NONDISPLAY)) {
       nsSVGUtils::GetOuterSVGFrame(this)->UnregisterForeignObject(this);
   }
-  nsContainerFrame::DestroyFrom(aDestructRoot);
+  nsSVGForeignObjectFrameBase::DestroyFrom(aDestructRoot);
 }
 
 nsIAtom *
@@ -141,7 +141,7 @@ nsSVGForeignObjectFrame::Reflow(nsPresContext*           aPresContext,
 
   // ReflowSVG makes sure mRect is up to date before we're called.
 
-  NS_ASSERTION(!aReflowState.mParentReflowState,
+  NS_ASSERTION(!aReflowState.parentReflowState,
                "should only get reflow from being reflow root");
   NS_ASSERTION(aReflowState.ComputedWidth() == GetSize().width &&
                aReflowState.ComputedHeight() == GetSize().height,
@@ -189,9 +189,8 @@ nsSVGForeignObjectFrame::IsSVGTransformed(Matrix *aOwnTransform,
   if ((transformList && transformList->HasTransform()) ||
       content->GetAnimateMotionTransform()) {
     if (aOwnTransform) {
-      *aOwnTransform = gfx::ToMatrix(content->PrependLocalTransformsTo(
-                                       gfxMatrix(),
-                                       eUserSpaceToParent));
+      *aOwnTransform = gfx::ToMatrix(content->PrependLocalTransformsTo(gfxMatrix(),
+                                  nsSVGElement::eUserSpaceToParent));
     }
     foundTransform = true;
   }
@@ -211,7 +210,7 @@ nsSVGForeignObjectFrame::PaintSVG(gfxContext& aContext,
   if (IsDisabled())
     return NS_OK;
 
-  nsIFrame* kid = PrincipalChildList().FirstChild();
+  nsIFrame* kid = GetFirstPrincipalChild();
   if (!kid)
     return NS_OK;
 
@@ -270,16 +269,13 @@ nsSVGForeignObjectFrame::PaintSVG(gfxContext& aContext,
 
   aContext.Multiply(canvasTMForChildren);
 
-  using PaintFrameFlags = nsLayoutUtils::PaintFrameFlags;
-  PaintFrameFlags flags = PaintFrameFlags::PAINT_IN_TRANSFORM;
+  uint32_t flags = nsLayoutUtils::PAINT_IN_TRANSFORM;
   if (SVGAutoRenderState::IsPaintingToWindow(aContext.GetDrawTarget())) {
-    flags |= PaintFrameFlags::PAINT_TO_WINDOW;
+    flags |= nsLayoutUtils::PAINT_TO_WINDOW;
   }
   nsRenderingContext rendCtx(&aContext);
   nsresult rv = nsLayoutUtils::PaintFrame(&rendCtx, kid, nsRegion(kidDirtyRect),
-                                          NS_RGBA(0,0,0,0),
-                                          nsDisplayListBuilderMode::PAINTING,
-                                          flags);
+                                          NS_RGBA(0,0,0,0), flags);
 
   aContext.Restore();
 
@@ -297,7 +293,7 @@ nsSVGForeignObjectFrame::GetFrameForPoint(const gfxPoint& aPoint)
   if (IsDisabled() || (GetStateBits() & NS_FRAME_IS_NONDISPLAY))
     return nullptr;
 
-  nsIFrame* kid = PrincipalChildList().FirstChild();
+  nsIFrame* kid = GetFirstPrincipalChild();
   if (!kid)
     return nullptr;
 
@@ -363,7 +359,7 @@ nsSVGForeignObjectFrame::ReflowSVG()
 
   // Fully mark our kid dirty so that it gets resized if necessary
   // (NS_FRAME_HAS_DIRTY_CHILDREN isn't enough in that case):
-  nsIFrame* kid = PrincipalChildList().FirstChild();
+  nsIFrame* kid = GetFirstPrincipalChild();
   kid->AddStateBits(NS_FRAME_IS_DIRTY);
 
   // Make sure to not allow interrupts if we're not being reflown as a root:
@@ -380,7 +376,7 @@ nsSVGForeignObjectFrame::ReflowSVG()
 
   // If we have a filter, we need to invalidate ourselves because filter
   // output can change even if none of our descendants need repainting.
-  if (StyleEffects()->HasFilters()) {
+  if (StyleSVGReset()->HasFilters()) {
     InvalidateFrame();
   }
 
@@ -513,7 +509,7 @@ void nsSVGForeignObjectFrame::RequestReflow(nsIPresShell::IntrinsicDirty aType)
     // If we haven't had a ReflowSVG() yet, nothing to do.
     return;
 
-  nsIFrame* kid = PrincipalChildList().FirstChild();
+  nsIFrame* kid = GetFirstPrincipalChild();
   if (!kid)
     return;
 
@@ -530,7 +526,7 @@ nsSVGForeignObjectFrame::DoReflow()
     return;
 
   nsPresContext *presContext = PresContext();
-  nsIFrame* kid = PrincipalChildList().FirstChild();
+  nsIFrame* kid = GetFirstPrincipalChild();
   if (!kid)
     return;
 
@@ -574,7 +570,7 @@ nsSVGForeignObjectFrame::GetInvalidRegion()
   MOZ_ASSERT(!NS_SVGDisplayListPaintingEnabled(),
              "Only called by nsDisplayOuterSVG code");
 
-  nsIFrame* kid = PrincipalChildList().FirstChild();
+  nsIFrame* kid = GetFirstPrincipalChild();
   if (kid->HasInvalidFrameInSubtree()) {
     gfxRect r(mRect.x, mRect.y, mRect.width, mRect.height);
     r.Scale(1.0 / nsPresContext::AppUnitsPerCSSPixel());

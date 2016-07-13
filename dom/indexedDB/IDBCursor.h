@@ -4,18 +4,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_idbcursor_h__
-#define mozilla_dom_idbcursor_h__
+#ifndef mozilla_dom_indexeddb_idbcursor_h__
+#define mozilla_dom_indexeddb_idbcursor_h__
 
 #include "IndexedDatabase.h"
 #include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/IDBCursorBinding.h"
 #include "mozilla/dom/indexedDB/Key.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 
@@ -23,24 +24,21 @@ class ErrorResult;
 
 namespace dom {
 
+class OwningIDBObjectStoreOrIDBIndex;
+
+namespace indexedDB {
+
+class BackgroundCursorChild;
 class IDBIndex;
 class IDBObjectStore;
 class IDBRequest;
 class IDBTransaction;
-class OwningIDBObjectStoreOrIDBIndex;
-
-namespace indexedDB {
-class BackgroundCursorChild;
-}
 
 class IDBCursor final
   : public nsISupports
   , public nsWrapperCache
 {
 public:
-  typedef indexedDB::Key Key;
-  typedef indexedDB::StructuredCloneReadInfo StructuredCloneReadInfo;
-
   enum Direction
   {
     NEXT = 0,
@@ -61,11 +59,11 @@ private:
     Type_IndexKey,
   };
 
-  indexedDB::BackgroundCursorChild* mBackgroundActor;
+  BackgroundCursorChild* mBackgroundActor;
 
-  RefPtr<IDBRequest> mRequest;
-  RefPtr<IDBObjectStore> mSourceObjectStore;
-  RefPtr<IDBIndex> mSourceIndex;
+  nsRefPtr<IDBRequest> mRequest;
+  nsRefPtr<IDBObjectStore> mSourceObjectStore;
+  nsRefPtr<IDBIndex> mSourceIndex;
 
   // mSourceObjectStore or mSourceIndex will hold this alive.
   IDBTransaction* mTransaction;
@@ -78,7 +76,6 @@ private:
   JS::Heap<JS::Value> mCachedValue;
 
   Key mKey;
-  Key mSortKey;
   Key mPrimaryKey;
   StructuredCloneReadInfo mCloneInfo;
 
@@ -94,25 +91,23 @@ private:
 
 public:
   static already_AddRefed<IDBCursor>
-  Create(indexedDB::BackgroundCursorChild* aBackgroundActor,
+  Create(BackgroundCursorChild* aBackgroundActor,
          const Key& aKey,
          StructuredCloneReadInfo&& aCloneInfo);
 
   static already_AddRefed<IDBCursor>
-  Create(indexedDB::BackgroundCursorChild* aBackgroundActor,
+  Create(BackgroundCursorChild* aBackgroundActor,
          const Key& aKey);
 
   static already_AddRefed<IDBCursor>
-  Create(indexedDB::BackgroundCursorChild* aBackgroundActor,
+  Create(BackgroundCursorChild* aBackgroundActor,
          const Key& aKey,
-         const Key& aSortKey,
          const Key& aPrimaryKey,
          StructuredCloneReadInfo&& aCloneInfo);
 
   static already_AddRefed<IDBCursor>
-  Create(indexedDB::BackgroundCursorChild* aBackgroundActor,
+  Create(BackgroundCursorChild* aBackgroundActor,
          const Key& aKey,
-         const Key& aSortKey,
          const Key& aPrimaryKey);
 
   static Direction
@@ -126,7 +121,7 @@ public:
   { }
 #endif
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const;
 
   void
@@ -134,8 +129,6 @@ public:
 
   IDBCursorDirection
   GetDirection() const;
-
-  bool IsContinueCalled() const { return mContinueCalled; }
 
   void
   GetKey(JSContext* aCx,
@@ -174,10 +167,10 @@ public:
   Reset(Key&& aKey);
 
   void
-  Reset(Key&& aKey, Key&& aSortKey, Key&& aPrimaryKey, StructuredCloneReadInfo&& aValue);
+  Reset(Key&& aKey, Key&& aPrimaryKey, StructuredCloneReadInfo&& aValue);
 
   void
-  Reset(Key&& aKey, Key&& aSortKey, Key&& aPrimaryKey);
+  Reset(Key&& aKey, Key&& aPrimaryKey);
 
   void
   ClearBackgroundActor()
@@ -196,16 +189,10 @@ public:
 
 private:
   IDBCursor(Type aType,
-            indexedDB::BackgroundCursorChild* aBackgroundActor,
+            BackgroundCursorChild* aBackgroundActor,
             const Key& aKey);
 
   ~IDBCursor();
-
-#ifdef ENABLE_INTL_API
-  // Checks if this is a locale aware cursor (ie. the index's sortKey is unset)
-  bool
-  IsLocaleAware() const;
-#endif
 
   void
   DropJSObjects();
@@ -214,7 +201,8 @@ private:
   IsSourceDeleted() const;
 };
 
+} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_idbcursor_h__
+#endif // mozilla_dom_indexeddb_idbcursor_h__

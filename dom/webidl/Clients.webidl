@@ -11,14 +11,10 @@
 [Exposed=ServiceWorker]
 interface Clients {
   // The objects returned will be new instances every time
-  [NewObject]
-  Promise<any> get(DOMString id);
-  [NewObject]
-  Promise<sequence<Client>> matchAll(optional ClientQueryOptions options);
-  [NewObject,
-   Func="mozilla::dom::ServiceWorkerGlobalScope::OpenWindowEnabled"]
-  Promise<WindowClient?> openWindow(USVString url);
-  [NewObject]
+  [Throws]
+  Promise<sequence<Client>?> matchAll(optional ClientQueryOptions options);
+  Promise<WindowClient> openWindow(USVString url);
+  [Throws]
   Promise<void> claim();
 };
 

@@ -11,9 +11,8 @@
 #ifndef WEBRTC_VIDEO_ENGINE_VIE_RENDERER_H_
 #define WEBRTC_VIDEO_ENGINE_VIE_RENDERER_H_
 
-#include <vector>
-
 #include "webrtc/modules/video_render/include/video_render_defines.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/video_engine/include/vie_render.h"
 #include "webrtc/video_engine/vie_frame_provider_base.h"
 
@@ -33,19 +32,17 @@ class ViEExternalRendererImpl : public VideoRenderCallback {
 
   // Implements VideoRenderCallback.
   virtual int32_t RenderFrame(const uint32_t stream_id,
-                              const I420VideoFrame& video_frame);
+                              I420VideoFrame& video_frame);
 
  private:
   void NotifyFrameSizeChange(const uint32_t stream_id,
-                             const I420VideoFrame& video_frame);
-  int32_t ConvertAndRenderFrame(uint32_t stream_id,
-                                const I420VideoFrame& video_frame);
+                             I420VideoFrame& video_frame);
   ExternalRenderer* external_renderer_;
   RawVideoType external_renderer_format_;
   int external_renderer_width_;
   int external_renderer_height_;
   // Converted_frame_ in color format specified by render_format_.
-  std::vector<uint8_t> converted_frame_;
+  scoped_ptr<VideoFrame> converted_frame_;
 };
 
 class ViERenderer: public ViEFrameCallback {
@@ -64,6 +61,9 @@ class ViERenderer: public ViEFrameCallback {
   int32_t StartRender();
   int32_t StopRender();
 
+  int32_t GetLastRenderedFrame(const int32_t renderID,
+                               I420VideoFrame& video_frame);
+
   int SetExpectedRenderDelay(int render_delay);
 
   int32_t ConfigureRenderer(const unsigned int z_order,
@@ -73,6 +73,11 @@ class ViERenderer: public ViEFrameCallback {
                             const float bottom);
 
   VideoRender& RenderModule();
+
+  int32_t EnableMirroring(const int32_t render_id,
+                          const bool enable,
+                          const bool mirror_xaxis,
+                          const bool mirror_yaxis);
 
   int32_t SetTimeoutImage(const I420VideoFrame& timeout_image,
                           const int32_t timeout_value);
@@ -98,7 +103,8 @@ class ViERenderer: public ViEFrameCallback {
   // Implement ViEFrameCallback
   virtual void DeliverFrame(int id,
                             I420VideoFrame* video_frame,
-                            const std::vector<uint32_t>& csrcs);
+                            int num_csrcs = 0,
+                            const uint32_t CSRC[kRtpCsrcSize] = NULL);
   virtual void DelayChanged(int id, int frame_delay);
   virtual int GetPreferedFrameSettings(int* width,
                                        int* height,

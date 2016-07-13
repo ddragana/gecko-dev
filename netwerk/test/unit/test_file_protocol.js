@@ -1,6 +1,6 @@
 /* run some tests on the file:// protocol handler */
 
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 const PR_RDONLY = 0x1;  // see prio.h
 
@@ -40,10 +40,12 @@ function new_file_channel(file) {
   var ios =
       Cc["@mozilla.org/network/io-service;1"].
       getService(Ci.nsIIOService);
-  return NetUtil.newChannel({
-    uri: ios.newFileURI(file),
-    loadUsingSystemPrincipal: true
-  });
+  return ios.newChannelFromURI2(ios.newFileURI(file),
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER);
 }
 
 /*
@@ -141,7 +143,7 @@ function test_read_file() {
   }
 
   chan.contentType = special_type;
-  chan.asyncOpen2(new FileStreamListener(on_read_complete));
+  chan.asyncOpen(new FileStreamListener(on_read_complete), null);
 }
 
 function do_test_read_dir(set_type, expected_type) {
@@ -163,7 +165,7 @@ function do_test_read_dir(set_type, expected_type) {
 
   if (set_type)
     chan.contentType = expected_type;
-  chan.asyncOpen2(new FileStreamListener(on_read_complete));
+  chan.asyncOpen(new FileStreamListener(on_read_complete), null);
 }
 
 function test_read_dir_1() {
@@ -180,7 +182,7 @@ function test_upload_file() {
   var file = do_get_file("../unit/data/test_readline6.txt"); // file to upload
   var dest = do_get_tempdir();      // file upload destination
   dest.append("junk.dat");
-  dest.createUnique(dest.NORMAL_FILE_TYPE, 0o600);
+  dest.createUnique(dest.NORMAL_FILE_TYPE, 0600);
 
   var uploadstream = new_file_input_stream(file, true);
 
@@ -222,12 +224,13 @@ function test_upload_file() {
   }
 
   chan.contentType = special_type;
-  chan.asyncOpen2(new FileStreamListener(on_upload_complete));
+  chan.asyncOpen(new FileStreamListener(on_upload_complete), null);
 }
 
 function test_load_replace() {
   // lnk files should resolve to their targets
-  if (mozinfo.os == "win") {
+  const isWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
+  if (isWindows) {
     dump("*** test_load_replace\n");
     file = do_get_file("data/system_root.lnk", false);
     var chan = new_file_channel(file);

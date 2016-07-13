@@ -5,21 +5,11 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXPORTS.mozilla += [
-    'D3DMessageUtils.h',
     'GfxMessageUtils.h'
 ]
 
 EXPORTS.mozilla.gfx += [
-    'GPUChild.h',
-    'GPUParent.h',
-    'GPUProcessHost.h',
-    'GPUProcessImpl.h',
-    'GPUProcessManager.h',
     'SharedDIB.h',
-]
-
-EXPORTS.mozilla.layers += [
-    'CompositorSession.h',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
@@ -27,25 +17,13 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
         'SharedDIBSurface.h',
         'SharedDIBWin.h',
     ]
-    UNIFIED_SOURCES += [
+    SOURCES += [
         'SharedDIBSurface.cpp',
         'SharedDIBWin.cpp',
     ]
 
-UNIFIED_SOURCES += [
-    'CompositorSession.cpp',
-    'D3DMessageUtils.cpp',
-    'GPUChild.cpp',
-    'GPUParent.cpp',
-    'GPUProcessHost.cpp',
-    'GPUProcessImpl.cpp',
-    'GPUProcessManager.cpp',
+SOURCES += [
     'SharedDIB.cpp',
-]
-
-IPDL_SOURCES = [
-    'GraphicsMessages.ipdlh',
-    'PGPU.ipdl',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

@@ -17,7 +17,6 @@
 
 #include "webrtc/common_video/interface/i420_video_frame.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
-#include "webrtc/common_video/rotation.h"
 #include "webrtc/modules/video_capture/include/video_capture.h"
 #include "webrtc/modules/video_capture/video_capture_config.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
@@ -53,9 +52,14 @@ public:
     static DeviceInfo* CreateDeviceInfo(const int32_t id);
 
     // Helpers for converting between (integral) degrees and
-    // VideoRotation values.  Return 0 on success.
-    static int32_t RotationFromDegrees(int degrees, VideoRotation* rotation);
-    static int32_t RotationInDegrees(VideoRotation rotation, int* degrees);
+    // VideoCaptureRotation values.  Return 0 on success.
+    static int32_t RotationFromDegrees(int degrees,
+                                       VideoCaptureRotation* rotation);
+    static int32_t RotationInDegrees(VideoCaptureRotation rotation,
+                                     int* degrees);
+
+    // Implements Module declared functions.
+    virtual int32_t ChangeUniqueId(const int32_t id);
 
     //Call backs
     virtual void RegisterCaptureDataCallback(
@@ -66,11 +70,7 @@ public:
 
     virtual void SetCaptureDelay(int32_t delayMS);
     virtual int32_t CaptureDelay();
-    virtual int32_t SetCaptureRotation(VideoRotation rotation);
-    virtual bool SetApplyRotation(bool enable);
-    virtual bool GetApplyRotation() {
-      return apply_rotation_;
-    }
+    virtual int32_t SetCaptureRotation(VideoCaptureRotation rotation);
 
     virtual void EnableFrameRateCallback(const bool enable);
     virtual void EnableNoPictureAlarm(const bool enable);
@@ -78,15 +78,18 @@ public:
     virtual const char* CurrentDeviceName() const;
 
     // Module handling
-    virtual int64_t TimeUntilNextProcess();
+    virtual int32_t TimeUntilNextProcess();
     virtual int32_t Process();
 
     // Implement VideoCaptureExternal
-    // |capture_time| must be specified in NTP time format in milliseconds.
+    // |capture_time| must be specified in the NTP time format in milliseconds.
     virtual int32_t IncomingFrame(uint8_t* videoFrame,
-                                  size_t videoFrameLength,
+                                  int32_t videoFrameLength,
                                   const VideoCaptureCapability& frameInfo,
                                   int64_t captureTime = 0);
+
+    virtual int32_t IncomingI420VideoFrame(I420VideoFrame* video_frame,
+                                           int64_t captureTime = 0);
 
     // Platform dependent
     virtual int32_t StartCapture(const VideoCaptureCapability& capability)
@@ -104,7 +107,8 @@ public:
 protected:
     VideoCaptureImpl(const int32_t id);
     virtual ~VideoCaptureImpl();
-    int32_t DeliverCapturedFrame(I420VideoFrame& captureFrame);
+    int32_t DeliverCapturedFrame(I420VideoFrame& captureFrame,
+                                 int64_t capture_time);
 
     int32_t _id; // Module ID
     char* _deviceUniqueId; // current Device unique name;
@@ -129,13 +133,16 @@ private:
 
     TickTime _lastProcessFrameCount;
     TickTime _incomingFrameTimes[kFrameRateCountHistorySize];// timestamp for local captured frames
-    VideoRotation _rotateFrame;  // Set if the frame should be rotated by the
-                                 // capture module.
+    VideoRotationMode _rotateFrame; //Set if the frame should be rotated by the capture module.
 
     I420VideoFrame _captureFrame;
+    VideoFrame _capture_encoded_frame;
 
-    // Indicate whether rotation should be applied before delivered externally.
-    bool apply_rotation_;
+    // Used to make sure incoming timestamp is increasing for every frame.
+    int64_t last_capture_time_;
+
+    // Delta used for translating between NTP and internal timestamps.
+    const int64_t delta_ntp_internal_ms_;
 };
 }  // namespace videocapturemodule
 }  // namespace webrtc

@@ -24,7 +24,7 @@ const LONG_BODY = "Let me not to the marriage of true minds\n"
 
 function checkMessage(message, delivery, body) {
   ok(message, "message is valid");
-  ok(message instanceof SmsMessage,
+  ok(message instanceof MozSmsMessage,
      "message is instanceof " + message.constructor);
 
   is(message.type, "sms", "message.type");

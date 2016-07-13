@@ -23,18 +23,16 @@ MessagePortChild::RecvStopSendingDataConfirmed()
 bool
 MessagePortChild::RecvEntangled(nsTArray<MessagePortMessage>&& aMessages)
 {
-  if (mPort) {
-    mPort->Entangled(aMessages);
-  }
+  MOZ_ASSERT(mPort);
+  mPort->Entangled(aMessages);
   return true;
 }
 
 bool
 MessagePortChild::RecvReceiveData(nsTArray<MessagePortMessage>&& aMessages)
 {
-  if (mPort) {
-    mPort->MessagesReceived(aMessages);
-  }
+  MOZ_ASSERT(mPort);
+  mPort->MessagesReceived(aMessages);
   return true;
 }
 

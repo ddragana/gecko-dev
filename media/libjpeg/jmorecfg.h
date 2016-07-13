@@ -3,11 +3,9 @@
  *
  * This file was part of the Independent JPEG Group's software:
  * Copyright (C) 1991-1997, Thomas G. Lane.
- * Modified 1997-2009 by Guido Vollbeding.
  * libjpeg-turbo Modifications:
- * Copyright (C) 2009, 2011, 2014-2015, D. R. Commander.
- * For conditions of distribution and use, see the accompanying README.ijg
- * file.
+ * Copyright (C) 2009, 2011, 2014, D. R. Commander.
+ * For conditions of distribution and use, see the accompanying README file.
  *
  * This file contains additional configuration options that customize the
  * JPEG software for special applications or support machine-dependent
@@ -134,30 +132,7 @@ typedef uint16_t UINT16;
 
 typedef int16_t INT16;
 
-/* INT32 must hold at least signed 32-bit values.
- *
- * NOTE: The INT32 typedef dates back to libjpeg v5 (1994.)  Integers were
- * sometimes 16-bit back then (MS-DOS), which is why INT32 is typedef'd to
- * long.  It also wasn't common (or at least as common) in 1994 for INT32 to be
- * defined by platform headers.  Since then, however, INT32 is defined in
- * several other common places:
- *
- * Xmd.h (X11 header) typedefs INT32 to int on 64-bit platforms and long on
- * 32-bit platforms (i.e always a 32-bit signed type.)
- *
- * basetsd.h (Win32 header) typedefs INT32 to int (always a 32-bit signed type
- * on modern platforms.)
- *
- * qglobal.h (Qt header) typedefs INT32 to int (always a 32-bit signed type on
- * modern platforms.)
- *
- * This is a recipe for conflict, since "long" and "int" aren't always
- * compatible types.  Since the definition of INT32 has technically been part
- * of the libjpeg API for more than 20 years, we can't remove it, but we do not
- * use it internally any longer.  We instead define a separate type (JLONG)
- * for internal use, which ensures that internal behavior will always be the
- * same regardless of any external headers that may be included.
- */
+/* INT32 must hold at least signed 32-bit values. */
 
 typedef int32_t INT32;
 
@@ -165,9 +140,7 @@ typedef int32_t INT32;
  * images up to 64K*64K due to 16-bit fields in SOF markers.  Therefore
  * "unsigned int" is sufficient on all machines.  However, if you need to
  * handle larger images and you don't mind deviating from the spec, you
- * can change this datatype.  (Note that changing this datatype will
- * potentially require modifying the SIMD code.  The x86-64 SIMD extensions,
- * in particular, assume a 32-bit JDIMENSION.)
+ * can change this datatype.
  */
 
 typedef unsigned int JDIMENSION;

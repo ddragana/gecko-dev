@@ -15,10 +15,15 @@
 <pre id="test"></pre>
 <script class="testbody" type="text/javascript">
 
-new SharedWorker('sharedWorker_sharedWorker.js');
-new SharedWorker('sharedWorker_sharedWorker.js', ':');
-new SharedWorker('sharedWorker_sharedWorker.js', '|||');
-ok(true, "3 SharedWorkers created!");
+  SpecialPowers.pushPrefEnv({ set: [["dom.workers.sharedWorkers.enabled", true]] }, function() {
+    new SharedWorker('sharedWorker_sharedWorker.js');
+    new SharedWorker('sharedWorker_sharedWorker.js', ':');
+    new SharedWorker('sharedWorker_sharedWorker.js', '|||');
+    ok(true, "3 SharedWorkers created!");
+    SimpleTest.finish();
+  });
+
+  SimpleTest.waitForExplicitFinish();
 
 </script>
 </pre>

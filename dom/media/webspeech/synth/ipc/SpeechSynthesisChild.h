@@ -28,10 +28,6 @@ public:
 
   bool RecvSetDefaultVoice(const nsString& aUri, const bool& aIsDefault) override;
 
-  bool RecvIsSpeakingChanged(const bool& aIsSpeaking) override;
-
-  bool RecvNotifyVoicesChanged() override;
-
 protected:
   SpeechSynthesisChild();
   virtual ~SpeechSynthesisChild();
@@ -52,23 +48,23 @@ public:
   virtual ~SpeechSynthesisRequestChild();
 
 protected:
-  bool RecvOnStart(const nsString& aUri) override;
+  virtual bool RecvOnStart(const nsString& aUri) override;
 
-  bool RecvOnEnd(const bool& aIsError,
-                 const float& aElapsedTime,
-                 const uint32_t& aCharIndex) override;
+  virtual bool Recv__delete__(const bool& aIsError,
+                              const float& aElapsedTime,
+                              const uint32_t& aCharIndex) override;
 
-  bool RecvOnPause(const float& aElapsedTime, const uint32_t& aCharIndex) override;
+  virtual bool RecvOnPause(const float& aElapsedTime, const uint32_t& aCharIndex) override;
 
-  bool RecvOnResume(const float& aElapsedTime, const uint32_t& aCharIndex) override;
+  virtual bool RecvOnResume(const float& aElapsedTime, const uint32_t& aCharIndex) override;
 
-  bool RecvOnBoundary(const nsString& aName, const float& aElapsedTime,
-                      const uint32_t& aCharIndex) override;
+  virtual bool RecvOnBoundary(const nsString& aName, const float& aElapsedTime,
+                              const uint32_t& aCharIndex) override;
 
-  bool RecvOnMark(const nsString& aName, const float& aElapsedTime,
-                  const uint32_t& aCharIndex) override;
+  virtual bool RecvOnMark(const nsString& aName, const float& aElapsedTime,
+                          const uint32_t& aCharIndex) override;
 
-  RefPtr<SpeechTaskChild> mTask;
+  nsRefPtr<SpeechTaskChild> mTask;
 };
 
 class SpeechTaskChild : public nsSpeechTask
@@ -86,15 +82,11 @@ public:
 
   NS_IMETHOD SendAudioNative(int16_t* aData, uint32_t aDataLen) override;
 
-  void Pause() override;
+  virtual void Pause() override;
 
-  void Resume() override;
+  virtual void Resume() override;
 
-  void Cancel() override;
-
-  void ForceEnd() override;
-
-  void SetAudioOutputVolume(float aVolume) override;
+  virtual void Cancel() override;
 
 private:
   SpeechSynthesisRequestChild* mActor;

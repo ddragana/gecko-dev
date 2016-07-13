@@ -6,9 +6,6 @@
 
 #include "compiler/translator/ForLoopUnroll.h"
 
-#include "compiler/translator/ValidateLimitations.h"
-#include "angle_gl.h"
-
 bool ForLoopUnrollMarker::visitBinary(Visit, TIntermBinary *node)
 {
     if (mUnrollCondition != kSamplerArrayIndex)
@@ -41,16 +38,11 @@ bool ForLoopUnrollMarker::visitBinary(Visit, TIntermBinary *node)
 
 bool ForLoopUnrollMarker::visitLoop(Visit, TIntermLoop *node)
 {
-    bool canBeUnrolled = mHasRunLoopValidation;
-    if (!mHasRunLoopValidation)
-    {
-        canBeUnrolled = ValidateLimitations::IsLimitedForLoop(node);
-    }
-    if (mUnrollCondition == kIntegerIndex && canBeUnrolled)
+    if (mUnrollCondition == kIntegerIndex)
     {
         // Check if loop index type is integer.
-        // This is called after ValidateLimitations pass, so the loop has the limited form specified
-        // in ESSL 1.00 appendix A.
+        // This is called after ValidateLimitations pass, so all the calls
+        // should be valid. See ValidateLimitations::validateForLoopInit().
         TIntermSequence *declSeq = node->getInit()->getAsAggregate()->getSequence();
         TIntermSymbol *symbol = (*declSeq)[0]->getAsBinaryNode()->getLeft()->getAsSymbolNode();
         if (symbol->getBasicType() == EbtInt)
@@ -58,18 +50,11 @@ bool ForLoopUnrollMarker::visitLoop(Visit, TIntermLoop *node)
     }
 
     TIntermNode *body = node->getBody();
-    if (body != nullptr)
+    if (body != NULL)
     {
-        if (canBeUnrolled)
-        {
-            mLoopStack.push(node);
-            body->traverse(this);
-            mLoopStack.pop();
-        }
-        else
-        {
-            body->traverse(this);
-        }
+        mLoopStack.push(node);
+        body->traverse(this);
+        mLoopStack.pop();
     }
     // The loop is fully processed - no need to visit children.
     return false;

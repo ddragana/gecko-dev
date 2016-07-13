@@ -22,7 +22,7 @@ struct ScriptObjectFixture : public JSAPITest {
     {
         CHECK(script);
 
-        JS_GC(cx);
+        JS_GC(rt);
 
         /* After a garbage collection, the script should still work. */
         JS::RootedValue result(cx);

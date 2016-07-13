@@ -31,19 +31,19 @@ class SVGRadialGradientElement;
 } // namespace dom
 } // namespace mozilla
 
+typedef nsSVGPaintServerFrame nsSVGGradientFrameBase;
+
 /**
  * Gradients can refer to other gradients. We create an nsSVGPaintingProperty
  * with property type nsGkAtoms::href to track the referenced gradient.
  */
-class nsSVGGradientFrame : public nsSVGPaintServerFrame
+class nsSVGGradientFrame : public nsSVGGradientFrameBase
 {
-  typedef mozilla::gfx::ExtendMode ExtendMode;
-
 protected:
   explicit nsSVGGradientFrame(nsStyleContext* aContext);
 
 public:
-  NS_DECL_ABSTRACT_FRAME(nsSVGGradientFrame)
+  NS_DECL_FRAMEARENA_HELPERS
 
   // nsSVGPaintServerFrame methods:
   virtual already_AddRefed<gfxPattern>
@@ -124,13 +124,15 @@ private:
 // Linear Gradients
 // -------------------------------------------------------------------------
 
-class nsSVGLinearGradientFrame : public nsSVGGradientFrame
+typedef nsSVGGradientFrame nsSVGLinearGradientFrameBase;
+
+class nsSVGLinearGradientFrame : public nsSVGLinearGradientFrameBase
 {
   friend nsIFrame* NS_NewSVGLinearGradientFrame(nsIPresShell* aPresShell,
                                                 nsStyleContext* aContext);
 protected:
-  explicit nsSVGLinearGradientFrame(nsStyleContext* aContext)
-    : nsSVGGradientFrame(aContext) {}
+  explicit nsSVGLinearGradientFrame(nsStyleContext* aContext) :
+    nsSVGLinearGradientFrameBase(aContext) {}
 
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -167,13 +169,15 @@ protected:
 // Radial Gradients
 // -------------------------------------------------------------------------
 
-class nsSVGRadialGradientFrame : public nsSVGGradientFrame
+typedef nsSVGGradientFrame nsSVGRadialGradientFrameBase;
+
+class nsSVGRadialGradientFrame : public nsSVGRadialGradientFrameBase
 {
   friend nsIFrame* NS_NewSVGRadialGradientFrame(nsIPresShell* aPresShell,
                                                 nsStyleContext* aContext);
 protected:
-  explicit nsSVGRadialGradientFrame(nsStyleContext* aContext)
-    : nsSVGGradientFrame(aContext) {}
+  explicit nsSVGRadialGradientFrame(nsStyleContext* aContext) :
+    nsSVGRadialGradientFrameBase(aContext) {}
 
 public:
   NS_DECL_FRAMEARENA_HELPERS

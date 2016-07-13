@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "prio.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "nsXPCOMStrings.h"
 #include "mozilla/IOInterposer.h"
 #include "mozilla/MemoryReporting.h"
@@ -92,9 +92,9 @@ StartupCache::GetSingleton()
     }
 #ifdef MOZ_DISABLE_STARTUPCACHE
     return nullptr;
-#else
-    StartupCache::InitSingleton();
 #endif
+
+    StartupCache::InitSingleton();
   }
 
   return StartupCache::gStartupCache;
@@ -284,7 +284,7 @@ namespace {
 
 nsresult
 GetBufferFromZipArchive(nsZipArchive *zip, bool doCRC, const char* id,
-                        UniquePtr<char[]>* outbuf, uint32_t* length)
+                        char** outbuf, uint32_t* length)
 {
   if (!zip)
     return NS_ERROR_NOT_AVAILABLE;
@@ -303,20 +303,17 @@ GetBufferFromZipArchive(nsZipArchive *zip, bool doCRC, const char* id,
 // NOTE: this will not find a new entry until it has been written to disk!
 // Consumer should take ownership of the resulting buffer.
 nsresult
-StartupCache::GetBuffer(const char* id, UniquePtr<char[]>* outbuf, uint32_t* length) 
+StartupCache::GetBuffer(const char* id, char** outbuf, uint32_t* length) 
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
-
   NS_ASSERTION(NS_IsMainThread(), "Startup cache only available on main thread");
-
   WaitOnWriteThread();
   if (!mStartupWriteInitiated) {
     CacheEntry* entry; 
     nsDependentCString idStr(id);
     mTable.Get(idStr, &entry);
     if (entry) {
-      *outbuf = MakeUnique<char[]>(entry->size);
-      memcpy(outbuf->get(), entry->data.get(), entry->size);
+      *outbuf = new char[entry->size];
+      memcpy(*outbuf, entry->data, entry->size);
       *length = entry->size;
       return NS_OK;
     }
@@ -326,7 +323,7 @@ StartupCache::GetBuffer(const char* id, UniquePtr<char[]>* outbuf, uint32_t* len
   if (NS_SUCCEEDED(rv))
     return rv;
 
-  RefPtr<nsZipArchive> omnijar = mozilla::Omnijar::GetReader(mozilla::Omnijar::APP);
+  nsRefPtr<nsZipArchive> omnijar = mozilla::Omnijar::GetReader(mozilla::Omnijar::APP);
   // no need to checksum omnijarred entries
   rv = GetBufferFromZipArchive(omnijar, false, id, outbuf, length);
   if (NS_SUCCEEDED(rv))
@@ -347,8 +344,8 @@ StartupCache::PutBuffer(const char* id, const char* inbuf, uint32_t len)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  auto data = MakeUnique<char[]>(len);
-  memcpy(data.get(), inbuf, len);
+  nsAutoArrayPtr<char> data(new char[len]);
+  memcpy(data, inbuf, len);
 
   nsCString idStr(id);
   // Cache it for now, we'll write all together later.
@@ -367,7 +364,7 @@ StartupCache::PutBuffer(const char* id, const char* inbuf, uint32_t len)
   }
 #endif
 
-  entry = new CacheEntry(Move(data), len);
+  entry = new CacheEntry(data.forget(), len);
   mTable.Put(idStr, entry);
   mPendingWrites.AppendElement(idStr);
   return ResetStartupWriteTimer();
@@ -380,21 +377,20 @@ StartupCache::SizeOfMapping()
 }
 
 size_t
-StartupCache::HeapSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+StartupCache::HeapSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
     // This function could measure more members, but they haven't been found by
     // DMD to be significant.  They can be added later if necessary.
+    return aMallocSizeOf(this) +
+           mTable.SizeOfExcludingThis(SizeOfEntryExcludingThis, aMallocSizeOf) +
+           mPendingWrites.SizeOfExcludingThis(aMallocSizeOf);
+}
 
-    size_t n = aMallocSizeOf(this);
-
-    n += mTable.ShallowSizeOfExcludingThis(aMallocSizeOf);
-    for (auto iter = mTable.ConstIter(); !iter.Done(); iter.Next()) {
-        n += iter.Data()->SizeOfIncludingThis(aMallocSizeOf);
-    }
-
-    n += mPendingWrites.ShallowSizeOfExcludingThis(aMallocSizeOf);
-
-    return n;
+/* static */ size_t
+StartupCache::SizeOfEntryExcludingThis(const nsACString& key, const nsAutoPtr<CacheEntry>& data,
+                                       mozilla::MallocSizeOf mallocSizeOf, void *)
+{
+    return data->SizeOfExcludingThis(mallocSizeOf);
 }
 
 struct CacheWriteHolder
@@ -414,7 +410,7 @@ CacheCloseHelper(const nsACString& key, const CacheEntry* data,
   nsIStringInputStream* stream = holder->stream;
   nsIZipWriter* writer = holder->writer;
 
-  stream->ShareData(data->data.get(), data->size);
+  stream->ShareData(data->data, data->size);
 
 #ifdef DEBUG
   bool hasEntry;
@@ -754,10 +750,7 @@ StartupCacheWrapper::GetBuffer(const char* id, char** outbuf, uint32_t* length)
   if (!sc) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  UniquePtr<char[]> buf;
-  nsresult rv = sc->GetBuffer(id, &buf, length);
-  *outbuf = buf.release();
-  return rv;
+  return sc->GetBuffer(id, outbuf, length);
 }
 
 nsresult

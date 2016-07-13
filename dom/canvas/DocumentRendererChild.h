@@ -20,7 +20,7 @@ public:
     DocumentRendererChild();
     virtual ~DocumentRendererChild();
 
-    bool RenderDocument(nsPIDOMWindowOuter* window,
+    bool RenderDocument(nsIDOMWindow *window,
                         const nsRect& documentRect, const gfx::Matrix& transform,
                         const nsString& bgcolor,
                         uint32_t renderFlags, bool flushLayout,

@@ -13,7 +13,7 @@ dictionary TVCurrentChannelChangedEventInit : EventInit {
 
 [Pref="dom.tv.enabled",
  CheckAnyPermissions="tv",
- AvailableIn=CertifiedApps,
+ Func="Navigator::HasTVSupport",
  Constructor(DOMString type, optional TVCurrentChannelChangedEventInit eventInitDict)]
 interface TVCurrentChannelChangedEvent : Event {
   readonly attribute TVChannel? channel;

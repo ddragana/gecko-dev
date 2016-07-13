@@ -26,15 +26,15 @@ NS_IMPL_ISUPPORTS(WebSocketChannelParent,
 
 WebSocketChannelParent::WebSocketChannelParent(nsIAuthPromptProvider* aAuthProvider,
                                                nsILoadContext* aLoadContext,
-                                               PBOverrideStatus aOverrideStatus,
-                                               uint32_t aSerial)
+                                               PBOverrideStatus aOverrideStatus)
   : mAuthProvider(aAuthProvider)
   , mLoadContext(aLoadContext)
   , mIPCOpen(true)
-  , mSerial(aSerial)
 {
   // Websocket channels can't have a private browsing override
   MOZ_ASSERT_IF(!aLoadContext, aOverrideStatus == kPBOverride_Unset);
+  if (!webSocketLog)
+    webSocketLog = PR_NewLogModule("nsWebSocket");
   mObserver = new OfflineObserver(this);
 }
 
@@ -58,18 +58,15 @@ WebSocketChannelParent::RecvDeleteSelf()
 }
 
 bool
-WebSocketChannelParent::RecvAsyncOpen(const OptionalURIParams& aURI,
+WebSocketChannelParent::RecvAsyncOpen(const URIParams& aURI,
                                       const nsCString& aOrigin,
-                                      const uint64_t& aInnerWindowID,
                                       const nsCString& aProtocol,
                                       const bool& aSecure,
                                       const uint32_t& aPingInterval,
                                       const bool& aClientSetPingInterval,
                                       const uint32_t& aPingTimeout,
                                       const bool& aClientSetPingTimeout,
-                                      const OptionalLoadInfoArgs& aLoadInfoArgs,
-                                      const OptionalTransportProvider& aTransportProvider,
-                                      const nsCString& aNegotiatedExtensions)
+                                      const OptionalLoadInfoArgs& aLoadInfoArgs)
 {
   LOG(("WebSocketChannelParent::RecvAsyncOpen() %p\n", this));
 
@@ -97,11 +94,6 @@ WebSocketChannelParent::RecvAsyncOpen(const OptionalURIParams& aURI,
   if (NS_FAILED(rv))
     goto fail;
 
-  rv = mChannel->SetSerial(mSerial);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    goto fail;
-  }
-
   rv = LoadInfoArgsToLoadInfo(aLoadInfoArgs, getter_AddRefs(loadInfo));
   if (NS_FAILED(rv))
     goto fail;
@@ -119,20 +111,10 @@ WebSocketChannelParent::RecvAsyncOpen(const OptionalURIParams& aURI,
   if (NS_FAILED(rv))
     goto fail;
 
-  if (aTransportProvider.type() != OptionalTransportProvider::Tvoid_t) {
-    RefPtr<TransportProviderParent> provider =
-      static_cast<TransportProviderParent*>(
-        aTransportProvider.get_PTransportProviderParent());
-    rv = mChannel->SetServerParameters(provider, aNegotiatedExtensions);
-    if (NS_FAILED(rv)) {
-      goto fail;
-    }
-  } else {
-    uri = DeserializeURI(aURI);
-    if (!uri) {
-      rv = NS_ERROR_FAILURE;
-      goto fail;
-    }
+  uri = DeserializeURI(aURI);
+  if (!uri) {
+    rv = NS_ERROR_FAILURE;
+    goto fail;
   }
 
   // only use ping values from child if they were overridden by client code.
@@ -146,7 +128,7 @@ WebSocketChannelParent::RecvAsyncOpen(const OptionalURIParams& aURI,
     mChannel->SetPingTimeout(aPingTimeout / 1000);
   }
 
-  rv = mChannel->AsyncOpen(uri, aOrigin, aInnerWindowID, this, nullptr);
+  rv = mChannel->AsyncOpen(uri, aOrigin, this, nullptr);
   if (NS_FAILED(rv))
     goto fail;
 
@@ -223,7 +205,7 @@ WebSocketChannelParent::OnStart(nsISupports *aContext)
     mChannel->GetProtocol(protocol);
     mChannel->GetExtensions(extensions);
 
-    RefPtr<WebSocketChannel> channel;
+    nsRefPtr<WebSocketChannel> channel;
     channel = static_cast<WebSocketChannel*>(mChannel.get());
     MOZ_ASSERT(channel);
 

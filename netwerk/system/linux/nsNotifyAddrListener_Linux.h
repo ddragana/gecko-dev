@@ -20,10 +20,7 @@
 #include "nsIObserver.h"
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
-#include "mozilla/Atomics.h"
 #include "mozilla/TimeStamp.h"
-#include "nsITimer.h"
-#include "nsClassHashtable.h"
 
 class nsNotifyAddrListener : public nsINetworkLinkService,
                              public nsIRunnable,
@@ -41,7 +38,7 @@ public:
     nsresult Init(void);
 
 private:
-    class ChangeEvent : public mozilla::Runnable {
+    class ChangeEvent : public nsRunnable {
     public:
         NS_DECL_NSIRUNNABLE
         ChangeEvent(nsINetworkLinkService *aService, const char *aEventID)
@@ -55,15 +52,8 @@ private:
     // Called when xpcom-shutdown-threads is received.
     nsresult Shutdown(void);
 
-    // Called when a network change was detected
-    nsresult NetworkChanged();
-
     // Sends the network event.
     nsresult SendEvent(const char *aEventID);
-
-    // Figure out the current "network identification"
-    void calculateNetworkId(void);
-    nsCString mNetworkId;
 
     // Checks if there's a network "link"
     void checkLink(void);
@@ -85,16 +75,8 @@ private:
     // Network changed events are enabled
     bool mAllowChangedEvent;
 
-    // Flag set while coalescing change events
-    bool mCoalescingActive;
-
-    // Time stamp for first event during coalescing
-    mozilla::TimeStamp mChangeTime;
-
-    // Seen Ip addresses. For Ipv6 addresses some time router renews their
-    // lifetime and we should not detect this as a network link change, so we
-    // keep info about all seen addresses.
-     nsClassHashtable<nsCStringHashKey, struct ifaddrmsg> mAddressInfo;
- };
+    // Flag to signal child thread kill with
+    bool mChildThreadShutdown;
+};
 
 #endif /* NSNOTIFYADDRLISTENER_LINUX_H_ */

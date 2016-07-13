@@ -10,13 +10,15 @@ function AutoCompleteInput(aSearches) {
 }
 AutoCompleteInput.prototype = Object.create(AutoCompleteInputBase.prototype);
 
-add_test(function test_handleEnter_mouse() {
+function run_test() {
+  run_next_test();
+}
+
+add_test(function test_handleEnter() {
   doSearch("moz", "mozilla.com", "http://www.mozilla.com", function(aController) {
     do_check_eq(aController.input.textValue, "moz");
     do_check_eq(aController.getFinalCompleteValueAt(0), "http://www.mozilla.com");
-    // Keyboard interaction is tested by test_finalCompleteValueSelectedIndex.js
-    // so here just test popup selection.
-    aController.handleEnter(true);
+    aController.handleEnter(false);
     do_check_eq(aController.input.textValue, "http://www.mozilla.com");
   });
 });
@@ -29,8 +31,8 @@ function doSearch(aSearchString, aResultValue, aFinalCompleteValue, aOnCompleteC
   registerAutoCompleteSearch(search);
 
   let controller = Cc["@mozilla.org/autocomplete/controller;1"].
-                   getService(Ci.nsIAutoCompleteController);
-
+                   getService(Ci.nsIAutoCompleteController);  
+  
   // Make an AutoCompleteInput that uses our searches and confirms results.
   let input = new AutoCompleteInput([ search.name ]);
   input.textValue = aSearchString;

@@ -14,16 +14,12 @@
  * limitations under the License.
  */
 
-#include "GonkPermission.h"
 #include <binder/IPCThreadState.h>
 #include <binder/ProcessState.h>
 #include <binder/IServiceManager.h>
 #include <binder/IPermissionController.h>
-
-#ifndef HAVE_ANDROID_OS
-#define HAVE_ANDROID_OS 1
-#endif
 #include <private/android_filesystem_config.h>
+#include "GonkPermission.h"
 
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/TabParent.h"
@@ -34,7 +30,6 @@
 
 #undef LOG
 #include <android/log.h>
-#undef ALOGE
 #define ALOGE(args...)  __android_log_print(ANDROID_LOG_ERROR, "gonkperm" , ## args)
 
 using namespace android;
@@ -43,7 +38,7 @@ using namespace mozilla;
 // Checking permissions needs to happen on the main thread, but the
 // binder callback is called on a special binder thread, so we use
 // this runnable for that.
-class GonkPermissionChecker : public Runnable {
+class GonkPermissionChecker : public nsRunnable {
   int32_t mPid;
   bool mCanUseCamera;
 
@@ -56,7 +51,7 @@ class GonkPermissionChecker : public Runnable {
 public:
   static already_AddRefed<GonkPermissionChecker> Inspect(int32_t pid)
   {
-    RefPtr<GonkPermissionChecker> that = new GonkPermissionChecker(pid);
+    nsRefPtr<GonkPermissionChecker> that = new GonkPermissionChecker(pid);
     nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
     MOZ_ASSERT(mainThread);
     SyncRunnable::DispatchToThread(mainThread, that);
@@ -94,11 +89,9 @@ GonkPermissionChecker::Run()
   }
 
   // Now iterate its apps...
-  const ManagedContainer<dom::PBrowserParent>& browsers =
-    contentParent->ManagedPBrowserParent();
-  for (auto iter = browsers.ConstIter(); !iter.Done(); iter.Next()) {
+  for (uint32_t i = 0; i < contentParent->ManagedPBrowserParent().Length(); i++) {
     dom::TabParent *tabParent =
-      static_cast<dom::TabParent*>(iter.Get()->GetKey());
+      static_cast<dom::TabParent*>(contentParent->ManagedPBrowserParent()[i]);
     nsCOMPtr<mozIApplication> mozApp = tabParent->GetOwnOrContainingApp();
     if (!mozApp) {
       continue;
@@ -158,7 +151,7 @@ GonkPermissionService::checkPermission(const String16& permission, int32_t pid,
 
   // Camera/audio record permissions are allowed for apps with the
   // "camera" permission.
-  RefPtr<GonkPermissionChecker> checker =
+  nsRefPtr<GonkPermissionChecker> checker =
     GonkPermissionChecker::Inspect(pid);
   bool canUseCamera = checker->CanUseCamera();
   if (!canUseCamera) {

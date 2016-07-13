@@ -2,9 +2,9 @@ Cu.import("resource://gre/modules/CrashSubmit.jsm", this);
 
 const SERVER_URL = "http://example.com/browser/toolkit/crashreporter/test/browser/crashreport.sjs";
 
-var gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-var gTestBrowser = null;
-var config = {};
+let gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
+let gTestBrowser = null;
+let config = {};
 
 add_task(function* () {
   // The test harness sets MOZ_CRASHREPORTER_NO_REPORT, which disables plugin
@@ -59,7 +59,7 @@ add_task(function* () {
   let crashReportStatus = TestUtils.topicObserved("crash-report-status", onSubmitStatus);
 
   // Test that the crash submission UI is actually visible and submit the crash report.
-  yield ContentTask.spawn(gTestBrowser, config, function* (aConfig) {
+  let crashUiVisible = yield ContentTask.spawn(gTestBrowser, config, function* (aConfig) {
     let doc = content.document;
     let plugin = doc.getElementById("plugin");
     let pleaseSubmit = doc.getAnonymousElementByAttribute(plugin, "anonid", "pleaseSubmit");
@@ -67,11 +67,12 @@ add_task(function* () {
     // Test that we don't send the URL when urlOptIn is false.
     doc.getAnonymousElementByAttribute(plugin, "anonid", "submitURLOptIn").checked = aConfig.urlOptIn;
     submitButton.click();
-    Assert.equal(content.getComputedStyle(pleaseSubmit).display == "block",
-      aConfig.shouldSubmissionUIBeVisible, "The crash UI should be visible");
+    return content.getComputedStyle(pleaseSubmit).display == "block";
   });
 
   yield crashReportStatus;
+
+  is(crashUiVisible, config.shouldSubmissionUIBeVisible, "The crash UI should be visible");
 });
 
 add_task(function* () {
@@ -96,7 +97,7 @@ add_task(function* () {
   let crashReportStatus = TestUtils.topicObserved("crash-report-status", onSubmitStatus);
 
   // Test that the crash submission UI is actually visible and submit the crash report.
-  yield ContentTask.spawn(gTestBrowser, config, function* (aConfig) {
+  let crashUiVisible = yield ContentTask.spawn(gTestBrowser, config, function* (aConfig) {
     let doc = content.document;
     let plugin = doc.getElementById("plugin");
     let pleaseSubmit = doc.getAnonymousElementByAttribute(plugin, "anonid", "pleaseSubmit");
@@ -105,11 +106,12 @@ add_task(function* () {
     doc.getAnonymousElementByAttribute(plugin, "anonid", "submitURLOptIn").checked = aConfig.urlOptIn;
     doc.getAnonymousElementByAttribute(plugin, "anonid", "submitComment").value = aConfig.comment;
     submitButton.click();
-    Assert.equal(content.getComputedStyle(pleaseSubmit).display == "block",
-      aConfig.shouldSubmissionUIBeVisible, "The crash UI should be visible");
+    return content.getComputedStyle(pleaseSubmit).display == "block";
   });
 
   yield crashReportStatus;
+
+  is(crashUiVisible, config.shouldSubmissionUIBeVisible, "The crash UI should be visible");
 });
 
 add_task(function* () {
@@ -134,20 +136,21 @@ add_task(function* () {
   yield pluginCrashed;
 
   // Test that the crash submission UI is not visible and do not submit a crash report.
-  yield ContentTask.spawn(gTestBrowser, config, function* (aConfig) {
+  let crashUiVisible = yield ContentTask.spawn(gTestBrowser, {}, function* () {
     let doc = content.document;
     let plugin = doc.getElementById("plugin");
     let pleaseSubmit = doc.getAnonymousElementByAttribute(plugin, "anonid", "pleaseSubmit");
-    Assert.equal(!!pleaseSubmit && content.getComputedStyle(pleaseSubmit).display == "block",
-      aConfig.shouldSubmissionUIBeVisible, "Plugin crash UI should not be visible");
+    return !!pleaseSubmit && content.getComputedStyle(pleaseSubmit).display == "block";
   });
+
+  is(crashUiVisible, config.shouldSubmissionUIBeVisible, "Plugin crash UI should not be visible");
 });
 
 function promisePluginCrashed() {
   return new ContentTask.spawn(gTestBrowser, {}, function* () {
     yield new Promise((resolve) => {
-      addEventListener("PluginCrashReporterDisplayed", function onPluginCrashed() {
-        removeEventListener("PluginCrashReporterDisplayed", onPluginCrashed);
+      addEventListener("PluginCrashed", function onPluginCrashed() {
+        removeEventListener("PluginCrashed", onPluginCrashed);
         resolve();
       });
     });

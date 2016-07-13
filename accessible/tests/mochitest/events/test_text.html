@@ -180,8 +180,7 @@
     {
       this.__proto__ = new textRemoveInvoker(aID, aStart, aEnd, aText);
 
-      this.eventSeq.push(new invokerChecker(EVENT_TEXT_VALUE_CHANGE,
-                                            this.DOMNode));
+      this.eventSeq.push(new invokerChecker(EVENT_VALUE_CHANGE, this.DOMNode));
 
       this.invoke = function removeTextFromInput_invoke()
       {
@@ -208,8 +207,7 @@
     {
       this.__proto__ = new textInsertInvoker(aID, aStart, aEnd, aText);
 
-      this.eventSeq.push(new invokerChecker(EVENT_TEXT_VALUE_CHANGE,
-                                            this.DOMNode));
+      this.eventSeq.push(new invokerChecker(EVENT_VALUE_CHANGE, this.DOMNode));
 
       this.invoke = function insertTextIntoInput_invoke()
       {
@@ -254,9 +252,9 @@
 
     ////////////////////////////////////////////////////////////////////////////
     // Do tests
-    gA11yEventDumpToConsole = true; // debugging
-
     var gQueue = null;
+    //gA11yEventDumpID = "eventdump"; // debug stuff
+
     function doTests()
     {
       gQueue = new eventQueue();
@@ -327,6 +325,7 @@
   <div id="content" style="display: none"></div>
   <pre id="test">
   </pre>
+  <div id="eventdump"></div>
 
   <p id="p"><span><span>333</span><span>22</span></span>1111</p>
   <div id="div">hello<div>hello</div>hello</div>

@@ -12,25 +12,19 @@ add_task(function*() {
   yield check_autocomplete({
     search: "doit",
     searchParam: "enable-actions",
-    matches: [ makeSearchMatch("doit", { engineName: "AliasedMozSearch", searchQuery: "", alias: "doit", heuristic: true }) ]
-  });
-
-  yield check_autocomplete({
-    search: "doit ",
-    searchParam: "enable-actions",
-    matches: [ makeSearchMatch("doit ", { engineName: "AliasedMozSearch", searchQuery: "", alias: "doit", heuristic: true }) ]
+    matches: [ makeSearchMatch("doit") ]
   });
 
   yield check_autocomplete({
     search: "doit mozilla",
     searchParam: "enable-actions",
-        matches: [ makeSearchMatch("doit mozilla", { engineName: "AliasedMozSearch", searchQuery: "mozilla", alias: "doit", heuristic: true }) ]
+    matches: [ makeSearchMatch("doit mozilla", { engineName: "AliasedMozSearch", searchQuery: "mozilla", alias: "doit" }) ]
   });
 
   yield check_autocomplete({
     search: "doit mozzarella mozilla",
     searchParam: "enable-actions",
-        matches: [ makeSearchMatch("doit mozzarella mozilla", { engineName: "AliasedMozSearch", searchQuery: "mozzarella mozilla", alias: "doit", heuristic: true }) ]
+    matches: [ makeSearchMatch("doit mozzarella mozilla", { engineName: "AliasedMozSearch", searchQuery: "mozzarella mozilla", alias: "doit" }) ]
   });
 
   yield cleanup();

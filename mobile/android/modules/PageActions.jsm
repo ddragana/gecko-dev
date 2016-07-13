@@ -31,6 +31,7 @@ function resolveGeckoURI(aURI) {
   return aURI;
 }
 
+
 var PageActions = {
   _items: { },
 
@@ -53,32 +54,19 @@ var PageActions = {
   },
 
   observe: function(aSubject, aTopic, aData) {
-    let item = this._items[aData];
     if (aTopic == "PageActions:Clicked") {
-      if (item.clickCallback) {
-        item.clickCallback();
+      if (this._items[aData].clickCallback) {
+        this._items[aData].clickCallback();
       }
     } else if (aTopic == "PageActions:LongClicked") {
-      if (item.longClickCallback) {
-        item.longClickCallback();
+      if (this._items[aData].longClickCallback) {
+        this._items[aData].longClickCallback();
       }
-    }
-  },
-
-  isShown: function(id) {
-    return !!this._items[id];
-  },
-
-  synthesizeClick: function(id) {
-    let item = this._items[id];
-    if (item && item.clickCallback) {
-      item.clickCallback();
     }
   },
 
   add: function(aOptions) {
-    let id = aOptions.id || uuidgen.generateUUID().toString()
-
+    let id = uuidgen.generateUUID().toString();
     Messaging.sendRequest({
       type: "PageActions:Add",
       id: id,
@@ -87,15 +75,10 @@ var PageActions = {
       important: "important" in aOptions ? aOptions.important : false
     });
 
-    this._items[id] = {};
-
-    if (aOptions.clickCallback) {
-      this._items[id].clickCallback = aOptions.clickCallback;
-    }
-
-    if (aOptions.longClickCallback) {
-      this._items[id].longClickCallback = aOptions.longClickCallback;
-    }
+    this._items[id] = {
+      clickCallback: aOptions.clickCallback,
+      longClickCallback: aOptions.longClickCallback
+    };
 
     this._maybeInit();
     return id;

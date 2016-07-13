@@ -36,8 +36,7 @@ class TransportLayerLoopback : public TransportLayer {
       timer_(nullptr),
       packets_(),
       packets_lock_(nullptr),
-      deliverer_(nullptr),
-      combinePackets_(false) {}
+      deliverer_(nullptr) {}
 
   ~TransportLayerLoopback() {
     while (!packets_.empty()) {
@@ -68,8 +67,6 @@ class TransportLayerLoopback : public TransportLayer {
     }
   }
 
-  void CombinePackets(bool combine) { combinePackets_ = combine; }
-
   // Overrides for TransportLayer
   virtual TransportResult SendPacket(const unsigned char *data, size_t len);
 
@@ -94,16 +91,6 @@ class TransportLayerLoopback : public TransportLayer {
       memcpy(static_cast<void *>(data_),
              static_cast<const void *>(data), len);
       len_ = len;
-    }
-
-    void Assign(const unsigned char *data1, size_t len1,
-                const unsigned char *data2, size_t len2) {
-      data_ = new unsigned char[len1 + len2];
-      memcpy(static_cast<void *>(data_),
-             static_cast<const void *>(data1), len1);
-      memcpy(static_cast<void *>(data_ + len1),
-             static_cast<const void *>(data2), len2);
-      len_ = len1 + len2;
     }
 
     const unsigned char *data() const { return data_; }
@@ -145,8 +132,7 @@ class TransportLayerLoopback : public TransportLayer {
   nsCOMPtr<nsITimer> timer_;
   std::queue<QueuedPacket *> packets_;
   PRLock *packets_lock_;
-  RefPtr<Deliverer> deliverer_;
-  bool combinePackets_;
+  nsRefPtr<Deliverer> deliverer_;
 };
 
 }  // close namespace

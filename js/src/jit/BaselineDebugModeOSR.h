@@ -41,30 +41,18 @@ namespace jit {
 template <typename T>
 class DebugModeOSRVolatileStub
 {
-    ICStubCompiler::Engine engine_;
     T stub_;
     BaselineFrame* frame_;
     uint32_t pcOffset_;
 
   public:
-    DebugModeOSRVolatileStub(ICStubCompiler::Engine engine, BaselineFrame* frame,
-                             ICFallbackStub* stub)
-      : engine_(engine),
-        stub_(static_cast<T>(stub)),
-        frame_(frame),
-        pcOffset_(stub->icEntry()->pcOffset())
-    { }
-
     DebugModeOSRVolatileStub(BaselineFrame* frame, ICFallbackStub* stub)
-      : engine_(ICStubCompiler::Engine::Baseline),
-        stub_(static_cast<T>(stub)),
+      : stub_(static_cast<T>(stub)),
         frame_(frame),
         pcOffset_(stub->icEntry()->pcOffset())
     { }
 
     bool invalid() const {
-        if (engine_ == ICStubCompiler::Engine::IonMonkey)
-            return stub_->invalid();
         MOZ_ASSERT(!frame_->isHandlingException());
         ICEntry& entry = frame_->script()->baselineScript()->icEntryFromPCOffset(pcOffset_);
         return stub_ != entry.fallbackStub();
@@ -135,7 +123,7 @@ struct BaselineDebugModeOSRInfo
     void popValueInto(PCMappingSlotInfo::SlotLocation loc, Value* vp);
 };
 
-MOZ_MUST_USE bool
+bool
 RecompileOnStackBaselineScriptsForDebugMode(JSContext* cx,
                                             const Debugger::ExecutionObservableSet& obs,
                                             Debugger::IsObserving observing);

@@ -1,6 +1,5 @@
 Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
@@ -19,19 +18,19 @@ function cached_handler(metadata, response) {
   handlers_called++;
 }
 
-function makeChan(url, appId, inIsolatedMozBrowser) {
-  var chan = NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true})
-                    .QueryInterface(Ci.nsIHttpChannel);
-  chan.loadInfo.originAttributes = { appId: appId,
-                                     inIsolatedMozBrowser: inIsolatedMozBrowser
-                                   };
+function makeChan(url, appId, inBrowser) {
+  var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
+  var chan = ios.newChannel2(url,
+                             null,
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_OTHER).QueryInterface(Ci.nsIHttpChannel);
   chan.notificationCallbacks = {
     appId: appId,
-    isInIsolatedMozBrowserElement: inIsolatedMozBrowser,
-    originAttributes: {
-      appId: appId,
-      inIsolatedMozBrowser: inIsolatedMozBrowser,
-    },
+    isInBrowserElement: inBrowser,
     QueryInterface: function(iid) {
       if (iid.equals(Ci.nsILoadContext))
         return this;
@@ -50,7 +49,7 @@ function run_all_tests() {
   for (let test of firstTests) {
     handlers_called = 0;
     var chan = makeChan(URL, test[0], test[1]);
-    chan.asyncOpen2(new ChannelListener(doneFirstLoad, test[2]));
+    chan.asyncOpen(new ChannelListener(doneFirstLoad, test[2]), null);
     yield undefined;
   }
 
@@ -60,36 +59,38 @@ function run_all_tests() {
   if (procType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT)
     return;
 
-  let attrs_inBrowser = JSON.stringify({ appId:1, inIsolatedMozBrowser:true });
-  let attrs_notInBrowser = JSON.stringify({ appId:1 });
-
-  Services.obs.notifyObservers(null, "clear-origin-data", attrs_inBrowser);
+  let subject = {
+    appId: 1,
+    browserOnly: true,
+    QueryInterface: XPCOMUtils.generateQI([Ci.mozIApplicationClearPrivateDataParams])
+  };
+  Services.obs.notifyObservers(subject, "webapps-clear-data", null);
 
   for (let test of secondTests) {
     handlers_called = 0;
     var chan = makeChan(URL, test[0], test[1]);
-    chan.asyncOpen2(new ChannelListener(doneFirstLoad, test[2]));
+    chan.asyncOpen(new ChannelListener(doneFirstLoad, test[2]), null);
     yield undefined;
   }
 
-  Services.obs.notifyObservers(null, "clear-origin-data", attrs_notInBrowser);
-  Services.obs.notifyObservers(null, "clear-origin-data", attrs_inBrowser);
+  subject = {
+    appId: 1,
+    browserOnly: false,
+    QueryInterface: XPCOMUtils.generateQI([Ci.mozIApplicationClearPrivateDataParams])
+  };
+  Services.obs.notifyObservers(subject, "webapps-clear-data", null);
 
   for (let test of thirdTests) {
     handlers_called = 0;
     var chan = makeChan(URL, test[0], test[1]);
-    chan.asyncOpen2(new ChannelListener(doneFirstLoad, test[2]));
+    chan.asyncOpen(new ChannelListener(doneFirstLoad, test[2]), null);
     yield undefined;
   }
 }
 
-var gTests;
+let gTests;
 function run_test() {
   do_get_profile();
-  if (!newCacheBackEndUsed()) {
-    do_check_true(true, "This test checks only cache2 specific behavior.");
-    return;
-  }
   do_test_pending();
   httpserv = new HttpServer();
   httpserv.registerPathHandler("/cached", cached_handler);
@@ -100,9 +101,8 @@ function run_test() {
 
 function doneFirstLoad(req, buffer, expected) {
   // Load it again, make sure it hits the cache
-  var nc = req.notificationCallbacks.getInterface(Ci.nsILoadContext);
-  var chan = makeChan(URL, nc.appId, nc.isInIsolatedMozBrowserElement);
-  chan.asyncOpen2(new ChannelListener(doneSecondLoad, expected));
+  var chan = makeChan(URL, 0, false);
+  chan.asyncOpen(new ChannelListener(doneSecondLoad, expected), null);
 }
 
 function doneSecondLoad(req, buffer, expected) {

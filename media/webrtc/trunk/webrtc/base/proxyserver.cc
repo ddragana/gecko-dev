@@ -74,8 +74,6 @@ ProxyBinding::ProxyBinding(AsyncProxyServerSocket* int_socket,
   ext_socket_->SignalCloseEvent.connect(this, &ProxyBinding::OnExternalClose);
 }
 
-ProxyBinding::~ProxyBinding() = default;
-
 void ProxyBinding::OnConnectRequest(AsyncProxyServerSocket* socket,
                                    const SocketAddress& addr) {
   ASSERT(!connected_ && ext_socket_.get() != NULL);
@@ -126,7 +124,7 @@ void ProxyBinding::Read(AsyncSocket* socket, FifoBuffer* buffer) {
   if (buffer->GetBuffered(&size) && size == 0) {
     void* p = buffer->GetWriteBuffer(&size);
     read = socket->Recv(p, size);
-    buffer->ConsumeWriteBuffer(std::max(read, 0));
+    buffer->ConsumeWriteBuffer(_max(read, 0));
   }
 }
 
@@ -136,15 +134,11 @@ void ProxyBinding::Write(AsyncSocket* socket, FifoBuffer* buffer) {
   int written;
   const void* p = buffer->GetReadData(&size);
   written = socket->Send(p, size);
-  buffer->ConsumeReadData(std::max(written, 0));
+  buffer->ConsumeReadData(_max(written, 0));
 }
 
 void ProxyBinding::Destroy() {
   SignalDestroyed(this);
-}
-
-AsyncProxyServerSocket* SocksProxyServer::WrapSocket(AsyncSocket* socket) {
-  return new AsyncSocksProxyServerSocket(socket);
 }
 
 }  // namespace rtc

@@ -7,7 +7,7 @@
 #ifndef mozilla_ipc_RilSocketConsumer_h
 #define mozilla_ipc_RilSocketConsumer_h
 
-#include "mozilla/UniquePtr.h"
+#include "nsAutoPtr.h"
 
 class JSContext;
 
@@ -31,7 +31,7 @@ public:
    */
   virtual void ReceiveSocketData(JSContext* aCx,
                                  int aIndex,
-                                 UniquePtr<UnixSocketBuffer>& aBuffer) = 0;
+                                 nsAutoPtr<UnixSocketBuffer>& aBuffer) = 0;
 
   /**
    * Callback for socket success. Consumer-thread only.

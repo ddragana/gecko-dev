@@ -109,7 +109,7 @@ public:
   void ToString(nsCString &aString);
 };
 
-struct nsSTSPreload;
+class nsSTSPreload;
 
 class nsSiteSecurityService : public nsISiteSecurityService
                             , public nsIObserver
@@ -132,15 +132,13 @@ private:
   nsresult ProcessHeaderInternal(uint32_t aType, nsIURI* aSourceURI,
                                  const char* aHeader, nsISSLStatus* aSSLStatus,
                                  uint32_t aFlags, uint64_t* aMaxAge,
-                                 bool* aIncludeSubdomains,
-                                 uint32_t* aFailureResult);
+                                 bool* aIncludeSubdomains);
   nsresult ProcessSTSHeader(nsIURI* aSourceURI, const char* aHeader,
                             uint32_t flags, uint64_t* aMaxAge,
-                            bool* aIncludeSubdomains, uint32_t* aFailureResult);
+                            bool* aIncludeSubdomains);
   nsresult ProcessPKPHeader(nsIURI* aSourceURI, const char* aHeader,
                             nsISSLStatus* aSSLStatus, uint32_t flags,
-                            uint64_t* aMaxAge, bool* aIncludeSubdomains,
-                            uint32_t* aFailureResult);
+                            uint64_t* aMaxAge, bool* aIncludeSubdomains);
   nsresult SetHPKPState(const char* aHost, SiteHPKPState& entry, uint32_t flags);
 
   const nsSTSPreload *GetPreloadListEntry(const char *aHost);
@@ -148,7 +146,7 @@ private:
   bool mUsePreloadList;
   int64_t mPreloadListTimeOffset;
   bool mProcessPKPHeadersFromNonBuiltInRoots;
-  RefPtr<mozilla::DataStorage> mSiteStateStorage;
+  nsRefPtr<mozilla::DataStorage> mSiteStateStorage;
 };
 
 #endif // __nsSiteSecurityService_h__

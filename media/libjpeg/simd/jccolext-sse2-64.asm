@@ -1,10 +1,9 @@
 ;
 ; jccolext.asm - colorspace conversion (64-bit SSE2)
 ;
-; Copyright (C) 2009, D. R. Commander.
-;
-; Based on the x86 SIMD extension for IJG JPEG library
+; x86 SIMD extension for IJG JPEG library
 ; Copyright (C) 1999-2006, MIYASAKA Masaru.
+; Copyright (C) 2009, D. R. Commander.
 ; For conditions of distribution and use, see copyright notice in jsimdext.inc
 ;
 ; This file should be assembled with NASM (Netwide Assembler),
@@ -51,14 +50,14 @@ EXTN(jsimd_rgb_ycc_convert_sse2):
         collect_args
         push    rbx
 
-        mov     ecx, r10d
+        mov     rcx, r10
         test    rcx,rcx
         jz      near .return
 
         push    rcx
 
         mov rsi, r12
-        mov ecx, r13d
+        mov rcx, r13
         mov     rdi, JSAMPARRAY [rsi+0*SIZEOF_JSAMPARRAY]
         mov     rbx, JSAMPARRAY [rsi+1*SIZEOF_JSAMPARRAY]
         mov     rdx, JSAMPARRAY [rsi+2*SIZEOF_JSAMPARRAY]

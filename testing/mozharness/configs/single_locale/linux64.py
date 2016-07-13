@@ -2,7 +2,6 @@ import os
 
 config = {
     "platform": "linux64",
-    "stage_product": "firefox",
     "update_platform": "Linux_x86_64-gcc3",
     "mozconfig": "%(branch)s/browser/config/mozconfigs/linux64/l10n-mozconfig",
     "bootstrap_env": {
@@ -14,13 +13,12 @@ config = {
         "LOCALE_MERGEDIR": "%(abs_merge_dir)s/",
         "L10NBASEDIR": "../../l10n",
         "MOZ_MAKE_COMPLETE_MAR": "1",
-        'TOOLTOOL_CACHE': '/builds/tooltool_cache',
-        'TOOLTOOL_HOME': '/builds',
     },
     "ssh_key_dir": "/home/mock_mozilla/.ssh",
     "log_name": "single_locale",
     "objdir": "obj-l10n",
     "js_src_dir": "js/src",
+    "make_dirs": ['config'],
     "vcs_share_base": "/builds/hg-shared",
 
     # tooltool
@@ -32,7 +30,7 @@ config = {
     'balrog_credentials_file': 'oauth.txt',
 
     # l10n
-    "ignore_locales": ["en-US", "ja-JP-mac"],
+    "ignore_locales": ["en-US"],
     "l10n_dir": "l10n",
     "locales_file": "%(branch)s/browser/locales/all-locales",
     "locales_dir": "browser/locales",
@@ -98,7 +96,6 @@ config = {
         ('/builds/gapi.data', '/builds/gapi.data'),
         ('/builds/relengapi.tok', '/builds/relengapi.tok'),
         ('/tools/tooltool.py', '/builds/tooltool.py'),
-        ('/usr/local/lib/hgext', '/usr/local/lib/hgext'),
     ],
     'exes': {
         'hgtool.py': os.path.join(

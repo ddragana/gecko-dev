@@ -10,7 +10,6 @@
 #include "nsIDOMHTMLCollection.h"
 #include "nsTArrayForwardDeclare.h"
 #include "nsWrapperCache.h"
-#include "js/GCAPI.h"
 #include "js/TypeDecls.h"
 
 class nsINode;
@@ -69,22 +68,19 @@ public:
   {
     return GetFirstNamedElement(aName, aFound);
   }
+  bool NameIsEnumerable(const nsAString& aName)
+  {
+    return false;
+  }
   virtual mozilla::dom::Element*
   GetFirstNamedElement(const nsAString& aName, bool& aFound) = 0;
 
-  virtual void GetSupportedNames(nsTArray<nsString>& aNames) = 0;
+  virtual void GetSupportedNames(unsigned aFlags,
+                                 nsTArray<nsString>& aNames) = 0;
 
   JSObject* GetWrapperPreserveColor()
   {
     return GetWrapperPreserveColorInternal();
-  }
-  JSObject* GetWrapper()
-  {
-    JSObject* obj = GetWrapperPreserveColor();
-    if (obj) {
-      JS::ExposeObjectToActiveJS(obj);
-    }
-    return obj;
   }
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) = 0;
 protected:

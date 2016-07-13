@@ -5,66 +5,61 @@
  * loads. The policy we are enforcing is outlined here:
  * https://bugzilla.mozilla.org/show_bug.cgi?id=593387#c17
 */
+var newBrowser;
 
-add_task(function* test() {
-  yield BrowserTestUtils.withNewTab({ gBrowser,
-                                      url: "chrome://global/content/mozilla.xhtml" },
-                                     function* (newBrowser) {
-    // NB: We load the chrome:// page in the parent process.
-    yield testXFOFrameInChrome(newBrowser);
+function test() {
+  waitForExplicitFinish();
 
-    // Run next test (try the same with a content top-level context)
-    yield BrowserTestUtils.loadURI(newBrowser, "http://example.com/");
-    yield BrowserTestUtils.browserLoaded(newBrowser);
+  var newTab = gBrowser.addTab();
+  gBrowser.selectedTab = newTab;
+  newBrowser = gBrowser.getBrowserForTab(newTab);
+  //alert(newBrowser.contentWindow);
 
-    yield ContentTask.spawn(newBrowser, null, testXFOFrameInContent);
-  });
-});
+  newBrowser.addEventListener("load", testXFOFrameInChrome, true);
+  newBrowser.contentWindow.location = "chrome://global/content/mozilla.xhtml";
+}
 
-function testXFOFrameInChrome(newBrowser) {
+function testXFOFrameInChrome() {
+  newBrowser.removeEventListener("load", testXFOFrameInChrome, true);
+
   // Insert an iframe that specifies "X-Frame-Options: DENY" and verify
   // that it loads, since the top context is chrome
-  var deferred = {};
-  deferred.promise = new Promise((resolve) => {
-    deferred.resolve = resolve;
-  });
-
   var frame = newBrowser.contentDocument.createElement("iframe");
   frame.src = "http://mochi.test:8888/tests/dom/base/test/file_x-frame-options_page.sjs?testid=deny&xfo=deny";
-  frame.addEventListener("load", function loaded() {
-    frame.removeEventListener("load", loaded, true);
+  frame.addEventListener("load", function() {
+    frame.removeEventListener("load", arguments.callee, true);
 
     // Test that the frame loaded
     var test = this.contentDocument.getElementById("test");
     is(test.tagName, "H1", "wrong element type");
     is(test.textContent, "deny", "wrong textContent");
-    deferred.resolve();
+    
+    // Run next test (try the same with a content top-level context)
+    newBrowser.addEventListener("load", testXFOFrameInContent, true);
+    newBrowser.contentWindow.location = "http://example.com/";  
   }, true);
 
   newBrowser.contentDocument.body.appendChild(frame);
-  return deferred.promise;
 }
 
-function testXFOFrameInContent(newBrowser) {
+function testXFOFrameInContent() {
+  newBrowser.removeEventListener("load", testXFOFrameInContent, true);
+
   // Insert an iframe that specifies "X-Frame-Options: DENY" and verify that it
   // is blocked from loading since the top browsing context is another site
-  var deferred = {};
-  deferred.promise = new Promise((resolve) => {
-    deferred.resolve = resolve;
-  });
-
-  var frame = content.document.createElement("iframe");
+  var frame = newBrowser.contentDocument.createElement("iframe");
   frame.src = "http://mochi.test:8888/tests/dom/base/test/file_x-frame-options_page.sjs?testid=deny&xfo=deny";
-  frame.addEventListener("load", function loaded() {
-    frame.removeEventListener("load", loaded, true);
+  frame.addEventListener("load", function() {
+    frame.removeEventListener("load", arguments.callee, true);
 
     // Test that the frame DID NOT load
     var test = this.contentDocument.getElementById("test");
-    Assert.equal(test, null, "should be about:blank");
+    is(test, undefined, "should be about:blank");
 
-    deferred.resolve();
+    // Finalize the test
+    gBrowser.removeCurrentTab();
+    finish();
   }, true);
 
-  content.document.body.appendChild(frame);
-  return deferred.promise;
+  newBrowser.contentDocument.body.appendChild(frame);
 }

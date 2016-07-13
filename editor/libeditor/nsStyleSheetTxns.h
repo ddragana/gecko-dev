@@ -7,9 +7,11 @@
 #define nsStylesheetTxns_h__
 
 #include "EditTxn.h"                    // for EditTxn, NS_DECL_EDITTXN
-#include "mozilla/StyleSheetHandle.h"   // for mozilla::StyleSheetHandle
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "mozilla/CSSStyleSheet.h"      // for mozilla::CSSStyleSheet
 #include "nsCycleCollectionParticipant.h"
 #include "nsID.h"                       // for REFNSIID
+#include "nsISupportsImpl.h"            // for CSSStyleSheet::Release
 #include "nscore.h"                     // for NS_IMETHOD
 
 class nsIEditor;
@@ -21,7 +23,8 @@ public:
     * @param aEditor the object providing core editing operations
     * @param aSheet   the stylesheet to add
     */
-  NS_IMETHOD Init(nsIEditor* aEditor, mozilla::StyleSheetHandle aSheet);
+  NS_IMETHOD Init(nsIEditor* aEditor,
+                  mozilla::CSSStyleSheet* aSheet);
 
   AddStyleSheetTxn();
 
@@ -33,7 +36,7 @@ public:
 protected:
 
   nsIEditor* mEditor;                      // the editor that created this transaction
-  mozilla::StyleSheetHandle::RefPtr mSheet; // the style sheet to add
+  nsRefPtr<mozilla::CSSStyleSheet> mSheet; // the style sheet to add
 
 };
 
@@ -45,7 +48,8 @@ public:
     * @param aEditor the object providing core editing operations
     * @param aSheet   the stylesheet to remove
     */
-  NS_IMETHOD Init(nsIEditor* aEditor, mozilla::StyleSheetHandle aSheet);
+  NS_IMETHOD Init(nsIEditor* aEditor,
+                  mozilla::CSSStyleSheet* aSheet);
 
   RemoveStyleSheetTxn();
 
@@ -57,7 +61,7 @@ public:
 protected:
 
   nsIEditor* mEditor;                      // the editor that created this transaction
-  mozilla::StyleSheetHandle::RefPtr mSheet; // the style sheet to remove
+  nsRefPtr<mozilla::CSSStyleSheet> mSheet; // the style sheet to remove
 
 };
 

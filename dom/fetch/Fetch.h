@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_Fetch_h
 #define mozilla_dom_Fetch_h
 
-#include "nsAutoPtr.h"
 #include "nsIInputStreamPump.h"
 #include "nsIStreamLoader.h"
 
@@ -20,7 +19,7 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/RequestBinding.h"
-#include "mozilla/dom/workers/bindings/WorkerHolder.h"
+#include "mozilla/dom/workers/bindings/WorkerFeature.h"
 
 class nsIGlobalObject;
 
@@ -51,8 +50,7 @@ UpdateRequestReferrer(nsIGlobalObject* aGlobal, InternalRequest* aRequest);
 nsresult
 ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
-                          nsCString& aContentType,
-                          uint64_t& aContentLength);
+                          nsCString& aContentType);
 
 /*
  * Non-owning version.
@@ -60,10 +58,9 @@ ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrFormDa
 nsresult
 ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
-                          nsCString& aContentType,
-                          uint64_t& aContentLength);
+                          nsCString& aContentType);
 
-template <class Derived> class FetchBodyWorkerHolder;
+template <class Derived> class FetchBodyFeature;
 
 /*
  * FetchBody's body consumption uses nsIInputStreamPump to read from the
@@ -155,7 +152,7 @@ public:
 
   // Set when consuming the body is attempted on a worker.
   // Unset when consumption is done/aborted.
-  nsAutoPtr<workers::WorkerHolder> mWorkerHolder;
+  nsAutoPtr<workers::WorkerFeature> mFeature;
 
 protected:
   FetchBody();
@@ -193,10 +190,10 @@ private:
   ReleaseObject();
 
   bool
-  RegisterWorkerHolder();
+  RegisterFeature();
 
   void
-  UnregisterWorkerHolder();
+  UnregisterFeature();
 
   bool
   IsOnTargetThread()
@@ -216,10 +213,8 @@ private:
 
   // Only touched on target thread.
   ConsumeType mConsumeType;
-  RefPtr<Promise> mConsumePromise;
-#ifdef DEBUG
-  bool mReadDone;
-#endif
+  nsRefPtr<Promise> mConsumePromise;
+  DebugOnly<bool> mReadDone;
 
   nsMainThreadPtrHandle<nsIInputStreamPump> mConsumeBodyPump;
 };

@@ -4,91 +4,80 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_idbfilerequest_h__
-#define mozilla_dom_idbfilerequest_h__
+#ifndef mozilla_dom_indexeddb_idbfilerequest_h__
+#define mozilla_dom_indexeddb_idbfilerequest_h__
 
 #include "DOMRequest.h"
 #include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/FileRequestBase.h"
+#include "mozilla/dom/FileRequest.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 
-template <class> struct already_AddRefed;
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 
 class EventChainPreVisitor;
 
 namespace dom {
+namespace indexedDB {
 
 class IDBFileHandle;
 
 class IDBFileRequest final : public DOMRequest,
                              public FileRequestBase
 {
-  RefPtr<IDBFileHandle> mFileHandle;
-
-  bool mWrapAsDOMRequest;
-
 public:
-  static already_AddRefed<IDBFileRequest>
-  Create(nsPIDOMWindowInner* aOwner, IDBFileHandle* aFileHandle,
-         bool aWrapAsDOMRequest);
-
-  // WebIDL
-  IDBFileHandle*
-  GetFileHandle() const
-  {
-    AssertIsOnOwningThread();
-    return mFileHandle;
-  }
-
-  IDBFileHandle*
-  GetLockedFile() const
-  {
-    AssertIsOnOwningThread();
-    return GetFileHandle();
-  }
-
-  IMPL_EVENT_HANDLER(progress)
-
   NS_DECL_ISUPPORTS_INHERITED
+
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBFileRequest, DOMRequest)
+
+  static already_AddRefed<IDBFileRequest>
+  Create(nsPIDOMWindow* aOwner, IDBFileHandle* aFileHandle,
+         bool aWrapAsDOMRequest);
 
   // nsIDOMEventTarget
   virtual nsresult
   PreHandleEvent(EventChainPreVisitor& aVisitor) override;
 
+  // FileRequest
+  virtual void
+  OnProgress(uint64_t aProgress, uint64_t aProgressMax) override;
+
+  virtual nsresult
+  NotifyHelperCompleted(FileHelper* aFileHelper) override;
+
   // nsWrapperCache
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  // FileRequestBase
-  virtual FileHandleBase*
-  FileHandle() const override;
+  // WebIDL
+  IDBFileHandle*
+  GetFileHandle() const;
 
-  virtual void
-  OnProgress(uint64_t aProgress, uint64_t aProgressMax) override;
+  IDBFileHandle*
+  GetLockedFile() const
+  {
+    return GetFileHandle();
+  }
 
-  virtual void
-  SetResultCallback(ResultCallback* aCallback) override;
-
-  virtual void
-  SetError(nsresult aError) override;
+  IMPL_EVENT_HANDLER(progress)
 
 private:
-  IDBFileRequest(nsPIDOMWindowInner* aWindow,
-                 IDBFileHandle* aFileHandle,
-                 bool aWrapAsDOMRequest);
-
+  explicit IDBFileRequest(nsPIDOMWindow* aWindow);
   ~IDBFileRequest();
 
   void
   FireProgressEvent(uint64_t aLoaded, uint64_t aTotal);
+
+  nsRefPtr<IDBFileHandle> mFileHandle;
+
+  bool mWrapAsDOMRequest;
 };
 
+} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_idbfilerequest_h__
+#endif // mozilla_dom_indexeddb_idbfilerequest_h__

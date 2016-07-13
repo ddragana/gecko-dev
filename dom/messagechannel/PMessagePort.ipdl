@@ -5,10 +5,18 @@
 include protocol PBackground;
 include protocol PBlob;
 
-include DOMTypes;
+using struct nsID from "nsID.h";
 
 namespace mozilla {
 namespace dom {
+
+struct MessagePortIdentifier
+{
+  nsID uuid;
+  nsID destinationUuid;
+  uint32_t sequenceId;
+  bool neutered;
+};
 
 struct MessagePortMessage
 {
@@ -36,17 +44,17 @@ protocol PMessagePort
      4. Recv__delete__(); */
 
 parent:
-  async PostMessages(MessagePortMessage[] messages);
-  async Disentangle(MessagePortMessage[] messages);
-  async StopSendingData();
-  async Close();
+  PostMessages(MessagePortMessage[] messages);
+  Disentangle(MessagePortMessage[] messages);
+  StopSendingData();
+  Close();
 
 child:
-  async Entangled(MessagePortMessage[] messages);
-  async ReceiveData(MessagePortMessage[] messages);
-  async StopSendingDataConfirmed();
+  Entangled(MessagePortMessage[] messages);
+  ReceiveData(MessagePortMessage[] messages);
+  StopSendingDataConfirmed();
 
-  async __delete__();
+  __delete__();
 };
 
 } // namespace dom

@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-"use strict";
 
 const nsIFilePicker = Components.interfaces.nsIFilePicker;
 const nsFilePicker = "@mozilla.org/filepicker;1";
@@ -17,7 +16,7 @@ const nsDialogParamBlock = "@mozilla.org/embedcomp/dialogparam;1";
 const nsIPKCS11 = Components.interfaces.nsIPKCS11;
 const nsPKCS11ContractID = "@mozilla.org/security/pkcs11;1";
 
-var { Services } = Components.utils.import("resource://gre/modules/Services.jsm", {});
+let { Services } = Components.utils.import("resource://gre/modules/Services.jsm", {});
 
 var bundle;
 var secmoddb;
@@ -72,20 +71,48 @@ function doConfirm(msg)
 
 function RefreshDeviceList()
 {
-  let modules = secmoddb.listModules();
-  while (modules.hasMoreElements()) {
-    let module = modules.getNext().QueryInterface(nsIPKCS11Module);
-    let slotnames = [];
-    let slots = module.listSlots();
-    while (slots.hasMoreElements()) {
-      let slot = slots.getNext().QueryInterface(nsIPKCS11Slot);
-      // Token names are preferred because NSS prefers lookup by token name.
-      slotnames.push(slot.tokenName ? slot.tokenName : slot.name);
-    }
-    AddModule(module.name, slotnames);
-  }
+  var modules = secmoddb.listModules();
+  var done = false;
 
-  // Set the text on the FIPS button.
+  try {
+    modules.isDone();
+  } catch (e) { done = true; }
+  while (!done) {
+    var module = modules.currentItem().QueryInterface(nsIPKCS11Module);
+    if (module) {
+      var slotnames = [];
+      var slots = module.listSlots();
+      var slots_done = false;
+      try {
+        slots.isDone();
+      } catch (e) { slots_done = true; }
+      while (!slots_done) {
+        var slot = null;
+ 	try {
+          slot = slots.currentItem().QueryInterface(nsIPKCS11Slot);
+        } catch (e) { slot = null; }
+        // in the ongoing discussion of whether slot names or token names
+        // are to be shown, I've gone with token names because NSS will
+        // prefer lookup by token name.  However, the token may not be
+        // present, so maybe slot names should be listed, while token names
+        // are "remembered" for lookup?
+	if (slot != null) {
+          if (slot.tokenName)
+            slotnames[slotnames.length] = slot.tokenName;
+          else
+            slotnames[slotnames.length] = slot.name;
+	}
+        try {
+          slots.next();
+        } catch (e) { slots_done = true; }
+      }
+      AddModule(module.name, slotnames);
+    }
+    try {
+      modules.next();
+    } catch (e) { done = true; }
+  }
+  /* Set the text on the fips button */
   SetFIPSButton();
 }
 
@@ -121,11 +148,11 @@ function AddModule(module, slots)
   row.appendChild(cell);
   item.appendChild(row);
   var parent = document.createElement("treechildren");
-  for (let slot of slots) {
+  for (var i = 0; i<slots.length; i++) {
     var child_item = document.createElement("treeitem");
     var child_row = document.createElement("treerow");
     var child_cell = document.createElement("treecell");
-    child_cell.setAttribute("label", slot);
+    child_cell.setAttribute("label", slots[i]);
     child_row.appendChild(child_cell);
     child_item.appendChild(child_row);
     child_item.setAttribute("pk11kind", "slot");
@@ -172,9 +199,8 @@ function getSelectedItem()
 
 function enableButtons()
 {
-  if (skip_enable_buttons) {
+  if (skip_enable_buttons)
     return;
-  }
 
   var login_toggle = "true";
   var logout_toggle = "true";
@@ -191,7 +217,7 @@ function enableButtons()
     if (selected_token != null) {
       if (selected_token.needsLogin() || !(selected_token.needsUserInit)) {
         pw_toggle = "false";
-        if (selected_token.needsLogin()) {
+        if(selected_token.needsLogin()) {
           if (selected_token.isLoggedIn()) {
             logout_toggle = "false";
           } else {
@@ -218,10 +244,9 @@ function enableButtons()
 // clear the display of information for the slot
 function ClearInfoList()
 {
-  let infoList = document.getElementById("info_list");
-  while (infoList.hasChildNodes()) {
-    infoList.removeChild(infoList.firstChild);
-  }
+  var info_list = document.getElementById("info_list");
+  while (info_list.firstChild)
+      info_list.removeChild(info_list.firstChild);
 }
 
 function ClearDeviceList()
@@ -233,12 +258,11 @@ function ClearDeviceList()
   tree.view.selection.clearSelection();
   skip_enable_buttons = false;
 
-  // Remove the existing listed modules so that a refresh doesn't display the
-  // module that just changed.
-  let deviceList = document.getElementById("device_list");
-  while (deviceList.hasChildNodes()) {
-    deviceList.removeChild(deviceList.firstChild);
-  }
+  // Remove the existing listed modules so that refresh doesn't 
+  // display the module that just changed.
+  var device_list = document.getElementById("device_list");
+  while (device_list.hasChildNodes())
+    device_list.removeChild(device_list.firstChild);
 }
 
 
@@ -332,7 +356,7 @@ function doLogin()
     selected_token.login(false);
     var tok_status = document.getElementById("tok_status");
     if (selected_token.isLoggedIn()) {
-      tok_status.setAttribute("label",
+      tok_status.setAttribute("label", 
                               bundle.getString("devinfo_stat_loggedin"));
     } else {
       tok_status.setAttribute("label",
@@ -354,7 +378,7 @@ function doLogout()
     selected_token.logoutAndDropAuthenticatedResources();
     var tok_status = document.getElementById("tok_status");
     if (selected_token.isLoggedIn()) {
-      tok_status.setAttribute("label",
+      tok_status.setAttribute("label", 
                               bundle.getString("devinfo_stat_loggedin"));
     } else {
       tok_status.setAttribute("label",
@@ -368,7 +392,8 @@ function doLogout()
 // load a new device
 function doLoad()
 {
-  window.open("load_device.xul", "loaddevice", "chrome,centerscreen,modal");
+  window.open("load_device.xul", "loaddevice", 
+              "chrome,centerscreen,modal");
   ClearDeviceList();
   RefreshDeviceList();
 }
@@ -414,11 +439,11 @@ function onSmartCardChange()
 function changePassword()
 {
   getSelectedItem();
-  let params = Components.classes[nsDialogParamBlock]
-                         .createInstance(nsIDialogParamBlock);
-  params.SetString(1, selected_slot.tokenName);
-  window.openDialog("changepassword.xul", "", "chrome,centerscreen,modal",
-                    params);
+  var params = Components.classes[nsDialogParamBlock].createInstance(nsIDialogParamBlock);
+  params.SetString(1,selected_slot.tokenName);
+  window.openDialog("changepassword.xul",
+              "", 
+              "chrome,centerscreen,modal", params);
   showSlotInfo();
   enableButtons();
 }
@@ -443,13 +468,13 @@ function doLoadDevice()
   var name_box = document.getElementById("device_name");
   var path_box = document.getElementById("device_path");
   try {
-    getPKCS11().addModule(name_box.value, path_box.value, 0, 0);
-  } catch (e) {
-    if (e.result == Components.results.NS_ERROR_ILLEGAL_VALUE) {
+    getPKCS11().addModule(name_box.value, path_box.value, 0,0);
+  }
+  catch (e) {
+    if (e.result == Components.results.NS_ERROR_ILLEGAL_VALUE)
       doPrompt(getNSSString("AddModuleDup"));
-    } else {
+    else
       doPrompt(getNSSString("AddModuleFailure"));
-    }
 
     return false;
   }
@@ -501,8 +526,8 @@ function toggleFIPS()
     return;
   }
 
-  // Remove the existing listed modules so that a refresh doesn't display the
-  // module that just changed.
+  //Remove the existing listed modules so that re-fresh doesn't 
+  //display the module that just changed.
   ClearDeviceList();
 
   RefreshDeviceList();

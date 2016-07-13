@@ -3,45 +3,60 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsSecureBrowserUIImpl.h"
-
-#include "imgIRequest.h"
+#include "nspr.h"
 #include "mozilla/Logging.h"
+
+#include "nsISecureBrowserUI.h"
+#include "nsSecureBrowserUIImpl.h"
+#include "nsCOMPtr.h"
+#include "nsIServiceManager.h"
 #include "nsCURILoader.h"
-#include "nsIAssociatedContentSecurity.h"
-#include "nsIChannel.h"
-#include "nsIDOMWindow.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocument.h"
-#include "nsIFTPChannel.h"
-#include "nsIFileChannel.h"
+#include "nsIDOMElement.h"
+#include "nsPIDOMWindow.h"
+#include "nsIWebProgress.h"
+#include "nsIWebProgressListener.h"
+#include "nsIChannel.h"
 #include "nsIHttpChannel.h"
+#include "nsIFileChannel.h"
+#include "nsIWyciwygChannel.h"
+#include "nsIFTPChannel.h"
+#include "nsITransportSecurityInfo.h"
+#include "nsISSLStatus.h"
+#include "nsIURI.h"
+#include "nsISecurityEventSink.h"
+#include "nsISecurityInfoProvider.h"
+#include "imgIRequest.h"
+#include "nsThreadUtils.h"
+#include "nsNetCID.h"
+#include "nsCRT.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIProtocolHandler.h"
-#include "nsISSLStatus.h"
-#include "nsISecurityInfoProvider.h"
-#include "nsIServiceManager.h"
-#include "nsITransportSecurityInfo.h"
-#include "nsIWebProgress.h"
-#include "nsIWyciwygChannel.h"
-#include "nsNetCID.h"
-#include "nsNetUtil.h"
-#include "nsPIDOMWindow.h"
-#include "nsThreadUtils.h"
-#include "nspr.h"
-#include "nsString.h"
 
 using namespace mozilla;
 
-LazyLogModule gSecureDocLog("nsSecureBrowserUI");
+//
+// Log module for nsSecureBrowserUI logging...
+//
+// To enable logging (see prlog.h for full details):
+//
+//    set NSPR_LOG_MODULES=nsSecureBrowserUI:5
+//    set NSPR_LOG_FILE=nspr.log
+//
+// this enables LogLevel::Debug level information and places all output in
+// the file nspr.log
+//
+PRLogModuleInfo* gSecureDocLog = nullptr;
 
 struct RequestHashEntry : PLDHashEntryHdr {
     void *r;
 };
 
 static bool
-RequestMapMatchEntry(const PLDHashEntryHdr *hdr, const void *key)
+RequestMapMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
+                         const void *key)
 {
   const RequestHashEntry *entry = static_cast<const RequestHashEntry*>(hdr);
   return entry->r == key;
@@ -55,15 +70,36 @@ RequestMapInitEntry(PLDHashEntryHdr *hdr, const void *key)
 }
 
 static const PLDHashTableOps gMapOps = {
-  PLDHashTable::HashVoidPtrKeyStub,
+  PL_DHashVoidPtrKeyStub,
   RequestMapMatchEntry,
-  PLDHashTable::MoveEntryStub,
-  PLDHashTable::ClearEntryStub,
+  PL_DHashMoveEntryStub,
+  PL_DHashClearEntryStub,
   RequestMapInitEntry
 };
 
+#ifdef DEBUG
+class nsAutoAtomic {
+  public:
+    explicit nsAutoAtomic(Atomic<int32_t> &i)
+    :mI(i) {
+      mI++;
+    }
+
+    ~nsAutoAtomic() {
+      mI--;
+    }
+
+  protected:
+    Atomic<int32_t> &mI;
+
+  private:
+    nsAutoAtomic(); // not accessible
+};
+#endif
+
 nsSecureBrowserUIImpl::nsSecureBrowserUIImpl()
-  : mNotifiedSecurityState(lis_no_security)
+  : mReentrantMonitor("nsSecureBrowserUIImpl.mReentrantMonitor")
+  , mNotifiedSecurityState(lis_no_security)
   , mNotifiedToplevelIsEV(false)
   , mNewToplevelSecurityState(STATE_IS_INSECURE)
   , mNewToplevelIsEV(false)
@@ -71,17 +107,17 @@ nsSecureBrowserUIImpl::nsSecureBrowserUIImpl()
   , mIsViewSource(false)
   , mSubRequestsBrokenSecurity(0)
   , mSubRequestsNoSecurity(0)
-  , mCertUserOverridden(false)
   , mRestoreSubrequests(false)
   , mOnLocationChangeSeen(false)
 #ifdef DEBUG
-  , mEntered(false)
+  , mOnStateLocationChangeReentranceDetection(0)
 #endif
   , mTransferringRequests(&gMapOps, sizeof(RequestHashEntry))
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   ResetStateTracking();
+
+  if (!gSecureDocLog)
+    gSecureDocLog = PR_NewLogModule("nsSecureBrowserUI");
 }
 
 NS_IMPL_ISUPPORTS(nsSecureBrowserUIImpl,
@@ -91,10 +127,8 @@ NS_IMPL_ISUPPORTS(nsSecureBrowserUIImpl,
                   nsISSLStatusProvider)
 
 NS_IMETHODIMP
-nsSecureBrowserUIImpl::Init(mozIDOMWindowProxy* aWindow)
+nsSecureBrowserUIImpl::Init(nsIDOMWindow *aWindow)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   if (MOZ_LOG_TEST(gSecureDocLog, LogLevel::Debug)) {
     nsCOMPtr<nsIDOMWindow> window(do_QueryReferent(mWindow));
 
@@ -113,11 +147,18 @@ nsSecureBrowserUIImpl::Init(mozIDOMWindowProxy* aWindow)
     return NS_ERROR_ALREADY_INITIALIZED;
   }
 
+  nsCOMPtr<nsPIDOMWindow> pwin(do_QueryInterface(aWindow));
+  if (pwin->IsInnerWindow()) {
+    pwin = pwin->GetOuterWindow();
+  }
+
   nsresult rv;
-  mWindow = do_GetWeakReference(aWindow, &rv);
+  mWindow = do_GetWeakReference(pwin, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  auto* piwindow = nsPIDOMWindowOuter::From(aWindow);
+  nsCOMPtr<nsPIDOMWindow> piwindow(do_QueryInterface(aWindow));
+  if (!piwindow) return NS_ERROR_FAILURE;
+
   nsIDocShell *docShell = piwindow->GetDocShell();
 
   // The Docshell will own the SecureBrowserUI object
@@ -144,9 +185,8 @@ nsSecureBrowserUIImpl::Init(mozIDOMWindowProxy* aWindow)
 NS_IMETHODIMP
 nsSecureBrowserUIImpl::GetState(uint32_t* aState)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  return MapInternalToExternalState(aState, mNotifiedSecurityState,
-                                    mNotifiedToplevelIsEV);
+  ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+  return MapInternalToExternalState(aState, mNotifiedSecurityState, mNotifiedToplevelIsEV);
 }
 
 // static
@@ -195,10 +235,6 @@ nsSecureBrowserUIImpl::MapInternalToExternalState(uint32_t* aState, lockIconStat
   if (ev && (*aState & STATE_IS_SECURE))
     *aState |= nsIWebProgressListener::STATE_IDENTITY_EV_TOPLEVEL;
 
-  if (mCertUserOverridden && (*aState & STATE_IS_SECURE)) {
-    *aState |= nsIWebProgressListener::STATE_CERT_USER_OVERRIDDEN;
-  }
-
   nsCOMPtr<nsIDocShell> docShell = do_QueryReferent(mDocShell);
   if (!docShell)
     return NS_OK;
@@ -226,28 +262,19 @@ nsSecureBrowserUIImpl::MapInternalToExternalState(uint32_t* aState, lockIconStat
     if (ev) {
       *aState |= nsIWebProgressListener::STATE_IDENTITY_EV_TOPLEVEL;
     }
-    if (mCertUserOverridden) {
-      *aState |= nsIWebProgressListener::STATE_CERT_USER_OVERRIDDEN;
-    }
   }
-  // * If so, the state should be broken or insecure; overriding the previous
-  // state set by the lock parameter.
-  uint32_t tempState = STATE_IS_BROKEN;
-  if (lock == lis_no_security) {
-      // this is to ensure that http: pages with mixed content in nested
-      // iframes don't get marked as broken instead of insecure
-      tempState = STATE_IS_INSECURE;
-  }
+  // * If so, the state should be broken; overriding the previous state
+  // set by the lock parameter.
   if (docShell->GetHasMixedActiveContentLoaded() &&
       docShell->GetHasMixedDisplayContentLoaded()) {
-      *aState = tempState |
+      *aState = STATE_IS_BROKEN |
                 nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT |
                 nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
   } else if (docShell->GetHasMixedActiveContentLoaded()) {
-      *aState = tempState |
+      *aState = STATE_IS_BROKEN |
                 nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT;
   } else if (docShell->GetHasMixedDisplayContentLoaded()) {
-      *aState = tempState |
+      *aState = STATE_IS_BROKEN |
                 nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
   }
 
@@ -269,9 +296,8 @@ nsSecureBrowserUIImpl::MapInternalToExternalState(uint32_t* aState, lockIconStat
 }
 
 NS_IMETHODIMP
-nsSecureBrowserUIImpl::SetDocShell(nsIDocShell* aDocShell)
+nsSecureBrowserUIImpl::SetDocShell(nsIDocShell *aDocShell)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   nsresult rv;
   mDocShell = do_GetWeakReference(aDocShell, &rv);
   return rv;
@@ -343,62 +369,76 @@ nsSecureBrowserUIImpl::OnProgressChange(nsIWebProgress* aWebProgress,
   return NS_OK;
 }
 
-void
-nsSecureBrowserUIImpl::ResetStateTracking()
+void nsSecureBrowserUIImpl::ResetStateTracking()
 {
+  ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+
   mDocumentRequestsInProgress = 0;
   mTransferringRequests.Clear();
 }
 
 void
 nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest,
-                                                      nsISupports* info,
+                                                      nsISupports *info,
                                                       bool withNewLocation,
                                                       bool withNewSink)
 {
-  mNewToplevelIsEV = false;
+  /* I explicitly ignore the camelCase variable naming style here,
+     I want to make it clear these are temp variables that relate to the 
+     member variables with the same suffix.*/
+
+  uint32_t temp_NewToplevelSecurityState = nsIWebProgressListener::STATE_IS_INSECURE;
+  bool temp_NewToplevelIsEV = false;
 
   bool updateStatus = false;
   nsCOMPtr<nsISSLStatus> temp_SSLStatus;
 
-  mNewToplevelSecurityState =
-    GetSecurityStateFromSecurityInfoAndRequest(info, aRequest);
+    temp_NewToplevelSecurityState =
+      GetSecurityStateFromSecurityInfoAndRequest(info, aRequest);
 
-  MOZ_LOG(gSecureDocLog, LogLevel::Debug,
-          ("SecureUI:%p: OnStateChange: remember mNewToplevelSecurityState => %x\n",
-           this, mNewToplevelSecurityState));
+    MOZ_LOG(gSecureDocLog, LogLevel::Debug,
+           ("SecureUI:%p: OnStateChange: remember mNewToplevelSecurityState => %x\n", this,
+            temp_NewToplevelSecurityState));
 
-  nsCOMPtr<nsISSLStatusProvider> sp(do_QueryInterface(info));
-  if (sp) {
-    // Ignore result
-    updateStatus = true;
-    (void) sp->GetSSLStatus(getter_AddRefs(temp_SSLStatus));
-    if (temp_SSLStatus) {
-      bool aTemp;
-      if (NS_SUCCEEDED(temp_SSLStatus->GetIsExtendedValidation(&aTemp))) {
-        mNewToplevelIsEV = aTemp;
+    nsCOMPtr<nsISSLStatusProvider> sp = do_QueryInterface(info);
+    if (sp) {
+      // Ignore result
+      updateStatus = true;
+      (void) sp->GetSSLStatus(getter_AddRefs(temp_SSLStatus));
+      if (temp_SSLStatus) {
+        bool aTemp;
+        if (NS_SUCCEEDED(temp_SSLStatus->GetIsExtendedValidation(&aTemp))) {
+          temp_NewToplevelIsEV = aTemp;
+        }
       }
     }
-  }
 
-  mNewToplevelSecurityStateKnown = true;
-  if (updateStatus) {
-    mSSLStatus = temp_SSLStatus;
-  }
-  MOZ_LOG(gSecureDocLog, LogLevel::Debug,
-         ("SecureUI:%p: remember securityInfo %p\n", this,
-          info));
-  nsCOMPtr<nsIAssociatedContentSecurity> associatedContentSecurityFromRequest(
-    do_QueryInterface(aRequest));
-  if (associatedContentSecurityFromRequest) {
-    mCurrentToplevelSecurityInfo = aRequest;
-  } else {
-    mCurrentToplevelSecurityInfo = info;
-  }
+  // assume temp_NewToplevelSecurityState was set in this scope!
+  // see code that is directly above
 
-  // The subrequest counters are now in sync with mCurrentToplevelSecurityInfo,
-  // don't restore after top level document load finishes.
-  mRestoreSubrequests = false;
+  {
+    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+    mNewToplevelSecurityStateKnown = true;
+    mNewToplevelSecurityState = temp_NewToplevelSecurityState;
+    mNewToplevelIsEV = temp_NewToplevelIsEV;
+    if (updateStatus) {
+      mSSLStatus = temp_SSLStatus;
+    }
+    MOZ_LOG(gSecureDocLog, LogLevel::Debug,
+           ("SecureUI:%p: remember securityInfo %p\n", this,
+            info));
+    nsCOMPtr<nsIAssociatedContentSecurity> associatedContentSecurityFromRequest =
+        do_QueryInterface(aRequest);
+    if (associatedContentSecurityFromRequest)
+        mCurrentToplevelSecurityInfo = aRequest;
+    else
+        mCurrentToplevelSecurityInfo = info;
+
+    // The subrequest counters are now in sync with 
+    // mCurrentToplevelSecurityInfo, don't restore after top level
+    // document load finishes.
+    mRestoreSubrequests = false;
+  }
 
   UpdateSecurityState(aRequest, withNewLocation, withNewSink || updateStatus);
 }
@@ -411,6 +451,9 @@ nsSecureBrowserUIImpl::UpdateSubrequestMembers(nsISupports* securityInfo,
   // subrequest state members.
   uint32_t reqState = GetSecurityStateFromSecurityInfoAndRequest(securityInfo,
                                                                  request);
+
+  // the code above this line should run without a lock
+  ReentrantMonitorAutoEnter lock(mReentrantMonitor);
 
   if (reqState & STATE_IS_SECURE) {
     // do nothing
@@ -431,8 +474,11 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
                                      uint32_t aProgressStateFlags,
                                      nsresult aStatus)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrancyGuard guard(*this);
+#ifdef DEBUG
+  nsAutoAtomic atomic(mOnStateLocationChangeReentranceDetection);
+  NS_ASSERTION(mOnStateLocationChangeReentranceDetection == 1,
+               "unexpected parallel nsIWebProgress OnStateChange and/or OnLocationChange notification");
+#endif
   /*
     All discussion, unless otherwise mentioned, only refers to
     http, https, file or wyciwig requests.
@@ -523,14 +569,30 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
     regardless of whether the load flags indicate a top level document.
   */
 
-  nsCOMPtr<mozIDOMWindowProxy> windowForProgress;
+  nsCOMPtr<nsIDOMWindow> windowForProgress;
   aWebProgress->GetDOMWindow(getter_AddRefs(windowForProgress));
 
-  nsCOMPtr<mozIDOMWindowProxy> window(do_QueryReferent(mWindow));
-  NS_ASSERTION(window, "Window has gone away?!");
+  nsCOMPtr<nsIDOMWindow> window;
+  bool isViewSource;
 
-  if (!mIOService) {
-    mIOService = do_GetService(NS_IOSERVICE_CONTRACTID);
+  nsCOMPtr<nsINetUtil> ioService;
+
+  {
+    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+    window = do_QueryReferent(mWindow);
+    NS_ASSERTION(window, "Window has gone away?!");
+    isViewSource = mIsViewSource;
+    ioService = mIOService;
+  }
+
+  if (!ioService)
+  {
+    ioService = do_GetService(NS_IOSERVICE_CONTRACTID);
+    if (ioService)
+    {
+      ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+      mIOService = ioService;
+    }
   }
 
   bool isNoContentResponse = false;
@@ -565,9 +627,8 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
   MOZ_LOG(gSecureDocLog, LogLevel::Debug,
          ("SecureUI:%p: OnStateChange\n", this));
 
-  if (mIsViewSource) {
+  if (isViewSource)
     return NS_OK;
-  }
 
   if (!aRequest)
   {
@@ -658,18 +719,121 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
 
   // This will ignore all resource, chrome, data, file, moz-icon, and anno
   // protocols. Local resources are treated as trusted.
-  if (uri && mIOService) {
+  if (uri && ioService) {
     bool hasFlag;
-    nsresult rv =
-      mIOService->URIChainHasFlags(uri,
-                                   nsIProtocolHandler::URI_IS_LOCAL_RESOURCE,
-                                   &hasFlag);
+    nsresult rv = 
+      ioService->URIChainHasFlags(uri, 
+                                  nsIProtocolHandler::URI_IS_LOCAL_RESOURCE,
+                                  &hasFlag);
     if (NS_SUCCEEDED(rv) && hasFlag) {
       isSubDocumentRelevant = false;
     }
   }
 
 #if defined(DEBUG)
+  nsCString info2;
+  uint32_t testFlags = loadFlags;
+
+  if (testFlags & nsIChannel::LOAD_DOCUMENT_URI)
+  {
+    testFlags -= nsIChannel::LOAD_DOCUMENT_URI;
+    info2.AppendLiteral("LOAD_DOCUMENT_URI ");
+  }
+  if (testFlags & nsIChannel::LOAD_RETARGETED_DOCUMENT_URI)
+  {
+    testFlags -= nsIChannel::LOAD_RETARGETED_DOCUMENT_URI;
+    info2.AppendLiteral("LOAD_RETARGETED_DOCUMENT_URI ");
+  }
+  if (testFlags & nsIChannel::LOAD_REPLACE)
+  {
+    testFlags -= nsIChannel::LOAD_REPLACE;
+    info2.AppendLiteral("LOAD_REPLACE ");
+  }
+
+  const char *_status = NS_SUCCEEDED(aStatus) ? "1" : "0";
+
+  nsCString info;
+  uint32_t f = aProgressStateFlags;
+  if (f & nsIWebProgressListener::STATE_START)
+  {
+    f -= nsIWebProgressListener::STATE_START;
+    info.AppendLiteral("START ");
+  }
+  if (f & nsIWebProgressListener::STATE_REDIRECTING)
+  {
+    f -= nsIWebProgressListener::STATE_REDIRECTING;
+    info.AppendLiteral("REDIRECTING ");
+  }
+  if (f & nsIWebProgressListener::STATE_TRANSFERRING)
+  {
+    f -= nsIWebProgressListener::STATE_TRANSFERRING;
+    info.AppendLiteral("TRANSFERRING ");
+  }
+  if (f & nsIWebProgressListener::STATE_NEGOTIATING)
+  {
+    f -= nsIWebProgressListener::STATE_NEGOTIATING;
+    info.AppendLiteral("NEGOTIATING ");
+  }
+  if (f & nsIWebProgressListener::STATE_STOP)
+  {
+    f -= nsIWebProgressListener::STATE_STOP;
+    info.AppendLiteral("STOP ");
+  }
+  if (f & nsIWebProgressListener::STATE_IS_REQUEST)
+  {
+    f -= nsIWebProgressListener::STATE_IS_REQUEST;
+    info.AppendLiteral("IS_REQUEST ");
+  }
+  if (f & nsIWebProgressListener::STATE_IS_DOCUMENT)
+  {
+    f -= nsIWebProgressListener::STATE_IS_DOCUMENT;
+    info.AppendLiteral("IS_DOCUMENT ");
+  }
+  if (f & nsIWebProgressListener::STATE_IS_NETWORK)
+  {
+    f -= nsIWebProgressListener::STATE_IS_NETWORK;
+    info.AppendLiteral("IS_NETWORK ");
+  }
+  if (f & nsIWebProgressListener::STATE_IS_WINDOW)
+  {
+    f -= nsIWebProgressListener::STATE_IS_WINDOW;
+    info.AppendLiteral("IS_WINDOW ");
+  }
+  if (f & nsIWebProgressListener::STATE_IS_INSECURE)
+  {
+    f -= nsIWebProgressListener::STATE_IS_INSECURE;
+    info.AppendLiteral("IS_INSECURE ");
+  }
+  if (f & nsIWebProgressListener::STATE_IS_BROKEN)
+  {
+    f -= nsIWebProgressListener::STATE_IS_BROKEN;
+    info.AppendLiteral("IS_BROKEN ");
+  }
+  if (f & nsIWebProgressListener::STATE_IS_SECURE)
+  {
+    f -= nsIWebProgressListener::STATE_IS_SECURE;
+    info.AppendLiteral("IS_SECURE ");
+  }
+  if (f & nsIWebProgressListener::STATE_SECURE_HIGH)
+  {
+    f -= nsIWebProgressListener::STATE_SECURE_HIGH;
+    info.AppendLiteral("SECURE_HIGH ");
+  }
+  if (f & nsIWebProgressListener::STATE_RESTORING)
+  {
+    f -= nsIWebProgressListener::STATE_RESTORING;
+    info.AppendLiteral("STATE_RESTORING ");
+  }
+
+  if (f > 0)
+  {
+    info.AppendLiteral("f contains unknown flag!");
+  }
+
+  MOZ_LOG(gSecureDocLog, LogLevel::Debug,
+         ("SecureUI:%p: OnStateChange: %s %s -- %s\n", this, _status, 
+          info.get(), info2.get()));
+
   if (aProgressStateFlags & STATE_STOP
       &&
       channel)
@@ -687,7 +851,9 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
   {
     // The listing of a request in mTransferringRequests
     // means, there has already been data transfered.
-    mTransferringRequests.Add(aRequest, fallible);
+
+    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+    PL_DHashTableAdd(&mTransferringRequests, aRequest, fallible);
 
     return NS_OK;
   }
@@ -698,10 +864,12 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       &&
       aProgressStateFlags & STATE_IS_REQUEST)
   {
-    PLDHashEntryHdr* entry = mTransferringRequests.Search(aRequest);
-    if (entry) {
-      mTransferringRequests.RemoveEntry(entry);
-      requestHasTransferedData = true;
+    { /* scope for the ReentrantMonitorAutoEnter */
+      ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+      if (PL_DHashTableSearch(&mTransferringRequests, aRequest)) {
+        PL_DHashTableRemove(&mTransferringRequests, aRequest);
+        requestHasTransferedData = true;
+      }
     }
 
     if (!requestHasTransferedData) {
@@ -738,6 +906,8 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       &&
       loadFlags & nsIChannel::LOAD_DOCUMENT_URI)
   {
+    bool inProgress;
+
     int32_t saveSubBroken;
     int32_t saveSubNo;
     nsCOMPtr<nsIAssociatedContentSecurity> prevContentSecurity;
@@ -745,12 +915,16 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
     int32_t newSubBroken = 0;
     int32_t newSubNo = 0;
 
-    bool inProgress = (mDocumentRequestsInProgress != 0);
+    {
+      ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+      inProgress = (mDocumentRequestsInProgress!=0);
 
-    if (allowSecurityStateChange && !inProgress) {
-      saveSubBroken = mSubRequestsBrokenSecurity;
-      saveSubNo = mSubRequestsNoSecurity;
-      prevContentSecurity = do_QueryInterface(mCurrentToplevelSecurityInfo);
+      if (allowSecurityStateChange && !inProgress)
+      {
+        saveSubBroken = mSubRequestsBrokenSecurity;
+        saveSubNo = mSubRequestsNoSecurity;
+        prevContentSecurity = do_QueryInterface(mCurrentToplevelSecurityInfo);
+      }
     }
 
     if (allowSecurityStateChange && !inProgress)
@@ -818,20 +992,25 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       }
     }
 
-    if (allowSecurityStateChange && !inProgress) {
-      ResetStateTracking();
-      mSubRequestsBrokenSecurity = newSubBroken;
-      mSubRequestsNoSecurity = newSubNo;
-      mNewToplevelSecurityStateKnown = false;
-    }
+    {
+      ReentrantMonitorAutoEnter lock(mReentrantMonitor);
 
-    // By using a counter, this code also works when the toplevel
-    // document get's redirected, but the STOP request for the 
-    // previous toplevel document has not yet have been received.
-    MOZ_LOG(gSecureDocLog, LogLevel::Debug,
-           ("SecureUI:%p: OnStateChange: ++mDocumentRequestsInProgress\n", this
-            ));
-    ++mDocumentRequestsInProgress;
+      if (allowSecurityStateChange && !inProgress)
+      {
+        ResetStateTracking();
+        mSubRequestsBrokenSecurity = newSubBroken;
+        mSubRequestsNoSecurity = newSubNo;
+        mNewToplevelSecurityStateKnown = false;
+      }
+
+      // By using a counter, this code also works when the toplevel
+      // document get's redirected, but the STOP request for the 
+      // previous toplevel document has not yet have been received.
+      MOZ_LOG(gSecureDocLog, LogLevel::Debug,
+             ("SecureUI:%p: OnStateChange: ++mDocumentRequestsInProgress\n", this
+              ));
+      ++mDocumentRequestsInProgress;
+    }
 
     return NS_OK;
   }
@@ -844,13 +1023,20 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       &&
       loadFlags & nsIChannel::LOAD_DOCUMENT_URI)
   {
+    int32_t temp_DocumentRequestsInProgress;
     nsCOMPtr<nsISecurityEventSink> temp_ToplevelEventSink;
 
-    if (allowSecurityStateChange) {
-      temp_ToplevelEventSink = mToplevelEventSink;
+    {
+      ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+      temp_DocumentRequestsInProgress = mDocumentRequestsInProgress;
+      if (allowSecurityStateChange)
+      {
+        temp_ToplevelEventSink = mToplevelEventSink;
+      }
     }
 
-    if (mDocumentRequestsInProgress <= 0) {
+    if (temp_DocumentRequestsInProgress <= 0)
+    {
       // Ignore stop requests unless a document load is in progress
       // Unfortunately on application start, see some stops without having seen any starts...
       return NS_OK;
@@ -870,12 +1056,16 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
 
     bool sinkChanged = false;
     bool inProgress;
-    if (allowSecurityStateChange) {
-      sinkChanged = (mToplevelEventSink != temp_ToplevelEventSink);
-      mToplevelEventSink = temp_ToplevelEventSink;
+    {
+      ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+      if (allowSecurityStateChange)
+      {
+        sinkChanged = (mToplevelEventSink != temp_ToplevelEventSink);
+        mToplevelEventSink = temp_ToplevelEventSink;
+      }
+      --mDocumentRequestsInProgress;
+      inProgress = mDocumentRequestsInProgress > 0;
     }
-    --mDocumentRequestsInProgress;
-    inProgress = mDocumentRequestsInProgress > 0;
 
     if (allowSecurityStateChange && requestHasTransferedData) {
       // Data has been transferred for the single toplevel
@@ -902,14 +1092,18 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       // app handler.  Restore mSubRequests* members to what the current security 
       // state info holds (it was reset to all zero in OnStateChange(START) 
       // before).
-      nsCOMPtr<nsIAssociatedContentSecurity> currentContentSecurity(
-        do_QueryInterface(mCurrentToplevelSecurityInfo));
+      nsCOMPtr<nsIAssociatedContentSecurity> currentContentSecurity;
+      {
+        ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+        currentContentSecurity = do_QueryInterface(mCurrentToplevelSecurityInfo);
 
-      // Drop this indication flag, the restore operation is just being done.
-      mRestoreSubrequests = false;
+        // Drop this indication flag, the restore opration is just being
+        // done.
+        mRestoreSubrequests = false;
 
-      // We can do this since the state didn't actually change.
-      mNewToplevelSecurityStateKnown = true;
+        // We can do this since the state didn't actually change.
+        mNewToplevelSecurityStateKnown = true;
+      }
 
       int32_t subBroken = 0;
       int32_t subNo = 0;
@@ -922,28 +1116,31 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
           this, currentContentSecurity.get(), subBroken, subNo));      
       }
 
-      mSubRequestsBrokenSecurity = subBroken;
-      mSubRequestsNoSecurity = subNo;
+      {
+        ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+        mSubRequestsBrokenSecurity = subBroken;
+        mSubRequestsNoSecurity = subNo;
+      }
     }
-
+    
     return NS_OK;
   }
-
+  
   if (aProgressStateFlags & STATE_STOP
       &&
       aProgressStateFlags & STATE_IS_REQUEST)
   {
     if (!isSubDocumentRelevant)
       return NS_OK;
-
+    
     // if we arrive here, LOAD_DOCUMENT_URI is not set
-
+    
     // We only care for the security state of sub requests which have actually transfered data.
 
     if (allowSecurityStateChange && requestHasTransferedData)
     {  
       UpdateSubrequestMembers(securityInfo, aRequest);
-
+      
       // Care for the following scenario:
       // A new top level document load might have already started,
       // but the security state of the new top level document might not yet been known.
@@ -954,7 +1151,13 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       //
       // We skip updating the security state in this case.
 
-      if (mNewToplevelSecurityStateKnown) {
+      bool temp_NewToplevelSecurityStateKnown;
+      {
+        ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+        temp_NewToplevelSecurityStateKnown = mNewToplevelSecurityStateKnown;
+      }
+
+      if (temp_NewToplevelSecurityStateKnown) {
         UpdateSecurityState(aRequest, false, false);
       }
     }
@@ -993,9 +1196,6 @@ nsSecureBrowserUIImpl::UpdateSecurityState(nsIRequest* aRequest,
     newSecurityState = lis_broken_security;
   }
 
-  mCertUserOverridden =
-    mNewToplevelSecurityState & STATE_CERT_USER_OVERRIDDEN;
-
   MOZ_LOG(gSecureDocLog, LogLevel::Debug,
          ("SecureUI:%p: UpdateSecurityState:  old-new  %d - %d\n", this,
           mNotifiedSecurityState, newSecurityState));
@@ -1025,15 +1225,20 @@ nsSecureBrowserUIImpl::UpdateSecurityState(nsIRequest* aRequest,
 void
 nsSecureBrowserUIImpl::TellTheWorld(nsIRequest* aRequest)
 {
+  nsCOMPtr<nsISecurityEventSink> toplevelEventSink;
   uint32_t state = STATE_IS_INSECURE;
-  GetState(&state);
+  {
+    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+    toplevelEventSink = mToplevelEventSink;
+    GetState(&state);
+  }
 
-  if (mToplevelEventSink) {
+  if (toplevelEventSink) {
     MOZ_LOG(gSecureDocLog, LogLevel::Debug,
            ("SecureUI:%p: UpdateSecurityState: calling OnSecurityChange\n",
             this));
 
-    mToplevelEventSink->OnSecurityChange(aRequest, state);
+    toplevelEventSink->OnSecurityChange(aRequest, state);
   } else {
     MOZ_LOG(gSecureDocLog, LogLevel::Debug,
            ("SecureUI:%p: UpdateSecurityState: NO mToplevelEventSink!\n",
@@ -1048,15 +1253,17 @@ nsSecureBrowserUIImpl::OnLocationChange(nsIWebProgress* aWebProgress,
                                         nsIURI* aLocation,
                                         uint32_t aFlags)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  ReentrancyGuard guard(*this);
-
+#ifdef DEBUG
+  nsAutoAtomic atomic(mOnStateLocationChangeReentranceDetection);
+  NS_ASSERTION(mOnStateLocationChangeReentranceDetection == 1,
+               "unexpected parallel nsIWebProgress OnStateChange and/or OnLocationChange notification");
+#endif
   MOZ_LOG(gSecureDocLog, LogLevel::Debug,
          ("SecureUI:%p: OnLocationChange\n", this));
 
   bool updateIsViewSource = false;
   bool temp_IsViewSource = false;
-  nsCOMPtr<mozIDOMWindowProxy> window;
+  nsCOMPtr<nsIDOMWindow> window;
 
   if (aLocation)
   {
@@ -1074,12 +1281,15 @@ nsSecureBrowserUIImpl::OnLocationChange(nsIWebProgress* aWebProgress,
     temp_IsViewSource = vs;
   }
 
-  if (updateIsViewSource) {
-    mIsViewSource = temp_IsViewSource;
+  {
+    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+    if (updateIsViewSource) {
+      mIsViewSource = temp_IsViewSource;
+    }
+    mCurrentURI = aLocation;
+    window = do_QueryReferent(mWindow);
+    NS_ASSERTION(window, "Window has gone away?!");
   }
-  mCurrentURI = aLocation;
-  window = do_QueryReferent(mWindow);
-  NS_ASSERTION(window, "Window has gone away?!");
 
   // When |aRequest| is null, basically we don't trust that document. But if
   // docshell insists that the document has not changed at all, we will reuse
@@ -1095,7 +1305,7 @@ nsSecureBrowserUIImpl::OnLocationChange(nsIWebProgress* aWebProgress,
   // loading may never end in some edge cases (perhaps by a site with malicious
   // intent).
 
-  nsCOMPtr<mozIDOMWindowProxy> windowForProgress;
+  nsCOMPtr<nsIDOMWindow> windowForProgress;
   aWebProgress->GetDOMWindow(getter_AddRefs(windowForProgress));
 
   nsCOMPtr<nsISupports> securityInfo(ExtractSecurityInfo(aRequest));
@@ -1121,7 +1331,13 @@ nsSecureBrowserUIImpl::OnLocationChange(nsIWebProgress* aWebProgress,
   //
   // We skip updating the security state in this case.
 
-  if (mNewToplevelSecurityStateKnown) {
+  bool temp_NewToplevelSecurityStateKnown;
+  {
+    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+    temp_NewToplevelSecurityStateKnown = mNewToplevelSecurityStateKnown;
+  }
+
+  if (temp_NewToplevelSecurityStateKnown) {
     UpdateSecurityState(aRequest, true, false);
   }
 
@@ -1139,11 +1355,10 @@ nsSecureBrowserUIImpl::OnStatusChange(nsIWebProgress* aWebProgress,
 }
 
 nsresult
-nsSecureBrowserUIImpl::OnSecurityChange(nsIWebProgress* aWebProgress,
-                                        nsIRequest* aRequest,
+nsSecureBrowserUIImpl::OnSecurityChange(nsIWebProgress *aWebProgress,
+                                        nsIRequest *aRequest,
                                         uint32_t state)
 {
-  MOZ_ASSERT(NS_IsMainThread());
 #if defined(DEBUG)
   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
   if (!channel)
@@ -1151,7 +1366,7 @@ nsSecureBrowserUIImpl::OnSecurityChange(nsIWebProgress* aWebProgress,
 
   nsCOMPtr<nsIURI> aURI;
   channel->GetURI(getter_AddRefs(aURI));
-
+  
   if (aURI) {
     nsAutoCString temp;
     aURI->GetSpec(temp);
@@ -1169,7 +1384,8 @@ NS_IMETHODIMP
 nsSecureBrowserUIImpl::GetSSLStatus(nsISSLStatus** _result)
 {
   NS_ENSURE_ARG_POINTER(_result);
-  MOZ_ASSERT(NS_IsMainThread());
+
+  ReentrantMonitorAutoEnter lock(mReentrantMonitor);
 
   switch (mNotifiedSecurityState)
   {
@@ -1179,12 +1395,12 @@ nsSecureBrowserUIImpl::GetSSLStatus(nsISSLStatus** _result)
       break;
 
     default:
-      MOZ_FALLTHROUGH_ASSERT("if this is reached you must add more entries to the switch");
+      NS_NOTREACHED("if this is reached you must add more entries to the switch");
     case lis_no_security:
       *_result = nullptr;
       return NS_OK;
   }
-
+ 
   *_result = mSSLStatus;
   NS_IF_ADDREF(*_result);
 

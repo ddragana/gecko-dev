@@ -13,43 +13,45 @@ class MacIOSurface;
 namespace mozilla {
 namespace layers {
 
-class MacIOSurfaceTextureData : public TextureData
+class MacIOSurfaceTextureClientOGL : public TextureClient
 {
 public:
-  static MacIOSurfaceTextureData* Create(MacIOSurface* aSurface,
-                                         gfx::BackendType aBackend);
+  explicit MacIOSurfaceTextureClientOGL(ISurfaceAllocator* aAllcator,
+                                        TextureFlags aFlags);
 
-  static MacIOSurfaceTextureData*
-  Create(const gfx::IntSize& aSize, gfx::SurfaceFormat aFormat,
-         gfx::BackendType aBackend);
+  virtual ~MacIOSurfaceTextureClientOGL();
 
-  ~MacIOSurfaceTextureData();
+  // Creates a TextureClient and init width.
+  static already_AddRefed<MacIOSurfaceTextureClientOGL>
+  Create(ISurfaceAllocator* aAllocator,
+         TextureFlags aFlags,
+         MacIOSurface* aSurface);
 
-  virtual void FillInfo(TextureData::Info& aInfo) const override;
-
-  virtual bool Lock(OpenMode, FenceHandle*) override;
+  virtual bool Lock(OpenMode aMode) override;
 
   virtual void Unlock() override;
 
-  virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() override;
+  virtual bool IsLocked() const override;
 
-  virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
+  virtual bool IsAllocated() const override { return !!mSurface; }
 
-  virtual void Deallocate(ClientIPCAllocator*) override;
+  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual void Forget(ClientIPCAllocator*) override;
+  virtual gfx::IntSize GetSize() const override;
 
-  virtual bool UpdateFromSurface(gfx::SourceSurface* aSurface) override;
+  virtual bool HasInternalBuffer() const override { return false; }
 
-  // For debugging purposes only.
-  already_AddRefed<gfx::DataSourceSurface> GetAsSurface();
+  virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override;
+
+  // This TextureClient should not be used in a context where we use CreateSimilar
+  // (ex. component alpha) because the underlying texture data is always created by
+  // an external producer.
+  virtual already_AddRefed<TextureClient>
+  CreateSimilar(TextureFlags, TextureAllocationFlags) const override { return nullptr; }
 
 protected:
-  MacIOSurfaceTextureData(MacIOSurface* aSurface,
-                          gfx::BackendType aBackend);
-
   RefPtr<MacIOSurface> mSurface;
-  gfx::BackendType mBackend;
+  bool mIsLocked;
 };
 
 } // namespace layers

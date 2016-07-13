@@ -7,30 +7,28 @@
 #ifndef _nsNSSComponent_h_
 #define _nsNSSComponent_h_
 
-#include "ScopedNSSTypes.h"
-#include "SharedCertVerifier.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
 #include "nsCOMPtr.h"
-#include "nsIObserver.h"
+#include "nsIEntropyCollector.h"
 #include "nsIStringBundle.h"
+#include "nsIObserver.h"
+#include "nsIObserverService.h"
+#include "nsINSSErrorsService.h"
 #include "nsNSSCallbacks.h"
+#include "SharedCertVerifier.h"
+#include "nsNSSHelper.h"
+#include "nsClientAuthRemember.h"
 #include "prerror.h"
 #include "sslt.h"
 
-#ifdef XP_WIN
-#include "windows.h" // this needs to be before the following includes
-#include "wincrypt.h"
-#endif // XP_WIN
-
 class nsIDOMWindow;
 class nsIPrompt;
-class nsIX509CertList;
 class SmartCardThreadList;
 
 namespace mozilla { namespace psm {
 
-MOZ_MUST_USE
+MOZ_WARN_UNUSED_RESULT
   ::already_AddRefed<mozilla::psm::SharedCertVerifier>
   GetDefaultCertVerifier();
 
@@ -42,9 +40,13 @@ MOZ_MUST_USE
 
 #define PSM_COMPONENT_CONTRACTID "@mozilla.org/psm;1"
 
+//Define an interface that we can use to look up from the
+//callbacks passed to NSS.
+
+#define NS_INSSCOMPONENT_IID_STR "e60602a8-97a3-4fe7-b5b7-56bc6ce87ab4"
 #define NS_INSSCOMPONENT_IID \
-  { 0xa0a8f52b, 0xea18, 0x4abc, \
-    { 0xa3, 0xca, 0xec, 0xcf, 0x70, 0x4f, 0xfe, 0x63 } }
+  { 0xe60602a8, 0x97a3, 0x4fe7, \
+    { 0xb5, 0xb7, 0x56, 0xbc, 0x6c, 0xe8, 0x7a, 0xb4 } }
 
 enum EnsureNSSOperator
 {
@@ -61,9 +63,10 @@ extern bool EnsureNSSInitializedChromeOrContent();
 
 extern bool EnsureNSSInitialized(EnsureNSSOperator op);
 
-class NS_NO_VTABLE nsINSSComponent : public nsISupports
-{
-public:
+class nsNSSComponent;
+
+class NS_NO_VTABLE nsINSSComponent : public nsISupports {
+ public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INSSCOMPONENT_IID)
 
   NS_IMETHOD ShowAlertFromStringBundle(const char* messageID) = 0;
@@ -77,6 +80,10 @@ public:
 
   NS_IMETHOD GetNSSBundleString(const char* name,
                                 nsAString& outString) = 0;
+  NS_IMETHOD NSSBundleFormatStringFromName(const char* name,
+                                           const char16_t** params,
+                                           uint32_t numParams,
+                                           nsAString& outString) = 0;
 
   NS_IMETHOD LogoutAuthenticatedPK11() = 0;
 
@@ -88,16 +95,6 @@ public:
 
   NS_IMETHOD IsNSSInitialized(bool* initialized) = 0;
 
-#ifdef DEBUG
-  NS_IMETHOD IsCertTestBuiltInRoot(CERTCertificate* cert, bool& result) = 0;
-#endif
-
-  NS_IMETHOD IsCertContentSigningRoot(CERTCertificate* cert, bool& result) = 0;
-
-#ifdef XP_WIN
-  NS_IMETHOD GetEnterpriseRoots(nsIX509CertList** enterpriseRoots) = 0;
-#endif
-
   virtual ::already_AddRefed<mozilla::psm::SharedCertVerifier>
     GetDefaultCertVerifier() = 0;
 };
@@ -108,18 +105,23 @@ class nsNSSShutDownList;
 class nsCertVerificationThread;
 
 // Implementation of the PSM component interface.
-class nsNSSComponent final : public nsINSSComponent
-                           , public nsIObserver
+class nsNSSComponent final : public nsIEntropyCollector,
+                             public nsINSSComponent,
+                             public nsIObserver,
+                             public nsSupportsWeakReference
 {
+  typedef mozilla::Mutex Mutex;
+
 public:
   NS_DEFINE_STATIC_CID_ACCESSOR( NS_NSSCOMPONENT_CID )
 
   nsNSSComponent();
 
   NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSIENTROPYCOLLECTOR
   NS_DECL_NSIOBSERVER
 
-  nsresult Init();
+  NS_METHOD Init();
 
   static nsresult GetNewPrompter(nsIPrompt** result);
   static nsresult ShowAlertWithConstructedString(const nsString& message);
@@ -132,6 +134,10 @@ public:
                                            uint32_t numParams,
                                            nsAString& outString) override;
   NS_IMETHOD GetNSSBundleString(const char* name, nsAString& outString) override;
+  NS_IMETHOD NSSBundleFormatStringFromName(const char* name,
+                                           const char16_t** params,
+                                           uint32_t numParams,
+                                           nsAString& outString) override;
   NS_IMETHOD LogoutAuthenticatedPK11() override;
 
 #ifndef MOZ_NO_SMART_CARDS
@@ -146,22 +152,12 @@ public:
 
   NS_IMETHOD IsNSSInitialized(bool* initialized) override;
 
-#ifdef DEBUG
-  NS_IMETHOD IsCertTestBuiltInRoot(CERTCertificate* cert, bool& result) override;
-#endif
-
-  NS_IMETHOD IsCertContentSigningRoot(CERTCertificate* cert, bool& result) override;
-
-#ifdef XP_WIN
-  NS_IMETHOD GetEnterpriseRoots(nsIX509CertList** enterpriseRoots) override;
-#endif
-
   ::already_AddRefed<mozilla::psm::SharedCertVerifier>
     GetDefaultCertVerifier() override;
 
   // The following two methods are thread-safe.
-  static bool AreAnyFallbackCiphersEnabled();
-  static void UseFallbackCiphersOnSocket(PRFileDesc* fd);
+  static bool AreAnyWeakCiphersEnabled();
+  static void UseWeakCiphersOnSocket(PRFileDesc* fd);
 
   static void FillTLSVersionRange(SSLVersionRange& rangeOut,
                                   uint32_t minFromPrefs,
@@ -183,44 +179,34 @@ private:
   nsresult InitializePIPNSSBundle();
   nsresult ConfigureInternalPKCS11Token();
   nsresult RegisterObservers();
+  nsresult DeregisterObservers();
 
-  void DoProfileBeforeChange();
+  // Methods that we use to handle the profile change notifications (and to
+  // synthesize a full profile change when we're just doing a profile startup):
+  void DoProfileChangeNetTeardown();
+  void DoProfileChangeTeardown(nsISupports* aSubject);
+  void DoProfileBeforeChange(nsISupports* aSubject);
+  void DoProfileChangeNetRestore();
 
-  void MaybeEnableFamilySafetyCompatibility();
-  void MaybeImportEnterpriseRoots();
-#ifdef XP_WIN
-  nsresult MaybeImportFamilySafetyRoot(PCCERT_CONTEXT certificate,
-                                       bool& wasFamilySafetyRoot);
-  nsresult LoadFamilySafetyRoot();
-  void UnloadFamilySafetyRoot();
-
-  void UnloadEnterpriseRoots();
-
-  mozilla::UniqueCERTCertificate mFamilySafetyRoot;
-  mozilla::UniqueCERTCertList mEnterpriseRoots;
-#endif // XP_WIN
-
-  mozilla::Mutex mutex;
+  Mutex mutex;
 
   nsCOMPtr<nsIStringBundle> mPIPNSSBundle;
   nsCOMPtr<nsIStringBundle> mNSSErrorsBundle;
   bool mNSSInitialized;
+  bool mObserversRegistered;
   static int mInstanceCount;
+  nsNSSShutDownList* mShutdownObjectList;
 #ifndef MOZ_NO_SMART_CARDS
   SmartCardThreadList* mThreadList;
 #endif
-
-#ifdef DEBUG
-  nsAutoString mTestBuiltInRootHash;
-#endif
-  nsString mContentSigningRootHash;
+  bool mIsNetworkDown;
 
   void deleteBackgroundThreads();
   void createBackgroundThreads();
   nsCertVerificationThread* mCertVerificationThread;
 
   nsNSSHttpInterface mHttpForNSS;
-  RefPtr<mozilla::psm::SharedCertVerifier> mDefaultCertVerifier;
+  mozilla::RefPtr<mozilla::psm::SharedCertVerifier> mDefaultCertVerifier;
 
   static PRStatus IdentityInfoInit(void);
 };
@@ -233,6 +219,15 @@ public:
   static nsresult getErrorMessageFromCode(PRErrorCode err,
                                           nsINSSComponent* component,
                                           nsString& returnedMessage);
+};
+
+class nsPSMInitPanic
+{
+private:
+  static bool isPanic;
+public:
+  static void SetPanic() {isPanic = true;}
+  static bool GetPanic() {return isPanic;}
 };
 
 #endif // _nsNSSComponent_h_

@@ -32,7 +32,7 @@
 #include "ScopedNSSTypes.h"
 #include "secerr.h"
 
-extern mozilla::LazyLogModule gCertVerifierLog;
+extern PRLogModuleInfo* gCertVerifierLog;
 
 using namespace mozilla::pkix;
 
@@ -52,7 +52,7 @@ namespace mozilla { namespace psm {
 static SECStatus
 CertIDHash(SHA384Buffer& buf, const CertID& certID)
 {
-  UniquePK11Context context(PK11_CreateDigestContext(SEC_OID_SHA384));
+  ScopedPK11Context context(PK11_CreateDigestContext(SEC_OID_SHA384));
   if (!context) {
     return SECFailure;
   }
@@ -149,9 +149,7 @@ OCSPCache::MakeMostRecentlyUsed(size_t aIndex,
   // Since mEntries is sorted with the most-recently-used entry at the end,
   // aIndex is likely to be near the end, so this is likely to be fast.
   mEntries.erase(mEntries.begin() + aIndex);
-  // erase() does not shrink or realloc memory, so the append below should
-  // always succeed.
-  MOZ_RELEASE_ASSERT(mEntries.append(entry));
+  mEntries.append(entry);
 }
 
 bool
@@ -254,10 +252,7 @@ OCSPCache::Put(const CertID& aCertID, Result aResult,
     delete newEntry;
     return rv;
   }
-  if (!mEntries.append(newEntry)) {
-    delete newEntry;
-    return Result::FATAL_ERROR_NO_MEMORY;
-  }
+  mEntries.append(newEntry);
   LogWithCertID("OCSPCache::Put(%p) added to cache", aCertID);
   return Success;
 }

@@ -3,13 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/Promise.jsm");
 
-const gIsWindows = mozinfo.os == "win";
-const gIsOSX = mozinfo.os == "mac";
-const gIsLinux = mozinfo.os == "linux";
+const gIsWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
+const gIsOSX = ("nsILocalFileMac" in Ci);
+const gIsLinux = ("@mozilla.org/gnome-gconf-service;1" in Cc) ||
+  ("@mozilla.org/gio-service;1" in Cc);
 const gDirSvc = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
 
 // Finds the test plugin library
@@ -113,7 +114,7 @@ function get_test_plugin_no_symlink() {
   return null;
 }
 
-var gGlobalScope = this;
+let gGlobalScope = this;
 function loadAddonManager() {
   let ns = {};
   Cu.import("resource://gre/modules/Services.jsm", ns);

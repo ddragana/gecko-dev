@@ -15,8 +15,7 @@ function usage() {
 
 clean=1
 platform=""
-# 3 hours. OS X doesn't support the "sleep 3h" syntax.
-TIMEOUT=10800
+TIMEOUT=3h
 while [ $# -gt 1 ]; do
     case "$1" in
         --dep)
@@ -55,11 +54,6 @@ if [ ! -f "$ABSDIR/variants/$VARIANT" ]; then
     exit 1
 fi
 
-if [[ "$VARIANT" = "nonunified" ]]; then
-    # Hack the moz.build files to turn off unified compilation.
-    find "$SOURCE/js/src" -name moz.build -exec sed -i 's/UNIFIED_SOURCES/SOURCES/' '{}' ';'
-fi
-
 (cd "$SOURCE/js/src"; autoconf-2.13 || autoconf2.13 || autoconf213)
 
 TRY_OVERRIDE=$SOURCE/js/src/config.try
@@ -88,18 +82,15 @@ if [[ "$OSTYPE" == darwin* ]]; then
   if [ "$VARIANT" = "arm-sim-osx" ]; then
     USE_64BIT=false
   fi
-  source "$ABSDIR/macbuildenv.sh"
 elif [ "$OSTYPE" = "linux-gnu" ]; then
   if [ -n "$AUTOMATION" ]; then
-      GCCDIR="${GCCDIR:-$SOURCE/../gcc}"
+      GCCDIR="${GCCDIR:-/tools/gcc-4.7.2-0moz1}"
       CONFIGURE_ARGS="$CONFIGURE_ARGS --with-ccache"
   fi
   UNAME_M=$(uname -m)
   MAKEFLAGS=-j4
   if [ "$VARIANT" = "arm-sim" ]; then
     USE_64BIT=false
-  elif [ "$VARIANT" = "arm64-sim" ]; then
-    USE_64BIT=true
   else
     case "$platform" in
     linux64)
@@ -122,7 +113,7 @@ elif [ "$OSTYPE" = "linux-gnu" ]; then
     esac
   fi
 
-  if [ -n "$AUTOMATION" ]; then
+  if [ "$UNAME_M" != "arm" ] && [ -n "$AUTOMATION" ]; then
     export CC=$GCCDIR/bin/gcc
     export CXX=$GCCDIR/bin/g++
     if $USE_64BIT; then
@@ -153,10 +144,7 @@ if $USE_64BIT; then
   fi
 else
   NSPR64=""
-  if [ "$OSTYPE" == darwin* ]; then
-    export CC="${CC:-/usr/bin/clang} -arch i386"
-    export CXX="${CXX:-/usr/bin/clang++} -arch i386"
-  elif [ "$OSTYPE" != "msys" ]; then
+  if [ "$OSTYPE" != "msys" ]; then
     export CC="${CC:-/usr/bin/gcc} -m32"
     export CXX="${CXX:-/usr/bin/g++} -m32"
     export AR=ar
@@ -180,10 +168,6 @@ if type setarch >/dev/null 2>&1; then
 fi
 
 RUN_JSTESTS=true
-RUN_JITTEST=true
-RUN_JSAPITESTS=true
-: ${RUN_CHECK_STYLE_ONLY:=false}
-: ${RUN_MAKE_CHECKS:=true}
 
 PARENT=$$
 
@@ -220,38 +204,13 @@ elif [[ "$VARIANT" = "warnaserr" ||
         "$VARIANT" = "plain" ]]; then
     export JSTESTS_EXTRA_ARGS=--jitflags=all
 elif [[ "$VARIANT" = "arm-sim" ||
-        "$VARIANT" = "arm-sim-osx" ||
         "$VARIANT" = "plaindebug" ]]; then
     export JSTESTS_EXTRA_ARGS=--jitflags=debug
-elif [[ "$VARIANT" = "nonunified" ]]; then
-    RUN_JSTESTS=false
-    RUN_JITTEST=false
-    RUN_CHECK_STYLE_ONLY=true
-elif [[ "$VARIANT" = arm64* ]]; then
-    # The ARM64 simulator is slow, so some tests are timing out.
-    # Run a reduced set of test cases so this doesn't take hours.
-    export JSTESTS_EXTRA_ARGS="--exclude-file=$ABSDIR/arm64-jstests-slow.txt"
-    export JITTEST_EXTRA_ARGS="--jitflags=none --args=--baseline-eager -x ion/ -x asm.js/"
 fi
 
-if $RUN_MAKE_CHECKS; then
-    if $RUN_CHECK_STYLE_ONLY; then
-        $COMMAND_PREFIX $MAKE check-style || exit 1
-    else
-        $COMMAND_PREFIX $MAKE check || exit 1
-    fi
-fi
-
-RESULT=0
-
-if $RUN_JITTEST; then
-    $COMMAND_PREFIX $MAKE check-jit-test || RESULT=$?
-fi
-if $RUN_JSAPITESTS; then
-    $COMMAND_PREFIX $OBJDIR/dist/bin/jsapi-tests || RESULT=$?
-fi
+$COMMAND_PREFIX $MAKE check || exit 1
+$COMMAND_PREFIX $MAKE check-jit-test || exit 1
+$COMMAND_PREFIX $OBJDIR/dist/bin/jsapi-tests || exit 1
 if $RUN_JSTESTS; then
-    $COMMAND_PREFIX $MAKE check-jstests || RESULT=$?
+    $COMMAND_PREFIX $MAKE check-jstests || exit 1
 fi
-
-exit $RESULT

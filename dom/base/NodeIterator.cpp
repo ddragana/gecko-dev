@@ -179,18 +179,21 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(NodeIterator)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(NodeIterator)
 
+/* readonly attribute nsIDOMNode root; */
 NS_IMETHODIMP NodeIterator::GetRoot(nsIDOMNode * *aRoot)
 {
     NS_ADDREF(*aRoot = Root()->AsDOMNode());
     return NS_OK;
 }
 
+/* readonly attribute unsigned long whatToShow; */
 NS_IMETHODIMP NodeIterator::GetWhatToShow(uint32_t *aWhatToShow)
 {
     *aWhatToShow = WhatToShow();
     return NS_OK;
 }
 
+/* readonly attribute nsIDOMNodeFilter filter; */
 NS_IMETHODIMP NodeIterator::GetFilter(nsIDOMNodeFilter **aFilter)
 {
     NS_ENSURE_ARG_POINTER(aFilter);
@@ -200,11 +203,13 @@ NS_IMETHODIMP NodeIterator::GetFilter(nsIDOMNodeFilter **aFilter)
     return NS_OK;
 }
 
+/* nsIDOMNode nextNode ()  raises (DOMException); */
 NS_IMETHODIMP NodeIterator::NextNode(nsIDOMNode **_retval)
 {
     return ImplNodeGetter(&NodeIterator::NextNode, _retval);
 }
 
+/* nsIDOMNode previousNode ()  raises (DOMException); */
 NS_IMETHODIMP NodeIterator::PreviousNode(nsIDOMNode **_retval)
 {
     return ImplNodeGetter(&NodeIterator::PreviousNode, _retval);
@@ -243,6 +248,7 @@ NodeIterator::NextOrPrevNode(NodePointer::MoveToMethodType aMove,
     return nullptr;
 }
 
+/* void detach (); */
 NS_IMETHODIMP NodeIterator::Detach(void)
 {
     if (mRoot) {
@@ -251,6 +257,7 @@ NS_IMETHODIMP NodeIterator::Detach(void)
     return NS_OK;
 }
 
+/* readonly attribute nsIDOMNode referenceNode; */
 NS_IMETHODIMP NodeIterator::GetReferenceNode(nsIDOMNode * *aRefNode)
 {
     nsCOMPtr<nsIDOMNode> node(do_QueryInterface(GetReferenceNode()));
@@ -258,6 +265,7 @@ NS_IMETHODIMP NodeIterator::GetReferenceNode(nsIDOMNode * *aRefNode)
     return NS_OK;
 }
 
+/* readonly attribute boolean pointerBeforeReferenceNode; */
 NS_IMETHODIMP NodeIterator::GetPointerBeforeReferenceNode(bool *aBeforeNode)
 {
     *aBeforeNode = PointerBeforeReferenceNode();

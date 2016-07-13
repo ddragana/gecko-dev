@@ -23,7 +23,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DynamicsCompressorNode, AudioNode)
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   AudioParam* Threshold() const
   {
@@ -56,13 +56,13 @@ public:
     return mReduction;
   }
 
-  const char* NodeType() const override
+  virtual const char* NodeType() const override
   {
     return "DynamicsCompressorNode";
   }
 
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
   void SetReduction(float aReduction)
   {
@@ -74,12 +74,19 @@ protected:
   virtual ~DynamicsCompressorNode();
 
 private:
-  RefPtr<AudioParam> mThreshold;
-  RefPtr<AudioParam> mKnee;
-  RefPtr<AudioParam> mRatio;
+  static void SendThresholdToStream(AudioNode* aNode);
+  static void SendKneeToStream(AudioNode* aNode);
+  static void SendRatioToStream(AudioNode* aNode);
+  static void SendAttackToStream(AudioNode* aNode);
+  static void SendReleaseToStream(AudioNode* aNode);
+
+private:
+  nsRefPtr<AudioParam> mThreshold;
+  nsRefPtr<AudioParam> mKnee;
+  nsRefPtr<AudioParam> mRatio;
   float mReduction;
-  RefPtr<AudioParam> mAttack;
-  RefPtr<AudioParam> mRelease;
+  nsRefPtr<AudioParam> mAttack;
+  nsRefPtr<AudioParam> mRelease;
 };
 
 } // namespace dom

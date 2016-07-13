@@ -56,7 +56,7 @@ VolumeObserverList Volume::sEventObserverList;
 // nsVolumeService looks for WakeLock status changes, and forwards
 // the results to the IOThread.
 //
-// If the Volume (IOThread) receives a volume update where the generation
+// If the Volume (IOThread) recieves a volume update where the generation
 // number mismatches, then the update is simply ignored.
 //
 // When a Volume (IOThread) initially becomes mounted, we assume it to
@@ -112,33 +112,11 @@ Volume::Dump(const char* aLabel) const
                            : (IsUnmounting() ? "y" : "n"));
 }
 
-void
-Volume::ResolveAndSetMountPoint(const nsCSubstring& aMountPoint)
-{
-  nsCString mountPoint(aMountPoint);
-  char realPathBuf[PATH_MAX];
-
-  // Call realpath so that we wind up with a path which is compatible with
-  // functions like nsVolumeService::GetVolumeByPath.
-
-  if (realpath(mountPoint.get(), realPathBuf) < 0) {
-    // The path we were handed doesn't exist. Warn about it, but use it
-    // anyways assuming that the user knows what they're doing.
-
-    ERR("ResolveAndSetMountPoint: realpath on '%s' failed: %d",
-        mountPoint.get(), errno);
-    mMountPoint = mountPoint;
-  } else {
-    mMountPoint = realPathBuf;
-  }
-  DBG("Volume %s: Setting mountpoint to '%s'", NameStr(), mMountPoint.get());
-}
-
 void Volume::SetFakeVolume(const nsACString& aMountPoint)
 {
   this->mMountLocked = false;
   this->mCanBeShared = false;
-  ResolveAndSetMountPoint(aMountPoint);
+  this->mMountPoint = aMountPoint;
   SetState(nsIVolume::STATE_MOUNTED);
 }
 
@@ -408,7 +386,8 @@ Volume::SetMountPoint(const nsCSubstring& aMountPoint)
   if (mMountPoint.Equals(aMountPoint)) {
     return;
   }
-  ResolveAndSetMountPoint(aMountPoint);
+  mMountPoint = aMountPoint;
+  DBG("Volume %s: Setting mountpoint to '%s'", NameStr(), mMountPoint.get());
 }
 
 void

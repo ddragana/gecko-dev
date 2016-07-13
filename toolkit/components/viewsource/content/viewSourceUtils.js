@@ -15,12 +15,6 @@
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ViewSourceBrowser",
   "resource://gre/modules/ViewSourceBrowser.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
-  "resource://gre/modules/Deprecated.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
-  "resource://gre/modules/Services.jsm");
 
 var gViewSourceUtils = {
 
@@ -92,9 +86,6 @@ var gViewSourceUtils = {
    *          The line number to focus on once the source is loaded.
    */
   viewSourceInBrowser: function(aArgs) {
-    Services.telemetry
-            .getHistogramById("VIEW_SOURCE_IN_BROWSER_OPENED_BOOLEAN")
-            .add(true);
     let viewSourceBrowser = new ViewSourceBrowser(aArgs.viewSourceBrowser);
     viewSourceBrowser.loadViewSource(aArgs);
   },
@@ -104,42 +95,33 @@ var gViewSourceUtils = {
    * <browser>.  This allows for non-window display methods, such as a tab from
    * Firefox.
    *
+   * @param aSelection
+   *        A Selection object for the content of interest.
    * @param aViewSourceInBrowser
-   *        The browser containing the page to view the source of.
-   * @param aTarget
-   *        Set to the target node for MathML. Null for other types of elements.
-   * @param aGetBrowserFn
-   *        If set, a function that will return a browser to open the source in.
-   *        If null, or this function returns null, opens the source in a new window.
+   *        The browser to display the view source in.
    */
-  viewPartialSourceInBrowser: function(aViewSourceInBrowser, aTarget, aGetBrowserFn) {
-    let mm = aViewSourceInBrowser.messageManager;
-    mm.addMessageListener("ViewSource:GetSelectionDone", function gotSelection(message) {
-      mm.removeMessageListener("ViewSource:GetSelectionDone", gotSelection);
+  viewSourceFromSelectionInBrowser: function(aSelection, aViewSourceInBrowser) {
+    let viewSourceBrowser = new ViewSourceBrowser(aViewSourceInBrowser);
+    viewSourceBrowser.loadViewSourceFromSelection(aSelection);
+  },
 
-      if (!message.data)
-        return;
-
-      let browserToOpenIn = aGetBrowserFn ? aGetBrowserFn() : null;
-      if (browserToOpenIn) {
-        let viewSourceBrowser = new ViewSourceBrowser(browserToOpenIn);
-        viewSourceBrowser.loadViewSourceFromSelection(message.data.uri, message.data.drawSelection,
-                                                      message.data.baseURI);
-      }
-      else {
-        let docUrl = null;
-        window.openDialog("chrome://global/content/viewPartialSource.xul",
-                          "_blank", "all,dialog=no",
-                          {
-                            URI: message.data.uri,
-                            drawSelection: message.data.drawSelection,
-                            baseURI: message.data.baseURI,
-                            partial: true,
-                          });
-      }
-    });
-
-    mm.sendAsyncMessage("ViewSource:GetSelection", { }, { target: aTarget });
+  /**
+   * Displays view source for a MathML fragment from some document in the
+   * provided <browser>.  This allows for non-window display methods,  such as a
+   * tab from Firefox.
+   *
+   * @param aNode
+   *        Some element within the fragment of interest.
+   * @param aContext
+   *        A string denoting the type of fragment.  Currently, "mathml" is the
+   *        only accepted value.
+   * @param aViewSourceInBrowser
+   *        The browser to display the view source in.
+   */
+  viewSourceFromFragmentInBrowser: function(aNode, aContext,
+                                            aViewSourceInBrowser) {
+    let viewSourceBrowser = new ViewSourceBrowser(aViewSourceInBrowser);
+    viewSourceBrowser.loadViewSourceFromFragment(aNode, aContext);
   },
 
   // Opens the interval view source viewer
@@ -163,9 +145,6 @@ var gViewSourceUtils = {
       } catch (ex) {
       }
     }
-    Services.telemetry
-            .getHistogramById("VIEW_SOURCE_IN_WINDOW_OPENED_BOOLEAN")
-            .add(true);
     openDialog("chrome://global/content/viewSource.xul",
                "_blank",
                "all,dialog=no",
@@ -191,81 +170,12 @@ var gViewSourceUtils = {
     return editorArgs;
   },
 
-  /**
-   * Opens an external editor with the view source content.
-   *
-   * @param aArgsOrURL (required)
-   *        This is either an Object containing parameters, or a string
-   *        URL for the page we want to view the source of. In the latter
-   *        case we will be paying attention to the other parameters, as
-   *        we will be supporting the old API for this method.
-   *        If aArgsOrURL is an Object, the other parameters will be ignored.
-   *        aArgsOrURL as an Object can include the following properties:
-   *
-   *        URL (required):
-   *          A string URL for the page we'd like to view the source of.
-   *        browser (optional):
-   *          The browser containing the document that we would like to view the
-   *          source of. This is required if outerWindowID is passed.
-   *        outerWindowID (optional):
-   *          The outerWindowID of the content window containing the document that
-   *          we want to view the source of. Pass this if you want to attempt to
-   *          load the document source out of the network cache.
-   *        lineNumber (optional):
-   *          The line number to focus on once the source is loaded.
-   *
-   * @param aPageDescriptor (deprecated, optional)
-   *        Accepted for compatibility reasons, but is otherwise ignored.
-   * @param aDocument (deprecated, optional)
-   *        The content document we would like to view the source of. This
-   *        function will throw if aDocument is a CPOW.
-   * @param aLineNumber (deprecated, optional)
-   *        The line number to focus on once the source is loaded.
-   * @param aCallBack
-   *        A function accepting two arguments:
-   *          * result (true = success)
-   *          * data object
-   *        The function defaults to opening an internal viewer if external
-   *        viewing fails.
-   */
-  openInExternalEditor: function(aArgsOrURL, aPageDescriptor, aDocument,
-                                 aLineNumber, aCallBack) {
-    let data;
-    if (typeof aArgsOrURL == "string") {
-      Deprecated.warning("The arguments you're passing to " +
-                         "openInExternalEditor are using an out-of-date API.",
-                         "https://developer.mozilla.org/en-US/Add-ons/" +
-                         "Code_snippets/View_Source_for_XUL_Applications");
-      if (Components.utils.isCrossProcessWrapper(aDocument)) {
-        throw new Error("View Source cannot accept a CPOW as a document.");
-      }
-      data = {
-        url: aArgsOrURL,
-        pageDescriptor: aPageDescriptor,
-        doc: aDocument,
-        lineNumber: aLineNumber,
-        isPrivate: false,
-      };
-      if (aDocument) {
-          data.isPrivate =
-            PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView);
-      }
-    } else {
-      let { URL, browser, lineNumber } = aArgsOrURL;
-      data = {
-        url: URL,
-        lineNumber,
-        isPrivate: false,
-      };
-      if (browser) {
-        data.doc = {
-          characterSet: browser.characterSet,
-          contentType: browser.documentContentType,
-          title: browser.contentTitle,
-        };
-        data.isPrivate = PrivateBrowsingUtils.isBrowserPrivate(browser);
-      }
-    }
+  // aCallBack is a function accepting two arguments - result (true=success) and a data object
+  // It defaults to openInInternalViewer if undefined.
+  openInExternalEditor: function(aURL, aPageDescriptor, aDocument, aLineNumber, aCallBack)
+  {
+    var data = {url: aURL, pageDescriptor: aPageDescriptor, doc: aDocument,
+                lineNumber: aLineNumber};
 
     try {
       var editor = this.getExternalViewSourceEditor();
@@ -277,12 +187,12 @@ var gViewSourceUtils = {
       // make a uri
       var ios = Components.classes["@mozilla.org/network/io-service;1"]
                           .getService(Components.interfaces.nsIIOService);
-      var charset = data.doc ? data.doc.characterSet : null;
-      var uri = ios.newURI(data.url, charset, null);
+      var charset = aDocument ? aDocument.characterSet : null;
+      var uri = ios.newURI(aURL, charset, null);
       data.uri = uri;
 
       var path;
-      var contentType = data.doc ? data.doc.contentType : null;
+      var contentType = aDocument ? aDocument.contentType : null;
       if (uri.scheme == "file") {
         // it's a local file; we can open it directly
         path = uri.QueryInterface(Components.interfaces.nsIFileURL).file.path;
@@ -292,14 +202,26 @@ var gViewSourceUtils = {
         this.handleCallBack(aCallBack, true, data);
       } else {
         // set up the progress listener with what we know so far
-        this.viewSourceProgressListener.contentLoaded = false;
         this.viewSourceProgressListener.editor = editor;
         this.viewSourceProgressListener.callBack = aCallBack;
         this.viewSourceProgressListener.data = data;
-        if (!data.pageDescriptor) {
+        if (!aPageDescriptor) {
           // without a page descriptor, loadPage has no chance of working. download the file.
-          var file = this.getTemporaryFile(uri, data.doc, contentType);
+          var file = this.getTemporaryFile(uri, aDocument, contentType);
           this.viewSourceProgressListener.file = file;
+
+          let fromPrivateWindow = false;
+          if (aDocument) {
+            try {
+              fromPrivateWindow =
+                aDocument.defaultView
+                         .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                         .getInterface(Components.interfaces.nsIWebNavigation)
+                         .QueryInterface(Components.interfaces.nsILoadContext)
+                         .usePrivateBrowsing;
+            } catch (e) {
+            }
+          }
 
           var webBrowserPersist = Components
                                   .classes["@mozilla.org/embedding/browser/nsWebBrowserPersist;1"]
@@ -308,11 +230,11 @@ var gViewSourceUtils = {
           webBrowserPersist.persistFlags = this.mnsIWebBrowserPersist.PERSIST_FLAGS_REPLACE_EXISTING_FILES;
           webBrowserPersist.progressListener = this.viewSourceProgressListener;
           let referrerPolicy = Components.interfaces.nsIHttpChannel.REFERRER_POLICY_NO_REFERRER;
-          webBrowserPersist.savePrivacyAwareURI(uri, null, null, referrerPolicy, null, null, file, data.isPrivate);
+          webBrowserPersist.savePrivacyAwareURI(uri, null, null, referrerPolicy, null, null, file, fromPrivateWindow);
 
           let helperService = Components.classes["@mozilla.org/uriloader/external-helper-app-service;1"]
                                         .getService(Components.interfaces.nsPIExternalAppLauncher);
-          if (data.isPrivate) {
+          if (fromPrivateWindow) {
             // register the file to be deleted when possible
             helperService.deleteTemporaryPrivateFileWhenPossible(file);
           } else {
@@ -332,7 +254,7 @@ var gViewSourceUtils = {
           progress.addProgressListener(this.viewSourceProgressListener,
                                        this.mnsIWebProgress.NOTIFY_STATE_DOCUMENT);
           var pageLoader = webShell.QueryInterface(this.mnsIWebPageDescriptor);
-          pageLoader.loadPage(data.pageDescriptor, this.mnsIWebPageDescriptor.DISPLAY_AS_SOURCE);
+          pageLoader.loadPage(aPageDescriptor, this.mnsIWebPageDescriptor.DISPLAY_AS_SOURCE);
         }
       }
     } catch (ex) {
@@ -354,10 +276,7 @@ var gViewSourceUtils = {
   // Calls the callback, keeping in mind undefined or null values.
   handleCallBack: function(aCallBack, result, data)
   {
-    Services.telemetry
-            .getHistogramById("VIEW_SOURCE_EXTERNAL_RESULT_BOOLEAN")
-            .add(result);
-    // if callback is undefined, default to the internal viewer
+    // ifcallback is undefined, default to the internal viewer
     if (aCallBack === undefined) {
       this.internalViewerFallback(result, data);
     } else if (aCallBack) {
@@ -435,11 +354,6 @@ var gViewSourceUtils = {
     },
 
     onContentLoaded: function() {
-      // The progress listener may call this multiple times, so be sure we only
-      // run once.
-      if (this.contentLoaded) {
-        return;
-      }
       try {
         if (!this.file) {
           // it's not saved to file yet, it's in the webshell
@@ -465,9 +379,16 @@ var gViewSourceUtils = {
           coStream.close();
           foStream.close();
 
+          let fromPrivateWindow =
+            this.data.doc.defaultView
+                         .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                         .getInterface(Components.interfaces.nsIWebNavigation)
+                         .QueryInterface(Components.interfaces.nsILoadContext)
+                         .usePrivateBrowsing;
+
           let helperService = Components.classes["@mozilla.org/uriloader/external-helper-app-service;1"]
                               .getService(Components.interfaces.nsPIExternalAppLauncher);
-          if (this.data.isPrivate) {
+          if (fromPrivateWindow) {
             // register the file to be deleted when possible
             helperService.deleteTemporaryPrivateFileWhenPossible(this.file);
           } else {
@@ -480,7 +401,6 @@ var gViewSourceUtils = {
                                                           this.data.lineNumber);
         this.editor.runw(false, editorArgs, editorArgs.length);
 
-        this.contentLoaded = true;
         gViewSourceUtils.handleCallBack(this.callBack, true, this.data);
       } catch (ex) {
         // we failed loading it with the external editor.

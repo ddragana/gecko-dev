@@ -11,161 +11,160 @@
 #ifndef WEBRTC_VIDEO_FRAME_H_
 #define WEBRTC_VIDEO_FRAME_H_
 
-#include "webrtc/base/scoped_ref_ptr.h"
-#include "webrtc/common_video/interface/native_handle.h"
-#include "webrtc/common_video/interface/video_frame_buffer.h"
-#include "webrtc/common_video/rotation.h"
+#include <assert.h>
+
+#include "webrtc/common_video/plane.h"
+// TODO(pbos): Remove scoped_refptr include (and AddRef/Release if they're not
+// used).
+#include "webrtc/system_wrappers/interface/scoped_refptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
 
+enum PlaneType {
+  kYPlane = 0,
+  kUPlane = 1,
+  kVPlane = 2,
+  kNumOfPlanes = 3
+};
+
 class I420VideoFrame {
  public:
   I420VideoFrame();
-  I420VideoFrame(const rtc::scoped_refptr<webrtc::VideoFrameBuffer>& buffer,
-                 uint32_t timestamp,
-                 int64_t render_time_ms,
-                 VideoRotation rotation);
-  I420VideoFrame(NativeHandle* handle,
-                 int width,
-                 int height,
-                 uint32_t timestamp,
-                 int64_t render_time_ms);
-
-  // TODO(pbos): Make all create/copy functions void, they should not be able to
-  // fail (which should be DCHECK/CHECKed instead).
+  virtual ~I420VideoFrame();
+  // Infrastructure for refCount implementation.
+  // Implements dummy functions for reference counting so that non reference
+  // counted instantiation can be done. These functions should not be called
+  // when creating the frame with new I420VideoFrame().
+  // Note: do not pass a I420VideoFrame created with new I420VideoFrame() or
+  // equivalent to a scoped_refptr or memory leak will occur.
+  virtual int32_t AddRef() {
+    assert(false);
+    return -1;
+  }
+  virtual int32_t Release() {
+    assert(false);
+    return -1;
+  }
 
   // CreateEmptyFrame: Sets frame dimensions and allocates buffers based
   // on set dimensions - height and plane stride.
   // If required size is bigger than the allocated one, new buffers of adequate
   // size will be allocated.
   // Return value: 0 on success, -1 on error.
-  int CreateEmptyFrame(int width,
-                       int height,
-                       int stride_y,
-                       int stride_u,
-                       int stride_v);
+  virtual int CreateEmptyFrame(int width,
+                               int height,
+                               int stride_y,
+                               int stride_u,
+                               int stride_v);
 
   // CreateFrame: Sets the frame's members and buffers. If required size is
   // bigger than allocated one, new buffers of adequate size will be allocated.
   // Return value: 0 on success, -1 on error.
-  int CreateFrame(const uint8_t* buffer_y,
-                  const uint8_t* buffer_u,
-                  const uint8_t* buffer_v,
-                  int width,
-                  int height,
-                  int stride_y,
-                  int stride_u,
-                  int stride_v);
+  virtual int CreateFrame(int size_y,
+                          const uint8_t* buffer_y,
+                          int size_u,
+                          const uint8_t* buffer_u,
+                          int size_v,
+                          const uint8_t* buffer_v,
+                          int width,
+                          int height,
+                          int stride_y,
+                          int stride_u,
+                          int stride_v);
 
-  // TODO(guoweis): remove the previous CreateFrame when chromium has this code.
-  int CreateFrame(const uint8_t* buffer_y,
-                  const uint8_t* buffer_u,
-                  const uint8_t* buffer_v,
-                  int width,
-                  int height,
-                  int stride_y,
-                  int stride_u,
-                  int stride_v,
-                  VideoRotation rotation);
-
-  // CreateFrame: Sets the frame's members and buffers. If required size is
-  // bigger than allocated one, new buffers of adequate size will be allocated.
-  // |buffer| must be a packed I420 buffer.
+  // Copy frame: If required size is bigger than allocated one, new buffers of
+  // adequate size will be allocated.
   // Return value: 0 on success, -1 on error.
-  int CreateFrame(const uint8_t* buffer,
-                  int width,
-                  int height,
-                  VideoRotation rotation);
+  virtual int CopyFrame(const I420VideoFrame& videoFrame);
 
-  // Deep copy frame: If required size is bigger than allocated one, new
-  // buffers of adequate size will be allocated.
-  // Return value: 0 on success, -1 on error.
-  int CopyFrame(const I420VideoFrame& videoFrame);
+  // Make a copy of |this|. The caller owns the returned frame.
+  // Return value: a new frame on success, NULL on error.
+  virtual I420VideoFrame* CloneFrame() const;
 
-  // Creates a shallow copy of |videoFrame|, i.e, the this object will retain a
-  // reference to the video buffer also retained by |videoFrame|.
-  void ShallowCopy(const I420VideoFrame& videoFrame);
-
-  // Release frame buffer and reset time stamps.
-  void Reset();
+  // Swap Frame.
+  virtual void SwapFrame(I420VideoFrame* videoFrame);
 
   // Get pointer to buffer per plane.
-  uint8_t* buffer(PlaneType type);
+  virtual uint8_t* buffer(PlaneType type);
   // Overloading with const.
-  const uint8_t* buffer(PlaneType type) const;
+  virtual const uint8_t* buffer(PlaneType type) const;
 
   // Get allocated size per plane.
-  int allocated_size(PlaneType type) const;
+  virtual int allocated_size(PlaneType type) const;
 
   // Get allocated stride per plane.
-  int stride(PlaneType type) const;
+  virtual int stride(PlaneType type) const;
+
+  // Set frame width.
+  virtual int set_width(int width);
+
+  // Set frame height.
+  virtual int set_height(int height);
 
   // Get frame width.
-  int width() const;
+  virtual int width() const { return width_; }
 
   // Get frame height.
-  int height() const;
+  virtual int height() const { return height_; }
 
   // Set frame timestamp (90kHz).
-  void set_timestamp(uint32_t timestamp) { timestamp_ = timestamp; }
+  virtual void set_timestamp(uint32_t timestamp) { timestamp_ = timestamp; }
 
   // Get frame timestamp (90kHz).
-  uint32_t timestamp() const { return timestamp_; }
+  virtual uint32_t timestamp() const { return timestamp_; }
 
   // Set capture ntp time in miliseconds.
-  void set_ntp_time_ms(int64_t ntp_time_ms) {
+  virtual void set_ntp_time_ms(int64_t ntp_time_ms) {
     ntp_time_ms_ = ntp_time_ms;
   }
 
   // Get capture ntp time in miliseconds.
-  int64_t ntp_time_ms() const { return ntp_time_ms_; }
-
-  // Naming convention for Coordination of Video Orientation. Please see
-  // http://www.etsi.org/deliver/etsi_ts/126100_126199/126114/12.07.00_60/ts_126114v120700p.pdf
-  //
-  // "pending rotation" or "pending" = a frame that has a VideoRotation > 0.
-  //
-  // "not pending" = a frame that has a VideoRotation == 0.
-  //
-  // "apply rotation" = modify a frame from being "pending" to being "not
-  //                    pending" rotation (a no-op for "unrotated").
-  //
-  VideoRotation rotation() const { return rotation_; }
-  void set_rotation(VideoRotation rotation) {
-    rotation_ = rotation;
-  }
+  virtual int64_t ntp_time_ms() const { return ntp_time_ms_; }
 
   // Set render time in miliseconds.
-  void set_render_time_ms(int64_t render_time_ms) {
+  virtual void set_render_time_ms(int64_t render_time_ms) {
     render_time_ms_ = render_time_ms;
   }
 
   // Get render time in miliseconds.
-  int64_t render_time_ms() const { return render_time_ms_; }
+  virtual int64_t render_time_ms() const { return render_time_ms_; }
 
   // Return true if underlying plane buffers are of zero size, false if not.
-  bool IsZeroSize() const;
+  virtual bool IsZeroSize() const;
+
+  // Reset underlying plane buffers sizes to 0. This function doesn't
+  // clear memory.
+  virtual void ResetSize();
 
   // Return the handle of the underlying video frame. This is used when the
   // frame is backed by a texture. The object should be destroyed when it is no
   // longer in use, so the underlying resource can be freed.
-  void* native_handle() const;
+  virtual void* native_handle() const;
 
-  // Return the underlying buffer.
-  rtc::scoped_refptr<webrtc::VideoFrameBuffer> video_frame_buffer() const;
-
-  // Set the underlying buffer.
-  void set_video_frame_buffer(
-      const rtc::scoped_refptr<webrtc::VideoFrameBuffer>& buffer);
+ protected:
+  // Verifies legality of parameters.
+  // Return value: 0 on success, -1 on error.
+  virtual int CheckDimensions(int width,
+                              int height,
+                              int stride_y,
+                              int stride_u,
+                              int stride_v);
 
  private:
-  // An opaque reference counted handle that stores the pixel data.
-  rtc::scoped_refptr<webrtc::VideoFrameBuffer> video_frame_buffer_;
+  // Get the pointer to a specific plane.
+  const Plane* GetPlane(PlaneType type) const;
+  // Overloading with non-const.
+  Plane* GetPlane(PlaneType type);
+
+  Plane y_plane_;
+  Plane u_plane_;
+  Plane v_plane_;
+  int width_;
+  int height_;
   uint32_t timestamp_;
   int64_t ntp_time_ms_;
   int64_t render_time_ms_;
-  VideoRotation rotation_;
 };
 
 enum VideoFrameType {
@@ -179,23 +178,42 @@ enum VideoFrameType {
 // TODO(pbos): Rename EncodedFrame and reformat this class' members.
 class EncodedImage {
  public:
-  EncodedImage() : EncodedImage(nullptr, 0, 0) {}
-  EncodedImage(uint8_t* buffer, size_t length, size_t size)
-      : _buffer(buffer), _length(length), _size(size) {}
+  EncodedImage()
+      : _encodedWidth(0),
+        _encodedHeight(0),
+        _timeStamp(0),
+        capture_time_ms_(0),
+        _frameType(kDeltaFrame),
+        _buffer(NULL),
+        _length(0),
+        _size(0),
+        _completeFrame(false) {}
 
-  uint32_t _encodedWidth = 0;
-  uint32_t _encodedHeight = 0;
-  uint32_t _timeStamp = 0;
+  EncodedImage(uint8_t* buffer, uint32_t length, uint32_t size)
+      : _encodedWidth(0),
+        _encodedHeight(0),
+        _timeStamp(0),
+        ntp_time_ms_(0),
+        capture_time_ms_(0),
+        _frameType(kDeltaFrame),
+        _buffer(buffer),
+        _length(length),
+        _size(size),
+        _completeFrame(false) {}
+
+  uint32_t _encodedWidth;
+  uint32_t _encodedHeight;
+  uint32_t _timeStamp;
   // NTP time of the capture time in local timebase in milliseconds.
-  int64_t ntp_time_ms_ = 0;
-  int64_t capture_time_ms_ = 0;
-  // TODO(pbos): Use webrtc::FrameType directly (and remove VideoFrameType).
-  VideoFrameType _frameType = kDeltaFrame;
+  int64_t ntp_time_ms_;
+  int64_t capture_time_ms_;
+  VideoFrameType _frameType;
   uint8_t* _buffer;
-  size_t _length;
-  size_t _size;
-  bool _completeFrame = false;
+  uint32_t _length;
+  uint32_t _size;
+  bool _completeFrame;
 };
 
 }  // namespace webrtc
 #endif  // WEBRTC_VIDEO_FRAME_H_
+

@@ -71,7 +71,7 @@ function shouldArchivePings() {
   return Preferences.get(PREF_ARCHIVE_ENABLED, false);
 }
 
-var TelemetryArchiveImpl = {
+let TelemetryArchiveImpl = {
   _logger: null,
 
   get _log() {
@@ -99,11 +99,11 @@ var TelemetryArchiveImpl = {
   },
 
   _buildArchivedPingList: function(archivedPingsMap) {
-    let list = Array.from(archivedPingsMap, p => ({
+    let list = [for (p of archivedPingsMap) {
       id: p[0],
       timestampCreated: p[1].timestampCreated,
       type: p[1].type,
-    }));
+    }];
 
     list.sort((a, b) => a.timestampCreated - b.timestampCreated);
 

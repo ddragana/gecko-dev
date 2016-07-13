@@ -2,9 +2,10 @@
 ; jdcolext.asm - colorspace conversion (64-bit SSE2)
 ;
 ; Copyright 2009, 2012 Pierre Ossman <ossman@cendio.se> for Cendio AB
-; Copyright (C) 2009, 2012, D. R. Commander.
+; Copyright 2009, 2012 D. R. Commander
 ;
-; Based on the x86 SIMD extension for IJG JPEG library
+; Based on
+; x86 SIMD extension for IJG JPEG library
 ; Copyright (C) 1999-2006, MIYASAKA Masaru.
 ; For conditions of distribution and use, see copyright notice in jsimdext.inc
 ;
@@ -51,14 +52,14 @@ EXTN(jsimd_ycc_rgb_convert_sse2):
         collect_args
         push    rbx
 
-        mov     ecx, r10d        ; num_cols
+        mov     rcx, r10        ; num_cols
         test    rcx,rcx
         jz      near .return
 
         push    rcx
 
         mov     rdi, r11
-        mov     ecx, r12d
+        mov     rcx, r12
         mov     rsi, JSAMPARRAY [rdi+0*SIZEOF_JSAMPARRAY]
         mov     rbx, JSAMPARRAY [rdi+1*SIZEOF_JSAMPARRAY]
         mov     rdx, JSAMPARRAY [rdi+2*SIZEOF_JSAMPARRAY]

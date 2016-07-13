@@ -13,12 +13,11 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/base/thread_annotations.h"
 #include "webrtc/call.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 #include "webrtc/test/call_test.h"
 #include "webrtc/test/direct_transport.h"
@@ -49,7 +48,7 @@ class TraceObserver {
   }
 
   ~TraceObserver() {
-    Trace::SetTraceCallback(nullptr);
+    Trace::SetTraceCallback(NULL);
     Trace::ReturnTrace();
   }
 
@@ -68,7 +67,9 @@ class TraceObserver {
         : crit_sect_(CriticalSectionWrapper::CreateCriticalSection()),
           done_(EventWrapper::Create()) {}
 
-    void Print(TraceLevel level, const char* message, int length) override {
+    virtual void Print(TraceLevel level,
+                       const char* message,
+                       int length) OVERRIDE {
       CriticalSectionScoped lock(crit_sect_.get());
       std::string msg(message);
       if (msg.find("BitrateEstimator") != std::string::npos) {
@@ -102,10 +103,10 @@ class TraceObserver {
 
    private:
     typedef std::list<std::string> Strings;
-    const rtc::scoped_ptr<CriticalSectionWrapper> crit_sect_;
+    const scoped_ptr<CriticalSectionWrapper> crit_sect_;
     Strings received_log_lines_ GUARDED_BY(crit_sect_);
     Strings expected_log_lines_ GUARDED_BY(crit_sect_);
-    rtc::scoped_ptr<EventWrapper> done_;
+    scoped_ptr<EventWrapper> done_;
   };
 
   Callback callback_;
@@ -144,7 +145,7 @@ class BitrateEstimatorTest : public test::CallTest {
     send_config_ = VideoSendStream::Config();
     send_config_.rtp.ssrcs.push_back(kSendSsrcs[0]);
     // Encoders will be set separately per stream.
-    send_config_.encoder_settings.encoder = nullptr;
+    send_config_.encoder_settings.encoder = NULL;
     send_config_.encoder_settings.payload_name = "FAKE";
     send_config_.encoder_settings.payload_type = kFakeSendPayloadType;
     encoder_config_.streams = test::CreateVideoStreams(1);
@@ -182,8 +183,8 @@ class BitrateEstimatorTest : public test::CallTest {
     explicit Stream(BitrateEstimatorTest* test)
         : test_(test),
           is_sending_receiving_(false),
-          send_stream_(nullptr),
-          receive_stream_(nullptr),
+          send_stream_(NULL),
+          receive_stream_(NULL),
           frame_generator_capturer_(),
           fake_encoder_(Clock::GetRealTimeClock()),
           fake_decoder_() {
@@ -191,7 +192,7 @@ class BitrateEstimatorTest : public test::CallTest {
       test_->send_config_.encoder_settings.encoder = &fake_encoder_;
       send_stream_ = test_->sender_call_->CreateVideoSendStream(
           test_->send_config_, test_->encoder_config_);
-      DCHECK_EQ(1u, test_->encoder_config_.streams.size());
+      assert(test_->encoder_config_.streams.size() == 1);
       frame_generator_capturer_.reset(test::FrameGeneratorCapturer::Create(
           send_stream_->Input(),
           test_->encoder_config_.streams[0].width,
@@ -216,11 +217,11 @@ class BitrateEstimatorTest : public test::CallTest {
     }
 
     ~Stream() {
-      frame_generator_capturer_.reset(nullptr);
+      frame_generator_capturer_.reset(NULL);
       test_->sender_call_->DestroyVideoSendStream(send_stream_);
-      send_stream_ = nullptr;
+      send_stream_ = NULL;
       test_->receiver_call_->DestroyVideoReceiveStream(receive_stream_);
-      receive_stream_ = nullptr;
+      receive_stream_ = NULL;
     }
 
     void StopSending() {
@@ -237,7 +238,7 @@ class BitrateEstimatorTest : public test::CallTest {
     bool is_sending_receiving_;
     VideoSendStream* send_stream_;
     VideoReceiveStream* receive_stream_;
-    rtc::scoped_ptr<test::FrameGeneratorCapturer> frame_generator_capturer_;
+    scoped_ptr<test::FrameGeneratorCapturer> frame_generator_capturer_;
     test::FakeEncoder fake_encoder_;
     test::FakeDecoder fake_decoder_;
   };
@@ -245,8 +246,8 @@ class BitrateEstimatorTest : public test::CallTest {
   TraceObserver receiver_trace_;
   test::DirectTransport send_transport_;
   test::DirectTransport receive_transport_;
-  rtc::scoped_ptr<Call> sender_call_;
-  rtc::scoped_ptr<Call> receiver_call_;
+  scoped_ptr<Call> sender_call_;
+  scoped_ptr<Call> receiver_call_;
   VideoReceiveStream::Config receive_config_;
   std::vector<Stream*> streams_;
 };

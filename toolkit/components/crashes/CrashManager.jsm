@@ -14,8 +14,8 @@ Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://gre/modules/Timer.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
+Cu.import("resource://services-common/utils.js", this);
 Cu.import("resource://gre/modules/TelemetryController.jsm");
-Cu.import("resource://gre/modules/KeyValueParser.jsm");
 
 this.EXPORTED_SYMBOLS = [
   "CrashManager",
@@ -269,20 +269,19 @@ this.CrashManager.prototype = Object.freeze({
                 Cu.reportError("Unhandled crash event file return code. Please " +
                                "file a bug: " + result);
             }
+          } catch (ex if ex instanceof OS.File.Error) {
+            this._log.warn("I/O error reading " + entry.path + ": " +
+                           CommonUtils.exceptionStr(ex));
           } catch (ex) {
-            if (ex instanceof OS.File.Error) {
-              this._log.warn("I/O error reading " + entry.path, ex);
-            } else {
-              // We should never encounter an exception. This likely represents
-              // a coding error because all errors should be detected and
-              // converted to return codes.
-              //
-              // If we get here, report the error and delete the source file
-              // so we don't see it again.
-              Cu.reportError("Exception when processing crash event file: " +
-                             Log.exceptionStr(ex));
-              deletePaths.push(entry.path);
-            }
+            // We should never encounter an exception. This likely represents
+            // a coding error because all errors should be detected and
+            // converted to return codes.
+            //
+            // If we get here, report the error and delete the source file
+            // so we don't see it again.
+            Cu.reportError("Exception when processing crash event file: " +
+                           CommonUtils.exceptionStr(ex));
+            deletePaths.push(entry.path);
           }
         }
 
@@ -295,7 +294,8 @@ this.CrashManager.prototype = Object.freeze({
           try {
             yield OS.File.remove(path);
           } catch (ex) {
-            this._log.warn("Error removing event file (" + path + ")", ex);
+            this._log.warn("Error removing event file (" + path + "): " +
+                           CommonUtils.exceptionStr(ex));
           }
         }
 
@@ -524,14 +524,17 @@ this.CrashManager.prototype = Object.freeze({
           // fall-through
         case "crash.main.2":
           let crashID = lines[0];
-          let metadata = parseKeyValuePairsFromLines(lines.slice(1));
+          let metadata = {};
+          for (let i = 1; i < lines.length; i++) {
+            let [key, val] = lines[i].split("=");
+            metadata[key] = val;
+          }
           store.addCrash(this.PROCESS_TYPE_MAIN, this.CRASH_TYPE_CRASH,
                          crashID, date, metadata);
 
           // If we have a saved environment, use it. Otherwise report
           // the current environment.
           let crashEnvironment = null;
-          let sessionId = null;
           let reportMeta = Cu.cloneInto(metadata, myScope);
           if ('TelemetryEnvironment' in reportMeta) {
             try {
@@ -541,15 +544,10 @@ this.CrashManager.prototype = Object.freeze({
             }
             delete reportMeta.TelemetryEnvironment;
           }
-          if ('TelemetrySessionId' in reportMeta) {
-            sessionId = reportMeta.TelemetrySessionId;
-            delete reportMeta.TelemetrySessionId;
-          }
           TelemetryController.submitExternalPing("crash",
             {
               version: 1,
               crashDate: date.toISOString().slice(0, 10), // YYYY-MM-DD
-              sessionId: sessionId,
               metadata: reportMeta,
               hasCrashEnvironment: (crashEnvironment !== null),
             },
@@ -599,11 +597,8 @@ this.CrashManager.prototype = Object.freeze({
     return Task.spawn(function* () {
       try {
         yield OS.File.stat(path);
-      } catch (ex) {
-        if (!(ex instanceof OS.File.Error) || !ex.becauseNoSuchFile) {
-          throw ex;
-        }
-        return [];
+      } catch (ex if ex instanceof OS.File.Error && ex.becauseNoSuchFile) {
+          return [];
       }
 
       let it = new OS.File.DirectoryIterator(path);
@@ -612,12 +607,12 @@ this.CrashManager.prototype = Object.freeze({
       try {
         yield it.forEach((entry, index, it) => {
           if (entry.isDir) {
-            return undefined;
+            return;
           }
 
           let match = re.exec(entry.name);
           if (!match) {
-            return undefined;
+            return;
           }
 
           return OS.File.stat(entry.path).then((info) => {
@@ -715,7 +710,7 @@ this.CrashManager.prototype = Object.freeze({
   },
 });
 
-var gCrashManager;
+let gCrashManager;
 
 /**
  * Interface to storage of crash data.
@@ -832,7 +827,7 @@ CrashStore.prototype = Object.freeze({
 
           // If we have an OOM size, count the crash as an OOM in addition to
           // being a main process crash.
-          if (denormalized.metadata &&
+          if (denormalized.metadata && 
               denormalized.metadata.OOMAllocationSize) {
             let oomKey = key + "-oom";
             actualCounts.set(oomKey, (actualCounts.get(oomKey) || 0) + 1);
@@ -863,17 +858,16 @@ CrashStore.prototype = Object.freeze({
             this._countsByDay.get(day).set(type, count);
           }
         }
-      } catch (ex) {
+      } catch (ex if ex instanceof OS.File.Error && ex.becauseNoSuchFile) {
         // Missing files (first use) are allowed.
-        if (!(ex instanceof OS.File.Error) || !ex.becauseNoSuchFile) {
-          // If we can't load for any reason, mark a corrupt date in the instance
-          // and swallow the error.
-          //
-          // The marking of a corrupted file is intentionally not persisted to
-          // disk yet. Instead, we wait until the next save(). This is to give
-          // non-permanent failures the opportunity to recover on their own.
-          this._data.corruptDate = new Date();
-        }
+      } catch (ex) {
+        // If we can't load for any reason, mark a corrupt date in the instance
+        // and swallow the error.
+        //
+        // The marking of a corrupted file is intentionally not persisted to
+        // disk yet. Instead, we wait until the next save(). This is to give
+        // non-permanent failures the opportunity to recover on their own.
+        this._data.corruptDate = new Date();
       }
     }.bind(this));
   },

@@ -56,9 +56,7 @@ function extend(source) {
 }
 exports.extend = extend;
 
-function has(obj, key) {
-  return obj.hasOwnProperty(key);
-}
+function has(obj, key) obj.hasOwnProperty(key);
 exports.has = has;
 
 function each(obj, fn) {

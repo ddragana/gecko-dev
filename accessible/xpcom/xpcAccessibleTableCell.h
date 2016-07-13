@@ -24,9 +24,6 @@ public:
   explicit xpcAccessibleTableCell(Accessible* aIntl) :
     xpcAccessibleHyperText(aIntl) { }
 
-  xpcAccessibleTableCell(ProxyAccessible* aProxy, uint32_t aInterfaces) :
-    xpcAccessibleHyperText(aProxy, aInterfaces) {}
-
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIAccessibleTableCell
@@ -43,14 +40,7 @@ protected:
   virtual ~xpcAccessibleTableCell() {}
 
 private:
-  TableCellAccessible* Intl()
-  {
-    if (Accessible* acc = mIntl.AsAccessible()) {
-      return acc->AsTableCell();
-    }
-
-    return nullptr;
-}
+  TableCellAccessible* Intl() { return mIntl->AsTableCell(); }
 
   xpcAccessibleTableCell(const xpcAccessibleTableCell&) = delete;
   xpcAccessibleTableCell& operator =(const xpcAccessibleTableCell&) = delete;

@@ -26,17 +26,11 @@ interface TelephonyCallGroup : EventTarget {
   [NewObject, Throws]
   Promise<void> resume();
 
-  readonly attribute TelephonyCallGroupState state;
+  readonly attribute DOMString state;
 
   attribute EventHandler onstatechange;
   attribute EventHandler onconnected;
   attribute EventHandler onheld;
   attribute EventHandler oncallschanged;
   attribute EventHandler onerror;
-};
-
-enum TelephonyCallGroupState {
-  "",
-  "connected",
-  "held",
 };

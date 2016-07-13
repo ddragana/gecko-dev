@@ -1,10 +1,16 @@
 function test () {
-  requestLongerTimeout(3);
   waitForExplicitFinish();
 
   var isHTTPS = false;
 
-  function loadListener() {
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.selectedBrowser.addEventListener("load", function () {
+    if (isHTTPS) {
+      gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
+    }
+    let doc = gBrowser.contentDocument;
+
+
     function testLocation(link, url, next) {
       var tabOpenListener = new TabOpenListener(url, function () {
           gBrowser.removeTab(this.tab);
@@ -12,26 +18,18 @@ function test () {
         next();
       });
 
-      ContentTask.spawn(gBrowser.selectedBrowser, link, link => {
-        content.document.getElementById(link).click();
-      });
+      doc.getElementById(link).click();
     }
 
     function testLink(link, name, next) {
-      addWindowListener("chrome://mozapps/content/downloads/unknownContentType.xul", function (win) {
-        ContentTask.spawn(gBrowser.selectedBrowser, null, () => {
-          Assert.equal(content.document.getElementById("unload-flag").textContent,
-            "Okay", "beforeunload shouldn't have fired");
-        }).then(() => {
-          is(win.document.getElementById("location").value, name, "file name should match");
-          win.close();
-          next();
+        addWindowListener("chrome://mozapps/content/downloads/unknownContentType.xul", function (win) {
+            is(doc.getElementById("unload-flag").textContent, "Okay", "beforeunload shouldn't have fired");
+            is(win.document.getElementById("location").value, name, "file name should match");
+            win.close();
+            next();
         });
-      });
 
-      ContentTask.spawn(gBrowser.selectedBrowser, link, link => {
-        content.document.getElementById(link).click();
-      });
+        doc.getElementById(link).click();
     }
 
     testLink("link1", "test.txt",
@@ -43,22 +41,18 @@ function test () {
                 testLocation.bind(null, "link7", "http://example.com/",
                   function () {
                     if (isHTTPS) {
+                      gBrowser.removeCurrentTab();
                       finish();
                     } else {
                       // same test again with https:
                       isHTTPS = true;
-                      gBrowser.loadURI("https://example.com:443/browser/browser/base/content/test/general/download_page.html");
+                      content.location = "https://example.com:443/browser/browser/base/content/test/general/download_page.html";
                     }
                   })))))));
 
-  }
+  }, true);
 
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    loadListener();
-    BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(loadListener);
-  });
-
-  gBrowser.loadURI("http://mochi.test:8888/browser/browser/base/content/test/general/download_page.html");
+  content.location = "http://mochi.test:8888/browser/browser/base/content/test/general/download_page.html";
 }
 
 
@@ -103,12 +97,15 @@ TabOpenListener.prototype = {
       gBrowser.tabContainer.removeEventListener("TabOpen", this, false);
       this.tab = event.originalTarget;
       this.browser = this.tab.linkedBrowser;
-      BrowserTestUtils.browserLoaded(this.browser, false, this.url).then(() => {
-        this.tab.addEventListener("TabClose", this, false);
-        var url = this.browser.currentURI.spec;
-        is(url, this.url, "Should have opened the correct tab");
-        this.opencallback();
-      });
+      gBrowser.addEventListener("pageshow", this, false);
+    } else if (event.type == "pageshow") {
+      if (event.target.location.href != this.url)
+        return;
+      gBrowser.removeEventListener("pageshow", this, false);
+      this.tab.addEventListener("TabClose", this, false);
+      var url = this.browser.contentDocument.location.href;
+      is(url, this.url, "Should have opened the correct tab");
+      this.opencallback(this.tab, this.browser.contentWindow);
     } else if (event.type == "TabClose") {
       if (event.originalTarget != this.tab)
         return;

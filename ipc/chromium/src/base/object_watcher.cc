@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -12,8 +10,7 @@ namespace base {
 
 //-----------------------------------------------------------------------------
 
-class ObjectWatcher::Watch : public mozilla::Runnable {
-public:
+struct ObjectWatcher::Watch : public Task {
   ObjectWatcher* watcher;    // The associated ObjectWatcher instance
   HANDLE object;             // The object being watched
   HANDLE wait_object;        // Returned by RegisterWaitForSingleObject
@@ -21,18 +18,16 @@ public:
   Delegate* delegate;        // Delegate to notify when signaled
   bool did_signal;           // DoneWaiting was called
 
-  NS_IMETHOD Run() override {
+  virtual void Run() {
     // The watcher may have already been torn down, in which case we need to
     // just get out of dodge.
     if (!watcher)
-      return NS_OK;
+      return;
 
     DCHECK(did_signal);
     watcher->StopWatching();
 
     delegate->OnObjectSignaled(object);
-
-    return NS_OK;
   }
 };
 
@@ -51,7 +46,7 @@ bool ObjectWatcher::StartWatching(HANDLE object, Delegate* delegate) {
     return false;
   }
 
-  RefPtr<Watch> watch = new Watch;
+  Watch* watch = new Watch;
   watch->watcher = this;
   watch->object = object;
   watch->origin_loop = MessageLoop::current();
@@ -63,12 +58,13 @@ bool ObjectWatcher::StartWatching(HANDLE object, Delegate* delegate) {
   DWORD wait_flags = WT_EXECUTEDEFAULT | WT_EXECUTEONLYONCE;
 
   if (!RegisterWaitForSingleObject(&watch->wait_object, object, DoneWaiting,
-                                   watch.get(), INFINITE, wait_flags)) {
+                                   watch, INFINITE, wait_flags)) {
     NOTREACHED() << "RegisterWaitForSingleObject failed: " << GetLastError();
+    delete watch;
     return false;
   }
 
-  watch_ = watch.forget();
+  watch_ = watch;
 
   // We need to know if the current message loop is going away so we can
   // prevent the wait thread from trying to access a dead message loop.
@@ -99,6 +95,12 @@ bool ObjectWatcher::StopWatching() {
   // anything once it is run.
   watch_->watcher = NULL;
 
+  // If DoneWaiting was called, then the watch would have been posted as a
+  // task, and will therefore be deleted by the MessageLoop.  Otherwise, we
+  // need to take care to delete it here.
+  if (!watch_->did_signal)
+    delete watch_;
+
   watch_ = NULL;
 
   MessageLoop::current()->RemoveDestructionObserver(this);
@@ -117,7 +119,6 @@ void CALLBACK ObjectWatcher::DoneWaiting(void* param, BOOLEAN timed_out) {
   DCHECK(!timed_out);
 
   Watch* watch = static_cast<Watch*>(param);
-  RefPtr<Watch> addrefedWatch = watch;
 
   // Record that we ran this function.
   watch->did_signal = true;
@@ -125,7 +126,7 @@ void CALLBACK ObjectWatcher::DoneWaiting(void* param, BOOLEAN timed_out) {
   // We rely on the locking in PostTask() to ensure that a memory barrier is
   // provided, which in turn ensures our change to did_signal can be observed
   // on the target thread.
-  watch->origin_loop->PostTask(addrefedWatch.forget());
+  watch->origin_loop->PostTask(FROM_HERE, watch);
 }
 
 void ObjectWatcher::WillDestroyCurrentMessageLoop() {

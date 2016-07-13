@@ -4,7 +4,7 @@
 
 %include ../../../shared/incontentprefs/dialog.inc.css
 
-label:not(.menu-text),
+label,
 textbox,
 description,
 .tab-text,

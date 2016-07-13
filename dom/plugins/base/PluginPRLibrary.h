@@ -117,22 +117,13 @@ public:
     virtual nsresult ContentsScaleFactorChanged(NPP aInstance, double aContentsScaleFactor) override;
 #endif
     virtual nsresult SetBackgroundUnknown(NPP instance) override;
-    virtual nsresult BeginUpdateBackground(NPP instance, const nsIntRect&,
-                                           DrawTarget** aDrawTarget) override;
+    virtual nsresult BeginUpdateBackground(NPP instance,
+                                           const nsIntRect&, gfxContext** aCtx) override;
     virtual nsresult EndUpdateBackground(NPP instance,
-                                         const nsIntRect&) override;
-    virtual void DidComposite(NPP aInstance) override { }
+                                         gfxContext* aCtx, const nsIntRect&) override;
     virtual void GetLibraryPath(nsACString& aPath) { aPath.Assign(mFilePath); }
     virtual nsresult GetRunID(uint32_t* aRunID) override { return NS_ERROR_NOT_IMPLEMENTED; }
     virtual void SetHasLocalInstance() override { }
-#if defined(XP_WIN)
-    virtual nsresult GetScrollCaptureContainer(NPP aInstance, mozilla::layers::ImageContainer** aContainer) override;
-    virtual nsresult UpdateScrollState(NPP aInstance, bool aIsScrolling) override;
-#endif
-    virtual nsresult HandledWindowedPluginKeyEvent(
-                       NPP aInstance,
-                       const mozilla::NativeEventData& aNativeKeyData,
-                       bool aIsCOnsumed) override;
 
 private:
     NP_InitializeFunc mNP_Initialize;

@@ -6,7 +6,7 @@
 
 #include "DateCacheCleaner.h"
 
-#include "js/Date.h"
+#include "jsapi.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Hal.h"
@@ -32,7 +32,8 @@ public:
   }
   void Notify(const SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo)
   {
-    JS::ResetTimeZone();
+    mozilla::AutoSafeJSContext cx;
+    JS_ClearDateCaches(cx);
   }
 
 };

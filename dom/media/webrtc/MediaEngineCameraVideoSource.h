@@ -28,22 +28,33 @@ public:
     , mHeight(0)
     , mInitDone(false)
     , mHasDirectListeners(false)
-    , mNrAllocations(0)
     , mCaptureIndex(aIndex)
     , mTrackID(0)
+    , mFps(-1)
   {}
 
 
-  void GetName(nsAString& aName) override;
-  void GetUUID(nsACString& aUUID) override;
-  void SetDirectListeners(bool aHasListeners) override;
+  virtual void GetName(nsAString& aName) override;
+  virtual void GetUUID(nsACString& aUUID) override;
+  virtual void SetDirectListeners(bool aHasListeners) override;
+  virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
+                          bool aAgcOn, uint32_t aAGC,
+                          bool aNoiseOn, uint32_t aNoise,
+                          int32_t aPlayoutDelay) override
+  {
+    return NS_OK;
+  };
 
-  bool IsFake() override
+  virtual bool IsFake() override
   {
     return false;
   }
 
-  nsresult TakePhoto(MediaEnginePhotoCallback* aCallback) override
+  virtual const dom::MediaSourceEnum GetMediaSource() override {
+      return dom::MediaSourceEnum::Camera;
+  }
+
+  virtual nsresult TakePhoto(PhotoCallback* aCallback) override
   {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -52,7 +63,7 @@ public:
       const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets,
       const nsString& aDeviceId) override;
 
-  void Shutdown() override {};
+  virtual void Shutdown() override {};
 
 protected:
   struct CapabilityCandidate {
@@ -70,8 +81,7 @@ protected:
   virtual bool AppendToTrack(SourceMediaStream* aSource,
                              layers::Image* aImage,
                              TrackID aID,
-                             StreamTime delta,
-                             const PrincipalHandle& aPrincipalHandle);
+                             StreamTime delta);
   uint32_t GetFitnessDistance(const webrtc::CaptureCapability& aCandidate,
                               const dom::MediaTrackConstraintSet &aConstraints,
                               bool aAdvanced,
@@ -79,12 +89,9 @@ protected:
   static void TrimLessFitCandidates(CapabilitySet& set);
   static void LogConstraints(const dom::MediaTrackConstraintSet& aConstraints,
                              bool aAdvanced);
-  static void LogCapability(const char* aHeader,
-                            const webrtc::CaptureCapability &aCapability,
-                            uint32_t aDistance);
   virtual size_t NumCapabilities();
   virtual void GetCapability(size_t aIndex, webrtc::CaptureCapability& aOut);
-  virtual bool ChooseCapability(const dom::MediaTrackConstraints &aConstraints,
+  bool ChooseCapability(const dom::MediaTrackConstraints &aConstraints,
                         const MediaEnginePrefs &aPrefs,
                         const nsString& aDeviceId);
   void SetName(nsString aName);
@@ -96,26 +103,25 @@ protected:
   // mMonitor protects mImage access/changes, and transitions of mState
   // from kStarted to kStopped (which are combined with EndTrack() and
   // image changes).
-  // mMonitor also protects mSources[] and mPrincipalHandles[] access/changes.
-  // mSources[] and mPrincipalHandles[] are accessed from webrtc threads.
+  // mMonitor also protects mSources[] access/changes.
+  // mSources[] is accessed from webrtc threads.
 
   // All the mMonitor accesses are from the child classes.
   Monitor mMonitor; // Monitor for processing Camera frames.
-  nsTArray<RefPtr<SourceMediaStream>> mSources; // When this goes empty, we shut down HW
-  nsTArray<PrincipalHandle> mPrincipalHandles; // Directly mapped to mSources.
-  RefPtr<layers::Image> mImage;
-  RefPtr<layers::ImageContainer> mImageContainer;
+  nsTArray<nsRefPtr<SourceMediaStream>> mSources; // When this goes empty, we shut down HW
+  nsRefPtr<layers::Image> mImage;
+  nsRefPtr<layers::ImageContainer> mImageContainer;
   int mWidth, mHeight; // protected with mMonitor on Gonk due to different threading
   // end of data protected by mMonitor
 
 
   bool mInitDone;
   bool mHasDirectListeners;
-  int mNrAllocations; // When this becomes 0, we shut down HW
   int mCaptureIndex;
   TrackID mTrackID;
+  int mFps; // Track rate (30 fps by default)
 
-  webrtc::CaptureCapability mCapability;
+  webrtc::CaptureCapability mCapability; // Doesn't work on OS X.
 
   nsTArray<webrtc::CaptureCapability> mHardcodedCapabilities; // For OSX & B2G
 private:

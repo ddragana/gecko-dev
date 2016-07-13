@@ -139,20 +139,19 @@ class my_transportation : public Transport
       netw(network) {
   }
 
-  int SendPacket(int channel, const void* data, size_t len) override;
-  int SendRTCPPacket(int channel, const void* data, size_t len) override;
-
+  virtual int SendPacket(int channel,const void *data,int len) OVERRIDE;
+  virtual int SendRTCPPacket(int channel, const void *data, int len) OVERRIDE;
  private:
   VoENetwork * netw;
 };
 
-int my_transportation::SendPacket(int channel, const void *data, size_t len)
+int my_transportation::SendPacket(int channel,const void *data,int len)
 {
   netw->ReceivedRTPPacket(channel, data, len);
   return len;
 }
 
-int my_transportation::SendRTCPPacket(int channel, const void *data, size_t len)
+int my_transportation::SendRTCPPacket(int channel, const void *data, int len)
 {
   netw->ReceivedRTCPPacket(channel, data, len);
   return len;
@@ -177,18 +176,27 @@ private:
     static bool Run(void* ptr);
     bool Process();
 private:
-    rtc::scoped_ptr<ThreadWrapper> _thread;
+    ThreadWrapper* _thread;
 };
 
 ThreadTest::~ThreadTest()
 {
     if (_thread)
-        _thread->Stop();
+    {
+        _thread->SetNotAlive();
+        if (_thread->Stop())
+        {
+            delete _thread;
+            _thread = NULL;
+        }
+    }
 }
 
-ThreadTest::ThreadTest()
+ThreadTest::ThreadTest() :
+    _thread(NULL)
 {
-    _thread = ThreadWrapper::CreateThread(Run, this, "ThreadTest thread");
+    _thread = ThreadWrapper::CreateThread(Run, this, kNormalPriority,
+                                          "ThreadTest thread");
 }
 
 bool ThreadTest::Run(void* ptr)
@@ -262,6 +270,7 @@ bool ThreadTest::Process()
             "sending instance started from thread");
 #endif
 
+    _thread->SetNotAlive();
     _thread->Stop();
 
     //res = veData1.jvm->DetachCurrentThread();
@@ -273,7 +282,8 @@ int ThreadTest::RunTest()
 {
     if (_thread)
     {
-        _thread->Start();
+        unsigned int id;
+        _thread->Start(id);
     }
     return 0;
 }

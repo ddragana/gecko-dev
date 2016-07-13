@@ -203,12 +203,14 @@ function updateBanner(messages) {
       icon: message.icon,
       weight: message.weight,
       onclick: function() {
-        gChromeWin.BrowserApp.loadURI(message.url);
-        removeSnippet(id, message.id);
+        let parentId = gChromeWin.BrowserApp.selectedTab.id;
+        gChromeWin.BrowserApp.addTab(message.url, { parentId: parentId });
         UITelemetry.addEvent("action.1", "banner", null, message.id);
       },
       ondismiss: function() {
-        removeSnippet(id, message.id);
+        // Remove this snippet from the banner, and store its id so we'll never show it again.
+        Home.banner.remove(id);
+        removeSnippet(message.id);
         UITelemetry.addEvent("cancel.1", "banner", null, message.id);
       },
       onshown: function() {
@@ -224,19 +226,11 @@ function updateBanner(messages) {
 }
 
 /**
- * Removes a snippet message from the home banner rotation, and stores its
- * snippet id in a pref so we'll never show it again.
+ * Appends snippet id to the end of `snippets-removed.txt`
  *
- * @param messageId unique id for home banner message, returned from Home.banner API
  * @param snippetId unique id for snippet, sent from snippets server
  */
-function removeSnippet(messageId, snippetId) {
-  // Remove the message from the home banner rotation.
-  Home.banner.remove(messageId);
-
-  // Remove the message from the stored message ids.
-  gMessageIds.splice(gMessageIds.indexOf(messageId), 1);
-
+function removeSnippet(snippetId) {
   let removedSnippetIds;
   try {
     removedSnippetIds = JSON.parse(Services.prefs.getCharPref(SNIPPETS_REMOVED_IDS_PREF));

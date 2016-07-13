@@ -23,7 +23,7 @@
 @interface RTCVideoCaptureIosObjC
     : NSObject<AVCaptureVideoDataOutputSampleBufferDelegate>
 
-@property webrtc::VideoRotation frameRotation;
+@property webrtc::VideoCaptureRotation frameRotation;
 
 // custom initializer. Instance of VideoCaptureIos is needed
 // for callback purposes.

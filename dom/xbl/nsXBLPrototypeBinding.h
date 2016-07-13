@@ -7,7 +7,6 @@
 #ifndef nsXBLPrototypeBinding_h__
 #define nsXBLPrototypeBinding_h__
 
-#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
@@ -19,8 +18,6 @@
 #include "nsXBLProtoImplMethod.h"
 #include "nsXBLPrototypeHandler.h"
 #include "nsXBLPrototypeResources.h"
-#include "mozilla/WeakPtr.h"
-#include "mozilla/StyleSheetHandle.h"
 
 class nsIAtom;
 class nsIContent;
@@ -29,18 +26,19 @@ class nsXBLAttributeEntry;
 class nsXBLBinding;
 class nsXBLProtoImplField;
 
+namespace mozilla {
+class CSSStyleSheet;
+} // namespace mozilla
+
 // *********************************************************************/
 // The XBLPrototypeBinding class
 
 // Instances of this class are owned by the nsXBLDocumentInfo object returned
 // by XBLDocumentInfo().  Consumers who want to refcount things should refcount
 // that.
-class nsXBLPrototypeBinding final :
-  public mozilla::SupportsWeakPtr<nsXBLPrototypeBinding>
+class nsXBLPrototypeBinding final
 {
 public:
-  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(nsXBLPrototypeBinding)
-
   nsIContent* GetBindingElement() const { return mBinding; }
   void SetBindingElement(nsIContent* aElement);
 
@@ -120,13 +118,13 @@ public:
 
   void SetInitialAttributes(nsIContent* aBoundElement, nsIContent* aAnonymousContent);
 
-  void AppendStyleSheet(mozilla::StyleSheetHandle aSheet);
-  void RemoveStyleSheet(mozilla::StyleSheetHandle aSheet);
-  void InsertStyleSheetAt(size_t aIndex, mozilla::StyleSheetHandle aSheet);
-  mozilla::StyleSheetHandle StyleSheetAt(size_t aIndex) const;
+  void AppendStyleSheet(mozilla::CSSStyleSheet* aSheet);
+  void RemoveStyleSheet(mozilla::CSSStyleSheet* aSheet);
+  void InsertStyleSheetAt(size_t aIndex, mozilla::CSSStyleSheet* aSheet);
+  mozilla::CSSStyleSheet* StyleSheetAt(size_t aIndex) const;
   size_t SheetCount() const;
   bool HasStyleSheets() const;
-  void AppendStyleSheetsTo(nsTArray<mozilla::StyleSheetHandle>& aResult) const;
+  void AppendStyleSheetsTo(nsTArray<mozilla::CSSStyleSheet*>& aResult) const;
 
   nsIStyleRuleProcessor* GetRuleProcessor();
 
@@ -292,8 +290,7 @@ protected:
   nsXBLProtoImpl* mImplementation; // Our prototype implementation (includes methods, properties, fields,
                                    // the constructor, and the destructor).
 
-  // Weak.  The docinfo will own our base binding.
-  mozilla::WeakPtr<nsXBLPrototypeBinding> mBaseBinding;
+  nsXBLPrototypeBinding* mBaseBinding; // Weak.  The docinfo will own our base binding.
   bool mInheritStyle;
   bool mCheckedBaseProto;
   bool mKeyHandlersRegistered;

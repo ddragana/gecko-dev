@@ -21,9 +21,6 @@
 
   <script type="application/javascript">
   <![CDATA[
-    //gA11yEventDumpToConsole = true;
-    //enableLogging("tree,verbose"); // debug
-
     if (navigator.platform.startsWith("Mac")) {
       SimpleTest.expectAssertions(0, 1);
     } else {
@@ -64,11 +61,6 @@
           events: CLICK_EVENTS
         },
         {
-          ID: "name_entry_label",
-          actionName: "click",
-          events: CLICK_EVENTS
-        },
-        {
           ID: "labelWithPopup",
           actionName: "click",
           events: CLICK_EVENTS
@@ -79,8 +71,6 @@
           events: CLICK_EVENTS
         }*/
       ];
-
-      is(getAccessible("name_entry_label").firstChild.actionCount, 1, "label text should have 1 action");
 
       testActions(actionsArray);
     }
@@ -135,10 +125,6 @@
       <label id="labelWithPopup" value="file name"
              popup="fileContext"
              tabindex="0"/>
-      <hbox>
-        <label id="name_entry_label" value="Name" control="name_entry"/>
-        <textbox id="name_entry"/>
-      </hbox>
     </vbox>
   </hbox>
 </window>

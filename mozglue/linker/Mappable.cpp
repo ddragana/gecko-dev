@@ -378,7 +378,8 @@ MappableSeekableZStream::Create(const char *name, Zip *zip,
                                 Zip::Stream *stream)
 {
   MOZ_ASSERT(stream->GetType() == Zip::Stream::STORE);
-  UniquePtr<MappableSeekableZStream> mappable(new MappableSeekableZStream(zip));
+  mozilla::ScopedDeletePtr<MappableSeekableZStream> mappable;
+  mappable = new MappableSeekableZStream(zip);
 
   pthread_mutexattr_t recursiveAttr;
   pthread_mutexattr_init(&recursiveAttr);
@@ -397,7 +398,7 @@ MappableSeekableZStream::Create(const char *name, Zip *zip,
 
   mappable->chunkAvail = MakeUnique<unsigned char[]>(mappable->zStream.GetChunksNum());
 
-  return mappable.release();
+  return mappable.forget();
 }
 
 MappableSeekableZStream::MappableSeekableZStream(Zip *zip)

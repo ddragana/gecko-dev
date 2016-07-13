@@ -72,13 +72,9 @@ const ToggleButton = Class({
     unregister(this);
   },
 
-  get id() {
-    return this.state().id;
-  },
+  get id() this.state().id,
 
-  click: function click() {
-    return view.click(toWidgetId(this.id));
-  }
+  click: function click() view.click(toWidgetId(this.id))
 });
 exports.ToggleButton = ToggleButton;
 
@@ -88,14 +84,14 @@ getNodeView.define(ToggleButton, button =>
   view.nodeFor(toWidgetId(button.id))
 );
 
-var toggleButtonStateEvents = events.filter(stateEvents,
+let toggleButtonStateEvents = events.filter(stateEvents,
   e => e.target instanceof ToggleButton);
 
-var toggleButtonViewEvents = events.filter(viewEvents,
+let toggleButtonViewEvents = events.filter(viewEvents,
   e => buttons.has(e.target));
 
-var clickEvents = events.filter(toggleButtonViewEvents, e => e.type === 'click');
-var updateEvents = events.filter(toggleButtonViewEvents, e => e.type === 'update');
+let clickEvents = events.filter(toggleButtonViewEvents, e => e.type === 'click');
+let updateEvents = events.filter(toggleButtonViewEvents, e => e.type === 'update');
 
 on(toggleButtonStateEvents, 'data', ({target, window, state}) => {
   let id = toWidgetId(target.id);

@@ -38,7 +38,7 @@ class mozIStorageService;
  * nsNotifyDoomListener
  *****************************************************************************/
 
-class nsNotifyDoomListener : public mozilla::Runnable {
+class nsNotifyDoomListener : public nsRunnable {
 public:
     nsNotifyDoomListener(nsICacheListener *listener,
                          nsresult status)
@@ -254,7 +254,6 @@ private:
      * Internal Methods
      */
 
-    static void      Lock();
     static void      Lock(::mozilla::Telemetry::ID mainThreadLockerID);
     static void      Unlock();
     void             LockAcquired();
@@ -311,6 +310,10 @@ private:
     void             CloseAllStreams();
     void             FireClearNetworkCacheStoredAnywhereNotification();
 
+    static
+    PLDHashOperator  ShutdownCustomCacheDeviceEnum(const nsAString& aProfileDir,
+                                                   nsRefPtr<nsOfflineCacheDevice>& aDevice,
+                                                   void* aUserArg);
     void LogCacheStatistics();
 
     nsresult         SetDiskSmartSize_Locked();
@@ -327,7 +330,6 @@ private:
 
     mozilla::Mutex                  mLock;
     mozilla::CondVar                mCondVar;
-    bool                            mNotified;
 
     mozilla::Mutex                  mTimeStampLock;
     mozilla::TimeStamp              mLockAcquiredTimeStamp;
@@ -378,9 +380,6 @@ private:
 // execution scope.
 class nsCacheServiceAutoLock {
 public:
-    nsCacheServiceAutoLock() {
-        nsCacheService::Lock();
-    }
     explicit nsCacheServiceAutoLock(mozilla::Telemetry::ID mainThreadLockerID) {
         nsCacheService::Lock(mainThreadLockerID);
     }

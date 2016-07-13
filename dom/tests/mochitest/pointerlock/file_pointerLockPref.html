@@ -52,22 +52,25 @@
 
         document.addEventListener("mozpointerlockerror", function (e) {
           prefDisabled = true;
-          addFullscreenChangeContinuation("exit", function() {
+          document.mozCancelFullScreen();
+        }, false);
+
+        document.addEventListener("mozfullscreenchange", function (e) {
+          if (document.mozFullScreenElement === div) {
+            SpecialPowers.setBoolPref("full-screen-api.pointer-lock.enabled",
+                                      true );
+            div.mozRequestPointerLock();
+          }
+          else {
             SpecialPowers.setBoolPref("full-screen-api.pointer-lock.enabled",
                                        true );
             runTests();
             SimpleTest.finish();
-          });
-          document.exitFullscreen();
+          }
         }, false);
 
         function start() {
-          addFullscreenChangeContinuation("enter", function() {
-            SpecialPowers.setBoolPref("full-screen-api.pointer-lock.enabled",
-                                      true );
-            div.mozRequestPointerLock();
-          });
-          div.requestFullscreen();
+          div.mozRequestFullScreen();
         }
       </script>
     </pre>

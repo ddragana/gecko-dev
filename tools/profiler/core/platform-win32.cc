@@ -188,8 +188,8 @@ class SamplerThread : public Thread {
     if (SuspendThread(profiled_thread) == kSuspendFailed)
       return;
 
-    // Using only CONTEXT_CONTROL is faster but on 64-bit it causes crashes in
-    // RtlVirtualUnwind (see bug 1120126) so we set all the flags.
+    // CONTEXT_CONTROL is faster but we can't use it on 64-bit because it
+    // causes crashes in RtlVirtualUnwind (see bug 1120126).
 #if V8_HOST_ARCH_X64
     context.ContextFlags = CONTEXT_FULL;
 #else

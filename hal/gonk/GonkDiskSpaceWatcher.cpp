@@ -7,23 +7,30 @@
 #include <sys/vfs.h>
 #include <fcntl.h>
 #include <errno.h>
-#include "base/message_loop.h"
-#include "base/task.h"
-#include "DiskSpaceWatcher.h"
-#include "fanotify.h"
 #include "nsIObserverService.h"
 #include "nsIDiskSpaceWatcher.h"
-#include "nsThreadUtils.h"
-#include "nsXULAppAPI.h"
 #include "mozilla/ModuleUtils.h"
+#include "nsAutoPtr.h"
+#include "nsThreadUtils.h"
+#include "base/message_loop.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "nsXULAppAPI.h"
+#include "fanotify.h"
+#include "DiskSpaceWatcher.h"
 
 using namespace mozilla;
 
 namespace mozilla { namespace hal_impl { class GonkDiskSpaceWatcher; } }
 
 using namespace mozilla::hal_impl;
+
+template<>
+struct RunnableMethodTraits<GonkDiskSpaceWatcher>
+{
+  static void RetainCallee(GonkDiskSpaceWatcher* obj) { }
+  static void ReleaseCallee(GonkDiskSpaceWatcher* obj) { }
+};
 
 namespace mozilla {
 namespace hal_impl {
@@ -113,7 +120,7 @@ static GonkDiskSpaceWatcher* gHalDiskSpaceWatcher = nullptr;
 static const char kWatchedPath[] = "/data";
 
 // Helper class to dispatch calls to xpcom on the main thread.
-class DiskSpaceNotifier : public Runnable
+class DiskSpaceNotifier : public nsRunnable
 {
 public:
   DiskSpaceNotifier(const bool aIsDiskFull, const uint64_t aFreeSpace) :
@@ -133,7 +140,7 @@ private:
 };
 
 // Helper runnable to delete the watcher on the main thread.
-class DiskSpaceCleaner : public Runnable
+class DiskSpaceCleaner : public nsRunnable
 {
 public:
   NS_IMETHOD Run()
@@ -305,7 +312,8 @@ StartDiskSpaceWatcher()
   gHalDiskSpaceWatcher = new GonkDiskSpaceWatcher();
 
   XRE_GetIOMessageLoop()->PostTask(
-    NewNonOwningRunnableMethod(gHalDiskSpaceWatcher, &GonkDiskSpaceWatcher::DoStart));
+    FROM_HERE,
+    NewRunnableMethod(gHalDiskSpaceWatcher, &GonkDiskSpaceWatcher::DoStart));
 }
 
 void
@@ -317,7 +325,8 @@ StopDiskSpaceWatcher()
   }
 
   XRE_GetIOMessageLoop()->PostTask(
-    NewNonOwningRunnableMethod(gHalDiskSpaceWatcher, &GonkDiskSpaceWatcher::DoStop));
+    FROM_HERE,
+    NewRunnableMethod(gHalDiskSpaceWatcher, &GonkDiskSpaceWatcher::DoStop));
 }
 
 } // namespace hal_impl

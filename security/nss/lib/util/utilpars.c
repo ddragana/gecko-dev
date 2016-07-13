@@ -49,7 +49,7 @@ PRBool NSSUTIL_ArgIsQuote(char c) {
     return PR_FALSE;
 }
 
-const char *NSSUTIL_ArgStrip(const char *c) {
+char *NSSUTIL_ArgStrip(char *c) {
    while (*c && NSSUTIL_ArgIsBlank(*c)) c++;
    return c;
 }
@@ -58,8 +58,8 @@ const char *NSSUTIL_ArgStrip(const char *c) {
  * find the end of the current tag/value pair. string should be pointing just
  * after the equal sign. Handles quoted characters.
  */
-const char *
-NSSUTIL_ArgFindEnd(const char *string) {
+char *
+NSSUTIL_ArgFindEnd(char *string) {
     char endChar = ' ';
     PRBool lastEscape = PR_FALSE;
 
@@ -91,9 +91,9 @@ NSSUTIL_ArgFindEnd(const char *string) {
  * the equal sign.
  */
 char *
-NSSUTIL_ArgFetchValue(const char *string, int *pcount)
+NSSUTIL_ArgFetchValue(char *string, int *pcount)
 {
-    const char *end = NSSUTIL_ArgFindEnd(string);
+    char *end = NSSUTIL_ArgFindEnd(string);
     char *retString, *copyString;
     PRBool lastEscape = PR_FALSE;
     int len;
@@ -127,10 +127,10 @@ NSSUTIL_ArgFetchValue(const char *string, int *pcount)
 /*
  * point to the next parameter in string
  */
-const char *
-NSSUTIL_ArgSkipParameter(const char *string)
+char *
+NSSUTIL_ArgSkipParameter(char *string) 
 {
-     const char *end;
+     char *end;
      /* look for the end of the <name>= */
      for (;*string; string++) {
 	if (*string == '=') { string++; break; }
@@ -146,7 +146,7 @@ NSSUTIL_ArgSkipParameter(const char *string)
  * get the value from that tag value pair.
  */
 char *
-NSSUTIL_ArgGetParamValue(const char *paramName, const char *parameters)
+NSSUTIL_ArgGetParamValue(char *paramName,char *parameters)
 {
     char searchValue[256];
     int paramLen = strlen(paramName);
@@ -175,8 +175,8 @@ NSSUTIL_ArgGetParamValue(const char *paramName, const char *parameters)
 /*
  * find the next flag in the parameter list
  */  
-const char *
-NSSUTIL_ArgNextFlag(const char *flags)
+char *
+NSSUTIL_ArgNextFlag(char *flags)
 {
     for (; *flags ; flags++) {
 	if (*flags == ',') {
@@ -191,10 +191,9 @@ NSSUTIL_ArgNextFlag(const char *flags)
  * return true if the flag is set in the label parameter.
  */
 PRBool
-NSSUTIL_ArgHasFlag(const char *label, const char *flag, const char *parameters)
+NSSUTIL_ArgHasFlag(char *label, char *flag, char *parameters)
 {
-    char *flags;
-    const char *index;
+    char *flags,*index;
     int len = strlen(flag);
     PRBool found = PR_FALSE;
 
@@ -215,7 +214,7 @@ NSSUTIL_ArgHasFlag(const char *label, const char *flag, const char *parameters)
  * decode a number. handle octal (leading '0'), hex (leading '0x') or decimal
  */
 long
-NSSUTIL_ArgDecodeNumber(const char *num)
+NSSUTIL_ArgDecodeNumber(char *num)
 {
     int	radix = 10;
     unsigned long value = 0;
@@ -265,10 +264,10 @@ NSSUTIL_ArgDecodeNumber(const char *num)
  * value before the equal size.
  */
 char *
-NSSUTIL_ArgGetLabel(const char *inString, int *next)
+NSSUTIL_ArgGetLabel(char *inString, int *next) 
 {
     char *name=NULL;
-    const char *string;
+    char *string;
     int len;
 
     /* look for the end of the <label>= */
@@ -293,14 +292,13 @@ NSSUTIL_ArgGetLabel(const char *inString, int *next)
  * read an argument at a Long integer
  */
 long
-NSSUTIL_ArgReadLong(const char *label, const char *params,
-		    long defValue, PRBool *isdefault)
+NSSUTIL_ArgReadLong(char *label,char *params, long defValue, PRBool *isdefault)
 {
     char *value;
     long retValue;
     if (isdefault) *isdefault = PR_FALSE; 
 
-    value = NSSUTIL_ArgGetParamValue(label, params);
+    value = NSSUTIL_ArgGetParamValue(label,params);
     if (value == NULL) {
 	if (isdefault) *isdefault = PR_TRUE;
 	return defValue;
@@ -565,10 +563,9 @@ static int nssutil_argSlotFlagTableSize =
 
 /* turn the slot flags into a bit mask */
 unsigned long
-NSSUTIL_ArgParseSlotFlags(const char *label, const char *params)
+NSSUTIL_ArgParseSlotFlags(char *label,char *params)
 {
-    char *flags;
-    const char *index;
+    char *flags,*index;
     unsigned long retValue = 0;
     int i;
     PRBool all = PR_FALSE;
@@ -623,10 +620,9 @@ nssutil_argDecodeSingleSlotInfo(char *name, char *params,
 
 /* parse all the slot specific parameters. */
 struct NSSUTILPreSlotInfoStr *
-NSSUTIL_ArgParseSlotInfo(PLArenaPool *arena, const char *slotParams,
-			 int *retCount)
+NSSUTIL_ArgParseSlotInfo(PLArenaPool *arena, char *slotParams, int *retCount)
 {
-    const char *slotIndex;
+    char *slotIndex;
     struct NSSUTILPreSlotInfoStr *slotInfo = NULL;
     int i=0,count = 0,next;
 
@@ -678,8 +674,7 @@ static char *
 nssutil_mkSlotFlags(unsigned long defaultFlags)
 {
     char *flags=NULL;
-    unsigned int i;
-    int j;
+    int i,j;
 
     for (i=0; i < sizeof(defaultFlags)*8; i++) {
 	if (defaultFlags & (1UL <<i)) {
@@ -772,32 +767,7 @@ NSSUTIL_MkSlotString(unsigned long slotID, unsigned long defaultFlags,
  * and NSS specifi parameters.
  */
 SECStatus
-NSSUTIL_ArgParseModuleSpecEx(const char *modulespec, char **lib, char **mod,
-					char **parameters, char **nss,
-					char **config)
-{
-    int next;
-    modulespec = NSSUTIL_ArgStrip(modulespec);
-
-    *lib = *mod = *parameters = *nss = *config = 0;
-
-    while (*modulespec) {
-	NSSUTIL_HANDLE_STRING_ARG(modulespec,*lib,"library=",;)
-	NSSUTIL_HANDLE_STRING_ARG(modulespec,*mod,"name=",;)
-	NSSUTIL_HANDLE_STRING_ARG(modulespec,*parameters,"parameters=",;)
-	NSSUTIL_HANDLE_STRING_ARG(modulespec,*nss,"nss=",;)
-        NSSUTIL_HANDLE_STRING_ARG(modulespec,*config,"config=",;)
-	NSSUTIL_HANDLE_FINAL_ARG(modulespec)
-   }
-   return SECSuccess;
-}
-
-/************************************************************************
- * Parse Full module specs into: library, commonName, module parameters,
- * and NSS specifi parameters.
- */
-SECStatus
-NSSUTIL_ArgParseModuleSpec(const char *modulespec, char **lib, char **mod,
+NSSUTIL_ArgParseModuleSpec(char *modulespec, char **lib, char **mod, 
 					char **parameters, char **nss)
 {
     int next;
@@ -818,12 +788,11 @@ NSSUTIL_ArgParseModuleSpec(const char *modulespec, char **lib, char **mod,
 /************************************************************************
  * make a new module spec from it's components */
 char *
-NSSUTIL_MkModuleSpecEx(char *dllName, char *commonName, char *parameters, 
-								char *NSS,
-								char *config)
+NSSUTIL_MkModuleSpec(char *dllName, char *commonName, char *parameters, 
+								char *NSS)
 {
     char *moduleSpec;
-    char *lib,*name,*param,*nss,*conf;
+    char *lib,*name,*param,*nss;
 
     /*
      * now the final spec
@@ -832,27 +801,12 @@ NSSUTIL_MkModuleSpecEx(char *dllName, char *commonName, char *parameters,
     name = nssutil_formatPair("name",commonName,'\"');
     param = nssutil_formatPair("parameters",parameters,'\"');
     nss = nssutil_formatPair("NSS",NSS,'\"');
-    if (config) {
-        conf = nssutil_formatPair("config",config,'\"');
-        moduleSpec = PR_smprintf("%s %s %s %s %s", lib,name,param,nss,conf);
-        nssutil_freePair(conf);
-    } else {
-        moduleSpec = PR_smprintf("%s %s %s %s", lib,name,param,nss);
-    }
+    moduleSpec = PR_smprintf("%s %s %s %s", lib,name,param,nss);
     nssutil_freePair(lib);
     nssutil_freePair(name);
     nssutil_freePair(param);
     nssutil_freePair(nss);
     return (moduleSpec);
-}
-
-/************************************************************************
- * make a new module spec from it's components */
-char *
-NSSUTIL_MkModuleSpec(char *dllName, char *commonName, char *parameters, 
-								char *NSS)
-{
-    return NSSUTIL_MkModuleSpecEx(dllName, commonName, parameters, NSS, NULL);
 }
 
 
@@ -861,7 +815,7 @@ NSSUTIL_MkModuleSpec(char *dllName, char *commonName, char *parameters,
  * Parse the cipher flags from the NSS parameter
  */
 void
-NSSUTIL_ArgParseCipherFlags(unsigned long *newCiphers, const char *cipherList)
+NSSUTIL_ArgParseCipherFlags(unsigned long *newCiphers,char *cipherList)
 {
     newCiphers[0] = newCiphers[1] = 0;
     if ((cipherList == NULL) || (*cipherList == 0)) return;
@@ -932,7 +886,7 @@ static char *
 nssutil_mkCipherFlags(unsigned long ssl0, unsigned long ssl1)
 {
     char *cipher = NULL;
-    unsigned int i;
+    int i;
 
     for (i=0; i < sizeof(ssl0)*8; i++) {
 	if (ssl0 & (1UL <<i)) {
@@ -977,8 +931,7 @@ NSSUTIL_MkNSSString(char **slotStrings, int slotCount, PRBool internal,
 	  unsigned long cipherOrder, unsigned long ssl0, unsigned long ssl1)
 {
     int slotLen, i;
-    char *slotParams, *ciphers, *nss, *nssFlags;
-    const char *tmp;
+    char *slotParams, *ciphers, *nss, *nssFlags, *tmp;
     char *trustOrderPair,*cipherOrderPair,*slotPair,*cipherPair,*flagPair;
 
 
@@ -1048,7 +1001,6 @@ _NSSUTIL_EvaluateConfigDir(const char *configdir,
 			   NSSDBType *pdbType, char **appName)
 {
     NSSDBType dbType;
-    PRBool checkEnvDefaultDB = PR_FALSE;
     *appName = NULL;
 /* force the default */
 #ifdef NSS_DISABLE_DBM
@@ -1056,9 +1008,7 @@ _NSSUTIL_EvaluateConfigDir(const char *configdir,
 #else
     dbType = NSS_DB_TYPE_LEGACY;
 #endif
-    if (configdir == NULL) {
-	checkEnvDefaultDB = PR_TRUE;
-    } else if (PORT_Strncmp(configdir, MULTIACCESS, sizeof(MULTIACCESS)-1) == 0) {
+    if (PORT_Strncmp(configdir, MULTIACCESS, sizeof(MULTIACCESS)-1) == 0) {
 	char *cdir;
 	dbType = NSS_DB_TYPE_MULTIACCESS;
 
@@ -1085,12 +1035,8 @@ _NSSUTIL_EvaluateConfigDir(const char *configdir,
 	dbType = NSS_DB_TYPE_LEGACY;
 	configdir = configdir + sizeof(LEGACY) -1;
     } else {
-	checkEnvDefaultDB = PR_TRUE;
-    }
-
-    /* look up the default from the environment */
-    if (checkEnvDefaultDB) {
-	char *defaultType = PR_GetEnvSecure("NSS_DEFAULT_DB_TYPE");
+	/* look up the default from the environment */
+	char *defaultType = PR_GetEnv("NSS_DEFAULT_DB_TYPE");
 	if (defaultType != NULL) {
 	    if (PORT_Strncmp(defaultType, SQLDB, sizeof(SQLDB)-2) == 0) {
 		dbType = NSS_DB_TYPE_SQL;
@@ -1109,17 +1055,18 @@ _NSSUTIL_EvaluateConfigDir(const char *configdir,
 }
 
 char *
-_NSSUTIL_GetSecmodName(const char *param, NSSDBType *dbType, char **appName,
+_NSSUTIL_GetSecmodName(char *param, NSSDBType *dbType, char **appName,
 		   char **filename, PRBool *rw)
 {
     int next;
     char *configdir = NULL;
     char *secmodName = NULL;
     char *value = NULL;
-    const char *save_params = param;
+    char *save_params = param;
     const char *lconfigdir;
     PRBool noModDB = PR_FALSE;
     param = NSSUTIL_ArgStrip(param);
+	
 
     while (*param) {
 	NSSUTIL_HANDLE_STRING_ARG(param,configdir,"configDir=",;)

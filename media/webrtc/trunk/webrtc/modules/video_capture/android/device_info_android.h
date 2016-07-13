@@ -26,7 +26,7 @@ namespace videocapturemodule
 
 class DeviceInfoAndroid : public DeviceInfoImpl {
  public:
-  static void Initialize(JavaVM* javaVM);
+  static void Initialize(JNIEnv* env);
   static void DeInitialize();
 
   DeviceInfoAndroid(int32_t id);
@@ -38,7 +38,6 @@ class DeviceInfoAndroid : public DeviceInfoImpl {
 
   virtual int32_t Init();
   virtual uint32_t NumberOfDevices();
-  virtual int32_t Refresh();
   virtual int32_t GetDeviceName(
       uint32_t deviceNumber,
       char* deviceNameUTF8,
@@ -56,7 +55,7 @@ class DeviceInfoAndroid : public DeviceInfoImpl {
       uint32_t /*positionX*/,
       uint32_t /*positionY*/) { return -1; }
   virtual int32_t GetOrientation(const char* deviceUniqueIdUTF8,
-                                 VideoRotation& orientation);
+                                 VideoCaptureRotation& orientation);
 
   // Populate |min_mfps| and |max_mfps| with the closest supported range of the
   // device to |max_fps_to_match|.
@@ -67,7 +66,6 @@ class DeviceInfoAndroid : public DeviceInfoImpl {
 
  private:
   enum { kExpectedCaptureDelay = 190};
-  static void BuildDeviceList();  
 };
 
 }  // namespace videocapturemodule

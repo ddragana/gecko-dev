@@ -4,12 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var bs = PlacesUtils.bookmarks;
-var hs = PlacesUtils.history;
-var anno = PlacesUtils.annotations;
+let bs = PlacesUtils.bookmarks;
+let hs = PlacesUtils.history;
+let anno = PlacesUtils.annotations;
 
 
-var bookmarksObserver = {
+let bookmarksObserver = {
   onBeginUpdateBatch: function() {
     this._beginUpdateBatch = true;
   },
@@ -43,13 +43,11 @@ var bookmarksObserver = {
     this._itemRemovedIndex = index;
   },
   onItemChanged: function(id, property, isAnnotationProperty, value,
-                          lastModified, itemType, parentId, guid, parentGuid,
-                          oldValue) {
+                          lastModified, itemType) {
     this._itemChangedId = id;
     this._itemChangedProperty = property;
     this._itemChanged_isAnnotationProperty = isAnnotationProperty;
     this._itemChangedValue = value;
-    this._itemChangedOldValue = oldValue;
   },
   onItemVisited: function(id, visitID, time) {
     this._itemVisitedId = id;
@@ -71,16 +69,16 @@ var bookmarksObserver = {
 
 
 // Get bookmarks menu folder id.
-var root = bs.bookmarksMenuFolder;
+let root = bs.bookmarksMenuFolder;
 // Index at which items should begin.
-var bmStartIndex = 0;
+let bmStartIndex = 0;
 
 
 function run_test() {
   run_next_test();
 }
 
-add_task(function* test_bookmarks() {
+add_task(function test_bookmarks() {
   bs.addObserver(bookmarksObserver, false);
 
   // test special folders
@@ -454,7 +452,6 @@ add_task(function* test_bookmarks() {
   do_check_eq(bookmarksObserver._itemChangedId, newId10);
   do_check_eq(bookmarksObserver._itemChangedProperty, "uri");
   do_check_eq(bookmarksObserver._itemChangedValue, "http://foo11.com/");
-  do_check_eq(bookmarksObserver._itemChangedOldValue, "http://foo10.com/");
 
   // test getBookmarkURI
   let newId11 = bs.insertBookmark(testRoot, uri("http://foo11.com/"),

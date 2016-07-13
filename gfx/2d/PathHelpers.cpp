@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#define _USE_MATH_DEFINES
+#include <cmath>
+
 #include "PathHelpers.h"
 
 namespace mozilla {
@@ -275,3 +278,4 @@ MaxStrokeExtents(const StrokeOptions& aStrokeOptions,
 
 } // namespace gfx
 } // namespace mozilla
+

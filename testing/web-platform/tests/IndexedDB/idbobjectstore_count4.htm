@@ -17,9 +17,15 @@
         db = event.target.result;
         ostore = db.createObjectStore("store", {keyPath:"pKey"});
         db.deleteObjectStore("store");
-        assert_throws("InvalidStateError", function(){
-            ostore.count();
+    }
+
+    open_rq.onsuccess = function (event) {
+        t.step(function(){
+            assert_throws("InvalidStateError", function(){
+                ostore.count();
+            });
         });
         t.done();
     }
 </script>
+

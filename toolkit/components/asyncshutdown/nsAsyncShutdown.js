@@ -13,7 +13,7 @@ const Ci = Components.interfaces;
 const Cc = Components.classes;
 const Cr = Components.results;
 
-var XPCOMUtils = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {}).XPCOMUtils;
+let XPCOMUtils = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {}).XPCOMUtils;
 XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
   "resource://gre/modules/AsyncShutdown.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
@@ -25,7 +25,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
 /**
  * Conversion between nsIPropertyBag and JS object
  */
-var PropertyBagConverter = {
+let PropertyBagConverter = {
   // From nsIPropertyBag to JS
   toObject: function(bag) {
     if (!(bag instanceof Ci.nsIPropertyBag)) {
@@ -202,7 +202,7 @@ nsAsyncShutdownClient.prototype = {
 function nsAsyncShutdownBarrier(moduleBarrier) {
   this._client = new nsAsyncShutdownClient(moduleBarrier.client);
   this._moduleBarrier = moduleBarrier;
-}
+};
 nsAsyncShutdownBarrier.prototype = {
   get state() {
     return PropertyBagConverter.fromValue(this._moduleBarrier.state);
@@ -226,26 +226,17 @@ function nsAsyncShutdownService() {
   // Cache for the getters
 
   for (let _k of
-   [// Parent process
-    "profileBeforeChange",
+   ["profileBeforeChange",
     "profileChangeTeardown",
-    "quitApplicationGranted",
     "sendTelemetry",
-
-    // Child processes
-    "contentChildShutdown",
-
-    // All processes
     "webWorkersShutdown",
-    "xpcomWillShutdown",
-    ]) {
+    "xpcomThreadsShutdown"]) {
     let k = _k;
     Object.defineProperty(this, k, {
       configurable: true,
       get: function() {
         delete this[k];
-        let wrapped = AsyncShutdown[k]; // May be undefined, if we're on the wrong process.
-        let result = wrapped ? new nsAsyncShutdownClient(wrapped) : undefined;
+        let result = new nsAsyncShutdownClient(AsyncShutdown[k]);
         Object.defineProperty(this, k, {
           value: result
         });
@@ -275,3 +266,4 @@ this.NSGetFactory = XPCOMUtils.generateNSGetFactory([
     nsAsyncShutdownBarrier,
     nsAsyncShutdownClient,
 ]);
+

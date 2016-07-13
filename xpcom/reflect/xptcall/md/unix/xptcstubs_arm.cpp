@@ -8,8 +8,8 @@
 #include "xptcprivate.h"
 #include "xptiprivate.h"
 
-#if !defined(__arm__) && !(defined(LINUX) || defined(ANDROID) || defined(XP_DARWIN))
-#error "This code is for Linux/iOS ARM only. Please check if it works for you, too.\nDepends strongly on gcc behaviour."
+#if !defined(__arm__) && !(defined(LINUX) || defined(ANDROID))
+#error "This code is for Linux ARM only. Please check if it works for you, too.\nDepends strongly on gcc behaviour."
 #endif
 
 /* Specify explicitly a symbol for this function, don't try to guess the c++ mangled symbol.  */
@@ -22,21 +22,11 @@ ATTRIBUTE_USED;
 #define DOUBLEWORD_ALIGN(p) (p)
 #endif
 
-// Apple's iOS toolchain is lame.
+// Apple's iOS toolchain is lame and does not support .cfi directives.
 #ifdef __APPLE__
-#define GNU(str)
-#define APPLE(str) str
-#define UNDERSCORE "__"
+#define CFI(str)
 #else
-#define GNU(str) str
-#define APPLE(str)
-#define UNDERSCORE "_"
-#endif
-
-#ifdef __thumb__
-#define THUMB_FUNC ".thumb_func\n"
-#else
-#define THUMB_FUNC
+#define CFI(str) str
 #endif
 
 static nsresult
@@ -137,29 +127,27 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args)
  *
  */
 __asm__ ("\n"
-         GNU(".text\n")
-         APPLE(".section __TEXT,__text\n")
-         THUMB_FUNC
+         ".text\n"
          ".align 2\n"
          "SharedStub:\n"
-         GNU(".fnstart\n")
-         GNU(".cfi_startproc\n")
+         ".fnstart\n"
+         CFI(".cfi_startproc\n")
          "stmfd	sp!, {r1, r2, r3}\n"
-         GNU(".save {r1, r2, r3}\n")
-         GNU(".cfi_def_cfa_offset 12\n")
-         GNU(".cfi_offset r3, -4\n")
-         GNU(".cfi_offset r2, -8\n")
-         GNU(".cfi_offset r1, -12\n")
+         ".save	{r1, r2, r3}\n"
+         CFI(".cfi_def_cfa_offset 12\n")
+         CFI(".cfi_offset r3, -4\n")
+         CFI(".cfi_offset r2, -8\n")
+         CFI(".cfi_offset r1, -12\n")
          "mov	r2, sp\n"
          "str	lr, [sp, #-4]!\n"
-         GNU(".save	{lr}\n")
-         GNU(".cfi_def_cfa_offset 16\n")
-         GNU(".cfi_offset lr, -16\n")
+         ".save	{lr}\n"
+         CFI(".cfi_def_cfa_offset 16\n")
+         CFI(".cfi_offset lr, -16\n")
          "mov	r1, ip\n"
          "bl	_PrepareAndDispatch\n"
          "ldr	pc, [sp], #16\n"
-         GNU(".cfi_endproc\n")
-         GNU(".fnend"));
+         CFI(".cfi_endproc\n")
+         ".fnend");
 
 /*
  * Create sets of stubs to call the SharedStub.
@@ -183,26 +171,22 @@ __asm__ ("\n"
 
 #define STUB_ENTRY(n)						\
   __asm__(							\
-        GNU(".section \".text\"\n")                             \
-        APPLE(".section __TEXT,__text\n")                       \
+	".section \".text\"\n"					\
 "	.align 2\n"						\
-"	.if ("#n" - 10) < 0\n"                                  \
-"	.globl	" UNDERSCORE "ZN14nsXPTCStubBase5Stub"#n"Ev\n"	\
-        THUMB_FUNC                                              \
-        GNU(".type	_ZN14nsXPTCStubBase5Stub"#n"Ev,#function\n") \
-UNDERSCORE "ZN14nsXPTCStubBase5Stub"#n"Ev:\n"			\
+"	.iflt ("#n" - 10)\n"                                    \
+"	.globl	_ZN14nsXPTCStubBase5Stub"#n"Ev\n"		\
+"	.type	_ZN14nsXPTCStubBase5Stub"#n"Ev,#function\n"	\
+"_ZN14nsXPTCStubBase5Stub"#n"Ev:\n"				\
 "	.else\n"                                                \
-"	.if  ("#n" - 100) < 0\n"                                \
-"	.globl	" UNDERSCORE "ZN14nsXPTCStubBase6Stub"#n"Ev\n"	\
-          THUMB_FUNC \
-          GNU(".type _ZN14nsXPTCStubBase6Stub"#n"Ev,#function\n") \
-UNDERSCORE "ZN14nsXPTCStubBase6Stub"#n"Ev:\n"			\
+"	.iflt  ("#n" - 100)\n"                                  \
+"	.globl	_ZN14nsXPTCStubBase6Stub"#n"Ev\n"		\
+"	.type	_ZN14nsXPTCStubBase6Stub"#n"Ev,#function\n"	\
+"_ZN14nsXPTCStubBase6Stub"#n"Ev:\n"				\
 "	.else\n"                                                \
-"	.if ("#n" - 1000) < 0\n"                                \
-"	.globl	" UNDERSCORE "ZN14nsXPTCStubBase7Stub"#n"Ev\n"	\
-        THUMB_FUNC                                              \
-        GNU(".type _ZN14nsXPTCStubBase7Stub"#n"Ev,#function\n") \
-UNDERSCORE "ZN14nsXPTCStubBase7Stub"#n"Ev:\n"			\
+"	.iflt ("#n" - 1000)\n"                                  \
+"	.globl	_ZN14nsXPTCStubBase7Stub"#n"Ev\n"		\
+"	.type	_ZN14nsXPTCStubBase7Stub"#n"Ev,#function\n"	\
+"_ZN14nsXPTCStubBase7Stub"#n"Ev:\n"				\
 "	.else\n"                                                \
 "	.err \"stub number "#n"> 1000 not yet supported\"\n"    \
 "	.endif\n"                                               \

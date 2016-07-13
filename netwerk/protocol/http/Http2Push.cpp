@@ -23,7 +23,7 @@
 namespace mozilla {
 namespace net {
 
-class CallChannelOnPush final : public Runnable {
+class CallChannelOnPush final : public nsRunnable {
   public:
   CallChannelOnPush(nsIHttpChannelInternal *associatedChannel,
                     const nsACString &pushedURI,
@@ -37,7 +37,7 @@ class CallChannelOnPush final : public Runnable {
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    RefPtr<nsHttpChannel> channel;
+    nsRefPtr<nsHttpChannel> channel;
     CallQueryInterface(mAssociatedChannel, channel.StartAssignment());
     MOZ_ASSERT(channel);
     if (channel && NS_SUCCEEDED(channel->OnPush(mPushedURI, mPushedStream))) {
@@ -77,7 +77,7 @@ Http2PushedStream::Http2PushedStream(Http2PushTransactionBuffer *aTransaction,
   mStreamID = aID;
   MOZ_ASSERT(!(aID & 1)); // must be even to be a pushed stream
   mBufferedPush->SetPushStream(this);
-  mRequestContext = aAssociatedStream->RequestContext();
+  mLoadGroupCI = aAssociatedStream->LoadGroupConnectionInfo();
   mLastRead = TimeStamp::Now();
   SetPriority(aAssociatedStream->Priority() + 1);
 }
@@ -151,87 +151,26 @@ Http2PushedStream::TryOnPush()
   return true;
 }
 
-// side effect free static method to determine if Http2Stream implements nsIHttpPushListener
-bool
-Http2PushedStream::TestOnPush(Http2Stream *stream)
-{
-  if (!stream) {
-    return false;
-  }
-  nsAHttpTransaction *abstractTransaction = stream->Transaction();
-  if (!abstractTransaction) {
-    return false;
-  }
-  nsHttpTransaction *trans = abstractTransaction->QueryHttpTransaction();
-  if (!trans) {
-    return false;
-  }
-  nsCOMPtr<nsIHttpChannelInternal> associatedChannel = do_QueryInterface(trans->HttpChannel());
-  if (!associatedChannel) {
-    return false;
-  }
-  return (trans->Caps() & NS_HTTP_ONPUSH_LISTENER);
-}
-
 nsresult
-Http2PushedStream::ReadSegments(nsAHttpSegmentReader *reader,
+Http2PushedStream::ReadSegments(nsAHttpSegmentReader *,
                                 uint32_t, uint32_t *count)
 {
-  nsresult rv = NS_OK;
+  // The request headers for this has been processed, so we need to verify
+  // that :authority, :scheme, and :path MUST be present. :method MUST NOT be
+  // present
+  CreatePushHashKey(mHeaderScheme, mHeaderHost,
+                    mSession->Serial(), mHeaderPath,
+                    mOrigin, mHashKey);
+
+  LOG3(("Http2PushStream 0x%X hash key %s\n", mStreamID, mHashKey.get()));
+
+  // the write side of a pushed transaction just involves manipulating a little state
+  SetSentFin(true);
+  Http2Stream::mRequestHeadersDone = 1;
+  Http2Stream::mOpenGenerated = 1;
+  Http2Stream::ChangeState(UPSTREAM_COMPLETE);
   *count = 0;
-
-  switch (mUpstreamState) {
-  case GENERATING_HEADERS:
-    // The request headers for this has been processed, so we need to verify
-    // that :authority, :scheme, and :path MUST be present. :method MUST NOT be
-    // present
-    CreatePushHashKey(mHeaderScheme, mHeaderHost,
-                      mSession->Serial(), mHeaderPath,
-                      mOrigin, mHashKey);
-
-    LOG3(("Http2PushStream 0x%X hash key %s\n", mStreamID, mHashKey.get()));
-
-    // the write side of a pushed transaction just involves manipulating a little state
-    SetSentFin(true);
-    Http2Stream::mRequestHeadersDone = 1;
-    Http2Stream::mOpenGenerated = 1;
-    Http2Stream::ChangeState(UPSTREAM_COMPLETE);
-    break;
-
-  case UPSTREAM_COMPLETE:
-    // Let's just clear the stream's transmit buffer by pushing it into
-    // the session. This is probably a window adjustment.
-    LOG3(("Http2Push::ReadSegments 0x%X \n", mStreamID));
-    mSegmentReader = reader;
-    rv = TransmitFrame(nullptr, nullptr, true);
-    mSegmentReader = nullptr;
-    break;
-
-  case GENERATING_BODY:
-  case SENDING_BODY:
-  case SENDING_FIN_STREAM:
-  default:
-    break;
-  }
-
-  return rv;
-}
-
-void
-Http2PushedStream::AdjustInitialWindow()
-{
-  LOG3(("Http2PushStream %p 0x%X AdjustInitialWindow", this, mStreamID));
-  if (mConsumerStream) {
-    LOG3(("Http2PushStream::AdjustInitialWindow %p 0x%X "
-          "calling super consumer %p 0x%X\n", this,
-          mStreamID, mConsumerStream, mConsumerStream->StreamID()));
-    Http2Stream::AdjustInitialWindow();
-    // Http2PushedStream::ReadSegments is needed to call TransmitFrame()
-    // and actually get this information into the session bytestream
-    mSession->TransactionHasDataToWrite(this);
-  }
-  // Otherwise, when we get hooked up, the initial window will get bumped
-  // anyway, so we're good to go.
+  return NS_OK;
 }
 
 void
@@ -315,7 +254,7 @@ Http2PushTransactionBuffer::Http2PushTransactionBuffer()
   , mBufferedHTTP1Used(0)
   , mBufferedHTTP1Consumed(0)
 {
-  mBufferedHTTP1 = MakeUnique<char[]>(mBufferedHTTP1Size);
+  mBufferedHTTP1 = new char[mBufferedHTTP1Size];
 }
 
 Http2PushTransactionBuffer::~Http2PushTransactionBuffer()
@@ -406,7 +345,7 @@ Http2PushTransactionBuffer::WriteSegments(nsAHttpSegmentWriter *writer,
   }
 
   count = std::min(count, mBufferedHTTP1Size - mBufferedHTTP1Used);
-  nsresult rv = writer->OnWriteSegment(&mBufferedHTTP1[mBufferedHTTP1Used],
+  nsresult rv = writer->OnWriteSegment(mBufferedHTTP1 + mBufferedHTTP1Used,
                                        count, countWritten);
   if (NS_SUCCEEDED(rv)) {
     mBufferedHTTP1Used += *countWritten;
@@ -445,7 +384,7 @@ Http2PushTransactionBuffer::RequestHead()
 
 nsresult
 Http2PushTransactionBuffer::TakeSubTransactions(
-  nsTArray<RefPtr<nsAHttpTransaction> > &outTransactions)
+  nsTArray<nsRefPtr<nsAHttpTransaction> > &outTransactions)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -493,7 +432,7 @@ Http2PushTransactionBuffer::GetBufferedData(char *buf,
 {
   *countWritten = std::min(count, static_cast<uint32_t>(Available()));
   if (*countWritten) {
-    memcpy(buf, &mBufferedHTTP1[mBufferedHTTP1Consumed], *countWritten);
+    memcpy(buf, mBufferedHTTP1 + mBufferedHTTP1Consumed, *countWritten);
     mBufferedHTTP1Consumed += *countWritten;
   }
 

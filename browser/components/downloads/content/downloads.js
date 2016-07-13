@@ -23,13 +23,16 @@
  *
  * DownloadsViewItem
  * Builds and updates a single item in the downloads list widget, responding to
- * changes in the download state and real-time data, and handles the user
- * interaction events related to a single item in the downloads list widgets.
+ * changes in the download state and real-time data.
  *
  * DownloadsViewController
  * Handles part of the user interaction events raised by the downloads list
  * widget, in particular the "commands" that apply to multiple items, and
  * dispatches the commands that apply to individual items.
+ *
+ * DownloadsViewItemController
+ * Handles all the user interaction events, in particular the "commands",
+ * related to a single item in the downloads list widgets.
  */
 
 /**
@@ -61,7 +64,7 @@
 
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+let { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -95,33 +98,22 @@ const DownloadsPanel = {
   _state: 0,
 
   /** The panel is not linked to downloads data yet. */
-  get kStateUninitialized() {
-    return 0;
-  },
+  get kStateUninitialized() 0,
   /** This object is linked to data, but the panel is invisible. */
-  get kStateHidden() {
-    return 1;
-  },
+  get kStateHidden() 1,
   /** The panel will be shown as soon as possible. */
-  get kStateWaitingData() {
-    return 2;
-  },
+  get kStateWaitingData() 2,
   /** The panel is almost shown - we're just waiting to get a handle on the
       anchor. */
-  get kStateWaitingAnchor() {
-    return 3;
-  },
+  get kStateWaitingAnchor() 3,
   /** The panel is open. */
-  get kStateShown() {
-    return 4;
-  },
+  get kStateShown() 4,
 
   /**
    * Location of the panel overlay.
    */
-  get kDownloadsOverlay() {
-    return "chrome://browser/content/downloads/downloadsOverlay.xul";
-  },
+  get kDownloadsOverlay()
+      "chrome://browser/content/downloads/downloadsOverlay.xul",
 
   /**
    * Starts loading the download data in background, without opening the panel.
@@ -295,14 +287,8 @@ const DownloadsPanel = {
    * visualization.
    */
   handleEvent(aEvent) {
-    switch (aEvent.type) {
-      case "mousemove":
-        this.keyFocusing = false;
-        break;
-      case "keydown":
-        return this._onKeyDown(aEvent);
-      case "keypress":
-        return this._onKeyPress(aEvent);
+    if (aEvent.type == "mousemove") {
+      this.keyFocusing = false;
     }
   },
 
@@ -392,10 +378,10 @@ const DownloadsPanel = {
    */
   _attachEventListeners() {
     // Handle keydown to support accel-V.
-    this.panel.addEventListener("keydown", this, false);
+    this.panel.addEventListener("keydown", this._onKeyDown.bind(this), false);
     // Handle keypress to be able to preventDefault() events before they reach
     // the richlistbox, for keyboard navigation.
-    this.panel.addEventListener("keypress", this, false);
+    this.panel.addEventListener("keypress", this._onKeyPress.bind(this), false);
   },
 
   /**
@@ -403,8 +389,10 @@ const DownloadsPanel = {
    * is called automatically on panel termination.
    */
   _unattachEventListeners() {
-    this.panel.removeEventListener("keydown", this, false);
-    this.panel.removeEventListener("keypress", this, false);
+    this.panel.removeEventListener("keydown", this._onKeyDown.bind(this),
+                                   false);
+    this.panel.removeEventListener("keypress", this._onKeyPress.bind(this),
+                                   false);
   },
 
   _onKeyPress(aEvent) {
@@ -468,7 +456,11 @@ const DownloadsPanel = {
     }
 
     let pasting = aEvent.keyCode == Ci.nsIDOMKeyEvent.DOM_VK_V &&
-                  aEvent.getModifierState("Accel");
+#ifdef XP_MACOSX
+                  aEvent.metaKey;
+#else
+                  aEvent.ctrlKey;
+#endif
 
     if (!pasting) {
       return;
@@ -573,8 +565,6 @@ const DownloadsPanel = {
   },
 };
 
-XPCOMUtils.defineConstant(this, "DownloadsPanel", DownloadsPanel);
-
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsOverlayLoader
 
@@ -652,8 +642,6 @@ const DownloadsOverlayLoader = {
     }
   },
 };
-
-XPCOMUtils.defineConstant(this, "DownloadsOverlayLoader", DownloadsOverlayLoader);
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsView
@@ -843,12 +831,12 @@ const DownloadsView = {
 
   /**
    * Associates each richlistitem for a download with its corresponding
-   * DownloadsViewItem object.
+   * DownloadsViewItemController object.
    */
-  _itemsForElements: new Map(),
+  _controllersForElements: new Map(),
 
-  itemForElement(element) {
-    return this._itemsForElements.get(element);
+  controllerForElement(element) {
+    return this._controllersForElements.get(element);
   },
 
   /**
@@ -863,7 +851,8 @@ const DownloadsView = {
     let element = document.createElement("richlistitem");
     let viewItem = new DownloadsViewItem(download, element);
     this._visibleViewItems.set(download, viewItem);
-    this._itemsForElements.set(element, viewItem);
+    let viewItemController = new DownloadsViewItemController(download);
+    this._controllersForElements.set(element, viewItemController);
     if (aNewest) {
       this.richListBox.insertBefore(element, this.richListBox.firstChild);
     } else {
@@ -884,7 +873,7 @@ const DownloadsView = {
                                                 this.richListBox.itemCount - 1);
     }
     this._visibleViewItems.delete(download);
-    this._itemsForElements.delete(element);
+    this._controllersForElements.delete(element);
   },
 
   //////////////////////////////////////////////////////////////////////////////
@@ -905,23 +894,14 @@ const DownloadsView = {
     while (target.nodeName != "richlistitem") {
       target = target.parentNode;
     }
-    DownloadsView.itemForElement(target).doCommand(aCommand);
+    DownloadsView.controllerForElement(target).doCommand(aCommand);
   },
 
   onDownloadClick(aEvent) {
     // Handle primary clicks only, and exclude the action button.
     if (aEvent.button == 0 &&
         !aEvent.originalTarget.hasAttribute("oncommand")) {
-      let target = aEvent.target;
-      while (target.nodeName != "richlistitem") {
-        target = target.parentNode;
-      }
-      let download = DownloadsView.itemForElement(target).download;
-      if (download.hasBlockedData) {
-        goDoCommand("downloadsCmd_showBlockedInfo");
-      } else {
-        goDoCommand("downloadsCmd_open");
-      }
+      goDoCommand("downloadsCmd_open");
     }
   },
 
@@ -991,7 +971,7 @@ const DownloadsView = {
     }
 
     // We must check for existence synchronously because this is a DOM event.
-    let file = new FileUtils.File(DownloadsView.itemForElement(element)
+    let file = new FileUtils.File(DownloadsView.controllerForElement(element)
                                                .download.target.path);
     if (!file.exists()) {
       return;
@@ -1009,15 +989,12 @@ const DownloadsView = {
   },
 }
 
-XPCOMUtils.defineConstant(this, "DownloadsView", DownloadsView);
-
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsViewItem
 
 /**
  * Builds and updates a single item in the downloads list widget, responding to
- * changes in the download state and real-time data, and handles the user
- * interaction events related to a single item in the downloads list widgets.
+ * changes in the download state and real-time data.
  *
  * @param download
  *        Download object to be associated with the view item.
@@ -1044,121 +1021,18 @@ DownloadsViewItem.prototype = {
   _element: null,
 
   onStateChanged() {
-    this._updateState();
+    this.element.setAttribute("image", this.image);
+    this.element.setAttribute("state",
+                              DownloadsCommon.stateOfDownload(this.download));
   },
 
   onChanged() {
+    // This cannot be placed within onStateChanged because
+    // when a download goes from hasBlockedData to !hasBlockedData
+    // it will still remain in the same state.
+    this.element.classList.toggle("temporary-block",
+                                  !!this.download.hasBlockedData);
     this._updateProgress();
-  },
-
-  isCommandEnabled(aCommand) {
-    switch (aCommand) {
-      case "downloadsCmd_open": {
-        if (!this.download.succeeded) {
-          return false;
-        }
-
-        let file = new FileUtils.File(this.download.target.path);
-        return file.exists();
-      }
-      case "downloadsCmd_show": {
-        let file = new FileUtils.File(this.download.target.path);
-        if (file.exists()) {
-          return true;
-        }
-
-        if (!this.download.target.partFilePath) {
-          return false;
-        }
-
-        let partFile = new FileUtils.File(this.download.target.partFilePath);
-        return partFile.exists();
-      }
-      case "cmd_delete":
-      case "downloadsCmd_cancel":
-      case "downloadsCmd_copyLocation":
-      case "downloadsCmd_doDefault":
-        return true;
-      case "downloadsCmd_showBlockedInfo":
-        return this.download.hasBlockedData;
-    }
-    return DownloadsViewUI.DownloadElementShell.prototype
-                          .isCommandEnabled.call(this, aCommand);
-  },
-
-  doCommand(aCommand) {
-    if (this.isCommandEnabled(aCommand)) {
-      this[aCommand]();
-    }
-  },
-
-  //////////////////////////////////////////////////////////////////////////////
-  //// Item commands
-
-  cmd_delete() {
-    DownloadsCommon.removeAndFinalizeDownload(this.download);
-    PlacesUtils.bhistory.removePage(
-                           NetUtil.newURI(this.download.source.url));
-  },
-
-  downloadsCmd_unblock() {
-    DownloadsPanel.hidePanel();
-    this.confirmUnblock(window, "unblock");
-  },
-
-  downloadsCmd_chooseUnblock() {
-    DownloadsPanel.hidePanel();
-    this.confirmUnblock(window, "chooseUnblock");
-  },
-
-  downloadsCmd_chooseOpen() {
-    DownloadsPanel.hidePanel();
-    this.confirmUnblock(window, "chooseOpen");
-  },
-
-  downloadsCmd_open() {
-    this.download.launch().catch(Cu.reportError);
-
-    // We explicitly close the panel here to give the user the feedback that
-    // their click has been received, and we're handling the action.
-    // Otherwise, we'd have to wait for the file-type handler to execute
-    // before the panel would close. This also helps to prevent the user from
-    // accidentally opening a file several times.
-    DownloadsPanel.hidePanel();
-  },
-
-  downloadsCmd_show() {
-    let file = new FileUtils.File(this.download.target.path);
-    DownloadsCommon.showDownloadedFile(file);
-
-    // We explicitly close the panel here to give the user the feedback that
-    // their click has been received, and we're handling the action.
-    // Otherwise, we'd have to wait for the operating system file manager
-    // window to open before the panel closed. This also helps to prevent the
-    // user from opening the containing folder several times.
-    DownloadsPanel.hidePanel();
-  },
-
-  downloadsCmd_showBlockedInfo() {
-    DownloadsBlockedSubview.show(this.element,
-                                 ...this.rawBlockedTitleAndDetails);
-  },
-
-  downloadsCmd_openReferrer() {
-    openURL(this.download.source.referrer);
-  },
-
-  downloadsCmd_copyLocation() {
-    let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"]
-                    .getService(Ci.nsIClipboardHelper);
-    clipboard.copyString(this.download.source.url);
-  },
-
-  downloadsCmd_doDefault() {
-    let defaultCommand = this.currentDefaultCommandName;
-    if (defaultCommand && this.isCommandEnabled(defaultCommand)) {
-      this.doCommand(defaultCommand);
-    }
   },
 };
 
@@ -1187,11 +1061,8 @@ const DownloadsViewController = {
 
   supportsCommand(aCommand) {
     // Firstly, determine if this is a command that we can handle.
-    if (!DownloadsViewUI.isCommandName(aCommand)) {
-      return false;
-    }
-    if (!(aCommand in this) &&
-        !(aCommand in DownloadsViewItem.prototype)) {
+    if (!(aCommand in this.commands) &&
+        !(aCommand in DownloadsViewItemController.prototype.commands)) {
       return false;
     }
     // Secondly, determine if focus is on a control in the downloads list.
@@ -1212,14 +1083,14 @@ const DownloadsViewController = {
 
     // Other commands are selection-specific.
     let element = DownloadsView.richListBox.selectedItem;
-    return element && DownloadsView.itemForElement(element)
+    return element && DownloadsView.controllerForElement(element)
                                    .isCommandEnabled(aCommand);
   },
 
   doCommand(aCommand) {
     // If this command is not selection-specific, execute it.
-    if (aCommand in this) {
-      this[aCommand]();
+    if (aCommand in this.commands) {
+      this.commands[aCommand].apply(this);
       return;
     }
 
@@ -1227,7 +1098,7 @@ const DownloadsViewController = {
     let element = DownloadsView.richListBox.selectedItem;
     if (element) {
       // The doCommand function also checks if the command is enabled.
-      DownloadsView.itemForElement(element).doCommand(aCommand);
+      DownloadsView.controllerForElement(element).doCommand(aCommand);
     }
   },
 
@@ -1237,26 +1108,189 @@ const DownloadsViewController = {
   //// Other functions
 
   updateCommands() {
-    function updateCommandsForObject(object) {
-      for (let name in object) {
-        if (DownloadsViewUI.isCommandName(name)) {
-          goUpdateCommand(name);
-        }
-      }
-    }
-    updateCommandsForObject(this);
-    updateCommandsForObject(DownloadsViewItem.prototype);
+    Object.keys(this.commands).forEach(goUpdateCommand);
+    Object.keys(DownloadsViewItemController.prototype.commands)
+          .forEach(goUpdateCommand);
   },
 
   //////////////////////////////////////////////////////////////////////////////
   //// Selection-independent commands
 
-  downloadsCmd_clearList() {
-    DownloadsCommon.getData(window).removeFinished();
+  /**
+   * This object contains one key for each command that operates regardless of
+   * the currently selected item in the list.
+   */
+  commands: {
+    downloadsCmd_clearList() {
+      DownloadsCommon.getData(window).removeFinished();
+    }
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+//// DownloadsViewItemController
+
+/**
+ * Handles all the user interaction events, in particular the "commands",
+ * related to a single item in the downloads list widgets.
+ */
+function DownloadsViewItemController(download) {
+  this.download = download;
+}
+
+DownloadsViewItemController.prototype = {
+  isCommandEnabled(aCommand) {
+    switch (aCommand) {
+      case "downloadsCmd_open": {
+        if (!this.download.succeeded) {
+          return false;
+        }
+
+        let file = new FileUtils.File(this.download.target.path);
+        return file.exists();
+      }
+      case "downloadsCmd_show": {
+        let file = new FileUtils.File(this.download.target.path);
+        if (file.exists()) {
+          return true;
+        }
+
+        if (!this.download.target.partFilePath) {
+          return false;
+        }
+
+        let partFile = new FileUtils.File(this.download.target.partFilePath);
+        return partFile.exists();
+      }
+      case "downloadsCmd_pauseResume":
+        return this.download.hasPartialData && !this.download.error;
+      case "downloadsCmd_retry":
+        return this.download.canceled || this.download.error;
+      case "downloadsCmd_openReferrer":
+        return !!this.download.source.referrer;
+      case "cmd_delete":
+      case "downloadsCmd_cancel":
+      case "downloadsCmd_copyLocation":
+      case "downloadsCmd_doDefault":
+        return true;
+      case "downloadsCmd_unblock":
+      case "downloadsCmd_confirmBlock":
+        return this.download.hasBlockedData;
+    }
+    return false;
+  },
+
+  doCommand(aCommand) {
+    if (this.isCommandEnabled(aCommand)) {
+      this.commands[aCommand].apply(this);
+    }
+  },
+
+  //////////////////////////////////////////////////////////////////////////////
+  //// Item commands
+
+  /**
+   * This object contains one key for each command that operates on this item.
+   *
+   * In commands, the "this" identifier points to the controller item.
+   */
+  commands: {
+    cmd_delete() {
+      DownloadsCommon.removeAndFinalizeDownload(this.download);
+      PlacesUtils.bhistory.removePage(
+                             NetUtil.newURI(this.download.source.url));
+    },
+
+    downloadsCmd_cancel() {
+      this.download.cancel().catch(() => {});
+      this.download.removePartialData().catch(Cu.reportError);
+    },
+
+    downloadsCmd_unblock() {
+      DownloadsPanel.hidePanel();
+      DownloadsCommon.confirmUnblockDownload(DownloadsCommon.BLOCK_VERDICT_MALWARE,
+                                             window).then((confirmed) => {
+        if (confirmed) {
+          return this.download.unblock();
+        }
+      }).catch(Cu.reportError);
+    },
+
+    downloadsCmd_confirmBlock() {
+      this.download.confirmBlock().catch(Cu.reportError);
+    },
+
+    downloadsCmd_open() {
+      this.download.launch().catch(Cu.reportError);
+
+      // We explicitly close the panel here to give the user the feedback that
+      // their click has been received, and we're handling the action.
+      // Otherwise, we'd have to wait for the file-type handler to execute
+      // before the panel would close. This also helps to prevent the user from
+      // accidentally opening a file several times.
+      DownloadsPanel.hidePanel();
+    },
+
+    downloadsCmd_show() {
+      let file = new FileUtils.File(this.download.target.path);
+      DownloadsCommon.showDownloadedFile(file);
+
+      // We explicitly close the panel here to give the user the feedback that
+      // their click has been received, and we're handling the action.
+      // Otherwise, we'd have to wait for the operating system file manager
+      // window to open before the panel closed. This also helps to prevent the
+      // user from opening the containing folder several times.
+      DownloadsPanel.hidePanel();
+    },
+
+    downloadsCmd_pauseResume() {
+      if (this.download.stopped) {
+        this.download.start();
+      } else {
+        this.download.cancel();
+      }
+    },
+
+    downloadsCmd_retry() {
+      this.download.start().catch(() => {});
+    },
+
+    downloadsCmd_openReferrer() {
+      openURL(this.download.source.referrer);
+    },
+
+    downloadsCmd_copyLocation() {
+      let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"]
+                      .getService(Ci.nsIClipboardHelper);
+      clipboard.copyString(this.download.source.url);
+    },
+
+    downloadsCmd_doDefault() {
+      const nsIDM = Ci.nsIDownloadManager;
+
+      // Determine the default command for the current item.
+      let defaultCommand = function () {
+        switch (DownloadsCommon.stateOfDownload(this.download)) {
+          case nsIDM.DOWNLOAD_NOTSTARTED:       return "downloadsCmd_cancel";
+          case nsIDM.DOWNLOAD_FINISHED:         return "downloadsCmd_open";
+          case nsIDM.DOWNLOAD_FAILED:           return "downloadsCmd_retry";
+          case nsIDM.DOWNLOAD_CANCELED:         return "downloadsCmd_retry";
+          case nsIDM.DOWNLOAD_PAUSED:           return "downloadsCmd_pauseResume";
+          case nsIDM.DOWNLOAD_QUEUED:           return "downloadsCmd_cancel";
+          case nsIDM.DOWNLOAD_BLOCKED_PARENTAL: return "downloadsCmd_openReferrer";
+          case nsIDM.DOWNLOAD_SCANNING:         return "downloadsCmd_show";
+          case nsIDM.DOWNLOAD_DIRTY:            return "downloadsCmd_openReferrer";
+          case nsIDM.DOWNLOAD_BLOCKED_POLICY:   return "downloadsCmd_openReferrer";
+        }
+        return "";
+      }.apply(this);
+      if (defaultCommand && this.isCommandEnabled(defaultCommand)) {
+        this.doCommand(defaultCommand);
+      }
+    },
   },
 };
 
-XPCOMUtils.defineConstant(this, "DownloadsViewController", DownloadsViewController);
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsSummary
@@ -1291,9 +1325,7 @@ const DownloadsSummary = {
   /**
    * Returns the active state of the downloads summary.
    */
-  get active() {
-    return this._active;
-  },
+  get active() this._active,
 
   _active: false,
 
@@ -1439,9 +1471,7 @@ const DownloadsSummary = {
     delete this._detailsNode;
     return this._detailsNode = node;
   }
-};
-
-XPCOMUtils.defineConstant(this, "DownloadsSummary", DownloadsSummary);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsFooter
@@ -1495,125 +1525,3 @@ const DownloadsFooter = {
     return this._footerNode = node;
   }
 };
-
-XPCOMUtils.defineConstant(this, "DownloadsFooter", DownloadsFooter);
-
-
-////////////////////////////////////////////////////////////////////////////////
-//// DownloadsBlockedSubview
-
-/**
- * Manages the blocked subview that slides in when you click a blocked download.
- */
-const DownloadsBlockedSubview = {
-
-  get subview() {
-    let subview = document.getElementById("downloadsPanel-blockedSubview");
-    delete this.subview;
-    return this.subview = subview;
-  },
-
-  /**
-   * Elements in the subview.
-   */
-  get elements() {
-    let idSuffixes = [
-      "title",
-      "details1",
-      "details2",
-      "openButton",
-      "deleteButton",
-    ];
-    let elements = idSuffixes.reduce((memo, s) => {
-      memo[s] = document.getElementById("downloadsPanel-blockedSubview-" + s);
-      return memo;
-    }, {});
-    delete this.elements;
-    return this.elements = elements;
-  },
-
-  /**
-   * The multiview that contains both the main view and the subview.
-   */
-  get view() {
-    let view = document.getElementById("downloadsPanel-multiView");
-    delete this.view;
-    return this.view = view;
-  },
-
-  /**
-   * The blocked-download richlistitem element that was clicked to show the
-   * subview.  If the subview is not showing, this is undefined.
-   */
-  element: undefined,
-
-  /**
-   * Slides in the blocked subview.
-   *
-   * @param element
-   *        The blocked-download richlistitem element that was clicked.
-   * @param title
-   *        The title to show in the subview.
-   * @param details
-   *        An array of strings with information about the block.
-   */
-  show(element, title, details) {
-    if (this.view.showingSubView) {
-      return;
-    }
-
-    this.element = element;
-    element.setAttribute("showingsubview", "true");
-
-    let e = this.elements;
-    let s = DownloadsCommon.strings;
-    e.title.textContent = title;
-    e.details1.textContent = details[0];
-    e.details2.textContent = details[1];
-    e.openButton.label = s.unblockButtonOpen;
-    e.deleteButton.label = s.unblockButtonConfirmBlock;
-
-    let verdict = element.getAttribute("verdict");
-    this.subview.setAttribute("verdict", verdict);
-    this.subview.addEventListener("ViewHiding", this);
-
-    this.view.showSubView(this.subview.id);
-
-    // Without this, the mainView is more narrow than the panel once all
-    // downloads are removed from the panel.
-    document.getElementById("downloadsPanel-mainView").style.minWidth =
-      window.getComputedStyle(this.view).width;
-  },
-
-  handleEvent(event) {
-    switch (event.type) {
-      case "ViewHiding":
-        this.subview.removeEventListener(event.type, this);
-        this.element.removeAttribute("showingsubview");
-        delete this.element;
-        break;
-      default:
-        DownloadsCommon.log("Unhandled DownloadsBlockedSubview event: " +
-                            event.type);
-        break;
-    }
-  },
-
-  /**
-   * Slides out the blocked subview and shows the main view.
-   */
-  hide() {
-    this.view.showMainView();
-  },
-
-  /**
-   * Deletes the download and hides the entire panel.
-   */
-  confirmBlock() {
-    goDoCommand("cmd_delete");
-    DownloadsPanel.hidePanel();
-  },
-};
-
-XPCOMUtils.defineConstant(this, "DownloadsBlockedSubview",
-                          DownloadsBlockedSubview);

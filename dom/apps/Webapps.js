@@ -84,7 +84,7 @@ WebappsRegistry.prototype = {
         break;
       case "Webapps:CheckInstalled:Return:OK":
         this.removeMessageListeners(aMessage.name);
-        Services.DOMRequest.fireSuccess(req, createContentApplicationObject(this._window, msg.app));
+        Services.DOMRequest.fireSuccess(req, msg.app);
         break;
       case "Webapps:GetInstalled:Return:OK":
         this.removeMessageListeners(aMessage.name);
@@ -183,7 +183,7 @@ WebappsRegistry.prototype = {
              topId: this._topId,
              requestID: requestID,
              appId: principal.appId,
-             isBrowser: principal.isInIsolatedMozBrowserElement,
+             isBrowser: principal.isInBrowserElement,
              isPackage: isPackage
            };
   },
@@ -316,7 +316,7 @@ WebappsRegistry.prototype = {
     }
 
     this.addMessageListeners(["Webapps:GetLocalizationResource:Return"]);
-    return this.createPromiseWithId((aResolverId) => {
+    return this.createPromise((aResolve, aReject) => {
       cpmm.sendAsyncMessage("Webapps:GetLocalizationResource", {
         manifestURL: manifestURL,
         lang: aLanguage,
@@ -325,7 +325,10 @@ WebappsRegistry.prototype = {
         dataType: aType,
         oid: this._id,
         topId: this._topId,
-        requestID: aResolverId
+        requestID: this.getPromiseResolverId({
+          resolve: aResolve,
+          reject: aReject
+        })
       });
     });
   },
@@ -573,6 +576,8 @@ WebappsApplication.prototype = {
 
   launch: function(aStartPoint) {
     let request = this.createRequest();
+    this.addMessageListeners(["Webapps:Launch:Return:OK",
+                              "Webapps:Launch:Return:KO"]);
     cpmm.sendAsyncMessage("Webapps:Launch", { origin: this.origin,
                                               manifestURL: this.manifestURL,
                                               startPoint: aStartPoint || "",
@@ -580,14 +585,6 @@ WebappsApplication.prototype = {
                                               topId: this._topId,
                                               timestamp: Date.now(),
                                               requestID: this.getRequestId(request) });
-
-    let manifestURL = AppsUtils.getAppManifestURLFromWindow(this._window);
-    if (manifestURL != this.manifestURL) {
-      Services.obs.notifyObservers(null, "will-launch-app", null);
-    }
-
-    this.addMessageListeners(["Webapps:Launch:Return:OK",
-                              "Webapps:Launch:Return:KO"]);
     return request;
   },
 
@@ -607,6 +604,41 @@ WebappsApplication.prototype = {
       Services.DOMRequest.fireErrorAsync(request, "NO_CLEARABLE_BROWSER");
     }
     return request;
+  },
+
+  connect: function(aKeyword, aRules) {
+    this.addMessageListeners(["Webapps:Connect:Return:OK",
+                              "Webapps:Connect:Return:KO"]);
+    return this.createPromise(function (aResolve, aReject) {
+      let from = this._window.location.origin + this._window.location.pathname;
+      cpmm.sendAsyncMessage("Webapps:Connect", {
+        keyword: aKeyword,
+        rules: aRules,
+        manifestURL: this.manifestURL,
+        pubPageURL: from,
+        outerWindowID: this._id,
+        topWindowID: this._topId,
+        requestID: this.getPromiseResolverId({
+          resolve: aResolve,
+          reject: aReject
+        })
+      });
+    }.bind(this));
+  },
+
+  getConnections: function() {
+    this.addMessageListeners("Webapps:GetConnections:Return:OK");
+    return this.createPromise(function (aResolve, aReject) {
+      cpmm.sendAsyncMessage("Webapps:GetConnections", {
+        manifestURL: this.manifestURL,
+        outerWindowID: this._id,
+        topWindowID: this._topId,
+        requestID: this.getPromiseResolverId({
+          resolve: aResolve,
+          reject: aReject
+        })
+      });
+    }.bind(this));
   },
 
   addReceipt: function(receipt) {
@@ -657,19 +689,22 @@ WebappsApplication.prototype = {
 
   export: function() {
     this.addMessageListeners(["Webapps:Export:Return"]);
-    return this.createPromiseWithId((aResolverId) => {
+    return this.createPromise((aResolve, aReject) => {
       cpmm.sendAsyncMessage("Webapps:Export",
         { manifestURL: this.manifestURL,
           oid: this._id,
           topId: this._topId,
-          requestID: aResolverId
+          requestID: this.getPromiseResolverId({
+            resolve: aResolve,
+            reject: aReject
+          })
         });
     });
   },
 
   getLocalizedValue: function(aProperty, aLang, aEntryPoint) {
     this.addMessageListeners(["Webapps:GetLocalizedValue:Return"]);
-    return this.createPromiseWithId((aResolverId) => {
+    return this.createPromise((aResolve, aReject) => {
       cpmm.sendAsyncMessage("Webapps:GetLocalizedValue",
         { manifestURL: this.manifestURL,
           oid: this._id,
@@ -677,7 +712,10 @@ WebappsApplication.prototype = {
           property: aProperty,
           lang: aLang,
           entryPoint: aEntryPoint,
-          requestID: aResolverId
+          requestID: this.getPromiseResolverId({
+            resolve: aResolve,
+            reject: aReject
+          })
         });
     });
   },
@@ -716,7 +754,10 @@ WebappsApplication.prototype = {
   receiveMessage: function(aMessage) {
     let msg = aMessage.json;
     let req;
-    if (aMessage.name == "Webapps:Export:Return" ||
+    if (aMessage.name == "Webapps:Connect:Return:OK" ||
+        aMessage.name == "Webapps:Connect:Return:KO" ||
+        aMessage.name == "Webapps:GetConnections:Return:OK" ||
+        aMessage.name == "Webapps:Export:Return" ||
         aMessage.name == "Webapps:GetLocalizedValue:Return") {
       req = this.takePromiseResolver(msg.requestID);
     } else {
@@ -741,6 +782,33 @@ WebappsApplication.prototype = {
       case "Webapps:ClearBrowserData:Return":
         this.removeMessageListeners(aMessage.name);
         Services.DOMRequest.fireSuccess(req, null);
+        break;
+      case "Webapps:Connect:Return:OK":
+        this.removeMessageListeners(["Webapps:Connect:Return:OK",
+                                     "Webapps:Connect:Return:KO"]);
+        let messagePorts = new this._window.Array();
+        msg.messagePortIDs.forEach((aPortID) => {
+          let port = new this._window.MozInterAppMessagePort(aPortID);
+          messagePorts.push(port);
+        });
+        req.resolve(messagePorts);
+        break;
+      case "Webapps:Connect:Return:KO":
+        this.removeMessageListeners(["Webapps:Connect:Return:OK",
+                                     "Webapps:Connect:Return:KO"]);
+        req.reject("No connections registered");
+        break;
+      case "Webapps:GetConnections:Return:OK":
+        this.removeMessageListeners(aMessage.name);
+        let connections = new this._window.Array();
+        msg.connections.forEach((aConnection) => {
+          let connection =
+            new this._window.MozInterAppConnection(aConnection.keyword,
+                                                   aConnection.pubAppManifestURL,
+                                                   aConnection.subAppManifestURL);
+          connections.push(connection);
+        });
+        req.resolve(connections);
         break;
       case "Webapps:AddReceipt:Return:OK":
         this.removeMessageListeners(["Webapps:AddReceipt:Return:OK",
@@ -821,6 +889,7 @@ WebappsApplicationMgmt.prototype = {
                                         "Webapps:Uninstall:Broadcast:Return:OK",
                                         "Webapps:Uninstall:Return:KO",
                                         "Webapps:Install:Return:OK",
+                                        "Webapps:GetNotInstalled:Return:OK",
                                         "Webapps:GetIcon:Return",
                                         "Webapps:Import:Return",
                                         "Webapps:ExtractManifest:Return",
@@ -835,6 +904,7 @@ WebappsApplicationMgmt.prototype = {
                          );
 
     if (!aHasFullMgmtPrivilege) {
+      this.getNotInstalled = null;
       this.applyDownload = null;
     }
   },
@@ -888,39 +958,59 @@ WebappsApplicationMgmt.prototype = {
   },
 
   getIcon: function(aApp, aIconID, aEntryPoint) {
-    return this.createPromiseWithId((aResolverId) => {
+    return this.createPromise(function(aResolve, aReject) {
       cpmm.sendAsyncMessage("Webapps:GetIcon", {
         oid: this._id,
         topId: this._topId,
         manifestURL: aApp.manifestURL,
         iconID: aIconID,
         entryPoint: aEntryPoint,
-        requestID: aResolverId
+        requestID: this.getPromiseResolverId({
+          resolve: aResolve,
+          reject: aReject
+        })
       });
-    });
+    }.bind(this));
+  },
+
+  getNotInstalled: function() {
+    let request = this.createRequest();
+    let principal = this._window.document.nodePrincipal;
+
+    cpmm.sendAsyncMessage("Webapps:GetNotInstalled", {
+      oid: this._id,
+      topId: this._topId,
+      requestID: this.getRequestId(request)
+    }, null, principal);
+
+    return request;
   },
 
   import: function(aBlob) {
     let principal = this._window.document.nodePrincipal;
-    return this.createPromiseWithId((aResolverId) => {
+    return this.createPromise((aResolve, aReject) => {
       cpmm.sendAsyncMessage("Webapps:Import",
         { blob: aBlob,
           oid: this._id,
           topId: this._topId,
-          requestID: aResolverId
-        }, null, principal);
+          requestID: this.getPromiseResolverId({
+            resolve: aResolve,
+            reject: aReject
+          })}, null, principal);
     });
   },
 
   extractManifest: function(aBlob) {
     let principal = this._window.document.nodePrincipal;
-    return this.createPromiseWithId((aResolverId) => {
+    return this.createPromise((aResolve, aReject) => {
       cpmm.sendAsyncMessage("Webapps:ExtractManifest",
         { blob: aBlob,
           oid: this._id,
           topId: this._topId,
-          requestID: aResolverId
-        }, null, principal);
+          requestID: this.getPromiseResolverId({
+            resolve: aResolve,
+            reject: aReject
+          })}, null, principal);
     });
   },
 
@@ -980,6 +1070,9 @@ WebappsApplicationMgmt.prototype = {
     }
 
     switch (aMessage.name) {
+      case "Webapps:GetNotInstalled:Return:OK":
+        Services.DOMRequest.fireSuccess(req, convertAppsArray(msg.apps, this._window));
+        break;
       case "Webapps:Install:Return:OK":
         {
           let app = createContentApplicationObject(this._window, msg.app);

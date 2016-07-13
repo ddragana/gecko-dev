@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "nsSMILTimeValueSpecParams.h"
 #include "nsReferencedElement.h"
+#include "nsAutoPtr.h"
 #include "nsIDOMEventListener.h"
 
 class nsAString;
@@ -91,7 +92,7 @@ protected:
   public:
     explicit TimeReferenceElement(nsSMILTimeValueSpec* aOwner) : mSpec(aOwner) { }
     void ResetWithElement(Element* aTo) {
-      RefPtr<Element> from = get();
+      nsRefPtr<Element> from = get();
       Unlink();
       ElementChanged(from, aTo);
     }
@@ -125,7 +126,7 @@ protected:
   private:
     nsSMILTimeValueSpec* mSpec;
   };
-  RefPtr<EventListener> mEventListener;
+  nsRefPtr<EventListener> mEventListener;
 };
 
 #endif // NS_SMILTIMEVALUESPEC_H_

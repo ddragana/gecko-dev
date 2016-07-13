@@ -10,6 +10,7 @@
  * W3C liability, trademark and document use rules apply.
  */
 
+enum IsTypeSupportedResult { "" /* empty string */, "maybe", "probably" };
 enum SessionType { "temporary", "persistent" };
 
 [Pref="media.eme.apiVisible"]

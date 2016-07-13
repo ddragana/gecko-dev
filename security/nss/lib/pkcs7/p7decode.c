@@ -648,15 +648,7 @@ sec_pkcs7_decoder_notify (void *arg, PRBool before, void *dest, int depth)
 	after = PR_TRUE;
 
     p7dcx = (SEC_PKCS7DecoderContext*)arg;
-    if (!p7dcx) {
-	return;
-    }
-
     cinfo = p7dcx->cinfo;
-
-    if (!cinfo) {
-	return;
-    }
 
     if (cinfo->contentTypeTag == NULL) {
 	if (after && dest == &(cinfo->contentType))
@@ -874,10 +866,6 @@ sec_pkcs7_decoder_notify (void *arg, PRBool before, void *dest, int depth)
 
       case SEC_OID_PKCS7_ENCRYPTED_DATA:
 	encd = cinfo->content.encryptedData;
-
-	if (!encd) {
-	    break;
-	}
 
 	/*
 	 * XXX If the decryption key callback is set, we want to start
@@ -1302,6 +1290,7 @@ sec_pkcs7_verify_signature(SEC_PKCS7ContentInfo *cinfo,
     const SECItem *digest;
     SECItem **digests;
     SECItem **rawcerts;
+    CERTSignedCrl **crls;
     SEC_PKCS7SignerInfo **signerinfos, *signerinfo;
     CERTCertificate *cert, **certs;
     PRBool goodsig;
@@ -1351,6 +1340,7 @@ sec_pkcs7_verify_signature(SEC_PKCS7ContentInfo *cinfo,
 	    digestalgs = sdp->digestAlgorithms;
 	    digests = sdp->digests;
 	    rawcerts = sdp->rawCerts;
+	    crls = sdp->crls;
 	    signerinfos = sdp->signerInfos;
 	    content_type = &(sdp->contentInfo.contentType);
 	    sigkey = NULL;
@@ -1365,6 +1355,7 @@ sec_pkcs7_verify_signature(SEC_PKCS7ContentInfo *cinfo,
 	    digestalgs = saedp->digestAlgorithms;
 	    digests = saedp->digests;
 	    rawcerts = saedp->rawCerts;
+	    crls = saedp->crls;
 	    signerinfos = saedp->signerInfos;
 	    content_type = &(saedp->encContentInfo.contentType);
 	    sigkey = saedp->sigKey;

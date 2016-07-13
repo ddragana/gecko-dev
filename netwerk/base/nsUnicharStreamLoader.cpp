@@ -49,6 +49,7 @@ nsUnicharStreamLoader::Create(nsISupports *aOuter,
 NS_IMPL_ISUPPORTS(nsUnicharStreamLoader, nsIUnicharStreamLoader,
                   nsIRequestObserver, nsIStreamListener)
 
+/* readonly attribute nsIChannel channel; */
 NS_IMETHODIMP
 nsUnicharStreamLoader::GetChannel(nsIChannel **aChannel)
 {
@@ -56,6 +57,7 @@ nsUnicharStreamLoader::GetChannel(nsIChannel **aChannel)
   return NS_OK;
 }
 
+/* readonly attribute nsACString charset */
 NS_IMETHODIMP
 nsUnicharStreamLoader::GetCharset(nsACString& aCharset)
 {

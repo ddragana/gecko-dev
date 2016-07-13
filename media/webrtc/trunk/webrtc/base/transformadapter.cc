@@ -182,16 +182,4 @@ TransformAdapter::Close() {
   StreamAdapterInterface::Close();
 }
 
-bool TransformAdapter::GetAvailable(size_t* size) const {
-  return false;
-}
-
-bool TransformAdapter::ReserveSize(size_t size) {
-  return true;
-}
-
-bool TransformAdapter::Rewind() {
-  return false;
-}
-
 } // namespace rtc

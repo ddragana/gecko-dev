@@ -12,11 +12,12 @@
 #ifndef nsHTMLStyleSheet_h_
 #define nsHTMLStyleSheet_h_
 
+#include "nsAutoPtr.h"
 #include "nsColor.h"
 #include "nsCOMPtr.h"
 #include "nsIStyleRule.h"
 #include "nsIStyleRuleProcessor.h"
-#include "PLDHashTable.h"
+#include "pldhash.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsString.h"
@@ -44,8 +45,7 @@ public:
   virtual nsRestyleHint HasStateDependentStyle(PseudoElementStateRuleProcessorData* aData) override;
   virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData) override;
   virtual nsRestyleHint
-    HasAttributeDependentStyle(AttributeRuleProcessorData* aData,
-                               mozilla::RestyleHintData& aRestyleHintDataResult) override;
+    HasAttributeDependentStyle(AttributeRuleProcessorData* aData) override;
   virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) override;
   virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
     const MOZ_MUST_OVERRIDE override;
@@ -83,7 +83,6 @@ private:
 
     // nsIStyleRule interface
     virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
-    virtual bool MightMapInheritedStyleData() override;
   #ifdef DEBUG
     virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
   #endif
@@ -92,7 +91,7 @@ private:
   };
 
   // Implementation of SetLink/VisitedLink/ActiveLinkColor
-  nsresult ImplLinkColorSetter(RefPtr<HTMLColorRule>& aRule, nscolor aColor);
+  nsresult ImplLinkColorSetter(nsRefPtr<HTMLColorRule>& aRule, nscolor aColor);
 
   class GenericTableRule;
   friend class GenericTableRule;
@@ -106,7 +105,6 @@ private:
 
     // nsIStyleRule interface
     virtual void MapRuleInfoInto(nsRuleData* aRuleData) override = 0;
-    virtual bool MightMapInheritedStyleData() override = 0;
   #ifdef DEBUG
     virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
   #endif
@@ -120,7 +118,6 @@ private:
     TableTHRule() {}
 
     virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
-    virtual bool MightMapInheritedStyleData() override;
   };
 
   // Rule to handle quirk table colors
@@ -129,7 +126,6 @@ private:
     TableQuirkColorRule() {}
 
     virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
-    virtual bool MightMapInheritedStyleData() override;
   };
 
 public: // for mLangRuleTable structures only
@@ -148,7 +144,6 @@ public: // for mLangRuleTable structures only
 
     // nsIStyleRule interface
     virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
-    virtual bool MightMapInheritedStyleData() override;
   #ifdef DEBUG
     virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
   #endif
@@ -158,11 +153,11 @@ public: // for mLangRuleTable structures only
 
 private:
   nsIDocument*            mDocument;
-  RefPtr<HTMLColorRule> mLinkRule;
-  RefPtr<HTMLColorRule> mVisitedRule;
-  RefPtr<HTMLColorRule> mActiveRule;
-  RefPtr<TableQuirkColorRule> mTableQuirkColorRule;
-  RefPtr<TableTHRule>   mTableTHRule;
+  nsRefPtr<HTMLColorRule> mLinkRule;
+  nsRefPtr<HTMLColorRule> mVisitedRule;
+  nsRefPtr<HTMLColorRule> mActiveRule;
+  nsRefPtr<TableQuirkColorRule> mTableQuirkColorRule;
+  nsRefPtr<TableTHRule>   mTableTHRule;
 
   PLDHashTable            mMappedAttrTable;
   PLDHashTable            mLangRuleTable;

@@ -7,7 +7,7 @@ const modules = [
 ];
 
 function run_test() {
-  for (let m of modules) {
+  for each (let m in modules) {
     let resource = "resource://services-crypto/" + m;
     _("Attempting to import: " + resource);
     Components.utils.import(resource, {});

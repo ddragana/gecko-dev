@@ -11,7 +11,7 @@ this.EXPORTED_SYMBOLS = [
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 // Set to true to see debug messages.
-var DEBUG = false;
+let DEBUG = false;
 
 /**
  * Constructor of Sntp.
@@ -169,7 +169,7 @@ Sntp.prototype = {
       return String.fromCharCode.apply(null, new Uint8Array(buffer));
     }
 
-    function SNTPListener() {}
+    function SNTPListener() {};
     SNTPListener.prototype = {
       onStartRequest: function onStartRequest(request, context) {
       },
@@ -324,7 +324,7 @@ Sntp.prototype = {
   _updateTimer: null
 };
 
-var debug;
+let debug;
 if (DEBUG) {
   debug = function (s) {
     dump("-*- Sntp: " + s + "\n");

@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include "defines.css"
+%filter substitution
+%include defines.inc
 
 .list-item > a {
   color: inherit;
@@ -15,13 +16,13 @@ include "defines.css"
 }
 
 .details {
-  margin-inline-start: calc(var(--icon-size) + var(--icon-margin) * 2 - 1em);
+  -moz-margin-start: calc(var(--icon-size) + var(--icon-margin) * 2 - 1em);
   padding: 1em;
 }
 
 .date {
   color: gray;
-  margin-inline-start: 0.5em;
+  -moz-margin-start: 0.5em;
 }
 
 .domain,

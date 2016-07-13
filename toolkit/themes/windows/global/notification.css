@@ -8,16 +8,6 @@ notification {
   color: InfoText;
   background-color: InfoBackground;
   text-shadow: none;
-  border-top: 1px solid ThreeDShadow;
-  border-bottom: 1px solid ThreeDShadow;
-}
-
-notificationbox[notificationside="top"] > notification {
-  border-top-style: none;
-}
-
-notificationbox[notificationside="bottom"] > notification {
-  border-bottom-style: none;
 }
 
 notification[type="info"] {
@@ -38,8 +28,8 @@ notification[type="critical"] {
 .messageImage {
   width: 16px;
   height: 16px;
-  margin-inline-start: 6px;
-  margin-inline-end: 1px;
+  -moz-margin-start: 6px;
+  -moz-margin-end: 1px;
 }
 
 /* Default icons for notifications */
@@ -63,7 +53,7 @@ notification[type="critical"] {
 }
 
 .messageCloseButton > .toolbarbutton-icon {
-  margin-inline-end: 5px;
+  -moz-margin-end: 5px;
 }
 
 /* Popup notification */
@@ -132,13 +122,13 @@ XXX: apply styles to all themes until bug 509642 is fixed
   .popup-notification-menubutton > .button-menubutton-button {
     background-color: transparent;
     padding: 1px;
-    border-inline-end: none;
+    -moz-border-end: none;
   }
 
   .popup-notification-menubutton:not([type="menu-button"]),
   .popup-notification-menubutton > .button-menubutton-button > .button-box {
-    padding-inline-start: 8px;
-    padding-inline-end: 5px;
+    -moz-padding-start: 8px;
+    -moz-padding-end: 5px;
   }
 
   .popup-notification-menubutton > .button-menubutton-dropmarker {
@@ -200,7 +190,7 @@ XXX: apply styles to all themes until bug 509642 is fixed
 %endif
 
 .popup-notification-closebutton {
-  margin-inline-end: -14px;
+  -moz-margin-end: -14px;
   margin-top: -10px;
 }
 

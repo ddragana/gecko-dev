@@ -41,16 +41,13 @@ NetworkInterfaceListService.prototype = {
                        LIST_NOT_INCLUDE_IMS_INTERFACES) != 0,
           excludeDun: (aConditions &
                        Ci.nsINetworkInterfaceListService.
-                       LIST_NOT_INCLUDE_DUN_INTERFACES) != 0,
-          excludeFota: (aConditions &
-                        Ci.nsINetworkInterfaceListService.
-                        LIST_NOT_INCLUDE_FOTA_INTERFACES) != 0
+                       LIST_NOT_INCLUDE_DUN_INTERFACES) != 0
         }
       )[0]);
   }
 };
 
-function FakeNetworkInfo(aAttributes) {
+function FakeNetworkInterface(aAttributes) {
   this.state = aAttributes.state;
   this.type = aAttributes.type;
   this.name = aAttributes.name;
@@ -58,9 +55,11 @@ function FakeNetworkInfo(aAttributes) {
   this.prefixLengths = aAttributes.prefixLengths;
   this.gateways = aAttributes.gateways;
   this.dnses = aAttributes.dnses;
+  this.httpProxyHost = aAttributes.httpProxyHost;
+  this.httpProxyPort = aAttributes.httpProxyPort;
 }
-FakeNetworkInfo.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsINetworkInfo]),
+FakeNetworkInterface.prototype = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsINetworkInterface]),
 
   getAddresses: function (ips, prefixLengths) {
     ips.value = this.ips.slice();
@@ -87,7 +86,7 @@ FakeNetworkInfo.prototype = {
 function NetworkInterfaceList (aInterfaceLiterals) {
   this._interfaces = [];
   for (let entry of aInterfaceLiterals) {
-    this._interfaces.push(new FakeNetworkInfo(entry));
+    this._interfaces.push(new FakeNetworkInterface(entry));
   }
 }
 
@@ -98,7 +97,7 @@ NetworkInterfaceList.prototype = {
     return this._interfaces.length;
   },
 
-  getInterfaceInfo: function(index) {
+  getInterface: function(index) {
     if (!this._interfaces) {
       return null;
     }

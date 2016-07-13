@@ -18,12 +18,12 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=717103
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=717103">Mozilla Bug 717103</a>
 <p id="display"></p>
 <div id="content" style="display: none">
-
+  
 </div>
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
-devicestorage_setup(function () {
+devicestorage_setup()
 
 ok(navigator.getDeviceStorage, "Should have getDeviceStorage");
 
@@ -50,11 +50,10 @@ ok(storage, "videos - Should have getDeviceStorage");
 var cursor = storage.enumerate();
 ok(cursor, "Should have a non-null cursor");
 
-SimpleTest.finish();
-
-});
+devicestorage_cleanup();
 
 </script>
 </pre>
 </body>
 </html>
+

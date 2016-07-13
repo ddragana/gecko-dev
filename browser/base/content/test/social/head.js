@@ -55,7 +55,7 @@ function promiseSocialUrlNotRemembered(url) {
   return deferred.promise;
 }
 
-var gURLsNotRemembered = [];
+let gURLsNotRemembered = [];
 
 
 function checkProviderPrefsEmpty(isError) {
@@ -89,7 +89,7 @@ function runSocialTestWithProvider(manifest, callback, finishcallback) {
     SessionStore.setWindowValue(window, "socialSidebar", "");
     for (let i = 0; i < manifests.length; i++) {
       let m = manifests[i];
-      for (let what of ['sidebarURL', 'iconURL', 'shareURL', 'markURL']) {
+      for (let what of ['sidebarURL', 'workerURL', 'iconURL', 'shareURL', 'markURL']) {
         if (m[what]) {
           yield promiseSocialUrlNotRemembered(m[what]);
         }
@@ -154,7 +154,7 @@ function runSocialTestWithProvider(manifest, callback, finishcallback) {
         registerCleanupFunction(function () {
           finishSocialTest(true);
         });
-        waitForCondition(() => provider.enabled,
+        waitForCondition(function() provider.enabled,
                          function() {
           info("provider has been enabled");
           callback(finishSocialTest);
@@ -194,7 +194,8 @@ function runSocialTests(tests, cbPreTest, cbPostTest, cbFinish) {
       return;
     }
     let [name, func] = result.value;
-    // We run on a timeout to help keep the debug messages sane.
+    // We run on a timeout as the frameworker also makes use of timeouts, so
+    // this helps keep the debug messages sane.
     executeSoon(function() {
       function cleanupAndRunNextTest() {
         info("sub-test " + name + " complete");
@@ -419,15 +420,12 @@ function ensureBrowserTabClosed(tab) {
   return promise;
 }
 
-function ensureFrameLoaded(frame, uri) {
+function ensureFrameLoaded(frame) {
   let deferred = Promise.defer();
-  if (frame.contentDocument && frame.contentDocument.readyState == "complete" &&
-      (!uri || frame.contentDocument.location.href == uri)) {
+  if (frame.contentDocument && frame.contentDocument.readyState == "complete") {
     deferred.resolve();
   } else {
     frame.addEventListener("load", function handler() {
-      if (uri && frame.contentDocument.location.href != uri)
-        return;
       frame.removeEventListener("load", handler, true);
       deferred.resolve()
     }, true);
@@ -443,6 +441,9 @@ function get3ChatsForCollapsing(mode, cb) {
   // ensure a second can be created fully visible but a third can not - then
   // create the other 2.  first will will be collapsed, second fully visible
   // and the third also visible and the "selected" one.
+  // To make our life easier we don't go via the worker and ports so we get
+  // more control over creation *and* to make the code much simpler.  We
+  // assume the worker/port stuff is individually tested above.
   let chatbar = getChatBar();
   let chatWidth = undefined;
   let num = 0;
@@ -473,9 +474,7 @@ function get3ChatsForCollapsing(mode, cb) {
           let second = chatbar.childNodes[2];
           let first = chatbar.childNodes[1];
           let third = chatbar.childNodes[0];
-          is(first.collapsed, true, "first collapsed state as promised");
-          is(second.collapsed, false, "second collapsed state as promised");
-          is(third.collapsed, false, "third collapsed state as promised");
+          ok(first.collapsed && !second.collapsed && !third.collapsed, "collapsed state as promised");
           is(chatbar.selectedChat, third, "third is selected as promised")
           info("have 3 chats for collapse testing - starting actual test...");
           cb(first, second, third);
@@ -488,26 +487,16 @@ function get3ChatsForCollapsing(mode, cb) {
 function makeChat(mode, uniqueid, cb) {
   info("making a chat window '" + uniqueid +"'");
   let provider = SocialSidebar.provider;
-  let chatUrl = provider.origin + "/browser/browser/base/content/test/social/social_chat.html";
-  // chatURL is not a part of the provider class, but is added by tests if we
-  // want to use a specific url (different than above) for testing
-  if (provider.chatURL) {
-    chatUrl = provider.chatURL;
-  }
+  const chatUrl = provider.origin + "/browser/browser/base/content/test/social/social_chat.html";
   // Note that we use promiseChatLoaded instead of the callback to ensure the
   // content has started loading.
-  let chatbox = getChatBar().openChat({
-    origin: provider.origin,
-    title: provider.name,url: chatUrl + "?id=" + uniqueid,
-    mode: mode
-  });
+  let chatbox = getChatBar().openChat(provider.origin, provider.name,
+                                      chatUrl + "?id=" + uniqueid, mode);
   chatbox.promiseChatLoaded.then(
     () => {
     info("chat window has opened");
-    chatbox.content.messageManager.sendAsyncMessage("Social:SetDocumentTitle", {
-      title: uniqueid
-    });
-    cb(chatbox);
+    chatbox.contentDocument.title = uniqueid;
+    cb();
   });
 }
 
@@ -593,7 +582,7 @@ function resizeAndCheckWidths(first, second, third, checks, cb) {
     checkPopup();
     ok(sizedOk, count+": window resized correctly");
     function collapsedObserver(r, m) {
-      if ([first, second, third].filter(item => !item.collapsed).length == numExpectedVisible) {
+      if ([first, second, third].filter(function(item) !item.collapsed).length == numExpectedVisible) {
         if (m) {
           m.disconnect();
         }
@@ -629,52 +618,17 @@ function getPopupWidth() {
   return popup.parentNode.getBoundingClientRect().width + margins;
 }
 
-function promiseNodeRemoved(aNode) {
-  let deferred = Promise.defer();
-  let parent = aNode.parentNode;
-
-  let observer = new MutationObserver(function onMutatations(mutations) {
-    for (let mutation of mutations) {
-      for (let i = 0; i < mutation.removedNodes.length; i++) {
-        let node = mutation.removedNodes.item(i);
-        if (node != aNode) {
-          continue;
-        }
-        observer.disconnect();
-        deferred.resolve();
-      }
-    }
-  });
-  observer.observe(parent, {childList: true});
-  return deferred.promise;
-}
-
-function promiseCloseChat(chat) {
-  let promise = promiseNodeRemoved(chat);
-  chat.close();
-  return promise;
-}
-
 function closeAllChats() {
   let chatbar = getChatBar();
   while (chatbar.selectedChat) {
-    yield promiseCloseChat(chatbar.selectedChat);
+    chatbar.selectedChat.close();
   }
-}
-
-function openChatViaUser() {
-  let sidebarDoc = document.getElementById("social-sidebar-browser").contentDocument;
-  let button = sidebarDoc.getElementById("chat-opener");
-  // Note we must use synthesizeMouseAtCenter() rather than calling
-  // .click() directly as this causes nsIDOMWindowUtils.isHandlingUserInput
-  // to be true.
-  EventUtils.synthesizeMouseAtCenter(button, {}, sidebarDoc.defaultView);
 }
 
 
 // Support for going on and offline.
 // (via browser/base/content/test/browser_bookmark_titles.js)
-var origProxyType = Services.prefs.getIntPref('network.proxy.type');
+let origProxyType = Services.prefs.getIntPref('network.proxy.type');
 
 function toggleOfflineStatus(goOffline) {
   // Bug 968887 fix.  when going on/offline, wait for notification before continuing

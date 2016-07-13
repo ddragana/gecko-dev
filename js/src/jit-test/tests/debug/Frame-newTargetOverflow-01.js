@@ -7,10 +7,6 @@ load(libdir + "jitopts.js");
 if (!jitTogglesMatch(Opts_Ion2NoOffthreadCompilation))
   quit();
 
-// GCs can invalidate JIT code and cause this test to fail.
-if ('gczeal' in this)
-    gczeal(0);
-
 withJitOptions(Opts_Ion2NoOffthreadCompilation, function () {
   var g = newGlobal();
   var dbg = new Debugger;

@@ -33,8 +33,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/cpu.h"
 #include "mozilla/Assertions.h"
-#include "skia/include/core/SkTypes.h"
+#include "skia/SkTypes.h"
 
 // avoid confusion with Mac OS X's math library (Carbon)
 #if defined(__APPLE__)

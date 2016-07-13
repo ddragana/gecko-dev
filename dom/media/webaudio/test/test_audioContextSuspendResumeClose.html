@@ -10,7 +10,9 @@
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
-function tryToCreateNodeOnClosedContext(ctx) {
+SimpleTest.requestCompleteLog();
+
+function tryToToCreateNodeOnClosedContext(ctx) {
   ok(ctx.state, "closed", "The context is in closed state");
 
   [ { name: "createBufferSource" },
@@ -305,7 +307,7 @@ function testAudioContext() {
       ok(!stateTracker.close.promise && !stateTracker.close.handler,
         "Promise should be called before the callback, and only once");
       stateTracker.close.promise = true;
-      tryToCreateNodeOnClosedContext(ac);
+      tryToToCreateNodeOnClosedContext(ac);
       tryLegalOpeerationsOnClosedContext(ac);
     });
   }
@@ -348,7 +350,7 @@ function testOfflineAudioContext() {
     previousState = o.state;
     o.onstatechange = afterRenderingFinished;
 
-    tryToCreateNodeOnClosedContext(o);
+    tryToToCreateNodeOnClosedContext(o);
     tryLegalOpeerationsOnClosedContext(o);
   }
 
@@ -361,24 +363,6 @@ function testOfflineAudioContext() {
   o.startRendering().then(function(buffer) {
     finishedRendering = true;
   });
-}
-
-function testSuspendResumeEventLoop() {
-  var ac = new AudioContext();
-  var source = ac.createBufferSource();
-  source.buffer = ac.createBuffer(1, 44100, 44100);
-  source.onended = function() {
-    ok(true, "The AudioContext did resume.");
-    finish();
-  }
-  ac.onstatechange = function() {
-    ac.onstatechange = null;
-
-    ok(ac.state == "running", "initial state is running");
-    ac.suspend();
-    source.start();
-    ac.resume();
-  }
 }
 
 var remaining = 0;
@@ -397,8 +381,7 @@ addLoadEvent(function() {
     testOfflineAudioContext,
     testScriptProcessNodeSuspended,
     testMultiContextOutput,
-    testMultiContextInput,
-    testSuspendResumeEventLoop
+    testMultiContextInput
   ];
   remaining = tests.length;
   tests.forEach(function(f) { f() });

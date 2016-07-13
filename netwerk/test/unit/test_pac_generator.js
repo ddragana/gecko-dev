@@ -4,17 +4,16 @@
 "use strict";
 
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
 
-var ios = Cc["@mozilla.org/network/io-service;1"]
+let ios = Cc["@mozilla.org/network/io-service;1"]
              .getService(Components.interfaces.nsIIOService);
 
-var pps = Cc["@mozilla.org/network/protocol-proxy-service;1"].getService();
+let pps = Cc["@mozilla.org/network/protocol-proxy-service;1"].getService();
 
-var prefs = Cc["@mozilla.org/preferences-service;1"]
+let prefs = Cc["@mozilla.org/preferences-service;1"]
                .getService(Components.interfaces.nsIPrefBranch);
 
-var pgen = Cc["@mozilla.org/pac-generator;1"]
+let pgen = Cc["@mozilla.org/pac-generator;1"]
               .getService(Components.interfaces.nsIPACGenerator);
 
 const TARGET_HOST ="www.mozilla.org";
@@ -139,10 +138,14 @@ function test_resolve_type(type, host, callback) {
     return app;
   };
 
-  let channel = NetUtil.newChannel({
-    uri: type + "://" + host + "/",
-    loadUsingSystemPrincipal: true
-  });
+  let channel = ios.newChannel2(type + "://" + host + "/",
+                                null,
+                                null,
+                                null,      // aLoadingNode
+                                Services.scriptSecurityManager.getSystemPrincipal(),
+                                null,      // aTriggeringPrincipal
+                                Ci.nsILoadInfo.SEC_NORMAL,
+                                Ci.nsIContentPolicy.TYPE_OTHER);
   channel.notificationCallbacks =
     AppsUtils.createLoadContext(MY_APP_ID, true);
 

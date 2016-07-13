@@ -15,7 +15,6 @@
 #include "nsHtml5OwningUTF16Buffer.h"
 #include "nsIInputStream.h"
 #include "mozilla/Mutex.h"
-#include "mozilla/UniquePtr.h"
 #include "nsHtml5AtomTable.h"
 #include "nsHtml5Speculation.h"
 #include "nsITimer.h"
@@ -399,7 +398,7 @@ class nsHtml5StreamParser : public nsICharsetDetectionObserver {
     /**
      * The buffer for sniffing the character encoding
      */
-    mozilla::UniquePtr<uint8_t[]> mSniffingBuffer;
+    nsAutoArrayPtr<uint8_t>       mSniffingBuffer;
 
     /**
      * The number of meaningful bytes in mSniffingBuffer
@@ -436,7 +435,7 @@ class nsHtml5StreamParser : public nsICharsetDetectionObserver {
     /**
      * The first buffer in the pending UTF-16 buffer queue
      */
-    RefPtr<nsHtml5OwningUTF16Buffer> mFirstBuffer;
+    nsRefPtr<nsHtml5OwningUTF16Buffer> mFirstBuffer;
 
     /**
      * The last buffer in the pending UTF-16 buffer queue
@@ -473,7 +472,7 @@ class nsHtml5StreamParser : public nsICharsetDetectionObserver {
     /**
      * The owner parser.
      */
-    RefPtr<nsHtml5Parser>       mOwner;
+    nsRefPtr<nsHtml5Parser>       mOwner;
 
     /**
      * Whether the last character tokenized was a carriage return (for CRLF)

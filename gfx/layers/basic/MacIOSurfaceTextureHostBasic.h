@@ -31,8 +31,6 @@ public:
                                  MacIOSurface* aSurface);
   virtual ~MacIOSurfaceTextureSourceBasic();
 
-  virtual const char* Name() const override { return "MacIOSurfaceTextureSourceBasic"; }
-
   virtual TextureSourceBasic* AsSourceBasic() override { return this; }
 
   virtual gfx::IntSize GetSize() const override;
@@ -61,8 +59,6 @@ public:
                                const SurfaceDescriptorMacIOSurface& aDescriptor);
 
   virtual void SetCompositor(Compositor* aCompositor) override;
-
-  virtual Compositor* GetCompositor() override { return mCompositor; }
 
   virtual bool Lock() override;
 

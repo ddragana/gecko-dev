@@ -21,17 +21,10 @@ EMEAudioCallbackAdapter::Error(GMPErr aErr)
   AudioCallbackAdapter::Error(aErr);
 }
 
-EMEAudioDecoder::EMEAudioDecoder(CDMProxy* aProxy,
-                                 const GMPAudioDecoderParams& aParams)
-  : GMPAudioDecoder(GMPAudioDecoderParams(aParams).WithAdapter(
-                    new EMEAudioCallbackAdapter(aParams.mCallback)))
-  , mProxy(aProxy)
-{}
-
 void
 EMEAudioDecoder::InitTags(nsTArray<nsCString>& aTags)
 {
-  aTags.AppendElement(NS_LITERAL_CSTRING("aac"));
+  GMPAudioDecoder::InitTags(aTags);
   aTags.AppendElement(NS_ConvertUTF16toUTF8(mProxy->KeySystem()));
 }
 

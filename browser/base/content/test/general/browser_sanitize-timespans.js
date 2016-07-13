@@ -1,22 +1,20 @@
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-requestLongerTimeout(2);
-
 // Bug 453440 - Test the timespan-based logic of the sanitizer code
-var now_mSec = Date.now();
-var now_uSec = now_mSec * 1000;
+let now_mSec = Date.now();
+let now_uSec = now_mSec * 1000;
 
 const kMsecPerMin = 60 * 1000;
 const kUsecPerMin = 60 * 1000000;
 
-var tempScope = {};
+let tempScope = {};
 Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader)
                                            .loadSubScript("chrome://browser/content/sanitize.js", tempScope);
-var Sanitizer = tempScope.Sanitizer;
+let Sanitizer = tempScope.Sanitizer;
 
-var FormHistory = (Components.utils.import("resource://gre/modules/FormHistory.jsm", {})).FormHistory;
-var Downloads = (Components.utils.import("resource://gre/modules/Downloads.jsm", {})).Downloads;
+let FormHistory = (Components.utils.import("resource://gre/modules/FormHistory.jsm", {})).FormHistory;
+let Downloads = (Components.utils.import("resource://gre/modules/Downloads.jsm", {})).Downloads;
 
 function promiseFormHistoryRemoved() {
   let deferred = Promise.defer();
@@ -42,12 +40,16 @@ function promiseDownloadRemoved(list) {
   return deferred.promise;
 }
 
-add_task(function* test() {
-  yield setupDownloads();
-  yield setupFormHistory();
-  yield setupHistory();
-  yield onHistoryReady();
-});
+function test() {
+  waitForExplicitFinish();
+
+  Task.spawn(function() {
+    yield setupDownloads();
+    yield setupFormHistory();
+    yield setupHistory();
+    yield onHistoryReady();
+  }).then(null, ex => ok(false, ex)).then(finish);
+}
 
 function countEntries(name, message, check) {
   let deferred = Promise.defer();
@@ -57,7 +59,7 @@ function countEntries(name, message, check) {
     obj.fieldname = name;
 
   let count;
-  FormHistory.count(obj, { handleResult: result => count = result,
+  FormHistory.count(obj, { handleResult: function (result) count = result,
                            handleError: function (error) {
                              do_throw("Error occurred searching form history: " + error);
                              deferred.reject(error)
@@ -73,7 +75,7 @@ function countEntries(name, message, check) {
   return deferred.promise;
 }
 
-function* onHistoryReady() {
+function onHistoryReady() {
   var hoursSinceMidnight = new Date().getHours();
   var minutesSinceMidnight = hoursSinceMidnight * 60 + new Date().getMinutes();
 
@@ -96,14 +98,13 @@ function* onHistoryReady() {
 
   let publicList = yield Downloads.getList(Downloads.PUBLIC);
   let downloadPromise = promiseDownloadRemoved(publicList);
-  let formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear 10 minutes ago
   s.range = [now_uSec - 10*60*1000000, now_uSec];
-  yield s.sanitize();
+  s.sanitize();
   s.range = null;
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://10minutes.com"))),
@@ -154,13 +155,12 @@ function* onHistoryReady() {
     ok((yield downloadExists(publicList, "fakefile-today")), "'Today' download should still be present");
 
   downloadPromise = promiseDownloadRemoved(publicList);
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear 1 hour
   Sanitizer.prefs.setIntPref("timeSpan", 1);
-  yield s.sanitize();
+  s.sanitize();
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://1hour.com"))),
@@ -204,14 +204,13 @@ function* onHistoryReady() {
     ok((yield downloadExists(publicList, "fakefile-today")), "'Today' download should still be present");
   
   downloadPromise = promiseDownloadRemoved(publicList);
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear 1 hour 10 minutes
   s.range = [now_uSec - 70*60*1000000, now_uSec];
-  yield s.sanitize();
+  s.sanitize();
   s.range = null;
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://1hour10minutes.com"))),
@@ -250,13 +249,12 @@ function* onHistoryReady() {
     ok((yield downloadExists(publicList, "fakefile-today")), "'Today' download should still be present");
 
   downloadPromise = promiseDownloadRemoved(publicList);
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear 2 hours
   Sanitizer.prefs.setIntPref("timeSpan", 2);
-  yield s.sanitize();
+  s.sanitize();
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://2hour.com"))),
@@ -289,16 +287,15 @@ function* onHistoryReady() {
   ok((yield downloadExists(publicList, "fakefile-4-hour-10-minutes")), "4 hour 10 minute download should still be present");
   if (hoursSinceMidnight > 2)
     ok((yield downloadExists(publicList, "fakefile-today")), "'Today' download should still be present");
-
+  
   downloadPromise = promiseDownloadRemoved(publicList);
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear 2 hours 10 minutes
   s.range = [now_uSec - 130*60*1000000, now_uSec];
-  yield s.sanitize();
+  s.sanitize();
   s.range = null;
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://2hour10minutes.com"))),
@@ -329,13 +326,12 @@ function* onHistoryReady() {
     ok((yield downloadExists(publicList, "fakefile-today")), "'Today' download should still be present");
 
   downloadPromise = promiseDownloadRemoved(publicList);
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear 4 hours
   Sanitizer.prefs.setIntPref("timeSpan", 3);
-  yield s.sanitize();
+  s.sanitize();
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://4hour.com"))),
@@ -362,14 +358,13 @@ function* onHistoryReady() {
     ok((yield downloadExists(publicList, "fakefile-today")), "'Today' download should still be present");
 
   downloadPromise = promiseDownloadRemoved(publicList);
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear 4 hours 10 minutes
   s.range = [now_uSec - 250*60*1000000, now_uSec];
-  yield s.sanitize();
+  s.sanitize();
   s.range = null;
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://4hour10minutes.com"))),
@@ -398,13 +393,12 @@ function* onHistoryReady() {
   } else {
     downloadPromise = Promise.resolve();
   }
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Clear Today
   Sanitizer.prefs.setIntPref("timeSpan", 4);
-  yield s.sanitize();
+  s.sanitize();
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   // Be careful.  If we add our objectss just before midnight, and sanitize
@@ -427,13 +421,12 @@ function* onHistoryReady() {
   ok((yield downloadExists(publicList, "fakefile-old")), "Year old download should still be present");
 
   downloadPromise = promiseDownloadRemoved(publicList);
-  formHistoryPromise = promiseFormHistoryRemoved();
 
   // Choose everything
   Sanitizer.prefs.setIntPref("timeSpan", 0);
-  yield s.sanitize();
+  s.sanitize();
 
-  yield formHistoryPromise;
+  yield promiseFormHistoryRemoved();
   yield downloadPromise;
 
   ok(!(yield promiseIsURIVisited(makeURI("http://before-today.com"))),
@@ -477,10 +470,11 @@ function setupHistory() {
   let lastYear = new Date();
   lastYear.setFullYear(lastYear.getFullYear() - 1);
   addPlace(makeURI("http://before-today.com/"), "Before Today", lastYear.getTime() * 1000);
+
   PlacesUtils.asyncHistory.updatePlaces(places, {
-    handleError: () => ok(false, "Unexpected error in adding visit."),
-    handleResult: () => { },
-    handleCompletion: () => deferred.resolve()
+    handleError: function () ok(false, "Unexpected error in adding visit."),
+    handleResult: function () { },
+    handleCompletion: function () deferred.resolve()
   });
 
   return deferred.promise;
@@ -492,7 +486,7 @@ function setupFormHistory() {
     let deferred = Promise.defer();
 
     let results = [];
-    FormHistory.search(terms, params, { handleResult: result => results.push(result),
+    FormHistory.search(terms, params, { handleResult: function (result) results.push(result),
                                         handleError: function (error) {
                                           do_throw("Error occurred searching form history: " + error);
                                           deferred.reject(error);

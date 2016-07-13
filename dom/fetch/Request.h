@@ -34,9 +34,6 @@ class Request final : public nsISupports
 public:
   Request(nsIGlobalObject* aOwner, InternalRequest* aRequest);
 
-  static bool
-  RequestContextEnabled(JSContext* aCx, JSObject* aObj);
-
   JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
@@ -46,9 +43,7 @@ public:
   void
   GetUrl(nsAString& aUrl) const
   {
-    nsAutoCString url;
-    mRequest->GetURL(url);
-    CopyUTF8toUTF16(url, aUrl);
+    CopyUTF8toUTF16(mRequest->mURL, aUrl);
   }
 
   void
@@ -60,6 +55,9 @@ public:
   RequestMode
   Mode() const
   {
+    if (mRequest->mMode == RequestMode::Cors_with_forced_preflight) {
+      return RequestMode::Cors;
+    }
     return mRequest->mMode;
   }
 
@@ -75,12 +73,6 @@ public:
     return mRequest->GetCacheMode();
   }
 
-  RequestRedirect
-  Redirect() const
-  {
-    return mRequest->GetRedirectMode();
-  }
-
   RequestContext
   Context() const
   {
@@ -88,27 +80,15 @@ public:
   }
 
   void
-  OverrideContentPolicyType(nsContentPolicyType aContentPolicyType)
+  SetContentPolicyType(nsContentPolicyType aContentPolicyType)
   {
-    mRequest->OverrideContentPolicyType(aContentPolicyType);
-  }
-
-  bool
-  IsContentPolicyTypeOverridden() const
-  {
-    return mRequest->IsContentPolicyTypeOverridden();
+    mRequest->SetContentPolicyType(aContentPolicyType);
   }
 
   void
   GetReferrer(nsAString& aReferrer) const
   {
     mRequest->GetReferrer(aReferrer);
-  }
-
-  ReferrerPolicy
-  ReferrerPolicy_() const
-  {
-    return mRequest->ReferrerPolicy_();
   }
 
   InternalHeaders*
@@ -121,9 +101,6 @@ public:
 
   void
   GetBody(nsIInputStream** aStream) { return mRequest->GetBody(aStream); }
-
-  void
-  SetBody(nsIInputStream* aStream) { return mRequest->SetBody(aStream); }
 
   static already_AddRefed<Request>
   Constructor(const GlobalObject& aGlobal, const RequestOrUSVString& aInput,
@@ -143,9 +120,9 @@ private:
   ~Request();
 
   nsCOMPtr<nsIGlobalObject> mOwner;
-  RefPtr<InternalRequest> mRequest;
+  nsRefPtr<InternalRequest> mRequest;
   // Lazily created.
-  RefPtr<Headers> mHeaders;
+  nsRefPtr<Headers> mHeaders;
 };
 
 } // namespace dom

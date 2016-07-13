@@ -111,19 +111,6 @@ def paramlistAsNative(m, empty='void'):
                                            location=None,
                                            realtype=m.realtype)))
 
-    # Set any optional out params to default to nullptr. Skip if we just added
-    # extra non-optional args to l.
-    if len(l) == len(m.params):
-        paramIter = len(m.params) - 1
-        while (paramIter >= 0 and m.params[paramIter].optional and
-                m.params[paramIter].paramtype == "out"):
-            t = m.params[paramIter].type
-            # Strings can't be optional, so this shouldn't happen, but let's make sure:
-            if t == "AString" or t == "ACString" or t == "DOMString" or t == "AUTF8String":
-                break
-            l[paramIter] += " = nullptr"
-            paramIter -= 1
-
     if len(l) == 0:
         return empty
 
@@ -526,20 +513,74 @@ def write_interface(iface, fd):
     fd.write(iface_template_epilog)
 
 
-def main(outputfile):
-    cachedir = '.'
-    if not os.path.isdir(cachedir):
-        os.mkdir(cachedir)
-    sys.path.append(cachedir)
+def main():
+    from optparse import OptionParser
+    o = OptionParser()
+    o.add_option('-I', action='append', dest='incdirs', default=['.'],
+                 help="Directory to search for imported files")
+    o.add_option('--cachedir', dest='cachedir', default=None,
+                 help="Directory in which to cache lex/parse tables.")
+    o.add_option('-o', dest='outfile', default=None,
+                 help="Output file (default is stdout)")
+    o.add_option('-d', dest='depfile', default=None,
+                 help="Generate a make dependency file")
+    o.add_option('--regen', action='store_true', dest='regen', default=False,
+                 help="Regenerate IDL Parser cache")
+    options, args = o.parse_args()
+    file = args[0] if args else None
 
-    # Delete the lex/yacc files.  Ply is too stupid to regenerate them
-    # properly
-    for fileglobs in [os.path.join(cachedir, f) for f in ["xpidllex.py*", "xpidlyacc.py*"]]:
-        for filename in glob.glob(fileglobs):
-            os.remove(filename)
+    if options.cachedir is not None:
+        if not os.path.isdir(options.cachedir):
+            os.mkdir(options.cachedir)
+        sys.path.append(options.cachedir)
+
+    # The only thing special about a regen is that there are no input files.
+    if options.regen:
+        if options.cachedir is None:
+            print >>sys.stderr, "--regen useless without --cachedir"
+        # Delete the lex/yacc files.  Ply is too stupid to regenerate them
+        # properly
+        for fileglobs in [os.path.join(options.cachedir, f) for f in ["xpidllex.py*", "xpidlyacc.py*"]]:
+            for filename in glob.glob(fileglobs):
+                os.remove(filename)
 
     # Instantiate the parser.
-    p = xpidl.IDLParser(outputdir=cachedir)
+    p = xpidl.IDLParser(outputdir=options.cachedir)
+
+    if options.regen:
+        sys.exit(0)
+
+    if options.depfile is not None and options.outfile is None:
+        print >>sys.stderr, "-d requires -o"
+        sys.exit(1)
+
+    if options.outfile is not None:
+        outfd = open(options.outfile, 'w')
+        closeoutfd = True
+    else:
+        outfd = sys.stdout
+        closeoutfd = False
+
+    idl = p.parse(open(file).read(), filename=file)
+    idl.resolve(options.incdirs, p)
+    print_header(idl, outfd, file)
+
+    if closeoutfd:
+        outfd.close()
+
+    if options.depfile is not None:
+        dirname = os.path.dirname(options.depfile)
+        if dirname:
+            try:
+                os.makedirs(dirname)
+            except:
+                pass
+        depfd = open(options.depfile, 'w')
+        deps = [dep.replace('\\', '/') for dep in idl.deps]
+
+        print >>depfd, "%s: %s" % (options.outfile, " ".join(deps))
+        for dep in deps:
+            print >>depfd, "%s:" % dep
 
 if __name__ == '__main__':
     main()

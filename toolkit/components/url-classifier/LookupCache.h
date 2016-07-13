@@ -12,7 +12,7 @@
 #include "nsCOMPtr.h"
 #include "nsIFile.h"
 #include "nsIFileStreams.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsUrlClassifierPrefixSet.h"
 #include "mozilla/Logging.h"
 
@@ -24,8 +24,7 @@ namespace safebrowsing {
 
 class LookupResult {
 public:
-  LookupResult() : mComplete(false), mNoise(false),
-                   mFresh(false), mProtocolConfirmed(false) {}
+  LookupResult() : mComplete(false), mNoise(false), mFresh(false), mProtocolConfirmed(false) {}
 
   // The fragment that matched in the LookupCache
   union {
@@ -33,13 +32,8 @@ public:
     Completion complete;
   } hash;
 
-  const Prefix &PrefixHash() {
-    return hash.prefix;
-  }
-  const Completion &CompleteHash() {
-    MOZ_ASSERT(!mNoise);
-    return hash.complete;
-  }
+  const Prefix &PrefixHash() { return hash.prefix; }
+  const Completion &CompleteHash() { return hash.complete; }
 
   bool Confirmed() const { return (mComplete && mFresh) || mProtocolConfirmed; }
   bool Complete() const { return mComplete; }
@@ -48,10 +42,7 @@ public:
   bool mComplete;
 
   // True if this is a noise entry, i.e. an extra entry
-  // that is inserted to mask the true URL we are requesting.
-  // Noise entries will not have a complete 256-bit hash as
-  // they are fetched from the local 32-bit database and we
-  // don't know the corresponding full URL.
+  // that is inserted to mask the true URL we are requesting
   bool mNoise;
 
   // True if we've updated this table recently-enough.
@@ -67,13 +58,6 @@ typedef nsTArray<LookupResult> LookupResultArray;
 struct CacheResult {
   AddComplete entry;
   nsCString table;
-
-  bool operator==(const CacheResult& aOther) const {
-    if (entry != aOther.entry) {
-      return false;
-    }
-    return table == aOther.table;
-  }
 };
 typedef nsTArray<CacheResult> CacheResultArray;
 
@@ -94,6 +78,13 @@ public:
   //  www.mail.hostname.com/foo/bar -> [hostname.com, mail.hostname.com]
   static nsresult GetHostKeys(const nsACString& aSpec,
                               nsTArray<nsCString>* aHostKeys);
+  // Get the database key for a given URI.  This is the top three
+  // domain components if they exist, otherwise the top two.
+  //  hostname.com/foo/bar -> hostname.com
+  //  mail.hostname.com/foo/bar -> mail.hostname.com
+  //  www.mail.hostname.com/foo/bar -> mail.hostname.com
+  static nsresult GetKey(const nsACString& aSpec, Completion* aHash,
+                         nsCOMPtr<nsICryptoHash>& aCryptoHash);
 
   LookupCache(const nsACString& aTableName, nsIFile* aStoreFile);
   ~LookupCache();
@@ -143,7 +134,7 @@ private:
   nsCOMPtr<nsIFile> mStoreDirectory;
   CompletionArray mCompletions;
   // Set of prefixes known to be in the database
-  RefPtr<nsUrlClassifierPrefixSet> mPrefixSet;
+  nsRefPtr<nsUrlClassifierPrefixSet> mPrefixSet;
 };
 
 } // namespace safebrowsing

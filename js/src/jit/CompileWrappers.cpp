@@ -6,8 +6,6 @@
 
 #include "jit/Ion.h"
 
-#include "jscompartmentinlines.h"
-
 using namespace js;
 using namespace js::jit;
 
@@ -60,13 +58,11 @@ CompileRuntime::addressOfJitStackLimit()
     return runtime()->addressOfJitStackLimit();
 }
 
-#ifdef DEBUG
 const void*
-CompileRuntime::addressOfIonBailAfter()
+CompileRuntime::addressOfJSContext()
 {
-    return runtime()->addressOfIonBailAfter();
+    return &runtime()->jitJSContext;
 }
-#endif
 
 const void*
 CompileRuntime::addressOfActivation()
@@ -77,14 +73,14 @@ CompileRuntime::addressOfActivation()
 const void*
 CompileRuntime::addressOfLastCachedNativeIterator()
 {
-    return &static_cast<JSContext*>(runtime())->caches.nativeIterCache.last;
+    return &runtime()->nativeIterCache.last;
 }
 
 #ifdef JS_GC_ZEAL
 const void*
-CompileRuntime::addressOfGCZealModeBits()
+CompileRuntime::addressOfGCZeal()
 {
-    return runtime()->gc.addressOfZealModeBits();
+    return runtime()->gc.addressOfZealMode();
 }
 #endif
 
@@ -92,12 +88,6 @@ const void*
 CompileRuntime::addressOfInterruptUint32()
 {
     return runtime()->addressOfInterruptUint32();
-}
-
-const void*
-CompileRuntime::getJSContext()
-{
-    return runtime()->unsafeContextFromAnyThread();
 }
 
 const JitRuntime*
@@ -184,7 +174,13 @@ CompileRuntime::isInsideNursery(gc::Cell* cell)
 const DOMCallbacks*
 CompileRuntime::DOMcallbacks()
 {
-    return runtime()->DOMcallbacks;
+    return GetDOMCallbacks(runtime());
+}
+
+const MathCache*
+CompileRuntime::maybeGetMathCache()
+{
+    return runtime()->maybeGetMathCache();
 }
 
 const Nursery&
@@ -219,9 +215,15 @@ CompileZone::addressOfNeedsIncrementalBarrier()
 }
 
 const void*
-CompileZone::addressOfFreeList(gc::AllocKind allocKind)
+CompileZone::addressOfFreeListFirst(gc::AllocKind allocKind)
 {
-    return zone()->arenas.addressOfFreeList(allocKind);
+    return zone()->arenas.getFreeList(allocKind)->addressOfFirst();
+}
+
+const void*
+CompileZone::addressOfFreeListLast(gc::AllocKind allocKind)
+{
+    return zone()->arenas.getFreeList(allocKind)->addressOfLast();
 }
 
 JSCompartment*
@@ -254,31 +256,16 @@ CompileCompartment::addressOfEnumerators()
     return &compartment()->enumerators;
 }
 
-const void*
-CompileCompartment::addressOfRandomNumberGenerator()
-{
-    return compartment()->randomNumberGenerator.ptr();
-}
-
 const JitCompartment*
 CompileCompartment::jitCompartment()
 {
     return compartment()->jitCompartment();
 }
 
-const GlobalObject*
-CompileCompartment::maybeGlobal()
-{
-    // This uses unsafeUnbarrieredMaybeGlobal() so as not to trigger the read
-    // barrier on the global from off the main thread.  This is safe because we
-    // abort Ion compilation when we GC.
-    return compartment()->unsafeUnbarrieredMaybeGlobal();
-}
-
 bool
-CompileCompartment::hasAllocationMetadataBuilder()
+CompileCompartment::hasObjectMetadataCallback()
 {
-    return compartment()->hasAllocationMetadataBuilder();
+    return compartment()->hasObjectMetadataCallback();
 }
 
 // Note: This function is thread-safe because setSingletonAsValue sets a boolean
@@ -291,7 +278,7 @@ CompileCompartment::hasAllocationMetadataBuilder()
 void
 CompileCompartment::setSingletonsAsValues()
 {
-    compartment()->behaviors().setSingletonsAsValues();
+    return JS::CompartmentOptionsRef(compartment()).setSingletonsAsValues();
 }
 
 JitCompileOptions::JitCompileOptions()
@@ -303,7 +290,8 @@ JitCompileOptions::JitCompileOptions()
 
 JitCompileOptions::JitCompileOptions(JSContext* cx)
 {
-    cloneSingletons_ = cx->compartment()->creationOptions().cloneSingletons();
+    JS::CompartmentOptions& options = cx->compartment()->options();
+    cloneSingletons_ = options.cloneSingletons();
     spsSlowAssertionsEnabled_ = cx->runtime()->spsProfiler.enabled() &&
                                 cx->runtime()->spsProfiler.slowAssertionsEnabled();
     offThreadCompilationAvailable_ = OffThreadCompilationAvailable(cx);

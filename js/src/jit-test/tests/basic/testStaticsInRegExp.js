@@ -5,4 +5,5 @@
     });
     assertEq(RegExp.lastMatch, '123');
 });
-assertEq(RegExp.lastMatch, '123');
+assertEq(RegExp.lastMatch, 'abc');
+

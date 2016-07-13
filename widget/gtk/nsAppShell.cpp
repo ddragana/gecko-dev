@@ -22,7 +22,7 @@
 #include "WakeLockListener.h"
 #endif
 
-using mozilla::Unused;
+using mozilla::unused;
 
 #define NOTIFY_TOKEN 0xFA
 
@@ -45,66 +45,6 @@ PollWrapper(GPollFD *ufds, guint nfsd, gint timeout_)
     return result;
 }
 
-#if MOZ_WIDGET_GTK == 3
-// For bug 726483.
-static decltype(GtkContainerClass::check_resize) sReal_gtk_window_check_resize;
-
-static void
-wrap_gtk_window_check_resize(GtkContainer *container)
-{
-    GdkWindow* gdk_window = gtk_widget_get_window(&container->widget);
-    if (gdk_window) {
-        g_object_ref(gdk_window);
-    }
-
-    sReal_gtk_window_check_resize(container);
-
-    if (gdk_window) {
-        g_object_unref(gdk_window);
-    }
-}
-
-// Emit resume-events on GdkFrameClock if flush-events has not been
-// balanced by resume-events at dispose.
-// For https://bugzilla.gnome.org/show_bug.cgi?id=742636
-static decltype(GObjectClass::constructed) sRealGdkFrameClockConstructed;
-static decltype(GObjectClass::dispose) sRealGdkFrameClockDispose;
-static GQuark sPendingResumeQuark;
-
-static void
-OnFlushEvents(GObject* clock, gpointer)
-{
-    g_object_set_qdata(clock, sPendingResumeQuark, GUINT_TO_POINTER(1));
-}
-
-static void
-OnResumeEvents(GObject* clock, gpointer)
-{
-    g_object_set_qdata(clock, sPendingResumeQuark, nullptr);
-}
-
-static void
-WrapGdkFrameClockConstructed(GObject* object)
-{
-    sRealGdkFrameClockConstructed(object);
-
-    g_signal_connect(object, "flush-events",
-                     G_CALLBACK(OnFlushEvents), nullptr);
-    g_signal_connect(object, "resume-events",
-                     G_CALLBACK(OnResumeEvents), nullptr);
-}
-
-static void
-WrapGdkFrameClockDispose(GObject* object)
-{
-    if (g_object_get_qdata(object, sPendingResumeQuark)) {
-        g_signal_emit_by_name(object, "resume-events");
-    }
-
-    sRealGdkFrameClockDispose(object);
-}
-#endif
-
 /*static*/ gboolean
 nsAppShell::EventProcessorCallback(GIOChannel *source, 
                                    GIOCondition condition,
@@ -113,7 +53,7 @@ nsAppShell::EventProcessorCallback(GIOChannel *source,
     nsAppShell *self = static_cast<nsAppShell *>(data);
 
     unsigned char c;
-    Unused << read(self->mPipeFDs[0], &c, 1);
+    unused << read(self->mPipeFDs[0], &c, 1);
     NS_ASSERTION(c == (unsigned char) NOTIFY_TOKEN, "wrong token");
 
     self->NativeEventCallback();
@@ -164,60 +104,8 @@ nsAppShell::Init()
         g_main_context_set_poll_func(nullptr, &PollWrapper);
     }
 
-#if MOZ_WIDGET_GTK == 3
-    if (!sReal_gtk_window_check_resize &&
-        gtk_check_version(3,8,0) != nullptr) { // GTK 3.0 to GTK 3.6.
-        // GtkWindow is a static class and so will leak anyway but this ref
-        // makes sure it isn't recreated.
-        gpointer gtk_plug_class = g_type_class_ref(GTK_TYPE_WINDOW);
-        auto check_resize = &GTK_CONTAINER_CLASS(gtk_plug_class)->check_resize;
-        sReal_gtk_window_check_resize = *check_resize;
-        *check_resize = wrap_gtk_window_check_resize;
-    }
-
-    if (!sPendingResumeQuark &&
-        gtk_check_version(3,14,7) != nullptr) { // GTK 3.0 to GTK 3.14.7.
-        // GTK 3.8 - 3.14 registered this type when creating the frame clock
-        // for the root window of the display when the display was opened.
-        GType gdkFrameClockIdleType = g_type_from_name("GdkFrameClockIdle");
-        if (gdkFrameClockIdleType) { // not in versions prior to 3.8
-            sPendingResumeQuark = g_quark_from_string("moz-resume-is-pending");
-            auto gdk_frame_clock_idle_class =
-                G_OBJECT_CLASS(g_type_class_peek_static(gdkFrameClockIdleType));
-            auto constructed = &gdk_frame_clock_idle_class->constructed;
-            sRealGdkFrameClockConstructed = *constructed;
-            *constructed = WrapGdkFrameClockConstructed;
-            auto dispose = &gdk_frame_clock_idle_class->dispose;
-            sRealGdkFrameClockDispose = *dispose;
-            *dispose = WrapGdkFrameClockDispose;
-        }
-    }
-
-    // Workaround for bug 1209659 which is fixed by Gtk3.20
-    if (gtk_check_version(3, 20, 0) != nullptr)
-        unsetenv("GTK_CSD");
-#endif
-
     if (PR_GetEnv("MOZ_DEBUG_PAINTS"))
         gdk_window_set_debug_updates(TRUE);
-
-    // Whitelist of only common, stable formats - see bugs 1197059 and 1203078
-    GSList* pixbufFormats = gdk_pixbuf_get_formats();
-    for (GSList* iter = pixbufFormats; iter; iter = iter->next) {
-        GdkPixbufFormat* format = static_cast<GdkPixbufFormat*>(iter->data);
-        gchar* name = gdk_pixbuf_format_get_name(format);
-        if (strcmp(name, "jpeg") &&
-            strcmp(name, "png") &&
-            strcmp(name, "gif") &&
-            strcmp(name, "bmp") &&
-            strcmp(name, "ico") &&
-            strcmp(name, "xpm") &&
-            strcmp(name, "svg")) {
-          gdk_pixbuf_format_set_disabled(format, TRUE);
-        }
-        g_free(name);
-    }
-    g_slist_free(pixbufFormats);
 
     int err = pipe(mPipeFDs);
     if (err)
@@ -261,7 +149,7 @@ void
 nsAppShell::ScheduleNativeEventCallback()
 {
     unsigned char buf[] = { NOTIFY_TOKEN };
-    Unused << write(mPipeFDs[1], buf, 1);
+    unused << write(mPipeFDs[1], buf, 1);
 }
 
 bool

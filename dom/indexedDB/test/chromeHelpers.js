@@ -3,9 +3,9 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-var { 'classes': Cc, 'interfaces': Ci, 'utils': Cu } = Components;
+const { 'classes': Cc, 'interfaces': Ci, 'utils': Cu } = Components;
 
-var testGenerator = testSteps();
+let testGenerator = testSteps();
 
 if (!window.runTest) {
   window.runTest = function()

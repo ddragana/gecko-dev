@@ -29,16 +29,18 @@
 #define RESAMPLER_QUALITY 3
 #endif
 
-namespace webrtc {
+namespace webrtc
+{
 
-Resampler::Resampler() : state_(NULL), channels_(0)
+Resampler::Resampler() : state_(NULL), type_(kResamplerSynchronous)
 {
   // Note: Push will fail until Reset() is called
 }
 
-Resampler::Resampler(int inFreq, int outFreq, int num_channels)
-    : Resampler() {
-  Reset(inFreq, outFreq, num_channels);
+Resampler::Resampler(int in_freq, int out_freq, ResamplerType type) :
+  state_(NULL) // all others get initialized in reset
+{
+  Reset(in_freq, out_freq, type);
 }
 
 Resampler::~Resampler()
@@ -49,40 +51,40 @@ Resampler::~Resampler()
   }
 }
 
-int Resampler::ResetIfNeeded(int inFreq, int outFreq, int num_channels)
+int Resampler::ResetIfNeeded(int in_freq, int out_freq, ResamplerType type)
 {
-  if (!state_ || channels_ != num_channels ||
-      inFreq != in_freq_ || outFreq != out_freq_)
+  if (!state_ || type != type_ ||
+      in_freq != in_freq_ || out_freq != out_freq_)
   {
     // Note that fixed-rate resamplers where input == output rate will
     // have state_ == NULL, and will call Reset() here - but reset won't
     // do anything beyond overwrite the member vars unless it needs a
     // real resampler.
-    return Reset(inFreq, outFreq, num_channels);
+    return Reset(in_freq, out_freq, type);
   } else {
     return 0;
   }
 }
 
-int Resampler::Reset(int inFreq, int outFreq, int num_channels)
+int Resampler::Reset(int in_freq, int out_freq, ResamplerType type)
 {
-  if (num_channels != 1 && num_channels != 2) {
-    return -1;
-  }
+  uint32_t channels = (type == kResamplerSynchronousStereo ||
+                       type == kResamplerFixedSynchronousStereo) ? 2 : 1;
 
   if (state_)
   {
     speex_resampler_destroy(state_);
     state_ = NULL;
   }
-  channels_ = num_channels;
-  in_freq_ = inFreq;
-  out_freq_ = outFreq;
+  type_ = type;
+  channels_ = channels;
+  in_freq_ = in_freq;
+  out_freq_ = out_freq;
 
   // For fixed-rate, same-rate resamples we just memcpy and so don't spin up a resampler
-  if (inFreq != outFreq)
+  if (in_freq != out_freq || !IsFixedRate())
   {
-    state_ = speex_resampler_init(num_channels, inFreq, outFreq, RESAMPLER_QUALITY, NULL);
+    state_ = speex_resampler_init(channels, in_freq, out_freq, RESAMPLER_QUALITY, NULL);
     if (!state_)
     {
       return -1;
@@ -91,40 +93,42 @@ int Resampler::Reset(int inFreq, int outFreq, int num_channels)
   return 0;
 }
 
-// Synchronous resampling, all output samples are written to samplesOut
+// Synchronous resampling, all output samples are written to samples_out
 // TODO(jesup) Change to take samples-per-channel in and out
-int Resampler::Push(const int16_t* samplesIn, int lengthIn, int16_t* samplesOut,
-                    int maxLen, int &outLen)
+int Resampler::Push(const int16_t* samples_in, int length_in,
+                    int16_t* samples_out, int max_len, int &out_len)
 {
-  if (maxLen < lengthIn)
+  if (max_len < length_in)
   {
     return -1;
   }
   if (!state_)
   {
-    if (in_freq_ != out_freq_ || channels_ == 0)
+    if (!IsFixedRate() || in_freq_ != out_freq_)
     {
-      // Push() will fail until Reset() is called
+      // Since we initialize to a non-Fixed type, Push() will fail
+      // until Reset() is called
       return -1;
     }
-    // Same-freq "resample" - use memcpy, which avoids
+
+    // Fixed-rate, same-freq "resample" - use memcpy, which avoids
     // filtering and delay.  For non-fixed rates, where we might tweak
     // from 48000->48000 to 48000->48001 for drift, we need to resample
     // (and filter) all the time to avoid glitches on rate changes.
-    memcpy(samplesOut, samplesIn, lengthIn*sizeof(*samplesIn));
-    outLen = lengthIn;
+    memcpy(samples_out, samples_in, length_in*sizeof(*samples_in));
+    out_len = length_in;
     return 0;
   }
   assert(channels_ == 1 || channels_ == 2);
-  spx_uint32_t len = lengthIn = (lengthIn >> (channels_ - 1));
-  spx_uint32_t out = (spx_uint32_t) (maxLen >> (channels_ - 1));
-  if ((speex_resampler_process_interleaved_int(state_, samplesIn, &len,
-                             samplesOut, &out) != RESAMPLER_ERR_SUCCESS) ||
-      len != (spx_uint32_t) lengthIn)
+  spx_uint32_t len = length_in = (length_in >> (channels_ - 1));
+  spx_uint32_t out = (spx_uint32_t) (max_len >> (channels_ - 1));
+  if ((speex_resampler_process_interleaved_int(state_, samples_in, &len,
+                             samples_out, &out) != RESAMPLER_ERR_SUCCESS) ||
+      len != (spx_uint32_t) length_in)
   {
     return -1;
   }
-  outLen = (int) (channels_ * out);
+  out_len = (int) (channels_ * out);
   return 0;
 }
 

@@ -5,6 +5,9 @@
 #include "jsfriendapi.h"
 #include "jsapi-tests/tests.h"
 
+using mozilla::UniquePtr;
+
+static bool sErrorReportMuted = false;
 BEGIN_TEST(testMutedErrors)
 {
     CHECK(testOuter("function f() {return 1}; f;"));
@@ -19,6 +22,7 @@ BEGIN_TEST(testMutedErrors)
     CHECK(testOuter("(function(){return function(){return 10}}).bind()()"));
     CHECK(testOuter("var e = eval; (function() { return e('(function(){return 11})') })()"));
 
+    JS_SetErrorReporter(rt, ErrorReporter);
     CHECK(testError("eval(-)"));
     CHECK(testError("-"));
     CHECK(testError("new Function('x', '-')"));
@@ -33,18 +37,22 @@ BEGIN_TEST(testMutedErrors)
     return true;
 }
 
+static void
+ErrorReporter(JSContext* cx, const char* message, JSErrorReport* report)
+{
+    sErrorReportMuted = report->isMuted;
+}
+
 bool
 eval(const char* asciiChars, bool mutedErrors, JS::MutableHandleValue rval)
 {
     size_t len = strlen(asciiChars);
-    mozilla::UniquePtr<char16_t[]> chars(new char16_t[len+1]);
+    UniquePtr<char16_t[]> chars(new char16_t[len+1]);
     for (size_t i = 0; i < len; ++i)
         chars[i] = asciiChars[i];
     chars[len] = 0;
 
-    JS::CompartmentOptions globalOptions;
-    JS::RootedObject global(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
-						   JS::FireOnNewGlobalHook, globalOptions));
+    JS::RootedObject global(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr, JS::FireOnNewGlobalHook));
     CHECK(global);
     JSAutoCompartment ac(cx, global);
     CHECK(JS_InitStandardClasses(cx, global));
@@ -83,14 +91,8 @@ testError(const char* asciiChars)
 {
     JS::RootedValue rval(cx);
     CHECK(!eval(asciiChars, true, &rval));
-
-    JS::RootedValue exn(cx);
-    CHECK(JS_GetPendingException(cx, &exn));
-    JS_ClearPendingException(cx);
-
-    js::ErrorReport report(cx);
-    CHECK(report.init(cx, exn, js::ErrorReport::WithSideEffects));
-    CHECK(report.report()->isMuted == true);
+    CHECK(JS_ReportPendingException(cx));
+    CHECK(sErrorReportMuted == true);
     return true;
 }
 END_TEST(testMutedErrors)

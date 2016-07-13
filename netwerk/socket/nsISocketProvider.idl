@@ -5,13 +5,12 @@
 
 #include "nsISupports.idl"
 
-interface nsIProxyInfo;
 [ptr] native PRFileDescStar(struct PRFileDesc);
 
 /**
  * nsISocketProvider
  */
-[scriptable, uuid(508d5469-9e1e-4a08-b5b0-7cfebba1e51a)]
+[scriptable, uuid(00b3df92-e830-11d8-d48e-0004e22243f8)]
 interface nsISocketProvider : nsISupports
 {
     /**
@@ -39,7 +38,8 @@ interface nsISocketProvider : nsISupports
     void newSocket(in long            aFamily,
                    in string          aHost, 
                    in long            aPort,
-                   in nsIProxyInfo    aProxy,
+                   in string          aProxyHost,
+                   in long            aProxyPort,
                    in unsigned long   aFlags,
                    out PRFileDescStar aFileDesc, 
                    out nsISupports    aSecurityInfo);
@@ -58,7 +58,8 @@ interface nsISocketProvider : nsISupports
     void addToSocket(in long           aFamily,
                      in string         aHost, 
                      in long           aPort,
-                     in nsIProxyInfo   aProxy,
+                     in string         aProxyHost,
+                     in long           aProxyPort,
                      in unsigned long  aFlags,
                      in PRFileDescStar aFileDesc, 
                      out nsISupports   aSecurityInfo);

@@ -89,8 +89,10 @@ public:
   virtual bool HasDeferredDNSPrefetchRequest() override;
 
   // WebIDL API
-
-  // The XPCOM GetHref is OK for us
+  void GetHref(nsAString& aValue, ErrorResult& rv)
+  {
+    GetHTMLURIAttr(nsGkAtoms::href, aValue);
+  }
   void SetHref(const nsAString& aValue, mozilla::ErrorResult& rv)
   {
     SetHTMLAttr(nsGkAtoms::href, aValue, rv);
@@ -121,13 +123,13 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::rel, aValue, rv);
   }
-  void SetReferrerPolicy(const nsAString& aValue, mozilla::ErrorResult& rv)
+  void SetReferrer(const nsAString& aValue, mozilla::ErrorResult& rv)
   {
-    SetHTMLAttr(nsGkAtoms::referrerpolicy, aValue, rv);
+    SetHTMLAttr(nsGkAtoms::referrer, aValue, rv);
   }
-  void GetReferrerPolicy(nsAString& aReferrer)
+  void GetReferrer(nsAString& aReferrer)
   {
-    GetEnumAttr(nsGkAtoms::referrerpolicy, EmptyCString().get(), aReferrer);
+    GetHTMLAttr(nsGkAtoms::referrer, aReferrer);
   }
   nsDOMTokenList* RelList();
   void GetHreflang(DOMString& aValue)
@@ -154,8 +156,8 @@ public:
 
   // Link::GetOrigin is OK for us
 
-  // Link::GetProtocol is OK for us
-  // Link::SetProtocol is OK for us
+  using Link::GetProtocol;
+  using Link::SetProtocol;
 
   // Link::GetUsername is OK for us
   // Link::SetUsername is OK for us
@@ -163,23 +165,23 @@ public:
   // Link::GetPassword is OK for us
   // Link::SetPassword is OK for us
 
-  // Link::Link::GetHost is OK for us
-  // Link::Link::SetHost is OK for us
+  using Link::GetHost;
+  using Link::SetHost;
 
-  // Link::Link::GetHostname is OK for us
-  // Link::Link::SetHostname is OK for us
+  using Link::GetHostname;
+  using Link::SetHostname;
 
-  // Link::Link::GetPort is OK for us
-  // Link::Link::SetPort is OK for us
+  using Link::GetPort;
+  using Link::SetPort;
 
-  // Link::Link::GetPathname is OK for us
-  // Link::Link::SetPathname is OK for us
+  using Link::GetPathname;
+  using Link::SetPathname;
 
-  // Link::Link::GetSearch is OK for us
-  // Link::Link::SetSearch is OK for us
+  using Link::GetSearch;
+  using Link::SetSearch;
 
-  // Link::Link::GetHash is OK for us
-  // Link::Link::SetHash is OK for us
+  using Link::GetHash;
+  using Link::SetHash;
 
   // The XPCOM URI decomposition attributes are fine for us
   void GetCoords(DOMString& aValue)
@@ -222,18 +224,18 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::shape, aValue, rv);
   }
-  void Stringify(nsAString& aResult)
+  void Stringify(nsAString& aResult, ErrorResult& aError)
   {
-    GetHref(aResult);
+    GetHref(aResult, aError);
   }
-
-  static DOMTokenListSupportedToken sSupportedRelValues[];
 
 protected:
   virtual ~HTMLAnchorElement();
 
+  virtual void GetItemValueText(DOMString& text) override;
+  virtual void SetItemValueText(const nsAString& text) override;
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
-  RefPtr<nsDOMTokenList > mRelList;
+  nsRefPtr<nsDOMTokenList > mRelList;
 };
 
 } // namespace dom

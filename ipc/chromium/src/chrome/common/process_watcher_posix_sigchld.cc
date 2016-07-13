@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 et sw=2 tw=80: 
+ */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -76,7 +77,7 @@ private:
 
 // Fear the reaper
 class ChildGrimReaper : public ChildReaper,
-                        public mozilla::Runnable
+                        public Task
 {
 public:
   explicit ChildGrimReaper(pid_t process) : ChildReaper(process)
@@ -90,13 +91,11 @@ public:
   }
 
   // @override
-  NS_IMETHOD Run()
+  virtual void Run()
   {
     // we may have already been signaled by the time this runs
     if (process_)
       KillProcess();
-
-    return NS_OK;
   }
 
 private:
@@ -201,11 +200,11 @@ ProcessWatcher::EnsureProcessTerminated(base::ProcessHandle process,
 
   MessageLoopForIO* loop = MessageLoopForIO::current();
   if (force) {
-    RefPtr<ChildGrimReaper> reaper = new ChildGrimReaper(process);
+    ChildGrimReaper* reaper = new ChildGrimReaper(process);
 
     loop->CatchSignal(SIGCHLD, reaper, reaper);
     // |loop| takes ownership of |reaper|
-    loop->PostDelayedTask(reaper.forget(), kMaxWaitMs);
+    loop->PostDelayedTask(FROM_HERE, reaper, kMaxWaitMs);
   } else {
     ChildLaxReaper* reaper = new ChildLaxReaper(process);
 

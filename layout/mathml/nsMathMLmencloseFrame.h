@@ -50,12 +50,12 @@ public:
                                              nsStyleContext* aContext);
   
   virtual nsresult
-  Place(DrawTarget*          aDrawTarget,
+  Place(nsRenderingContext& aRenderingContext,
         bool                 aPlaceOrigin,
         nsHTMLReflowMetrics& aDesiredSize) override;
   
   virtual nsresult
-  MeasureForWidth(DrawTarget* aDrawTarget,
+  MeasureForWidth(nsRenderingContext& aRenderingContext,
                   nsHTMLReflowMetrics& aDesiredSize) override;
   
   virtual nsresult
@@ -92,11 +92,11 @@ protected:
   explicit nsMathMLmencloseFrame(nsStyleContext* aContext);
   virtual ~nsMathMLmencloseFrame();
 
-  nsresult PlaceInternal(DrawTarget*          aDrawTarget,
+  nsresult PlaceInternal(nsRenderingContext& aRenderingContext,
                          bool                 aPlaceOrigin,
                          nsHTMLReflowMetrics& aDesiredSize,
                          bool                 aWidthOnly);
-
+  
   // functions to parse the "notation" attribute.
   nsresult AddNotation(const nsAString& aNotation);
   void InitNotations();

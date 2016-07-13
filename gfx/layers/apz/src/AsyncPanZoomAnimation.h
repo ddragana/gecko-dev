@@ -12,19 +12,18 @@
 #include "mozilla/TimeStamp.h"
 #include "FrameMetrics.h"
 #include "nsISupportsImpl.h"
-#include "nsTArray.h"
 
 namespace mozilla {
 namespace layers {
 
 class WheelScrollAnimation;
-class SmoothScrollAnimation;
 
 class AsyncPanZoomAnimation {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AsyncPanZoomAnimation)
 
 public:
-  explicit AsyncPanZoomAnimation()
+  explicit AsyncPanZoomAnimation(const TimeDuration& aRepaintInterval)
+    : mRepaintInterval(aRepaintInterval)
   { }
 
   virtual bool DoSample(FrameMetrics& aFrameMetrics,
@@ -43,22 +42,26 @@ public:
   }
 
   /**
-   * Get the deferred tasks in |mDeferredTasks| and place them in |aTasks|. See
-   * |mDeferredTasks| for more information.  Clears |mDeferredTasks|.
+   * Get the deferred tasks in |mDeferredTasks|. See |mDeferredTasks|
+   * for more information.
+   * Clears |mDeferredTasks|.
    */
-  nsTArray<RefPtr<Runnable>> TakeDeferredTasks() {
-    return Move(mDeferredTasks);
+  Vector<Task*> TakeDeferredTasks() {
+    Vector<Task*> result;
+    mDeferredTasks.swap(result);
+    return result;
   }
 
+  /**
+   * Specifies how frequently (at most) we want to do repaints during the
+   * animation sequence. TimeDuration::Forever() will cause it to only repaint
+   * at the end of the animation.
+   */
+  TimeDuration mRepaintInterval;
+
+public:
   virtual WheelScrollAnimation* AsWheelScrollAnimation() {
     return nullptr;
-  }
-  virtual SmoothScrollAnimation* AsSmoothScrollAnimation() {
-    return nullptr;
-  }
-
-  virtual bool WantsRepaints() {
-    return true;
   }
 
 protected:
@@ -71,7 +74,7 @@ protected:
    * Derived classes can add tasks here in Sample(), and the APZC can call
    * ExecuteDeferredTasks() to execute them.
    */
-  nsTArray<RefPtr<Runnable>> mDeferredTasks;
+  Vector<Task*> mDeferredTasks;
 };
 
 } // namespace layers

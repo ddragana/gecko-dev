@@ -20,13 +20,9 @@ namespace mozilla {
 
 class AudioNodeStream;
 
-extern LazyLogModule gWebAudioAPILog;
-#define WEB_AUDIO_API_LOG(...) \
-  MOZ_LOG(gWebAudioAPILog, LogLevel::Debug, (__VA_ARGS__))
-
 namespace dom {
 
-struct AudioTimelineEvent;
+class AudioParamTimeline;
 
 namespace WebAudioUtils {
   // 32 is the minimum required by the spec for createBuffer() and
@@ -59,16 +55,17 @@ namespace WebAudioUtils {
   }
 
   /**
-   * Converts an AudioTimelineEvent's floating point time values to tick values
-   * with respect to a destination AudioNodeStream.
+   * Converts AudioParamTimeline floating point time values to tick values
+   * with respect to a source and a destination AudioNodeStream.
    *
-   * This needs to be called for each AudioTimelineEvent that gets sent to an
-   * AudioNodeEngine, on the engine side where the AudioTimlineEvent is
-   * received.  This means that such engines need to be aware of their
-   * destination streams as well.
+   * This needs to be called for each AudioParamTimeline that gets sent to an
+   * AudioNodeEngine on the engine side where the AudioParamTimeline is
+   * received.  This means that such engines need to be aware of their source
+   * and destination streams as well.
    */
-  void ConvertAudioTimelineEventToTicks(AudioTimelineEvent& aEvent,
-                                        AudioNodeStream* aDest);
+  void ConvertAudioParamToTicks(AudioParamTimeline& aParam,
+                                AudioNodeStream* aSource,
+                                AudioNodeStream* aDest);
 
   /**
    * Converts a linear value to decibels.  Returns aMinDecibels if the linear
@@ -225,10 +222,6 @@ namespace WebAudioUtils {
                         uint32_t aChannel,
                         const int16_t* aIn, uint32_t* aInLen,
                         int16_t* aOut, uint32_t* aOutLen);
-
-  void
-  LogToDeveloperConsole(uint64_t aWindowID, const char* aKey);
-
   } // namespace WebAudioUtils
 
 } // namespace dom

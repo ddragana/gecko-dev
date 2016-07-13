@@ -66,36 +66,23 @@ AlertsService.prototype = {
   },
 
   // nsIAlertsService
-  showAlert: function(aAlert, aAlertListener) {
-    if (!aAlert) {
-      return;
-    }
-    cpmm.sendAsyncMessage(kMessageAlertNotificationSend, {
-      imageURL: aAlert.imageURL,
-      title: aAlert.title,
-      text: aAlert.text,
-      clickable: aAlert.textClickable,
-      cookie: aAlert.cookie,
-      listener: aAlertListener,
-      id: aAlert.name,
-      dir: aAlert.dir,
-      lang: aAlert.lang,
-      dataStr: aAlert.data,
-      inPrivateBrowsing: aAlert.inPrivateBrowsing
-    });
-  },
-
   showAlertNotification: function(aImageUrl, aTitle, aText, aTextClickable,
                                   aCookie, aAlertListener, aName, aBidi,
                                   aLang, aDataStr, aPrincipal,
                                   aInPrivateBrowsing) {
-    let alert = Cc["@mozilla.org/alert-notification;1"].
-      createInstance(Ci.nsIAlertNotification);
-
-    alert.init(aName, aImageUrl, aTitle, aText, aTextClickable, aCookie,
-               aBidi, aLang, aDataStr, aPrincipal, aInPrivateBrowsing);
-
-    this.showAlert(alert, aAlertListener);
+    cpmm.sendAsyncMessage(kMessageAlertNotificationSend, {
+      imageURL: aImageUrl,
+      title: aTitle,
+      text: aText,
+      clickable: aTextClickable,
+      cookie: aCookie,
+      listener: aAlertListener,
+      id: aName,
+      dir: aBidi,
+      lang: aLang,
+      dataStr: aDataStr,
+      inPrivateBrowsing: aInPrivateBrowsing
+    });
   },
 
   closeAlert: function(aName) {

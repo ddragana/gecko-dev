@@ -11,6 +11,7 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
+#include "nsISpeechRecognitionService.h"
 
 struct JSContext;
 
@@ -28,7 +29,7 @@ class SpeechGrammarList final : public nsISupports,
                                 public nsWrapperCache
 {
 public:
-  explicit SpeechGrammarList(nsISupports* aParent);
+  explicit SpeechGrammarList(nsISupports* aParent, nsISpeechRecognitionService* aRecognitionService);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SpeechGrammarList)
@@ -37,7 +38,7 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   uint32_t Length() const;
 
@@ -49,12 +50,14 @@ public:
 
   already_AddRefed<SpeechGrammar> IndexedGetter(uint32_t aIndex, bool& aPresent, ErrorResult& aRv);
 
+  nsCOMPtr<nsISpeechRecognitionService> mRecognitionService;
+
 private:
   ~SpeechGrammarList();
 
   nsCOMPtr<nsISupports> mParent;
 
-  nsTArray<RefPtr<SpeechGrammar>> mItems;
+  nsTArray<nsRefPtr<SpeechGrammar>> mItems;
 };
 
 } // namespace dom

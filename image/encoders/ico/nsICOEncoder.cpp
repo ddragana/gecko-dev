@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCRT.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include "nsBMPEncoder.h"
 #include "nsPNGEncoder.h"
 #include "nsICOEncoder.h"
@@ -162,10 +162,9 @@ nsICOEncoder::AddImageFrame(const uint8_t* aData,
 
     // Icon files that wrap a BMP file must not include the BITMAPFILEHEADER
     // section at the beginning of the encoded BMP data, so we must skip over
-    // bmp::FILE_HEADER_LENGTH bytes when adding the BMP content to the icon
-    // file.
+    // BMPFILEHEADER::LENGTH bytes when adding the BMP content to the icon file.
     mICODirEntry.mBytesInRes =
-      BMPImageBufferSize - bmp::FILE_HEADER_LENGTH + andMaskSize;
+      BMPImageBufferSize - BMPFILEHEADER::LENGTH + andMaskSize;
 
     // Encode the icon headers
     EncodeFileHeader();
@@ -174,14 +173,14 @@ nsICOEncoder::AddImageFrame(const uint8_t* aData,
     char* imageBuffer;
     rv = mContainedEncoder->GetImageBuffer(&imageBuffer);
     NS_ENSURE_SUCCESS(rv, rv);
-    memcpy(mImageBufferCurr, imageBuffer + bmp::FILE_HEADER_LENGTH,
-           BMPImageBufferSize - bmp::FILE_HEADER_LENGTH);
+    memcpy(mImageBufferCurr, imageBuffer + BMPFILEHEADER::LENGTH,
+           BMPImageBufferSize - BMPFILEHEADER::LENGTH);
     // We need to fix the BMP height to be *2 for the AND mask
     uint32_t fixedHeight = GetRealHeight() * 2;
     NativeEndian::swapToLittleEndianInPlace(&fixedHeight, 1);
     // The height is stored at an offset of 8 from the DIB header
     memcpy(mImageBufferCurr + 8, &fixedHeight, sizeof(fixedHeight));
-    mImageBufferCurr += BMPImageBufferSize - bmp::FILE_HEADER_LENGTH;
+    mImageBufferCurr += BMPImageBufferSize - BMPFILEHEADER::LENGTH;
 
     // Calculate rowsize in DWORD's
     uint32_t rowSize = ((GetRealWidth() + 31) / 32) * 4; // + 31 to round up
@@ -231,7 +230,7 @@ nsICOEncoder::StartImageEncode(uint32_t aWidth,
   // parse and check any provided output options
   uint32_t bpp = 24;
   bool usePNG = true;
-  nsresult rv = ParseOptions(aOutputOptions, bpp, usePNG);
+  nsresult rv = ParseOptions(aOutputOptions, &bpp, &usePNG);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mUsePNG = usePNG;
@@ -266,13 +265,17 @@ nsICOEncoder::EndImageEncode()
 // Parses the encoder options and sets the bits per pixel to use and PNG or BMP
 // See InitFromData for a description of the parse options
 nsresult
-nsICOEncoder::ParseOptions(const nsAString& aOptions, uint32_t& aBppOut,
-                           bool& aUsePNGOut)
+nsICOEncoder::ParseOptions(const nsAString& aOptions, uint32_t* bpp,
+                           bool* usePNG)
 {
   // If no parsing options just use the default of 24BPP and PNG yes
   if (aOptions.Length() == 0) {
-    aUsePNGOut = true;
-    aBppOut = 24;
+    if (usePNG) {
+      *usePNG = true;
+    }
+    if (bpp) {
+      *bpp = 24;
+    }
   }
 
   // Parse the input string into a set of name/value pairs.
@@ -300,11 +303,11 @@ nsICOEncoder::ParseOptions(const nsAString& aOptions, uint32_t& aBppOut,
                                 nsCaseInsensitiveCStringComparator())) {
       if (nameValuePair[1].Equals("png",
                                   nsCaseInsensitiveCStringComparator())) {
-        aUsePNGOut = true;
+        *usePNG = true;
       }
       else if (nameValuePair[1].Equals("bmp",
                                        nsCaseInsensitiveCStringComparator())) {
-        aUsePNGOut = false;
+        *usePNG = false;
       }
       else {
         return NS_ERROR_INVALID_ARG;
@@ -314,10 +317,10 @@ nsICOEncoder::ParseOptions(const nsAString& aOptions, uint32_t& aBppOut,
     // Parse the bpp portion of the string format=<png|bmp>;bpp=<bpp_value>
     if (nameValuePair[0].Equals("bpp", nsCaseInsensitiveCStringComparator())) {
       if (nameValuePair[1].EqualsLiteral("24")) {
-        aBppOut = 24;
+        *bpp = 24;
       }
       else if (nameValuePair[1].EqualsLiteral("32")) {
-        aBppOut = 32;
+        *bpp = 32;
       }
       else {
         return NS_ERROR_INVALID_ARG;

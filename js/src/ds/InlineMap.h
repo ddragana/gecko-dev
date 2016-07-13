@@ -45,18 +45,11 @@ class InlineMap
     static_assert(ZeroIsReserved<K>::result,
                   "zero as tombstone requires that zero keys be invalid");
 
-#ifdef DEBUG
-    bool keyNonZero(const K& key) {
-        // Zero as tombstone means zero keys are invalid.
-        return !!key;
-    }
-#endif
-
     bool usingMap() const {
         return inlNext > InlineElems;
     }
 
-    MOZ_MUST_USE bool switchToMap() {
+    bool switchToMap() {
         MOZ_ASSERT(inlNext == InlineElems);
 
         if (map.initialized()) {
@@ -80,7 +73,7 @@ class InlineMap
     }
 
     MOZ_NEVER_INLINE
-    MOZ_MUST_USE bool switchAndAdd(const K& key, const V& value) {
+    bool switchAndAdd(const K& key, const V& value) {
         if (!switchToMap())
             return false;
 
@@ -216,8 +209,6 @@ class InlineMap
 
     MOZ_ALWAYS_INLINE
     Ptr lookup(const K& key) {
-        MOZ_ASSERT(keyNonZero(key));
-
         if (usingMap())
             return Ptr(map.lookup(key));
 
@@ -232,8 +223,6 @@ class InlineMap
 
     MOZ_ALWAYS_INLINE
     AddPtr lookupForAdd(const K& key) {
-        MOZ_ASSERT(keyNonZero(key));
-
         if (usingMap())
             return AddPtr(map.lookupForAdd(key));
 
@@ -252,9 +241,8 @@ class InlineMap
     }
 
     MOZ_ALWAYS_INLINE
-    MOZ_MUST_USE bool add(AddPtr& p, const K& key, const V& value) {
+    bool add(AddPtr& p, const K& key, const V& value) {
         MOZ_ASSERT(!p);
-        MOZ_ASSERT(keyNonZero(key));
 
         if (p.isInlinePtr) {
             InlineElem* addPtr = p.inlAddPtr;
@@ -277,7 +265,7 @@ class InlineMap
     }
 
     MOZ_ALWAYS_INLINE
-    MOZ_MUST_USE bool put(const K& key, const V& value) {
+    bool put(const K& key, const V& value) {
         AddPtr p = lookupForAdd(key);
         if (p) {
             p.value() = value;

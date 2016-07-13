@@ -4,18 +4,18 @@
 
 Components.utils.import("resource://gre/modules/AppConstants.jsm");
 
-const HAVE_CSS_WINDOW_DRAG_SUPPORT = ["win", "macosx"].includes(AppConstants.platform);
+const USE_HITTEST = /^(win|macosx)/i.test(AppConstants.platform);
 
 this.EXPORTED_SYMBOLS = [ "WindowDraggingElement" ];
 
 this.WindowDraggingElement = function WindowDraggingElement(elem) {
   this._elem = elem;
   this._window = elem.ownerDocument.defaultView;
-  if (HAVE_CSS_WINDOW_DRAG_SUPPORT && !this.isPanel()) {
-    return;
-  }
 
-  this._elem.addEventListener("mousedown", this, false);
+  if (USE_HITTEST && !this.isPanel())
+    this._elem.addEventListener("MozMouseHittest", this, false);
+  else
+    this._elem.addEventListener("mousedown", this, false);
 };
 
 WindowDraggingElement.prototype = {
@@ -57,6 +57,12 @@ WindowDraggingElement.prototype = {
   },
   handleEvent: function(aEvent) {
     let isPanel = this.isPanel();
+    if (USE_HITTEST && !isPanel) {
+      if (this.shouldDrag(aEvent))
+        aEvent.preventDefault();
+      return;
+    }
+
     switch (aEvent.type) {
       case "mousedown":
         if (!this.shouldDrag(aEvent))

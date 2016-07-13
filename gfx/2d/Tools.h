@@ -12,6 +12,9 @@
 #include "Types.h"
 #include "Point.h"
 #include <math.h>
+#if defined(_MSC_VER) && (_MSC_VER < 1600)
+#define hypotf _hypotf
+#endif
 
 namespace mozilla {
 namespace gfx {
@@ -83,34 +86,10 @@ BytesPerPixel(SurfaceFormat aFormat)
   switch (aFormat) {
   case SurfaceFormat::A8:
     return 1;
-  case SurfaceFormat::R5G6B5_UINT16:
+  case SurfaceFormat::R5G6B5:
     return 2;
-  case SurfaceFormat::R8G8B8:
-  case SurfaceFormat::B8G8R8:
-    return 3;
-  case SurfaceFormat::HSV:
-  case SurfaceFormat::Lab:
-    return 3 * sizeof(float);
-  case SurfaceFormat::Depth:
-    return sizeof(uint16_t);
   default:
     return 4;
-  }
-}
-
-static inline bool
-IsOpaqueFormat(SurfaceFormat aFormat) {
-  switch (aFormat) {
-    case SurfaceFormat::B8G8R8X8:
-    case SurfaceFormat::R8G8B8X8:
-    case SurfaceFormat::X8R8G8B8:
-    case SurfaceFormat::YUV:
-    case SurfaceFormat::NV12:
-    case SurfaceFormat::YUV422:
-    case SurfaceFormat::R5G6B5_UINT16:
-      return true;
-    default:
-      return false;
   }
 }
 

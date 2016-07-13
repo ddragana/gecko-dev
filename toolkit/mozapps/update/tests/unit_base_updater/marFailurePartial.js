@@ -6,34 +6,30 @@
 /* General Partial MAR File Patch Apply Failure Test */
 
 function run_test() {
-  if (!setupTestCommon()) {
-    return;
-  }
+  setupTestCommon();
   gTestFiles = gTestFilesPartialSuccess;
   gTestFiles[11].originalFile = "partial.png";
   gTestDirs = gTestDirsPartialSuccess;
   setTestFilesAndDirsForFailure();
-  setupUpdaterTest(FILE_PARTIAL_MAR, false);
+  setupUpdaterTest(FILE_PARTIAL_MAR);
+
+  createUpdaterINI();
+  setAppBundleModTime();
+
+  // Note that on platforms where we use execv, we cannot trust the return code.
+  runUpdate((USE_EXECV ? 0 : 1), STATE_FAILED_LOADSOURCE_ERROR_WRONG_SIZE,
+            checkUpdateFinished);
 }
 
 /**
- * Called after the call to setupUpdaterTest finishes.
+ * Checks if the update has finished and if it has finished performs checks for
+ * the test.
  */
-function setupUpdaterTestFinished() {
-  // If execv is used the updater process will turn into the callback process
-  // and the updater's return code will be that of the callback process.
-  runUpdate(STATE_FAILED_LOADSOURCE_ERROR_WRONG_SIZE, false,
-            (USE_EXECV ? 0 : 1), true);
-}
-
-/**
- * Called after the call to runUpdate finishes.
- */
-function runUpdateFinished() {
-  checkAppBundleModTime();
-  standardInit();
+function checkUpdateFinished() {
   checkPostUpdateRunningFile(false);
-  checkFilesAfterUpdateFailure(getApplyDirFile);
+  checkAppBundleModTime();
+  checkFilesAfterUpdateFailure(getApplyDirFile, false, false);
   checkUpdateLogContents(LOG_PARTIAL_FAILURE);
-  checkCallbackLog();
+  standardInit();
+  checkCallbackAppLog();
 }

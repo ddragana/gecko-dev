@@ -9,11 +9,9 @@
 #include "inDOMUtils.h"
 #include "inLayoutUtils.h"
 
-#include "nsAutoPtr.h"
 #include "nsIServiceManager.h"
 #include "nsISupportsArray.h"
 #include "nsString.h"
-#include "nsIStyleSheetLinkingElement.h"
 #include "nsIDOMElement.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
@@ -38,7 +36,6 @@
 #include "mozilla/dom/Element.h"
 #include "nsRuleWalker.h"
 #include "nsRuleProcessorData.h"
-#include "nsCSSPseudoClasses.h"
 #include "nsCSSRuleProcessor.h"
 #include "mozilla/dom/CSSLexer.h"
 #include "mozilla/dom/InspectorUtilsBinding.h"
@@ -76,59 +73,38 @@ inDOMUtils::GetAllStyleSheets(nsIDOMDocument *aDocument, uint32_t *aLength,
 {
   NS_ENSURE_ARG_POINTER(aDocument);
 
-  nsTArray<RefPtr<CSSStyleSheet>> sheets;
+  nsCOMArray<nsISupports> sheets;
 
   nsCOMPtr<nsIDocument> document = do_QueryInterface(aDocument);
   MOZ_ASSERT(document);
 
-  // Get the agent, then user and finally xbl sheets in the style set.
+  // Get the agent, then user sheets in the style set.
   nsIPresShell* presShell = document->GetShell();
-
-  if (presShell && presShell->StyleSet()->IsServo()) {
-    // XXXheycam ServoStyleSets don't have the ability to expose their
-    // sheets in a script-accessible way yet.
-    NS_ERROR("stylo: ServoStyleSets cannot expose their sheets to script yet");
-    return NS_ERROR_FAILURE;
-  }
-
   if (presShell) {
-    nsStyleSet* styleSet = presShell->StyleSet()->AsGecko();
-    SheetType sheetType = SheetType::Agent;
+    nsStyleSet* styleSet = presShell->StyleSet();
+    nsStyleSet::sheetType sheetType = nsStyleSet::eAgentSheet;
     for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
       sheets.AppendElement(styleSet->StyleSheetAt(sheetType, i));
     }
-    sheetType = SheetType::User;
+    sheetType = nsStyleSet::eUserSheet;
     for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
       sheets.AppendElement(styleSet->StyleSheetAt(sheetType, i));
-    }
-    AutoTArray<CSSStyleSheet*, 32> xblSheetArray;
-    styleSet->AppendAllXBLStyleSheets(xblSheetArray);
-
-    // The XBL stylesheet array will quite often be full of duplicates. Cope:
-    nsTHashtable<nsPtrHashKey<CSSStyleSheet>> sheetSet;
-    for (CSSStyleSheet* sheet : xblSheetArray) {
-      if (!sheetSet.Contains(sheet)) {
-        sheetSet.PutEntry(sheet);
-        sheets.AppendElement(sheet);
-      }
     }
   }
 
   // Get the document sheets.
   for (int32_t i = 0; i < document->GetNumberOfStyleSheets(); i++) {
-    // XXXheycam ServoStyleSets don't have the ability to expose their
-    // sheets in a script-accessible way yet.
-    sheets.AppendElement(document->GetStyleSheetAt(i)->AsGecko());
+    sheets.AppendElement(document->GetStyleSheetAt(i));
   }
 
-  nsISupports** ret = static_cast<nsISupports**>(moz_xmalloc(sheets.Length() *
+  nsISupports** ret = static_cast<nsISupports**>(moz_xmalloc(sheets.Count() *
                                                  sizeof(nsISupports*)));
 
-  for (size_t i = 0; i < sheets.Length(); i++) {
-    NS_ADDREF(ret[i] = NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, sheets[i]));
+  for (int32_t i = 0; i < sheets.Count(); i++) {
+    NS_ADDREF(ret[i] = sheets[i]);
   }
 
-  *aLength = sheets.Length();
+  *aLength = sheets.Count();
   *aSheets = ret;
 
   return NS_OK;
@@ -232,13 +208,13 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
 
   nsCOMPtr<nsIAtom> pseudoElt;
   if (!aPseudo.IsEmpty()) {
-    pseudoElt = NS_Atomize(aPseudo);
+    pseudoElt = do_GetAtom(aPseudo);
   }
 
   nsRuleNode* ruleNode = nullptr;
   nsCOMPtr<Element> element = do_QueryInterface(aElement);
   NS_ENSURE_STATE(element);
-  RefPtr<nsStyleContext> styleContext;
+  nsRefPtr<nsStyleContext> styleContext;
   GetRuleNodeForElement(element, pseudoElt, getter_AddRefs(styleContext), &ruleNode);
   if (!ruleNode) {
     // This can fail for elements that are not in the document or
@@ -247,22 +223,16 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
   }
 
   nsCOMPtr<nsISupportsArray> rules;
-  nsresult rv = NS_NewISupportsArray(getter_AddRefs(rules));
-  if (NS_FAILED(rv)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  NS_NewISupportsArray(getter_AddRefs(rules));
+  if (!rules) return NS_ERROR_OUT_OF_MEMORY;
 
+  nsRefPtr<mozilla::css::StyleRule> cssRule;
   for ( ; !ruleNode->IsRoot(); ruleNode = ruleNode->GetParent()) {
-    RefPtr<Declaration> decl = do_QueryObject(ruleNode->GetRule());
-    if (decl) {
-      RefPtr<mozilla::css::StyleRule> styleRule =
-        do_QueryObject(decl->GetOwningRule());
-      if (styleRule) {
-        nsCOMPtr<nsIDOMCSSRule> domRule = styleRule->GetDOMRule();
-        if (domRule) {
-          rules->InsertElementAt(domRule, 0);
-        }
-      }
+    cssRule = do_QueryObject(ruleNode->GetRule());
+    if (cssRule) {
+      nsCOMPtr<nsIDOMCSSRule> domRule = cssRule->GetDOMRule();
+      if (domRule)
+        rules->InsertElementAt(domRule, 0);
     }
   }
 
@@ -280,7 +250,7 @@ GetRuleFromDOMRule(nsIDOMCSSStyleRule *aRule, ErrorResult& rv)
     return nullptr;
   }
 
-  RefPtr<StyleRule> cssrule;
+  nsRefPtr<StyleRule> cssrule;
   rv = rule->GetCSSStyleRule(getter_AddRefs(cssrule));
   if (rv.Failed()) {
     return nullptr;
@@ -321,33 +291,6 @@ inDOMUtils::GetRuleColumn(nsIDOMCSSRule* aRule, uint32_t* _retval)
 }
 
 NS_IMETHODIMP
-inDOMUtils::GetRelativeRuleLine(nsIDOMCSSRule* aRule, uint32_t* _retval)
-{
-  NS_ENSURE_ARG_POINTER(aRule);
-
-  Rule* rule = aRule->GetCSSRule();
-  if (!rule) {
-    return NS_ERROR_FAILURE;
-  }
-
-  uint32_t lineNumber = rule->GetLineNumber();
-  CSSStyleSheet* sheet = rule->GetStyleSheet();
-  if (sheet && lineNumber != 0) {
-    nsINode* owningNode = sheet->GetOwnerNode();
-    if (owningNode) {
-      nsCOMPtr<nsIStyleSheetLinkingElement> link =
-        do_QueryInterface(owningNode);
-      if (link) {
-        lineNumber -= link->GetLineNumber() - 1;
-      }
-    }
-  }
-
-  *_retval = lineNumber;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 inDOMUtils::GetCSSLexer(const nsAString& aText, JSContext* aCx,
                         JS::MutableHandleValue aResult)
 {
@@ -364,7 +307,7 @@ NS_IMETHODIMP
 inDOMUtils::GetSelectorCount(nsIDOMCSSStyleRule* aRule, uint32_t *aCount)
 {
   ErrorResult rv;
-  RefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
   if (rv.Failed()) {
     return rv.StealNSResult();
   }
@@ -380,7 +323,7 @@ inDOMUtils::GetSelectorCount(nsIDOMCSSStyleRule* aRule, uint32_t *aCount)
 static nsCSSSelectorList*
 GetSelectorAtIndex(nsIDOMCSSStyleRule* aRule, uint32_t aIndex, ErrorResult& rv)
 {
-  RefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
   if (rv.Failed()) {
     return nullptr;
   }
@@ -408,7 +351,7 @@ inDOMUtils::GetSelectorText(nsIDOMCSSStyleRule* aRule,
     return rv.StealNSResult();
   }
 
-  RefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
   MOZ_ASSERT(!rv.Failed(), "How could we get a selector but not a rule?");
 
   sel->mSelectors->ToString(aText, rule->GetStyleSheet(), false);
@@ -459,9 +402,9 @@ inDOMUtils::SelectorMatchesElement(nsIDOMElement* aElement,
   if (!aPseudo.IsEmpty()) {
     // We need to make sure that the requested pseudo element type
     // matches the selector pseudo element type before proceeding.
-    nsCOMPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
-    if (sel->mSelectors->PseudoType() != nsCSSPseudoElements::
-          GetPseudoType(pseudoElt, CSSEnabledState::eIgnoreEnabledState)) {
+    nsCOMPtr<nsIAtom> pseudoElt = do_GetAtom(aPseudo);
+    if (sel->mSelectors->PseudoType() !=
+        nsCSSPseudoElements::GetPseudoType(pseudoElt)) {
       *aMatches = false;
       return NS_OK;
     }
@@ -486,8 +429,8 @@ inDOMUtils::SelectorMatchesElement(nsIDOMElement* aElement,
 NS_IMETHODIMP
 inDOMUtils::IsInheritedProperty(const nsAString &aPropertyName, bool *_retval)
 {
-  nsCSSProperty prop = nsCSSProps::
-    LookupProperty(aPropertyName, CSSEnabledState::eIgnoreEnabledState);
+  nsCSSProperty prop =
+    nsCSSProps::LookupProperty(aPropertyName, nsCSSProps::eIgnoreEnabledState);
   if (prop == eCSSProperty_UNKNOWN) {
     *_retval = false;
     return NS_OK;
@@ -529,14 +472,14 @@ inDOMUtils::GetCSSPropertyNames(uint32_t aFlags, uint32_t* aCount,
   char16_t** props =
     static_cast<char16_t**>(moz_xmalloc(maxCount * sizeof(char16_t*)));
 
-#define DO_PROP(_prop)                                                      \
-  PR_BEGIN_MACRO                                                            \
-    nsCSSProperty cssProp = nsCSSProperty(_prop);                           \
-    if (nsCSSProps::IsEnabled(cssProp, CSSEnabledState::eForAllContent)) {  \
-      props[propCount] =                                                    \
-        ToNewUnicode(nsDependentCString(kCSSRawProperties[_prop]));         \
-      ++propCount;                                                          \
-    }                                                                       \
+#define DO_PROP(_prop)                                                  \
+  PR_BEGIN_MACRO                                                        \
+    nsCSSProperty cssProp = nsCSSProperty(_prop);                       \
+    if (nsCSSProps::IsEnabled(cssProp)) {                               \
+      props[propCount] =                                                \
+        ToNewUnicode(nsDependentCString(kCSSRawProperties[_prop]));     \
+      ++propCount;                                                      \
+    }                                                                   \
   PR_END_MACRO
 
   // prop is the property id we're considering; propCount is how many properties
@@ -591,13 +534,17 @@ static void GetKeywordsForProperty(const nsCSSProperty aProperty,
     // Shorthand props have no keywords.
     return;
   }
-  const nsCSSProps::KTableEntry* keywordTable =
+  const nsCSSProps::KTableValue *keywordTable =
     nsCSSProps::kKeywordTableTable[aProperty];
   if (keywordTable) {
-    for (size_t i = 0; keywordTable[i].mKeyword != eCSSKeyword_UNKNOWN; ++i) {
-      nsCSSKeyword word = keywordTable[i].mKeyword;
+    size_t i = 0;
+    while (nsCSSKeyword(keywordTable[i]) != eCSSKeyword_UNKNOWN) {
+      nsCSSKeyword word = nsCSSKeyword(keywordTable[i]);
       InsertNoDuplicates(aArray,
                          NS_ConvertASCIItoUTF16(nsCSSKeywords::GetStringValue(word)));
+      // Increment counter by 2, because in this table every second
+      // element is a nsCSSKeyword.
+      i += 2;
     }
   }
 }
@@ -611,11 +558,9 @@ static void GetColorsForProperty(const uint32_t aParserVariant,
     MOZ_ASSERT(aArray.Length() == 0);
     size_t size;
     const char * const *allColorNames = NS_AllColorNames(&size);
-    nsString* utf16Names = aArray.AppendElements(size);
     for (size_t i = 0; i < size; i++) {
-      CopyASCIItoUTF16(allColorNames[i], utf16Names[i]);
+      CopyASCIItoUTF16(allColorNames[i], *aArray.AppendElement());
     }
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("currentColor"));
   }
   return;
 }
@@ -676,7 +621,7 @@ inDOMUtils::GetSubpropertiesForCSSProperty(const nsAString& aProperty,
                                            char16_t*** aValues)
 {
   nsCSSProperty propertyID =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
+    nsCSSProps::LookupProperty(aProperty, nsCSSProps::eEnabledForAllContent);
 
   if (propertyID == eCSSProperty_UNKNOWN) {
     return NS_ERROR_FAILURE;
@@ -718,16 +663,12 @@ NS_IMETHODIMP
 inDOMUtils::CssPropertyIsShorthand(const nsAString& aProperty, bool *_retval)
 {
   nsCSSProperty propertyID =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
+    nsCSSProps::LookupProperty(aProperty, nsCSSProps::eEnabledForAllContent);
   if (propertyID == eCSSProperty_UNKNOWN) {
     return NS_ERROR_FAILURE;
   }
 
-  if (propertyID == eCSSPropertyExtra_variable) {
-    *_retval = false;
-  } else {
-    *_retval = nsCSSProps::IsShorthand(propertyID);
-  }
+  *_retval = nsCSSProps::IsShorthand(propertyID);
   return NS_OK;
 }
 
@@ -779,15 +720,7 @@ PropertySupportsVariant(nsCSSProperty aPropertyID, uint32_t aVariant)
       case eCSSProperty_border_bottom_left_radius:
       case eCSSProperty_border_bottom_right_radius:
       case eCSSProperty_background_position:
-      case eCSSProperty_background_position_x:
-      case eCSSProperty_background_position_y:
       case eCSSProperty_background_size:
-#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
-      case eCSSProperty_mask_position:
-      case eCSSProperty_mask_position_x:
-      case eCSSProperty_mask_position_y:
-      case eCSSProperty_mask_size:
-#endif
       case eCSSProperty_grid_auto_columns:
       case eCSSProperty_grid_auto_rows:
       case eCSSProperty_grid_template_columns:
@@ -863,7 +796,7 @@ inDOMUtils::CssPropertySupportsType(const nsAString& aProperty, uint32_t aType,
                                     bool *_retval)
 {
   nsCSSProperty propertyID =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
+    nsCSSProps::LookupProperty(aProperty, nsCSSProps::eEnabledForAllContent);
   if (propertyID == eCSSProperty_UNKNOWN) {
     return NS_ERROR_FAILURE;
   }
@@ -923,8 +856,8 @@ inDOMUtils::GetCSSValuesForProperty(const nsAString& aProperty,
                                     uint32_t* aLength,
                                     char16_t*** aValues)
 {
-  nsCSSProperty propertyID = nsCSSProps::
-    LookupProperty(aProperty, CSSEnabledState::eForAllContent);
+  nsCSSProperty propertyID = nsCSSProps::LookupProperty(aProperty,
+                                                        nsCSSProps::eEnabledForAllContent);
   if (propertyID == eCSSProperty_UNKNOWN) {
     return NS_ERROR_FAILURE;
   }
@@ -946,7 +879,7 @@ inDOMUtils::GetCSSValuesForProperty(const nsAString& aProperty,
   } else {
     // Property is shorthand.
     CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID,
-                                         CSSEnabledState::eForAllContent) {
+                                         nsCSSProps::eEnabledForAllContent) {
       // Get colors (once) first.
       uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);
       if (propertyParserVariant & VARIANT_COLOR) {
@@ -955,7 +888,7 @@ inDOMUtils::GetCSSValuesForProperty(const nsAString& aProperty,
       }
     }
     CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID,
-                                         CSSEnabledState::eForAllContent) {
+                                         nsCSSProps::eEnabledForAllContent) {
       uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);
       if (propertyParserVariant & VARIANT_KEYWORD) {
         GetKeywordsForProperty(*subproperty, array);
@@ -1058,8 +991,8 @@ inDOMUtils::CssPropertyIsValid(const nsAString& aPropertyName,
                                const nsAString& aPropertyValue,
                                bool *_retval)
 {
-  nsCSSProperty propertyID = nsCSSProps::
-    LookupProperty(aPropertyName, CSSEnabledState::eIgnoreEnabledState);
+  nsCSSProperty propertyID =
+    nsCSSProps::LookupProperty(aPropertyName, nsCSSProps::eIgnoreEnabledState);
 
   if (propertyID == eCSSProperty_UNKNOWN) {
     *_retval = false;
@@ -1105,36 +1038,21 @@ inDOMUtils::GetBindingURLs(nsIDOMElement *aElement, nsIArray **_retval)
 
 NS_IMETHODIMP
 inDOMUtils::SetContentState(nsIDOMElement* aElement,
-                            EventStates::InternalType aState,
-                            bool* aRetVal)
+                            EventStates::InternalType aState)
 {
   NS_ENSURE_ARG_POINTER(aElement);
 
-  RefPtr<EventStateManager> esm =
+  nsRefPtr<EventStateManager> esm =
     inLayoutUtils::GetEventStateManagerFor(aElement);
-  NS_ENSURE_TRUE(esm, NS_ERROR_INVALID_ARG);
+  if (esm) {
+    nsCOMPtr<nsIContent> content;
+    content = do_QueryInterface(aElement);
 
-  nsCOMPtr<nsIContent> content;
-  content = do_QueryInterface(aElement);
-  NS_ENSURE_TRUE(content, NS_ERROR_INVALID_ARG);
+    // XXX Invalid cast of bool to nsresult (bug 778108)
+    return (nsresult)esm->SetContentState(content, EventStates(aState));
+  }
 
-  *aRetVal = esm->SetContentState(content, EventStates(aState));
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-inDOMUtils::RemoveContentState(nsIDOMElement* aElement,
-                               EventStates::InternalType aState,
-                               bool* aRetVal)
-{
-  NS_ENSURE_ARG_POINTER(aElement);
-
-  RefPtr<EventStateManager> esm =
-    inLayoutUtils::GetEventStateManagerFor(aElement);
-  NS_ENSURE_TRUE(esm, NS_ERROR_INVALID_ARG);
-
-  *aRetVal = esm->SetContentState(nullptr, EventStates(aState));
-  return NS_OK;
+  return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -1173,7 +1091,7 @@ inDOMUtils::GetRuleNodeForElement(dom::Element* aElement,
 
   presContext->EnsureSafeToHandOutCSSRules();
 
-  RefPtr<nsStyleContext> sContext =
+  nsRefPtr<nsStyleContext> sContext =
     nsComputedDOMStyle::GetStyleContextForElement(aElement, aPseudo, presShell);
   if (sContext) {
     *aRuleNode = sContext->RuleNode();
@@ -1209,46 +1127,20 @@ GetStatesForPseudoClass(const nsAString& aStatePseudo)
     EventStates()
   };
   static_assert(MOZ_ARRAY_LENGTH(sPseudoClassStates) ==
-                static_cast<size_t>(CSSPseudoClassType::MAX),
+                nsCSSPseudoClasses::ePseudoClass_NotPseudoClass + 1,
                 "Length of PseudoClassStates array is incorrect");
 
-  nsCOMPtr<nsIAtom> atom = NS_Atomize(aStatePseudo);
-  CSSPseudoClassType type = nsCSSPseudoClasses::
-    GetPseudoType(atom, CSSEnabledState::eIgnoreEnabledState);
+  nsCOMPtr<nsIAtom> atom = do_GetAtom(aStatePseudo);
 
   // Ignore :moz-any-link so we don't give the element simultaneous
   // visited and unvisited style state
-  if (type == CSSPseudoClassType::mozAnyLink) {
+  if (nsCSSPseudoClasses::GetPseudoType(atom) ==
+      nsCSSPseudoClasses::ePseudoClass_mozAnyLink) {
     return EventStates();
   }
   // Our array above is long enough that indexing into it with
-  // NotPseudo is ok.
-  return sPseudoClassStates[static_cast<CSSPseudoClassTypeBase>(type)];
-}
-
-NS_IMETHODIMP
-inDOMUtils::GetCSSPseudoElementNames(uint32_t* aLength, char16_t*** aNames)
-{
-  nsTArray<nsIAtom*> array;
-
-  const CSSPseudoElementTypeBase pseudoCount =
-    static_cast<CSSPseudoElementTypeBase>(CSSPseudoElementType::Count);
-  for (CSSPseudoElementTypeBase i = 0; i < pseudoCount; ++i) {
-    CSSPseudoElementType type = static_cast<CSSPseudoElementType>(i);
-    if (nsCSSPseudoElements::IsEnabled(type, CSSEnabledState::eForAllContent)) {
-      nsIAtom* atom = nsCSSPseudoElements::GetPseudoAtom(type);
-      array.AppendElement(atom);
-    }
-  }
-
-  *aLength = array.Length();
-  char16_t** ret =
-    static_cast<char16_t**>(moz_xmalloc(*aLength * sizeof(char16_t*)));
-  for (uint32_t i = 0; i < *aLength; ++i) {
-    ret[i] = ToNewUnicode(nsDependentAtomString(array[i]));
-  }
-  *aNames = ret;
-  return NS_OK;
+  // NotPseudoClass is ok.
+  return sPseudoClassStates[nsCSSPseudoClasses::GetPseudoType(atom)];
 }
 
 NS_IMETHODIMP
@@ -1320,10 +1212,10 @@ NS_IMETHODIMP
 inDOMUtils::ParseStyleSheet(nsIDOMCSSStyleSheet *aSheet,
                             const nsAString& aInput)
 {
-  RefPtr<CSSStyleSheet> sheet = do_QueryObject(aSheet);
+  nsRefPtr<CSSStyleSheet> sheet = do_QueryObject(aSheet);
   NS_ENSURE_ARG_POINTER(sheet);
 
-  return sheet->ReparseSheet(aInput);
+  return sheet->ParseSheet(aInput);
 }
 
 NS_IMETHODIMP

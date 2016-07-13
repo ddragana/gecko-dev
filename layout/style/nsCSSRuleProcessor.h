@@ -15,14 +15,14 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/RefCountType.h"
-#include "mozilla/SheetType.h"
-#include "mozilla/UniquePtr.h"
-#include "nsExpirationTracker.h"
-#include "nsIMediaList.h"
 #include "nsIStyleRuleProcessor.h"
-#include "nsRuleWalker.h"
+#include "nsIMediaList.h"
 #include "nsTArray.h"
+#include "nsAutoPtr.h"
+#include "nsExpirationTracker.h"
+#include "nsRuleWalker.h"
+#include "mozilla/RefCountType.h"
+#include "mozilla/UniquePtr.h"
 
 struct CascadeEnumData;
 struct ElementDependentRuleProcessorData;
@@ -38,7 +38,6 @@ class nsCSSCounterStyleRule;
 
 namespace mozilla {
 class CSSStyleSheet;
-enum class CSSPseudoElementType : uint8_t;
 namespace css {
 class DocumentRule;
 } // namespace css
@@ -57,19 +56,14 @@ class DocumentRule;
 
 class nsCSSRuleProcessor: public nsIStyleRuleProcessor {
 public:
-  typedef nsTArray<RefPtr<mozilla::CSSStyleSheet>> sheet_array_type;
+  typedef nsTArray<nsRefPtr<mozilla::CSSStyleSheet>> sheet_array_type;
 
   // aScopeElement must be non-null iff aSheetType is
-  // SheetType::ScopedDoc.
+  // nsStyleSet::eScopedDocSheet.
   // aPreviousCSSRuleProcessor is the rule processor (if any) that this
   // one is replacing.
   nsCSSRuleProcessor(const sheet_array_type& aSheets,
-                     mozilla::SheetType aSheetType,
-                     mozilla::dom::Element* aScopeElement,
-                     nsCSSRuleProcessor* aPreviousCSSRuleProcessor,
-                     bool aIsShared = false);
-  nsCSSRuleProcessor(sheet_array_type&& aSheets,
-                     mozilla::SheetType aSheetType,
+                     uint8_t aSheetType,
                      mozilla::dom::Element* aScopeElement,
                      nsCSSRuleProcessor* aPreviousCSSRuleProcessor,
                      bool aIsShared = false);
@@ -118,21 +112,6 @@ public:
    */
   static bool IsLink(mozilla::dom::Element* aElement);
 
-  /**
-   * Returns true if the given aElement matches aSelector.
-   * Like nsCSSRuleProcessor.cpp's SelectorMatches (and unlike
-   * SelectorMatchesTree), this does not check an entire selector list
-   * separated by combinators.
-   *
-   * :visited and :link will match both visited and non-visited links,
-   * as if aTreeMatchContext->mVisitedHandling were eLinksVisitedOrUnvisited.
-   *
-   * aSelector is restricted to not containing pseudo-elements.
-   */
-  static bool RestrictedSelectorMatches(mozilla::dom::Element* aElement,
-                                        nsCSSSelector* aSelector,
-                                        TreeMatchContext& aTreeMatchContext);
-
   // nsIStyleRuleProcessor
   virtual void RulesMatching(ElementRuleProcessorData* aData) override;
 
@@ -150,9 +129,7 @@ public:
   virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData) override;
 
   virtual nsRestyleHint
-    HasAttributeDependentStyle(AttributeRuleProcessorData* aData,
-                               mozilla::RestyleHintData& aRestyleHintDataResult)
-                                 override;
+    HasAttributeDependentStyle(AttributeRuleProcessorData* aData) override;
 
   virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) override;
 
@@ -238,7 +215,7 @@ private:
 
   nsRestyleHint HasStateDependentStyle(ElementDependentRuleProcessorData* aData,
                                        mozilla::dom::Element* aStatefulElement,
-                                       mozilla::CSSPseudoElementType aPseudoType,
+                                       nsCSSPseudoElements::Type aPseudoType,
                                        mozilla::EventStates aStateMask);
 
   void ClearSheets();
@@ -259,7 +236,7 @@ private:
 
   // The scope element for this rule processor's scoped style sheets.
   // Only used if mSheetType == nsStyleSet::eScopedDocSheet.
-  RefPtr<mozilla::dom::Element> mScopeElement;
+  nsRefPtr<mozilla::dom::Element> mScopeElement;
 
   nsTArray<mozilla::css::DocumentRule*> mDocumentRules;
   nsDocumentRuleResultCacheKey mDocumentCacheKey;
@@ -268,7 +245,7 @@ private:
   MozRefCountType mStyleSetRefCnt;
 
   // type of stylesheet using this processor
-  mozilla::SheetType mSheetType;
+  uint8_t mSheetType;  // == nsStyleSet::sheetType
 
   const bool mIsShared;
 

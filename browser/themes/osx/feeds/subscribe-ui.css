@@ -6,3 +6,6 @@
   padding: 3px;
 }
 
+.chooseApplicationMenuItem {
+  list-style-image: url("chrome://browser/skin/preferences/application.png");
+}

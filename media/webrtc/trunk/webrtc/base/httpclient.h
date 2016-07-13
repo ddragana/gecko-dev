@@ -62,7 +62,7 @@ public:
   // be freed by the caller.  Otherwise, an internal object is allocated.
   HttpClient(const std::string& agent, StreamPool* pool,
              HttpTransaction* transaction = NULL);
-  ~HttpClient() override;
+  virtual ~HttpClient();
 
   void set_pool(StreamPool* pool) { pool_ = pool; }
 
@@ -161,10 +161,10 @@ protected:
   void OnResolveResult(AsyncResolverInterface* resolver);
 
   // IHttpNotify Interface
-  HttpError onHttpHeaderComplete(bool chunked, size_t& data_size) override;
-  void onHttpComplete(HttpMode mode, HttpError err) override;
-  void onHttpClosed(HttpError err) override;
-
+  virtual HttpError onHttpHeaderComplete(bool chunked, size_t& data_size);
+  virtual void onHttpComplete(HttpMode mode, HttpError err);
+  virtual void onHttpClosed(HttpError err);
+  
 private:
   enum CacheState { CS_READY, CS_WRITING, CS_READING, CS_VALIDATING };
   bool IsCacheActive() const { return (cache_state_ > CS_READY); }

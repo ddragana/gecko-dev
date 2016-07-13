@@ -4,17 +4,11 @@ testStorages(function(storageString) {
         var storage = window[storageString];
         t.add_cleanup(function() { storage.clear() });
 
-        clearStorage(storageString, t.step_func(step0));
+        storage.clear();
         assert_equals(storage.length, 0, "storage.length");
 
-        function step0(msg)
-        {
-            iframe.onload = t.step_func(step1);
-            // Null out the existing handler eventTestHarness.js set up;
-            // otherwise this test won't be testing much of anything useful.
-            iframe.contentWindow.onstorage = null;
-            iframe.src = "resources/event_body_handler.html";
-        }
+        iframe.onload = t.step_func(step1);
+        iframe.src = "resources/event_body_handler.html";
 
         function step1(msg)
         {

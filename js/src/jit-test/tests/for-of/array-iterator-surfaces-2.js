@@ -3,11 +3,11 @@
 load(libdir + "iteration.js");
 
 var proto = Object.getPrototypeOf([][Symbol.iterator]());
-var iterProto = Object.getPrototypeOf(proto);
+assertEq(Object.getPrototypeOf(proto), Iterator.prototype);
 proto = Object.getPrototypeOf([].keys());
-assertEq(Object.getPrototypeOf(proto), iterProto);
+assertEq(Object.getPrototypeOf(proto), Iterator.prototype);
 proto = Object.getPrototypeOf([].entries());
-assertEq(Object.getPrototypeOf(proto), iterProto);
+assertEq(Object.getPrototypeOf(proto), Iterator.prototype);
 
 function check(it) {
     assertEq(typeof it, 'object');

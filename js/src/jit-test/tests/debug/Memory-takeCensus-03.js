@@ -15,11 +15,11 @@ Census.walkCensus(census1, "census1", Census.assertAllNotLessThan(census0));
 var g2 = newGlobal();
 dbg.addDebuggee(g2);
 var census2 = dbg.memory.takeCensus();
-Census.walkCensus(census2, "census2", Census.assertAllNotLessThan(census1), new Set(["bytes"]));
+Census.walkCensus(census2, "census2", Census.assertAllNotLessThan(census1));
 
 dbg.removeDebuggee(g2);
 var census3 = dbg.memory.takeCensus();
-Census.walkCensus(census3, "census3", Census.assertAllEqual(census1), new Set(["bytes"]));
+Census.walkCensus(census3, "census3", Census.assertAllEqual(census1));
 
 dbg.removeDebuggee(g1);
 var census4 = dbg.memory.takeCensus();

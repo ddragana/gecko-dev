@@ -18,7 +18,6 @@ Notes to self:
 #include "nsReadableUtils.h"
 #include "nsTArray.h"
 #include "nsIFormatConverter.h"
-#include "nsIContentPolicy.h"
 #include "nsIComponentManager.h"
 #include "nsCOMPtr.h"
 #include "nsXPCOM.h"
@@ -36,7 +35,7 @@ Notes to self:
 #include "nsIWeakReferenceUtils.h"
 #include "nsIFile.h"
 #include "nsILoadContext.h"
-#include "mozilla/UniquePtr.h"
+#include "nsAutoPtr.h"
 
 NS_IMPL_ISUPPORTS(nsTransferable, nsITransferable)
 
@@ -184,7 +183,7 @@ DataStruct::ReadCache(nsISupports** aData, uint32_t* aDataLen)
 
     uint32_t size = uint32_t(fileSize);
     // create new memory for the large clipboard data
-    auto data = mozilla::MakeUnique<char[]>(size);
+    nsAutoArrayPtr<char> data(new char[size]);
     if ( !data )
       return NS_ERROR_OUT_OF_MEMORY;
       
@@ -195,12 +194,11 @@ DataStruct::ReadCache(nsISupports** aData, uint32_t* aDataLen)
     
     if (!cacheFile) return NS_ERROR_FAILURE;
 
-    nsresult rv = inStr->Read(data.get(), fileSize, aDataLen);
+    nsresult rv = inStr->Read(data, fileSize, aDataLen);
 
     // make sure we got all the data ok
     if (NS_SUCCEEDED(rv) && *aDataLen == size) {
-      nsPrimitiveHelpers::CreatePrimitiveForData(mFlavor.get(), data.get(),
-                                                 fileSize, aData);
+      nsPrimitiveHelpers::CreatePrimitiveForData ( mFlavor.get(), data, fileSize, aData );
       return *aData ? NS_OK : NS_ERROR_FAILURE;
     }
 
@@ -220,7 +218,6 @@ DataStruct::ReadCache(nsISupports** aData, uint32_t* aDataLen)
 //-------------------------------------------------------------------------
 nsTransferable::nsTransferable()
   : mPrivateData(false)
-  , mContentPolicyType(nsIContentPolicy::TYPE_OTHER)
 #ifdef DEBUG
   , mInitialized(false)
 #endif
@@ -644,20 +641,5 @@ NS_IMETHODIMP
 nsTransferable::SetRequestingNode(nsIDOMNode* aRequestingNode)
 {
   mRequestingNode = do_GetWeakReference(aRequestingNode);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsTransferable::GetContentPolicyType(nsContentPolicyType* outContentPolicyType)
-{
-  NS_ENSURE_ARG_POINTER(outContentPolicyType);
-  *outContentPolicyType = mContentPolicyType;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsTransferable::SetContentPolicyType(nsContentPolicyType aContentPolicyType)
-{
-  mContentPolicyType = aContentPolicyType;
   return NS_OK;
 }

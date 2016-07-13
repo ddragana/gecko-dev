@@ -126,11 +126,11 @@ public:
   typedef ReverseIterator<IteratorT> const_reverse_iterator;
 
   template<typename Iterator1, typename Iterator2>
-  MOZ_IMPLICIT IteratorRange(Iterator1 aIterBegin, Iterator2 aIterEnd)
+  IteratorRange(Iterator1 aIterBegin, Iterator2 aIterEnd)
     : mIterBegin(aIterBegin), mIterEnd(aIterEnd) { }
 
   template<typename Iterator>
-  MOZ_IMPLICIT IteratorRange(const IteratorRange<Iterator>& aOther)
+  IteratorRange(const IteratorRange<Iterator>& aOther)
     : mIterBegin(aOther.mIterBegin), mIterEnd(aOther.mIterEnd) { }
 
   iterator begin() const { return mIterBegin; }

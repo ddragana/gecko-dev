@@ -15,8 +15,8 @@ Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 // Ensure NetworkStatsService and NetworkStatsDB are loaded in the parent process
 // to receive messages from the child processes.
-var appInfo = Cc["@mozilla.org/xre/app-info;1"];
-var isParentProcess = !appInfo || appInfo.getService(Ci.nsIXULRuntime)
+let appInfo = Cc["@mozilla.org/xre/app-info;1"];
+let isParentProcess = !appInfo || appInfo.getService(Ci.nsIXULRuntime)
                         .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
 if (isParentProcess) {
   Cu.import("resource://gre/modules/NetworkStatsService.jsm");
@@ -111,6 +111,7 @@ NetworkStatsAlarm.prototype = {
 
 const NETWORKSTATSMANAGER_CONTRACTID = "@mozilla.org/networkStatsManager;1";
 const NETWORKSTATSMANAGER_CID        = Components.ID("{ceb874cd-cc1a-4e65-b404-cc2d3e42425f}");
+const nsIDOMMozNetworkStatsManager   = Ci.nsIDOMMozNetworkStatsManager;
 
 function NetworkStatsManager() {
   if (DEBUG) {
@@ -121,25 +122,40 @@ function NetworkStatsManager() {
 NetworkStatsManager.prototype = {
   __proto__: DOMRequestIpcHelper.prototype,
 
+  checkPrivileges: function checkPrivileges() {
+    if (!this.hasPrivileges) {
+      throw Components.Exception("Permission denied", Cr.NS_ERROR_FAILURE);
+    }
+  },
+
   getSamples: function getSamples(aNetwork, aStart, aEnd, aOptions) {
-    if (aStart > aEnd) {
+    this.checkPrivileges();
+
+    if (aStart.constructor.name !== "Date" ||
+        aEnd.constructor.name !== "Date" ||
+        !(aNetwork instanceof this.window.MozNetworkStatsInterface) ||
+        aStart > aEnd) {
       throw Components.results.NS_ERROR_INVALID_ARG;
     }
 
-    // appManifestURL is used to query network statistics by app;
-    // serviceType is used to query network statistics by system service.
-    // It is illegal to specify both of them at the same time.
-    if (aOptions.appManifestURL && aOptions.serviceType) {
-      throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+    let appManifestURL = null;
+    let browsingTrafficOnly = false;
+    let serviceType = null;
+    if (aOptions) {
+      // appManifestURL is used to query network statistics by app;
+      // serviceType is used to query network statistics by system service.
+      // It is illegal to specify both of them at the same time.
+      if (aOptions.appManifestURL && aOptions.serviceType) {
+        throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+      }
+      // browsingTrafficOnly is meaningful only when querying by app.
+      if (!aOptions.appManifestURL && aOptions.browsingTrafficOnly) {
+        throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+      }
+      appManifestURL = aOptions.appManifestURL;
+      serviceType = aOptions.serviceType;
+      browsingTrafficOnly = aOptions.browsingTrafficOnly || false;
     }
-    // browsingTrafficOnly is meaningful only when querying by app.
-    if (!aOptions.appManifestURL && aOptions.browsingTrafficOnly) {
-      throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
-    }
-
-    let appManifestURL = aOptions.appManifestURL;
-    let serviceType = aOptions.serviceType;
-    let browsingTrafficOnly = aOptions.browsingTrafficOnly;
 
     // TODO Bug 929410 Date object cannot correctly pass through cpmm/ppmm IPC
     // This is just a work-around by passing timestamp numbers.
@@ -159,6 +175,12 @@ NetworkStatsManager.prototype = {
   },
 
   clearStats: function clearStats(aNetwork) {
+    this.checkPrivileges();
+
+    if (!aNetwork instanceof this.window.MozNetworkStatsInterface) {
+      throw Components.results.NS_ERROR_INVALID_ARG;
+    }
+
     let request = this.createRequest();
     cpmm.sendAsyncMessage("NetworkStats:Clear",
                           { network: aNetwork.toJSON(),
@@ -167,6 +189,8 @@ NetworkStatsManager.prototype = {
   },
 
   clearAllStats: function clearAllStats() {
+    this.checkPrivileges();
+
     let request = this.createRequest();
     cpmm.sendAsyncMessage("NetworkStats:ClearAll",
                           {id: this.getRequestId(request)});
@@ -174,6 +198,17 @@ NetworkStatsManager.prototype = {
   },
 
   addAlarm: function addAlarm(aNetwork, aThreshold, aOptions) {
+    this.checkPrivileges();
+
+    if (!aOptions) {
+      aOptions = Object.create(null);
+    }
+
+    if (aOptions.startTime && aOptions.startTime.constructor.name !== "Date" ||
+        !(aNetwork instanceof this.window.MozNetworkStatsInterface)) {
+      throw Components.results.NS_ERROR_INVALID_ARG;
+    }
+
     let request = this.createRequest();
     cpmm.sendAsyncMessage("NetworkStats:SetAlarm",
                           {id: this.getRequestId(request),
@@ -187,8 +222,13 @@ NetworkStatsManager.prototype = {
   },
 
   getAllAlarms: function getAllAlarms(aNetwork) {
+    this.checkPrivileges();
+
     let network = null;
     if (aNetwork) {
+      if (!aNetwork instanceof this.window.MozNetworkStatsInterface) {
+        throw Components.results.NS_ERROR_INVALID_ARG;
+      }
       network = aNetwork.toJSON();
     }
 
@@ -201,6 +241,8 @@ NetworkStatsManager.prototype = {
   },
 
   removeAlarms: function removeAlarms(aAlarmId) {
+    this.checkPrivileges();
+
     if (aAlarmId == 0) {
       aAlarmId = -1;
     }
@@ -215,6 +257,8 @@ NetworkStatsManager.prototype = {
   },
 
   getAvailableNetworks: function getAvailableNetworks() {
+    this.checkPrivileges();
+
     let request = this.createRequest();
     cpmm.sendAsyncMessage("NetworkStats:GetAvailableNetworks",
                           { id: this.getRequestId(request) });
@@ -222,6 +266,8 @@ NetworkStatsManager.prototype = {
   },
 
   getAvailableServiceTypes: function getAvailableServiceTypes() {
+    this.checkPrivileges();
+
     let request = this.createRequest();
     cpmm.sendAsyncMessage("NetworkStats:GetAvailableServiceTypes",
                           { id: this.getRequestId(request) });
@@ -229,10 +275,12 @@ NetworkStatsManager.prototype = {
   },
 
   get sampleRate() {
+    this.checkPrivileges();
     return cpmm.sendSyncMessage("NetworkStats:SampleRate")[0];
   },
 
   get maxStorageAge() {
+    this.checkPrivileges();
     return cpmm.sendSyncMessage("NetworkStats:MaxStorageAge")[0];
   },
 
@@ -342,7 +390,27 @@ NetworkStatsManager.prototype = {
   },
 
   init: function(aWindow) {
+    // Set navigator.mozNetworkStats to null.
+    if (!Services.prefs.getBoolPref("dom.mozNetworkStats.enabled")) {
+      return null;
+    }
+
     let principal = aWindow.document.nodePrincipal;
+    let secMan = Services.scriptSecurityManager;
+    let perm = principal == secMan.getSystemPrincipal() ?
+                 Ci.nsIPermissionManager.ALLOW_ACTION :
+                 Services.perms.testExactPermissionFromPrincipal(principal,
+                                                                 "networkstats-manage");
+
+    // Only pages with perm set can use the netstats.
+    this.hasPrivileges = perm == Ci.nsIPermissionManager.ALLOW_ACTION;
+    if (DEBUG) {
+      debug("has privileges: " + this.hasPrivileges);
+    }
+
+    if (!this.hasPrivileges) {
+      return null;
+    }
 
     this.initDOMRequestHelper(aWindow, ["NetworkStats:Get:Return",
                                         "NetworkStats:GetAvailableNetworks:Return",
@@ -375,10 +443,16 @@ NetworkStatsManager.prototype = {
   },
 
   classID : NETWORKSTATSMANAGER_CID,
-  contractID : NETWORKSTATSMANAGER_CONTRACTID,
-  QueryInterface : XPCOMUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer,
-                                          Ci.nsISupportsWeakReference,
-                                          Ci.nsIObserver]),
+  QueryInterface : XPCOMUtils.generateQI([nsIDOMMozNetworkStatsManager,
+                                         Ci.nsIDOMGlobalPropertyInitializer,
+                                         Ci.nsISupportsWeakReference,
+                                         Ci.nsIObserver]),
+
+  classInfo : XPCOMUtils.generateCI({classID: NETWORKSTATSMANAGER_CID,
+                                     contractID: NETWORKSTATSMANAGER_CONTRACTID,
+                                     classDescription: "NetworkStatsManager",
+                                     interfaces: [nsIDOMMozNetworkStatsManager],
+                                     flags: nsIClassInfo.DOM_OBJECT})
 }
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([NetworkStatsAlarm,

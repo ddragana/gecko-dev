@@ -9,45 +9,11 @@
 
 interface Principal;
 
-enum PushEncryptionKeyName
-{
-  "p256dh",
-  "auth"
-};
-
-dictionary PushSubscriptionKeys
-{
-  ByteString p256dh;
-  ByteString auth;
-};
-
-dictionary PushSubscriptionJSON
-{
-  USVString endpoint;
-  PushSubscriptionKeys keys;
-};
-
-dictionary PushSubscriptionInit
-{
-  required USVString endpoint;
-  required USVString scope;
-  ArrayBuffer? p256dhKey;
-  ArrayBuffer? authSecret;
-  BufferSource? appServerKey;
-};
-
-[Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled",
- ChromeConstructor(PushSubscriptionInit initDict)]
+[JSImplementation="@mozilla.org/push/PushSubscription;1",
+ Constructor(DOMString pushEndpoint, DOMString scope, Principal principal), ChromeOnly]
 interface PushSubscription
 {
-  readonly attribute USVString endpoint;
-  readonly attribute PushSubscriptionOptions options;
-  [Throws]
-  ArrayBuffer? getKey(PushEncryptionKeyName name);
-  [Throws, UseCounter]
-  Promise<boolean> unsubscribe();
-
-  // Implements the custom serializer specified in Push API, section 9.
-  [Throws]
-  PushSubscriptionJSON toJSON();
+    readonly attribute USVString endpoint;
+    Promise<boolean> unsubscribe();
+    jsonifier;
 };

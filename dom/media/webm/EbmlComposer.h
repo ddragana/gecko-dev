@@ -22,7 +22,8 @@ public:
   void SetVideoConfig(uint32_t aWidth, uint32_t aHeight, uint32_t aDisplayWidth,
                       uint32_t aDisplayHeight, float aFrameRate);
 
-  void SetAudioConfig(uint32_t aSampleFreq, uint32_t aChannels);
+  void SetAudioConfig(uint32_t aSampleFreq, uint32_t aChannels,
+                      uint32_t bitDepth);
   /*
    * Set the CodecPrivateData for writing in header.
    */
@@ -67,8 +68,6 @@ private:
   uint64_t mClusterLengthLoc;
   // Audio codec specific header data.
   nsTArray<uint8_t> mCodecPrivateData;
-  // Codec delay in nanoseconds.
-  uint64_t mCodecDelay;
 
   // The timecode of the cluster.
   uint64_t mClusterTimecode;
@@ -81,6 +80,7 @@ private:
   float mFrameRate;
   // Audio configuration
   float mSampleFreq;
+  int mBitDepth;
   int mChannels;
 };
 

@@ -15,11 +15,27 @@ SurfaceCaps::SurfaceCaps()
     Clear();
 }
 
-/* These are defined out of line so that we don't need to include
- * ISurfaceAllocator.h in the header */
-SurfaceCaps::SurfaceCaps(const SurfaceCaps& other) = default;
+SurfaceCaps::SurfaceCaps(const SurfaceCaps& other)
+{
+    *this = other;
+}
+
 SurfaceCaps&
-SurfaceCaps::operator=(const SurfaceCaps& other) = default;
+SurfaceCaps::operator=(const SurfaceCaps& other)
+{
+    any = other.any;
+    color = other.color;
+    alpha = other.alpha;
+    bpp16 = other.bpp16;
+    depth = other.depth;
+    stencil = other.stencil;
+    antialias = other.antialias;
+    premultAlpha = other.premultAlpha;
+    preserve = other.preserve;
+    surfaceAllocator = other.surfaceAllocator;
+
+    return *this;
+}
 
 void
 SurfaceCaps::Clear()

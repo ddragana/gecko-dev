@@ -35,7 +35,7 @@ class nsInProcessTabChildGlobal : public mozilla::DOMEventTargetHelper,
                                   public nsSupportsWeakReference,
                                   public mozilla::dom::ipc::MessageManagerCallback
 {
-  typedef mozilla::dom::ipc::StructuredCloneData StructuredCloneData;
+  typedef mozilla::OwningSerializedStructuredCloneBuffer OwningSerializedStructuredCloneBuffer;
 
 public:
   nsInProcessTabChildGlobal(nsIDocShell* aShell, nsIContent* aOwner,
@@ -73,7 +73,7 @@ public:
                                         aPrincipal, aCx, aArgc, aRetval)
       : NS_ERROR_NULL_POINTER;
   }
-  NS_IMETHOD GetContent(mozIDOMWindowProxy** aContent) override;
+  NS_IMETHOD GetContent(nsIDOMWindow** aContent) override;
   NS_IMETHOD GetDocShell(nsIDocShell** aDocShell) override;
 
   NS_DECL_NSIINPROCESSCONTENTFRAMEMESSAGEMANAGER
@@ -83,16 +83,16 @@ public:
    */
   virtual bool DoSendBlockingMessage(JSContext* aCx,
                                       const nsAString& aMessage,
-                                      StructuredCloneData& aData,
+                                      const mozilla::dom::StructuredCloneData& aData,
                                       JS::Handle<JSObject *> aCpows,
                                       nsIPrincipal* aPrincipal,
-                                      nsTArray<StructuredCloneData>* aRetVal,
+                                      nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal,
                                       bool aIsSync) override;
-  virtual nsresult DoSendAsyncMessage(JSContext* aCx,
-                                      const nsAString& aMessage,
-                                      StructuredCloneData& aData,
-                                      JS::Handle<JSObject *> aCpows,
-                                      nsIPrincipal* aPrincipal) override;
+  virtual bool DoSendAsyncMessage(JSContext* aCx,
+                                  const nsAString& aMessage,
+                                  const mozilla::dom::StructuredCloneData& aData,
+                                  JS::Handle<JSObject *> aCpows,
+                                  nsIPrincipal* aPrincipal) override;
 
   virtual nsresult PreHandleEvent(
                      mozilla::EventChainPreVisitor& aVisitor) override;

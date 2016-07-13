@@ -20,15 +20,10 @@ struct MinimalAlloc {
     LifoAlloc lifo;
     TempAllocator alloc;
 
-    // We are not testing the fallible allocator in these test cases, thus make
-    // the lifo alloc chunk extremely large for our test cases.
     MinimalAlloc()
-      : lifo(128 * 1024),
+      : lifo(4096),
         alloc(&lifo)
-    {
-        if (!alloc.ensureBallast())
-            MOZ_CRASH("[OOM] Not enough RAM for the test.");
-    }
+    { }
 };
 
 struct MinimalFunc : MinimalAlloc
@@ -80,7 +75,8 @@ struct MinimalFunc : MinimalAlloc
     {
         if (!SplitCriticalEdges(graph))
             return false;
-        RenumberBlocks(graph);
+        if (!RenumberBlocks(graph))
+            return false;
         if (!BuildDominatorTree(graph))
             return false;
         if (!BuildPhiReverseMapping(graph))
@@ -97,7 +93,8 @@ struct MinimalFunc : MinimalAlloc
     {
         if (!SplitCriticalEdges(graph))
             return false;
-        RenumberBlocks(graph);
+        if (!RenumberBlocks(graph))
+            return false;
         if (!BuildDominatorTree(graph))
             return false;
         if (!BuildPhiReverseMapping(graph))

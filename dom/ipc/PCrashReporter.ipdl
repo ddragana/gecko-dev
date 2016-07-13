@@ -22,9 +22,9 @@ struct Mapping {
 async protocol PCrashReporter {
   manager PContent or PPluginModule or PGMP;
 parent:
-  async AnnotateCrashReport(nsCString key, nsCString data);
-  async AppendAppNotes(nsCString data);
-  async __delete__();
+  AnnotateCrashReport(nsCString key, nsCString data);
+  AppendAppNotes(nsCString data);
+  __delete__();
 };
 
 }

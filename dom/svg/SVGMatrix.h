@@ -39,6 +39,7 @@
 
 #include "mozilla/dom/SVGTransform.h"
 #include "gfxMatrix.h"
+#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 #include "mozilla/Attributes.h"
@@ -118,7 +119,7 @@ private:
     return mTransform ? mTransform->IsAnimVal() : false;
   }
 
-  RefPtr<SVGTransform> mTransform;
+  nsRefPtr<SVGTransform> mTransform;
 
   // Typically we operate on the matrix data accessed via mTransform but for
   // matrices that exist independently of an SVGTransform we use mMatrix below.

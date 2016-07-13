@@ -9,15 +9,12 @@
 #include "Units.h"                      // for ScreenPoint
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/RefPtr.h"             // for already_AddRefed, RefCounted
-#include "mozilla/gfx/2D.h"             // for DrawTarget
-#include "mozilla/gfx/MatrixFwd.h"      // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for IntSize, Point
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float
 #include "mozilla/layers/CompositorTypes.h"  // for DiagnosticTypes, etc
 #include "mozilla/layers/FenceUtils.h"  // for FenceHandle
 #include "mozilla/layers/LayersTypes.h"  // for LayersBackend
-#include "mozilla/widget/CompositorWidget.h"
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsRegion.h"
 #include <vector>
@@ -109,12 +106,13 @@
  */
 
 class nsIWidget;
+class nsIntRegion;
 
 namespace mozilla {
 namespace gfx {
 class Matrix;
+class Matrix4x4;
 class DrawTarget;
-class DataSourceSurface;
 } // namespace gfx
 
 namespace layers {
@@ -122,19 +120,12 @@ namespace layers {
 struct Effect;
 struct EffectChain;
 class Image;
-class ImageHostOverlay;
 class Layer;
 class TextureSource;
 class DataTextureSource;
 class CompositingRenderTarget;
-class CompositorBridgeParent;
+class PCompositorParent;
 class LayerManagerComposite;
-class CompositorOGL;
-class CompositorD3D9;
-class CompositorD3D11;
-class BasicCompositor;
-class TextureHost;
-class TextureReadLock;
 
 enum SurfaceInitMode
 {
@@ -187,24 +178,22 @@ enum SurfaceInitMode
 class Compositor
 {
 protected:
-  virtual ~Compositor();
+  virtual ~Compositor() {}
 
 public:
   NS_INLINE_DECL_REFCOUNTING(Compositor)
 
-  explicit Compositor(widget::CompositorWidget* aWidget,
-                      CompositorBridgeParent* aParent = nullptr);
+  explicit Compositor(PCompositorParent* aParent = nullptr)
+    : mCompositorID(0)
+    , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
+    , mParent(aParent)
+    , mScreenRotation(ROTATION_0)
+  {
+  }
 
   virtual already_AddRefed<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) = 0;
-
-  virtual already_AddRefed<DataTextureSource>
-  CreateDataTextureSourceAround(gfx::DataSourceSurface* aSurface) { return nullptr; }
-
-  virtual bool Initialize(nsCString* const out_failureReason) = 0;
-  virtual void Destroy();
-  bool IsDestroyed() const { return mIsDestroyed; }
-
-  virtual void DetachWidget() { mWidget = nullptr; }
+  virtual bool Initialize() = 0;
+  virtual void Destroy() = 0;
 
   /**
    * Return true if the effect type is supported.
@@ -315,7 +304,7 @@ public:
    * aVisibleRect is used to determine which edges should be antialiased,
    * without applying the effect to the inner edges of a tiled layer.
    */
-  virtual void DrawQuad(const gfx::Rect& aRect, const gfx::IntRect& aClipRect,
+  virtual void DrawQuad(const gfx::Rect& aRect, const gfx::Rect& aClipRect,
                         const EffectChain& aEffectChain,
                         gfx::Float aOpacity, const gfx::Matrix4x4& aTransform,
                         const gfx::Rect& aVisibleRect) = 0;
@@ -325,26 +314,11 @@ public:
    * Use this when you are drawing a single quad that is not part of a tiled
    * layer.
    */
-  void DrawQuad(const gfx::Rect& aRect, const gfx::IntRect& aClipRect,
+  void DrawQuad(const gfx::Rect& aRect, const gfx::Rect& aClipRect,
                         const EffectChain& aEffectChain,
                         gfx::Float aOpacity, const gfx::Matrix4x4& aTransform) {
       DrawQuad(aRect, aClipRect, aEffectChain, aOpacity, aTransform, aRect);
   }
-
-  /**
-   * Draw an unfilled solid color rect. Typically used for debugging overlays.
-   */
-  void SlowDrawRect(const gfx::Rect& aRect, const gfx::Color& color,
-                const gfx::IntRect& aClipRect = gfx::IntRect(),
-                const gfx::Matrix4x4& aTransform = gfx::Matrix4x4(),
-                int aStrokeWidth = 1);
-
-  /**
-   * Draw a solid color filled rect. This is a simple DrawQuad helper.
-   */
-  void FillRect(const gfx::Rect& aRect, const gfx::Color& color,
-                    const gfx::IntRect& aClipRect = gfx::IntRect(),
-                    const gfx::Matrix4x4& aTransform = gfx::Matrix4x4());
 
   /*
    * Clear aRect on current render target.
@@ -369,27 +343,24 @@ public:
    * If aRenderBoundsOut is non-null, it will be set to the render bounds
    * actually used by the compositor in window space. If aRenderBoundsOut
    * is returned empty, composition should be aborted.
-   *
-   * If aOpaque is true, then all of aInvalidRegion will be drawn to with
-   * opaque content.
    */
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
-                          const gfx::IntRect* aClipRectIn,
-                          const gfx::IntRect& aRenderBounds,
-                          const nsIntRegion& aOpaqueRegion,
-                          gfx::IntRect* aClipRectOut = nullptr,
-                          gfx::IntRect* aRenderBoundsOut = nullptr) = 0;
+                          const gfx::Rect* aClipRectIn,
+                          const gfx::Rect& aRenderBounds,
+                          gfx::Rect* aClipRectOut = nullptr,
+                          gfx::Rect* aRenderBoundsOut = nullptr) = 0;
 
   /**
    * Flush the current frame to the screen and tidy up.
-   *
-   * Derived class overriding this should call Compositor::EndFrame.
    */
-  virtual void EndFrame();
+  virtual void EndFrame() = 0;
 
-  virtual void SetDispAcquireFence(Layer* aLayer);
+  virtual void SetDispAcquireFence(Layer* aLayer) {}
 
-  virtual FenceHandle GetReleaseFence();
+  virtual FenceHandle GetReleaseFence()
+  {
+    return FenceHandle();
+  }
 
   /**
    * Post-rendering stuff if the rendering is done outside of this Compositor
@@ -397,6 +368,16 @@ public:
    * aTransform is the transform from user space to window space.
    */
   virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) = 0;
+
+  /**
+   * Setup the viewport and projection matrix for rendering to a target of the
+   * given dimensions. The size and transform here will override those set in
+   * BeginFrame. BeginFrame sets a size and transform for the default render
+   * target, usually the screen. Calling this method prepares the compositor to
+   * render using a different viewport (that is, size and transform), usually
+   * associated with a new render target.
+   */
+  virtual void PrepareViewport(const gfx::IntSize& aSize) = 0;
 
   /**
    * Whether textures created by this compositor can receive partial updates.
@@ -415,13 +396,13 @@ public:
 
   void DrawDiagnostics(DiagnosticFlags aFlags,
                        const gfx::Rect& visibleRect,
-                       const gfx::IntRect& aClipRect,
+                       const gfx::Rect& aClipRect,
                        const gfx::Matrix4x4& transform,
                        uint32_t aFlashCounter = DIAGNOSTIC_FLASH_COUNTER_MAX);
 
   void DrawDiagnostics(DiagnosticFlags aFlags,
                        const nsIntRegion& visibleRegion,
-                       const gfx::IntRect& aClipRect,
+                       const gfx::Rect& aClipRect,
                        const gfx::Matrix4x4& transform,
                        uint32_t aFlashCounter = DIAGNOSTIC_FLASH_COUNTER_MAX);
 
@@ -430,11 +411,6 @@ public:
 #endif // MOZ_DUMP_PAINTING
 
   virtual LayersBackend GetBackendType() const = 0;
-
-  virtual CompositorOGL* AsCompositorOGL() { return nullptr; }
-  virtual CompositorD3D9* AsCompositorD3D9() { return nullptr; }
-  virtual CompositorD3D11* AsCompositorD3D11() { return nullptr; }
-  virtual BasicCompositor* AsBasicCompositor() { return nullptr; }
 
   /**
    * Each Compositor has a unique ID.
@@ -472,21 +448,25 @@ public:
    */
   virtual bool Ready() { return true; }
 
-  virtual void ForcePresent() { }
-
-  widget::CompositorWidget* GetWidget() const { return mWidget; }
-
-  virtual bool HasImageHostOverlays() { return false; }
-
-  virtual void AddImageHostOverlay(ImageHostOverlay* aOverlay) {}
-
-  virtual void RemoveImageHostOverlay(ImageHostOverlay* aOverlay) {}
+  // XXX I expect we will want to move mWidget into this class and implement
+  // these methods properly.
+  virtual nsIWidget* GetWidget() const { return nullptr; }
 
   /**
    * Debug-build assertion that can be called to ensure code is running on the
    * compositor thread.
    */
   static void AssertOnCompositorThread();
+
+  /**
+   * We enforce that there can only be one Compositor backend type off the main
+   * thread at the same time. The backend type in use can be checked with this
+   * static method. We need this for creating texture clients/hosts etc. when we
+   * don't have a reference to a Compositor.
+   *
+   * This can only be used from the compositor thread!
+   */
+  static LayersBackend GetBackend();
 
   size_t GetFillRatio() {
     float fillRatio = 0;
@@ -511,84 +491,32 @@ public:
   }
   void SetCompositionTime(TimeStamp aTimeStamp) {
     mCompositionTime = aTimeStamp;
-    if (!mCompositionTime.IsNull() && !mCompositeUntilTime.IsNull() &&
-        mCompositionTime >= mCompositeUntilTime) {
-      mCompositeUntilTime = TimeStamp();
+    mCompositeAgainTime = TimeStamp();
+  }
+
+  void CompositeAgainAt(TimeStamp aTimeStamp) {
+    if (mCompositeAgainTime.IsNull() ||
+        mCompositeAgainTime > aTimeStamp) {
+      mCompositeAgainTime = aTimeStamp;
     }
   }
-
-  void CompositeUntil(TimeStamp aTimeStamp) {
-    if (mCompositeUntilTime.IsNull() ||
-        mCompositeUntilTime < aTimeStamp) {
-      mCompositeUntilTime = aTimeStamp;
-    }
+  TimeStamp GetCompositeAgainTime() const {
+    return mCompositeAgainTime;
   }
-  TimeStamp GetCompositeUntilTime() const {
-    return mCompositeUntilTime;
-  }
-
-  // A stale Compositor has no CompositorBridgeParent; it will not process
-  // frames and should not be used.
-  void SetInvalid();
-  bool IsValid() const;
-  CompositorBridgeParent* GetCompositorBridgeParent() const {
-    return mParent;
-  }
-
-  /// Most compositor backends operate asynchronously under the hood. This
-  /// means that when a layer stops using a texture it is often desirable to
-  /// wait for the end of the next composition before releasing the texture's
-  /// ReadLock.
-  /// This function provides a convenient way to do this delayed unlocking, if
-  /// the texture itself requires it.
-  void UnlockAfterComposition(TextureHost* aTexture);
-
-  /// Most compositor backends operate asynchronously under the hood. This
-  /// means that when a layer stops using a texture it is often desirable to
-  /// wait for the end of the next composition before NotifyNotUsed() call.
-  /// This function provides a convenient way to do this delayed NotifyNotUsed()
-  /// call, if the texture itself requires it.
-  /// See bug 1260611 and bug 1252835
-  void NotifyNotUsedAfterComposition(TextureHost* aTextureHost);
-
-  void FlushPendingNotifyNotUsed();
 
 protected:
   void DrawDiagnosticsInternal(DiagnosticFlags aFlags,
                                const gfx::Rect& aVisibleRect,
-                               const gfx::IntRect& aClipRect,
+                               const gfx::Rect& aClipRect,
                                const gfx::Matrix4x4& transform,
                                uint32_t aFlashCounter);
 
   bool ShouldDrawDiagnostics(DiagnosticFlags);
 
-  // Should be called at the end of each composition.
-  void ReadUnlockTextures();
-
   /**
-   * Given a layer rect, clip, and transform, compute the area of the backdrop that
-   * needs to be copied for mix-blending. The output transform translates from 0..1
-   * space into the backdrop rect space.
-   *
-   * The transformed layer quad is also optionally returned - this is the same as
-   * the result rect, before rounding.
+   * Set the global Compositor backend, checking that one isn't already set.
    */
-  gfx::IntRect ComputeBackdropCopyRect(
-    const gfx::Rect& aRect,
-    const gfx::IntRect& aClipRect,
-    const gfx::Matrix4x4& aTransform,
-    gfx::Matrix4x4* aOutTransform,
-    gfx::Rect* aOutLayerQuad = nullptr);
-
-  /**
-   * An array of locks that will need to be unlocked after the next composition.
-   */
-  nsTArray<RefPtr<TextureHost>> mUnlockAfterComposition;
-
-  /**
-   * An array of TextureHosts that will need to call NotifyNotUsed() after the next composition.
-   */
-  nsTArray<RefPtr<TextureHost>> mNotifyNotUsedAfterComposition;
+  static void SetBackend(LayersBackend backend);
 
   /**
    * Render time for the current composition.
@@ -596,14 +524,13 @@ protected:
   TimeStamp mCompositionTime;
   /**
    * When nonnull, during rendering, some compositable indicated that it will
-   * change its rendering at this time. In order not to miss it, we composite
-   * on every vsync until this time occurs (this is the latest such time).
+   * change its rendering at this time (and this is the earliest such time).
    */
-  TimeStamp mCompositeUntilTime;
+  TimeStamp mCompositeAgainTime;
 
   uint32_t mCompositorID;
   DiagnosticTypes mDiagnosticTypes;
-  CompositorBridgeParent* mParent;
+  PCompositorParent* mParent;
 
   /**
    * We keep track of the total number of pixels filled as we composite the
@@ -615,16 +542,10 @@ protected:
 
   ScreenRotation mScreenRotation;
 
+  virtual gfx::IntSize GetWidgetSize() const = 0;
+
   RefPtr<gfx::DrawTarget> mTarget;
   gfx::IntRect mTargetBounds;
-
-  widget::CompositorWidget* mWidget;
-
-  bool mIsDestroyed;
-
-#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
-  FenceHandle mReleaseFenceHandle;
-#endif
 
 private:
   static LayersBackend sBackend;
@@ -637,31 +558,6 @@ size_t DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
                                   const gfx::Rect& aTexCoordRect,
                                   decomposedRectArrayT* aLayerRects,
                                   decomposedRectArrayT* aTextureRects);
-
-static inline bool
-BlendOpIsMixBlendMode(gfx::CompositionOp aOp)
-{
-  switch (aOp) {
-  case gfx::CompositionOp::OP_MULTIPLY:
-  case gfx::CompositionOp::OP_SCREEN:
-  case gfx::CompositionOp::OP_OVERLAY:
-  case gfx::CompositionOp::OP_DARKEN:
-  case gfx::CompositionOp::OP_LIGHTEN:
-  case gfx::CompositionOp::OP_COLOR_DODGE:
-  case gfx::CompositionOp::OP_COLOR_BURN:
-  case gfx::CompositionOp::OP_HARD_LIGHT:
-  case gfx::CompositionOp::OP_SOFT_LIGHT:
-  case gfx::CompositionOp::OP_DIFFERENCE:
-  case gfx::CompositionOp::OP_EXCLUSION:
-  case gfx::CompositionOp::OP_HUE:
-  case gfx::CompositionOp::OP_SATURATION:
-  case gfx::CompositionOp::OP_COLOR:
-  case gfx::CompositionOp::OP_LUMINOSITY:
-    return true;
-  default:
-    return false;
-  }
-}
 
 } // namespace layers
 } // namespace mozilla

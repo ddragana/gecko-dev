@@ -18,6 +18,7 @@
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 
 namespace webrtc {
@@ -48,7 +49,7 @@ VideoChannelAGL::VideoChannelAGL(AGLContext& aglContext, int iId, VideoRenderAGL
     _oldStretchedWidth( 0),
     _buffer( 0),
     _bufferSize( 0),
-    _incomingBufferSize(0),
+    _incommingBufferSize(0),
     _bufferIsUpdated( false),
     _sizeInitialized( false),
     _numberOfStreams( 0),
@@ -137,7 +138,7 @@ int VideoChannelAGL::FrameSizeChange(int width, int height, int numberOfStreams)
         _bufferSize = 0;
     }
 
-    _incomingBufferSize = CalcBufferSize(kI420, _width, _height);
+    _incommingBufferSize = CalcBufferSize(kI420, _width, _height);
     _bufferSize = CalcBufferSize(kARGB, _width, _height);//_width * _height * bytesPerPixel;
     _buffer = new unsigned char [_bufferSize];
     memset(_buffer, 0, _bufferSize * sizeof(unsigned char));
@@ -227,8 +228,8 @@ int VideoChannelAGL::DeliverFrame(const I420VideoFrame& videoFrame) {
     return 0;
   }
 
-  if (CalcBufferSize(kI420, videoFrame.width(), videoFrame.height()) !=
-      _incomingBufferSize) {
+  int length = CalcBufferSize(kI420, videoFrame.width(), videoFrame.height());
+  if (length != _incommingBufferSize) {
     _owner->UnlockAGLCntx();
     return -1;
   }
@@ -367,6 +368,7 @@ _windowRef( windowRef),
 _fullScreen( fullscreen),
 _id( iId),
 _renderCritSec(*CriticalSectionWrapper::CreateCriticalSection()),
+_screenUpdateThread( 0),
 _screenUpdateEvent( 0),
 _isHIViewRef( false),
 _aglContext( 0),
@@ -391,12 +393,12 @@ _windowEventHandlerRef( NULL),
 _currentViewBounds( ),
 _lastViewBounds( ),
 _renderingIsPaused( false),
+_threadID( )
 
 {
     //WEBRTC_TRACE(kTraceInfo, kTraceVideoRenderer, _id, "%s");
 
-    _screenUpdateThread = ThreadWrapper::CreateThread(
-        ScreenUpdateThreadProc, this, "ScreenUpdate");
+    _screenUpdateThread = ThreadWrapper::CreateThread(ScreenUpdateThreadProc, this, kRealtimePriority);
     _screenUpdateEvent = EventWrapper::Create();
 
     if(!IsValidWindowPtr(_windowRef))
@@ -484,6 +486,7 @@ _windowRef( 0),
 _fullScreen( fullscreen),
 _id( iId),
 _renderCritSec(*CriticalSectionWrapper::CreateCriticalSection()),
+_screenUpdateThread( 0),
 _screenUpdateEvent( 0),
 _isHIViewRef( false),
 _aglContext( 0),
@@ -508,12 +511,12 @@ _windowEventHandlerRef( NULL),
 _currentViewBounds( ),
 _lastViewBounds( ),
 _renderingIsPaused( false),
+_threadID( )
 {
     //WEBRTC_TRACE(kTraceDebug, "%s:%d Constructor", __FUNCTION__, __LINE__);
     //    _renderCritSec = CriticalSectionWrapper::CreateCriticalSection();
 
-    _screenUpdateThread = ThreadWrapper::CreateThread(
-        ScreenUpdateThreadProc, this, "ScreenUpdateThread");
+    _screenUpdateThread = ThreadWrapper::CreateThread(ScreenUpdateThreadProc, this, kRealtimePriority);
     _screenUpdateEvent = EventWrapper::Create();
 
     GetWindowRect(_windowRect);
@@ -551,7 +554,7 @@ _renderingIsPaused( false),
 
 #endif
 
-#ifdef NEW_HIVIEW_EVENT_HANDLER
+#ifdef NEW_HIVIEW_EVENT_HANDLER	
     //WEBRTC_TRACE(kTraceDebug, "%s:%d Installing Eventhandler for hiviewRef", __FUNCTION__, __LINE__);
 
     static const EventTypeSpec hiviewEventTypes[] =
@@ -665,7 +668,7 @@ VideoRenderAGL::~VideoRenderAGL()
     }
 #endif
 
-#ifdef NEW_HIVIEW_EVENT_HANDLER
+#ifdef NEW_HIVIEW_EVENT_HANDLER	
     if(_hiviewEventHandlerRef)
     {
         status = RemoveEventHandler(_hiviewEventHandlerRef);
@@ -677,15 +680,19 @@ VideoRenderAGL::~VideoRenderAGL()
 #endif
 
     // Signal event to exit thread, then delete it
-    ThreadWrapper* tmpPtr = _screenUpdateThread.release();
+    ThreadWrapper* tmpPtr = _screenUpdateThread;
+    _screenUpdateThread = NULL;
 
     if (tmpPtr)
     {
+        tmpPtr->SetNotAlive();
         _screenUpdateEvent->Set();
         _screenUpdateEvent->StopTimer();
 
-        tmpPtr->Stop();
-        delete tmpPtr;
+        if (tmpPtr->Stop())
+        {
+            delete tmpPtr;
+        }
         delete _screenUpdateEvent;
         _screenUpdateEvent = NULL;
     }
@@ -738,8 +745,8 @@ int VideoRenderAGL::Init()
         //WEBRTC_TRACE(kTraceError, "%s:%d Thread not created", __FUNCTION__, __LINE__);
         return -1;
     }
-    _screenUpdateThread->Start();
-    _screenUpdateThread->SetPriority(kRealtimePriority);
+    unsigned int threadId;
+    _screenUpdateThread->Start(threadId);
 
     // Start the event triggering the render process
     unsigned int monitorFreq = 60;
@@ -856,15 +863,17 @@ int VideoRenderAGL::DeleteAGLChannel(int channel)
 int VideoRenderAGL::StopThread()
 {
     CriticalSectionScoped cs(&_renderCritSec);
-    ThreadWrapper* tmpPtr = _screenUpdateThread.release();
+    ThreadWrapper* tmpPtr = _screenUpdateThread;
+    //_screenUpdateThread = NULL;
 
     if (tmpPtr)
     {
+        tmpPtr->SetNotAlive();
         _screenUpdateEvent->Set();
-        _renderCritSec.Leave();
-        tmpPtr->Stop();
-        delete tmpPtr;
-        _renderCritSec.Enter();
+        if (tmpPtr->Stop())
+        {
+            delete tmpPtr;
+        }
     }
 
     delete _screenUpdateEvent;
@@ -1269,7 +1278,7 @@ int VideoRenderAGL::CreateMixingContext()
 
     //WEBRTC_LOG(kTraceDebug, "Entering CreateMixingContext()");
 
-    // Use both AGL_ACCELERATED and AGL_NO_RECOVERY to make sure
+    // Use both AGL_ACCELERATED and AGL_NO_RECOVERY to make sure 
     // a hardware renderer is used and not a software renderer.
 
     GLint attributes[] =
@@ -1863,6 +1872,13 @@ int VideoRenderAGL::ChangeWindow(void* newWindowRef)
     UnlockAGLCntx();
     return -1;
 }
+int32_t VideoRenderAGL::ChangeUniqueID(int32_t id)
+{
+    LockAGLCntx();
+
+    UnlockAGLCntx();
+    return -1;
+}
 
 int32_t VideoRenderAGL::StartRender()
 {
@@ -1874,13 +1890,12 @@ int32_t VideoRenderAGL::StartRender()
         //WEBRTC_TRACE(kTraceInfo, kTraceVideoRenderer, _id, "%s:%d Rendering is paused. Restarting now", __FUNCTION__, __LINE__);
 
         // we already have the thread. Most likely StopRender() was called and they were paused
-        if(FALSE == _screenUpdateThread->Start())
+        if(FALSE == _screenUpdateThread->Start(_threadID))
         {
             //WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id, "%s:%d Failed to start screenUpdateThread", __FUNCTION__, __LINE__);
             UnlockAGLCntx();
             return -1;
         }
-        _screenUpdateThread->SetPriority(kRealtimePriority);
         if(FALSE == _screenUpdateEvent->StartTimer(true, 1000/MONITOR_FREQ))
         {
             //WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id, "%s:%d Failed to start screenUpdateEvent", __FUNCTION__, __LINE__);
@@ -1891,8 +1906,7 @@ int32_t VideoRenderAGL::StartRender()
         return 0;
     }
 
-    _screenUpdateThread = ThreadWrapper::CreateThread(ScreenUpdateThreadProc,
-        this, "ScreenUpdate");
+    _screenUpdateThread = ThreadWrapper::CreateThread(ScreenUpdateThreadProc, this, kRealtimePriority);
     _screenUpdateEvent = EventWrapper::Create();
 
     if (!_screenUpdateThread)
@@ -1902,8 +1916,7 @@ int32_t VideoRenderAGL::StartRender()
         return -1;
     }
 
-    _screenUpdateThread->Start();
-    _screenUpdateThread->SetPriority(kRealtimePriority);
+    _screenUpdateThread->Start(_threadID);
     _screenUpdateEvent->StartTimer(true, 1000/MONITOR_FREQ);
 
     //WEBRTC_TRACE(kTraceInfo, kTraceVideoRenderer, _id, "%s:%d Started screenUpdateThread", __FUNCTION__, __LINE__);

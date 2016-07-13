@@ -37,17 +37,19 @@ add_test(function() {
 
       info("Clicking 'Plugin Check' button");
       EventUtils.synthesizeMouseAtCenter(button, { }, aManager);
-      function wantLoad(url) {
-        return url != "about:blank";
-      }
-      BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser, false, wantLoad).then(() => {
+      gBrowser.addEventListener("load", function(event) {
+        if (!(event.target instanceof Document) ||
+            event.target.location.href == "about:blank")
+          return;
+        gBrowser.removeEventListener("load", arguments.callee, true);
+
         is(gBrowser.currentURI.spec, Services.urlFormatter.formatURLPref("plugins.update.url"), "Plugin Check URL should match");
 
         gBrowser.removeCurrentTab();
         close_manager(aManager, function() {
           run_next_test();
         });
-      });
+      }, true);
     });
   });
 });

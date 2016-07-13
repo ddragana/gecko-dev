@@ -22,26 +22,22 @@ namespace rtc {
 class SocketStream : public StreamInterface, public sigslot::has_slots<> {
  public:
   explicit SocketStream(AsyncSocket* socket);
-  ~SocketStream() override;
+  virtual ~SocketStream();
 
   void Attach(AsyncSocket* socket);
   AsyncSocket* Detach();
 
   AsyncSocket* GetSocket() { return socket_; }
 
-  StreamState GetState() const override;
+  virtual StreamState GetState() const;
 
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
+  virtual StreamResult Read(void* buffer, size_t buffer_len,
+                            size_t* read, int* error);
 
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
+  virtual StreamResult Write(const void* data, size_t data_len,
+                             size_t* written, int* error);
 
-  void Close() override;
+  virtual void Close();
 
  private:
   void OnConnectEvent(AsyncSocket* socket);

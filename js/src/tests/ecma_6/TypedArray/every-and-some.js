@@ -7,17 +7,8 @@ const constructors = [
     Int32Array,
     Uint32Array,
     Float32Array,
-    Float64Array ];
-
-if (typeof SharedArrayBuffer != "undefined")
-    constructors.push(sharedConstructor(Int8Array),
-		      sharedConstructor(Uint8Array),
-		      sharedConstructor(Int16Array),
-		      sharedConstructor(Uint16Array),
-		      sharedConstructor(Int32Array),
-		      sharedConstructor(Uint32Array),
-		      sharedConstructor(Float32Array),
-		      sharedConstructor(Float64Array));
+    Float64Array
+];
 
 // Tests for TypedArray#every.
 for (var constructor of constructors) {
@@ -112,7 +103,7 @@ for (var constructor of constructors) {
     });
 
     // Called from other globals.
-    if (typeof newGlobal === "function" && !isSharedConstructor(constructor)) {
+    if (typeof newGlobal === "function") {
         var every = newGlobal()[constructor.name].prototype.every;
         var sum = 0;
         assertEq(every.call(new constructor([1, 2, 3]), v => sum += v), true);
@@ -234,7 +225,7 @@ for (var constructor of constructors) {
     });
 
     // Called from other globals.
-    if (typeof newGlobal === "function" && !isSharedConstructor(constructor)) {
+    if (typeof newGlobal === "function") {
         var some = newGlobal()[constructor.name].prototype.some;
         var sum = 0;
         assertEq(some.call(new constructor([1, 2, 3]), v => {

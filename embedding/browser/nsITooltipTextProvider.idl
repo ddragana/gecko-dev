@@ -32,13 +32,12 @@ interface nsITooltipTextProvider : nsISupports
     /**
      * Called to obtain the tooltip text for a node.
      *
-     * @arg aNode      The node to obtain the text from.
-     * @arg aText      The tooltip text.
-     * @arg aDirection The text direction (ltr or rtl) to use
+     * @arg aNode The node to obtain the text from.
+     * @arg aText The tooltip text.
      *
      * @return <CODE>PR_TRUE</CODE> if tooltip text is associated
      *         with the node and was returned in the aText argument;
      *         <CODE>PR_FALSE</CODE> otherwise.
      */
-    boolean getNodeText(in nsIDOMNode aNode, out wstring aText, out wstring aDirection);
+    boolean getNodeText(in nsIDOMNode aNode, out wstring aText);
 };

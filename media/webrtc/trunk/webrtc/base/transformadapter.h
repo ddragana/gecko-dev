@@ -45,24 +45,20 @@ public:
   TransformAdapter(StreamInterface * stream,
                    TransformInterface * transform,
                    bool direction_read);
-  ~TransformAdapter() override;
-
-  StreamResult Read(void* buffer,
-                    size_t buffer_len,
-                    size_t* read,
-                    int* error) override;
-  StreamResult Write(const void* data,
-                     size_t data_len,
-                     size_t* written,
-                     int* error) override;
-  void Close() override;
+  virtual ~TransformAdapter();
+  
+  virtual StreamResult Read(void * buffer, size_t buffer_len,
+                            size_t * read, int * error);
+  virtual StreamResult Write(const void * data, size_t data_len,
+                             size_t * written, int * error);
+  virtual void Close();
 
   // Apriori, we can't tell what the transformation does to the stream length.
-  bool GetAvailable(size_t* size) const override;
-  bool ReserveSize(size_t size) override;
+  virtual bool GetAvailable(size_t* size) const { return false; }
+  virtual bool ReserveSize(size_t size) { return true; }
 
   // Transformations might not be restartable
-  virtual bool Rewind();
+  virtual bool Rewind() { return false; }
 
 private:
   enum State { ST_PROCESSING, ST_FLUSHING, ST_COMPLETE, ST_ERROR };

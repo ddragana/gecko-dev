@@ -14,7 +14,7 @@
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIDocument.h"
-#include "mozilla/css/Declaration.h"
+#include "mozilla/css/StyleRule.h"
 #include "nsCSSParser.h"
 #include "mozilla/css/Loader.h"
 #include "nsIDOMMutationEvent.h"
@@ -45,9 +45,9 @@ nsStyledElementNotElementCSSInlineStyle::ParseAttribute(int32_t aNamespaceID,
 }
 
 nsresult
-nsStyledElementNotElementCSSInlineStyle::SetInlineStyleDeclaration(css::Declaration* aDeclaration,
-                                                                   const nsAString* aSerialized,
-                                                                   bool aNotify)
+nsStyledElementNotElementCSSInlineStyle::SetInlineStyleRule(css::StyleRule* aStyleRule,
+                                                            const nsAString* aSerialized,
+                                                            bool aNotify)
 {
   SetMayHaveStyle();
   bool modification = false;
@@ -73,11 +73,11 @@ nsStyledElementNotElementCSSInlineStyle::SetInlineStyleDeclaration(css::Declarat
       oldValue.SetTo(oldValueStr);
     }
   }
-  else if (aNotify && IsInUncomposedDoc()) {
+  else if (aNotify && IsInDoc()) {
     modification = !!mAttrsAndChildren.GetAttr(nsGkAtoms::style);
   }
 
-  nsAttrValue attrValue(aDeclaration, aSerialized);
+  nsAttrValue attrValue(aStyleRule, aSerialized);
 
   // XXXbz do we ever end up with ADDITION here?  I doubt it.
   uint8_t modType = modification ?
@@ -89,16 +89,16 @@ nsStyledElementNotElementCSSInlineStyle::SetInlineStyleDeclaration(css::Declarat
                           aNotify, kDontCallAfterSetAttr);
 }
 
-css::Declaration*
-nsStyledElementNotElementCSSInlineStyle::GetInlineStyleDeclaration()
+css::StyleRule*
+nsStyledElementNotElementCSSInlineStyle::GetInlineStyleRule()
 {
   if (!MayHaveStyle()) {
     return nullptr;
   }
   const nsAttrValue* attrVal = mAttrsAndChildren.GetAttr(nsGkAtoms::style);
 
-  if (attrVal && attrVal->Type() == nsAttrValue::eGeckoCSSDeclaration) {
-    return attrVal->GetGeckoCSSDeclarationValue();
+  if (attrVal && attrVal->Type() == nsAttrValue::eCSSStyleRule) {
+    return attrVal->GetCSSStyleRuleValue();
   }
 
   return nullptr;
@@ -131,19 +131,14 @@ nsStyledElementNotElementCSSInlineStyle::ReparseStyleAttribute(bool aForceInData
   }
   const nsAttrValue* oldVal = mAttrsAndChildren.GetAttr(nsGkAtoms::style);
   
-  nsAttrValue::ValueType desiredType =
-    OwnerDoc()->GetStyleBackendType() == StyleBackendType::Gecko ?
-      nsAttrValue::eGeckoCSSDeclaration :
-      nsAttrValue::eServoCSSDeclaration;
-
-  if (oldVal && oldVal->Type() != desiredType) {
+  if (oldVal && oldVal->Type() != nsAttrValue::eCSSStyleRule) {
     nsAttrValue attrValue;
     nsAutoString stringValue;
     oldVal->ToString(stringValue);
     ParseStyleAttribute(stringValue, attrValue, aForceInDataDoc);
-    // Don't bother going through SetInlineStyleDeclaration; we don't
-    // want to fire off mutation events or document notifications anyway
-    nsresult rv = mAttrsAndChildren.SetAndSwapAttr(nsGkAtoms::style, attrValue);
+    // Don't bother going through SetInlineStyleRule, we don't want to fire off
+    // mutation events or document notifications anyway
+    nsresult rv = mAttrsAndChildren.SetAndTakeAttr(nsGkAtoms::style, attrValue);
     NS_ENSURE_SUCCESS(rv, rv);
   }
   
@@ -156,10 +151,8 @@ nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aV
                                                              bool aForceInDataDoc)
 {
   nsIDocument* doc = OwnerDoc();
-  bool isNativeAnon = IsInNativeAnonymousSubtree();
 
-  if (!isNativeAnon &&
-      !nsStyleUtil::CSPAllowsInlineStyle(nullptr, NodePrincipal(),
+  if (!nsStyleUtil::CSPAllowsInlineStyle(nullptr, NodePrincipal(),
                                          doc->GetDocumentURI(), 0, aValue,
                                          nullptr))
     return;
@@ -169,7 +162,8 @@ nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aV
       doc->IsStaticDocument()) {
     bool isCSS = true; // assume CSS until proven otherwise
 
-    if (!isNativeAnon) {  // native anonymous content always assumes CSS
+    if (!IsInNativeAnonymousSubtree()) {  // native anonymous content
+                                          // always assumes CSS
       nsAutoString styleType;
       doc->GetHeaderData(nsGkAtoms::headerContentStyleType, styleType);
       if (!styleType.IsEmpty()) {

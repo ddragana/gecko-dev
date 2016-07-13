@@ -15,6 +15,7 @@ const MS_IN_ONE_HOUR  = 60 * 60 * 1000;
 const MS_IN_ONE_DAY   = 24 * MS_IN_ONE_HOUR;
 
 const PREF_BRANCH = "toolkit.telemetry.";
+const PREF_ENABLED = PREF_BRANCH + "enabled";
 const PREF_ARCHIVE_ENABLED = PREF_BRANCH + "archive.enabled";
 
 const REASON_ABORTED_SESSION = "aborted-session";
@@ -26,7 +27,7 @@ XPCOMUtils.defineLazyGetter(this, "DATAREPORTING_PATH", function() {
   return OS.Path.join(OS.Constants.Path.profileDir, "datareporting");
 });
 
-var promiseValidateArchivedPings = Task.async(function*(aExpectedReasons) {
+let promiseValidateArchivedPings = Task.async(function*(aExpectedReasons) {
   // The list of ping reasons which mark the session end (and must reset the subsession
   // count).
   const SESSION_END_PING_REASONS = new Set([ REASON_ABORTED_SESSION, REASON_SHUTDOWN ]);
@@ -90,10 +91,8 @@ function run_test() {
   // Addon manager needs a profile directory
   do_get_profile();
   loadAddonManager("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
-  // Make sure we don't generate unexpected pings due to pref changes.
-  setEmptyPrefWatchlist();
 
-  Preferences.set(PREF_TELEMETRY_ENABLED, true);
+  Preferences.set(PREF_ENABLED, true);
 
   run_next_test();
 }
@@ -106,7 +105,7 @@ add_task(function* test_subsessionsChaining() {
 
   const PREF_TEST = PREF_BRANCH + "test.pref1";
   const PREFS_TO_WATCH = new Map([
-    [PREF_TEST, {what: TelemetryEnvironment.RECORD_PREF_VALUE}],
+    [PREF_TEST, TelemetryEnvironment.RECORD_PREF_VALUE],
   ]);
   Preferences.reset(PREF_TEST);
 
@@ -124,16 +123,16 @@ add_task(function* test_subsessionsChaining() {
 
   // Start and shut down Telemetry. We expect a shutdown ping with profileSubsessionCounter: 1,
   // subsessionCounter: 1, subsessionId: A,  and previousSubsessionId: null to be archived.
-  yield TelemetryController.testSetup();
-  yield TelemetryController.testShutdown();
+  yield TelemetrySession.reset();
+  yield TelemetrySession.shutdown();
   expectedReasons.push(REASON_SHUTDOWN);
 
   // Start Telemetry but don't wait for it to initialise before shutting down. We expect a
   // shutdown ping with profileSubsessionCounter: 2, subsessionCounter: 1, subsessionId: B
   // and previousSubsessionId: A to be archived.
   moveClockForward(30);
-  TelemetryController.testReset();
-  yield TelemetryController.testShutdown();
+  TelemetrySession.reset();
+  yield TelemetrySession.shutdown();
   expectedReasons.push(REASON_SHUTDOWN);
 
   // Start Telemetry and simulate an aborted-session ping. We expect an aborted-session ping
@@ -141,11 +140,11 @@ add_task(function* test_subsessionsChaining() {
   // previousSubsessionId: B to be archived.
   let schedulerTickCallback = null;
   fakeSchedulerTimer(callback => schedulerTickCallback = callback, () => {});
-  yield TelemetryController.testReset();
+  yield TelemetrySession.reset();
   moveClockForward(6);
   // Trigger the an aborted session ping save. When testing,we are not saving the aborted-session
   // ping as soon as Telemetry starts, otherwise we would end up with unexpected pings being
-  // sent when calling |TelemetryController.testReset()|, thus breaking some tests.
+  // sent when calling |TelemetrySession.reset()|, thus breaking some tests.
   Assert.ok(!!schedulerTickCallback);
   yield schedulerTickCallback();
   expectedReasons.push(REASON_ABORTED_SESSION);
@@ -154,8 +153,9 @@ add_task(function* test_subsessionsChaining() {
   // an environment-change ping with profileSubsessionCounter: 4, subsessionCounter: 1,
   // subsessionId: D and previousSubsessionId: C to be archived.
   moveClockForward(30);
-  yield TelemetryController.testReset();
-  TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
+  yield TelemetryController.reset();
+  yield TelemetrySession.reset();
+  TelemetryEnvironment._watchPreferences(PREFS_TO_WATCH);
   moveClockForward(30);
   Preferences.set(PREF_TEST, 1);
   expectedReasons.push(REASON_ENVIRONMENT_CHANGE);
@@ -163,14 +163,14 @@ add_task(function* test_subsessionsChaining() {
   // Shut down Telemetry. We expect a shutdown ping with profileSubsessionCounter: 5,
   // subsessionCounter: 2, subsessionId: E and previousSubsessionId: D to be archived.
   moveClockForward(30);
-  yield TelemetryController.testShutdown();
+  yield TelemetrySession.shutdown();
   expectedReasons.push(REASON_SHUTDOWN);
 
   // Start Telemetry and trigger a daily ping. We expect a daily ping with
   // profileSubsessionCounter: 6, subsessionCounter: 1, subsessionId: F and
   // previousSubsessionId: E to be archived.
   moveClockForward(30);
-  yield TelemetryController.testReset();
+  yield TelemetrySession.reset();
 
   // Delay the callback around midnight.
   now = fakeNow(futureDate(now, MS_IN_ONE_DAY));
@@ -187,12 +187,12 @@ add_task(function* test_subsessionsChaining() {
 
   // Shut down Telemetry and trigger a shutdown ping.
   moveClockForward(30);
-  yield TelemetryController.testShutdown();
+  yield TelemetrySession.shutdown();
   expectedReasons.push(REASON_SHUTDOWN);
 
   // Start Telemetry and trigger an environment change.
-  yield TelemetryController.testReset();
-  TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
+  yield TelemetrySession.reset();
+  TelemetryEnvironment._watchPreferences(PREFS_TO_WATCH);
   moveClockForward(30);
   Preferences.set(PREF_TEST, 1);
   expectedReasons.push(REASON_ENVIRONMENT_CHANGE);
@@ -205,7 +205,8 @@ add_task(function* test_subsessionsChaining() {
 
   // Start Telemetry and trigger a daily ping.
   moveClockForward(30);
-  yield TelemetryController.testReset();
+  yield TelemetryController.reset();
+  yield TelemetrySession.reset();
   // Delay the callback around midnight.
   now = futureDate(now, MS_IN_ONE_DAY);
   fakeNow(now);
@@ -225,12 +226,13 @@ add_task(function* test_subsessionsChaining() {
   expectedReasons.push(REASON_ABORTED_SESSION);
 
   // Make sure the aborted-session ping gets archived.
-  yield TelemetryController.testReset();
+  yield TelemetryController.reset();
+  yield TelemetrySession.reset();
 
   yield promiseValidateArchivedPings(expectedReasons);
 });
 
 add_task(function* () {
-  yield TelemetryController.testShutdown();
+  yield TelemetrySend.shutdown();
   do_test_finished();
 });

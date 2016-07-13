@@ -5,16 +5,15 @@
 
 #include "nsPlaintextEditor.h"
 
-#include "gfxFontUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/Selection.h"
-#include "mozilla/dom/Event.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
+#include "nsAutoPtr.h"
 #include "nsCRT.h"
 #include "nsCaret.h"
 #include "nsCharTraits.h"
@@ -68,6 +67,7 @@ using namespace mozilla::dom;
 nsPlaintextEditor::nsPlaintextEditor()
 : nsEditor()
 , mRules(nullptr)
+, mWrapToWindow(false)
 , mWrapColumn(0)
 , mMaxTextLength(-1)
 , mInitTriggerCounter(0)
@@ -360,22 +360,22 @@ nsPlaintextEditor::HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent)
   }
 
   WidgetKeyboardEvent* nativeKeyEvent =
-    aKeyEvent->AsEvent()->WidgetEventPtr()->AsKeyboardEvent();
+    aKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
   NS_ENSURE_TRUE(nativeKeyEvent, NS_ERROR_UNEXPECTED);
-  NS_ASSERTION(nativeKeyEvent->mMessage == eKeyPress,
+  NS_ASSERTION(nativeKeyEvent->message == NS_KEY_PRESS,
                "HandleKeyPressEvent gets non-keypress event");
 
-  switch (nativeKeyEvent->mKeyCode) {
-    case NS_VK_META:
-    case NS_VK_WIN:
-    case NS_VK_SHIFT:
-    case NS_VK_CONTROL:
-    case NS_VK_ALT:
-    case NS_VK_BACK:
-    case NS_VK_DELETE:
+  switch (nativeKeyEvent->keyCode) {
+    case nsIDOMKeyEvent::DOM_VK_META:
+    case nsIDOMKeyEvent::DOM_VK_WIN:
+    case nsIDOMKeyEvent::DOM_VK_SHIFT:
+    case nsIDOMKeyEvent::DOM_VK_CONTROL:
+    case nsIDOMKeyEvent::DOM_VK_ALT:
+    case nsIDOMKeyEvent::DOM_VK_BACK_SPACE:
+    case nsIDOMKeyEvent::DOM_VK_DELETE:
       // These keys are handled on nsEditor
       return nsEditor::HandleKeyPressEvent(aKeyEvent);
-    case NS_VK_TAB: {
+    case nsIDOMKeyEvent::DOM_VK_TAB: {
       if (IsTabbable()) {
         return NS_OK; // let it be used for focus switching
       }
@@ -387,29 +387,29 @@ nsPlaintextEditor::HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent)
       }
 
       // else we insert the tab straight through
-      aKeyEvent->AsEvent()->PreventDefault();
+      aKeyEvent->PreventDefault();
       return TypedText(NS_LITERAL_STRING("\t"), eTypedText);
     }
-    case NS_VK_RETURN:
+    case nsIDOMKeyEvent::DOM_VK_RETURN:
       if (IsSingleLineEditor() || nativeKeyEvent->IsControl() ||
           nativeKeyEvent->IsAlt() || nativeKeyEvent->IsMeta() ||
           nativeKeyEvent->IsOS()) {
         return NS_OK;
       }
-      aKeyEvent->AsEvent()->PreventDefault();
+      aKeyEvent->PreventDefault();
       return TypedText(EmptyString(), eTypedBreak);
   }
 
   // NOTE: On some keyboard layout, some characters are inputted with Control
   // key or Alt key, but at that time, widget sets FALSE to these keys.
-  if (!nativeKeyEvent->mCharCode || nativeKeyEvent->IsControl() ||
+  if (nativeKeyEvent->charCode == 0 || nativeKeyEvent->IsControl() ||
       nativeKeyEvent->IsAlt() || nativeKeyEvent->IsMeta() ||
       nativeKeyEvent->IsOS()) {
     // we don't PreventDefault() here or keybindings like control-x won't work
     return NS_OK;
   }
-  aKeyEvent->AsEvent()->PreventDefault();
-  nsAutoString str(nativeKeyEvent->mCharCode);
+  aKeyEvent->PreventDefault();
+  nsAutoString str(nativeKeyEvent->charCode);
   return TypedText(str, eTypedText);
 }
 
@@ -435,7 +435,7 @@ nsPlaintextEditor::TypedText(const nsAString& aString, ETypingAction aAction)
   }
 }
 
-Element*
+already_AddRefed<Element>
 nsPlaintextEditor::CreateBRImpl(nsCOMPtr<nsINode>* aInOutParent,
                                 int32_t* aInOutOffset,
                                 EDirection aSelect)
@@ -446,7 +446,7 @@ nsPlaintextEditor::CreateBRImpl(nsCOMPtr<nsINode>* aInOutParent,
   CreateBRImpl(address_of(parent), aInOutOffset, address_of(br), aSelect);
   *aInOutParent = do_QueryInterface(parent);
   nsCOMPtr<Element> ret(do_QueryInterface(br));
-  return ret;
+  return ret.forget();
 }
 
 nsresult
@@ -507,7 +507,7 @@ nsPlaintextEditor::CreateBRImpl(nsCOMPtr<nsIDOMNode>* aInOutParent,
     int32_t offset;
     nsCOMPtr<nsIDOMNode> parent = GetNodeLocation(*outBRNode, &offset);
 
-    RefPtr<Selection> selection = GetSelection();
+    nsRefPtr<Selection> selection = GetSelection();
     NS_ENSURE_STATE(selection);
     if (aSelect == eNext)
     {
@@ -542,7 +542,7 @@ nsPlaintextEditor::InsertBR(nsCOMPtr<nsIDOMNode>* outBRNode)
   // calling it text insertion to trigger moz br treatment by rules
   nsAutoRules beginRulesSniffing(this, EditAction::insertText, nsIEditor::eNext);
 
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   NS_ENSURE_STATE(selection);
 
   nsresult res;
@@ -600,8 +600,7 @@ nsPlaintextEditor::ExtendSelectionForDelete(Selection* aSelection,
         break;
       case ePrevious: {
         // Only extend the selection where the selection is after a UTF-16
-        // surrogate pair or a variation selector.
-        // For other cases we don't want to do that, in order
+        // surrogate pair.  For other cases we don't want to do that, in order
         // to make sure that pressing backspace will only delete the last
         // typed character.
         nsCOMPtr<nsIDOMNode> node;
@@ -617,11 +616,9 @@ nsPlaintextEditor::ExtendSelectionForDelete(Selection* aSelection,
             result = charData->GetData(data);
             NS_ENSURE_SUCCESS(result, result);
 
-            if ((offset > 1 &&
-                 NS_IS_LOW_SURROGATE(data[offset - 1]) &&
-                 NS_IS_HIGH_SURROGATE(data[offset - 2])) ||
-                (offset > 0 &&
-                 gfxFontUtils::IsVarSelector(data[offset - 1]))) {
+            if (offset > 1 &&
+                NS_IS_LOW_SURROGATE(data[offset - 1]) &&
+                NS_IS_HIGH_SURROGATE(data[offset - 2])) {
               result = selCont->CharacterExtendForBackspace();
             }
           }
@@ -663,7 +660,7 @@ nsPlaintextEditor::DeleteSelection(EDirection aAction,
   nsAutoRules beginRulesSniffing(this, EditAction::deleteSelection, aAction);
 
   // pre-process
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   // If there is an existing selection when an extended delete is requested,
@@ -720,7 +717,7 @@ NS_IMETHODIMP nsPlaintextEditor::InsertText(const nsAString &aStringToInsert)
   nsAutoRules beginRulesSniffing(this, opID, nsIEditor::eNext);
 
   // pre-process
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
   nsAutoString resultString;
   // XXX can we trust instring to outlive ruleInfo,
@@ -757,7 +754,7 @@ NS_IMETHODIMP nsPlaintextEditor::InsertLineBreak()
   nsAutoRules beginRulesSniffing(this, EditAction::insertBreak, nsIEditor::eNext);
 
   // pre-process
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   nsTextRulesInfo ruleInfo(EditAction::insertBreak);
@@ -846,17 +843,17 @@ nsPlaintextEditor::UpdateIMEComposition(nsIDOMEvent* aDOMTextEvent)
   MOZ_ASSERT(aDOMTextEvent, "aDOMTextEvent must not be nullptr");
 
   WidgetCompositionEvent* compositionChangeEvent =
-    aDOMTextEvent->WidgetEventPtr()->AsCompositionEvent();
+    aDOMTextEvent->GetInternalNSEvent()->AsCompositionEvent();
   NS_ENSURE_TRUE(compositionChangeEvent, NS_ERROR_INVALID_ARG);
-  MOZ_ASSERT(compositionChangeEvent->mMessage == eCompositionChange,
-             "The internal event should be eCompositionChange");
+  MOZ_ASSERT(compositionChangeEvent->message == NS_COMPOSITION_CHANGE,
+             "The internal event should be NS_COMPOSITION_CHANGE");
 
   EnsureComposition(compositionChangeEvent);
 
   nsCOMPtr<nsIPresShell> ps = GetPresShell();
   NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
 
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   NS_ENSURE_STATE(selection);
 
   // NOTE: TextComposition should receive selection change notification before
@@ -874,7 +871,7 @@ nsPlaintextEditor::UpdateIMEComposition(nsIDOMEvent* aDOMTextEvent)
 
   NotifyEditorObservers(eNotifyEditorObserversOfBefore);
 
-  RefPtr<nsCaret> caretP = ps->GetCaret();
+  nsRefPtr<nsCaret> caretP = ps->GetCaret();
 
   nsresult rv;
   {
@@ -888,11 +885,10 @@ nsPlaintextEditor::UpdateIMEComposition(nsIDOMEvent* aDOMTextEvent)
   }
 
   // If still composing, we should fire input event via observer.
-  // Note that if the composition will be committed by the following
-  // compositionend event, we don't need to notify editor observes of this
-  // change.
+  // Note that if committed, we don't need to notify it since it will be
+  // notified at followed compositionend event.
   // NOTE: We must notify after the auto batch will be gone.
-  if (!compositionChangeEvent->IsFollowedByCompositionEnd()) {
+  if (IsIMEComposing()) {
     NotifyEditorObservers(eNotifyEditorObserversOfEnd);
   }
 
@@ -1043,17 +1039,27 @@ nsPlaintextEditor::SetWrapWidth(int32_t aWrapColumn)
   if (IsWrapHackEnabled() && aWrapColumn >= 0)
     styleValue.AppendLiteral("font-family: -moz-fixed; ");
 
+  // If "mail.compose.wrap_to_window_width" is set, and we're a mail editor,
+  // then remember our wrap width (for output purposes) but set the visual
+  // wrapping to window width.
+  // We may reset mWrapToWindow here, based on the pref's current value.
+  if (IsMailEditor())
+  {
+    mWrapToWindow =
+      Preferences::GetBool("mail.compose.wrap_to_window_width", mWrapToWindow);
+  }
+
   // and now we're ready to set the new whitespace/wrapping style.
-  if (aWrapColumn > 0) {
-    // Wrap to a fixed column.
+  if (aWrapColumn > 0 && !mWrapToWindow)        // Wrap to a fixed column
+  {
     styleValue.AppendLiteral("white-space: pre-wrap; width: ");
     styleValue.AppendInt(aWrapColumn);
     styleValue.AppendLiteral("ch;");
-  } else if (aWrapColumn == 0) {
-    styleValue.AppendLiteral("white-space: pre-wrap;");
-  } else {
-    styleValue.AppendLiteral("white-space: pre;");
   }
+  else if (mWrapToWindow || aWrapColumn == 0)
+    styleValue.AppendLiteral("white-space: pre-wrap;");
+  else
+    styleValue.AppendLiteral("white-space: pre;");
 
   return rootElement->SetAttr(kNameSpaceID_None, nsGkAtoms::style, styleValue, true);
 }
@@ -1103,7 +1109,7 @@ nsPlaintextEditor::Undo(uint32_t aCount)
   nsAutoRules beginRulesSniffing(this, EditAction::undo, nsIEditor::eNone);
 
   nsTextRulesInfo ruleInfo(EditAction::undo);
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   bool cancel, handled;
   nsresult result = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
 
@@ -1132,7 +1138,7 @@ nsPlaintextEditor::Redo(uint32_t aCount)
   nsAutoRules beginRulesSniffing(this, EditAction::redo, nsIEditor::eNone);
 
   nsTextRulesInfo ruleInfo(EditAction::redo);
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   bool cancel, handled;
   nsresult result = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
 
@@ -1149,7 +1155,7 @@ nsPlaintextEditor::Redo(uint32_t aCount)
 bool
 nsPlaintextEditor::CanCutOrCopy(PasswordFieldAllowed aPasswordFieldAllowed)
 {
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   if (!selection) {
     return false;
   }
@@ -1162,26 +1168,21 @@ nsPlaintextEditor::CanCutOrCopy(PasswordFieldAllowed aPasswordFieldAllowed)
 }
 
 bool
-nsPlaintextEditor::FireClipboardEvent(EventMessage aEventMessage,
-                                      int32_t aSelectionType,
-                                      bool* aActionTaken)
+nsPlaintextEditor::FireClipboardEvent(int32_t aType, int32_t aSelectionType, bool* aActionTaken)
 {
-  if (aEventMessage == ePaste) {
+  if (aType == NS_PASTE)
     ForceCompositionEnd();
-  }
 
   nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   NS_ENSURE_TRUE(presShell, false);
 
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   if (!selection) {
     return false;
   }
 
-  if (!nsCopySupport::FireClipboardEvent(aEventMessage, aSelectionType,
-                                         presShell, selection, aActionTaken)) {
+  if (!nsCopySupport::FireClipboardEvent(aType, aSelectionType, presShell, selection, aActionTaken))
     return false;
-  }
 
   // If the event handler caused the editor to be destroyed, return false.
   // Otherwise return true to indicate that the event was not cancelled.
@@ -1191,7 +1192,7 @@ nsPlaintextEditor::FireClipboardEvent(EventMessage aEventMessage,
 NS_IMETHODIMP nsPlaintextEditor::Cut()
 {
   bool actionTaken = false;
-  if (FireClipboardEvent(eCut, nsIClipboard::kGlobalClipboard, &actionTaken)) {
+  if (FireClipboardEvent(NS_CUT, nsIClipboard::kGlobalClipboard, &actionTaken)) {
     DeleteSelection(eNone, eStrip);
   }
   return actionTaken ? NS_OK : NS_ERROR_FAILURE;
@@ -1210,7 +1211,7 @@ NS_IMETHODIMP nsPlaintextEditor::CanCut(bool *aCanCut)
 NS_IMETHODIMP nsPlaintextEditor::Copy()
 {
   bool actionTaken = false;
-  FireClipboardEvent(eCopy, nsIClipboard::kGlobalClipboard, &actionTaken);
+  FireClipboardEvent(NS_COPY, nsIClipboard::kGlobalClipboard, &actionTaken);
 
   return actionTaken ? NS_OK : NS_ERROR_FAILURE;
 }
@@ -1266,7 +1267,7 @@ nsPlaintextEditor::GetAndInitDocEncoder(const nsAString& aFormatType,
   // in which case we use our existing selection ...
   if (aFlags & nsIDocumentEncoder::OutputSelectionOnly)
   {
-    RefPtr<Selection> selection = GetSelection();
+    nsRefPtr<Selection> selection = GetSelection();
     NS_ENSURE_STATE(selection);
     rv = docEncoder->SetSelection(selection);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1423,7 +1424,7 @@ nsPlaintextEditor::InsertAsQuotation(const nsAString& aQuotedText,
     quotedStuff.Append(char16_t('\n'));
 
   // get selection
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   nsAutoEditBatch beginBatching(this);
@@ -1470,7 +1471,7 @@ nsPlaintextEditor::SharedOutputString(uint32_t aFlags,
                                       bool* aIsCollapsed,
                                       nsAString& aResult)
 {
-  RefPtr<Selection> selection = GetSelection();
+  nsRefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NOT_INITIALIZED);
 
   *aIsCollapsed = selection->Collapsed();

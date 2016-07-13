@@ -7,6 +7,7 @@
 #include "nsArrayEnumerator.h"
 #include "nsCOMArray.h"
 #include "nsIFile.h"
+#include "nsIVariant.h"
 #include "nsMIMEInfoWin.h"
 #include "nsNetUtil.h"
 #include <windows.h>
@@ -21,8 +22,6 @@
 #include "nsOSHelperAppService.h"
 #include "nsUnicharUtils.h"
 #include "nsITextToSubURI.h"
-#include "nsVariant.h"
-#include "mozilla/UniquePtrExtensions.h"
 
 #define RUNDLL32_EXE L"\\rundll32.exe"
 
@@ -173,13 +172,15 @@ nsMIMEInfoWin::GetEnumerator(nsISimpleEnumerator* *_retval)
 
 static nsresult GetIconURLVariant(nsIFile* aApplication, nsIVariant* *_retval)
 {
+  nsresult rv = CallCreateInstance("@mozilla.org/variant;1", _retval);
+  if (NS_FAILED(rv))
+    return rv;
   nsAutoCString fileURLSpec;
   NS_GetURLSpecFromFile(aApplication, fileURLSpec);
   nsAutoCString iconURLSpec; iconURLSpec.AssignLiteral("moz-icon://");
   iconURLSpec += fileURLSpec;
-  RefPtr<nsVariant> writable(new nsVariant());
+  nsCOMPtr<nsIWritableVariant> writable(do_QueryInterface(*_retval));
   writable->SetAsAUTF8String(iconURLSpec);
-  writable.forget(_retval);
   return NS_OK;
 }
 
@@ -425,15 +426,15 @@ bool nsMIMEInfoWin::GetDllLaunchInfo(nsIFile * aDll,
     if (bufLength == 0) // Error
       return false;
 
-    auto destination = mozilla::MakeUniqueFallible<wchar_t[]>(bufLength);
+    nsAutoArrayPtr<wchar_t> destination(new wchar_t[bufLength]);
     if (!destination)
       return false;
     if (!::ExpandEnvironmentStringsW(appFilesystemCommand.get(),
-                                     destination.get(),
+                                     destination,
                                      bufLength))
       return false;
 
-    appFilesystemCommand.Assign(destination.get());
+    appFilesystemCommand = static_cast<const wchar_t*>(destination);
 
     // C:\Windows\System32\rundll32.exe "C:\Program Files\Windows 
     // Photo Gallery\PhotoViewer.dll", ImageView_Fullscreen %1

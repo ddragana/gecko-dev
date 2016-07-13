@@ -22,10 +22,8 @@ class WebrtcGlobalChild :
 
   virtual bool RecvGetStatsRequest(const int& aRequestId,
                                    const nsString& aPcIdFilter) override;
-  virtual bool RecvClearStatsRequest() override;
   virtual bool RecvGetLogRequest(const int& aReqestId,
                                  const nsCString& aPattern) override;
-  virtual bool RecvClearLogRequest() override;
   virtual bool RecvSetAecLogging(const bool& aEnable) override;
   virtual bool RecvSetDebugMode(const int& aLevel) override;
 

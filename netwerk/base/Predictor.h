@@ -17,8 +17,7 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserver.h"
 #include "nsISpeculativeConnect.h"
-#include "nsIStreamListener.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
@@ -27,14 +26,10 @@
 class nsICacheStorage;
 class nsIDNSService;
 class nsIIOService;
-class nsILoadContextInfo;
 class nsITimer;
 
 namespace mozilla {
 namespace net {
-
-class nsHttpRequestHead;
-class nsHttpResponseHead;
 
 class Predictor : public nsINetworkPredictor
                 , public nsIObserver
@@ -57,15 +52,6 @@ public:
   nsresult Init();
   void Shutdown();
   static nsresult Create(nsISupports *outer, const nsIID& iid, void **result);
-
-  // Used to update whether a particular URI was cacheable or not.
-  // sourceURI and targetURI are the same as the arguments to Learn
-  // and httpStatus is the status code we got while loading targetURI.
-  static void UpdateCacheability(nsIURI *sourceURI, nsIURI *targetURI,
-                                 uint32_t httpStatus,
-                                 nsHttpRequestHead &requestHead,
-                                 nsHttpResponseHead *reqponseHead,
-                                 nsILoadContextInfo *lci);
 
 private:
   virtual ~Predictor();
@@ -126,34 +112,7 @@ private:
     nsCOMPtr<nsINetworkPredictorVerifier> mVerifier;
     TimeStamp mStartTime;
     uint8_t mStackCount;
-    RefPtr<Predictor> mPredictor;
-  };
-
-  class CacheabilityAction : public nsICacheEntryOpenCallback
-                           , public nsICacheEntryMetaDataVisitor
-  {
-  public:
-    NS_DECL_THREADSAFE_ISUPPORTS
-    NS_DECL_NSICACHEENTRYOPENCALLBACK
-    NS_DECL_NSICACHEENTRYMETADATAVISITOR
-
-    CacheabilityAction(nsIURI *targetURI, uint32_t httpStatus,
-                       const nsCString &method, Predictor *predictor)
-      :mTargetURI(targetURI)
-      ,mHttpStatus(httpStatus)
-      ,mMethod(method)
-      ,mPredictor(predictor)
-    { }
-
-  private:
-    virtual ~CacheabilityAction() { }
-
-    nsCOMPtr<nsIURI> mTargetURI;
-    uint32_t mHttpStatus;
-    nsCString mMethod;
-    RefPtr<Predictor> mPredictor;
-    nsTArray<nsCString> mKeysToCheck;
-    nsTArray<nsCString> mValuesToCheck;
+    nsRefPtr<Predictor> mPredictor;
   };
 
   class Resetter : public nsICacheEntryOpenCallback,
@@ -175,7 +134,7 @@ private:
 
     uint32_t mEntriesToVisit;
     nsTArray<nsCString> mKeysToDelete;
-    RefPtr<Predictor> mPredictor;
+    nsRefPtr<Predictor> mPredictor;
     nsTArray<nsCOMPtr<nsIURI>> mURIsToVisit;
   };
 
@@ -187,7 +146,7 @@ private:
 
     explicit SpaceCleaner(Predictor *predictor)
       :mLRUStamp(0)
-      ,mLRUKeyToDelete(nullptr)
+      ,mKeyToDelete(nullptr)
       ,mPredictor(predictor)
     { }
 
@@ -196,32 +155,8 @@ private:
   private:
     virtual ~SpaceCleaner() { }
     uint32_t mLRUStamp;
-    const char *mLRUKeyToDelete;
-    nsTArray<nsCString> mLongKeysToDelete;
-    RefPtr<Predictor> mPredictor;
-  };
-
-  class PrefetchListener : public nsIStreamListener
-  {
-  public:
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIREQUESTOBSERVER
-    NS_DECL_NSISTREAMLISTENER
-
-    PrefetchListener(nsINetworkPredictorVerifier *verifier, nsIURI *uri,
-                     Predictor *predictor)
-      :mVerifier(verifier)
-      ,mURI(uri)
-      ,mPredictor(predictor)
-    { }
-
-  private:
-    virtual ~PrefetchListener() { }
-
-    nsCOMPtr<nsINetworkPredictorVerifier> mVerifier;
-    nsCOMPtr<nsIURI> mURI;
-    RefPtr<Predictor> mPredictor;
-    TimeStamp mStartTime;
+    const char *mKeyToDelete;
+    nsRefPtr<Predictor> mPredictor;
   };
 
   // Observer-related stuff
@@ -263,31 +198,16 @@ private:
   // being the target of a redirect). All arguments are the same as for
   // PredictInternal. Returns true if any predictions were queued up.
   bool PredictForPageload(nsICacheEntry *entry,
-                          nsIURI *targetURI,
                           uint8_t stackCount,
-                          bool fullUri,
                           nsINetworkPredictorVerifier *verifier);
 
   // Used when predicting pages that will be used near browser startup. All
   // arguments are the same as for PredictInternal. Returns true if any
   // predictions were queued up.
   bool PredictForStartup(nsICacheEntry *entry,
-                         bool fullUri,
                          nsINetworkPredictorVerifier *verifier);
 
   // Utilities related to prediction
-
-  // Used to update our rolling load count (how many of the last n loads was a
-  // partular resource loaded on?)
-  //   * entry - cache entry of page we're loading
-  //   * flags - value that contains our rolling count as the top 20 bits (but
-  //             we may use fewer than those 20 bits for calculations)
-  //   * key - metadata key that we will update on entry
-  //   * hitCount - part of the metadata we need to preserve
-  //   * lastHit - part of the metadata we need to preserve
-  void UpdateRollingLoadCount(nsICacheEntry *entry, const uint32_t flags,
-                              const char *key, const uint32_t hitCount,
-                              const uint32_t lastHit);
 
   // Used to calculate how much to degrade our confidence for all resources
   // on a particular page, because of how long ago the most recent load of that
@@ -313,33 +233,22 @@ private:
   // Used to calculate all confidence values for all resources associated with a
   // page.
   //   * entry - the cache entry with all necessary information about this page
-  //   * referrer - the URI that we are loading (may be null)
   //   * lastLoad - timestamp of the last time this page was loaded
   //   * loadCount - number of times this page has been loaded
   //   * gloablDegradation - value calculated by CalculateGlobalDegradation for
   //                         this page
-  //   * fullUri - whether we're predicting for a full URI or origin-only
-  void CalculatePredictions(nsICacheEntry *entry, nsIURI *referrer,
-                            uint32_t lastLoad, uint32_t loadCount,
-                            int32_t globalDegradation, bool fullUri);
+  void CalculatePredictions(nsICacheEntry *entry, uint32_t lastLoad,
+                            uint32_t loadCount, int32_t globalDegradation);
 
   // Used to prepare any necessary prediction for a resource on a page
   //   * confidence - value calculated by CalculateConfidence for this resource
-  //   * flags - the flags taken from the resource
   //   * uri - the URI of the resource
-  void SetupPrediction(int32_t confidence, uint32_t flags, nsIURI *uri);
-
-  // Used to kick off a prefetch from RunPredictions if necessary
-  //   * uri - the URI to prefetch
-  //   * referrer - the URI of the referring page
-  //   * verifier - used for testing to ensure the expected prefetch happens
-  nsresult Prefetch(nsIURI *uri, nsIURI *referrer, nsINetworkPredictorVerifier *verifier);
+  void SetupPrediction(int32_t confidence, nsIURI *uri);
 
   // Used to actually perform any predictions set up via SetupPrediction.
   // Returns true if any predictions were performed.
-  //   * referrer - the URI we are predicting from
   //   * verifier - used for testing to ensure the expected predictions happen
-  bool RunPredictions(nsIURI *referrer, nsINetworkPredictorVerifier *verifier);
+  bool RunPredictions(nsINetworkPredictorVerifier *verifier);
 
   // Used to guess whether a page will redirect to another page or not. Returns
   // true if a redirection is likely.
@@ -405,21 +314,11 @@ private:
                           uint32_t &hitCount, uint32_t &lastHit,
                           uint32_t &flags);
 
-  // Used to update whether a particular URI was cacheable or not.
-  // sourceURI and targetURI are the same as the arguments to Learn
-  // and httpStatus is the status code we got while loading targetURI.
-  void UpdateCacheabilityInternal(nsIURI *sourceURI, nsIURI *targetURI,
-                                  uint32_t httpStatus, const nsCString &method);
-
-  // Make sure our prefs are in their expected range of values
-  void SanitizePrefs();
-
   // Our state
   bool mInitialized;
 
   bool mEnabled;
   bool mEnableHoverOnSSL;
-  bool mEnablePrefetch;
 
   int32_t mPageDegradationDay;
   int32_t mPageDegradationWeek;
@@ -433,13 +332,9 @@ private:
   int32_t mSubresourceDegradationYear;
   int32_t mSubresourceDegradationMax;
 
-  int32_t mPrefetchRollingLoadCount;
-  int32_t mPrefetchMinConfidence;
   int32_t mPreconnectMinConfidence;
   int32_t mPreresolveMinConfidence;
   int32_t mRedirectLikelyConfidence;
-
-  int32_t mPrefetchForceValidFor;
 
   int32_t mMaxResourcesPerEntry;
 
@@ -459,17 +354,12 @@ private:
   uint32_t mLastStartupTime;
   int32_t mStartupCount;
 
-  uint32_t mMaxURILength;
-
   nsCOMPtr<nsIDNSService> mDnsService;
 
-  RefPtr<DNSListener> mDNSListener;
+  nsRefPtr<DNSListener> mDNSListener;
 
-  nsTArray<nsCOMPtr<nsIURI>> mPrefetches;
   nsTArray<nsCOMPtr<nsIURI>> mPreconnects;
   nsTArray<nsCOMPtr<nsIURI>> mPreresolves;
-
-  bool mDoingTests;
 
   static Predictor *sSelf;
 };

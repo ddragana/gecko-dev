@@ -14,7 +14,6 @@
 
 #include "jsscriptinlines.h"
 #include "jit/JitFrames-inl.h"
-#include "vm/ScopeObject-inl.h"
 
 using namespace js;
 using namespace jit;
@@ -37,7 +36,6 @@ RematerializedFrame::RematerializedFrame(JSContext* cx, uint8_t* top, unsigned n
   : prevUpToDate_(false),
     isDebuggee_(iter.script()->isDebuggee()),
     isConstructing_(iter.isConstructing()),
-    hasCachedSavedFrame_(false),
     top_(top),
     pc_(iter.pc()),
     frameNo_(iter.frameNo()),
@@ -51,7 +49,7 @@ RematerializedFrame::RematerializedFrame(JSContext* cx, uint8_t* top, unsigned n
 
     CopyValueToRematerializedFrame op(slots_);
     iter.readFrameArgsAndLocals(cx, op, op, &scopeChain_, &hasCallObj_, &returnValue_,
-                                &argsObj_, &thisArgument_, ReadFrame_Actuals,
+                                &argsObj_, &thisValue_, ReadFrame_Actuals,
                                 fallback);
 }
 
@@ -78,8 +76,7 @@ RematerializedFrame::RematerializeInlineFrames(JSContext* cx, uint8_t* top,
                                                MaybeReadFallback& fallback,
                                                Vector<RematerializedFrame*>& frames)
 {
-    Vector<RematerializedFrame*> tempFrames(cx);
-    if (!tempFrames.resize(iter.frameCount()))
+    if (!frames.resize(iter.frameCount()))
         return false;
 
     while (true) {
@@ -92,14 +89,13 @@ RematerializedFrame::RematerializeInlineFrames(JSContext* cx, uint8_t* top,
                 return false;
         }
 
-        tempFrames[frameNo] = frame;
+        frames[frameNo] = frame;
 
         if (!iter.more())
             break;
         ++iter;
     }
 
-    frames = Move(tempFrames);
     return true;
 }
 
@@ -144,8 +140,8 @@ RematerializedFrame::pushOnScopeChain(ScopeObject& scope)
 bool
 RematerializedFrame::initFunctionScopeObjects(JSContext* cx)
 {
-    MOZ_ASSERT(isFunctionFrame());
-    MOZ_ASSERT(callee()->needsCallObject());
+    MOZ_ASSERT(isNonEvalFunctionFrame());
+    MOZ_ASSERT(fun()->isHeavyweight());
     CallObject* callobj = CallObject::createForFunction(cx, this);
     if (!callobj)
         return false;
@@ -161,10 +157,8 @@ RematerializedFrame::mark(JSTracer* trc)
     TraceRoot(trc, &scopeChain_, "remat ion frame scope chain");
     if (callee_)
         TraceRoot(trc, &callee_, "remat ion frame callee");
-    if (argsObj_)
-        TraceRoot(trc, &argsObj_, "remat ion frame argsobj");
     TraceRoot(trc, &returnValue_, "remat ion frame return value");
-    TraceRoot(trc, &thisArgument_, "remat ion frame this");
+    TraceRoot(trc, &thisValue_, "remat ion frame this");
     TraceRootRange(trc, numActualArgs_ + isConstructing_ + script_->nfixed(),
                    slots_, "remat ion frame stack");
 }
@@ -209,7 +203,7 @@ RematerializedFrame::dump()
 
         fprintf(stderr, "  this: ");
 #ifdef DEBUG
-        DumpValue(thisArgument());
+        DumpValue(thisValue());
 #else
         fprintf(stderr, "?\n");
 #endif

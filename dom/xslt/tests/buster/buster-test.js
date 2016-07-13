@@ -3,8 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/NetUtil.jsm");
-
 var parser = new DOMParser();
 var methodExpr = (new XPathEvaluator).createExpression("xsl:output/@method",
     {
@@ -309,12 +307,21 @@ runItem.prototype =
 
     loadTextFile : function(url)
     {
-        var chan = NetUtil.newChannel({
-            uri: url,
-            loadUsingSystemPrincipal: true
-        });
+        var serv = Components.classes[IOSERVICE_CTRID].
+            getService(nsIIOService);
+        if (!serv) {
+            throw Components.results.ERR_FAILURE;
+        }
+        var chan = serv.newChannel2(url,
+                                    null,
+                                    null,
+                                    null,      // aLoadingNode
+                                    Services.scriptSecurityManager.getSystemPrincipal(),
+                                    null,      // aTriggeringPrincipal
+                                    Ci.nsILoadInfo.SEC_NORMAL,
+                                    Ci.nsIContentPolicy.TYPE_OTHER);
         var instream = doCreate(SIS_CTRID, nsISIS);
-        instream.init(chan.open2());
+        instream.init(chan.open());
 
         return instream.read(instream.available());
     }

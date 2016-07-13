@@ -165,6 +165,7 @@ exports.push = function push(url, headers, priority, callback) {
   });
 
   stream.associated = socket;
+  socket.connection._addStream(stream);
 
   socket._lock(function() {
     this._spdyState.framer.streamFrame(

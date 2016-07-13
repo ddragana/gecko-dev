@@ -6,7 +6,7 @@ namespace _ipdltest {
 sync protocol PTestIndirectProtocolParamSecond {
     manager PTestIndirectProtocolParamManage;
 both:
-    async __delete__();
+    __delete__();
 };
 
 }

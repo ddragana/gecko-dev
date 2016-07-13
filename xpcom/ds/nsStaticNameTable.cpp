@@ -19,50 +19,52 @@ using namespace mozilla;
 
 struct NameTableKey
 {
-  NameTableKey(const nsDependentCString aNameArray[],
-               const nsAFlatCString* aKeyStr)
-    : mNameArray(aNameArray)
-    , mIsUnichar(false)
+  explicit NameTableKey(const nsAFlatCString* aKeyStr)
+    : mIsUnichar(false)
   {
     mKeyStr.m1b = aKeyStr;
   }
 
-  NameTableKey(const nsDependentCString aNameArray[],
-               const nsAFlatString* aKeyStr)
-    : mNameArray(aNameArray)
-    , mIsUnichar(true)
+  explicit NameTableKey(const nsAFlatString* aKeyStr)
+    : mIsUnichar(true)
   {
     mKeyStr.m2b = aKeyStr;
   }
 
-  const nsDependentCString* mNameArray;
+  bool mIsUnichar;
   union
   {
     const nsAFlatCString* m1b;
     const nsAFlatString* m2b;
   } mKeyStr;
-  bool mIsUnichar;
 };
 
 struct NameTableEntry : public PLDHashEntryHdr
 {
+  // no ownership here!
+  const nsAFlatCString* mString;
   int32_t mIndex;
 };
 
 static bool
-matchNameKeysCaseInsensitive(const PLDHashEntryHdr* aHdr, const void* aVoidKey)
+matchNameKeysCaseInsensitive(PLDHashTable*, const PLDHashEntryHdr* aHdr,
+                             const void* aKey)
 {
-  auto entry = static_cast<const NameTableEntry*>(aHdr);
-  auto key = static_cast<const NameTableKey*>(aVoidKey);
-  const nsDependentCString* name = &key->mNameArray[entry->mIndex];
+  const NameTableEntry* entry = static_cast<const NameTableEntry*>(aHdr);
+  const NameTableKey* keyValue = static_cast<const NameTableKey*>(aKey);
+  const nsAFlatCString* entryKey = entry->mString;
 
-  return key->mIsUnichar
-       ? key->mKeyStr.m2b->LowerCaseEqualsASCII(name->get(), name->Length())
-       : key->mKeyStr.m1b->LowerCaseEqualsASCII(name->get(), name->Length());
+  if (keyValue->mIsUnichar) {
+    return keyValue->mKeyStr.m2b->LowerCaseEqualsASCII(entryKey->get(),
+                                                       entryKey->Length());
+  }
+
+  return keyValue->mKeyStr.m1b->LowerCaseEqualsASCII(entryKey->get(),
+                                                     entryKey->Length());
 }
 
 /*
- * caseInsensitiveHashKey is just like PLDHashTable::HashStringKey except it
+ * caseInsensitiveHashKey is just like PL_DHashStringKey except it
  * uses (*s & ~0x20) instead of simply *s.  This means that "aFOO" and
  * "afoo" and "aFoo" will all hash to the same thing.  It also means
  * that some strings that aren't case-insensensitively equal will hash
@@ -70,7 +72,7 @@ matchNameKeysCaseInsensitive(const PLDHashEntryHdr* aHdr, const void* aVoidKey)
  * matter.
  */
 static PLDHashNumber
-caseInsensitiveStringHashKey(const void* aKey)
+caseInsensitiveStringHashKey(PLDHashTable* aTable, const void* aKey)
 {
   PLDHashNumber h = 0;
   const NameTableKey* tableKey = static_cast<const NameTableKey*>(aKey);
@@ -94,8 +96,8 @@ caseInsensitiveStringHashKey(const void* aKey)
 static const struct PLDHashTableOps nametable_CaseInsensitiveHashTableOps = {
   caseInsensitiveStringHashKey,
   matchNameKeysCaseInsensitive,
-  PLDHashTable::MoveEntryStub,
-  PLDHashTable::ClearEntryStub,
+  PL_DHashMoveEntryStub,
+  PL_DHashClearEntryStub,
   nullptr,
 };
 
@@ -132,24 +134,21 @@ nsStaticCaseInsensitiveNameTable::nsStaticCaseInsensitiveNameTable(
     nsDependentCString* strPtr = &mNameArray[index];
     new (strPtr) nsDependentCString(raw);
 
-    NameTableKey key(mNameArray, strPtr);
+    NameTableKey key(strPtr);
 
-    auto entry = static_cast<NameTableEntry*>(mNameTable.Add(&key, fallible));
+    NameTableEntry* entry = static_cast<NameTableEntry*>
+      (PL_DHashTableAdd(&mNameTable, &key, fallible));
     if (!entry) {
       continue;
     }
 
-    // If the entry already exists it's unlikely but possible that its index is
-    // zero, in which case this assertion won't fail. But if the index is
-    // non-zero (highly likely) then it will fail. In other words, this
-    // assertion is likely but not guaranteed to detect if an entry is already
-    // used.
-    MOZ_ASSERT(entry->mIndex == 0, "Entry already exists!");
+    NS_ASSERTION(entry->mString == 0, "Entry already exists!");
 
+    entry->mString = strPtr;      // not owned!
     entry->mIndex = index;
   }
 #ifdef DEBUG
-  mNameTable.MarkImmutable();
+  PL_DHashMarkTableImmutable(&mNameTable);
 #endif
 }
 
@@ -170,8 +169,9 @@ nsStaticCaseInsensitiveNameTable::Lookup(const nsACString& aName)
 
   const nsAFlatCString& str = PromiseFlatCString(aName);
 
-  NameTableKey key(mNameArray, &str);
-  auto entry = static_cast<NameTableEntry*>(mNameTable.Search(&key));
+  NameTableKey key(&str);
+  NameTableEntry* entry =
+    static_cast<NameTableEntry*>(PL_DHashTableSearch(&mNameTable, &key));
 
   return entry ? entry->mIndex : nsStaticCaseInsensitiveNameTable::NOT_FOUND;
 }
@@ -183,8 +183,9 @@ nsStaticCaseInsensitiveNameTable::Lookup(const nsAString& aName)
 
   const nsAFlatString& str = PromiseFlatString(aName);
 
-  NameTableKey key(mNameArray, &str);
-  auto entry = static_cast<NameTableEntry*>(mNameTable.Search(&key));
+  NameTableKey key(&str);
+  NameTableEntry* entry =
+    static_cast<NameTableEntry*>(PL_DHashTableSearch(&mNameTable, &key));
 
   return entry ? entry->mIndex : nsStaticCaseInsensitiveNameTable::NOT_FOUND;
 }

@@ -1,6 +1,6 @@
 "use strict";
 
-var ScriptableUnicodeConverter =
+let ScriptableUnicodeConverter =
   Components.Constructor("@mozilla.org/intl/scriptableunicodeconverter",
                          "nsIScriptableUnicodeConverter");
 
@@ -52,7 +52,7 @@ function testHMAC(alg) {
 }
 
 function hexdigest(data) {
-  return Array.from(data, (c, i) => ("0" + data.charCodeAt(i).toString(16)).slice(-2)).join("");
+  return [("0" + data.charCodeAt(i).toString(16)).slice(-2) for (i in data)].join("");
 }
 
 function testVectors() {

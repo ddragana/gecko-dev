@@ -6,7 +6,6 @@
 
 #include <stdio.h>
 #include "nsBidiKeyboard.h"
-#include "WidgetUtils.h"
 #include "prmem.h"
 #include <tchar.h>
 
@@ -177,11 +176,4 @@ bool nsBidiKeyboard::IsRTLLanguage(HKL aLocale)
                            (LPWSTR)&localesig,
                            (sizeof(localesig)/sizeof(WCHAR))) &&
           (localesig.lsUsb[3] & 0x08000000));
-}
-
-//static
-void
-nsBidiKeyboard::OnLayoutChange()
-{
-  mozilla::widget::WidgetUtils::SendBidiKeyboardInfoToContent();
 }

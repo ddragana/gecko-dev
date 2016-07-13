@@ -165,13 +165,18 @@ const querySwitches = [
   // hasUri
   {
     flag:        "hasUri",
-    subswitches: ["uri"],
+    subswitches: ["uri", "uriIsPrefix"],
     desc:        "nsINavHistoryQuery.hasUri",
     matches:     flagSwitchMatches,
     runs:        [
       function (aQuery, aQueryOptions) {
         aQuery.uri = uri("http://mozilla.com");
+        aQuery.uriIsPrefix = false;
       },
+      function (aQuery, aQueryOptions) {
+        aQuery.uri = uri("http://mozilla.com");
+        aQuery.uriIsPrefix = true;
+      }
     ]
   },
   // hasAnnotation
@@ -498,7 +503,7 @@ function cartProd(aSequences, aCallback)
 
   // For each sequence in aSequences, we maintain a pointer (an array index,
   // really) to the element we're currently enumerating in that sequence
-  var seqEltPtrs = aSequences.map(i => 0);
+  var seqEltPtrs = aSequences.map(function (i) 0);
 
   var numProds = 0;
   var done = false;
@@ -569,7 +574,7 @@ function choose(aSet, aHowMany, aCallback)
   var done = false;
   while (!done) {
     numFound++;
-    aCallback(ptrs.map(p => aSet[p]));
+    aCallback(ptrs.map(function (p) aSet[p]));
 
     // The next subset to be chosen differs from the current one by just a
     // single element.  Determine which element that is.  Advance the "rightmost"

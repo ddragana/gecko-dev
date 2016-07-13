@@ -44,7 +44,7 @@ public:
   // Delayed-task handling
   //
 
-  void SetDelayedConnectTask(CancelableRunnable* aTask);
+  void SetDelayedConnectTask(CancelableTask* aTask);
   void ClearDelayedConnectTask();
   void CancelDelayedConnectTask();
 
@@ -70,7 +70,7 @@ private:
   /**
    * Cross-thread dispatcher for the RIL worker
    */
-  RefPtr<WorkerCrossThreadDispatcher> mDispatcher;
+  nsRefPtr<WorkerCrossThreadDispatcher> mDispatcher;
 
   /**
    * Consumer pointer. Non-thread safe RefPtr, so should only be manipulated
@@ -88,12 +88,12 @@ private:
    * Task member for delayed connect task. Should only be access on consumer
    * thread.
    */
-  CancelableRunnable* mDelayedConnectTask;
+  CancelableTask* mDelayedConnectTask;
 
   /**
    * I/O buffer for received data
    */
-  UniquePtr<UnixSocketRawData> mBuffer;
+  nsAutoPtr<UnixSocketRawData> mBuffer;
 };
 
 RilSocketIO::RilSocketIO(WorkerCrossThreadDispatcher* aDispatcher,
@@ -134,7 +134,7 @@ RilSocketIO::GetDataSocket()
 }
 
 void
-RilSocketIO::SetDelayedConnectTask(CancelableRunnable* aTask)
+RilSocketIO::SetDelayedConnectTask(CancelableTask* aTask)
 {
   MOZ_ASSERT(IsConsumerThread());
 
@@ -170,7 +170,7 @@ RilSocketIO::QueryReceiveBuffer(UnixSocketIOBuffer** aBuffer)
   MOZ_ASSERT(aBuffer);
 
   if (!mBuffer) {
-    mBuffer = MakeUnique<UnixSocketRawData>(MAX_READ_SIZE);
+    mBuffer = new UnixSocketRawData(MAX_READ_SIZE);
   }
   *aBuffer = mBuffer.get();
 
@@ -212,13 +212,13 @@ public:
 
 private:
   RilSocketIO* mIO;
-  UniquePtr<UnixSocketBuffer> mBuffer;
+  nsAutoPtr<UnixSocketBuffer> mBuffer;
 };
 
 void
 RilSocketIO::ConsumeBuffer()
 {
-  RefPtr<ReceiveTask> task = new ReceiveTask(this, mBuffer.release());
+  nsRefPtr<ReceiveTask> task = new ReceiveTask(this, mBuffer.forget());
   NS_WARN_IF(!mDispatcher->PostTask(task));
 }
 
@@ -281,14 +281,12 @@ public:
     : SocketIOTask<RilSocketIO>(aIO)
   { }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(!GetIO()->IsConsumerThread());
     MOZ_ASSERT(!IsCanceled());
 
     GetIO()->Connect();
-
-    return NS_OK;
   }
 };
 
@@ -300,23 +298,21 @@ public:
     : SocketIOTask<RilSocketIO>(aIO)
   { }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     MOZ_ASSERT(GetIO()->IsConsumerThread());
 
     if (IsCanceled()) {
-      return NS_OK;
+      return;
     }
 
     RilSocketIO* io = GetIO();
     if (io->IsShutdownOnConsumerThread()) {
-      return NS_OK;
+      return;
     }
 
     io->ClearDelayedConnectTask();
-    io->GetIOLoop()->PostTask(MakeAndAddRef<ConnectTask>(io));
-
-    return NS_OK;
+    io->GetIOLoop()->PostTask(FROM_HERE, new ConnectTask(io));
   }
 };
 
@@ -346,7 +342,7 @@ RilSocket::~RilSocket()
 
 void
 RilSocket::ReceiveSocketData(JSContext* aCx,
-                             UniquePtr<UnixSocketBuffer>& aBuffer)
+                             nsAutoPtr<UnixSocketBuffer>& aBuffer)
 {
   mConsumer->ReceiveSocketData(aCx, mIndex, aBuffer);
 }
@@ -361,12 +357,12 @@ RilSocket::Connect(UnixSocketConnector* aConnector, int aDelayMs,
   SetConnectionStatus(SOCKET_CONNECTING);
 
   if (aDelayMs > 0) {
-    RefPtr<RilSocketIO::DelayedConnectTask> connectTask =
-      MakeAndAddRef<RilSocketIO::DelayedConnectTask>(mIO);
+    RilSocketIO::DelayedConnectTask* connectTask =
+      new RilSocketIO::DelayedConnectTask(mIO);
     mIO->SetDelayedConnectTask(connectTask);
-    MessageLoop::current()->PostDelayedTask(connectTask.forget(), aDelayMs);
+    MessageLoop::current()->PostDelayedTask(FROM_HERE, connectTask, aDelayMs);
   } else {
-    aIOLoop->PostTask(MakeAndAddRef<RilSocketIO::ConnectTask>(mIO));
+    aIOLoop->PostTask(FROM_HERE, new RilSocketIO::ConnectTask(mIO));
   }
 
   return NS_OK;
@@ -400,7 +396,8 @@ RilSocket::SendSocketData(UnixSocketIOBuffer* aBuffer)
   MOZ_ASSERT(!mIO->IsShutdownOnConsumerThread());
 
   mIO->GetIOLoop()->PostTask(
-    MakeAndAddRef<SocketIOSendTask<RilSocketIO, UnixSocketIOBuffer>>(mIO, aBuffer));
+    FROM_HERE,
+    new SocketIOSendTask<RilSocketIO, UnixSocketIOBuffer>(mIO, aBuffer));
 }
 
 // |SocketBase|
@@ -417,7 +414,7 @@ RilSocket::Close()
   // the relationship here so any future calls to |Connect| will create
   // a new I/O object.
   mIO->ShutdownOnConsumerThread();
-  mIO->GetIOLoop()->PostTask(MakeAndAddRef<SocketIOShutdownTask>(mIO));
+  mIO->GetIOLoop()->PostTask(FROM_HERE, new SocketIOShutdownTask(mIO));
   mIO = nullptr;
 
   NotifyDisconnect();

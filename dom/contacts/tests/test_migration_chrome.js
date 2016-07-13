@@ -5,9 +5,9 @@
  */
 "use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-var imports = {};
+let imports = {};
 
 Cu.import("resource://gre/modules/ContactDB.jsm", imports);
 Cu.import("resource://gre/modules/ContactService.jsm", imports);
@@ -28,7 +28,7 @@ Object.defineProperty(this, "Promise", {
   value: imports.Promise, writable: false, configurable: false
 });
 
-var DEBUG = false;
+let DEBUG = false;
 function debug(str) {
   if (DEBUG){
     dump("-*- TestMigrationChromeScript: " + str + "\n");

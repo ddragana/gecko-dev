@@ -53,7 +53,7 @@ const NOTIFICATIONS = [
   "sessionstore-final-state-write-complete"
 ];
 
-var CrashMonitorInternal = {
+let CrashMonitorInternal = {
 
   /**
    * Notifications received during the current session.
@@ -98,10 +98,7 @@ var CrashMonitorInternal = {
       let data;
       try {
         data = yield OS.File.read(CrashMonitorInternal.path, { encoding: "utf-8" });
-      } catch (ex) {
-        if (!(ex instanceof OS.File.Error)) {
-          throw ex;
-        }
+      } catch (ex if ex instanceof OS.File.Error) {
         if (!ex.becauseNoSuchFile) {
           Cu.reportError("Error while loading crash monitor data: " + ex.toString());
         }
@@ -190,7 +187,7 @@ this.CrashMonitor = {
       // If this is the first time this notification is received,
       // remember it and write it to file
       CrashMonitorInternal.checkpoints[aTopic] = true;
-      Task.spawn(function* () {
+      Task.spawn(function() {
         try {
           let data = JSON.stringify(CrashMonitorInternal.checkpoints);
 

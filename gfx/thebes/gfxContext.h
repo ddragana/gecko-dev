@@ -14,6 +14,7 @@
 #include "gfxMatrix.h"
 #include "gfxPattern.h"
 #include "nsTArray.h"
+#include "nsAutoPtr.h"
 
 #include "mozilla/gfx/2D.h"
 
@@ -45,38 +46,48 @@ class ClipExporter;
  */
 class gfxContext final {
     typedef mozilla::gfx::CapStyle CapStyle;
-    typedef mozilla::gfx::CompositionOp CompositionOp;
     typedef mozilla::gfx::JoinStyle JoinStyle;
     typedef mozilla::gfx::FillRule FillRule;
     typedef mozilla::gfx::Path Path;
     typedef mozilla::gfx::Pattern Pattern;
     typedef mozilla::gfx::Rect Rect;
     typedef mozilla::gfx::RectCornerRadii RectCornerRadii;
-    typedef mozilla::gfx::Size Size;
 
     NS_INLINE_DECL_REFCOUNTING(gfxContext)
 
 public:
+
     /**
      * Initialize this context from a DrawTarget.
      * Strips any transform from aTarget.
      * aTarget will be flushed in the gfxContext's destructor.
-     * If aTarget is null or invalid, nullptr is returned.  The caller
-     * is responsible for handling this scenario as appropriate.
      */
-    static already_AddRefed<gfxContext>
-        CreateOrNull(mozilla::gfx::DrawTarget* aTarget,
-                     const mozilla::gfx::Point& aDeviceOffset = mozilla::gfx::Point());
+    explicit gfxContext(mozilla::gfx::DrawTarget *aTarget,
+                        const mozilla::gfx::Point& aDeviceOffset = mozilla::gfx::Point());
 
     /**
      * Create a new gfxContext wrapping aTarget and preserving aTarget's
      * transform. Note that the transform is moved from aTarget to the resulting
      * gfxContext, aTarget will no longer have its transform.
-     * If aTarget is null or invalid, nullptr is returned.  The caller
-     * is responsible for handling this scenario as appropriate.
      */
-    static already_AddRefed<gfxContext>
-        CreatePreservingTransformOrNull(mozilla::gfx::DrawTarget* aTarget);
+    static already_AddRefed<gfxContext> ContextForDrawTarget(mozilla::gfx::DrawTarget* aTarget);
+
+    /**
+     * Return the current transparency group target, if any, along
+     * with its device offsets from the top.  If no group is
+     * active, returns the surface the gfxContext was created with,
+     * and 0,0 in dx,dy.
+     */
+    already_AddRefed<gfxASurface> CurrentSurface(gfxFloat *dx, gfxFloat *dy);
+    already_AddRefed<gfxASurface> CurrentSurface() {
+        return CurrentSurface(nullptr, nullptr);
+    }
+
+    /**
+     * Return the raw cairo_t object.
+     * XXX this should go away at some point.
+     */
+    cairo_t *GetCairo();
 
     mozilla::gfx::DrawTarget *GetDrawTarget() { return mDT; }
 
@@ -182,7 +193,7 @@ public:
      * Converts a size from device to user coordinates. This does not apply
      * translation components of the matrix.
      */
-    Size DeviceToUser(const Size& size) const;
+    gfxSize DeviceToUser(const gfxSize& size) const;
 
     /**
      * Converts a rectangle from device to user coordinates; this has the
@@ -201,7 +212,7 @@ public:
      * Converts a size from user to device coordinates. This does not apply
      * translation components of the matrix.
      */
-    Size UserToDevice(const Size& size) const;
+    gfxSize UserToDevice(const gfxSize& size) const;
 
     /**
      * Converts a rectangle from user to device coordinates.  The
@@ -244,21 +255,21 @@ public:
      * Set a solid color to use for drawing.  This color is in the device color space
      * and is not transformed.
      */
-    void SetDeviceColor(const mozilla::gfx::Color& aColor);
+    void SetDeviceColor(const gfxRGBA& c);
 
     /**
      * Gets the current color.  It's returned in the device color space.
      * returns false if there is something other than a color
      *         set as the current source (pattern, surface, etc)
      */
-    bool GetDeviceColor(mozilla::gfx::Color& aColorOut);
+    bool GetDeviceColor(gfxRGBA& c);
 
     /**
      * Set a solid color in the sRGB color space to use for drawing.
      * If CMS is not enabled, the color is treated as a device-space color
      * and this call is identical to SetDeviceColor().
      */
-    void SetColor(const mozilla::gfx::Color& aColor);
+    void SetColor(const gfxRGBA& c);
 
     /**
      * Uses a surface for drawing. This is a shorthand for creating a
@@ -302,8 +313,14 @@ public:
      * Like Paint, except that it only draws the source where pattern is
      * non-transparent.
      */
-    void Mask(mozilla::gfx::SourceSurface *aSurface, mozilla::gfx::Float aAlpha, const mozilla::gfx::Matrix& aTransform);
-    void Mask(mozilla::gfx::SourceSurface *aSurface, const mozilla::gfx::Matrix& aTransform) { Mask(aSurface, 1.0f, aTransform); }
+    void Mask(mozilla::gfx::SourceSurface *aSurface, const mozilla::gfx::Matrix& aTransform);
+
+    /**
+     * Shorthand for creating a pattern and calling the pattern-taking
+     * variant of Mask.
+     */
+    void Mask(gfxASurface *surface, const gfxPoint& offset = gfxPoint(0.0, 0.0));
+
     void Mask(mozilla::gfx::SourceSurface *surface, float alpha = 1.0f, const mozilla::gfx::Point& offset = mozilla::gfx::Point());
 
     /**
@@ -347,13 +364,59 @@ public:
     gfxFloat CurrentMiterLimit() const;
 
     /**
+     ** Fill Properties
+     **/
+
+    void SetFillRule(FillRule rule);
+    FillRule CurrentFillRule() const;
+
+    /**
+     ** Operators and Rendering control
+     **/
+
+    // define enum for operators (clear, src, dst, etc)
+    enum GraphicsOperator {
+        OPERATOR_SOURCE,
+
+        OPERATOR_OVER,
+        OPERATOR_IN,
+        OPERATOR_OUT,
+        OPERATOR_ATOP,
+
+        OPERATOR_DEST,
+        OPERATOR_DEST_OVER,
+        OPERATOR_DEST_IN,
+        OPERATOR_DEST_OUT,
+        OPERATOR_DEST_ATOP,
+
+        OPERATOR_XOR,
+        OPERATOR_ADD,
+        OPERATOR_SATURATE,
+
+        OPERATOR_MULTIPLY,
+        OPERATOR_SCREEN,
+        OPERATOR_OVERLAY,
+        OPERATOR_DARKEN,
+        OPERATOR_LIGHTEN,
+        OPERATOR_COLOR_DODGE,
+        OPERATOR_COLOR_BURN,
+        OPERATOR_HARD_LIGHT,
+        OPERATOR_SOFT_LIGHT,
+        OPERATOR_DIFFERENCE,
+        OPERATOR_EXCLUSION,
+        OPERATOR_HUE,
+        OPERATOR_SATURATION,
+        OPERATOR_COLOR,
+        OPERATOR_LUMINOSITY
+    };
+    /**
      * Sets the operator used for all further drawing. The operator affects
      * how drawing something will modify the destination. For example, the
      * OVER operator will do alpha blending of source and destination, while
      * SOURCE will replace the destination with the source.
      */
-    void SetOp(CompositionOp op);
-    CompositionOp CurrentOp() const;
+    void SetOperator(GraphicsOperator op);
+    GraphicsOperator CurrentOperator() const;
 
     void SetAntialiasMode(mozilla::gfx::AntialiasMode mode);
     mozilla::gfx::AntialiasMode CurrentAntialiasMode() const;
@@ -404,26 +467,29 @@ public:
     /**
      * Groups
      */
-    void PushGroupForBlendBack(gfxContentType content, mozilla::gfx::Float aOpacity = 1.0f,
-                               mozilla::gfx::SourceSurface* aMask = nullptr,
-                               const mozilla::gfx::Matrix& aMaskTransform = mozilla::gfx::Matrix());
-
+    void PushGroup(gfxContentType content = gfxContentType::COLOR);
     /**
-     * Like PushGroupForBlendBack, but if the current surface is gfxContentType::COLOR and
+     * Like PushGroup, but if the current surface is gfxContentType::COLOR and
      * content is gfxContentType::COLOR_ALPHA, makes the pushed surface gfxContentType::COLOR
      * instead and copies the contents of the current surface to the pushed
      * surface. This is good for pushing opacity groups, since blending the
      * group back to the current surface with some alpha applied will give
      * the correct results and using an opaque pushed surface gives better
      * quality and performance.
+     * This API really only makes sense if you do a PopGroupToSource and
+     * immediate Paint with OPERATOR_OVER.
      */
-    void PushGroupAndCopyBackground(gfxContentType content = gfxContentType::COLOR,
-                                    mozilla::gfx::Float aOpacity = 1.0f,
-                                    mozilla::gfx::SourceSurface* aMask = nullptr,
-                                    const mozilla::gfx::Matrix& aMaskTransform = mozilla::gfx::Matrix());
-    void PopGroupAndBlend();
+    void PushGroupAndCopyBackground(gfxContentType content = gfxContentType::COLOR);
+    already_AddRefed<gfxPattern> PopGroup();
+    void PopGroupToSource();
+
+    already_AddRefed<mozilla::gfx::SourceSurface>
+    PopGroupToSurface(mozilla::gfx::Matrix* aMatrix);
 
     mozilla::gfx::Point GetDeviceOffset() const;
+
+    // Work out whether cairo will snap inter-glyph spacing to pixels.
+    void GetRoundOffsetsToPixels(bool *aRoundX, bool *aRoundY);
 
 #ifdef MOZ_DUMP_PAINTING
     /**
@@ -449,16 +515,6 @@ public:
     static mozilla::gfx::UserDataKey sDontUseAsSourceKey;
 
 private:
-
-    /**
-     * Initialize this context from a DrawTarget.
-     * Strips any transform from aTarget.
-     * aTarget will be flushed in the gfxContext's destructor.  Use the static
-     * ContextForDrawTargetNoTransform() when you want this behavior, as that
-     * version deals with null DrawTarget better.
-     */
-    explicit gfxContext(mozilla::gfx::DrawTarget *aTarget,
-                        const mozilla::gfx::Point& aDeviceOffset = mozilla::gfx::Point());
     ~gfxContext();
 
   friend class PatternFromState;
@@ -469,6 +525,7 @@ private:
   typedef mozilla::gfx::Color Color;
   typedef mozilla::gfx::StrokeOptions StrokeOptions;
   typedef mozilla::gfx::Float Float;
+  typedef mozilla::gfx::CompositionOp CompositionOp;
   typedef mozilla::gfx::PathBuilder PathBuilder;
   typedef mozilla::gfx::SourceSurface SourceSurface;
   
@@ -476,41 +533,38 @@ private:
     AzureState()
       : op(mozilla::gfx::CompositionOp::OP_OVER)
       , color(0, 0, 0, 1.0f)
+      , clipWasReset(false)
+      , fillRule(mozilla::gfx::FillRule::FILL_WINDING)
       , aaMode(mozilla::gfx::AntialiasMode::SUBPIXEL)
       , patternTransformChanged(false)
-      , mBlendOpacity(0.0f)
     {}
 
     mozilla::gfx::CompositionOp op;
     Color color;
-    RefPtr<gfxPattern> pattern;
-    RefPtr<gfxASurface> sourceSurfCairo;
-    RefPtr<SourceSurface> sourceSurface;
+    nsRefPtr<gfxPattern> pattern;
+    nsRefPtr<gfxASurface> sourceSurfCairo;
+    mozilla::RefPtr<SourceSurface> sourceSurface;
     mozilla::gfx::Point sourceSurfaceDeviceOffset;
     Matrix surfTransform;
     Matrix transform;
     struct PushedClip {
-      RefPtr<Path> path;
+      mozilla::RefPtr<Path> path;
       Rect rect;
       Matrix transform;
     };
     nsTArray<PushedClip> pushedClips;
     nsTArray<Float> dashPattern;
+    bool clipWasReset;
+    mozilla::gfx::FillRule fillRule;
     StrokeOptions strokeOptions;
-    RefPtr<DrawTarget> drawTarget;
+    mozilla::RefPtr<DrawTarget> drawTarget;
+    mozilla::RefPtr<DrawTarget> parentTarget;
     mozilla::gfx::AntialiasMode aaMode;
     bool patternTransformChanged;
     Matrix patternTransform;
     Color fontSmoothingBackgroundColor;
     // This is used solely for using minimal intermediate surface size.
     mozilla::gfx::Point deviceOffset;
-    // Support groups
-    mozilla::gfx::Float mBlendOpacity;
-    RefPtr<SourceSurface> mBlendMask;
-    Matrix mBlendMaskTransform;
-#ifdef DEBUG
-    bool mWasPushedForBlendBack;
-#endif
   };
 
   // This ensures mPath contains a valid path (in user space!)
@@ -530,15 +584,18 @@ private:
   bool mTransformChanged;
   Matrix mPathTransform;
   Rect mRect;
-  RefPtr<PathBuilder> mPathBuilder;
-  RefPtr<Path> mPath;
+  mozilla::RefPtr<PathBuilder> mPathBuilder;
+  mozilla::RefPtr<Path> mPath;
   Matrix mTransform;
   nsTArray<AzureState> mStateStack;
 
   AzureState &CurrentState() { return mStateStack[mStateStack.Length() - 1]; }
   const AzureState &CurrentState() const { return mStateStack[mStateStack.Length() - 1]; }
 
-  RefPtr<DrawTarget> mDT;
+  cairo_t *mRefCairo;
+
+  mozilla::RefPtr<DrawTarget> mDT;
+  mozilla::RefPtr<DrawTarget> mOriginalDT;
 };
 
 /**
@@ -629,27 +686,23 @@ public:
         return mMatrix;
     }
 
-    bool HasMatrix() const { return !!mContext; }
-
 private:
     gfxContext *mContext;
     gfxMatrix   mMatrix;
 };
 
 
-class DrawTargetAutoDisableSubpixelAntialiasing {
+class gfxContextAutoDisableSubpixelAntialiasing {
 public:
-    typedef mozilla::gfx::DrawTarget DrawTarget;
-
-    DrawTargetAutoDisableSubpixelAntialiasing(DrawTarget *aDT, bool aDisable)
+    gfxContextAutoDisableSubpixelAntialiasing(gfxContext *aContext, bool aDisable)
     {
         if (aDisable) {
-            mDT = aDT;
+            mDT = aContext->GetDrawTarget();
             mSubpixelAntialiasingEnabled = mDT->GetPermitSubpixelAA();
             mDT->SetPermitSubpixelAA(false);
         }
     }
-    ~DrawTargetAutoDisableSubpixelAntialiasing()
+    ~gfxContextAutoDisableSubpixelAntialiasing()
     {
         if (mDT) {
             mDT->SetPermitSubpixelAA(mSubpixelAntialiasingEnabled);
@@ -657,7 +710,7 @@ public:
     }
 
 private:
-    RefPtr<DrawTarget> mDT;
+    mozilla::RefPtr<mozilla::gfx::DrawTarget> mDT;
     bool mSubpixelAntialiasingEnabled;
 };
 

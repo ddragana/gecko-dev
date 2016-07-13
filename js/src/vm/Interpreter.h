@@ -14,8 +14,6 @@
 #include "jsiter.h"
 #include "jspubtd.h"
 
-#include "frontend/ParseNode.h"
-
 #include "vm/Stack.h"
 
 namespace js {
@@ -23,17 +21,30 @@ namespace js {
 class ScopeIter;
 
 /*
- * Convert null/undefined |thisv| into the current global object for the
- * compartment, and replace other primitives with boxed versions.
+ * For a given |call|, convert null/undefined |this| into the global object for
+ * the callee and replace other primitives with boxed versions. This assumes
+ * that call.callee() is not strict mode code. This is the special/slow case of
+ * ComputeThis.
  */
 extern bool
-BoxNonStrictThis(JSContext* cx, HandleValue thisv, MutableHandleValue vp);
+BoxNonStrictThis(JSContext* cx, const CallReceiver& call);
 
-extern bool
-GetFunctionThis(JSContext* cx, AbstractFramePtr frame, MutableHandleValue res);
+extern JSObject*
+BoxNonStrictThis(JSContext* cx, HandleValue thisv);
 
-extern bool
-GetNonSyntacticGlobalThis(JSContext* cx, HandleObject scopeChain, MutableHandleValue res);
+/*
+ * Ensure that fp->thisValue() is the correct value of |this| for the scripted
+ * call represented by |fp|. ComputeThis is necessary because fp->thisValue()
+ * may be set to 'undefined' when 'this' should really be the global object (as
+ * an optimization to avoid global-this computation).
+ */
+inline bool
+ComputeThis(JSContext* cx, AbstractFramePtr frame);
+
+enum MaybeConstruct {
+    NO_CONSTRUCT = INITIAL_NONE,
+    CONSTRUCT = INITIAL_CONSTRUCT
+};
 
 /*
  * numToSkip is the number of stack values the expression decompiler should skip
@@ -49,140 +60,42 @@ ValueToCallable(JSContext* cx, HandleValue v, int numToSkip = -1,
                 MaybeConstruct construct = NO_CONSTRUCT);
 
 /*
- * Call or construct arguments that are stored in rooted memory.
- *
- * NOTE: Any necessary |GetThisValue| computation must have been performed on
- *       |args.thisv()|, likely by the interpreter when pushing |this| onto the
- *       stack.  If you're not sure whether |GetThisValue| processing has been
- *       performed, use |Invoke|.
+ * Invoke assumes that the given args have been pushed on the top of the
+ * VM stack.
  */
 extern bool
-InternalCallOrConstruct(JSContext* cx, const CallArgs& args,
-                        MaybeConstruct construct);
+Invoke(JSContext* cx, CallArgs args, MaybeConstruct construct = NO_CONSTRUCT);
+
+/*
+ * This Invoke overload places the least requirements on the caller: it may be
+ * called at any time and it takes care of copying the given callee, this, and
+ * arguments onto the stack.
+ */
+extern bool
+Invoke(JSContext* cx, const Value& thisv, const Value& fval, unsigned argc, const Value* argv,
+       MutableHandleValue rval);
 
 /*
  * These helpers take care of the infinite-recursion check necessary for
  * getter/setter calls.
  */
 extern bool
-CallGetter(JSContext* cx, HandleValue thisv, HandleValue getter, MutableHandleValue rval);
+InvokeGetter(JSContext* cx, JSObject* obj, Value fval, MutableHandleValue rval);
 
 extern bool
-CallSetter(JSContext* cx, HandleValue thisv, HandleValue setter, HandleValue rval);
+InvokeSetter(JSContext* cx, const Value& thisv, Value fval, HandleValue v);
 
-// ES7 rev 0c1bd3004329336774cbc90de727cd0cf5f11e93 7.3.12 Call(F, V, argumentsList).
-// All parameters are required, hopefully forcing callers to be careful not to
-// (say) blindly pass callee as |newTarget| when a different value should have
-// been passed.  Behavior is unspecified if any element of |args| isn't initialized.
-//
-// |rval| is written to *only* after |fval| and |thisv| have been consumed, so
-// |rval| *may* alias either argument.
+/*
+ * InvokeConstructor implement a function call from a constructor context
+ * (e.g. 'new') handling the the creation of the new 'this' object.
+ */
 extern bool
-Call(JSContext* cx, HandleValue fval, HandleValue thisv, const AnyInvokeArgs& args,
-     MutableHandleValue rval);
+InvokeConstructor(JSContext* cx, CallArgs args);
 
-inline bool
-Call(JSContext* cx, HandleValue fval, HandleValue thisv, MutableHandleValue rval)
-{
-    FixedInvokeArgs<0> args(cx);
-    return Call(cx, fval, thisv, args, rval);
-}
-
-inline bool
-Call(JSContext* cx, HandleValue fval, JSObject* thisObj, MutableHandleValue rval)
-{
-    RootedValue thisv(cx, ObjectOrNullValue(thisObj));
-    FixedInvokeArgs<0> args(cx);
-    return Call(cx, fval, thisv, args, rval);
-}
-
-inline bool
-Call(JSContext* cx, HandleValue fval, HandleValue thisv, HandleValue arg0, MutableHandleValue rval)
-{
-    FixedInvokeArgs<1> args(cx);
-    args[0].set(arg0);
-    return Call(cx, fval, thisv, args, rval);
-}
-
-inline bool
-Call(JSContext* cx, HandleValue fval, JSObject* thisObj, HandleValue arg0,
-     MutableHandleValue rval)
-{
-    RootedValue thisv(cx, ObjectOrNullValue(thisObj));
-    FixedInvokeArgs<1> args(cx);
-    args[0].set(arg0);
-    return Call(cx, fval, thisv, args, rval);
-}
-
-inline bool
-Call(JSContext* cx, HandleValue fval, HandleValue thisv,
-     HandleValue arg0, HandleValue arg1, MutableHandleValue rval)
-{
-    FixedInvokeArgs<2> args(cx);
-    args[0].set(arg0);
-    args[1].set(arg1);
-    return Call(cx, fval, thisv, args, rval);
-}
-
-inline bool
-Call(JSContext* cx, HandleValue fval, JSObject* thisObj,
-     HandleValue arg0, HandleValue arg1, MutableHandleValue rval)
-{
-    RootedValue thisv(cx, ObjectOrNullValue(thisObj));
-    FixedInvokeArgs<2> args(cx);
-    args[0].set(arg0);
-    args[1].set(arg1);
-    return Call(cx, fval, thisv, args, rval);
-}
-
-// Perform the above Call() operation using the given arguments.  Similar to
-// ConstructFromStack() below, this handles |!IsCallable(args.calleev())|.
-//
-// This internal operation is intended only for use with arguments known to be
-// on the JS stack, or at least in carefully-rooted memory. The vast majority of
-// potential users should instead use InvokeArgs in concert with Call().
+/* See the fval overload of Invoke. */
 extern bool
-CallFromStack(JSContext* cx, const CallArgs& args);
-
-// ES6 7.3.13 Construct(F, argumentsList, newTarget).  All parameters are
-// required, hopefully forcing callers to be careful not to (say) blindly pass
-// callee as |newTarget| when a different value should have been passed.
-// Behavior is unspecified if any element of |args| isn't initialized.
-//
-// |rval| is written to *only* after |fval| and |newTarget| have been consumed,
-// so |rval| *may* alias either argument.
-//
-// NOTE: As with the ES6 spec operation, it's the caller's responsibility to
-//       ensure |fval| and |newTarget| are both |IsConstructor|.
-extern bool
-Construct(JSContext* cx, HandleValue fval, const AnyConstructArgs& args, HandleValue newTarget,
-          MutableHandleObject objp);
-
-// Check that in the given |args|, which must be |args.isConstructing()|, that
-// |IsConstructor(args.callee())|. If this is not the case, throw a TypeError.
-// Otherwise, the user must ensure that, additionally, |IsConstructor(args.newTarget())|.
-// (If |args| comes directly from the interpreter stack, as set up by JSOP_NEW,
-// this comes for free.) Then perform a Construct() operation using |args|.
-//
-// This internal operation is intended only for use with arguments known to be
-// on the JS stack, or at least in carefully-rooted memory. The vast majority of
-// potential users should instead use ConstructArgs in concert with Construct().
-extern bool
-ConstructFromStack(JSContext* cx, const CallArgs& args);
-
-// Call Construct(fval, args, newTarget), but use the given |thisv| as |this|
-// during construction of |fval|.
-//
-// |rval| is written to *only* after |fval|, |thisv|, and |newTarget| have been
-// consumed, so |rval| *may* alias any of these arguments.
-//
-// This method exists only for very rare cases where a |this| was created
-// caller-side for construction of |fval|: basically only for JITs using
-// |CreateThis|.  If that's not you, use Construct()!
-extern bool
-InternalConstructWithProvidedThis(JSContext* cx, HandleValue fval, HandleValue thisv,
-                                  const AnyConstructArgs& args, HandleValue newTarget,
-                                  MutableHandleValue rval);
+InvokeConstructor(JSContext* cx, Value fval, unsigned argc, const Value* argv,
+                  bool newTargetInArgv, MutableHandleValue rval);
 
 /*
  * Executes a script with the given scopeChain/this. The 'type' indicates
@@ -191,8 +104,9 @@ InternalConstructWithProvidedThis(JSContext* cx, HandleValue fval, HandleValue t
  * stack to simulate executing an eval in that frame.
  */
 extern bool
-ExecuteKernel(JSContext* cx, HandleScript script, JSObject& scopeChain,
-              const Value& newTargetVal, AbstractFramePtr evalInFrame, Value* result);
+ExecuteKernel(JSContext* cx, HandleScript script, JSObject& scopeChain, const Value& thisv,
+              const Value& newTargetVal, ExecuteType type, AbstractFramePtr evalInFrame,
+              Value* result);
 
 /* Execute a script with the given scopeChain as global code. */
 extern bool
@@ -247,6 +161,9 @@ class RunState
 // Eval or global script.
 class ExecuteState : public RunState
 {
+    ExecuteType type_;
+
+    RootedValue thisv_;
     RootedValue newTargetValue_;
     RootedObject scopeChain_;
 
@@ -254,18 +171,23 @@ class ExecuteState : public RunState
     Value* result_;
 
   public:
-    ExecuteState(JSContext* cx, JSScript* script, const Value& newTargetValue,
-                 JSObject& scopeChain, AbstractFramePtr evalInFrame, Value* result)
+    ExecuteState(JSContext* cx, JSScript* script, const Value& thisv, const Value& newTargetValue,
+                 JSObject& scopeChain, ExecuteType type, AbstractFramePtr evalInFrame,
+                 Value* result)
       : RunState(cx, Execute, script),
+        type_(type),
+        thisv_(cx, thisv),
         newTargetValue_(cx, newTargetValue),
         scopeChain_(cx, &scopeChain),
         evalInFrame_(evalInFrame),
         result_(result)
     { }
 
+    Value* addressOfThisv() { return thisv_.address(); }
+    Value thisv() { return thisv_; }
     Value newTarget() { return newTargetValue_; }
     JSObject* scopeChain() const { return scopeChain_; }
-    bool isDebuggerEval() const { return !!evalInFrame_; }
+    ExecuteType type() const { return type_; }
 
     virtual InterpreterFrame* pushInterpreterFrame(JSContext* cx);
 
@@ -276,25 +198,25 @@ class ExecuteState : public RunState
 };
 
 // Data to invoke a function.
-class InvokeState final : public RunState
+class InvokeState : public RunState
 {
-    const CallArgs& args_;
-    MaybeConstruct construct_;
+    CallArgs& args_;
+    InitialFrameFlags initial_;
     bool createSingleton_;
 
   public:
-    InvokeState(JSContext* cx, const CallArgs& args, MaybeConstruct construct)
+    InvokeState(JSContext* cx, CallArgs& args, InitialFrameFlags initial)
       : RunState(cx, Invoke, args.callee().as<JSFunction>().nonLazyScript()),
         args_(args),
-        construct_(construct),
+        initial_(initial),
         createSingleton_(false)
     { }
 
     bool createSingleton() const { return createSingleton_; }
     void setCreateSingleton() { createSingleton_ = true; }
 
-    bool constructing() const { return construct_; }
-    const CallArgs& args() const { return args_; }
+    bool constructing() const { return InitialFrameFlagsAreConstructing(initial_); }
+    CallArgs& args() const { return args_; }
 
     virtual InterpreterFrame* pushInterpreterFrame(JSContext* cx);
 
@@ -323,9 +245,6 @@ extern JSType
 TypeOfValue(const Value& v);
 
 extern bool
-InstanceOfOperator(JSContext* cx, HandleObject obj, MutableHandleValue v, bool* bp);
-
-extern bool
 HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp);
 
 // Unwind scope chain and iterator to match the static scope corresponding to
@@ -341,6 +260,9 @@ UnwindAllScopesInFrame(JSContext* cx, ScopeIter& si);
 // pointed to by the try note.
 extern jsbytecode*
 UnwindScopeToTryPc(JSScript* script, JSTryNote* tn);
+
+extern bool
+OnUnknownMethod(JSContext* cx, HandleObject obj, Value idval, MutableHandleValue vp);
 
 template <class StackDepthOp>
 class MOZ_STACK_CLASS TryNoteIter
@@ -421,6 +343,9 @@ bool
 GetProperty(JSContext* cx, HandleValue value, HandlePropertyName name, MutableHandleValue vp);
 
 bool
+CallProperty(JSContext* cx, HandleValue value, HandlePropertyName name, MutableHandleValue vp);
+
+bool
 GetScopeName(JSContext* cx, HandleObject obj, HandlePropertyName name, MutableHandleValue vp);
 
 bool
@@ -431,7 +356,8 @@ JSObject*
 Lambda(JSContext* cx, HandleFunction fun, HandleObject parent);
 
 JSObject*
-LambdaArrow(JSContext* cx, HandleFunction fun, HandleObject parent, HandleValue newTargetv);
+LambdaArrow(JSContext* cx, HandleFunction fun, HandleObject parent, HandleValue thisv,
+            HandleValue newTargetv);
 
 bool
 GetElement(JSContext* cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
@@ -445,10 +371,6 @@ SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleValue
 bool
 SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleValue value,
                  bool strict, HandleScript script, jsbytecode* pc);
-
-bool
-SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleValue value,
-                 HandleValue receiver, bool strict, HandleScript script, jsbytecode* pc);
 
 bool
 InitElementArray(JSContext* cx, jsbytecode* pc,
@@ -526,9 +448,6 @@ bool
 SpreadCallOperation(JSContext* cx, HandleScript script, jsbytecode* pc, HandleValue thisv,
                     HandleValue callee, HandleValue arr, HandleValue newTarget, MutableHandleValue res);
 
-bool
-OptimizeSpreadCall(JSContext* cx, HandleValue arg, bool* optimized);
-
 JSObject*
 NewObjectOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
                    NewObjectKind newKind = GenericObject);
@@ -543,30 +462,18 @@ NewArrayOperation(JSContext* cx, HandleScript script, jsbytecode* pc, uint32_t l
 JSObject*
 NewArrayOperationWithTemplate(JSContext* cx, HandleObject templateObject);
 
-void
-ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber, HandleId id);
+inline bool
+SetConstOperation(JSContext* cx, HandleObject varobj, HandlePropertyName name, HandleValue rval)
+{
+    return DefineProperty(cx, varobj, name, rval, nullptr, nullptr,
+                          JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY);
+}
 
 void
-ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber, HandlePropertyName name);
+ReportUninitializedLexical(JSContext* cx, HandlePropertyName name);
 
 void
-ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber, HandleScript script, jsbytecode* pc);
-
-// The parser only reports redeclarations that occurs within a single
-// script. Due to the extensibility of the global lexical scope, we also check
-// for redeclarations during runtime in JSOP_DEF{VAR,LET,CONST}.
-void
-ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name,
-                           frontend::Definition::Kind declKind);
-
-bool
-ThrowUninitializedThis(JSContext* cx, AbstractFramePtr frame);
-
-bool
-DefaultClassConstructor(JSContext* cx, unsigned argc, Value* vp);
-
-bool
-Debug_CheckSelfHosted(JSContext* cx, HandleValue v);
+ReportUninitializedLexical(JSContext* cx, HandleScript script, jsbytecode* pc);
 
 }  /* namespace js */
 

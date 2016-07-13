@@ -7,13 +7,13 @@
 #ifndef nsTextEditorState_h__
 #define nsTextEditorState_h__
 
+#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsITextControlElement.h"
 #include "nsITextControlFrame.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Maybe.h"
 #include "mozilla/WeakPtr.h"
 
 class nsTextInputListener;
@@ -155,7 +155,8 @@ public:
     // Whether the value change should be notified to the frame/contet nor not.
     eSetValue_Notify                = 1 << 2
   };
-  MOZ_MUST_USE bool SetValue(const nsAString& aValue, uint32_t aFlags);
+  MOZ_WARN_UNUSED_RESULT bool SetValue(const nsAString& aValue,
+                                       uint32_t aFlags);
   void GetValue(nsAString& aValue, bool aIgnoreWrap) const;
   void EmptyValue() { if (mValue) mValue->Truncate(); }
   bool IsEmpty() const { return mValue ? mValue->IsEmpty() : true; }
@@ -285,15 +286,15 @@ private:
   // The text control element owns this object, and ensures that this object
   // has a smaller lifetime.
   nsITextControlElement* const MOZ_NON_OWNING_REF mTextCtrlElement;
-  RefPtr<nsTextInputSelectionImpl> mSelCon;
-  RefPtr<RestoreSelectionState> mRestoringSelection;
+  nsRefPtr<nsTextInputSelectionImpl> mSelCon;
+  nsRefPtr<RestoreSelectionState> mRestoringSelection;
   nsCOMPtr<nsIEditor> mEditor;
   nsCOMPtr<mozilla::dom::Element> mRootNode;
   nsCOMPtr<mozilla::dom::Element> mPlaceholderDiv;
   nsTextControlFrame* mBoundFrame;
-  RefPtr<nsTextInputListener> mTextListener;
-  mozilla::Maybe<nsString> mValue;
-  RefPtr<nsAnonDivObserver> mMutationObserver;
+  nsRefPtr<nsTextInputListener> mTextListener;
+  nsAutoPtr<nsCString> mValue;
+  nsRefPtr<nsAnonDivObserver> mMutationObserver;
   mutable nsString mCachedValue; // Caches non-hard-wrapped value on a multiline control.
   // mValueBeingSet is available only while SetValue() is requesting to commit
   // composition.  I.e., this is valid only while mIsCommittingComposition is

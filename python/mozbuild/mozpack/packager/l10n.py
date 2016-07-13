@@ -44,7 +44,7 @@ from createprecomplete import generate_precomplete
 class LocaleManifestFinder(object):
     def __init__(self, finder):
         entries = self.entries = []
-        bases = self.bases = []
+        bases = self.bases = ['']
 
         class MockFormatter(object):
             def add_interfaces(self, path, content):
@@ -237,13 +237,10 @@ def repack(source, l10n, extra_l10n={}, non_resources=[], non_chrome=set()):
     if app_finder.kind == 'flat':
         formatter = FlatFormatter(copier)
     elif app_finder.kind == 'jar':
-        formatter = JarFormatter(copier,
-                                 optimize=app_finder.optimizedjars,
-                                 compress=app_finder.compressed)
+        formatter = JarFormatter(copier, optimize=app_finder.optimizedjars)
     elif app_finder.kind == 'omni':
         formatter = OmniJarFormatter(copier, app_finder.omnijar,
                                      optimize=app_finder.optimizedjars,
-                                     compress=app_finder.compressed,
                                      non_resources=non_resources)
 
     with errors.accumulate():

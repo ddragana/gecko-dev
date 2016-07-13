@@ -21,7 +21,7 @@
       "use strict";
 
       let { MockFilePicker } =
-        Components.utils.import("chrome://specialpowers/content/MockFilePicker.jsm", {});
+        Components.utils.import("resource://specialpowers/MockFilePicker.jsm", {});
 
       function parentReady(message) {
         MockFilePicker.init(content);
@@ -31,8 +31,8 @@
         let input = content.document.getElementById("f");
         input.addEventListener("change", () => {
           MockFilePicker.cleanup();
-          let value = input.value;
-          message.target.sendAsyncMessage("testBug1086684:childDone", { value });
+          message.target.sendAsyncMessage("testBug1086684:childDone", { },
+                                          { elt: input });
         });
 
         input.focus();
@@ -46,10 +46,10 @@
 
     let test;
     function* testStructure(mm) {
-      let value;
+      let lastResult;
 
       function testDone(msg) {
-        test.next(msg.data.value);
+        test.next(msg.objects);
       }
 
       mm.addMessageListener("testBug1086684:childDone", testDone);
@@ -58,12 +58,12 @@
       let file = new File([blob], "helloworld.txt", { type: "text/plain" });
 
       mm.sendAsyncMessage("testBug1086684:parentReady", { file });
-      value = yield;
+      lastResult = yield;
 
       // Note that the "helloworld.txt" passed in above doesn't affect the
       // 'value' getter. Because we're mocking a file using a blob, we ask the
       // blob for its path, which is the empty string.
-      is(value, "", "got the right answer and didn't crash");
+      is(SpecialPowers.wrap(lastResult.elt).value, "", "got the right answer and didn't crash");
 
       SimpleTest.finish();
     }

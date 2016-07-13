@@ -5,15 +5,15 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 # Add assembler flags and includes
-if CONFIG['LIBAV_FFT_ASFLAGS']:
-    ASFLAGS += CONFIG['LIBAV_FFT_ASFLAGS']
-    ASFLAGS += ['-I%s/media/libav' % TOPSRCDIR]
-    USE_YASM = True
+ASFLAGS += CONFIG['LIBAV_FFT_ASFLAGS']
+ASFLAGS += ['-I%s/media/libav' % TOPSRCDIR]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     # Fix inline symbols and math defines for windows.
     DEFINES['_USE_MATH_DEFINES'] = True
     DEFINES['inline'] = "__inline"
+    # snprintf is prefixed with an underscore on windows.
+    DEFINES['snprintf'] = "_snprintf"
     ASFLAGS += ['-Pconfig_win.asm']
     # 32-bit windows need to prefix symbols with an underscore.
     if CONFIG['CPU_ARCH'] == 'x86':
@@ -28,24 +28,11 @@ else:
 LOCAL_INCLUDES += ['/media/libav']
 
 # Suppress warnings in third-party code.
-if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
+if CONFIG['GNU_CC']:
     CFLAGS += [
-        '-Wno-parentheses',
-        '-Wno-pointer-sign',
         '-Wno-sign-compare',
-        '-Wno-switch',
         '-Wno-type-limits',
-    ]
-if CONFIG['CLANG_CXX'] or CONFIG['CLANG_CL']:
-    CFLAGS += [
-        '-Wno-incompatible-pointer-types-discards-qualifiers',
-        '-Wno-logical-op-parentheses',
-    ]
-if CONFIG['_MSC_VER'] and not CONFIG['CLANG_CL']:
-    CFLAGS += [
-        '-wd4090', # 'return' : different 'const' qualifiers
-        '-wd4018', # '>' : signed/unsigned mismatch
-        '-wd4305', # 'initializing' : truncation from '__int64' to 'double'
+        '-Wno-pointer-sign'
     ]
 
 FINAL_LIBRARY = 'lgpllibs'

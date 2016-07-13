@@ -244,7 +244,7 @@ private:
   // start URI classifier if requested
   void ClassifyURI();
 
-  class RedirectRunnable : public mozilla::Runnable
+  class RedirectRunnable : public nsRunnable
   {
   public:
     RedirectRunnable(nsBaseChannel* chan, nsIChannel* newChannel)
@@ -260,15 +260,16 @@ private:
     }
 
   private:
-    RefPtr<nsBaseChannel> mChannel;
+    nsRefPtr<nsBaseChannel> mChannel;
     nsCOMPtr<nsIChannel> mNewChannel;
   };
   friend class RedirectRunnable;
 
-  RefPtr<nsInputStreamPump>         mPump;
+  nsRefPtr<nsInputStreamPump>         mPump;
   nsCOMPtr<nsIProgressEventSink>      mProgressSink;
   nsCOMPtr<nsIURI>                    mOriginalURI;
   nsCOMPtr<nsISupports>               mOwner;
+  nsCOMPtr<nsILoadInfo>               mLoadInfo;
   nsCOMPtr<nsISupports>               mSecurityInfo;
   nsCOMPtr<nsIChannel>                mRedirectChannel;
   nsCString                           mContentType;
@@ -284,7 +285,6 @@ private:
 protected:
   nsCOMPtr<nsIURI>                    mURI;
   nsCOMPtr<nsILoadGroup>              mLoadGroup;
-  nsCOMPtr<nsILoadInfo>               mLoadInfo;
   nsCOMPtr<nsIInterfaceRequestor>     mCallbacks;
   nsCOMPtr<nsIStreamListener>         mListener;
   nsCOMPtr<nsISupports>               mListenerContext;

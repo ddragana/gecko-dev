@@ -35,15 +35,15 @@ public:
   NS_DECL_NSITASKBAROVERLAYICONCONTROLLER
   NS_FORWARD_NSITASKBARPREVIEW(TaskbarPreview::)
 
-  virtual LRESULT WndProc(UINT nMsg, WPARAM wParam, LPARAM lParam) override;
+  virtual LRESULT WndProc(UINT nMsg, WPARAM wParam, LPARAM lParam);
 private:
-  virtual nsresult ShowActive(bool active) override;
-  virtual HWND &PreviewWindow() override;
+  virtual nsresult ShowActive(bool active);
+  virtual HWND &PreviewWindow();
 
-  virtual nsresult UpdateTaskbarProperties() override;
-  virtual nsresult Enable() override;
-  virtual nsresult Disable() override;
-  virtual void DetachFromNSWindow() override;
+  virtual nsresult UpdateTaskbarProperties();
+  virtual nsresult Enable();
+  virtual nsresult Disable();
+  virtual void DetachFromNSWindow();
   nsresult UpdateButton(uint32_t index);
   nsresult UpdateButtons();
 

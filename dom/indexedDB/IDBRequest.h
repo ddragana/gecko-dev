@@ -4,21 +4,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_idbrequest_h__
-#define mozilla_dom_idbrequest_h__
+#ifndef mozilla_dom_indexeddb_idbrequest_h__
+#define mozilla_dom_indexeddb_idbrequest_h__
 
 #include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/IDBRequestBinding.h"
-#include "mozilla/dom/IDBWrapperCache.h"
+#include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 
 #define PRIVATE_IDBREQUEST_IID \
   {0xe68901e5, 0x1d50, 0x4ee9, {0xaf, 0x49, 0x90, 0x99, 0x4a, 0xff, 0xc8, 0x39}}
 
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 struct PRThread;
 
 namespace mozilla {
@@ -28,14 +28,17 @@ class ErrorResult;
 namespace dom {
 
 class DOMError;
+template <typename> struct Nullable;
+class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
+
+namespace indexedDB {
+
 class IDBCursor;
 class IDBDatabase;
 class IDBFactory;
 class IDBIndex;
 class IDBObjectStore;
 class IDBTransaction;
-template <typename> struct Nullable;
-class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
 
 class IDBRequest
   : public IDBWrapperCache
@@ -43,47 +46,43 @@ class IDBRequest
 protected:
   // mSourceAsObjectStore and mSourceAsIndex are exclusive and one must always
   // be set. mSourceAsCursor is sometimes set also.
-  RefPtr<IDBObjectStore> mSourceAsObjectStore;
-  RefPtr<IDBIndex> mSourceAsIndex;
-  RefPtr<IDBCursor> mSourceAsCursor;
+  nsRefPtr<IDBObjectStore> mSourceAsObjectStore;
+  nsRefPtr<IDBIndex> mSourceAsIndex;
+  nsRefPtr<IDBCursor> mSourceAsCursor;
 
-  RefPtr<IDBTransaction> mTransaction;
+  nsRefPtr<IDBTransaction> mTransaction;
 
 #ifdef DEBUG
   PRThread* mOwningThread;
 #endif
 
   JS::Heap<JS::Value> mResultVal;
-  RefPtr<DOMError> mError;
+  nsRefPtr<DOMError> mError;
 
   nsString mFilename;
   uint64_t mLoggingSerialNumber;
   nsresult mErrorCode;
   uint32_t mLineNo;
-  uint32_t mColumn;
   bool mHaveResultOrErrorCode;
 
 public:
   class ResultCallback;
 
   static already_AddRefed<IDBRequest>
-  Create(JSContext* aCx, IDBDatabase* aDatabase, IDBTransaction* aTransaction);
+  Create(IDBDatabase* aDatabase, IDBTransaction* aTransaction);
 
   static already_AddRefed<IDBRequest>
-  Create(JSContext* aCx,
-         IDBObjectStore* aSource,
+  Create(IDBObjectStore* aSource,
          IDBDatabase* aDatabase,
          IDBTransaction* aTransaction);
 
   static already_AddRefed<IDBRequest>
-  Create(JSContext* aCx,
-         IDBIndex* aSource,
+  Create(IDBIndex* aSource,
          IDBDatabase* aDatabase,
          IDBTransaction* aTransaction);
 
   static void
-  CaptureCaller(JSContext* aCx, nsAString& aFilename, uint32_t* aLineNo,
-                uint32_t* aColumn);
+  CaptureCaller(nsAString& aFilename, uint32_t* aLineNo);
 
   static uint64_t
   NextSerialNumber();
@@ -131,8 +130,7 @@ public:
   GetError(ErrorResult& aRv);
 
   void
-  GetCallerLocation(nsAString& aFilename, uint32_t* aLineNo,
-                    uint32_t* aColumn) const;
+  GetCallerLocation(nsAString& aFilename, uint32_t* aLineNo) const;
 
   bool
   IsPending() const
@@ -151,7 +149,7 @@ public:
   void
   SetLoggingSerialNumber(uint64_t aLoggingSerialNumber);
 
-  nsPIDOMWindowInner*
+  nsPIDOMWindow*
   GetParentObject() const
   {
     return GetOwner();
@@ -202,7 +200,7 @@ public:
 
 protected:
   explicit IDBRequest(IDBDatabase* aDatabase);
-  explicit IDBRequest(nsPIDOMWindowInner* aOwner);
+  explicit IDBRequest(nsPIDOMWindow* aOwner);
   ~IDBRequest();
 
   void
@@ -226,32 +224,22 @@ protected:
 class IDBOpenDBRequest final
   : public IDBRequest
 {
-  class WorkerHolder;
+  class WorkerFeature;
 
   // Only touched on the owning thread.
-  RefPtr<IDBFactory> mFactory;
+  nsRefPtr<IDBFactory> mFactory;
 
-  nsAutoPtr<WorkerHolder> mWorkerHolder;
-
-  const bool mFileHandleDisabled;
+  nsAutoPtr<WorkerFeature> mWorkerFeature;
 
 public:
   static already_AddRefed<IDBOpenDBRequest>
-  CreateForWindow(JSContext* aCx,
-                  IDBFactory* aFactory,
-                  nsPIDOMWindowInner* aOwner,
+  CreateForWindow(IDBFactory* aFactory,
+                  nsPIDOMWindow* aOwner,
                   JS::Handle<JSObject*> aScriptOwner);
 
   static already_AddRefed<IDBOpenDBRequest>
-  CreateForJS(JSContext* aCx,
-              IDBFactory* aFactory,
+  CreateForJS(IDBFactory* aFactory,
               JS::Handle<JSObject*> aScriptOwner);
-
-  bool
-  IsFileHandleDisabled() const
-  {
-    return mFileHandleDisabled;
-  }
 
   void
   SetTransaction(IDBTransaction* aTransaction);
@@ -280,14 +268,13 @@ public:
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 private:
-  IDBOpenDBRequest(IDBFactory* aFactory,
-                   nsPIDOMWindowInner* aOwner,
-                   bool aFileHandleDisabled);
+  IDBOpenDBRequest(IDBFactory* aFactory, nsPIDOMWindow* aOwner);
 
   ~IDBOpenDBRequest();
 };
 
+} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_idbrequest_h__
+#endif // mozilla_dom_indexeddb_idbrequest_h__

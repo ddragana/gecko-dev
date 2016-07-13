@@ -27,7 +27,7 @@
 
 #include "mozilla/Logging.h"
 
-extern mozilla::LazyLogModule gStorageLog;
+extern PRLogModuleInfo *gStorageLog;
 
 namespace mozilla {
 namespace storage {
@@ -182,7 +182,7 @@ AsyncStatement::getParams()
 
   // If there isn't already any rows added, we'll have to add one to use.
   if (mParamsArray->length() == 0) {
-    RefPtr<AsyncBindingParams> params(new AsyncBindingParams(mParamsArray));
+    nsRefPtr<AsyncBindingParams> params(new AsyncBindingParams(mParamsArray));
     NS_ENSURE_TRUE(params, nullptr);
 
     rv = mParamsArray->AddParams(params);
@@ -220,8 +220,10 @@ AsyncStatement::~AsyncStatement()
   if (!onCallingThread) {
     // NS_ProxyRelase only magic forgets for us if mDBConnection is an
     // nsCOMPtr.  Which it is not; it's an nsRefPtr.
-    nsCOMPtr<nsIThread> targetThread(mDBConnection->threadOpenedOn);
-    NS_ProxyRelease(targetThread, mDBConnection.forget());
+    Connection *forgottenConn = nullptr;
+    mDBConnection.swap(forgottenConn);
+    (void)::NS_ProxyRelease(forgottenConn->threadOpenedOn,
+                            static_cast<mozIStorageConnection *>(forgottenConn));
   }
 }
 

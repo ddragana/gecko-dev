@@ -6,13 +6,10 @@
 
 #include "BluetoothDaemonSocketInterface.h"
 #include "BluetoothSocketMessageWatcher.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
 #include "nsXULAppAPI.h"
+#include "mozilla/unused.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
-
-using namespace mozilla::ipc;
 
 //
 // Socket module
@@ -25,84 +22,79 @@ const int BluetoothDaemonSocketModule::MAX_NUM_CLIENTS = 1;
 
 nsresult
 BluetoothDaemonSocketModule::ListenCmd(BluetoothSocketType aType,
-                                       const BluetoothServiceName& aServiceName,
-                                       const BluetoothUuid& aServiceUuid,
+                                       const nsAString& aServiceName,
+                                       const uint8_t aServiceUuid[16],
                                        int aChannel, bool aEncrypt,
                                        bool aAuth,
                                        BluetoothSocketResultHandler* aRes)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  UniquePtr<DaemonSocketPDU> pdu =
-    MakeUnique<DaemonSocketPDU>(SERVICE_ID, OPCODE_LISTEN,
-                                0);
+  nsAutoPtr<DaemonSocketPDU> pdu(new DaemonSocketPDU(0x02, 0x01, 0));
 
   nsresult rv = PackPDU(
     aType,
-    aServiceName,
-    aServiceUuid,
+    PackConversion<nsAString, BluetoothServiceName>(aServiceName),
+    PackArray<uint8_t>(aServiceUuid, 16),
     PackConversion<int, int32_t>(aChannel),
     SocketFlags(aEncrypt, aAuth), *pdu);
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = Send(pdu.get(), aRes);
+  rv = Send(pdu, aRes);
   if (NS_FAILED(rv)) {
     return rv;
   }
-  Unused << pdu.release();
+  unused << pdu.forget();
   return rv;
 }
 
 nsresult
-BluetoothDaemonSocketModule::ConnectCmd(const BluetoothAddress& aBdAddr,
+BluetoothDaemonSocketModule::ConnectCmd(const nsAString& aBdAddr,
                                         BluetoothSocketType aType,
-                                        const BluetoothUuid& aServiceUuid,
+                                        const uint8_t aUuid[16],
                                         int aChannel, bool aEncrypt,
                                         bool aAuth,
                                         BluetoothSocketResultHandler* aRes)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  UniquePtr<DaemonSocketPDU> pdu =
-    MakeUnique<DaemonSocketPDU>(SERVICE_ID, OPCODE_CONNECT,
-                                0);
+  nsAutoPtr<DaemonSocketPDU> pdu(new DaemonSocketPDU(0x02, 0x02, 0));
 
   nsresult rv = PackPDU(
-    aBdAddr,
+    PackConversion<nsAString, BluetoothAddress>(aBdAddr),
     aType,
-    aServiceUuid,
+    PackArray<uint8_t>(aUuid, 16),
     PackConversion<int, int32_t>(aChannel),
     SocketFlags(aEncrypt, aAuth), *pdu);
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = Send(pdu.get(), aRes);
+  rv = Send(pdu, aRes);
   if (NS_FAILED(rv)) {
     return rv;
   }
-  Unused << pdu.release();
+  unused << pdu.forget();
   return rv;
 }
 
 /* |DeleteTask| deletes a class instance on the I/O thread
  */
 template <typename T>
-class DeleteTask final : public Runnable
+class DeleteTask final : public Task
 {
 public:
   DeleteTask(T* aPtr)
   : mPtr(aPtr)
   { }
 
-  NS_IMETHOD Run() override
+  void Run() override
   {
     mPtr = nullptr;
-    return NS_OK;
   }
 
 private:
-  UniquePtr<T> mPtr;
+  nsAutoPtr<T> mPtr;
 };
 
 /* |AcceptWatcher| specializes SocketMessageWatcher for Accept
@@ -123,11 +115,10 @@ public:
   void Proceed(BluetoothStatus aStatus) override
   {
     if (aStatus == STATUS_SUCCESS) {
-      AcceptResultRunnable::Dispatch(
+      IntStringIntResultRunnable::Dispatch(
         GetResultHandler(), &BluetoothSocketResultHandler::Accept,
-        ConstantInitOp3<int, BluetoothAddress, int>(GetClientFd(),
-                                                    GetBdAddress(),
-                                                    GetConnectionStatus()));
+        ConstantInitOp3<int, nsString, int>(GetClientFd(), GetBdAddress(),
+                                            GetConnectionStatus()));
     } else {
       ErrorRunnable::Dispatch(GetResultHandler(),
                               &BluetoothSocketResultHandler::OnError,
@@ -135,7 +126,7 @@ public:
     }
 
     MessageLoopForIO::current()->PostTask(
-      MakeAndAddRef<DeleteTask<AcceptWatcher>>(this));
+      FROM_HERE, new DeleteTask<AcceptWatcher>(this));
   }
 };
 
@@ -146,8 +137,8 @@ BluetoothDaemonSocketModule::AcceptCmd(int aFd,
   MOZ_ASSERT(NS_IsMainThread());
 
   /* receive Bluedroid's socket-setup messages and client fd */
-  XRE_GetIOMessageLoop()->PostTask(
-    MakeAndAddRef<SocketMessageWatcherTask>(new AcceptWatcher(aFd, aRes)));
+  Task* t = new SocketMessageWatcherTask(new AcceptWatcher(aFd, aRes));
+  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, t);
 
   return NS_OK;
 }
@@ -158,8 +149,8 @@ BluetoothDaemonSocketModule::CloseCmd(BluetoothSocketResultHandler* aRes)
   MOZ_ASSERT(NS_IsMainThread());
 
   /* stop the watcher corresponding to |aRes| */
-  XRE_GetIOMessageLoop()->PostTask(
-    MakeAndAddRef<DeleteSocketMessageWatcherTask>(aRes));
+  Task* t = new DeleteSocketMessageWatcherTask(aRes);
+  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, t);
 
   return NS_OK;
 }
@@ -167,15 +158,15 @@ BluetoothDaemonSocketModule::CloseCmd(BluetoothSocketResultHandler* aRes)
 void
 BluetoothDaemonSocketModule::HandleSvc(const DaemonSocketPDUHeader& aHeader,
                                        DaemonSocketPDU& aPDU,
-                                       DaemonSocketResultHandler* aRes)
+                                       void* aUserData)
 {
   static void (BluetoothDaemonSocketModule::* const HandleRsp[])(
     const DaemonSocketPDUHeader&,
     DaemonSocketPDU&,
     BluetoothSocketResultHandler*) = {
-    [OPCODE_ERROR] = &BluetoothDaemonSocketModule::ErrorRsp,
-    [OPCODE_LISTEN] = &BluetoothDaemonSocketModule::ListenRsp,
-    [OPCODE_CONNECT] = &BluetoothDaemonSocketModule::ConnectRsp
+    INIT_ARRAY_AT(0x00, &BluetoothDaemonSocketModule::ErrorRsp),
+    INIT_ARRAY_AT(0x01, &BluetoothDaemonSocketModule::ListenRsp),
+    INIT_ARRAY_AT(0x02, &BluetoothDaemonSocketModule::ConnectRsp),
   };
 
   if (NS_WARN_IF(MOZ_ARRAY_LENGTH(HandleRsp) <= aHeader.mOpcode) ||
@@ -183,14 +174,23 @@ BluetoothDaemonSocketModule::HandleSvc(const DaemonSocketPDUHeader& aHeader,
     return;
   }
 
-  RefPtr<BluetoothSocketResultHandler> res =
-    static_cast<BluetoothSocketResultHandler*>(aRes);
+  nsRefPtr<BluetoothSocketResultHandler> res =
+    already_AddRefed<BluetoothSocketResultHandler>(
+      static_cast<BluetoothSocketResultHandler*>(aUserData));
 
   if (!res) {
     return; // Return early if no result handler has been set
   }
 
   (this->*(HandleRsp[aHeader.mOpcode]))(aHeader, aPDU, res);
+}
+
+nsresult
+BluetoothDaemonSocketModule::Send(DaemonSocketPDU* aPDU,
+                                  BluetoothSocketResultHandler* aRes)
+{
+  aRes->AddRef(); // Keep reference for response
+  return Send(aPDU, static_cast<void*>(aRes));
 }
 
 uint8_t
@@ -223,11 +223,7 @@ public:
   {
     DaemonSocketPDU& pdu = GetPDU();
 
-    auto receiveFds = pdu.AcquireFds();
-    if (NS_WARN_IF(receiveFds.Length() == 0)) {
-      return NS_ERROR_ILLEGAL_VALUE;
-    }
-    aArg1 = receiveFds[0];
+    aArg1 = pdu.AcquireFd();
 
     if (NS_WARN_IF(aArg1 < 0)) {
       return NS_ERROR_ILLEGAL_VALUE;
@@ -242,7 +238,7 @@ BluetoothDaemonSocketModule::ListenRsp(const DaemonSocketPDUHeader& aHeader,
                                        DaemonSocketPDU& aPDU,
                                        BluetoothSocketResultHandler* aRes)
 {
-  ListenResultRunnable::Dispatch(
+  IntResultRunnable::Dispatch(
     aRes, &BluetoothSocketResultHandler::Listen, ListenInitOp(aPDU));
 }
 
@@ -262,11 +258,10 @@ public:
   void Proceed(BluetoothStatus aStatus) override
   {
     if (aStatus == STATUS_SUCCESS) {
-      ConnectResultRunnable::Dispatch(
+      IntStringIntResultRunnable::Dispatch(
         GetResultHandler(), &BluetoothSocketResultHandler::Connect,
-        ConstantInitOp3<int, BluetoothAddress, int>(GetFd(),
-                                                    GetBdAddress(),
-                                                    GetConnectionStatus()));
+        ConstantInitOp3<int, nsString, int>(GetFd(), GetBdAddress(),
+                                            GetConnectionStatus()));
     } else {
       ErrorRunnable::Dispatch(GetResultHandler(),
                               &BluetoothSocketResultHandler::OnError,
@@ -274,7 +269,7 @@ public:
     }
 
     MessageLoopForIO::current()->PostTask(
-      MakeAndAddRef<DeleteTask<ConnectWatcher>>(this));
+      FROM_HERE, new DeleteTask<ConnectWatcher>(this));
   }
 };
 
@@ -284,14 +279,7 @@ BluetoothDaemonSocketModule::ConnectRsp(const DaemonSocketPDUHeader& aHeader,
                                         BluetoothSocketResultHandler* aRes)
 {
   /* the file descriptor is attached in the PDU's ancillary data */
-  auto receiveFds = aPDU.AcquireFds();
-  if (receiveFds.Length() == 0) {
-    ErrorRunnable::Dispatch(aRes, &BluetoothSocketResultHandler::OnError,
-                            ConstantInitOp1<BluetoothStatus>(STATUS_FAIL));
-    return;
-  }
-  int fd = -1;
-  fd = receiveFds[0];
+  int fd = aPDU.AcquireFd();
   if (fd < 0) {
     ErrorRunnable::Dispatch(aRes, &BluetoothSocketResultHandler::OnError,
                             ConstantInitOp1<BluetoothStatus>(STATUS_FAIL));
@@ -299,8 +287,8 @@ BluetoothDaemonSocketModule::ConnectRsp(const DaemonSocketPDUHeader& aHeader,
   }
 
   /* receive Bluedroid's socket-setup messages */
-  XRE_GetIOMessageLoop()->PostTask(
-    MakeAndAddRef<SocketMessageWatcherTask>(new ConnectWatcher(fd, aRes)));
+  Task* t = new SocketMessageWatcherTask(new ConnectWatcher(fd, aRes));
+  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, t);
 }
 
 //
@@ -319,8 +307,8 @@ BluetoothDaemonSocketInterface::~BluetoothDaemonSocketInterface()
 
 void
 BluetoothDaemonSocketInterface::Listen(BluetoothSocketType aType,
-                                       const BluetoothServiceName& aServiceName,
-                                       const BluetoothUuid& aServiceUuid,
+                                       const nsAString& aServiceName,
+                                       const uint8_t aServiceUuid[16],
                                        int aChannel, bool aEncrypt,
                                        bool aAuth,
                                        BluetoothSocketResultHandler* aRes)
@@ -335,16 +323,16 @@ BluetoothDaemonSocketInterface::Listen(BluetoothSocketType aType,
 }
 
 void
-BluetoothDaemonSocketInterface::Connect(const BluetoothAddress& aBdAddr,
+BluetoothDaemonSocketInterface::Connect(const nsAString& aBdAddr,
                                         BluetoothSocketType aType,
-                                        const BluetoothUuid& aServiceUuid,
+                                        const uint8_t aUuid[16],
                                         int aChannel, bool aEncrypt,
                                         bool aAuth,
                                         BluetoothSocketResultHandler* aRes)
 {
   MOZ_ASSERT(mModule);
 
-  nsresult rv = mModule->ConnectCmd(aBdAddr, aType, aServiceUuid, aChannel,
+  nsresult rv = mModule->ConnectCmd(aBdAddr, aType, aUuid, aChannel,
                                     aEncrypt, aAuth, aRes);
   if (NS_FAILED(rv))  {
     DispatchError(aRes, rv);
@@ -378,8 +366,8 @@ void
 BluetoothDaemonSocketInterface::DispatchError(
   BluetoothSocketResultHandler* aRes, BluetoothStatus aStatus)
 {
-  DaemonResultRunnable1<BluetoothSocketResultHandler, void,
-                        BluetoothStatus, BluetoothStatus>::Dispatch(
+  BluetoothResultRunnable1<BluetoothSocketResultHandler, void,
+                           BluetoothStatus, BluetoothStatus>::Dispatch(
     aRes, &BluetoothSocketResultHandler::OnError,
     ConstantInitOp1<BluetoothStatus>(aStatus));
 }

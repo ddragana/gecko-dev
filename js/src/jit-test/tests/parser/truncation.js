@@ -6,6 +6,7 @@ var cases = [
     "var",
     "var x,",
     "var x =",
+    "let",
     "let x,",
     "let x =",
     "const",

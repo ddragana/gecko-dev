@@ -19,7 +19,7 @@ using mozilla::ipc::MessageChannel;
 
 namespace {
 
-class DeferNPObjectReleaseRunnable : public mozilla::Runnable
+class DeferNPObjectReleaseRunnable : public nsRunnable
 {
 public:
   DeferNPObjectReleaseRunnable(const NPNetscapeFuncs* f, NPObject* o)
@@ -54,6 +54,9 @@ NPRemoteWindow::NPRemoteWindow() :
   , visualID(0)
   , colormap(0)
 #endif /* XP_UNIX */
+#if defined(XP_WIN)
+  ,surfaceHandle(0)
+#endif
 #if defined(XP_MACOSX)
   ,contentsScaleFactor(1.0)
 #endif
@@ -65,8 +68,8 @@ NPRemoteWindow::NPRemoteWindow() :
 }
 
 ipc::RacyInterruptPolicy
-MediateRace(const MessageChannel::MessageInfo& parent,
-            const MessageChannel::MessageInfo& child)
+MediateRace(const MessageChannel::Message& parent,
+            const MessageChannel::Message& child)
 {
   switch (parent.type()) {
   case PPluginInstance::Msg_Paint__ID:
@@ -120,10 +123,12 @@ UnmungePluginDsoPath(const string& munged)
 }
 
 
-LogModule*
+PRLogModuleInfo*
 GetPluginLog()
 {
-  static LazyLogModule sLog("IPCPlugins");
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("IPCPlugins");
   return sLog;
 }
 
@@ -150,6 +155,19 @@ void DeferNPVariantLastRelease(const NPNetscapeFuncs* f, NPVariant* v)
   DeferNPObjectLastRelease(f, v->value.objectValue);
   VOID_TO_NPVARIANT(*v);
 }
+
+#ifdef XP_WIN
+
+// The private event used for double-pass widgetless plugin rendering.
+UINT DoublePassRenderingEvent()
+{
+  static UINT gEventID = 0;
+  if (!gEventID)
+    gEventID = ::RegisterWindowMessage(L"MozDoublePassMsg");
+  return gEventID;
+}
+
+#endif
 
 } // namespace plugins
 } // namespace mozilla

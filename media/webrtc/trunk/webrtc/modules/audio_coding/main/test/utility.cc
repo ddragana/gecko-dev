@@ -13,7 +13,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/common.h"
@@ -306,23 +305,28 @@ void DTMFDetector::PrintDetectedDigits() {
 }
 
 void VADCallback::Reset() {
-  memset(_numFrameTypes, 0, sizeof(_numFrameTypes));
+  for (int n = 0; n < 6; n++) {
+    _numFrameTypes[n] = 0;
+  }
 }
 
 VADCallback::VADCallback() {
-  memset(_numFrameTypes, 0, sizeof(_numFrameTypes));
+  for (int n = 0; n < 6; n++) {
+    _numFrameTypes[n] = 0;
+  }
 }
 
 void VADCallback::PrintFrameTypes() {
-  printf("kFrameEmpty......... %d\n", _numFrameTypes[kFrameEmpty]);
-  printf("kAudioFrameSpeech... %d\n", _numFrameTypes[kAudioFrameSpeech]);
-  printf("kAudioFrameCN....... %d\n", _numFrameTypes[kAudioFrameCN]);
-  printf("kVideoFrameKey...... %d\n", _numFrameTypes[kVideoFrameKey]);
-  printf("kVideoFrameDelta.... %d\n", _numFrameTypes[kVideoFrameDelta]);
+  fprintf(stdout, "No encoding.................. %d\n", _numFrameTypes[0]);
+  fprintf(stdout, "Active normal encoded........ %d\n", _numFrameTypes[1]);
+  fprintf(stdout, "Passive normal encoded....... %d\n", _numFrameTypes[2]);
+  fprintf(stdout, "Passive DTX wideband......... %d\n", _numFrameTypes[3]);
+  fprintf(stdout, "Passive DTX narrowband....... %d\n", _numFrameTypes[4]);
+  fprintf(stdout, "Passive DTX super-wideband... %d\n", _numFrameTypes[5]);
 }
 
-int32_t VADCallback::InFrameType(FrameType frame_type) {
-  _numFrameTypes[frame_type]++;
+int32_t VADCallback::InFrameType(int16_t frameType) {
+  _numFrameTypes[frameType]++;
   return 0;
 }
 

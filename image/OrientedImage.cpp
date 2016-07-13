@@ -3,8 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "OrientedImage.h"
-
 #include <algorithm>
 
 #include "gfx2DGlue.h"
@@ -13,6 +11,8 @@
 #include "gfxUtils.h"
 #include "ImageRegion.h"
 #include "SVGImageContext.h"
+
+#include "OrientedImage.h"
 
 using std::swap;
 
@@ -81,7 +81,7 @@ OrientedImage::GetFrame(uint32_t aWhichFrame,
   }
 
   // Get the underlying dimensions.
-  IntSize size;
+  gfxIntSize size;
   rv = InnerImage()->GetWidth(&size.width);
   NS_ENSURE_SUCCESS(rv, nullptr);
   rv = InnerImage()->GetHeight(&size.height);
@@ -99,7 +99,7 @@ OrientedImage::GetFrame(uint32_t aWhichFrame,
   RefPtr<DrawTarget> target =
     gfxPlatform::GetPlatform()->
       CreateOffscreenContentDrawTarget(size, surfaceFormat);
-  if (!target || !target->IsValid()) {
+  if (!target) {
     NS_ERROR("Could not create a DrawTarget");
     return nullptr;
   }
@@ -109,27 +109,17 @@ OrientedImage::GetFrame(uint32_t aWhichFrame,
   RefPtr<SourceSurface> innerSurface =
     InnerImage()->GetFrame(aWhichFrame, aFlags);
   NS_ENSURE_TRUE(innerSurface, nullptr);
-  RefPtr<gfxDrawable> drawable =
+  nsRefPtr<gfxDrawable> drawable =
     new gfxSurfaceDrawable(innerSurface, size);
 
   // Draw.
-  RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(target);
-  MOZ_ASSERT(ctx); // already checked the draw target above
+  nsRefPtr<gfxContext> ctx = new gfxContext(target);
   ctx->Multiply(OrientationMatrix(size));
-  gfxUtils::DrawPixelSnapped(ctx, drawable, size, ImageRegion::Create(size),
-                             surfaceFormat, SamplingFilter::LINEAR);
+  gfxUtils::DrawPixelSnapped(ctx, drawable, size,
+                             ImageRegion::Create(size),
+                             surfaceFormat, GraphicsFilter::FILTER_FAST);
 
   return target->Snapshot();
-}
-
-NS_IMETHODIMP_(already_AddRefed<SourceSurface>)
-OrientedImage::GetFrameAtSize(const IntSize& aSize,
-                              uint32_t aWhichFrame,
-                              uint32_t aFlags)
-{
-  // XXX(seth): It'd be nice to support downscale-during-decode for this case,
-  // but right now we just fall back to the intrinsic size.
-  return GetFrame(aWhichFrame, aFlags);
 }
 
 NS_IMETHODIMP_(bool)
@@ -256,19 +246,30 @@ OrientedImage::OrientationMatrix(const nsIntSize& aSize,
   return builder.Build();
 }
 
+static SVGImageContext
+OrientViewport(const SVGImageContext& aOldContext,
+               const Orientation& aOrientation)
+{
+  CSSIntSize viewportSize(aOldContext.GetViewportSize());
+  if (aOrientation.SwapsWidthAndHeight()) {
+    swap(viewportSize.width, viewportSize.height);
+  }
+  return SVGImageContext(viewportSize,
+                         aOldContext.GetPreserveAspectRatio());
+}
+
 NS_IMETHODIMP_(DrawResult)
 OrientedImage::Draw(gfxContext* aContext,
                     const nsIntSize& aSize,
                     const ImageRegion& aRegion,
                     uint32_t aWhichFrame,
-                    SamplingFilter aSamplingFilter,
+                    GraphicsFilter aFilter,
                     const Maybe<SVGImageContext>& aSVGContext,
                     uint32_t aFlags)
 {
   if (mOrientation.IsIdentity()) {
     return InnerImage()->Draw(aContext, aSize, aRegion,
-                              aWhichFrame, aSamplingFilter,
-                              aSVGContext, aFlags);
+                              aWhichFrame, aFilter, aSVGContext, aFlags);
   }
 
   // Update the image size to match the image's coordinate system. (This could
@@ -291,35 +292,26 @@ OrientedImage::Draw(gfxContext* aContext,
   ImageRegion region(aRegion);
   region.TransformBoundsBy(inverseMatrix);
 
-  auto orientViewport = [&](const SVGImageContext& aOldContext) {
-    CSSIntSize viewportSize(aOldContext.GetViewportSize());
-    if (mOrientation.SwapsWidthAndHeight()) {
-      swap(viewportSize.width, viewportSize.height);
-    }
-    return SVGImageContext(viewportSize,
-                           aOldContext.GetPreserveAspectRatio());
-  };
-
-  return InnerImage()->Draw(aContext, size, region, aWhichFrame, aSamplingFilter,
-                            aSVGContext.map(orientViewport), aFlags);
+  return InnerImage()->Draw(aContext, size, region, aWhichFrame, aFilter,
+                            aSVGContext.map(OrientViewport, mOrientation),
+                            aFlags);
 }
 
 nsIntSize
 OrientedImage::OptimalImageSizeForDest(const gfxSize& aDest,
                                        uint32_t aWhichFrame,
-                                       SamplingFilter aSamplingFilter,
-                                       uint32_t aFlags)
+                                       GraphicsFilter aFilter, uint32_t aFlags)
 {
   if (!mOrientation.SwapsWidthAndHeight()) {
-    return InnerImage()->OptimalImageSizeForDest(aDest, aWhichFrame,
-                                                 aSamplingFilter, aFlags);
+    return InnerImage()->OptimalImageSizeForDest(aDest, aWhichFrame, aFilter,
+                                                 aFlags);
   }
 
   // Swap the size for the calculation, then swap it back for the caller.
   gfxSize destSize(aDest.height, aDest.width);
   nsIntSize innerImageSize(InnerImage()->OptimalImageSizeForDest(destSize,
                                                                  aWhichFrame,
-                                                                 aSamplingFilter,
+                                                                 aFilter,
                                                                  aFlags));
   return nsIntSize(innerImageSize.height, innerImageSize.width);
 }
@@ -342,7 +334,7 @@ OrientedImage::GetImageSpaceInvalidationRect(const nsIntRect& aRect)
   }
 
   // Transform the invalidation rect into the correct orientation.
-  gfxMatrix matrix(OrientationMatrix(innerSize));
+  gfxMatrix matrix(OrientationMatrix(innerSize, /* aInvert = */ true));
   gfxRect invalidRect(matrix.TransformBounds(gfxRect(rect.x, rect.y,
                                                      rect.width, rect.height)));
   invalidRect.RoundOut();

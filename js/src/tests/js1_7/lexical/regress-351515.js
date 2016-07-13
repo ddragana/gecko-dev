@@ -40,7 +40,7 @@ reportCompare(expect, actual, summary + ': local: yield = 1');
 
 try
 {
-  expect = "No Error";
+  expect = "SyntaxError";
   eval('let = 1;');
   actual = 'No Error';
 }
@@ -83,7 +83,7 @@ function test()
 
   try
   {
-    expect = "No Error";
+    expect = "SyntaxError";
     eval('var let = 1;');
     actual = 'No Error';
   }

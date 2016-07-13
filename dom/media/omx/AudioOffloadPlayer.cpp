@@ -42,7 +42,7 @@ using namespace android;
 
 namespace mozilla {
 
-LazyLogModule gAudioOffloadPlayerLog("AudioOffloadPlayer");
+PRLogModuleInfo* gAudioOffloadPlayerLog;
 #define AUDIO_OFFLOAD_LOG(type, msg) \
   MOZ_LOG(gAudioOffloadPlayerLog, type, msg)
 
@@ -62,6 +62,10 @@ AudioOffloadPlayer::AudioOffloadPlayer(MediaOmxCommonDecoder* aObserver) :
   mObserver(aObserver)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (!gAudioOffloadPlayerLog) {
+    gAudioOffloadPlayerLog = PR_NewLogModule("AudioOffloadPlayer");
+  }
 
   CHECK(aObserver);
 #if ANDROID_VERSION >= 21
@@ -327,14 +331,14 @@ void AudioOffloadPlayer::Reset()
   WakeLockRelease();
 }
 
-RefPtr<MediaDecoder::SeekPromise> AudioOffloadPlayer::Seek(SeekTarget aTarget)
+nsRefPtr<MediaDecoder::SeekPromise> AudioOffloadPlayer::Seek(SeekTarget aTarget)
 {
   MOZ_ASSERT(NS_IsMainThread());
   android::Mutex::Autolock autoLock(mLock);
 
   mSeekPromise.RejectIfExists(true, __func__);
   mSeekTarget = aTarget;
-  RefPtr<MediaDecoder::SeekPromise> p = mSeekPromise.Ensure(__func__);
+  nsRefPtr<MediaDecoder::SeekPromise> p = mSeekPromise.Ensure(__func__);
   DoSeek();
   return p;
 }
@@ -345,16 +349,15 @@ status_t AudioOffloadPlayer::DoSeek()
   MOZ_ASSERT(mSeekTarget.IsValid());
   CHECK(mAudioSink.get());
 
-  AUDIO_OFFLOAD_LOG(LogLevel::Debug,
-                    ("DoSeek ( %lld )", mSeekTarget.GetTime().ToMicroseconds()));
+  AUDIO_OFFLOAD_LOG(LogLevel::Debug, ("DoSeek ( %lld )", mSeekTarget.mTime));
 
   mReachedEOS = false;
   mPositionTimeMediaUs = -1;
-  mStartPosUs = mSeekTarget.GetTime().ToMicroseconds();
+  mStartPosUs = mSeekTarget.mTime;
 
   if (!mSeekPromise.IsEmpty()) {
     nsCOMPtr<nsIRunnable> nsEvent =
-      NewRunnableMethod<MediaDecoderEventVisibility>(
+      NS_NewRunnableMethodWithArg<MediaDecoderEventVisibility>(
         mObserver,
         &MediaDecoder::SeekingStarted,
         mSeekTarget.mEventVisibility);
@@ -388,7 +391,7 @@ int64_t AudioOffloadPlayer::GetMediaTimeUs()
 
   int64_t playPosition = 0;
   if (mSeekTarget.IsValid()) {
-    return mSeekTarget.GetTime().ToMicroseconds();
+    return mSeekTarget.mTime;
   }
   if (!mStarted) {
     return mPositionTimeMediaUs;
@@ -425,14 +428,16 @@ void AudioOffloadPlayer::NotifyAudioEOS()
     MediaDecoder::SeekResolveValue val(mReachedEOS, mSeekTarget.mEventVisibility);
     mSeekPromise.Resolve(val, __func__);
   }
-  NS_DispatchToMainThread(NewRunnableMethod(mObserver,
-                                            &MediaDecoder::PlaybackEnded));
+  nsCOMPtr<nsIRunnable> nsEvent = NS_NewRunnableMethod(mObserver,
+      &MediaDecoder::PlaybackEnded);
+  NS_DispatchToMainThread(nsEvent);
 }
 
 void AudioOffloadPlayer::NotifyPositionChanged()
 {
-  NS_DispatchToMainThread(NewRunnableMethod(mObserver,
-                                            &MediaOmxCommonDecoder::NotifyOffloadPlayerPositionChanged));
+  nsCOMPtr<nsIRunnable> nsEvent =
+    NS_NewRunnableMethod(mObserver, &MediaOmxCommonDecoder::NotifyOffloadPlayerPositionChanged);
+  NS_DispatchToMainThread(nsEvent);
 }
 
 void AudioOffloadPlayer::NotifyAudioTearDown()
@@ -446,8 +451,9 @@ void AudioOffloadPlayer::NotifyAudioTearDown()
     MediaDecoder::SeekResolveValue val(mReachedEOS, mSeekTarget.mEventVisibility);
     mSeekPromise.Resolve(val, __func__);
   }
-  NS_DispatchToMainThread(NewRunnableMethod(mObserver,
-                                            &MediaOmxCommonDecoder::AudioOffloadTearDown));
+  nsCOMPtr<nsIRunnable> nsEvent = NS_NewRunnableMethod(mObserver,
+      &MediaOmxCommonDecoder::AudioOffloadTearDown);
+  NS_DispatchToMainThread(nsEvent);
 }
 
 // static
@@ -503,7 +509,7 @@ size_t AudioOffloadPlayer::FillBuffer(void* aData, size_t aSize)
       android::Mutex::Autolock autoLock(mLock);
 
       if (mSeekTarget.IsValid()) {
-        seekTimeUs = mSeekTarget.GetTime().ToMicroseconds();
+        seekTimeUs = mSeekTarget.mTime;
         options.setSeekTo(seekTimeUs);
         refreshSeekTime = true;
 
@@ -555,8 +561,7 @@ size_t AudioOffloadPlayer::FillBuffer(void* aData, size_t aSize)
             kKeyTime, &mPositionTimeMediaUs));
       }
 
-      if (mSeekTarget.IsValid() &&
-          seekTimeUs == mSeekTarget.GetTime().ToMicroseconds()) {
+      if (mSeekTarget.IsValid() && seekTimeUs == mSeekTarget.mTime) {
         MOZ_ASSERT(mSeekTarget.IsValid());
         mSeekTarget.Reset();
         if (!mSeekPromise.IsEmpty()) {
@@ -724,7 +729,7 @@ void AudioOffloadPlayer::WakeLockCreate()
   MOZ_ASSERT(NS_IsMainThread());
   AUDIO_OFFLOAD_LOG(LogLevel::Debug, ("%s", __FUNCTION__));
   if (!mWakeLock) {
-    RefPtr<dom::power::PowerManagerService> pmService =
+    nsRefPtr<dom::power::PowerManagerService> pmService =
       dom::power::PowerManagerService::GetInstance();
     NS_ENSURE_TRUE_VOID(pmService);
 
@@ -740,6 +745,7 @@ void AudioOffloadPlayer::WakeLockRelease()
   if (mWakeLock) {
     ErrorResult rv;
     mWakeLock->Unlock(rv);
+    NS_WARN_IF_FALSE(!rv.Failed(), "Failed to unlock the wakelock.");
     mWakeLock = nullptr;
   }
 }

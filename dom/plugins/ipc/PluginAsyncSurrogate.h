@@ -11,6 +11,7 @@
 #include "npapi.h"
 #include "npfunctions.h"
 #include "npruntime.h"
+#include "nsAutoPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsPluginHost.h"
 #include "nsString.h"
@@ -59,7 +60,7 @@ public:
   virtual PluginInstanceParent*
   GetInstance() { return nullptr; }
 
-  NPP GetNPP();
+  NPP GetNPP() { return mInstance; }
 
   bool GetPropertyHelper(NPObject* aObject, NPIdentifier aName,
                          bool* aHasProperty, bool* aHasMethod,
@@ -140,7 +141,7 @@ private:
   PluginModuleParent*             mParent;
   // These values are used to construct the plugin instance
   nsCString                       mMimeType;
-  mozilla::WeakPtr<nsNPAPIPluginInstance> mInstance;
+  NPP                             mInstance;
   uint16_t                        mMode;
   InfallibleTArray<nsCString>     mNames;
   InfallibleTArray<nsCString>     mValues;
@@ -167,7 +168,7 @@ struct AsyncNPObject : NPObject
 
   NPObject* GetRealObject();
 
-  RefPtr<PluginAsyncSurrogate>  mSurrogate;
+  nsRefPtr<PluginAsyncSurrogate>  mSurrogate;
   ParentNPObject*                 mRealObject;
 };
 

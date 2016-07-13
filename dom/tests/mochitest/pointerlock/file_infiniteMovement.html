@@ -49,7 +49,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
         }
 
         var firstMoveListener = function (e) {
-          info("Got first mousemove");
           div.removeEventListener("mousemove", firstMoveListener, false);
           div.addEventListener("mousemove", secondMoveListener, false);
 
@@ -60,22 +59,15 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
         }
 
         var secondMoveListener = function (e) {
-          info("Got second mousemove");
           totalMovementX = divCenterWidth + ((divCenterWidth / 2) * 3);
           totalMovementY = divCenterHeight + ((divCenterHeight / 2) * 3);
 
           div.removeEventListener("mousemove", secondMoveListener, false);
-          addFullscreenChangeContinuation("exit", function() {
-            info("Got fullscreenchange for exiting");
-            runTests();
-            SimpleTest.finish();
-          });
-          document.exitFullscreen();
+          document.mozCancelFullScreen();
         }
 
         document.addEventListener("mozpointerlockchange", function (e) {
           if (document.mozPointerLockElement === div) {
-            info("Got mozpointerlockchange for entering");
             div.addEventListener("mousemove", firstMoveListener, false);
 
             divCenterWidth = Math.round(div.getBoundingClientRect().width / 2);
@@ -84,18 +76,21 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
             synthesizeMouse(div, divCenterWidth, divCenterHeight, {
               type: "mousemove"
             }, window);
-          } else {
-            info("Got mozpointerlockchange for exiting");
+          }
+        }, false);
+
+        document.addEventListener("mozfullscreenchange", function() {
+          if (document.mozFullScreenElement === div) {
+            div.mozRequestPointerLock();
+          }
+          else {
+            runTests();
+            SimpleTest.finish();
           }
         }, false);
 
         function start() {
-          info("Requesting fullscreen on parent");
-          addFullscreenChangeContinuation("enter", function() {
-            info("Got fullscreenchange for entering");
-            div.mozRequestPointerLock();
-          });
-          div.requestFullscreen();
+          div.mozRequestFullScreen();
         }
       </script>
     </pre>

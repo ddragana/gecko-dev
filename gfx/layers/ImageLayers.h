@@ -7,6 +7,7 @@
 #define GFX_IMAGELAYER_H
 
 #include "Layers.h"                     // for Layer, etc
+#include "GraphicsFilter.h"             // for GraphicsFilter
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
 #include "mozilla/gfx/Point.h"          // for IntSize
 #include "mozilla/layers/LayersTypes.h"
@@ -38,11 +39,11 @@ public:
    * CONSTRUCTION PHASE ONLY
    * Set the filter used to resample this image if necessary.
    */
-  void SetSamplingFilter(gfx::SamplingFilter aSamplingFilter)
+  void SetFilter(GraphicsFilter aFilter)
   {
-    if (mSamplingFilter != aSamplingFilter) {
+    if (mFilter != aFilter) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) Filter", this));
-      mSamplingFilter = aSamplingFilter;
+      mFilter = aFilter;
       Mutated();
     }
   }
@@ -62,7 +63,7 @@ public:
 
 
   ImageContainer* GetContainer() { return mContainer; }
-  gfx::SamplingFilter GetSamplingFilter() { return mSamplingFilter; }
+  GraphicsFilter GetFilter() { return mFilter; }
   const gfx::IntSize& GetScaleToSize() { return mScaleToSize; }
   ScaleMode GetScaleMode() { return mScaleMode; }
 
@@ -93,8 +94,8 @@ protected:
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
   virtual void DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent) override;
 
-  RefPtr<ImageContainer> mContainer;
-  gfx::SamplingFilter mSamplingFilter;
+  nsRefPtr<ImageContainer> mContainer;
+  GraphicsFilter mFilter;
   gfx::IntSize mScaleToSize;
   ScaleMode mScaleMode;
   bool mDisallowBigImage;

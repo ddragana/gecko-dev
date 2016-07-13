@@ -12,12 +12,9 @@
 #include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
 #include "nsIRunnable.h"
-#include "nsThreadUtils.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Monitor.h"
 #include "gtest/gtest.h"
-
-using namespace mozilla;
 
 class Task final : public nsIRunnable
 {
@@ -69,11 +66,11 @@ TEST(ThreadPool, Parallelism)
   EXPECT_TRUE(pool);
 
   // Dispatch and sleep to ensure we have an idle thread
-  nsCOMPtr<nsIRunnable> r0 = new Runnable();
+  nsCOMPtr<nsIRunnable> r0 = new nsRunnable();
   pool->Dispatch(r0, NS_DISPATCH_SYNC);
   PR_Sleep(PR_SecondsToInterval(2));
 
-  class Runnable1 : public Runnable {
+  class Runnable1 : public nsRunnable {
   public:
     Runnable1(Monitor& aMonitor, bool& aDone)
       : mMonitor(aMonitor), mDone(aDone) {}
@@ -93,7 +90,7 @@ TEST(ThreadPool, Parallelism)
     bool& mDone;
   };
 
-  class Runnable2 : public Runnable {
+  class Runnable2 : public nsRunnable {
   public:
     Runnable2(Monitor& aMonitor, bool& aDone)
       : mMonitor(aMonitor), mDone(aDone) {}

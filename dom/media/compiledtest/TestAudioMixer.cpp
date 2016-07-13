@@ -4,6 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AudioMixer.h"
+#include <assert.h>
 
 using mozilla::AudioDataValue;
 using mozilla::AudioSampleFormat;
@@ -161,3 +162,4 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
+

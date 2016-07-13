@@ -31,6 +31,16 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=238987
   // but the last blur event goes to i1, not "begin".
   var expectedWindowBlurCount = forwardFocusArray.length + backwardFocusArray.length + 3;
 
+  // accessibility.tabfocus must be set to value 7 before running test also
+  // on a mac.
+  function setOrRestoreTabFocus(newValue) {
+    if (!newValue) {
+      SpecialPowers.clearUserPref("accessibility.tabfocus");
+    } else {
+      SpecialPowers.setIntPref("accessibility.tabfocus", newValue);
+    }
+  }
+
   function handleFocus(e) {
     if (e.target.id == "begin") {
       // if the modifier is set, the test is coming back from the end.
@@ -118,6 +128,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=238987
          "|window| didn't get the right amount of blur events");
 
       // Cleanup
+      setOrRestoreTabFocus(0);
       window.removeEventListener("focus", handleWindowFocus, true);
       window.removeEventListener("focus", handleWindowFocus, false);
       window.removeEventListener("blur", handleWindowBlur, true);
@@ -155,10 +166,9 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=238987
     tab();
   }
 
-  // accessibility.tabfocus must be set to value 7 before running test also
-  // on a mac.
   function doTest() {
-    SpecialPowers.pushPrefEnv({"set": [["accessibility.tabfocus", 7]]}, start);
+    setOrRestoreTabFocus(7);
+    setTimeout(start, 0);
   }
 
   SimpleTest.waitForExplicitFinish();

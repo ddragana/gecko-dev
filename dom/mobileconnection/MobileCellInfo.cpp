@@ -20,7 +20,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MobileCellInfo)
   NS_INTERFACE_MAP_ENTRY(nsIMobileCellInfo)
 NS_INTERFACE_MAP_END
 
-MobileCellInfo::MobileCellInfo(nsPIDOMWindowInner* aWindow)
+MobileCellInfo::MobileCellInfo(nsPIDOMWindow* aWindow)
   : mWindow(aWindow)
   , mGsmLocationAreaCode(-1)
   , mGsmCellId(-1)

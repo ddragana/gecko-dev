@@ -43,7 +43,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DesktopNotificationCenter)
 
-  explicit DesktopNotificationCenter(nsPIDOMWindowInner* aWindow)
+  explicit DesktopNotificationCenter(nsPIDOMWindow* aWindow)
   {
     MOZ_ASSERT(aWindow);
     mOwner = aWindow;
@@ -59,7 +59,7 @@ public:
     mOwner = nullptr;
   }
 
-  nsPIDOMWindowInner* GetParentObject() const
+  nsPIDOMWindow* GetParentObject() const
   {
     return mOwner;
   }
@@ -76,7 +76,7 @@ private:
   {
   }
 
-  nsCOMPtr<nsPIDOMWindowInner> mOwner;
+  nsCOMPtr<nsPIDOMWindow> mOwner;
   nsCOMPtr<nsIPrincipal> mPrincipal;
 };
 
@@ -91,7 +91,7 @@ public:
   DesktopNotification(const nsAString& aTitle,
                       const nsAString& aDescription,
                       const nsAString& aIconURL,
-                      nsPIDOMWindowInner* aWindow,
+                      nsPIDOMWindow *aWindow,
                       nsIPrincipal* principal);
 
   virtual ~DesktopNotification();
@@ -115,7 +115,7 @@ public:
 
   // WebIDL
 
-  nsPIDOMWindowInner* GetParentObject() const
+  nsPIDOMWindow* GetParentObject() const
   {
     return GetOwner();
   }
@@ -133,7 +133,7 @@ protected:
   nsString mDescription;
   nsString mIconURL;
 
-  RefPtr<AlertServiceObserver> mObserver;
+  nsRefPtr<AlertServiceObserver> mObserver;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   bool mAllow;
   bool mShowHasBeenCalled;

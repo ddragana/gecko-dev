@@ -13,8 +13,9 @@
 #include "nsParserMsgUtils.h"
 #include "nsIURL.h"
 #include "nsIUnicharInputStream.h"
-#include "nsIProtocolHandler.h"
+#include "nsISimpleUnicharStreamFactory.h"
 #include "nsNetUtil.h"
+#include "nsNullPrincipal.h"
 #include "prprf.h"
 #include "prmem.h"
 #include "nsTextFormatter.h"
@@ -27,19 +28,23 @@
 #include "nsError.h"
 #include "nsXPCOMCIDInternal.h"
 #include "nsUnicharInputStream.h"
-#include "nsContentUtils.h"
-#include "nsNullPrincipal.h"
 
 #include "mozilla/Logging.h"
 
-using mozilla::fallible;
 using mozilla::LogLevel;
 
 #define kExpatSeparatorChar 0xFFFF
 
 static const char16_t kUTF16[] = { 'U', 'T', 'F', '-', '1', '6', '\0' };
 
-static mozilla::LazyLogModule gExpatDriverLog("expatdriver");
+static PRLogModuleInfo *
+GetExpatDriverLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("expatdriver");
+  return sLog;
+}
 
 /***************************** EXPAT CALL BACKS ******************************/
 // The callback handlers that get called from the expat parser.
@@ -408,9 +413,7 @@ nsExpatDriver::HandleCharacterData(const char16_t *aValue,
   NS_ASSERTION(mSink, "content sink not found!");
 
   if (mInCData) {
-    if (!mCDataText.Append(aValue, aLength, fallible)) {
-      MaybeStopParser(NS_ERROR_OUT_OF_MEMORY);
-    }
+    mCDataText.Append(aValue, aLength);
   }
   else if (mSink) {
     nsresult rv = mSink->HandleCharacterData(aValue, aLength);
@@ -705,7 +708,8 @@ nsExpatDriver::HandleExternalEntityRef(const char16_t *openEntityNames,
   }
 
   nsCOMPtr<nsIUnicharInputStream> uniIn;
-  rv = NS_NewUnicharInputStream(in, getter_AddRefs(uniIn));
+  rv = nsSimpleUnicharStreamFactory::GetInstance()->
+    CreateInstanceFromUTF8Stream(in, getter_AddRefs(uniIn));
   NS_ENSURE_SUCCESS(rv, 1);
 
   int result = 1;
@@ -751,65 +755,73 @@ nsExpatDriver::OpenInputStreamFromExternalDTD(const char16_t* aFPIStr,
                  baseURI);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // make sure the URI is allowed to be loaded in sync
-  bool isUIResource = false;
-  rv = NS_URIChainHasFlags(uri, nsIProtocolHandler::URI_IS_UI_RESOURCE,
-                           &isUIResource);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIURI> localURI;
-  if (!isUIResource) {
-    // Check to see if we can map the DTD to a known local DTD, or if a DTD
-    // file of the same name exists in the special DTD directory
+  // check if it is alright to load this uri
+  bool isChrome = false;
+  uri->SchemeIs("chrome", &isChrome);
+  if (!isChrome) {
+    // since the url is not a chrome url, check to see if we can map the DTD
+    // to a known local DTD, or if a DTD file of the same name exists in the
+    // special DTD directory
     if (aFPIStr) {
       // see if the Formal Public Identifier (FPI) maps to a catalog entry
       mCatalogData = LookupCatalogData(aFPIStr);
-      GetLocalDTDURI(mCatalogData, uri, getter_AddRefs(localURI));
     }
+
+    nsCOMPtr<nsIURI> localURI;
+    GetLocalDTDURI(mCatalogData, uri, getter_AddRefs(localURI));
     if (!localURI) {
       return NS_ERROR_NOT_IMPLEMENTED;
     }
+
+    localURI.swap(uri);
   }
 
+  nsCOMPtr<nsIDocument> doc;
+  NS_ASSERTION(mSink == nsCOMPtr<nsIExpatSink>(do_QueryInterface(mOriginalSink)),
+               "In nsExpatDriver::OpenInputStreamFromExternalDTD: "
+               "mOriginalSink not the same object as mSink?");
+  if (mOriginalSink)
+    doc = do_QueryInterface(mOriginalSink->GetTarget());
+  int16_t shouldLoad = nsIContentPolicy::ACCEPT;
+  rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_DTD,
+                                uri,
+                                (doc ? doc->NodePrincipal() : nullptr),
+                                doc,
+                                EmptyCString(), //mime guess
+                                nullptr,         //extra
+                                &shouldLoad);
+  if (NS_FAILED(rv)) return rv;
+  if (NS_CP_REJECTED(shouldLoad)) {
+    // Disallowed by content policy
+    return NS_ERROR_CONTENT_BLOCKED;
+  }
+
+  nsAutoCString absURL;
+  uri->GetSpec(absURL);
+
+  CopyUTF8toUTF16(absURL, aAbsURL);
+
   nsCOMPtr<nsIChannel> channel;
-  if (localURI) {
-    localURI.swap(uri);
+  if (doc) {
     rv = NS_NewChannel(getter_AddRefs(channel),
                        uri,
-                       nsContentUtils::GetSystemPrincipal(),
-                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                       doc,
+                       nsILoadInfo::SEC_NORMAL,
                        nsIContentPolicy::TYPE_DTD);
   }
   else {
-    NS_ASSERTION(mSink == nsCOMPtr<nsIExpatSink>(do_QueryInterface(mOriginalSink)),
-                 "In nsExpatDriver::OpenInputStreamFromExternalDTD: "
-                 "mOriginalSink not the same object as mSink?");
-    nsCOMPtr<nsIPrincipal> loadingPrincipal;
-    if (mOriginalSink) {
-      nsCOMPtr<nsIDocument> doc;
-      doc = do_QueryInterface(mOriginalSink->GetTarget());
-      if (doc) {
-        loadingPrincipal = doc->NodePrincipal();
-      }
-    }
-    if (!loadingPrincipal) {
-      loadingPrincipal = nsNullPrincipal::Create();
-    }
+    nsCOMPtr<nsIPrincipal> nullPrincipal = nsNullPrincipal::Create();
+    NS_ENSURE_TRUE(nullPrincipal, NS_ERROR_FAILURE);
     rv = NS_NewChannel(getter_AddRefs(channel),
                        uri,
-                       loadingPrincipal,
-                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS |
-                       nsILoadInfo::SEC_ALLOW_CHROME,
+                       nullPrincipal,
+                       nsILoadInfo::SEC_NORMAL,
                        nsIContentPolicy::TYPE_DTD);
   }
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsAutoCString absURL;
-  uri->GetSpec(absURL);
-  CopyUTF8toUTF16(absURL, aAbsURL);
-
   channel->SetContentType(NS_LITERAL_CSTRING("application/xml"));
-  return channel->Open2(aStream);
+  return channel->Open(aStream);
 }
 
 static nsresult
@@ -1050,7 +1062,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
   nsScannerIterator end;
   aScanner.EndReading(end);
 
-  MOZ_LOG(gExpatDriverLog, LogLevel::Debug,
+  MOZ_LOG(GetExpatDriverLog(), LogLevel::Debug,
          ("Remaining in expat's buffer: %i, remaining in scanner: %i.",
           mExpatBuffered, Distance(start, end)));
 
@@ -1071,7 +1083,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
       length = 0;
 
       if (blocked) {
-        MOZ_LOG(gExpatDriverLog, LogLevel::Debug,
+        MOZ_LOG(GetExpatDriverLog(), LogLevel::Debug,
                ("Resuming Expat, will parse data remaining in Expat's "
                 "buffer.\nContent of Expat's buffer:\n-----\n%s\n-----\n",
                 NS_ConvertUTF16toUTF8(currentExpatPosition.get(),
@@ -1080,7 +1092,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
       else {
         NS_ASSERTION(mExpatBuffered == Distance(currentExpatPosition, end),
                      "Didn't pass all the data to Expat?");
-        MOZ_LOG(gExpatDriverLog, LogLevel::Debug,
+        MOZ_LOG(GetExpatDriverLog(), LogLevel::Debug,
                ("Last call to Expat, will parse data remaining in Expat's "
                 "buffer.\nContent of Expat's buffer:\n-----\n%s\n-----\n",
                 NS_ConvertUTF16toUTF8(currentExpatPosition.get(),
@@ -1091,7 +1103,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
       buffer = start.get();
       length = uint32_t(start.size_forward());
 
-      MOZ_LOG(gExpatDriverLog, LogLevel::Debug,
+      MOZ_LOG(GetExpatDriverLog(), LogLevel::Debug,
              ("Calling Expat, will parse data remaining in Expat's buffer and "
               "new data.\nContent of Expat's buffer:\n-----\n%s\n-----\nNew "
               "data:\n-----\n%s\n-----\n",
@@ -1119,25 +1131,19 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
         // last line until the point where we stopped parsing.
         nsScannerIterator startLastLine = currentExpatPosition;
         startLastLine.advance(-((ptrdiff_t)lastLineLength));
-        if (!CopyUnicodeTo(startLastLine, currentExpatPosition, mLastLine)) {
-          return (mInternalState = NS_ERROR_OUT_OF_MEMORY);
-        }
+        CopyUnicodeTo(startLastLine, currentExpatPosition, mLastLine);
       }
       else {
         // There was no line break in the consumed data, append the consumed
         // data.
-        if (!AppendUnicodeTo(oldExpatPosition,
-                             currentExpatPosition,
-                             mLastLine)) {
-          return (mInternalState = NS_ERROR_OUT_OF_MEMORY);
-        }
+        AppendUnicodeTo(oldExpatPosition, currentExpatPosition, mLastLine);
       }
     }
 
     mExpatBuffered += length - consumed;
 
     if (BlockedOrInterrupted()) {
-      MOZ_LOG(gExpatDriverLog, LogLevel::Debug,
+      MOZ_LOG(GetExpatDriverLog(), LogLevel::Debug,
              ("Blocked or interrupted parser (probably for loading linked "
               "stylesheets or scripts)."));
 
@@ -1198,7 +1204,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
   aScanner.SetPosition(currentExpatPosition, true);
   aScanner.Mark();
 
-  MOZ_LOG(gExpatDriverLog, LogLevel::Debug,
+  MOZ_LOG(GetExpatDriverLog(), LogLevel::Debug,
          ("Remaining in expat's buffer: %i, remaining in scanner: %i.",
           mExpatBuffered, Distance(currentExpatPosition, end)));
 
@@ -1244,20 +1250,20 @@ nsExpatDriver::WillBuildModel(const CParserContext& aParserContext,
 
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(mOriginalSink->GetTarget());
   if (doc) {
-    nsCOMPtr<nsPIDOMWindowOuter> win = doc->GetWindow();
-    nsCOMPtr<nsPIDOMWindowInner> inner;
-    if (win) {
-      inner = win->GetCurrentInnerWindow();
-    } else {
+    nsCOMPtr<nsPIDOMWindow> win = doc->GetWindow();
+    if (!win) {
       bool aHasHadScriptHandlingObject;
       nsIScriptGlobalObject *global =
         doc->GetScriptHandlingObject(aHasHadScriptHandlingObject);
       if (global) {
-        inner = do_QueryInterface(global);
+        win = do_QueryInterface(global);
       }
     }
-    if (inner) {
-      mInnerWindowID = inner->WindowID();
+    if (win && !win->IsInnerWindow()) {
+      win = win->GetCurrentInnerWindow();
+    }
+    if (win) {
+      mInnerWindowID = win->WindowID();
     }
   }
 

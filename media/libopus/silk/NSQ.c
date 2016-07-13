@@ -46,7 +46,6 @@ static OPUS_INLINE void silk_nsq_scale_states(
     const opus_int      signal_type             /* I    Signal type                     */
 );
 
-#if !defined(OPUS_X86_MAY_HAVE_SSE4_1)
 static OPUS_INLINE void silk_noise_shape_quantizer(
     silk_nsq_state      *NSQ,                   /* I/O  NSQ state                       */
     opus_int            signalType,             /* I    Signal type                     */
@@ -68,10 +67,8 @@ static OPUS_INLINE void silk_noise_shape_quantizer(
     opus_int            shapingLPCOrder,        /* I    Noise shaping AR filter order   */
     opus_int            predictLPCOrder         /* I    Prediction filter order         */
 );
-#endif
 
-void silk_NSQ_c
-(
+void silk_NSQ(
     const silk_encoder_state    *psEncC,                                    /* I/O  Encoder State                   */
     silk_nsq_state              *NSQ,                                       /* I/O  NSQ state                       */
     SideInfoIndices             *psIndices,                                 /* I/O  Quantization Indices            */
@@ -144,7 +141,7 @@ void silk_NSQ_c
                 silk_assert( start_idx > 0 );
 
                 silk_LPC_analysis_filter( &sLTP[ start_idx ], &NSQ->xq[ start_idx + k * psEncC->subfr_length ],
-                    A_Q12, psEncC->ltp_mem_length - start_idx, psEncC->predictLPCOrder, psEncC->arch );
+                    A_Q12, psEncC->ltp_mem_length - start_idx, psEncC->predictLPCOrder );
 
                 NSQ->rewhite_flag = 1;
                 NSQ->sLTP_buf_idx = psEncC->ltp_mem_length;
@@ -175,11 +172,7 @@ void silk_NSQ_c
 /***********************************/
 /* silk_noise_shape_quantizer  */
 /***********************************/
-
-#if !defined(OPUS_X86_MAY_HAVE_SSE4_1)
-static OPUS_INLINE
-#endif
-void silk_noise_shape_quantizer(
+static OPUS_INLINE void silk_noise_shape_quantizer(
     silk_nsq_state      *NSQ,                   /* I/O  NSQ state                       */
     opus_int            signalType,             /* I    Signal type                     */
     const opus_int32    x_sc_Q10[],             /* I                                    */

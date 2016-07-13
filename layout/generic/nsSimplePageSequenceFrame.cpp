@@ -26,6 +26,9 @@
 #include "nsServiceManagerUtils.h"
 #include <algorithm>
 
+// DateTime Includes
+#include "nsDateTimeFormatCID.h"
+
 #define OFFSET_NOT_SET -1
 
 // Print Options
@@ -39,9 +42,15 @@ static const char sPrintOptionsContractID[] = "@mozilla.org/gfx/printsettings-se
 //
 
 #include "mozilla/Logging.h"
-mozilla::LazyLogModule gLayoutPrintingLog("printing-layout");
-
-#define PR_PL(_p1)  MOZ_LOG(gLayoutPrintingLog, mozilla::LogLevel::Debug, _p1)
+PRLogModuleInfo *
+GetLayoutPrintingLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("printing-layout");
+  return sLog;
+}
+#define PR_PL(_p1)  MOZ_LOG(GetLayoutPrintingLog(), mozilla::LogLevel::Debug, _p1)
 
 nsSimplePageSequenceFrame*
 NS_NewSimplePageSequenceFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -311,7 +320,7 @@ nsSimplePageSequenceFrame::Reflow(nsPresContext*          aPresContext,
 
   // Create current Date/Time String
   if (!mDateFormatter) {
-    mDateFormatter = nsIDateTimeFormat::Create();
+    mDateFormatter = do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID);
   }
   if (!mDateFormatter) {
     return;
@@ -492,7 +501,7 @@ nsSimplePageSequenceFrame::StartPrint(nsPresContext*    aPresContext,
 }
 
 void
-GetPrintCanvasElementsInFrame(nsIFrame* aFrame, nsTArray<RefPtr<HTMLCanvasElement> >* aArr)
+GetPrintCanvasElementsInFrame(nsIFrame* aFrame, nsTArray<nsRefPtr<HTMLCanvasElement> >* aArr)
 {
   if (!aFrame) {
     return;
@@ -517,7 +526,7 @@ GetPrintCanvasElementsInFrame(nsIFrame* aFrame, nsTArray<RefPtr<HTMLCanvasElemen
         }
       }
 
-      if (!child->PrincipalChildList().FirstChild()) {
+      if (!child->GetFirstPrincipalChild()) {
         nsSubDocumentFrame* subdocumentFrame = do_QueryFrame(child);
         if (subdocumentFrame) {
           // Descend into the subdocument
@@ -635,31 +644,34 @@ nsSimplePageSequenceFrame::PrePrintNextPage(nsITimerCallback* aCallback, bool* a
 
       mCalledBeginPage = true;
       
-      RefPtr<gfxContext> renderingContext = dc->CreateRenderingContext();
-      NS_ENSURE_TRUE(renderingContext, NS_ERROR_OUT_OF_MEMORY);
+      nsRefPtr<gfxContext> renderingContext = dc->CreateRenderingContext();
 
-      DrawTarget* drawTarget = renderingContext->GetDrawTarget();
-      if (NS_WARN_IF(!drawTarget)) {
-        return NS_ERROR_FAILURE;
-      }
+      nsRefPtr<gfxASurface> renderingSurface =
+          renderingContext->CurrentSurface();
+      NS_ENSURE_TRUE(renderingSurface, NS_ERROR_OUT_OF_MEMORY);
 
       for (int32_t i = mCurrentCanvasList.Length() - 1; i >= 0 ; i--) {
         HTMLCanvasElement* canvas = mCurrentCanvasList[i];
         nsIntSize size = canvas->GetSize();
 
-        RefPtr<DrawTarget> canvasTarget =
-          drawTarget->CreateSimilarDrawTarget(size, drawTarget->GetFormat());
-        if (!canvasTarget) {
+        nsRefPtr<gfxASurface> printSurface = renderingSurface->
+           CreateSimilarSurface(
+             gfxContentType::COLOR_ALPHA,
+             size
+           );
+
+        if (!printSurface) {
           continue;
         }
 
         nsICanvasRenderingContextInternal* ctx = canvas->GetContextAtIndex(0);
+
         if (!ctx) {
           continue;
         }
 
-        // Initialize the context with the new DrawTarget.
-        ctx->InitializeWithDrawTarget(nullptr, canvasTarget);
+          // Initialize the context with the new printSurface.
+        ctx->InitializeWithSurface(nullptr, printSurface, size.width, size.height);
 
         // Start the rendering process.
         nsWeakFrame weakFrame = this;
@@ -735,7 +747,7 @@ nsSimplePageSequenceFrame::PrintNextPage()
     height -= mMargin.top + mMargin.bottom;
     width  -= mMargin.left + mMargin.right;
     nscoord selectionY = height;
-    nsIFrame* conFrame = currentPage->PrincipalChildList().FirstChild();
+    nsIFrame* conFrame = currentPage->GetFirstPrincipalChild();
     if (mSelectionHeight >= 0) {
       conFrame->SetPosition(conFrame->GetPosition() + nsPoint(0, -mYSelOffset));
       nsContainerFrame::PositionChildViews(conFrame);
@@ -761,18 +773,13 @@ nsSimplePageSequenceFrame::PrintNextPage()
 
       PR_PL(("SeqFr::PrintNextPage -> %p PageNo: %d", pf, mPageNum));
 
-      // CreateRenderingContext can fail
-      RefPtr<gfxContext> gCtx = dc->CreateRenderingContext();
-      NS_ENSURE_TRUE(gCtx, NS_ERROR_OUT_OF_MEMORY);
-
-      nsRenderingContext renderingContext(gCtx);
+      nsRenderingContext renderingContext(dc->CreateRenderingContext());
 
       nsRect drawingRect(nsPoint(0, 0), currentPage->GetSize());
       nsRegion drawingRegion(drawingRect);
       nsLayoutUtils::PaintFrame(&renderingContext, currentPage,
                                 drawingRegion, NS_RGBA(0,0,0,0),
-                                nsDisplayListBuilderMode::PAINTING,
-                                nsLayoutUtils::PaintFrameFlags::PAINT_SYNC_DECODE_IMAGES);
+                                nsLayoutUtils::PAINT_SYNC_DECODE_IMAGES);
 
       if (mSelectionHeight >= 0 && selectionY < mSelectionHeight) {
         selectionY += height;
@@ -831,7 +838,7 @@ nsSimplePageSequenceFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
     clipState.Clear();
 
-    nsIFrame* child = PrincipalChildList().FirstChild();
+    nsIFrame* child = GetFirstPrincipalChild();
     nsRect dirty = aDirtyRect;
     dirty.ScaleInverseRoundOut(PresContext()->GetPrintPreviewScale());
 

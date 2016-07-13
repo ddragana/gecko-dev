@@ -41,7 +41,6 @@ if CONFIG['MOZ_OMX_ENCODER']:
         'OMXCodecDescriptorUtil.cpp',
         'OMXCodecWrapper.cpp',
     ]
-    LOCAL_INCLUDES += ['/media/libyuv/include']
 
 if 'rtsp' in CONFIG['NECKO_PROTOCOLS']:
     EXPORTS += [
@@ -54,15 +53,28 @@ if 'rtsp' in CONFIG['NECKO_PROTOCOLS']:
         'RtspOmxDecoder.cpp',
         'RtspOmxReader.cpp',
     ]
+    if CONFIG['ANDROID_VERSION'] >= '18':
+        EXPORTS += [
+            'RtspMediaCodecDecoder.h',
+            'RtspMediaCodecReader.h',
+        ]
+        SOURCES += [
+            'RtspMediaCodecDecoder.cpp',
+            'RtspMediaCodecReader.cpp',
+        ]
 
 if CONFIG['ANDROID_VERSION'] >= '18':
     EXPORTS += [
         'I420ColorConverterHelper.h',
+        'MediaCodecDecoder.h',
         'MediaCodecProxy.h',
+        'MediaCodecReader.h',
     ]
     SOURCES += [
         'I420ColorConverterHelper.cpp',
+        'MediaCodecDecoder.cpp',
         'MediaCodecProxy.cpp',
+        'MediaCodecReader.cpp',
     ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
@@ -71,11 +83,10 @@ include('/ipc/chromium/chromium-config.mozbuild')
 #  - about attributes on forward declarations for types that are already
 #    defined, which complains about an important MOZ_EXPORT for android::AString
 #  - about multi-character constants which are used in codec-related code
-#    and are part of Android's libstagefright API style.
 if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
   CXXFLAGS += [
     '-Wno-error=attributes',
-    '-Wno-multichar'
+    '-Wno-error=multichar'
   ]
 
 FINAL_LIBRARY = 'xul'
@@ -85,27 +96,23 @@ LOCAL_INCLUDES += [
     '/ipc/chromium/src',
 ]
 
-if CONFIG['ANDROID_VERSION'] == '15':
-    LOCAL_INCLUDES += [
-        '%' + '%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
-            'dalvik/libnativehelper/include/nativehelper',
-            'frameworks/base/include',
-            'frameworks/base/include/binder',
-            'frameworks/base/include/media',
-            'frameworks/base/include/media/stagefright/openmax',
-            'frameworks/base/include/utils',
-            'frameworks/base/media/libstagefright/include',
-            'hardware/libhardware/include',
-        ]
+CXXFLAGS += [
+    '-I%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
+        'dalvik/libnativehelper/include/nativehelper',
+        'frameworks/av/include/media',
+        'frameworks/base/include',
+        'frameworks/base/include/binder',
+        'frameworks/base/include/utils',
+        'frameworks/base/include/media',
+        'frameworks/base/include/media/stagefright/openmax',
+        'frameworks/base/media/libstagefright/include',
+        'frameworks/native/opengl/include',
+        'frameworks/native/include',
+        'hardware/libhardware/include/',
     ]
-else:
-    LOCAL_INCLUDES += [
-        '%' + '%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
-            'frameworks/av/include/media',
-            'frameworks/native/include',
-            'frameworks/native/opengl/include',
-        ]
 ]
 
 if CONFIG['ANDROID_VERSION'] > '15':
     DEFINES['MOZ_OMX_WEBM_DECODER'] = True
+
+FAIL_ON_WARNINGS = True

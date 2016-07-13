@@ -7,7 +7,6 @@
 #define __NS_SVGOUTERSVGFRAME_H__
 
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "nsISVGSVGFrame.h"
 #include "nsSVGContainerFrame.h"
 #include "nsRegion.h"
@@ -18,8 +17,10 @@ class nsSVGForeignObjectFrame;
 ////////////////////////////////////////////////////////////////////////
 // nsSVGOuterSVGFrame class
 
-class nsSVGOuterSVGFrame final : public nsSVGDisplayContainerFrame
-                               , public nsISVGSVGFrame
+typedef nsSVGDisplayContainerFrame nsSVGOuterSVGFrameBase;
+
+class nsSVGOuterSVGFrame final : public nsSVGOuterSVGFrameBase,
+                                 public nsISVGSVGFrame
 {
   friend nsContainerFrame*
   NS_NewSVGOuterSVGFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -63,7 +64,7 @@ public:
                          const nsHTMLReflowState*  aReflowState,
                          nsDidReflowStatus aStatus) override;
 
-  virtual void UnionChildOverflow(nsOverflowAreas& aOverflowAreas) override;
+  virtual bool UpdateOverflow() override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
@@ -95,11 +96,11 @@ public:
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
     // Any children must be added to our single anonymous inner frame kid.
-    MOZ_ASSERT(PrincipalChildList().FirstChild() &&
-               PrincipalChildList().FirstChild()->GetType() ==
+    MOZ_ASSERT(GetFirstPrincipalChild() &&
+               GetFirstPrincipalChild()->GetType() ==
                  nsGkAtoms::svgOuterSVGAnonChildFrame,
                "Where is our anonymous child?");
-    return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
+    return GetFirstPrincipalChild()->GetContentInsertionFrame();
   }
 
   virtual bool IsSVGTransformed(Matrix *aOwnTransform,
@@ -107,7 +108,7 @@ public:
     // Our anonymous wrapper performs the transforms. We simply
     // return whether we are transformed here but don't apply the transforms
     // themselves.
-    return PrincipalChildList().FirstChild()->IsSVGTransformed();
+    return GetFirstPrincipalChild()->IsSVGTransformed();
   }
 
   // nsISVGSVGFrame interface:
@@ -208,6 +209,8 @@ protected:
 ////////////////////////////////////////////////////////////////////////
 // nsSVGOuterSVGAnonChildFrame class
 
+typedef nsSVGDisplayContainerFrame nsSVGOuterSVGAnonChildFrameBase;
+
 /**
  * nsSVGOuterSVGFrames have a single direct child that is an instance of this
  * class, and which is used to wrap their real child frames. Such anonymous
@@ -231,14 +234,15 @@ protected:
  * example, the implementations of IsSVGTransformed and GetCanvasTM assume
  * nsSVGContainerFrame instances all the way up to the nsSVGOuterSVGFrame.
  */
-class nsSVGOuterSVGAnonChildFrame : public nsSVGDisplayContainerFrame
+class nsSVGOuterSVGAnonChildFrame
+  : public nsSVGOuterSVGAnonChildFrameBase
 {
   friend nsContainerFrame*
   NS_NewSVGOuterSVGAnonChildFrame(nsIPresShell* aPresShell,
                                   nsStyleContext* aContext);
 
   explicit nsSVGOuterSVGAnonChildFrame(nsStyleContext* aContext)
-    : nsSVGDisplayContainerFrame(aContext)
+    : nsSVGOuterSVGAnonChildFrameBase(aContext)
   {}
 
 public:

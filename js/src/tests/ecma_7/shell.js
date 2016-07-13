@@ -150,8 +150,8 @@ if (typeof assertDeepEq === 'undefined') {
                 }
             };
 
-            var ab = new Map_();
-            var bpath = new Map_();
+            var ab = Map_();
+            var bpath = Map_();
 
             function check(a, b, path) {
                 if (typeof a === "symbol") {

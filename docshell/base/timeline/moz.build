@@ -5,35 +5,20 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXPORTS.mozilla += [
-    'AbstractTimelineMarker.h',
     'AutoGlobalTimelineMarker.h',
     'AutoTimelineMarker.h',
-    'CompositeTimelineMarker.h',
-    'ConsoleTimelineMarker.h',
-    'DocLoadingTimelineMarker.h',
-    'EventTimelineMarker.h',
-    'JavascriptTimelineMarker.h',
-    'LayerTimelineMarker.h',
-    'MarkersStorage.h',
-    'MessagePortTimelineMarker.h',
-    'ObservedDocShell.h',
-    'RestyleTimelineMarker.h',
     'TimelineConsumers.h',
-    'TimelineMarker.h',
-    'TimelineMarkerEnums.h',
-    'TimestampTimelineMarker.h',
-    'WorkerTimelineMarker.h',
 ]
 
 UNIFIED_SOURCES += [
-    'AbstractTimelineMarker.cpp',
     'AutoGlobalTimelineMarker.cpp',
     'AutoTimelineMarker.cpp',
-    'MarkersStorage.cpp',
     'ObservedDocShell.cpp',
     'TimelineConsumers.cpp',
     'TimelineMarker.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
 
 FINAL_LIBRARY = 'xul'
 

@@ -318,7 +318,7 @@ CategoryNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf)
 {
   // We don't measure the strings pointed to by the entries because the
   // pointers are non-owning.
-  return mTable.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  return mTable.SizeOfExcludingThis(nullptr, aMallocSizeOf);
 }
 
 //
@@ -418,7 +418,9 @@ nsCategoryManager::nsCategoryManager()
 void
 nsCategoryManager::InitMemoryReporter()
 {
+#if !defined(MOZILLA_XPCOMRT_API)
   RegisterStrongMemoryReporter(this);
+#endif // !defined(MOZILLA_XPCOMRT_API)
 }
 
 nsCategoryManager::~nsCategoryManager()
@@ -453,6 +455,17 @@ nsCategoryManager::CollectReports(nsIHandleReportCallback* aHandleReport,
                             "Memory used for the XPCOM category manager.");
 }
 
+static size_t
+SizeOfCategoryManagerTableEntryExcludingThis(nsDepCharHashKey::KeyType aKey,
+                                             const nsAutoPtr<CategoryNode>& aData,
+                                             MallocSizeOf aMallocSizeOf,
+                                             void* aUserArg)
+{
+  // We don't measure the string pointed to by aKey because it's a non-owning
+  // pointer.
+  return aData.get()->SizeOfExcludingThis(aMallocSizeOf);
+}
+
 size_t
 nsCategoryManager::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
@@ -460,18 +473,15 @@ nsCategoryManager::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 
   n += PL_SizeOfArenaPoolExcludingPool(&mArena, aMallocSizeOf);
 
-  n += mTable.ShallowSizeOfExcludingThis(aMallocSizeOf);
-  for (auto iter = mTable.ConstIter(); !iter.Done(); iter.Next()) {
-    // We don't measure the key string because it's a non-owning pointer.
-    n += iter.Data().get()->SizeOfExcludingThis(aMallocSizeOf);
-  }
+  n += mTable.SizeOfExcludingThis(SizeOfCategoryManagerTableEntryExcludingThis,
+                                  aMallocSizeOf);
 
   return n;
 }
 
 namespace {
 
-class CategoryNotificationRunnable : public Runnable
+class CategoryNotificationRunnable : public nsRunnable
 {
 public:
   CategoryNotificationRunnable(nsISupports* aSubject,
@@ -515,7 +525,7 @@ nsCategoryManager::NotifyObservers(const char* aTopic,
     return;
   }
 
-  RefPtr<CategoryNotificationRunnable> r;
+  nsRefPtr<CategoryNotificationRunnable> r;
 
   if (aEntryName) {
     nsCOMPtr<nsISupportsCString> entry =
@@ -762,8 +772,7 @@ nsCategoryManager::SuppressNotifications(bool aSuppress)
 void
 NS_CreateServicesFromCategory(const char* aCategory,
                               nsISupports* aOrigin,
-                              const char* aObserverTopic,
-                              const char16_t* aObserverData)
+                              const char* aObserverTopic)
 {
   nsresult rv;
 
@@ -804,8 +813,10 @@ NS_CreateServicesFromCategory(const char* aCategory,
 
     nsCOMPtr<nsISupports> instance = do_GetService(contractID);
     if (!instance) {
+#if !defined(MOZILLA_XPCOMRT_API)
       LogMessage("While creating services from category '%s', could not create service for entry '%s', contract ID '%s'",
                  aCategory, entryString.get(), contractID.get());
+#endif // !defined(MOZILLA_XPCOMRT_API)
       continue;
     }
 
@@ -813,11 +824,12 @@ NS_CreateServicesFromCategory(const char* aCategory,
       // try an observer, if it implements it.
       nsCOMPtr<nsIObserver> observer = do_QueryInterface(instance);
       if (observer) {
-        observer->Observe(aOrigin, aObserverTopic,
-                          aObserverData ? aObserverData : MOZ_UTF16(""));
+        observer->Observe(aOrigin, aObserverTopic, EmptyString().get());
       } else {
+#if !defined(MOZILLA_XPCOMRT_API)
         LogMessage("While creating services from category '%s', service for entry '%s', contract ID '%s' does not implement nsIObserver.",
                    aCategory, entryString.get(), contractID.get());
+#endif // !defined(MOZILLA_XPCOMRT_API)
       }
     }
   }

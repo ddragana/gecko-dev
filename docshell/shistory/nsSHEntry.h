@@ -9,6 +9,7 @@
 
 // Helper Classes
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsString.h"
 #include "mozilla/Attributes.h"
@@ -44,12 +45,10 @@ private:
 
   // We share the state in here with other SHEntries which correspond to the
   // same document.
-  RefPtr<nsSHEntryShared> mShared;
+  nsRefPtr<nsSHEntryShared> mShared;
 
   // See nsSHEntry.idl for comments on these members.
   nsCOMPtr<nsIURI> mURI;
-  nsCOMPtr<nsIURI> mOriginalURI;
-  bool mLoadReplace;
   nsCOMPtr<nsIURI> mReferrerURI;
   uint32_t mReferrerPolicy;
   nsString mTitle;
@@ -63,7 +62,6 @@ private:
   bool mURIWasModified;
   nsCOMPtr<nsIStructuredCloneContainer> mStateData;
   bool mIsSrcdocEntry;
-  bool mScrollRestorationIsManual;
   nsString mSrcdocData;
   nsCOMPtr<nsIURI> mBaseURI;
 };

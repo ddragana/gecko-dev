@@ -42,7 +42,7 @@ checkbox {
 }
 
 .checkbox-icon[src] {
-  margin-inline-end: 2px;
+  -moz-margin-end: 2px;
 }
 
 .checkbox-label {

@@ -7,14 +7,13 @@ import subprocess
 
 def get_all_toplevel_filenames():
     '''Get a list of all the files in the (Mercurial or Git) repository.'''
-    failed_cmds = []
     try:
         cmd = ['hg', 'manifest', '-q']
         all_filenames = subprocess.check_output(cmd, universal_newlines=True,
                                                 stderr=subprocess.PIPE).split('\n')
         return all_filenames
     except:
-        failed_cmds.append(cmd)
+        pass
 
     try:
         # Get the relative path to the top-level directory.
@@ -26,6 +25,6 @@ def get_all_toplevel_filenames():
                                                 stderr=subprocess.PIPE).split('\n')
         return all_filenames
     except:
-        failed_cmds.append(cmd)
+        pass
 
-    raise Exception('failed to run any of the repo manifest commands', failed_cmds)
+    raise Exception('failed to run any of the repo manifest commands', cmds)

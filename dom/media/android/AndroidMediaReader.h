@@ -10,8 +10,9 @@
 #include "MediaResource.h"
 #include "MediaDecoderReader.h"
 #include "ImageContainer.h"
+#include "nsAutoPtr.h"
 #include "mozilla/layers/SharedRGBImage.h"
-
+ 
 #include "MPAPI.h"
 
 class nsACString;
@@ -34,23 +35,42 @@ class AndroidMediaReader : public MediaDecoderReader
   nsIntSize mInitialFrame;
   int64_t mVideoSeekTimeUs;
   int64_t mAudioSeekTimeUs;
-  RefPtr<VideoData> mLastVideoFrame;
+  nsRefPtr<VideoData> mLastVideoFrame;
   MozPromiseHolder<MediaDecoderReader::SeekPromise> mSeekPromise;
-  MozPromiseRequestHolder<MediaDecoderReader::MediaDataPromise> mSeekRequest;
+  MozPromiseRequestHolder<MediaDecoderReader::VideoDataPromise> mSeekRequest;
 public:
   AndroidMediaReader(AbstractMediaDecoder* aDecoder,
                      const nsACString& aContentType);
 
-  nsresult ResetDecode(TrackSet aTracks = TrackSet(TrackInfo::kAudioTrack,
-                                                   TrackInfo::kVideoTrack)) override;
+  virtual nsresult Init(MediaDecoderReader* aCloneDonor);
+  virtual nsresult ResetDecode();
 
-  bool DecodeAudioData() override;
-  bool DecodeVideoFrame(bool &aKeyframeSkip, int64_t aTimeThreshold) override;
+  virtual bool DecodeAudioData();
+  virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
+                                int64_t aTimeThreshold);
 
-  nsresult ReadMetadata(MediaInfo* aInfo, MetadataTags** aTags) override;
-  RefPtr<SeekPromise> Seek(SeekTarget aTarget, int64_t aEndTime) override;
+  virtual bool HasAudio()
+  {
+    return mHasAudio;
+  }
 
-  RefPtr<ShutdownPromise> Shutdown() override;
+  virtual bool HasVideo()
+  {
+    return mHasVideo;
+  }
+
+  virtual bool IsMediaSeekable()
+  {
+    // not used
+    return true;
+  }
+
+  virtual nsresult ReadMetadata(MediaInfo* aInfo,
+                                MetadataTags** aTags);
+  virtual nsRefPtr<SeekPromise>
+  Seek(int64_t aTime, int64_t aEndTime) override;
+
+  virtual nsRefPtr<ShutdownPromise> Shutdown() override;
 
   class ImageBufferCallback : public MPAPI::BufferCallback {
     typedef mozilla::layers::Image Image;
@@ -65,7 +85,7 @@ public:
     uint8_t *CreateI420Image(size_t aWidth, size_t aHeight);
 
     mozilla::layers::ImageContainer *mImageContainer;
-    RefPtr<Image> mImage;
+    nsRefPtr<Image> mImage;
   };
 
 };

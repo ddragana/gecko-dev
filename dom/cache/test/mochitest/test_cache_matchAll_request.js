@@ -129,10 +129,9 @@ function testRequest(request1, request2, request3, unknownRequest,
   }).then(function() {
     return caches.match(request1, {cacheName: name + "mambojambo"})
       .then(function() {
-        is(typeof r, "undefined", 'Searching in the wrong cache should resolve to undefined');
-        return caches.has(name + "mambojambo");
-      }).then(function(hasCache) {
-        ok(!hasCache, 'The wrong cache should still not exist');
+        ok(false, "Promise should be rejected");
+      }, function(err) {
+        is(err.name, "NotFoundError", "Searching in the wrong cache should not succeed");
       });
   }).then(function() {
     return c.matchAll(unknownRequest);

@@ -40,7 +40,7 @@ protected:
   virtual ~nsMathMLmspaceFrame();
 
   virtual nsresult
-  MeasureForWidth(DrawTarget* aDrawTarget,
+  MeasureForWidth(nsRenderingContext& aRenderingContext,
                   nsHTMLReflowMetrics& aDesiredSize) override;
 
 private:

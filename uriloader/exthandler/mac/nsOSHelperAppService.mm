@@ -129,7 +129,7 @@ NS_IMETHODIMP nsOSHelperAppService::GetApplicationDescription(const nsACString& 
                                                                 kCFBundleNameKey);
 
             if (bundleName) {
-              AutoTArray<UniChar, 255> buffer;
+              nsAutoTArray<UniChar, 255> buffer;
               CFIndex bundleNameLength = ::CFStringGetLength(bundleName);
               buffer.SetLength(bundleNameLength);
               ::CFStringGetCharacters(bundleName, CFRangeMake(0, bundleNameLength),
@@ -312,7 +312,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
                               flatType.get(), flatExt.get()));
 
   // Create a Mac-specific MIME info so we can use Mac-specific members.
-  RefPtr<nsMIMEInfoMac> mimeInfoMac = new nsMIMEInfoMac(aMIMEType);
+  nsRefPtr<nsMIMEInfoMac> mimeInfoMac = new nsMIMEInfoMac(aMIMEType);
 
   NSAutoreleasePool *localPool = [[NSAutoreleasePool alloc] init];
 
@@ -329,7 +329,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
   if (!aMIMEType.IsEmpty()) {
     CFURLRef appURL = NULL;
     // CFStringCreateWithCString() can fail even if we're not out of memory --
-    // for example if the 'cStr' parameter is something very weird (like "ÿÿ~"
+    // for example if the 'cStr' parameter is something very wierd (like "ÿÿ~"
     // aka "\xFF\xFF~"), or possibly if it can't be interpreted as using what's
     // specified in the 'encoding' parameter.  See bug 548719.
     cfMIMEType = ::CFStringCreateWithCString(NULL, flatType.get(),
@@ -477,7 +477,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
                             kLSItemDisplayName, (CFTypeRef *) &cfAppName);
     }
     if (cfAppName) {
-      AutoTArray<UniChar, 255> buffer;
+      nsAutoTArray<UniChar, 255> buffer;
       CFIndex appNameLength = ::CFStringGetLength(cfAppName);
       buffer.SetLength(appNameLength);
       ::CFStringGetCharacters(cfAppName, CFRangeMake(0, appNameLength),
@@ -512,7 +512,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
     if (cfType) {
       CFStringRef cfTypeDesc = NULL;
       if (::LSCopyKindStringForMIMEType(cfType, &cfTypeDesc) == noErr) {
-        AutoTArray<UniChar, 255> buffer;
+        nsAutoTArray<UniChar, 255> buffer;
         CFIndex typeDescLength = ::CFStringGetLength(cfTypeDesc);
         buffer.SetLength(typeDescLength);
         ::CFStringGetCharacters(cfTypeDesc, CFRangeMake(0, typeDescLength),

@@ -187,7 +187,7 @@ ParseClockValue(RangedPtr<const char16_t>& aIter,
           !ParseColon(iter, aEnd)) {
         return false;
       }
-      MOZ_FALLTHROUGH;
+      // intentional fall through
     case PARTIAL_CLOCK_VALUE:
       if (!ParseSecondsOrMinutes(iter, aEnd, minutes) ||
           !ParseColon(iter, aEnd) ||
@@ -351,7 +351,7 @@ ConvertUnescapedTokenToAtom(const nsAString& aToken)
   // Whether the token is an id-ref or event-symbol it should be a valid NCName
   if (aToken.IsEmpty() || NS_FAILED(nsContentUtils::CheckQName(aToken, false)))
     return nullptr;
-  return NS_Atomize(aToken);
+  return do_GetAtom(aToken);
 }
     
 already_AddRefed<nsIAtom>
@@ -416,7 +416,7 @@ ParseElementBaseTimeValueSpec(const nsAString& aSpec,
   bool requiresUnescaping;
   MoveToNextToken(tokenEnd, end, true, requiresUnescaping);
 
-  RefPtr<nsIAtom> atom =
+  nsRefPtr<nsIAtom> atom =
     ConvertTokenToAtom(Substring(start.get(), tokenEnd.get()),
                        requiresUnescaping);
   if (atom == nullptr) {

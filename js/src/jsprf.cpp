@@ -375,11 +375,11 @@ BuildArgArray(const char* fmt, va_list ap, NumArgStateVector& nas)
             if (c > '9' || c < '0') {
                 if (c == '$') {         // numbered argument case
                     if (i > 0)
-                        MOZ_CRASH("Bad format string");
+                        return false;
                     number++;
                 } else {                // non-numbered argument case
                     if (number > 0)
-                        MOZ_CRASH("Bad format string");
+                        return false;
                     i = 1;
                 }
                 break;
@@ -417,7 +417,7 @@ BuildArgArray(const char* fmt, va_list ap, NumArgStateVector& nas)
         }
 
         if (!c || cn < 1 || cn > number)
-            MOZ_CRASH("Bad format string");
+            return false;
 
         // nas[cn] starts from 0, and make sure nas[cn].type is not assigned.
         cn--;
@@ -429,7 +429,7 @@ BuildArgArray(const char* fmt, va_list ap, NumArgStateVector& nas)
         // width
         if (c == '*') {
             // not supported feature, for the argument is not numbered
-            MOZ_CRASH("Bad format string");
+            return false;
         }
 
         while ((c >= '0') && (c <= '9')) {
@@ -441,7 +441,7 @@ BuildArgArray(const char* fmt, va_list ap, NumArgStateVector& nas)
             c = *p++;
             if (c == '*') {
                 // not supported feature, for the argument is not numbered
-                MOZ_CRASH("Bad format string");
+                return false;
             }
 
             while ((c >= '0') && (c <= '9')) {
@@ -527,7 +527,7 @@ BuildArgArray(const char* fmt, va_list ap, NumArgStateVector& nas)
 
         // get a legal para.
         if (nas[cn].type == TYPE_UNKNOWN)
-            MOZ_CRASH("Bad format string");
+            return false;
     }
 
 
@@ -557,7 +557,7 @@ BuildArgArray(const char* fmt, va_list ap, NumArgStateVector& nas)
         case TYPE_INTSTR:       (void) va_arg(ap, int*);        break;
         case TYPE_DOUBLE:       (void) va_arg(ap, double);      break;
 
-        default: MOZ_CRASH();
+        default: return false;
         }
 
         cn++;
@@ -599,7 +599,8 @@ dosprintf(SprintfState* ss, const char* fmt, va_list ap)
     NumArgStateVector nas;
     if (!BuildArgArray(fmt, ap, nas)) {
         // the fmt contains error Numbered Argument format, jliu@netscape.com
-        MOZ_CRASH("Bad format string");
+        MOZ_ASSERT(0);
+        return false;
     }
 
     while ((c = *fmt++) != 0) {
@@ -632,7 +633,7 @@ dosprintf(SprintfState* ss, const char* fmt, va_list ap)
             }
 
             if (nas[i - 1].type == TYPE_UNKNOWN)
-                MOZ_CRASH("Bad format string");
+                return false;
 
             ap = nas[i - 1].ap;
             dolPt = fmt;
@@ -996,8 +997,8 @@ JS_snprintf(char* out, uint32_t outlen, const char* fmt, ...)
     va_list ap;
     int rv;
 
-    MOZ_ASSERT(outlen > 0);
-    if (outlen == 0)
+    MOZ_ASSERT(int32_t(outlen) > 0);
+    if (int32_t(outlen) <= 0)
         return 0;
 
     va_start(ap, fmt);
@@ -1010,8 +1011,10 @@ JS_PUBLIC_API(uint32_t)
 JS_vsnprintf(char* out, uint32_t outlen, const char* fmt, va_list ap)
 {
     SprintfState ss;
+    uint32_t n;
 
-    if (outlen == 0)
+    MOZ_ASSERT(int32_t(outlen) > 0);
+    if (int32_t(outlen) <= 0)
         return 0;
 
     ss.stuff = LimitStuff;
@@ -1020,19 +1023,12 @@ JS_vsnprintf(char* out, uint32_t outlen, const char* fmt, va_list ap)
     ss.maxlen = outlen;
     (void) dosprintf(&ss, fmt, ap);
 
-    uint32_t charsWritten = ss.cur - ss.base;
-    MOZ_RELEASE_ASSERT(charsWritten > 0);
-
-    // If we didn't append a null then we must have hit the buffer limit. Write
-    // a null terminator now and return a value indicating that we failed.
-    if (ss.cur[-1] != '\0') {
+    /* If we added chars, and we didn't append a null, do it now. */
+    if (ss.cur != ss.base && ss.cur[-1] != '\0')
         ss.cur[-1] = '\0';
-        return outlen;
-    }
 
-    // Success: return the number of character written excluding the null
-    // terminator.
-    return charsWritten - 1;
+    n = ss.cur - ss.base;
+    return n ? n - 1 : n;
 }
 
 JS_PUBLIC_API(char*)

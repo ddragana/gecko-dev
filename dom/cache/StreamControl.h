@@ -8,14 +8,14 @@
 #define mozilla_dom_cache_StreamControl_h
 
 #include "mozilla/dom/cache/ReadStream.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsTObserverArray.h"
 
 struct nsID;
 
 namespace mozilla {
 namespace ipc {
-class AutoIPCStream;
+ class FileDescriptor;
 } // namespace ipc
 namespace dom {
 namespace cache {
@@ -33,8 +33,12 @@ public:
   SerializeControl(CacheReadStream* aReadStreamOut) = 0;
 
   virtual void
-  SerializeStream(CacheReadStream* aReadStreamOut, nsIInputStream* aStream,
-                  nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList) = 0;
+  SerializeFds(CacheReadStream* aReadStreamOut,
+               const nsTArray<mozilla::ipc::FileDescriptor>& aFds) = 0;
+
+  virtual void
+  DeserializeFds(const CacheReadStream& aReadStream,
+                 nsTArray<mozilla::ipc::FileDescriptor>& aFdsOut) = 0;
 
   // inherited implementation of the ReadStream::Controllable list
 
@@ -81,7 +85,7 @@ protected:
 private:
   // Hold strong references to ReadStream object.  When the stream is closed
   // it should call NoteClosed() or ForgetReadStream() to release this ref.
-  typedef nsTObserverArray<RefPtr<ReadStream::Controllable>> ReadStreamList;
+  typedef nsTObserverArray<nsRefPtr<ReadStream::Controllable>> ReadStreamList;
   ReadStreamList mReadStreamList;
 };
 

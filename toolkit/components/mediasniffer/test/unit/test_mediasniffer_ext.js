@@ -2,17 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cc = Components.classes;
-var CC = Components.Constructor;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
+const Cc = Components.classes;
+const CC = Components.Constructor;
 
 var BinaryOutputStream = CC("@mozilla.org/binaryoutputstream;1",
                             "nsIBinaryOutputStream",
                             "setOutputStream");
 
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var httpserver = new HttpServer();
 
@@ -69,11 +69,17 @@ var listener = {
 };
 
 function setupChannel(url) {
-  var chan = NetUtil.newChannel({
-    uri: "http://localhost:" + httpserver.identity.primaryPort + url,
-    loadUsingSystemPrincipal: true,
-    contentPolicyType: Ci.nsIContentPolicy.TYPE_MEDIA
-  });
+  var ios = Components.classes["@mozilla.org/network/io-service;1"].
+                       getService(Ci.nsIIOService);
+  var chan = ios.newChannel2("http://localhost:" +
+                             httpserver.identity.primaryPort + url,
+                             "",
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_MEDIA);
   var httpChan = chan.QueryInterface(Components.interfaces.nsIHttpChannel);
   return httpChan;
 }
@@ -84,7 +90,7 @@ function runNext() {
     return;
   }
   var channel = setupChannel("/");
-  channel.asyncOpen2(listener);
+  channel.asyncOpen(listener, channel, null);
 }
 
 function getFileContents(aFile) {

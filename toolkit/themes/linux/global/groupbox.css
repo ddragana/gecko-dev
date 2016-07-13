@@ -16,7 +16,7 @@ groupbox {
 }
 
 .groupbox-body {
-  padding-inline-start: 10px;
+  -moz-padding-start: 10px;
 }
 
 caption {
@@ -28,5 +28,5 @@ caption {
 .caption-text {
   margin-top: 0 !important;
   margin-bottom: 0 !important;
-  margin-inline-start: 1px !important;
+  -moz-margin-start: 1px !important;
 }

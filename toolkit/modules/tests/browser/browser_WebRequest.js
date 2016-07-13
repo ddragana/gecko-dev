@@ -1,13 +1,13 @@
 "use strict";
 
-var { interfaces: Ci, classes: Cc, utils: Cu, results: Cr } = Components;
+const { interfaces: Ci, classes: Cc, utils: Cu, results: Cr } = Components;
 
-var {WebRequest} = Cu.import("resource://gre/modules/WebRequest.jsm", {});
+let {WebRequest} = Cu.import("resource://gre/modules/WebRequest.jsm", {});
 
 const BASE = "http://example.com/browser/toolkit/modules/tests/browser";
 const URL = BASE + "/file_WebRequest_page1.html";
 
-var expected_browser;
+let expected_browser;
 
 function checkType(details)
 {
@@ -20,7 +20,7 @@ function checkType(details)
     expected_type = "script";
   } else if (details.url.indexOf("page1") != -1) {
     expected_type = "main_frame";
-  } else if (/page2|_redirection\.|dummy_page/.test(details.url)) {
+  } else if (details.url.indexOf("page2") != -1) {
     expected_type = "sub_frame";
   } else if (details.url.indexOf("xhr") != -1) {
     expected_type = "xmlhttprequest";
@@ -28,9 +28,9 @@ function checkType(details)
   is(details.type, expected_type, "resource type is correct");
 }
 
-var windowIDs = new Map();
+let windowIDs = new Map();
 
-var requested = [];
+let requested = [];
 
 function onBeforeRequest(details)
 {
@@ -51,10 +51,9 @@ function onBeforeRequest(details)
   if (details.url.indexOf("_bad.") != -1) {
     return {cancel: true};
   }
-  return undefined;
 }
 
-var sendHeaders = [];
+let sendHeaders = [];
 
 function onBeforeSendHeaders(details)
 {
@@ -71,32 +70,9 @@ function onBeforeSendHeaders(details)
   if (details.url.indexOf("_redirect.") != -1) {
     return {redirectUrl: details.url.replace("_redirect.", "_good.")};
   }
-  return undefined;
 }
 
-var beforeRedirect = [];
-
-function onBeforeRedirect(details)
-{
-  info(`onBeforeRedirect ${details.url} -> ${details.redirectUrl}`);
-  checkType(details);
-  if (details.url.startsWith(BASE)) {
-    beforeRedirect.push(details.url);
-
-    is(details.browser, expected_browser, "correct <browser> element");
-    checkType(details);
-
-    let expectedUrl = details.url.replace("_redirect.", "_good.").replace(/\w+_redirection\..*/, "dummy_page.html")
-    is(details.redirectUrl, expectedUrl, "Correct redirectUrl value");
-  }
-  let id = windowIDs.get(details.url);
-  is(id, details.windowId, "window ID same in onBeforeRedirect as onBeforeRequest");
-  // associate stored windowId with final url
-  windowIDs.set(details.redirectUrl, details.windowId);
-  return {};
-}
-
-var headersReceived = [];
+let headersReceived = [];
 
 function onResponseStarted(details)
 {
@@ -118,8 +94,6 @@ const expected_requested = [BASE + "/file_WebRequest_page1.html",
                             BASE + "/file_script_xhr.js",
                             BASE + "/file_WebRequest_page2.html",
                             BASE + "/nonexistent_script_url.js",
-                            BASE +  "/WebRequest_redirection.sjs",
-                            BASE + "/dummy_page.html",
                             BASE + "/xhr_resource"];
 
 const expected_sendHeaders = [BASE + "/file_WebRequest_page1.html",
@@ -132,12 +106,7 @@ const expected_sendHeaders = [BASE + "/file_WebRequest_page1.html",
                               BASE + "/file_script_xhr.js",
                               BASE + "/file_WebRequest_page2.html",
                               BASE + "/nonexistent_script_url.js",
-                              BASE +  "/WebRequest_redirection.sjs",
-                              BASE + "/dummy_page.html",
                               BASE + "/xhr_resource"];
-
-const expected_beforeRedirect = expected_sendHeaders.filter(u => /_redirect\./.test(u))
-                                  .concat(BASE +  "/WebRequest_redirection.sjs");
 
 const expected_headersReceived = [BASE + "/file_WebRequest_page1.html",
                                   BASE + "/file_style_good.css",
@@ -146,7 +115,6 @@ const expected_headersReceived = [BASE + "/file_WebRequest_page1.html",
                                   BASE + "/file_script_xhr.js",
                                   BASE + "/file_WebRequest_page2.html",
                                   BASE + "/nonexistent_script_url.js",
-                                  BASE + "/dummy_page.html",
                                   BASE + "/xhr_resource"];
 
 function removeDupes(list)
@@ -176,20 +144,17 @@ function* test_once()
 {
   WebRequest.onBeforeRequest.addListener(onBeforeRequest, null, ["blocking"]);
   WebRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders, null, ["blocking"]);
-  WebRequest.onBeforeRedirect.addListener(onBeforeRedirect);
   WebRequest.onResponseStarted.addListener(onResponseStarted);
 
   gBrowser.selectedTab = gBrowser.addTab();
   let browser = gBrowser.selectedBrowser;
   expected_browser = browser;
 
-  yield BrowserTestUtils.browserLoaded(expected_browser);
+  yield waitForLoad();
 
   browser.messageManager.loadFrameScript(`data:,content.location = "${URL}";`, false);
 
-  yield BrowserTestUtils.browserLoaded(expected_browser);
-
-  expected_browser = null;
+  yield waitForLoad();
 
   let win = browser.contentWindow.wrappedJSObject;
   is(win.success, 2, "Good script ran");
@@ -198,19 +163,26 @@ function* test_once()
   let style = browser.contentWindow.getComputedStyle(browser.contentDocument.getElementById("test"), null);
   is(style.getPropertyValue("color"), "rgb(255, 0, 0)", "Good CSS loaded");
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  gBrowser.removeCurrentTab();
 
   compareLists(requested, expected_requested, "requested");
   compareLists(sendHeaders, expected_sendHeaders, "sendHeaders");
-  compareLists(beforeRedirect, expected_beforeRedirect, "beforeRedirect");
   compareLists(headersReceived, expected_headersReceived, "headersReceived");
 
   WebRequest.onBeforeRequest.removeListener(onBeforeRequest);
   WebRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders);
-  WebRequest.onBeforeRedirect.removeListener(onBeforeRedirect);
   WebRequest.onResponseStarted.removeListener(onResponseStarted);
 }
 
 // Run the test twice to make sure it works with caching.
 add_task(test_once);
 add_task(test_once);
+
+function waitForLoad(browser = gBrowser.selectedBrowser) {
+  return new Promise(resolve => {
+    browser.addEventListener("load", function listener() {
+      browser.removeEventListener("load", listener, true);
+      resolve();
+    }, true);
+  });
+}

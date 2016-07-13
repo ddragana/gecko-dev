@@ -4,18 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsNSSIOLayer_h
-#define nsNSSIOLayer_h
+#ifndef _NSNSSIOLAYER_H
+#define _NSNSSIOLAYER_H
 
 #include "TransportSecurityInfo.h"
-#include "mozilla/TimeStamp.h"
-#include "nsCOMPtr.h"
-#include "nsDataHashtable.h"
-#include "nsIClientAuthDialogs.h"
-#include "nsIProxyInfo.h"
 #include "nsISSLSocketControl.h"
+#include "nsIClientAuthDialogs.h"
 #include "nsNSSCertificate.h"
+#include "nsDataHashtable.h"
 #include "nsTHashtable.h"
+#include "mozilla/TimeStamp.h"
 #include "sslt.h"
 
 namespace mozilla {
@@ -186,9 +184,12 @@ public:
   static PRIOMethods nsSSLPlaintextLayerMethods;
 
   bool mTreatUnsafeNegotiationAsBroken;
+  int32_t mWarnLevelMissingRFC5746;
 
   void setTreatUnsafeNegotiationAsBroken(bool broken);
   bool treatUnsafeNegotiationAsBroken();
+  void setWarnLevelMissingRFC5746(int32_t level);
+  int32_t getWarnLevelMissingRFC5746();
 
 private:
   struct IntoleranceEntry
@@ -228,13 +229,13 @@ public:
   void clearStoredData();
   void loadVersionFallbackLimit();
   void setInsecureFallbackSites(const nsCString& str);
-  void initInsecureFallbackSites();
-  bool isPublic() const;
-  void addInsecureFallbackSite(const nsCString& hostname, bool temporary);
-  void removeInsecureFallbackSite(const nsACString& hostname, uint16_t port);
   bool isInsecureFallbackSite(const nsACString& hostname);
 
   bool mFalseStartRequireNPN;
+  // Use the static list of sites that require insecure fallback
+  // to TLS 1.0 if true, set by the pref
+  // security.tls.insecure_fallback_hosts.use_static_list.
+  bool mUseStaticFallbackList;
   bool mUnrestrictedRC4Fallback;
   uint16_t mVersionFallbackLimit;
 private:
@@ -245,7 +246,8 @@ private:
 nsresult nsSSLIOLayerNewSocket(int32_t family,
                                const char* host,
                                int32_t port,
-                               nsIProxyInfo *proxy,
+                               const char* proxyHost,
+                               int32_t proxyPort,
                                PRFileDesc** fd,
                                nsISupports** securityInfo,
                                bool forSTARTTLS,
@@ -254,7 +256,8 @@ nsresult nsSSLIOLayerNewSocket(int32_t family,
 nsresult nsSSLIOLayerAddToSocket(int32_t family,
                                  const char* host,
                                  int32_t port,
-                                 nsIProxyInfo *proxy,
+                                 const char* proxyHost,
+                                 int32_t proxyPort,
                                  PRFileDesc* fd,
                                  nsISupports** securityInfo,
                                  bool forSTARTTLS,
@@ -263,4 +266,4 @@ nsresult nsSSLIOLayerAddToSocket(int32_t family,
 nsresult nsSSLIOLayerFreeTLSIntolerantSites();
 nsresult displayUnknownCertErrorAlert(nsNSSSocketInfo* infoObject, int error);
 
-#endif // nsNSSIOLayer_h
+#endif /* _NSNSSIOLAYER_H */

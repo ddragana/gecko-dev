@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-add_task(function* test() {
+function test() {
   // There should be one tab when we start the test
   let [origTab] = gBrowser.visibleTabs;
   is(gBrowser.visibleTabs.length, 1, "there is one visible tab");
@@ -36,7 +36,7 @@ add_task(function* test() {
   is(document.getElementById("context_closeTabsToTheEnd").disabled, true, "Close Tabs To The End is disabled");
 
   // Show all tabs
-  let allTabs = Array.from(gBrowser.tabs);
+  let allTabs = [tab for each (tab in gBrowser.tabs)];
   gBrowser.showOnlyTheseTabs(allTabs);
 
   // Check the context menu now
@@ -51,5 +51,4 @@ add_task(function* test() {
 
   gBrowser.removeTab(testTab);
   gBrowser.removeTab(pinned);
-});
-
+}

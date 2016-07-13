@@ -12,7 +12,7 @@
 #include "nsWrapperCache.h"
 
 class nsIInputPortService;
-class nsPIDOMWindowInner;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
@@ -28,11 +28,10 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(InputPortManager)
   NS_DECL_NSIINPUTPORTSERVICECALLBACK
 
-  static already_AddRefed<InputPortManager>
-  Create(nsPIDOMWindowInner* aWindow, ErrorResult& aRv);
+  static already_AddRefed<InputPortManager> Create(nsPIDOMWindow* aWindow, ErrorResult& aRv);
 
   // WebIDL (internal functions)
-  nsPIDOMWindowInner* GetParentObject() const;
+  nsPIDOMWindow* GetParentObject() const;
 
   virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -40,7 +39,7 @@ public:
   already_AddRefed<Promise> GetInputPorts(ErrorResult& aRv);
 
 private:
-  explicit InputPortManager(nsPIDOMWindowInner* aWindow);
+  explicit InputPortManager(nsPIDOMWindow* aWindow);
 
   ~InputPortManager();
 
@@ -48,11 +47,11 @@ private:
 
   void RejectPendingGetInputPortsPromises(nsresult aRv);
 
-  nsresult SetInputPorts(const nsTArray<RefPtr<InputPort>>& aPorts);
+  nsresult SetInputPorts(const nsTArray<nsRefPtr<InputPort>>& aPorts);
 
-  nsTArray<RefPtr<Promise>> mPendingGetInputPortsPromises;
-  nsTArray<RefPtr<InputPort>> mInputPorts;
-  nsCOMPtr<nsPIDOMWindowInner> mParent;
+  nsTArray<nsRefPtr<Promise>> mPendingGetInputPortsPromises;
+  nsTArray<nsRefPtr<InputPort>> mInputPorts;
+  nsCOMPtr<nsPIDOMWindow> mParent;
   nsCOMPtr<nsIInputPortService> mInputPortService;
   bool mIsReady;
 };

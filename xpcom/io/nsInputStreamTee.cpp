@@ -22,9 +22,16 @@ using namespace mozilla;
 #ifdef LOG
 #undef LOG
 #endif
-
-static LazyLogModule sTeeLog("nsInputStreamTee");
-#define LOG(args) MOZ_LOG(sTeeLog, mozilla::LogLevel::Debug, args)
+static PRLogModuleInfo*
+GetTeeLog()
+{
+  static PRLogModuleInfo* sLog;
+  if (!sLog) {
+    sLog = PR_NewLogModule("nsInputStreamTee");
+  }
+  return sLog;
+}
+#define LOG(args) MOZ_LOG(GetTeeLog(), mozilla::LogLevel::Debug, args)
 
 class nsInputStreamTee final : public nsIInputStreamTee
 {
@@ -57,7 +64,7 @@ private:
   bool                      mSinkIsValid; // False if TeeWriteEvent fails
 };
 
-class nsInputStreamTeeWriteEvent : public Runnable
+class nsInputStreamTeeWriteEvent : public nsRunnable
 {
 public:
   // aTee's lock is held across construction of this object
@@ -128,7 +135,7 @@ private:
   uint32_t mCount;
   nsCOMPtr<nsIOutputStream> mSink;
   // back pointer to the tee that created this runnable
-  RefPtr<nsInputStreamTee> mTee;
+  nsRefPtr<nsInputStreamTee> mTee;
 };
 
 nsInputStreamTee::nsInputStreamTee(): mLock(nullptr)
@@ -351,7 +358,7 @@ NS_NewInputStreamTeeAsync(nsIInputStream** aResult,
     return rv;
   }
 
-  tee.forget(aResult);
+  NS_ADDREF(*aResult = tee);
   return rv;
 }
 

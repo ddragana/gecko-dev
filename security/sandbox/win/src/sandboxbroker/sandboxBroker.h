@@ -7,8 +7,13 @@
 #ifndef __SECURITY_SANDBOX_SANDBOXBROKER_H__
 #define __SECURITY_SANDBOX_SANDBOXBROKER_H__
 
+#ifdef SANDBOX_EXPORTS
+#define SANDBOX_EXPORT __declspec(dllexport)
+#else
+#define SANDBOX_EXPORT __declspec(dllimport)
+#endif
+
 #include <stdint.h>
-#include <windows.h>
 
 namespace sandbox {
   class BrokerServices;
@@ -17,13 +22,10 @@ namespace sandbox {
 
 namespace mozilla {
 
-class SandboxBroker
+class SANDBOX_EXPORT SandboxBroker
 {
 public:
   SandboxBroker();
-
-  static void Initialize(sandbox::BrokerServices* aBrokerServices);
-
   bool LaunchApp(const wchar_t *aPath,
                  const wchar_t *aArguments,
                  const bool aEnableLogging,
@@ -32,26 +34,16 @@ public:
 
   // Security levels for different types of processes
 #if defined(MOZ_CONTENT_SANDBOX)
-  void SetSecurityLevelForContentProcess(int32_t aSandboxLevel);
+  bool SetSecurityLevelForContentProcess(int32_t aSandboxLevel);
 #endif
   bool SetSecurityLevelForPluginProcess(int32_t aSandboxLevel);
-  enum SandboxLevel {
-    LockDown,
-    Restricted
-  };
-  bool SetSecurityLevelForGMPlugin(SandboxLevel aLevel);
+  bool SetSecurityLevelForIPDLUnitTestProcess();
+  bool SetSecurityLevelForGMPlugin();
 
   // File system permissions
   bool AllowReadFile(wchar_t const *file);
   bool AllowReadWriteFile(wchar_t const *file);
   bool AllowDirectory(wchar_t const *dir);
-
-  // Exposes AddTargetPeer from broker services, so that none sandboxed
-  // processes can be added as handle duplication targets.
-  bool AddTargetPeer(HANDLE aPeerProcess);
-
-  // Set up dummy interceptions via the broker, so we can log calls.
-  void ApplyLoggingPolicy();
 
 private:
   static sandbox::BrokerServices *sBrokerService;

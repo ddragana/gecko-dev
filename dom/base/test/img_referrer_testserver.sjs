@@ -1,15 +1,10 @@
 var BASE_URL = 'example.com/tests/dom/base/test/img_referrer_testserver.sjs';
-const IMG_BYTES = atob(
-  "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12" +
-  "P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==");
 
-function createTestUrl(aPolicy, aAction, aName, aContent) {
-  var content = aContent || 'text';
+function createTestUrl(aPolicy, aAction, aName) {
   return 'http://' + BASE_URL + '?' +
          'action=' + aAction + '&' +
          'policy=' + aPolicy + '&' +
-         'name=' + aName + '&' +
-         'content=' + content;
+         'name=' + aName;
 }
 
 function createTestPage(aHead, aImgPolicy, aName) {
@@ -19,7 +14,7 @@ function createTestPage(aHead, aImgPolicy, aName) {
          <html>'+
             aHead +
            '<body>\n\
-             <img src="' + _createTestUrl('img') + '" referrerpolicy="' + aImgPolicy + '" id="image"></img>\n\
+             <img src="' + _createTestUrl('img') + '" referrer="' + aImgPolicy + '" id="image"></img>\n\
              <script>' +
 
                // LOAD EVENT (of the test)
@@ -57,9 +52,9 @@ function createTest3(aImgPolicy1, aImgPolicy2, aImgPolicy3, aName) {
   return '<!DOCTYPE HTML>\n\
          <html>\n\
            <body>\n\
-             <img src="' + createTestUrl(aImgPolicy1, 'test', aName + aImgPolicy1) + '" referrerpolicy="' + aImgPolicy1 + '" id="image"></img>\n\
-             <img src="' + createTestUrl(aImgPolicy2, 'test', aName + aImgPolicy2) + '" referrerpolicy="' + aImgPolicy2 + '" id="image"></img>\n\
-             <img src="' + createTestUrl(aImgPolicy3, 'test', aName + aImgPolicy3) + '" referrerpolicy="' + aImgPolicy3 + '" id="image"></img>\n\
+             <img src="' + createTestUrl(aImgPolicy1, 'test', aName + aImgPolicy1) + '" referrer="' + aImgPolicy1 + '" id="image"></img>\n\
+             <img src="' + createTestUrl(aImgPolicy2, 'test', aName + aImgPolicy2) + '" referrer="' + aImgPolicy2 + '" id="image"></img>\n\
+             <img src="' + createTestUrl(aImgPolicy3, 'test', aName + aImgPolicy3) + '" referrer="' + aImgPolicy3 + '" id="image"></img>\n\
              <script>\n\
                var _numLoads = 0;' +
 
@@ -93,61 +88,6 @@ function createTestPage2(aHead, aPolicy, aName) {
          </html>';
 }
 
-function createTestPage3(aHead, aPolicy, aName) {
-  return '<!DOCTYPE HTML>\n\
-         <html>'+
-            aHead +
-           '<body>\n\
-             <script>' +
-               'var image = new Image();\n\
-               image.src = "' + createTestUrl(aPolicy, "test", aName, "image") + '";\n\
-               image.referrerPolicy = "' + aPolicy + '";\n\
-               image.onload = function() {\n\
-                 window.parent.postMessage("childLoadComplete", "http://mochi.test:8888");\n\
-               }\n\
-               document.body.appendChild(image);' +
-
-             '</script>\n\
-           </body>\n\
-         </html>';
-}
-
-function createTestPage4(aHead, aPolicy, aName) {
-  return '<!DOCTYPE HTML>\n\
-         <html>'+
-            aHead +
-           '<body>\n\
-             <script>' +
-               'var image = new Image();\n\
-               image.referrerPolicy = "' + aPolicy + '";\n\
-               image.src = "' + createTestUrl(aPolicy, "test", aName, "image") + '";\n\
-               image.onload = function() {\n\
-                 window.parent.postMessage("childLoadComplete", "http://mochi.test:8888");\n\
-               }\n\
-               document.body.appendChild(image);' +
-
-             '</script>\n\
-           </body>\n\
-         </html>';
-}
-
-function createSetAttributeTest1(aPolicy, aImgPolicy, aName) {
-  var headString = '<head>';
-  headString += '<meta name="referrer" content="' + aPolicy + '">';
-  headString += '<script></script>';
-
-  return createTestPage3(headString, aImgPolicy, aName);
-}
-
-function createSetAttributeTest2(aPolicy, aImgPolicy, aName) {
-  var headString = '<head>';
-  headString += '<meta name="referrer" content="' + aPolicy + '">';
-  headString += '<script></script>';
-
-  return createTestPage4(headString, aImgPolicy, aName);
-}
-
-
 function createTest4(aPolicy, aName) {
   var headString = '<head>';
   headString += '<meta name="referrer" content="' + aPolicy + '">';
@@ -179,10 +119,9 @@ function handleRequest(request, response) {
     return;
   }
   if (action === 'test') {
-    // ?action=test&policy=origin&name=name&content=content
+    // ?action=test&policy=origin&name=name
     var policy = params[1].split('=')[1];
     var name = params[2].split('=')[1];
-    var content = params[3].split('=')[1];
     var result = getSharedState(sharedKey);
 
     if (result === '') {
@@ -201,7 +140,7 @@ function handleRequest(request, response) {
         let referrer = request.getHeader('Referer');
       if (referrer.indexOf("img_referrer_testserver") > 0) {
         referrerLevel = "full";
-      } else if (referrer == "http://mochi.test:8888/") {
+      } else if (referrer == "http://mochi.test:8888") {
         referrerLevel = "origin";
       }
       test.referrer = request.getHeader('Referer');
@@ -214,11 +153,6 @@ function handleRequest(request, response) {
     result["tests"][name] = test;
 
     setSharedState(sharedKey, JSON.stringify(result));
-
-    if (content === 'image') {
-      response.setHeader("Content-Type", "image/png");
-      response.write(IMG_BYTES);
-    }
     return;
   }
   if (action === 'get-test-results') {
@@ -270,26 +204,6 @@ function handleRequest(request, response) {
     var name = unescape(params[2].split('=')[1]);
 
     response.write(createTest5(policy, name));
-    return;
-  }
-
-  if (action === 'generate-setAttribute-test1') {
-    // ?action=generate-setAttribute-test1&policy=b64-encoded-string&name=name
-    var imgPolicy = unescape(params[1].split('=')[1]);
-    var policy = unescape(params[2].split('=')[1]);
-    var name = unescape(params[3].split('=')[1]);
-
-    response.write(createSetAttributeTest1(policy, imgPolicy, name));
-    return;
-  }
-
-  if (action === 'generate-setAttribute-test2') {
-    // ?action=generate-setAttribute-test2&policy=b64-encoded-string&name=name
-    var imgPolicy = unescape(params[1].split('=')[1]);
-    var policy = unescape(params[2].split('=')[1]);
-    var name = unescape(params[3].split('=')[1]);
-
-    response.write(createSetAttributeTest2(policy, imgPolicy, name));
     return;
   }
 

@@ -202,6 +202,10 @@ status_t FramebufferSurface::compositionComplete()
     return NO_ERROR;
 }
 
+void FramebufferSurface::dump(String8& result) const {
+    ConsumerBase::dump(result);
+}
+
 // ----------------------------------------------------------------------------
 }; // namespace android
 // ----------------------------------------------------------------------------

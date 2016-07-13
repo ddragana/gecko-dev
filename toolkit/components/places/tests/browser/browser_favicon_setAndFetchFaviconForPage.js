@@ -18,9 +18,9 @@ function test() {
   function testOnWindow(aOptions, aCallback) {
     whenNewWindowLoaded(aOptions, function(aWin) {
       windowsToClose.push(aWin);
-      executeSoon(() => aCallback(aWin));
+      executeSoon(function() aCallback(aWin));
     });
-  }
+  };
 
   // This function is called after calling finish() on the test.
   registerCleanupFunction(function() {
@@ -33,7 +33,7 @@ function test() {
     NetUtil.asyncFetch({
       uri: favIconLocation,
       loadUsingSystemPrincipal: true,
-      contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_IMAGE
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_IMAGE
     }, function(inputStream, status) {
         if (!Components.isSuccessCode(status)) {
           ok(false, "Could not get the icon file");
@@ -67,9 +67,8 @@ function test() {
 
     addVisits({uri: pageURI, transition: TRANSITION_TYPED}, aWindow,
       function () {
-        aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI, favIconURI,
-          true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
-          Services.scriptSecurityManager.getSystemPrincipal());
+        aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI,
+          favIconURI, true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
       }
     );
   }
@@ -87,8 +86,7 @@ function test() {
       aWindow.PlacesUtils.unfiledBookmarksFolderId, pageURI,
       aWindow.PlacesUtils.bookmarks.DEFAULT_INDEX, pageURI.spec);
     aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI, favIconURI,
-      true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
-      Services.scriptSecurityManager.getSystemPrincipal());
+      true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
   }
 
   function testPrivateBrowsingBookmarked(aWindow, aCallback) {
@@ -104,8 +102,7 @@ function test() {
       aWindow.PlacesUtils.unfiledBookmarksFolderId, pageURI,
       aWindow.PlacesUtils.bookmarks.DEFAULT_INDEX, pageURI.spec);
     aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI, favIconURI,
-      true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_PRIVATE, null,
-      Services.scriptSecurityManager.getSystemPrincipal());
+      true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_PRIVATE);
   }
 
   function testDisabledHistoryBookmarked(aWindow, aCallback) {
@@ -124,8 +121,7 @@ function test() {
       aWindow.PlacesUtils.unfiledBookmarksFolderId, pageURI,
       aWindow.PlacesUtils.bookmarks.DEFAULT_INDEX, pageURI.spec);
     aWindow.PlacesUtils.favicons.setAndFetchFaviconForPage(pageURI, favIconURI,
-      true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
-      Services.scriptSecurityManager.getSystemPrincipal());
+      true, aWindow.PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
 
     // The setAndFetchFaviconForPage function calls CanAddURI synchronously, thus
     // we can set the preference back to true immediately.  We don't clear the

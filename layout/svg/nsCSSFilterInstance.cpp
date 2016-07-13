@@ -324,8 +324,8 @@ nsCSSFilterInstance::BlurRadiusToFilterSpace(nscoord aRadiusInFrameSpace)
     nsPresContext::AppUnitsToFloatCSSPixels(aRadiusInFrameSpace);
 
   // Convert the radius to filter space.
-  Size radiusInFilterSpace(radiusInFrameSpaceInCSSPx,
-                           radiusInFrameSpaceInCSSPx);
+  gfxSize radiusInFilterSpace(radiusInFrameSpaceInCSSPx,
+                              radiusInFrameSpaceInCSSPx);
   gfxSize frameSpaceInCSSPxToFilterSpaceScale =
     mFrameSpaceInCSSPxToFilterSpaceTransform.ScaleFactors(true);
   radiusInFilterSpace.Scale(frameSpaceInCSSPxToFilterSpaceScale.width,
@@ -336,11 +336,11 @@ nsCSSFilterInstance::BlurRadiusToFilterSpace(nscoord aRadiusInFrameSpace)
     NS_NOTREACHED("we shouldn't have parsed a negative radius in the style");
     return Size();
   }
-  Float maxStdDeviation = (Float)kMaxStdDeviation;
+  gfxFloat maxStdDeviation = (gfxFloat)kMaxStdDeviation;
   radiusInFilterSpace.width = std::min(radiusInFilterSpace.width, maxStdDeviation);
   radiusInFilterSpace.height = std::min(radiusInFilterSpace.height, maxStdDeviation);
 
-  return radiusInFilterSpace;
+  return ToSize(radiusInFilterSpace);
 }
 
 IntPoint

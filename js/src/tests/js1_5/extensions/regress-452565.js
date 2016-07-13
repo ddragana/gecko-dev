@@ -12,8 +12,10 @@ var expect = 'No Crash';
 printBugNumber(BUGNUMBER);
 printStatus (summary);
 
+jit(true);
 
 var c = undefined; (function() { for (var j=0;j<5;++j) { c = 1; } })();
 
+jit(false);
 
 reportCompare(expect, actual, summary);

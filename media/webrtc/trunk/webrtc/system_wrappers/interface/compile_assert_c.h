@@ -11,10 +11,8 @@
 #ifndef WEBRTC_SYSTEM_WRAPPERS_INTERFACE_COMPILE_ASSERT_H_
 #define WEBRTC_SYSTEM_WRAPPERS_INTERFACE_COMPILE_ASSERT_H_
 
-#ifdef __cplusplus
-#error "Only use this for C files. For C++, use static_assert."
-#endif
-
+// Only use this for C files. For C++, use compile_assert.h.
+//
 // Use this macro to verify at compile time that certain restrictions are met.
 // The argument is the boolean expression to evaluate.
 // Example:

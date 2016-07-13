@@ -2,11 +2,10 @@ actual = '';
 expected = '10,';
 
 function f(x) {
-  {
-    let x2 = 10;
+  let (x = 10) {
     for (var i = 0; i < 5; ++i) {
       var g = function () {
-	appendToActual(x2);
+	appendToActual(x);
       };
     }
     g();

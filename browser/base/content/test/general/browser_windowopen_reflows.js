@@ -29,9 +29,9 @@ if (Services.appinfo.OS == "WINNT" || Services.appinfo.OS == "Darwin") {
   // TabsInTitlebar._update causes a reflow on OS X and Windows trying to do calculations
   // since layout info is already dirty. This doesn't seem to happen before
   // MozAfterPaint on Linux.
-  EXPECTED_REFLOWS.push("TabsInTitlebar._update/rect@chrome://browser/content/browser-tabsintitlebar.js|" +
-                          "TabsInTitlebar._update@chrome://browser/content/browser-tabsintitlebar.js|" +
-                          "updateAppearance@chrome://browser/content/browser-tabsintitlebar.js|" +
+  EXPECTED_REFLOWS.push("rect@chrome://browser/content/browser.js|" +
+                          "TabsInTitlebar._update@chrome://browser/content/browser.js|" +
+                          "updateAppearance@chrome://browser/content/browser.js|" +
                           "handleEvent@chrome://browser/content/tabbrowser.xml|");
 }
 
@@ -72,7 +72,7 @@ function test() {
   });
 }
 
-var observer = {
+let observer = {
   reflow: function (start, end) {
     // Gather information about the current code path.
     let stack = new Error().stack;

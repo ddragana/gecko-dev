@@ -895,6 +895,7 @@ nssCertificateList_DoCallback (
 {
     nssListIterator *certs;
     NSSCertificate *cert;
+    PRStatus nssrv;
     certs = nssList_CreateIterator(certList);
     if (!certs) {
         return PR_FAILURE;
@@ -903,7 +904,7 @@ nssCertificateList_DoCallback (
          cert != (NSSCertificate *)NULL;
          cert  = (NSSCertificate *)nssListIterator_Next(certs))
     {
-	(void)(*callback)(cert, arg);
+	nssrv = (*callback)(cert, arg);
     }
     nssListIterator_Finish(certs);
     nssListIterator_Destroy(certs);
@@ -1122,9 +1123,6 @@ nssCRL_Create (
                                           &rvCRL->url,
                                           &rvCRL->isKRL);
     if (status != PR_SUCCESS) {
-	if (!arena) {
-	    nssPKIObject_Destroy((nssPKIObject *)rvCRL);
-	}
 	return (NSSCRL *)NULL;
     }
     return rvCRL;

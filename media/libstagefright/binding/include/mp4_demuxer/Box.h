@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include "nsTArray.h"
 #include "MediaResource.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include "mp4_demuxer/AtomType.h"
 #include "mp4_demuxer/ByteReader.h"
 
@@ -23,13 +23,13 @@ class Stream;
 class BoxContext
 {
 public:
-  BoxContext(Stream* aSource, const MediaByteRangeSet& aByteRanges)
+  BoxContext(Stream* aSource, const nsTArray<MediaByteRange>& aByteRanges)
     : mSource(aSource), mByteRanges(aByteRanges)
   {
   }
 
-  RefPtr<Stream> mSource;
-  const MediaByteRangeSet& mByteRanges;
+  nsRefPtr<Stream> mSource;
+  const nsTArray<MediaByteRange>& mByteRanges;
 };
 
 class Box
@@ -38,7 +38,7 @@ public:
   Box(BoxContext* aContext, uint64_t aOffset, const Box* aParent = nullptr);
   Box();
 
-  bool IsAvailable() const { return !mRange.IsEmpty(); }
+  bool IsAvailable() const { return !mRange.IsNull(); }
   uint64_t Offset() const { return mRange.mStart; }
   uint64_t Length() const { return mRange.mEnd - mRange.mStart; }
   uint64_t NextOffset() const { return mRange.mEnd; }
@@ -50,8 +50,6 @@ public:
   Box FirstChild() const;
   bool Read(nsTArray<uint8_t>* aDest);
   bool Read(nsTArray<uint8_t>* aDest, const MediaByteRange& aRange);
-
-  static const uint64_t kMAX_BOX_READ;
 
 private:
   bool Contains(MediaByteRange aRange) const;

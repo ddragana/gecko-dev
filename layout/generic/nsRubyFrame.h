@@ -13,6 +13,8 @@
 
 class nsRubyBaseContainerFrame;
 
+typedef nsInlineFrame nsRubyFrameSuper;
+
 /**
  * Factory function.
  * @return a newly allocated nsRubyFrame (infallible)
@@ -20,7 +22,7 @@ class nsRubyBaseContainerFrame;
 nsContainerFrame* NS_NewRubyFrame(nsIPresShell* aPresShell,
                                   nsStyleContext* aContext);
 
-class nsRubyFrame final : public nsInlineFrame
+class nsRubyFrame final : public nsRubyFrameSuper
 {
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -53,15 +55,14 @@ protected:
   friend nsContainerFrame* NS_NewRubyFrame(nsIPresShell* aPresShell,
                                            nsStyleContext* aContext);
   explicit nsRubyFrame(nsStyleContext* aContext)
-    : nsInlineFrame(aContext) {}
+    : nsRubyFrameSuper(aContext) {}
 
   void ReflowSegment(nsPresContext* aPresContext,
                      const nsHTMLReflowState& aReflowState,
                      nsRubyBaseContainerFrame* aBaseContainer,
                      nsReflowStatus& aStatus);
 
-  nsRubyBaseContainerFrame* PullOneSegment(const nsLineLayout* aLineLayout,
-                                           ContinuationTraversingState& aState);
+  nsRubyBaseContainerFrame* PullOneSegment(ContinuationTraversingState& aState);
 
   // The leading required to put the annotations.
   // They are not initialized until the first reflow.

@@ -37,9 +37,14 @@ nsReferencedElement::Reset(nsIContent* aFromContent, nsIURI* aURI,
   nsresult rv = nsContentUtils::ConvertStringFromEncoding(charset,
                                                           refPart,
                                                           ref);
-  if (NS_FAILED(rv) || ref.IsEmpty()) {
-    return;
+  if (NS_FAILED(rv)) {
+    // XXX Eww. If fallible malloc failed, using a conversion method that
+    // assumes UTF-8 and doesn't handle UTF-8 errors.
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=951082
+    CopyUTF8toUTF16(refPart, ref);
   }
+  if (ref.IsEmpty())
+    return;
 
   // Get the current document
   nsIDocument *doc = aFromContent->OwnerDoc();
@@ -49,19 +54,7 @@ nsReferencedElement::Reset(nsIContent* aFromContent, nsIURI* aURI,
   nsIContent* bindingParent = aFromContent->GetBindingParent();
   if (bindingParent) {
     nsXBLBinding* binding = bindingParent->GetXBLBinding();
-    if (!binding) {
-      // This happens, for example, if aFromContent is part of the content
-      // inserted by a call to nsIDocument::InsertAnonymousContent, which we
-      // also want to handle.  (It also happens for <use>'s anonymous
-      // content etc.)
-      Element* anonRoot =
-        doc->GetAnonRootIfInAnonymousContentContainer(aFromContent);
-      if (anonRoot) {
-        mElement = nsContentUtils::MatchElementId(anonRoot, ref);
-        // We don't have watching working yet for anonymous content, so bail out here.
-        return;
-      }
-    } else {
+    if (binding) {
       bool isEqualExceptRef;
       rv = aURI->EqualsExceptRef(binding->PrototypeBinding()->DocURI(),
                                  &isEqualExceptRef);
@@ -96,7 +89,7 @@ nsReferencedElement::Reset(nsIContent* aFromContent, nsIURI* aURI,
   bool isEqualExceptRef;
   rv = aURI->EqualsExceptRef(doc->GetDocumentURI(), &isEqualExceptRef);
   if (NS_FAILED(rv) || !isEqualExceptRef) {
-    RefPtr<nsIDocument::ExternalResourceLoad> load;
+    nsRefPtr<nsIDocument::ExternalResourceLoad> load;
     doc = doc->RequestExternalResource(aURI, aFromContent,
                                        getter_AddRefs(load));
     if (!doc) {
@@ -116,7 +109,7 @@ nsReferencedElement::Reset(nsIContent* aFromContent, nsIURI* aURI,
   }
 
   if (aWatch) {
-    nsCOMPtr<nsIAtom> atom = NS_Atomize(ref);
+    nsCOMPtr<nsIAtom> atom = do_GetAtom(ref);
     if (!atom)
       return;
     atom.swap(mWatchID);
@@ -138,7 +131,7 @@ nsReferencedElement::ResetWithID(nsIContent* aFromContent, const nsString& aID,
   // XXX Need to take care of XBL/XBL2
 
   if (aWatch) {
-    nsCOMPtr<nsIAtom> atom = NS_Atomize(aID);
+    nsCOMPtr<nsIAtom> atom = do_GetAtom(aID);
     if (!atom)
       return;
     atom.swap(mWatchID);
@@ -222,7 +215,7 @@ nsReferencedElement::Observe(Element* aOldElement,
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(nsReferencedElement::ChangeNotification,
-                             mozilla::Runnable)
+                             nsRunnable)
 
 NS_IMPL_ISUPPORTS(nsReferencedElement::DocumentLoadNotification,
                   nsIObserver)

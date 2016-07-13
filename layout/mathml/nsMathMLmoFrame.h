@@ -49,7 +49,7 @@ public:
          nsReflowStatus&          aStatus) override;
 
   virtual nsresult
-  Place(DrawTarget*          aDrawTarget,
+  Place(nsRenderingContext& aRenderingContext,
         bool                 aPlaceOrigin,
         nsHTMLReflowMetrics& aDesiredSize) override;
 
@@ -67,7 +67,7 @@ public:
   // This method is called by the parent frame to ask <mo> 
   // to stretch itself.
   NS_IMETHOD
-  Stretch(DrawTarget*          aDrawTarget,
+  Stretch(nsRenderingContext& aRenderingContext,
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
           nsHTMLReflowMetrics& aDesiredStretchSize) override;

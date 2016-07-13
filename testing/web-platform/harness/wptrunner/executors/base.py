@@ -63,7 +63,6 @@ class TestharnessResultConverter(object):
                 [test.subtest_result_cls(name, self.test_codes[status], message, stack)
                  for name, status, message, stack in subtest_results])
 
-
 testharness_result_converter = TestharnessResultConverter()
 
 
@@ -72,23 +71,10 @@ def reftest_result_converter(self, test, result):
                             extra=result.get("extra")), [])
 
 
-def pytest_result_converter(self, test, data):
-    harness_data, subtest_data = data
-
-    if subtest_data is None:
-        subtest_data = []
-
-    harness_result = test.result_cls(*harness_data)
-    subtest_results = [test.subtest_result_cls(*item) for item in subtest_data]
-
-    return (harness_result, subtest_results)
-
-
 class ExecutorException(Exception):
     def __init__(self, status, message):
         self.status = status
         self.message = message
-
 
 class TestExecutor(object):
     __metaclass__ = ABCMeta
@@ -130,13 +116,11 @@ class TestExecutor(object):
 
         :param runner: TestRunner instance that is going to run the tests"""
         self.runner = runner
-        if self.protocol is not None:
-            self.protocol.setup(runner)
+        self.protocol.setup(runner)
 
     def teardown(self):
         """Run cleanup steps after tests have finished"""
-        if self.protocol is not None:
-            self.protocol.teardown()
+        self.protocol.teardown()
 
     def run_test(self, test):
         """Run a particular test.
@@ -153,13 +137,13 @@ class TestExecutor(object):
         if result is Stop:
             return result
 
-        # log result of parent test
         if result[0].status == "ERROR":
             self.logger.debug(result[0].message)
 
         self.last_environment = test.environment
 
         self.runner.send_message("test_ended", test, result)
+
 
     def server_url(self, protocol):
         return "%s://%s:%s" % (protocol,
@@ -207,7 +191,6 @@ class RefTestExecutor(TestExecutor):
 
         self.screenshot_cache = screenshot_cache
 
-
 class RefTestImplementation(object):
     def __init__(self, executor):
         self.timeout_multiplier = executor.timeout_multiplier
@@ -223,12 +206,11 @@ class RefTestImplementation(object):
     def logger(self):
         return self.executor.logger
 
-    def get_hash(self, test, viewport_size, dpi):
+    def get_hash(self, test):
         timeout = test.timeout * self.timeout_multiplier
-        key = (test.url, viewport_size, dpi)
 
-        if key not in self.screenshot_cache:
-            success, data = self.executor.screenshot(test, viewport_size, dpi)
+        if test.url not in self.screenshot_cache:
+            success, data = self.executor.screenshot(test)
 
             if not success:
                 return False, data
@@ -236,14 +218,14 @@ class RefTestImplementation(object):
             screenshot = data
             hash_value = hashlib.sha1(screenshot).hexdigest()
 
-            self.screenshot_cache[key] = (hash_value, None)
+            self.screenshot_cache[test.url] = (hash_value, None)
 
-            rv = (hash_value, screenshot)
+            rv = True, (hash_value, screenshot)
         else:
-            rv = self.screenshot_cache[key]
+            rv = True, self.screenshot_cache[test.url]
 
-        self.message.append("%s %s" % (test.url, rv[0]))
-        return True, rv
+        self.message.append("%s %s" % (test.url, rv[1][0]))
+        return rv
 
     def is_pass(self, lhs_hash, rhs_hash, relation):
         assert relation in ("==", "!=")
@@ -252,8 +234,6 @@ class RefTestImplementation(object):
                 (relation == "!=" and lhs_hash != rhs_hash))
 
     def run_test(self, test):
-        viewport_size = test.viewport_size
-        dpi = test.dpi
         self.message = []
 
         # Depth-first search of reference tree, with the goal
@@ -267,7 +247,7 @@ class RefTestImplementation(object):
             nodes, relation = stack.pop()
 
             for i, node in enumerate(nodes):
-                success, data = self.get_hash(node, viewport_size, dpi)
+                success, data = self.get_hash(node)
                 if success is False:
                     return {"status": data[0], "message": data[1]}
 
@@ -284,7 +264,7 @@ class RefTestImplementation(object):
 
         for i, (node, screenshot) in enumerate(zip(nodes, screenshots)):
             if screenshot is None:
-                success, screenshot = self.retake_screenshot(node, viewport_size, dpi)
+                success, screenshot = self.retake_screenshot(node)
                 if success:
                     screenshots[i] = screenshot
 
@@ -295,20 +275,14 @@ class RefTestImplementation(object):
                 "message": "\n".join(self.message),
                 "extra": {"reftest_screenshots": log_data}}
 
-    def retake_screenshot(self, node, viewport_size, dpi):
-        success, data = self.executor.screenshot(node, viewport_size, dpi)
+    def retake_screenshot(self, node):
+        success, data = self.executor.screenshot(node)
         if not success:
             return False, data
 
-        key = (node.url, viewport_size, dpi)
-        hash_val, _ = self.screenshot_cache[key]
-        self.screenshot_cache[key] = hash_val, data
+        hash_val, _ = self.screenshot_cache[node.url]
+        self.screenshot_cache[node.url] = hash_val, data
         return True, data
-
-
-class WdspecExecutor(TestExecutor):
-    convert_result = pytest_result_converter
-
 
 class Protocol(object):
     def __init__(self, executor, browser):

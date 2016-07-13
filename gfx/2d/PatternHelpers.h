@@ -97,11 +97,11 @@ public:
   SurfacePattern* InitSurfacePattern(SourceSurface *aSourceSurface,
                                      ExtendMode aExtendMode,
                                      const Matrix &aMatrix = Matrix(),
-                                     SamplingFilter aSamplingFilter = SamplingFilter::GOOD,
+                                     Filter aFilter = Filter::GOOD,
                                      const IntRect &aSamplingRect = IntRect()) {
     MOZ_ASSERT(!mPattern);
     mPattern = new (mSurfacePattern.addr())
-      SurfacePattern(aSourceSurface, aExtendMode, aMatrix, aSamplingFilter, aSamplingRect);
+      SurfacePattern(aSourceSurface, aExtendMode, aMatrix, aFilter, aSamplingRect);
     return mSurfacePattern.addr();
   }
 
@@ -115,7 +115,7 @@ public:
 
   operator Pattern&() {
     if (!mPattern) {
-      MOZ_CRASH("GFX: GeneralPattern not initialized");
+      MOZ_CRASH("GeneralPattern not initialized");
     }
     return *mPattern;
   }

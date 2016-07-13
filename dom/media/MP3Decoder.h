@@ -13,15 +13,12 @@ namespace mozilla {
 class MP3Decoder : public MediaDecoder {
 public:
   // MediaDecoder interface.
-  explicit MP3Decoder(MediaDecoderOwner* aOwner) : MediaDecoder(aOwner) {}
-  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override;
+  MediaDecoder* Clone() override;
   MediaDecoderStateMachine* CreateStateMachine() override;
 
   // Returns true if the MP3 backend is preffed on, and we're running on a
   // platform that is likely to have decoders for the format.
   static bool IsEnabled();
-  static bool CanHandleMediaType(const nsACString& aType,
-                                 const nsAString& aCodecs);
 };
 
 } // namespace mozilla

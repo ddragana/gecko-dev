@@ -32,8 +32,10 @@ class nsSVGMarkerProperty;
 
 struct nsRect;
 
-class nsSVGPathGeometryFrame : public nsFrame
-                             , public nsISVGChildFrame
+typedef nsFrame nsSVGPathGeometryFrameBase;
+
+class nsSVGPathGeometryFrame : public nsSVGPathGeometryFrameBase,
+                               public nsISVGChildFrame
 {
   typedef mozilla::gfx::DrawTarget DrawTarget;
 
@@ -44,7 +46,7 @@ class nsSVGPathGeometryFrame : public nsFrame
 
 protected:
   explicit nsSVGPathGeometryFrame(nsStyleContext* aContext)
-    : nsFrame(aContext)
+    : nsSVGPathGeometryFrameBase(aContext)
   {
      AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_MAY_BE_TRANSFORMED);
   }
@@ -61,7 +63,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsFrame::IsFrameOfType(aFlags & ~(nsIFrame::eSVG | nsIFrame::eSVGGeometry));
+    return nsSVGPathGeometryFrameBase::IsFrameOfType(aFlags & ~(nsIFrame::eSVG | nsIFrame::eSVGGeometry));
   }
 
   virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,

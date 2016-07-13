@@ -128,12 +128,12 @@ richlistitem[type="download"] .dateTime {
   }
 
   #clearListButton {
-    margin-inline-start: 0;
+    -moz-margin-start: 0;
     margin-bottom: 0;
   }
 
   #searchbox {
-    margin-inline-end: 0;
+    -moz-margin-end: 0;
     margin-bottom: 0;
   }
 }

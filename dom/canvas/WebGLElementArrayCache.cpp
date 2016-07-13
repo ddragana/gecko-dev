@@ -311,8 +311,7 @@ public:
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const
     {
-        return mallocSizeOf(this) +
-               mTreeData.ShallowSizeOfExcludingThis(mallocSizeOf);
+        return mallocSizeOf(this) + mTreeData.SizeOfExcludingThis(mallocSizeOf);
     }
 };
 
@@ -324,7 +323,7 @@ struct TreeForType {};
 template<>
 struct TreeForType<uint8_t>
 {
-    static UniquePtr<WebGLElementArrayCacheTree<uint8_t>>&
+    static ScopedDeletePtr<WebGLElementArrayCacheTree<uint8_t>>&
     Value(WebGLElementArrayCache* b) {
         return b->mUint8Tree;
     }
@@ -333,7 +332,7 @@ struct TreeForType<uint8_t>
 template<>
 struct TreeForType<uint16_t>
 {
-    static UniquePtr<WebGLElementArrayCacheTree<uint16_t>>&
+    static ScopedDeletePtr<WebGLElementArrayCacheTree<uint16_t>>&
     Value(WebGLElementArrayCache* b) {
         return b->mUint16Tree;
     }
@@ -342,7 +341,7 @@ struct TreeForType<uint16_t>
 template<>
 struct TreeForType<uint32_t>
 {
-    static UniquePtr<WebGLElementArrayCacheTree<uint32_t>>&
+    static ScopedDeletePtr<WebGLElementArrayCacheTree<uint32_t>>&
     Value(WebGLElementArrayCache* b) {
         return b->mUint32Tree;
     }
@@ -488,9 +487,6 @@ WebGLElementArrayCache::BufferSubData(size_t pos, const void* ptr,
     if (!updateByteLength)
         return true;
 
-    // Note, using memcpy on shared racy data is not well-defined, this
-    // will need to use safe-for-races operations when those become available.
-    // See bug 1225033.
     if (ptr)
         memcpy(mBytes.Elements() + pos, ptr, updateByteLength);
     else
@@ -536,9 +532,9 @@ WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
     if (!mBytes.Length() || !countElements)
       return true;
 
-    UniquePtr<WebGLElementArrayCacheTree<T>>& tree = TreeForType<T>::Value(this);
+    ScopedDeletePtr<WebGLElementArrayCacheTree<T>>& tree = TreeForType<T>::Value(this);
     if (!tree) {
-        tree = MakeUnique<WebGLElementArrayCacheTree<T>>(*this);
+        tree = new WebGLElementArrayCacheTree<T>(*this);
         if (mBytes.Length()) {
             bool valid = tree->Update(0, mBytes.Length() - 1);
             if (!valid) {
@@ -628,7 +624,7 @@ size_t
 WebGLElementArrayCache::SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const
 {
     return mallocSizeOf(this) +
-           mBytes.ShallowSizeOfExcludingThis(mallocSizeOf) +
+           mBytes.SizeOfExcludingThis(mallocSizeOf) +
            SizeOfNullable(mallocSizeOf, mUint8Tree) +
            SizeOfNullable(mallocSizeOf, mUint16Tree) +
            SizeOfNullable(mallocSizeOf, mUint32Tree);

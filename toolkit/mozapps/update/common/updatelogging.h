@@ -17,7 +17,8 @@ public:
     return primaryLog;
   }
 
-  void Init(NS_tchar* sourcePath, const NS_tchar* fileName);
+  void Init(NS_tchar* sourcePath, const NS_tchar* fileName,
+            const NS_tchar* alternateFileName, bool append);
   void Finish();
   void Flush();
   void Printf(const char *fmt, ... );
@@ -38,7 +39,9 @@ protected:
 #define LOG_WARN(args) UpdateLog::GetPrimaryLog().WarnPrintf args
 #define LOG(args) UpdateLog::GetPrimaryLog().Printf args
 #define LogInit(PATHNAME_, FILENAME_) \
-  UpdateLog::GetPrimaryLog().Init(PATHNAME_, FILENAME_)
+  UpdateLog::GetPrimaryLog().Init(PATHNAME_, FILENAME_, 0, false)
+#define LogInitAppend(PATHNAME_, FILENAME_, ALTERNATE_) \
+  UpdateLog::GetPrimaryLog().Init(PATHNAME_, FILENAME_, ALTERNATE_, true)
 #define LogFinish() UpdateLog::GetPrimaryLog().Finish()
 #define LogFlush() UpdateLog::GetPrimaryLog().Flush()
 

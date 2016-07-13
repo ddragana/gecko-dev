@@ -32,15 +32,14 @@ class FixedList
     { }
 
     // Dynamic memory allocation requires the ability to report failure.
-    MOZ_MUST_USE bool init(TempAllocator& alloc, size_t length) {
+    bool init(TempAllocator& alloc, size_t length) {
         length_ = length;
         if (length == 0)
             return true;
 
-        size_t bytes;
-        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(length, &bytes)))
+        if (MOZ_UNLIKELY(length & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
             return false;
-        list_ = (T*)alloc.allocate(bytes);
+        list_ = (T*)alloc.allocate(length * sizeof(T));
         return list_ != nullptr;
     }
 
@@ -57,14 +56,13 @@ class FixedList
         length_ -= num;
     }
 
-    MOZ_MUST_USE bool growBy(TempAllocator& alloc, size_t num) {
+    bool growBy(TempAllocator& alloc, size_t num) {
         size_t newlength = length_ + num;
         if (newlength < length_)
             return false;
-        size_t bytes;
-        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(newlength, &bytes)))
+        if (MOZ_UNLIKELY(newlength & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
             return false;
-        T* list = (T*)alloc.allocate(bytes);
+        T* list = (T*)alloc.allocate((length_ + num) * sizeof(T));
         if (MOZ_UNLIKELY(!list))
             return false;
 
@@ -83,10 +81,6 @@ class FixedList
     const T& operator [](size_t index) const {
         MOZ_ASSERT(index < length_);
         return list_[index];
-    }
-
-    T* data() {
-        return list_;
     }
 
     T* begin() {

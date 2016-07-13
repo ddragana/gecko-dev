@@ -12,7 +12,7 @@ extern "C" {
 
 #include <vector>
 #include <string>
-#include "nsINetworkInterface.h"
+#include "nsINetworkManager.h"
 #include "nsINetworkInterfaceListService.h"
 #include "runnable_utils.h"
 #include "nsCOMPtr.h"
@@ -44,8 +44,7 @@ GetInterfaces(std::vector<NetworkInterface>* aInterfaces)
     nsINetworkInterfaceListService::LIST_NOT_INCLUDE_SUPL_INTERFACES |
     nsINetworkInterfaceListService::LIST_NOT_INCLUDE_MMS_INTERFACES |
     nsINetworkInterfaceListService::LIST_NOT_INCLUDE_IMS_INTERFACES |
-    nsINetworkInterfaceListService::LIST_NOT_INCLUDE_DUN_INTERFACES |
-    nsINetworkInterfaceListService::LIST_NOT_INCLUDE_FOTA_INTERFACES;
+    nsINetworkInterfaceListService::LIST_NOT_INCLUDE_DUN_INTERFACES;
   nsCOMPtr<nsINetworkInterfaceList> networkList;
   NS_ENSURE_SUCCESS(listService->GetDataInterfaceList(flags,
                                                       getter_AddRefs(networkList)),
@@ -58,8 +57,8 @@ GetInterfaces(std::vector<NetworkInterface>* aInterfaces)
   aInterfaces->clear();
 
   for (int32_t i = 0; i < listLength; i++) {
-    nsCOMPtr<nsINetworkInfo> info;
-    if (NS_FAILED(networkList->GetInterfaceInfo(i, getter_AddRefs(info)))) {
+    nsCOMPtr<nsINetworkInterface> iface;
+    if (NS_FAILED(networkList->GetInterface(i, getter_AddRefs(iface)))) {
       continue;
     }
 
@@ -71,7 +70,7 @@ GetInterfaces(std::vector<NetworkInterface>* aInterfaces)
     memset(&(interface.addr), 0, sizeof(interface.addr));
     interface.addr.sin_family = AF_INET;
 
-    if (NS_FAILED(info->GetAddresses(&ips, &prefixs, &count))) {
+    if (NS_FAILED(iface->GetAddresses(&ips, &prefixs, &count))) {
       continue;
     }
 
@@ -94,20 +93,20 @@ GetInterfaces(std::vector<NetworkInterface>* aInterfaces)
     }
 
     nsAutoString ifaceName;
-    if (NS_FAILED(info->GetName(ifaceName))) {
+    if (NS_FAILED(iface->GetName(ifaceName))) {
       continue;
     }
     interface.name = NS_ConvertUTF16toUTF8(ifaceName).get();
 
     int32_t type;
-    if (NS_FAILED(info->GetType(&type))) {
+    if (NS_FAILED(iface->GetType(&type))) {
       continue;
     }
     switch (type) {
-      case nsINetworkInfo::NETWORK_TYPE_WIFI:
+      case nsINetworkInterface::NETWORK_TYPE_WIFI:
         interface.type = NR_INTERFACE_TYPE_WIFI;
         break;
-      case nsINetworkInfo::NETWORK_TYPE_MOBILE:
+      case nsINetworkInterface::NETWORK_TYPE_MOBILE:
         interface.type = NR_INTERFACE_TYPE_MOBILE;
         break;
     }

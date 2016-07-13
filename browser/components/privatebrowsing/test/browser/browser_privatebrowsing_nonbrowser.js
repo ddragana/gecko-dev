@@ -15,13 +15,12 @@ function test() {
   let win = OpenBrowserWindow({private: true});
   win.addEventListener("load", function onLoad() {
     win.removeEventListener("load", onLoad, false);
-    let chromeWin = win.open("chrome://browser/content/places/places.xul",
-      "_blank", "chrome,extrachrome,menubar,resizable,scrollbars,status,toolbar");
-    chromeWin.addEventListener("load", function chromeWinLoad() {
-      chromeWin.removeEventListener("load", chromeWinLoad, false);
+    let consoleWin = win.open("chrome://global/content/console.xul", "_blank", "chrome,extrachrome,menubar,resizable,scrollbars,status,toolbar");
+    consoleWin.addEventListener("load", function consoleLoad() {
+      consoleWin.removeEventListener("load", consoleLoad, false);
       win.close();
     }, false);
-    windowsToClose.push(chromeWin);
+    windowsToClose.push(consoleWin);
   }, false);
 
   let observer = function() {

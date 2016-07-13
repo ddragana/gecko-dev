@@ -50,7 +50,7 @@ protected:
   }
 
 public:
-  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
+  virtual void SetVisibleRegion(const nsIntRegion& aRegion) override
   {
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -60,8 +60,9 @@ public:
   {
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
-    mInvalidRegion.Add(aRegion);
-    mValidRegion.Sub(mValidRegion, mInvalidRegion.GetRegion());
+    mInvalidRegion.Or(mInvalidRegion, aRegion);
+    mInvalidRegion.SimplifyOutward(20);
+    mValidRegion.Sub(mValidRegion, mInvalidRegion);
   }
 
   virtual void RenderLayer() override { RenderLayerWithReadback(nullptr); }
@@ -76,14 +77,7 @@ public:
     mValidRegion.SetEmpty();
     DestroyBackBuffer();
   }
-
-  virtual void HandleMemoryPressure() override
-  {
-    if (mContentClient) {
-      mContentClient->HandleMemoryPressure();
-    }
-  }
-
+  
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override
   {
     aAttrs = PaintedLayerAttributes(GetValidRegion());

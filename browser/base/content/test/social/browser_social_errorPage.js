@@ -9,7 +9,7 @@ function gc() {
   wu.garbageCollect();
 }
 
-var openChatWindow = Cu.import("resource://gre/modules/MozSocialAPI.jsm", {}).openChatWindow;
+let openChatWindow = Cu.import("resource://gre/modules/MozSocialAPI.jsm", {}).openChatWindow;
 
 function openPanel(url, panelCallback, loadCallback) {
   // open a flyout
@@ -43,7 +43,7 @@ function onSidebarLoad(callback) {
   }, true);
 }
 
-var manifest = { // normal provider
+let manifest = { // normal provider
   name: "provider 1",
   origin: "https://example.com",
   sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar_empty.html",
@@ -122,10 +122,6 @@ var tests = {
   },
 
   testChatWindow: function(next) {
-    todo(false, "Bug 1245799 is needed to make error pages work again for chat windows.");
-    next();
-    return;
-
     let panelCallbackCount = 0;
     // chatwindow tests throw errors, which muddy test output, if the worker
     // doesn't get test-init
@@ -138,7 +134,7 @@ var tests = {
         function() { // the "load" callback.
           todo_is(panelCallbackCount, 0, "Bug 833207 - should be no callback when error page loads.");
           let chat = getChatBar().selectedChat;
-          waitForCondition(() => chat.content != null && chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
+          waitForCondition(function() chat.content != null && chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
                            function() {
                             chat.close();
                             next();
@@ -150,10 +146,6 @@ var tests = {
   },
 
   testChatWindowAfterTearOff: function(next) {
-    todo(false, "Bug 1245799 is needed to make error pages work again for chat windows.");
-    next();
-    return;
-
     // Ensure that the error listener survives the chat window being detached.
     let url = manifest.sidebarURL; /* empty html page */
     let panelCallbackCount = 0;
@@ -170,14 +162,14 @@ var tests = {
         chat.swapWindows().then(
           chat => {
             ok(!!chat.content, "we have chat content 1");
-            waitForCondition(() => chat.content != null && chat.contentDocument.readyState == "complete",
+            waitForCondition(function() chat.content != null && chat.contentDocument.readyState == "complete",
                              function() {
               // now go offline and reload the chat - about:socialerror should be loaded.
               goOffline().then(function() {
                 ok(!!chat.content, "we have chat content 2");
                 chat.contentDocument.location.reload();
                 info("chat reload called");
-                waitForCondition(() => chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
+                waitForCondition(function() chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
                                  function() {
                                   chat.close();
                                   next();

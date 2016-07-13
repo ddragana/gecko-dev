@@ -27,10 +27,12 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=650295
    * When this is done from inside DOM event handlers, it is possible to
    * cause reentrancy in our C++ code, which we should be able to withstand.
    */
+
   function abortAndSpinEventLoop(evt, sr) {
     sr.abort();
-    SpecialPowers.spinEventLoop(window);
+    window.showModalDialog("javascript:window.close()");
   }
+
   function doneFunc() {
     // Trigger gc now and wait some time to make sure this test gets the blame
     // for any assertions caused by showModalDialog

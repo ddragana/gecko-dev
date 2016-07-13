@@ -37,7 +37,7 @@ nsresult
 PluginPRLibrary::NP_Initialize(NPNetscapeFuncs* bFuncs,
 			       NPPluginFuncs* pFuncs, NPError* error)
 {
-  JNIEnv* env = jni::GetEnvForThread();
+  JNIEnv* env = GetJNIForThread();
 
   mozilla::AutoLocalJNIFrame jniFrame(env);
 
@@ -304,47 +304,22 @@ PluginPRLibrary::SetBackgroundUnknown(NPP instance)
 }
 
 nsresult
-PluginPRLibrary::BeginUpdateBackground(NPP instance, const nsIntRect&,
-                                       DrawTarget** aDrawTarget)
+PluginPRLibrary::BeginUpdateBackground(NPP instance,
+                                       const nsIntRect&, gfxContext** aCtx)
 {
   nsNPAPIPluginInstance* inst = (nsNPAPIPluginInstance*)instance->ndata;
   NS_ENSURE_TRUE(inst, NS_ERROR_NULL_POINTER);
   NS_ERROR("Unexpected use of async APIs for in-process plugin.");
-  *aDrawTarget = nullptr;
+  *aCtx = nullptr;
   return NS_OK;
 }
 
 nsresult
-PluginPRLibrary::EndUpdateBackground(NPP instance, const nsIntRect&)
+PluginPRLibrary::EndUpdateBackground(NPP instance,
+                                     gfxContext*, const nsIntRect&)
 {
   NS_RUNTIMEABORT("This should never be called");
   return NS_ERROR_NOT_AVAILABLE;
-}
-
-#if defined(XP_WIN)
-nsresult
-PluginPRLibrary::GetScrollCaptureContainer(NPP aInstance, ImageContainer** aContainer)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-nsresult
-PluginPRLibrary::UpdateScrollState(NPP aInstance, bool aIsScrolling)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-#endif
-
-nsresult
-PluginPRLibrary::HandledWindowedPluginKeyEvent(
-                   NPP aInstance,
-                   const NativeEventData& aNativeKeyData,
-                   bool aIsConsumed)
-{
-  nsNPAPIPluginInstance* instance = (nsNPAPIPluginInstance*)aInstance->ndata;
-  if (NS_WARN_IF(!instance)) {
-    return NS_ERROR_NULL_POINTER;
-  }
-  return NS_OK;
 }
 
 } // namespace mozilla

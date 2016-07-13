@@ -7,19 +7,19 @@
 #ifndef mozilla_Hal_h
 #define mozilla_Hal_h
 
+#include "mozilla/hal_sandbox/PHal.h"
+#include "mozilla/HalTypes.h"
 #include "base/basictypes.h"
 #include "base/platform_thread.h"
+#include "mozilla/Observer.h"
+#include "mozilla/Types.h"
 #include "nsTArray.h"
-#include "mozilla/dom/battery/Types.h"
 #include "mozilla/dom/MozPowerManagerBinding.h"
+#include "mozilla/dom/battery/Types.h"
 #include "mozilla/dom/network/Types.h"
 #include "mozilla/dom/power/Types.h"
 #include "mozilla/dom/ScreenOrientation.h"
-#include "mozilla/hal_sandbox/PHal.h"
 #include "mozilla/HalScreenConfiguration.h"
-#include "mozilla/HalTypes.h"
-#include "mozilla/Observer.h"
-#include "mozilla/Types.h"
 
 /*
  * Hal.h contains the public Hal API.
@@ -31,7 +31,7 @@
  * functions here in the hal_impl and hal_sandbox namespaces.
  */
 
-class nsPIDOMWindowInner;
+class nsIDOMWindow;
 
 #ifndef MOZ_HAL_NAMESPACE
 # define MOZ_HAL_NAMESPACE hal
@@ -69,7 +69,7 @@ namespace MOZ_HAL_NAMESPACE {
  * The method with WindowIdentifier will be called automatically.
  */
 void Vibrate(const nsTArray<uint32_t>& pattern,
-             nsPIDOMWindowInner* aWindow);
+             nsIDOMWindow* aWindow);
 void Vibrate(const nsTArray<uint32_t>& pattern,
              const hal::WindowIdentifier &id);
 
@@ -85,7 +85,7 @@ void Vibrate(const nsTArray<uint32_t>& pattern,
  * world, pass an nsIDOMWindow*. The method with WindowIdentifier will be called
  * automatically.
  */
-void CancelVibrate(nsPIDOMWindowInner* aWindow);
+void CancelVibrate(nsIDOMWindow* aWindow);
 void CancelVibrate(const hal::WindowIdentifier &id);
 
 /**
@@ -394,7 +394,7 @@ void NotifyScreenConfigurationChange(const hal::ScreenConfiguration& aScreenConf
  * Lock the screen orientation to the specific orientation.
  * @return Whether the lock has been accepted.
  */
-MOZ_MUST_USE bool LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation);
+bool LockScreenOrientation(const dom::ScreenOrientation& aOrientation);
 
 /**
  * Unlock the screen orientation.
@@ -438,7 +438,7 @@ void NotifySwitchStateFromInputDevice(hal::SwitchDevice aDevice,
  *
  * Currently, there can only be 0 or 1 alarm observers.
  */
-MOZ_MUST_USE bool RegisterTheOneAlarmObserver(hal::AlarmObserver* aObserver);
+bool RegisterTheOneAlarmObserver(hal::AlarmObserver* aObserver);
 
 /**
  * Unregister the alarm observer.  Doing so will implicitly cancel any
@@ -465,7 +465,7 @@ void NotifyAlarmFired();
  * This API is currently only allowed to be used from non-sandboxed
  * contexts.
  */
-MOZ_MUST_USE bool SetAlarm(int32_t aSeconds, int32_t aNanoseconds);
+bool SetAlarm(int32_t aSeconds, int32_t aNanoseconds);
 
 /**
  * Set the priority of the given process.
@@ -585,7 +585,7 @@ hal::FMRadioSettings GetFMBandSettings(hal::FMRadioCountry aCountry);
 /**
  * Enable RDS data reception
  */
-MOZ_MUST_USE bool EnableRDS(uint32_t aMask);
+bool EnableRDS(uint32_t aMask);
 
 /**
  * Disable RDS data reception
@@ -639,21 +639,6 @@ uint32_t GetTotalSystemMemoryLevel();
  * Determine whether the headphone switch event is from input device
  */
 bool IsHeadphoneEventFromInputDev();
-
-/**
- * Start the system service with the specified name and arguments.
- */
-nsresult StartSystemService(const char* aSvcName, const char* aArgs);
-
-/**
- * Stop the system service with the specified name.
- */
-void StopSystemService(const char* aSvcName);
-
-/**
- * Determine whether the system service with the specified name is running.
- */
-bool SystemServiceIsRunning(const char* aSvcName);
 
 } // namespace MOZ_HAL_NAMESPACE
 } // namespace mozilla

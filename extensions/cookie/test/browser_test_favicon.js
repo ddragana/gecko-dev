@@ -23,6 +23,5 @@ function test() {
   }, "cookie-rejected", false);
 
   // kick off a favicon load
-  gBrowser.setIcon(gBrowser.selectedTab, "http://example.org/tests/extensions/cookie/test/damonbowling.jpg",
-                   Services.scriptSecurityManager.getSystemPrincipal());
+  gBrowser.setIcon(gBrowser.selectedTab, "http://example.org/tests/extensions/cookie/test/damonbowling.jpg");
 }

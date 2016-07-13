@@ -43,13 +43,13 @@ Types = (
 
 HeaderIncludes = (
     'mozilla/Attributes.h',
+    'prtime.h',
     'IPCMessageStart.h',
     'ipc/IPCMessageUtils.h',
-    'mozilla/RefPtr.h',
+    'nsRefPtr.h',
     'nsStringGlue.h',
     'nsTArray.h',
     'mozilla/ipc/ProtocolUtils.h',
-    'nsTHashtable.h',
 )
 
 CppIncludes = (

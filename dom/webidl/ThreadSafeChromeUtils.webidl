@@ -14,15 +14,13 @@ interface ThreadSafeChromeUtils {
    * Serialize a snapshot of the heap graph, as seen by |JS::ubi::Node| and
    * restricted by |boundaries|, and write it to the provided file path.
    *
-   * @param boundaries        The portion of the heap graph to write.
+   * @param filePath          The file path to write the heap snapshot to.
    *
-   * @returns                 The path to the file the heap snapshot was written
-   *                          to. This is guaranteed to be within the temp
-   *                          directory and its file name will match the regexp
-   *                          `\d+(\-\d+)?\.fxsnapshot`.
+   * @param boundaries        The portion of the heap graph to write.
    */
   [Throws]
-  static DOMString saveHeapSnapshot(optional HeapSnapshotBoundaries boundaries);
+  static void saveHeapSnapshot(DOMString filePath,
+                               optional HeapSnapshotBoundaries boundaries);
 
   /**
    * Deserialize a core dump into a HeapSnapshot.
@@ -31,52 +29,6 @@ interface ThreadSafeChromeUtils {
    */
   [Throws, NewObject]
   static HeapSnapshot readHeapSnapshot(DOMString filePath);
-
-  /**
-   * Return the keys in a weak map.  This operation is
-   * non-deterministic because it is affected by the scheduling of the
-   * garbage collector and the cycle collector.
-   *
-   * @param aMap weak map or other JavaScript value
-   * @returns If aMap is a weak map object, return the keys of the weak
-   *          map as an array.  Otherwise, return undefined.
-   */
-  [Throws, NewObject]
-  static any nondeterministicGetWeakMapKeys(any map);
-
-  /**
-   * Return the keys in a weak set.  This operation is
-   * non-deterministic because it is affected by the scheduling of the
-   * garbage collector and the cycle collector.
-   *
-   * @param aSet weak set or other JavaScript value
-   * @returns If aSet is a weak set object, return the keys of the weak
-   *          set as an array.  Otherwise, return undefined.
-   */
-  [Throws, NewObject]
-  static any nondeterministicGetWeakSetKeys(any aSet);
-
-  /**
-   * Converts a buffer to a Base64 URL-encoded string per RFC 4648.
-   *
-   * @param source The buffer to encode.
-   * @param options Additional encoding options.
-   * @returns The encoded string.
-   */
-  [Throws]
-  static ByteString base64URLEncode(BufferSource source,
-                                    Base64URLEncodeOptions options);
-
-  /**
-   * Decodes a Base64 URL-encoded string per RFC 4648.
-   *
-   * @param string The string to decode.
-   * @param options Additional decoding options.
-   * @returns The decoded buffer.
-   */
-  [Throws, NewObject]
-  static ArrayBuffer base64URLDecode(ByteString string,
-                                     Base64URLDecodeOptions options);
 };
 
 /**
@@ -109,32 +61,4 @@ dictionary HeapSnapshotBoundaries {
   sequence<object> globals;
   object           debugger;
   boolean          runtime;
-};
-
-dictionary Base64URLEncodeOptions {
-  /** Specifies whether the output should be padded with "=" characters. */
-  required boolean pad;
-};
-
-enum Base64URLDecodePadding {
-  /**
-   * Fails decoding if the input is unpadded. RFC 4648, section 3.2 requires
-   * padding, unless the referring specification prohibits it.
-   */
-  "require",
-
-  /** Tolerates padded and unpadded input. */
-  "ignore",
-
-  /**
-   * Fails decoding if the input is padded. This follows the strict base64url
-   * variant used in JWS (RFC 7515, Appendix C) and HTTP Encrypted
-   * Content-Encoding (draft-ietf-httpbis-encryption-encoding-01).
-   */
-  "reject"
-};
-
-dictionary Base64URLDecodeOptions {
-  /** Specifies the padding mode for decoding the input. */
-  required Base64URLDecodePadding padding;
 };

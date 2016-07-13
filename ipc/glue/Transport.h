@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: sw=2 ts=8 et :
+ */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,7 +16,6 @@
 #elif OS_WIN
 # include "mozilla/ipc/Transport_win.h"
 #endif
-#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace ipc {
@@ -28,14 +28,11 @@ nsresult CreateTransport(base::ProcessId aProcIdOne,
                          TransportDescriptor* aOne,
                          TransportDescriptor* aTwo);
 
-UniquePtr<Transport> OpenDescriptor(const TransportDescriptor& aTd,
-                                    Transport::Mode aMode);
+Transport* OpenDescriptor(const TransportDescriptor& aTd,
+                          Transport::Mode aMode);
 
-UniquePtr<Transport> OpenDescriptor(const FileDescriptor& aFd,
-                                    Transport::Mode aMode);
-
-TransportDescriptor
-DuplicateDescriptor(const TransportDescriptor& aTd);
+Transport* OpenDescriptor(const FileDescriptor& aFd,
+                          Transport::Mode aMode);
 
 void CloseDescriptor(const TransportDescriptor& aTd);
 

@@ -20,6 +20,7 @@ function test()
   printBugNumber(BUGNUMBER);
   printStatus (summary);
 
+  jit(true);
 
   linkarr = new Array();
   picarr = new Array();
@@ -40,6 +41,7 @@ function test()
     }
   }
 
+  jit(false);
 
   reportCompare(expect, actual, summary);
 

@@ -4,29 +4,32 @@
 
 "use strict";
 
-var {Constructor: CC, classes: Cc, interfaces: Ci, utils: Cu} = Components;
+const {Constructor: CC, classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-var loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader);
+const loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader);
 const ServerSocket = CC("@mozilla.org/network/server-socket;1", "nsIServerSocket", "initSpecialConnection");
 
 Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://marionette/content/dispatcher.js");
 Cu.import("chrome://marionette/content/driver.js");
-Cu.import("chrome://marionette/content/element.js");
+Cu.import("chrome://marionette/content/elements.js");
 Cu.import("chrome://marionette/content/simpletest.js");
 
 // Bug 1083711: Load transport.js as an SDK module instead of subscript
-loader.loadSubScript("resource://devtools/shared/transport/transport.js");
+loader.loadSubScript("resource://gre/modules/devtools/transport/transport.js");
+
+// Preserve this import order:
+let events = {};
+loader.loadSubScript("chrome://marionette/content/EventUtils.js", events);
+loader.loadSubScript("chrome://marionette/content/ChromeUtils.js", events);
+loader.loadSubScript("chrome://marionette/content/frame-manager.js");
 
 const logger = Log.repository.getLogger("Marionette");
 
 this.EXPORTED_SYMBOLS = ["MarionetteServer"];
-
 const CONTENT_LISTENER_PREF = "marionette.contentListener";
-const MANAGE_OFFLINE_STATUS_PREF = "network.gonk.manage-offline-status";
 
 /**
  * Bootstraps Marionette and handles incoming client connections.
@@ -50,28 +53,47 @@ this.MarionetteServer = function(port, forceLocal) {
 };
 
 /**
- * Function produces a GeckoDriver.
+ * Function that takes an Emulator and produces a GeckoDriver.
  *
- * Determines application nameto initialise the driver with.
+ * Determines application name and device type to initialise the driver
+ * with.  Also bypasses offline status if the device is a qemu or panda
+ * type device.
  *
  * @return {GeckoDriver}
  *     A driver instance.
  */
-MarionetteServer.prototype.driverFactory = function() {
+MarionetteServer.prototype.driverFactory = function(emulator) {
   let appName = isMulet() ? "B2G" : Services.appinfo.name;
+  let qemu = "0";
+  let device = null;
   let bypassOffline = false;
 
-  Preferences.set(CONTENT_LISTENER_PREF, false);
+  try {
+    Cu.import("resource://gre/modules/systemlibs.js");
+    qemu = libcutils.property_get("ro.kernel.qemu");
+    logger.debug("B2G emulator: " + (qemu == "1" ? "yes" : "no"));
+    device = libcutils.property_get("ro.product.device");
+    logger.debug("Device detected is " + device);
+    bypassOffline = (qemu == "1" || device == "panda");
+  } catch (e) {}
 
-  if (bypassOffline) {
-      logger.debug("Bypassing offline status");
-      Preferences.set(MANAGE_OFFLINE_STATUS_PREF, false);
-      Services.io.manageOfflineStatus = false;
-      Services.io.offline = false;
+  if (qemu == "1") {
+    device = "qemu";
+  }
+  if (!device) {
+    device = "desktop";
   }
 
-  let stopSignal = () => this.stop();
-  return new GeckoDriver(appName, stopSignal);
+  Services.prefs.setBoolPref(CONTENT_LISTENER_PREF, false);
+
+  if (bypassOffline) {
+    logger.debug("Bypassing offline status");
+    Services.prefs.setBoolPref("network.gonk.manage-offline-status", false);
+    Services.io.manageOfflineStatus = false;
+    Services.io.offline = false;
+  }
+
+  return new GeckoDriver(appName, device, emulator);
 };
 
 MarionetteServer.prototype.start = function() {
@@ -82,7 +104,7 @@ MarionetteServer.prototype.start = function() {
   if (this.forceLocal) {
     flags |= Ci.nsIServerSocket.LoopbackOnly;
   }
-  this.listener = new ServerSocket(this.port, flags, 1);
+  this.listener = new ServerSocket(this.port, flags, 0);
   this.listener.asyncListen(this);
   this.alive = true;
 };
@@ -107,21 +129,28 @@ MarionetteServer.prototype.onSocketAccepted = function(
   let transport = new DebuggerTransport(input, output);
   let connId = "conn" + this.nextConnId++;
 
-  let dispatcher = new Dispatcher(connId, transport, this.driverFactory.bind(this));
+  let stopSignal = () => this.stop();
+  let dispatcher = new Dispatcher(connId, transport, this.driverFactory, stopSignal);
   dispatcher.onclose = this.onConnectionClosed.bind(this);
   this.conns[connId] = dispatcher;
 
-  logger.debug(`Accepted connection ${connId} from ${clientSocket.host}:${clientSocket.port}`);
+  logger.info(`Accepted connection ${connId} from ${clientSocket.host}:${clientSocket.port}`);
+
+  // Create a root actor for the connection and send the hello packet
   dispatcher.sayHello();
   transport.ready();
 };
 
 MarionetteServer.prototype.onConnectionClosed = function(conn) {
-  let id = conn.connId;
+  let id = conn.id;
   delete this.conns[id];
-  logger.debug(`Closed connection ${id}`);
+  logger.info(`Closed connection ${id}`);
 };
 
 function isMulet() {
-  return Preferences.get("b2g.is_mulet", false);
+  try {
+    return Services.prefs.getBoolPref("b2g.is_mulet");
+  } catch (e) {
+    return false;
+  }
 }

@@ -3,7 +3,7 @@ sync protocol syncProtocol {
     // sanity check of sync protocols
 
 child:
-    async AsyncMsg();
+    AsyncMsg();
 
 parent:
     sync SyncMsg() returns (int i);

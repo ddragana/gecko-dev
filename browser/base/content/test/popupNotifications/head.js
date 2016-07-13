@@ -8,18 +8,12 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 
 function whenDelayedStartupFinished(aWindow, aCallback) {
-  return new Promise(resolve => {
-    info("Waiting for delayed startup to finish");
-    Services.obs.addObserver(function observer(aSubject, aTopic) {
-      if (aWindow == aSubject) {
-        Services.obs.removeObserver(observer, aTopic);
-        if (aCallback) {
-          executeSoon(aCallback);
-        }
-        resolve();
-      }
-    }, "browser-delayed-startup-finished", false);
-  });
+  Services.obs.addObserver(function observer(aSubject, aTopic) {
+    if (aWindow == aSubject) {
+      Services.obs.removeObserver(observer, aTopic);
+      executeSoon(aCallback);
+    }
+  }, "browser-delayed-startup-finished", false);
 }
 
 /**
@@ -52,19 +46,41 @@ function promiseTopicObserved(topic)
  *        The tab to load into.
  * @param [optional] url
  *        The url to load, or the current url.
+ * @param [optional] event
+ *        The load event type to wait for.  Defaults to "load".
  * @return {Promise} resolved when the event is handled.
  * @resolves to the received event
  * @rejects if a valid load event is not received within a meaningful interval
  */
-function promiseTabLoadEvent(tab, url)
+function promiseTabLoadEvent(tab, url, eventType="load")
 {
-  let browser = tab.linkedBrowser;
+  let deferred = Promise.defer();
+  info("Wait tab event: " + eventType);
 
-  if (url) {
-    browser.loadURI(url);
+  function handle(event) {
+    if (event.originalTarget != tab.linkedBrowser.contentDocument ||
+        event.target.location.href == "about:blank" ||
+        (url && event.target.location.href != url)) {
+      info("Skipping spurious '" + eventType + "'' event" +
+           " for " + event.target.location.href);
+      return;
+    }
+    clearTimeout(timeout);
+    tab.linkedBrowser.removeEventListener(eventType, handle, true);
+    info("Tab event received: " + eventType);
+    deferred.resolve(event);
   }
 
-  return BrowserTestUtils.browserLoaded(browser, false, url);
+  let timeout = setTimeout(() => {
+    if (tab.linkedBrowser)
+      tab.linkedBrowser.removeEventListener(eventType, handle, true);
+    deferred.reject(new Error("Timed out while waiting for a '" + eventType + "'' event"));
+  }, 30000);
+
+  tab.linkedBrowser.addEventListener(eventType, handle, true, true);
+  if (url)
+    tab.linkedBrowser.loadURI(url);
+  return deferred.promise;
 }
 
 const PREF_SECURITY_DELAY_INITIAL = Services.prefs.getIntPref("security.notification_enable_delay");
@@ -202,7 +218,7 @@ function checkPopup(popup, notifyObj) {
                                                      "popup-notification-icon");
   if (notifyObj.id == "geolocation") {
     isnot(icon.boxObject.width, 0, "icon for geo displayed");
-    ok(popup.anchorNode.classList.contains("notification-anchor-icon"),
+    is(popup.anchorNode.className, "notification-anchor-icon",
        "notification anchored to icon");
   }
   is(notification.getAttribute("label"), notifyObj.message, "message matches");

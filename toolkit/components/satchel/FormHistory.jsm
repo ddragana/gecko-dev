@@ -91,7 +91,6 @@ const Cr = Components.results;
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "uuidService",
                                    "@mozilla.org/uuid-generator;1",
@@ -102,9 +101,14 @@ const DAY_IN_MS  = 86400000; // 1 day in milliseconds
 const MAX_SEARCH_TOKENS = 10;
 const NOOP = function noop() {};
 
-var supportsDeletedTable = AppConstants.platform == "android";
+let supportsDeletedTable =
+#ifdef ANDROID
+  true;
+#else
+  false;
+#endif
 
-var Prefs = {
+let Prefs = {
   initialized: false,
 
   get debug() { this.ensureInitialized(); return this._debug; },
@@ -334,7 +338,7 @@ function makeMoveToDeletedStatement(aGuid, aNow, aData, aBindingArrays) {
       // TODO: Add these items to the deleted items table once we've sorted
       //       out the issues from bug 756701
       if (!queryTerms)
-        return undefined;
+        return;
 
       query += " SELECT guid, :timeDeleted FROM moz_formhistory WHERE " + queryTerms;
     }
@@ -367,7 +371,7 @@ function generateGUID() {
  * Database creation and access
  */
 
-var _dbConnection = null;
+let _dbConnection = null;
 XPCOMUtils.defineLazyGetter(this, "dbConnection", function() {
   let dbFile;
 
@@ -378,9 +382,7 @@ XPCOMUtils.defineLazyGetter(this, "dbConnection", function() {
 
     _dbConnection = Services.storage.openUnsharedDatabase(dbFile);
     dbInit();
-  } catch (e) {
-    if (e.result != Cr.NS_ERROR_FILE_CORRUPTED)
-      throw e;
+  } catch (e if e.result == Cr.NS_ERROR_FILE_CORRUPTED) {
     dbCleanup(dbFile);
     _dbConnection = Services.storage.openUnsharedDatabase(dbFile);
     dbInit();
@@ -390,7 +392,7 @@ XPCOMUtils.defineLazyGetter(this, "dbConnection", function() {
 });
 
 
-var dbStmts = new Map();
+let dbStmts = new Map();
 
 /*
  * dbCreateAsyncStatement
@@ -463,7 +465,7 @@ function dbCreate() {
   log("Creating DB -- tables");
   for (let name in dbSchema.tables) {
     let table = dbSchema.tables[name];
-    let tSQL = Object.keys(table).map(col => [col, table[col]].join(" ")).join(", ");
+    let tSQL = [[col, table[col]].join(" ") for (col in table)].join(", ");
     log("Creating table " + name + " with " + tSQL);
     _dbConnection.createTable(name, tSQL);
   }
@@ -530,7 +532,7 @@ var Migrators = {
   dbMigrateToVersion4: function dbMigrateToVersion4() {
     if (!_dbConnection.tableExists("moz_deleted_formhistory")) {
       let table = dbSchema.tables["moz_deleted_formhistory"];
-      let tSQL = Object.keys(table).map(col => [col, table[col]].join(" ")).join(", ");
+      let tSQL = [[col, table[col]].join(" ") for (col in table)].join(", ");
       _dbConnection.createTable("moz_deleted_formhistory", tSQL);
     }
   }
@@ -546,7 +548,7 @@ function dbAreExpectedColumnsPresent() {
   for (let name in dbSchema.tables) {
     let table = dbSchema.tables[name];
     let query = "SELECT " +
-                Object.keys(table).join(", ") +
+                [col for (col in table)].join(", ") +
                 " FROM " + name;
     try {
       let stmt = _dbConnection.createStatement(query);
@@ -599,7 +601,7 @@ function dbClose(aShutdown) {
   dbStmts = new Map();
 
   let closed = false;
-  _dbConnection.asyncClose(() => closed = true);
+  _dbConnection.asyncClose(function () closed = true);
 
   if (!aShutdown) {
     let thread = Services.tm.currentThread;
@@ -771,9 +773,7 @@ function expireOldEntriesVacuum(aExpireTime, aBeginningCount) {
 }
 
 this.FormHistory = {
-  get enabled() {
-    return Prefs.enabled;
-  },
+  get enabled() Prefs.enabled,
 
   search : function formHistorySearch(aSelectTerms, aSearchData, aCallbacks) {
     // if no terms selected, select everything
@@ -842,6 +842,10 @@ this.FormHistory = {
   },
 
   update : function formHistoryUpdate(aChanges, aCallbacks) {
+    if (!Prefs.enabled) {
+      return;
+    }
+
     // Used to keep track of how many searches have been started. When that number
     // are finished, updateFormHistoryWrite can be called.
     let numSearches = 0;
@@ -855,20 +859,6 @@ this.FormHistory = {
 
     if (!("length" in aChanges))
       aChanges = [aChanges];
-
-    let isRemoveOperation = aChanges.every(change => change && change.op && change.op == "remove");
-    if (!Prefs.enabled && !isRemoveOperation) {
-      if (aCallbacks && aCallbacks.handleError) {
-        aCallbacks.handleError({
-          message: "Form history is disabled, only remove operations are allowed",
-          result: Ci.mozIStorageError.MISUSE
-        });
-      }
-      if (aCallbacks && aCallbacks.handleCompletion) {
-        aCallbacks.handleCompletion(1);
-      }
-      return;
-    }
 
     for (let change of aChanges) {
       switch (change.op) {

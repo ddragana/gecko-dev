@@ -57,7 +57,7 @@ build() {
 	cd build/$name
 	eval ../../$name-$version/configure --disable-static $* $configure_args
 	make $make_flags
-	make install DESTDIR=$root_dir/gtk3
+	make install-strip DESTDIR=$root_dir/gtk3
 	find $root_dir/gtk3 -name \*.la -delete
 	cd ../..
 }
@@ -102,49 +102,6 @@ build gtk+
 
 rm -rf $root_dir/gtk3/usr/local/share/gtk-doc
 rm -rf $root_dir/gtk3/usr/local/share/locale
-
-# mock build environment doesn't have fonts in /usr/share/fonts, but
-# has some in /usr/share/X11/fonts. Add this directory to the
-# fontconfig configuration without changing the gtk3 tooltool package.
-cat << EOF > $root_dir/gtk3/usr/local/etc/fonts/local.conf
-<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig>
-  <dir>/usr/share/X11/fonts</dir>
-</fontconfig>
-EOF
-
-cat <<EOF > $root_dir/gtk3/setup.sh
-#!/bin/sh
-
-cd \$(dirname \$0)
-HERE=\$(pwd)
-
-# pango expects absolute paths in pango.modules, and TOOLTOOL_DIR may vary...
-LD_LIBRARY_PATH=\$HERE/usr/local/lib \
-PANGO_SYSCONFDIR=\$HERE/usr/local/etc \
-PANGO_LIBDIR=\$HERE/usr/local/lib \
-\$HERE/usr/local/bin/pango-querymodules > \$HERE/usr/local/etc/pango/pango.modules
-
-# same with gdb-pixbuf and loaders.cache
-LD_LIBRARY_PATH=\$HERE/usr/local/lib \
-GDK_PIXBUF_MODULE_FILE=\$HERE/usr/local/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache \
-GDK_PIXBUF_MODULEDIR=\$HERE/usr/local/lib/gdk-pixbuf-2.0/2.10.0/loaders \
-\$HERE/usr/local/bin/gdk-pixbuf-query-loaders > \
-\$HERE/usr/local/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
-
-# The fontconfig version in the tooltool package has known uses of
-# uninitialized memory when creating its cache, and while most users
-# will already have an existing cache, running Firefox on automation
-# will create it. Combined with valgrind, this generates irrelevant
-# errors.
-# So create the fontconfig cache beforehand.
-FONTCONFIG_PATH=\$HERE/usr/local/etc/fonts \
-LD_LIBRARY_PATH=\$HERE/usr/local/lib \
-\$HERE/usr/local/bin/fc-cache
-EOF
-
-chmod +x $root_dir/gtk3/setup.sh
 
 cd $cwd
 tar -C $root_dir -Jcf gtk3.tar.xz gtk3

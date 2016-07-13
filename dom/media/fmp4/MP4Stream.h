@@ -13,7 +13,6 @@
 
 #include "mozilla/Maybe.h"
 #include "mozilla/Monitor.h"
-#include "mozilla/UniquePtrExtensions.h"
 
 namespace mozilla {
 
@@ -24,11 +23,11 @@ public:
   explicit MP4Stream(MediaResource* aResource);
   virtual ~MP4Stream();
   bool BlockingReadIntoCache(int64_t aOffset, size_t aCount, Monitor* aToUnlock);
-  bool ReadAt(int64_t aOffset, void* aBuffer, size_t aCount,
-              size_t* aBytesRead) override;
-  bool CachedReadAt(int64_t aOffset, void* aBuffer, size_t aCount,
-                    size_t* aBytesRead) override;
-  bool Length(int64_t* aSize) override;
+  virtual bool ReadAt(int64_t aOffset, void* aBuffer, size_t aCount,
+                      size_t* aBytesRead) override;
+  virtual bool CachedReadAt(int64_t aOffset, void* aBuffer, size_t aCount,
+                            size_t* aBytesRead) override;
+  virtual bool Length(int64_t* aSize) override;
 
   struct ReadRecord {
     ReadRecord(int64_t aOffset, size_t aCount) : mOffset(aOffset), mCount(aCount) {}
@@ -50,13 +49,13 @@ public:
 
   void Pin()
   {
-    mResource.GetResource()->Pin();
+    mResource->Pin();
     ++mPinCount;
   }
 
   void Unpin()
   {
-    mResource.GetResource()->Unpin();
+    mResource->Unpin();
     MOZ_ASSERT(mPinCount);
     --mPinCount;
     if (mPinCount == 0) {
@@ -65,7 +64,7 @@ public:
   }
 
 private:
-  MediaResourceIndex mResource;
+  nsRefPtr<MediaResource> mResource;
   Maybe<ReadRecord> mFailedRead;
   uint32_t mPinCount;
 
@@ -75,15 +74,9 @@ private:
     int64_t mOffset;
     size_t mCount;
 
-    CacheBlock(CacheBlock&& aOther)
-      : mOffset(aOther.mOffset)
-      , mCount(aOther.mCount)
-      , mBuffer(Move(aOther.mBuffer))
-    {}
-
     bool Init()
     {
-      mBuffer = MakeUniqueFallible<char[]>(mCount);
+      mBuffer = new (fallible) char[mCount];
       return !!mBuffer;
     }
 
@@ -94,10 +87,7 @@ private:
     }
 
   private:
-    CacheBlock(const CacheBlock&) = delete;
-    CacheBlock& operator=(const CacheBlock&) = delete;
-
-    UniquePtr<char[]> mBuffer;
+    nsAutoArrayPtr<char> mBuffer;
   };
   nsTArray<CacheBlock> mCache;
 };

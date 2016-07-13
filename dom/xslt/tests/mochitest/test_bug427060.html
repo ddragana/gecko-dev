@@ -20,9 +20,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=427060
 /** Test for Bug 427060 **/
 
 var xmldoc, xsltdoc;
+[ xmldoc, xsltdoc ] = [ new DOMParser().parseFromString(xml, "text/xml") for (xml of [ 
 
-xmldoc = new DOMParser().parseFromString('<opml version="1.0"><body></body></opml>', "text/xml");
-xsltdoc = new DOMParser().parseFromString('<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">\n\
+    '<opml version="1.0"><body></body></opml>' ,
+
+    '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">\n\
     	<xsl:template match="/opml">\n\
     		<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">\n\
     			<head>\n\
@@ -31,7 +33,9 @@ xsltdoc = new DOMParser().parseFromString('<xsl:stylesheet version="1.0" xmlns:x
     			<body></body>\n\
     		</html>\n\
     	</xsl:template>\n\
-    </xsl:stylesheet>', "text/xml");
+    </xsl:stylesheet>'
+
+]) ];
 
 var processor = new XSLTProcessor;
 processor.importStylesheet(xsltdoc);

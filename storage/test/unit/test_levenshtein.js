@@ -30,7 +30,8 @@ function check_levenshtein(db, s, t, expectedDistance)
   try {
     do_check_true(stmt.executeStep());
     do_check_eq(expectedDistance, stmt.row.result);
-  } finally {
+  } 
+  finally {
     stmt.reset();
     stmt.finalize();
   }
@@ -55,7 +56,7 @@ function testLevenshtein(db)
   check_levenshtein(db, "foo", null, null);
   check_levenshtein(db, null, "bar", null);
   check_levenshtein(db, null, null, null);
-
+  
   // The levenshteinDistance function allocates temporary memory on the stack
   // if it can.  Test some strings long enough to force a heap allocation.
   var dots1000 = Array(1001).join(".");

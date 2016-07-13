@@ -9,11 +9,10 @@
 
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/HTMLFormSubmission.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIForm.h"
 #include "nsIFormControl.h"
+#include "nsFormSubmission.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIWebProgressListener.h"
@@ -283,7 +282,7 @@ public:
    *
    * @param aFormSubmission the form submission object
    */
-  nsresult WalkFormElements(HTMLFormSubmission* aFormSubmission);
+  nsresult WalkFormElements(nsFormSubmission* aFormSubmission);
 
   /**
    * Whether the submission of this form has been ever prevented because of
@@ -388,18 +387,15 @@ public:
     return CheckFormValidity(nullptr);
   }
 
-  bool ReportValidity()
-  {
-    return CheckValidFormSubmission();
-  }
-
   Element*
   IndexedGetter(uint32_t aIndex, bool &aFound);
 
   already_AddRefed<nsISupports>
   NamedGetter(const nsAString& aName, bool &aFound);
 
-  void GetSupportedNames(nsTArray<nsString>& aRetval);
+  bool NameIsEnumerable(const nsAString& aName);
+
+  void GetSupportedNames(unsigned, nsTArray<nsString >& aRetval);
 
   static int32_t
   CompareFormControlPosition(Element* aElement1, Element* aElement2,
@@ -435,12 +431,12 @@ protected:
     }
   };
 
-  RefPtr<FormPasswordEventDispatcher> mFormPasswordEventDispatcher;
+  nsRefPtr<FormPasswordEventDispatcher> mFormPasswordEventDispatcher;
 
   class RemoveElementRunnable;
   friend class RemoveElementRunnable;
 
-  class RemoveElementRunnable : public Runnable {
+  class RemoveElementRunnable : public nsRunnable {
   public:
     explicit RemoveElementRunnable(HTMLFormElement* aForm)
       : mForm(aForm)
@@ -452,11 +448,11 @@ protected:
     }
 
   private:
-    RefPtr<HTMLFormElement> mForm;
+    nsRefPtr<HTMLFormElement> mForm;
   };
 
   nsresult DoSubmitOrReset(WidgetEvent* aEvent,
-                           EventMessage aMessage);
+                           int32_t aMessage);
   nsresult DoReset();
 
   // Async callback to handle removal of our default submit
@@ -481,14 +477,14 @@ protected:
    * @param aFormSubmission the submission object
    * @param aEvent the DOM event that was passed to us for the submit
    */
-  nsresult BuildSubmission(HTMLFormSubmission** aFormSubmission,
+  nsresult BuildSubmission(nsFormSubmission** aFormSubmission,
                            WidgetEvent* aEvent);
   /**
    * Perform the submission (called by DoSubmit and FlushPendingSubmission)
    *
    * @param aFormSubmission the submission object
    */
-  nsresult SubmitSubmission(HTMLFormSubmission* aFormSubmission);
+  nsresult SubmitSubmission(nsFormSubmission* aFormSubmission);
 
   /**
    * Notify any submit observers of the submit.
@@ -565,7 +561,7 @@ protected:
   // Data members
   //
   /** The list of controls (form.elements as well as stuff not in elements) */
-  RefPtr<HTMLFormControlsCollection> mControls;
+  nsRefPtr<HTMLFormControlsCollection> mControls;
   /** The currently selected radio button of each group */
   nsRefPtrHashtable<nsStringCaseInsensitiveHashKey, HTMLInputElement> mSelectedRadioButtons;
   /** The number of required radio button of each group */
@@ -590,7 +586,7 @@ protected:
   bool mSubmitInitiatedFromUserInput;
 
   /** The pending submission object */
-  nsAutoPtr<HTMLFormSubmission> mPendingSubmission;
+  nsAutoPtr<nsFormSubmission> mPendingSubmission;
   /** The request currently being submitted */
   nsCOMPtr<nsIRequest> mSubmittingRequest;
   /** The web progress object we are currently listening to */

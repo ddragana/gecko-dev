@@ -14,18 +14,17 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/SourceBufferBinding.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/mozalloc.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionNoteChild.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupports.h"
 #include "nsString.h"
 #include "nscore.h"
-#include "TrackBuffersManager.h"
-#include "SourceBufferTask.h"
+#include "SourceBufferContentManager.h"
 
 class JSObject;
 struct JSContext;
@@ -35,6 +34,7 @@ namespace mozilla {
 class ErrorResult;
 class MediaByteBuffer;
 template <typename T> class AsyncEventRunner;
+class TrackBuffersManager;
 
 namespace dom {
 
@@ -46,7 +46,7 @@ public:
   /** WebIDL Methods. */
   SourceBufferAppendMode Mode() const
   {
-    return mCurrentAttributes.GetAppendMode();
+    return mAppendMode;
   }
 
   void SetMode(SourceBufferAppendMode aMode, ErrorResult& aRv);
@@ -56,26 +56,26 @@ public:
     return mUpdating;
   }
 
-  TimeRanges* GetBuffered(ErrorResult& aRv);
+  already_AddRefed<TimeRanges> GetBuffered(ErrorResult& aRv);
   media::TimeIntervals GetTimeIntervals();
 
   double TimestampOffset() const
   {
-    return mCurrentAttributes.GetApparentTimestampOffset();
+    return mApparentTimestampOffset;
   }
 
   void SetTimestampOffset(double aTimestampOffset, ErrorResult& aRv);
 
   double AppendWindowStart() const
   {
-    return mCurrentAttributes.GetAppendWindowStart();
+    return mAppendWindowStart;
   }
 
   void SetAppendWindowStart(double aAppendWindowStart, ErrorResult& aRv);
 
   double AppendWindowEnd() const
   {
-    return mCurrentAttributes.GetAppendWindowEnd();
+    return mAppendWindowEnd;
   }
 
   void SetAppendWindowEnd(double aAppendWindowEnd, ErrorResult& aRv);
@@ -108,6 +108,9 @@ public:
 
   void Ended();
 
+  // Evict data in the source buffer in the given time range.
+  void Evict(double aStart, double aEnd);
+
   double GetBufferedStart();
   double GetBufferedEnd();
 
@@ -118,6 +121,10 @@ public:
   {
     return mActive;
   }
+
+#if defined(DEBUG)
+  void Dump(const char* aPath);
+#endif
 
 private:
   ~SourceBuffer();
@@ -132,7 +139,6 @@ private:
   void StartUpdating();
   void StopUpdating();
   void AbortUpdating();
-  void ResetParserState();
 
   // If the media segment contains data beyond the current duration,
   // then run the duration change algorithm with new duration set to the
@@ -141,6 +147,7 @@ private:
 
   // Shared implementation of AppendBuffer overloads.
   void AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aRv);
+  void BufferAppend(uint32_t aAppendID);
 
   // Implement the "Append Error Algorithm".
   // Will call endOfStream() with "decode" error if aDecodeError is true.
@@ -154,22 +161,39 @@ private:
                                                   uint32_t aLength,
                                                   ErrorResult& aRv);
 
-  void AppendDataCompletedWithSuccess(SourceBufferTask::AppendBufferResult aResult);
+  void AppendDataCompletedWithSuccess(bool aHasActiveTracks);
   void AppendDataErrored(nsresult aError);
 
-  RefPtr<MediaSource> mMediaSource;
+  // Set timestampOffset, must be called on the main thread.
+  void SetTimestampOffset(const media::TimeUnit& aTimestampOffset);
 
-  RefPtr<TrackBuffersManager> mTrackBuffersManager;
-  SourceBufferAttributes mCurrentAttributes;
+  nsRefPtr<MediaSource> mMediaSource;
 
+  uint32_t mEvictionThreshold;
+
+  nsRefPtr<SourceBufferContentManager> mContentManager;
+
+  double mAppendWindowStart;
+  double mAppendWindowEnd;
+
+  double mApparentTimestampOffset;
+  media::TimeUnit mTimestampOffset;
+
+  SourceBufferAppendMode mAppendMode;
   bool mUpdating;
+  bool mGenerateTimestamps;
+  bool mIsUsingFormatReader;
 
   mozilla::Atomic<bool> mActive;
 
-  MozPromiseRequestHolder<SourceBufferTask::AppendPromise> mPendingAppend;
-  const nsCString mType;
+  // Each time mUpdating is set to true, mUpdateID will be incremented.
+  // This allows for a queued AppendData task to identify if it was earlier
+  // aborted and another AppendData queued.
+  uint32_t mUpdateID;
+  int64_t mReportedOffset;
 
-  RefPtr<TimeRanges> mBuffered;
+  MozPromiseRequestHolder<SourceBufferContentManager::AppendPromise> mPendingAppend;
+  const nsCString mType;
 };
 
 } // namespace dom

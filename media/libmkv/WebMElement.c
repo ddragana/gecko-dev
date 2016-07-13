@@ -87,7 +87,6 @@ void writeVideoTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
 }
 void writeAudioTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
                      const char *codecId, double samplingFrequency, unsigned int channels,
-                     uint64_t codecDelay, uint64_t seekPreRoll,
                      unsigned char *private, unsigned long privateSize) {
   EbmlLoc start;
   UInt64 trackID;
@@ -96,8 +95,6 @@ void writeAudioTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
   trackID = generateTrackID(trackNumber);
   Ebml_SerializeUnsigned(glob, TrackUID, trackID);
   Ebml_SerializeUnsigned(glob, TrackType, 2); // audio is always 2
-  Ebml_SerializeUnsigned(glob, CodecDelay, codecDelay);
-  Ebml_SerializeUnsigned(glob, SeekPreRoll, seekPreRoll);
   // I am using defaults for thesed required fields
   /*  Ebml_SerializeUnsigned(glob, FlagEnabled, 1);
       Ebml_SerializeUnsigned(glob, FlagDefault, 1);
@@ -106,7 +103,7 @@ void writeAudioTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
   Ebml_SerializeString(glob, CodecID, codecId);
   Ebml_SerializeData(glob, CodecPrivate, private, privateSize);
 
-  Ebml_SerializeString(glob, CodecName, "OPUS");  // fixed for now
+  Ebml_SerializeString(glob, CodecName, "VORBIS");  // fixed for now
   {
     EbmlLoc AudioStart;
     Ebml_StartSubElement(glob, &AudioStart, Audio);

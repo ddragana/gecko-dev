@@ -6,9 +6,9 @@
 <div id="log"></div>
 <script>
 test(function () {
-  var e = document.createEvent('PopStateEvent');
-  var eProto = Object.getPrototypeOf(e);
-  assert_equals(eProto, PopStateEvent.prototype);
+  assert_throws('NotSupportedError', function() {
+    document.createEvent('PopStateEvent');
+  }, 'document.createEvent("PopStateEvent") should not be supported');
 }, 'document.createEvent');
 
 test(function () {

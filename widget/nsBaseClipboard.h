@@ -37,8 +37,8 @@ protected:
 
   bool                mEmptyingForSetData;
   bool                mIgnoreEmptyNotification;
-  nsCOMPtr<nsIClipboardOwner> mClipboardOwner;
-  nsCOMPtr<nsITransferable>   mTransferable;
+  nsIClipboardOwner * mClipboardOwner;
+  nsITransferable   * mTransferable;
 
 };
 

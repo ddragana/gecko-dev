@@ -13,7 +13,7 @@
 #include "nsQueryObject.h"
 
 #undef LOG
-mozilla::LazyLogModule gMediaChildLog("MediaChild");
+PRLogModuleInfo *gMediaChildLog;
 #define LOG(args) MOZ_LOG(gMediaChildLog, mozilla::LogLevel::Debug, args)
 
 namespace mozilla {
@@ -22,10 +22,10 @@ namespace media {
 already_AddRefed<Pledge<nsCString>>
 GetOriginKey(const nsCString& aOrigin, bool aPrivateBrowsing, bool aPersist)
 {
-  RefPtr<MediaManager> mgr = MediaManager::GetInstance();
+  nsRefPtr<MediaManager> mgr = MediaManager::GetInstance();
   MOZ_ASSERT(mgr);
 
-  RefPtr<Pledge<nsCString>> p = new Pledge<nsCString>();
+  nsRefPtr<Pledge<nsCString>> p = new Pledge<nsCString>();
   uint32_t id = mgr->mGetOriginKeyPledges.Append(*p);
 
   if (XRE_GetProcessType() == GeckoProcessType_Default) {
@@ -46,7 +46,7 @@ SanitizeOriginKeys(const uint64_t& aSinceWhen, bool aOnlyPrivateBrowsing)
   if (XRE_GetProcessType() == GeckoProcessType_Default) {
     // Avoid opening MediaManager in this case, since this is called by
     // sanitize.js when cookies are cleared, which can happen on startup.
-    auto tmpParent = MakeUnique<Parent<NonE10s>>(true);
+    ScopedDeletePtr<Parent<NonE10s>> tmpParent(new Parent<NonE10s>(true));
     tmpParent->RecvSanitizeOriginKeys(aSinceWhen, aOnlyPrivateBrowsing);
   } else {
     Child::Get()->SendSanitizeOriginKeys(aSinceWhen, aOnlyPrivateBrowsing);
@@ -68,6 +68,9 @@ Child* Child::Get()
 Child::Child()
   : mActorDestroyed(false)
 {
+  if (!gMediaChildLog) {
+    gMediaChildLog = PR_NewLogModule("MediaChild");
+  }
   LOG(("media::Child: %p", this));
   MOZ_COUNT_CTOR(Child);
 }
@@ -87,11 +90,11 @@ void Child::ActorDestroy(ActorDestroyReason aWhy)
 bool
 Child::RecvGetOriginKeyResponse(const uint32_t& aRequestId, const nsCString& aKey)
 {
-  RefPtr<MediaManager> mgr = MediaManager::GetInstance();
+  nsRefPtr<MediaManager> mgr = MediaManager::GetInstance();
   if (!mgr) {
     return false;
   }
-  RefPtr<Pledge<nsCString>> pledge = mgr->mGetOriginKeyPledges.Remove(aRequestId);
+  nsRefPtr<Pledge<nsCString>> pledge = mgr->mGetOriginKeyPledges.Remove(aRequestId);
   if (pledge) {
     pledge->Resolve(aKey);
   }

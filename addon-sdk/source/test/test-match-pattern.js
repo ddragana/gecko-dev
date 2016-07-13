@@ -86,32 +86,32 @@ exports.testMatchPatternTestFalse = function(assert) {
 
 exports.testMatchPatternErrors = function(assert) {
   assert.throws(
-    () => new MatchPattern("*.google.com/*"),
+    function() new MatchPattern("*.google.com/*"),
     /There can be at most one/,
     "MatchPattern throws when supplied multiple '*'"
   );
 
   assert.throws(
-    () => new MatchPattern("google.com"),
+    function() new MatchPattern("google.com"),
     /expected to be either an exact URL/,
     "MatchPattern throws when the wildcard doesn't use '*' and doesn't " +
     "look like a URL"
   );
 
   assert.throws(
-    () => new MatchPattern("http://google*.com"),
+    function() new MatchPattern("http://google*.com"),
     /expected to be the first or the last/,
     "MatchPattern throws when a '*' is in the middle of the wildcard"
   );
 
   assert.throws(
-    () => new MatchPattern(/ /g),
+    function() new MatchPattern(/ /g),
     /^A RegExp match pattern cannot be set to `global` \(i\.e\. \/\/g\)\.$/,
     "MatchPattern throws on a RegExp set to `global` (i.e. //g)."
   );
 
   assert.throws(
-    () => new MatchPattern( / /m ),
+    function() new MatchPattern( / /m ),
     /^A RegExp match pattern cannot be set to `multiline` \(i\.e\. \/\/m\)\.$/,
     "MatchPattern throws on a RegExp set to `multiline` (i.e. //m)."
   );

@@ -18,6 +18,7 @@
 #include "mozilla/gfx/Types.h"          // for Float, etc
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/Preferences.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
@@ -74,27 +75,19 @@ ClientPaintedLayer::PaintThebes()
   // from RGB to RGBA, because we might need to repaint with
   // subpixel AA)
   state.mRegionToInvalidate.And(state.mRegionToInvalidate,
-                                GetLocalVisibleRegion().ToUnknownRegion());
+                                GetEffectiveVisibleRegion());
 
   bool didUpdate = false;
   RotatedContentBuffer::DrawIterator iter;
   while (DrawTarget* target = mContentClient->BorrowDrawTargetForPainting(state, &iter)) {
-    if (!target || !target->IsValid()) {
-      if (target) {
-        mContentClient->ReturnDrawTargetToBuffer(target);
-      }
-      continue;
-    }
-    
     SetAntialiasingFlags(this, target);
 
-    RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
-    MOZ_ASSERT(ctx); // already checked the target above
+    nsRefPtr<gfxContext> ctx = gfxContext::ContextForDrawTarget(target);
 
     ClientManager()->GetPaintedLayerCallback()(this,
                                               ctx,
                                               iter.mDrawRegion,
-                                              iter.mDrawRegion,
+                                              state.mRegionToDraw,
                                               state.mClip,
                                               state.mRegionToInvalidate,
                                               ClientManager()->GetPaintedLayerCallbackData());
@@ -117,7 +110,7 @@ ClientPaintedLayer::PaintThebes()
     // so deleting this Hold for whatever reason will break things.
     ClientManager()->Hold(this);
     contentClientRemote->Updated(state.mRegionToDraw,
-                                 mVisibleRegion.ToUnknownRegion(),
+                                 mVisibleRegion,
                                  state.mDidSelfCopy);
   }
 }
@@ -149,6 +142,22 @@ ClientPaintedLayer::RenderLayerWithReadback(ReadbackProcessor *aReadback)
   mContentClient->EndPaint(&readbackUpdates);
 }
 
+bool
+ClientLayerManager::IsOptimizedFor(PaintedLayer* aLayer, PaintedLayerCreationHint aHint)
+{
+#ifdef MOZ_B2G
+  // The only creation hint is whether the layer is scrollable or not, and this
+  // is only respected on B2G, where it's used to determine whether to use
+  // tiled layers or not.
+  // There are pretty nasty performance consequences for not using tiles on
+  // large, scrollable layers, so we want the layer to be recreated in this
+  // situation.
+  return aHint == aLayer->GetCreationHint();
+#else
+  return LayerManager::IsOptimizedFor(aLayer, aHint);
+#endif
+}
+
 already_AddRefed<PaintedLayer>
 ClientLayerManager::CreatePaintedLayer()
 {
@@ -159,12 +168,22 @@ already_AddRefed<PaintedLayer>
 ClientLayerManager::CreatePaintedLayerWithHint(PaintedLayerCreationHint aHint)
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  if (gfxPrefs::LayersTilesEnabled()) {
-    RefPtr<ClientTiledPaintedLayer> layer = new ClientTiledPaintedLayer(this, aHint);
+  if (
+#ifdef MOZ_B2G
+      aHint == SCROLLABLE &&
+#endif
+      gfxPrefs::LayersTilesEnabled()
+#ifndef MOZ_X11
+      && (AsShadowForwarder()->GetCompositorBackendType() == LayersBackend::LAYERS_OPENGL ||
+          AsShadowForwarder()->GetCompositorBackendType() == LayersBackend::LAYERS_D3D9 ||
+          AsShadowForwarder()->GetCompositorBackendType() == LayersBackend::LAYERS_D3D11)
+#endif
+  ) {
+    nsRefPtr<ClientTiledPaintedLayer> layer = new ClientTiledPaintedLayer(this, aHint);
     CREATE_SHADOW(Painted);
     return layer.forget();
   } else {
-    RefPtr<ClientPaintedLayer> layer = new ClientPaintedLayer(this, aHint);
+    nsRefPtr<ClientPaintedLayer> layer = new ClientPaintedLayer(this, aHint);
     CREATE_SHADOW(Painted);
     return layer.forget();
   }

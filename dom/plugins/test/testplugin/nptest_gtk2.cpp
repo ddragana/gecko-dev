@@ -471,7 +471,8 @@ int32_t pluginGetEdge(InstanceData* instanceData, RectEdge edge)
   case EDGE_BOTTOM:
     return pluginY + pluginHeight;
   }
-  MOZ_CRASH("Unexpected RectEdge?!");
+
+  return NPTEST_INT32_ERROR;
 }
 
 #ifdef MOZ_X11

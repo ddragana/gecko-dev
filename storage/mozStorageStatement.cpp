@@ -28,7 +28,7 @@
 #include "mozilla/Logging.h"
 
 
-extern mozilla::LazyLogModule gStorageLog;
+extern PRLogModuleInfo* gStorageLog;
 
 namespace mozilla {
 namespace storage {
@@ -148,10 +148,9 @@ Statement::initialize(Connection *aDBConnection,
   mResultColumnCount = ::sqlite3_column_count(mDBStatement);
   mColumnNames.Clear();
 
-  nsCString* columnNames = mColumnNames.AppendElements(mResultColumnCount);
   for (uint32_t i = 0; i < mResultColumnCount; i++) {
       const char *name = ::sqlite3_column_name(mDBStatement, i);
-      columnNames[i].Assign(name);
+      (void)mColumnNames.AppendElement(nsDependentCString(name));
   }
 
 #ifdef DEBUG
@@ -208,7 +207,7 @@ Statement::getParams()
 
   // If there isn't already any rows added, we'll have to add one to use.
   if (mParamsArray->length() == 0) {
-    RefPtr<BindingParams> params(new BindingParams(mParamsArray, this));
+    nsRefPtr<BindingParams> params(new BindingParams(mParamsArray, this));
     NS_ENSURE_TRUE(params, nullptr);
 
     rv = mParamsArray->AddParams(params);
@@ -318,7 +317,7 @@ MIXIN_IMPL_STORAGEBASESTATEMENTINTERNAL(Statement, (void)0;)
 NS_IMETHODIMP
 Statement::Clone(mozIStorageStatement **_statement)
 {
-  RefPtr<Statement> statement(new Statement());
+  nsRefPtr<Statement> statement(new Statement());
   NS_ENSURE_TRUE(statement, NS_ERROR_OUT_OF_MEMORY);
 
   nsAutoCString sql(::sqlite3_sql(mDBStatement));
@@ -446,9 +445,9 @@ Statement::GetParameterName(uint32_t aParamIndex,
                                                    aParamIndex + 1);
   if (name == nullptr) {
     // this thing had no name, so fake one
-    nsAutoCString fakeName(":");
-    fakeName.AppendInt(aParamIndex);
-    _name.Assign(fakeName);
+    nsAutoCString name(":");
+    name.AppendInt(aParamIndex);
+    _name.Assign(name);
   }
   else {
     _name.Assign(nsDependentCString(name));
@@ -545,8 +544,6 @@ Statement::Reset()
 NS_IMETHODIMP
 Statement::BindParameters(mozIStorageBindingParamsArray *aParameters)
 {
-  NS_ENSURE_ARG_POINTER(aParameters);
-
   if (!mDBStatement)
     return NS_ERROR_NOT_INITIALIZED;
 

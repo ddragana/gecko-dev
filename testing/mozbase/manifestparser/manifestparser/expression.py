@@ -3,8 +3,6 @@
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import re
-import sys
-import traceback
 
 __all__ = ['parse', 'ParseError', 'ExpressionParser']
 
@@ -266,9 +264,7 @@ class ExpressionParser(object):
             self.token = self.iter.next()
             return self.expression()
         except:
-            extype, ex, tb = sys.exc_info()
-            formatted = ''.join(traceback.format_exception_only(extype, ex))
-            raise ParseError("could not parse: %s\nexception: %svariables: %s" % (self.text, formatted, self.valuemapping)), None, tb
+            raise ParseError("could not parse: %s; variables: %s" % (self.text, self.valuemapping))
 
     __call__ = parse
 

@@ -20,7 +20,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsIIPCSerializableURI.h"
-#include "nsISensitiveInfoHiddenURI.h"
 
 #ifdef NS_BUILD_REFCNT_LOGGING
 #define DEBUG_DUMP_URLS_AT_SHUTDOWN
@@ -33,9 +32,6 @@ class nsIPrefBranch;
 class nsIFile;
 class nsIURLParser;
 
-namespace mozilla {
-namespace net {
-
 //-----------------------------------------------------------------------------
 // standard URL implementation
 //-----------------------------------------------------------------------------
@@ -46,7 +42,6 @@ class nsStandardURL : public nsIFileURL
                     , public nsIClassInfo
                     , public nsISizeOf
                     , public nsIIPCSerializableURI
-                    , public nsISensitiveInfoHiddenURI
 {
 protected:
     virtual ~nsStandardURL();
@@ -61,11 +56,10 @@ public:
     NS_DECL_NSICLASSINFO
     NS_DECL_NSIMUTABLE
     NS_DECL_NSIIPCSERIALIZABLEURI
-    NS_DECL_NSISENSITIVEINFOHIDDENURI
 
     // nsISizeOf
-    virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-    virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
+    virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
+    virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
 
     explicit nsStandardURL(bool aSupportsFileURL = false, bool aTrackURL = true);
 
@@ -83,7 +77,6 @@ public: /* internal -- HPUX compiler can't handle this being private */
 
         URLSegment() : mPos(0), mLen(-1) {}
         URLSegment(uint32_t pos, int32_t len) : mPos(pos), mLen(len) {}
-        URLSegment(const URLSegment& aCopy) : mPos(aCopy.mPos), mLen(aCopy.mLen) {}
         void Reset() { mPos = 0; mLen = -1; }
         // Merge another segment following this one to it if they're contiguous
         // Assumes we have something like "foo;bar" where this object is 'foo' and right
@@ -177,18 +170,14 @@ protected:
 private:
     int32_t  Port() { return mPort == -1 ? mDefaultPort : mPort; }
 
-    void     ReplacePortInSpec(int32_t aNewPort);
     void     Clear();
     void     InvalidateCache(bool invalidateCachedFile = true);
 
-    bool     ValidIPv6orHostname(const char *host, uint32_t aLen);
-    nsresult NormalizeIDN(const nsCSubstring &host, nsCString &result);
+    bool     ValidIPv6orHostname(const char *host);
+    bool     NormalizeIDN(const nsCSubstring &host, nsCString &result);
     void     CoalescePath(netCoalesceFlags coalesceFlag, char *path);
 
-    uint32_t AppendSegmentToBuf(char *, uint32_t, const char *,
-                                const URLSegment &input, URLSegment &output,
-                                const nsCString *esc=nullptr,
-                                bool useEsc = false, int32_t* diff = nullptr);
+    uint32_t AppendSegmentToBuf(char *, uint32_t, const char *, URLSegment &, const nsCString *esc=nullptr, bool useEsc = false);
     uint32_t AppendToBuf(char *, uint32_t, const char *, uint32_t);
 
     nsresult BuildNormalizedSpec(const char *spec);
@@ -227,17 +216,17 @@ private:
     const nsDependentCSubstring Ref()       { return Segment(mRef); }
 
     // shift the URLSegments to the right by diff
-    void ShiftFromAuthority(int32_t diff);
-    void ShiftFromUsername(int32_t diff);
-    void ShiftFromPassword(int32_t diff);
-    void ShiftFromHost(int32_t diff);
-    void ShiftFromPath(int32_t diff);
-    void ShiftFromFilepath(int32_t diff);
-    void ShiftFromDirectory(int32_t diff);
-    void ShiftFromBasename(int32_t diff);
-    void ShiftFromExtension(int32_t diff);
-    void ShiftFromQuery(int32_t diff);
-    void ShiftFromRef(int32_t diff);
+    void ShiftFromAuthority(int32_t diff) { mAuthority.mPos += diff; ShiftFromUsername(diff); }
+    void ShiftFromUsername(int32_t diff)  { mUsername.mPos += diff; ShiftFromPassword(diff); }
+    void ShiftFromPassword(int32_t diff)  { mPassword.mPos += diff; ShiftFromHost(diff); }
+    void ShiftFromHost(int32_t diff)      { mHost.mPos += diff; ShiftFromPath(diff); }
+    void ShiftFromPath(int32_t diff)      { mPath.mPos += diff; ShiftFromFilepath(diff); }
+    void ShiftFromFilepath(int32_t diff)  { mFilepath.mPos += diff; ShiftFromDirectory(diff); }
+    void ShiftFromDirectory(int32_t diff) { mDirectory.mPos += diff; ShiftFromBasename(diff); }
+    void ShiftFromBasename(int32_t diff)  { mBasename.mPos += diff; ShiftFromExtension(diff); }
+    void ShiftFromExtension(int32_t diff) { mExtension.mPos += diff; ShiftFromQuery(diff); }
+    void ShiftFromQuery(int32_t diff)     { mQuery.mPos += diff; ShiftFromRef(diff); }
+    void ShiftFromRef(int32_t diff)       { mRef.mPos += diff; }
 
     // fastload helper functions
     nsresult ReadSegment(nsIBinaryInputStream *, URLSegment &);
@@ -247,6 +236,8 @@ private:
 
     void FindHostLimit(nsACString::const_iterator& aStart,
                        nsACString::const_iterator& aEnd);
+    // Checks that the Ref contains only allowed characters
+    nsresult CheckRefCharacters(const nsACString &input);
 
     // mSpec contains the normalized version of the URL spec (UTF-8 encoded).
     nsCString mSpec;
@@ -391,8 +382,5 @@ nsStandardURL::Filename()
     }
     return Substring(mSpec, pos, len);
 }
-
-} // namespace net
-} // namespace mozilla
 
 #endif // nsStandardURL_h__

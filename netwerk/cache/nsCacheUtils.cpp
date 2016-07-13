@@ -10,7 +10,7 @@
 
 using namespace mozilla;
 
-class nsDestroyThreadEvent : public Runnable {
+class nsDestroyThreadEvent : public nsRunnable {
 public:
   explicit nsDestroyThreadEvent(nsIThread *thread)
     : mThread(thread)
@@ -25,8 +25,8 @@ private:
 };
 
 nsShutdownThread::nsShutdownThread(nsIThread *aThread)
-  : mMonitor("nsShutdownThread.mMonitor")
-  , mShuttingDown(false)
+  : mLock("nsShutdownThread.mLock")
+  , mCondVar(mLock, "nsShutdownThread.mCondVar")
   , mThread(aThread)
 {
 }
@@ -39,7 +39,7 @@ nsresult
 nsShutdownThread::Shutdown(nsIThread *aThread)
 {
   nsresult rv;
-  RefPtr<nsDestroyThreadEvent> ev = new nsDestroyThreadEvent(aThread);
+  nsRefPtr<nsDestroyThreadEvent> ev = new nsDestroyThreadEvent(aThread);
   rv = NS_DispatchToMainThread(ev);
   if (NS_FAILED(rv)) {
     NS_WARNING("Dispatching event in nsShutdownThread::Shutdown failed!");
@@ -52,7 +52,7 @@ nsShutdownThread::BlockingShutdown(nsIThread *aThread)
 {
   nsresult rv;
 
-  RefPtr<nsShutdownThread> st = new nsShutdownThread(aThread);
+  nsRefPtr<nsShutdownThread> st = new nsShutdownThread(aThread);
   nsCOMPtr<nsIThread> workerThread;
 
   rv = NS_NewNamedThread("thread shutdown", getter_AddRefs(workerThread));
@@ -62,16 +62,13 @@ nsShutdownThread::BlockingShutdown(nsIThread *aThread)
   }
 
   {
-    MonitorAutoLock mon(st->mMonitor);
+    MutexAutoLock lock(st->mLock);
     rv = workerThread->Dispatch(st, NS_DISPATCH_NORMAL);
     if (NS_FAILED(rv)) {
       NS_WARNING(
         "Dispatching event in nsShutdownThread::BlockingShutdown failed!");
     } else {
-      st->mShuttingDown = true;
-      while (st->mShuttingDown) {
-        mon.Wait();
-      }
+      st->mCondVar.Wait();
     }
   }
 
@@ -81,9 +78,8 @@ nsShutdownThread::BlockingShutdown(nsIThread *aThread)
 NS_IMETHODIMP
 nsShutdownThread::Run()
 {
-  MonitorAutoLock mon(mMonitor);
+  MutexAutoLock lock(mLock);
   mThread->Shutdown();
-  mShuttingDown = false;
-  mon.Notify();
+  mCondVar.Notify();
   return NS_OK;
 }

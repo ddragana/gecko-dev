@@ -12,8 +12,8 @@ import sys
 # load modules from parent dir
 sys.path.insert(1, os.path.dirname(sys.path[0]))
 
-from mozharness.base.errors import BaseErrorList, TarErrorList
-from mozharness.base.log import ERROR, FATAL, INFO
+from mozharness.base.errors import BaseErrorList, TarErrorList, ZipErrorList
+from mozharness.base.log import ERROR, WARNING, FATAL, INFO
 from mozharness.base.script import (
     BaseScript,
     PreScriptAction,
@@ -121,7 +121,6 @@ class LuciddreamTest(TestingMixin, MercurialScript, MozbaseMixin, BaseScript,
         self.emulator_url = c.get('emulator_url')
         self.binary_path = c.get('binary_path')
         self.test_url = c.get('test_url')
-        self.test_packages_url = c.get('test_packages_url')
 
         if c.get('structured_output'):
             self.parser_class = StructuredOutputParser
@@ -237,7 +236,6 @@ class LuciddreamTest(TestingMixin, MercurialScript, MozbaseMixin, BaseScript,
         str_format_values = {
             'browser_path': self.binary_path,
             'raw_log_file': os.path.join(dirs['abs_work_dir'], 'luciddream_raw.log'),
-            'error_summary_file': os.path.join(dirs['abs_work_dir'], 'luciddream_errorsummary.log'),
             'test_manifest': os.path.join(ld_dir, 'example-tests', 'luciddream.ini')
         }
 
@@ -251,7 +249,7 @@ class LuciddreamTest(TestingMixin, MercurialScript, MozbaseMixin, BaseScript,
             str_format_values['gaia_profile'] = os.path.join(dirs['abs_gaia_dir'], 'profile')
 
         suite = 'luciddream-emulator' if self.config.get('emulator_url') else 'luciddream-b2gdt'
-        options = self.config['suite_definitions'][suite]['options']
+        options = self.tree_config['suite_definitions'][suite]['options']
         for option in options:
             option = option % str_format_values
             if not option.endswith('None'):

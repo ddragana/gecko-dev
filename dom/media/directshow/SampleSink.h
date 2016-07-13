@@ -9,6 +9,7 @@
 
 #include "BaseFilter.h"
 #include "DirectShowUtils.h"
+#include "nsAutoPtr.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/ReentrantMonitor.h"
 

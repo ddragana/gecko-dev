@@ -35,9 +35,12 @@ SourceSurface*
 X11TextureSourceBasic::GetSurface(DrawTarget* aTarget)
 {
   if (!mSourceSurface) {
-    mSourceSurface =
-        Factory::CreateSourceSurfaceForCairoSurface(mSurface->CairoSurface(),
-                                                    GetSize(), GetFormat());
+    NativeSurface surf;
+    surf.mFormat = GetFormat();
+    surf.mType = NativeSurfaceType::CAIRO_SURFACE;
+    surf.mSurface = mSurface->CairoSurface();
+    surf.mSize = GetSize();
+    mSourceSurface = aTarget->CreateSourceSurfaceFromNativeSurface(surf);
   }
   return mSourceSurface;
 }
@@ -45,7 +48,9 @@ X11TextureSourceBasic::GetSurface(DrawTarget* aTarget)
 void
 X11TextureSourceBasic::SetCompositor(Compositor* aCompositor)
 {
-  mCompositor = AssertBasicCompositor(aCompositor);
+  MOZ_ASSERT(aCompositor->GetBackendType() == LayersBackend::LAYERS_BASIC);
+  BasicCompositor* compositor = static_cast<BasicCompositor*>(aCompositor);
+  mCompositor = compositor;
 }
 
 SurfaceFormat

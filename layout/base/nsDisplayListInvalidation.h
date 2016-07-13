@@ -172,9 +172,7 @@ public:
   bool mHasRoundedCorners;
 };
 
-class nsDisplayBorderGeometry
-  : public nsDisplayItemGeometry
-  , public nsImageGeometryMixin<nsDisplayBorderGeometry>
+class nsDisplayBorderGeometry : public nsDisplayItemGeometry
 {
 public:
   nsDisplayBorderGeometry(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder);
@@ -194,7 +192,6 @@ public:
   virtual void MoveBy(const nsPoint& aOffset) override;
 
   nsRect mPositioningArea;
-  nsRect mDestRect;
 };
 
 class nsDisplayThemedBackgroundGeometry : public nsDisplayItemGeometry

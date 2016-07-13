@@ -11,7 +11,7 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-var ContentPrefServiceParent = {
+let ContentPrefServiceParent = {
   _cps2: null,
 
   init: function() {
@@ -54,16 +54,16 @@ var ContentPrefServiceParent = {
       // observers for the same name.
       if (!observer) {
         observer = {
-          onContentPrefSet: function(group, name, value, isPrivate) {
+          onContentPrefSet: function(group, name, value) {
             msg.target.sendAsyncMessage("ContentPrefs:NotifyObservers",
                                         { name: name, callback: "onContentPrefSet",
-                                          args: [ group, name, value, isPrivate ] });
+                                          args: [ group, name, value ] });
           },
 
-          onContentPrefRemoved: function(group, name, isPrivate) {
+          onContentPrefRemoved: function(group, name) {
             msg.target.sendAsyncMessage("ContentPrefs:NotifyObservers",
                                         { name: name, callback: "onContentPrefRemoved",
-                                          args: [ group, name, isPrivate ] });
+                                          args: [ group, name ] });
           },
 
           // The names we're using this observer object for, used to keep track
@@ -102,12 +102,7 @@ var ContentPrefServiceParent = {
       handleResult: function(pref) {
         msg.target.sendAsyncMessage("ContentPrefs:HandleResult",
                                     { requestId: requestId,
-                                      contentPref: {
-                                        domain: pref.domain,
-                                        name: pref.name,
-                                        value: pref.value
-                                      }
-                                    });
+                                      contentPref: pref });
       },
 
       handleError: function(error) {
@@ -115,6 +110,7 @@ var ContentPrefServiceParent = {
                                     { requestId: requestId,
                                       error: error });
       },
+
       handleCompletion: function(reason) {
         msg.target.sendAsyncMessage("ContentPrefs:HandleCompletion",
                                     { requestId: requestId,

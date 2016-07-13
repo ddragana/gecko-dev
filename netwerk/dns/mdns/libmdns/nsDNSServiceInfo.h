@@ -28,7 +28,6 @@ private:
 
 private:
   nsCString mHost;
-  nsCString mAddress;
   uint16_t mPort = 0;
   nsCString mServiceName;
   nsCString mServiceType;
@@ -36,7 +35,6 @@ private:
   nsCOMPtr<nsIPropertyBag2> mAttributes;
 
   bool mIsHostSet = false;
-  bool mIsAddressSet = false;
   bool mIsPortSet = false;
   bool mIsServiceNameSet = false;
   bool mIsServiceTypeSet = false;

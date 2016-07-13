@@ -208,7 +208,7 @@ var SEARCH_RESULTS = [{
   repositoryStatus:       8,
   size:                   5555,
   updateDate:             new Date(1265033045000),
-
+  
 }, {
   id:                     "purchase1@tests.mozilla.org",
   type:                   "extension",
@@ -469,12 +469,12 @@ function run_test_1() {
     initiallyUndefined: true,
     preference:         PREF_GETADDONS_BROWSEADDONS,
     urlTests:           urlTests,
-    getURL:             () => AddonRepository.homepageURL
+    getURL:             function() AddonRepository.homepageURL
   }, {
     initiallyUndefined: true,
     preference:         PREF_GETADDONS_BROWSERECOMMENDED,
     urlTests:           urlTests,
-    getURL:             () => AddonRepository.getRecommendedURL()
+    getURL:             function() AddonRepository.getRecommendedURL()
   }, {
     initiallyUndefined: false,
     preference:         PREF_GETADDONS_BROWSESEARCHRESULTS,

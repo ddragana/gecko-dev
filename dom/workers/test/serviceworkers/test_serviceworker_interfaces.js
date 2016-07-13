@@ -48,12 +48,23 @@ var ecmaGlobals =
     "Number",
     "Object",
     "Proxy",
+    "PushEvent",
+    "PushMessageData",
     "RangeError",
     "ReferenceError",
     "Reflect",
     "RegExp",
     "Set",
     {name: "SharedArrayBuffer", nightly: true},
+    {name: "SharedInt8Array", nightly: true},
+    {name: "SharedUint8Array", nightly: true},
+    {name: "SharedUint8ClampedArray", nightly: true},
+    {name: "SharedInt16Array", nightly: true},
+    {name: "SharedUint16Array", nightly: true},
+    {name: "SharedInt32Array", nightly: true},
+    {name: "SharedUint32Array", nightly: true},
+    {name: "SharedFloat32Array", nightly: true},
+    {name: "SharedFloat64Array", nightly: true},
     {name: "SIMD", nightly: true},
     {name: "Atomics", nightly: true},
     "StopIteration",
@@ -89,11 +100,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Clients",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Crypto",
+    { name: "DataStore", b2g: true },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CustomEvent",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "Directory",
+    { name: "DataStoreCursor", b2g: true },
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DOMCursor",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -111,13 +120,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "ExtendableEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ExtendableMessageEvent",
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "FetchEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "File",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileReader",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "FileReaderSync",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -126,8 +131,6 @@ var interfaceNamesInGlobalScope =
     "Headers",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "IDBCursor",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBCursorWithValue",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "IDBDatabase",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -147,10 +150,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "IDBVersionChangeEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ImageBitmap",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "ImageBitmapRenderingContext",
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "ImageData",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "MessageChannel",
@@ -159,9 +158,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "MessagePort",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "Notification", nonReleaseB2G: true, b2g: false },
+    "Notification",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "NotificationEvent", nonReleaseB2G: true, b2g: false },
+    "NotificationEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Performance",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -171,21 +170,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "PerformanceMeasure",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PerformanceObserver", nightly: true },
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PerformanceObserverEntryList", nightly: true },
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "Promise",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PushEvent", b2g: false },
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PushManager", b2g: false },
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PushMessageData", b2g: false },
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PushSubscription", b2g: false },
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PushSubscriptionOptions", b2g: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Request",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -197,11 +182,15 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "ServiceWorkerRegistration",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SubtleCrypto",
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "TextDecoder",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "TextEncoder",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "XMLHttpRequest",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "XMLHttpRequestEventTarget",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "XMLHttpRequestUpload",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "URL",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -236,12 +225,9 @@ function createInterfaceMap(permissionMap, version, userAgent, isB2G) {
       } else {
         ok(!("pref" in entry), "Bogus pref annotation for " + entry.name);
         if ((entry.nightly === !isNightly) ||
-            (entry.nightlyAndroid === !(isAndroid && isNightly) && isAndroid) ||
-            (entry.nonReleaseB2G === !(isB2G && !isRelease) && isB2G) ||
-            (entry.nonReleaseAndroid === !(isAndroid && !isRelease) && isAndroid) ||
             (entry.desktop === !isDesktop) ||
-            (entry.android === !isAndroid && !entry.nonReleaseAndroid && !entry.nightlyAndroid) ||
-            (entry.b2g === !isB2G && !entry.nonReleaseB2G) ||
+            (entry.android === !isAndroid) ||
+            (entry.b2g === !isB2G) ||
             (entry.release === !isRelease) ||
             (entry.permission && !permissionMap[entry.permission])) {
           interfaceMap[entry.name] = false;

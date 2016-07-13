@@ -5,58 +5,52 @@
 import json
 import os
 import posixpath
+import shutil
 import sys
 import tempfile
+import threading
 import traceback
 
 here = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, here)
 
-from runtests import MochitestBase
+from runtests import Mochitest
+from runtests import MochitestUtilsMixin
 from mochitest_options import MochitestArgumentParser
 from marionette import Marionette
 from mozprofile import Profile, Preferences
-from mozrunner.utils import get_stack_fixer_function
 import mozinfo
 import mozleak
 
 
-class MochitestB2G(MochitestBase):
-    """
-    Mochitest class for b2g emulators and devices.
-    """
+class B2GMochitest(MochitestUtilsMixin):
     marionette = None
-    remote_log = None
 
     def __init__(self, marionette_args,
                  logger_options,
-                 profile_data_dir,
-                 local_binary_dir,
-                 locations=os.path.join(here, 'server-locations.txt'),
                  out_of_process=True,
-                 remote_test_root=None,
-                 remote_log_file=None):
-        MochitestBase.__init__(self, logger_options)
+                 profile_data_dir=None,
+                 locations=os.path.join(here, 'server-locations.txt')):
+        super(B2GMochitest, self).__init__(logger_options)
         self.marionette_args = marionette_args
         self.out_of_process = out_of_process
         self.locations_file = locations
         self.preferences = []
         self.webapps = None
-        self.start_script = os.path.join(here, 'start_b2g.js')
-        self.start_script_args = [self.out_of_process]
+        self.test_script = os.path.join(here, 'b2g_start_script.js')
+        self.test_script_args = [self.out_of_process]
         self.product = 'b2g'
         self.remote_chrome_test_dir = None
-        self.local_log = None
-        self.local_binary_dir = local_binary_dir
 
-        self.preferences = [
-            os.path.join(
-                profile_data_dir,
-                f) for f in os.listdir(profile_data_dir) if f.startswith('pref')]
-        self.webapps = [
-            os.path.join(
-                profile_data_dir,
-                f) for f in os.listdir(profile_data_dir) if f.startswith('webapp')]
+        if profile_data_dir:
+            self.preferences = [
+                os.path.join(
+                    profile_data_dir,
+                    f) for f in os.listdir(profile_data_dir) if f.startswith('pref')]
+            self.webapps = [
+                os.path.join(
+                    profile_data_dir,
+                    f) for f in os.listdir(profile_data_dir) if f.startswith('webapp')]
 
         # mozinfo is populated by the parent class
         if mozinfo.info['debug']:
@@ -64,9 +58,21 @@ class MochitestB2G(MochitestBase):
         else:
             self.SERVER_STARTUP_TIMEOUT = 90
 
+    def setup_common_options(self, options):
+        test_url = self.buildTestPath(options)
+        # For B2G emulators buildURLOptions has been called
+        # without calling buildTestPath first and that
+        # causes manifestFile not to be set
+        if not "manifestFile=tests.json" in self.urlOpts:
+            self.urlOpts.append("manifestFile=%s" % options.manifestFile)
+
+        if len(self.urlOpts) > 0:
+            test_url += "?" + "&".join(self.urlOpts)
+        self.test_script_args.append(test_url)
+
     def buildTestPath(self, options, testsToFilter=None):
         if options.manifestFile != 'tests.json':
-            MochitestBase.buildTestPath(self, options, testsToFilter, disabled=False)
+            super(B2GMochitest, self).buildTestPath(options, testsToFilter, disabled=False)
         return self.buildTestURL(options)
 
     def build_profile(self, options):
@@ -100,7 +106,11 @@ class MochitestB2G(MochitestBase):
             'proxy': {"remote": options.webServer}
         }
 
-        self.profile = Profile(**kwargs)
+        if options.profile:
+            self.profile = Profile.clone(options.profile, **kwargs)
+        else:
+            self.profile = Profile(**kwargs)
+
         options.profilePath = self.profile.profile
         # TODO bug 839108 - mozprofile should probably handle this
         manifest = self.addChromeToProfile(options)
@@ -143,8 +153,6 @@ class MochitestB2G(MochitestBase):
                             'stream': None}
             self.marionette_args['process_args'] = process_args
             self.marionette_args['profile'] = self.profile
-            # Increase the timeout to fix bug 1208725
-            self.marionette_args['socket_timeout'] = 720
 
             self.marionette = Marionette(**self.marionette_args)
             self.runner = self.marionette.runner
@@ -198,9 +206,9 @@ class MochitestB2G(MochitestBase):
             self.buildURLOptions(options, {'MOZ_HIDE_RESULTS_TABLE': '1'})
             options.manifestFile = manifestFile
 
-            self.start_script_args.append(not options.emulator)
-            self.start_script_args.append(options.wifi)
-            self.start_script_args.append(options.chrome)
+            self.test_script_args.append(not options.emulator)
+            self.test_script_args.append(options.wifi)
+            self.test_script_args.append(options.chrome)
 
             self.runner.start(outputTimeout=timeout)
 
@@ -225,17 +233,18 @@ class MochitestB2G(MochitestBase):
                 if (!testUtils.hasOwnProperty("specialPowersObserver")) {
                   let loader = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
                     .getService(Components.interfaces.mozIJSSubScriptLoader);
-                  loader.loadSubScript("chrome://specialpowers/content/SpecialPowersObserver.jsm",
+                  loader.loadSubScript("chrome://specialpowers/content/SpecialPowersObserver.js",
                     testUtils);
                   testUtils.specialPowersObserver = new testUtils.SpecialPowersObserver();
                   testUtils.specialPowersObserver.init();
+                  testUtils.specialPowersObserver._loadFrameScript();
                 }
                 """)
 
             if options.chrome:
                 self.app_ctx.dm.removeDir(self.remote_chrome_test_dir)
                 self.app_ctx.dm.mkDir(self.remote_chrome_test_dir)
-                local = MochitestBase.getChromeTestDir(self, options)
+                local = super(B2GMochitest, self).getChromeTestDir(options)
                 local = os.path.join(local, "chrome")
                 remote = self.remote_chrome_test_dir
                 self.log.info(
@@ -243,7 +252,15 @@ class MochitestB2G(MochitestBase):
                     (local, remote))
                 self.app_ctx.dm.pushDir(local, remote)
 
-            self.execute_start_script()
+            if os.path.isfile(self.test_script):
+                with open(self.test_script, 'r') as script:
+                    self.marionette.execute_script(
+                        script.read(),
+                        script_args=self.test_script_args)
+            else:
+                self.marionette.execute_script(
+                    self.test_script,
+                    script_args=self.test_script_args)
             status = self.runner.wait()
 
             if status is None:
@@ -261,8 +278,6 @@ class MochitestB2G(MochitestBase):
                 leak_thresholds=options.leakThresholds,
                 ignore_missing_leaks=options.ignoreMissingLeaks,
                 log=self.log,
-                stack_fixer=get_stack_fixer_function(options.utilityPath,
-                                                     options.symbolsPath),
             )
         except KeyboardInterrupt:
             self.log.info("runtests.py | Received keyboard interrupt.\n")
@@ -302,6 +317,27 @@ class MochitestB2G(MochitestBase):
             return self.remote_chrome_test_dir
         return 'dummy-chrome-test-dir'
 
+
+class B2GDeviceMochitest(B2GMochitest, Mochitest):
+    remote_log = None
+
+    def __init__(
+            self,
+            marionette_args,
+            logger_options,
+            profile_data_dir,
+            local_binary_dir,
+            remote_test_root=None,
+            remote_log_file=None):
+        B2GMochitest.__init__(
+            self,
+            marionette_args,
+            logger_options,
+            out_of_process=True,
+            profile_data_dir=profile_data_dir)
+        self.local_log = None
+        self.local_binary_dir = local_binary_dir
+
     def cleanup(self, manifest, options):
         if self.local_log:
             self.app_ctx.dm.getFile(self.remote_log, self.local_log)
@@ -332,7 +368,7 @@ class MochitestB2G(MochitestBase):
         options.utilityPath = self.local_binary_dir
         options.profilePath = tempfile.mkdtemp()
 
-        MochitestBase.startServers(self, options, debuggerInfo)
+        MochitestUtilsMixin.startServers(self, options, debuggerInfo)
 
         options.xrePath = savedXre
         options.utilityPath = savedUtility
@@ -342,25 +378,72 @@ class MochitestB2G(MochitestBase):
         self.local_log = options.logFile
         options.logFile = self.remote_log
         options.profilePath = self.profile.profile
-        MochitestBase.buildURLOptions(self, options, env)
+        super(B2GDeviceMochitest, self).buildURLOptions(options, env)
 
-        test_url = self.buildTestPath(options)
-
-        # For B2G emulators buildURLOptions has been called
-        # without calling buildTestPath first and that
-        # causes manifestFile not to be set
-        if "manifestFile=tests.json" not in self.urlOpts:
-            self.urlOpts.append("manifestFile=%s" % options.manifestFile)
-
-        if len(self.urlOpts) > 0:
-            test_url += "?" + "&".join(self.urlOpts)
-        self.start_script_args.append(test_url)
+        self.setup_common_options(options)
 
         options.profilePath = self.app_ctx.remote_profile
         options.logFile = self.local_log
 
 
-def run_test_harness(options):
+class B2GDesktopMochitest(B2GMochitest, Mochitest):
+
+    def __init__(self, marionette_args, logger_options, profile_data_dir):
+        B2GMochitest.__init__(
+            self,
+            marionette_args,
+            logger_options,
+            out_of_process=False,
+            profile_data_dir=profile_data_dir)
+        Mochitest.__init__(self, logger_options)
+        self.certdbNew = True
+
+    def runMarionetteScript(self, marionette, test_script, test_script_args):
+        assert(marionette.wait_for_port())
+        marionette.start_session()
+        marionette.set_context(marionette.CONTEXT_CHROME)
+
+        if os.path.isfile(test_script):
+            f = open(test_script, 'r')
+            test_script = f.read()
+            f.close()
+        self.marionette.execute_script(test_script,
+                                       script_args=test_script_args)
+
+    def startTests(self):
+        # This is run in a separate thread because otherwise, the app's
+        # stdout buffer gets filled (which gets drained only after this
+        # function returns, by waitForFinish), which causes the app to hang.
+        self.marionette = Marionette(**self.marionette_args)
+        thread = threading.Thread(target=self.runMarionetteScript,
+                                  args=(self.marionette,
+                                        self.test_script,
+                                        self.test_script_args))
+        thread.start()
+
+    def buildURLOptions(self, options, env):
+        super(B2GDesktopMochitest, self).buildURLOptions(options, env)
+
+        self.setup_common_options(options)
+
+        # Copy the extensions to the B2G bundles dir.
+        extensionDir = os.path.join(
+            options.profilePath,
+            'extensions',
+            'staged')
+        bundlesDir = os.path.join(os.path.dirname(options.app),
+                                  'distribution', 'bundles')
+
+        for filename in os.listdir(extensionDir):
+            shutil.rmtree(os.path.join(bundlesDir, filename), True)
+            shutil.copytree(os.path.join(extensionDir, filename),
+                            os.path.join(bundlesDir, filename))
+
+    def buildProfile(self, options):
+        return self.build_profile(options)
+
+
+def run_remote_mochitests(options):
     # create our Marionette instance
     marionette_args = {
         'adb_path': options.adbPath,
@@ -381,7 +464,7 @@ def run_test_harness(options):
         print "ERROR: Invalid options specified, use --help for a list of valid options"
         sys.exit(1)
 
-    mochitest = MochitestB2G(
+    mochitest = B2GDeviceMochitest(
         marionette_args,
         options,
         options.profile_data_dir,
@@ -410,10 +493,45 @@ def run_test_harness(options):
     return retVal
 
 
+def run_desktop_mochitests(options):
+    # create our Marionette instance
+    marionette_args = {}
+    if options.marionette:
+        host, port = options.marionette.split(':')
+        marionette_args['host'] = host
+        marionette_args['port'] = int(port)
+
+    # add a -bin suffix if b2g-bin exists, but just b2g was specified
+    if options.app[-4:] != '-bin':
+        if os.path.isfile("%s-bin" % options.app):
+            options.app = "%s-bin" % options.app
+
+    mochitest = B2GDesktopMochitest(
+        marionette_args,
+        options,
+        options.profile_data_dir)
+    if options is None:
+        sys.exit(1)
+
+    if options.desktop and not options.profile:
+        raise Exception("must specify --profile when specifying --desktop")
+
+    options.browserArgs += ['-marionette']
+
+    retVal = mochitest.runTests(options, onLaunch=mochitest.startTests)
+    mochitest.message_logger.finish()
+
+    return retVal
+
+
 def main():
     parser = MochitestArgumentParser(app='b2g')
     options = parser.parse_args()
-    return run_test_harness(options)
+
+    if options.desktop:
+        return run_desktop_mochitests(options)
+    else:
+        return run_remote_mochitests(options)
 
 if __name__ == "__main__":
     sys.exit(main())

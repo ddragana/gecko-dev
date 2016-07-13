@@ -70,6 +70,7 @@ do
     ;;
     -clang-cl)
       cl="clang-cl"
+      safeseh=
       shift 1
     ;;
     -O0)

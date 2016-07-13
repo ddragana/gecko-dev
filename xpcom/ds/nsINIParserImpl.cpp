@@ -36,7 +36,7 @@ nsINIParserFactory::CreateINIParser(nsIFile* aINIFile,
 {
   *aResult = nullptr;
 
-  RefPtr<nsINIParserImpl> p(new nsINIParserImpl());
+  nsRefPtr<nsINIParserImpl> p(new nsINIParserImpl());
   if (!p) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -76,7 +76,7 @@ static bool
 SectionCB(const char* aSection, void* aClosure)
 {
   nsTArray<nsCString>* strings = static_cast<nsTArray<nsCString>*>(aClosure);
-  strings->AppendElement()->Assign(aSection);
+  strings->AppendElement(nsDependentCString(aSection));
   return true;
 }
 
@@ -104,7 +104,7 @@ static bool
 KeyCB(const char* aKey, const char* aValue, void* aClosure)
 {
   nsTArray<nsCString>* strings = static_cast<nsTArray<nsCString>*>(aClosure);
-  strings->AppendElement()->Assign(aKey);
+  strings->AppendElement(nsDependentCString(aKey));
   return true;
 }
 

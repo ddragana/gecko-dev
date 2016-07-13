@@ -31,7 +31,7 @@ class FirewallManager;
 class AsyncHttpRequest : public SignalThread {
  public:
   explicit AsyncHttpRequest(const std::string &user_agent);
-  ~AsyncHttpRequest() override;
+  ~AsyncHttpRequest();
 
   // If start_delay is less than or equal to zero, this starts immediately.
   // Start_delay defaults to zero.
@@ -75,11 +75,11 @@ class AsyncHttpRequest : public SignalThread {
 
  protected:
   void set_error(HttpErrorType error) { error_ = error; }
-  void OnWorkStart() override;
-  void OnWorkStop() override;
+  virtual void OnWorkStart();
+  virtual void OnWorkStop();
   void OnComplete(HttpClient* client, HttpErrorType error);
-  void OnMessage(Message* message) override;
-  void DoWork() override;
+  virtual void OnMessage(Message* message);
+  virtual void DoWork();
 
  private:
   void LaunchRequest();

@@ -8,16 +8,11 @@
 #include "mozilla/dom/CanvasRenderingContext2D.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
-#include "mozilla/layers/AsyncCanvasRenderer.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/unused.h"
 #include "gfxUtils.h"
-#include "nsIThreadPool.h"
 #include "nsNetUtil.h"
-#include "nsXPCOMCIDInternal.h"
-#include "WorkerPrivate.h"
-#include "YCbCrUtils.h"
 
 using namespace mozilla::gfx;
 
@@ -27,7 +22,7 @@ namespace dom {
 // This class should be placed inside GetBRGADataSourceSurfaceSync(). However,
 // due to B2G ICS uses old complier (C++98/03) which forbids local class as
 // template parameter, we need to move this class outside.
-class SurfaceHelper : public Runnable {
+class SurfaceHelper : public nsRunnable {
 public:
   explicit SurfaceHelper(already_AddRefed<layers::Image> aImage) : mImage(aImage) {}
 
@@ -69,36 +64,35 @@ private:
 already_AddRefed<DataSourceSurface>
 GetBRGADataSourceSurfaceSync(already_AddRefed<layers::Image> aImage)
 {
-  RefPtr<SurfaceHelper> helper = new SurfaceHelper(Move(aImage));
+  nsRefPtr<SurfaceHelper> helper = new SurfaceHelper(Move(aImage));
   return helper->GetDataSurfaceSafe();
 }
 
-class EncodingCompleteEvent : public CancelableRunnable
+class EncodingCompleteEvent : public nsRunnable
 {
   virtual ~EncodingCompleteEvent() {}
 
 public:
-  explicit EncodingCompleteEvent(EncodeCompleteCallback* aEncodeCompleteCallback)
+  NS_DECL_ISUPPORTS_INHERITED
+
+  EncodingCompleteEvent(nsIThread* aEncoderThread,
+                        EncodeCompleteCallback* aEncodeCompleteCallback)
     : mImgSize(0)
     , mType()
     , mImgData(nullptr)
+    , mEncoderThread(aEncoderThread)
     , mEncodeCompleteCallback(aEncodeCompleteCallback)
     , mFailed(false)
-  {
-    if (!NS_IsMainThread() && workers::GetCurrentThreadWorkerPrivate()) {
-      mCreationThread = NS_GetCurrentThread();
-    } else {
-      NS_GetMainThread(getter_AddRefs(mCreationThread));
-    }
-  }
+  {}
 
   NS_IMETHOD Run() override
   {
     nsresult rv = NS_OK;
+    MOZ_ASSERT(NS_IsMainThread());
 
     if (!mFailed) {
       // The correct parentObject has to be set by the mEncodeCompleteCallback.
-      RefPtr<Blob> blob =
+      nsRefPtr<Blob> blob =
         Blob::CreateMemoryBlob(nullptr, mImgData, mImgSize, mType);
       MOZ_ASSERT(blob);
 
@@ -107,6 +101,7 @@ public:
 
     mEncodeCompleteCallback = nullptr;
 
+    mEncoderThread->Shutdown();
     return rv;
   }
 
@@ -122,21 +117,18 @@ public:
     mFailed = true;
   }
 
-  nsIThread* GetCreationThread()
-  {
-    return mCreationThread;
-  }
-
 private:
   uint64_t mImgSize;
   nsAutoString mType;
   void* mImgData;
-  nsCOMPtr<nsIThread> mCreationThread;
-  RefPtr<EncodeCompleteCallback> mEncodeCompleteCallback;
+  nsCOMPtr<nsIThread> mEncoderThread;
+  nsRefPtr<EncodeCompleteCallback> mEncodeCompleteCallback;
   bool mFailed;
 };
 
-class EncodingRunnable : public Runnable
+NS_IMPL_ISUPPORTS_INHERITED0(EncodingCompleteEvent, nsRunnable);
+
+class EncodingRunnable : public nsRunnable
 {
   virtual ~EncodingRunnable() {}
 
@@ -145,7 +137,7 @@ public:
 
   EncodingRunnable(const nsAString& aType,
                    const nsAString& aOptions,
-                   UniquePtr<uint8_t[]> aImageBuffer,
+                   uint8_t* aImageBuffer,
                    layers::Image* aImage,
                    imgIEncoder* aEncoder,
                    EncodingCompleteEvent* aEncodingCompleteEvent,
@@ -154,7 +146,7 @@ public:
                    bool aUsingCustomOptions)
     : mType(aType)
     , mOptions(aOptions)
-    , mImageBuffer(Move(aImageBuffer))
+    , mImageBuffer(aImageBuffer)
     , mImage(aImage)
     , mEncoder(aEncoder)
     , mEncodingCompleteEvent(aEncodingCompleteEvent)
@@ -168,11 +160,10 @@ public:
     nsCOMPtr<nsIInputStream> stream;
     nsresult rv = ImageEncoder::ExtractDataInternal(mType,
                                                     mOptions,
-                                                    mImageBuffer.get(),
+                                                    mImageBuffer,
                                                     mFormat,
                                                     mSize,
                                                     mImage,
-                                                    nullptr,
                                                     nullptr,
                                                     getter_AddRefs(stream),
                                                     mEncoder);
@@ -182,11 +173,10 @@ public:
     if (rv == NS_ERROR_INVALID_ARG && mUsingCustomOptions) {
       rv = ImageEncoder::ExtractDataInternal(mType,
                                              EmptyString(),
-                                             mImageBuffer.get(),
+                                             mImageBuffer,
                                              mFormat,
                                              mSize,
                                              mImage,
-                                             nullptr,
                                              nullptr,
                                              getter_AddRefs(stream),
                                              mEncoder);
@@ -214,11 +204,10 @@ public:
     } else {
       mEncodingCompleteEvent->SetMembers(imgData, imgSize, mType);
     }
-    rv = mEncodingCompleteEvent->GetCreationThread()->
-      Dispatch(mEncodingCompleteEvent, nsIThread::DISPATCH_NORMAL);
+    rv = NS_DispatchToMainThread(mEncodingCompleteEvent);
     if (NS_FAILED(rv)) {
       // Better to leak than to crash.
-      Unused << mEncodingCompleteEvent.forget();
+      unused << mEncodingCompleteEvent.forget();
       return rv;
     }
 
@@ -228,18 +217,16 @@ public:
 private:
   nsAutoString mType;
   nsAutoString mOptions;
-  UniquePtr<uint8_t[]> mImageBuffer;
-  RefPtr<layers::Image> mImage;
+  nsAutoArrayPtr<uint8_t> mImageBuffer;
+  nsRefPtr<layers::Image> mImage;
   nsCOMPtr<imgIEncoder> mEncoder;
-  RefPtr<EncodingCompleteEvent> mEncodingCompleteEvent;
+  nsRefPtr<EncodingCompleteEvent> mEncodingCompleteEvent;
   int32_t mFormat;
   const nsIntSize mSize;
   bool mUsingCustomOptions;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED0(EncodingRunnable, Runnable);
-
-StaticRefPtr<nsIThreadPool> ImageEncoder::sThreadPool;
+NS_IMPL_ISUPPORTS_INHERITED0(EncodingRunnable, nsRunnable);
 
 /* static */
 nsresult
@@ -247,7 +234,6 @@ ImageEncoder::ExtractData(nsAString& aType,
                           const nsAString& aOptions,
                           const nsIntSize aSize,
                           nsICanvasRenderingContextInternal* aContext,
-                          layers::AsyncCanvasRenderer* aRenderer,
                           nsIInputStream** aStream)
 {
   nsCOMPtr<imgIEncoder> encoder = ImageEncoder::GetImageEncoder(aType);
@@ -256,8 +242,9 @@ ImageEncoder::ExtractData(nsAString& aType,
   }
 
   return ExtractDataInternal(aType, aOptions, nullptr, 0, aSize, nullptr,
-                             aContext, aRenderer, aStream, encoder);
+                             aContext, aStream, encoder);
 }
+
 
 /* static */
 nsresult
@@ -272,13 +259,12 @@ ImageEncoder::ExtractDataFromLayersImageAsync(nsAString& aType,
     return NS_IMAGELIB_ERROR_NO_ENCODER;
   }
 
-  nsresult rv = EnsureThreadPool();
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  nsCOMPtr<nsIThread> encoderThread;
+  nsresult rv = NS_NewThread(getter_AddRefs(encoderThread), nullptr);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<EncodingCompleteEvent> completeEvent =
-    new EncodingCompleteEvent(aEncodeCallback);
+  nsRefPtr<EncodingCompleteEvent> completeEvent =
+    new EncodingCompleteEvent(encoderThread, aEncodeCallback);
 
   nsIntSize size(aImage->GetSize().width, aImage->GetSize().height);
   nsCOMPtr<nsIRunnable> event = new EncodingRunnable(aType,
@@ -290,7 +276,7 @@ ImageEncoder::ExtractDataFromLayersImageAsync(nsAString& aType,
                                                      imgIEncoder::INPUT_FORMAT_HOSTARGB,
                                                      size,
                                                      aUsingCustomOptions);
-  return sThreadPool->Dispatch(event, NS_DISPATCH_NORMAL);
+  return encoderThread->Dispatch(event, NS_DISPATCH_NORMAL);
 }
 
 /* static */
@@ -298,7 +284,7 @@ nsresult
 ImageEncoder::ExtractDataAsync(nsAString& aType,
                                const nsAString& aOptions,
                                bool aUsingCustomOptions,
-                               UniquePtr<uint8_t[]> aImageBuffer,
+                               uint8_t* aImageBuffer,
                                int32_t aFormat,
                                const nsIntSize aSize,
                                EncodeCompleteCallback* aEncodeCallback)
@@ -308,24 +294,23 @@ ImageEncoder::ExtractDataAsync(nsAString& aType,
     return NS_IMAGELIB_ERROR_NO_ENCODER;
   }
 
-  nsresult rv = EnsureThreadPool();
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  nsCOMPtr<nsIThread> encoderThread;
+  nsresult rv = NS_NewThread(getter_AddRefs(encoderThread), nullptr);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<EncodingCompleteEvent> completeEvent =
-    new EncodingCompleteEvent(aEncodeCallback);
+  nsRefPtr<EncodingCompleteEvent> completeEvent =
+    new EncodingCompleteEvent(encoderThread, aEncodeCallback);
 
   nsCOMPtr<nsIRunnable> event = new EncodingRunnable(aType,
                                                      aOptions,
-                                                     Move(aImageBuffer),
+                                                     aImageBuffer,
                                                      nullptr,
                                                      encoder,
                                                      completeEvent,
                                                      aFormat,
                                                      aSize,
                                                      aUsingCustomOptions);
-  return sThreadPool->Dispatch(event, NS_DISPATCH_NORMAL);
+  return encoderThread->Dispatch(event, NS_DISPATCH_NORMAL);
 }
 
 /*static*/ nsresult
@@ -356,7 +341,6 @@ ImageEncoder::ExtractDataInternal(const nsAString& aType,
                                   const nsIntSize aSize,
                                   layers::Image* aImage,
                                   nsICanvasRenderingContextInternal* aContext,
-                                  layers::AsyncCanvasRenderer* aRenderer,
                                   nsIInputStream** aStream,
                                   imgIEncoder* aEncoder)
 {
@@ -382,11 +366,6 @@ ImageEncoder::ExtractDataInternal(const nsAString& aType,
     rv = aContext->GetInputStream(encoderType.get(),
                                   nsPromiseFlatString(aOptions).get(),
                                   getter_AddRefs(imgStream));
-  } else if (aRenderer) {
-    NS_ConvertUTF16toUTF8 encoderType(aType);
-    rv = aRenderer->GetInputStream(encoderType.get(),
-                                   nsPromiseFlatString(aOptions).get(),
-                                   getter_AddRefs(imgStream));
   } else if (aImage) {
     // It is safe to convert PlanarYCbCr format from YUV to RGB off-main-thread.
     // Other image formats could have problem to convert format off-main-thread.
@@ -395,16 +374,16 @@ ImageEncoder::ExtractDataInternal(const nsAString& aType,
     if (aImage->GetFormat() == ImageFormat::PLANAR_YCBCR) {
       nsTArray<uint8_t> data;
       layers::PlanarYCbCrImage* ycbcrImage = static_cast<layers::PlanarYCbCrImage*> (aImage);
-      gfxImageFormat format = SurfaceFormat::A8R8G8B8_UINT32;
+      gfxImageFormat format = gfxImageFormat::ARGB32;
       uint32_t stride = GetAlignedStride<16>(aSize.width * 4);
       size_t length = BufferSizeFromStrideAndHeight(stride, aSize.height);
       data.SetCapacity(length);
 
-      ConvertYCbCrToRGB(*ycbcrImage->GetData(),
-                        format,
-                        aSize,
-                        data.Elements(),
-                        stride);
+      gfxUtils::ConvertYCbCrToRGB(*ycbcrImage->GetData(),
+                                  format,
+                                  aSize,
+                                  data.Elements(),
+                                  stride);
 
       rv = aEncoder->InitFromData(data.Elements(),
                                   aSize.width * aSize.height * 4,
@@ -489,82 +468,6 @@ ImageEncoder::GetImageEncoder(nsAString& aType)
   }
 
   return encoder.forget();
-}
-
-class EncoderThreadPoolTerminator final : public nsIObserver
-{
-  public:
-    NS_DECL_ISUPPORTS
-
-    NS_IMETHODIMP Observe(nsISupports *, const char *topic, const char16_t *) override
-    {
-      NS_ASSERTION(!strcmp(topic, "xpcom-shutdown-threads"),
-                   "Unexpected topic");
-      if (ImageEncoder::sThreadPool) {
-        ImageEncoder::sThreadPool->Shutdown();
-        ImageEncoder::sThreadPool = nullptr;
-      }
-      return NS_OK;
-    }
-  private:
-    ~EncoderThreadPoolTerminator() {}
-};
-
-NS_IMPL_ISUPPORTS(EncoderThreadPoolTerminator, nsIObserver)
-
-static void
-RegisterEncoderThreadPoolTerminatorObserver()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  NS_ASSERTION(os, "do_GetService failed");
-  os->AddObserver(new EncoderThreadPoolTerminator(),
-                  "xpcom-shutdown-threads",
-                  false);
-}
-
-/* static */
-nsresult
-ImageEncoder::EnsureThreadPool()
-{
-  if (!sThreadPool) {
-    nsCOMPtr<nsIThreadPool> threadPool = do_CreateInstance(NS_THREADPOOL_CONTRACTID);
-    sThreadPool = threadPool;
-
-    if (!NS_IsMainThread()) {
-      NS_DispatchToMainThread(NS_NewRunnableFunction([]() -> void {
-        RegisterEncoderThreadPoolTerminatorObserver();
-      }));
-    } else {
-      RegisterEncoderThreadPoolTerminatorObserver();
-    }
-
-    const uint32_t kThreadLimit = 2;
-    const uint32_t kIdleThreadLimit = 1;
-    const uint32_t kIdleThreadTimeoutMs = 30000;
-
-    nsresult rv = sThreadPool->SetName(NS_LITERAL_CSTRING("EncodingRunnable"));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    rv = sThreadPool->SetThreadLimit(kThreadLimit);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    rv = sThreadPool->SetIdleThreadLimit(kIdleThreadLimit);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    rv = sThreadPool->SetIdleThreadTimeout(kIdleThreadTimeoutMs);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
-
-  return NS_OK;
 }
 
 } // namespace dom

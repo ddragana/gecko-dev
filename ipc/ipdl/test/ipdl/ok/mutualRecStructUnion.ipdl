@@ -16,6 +16,6 @@ struct Z {
 
 protocol mutualRecStructUnion {
 child:
-    async Test(X x, Y y, Z z);
-    async __delete__();
+    Test(X x, Y y, Z z);
+    __delete__();
 };

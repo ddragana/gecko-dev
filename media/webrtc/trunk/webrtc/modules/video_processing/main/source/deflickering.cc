@@ -51,11 +51,17 @@ const uint16_t VPMDeflickering::prob_uw16_[kNumProbs] = {102, 205, 410, 614,
 const uint16_t VPMDeflickering::weight_uw16_[kNumQuants - kMaxOnlyLength] =
     {16384, 18432, 20480, 22528, 24576, 26624, 28672, 30720, 32768}; // <Q15>
 
-VPMDeflickering::VPMDeflickering() {
+VPMDeflickering::VPMDeflickering()
+    : id_(0) {
   Reset();
 }
 
 VPMDeflickering::~VPMDeflickering() {}
+
+int32_t VPMDeflickering::ChangeUniqueId(const int32_t id) {
+  id_ = id;
+  return 0;
+}
 
 void VPMDeflickering::Reset() {
   mean_buffer_length_ = 0;

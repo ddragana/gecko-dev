@@ -18,7 +18,7 @@
 #include "nsIProtocolProxyCallback.h"
 
 #ifdef MOZ_WIDGET_GONK
-#include "nsINetworkInterface.h"
+#include "nsINetworkManager.h"
 #include "nsProxyRelease.h"
 #endif
 
@@ -163,7 +163,7 @@ private:
     nsCString           mResponseMsg;       // the last command response text
 
         // ****** channel/transport/stream vars 
-    RefPtr<nsFtpControlConnection> mControlConnection;       // cacheable control connection (owns mCPipe)
+    nsRefPtr<nsFtpControlConnection> mControlConnection;       // cacheable control connection (owns mCPipe)
     bool                            mReceivedControlData;  
     bool                            mTryingCachedControl;     // retrying the password
     bool                            mRETRFailed;              // Did we already try a RETR and it failed?
@@ -171,7 +171,7 @@ private:
     nsCString                       mModTime;
 
         // ****** consumer vars
-    RefPtr<nsFtpChannel>          mChannel;         // our owning FTP channel we pass through our events
+    nsRefPtr<nsFtpChannel>          mChannel;         // our owning FTP channel we pass through our events
     nsCOMPtr<nsIProxyInfo>          mProxyInfo;
 
         // ****** connection cache vars
@@ -218,7 +218,7 @@ private:
 // Currently, they are only available on gonk.
     uint64_t                           mCountRecv;
 #ifdef MOZ_WIDGET_GONK
-    nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
+    nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
 #endif
     nsresult                           SaveNetworkStats(bool);
     void                               CountRecvBytes(uint64_t recvBytes)

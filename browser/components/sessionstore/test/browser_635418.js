@@ -7,7 +7,6 @@
 
 function test() {
   waitForExplicitFinish();
-
   // We speed up the interval between session saves to ensure that the test
   // runs quickly.
   Services.prefs.setIntPref("browser.sessionstore.interval", 2000);

@@ -12,5 +12,5 @@ g.eval("function f(nonfunction) { debugger; }");
 g.eval("f({});");
 g.eval("f(/a*/);");
 g.eval("f({name: 'bad'});");
-g.eval("f(new Proxy({}, {}));");
+g.eval("f(Proxy.createFunction({name: {value: 'bad'}}, function () {}));");
 assertEq(hits, 4);

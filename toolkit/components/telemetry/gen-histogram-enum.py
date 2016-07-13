@@ -23,17 +23,13 @@ banner = """/* This file is auto-generated, see gen-histogram-enum.py.  */
 
 def main(output, *filenames):
     print(banner, file=output)
-    print("#ifndef mozilla_TelemetryHistogramEnums_h", file=output);
-    print("#define mozilla_TelemetryHistogramEnums_h", file=output);
-    print("namespace mozilla {", file=output)
-    print("namespace Telemetry {", file=output)
     print("enum ID : uint32_t {", file=output)
 
     groups = itertools.groupby(histogram_tools.from_files(filenames),
-                               lambda h: h.name().startswith("USE_COUNTER2_"))
+                               lambda h: h.name().startswith("USE_COUNTER_"))
     seen_use_counters = False
 
-    # Note that histogram_tools.py guarantees that all of the USE_COUNTER2_*
+    # Note that histogram_tools.py guarantees that all of the USE_COUNTER_*
     # histograms are defined in a contiguous block.  We therefore assume
     # that there's at most one group for which use_counter_group is true.
     for (use_counter_group, histograms) in groups:
@@ -63,13 +59,8 @@ def main(output, *filenames):
     if seen_use_counters:
         print("  HistogramUseCounterCount = HistogramLastUseCounter - HistogramFirstUseCounter + 1", file=output)
     else:
-        print("  HistogramFirstUseCounter = 0,", file=output)
-        print("  HistogramLastUseCounter = 0,", file=output)
         print("  HistogramUseCounterCount = 0", file=output)
     print("};", file=output)
-    print("} // namespace mozilla", file=output)
-    print("} // namespace Telemetry", file=output)
-    print("#endif // mozilla_TelemetryHistogramEnums_h", file=output);
 
 if __name__ == '__main__':
     main(sys.stdout, *sys.argv[1:])

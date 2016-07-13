@@ -24,7 +24,9 @@ function run_test() {
             updaterBin.path + " signature.");
 
   // Bypass the manifest and run as invoker
-  gEnv.set("__COMPAT_LAYER", "RunAsInvoker");
+  let env = Cc["@mozilla.org/process/environment;1"].
+            getService(Ci.nsIEnvironment);
+  env.set("__COMPAT_LAYER", "RunAsInvoker");
 
   let dummyInstallPath = "---";
   let maintenanceServiceBinArgs = ["check-cert", dummyInstallPath,

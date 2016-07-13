@@ -4,14 +4,7 @@
 const PREF_NEWTAB_ROWS = "browser.newtabpage.rows";
 const PREF_NEWTAB_COLUMNS = "browser.newtabpage.columns";
 
-function getCellsCount()
-{
-  return ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
-    return content.gGrid.cells.length;
-  });
-}
-
-add_task(function* () {
+function runTests() {
   let testValues = [
     {row: 0, column: 0},
     {row: -1, column: -1},
@@ -27,30 +20,38 @@ add_task(function* () {
    // Values before setting new pref values (15 is the default value -> 5 x 3)
   let previousValues = [15, 1, 1, 1, 1, 8];
 
-  yield* addNewTabPageTab();
-  let existingTab = gBrowser.selectedTab;
+  let existingTab, existingTabGridLength, newTab, newTabGridLength;
+  yield addNewTabPageTab();
+  existingTab = gBrowser.selectedTab;
 
   for (let i = 0; i < expectedValues.length; i++) {
-    let existingTabGridLength = yield getCellsCount();
+    gBrowser.selectedTab = existingTab;
+    existingTabGridLength = getGrid().cells.length;
     is(existingTabGridLength, previousValues[i],
       "Grid length of existing page before update is correctly.");
 
-    yield pushPrefs([PREF_NEWTAB_ROWS, testValues[i].row]);
-    yield pushPrefs([PREF_NEWTAB_COLUMNS, testValues[i].column]);
+    Services.prefs.setIntPref(PREF_NEWTAB_ROWS, testValues[i].row);
+    Services.prefs.setIntPref(PREF_NEWTAB_COLUMNS, testValues[i].column);
 
-    existingTabGridLength = yield getCellsCount();
+    existingTabGridLength = getGrid().cells.length;
     is(existingTabGridLength, expectedValues[i],
       "Existing page grid is updated correctly.");
 
-    yield* addNewTabPageTab();
-    let newTab = gBrowser.selectedTab;
-    let newTabGridLength = yield getCellsCount();
+    yield addNewTabPageTab();
+    newTab = gBrowser.selectedTab;
+    newTabGridLength = getGrid().cells.length;
     is(newTabGridLength, expectedValues[i],
       "New page grid is updated correctly.");
 
-    yield BrowserTestUtils.removeTab(newTab);
+    gBrowser.removeTab(newTab);
+
+    // Wait until the original tab is visible again.
+    let doc = existingTab.linkedBrowser.contentDocument;
+    yield waitForCondition(() => !doc.hidden).then(TestRunner.next);
   }
 
   gBrowser.removeTab(existingTab);
-});
 
+  Services.prefs.clearUserPref(PREF_NEWTAB_ROWS);
+  Services.prefs.clearUserPref(PREF_NEWTAB_COLUMNS);
+}

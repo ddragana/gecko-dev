@@ -5,6 +5,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/mozalloc.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
@@ -101,13 +102,15 @@ nsTransactionManager::UndoTransaction()
   // executing a  transaction's DoTransaction() method! If this happens,
   // the UndoTransaction() request is ignored, and we return NS_ERROR_FAILURE.
 
-  if (!mDoStack.IsEmpty()) {
+  nsRefPtr<nsTransactionItem> tx = mDoStack.Peek();
+
+  if (tx) {
     return NS_ERROR_FAILURE;
   }
 
   // Peek at the top of the undo stack. Don't remove the transaction
   // until it has successfully completed.
-  RefPtr<nsTransactionItem> tx = mUndoStack.Peek();
+  tx = mUndoStack.Peek();
 
   // Bail if there's nothing on the stack.
   if (!tx) {
@@ -132,7 +135,7 @@ nsTransactionManager::UndoTransaction()
 
   if (NS_SUCCEEDED(result)) {
     tx = mUndoStack.Pop();
-    mRedoStack.Push(tx.forget());
+    mRedoStack.Push(tx);
   }
 
   nsresult result2 = DidUndoNotify(t, result);
@@ -152,13 +155,15 @@ nsTransactionManager::RedoTransaction()
   // executing a  transaction's DoTransaction() method! If this happens,
   // the RedoTransaction() request is ignored, and we return NS_ERROR_FAILURE.
 
-  if (!mDoStack.IsEmpty()) {
+  nsRefPtr<nsTransactionItem> tx = mDoStack.Peek();
+
+  if (tx) {
     return NS_ERROR_FAILURE;
   }
 
   // Peek at the top of the redo stack. Don't remove the transaction
   // until it has successfully completed.
-  RefPtr<nsTransactionItem> tx = mRedoStack.Peek();
+  tx = mRedoStack.Peek();
 
   // Bail if there's nothing on the stack.
   if (!tx) {
@@ -183,7 +188,7 @@ nsTransactionManager::RedoTransaction()
 
   if (NS_SUCCEEDED(result)) {
     tx = mRedoStack.Pop();
-    mUndoStack.Push(tx.forget());
+    mUndoStack.Push(tx);
   }
 
   nsresult result2 = DidRedoNotify(t, result);
@@ -259,7 +264,7 @@ nsTransactionManager::EndBatch(bool aAllowEmpty)
   //      future when we allow users to execute a transaction when beginning
   //      a batch!!!!
 
-  RefPtr<nsTransactionItem> tx = mDoStack.Peek();
+  nsRefPtr<nsTransactionItem> tx = mDoStack.Peek();
 
   if (tx) {
     ti = tx->GetTransaction();
@@ -326,7 +331,9 @@ nsTransactionManager::SetMaxTransactionCount(int32_t aMaxCount)
   // SetMaxTransactionCount() request is ignored, and we return
   // NS_ERROR_FAILURE.
 
-  if (!mDoStack.IsEmpty()) {
+  nsRefPtr<nsTransactionItem> tx = mDoStack.Peek();
+
+  if (tx) {
     return NS_ERROR_FAILURE;
   }
 
@@ -357,7 +364,7 @@ nsTransactionManager::SetMaxTransactionCount(int32_t aMaxCount)
   // the bottom of the stack and pop towards the top.
 
   while (numUndoItems > 0 && (numRedoItems + numUndoItems) > aMaxCount) {
-    RefPtr<nsTransactionItem> tx = mUndoStack.PopBottom();
+    tx = mUndoStack.PopBottom();
 
     if (!tx) {
       return NS_ERROR_FAILURE;
@@ -370,7 +377,7 @@ nsTransactionManager::SetMaxTransactionCount(int32_t aMaxCount)
   // the bottom of the stack and pop towards the top.
 
   while (numRedoItems > 0 && (numRedoItems + numUndoItems) > aMaxCount) {
-    RefPtr<nsTransactionItem> tx = mRedoStack.PopBottom();
+    tx = mRedoStack.PopBottom();
 
     if (!tx) {
       return NS_ERROR_FAILURE;
@@ -395,7 +402,7 @@ nsTransactionManager::PeekUndoStack(nsITransaction **aTransaction)
 already_AddRefed<nsITransaction>
 nsTransactionManager::PeekUndoStack()
 {
-  RefPtr<nsTransactionItem> tx = mUndoStack.Peek();
+  nsRefPtr<nsTransactionItem> tx = mUndoStack.Peek();
 
   if (!tx) {
     return nullptr;
@@ -415,7 +422,7 @@ nsTransactionManager::PeekRedoStack(nsITransaction** aTransaction)
 already_AddRefed<nsITransaction>
 nsTransactionManager::PeekRedoStack()
 {
-  RefPtr<nsTransactionItem> tx = mRedoStack.Peek();
+  nsRefPtr<nsTransactionItem> tx = mRedoStack.Peek();
 
   if (!tx) {
     return nullptr;
@@ -456,8 +463,8 @@ nsTransactionManager::BatchTopUndo()
     return NS_OK;
   }
 
-  RefPtr<nsTransactionItem> lastUndo;
-  RefPtr<nsTransactionItem> previousUndo;
+  nsRefPtr<nsTransactionItem> lastUndo;
+  nsRefPtr<nsTransactionItem> previousUndo;
 
   lastUndo = mUndoStack.Pop();
   MOZ_ASSERT(lastUndo, "There should be at least two transactions.");
@@ -480,11 +487,15 @@ nsTransactionManager::BatchTopUndo()
 nsresult
 nsTransactionManager::RemoveTopUndo()
 {
-  if (mUndoStack.IsEmpty()) {
+  nsRefPtr<nsTransactionItem> lastUndo;
+
+  lastUndo = mUndoStack.Peek();
+  if (!lastUndo) {
     return NS_OK;
   }
 
-  RefPtr<nsTransactionItem> lastUndo = mUndoStack.Pop();
+  lastUndo = mUndoStack.Pop();
+
   return NS_OK;
 }
 
@@ -757,7 +768,7 @@ nsTransactionManager::BeginTransaction(nsITransaction *aTransaction,
 
   // XXX: POSSIBLE OPTIMIZATION
   //      We could use a factory that pre-allocates/recycles transaction items.
-  RefPtr<nsTransactionItem> tx = new nsTransactionItem(aTransaction);
+  nsRefPtr<nsTransactionItem> tx = new nsTransactionItem(aTransaction);
 
   if (aData) {
     nsCOMArray<nsISupports>& data = tx->GetData();
@@ -785,7 +796,7 @@ nsTransactionManager::EndTransaction(bool aAllowEmpty)
 {
   nsresult result              = NS_OK;
 
-  RefPtr<nsTransactionItem> tx = mDoStack.Pop();
+  nsRefPtr<nsTransactionItem> tx = mDoStack.Pop();
 
   if (!tx)
     return NS_ERROR_FAILURE;
@@ -823,7 +834,7 @@ nsTransactionManager::EndTransaction(bool aAllowEmpty)
   // the current transaction is a "sub" transaction, and should
   // be added to the transaction at the top of the do stack.
 
-  RefPtr<nsTransactionItem> top = mDoStack.Peek();
+  nsRefPtr<nsTransactionItem> top = mDoStack.Peek();
   if (top) {
     result = top->AddChild(tx);
 
@@ -882,12 +893,12 @@ nsTransactionManager::EndTransaction(bool aAllowEmpty)
   int32_t sz = mUndoStack.GetSize();
 
   if (mMaxTransactionCount > 0 && sz >= mMaxTransactionCount) {
-    RefPtr<nsTransactionItem> overflow = mUndoStack.PopBottom();
+    nsRefPtr<nsTransactionItem> overflow = mUndoStack.PopBottom();
   }
 
   // Push the transaction on the undo stack:
 
-  mUndoStack.Push(tx.forget());
+  mUndoStack.Push(tx);
 
   return NS_OK;
 }

@@ -18,11 +18,11 @@ function add(ta) {
     return w;
 }
 
-if (!this.SharedArrayBuffer || !this.Atomics)
+if (!this.SharedArrayBuffer || !this.Atomics || !this.SharedInt32Array)
     quit(0);
 
 var sab = new SharedArrayBuffer(4096);
-var ia = new Int32Array(sab);
+var ia = new SharedInt32Array(sab);
 for ( var i=0, limit=ia.length ; i < limit ; i++ )
     ia[i] = 37;
 var v = 0;

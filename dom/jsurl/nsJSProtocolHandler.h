@@ -61,11 +61,11 @@ protected:
 };
 
 
-class nsJSURI : public mozilla::net::nsSimpleURI
+class nsJSURI : public nsSimpleURI
 {
 public:
-    using mozilla::net::nsSimpleURI::Read;
-    using mozilla::net::nsSimpleURI::Write;
+    using nsSimpleURI::Read;
+    using nsSimpleURI::Write;
 
     nsJSURI() {}
 
@@ -79,7 +79,7 @@ public:
     NS_DECL_ISUPPORTS_INHERITED
 
     // nsIURI overrides
-    virtual mozilla::net::nsSimpleURI* StartClone(RefHandlingEnum refHandlingMode) override;
+    virtual nsSimpleURI* StartClone(RefHandlingEnum refHandlingMode) override;
 
     // nsISerializable overrides
     NS_IMETHOD Read(nsIObjectInputStream* aStream) override;

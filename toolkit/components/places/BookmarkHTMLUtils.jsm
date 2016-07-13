@@ -89,7 +89,7 @@ const MICROSEC_PER_SEC = 1000000;
 const EXPORT_INDENT = "    "; // four spaces
 
 // Counter used to build fake favicon urls.
-var serialNumber = 0;
+let serialNumber = 0;
 
 function base64EncodeString(aString) {
   let stream = Cc["@mozilla.org/io/string-input-stream;1"]
@@ -289,7 +289,7 @@ function Frame(aFrameId) {
    * contains the URL of the previous bookmark created. This is used so that
    * when we encounter a <dd>, we know what bookmark to associate the text with.
    * This is cleared whenever we hit a <h3>, so that we know NOT to save this
-   * with a bookmark, but to keep it until
+   * with a bookmark, but to keep it until 
    */
   this.previousLink = null; // nsIURI
 
@@ -346,7 +346,7 @@ BookmarkImporter.prototype = {
     switch (containerType) {
       case Container_Normal:
         // append a new folder
-        containerId =
+        containerId = 
           PlacesUtils.bookmarks.createFolder(frame.containerId,
                                              containerTitle,
                                              PlacesUtils.bookmarks.DEFAULT_INDEX);
@@ -517,7 +517,6 @@ BookmarkImporter.prototype = {
     let generatedTitle = this._safeTrim(aElt.getAttribute("generated_title"));
     let dateAdded = this._safeTrim(aElt.getAttribute("add_date"));
     let lastModified = this._safeTrim(aElt.getAttribute("last_modified"));
-    let tags = this._safeTrim(aElt.getAttribute("tags"));
 
     // For feeds, get the feed URL.  If it is invalid, mPreviousFeed will be
     // NULL and we'll create it as a normal bookmark.
@@ -574,15 +573,6 @@ BookmarkImporter.prototype = {
       try {
         PlacesUtils.bookmarks.setItemDateAdded(frame.previousId,
           this._convertImportedDateToInternalDate(dateAdded));
-      } catch(e) {
-      }
-    }
-
-    // Adds tags to the URI, if there are any.
-    if (tags) {
-      try {
-        let tagsArray = tags.split(",");
-        PlacesUtils.tagging.tagURI(frame.previousLink, tagsArray);
       } catch(e) {
       }
     }
@@ -765,14 +755,14 @@ BookmarkImporter.prototype = {
         frame.previousText = "";
 
         // Set last-modified a 2nd time for all items with descriptions
-        // we need to set last-modified as the *last* step in processing
+        // we need to set last-modified as the *last* step in processing 
         // any item type in the bookmarks.html file, so that we do
-        // not overwrite the imported value. for items without descriptions,
-        // setting this value after setting the item title is that
+        // not overwrite the imported value. for items without descriptions, 
+        // setting this value after setting the item title is that 
         // last point at which we can save this value before it gets reset.
         // for items with descriptions, it must set after that point.
-        // however, at the point at which we set the title, there's no way
-        // to determine if there will be a description following,
+        // however, at the point at which we set the title, there's no way 
+        // to determine if there will be a description following, 
         // so we need to set the last-modified-date at both places.
 
         let lastModified;
@@ -839,10 +829,9 @@ BookmarkImporter.prototype = {
     // worry about data
     if (aIconURI) {
       if (aIconURI.schemeIs("chrome")) {
-        PlacesUtils.favicons.setAndFetchFaviconForPage(aPageURI, aIconURI, false,
-                                                       PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
-                                                       Services.scriptSecurityManager.getSystemPrincipal());
-
+        PlacesUtils.favicons.setAndFetchFaviconForPage(aPageURI, aIconURI,
+                                                       false,
+                                                       PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
         return;
       }
     }
@@ -871,11 +860,8 @@ BookmarkImporter.prototype = {
     // This could fail if the favicon is bigger than defined limit, in such a
     // case neither the favicon URI nor the favicon data will be saved.  If the
     // bookmark is visited again later, the URI and data will be fetched.
-    PlacesUtils.favicons.replaceFaviconDataFromDataURL(faviconURI, aData, 0,
-                                                       Services.scriptSecurityManager.getSystemPrincipal());
-    PlacesUtils.favicons.setAndFetchFaviconForPage(aPageURI, faviconURI, false,
-                                                   PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
-                                                   Services.scriptSecurityManager.getSystemPrincipal());
+    PlacesUtils.favicons.replaceFaviconDataFromDataURL(faviconURI, aData);
+    PlacesUtils.favicons.setAndFetchFaviconForPage(aPageURI, faviconURI, false, PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
   },
 
   /**
@@ -1045,7 +1031,7 @@ BookmarkExporter.prototype = {
     this._writeLine("<TITLE>Bookmarks</TITLE>");
   },
 
-  *_writeContainer(aItem, aIndent = "") {
+  _writeContainer: function (aItem, aIndent = "") {
     if (aItem == this._root) {
       this._writeLine("<H1>" + escapeHtmlEntities(this._root.title) + "</H1>");
       this._writeLine("");
@@ -1072,19 +1058,18 @@ BookmarkExporter.prototype = {
       this._writeLine(aIndent + "</DL><p>");
   },
 
-  *_writeContainerContents(aItem, aIndent) {
+  _writeContainerContents: function (aItem, aIndent) {
     let localIndent = aIndent + EXPORT_INDENT;
 
     for (let child of aItem.children) {
-      if (child.annos && child.annos.some(anno => anno.name == PlacesUtils.LMANNO_FEEDURI)) {
-        this._writeLivemark(child, localIndent);
-      } else if (child.type == PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER) {
-        yield this._writeContainer(child, localIndent);
-      } else if (child.type == PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR) {
+      if (child.annos && child.annos.some(anno => anno.name == PlacesUtils.LMANNO_FEEDURI))
+          this._writeLivemark(child, localIndent);
+      else if (child.type == PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER)
+          yield this._writeContainer(child, localIndent);
+      else if (child.type == PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR)
         this._writeSeparator(child, localIndent);
-      } else {
+      else
         yield this._writeItem(child, localIndent);
-      }
     }
   },
 
@@ -1107,7 +1092,7 @@ BookmarkExporter.prototype = {
     this._writeDescription(aItem, aIndent);
   },
 
-  *_writeItem(aItem, aIndent) {
+  _writeItem: function (aItem, aIndent) {
     let uri = null;
     try {
       uri = NetUtil.newURI(aItem.uri);
@@ -1146,7 +1131,7 @@ BookmarkExporter.prototype = {
                            Math.floor(aItem.lastModified / MICROSEC_PER_SEC));
   },
 
-  *_writeFaviconAttribute(aItem) {
+  _writeFaviconAttribute: function (aItem) {
     if (!aItem.iconuri)
       return;
     let favicon;

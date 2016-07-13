@@ -8,7 +8,6 @@
 #define HTMLFrameSetElement_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/UniquePtr.h"
 #include "nsIDOMHTMLFrameSetElement.h"
 #include "nsGenericHTMLElement.h"
 
@@ -145,8 +144,8 @@ protected:
 
 private:
   nsresult ParseRowCol(const nsAString& aValue,
-                       int32_t& aNumSpecs,
-                       UniquePtr<nsFramesetSpec[]>* aSpecs);
+                       int32_t&         aNumSpecs,
+                       nsFramesetSpec** aSpecs);
 
   /**
    * The number of size specs in our "rows" attr
@@ -164,11 +163,11 @@ private:
   /**
    * The parsed representation of the "rows" attribute
    */
-  UniquePtr<nsFramesetSpec[]>  mRowSpecs; // parsed, non-computed dimensions
+  nsAutoArrayPtr<nsFramesetSpec>  mRowSpecs; // parsed, non-computed dimensions
   /**
    * The parsed representation of the "cols" attribute
    */
-  UniquePtr<nsFramesetSpec[]>  mColSpecs; // parsed, non-computed dimensions
+  nsAutoArrayPtr<nsFramesetSpec>  mColSpecs; // parsed, non-computed dimensions
 };
 
 } // namespace dom

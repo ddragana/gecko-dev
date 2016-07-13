@@ -2,14 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 
 const kIMig = Ci.nsIBrowserProfileMigrator;
 const kIPStartup = Ci.nsIProfileStartup;
 
-Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/MigrationUtils.jsm");
 
 var MigrationWizard = {
@@ -22,7 +21,8 @@ var MigrationWizard = {
 
   init: function ()
   {
-    let os = Services.obs;
+    var os = Components.classes["@mozilla.org/observer-service;1"]
+                       .getService(Components.interfaces.nsIObserverService);
     os.addObserver(this, "Migration:Started", false);
     os.addObserver(this, "Migration:ItemBeforeMigrate", false);
     os.addObserver(this, "Migration:ItemAfterMigrate", false);
@@ -31,25 +31,18 @@ var MigrationWizard = {
 
     this._wiz = document.documentElement;
 
-    let args = window.arguments;
-    let entryPointId = args[0] || MigrationUtils.MIGRATION_ENTRYPOINT_UNKNOWN;
-    Services.telemetry.getHistogramById("FX_MIGRATION_ENTRY_POINT").add(entryPointId);
-    this.isInitialMigration = entryPointId == MigrationUtils.MIGRATION_ENTRYPOINT_FIRSTRUN;
-
-    if (args.length > 1) {
-      this._source = args[1];
-      this._migrator = args[2] instanceof kIMig ?  args[2] : null;
-      this._autoMigrate = args[3].QueryInterface(kIPStartup);
-      this._skipImportSourcePage = args[4];
-      if (this._migrator && args[5]) {
-        let sourceProfiles = this._migrator.sourceProfiles;
-        this._selectedProfile = sourceProfiles.find(profile => profile.id == args[5]);
-      }
+    if ("arguments" in window && window.arguments.length > 1) {
+      this._source = window.arguments[0];
+      this._migrator = window.arguments[1] instanceof kIMig ?
+                       window.arguments[1] : null;
+      this._autoMigrate = window.arguments[2].QueryInterface(kIPStartup);
+      this._skipImportSourcePage = window.arguments[3];
 
       if (this._autoMigrate) {
         // Show the "nothing" option in the automigrate case to provide an
         // easily identifiable way to avoid migration and create a new profile.
-        document.getElementById("nothing").hidden = false;
+        var nothing = document.getElementById("nothing");
+        nothing.hidden = false;
       }
     }
 
@@ -71,19 +64,9 @@ var MigrationWizard = {
   // 1 - Import Source
   onImportSourcePageShow: function ()
   {
-    // Show warning message to close the selected browser when needed
-    function toggleCloseBrowserWarning() {
-      let visibility = "hidden";
-      if (group.selectedItem.id != "nothing") {
-        let migrator = MigrationUtils.getMigrator(group.selectedItem.id);
-        visibility = migrator.sourceLocked ? "visible" : "hidden";
-      }
-      document.getElementById("closeSourceBrowser").style.visibility = visibility;
-    }
     this._wiz.canRewind = false;
 
     var selectedMigrator = null;
-    this._availableMigrators = [];
 
     // Figure out what source apps are are available to import from:
     var group = document.getElementById("importSourceGroup");
@@ -96,29 +79,16 @@ var MigrationWizard = {
           // one, or if it is the migrator that was passed to us.
           if (!selectedMigrator || this._source == migratorKey)
             selectedMigrator = group.childNodes[i];
-          this._availableMigrators.push([migratorKey, migrator]);
         } else {
           // Hide this option
           group.childNodes[i].hidden = true;
         }
       }
     }
-    if (this.isInitialMigration) {
-      Services.telemetry.getHistogramById("FX_STARTUP_MIGRATION_BROWSER_COUNT")
-        .add(this._availableMigrators.length);
-      let defaultBrowser = MigrationUtils.getMigratorKeyForDefaultBrowser();
-      // This will record 0 for unknown default browser IDs.
-      defaultBrowser = MigrationUtils.getSourceIdForTelemetry(defaultBrowser);
-      Services.telemetry.getHistogramById("FX_STARTUP_MIGRATION_EXISTING_DEFAULT_BROWSER")
-        .add(defaultBrowser);
-    }
 
-    group.addEventListener("command", toggleCloseBrowserWarning);
-
-    if (selectedMigrator) {
+    if (selectedMigrator)
       group.selectedItem = selectedMigrator;
-      toggleCloseBrowserWarning();
-    } else {
+    else {
       // We didn't find a migrator, notify the user
       document.getElementById("noSources").hidden = false;
 
@@ -134,21 +104,16 @@ var MigrationWizard = {
       this._wiz.canRewind = false;
     }
   },
-
+  
   onImportSourcePageAdvanced: function ()
   {
     var newSource = document.getElementById("importSourceGroup").selectedItem.id;
-
+    
     if (newSource == "nothing") {
-      // Need to do telemetry here because we're closing the dialog before we get to
-      // do actual migration. For actual migration, this doesn't happen until after
-      // migration takes place.
-      Services.telemetry.getHistogramById("FX_MIGRATION_SOURCE_BROWSER")
-                        .add(MigrationUtils.getSourceIdForTelemetry("nothing"));
       document.documentElement.cancel();
       return false;
     }
-
+    
     if (!this._migrator || (newSource != this._source)) {
       // Create the migrator for the selected source.
       this._migrator = MigrationUtils.getMigrator(newSource);
@@ -159,7 +124,7 @@ var MigrationWizard = {
     this._source = newSource;
 
     // check for more than one source profile
-    var sourceProfiles = this._migrator.sourceProfiles;
+    var sourceProfiles = this._migrator.sourceProfiles;    
     if (this._skipImportSourcePage) {
       this._wiz.currentPage.next = "homePageImport";
     }
@@ -177,9 +142,8 @@ var MigrationWizard = {
       else
         this._selectedProfile = null;
     }
-    return undefined;
   },
-
+  
   // 2 - [Profile Selection]
   onSelectProfilePageShow: function ()
   {
@@ -187,11 +151,11 @@ var MigrationWizard = {
     // too and don't want to disable the back button
     // if (this._autoMigrate)
     //   document.documentElement.getButton("back").disabled = true;
-
+      
     var profiles = document.getElementById("profiles");
-    while (profiles.hasChildNodes())
+    while (profiles.hasChildNodes()) 
       profiles.removeChild(profiles.firstChild);
-
+    
     // Note that this block is still reached even if the user chose 'From File'
     // and we canceled the dialog.  When that happens, _migrator will be null.
     if (this._migrator) {
@@ -204,10 +168,10 @@ var MigrationWizard = {
         profiles.appendChild(item);
       }
     }
-
+    
     profiles.selectedItem = this._selectedProfile ? document.getElementById(this._selectedProfile.id) : profiles.firstChild;
   },
-
+  
   onSelectProfilePageRewound: function ()
   {
     var profiles = document.getElementById("profiles");
@@ -215,7 +179,7 @@ var MigrationWizard = {
       profile => profile.id == profiles.selectedItem.id
     ) || null;
   },
-
+  
   onSelectProfilePageAdvanced: function ()
   {
     var profiles = document.getElementById("profiles");
@@ -227,7 +191,7 @@ var MigrationWizard = {
     if (this._autoMigrate)
       this._wiz.currentPage.next = "homePageImport";
   },
-
+  
   // 3 - ImportItems
   onImportItemsPageShow: function ()
   {
@@ -241,7 +205,7 @@ var MigrationWizard = {
       if (itemID > 0) {
         var checkbox = document.createElement("checkbox");
         checkbox.id = itemID;
-        checkbox.setAttribute("label",
+        checkbox.setAttribute("label", 
           MigrationUtils.getLocalizedString(itemID + "_" + this._source));
         dataSources.appendChild(checkbox);
         if (!this._itemsFlags || this._itemsFlags & itemID)
@@ -266,7 +230,7 @@ var MigrationWizard = {
         this._itemsFlags |= parseInt(checkbox.id);
     }
   },
-
+  
   onImportItemCommand: function (aEvent)
   {
     var items = document.getElementById("dataSources");
@@ -322,14 +286,8 @@ var MigrationWizard = {
       case "safari":
         source = "sourceNameSafari";
         break;
-      case "canary":
-        source = "sourceNameCanary";
-        break;
       case "chrome":
         source = "sourceNameChrome";
-        break;
-      case "chromium":
-        source = "sourceNameChromium";
         break;
       case "firefox":
         source = "sourceNameFirefox";
@@ -375,35 +333,20 @@ var MigrationWizard = {
     this._wiz.getButton("cancel").disabled = true;
     this._wiz.canRewind = false;
     this._wiz.canAdvance = false;
-
+    
     // When automigrating, show all of the data that can be received from this source.
     if (this._autoMigrate)
       this._itemsFlags = this._migrator.getMigrateData(this._selectedProfile, this._autoMigrate);
 
     this._listItems("migratingItems");
-    setTimeout(() => this.onMigratingMigrate(), 0);
+    setTimeout(this.onMigratingMigrate, 0, this);
   },
 
-  onMigratingMigrate: function ()
+  onMigratingMigrate: function (aOuter)
   {
-    this._migrator.migrate(this._itemsFlags, this._autoMigrate, this._selectedProfile);
-
-    Services.telemetry.getHistogramById("FX_MIGRATION_SOURCE_BROWSER")
-                      .add(MigrationUtils.getSourceIdForTelemetry(this._source));
-    if (!this._autoMigrate) {
-      let hist = Services.telemetry.getKeyedHistogramById("FX_MIGRATION_USAGE");
-      let exp = 0;
-      let items = this._itemsFlags;
-      while (items) {
-        if (items & 1) {
-          hist.add(this._source, exp);
-        }
-        items = items >> 1;
-        exp++
-      }
-    }
+    aOuter._migrator.migrate(aOuter._itemsFlags, aOuter._autoMigrate, aOuter._selectedProfile);
   },
-
+  
   _listItems: function (aID)
   {
     var items = document.getElementById(aID);
@@ -413,7 +356,7 @@ var MigrationWizard = {
     var brandBundle = document.getElementById("brandBundle");
     var itemID;
     for (var i = 0; i < 16; ++i) {
-      itemID = (this._itemsFlags >> i) & 0x1 ? Math.pow(2, i) : 0;
+      var itemID = (this._itemsFlags >> i) & 0x1 ? Math.pow(2, i) : 0;
       if (itemID > 0) {
         var label = document.createElement("label");
         label.id = itemID + "_migrated";
@@ -424,36 +367,30 @@ var MigrationWizard = {
         }
         catch (e) {
           // if the block above throws, we've enumerated all the import data types we
-          // currently support and are now just wasting time, break.
+          // currently support and are now just wasting time, break. 
           break;
         }
       }
     }
   },
-
+  
   observe: function (aSubject, aTopic, aData)
   {
-    var label;
     switch (aTopic) {
     case "Migration:Started":
       break;
     case "Migration:ItemBeforeMigrate":
-      label = document.getElementById(aData + "_migrated");
+      var label = document.getElementById(aData + "_migrated");
       if (label)
         label.setAttribute("style", "font-weight: bold");
       break;
     case "Migration:ItemAfterMigrate":
-      label = document.getElementById(aData + "_migrated");
+      var label = document.getElementById(aData + "_migrated");
       if (label)
         label.removeAttribute("style");
       break;
     case "Migration:Ended":
-      if (this.isInitialMigration) {
-        this.reportDataRecencyTelemetry();
-      }
       if (this._autoMigrate) {
-        Services.telemetry.getKeyedHistogramById("FX_MIGRATION_HOMEPAGE_IMPORTED")
-                          .add(this._source, !!this._newHomePage);
         if (this._newHomePage) {
           try {
             // set homepage properly
@@ -478,8 +415,8 @@ var MigrationWizard = {
             var prefFile = dirSvc.get("ProfDS", Components.interfaces.nsIFile);
             prefFile.append("prefs.js");
             prefSvc.savePrefFile(prefFile);
-          } catch(ex) {
-            dump(ex);
+          } catch(ex) { 
+            dump(ex); 
           }
         }
 
@@ -496,9 +433,8 @@ var MigrationWizard = {
       }
       break;
     case "Migration:ItemError":
-      let type = "undefined";
-      let numericType = parseInt(aData);
-      switch (numericType) {
+      var type = "undefined";
+      switch (parseInt(aData)) {
       case Ci.nsIBrowserProfileMigrator.SETTINGS:
         type = "settings";
         break;
@@ -524,8 +460,6 @@ var MigrationWizard = {
       Cc["@mozilla.org/consoleservice;1"]
         .getService(Ci.nsIConsoleService)
         .logStringMessage("some " + type + " did not successfully migrate.");
-      Services.telemetry.getKeyedHistogramById("FX_MIGRATION_ERRORS")
-                        .add(this._source, Math.log2(numericType));
       break;
     }
   },
@@ -535,31 +469,5 @@ var MigrationWizard = {
     this._wiz.getButton("cancel").disabled = true;
     this._wiz.canRewind = false;
     this._listItems("doneItems");
-  },
-
-  reportDataRecencyTelemetry() {
-    let histogram = Services.telemetry.getKeyedHistogramById("FX_STARTUP_MIGRATION_DATA_RECENCY");
-    let lastUsedPromises = [];
-    for (let [key, migrator] of this._availableMigrators) {
-      // No block-scoped let in for...of loop conditions, so get the source:
-      let localKey = key;
-      lastUsedPromises.push(migrator.getLastUsedDate().then(date => {
-        const ONE_YEAR = 24 * 365;
-        let diffInHours = Math.round((Date.now() - date) / (60 * 60 * 1000));
-        if (diffInHours > ONE_YEAR) {
-          diffInHours = ONE_YEAR;
-        }
-        histogram.add(localKey, diffInHours);
-        return [localKey, diffInHours];
-      }));
-    }
-    Promise.all(lastUsedPromises).then(migratorUsedTimeDiff => {
-      // Sort low to high.
-      migratorUsedTimeDiff.sort(([keyA, diffA], [keyB, diffB]) => diffA - diffB);
-      let usedMostRecentBrowser = migratorUsedTimeDiff.length && this._source == migratorUsedTimeDiff[0][0];
-      let usedRecentBrowser =
-        Services.telemetry.getKeyedHistogramById("FX_STARTUP_MIGRATION_USED_RECENT_BROWSER");
-      usedRecentBrowser.add(this._source, usedMostRecentBrowser);
-    });
-  },
+  }
 };

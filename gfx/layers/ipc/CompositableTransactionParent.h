@@ -25,20 +25,20 @@ typedef std::vector<mozilla::layers::EditReply> EditReplyVector;
 // the Manager() method usually generated when there's one manager protocol,
 // so both manager protocols implement this and we keep a reference to them
 // through this interface.
-class CompositableParentManager : public HostIPCAllocator
+class CompositableParentManager : public ISurfaceAllocator
 {
 public:
-  CompositableParentManager(const char* aName) : HostIPCAllocator(aName) {}
+  virtual void SendFenceHandleIfPresent(PTextureParent* aTexture,
+                                        CompositableHost* aCompositableHost) = 0;
 
-  void DestroyActor(const OpDestroy& aOp);
+  virtual void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) = 0;
 
-  void UpdateFwdTransactionId(uint64_t aTransactionId)
-  {
-    MOZ_ASSERT(mFwdTransactionId < aTransactionId);
-    mFwdTransactionId = aTransactionId;
-  }
+  void SendPendingAsyncMessages();
 
-  uint64_t GetFwdTransactionId() { return mFwdTransactionId; }
+  /**
+   * Get child side's process Id.
+   */
+  virtual base::ProcessId GetChildProcessId() = 0;
 
 protected:
   /**
@@ -46,10 +46,17 @@ protected:
    */
   bool ReceiveCompositableUpdate(const CompositableOperation& aEdit,
                                  EditReplyVector& replyv);
+  bool IsOnCompositorSide() const override { return true; }
 
-  virtual void ReplyRemoveTexture(const OpReplyRemoveTexture& aReply) {};
+  /**
+   * Return true if this protocol is asynchronous with respect to the content
+   * thread (ImageBridge for instance).
+   */
+  virtual bool IsAsync() const { return false; }
 
-  uint64_t mFwdTransactionId = 0;
+  virtual void ReplyRemoveTexture(const OpReplyRemoveTexture& aReply) {}
+
+  std::vector<AsyncParentMessageData> mPendingAsyncMessage;
 };
 
 } // namespace layers

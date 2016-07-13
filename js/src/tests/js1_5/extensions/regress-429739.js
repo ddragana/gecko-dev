@@ -6,6 +6,8 @@
 //-----------------------------------------------------------------------------
 var BUGNUMBER = 429739;
 var summary = 'Do not assert: OBJ_GET_CLASS(cx, obj)->flags & JSCLASS_HAS_PRIVATE';
+var actual = '';
+var expect = '';
 
 //-----------------------------------------------------------------------------
 test();
@@ -16,21 +18,20 @@ function test()
   enterFunc ('test');
   printBugNumber(BUGNUMBER);
   printStatus (summary);
+ 
+  expect = 'TypeError: o.y is not a constructor';
 
-  var actual;
   try
   {
     var o = { __noSuchMethod__: Function }; 
     actual = (new o.y) + '';
-    throw new Error("didn't throw, produced a value");
   }
   catch(ex)
   {
-    actual = ex;
+    actual = ex + '';
   }
 
-  reportCompare("TypeError", actual.name, "bad error name");
-  reportCompare(true, /is not a constructor/.test(actual), summary);
+  reportCompare(expect, actual, summary);
 
   exitFunc ('test');
 }

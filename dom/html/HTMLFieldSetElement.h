@@ -26,7 +26,6 @@ public:
   using nsGenericHTMLFormElement::GetForm;
   using nsIConstraintValidation::Validity;
   using nsIConstraintValidation::CheckValidity;
-  using nsIConstraintValidation::ReportValidity;
   using nsIConstraintValidation::GetValidationMessage;
 
   explicit HTMLFieldSetElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
@@ -51,8 +50,8 @@ public:
   // nsIFormControl
   NS_IMETHOD_(uint32_t) GetType() const override { return NS_FORM_FIELDSET; }
   NS_IMETHOD Reset() override;
-  NS_IMETHOD SubmitNamesValues(HTMLFormSubmission* aFormSubmission) override;
-  virtual bool IsDisabledForEvents(EventMessage aMessage) override;
+  NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission) override;
+  virtual bool IsDisabledForEvents(uint32_t aMessage) override;
   virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
 
   const nsIContent* GetFirstLegend() const { return mFirstLegend; }
@@ -128,7 +127,7 @@ private:
                                     nsIAtom* aAtom, void* aData);
 
   // listed form controls elements.
-  RefPtr<nsContentList> mElements;
+  nsRefPtr<nsContentList> mElements;
 
   // List of elements which have this fieldset as first fieldset ancestor.
   nsTArray<nsGenericHTMLFormElement*> mDependentElements;

@@ -10,7 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLFrameElement.h"
 #include "nsIDOMHTMLIFrameElement.h"
-#include "nsDOMTokenList.h"
+#include "nsDOMSettableTokenList.h"
 
 namespace mozilla {
 namespace dom {
@@ -84,9 +84,9 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::name, aName, aError);
   }
-  nsDOMTokenList* Sandbox()
+  nsDOMSettableTokenList* Sandbox()
   {
-    return GetTokenList(nsGkAtoms::sandbox, sSupportedSandboxTokens);
+    return GetTokenList(nsGkAtoms::sandbox);
   }
   bool AllowFullscreen() const
   {
@@ -159,14 +159,15 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::marginheight, aMarginHeight, aError);
   }
-  void SetReferrerPolicy(const nsAString& aReferrer, ErrorResult& aError)
+  void SetReferrer(const nsAString& aReferrer, ErrorResult& aError)
   {
-    SetHTMLAttr(nsGkAtoms::referrerpolicy, aReferrer, aError);
+    SetHTMLAttr(nsGkAtoms::referrer, aReferrer, aError);
   }
-  void GetReferrerPolicy(nsAString& aReferrer)
+  void GetReferrer(nsAString& aReferrer)
   {
-    GetEnumAttr(nsGkAtoms::referrerpolicy, EmptyCString().get(), aReferrer);
+    GetHTMLAttr(nsGkAtoms::referrer, aReferrer);
   }
+
   nsIDocument* GetSVGDocument()
   {
     return GetContentDocument();
@@ -183,23 +184,17 @@ public:
   // nsGenericHTMLFrameElement::GetFrameLoader is fine
   // nsGenericHTMLFrameElement::GetAppManifestURL is fine
 
-  // The fullscreen flag is set to true only when requestFullscreen is
-  // explicitly called on this <iframe> element. In case this flag is
-  // set, the fullscreen state of this element will not be reverted
-  // automatically when its subdocument exits fullscreen.
-  bool FullscreenFlag() const { return mFullscreenFlag; }
-  void SetFullscreenFlag(bool aValue) { mFullscreenFlag = aValue; }
-
 protected:
   virtual ~HTMLIFrameElement();
+
+  virtual void GetItemValueText(DOMString& text) override;
+  virtual void SetItemValueText(const nsAString& text) override;
 
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                     nsRuleData* aData);
-
-  static const DOMTokenListSupportedToken sSupportedSandboxTokens[];
 };
 
 } // namespace dom

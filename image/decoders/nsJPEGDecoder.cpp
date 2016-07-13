@@ -4,13 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ImageLogging.h"  // Must appear first.
-
+#include "ImageLogging.h"
 #include "nsJPEGDecoder.h"
-
-#include <cstdint>
-
-#include "imgFrame.h"
 #include "Orientation.h"
 #include "EXIF.h"
 
@@ -23,7 +18,7 @@
 #include "jerror.h"
 
 #include "gfxPlatform.h"
-#include "mozilla/EndianUtils.h"
+#include "mozilla/Endian.h"
 #include "mozilla/Telemetry.h"
 
 extern "C" {
@@ -41,9 +36,25 @@ static void cmyk_convert_rgb(JSAMPROW row, JDIMENSION width);
 namespace mozilla {
 namespace image {
 
-static mozilla::LazyLogModule sJPEGLog("JPEGDecoder");
+static PRLogModuleInfo*
+GetJPEGLog()
+{
+  static PRLogModuleInfo* sJPEGLog;
+  if (!sJPEGLog) {
+    sJPEGLog = PR_NewLogModule("JPEGDecoder");
+  }
+  return sJPEGLog;
+}
 
-static mozilla::LazyLogModule sJPEGDecoderAccountingLog("JPEGDecoderAccounting");
+static PRLogModuleInfo*
+GetJPEGDecoderAccountingLog()
+{
+  static PRLogModuleInfo* sJPEGDecoderAccountingLog;
+  if (!sJPEGDecoderAccountingLog) {
+    sJPEGDecoderAccountingLog = PR_NewLogModule("JPEGDecoderAccounting");
+  }
+  return sJPEGDecoderAccountingLog;
+}
 
 static qcms_profile*
 GetICCProfile(struct jpeg_decompress_struct& info)
@@ -72,11 +83,7 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo);
 nsJPEGDecoder::nsJPEGDecoder(RasterImage* aImage,
                              Decoder::DecodeStyle aDecodeStyle)
  : Decoder(aImage)
- , mLexer(Transition::ToUnbuffered(State::FINISHED_JPEG_DATA,
-                                   State::JPEG_DATA,
-                                   SIZE_MAX))
  , mDecodeStyle(aDecodeStyle)
- , mSampleSize(0)
 {
   mState = JPEG_HEADER;
   mReading = true;
@@ -98,7 +105,7 @@ nsJPEGDecoder::nsJPEGDecoder(RasterImage* aImage,
 
   mCMSMode = 0;
 
-  MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+  MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
          ("nsJPEGDecoder::nsJPEGDecoder: Creating JPEG decoder %p",
           this));
 }
@@ -117,7 +124,7 @@ nsJPEGDecoder::~nsJPEGDecoder()
     qcms_profile_release(mInProfile);
   }
 
-  MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+  MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
          ("nsJPEGDecoder::~nsJPEGDecoder: Destroying JPEG decoder %p",
           this));
 }
@@ -128,11 +135,25 @@ nsJPEGDecoder::SpeedHistogram()
   return Telemetry::IMAGE_DECODE_SPEED_JPEG;
 }
 
+nsresult
+nsJPEGDecoder::SetTargetSize(const nsIntSize& aSize)
+{
+  // Make sure the size is reasonable.
+  if (MOZ_UNLIKELY(aSize.width <= 0 || aSize.height <= 0)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Create a downscaler that we'll filter our output through.
+  mDownscaler.emplace(aSize);
+
+  return NS_OK;
+}
+
 void
 nsJPEGDecoder::InitInternal()
 {
   mCMSMode = gfxPlatform::GetCMSMode();
-  if (GetSurfaceFlags() & SurfaceFlags::NO_COLORSPACE_CONVERSION) {
+  if (GetDecodeFlags() & imgIContainer::FLAG_DECODE_NO_COLORSPACE_CONVERSION) {
     mCMSMode = eCMSMode_Off;
   }
 
@@ -182,74 +203,55 @@ nsJPEGDecoder::FinishInternal()
 void
 nsJPEGDecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
 {
+  mSegment = (const JOCTET*)aBuffer;
+  mSegmentLen = aCount;
+
   MOZ_ASSERT(!HasError(), "Shouldn't call WriteInternal after error!");
-  MOZ_ASSERT(aBuffer);
-  MOZ_ASSERT(aCount > 0);
-
-  Maybe<TerminalState> terminalState =
-    mLexer.Lex(aBuffer, aCount, [=](State aState,
-                                    const char* aData, size_t aLength) {
-      switch (aState) {
-        case State::JPEG_DATA:
-          return ReadJPEGData(aData, aLength);
-        case State::FINISHED_JPEG_DATA:
-          return FinishedJPEGData();
-      }
-      MOZ_CRASH("Unknown State");
-    });
-
-  if (terminalState == Some(TerminalState::FAILURE)) {
-    PostDataError();
-  }
-}
-
-LexerTransition<nsJPEGDecoder::State>
-nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
-{
-  mSegment = reinterpret_cast<const JOCTET*>(aData);
-  mSegmentLen = aLength;
 
   // Return here if there is a fatal error within libjpeg.
   nsresult error_code;
   // This cast to nsresult makes sense because setjmp() returns whatever we
   // passed to longjmp(), which was actually an nsresult.
-  if ((error_code = static_cast<nsresult>(setjmp(mErr.setjmp_buffer))) != NS_OK) {
+  if ((error_code = (nsresult)setjmp(mErr.setjmp_buffer)) != NS_OK) {
     if (error_code == NS_ERROR_FAILURE) {
-      // Error due to corrupt data. Make sure that we don't feed any more data
-      // to libjpeg-turbo.
+      PostDataError();
+      // Error due to corrupt stream - return NS_OK and consume silently
+      // so that ImageLib doesn't throw away a partial image load
       mState = JPEG_SINK_NON_JPEG_TRAILER;
-      MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+      MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
              ("} (setjmp returned NS_ERROR_FAILURE)"));
+      return;
     } else {
-      // Error for another reason. (Possibly OOM.)
+      // Error due to reasons external to the stream (probably out of
+      // memory) - let ImageLib attempt to clean up, even though
+      // mozilla is seconds away from falling flat on its face.
       PostDecoderError(error_code);
       mState = JPEG_ERROR;
-      MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+      MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
              ("} (setjmp returned an error)"));
+      return;
     }
-
-    return Transition::TerminateFailure();
   }
 
-  MOZ_LOG(sJPEGLog, LogLevel::Debug,
+  MOZ_LOG(GetJPEGLog(), LogLevel::Debug,
          ("[this=%p] nsJPEGDecoder::Write -- processing JPEG data\n", this));
 
   switch (mState) {
     case JPEG_HEADER: {
-      LOG_SCOPE((mozilla::LogModule*)sJPEGLog, "nsJPEGDecoder::Write -- entering JPEG_HEADER"
+      LOG_SCOPE(GetJPEGLog(), "nsJPEGDecoder::Write -- entering JPEG_HEADER"
                 " case");
 
       // Step 3: read file parameters with jpeg_read_header()
       if (jpeg_read_header(&mInfo, TRUE) == JPEG_SUSPENDED) {
-        MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+        MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                ("} (JPEG_SUSPENDED)"));
-        return Transition::ContinueUnbuffered(State::JPEG_DATA); // I/O suspension
+        return; // I/O suspension
       }
 
-      // If we have a sample size specified for -moz-sample-size, use it.
-      if (mSampleSize > 0) {
+      int sampleSize = mImage->GetRequestedSampleSize();
+      if (sampleSize > 0) {
         mInfo.scale_num = 1;
-        mInfo.scale_denom = mSampleSize;
+        mInfo.scale_denom = sampleSize;
       }
 
       // Used to set up image size so arrays can be allocated
@@ -261,12 +263,12 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
       if (HasError()) {
         // Setting the size led to an error.
         mState = JPEG_ERROR;
-        return Transition::TerminateFailure();
+        return;
       }
 
       // If we're doing a metadata decode, we're done.
       if (IsMetadataDecode()) {
-        return Transition::TerminateSuccess();
+        return;
       }
 
       // We're doing a full decode.
@@ -307,9 +309,9 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
         default:
           mState = JPEG_ERROR;
           PostDataError();
-          MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+          MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                  ("} (unknown colorpsace (1))"));
-          return Transition::TerminateFailure();
+          return;
       }
 
       if (!mismatch) {
@@ -324,9 +326,9 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
           default:
             mState = JPEG_ERROR;
             PostDataError();
-            MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+            MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                    ("} (unknown colorpsace (2))"));
-            return Transition::TerminateFailure();
+            return;
         }
 #if 0
         // We don't currently support CMYK profiles. The following
@@ -383,9 +385,9 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
         default:
           mState = JPEG_ERROR;
           PostDataError();
-          MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+          MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                  ("} (unknown colorpsace (3))"));
-          return Transition::TerminateFailure();
+          return;
       }
     }
 
@@ -401,34 +403,33 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
                                 gfx::SurfaceFormat::B8G8R8A8);
     if (NS_FAILED(rv)) {
       mState = JPEG_ERROR;
-      MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+      MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
              ("} (could not initialize image frame)"));
-      return Transition::TerminateFailure();
+      return;
     }
 
     MOZ_ASSERT(mImageData, "Should have a buffer now");
 
     if (mDownscaler) {
-      nsresult rv = mDownscaler->BeginFrame(GetSize(), Nothing(),
+      nsresult rv = mDownscaler->BeginFrame(GetSize(),
                                             mImageData,
                                             /* aHasAlpha = */ false);
       if (NS_FAILED(rv)) {
         mState = JPEG_ERROR;
-        return Transition::TerminateFailure();
+        return;
       }
     }
 
-    MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+    MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
            ("        JPEGDecoderAccounting: nsJPEGDecoder::"
             "Write -- created image frame with %ux%u pixels",
             mInfo.output_width, mInfo.output_height));
 
     mState = JPEG_START_DECOMPRESS;
-    MOZ_FALLTHROUGH; // to start decompressing.
   }
 
   case JPEG_START_DECOMPRESS: {
-    LOG_SCOPE((mozilla::LogModule*)sJPEGLog, "nsJPEGDecoder::Write -- entering"
+    LOG_SCOPE(GetJPEGLog(), "nsJPEGDecoder::Write -- entering"
                             " JPEG_START_DECOMPRESS case");
     // Step 4: set parameters for decompression
 
@@ -443,29 +444,28 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
 
     // Step 5: Start decompressor
     if (jpeg_start_decompress(&mInfo) == FALSE) {
-      MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+      MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
              ("} (I/O suspension after jpeg_start_decompress())"));
-      return Transition::ContinueUnbuffered(State::JPEG_DATA); // I/O suspension
+      return; // I/O suspension
     }
 
     // If this is a progressive JPEG ...
     mState = mInfo.buffered_image ?
              JPEG_DECOMPRESS_PROGRESSIVE : JPEG_DECOMPRESS_SEQUENTIAL;
-    MOZ_FALLTHROUGH; // to decompress sequential JPEG.
   }
 
   case JPEG_DECOMPRESS_SEQUENTIAL: {
     if (mState == JPEG_DECOMPRESS_SEQUENTIAL) {
-      LOG_SCOPE((mozilla::LogModule*)sJPEGLog, "nsJPEGDecoder::Write -- "
+      LOG_SCOPE(GetJPEGLog(), "nsJPEGDecoder::Write -- "
                               "JPEG_DECOMPRESS_SEQUENTIAL case");
 
       bool suspend;
       OutputScanlines(&suspend);
 
       if (suspend) {
-        MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+        MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                ("} (I/O suspension after OutputScanlines() - SEQUENTIAL)"));
-        return Transition::ContinueUnbuffered(State::JPEG_DATA); // I/O suspension
+        return; // I/O suspension
       }
 
       // If we've completed image output ...
@@ -473,12 +473,11 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
                    "We didn't process all of the data!");
       mState = JPEG_DONE;
     }
-    MOZ_FALLTHROUGH; // to decompress progressive JPEG.
   }
 
   case JPEG_DECOMPRESS_PROGRESSIVE: {
     if (mState == JPEG_DECOMPRESS_PROGRESSIVE) {
-      LOG_SCOPE((mozilla::LogModule*)sJPEGLog,
+      LOG_SCOPE(GetJPEGLog(),
                 "nsJPEGDecoder::Write -- JPEG_DECOMPRESS_PROGRESSIVE case");
 
       int status;
@@ -500,10 +499,10 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
             scan--;
 
           if (!jpeg_start_output(&mInfo, scan)) {
-            MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+            MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                    ("} (I/O suspension after jpeg_start_output() -"
                     " PROGRESSIVE)"));
-            return Transition::ContinueUnbuffered(State::JPEG_DATA); // I/O suspension
+            return; // I/O suspension
           }
         }
 
@@ -520,17 +519,17 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
             // jpeg_start_output() multiple times for the same scan
             mInfo.output_scanline = 0xffffff;
           }
-          MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+          MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                  ("} (I/O suspension after OutputScanlines() - PROGRESSIVE)"));
-          return Transition::ContinueUnbuffered(State::JPEG_DATA); // I/O suspension
+          return; // I/O suspension
         }
 
         if (mInfo.output_scanline == mInfo.output_height) {
           if (!jpeg_finish_output(&mInfo)) {
-            MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+            MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
                    ("} (I/O suspension after jpeg_finish_output() -"
                     " PROGRESSIVE)"));
-            return Transition::ContinueUnbuffered(State::JPEG_DATA); // I/O suspension
+            return; // I/O suspension
           }
 
           if (jpeg_input_complete(&mInfo) &&
@@ -546,55 +545,41 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
 
       mState = JPEG_DONE;
     }
-    MOZ_FALLTHROUGH; // to finish decompressing.
   }
 
   case JPEG_DONE: {
-    LOG_SCOPE((mozilla::LogModule*)sJPEGLog, "nsJPEGDecoder::ProcessData -- entering"
+    LOG_SCOPE(GetJPEGLog(), "nsJPEGDecoder::ProcessData -- entering"
                             " JPEG_DONE case");
 
     // Step 7: Finish decompression
 
     if (jpeg_finish_decompress(&mInfo) == FALSE) {
-      MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+      MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
              ("} (I/O suspension after jpeg_finish_decompress() - DONE)"));
-      return Transition::ContinueUnbuffered(State::JPEG_DATA); // I/O suspension
+      return; // I/O suspension
     }
 
-    // Make sure we don't feed any more data to libjpeg-turbo.
     mState = JPEG_SINK_NON_JPEG_TRAILER;
 
-    // We're done.
-    return Transition::TerminateSuccess();
+    // we're done dude
+    break;
   }
   case JPEG_SINK_NON_JPEG_TRAILER:
-    MOZ_LOG(sJPEGLog, LogLevel::Debug,
+    MOZ_LOG(GetJPEGLog(), LogLevel::Debug,
            ("[this=%p] nsJPEGDecoder::ProcessData -- entering"
             " JPEG_SINK_NON_JPEG_TRAILER case\n", this));
 
-    MOZ_ASSERT_UNREACHABLE("Should stop getting data after entering state "
-                           "JPEG_SINK_NON_JPEG_TRAILER");
-
-    return Transition::TerminateSuccess();
+    break;
 
   case JPEG_ERROR:
-    MOZ_ASSERT_UNREACHABLE("Should stop getting data after entering state "
-                           "JPEG_ERROR");
-
-    return Transition::TerminateFailure();
+    MOZ_ASSERT(false,
+               "Should always return immediately after error and not re-enter "
+               "decoder");
   }
 
-  MOZ_ASSERT_UNREACHABLE("Escaped the JPEG decoder state machine");
-  return Transition::TerminateFailure();
-}
-
-LexerTransition<nsJPEGDecoder::State>
-nsJPEGDecoder::FinishedJPEGData()
-{
-  // Since we set up an unbuffered read for SIZE_MAX bytes, if we actually read
-  // all that data something is really wrong.
-  MOZ_ASSERT_UNREACHABLE("Read the entire address space?");
-  return Transition::TerminateFailure();
+  MOZ_LOG(GetJPEGDecoderAccountingLog(), LogLevel::Debug,
+         ("} (end of function)"));
+  return;
 }
 
 Orientation
@@ -623,7 +608,7 @@ nsJPEGDecoder::ReadOrientationFromEXIF()
 void
 nsJPEGDecoder::NotifyDone()
 {
-  PostFrameStop(Opacity::FULLY_OPAQUE);
+  PostFrameStop(Opacity::OPAQUE);
   PostDecodeDone();
 }
 

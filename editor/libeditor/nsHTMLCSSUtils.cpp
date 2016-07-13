@@ -14,6 +14,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsColor.h"
 #include "nsComputedDOMStyle.h"
@@ -434,7 +435,7 @@ nsresult
 nsHTMLCSSUtils::SetCSSProperty(Element& aElement, nsIAtom& aProperty,
                                const nsAString& aValue, bool aSuppressTxn)
 {
-  RefPtr<ChangeStyleTxn> txn =
+  nsRefPtr<ChangeStyleTxn> txn =
     CreateCSSPropertyTxn(aElement, aProperty, aValue, ChangeStyleTxn::eSet);
   if (aSuppressTxn) {
     return txn->DoTransaction();
@@ -459,7 +460,7 @@ nsresult
 nsHTMLCSSUtils::RemoveCSSProperty(Element& aElement, nsIAtom& aProperty,
                                   const nsAString& aValue, bool aSuppressTxn)
 {
-  RefPtr<ChangeStyleTxn> txn =
+  nsRefPtr<ChangeStyleTxn> txn =
     CreateCSSPropertyTxn(aElement, aProperty, aValue, ChangeStyleTxn::eRemove);
   if (aSuppressTxn) {
     return txn->DoTransaction();
@@ -472,7 +473,7 @@ nsHTMLCSSUtils::CreateCSSPropertyTxn(Element& aElement, nsIAtom& aAttribute,
                                      const nsAString& aValue,
                                      ChangeStyleTxn::EChangeType aChangeType)
 {
-  RefPtr<ChangeStyleTxn> txn =
+  nsRefPtr<ChangeStyleTxn> txn =
     new ChangeStyleTxn(aElement, aAttribute, aValue, aChangeType);
   return txn.forget();
 }
@@ -504,26 +505,26 @@ nsHTMLCSSUtils::GetCSSInlinePropertyBase(nsINode* aNode, nsIAtom* aProperty,
 
   if (aStyleType == eComputed) {
     // Get the all the computed css styles attached to the element node
-    RefPtr<nsComputedDOMStyle> cssDecl = GetComputedStyle(element);
+    nsRefPtr<nsComputedDOMStyle> cssDecl = GetComputedStyle(element);
     NS_ENSURE_STATE(cssDecl);
 
     // from these declarations, get the one we want and that one only
-    MOZ_ALWAYS_SUCCEEDS(
-      cssDecl->GetPropertyValue(nsDependentAtomString(aProperty), aValue));
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
+      cssDecl->GetPropertyValue(nsDependentAtomString(aProperty), aValue)));
 
     return NS_OK;
   }
 
   MOZ_ASSERT(aStyleType == eSpecified);
-  RefPtr<css::Declaration> decl = element->GetInlineStyleDeclaration();
-  if (!decl) {
+  nsRefPtr<css::StyleRule> rule = element->GetInlineStyleRule();
+  if (!rule) {
     return NS_OK;
   }
   nsCSSProperty prop =
     nsCSSProps::LookupProperty(nsDependentAtomString(aProperty),
-                               CSSEnabledState::eForAllContent);
+                               nsCSSProps::eEnabledForAllContent);
   MOZ_ASSERT(prop != eCSSProperty_UNKNOWN);
-  decl->GetValue(prop, aValue);
+  rule->GetDeclaration()->GetValue(prop, aValue);
 
   return NS_OK;
 }
@@ -533,13 +534,13 @@ nsHTMLCSSUtils::GetComputedStyle(dom::Element* aElement)
 {
   MOZ_ASSERT(aElement);
 
-  nsIDocument* doc = aElement->GetUncomposedDoc();
+  nsIDocument* doc = aElement->GetCurrentDoc();
   NS_ENSURE_TRUE(doc, nullptr);
 
   nsIPresShell* presShell = doc->GetShell();
   NS_ENSURE_TRUE(presShell, nullptr);
 
-  RefPtr<nsComputedDOMStyle> style =
+  nsRefPtr<nsComputedDOMStyle> style =
     NS_NewComputedDOMStyle(aElement, EmptyString(), presShell);
 
   return style.forget();
@@ -621,7 +622,7 @@ nsHTMLCSSUtils::ParseLength(const nsAString& aString, float* aValue,
 {
   if (aString.IsEmpty()) {
     *aValue = 0;
-    *aUnit = NS_Atomize(aString).take();
+    *aUnit = NS_NewAtom(aString).take();
     return;
   }
 
@@ -660,7 +661,7 @@ nsHTMLCSSUtils::ParseLength(const nsAString& aString, float* aValue,
     i++;
   }
   *aValue = value * sign;
-  *aUnit = NS_Atomize(StringTail(aString, j-i)).take();
+  *aUnit = NS_NewAtom(StringTail(aString, j-i)).take();
 }
 
 void
@@ -1105,7 +1106,7 @@ nsHTMLCSSUtils::IsCSSEquivalentToHTMLInlineStyleSet(nsIDOMNode *aNode,
         nsAutoString subStr;
         htmlValueString.Right(subStr, htmlValueString.Length() - 1);
         if (NS_ColorNameToRGB(htmlValueString, &rgba) ||
-            NS_HexToRGBA(subStr, nsHexColorType::NoAlpha, &rgba)) {
+            NS_HexToRGB(subStr, &rgba)) {
           nsAutoString htmlColor, tmpStr;
 
           if (NS_GET_A(rgba) != 255) {

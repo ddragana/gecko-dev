@@ -124,7 +124,8 @@ WeaveService.prototype = {
    */
   get enabled() {
     let prefs = Services.prefs.getBranch(SYNC_PREFS_BRANCH);
-    return prefs.prefHasUserValue("username");
+    return prefs.prefHasUserValue("username") &&
+           prefs.prefHasUserValue("clusterURL");
   },
 
   observe: function (subject, topic, data) {
@@ -184,13 +185,10 @@ AboutWeaveLog.prototype = {
     channel.originalURI = aURI;
 
     // Ensure that the about page has the same privileges as a regular directory
-    // view. That way links to files can be opened. make sure we use the correct
-    // origin attributes when creating the principal for accessing the
-    // about:sync-log data.
+    // view. That way links to files can be opened.
     let ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
                 .getService(Ci.nsIScriptSecurityManager);
-    let principal = ssm.createCodebasePrincipal(uri, aLoadInfo.originAttributes);
-
+    let principal = ssm.getNoAppCodebasePrincipal(uri);
     channel.owner = principal;
     return channel;
   }

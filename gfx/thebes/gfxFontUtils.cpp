@@ -7,6 +7,7 @@
 #include "mozilla/BinarySearch.h"
 
 #include "gfxFontUtils.h"
+#include "gfxColor.h"
 
 #include "nsServiceManagerUtils.h"
 
@@ -66,10 +67,8 @@ gfxSparseBitSet::Dump(const char* aPrefix, eGfxLog aWhichLog) const
     uint32_t b, numBlocks = mBlocks.Length();
 
     for (b = 0; b < numBlocks; b++) {
-        Block *block = mBlocks[b].get();
-        if (!block) {
-            continue;
-        }
+        Block *block = mBlocks[b];
+        if (!block) continue;
         const int BUFSIZE = 256;
         char outStr[BUFSIZE];
         int index = 0;
@@ -291,7 +290,7 @@ gfxFontUtils::ReadCMAPTableFormat4(const uint8_t *aBuf, uint32_t aLength,
 
 nsresult
 gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
-                                    UniquePtr<uint8_t[]>& aTable)
+                                    uint8_t*& aTable)
 {
     enum {
         OffsetFormat = 0,
@@ -373,14 +372,15 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
         }
     }
 
-    aTable = MakeUnique<uint8_t[]>(tablelen);
-    memcpy(aTable.get(), aBuf, tablelen);
+    aTable = new uint8_t[tablelen];
+    memcpy(aTable, aBuf, tablelen);
 
     return NS_OK;
 }
 
-// For fonts with two format-4 tables, the first one (Unicode platform) is preferred on the Mac;
-// on other platforms we allow the Microsoft-platform subtable to replace it.
+// Windows requires fonts to have a format-4 cmap with a Microsoft ID (3).  On the Mac, fonts either have
+// a format-4 cmap with Microsoft platform/encoding id or they have one with a platformID == Unicode (0)
+// For fonts with two format-4 tables, the first one (Unicode platform) is preferred on the Mac.
 
 #if defined(XP_MACOSX)
     #define acceptableFormat4(p,e,k) (((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDMicrosoft && !(k)) || \
@@ -389,10 +389,9 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
     #define acceptableUCS4Encoding(p, e, k) \
         (((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDUCS4ForMicrosoftPlatform) && (k) != 12 || \
          ((p) == PLATFORM_ID_UNICODE   && \
-          ((e) != EncodingIDUVSForUnicodePlatform)))
+          ((e) == EncodingIDDefaultForUnicodePlatform || (e) >= EncodingIDUCS4ForUnicodePlatform)))
 #else
-    #define acceptableFormat4(p,e,k) (((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDMicrosoft) || \
-                                      ((p) == PLATFORM_ID_UNICODE))
+    #define acceptableFormat4(p,e,k) ((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDMicrosoft)
 
     #define acceptableUCS4Encoding(p, e, k) \
         ((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDUCS4ForMicrosoftPlatform)
@@ -733,10 +732,6 @@ gfxFontUtils::MapUVSToGlyphFormat14(const uint8_t *aBuf, uint32_t aCh, uint32_t 
     }
 
     const uint32_t nonDefUVSOffset = cmap14->varSelectorRecords[index].nonDefaultUVSOffset;
-    if (!nonDefUVSOffset) {
-        return 0;
-    }
-
     const NonDefUVSTable *table = reinterpret_cast<const NonDefUVSTable*>
                                       (aBuf + nonDefUVSOffset);
 
@@ -1669,8 +1664,7 @@ gfxFontUtils::ValidateColorGlyphs(hb_blob_t* aCOLR, hb_blob_t* aCPAL)
             reinterpret_cast<const uint8_t*>(colr) + offsetLayerRecord);
 
     for (uint16_t i = 0; i < numLayerRecords; i++, layer++) {
-        if (uint16_t(layer->paletteEntryIndex) >= numPaletteEntries &&
-            uint16_t(layer->paletteEntryIndex) != 0xFFFF) {
+        if (uint16_t(layer->paletteEntryIndex) >= numPaletteEntries) {
             // CPAL palette entry record is overflow
             return false;
         }
@@ -1714,7 +1708,6 @@ bool
 gfxFontUtils::GetColorGlyphLayers(hb_blob_t* aCOLR,
                                   hb_blob_t* aCPAL,
                                   uint32_t aGlyphId,
-                                  const mozilla::gfx::Color& aDefaultColor,
                                   nsTArray<uint16_t>& aGlyphs,
                                   nsTArray<mozilla::gfx::Color>& aColors)
 {
@@ -1746,19 +1739,15 @@ gfxFontUtils::GetColorGlyphLayers(hb_blob_t* aCOLR,
 
     for (uint16_t layerIndex = 0; layerIndex < numLayers; layerIndex++) {
         aGlyphs.AppendElement(uint16_t(layer->glyphId));
-        if (uint16_t(layer->paletteEntryIndex) == 0xFFFF) {
-            aColors.AppendElement(aDefaultColor);
-        } else {
-            const CPALColorRecord* color =
-                reinterpret_cast<const CPALColorRecord*>(
-                    reinterpret_cast<const uint8_t*>(cpal) +
-                    offsetFirstColorRecord +
-                    sizeof(CPALColorRecord) * uint16_t(layer->paletteEntryIndex));
-            aColors.AppendElement(mozilla::gfx::Color(color->red / 255.0,
-                                                      color->green / 255.0,
-                                                      color->blue / 255.0,
-                                                      color->alpha / 255.0));
-        }
+        const CPALColorRecord* color =
+            reinterpret_cast<const CPALColorRecord*>(
+                reinterpret_cast<const uint8_t*>(cpal) +
+                offsetFirstColorRecord +
+                sizeof(CPALColorRecord) * uint16_t(layer->paletteEntryIndex));
+        aColors.AppendElement(mozilla::gfx::Color(color->red / 255.0,
+                                                  color->green / 255.0,
+                                                  color->blue / 255.0,
+                                                  color->alpha / 255.0));
         layer++;
     }
     return true;

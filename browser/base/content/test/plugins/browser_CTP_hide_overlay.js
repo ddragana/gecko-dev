@@ -1,6 +1,6 @@
-var rootDir = getRootDirectory(gTestPath);
+let rootDir = getRootDirectory(gTestPath);
 const gTestRoot = rootDir.replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-var gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
+let gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
 
 add_task(function* () {
   registerCleanupFunction(function () {
@@ -30,7 +30,7 @@ add_task(function* () {
   yield promiseUpdatePluginBindings(gBrowser.selectedBrowser);
 
   // Tests that the overlay can be hidden for plugins using the close icon.
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
+  let overlayIsVisible = yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
     let doc = content.document;
     let plugin = doc.getElementById("test");
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
@@ -43,8 +43,10 @@ add_task(function* () {
     utils.sendMouseEvent("mousedown", left, top, 0, 1, 0, false, 0, 0);
     utils.sendMouseEvent("mouseup", left, top, 0, 1, 0, false, 0, 0);
 
-    Assert.ok(!overlay.classList.contains("visible"), "overlay should be hidden.");
+    return overlay.classList.contains("visible");
   });
+
+  ok(!overlayIsVisible, "overlay should be hidden.");
 });
 
 // Test that the overlay cannot be interacted with after the user closes the overlay
@@ -57,7 +59,7 @@ add_task(function* () {
   // Work around for delayed PluginBindingAttached
   yield promiseUpdatePluginBindings(gBrowser.selectedBrowser);
 
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function* () {
+  let overlayHidden = yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
     let doc = content.document;
     let plugin = doc.getElementById("test");
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
@@ -78,11 +80,11 @@ add_task(function* () {
     utils.sendMouseEvent("mousedown", overlayLeft, overlayTop, 0, 1, 0, false, 0, 0);
     utils.sendMouseEvent("mouseup", overlayLeft, overlayTop, 0, 1, 0, false, 0, 0);
 
-    Assert.ok(overlay.hasAttribute("dismissed") && !overlay.classList.contains("visible"),
-      "Overlay should be hidden");
+    return overlay.hasAttribute("dismissed") && !overlay.classList.contains("visible");
   });
 
   let notification = PopupNotifications.getNotification("click-to-play-plugins");
 
   ok(notification.dismissed, "No notification should be shown");
+  ok(overlayHidden, "Overlay should be hidden");
 });

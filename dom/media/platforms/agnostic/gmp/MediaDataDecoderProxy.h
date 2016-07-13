@@ -8,14 +8,13 @@
 #define MediaDataDecoderProxy_h_
 
 #include "PlatformDecoderModule.h"
-#include "mozilla/RefPtr.h"
+#include "nsRefPtr.h"
 #include "nsThreadUtils.h"
 #include "nscore.h"
-#include "GMPService.h"
 
 namespace mozilla {
 
-class InputTask : public Runnable {
+class InputTask : public nsRunnable {
 public:
   InputTask(MediaDataDecoder* aDecoder,
             MediaRawData* aSample)
@@ -29,8 +28,32 @@ public:
   }
 
 private:
-  RefPtr<MediaDataDecoder> mDecoder;
-  RefPtr<MediaRawData> mSample;
+  nsRefPtr<MediaDataDecoder> mDecoder;
+  nsRefPtr<MediaRawData> mSample;
+};
+
+class InitTask : public nsRunnable {
+public:
+  explicit InitTask(MediaDataDecoder* aDecoder)
+   : mDecoder(aDecoder)
+   , mResultValid(false)
+  {}
+
+  NS_IMETHOD Run() {
+    mResult = mDecoder->Init();
+    mResultValid = true;
+    return NS_OK;
+  }
+
+  nsresult Result() {
+    MOZ_ASSERT(mResultValid);
+    return mResult;
+  }
+
+private:
+  MediaDataDecoder* mDecoder;
+  nsresult mResult;
+  bool mResultValid;
 };
 
 template<typename T>
@@ -63,34 +86,33 @@ class MediaDataDecoderProxy;
 
 class MediaDataDecoderCallbackProxy : public MediaDataDecoderCallback {
 public:
-  MediaDataDecoderCallbackProxy(MediaDataDecoderProxy* aProxyDecoder,
-                                MediaDataDecoderCallback* aCallback)
+  MediaDataDecoderCallbackProxy(MediaDataDecoderProxy* aProxyDecoder, MediaDataDecoderCallback* aCallback)
    : mProxyDecoder(aProxyDecoder)
    , mProxyCallback(aCallback)
   {
   }
 
-  void Output(MediaData* aData) override {
+  virtual void Output(MediaData* aData) override {
     mProxyCallback->Output(aData);
   }
 
-  void Error(MediaDataDecoderError aError) override;
+  virtual void Error() override;
 
-  void InputExhausted() override {
+  virtual void InputExhausted() override {
     mProxyCallback->InputExhausted();
   }
 
-  void DrainComplete() override {
+  virtual void DrainComplete() override {
     mProxyCallback->DrainComplete();
   }
 
-  void ReleaseMediaResources() override {
+  virtual void ReleaseMediaResources() override {
     mProxyCallback->ReleaseMediaResources();
   }
 
-  void FlushComplete();
+  virtual void FlushComplete();
 
-  bool OnReaderTaskQueue() override
+  virtual bool OnReaderTaskQueue() override
   {
     return mProxyCallback->OnReaderTaskQueue();
   }
@@ -102,8 +124,7 @@ private:
 
 class MediaDataDecoderProxy : public MediaDataDecoder {
 public:
-  MediaDataDecoderProxy(already_AddRefed<AbstractThread> aProxyThread,
-                        MediaDataDecoderCallback* aCallback)
+  MediaDataDecoderProxy(nsIThread* aProxyThread, MediaDataDecoderCallback* aCallback)
    : mProxyThread(aProxyThread)
    , mProxyCallback(this, aCallback)
    , mFlushComplete(false)
@@ -134,34 +155,27 @@ public:
   // Init and Shutdown run synchronously on the proxy thread, all others are
   // asynchronously and responded to via the MediaDataDecoderCallback.
   // Note: the nsresults returned by the proxied decoder are lost.
-  RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
-
-  const char* GetDescriptionName() const override
-  {
-    return "GMP proxy data decoder";
-  }
+  virtual nsresult Init() override;
+  virtual nsresult Input(MediaRawData* aSample) override;
+  virtual nsresult Flush() override;
+  virtual nsresult Drain() override;
+  virtual nsresult Shutdown() override;
 
   // Called by MediaDataDecoderCallbackProxy.
   void FlushComplete();
 
 private:
-  RefPtr<InitPromise> InternalInit();
-
 #ifdef DEBUG
   bool IsOnProxyThread() {
-    return mProxyThread && mProxyThread->IsCurrentThreadIn();
+    return NS_GetCurrentThread() == mProxyThread;
   }
 #endif
 
   friend class InputTask;
   friend class InitTask;
 
-  RefPtr<MediaDataDecoder> mProxyDecoder;
-  RefPtr<AbstractThread> mProxyThread;
+  nsRefPtr<MediaDataDecoder> mProxyDecoder;
+  nsCOMPtr<nsIThread> mProxyThread;
 
   MediaDataDecoderCallbackProxy mProxyCallback;
 

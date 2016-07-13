@@ -20,23 +20,18 @@ ABIArg
 ABIArgGenerator::next(MIRType type)
 {
     switch (type) {
-      case MIRType::Int32:
-      case MIRType::Pointer:
+      case MIRType_Int32:
+      case MIRType_Pointer:
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uint32_t);
         break;
-      case MIRType::Float32: // Float32 moves are actually double moves
-      case MIRType::Double:
+      case MIRType_Float32: // Float32 moves are actually double moves
+      case MIRType_Double:
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uint64_t);
         break;
-      case MIRType::Int8x16:
-      case MIRType::Int16x8:
-      case MIRType::Int32x4:
-      case MIRType::Float32x4:
-      case MIRType::Bool8x16:
-      case MIRType::Bool16x8:
-      case MIRType::Bool32x4:
+      case MIRType_Int32x4:
+      case MIRType_Float32x4:
         // SIMD values aren't passed in or out of C++, so we can make up
         // whatever internal ABI we like. visitAsmJSPassArg assumes
         // SimdMemoryAlignment.
@@ -49,6 +44,12 @@ ABIArgGenerator::next(MIRType type)
     }
     return current_;
 }
+
+const Register ABIArgGenerator::NonArgReturnReg0 = ecx;
+const Register ABIArgGenerator::NonArgReturnReg1 = edx;
+const Register ABIArgGenerator::NonVolatileReg = ebx;
+const Register ABIArgGenerator::NonArg_VolatileReg = eax;
+const Register ABIArgGenerator::NonReturn_VolatileReg0 = ecx;
 
 void
 Assembler::executableCopy(uint8_t* buffer)

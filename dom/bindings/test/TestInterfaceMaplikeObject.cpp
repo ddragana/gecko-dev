@@ -4,7 +4,7 @@
 
 #include "mozilla/dom/TestInterfaceMaplikeObject.h"
 #include "mozilla/dom/TestInterfaceMaplike.h"
-#include "mozilla/dom/TestInterfaceJSMaplikeSetlikeIterableBinding.h"
+#include "mozilla/dom/TestInterfaceJSMaplikeSetlikeBinding.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/dom/BindingUtils.h"
 
@@ -21,7 +21,7 @@ NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-TestInterfaceMaplikeObject::TestInterfaceMaplikeObject(nsPIDOMWindowInner* aParent)
+TestInterfaceMaplikeObject::TestInterfaceMaplikeObject(nsPIDOMWindow* aParent)
 : mParent(aParent)
 {
 }
@@ -31,13 +31,13 @@ already_AddRefed<TestInterfaceMaplikeObject>
 TestInterfaceMaplikeObject::Constructor(const GlobalObject& aGlobal,
                                         ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  RefPtr<TestInterfaceMaplikeObject> r =
+  nsRefPtr<TestInterfaceMaplikeObject> r =
     new TestInterfaceMaplikeObject(window);
   return r.forget();
 }
@@ -49,7 +49,7 @@ TestInterfaceMaplikeObject::WrapObject(JSContext* aCx,
   return TestInterfaceMaplikeObjectBinding::Wrap(aCx, this, aGivenProto);
 }
 
-nsPIDOMWindowInner*
+nsPIDOMWindow*
 TestInterfaceMaplikeObject::GetParentObject() const
 {
   return mParent;
@@ -58,7 +58,7 @@ TestInterfaceMaplikeObject::GetParentObject() const
 void
 TestInterfaceMaplikeObject::SetInternal(const nsAString& aKey)
 {
-  RefPtr<TestInterfaceMaplike> p(new TestInterfaceMaplike(mParent));
+  nsRefPtr<TestInterfaceMaplike> p(new TestInterfaceMaplike(mParent));
   ErrorResult rv;
   TestInterfaceMaplikeObjectBinding::MaplikeHelpers::Set(this, aKey, *p, rv);
 }

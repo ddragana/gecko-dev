@@ -29,7 +29,7 @@ namespace _ipdltest {
 
 //-----------------------------------------------------------------------------
 // both processes
-const char* IPDLUnitTestName();
+const char* const IPDLUnitTestName();
 
 // NB: these are named like the similar functions in
 // xpcom/test/TestHarness.h.  The names should nominally be kept in

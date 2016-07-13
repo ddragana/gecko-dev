@@ -16,7 +16,7 @@
 #include "nsIAppStartup.h"
 #include "nsIBaseWindow.h"
 #include "nsICommandLineRunner.h"
-#include "mozIDOMWindow.h"
+#include "nsIDOMWindow.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -30,7 +30,7 @@
 #include "nsObjCExceptions.h"
 
 nsresult
-GetNativeWindowPointerFromDOMWindow(mozIDOMWindowProxy *a_window, NSWindow **a_nativeWindow)
+GetNativeWindowPointerFromDOMWindow(nsIDOMWindow *a_window, NSWindow **a_nativeWindow)
 {
   *a_nativeWindow = nil;
   if (!a_window)
@@ -144,16 +144,16 @@ nsNativeAppSupportCocoa::ReOpen()
       if (![cocoaWindow isMiniaturized]) {
         haveNonMiniaturized = true;
         break;  //have un-minimized windows, nothing to do
-      }
+      } 
       windowList->HasMoreElements(&more);
     } // end while
-
+        
     if (!haveNonMiniaturized) {
       // Deminiaturize the most recenty used window
-      nsCOMPtr<mozIDOMWindowProxy> mru;
+      nsCOMPtr<nsIDOMWindow> mru;
       wm->GetMostRecentWindow(nullptr, getter_AddRefs(mru));
-
-      if (mru) {
+            
+      if (mru) {        
         NSWindow *cocoaMru = nil;
         GetNativeWindowPointerFromDOMWindow(mru, &cocoaMru);
         if (cocoaMru) {
@@ -161,11 +161,12 @@ nsNativeAppSupportCocoa::ReOpen()
           done = true;
         }
       }
+      
     } // end if have non miniaturized
-
+    
     if (!haveOpenWindows && !done) {
       char* argv[] = { nullptr };
-
+    
       // use an empty command line to make the right kind(s) of window open
       nsCOMPtr<nsICommandLineRunner> cmdLine
         (do_CreateInstance("@mozilla.org/toolkit/command-line;1"));

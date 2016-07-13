@@ -7,6 +7,7 @@
 #include "GMPStorageChild.h"
 #include "GMPTimerChild.h"
 #include "mozilla/Monitor.h"
+#include "nsAutoPtr.h"
 #include "GMPChild.h"
 #include <ctime>
 
@@ -23,12 +24,12 @@ IsOnChildMainThread()
 }
 
 // We just need a refcounted wrapper for GMPTask objects.
-class GMPRunnable final
+class Runnable final
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GMPRunnable)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Runnable)
 
-  explicit GMPRunnable(GMPTask* aTask)
+  explicit Runnable(GMPTask* aTask)
   : mTask(aTask)
   {
     MOZ_ASSERT(mTask);
@@ -42,19 +43,19 @@ public:
   }
 
 private:
-  ~GMPRunnable()
+  ~Runnable()
   {
   }
 
   GMPTask* mTask;
 };
 
-class GMPSyncRunnable final
+class SyncRunnable final
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GMPSyncRunnable)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRunnable)
 
-  GMPSyncRunnable(GMPTask* aTask, MessageLoop* aMessageLoop)
+  SyncRunnable(GMPTask* aTask, MessageLoop* aMessageLoop)
   : mDone(false)
   , mTask(aTask)
   , mMessageLoop(aMessageLoop)
@@ -72,7 +73,7 @@ public:
     //    main thread tries to do a sync call back to the calling thread.
     MOZ_ASSERT(!IsOnChildMainThread());
 
-    mMessageLoop->PostTask(NewRunnableMethod(this, &GMPSyncRunnable::Run));
+    mMessageLoop->PostTask(FROM_HERE, NewRunnableMethod(this, &SyncRunnable::Run));
     MonitorAutoLock lock(mMonitor);
     while (!mDone) {
       lock.Wait();
@@ -90,7 +91,7 @@ public:
   }
 
 private:
-  ~GMPSyncRunnable()
+  ~SyncRunnable()
   {
   }
 
@@ -119,8 +120,8 @@ RunOnMainThread(GMPTask* aTask)
     return GMPGenericErr;
   }
 
-  RefPtr<GMPRunnable> r = new GMPRunnable(aTask);
-  sMainLoop->PostTask(NewRunnableMethod(r, &GMPRunnable::Run));
+  nsRefPtr<Runnable> r = new Runnable(aTask);
+  sMainLoop->PostTask(FROM_HERE, NewRunnableMethod(r.get(), &Runnable::Run));
 
   return GMPNoErr;
 }
@@ -132,7 +133,7 @@ SyncRunOnMainThread(GMPTask* aTask)
     return GMPGenericErr;
   }
 
-  RefPtr<GMPSyncRunnable> r = new GMPSyncRunnable(aTask, sMainLoop);
+  nsRefPtr<SyncRunnable> r = new SyncRunnable(aTask, sMainLoop);
 
   r->Post();
 
@@ -157,9 +158,8 @@ CreateRecord(const char* aRecordName,
              GMPRecord** aOutRecord,
              GMPRecordClient* aClient)
 {
-  if (aRecordNameSize > GMP_MAX_RECORD_NAME_SIZE ||
-      aRecordNameSize == 0) {
-    NS_WARNING("GMP tried to CreateRecord with too long or 0 record name");
+  if (aRecordNameSize > GMP_MAX_RECORD_NAME_SIZE) {
+    NS_WARNING("GMP tried to CreateRecord with too long record name");
     return GMPGenericErr;
   }
   GMPStorageChild* storage = sChild->GetGMPStorage();
@@ -251,8 +251,9 @@ GMPThreadImpl::Post(GMPTask* aTask)
     }
   }
 
-  RefPtr<GMPRunnable> r = new GMPRunnable(aTask);
-  mThread.message_loop()->PostTask(NewRunnableMethod(r.get(), &GMPRunnable::Run));
+  nsRefPtr<Runnable> r = new Runnable(aTask);
+
+  mThread.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(r.get(), &Runnable::Run));
 }
 
 void

@@ -20,12 +20,11 @@
 
 #include "mozilla/BasePrincipal.h"
 
-class nsIDocShell;
 class nsIURI;
 
 #define NS_NULLPRINCIPAL_CID \
-{ 0xbd066e5f, 0x146f, 0x4472, \
-  { 0x83, 0x31, 0x7b, 0xfd, 0x05, 0xb1, 0xed, 0x90 } }
+{ 0x34a19ab6, 0xca47, 0x4098, \
+  { 0xa7, 0xb8, 0x4a, 0xfc, 0xdd, 0xcd, 0x8f, 0x88 } }
 #define NS_NULLPRINCIPAL_CONTRACTID "@mozilla.org/nullprincipal;1"
 
 #define NS_NULLPRINCIPAL_SCHEME "moz-nullprincipal"
@@ -45,21 +44,21 @@ public:
   NS_IMETHOD GetURI(nsIURI** aURI) override;
   NS_IMETHOD GetDomain(nsIURI** aDomain) override;
   NS_IMETHOD SetDomain(nsIURI* aDomain) override;
+  NS_IMETHOD CheckMayLoad(nsIURI* uri, bool report, bool allowIfInheritsPrincipal) override;
+  NS_IMETHOD GetIsNullPrincipal(bool* aIsNullPrincipal) override;
   NS_IMETHOD GetBaseDomain(nsACString& aBaseDomain) override;
   nsresult GetOriginInternal(nsACString& aOrigin) override;
 
-  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIPrincipal* aInheritFrom);
+  // Returns null on failure.
+  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIPrincipal *aInheritFrom);
 
-  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIDocShell* aDocShell);
-
+  // Returns null on failure.
   static already_AddRefed<nsNullPrincipal>
-  Create(const mozilla::PrincipalOriginAttributes& aOriginAttributes = mozilla::PrincipalOriginAttributes());
+    Create(const mozilla::OriginAttributes& aOriginAttributes = mozilla::OriginAttributes());
 
-  nsresult Init(const mozilla::PrincipalOriginAttributes& aOriginAttributes = mozilla::PrincipalOriginAttributes());
+  nsresult Init(const mozilla::OriginAttributes& aOriginAttributes = mozilla::OriginAttributes());
 
   virtual void GetScriptLocation(nsACString &aStr) override;
-
-  PrincipalKind Kind() override { return eNullPrincipal; }
 
  protected:
   virtual ~nsNullPrincipal() {}
@@ -69,9 +68,8 @@ public:
     return aOther == this;
   }
 
-  bool MayLoadInternal(nsIURI* aURI) override;
-
   nsCOMPtr<nsIURI> mURI;
+  nsCOMPtr<nsIContentSecurityPolicy> mCSP;
 };
 
 #endif // nsNullPrincipal_h__

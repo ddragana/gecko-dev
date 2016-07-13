@@ -7,13 +7,10 @@
 
 #ifdef MOZ_ENABLE_DBUS
 
-#include "WakeLockListener.h"
-
 #include <dbus/dbus.h>
 #include <dbus/dbus-glib-lowlevel.h>
 
-#include "mozilla/ipc/DBusMessageRefPtr.h"
-#include "mozilla/ipc/DBusPendingCallRefPtr.h"
+#include "WakeLockListener.h"
 
 #define FREEDESKTOP_SCREENSAVER_TARGET    "org.freedesktop.ScreenSaver"
 #define FREEDESKTOP_SCREENSAVER_OBJECT    "/ScreenSaver"
@@ -66,8 +63,8 @@ private:
   void InhibitFailed();
   void InhibitSucceeded(uint32_t aInhibitRequest);
 
-  nsCString mTopic;
-  RefPtr<DBusConnection> mConnection;
+  nsAutoCString mTopic;
+  DBusConnection* mConnection;
 
   DesktopEnvironment mDesktopEnvironment;
 
@@ -82,15 +79,17 @@ bool
 WakeLockTopic::SendMessage(DBusMessage* aMessage)
 {
   // send message and get a handle for a reply
-  RefPtr<DBusPendingCall> reply;
-  dbus_connection_send_with_reply(mConnection, aMessage,
-                                  reply.StartAssignment(),
+  DBusPendingCall* reply;
+  dbus_connection_send_with_reply(mConnection, aMessage, &reply,
                                   DBUS_TIMEOUT);
+  dbus_message_unref(aMessage);
+
   if (!reply) {
     return false;
   }
 
   dbus_pending_call_set_notify(reply, &ReceiveInhibitReply, this, NULL);
+  dbus_pending_call_unref(reply);
 
   return true;
 }
@@ -98,11 +97,11 @@ WakeLockTopic::SendMessage(DBusMessage* aMessage)
 bool
 WakeLockTopic::SendFreeDesktopInhibitMessage()
 {
-  RefPtr<DBusMessage> message = already_AddRefed<DBusMessage>(
+  DBusMessage* message =
     dbus_message_new_method_call(FREEDESKTOP_SCREENSAVER_TARGET,
                                  FREEDESKTOP_SCREENSAVER_OBJECT,
                                  FREEDESKTOP_SCREENSAVER_INTERFACE,
-                                 "Inhibit"));
+                                 "Inhibit");
 
   if (!message) {
     return false;
@@ -121,11 +120,11 @@ WakeLockTopic::SendFreeDesktopInhibitMessage()
 bool
 WakeLockTopic::SendGNOMEInhibitMessage()
 {
-  RefPtr<DBusMessage> message = already_AddRefed<DBusMessage>(
+  DBusMessage* message =
     dbus_message_new_method_call(SESSION_MANAGER_TARGET,
                                  SESSION_MANAGER_OBJECT,
                                  SESSION_MANAGER_INTERFACE,
-                                 "Inhibit"));
+                                 "Inhibit");
 
   if (!message) {
     return false;
@@ -173,20 +172,20 @@ WakeLockTopic::SendInhibit()
 bool
 WakeLockTopic::SendUninhibit()
 {
-  RefPtr<DBusMessage> message;
+  DBusMessage* message = nullptr;
 
   if (mDesktopEnvironment == FreeDesktop) {
-    message = already_AddRefed<DBusMessage>(
+    message =
       dbus_message_new_method_call(FREEDESKTOP_SCREENSAVER_TARGET,
                                    FREEDESKTOP_SCREENSAVER_OBJECT,
                                    FREEDESKTOP_SCREENSAVER_INTERFACE,
-                                   "UnInhibit"));
+                                   "UnInhibit");
   } else if (mDesktopEnvironment == GNOME) {
-    message = already_AddRefed<DBusMessage>(
+    message =
       dbus_message_new_method_call(SESSION_MANAGER_TARGET,
                                    SESSION_MANAGER_OBJECT,
                                    SESSION_MANAGER_INTERFACE,
-                                   "Uninhibit"));
+                                   "Uninhibit");
   }
 
   if (!message) {
@@ -199,6 +198,7 @@ WakeLockTopic::SendUninhibit()
 
   dbus_connection_send(mConnection, message, nullptr);
   dbus_connection_flush(mConnection);
+  dbus_message_unref(message);
 
   mInhibitRequest = 0;
 
@@ -291,8 +291,7 @@ WakeLockTopic::ReceiveInhibitReply(DBusPendingCall* pending, void* user_data)
 
   WakeLockTopic* self = static_cast<WakeLockTopic*>(user_data);
 
-  RefPtr<DBusMessage> msg = already_AddRefed<DBusMessage>(
-    dbus_pending_call_steal_reply(pending));
+  DBusMessage* msg = dbus_pending_call_steal_reply(pending);
   if (!msg) {
     return;
   }
@@ -307,16 +306,24 @@ WakeLockTopic::ReceiveInhibitReply(DBusPendingCall* pending, void* user_data)
   } else {
     self->InhibitFailed();
   }
+
+  dbus_message_unref(msg);
 }
 
 
 WakeLockListener::WakeLockListener()
-  : mConnection(already_AddRefed<DBusConnection>(
-    dbus_bus_get(DBUS_BUS_SESSION, nullptr)))
+  : mConnection(dbus_bus_get(DBUS_BUS_SESSION, nullptr))
 {
   if (mConnection) {
     dbus_connection_set_exit_on_disconnect(mConnection, false);
     dbus_connection_setup_with_g_main(mConnection, nullptr);
+  }
+}
+
+WakeLockListener::~WakeLockListener()
+{
+  if (mConnection) {
+    dbus_connection_unref(mConnection);
   }
 }
 

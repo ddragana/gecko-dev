@@ -30,27 +30,12 @@ public:
   void
   Release();
 
-  const nsAString&
-  Path() const
-  {
-    return mPath;
-  }
-
   bool
   MaybeUpdateSize(int64_t aSize, bool aTruncate);
 
-  void
-  DisableQuotaCheck();
-
-  void
-  EnableQuotaCheck();
-
 private:
   QuotaObject(OriginInfo* aOriginInfo, const nsAString& aPath, int64_t aSize)
-    : mOriginInfo(aOriginInfo)
-    , mPath(aPath)
-    , mSize(aSize)
-    , mQuotaCheckDisabled(false)
+  : mOriginInfo(aOriginInfo), mPath(aPath), mSize(aSize)
   {
     MOZ_COUNT_CTOR(QuotaObject);
   }
@@ -67,7 +52,7 @@ private:
 
     ++mRefCnt;
 
-    RefPtr<QuotaObject> result = dont_AddRef(this);
+    nsRefPtr<QuotaObject> result = dont_AddRef(this);
     return result.forget();
   }
 
@@ -76,8 +61,6 @@ private:
   OriginInfo* mOriginInfo;
   nsString mPath;
   int64_t mSize;
-
-  bool mQuotaCheckDisabled;
 };
 
 END_QUOTA_NAMESPACE
