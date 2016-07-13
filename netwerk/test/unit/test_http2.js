@@ -903,6 +903,8 @@ var tests = [ test_http2_post_big
             , test_http2_push2
             , test_http2_push3
             , test_http2_push4
+            , test_http2_push5
+            , test_http2_push6
             , test_http2_altsvc
             , test_http2_push5
             , test_http2_push6
@@ -1024,6 +1026,7 @@ function resetPrefs() {
 
 function run_test() {
   var env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
+
   serverPort = 5500;//env.get("MOZHTTP2-PORT");
   do_check_neq(serverPort, null);
   dump("using port " + serverPort + "\n");
