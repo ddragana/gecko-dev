@@ -4,18 +4,15 @@
 
 /**
  * Test that the reader mode button appears and works properly on
- * reader-able content, and that ReadingList button can open and close
- * its Sidebar UI.
+ * reader-able content.
  */
 const TEST_PREFS = [
   ["reader.parse-on-load.enabled", true],
-  ["browser.readinglist.enabled", true],
-  ["browser.readinglist.introShown", false],
 ];
 
 const TEST_PATH = "http://example.com/browser/browser/base/content/test/general/";
 
-let readerButton = document.getElementById("reader-mode-button");
+var readerButton = document.getElementById("reader-mode-button");
 
 add_task(function* test_reader_button() {
   registerCleanupFunction(function() {
@@ -63,31 +60,25 @@ add_task(function* test_reader_button() {
   is(gURLBar.value, readerUrl, "gURLBar value is about:reader URL");
   is(gURLBar.textValue, url.substring("http://".length), "gURLBar is displaying original article URL");
 
-  // Readinglist button should be present, and status should be "openned", as the
-  // first time in readerMode opens the Sidebar ReadingList as a feature introduction.
-  let listButton;
-  yield promiseWaitForCondition(() =>
-    listButton = gBrowser.contentDocument.getElementById("list-button"));
-  is_element_visible(listButton, "List button is present on a reader-able page");
-  yield promiseWaitForCondition(() => listButton.classList.contains("on"));
-  ok(listButton.classList.contains("on"),
-    "List button should indicate SideBar-ReadingList open.");
-  ok(ReadingListUI.isSidebarOpen,
-    "The ReadingListUI should indicate SideBar-ReadingList open.");
+  // Check selected value for URL bar
+  yield new Promise((resolve, reject) => {
+    waitForClipboard(url, function () {
+      gURLBar.focus();
+      gURLBar.select();
+      goDoCommand("cmd_copy");
+    }, resolve, reject);
+  });
 
-  // Now close the Sidebar ReadingList.
-  listButton.click();
-  yield promiseWaitForCondition(() => !listButton.classList.contains("on"));
-  ok(!listButton.classList.contains("on"),
-    "List button should now indicate SideBar-ReadingList closed.");
-  ok(!ReadingListUI.isSidebarOpen,
-    "The ReadingListUI should now indicate SideBar-ReadingList closed.");
+  info("Got correct URL when copying");
 
   // Switch page back out of reader mode.
+  let promisePageShow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
   readerButton.click();
-  yield promiseTabLoadEvent(tab);
+  yield promisePageShow;
   is(gBrowser.selectedBrowser.currentURI.spec, url,
-    "Original page loaded after clicking active reader mode button");
+    "Back to the original page after clicking active reader mode button");
+  ok(gBrowser.selectedBrowser.canGoForward,
+    "Moved one step back in the session history.");
 
   // Load a new tab that is NOT reader-able.
   let newTab = gBrowser.selectedTab = gBrowser.addTab();
@@ -112,4 +103,116 @@ add_task(function* test_getOriginalUrl() {
   let badUrl = "http://foo.com/?;$%^^";
   is(ReaderMode.getOriginalUrl("about:reader?url=" + encodeURIComponent(badUrl)), badUrl, "Found original URL from encoded malformed URL");
   is(ReaderMode.getOriginalUrl("about:reader?url=" + badUrl), badUrl, "Found original URL from non-encoded malformed URL");
+});
+
+add_task(function* test_reader_view_element_attribute_transform() {
+  registerCleanupFunction(function() {
+    while (gBrowser.tabs.length > 1) {
+      gBrowser.removeCurrentTab();
+    }
+  });
+
+  function observeAttribute(element, attribute, triggerFn, checkFn) {
+    let initValue = element.getAttribute(attribute);
+    return new Promise(resolve => {
+      let observer = new MutationObserver((mutations) => {
+        mutations.forEach( mu => {
+          let muValue = element.getAttribute(attribute);
+          if(element.getAttribute(attribute) !== mu.oldValue) {
+            checkFn();
+            resolve();
+            observer.disconnect();
+          }
+        });
+      });
+
+      observer.observe(element, {
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: [attribute]
+      });
+
+      triggerFn();
+    });
+  };
+
+  let command = document.getElementById("View:ReaderView");
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser);
+  is(command.hidden, true, "Command element should have the hidden attribute");
+
+  info("Navigate a reader-able page");
+  let waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
+  yield observeAttribute(command, "hidden",
+    () => {
+      let url = TEST_PATH + "readerModeArticle.html";
+      tab.linkedBrowser.loadURI(url);
+    },
+    () => {
+      is(command.hidden, false, "Command's hidden attribute should be false on a reader-able page");
+    }
+  );
+  yield waitForPageshow;
+
+  info("Navigate a non-reader-able page");
+  waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
+  yield observeAttribute(command, "hidden",
+    () => {
+      let url = TEST_PATH + "readerModeArticleHiddenNodes.html";
+      tab.linkedBrowser.loadURI(url);
+    },
+    () => {
+      is(command.hidden, true, "Command's hidden attribute should be true on a non-reader-able page");
+    }
+  );
+  yield waitForPageshow;
+
+  info("Navigate a reader-able page");
+  waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
+  yield observeAttribute(command, "hidden",
+    () => {
+      let url = TEST_PATH + "readerModeArticle.html";
+      tab.linkedBrowser.loadURI(url);
+    },
+    () => {
+      is(command.hidden, false, "Command's hidden attribute should be false on a reader-able page");
+    }
+  );
+  yield waitForPageshow;
+
+  info("Enter Reader Mode");
+  waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
+  yield observeAttribute(readerButton, "readeractive",
+    () => {
+      readerButton.click();
+    },
+    () => {
+      is(readerButton.getAttribute("readeractive"), "true", "readerButton's readeractive attribute should be true when entering reader mode");
+    }
+  );
+  yield waitForPageshow;
+
+  info("Exit Reader Mode");
+  waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
+  yield observeAttribute(readerButton, "readeractive",
+    () => {
+      readerButton.click();
+    },
+    () => {
+      is(readerButton.getAttribute("readeractive"), "", "readerButton's readeractive attribute should be empty when reader mode is exited");
+    }
+  );
+  yield waitForPageshow;
+
+  info("Navigate a non-reader-able page");
+  waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
+  yield observeAttribute(command, "hidden",
+    () => {
+      let url = TEST_PATH + "readerModeArticleHiddenNodes.html";
+      tab.linkedBrowser.loadURI(url);
+    },
+    () => {
+      is(command.hidden, true, "Command's hidden attribute should be true on a non-reader-able page");
+    }
+  );
+  yield waitForPageshow;
 });

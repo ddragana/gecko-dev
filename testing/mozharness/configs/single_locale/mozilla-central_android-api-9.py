@@ -2,19 +2,15 @@ BRANCH = "mozilla-central"
 MOZ_UPDATE_CHANNEL = "nightly"
 MOZILLA_DIR = BRANCH
 OBJDIR = "obj-l10n"
-EN_US_BINARY_URL = "http://stage.mozilla.org/pub/mozilla.org/mobile/nightly/latest-%s-android-api-9/en-US" % (BRANCH)
-#STAGE_SERVER = "dev-stage01.srv.releng.scl3.mozilla.com"
-STAGE_SERVER = "stage.mozilla.org"
-STAGE_USER = "ffxbld"
-STAGE_SSH_KEY = "~/.ssh/ffxbld_rsa"
+EN_US_BINARY_URL = "http://archive.mozilla.org/pub/mobile/nightly/latest-%s-android-api-9/en-US" % BRANCH
 HG_SHARE_BASE_DIR = "/builds/hg-shared"
 
 config = {
+    "branch": BRANCH,
     "log_name": "single_locale",
     "objdir": OBJDIR,
     "is_automation": True,
     "buildbot_json_path": "buildprops.json",
-    "purge_minsize": 10,
     "force_clobber": True,
     "clobberer_url": "https://api.pub.build.mozilla.org/clobberer/lastclobber",
     "locales_file": "%s/mobile/android/locales/all-locales" % MOZILLA_DIR,
@@ -26,26 +22,22 @@ config = {
     "tooltool_config": {
         "manifest": "mobile/android/config/tooltool-manifests/android/releng.manifest",
         "output_dir": "%(abs_work_dir)s/" + MOZILLA_DIR,
-        "bootstrap_cmd": ["bash", "-xe", "setup.sh"],
     },
     "exes": {
-        'tooltool.py': '/tools/tooltool.py',
+        'tooltool.py': '/builds/tooltool.py',
     },
     "repos": [{
         "repo": "https://hg.mozilla.org/mozilla-central",
-        "revision": "default",
+        "branch": "default",
         "dest": MOZILLA_DIR,
     }, {
         "repo": "https://hg.mozilla.org/build/buildbot-configs",
-        "revision": "default",
+        "branch": "default",
         "dest": "buildbot-configs"
     }, {
         "repo": "https://hg.mozilla.org/build/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools"
-    }, {
-        "repo": "https://hg.mozilla.org/build/compare-locales",
-        "revision": "RELEASE_AUTOMATION"
     }],
     "hg_l10n_base": "https://hg.mozilla.org/l10n-central",
     "hg_l10n_tag": "default",
@@ -60,20 +52,15 @@ config = {
         "LOCALE_MERGEDIR": "%(abs_merge_dir)s/",
         "MOZ_UPDATE_CHANNEL": MOZ_UPDATE_CHANNEL,
     },
-    # TODO ideally we could get this info from a central location.
-    # However, the agility of these individual config files might trump that.
-    "upload_env": {
-        "UPLOAD_USER": STAGE_USER,
-        "UPLOAD_SSH_KEY": STAGE_SSH_KEY,
-        "UPLOAD_HOST": STAGE_SERVER,
-        "POST_UPLOAD_CMD": "post_upload.py -b mozilla-central-android-api-9-l10n -p mobile -i %(buildid)s --release-to-latest --release-to-dated",
-        "UPLOAD_TO_TEMP": "1",
-    },
+    "upload_branch": "%s-android-api-9" % BRANCH,
+    "ssh_key_dir": "~/.ssh",
     "merge_locales": True,
-    "make_dirs": ['config'],
     "mozilla_dir": MOZILLA_DIR,
     "mozconfig": "%s/mobile/android/config/mozconfigs/android-api-9-10-constrained/l10n-nightly" % MOZILLA_DIR,
     "signature_verification_script": "tools/release/signing/verify-android-signature.sh",
+    "stage_product": "mobile",
+    "platform": "android",
+    "build_type": "api-9-opt",
 
     # Balrog
     "build_target": "Android_arm-eabi-gcc3",
@@ -102,5 +89,9 @@ config = {
                       ],
     "mock_files": [
         ("/home/cltbld/.ssh", "/home/mock_mozilla/.ssh"),
+        ('/home/cltbld/.hgrc', '/builds/.hgrc'),
+        ('/builds/relengapi.tok', '/builds/relengapi.tok'),
+        ('/tools/tooltool.py', '/builds/tooltool.py'),
+        ('/usr/local/lib/hgext', '/usr/local/lib/hgext'),
     ],
 }

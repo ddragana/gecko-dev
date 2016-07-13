@@ -8,7 +8,7 @@
 include LayersSurfaces;
 include LayersMessages;
 include protocol PCompositable;
-include protocol PCompositor;
+include protocol PCompositorBridge;
 include protocol PLayer;
 include protocol PRenderFrame;
 include protocol PTexture;
@@ -17,10 +17,10 @@ include "mozilla/GfxMessageUtils.h";
 
 using struct mozilla::layers::TextureInfo from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
-using mozilla::layers::TextureFlags from "mozilla/layers/CompositorTypes.h";
 using class mozilla::layers::APZTestData from "mozilla/layers/APZTestData.h";
 using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
 using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
+using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
 
 /**
  * The layers protocol is spoken between thread contexts that manage
@@ -39,33 +39,34 @@ union MaybeTransform {
 };
 
 sync protocol PLayerTransaction {
-  manager PCompositor;
+  manager PCompositorBridge;
   manages PLayer;
   manages PCompositable;
-  manages PTexture;
-
-child:
-  async ParentAsyncMessages(AsyncParentMessageData[] aMessages);
 
 parent:
   async PLayer();
   async PCompositable(TextureInfo aTextureInfo);
-  async PTexture(SurfaceDescriptor aSharedData, TextureFlags aTextureFlags);
 
   // The isFirstPaint flag can be used to indicate that this is the first update
   // for a particular document.
-  sync Update(Edit[] cset, uint64_t id, TargetConfig targetConfig,
+  sync Update(Edit[] cset, OpDestroy[] toDestroy,
+              uint64_t fwdTransactionId,
+              uint64_t id, TargetConfig targetConfig,
               PluginWindowData[] plugins, bool isFirstPaint,
               bool scheduleComposite, uint32_t paintSequenceNumber,
-              bool isRepeatTransaction, TimeStamp transactionStart)
+              bool isRepeatTransaction, TimeStamp transactionStart,
+              int32_t paintSyncId)
     returns (EditReply[] reply);
 
   // We don't need to send a sync transaction if
   // no transaction operate require a swap.
-  async UpdateNoSwap(Edit[] cset, uint64_t id, TargetConfig targetConfig,
+  async UpdateNoSwap(Edit[] cset, OpDestroy[] toDestroy,
+                     uint64_t fwdTransactionId,
+                     uint64_t id, TargetConfig targetConfig,
                      PluginWindowData[] plugins, bool isFirstPaint,
                      bool scheduleComposite, uint32_t paintSequenceNumber,
-                     bool isRepeatTransaction, TimeStamp transactionStart);
+                     bool isRepeatTransaction, TimeStamp transactionStart,
+                     int32_t paintSyncId);
 
   // Testing APIs
 
@@ -87,7 +88,7 @@ parent:
   // The next time the layer tree is composited, add this async scroll offset in
   // CSS pixels for the given ViewID.
   // Useful for testing rendering of async scrolling.
-  sync SetAsyncScrollOffset(ViewID id, int32_t x, int32_t y);
+  sync SetAsyncScrollOffset(ViewID id, float x, float y);
 
   // The next time the layer tree is composited, include this async zoom in
   // for the given ViewID.
@@ -115,9 +116,9 @@ parent:
   // input event.
   async SetConfirmedTargetAPZC(uint64_t aInputBlockId, ScrollableLayerGuid[] aTargets);
 
-  async ChildAsyncMessages(AsyncChildMessageData[] aMessages);
-
   async Shutdown();
+
+  sync SyncWithCompositor();
 child:
   async __delete__();
 };

@@ -46,11 +46,13 @@ WebGLBuffer::BindTo(GLenum target)
 
     case LOCAL_GL_COPY_READ_BUFFER:
     case LOCAL_GL_COPY_WRITE_BUFFER:
-        /* Do nothing. Doesn't set the type of the buffer contents. */
+        if (mContent == Kind::Undefined) {
+          mContent = Kind::OtherData;
+        }
         break;
 
     default:
-        MOZ_CRASH();
+        MOZ_CRASH("GFX: invalid target");
     }
 }
 

@@ -20,6 +20,8 @@
 #include "mozilla/dom/Element.h"
 #include "nsSVGElement.h"
 #include "mozilla/dom/SVGDocumentBinding.h"
+#include "mozilla/StyleSheetHandle.h"
+#include "mozilla/StyleSheetHandleInlines.h"
 
 using namespace mozilla::css;
 using namespace mozilla::dom;
@@ -88,7 +90,7 @@ SVGDocument::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
   NS_ASSERTION(aNodeInfo->NodeInfoManager() == mNodeInfoManager,
                "Can't import this document into another document!");
 
-  nsRefPtr<SVGDocument> clone = new SVGDocument();
+  RefPtr<SVGDocument> clone = new SVGDocument();
   nsresult rv = CloneDocHelper(clone.get());
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -99,6 +101,14 @@ void
 SVGDocument::EnsureNonSVGUserAgentStyleSheetsLoaded()
 {
   if (mHasLoadedNonSVGUserAgentStyleSheets) {
+    return;
+  }
+
+  if (IsStaticDocument()) {
+    // If we're a static clone of a document, then
+    // nsIDocument::CreateStaticClone will handle cloning the original
+    // document's sheets, including the on-demand non-SVG UA sheets,
+    // for us.
     return;
   }
 
@@ -147,10 +157,12 @@ SVGDocument::EnsureNonSVGUserAgentStyleSheetsLoaded()
             nsCOMPtr<nsIURI> uri;
             NS_NewURI(getter_AddRefs(uri), spec);
             if (uri) {
-              nsRefPtr<CSSStyleSheet> cssSheet;
-              cssLoader->LoadSheetSync(uri, true, true, getter_AddRefs(cssSheet));
-              if (cssSheet) {
-                EnsureOnDemandBuiltInUASheet(cssSheet);
+              StyleSheetHandle::RefPtr sheet;
+              cssLoader->LoadSheetSync(uri,
+                                       mozilla::css::eAgentSheetFeatures,
+                                       true, &sheet);
+              if (sheet) {
+                EnsureOnDemandBuiltInUASheet(sheet);
               }
             }
           }
@@ -159,21 +171,23 @@ SVGDocument::EnsureNonSVGUserAgentStyleSheetsLoaded()
     }
   }
 
-  CSSStyleSheet* sheet = nsLayoutStylesheetCache::NumberControlSheet();
+  auto cache = nsLayoutStylesheetCache::For(GetStyleBackendType());
+
+  StyleSheetHandle sheet = cache->NumberControlSheet();
   if (sheet) {
     // number-control.css can be behind a pref
     EnsureOnDemandBuiltInUASheet(sheet);
   }
-  EnsureOnDemandBuiltInUASheet(nsLayoutStylesheetCache::FormsSheet());
-  EnsureOnDemandBuiltInUASheet(nsLayoutStylesheetCache::CounterStylesSheet());
-  EnsureOnDemandBuiltInUASheet(nsLayoutStylesheetCache::HTMLSheet());
+  EnsureOnDemandBuiltInUASheet(cache->FormsSheet());
+  EnsureOnDemandBuiltInUASheet(cache->CounterStylesSheet());
+  EnsureOnDemandBuiltInUASheet(cache->HTMLSheet());
   if (nsLayoutUtils::ShouldUseNoFramesSheet(this)) {
-    EnsureOnDemandBuiltInUASheet(nsLayoutStylesheetCache::NoFramesSheet());
+    EnsureOnDemandBuiltInUASheet(cache->NoFramesSheet());
   }
   if (nsLayoutUtils::ShouldUseNoScriptSheet(this)) {
-    EnsureOnDemandBuiltInUASheet(nsLayoutStylesheetCache::NoScriptSheet());
+    EnsureOnDemandBuiltInUASheet(cache->NoScriptSheet());
   }
-  EnsureOnDemandBuiltInUASheet(nsLayoutStylesheetCache::UASheet());
+  EnsureOnDemandBuiltInUASheet(cache->UASheet());
 
   EndUpdate(UPDATE_STYLE);
 }
@@ -193,7 +207,7 @@ SVGDocument::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 nsresult
 NS_NewSVGDocument(nsIDocument** aInstancePtrResult)
 {
-  nsRefPtr<SVGDocument> doc = new SVGDocument();
+  RefPtr<SVGDocument> doc = new SVGDocument();
 
   nsresult rv = doc->Init();
   if (NS_FAILED(rv)) {

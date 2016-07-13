@@ -4,6 +4,8 @@ config = {
     "products": {
         "installer": {
             "product-name": "Firefox-%(version)s",
+            "check_uptake": True,
+            "alias": "firefox-esr-latest",
             "ssl-only": True,
             "add-locales": True,
             "paths": {
@@ -23,26 +25,15 @@ config = {
                     "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Setup%%20%(version)s.exe",
                     "bouncer-platform": "win",
                 },
-                "opensolaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-i386.tar.bz2",
-                    "bouncer-platform": "opensolaris-i386",
-                },
-                "opensolaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-sparc.tar.bz2",
-                    "bouncer-platform": "opensolaris-sparc",
-                },
-                "solaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.solaris-i386.tar.bz2",
-                    "bouncer-platform": "solaris-i386",
-                },
-                "solaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.solaris-sparc.tar.bz2",
-                    "bouncer-platform": "solaris-sparc",
+                "win64": {
+                    "path": "/firefox/releases/%(version)s/win64/:lang/Firefox%%20Setup%%20%(version)s.exe",
+                    "bouncer-platform": "win64",
                 },
             },
         },
         "installer-ssl": {
             "product-name": "Firefox-%(version)s-SSL",
+            "check_uptake": True,
             "ssl-only": True,
             "add-locales": True,
             "paths": {
@@ -62,37 +53,15 @@ config = {
                     "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Setup%%20%(version)s.exe",
                     "bouncer-platform": "win",
                 },
-                "opensolaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-i386.tar.bz2",
-                    "bouncer-platform": "opensolaris-i386",
-                },
-                "opensolaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-sparc.tar.bz2",
-                    "bouncer-platform": "opensolaris-sparc",
-                },
-                "solaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.solaris-i386.tar.bz2",
-                    "bouncer-platform": "solaris-i386",
-                },
-                "solaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.solaris-sparc.tar.bz2",
-                    "bouncer-platform": "solaris-sparc",
-                },
-            },
-        },
-        "stub-installer": {
-            "product-name": "Firefox-%(version)s-stub",
-            "ssl-only": True,
-            "add-locales": True,
-            "paths": {
-                "win32": {
-                    "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Setup%%20Stub%%20%(version)s.exe",
-                    "bouncer-platform": "win",
+                "win64": {
+                    "path": "/firefox/releases/%(version)s/win64/:lang/Firefox%%20Setup%%20%(version)s.exe",
+                    "bouncer-platform": "win64",
                 },
             },
         },
         "complete-mar": {
             "product-name": "Firefox-%(version)s-Complete",
+            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -112,21 +81,9 @@ config = {
                     "path": "/firefox/releases/%(version)s/update/win32/:lang/firefox-%(version)s.complete.mar",
                     "bouncer-platform": "win",
                 },
-                "opensolaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-i386.complete.mar",
-                    "bouncer-platform": "opensolaris-i386",
-                },
-                "opensolaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.opensolaris-sparc.complete.mar",
-                    "bouncer-platform": "opensolaris-sparc",
-                },
-                "solaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.solaris-i386.complete.mar",
-                    "bouncer-platform": "solaris-i386",
-                },
-                "solaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(version)s.en-US.solaris-sparc.complete.mar",
-                    "bouncer-platform": "solaris-sparc",
+                "win64": {
+                    "path": "/firefox/releases/%(version)s/update/win64/:lang/firefox-%(version)s.complete.mar",
+                    "bouncer-platform": "win64",
                 },
             },
         },
@@ -134,6 +91,7 @@ config = {
     "partials": {
         "releases-dir": {
             "product-name": "Firefox-%(version)s-Partial-%(prev_version)s",
+            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -153,21 +111,9 @@ config = {
                     "path": "/firefox/releases/%(version)s/update/win32/:lang/firefox-%(prev_version)s-%(version)s.partial.mar",
                     "bouncer-platform": "win",
                 },
-                "opensolaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(prev_version)s-%(version)s.en-US.opensolaris-i386.partial.mar",
-                    "bouncer-platform": "opensolaris-i386",
-                },
-                "opensolaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(prev_version)s-%(version)s.en-US.opensolaris-sparc.partial.mar",
-                    "bouncer-platform": "opensolaris-sparc",
-                },
-                "solaris-i386": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(prev_version)s-%(version)s.en-US.solaris-i386.partial.mar",
-                    "bouncer-platform": "solaris-i386",
-                },
-                "solaris-sparc": {
-                    "path": "/firefox/releases/%(version)s/contrib/solaris_tarball/firefox-%(prev_version)s-%(version)s.en-US.solaris-sparc.partial.mar",
-                    "bouncer-platform": "solaris-sparc",
+                "win64": {
+                    "path": "/firefox/releases/%(version)s/update/win64/:lang/firefox-%(prev_version)s-%(version)s.partial.mar",
+                    "bouncer-platform": "win64",
                 },
             },
         },

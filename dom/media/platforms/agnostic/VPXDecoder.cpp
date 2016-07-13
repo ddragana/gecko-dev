@@ -9,38 +9,38 @@
 #include "nsError.h"
 #include "TimeUnits.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/SyncRunnable.h"
+#include "prsystem.h"
 
 #include <algorithm>
 
 #undef LOG
-#define LOG(arg, ...) MOZ_LOG(gMediaDecoderLog, mozilla::LogLevel::Debug, ("VPXDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+#define LOG(arg, ...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, ("VPXDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 
 namespace mozilla {
 
 using namespace gfx;
 using namespace layers;
 
-extern PRLogModuleInfo* gMediaDecoderLog;
+static int MimeTypeToCodec(const nsACString& aMimeType)
+{
+  if (aMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
+    return VPXDecoder::Codec::VP8;
+  } else if (aMimeType.EqualsLiteral("video/webm; codecs=vp9")) {
+    return VPXDecoder::Codec::VP9;
+  }
+  return -1;
+}
 
-VPXDecoder::VPXDecoder(const VideoInfo& aConfig,
-                       ImageContainer* aImageContainer,
-                       FlushableTaskQueue* aTaskQueue,
-                       MediaDataDecoderCallback* aCallback)
-  : mImageContainer(aImageContainer)
-  , mTaskQueue(aTaskQueue)
-  , mCallback(aCallback)
-  , mIter(nullptr)
-  , mDisplayWidth(aConfig.mDisplay.width)
-  , mDisplayHeight(aConfig.mDisplay.height)
+VPXDecoder::VPXDecoder(const CreateDecoderParams& aParams)
+  : mImageContainer(aParams.mImageContainer)
+  , mTaskQueue(aParams.mTaskQueue)
+  , mCallback(aParams.mCallback)
+  , mIsFlushing(false)
+  , mInfo(aParams.VideoConfig())
+  , mCodec(MimeTypeToCodec(aParams.VideoConfig().mMimeType))
 {
   MOZ_COUNT_CTOR(VPXDecoder);
-  if (aConfig.mMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
-    mCodec = Codec::VP8;
-  } else if (aConfig.mMimeType.EqualsLiteral("video/webm; codecs=vp9")) {
-    mCodec = Codec::VP9;
-  } else {
-    mCodec = -1;
-  }
   PodZero(&mVPX);
 }
 
@@ -56,54 +56,76 @@ VPXDecoder::Shutdown()
   return NS_OK;
 }
 
-nsresult
+RefPtr<MediaDataDecoder::InitPromise>
 VPXDecoder::Init()
 {
+  int decode_threads = 2;
+
   vpx_codec_iface_t* dx = nullptr;
   if (mCodec == Codec::VP8) {
     dx = vpx_codec_vp8_dx();
   } else if (mCodec == Codec::VP9) {
     dx = vpx_codec_vp9_dx();
+    if (mInfo.mDisplay.width >= 2048) {
+      decode_threads = 8;
+    } else if (mInfo.mDisplay.width >= 1024) {
+      decode_threads = 4;
+    }
   }
-  if (!dx || vpx_codec_dec_init(&mVPX, dx, nullptr, 0)) {
-    return NS_ERROR_FAILURE;
+  decode_threads = std::min(decode_threads, PR_GetNumberOfProcessors());
+
+  vpx_codec_dec_cfg_t config;
+  config.threads = decode_threads;
+  config.w = config.h = 0; // set after decode
+
+  if (!dx || vpx_codec_dec_init(&mVPX, dx, &config, 0)) {
+    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
   }
-  return NS_OK;
+  return InitPromise::CreateAndResolve(TrackInfo::kVideoTrack, __func__);
 }
 
 nsresult
 VPXDecoder::Flush()
 {
-  mTaskQueue->Flush();
-  mIter = nullptr;
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  mIsFlushing = true;
+  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([this] () {
+    // nothing to do for now.
+  });
+  SyncRunnable::DispatchToThread(mTaskQueue, r);
+  mIsFlushing = false;
   return NS_OK;
 }
 
 int
-VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
+VPXDecoder::DoDecode(MediaRawData* aSample)
 {
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
 #if defined(DEBUG)
   vpx_codec_stream_info_t si;
   PodZero(&si);
   si.sz = sizeof(si);
   if (mCodec == Codec::VP8) {
-    vpx_codec_peek_stream_info(vpx_codec_vp8_dx(), aSample->mData, aSample->mSize, &si);
+    vpx_codec_peek_stream_info(vpx_codec_vp8_dx(), aSample->Data(), aSample->Size(), &si);
   } else if (mCodec == Codec::VP9) {
-    vpx_codec_peek_stream_info(vpx_codec_vp9_dx(), aSample->mData, aSample->mSize, &si);
+    vpx_codec_peek_stream_info(vpx_codec_vp9_dx(), aSample->Data(), aSample->Size(), &si);
   }
   NS_ASSERTION(bool(si.is_kf) == aSample->mKeyframe,
                "VPX Decode Keyframe error sample->mKeyframe and si.si_kf out of sync");
 #endif
 
-  if (vpx_codec_err_t r = vpx_codec_decode(&mVPX, aSample->mData, aSample->mSize, nullptr, 0)) {
+  if (vpx_codec_err_t r = vpx_codec_decode(&mVPX, aSample->Data(), aSample->Size(), nullptr, 0)) {
     LOG("VPX Decode error: %s", vpx_codec_err_to_string(r));
     return -1;
   }
 
+  vpx_codec_iter_t  iter = nullptr;
   vpx_image_t      *img;
 
-  if ((img = vpx_codec_get_frame(&mVPX, &mIter))) {
-    NS_ASSERTION(img->fmt == VPX_IMG_FMT_I420, "WebM image format not I420");
+  while ((img = vpx_codec_get_frame(&mVPX, &iter))) {
+    NS_ASSERTION(img->fmt == VPX_IMG_FMT_I420 ||
+                 img->fmt == VPX_IMG_FMT_I444,
+                 "WebM image format not I420 or I444");
 
     // Chroma shifts are rounded down as per the decoding examples in the SDK
     VideoData::YCbCrBuffer b;
@@ -115,47 +137,60 @@ VPXDecoder::DoDecodeFrame(MediaRawData* aSample)
 
     b.mPlanes[1].mData = img->planes[1];
     b.mPlanes[1].mStride = img->stride[1];
-    b.mPlanes[1].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
-    b.mPlanes[1].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
     b.mPlanes[1].mOffset = b.mPlanes[1].mSkip = 0;
 
     b.mPlanes[2].mData = img->planes[2];
     b.mPlanes[2].mStride = img->stride[2];
-    b.mPlanes[2].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
-    b.mPlanes[2].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
     b.mPlanes[2].mOffset = b.mPlanes[2].mSkip = 0;
 
-    IntRect picture = IntRect(0, 0, img->d_w, img->d_h);
-    VideoInfo info;
-    info.mDisplay = nsIntSize(mDisplayWidth, mDisplayHeight);
-    nsRefPtr<VideoData> v = VideoData::Create(info,
-                                              mImageContainer,
-                                              aSample->mOffset,
-                                              aSample->mTime,
-                                              aSample->mDuration,
-                                              b,
-                                              aSample->mKeyframe,
-                                              -1,
-                                              picture);
+    if (img->fmt == VPX_IMG_FMT_I420) {
+      b.mPlanes[1].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
+      b.mPlanes[1].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
+
+      b.mPlanes[2].mHeight = (img->d_h + 1) >> img->y_chroma_shift;
+      b.mPlanes[2].mWidth = (img->d_w + 1) >> img->x_chroma_shift;
+    } else if (img->fmt == VPX_IMG_FMT_I444) {
+      b.mPlanes[1].mHeight = img->d_h;
+      b.mPlanes[1].mWidth = img->d_w;
+
+      b.mPlanes[2].mHeight = img->d_h;
+      b.mPlanes[2].mWidth = img->d_w;
+    } else {
+      LOG("VPX Unknown image format");
+      return -1;
+    }
+
+    RefPtr<VideoData> v = VideoData::Create(mInfo,
+                                            mImageContainer,
+                                            aSample->mOffset,
+                                            aSample->mTime,
+                                            aSample->mDuration,
+                                            b,
+                                            aSample->mKeyframe,
+                                            aSample->mTimecode,
+                                            mInfo.ScaledImageRect(img->d_w,
+                                                                  img->d_h));
 
     if (!v) {
       LOG("Image allocation error source %ldx%ld display %ldx%ld picture %ldx%ld",
-          img->d_w, img->d_h, mDisplayWidth, mDisplayHeight,
-          picture.width, picture.height);
+          img->d_w, img->d_h, mInfo.mDisplay.width, mInfo.mDisplay.height,
+          mInfo.mImage.width, mInfo.mImage.height);
       return -1;
     }
     mCallback->Output(v);
-    return 1;
   }
-  mIter = nullptr;
   return 0;
 }
 
 void
-VPXDecoder::DecodeFrame(MediaRawData* aSample)
+VPXDecoder::ProcessDecode(MediaRawData* aSample)
 {
-  if (DoDecodeFrame(aSample) == -1) {
-    mCallback->Error();
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  if (mIsFlushing) {
+    return;
+  }
+  if (DoDecode(aSample) == -1) {
+    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
   } else if (mTaskQueue->IsEmpty()) {
     mCallback->InputExhausted();
   }
@@ -164,37 +199,37 @@ VPXDecoder::DecodeFrame(MediaRawData* aSample)
 nsresult
 VPXDecoder::Input(MediaRawData* aSample)
 {
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethodWithArg<nsRefPtr<MediaRawData>>(
-      this, &VPXDecoder::DecodeFrame,
-      nsRefPtr<MediaRawData>(aSample)));
-  mTaskQueue->Dispatch(runnable.forget());
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  mTaskQueue->Dispatch(NewRunnableMethod<RefPtr<MediaRawData>>(
+                       this, &VPXDecoder::ProcessDecode, aSample));
 
   return NS_OK;
 }
 
 void
-VPXDecoder::DoDrain()
+VPXDecoder::ProcessDrain()
 {
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
   mCallback->DrainComplete();
 }
 
 nsresult
 VPXDecoder::Drain()
 {
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethod(this, &VPXDecoder::DoDrain));
-  mTaskQueue->Dispatch(runnable.forget());
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  mTaskQueue->Dispatch(NewRunnableMethod(this, &VPXDecoder::ProcessDrain));
 
   return NS_OK;
 }
 
 /* static */
 bool
-VPXDecoder::IsVPX(const nsACString& aMimeType)
+VPXDecoder::IsVPX(const nsACString& aMimeType, uint8_t aCodecMask)
 {
-  return aMimeType.EqualsLiteral("video/webm; codecs=vp8") ||
-    aMimeType.EqualsLiteral("video/webm; codecs=vp9");
+  return ((aCodecMask & VPXDecoder::VP8) &&
+          aMimeType.EqualsLiteral("video/webm; codecs=vp8")) ||
+         ((aCodecMask & VPXDecoder::VP9) &&
+          aMimeType.EqualsLiteral("video/webm; codecs=vp9"));
 }
 
 } // namespace mozilla

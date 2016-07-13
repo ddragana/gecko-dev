@@ -3,13 +3,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let Cc = Components.classes;
-let Ci = Components.interfaces;
-let Cu = Components.utils;
-let Cr = Components.results;
+var Cc = Components.classes;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
+var Cr = Components.results;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode",
+  "resource://gre/modules/ReaderMode.jsm");
 
 var global = this;
 
@@ -20,7 +23,7 @@ addMessageListener("Finder:Initialize", function () {
   new RemoteFinderListener(global);
 });
 
-let ClickEventHandler = {
+var ClickEventHandler = {
   init: function init() {
     this._scrollable = null;
     this._scrolldir = "";
@@ -93,7 +96,7 @@ let ClickEventHandler = {
       // do not allow horizontal scrolling for select elements, it leads
       // to visual artifacts and is not the expected behavior anyway
       if (!(this._scrollable instanceof content.HTMLSelectElement) &&
-          this._scrollable.scrollLeftMax &&
+          this._scrollable.scrollLeftMin != this._scrollable.scrollLeftMax &&
           scrollingAllowed.indexOf(overflowx) >= 0) {
         this._scrolldir = scrollVert ? "NSEW" : "EW";
         break;
@@ -105,9 +108,10 @@ let ClickEventHandler = {
 
     if (!this._scrollable) {
       this._scrollable = aNode.ownerDocument.defaultView;
-      if (this._scrollable.scrollMaxX > 0) {
-        this._scrolldir = this._scrollable.scrollMaxY > 0 ? "NSEW" : "EW";
-      } else if (this._scrollable.scrollMaxY > 0) {
+      if (this._scrollable.scrollMaxX != this._scrollable.scrollMinX) {
+        this._scrolldir = this._scrollable.scrollMaxY !=
+                          this._scrollable.scrollMinY ? "NSEW" : "EW";
+      } else if (this._scrollable.scrollMaxY != this._scrollable.scrollMinY) {
         this._scrolldir = "NS";
       } else if (this._scrollable.frameElement) {
         this.findNearestScrollableElement(this._scrollable.frameElement);
@@ -206,6 +210,9 @@ let ClickEventHandler = {
       this._scrollErrorX = (desiredScrollX - actualScrollX);
     }
 
+    const kAutoscroll = 15;  // defined in mozilla/layers/ScrollInputMethods.h
+    Services.telemetry.getHistogramById("SCROLL_INPUT_METHODS").add(kAutoscroll);
+
     if (this._scrollable instanceof content.Window) {
       this._scrollable.scrollBy(actualScrollX, actualScrollY);
     } else { // an element with overflow
@@ -249,7 +256,7 @@ let ClickEventHandler = {
 };
 ClickEventHandler.init();
 
-let PopupBlocking = {
+var PopupBlocking = {
   popupData: null,
   popupDataInternal: null,
 
@@ -259,6 +266,7 @@ let PopupBlocking = {
     addEventListener("pagehide", this, true);
 
     addMessageListener("PopupBlocking:UnblockPopup", this);
+    addMessageListener("PopupBlocking:GetBlockedPopupList", this);
   },
 
   receiveMessage: function(msg) {
@@ -273,9 +281,34 @@ let PopupBlocking = {
           // If we have a requesting window and the requesting document is
           // still the current document, open the popup.
           if (dwi && dwi.document == internals.requestingDocument) {
-            dwi.open(data.popupWindowURI, data.popupWindowName, data.popupWindowFeatures);
+            dwi.open(data.popupWindowURIspec, data.popupWindowName, data.popupWindowFeatures);
           }
         }
+        break;
+      }
+
+      case "PopupBlocking:GetBlockedPopupList": {
+        let popupData = [];
+        let length = this.popupData ? this.popupData.length : 0;
+
+        // Limit 15 popup URLs to be reported through the UI
+        length = Math.min(length, 15);
+
+        for (let i = 0; i < length; i++) {
+          let popupWindowURIspec = this.popupData[i].popupWindowURIspec;
+
+          if (popupWindowURIspec == global.content.location.href) {
+            popupWindowURIspec = "<self>";
+          } else {
+            // Limit 500 chars to be sent because the URI will be cropped
+            // by the UI anyway, and data: URIs can be significantly larger.
+            popupWindowURIspec = popupWindowURIspec.substring(0, 500)
+          }
+
+          popupData.push({popupWindowURIspec});
+        }
+
+        sendAsyncMessage("PopupBlocking:ReplyGetBlockedPopupList", {popupData});
         break;
       }
     }
@@ -290,6 +323,7 @@ let PopupBlocking = {
       case "pagehide":
         return this.onPageHide(ev);
     }
+    return undefined;
   },
 
   onPopupBlocked: function(ev) {
@@ -299,7 +333,7 @@ let PopupBlocking = {
     }
 
     let obj = {
-      popupWindowURI: ev.popupWindowURI.spec,
+      popupWindowURIspec: ev.popupWindowURI ? ev.popupWindowURI.spec : "about:blank",
       popupWindowFeatures: ev.popupWindowFeatures,
       popupWindowName: ev.popupWindowName
     };
@@ -346,18 +380,21 @@ let PopupBlocking = {
 
   updateBlockedPopups: function(freshPopup) {
     sendAsyncMessage("PopupBlocking:UpdateBlockedPopups",
-                     {blockedPopups: this.popupData, freshPopup: freshPopup});
+      {
+        count: this.popupData ? this.popupData.length : 0,
+        freshPopup
+      });
   },
 };
 PopupBlocking.init();
 
 XPCOMUtils.defineLazyGetter(this, "console", () => {
   // Set up console.* for frame scripts.
-  let Console = Components.utils.import("resource://gre/modules/devtools/Console.jsm", {});
+  let Console = Components.utils.import("resource://gre/modules/Console.jsm", {});
   return new Console.ConsoleAPI();
 });
 
-let Printing = {
+var Printing = {
   // Bug 1088061: nsPrintEngine's DoCommonPrint currently expects the
   // progress listener passed to it to QI to an nsIPrintingPromptService
   // in order to know that a printing progress dialog has been shown. That's
@@ -371,12 +408,14 @@ let Printing = {
     "Printing:Preview:Enter",
     "Printing:Preview:Exit",
     "Printing:Preview:Navigate",
+    "Printing:Preview:ParseDocument",
     "Printing:Preview:UpdatePageCount",
     "Printing:Print",
   ],
 
   init() {
     this.MESSAGES.forEach(msgName => addMessageListener(msgName, this));
+    addEventListener("PrintingError", this, true);
   },
 
   get shouldSavePrintSettings() {
@@ -384,12 +423,25 @@ let Printing = {
            Services.prefs.getBoolPref("print.save_print_settings", false);
   },
 
+  handleEvent(event) {
+    if (event.type == "PrintingError") {
+      let win = event.target.defaultView;
+      let wbp = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                   .getInterface(Ci.nsIWebBrowserPrint);
+      let nsresult = event.detail;
+      sendAsyncMessage("Printing:Error", {
+        isPrinting: wbp.doingPrint,
+        nsresult: nsresult,
+      });
+    }
+  },
+
   receiveMessage(message) {
     let objects = message.objects;
     let data = message.data;
     switch(message.name) {
       case "Printing:Preview:Enter": {
-        this.enterPrintPreview(Services.wm.getOuterWindowWithId(data.windowID));
+        this.enterPrintPreview(Services.wm.getOuterWindowWithId(data.windowID), data.simplifiedMode);
         break;
       }
 
@@ -403,13 +455,18 @@ let Printing = {
         break;
       }
 
+      case "Printing:Preview:ParseDocument": {
+        this.parseDocument(data.URL, Services.wm.getOuterWindowWithId(data.windowID));
+        break;
+      }
+
       case "Printing:Preview:UpdatePageCount": {
         this.updatePageCount();
         break;
       }
 
       case "Printing:Print": {
-        this.print(Services.wm.getOuterWindowWithId(data.windowID));
+        this.print(Services.wm.getOuterWindowWithId(data.windowID), data.simplifiedMode);
         break;
       }
     }
@@ -439,7 +496,98 @@ let Printing = {
     return null;
   },
 
-  enterPrintPreview(contentWindow) {
+  parseDocument(URL, contentWindow) {
+    // By using ReaderMode primitives, we parse given document and place the
+    // resulting JS object into the DOM of current browser.
+    let articlePromise = ReaderMode.parseDocument(contentWindow.document).catch(Cu.reportError);
+    articlePromise.then(function (article) {
+      content.document.head.innerHTML = "";
+
+      // Set title of document
+      content.document.title = article.title;
+
+      // Set base URI of document. Print preview code will read this value to
+      // populate the URL field in print settings so that it doesn't show
+      // "about:blank" as its URI.
+      let headBaseElement = content.document.createElement("base");
+      headBaseElement.setAttribute("href", URL);
+      content.document.head.appendChild(headBaseElement);
+
+      // Create link element referencing aboutReader.css and append it to head
+      let headStyleElement = content.document.createElement("link");
+      headStyleElement.setAttribute("rel", "stylesheet");
+      headStyleElement.setAttribute("href", "chrome://global/skin/aboutReader.css");
+      headStyleElement.setAttribute("type", "text/css");
+      content.document.head.appendChild(headStyleElement);
+
+      content.document.body.innerHTML = "";
+
+      // Create container div (main element) and append it to body
+      let containerElement = content.document.createElement("div");
+      containerElement.setAttribute("id", "container");
+      content.document.body.appendChild(containerElement);
+
+      // Create header div and append it to container
+      let headerElement = content.document.createElement("div");
+      headerElement.setAttribute("id", "reader-header");
+      headerElement.setAttribute("class", "header");
+      containerElement.appendChild(headerElement);
+
+      // Create style element for header div and import simplifyMode.css
+      let controlHeaderStyle = content.document.createElement("style");
+      controlHeaderStyle.setAttribute("scoped", "");
+      controlHeaderStyle.textContent = "@import url(\"chrome://global/content/simplifyMode.css\");";
+      headerElement.appendChild(controlHeaderStyle);
+
+      // Jam the article's title and byline into header div
+      let titleElement = content.document.createElement("h1");
+      titleElement.setAttribute("id", "reader-title");
+      titleElement.textContent = article.title;
+      headerElement.appendChild(titleElement);
+
+      let bylineElement = content.document.createElement("div");
+      bylineElement.setAttribute("id", "reader-credits");
+      bylineElement.setAttribute("class", "credits");
+      bylineElement.textContent = article.byline;
+      headerElement.appendChild(bylineElement);
+
+      // Display header element
+      headerElement.style.display = "block";
+
+      // Create content div and append it to container
+      let contentElement = content.document.createElement("div");
+      contentElement.setAttribute("class", "content");
+      containerElement.appendChild(contentElement);
+
+      // Create style element for content div and import aboutReaderContent.css
+      let controlContentStyle = content.document.createElement("style");
+      controlContentStyle.setAttribute("scoped", "");
+      controlContentStyle.textContent = "@import url(\"chrome://global/skin/aboutReaderContent.css\");";
+      contentElement.appendChild(controlContentStyle);
+
+      // Jam the article's content into content div
+      let readerContent = content.document.createElement("div");
+      readerContent.setAttribute("id", "moz-reader-content");
+      contentElement.appendChild(readerContent);
+
+      let articleUri = Services.io.newURI(article.url, null, null);
+      let parserUtils = Cc["@mozilla.org/parserutils;1"].getService(Ci.nsIParserUtils);
+      let contentFragment = parserUtils.parseFragment(article.content,
+        Ci.nsIParserUtils.SanitizerDropForms | Ci.nsIParserUtils.SanitizerAllowStyle,
+        false, articleUri, readerContent);
+
+      readerContent.appendChild(contentFragment);
+
+      // Display reader content element
+      readerContent.style.display = "block";
+
+      // Here we tell the parent that we have parsed the document successfully
+      // using ReaderMode primitives and we are able to enter on preview mode.
+      sendAsyncMessage("Printing:Preview:ReaderModeReady");
+    });
+  },
+
+  enterPrintPreview(contentWindow, simplifiedMode) {
     // We'll call this whenever we've finished reflowing the document, or if
     // we errored out while attempting to print preview (in which case, we'll
     // notify the parent that we've failed).
@@ -463,6 +611,13 @@ let Printing = {
 
     try {
       let printSettings = this.getPrintSettings();
+
+      // If we happen to be on simplified mode, we need to set docURL in order
+      // to generate header/footer content correctly, since simplified tab has
+      // "about:blank" as its URI.
+      if (printSettings && simplifiedMode)
+        printSettings.docURL = contentWindow.document.baseURI;
+
       docShell.printPreview.printPreview(printSettings, contentWindow, this);
     } catch(error) {
       // This might fail if we, for example, attempt to print a XUL document.
@@ -476,9 +631,17 @@ let Printing = {
     docShell.printPreview.exitPrintPreview();
   },
 
-  print(contentWindow) {
+  print(contentWindow, simplifiedMode) {
     let printSettings = this.getPrintSettings();
     let rv = Cr.NS_OK;
+
+    // If we happen to be on simplified mode, we need to set docURL in order
+    // to generate header/footer content correctly, since simplified tab has
+    // "about:blank" as its URI.
+    if (printSettings && simplifiedMode) {
+      printSettings.docURL = contentWindow.document.baseURI;
+    }
+
     try {
       let print = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                                .getInterface(Ci.nsIWebBrowserPrint);
@@ -489,6 +652,10 @@ let Printing = {
       if (e.result != Cr.NS_ERROR_ABORT) {
         Cu.reportError(`In Printing:Print:Done handler, got unexpected rv
                         ${e.result}.`);
+        sendAsyncMessage("Printing:Error", {
+          isPrinting: true,
+          nsresult: e.result,
+        });
       }
     }
 
@@ -556,18 +723,13 @@ addMessageListener("SwitchDocumentDirection", () => {
   SwitchDocumentDirection(content.window);
 });
 
-let FindBar = {
+var FindBar = {
   /* Please keep in sync with toolkit/content/widgets/findbar.xml */
   FIND_NORMAL: 0,
   FIND_TYPEAHEAD: 1,
   FIND_LINKS: 2,
-  FAYT_LINKS_KEY: "'".charCodeAt(0),
-  FAYT_TEXT_KEY: "/".charCodeAt(0),
 
   _findMode: 0,
-  get _findAsYouType() {
-    return Services.prefs.getBoolPref("accessibility.typeaheadfind");
-  },
 
   init() {
     addMessageListener("Findbar:UpdateState", this);
@@ -579,7 +741,6 @@ let FindBar = {
     switch (msg.name) {
       case "Findbar:UpdateState":
         this._findMode = msg.data.findMode;
-        this._findAsYouType = msg.data.findAsYouType;
         break;
     }
   },
@@ -599,43 +760,51 @@ let FindBar = {
    * Returns whether FAYT can be used for the given event in
    * the current content state.
    */
-  _shouldFastFind() {
-    //XXXgijs: why all these shenanigans? Why not use the event's target?
-    let focusedWindow = {};
-    let elt = Services.focus.getFocusedElementForWindow(content, true, focusedWindow);
-    let win = focusedWindow.value;
+  _canAndShouldFastFind() {
     let {BrowserUtils} = Cu.import("resource://gre/modules/BrowserUtils.jsm", {});
-    return BrowserUtils.shouldFastFind(elt, win);
+    let should = false;
+    let can = BrowserUtils.canFastFind(content);
+    if (can) {
+      //XXXgijs: why all these shenanigans? Why not use the event's target?
+      let focusedWindow = {};
+      let elt = Services.focus.getFocusedElementForWindow(content, true, focusedWindow);
+      let win = focusedWindow.value;
+      should = BrowserUtils.shouldFastFind(elt, win);
+    }
+    return { can, should }
   },
 
   _onKeypress(event) {
     // Useless keys:
     if (event.ctrlKey || event.altKey || event.metaKey || event.defaultPrevented) {
-      return;
-    }
-    // Not interested in random keypresses most of the time:
-    if (this._findMode == this.FIND_NORMAL && !this._findAsYouType &&
-        event.charCode != this.FAYT_LINKS_KEY && event.charCode != this.FAYT_TEXT_KEY) {
-      return;
+      return undefined;
     }
 
     // Check the focused element etc.
-    if (!this._shouldFastFind()) {
-      return;
+    let fastFind = this._canAndShouldFastFind();
+
+    // Can we even use find in this page at all?
+    if (!fastFind.can) {
+      return undefined;
     }
 
     let fakeEvent = {};
     for (let k in event) {
-      if (typeof event[k] != "object" && typeof event[k] != "function") {
+      if (typeof event[k] != "object" && typeof event[k] != "function" &&
+          !(k in content.KeyboardEvent)) {
         fakeEvent[k] = event[k];
       }
     }
     // sendSyncMessage returns an array of the responses from all listeners
-    let rv = sendSyncMessage("Findbar:Keypress", fakeEvent);
+    let rv = sendSyncMessage("Findbar:Keypress", {
+      fakeEvent: fakeEvent,
+      shouldFastFind: fastFind.should
+    });
     if (rv.indexOf(false) !== -1) {
       event.preventDefault();
       return false;
     }
+    return undefined;
   },
 
   _onMouseup(event) {
@@ -689,38 +858,477 @@ addMessageListener("WebChannelMessageToContent", function (e) {
   }
 });
 
-let MediaPlaybackListener = {
+var AudioPlaybackListener = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
 
   init() {
-    Services.obs.addObserver(this, "media-playback", false);
-    addMessageListener("MediaPlaybackMute", this);
+    Services.obs.addObserver(this, "audio-playback", false);
+    Services.obs.addObserver(this, "AudioFocusChanged", false);
+    Services.obs.addObserver(this, "MediaControl", false);
+
+    addMessageListener("AudioPlayback", this);
     addEventListener("unload", () => {
-      MediaPlaybackListener.uninit();
+      AudioPlaybackListener.uninit();
     });
   },
 
   uninit() {
-    Services.obs.removeObserver(this, "media-playback");
-    removeMessageListener("MediaPlaybackMute", this);
+    Services.obs.removeObserver(this, "audio-playback");
+    Services.obs.removeObserver(this, "AudioFocusChanged");
+    Services.obs.removeObserver(this, "MediaControl");
+
+    removeMessageListener("AudioPlayback", this);
+  },
+
+  handleMediaControlMessage(msg) {
+    let utils = global.content.QueryInterface(Ci.nsIInterfaceRequestor)
+                              .getInterface(Ci.nsIDOMWindowUtils);
+    let suspendTypes = Ci.nsISuspendedTypes;
+    switch (msg) {
+      case "mute":
+        utils.audioMuted = true;
+        break;
+      case "unmute":
+        utils.audioMuted = false;
+        break;
+      case "lostAudioFocus":
+        utils.mediaSuspend = suspendTypes.SUSPENDED_PAUSE_DISPOSABLE;
+        break;
+      case "lostAudioFocusTransiently":
+        utils.mediaSuspend = suspendTypes.SUSPENDED_PAUSE;
+        break;
+      case "gainAudioFocus":
+        utils.mediaSuspend = suspendTypes.NONE_SUSPENDED;
+        break;
+      case "mediaControlPaused":
+        utils.mediaSuspend = suspendTypes.SUSPENDED_PAUSE_DISPOSABLE;
+        break;
+      case "mediaControlStopped":
+        utils.mediaSuspend = suspendTypes.SUSPENDED_STOP_DISPOSABLE;
+        break;
+      case "blockInactivePageMedia":
+        utils.mediaSuspend = suspendTypes.SUSPENDED_BLOCK;
+        break;
+      case "resumeMedia":
+        utils.mediaSuspend = suspendTypes.NONE_SUSPENDED;
+        break;
+      default:
+        dump("Error : wrong media control msg!\n");
+        break;
+    }
   },
 
   observe(subject, topic, data) {
-    if (topic === "media-playback") {
+    if (topic === "audio-playback") {
       if (subject && subject.top == global.content) {
-        let name = "MediaPlayback:";
+        let name = "AudioPlayback:";
         name += (data === "active") ? "Start" : "Stop";
         sendAsyncMessage(name);
       }
+    } else if (topic == "AudioFocusChanged" || topic == "MediaControl") {
+      this.handleMediaControlMessage(data);
     }
   },
 
   receiveMessage(msg) {
-    if (msg.name == "MediaPlaybackMute") {
-      let utils = global.content.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindowUtils);
-      utils.audioMuted = msg.data.type === "mute";
+    if (msg.name == "AudioPlayback") {
+      this.handleMediaControlMessage(msg.data.type);
     }
   },
 };
-MediaPlaybackListener.init();
+AudioPlaybackListener.init();
+
+addMessageListener("Browser:PurgeSessionHistory", function BrowserPurgeHistory() {
+  let sessionHistory = docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
+  if (!sessionHistory) {
+    return;
+  }
+
+  // place the entry at current index at the end of the history list, so it won't get removed
+  if (sessionHistory.index < sessionHistory.count - 1) {
+    let indexEntry = sessionHistory.getEntryAtIndex(sessionHistory.index, false);
+    sessionHistory.QueryInterface(Components.interfaces.nsISHistoryInternal);
+    indexEntry.QueryInterface(Components.interfaces.nsISHEntry);
+    sessionHistory.addEntry(indexEntry, true);
+  }
+
+  let purge = sessionHistory.count;
+  if (global.content.location.href != "about:blank") {
+    --purge; // Don't remove the page the user's staring at from shistory
+  }
+
+  if (purge > 0) {
+    sessionHistory.PurgeHistory(purge);
+  }
+});
+
+var ViewSelectionSource = {
+  init: function () {
+    addMessageListener("ViewSource:GetSelection", this);
+  },
+
+  receiveMessage: function(message) {
+    if (message.name == "ViewSource:GetSelection") {
+      let selectionDetails;
+      try {
+        selectionDetails = message.objects.target ? this.getMathMLSelection(message.objects.target)
+                                                  : this.getSelection();
+      } finally {
+        sendAsyncMessage("ViewSource:GetSelectionDone", selectionDetails);
+      }
+    }
+  },
+
+  /**
+   * A helper to get a path like FIXptr, but with an array instead of the
+   * "tumbler" notation.
+   * See FIXptr: http://lists.w3.org/Archives/Public/www-xml-linking-comments/2001AprJun/att-0074/01-NOTE-FIXptr-20010425.htm
+   */
+  getPath: function(ancestor, node) {
+    var n = node;
+    var p = n.parentNode;
+    if (n == ancestor || !p)
+      return null;
+    var path = new Array();
+    if (!path)
+      return null;
+    do {
+      for (var i = 0; i < p.childNodes.length; i++) {
+        if (p.childNodes.item(i) == n) {
+          path.push(i);
+          break;
+        }
+      }
+      n = p;
+      p = n.parentNode;
+    } while (n != ancestor && p);
+    return path;
+  },
+
+  getSelection: function () {
+    // These are markers used to delimit the selection during processing. They
+    // are removed from the final rendering.
+    // We use noncharacter Unicode codepoints to minimize the risk of clashing
+    // with anything that might legitimately be present in the document.
+    // U+FDD0..FDEF <noncharacters>
+    const MARK_SELECTION_START = "\uFDD0";
+    const MARK_SELECTION_END = "\uFDEF";
+
+    var focusedWindow = Services.focus.focusedWindow || content;
+    var selection = focusedWindow.getSelection();
+
+    var range = selection.getRangeAt(0);
+    var ancestorContainer = range.commonAncestorContainer;
+    var doc = ancestorContainer.ownerDocument;
+
+    var startContainer = range.startContainer;
+    var endContainer = range.endContainer;
+    var startOffset = range.startOffset;
+    var endOffset = range.endOffset;
+
+    // let the ancestor be an element
+    var Node = doc.defaultView.Node;
+    if (ancestorContainer.nodeType == Node.TEXT_NODE ||
+        ancestorContainer.nodeType == Node.CDATA_SECTION_NODE)
+      ancestorContainer = ancestorContainer.parentNode;
+
+    // for selectAll, let's use the entire document, including <html>...</html>
+    // @see nsDocumentViewer::SelectAll() for how selectAll is implemented
+    try {
+      if (ancestorContainer == doc.body)
+        ancestorContainer = doc.documentElement;
+    } catch (e) { }
+
+    // each path is a "child sequence" (a.k.a. "tumbler") that
+    // descends from the ancestor down to the boundary point
+    var startPath = this.getPath(ancestorContainer, startContainer);
+    var endPath = this.getPath(ancestorContainer, endContainer);
+
+    // clone the fragment of interest and reset everything to be relative to it
+    // note: it is with the clone that we operate/munge from now on.  Also note
+    // that we clone into a data document to prevent images in the fragment from
+    // loading and the like.  The use of importNode here, as opposed to adoptNode,
+    // is _very_ important.
+    // XXXbz wish there were a less hacky way to create an untrusted document here
+    var isHTML = (doc.createElement("div").tagName == "DIV");
+    var dataDoc = isHTML ?
+      ancestorContainer.ownerDocument.implementation.createHTMLDocument("") :
+      ancestorContainer.ownerDocument.implementation.createDocument("", "", null);
+    ancestorContainer = dataDoc.importNode(ancestorContainer, true);
+    startContainer = ancestorContainer;
+    endContainer = ancestorContainer;
+
+    // Only bother with the selection if it can be remapped. Don't mess with
+    // leaf elements (such as <isindex>) that secretly use anynomous content
+    // for their display appearance.
+    var canDrawSelection = ancestorContainer.hasChildNodes();
+    var tmpNode;
+    if (canDrawSelection) {
+      var i;
+      for (i = startPath ? startPath.length-1 : -1; i >= 0; i--) {
+        startContainer = startContainer.childNodes.item(startPath[i]);
+      }
+      for (i = endPath ? endPath.length-1 : -1; i >= 0; i--) {
+        endContainer = endContainer.childNodes.item(endPath[i]);
+      }
+
+      // add special markers to record the extent of the selection
+      // note: |startOffset| and |endOffset| are interpreted either as
+      // offsets in the text data or as child indices (see the Range spec)
+      // (here, munging the end point first to keep the start point safe...)
+      if (endContainer.nodeType == Node.TEXT_NODE ||
+          endContainer.nodeType == Node.CDATA_SECTION_NODE) {
+        // do some extra tweaks to try to avoid the view-source output to look like
+        // ...<tag>]... or ...]</tag>... (where ']' marks the end of the selection).
+        // To get a neat output, the idea here is to remap the end point from:
+        // 1. ...<tag>]...   to   ...]<tag>...
+        // 2. ...]</tag>...  to   ...</tag>]...
+        if ((endOffset > 0 && endOffset < endContainer.data.length) ||
+            !endContainer.parentNode || !endContainer.parentNode.parentNode)
+          endContainer.insertData(endOffset, MARK_SELECTION_END);
+        else {
+          tmpNode = dataDoc.createTextNode(MARK_SELECTION_END);
+          endContainer = endContainer.parentNode;
+          if (endOffset === 0)
+            endContainer.parentNode.insertBefore(tmpNode, endContainer);
+          else
+            endContainer.parentNode.insertBefore(tmpNode, endContainer.nextSibling);
+        }
+      }
+      else {
+        tmpNode = dataDoc.createTextNode(MARK_SELECTION_END);
+        endContainer.insertBefore(tmpNode, endContainer.childNodes.item(endOffset));
+      }
+
+      if (startContainer.nodeType == Node.TEXT_NODE ||
+          startContainer.nodeType == Node.CDATA_SECTION_NODE) {
+        // do some extra tweaks to try to avoid the view-source output to look like
+        // ...<tag>[... or ...[</tag>... (where '[' marks the start of the selection).
+        // To get a neat output, the idea here is to remap the start point from:
+        // 1. ...<tag>[...   to   ...[<tag>...
+        // 2. ...[</tag>...  to   ...</tag>[...
+        if ((startOffset > 0 && startOffset < startContainer.data.length) ||
+            !startContainer.parentNode || !startContainer.parentNode.parentNode ||
+            startContainer != startContainer.parentNode.lastChild)
+          startContainer.insertData(startOffset, MARK_SELECTION_START);
+        else {
+          tmpNode = dataDoc.createTextNode(MARK_SELECTION_START);
+          startContainer = startContainer.parentNode;
+          if (startOffset === 0)
+            startContainer.parentNode.insertBefore(tmpNode, startContainer);
+          else
+            startContainer.parentNode.insertBefore(tmpNode, startContainer.nextSibling);
+        }
+      }
+      else {
+        tmpNode = dataDoc.createTextNode(MARK_SELECTION_START);
+        startContainer.insertBefore(tmpNode, startContainer.childNodes.item(startOffset));
+      }
+    }
+
+    // now extract and display the syntax highlighted source
+    tmpNode = dataDoc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    tmpNode.appendChild(ancestorContainer);
+
+    return { uri: (isHTML ? "view-source:data:text/html;charset=utf-8," :
+                            "view-source:data:application/xml;charset=utf-8,")
+                  + encodeURIComponent(tmpNode.innerHTML),
+             drawSelection: canDrawSelection,
+             baseURI: doc.baseURI };
+  },
+
+  /**
+   * Reformat the source of a MathML node to highlight the node that was targetted.
+   *
+   * @param node
+   *        Some element within the fragment of interest.
+   */
+  getMathMLSelection: function(node) {
+    var Node = node.ownerDocument.defaultView.Node;
+    this._lineCount = 0;
+    this._startTargetLine = 0;
+    this._endTargetLine = 0;
+    this._targetNode = node;
+    if (this._targetNode && this._targetNode.nodeType == Node.TEXT_NODE)
+      this._targetNode = this._targetNode.parentNode;
+
+    // walk up the tree to the top-level element (e.g., <math>, <svg>)
+    var topTag = "math";
+    var topNode = this._targetNode;
+    while (topNode && topNode.localName != topTag) {
+      topNode = topNode.parentNode;
+    }
+    if (!topNode)
+      return undefined;
+
+    // serialize
+    const VIEW_SOURCE_CSS = "resource://gre-resources/viewsource.css";
+    const BUNDLE_URL = "chrome://global/locale/viewSource.properties";
+
+    let bundle = Services.strings.createBundle(BUNDLE_URL);
+    var title = bundle.GetStringFromName("viewMathMLSourceTitle");
+    var wrapClass = this.wrapLongLines ? ' class="wrap"' : '';
+    var source =
+      '<!DOCTYPE html>'
+    + '<html>'
+    + '<head><title>' + title + '</title>'
+    + '<link rel="stylesheet" type="text/css" href="' + VIEW_SOURCE_CSS + '">'
+    + '<style type="text/css">'
+    + '#target { border: dashed 1px; background-color: lightyellow; }'
+    + '</style>'
+    + '</head>'
+    + '<body id="viewsource"' + wrapClass
+    +        ' onload="document.title=\''+title+'\'; document.getElementById(\'target\').scrollIntoView(true)">'
+    + '<pre>'
+    + this.getOuterMarkup(topNode, 0)
+    + '</pre></body></html>'
+    ; // end
+
+    return { uri: "data:text/html;charset=utf-8," + encodeURIComponent(source),
+             drawSelection: false, baseURI: node.ownerDocument.baseURI };
+  },
+
+  get wrapLongLines() {
+    return Services.prefs.getBoolPref("view_source.wrap_long_lines");
+  },
+
+  getInnerMarkup: function(node, indent) {
+    var str = '';
+    for (var i = 0; i < node.childNodes.length; i++) {
+      str += this.getOuterMarkup(node.childNodes.item(i), indent);
+    }
+    return str;
+  },
+
+  getOuterMarkup: function(node, indent) {
+    var Node = node.ownerDocument.defaultView.Node;
+    var newline = "";
+    var padding = "";
+    var str = "";
+    if (node == this._targetNode) {
+      this._startTargetLine = this._lineCount;
+      str += '</pre><pre id="target">';
+    }
+
+    switch (node.nodeType) {
+    case Node.ELEMENT_NODE: // Element
+      // to avoid the wide gap problem, '\n' is not emitted on the first
+      // line and the lines before & after the <pre id="target">...</pre>
+      if (this._lineCount > 0 &&
+          this._lineCount != this._startTargetLine &&
+          this._lineCount != this._endTargetLine) {
+        newline = "\n";
+      }
+      this._lineCount++;
+      for (var k = 0; k < indent; k++) {
+        padding += " ";
+      }
+      str += newline + padding
+          +  '&lt;<span class="start-tag">' + node.nodeName + '</span>';
+      for (var i = 0; i < node.attributes.length; i++) {
+        var attr = node.attributes.item(i);
+        if (attr.nodeName.match(/^[-_]moz/)) {
+          continue;
+        }
+        str += ' <span class="attribute-name">'
+            +  attr.nodeName
+            +  '</span>=<span class="attribute-value">"'
+            +  this.unicodeToEntity(attr.nodeValue)
+            +  '"</span>';
+      }
+      if (!node.hasChildNodes()) {
+        str += "/&gt;";
+      }
+      else {
+        str += "&gt;";
+        var oldLine = this._lineCount;
+        str += this.getInnerMarkup(node, indent + 2);
+        if (oldLine == this._lineCount) {
+          newline = "";
+          padding = "";
+        }
+        else {
+          newline = (this._lineCount == this._endTargetLine) ? "" : "\n";
+          this._lineCount++;
+        }
+        str += newline + padding
+            +  '&lt;/<span class="end-tag">' + node.nodeName + '</span>&gt;';
+      }
+      break;
+    case Node.TEXT_NODE: // Text
+      var tmp = node.nodeValue;
+      tmp = tmp.replace(/(\n|\r|\t)+/g, " ");
+      tmp = tmp.replace(/^ +/, "");
+      tmp = tmp.replace(/ +$/, "");
+      if (tmp.length != 0) {
+        str += '<span class="text">' + this.unicodeToEntity(tmp) + '</span>';
+      }
+      break;
+    default:
+      break;
+    }
+
+    if (node == this._targetNode) {
+      this._endTargetLine = this._lineCount;
+      str += '</pre><pre>';
+    }
+    return str;
+  },
+
+  unicodeToEntity: function(text) {
+    const charTable = {
+      '&': '&amp;<span class="entity">amp;</span>',
+      '<': '&amp;<span class="entity">lt;</span>',
+      '>': '&amp;<span class="entity">gt;</span>',
+      '"': '&amp;<span class="entity">quot;</span>'
+    };
+
+    function charTableLookup(letter) {
+      return charTable[letter];
+    }
+
+    function convertEntity(letter) {
+      try {
+        var unichar = this._entityConverter
+                          .ConvertToEntity(letter, entityVersion);
+        var entity = unichar.substring(1); // extract '&'
+        return '&amp;<span class="entity">' + entity + '</span>';
+      } catch (ex) {
+        return letter;
+      }
+    }
+
+    if (!this._entityConverter) {
+      try {
+        this._entityConverter = Cc["@mozilla.org/intl/entityconverter;1"]
+                                  .createInstance(Ci.nsIEntityConverter);
+      } catch(e) { }
+    }
+
+    const entityVersion = Ci.nsIEntityConverter.entityW3C;
+
+    var str = text;
+
+    // replace chars in our charTable
+    str = str.replace(/[<>&"]/g, charTableLookup);
+
+    // replace chars > 0x7f via nsIEntityConverter
+    str = str.replace(/[^\0-\u007f]/g, convertEntity);
+
+    return str;
+  }
+};
+
+ViewSelectionSource.init();
+
+addEventListener("MozApplicationManifest", function(e) {
+  let doc = e.target;
+  let info = {
+    uri: doc.documentURI,
+    characterSet: doc.characterSet,
+    manifest: doc.documentElement.getAttribute("manifest"),
+    principal: doc.nodePrincipal,
+  };
+  sendAsyncMessage("MozApplicationManifest", info);
+}, false);
+

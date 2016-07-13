@@ -6,8 +6,11 @@
 #define MP3_DEMUXER_H_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
 #include "MediaDataDemuxer.h"
 #include "MediaResource.h"
+#include "mp4_demuxer/ByteReader.h"
+#include <vector>
 
 namespace mozilla {
 namespace mp3 {
@@ -18,22 +21,21 @@ class MP3Demuxer : public MediaDataDemuxer {
 public:
   // MediaDataDemuxer interface.
   explicit MP3Demuxer(MediaResource* aSource);
-  nsRefPtr<InitPromise> Init() override;
-  already_AddRefed<MediaDataDemuxer> Clone() const override;
+  RefPtr<InitPromise> Init() override;
   bool HasTrackType(TrackInfo::TrackType aType) const override;
   uint32_t GetNumberTracks(TrackInfo::TrackType aType) const override;
   already_AddRefed<MediaTrackDemuxer> GetTrackDemuxer(
       TrackInfo::TrackType aType, uint32_t aTrackNumber) override;
   bool IsSeekable() const override;
-  void NotifyDataArrived(uint32_t aLength, int64_t aOffset) override;
+  void NotifyDataArrived() override;
   void NotifyDataRemoved() override;
 
 private:
   // Synchronous initialization.
   bool InitInternal();
 
-  nsRefPtr<MediaResource> mSource;
-  nsRefPtr<MP3TrackDemuxer> mTrackDemuxer;
+  RefPtr<MediaResource> mSource;
+  RefPtr<MP3TrackDemuxer> mTrackDemuxer;
 };
 
 // ID3 header parser state machine used by FrameParser.
@@ -61,8 +63,11 @@ public:
     // The ID3 flags field.
     uint8_t Flags() const;
 
-    // The derived size based on the provides size fields.
+    // The derived size based on the provided size fields.
     uint32_t Size() const;
+
+    // Returns the size of an ID3v2.4 footer if present and zero otherwise.
+    uint8_t FooterSize() const;
 
     // Returns whether the parsed data is a valid ID3 header up to the given
     // byte position.
@@ -96,9 +101,9 @@ public:
   // Returns the parsed ID3 header. Note: check for validity.
   const ID3Header& Header() const;
 
-  // Parses the given buffer range [aBeg, aEnd) for a valid ID3 header.
-  // Returns the header begin position or aEnd if no valid header was found.
-  const uint8_t* Parse(const uint8_t* aBeg, const uint8_t* aEnd);
+  // Parses contents of given ByteReader for a valid ID3v2 header.
+  // Returns the total ID3v2 tag size if successful and zero otherwise.
+  uint32_t Parse(mp4_demuxer::ByteReader* aReader);
 
   // Resets the state to allow for a new parsing session.
   void Reset();
@@ -197,8 +202,9 @@ public:
   // this class to parse them and access this info.
   class VBRHeader {
   public:
+    // Synchronize with vbr_header TYPE_STR on change.
     enum VBRHeaderType {
-      NONE,
+      NONE = 0,
       XING,
       VBRI
     };
@@ -209,24 +215,56 @@ public:
     // Returns the parsed VBR header type, or NONE if no valid header found.
     VBRHeaderType Type() const;
 
-    // Returns the total number of frames expected in the stream/file.
-    int64_t NumFrames() const;
+    // Returns the total number of audio frames (excluding the VBR header frame)
+    // expected in the stream/file.
+    const Maybe<uint32_t>& NumAudioFrames() const;
 
-    // Parses given buffer [aBeg, aEnd) for a valid VBR header.
+    // Returns the expected size of the stream.
+    const Maybe<uint32_t>& NumBytes() const;
+
+    // Returns the VBR scale factor (0: best quality, 100: lowest quality).
+    const Maybe<uint32_t>& Scale() const;
+
+    // Returns true iff Xing/Info TOC (table of contents) is present.
+    bool IsTOCPresent() const;
+
+    // Returns whether the header is valid (containing reasonable field values).
+    bool IsValid() const;
+
+    // Returns the byte offset for the given duration percentage as a factor
+    // (0: begin, 1.0: end).
+    int64_t Offset(float aDurationFac) const;
+
+    // Parses contents of given ByteReader for a valid VBR header.
+    // The offset of the passed ByteReader needs to point to an MPEG frame begin,
+    // as a VBRI-style header is searched at a fixed offset relative to frame begin.
     // Returns whether a valid VBR header was found in the range.
-    bool Parse(const uint8_t* aBeg, const uint8_t* aEnd);
+    bool Parse(mp4_demuxer::ByteReader* aReader);
 
   private:
-    // Parses given buffer [aBeg, aEnd) for a valid Xing header.
+    // Parses contents of given ByteReader for a valid Xing header.
+    // The initial ByteReader offset will be preserved.
     // Returns whether a valid Xing header was found in the range.
-    bool ParseXing(const uint8_t* aBeg, const uint8_t* aEnd);
+    bool ParseXing(mp4_demuxer::ByteReader* aReader);
 
-    // Parses given buffer [aBeg, aEnd) for a valid VBRI header.
+    // Parses contents of given ByteReader for a valid VBRI header.
+    // The initial ByteReader offset will be preserved. It also needs to point
+    // to the beginning of a valid MPEG frame, as VBRI headers are searched
+    // at a fixed offset relative to frame begin.
     // Returns whether a valid VBRI header was found in the range.
-    bool ParseVBRI(const uint8_t* aBeg, const uint8_t* aEnd);
+    bool ParseVBRI(mp4_demuxer::ByteReader* aReader);
 
     // The total number of frames expected as parsed from a VBR header.
-    int64_t mNumFrames;
+    Maybe<uint32_t> mNumAudioFrames;
+
+    // The total number of bytes expected in the stream.
+    Maybe<uint32_t> mNumBytes;
+
+    // The VBR scale factor.
+    Maybe<uint32_t> mScale;
+
+    // The TOC table mapping duration percentage to byte offset.
+    std::vector<int64_t> mTOC;
 
     // The detected VBR header type.
     VBRHeaderType mType;
@@ -256,13 +294,11 @@ public:
   // Constructor.
   FrameParser();
 
-  // Returns the currently parsed frame. Reset via Reset or FinishParsing.
+  // Returns the currently parsed frame. Reset via Reset or EndFrameSession.
   const Frame& CurrentFrame() const;
 
-#ifdef ENABLE_TESTS
   // Returns the previously parsed frame. Reset via Reset.
   const Frame& PrevFrame() const;
-#endif
 
   // Returns the first parsed frame. Reset via Reset.
   const Frame& FirstFrame() const;
@@ -273,22 +309,30 @@ public:
   // Returns the parsed VBR header info. Note: check for validity by type.
   const VBRHeader& VBRInfo() const;
 
-  // Resets the parser. Don't use between frames as first frame data is reset.
+  // Resets the parser.
   void Reset();
+
+  // Resets all frame data, but not the ID3Header.
+  // Don't use between frames as first frame data is reset.
+  void ResetFrameData();
 
   // Clear the last parsed frame to allow for next frame parsing, i.e.:
   // - sets PrevFrame to CurrentFrame
   // - resets the CurrentFrame
   // - resets ID3Header if no valid header was parsed yet
-  void FinishParsing();
+  void EndFrameSession();
 
-  // Parses given buffer [aBeg, aEnd) for a valid frame header.
-  // Returns begin of frame header if a frame header was found or aEnd otherwise.
-  const uint8_t* Parse(const uint8_t* aBeg, const uint8_t* aEnd);
+  // Parses contents of given ByteReader for a valid frame header and returns true
+  // if one was found. After returning, the variable passed to 'aBytesToSkip' holds
+  // the amount of bytes to be skipped (if any) in order to jump across a large
+  // ID3v2 tag spanning multiple buffers.
+  bool Parse(mp4_demuxer::ByteReader* aReader, uint32_t* aBytesToSkip);
 
-  // Parses given buffer [aBeg, aEnd) for a valid VBR header.
+  // Parses contents of given ByteReader for a valid VBR header.
+  // The offset of the passed ByteReader needs to point to an MPEG frame begin,
+  // as a VBRI-style header is searched at a fixed offset relative to frame begin.
   // Returns whether a valid VBR header was found.
-  bool ParseVBRHeader(const uint8_t* aBeg, const uint8_t* aEnd);
+  bool ParseVBRHeader(mp4_demuxer::ByteReader* aReader);
 
 private:
   // ID3 header parser.
@@ -301,16 +345,14 @@ private:
   // previously parsed frame for debugging and the currently parsed frame.
   Frame mFirstFrame;
   Frame mFrame;
-#ifdef ENABLE_TESTS
   Frame mPrevFrame;
-#endif
 };
 
 // The MP3 demuxer used to extract MPEG frames and side information out of
 // MPEG streams.
 class MP3TrackDemuxer : public MediaTrackDemuxer {
 public:
-  // Constructor, expecing a valid media resource.
+  // Constructor, expecting a valid media resource.
   explicit MP3TrackDemuxer(MediaResource* aSource);
 
   // Initializes the track demuxer by reading the first frame for meta data.
@@ -327,36 +369,41 @@ public:
   // or a 0-duration if unknown.
   media::TimeUnit Duration(int64_t aNumFrames) const;
 
-#ifdef ENABLE_TESTS
+  // Returns the estimated current seek position time.
+  media::TimeUnit SeekPosition() const;
+
   const FrameParser::Frame& LastFrame() const;
-  nsRefPtr<MediaRawData> DemuxSample();
-#endif
+  RefPtr<MediaRawData> DemuxSample();
 
   const ID3Parser::ID3Header& ID3Header() const;
   const FrameParser::VBRHeader& VBRInfo() const;
 
   // MediaTrackDemuxer interface.
   UniquePtr<TrackInfo> GetInfo() const override;
-  nsRefPtr<SeekPromise> Seek(media::TimeUnit aTime) override;
-  nsRefPtr<SamplesPromise> GetSamples(int32_t aNumSamples = 1) override;
+  RefPtr<SeekPromise> Seek(media::TimeUnit aTime) override;
+  RefPtr<SamplesPromise> GetSamples(int32_t aNumSamples = 1) override;
   void Reset() override;
-  nsRefPtr<SkipAccessPointPromise> SkipToNextRandomAccessPoint(
+  RefPtr<SkipAccessPointPromise> SkipToNextRandomAccessPoint(
     media::TimeUnit aTimeThreshold) override;
   int64_t GetResourceOffset() const override;
   media::TimeIntervals GetBuffered() override;
-  int64_t GetEvictionOffset(media::TimeUnit aTime) override;
 
 private:
   // Destructor.
   ~MP3TrackDemuxer() {}
 
   // Fast approximate seeking to given time.
-  media::TimeUnit FastSeek(media::TimeUnit aTime);
+  media::TimeUnit FastSeek(const media::TimeUnit& aTime);
 
   // Seeks by scanning the stream up to the given time for more accurate results.
-  media::TimeUnit ScanUntil(media::TimeUnit aTime);
+  media::TimeUnit ScanUntil(const media::TimeUnit& aTime);
 
-  // Finds the next valid frame and returns its byte range.
+  // Finds the first valid frame and returns its byte range if found
+  // or a null-byte range otherwise.
+  MediaByteRange FindFirstFrame();
+
+  // Finds the next valid frame and returns its byte range if found
+  // or a null-byte range otherwise.
   MediaByteRange FindNextFrame();
 
   // Skips the next frame given the provided byte range.
@@ -368,6 +415,15 @@ private:
   // Updates post-read meta data.
   void UpdateState(const MediaByteRange& aRange);
 
+  // Returns the estimated offset for the given frame index.
+  int64_t OffsetFromFrameIndex(int64_t aFrameIndex) const;
+
+  // Returns the estimated frame index for the given offset.
+  int64_t FrameIndexFromOffset(int64_t aOffset) const;
+
+  // Returns the estimated frame index for the given time.
+  int64_t FrameIndexFromTime(const media::TimeUnit& aTime) const;
+
   // Reads aSize bytes into aBuffer from the source starting at aOffset.
   // Returns the actual size read.
   int32_t Read(uint8_t* aBuffer, int64_t aOffset, int32_t aSize);
@@ -376,7 +432,7 @@ private:
   double AverageFrameLength() const;
 
   // The (hopefully) MPEG resource.
-  nsRefPtr<MediaResource> mSource;
+  MediaResourceIndex mSource;
 
   // MPEG frame parser used to detect frames and extract side info.
   FrameParser mParser;

@@ -30,9 +30,9 @@
 struct jsid
 {
     size_t asBits;
-    bool operator==(jsid rhs) const { return asBits == rhs.asBits; }
-    bool operator!=(jsid rhs) const { return asBits != rhs.asBits; }
-};
+    bool operator==(const jsid& rhs) const { return asBits == rhs.asBits; }
+    bool operator!=(const jsid& rhs) const { return asBits != rhs.asBits; }
+} JS_HAZ_GC_POINTER;
 #define JSID_BITS(id) (id.asBits)
 
 #define JSID_TYPE_STRING                 0x0
@@ -58,7 +58,7 @@ JSID_TO_STRING(jsid id)
     return (JSString*)JSID_BITS(id);
 }
 
-/*
+/**
  * Only JSStrings that have been interned via the JSAPI can be turned into
  * jsids by API clients.
  *
@@ -166,11 +166,36 @@ extern JS_PUBLIC_DATA(const jsid) JSID_EMPTY;
 extern JS_PUBLIC_DATA(const JS::HandleId) JSID_VOIDHANDLE;
 extern JS_PUBLIC_DATA(const JS::HandleId) JSID_EMPTYHANDLE;
 
-namespace js {
+namespace JS {
 
-template <> struct GCMethods<jsid>
+template <>
+struct GCPolicy<jsid>
 {
     static jsid initial() { return JSID_VOID; }
+    static void trace(JSTracer* trc, jsid* idp, const char* name) {
+        js::UnsafeTraceManuallyBarrieredEdge(trc, idp, name);
+    }
+};
+
+} // namespace JS
+
+namespace js {
+
+template <>
+struct DefaultHasher<jsid>
+{
+    typedef jsid Lookup;
+    static HashNumber hash(jsid id) {
+        return JSID_BITS(id);
+    }
+    static bool match(jsid id1, jsid id2) {
+        return id1 == id2;
+    }
+};
+
+template <>
+struct BarrierMethods<jsid>
+{
     static void postBarrier(jsid* idp, jsid prev, jsid next) {}
 };
 
@@ -178,7 +203,7 @@ template <> struct GCMethods<jsid>
 // the pointer. If the jsid is not a GC type, calls F::defaultValue.
 template <typename F, typename... Args>
 auto
-DispatchIdTyped(F f, jsid& id, Args&&... args)
+DispatchTyped(F f, jsid& id, Args&&... args)
   -> decltype(f(static_cast<JSString*>(nullptr), mozilla::Forward<Args>(args)...))
 {
     if (JSID_IS_STRING(id))

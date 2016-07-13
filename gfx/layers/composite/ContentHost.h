@@ -14,9 +14,10 @@
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/gfx/BasePoint.h"      // for BasePoint
+#include "mozilla/gfx/MatrixFwd.h"      // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for Point
 #include "mozilla/gfx/Rect.h"           // for Rect
-#include "mozilla/gfx/Types.h"          // for Filter
+#include "mozilla/gfx/Types.h"          // for SamplingFilter
 #include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
 #include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
@@ -34,9 +35,6 @@
 #include "nscore.h"                     // for nsACString
 
 namespace mozilla {
-namespace gfx {
-class Matrix4x4;
-} // namespace gfx
 namespace layers {
 class Compositor;
 class ThebesBufferData;
@@ -60,6 +58,10 @@ public:
 
   virtual void SetPaintWillResample(bool aResample) { mPaintWillResample = aResample; }
   bool PaintWillResample() { return mPaintWillResample; }
+
+  // We use this to allow TiledContentHost to invalidate regions where
+  // tiles are fading in.
+  virtual void AddAnimationInvalidation(nsIntRegion& aRegion) { }
 
 protected:
   explicit ContentHost(const TextureInfo& aTextureInfo)
@@ -112,14 +114,15 @@ public:
   explicit ContentHostTexture(const TextureInfo& aTextureInfo)
     : ContentHostBase(aTextureInfo)
     , mLocked(false)
+    , mReceivedNewHost(false)
   { }
 
   virtual void Composite(LayerComposite* aLayer,
                          EffectChain& aEffectChain,
                          float aOpacity,
                          const gfx::Matrix4x4& aTransform,
-                         const gfx::Filter& aFilter,
-                         const gfx::Rect& aClipRect,
+                         const gfx::SamplingFilter aSamplingFilter,
+                         const gfx::IntRect& aClipRect,
                          const nsIntRegion* aVisibleRegion = nullptr) override;
 
   virtual void SetCompositor(Compositor* aCompositor) override;
@@ -163,7 +166,7 @@ public:
 
   LayerRenderState GetRenderState() override;
 
-  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::Filter& aFilter) override;
+  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::SamplingFilter aSamplingFilter) override;
 
 protected:
   CompositableTextureHostRef mTextureHost;
@@ -171,6 +174,7 @@ protected:
   CompositableTextureSourceRef mTextureSource;
   CompositableTextureSourceRef mTextureSourceOnWhite;
   bool mLocked;
+  bool mReceivedNewHost;
 };
 
 /**

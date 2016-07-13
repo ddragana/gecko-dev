@@ -138,6 +138,8 @@ protected:
   virtual nsresult StartRecordingImpl(DeviceStorageFileDescriptor* aFileDescriptor,
                                       const StartRecordingOptions* aOptions = nullptr) override;
   virtual nsresult StopRecordingImpl() override;
+  virtual nsresult PauseRecordingImpl() override;
+  virtual nsresult ResumeRecordingImpl() override;
   virtual nsresult ResumeContinuousFocusImpl() override;
   virtual nsresult PushParametersImpl() override;
   virtual nsresult PullParametersImpl() override;
@@ -154,9 +156,6 @@ protected:
   void CreatePoster(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight, int32_t aRotation);
 
   nsresult LoadRecorderProfiles();
-  static PLDHashOperator Enumerate(const nsAString& aProfileName,
-                                   RecorderProfile* aProfile,
-                                   void* aUserArg);
 
   friend class SetPictureSize;
   friend class SetThumbnailSize;
@@ -177,6 +176,7 @@ protected:
 
   Size                      mLastThumbnailSize;
   Size                      mLastRecorderSize;
+  Size                      mRequestedPreviewSize;
   uint32_t                  mPreviewFps;
   bool                      mResumePreviewAfterTakingPicture;
   bool                      mFlashSupported;
@@ -186,10 +186,10 @@ protected:
   Atomic<uint32_t>          mDeferConfigUpdate;
   GonkCameraParameters      mParams;
 
-  nsRefPtr<mozilla::layers::ImageContainer> mImageContainer;
+  RefPtr<mozilla::layers::ImageContainer> mImageContainer;
 
 #ifdef MOZ_WIDGET_GONK
-  nsRefPtr<android::GonkRecorder> mRecorder;
+  RefPtr<android::GonkRecorder> mRecorder;
 #endif
   // Touching mRecorder happens inside this monitor because the destructor
   // can run on any thread, and we need to be able to clean up properly if
@@ -199,7 +199,7 @@ protected:
   // Supported recorder profiles
   nsRefPtrHashtable<nsStringHashKey, RecorderProfile> mRecorderProfiles;
 
-  nsRefPtr<DeviceStorageFile> mVideoFile;
+  RefPtr<DeviceStorageFile> mVideoFile;
   nsString                  mFileFormat;
 
   Atomic<bool>              mCapturePoster;
@@ -208,6 +208,8 @@ protected:
   bool                      mAutoFocusPending;
   nsCOMPtr<nsITimer>        mAutoFocusCompleteTimer;
   int32_t                   mAutoFocusCompleteExpired;
+
+  uint32_t                  mPrevFacesDetected;
 
   // Guards against calling StartPreviewImpl() while in OnTakePictureComplete().
   ReentrantMonitor          mReentrantMonitor;

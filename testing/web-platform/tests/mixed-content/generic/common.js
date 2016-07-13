@@ -83,7 +83,8 @@ function setAttributes(el, attrs) {
 function bindEvents(element, resolveEventName, rejectEventName) {
   element.eventPromise = new Promise(function(resolve, reject) {
     element.addEventListener(resolveEventName  || "load", resolve);
-    element.addEventListener(rejectEventName || "error", reject);
+    element.addEventListener(rejectEventName || "error",
+                             function(e) { e.preventDefault(); reject(); } );
   });
 }
 
@@ -106,10 +107,21 @@ function createElement(tagName, attrs, parent, doBindEvents) {
 
   // We set the attributes after binding to events to catch any
   // event-triggering attribute changes. E.g. form submission.
-  setAttributes(element, attrs);
+  //
+  // But be careful with images: unlike other elements they will start the load
+  // as soon as the attr is set, even if not in the document yet, and sometimes
+  // complete it synchronously, so the append doesn't have the effect we want.
+  // So for images, we want to set the attrs after appending, whereas for other
+  // elements we want to do it before appending.
+  var isImg = (tagName == "img");
+  if (!isImg)
+    setAttributes(element, attrs);
 
   if (parent)
     parent.appendChild(element);
+
+  if (isImg)
+    setAttributes(element, attrs);
 
   return element;
 }
@@ -354,7 +366,33 @@ function requestViaObject(url) {
   return createRequestViaElement("object", {"data": url}, document.body);
 }
 
+/**
+ * Creates a new WebSocket pointing to {@code url} and sends a message string
+ * "echo". The {@code message} and {@code error} events are triggering the
+ * returned promise resolve/reject events.
+ * @param {string} url The URL for WebSocket to connect to.
+ * @return {Promise} The promise for success/error events.
+ */
+function requestViaWebSocket(url) {
+  return new Promise(function(resolve, reject) {
+    var websocket = new WebSocket(url);
+
+    websocket.addEventListener("message", function(e) {
+      resolve(JSON.parse(e.data));
+    });
+
+    websocket.addEventListener("open", function(e) {
+      websocket.send("echo");
+    });
+
+    websocket.addEventListener("error", function(e) {
+      reject(e)
+    });
+  });
+}
+
 // SanityChecker does nothing in release mode. See sanity-checker.js for debug
 // mode.
 function SanityChecker() {}
 SanityChecker.prototype.checkScenario = function() {};
+SanityChecker.prototype.setFailTimeout = function(test, timeout) {};

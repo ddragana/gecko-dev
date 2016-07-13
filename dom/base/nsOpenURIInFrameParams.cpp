@@ -5,24 +5,27 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsOpenURIInFrameParams.h"
+#include "mozilla/BasePrincipal.h"
+#include "mozilla/dom/ToJSValue.h"
 
 NS_IMPL_ISUPPORTS(nsOpenURIInFrameParams, nsIOpenURIInFrameParams)
 
-nsOpenURIInFrameParams::nsOpenURIInFrameParams() :
-  mIsPrivate(false)
+nsOpenURIInFrameParams::nsOpenURIInFrameParams(const mozilla::DocShellOriginAttributes& aOriginAttributes)
+  : mOpenerOriginAttributes(aOriginAttributes)
+  , mIsPrivate(false)
 {
 }
 
 nsOpenURIInFrameParams::~nsOpenURIInFrameParams() {
 }
 
-/* attribute DOMString referrer; */
 NS_IMETHODIMP
 nsOpenURIInFrameParams::GetReferrer(nsAString& aReferrer)
 {
   aReferrer = mReferrer;
   return NS_OK;
 }
+
 NS_IMETHODIMP
 nsOpenURIInFrameParams::SetReferrer(const nsAString& aReferrer)
 {
@@ -30,7 +33,6 @@ nsOpenURIInFrameParams::SetReferrer(const nsAString& aReferrer)
   return NS_OK;
 }
 
-/* attribute boolean isPrivate; */
 NS_IMETHODIMP
 nsOpenURIInFrameParams::GetIsPrivate(bool* aIsPrivate)
 {
@@ -38,9 +40,19 @@ nsOpenURIInFrameParams::GetIsPrivate(bool* aIsPrivate)
   *aIsPrivate = mIsPrivate;
   return NS_OK;
 }
+
 NS_IMETHODIMP
 nsOpenURIInFrameParams::SetIsPrivate(bool aIsPrivate)
 {
   mIsPrivate = aIsPrivate;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsOpenURIInFrameParams::GetOpenerOriginAttributes(JSContext* aCx,
+                                                  JS::MutableHandle<JS::Value> aValue)
+{
+  bool ok = ToJSValue(aCx, mOpenerOriginAttributes, aValue);
+  NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
   return NS_OK;
 }

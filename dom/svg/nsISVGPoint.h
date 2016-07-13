@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 #include "mozilla/dom/SVGPointBinding.h"
@@ -154,7 +153,7 @@ protected:
   bool IndexIsValid();
 #endif
 
-  nsRefPtr<DOMSVGPointList> mList;
+  RefPtr<DOMSVGPointList> mList;
 
   // Bounds for the following are checked in the ctor, so be sure to update
   // that if you change the capacity of any of the following.

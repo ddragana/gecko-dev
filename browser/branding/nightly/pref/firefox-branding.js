@@ -4,6 +4,7 @@
 
 pref("startup.homepage_override_url", "https://www.mozilla.org/projects/firefox/%VERSION%/whatsnew/?oldversion=%OLD_VERSION%");
 pref("startup.homepage_welcome_url", "https://www.mozilla.org/projects/firefox/%VERSION%/firstrun/");
+pref("startup.homepage_welcome_url.additional", "");
 // The time interval between checks for a new version (in seconds)
 pref("app.update.interval", 7200); // 2 hours
 // The time interval between the downloading of mar file chunks in the
@@ -16,7 +17,7 @@ pref("app.update.promptWaitTime", 43200);
 // attempts fail.
 pref("app.update.url.manual", "https://nightly.mozilla.org");
 // A default value for the "More information about this update" link
-// supplied in the "An update is available" page of the update wizard. 
+// supplied in the "An update is available" page of the update wizard.
 pref("app.update.url.details", "https://nightly.mozilla.org");
 
 // The number of days a binary is permitted to be old

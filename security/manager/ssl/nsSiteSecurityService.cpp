@@ -13,6 +13,7 @@
 #include "nsISSLStatus.h"
 #include "nsISocketProvider.h"
 #include "nsIURI.h"
+#include "nsIX509Cert.h"
 #include "nsNetUtil.h"
 #include "nsNSSComponent.h"
 #include "nsSecurityHeaderParser.h"
@@ -40,16 +41,9 @@
 using namespace mozilla;
 using namespace mozilla::psm;
 
-static PRLogModuleInfo *
-GetSSSLog()
-{
-  static PRLogModuleInfo *gSSSLog;
-  if (!gSSSLog)
-    gSSSLog = PR_NewLogModule("nsSSService");
-  return gSSSLog;
-}
+static LazyLogModule gSSSLog("nsSSService");
 
-#define SSSLOG(args) MOZ_LOG(GetSSSLog(), mozilla::LogLevel::Debug, args)
+#define SSSLOG(args) MOZ_LOG(gSSSLog, mozilla::LogLevel::Debug, args)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -210,8 +204,11 @@ SiteHPKPState::ToString(nsCString& aString)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+const uint64_t kSixtyDaysInSeconds = 60 * 24 * 60 * 60;
+
 nsSiteSecurityService::nsSiteSecurityService()
-  : mUsePreloadList(true)
+  : mMaxMaxAge(kSixtyDaysInSeconds)
+  , mUsePreloadList(true)
   , mPreloadListTimeOffset(0)
 {
 }
@@ -227,17 +224,16 @@ NS_IMPL_ISUPPORTS(nsSiteSecurityService,
 nsresult
 nsSiteSecurityService::Init()
 {
-   // Child processes are not allowed direct access to this.
-   if (!XRE_IsParentProcess()) {
-     MOZ_CRASH("Child process: no direct access to nsSiteSecurityService");
-   }
-
   // Don't access Preferences off the main thread.
   if (!NS_IsMainThread()) {
     NS_NOTREACHED("nsSiteSecurityService initialized off main thread");
     return NS_ERROR_NOT_SAME_THREAD;
   }
 
+  mMaxMaxAge = mozilla::Preferences::GetInt(
+    "security.cert_pinning.max_max_age_seconds", kSixtyDaysInSeconds);
+  mozilla::Preferences::AddStrongObserver(this,
+    "security.cert_pinning.max_max_age_seconds");
   mUsePreloadList = mozilla::Preferences::GetBool(
     "network.stricttransportsecurity.preloadlist", true);
   mozilla::Preferences::AddStrongObserver(this,
@@ -251,7 +247,7 @@ nsSiteSecurityService::Init()
   mozilla::Preferences::AddStrongObserver(this,
     "test.currentTimeOffsetSeconds");
   mSiteStateStorage =
-    new mozilla::DataStorage(NS_LITERAL_STRING("SiteSecurityServiceState.txt"));
+    mozilla::DataStorage::Get(NS_LITERAL_STRING("SiteSecurityServiceState.txt"));
   bool storageWillPersist = false;
   nsresult rv = mSiteStateStorage->Init(storageWillPersist);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -308,9 +304,9 @@ SetStorageKey(nsAutoCString& storageKey, nsCString& hostname, uint32_t aType)
 // Expire times are in millis.  Since Headers max-age is in seconds, and
 // PR_Now() is in micros, normalize the units at milliseconds.
 static int64_t
-ExpireTimeFromMaxAge(int64_t maxAge)
+ExpireTimeFromMaxAge(uint64_t maxAge)
 {
-  return (PR_Now() / PR_USEC_PER_MSEC) + (maxAge * PR_MSEC_PER_SEC);
+  return (PR_Now() / PR_USEC_PER_MSEC) + ((int64_t)maxAge * PR_MSEC_PER_SEC);
 }
 
 nsresult
@@ -350,6 +346,11 @@ NS_IMETHODIMP
 nsSiteSecurityService::RemoveState(uint32_t aType, nsIURI* aURI,
                                    uint32_t aFlags)
 {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess()) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::RemoveState");
+   }
+
   // Only HSTS is supported at the moment.
   NS_ENSURE_TRUE(aType == nsISiteSecurityService::HEADER_HSTS ||
                  aType == nsISiteSecurityService::HEADER_HPKP,
@@ -397,15 +398,24 @@ nsSiteSecurityService::ProcessHeader(uint32_t aType,
                                      nsISSLStatus* aSSLStatus,
                                      uint32_t aFlags,
                                      uint64_t* aMaxAge,
-                                     bool* aIncludeSubdomains)
+                                     bool* aIncludeSubdomains,
+                                     uint32_t* aFailureResult)
 {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess()) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::ProcessHeader");
+   }
+
+  if (aFailureResult) {
+    *aFailureResult = nsISiteSecurityService::ERROR_UNKNOWN;
+  }
   NS_ENSURE_TRUE(aType == nsISiteSecurityService::HEADER_HSTS ||
                  aType == nsISiteSecurityService::HEADER_HPKP,
                  NS_ERROR_NOT_IMPLEMENTED);
 
   NS_ENSURE_ARG(aSSLStatus);
   return ProcessHeaderInternal(aType, aSourceURI, aHeader, aSSLStatus, aFlags,
-                               aMaxAge, aIncludeSubdomains);
+                               aMaxAge, aIncludeSubdomains, aFailureResult);
 }
 
 NS_IMETHODIMP
@@ -414,10 +424,16 @@ nsSiteSecurityService::UnsafeProcessHeader(uint32_t aType,
                                            const char* aHeader,
                                            uint32_t aFlags,
                                            uint64_t* aMaxAge,
-                                           bool* aIncludeSubdomains)
+                                           bool* aIncludeSubdomains,
+                                           uint32_t* aFailureResult)
 {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess()) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::UnsafeProcessHeader");
+   }
+
   return ProcessHeaderInternal(aType, aSourceURI, aHeader, nullptr, aFlags,
-                               aMaxAge, aIncludeSubdomains);
+                               aMaxAge, aIncludeSubdomains, aFailureResult);
 }
 
 nsresult
@@ -427,8 +443,12 @@ nsSiteSecurityService::ProcessHeaderInternal(uint32_t aType,
                                              nsISSLStatus* aSSLStatus,
                                              uint32_t aFlags,
                                              uint64_t* aMaxAge,
-                                             bool* aIncludeSubdomains)
+                                             bool* aIncludeSubdomains,
+                                             uint32_t* aFailureResult)
 {
+  if (aFailureResult) {
+    *aFailureResult = nsISiteSecurityService::ERROR_UNKNOWN;
+  }
   // Only HSTS and HPKP are supported at the moment.
   NS_ENSURE_TRUE(aType == nsISiteSecurityService::HEADER_HSTS ||
                  aType == nsISiteSecurityService::HEADER_HPKP,
@@ -459,6 +479,9 @@ nsSiteSecurityService::ProcessHeaderInternal(uint32_t aType,
     tlsIsBroken = tlsIsBroken || trustcheck;
     if (tlsIsBroken) {
        SSSLOG(("SSS: discarding header from untrustworthy connection"));
+       if (aFailureResult) {
+         *aFailureResult = nsISiteSecurityService::ERROR_UNTRUSTWORTHY_CONNECTION;
+       }
       return NS_ERROR_FAILURE;
     }
   }
@@ -474,11 +497,11 @@ nsSiteSecurityService::ProcessHeaderInternal(uint32_t aType,
   switch (aType) {
     case nsISiteSecurityService::HEADER_HSTS:
       rv = ProcessSTSHeader(aSourceURI, aHeader, aFlags, aMaxAge,
-                            aIncludeSubdomains);
+                            aIncludeSubdomains, aFailureResult);
       break;
     case nsISiteSecurityService::HEADER_HPKP:
       rv = ProcessPKPHeader(aSourceURI, aHeader, aSSLStatus, aFlags, aMaxAge,
-                            aIncludeSubdomains);
+                            aIncludeSubdomains, aFailureResult);
       break;
     default:
       MOZ_CRASH("unexpected header type");
@@ -486,16 +509,16 @@ nsSiteSecurityService::ProcessHeaderInternal(uint32_t aType,
   return rv;
 }
 
-static nsresult
+static uint32_t
 ParseSSSHeaders(uint32_t aType,
                 const char* aHeader,
                 bool& foundIncludeSubdomains,
                 bool& foundMaxAge,
                 bool& foundUnrecognizedDirective,
-                int64_t& maxAge,
+                uint64_t& maxAge,
                 nsTArray<nsCString>& sha256keys)
 {
-  // Stric transport security and Public Key Pinning have very similar
+  // Strict transport security and Public Key Pinning have very similar
   // Header formats.
 
   // "Strict-Transport-Security" ":" OWS
@@ -547,7 +570,7 @@ ParseSSSHeaders(uint32_t aType,
   nsresult rv = parser.Parse();
   if (NS_FAILED(rv)) {
     SSSLOG(("SSS: could not parse header"));
-    return rv;
+    return nsISiteSecurityService::ERROR_COULD_NOT_PARSE_HEADER;
   }
   mozilla::LinkedList<nsSecurityHeaderDirective>* directives = parser.GetDirectives();
 
@@ -559,7 +582,7 @@ ParseSSSHeaders(uint32_t aType,
                                           max_age_var.Length())) {
       if (foundMaxAge) {
         SSSLOG(("SSS: found two max-age directives"));
-        return NS_ERROR_FAILURE;
+        return nsISiteSecurityService::ERROR_MULTIPLE_MAX_AGES;
       }
 
       SSSLOG(("SSS: found max-age directive"));
@@ -570,22 +593,22 @@ ParseSSSHeaders(uint32_t aType,
         char chr = directive->mValue.CharAt(i);
         if (chr < '0' || chr > '9') {
           SSSLOG(("SSS: invalid value for max-age directive"));
-          return NS_ERROR_FAILURE;
+          return nsISiteSecurityService::ERROR_INVALID_MAX_AGE;
         }
       }
 
-      if (PR_sscanf(directive->mValue.get(), "%lld", &maxAge) != 1) {
+      if (PR_sscanf(directive->mValue.get(), "%llu", &maxAge) != 1) {
         SSSLOG(("SSS: could not parse delta-seconds"));
-        return NS_ERROR_FAILURE;
+        return nsISiteSecurityService::ERROR_INVALID_MAX_AGE;
       }
 
-      SSSLOG(("SSS: parsed delta-seconds: %lld", maxAge));
+      SSSLOG(("SSS: parsed delta-seconds: %llu", maxAge));
     } else if (directive->mName.Length() == include_subd_var.Length() &&
                directive->mName.EqualsIgnoreCase(include_subd_var.get(),
                                                  include_subd_var.Length())) {
       if (foundIncludeSubdomains) {
         SSSLOG(("SSS: found two includeSubdomains directives"));
-        return NS_ERROR_FAILURE;
+        return nsISiteSecurityService::ERROR_MULTIPLE_INCLUDE_SUBDOMAINS;
       }
 
       SSSLOG(("SSS: found includeSubdomains directive"));
@@ -594,7 +617,7 @@ ParseSSSHeaders(uint32_t aType,
       if (directive->mValue.Length() != 0) {
         SSSLOG(("SSS: includeSubdomains directive unexpectedly had value '%s'",
                 directive->mValue.get()));
-        return NS_ERROR_FAILURE;
+        return nsISiteSecurityService::ERROR_INVALID_INCLUDE_SUBDOMAINS;
       }
     } else if (aType == nsISiteSecurityService::HEADER_HPKP &&
                directive->mName.Length() == pin_sha256_var.Length() &&
@@ -603,18 +626,18 @@ ParseSSSHeaders(uint32_t aType,
        SSSLOG(("SSS: found pinning entry '%s' length=%d",
                directive->mValue.get(), directive->mValue.Length()));
        if (!stringIsBase64EncodingOf256bitValue(directive->mValue)) {
-         return NS_ERROR_FAILURE;
+         return nsISiteSecurityService::ERROR_INVALID_PIN;
        }
        sha256keys.AppendElement(directive->mValue);
    } else if (aType == nsISiteSecurityService::HEADER_HPKP &&
               directive->mName.Length() == report_uri_var.Length() &&
               directive->mName.EqualsIgnoreCase(report_uri_var.get(),
                                                 report_uri_var.Length())) {
-       // We doni't support the report-uri yet, but to avoid unrecognized
+       // We don't support the report-uri yet, but to avoid unrecognized
        // directive warnings, we still have to handle its presence
       if (foundReportURI) {
         SSSLOG(("SSS: found two report-uri directives"));
-        return NS_ERROR_FAILURE;
+        return nsISiteSecurityService::ERROR_MULTIPLE_REPORT_URIS;
       }
       SSSLOG(("SSS: found report-uri directive"));
       foundReportURI = true;
@@ -624,7 +647,7 @@ ParseSSSHeaders(uint32_t aType,
       foundUnrecognizedDirective = true;
     }
   }
-  return NS_OK;
+  return nsISiteSecurityService::Success;
 }
 
 nsresult
@@ -633,8 +656,12 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
                                         nsISSLStatus* aSSLStatus,
                                         uint32_t aFlags,
                                         uint64_t* aMaxAge,
-                                        bool* aIncludeSubdomains)
+                                        bool* aIncludeSubdomains,
+                                        uint32_t* aFailureResult)
 {
+  if (aFailureResult) {
+    *aFailureResult = nsISiteSecurityService::ERROR_UNKNOWN;
+  }
   SSSLOG(("SSS: processing HPKP header '%s'", aHeader));
   NS_ENSURE_ARG(aSSLStatus);
 
@@ -642,17 +669,25 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
   bool foundMaxAge = false;
   bool foundIncludeSubdomains = false;
   bool foundUnrecognizedDirective = false;
-  int64_t maxAge = 0;
+  uint64_t maxAge = 0;
   nsTArray<nsCString> sha256keys;
-  nsresult rv = ParseSSSHeaders(aType, aHeader, foundIncludeSubdomains,
-                                foundMaxAge, foundUnrecognizedDirective,
-                                maxAge, sha256keys);
-  NS_ENSURE_SUCCESS(rv, rv);
+  uint32_t sssrv = ParseSSSHeaders(aType, aHeader, foundIncludeSubdomains,
+                                   foundMaxAge, foundUnrecognizedDirective,
+                                   maxAge, sha256keys);
+  if (sssrv != nsISiteSecurityService::Success) {
+    if (aFailureResult) {
+      *aFailureResult = sssrv;
+    }
+    return NS_ERROR_FAILURE;
+  }
 
   // after processing all the directives, make sure we came across max-age
   // somewhere.
   if (!foundMaxAge) {
     SSSLOG(("SSS: did not encounter required max-age directive"));
+    if (aFailureResult) {
+      *aFailureResult = nsISiteSecurityService::ERROR_NO_MAX_AGE;
+    }
     return NS_ERROR_FAILURE;
   }
 
@@ -661,25 +696,34 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
   // 1. recompute a valid chain (no external ocsp)
   // 2. use this chain to check if things would have broken!
   nsAutoCString host;
-  rv = GetHost(aSourceURI, host);
+  nsresult rv = GetHost(aSourceURI, host);
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIX509Cert> cert;
   rv = aSSLStatus->GetServerCert(getter_AddRefs(cert));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(cert, NS_ERROR_FAILURE);
-  ScopedCERTCertificate nssCert(cert->GetCert());
+  UniqueCERTCertificate nssCert(cert->GetCert());
   NS_ENSURE_TRUE(nssCert, NS_ERROR_FAILURE);
 
   mozilla::pkix::Time now(mozilla::pkix::Now());
-  ScopedCERTCertList certList;
+  UniqueCERTCertList certList;
   RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
   NS_ENSURE_TRUE(certVerifier, NS_ERROR_UNEXPECTED);
+  // We don't want this verification to cause any network traffic that would
+  // block execution. Also, since we don't have access to the original stapled
+  // OCSP response, we can't enforce this aspect of the TLS Feature extension.
+  // This is ok, because it will have been enforced when we originally connected
+  // to the site (or it's disabled, in which case we wouldn't want to enforce it
+  // anyway).
+  CertVerifier::Flags flags = CertVerifier::FLAG_LOCAL_ONLY |
+                              CertVerifier::FLAG_TLS_IGNORE_STATUS_REQUEST;
   if (certVerifier->VerifySSLServerCert(nssCert, nullptr, // stapled ocsp
                                         now, nullptr, // pinarg
                                         host.get(), // hostname
+                                        certList,
                                         false, // don't store intermediates
-                                        CertVerifier::FLAG_LOCAL_ONLY,
-                                        &certList) != SECSuccess) {
+                                        flags)
+      != SECSuccess) {
     return NS_ERROR_FAILURE;
   }
 
@@ -688,18 +732,26 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
     return NS_ERROR_FAILURE;
   }
   bool isBuiltIn = false;
-  SECStatus srv = IsCertBuiltInRoot(rootNode->cert, isBuiltIn);
-  if (srv != SECSuccess) {
+  mozilla::pkix::Result result = IsCertBuiltInRoot(rootNode->cert, isBuiltIn);
+  if (result != mozilla::pkix::Success) {
     return NS_ERROR_FAILURE;
   }
 
   if (!isBuiltIn && !mProcessPKPHeadersFromNonBuiltInRoots) {
-    return NS_OK;
+    if (aFailureResult) {
+      *aFailureResult = nsISiteSecurityService::ERROR_ROOT_NOT_BUILT_IN;
+    }
+    return NS_ERROR_FAILURE;
   }
 
   // if maxAge == 0 we must delete all state, for now no hole-punching
   if (maxAge == 0) {
     return RemoveState(aType, aSourceURI, aFlags);
+  }
+
+  // clamp maxAge to the maximum set by pref
+  if (maxAge > mMaxMaxAge) {
+    maxAge = mMaxMaxAge;
   }
 
   bool chainMatchesPinset;
@@ -711,11 +763,14 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
   if (!chainMatchesPinset) {
     // is invalid
     SSSLOG(("SSS: Pins provided by %s are invalid no match with certList\n", host.get()));
+    if (aFailureResult) {
+      *aFailureResult = nsISiteSecurityService::ERROR_PINSET_DOES_NOT_MATCH_CHAIN;
+    }
     return NS_ERROR_FAILURE;
   }
 
   // finally we need to ensure that there is a "backup pin" ie. There must be
-  // at least one fingerprint hash that does NOT valiate against the verified
+  // at least one fingerprint hash that does NOT validate against the verified
   // chain (Section 2.5 of the spec)
   bool hasBackupPin = false;
   for (uint32_t i = 0; i < sha256keys.Length(); i++) {
@@ -733,20 +788,29 @@ nsSiteSecurityService::ProcessPKPHeader(nsIURI* aSourceURI,
   if (!hasBackupPin) {
      // is invalid
     SSSLOG(("SSS: Pins provided by %s are invalid no backupPin\n", host.get()));
+    if (aFailureResult) {
+      *aFailureResult = nsISiteSecurityService::ERROR_NO_BACKUP_PIN;
+    }
     return NS_ERROR_FAILURE;
   }
 
   int64_t expireTime = ExpireTimeFromMaxAge(maxAge);
   SiteHPKPState dynamicEntry(expireTime, SecurityPropertySet,
                              foundIncludeSubdomains, sha256keys);
-  SSSLOG(("SSS: about to set pins for  %s, expires=%ld now=%ld maxAge=%ld\n",
+  SSSLOG(("SSS: about to set pins for  %s, expires=%ld now=%ld maxAge=%lu\n",
            host.get(), expireTime, PR_Now() / PR_USEC_PER_MSEC, maxAge));
 
   rv = SetHPKPState(host.get(), dynamicEntry, aFlags);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    SSSLOG(("SSS: failed to set pins for %s\n", host.get()));
+    if (aFailureResult) {
+      *aFailureResult = nsISiteSecurityService::ERROR_COULD_NOT_SAVE_STATE;
+    }
+    return rv;
+  }
 
   if (aMaxAge != nullptr) {
-    *aMaxAge = (uint64_t)maxAge;
+    *aMaxAge = maxAge;
   }
 
   if (aIncludeSubdomains != nullptr) {
@@ -763,34 +827,54 @@ nsSiteSecurityService::ProcessSTSHeader(nsIURI* aSourceURI,
                                         const char* aHeader,
                                         uint32_t aFlags,
                                         uint64_t* aMaxAge,
-                                        bool* aIncludeSubdomains)
+                                        bool* aIncludeSubdomains,
+                                        uint32_t* aFailureResult)
 {
+  if (aFailureResult) {
+    *aFailureResult = nsISiteSecurityService::ERROR_UNKNOWN;
+  }
   SSSLOG(("SSS: processing HSTS header '%s'", aHeader));
 
   const uint32_t aType = nsISiteSecurityService::HEADER_HSTS;
   bool foundMaxAge = false;
   bool foundIncludeSubdomains = false;
   bool foundUnrecognizedDirective = false;
-  int64_t maxAge = 0;
-  nsTArray<nsCString> unusedSHA256keys; // Requred for sane internal interface
+  uint64_t maxAge = 0;
+  nsTArray<nsCString> unusedSHA256keys; // Required for sane internal interface
 
-  nsresult rv = ParseSSSHeaders(aType, aHeader, foundIncludeSubdomains,
-                                foundMaxAge, foundUnrecognizedDirective,
-                                maxAge, unusedSHA256keys);
-  NS_ENSURE_SUCCESS(rv, rv);
+  uint32_t sssrv = ParseSSSHeaders(aType, aHeader, foundIncludeSubdomains,
+                                   foundMaxAge, foundUnrecognizedDirective,
+                                   maxAge, unusedSHA256keys);
+  if (sssrv != nsISiteSecurityService::Success) {
+    if (aFailureResult) {
+      *aFailureResult = sssrv;
+    }
+    return NS_ERROR_FAILURE;
+  }
 
   // after processing all the directives, make sure we came across max-age
   // somewhere.
   if (!foundMaxAge) {
     SSSLOG(("SSS: did not encounter required max-age directive"));
+    if (aFailureResult) {
+      *aFailureResult = nsISiteSecurityService::ERROR_NO_MAX_AGE;
+    }
     return NS_ERROR_FAILURE;
   }
 
   // record the successfully parsed header data.
-  SetHSTSState(aType, aSourceURI, maxAge, foundIncludeSubdomains, aFlags);
+  nsresult rv = SetHSTSState(aType, aSourceURI, maxAge, foundIncludeSubdomains,
+                             aFlags);
+  if (NS_FAILED(rv)) {
+    SSSLOG(("SSS: failed to set STS state"));
+    if (aFailureResult) {
+      *aFailureResult = nsISiteSecurityService::ERROR_COULD_NOT_SAVE_STATE;
+    }
+    return rv;
+  }
 
   if (aMaxAge != nullptr) {
-    *aMaxAge = (uint64_t)maxAge;
+    *aMaxAge = maxAge;
   }
 
   if (aIncludeSubdomains != nullptr) {
@@ -806,6 +890,11 @@ NS_IMETHODIMP
 nsSiteSecurityService::IsSecureURI(uint32_t aType, nsIURI* aURI,
                                    uint32_t aFlags, bool* aResult)
 {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess() && aType != nsISiteSecurityService::HEADER_HSTS) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::IsSecureURI for non-HSTS entries");
+   }
+
   NS_ENSURE_ARG(aURI);
   NS_ENSURE_ARG(aResult);
 
@@ -830,7 +919,7 @@ int STSPreloadCompare(const void *key, const void *entry)
 {
   const char *keyStr = (const char *)key;
   const nsSTSPreload *preloadEntry = (const nsSTSPreload *)entry;
-  return strcmp(keyStr, preloadEntry->mHost);
+  return strcmp(keyStr, &kSTSHostTable[preloadEntry->mHostIndex]);
 }
 
 // Returns the preload list entry for the given host, if it exists.
@@ -855,6 +944,11 @@ NS_IMETHODIMP
 nsSiteSecurityService::IsSecureHost(uint32_t aType, const char* aHost,
                                     uint32_t aFlags, bool* aResult)
 {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess() && aType != nsISiteSecurityService::HEADER_HSTS) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::IsSecureHost for non-HSTS entries");
+   }
+
   NS_ENSURE_ARG(aHost);
   NS_ENSURE_ARG(aResult);
 
@@ -990,6 +1084,11 @@ nsSiteSecurityService::IsSecureHost(uint32_t aType, const char* aHost,
 NS_IMETHODIMP
 nsSiteSecurityService::ClearAll()
 {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess()) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::ClearAll");
+   }
+
   return mSiteStateStorage->Clear();
 }
 
@@ -999,6 +1098,11 @@ nsSiteSecurityService::GetKeyPinsForHostname(const char* aHostname,
                                              /*out*/ nsTArray<nsCString>& pinArray,
                                              /*out*/ bool* aIncludeSubdomains,
                                              /*out*/ bool* afound) {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess()) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::GetKeyPinsForHostname");
+   }
+
   NS_ENSURE_ARG(afound);
   NS_ENSURE_ARG(aHostname);
 
@@ -1041,6 +1145,11 @@ nsSiteSecurityService::SetKeyPins(const char* aHost, bool aIncludeSubdomains,
                                   const char** aSha256Pins,
                                   /*out*/ bool* aResult)
 {
+   // Child processes are not allowed direct access to this.
+   if (!XRE_IsParentProcess()) {
+     MOZ_CRASH("Child process: no direct access to nsISiteSecurityService::SetKeyPins");
+   }
+
   NS_ENSURE_ARG_POINTER(aHost);
   NS_ENSURE_ARG_POINTER(aResult);
   NS_ENSURE_ARG_POINTER(aSha256Pins);
@@ -1105,6 +1214,8 @@ nsSiteSecurityService::Observe(nsISupports *subject,
       mozilla::Preferences::GetInt("test.currentTimeOffsetSeconds", 0);
     mProcessPKPHeadersFromNonBuiltInRoots = mozilla::Preferences::GetBool(
       "security.cert_pinning.process_headers_from_non_builtin_roots", false);
+    mMaxMaxAge = mozilla::Preferences::GetInt(
+      "security.cert_pinning.max_max_age_seconds", kSixtyDaysInSeconds);
   }
 
   return NS_OK;

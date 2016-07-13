@@ -38,7 +38,11 @@ callback interface UncaughtRejectionObserver {
    * caught, i.e. if its `then` callback is called, `onConsumed` will
    * be called.
    */
+#ifdef SPIDERMONKEY_PROMISE
+  void onLeftUncaught(object p);
+#else
   void onLeftUncaught(Promise<any> p);
+#endif SPIDERMONKEY_PROMISE
 
   /**
    * A Promise previously left uncaught is not the last in its
@@ -47,39 +51,61 @@ callback interface UncaughtRejectionObserver {
    * @param p A Promise that was previously left in uncaught state is
    * now caught, i.e. it is not the last in its chain anymore.
    */
+#ifdef SPIDERMONKEY_PROMISE
+  void onConsumed(object p);
+#else
   void onConsumed(Promise<any> p);
+#endif SPIDERMONKEY_PROMISE
 };
 
 [ChromeOnly, Exposed=(Window,System)]
 interface PromiseDebugging {
-  static PromiseDebuggingStateHolder getState(Promise<any> p);
+  /**
+   * The various functions on this interface all expect to take promises but
+   * don't want the WebIDL behavior of assimilating random passed-in objects
+   * into promises.  They also want to treat Promise subclass instances as
+   * promises instead of wrapping them in a vanilla Promise, which is what the
+   * IDL spec says to do.  So we list all our arguments as "object" instead of
+   * "Promise" and check for them being a Promise internally.
+   */
+
+  /**
+   * Get the current state of the given promise.
+   */
+  [Throws]
+  static PromiseDebuggingStateHolder getState(object p);
+
+  /**
+   * Return an identifier for a promise. This identifier is guaranteed
+   * to be unique to the current process.
+   */
+  [Throws]
+  static DOMString getPromiseID(object p);
 
   /**
    * Return the stack to the promise's allocation point.  This can
    * return null if the promise was not created from script.
    */
-  static object? getAllocationStack(Promise<any> p);
+  [Throws]
+  static object? getAllocationStack(object p);
 
   /**
    * Return the stack to the promise's rejection point, if the
    * rejection happened from script.  This can return null if the
    * promise has not been rejected or was not rejected from script.
    */
-  static object? getRejectionStack(Promise<any> p);
+  [Throws]
+  static object? getRejectionStack(object p);
 
   /**
    * Return the stack to the promise's fulfillment point, if the
    * fulfillment happened from script.  This can return null if the
    * promise has not been fulfilled or was not fulfilled from script.
    */
-  static object? getFullfillmentStack(Promise<any> p);
+  [Throws]
+  static object? getFullfillmentStack(object p);
 
-  /**
-   * Return an identifier for a promise. This identifier is guaranteed
-   * to be unique to this instance of Firefox.
-   */
-  static DOMString getPromiseID(Promise<any> p);
-
+#ifndef SPIDERMONKEY_PROMISE
   /**
    * Get the promises directly depending on a given promise.  These are:
    *
@@ -96,12 +122,14 @@ interface PromiseDebugging {
    * p.  It does not recursively return promises that depend on promises that
    * depend on p.
    */
-  static sequence<Promise<any>> getDependentPromises(Promise<any> p);
+  [Throws]
+  static sequence<Promise<any>> getDependentPromises(object p);
 
   /**
    * Get the number of milliseconds elapsed since the given promise was created.
    */
-  static DOMHighResTimeStamp getPromiseLifetime(Promise<any> p);
+  [Throws]
+  static DOMHighResTimeStamp getPromiseLifetime(object p);
 
   /*
    * Get the number of milliseconds elapsed between the promise being created
@@ -109,7 +137,9 @@ interface PromiseDebugging {
    * settled.
    */
   [Throws]
-  static DOMHighResTimeStamp getTimeToSettle(Promise<any> p);
+  static DOMHighResTimeStamp getTimeToSettle(object p);
+
+#endif // SPIDERMONKEY_PROMISE
 
   /**
    * Watching uncaught rejections on the current thread.

@@ -2,19 +2,15 @@ BRANCH = "mozilla-beta"
 MOZ_UPDATE_CHANNEL = "beta"
 MOZILLA_DIR = BRANCH
 OBJDIR = "obj-l10n"
-EN_US_BINARY_URL = "http://ftp.mozilla.org/pub/mozilla.org/mobile/candidates/%(version)s-candidates/build%(buildnum)d/android-api-9/en-US"
-#STAGE_SERVER = "dev-stage01.srv.releng.scl3.mozilla.com"
-STAGE_SERVER = "stage.mozilla.org"
-STAGE_USER = "ffxbld"
-STAGE_SSH_KEY = "~/.ssh/ffxbld_rsa"
+EN_US_BINARY_URL = "http://archive.mozilla.org/pub/mobile/candidates/%(version)s-candidates/build%(buildnum)d/android-api-9/en-US"
 HG_SHARE_BASE_DIR = "/builds/hg-shared"
 
 config = {
+    "stage_product": "mobile",
     "log_name": "single_locale",
     "objdir": OBJDIR,
     "is_automation": True,
     "buildbot_json_path": "buildprops.json",
-    "purge_minsize": 10,
     "force_clobber": True,
     "clobberer_url": "https://api.pub.build.mozilla.org/clobberer/lastclobber",
     "locales_file": "buildbot-configs/mozilla/l10n-changesets_mobile-beta.json",
@@ -27,26 +23,22 @@ config = {
     "tooltool_config": {
         "manifest": "mobile/android/config/tooltool-manifests/android/releng.manifest",
         "output_dir": "%(abs_work_dir)s/" + MOZILLA_DIR,
-        "bootstrap_cmd": ["bash", "-xe", "setup.sh"],
     },
     "exes": {
-        'tooltool.py': '/tools/tooltool.py',
+        'tooltool.py': '/builds/tooltool.py',
     },
     "repos": [{
         "repo": "https://hg.mozilla.org/releases/mozilla-beta",
-        "revision": "default",
+        "branch": "default",
         "dest": MOZILLA_DIR,
     }, {
         "repo": "https://hg.mozilla.org/build/buildbot-configs",
-        "revision": "default",
+        "branch": "default",
         "dest": "buildbot-configs"
     }, {
         "repo": "https://hg.mozilla.org/build/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools"
-    }, {
-        "repo": "https://hg.mozilla.org/build/compare-locales",
-        "revision": "RELEASE_AUTOMATION"
     }],
     "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/%s" % BRANCH,
     "hg_l10n_tag": "default",
@@ -63,32 +55,14 @@ config = {
         "MOZ_UPDATE_CHANNEL": MOZ_UPDATE_CHANNEL,
     },
     "base_en_us_binary_url": EN_US_BINARY_URL,
-    # TODO ideally we could get this info from a central location.
-    # However, the agility of these individual config files might trump that.
-    "upload_env": {
-        "UPLOAD_USER": STAGE_USER,
-        "UPLOAD_SSH_KEY": STAGE_SSH_KEY,
-        "UPLOAD_HOST": STAGE_SERVER,
-        "UPLOAD_TO_TEMP": "1",
-        "MOZ_PKG_VERSION": "%(version)s",
-    },
-    "base_post_upload_cmd": "post_upload.py -p mobile -n %(buildnum)s -v %(version)s --builddir android-api-9/%(locale)s --release-to-mobile-candidates-dir --nightly-dir=candidates",
+    "upload_branch": "%s-android-api-9" % BRANCH,
+    "ssh_key_dir": "~/.ssh",
+    "base_post_upload_cmd": "post_upload.py -p mobile -n %(buildnum)s -v %(version)s --builddir android-api-9/%(locale)s --release-to-mobile-candidates-dir --nightly-dir=candidates %(post_upload_extra)s",
     "merge_locales": True,
-    "make_dirs": ['config'],
     "mozilla_dir": MOZILLA_DIR,
     "mozconfig": "%s/mobile/android/config/mozconfigs/android-api-9-10-constrained/l10n-release" % MOZILLA_DIR,
     "signature_verification_script": "tools/release/signing/verify-android-signature.sh",
     "key_alias": "release",
-    "default_actions": [
-        "clobber",
-        "pull",
-        "list-locales",
-        "setup",
-        "repack",
-        "upload-repacks",
-        "submit-to-balrog",
-        "summary",
-    ],
     # Mock
     "mock_target": "mozilla-centos6-x86_64-android",
     "mock_packages": ['autoconf213', 'python', 'zip', 'mozilla-python27-mercurial', 'git', 'ccache',
@@ -113,5 +87,9 @@ config = {
                       ],
     "mock_files": [
         ("/home/cltbld/.ssh", "/home/mock_mozilla/.ssh"),
+        ('/home/cltbld/.hgrc', '/builds/.hgrc'),
+        ('/builds/relengapi.tok', '/builds/relengapi.tok'),
+        ('/tools/tooltool.py', '/builds/tooltool.py'),
+        ('/usr/local/lib/hgext', '/usr/local/lib/hgext'),
     ],
 }

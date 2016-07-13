@@ -4,13 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_bluetooth_BluetoothSocket_h
-#define mozilla_dom_bluetooth_BluetoothSocket_h
+#ifndef mozilla_dom_bluetooth_bluez_BluetoothSocket_h
+#define mozilla_dom_bluetooth_bluez_BluetoothSocket_h
 
 #include "BluetoothCommon.h"
 #include "mozilla/ipc/DataSocket.h"
 #include "mozilla/ipc/UnixSocketWatcher.h"
-#include "nsAutoPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "nsString.h"
 
 class MessageLoop;
@@ -26,7 +26,7 @@ public:
   BluetoothSocket(BluetoothSocketObserver* aObserver);
   ~BluetoothSocket();
 
-  nsresult Connect(const nsAString& aDeviceAddress,
+  nsresult Connect(const BluetoothAddress& aDeviceAddress,
                    const BluetoothUuid& aServiceUuid,
                    BluetoothSocketType aType,
                    int aChannel,
@@ -44,7 +44,7 @@ public:
    *
    * @param aBuffer Data received from the socket.
    */
-  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketBuffer>& aBuffer);
+  void ReceiveSocketData(UniquePtr<mozilla::ipc::UnixSocketBuffer>& aBuffer);
 
   /**
    * Convenience function for sending strings to the socket (common in bluetooth
@@ -105,9 +105,9 @@ public:
   /**
    * Get the current socket address.
    *
-   * @param[out] aDeviceAddress Returns the address string.
+   * @param[out] aDeviceAddress Returns the address.
    */
-  void GetAddress(nsAString& aDeviceAddress);
+  void GetAddress(BluetoothAddress& aDeviceAddress);
 
   // Methods for |DataSocket|
   //
@@ -135,4 +135,4 @@ private:
 
 END_BLUETOOTH_NAMESPACE
 
-#endif
+#endif // mozilla_dom_bluetooth_bluez_BluetoothSocket_h

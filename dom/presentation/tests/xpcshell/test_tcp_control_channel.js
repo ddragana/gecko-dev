@@ -9,7 +9,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
-let tps;
+var pcs;
 
 // Call |run_next_test| if all functions in |names| are called
 function makeJointSuccess(names) {
@@ -29,8 +29,8 @@ function TestDescription(aType, aTcpAddress, aTcpPort) {
   this.tcpAddress = Cc["@mozilla.org/array;1"]
                       .createInstance(Ci.nsIMutableArray);
   for (let address of aTcpAddress) {
-    let wrapper = Cc["@mozilla.org/supports-string;1"]
-                    .createInstance(Ci.nsISupportsString);
+    let wrapper = Cc["@mozilla.org/supports-cstring;1"]
+                    .createInstance(Ci.nsISupportsCString);
     wrapper.data = address;
     this.tcpAddress.appendElement(wrapper, false);
   }
@@ -44,6 +44,9 @@ TestDescription.prototype = {
 const CONTROLLER_CONTROL_CHANNEL_PORT = 36777;
 const PRESENTER_CONTROL_CHANNEL_PORT = 36888;
 
+var CLOSE_CONTROL_CHANNEL_REASON = Cr.NS_OK;
+var candidate;
+
 // presenter's presentation channel description
 const OFFER_ADDRESS = '192.168.123.123';
 const OFFER_PORT = 123;
@@ -53,10 +56,10 @@ const ANSWER_ADDRESS = '192.168.321.321';
 const ANSWER_PORT = 321;
 
 function loopOfferAnser() {
-  tps = Cc["@mozilla.org/presentation-device/tcp-presentation-server;1"]
-        .createInstance(Ci.nsITCPPresentationServer);
-  tps.init(null, PRESENTER_CONTROL_CHANNEL_PORT);
-  tps.id = 'controllerID';
+  pcs = Cc["@mozilla.org/presentation/control-service;1"]
+        .createInstance(Ci.nsIPresentationControlService);
+  pcs.id = 'controllerID';
+  pcs.startServer(PRESENTER_CONTROL_CHANNEL_PORT);
 
   testPresentationServer();
 }
@@ -65,22 +68,14 @@ function loopOfferAnser() {
 function testPresentationServer() {
   let yayFuncs = makeJointSuccess(['controllerControlChannelClose',
                                    'presenterControlChannelClose']);
-  let controllerDevice, controllerControlChannel;
-  let presenterDevice, presenterControlChannel;
+  let controllerControlChannel;
 
+  pcs.listener = {
 
-  controllerDevice = tps.createTCPDevice('controllerID',
-                                         'controllerName',
-                                         'testType',
-                                         '127.0.0.1',
-                                         CONTROLLER_CONTROL_CHANNEL_PORT)
-                        .QueryInterface(Ci.nsIPresentationDevice);
-
-  controllerDevice.listener = {
-
-    onSessionRequest: function(device, url, presentationId, controlChannel) {
+    onSessionRequest: function(deviceInfo, url, presentationId, controlChannel) {
       controllerControlChannel = controlChannel;
-      Assert.strictEqual(device, controllerDevice, 'expected device object');
+      Assert.equal(deviceInfo.id, pcs.id, 'expected device id');
+      Assert.equal(deviceInfo.address, '127.0.0.1', 'expected device address');
       Assert.equal(url, 'http://example.com', 'expected url');
       Assert.equal(presentationId, 'testPresentationId', 'expected presentation id');
 
@@ -91,7 +86,7 @@ function testPresentationServer() {
           this.status = 'onOffer';
 
           let offer = aOffer.QueryInterface(Ci.nsIPresentationChannelDescription);
-          Assert.strictEqual(offer.tcpAddress.queryElementAt(0,Ci.nsISupportsString).data,
+          Assert.strictEqual(offer.tcpAddress.queryElementAt(0,Ci.nsISupportsCString).data,
                              OFFER_ADDRESS,
                              'expected offer address array');
           Assert.equal(offer.tcpPort, OFFER_PORT, 'expected offer port');
@@ -106,38 +101,41 @@ function testPresentationServer() {
         onAnswer: function(aAnswer) {
           Assert.ok(false, 'get answer');
         },
-        notifyOpened: function() {
+        onIceCandidate: function(aCandidate) {
+          Assert.ok(true, '3. controllerControlChannel: get ice candidate, close channel');
+          let recvCandidate = JSON.parse(aCandidate);
+          for (let key in recvCandidate) {
+            if (typeof(recvCandidate[key]) !== "function") {
+              Assert.equal(recvCandidate[key], candidate[key], "key " + key + " should match.");
+            }
+          }
+          controllerControlChannel.disconnect(CLOSE_CONTROL_CHANNEL_REASON);
+        },
+        notifyConnected: function() {
           Assert.equal(this.status, 'created', '0. controllerControlChannel: opened');
           this.status = 'opened';
         },
-        notifyClosed: function(aReason) {
-          Assert.equal(this.status, 'onOffer', '3. controllerControlChannel: closed');
-          Assert.equal(aReason, Cr.NS_OK, 'presenterControlChannel notify closed NS_OK');
+        notifyDisconnected: function(aReason) {
+          Assert.equal(this.status, 'onOffer', '4. controllerControlChannel: closed');
+          Assert.equal(aReason, CLOSE_CONTROL_CHANNEL_REASON, 'controllerControlChannel notify closed');
           this.status = 'closed';
           yayFuncs.controllerControlChannelClose();
         },
-        QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationDeviceEventListener]),
+        QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationControlChannelListener]),
       };
     },
 
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationControlChannelListener]),
+    QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationControlServerListener]),
   };
 
-  presenterDevice = tps.createTCPDevice('presentatorID',
-                                        'presentatorName',
-                                        'testType',
-                                        '127.0.0.1',
-                                        PRESENTER_CONTROL_CHANNEL_PORT)
-                       .QueryInterface(Ci.nsIPresentationDevice);
+  let presenterDeviceInfo = {
+    id: 'presentatorID',
+    address: '127.0.0.1',
+    port: PRESENTER_CONTROL_CHANNEL_PORT,
+    QueryInterface: XPCOMUtils.generateQI([Ci.nsITCPDeviceInfo]),
+  };
 
-  presenterDevice.listener = {
-    onSessionRequest: function(device, url, presentationId, controlChannel) {
-      Assert.ok(false, 'presenterDevice.listener.onSessionRequest should not be called');
-    },
-  }
-
-  presenterControlChannel =
-  presenterDevice.establishControlChannel('http://example.com', 'testPresentationId');
+  let presenterControlChannel = pcs.connect(presenterDeviceInfo);
 
   presenterControlChannel.listener = {
     status: 'created',
@@ -145,18 +143,26 @@ function testPresentationServer() {
       Assert.ok(false, 'get offer');
     },
     onAnswer: function(aAnswer) {
-      Assert.equal(this.status, 'opened', '2. presenterControlChannel: get answer, close channel');
+      Assert.equal(this.status, 'opened', '2. presenterControlChannel: get answer, send ICE candidate');
 
       let answer = aAnswer.QueryInterface(Ci.nsIPresentationChannelDescription);
-      Assert.strictEqual(answer.tcpAddress.queryElementAt(0,Ci.nsISupportsString).data,
+      Assert.strictEqual(answer.tcpAddress.queryElementAt(0,Ci.nsISupportsCString).data,
                          ANSWER_ADDRESS,
                          'expected answer address array');
       Assert.equal(answer.tcpPort, ANSWER_PORT, 'expected answer port');
-
-      presenterControlChannel.close(Cr.NS_OK);
+      candidate = {
+        candidate: "1 1 UDP 1 127.0.0.1 34567 type host",
+        sdpMid: "helloworld",
+        sdpMLineIndex: 1
+      };
+      presenterControlChannel.sendIceCandidate(JSON.stringify(candidate));
     },
-    notifyOpened: function() {
+    onIceCandidate: function(aCandidate) {
+      Assert.ok(false, 'get ICE candidate');
+    },
+    notifyConnected: function() {
       Assert.equal(this.status, 'created', '0. presenterControlChannel: opened, send offer');
+      presenterControlChannel.launch('testPresentationId', 'http://example.com');
       this.status = 'opened';
       try {
         let tcpType = Ci.nsIPresentationChannelDescription.TYPE_TCP;
@@ -166,9 +172,9 @@ function testPresentationServer() {
         Assert.ok(false, 'sending offer fails:' + e);
       }
     },
-    notifyClosed: function(aReason) {
+    notifyDisconnected: function(aReason) {
       this.status = 'closed';
-      Assert.equal(aReason, Cr.NS_OK, '3. presenterControlChannel notify closed NS_OK');
+      Assert.equal(aReason, CLOSE_CONTROL_CHANNEL_REASON, '4. presenterControlChannel notify closed');
       yayFuncs.presenterControlChannelClose();
     },
     QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationControlChannelListener]),
@@ -176,22 +182,22 @@ function testPresentationServer() {
 }
 
 function setOffline() {
-  let expectedReason;
-  tps.listener = {
-    onClose: function(aReason) {
-      Assert.equal(aReason, Cr.NS_ERROR_ABORT, 'TCPPresentationServer close as expected');
-      Services.io.offline = false;
+  pcs.listener = {
+    onPortChange: function(aPort) {
+      Assert.notEqual(aPort, 0, 'TCPPresentationServer port changed and the port should be valid');
+      pcs.close();
       run_next_test();
     },
-  }
+  };
 
-  // Let the server socket be closed non-manually
+  // Let the server socket restart automatically.
   Services.io.offline = true;
+  Services.io.offline = false;
 }
 
 function oneMoreLoop() {
   try {
-    tps.init('controllerID', PRESENTER_CONTROL_CHANNEL_PORT);
+    pcs.startServer(PRESENTER_CONTROL_CHANNEL_PORT);
     testPresentationServer();
   } catch (e) {
     Assert.ok(false, 'TCP presentation init fail:' + e);
@@ -202,32 +208,34 @@ function oneMoreLoop() {
 
 function shutdown()
 {
-  tps.listener = {
-    onClose: function(aReason) {
-      Assert.equal(aReason, Cr.NS_OK, 'TCPPresentationServer close success');
-      run_next_test();
+  pcs.listener = {
+    onPortChange: function(aPort) {
+      Assert.ok(false, 'TCPPresentationServer port changed');
     },
-  }
-  tps.close();
-}
-
-function setPref() {
-  Services.prefs.setBoolPref("dom.presentation.tcp_server.debug", true);
+  };
+  pcs.close();
+  Assert.equal(pcs.port, 0, "TCPPresentationServer closed");
   run_next_test();
 }
 
-function clearPref() {
-  Services.prefs.clearUserPref("dom.presentation.tcp_server.debug");
+// Test manually close control channel with NS_ERROR_FAILURE
+function changeCloseReason() {
+  CLOSE_CONTROL_CHANNEL_REASON = Cr.NS_ERROR_FAILURE;
   run_next_test();
 }
 
-add_test(setPref);
 add_test(loopOfferAnser);
 add_test(setOffline);
+add_test(changeCloseReason);
 add_test(oneMoreLoop);
 add_test(shutdown);
-add_test(clearPref);
 
 function run_test() {
+  Services.prefs.setBoolPref("dom.presentation.tcp_server.debug", true);
+
+  do_register_cleanup(() => {
+    Services.prefs.clearUserPref("dom.presentation.tcp_server.debug");
+  });
+
   run_next_test();
 }

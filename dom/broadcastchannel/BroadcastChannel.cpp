@@ -8,14 +8,16 @@
 #include "BroadcastChannelChild.h"
 #include "mozilla/dom/BroadcastChannelBinding.h"
 #include "mozilla/dom/Navigator.h"
-#include "mozilla/dom/StructuredCloneUtils.h"
+#include "mozilla/dom/File.h"
+#include "mozilla/dom/StructuredCloneHolder.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
-#include "mozilla/Preferences.h"
+#include "nsContentUtils.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 
+#include "nsIBFCacheEntry.h"
 #include "nsIDocument.h"
 #include "nsISupportsPrimitives.h"
 
@@ -31,20 +33,19 @@ namespace dom {
 
 using namespace workers;
 
-class BroadcastChannelMessage final
+class BroadcastChannelMessage final : public StructuredCloneHolder
 {
 public:
   NS_INLINE_DECL_REFCOUNTING(BroadcastChannelMessage)
 
-  JSAutoStructuredCloneBuffer mBuffer;
-  StructuredCloneClosure mClosure;
-
   BroadcastChannelMessage()
-  { }
+    : StructuredCloneHolder(CloningSupported, TransferringNotSupported,
+                            DifferentProcess)
+  {}
 
 private:
   ~BroadcastChannelMessage()
-  { }
+  {}
 };
 
 namespace {
@@ -70,13 +71,12 @@ class InitializeRunnable final : public WorkerMainThreadRunnable
 {
 public:
   InitializeRunnable(WorkerPrivate* aWorkerPrivate, nsACString& aOrigin,
-                     PrincipalInfo& aPrincipalInfo, bool& aPrivateBrowsing,
-                     ErrorResult& aRv)
-    : WorkerMainThreadRunnable(aWorkerPrivate)
+                     PrincipalInfo& aPrincipalInfo, ErrorResult& aRv)
+    : WorkerMainThreadRunnable(aWorkerPrivate,
+                               NS_LITERAL_CSTRING("BroadcastChannel :: Initialize"))
     , mWorkerPrivate(GetCurrentThreadWorkerPrivate())
     , mOrigin(aOrigin)
     , mPrincipalInfo(aPrincipalInfo)
-    , mPrivateBrowsing(aPrivateBrowsing)
     , mRv(aRv)
   {
     MOZ_ASSERT(mWorkerPrivate);
@@ -120,17 +120,9 @@ public:
     }
 
     // Window doesn't exist for some kind of workers (eg: SharedWorkers)
-    nsPIDOMWindow* window = wp->GetWindow();
+    nsPIDOMWindowInner* window = wp->GetWindow();
     if (!window) {
       return true;
-    }
-
-    nsIDocument* doc = window->GetExtantDoc();
-    if (doc) {
-      mPrivateBrowsing = nsContentUtils::IsInPrivateBrowsing(doc);
-
-      // No bfcache when BroadcastChannel is used.
-      doc->DisallowBFCaching();
     }
 
     return true;
@@ -140,11 +132,11 @@ private:
   WorkerPrivate* mWorkerPrivate;
   nsACString& mOrigin;
   PrincipalInfo& mPrincipalInfo;
-  bool& mPrivateBrowsing;
   ErrorResult& mRv;
 };
 
-class BCPostMessageRunnable final : public nsICancelableRunnable
+class BCPostMessageRunnable final : public nsIRunnable,
+                                    public nsICancelableRunnable
 {
 public:
   NS_DECL_ISUPPORTS
@@ -167,13 +159,13 @@ public:
     ClonedMessageData message;
 
     SerializedStructuredCloneBuffer& buffer = message.data();
-    buffer.data = mData->mBuffer.data();
-    buffer.dataLength = mData->mBuffer.nbytes();
+    buffer.data = mData->BufferData();
+    buffer.dataLength = mData->BufferSize();
 
     PBackgroundChild* backgroundManager = mActor->Manager();
     MOZ_ASSERT(backgroundManager);
 
-    const nsTArray<nsRefPtr<BlobImpl>>& blobImpls = mData->mClosure.mBlobImpls;
+    const nsTArray<RefPtr<BlobImpl>>& blobImpls = mData->BlobImpls();
 
     if (!blobImpls.IsEmpty()) {
       message.blobsChild().SetCapacity(blobImpls.Length());
@@ -192,7 +184,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP Cancel() override
+  nsresult Cancel() override
   {
     mActor = nullptr;
     return NS_OK;
@@ -201,13 +193,14 @@ public:
 private:
   ~BCPostMessageRunnable() {}
 
-  nsRefPtr<BroadcastChannelChild> mActor;
-  nsRefPtr<BroadcastChannelMessage> mData;
+  RefPtr<BroadcastChannelChild> mActor;
+  RefPtr<BroadcastChannelMessage> mData;
 };
 
 NS_IMPL_ISUPPORTS(BCPostMessageRunnable, nsICancelableRunnable, nsIRunnable)
 
-class CloseRunnable final : public nsICancelableRunnable
+class CloseRunnable final : public nsIRunnable,
+                            public nsICancelableRunnable
 {
 public:
   NS_DECL_ISUPPORTS
@@ -224,7 +217,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP Cancel() override
+  nsresult Cancel() override
   {
     mBC = nullptr;
     return NS_OK;
@@ -233,12 +226,13 @@ public:
 private:
   ~CloseRunnable() {}
 
-  nsRefPtr<BroadcastChannel> mBC;
+  RefPtr<BroadcastChannel> mBC;
 };
 
 NS_IMPL_ISUPPORTS(CloseRunnable, nsICancelableRunnable, nsIRunnable)
 
-class TeardownRunnable final : public nsICancelableRunnable
+class TeardownRunnable final : public nsIRunnable,
+                               public nsICancelableRunnable
 {
 public:
   NS_DECL_ISUPPORTS
@@ -258,7 +252,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP Cancel() override
+  nsresult Cancel() override
   {
     mActor = nullptr;
     return NS_OK;
@@ -267,23 +261,23 @@ public:
 private:
   ~TeardownRunnable() {}
 
-  nsRefPtr<BroadcastChannelChild> mActor;
+  RefPtr<BroadcastChannelChild> mActor;
 };
 
 NS_IMPL_ISUPPORTS(TeardownRunnable, nsICancelableRunnable, nsIRunnable)
 
-class BroadcastChannelFeature final : public workers::WorkerFeature
+class BroadcastChannelWorkerHolder final : public workers::WorkerHolder
 {
   BroadcastChannel* mChannel;
 
 public:
-  explicit BroadcastChannelFeature(BroadcastChannel* aChannel)
+  explicit BroadcastChannelWorkerHolder(BroadcastChannel* aChannel)
     : mChannel(aChannel)
   {
-    MOZ_COUNT_CTOR(BroadcastChannelFeature);
+    MOZ_COUNT_CTOR(BroadcastChannelWorkerHolder);
   }
 
-  virtual bool Notify(JSContext* aCx, workers::Status aStatus) override
+  virtual bool Notify(workers::Status aStatus) override
   {
     if (aStatus >= Closing) {
       mChannel->Shutdown();
@@ -293,67 +287,23 @@ public:
   }
 
 private:
-  ~BroadcastChannelFeature()
+  ~BroadcastChannelWorkerHolder()
   {
-    MOZ_COUNT_DTOR(BroadcastChannelFeature);
+    MOZ_COUNT_DTOR(BroadcastChannelWorkerHolder);
   }
-};
-
-class PrefEnabledRunnable final : public WorkerMainThreadRunnable
-{
-public:
-  explicit PrefEnabledRunnable(WorkerPrivate* aWorkerPrivate)
-    : WorkerMainThreadRunnable(aWorkerPrivate)
-    , mEnabled(false)
-  { }
-
-  bool MainThreadRun() override
-  {
-    AssertIsOnMainThread();
-    mEnabled = Preferences::GetBool("dom.broadcastChannel.enabled", false);
-    return true;
-  }
-
-  bool IsEnabled() const
-  {
-    return mEnabled;
-  }
-
-private:
-  bool mEnabled;
 };
 
 } // namespace
 
-/* static */ bool
-BroadcastChannel::IsEnabled(JSContext* aCx, JSObject* aGlobal)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("dom.broadcastChannel.enabled", false);
-  }
-
-  WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-  MOZ_ASSERT(workerPrivate);
-  workerPrivate->AssertIsOnWorkerThread();
-
-  nsRefPtr<PrefEnabledRunnable> runnable =
-    new PrefEnabledRunnable(workerPrivate);
-  runnable->Dispatch(workerPrivate->GetJSContext());
-
-  return runnable->IsEnabled();
-}
-
-BroadcastChannel::BroadcastChannel(nsPIDOMWindow* aWindow,
+BroadcastChannel::BroadcastChannel(nsPIDOMWindowInner* aWindow,
                                    const PrincipalInfo& aPrincipalInfo,
                                    const nsACString& aOrigin,
-                                   const nsAString& aChannel,
-                                   bool aPrivateBrowsing)
+                                   const nsAString& aChannel)
   : DOMEventTargetHelper(aWindow)
-  , mWorkerFeature(nullptr)
+  , mWorkerHolder(nullptr)
   , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
   , mOrigin(aOrigin)
   , mChannel(aChannel)
-  , mPrivateBrowsing(aPrivateBrowsing)
   , mIsKeptAlive(false)
   , mInnerID(0)
   , mState(StateActive)
@@ -364,7 +314,7 @@ BroadcastChannel::BroadcastChannel(nsPIDOMWindow* aWindow,
 BroadcastChannel::~BroadcastChannel()
 {
   Shutdown();
-  MOZ_ASSERT(!mWorkerFeature);
+  MOZ_ASSERT(!mWorkerHolder);
 }
 
 JSObject*
@@ -378,12 +328,12 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
                               const nsAString& aChannel,
                               ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindowInner> window =
+    do_QueryInterface(aGlobal.GetAsSupports());
   // Window is null in workers.
 
   nsAutoCString origin;
   PrincipalInfo principalInfo;
-  bool privateBrowsing = false;
   WorkerPrivate* workerPrivate = nullptr;
 
   if (NS_IsMainThread()) {
@@ -420,32 +370,22 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
-
-    nsIDocument* doc = window->GetExtantDoc();
-    if (doc) {
-      privateBrowsing = nsContentUtils::IsInPrivateBrowsing(doc);
-
-      // No bfcache when BroadcastChannel is used.
-      doc->DisallowBFCaching();
-    }
   } else {
     JSContext* cx = aGlobal.Context();
     workerPrivate = GetWorkerPrivateFromContext(cx);
     MOZ_ASSERT(workerPrivate);
 
-    nsRefPtr<InitializeRunnable> runnable =
-      new InitializeRunnable(workerPrivate, origin, principalInfo,
-                             privateBrowsing, aRv);
-    runnable->Dispatch(cx);
+    RefPtr<InitializeRunnable> runnable =
+      new InitializeRunnable(workerPrivate, origin, principalInfo, aRv);
+    runnable->Dispatch(aRv);
   }
 
   if (aRv.Failed()) {
     return nullptr;
   }
 
-  nsRefPtr<BroadcastChannel> bc =
-    new BroadcastChannel(window, principalInfo, origin, aChannel,
-                         privateBrowsing);
+  RefPtr<BroadcastChannel> bc =
+    new BroadcastChannel(window, principalInfo, origin, aChannel);
 
   // Register this component to PBackground.
   PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
@@ -466,11 +406,9 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
       obs->AddObserver(bc, "inner-window-destroyed", false);
     }
   } else {
-    bc->mWorkerFeature = new BroadcastChannelFeature(bc);
-    JSContext* cx = workerPrivate->GetJSContext();
-    if (NS_WARN_IF(!workerPrivate->AddFeature(cx, bc->mWorkerFeature))) {
-      NS_WARNING("Failed to register the BroadcastChannel worker feature.");
-      bc->mWorkerFeature = nullptr;
+    bc->mWorkerHolder = new BroadcastChannelWorkerHolder(bc);
+    if (NS_WARN_IF(!bc->mWorkerHolder->HoldWorker(workerPrivate))) {
+      bc->mWorkerHolder = nullptr;
       aRv.Throw(NS_ERROR_FAILURE);
       return nullptr;
     }
@@ -484,7 +422,7 @@ BroadcastChannel::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                               ErrorResult& aRv)
 {
   if (mState != StateActive) {
-    aRv.Throw(NS_ERROR_FAILURE);
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
 
@@ -496,19 +434,11 @@ BroadcastChannel::PostMessageInternal(JSContext* aCx,
                                       JS::Handle<JS::Value> aMessage,
                                       ErrorResult& aRv)
 {
-  nsRefPtr<BroadcastChannelMessage> data = new BroadcastChannelMessage();
+  RefPtr<BroadcastChannelMessage> data = new BroadcastChannelMessage();
 
-  if (!WriteStructuredClone(aCx, aMessage, data->mBuffer, data->mClosure)) {
-    aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
+  data->Write(aCx, aMessage, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
     return;
-  }
-
-  const nsTArray<nsRefPtr<BlobImpl>>& blobImpls = data->mClosure.mBlobImpls;
-  for (uint32_t i = 0, len = blobImpls.Length(); i < len; ++i) {
-    if (!blobImpls[i]->MayBeClonedToOtherThreads()) {
-      aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
-      return;
-    }
   }
 
   PostMessageData(data);
@@ -517,8 +447,10 @@ BroadcastChannel::PostMessageInternal(JSContext* aCx,
 void
 BroadcastChannel::PostMessageData(BroadcastChannelMessage* aData)
 {
+  RemoveDocFromBFCache();
+
   if (mActor) {
-    nsRefPtr<BCPostMessageRunnable> runnable =
+    RefPtr<BCPostMessageRunnable> runnable =
       new BCPostMessageRunnable(mActor, aData);
 
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
@@ -544,7 +476,7 @@ BroadcastChannel::Close()
     // StateClosed and we shutdown the actor asynchrounsly.
 
     mState = StateClosed;
-    nsRefPtr<CloseRunnable> runnable = new CloseRunnable(this);
+    RefPtr<CloseRunnable> runnable = new CloseRunnable(this);
 
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
       NS_WARNING("Failed to dispatch to the current thread!");
@@ -571,8 +503,7 @@ BroadcastChannel::ActorCreated(PBackgroundChild* aActor)
   }
 
   PBroadcastChannelChild* actor =
-    aActor->SendPBroadcastChannelConstructor(*mPrincipalInfo, mOrigin, mChannel,
-                                             mPrivateBrowsing);
+    aActor->SendPBroadcastChannelConstructor(*mPrincipalInfo, mOrigin, mChannel);
 
   mActor = static_cast<BroadcastChannelChild*>(actor);
   MOZ_ASSERT(mActor);
@@ -596,16 +527,13 @@ BroadcastChannel::Shutdown()
 {
   mState = StateClosed;
 
-  if (mWorkerFeature) {
-    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-    workerPrivate->RemoveFeature(workerPrivate->GetJSContext(), mWorkerFeature);
-    mWorkerFeature = nullptr;
-  }
+  // The DTOR of this WorkerHolder will release the worker for us.
+  mWorkerHolder = nullptr;
 
   if (mActor) {
     mActor->SetParent(nullptr);
 
-    nsRefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
+    RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
     NS_DispatchToCurrentThread(runnable);
 
     mActor = nullptr;
@@ -643,11 +571,11 @@ BroadcastChannel::SetOnmessage(EventHandlerNonNull* aCallback)
 void
 BroadcastChannel::AddEventListener(const nsAString& aType,
                                    EventListener* aCallback,
-                                   bool aCapture,
+                                   const AddEventListenerOptionsOrBoolean& aOptions,
                                    const dom::Nullable<bool>& aWantsUntrusted,
                                    ErrorResult& aRv)
 {
-  DOMEventTargetHelper::AddEventListener(aType, aCallback, aCapture,
+  DOMEventTargetHelper::AddEventListener(aType, aCallback, aOptions,
                                          aWantsUntrusted, aRv);
 
   if (aRv.Failed()) {
@@ -660,10 +588,10 @@ BroadcastChannel::AddEventListener(const nsAString& aType,
 void
 BroadcastChannel::RemoveEventListener(const nsAString& aType,
                                       EventListener* aCallback,
-                                      bool aCapture,
+                                      const EventListenerOptionsOrBoolean& aOptions,
                                       ErrorResult& aRv)
 {
-  DOMEventTargetHelper::RemoveEventListener(aType, aCallback, aCapture, aRv);
+  DOMEventTargetHelper::RemoveEventListener(aType, aCallback, aOptions, aRv);
 
   if (aRv.Failed()) {
     return;
@@ -698,10 +626,6 @@ BroadcastChannel::Observe(nsISupports* aSubject, const char* aTopic,
 
   // If the window is destroyed we have to release the reference that we are
   // keeping.
-  if (!mIsKeptAlive) {
-    return NS_OK;
-  }
-
   nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
   NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
 
@@ -719,6 +643,31 @@ BroadcastChannel::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   return NS_OK;
+}
+
+void
+BroadcastChannel::RemoveDocFromBFCache()
+{
+  if (!NS_IsMainThread()) {
+    return;
+  }
+
+  nsPIDOMWindowInner* window = GetOwner();
+  if (!window) {
+    return;
+  }
+
+  nsIDocument* doc = window->GetExtantDoc();
+  if (!doc) {
+    return;
+  }
+
+  nsCOMPtr<nsIBFCacheEntry> bfCacheEntry = doc->GetBFCacheEntry();
+  if (!bfCacheEntry) {
+    return;
+  }
+
+  bfCacheEntry->RemoveFromBFCacheSync();
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(BroadcastChannel)

@@ -12,6 +12,12 @@
 using namespace mozilla;
 using services::GetObserverService;
 
+#define LOG_FONTINIT(args) MOZ_LOG(gfxPlatform::GetLog(eGfxLog_fontinit), \
+                               LogLevel::Debug, args)
+#define LOG_FONTINIT_ENABLED() MOZ_LOG_TEST( \
+                                   gfxPlatform::GetLog(eGfxLog_fontinit), \
+                                   LogLevel::Debug)
+
 void
 FontInfoData::Load()
 {
@@ -19,14 +25,21 @@ FontInfoData::Load()
 
     uint32_t i, n = mFontFamiliesToLoad.Length();
     mLoadStats.families = n;
-    for (i = 0; i < n; i++) {
-        LoadFontFamilyData(mFontFamiliesToLoad[i]);
+    for (i = 0; i < n && !mCanceled; i++) {
+        // font file memory mapping sometimes causes exceptions - bug 1100949
+        MOZ_SEH_TRY {
+            LoadFontFamilyData(mFontFamiliesToLoad[i]);
+        } MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+            gfxCriticalError() <<
+                "Exception occurred reading font data for " <<
+                NS_ConvertUTF16toUTF8(mFontFamiliesToLoad[i]).get();
+        }
     }
 
     mLoadTime = TimeStamp::Now() - start;
 }
 
-class FontInfoLoadCompleteEvent : public nsRunnable {
+class FontInfoLoadCompleteEvent : public Runnable {
     virtual ~FontInfoLoadCompleteEvent() {}
 
     NS_DECL_ISUPPORTS_INHERITED
@@ -37,10 +50,10 @@ class FontInfoLoadCompleteEvent : public nsRunnable {
 
     NS_IMETHOD Run() override;
 
-    nsRefPtr<FontInfoData> mFontInfo;
+    RefPtr<FontInfoData> mFontInfo;
 };
 
-class AsyncFontInfoLoader : public nsRunnable {
+class AsyncFontInfoLoader : public Runnable {
     virtual ~AsyncFontInfoLoader() {}
 
     NS_DECL_ISUPPORTS_INHERITED
@@ -53,9 +66,24 @@ class AsyncFontInfoLoader : public nsRunnable {
 
     NS_IMETHOD Run() override;
 
-    nsRefPtr<FontInfoData> mFontInfo;
-    nsRefPtr<FontInfoLoadCompleteEvent> mCompleteEvent;
+    RefPtr<FontInfoData> mFontInfo;
+    RefPtr<FontInfoLoadCompleteEvent> mCompleteEvent;
 };
+
+class ShutdownThreadEvent : public Runnable {
+    virtual ~ShutdownThreadEvent() {}
+
+    NS_DECL_ISUPPORTS_INHERITED
+
+    explicit ShutdownThreadEvent(nsIThread* aThread) : mThread(aThread) {}
+    NS_IMETHOD Run() override {
+        mThread->Shutdown();
+        return NS_OK;
+    }
+    nsCOMPtr<nsIThread> mThread;
+};
+
+NS_IMPL_ISUPPORTS_INHERITED0(ShutdownThreadEvent, Runnable);
 
 // runs on main thread after async font info loading is done
 nsresult
@@ -69,7 +97,7 @@ FontInfoLoadCompleteEvent::Run()
     return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(FontInfoLoadCompleteEvent, nsRunnable);
+NS_IMPL_ISUPPORTS_INHERITED0(FontInfoLoadCompleteEvent, Runnable);
 
 // runs on separate thread
 nsresult
@@ -84,7 +112,7 @@ AsyncFontInfoLoader::Run()
     return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(AsyncFontInfoLoader, nsRunnable);
+NS_IMPL_ISUPPORTS_INHERITED0(AsyncFontInfoLoader, Runnable);
 
 NS_IMPL_ISUPPORTS(gfxFontInfoLoader::ShutdownObserver, nsIObserver)
 
@@ -105,6 +133,9 @@ void
 gfxFontInfoLoader::StartLoader(uint32_t aDelay, uint32_t aInterval)
 {
     mInterval = aInterval;
+
+    NS_ASSERTION(!mFontInfo,
+                 "fontinfo should be null when starting font loader");
 
     // sanity check
     if (mState != stateInitial &&
@@ -149,6 +180,11 @@ gfxFontInfoLoader::StartLoader(uint32_t aDelay, uint32_t aInterval)
     nsCOMPtr<nsIRunnable> loadEvent = new AsyncFontInfoLoader(mFontInfo);
 
     mFontLoaderThread->Dispatch(loadEvent.forget(), NS_DISPATCH_NORMAL);
+
+    if (LOG_FONTINIT_ENABLED()) {
+        LOG_FONTINIT(("(fontinit) fontloader started (fontinfo: %p)\n",
+                      mFontInfo.get()));
+    }
 }
 
 void
@@ -159,7 +195,7 @@ gfxFontInfoLoader::FinalizeLoader(FontInfoData *aFontInfo)
     // thread has already Shutdown(), and likely before processing
     // the Shutdown event it handled the load event and sent back
     // our Completion event, thus we end up here.
-    if (mState != stateAsyncLoad) {
+    if (mState != stateAsyncLoad || mFontInfo != aFontInfo) {
         return;
     }
 
@@ -188,12 +224,11 @@ gfxFontInfoLoader::CancelLoader()
         mTimer->Cancel();
         mTimer = nullptr;
     }
+    if (mFontInfo) // null during any initial delay
+        mFontInfo->mCanceled = true;
     if (mFontLoaderThread) {
-        // NOTE: Shutdown() runs the event loop, and we can get timer events
-        // ensure that we can't try to do this twice!
-        nsCOMPtr<nsIThread> temp;
-        temp.swap(mFontLoaderThread);
-        temp->Shutdown();
+        NS_DispatchToMainThread(new ShutdownThreadEvent(mFontLoaderThread));
+        mFontLoaderThread = nullptr;
     }
     RemoveShutdownObserver();
     CleanupLoader();

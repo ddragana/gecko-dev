@@ -6,6 +6,7 @@
 #ifndef OmxTrackEncoder_h_
 #define OmxTrackEncoder_h_
 
+#include "nsAutoPtr.h"
 #include "TrackEncoder.h"
 
 namespace android {
@@ -83,6 +84,22 @@ public:
 
   enum {
     AMR_NB_SAMPLERATE = 8000,
+  };
+  already_AddRefed<TrackMetadataBase> GetMetadata() override;
+
+protected:
+  nsresult Init(int aChannels, int aSamplingRate) override;
+};
+
+class OmxEVRCAudioTrackEncoder final : public OmxAudioTrackEncoder
+{
+public:
+  OmxEVRCAudioTrackEncoder()
+    : OmxAudioTrackEncoder()
+  {}
+
+  enum {
+    EVRC_SAMPLERATE = 8000,
   };
   already_AddRefed<TrackMetadataBase> GetMetadata() override;
 

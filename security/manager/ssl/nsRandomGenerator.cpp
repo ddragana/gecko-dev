@@ -4,6 +4,7 @@
 
 #include "nsRandomGenerator.h"
 
+#include "ScopedNSSTypes.h"
 #include "nsNSSComponent.h"
 #include "pk11pub.h"
 #include "prerror.h"
@@ -11,8 +12,6 @@
 
 NS_IMPL_ISUPPORTS(nsRandomGenerator, nsIRandomGenerator)
 
-// void generateRandomBytes(in unsigned long aLength,
-//                          [retval, array, size_is(aLength)] out octet aBuffer)
 NS_IMETHODIMP
 nsRandomGenerator::GenerateRandomBytes(uint32_t aLength,
                                        uint8_t** aBuffer)
@@ -25,18 +24,17 @@ nsRandomGenerator::GenerateRandomBytes(uint32_t aLength,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  mozilla::ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
+  mozilla::UniquePK11SlotInfo slot(PK11_GetInternalSlot());
   if (!slot) {
     return NS_ERROR_FAILURE;
   }
 
-  uint8_t* buf = reinterpret_cast<uint8_t*>(moz_xmalloc(aLength));
+  auto buf = static_cast<uint8_t*>(moz_xmalloc(aLength));
   if (!buf) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  SECStatus srv = PK11_GenerateRandomOnSlot(slot, buf, aLength);
-
+  SECStatus srv = PK11_GenerateRandomOnSlot(slot.get(), buf, aLength);
   if (srv != SECSuccess) {
     free(buf);
     return NS_ERROR_FAILURE;

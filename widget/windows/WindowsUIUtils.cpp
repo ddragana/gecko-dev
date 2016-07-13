@@ -11,7 +11,7 @@
 
 #include "nsIObserverService.h"
 #include "nsIBaseWindow.h"
-#include "nsIDocshell.h"
+#include "nsIDocShell.h"
 #include "nsIAppShellService.h"
 #include "nsAppShellCID.h"
 #include "nsIXULWindow.h"
@@ -19,6 +19,9 @@
 #include "mozilla/WindowsVersion.h"
 #include "nsString.h"
 #include "nsIWidget.h"
+
+/* mingw currently doesn't support windows.ui.viewmanagement.h, so we disable it until it's fixed. */
+#ifndef __MINGW32__
 
 #include <windows.ui.viewmanagement.h>
 
@@ -33,7 +36,7 @@ using namespace ABI::Windows::Foundation;
 
 /* All of this is win10 stuff and we're compiling against win81 headers
  * for now, so we may need to do some legwork: */
-#ifndef UserInteractionMode
+#if MOZ_WINSDK_MAXVER < 0x0A000000
 namespace ABI {
   namespace Windows {
     namespace UI {
@@ -53,7 +56,7 @@ namespace ABI {
 #define RuntimeClass_Windows_UI_ViewManagement_UIViewSettings L"Windows.UI.ViewManagement.UIViewSettings"
 #endif
 
-#ifndef IUIViewSettings
+#if MOZ_WINSDK_MAXVER < 0x0A000000
 namespace ABI {
   namespace Windows {
     namespace UI {
@@ -85,6 +88,8 @@ public:
 };
 #endif
 
+#endif
+
 WindowsUIUtils::WindowsUIUtils() :
   mInTabletMode(eTabletModeUnknown)
 {
@@ -113,6 +118,7 @@ WindowsUIUtils::GetInTabletMode(bool* aResult)
 NS_IMETHODIMP
 WindowsUIUtils::UpdateTabletModeState()
 {
+#ifndef __MINGW32__
   if (!IsWin10OrLater()) {
     return NS_OK;
   }
@@ -168,6 +174,7 @@ WindowsUIUtils::UpdateTabletModeState()
       }
     }
   }
+#endif
 
   return NS_OK;
 }

@@ -12,22 +12,14 @@
 #include "jsalloc.h"
 
 #include "gc/Barrier.h"
+#include "gc/Marking.h"
 #include "gc/Rooting.h"
 #include "js/GCAPI.h"
+#include "js/GCHashTable.h"
 #include "vm/CommonPropertyNames.h"
 
 class JSAtom;
 class JSAutoByteString;
-
-struct JSIdArray {
-    int length;
-    js::HeapId vector[1];    /* actually, length jsid words */
-
-    js::HeapId* begin() { return vector; }
-    const js::HeapId* begin() const { return vector; }
-    js::HeapId* end() { return vector + length; }
-    const js::HeapId* end() const { return vector + length; }
-};
 
 namespace js {
 
@@ -38,17 +30,6 @@ HashId(jsid id)
 {
     return mozilla::HashGeneric(JSID_BITS(id));
 }
-
-struct JsidHasher
-{
-    typedef jsid Lookup;
-    static HashNumber hash(const Lookup& l) {
-        return HashNumber(JSID_BITS(l));
-    }
-    static bool match(const jsid& id, const Lookup& l) {
-        return id == l;
-    }
-};
 
 /*
  * Return a printable, lossless char[] representation of a string-type atom.
@@ -85,6 +66,12 @@ class AtomStateEntry
     }
 
     JSAtom* asPtr() const;
+    JSAtom* asPtrUnbarriered() const;
+
+    bool needsSweep() {
+        JSAtom* atom = asPtrUnbarriered();
+        return gc::IsAboutToBeFinalizedUnbarriered(&atom);
+    }
 };
 
 struct AtomHasher
@@ -120,7 +107,7 @@ struct AtomHasher
     static void rekey(AtomStateEntry& k, const AtomStateEntry& newKey) { k = newKey; }
 };
 
-typedef HashSet<AtomStateEntry, AtomHasher, SystemAllocPolicy> AtomSet;
+using AtomSet = JS::GCHashSet<AtomStateEntry, AtomHasher, SystemAllocPolicy>;
 
 // This class is a wrapper for AtomSet that is used to ensure the AtomSet is
 // not modified. It should only expose read-only methods from AtomSet.
@@ -186,7 +173,6 @@ extern const char js_import_str[];
 extern const char js_in_str[];
 extern const char js_instanceof_str[];
 extern const char js_interface_str[];
-extern const char js_new_str[];
 extern const char js_package_str[];
 extern const char js_private_str[];
 extern const char js_protected_str[];
@@ -205,11 +191,13 @@ extern const char js_with_str[];
 
 namespace js {
 
+class AutoLockForExclusiveAccess;
+
 /*
  * Atom tracing and garbage collection hooks.
  */
 void
-MarkAtoms(JSTracer* trc);
+MarkAtoms(JSTracer* trc, AutoLockForExclusiveAccess& lock);
 
 void
 MarkPermanentAtoms(JSTracer* trc);
@@ -232,6 +220,9 @@ template <typename CharT>
 extern JSAtom*
 AtomizeChars(ExclusiveContext* cx, const CharT* chars, size_t length,
              js::PinningBehavior pin = js::DoNotPinAtom);
+
+extern JSAtom*
+AtomizeUTF8Chars(JSContext* cx, const char* utf8Chars, size_t utf8ByteLength);
 
 extern JSAtom*
 AtomizeString(ExclusiveContext* cx, JSString* str, js::PinningBehavior pin = js::DoNotPinAtom);

@@ -1,11 +1,32 @@
-the contents of this dir (testing/mozharness) represent two parts
+# Mozharness
 
-1) the old way: mozharness.json is a manifest file that locks or "pins" mozharness to a repository and a revision.
+## Docs
+* https://developer.mozilla.org/en-US/docs/Mozharness_FAQ
+* https://wiki.mozilla.org/ReleaseEngineering/Mozharness
+* http://moz-releng-mozharness.readthedocs.org/en/latest/mozharness.mozilla.html
+* http://moz-releng-docs.readthedocs.org/en/latest/software.html#mozharness
 
-2) the new way: an in-gecko-tree copy of mozharness.
-    * hgmo/build/mozharness is still live and the defacto read/write repository
-    * continuous integration jobs are based on this copy
-    * As we transition to dropping support for hg.m.o/build/mozharness, this copy will continue to be synced
-    * this copy is currently based on: http://hg.mozilla.org/build/mozharness/rev/239491bc393a
+## Submitting changes
+Like any Gecko change, please create a patch or submit to Mozreview and
+open a Bugzilla ticket under the Mozharness component:
+https://bugzilla.mozilla.org/enter_bug.cgi?product=Release%20Engineering&component=Mozharness
 
+This bug will get triaged by Release Engineering
+
+## Run unit tests
+To run the unit tests of mozharness the `tox` package needs to be installed:
+
+```
+pip install tox
+```
+
+There are various ways to run the unit tests. Just make sure you are within the `$gecko_repo/testing/mozharness` directory before running one of the commands below:
+
+```
+tox                            # run all unit tests
+tox -- -x                      # run all unit tests but stop after first failure
+tox -- test/test_base_log.py   # only run the base log unit test
+```
+
+Happy contributing! =)
 

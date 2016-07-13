@@ -4,12 +4,12 @@
 
 "use strict";
 
-let Cu = Components.utils;
-let Ci = Components.interfaces;
+var Cu = Components.utils;
+var Ci = Components.interfaces;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/sessionstore/FrameTree.jsm", this);
-let gFrameTree = new FrameTree(this);
+var gFrameTree = new FrameTree(this);
 
 function executeSoon(callback) {
   Services.tm.mainThread.dispatch(callback, Components.interfaces.nsIThread.DISPATCH_NORMAL);
@@ -25,7 +25,7 @@ gFrameTree.addObserver({
   }
 });
 
-let historyListener = {
+var historyListener = {
   OnHistoryNewEntry: function () {
     sendAsyncMessage("ss-test:OnHistoryNewEntry");
   },
@@ -65,7 +65,7 @@ let historyListener = {
   ])
 };
 
-let {sessionHistory} = docShell.QueryInterface(Ci.nsIWebNavigation);
+var {sessionHistory} = docShell.QueryInterface(Ci.nsIWebNavigation);
 if (sessionHistory) {
   sessionHistory.addSHistoryListener(historyListener);
 }
@@ -214,12 +214,6 @@ addMessageListener("ss-test:mapFrameTree", function (msg) {
 addMessageListener("ss-test:click", function ({data}) {
   content.document.getElementById(data.id).click();
   sendAsyncMessage("ss-test:click");
-});
-
-addMessageListener("ss-test:run", function({data, objects}) {
-  let f = eval('(' + data.code + ')');
-  let result = f(content, objects.arg);
-  sendAsyncMessage("ss-test:runFinished", result);
 });
 
 addEventListener("load", function(event) {

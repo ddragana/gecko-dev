@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 
+#include "js/Initialization.h"
 #include "js/RootingAPI.h"
 
 JSAPITest* JSAPITest::list;
@@ -17,8 +18,8 @@ bool JSAPITest::init()
     rt = createRuntime();
     if (!rt)
         return false;
-    cx = createContext();
-    if (!cx)
+    cx = JS_GetContext(rt);
+    if (!JS::InitSelfHostedCode(cx))
         return false;
     JS_BeginRequest(cx);
     global.init(rt);
@@ -41,7 +42,6 @@ void JSAPITest::uninit()
     }
     if (cx) {
         JS_EndRequest(cx);
-        JS_DestroyContext(cx);
         cx = nullptr;
     }
     if (rt) {
@@ -59,6 +59,14 @@ bool JSAPITest::exec(const char* bytes, const char* filename, int lineno)
         fail(JSAPITestString(bytes), filename, lineno);
 }
 
+bool JSAPITest::execDontReport(const char* bytes, const char* filename, int lineno)
+{
+    JS::RootedValue v(cx);
+    JS::CompileOptions opts(cx);
+    opts.setFileAndLine(filename, lineno);
+    return JS::Evaluate(cx, opts, bytes, strlen(bytes), &v);
+}
+
 bool JSAPITest::evaluate(const char* bytes, const char* filename, int lineno,
                          JS::MutableHandleValue vp)
 {
@@ -73,12 +81,12 @@ bool JSAPITest::definePrint()
     return JS_DefineFunction(cx, global, "print", (JSNative) print, 0, 0);
 }
 
-JSObject * JSAPITest::createGlobal(JSPrincipals* principals)
+JSObject* JSAPITest::createGlobal(JSPrincipals* principals)
 {
     /* Create the global object. */
     JS::RootedObject newGlobal(cx);
     JS::CompartmentOptions options;
-    options.setVersion(JSVERSION_LATEST);
+    options.behaviors().setVersion(JSVERSION_LATEST);
     newGlobal = JS_NewGlobalObject(cx, getGlobalClass(), principals, JS::FireOnNewGlobalHook,
                                    options);
     if (!newGlobal)
@@ -86,8 +94,8 @@ JSObject * JSAPITest::createGlobal(JSPrincipals* principals)
 
     JSAutoCompartment ac(cx, newGlobal);
 
-    /* Populate the global object with the standard globals, like Object and
-       Array. */
+    // Populate the global object with the standard globals like Object and
+    // Array.
     if (!JS_InitStandardClasses(cx, newGlobal))
         return nullptr;
 

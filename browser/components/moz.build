@@ -6,22 +6,22 @@
 
 DIRS += [
     'about',
+    'contextualidentity',
     'customizableui',
     'dirprovider',
     'downloads',
+    'extensions',
     'feeds',
-    'loop',
     'migration',
+    'newtab',
     'places',
-    'pocket',
     'preferences',
     'privatebrowsing',
-    'readinglist',
     'search',
     'sessionstore',
     'shell',
     'selfsupport',
-    'tabview',
+    'syncedtabs',
     'uitour',
     'translation',
 ]
@@ -37,11 +37,11 @@ XPIDL_MODULE = 'browsercompsbase'
 
 EXTRA_PP_COMPONENTS += [
     'BrowserComponents.manifest',
-    'nsBrowserGlue.js',
 ]
 
 EXTRA_COMPONENTS += [
     'nsBrowserContentHandler.js',
+    'nsBrowserGlue.js',
 ]
 
 EXTRA_JS_MODULES += [
@@ -49,7 +49,11 @@ EXTRA_JS_MODULES += [
 ]
 
 BROWSER_CHROME_MANIFESTS += [
-    'test/browser.ini'
+    'tests/browser/browser.ini'
+]
+
+XPCSHELL_TESTS_MANIFESTS += [
+    'tests/unit/xpcshell.ini'
 ]
 
 if CONFIG['MOZ_SAFE_BROWSING']:

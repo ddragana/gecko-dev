@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -36,18 +38,6 @@ class Message : public Pickle {
  public:
   typedef uint32_t msgid_t;
 
-  // Implemented by objects that can send IPC messages across a channel.
-  class Sender {
-   public:
-    virtual ~Sender() {}
-
-    // Sends the given IPC message.  The implementor takes ownership of the
-    // given Message regardless of whether or not this method succeeds.  This
-    // is done to make this method easier to use.  Returns true on success and
-    // false otherwise.
-    virtual bool Send(Message* msg) = 0;
-  };
-
   enum PriorityValue {
     PRIORITY_NORMAL = 1,
     PRIORITY_HIGH = 2,
@@ -70,14 +60,11 @@ class Message : public Pickle {
           MessageCompression compression = COMPRESSION_NONE,
           const char* const name="???");
 
-  // Initializes a message from a const block of data.  The data is not copied;
-  // instead the data is merely referenced by this message.  Only const methods
-  // should be used on the message when initialized this way.
   Message(const char* data, int data_len);
 
-  Message(const Message& other);
+  Message(const Message& other) = delete;
   Message(Message&& other);
-  Message& operator=(const Message& other);
+  Message& operator=(const Message& other) = delete;
   Message& operator=(Message&& other);
 
   PriorityValue priority() const {
@@ -190,16 +177,16 @@ class Message : public Pickle {
     return header()->seqno;
   }
 
-  void set_seqno(int32_t seqno) {
-    header()->seqno = seqno;
+  void set_seqno(int32_t aSeqno) {
+    header()->seqno = aSeqno;
   }
 
-  const char* const name() const {
+  const char* name() const {
     return name_;
   }
 
-  void set_name(const char* const name) {
-    name_ = name;
+  void set_name(const char* const aName) {
+    name_ = aName;
   }
 
 #if defined(OS_POSIX)
@@ -236,10 +223,11 @@ class Message : public Pickle {
   static void Log(const Message* msg, std::wstring* l) {
   }
 
-  // Find the end of the message data that starts at range_start.  Returns NULL
-  // if the entire message is not found in the given data range.
-  static const char* FindNext(const char* range_start, const char* range_end) {
-    return Pickle::FindNext(sizeof(Header), range_start, range_end);
+  // Figure out how big the message starting at range_start is. Returns 0 if
+  // there's no enough data to determine (i.e., if [range_start, range_end) does
+  // not contain enough of the message header to know the size).
+  static uint32_t MessageSize(const char* range_start, const char* range_end) {
+    return Pickle::MessageSize(sizeof(Header), range_start, range_end);
   }
 
 #if defined(OS_POSIX)
@@ -250,7 +238,7 @@ class Message : public Pickle {
   bool WriteFileDescriptor(const base::FileDescriptor& descriptor);
   // Get a file descriptor from the message. Returns false on error.
   //   iter: a Pickle iterator to the current location in the message.
-  bool ReadFileDescriptor(void** iter, base::FileDescriptor* descriptor) const;
+  bool ReadFileDescriptor(PickleIterator* iter, base::FileDescriptor* descriptor) const;
 
 #if defined(OS_MACOSX)
   void set_fd_cookie(uint32_t cookie) {
@@ -332,7 +320,7 @@ class Message : public Pickle {
 
 #if defined(OS_POSIX)
   // The set of file descriptors associated with this message.
-  nsRefPtr<FileDescriptorSet> file_descriptor_set_;
+  RefPtr<FileDescriptorSet> file_descriptor_set_;
 
   // Ensure that a FileDescriptorSet is allocated
   void EnsureFileDescriptorSet();
@@ -348,6 +336,21 @@ class Message : public Pickle {
 
   const char* name_;
 
+};
+
+class MessageInfo {
+public:
+    typedef uint32_t msgid_t;
+
+    explicit MessageInfo(const Message& aMsg)
+        : mSeqno(aMsg.seqno()), mType(aMsg.type()) {}
+
+    int32_t seqno() const { return mSeqno; }
+    msgid_t type() const { return mType; }
+
+private:
+    int32_t mSeqno;
+    msgid_t mType;
 };
 
 //------------------------------------------------------------------------------

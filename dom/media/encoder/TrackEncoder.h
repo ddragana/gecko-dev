@@ -10,7 +10,7 @@
 
 #include "AudioSegment.h"
 #include "EncodedFrameContainer.h"
-#include "StreamBuffer.h"
+#include "StreamTracks.h"
 #include "TrackMetadataBase.h"
 #include "VideoSegment.h"
 #include "MediaStreamGraph.h"
@@ -48,12 +48,7 @@ public:
    * MediaStreamGraph. Called on the MediaStreamGraph thread.
    */
   void NotifyEvent(MediaStreamGraph* aGraph,
-                   MediaStreamListener::MediaStreamGraphEvent event)
-  {
-    if (event == MediaStreamListener::MediaStreamGraphEvent::EVENT_REMOVED) {
-      NotifyEndOfStream();
-    }
-  }
+                   MediaStreamGraphEvent event);
 
   /**
    * Creates and sets up meta data for a specific codec, called on the worker
@@ -83,6 +78,8 @@ public:
     mCanceled = true;
     mReentrantMonitor.NotifyAll();
   }
+
+  virtual void SetBitrate(const uint32_t aBitrate) {}
 
 protected:
   /**
@@ -130,8 +127,8 @@ protected:
   bool mCanceled;
 
   // How many times we have tried to initialize the encoder.
-  uint32_t mAudioInitCounter;
-  uint32_t mVideoInitCounter;
+  uint32_t mInitCounter;
+  StreamTime mNotInitDuration;
 };
 
 class AudioTrackEncoder : public TrackEncoder
@@ -141,12 +138,35 @@ public:
     : TrackEncoder()
     , mChannels(0)
     , mSamplingRate(0)
+    , mAudioBitrate(0)
   {}
 
-  virtual void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
-                                        StreamTime aTrackOffset,
-                                        uint32_t aTrackEvents,
-                                        const MediaSegment& aQueuedMedia) override;
+  void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
+                                StreamTime aTrackOffset,
+                                uint32_t aTrackEvents,
+                                const MediaSegment& aQueuedMedia) override;
+
+  template<typename T>
+  static
+  void InterleaveTrackData(nsTArray<const T*>& aInput,
+                           int32_t aDuration,
+                           uint32_t aOutputChannels,
+                           AudioDataValue* aOutput,
+                           float aVolume)
+  {
+    if (aInput.Length() < aOutputChannels) {
+      // Up-mix. This might make the mChannelData have more than aChannels.
+      AudioChannelsUpMix(&aInput, aOutputChannels, SilentChannel::ZeroChannel<T>());
+    }
+
+    if (aInput.Length() > aOutputChannels) {
+      DownmixAndInterleave(aInput, aDuration,
+                           aVolume, aOutputChannels, aOutput);
+    } else {
+      InterleaveAndConvertBuffer(aInput.Elements(), aDuration, aVolume,
+                                 aOutputChannels, aOutput);
+    }
+  }
 
   /**
    * Interleaves the track data and stores the result into aOutput. Might need
@@ -169,6 +189,10 @@ public:
   */
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
+  void SetBitrate(const uint32_t aBitrate) override
+  {
+    mAudioBitrate = aBitrate;
+  }
 protected:
   /**
    * Number of samples per channel in a pcm buffer. This is also the value of
@@ -198,7 +222,7 @@ protected:
    * Notifies the audio encoder that we have reached the end of source stream,
    * and wakes up mReentrantMonitor if encoder is waiting for more track data.
    */
-  virtual void NotifyEndOfStream() override;
+  void NotifyEndOfStream() override;
 
   /**
    * The number of channels are used for processing PCM data in the audio encoder.
@@ -217,6 +241,8 @@ protected:
    * A segment queue of audio track data, protected by mReentrantMonitor.
    */
   AudioSegment mRawSegment;
+
+  uint32_t mAudioBitrate;
 };
 
 class VideoTrackEncoder : public TrackEncoder
@@ -230,21 +256,27 @@ public:
     , mDisplayHeight(0)
     , mTrackRate(0)
     , mTotalFrameDuration(0)
+    , mLastFrameDuration(0)
+    , mVideoBitrate(0)
   {}
 
   /**
    * Notified by the same callback of MediaEncoder when it has received a track
    * change from MediaStreamGraph. Called on the MediaStreamGraph thread.
    */
-  virtual void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
-                                        StreamTime aTrackOffset,
-                                        uint32_t aTrackEvents,
-                                        const MediaSegment& aQueuedMedia) override;
+  void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
+                                StreamTime aTrackOffset,
+                                uint32_t aTrackEvents,
+                                const MediaSegment& aQueuedMedia) override;
   /**
   * Measure size of mRawSegment
   */
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
+  void SetBitrate(const uint32_t aBitrate) override
+  {
+    mVideoBitrate = aBitrate;
+  }
 protected:
   /**
    * Initialized the video encoder. In order to collect the value of width and
@@ -267,7 +299,7 @@ protected:
    * and wakes up mReentrantMonitor if encoder is waiting for more track data.
    * Called on the MediaStreamGraph thread.
    */
-  virtual void NotifyEndOfStream() override;
+  void NotifyEndOfStream() override;
 
   /**
    * The width of source video frame, ceiled if the source width is odd.
@@ -301,15 +333,18 @@ protected:
   StreamTime mTotalFrameDuration;
 
   /**
-   * The last unique frame we've sent to track encoder, kept track of in
-   * subclasses.
+   * The last unique frame and duration we've sent to track encoder,
+   * kept track of in subclasses.
    */
   VideoFrame mLastFrame;
+  StreamTime mLastFrameDuration;
 
   /**
    * A segment queue of audio track data, protected by mReentrantMonitor.
    */
   VideoSegment mRawSegment;
+
+  uint32_t mVideoBitrate;
 };
 
 } // namespace mozilla

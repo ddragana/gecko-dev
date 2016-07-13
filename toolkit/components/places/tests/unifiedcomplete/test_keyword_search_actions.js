@@ -25,49 +25,52 @@ add_task(function* test_keyword_search() {
   yield check_autocomplete({
     search: "key term",
     searchParam: "enable-actions",
-    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=term", input: "key term"}), title: "abc", style: [ "action", "keyword" ] } ]
+    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=term", input: "key term"}), title: "abc", style: [ "action", "keyword", "heuristic" ] } ]
   });
 
   do_print("Multi-word keyword query");
   yield check_autocomplete({
     search: "key multi word",
     searchParam: "enable-actions",
-    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=multi+word", input: "key multi word"}), title: "abc", style: [ "action", "keyword" ] } ]
+    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=multi+word", input: "key multi word"}), title: "abc", style: [ "action", "keyword", "heuristic" ] } ]
   });
 
   do_print("Keyword query with +");
   yield check_autocomplete({
     search: "key blocking+",
     searchParam: "enable-actions",
-    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=blocking%2B", input: "key blocking+"}), title: "abc", style: [ "action", "keyword" ] } ]
+    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=blocking%2B", input: "key blocking+"}), title: "abc", style: [ "action", "keyword", "heuristic" ] } ]
   });
 
   do_print("Unescaped term in query");
+  // ... but note that UnifiedComplete calls encodeURIComponent() on the query
+  // string when it builds the URL, so the expected result will have the
+  // ユニコード substring encoded in the URL.
   yield check_autocomplete({
     search: "key ユニコード",
     searchParam: "enable-actions",
-    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=ユニコード", input: "key ユニコード"}), title: "abc", style: [ "action", "keyword" ] } ]
+    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=" + encodeURIComponent("ユニコード"), input: "key ユニコード"}), title: "abc", style: [ "action", "keyword", "heuristic" ] } ]
   });
 
   do_print("Keyword that happens to match a page");
   yield check_autocomplete({
     search: "key ThisPageIsInHistory",
     searchParam: "enable-actions",
-    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=ThisPageIsInHistory", input: "key ThisPageIsInHistory"}), title: "abc", style: [ "action", "keyword" ] } ]
+    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=ThisPageIsInHistory", input: "key ThisPageIsInHistory"}), title: "abc", style: [ "action", "keyword", "heuristic" ] } ]
   });
 
   do_print("Keyword without query (without space)");
   yield check_autocomplete({
     search: "key",
     searchParam: "enable-actions",
-    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=", input: "key"}), title: "abc", style: [ "action", "keyword" ] } ]
+    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=", input: "key"}), title: "abc", style: [ "action", "keyword", "heuristic" ] } ]
   });
 
   do_print("Keyword without query (with space)");
   yield check_autocomplete({
     search: "key ",
     searchParam: "enable-actions",
-    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=", input: "key "}), title: "abc", style: [ "action", "keyword" ] } ]
+    matches: [ { uri: makeActionURI("keyword", {url: "http://abc/?search=", input: "key "}), title: "abc", style: [ "action", "keyword", "heuristic" ] } ]
   });
 
   yield cleanup();

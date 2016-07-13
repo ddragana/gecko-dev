@@ -10,7 +10,7 @@
 
 // Disable automatic network detection, so tests work correctly when
 // not connected to a network.
-let ios = Cc["@mozilla.org/network/io-service;1"]
+var ios = Cc["@mozilla.org/network/io-service;1"]
           .getService(Ci.nsIIOService2);
 ios.manageOfflineStatus = false;
 ios.offline = false;
@@ -669,6 +669,8 @@ function testListing(metadata, response)
               type: "text/css", href: "/static/harness.css"}
         ),
         SCRIPT({type: "text/javascript",
+                 src: "/tests/SimpleTest/StructuredLog.jsm"}),
+        SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/LogController.js"}),
         SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/MemoryStats.js"}),
@@ -710,7 +712,7 @@ function testListing(metadata, response)
           ),
           DIV({class: "clear"}),
           DIV({class: "frameholder"},
-            IFRAME({scrolling: "no", id: "testframe"})
+            IFRAME({scrolling: "no", id: "testframe", "allowfullscreen": true})
           ),
           DIV({class: "clear"}),
           DIV({class: "toggle"},

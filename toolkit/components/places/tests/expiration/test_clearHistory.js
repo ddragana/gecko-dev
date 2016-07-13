@@ -11,8 +11,8 @@
  * annos.
  */
 
-let hs = PlacesUtils.history;
-let as = PlacesUtils.annotations;
+var hs = PlacesUtils.history;
+var as = PlacesUtils.annotations;
 
 /**
  * Creates an aged annotation.
@@ -24,7 +24,7 @@ let as = PlacesUtils.annotations;
  * @param aAgeInDays Age in days of the annotation.
  * @param [optional] aLastModifiedAgeInDays Age in days of the annotation, for lastModified.
  */
-let now = Date.now();
+var now = Date.now();
 function add_old_anno(aIdentifier, aName, aValue, aExpirePolicy,
                       aAgeInDays, aLastModifiedAgeInDays) {
   let expireDate = (now - (aAgeInDays * 86400 * 1000)) * 1000;
@@ -55,7 +55,7 @@ function add_old_anno(aIdentifier, aName, aValue, aExpirePolicy,
             "SELECT a.id FROM moz_annos a " +
             "JOIN moz_anno_attributes n ON n.id = a.anno_attribute_id " +
             "JOIN moz_places h on h.id = a.place_id " +
-            "WHERE h.url = :id " +
+            "WHERE h.url_hash = hash(:id) AND h.url = :id " +
             "AND n.name = :anno_name " +
             "ORDER BY a.dateAdded DESC LIMIT 1 " +
           ")";
@@ -81,7 +81,7 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function test_historyClear() {
+add_task(function* test_historyClear() {
   // Set interval to a large value so we don't expire on it.
   setInterval(3600); // 1h
 

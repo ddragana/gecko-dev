@@ -43,6 +43,7 @@ XPCOMUtils.defineLazyGetter(this, "DEFAULT_AREA_PLACEMENTS", function() {
       "find-button",
       "preferences-button",
       "add-ons-button",
+      "sync-button",
       "developer-button",
     ],
     "nav-bar": [
@@ -91,9 +92,7 @@ XPCOMUtils.defineLazyGetter(this, "PALETTE_ITEMS", function() {
     "developer-button",
     "feed-button",
     "email-link-button",
-    "sync-button",
-    "tabview-button",
-    "web-apps-button",
+    "containers-panelmenu",
   ];
 
   let panelPlacements = DEFAULT_AREA_PLACEMENTS["PanelUI-contents"];
@@ -136,6 +135,7 @@ XPCOMUtils.defineLazyGetter(this, "ALL_BUILTIN_ITEMS", function() {
     "BMB_unsortedBookmarksPopup",
     "BMB_bookmarksToolbarPopup",
     "search-go-button",
+    "soundplaying-icon",
   ]
   return DEFAULT_ITEMS.concat(PALETTE_ITEMS)
                       .concat(SPECIAL_CASES);
@@ -179,6 +179,9 @@ this.BrowserUITelemetry = {
     // simple measure function with UITelemetry.
     UITelemetry.addSimpleMeasureFunction("UITour",
                                          () => UITour.getTelemetry());
+
+    UITelemetry.addSimpleMeasureFunction("syncstate",
+                                         this.getSyncState.bind(this));
 
     Services.obs.addObserver(this, "sessionstore-windows-restored", false);
     Services.obs.addObserver(this, "browser-delayed-startup-finished", false);
@@ -535,8 +538,12 @@ this.BrowserUITelemetry = {
     // items are in there.
     let paletteItems =
       CustomizableUI.getUnusedWidgets(aWindow.gNavToolbox.palette);
-    let defaultRemoved = [item.id for (item of paletteItems)
-                          if (DEFAULT_ITEMS.indexOf(item.id) != -1)];
+    let defaultRemoved = [];
+    for (let item of paletteItems) {
+      if (DEFAULT_ITEMS.indexOf(item.id) != -1) {
+        defaultRemoved.push(item.id);
+      }
+    }
 
     result.defaultKept = defaultKept;
     result.defaultMoved = defaultMoved;
@@ -571,7 +578,7 @@ this.BrowserUITelemetry = {
     if (Components.isSuccessCode(searchResult)) {
       result.currentSearchEngine = Services.search.currentEngine.name;
     }
-    result.oneOffSearchEnabled = Services.prefs.getBoolPref("browser.search.showOneOffButtons");
+
     return result;
   },
 
@@ -579,6 +586,18 @@ this.BrowserUITelemetry = {
     let result = this._firstWindowMeasurements || {};
     result.countableEvents = this._countableEvents;
     result.durations = this._durations;
+    return result;
+  },
+
+  getSyncState: function() {
+    let result = {};
+    for (let sub of ["desktop", "mobile"]) {
+      let count = 0;
+      try {
+        count = Services.prefs.getIntPref("services.sync.clients.devices." + sub);
+      } catch (ex) {}
+      result[sub] = count;
+    }
     return result;
   },
 
@@ -606,6 +625,22 @@ this.BrowserUITelemetry = {
 
   countPanicEvent: function(timeId) {
     this._countEvent(["forget-button", timeId]);
+  },
+
+  countTabMutingEvent: function(action, reason) {
+    this._countEvent(["tab-audio-control", action, reason || "no reason given"]);
+  },
+
+  countSyncedTabEvent: function(what, where) {
+    // "what" will be, eg, "open"
+    // "where" will be "toolbarbutton-subview" or "sidebar"
+    this._countEvent(["synced-tabs", what, where]);
+  },
+
+  countSidebarEvent: function(sidebarID, action) {
+    // sidebarID is the ID of the sidebar (duh!)
+    // action will be "hide" or "show"
+    this._countEvent(["sidebar", sidebarID, action]);
   },
 
   _logAwesomeBarSearchResult: function (url) {
@@ -663,9 +698,9 @@ this.BrowserUITelemetry = {
     "marklinkMenu", "copyemail", "copylink", "media-play", "media-pause",
     "media-mute", "media-unmute", "media-playbackrate",
     "media-playbackrate-050x", "media-playbackrate-100x",
-    "media-playbackrate-150x", "media-playbackrate-200x",
-    "media-showcontrols", "media-hidecontrols", "video-showstats",
-    "video-hidestats", "video-fullscreen", "leave-dom-fullscreen",
+    "media-playbackrate-125x", "media-playbackrate-150x", "media-playbackrate-200x",
+    "media-showcontrols", "media-hidecontrols",
+    "video-fullscreen", "leave-dom-fullscreen",
     "reloadimage", "viewimage", "viewvideo", "copyimage-contents", "copyimage",
     "copyvideourl", "copyaudiourl", "saveimage", "shareimage", "sendimage",
     "setDesktopBackground", "viewimageinfo", "viewimagedesc", "savevideo",
@@ -713,18 +748,24 @@ this.BrowserUITelemetry = {
   /**
    * Default bucket name, when no other bucket is active.
    */
-  get BUCKET_DEFAULT() BUCKET_DEFAULT,
+  get BUCKET_DEFAULT() {
+    return BUCKET_DEFAULT;
+  },
 
   /**
    * Bucket prefix, for named buckets.
    */
-  get BUCKET_PREFIX() BUCKET_PREFIX,
+  get BUCKET_PREFIX() {
+    return BUCKET_PREFIX;
+  },
 
   /**
    * Standard separator to use between different parts of a bucket name, such
    * as primary name and the time step string.
    */
-  get BUCKET_SEPARATOR() BUCKET_SEPARATOR,
+  get BUCKET_SEPARATOR() {
+    return BUCKET_SEPARATOR;
+  },
 
   get currentBucket() {
     return this._bucket;

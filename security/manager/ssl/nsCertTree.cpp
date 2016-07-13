@@ -4,29 +4,30 @@
 
 #include "nsCertTree.h"
 
-#include "pkix/pkixtypes.h"
-#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
+#include "ScopedNSSTypes.h"
+#include "mozilla/Logging.h"
+#include "nsArray.h"
+#include "nsArrayUtils.h"
+#include "nsHashKeys.h"
+#include "nsISupportsPrimitives.h"
 #include "nsITreeColumns.h"
+#include "nsIX509CertDB.h"
 #include "nsIX509Cert.h"
 #include "nsIX509CertValidity.h"
-#include "nsIX509CertDB.h"
-#include "nsXPIDLString.h"
-#include "nsReadableUtils.h"
-#include "nsUnicharUtils.h"
-#include "nsNSSCertificate.h"
 #include "nsNSSCertHelper.h"
-#include "nsIMutableArray.h"
-#include "nsArrayUtils.h"
-#include "nsISupportsPrimitives.h"
-#include "nsXPCOMCID.h"
+#include "nsNSSCertificate.h"
+#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
+#include "nsNSSHelper.h"
+#include "nsReadableUtils.h"
 #include "nsTHashtable.h"
-#include "nsHashKeys.h"
-
-#include "mozilla/Logging.h"
+#include "nsUnicharUtils.h"
+#include "nsXPCOMCID.h"
+#include "nsXPIDLString.h"
+#include "pkix/pkixtypes.h"
 
 using namespace mozilla;
 
-extern PRLogModuleInfo* gPIPNSSLog;
+extern LazyLogModule gPIPNSSLog;
 
 static NS_DEFINE_CID(kCertOverrideCID, NS_CERTOVERRIDE_CID);
 
@@ -61,8 +62,7 @@ CompareCacheHashEntry::CompareCacheHashEntry()
 }
 
 static bool
-CompareCacheMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
-                         const void *key)
+CompareCacheMatchEntry(const PLDHashEntryHdr *hdr, const void *key)
 {
   const CompareCacheHashEntryPtr *entryPtr = static_cast<const CompareCacheHashEntryPtr*>(hdr);
   return entryPtr->entry->key == key;
@@ -84,9 +84,9 @@ CompareCacheClearEntry(PLDHashTable *table, PLDHashEntryHdr *hdr)
 }
 
 static const PLDHashTableOps gMapOps = {
-  PL_DHashVoidPtrKeyStub,
+  PLDHashTable::HashVoidPtrKeyStub,
   CompareCacheMatchEntry,
-  PL_DHashMoveEntryStub,
+  PLDHashTable::MoveEntryStub,
   CompareCacheClearEntry,
   CompareCacheInitEntry
 };
@@ -182,18 +182,18 @@ nsCertTree::FreeCertArray()
   mDispInfo.Clear();
 }
 
-CompareCacheHashEntry *
-nsCertTree::getCacheEntry(void *cache, void *aCert)
+CompareCacheHashEntry*
+nsCertTree::getCacheEntry(void* cache, void* aCert)
 {
-  PLDHashTable &aCompareCache = *reinterpret_cast<PLDHashTable*>(cache);
-  CompareCacheHashEntryPtr *entryPtr = static_cast<CompareCacheHashEntryPtr*>
-    (PL_DHashTableAdd(&aCompareCache, aCert, fallible));
+  PLDHashTable& aCompareCache = *static_cast<PLDHashTable*>(cache);
+  auto entryPtr = static_cast<CompareCacheHashEntryPtr*>
+                             (aCompareCache.Add(aCert, fallible));
   return entryPtr ? entryPtr->entry : nullptr;
 }
 
 void nsCertTree::RemoveCacheEntry(void *key)
 {
-  PL_DHashTableRemove(&mCompareCache, key);
+  mCompareCache.Remove(key);
 }
 
 // CountOrganizations
@@ -613,7 +613,7 @@ nsCertTree::GetCertsByType(uint32_t           aType,
 {
   nsNSSShutDownPreventionLock locker;
   nsCOMPtr<nsIInterfaceRequestor> cxt = new PipUIContext();
-  ScopedCERTCertList certList(PK11_ListCerts(PK11CertListUnique, cxt));
+  UniqueCERTCertList certList(PK11_ListCerts(PK11CertListUnique, cxt));
   return GetCertsByTypeFromCertList(certList.get(), aType, aCertCmpFn,
                                     aCertCmpFnArg);
 }
@@ -634,7 +634,7 @@ nsCertTree::GetCertsByTypeFromCache(nsIX509CertList   *aCache,
   // more encapsulated types that handled NSS shutdown themselves, we wouldn't
   // be having these kinds of problems.
   nsNSSShutDownPreventionLock locker;
-  CERTCertList *certList = reinterpret_cast<CERTCertList*>(aCache->GetRawCertList());
+  CERTCertList* certList = aCache->GetRawCertList();
   if (!certList)
     return NS_ERROR_FAILURE;
   return GetCertsByTypeFromCertList(certList, aType, aCertCmpFn, aCertCmpFnArg);
@@ -686,7 +686,7 @@ nsCertTree::UpdateUIContents()
   mNumOrgs = CountOrganizations();
   mTreeArray = new treeArrayEl[mNumOrgs];
 
-  mCellText = do_CreateInstance(NS_ARRAY_CONTRACTID);
+  mCellText = nsArrayBase::Create();
 
 if (count) {
   uint32_t j = 0;
@@ -771,7 +771,8 @@ nsCertTree::DeleteEntryObject(uint32_t index)
         if (certdi->mAddonInfo) {
           cert = certdi->mAddonInfo->mCert;
         }
-        nsCertAddonInfo *addonInfo = certdi->mAddonInfo ? certdi->mAddonInfo : nullptr;
+        nsCertAddonInfo* addonInfo =
+          certdi->mAddonInfo ? certdi->mAddonInfo.get() : nullptr;
         if (certdi->mTypeOfEntry == nsCertTreeDispInfo::host_port_override) {
           mOverrideService->ClearValidityOverride(certdi->mAsciiHost, certdi->mPort);
           if (addonInfo) {
@@ -791,12 +792,12 @@ nsCertTree::DeleteEntryObject(uint32_t index)
             // although there are still overrides stored,
             // so, we keep the cert, but remove the trust
 
-            ScopedCERTCertificate nsscert(cert->GetCert());
+            UniqueCERTCertificate nsscert(cert->GetCert());
 
             if (nsscert) {
               CERTCertTrust trust;
               memset((void*)&trust, 0, sizeof(trust));
-            
+
               SECStatus srv = CERT_DecodeTrustString(&trust, ""); // no override 
               if (srv == SECSuccess) {
                 CERT_ChangeCertTrust(CERT_GetDefaultCertDB(), nsscert.get(),
@@ -836,7 +837,6 @@ nsCertTree::DeleteEntryObject(uint32_t index)
 //
 /////////////////////////////////////////////////////////////////////////////
 
-/* nsIX509Cert getCert(in unsigned long index); */
 NS_IMETHODIMP
 nsCertTree::GetCert(uint32_t aIndex, nsIX509Cert **_cert)
 {
@@ -859,20 +859,6 @@ nsCertTree::GetTreeItem(uint32_t aIndex, nsICertTreeItem **_treeitem)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsCertTree::IsHostPortOverride(uint32_t aIndex, bool *_retval)
-{
-  NS_ENSURE_ARG(_retval);
-
-  RefPtr<nsCertTreeDispInfo> certdi(GetDispInfoAtIndex(aIndex));
-  if (!certdi)
-    return NS_ERROR_FAILURE;
-
-  *_retval = (certdi->mTypeOfEntry == nsCertTreeDispInfo::host_port_override);
-  return NS_OK;
-}
-
-/* readonly attribute long rowCount; */
 NS_IMETHODIMP 
 nsCertTree::GetRowCount(int32_t *aRowCount)
 {
@@ -889,7 +875,6 @@ nsCertTree::GetRowCount(int32_t *aRowCount)
   return NS_OK;
 }
 
-/* attribute nsITreeSelection selection; */
 NS_IMETHODIMP 
 nsCertTree::GetSelection(nsITreeSelection * *aSelection)
 {
@@ -923,7 +908,6 @@ nsCertTree::GetColumnProperties(nsITreeColumn* col, nsAString& aProps)
 {
   return NS_OK;
 }
-/* boolean isContainer (in long index); */
 NS_IMETHODIMP 
 nsCertTree::IsContainer(int32_t index, bool *_retval)
 {
@@ -938,7 +922,6 @@ nsCertTree::IsContainer(int32_t index, bool *_retval)
   return NS_OK;
 }
 
-/* boolean isContainerOpen (in long index); */
 NS_IMETHODIMP 
 nsCertTree::IsContainerOpen(int32_t index, bool *_retval)
 {
@@ -953,7 +936,6 @@ nsCertTree::IsContainerOpen(int32_t index, bool *_retval)
   return NS_OK;
 }
 
-/* boolean isContainerEmpty (in long index); */
 NS_IMETHODIMP 
 nsCertTree::IsContainerEmpty(int32_t index, bool *_retval)
 {
@@ -961,7 +943,6 @@ nsCertTree::IsContainerEmpty(int32_t index, bool *_retval)
   return NS_OK;
 }
 
-/* boolean isSeparator (in long index); */
 NS_IMETHODIMP 
 nsCertTree::IsSeparator(int32_t index, bool *_retval)
 {
@@ -969,7 +950,6 @@ nsCertTree::IsSeparator(int32_t index, bool *_retval)
   return NS_OK;
 }
 
-/* long getParentIndex (in long rowIndex); */
 NS_IMETHODIMP 
 nsCertTree::GetParentIndex(int32_t rowIndex, int32_t *_retval)
 {
@@ -989,7 +969,6 @@ nsCertTree::GetParentIndex(int32_t rowIndex, int32_t *_retval)
   return NS_OK;
 }
 
-/* boolean hasNextSibling (in long rowIndex, in long afterIndex); */
 NS_IMETHODIMP 
 nsCertTree::HasNextSibling(int32_t rowIndex, int32_t afterIndex, 
                                bool *_retval)
@@ -1011,7 +990,6 @@ nsCertTree::HasNextSibling(int32_t rowIndex, int32_t afterIndex,
   return NS_OK;
 }
 
-/* long getLevel (in long index); */
 NS_IMETHODIMP 
 nsCertTree::GetLevel(int32_t index, int32_t *_retval)
 {
@@ -1026,7 +1004,6 @@ nsCertTree::GetLevel(int32_t index, int32_t *_retval)
   return NS_OK;
 }
 
-/* Astring getImageSrc (in long row, in nsITreeColumn col); */
 NS_IMETHODIMP 
 nsCertTree::GetImageSrc(int32_t row, nsITreeColumn* col, 
                         nsAString& _retval)
@@ -1035,14 +1012,12 @@ nsCertTree::GetImageSrc(int32_t row, nsITreeColumn* col,
   return NS_OK;
 }
 
-/* long getProgressMode (in long row, in nsITreeColumn col); */
 NS_IMETHODIMP
 nsCertTree::GetProgressMode(int32_t row, nsITreeColumn* col, int32_t* _retval)
 {
   return NS_OK;
 }
 
-/* Astring getCellValue (in long row, in nsITreeColumn col); */
 NS_IMETHODIMP 
 nsCertTree::GetCellValue(int32_t row, nsITreeColumn* col, 
                          nsAString& _retval)
@@ -1051,7 +1026,6 @@ nsCertTree::GetCellValue(int32_t row, nsITreeColumn* col,
   return NS_OK;
 }
 
-/* Astring getCellText (in long row, in nsITreeColumn col); */
 NS_IMETHODIMP 
 nsCertTree::GetCellText(int32_t row, nsITreeColumn* col, 
                         nsAString& _retval)
@@ -1059,7 +1033,7 @@ nsCertTree::GetCellText(int32_t row, nsITreeColumn* col,
   if (!mTreeArray)
     return NS_ERROR_NOT_INITIALIZED;
 
-  nsresult rv;
+  nsresult rv = NS_OK;
   _retval.Truncate();
 
   const char16_t* colID;
@@ -1245,7 +1219,6 @@ nsCertTree::GetCellText(int32_t row, nsITreeColumn* col,
   return rv;
 }
 
-/* void setTree (in nsITreeBoxObject tree); */
 NS_IMETHODIMP 
 nsCertTree::SetTree(nsITreeBoxObject *tree)
 {
@@ -1253,7 +1226,6 @@ nsCertTree::SetTree(nsITreeBoxObject *tree)
   return NS_OK;
 }
 
-/* void toggleOpenState (in long index); */
 NS_IMETHODIMP 
 nsCertTree::ToggleOpenState(int32_t index)
 {
@@ -1268,28 +1240,24 @@ nsCertTree::ToggleOpenState(int32_t index)
   return NS_OK;
 }
 
-/* void cycleHeader (in nsITreeColumn); */
 NS_IMETHODIMP 
 nsCertTree::CycleHeader(nsITreeColumn* col)
 {
   return NS_OK;
 }
 
-/* void selectionChanged (); */
 NS_IMETHODIMP 
 nsCertTree::SelectionChanged()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-/* void cycleCell (in long row, in nsITreeColumn col); */
 NS_IMETHODIMP 
 nsCertTree::CycleCell(int32_t row, nsITreeColumn* col)
 {
   return NS_OK;
 }
 
-/* boolean isEditable (in long row, in nsITreeColumn col); */
 NS_IMETHODIMP 
 nsCertTree::IsEditable(int32_t row, nsITreeColumn* col, bool *_retval)
 {
@@ -1297,7 +1265,6 @@ nsCertTree::IsEditable(int32_t row, nsITreeColumn* col, bool *_retval)
   return NS_OK;
 }
 
-/* boolean isSelectable (in long row, in nsITreeColumn col); */
 NS_IMETHODIMP 
 nsCertTree::IsSelectable(int32_t row, nsITreeColumn* col, bool *_retval)
 {
@@ -1305,7 +1272,6 @@ nsCertTree::IsSelectable(int32_t row, nsITreeColumn* col, bool *_retval)
   return NS_OK;
 }
 
-/* void setCellValue (in long row, in nsITreeColumn col, in AString value); */
 NS_IMETHODIMP 
 nsCertTree::SetCellValue(int32_t row, nsITreeColumn* col, 
                          const nsAString& value)
@@ -1313,7 +1279,6 @@ nsCertTree::SetCellValue(int32_t row, nsITreeColumn* col,
   return NS_OK;
 }
 
-/* void setCellText (in long row, in nsITreeColumn col, in AString value); */
 NS_IMETHODIMP 
 nsCertTree::SetCellText(int32_t row, nsITreeColumn* col, 
                         const nsAString& value)
@@ -1321,23 +1286,18 @@ nsCertTree::SetCellText(int32_t row, nsITreeColumn* col,
   return NS_OK;
 }
 
-/* void performAction (in wstring action); */
 NS_IMETHODIMP 
 nsCertTree::PerformAction(const char16_t *action)
 {
   return NS_OK;
 }
 
-/* void performActionOnRow (in wstring action, in long row); */
 NS_IMETHODIMP 
 nsCertTree::PerformActionOnRow(const char16_t *action, int32_t row)
 {
   return NS_OK;
 }
 
-/* void performActionOnCell (in wstring action, in long row, 
- *                           in wstring colID); 
- */
 NS_IMETHODIMP 
 nsCertTree::PerformActionOnCell(const char16_t *action, int32_t row, 
                                 nsITreeColumn* col)

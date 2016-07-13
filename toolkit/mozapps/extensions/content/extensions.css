@@ -131,6 +131,11 @@ setting[type="menulist"] {
   display: none;
 }
 
+#show-disabled-unsigned-extensions .button-text {
+  margin-inline-start: 3px !important;
+  margin-inline-end: 2px !important;
+}
+
 #header-searching:not([active]) {
   visibility: hidden;
 }
@@ -193,10 +198,6 @@ setting[type="menulist"] {
   display: none;
 }
 
-#addons-page .view-pane:not([type="plugin"]) .plugin-info-container {
-  display: none;
-}
-
 #addons-page .view-pane:not([type="experiment"]) .experiment-info-container {
   display: none;
 }
@@ -244,9 +245,13 @@ richlistitem:not([selected]) * {
 .view-pane[type="experiment"] .addon:not([pending="uninstall"]) .pending,
 .view-pane[type="experiment"] .disabled-postfix,
 .view-pane[type="experiment"] .update-postfix,
+.view-pane[type="experiment"] .addon-control.enable,
+.view-pane[type="experiment"] .addon-control.disable,
 #detail-view[type="experiment"] .alert-container,
 #detail-view[type="experiment"] #detail-version,
-#detail-view[type="experiment"] #detail-creator {
+#detail-view[type="experiment"] #detail-creator,
+#detail-view[type="experiment"] #detail-enable-btn,
+#detail-view[type="experiment"] #detail-disable-btn {
   display: none;
 }
 

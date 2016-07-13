@@ -17,6 +17,8 @@
 #include "mozilla/dom/HTMLContentElement.h"
 #include "mozilla/dom/HTMLShadowElement.h"
 #include "nsXBLPrototypeBinding.h"
+#include "mozilla/StyleSheetHandle.h"
+#include "mozilla/StyleSheetHandleInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -130,7 +132,7 @@ ShadowRoot::StyleSheetChanged()
 }
 
 void
-ShadowRoot::InsertSheet(CSSStyleSheet* aSheet,
+ShadowRoot::InsertSheet(StyleSheetHandle aSheet,
                         nsIContent* aLinkingContent)
 {
   nsCOMPtr<nsIStyleSheetLinkingElement>
@@ -148,8 +150,8 @@ ShadowRoot::InsertSheet(CSSStyleSheet* aSheet,
       break;
     }
 
-    nsINode* sheetOwnerNode = mProtoBinding->StyleSheetAt(i)->GetOwnerNode();
-    if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwnerNode)) {
+    nsINode* sheetOwningNode = mProtoBinding->StyleSheetAt(i)->GetOwnerNode();
+    if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwningNode)) {
       mProtoBinding->InsertStyleSheetAt(i, aSheet);
       break;
     }
@@ -161,7 +163,7 @@ ShadowRoot::InsertSheet(CSSStyleSheet* aSheet,
 }
 
 void
-ShadowRoot::RemoveSheet(CSSStyleSheet* aSheet)
+ShadowRoot::RemoveSheet(StyleSheetHandle aSheet)
 {
   mProtoBinding->RemoveStyleSheet(aSheet);
 
@@ -219,7 +221,7 @@ ShadowRoot::RemoveFromIdTable(Element* aElement, nsIAtom* aId)
   if (entry) {
     entry->RemoveIdElement(aElement);
     if (entry->IsEmpty()) {
-      mIdentifierMap.RawRemoveEntry(entry);
+      mIdentifierMap.RemoveEntry(entry);
     }
   }
 }
@@ -316,7 +318,7 @@ ShadowRoot::DistributeSingleNode(nsIContent* aContent)
     if (!isIndexFound) {
       // We have still not found an index in the insertion point,
       // thus it must be at the end.
-      MOZ_ASSERT(childIterator.Seek(aContent),
+      MOZ_ASSERT(childIterator.Seek(aContent, nullptr),
                  "Trying to match a node that is not a candidate to be matched");
       insertionPoint->AppendMatchedNode(aContent);
     }
@@ -607,7 +609,8 @@ ShadowRoot::AttributeChanged(nsIDocument* aDocument,
                              Element* aElement,
                              int32_t aNameSpaceID,
                              nsIAtom* aAttribute,
-                             int32_t aModType)
+                             int32_t aModType,
+                             const nsAttrValue* aOldValue)
 {
   if (!IsPooledNode(aElement, aElement->GetParent(), mPoolHost)) {
     return;
@@ -751,7 +754,14 @@ ShadowRootStyleSheetList::IndexedGetter(uint32_t aIndex, bool& aFound)
     return nullptr;
   }
 
-  return mShadowRoot->mProtoBinding->StyleSheetAt(aIndex);
+  // XXXheycam Return null until ServoStyleSheet implements the right
+  // DOM interfaces.
+  StyleSheetHandle sheet = mShadowRoot->mProtoBinding->StyleSheetAt(aIndex);
+  if (sheet->IsServo()) {
+    NS_ERROR("stylo: can't return ServoStyleSheets to script yet");
+    return nullptr;
+  }
+  return sheet->AsGecko();
 }
 
 uint32_t

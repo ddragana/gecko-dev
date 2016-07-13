@@ -18,12 +18,14 @@
 #include "nsServiceManagerUtils.h"
 #include "nsNotifyAddrListener_Linux.h"
 #include "nsString.h"
-#include "nsAutoPtr.h"
 #include "mozilla/Logging.h"
 
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/FileUtils.h"
+#include "mozilla/SHA1.h"
+#include "mozilla/Base64.h"
+#include "mozilla/Telemetry.h"
 
 #ifdef MOZ_NUWA_PROCESS
 #include "ipc/Nuwa.h"
@@ -36,9 +38,13 @@
 /* a shorter name that better explains what it does */
 #define EINTR_RETRY(x) MOZ_TEMP_FAILURE_RETRY(x)
 
+// period during which to absorb subsequent network change events, in
+// milliseconds
+static const unsigned int kNetworkChangeCoalescingPeriod  = 1000;
+
 using namespace mozilla;
 
-static PRLogModuleInfo *gNotifyAddrLog = nullptr;
+static LazyLogModule gNotifyAddrLog("nsNotifyAddr");
 #define LOG(args) MOZ_LOG(gNotifyAddrLog, mozilla::LogLevel::Debug, args)
 
 #define NETWORK_NOTIFY_CHANGED_PREF "network.notify.changed"
@@ -52,7 +58,7 @@ nsNotifyAddrListener::nsNotifyAddrListener()
     : mLinkUp(true)  // assume true by default
     , mStatusKnown(false)
     , mAllowChangedEvent(true)
-    , mChildThreadShutdown(false)
+    , mCoalescingActive(false)
 {
     mShutdownPipe[0] = -1;
     mShutdownPipe[1] = -1;
@@ -97,6 +103,112 @@ nsNotifyAddrListener::GetLinkType(uint32_t *aLinkType)
 }
 
 //
+// Figure out the current "network identification" string.
+//
+// It detects the IP of the default gateway in the routing table, then the MAC
+// address of that IP in the ARP table before it hashes that string (to avoid
+// information leakage).
+//
+void nsNotifyAddrListener::calculateNetworkId(void)
+{
+    const char *kProcRoute = "/proc/net/route"; /* IPv4 routes */
+    const char *kProcArp = "/proc/net/arp";
+    bool found = false;
+
+    FILE *froute = fopen(kProcRoute, "r");
+    if (froute) {
+        char buffer[512];
+        uint32_t gw = 0;
+        char *l = fgets(buffer, sizeof(buffer), froute);
+        if (l) {
+            /* skip the title line  */
+            while (l) {
+                char interf[32];
+                uint32_t dest;
+                uint32_t gateway;
+                l = fgets(buffer, sizeof(buffer), froute);
+                if (l) {
+                    buffer[511]=0; /* as a precaution */
+                    int val = sscanf(buffer, "%31s %x %x",
+                                     interf, &dest, &gateway);
+                    if ((3 == val) && !dest) {
+                        gw = gateway;
+                        break;
+                    }
+                }
+            }
+        }
+        fclose(froute);
+
+        if (gw) {
+            /* create a string to search for in the arp table */
+            char searchfor[16];
+            snprintf(searchfor, sizeof(searchfor), "%d.%d.%d.%d",
+                     gw & 0xff,
+                     (gw >> 8) & 0xff,
+                     (gw >> 16) & 0xff,
+                     gw >> 24);
+
+            FILE *farp = fopen(kProcArp, "r");
+            if (farp) {
+                l = fgets(buffer, sizeof(buffer), farp);
+                while (l) {
+                    /* skip the title line  */
+                    l = fgets(buffer, sizeof(buffer), farp);
+                    if (l) {
+                        buffer[511]=0; /* as a precaution */
+                        int p[4];
+                        char type[16];
+                        char flags[16];
+                        char hw[32];
+                        if (7 == sscanf(buffer, "%u.%u.%u.%u %15s %15s %31s",
+                                        &p[0], &p[1], &p[2], &p[3],
+                                        type, flags, hw)) {
+                            uint32_t searchip = p[0] | (p[1] << 8) |
+                                (p[2] << 16) | (p[3] << 24);
+                            if (gw == searchip) {
+                                LOG(("networkid: MAC %s\n", hw));
+                                nsAutoCString mac(hw);
+                                // This 'addition' could potentially be a
+                                // fixed number from the profile or something.
+                                nsAutoCString addition("local-rubbish");
+                                nsAutoCString output;
+                                SHA1Sum sha1;
+                                nsCString combined(mac + addition);
+                                sha1.update(combined.get(), combined.Length());
+                                uint8_t digest[SHA1Sum::kHashSize];
+                                sha1.finish(digest);
+                                nsCString newString(reinterpret_cast<char*>(digest),
+                                                    SHA1Sum::kHashSize);
+                                nsresult rv = Base64Encode(newString, output);
+                                MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+                                LOG(("networkid: id %s\n", output.get()));
+                                if (mNetworkId != output) {
+                                    // new id
+                                    Telemetry::Accumulate(Telemetry::NETWORK_ID, 1);
+                                    mNetworkId = output;
+                                }
+                                else {
+                                    // same id
+                                    Telemetry::Accumulate(Telemetry::NETWORK_ID, 2);
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                fclose(farp);
+            } /* if (farp) */
+        } /* if (gw) */
+    } /* if (froute) */
+    if (!found) {
+        // no id
+        Telemetry::Accumulate(Telemetry::NETWORK_ID, 0);
+    }
+}
+
+//
 // Check if there's a network interface available to do networking on.
 //
 void nsNotifyAddrListener::checkLink(void)
@@ -109,7 +221,7 @@ void nsNotifyAddrListener::checkLink(void)
     bool link = false;
     bool prevLinkUp = mLinkUp;
 
-    if(getifaddrs(&list))
+    if (getifaddrs(&list))
         return;
 
     // Walk through the linked list, maintaining head pointer so we can free
@@ -123,7 +235,7 @@ void nsNotifyAddrListener::checkLink(void)
         family = ifa->ifa_addr->sa_family;
 
         if ((family == AF_INET || family == AF_INET6) &&
-            (ifa->ifa_flags & IFF_UP) &&
+            (ifa->ifa_flags & IFF_RUNNING) &&
             !(ifa->ifa_flags & IFF_LOOPBACK)) {
             // An interface that is UP and not loopback
             link = true;
@@ -144,14 +256,16 @@ void nsNotifyAddrListener::checkLink(void)
 void nsNotifyAddrListener::OnNetlinkMessage(int aNetlinkSocket)
 {
     struct  nlmsghdr *nlh;
-    struct  rtmsg *route_entry;
 
     // The buffer size below, (4095) was chosen partly based on testing and
     // partly on existing sample source code using this size. It needs to be
     // large enough to hold the netlink messages from the kernel.
     char buffer[4095];
+    struct rtattr *attr;
+    int attr_len;
+    const struct ifaddrmsg* newifam;
 
-    // Receiving netlink socket data
+
     ssize_t rc = EINTR_RETRY(recv(aNetlinkSocket, buffer, sizeof(buffer), 0));
     if (rc < 0) {
         return;
@@ -164,35 +278,85 @@ void nsNotifyAddrListener::OnNetlinkMessage(int aNetlinkSocket)
 
     for (; NLMSG_OK(nlh, netlink_bytes);
          nlh = NLMSG_NEXT(nlh, netlink_bytes)) {
+        char prefixaddr[INET6_ADDRSTRLEN];
+        char localaddr[INET6_ADDRSTRLEN];
+        char* addr = nullptr;
+        prefixaddr[0] = localaddr[0] = '\0';
 
         if (NLMSG_DONE == nlh->nlmsg_type) {
             break;
         }
 
-        switch(nlh->nlmsg_type) {
-        case RTM_DELROUTE:
-        case RTM_NEWROUTE:
-            // Get the route data
-            route_entry = static_cast<struct rtmsg *>(NLMSG_DATA(nlh));
+        LOG(("nsNotifyAddrListener::OnNetlinkMessage: new/deleted address\n"));
+        newifam = reinterpret_cast<struct ifaddrmsg*>(NLMSG_DATA(nlh));
 
-            // We are just intrested in main routing table
-            if (route_entry->rtm_table != RT_TABLE_MAIN)
-                continue;
-
-            networkChange = true;
-            break;
-
-        case RTM_NEWADDR:
-            networkChange = true;
-            break;
-
-        default:
+        if ((newifam->ifa_family != AF_INET) &&
+            (newifam->ifa_family != AF_INET6)) {
             continue;
+        }
+
+        attr = IFA_RTA (newifam);
+        attr_len = IFA_PAYLOAD (nlh);
+        for (;attr_len && RTA_OK (attr, attr_len);
+             attr = RTA_NEXT (attr, attr_len)) {
+            if (attr->rta_type == IFA_ADDRESS) {
+                if (newifam->ifa_family == AF_INET) {
+                    struct in_addr* in = (struct in_addr*)RTA_DATA(attr);
+                    inet_ntop(AF_INET, in, prefixaddr, INET_ADDRSTRLEN);
+                } else {
+                    struct in6_addr* in = (struct in6_addr*)RTA_DATA(attr);
+                    inet_ntop(AF_INET6, in, prefixaddr, INET6_ADDRSTRLEN);
+                }
+            } else if (attr->rta_type == IFA_LOCAL) {
+                if (newifam->ifa_family == AF_INET) {
+                    struct in_addr* in = (struct in_addr*)RTA_DATA(attr);
+                    inet_ntop(AF_INET, in, localaddr, INET_ADDRSTRLEN);
+                } else {
+                    struct in6_addr* in = (struct in6_addr*)RTA_DATA(attr);
+                    inet_ntop(AF_INET6, in, localaddr, INET6_ADDRSTRLEN);
+                }
+            }
+        }
+        if (localaddr[0]) {
+            addr = localaddr;
+        } else if (prefixaddr[0]) {
+            addr = prefixaddr;
+        } else {
+            continue;
+        }
+        if (nlh->nlmsg_type == RTM_NEWADDR) {
+            LOG(("nsNotifyAddrListener::OnNetlinkMessage: a new address "
+                 "- %s.", addr));
+            struct ifaddrmsg* ifam;
+            nsCString addrStr;
+            addrStr.Assign(addr);
+            if (mAddressInfo.Get(addrStr, &ifam)) {
+                LOG(("nsNotifyAddrListener::OnNetlinkMessage: the address "
+                     "already known."));
+                if (memcmp(ifam, newifam, sizeof(struct ifaddrmsg))) {
+                    LOG(("nsNotifyAddrListener::OnNetlinkMessage: but "
+                         "the address info has been changed."));
+                    networkChange = true;
+                    memcpy(ifam, newifam, sizeof(struct ifaddrmsg));
+                }
+            } else {
+                networkChange = true;
+                ifam = (struct ifaddrmsg*)malloc(sizeof(struct ifaddrmsg));
+                memcpy(ifam, newifam, sizeof(struct ifaddrmsg));
+                mAddressInfo.Put(addrStr,ifam);
+            }
+        } else {
+            LOG(("nsNotifyAddrListener::OnNetlinkMessage: an address "
+                 "has been deleted - %s.", addr));
+            networkChange = true;
+            nsCString addrStr;
+            addrStr.Assign(addr);
+            mAddressInfo.Remove(addrStr);
         }
     }
 
     if (networkChange && mAllowChangedEvent) {
-        SendEvent(NS_NETWORK_LINK_DATA_CHANGED);
+        NetworkChanged();
     }
 
     if (networkChange) {
@@ -212,8 +376,7 @@ nsNotifyAddrListener::Run()
     memset(&addr, 0, sizeof(addr));   // clear addr
 
     addr.nl_family = AF_NETLINK;
-    addr.nl_groups = RTMGRP_IPV4_ROUTE | RTMGRP_IPV4_IFADDR |
-        RTMGRP_IPV6_IFADDR | RTMGRP_IPV6_ROUTE;
+    addr.nl_groups = RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
 
     if (bind(netlinkSocket, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         // failure!
@@ -234,18 +397,13 @@ nsNotifyAddrListener::Run()
     fds[1].events = POLLIN;
     fds[1].revents = 0;
 
-    // when in b2g emulator, work around bug 1112499
-    int pollTimeout = -1;
-#ifdef MOZ_WIDGET_GONK
-    char propQemu[PROPERTY_VALUE_MAX];
-    property_get("ro.kernel.qemu", propQemu, "");
-    pollTimeout = !strncmp(propQemu, "1", 1) ? 100 : -1;
-#endif
+    calculateNetworkId();
 
     nsresult rv = NS_OK;
     bool shutdown = false;
+    int pollWait = -1;
     while (!shutdown) {
-        int rc = EINTR_RETRY(poll(fds, 2, pollTimeout));
+        int rc = EINTR_RETRY(poll(fds, 2, pollWait));
 
         if (rc > 0) {
             if (fds[0].revents & POLLIN) {
@@ -260,9 +418,19 @@ nsNotifyAddrListener::Run()
             rv = NS_ERROR_FAILURE;
             break;
         }
-        if (mChildThreadShutdown) {
-            LOG(("thread shutdown via variable, dying...\n"));
-            shutdown = true;
+        if (mCoalescingActive) {
+            // check if coalescing period should continue
+            double period = (TimeStamp::Now() - mChangeTime).ToMilliseconds();
+            if (period >= kNetworkChangeCoalescingPeriod) {
+                SendEvent(NS_NETWORK_LINK_DATA_CHANGED);
+                calculateNetworkId();
+                mCoalescingActive = false;
+                pollWait = -1; // restore to default
+            } else {
+                // wait no longer than to the end of the period
+                pollWait = static_cast<int>
+                    (kNetworkChangeCoalescingPeriod - period);
+            }
         }
     }
 
@@ -284,7 +452,7 @@ nsNotifyAddrListener::Observe(nsISupports *subject,
 }
 
 #ifdef MOZ_NUWA_PROCESS
-class NuwaMarkLinkMonitorThreadRunner : public nsRunnable
+class NuwaMarkLinkMonitorThreadRunner : public Runnable
 {
     NS_IMETHODIMP Run() override
     {
@@ -299,9 +467,6 @@ class NuwaMarkLinkMonitorThreadRunner : public nsRunnable
 nsresult
 nsNotifyAddrListener::Init(void)
 {
-    if (!gNotifyAddrLog)
-        gNotifyAddrLog = PR_NewLogModule("nsNotifyAddr");
-
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
     if (!observerService)
@@ -314,17 +479,17 @@ nsNotifyAddrListener::Init(void)
     Preferences::AddBoolVarCache(&mAllowChangedEvent,
                                  NETWORK_NOTIFY_CHANGED_PREF, true);
 
-    rv = NS_NewNamedThread("Link Monitor", getter_AddRefs(mThread));
+    if (-1 == pipe(mShutdownPipe)) {
+        return NS_ERROR_FAILURE;
+    }
+
+    rv = NS_NewNamedThread("Link Monitor", getter_AddRefs(mThread), this);
     NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef MOZ_NUWA_PROCESS
     nsCOMPtr<nsIRunnable> runner = new NuwaMarkLinkMonitorThreadRunner();
     mThread->Dispatch(runner, NS_DISPATCH_NORMAL);
 #endif
-
-    if (-1 == pipe(mShutdownPipe)) {
-        return NS_ERROR_FAILURE;
-    }
 
     return NS_OK;
 }
@@ -344,8 +509,6 @@ nsNotifyAddrListener::Shutdown(void)
     ssize_t rc = EINTR_RETRY(write(mShutdownPipe[1], "1", 1));
     LOG(("write() returned %d, errno == %d\n", (int)rc, errno));
 
-    mChildThreadShutdown = true;
-
     nsresult rv = mThread->Shutdown();
 
     // Have to break the cycle here, otherwise nsNotifyAddrListener holds
@@ -354,6 +517,27 @@ nsNotifyAddrListener::Shutdown(void)
     mThread = nullptr;
 
     return rv;
+}
+
+
+/*
+ * A network event has been registered. Delay the actual sending of the event
+ * for a while and absorb subsequent events in the mean time in an effort to
+ * squash potentially many triggers into a single event.
+ * Only ever called from the same thread.
+ */
+nsresult
+nsNotifyAddrListener::NetworkChanged()
+{
+    if (mCoalescingActive) {
+        LOG(("NetworkChanged: absorbed an event (coalescing active)\n"));
+    } else {
+        // A fresh trigger!
+        mChangeTime = TimeStamp::Now();
+        mCoalescingActive = true;
+        LOG(("NetworkChanged: coalescing period started\n"));
+    }
+    return NS_OK;
 }
 
 /* Sends the given event.  Assumes aEventID never goes out of scope (static
@@ -365,6 +549,7 @@ nsNotifyAddrListener::SendEvent(const char *aEventID)
     if (!aEventID)
         return NS_ERROR_NULL_POINTER;
 
+    LOG(("SendEvent: %s\n", aEventID));
     nsresult rv = NS_OK;
     nsCOMPtr<nsIRunnable> event = new ChangeEvent(this, aEventID);
     if (NS_FAILED(rv = NS_DispatchToMainThread(event)))

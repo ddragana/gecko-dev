@@ -9,11 +9,14 @@
 #include "mozilla/dom/MimeTypeArrayBinding.h"
 #include "mozilla/dom/MimeTypeBinding.h"
 #include "nsIDOMNavigator.h"
+#include "nsPIDOMWindow.h"
 #include "nsPluginArray.h"
 #include "nsIMIMEService.h"
 #include "nsIMIMEInfo.h"
 #include "Navigator.h"
 #include "nsServiceManagerUtils.h"
+#include "nsContentUtils.h"
+#include "nsPluginTags.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -29,13 +32,19 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsMimeTypeArray,
                                       mWindow,
                                       mMimeTypes)
 
-nsMimeTypeArray::nsMimeTypeArray(nsPIDOMWindow* aWindow)
+nsMimeTypeArray::nsMimeTypeArray(nsPIDOMWindowInner* aWindow)
   : mWindow(aWindow)
 {
 }
 
 nsMimeTypeArray::~nsMimeTypeArray()
 {
+}
+
+static bool
+ResistFingerprinting() {
+  return !nsContentUtils::ThreadsafeIsCallerChrome() &&
+         nsContentUtils::ResistFingerprinting();
 }
 
 JSObject*
@@ -50,7 +59,7 @@ nsMimeTypeArray::Refresh()
   mMimeTypes.Clear();
 }
 
-nsPIDOMWindow*
+nsPIDOMWindowInner*
 nsMimeTypeArray::GetParentObject() const
 {
   MOZ_ASSERT(mWindow);
@@ -76,6 +85,10 @@ nsMimeTypeArray::IndexedGetter(uint32_t aIndex, bool &aFound)
 {
   aFound = false;
 
+  if (ResistFingerprinting()) {
+    return nullptr;
+  }
+
   EnsurePluginMimeTypes();
 
   if (aIndex >= mMimeTypes.Length()) {
@@ -88,7 +101,7 @@ nsMimeTypeArray::IndexedGetter(uint32_t aIndex, bool &aFound)
 }
 
 static nsMimeType*
-FindMimeType(const nsTArray<nsRefPtr<nsMimeType> >& aMimeTypes,
+FindMimeType(const nsTArray<RefPtr<nsMimeType>>& aMimeTypes,
              const nsAString& aType)
 {
   for (uint32_t i = 0; i < aMimeTypes.Length(); ++i) {
@@ -106,6 +119,10 @@ nsMimeTypeArray::NamedGetter(const nsAString& aName, bool &aFound)
 {
   aFound = false;
 
+  if (ResistFingerprinting()) {
+    return nullptr;
+  }
+
   EnsurePluginMimeTypes();
 
   nsString lowerName(aName);
@@ -117,68 +134,23 @@ nsMimeTypeArray::NamedGetter(const nsAString& aName, bool &aFound)
     return mimeType;
   }
 
-  // Now let's check with the MIME service.
-  nsCOMPtr<nsIMIMEService> mimeSrv = do_GetService("@mozilla.org/mime;1");
-  if (!mimeSrv) {
-    return nullptr;
-  }
-
-  nsCOMPtr<nsIMIMEInfo> mimeInfo;
-  mimeSrv->GetFromTypeAndExtension(NS_ConvertUTF16toUTF8(lowerName),
-                                   EmptyCString(), getter_AddRefs(mimeInfo));
-  if (!mimeInfo) {
-    return nullptr;
-  }
-
-  // Now we check whether we can really claim to support this type
-  nsHandlerInfoAction action = nsIHandlerInfo::saveToDisk;
-  mimeInfo->GetPreferredAction(&action);
-  if (action != nsIMIMEInfo::handleInternally) {
-    bool hasHelper = false;
-    mimeInfo->GetHasDefaultHandler(&hasHelper);
-
-    if (!hasHelper) {
-      nsCOMPtr<nsIHandlerApp> helper;
-      mimeInfo->GetPreferredApplicationHandler(getter_AddRefs(helper));
-
-      if (!helper) {
-        // mime info from the OS may not have a PreferredApplicationHandler
-        // so just check for an empty default description
-        nsAutoString defaultDescription;
-        mimeInfo->GetDefaultDescription(defaultDescription);
-
-        if (defaultDescription.IsEmpty()) {
-          // no support; just leave
-          return nullptr;
-        }
-      }
-    }
-  }
-
-  // If we got here, we support this type!  Say so.
-  aFound = true;
-
-  nsMimeType *mt = new nsMimeType(mWindow, lowerName);
-  mMimeTypes.AppendElement(mt);
-  return mt;
-}
-
-bool
-nsMimeTypeArray::NameIsEnumerable(const nsAString& aName)
-{
-  return true;
+  return nullptr;
 }
 
 uint32_t
 nsMimeTypeArray::Length()
 {
+  if (ResistFingerprinting()) {
+    return 0;
+  }
+
   EnsurePluginMimeTypes();
 
   return mMimeTypes.Length();
 }
 
 void
-nsMimeTypeArray::GetSupportedNames(unsigned, nsTArray< nsString >& aRetval)
+nsMimeTypeArray::GetSupportedNames(nsTArray<nsString>& aRetval)
 {
   EnsurePluginMimeTypes();
 
@@ -194,8 +166,7 @@ nsMimeTypeArray::EnsurePluginMimeTypes()
     return;
   }
 
-  nsCOMPtr<nsIDOMNavigator> navigator;
-  mWindow->GetNavigator(getter_AddRefs(navigator));
+  nsCOMPtr<nsIDOMNavigator> navigator = mWindow->GetNavigator();
 
   if (!navigator) {
     return;
@@ -216,28 +187,25 @@ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsMimeType, Release)
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsMimeType, mWindow, mPluginElement)
 
-nsMimeType::nsMimeType(nsPIDOMWindow* aWindow, nsPluginElement* aPluginElement,
-                       uint32_t aPluginTagMimeIndex, const nsAString& aType)
+nsMimeType::nsMimeType(nsPIDOMWindowInner* aWindow,
+                       nsPluginElement* aPluginElement,
+                       const nsAString& aType,
+                       const nsAString& aDescription,
+                       const nsAString& aExtension)
   : mWindow(aWindow),
     mPluginElement(aPluginElement),
-    mPluginTagMimeIndex(aPluginTagMimeIndex),
-    mType(aType)
+    mType(aType),
+    mDescription(aDescription),
+    mExtension(aExtension)
 {
-}
-
-nsMimeType::nsMimeType(nsPIDOMWindow* aWindow, const nsAString& aType)
-  : mWindow(aWindow),
-    mPluginElement(nullptr),
-    mPluginTagMimeIndex(0),
-    mType(aType)
-{
+  MOZ_ASSERT(aPluginElement);
 }
 
 nsMimeType::~nsMimeType()
 {
 }
 
-nsPIDOMWindow*
+nsPIDOMWindowInner*
 nsMimeType::GetParentObject() const
 {
   MOZ_ASSERT(mWindow);
@@ -251,32 +219,26 @@ nsMimeType::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 }
 
 void
-nsMimeType::GetDescription(nsString& retval) const
+nsMimeType::GetDescription(nsString& aRetval) const
 {
-  retval.Truncate();
-
-  if (mPluginElement) {
-    CopyUTF8toUTF16(mPluginElement->PluginTag()->
-                    mMimeDescriptions[mPluginTagMimeIndex], retval);
-  }
+  aRetval = mDescription;
 }
 
 nsPluginElement*
 nsMimeType::GetEnabledPlugin() const
 {
-  return (mPluginElement && mPluginElement->PluginTag()->IsEnabled()) ?
-    mPluginElement : nullptr;
+  // mPluginElement might be null if we got unlinked but are still somehow being
+  // called into.
+  if (!mPluginElement || !mPluginElement->PluginTag()->IsEnabled()) {
+    return nullptr;
+  }
+  return mPluginElement;
 }
 
 void
-nsMimeType::GetSuffixes(nsString& retval) const
+nsMimeType::GetSuffixes(nsString& aRetval) const
 {
-  retval.Truncate();
-
-  if (mPluginElement) {
-    CopyUTF8toUTF16(mPluginElement->PluginTag()->
-                    mExtensions[mPluginTagMimeIndex], retval);
-  }
+  aRetval = mExtension;
 }
 
 void

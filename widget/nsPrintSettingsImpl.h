@@ -7,7 +7,6 @@
 #ifndef nsPrintSettingsImpl_h__
 #define nsPrintSettingsImpl_h__
 
-#include "gfxCore.h"
 #include "nsIPrintSettings.h"  
 #include "nsMargin.h"  
 #include "nsString.h"
@@ -82,7 +81,6 @@ protected:
 
   nsString      mPaperName;
   int16_t       mPaperData;
-  int16_t       mPaperSizeType;
   double        mPaperWidth;
   double        mPaperHeight;
   int16_t       mPaperSizeUnit;
@@ -99,7 +97,6 @@ protected:
   int16_t       mOutputFormat;
   bool          mIsInitedFromPrinter;
   bool          mIsInitedFromPrefs;
-  bool          mPersistMarginBoxSettings;
 };
 
 #endif /* nsPrintSettings_h__ */

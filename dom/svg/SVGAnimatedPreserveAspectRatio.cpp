@@ -100,7 +100,7 @@ GetMeetOrSliceString(nsAString& aMeetOrSliceString, uint16_t aMeetOrSlice)
 already_AddRefed<DOMSVGPreserveAspectRatio>
 DOMSVGAnimatedPreserveAspectRatio::BaseVal()
 {
-  nsRefPtr<DOMSVGPreserveAspectRatio> domBaseVal =
+  RefPtr<DOMSVGPreserveAspectRatio> domBaseVal =
     sBaseSVGPAspectRatioTearoffTable.GetTearoff(mVal);
   if (!domBaseVal) {
     domBaseVal = new DOMSVGPreserveAspectRatio(mVal, mSVGElement, true);
@@ -122,7 +122,7 @@ DOMSVGPreserveAspectRatio::~DOMSVGPreserveAspectRatio()
 already_AddRefed<DOMSVGPreserveAspectRatio>
 DOMSVGAnimatedPreserveAspectRatio::AnimVal()
 {
-  nsRefPtr<DOMSVGPreserveAspectRatio> domAnimVal =
+  RefPtr<DOMSVGPreserveAspectRatio> domAnimVal =
     sAnimSVGPAspectRatioTearoffTable.GetTearoff(mVal);
   if (!domAnimVal) {
     domAnimVal = new DOMSVGPreserveAspectRatio(mVal, mSVGElement, false);
@@ -146,16 +146,7 @@ ToPreserveAspectRatio(const nsAString &aString,
   nsresult rv;
   SVGPreserveAspectRatio val;
 
-  val.SetDefer(token.EqualsLiteral("defer"));
-
-  if (val.GetDefer()) {
-    if (!tokenizer.hasMoreTokens()) {
-      return NS_ERROR_DOM_SYNTAX_ERR;
-    }
-    rv = val.SetAlign(GetAlignForString(tokenizer.nextToken()));
-  } else {
-    rv = val.SetAlign(GetAlignForString(token));
-  }
+  rv = val.SetAlign(GetAlignForString(token));
 
   if (NS_FAILED(rv)) {
     return NS_ERROR_DOM_SYNTAX_ERR;
@@ -216,10 +207,6 @@ SVGAnimatedPreserveAspectRatio::GetBaseValueString(
 
   aValueAsString.Truncate();
 
-  if (mBaseVal.mDefer) {
-    aValueAsString.AppendLiteral("defer ");
-  }
-
   GetAlignString(tmpString, mBaseVal.mAlign);
   aValueAsString.Append(tmpString);
 
@@ -258,7 +245,6 @@ PackPreserveAspectRatio(const SVGPreserveAspectRatio& par)
   // All preserveAspectRatio values are enum values (do not interpolate), so we
   // can safely collate them and treat them as a single enum as for SMIL.
   uint64_t packed = 0;
-  packed |= uint64_t(par.GetDefer() ? 1 : 0) << 16;
   packed |= uint64_t(par.GetAlign()) << 8;
   packed |= uint64_t(par.GetMeetOrSlice());
   return packed;
@@ -271,7 +257,6 @@ SVGAnimatedPreserveAspectRatio::SetAnimValue(uint64_t aPackedValue,
   if (mIsAnimated && PackPreserveAspectRatio(mAnimVal) == aPackedValue) {
     return;
   }
-  mAnimVal.SetDefer(((aPackedValue & 0xff0000) >> 16) ? true : false);
   mAnimVal.SetAlign(uint16_t((aPackedValue & 0xff00) >> 8));
   mAnimVal.SetMeetOrSlice(uint16_t(aPackedValue & 0xff));
   mIsAnimated = true;
@@ -282,7 +267,7 @@ already_AddRefed<DOMSVGAnimatedPreserveAspectRatio>
 SVGAnimatedPreserveAspectRatio::ToDOMAnimatedPreserveAspectRatio(
   nsSVGElement *aSVGElement)
 {
-  nsRefPtr<DOMSVGAnimatedPreserveAspectRatio> domAnimatedPAspectRatio =
+  RefPtr<DOMSVGAnimatedPreserveAspectRatio> domAnimatedPAspectRatio =
     sSVGAnimatedPAspectRatioTearoffTable.GetTearoff(this);
   if (!domAnimatedPAspectRatio) {
     domAnimatedPAspectRatio = new DOMSVGAnimatedPreserveAspectRatio(this, aSVGElement);

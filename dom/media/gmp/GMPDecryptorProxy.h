@@ -48,8 +48,6 @@ public:
                                 const nsTArray<uint8_t>& aKeyId,
                                 GMPMediaKeyStatus aStatus) = 0;
 
-  virtual void SetCaps(uint64_t aCaps) = 0;
-
   virtual void Decrypted(uint32_t aId,
                          GMPErr aResult,
                          const nsTArray<uint8_t>& aDecryptedData) = 0;
@@ -59,7 +57,7 @@ class GMPDecryptorProxy {
 public:
   ~GMPDecryptorProxy() {}
 
-  virtual const uint32_t GetPluginId() const = 0;
+  virtual uint32_t GetPluginId() const = 0;
 
   virtual nsresult Init(GMPDecryptorProxyCallback* aCallback) = 0;
 

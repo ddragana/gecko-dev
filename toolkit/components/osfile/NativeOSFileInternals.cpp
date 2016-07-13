@@ -84,14 +84,14 @@ struct ScopedArrayBufferContentsTraits {
     type result = {0, 0};
     return result;
   }
-  const static void release(type ptr) {
+  static void release(type ptr) {
     js_free(ptr.data);
     ptr.data = nullptr;
     ptr.nbytes = 0;
   }
 };
 
-struct ScopedArrayBufferContents: public Scoped<ScopedArrayBufferContentsTraits> {
+struct MOZ_NON_TEMPORARY_CLASS ScopedArrayBufferContents: public Scoped<ScopedArrayBufferContentsTraits> {
   explicit ScopedArrayBufferContents(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM):
     Scoped<ScopedArrayBufferContentsTraits>(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_TO_PARENT)
   { }
@@ -228,7 +228,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AbstractResult)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(AbstractResult)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedResult)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedResult)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(AbstractResult)
@@ -390,7 +390,7 @@ TypedArrayResult::GetCacheableResult(JSContext* cx, JS::MutableHandle<JS::Value>
 /**
  * An event used to notify asynchronously of an error.
  */
-class ErrorEvent final : public nsRunnable {
+class ErrorEvent final : public Runnable {
 public:
   /**
    * @param aOnSuccess The success callback.
@@ -407,8 +407,8 @@ public:
    * alread_AddRefed to ensure that we do not manipulate main-thread
    * only refcounters off the main thread.
    */
-  ErrorEvent(already_AddRefed<nsINativeOSFileSuccessCallback>&& aOnSuccess,
-             already_AddRefed<nsINativeOSFileErrorCallback>&& aOnError,
+  ErrorEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+             nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError,
              already_AddRefed<AbstractResult>& aDiscardedResult,
              const nsACString& aOperation,
              int32_t aOSError)
@@ -433,14 +433,14 @@ public:
     return NS_OK;
   }
  private:
-  // The callbacks. Maintained as nsRefPtr as they are generally
+  // The callbacks. Maintained as nsMainThreadPtrHandle as they are generally
   // xpconnect values, which cannot be manipulated with nsCOMPtr off
   // the main thread. We store both the success callback and the
   // error callback to ensure that they are safely released on the
   // main thread.
-  nsRefPtr<nsINativeOSFileSuccessCallback> mOnSuccess;
-  nsRefPtr<nsINativeOSFileErrorCallback> mOnError;
-  nsRefPtr<AbstractResult> mDiscardedResult;
+  nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback> mOnSuccess;
+  nsMainThreadPtrHandle<nsINativeOSFileErrorCallback> mOnError;
+  RefPtr<AbstractResult> mDiscardedResult;
   int32_t mOSError;
   nsCString mOperation;
 };
@@ -448,7 +448,7 @@ public:
 /**
  * An event used to notify of a success.
  */
-class SuccessEvent final : public nsRunnable {
+class SuccessEvent final : public Runnable {
 public:
   /**
    * @param aOnSuccess The success callback.
@@ -461,8 +461,8 @@ public:
    * we do not manipulate xpconnect refcounters off the main thread
    * (which is illegal).
    */
-  SuccessEvent(already_AddRefed<nsINativeOSFileSuccessCallback>&& aOnSuccess,
-               already_AddRefed<nsINativeOSFileErrorCallback>&& aOnError,
+  SuccessEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+               nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError,
                already_AddRefed<nsINativeOSFileResult>& aResult)
     : mOnSuccess(aOnSuccess)
     , mOnError(aOnError)
@@ -483,14 +483,14 @@ public:
     return NS_OK;
   }
  private:
-  // The callbacks. Maintained as nsRefPtr as they are generally
+  // The callbacks. Maintained as nsMainThreadPtrHandle as they are generally
   // xpconnect values, which cannot be manipulated with nsCOMPtr off
   // the main thread. We store both the success callback and the
   // error callback to ensure that they are safely released on the
   // main thread.
-  nsRefPtr<nsINativeOSFileSuccessCallback> mOnSuccess;
-  nsRefPtr<nsINativeOSFileErrorCallback> mOnError;
-  nsRefPtr<nsINativeOSFileResult> mResult;
+  nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback> mOnSuccess;
+  nsMainThreadPtrHandle<nsINativeOSFileErrorCallback> mOnError;
+  RefPtr<nsINativeOSFileResult> mResult;
 };
 
 
@@ -499,10 +499,10 @@ public:
 /**
  * Base class shared by actions.
  */
-class AbstractDoEvent: public nsRunnable {
+class AbstractDoEvent: public Runnable {
 public:
-  AbstractDoEvent(already_AddRefed<nsINativeOSFileSuccessCallback>& aOnSuccess,
-                  already_AddRefed<nsINativeOSFileErrorCallback>& aOnError)
+  AbstractDoEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+                  nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
     : mOnSuccess(aOnSuccess)
     , mOnError(aOnError)
 #if defined(DEBUG)
@@ -519,8 +519,8 @@ public:
             already_AddRefed<AbstractResult>&& aDiscardedResult,
             int32_t aOSError = 0) {
     Resolve();
-    nsRefPtr<ErrorEvent> event = new ErrorEvent(mOnSuccess.forget(),
-                                                mOnError.forget(),
+    RefPtr<ErrorEvent> event = new ErrorEvent(mOnSuccess,
+                                                mOnError,
                                                 aDiscardedResult,
                                                 aOperation,
                                                 aOSError);
@@ -529,8 +529,7 @@ public:
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      nsCOMPtr<nsIThread> main = do_GetMainThread();
-      NS_ProxyRelease(main, event);
+      NS_ReleaseOnMainThread(event.forget());
     }
   }
 
@@ -539,16 +538,15 @@ public:
    */
   void Succeed(already_AddRefed<nsINativeOSFileResult>&& aResult) {
     Resolve();
-    nsRefPtr<SuccessEvent> event = new SuccessEvent(mOnSuccess.forget(),
-                                                    mOnError.forget(),
+    RefPtr<SuccessEvent> event = new SuccessEvent(mOnSuccess,
+                                                    mOnError,
                                                     aResult);
     nsresult rv = NS_DispatchToMainThread(event);
     if (NS_FAILED(rv)) {
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      nsCOMPtr<nsIThread> main = do_GetMainThread();
-      NS_ProxyRelease(main, event);
+      NS_ReleaseOnMainThread(event.forget());
     }
 
   }
@@ -566,8 +564,8 @@ private:
   }
 
 private:
-  nsRefPtr<nsINativeOSFileSuccessCallback> mOnSuccess;
-  nsRefPtr<nsINativeOSFileErrorCallback> mOnError;
+  nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback> mOnSuccess;
+  nsMainThreadPtrHandle<nsINativeOSFileErrorCallback> mOnError;
 #if defined(DEBUG)
   // |true| once the action is complete
   bool mResolved;
@@ -587,8 +585,8 @@ public:
    */
   AbstractReadEvent(const nsAString& aPath,
                     const uint64_t aBytes,
-                    already_AddRefed<nsINativeOSFileSuccessCallback>& aOnSuccess,
-                    already_AddRefed<nsINativeOSFileErrorCallback>& aOnError)
+                    nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+                    nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
     : AbstractDoEvent(aOnSuccess, aOnError)
     , mPath(aPath)
     , mBytes(aBytes)
@@ -736,8 +734,8 @@ class DoReadToTypedArrayEvent final : public AbstractReadEvent {
 public:
   DoReadToTypedArrayEvent(const nsAString& aPath,
                           const uint32_t aBytes,
-                          already_AddRefed<nsINativeOSFileSuccessCallback>&& aOnSuccess,
-                          already_AddRefed<nsINativeOSFileErrorCallback>&& aOnError)
+                          nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+                          nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
     : AbstractReadEvent(aPath, aBytes,
                         aOnSuccess, aOnError)
     , mResult(new TypedArrayResult(TimeStamp::Now()))
@@ -749,8 +747,7 @@ public:
     if (!mResult) {
       return;
     }
-    nsCOMPtr<nsIThread> main = do_GetMainThread();
-    (void)NS_ProxyRelease(main, mResult);
+    NS_ReleaseOnMainThread(mResult.forget());
   }
 
 protected:
@@ -762,7 +759,7 @@ protected:
   }
 
  private:
-  nsRefPtr<TypedArrayResult> mResult;
+  RefPtr<TypedArrayResult> mResult;
 };
 
 /**
@@ -774,8 +771,8 @@ public:
   DoReadToStringEvent(const nsAString& aPath,
                       const nsACString& aEncoding,
                       const uint32_t aBytes,
-                      already_AddRefed<nsINativeOSFileSuccessCallback>&& aOnSuccess,
-                      already_AddRefed<nsINativeOSFileErrorCallback>&& aOnError)
+                      nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+                      nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
     : AbstractReadEvent(aPath, aBytes, aOnSuccess, aOnError)
     , mEncoding(aEncoding)
     , mResult(new StringResult(TimeStamp::Now()))
@@ -787,8 +784,7 @@ public:
     if (!mResult) {
       return;
     }
-    nsCOMPtr<nsIThread> main = do_GetMainThread();
-    (void)NS_ProxyRelease(main, mResult);
+    NS_ReleaseOnMainThread(mResult.forget());
   }
 
 protected:
@@ -853,7 +849,7 @@ protected:
  private:
   nsCString mEncoding;
   nsCOMPtr<nsIUnicodeDecoder> mDecoder;
-  nsRefPtr<StringResult> mResult;
+  RefPtr<StringResult> mResult;
 };
 
 } // namespace
@@ -890,17 +886,21 @@ NativeOSFileInternalsService::Read(const nsAString& aPath,
 
   // Prepare the off main thread event and dispatch it
   nsCOMPtr<nsINativeOSFileSuccessCallback> onSuccess(aOnSuccess);
+  nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback> onSuccessHandle(
+    new nsMainThreadPtrHolder<nsINativeOSFileSuccessCallback>(onSuccess));
   nsCOMPtr<nsINativeOSFileErrorCallback> onError(aOnError);
+  nsMainThreadPtrHandle<nsINativeOSFileErrorCallback> onErrorHandle(
+    new nsMainThreadPtrHolder<nsINativeOSFileErrorCallback>(onError));
 
-  nsRefPtr<AbstractDoEvent> event;
+  RefPtr<AbstractDoEvent> event;
   if (encoding.IsEmpty()) {
     event = new DoReadToTypedArrayEvent(aPath, bytes,
-                                        onSuccess.forget(),
-                                        onError.forget());
+                                        onSuccessHandle,
+                                        onErrorHandle);
   } else {
     event = new DoReadToStringEvent(aPath, encoding, bytes,
-                                    onSuccess.forget(),
-                                    onError.forget());
+                                    onSuccessHandle,
+                                    onErrorHandle);
   }
 
   nsresult rv;

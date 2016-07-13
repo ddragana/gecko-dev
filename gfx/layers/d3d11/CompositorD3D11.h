@@ -27,14 +27,14 @@ struct VertexShaderConstants
   gfx::Rect textureCoords;
   gfx::Rect layerQuad;
   gfx::Rect maskQuad;
-  float vrEyeToSourceUVScale[2];
-  float vrEyeToSourceUVOffset[2];
+  float backdropTransform[4][4];
 };
 
 struct PixelShaderConstants
 {
   float layerColor[4];
   float layerOpacity[4];
+  int blendConfig[4];
 };
 
 struct DeviceAttachmentsD3D11;
@@ -42,11 +42,12 @@ struct DeviceAttachmentsD3D11;
 class CompositorD3D11 : public Compositor
 {
 public:
-  CompositorD3D11(nsIWidget* aWidget);
+  CompositorD3D11(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget);
   ~CompositorD3D11();
 
-  virtual bool Initialize() override;
-  virtual void Destroy() override {}
+  virtual CompositorD3D11* AsCompositorD3D11() override { return this; }
+
+  virtual bool Initialize(nsCString* const out_failureReason) override;
 
   virtual TextureFactoryIdentifier
     GetTextureFactoryIdentifier() override;
@@ -91,7 +92,7 @@ public:
   virtual void ClearRect(const gfx::Rect& aRect) override;
 
   virtual void DrawQuad(const gfx::Rect &aRect,
-                        const gfx::Rect &aClipRect,
+                        const gfx::IntRect &aClipRect,
                         const EffectChain &aEffectChain,
                         gfx::Float aOpacity,
                         const gfx::Matrix4x4& aTransform,
@@ -99,7 +100,7 @@ public:
 
   /* Helper for when the primary effect is VR_DISTORTION */
   void DrawVRDistortion(const gfx::Rect &aRect,
-                        const gfx::Rect &aClipRect,
+                        const gfx::IntRect &aClipRect,
                         const EffectChain &aEffectChain,
                         gfx::Float aOpacity,
                         const gfx::Matrix4x4 &aTransform);
@@ -109,10 +110,11 @@ public:
    * screen dimensions. 
    */
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
-                          const gfx::Rect *aClipRectIn,
-                          const gfx::Rect& aRenderBounds,
-                          gfx::Rect *aClipRectOut = nullptr,
-                          gfx::Rect *aRenderBoundsOut = nullptr) override;
+                          const gfx::IntRect *aClipRectIn,
+                          const gfx::IntRect& aRenderBounds,
+                          const nsIntRegion& aOpaqueRegion,
+                          gfx::IntRect *aClipRectOut = nullptr,
+                          gfx::IntRect *aRenderBoundsOut = nullptr) override;
 
   /**
    * Flush the current frame to the screen.
@@ -129,7 +131,9 @@ public:
    * Setup the viewport and projection matrix for rendering
    * to a window of the given dimensions.
    */
-  virtual void PrepareViewport(const gfx::IntSize& aSize) override;
+  virtual void PrepareViewport(const gfx::IntSize& aSize);
+  virtual void PrepareViewport(const gfx::IntSize& aSize, const gfx::Matrix4x4& aProjection,
+                               float aZNear, float aZFar);
 
   virtual bool SupportsPartialTextureUpdate() override { return true; }
 
@@ -141,7 +145,7 @@ public:
     return LayersBackend::LAYERS_D3D11;
   }
 
-  virtual nsIWidget* GetWidget() const override { return mWidget; }
+  virtual void ForcePresent();
 
   ID3D11Device* GetDevice() { return mDevice; }
 
@@ -155,20 +159,25 @@ private:
   };
 
   void HandleError(HRESULT hr, Severity aSeverity = DebugAssert);
-  bool Failed(HRESULT hr, Severity aSeverity = DebugAssert);
-  bool Succeeded(HRESULT hr, Severity aSeverity = DebugAssert);
+
+  // Same as Failed(), except the severity is critical (with no abort) and
+  // a string prefix must be provided.
+  bool Failed(HRESULT hr, const char* aContext);
 
   // ensure mSize is up to date with respect to mWidget
   void EnsureSize();
   bool VerifyBufferSize();
-  void UpdateRenderTarget();
-  bool CreateShaders();
+  bool UpdateRenderTarget();
   bool UpdateConstantBuffers();
-  void SetSamplerForFilter(gfx::Filter aFilter);
-  void SetPSForEffect(Effect *aEffect, MaskType aMaskType, gfx::SurfaceFormat aFormat);
+  void SetSamplerForSamplingFilter(gfx::SamplingFilter aSamplingFilter);
+  ID3D11PixelShader* GetPSForEffect(Effect *aEffect, MaskType aMaskType);
   void PaintToTarget();
-
-  virtual gfx::IntSize GetWidgetSize() const override { return mSize; }
+  RefPtr<ID3D11Texture2D> CreateTexture(const gfx::IntRect& aRect,
+                                        const CompositingRenderTarget* aSource,
+                                        const gfx::IntPoint& aSourcePoint);
+  bool CopyBackdrop(const gfx::IntRect& aRect,
+                    RefPtr<ID3D11Texture2D>* aOutTexture,
+                    RefPtr<ID3D11ShaderResourceView>* aOutView);
 
   RefPtr<ID3D11DeviceContext> mContext;
   RefPtr<ID3D11Device> mDevice;
@@ -176,11 +185,11 @@ private:
   RefPtr<CompositingRenderTargetD3D11> mDefaultRT;
   RefPtr<CompositingRenderTargetD3D11> mCurrentRT;
 
+  RefPtr<ID3D11Query> mQuery;
+
   DeviceAttachmentsD3D11* mAttachments;
 
-  nsIWidget* mWidget;
-
-  gfx::IntSize mSize;
+  LayoutDeviceIntSize mSize;
 
   HWND mHwnd;
 
@@ -194,6 +203,8 @@ private:
   // This is the clip rect applied to the default DrawTarget (i.e. the window)
   gfx::IntRect mCurrentClip;
   nsIntRegion mInvalidRegion;
+
+  bool mVerifyBuffersFailed;
 };
 
 }

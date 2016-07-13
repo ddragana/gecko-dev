@@ -88,7 +88,7 @@ public:
     { return static_cast<EIsFromUserInput>(mIsFromUserInput); }
 
   Accessible* GetAccessible() const { return mAccessible; }
-  DocAccessible* GetDocAccessible() const { return mAccessible->Document(); }
+  DocAccessible* Document() const { return mAccessible->Document(); }
 
   /**
    * Down casting.
@@ -127,10 +127,10 @@ protected:
   bool mIsFromUserInput;
   uint32_t mEventType;
   EEventRule mEventRule;
-  nsRefPtr<Accessible> mAccessible;
+  RefPtr<Accessible> mAccessible;
 
   friend class EventQueue;
-  friend class AccReorderEvent;
+  friend class EventTree;
 };
 
 
@@ -201,8 +201,7 @@ private:
   bool mIsInserted;
   nsString mModifiedText;
 
-  friend class EventQueue;
-  friend class AccReorderEvent;
+  friend class EventTree;
 };
 
 
@@ -212,8 +211,7 @@ private:
 class AccMutationEvent: public AccEvent
 {
 public:
-  AccMutationEvent(uint32_t aEventType, Accessible* aTarget,
-                   nsINode* aTargetNode) :
+  AccMutationEvent(uint32_t aEventType, Accessible* aTarget) :
     AccEvent(aEventType, aTarget, eAutoDetect, eCoalesceMutationTextChange)
   {
     // Don't coalesce these since they are coalesced by reorder event. Coalesce
@@ -237,10 +235,10 @@ public:
 
 protected:
   nsCOMPtr<nsINode> mNode;
-  nsRefPtr<Accessible> mParent;
-  nsRefPtr<AccTextChangeEvent> mTextChangeEvent;
+  RefPtr<Accessible> mParent;
+  RefPtr<AccTextChangeEvent> mTextChangeEvent;
 
-  friend class EventQueue;
+  friend class EventTree;
 };
 
 
@@ -250,7 +248,7 @@ protected:
 class AccHideEvent: public AccMutationEvent
 {
 public:
-  AccHideEvent(Accessible* aTarget, nsINode* aTargetNode);
+  explicit AccHideEvent(Accessible* aTarget, bool aNeedsShutdown = true);
 
   // Event
   static const EventGroup kEventGroup = eHideEvent;
@@ -263,12 +261,14 @@ public:
   Accessible* TargetParent() const { return mParent; }
   Accessible* TargetNextSibling() const { return mNextSibling; }
   Accessible* TargetPrevSibling() const { return mPrevSibling; }
+  bool NeedsShutdown() const { return mNeedsShutdown; }
 
 protected:
-  nsRefPtr<Accessible> mNextSibling;
-  nsRefPtr<Accessible> mPrevSibling;
+  bool mNeedsShutdown;
+  RefPtr<Accessible> mNextSibling;
+  RefPtr<Accessible> mPrevSibling;
 
-  friend class EventQueue;
+  friend class EventTree;
 };
 
 
@@ -278,7 +278,7 @@ protected:
 class AccShowEvent: public AccMutationEvent
 {
 public:
-  AccShowEvent(Accessible* aTarget, nsINode* aTargetNode);
+  explicit AccShowEvent(Accessible* aTarget);
 
   // Event
   static const EventGroup kEventGroup = eShowEvent;
@@ -286,6 +286,11 @@ public:
   {
     return AccMutationEvent::GetEventGroups() | (1U << eShowEvent);
   }
+
+  uint32_t InsertionIndex() const { return mInsertionIndex; }
+
+private:
+  uint32_t mInsertionIndex;
 };
 
 
@@ -306,37 +311,6 @@ public:
   {
     return AccEvent::GetEventGroups() | (1U << eReorderEvent);
   }
-
-  /**
-   * Get connected with mutation event.
-   */
-  void AddSubMutationEvent(AccMutationEvent* aEvent)
-    { mDependentEvents.AppendElement(aEvent); }
-
-  /**
-   * Do not emit the reorder event and its connected mutation events.
-   */
-  void DoNotEmitAll()
-  {
-    mEventRule = AccEvent::eDoNotEmit;
-    uint32_t eventsCount = mDependentEvents.Length();
-    for (uint32_t idx = 0; idx < eventsCount; idx++)
-      mDependentEvents[idx]->mEventRule = AccEvent::eDoNotEmit;
-  }
-
-  /**
-   * Return true if the given accessible is a target of connected mutation
-   * event.
-   */
-  uint32_t IsShowHideEventTarget(const Accessible* aTarget) const;
-
-protected:
-  /**
-   * Show and hide events causing this reorder event.
-   */
-  nsTArray<AccMutationEvent*> mDependentEvents;
-
-  friend class EventQueue;
 };
 
 
@@ -394,7 +368,7 @@ public:
   bool IsCaretMoveOnly() const;
 
 private:
-  nsRefPtr<dom::Selection> mSel;
+  RefPtr<dom::Selection> mSel;
   int32_t mReason;
 
   friend class EventQueue;
@@ -429,8 +403,8 @@ public:
   Accessible* Widget() const { return mWidget; }
 
 private:
-  nsRefPtr<Accessible> mWidget;
-  nsRefPtr<Accessible> mItem;
+  RefPtr<Accessible> mWidget;
+  RefPtr<Accessible> mItem;
   SelChangeType mSelChangeType;
   uint32_t mPreceedingCount;
   AccSelChangeEvent* mPackedEvent;
@@ -492,7 +466,7 @@ public:
   int32_t Reason() const { return mReason; }
 
 private:
-  nsRefPtr<Accessible> mOldAccessible;
+  RefPtr<Accessible> mOldAccessible;
   int32_t mOldStart;
   int32_t mOldEnd;
   int16_t mReason;

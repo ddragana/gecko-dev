@@ -85,12 +85,9 @@ public:
     // Check if mHwc exists
     virtual bool HasHwc() const = 0;
 
-    // Get HwcRect
-    virtual const hwc_rect_t GetHwcRect() const = 0;
-
     // Set EGL info (only ICS need this info)
-    virtual void SetEGLInfo(hwc_display_t aDpy,
-                            hwc_surface_t aSur) = 0;
+    virtual void SetEGLInfo(hwc_display_t aEGLDisplay,
+                            hwc_surface_t aEGLSurface) = 0;
 
     // HwcDevice query properties
     virtual bool Query(QueryType aType) = 0;
@@ -105,6 +102,7 @@ public:
     // HwcDevice prepare
     virtual int Prepare(HwcList *aList,
                         uint32_t aDisp,
+                        hwc_rect_t aDispRect,
                         buffer_handle_t aHandle,
                         int aFenceFd) = 0;
 
@@ -125,7 +123,7 @@ public:
     virtual bool RegisterHwcEventCallback(const HwcHALProcs_t &aProcs) = 0;
 
 protected:
-    MOZ_CONSTEXPR static uint32_t HwcAPIVersion(uint32_t aMaj, uint32_t aMin) {
+    constexpr static uint32_t HwcAPIVersion(uint32_t aMaj, uint32_t aMin) {
         // HARDWARE_MAKE_API_VERSION_2, from Android hardware.h
         return (((aMaj & 0xff) << 24) | ((aMin & 0xff) << 16) | (1 & 0xffff));
     }

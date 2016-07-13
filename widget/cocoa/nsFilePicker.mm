@@ -15,7 +15,6 @@
 #include "nsIURL.h"
 #include "nsArrayEnumerator.h"
 #include "nsIStringBundle.h"
-#include "nsCocoaFeatures.h"
 #include "nsCocoaUtils.h"
 #include "mozilla/Preferences.h"
 
@@ -121,7 +120,7 @@ NSView* nsFilePicker::GetAccessoryView()
   nsresult rv = sbs->CreateBundle("chrome://global/locale/filepicker.properties", getter_AddRefs(bundle));
   if (NS_SUCCEEDED(rv)) {
     nsXPIDLString locaLabel;
-    bundle->GetStringFromName(NS_LITERAL_STRING("formatLabel").get(),
+    bundle->GetStringFromName(MOZ_UTF16("formatLabel"),
 			      getter_Copies(locaLabel));
     if (locaLabel) {
       label = [NSString stringWithCharacters:reinterpret_cast<const unichar*>(locaLabel.get())

@@ -13,7 +13,8 @@
 #include "nsThreadUtils.h"
 #include "prnetdb.h"
 
-#include "AndroidBridge.h"
+#include "mozilla/jni/Utils.h"
+#include "GeneratedJNIWrappers.h"
 
 namespace mozilla {
 namespace net {
@@ -32,38 +33,16 @@ Tickler::Tickler()
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-class TicklerThreadDestructor  : public nsRunnable
-{
-public:
-  explicit TicklerThreadDestructor(nsIThread *aThread)
-    : mThread(aThread) { }
-
-  NS_IMETHOD Run() override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    if (mThread)
-      mThread->Shutdown();
-    return NS_OK;
-  }
-
-private:
-  ~TicklerThreadDestructor() { }
-  nsCOMPtr<nsIThread> mThread;
-};
-
 Tickler::~Tickler()
 {
   // non main thread uses of the tickler should hold weak
   // references to it if they must hold a reference at all
   MOZ_ASSERT(NS_IsMainThread());
 
-  // Shutting down a thread can spin the event loop - which is a surprising
-  // thing to do from a dtor. Running it on its own event is safer.
-  nsCOMPtr<nsIRunnable> event = new TicklerThreadDestructor(mThread);
-  if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
-    mThread->Shutdown();
+  if (mThread) {
+    mThread->AsyncShutdown();
+    mThread = nullptr;
   }
-  mThread = nullptr;
 
   if (mTimer)
     mTimer->Cancel();
@@ -80,7 +59,7 @@ Tickler::Init()
   MOZ_ASSERT(!mThread);
   MOZ_ASSERT(!mFD);
 
-  if (AndroidBridge::HasEnv()) {
+  if (jni::IsAvailable()) {
       widget::GeckoAppShell::EnableNetworkNotifications();
   }
 
@@ -129,7 +108,7 @@ void Tickler::Tickle()
 void Tickler::PostCheckTickler()
 {
   mLock.AssertCurrentThreadOwns();
-  mThread->Dispatch(NS_NewRunnableMethod(this, &Tickler::CheckTickler),
+  mThread->Dispatch(NewRunnableMethod(this, &Tickler::CheckTickler),
                     NS_DISPATCH_NORMAL);
   return;
 }
@@ -145,7 +124,7 @@ void Tickler::MaybeStartTickler()
   mLock.AssertCurrentThreadOwns();
   if (!NS_IsMainThread()) {
     NS_DispatchToMainThread(
-      NS_NewRunnableMethod(this, &Tickler::MaybeStartTicklerUnlocked));
+      NewRunnableMethod(this, &Tickler::MaybeStartTicklerUnlocked));
     return;
   }
 
@@ -260,7 +239,7 @@ NS_IMPL_ISUPPORTS(TicklerTimer, nsITimerCallback)
 
 NS_IMETHODIMP TicklerTimer::Notify(nsITimer *timer)
 {
-  nsRefPtr<Tickler> tickler = do_QueryReferent(mTickler);
+  RefPtr<Tickler> tickler = do_QueryReferent(mTickler);
   if (!tickler)
     return NS_ERROR_FAILURE;
   MutexAutoLock lock(tickler->mLock);

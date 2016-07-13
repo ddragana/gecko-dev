@@ -44,14 +44,18 @@ interface nsIMozBrowserFrame : nsIDOMMozBrowserFrame
   [infallible] readonly attribute boolean reallyIsWidget;
 
   /**
-   * This corresponds to the expecting-system-message attribute, which tells us
-   * whether we should expect that this frame will receive a system message once
-   * it starts up.
+   * Gets whether this frame is an isolated frame.
    *
-   * It's the embedder's job to set this attribute on a frame.  Its presence
-   * might cause us to increase the priority of the frame's process.
+   * By default, browser frames are isolated, meaning they have a principal
+   * where OriginAttributes.mIsInIsolatedMozBrowser == true.  This isolates
+   * storage and other origin related items from non-browser apps, xul:browsers,
+   * etc.
+   *
+   * Isolation can be disabled by setting the frame's isolated attribute to
+   * false.  Disabling isolation is only allowed if the containing document has
+   * browser permission (or equivalent access).
    */
-  [infallible] readonly attribute boolean isExpectingSystemMessage;
+  [infallible] readonly attribute boolean isolated;
 
   /**
    * Gets this frame's app manifest URL or widget manifest URL, if the frame

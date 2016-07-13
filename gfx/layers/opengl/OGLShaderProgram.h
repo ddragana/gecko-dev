@@ -20,8 +20,6 @@
 
 #include <string>
 
-struct gfxRGBA;
-
 namespace mozilla {
 namespace layers {
 
@@ -32,15 +30,15 @@ enum ShaderFeatures {
   ENABLE_TEXTURE_RECT=0x02,
   ENABLE_TEXTURE_EXTERNAL=0x04,
   ENABLE_TEXTURE_YCBCR=0x08,
-  ENABLE_TEXTURE_COMPONENT_ALPHA=0x10,
-  ENABLE_TEXTURE_NO_ALPHA=0x20,
-  ENABLE_TEXTURE_RB_SWAP=0x40,
-  ENABLE_OPACITY=0x80,
-  ENABLE_BLUR=0x100,
-  ENABLE_COLOR_MATRIX=0x200,
-  ENABLE_MASK_2D=0x400,
-  ENABLE_MASK_3D=0x800,
-  ENABLE_PREMULTIPLY=0x1000,
+  ENABLE_TEXTURE_NV12=0x10,
+  ENABLE_TEXTURE_COMPONENT_ALPHA=0x20,
+  ENABLE_TEXTURE_NO_ALPHA=0x40,
+  ENABLE_TEXTURE_RB_SWAP=0x80,
+  ENABLE_OPACITY=0x100,
+  ENABLE_BLUR=0x200,
+  ENABLE_COLOR_MATRIX=0x400,
+  ENABLE_MASK=0x800,
+  ENABLE_NO_PREMUL_ALPHA=0x1000,
   ENABLE_DEAA=0x2000
 };
 
@@ -53,6 +51,7 @@ public:
     LayerTransform = 0,
     LayerTransformInverse,
     MaskTransform,
+    BackdropTransform,
     LayerRects,
     MatrixProj,
     TextureTransform,
@@ -66,8 +65,10 @@ public:
     BlackTexture,
     WhiteTexture,
     MaskTexture,
+    BackdropTexture,
     RenderColor,
     TexCoordMultiplier,
+    CbCrTexCoordMultiplier,
     TexturePass2,
     ColorMatrix,
     ColorMatrixVector,
@@ -207,7 +208,9 @@ class ShaderConfigOGL
 {
 public:
   ShaderConfigOGL() :
-    mFeatures(0) {}
+    mFeatures(0),
+    mCompositionOp(gfx::CompositionOp::OP_OVER)
+  {}
 
   void SetRenderColor(bool aEnabled);
   void SetTextureTarget(GLenum aTarget);
@@ -215,16 +218,19 @@ public:
   void SetNoAlpha(bool aEnabled);
   void SetOpacity(bool aEnabled);
   void SetYCbCr(bool aEnabled);
+  void SetNV12(bool aEnabled);
   void SetComponentAlpha(bool aEnabled);
   void SetColorMatrix(bool aEnabled);
   void SetBlur(bool aEnabled);
-  void SetMask2D(bool aEnabled);
-  void SetMask3D(bool aEnabled);
-  void SetPremultiply(bool aEnabled);
+  void SetMask(bool aEnabled);
   void SetDEAA(bool aEnabled);
+  void SetCompositionOp(gfx::CompositionOp aOp);
+  void SetNoPremultipliedAlpha();
 
   bool operator< (const ShaderConfigOGL& other) const {
-    return mFeatures < other.mFeatures;
+    return mFeatures < other.mFeatures ||
+           (mFeatures == other.mFeatures &&
+            (int)mCompositionOp < (int)other.mCompositionOp);
   }
 
 public:
@@ -236,6 +242,7 @@ public:
   }
 
   int mFeatures;
+  gfx::CompositionOp mCompositionOp;
 };
 
 static inline ShaderConfigOGL
@@ -248,7 +255,7 @@ ShaderConfigFromTargetAndFormat(GLenum aTarget,
                    aFormat == gfx::SurfaceFormat::B8G8R8X8);
   config.SetNoAlpha(aFormat == gfx::SurfaceFormat::B8G8R8X8 ||
                     aFormat == gfx::SurfaceFormat::R8G8B8X8 ||
-                    aFormat == gfx::SurfaceFormat::R5G6B5);
+                    aFormat == gfx::SurfaceFormat::R5G6B5_UINT16);
   return config;
 }
 
@@ -277,6 +284,9 @@ struct ProgramProfileOGL
   ProgramProfileOGL() :
     mTextureCount(0)
   {}
+
+ private:
+  static void BuildMixBlender(const ShaderConfigOGL& aConfig, std::ostringstream& fs);
 };
 
 
@@ -339,6 +349,10 @@ public:
 
   void SetMaskLayerTransform(const gfx::Matrix4x4& aMatrix) {
     SetMatrixUniform(KnownUniform::MaskTransform, aMatrix);
+  }
+
+  void SetBackdropTransform(const gfx::Matrix4x4& aMatrix) {
+    SetMatrixUniform(KnownUniform::BackdropTransform, aMatrix);
   }
 
   void SetDEAAEdges(const gfx::Point3D* aEdges) {
@@ -415,6 +429,11 @@ public:
     SetUniform(KnownUniform::CrTexture, aCrUnit);
   }
 
+  void SetNV12TextureUnits(GLint aYUnit, GLint aCbCrUnit) {
+    SetUniform(KnownUniform::YTexture, aYUnit);
+    SetUniform(KnownUniform::CbTexture, aCbCrUnit);
+  }
+
   void SetBlackTextureUnit(GLint aUnit) {
     SetUniform(KnownUniform::BlackTexture, aUnit);
   }
@@ -427,8 +446,8 @@ public:
     SetUniform(KnownUniform::MaskTexture, aUnit);
   }
 
-  void SetRenderColor(const gfxRGBA& aColor) {
-    SetUniform(KnownUniform::RenderColor, aColor);
+  void SetBackdropTextureUnit(GLint aUnit) {
+    SetUniform(KnownUniform::BackdropTexture, aUnit);
   }
 
   void SetRenderColor(const gfx::Color& aColor) {
@@ -444,6 +463,11 @@ public:
   void SetTexCoordMultiplier(float aWidth, float aHeight) {
     float f[] = {aWidth, aHeight};
     SetUniform(KnownUniform::TexCoordMultiplier, 2, f);
+  }
+
+  void SetCbCrTexCoordMultiplier(float aWidth, float aHeight) {
+    float f[] = {aWidth, aHeight};
+    SetUniform(KnownUniform::CbCrTexCoordMultiplier, 2, f);
   }
 
   // Set whether we want the component alpha shader to return the color
@@ -491,17 +515,6 @@ protected:
     KnownUniform& ku(mProfile.mUniforms[aKnownUniform]);
     if (ku.UpdateUniform(aFloatValue)) {
       mGL->fUniform1f(ku.mLocation, aFloatValue);
-    }
-  }
-
-  void SetUniform(KnownUniform::KnownUniformName aKnownUniform, const gfxRGBA& aColor)
-  {
-    ASSERT_THIS_PROGRAM;
-    NS_ASSERTION(aKnownUniform >= 0 && aKnownUniform < KnownUniform::KnownUniformCount, "Invalid known uniform");
-
-    KnownUniform& ku(mProfile.mUniforms[aKnownUniform]);
-    if (ku.UpdateUniform(aColor.r, aColor.g, aColor.b, aColor.a)) {
-      mGL->fUniform4fv(ku.mLocation, 1, ku.mValue.f16v);
     }
   }
 

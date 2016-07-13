@@ -7,15 +7,19 @@
 #ifndef gc_Marking_h
 #define gc_Marking_h
 
-#include "mozilla/DebugOnly.h"
+#include "mozilla/HashFunctions.h"
+#include "mozilla/Move.h"
 
 #include "jsfriendapi.h"
 
+#include "ds/OrderedHashTable.h"
 #include "gc/Heap.h"
 #include "gc/Tracer.h"
 #include "js/GCAPI.h"
+#include "js/HeapAPI.h"
 #include "js/SliceBudget.h"
 #include "js/TracingAPI.h"
+#include "vm/TaggedProto.h"
 
 class JSLinearString;
 class JSRope;
@@ -25,8 +29,9 @@ class GCMarker;
 class LazyScript;
 class NativeObject;
 class ObjectGroup;
+class WeakMapBase;
 namespace gc {
-struct ArenaHeader;
+class Arena;
 } // namespace gc
 namespace jit {
 class JitCode;
@@ -36,9 +41,9 @@ static const size_t NON_INCREMENTAL_MARK_STACK_BASE_CAPACITY = 4096;
 static const size_t INCREMENTAL_MARK_STACK_BASE_CAPACITY = 32768;
 
 /*
- * When the native stack is low, the GC does not call JS_TraceChildren to mark
+ * When the native stack is low, the GC does not call js::TraceChildren to mark
  * the reachable "children" of the thing. Rather the thing is put aside and
- * JS_TraceChildren is called later with more space on the C stack.
+ * js::TraceChildren is called later with more space on the C stack.
  *
  * To implement such delayed marking of the children with minimal overhead for
  * the normal case of sufficient native stack, the code adds a field per arena.
@@ -82,13 +87,13 @@ class MarkStack
         end_ = stack + capacity;
     }
 
-    bool init(JSGCMode gcMode);
+    MOZ_MUST_USE bool init(JSGCMode gcMode);
 
     void setBaseCapacity(JSGCMode mode);
     size_t maxCapacity() const { return maxCapacity_; }
     void setMaxCapacity(size_t maxCapacity);
 
-    bool push(uintptr_t item) {
+    MOZ_MUST_USE bool push(uintptr_t item) {
         if (tos_ == end_) {
             if (!enlarge(1))
                 return false;
@@ -98,7 +103,7 @@ class MarkStack
         return true;
     }
 
-    bool push(uintptr_t item1, uintptr_t item2, uintptr_t item3) {
+    MOZ_MUST_USE bool push(uintptr_t item1, uintptr_t item2, uintptr_t item3) {
         uintptr_t* nextTos = tos_ + 3;
         if (nextTos > end_) {
             if (!enlarge(3))
@@ -125,18 +130,45 @@ class MarkStack
     void reset();
 
     /* Grow the stack, ensuring there is space for at least count elements. */
-    bool enlarge(unsigned count);
+    MOZ_MUST_USE bool enlarge(unsigned count);
 
     void setGCMode(JSGCMode gcMode);
 
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 };
 
+namespace gc {
+
+struct WeakKeyTableHashPolicy {
+    typedef JS::GCCellPtr Lookup;
+    static HashNumber hash(const Lookup& v) { return mozilla::HashGeneric(v.asCell()); }
+    static bool match(const JS::GCCellPtr& k, const Lookup& l) { return k == l; }
+    static bool isEmpty(const JS::GCCellPtr& v) { return !v; }
+    static void makeEmpty(JS::GCCellPtr* vp) { *vp = nullptr; }
+};
+
+struct WeakMarkable {
+    WeakMapBase* weakmap;
+    JS::GCCellPtr key;
+
+    WeakMarkable(WeakMapBase* weakmapArg, JS::GCCellPtr keyArg)
+      : weakmap(weakmapArg), key(keyArg) {}
+};
+
+using WeakEntryVector = Vector<WeakMarkable, 2, js::SystemAllocPolicy>;
+
+using WeakKeyTable = OrderedHashMap<JS::GCCellPtr,
+                                    WeakEntryVector,
+                                    WeakKeyTableHashPolicy,
+                                    js::SystemAllocPolicy>;
+
+} /* namespace gc */
+
 class GCMarker : public JSTracer
 {
   public:
     explicit GCMarker(JSRuntime* rt);
-    bool init(JSGCMode gcMode);
+    MOZ_MUST_USE bool init(JSGCMode gcMode);
 
     void setMaxCapacity(size_t maxCap) { stack.setMaxCapacity(maxCap); }
     size_t maxCapacity() const { return stack.maxCapacity(); }
@@ -149,10 +181,11 @@ class GCMarker : public JSTracer
     template <typename T> void traverse(T thing);
 
     // Calls traverse on target after making additional assertions.
+    template <typename S, typename T> void traverseEdge(S source, T* target);
     template <typename S, typename T> void traverseEdge(S source, T target);
-    // C++ requires explicit declarations of partial template instantiations.
-    template <typename S> void traverseEdge(S source, jsid target);
-    template <typename S> void traverseEdge(S source, Value target);
+
+    // Notes a weak graph edge for later sweeping.
+    template <typename T> void noteWeakEdge(T* edge);
 
     /*
      * Care must be taken changing the mark color from gray to black. The cycle
@@ -173,10 +206,17 @@ class GCMarker : public JSTracer
     }
     uint32_t markColor() const { return color; }
 
-    void delayMarkingArena(gc::ArenaHeader* aheader);
+    void enterWeakMarkingMode();
+    void leaveWeakMarkingMode();
+    void abortLinearWeakMarking() {
+        leaveWeakMarkingMode();
+        linearWeakMarkingDisabled_ = true;
+    }
+
+    void delayMarkingArena(gc::Arena* arena);
     void delayMarkingChildren(const void* thing);
-    void markDelayedChildren(gc::ArenaHeader* aheader);
-    bool markDelayedChildren(SliceBudget& budget);
+    void markDelayedChildren(gc::Arena* arena);
+    MOZ_MUST_USE bool markDelayedChildren(SliceBudget& budget);
     bool hasDelayedChildren() const {
         return !!unmarkedArenaStackTop;
     }
@@ -185,7 +225,7 @@ class GCMarker : public JSTracer
         return isMarkStackEmpty() && !unmarkedArenaStackTop;
     }
 
-    bool drainMarkStack(SliceBudget& budget);
+    MOZ_MUST_USE bool drainMarkStack(SliceBudget& budget);
 
     void setGCMode(JSGCMode mode) { stack.setGCMode(mode); }
 
@@ -194,6 +234,8 @@ class GCMarker : public JSTracer
 #ifdef DEBUG
     bool shouldCheckCompartments() { return strictCompartmentChecking; }
 #endif
+
+    void markEphemeronValues(gc::Cell* markedCell, gc::WeakEntryVector& entry);
 
   private:
 #ifdef DEBUG
@@ -213,6 +255,7 @@ class GCMarker : public JSTracer
         GroupTag,
         SavedValueArrayTag,
         JitCodeTag,
+        ScriptTag,
         LastTag = JitCodeTag
     };
 
@@ -230,6 +273,8 @@ class GCMarker : public JSTracer
     template <typename T> void markAndTraceChildren(T* thing);
     template <typename T> void markAndPush(StackTag tag, T* thing);
     template <typename T> void markAndScan(T* thing);
+    template <typename T> void markImplicitEdgesHelper(T oldThing);
+    template <typename T> void markImplicitEdges(T* oldThing);
     void eagerlyMarkChildren(JSLinearString* str);
     void eagerlyMarkChildren(JSRope* rope);
     void eagerlyMarkChildren(JSString* str);
@@ -237,14 +282,14 @@ class GCMarker : public JSTracer
     void eagerlyMarkChildren(Shape* shape);
     void lazilyMarkChildren(ObjectGroup* group);
 
-    // We may not have concrete types yet, so this has to be out of the header.
+    // We may not have concrete types yet, so this has to be outside the header.
     template <typename T>
     void dispatchToTraceChildren(T* thing);
 
     // Mark the given GC thing, but do not trace its children. Return true
     // if the thing became marked.
     template <typename T>
-    bool mark(T* thing);
+    MOZ_MUST_USE bool mark(T* thing);
 
     void pushTaggedPtr(StackTag tag, void* ptr) {
         checkZone(ptr);
@@ -274,7 +319,7 @@ class GCMarker : public JSTracer
         return stack.isEmpty();
     }
 
-    bool restoreValueArray(JSObject* obj, void** vpp, void** endp);
+    MOZ_MUST_USE bool restoreValueArray(JSObject* obj, void** vpp, void** endp);
     void saveValueRanges();
     inline void processMarkStackTop(SliceBudget& budget);
 
@@ -285,19 +330,27 @@ class GCMarker : public JSTracer
     uint32_t color;
 
     /* Pointer to the top of the stack of arenas we are delaying marking on. */
-    js::gc::ArenaHeader* unmarkedArenaStackTop;
+    js::gc::Arena* unmarkedArenaStackTop;
 
+    /*
+     * If the weakKeys table OOMs, disable the linear algorithm and fall back
+     * to iterating until the next GC.
+     */
+    bool linearWeakMarkingDisabled_;
+
+#ifdef DEBUG
     /* Count of arenas that are currently in the stack. */
-    mozilla::DebugOnly<size_t> markLaterArenas;
+    size_t markLaterArenas;
 
     /* Assert that start and stop are called with correct ordering. */
-    mozilla::DebugOnly<bool> started;
+    bool started;
 
     /*
      * If this is true, all marked objects must belong to a compartment being
      * GCed. This is used to look for compartment bugs.
      */
-    mozilla::DebugOnly<bool> strictCompartmentChecking;
+    bool strictCompartmentChecking;
+#endif // DEBUG
 };
 
 #ifdef DEBUG
@@ -312,7 +365,7 @@ namespace gc {
 /*** Special Cases ***/
 
 void
-PushArena(GCMarker* gcmarker, ArenaHeader* aheader);
+PushArena(GCMarker* gcmarker, Arena* arena);
 
 /*** Liveness ***/
 
@@ -322,11 +375,7 @@ IsMarkedUnbarriered(T* thingp);
 
 template <typename T>
 bool
-IsMarked(BarrieredBase<T>* thingp);
-
-template <typename T>
-bool
-IsMarked(ReadBarriered<T>* thingp);
+IsMarked(WriteBarrieredBase<T>* thingp);
 
 template <typename T>
 bool
@@ -334,11 +383,14 @@ IsAboutToBeFinalizedUnbarriered(T* thingp);
 
 template <typename T>
 bool
-IsAboutToBeFinalized(BarrieredBase<T>* thingp);
+IsAboutToBeFinalized(WriteBarrieredBase<T>* thingp);
 
 template <typename T>
 bool
-IsAboutToBeFinalized(ReadBarriered<T>* thingp);
+IsAboutToBeFinalized(ReadBarrieredBase<T>* thingp);
+
+bool
+IsAboutToBeFinalizedDuringSweep(TenuredCell& tenured);
 
 inline Cell*
 ToMarkable(const Value& v)
@@ -359,48 +411,53 @@ ToMarkable(Cell* cell)
 MOZ_ALWAYS_INLINE bool
 IsNullTaggedPointer(void* p)
 {
-    return uintptr_t(p) < 32;
+    return uintptr_t(p) <= LargestTaggedNullCellPointer;
 }
-
-// HashKeyRef represents a reference to a HashMap key. This should normally
-// be used through the HashTableWriteBarrierPost function.
-template <typename Map, typename Key>
-class HashKeyRef : public BufferableRef
-{
-    Map* map;
-    Key key;
-
-  public:
-    HashKeyRef(Map* m, const Key& k) : map(m), key(k) {}
-
-    void trace(JSTracer* trc) override {
-        Key prior = key;
-        typename Map::Ptr p = map->lookup(key);
-        if (!p)
-            return;
-        TraceManuallyBarrieredEdge(trc, &key, "HashKeyRef");
-        map->rekeyIfMoved(prior, key);
-    }
-};
 
 // Wrap a GC thing pointer into a new Value or jsid. The type system enforces
 // that the thing pointer is a wrappable type.
 template <typename S, typename T>
-struct RewrapValueOrId {};
+struct RewrapTaggedPointer{};
 #define DECLARE_REWRAP(S, T, method, prefix) \
-    template <> struct RewrapValueOrId<S, T> { \
-        static S wrap(T thing) { return method ( prefix thing ); } \
+    template <> struct RewrapTaggedPointer<S, T> { \
+        static S wrap(T* thing) { return method ( prefix thing ); } \
     }
-DECLARE_REWRAP(JS::Value, JSObject*, JS::ObjectOrNullValue, );
-DECLARE_REWRAP(JS::Value, JSString*, JS::StringValue, );
-DECLARE_REWRAP(JS::Value, JS::Symbol*, JS::SymbolValue, );
-DECLARE_REWRAP(jsid, JSString*, NON_INTEGER_ATOM_TO_JSID, (JSAtom*));
-DECLARE_REWRAP(jsid, JS::Symbol*, SYMBOL_TO_JSID, );
+DECLARE_REWRAP(JS::Value, JSObject, JS::ObjectOrNullValue, );
+DECLARE_REWRAP(JS::Value, JSString, JS::StringValue, );
+DECLARE_REWRAP(JS::Value, JS::Symbol, JS::SymbolValue, );
+DECLARE_REWRAP(jsid, JSString, NON_INTEGER_ATOM_TO_JSID, (JSAtom*));
+DECLARE_REWRAP(jsid, JS::Symbol, SYMBOL_TO_JSID, );
+DECLARE_REWRAP(js::TaggedProto, JSObject, js::TaggedProto, );
+#undef DECLARE_REWRAP
+
+template <typename T>
+struct IsPrivateGCThingInValue
+  : public mozilla::EnableIf<mozilla::IsBaseOf<Cell, T>::value &&
+                             !mozilla::IsBaseOf<JSObject, T>::value &&
+                             !mozilla::IsBaseOf<JSString, T>::value &&
+                             !mozilla::IsBaseOf<JS::Symbol, T>::value, T>
+{
+    static_assert(!mozilla::IsSame<Cell, T>::value && !mozilla::IsSame<TenuredCell, T>::value,
+                  "T must not be Cell or TenuredCell");
+};
+
+template <typename T>
+struct RewrapTaggedPointer<Value, T>
+{
+    static Value wrap(typename IsPrivateGCThingInValue<T>::Type* thing) {
+        return JS::PrivateGCThingValue(thing);
+    }
+};
 
 } /* namespace gc */
 
+// The return value indicates if anything was unmarked.
 bool
 UnmarkGrayShapeRecursively(Shape* shape);
+
+template<typename T>
+void
+CheckTracedThing(JSTracer* trc, T* thing);
 
 template<typename T>
 void

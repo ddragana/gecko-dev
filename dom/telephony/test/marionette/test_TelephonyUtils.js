@@ -33,16 +33,18 @@ function dial() {
   });
 }
 
-function waitForStateChanged() {
+function waitForStateChanged(aPredicate) {
   return new Promise(resolve => {
     let listener = {
       QueryInterface: XPCOMUtils.generateQI([Ci.nsITelephonyListener]),
 
       callStateChanged: function(length, allInfo) {
-        resolve(allInfo);
-        TelephonyService.unregisterListener(listener);
+        if (aPredicate(allInfo)) {
+          resolve(allInfo);
+          TelephonyService.unregisterListener(listener);
+        }
       },
-      conferenceCallStateChanged: function() {},
+
       supplementaryServiceNotification: function() {},
       notifyError: function() {},
       notifyCdmaCallWaiting: function() {},
@@ -68,24 +70,31 @@ function test_oneCall() {
       is(TelephonyUtils.hasAnyCalls(), true, "hasAnyCalls");
       is(TelephonyUtils.hasConnectedCalls(), false, "hasConnectedCalls");
     })
+    .then(() => waitForStateChanged(aAllInfo => {
+      return aAllInfo[0].callState === Ci.nsITelephonyService.CALL_STATE_ALERTING;
+    }))
     .then(() => {
-      let p = waitForStateChanged();
-      emulator.runCmd("gsm accept " + number);
+      let p = waitForStateChanged(aAllInfo => {
+        return aAllInfo[0].callState === Ci.nsITelephonyService.CALL_STATE_CONNECTED;
+      });
+      emulator.runCmd("telephony accept " + number);
       return p;
     })
-    .then(allInfo => {
-      is(allInfo[0].callState, Ci.nsITelephonyService.CALL_STATE_CONNECTED);
+    .then(() => {
       is(TelephonyUtils.hasAnyCalls(), true, "hasAnyCalls");
       is(TelephonyUtils.hasConnectedCalls(), true, "hasConnectedCalls");
     })
     .then(() => {
       let p = TelephonyUtils.waitForNoCalls();
-      emulator.runCmd("gsm cancel " + number);
+      emulator.runCmd("telephony cancel " + number);
       return p;
     });
 }
 
-test_noCall()
-  .then(test_oneCall)
-  .catch(error => ok(false, "Promise reject: " + error))
-  .then(finish);
+startTest(function() {
+  return Promise.resolve()
+    .then(test_noCall)
+    .then(test_oneCall)
+    .catch(error => ok(false, "Promise reject: " + error))
+    .then(finish);
+});

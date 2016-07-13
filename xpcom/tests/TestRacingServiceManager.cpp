@@ -186,18 +186,18 @@ Factory::CreateInstance(nsISupports* aDelegate,
   return NS_OK;
 }
 
-class Runnable : public nsRunnable
+class TestRunnable : public Runnable
 {
 public:
   NS_DECL_NSIRUNNABLE
 
-  Runnable() : mFirstRunnableDone(false) { }
+  TestRunnable() : mFirstRunnableDone(false) { }
 
   bool mFirstRunnableDone;
 };
 
 NS_IMETHODIMP
-Runnable::Run()
+TestRunnable::Run()
 {
   {
     ReentrantMonitorAutoEnter mon(*gReentrantMonitor);
@@ -259,9 +259,9 @@ int main(int argc, char** argv)
   ScopedXPCOM xpcom("RacingServiceManager");
   NS_ENSURE_FALSE(xpcom.failed(), 1);
 
-  AutoCreateAndDestroyReentrantMonitor mon(&gReentrantMonitor);
+  AutoCreateAndDestroyReentrantMonitor mon1(&gReentrantMonitor);
 
-  nsRefPtr<Runnable> runnable = new Runnable();
+  RefPtr<TestRunnable> runnable = new TestRunnable();
   NS_ENSURE_TRUE(runnable, 1);
 
   // Run the classID test
@@ -270,13 +270,13 @@ int main(int argc, char** argv)
   NS_ENSURE_SUCCESS(rv, 1);
 
   {
-    ReentrantMonitorAutoEnter mon(*gReentrantMonitor);
+    ReentrantMonitorAutoEnter mon2(*gReentrantMonitor);
 
     gMainThreadWaiting = true;
-    mon.Notify();
+    mon2.Notify();
 
     while (!gCreateInstanceCalled) {
-      mon.Wait();
+      mon2.Wait();
     }
   }
 
@@ -292,13 +292,13 @@ int main(int argc, char** argv)
   NS_ENSURE_SUCCESS(rv, 1);
 
   {
-    ReentrantMonitorAutoEnter mon(*gReentrantMonitor);
+    ReentrantMonitorAutoEnter mon3(*gReentrantMonitor);
 
     gMainThreadWaiting = true;
-    mon.Notify();
+    mon3.Notify();
 
     while (!gCreateInstanceCalled) {
-      mon.Wait();
+      mon3.Wait();
     }
   }
 

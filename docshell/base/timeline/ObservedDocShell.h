@@ -4,40 +4,49 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ObservedDocShell_h_
-#define ObservedDocShell_h_
+#ifndef mozilla_ObservedDocShell_h_
+#define mozilla_ObservedDocShell_h_
 
-#include "GeckoProfiler.h"
+#include "MarkersStorage.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "nsTArray.h"
-#include "nsRefPtr.h"
 
-class nsDocShell;
-class TimelineMarker;
+class nsIDocShell;
 
 namespace mozilla {
+class AbstractTimelineMarker;
+
+namespace dom {
+struct ProfileTimelineMarker;
+}
 
 // # ObservedDocShell
 //
 // A wrapper around a docshell for which docshell-specific markers are
 // allowed to exist. See TimelineConsumers for register/unregister logic.
-class ObservedDocShell : public LinkedListElement<ObservedDocShell>
+class ObservedDocShell : public MarkersStorage
 {
 private:
-  nsRefPtr<nsDocShell> mDocShell;
+  RefPtr<nsIDocShell> mDocShell;
+
+  // Main thread only.
+  nsTArray<UniquePtr<AbstractTimelineMarker>> mTimelineMarkers;
+  bool mPopping;
+
+  // Off the main thread only.
+  nsTArray<UniquePtr<AbstractTimelineMarker>> mOffTheMainThreadTimelineMarkers;
 
 public:
-  // FIXME: make this private once all marker-specific logic has been
-  // moved out of nsDocShell.
-  nsTArray<UniquePtr<TimelineMarker>> mTimelineMarkers;
+  explicit ObservedDocShell(nsIDocShell* aDocShell);
+  nsIDocShell* operator*() const { return mDocShell.get(); }
 
-  explicit ObservedDocShell(nsDocShell* aDocShell);
-  nsDocShell* operator*() const { return mDocShell.get(); }
-
-  void AddMarker(const char* aName, TracingMetadata aMetaData);
-  void AddMarker(UniquePtr<TimelineMarker>&& aMarker);
-  void ClearMarkers();
+  void AddMarker(UniquePtr<AbstractTimelineMarker>&& aMarker) override;
+  void AddOTMTMarker(UniquePtr<AbstractTimelineMarker>&& aMarker) override;
+  void ClearMarkers() override;
+  void PopMarkers(JSContext* aCx, nsTArray<dom::ProfileTimelineMarker>& aStore) override;
 };
 
 } // namespace mozilla
 
-#endif /* ObservedDocShell_h_ */
+#endif /* mozilla_ObservedDocShell_h_ */

@@ -20,7 +20,7 @@ class GrallocTextureHostOGL : public TextureHost
   friend class GrallocBufferActor;
 public:
   GrallocTextureHostOGL(TextureFlags aFlags,
-                        const NewSurfaceDescriptorGralloc& aDescriptor);
+                        const SurfaceDescriptorGralloc& aDescriptor);
 
   virtual ~GrallocTextureHostOGL();
 
@@ -29,6 +29,8 @@ public:
   virtual void Unlock() override;
 
   virtual void SetCompositor(Compositor* aCompositor) override;
+
+  virtual Compositor* GetCompositor() override { return mCompositor; }
 
   virtual void DeallocateSharedData() override;
 
@@ -60,10 +62,23 @@ public:
 
   gl::GLContext* GetGLContext() const { return mCompositor ? mCompositor->gl() : nullptr; }
 
+  virtual bool NeedsFenceHandle() override
+  {
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+    return true;
+#else
+    return false;
+#endif
+  }
+
+  virtual FenceHandle GetCompositorReleaseFence() override;
+
+  virtual GrallocTextureHostOGL* AsGrallocTextureHostOGL() override { return this; }
+
 private:
   void DestroyEGLImage();
 
-  NewSurfaceDescriptorGralloc mGrallocHandle;
+  SurfaceDescriptorGralloc mGrallocHandle;
   RefPtr<GLTextureSource> mGLTextureSource;
   RefPtr<CompositorOGL> mCompositor;
   // Size reported by the GraphicBuffer

@@ -9,7 +9,7 @@
 #include "mozilla/MozPromise.h"
 
 #include "nsISupportsImpl.h"
-#include "SharedThreadPool.h"
+#include "mozilla/SharedThreadPool.h"
 #include "VideoUtils.h"
 
 using namespace mozilla;
@@ -31,10 +31,10 @@ public:
 
   TaskQueue* Queue() { return mTaskQueue; }
 private:
-  nsRefPtr<TaskQueue> mTaskQueue;
+  RefPtr<TaskQueue> mTaskQueue;
 };
 
-class DelayedResolveOrReject : public nsRunnable
+class DelayedResolveOrReject : public Runnable
 {
 public:
   DelayedResolveOrReject(TaskQueue* aTaskQueue,
@@ -73,8 +73,8 @@ protected:
   ~DelayedResolveOrReject() {}
 
 private:
-  nsRefPtr<TaskQueue> mTaskQueue;
-  nsRefPtr<TestPromise::Private> mPromise;
+  RefPtr<TaskQueue> mTaskQueue;
+  RefPtr<TestPromise::Private> mPromise;
   TestPromise::ResolveOrRejectValue mValue;
   int mIterations;
 };
@@ -93,7 +93,7 @@ RunOnTaskQueue(TaskQueue* aQueue, FunctionType aFun)
 TEST(MozPromise, BasicResolve)
 {
   AutoTaskQueue atq;
-  nsRefPtr<TaskQueue> queue = atq.Queue();
+  RefPtr<TaskQueue> queue = atq.Queue();
   RunOnTaskQueue(queue, [queue] () -> void {
     TestPromise::CreateAndResolve(42, __func__)->Then(queue, __func__,
       [queue] (int aResolveValue) -> void { EXPECT_EQ(aResolveValue, 42); queue->BeginShutdown(); },
@@ -104,7 +104,7 @@ TEST(MozPromise, BasicResolve)
 TEST(MozPromise, BasicReject)
 {
   AutoTaskQueue atq;
-  nsRefPtr<TaskQueue> queue = atq.Queue();
+  RefPtr<TaskQueue> queue = atq.Queue();
   RunOnTaskQueue(queue, [queue] () -> void {
     TestPromise::CreateAndReject(42.0, __func__)->Then(queue, __func__,
       DO_FAIL,
@@ -115,14 +115,14 @@ TEST(MozPromise, BasicReject)
 TEST(MozPromise, AsyncResolve)
 {
   AutoTaskQueue atq;
-  nsRefPtr<TaskQueue> queue = atq.Queue();
+  RefPtr<TaskQueue> queue = atq.Queue();
   RunOnTaskQueue(queue, [queue] () -> void {
-    nsRefPtr<TestPromise::Private> p = new TestPromise::Private(__func__);
+    RefPtr<TestPromise::Private> p = new TestPromise::Private(__func__);
 
     // Kick off three racing tasks, and make sure we get the one that finishes earliest.
-    nsRefPtr<DelayedResolveOrReject> a = new DelayedResolveOrReject(queue, p, RRValue::MakeResolve(32), 10);
-    nsRefPtr<DelayedResolveOrReject> b = new DelayedResolveOrReject(queue, p, RRValue::MakeResolve(42), 5);
-    nsRefPtr<DelayedResolveOrReject> c = new DelayedResolveOrReject(queue, p, RRValue::MakeReject(32.0), 7);
+    RefPtr<DelayedResolveOrReject> a = new DelayedResolveOrReject(queue, p, RRValue::MakeResolve(32), 10);
+    RefPtr<DelayedResolveOrReject> b = new DelayedResolveOrReject(queue, p, RRValue::MakeResolve(42), 5);
+    RefPtr<DelayedResolveOrReject> c = new DelayedResolveOrReject(queue, p, RRValue::MakeReject(32.0), 7);
 
     nsCOMPtr<nsIRunnable> ref = a.get();
     queue->Dispatch(ref.forget());
@@ -145,26 +145,26 @@ TEST(MozPromise, CompletionPromises)
 {
   bool invokedPass = false;
   AutoTaskQueue atq;
-  nsRefPtr<TaskQueue> queue = atq.Queue();
+  RefPtr<TaskQueue> queue = atq.Queue();
   RunOnTaskQueue(queue, [queue, &invokedPass] () -> void {
     TestPromise::CreateAndResolve(40, __func__)
     ->Then(queue, __func__,
-      [] (int aVal) -> nsRefPtr<TestPromise> { return TestPromise::CreateAndResolve(aVal + 10, __func__); },
+      [] (int aVal) -> RefPtr<TestPromise> { return TestPromise::CreateAndResolve(aVal + 10, __func__); },
       DO_FAIL)
     ->CompletionPromise()
     ->Then(queue, __func__, [&invokedPass] () -> void { invokedPass = true; }, DO_FAIL)
     ->CompletionPromise()
     ->Then(queue, __func__,
-      [queue] (int aVal) -> nsRefPtr<TestPromise> {
-        nsRefPtr<TestPromise::Private> p = new TestPromise::Private(__func__);
+      [queue] (int aVal) -> RefPtr<TestPromise> {
+        RefPtr<TestPromise::Private> p = new TestPromise::Private(__func__);
         nsCOMPtr<nsIRunnable> resolver = new DelayedResolveOrReject(queue, p, RRValue::MakeResolve(aVal - 8), 10);
         queue->Dispatch(resolver.forget());
-        return nsRefPtr<TestPromise>(p);
+        return RefPtr<TestPromise>(p);
       },
       DO_FAIL)
     ->CompletionPromise()
     ->Then(queue, __func__,
-      [queue] (int aVal) -> nsRefPtr<TestPromise> { return TestPromise::CreateAndReject(double(aVal - 42) + 42.0, __func__); },
+      [queue] (int aVal) -> RefPtr<TestPromise> { return TestPromise::CreateAndReject(double(aVal - 42) + 42.0, __func__); },
       DO_FAIL)
     ->CompletionPromise()
     ->Then(queue, __func__,
@@ -176,10 +176,10 @@ TEST(MozPromise, CompletionPromises)
 TEST(MozPromise, PromiseAllResolve)
 {
   AutoTaskQueue atq;
-  nsRefPtr<TaskQueue> queue = atq.Queue();
+  RefPtr<TaskQueue> queue = atq.Queue();
   RunOnTaskQueue(queue, [queue] () -> void {
 
-    nsTArray<nsRefPtr<TestPromise>> promises;
+    nsTArray<RefPtr<TestPromise>> promises;
     promises.AppendElement(TestPromise::CreateAndResolve(22, __func__));
     promises.AppendElement(TestPromise::CreateAndResolve(32, __func__));
     promises.AppendElement(TestPromise::CreateAndResolve(42, __func__));
@@ -200,13 +200,15 @@ TEST(MozPromise, PromiseAllResolve)
 TEST(MozPromise, PromiseAllReject)
 {
   AutoTaskQueue atq;
-  nsRefPtr<TaskQueue> queue = atq.Queue();
+  RefPtr<TaskQueue> queue = atq.Queue();
   RunOnTaskQueue(queue, [queue] () -> void {
 
-    nsTArray<nsRefPtr<TestPromise>> promises;
+    nsTArray<RefPtr<TestPromise>> promises;
     promises.AppendElement(TestPromise::CreateAndResolve(22, __func__));
     promises.AppendElement(TestPromise::CreateAndReject(32.0, __func__));
     promises.AppendElement(TestPromise::CreateAndResolve(42, __func__));
+   // Ensure that more than one rejection doesn't cause a crash (bug #1207312)
+    promises.AppendElement(TestPromise::CreateAndReject(52.0, __func__));
 
     TestPromise::All(queue, promises)->Then(queue, __func__,
       DO_FAIL,
@@ -215,6 +217,40 @@ TEST(MozPromise, PromiseAllReject)
         queue->BeginShutdown();
       }
     );
+  });
+}
+
+// Test we don't hit the assertions in MozPromise when exercising promise
+// chaining upon task queue shutdown.
+TEST(MozPromise, Chaining)
+{
+  AutoTaskQueue atq;
+  RefPtr<TaskQueue> queue = atq.Queue();
+  MozPromiseRequestHolder<TestPromise> holder;
+
+  RunOnTaskQueue(queue, [queue, &holder] () {
+    auto p = TestPromise::CreateAndResolve(42, __func__);
+    const size_t kIterations = 100;
+    for (size_t i = 0; i < kIterations; ++i) {
+      p = p->Then(queue, __func__,
+        [] (int aVal) {
+          EXPECT_EQ(aVal, 42);
+        },
+        [] () {}
+      )->CompletionPromise();
+
+      if (i == kIterations / 2) {
+        p->Then(queue, __func__,
+          [queue, &holder] () {
+            holder.Disconnect();
+            queue->BeginShutdown();
+          },
+          DO_FAIL);
+      }
+    }
+    // We will hit the assertion if we don't disconnect the leaf Request
+    // in the promise chain.
+    holder.Begin(p->Then(queue, __func__, [] () {}, [] () {}));
   });
 }
 

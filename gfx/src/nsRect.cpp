@@ -5,6 +5,7 @@
 
 #include "nsRect.h"
 #include "mozilla/gfx/Types.h"          // for NS_SIDE_BOTTOM, etc
+#include "mozilla/CheckedInt.h"         // for CheckedInt
 #include "nsDeviceContext.h"            // for nsDeviceContext
 #include "nsString.h"               // for nsAutoString, etc
 #include "nsMargin.h"                   // for nsMargin
@@ -15,18 +16,22 @@ static_assert((int(NS_SIDE_TOP) == 0) &&
               (int(NS_SIDE_LEFT) == 3),
               "The mozilla::css::Side sequence must match the nsMargin nscoord sequence");
 
-nsRect
-ToAppUnits(const mozilla::gfx::IntRect& aRect, nscoord aAppUnitsPerPixel)
-{
-  return nsRect(NSIntPixelsToAppUnits(aRect.x, aAppUnitsPerPixel),
-                NSIntPixelsToAppUnits(aRect.y, aAppUnitsPerPixel),
-                NSIntPixelsToAppUnits(aRect.width, aAppUnitsPerPixel),
-                NSIntPixelsToAppUnits(aRect.height, aAppUnitsPerPixel));
-}
-
 const mozilla::gfx::IntRect& GetMaxSizedIntRect() {
   static const mozilla::gfx::IntRect r(0, 0, INT32_MAX, INT32_MAX);
   return r;
+}
+
+
+bool nsRect::Overflows() const {
+#ifdef NS_COORD_IS_FLOAT
+  return false;
+#else
+  mozilla::CheckedInt<int32_t> xMost = this->x;
+  xMost += this->width;
+  mozilla::CheckedInt<int32_t> yMost = this->y;
+  yMost += this->height;
+  return !xMost.isValid() || !yMost.isValid();
+#endif
 }
 
 #ifdef DEBUG

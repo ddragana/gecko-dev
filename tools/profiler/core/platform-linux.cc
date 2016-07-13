@@ -76,7 +76,7 @@
 #include "GeckoSampler.h"
 #include "ThreadResponsiveness.h"
 
-#if defined(__ARM_EABI__) && defined(MOZ_WIDGET_GONK)
+#if defined(__ARM_EABI__) && defined(ANDROID)
  // Should also work on other Android and ARM Linux, but not tested there yet.
 # define USE_EHABI_STACKWALK
 # include "EHABIStackWalk.h"
@@ -231,8 +231,12 @@ static void SetSampleContext(TickSample* sample, void* context)
 namespace {
 
 void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
+  // Avoid TSan warning about clobbering errno.
+  int savedErrno = errno;
+
   if (!Sampler::GetActiveSampler()) {
     sem_post(&sSignalHandlingDone);
+    errno = savedErrno;
     return;
   }
 
@@ -253,6 +257,7 @@ void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
 
   sCurrentThreadProfile = NULL;
   sem_post(&sSignalHandlingDone);
+  errno = savedErrno;
 }
 
 } // namespace
@@ -359,8 +364,9 @@ static void* SignalSender(void* arg) {
           printf_stderr("profiler failed to signal tid=%d\n", threadId);
 #ifdef DEBUG
           abort();
-#endif
+#else
           continue;
+#endif
         }
 
         // Wait for the signal handler to run before moving on to the next one
@@ -671,7 +677,7 @@ static void DoStartTask() {
 }
 
 static void StartSignalHandler(int signal, siginfo_t* info, void* context) {
-  class StartTask : public nsRunnable {
+  class StartTask : public Runnable {
   public:
     NS_IMETHOD Run() {
       DoStartTask();

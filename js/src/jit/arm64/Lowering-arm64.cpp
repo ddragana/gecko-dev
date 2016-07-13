@@ -17,15 +17,8 @@ using namespace js::jit;
 
 using mozilla::FloorLog2;
 
-void
-LIRGeneratorARM64::useBox(LInstruction* lir, size_t n, MDefinition* mir,
-                          LUse::Policy policy, bool useAtStart)
-{
-    MOZ_CRASH("useBox");
-}
-
-void
-LIRGeneratorARM64::useBoxFixed(LInstruction* lir, size_t n, MDefinition* mir, Register reg1, Register)
+LBoxAllocation
+LIRGeneratorARM64::useBoxFixed(MDefinition* mir, Register reg1, Register, bool useAtStart)
 {
     MOZ_CRASH("useBoxFixed");
 }
@@ -40,24 +33,6 @@ LAllocation
 LIRGeneratorARM64::useByteOpRegisterOrNonDoubleConstant(MDefinition* mir)
 {
     MOZ_CRASH("useByteOpRegisterOrNonDoubleConstant");
-}
-
-void
-LIRGeneratorARM64::lowerConstantDouble(double d, MInstruction* mir)
-{
-    MOZ_CRASH("lowerConstantDouble");
-}
-
-void
-LIRGeneratorARM64::lowerConstantFloat32(float d, MInstruction* mir)
-{
-    MOZ_CRASH("lowerConstantFloat32");
-}
-
-void
-LIRGeneratorARM64::visitConstant(MConstant* ins)
-{
-    MOZ_CRASH("visitConstant");
 }
 
 void
@@ -113,6 +88,20 @@ template void LIRGeneratorARM64::lowerForFPU(LInstructionHelper<1, 2, 1>* ins, M
                                              MDefinition* lhs, MDefinition* rhs);
 
 void
+LIRGeneratorARM64::lowerForALUInt64(LInstructionHelper<INT64_PIECES, 2 * INT64_PIECES, 0>* ins,
+                                    MDefinition* mir, MDefinition* lhs, MDefinition* rhs)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+LIRGeneratorARM64::lowerForShiftInt64(LInstructionHelper<INT64_PIECES, INT64_PIECES + 1, 0>* ins,
+                                      MDefinition* mir, MDefinition* lhs, MDefinition* rhs)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
 LIRGeneratorARM64::lowerForBitAndAndBranch(LBitAndAndBranch* baab, MInstruction* mir,
                                          MDefinition* lhs, MDefinition* rhs)
 {
@@ -155,6 +144,18 @@ void
 LIRGeneratorARM64::lowerModI(MMod* mod)
 {
     MOZ_CRASH("lowerModI");
+}
+
+void
+LIRGeneratorARM64::lowerDivI64(MDiv* div)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+LIRGeneratorARM64::lowerModI64(MMod* mod)
+{
+    MOZ_CRASH("NYI");
 }
 
 void
@@ -201,6 +202,12 @@ LIRGeneratorARM64::visitAsmJSNeg(MAsmJSNeg* ins)
 }
 
 void
+LIRGeneratorARM64::visitAsmSelect(MAsmSelect* ins)
+{
+    MOZ_CRASH("visitAsmSelect");
+}
+
+void
 LIRGeneratorARM64::lowerUDiv(MDiv* div)
 {
     MOZ_CRASH("lowerUDiv");
@@ -234,12 +241,6 @@ void
 LIRGeneratorARM64::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
 {
     MOZ_CRASH("visitAsmJSStoreHeap");
-}
-
-void
-LIRGeneratorARM64::visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins)
-{
-    MOZ_CRASH("visitAsmJSLoadFuncPtr");
 }
 
 void
@@ -279,30 +280,6 @@ LIRGeneratorARM64::visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStat
 }
 
 void
-LIRGeneratorARM64::visitSimdBinaryArith(MSimdBinaryArith* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM64::visitSimdSelect(MSimdSelect* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM64::visitSimdSplatX4(MSimdSplatX4* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM64::visitSimdValueX4(MSimdValueX4* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
 LIRGeneratorARM64::visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins)
 {
     MOZ_CRASH("NYI");
@@ -329,5 +306,44 @@ LIRGeneratorARM64::visitSubstr(MSubstr* ins)
 void
 LIRGeneratorARM64::visitRandom(MRandom* ins)
 {
-    MOZ_CRASH("visitRandom");
+    LRandom *lir = new(alloc()) LRandom(temp(),
+                                        temp(),
+                                        temp());
+    defineFixed(lir, ins, LFloatReg(ReturnDoubleReg));
+}
+
+void
+LIRGeneratorARM64::visitWasmTruncateToInt64(MWasmTruncateToInt64* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitWasmLoad(MWasmLoad* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitWasmStore(MWasmStore* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
+{
+    MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM64::visitCopySign(MCopySign* ins)
+{
+    MOZ_CRASH("NY");
 }

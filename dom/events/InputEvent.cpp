@@ -15,7 +15,8 @@ InputEvent::InputEvent(EventTarget* aOwner,
                        nsPresContext* aPresContext,
                        InternalEditorInputEvent* aEvent)
   : UIEvent(aOwner, aPresContext,
-            aEvent ? aEvent : new InternalEditorInputEvent(false, 0, nullptr))
+            aEvent ? aEvent :
+                     new InternalEditorInputEvent(false, eVoidEvent, nullptr))
 {
   NS_ASSERTION(mEvent->mClass == eEditorInputEventClass,
                "event type mismatch");
@@ -24,7 +25,7 @@ InputEvent::InputEvent(EventTarget* aOwner,
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->time = PR_Now();
+    mEvent->mTime = PR_Now();
   }
 }
 
@@ -47,10 +48,11 @@ InputEvent::Constructor(const GlobalObject& aGlobal,
                         ErrorResult& aRv)
 {
   nsCOMPtr<EventTarget> t = do_QueryInterface(aGlobal.GetAsSupports());
-  nsRefPtr<InputEvent> e = new InputEvent(t, nullptr, nullptr);
+  RefPtr<InputEvent> e = new InputEvent(t, nullptr, nullptr);
   bool trusted = e->Init(t);
-  aRv = e->InitUIEvent(aType, aParam.mBubbles, aParam.mCancelable,
-                       aParam.mView, aParam.mDetail);
+  auto* view = aParam.mView ? aParam.mView->AsInner() : nullptr;
+  e->InitUIEvent(aType, aParam.mBubbles, aParam.mCancelable, view,
+                 aParam.mDetail);
   InternalEditorInputEvent* internalEvent = e->mEvent->AsEditorInputEvent();
   internalEvent->mIsComposing = aParam.mIsComposing;
   e->SetTrusted(trusted);
@@ -63,14 +65,11 @@ InputEvent::Constructor(const GlobalObject& aGlobal,
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsresult
-NS_NewDOMInputEvent(nsIDOMEvent** aInstancePtrResult,
-                    EventTarget* aOwner,
+already_AddRefed<InputEvent>
+NS_NewDOMInputEvent(EventTarget* aOwner,
                     nsPresContext* aPresContext,
                     InternalEditorInputEvent* aEvent)
 {
-  InputEvent* it = new InputEvent(aOwner, aPresContext, aEvent);
-  NS_ADDREF(it);
-  *aInstancePtrResult = static_cast<Event*>(it);
-  return NS_OK;
+  RefPtr<InputEvent> it = new InputEvent(aOwner, aPresContext, aEvent);
+  return it.forget();
 }

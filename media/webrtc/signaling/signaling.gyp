@@ -72,7 +72,6 @@
         './src/mediapipeline',
         './src/peerconnection',
         './src/sdp/sipcc',
-        '../../../xpcom/base',
         '../../../dom/base',
         '../../../dom/media',
         '../../../media/mtransport',
@@ -159,6 +158,7 @@
          './src/sdp/SdpHelper.h',
          './src/sdp/SdpHelper.cpp',
          './src/sdp/SdpMediaSection.h',
+         './src/sdp/SdpMediaSection.cpp',
          './src/sdp/SipccSdp.h',
          './src/sdp/SipccSdpAttributeList.h',
          './src/sdp/SipccSdpAttributeList.cpp',
@@ -173,7 +173,9 @@
          './src/jsep/JsepSession.h',
          './src/jsep/JsepSessionImpl.cpp',
          './src/jsep/JsepSessionImpl.h',
+         './src/jsep/JsepTrack.cpp',
          './src/jsep/JsepTrack.h',
+         './src/jsep/JsepTrackEncoding.h',
          './src/jsep/JsepTransport.h'
       ],
 
@@ -201,7 +203,6 @@
         '$(NSPR_CFLAGS)',
         '$(NSS_CFLAGS)',
         '$(MOZ_PIXMAN_CFLAGS)',
-        '$(WARNINGS_AS_ERRORS)',
       ],
 
 
@@ -292,7 +293,6 @@
           ],
           'defines' : [
             'MOZILLA_INTERNAL_API',
-            'MOZILLA_XPCOMRT_API',
             'MOZILLA_EXTERNAL_LINKAGE',
             'NO_CHROMIUM_LOGGING',
             'USE_FAKE_MEDIA_STREAMS',
@@ -329,6 +329,7 @@
           'defines': [
             'OS_WIN',
             'SIP_OS_WINDOWS',
+            'WEBRTC_WIN',
             'WIN32',
             'GIPS_VER=3480',
             'SIPCC_BUILD',

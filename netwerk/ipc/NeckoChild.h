@@ -23,7 +23,6 @@ public:
   virtual ~NeckoChild();
 
   static void InitNeckoChild();
-  static void DestroyNeckoChild();
 
 protected:
   virtual PHttpChannelChild*
@@ -41,7 +40,8 @@ protected:
   virtual bool DeallocPFTPChannelChild(PFTPChannelChild*) override;
   virtual PWebSocketChild*
     AllocPWebSocketChild(const PBrowserOrId&,
-                         const SerializedLoadContext&) override;
+                         const SerializedLoadContext&,
+                         const uint32_t&) override;
   virtual bool DeallocPWebSocketChild(PWebSocketChild*) override;
   virtual PTCPSocketChild* AllocPTCPSocketChild(const nsString& host,
                                                 const uint16_t& port) override;
@@ -49,7 +49,7 @@ protected:
   virtual PTCPServerSocketChild*
     AllocPTCPServerSocketChild(const uint16_t& aLocalPort,
                                const uint16_t& aBacklog,
-                               const nsString& aBinaryType) override;
+                               const bool& aUseArrayBuffers) override;
   virtual bool DeallocPTCPServerSocketChild(PTCPServerSocketChild*) override;
   virtual PUDPSocketChild* AllocPUDPSocketChild(const Principal& aPrincipal,
                                                 const nsCString& aFilter) override;
@@ -75,15 +75,26 @@ protected:
   AllocPChannelDiverterChild(const ChannelDiverterArgs& channel) override;
   virtual bool
   DeallocPChannelDiverterChild(PChannelDiverterChild* actor) override;
+  virtual PTransportProviderChild*
+  AllocPTransportProviderChild() override;
+  virtual bool
+  DeallocPTransportProviderChild(PTransportProviderChild* aActor) override;
   virtual bool RecvAsyncAuthPromptForNestedFrame(const TabId& aNestedFrameId,
                                                  const nsCString& aUri,
                                                  const nsString& aRealm,
                                                  const uint64_t& aCallbackId) override;
   virtual bool RecvAppOfflineStatus(const uint32_t& aId, const bool& aOffline) override;
+  virtual PWebSocketEventListenerChild*
+    AllocPWebSocketEventListenerChild(const uint64_t& aInnerWindowID) override;
+  virtual bool DeallocPWebSocketEventListenerChild(PWebSocketEventListenerChild*) override;
 
   /* Predictor Messsages */
+  virtual bool RecvPredOnPredictPrefetch(const URIParams& aURI,
+                                         const uint32_t& aHttpStatus) override;
   virtual bool RecvPredOnPredictPreconnect(const URIParams& aURI) override;
   virtual bool RecvPredOnPredictDNS(const URIParams& aURI) override;
+
+  virtual bool RecvSpeculativeConnectRequest(const nsCString& aNotificationData) override;
 };
 
 /**

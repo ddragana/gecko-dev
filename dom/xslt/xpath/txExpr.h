@@ -478,7 +478,7 @@ public:
      */
     void setNodeName(const nsAString& aName)
     {
-        mNodeName = do_GetAtom(aName);
+        mNodeName = NS_Atomize(aName);
     }
 
     NodeType getNodeTestType()
@@ -679,7 +679,7 @@ public:
     TX_DECL_EXPR
 
 private:
-    nsRefPtr<txAExprResult> mValue;
+    RefPtr<txAExprResult> mValue;
 };
 
 /**

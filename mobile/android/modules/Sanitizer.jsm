@@ -5,9 +5,9 @@
 
 /*globals LoadContextInfo, FormHistory, Accounts */
 
-let Cc = Components.classes;
-let Ci = Components.interfaces;
-let Cu = Components.utils;
+var Cc = Components.classes;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -18,6 +18,9 @@ Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Downloads.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Accounts.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadIntegration",
+                                  "resource://gre/modules/DownloadIntegration.jsm");
 
 function dump(a) {
   Services.console.logStringMessage(a);
@@ -83,32 +86,41 @@ Sanitizer.prototype = {
     },
 
     siteSettings: {
-      clear: function ()
-      {
-        return new Promise(function(resolve, reject) {
-          // Clear site-specific permissions like "Allow this site to open popups"
-          Services.perms.removeAll();
+      clear: Task.async(function* () {
+        // Clear site-specific permissions like "Allow this site to open popups"
+        Services.perms.removeAll();
 
-          // Clear site-specific settings like page-zoom level
-          Cc["@mozilla.org/content-pref/service;1"]
-            .getService(Ci.nsIContentPrefService2)
-            .removeAllDomains(null);
+        // Clear site-specific settings like page-zoom level
+        Cc["@mozilla.org/content-pref/service;1"]
+          .getService(Ci.nsIContentPrefService2)
+          .removeAllDomains(null);
 
-          // Clear "Never remember passwords for this site", which is not handled by
-          // the permission manager
-          var hosts = Services.logins.getAllDisabledHosts({})
-          for (var host of hosts) {
-            Services.logins.setLoginSavingEnabled(host, true);
-          }
+        // Clear "Never remember passwords for this site", which is not handled by
+        // the permission manager
+        var hosts = Services.logins.getAllDisabledHosts({})
+        for (var host of hosts) {
+          Services.logins.setLoginSavingEnabled(host, true);
+        }
 
-          // Clear site security settings
-          var sss = Cc["@mozilla.org/ssservice;1"]
-                      .getService(Ci.nsISiteSecurityService);
-          sss.clearAll();
+        // Clear site security settings
+        var sss = Cc["@mozilla.org/ssservice;1"]
+                    .getService(Ci.nsISiteSecurityService);
+        sss.clearAll();
 
-          resolve();
+        // Clear push subscriptions
+        yield new Promise((resolve, reject) => {
+          let push = Cc["@mozilla.org/push/Service;1"]
+                       .getService(Ci.nsIPushService);
+          push.clearForDomain("*", status => {
+            if (Components.isSuccessCode(status)) {
+              resolve();
+            } else {
+              reject(new Error("Error clearing push subscriptions: " +
+                               status));
+            }
+          });
         });
-      },
+      }),
 
       get canClear()
       {
@@ -200,6 +212,7 @@ Sanitizer.prototype = {
       clear: Task.async(function* () {
         let list = yield Downloads.getList(Downloads.ALL);
         let downloads = yield list.getAll();
+        var finalizePromises = [];
 
         // Logic copied from DownloadList.removeFinished. Ideally, we would
         // just use that method directly, but we want to be able to remove the
@@ -216,16 +229,19 @@ Sanitizer.prototype = {
             // This works even if the download state has changed meanwhile.  We
             // don't need to wait for the procedure to be complete before
             // processing the other downloads in the list.
-            download.finalize(true).then(null, Cu.reportError);
+            finalizePromises.push(download.finalize(true).then(() => null, Cu.reportError));
 
             // Delete the downloaded files themselves.
-            OS.File.remove(download.target.path).then(null, ex => {
+            OS.File.remove(download.target.path).then(() => null, ex => {
               if (!(ex instanceof OS.File.Error && ex.becauseNoSuchFile)) {
                 Cu.reportError(ex);
               }
             });
           }
         }
+
+        yield Promise.all(finalizePromises);
+        yield DownloadIntegration.forceSave();
       }),
 
       get canClear()

@@ -9,7 +9,6 @@
 #define nsDOMCSSRGBColor_h__
 
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "nsWrapperCache.h"
 
 class nsROCSSPrimitiveValue;
@@ -58,10 +57,10 @@ public:
 private:
   virtual ~nsDOMCSSRGBColor(void);
 
-  nsRefPtr<nsROCSSPrimitiveValue> mRed;
-  nsRefPtr<nsROCSSPrimitiveValue> mGreen;
-  nsRefPtr<nsROCSSPrimitiveValue> mBlue;
-  nsRefPtr<nsROCSSPrimitiveValue> mAlpha;
+  RefPtr<nsROCSSPrimitiveValue> mRed;
+  RefPtr<nsROCSSPrimitiveValue> mGreen;
+  RefPtr<nsROCSSPrimitiveValue> mBlue;
+  RefPtr<nsROCSSPrimitiveValue> mAlpha;
   bool mHasAlpha;
 };
 

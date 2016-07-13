@@ -76,7 +76,7 @@ nsDocShellEditorData::CreateEditor()
     return rv;
   }
 
-  nsCOMPtr<nsIDOMWindow> domWindow =
+  nsCOMPtr<nsPIDOMWindowOuter> domWindow =
     mDocShell ? mDocShell->GetWindow() : nullptr;
   rv = editingSession->SetupEditorOnWindow(domWindow);
   if (NS_FAILED(rv)) {
@@ -149,7 +149,7 @@ nsDocShellEditorData::DetachFromWindow()
   NS_ASSERTION(mEditingSession,
                "Can't detach when we don't have a session to detach!");
 
-  nsCOMPtr<nsIDOMWindow> domWindow =
+  nsCOMPtr<nsPIDOMWindowOuter> domWindow =
     mDocShell ? mDocShell->GetWindow() : nullptr;
   nsresult rv = mEditingSession->DetachFromWindow(domWindow);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -158,9 +158,8 @@ nsDocShellEditorData::DetachFromWindow()
   mDetachedMakeEditable = mMakeEditable;
   mMakeEditable = false;
 
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  domWindow->GetDocument(getter_AddRefs(domDoc));
-  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(domDoc);
+  nsCOMPtr<nsIDocument> doc = domWindow->GetDoc();
+  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(doc);
   if (htmlDoc) {
     mDetachedEditingState = htmlDoc->GetEditingState();
   }
@@ -175,7 +174,7 @@ nsDocShellEditorData::ReattachToWindow(nsIDocShell* aDocShell)
 {
   mDocShell = aDocShell;
 
-  nsCOMPtr<nsIDOMWindow> domWindow =
+  nsCOMPtr<nsPIDOMWindowOuter> domWindow =
     mDocShell ? mDocShell->GetWindow() : nullptr;
   nsresult rv = mEditingSession->ReattachToWindow(domWindow);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -183,9 +182,8 @@ nsDocShellEditorData::ReattachToWindow(nsIDocShell* aDocShell)
   mIsDetached = false;
   mMakeEditable = mDetachedMakeEditable;
 
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  domWindow->GetDocument(getter_AddRefs(domDoc));
-  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(domDoc);
+  nsCOMPtr<nsIDocument> doc = domWindow->GetDoc();
+  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(doc);
   if (htmlDoc) {
     htmlDoc->SetEditingState(mDetachedEditingState);
   }

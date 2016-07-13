@@ -9,6 +9,8 @@
 #define nsPluginFrame_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/UniquePtr.h"
 #include "nsIObjectFrame.h"
 #include "nsFrame.h"
 #include "nsRegion.h"
@@ -24,6 +26,8 @@
 #undef GetClassName
 #undef GetBinaryType
 #undef RemoveDirectory
+#undef LoadIcon
+#undef GetObject
 #endif
 
 class nsPresContext;
@@ -40,13 +44,17 @@ class LayerManager;
 } // namespace layers
 } // namespace mozilla
 
-typedef nsFrame nsPluginFrameSuper;
+class PluginFrameDidCompositeObserver;
 
-class nsPluginFrame : public nsPluginFrameSuper,
-                      public nsIObjectFrame,
-                      public nsIReflowCallback {
+class nsPluginFrame : public nsFrame
+                    , public nsIObjectFrame
+                    , public nsIReflowCallback
+{
 public:
   typedef mozilla::LayerState LayerState;
+  typedef mozilla::LayoutDeviceIntPoint LayoutDeviceIntPoint;
+  typedef mozilla::LayoutDeviceIntRect LayoutDeviceIntRect;
+  typedef mozilla::LayoutDeviceIntRegion LayoutDeviceIntRegion;
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::layers::ImageContainer ImageContainer;
@@ -83,7 +91,8 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return nsPluginFrameSuper::IsFrameOfType(aFlags & ~(nsIFrame::eReplaced));
+    return nsFrame::IsFrameOfType(aFlags &
+      ~(nsIFrame::eReplaced | nsIFrame::eReplacedSizing));
   }
 
   virtual bool NeedsView() override { return true; }
@@ -115,7 +124,7 @@ public:
    */
   void SetEmptyWidgetConfiguration()
   {
-    mNextConfigurationBounds = nsIntRect(0,0,0,0);
+    mNextConfigurationBounds = LayoutDeviceIntRect(0,0,0,0);
     mNextConfigurationClipRegion.Clear();
   }
   /**
@@ -123,7 +132,7 @@ public:
    */
   void GetWidgetConfiguration(nsTArray<nsIWidget::Configuration>* aConfigurations);
 
-  nsIntRect GetWidgetlessClipRect() {
+  LayoutDeviceIntRect GetWidgetlessClipRect() {
     return RegionFromArray(mNextConfigurationClipRegion).GetBounds();
   }
 
@@ -184,7 +193,12 @@ public:
    */
   static void EndSwapDocShells(nsISupports* aSupports, void*);
 
-  nsIWidget* GetWidget() override { return mInnerView ? mWidget : nullptr; }
+  nsIWidget* GetWidget() override {
+    if (!mInnerView) {
+      return nullptr;
+    }
+    return mWidget;
+  }
 
   /**
    * Adjust the plugin's idea of its size, using aSize as its new size.
@@ -198,6 +212,24 @@ public:
   nsresult CallSetWindow(bool aCheckIsHidden = true);
 
   void SetInstanceOwner(nsPluginInstanceOwner* aOwner);
+
+  /**
+   * Helper for hiding windowed plugins during async scroll operations.
+   */
+  void SetScrollVisibility(bool aState);
+
+  /**
+   * HandleWheelEventAsDefaultAction() handles eWheel event as default action.
+   * This should be called only when WantsToHandleWheelEventAsDefaultAction()
+   * returns true.
+   */
+  void HandleWheelEventAsDefaultAction(mozilla::WidgetWheelEvent* aEvent);
+
+  /**
+   * WantsToHandleWheelEventAsDefaultAction() returns true if the plugin
+   * may want to handle wheel events as default action.
+   */
+  bool WantsToHandleWheelEventAsDefaultAction() const;
 
 protected:
   explicit nsPluginFrame(nsStyleContext* aContext);
@@ -226,7 +258,7 @@ protected:
    * the origin of the chrome window. In non-e10s, this return 0,0.
    * This api sends a sync ipc request so be careful about use.
    */
-  mozilla::LayoutDeviceIntPoint GetRemoteTabChromeOffset();
+  LayoutDeviceIntPoint GetRemoteTabChromeOffset();
 
   static void PaintPrintPlugin(nsIFrame* aFrame,
                                nsRenderingContext* aRenderingContext,
@@ -254,16 +286,17 @@ private:
   // stored in mRootPresContextRegisteredWith.
   void UnregisterPluginForGeometryUpdates();
 
-  static const nsIntRegion RegionFromArray(const nsTArray<nsIntRect>& aRects)
+  static const LayoutDeviceIntRegion
+  RegionFromArray(const nsTArray<LayoutDeviceIntRect>& aRects)
   {
-    nsIntRegion region;
+    LayoutDeviceIntRegion region;
     for (uint32_t i = 0; i < aRects.Length(); ++i) {
       region.Or(region, aRects[i]);
     }
     return region;
   }
 
-  class PluginEventNotifier : public nsRunnable {
+  class PluginEventNotifier : public mozilla::Runnable {
   public:
     explicit PluginEventNotifier(const nsString &aEventType) : 
       mEventType(aEventType) {}
@@ -288,12 +321,12 @@ private:
    * for plugins with widgets. For plugins without widgets, bounds in device
    * pixels relative to the nearest frame that's a display list reference frame.
    */
-  nsIntRect                       mNextConfigurationBounds;
+  LayoutDeviceIntRect             mNextConfigurationBounds;
   /**
    * Clip region that we should set the plugin's widget to
    * in the next composite. Only meaningful for plugins with widgets.
    */
-  nsTArray<nsIntRect>             mNextConfigurationClipRegion;
+  nsTArray<LayoutDeviceIntRect>   mNextConfigurationClipRegion;
 
   bool mReflowCallbackPosted;
 
@@ -301,7 +334,13 @@ private:
   // plugins we register on the root PresContext.
   // This is only non-null while we have a plugin registered for geometry
   // updates.
-  nsRefPtr<nsRootPresContext> mRootPresContextRegisteredWith;
+  RefPtr<nsRootPresContext> mRootPresContextRegisteredWith;
+
+  mozilla::UniquePtr<PluginFrameDidCompositeObserver> mDidCompositeObserver;
+
+  // Tracks windowed plugin visibility during scroll operations. See
+  // SetScrollVisibility.
+  bool mIsHiddenDueToScroll;
 };
 
 class nsDisplayPlugin : public nsDisplayItem {

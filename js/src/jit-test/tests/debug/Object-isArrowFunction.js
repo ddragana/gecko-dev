@@ -7,7 +7,7 @@ var hits = 0;
 
 function checkIsArrow(shouldBe, expr) {
   print(expr);
-  assertEq(gDO.evalInGlobal(expr).return.isArrowFunction, shouldBe);
+  assertEq(gDO.executeInGlobal(expr).return.isArrowFunction, shouldBe);
 }
 
 checkIsArrow(true, '() => { }');
@@ -15,7 +15,7 @@ checkIsArrow(true, '(a) => { bleh; }');
 checkIsArrow(false, 'Object.getPrototypeOf(() => { })');
 checkIsArrow(false, '(function () { })');
 checkIsArrow(false, 'function f() { } f');
-checkIsArrow(false, '({})');
+checkIsArrow((void 0), '({})');
 checkIsArrow(false, 'Math.atan2');
 checkIsArrow(false, 'Function.prototype');
 checkIsArrow(false, 'Function("")');

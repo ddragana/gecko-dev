@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_indexeddb_indexeddatabasemanager_h__
-#define mozilla_dom_indexeddb_indexeddatabasemanager_h__
+#ifndef mozilla_dom_indexeddatabasemanager_h__
+#define mozilla_dom_indexeddatabasemanager_h__
 
 #include "nsIObserver.h"
 
@@ -18,7 +18,7 @@
 #include "nsHashKeys.h"
 #include "nsITimer.h"
 
-struct PRLogModuleInfo;
+class nsIEventTarget;
 
 namespace mozilla {
 
@@ -26,17 +26,23 @@ class EventChainPostVisitor;
 
 namespace dom {
 
+class IDBFactory;
+
 namespace indexedDB {
 
+class BackgroundUtilsChild;
 class FileManager;
 class FileManagerInfo;
-class IDBFactory;
+
+} // namespace indexedDB
 
 class IndexedDatabaseManager final
   : public nsIObserver
   , public nsITimerCallback
 {
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
+  typedef mozilla::dom::indexedDB::FileManager FileManager;
+  typedef mozilla::dom::indexedDB::FileManagerInfo FileManagerInfo;
 
 public:
   enum LoggingMode
@@ -99,7 +105,7 @@ public:
   }
 #endif
 
-  static PRLogModuleInfo*
+  static mozilla::LogModule*
   GetLoggingModule()
 #ifdef DEBUG
   ;
@@ -113,10 +119,16 @@ public:
   ExperimentalFeaturesEnabled();
 
   static bool
-  ExperimentalFeaturesEnabled(JSContext* /* aCx */, JSObject* /* aGlobal */)
-  {
-    return ExperimentalFeaturesEnabled();
-  }
+  ExperimentalFeaturesEnabled(JSContext* aCx, JSObject* aGlobal);
+
+  static bool
+  IsFileHandleEnabled();
+
+  void
+  ClearBackgroundActor();
+
+  void
+  NoteBackgroundThread(nsIEventTarget* aBackgroundThread);
 
   already_AddRefed<FileManager>
   GetFileManager(PersistenceType aPersistenceType,
@@ -158,6 +170,11 @@ public:
   nsresult
   FlushPendingFileDeletions();
 
+#ifdef ENABLE_INTL_API
+  static const nsCString&
+  GetLocale();
+#endif
+
   static mozilla::Mutex&
   FileMutex()
   {
@@ -169,6 +186,9 @@ public:
 
   static nsresult
   CommonPostHandleEvent(EventChainPostVisitor& aVisitor, IDBFactory* aFactory);
+
+  static bool
+  ResolveSandboxBinding(JSContext* aCx);
 
   static bool
   DefineIndexedDB(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
@@ -186,6 +206,8 @@ private:
   static void
   LoggingModePrefChangedCallback(const char* aPrefName, void* aClosure);
 
+  nsCOMPtr<nsIEventTarget> mBackgroundThread;
+
   nsCOMPtr<nsITimer> mDeleteTimer;
 
   // Maintains a list of all file managers per origin. This list isn't
@@ -195,20 +217,25 @@ private:
   nsClassHashtable<nsRefPtrHashKey<FileManager>,
                    nsTArray<int64_t>> mPendingDeleteInfos;
 
-  // Lock protecting FileManager.mFileInfos and BlobImplBase.mFileInfos
+  // Lock protecting FileManager.mFileInfos.
   // It's s also used to atomically update FileInfo.mRefCnt, FileInfo.mDBRefCnt
   // and FileInfo.mSliceRefCnt
   mozilla::Mutex mFileMutex;
 
+#ifdef ENABLE_INTL_API
+  nsCString mLocale;
+#endif
+
+  indexedDB::BackgroundUtilsChild* mBackgroundActor;
+
   static bool sIsMainProcess;
   static bool sFullSynchronousMode;
-  static PRLogModuleInfo* sLoggingModule;
+  static LazyLogModule sLoggingModule;
   static Atomic<LoggingMode> sLoggingMode;
   static mozilla::Atomic<bool> sLowDiskSpaceMode;
 };
 
-} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_indexeddb_indexeddatabasemanager_h__
+#endif // mozilla_dom_indexeddatabasemanager_h__

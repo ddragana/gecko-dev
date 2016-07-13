@@ -1,16 +1,20 @@
+import imp
 import os
-import urlparse
+from six.moves.urllib.parse import urljoin
 from fnmatch import fnmatch
 try:
     from xml.etree import cElementTree as ElementTree
 except ImportError:
     from xml.etree import ElementTree
 
+here = os.path.dirname(__file__)
+localpaths = imp.load_source("localpaths", os.path.abspath(os.path.join(here, os.pardir, "localpaths.py")))
+
 import html5lib
 
-import vcs
-from item import Stub, ManualTest, WebdriverSpecTest, RefTest, TestharnessTest
-from utils import rel_path_to_url, is_blacklisted, ContextManagerStringIO, cached_property
+from . import vcs
+from .item import Stub, ManualTest, WebdriverSpecTest, RefTest, TestharnessTest
+from .utils import rel_path_to_url, is_blacklisted, ContextManagerStringIO, cached_property
 
 wd_pattern = "*.py"
 
@@ -74,7 +78,7 @@ class SourceFile(object):
             blob = git("show", "HEAD:%s" % self.rel_path)
             file_obj = ContextManagerStringIO(blob)
         else:
-            file_obj = open(self.path)
+            file_obj = open(self.path, 'rb')
         return file_obj
 
     @property
@@ -112,7 +116,7 @@ class SourceFile(object):
         # files.
         rel_dir_tree = self.rel_path.split(os.path.sep)
         return (rel_dir_tree[0] == "webdriver" and
-                len(rel_dir_tree) > 2 and
+                len(rel_dir_tree) > 1 and
                 self.filename != "__init__.py" and
                 fnmatch(self.filename, wd_pattern))
 
@@ -134,7 +138,7 @@ class SourceFile(object):
             ext = ext[1:]
         if ext in ["html", "htm"]:
             return "html"
-        if ext in ["xhtml", "xht"]:
+        if ext in ["xhtml", "xht", "xml"]:
             return "xhtml"
         if ext == "svg":
             return "svg"
@@ -179,6 +183,40 @@ class SourceFile(object):
             timeout_str = self.timeout_nodes[0].attrib.get("content", None)
             if timeout_str and timeout_str.lower() == "long":
                 return timeout_str
+
+    @cached_property
+    def viewport_nodes(self):
+        """List of ElementTree Elements corresponding to nodes in a test that
+        specify viewport sizes"""
+        return self.root.findall(".//{http://www.w3.org/1999/xhtml}meta[@name='viewport-size']")
+
+    @cached_property
+    def viewport_size(self):
+        """The viewport size of a test or reference file"""
+        if not self.root:
+            return None
+
+        if not self.viewport_nodes:
+            return None
+
+        return self.viewport_nodes[0].attrib.get("content", None)
+
+    @cached_property
+    def dpi_nodes(self):
+        """List of ElementTree Elements corresponding to nodes in a test that
+        specify device pixel ratios"""
+        return self.root.findall(".//{http://www.w3.org/1999/xhtml}meta[@name='device-pixel-ratio']")
+
+    @cached_property
+    def dpi(self):
+        """The device pixel ratio of a test or reference file"""
+        if not self.root:
+            return None
+
+        if not self.dpi_nodes:
+            return None
+
+        return self.dpi_nodes[0].attrib.get("content", None)
 
     @cached_property
     def testharness_nodes(self):
@@ -233,7 +271,7 @@ class SourceFile(object):
         rel_map = {"match": "==", "mismatch": "!="}
         for item in self.reftest_nodes:
             if "href" in item.attrib:
-                ref_url = urlparse.urljoin(self.url, item.attrib["href"])
+                ref_url = urljoin(self.url, item.attrib["href"])
                 ref_type = rel_map[item.attrib["rel"]]
                 rv.append((ref_url, ref_type))
         return rv
@@ -262,7 +300,7 @@ class SourceFile(object):
             rv = [TestharnessTest(self, self.url[:-3])]
 
         elif self.name_is_webdriver:
-            rv = [WebdriverSpecTest(self)]
+            rv = [WebdriverSpecTest(self, self.url)]
 
         elif self.content_is_testharness:
             rv = []
@@ -271,7 +309,8 @@ class SourceFile(object):
                 rv.append(TestharnessTest(self, url, timeout=self.timeout))
 
         elif self.content_is_ref_node:
-            rv = [RefTest(self, self.url, self.references, timeout=self.timeout)]
+            rv = [RefTest(self, self.url, self.references, timeout=self.timeout,
+                          viewport_size=self.viewport_size, dpi=self.dpi)]
 
         else:
             # If nothing else it's a helper file, which we don't have a specific type for

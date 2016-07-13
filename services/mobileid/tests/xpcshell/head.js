@@ -3,9 +3,9 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
-const Cm = Components.manager;
+var Cm = Components.manager;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -125,9 +125,10 @@ function addPermission(aAction) {
   let uri = Cc["@mozilla.org/network/io-service;1"]
               .getService(Ci.nsIIOService)
               .newURI(ORIGIN, null, null);
+  let attrs = {appId: APP_ID};
   let _principal = Cc["@mozilla.org/scriptsecuritymanager;1"]
                      .getService(Ci.nsIScriptSecurityManager)
-                     .getAppCodebasePrincipal(uri, APP_ID, false);
+                     .createCodebasePrincipal(uri, attrs);
   let pm = Cc["@mozilla.org/permissionmanager;1"]
              .getService(Ci.nsIPermissionManager);
   pm.addFromPrincipal(_principal, MOBILEID_PERM, aAction);
@@ -137,9 +138,10 @@ function removePermission() {
   let uri = Cc["@mozilla.org/network/io-service;1"]
               .getService(Ci.nsIIOService)
               .newURI(ORIGIN, null, null);
+  let attrs = {appId: APP_ID};
   let _principal = Cc["@mozilla.org/scriptsecuritymanager;1"]
                      .getService(Ci.nsIScriptSecurityManager)
-                     .getAppCodebasePrincipal(uri, APP_ID, false);
+                     .createCodebasePrincipal(uri, attrs);
   let pm = Cc["@mozilla.org/permissionmanager;1"]
              .getService(Ci.nsIPermissionManager);
   pm.removeFromPrincipal(_principal, MOBILEID_PERM);
@@ -147,7 +149,7 @@ function removePermission() {
 
 // === Mocks ===
 
-let Mock = function(aOptions) {
+var Mock = function(aOptions) {
   if (!aOptions) {
     aOptions = {};
   }
@@ -205,7 +207,7 @@ Mock.prototype = {
 };
 
 // UI Glue mock up.
-let MockUi = function(aOptions) {
+var MockUi = function(aOptions) {
   Mock.call(this, aOptions);
 };
 
@@ -253,7 +255,7 @@ MockUi.prototype = {
 };
 
 // Credentials store mock up.
-let MockCredStore = function(aOptions) {
+var MockCredStore = function(aOptions) {
   Mock.call(this, aOptions);
 };
 
@@ -314,7 +316,7 @@ MockCredStore.prototype = {
 };
 
 // Client mock up.
-let MockClient = function(aOptions) {
+var MockClient = function(aOptions) {
   Mock.call(this, aOptions);
 };
 
@@ -406,14 +408,14 @@ const kMobileIdentityUIGlueContractID =
 /*const kMobileIdentityUIGlueFactory =
   Cm.getClassObject(Cc[kMobileIdentityUIGlueContractID], Ci.nsIFactory);*/
 
-let fakeMobileIdentityUIGlueFactory = {
+var fakeMobileIdentityUIGlueFactory = {
   createInstance: function(aOuter, aIid) {
     return MobileIdentityUIGlue.QueryInterface(aIid);
   }
 };
 
 // MobileIdentityUIGlue fake component.
-let MobileIdentityUIGlue = {
+var MobileIdentityUIGlue = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIMobileIdentityUIGlue]),
 
 };
@@ -428,38 +430,10 @@ let MobileIdentityUIGlue = {
 
 // The tests rely on having an app registered. Otherwise, it will throw.
 // Override XULAppInfo.
-const XUL_APP_INFO_UUID = Components.ID("{84fdc459-d96d-421c-9bff-a8193233ae75}");
-const XUL_APP_INFO_CONTRACT_ID = "@mozilla.org/xre/app-info;1";
-
-let XULAppInfo = {
-  vendor: "Mozilla",
+Cu.import("resource://testing-common/AppInfo.jsm", this);
+updateAppInfo({
   name: "MobileIdTest",
   ID: "{230de50e-4cd1-11dc-8314-0800200b9a66}",
   version: "1",
-  appBuildID: "2007010101",
   platformVersion: "",
-  platformBuildID: "2007010101",
-  inSafeMode: false,
-  logConsoleErrors: true,
-  OS: "XPCShell",
-  XPCOMABI: "noarch-spidermonkey",
-
-  QueryInterface: XPCOMUtils.generateQI([
-    Ci.nsIXULAppInfo,
-    Ci.nsIXULRuntime,
-  ])
-};
-
-let XULAppInfoFactory = {
-  createInstance: function (outer, iid) {
-    if (outer != null) {
-      throw Cr.NS_ERROR_NO_AGGREGATION;
-    }
-    return XULAppInfo.QueryInterface(iid);
-  }
-};
-Cm.QueryInterface(Ci.nsIComponentRegistrar)
-  .registerFactory(XUL_APP_INFO_UUID,
-                   "XULAppInfo",
-                   XUL_APP_INFO_CONTRACT_ID,
-                   XULAppInfoFactory);
+});

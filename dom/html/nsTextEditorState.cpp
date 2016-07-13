@@ -35,8 +35,8 @@
 #include "nsPIDOMWindow.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIEditor.h"
-#include "nsTextEditRules.h"
 #include "mozilla/dom/Selection.h"
+#include "mozilla/TextEditRules.h"
 #include "mozilla/EventListenerManager.h"
 #include "nsContentUtils.h"
 #include "mozilla/Preferences.h"
@@ -47,9 +47,12 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsNumberControlFrame.h"
 #include "nsFrameSelection.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/layers/ScrollInputMethods.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using mozilla::layers::ScrollInputMethod;
 
 static NS_DEFINE_CID(kTextEditorCID, NS_TEXTEDITOR_CID);
 
@@ -80,7 +83,7 @@ private:
   bool mOuterTransaction;
 };
 
-class RestoreSelectionState : public nsRunnable {
+class RestoreSelectionState : public Runnable {
 public:
   RestoreSelectionState(nsTextEditorState *aState, nsTextControlFrame *aFrame)
     : mFrame(aFrame),
@@ -92,6 +95,9 @@ public:
     if (!mTextEditorState) {
       return NS_OK;
     }
+
+    AutoHideSelectionChanges hideSelectionChanges
+      (mFrame->GetConstFrameSelection());
 
     if (mFrame) {
       // SetSelectionRange leads to Selection::AddRange which flushes Layout -
@@ -107,7 +113,10 @@ public:
       }
       mTextEditorState->mSelectionRestoreEagerInit = false;
     }
-    mTextEditorState->FinishedRestoringSelection();
+
+    if (mTextEditorState) {
+      mTextEditorState->FinishedRestoringSelection();
+    }
     return NS_OK;
   }
 
@@ -219,10 +228,13 @@ public:
   NS_IMETHOD GetDisplaySelection(int16_t* _retval) override;
   NS_IMETHOD SetSelectionFlags(int16_t aInEnable) override;
   NS_IMETHOD GetSelectionFlags(int16_t *aOutEnable) override;
-  NS_IMETHOD GetSelection(int16_t type, nsISelection** _retval) override;
-  NS_IMETHOD ScrollSelectionIntoView(int16_t aType, int16_t aRegion, int16_t aFlags) override;
-  NS_IMETHOD RepaintSelection(int16_t type) override;
-  NS_IMETHOD RepaintSelection(nsPresContext* aPresContext, SelectionType aSelectionType);
+  NS_IMETHOD GetSelection(RawSelectionType aRawSelectionType,
+                          nsISelection** aSelection) override;
+  NS_IMETHOD ScrollSelectionIntoView(RawSelectionType aRawSelectionType,
+                                     int16_t aRegion, int16_t aFlags) override;
+  NS_IMETHOD RepaintSelection(RawSelectionType aRawSelectionType) override;
+  nsresult RepaintSelection(nsPresContext* aPresContext,
+                            SelectionType aSelectionType);
   NS_IMETHOD SetCaretEnabled(bool enabled) override;
   NS_IMETHOD SetCaretReadOnly(bool aReadOnly) override;
   NS_IMETHOD GetCaretEnabled(bool* _retval) override;
@@ -246,11 +258,8 @@ public:
   NS_IMETHOD CheckVisibility(nsIDOMNode *node, int16_t startOffset, int16_t EndOffset, bool* _retval) override;
   virtual nsresult CheckVisibilityContent(nsIContent* aNode, int16_t aStartOffset, int16_t aEndOffset, bool* aRetval) override;
 
-  NS_IMETHOD GetSelectionCaretsVisibility(bool* aOutVisibility) override;
-  NS_IMETHOD SetSelectionCaretsVisibility(bool aVisibility) override;
-
 private:
-  nsRefPtr<nsFrameSelection> mFrameSelection;
+  RefPtr<nsFrameSelection> mFrameSelection;
   nsCOMPtr<nsIContent>       mLimiter;
   nsIScrollableFrame        *mScrollFrame;
   nsWeakPtr mPresShellWeak;
@@ -329,40 +338,50 @@ nsTextInputSelectionImpl::GetSelectionFlags(int16_t *aOutEnable)
 }
 
 NS_IMETHODIMP
-nsTextInputSelectionImpl::GetSelection(int16_t type, nsISelection **_retval)
+nsTextInputSelectionImpl::GetSelection(RawSelectionType aRawSelectionType,
+                                       nsISelection** aSelection)
 {
   if (!mFrameSelection)
     return NS_ERROR_NULL_POINTER;
-    
-  *_retval = mFrameSelection->GetSelection(type);
-  
-  if (!(*_retval))
-    return NS_ERROR_FAILURE;
 
-  NS_ADDREF(*_retval);
+  *aSelection =
+    mFrameSelection->GetSelection(ToSelectionType(aRawSelectionType));
+
+  // GetSelection() fails only when aRawSelectionType is invalid value.
+  if (!(*aSelection)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  NS_ADDREF(*aSelection);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsTextInputSelectionImpl::ScrollSelectionIntoView(int16_t aType, int16_t aRegion, int16_t aFlags)
+nsTextInputSelectionImpl::ScrollSelectionIntoView(
+                            RawSelectionType aRawSelectionType,
+                            int16_t aRegion,
+                            int16_t aFlags)
 {
   if (!mFrameSelection) 
     return NS_ERROR_FAILURE; 
 
-  return mFrameSelection->ScrollSelectionIntoView(aType, aRegion, aFlags);
+  return mFrameSelection->ScrollSelectionIntoView(
+                            ToSelectionType(aRawSelectionType),
+                            aRegion, aFlags);
 }
 
 NS_IMETHODIMP
-nsTextInputSelectionImpl::RepaintSelection(int16_t type)
+nsTextInputSelectionImpl::RepaintSelection(RawSelectionType aRawSelectionType)
 {
   if (!mFrameSelection)
     return NS_ERROR_FAILURE;
 
-  return mFrameSelection->RepaintSelection(type);
+  return mFrameSelection->RepaintSelection(ToSelectionType(aRawSelectionType));
 }
 
-NS_IMETHODIMP
-nsTextInputSelectionImpl::RepaintSelection(nsPresContext* aPresContext, SelectionType aSelectionType)
+nsresult
+nsTextInputSelectionImpl::RepaintSelection(nsPresContext* aPresContext,
+                                           SelectionType aSelectionType)
 {
   if (!mFrameSelection)
     return NS_ERROR_FAILURE;
@@ -395,10 +414,10 @@ nsTextInputSelectionImpl::SetCaretReadOnly(bool aReadOnly)
   nsCOMPtr<nsIPresShell> shell = do_QueryReferent(mPresShellWeak, &result);
   if (shell)
   {
-    nsRefPtr<nsCaret> caret = shell->GetCaret();
+    RefPtr<nsCaret> caret = shell->GetCaret();
     if (caret) {
-      nsISelection* domSel = mFrameSelection->
-        GetSelection(nsISelectionController::SELECTION_NORMAL);
+      nsISelection* domSel =
+        mFrameSelection->GetSelection(SelectionType::eNormal);
       if (domSel)
         caret->SetCaretReadOnly(aReadOnly);
       return NS_OK;
@@ -421,7 +440,7 @@ nsTextInputSelectionImpl::GetCaretVisible(bool *_retval)
   nsCOMPtr<nsIPresShell> shell = do_QueryReferent(mPresShellWeak, &result);
   if (shell)
   {
-    nsRefPtr<nsCaret> caret = shell->GetCaret();
+    RefPtr<nsCaret> caret = shell->GetCaret();
     if (caret) {
       *_retval = caret->IsVisible();
       return NS_OK;
@@ -438,10 +457,10 @@ nsTextInputSelectionImpl::SetCaretVisibilityDuringSelection(bool aVisibility)
   nsCOMPtr<nsIPresShell> shell = do_QueryReferent(mPresShellWeak, &result);
   if (shell)
   {
-    nsRefPtr<nsCaret> caret = shell->GetCaret();
+    RefPtr<nsCaret> caret = shell->GetCaret();
     if (caret) {
-      nsISelection* domSel = mFrameSelection->
-        GetSelection(nsISelectionController::SELECTION_NORMAL);
+      nsISelection* domSel =
+        mFrameSelection->GetSelection(SelectionType::eNormal);
       if (domSel)
         caret->SetVisibilityDuringSelection(aVisibility);
       return NS_OK;
@@ -533,8 +552,10 @@ nsTextInputSelectionImpl::PageMove(bool aForward, bool aExtend)
   }
   // After ScrollSelectionIntoView(), the pending notifications might be
   // flushed and PresShell/PresContext/Frames may be dead. See bug 418470.
-  return ScrollSelectionIntoView(nsISelectionController::SELECTION_NORMAL, nsISelectionController::SELECTION_FOCUS_REGION,
-                                 nsISelectionController::SCROLL_SYNCHRONOUS);
+  return ScrollSelectionIntoView(nsISelectionController::SELECTION_NORMAL,
+                                 nsISelectionController::SELECTION_FOCUS_REGION,
+                                 nsISelectionController::SCROLL_SYNCHRONOUS |
+                                 nsISelectionController::SCROLL_FOR_CARET_MOVE);
 }
 
 NS_IMETHODIMP
@@ -542,6 +563,9 @@ nsTextInputSelectionImpl::CompleteScroll(bool aForward)
 {
   if (!mScrollFrame)
     return NS_ERROR_NOT_INITIALIZED;
+
+  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
+      (uint32_t) ScrollInputMethod::MainThreadCompleteScroll);
 
   mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
                          nsIScrollableFrame::WHOLE,
@@ -592,6 +616,9 @@ nsTextInputSelectionImpl::ScrollPage(bool aForward)
   if (!mScrollFrame)
     return NS_ERROR_NOT_INITIALIZED;
 
+  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
+      (uint32_t) ScrollInputMethod::MainThreadScrollPage);
+
   mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
                          nsIScrollableFrame::PAGES,
                          nsIScrollableFrame::SMOOTH);
@@ -604,6 +631,9 @@ nsTextInputSelectionImpl::ScrollLine(bool aForward)
   if (!mScrollFrame)
     return NS_ERROR_NOT_INITIALIZED;
 
+  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
+      (uint32_t) ScrollInputMethod::MainThreadScrollLine);
+
   mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
                          nsIScrollableFrame::LINES,
                          nsIScrollableFrame::SMOOTH);
@@ -615,6 +645,9 @@ nsTextInputSelectionImpl::ScrollCharacter(bool aRight)
 {
   if (!mScrollFrame)
     return NS_ERROR_NOT_INITIALIZED;
+
+  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
+      (uint32_t) ScrollInputMethod::MainThreadScrollCharacter);
 
   mScrollFrame->ScrollBy(nsIntPoint(aRight ? 1 : -1, 0),
                          nsIScrollableFrame::LINES,
@@ -642,36 +675,6 @@ nsTextInputSelectionImpl::CheckVisibility(nsIDOMNode *node, int16_t startOffset,
   }
   return NS_ERROR_FAILURE;
 
-}
-
-NS_IMETHODIMP
-nsTextInputSelectionImpl::GetSelectionCaretsVisibility(bool* aOutVisibility)
-{
-  if (!mPresShellWeak) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  nsresult result;
-  nsCOMPtr<nsISelectionController> shell = do_QueryReferent(mPresShellWeak, &result);
-  if (shell) {
-    return shell->GetSelectionCaretsVisibility(aOutVisibility);
-  }
-  return NS_ERROR_FAILURE;
-}
-
-NS_IMETHODIMP
-nsTextInputSelectionImpl::SetSelectionCaretsVisibility(bool aVisibility)
-{
-  if (!mPresShellWeak) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  nsresult result;
-  nsCOMPtr<nsISelectionController> shell = do_QueryReferent(mPresShellWeak, &result);
-  if (shell) {
-    return shell->SetSelectionCaretsVisibility(aVisibility);
-  }
-  return NS_ERROR_FAILURE;
 }
 
 nsresult
@@ -819,7 +822,7 @@ nsTextInputListener::NotifySelectionChanged(nsIDOMDocument* aDoc, nsISelection* 
         if (presShell) 
         {
           nsEventStatus status = nsEventStatus_eIgnore;
-          WidgetEvent event(true, NS_FORM_SELECTED);
+          WidgetEvent event(true, eFormSelect);
 
           presShell->HandleEventWithTarget(&event, mFrame, content, &status);
         }
@@ -899,12 +902,12 @@ nsTextInputListener::HandleEvent(nsIDOMEvent* aEvent)
   }
 
   WidgetKeyboardEvent* keyEvent =
-    aEvent->GetInternalNSEvent()->AsKeyboardEvent();
+    aEvent->WidgetEventPtr()->AsKeyboardEvent();
   if (!keyEvent) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  if (keyEvent->message != NS_KEY_PRESS) {
+  if (keyEvent->mMessage != eKeyPress) {
     return NS_OK;
   }
 
@@ -912,7 +915,7 @@ nsTextInputListener::HandleEvent(nsIDOMEvent* aEvent)
     mTxtCtrlElement->IsTextArea() ?
       nsIWidget::NativeKeyBindingsForMultiLineEditor :
       nsIWidget::NativeKeyBindingsForSingleLineEditor;
-  nsIWidget* widget = keyEvent->widget;
+  nsIWidget* widget = keyEvent->mWidget;
   // If the event is created by chrome script, the widget is nullptr.
   if (!widget) {
     widget = mFrame->GetNearestWidget();
@@ -1005,7 +1008,7 @@ nsTextInputListener::UpdateTextInputCommands(const nsAString& commandsToUpdate,
   nsCOMPtr<nsIDocument> doc = content->GetComposedDoc();
   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
 
-  nsPIDOMWindow *domWindow = doc->GetWindow();
+  nsPIDOMWindowOuter *domWindow = doc->GetWindow();
   NS_ENSURE_TRUE(domWindow, NS_ERROR_FAILURE);
 
   return domWindow->UpdateCommands(commandsToUpdate, sel, reason);
@@ -1097,7 +1100,7 @@ nsTextEditorState::GetSelectionController() const
 }
 
 // Helper class, used below in BindToFrame().
-class PrepareEditorEvent : public nsRunnable {
+class PrepareEditorEvent : public Runnable {
 public:
   PrepareEditorEvent(nsTextEditorState &aState,
                      nsIContent *aOwnerContent,
@@ -1160,7 +1163,7 @@ nsTextEditorState::BindToFrame(nsTextControlFrame* aFrame)
   NS_ENSURE_TRUE(shell, NS_ERROR_FAILURE);
 
   // Create selection
-  nsRefPtr<nsFrameSelection> frameSel = new nsFrameSelection();
+  RefPtr<nsFrameSelection> frameSel = new nsFrameSelection();
 
   // Create a SelectionController
   mSelCon = new nsTextInputSelectionImpl(frameSel, shell, rootNode);
@@ -1171,12 +1174,12 @@ nsTextEditorState::BindToFrame(nsTextControlFrame* aFrame)
   mSelCon->SetDisplaySelection(nsISelectionController::SELECTION_ON);
 
   // Get the caret and make it a selection listener.
-  nsRefPtr<nsISelection> domSelection;
+  RefPtr<nsISelection> domSelection;
   if (NS_SUCCEEDED(mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL,
                                          getter_AddRefs(domSelection))) &&
       domSelection) {
     nsCOMPtr<nsISelectionPrivate> selPriv(do_QueryInterface(domSelection));
-    nsRefPtr<nsCaret> caret = shell->GetCaret();
+    RefPtr<nsCaret> caret = shell->GetCaret();
     nsCOMPtr<nsISelectionListener> listener;
     if (caret) {
       listener = do_QueryInterface(caret);
@@ -1206,9 +1209,8 @@ nsTextEditorState::BindToFrame(nsTextControlFrame* aFrame)
       // otherwise, inherit the content node's direction
     }
 
-    if (!nsContentUtils::AddScriptRunner(
-          new PrepareEditorEvent(*this, content, currentValue)))
-      return NS_ERROR_OUT_OF_MEMORY;
+    nsContentUtils::AddScriptRunner(
+      new PrepareEditorEvent(*this, content, currentValue));
   }
 
   return NS_OK;
@@ -1247,6 +1249,8 @@ nsTextEditorState::PrepareEditor(const nsAString *aValue)
     // Do not initialize the editor multiple times.
     return NS_OK;
   }
+
+  AutoHideSelectionChanges hideSelectionChanges(GetConstFrameSelection());
 
   // Don't attempt to initialize recursively!
   InitializationGuard guard(*this);
@@ -1666,7 +1670,7 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
 
   if (mSelCon) {
     if (mTextListener) {
-      nsRefPtr<nsISelection> domSelection;
+      RefPtr<nsISelection> domSelection;
       if (NS_SUCCEEDED(mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL,
                                              getter_AddRefs(domSelection))) &&
           domSelection) {
@@ -1737,7 +1741,7 @@ nsTextEditorState::CreateRootNode()
   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
 
   // Now create a DIV and add it to the anonymous content child list.
-  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::div, nullptr,
                                                  kNameSpaceID_XHTML,
                                                  nsIDOMNode::ELEMENT_NODE);
@@ -1820,7 +1824,7 @@ be called if @placeholder is the empty string when trimmed from line breaks");
 
   // Create a DIV for the placeholder
   // and add it to the anonymous content child list
-  nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+  RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = pNodeInfoManager->GetNodeInfo(nsGkAtoms::div, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
@@ -1830,7 +1834,7 @@ be called if @placeholder is the empty string when trimmed from line breaks");
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the text node for the placeholder text before doing anything else
-  nsRefPtr<nsTextNode> placeholderText = new nsTextNode(pNodeInfoManager);
+  RefPtr<nsTextNode> placeholderText = new nsTextNode(pNodeInfoManager);
 
   rv = mPlaceholderDiv->AppendChildTo(placeholderText, false);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1926,7 +1930,7 @@ nsTextEditorState::GetValue(nsAString& aValue, bool aIgnoreWrap) const
     if (!mTextCtrlElement->ValueChanged() || !mValue) {
       mTextCtrlElement->GetDefaultValueFromContent(aValue);
     } else {
-      aValue = NS_ConvertUTF8toUTF16(*mValue);
+      aValue = *mValue;
     }
   }
 }
@@ -1958,6 +1962,21 @@ nsTextEditorState::SetValue(const nsAString& aValue, uint32_t aFlags)
         // we should skip to set the new value to the editor here.  It should
         // be set later with the updated mValueBeingSet.
         return true;
+      }
+      if (NS_WARN_IF(!mBoundFrame)) {
+        // We're not sure if this case is possible.
+      } else {
+        // If setting value won't change current value, we shouldn't commit
+        // composition for compatibility with the other browsers.
+        nsAutoString currentValue;
+        mBoundFrame->GetText(currentValue);
+        if (newValue == currentValue) {
+          // Note that in this case, we shouldn't fire any events with setting
+          // value because event handlers may try to set value recursively but
+          // we cannot commit composition at that time due to unsafe to run
+          // script (see below).
+          return true;
+        }
       }
       // If there is composition, need to commit composition first because
       // other browsers do that.
@@ -2132,7 +2151,7 @@ nsTextEditorState::SetValue(const nsAString& aValue, uint32_t aFlags)
     }
   } else {
     if (!mValue) {
-      mValue = new nsCString;
+      mValue.emplace();
     }
     nsString value;
     if (!value.Assign(newValue, fallible)) {
@@ -2141,7 +2160,7 @@ nsTextEditorState::SetValue(const nsAString& aValue, uint32_t aFlags)
     if (!nsContentUtils::PlatformToDOMLineBreaks(value, fallible)) {
       return false;
     }
-    if (!CopyUTF16toUTF8(value, *mValue, fallible)) {
+    if (!mValue->Assign(value, fallible)) {
       return false;
     }
 
@@ -2178,7 +2197,7 @@ nsTextEditorState::InitializeKeyboardEventListeners()
                                     TrustedEventsAtSystemGroupBubble());
   }
 
-  mSelCon->SetScrollableFrame(do_QueryFrame(mBoundFrame->GetFirstPrincipalChild()));
+  mSelCon->SetScrollableFrame(do_QueryFrame(mBoundFrame->PrincipalChildList().FirstChild()));
 }
 
 void

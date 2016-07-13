@@ -24,7 +24,7 @@ typedef double gfxFloat;
  *
  * eNoBreak       The line has no break opportunities
  * eWordWrapBreak The line has a break opportunity only within a word. With
- *                word-wrap: break-word we will break at this point only if
+ *                overflow-wrap|word-wrap: break-word we will break at this point only if
  *                there are no other break opportunities in the line.
  * eNormalBreak   The line has a break opportunity determined by the standard
  *                line-breaking algorithm.
@@ -42,19 +42,6 @@ enum class gfxBreakPriority {
   eNoBreak       = 0,
   eWordWrapBreak,
   eNormalBreak
-};
-
-/**
-  * The format for an image surface. For all formats with alpha data, 0
-  * means transparent, 1 or 255 means fully opaque.
-  */
-enum class gfxImageFormat {
-  ARGB32, ///< ARGB data in native endianness, using premultiplied alpha
-  RGB24,  ///< xRGB data in native endianness
-  A8,     ///< Only an alpha channel
-  A1,     ///< Packed transparency information (one byte refers to 8 pixels)
-  RGB16_565,  ///< RGB_565 data in native endianness
-  Unknown
 };
 
 enum class gfxSurfaceType {
@@ -90,17 +77,6 @@ enum class gfxContentType {
   ALPHA       = 0x2000,
   COLOR_ALPHA = 0x3000,
   SENTINEL    = 0xffff
-};
-
-/**
-  * The memory used by a gfxASurface (as reported by KnownMemoryUsed()) can
-  * either live in this process's heap, in this process but outside the
-  * heap, or in another process altogether.
-  */
-enum class gfxMemoryLocation {
-  IN_PROCESS_HEAP,
-  IN_PROCESS_NONHEAP,
-  OUT_OF_PROCESS
 };
 
 #endif /* GFX_TYPES_H */

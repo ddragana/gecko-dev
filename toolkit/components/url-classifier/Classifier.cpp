@@ -16,8 +16,8 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/Logging.h"
 
-// NSPR_LOG_MODULES=UrlClassifierDbService:5
-extern PRLogModuleInfo *gUrlClassifierDbServiceLog;
+// MOZ_LOG=UrlClassifierDbService:5
+extern mozilla::LazyLogModule gUrlClassifierDbServiceLog;
 #define LOG(args) MOZ_LOG(gUrlClassifierDbServiceLog, mozilla::LogLevel::Debug, args)
 #define LOG_ENABLED() MOZ_LOG_TEST(gUrlClassifierDbServiceLog, mozilla::LogLevel::Debug)
 
@@ -243,22 +243,12 @@ Classifier::Check(const nsACString& aSpec,
     Completion lookupHash;
     lookupHash.FromPlaintext(fragments[i], mCryptoHash);
 
-    // Get list of host keys to look up
-    Completion hostKey;
-    rv = LookupCache::GetKey(fragments[i], &hostKey, mCryptoHash);
-    if (NS_FAILED(rv)) {
-      // Local host on the network.
-      continue;
-    }
-
-#if DEBUG
     if (LOG_ENABLED()) {
       nsAutoCString checking;
       lookupHash.ToHexString(checking);
       LOG(("Checking fragment %s, hash %s (%X)", fragments[i].get(),
            checking.get(), lookupHash.ToUint32()));
     }
-#endif
 
     for (uint32_t i = 0; i < cacheArray.Length(); i++) {
       LookupCache *cache = cacheArray[i];
@@ -368,6 +358,15 @@ Classifier::MarkSpoiled(nsTArray<nsCString>& aTables)
     }
   }
   return NS_OK;
+}
+
+void
+Classifier::SetLastUpdateTime(const nsACString &aTable,
+                              uint64_t updateTime)
+{
+  LOG(("Marking table %s as last updated on %u",
+       PromiseFlatCString(aTable).get(), updateTime));
+  mTableFreshness.Put(aTable, updateTime / PR_MSEC_PER_SEC);
 }
 
 void
@@ -693,7 +692,7 @@ Classifier::GetLookupCache(const nsACString& aTable)
     }
   }
 
-  LookupCache *cache = new LookupCache(aTable, mStoreDirectory);
+  UniquePtr<LookupCache> cache(new LookupCache(aTable, mStoreDirectory));
   nsresult rv = cache->Init();
   if (NS_FAILED(rv)) {
     return nullptr;
@@ -705,8 +704,8 @@ Classifier::GetLookupCache(const nsACString& aTable)
     }
     return nullptr;
   }
-  mLookupCaches.AppendElement(cache);
-  return cache;
+  mLookupCaches.AppendElement(cache.get());
+  return cache.release();
 }
 
 nsresult

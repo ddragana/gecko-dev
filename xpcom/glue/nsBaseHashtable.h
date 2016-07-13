@@ -10,7 +10,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
 #include "nsTHashtable.h"
-#include "prlock.h"
 #include "nsDebug.h"
 
 template<class KeyClass, class DataType, class UserDataType>
@@ -128,8 +127,8 @@ public:
     }
   }
 
-  MOZ_WARN_UNUSED_RESULT bool Put(KeyType aKey, const UserDataType& aData,
-                                  const fallible_t&)
+  MOZ_MUST_USE bool Put(KeyType aKey, const UserDataType& aData,
+                        const fallible_t&)
   {
     EntryType* ent = this->PutEntry(aKey);
     if (!ent) {
@@ -146,79 +145,6 @@ public:
    * @param aKey the key to remove from the hashtable
    */
   void Remove(KeyType aKey) { this->RemoveEntry(aKey); }
-
-  /**
-   * function type provided by the application for enumeration.
-   * @param aKey the key being enumerated
-   * @param aData data being enumerated
-   * @param aUserArg passed unchanged from Enumerate
-   * @return either
-   *   @link PLDHashOperator::PL_DHASH_NEXT PL_DHASH_NEXT @endlink or
-   *   @link PLDHashOperator::PL_DHASH_STOP PL_DHASH_STOP @endlink
-   */
-  typedef PLDHashOperator (*EnumReadFunction)(KeyType aKey,
-                                              UserDataType aData,
-                                              void* aUserArg);
-
-  /**
-   * enumerate entries in the hashtable, without allowing changes
-   * WARNING: this function is deprecated. Please use Iterator instead.
-   * @param aEnumFunc enumeration callback
-   * @param aUserArg passed unchanged to the EnumReadFunction
-   */
-  uint32_t EnumerateRead(EnumReadFunction aEnumFunc, void* aUserArg) const
-  {
-    uint32_t n = 0;
-    for (auto iter = this->mTable.ConstIter(); !iter.Done(); iter.Next()) {
-      auto entry = static_cast<EntryType*>(iter.Get());
-      PLDHashOperator op = aEnumFunc(entry->GetKey(), entry->mData, aUserArg);
-      n++;
-      MOZ_ASSERT(!(op & PL_DHASH_REMOVE));
-      if (op & PL_DHASH_STOP) {
-        break;
-      }
-    }
-    return n;
-  }
-
-  /**
-   * function type provided by the application for enumeration.
-   * @param aKey the key being enumerated
-   * @param aData Reference to data being enumerated, may be altered. e.g. for
-   *        nsInterfaceHashtable this is an nsCOMPtr reference...
-   * @parm aUserArg passed unchanged from Enumerate
-   * @return bitflag combination of
-   *   @link PLDHashOperator::PL_DHASH_REMOVE @endlink,
-   *   @link PLDHashOperator::PL_DHASH_NEXT PL_DHASH_NEXT @endlink, or
-   *   @link PLDHashOperator::PL_DHASH_STOP PL_DHASH_STOP @endlink
-   */
-  typedef PLDHashOperator (*EnumFunction)(KeyType aKey,
-                                          DataType& aData,
-                                          void* aUserArg);
-
-  /**
-   * enumerate entries in the hashtable, allowing changes.
-   * WARNING: this function is deprecated. Please use Iterator and/or
-   * MutatingIterator instead.
-   * @param aEnumFunc enumeration callback
-   * @param aUserArg passed unchanged to the EnumFunction
-   */
-  uint32_t Enumerate(EnumFunction aEnumFunc, void* aUserArg)
-  {
-    uint32_t n = 0;
-    for (auto iter = this->mTable.Iter(); !iter.Done(); iter.Next()) {
-      auto entry = static_cast<EntryType*>(iter.Get());
-      PLDHashOperator op = aEnumFunc(entry->GetKey(), entry->mData, aUserArg);
-      n++;
-      if (op & PL_DHASH_REMOVE) {
-        iter.Remove();
-      }
-      if (op & PL_DHASH_STOP) {
-        break;
-      }
-    }
-    return n;
-  }
 
   // This is an iterator that also allows entry removal. Example usage:
   //
@@ -267,116 +193,38 @@ public:
   void Clear() { nsTHashtable<EntryType>::Clear(); }
 
   /**
-   * client must provide a SizeOfEntryExcludingThisFun function for
-   *   SizeOfExcludingThis.
-   * @param     aKey the key being enumerated
-   * @param     aData Reference to data being enumerated.
-   * @param     aMallocSizeOf the function used to measure heap-allocated blocks
-   * @param     aUserArg passed unchanged from SizeOf{In,Ex}cludingThis
-   * @return    summed size of the things pointed to by the entries
-   */
-  typedef size_t
-    (*SizeOfEntryExcludingThisFun)(KeyType aKey,
-                                   const DataType& aData,
-                                   mozilla::MallocSizeOf aMallocSizeOf,
-                                   void* aUserArg);
-
-  /**
-   * Measure the size of the table's entry storage and the table itself.
-   * If |aSizeOfEntryExcludingThis| is non-nullptr, measure the size of things
-   * pointed to by entries.
+   * Measure the size of the table's entry storage. The size of things pointed
+   * to by entries must be measured separately; hence the "Shallow" prefix.
    *
-   * @param    aSizeOfEntryExcludingThis
-   *           the <code>SizeOfEntryExcludingThisFun</code> function to call
-   * @param    aMallocSizeOf the function used to meeasure heap-allocated blocks
-   * @param    aUserArg a point to pass to the
-   *           <code>SizeOfEntryExcludingThisFun</code> function
-   * @return   the summed size of the entries, the table, and the table's storage
+   * @param   aMallocSizeOf the function used to measure heap-allocated blocks
+   * @return  the summed size of the table's storage
    */
-  size_t SizeOfIncludingThis(SizeOfEntryExcludingThisFun aSizeOfEntryExcludingThis,
-                             mozilla::MallocSizeOf aMallocSizeOf,
-                             void* aUserArg = nullptr)
+  size_t ShallowSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return aMallocSizeOf(this) +
-      this->SizeOfExcludingThis(aSizeOfEntryExcludingThis, aMallocSizeOf,
-                                aUserArg);
+    return this->mTable.ShallowSizeOfExcludingThis(aMallocSizeOf);
   }
 
   /**
-   * Measure the size of the table's entry storage, and if
-   * |aSizeOfEntryExcludingThis| is non-nullptr, measure the size of things
-   * pointed to by entries.
-   *
-   * @param     aSizeOfEntryExcludingThis the
-   *            <code>SizeOfEntryExcludingThisFun</code> function to call
-   * @param     aMallocSizeOf the function used to measure heap-allocated blocks
-   * @param     aUserArg a pointer to pass to the
-   *            <code>SizeOfEntryExcludingThisFun</code> function
-   * @return    the summed size of all the entries
+   * Like ShallowSizeOfExcludingThis, but includes sizeof(*this).
    */
-  size_t SizeOfExcludingThis(SizeOfEntryExcludingThisFun aSizeOfEntryExcludingThis,
-                             mozilla::MallocSizeOf aMallocSizeOf,
-                             void* aUserArg = nullptr) const
+  size_t ShallowSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    if (aSizeOfEntryExcludingThis) {
-      s_SizeOfArgs args = { aSizeOfEntryExcludingThis, aUserArg };
-      return PL_DHashTableSizeOfExcludingThis(&this->mTable, s_SizeOfStub,
-                                              aMallocSizeOf, &args);
-    }
-    return PL_DHashTableSizeOfExcludingThis(&this->mTable, nullptr,
-                                            aMallocSizeOf);
+    return aMallocSizeOf(this) + ShallowSizeOfExcludingThis(aMallocSizeOf);
   }
+
+  /**
+   * Swap the elements in this hashtable with the elements in aOther.
+   */
+  void SwapElements(nsBaseHashtable& aOther)
+  {
+    nsTHashtable<EntryType>::SwapElements(aOther);
+  }
+
 
 #ifdef DEBUG
   using nsTHashtable<EntryType>::MarkImmutable;
 #endif
-
-protected:
-  struct s_SizeOfArgs
-  {
-    SizeOfEntryExcludingThisFun func;
-    void* userArg;
-  };
-
-  static size_t s_SizeOfStub(PLDHashEntryHdr* aEntry,
-                             mozilla::MallocSizeOf aMallocSizeOf,
-                             void* aArg);
 };
-
-class nsCycleCollectionTraversalCallback;
-
-struct MOZ_STACK_CLASS nsBaseHashtableCCTraversalData
-{
-  nsBaseHashtableCCTraversalData(nsCycleCollectionTraversalCallback& aCallback,
-                                 const char* aName,
-                                 uint32_t aFlags)
-    : mCallback(aCallback)
-    , mName(aName)
-    , mFlags(aFlags)
-  {
-  }
-
-  nsCycleCollectionTraversalCallback& mCallback;
-  const char* mName;
-  uint32_t mFlags;
-
-};
-
-template<typename K, typename T>
-PLDHashOperator
-ImplCycleCollectionTraverse_EnumFunc(K aKey,
-                                     T aData,
-                                     void* aUserData)
-{
-  nsBaseHashtableCCTraversalData* userData =
-    static_cast<nsBaseHashtableCCTraversalData*>(aUserData);
-
-  CycleCollectionNoteChild(userData->mCallback,
-                           aData,
-                           userData->mName,
-                           userData->mFlags);
-  return PL_DHASH_NEXT;
-}
 
 //
 // nsBaseHashtableET definitions
@@ -400,22 +248,6 @@ nsBaseHashtableET<KeyClass, DataType>::nsBaseHashtableET(
 template<class KeyClass, class DataType>
 nsBaseHashtableET<KeyClass, DataType>::~nsBaseHashtableET()
 {
-}
-
-
-//
-// nsBaseHashtable definitions
-//
-
-template<class KeyClass, class DataType, class UserDataType>
-size_t
-nsBaseHashtable<KeyClass, DataType, UserDataType>::s_SizeOfStub(
-    PLDHashEntryHdr* aHdr, mozilla::MallocSizeOf aMallocSizeOf, void* aArg)
-{
-  EntryType* ent = static_cast<EntryType*>(aHdr);
-  s_SizeOfArgs* eargs = static_cast<s_SizeOfArgs*>(aArg);
-
-  return (eargs->func)(ent->GetKey(), ent->mData, aMallocSizeOf, eargs->userArg);
 }
 
 #endif // nsBaseHashtable_h__

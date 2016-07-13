@@ -13,15 +13,16 @@
 
 #include "nsCOMPtr.h"
 
+#include "mozilla/Attributes.h"
 #include "mozilla/Logging.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/Attributes.h"
+#include "mozilla/Variant.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "TracedTaskCommon.h"
 #endif
 
-extern PRLogModuleInfo* GetTimerLog();
+extern mozilla::LogModule* GetTimerLog();
 
 #define NS_TIMER_CID \
 { /* 5ff24248-1dd2-11b2-8427-fbab44f29bc8 */         \
@@ -42,8 +43,8 @@ public:
   static void Shutdown();
 
   friend class TimerThread;
-  friend struct TimerAdditionComparator;
   friend class nsTimerEvent;
+  friend struct TimerAdditionComparator;
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITIMER
@@ -77,7 +78,7 @@ private:
   };
 
   ~nsTimerImpl();
-  nsresult InitCommon(uint32_t aType, uint32_t aDelay);
+  nsresult InitCommon(uint32_t aDelay, uint32_t aType);
 
   void ReleaseCallback()
   {
@@ -121,6 +122,28 @@ private:
     nsITimerCallback* MOZ_OWNING_REF i;
     nsIObserver* MOZ_OWNING_REF o;
   } mCallback;
+
+  void LogFiring(CallbackType aCallbackType, CallbackUnion aCallbackUnion);
+
+  // |Name| is a tagged union type representing one of (a) nothing, (b) a
+  // string, or (c) a function. mozilla::Variant doesn't naturally handle the
+  // "nothing" case, so we define a dummy type and value (which is unused and
+  // so the exact value doesn't matter) for it.
+  typedef const int NameNothing;
+  typedef const char* NameString;
+  typedef nsTimerNameCallbackFunc NameFunc;
+  typedef mozilla::Variant<NameNothing, NameString, NameFunc> Name;
+  static const NameNothing Nothing;
+
+  nsresult InitWithFuncCallbackCommon(nsTimerCallbackFunc aFunc,
+                                      void* aClosure,
+                                      uint32_t aDelay,
+                                      uint32_t aType,
+                                      Name aName);
+
+  // This is set by Init. It records the name (if there is one) for the timer,
+  // for use when logging timer firings.
+  Name mName;
 
   // Some callers expect to be able to access the callback while the
   // timer is firing.

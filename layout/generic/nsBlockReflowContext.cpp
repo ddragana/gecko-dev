@@ -41,7 +41,7 @@ static nsIFrame* DescendIntoBlockLevelFrame(nsIFrame* aFrame)
   nsIAtom* type = aFrame->GetType();
   if (type == nsGkAtoms::columnSetFrame) {
     static_cast<nsColumnSetFrame*>(aFrame)->DrainOverflowColumns();
-    nsIFrame* child = aFrame->GetFirstPrincipalChild();
+    nsIFrame* child = aFrame->PrincipalChildList().FirstChild();
     if (child) {
       return DescendIntoBlockLevelFrame(child);
     }
@@ -136,6 +136,10 @@ nsBlockReflowContext::ComputeCollapsedBStartMargin(const nsHTMLReflowState& aRS,
             line->SetHasClearance();
             line->MarkDirty();
             dirtiedLine = true;
+            if (!setBlockIsEmpty && aBlockIsEmpty) {
+              setBlockIsEmpty = true;
+              *aBlockIsEmpty = false;
+            }
             goto done;
           }
           // Here is where we recur. Now that we have determined that a
@@ -164,7 +168,8 @@ nsBlockReflowContext::ComputeCollapsedBStartMargin(const nsHTMLReflowState& aRS,
                                                availSpace);
             // Record that we're being optimistic by assuming the kid
             // has no clearance
-            if (kid->StyleDisplay()->mBreakType != NS_STYLE_CLEAR_NONE) {
+            if (kid->StyleDisplay()->mBreakType != NS_STYLE_CLEAR_NONE ||
+                !nsBlockFrame::BlockCanIntersectFloats(kid)) {
               *aMayNeedRetry = true;
             }
             if (ComputeCollapsedBStartMargin(innerReflowState, aMargin,
@@ -256,6 +261,10 @@ nsBlockReflowContext::ReflowBlock(const LogicalRect&  aSpace,
         aFrameRS.AvailableBSize() -= mBStartMargin.get() + aClearance;
       }
     }
+  } else {
+    // nsBlockFrame::ReflowBlock might call us multiple times with
+    // *different* values of aApplyBStartMargin.
+    mBStartMargin.Zero();
   }
 
   nscoord tI = 0, tB = 0;
@@ -299,8 +308,9 @@ nsBlockReflowContext::ReflowBlock(const LogicalRect&  aSpace,
 
 #ifdef DEBUG
   if (!NS_INLINE_IS_BREAK_BEFORE(aFrameReflowStatus)) {
-    if (CRAZY_SIZE(mMetrics.ISize(mWritingMode)) ||
-        CRAZY_SIZE(mMetrics.BSize(mWritingMode))) {
+    if ((CRAZY_SIZE(mMetrics.ISize(mWritingMode)) ||
+         CRAZY_SIZE(mMetrics.BSize(mWritingMode))) &&
+        !mFrame->GetParent()->IsCrazySizeAssertSuppressed()) {
       printf("nsBlockReflowContext: ");
       nsFrame::ListTag(stdout, mFrame);
       printf(" metrics=%d,%d!\n",

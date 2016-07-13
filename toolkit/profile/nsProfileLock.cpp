@@ -30,11 +30,7 @@
 #include "prenv.h"
 #endif
 
-#ifdef VMS
-#include <rmsdef.h>
-#endif
-
-#if defined(MOZ_B2G) && !defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_WIDGET_GONK) && !defined(MOZ_CRASHREPORTER)
 #include <sys/syscall.h>
 #endif
 
@@ -196,7 +192,7 @@ void nsProfileLock::FatalSignalHandler(int signo
         }
     }
 
-#ifdef MOZ_B2G
+#ifdef MOZ_WIDGET_GONK
     switch (signo) {
         case SIGQUIT:
         case SIGILL:
@@ -302,7 +298,7 @@ static bool IsSymlinkStaleLock(struct in_addr* aAddr, const char* aFileName,
                     // so the process that created this obsolete lock must be gone
                     return true;
                 }
-                    
+
                 char *after = nullptr;
                 pid_t pid = strtol(colon, &after, 0);
                 if (pid != 0 && *after == '\0')
@@ -312,7 +308,7 @@ static bool IsSymlinkStaleLock(struct in_addr* aAddr, const char* aFileName,
                         // Remote lock: give up even if stuck.
                         return false;
                     }
-    
+
                     // kill(pid,0) is a neat trick to check if a
                     // process exists
                     if (kill(pid, 0) == 0 || errno != ESRCH)
@@ -489,7 +485,7 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
     rv = lockFile->Append(LOCKFILE_NAME);
     if (NS_FAILED(rv))
         return rv;
-        
+
 #if defined(XP_MACOSX)
     // First, try locking using fcntl. It is more reliable on
     // a local machine, but may not be supported by an NFS server.
@@ -501,7 +497,7 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
         // assume we tried an NFS that does not support it. Now, try with symlink.
         rv = LockWithSymlink(lockFile, false);
     }
-    
+
     if (NS_SUCCEEDED(rv))
     {
         // Check for the old-style lock used by pre-mozilla 1.3 builds.
@@ -607,7 +603,7 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
                                   nullptr);
     if (mLockFileHandle == INVALID_HANDLE_VALUE) {
         if (aUnlocker) {
-          nsRefPtr<mozilla::ProfileUnlockerWin> unlocker(
+          RefPtr<mozilla::ProfileUnlockerWin> unlocker(
                                      new mozilla::ProfileUnlockerWin(filePath));
           if (NS_SUCCEEDED(unlocker->Init())) {
             nsCOMPtr<nsIProfileUnlocker> unlockerInterface(
@@ -616,27 +612,6 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
           }
         }
         return NS_ERROR_FILE_ACCESS_DENIED;
-    }
-#elif defined(VMS)
-    nsAutoCString filePath;
-    rv = lockFile->GetNativePath(filePath);
-    if (NS_FAILED(rv))
-        return rv;
-
-    lockFile->GetLastModifiedTime(&mReplacedLockTime);
-
-    mLockFileDesc = open_noshr(filePath.get(), O_CREAT, 0666);
-    if (mLockFileDesc == -1)
-    {
-        if ((errno == EVMSERR) && (vaxc$errno == RMS$_FLK))
-        {
-            return NS_ERROR_FILE_ACCESS_DENIED;
-        }
-        else
-        {
-            NS_ERROR("Failed to open lock file.");
-            return NS_ERROR_FAILURE;
-        }
     }
 #endif
 

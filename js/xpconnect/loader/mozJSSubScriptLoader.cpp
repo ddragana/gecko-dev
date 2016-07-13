@@ -239,11 +239,11 @@ EvalScript(JSContext* cx,
     return NS_OK;
 }
 
-class AsyncScriptLoader : public nsIStreamLoaderObserver
+class AsyncScriptLoader : public nsIIncrementalStreamLoaderObserver
 {
 public:
     NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_NSISTREAMLOADEROBSERVER
+    NS_DECL_NSIINCREMENTALSTREAMLOADEROBSERVER
 
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(AsyncScriptLoader)
 
@@ -266,9 +266,9 @@ private:
         mozilla::DropJSObjects(this);
     }
 
-    nsRefPtr<nsIChannel>      mChannel;
+    RefPtr<nsIChannel>      mChannel;
     Heap<JSObject*>           mTargetObj;
-    nsRefPtr<Promise>         mPromise;
+    RefPtr<Promise>         mPromise;
     nsString                  mCharset;
     bool                      mReuseGlobal;
     bool                      mCache;
@@ -277,7 +277,7 @@ private:
 NS_IMPL_CYCLE_COLLECTION_CLASS(AsyncScriptLoader)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AsyncScriptLoader)
-  NS_INTERFACE_MAP_ENTRY(nsIStreamLoaderObserver)
+  NS_INTERFACE_MAP_ENTRY(nsIIncrementalStreamLoaderObserver)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AsyncScriptLoader)
@@ -321,12 +321,22 @@ class MOZ_STACK_CLASS AutoRejectPromise
 
   private:
     JSContext*                mCx;
-    nsRefPtr<Promise>         mPromise;
+    RefPtr<Promise>         mPromise;
     nsCOMPtr<nsIGlobalObject> mGlobalObject;
 };
 
 NS_IMETHODIMP
-AsyncScriptLoader::OnStreamComplete(nsIStreamLoader* aLoader,
+AsyncScriptLoader::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
+                                     nsISupports* aContext,
+                                     uint32_t aDataLength,
+                                     const uint8_t* aData,
+                                     uint32_t *aConsumedData)
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+AsyncScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                     nsISupports* aContext,
                                     nsresult aStatus,
                                     uint32_t aLength,
@@ -395,7 +405,7 @@ mozJSSubScriptLoader::ReadScriptAsync(nsIURI* uri, JSObject* targetObjArg,
       return NS_ERROR_UNEXPECTED;
     }
 
-    nsRefPtr<Promise> promise = Promise::Create(globalObject, result);
+    RefPtr<Promise> promise = Promise::Create(globalObject, result);
     if (result.Failed()) {
       promise = nullptr;
     }
@@ -410,7 +420,7 @@ mozJSSubScriptLoader::ReadScriptAsync(nsIURI* uri, JSObject* targetObjArg,
     rv = NS_NewChannel(getter_AddRefs(channel),
                        uri,
                        nsContentUtils::GetSystemPrincipal(),
-                       nsILoadInfo::SEC_NORMAL,
+                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                        nsIContentPolicy::TYPE_OTHER,
                        nullptr,  // aLoadGroup
                        nullptr,  // aCallbacks
@@ -423,7 +433,7 @@ mozJSSubScriptLoader::ReadScriptAsync(nsIURI* uri, JSObject* targetObjArg,
 
     channel->SetContentType(NS_LITERAL_CSTRING("application/javascript"));
 
-    nsRefPtr<AsyncScriptLoader> loadObserver =
+    RefPtr<AsyncScriptLoader> loadObserver =
         new AsyncScriptLoader(channel,
                               reuseGlobal,
                               target_obj,
@@ -431,12 +441,12 @@ mozJSSubScriptLoader::ReadScriptAsync(nsIURI* uri, JSObject* targetObjArg,
                               cache,
                               promise);
 
-    nsCOMPtr<nsIStreamLoader> loader;
-    rv = NS_NewStreamLoader(getter_AddRefs(loader), loadObserver);
+    nsCOMPtr<nsIIncrementalStreamLoader> loader;
+    rv = NS_NewIncrementalStreamLoader(getter_AddRefs(loader), loadObserver);
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIStreamListener> listener = loader.get();
-    return channel->AsyncOpen(listener, nullptr);
+    return channel->AsyncOpen2(listener);
 }
 
 nsresult
@@ -459,7 +469,7 @@ mozJSSubScriptLoader::ReadScript(nsIURI* uri, JSContext* cx, JSObject* targetObj
     rv = NS_NewChannel(getter_AddRefs(chan),
                        uri,
                        nsContentUtils::GetSystemPrincipal(),
-                       nsILoadInfo::SEC_NORMAL,
+                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                        nsIContentPolicy::TYPE_OTHER,
                        nullptr,  // aLoadGroup
                        nullptr,  // aCallbacks
@@ -468,7 +478,7 @@ mozJSSubScriptLoader::ReadScript(nsIURI* uri, JSContext* cx, JSObject* targetObj
 
     if (NS_SUCCEEDED(rv)) {
         chan->SetContentType(NS_LITERAL_CSTRING("application/javascript"));
-        rv = chan->Open(getter_AddRefs(instream));
+        rv = chan->Open2(getter_AddRefs(instream));
     }
 
     if (NS_FAILED(rv)) {
@@ -581,8 +591,6 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString& url,
     if (targetObj != result_obj)
         principal = GetObjectPrincipal(targetObj);
 
-    JSAutoCompartment ac(cx, targetObj);
-
     /* load up the url.  From here on, failures are reflected as ``custom''
      * js exceptions */
     nsCOMPtr<nsIURI> uri;
@@ -595,6 +603,8 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString& url,
         // No scripted frame means we don't know who's calling, bail.
         return NS_ERROR_FAILURE;
     }
+
+    JSAutoCompartment ac(cx, targetObj);
 
     // Suppress caching if we're compiling as content.
     StartupCache* cache = (principal == mSystemPrincipal)
@@ -646,8 +656,13 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString& url,
 
     RootedFunction function(cx);
     RootedScript script(cx);
-    if (cache && !options.ignoreCache)
+    if (cache && !options.ignoreCache) {
         rv = ReadCachedScript(cache, cachePath, cx, mSystemPrincipal, &script);
+        if (NS_FAILED(rv)) {
+            // ReadCachedScript may have set a pending exception.
+            JS_ClearPendingException(cx);
+        }
+    }
 
     // If we are doing an async load, trigger it and bail out.
     if (!script && options.async) {
@@ -673,11 +688,11 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString& url,
   * Let us compile scripts from a URI off the main thread.
   */
 
-class ScriptPrecompiler : public nsIStreamLoaderObserver
+class ScriptPrecompiler : public nsIIncrementalStreamLoaderObserver
 {
 public:
     NS_DECL_ISUPPORTS
-    NS_DECL_NSISTREAMLOADEROBSERVER
+    NS_DECL_NSIINCREMENTALSTREAMLOADEROBSERVER
 
     ScriptPrecompiler(nsIObserver* aObserver,
                       nsIPrincipal* aPrincipal,
@@ -702,16 +717,16 @@ private:
       }
     }
 
-    nsRefPtr<nsIObserver> mObserver;
-    nsRefPtr<nsIPrincipal> mPrincipal;
-    nsRefPtr<nsIChannel> mChannel;
+    RefPtr<nsIObserver> mObserver;
+    RefPtr<nsIPrincipal> mPrincipal;
+    RefPtr<nsIChannel> mChannel;
     char16_t* mScriptBuf;
     size_t mScriptLength;
 };
 
-NS_IMPL_ISUPPORTS(ScriptPrecompiler, nsIStreamLoaderObserver);
+NS_IMPL_ISUPPORTS(ScriptPrecompiler, nsIIncrementalStreamLoaderObserver);
 
-class NotifyPrecompilationCompleteRunnable : public nsRunnable
+class NotifyPrecompilationCompleteRunnable : public Runnable
 {
 public:
     NS_DECL_NSIRUNNABLE
@@ -727,7 +742,7 @@ public:
     }
 
 protected:
-    nsRefPtr<ScriptPrecompiler> mPrecompiler;
+    RefPtr<ScriptPrecompiler> mPrecompiler;
     void* mToken;
 };
 
@@ -770,7 +785,17 @@ NotifyPrecompilationCompleteRunnable::Run(void)
 }
 
 NS_IMETHODIMP
-ScriptPrecompiler::OnStreamComplete(nsIStreamLoader* aLoader,
+ScriptPrecompiler::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
+                                     nsISupports* aContext,
+                                     uint32_t aDataLength,
+                                     const uint8_t* aData,
+                                     uint32_t *aConsumedData)
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ScriptPrecompiler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                     nsISupports* aContext,
                                     nsresult aStatus,
                                     uint32_t aLength,
@@ -820,7 +845,7 @@ ScriptPrecompiler::OnStreamComplete(nsIStreamLoader* aLoader,
         return NS_OK;
     }
 
-    nsRefPtr<NotifyPrecompilationCompleteRunnable> runnable =
+    RefPtr<NotifyPrecompilationCompleteRunnable> runnable =
         new NotifyPrecompilationCompleteRunnable(this);
 
     if (!JS::CompileOffThread(cx, options,
@@ -831,7 +856,7 @@ ScriptPrecompiler::OnStreamComplete(nsIStreamLoader* aLoader,
         return NS_OK;
     }
 
-    unused << runnable.forget();
+    Unused << runnable.forget();
     notifier.Disarm();
 
     return NS_OK;
@@ -841,7 +866,7 @@ ScriptPrecompiler::OnStreamComplete(nsIStreamLoader* aLoader,
 void
 ScriptPrecompiler::OffThreadCallback(void* aToken, void* aData)
 {
-    nsRefPtr<NotifyPrecompilationCompleteRunnable> runnable =
+    RefPtr<NotifyPrecompilationCompleteRunnable> runnable =
         dont_AddRef(static_cast<NotifyPrecompilationCompleteRunnable*>(aData));
     runnable->SetToken(aToken);
 
@@ -868,20 +893,20 @@ mozJSSubScriptLoader::PrecompileScript(nsIURI* aURI,
     nsresult rv = NS_NewChannel(getter_AddRefs(channel),
                                 aURI,
                                 nsContentUtils::GetSystemPrincipal(),
-                                nsILoadInfo::SEC_NORMAL,
+                                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                                 nsIContentPolicy::TYPE_OTHER);
 
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsRefPtr<ScriptPrecompiler> loadObserver =
+    RefPtr<ScriptPrecompiler> loadObserver =
         new ScriptPrecompiler(aObserver, aPrincipal, channel);
 
-    nsCOMPtr<nsIStreamLoader> loader;
-    rv = NS_NewStreamLoader(getter_AddRefs(loader), loadObserver);
+    nsCOMPtr<nsIIncrementalStreamLoader> loader;
+    rv = NS_NewIncrementalStreamLoader(getter_AddRefs(loader), loadObserver);
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIStreamListener> listener = loader.get();
-    rv = channel->AsyncOpen(listener, nullptr);
+    rv = channel->AsyncOpen2(listener);
     NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;

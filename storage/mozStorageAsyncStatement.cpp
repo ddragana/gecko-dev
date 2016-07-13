@@ -27,7 +27,7 @@
 
 #include "mozilla/Logging.h"
 
-extern PRLogModuleInfo *gStorageLog;
+extern mozilla::LazyLogModule gStorageLog;
 
 namespace mozilla {
 namespace storage {
@@ -44,7 +44,7 @@ NS_IMPL_CI_INTERFACE_GETTER(AsyncStatement,
 class AsyncStatementClassInfo : public nsIClassInfo
 {
 public:
-  MOZ_CONSTEXPR AsyncStatementClassInfo() {}
+  constexpr AsyncStatementClassInfo() {}
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -182,7 +182,7 @@ AsyncStatement::getParams()
 
   // If there isn't already any rows added, we'll have to add one to use.
   if (mParamsArray->length() == 0) {
-    nsRefPtr<AsyncBindingParams> params(new AsyncBindingParams(mParamsArray));
+    RefPtr<AsyncBindingParams> params(new AsyncBindingParams(mParamsArray));
     NS_ENSURE_TRUE(params, nullptr);
 
     rv = mParamsArray->AddParams(params);
@@ -220,10 +220,8 @@ AsyncStatement::~AsyncStatement()
   if (!onCallingThread) {
     // NS_ProxyRelase only magic forgets for us if mDBConnection is an
     // nsCOMPtr.  Which it is not; it's an nsRefPtr.
-    Connection *forgottenConn = nullptr;
-    mDBConnection.swap(forgottenConn);
-    (void)::NS_ProxyRelease(forgottenConn->threadOpenedOn,
-                            static_cast<mozIStorageConnection *>(forgottenConn));
+    nsCOMPtr<nsIThread> targetThread(mDBConnection->threadOpenedOn);
+    NS_ProxyRelease(targetThread, mDBConnection.forget());
   }
 }
 

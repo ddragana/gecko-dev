@@ -10,9 +10,9 @@
 thisTestLeaksUncaughtRejectionsAndShouldBeFixed("TypeError: Assert is null");
 
 
-let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
+var SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
 
-let tabsToRemove = [];
+var tabsToRemove = [];
 
 
 function removeAllProviders(callback) {
@@ -67,7 +67,7 @@ function sendActivationEvent(tab, callback, nullManifest) {
 }
 
 function activateProvider(domain, callback, nullManifest) {
-  let activationURL = domain+"/browser/browser/base/content/test/social/social_activate.html"
+  let activationURL = domain+"/browser/browser/base/content/test/social/social_activate_basic.html"
   addTab(activationURL, function(tab) {
     sendActivationEvent(tab, callback, nullManifest);
   });
@@ -84,8 +84,8 @@ function waitForProviderLoad(cb) {
     waitForCondition(function() {
       let sbrowser = document.getElementById("social-sidebar-browser");
       let provider = SocialSidebar.provider;
-      let postActivation = provider && gBrowser.contentDocument &&
-                            gBrowser.contentDocument.location.href == provider.origin + "/browser/browser/base/content/test/social/social_postActivation.html";
+      let postActivation = provider && gBrowser.currentURI &&
+                            gBrowser.currentURI.spec == provider.origin + "/browser/browser/base/content/test/social/social_postActivation.html";
 
       return postActivation && sbrowser.docShellIsActive;
     }, function() {
@@ -163,8 +163,8 @@ function activateOneProvider(manifest, finishActivation, aCallback) {
   });
 }
 
-let gTestDomains = ["https://example.com", "https://test1.example.com", "https://test2.example.com"];
-let gProviders = [
+var gTestDomains = ["https://example.com", "https://test1.example.com", "https://test2.example.com"];
+var gProviders = [
   {
     name: "provider 1",
     origin: "https://example.com",
@@ -263,7 +263,7 @@ var tests = {
         info("first activation completed");
         is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_postActivation.html", "postActivationURL loaded");
         gBrowser.removeTab(gBrowser.selectedTab);
-        is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_activate.html", "activation page selected");
+        is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_activate_basic.html", "activation page selected");
         gBrowser.removeTab(gBrowser.selectedTab);
         tabsToRemove.pop();
         // uninstall the provider

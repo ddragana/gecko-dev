@@ -10,7 +10,6 @@
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIDOMHTMLMapElement.h"
-#include "nsAutoPtr.h"
 #include "nsGkAtoms.h"
 
 class nsContentList;
@@ -47,7 +46,7 @@ public:
 protected:
   ~HTMLMapElement() {}
 
-  nsRefPtr<nsContentList> mAreas;
+  RefPtr<nsContentList> mAreas;
 };
 
 } // namespace dom

@@ -1,6 +1,6 @@
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 
-let shutdownOrder = [];
+var shutdownOrder = [];
 
 function mockAddonProvider(name) {
   let mockProvider = {
@@ -15,19 +15,22 @@ function mockAddonProvider(name) {
       shutdownOrder.push(this.name);
       if (this.shutdownCallback)
         return this.shutdownCallback();
+      return undefined;
     },
     getAddonByID(id, callback) {
       if (this.hasShutdown) {
-        unsafeAccess = true;
+        this.unsafeAccess = true;
       }
       callback(null);
     },
 
-    get name() name,
+    get name() {
+      return name;
+    },
   };
 
   return mockProvider;
-};
+}
 
 function run_test() {
   run_next_test();

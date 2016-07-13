@@ -16,6 +16,8 @@
 namespace mozilla {
 namespace dom {
 
+class HTMLFormSubmission;
+
 class HTMLObjectElement final : public nsGenericHTMLFormElement
                               , public nsObjectLoadingContent
                               , public nsIDOMHTMLObjectElement
@@ -28,6 +30,7 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLObjectElement, object)
   virtual int32_t TabIndexDefault() override;
 
 #ifdef XP_MACOSX
@@ -69,7 +72,7 @@ public:
   }
 
   NS_IMETHOD Reset() override;
-  NS_IMETHOD SubmitNamesValues(nsFormSubmission *aFormSubmission) override;
+  NS_IMETHOD SubmitNamesValues(HTMLFormSubmission *aFormSubmission) override;
 
   virtual bool IsDisabled() const override { return false; }
 
@@ -153,8 +156,9 @@ public:
     SetHTMLAttr(nsGkAtoms::height, aValue, aRv);
   }
   using nsObjectLoadingContent::GetContentDocument;
-  nsIDOMWindow* GetContentWindow();
+  nsPIDOMWindowOuter* GetContentWindow();
   using nsIConstraintValidation::CheckValidity;
+  using nsIConstraintValidation::ReportValidity;
   using nsIConstraintValidation::GetValidationMessage;
   void GetAlign(DOMString& aValue)
   {
@@ -172,7 +176,7 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::archive, aValue, aRv);
   }
-  // XPCOM GetCode is ok; note that it's a URI attribute with a weird base URI
+  // XPCOM GetCode is ok
   void SetCode(const nsAString& aValue, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::code, aValue, aRv);
@@ -191,7 +195,7 @@ public:
   }
   void SetHspace(uint32_t aValue, ErrorResult& aRv)
   {
-    SetUnsignedIntAttr(nsGkAtoms::hspace, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::hspace, aValue, 0, aRv);
   }
   void GetStandby(DOMString& aValue)
   {
@@ -207,7 +211,7 @@ public:
   }
   void SetVspace(uint32_t aValue, ErrorResult& aRv)
   {
-    SetUnsignedIntAttr(nsGkAtoms::vspace, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::vspace, aValue, 0, aRv);
   }
   // XPCOM GetCodebase is ok; note that it's a URI attribute
   void SetCodeBase(const nsAString& aValue, ErrorResult& aRv)
@@ -251,9 +255,6 @@ private:
   {
     return nsIContentPolicy::TYPE_INTERNAL_OBJECT;
   }
-
-  virtual void GetItemValueText(DOMString& text) override;
-  virtual void SetItemValueText(const nsAString& text) override;
 
   virtual ~HTMLObjectElement();
 

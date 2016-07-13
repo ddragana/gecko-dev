@@ -24,17 +24,18 @@ public:
   NS_DECL_NSIQUERYCONTENTEVENTRESULT
 
   void SetEventResult(nsIWidget* aWidget,
-                      const mozilla::WidgetQueryContentEvent &aEvent);
+                      mozilla::WidgetQueryContentEvent& aEvent);
 
 protected:
   ~nsQueryContentEventResult();
 
-  uint32_t mEventID;
+  mozilla::EventMessage mEventMessage;
 
   uint32_t mOffset;
   uint32_t mTentativeCaretOffset;
   nsString mString;
   mozilla::LayoutDeviceIntRect mRect;
+  nsTArray<mozilla::LayoutDeviceIntRect> mRectArray;
 
   bool mSucceeded;
   bool mReversed;

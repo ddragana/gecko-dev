@@ -14,6 +14,8 @@ It contains some basic information shared between different ping types, the :doc
 Submission
 ==========
 
+*Note:* The server-side behaviour is documented in the `HTTP Edge Server specification <https://wiki.mozilla.org/CloudServices/DataPipeline/HTTPEdgeServerSpecification>`_.
+
 Pings are submitted via a common API on ``TelemetryController``.
 If a ping fails to successfully submit to the server immediately (e.g. because
 of missing internet connection), Telemetry will store it on disk and retry to
@@ -46,7 +48,9 @@ Ping types
 * :doc:`uitour-ping` - a ping submitted via the UITour API
 * ``activation`` - *planned* - sent right after installation or profile creation
 * ``upgrade`` - *planned* - sent right after an upgrade
+* :doc:`heartbeat-ping` - contains information on Heartbeat surveys
 * :doc:`deletion <deletion-ping>` - sent when FHR upload is disabled, requesting deletion of the data associated with this user
+* :doc:`sync <sync-ping>` - sent after a sync is completed or fails, contains information on sync errors and performance.
 
 Archiving
 =========

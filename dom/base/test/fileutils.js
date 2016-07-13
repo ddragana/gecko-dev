@@ -49,7 +49,7 @@ function testFile(file, contents, test) {
 
   // Send file to server using plain XMLHttpRequest
   var xhr = new XMLHttpRequest;
-  xhr.open("POST", "file_XHRSendData.sjs");
+  xhr.open("POST", "../../../dom/xhr/tests/file_XHRSendData.sjs");
   xhr.onload = function (event) {
     is(event.target.getResponseHeader("Result-Content-Type"),
        file.type ? file.type : null,
@@ -125,23 +125,6 @@ function testHasRun() {
  if (testRanCounter == expectedTestCount) {
     SimpleTest.finish();
   }
-}
-
-function createFileWithData(fileData) {
-  var dirSvc = SpecialPowers.Cc["@mozilla.org/file/directory_service;1"].getService(SpecialPowers.Ci.nsIProperties);
-  var testFile = dirSvc.get("ProfD", SpecialPowers.Ci.nsIFile);
-  testFile.append("fileAPItestfile2-" + fileNum);
-  fileNum++;
-  var outStream = SpecialPowers.Cc["@mozilla.org/network/file-output-stream;1"].createInstance(SpecialPowers.Ci.nsIFileOutputStream);
-  outStream.init(testFile, 0x02 | 0x08 | 0x20, // write, create, truncate
-                 0666, 0);
-  outStream.write(fileData, fileData.length);
-  outStream.close();
-
-  var fileList = document.getElementById('fileList');
-  SpecialPowers.wrap(fileList).value = testFile.path;
-
-  return fileList.files[0];
 }
 
 function gc() {

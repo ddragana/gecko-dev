@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -18,6 +20,8 @@
 
 #include <algorithm>
 #include "prenv.h"
+
+#include "mozilla/WindowsVersion.h"
 
 namespace {
 
@@ -82,7 +86,9 @@ bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle) {
   return true;
 }
 
-bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
+bool OpenPrivilegedProcessHandle(ProcessId pid,
+                                 ProcessHandle* handle,
+                                 int64_t* error) {
   ProcessHandle result = OpenProcess(PROCESS_DUP_HANDLE |
                                          PROCESS_TERMINATE |
                                          PROCESS_QUERY_INFORMATION |
@@ -91,6 +97,9 @@ bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
                                      FALSE, pid);
 
   if (result == NULL) {
+    if (error) {
+      *error = GetLastError();
+    }
     return false;
   }
 
@@ -294,7 +303,7 @@ bool LaunchApp(const std::wstring& cmdline,
 
   LPPROC_THREAD_ATTRIBUTE_LIST lpAttributeList = NULL;
   // Don't even bother trying pre-Vista...
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+  if (mozilla::IsVistaOrLater()) {
     // setup our handle array first - if we end up with no handles that can
     // be inherited we can avoid trying to do the ThreadAttributeList dance...
     HANDLE handlesToInherit[2];

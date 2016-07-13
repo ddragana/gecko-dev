@@ -6,12 +6,14 @@
 #ifndef mozilla_dom_XULDocument_h
 #define mozilla_dom_XULDocument_h
 
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsXULPrototypeDocument.h"
 #include "nsXULPrototypeCache.h"
 #include "nsTArray.h"
 
 #include "mozilla/dom/XMLDocument.h"
+#include "mozilla/StyleSheetHandle.h"
 #include "nsForwardReference.h"
 #include "nsIContent.h"
 #include "nsIDOMXULCommandDispatcher.h"
@@ -21,6 +23,7 @@
 #include "nsIXULDocument.h"
 #include "nsScriptLoader.h"
 #include "nsIStreamListener.h"
+#include "nsIStreamLoader.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsIXULStore.h"
 
@@ -42,8 +45,6 @@ class nsIObjectOutputStream;
 #endif
 #include "nsURIHashKey.h"
 #include "nsInterfaceHashtable.h"
-
-struct PRLogModuleInfo;
 
 class nsRefMapEntry : public nsStringHashKey
 {
@@ -162,7 +163,7 @@ public:
     NS_DECL_NSIDOMXULDOCUMENT
 
     // nsICSSLoaderObserver
-    NS_IMETHOD StyleSheetLoaded(CSSStyleSheet* aSheet,
+    NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheetHandle aSheet,
                                 bool aWasAlternate,
                                 nsresult aStatus) override;
 
@@ -294,7 +295,7 @@ protected:
     static nsIRDFResource* kNC_attribute;
     static nsIRDFResource* kNC_value;
 
-    static PRLogModuleInfo* gXULLog;
+    static LazyLogModule gXULLog;
 
     nsresult
     Persist(nsIContent* aElement, int32_t aNameSpaceID, nsIAtom* aAttribute);
@@ -343,7 +344,7 @@ protected:
      * An array of style sheets, that will be added (preserving order) to the
      * document after all of them are loaded (in DoneWalking).
      */
-    nsTArray<nsRefPtr<CSSStyleSheet>> mOverlaySheets;
+    nsTArray<StyleSheetHandle::RefPtr> mOverlaySheets;
 
     nsCOMPtr<nsIDOMXULCommandDispatcher>     mCommandDispatcher; // [OWNER] of the focus tracker
 
@@ -517,7 +518,7 @@ protected:
     {
     protected:
         XULDocument* mDocument;              // [WEAK]
-        nsRefPtr<Element> mObservesElement; // [OWNER]
+        RefPtr<Element> mObservesElement; // [OWNER]
         bool mResolved;
 
     public:
@@ -610,19 +611,19 @@ protected:
      * The current prototype that we are walking to construct the
      * content model.
      */
-    nsRefPtr<nsXULPrototypeDocument> mCurrentPrototype;
+    RefPtr<nsXULPrototypeDocument> mCurrentPrototype;
 
     /**
      * The master document (outermost, .xul) prototype, from which
      * all subdocuments get their security principals.
      */
-    nsRefPtr<nsXULPrototypeDocument> mMasterPrototype;
+    RefPtr<nsXULPrototypeDocument> mMasterPrototype;
 
     /**
      * Owning references to all of the prototype documents that were
      * used to construct this document.
      */
-    nsTArray< nsRefPtr<nsXULPrototypeDocument> > mPrototypes;
+    nsTArray< RefPtr<nsXULPrototypeDocument> > mPrototypes;
 
     /**
      * Prepare to walk the current prototype.
@@ -689,7 +690,7 @@ protected:
 
     class CachedChromeStreamListener : public nsIStreamListener {
     protected:
-        nsRefPtr<XULDocument> mDocument;
+        RefPtr<XULDocument> mDocument;
         bool mProtoLoaded;
 
         virtual ~CachedChromeStreamListener();
@@ -708,8 +709,8 @@ protected:
 
     class ParserObserver : public nsIRequestObserver {
     protected:
-        nsRefPtr<XULDocument> mDocument;
-        nsRefPtr<nsXULPrototypeDocument> mPrototype;
+        RefPtr<XULDocument> mDocument;
+        RefPtr<nsXULPrototypeDocument> mPrototype;
         virtual ~ParserObserver();
 
     public:

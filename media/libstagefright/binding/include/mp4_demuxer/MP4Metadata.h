@@ -5,23 +5,18 @@
 #ifndef MP4METADATA_H_
 #define MP4METADATA_H_
 
-#include "mozilla/Monitor.h"
 #include "mozilla/UniquePtr.h"
-#include "mp4_demuxer/Index.h"
 #include "mp4_demuxer/DecoderData.h"
-#include "nsAutoPtr.h"
-#include "nsTArray.h"
+#include "mp4_demuxer/Index.h"
+#include "MediaData.h"
 #include "MediaInfo.h"
-#include "MediaResource.h"
-
-namespace mozilla { class MediaByteRange; }
-
-namespace stagefright { class MetaData; }
+#include "Stream.h"
 
 namespace mp4_demuxer
 {
 
-struct StageFrightPrivate;
+class MP4MetadataStagefright;
+class MP4MetadataRust;
 
 class MP4Metadata
 {
@@ -30,25 +25,24 @@ public:
   ~MP4Metadata();
 
   static bool HasCompleteMetadata(Stream* aSource);
-  static mozilla::MediaByteRange MetadataRange(Stream* aSource);
+  static already_AddRefed<mozilla::MediaByteBuffer> Metadata(Stream* aSource);
   uint32_t GetNumberTracks(mozilla::TrackInfo::TrackType aType) const;
   mozilla::UniquePtr<mozilla::TrackInfo> GetTrackInfo(mozilla::TrackInfo::TrackType aType,
                                                       size_t aTrackNumber) const;
   bool CanSeek() const;
 
-  const CryptoFile& Crypto() const
-  {
-    return mCrypto;
-  }
+  const CryptoFile& Crypto() const;
 
   bool ReadTrackIndex(FallibleTArray<Index::Indice>& aDest, mozilla::TrackID aTrackID);
 
 private:
-  int32_t GetTrackNumber(mozilla::TrackID aTrackID);
-  void UpdateCrypto(const stagefright::MetaData* aMetaData);
-  nsAutoPtr<StageFrightPrivate> mPrivate;
-  CryptoFile mCrypto;
-  nsRefPtr<Stream> mSource;
+  UniquePtr<MP4MetadataStagefright> mStagefright;
+#ifdef MOZ_RUST_MP4PARSE
+  UniquePtr<MP4MetadataRust> mRust;
+  mutable bool mPreferRust;
+  mutable bool mReportedTelemetry;
+  bool ShouldPreferRust() const;
+#endif
 };
 
 } // namespace mp4_demuxer

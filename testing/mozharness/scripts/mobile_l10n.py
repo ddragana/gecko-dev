@@ -15,6 +15,8 @@ import os
 import re
 import subprocess
 import sys
+import time
+import shlex
 
 try:
     import simplejson as json
@@ -37,12 +39,15 @@ from mozharness.base.vcs.vcsbase import MercurialScript
 from mozharness.mozilla.l10n.locales import LocalesMixin
 from mozharness.mozilla.mock import MockMixin
 from mozharness.mozilla.updates.balrog import BalrogMixin
+from mozharness.base.python import VirtualenvMixin
+from mozharness.mozilla.taskcluster_helper import Taskcluster
 
 
 # MobileSingleLocale {{{1
 class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                          MobileSigningMixin, TransferMixin, TooltoolMixin,
-                         BuildbotMixin, PurgeMixin, MercurialScript, BalrogMixin):
+                         BuildbotMixin, PurgeMixin, MercurialScript, BalrogMixin,
+                         VirtualenvMixin):
     config_options = [[
         ['--locale', ],
         {"action": "extend",
@@ -104,21 +109,35 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
     ]]
 
     def __init__(self, require_config_file=True):
-        LocalesMixin.__init__(self)
-        MercurialScript.__init__(
-            self,
-            config_options=self.config_options,
-            all_actions=[
+        buildscript_kwargs = {
+            'all_actions': [
                 "clobber",
                 "pull",
                 "list-locales",
                 "setup",
                 "repack",
                 "upload-repacks",
+                "create-virtualenv",
+                "taskcluster-upload",
                 "submit-to-balrog",
                 "summary",
             ],
-            require_config_file=require_config_file
+            'config': {
+                'taskcluster_credentials_file': 'oauth.txt',
+                'virtualenv_modules': [
+                    'requests==2.8.1',
+                    'PyHawk-with-a-single-extra-commit==0.1.5',
+                    'taskcluster==0.0.26',
+                ],
+                'virtualenv_path': 'venv',
+            },
+        }
+        LocalesMixin.__init__(self)
+        MercurialScript.__init__(
+            self,
+            config_options=self.config_options,
+            require_config_file=require_config_file,
+            **buildscript_kwargs
         )
         self.base_package_name = None
         self.buildid = None
@@ -148,21 +167,37 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
             rc = self.query_release_config()
             repack_env['EN_US_BINARY_URL'] = c['base_en_us_binary_url'] % replace_dict
         if 'MOZ_SIGNING_SERVERS' in os.environ:
-            repack_env['MOZ_SIGN_CMD'] = subprocess.list2cmdline(self.query_moz_sign_cmd(formats='jar'))
+            repack_env['MOZ_SIGN_CMD'] = subprocess.list2cmdline(self.query_moz_sign_cmd(formats=['jar']))
         self.repack_env = repack_env
         return self.repack_env
+
+    def query_l10n_env(self):
+        return self.query_env()
 
     def query_upload_env(self):
         if self.upload_env:
             return self.upload_env
         c = self.config
-        buildid = self.query_buildid()
-        version = self.query_version()
+        replace_dict = {
+            'buildid': self.query_buildid(),
+            'version': self.query_version(),
+        }
+        replace_dict.update(c)
+
+        # Android l10n builds use a non-standard location for l10n files.  Other
+        # builds go to 'mozilla-central-l10n', while android builds add part of
+        # the platform name as well, like 'mozilla-central-android-api-15-l10n'.
+        # So we override the branch with something that contains the platform
+        # name.
+        replace_dict['branch'] = c['upload_branch']
+        replace_dict['post_upload_extra'] = ' '.join(c.get('post_upload_extra', []))
+
         upload_env = self.query_env(partial_env=c.get("upload_env"),
-                                    replace_dict={'buildid': buildid,
-                                                  'version': version})
+                                    replace_dict=replace_dict)
         if 'MOZ_SIGNING_SERVERS' in os.environ:
             upload_env['MOZ_SIGN_CMD'] = subprocess.list2cmdline(self.query_moz_sign_cmd())
+        if self.query_is_release():
+            upload_env['MOZ_PKG_VERSION'] = '%(version)s' % replace_dict
         self.upload_env = upload_env
         return self.upload_env
 
@@ -205,7 +240,7 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
         """
         if self.revision:
             return self.revision
-        r = re.compile(r"gecko_revision ([0-9a-f]{12}\+?)")
+        r = re.compile(r"gecko_revision ([0-9a-f]+\+?)")
         output = self._query_make_ident_output()
         for line in output.splitlines():
             m = r.match(line)
@@ -335,18 +370,23 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                               env=env,
                               error_list=MakefileErrorList):
             self.fatal("Configure failed!")
-        for make_dir in c.get('make_dirs', []):
-            self.run_command_m([make, 'export'],
-                               cwd=os.path.join(dirs['abs_objdir'], make_dir),
-                               env=env,
-                               error_list=MakefileErrorList,
-                               halt_on_failure=True)
-            if buildid:
-                self.run_command_m([make, 'export',
-                                    'MOZ_BUILD_DATE=%s' % str(buildid)],
-                                   cwd=os.path.join(dirs['abs_objdir'], make_dir),
-                                   env=env,
-                                   error_list=MakefileErrorList)
+
+        # Run 'make export' in objdir/config to get nsinstall
+        self.run_command_m([make, 'export'],
+                           cwd=os.path.join(dirs['abs_objdir'], 'config'),
+                           env=env,
+                           error_list=MakefileErrorList,
+                           halt_on_failure=True)
+
+        # Run 'make buildid.h' in objdir/ to get the buildid.h file
+        cmd = [make, 'buildid.h']
+        if buildid:
+            cmd.append('MOZ_BUILD_DATE=%s' % str(buildid))
+        self.run_command_m(cmd,
+                           cwd=dirs['abs_objdir'],
+                           env=env,
+                           error_list=MakefileErrorList,
+                           halt_on_failure=True)
 
     def setup(self):
         c = self.config
@@ -363,7 +403,6 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
         if self.config.get("tooltool_config"):
             self.tooltool_fetch(
                 self.config['tooltool_config']['manifest'],
-                bootstrap_cmd=self.config['tooltool_config']['bootstrap_cmd'],
                 output_dir=self.config['tooltool_config']['output_dir'] % self.query_abs_dirs(),
             )
         self._setup_configure()
@@ -436,6 +475,74 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
         self.summarize_success_count(success_count, total_count,
                                      message="Repacked %d of %d binaries successfully.")
 
+    def taskcluster_upload(self):
+        auth = os.path.join(os.getcwd(), self.config['taskcluster_credentials_file'])
+        credentials = {}
+        execfile(auth, credentials)
+        client_id = credentials.get('taskcluster_clientId')
+        access_token = credentials.get('taskcluster_accessToken')
+        if not client_id or not access_token:
+            self.warning('Skipping S3 file upload: No taskcluster credentials.')
+            return
+
+        self.activate_virtualenv()
+
+        dirs = self.query_abs_dirs()
+        locales = self.query_locales()
+        make = self.query_exe("make")
+        upload_env = self.query_upload_env()
+        cwd = dirs['abs_locales_dir']
+        branch = self.config['branch']
+        revision = self.query_revision()
+        repo = self.query_l10n_repo()
+        pushinfo = self.vcs_query_pushinfo(repo, revision, vcs='hgtool')
+        pushdate = time.strftime('%Y%m%d%H%M%S', time.gmtime(pushinfo.pushdate))
+        routes_json = os.path.join(self.query_abs_dirs()['abs_mozilla_dir'],
+                                   'taskcluster/ci/legacy/routes.json')
+        with open(routes_json) as routes_file:
+            contents = json.load(routes_file)
+            templates = contents['l10n']
+
+        for locale in locales:
+            output = self.get_output_from_command_m(
+                "%s echo-variable-UPLOAD_FILES AB_CD=%s" % (make, locale),
+                cwd=cwd,
+                env=upload_env,
+            )
+            files = shlex.split(output)
+            abs_files = [os.path.abspath(os.path.join(cwd, f)) for f in files]
+
+            routes = []
+            fmt = {
+                'index': self.config.get('taskcluster_index', 'index.garbage.staging'),
+                'project': branch,
+                'head_rev': revision,
+                'pushdate': pushdate,
+                'year': pushdate[0:4],
+                'month': pushdate[4:6],
+                'day': pushdate[6:8],
+                'build_product': self.config['stage_product'],
+                'build_name': self.query_build_name(),
+                'build_type': self.query_build_type(),
+                'locale': locale,
+            }
+            for template in templates:
+                routes.append(template.format(**fmt))
+
+            self.info('Using routes: %s' % routes)
+            tc = Taskcluster(branch,
+                             pushinfo.pushdate, # Use pushdate as the rank
+                             client_id,
+                             access_token,
+                             self.log_obj,
+                             )
+            task = tc.create_task(routes)
+            tc.claim_task(task)
+
+            for upload_file in abs_files:
+                tc.create_artifact(task, upload_file)
+            tc.report_completed(task)
+
     def upload_repacks(self):
         c = self.config
         dirs = self.query_abs_dirs()
@@ -455,7 +562,7 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                 continue
             total_count += 1
             if c.get('base_post_upload_cmd'):
-                upload_env['POST_UPLOAD_CMD'] = c['base_post_upload_cmd'] % {'version': version, 'locale': locale, 'buildnum': str(buildnum)}
+                upload_env['POST_UPLOAD_CMD'] = c['base_post_upload_cmd'] % {'version': version, 'locale': locale, 'buildnum': str(buildnum), 'post_upload_extra': ' '.join(c.get('post_upload_extra', []))}
             output = self.get_output_from_command_m(
                 # Ugly hack to avoid |make upload| stderr from showing up
                 # as get_output_from_command errors

@@ -3,7 +3,8 @@
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MediaKeySystemAccessManager.h"
-#include "mozilla/Preferences.h"
+#include "DecoderDoctorDiagnostics.h"
+#include "MediaPrefs.h"
 #include "mozilla/EMEUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsComponentManagerUtils.h"
@@ -13,6 +14,10 @@
 #ifdef XP_WIN
 #include "mozilla/WindowsVersion.h"
 #endif
+#ifdef XP_MACOSX
+#include "nsCocoaFeatures.h"
+#endif
+#include "nsPrintfCString.h"
 
 namespace mozilla {
 namespace dom {
@@ -44,12 +49,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(MediaKeySystemAccessManager)
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-MediaKeySystemAccessManager::MediaKeySystemAccessManager(nsPIDOMWindow* aWindow)
+MediaKeySystemAccessManager::MediaKeySystemAccessManager(nsPIDOMWindowInner* aWindow)
   : mWindow(aWindow)
   , mAddedObservers(false)
-#ifdef XP_WIN
-  , mTrialCreator(new GMPVideoDecoderTrialCreator())
-#endif
 {
 }
 
@@ -61,55 +63,70 @@ MediaKeySystemAccessManager::~MediaKeySystemAccessManager()
 void
 MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
                                      const nsAString& aKeySystem,
-                                     const Optional<Sequence<MediaKeySystemOptions>>& aOptions)
+                                     const Sequence<MediaKeySystemConfiguration>& aConfigs)
 {
-  if (aKeySystem.IsEmpty() || (aOptions.WasPassed() && aOptions.Value().IsEmpty())) {
+  if (aKeySystem.IsEmpty() || aConfigs.IsEmpty()) {
     aPromise->MaybeReject(NS_ERROR_DOM_INVALID_ACCESS_ERR,
                           NS_LITERAL_CSTRING("Invalid keysystem type or invalid options sequence"));
     return;
   }
-  Sequence<MediaKeySystemOptions> optionsNotPassed;
-  const auto& options = aOptions.WasPassed() ? aOptions.Value() : optionsNotPassed;
-  Request(aPromise, aKeySystem, options, RequestType::Initial);
+  Request(aPromise, aKeySystem, aConfigs, RequestType::Initial);
 }
 
 void
 MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
                                      const nsAString& aKeySystem,
-                                     const Sequence<MediaKeySystemOptions>& aOptions,
+                                     const Sequence<MediaKeySystemConfiguration>& aConfigs,
                                      RequestType aType)
 {
   EME_LOG("MediaKeySystemAccessManager::Request %s", NS_ConvertUTF16toUTF8(aKeySystem).get());
-  if (!Preferences::GetBool("media.eme.enabled", false)) {
-    // EME disabled by user, send notification to chrome so UI can
-    // inform user.
+
+  DecoderDoctorDiagnostics diagnostics;
+
+  // Parse keysystem, split it out into keySystem prefix, and version suffix.
+  nsAutoString keySystem;
+  int32_t minCdmVersion = NO_CDM_VERSION;
+  if (!ParseKeySystem(aKeySystem, keySystem, minCdmVersion)) {
+    // Not to inform user, because nothing to do if the keySystem is not
+    // supported.
+    aPromise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+                          NS_LITERAL_CSTRING("Key system string is invalid,"
+                                             " or key system is unsupported"));
+    diagnostics.StoreMediaKeySystemAccess(mWindow->GetExtantDoc(),
+                                          aKeySystem, false, __func__);
+    return;
+  }
+
+  if (!MediaPrefs::EMEEnabled()) {
+    // EME disabled by user, send notification to chrome so UI can inform user.
     MediaKeySystemAccess::NotifyObservers(mWindow,
                                           aKeySystem,
                                           MediaKeySystemStatus::Api_disabled);
     aPromise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
                           NS_LITERAL_CSTRING("EME has been preffed off"));
-    return;
-  }
-
-  // Parse keysystem, split it out into keySystem prefix, and version suffix.
-  nsAutoString keySystem;
-  int32_t minCdmVersion = NO_CDM_VERSION;
-  if (!ParseKeySystem(aKeySystem,
-                      keySystem,
-                      minCdmVersion)) {
-    // Invalid keySystem string, or unsupported keySystem. Send notification
-    // to chrome to show a failure notice.
-    MediaKeySystemAccess::NotifyObservers(mWindow, aKeySystem, MediaKeySystemStatus::Cdm_not_supported);
-    aPromise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-                          NS_LITERAL_CSTRING("Key system string is invalid, or key system is unsupported"));
+    diagnostics.StoreMediaKeySystemAccess(mWindow->GetExtantDoc(),
+                                          aKeySystem, false, __func__);
     return;
   }
 
   nsAutoCString message;
-  MediaKeySystemStatus status = MediaKeySystemAccess::GetKeySystemStatus(keySystem, minCdmVersion, message);
+  nsAutoCString cdmVersion;
+  MediaKeySystemStatus status =
+    MediaKeySystemAccess::GetKeySystemStatus(keySystem, minCdmVersion, message, cdmVersion);
+
+  nsPrintfCString msg("MediaKeySystemAccess::GetKeySystemStatus(%s, minVer=%d) "
+                      "result=%s version='%s' msg='%s'",
+                      NS_ConvertUTF16toUTF8(keySystem).get(),
+                      minCdmVersion,
+                      MediaKeySystemStatusValues::strings[(size_t)status].value,
+                      cdmVersion.get(),
+                      message.get());
+  LogToBrowserConsole(NS_ConvertUTF8toUTF16(msg));
+
   if ((status == MediaKeySystemStatus::Cdm_not_installed ||
        status == MediaKeySystemStatus::Cdm_insufficient_version) &&
-      keySystem.EqualsLiteral("com.adobe.primetime")) {
+      (keySystem.EqualsLiteral("com.adobe.primetime") ||
+       keySystem.EqualsLiteral("com.widevine.alpha"))) {
     // These are cases which could be resolved by downloading a new(er) CDM.
     // When we send the status to chrome, chrome's GMPProvider will attempt to
     // download or update the CDM. In AwaitInstall() we add listeners to wait
@@ -118,7 +135,7 @@ MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
     // has had a new plugin added. AwaitInstall() sets a timer to fail if the
     // update/download takes too long or fails.
     if (aType == RequestType::Initial &&
-        AwaitInstall(aPromise, aKeySystem, aOptions)) {
+        AwaitInstall(aPromise, aKeySystem, aConfigs)) {
       // Notify chrome that we're going to wait for the CDM to download/update.
       // Note: If we're re-trying, we don't re-send the notificaiton,
       // as chrome is already displaying the "we can't play, updating"
@@ -131,6 +148,8 @@ MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
       aPromise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
                             NS_LITERAL_CSTRING("Gave up while waiting for a CDM update"));
     }
+    diagnostics.StoreMediaKeySystemAccess(mWindow->GetExtantDoc(),
+                                          aKeySystem, false, __func__);
     return;
   }
   if (status != MediaKeySystemStatus::Available) {
@@ -139,43 +158,40 @@ MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
       // chrome, so we can show some UI to explain how the user can rectify
       // the situation.
       MediaKeySystemAccess::NotifyObservers(mWindow, keySystem, status);
-      aPromise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-                            NS_LITERAL_CSTRING("The key system has been disabled by the user"));
+      aPromise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR, message);
       return;
     }
     aPromise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR,
                           NS_LITERAL_CSTRING("GetKeySystemAccess failed"));
+    diagnostics.StoreMediaKeySystemAccess(mWindow->GetExtantDoc(),
+                                          aKeySystem, false, __func__);
     return;
   }
 
-  if (aOptions.IsEmpty() ||
-      MediaKeySystemAccess::IsSupported(keySystem, aOptions)) {
-    nsRefPtr<MediaKeySystemAccess> access(new MediaKeySystemAccess(mWindow, keySystem));
-#ifdef XP_WIN
-    if (IsVistaOrLater()) {
-      // On Windows, ensure we have tried creating a GMPVideoDecoder for this
-      // keySystem, and that we can use it to decode. This ensures that we only
-      // report that we support this keySystem when the CDM us usable (i.e.
-      // all system libraries required are installed).
-      mTrialCreator->MaybeAwaitTrialCreate(keySystem, access, aPromise, mWindow);
-      return;
-    }
-#endif
+  MediaKeySystemConfiguration config;
+  if (MediaKeySystemAccess::GetSupportedConfig(keySystem, aConfigs, config, &diagnostics)) {
+    RefPtr<MediaKeySystemAccess> access(
+      new MediaKeySystemAccess(mWindow, keySystem, NS_ConvertUTF8toUTF16(cdmVersion), config));
     aPromise->MaybeResolve(access);
+    diagnostics.StoreMediaKeySystemAccess(mWindow->GetExtantDoc(),
+                                          aKeySystem, true, __func__);
     return;
   }
-
+  // Not to inform user, because nothing to do if the corresponding keySystem
+  // configuration is not supported.
   aPromise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-                        NS_LITERAL_CSTRING("Key system is not supported"));
+                        NS_LITERAL_CSTRING("Key system configuration is not supported"));
+  diagnostics.StoreMediaKeySystemAccess(mWindow->GetExtantDoc(),
+                                        aKeySystem, false, __func__);
 }
 
 MediaKeySystemAccessManager::PendingRequest::PendingRequest(DetailedPromise* aPromise,
                                                             const nsAString& aKeySystem,
-                                                            const Sequence<MediaKeySystemOptions>& aOptions,
+                                                            const Sequence<MediaKeySystemConfiguration>& aConfigs,
                                                             nsITimer* aTimer)
   : mPromise(aPromise)
   , mKeySystem(aKeySystem)
-  , mOptions(aOptions)
+  , mConfigs(aConfigs)
   , mTimer(aTimer)
 {
   MOZ_COUNT_CTOR(MediaKeySystemAccessManager::PendingRequest);
@@ -184,7 +200,7 @@ MediaKeySystemAccessManager::PendingRequest::PendingRequest(DetailedPromise* aPr
 MediaKeySystemAccessManager::PendingRequest::PendingRequest(const PendingRequest& aOther)
   : mPromise(aOther.mPromise)
   , mKeySystem(aOther.mKeySystem)
-  , mOptions(aOther.mOptions)
+  , mConfigs(aOther.mConfigs)
   , mTimer(aOther.mTimer)
 {
   MOZ_COUNT_CTOR(MediaKeySystemAccessManager::PendingRequest);
@@ -214,7 +230,7 @@ MediaKeySystemAccessManager::PendingRequest::RejectPromise(const nsCString& aRea
 bool
 MediaKeySystemAccessManager::AwaitInstall(DetailedPromise* aPromise,
                                           const nsAString& aKeySystem,
-                                          const Sequence<MediaKeySystemOptions>& aOptions)
+                                          const Sequence<MediaKeySystemConfiguration>& aConfigs)
 {
   EME_LOG("MediaKeySystemAccessManager::AwaitInstall %s", NS_ConvertUTF16toUTF8(aKeySystem).get());
 
@@ -229,7 +245,7 @@ MediaKeySystemAccessManager::AwaitInstall(DetailedPromise* aPromise,
     return false;
   }
 
-  mRequests.AppendElement(PendingRequest(aPromise, aKeySystem, aOptions, timer));
+  mRequests.AppendElement(PendingRequest(aPromise, aKeySystem, aConfigs, timer));
   return true;
 }
 
@@ -237,7 +253,7 @@ void
 MediaKeySystemAccessManager::RetryRequest(PendingRequest& aRequest)
 {
   aRequest.CancelTimer();
-  Request(aRequest.mPromise, aRequest.mKeySystem, aRequest.mOptions, RequestType::Subsequent);
+  Request(aRequest.mPromise, aRequest.mKeySystem, aRequest.mConfigs, RequestType::Subsequent);
 }
 
 nsresult

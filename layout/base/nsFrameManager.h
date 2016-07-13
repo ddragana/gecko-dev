@@ -21,7 +21,6 @@
 
 #include "nsFrameManagerBase.h"
 
-#include "nsAutoPtr.h"
 #include "nsFrameList.h"
 #include "nsIContent.h"
 #include "nsStyleContext.h"
@@ -58,7 +57,7 @@ struct UndisplayedNode {
   }
 
   nsCOMPtr<nsIContent>      mContent;
-  nsRefPtr<nsStyleContext>  mStyle;
+  RefPtr<nsStyleContext>  mStyle;
   UndisplayedNode*          mNext;
 };
 
@@ -82,11 +81,9 @@ class nsFrameManager : public nsFrameManagerBase
   typedef mozilla::layout::FrameChildListID ChildListID;
 
 public:
-  nsFrameManager(nsIPresShell *aPresShell, nsStyleSet* aStyleSet) {
+  explicit nsFrameManager(nsIPresShell* aPresShell) {
     mPresShell = aPresShell;
-    mStyleSet = aStyleSet;
     MOZ_ASSERT(mPresShell, "need a pres shell");
-    MOZ_ASSERT(mStyleSet, "need a style set");
   }
   ~nsFrameManager();
 

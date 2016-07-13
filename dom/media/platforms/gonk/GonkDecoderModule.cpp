@@ -6,7 +6,6 @@
 #include "GonkDecoderModule.h"
 #include "GonkVideoDecoderManager.h"
 #include "GonkAudioDecoderManager.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/DebugOnly.h"
 #include "GonkMediaDataDecoder.h"
 
@@ -19,34 +18,21 @@ GonkDecoderModule::~GonkDecoderModule()
 {
 }
 
-/* static */
-void
-GonkDecoderModule::Init()
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
-}
-
 already_AddRefed<MediaDataDecoder>
-GonkDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
-                                     mozilla::layers::LayersBackend aLayersBackend,
-                                     mozilla::layers::ImageContainer* aImageContainer,
-                                     FlushableTaskQueue* aVideoTaskQueue,
-                                     MediaDataDecoderCallback* aCallback)
+GonkDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 {
-  nsRefPtr<MediaDataDecoder> decoder =
-  new GonkMediaDataDecoder(new GonkVideoDecoderManager(aImageContainer, aConfig),
-                           aVideoTaskQueue, aCallback);
+  RefPtr<MediaDataDecoder> decoder =
+  new GonkMediaDataDecoder(new GonkVideoDecoderManager(aParams.mImageContainer, aParams.VideoConfig()),
+                           aParams.mCallback);
   return decoder.forget();
 }
 
 already_AddRefed<MediaDataDecoder>
-GonkDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
-                                      FlushableTaskQueue* aAudioTaskQueue,
-                                      MediaDataDecoderCallback* aCallback)
+GonkDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
 {
-  nsRefPtr<MediaDataDecoder> decoder =
-  new GonkMediaDataDecoder(new GonkAudioDecoderManager(aConfig),
-                           aAudioTaskQueue, aCallback);
+  RefPtr<MediaDataDecoder> decoder =
+  new GonkMediaDataDecoder(new GonkAudioDecoderManager(aParams.AudioConfig()),
+                           aParams.mCallback);
   return decoder.forget();
 }
 
@@ -61,7 +47,8 @@ GonkDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
 }
 
 bool
-GonkDecoderModule::SupportsMimeType(const nsACString& aMimeType)
+GonkDecoderModule::SupportsMimeType(const nsACString& aMimeType,
+                                    DecoderDoctorDiagnostics* aDiagnostics) const
 {
   return aMimeType.EqualsLiteral("audio/mp4a-latm") ||
     aMimeType.EqualsLiteral("audio/3gpp") ||

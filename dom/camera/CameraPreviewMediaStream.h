@@ -35,20 +35,20 @@ protected:
  * A camera preview requests no delay and no buffering stream,
  * but the SourceMediaStream does not support it.
  */
-class CameraPreviewMediaStream : public MediaStream
+class CameraPreviewMediaStream : public ProcessedMediaStream
 {
   typedef mozilla::layers::Image Image;
 
 public:
-  explicit CameraPreviewMediaStream(DOMMediaStream* aWrapper);
+  CameraPreviewMediaStream();
 
-  virtual CameraPreviewMediaStream* AsCameraPreviewStream() override { return this; };
   virtual void AddAudioOutput(void* aKey) override;
   virtual void SetAudioOutputVolume(void* aKey, float aVolume) override;
   virtual void RemoveAudioOutput(void* aKey) override;
   virtual void AddVideoOutput(VideoFrameContainer* aContainer) override;
   virtual void RemoveVideoOutput(VideoFrameContainer* aContainer) override;
-  virtual void ChangeExplicitBlockerCount(int32_t aDelta) override;
+  virtual void Suspend() override {}
+  virtual void Resume() override {}
   virtual void AddListener(MediaStreamListener* aListener) override;
   virtual void RemoveListener(MediaStreamListener* aListener) override;
   virtual void Destroy() override;
@@ -56,8 +56,10 @@ public:
 
   void Invalidate();
 
+  void ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags) override;
+
   // Call these on any thread.
-  void SetCurrentFrame(const gfxIntSize& aIntrinsicSize, Image* aImage);
+  void SetCurrentFrame(const gfx::IntSize& aIntrinsicSize, Image* aImage);
   void ClearCurrentFrame();
   void RateLimit(bool aLimit);
 
@@ -70,7 +72,7 @@ protected:
   uint32_t mDiscardedFrames;
   bool mRateLimit;
   bool mTrackCreated;
-  nsRefPtr<FakeMediaStreamGraph> mFakeMediaStreamGraph;
+  RefPtr<FakeMediaStreamGraph> mFakeMediaStreamGraph;
 };
 
 } // namespace mozilla

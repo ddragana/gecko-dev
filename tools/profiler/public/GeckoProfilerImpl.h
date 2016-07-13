@@ -22,17 +22,6 @@
 #include "PseudoStack.h"
 #include "ProfilerBacktrace.h"
 
-#ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracer.h"
-#endif
-
-/* QT has a #define for the word "slots" and jsfriendapi.h has a struct with
- * this variable name, causing compilation problems. Alleviate this for now by
- * removing this #define */
-#ifdef MOZ_WIDGET_QT
-#undef slots
-#endif
-
 // Make sure that we can use std::min here without the Windows headers messing with us.
 #ifdef min
 #undef min
@@ -44,9 +33,9 @@ namespace mozilla {
 class TimeStamp;
 } // namespace mozilla
 
-extern mozilla::ThreadLocal<PseudoStack *> tlsPseudoStack;
-extern mozilla::ThreadLocal<GeckoSampler *> tlsTicker;
-extern mozilla::ThreadLocal<void *> tlsStackTop;
+extern MOZ_THREAD_LOCAL(PseudoStack *) tlsPseudoStack;
+extern MOZ_THREAD_LOCAL(GeckoSampler *) tlsTicker;
+extern MOZ_THREAD_LOCAL(void *) tlsStackTop;
 extern bool stack_key_initialized;
 
 #ifndef SAMPLE_FUNCTION_NAME
@@ -62,18 +51,12 @@ extern bool stack_key_initialized;
 static inline
 void profiler_init(void* stackTop)
 {
-#ifdef MOZ_TASK_TRACER
-  mozilla::tasktracer::InitTaskTracer();
-#endif
   mozilla_sampler_init(stackTop);
 }
 
 static inline
 void profiler_shutdown()
 {
-#ifdef MOZ_TASK_TRACER
-  mozilla::tasktracer::ShutdownTaskTracer();
-#endif
   mozilla_sampler_shutdown();
 }
 
@@ -122,6 +105,12 @@ void profiler_free_backtrace(ProfilerBacktrace* aBacktrace)
 }
 
 static inline
+void profiler_get_backtrace_noalloc(char *output, size_t outputSize)
+{
+  return mozilla_sampler_get_backtrace_noalloc(output, outputSize);
+}
+
+static inline
 bool profiler_is_active()
 {
   return mozilla_sampler_is_active();
@@ -164,6 +153,22 @@ void profiler_get_profile_jsobject_async(double aSinceTime = 0,
 {
   mozilla_sampler_get_profile_data_async(aSinceTime, aPromise);
 }
+
+static inline
+void profiler_get_start_params(int* aEntrySize,
+                               double* aInterval,
+                               mozilla::Vector<const char*>* aFilters,
+                               mozilla::Vector<const char*>* aFeatures)
+{
+  mozilla_sampler_get_profiler_start_params(aEntrySize, aInterval, aFilters, aFeatures);
+}
+
+static inline
+void profiler_get_gatherer(nsISupports** aRetVal)
+{
+  mozilla_sampler_get_gatherer(aRetVal);
+}
+
 #endif
 
 static inline
@@ -198,9 +203,9 @@ void profiler_unlock()
 }
 
 static inline
-void profiler_register_thread(const char* name, void* stackTop)
+void profiler_register_thread(const char* name, void* guessStackTop)
 {
-  mozilla_sampler_register_thread(name, stackTop);
+  mozilla_sampler_register_thread(name, guessStackTop);
 }
 
 static inline
@@ -377,7 +382,7 @@ static inline void profiler_tracing(const char* aCategory, const char* aInfo,
 
 namespace mozilla {
 
-class MOZ_STACK_CLASS GeckoProfilerTracingRAII {
+class MOZ_RAII GeckoProfilerTracingRAII {
 public:
   GeckoProfilerTracingRAII(const char* aCategory, const char* aInfo,
                            mozilla::UniquePtr<ProfilerBacktrace> aBacktrace
@@ -399,27 +404,31 @@ protected:
   const char* mInfo;
 };
 
-class MOZ_STACK_CLASS SamplerStackFrameRAII {
+class MOZ_RAII SamplerStackFrameRAII {
 public:
   // we only copy the strings at save time, so to take multiple parameters we'd need to copy them then.
   SamplerStackFrameRAII(const char *aInfo,
-    js::ProfileEntry::Category aCategory, uint32_t line)
+    js::ProfileEntry::Category aCategory, uint32_t line
+    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
   {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     mHandle = mozilla_sampler_call_enter(aInfo, aCategory, this, false, line);
   }
   ~SamplerStackFrameRAII() {
     mozilla_sampler_call_exit(mHandle);
   }
 private:
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   void* mHandle;
 };
 
 static const int SAMPLER_MAX_STRING = 128;
-class MOZ_STACK_CLASS SamplerStackFramePrintfRAII {
+class MOZ_RAII SamplerStackFramePrintfRAII {
 public:
   // we only copy the strings at save time, so to take multiple parameters we'd need to copy them then.
   SamplerStackFramePrintfRAII(const char *aInfo,
     js::ProfileEntry::Category aCategory, uint32_t line, const char *aFormat, ...)
+    : mHandle(nullptr)
   {
     if (profiler_is_active() && !profiler_in_privacy_mode()) {
       va_list args;
@@ -428,13 +437,9 @@ public:
 
       // We have to use seperate printf's because we're using
       // the vargs.
-#if _MSC_VER
-      _vsnprintf(buff, SAMPLER_MAX_STRING, aFormat, args);
-      _snprintf(mDest, SAMPLER_MAX_STRING, "%s %s", aInfo, buff);
-#else
       ::vsnprintf(buff, SAMPLER_MAX_STRING, aFormat, args);
       ::snprintf(mDest, SAMPLER_MAX_STRING, "%s %s", aInfo, buff);
-#endif
+
       mHandle = mozilla_sampler_call_enter(mDest, aCategory, this, true, line);
       va_end(args);
     } else {

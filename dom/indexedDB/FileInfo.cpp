@@ -50,9 +50,9 @@ private:
 };
 
 class CleanupFileRunnable final
-  : public nsRunnable
+  : public Runnable
 {
-  nsRefPtr<FileManager> mFileManager;
+  RefPtr<FileManager> mFileManager;
   int64_t mFileId;
 
 public:
@@ -130,10 +130,12 @@ FileInfo::GetReferences(int32_t* aRefCnt,
 
 void
 FileInfo::UpdateReferences(ThreadSafeAutoRefCnt& aRefCount,
-                           int32_t aDelta)
+                           int32_t aDelta,
+                           CustomCleanupCallback* aCustomCleanupCallback)
 {
   // XXX This can go away once DOM objects no longer hold FileInfo objects...
-  //     Looking at you, IDBMutableFile...
+  //     Looking at you, BlobImplBase...
+  //     BlobImplBase is being addressed in bug 1068975.
   if (IndexedDatabaseManager::IsClosed()) {
     MOZ_ASSERT(&aRefCount == &mRefCnt);
     MOZ_ASSERT(aDelta == 1 || aDelta == -1);
@@ -168,7 +170,14 @@ FileInfo::UpdateReferences(ThreadSafeAutoRefCnt& aRefCount,
   }
 
   if (needsCleanup) {
-    Cleanup();
+    if (aCustomCleanupCallback) {
+      nsresult rv = aCustomCleanupCallback->Cleanup(mFileManager, Id());
+      if (NS_FAILED(rv)) {
+        NS_WARNING("Custom cleanup failed!");
+      }
+    } else {
+      Cleanup();
+    }
   }
 
   delete this;
@@ -204,10 +213,10 @@ FileInfo::Cleanup()
 
   // IndexedDatabaseManager is main-thread only.
   if (!NS_IsMainThread()) {
-    nsRefPtr<CleanupFileRunnable> cleaner =
+    RefPtr<CleanupFileRunnable> cleaner =
       new CleanupFileRunnable(mFileManager, id);
 
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(cleaner)));
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(cleaner));
     return;
   }
 
@@ -226,7 +235,7 @@ CleanupFileRunnable::DoCleanup(FileManager* aFileManager, int64_t aFileId)
     return;
   }
 
-  nsRefPtr<IndexedDatabaseManager> mgr = IndexedDatabaseManager::Get();
+  RefPtr<IndexedDatabaseManager> mgr = IndexedDatabaseManager::Get();
   MOZ_ASSERT(mgr);
 
   if (NS_FAILED(mgr->AsyncDeleteFile(aFileManager, aFileId))) {
@@ -234,7 +243,7 @@ CleanupFileRunnable::DoCleanup(FileManager* aFileManager, int64_t aFileId)
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(CleanupFileRunnable, nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(CleanupFileRunnable, Runnable)
 
 NS_IMETHODIMP
 CleanupFileRunnable::Run()

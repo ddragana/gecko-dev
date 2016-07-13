@@ -8,9 +8,13 @@ ac_add_options --enable-optimize="-O1"
 # ASan specific options on Linux
 ac_add_options --enable-valgrind
 
-ac_add_options --enable-default-toolkit=cairo-gtk2
-
 . $topsrcdir/build/unix/mozconfig.asan
+
+export PKG_CONFIG_LIBDIR=/usr/lib64/pkgconfig:/usr/share/pkgconfig
+. $topsrcdir/build/unix/mozconfig.gtk
+
+# Enable Telemetry
+export MOZ_TELEMETRY_REPORTING=1
 
 # Package js shell.
 export MOZ_PACKAGE_JSSHELL=1

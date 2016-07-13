@@ -52,18 +52,17 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "jsnum.h"
 
-#include "prmjtime.h"
-
-#include "asmjs/AsmJSModule.h"
+#include "asmjs/WasmInstance.h"
 #include "jit/AtomicOperations.h"
+#include "jit/InlinableNatives.h"
 #include "js/Class.h"
 #include "vm/GlobalObject.h"
-#include "vm/SharedTypedArrayObject.h"
+#include "vm/Time.h"
 #include "vm/TypedArrayObject.h"
 
 #include "jsobjinlines.h"
-#include "jit/AtomicOperations-inl.h"
 
 using namespace js;
 
@@ -80,102 +79,93 @@ ReportBadArrayType(JSContext* cx)
 }
 
 static bool
+ReportOutOfRange(JSContext* cx)
+{
+    // Use JSMSG_BAD_INDEX here even if it is generic, since that is
+    // the message used by ToIntegerIndex for its initial range
+    // checking.
+    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
+    return false;
+}
+
+static bool
+ReportCannotWait(JSContext* cx)
+{
+    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_ATOMICS_WAIT_NOT_ALLOWED);
+    return false;
+}
+
+static bool
 GetSharedTypedArray(JSContext* cx, HandleValue v,
-                    MutableHandle<SharedTypedArrayObject*> viewp)
+                    MutableHandle<TypedArrayObject*> viewp)
 {
     if (!v.isObject())
         return ReportBadArrayType(cx);
-    if (!v.toObject().is<SharedTypedArrayObject>())
+    if (!v.toObject().is<TypedArrayObject>())
         return ReportBadArrayType(cx);
-    viewp.set(&v.toObject().as<SharedTypedArrayObject>());
+    viewp.set(&v.toObject().as<TypedArrayObject>());
+    if (!viewp->isSharedMemory())
+        return ReportBadArrayType(cx);
     return true;
 }
 
-// Returns true so long as the conversion succeeds, and then *inRange
-// is set to false if the index is not in range.
 static bool
-GetSharedTypedArrayIndex(JSContext* cx, HandleValue v, Handle<SharedTypedArrayObject*> view,
-                         uint32_t* offset, bool* inRange)
+GetTypedArrayIndex(JSContext* cx, HandleValue v, Handle<TypedArrayObject*> view, uint32_t* offset)
 {
-    RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, v, &id))
-        return false;
     uint64_t index;
-    if (!IsTypedArrayIndex(id, &index) || index >= view->length()) {
-        *inRange = false;
-    } else {
-        *offset = (uint32_t)index;
-        *inRange = true;
-    }
+    if (!js::ToIntegerIndex(cx, v, &index))
+        return false;
+    if (index >= view->length())
+        return ReportOutOfRange(cx);
+    *offset = uint32_t(index);
     return true;
-}
-
-void
-js::atomics_fullMemoryBarrier()
-{
-    jit::AtomicOperations::fenceSeqCst();
-}
-
-static bool
-AtomicsFence(JSContext* cx, MutableHandleValue r)
-{
-    atomics_fullMemoryBarrier();
-    r.setUndefined();
-    return true;
-}
-
-bool
-js::atomics_fence(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    return AtomicsFence(cx, args.rval());
 }
 
 static int32_t
-CompareExchange(Scalar::Type viewType, int32_t oldCandidate, int32_t newCandidate, void* viewData,
-                uint32_t offset, bool* badArrayType=nullptr)
+CompareExchange(Scalar::Type viewType, int32_t oldCandidate, int32_t newCandidate,
+                SharedMem<void*> viewData, uint32_t offset, bool* badArrayType = nullptr)
 {
     switch (viewType) {
       case Scalar::Int8: {
         int8_t oldval = (int8_t)oldCandidate;
         int8_t newval = (int8_t)newCandidate;
-        oldval = jit::AtomicOperations::compareExchangeSeqCst((int8_t*)viewData + offset, oldval, newval);
+        oldval = jit::AtomicOperations::compareExchangeSeqCst(viewData.cast<int8_t*>() + offset,
+                                                              oldval, newval);
         return oldval;
       }
       case Scalar::Uint8: {
         uint8_t oldval = (uint8_t)oldCandidate;
         uint8_t newval = (uint8_t)newCandidate;
-        oldval = jit::AtomicOperations::compareExchangeSeqCst((uint8_t*)viewData + offset, oldval, newval);
-        return oldval;
-      }
-      case Scalar::Uint8Clamped: {
-        uint8_t oldval = ClampIntForUint8Array(oldCandidate);
-        uint8_t newval = ClampIntForUint8Array(newCandidate);
-        oldval = jit::AtomicOperations::compareExchangeSeqCst((uint8_t*)viewData + offset, oldval, newval);
+        oldval = jit::AtomicOperations::compareExchangeSeqCst(viewData.cast<uint8_t*>() + offset,
+                                                              oldval, newval);
         return oldval;
       }
       case Scalar::Int16: {
         int16_t oldval = (int16_t)oldCandidate;
         int16_t newval = (int16_t)newCandidate;
-        oldval = jit::AtomicOperations::compareExchangeSeqCst((int16_t*)viewData + offset, oldval, newval);
+        oldval = jit::AtomicOperations::compareExchangeSeqCst(viewData.cast<int16_t*>() + offset,
+                                                              oldval, newval);
         return oldval;
       }
       case Scalar::Uint16: {
         uint16_t oldval = (uint16_t)oldCandidate;
         uint16_t newval = (uint16_t)newCandidate;
-        oldval = jit::AtomicOperations::compareExchangeSeqCst((uint16_t*)viewData + offset, oldval, newval);
+        oldval = jit::AtomicOperations::compareExchangeSeqCst(viewData.cast<uint16_t*>() + offset,
+                                                              oldval, newval);
         return oldval;
       }
       case Scalar::Int32: {
         int32_t oldval = oldCandidate;
         int32_t newval = newCandidate;
-        oldval = jit::AtomicOperations::compareExchangeSeqCst((int32_t*)viewData + offset, oldval, newval);
+        oldval = jit::AtomicOperations::compareExchangeSeqCst(viewData.cast<int32_t*>() + offset,
+                                                              oldval, newval);
         return oldval;
       }
       case Scalar::Uint32: {
         uint32_t oldval = (uint32_t)oldCandidate;
         uint32_t newval = (uint32_t)newCandidate;
-        oldval = jit::AtomicOperations::compareExchangeSeqCst((uint32_t*)viewData + offset, oldval, newval);
+        oldval = jit::AtomicOperations::compareExchangeSeqCst(viewData.cast<uint32_t*>() + offset,
+                                                              oldval, newval);
         return (int32_t)oldval;
       }
       default:
@@ -195,12 +185,11 @@ js::atomics_compareExchange(JSContext* cx, unsigned argc, Value* vp)
     HandleValue newv = args.get(3);
     MutableHandleValue r = args.rval();
 
-    Rooted<SharedTypedArrayObject*> view(cx, nullptr);
+    Rooted<TypedArrayObject*> view(cx, nullptr);
     if (!GetSharedTypedArray(cx, objv, &view))
         return false;
     uint32_t offset;
-    bool inRange;
-    if (!GetSharedTypedArrayIndex(cx, idxv, view, &offset, &inRange))
+    if (!GetTypedArrayIndex(cx, idxv, view, &offset))
         return false;
     int32_t oldCandidate;
     if (!ToInt32(cx, oldv, &oldCandidate))
@@ -209,11 +198,9 @@ js::atomics_compareExchange(JSContext* cx, unsigned argc, Value* vp)
     if (!ToInt32(cx, newv, &newCandidate))
         return false;
 
-    if (!inRange)
-        return AtomicsFence(cx, r);
-
     bool badType = false;
-    int32_t result = CompareExchange(view->type(), oldCandidate, newCandidate, view->viewData(), offset, &badType);
+    int32_t result = CompareExchange(view->type(), oldCandidate, newCandidate,
+                                     view->viewDataShared(), offset, &badType);
 
     if (badType)
         return ReportBadArrayType(cx);
@@ -233,46 +220,42 @@ js::atomics_load(JSContext* cx, unsigned argc, Value* vp)
     HandleValue idxv = args.get(1);
     MutableHandleValue r = args.rval();
 
-    Rooted<SharedTypedArrayObject*> view(cx, nullptr);
+    Rooted<TypedArrayObject*> view(cx, nullptr);
     if (!GetSharedTypedArray(cx, objv, &view))
         return false;
     uint32_t offset;
-    bool inRange;
-    if (!GetSharedTypedArrayIndex(cx, idxv, view, &offset, &inRange))
+    if (!GetTypedArrayIndex(cx, idxv, view, &offset))
         return false;
 
-    if (!inRange)
-        return AtomicsFence(cx, r);
-
+    SharedMem<void*> viewData = view->viewDataShared();
     switch (view->type()) {
-      case Scalar::Uint8:
-      case Scalar::Uint8Clamped: {
-        uint8_t v = jit::AtomicOperations::loadSeqCst((uint8_t*)view->viewData() + offset);
+      case Scalar::Uint8: {
+        uint8_t v = jit::AtomicOperations::loadSeqCst(viewData.cast<uint8_t*>() + offset);
         r.setInt32(v);
         return true;
       }
       case Scalar::Int8: {
-        int8_t v = jit::AtomicOperations::loadSeqCst((uint8_t*)view->viewData() + offset);
+        int8_t v = jit::AtomicOperations::loadSeqCst(viewData.cast<uint8_t*>() + offset);
         r.setInt32(v);
         return true;
       }
       case Scalar::Int16: {
-        int16_t v = jit::AtomicOperations::loadSeqCst((int16_t*)view->viewData() + offset);
+        int16_t v = jit::AtomicOperations::loadSeqCst(viewData.cast<int16_t*>() + offset);
         r.setInt32(v);
         return true;
       }
       case Scalar::Uint16: {
-        uint16_t v = jit::AtomicOperations::loadSeqCst((uint16_t*)view->viewData() + offset);
+        uint16_t v = jit::AtomicOperations::loadSeqCst(viewData.cast<uint16_t*>() + offset);
         r.setInt32(v);
         return true;
       }
       case Scalar::Int32: {
-        int32_t v = jit::AtomicOperations::loadSeqCst((int32_t*)view->viewData() + offset);
+        int32_t v = jit::AtomicOperations::loadSeqCst(viewData.cast<int32_t*>() + offset);
         r.setInt32(v);
         return true;
       }
       case Scalar::Uint32: {
-        uint32_t v = jit::AtomicOperations::loadSeqCst((uint32_t*)view->viewData() + offset);
+        uint32_t v = jit::AtomicOperations::loadSeqCst(viewData.cast<uint32_t*>() + offset);
         r.setNumber(v);
         return true;
       }
@@ -288,8 +271,8 @@ enum XchgStoreOp {
 
 template<XchgStoreOp op>
 static int32_t
-ExchangeOrStore(Scalar::Type viewType, int32_t numberValue, void* viewData, uint32_t offset,
-                bool* badArrayType=nullptr)
+ExchangeOrStore(Scalar::Type viewType, int32_t numberValue, SharedMem<void*> viewData,
+                uint32_t offset, bool* badArrayType = nullptr)
 {
 #define INT_OP(ptr, value)                                         \
     JS_BEGIN_MACRO                                                 \
@@ -302,37 +285,32 @@ ExchangeOrStore(Scalar::Type viewType, int32_t numberValue, void* viewData, uint
     switch (viewType) {
       case Scalar::Int8: {
         int8_t value = (int8_t)numberValue;
-        INT_OP((int8_t*)viewData + offset, value);
+        INT_OP(viewData.cast<int8_t*>() + offset, value);
         return value;
       }
       case Scalar::Uint8: {
         uint8_t value = (uint8_t)numberValue;
-        INT_OP((uint8_t*)viewData + offset, value);
-        return value;
-      }
-      case Scalar::Uint8Clamped: {
-        uint8_t value = ClampIntForUint8Array(numberValue);
-        INT_OP((uint8_t*)viewData + offset, value);
+        INT_OP(viewData.cast<uint8_t*>() + offset, value);
         return value;
       }
       case Scalar::Int16: {
         int16_t value = (int16_t)numberValue;
-        INT_OP((int16_t*)viewData + offset, value);
+        INT_OP(viewData.cast<int16_t*>() + offset, value);
         return value;
       }
       case Scalar::Uint16: {
         uint16_t value = (uint16_t)numberValue;
-        INT_OP((uint16_t*)viewData + offset, value);
+        INT_OP(viewData.cast<uint16_t*>() + offset, value);
         return value;
       }
       case Scalar::Int32: {
         int32_t value = numberValue;
-        INT_OP((int32_t*)viewData + offset, value);
+        INT_OP(viewData.cast<int32_t*>() + offset, value);
         return value;
       }
       case Scalar::Uint32: {
         uint32_t value = (uint32_t)numberValue;
-        INT_OP((uint32_t*)viewData + offset, value);
+        INT_OP(viewData.cast<uint32_t*>() + offset, value);
         return (int32_t)value;
       }
       default:
@@ -353,25 +331,19 @@ ExchangeOrStore(JSContext* cx, unsigned argc, Value* vp)
     HandleValue valv = args.get(2);
     MutableHandleValue r = args.rval();
 
-    Rooted<SharedTypedArrayObject*> view(cx, nullptr);
+    Rooted<TypedArrayObject*> view(cx, nullptr);
     if (!GetSharedTypedArray(cx, objv, &view))
         return false;
     uint32_t offset;
-    bool inRange;
-    if (!GetSharedTypedArrayIndex(cx, idxv, view, &offset, &inRange))
+    if (!GetTypedArrayIndex(cx, idxv, view, &offset))
         return false;
     int32_t numberValue;
     if (!ToInt32(cx, valv, &numberValue))
         return false;
 
-    if (!inRange) {
-        atomics_fullMemoryBarrier();
-        r.set(valv);
-        return true;
-    }
-
     bool badType = false;
-    int32_t result = ExchangeOrStore<op>(view->type(), numberValue, view->viewData(), offset, &badType);
+    int32_t result = ExchangeOrStore<op>(view->type(), numberValue, view->viewDataShared(), offset,
+                                         &badType);
 
     if (badType)
         return ReportBadArrayType(cx);
@@ -400,69 +372,46 @@ static bool
 AtomicsBinop(JSContext* cx, HandleValue objv, HandleValue idxv, HandleValue valv,
              MutableHandleValue r)
 {
-    Rooted<SharedTypedArrayObject*> view(cx, nullptr);
+    Rooted<TypedArrayObject*> view(cx, nullptr);
     if (!GetSharedTypedArray(cx, objv, &view))
         return false;
     uint32_t offset;
-    bool inRange;
-    if (!GetSharedTypedArrayIndex(cx, idxv, view, &offset, &inRange))
+    if (!GetTypedArrayIndex(cx, idxv, view, &offset))
         return false;
     int32_t numberValue;
     if (!ToInt32(cx, valv, &numberValue))
         return false;
 
-    if (!inRange)
-        return AtomicsFence(cx, r);
-
+    SharedMem<void*> viewData = view->viewDataShared();
     switch (view->type()) {
       case Scalar::Int8: {
         int8_t v = (int8_t)numberValue;
-        r.setInt32(T::operate((int8_t*)view->viewData() + offset, v));
+        r.setInt32(T::operate(viewData.cast<int8_t*>() + offset, v));
         return true;
       }
       case Scalar::Uint8: {
         uint8_t v = (uint8_t)numberValue;
-        r.setInt32(T::operate((uint8_t*)view->viewData() + offset, v));
-        return true;
-      }
-      case Scalar::Uint8Clamped: {
-        // Spec says:
-        //  - clamp the input value
-        //  - perform the operation
-        //  - clamp the result
-        //  - store the result
-        // This requires a CAS loop.
-        int32_t value = ClampIntForUint8Array(numberValue);
-        uint8_t* loc = (uint8_t*)view->viewData() + offset;
-        for (;;) {
-            uint8_t old = *loc;
-            uint8_t result = (uint8_t)ClampIntForUint8Array(T::perform(old, value));
-            uint8_t tmp = jit::AtomicOperations::compareExchangeSeqCst(loc, old, result);
-            if (tmp == old) {
-                r.setInt32(old);
-                break;
-            }
-        }
+        r.setInt32(T::operate(viewData.cast<uint8_t*>() + offset, v));
         return true;
       }
       case Scalar::Int16: {
         int16_t v = (int16_t)numberValue;
-        r.setInt32(T::operate((int16_t*)view->viewData() + offset, v));
+        r.setInt32(T::operate(viewData.cast<int16_t*>() + offset, v));
         return true;
       }
       case Scalar::Uint16: {
         uint16_t v = (uint16_t)numberValue;
-        r.setInt32(T::operate((uint16_t*)view->viewData() + offset, v));
+        r.setInt32(T::operate(viewData.cast<uint16_t*>() + offset, v));
         return true;
       }
       case Scalar::Int32: {
         int32_t v = numberValue;
-        r.setInt32(T::operate((int32_t*)view->viewData() + offset, v));
+        r.setInt32(T::operate(viewData.cast<int32_t*>() + offset, v));
         return true;
       }
       case Scalar::Uint32: {
         uint32_t v = (uint32_t)numberValue;
-        r.setNumber((double)T::operate((uint32_t*)view->viewData() + offset, v));
+        r.setNumber((double)T::operate(viewData.cast<uint32_t*>() + offset, v));
         return true;
       }
       default:
@@ -471,12 +420,12 @@ AtomicsBinop(JSContext* cx, HandleValue objv, HandleValue idxv, HandleValue valv
 }
 
 #define INTEGRAL_TYPES_FOR_EACH(NAME) \
-    static int8_t operate(int8_t* addr, int8_t v) { return NAME(addr, v); } \
-    static uint8_t operate(uint8_t* addr, uint8_t v) { return NAME(addr, v); } \
-    static int16_t operate(int16_t* addr, int16_t v) { return NAME(addr, v); } \
-    static uint16_t operate(uint16_t* addr, uint16_t v) { return NAME(addr, v); } \
-    static int32_t operate(int32_t* addr, int32_t v) { return NAME(addr, v); } \
-    static uint32_t operate(uint32_t* addr, uint32_t v) { return NAME(addr, v); }
+    static int8_t operate(SharedMem<int8_t*> addr, int8_t v) { return NAME(addr, v); } \
+    static uint8_t operate(SharedMem<uint8_t*> addr, uint8_t v) { return NAME(addr, v); } \
+    static int16_t operate(SharedMem<int16_t*> addr, int16_t v) { return NAME(addr, v); } \
+    static uint16_t operate(SharedMem<uint16_t*> addr, uint16_t v) { return NAME(addr, v); } \
+    static int32_t operate(SharedMem<int32_t*> addr, int32_t v) { return NAME(addr, v); } \
+    static uint32_t operate(SharedMem<uint32_t*> addr, uint32_t v) { return NAME(addr, v); }
 
 class PerformAdd
 {
@@ -553,47 +502,58 @@ js::atomics_isLockFree(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     HandleValue v = args.get(0);
-    if (!v.isInt32()) {
-        args.rval().setBoolean(false);
-        return true;
+    int32_t size;
+    if (v.isInt32()) {
+        size = v.toInt32();
+    } else {
+        double dsize;
+        if (!ToInteger(cx, v, &dsize))
+            return false;
+        if (!mozilla::NumberIsInt32(dsize, &size)) {
+            args.rval().setBoolean(false);
+            return true;
+        }
     }
-    args.rval().setBoolean(jit::AtomicOperations::isLockfree(v.toInt32()));
+    args.rval().setBoolean(jit::AtomicOperations::isLockfree(size));
     return true;
 }
 
 // asm.js callouts for platforms that do not have non-word-sized
 // atomics where we don't want to inline the logic for the atomics.
 //
+// Memory will always be shared since the callouts are only called from
+// code that checks that the memory is shared.
+//
 // To test this, either run on eg Raspberry Pi Model 1, or invoke the ARM
 // simulator build with ARMHWCAP=vfp set.  Do not set any other flags; other
 // vfp/neon flags force ARMv7 to be set.
 
 static void
-GetCurrentAsmJSHeap(void** heap, size_t* length)
+GetCurrentAsmJSHeap(SharedMem<void*>* heap, size_t* length)
 {
     JSRuntime* rt = js::TlsPerThreadData.get()->runtimeFromMainThread();
-    AsmJSModule& mod = rt->asmJSActivationStack()->module();
-    *heap = mod.heapDatum();
-    *length = mod.heapLength();
+    wasm::Instance& instance = rt->wasmActivationStack()->instance();
+    *heap = instance.memoryBase().cast<void*>();
+    *length = instance.memoryLength();
 }
 
 int32_t
 js::atomics_add_asm_callout(int32_t vt, int32_t offset, int32_t value)
 {
-    void* heap;
+    SharedMem<void*> heap;
     size_t heapLength;
     GetCurrentAsmJSHeap(&heap, &heapLength);
     if (size_t(offset) >= heapLength)
         return 0;
     switch (Scalar::Type(vt)) {
       case Scalar::Int8:
-        return PerformAdd::operate((int8_t*)heap + offset, value);
+        return PerformAdd::operate(heap.cast<int8_t*>() + offset, value);
       case Scalar::Uint8:
-        return PerformAdd::operate((uint8_t*)heap + offset, value);
+        return PerformAdd::operate(heap.cast<uint8_t*>() + offset, value);
       case Scalar::Int16:
-        return PerformAdd::operate((int16_t*)heap + (offset >> 1), value);
+        return PerformAdd::operate(heap.cast<int16_t*>() + (offset >> 1), value);
       case Scalar::Uint16:
-        return PerformAdd::operate((uint16_t*)heap + (offset >> 1), value);
+        return PerformAdd::operate(heap.cast<uint16_t*>() + (offset >> 1), value);
       default:
         MOZ_CRASH("Invalid size");
     }
@@ -602,20 +562,20 @@ js::atomics_add_asm_callout(int32_t vt, int32_t offset, int32_t value)
 int32_t
 js::atomics_sub_asm_callout(int32_t vt, int32_t offset, int32_t value)
 {
-    void* heap;
+    SharedMem<void*> heap;
     size_t heapLength;
     GetCurrentAsmJSHeap(&heap, &heapLength);
     if (size_t(offset) >= heapLength)
         return 0;
     switch (Scalar::Type(vt)) {
       case Scalar::Int8:
-        return PerformSub::operate((int8_t*)heap + offset, value);
+        return PerformSub::operate(heap.cast<int8_t*>() + offset, value);
       case Scalar::Uint8:
-        return PerformSub::operate((uint8_t*)heap + offset, value);
+        return PerformSub::operate(heap.cast<uint8_t*>() + offset, value);
       case Scalar::Int16:
-        return PerformSub::operate((int16_t*)heap + (offset >> 1), value);
+        return PerformSub::operate(heap.cast<int16_t*>() + (offset >> 1), value);
       case Scalar::Uint16:
-        return PerformSub::operate((uint16_t*)heap + (offset >> 1), value);
+        return PerformSub::operate(heap.cast<uint16_t*>() + (offset >> 1), value);
       default:
         MOZ_CRASH("Invalid size");
     }
@@ -624,20 +584,20 @@ js::atomics_sub_asm_callout(int32_t vt, int32_t offset, int32_t value)
 int32_t
 js::atomics_and_asm_callout(int32_t vt, int32_t offset, int32_t value)
 {
-    void* heap;
+    SharedMem<void*> heap;
     size_t heapLength;
     GetCurrentAsmJSHeap(&heap, &heapLength);
     if (size_t(offset) >= heapLength)
         return 0;
     switch (Scalar::Type(vt)) {
       case Scalar::Int8:
-        return PerformAnd::operate((int8_t*)heap + offset, value);
+        return PerformAnd::operate(heap.cast<int8_t*>() + offset, value);
       case Scalar::Uint8:
-        return PerformAnd::operate((uint8_t*)heap + offset, value);
+        return PerformAnd::operate(heap.cast<uint8_t*>() + offset, value);
       case Scalar::Int16:
-        return PerformAnd::operate((int16_t*)heap + (offset >> 1), value);
+        return PerformAnd::operate(heap.cast<int16_t*>() + (offset >> 1), value);
       case Scalar::Uint16:
-        return PerformAnd::operate((uint16_t*)heap + (offset >> 1), value);
+        return PerformAnd::operate(heap.cast<uint16_t*>() + (offset >> 1), value);
       default:
         MOZ_CRASH("Invalid size");
     }
@@ -646,20 +606,20 @@ js::atomics_and_asm_callout(int32_t vt, int32_t offset, int32_t value)
 int32_t
 js::atomics_or_asm_callout(int32_t vt, int32_t offset, int32_t value)
 {
-    void* heap;
+    SharedMem<void*> heap;
     size_t heapLength;
     GetCurrentAsmJSHeap(&heap, &heapLength);
     if (size_t(offset) >= heapLength)
         return 0;
     switch (Scalar::Type(vt)) {
       case Scalar::Int8:
-        return PerformOr::operate((int8_t*)heap + offset, value);
+        return PerformOr::operate(heap.cast<int8_t*>() + offset, value);
       case Scalar::Uint8:
-        return PerformOr::operate((uint8_t*)heap + offset, value);
+        return PerformOr::operate(heap.cast<uint8_t*>() + offset, value);
       case Scalar::Int16:
-        return PerformOr::operate((int16_t*)heap + (offset >> 1), value);
+        return PerformOr::operate(heap.cast<int16_t*>() + (offset >> 1), value);
       case Scalar::Uint16:
-        return PerformOr::operate((uint16_t*)heap + (offset >> 1), value);
+        return PerformOr::operate(heap.cast<uint16_t*>() + (offset >> 1), value);
       default:
         MOZ_CRASH("Invalid size");
     }
@@ -668,20 +628,20 @@ js::atomics_or_asm_callout(int32_t vt, int32_t offset, int32_t value)
 int32_t
 js::atomics_xor_asm_callout(int32_t vt, int32_t offset, int32_t value)
 {
-    void* heap;
+    SharedMem<void*> heap;
     size_t heapLength;
     GetCurrentAsmJSHeap(&heap, &heapLength);
     if (size_t(offset) >= heapLength)
         return 0;
     switch (Scalar::Type(vt)) {
       case Scalar::Int8:
-        return PerformXor::operate((int8_t*)heap + offset, value);
+        return PerformXor::operate(heap.cast<int8_t*>() + offset, value);
       case Scalar::Uint8:
-        return PerformXor::operate((uint8_t*)heap + offset, value);
+        return PerformXor::operate(heap.cast<uint8_t*>() + offset, value);
       case Scalar::Int16:
-        return PerformXor::operate((int16_t*)heap + (offset >> 1), value);
+        return PerformXor::operate(heap.cast<int16_t*>() + (offset >> 1), value);
       case Scalar::Uint16:
-        return PerformXor::operate((uint16_t*)heap + (offset >> 1), value);
+        return PerformXor::operate(heap.cast<uint16_t*>() + (offset >> 1), value);
       default:
         MOZ_CRASH("Invalid size");
     }
@@ -690,7 +650,7 @@ js::atomics_xor_asm_callout(int32_t vt, int32_t offset, int32_t value)
 int32_t
 js::atomics_xchg_asm_callout(int32_t vt, int32_t offset, int32_t value)
 {
-    void* heap;
+    SharedMem<void*> heap;
     size_t heapLength;
     GetCurrentAsmJSHeap(&heap, &heapLength);
     if (size_t(offset) >= heapLength)
@@ -712,7 +672,7 @@ js::atomics_xchg_asm_callout(int32_t vt, int32_t offset, int32_t value)
 int32_t
 js::atomics_cmpxchg_asm_callout(int32_t vt, int32_t offset, int32_t oldval, int32_t newval)
 {
-    void* heap;
+    SharedMem<void*> heap;
     size_t heapLength;
     GetCurrentAsmJSHeap(&heap, &heapLength);
     if (size_t(offset) >= heapLength)
@@ -788,7 +748,7 @@ class AutoUnlockFutexAPI
 } // namespace js
 
 bool
-js::atomics_futexWait(JSContext* cx, unsigned argc, Value* vp)
+js::atomics_wait(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     HandleValue objv = args.get(0);
@@ -799,14 +759,13 @@ js::atomics_futexWait(JSContext* cx, unsigned argc, Value* vp)
 
     JSRuntime* rt = cx->runtime();
 
-    Rooted<SharedTypedArrayObject*> view(cx, nullptr);
+    Rooted<TypedArrayObject*> view(cx, nullptr);
     if (!GetSharedTypedArray(cx, objv, &view))
         return false;
     if (view->type() != Scalar::Int32)
         return ReportBadArrayType(cx);
     uint32_t offset;
-    bool inRange;
-    if (!GetSharedTypedArrayIndex(cx, idxv, view, &offset, &inRange))
+    if (!GetTypedArrayIndex(cx, idxv, view, &offset))
         return false;
     int32_t value;
     if (!ToInt32(cx, valv, &value))
@@ -823,23 +782,20 @@ js::atomics_futexWait(JSContext* cx, unsigned argc, Value* vp)
             timeout_ms = 0;
     }
 
-    if (!inRange) {
-        atomics_fullMemoryBarrier();
-        r.setUndefined();
-        return true;
-    }
+    if (!rt->fx.canWait())
+        return ReportCannotWait(cx);
 
     // This lock also protects the "waiters" field on SharedArrayRawBuffer,
     // and it provides the necessary memory fence.
     AutoLockFutexAPI lock;
 
-    int32_t* addr = (int32_t*)view->viewData() + offset;
-    if (*addr != value) {
-        r.setInt32(AtomicsObject::FutexNotequal);
+    SharedMem<int32_t*>(addr) = view->viewDataShared().cast<int32_t*>() + offset;
+    if (jit::AtomicOperations::loadSafeWhenRacy(addr) != value) {
+        r.setString(cx->names().futexNotEqual);
         return true;
     }
 
-    Rooted<SharedArrayBufferObject*> sab(cx, &view->buffer()->as<SharedArrayBufferObject>());
+    Rooted<SharedArrayBufferObject*> sab(cx, view->bufferShared());
     SharedArrayRawBuffer* sarb = sab->rawBufferObject();
 
     FutexWaiter w(offset, rt);
@@ -853,10 +809,18 @@ js::atomics_futexWait(JSContext* cx, unsigned argc, Value* vp)
         sarb->setWaiters(&w);
     }
 
-    AtomicsObject::FutexWaitResult result = AtomicsObject::FutexOK;
+    FutexRuntime::WaitResult result = FutexRuntime::FutexOK;
     bool retval = rt->fx.wait(cx, timeout_ms, &result);
-    if (retval)
-        r.setInt32(result);
+    if (retval) {
+        switch (result) {
+          case FutexRuntime::FutexOK:
+            r.setString(cx->names().futexOK);
+            break;
+          case FutexRuntime::FutexTimedOut:
+            r.setString(cx->names().futexTimedOut);
+            break;
+        }
+    }
 
     if (w.lower_pri == &w) {
         sarb->setWaiters(nullptr);
@@ -870,7 +834,7 @@ js::atomics_futexWait(JSContext* cx, unsigned argc, Value* vp)
 }
 
 bool
-js::atomics_futexWake(JSContext* cx, unsigned argc, Value* vp)
+js::atomics_wake(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     HandleValue objv = args.get(0);
@@ -878,29 +842,27 @@ js::atomics_futexWake(JSContext* cx, unsigned argc, Value* vp)
     HandleValue countv = args.get(2);
     MutableHandleValue r = args.rval();
 
-    Rooted<SharedTypedArrayObject*> view(cx, nullptr);
+    Rooted<TypedArrayObject*> view(cx, nullptr);
     if (!GetSharedTypedArray(cx, objv, &view))
         return false;
     if (view->type() != Scalar::Int32)
         return ReportBadArrayType(cx);
     uint32_t offset;
-    bool inRange;
-    if (!GetSharedTypedArrayIndex(cx, idxv, view, &offset, &inRange))
+    if (!GetTypedArrayIndex(cx, idxv, view, &offset))
         return false;
-    if (!inRange) {
-        atomics_fullMemoryBarrier();
-        r.setUndefined();
-        return true;
-    }
     double count;
-    if (!ToInteger(cx, countv, &count))
-        return false;
-    if (count < 0)
-        count = 0;
+    if (countv.isUndefined()) {
+        count = mozilla::PositiveInfinity<double>();
+    } else {
+        if (!ToInteger(cx, countv, &count))
+            return false;
+        if (count < 0.0)
+            count = 0.0;
+    }
 
     AutoLockFutexAPI lock;
 
-    Rooted<SharedArrayBufferObject*> sab(cx, &view->buffer()->as<SharedArrayBufferObject>());
+    Rooted<SharedArrayBufferObject*> sab(cx, view->bufferShared());
     SharedArrayRawBuffer* sarb = sab->rawBufferObject();
     int32_t woken = 0;
 
@@ -917,127 +879,6 @@ js::atomics_futexWake(JSContext* cx, unsigned argc, Value* vp)
             --count;
         } while (count > 0 && iter != waiters);
     }
-
-    r.setInt32(woken);
-    return true;
-}
-
-bool
-js::atomics_futexWakeOrRequeue(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    HandleValue objv = args.get(0);
-    HandleValue idx1v = args.get(1);
-    HandleValue countv = args.get(2);
-    HandleValue valv = args.get(3);
-    HandleValue idx2v = args.get(4);
-    MutableHandleValue r = args.rval();
-
-    Rooted<SharedTypedArrayObject*> view(cx, nullptr);
-    if (!GetSharedTypedArray(cx, objv, &view))
-        return false;
-    if (view->type() != Scalar::Int32)
-        return ReportBadArrayType(cx);
-    uint32_t offset1;
-    bool inRange1;
-    if (!GetSharedTypedArrayIndex(cx, idx1v, view, &offset1, &inRange1))
-        return false;
-    double count;
-    if (!ToInteger(cx, countv, &count))
-        return false;
-    if (count < 0)
-        count = 0;
-    int32_t value;
-    if (!ToInt32(cx, valv, &value))
-        return false;
-    uint32_t offset2;
-    bool inRange2;
-    if (!GetSharedTypedArrayIndex(cx, idx2v, view, &offset2, &inRange2))
-        return false;
-    if (!(inRange1 && inRange2)) {
-        atomics_fullMemoryBarrier();
-        r.setUndefined();
-        return true;
-    }
-
-    AutoLockFutexAPI lock;
-
-    int32_t* addr = (int32_t*)view->viewData() + offset1;
-    if (*addr != value) {
-        r.setInt32(AtomicsObject::FutexNotequal);
-        return true;
-    }
-
-    Rooted<SharedArrayBufferObject*> sab(cx, &view->buffer()->as<SharedArrayBufferObject>());
-    SharedArrayRawBuffer* sarb = sab->rawBufferObject();
-
-    // Walk the list of waiters looking for those waiting on offset1.
-    // Wake some and requeue the others.  There may already be other
-    // waiters on offset2, so those that are requeued must be moved to
-    // the back of the list.  Offset1 may equal offset2.  The list's
-    // first node may change, and the list may be emptied out by the
-    // operation.
-
-    FutexWaiter* waiters = sarb->waiters();
-    if (!waiters) {
-        r.setInt32(0);
-        return true;
-    }
-
-    int32_t woken = 0;
-    FutexWaiter whead((uint32_t)-1, nullptr); // Header node for waiters
-    FutexWaiter* first = waiters;
-    FutexWaiter* last = waiters->back;
-    whead.lower_pri = first;
-    whead.back = last;
-    first->back = &whead;
-    last->lower_pri = &whead;
-
-    FutexWaiter rhead((uint32_t)-1, nullptr); // Header node for requeued
-    rhead.lower_pri = rhead.back = &rhead;
-
-    FutexWaiter* iter = whead.lower_pri;
-    while (iter != &whead) {
-        FutexWaiter* c = iter;
-        iter = iter->lower_pri;
-        if (c->offset != offset1 || !c->rt->fx.isWaiting())
-            continue;
-        if (count > 0) {
-            c->rt->fx.wake(FutexRuntime::WakeExplicit);
-            ++woken;
-            --count;
-        } else {
-            c->offset = offset2;
-
-            // Remove the node from the waiters list.
-            c->back->lower_pri = c->lower_pri;
-            c->lower_pri->back = c->back;
-
-            // Insert the node at the back of the requeuers list.
-            c->lower_pri = &rhead;
-            c->back = rhead.back;
-            rhead.back->lower_pri = c;
-            rhead.back = c;
-        }
-    }
-
-    // If there are any requeuers, append them to the waiters.
-    if (rhead.lower_pri != &rhead) {
-        whead.back->lower_pri = rhead.lower_pri;
-        rhead.lower_pri->back = whead.back;
-
-        whead.back = rhead.back;
-        rhead.back->lower_pri = &whead;
-    }
-
-    // Make the final list and install it.
-    waiters = nullptr;
-    if (whead.lower_pri != &whead) {
-        whead.back->lower_pri = whead.lower_pri;
-        whead.lower_pri->back = whead.back;
-        waiters = whead.lower_pri;
-    }
-    sarb->setWaiters(waiters);
 
     r.setInt32(woken);
     return true;
@@ -1088,7 +929,8 @@ js::FutexRuntime::unlock()
 
 js::FutexRuntime::FutexRuntime()
   : cond_(nullptr),
-    state_(Idle)
+    state_(Idle),
+    canWait_(false)
 {
 }
 
@@ -1120,9 +962,10 @@ js::FutexRuntime::isWaiting()
 }
 
 bool
-js::FutexRuntime::wait(JSContext* cx, double timeout_ms, AtomicsObject::FutexWaitResult* result)
+js::FutexRuntime::wait(JSContext* cx, double timeout_ms, WaitResult* result)
 {
     MOZ_ASSERT(&cx->runtime()->fx == this);
+    MOZ_ASSERT(cx->runtime()->fx.canWait());
     MOZ_ASSERT(lockHolder_ == PR_GetCurrentThread());
     MOZ_ASSERT(state_ == Idle || state_ == WaitingInterrupted);
 
@@ -1176,14 +1019,14 @@ js::FutexRuntime::wait(JSContext* cx, double timeout_ms, AtomicsObject::FutexWai
             if (timed) {
                 uint64_t now = PRMJ_Now();
                 if (now >= finalEnd) {
-                    *result = AtomicsObject::FutexTimedout;
+                    *result = FutexTimedOut;
                     goto finished;
                 }
             }
             break;
 
           case FutexRuntime::Woken:
-            *result = AtomicsObject::FutexOK;
+            *result = FutexOK;
             goto finished;
 
           case FutexRuntime::WaitingNotifiedForInterrupt:
@@ -1195,10 +1038,10 @@ js::FutexRuntime::wait(JSContext* cx, double timeout_ms, AtomicsObject::FutexWai
             //   should be woken when the interrupt handler returns.
             //   To that end, we flag the thread as interrupted around
             //   the interrupt and check state_ when the interrupt
-            //   handler returns.  A futexWake() call that reaches the
+            //   handler returns.  A wake() call that reaches the
             //   runtime during the interrupt sets state_ to Woken.
             //
-            // - It is in principle possible for futexWait() to be
+            // - It is in principle possible for wait() to be
             //   reentered on the same thread/runtime and waiting on the
             //   same location and to yet again be interrupted and enter
             //   the interrupt handler.  In this case, it is important
@@ -1224,7 +1067,7 @@ js::FutexRuntime::wait(JSContext* cx, double timeout_ms, AtomicsObject::FutexWai
             if (!retval)
                 goto finished;
             if (state_ == Woken) {
-                *result = AtomicsObject::FutexOK;
+                *result = FutexOK;
                 goto finished;
             }
             break;
@@ -1264,28 +1107,19 @@ js::FutexRuntime::wake(WakeReason reason)
 }
 
 const JSFunctionSpec AtomicsMethods[] = {
-    JS_FN("compareExchange",    atomics_compareExchange,    4,0),
-    JS_FN("load",               atomics_load,               2,0),
-    JS_FN("store",              atomics_store,              3,0),
-    JS_FN("exchange",           atomics_exchange,           3,0),
-    JS_FN("fence",              atomics_fence,              0,0),
-    JS_FN("add",                atomics_add,                3,0),
-    JS_FN("sub",                atomics_sub,                3,0),
-    JS_FN("and",                atomics_and,                3,0),
-    JS_FN("or",                 atomics_or,                 3,0),
-    JS_FN("xor",                atomics_xor,                3,0),
-    JS_FN("isLockFree",         atomics_isLockFree,         1,0),
-    JS_FN("futexWait",          atomics_futexWait,          4,0),
-    JS_FN("futexWake",          atomics_futexWake,          3,0),
-    JS_FN("futexWakeOrRequeue", atomics_futexWakeOrRequeue, 5,0),
+    JS_INLINABLE_FN("compareExchange",    atomics_compareExchange,    4,0, AtomicsCompareExchange),
+    JS_INLINABLE_FN("load",               atomics_load,               2,0, AtomicsLoad),
+    JS_INLINABLE_FN("store",              atomics_store,              3,0, AtomicsStore),
+    JS_INLINABLE_FN("exchange",           atomics_exchange,           3,0, AtomicsExchange),
+    JS_INLINABLE_FN("add",                atomics_add,                3,0, AtomicsAdd),
+    JS_INLINABLE_FN("sub",                atomics_sub,                3,0, AtomicsSub),
+    JS_INLINABLE_FN("and",                atomics_and,                3,0, AtomicsAnd),
+    JS_INLINABLE_FN("or",                 atomics_or,                 3,0, AtomicsOr),
+    JS_INLINABLE_FN("xor",                atomics_xor,                3,0, AtomicsXor),
+    JS_INLINABLE_FN("isLockFree",         atomics_isLockFree,         1,0, AtomicsIsLockFree),
+    JS_FN("wait",                         atomics_wait,               4,0),
+    JS_FN("wake",                         atomics_wake,               3,0),
     JS_FS_END
-};
-
-static const JSConstDoubleSpec AtomicsConstants[] = {
-    {"OK",       AtomicsObject::FutexOK},
-    {"TIMEDOUT", AtomicsObject::FutexTimedout},
-    {"NOTEQUAL", AtomicsObject::FutexNotequal},
-    {0,          0}
 };
 
 JSObject*
@@ -1301,8 +1135,6 @@ AtomicsObject::initClass(JSContext* cx, Handle<GlobalObject*> global)
         return nullptr;
 
     if (!JS_DefineFunctions(cx, Atomics, AtomicsMethods))
-        return nullptr;
-    if (!JS_DefineConstDoubles(cx, Atomics, AtomicsConstants))
         return nullptr;
 
     RootedValue AtomicsValue(cx, ObjectValue(*Atomics));

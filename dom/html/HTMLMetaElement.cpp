@@ -7,8 +7,10 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/HTMLMetaElement.h"
 #include "mozilla/dom/HTMLMetaElementBinding.h"
+#include "mozilla/dom/nsCSPService.h"
 #include "nsContentUtils.h"
 #include "nsStyleConsts.h"
+#include "nsIContentSecurityPolicy.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Meta)
 
@@ -36,27 +38,46 @@ NS_IMPL_STRING_ATTR(HTMLMetaElement, HttpEquiv, httpEquiv)
 NS_IMPL_STRING_ATTR(HTMLMetaElement, Name, name)
 NS_IMPL_STRING_ATTR(HTMLMetaElement, Scheme, scheme)
 
-void
-HTMLMetaElement::GetItemValueText(DOMString& aValue)
+nsresult
+HTMLMetaElement::SetMetaReferrer(nsIDocument* aDocument)
 {
-  GetContent(aValue);
+  if (!aDocument ||
+      !AttrValueIs(kNameSpaceID_None, nsGkAtoms::name, nsGkAtoms::referrer, eIgnoreCase)) {
+    return NS_OK;
+  }
+  nsAutoString content;
+  nsresult rv = GetContent(content);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  Element* headElt = aDocument->GetHeadElement();
+  if (headElt && nsContentUtils::ContentIsDescendantOf(this, headElt)) {
+      content = nsContentUtils::TrimWhitespace<nsContentUtils::IsHTMLWhitespace>(content);
+      aDocument->SetHeaderData(nsGkAtoms::referrer, content);
+  }
+  return NS_OK;
 }
-
-void
-HTMLMetaElement::SetItemValueText(const nsAString& aValue)
-{
-  SetContent(aValue);
-}
-
 
 nsresult
 HTMLMetaElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                               const nsAttrValue* aValue, bool aNotify)
 {
   if (aNameSpaceID == kNameSpaceID_None) {
+    nsIDocument *document = GetUncomposedDoc();
     if (aName == nsGkAtoms::content) {
-      nsIDocument *document = GetUncomposedDoc();
+      if (document && AttrValueIs(kNameSpaceID_None, nsGkAtoms::name,
+                                  nsGkAtoms::viewport, eIgnoreCase)) {
+        nsAutoString content;
+        nsresult rv = GetContent(content);
+        NS_ENSURE_SUCCESS(rv, rv);
+        nsContentUtils::ProcessViewportInfo(document, content);
+      }
       CreateAndDispatchEvent(document, NS_LITERAL_STRING("DOMMetaChanged"));
+    }
+    // Update referrer policy when it got changed from JS
+    nsresult rv = SetMetaReferrer(document);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
     }
   }
 
@@ -80,19 +101,42 @@ HTMLMetaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     NS_ENSURE_SUCCESS(rv, rv);
     nsContentUtils::ProcessViewportInfo(aDocument, content);
   }
-  if (aDocument &&
-      AttrValueIs(kNameSpaceID_None, nsGkAtoms::name, nsGkAtoms::referrer, eIgnoreCase)) {
-    nsAutoString content;
-    rv = GetContent(content);
-    NS_ENSURE_SUCCESS(rv, rv);
 
-    // Referrer Policy spec requires a <meta name="referrer" tag to be in the
-    // <head> element.
+  if (CSPService::sCSPEnabled && aDocument &&
+      AttrValueIs(kNameSpaceID_None, nsGkAtoms::httpEquiv, nsGkAtoms::headerCSP, eIgnoreCase)) {
+
+    // only accept <meta http-equiv="Content-Security-Policy" content=""> if it appears
+    // in the <head> element.
     Element* headElt = aDocument->GetHeadElement();
     if (headElt && nsContentUtils::ContentIsDescendantOf(this, headElt)) {
+      
+      nsAutoString content;
+      rv = GetContent(content);
+      NS_ENSURE_SUCCESS(rv, rv);
       content = nsContentUtils::TrimWhitespace<nsContentUtils::IsHTMLWhitespace>(content);
-      aDocument->SetHeaderData(nsGkAtoms::referrer, content);
+
+      nsIPrincipal* principal = aDocument->NodePrincipal();
+      nsCOMPtr<nsIContentSecurityPolicy> csp;
+      nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(aDocument);
+      principal->EnsureCSP(domDoc, getter_AddRefs(csp));
+      if (csp) {
+        // Multiple CSPs (delivered through either header of meta tag) need to be
+        // joined together, see:
+        // https://w3c.github.io/webappsec/specs/content-security-policy/#delivery-html-meta-element
+        rv = csp->AppendPolicy(content,
+                               false, // csp via meta tag can not be report only
+                               true); // delivered through the meta tag
+        NS_ENSURE_SUCCESS(rv, rv);
+        aDocument->ApplySettingsFromCSP(false);
+      }
     }
+  }
+
+  // Referrer Policy spec requires a <meta name="referrer" tag to be in the
+  // <head> element.
+  rv = SetMetaReferrer(aDocument);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
   CreateAndDispatchEvent(aDocument, NS_LITERAL_STRING("DOMMetaAdded"));
   return rv;
@@ -113,9 +157,9 @@ HTMLMetaElement::CreateAndDispatchEvent(nsIDocument* aDoc,
   if (!aDoc)
     return;
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+  RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this, aEventName, true, true);
-  asyncDispatcher->PostDOMEvent();
+  asyncDispatcher->RunDOMEventWhenSafe();
 }
 
 JSObject*

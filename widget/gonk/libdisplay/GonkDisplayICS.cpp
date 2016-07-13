@@ -168,7 +168,17 @@ GonkDisplayICS::SwapBuffers(EGLDisplay dpy, EGLSurface sur)
 {
     // Should be called when composition rendering is complete for a frame.
     // Only HWC v1.0 needs this call. ICS gonk always needs the call.
-    return !mFBSurface->compositionComplete();
+    mFBSurface->compositionComplete();
+
+    if (!mHwc) {
+        if (sur != EGL_NO_SURFACE) {
+            return eglSwapBuffers(dpy, sur);
+        }
+        return true;
+    }
+
+    mHwc->prepare(mHwc, nullptr);
+    return !mHwc->set(mHwc, dpy, sur, 0);
 }
 
 ANativeWindowBuffer*
@@ -199,7 +209,7 @@ GonkDisplayICS::SetDispReleaseFd(int fd)
 
 GonkDisplay::NativeData
 GonkDisplayICS::GetNativeData(GonkDisplay::DisplayType aDisplayType,
-                              android::IGraphicBufferProducer* aProducer)
+                              android::IGraphicBufferProducer* aSink)
 {
     MOZ_ASSERT(aDisplayType == DISPLAY_PRIMARY, "ICS gonk supports primary display only.");
 

@@ -22,8 +22,8 @@
 #include "nsIPrintSettings.h"
 
 #include "mozilla/Logging.h"
-extern PRLogModuleInfo *GetLayoutPrintingLog();
-#define PR_PL(_p1)  MOZ_LOG(GetLayoutPrintingLog(), mozilla::LogLevel::Debug, _p1)
+extern mozilla::LazyLogModule gLayoutPrintingLog;
+#define PR_PL(_p1)  MOZ_LOG(gLayoutPrintingLog, mozilla::LogLevel::Debug, _p1)
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -102,23 +102,22 @@ nsPageFrame::Reflow(nsPresContext*           aPresContext,
 
     // Use the margins given in the @page rule.
     // If a margin is 'auto', use the margin from the print settings for that side.
-    nsMargin pageContentMargin;
     const nsStyleSides& marginStyle = kidReflowState.mStyleMargin->mMargin;
     NS_FOR_CSS_SIDES(side) {
       if (marginStyle.GetUnit(side) == eStyleUnit_Auto) {
-        pageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
+        mPageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
       } else {
-        pageContentMargin.Side(side) = kidReflowState.ComputedPhysicalMargin().Side(side);
+        mPageContentMargin.Side(side) = kidReflowState.ComputedPhysicalMargin().Side(side);
       }
     }
 
 
-    nscoord maxWidth = maxSize.width - pageContentMargin.LeftRight() / scale;
+    nscoord maxWidth = maxSize.width - mPageContentMargin.LeftRight() / scale;
     nscoord maxHeight;
     if (maxSize.height == NS_UNCONSTRAINEDSIZE) {
       maxHeight = NS_UNCONSTRAINEDSIZE;
     } else {
-      maxHeight = maxSize.height - pageContentMargin.TopBottom() / scale;
+      maxHeight = maxSize.height - mPageContentMargin.TopBottom() / scale;
     }
 
     // Check the width and height, if they're too small we reset the margins
@@ -126,11 +125,11 @@ nsPageFrame::Reflow(nsPresContext*           aPresContext,
     if (maxWidth < onePixelInTwips ||
        (maxHeight != NS_UNCONSTRAINEDSIZE && maxHeight < onePixelInTwips)) {
       NS_FOR_CSS_SIDES(side) {
-        pageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
+        mPageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
       }
-      maxWidth = maxSize.width - pageContentMargin.LeftRight() / scale;
+      maxWidth = maxSize.width - mPageContentMargin.LeftRight() / scale;
       if (maxHeight != NS_UNCONSTRAINEDSIZE) {
-        maxHeight = maxSize.height - pageContentMargin.TopBottom() / scale;
+        maxHeight = maxSize.height - mPageContentMargin.TopBottom() / scale;
       }
     }
 
@@ -138,8 +137,8 @@ nsPageFrame::Reflow(nsPresContext*           aPresContext,
     kidReflowState.SetComputedHeight(maxHeight);
 
     // calc location of frame
-    nscoord xc = pageContentMargin.left;
-    nscoord yc = pageContentMargin.top;
+    nscoord xc = mPageContentMargin.left;
+    nscoord yc = mPageContentMargin.top;
 
     // Get the child's desired size
     ReflowChild(frame, aPresContext, aDesiredSize, kidReflowState, xc, yc, 0, aStatus);
@@ -333,8 +332,11 @@ nsPageFrame::DrawHeaderFooter(nsRenderingContext& aRenderingContext,
 
   nscoord contentWidth = aWidth - (mPD->mEdgePaperMargin.left + mPD->mEdgePaperMargin.right);
 
-  if ((aHeaderFooter == eHeader && aHeight < mPD->mReflowMargin.top) ||
-      (aHeaderFooter == eFooter && aHeight < mPD->mReflowMargin.bottom)) {
+  gfxContext* gfx = aRenderingContext.ThebesContext();
+  DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
+
+  if ((aHeaderFooter == eHeader && aHeight < mPageContentMargin.top) ||
+      (aHeaderFooter == eFooter && aHeight < mPageContentMargin.bottom)) {
     nsAutoString str;
     ProcessSpecialCodes(aStr, str);
 
@@ -347,9 +349,10 @@ nsPageFrame::DrawHeaderFooter(nsRenderingContext& aRenderingContext,
       return; // bail is empty string
     }
     // find how much text fits, the "position" is the size of the available area
-    if (nsLayoutUtils::BinarySearchForPosition(&aRenderingContext, aFontMetrics,
-                                               text, 0, 0, 0, len,
-                                int32_t(contentWidth), indx, textWidth)) {
+    if (nsLayoutUtils::BinarySearchForPosition(drawTarget, aFontMetrics, text,
+                                               0, 0, 0, len,
+                                               int32_t(contentWidth), indx,
+                                               textWidth)) {
       if (indx < len-1 ) {
         // we can't fit in all the text
         if (indx > 3) {
@@ -383,14 +386,11 @@ nsPageFrame::DrawHeaderFooter(nsRenderingContext& aRenderingContext,
       y = aRect.YMost() - aHeight - mPD->mEdgePaperMargin.bottom;
     }
 
-    DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
-    gfxContext* gfx = aRenderingContext.ThebesContext();
-
     // set up new clip and draw the text
     gfx->Save();
     gfx->Clip(NSRectToSnappedRect(aRect, PresContext()->AppUnitsPerDevPixel(),
                                   *drawTarget));
-    aRenderingContext.ThebesContext()->SetColor(NS_RGB(0,0,0));
+    gfx->SetColor(Color(0.f, 0.f, 0.f));
     nsLayoutUtils::DrawString(this, aFontMetrics, &aRenderingContext,
                               str.get(), str.Length(),
                               nsPoint(x, y + aAscent));
@@ -464,7 +464,7 @@ GetNextPage(nsIFrame* aPageContentFrame)
     return nullptr;
   NS_ASSERTION(nextPageFrame->GetType() == nsGkAtoms::pageFrame,
                "pageFrame's sibling is not a page frame...");
-  nsIFrame* f = nextPageFrame->GetFirstPrincipalChild();
+  nsIFrame* f = nextPageFrame->PrincipalChildList().FirstChild();
   NS_ASSERTION(f, "pageFrame has no page content frame!");
   NS_ASSERTION(f->GetType() == nsGkAtoms::pageContentFrame,
                "pageFrame's child is not page content!");
@@ -624,17 +624,17 @@ nsPageFrame::PaintHeaderFooter(nsRenderingContext& aRenderingContext,
   }
 
   nsRect rect(aPt, mRect.Size());
-  aRenderingContext.ThebesContext()->SetColor(NS_RGB(0,0,0));
+  aRenderingContext.ThebesContext()->SetColor(Color(0.f, 0.f, 0.f));
 
-  gfxContextAutoDisableSubpixelAntialiasing disable(aRenderingContext.ThebesContext(), aDisableSubpixelAA);
+  DrawTargetAutoDisableSubpixelAntialiasing
+    disable(aRenderingContext.GetDrawTarget(), aDisableSubpixelAA);
 
   // Get the FontMetrics to determine width.height of strings
-  nsRefPtr<nsFontMetrics> fontMet;
-  pc->DeviceContext()->GetMetricsFor(mPD->mHeadFootFont, nullptr, false,
-                                     gfxFont::eHorizontal,
-                                     pc->GetUserFontSet(),
-                                     pc->GetTextPerfMetrics(),
-                                     *getter_AddRefs(fontMet));
+  nsFontMetrics::Params params;
+  params.userFontSet = pc->GetUserFontSet();
+  params.textPerf = pc->GetTextPerfMetrics();
+  RefPtr<nsFontMetrics> fontMet =
+    pc->DeviceContext()->GetMetricsFor(mPD->mHeadFootFont, params);
 
   nscoord ascent = 0;
   nscoord visibleHeight = 0;

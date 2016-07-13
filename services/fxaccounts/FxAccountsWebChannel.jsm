@@ -22,13 +22,41 @@ XPCOMUtils.defineLazyModuleGetter(this, "WebChannel",
                                   "resource://gre/modules/WebChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
                                   "resource://gre/modules/FxAccounts.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsStorageManagerCanStoreField",
+                                  "resource://gre/modules/FxAccountsStorage.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Weave",
+                                  "resource://services-sync/main.js");
 
 const COMMAND_PROFILE_CHANGE       = "profile:change";
 const COMMAND_CAN_LINK_ACCOUNT     = "fxaccounts:can_link_account";
 const COMMAND_LOGIN                = "fxaccounts:login";
+const COMMAND_LOGOUT               = "fxaccounts:logout";
+const COMMAND_DELETE               = "fxaccounts:delete";
+const COMMAND_SYNC_PREFERENCES     = "fxaccounts:sync_preferences";
+const COMMAND_CHANGE_PASSWORD      = "fxaccounts:change_password";
 
 const PREF_LAST_FXA_USER           = "identity.fxaccounts.lastSignedInUserHash";
 const PREF_SYNC_SHOW_CUSTOMIZATION = "services.sync-setup.ui.showCustomizationDialog";
+
+/**
+ * A helper function that extracts the message and stack from an error object.
+ * Returns a `{ message, stack }` tuple. `stack` will be null if the error
+ * doesn't have a stack trace.
+ */
+function getErrorDetails(error) {
+  let details = { message: String(error), stack: null };
+
+  // Adapted from Console.jsm.
+  if (error.stack) {
+    let frames = [];
+    for (let frame = error.stack; frame; frame = frame.caller) {
+      frames.push(String(frame).padStart(4));
+    }
+    details.stack = frames.join("\n");
+  }
+
+  return details;
+}
 
 /**
  * Create a new FxAccountsWebChannel to listen for account updates
@@ -108,6 +136,59 @@ this.FxAccountsWebChannel.prototype = {
     }
   },
 
+  _receiveMessage(message, sendingContext) {
+    let command = message.command;
+    let data = message.data;
+
+    switch (command) {
+      case COMMAND_PROFILE_CHANGE:
+        Services.obs.notifyObservers(null, ON_PROFILE_CHANGE_NOTIFICATION, data.uid);
+        break;
+      case COMMAND_LOGIN:
+        this._helpers.login(data).catch(error =>
+          this._sendError(error, message, sendingContext));
+        break;
+      case COMMAND_LOGOUT:
+      case COMMAND_DELETE:
+        this._helpers.logout(data.uid).catch(error =>
+          this._sendError(error, message, sendingContext));
+        break;
+      case COMMAND_CAN_LINK_ACCOUNT:
+        let canLinkAccount = this._helpers.shouldAllowRelink(data.email);
+
+        let response = {
+          command: command,
+          messageId: message.messageId,
+          data: { ok: canLinkAccount }
+        };
+
+        log.debug("FxAccountsWebChannel response", response);
+        this._channel.send(response, sendingContext);
+        break;
+      case COMMAND_SYNC_PREFERENCES:
+        this._helpers.openSyncPreferences(sendingContext.browser, data.entryPoint);
+        break;
+      case COMMAND_CHANGE_PASSWORD:
+        this._helpers.changePassword(data).catch(error =>
+          this._sendError(error, message, sendingContext));
+        break;
+      default:
+        log.warn("Unrecognized FxAccountsWebChannel command", command);
+        break;
+    }
+  },
+
+  _sendError(error, incomingMessage, sendingContext) {
+    log.error("Failed to handle FxAccountsWebChannel message", error);
+    this._channel.send({
+      command: incomingMessage.command,
+      messageId: incomingMessage.messageId,
+      data: {
+        error: getErrorDetails(error),
+      },
+    }, sendingContext);
+  },
+
   /**
    * Create a new channel with the WebChannelBroker, setup a callback listener
    * @private
@@ -134,32 +215,14 @@ this.FxAccountsWebChannel.prototype = {
      */
     let listener = (webChannelId, message, sendingContext) => {
       if (message) {
-        log.debug("FxAccountsWebChannel message received", message);
-        let command = message.command;
-        let data = message.data;
-
-        switch (command) {
-          case COMMAND_PROFILE_CHANGE:
-            Services.obs.notifyObservers(null, ON_PROFILE_CHANGE_NOTIFICATION, data.uid);
-            break;
-          case COMMAND_LOGIN:
-            this._helpers.login(data);
-            break;
-          case COMMAND_CAN_LINK_ACCOUNT:
-            let canLinkAccount = this._helpers.shouldAllowRelink(data.email);
-
-            let response = {
-              command: command,
-              messageId: message.messageId,
-              data: { ok: canLinkAccount }
-            };
-
-            log.debug("FxAccountsWebChannel response", response);
-            this._channel.send(response, sendingContext);
-            break;
-          default:
-            log.warn("Unrecognized FxAccountsWebChannel command", command);
-            break;
+        log.debug("FxAccountsWebChannel message received", message.command);
+        if (logPII) {
+          log.debug("FxAccountsWebChannel message details", message);
+        }
+        try {
+          this._receiveMessage(message, sendingContext);
+        } catch (error) {
+          this._sendError(error, message, sendingContext);
         }
       }
     };
@@ -200,7 +263,7 @@ this.FxAccountsWebChannelHelpers.prototype = {
     Services.prefs.setBoolPref(PREF_SYNC_SHOW_CUSTOMIZATION, showCustomizeSyncPref);
   },
 
-  getShowCustomizeSyncPref(showCustomizeSyncPref) {
+  getShowCustomizeSyncPref() {
     return Services.prefs.getBoolPref(PREF_SYNC_SHOW_CUSTOMIZATION);
   },
 
@@ -213,6 +276,19 @@ this.FxAccountsWebChannelHelpers.prototype = {
     if (accountData.customizeSync) {
       this.setShowCustomizeSyncPref(true);
       delete accountData.customizeSync;
+    }
+
+    if (accountData.declinedSyncEngines) {
+      let declinedSyncEngines = accountData.declinedSyncEngines;
+      log.debug("Received declined engines", declinedSyncEngines);
+      Weave.Service.engineManager.setDeclined(declinedSyncEngines);
+      declinedSyncEngines.forEach(engine => {
+        Services.prefs.setBoolPref("services.sync.engine." + engine, false);
+      });
+
+      // if we got declinedSyncEngines that means we do not need to show the customize screen.
+      this.setShowCustomizeSyncPref(false);
+      delete accountData.declinedSyncEngines;
     }
 
     // the user has already been shown the "can link account"
@@ -230,6 +306,42 @@ this.FxAccountsWebChannelHelpers.prototype = {
     return xps.whenLoaded().then(() => {
       return this._fxAccounts.setSignedInUser(accountData);
     });
+  },
+
+  /**
+   * logout the fxaccounts service
+   *
+   * @param the uid of the account which have been logged out
+   */
+  logout(uid) {
+    return fxAccounts.getSignedInUser().then(userData => {
+      if (userData.uid === uid) {
+        // true argument is `localOnly`, because server-side stuff
+        // has already been taken care of by the content server
+        return fxAccounts.signOut(true);
+      }
+    });
+  },
+
+  changePassword(credentials) {
+    // If |credentials| has fields that aren't handled by accounts storage,
+    // updateUserAccountData will throw - mainly to prevent errors in code
+    // that hard-codes field names.
+    // However, in this case the field names aren't really in our control.
+    // We *could* still insist the server know what fields names are valid,
+    // but that makes life difficult for the server when Firefox adds new
+    // features (ie, new fields) - forcing the server to track a map of
+    // versions to supported field names doesn't buy us much.
+    // So we just remove field names we know aren't handled.
+    let newCredentials = {};
+    for (let name of Object.keys(credentials)) {
+      if (name == "email" || name == "uid" || FxAccountsStorageManagerCanStoreField(name)) {
+        newCredentials[name] = credentials[name];
+      } else {
+        log.info("changePassword ignoring unsupported field", name);
+      }
+    }
+    return this._fxAccounts.updateUserAccountData(newCredentials);
   },
 
   /**
@@ -273,6 +385,22 @@ this.FxAccountsWebChannelHelpers.prototype = {
   },
 
   /**
+   * Open Sync Preferences in the current tab of the browser
+   *
+   * @param {Object} browser the browser in which to open preferences
+   * @param {String} [entryPoint] entryPoint to use for logging
+   */
+  openSyncPreferences(browser, entryPoint) {
+    let uri = "about:preferences";
+    if (entryPoint) {
+      uri += "?entrypoint=" + encodeURIComponent(entryPoint);
+    }
+    uri += "#sync";
+
+    browser.loadURI(uri);
+  },
+
+  /**
    * If a user signs in using a different account, the data from the
    * previous account and the new account will be merged. Ask the user
    * if they want to continue.
@@ -312,7 +440,7 @@ this.FxAccountsWebChannelHelpers.prototype = {
   }
 };
 
-let singleton;
+var singleton;
 // The entry-point for this module, which ensures only one of our channels is
 // ever created - we require this because the WebChannel is global in scope
 // (eg, it uses the observer service to tell interested parties of interesting
@@ -320,12 +448,20 @@ let singleton;
 // sent multiple times.
 this.EnsureFxAccountsWebChannel = function() {
   if (!singleton) {
-    let contentUri = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.webchannel.uri");
-    // The FxAccountsWebChannel listens for events and updates
-    // the state machine accordingly.
-    singleton = new this.FxAccountsWebChannel({
-      content_uri: contentUri,
-      channel_id: WEBCHANNEL_ID,
-    });
+    try {
+      let contentUri = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.webchannel.uri");
+      if (contentUri) {
+        // The FxAccountsWebChannel listens for events and updates
+        // the state machine accordingly.
+        singleton = new this.FxAccountsWebChannel({
+          content_uri: contentUri,
+          channel_id: WEBCHANNEL_ID,
+        });
+      } else {
+        log.warn("FxA WebChannel functionaly is disabled due to no URI pref.");
+      }
+    } catch (ex) {
+      log.error("Failed to create FxA WebChannel", ex);
+    }
   }
 }

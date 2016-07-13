@@ -9,8 +9,15 @@
 
 #include "windows.h" // HRESULT, DWORD
 #include "MediaDecoderReader.h"
+#include "MediaResource.h"
 #include "mozilla/RefPtr.h"
 #include "MP3FrameParser.h"
+
+// Add the graph to the Running Object Table so that we can connect
+// to this graph with GraphEdit/GraphStudio. Note: on Vista and up you must
+// also regsvr32 proppage.dll from the Windows SDK.
+// See: http://msdn.microsoft.com/en-us/library/ms787252(VS.85).aspx
+// #define DIRECTSHOW_REGISTER_GRAPH
 
 struct IGraphBuilder;
 struct IMediaControl;
@@ -43,30 +50,17 @@ public:
 
   virtual ~DirectShowReader();
 
-  nsresult Init(MediaDecoderReader* aCloneDonor) override;
-
   bool DecodeAudioData() override;
   bool DecodeVideoFrame(bool &aKeyframeSkip,
                         int64_t aTimeThreshold) override;
 
-  bool HasAudio() override;
-  bool HasVideo() override;
-
   nsresult ReadMetadata(MediaInfo* aInfo,
                         MetadataTags** aTags) override;
 
-  nsRefPtr<SeekPromise>
-  Seek(int64_t aTime, int64_t aEndTime) override;
-
-protected:
-  void NotifyDataArrivedInternal(uint32_t aLength,
-                                 int64_t aOffset) override;
-public:
-
-  bool IsMediaSeekable() override;
+  RefPtr<SeekPromise>
+  Seek(SeekTarget aTarget, int64_t aEndTime) override;
 
 private:
-
   // Notifies the filter graph that playback is complete. aStatus is
   // the code to send to the filter graph. Always returns false, so
   // that we can just "return Finish()" from DecodeAudioData().
@@ -92,7 +86,7 @@ private:
   // the MP3 frames to get a more accuate estimate of the duration.
   MP3FrameParser mMP3FrameParser;
 
-#ifdef DEBUG
+#ifdef DIRECTSHOW_REGISTER_GRAPH
   // Used to add/remove the filter graph to the Running Object Table. You can
   // connect GraphEdit/GraphStudio to the graph to observe and/or debug its
   // topology and state.
@@ -107,9 +101,6 @@ private:
 
   // Number of bytes per sample. Can be either 1 or 2.
   uint32_t mBytesPerSample;
-
-  // Duration of the stream, in microseconds.
-  int64_t mDuration;
 };
 
 } // namespace mozilla

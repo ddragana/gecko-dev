@@ -13,6 +13,8 @@
 namespace mozilla {
 
 using gfx::DataSourceSurface;
+using gfx::IntSize;
+using gfx::SamplingFilter;
 using gfx::SourceSurface;
 using layers::LayerManager;
 using layers::ImageContainer;
@@ -174,6 +176,14 @@ ImageWrapper::GetFrame(uint32_t aWhichFrame,
   return mInnerImage->GetFrame(aWhichFrame, aFlags);
 }
 
+NS_IMETHODIMP_(already_AddRefed<SourceSurface>)
+ImageWrapper::GetFrameAtSize(const IntSize& aSize,
+                             uint32_t aWhichFrame,
+                             uint32_t aFlags)
+{
+  return mInnerImage->GetFrameAtSize(aSize, aWhichFrame, aFlags);
+}
+
 NS_IMETHODIMP_(bool)
 ImageWrapper::IsOpaque()
 {
@@ -197,18 +207,12 @@ ImageWrapper::Draw(gfxContext* aContext,
                    const nsIntSize& aSize,
                    const ImageRegion& aRegion,
                    uint32_t aWhichFrame,
-                   GraphicsFilter aFilter,
+                   SamplingFilter aSamplingFilter,
                    const Maybe<SVGImageContext>& aSVGContext,
                    uint32_t aFlags)
 {
   return mInnerImage->Draw(aContext, aSize, aRegion, aWhichFrame,
-                           aFilter, aSVGContext, aFlags);
-}
-
-NS_IMETHODIMP
-ImageWrapper::RequestDecode()
-{
-  return mInnerImage->RequestDecode();
+                           aSamplingFilter, aSVGContext, aFlags);
 }
 
 NS_IMETHODIMP
@@ -287,13 +291,20 @@ ImageWrapper::SetAnimationStartTime(const TimeStamp& aTime)
   mInnerImage->SetAnimationStartTime(aTime);
 }
 
+void
+ImageWrapper::PropagateUseCounters(nsIDocument* aParentDocument)
+{
+  mInnerImage->PropagateUseCounters(aParentDocument);
+}
+
 nsIntSize
 ImageWrapper::OptimalImageSizeForDest(const gfxSize& aDest,
                                       uint32_t aWhichFrame,
-                                      GraphicsFilter aFilter, uint32_t aFlags)
+                                      SamplingFilter aSamplingFilter,
+                                      uint32_t aFlags)
 {
-  return mInnerImage->OptimalImageSizeForDest(aDest, aWhichFrame, aFilter,
-                                              aFlags);
+  return mInnerImage->OptimalImageSizeForDest(aDest, aWhichFrame,
+                                              aSamplingFilter, aFlags);
 }
 
 NS_IMETHODIMP_(nsIntRect)

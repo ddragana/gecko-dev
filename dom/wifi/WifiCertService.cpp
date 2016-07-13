@@ -4,14 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// XXX: This must be done prior to including cert.h (directly or indirectly).
-// CERT_AddTempCertToPerm is exposed as __CERT_AddTempCertToPerm.
-#define CERT_AddTempCertToPerm __CERT_AddTempCertToPerm
-
 #include "WifiCertService.h"
 
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/ModuleUtils.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/dom/File.h"
@@ -303,7 +299,7 @@ private:
     return NS_OK;
   }
 
-  nsRefPtr<Blob> mBlob;
+  RefPtr<Blob> mBlob;
   nsString mPassword;
   WifiCertServiceResultOptions mResult;
 };
@@ -439,6 +435,12 @@ WifiCertService::WifiCertService()
 WifiCertService::~WifiCertService()
 {
   MOZ_ASSERT(!gWifiCertService);
+
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown()) {
+    return;
+  }
+  shutdown(calledFromObject);
 }
 
 already_AddRefed<WifiCertService>
@@ -455,7 +457,7 @@ WifiCertService::FactoryCreate()
     ClearOnShutdown(&gWifiCertService);
   }
 
-  nsRefPtr<WifiCertService> service = gWifiCertService.get();
+  RefPtr<WifiCertService> service = gWifiCertService.get();
   return service.forget();
 }
 
@@ -464,7 +466,7 @@ WifiCertService::ImportCert(int32_t aId, nsIDOMBlob* aCertBlob,
                             const nsAString& aCertPassword,
                             const nsAString& aCertNickname)
 {
-  nsRefPtr<Blob> blob = static_cast<Blob*>(aCertBlob);
+  RefPtr<Blob> blob = static_cast<Blob*>(aCertBlob);
   RefPtr<CryptoTask> task = new ImportCertTask(aId, blob, aCertPassword,
                                                aCertNickname);
   return task->Dispatch("WifiImportCert");

@@ -10,19 +10,14 @@ UNIFIED_SOURCES += [
     'nsIconURI.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
-
 FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
 platform = None
 
-if CONFIG['MOZ_WIDGET_GTK']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     platform = 'gtk'
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    platform = 'qt'
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     platform = 'win'

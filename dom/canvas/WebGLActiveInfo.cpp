@@ -9,7 +9,7 @@
 
 namespace mozilla {
 
-static uint8_t
+uint8_t
 ElemSizeFromType(GLenum elemType)
 {
     switch (elemType) {
@@ -72,7 +72,7 @@ ElemSizeFromType(GLenum elemType)
         return 16;
 
     default:
-        MOZ_CRASH("Bad `elemType`.");
+        MOZ_CRASH("GFX: Bad `elemType`.");
     }
 }
 

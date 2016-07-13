@@ -18,13 +18,13 @@
 #include "jswatchpoint.h"
 #include "jsweakmap.h"
 #include "jswrapper.h"
-#include "prmjtime.h"
 
+#include "builtin/Promise.h"
 #include "builtin/TestingFunctions.h"
 #include "js/Proxy.h"
 #include "proxy/DeadObjectProxy.h"
 #include "vm/ArgumentsObject.h"
-#include "vm/WeakMapObject.h"
+#include "vm/Time.h"
 #include "vm/WrapperObject.h"
 
 #include "jsobjinlines.h"
@@ -37,7 +37,6 @@ using namespace js;
 
 using mozilla::Move;
 using mozilla::PodArrayZero;
-using mozilla::UniquePtr;
 
 // Required by PerThreadDataFriendFields::getMainThread()
 JS_STATIC_ASSERT(offsetof(JSRuntime, mainThread) ==
@@ -53,21 +52,21 @@ PerThreadDataFriendFields::PerThreadDataFriendFields()
 }
 
 JS_FRIEND_API(void)
-js::SetSourceHook(JSRuntime* rt, UniquePtr<SourceHook> hook)
+js::SetSourceHook(JSContext* cx, mozilla::UniquePtr<SourceHook> hook)
 {
-    rt->sourceHook = Move(hook);
+    cx->sourceHook = Move(hook);
 }
 
-JS_FRIEND_API(UniquePtr<SourceHook>)
-js::ForgetSourceHook(JSRuntime* rt)
+JS_FRIEND_API(mozilla::UniquePtr<SourceHook>)
+js::ForgetSourceHook(JSContext* cx)
 {
-    return Move(rt->sourceHook);
+    return Move(cx->sourceHook);
 }
 
 JS_FRIEND_API(void)
-JS_SetGrayGCRootsTracer(JSRuntime* rt, JSTraceDataOp traceOp, void* data)
+JS_SetGrayGCRootsTracer(JSContext* cx, JSTraceDataOp traceOp, void* data)
 {
-    rt->gc.setGrayRootsTracer(traceOp, data);
+    cx->gc.setGrayRootsTracer(traceOp, data);
 }
 
 JS_FRIEND_API(JSObject*)
@@ -83,10 +82,10 @@ JS_FindCompilationScope(JSContext* cx, HandleObject objArg)
         obj = UncheckedUnwrap(obj);
 
     /*
-     * Innerize the target_obj so that we compile in the correct (inner)
-     * scope.
+     * Get the Window if `obj` is a WindowProxy so that we compile in the
+     * correct (global) scope.
      */
-    return GetInnerObject(obj);
+    return ToWindowIfWindowProxy(obj);
 }
 
 JS_FRIEND_API(JSFunction*)
@@ -140,9 +139,14 @@ JS_NewObjectWithUniqueType(JSContext* cx, const JSClass* clasp, HandleObject pro
 JS_FRIEND_API(JSObject*)
 JS_NewObjectWithoutMetadata(JSContext* cx, const JSClass* clasp, JS::Handle<JSObject*> proto)
 {
-    // Use an AutoEnterAnalysis to suppress invocation of the metadata callback.
-    AutoEnterAnalysis enter(cx);
+    AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
     return JS_NewObjectWithGivenProto(cx, clasp, proto);
+}
+
+JS_FRIEND_API(bool)
+JS_GetIsSecureContext(JSCompartment* compartment)
+{
+    return compartment->creationOptions().secureContext();
 }
 
 JS_FRIEND_API(JSPrincipals*)
@@ -165,7 +169,7 @@ JS_SetCompartmentPrincipals(JSCompartment* compartment, JSPrincipals* principals
 
     // Clear out the old principals, if any.
     if (compartment->principals()) {
-        JS_DropPrincipals(compartment->runtimeFromMainThread(), compartment->principals());
+        JS_DropPrincipals(compartment->contextFromMainThread(), compartment->principals());
         compartment->setPrincipals(nullptr);
         // We'd like to assert that our new principals is always same-origin
         // with the old one, but JSPrincipals doesn't give us a way to do that.
@@ -205,15 +209,15 @@ JS_WrapPropertyDescriptor(JSContext* cx, JS::MutableHandle<js::PropertyDescripto
 JS_FRIEND_API(void)
 JS_TraceShapeCycleCollectorChildren(JS::CallbackTracer* trc, JS::GCCellPtr shape)
 {
-    MOZ_ASSERT(shape.isShape());
-    TraceCycleCollectorChildren(trc, static_cast<Shape*>(shape.asCell()));
+    MOZ_ASSERT(shape.is<Shape>());
+    TraceCycleCollectorChildren(trc, &shape.as<Shape>());
 }
 
 JS_FRIEND_API(void)
 JS_TraceObjectGroupCycleCollectorChildren(JS::CallbackTracer* trc, JS::GCCellPtr group)
 {
-    MOZ_ASSERT(group.isObjectGroup());
-    TraceCycleCollectorChildren(trc, static_cast<ObjectGroup*>(group.asCell()));
+    MOZ_ASSERT(group.is<ObjectGroup>());
+    TraceCycleCollectorChildren(trc, &group.as<ObjectGroup>());
 }
 
 static bool
@@ -244,6 +248,9 @@ JS_DefineFunctionsWithHelp(JSContext* cx, HandleObject obj, const JSFunctionSpec
         if (!fun)
             return false;
 
+        if (fs->jitInfo)
+            fun->setJitInfo(fs->jitInfo);
+
         if (fs->usage) {
             if (!DefineHelpProperty(cx, fun, "usage", fs->usage))
                 return false;
@@ -259,9 +266,47 @@ JS_DefineFunctionsWithHelp(JSContext* cx, HandleObject obj, const JSFunctionSpec
 }
 
 JS_FRIEND_API(bool)
-js::ObjectClassIs(JSContext* cx, HandleObject obj, ESClassValue classValue)
+js::GetBuiltinClass(JSContext* cx, HandleObject obj, ESClass* cls)
 {
-    return ObjectClassIs(obj, classValue, cx);
+    if (MOZ_UNLIKELY(obj->is<ProxyObject>()))
+        return Proxy::getBuiltinClass(cx, obj, cls);
+
+    if (obj->is<PlainObject>() || obj->is<UnboxedPlainObject>())
+        *cls = ESClass::Object;
+    else if (obj->is<ArrayObject>() || obj->is<UnboxedArrayObject>())
+        *cls = ESClass::Array;
+    else if (obj->is<NumberObject>())
+        *cls = ESClass::Number;
+    else if (obj->is<StringObject>())
+        *cls = ESClass::String;
+    else if (obj->is<BooleanObject>())
+        *cls = ESClass::Boolean;
+    else if (obj->is<RegExpObject>())
+        *cls = ESClass::RegExp;
+    else if (obj->is<ArrayBufferObject>())
+        *cls = ESClass::ArrayBuffer;
+    else if (obj->is<SharedArrayBufferObject>())
+        *cls = ESClass::SharedArrayBuffer;
+    else if (obj->is<DateObject>())
+        *cls = ESClass::Date;
+    else if (obj->is<SetObject>())
+        *cls = ESClass::Set;
+    else if (obj->is<MapObject>())
+        *cls = ESClass::Map;
+    else if (obj->is<PromiseObject>())
+        *cls = ESClass::Promise;
+    else if (obj->is<MapIteratorObject>())
+        *cls = ESClass::MapIterator;
+    else if (obj->is<SetIteratorObject>())
+        *cls = ESClass::SetIterator;
+    else if (obj->is<ArgumentsObject>())
+        *cls = ESClass::Arguments;
+    else if (obj->is<ErrorObject>())
+        *cls = ESClass::Error;
+    else
+        *cls = ESClass::Other;
+
+    return true;
 }
 
 JS_FRIEND_API(const char*)
@@ -316,8 +361,7 @@ JS_FRIEND_API(JSObject*)
 js::GetPrototypeNoProxy(JSObject* obj)
 {
     MOZ_ASSERT(!obj->is<js::ProxyObject>());
-    MOZ_ASSERT(!obj->getTaggedProto().isLazy());
-    return obj->getTaggedProto().toObjectOrNull();
+    return obj->staticPrototype();
 }
 
 JS_FRIEND_API(void)
@@ -364,10 +408,18 @@ JS_FRIEND_API(JSFunction*)
 js::GetOutermostEnclosingFunctionOfScriptedCaller(JSContext* cx)
 {
     ScriptFrameIter iter(cx);
+
+    // Skip eval frames.
+    while (!iter.done() && iter.isEvalFrame())
+        ++iter;
+
     if (iter.done())
         return nullptr;
 
     if (!iter.isFunctionFrame())
+        return nullptr;
+
+    if (iter.compartment() != cx->compartment())
         return nullptr;
 
     RootedFunction curr(cx, iter.callee(cx));
@@ -375,6 +427,8 @@ js::GetOutermostEnclosingFunctionOfScriptedCaller(JSContext* cx)
         if (i.type() == StaticScopeIter<NoGC>::Function)
             curr = &i.fun();
     }
+
+    assertSameCompartment(cx, curr);
     return curr;
 }
 
@@ -459,6 +513,13 @@ js::GetObjectProto(JSContext* cx, JS::Handle<JSObject*> obj, JS::MutableHandle<J
     return true;
 }
 
+JS_FRIEND_API(JSObject*)
+js::GetStaticPrototype(JSObject* obj)
+{
+    MOZ_ASSERT(obj->hasStaticPrototype());
+    return obj->staticPrototype();
+}
+
 JS_FRIEND_API(bool)
 js::GetOriginalEval(JSContext* cx, HandleObject scope, MutableHandleObject eval)
 {
@@ -479,9 +540,9 @@ js::SetReservedOrProxyPrivateSlotWithBarrier(JSObject* obj, size_t slot, const j
 }
 
 void
-js::SetPreserveWrapperCallback(JSRuntime* rt, PreserveWrapperCallback callback)
+js::SetPreserveWrapperCallback(JSContext* cx, PreserveWrapperCallback callback)
 {
-    rt->preserveWrapperCallback = callback;
+    cx->preserveWrapperCallback = callback;
 }
 
 /*
@@ -545,29 +606,36 @@ js::ZoneGlobalsAreAllGray(JS::Zone* zone)
     return true;
 }
 
-JS_FRIEND_API(JS::TraceKind)
-js::GCThingTraceKind(void* thing)
-{
-    MOZ_ASSERT(thing);
-    return static_cast<js::gc::Cell*>(thing)->getTraceKind();
-}
+namespace {
+struct VisitGrayCallbackFunctor {
+    GCThingCallback callback_;
+    void* closure_;
+    VisitGrayCallbackFunctor(GCThingCallback callback, void* closure)
+      : callback_(callback), closure_(closure)
+    {}
+
+    using ReturnType = void;
+    template <class T>
+    ReturnType operator()(T tp) const {
+        if ((*tp)->isTenured() && (*tp)->asTenured().isMarked(gc::GRAY))
+            callback_(closure_, JS::GCCellPtr(*tp));
+    }
+};
+} // namespace (anonymous)
 
 JS_FRIEND_API(void)
 js::VisitGrayWrapperTargets(Zone* zone, GCThingCallback callback, void* closure)
 {
     for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
-        for (JSCompartment::WrapperEnum e(comp); !e.empty(); e.popFront()) {
-            gc::Cell* thing = e.front().key().wrapped;
-            if (thing->isTenured() && thing->asTenured().isMarked(gc::GRAY))
-                callback(closure, JS::GCCellPtr(thing, thing->asTenured().getTraceKind()));
-        }
+        for (JSCompartment::WrapperEnum e(comp); !e.empty(); e.popFront())
+            e.front().mutableKey().applyToWrapped(VisitGrayCallbackFunctor(callback, closure));
     }
 }
 
 JS_FRIEND_API(JSObject*)
 js::GetWeakmapKeyDelegate(JSObject* key)
 {
-    if (JSWeakmapKeyDelegateOp op = key->getClass()->ext.weakmapKeyDelegateOp)
+    if (JSWeakmapKeyDelegateOp op = key->getClass()->extWeakmapKeyDelegateOp())
         return op(key);
     return nullptr;
 }
@@ -579,9 +647,9 @@ js::StringToLinearStringSlow(JSContext* cx, JSString* str)
 }
 
 JS_FRIEND_API(void)
-JS_SetAccumulateTelemetryCallback(JSRuntime* rt, JSAccumulateTelemetryDataCallback callback)
+JS_SetAccumulateTelemetryCallback(JSContext* cx, JSAccumulateTelemetryDataCallback callback)
 {
-    rt->setTelemetryCallback(rt, callback);
+    cx->setTelemetryCallback(cx, callback);
 }
 
 JS_FRIEND_API(JSObject*)
@@ -592,34 +660,74 @@ JS_CloneObject(JSContext* cx, HandleObject obj, HandleObject protoArg)
 }
 
 #ifdef DEBUG
+
 JS_FRIEND_API(void)
-js::DumpString(JSString* str)
+js::DumpString(JSString* str, FILE* fp)
 {
-    str->dump();
+    str->dump(fp);
 }
 
 JS_FRIEND_API(void)
-js::DumpAtom(JSAtom* atom)
+js::DumpAtom(JSAtom* atom, FILE* fp)
 {
-    atom->dump();
+    atom->dump(fp);
 }
 
 JS_FRIEND_API(void)
-js::DumpChars(const char16_t* s, size_t n)
+js::DumpChars(const char16_t* s, size_t n, FILE* fp)
 {
-    fprintf(stderr, "char16_t * (%p) = ", (void*) s);
-    JSString::dumpChars(s, n);
-    fputc('\n', stderr);
+    fprintf(fp, "char16_t * (%p) = ", (void*) s);
+    JSString::dumpChars(s, n, fp);
+    fputc('\n', fp);
 }
 
 JS_FRIEND_API(void)
-js::DumpObject(JSObject* obj)
+js::DumpObject(JSObject* obj, FILE* fp)
 {
     if (!obj) {
-        fprintf(stderr, "NULL\n");
+        fprintf(fp, "NULL\n");
         return;
     }
-    obj->dump();
+    obj->dump(fp);
+}
+
+JS_FRIEND_API(void)
+js::DumpString(JSString* str) {
+    DumpString(str, stderr);
+}
+JS_FRIEND_API(void)
+js::DumpAtom(JSAtom* atom) {
+    DumpAtom(atom, stderr);
+}
+JS_FRIEND_API(void)
+js::DumpObject(JSObject* obj) {
+    DumpObject(obj, stderr);
+}
+JS_FRIEND_API(void)
+js::DumpChars(const char16_t* s, size_t n) {
+    DumpChars(s, n, stderr);
+}
+JS_FRIEND_API(void)
+js::DumpValue(const JS::Value& val) {
+    DumpValue(val, stderr);
+}
+JS_FRIEND_API(void)
+js::DumpId(jsid id) {
+    DumpId(id, stderr);
+}
+JS_FRIEND_API(void)
+js::DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start)
+{
+    DumpInterpreterFrame(cx, stderr, start);
+}
+JS_FRIEND_API(bool)
+js::DumpPC(JSContext* cx) {
+    return DumpPC(cx, stdout);
+}
+JS_FRIEND_API(bool)
+js::DumpScript(JSContext* cx, JSScript* scriptArg)
+{
+    return DumpScript(cx, scriptArg, stdout);
 }
 
 #endif
@@ -656,6 +764,21 @@ FormatValue(JSContext* cx, const Value& vArg, JSAutoByteString& bytes)
     return buf;
 }
 
+// Wrapper for JS_sprintf_append() that reports allocation failure to the
+// context.
+template <typename... Args>
+static char*
+sprintf_append(JSContext* cx, char* buf, Args&&... args)
+{
+    char* result = JS_sprintf_append(buf, mozilla::Forward<Args>(args)...);
+    if (!result) {
+        ReportOutOfMemory(cx);
+        return nullptr;
+    }
+
+    return result;
+}
+
 static char*
 FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
             bool showArgs, bool showLocals, bool showThisProps)
@@ -675,21 +798,28 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
         funname = fun->displayAtom();
 
     RootedValue thisVal(cx);
-    if (iter.hasUsableAbstractFramePtr() && iter.computeThis(cx)) {
-        thisVal = iter.computedThisValue();
+    if (iter.hasUsableAbstractFramePtr() &&
+        iter.isFunctionFrame() &&
+        fun && !fun->isArrow() && !fun->isDerivedClassConstructor())
+    {
+        if (!GetFunctionThis(cx, iter.abstractFramePtr(), &thisVal))
+            return nullptr;
     }
 
     // print the frame number and function name
     if (funname) {
         JSAutoByteString funbytes;
-        buf = JS_sprintf_append(buf, "%d %s(", num, funbytes.encodeLatin1(cx, funname));
+        char* str = funbytes.encodeLatin1(cx, funname);
+        if (!str)
+            return nullptr;
+        buf = sprintf_append(cx, buf, "%d %s(", num, str);
     } else if (fun) {
-        buf = JS_sprintf_append(buf, "%d anonymous(", num);
+        buf = sprintf_append(cx, buf, "%d anonymous(", num);
     } else {
-        buf = JS_sprintf_append(buf, "%d <TOP LEVEL>", num);
+        buf = sprintf_append(cx, buf, "%d <TOP LEVEL>", num);
     }
     if (!buf)
-        return buf;
+        return nullptr;
 
     if (showArgs && iter.hasArgs()) {
         BindingIter bi(script);
@@ -703,17 +833,26 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
                         break;
                     }
                 }
-            } else if (script->argsObjAliasesFormals() && iter.hasArgsObj()) {
-                arg = iter.argsObj().arg(i);
-            } else {
-                if (iter.hasUsableAbstractFramePtr())
+            } else if (iter.hasUsableAbstractFramePtr()) {
+                if (script->analyzedArgsUsage() &&
+                    script->argsObjAliasesFormals() &&
+                    iter.hasArgsObj())
+                {
+                    arg = iter.argsObj().arg(i);
+                } else {
                     arg = iter.unaliasedActual(i, DONT_CHECK_ALIASING);
-                else
-                    arg = MagicValue(JS_OPTIMIZED_OUT);
+                }
+            } else {
+                arg = MagicValue(JS_OPTIMIZED_OUT);
             }
 
             JSAutoByteString valueBytes;
             const char* value = FormatValue(cx, arg, valueBytes);
+            if (!value) {
+                if (cx->isThrowingOutOfMemory())
+                    return nullptr;
+                cx->clearPendingException();
+            }
 
             JSAutoByteString nameBytes;
             const char* name = nullptr;
@@ -721,40 +860,40 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
             if (i < iter.numFormalArgs()) {
                 MOZ_ASSERT(i == bi.argIndex());
                 name = nameBytes.encodeLatin1(cx, bi->name());
-                if (!buf)
+                if (!name)
                     return nullptr;
                 bi++;
             }
 
             if (value) {
-                buf = JS_sprintf_append(buf, "%s%s%s%s%s%s",
-                                        !first ? ", " : "",
-                                        name ? name :"",
-                                        name ? " = " : "",
-                                        arg.isString() ? "\"" : "",
-                                        value,
-                                        arg.isString() ? "\"" : "");
+                buf = sprintf_append(cx, buf, "%s%s%s%s%s%s",
+                                     !first ? ", " : "",
+                                     name ? name :"",
+                                     name ? " = " : "",
+                                     arg.isString() ? "\"" : "",
+                                     value,
+                                     arg.isString() ? "\"" : "");
                 if (!buf)
-                    return buf;
+                    return nullptr;
 
                 first = false;
             } else {
-                buf = JS_sprintf_append(buf, "    <Failed to get argument while inspecting stack frame>\n");
+                buf = sprintf_append(cx, buf,
+                                     "    <Failed to get argument while inspecting stack frame>\n");
                 if (!buf)
-                    return buf;
-                cx->clearPendingException();
+                    return nullptr;
 
             }
         }
     }
 
     // print filename and line number
-    buf = JS_sprintf_append(buf, "%s [\"%s\":%d]\n",
-                            fun ? ")" : "",
-                            filename ? filename : "<unknown>",
-                            lineno);
+    buf = sprintf_append(cx, buf, "%s [\"%s\":%d]\n",
+                         fun ? ")" : "",
+                         filename ? filename : "<unknown>",
+                         lineno);
     if (!buf)
-        return buf;
+        return nullptr;
 
 
     // Note: Right now we don't dump the local variables anymore, because
@@ -765,17 +904,21 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
         if (!thisVal.isUndefined()) {
             JSAutoByteString thisValBytes;
             RootedString thisValStr(cx, ToString<CanGC>(cx, thisVal));
-            const char* str = nullptr;
-            if (thisValStr &&
-                (str = thisValBytes.encodeLatin1(cx, thisValStr)))
-            {
-                buf = JS_sprintf_append(buf, "    this = %s\n", str);
-                if (!buf)
-                    return buf;
-            } else {
-                buf = JS_sprintf_append(buf, "    <failed to get 'this' value>\n");
+            if (!thisValStr) {
+                if (cx->isThrowingOutOfMemory())
+                    return nullptr;
                 cx->clearPendingException();
             }
+            if (thisValStr) {
+                const char* str = thisValBytes.encodeLatin1(cx, thisValStr);
+                if (!str)
+                    return nullptr;
+                buf = sprintf_append(cx, buf, "    this = %s\n", str);
+            } else {
+                buf = sprintf_append(cx, buf, "    <failed to get 'this' value>\n");
+            }
+            if (!buf)
+                return nullptr;
         }
     }
 
@@ -784,8 +927,9 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
 
         AutoIdVector keys(cx);
         if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY, &keys)) {
+            if (cx->isThrowingOutOfMemory())
+                return nullptr;
             cx->clearPendingException();
-            return buf;
         }
 
         RootedId id(cx);
@@ -795,27 +939,44 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
             RootedValue v(cx);
 
             if (!GetProperty(cx, obj, obj, id, &v)) {
-                buf = JS_sprintf_append(buf, "    <Failed to fetch property while inspecting stack frame>\n");
+                if (cx->isThrowingOutOfMemory())
+                    return nullptr;
                 cx->clearPendingException();
+                buf = sprintf_append(cx, buf,
+                                     "    <Failed to fetch property while inspecting stack frame>\n");
+                if (!buf)
+                    return nullptr;
                 continue;
             }
 
             JSAutoByteString nameBytes;
-            JSAutoByteString valueBytes;
             const char* name = FormatValue(cx, key, nameBytes);
-            const char* value = FormatValue(cx, v, valueBytes);
-            if (name && value) {
-                buf = JS_sprintf_append(buf, "    this.%s = %s%s%s\n",
-                                        name,
-                                        v.isString() ? "\"" : "",
-                                        value,
-                                        v.isString() ? "\"" : "");
-                if (!buf)
-                    return buf;
-            } else {
-                buf = JS_sprintf_append(buf, "    <Failed to format values while inspecting stack frame>\n");
+            if (!name) {
+                if (cx->isThrowingOutOfMemory())
+                    return nullptr;
                 cx->clearPendingException();
             }
+
+            JSAutoByteString valueBytes;
+            const char* value = FormatValue(cx, v, valueBytes);
+            if (!value) {
+                if (cx->isThrowingOutOfMemory())
+                    return nullptr;
+                cx->clearPendingException();
+            }
+
+            if (name && value) {
+                buf = sprintf_append(cx, buf, "    this.%s = %s%s%s\n",
+                                     name,
+                                     v.isString() ? "\"" : "",
+                                     value,
+                                     v.isString() ? "\"" : "");
+            } else {
+                buf = sprintf_append(cx, buf,
+                                     "    <Failed to format values while inspecting stack frame>\n");
+            }
+            if (!buf)
+                return nullptr;
         }
     }
 
@@ -830,6 +991,8 @@ JS::FormatStackDump(JSContext* cx, char* buf, bool showArgs, bool showLocals, bo
 
     for (AllFramesIter i(cx); !i.done(); ++i) {
         buf = FormatFrame(cx, i, buf, num, showArgs, showLocals, showThisProps);
+        if (!buf)
+            return nullptr;
         num++;
     }
 
@@ -837,6 +1000,28 @@ JS::FormatStackDump(JSContext* cx, char* buf, bool showArgs, bool showLocals, bo
         buf = JS_sprintf_append(buf, "JavaScript stack is empty\n");
 
     return buf;
+}
+
+extern JS_FRIEND_API(bool)
+JS::ForceLexicalInitialization(JSContext *cx, HandleObject obj)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, obj);
+
+    bool initializedAny = false;
+    NativeObject* nobj = &obj->as<NativeObject>();
+
+    for (Shape::Range<NoGC> r(nobj->lastProperty()); !r.empty(); r.popFront()) {
+        Shape* s = &r.front();
+        Value v = nobj->getSlot(s->slot());
+        if (s->hasSlot() && v.isMagic() && v.whyMagic() == JS_UNINITIALIZED_LEXICAL) {
+            nobj->setSlot(s->slot(), UndefinedValue());
+            initializedAny = true;
+        }
+
+    }
+    return initializedAny;
 }
 
 struct DumpHeapTracer : public JS::CallbackTracer, public WeakMapTracer
@@ -852,8 +1037,8 @@ struct DumpHeapTracer : public JS::CallbackTracer, public WeakMapTracer
   private:
     void trace(JSObject* map, JS::GCCellPtr key, JS::GCCellPtr value) override {
         JSObject* kdelegate = nullptr;
-        if (key.isObject())
-            kdelegate = js::GetWeakmapKeyDelegate(key.toObject());
+        if (key.is<JSObject>())
+            kdelegate = js::GetWeakmapKeyDelegate(&key.as<JSObject>());
 
         fprintf(output, "WeakMapEntry map=%p key=%p keyDelegate=%p value=%p\n",
                 map, key.asCell(), kdelegate, value.asCell());
@@ -898,7 +1083,7 @@ DumpHeapVisitArena(JSRuntime* rt, void* data, gc::Arena* arena,
 {
     DumpHeapTracer* dtrc = static_cast<DumpHeapTracer*>(data);
     fprintf(dtrc->output, "# arena allockind=%u size=%u\n",
-            unsigned(arena->aheader.getAllocKind()), unsigned(thingSize));
+            unsigned(arena->getAllocKind()), unsigned(thingSize));
 }
 
 static void
@@ -909,7 +1094,7 @@ DumpHeapVisitCell(JSRuntime* rt, void* data, void* thing,
     char cellDesc[1024 * 32];
     JS_GetTraceThingInfo(cellDesc, sizeof(cellDesc), dtrc, thing, traceKind, true);
     fprintf(dtrc->output, "%p %c %s\n", thing, MarkDescriptor(thing), cellDesc);
-    JS_TraceChildren(dtrc, thing, traceKind);
+    js::TraceChildren(dtrc, thing, traceKind);
 }
 
 void
@@ -924,12 +1109,12 @@ DumpHeapTracer::onChild(const JS::GCCellPtr& thing)
 }
 
 void
-js::DumpHeap(JSRuntime* rt, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehaviour)
+js::DumpHeap(JSContext* cx, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehaviour)
 {
     if (nurseryBehaviour == js::CollectNurseryBeforeDump)
-        rt->gc.evictNursery(JS::gcreason::API);
+        cx->gc.evictNursery(JS::gcreason::API);
 
-    DumpHeapTracer dtrc(fp, rt);
+    DumpHeapTracer dtrc(fp, cx);
     fprintf(dtrc.output, "# Roots.\n");
     TraceRuntime(&dtrc);
 
@@ -939,7 +1124,7 @@ js::DumpHeap(JSRuntime* rt, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehavi
     fprintf(dtrc.output, "==========\n");
 
     dtrc.prefix = "> ";
-    IterateZonesCompartmentsArenasCells(rt, &dtrc,
+    IterateZonesCompartmentsArenasCells(cx, &dtrc,
                                         DumpHeapVisitZone,
                                         DumpHeapVisitCompartment,
                                         DumpHeapVisitArena,
@@ -948,41 +1133,23 @@ js::DumpHeap(JSRuntime* rt, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehavi
     fflush(dtrc.output);
 }
 
-JS_FRIEND_API(const JSStructuredCloneCallbacks*)
-js::GetContextStructuredCloneCallbacks(JSContext* cx)
+JS_FRIEND_API(void)
+js::SetActivityCallback(JSContext* cx, ActivityCallback cb, void* arg)
 {
-    return cx->runtime()->structuredCloneCallbacks;
-}
-
-JS_FRIEND_API(bool)
-js::ContextHasOutstandingRequests(const JSContext* cx)
-{
-    return cx->outstandingRequests > 0;
+    cx->activityCallback = cb;
+    cx->activityCallbackArg = arg;
 }
 
 JS_FRIEND_API(void)
-js::SetActivityCallback(JSRuntime* rt, ActivityCallback cb, void* arg)
+JS::NotifyDidPaint(JSContext* cx)
 {
-    rt->activityCallback = cb;
-    rt->activityCallbackArg = arg;
-}
-
-JS_FRIEND_API(bool)
-js::IsContextRunningJS(JSContext* cx)
-{
-    return cx->currentlyRunning();
+    cx->gc.notifyDidPaint();
 }
 
 JS_FRIEND_API(void)
-JS::NotifyDidPaint(JSRuntime* rt)
+JS::PokeGC(JSContext* cx)
 {
-    rt->gc.notifyDidPaint();
-}
-
-JS_FRIEND_API(void)
-JS::PokeGC(JSRuntime* rt)
-{
-    rt->gc.poke();
+    cx->gc.poke();
 }
 
 JS_FRIEND_API(JSCompartment*)
@@ -991,6 +1158,14 @@ js::GetAnyCompartmentInZone(JS::Zone* zone)
     CompartmentsInZoneIter comp(zone);
     MOZ_ASSERT(!comp.done());
     return comp.get();
+}
+
+void
+JS::ObjectPtr::finalize(JSRuntime* rt)
+{
+    if (IsIncrementalBarrierNeeded(rt->contextFromMainThread()))
+        IncrementalObjectBarrier(value);
+    value = nullptr;
 }
 
 void
@@ -1003,7 +1178,7 @@ JS::ObjectPtr::updateWeakPointerAfterGC()
 void
 JS::ObjectPtr::trace(JSTracer* trc, const char* name)
 {
-    JS_CallObjectTracer(trc, &value, name);
+    JS::TraceEdge(trc, &value, name);
 }
 
 JS_FRIEND_API(JSObject*)
@@ -1013,7 +1188,7 @@ js::GetTestingFunctions(JSContext* cx)
     if (!obj)
         return nullptr;
 
-    if (!DefineTestingFunctions(cx, obj, false))
+    if (!DefineTestingFunctions(cx, obj, false, false))
         return nullptr;
 
     return obj;
@@ -1028,15 +1203,15 @@ js::GetEnterCompartmentDepth(JSContext* cx)
 #endif
 
 JS_FRIEND_API(void)
-js::SetDOMCallbacks(JSRuntime* rt, const DOMCallbacks* callbacks)
+js::SetDOMCallbacks(JSContext* cx, const DOMCallbacks* callbacks)
 {
-    rt->DOMcallbacks = callbacks;
+    cx->DOMcallbacks = callbacks;
 }
 
 JS_FRIEND_API(const DOMCallbacks*)
-js::GetDOMCallbacks(JSRuntime* rt)
+js::GetDOMCallbacks(JSContext* cx)
 {
-    return rt->DOMcallbacks;
+    return cx->DOMcallbacks;
 }
 
 static const void* gDOMProxyHandlerFamily = nullptr;
@@ -1076,44 +1251,27 @@ js::detail::IdMatchesAtom(jsid id, JSAtom* atom)
     return id == INTERNED_STRING_TO_JSID(nullptr, atom);
 }
 
-JS_FRIEND_API(bool)
-js::PrepareScriptEnvironmentAndInvoke(JSRuntime* rt, HandleObject scope, ScriptEnvironmentPreparer::Closure& closure)
+JS_FRIEND_API(void)
+js::PrepareScriptEnvironmentAndInvoke(JSContext* cx, HandleObject scope, ScriptEnvironmentPreparer::Closure& closure)
 {
-    if (rt->scriptEnvironmentPreparer)
-        return rt->scriptEnvironmentPreparer->invoke(scope, closure);
+    MOZ_ASSERT(!cx->isExceptionPending());
 
-    MOZ_ASSERT(rt->contextList.getFirst() == rt->contextList.getLast());
-    JSContext* cx = rt->contextList.getFirst();
-    JSAutoCompartment ac(cx, scope);
-    bool ok = closure(cx);
+    MOZ_RELEASE_ASSERT(cx->runtime()->scriptEnvironmentPreparer,
+                       "Embedding needs to set a scriptEnvironmentPreparer callback");
 
-    // NB: This does not affect Gecko, which has a prepareScriptEnvironment
-    // callback.
-    if (JS_IsExceptionPending(cx)) {
-        JS_ReportPendingException(cx);
-    }
-
-    return ok;
+    cx->runtime()->scriptEnvironmentPreparer->invoke(scope, closure);
 }
 
 JS_FRIEND_API(void)
-js::SetScriptEnvironmentPreparer(JSRuntime* rt, ScriptEnvironmentPreparer* preparer)
+js::SetScriptEnvironmentPreparer(JSContext* cx, ScriptEnvironmentPreparer* preparer)
 {
-    rt->scriptEnvironmentPreparer = preparer;
+    cx->scriptEnvironmentPreparer = preparer;
 }
 
-#ifdef DEBUG
 JS_FRIEND_API(void)
-js::Debug_SetActiveJSContext(JSRuntime* rt, JSContext* cx)
+js::SetCTypesActivityCallback(JSContext* cx, CTypesActivityCallback cb)
 {
-    rt->activeContext = cx;
-}
-#endif
-
-JS_FRIEND_API(void)
-js::SetCTypesActivityCallback(JSRuntime* rt, CTypesActivityCallback cb)
-{
-    rt->ctypesActivityCallback = cb;
+    cx->ctypesActivityCallback = cb;
 }
 
 js::AutoCTypesActivityCallback::AutoCTypesActivityCallback(JSContext* cx,
@@ -1129,13 +1287,13 @@ js::AutoCTypesActivityCallback::AutoCTypesActivityCallback(JSContext* cx,
 }
 
 JS_FRIEND_API(void)
-js::SetObjectMetadataCallback(JSContext* cx, ObjectMetadataCallback callback)
+js::SetAllocationMetadataBuilder(JSContext* cx, const AllocationMetadataBuilder *callback)
 {
-    cx->compartment()->setObjectMetadataCallback(callback);
+    cx->compartment()->setAllocationMetadataBuilder(callback);
 }
 
 JS_FRIEND_API(JSObject*)
-js::GetObjectMetadata(JSObject* obj)
+js::GetAllocationMetadata(JSObject* obj)
 {
     ObjectWeakMap* map = obj->compartment()->objectMetadataTable;
     if (map)
@@ -1167,35 +1325,9 @@ js::ReportErrorWithId(JSContext* cx, const char* msg, HandleId id)
 #ifdef DEBUG
 bool
 js::HasObjectMovedOp(JSObject* obj) {
-    return !!GetObjectClass(obj)->ext.objectMovedOp;
+    return !!GetObjectClass(obj)->extObjectMovedOp();
 }
 #endif
-
-JS_FRIEND_API(void)
-JS_StoreObjectPostBarrierCallback(JSContext* cx,
-                                  void (*callback)(JSTracer* trc, JSObject* key, void* data),
-                                  JSObject* key, void* data)
-{
-    JSRuntime* rt = cx->runtime();
-    if (IsInsideNursery(key))
-        rt->gc.storeBuffer.putCallback(callback, key, data);
-}
-
-extern JS_FRIEND_API(void)
-JS_StoreStringPostBarrierCallback(JSContext* cx,
-                                  void (*callback)(JSTracer* trc, JSString* key, void* data),
-                                  JSString* key, void* data)
-{
-    JSRuntime* rt = cx->runtime();
-    if (IsInsideNursery(key))
-        rt->gc.storeBuffer.putCallback(callback, key, data);
-}
-
-extern JS_FRIEND_API(void)
-JS_ClearAllPostBarrierCallbacks(JSRuntime* rt)
-{
-    rt->gc.clearPostBarrierCallbacks();
-}
 
 JS_FRIEND_API(bool)
 js::ForwardToNative(JSContext* cx, JSNative native, const CallArgs& args)
@@ -1216,4 +1348,54 @@ js::GetPropertyNameFromPC(JSScript* script, jsbytecode* pc)
     if (!IsGetPropPC(pc) && !IsSetPropPC(pc))
         return nullptr;
     return script->getName(pc);
+}
+
+JS_FRIEND_API(void)
+js::SetWindowProxyClass(JSContext* cx, const js::Class* clasp)
+{
+    MOZ_ASSERT(!cx->maybeWindowProxyClass());
+    cx->setWindowProxyClass(clasp);
+}
+
+JS_FRIEND_API(void)
+js::SetWindowProxy(JSContext* cx, HandleObject global, HandleObject windowProxy)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+
+    assertSameCompartment(cx, global, windowProxy);
+
+    MOZ_ASSERT(IsWindowProxy(windowProxy));
+    global->as<GlobalObject>().setWindowProxy(windowProxy);
+}
+
+JS_FRIEND_API(JSObject*)
+js::ToWindowIfWindowProxy(JSObject* obj)
+{
+    if (IsWindowProxy(obj))
+        return &obj->global();
+    return obj;
+}
+
+JS_FRIEND_API(JSObject*)
+js::ToWindowProxyIfWindow(JSObject* obj)
+{
+    if (IsWindow(obj))
+        return obj->as<GlobalObject>().windowProxy();
+    return obj;
+}
+
+JS_FRIEND_API(bool)
+js::IsWindowProxy(JSObject* obj)
+{
+    // Note: simply checking `obj == obj->global().windowProxy()` is not
+    // sufficient: we may have transplanted the window proxy with a CCW.
+    // Check the Class to ensure we really have a window proxy.
+    return obj->getClass() == obj->runtimeFromAnyThread()->maybeWindowProxyClass();
+}
+
+JS_FRIEND_API(bool)
+js::detail::IsWindowSlow(JSObject* obj)
+{
+    return obj->as<GlobalObject>().maybeWindowProxy();
 }

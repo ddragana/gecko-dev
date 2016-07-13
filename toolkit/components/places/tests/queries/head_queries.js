@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cr = Components.results;
-const Cu = Components.utils;
+var Ci = Components.interfaces;
+var Cc = Components.classes;
+var Cr = Components.results;
+var Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -39,10 +39,10 @@ const olderthansixmonths = today - (DAY_MICROSEC * 31 * 7);
  * appropriate.  This function is an asynchronous task, it can be called using
  * "Task.spawn" or using the "yield" function inside another task.
  */
-function task_populateDB(aArray)
+function* task_populateDB(aArray)
 {
   // Iterate over aArray and execute all instructions.
-  for ([, data] in Iterator(aArray)) {
+  for (let data of aArray) {
     try {
       // make the data object into a query data object in order to create proper
       // default values for anything left unspecified
@@ -60,7 +60,7 @@ function task_populateDB(aArray)
           // Set a fake visit_count, this is not a real count but can be used
           // to test sorting by visit_count.
           let stmt = DBConn().createAsyncStatement(
-            "UPDATE moz_places SET visit_count = :vc WHERE url = :url");
+            "UPDATE moz_places SET visit_count = :vc WHERE url_hash = hash(:url) AND url = :url");
           stmt.params.vc = qdata.visitCount;
           stmt.params.url = qdata.uri;
           try {
@@ -79,7 +79,7 @@ function task_populateDB(aArray)
         // This must be async to properly enqueue after the updateFrecency call
         // done by the visit addition.
         let stmt = DBConn().createAsyncStatement(
-          "UPDATE moz_places SET hidden = 1 WHERE url = :url");
+          "UPDATE moz_places SET hidden = 1 WHERE url_hash = hash(:url) AND url = :url");
         stmt.params.url = qdata.uri;
         try {
           stmt.executeAsync();

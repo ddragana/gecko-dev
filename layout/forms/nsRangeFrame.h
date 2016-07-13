@@ -27,6 +27,7 @@ class nsRangeFrame : public nsContainerFrame,
   explicit nsRangeFrame(nsStyleContext* aContext);
   virtual ~nsRangeFrame();
 
+  typedef mozilla::CSSPseudoElementType CSSPseudoElementType;
   typedef mozilla::dom::Element Element;
 
 public:
@@ -147,12 +148,12 @@ public:
    */
   void UpdateForValueChange();
 
-  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) override;
+  virtual Element* GetPseudoElement(CSSPseudoElementType aType) override;
 
 private:
 
   nsresult MakeAnonymousDiv(Element** aResult,
-                            nsCSSPseudoElements::Type aPseudoType,
+                            CSSPseudoElementType aPseudoType,
                             nsTArray<ContentInfo>& aElements);
 
   // Helper function which reflows the anonymous div frames.
@@ -189,7 +190,7 @@ private:
   /**
    * Cached style context for -moz-focus-outer CSS pseudo-element style.
    */
-  nsRefPtr<nsStyleContext> mOuterFocusStyle;
+  RefPtr<nsStyleContext> mOuterFocusStyle;
 
   class DummyTouchListener final : public nsIDOMEventListener
   {
@@ -208,7 +209,7 @@ private:
   /**
    * A no-op touch-listener used for APZ purposes (see nsRangeFrame::Init).
    */
-  nsRefPtr<DummyTouchListener> mDummyTouchListener;
+  RefPtr<DummyTouchListener> mDummyTouchListener;
 };
 
 #endif

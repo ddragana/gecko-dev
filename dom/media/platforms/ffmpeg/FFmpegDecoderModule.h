@@ -8,8 +8,9 @@
 #define __FFmpegDecoderModule_h__
 
 #include "PlatformDecoderModule.h"
+#include "FFmpegLibWrapper.h"
 #include "FFmpegAudioDecoder.h"
-#include "FFmpegH264Decoder.h"
+#include "FFmpegVideoDecoder.h"
 
 namespace mozilla
 {
@@ -19,45 +20,63 @@ class FFmpegDecoderModule : public PlatformDecoderModule
 {
 public:
   static already_AddRefed<PlatformDecoderModule>
-  Create()
+  Create(FFmpegLibWrapper* aLib)
   {
-    nsRefPtr<PlatformDecoderModule> pdm = new FFmpegDecoderModule();
+    RefPtr<PlatformDecoderModule> pdm = new FFmpegDecoderModule(aLib);
+
     return pdm.forget();
   }
 
-  FFmpegDecoderModule() {}
+  explicit FFmpegDecoderModule(FFmpegLibWrapper* aLib) : mLib(aLib) {}
   virtual ~FFmpegDecoderModule() {}
 
-  virtual already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override
+  already_AddRefed<MediaDataDecoder>
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override
   {
-    nsRefPtr<MediaDataDecoder> decoder =
-      new FFmpegH264Decoder<V>(aVideoTaskQueue, aCallback, aConfig,
-                               aImageContainer);
+    RefPtr<MediaDataDecoder> decoder =
+      new FFmpegVideoDecoder<V>(mLib,
+                                aParams.mTaskQueue,
+                                aParams.mCallback,
+                                aParams.VideoConfig(),
+                                aParams.mImageContainer);
     return decoder.forget();
   }
 
-  virtual already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override
+  already_AddRefed<MediaDataDecoder>
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override
   {
-    nsRefPtr<MediaDataDecoder> decoder =
-      new FFmpegAudioDecoder<V>(aAudioTaskQueue, aCallback, aConfig);
+#ifdef USING_MOZFFVPX
+    return nullptr;
+#else
+    RefPtr<MediaDataDecoder> decoder =
+      new FFmpegAudioDecoder<V>(mLib,
+                                aParams.mTaskQueue,
+                                aParams.mCallback,
+                                aParams.AudioConfig());
     return decoder.forget();
+#endif
   }
 
-  virtual bool SupportsMimeType(const nsACString& aMimeType) override
+  bool SupportsMimeType(const nsACString& aMimeType,
+                        DecoderDoctorDiagnostics* aDiagnostics) const override
   {
-    return FFmpegAudioDecoder<V>::GetCodecId(aMimeType) != AV_CODEC_ID_NONE ||
-      FFmpegH264Decoder<V>::GetCodecId(aMimeType) != AV_CODEC_ID_NONE;
+    AVCodecID videoCodec = FFmpegVideoDecoder<V>::GetCodecId(aMimeType);
+#ifdef USING_MOZFFVPX
+    if (videoCodec == AV_CODEC_ID_NONE) {
+        return false;
+    }
+    return !!FFmpegDataDecoder<V>::FindAVCodec(mLib, videoCodec);
+#else
+    AVCodecID audioCodec = FFmpegAudioDecoder<V>::GetCodecId(aMimeType);
+    if (audioCodec == AV_CODEC_ID_NONE && videoCodec == AV_CODEC_ID_NONE) {
+      return false;
+    }
+    AVCodecID codec = audioCodec != AV_CODEC_ID_NONE ? audioCodec : videoCodec;
+    return !!FFmpegDataDecoder<V>::FindAVCodec(mLib, codec);
+#endif
   }
 
-  virtual ConversionRequired
+  ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override
   {
     if (aConfig.IsVideo() &&
@@ -69,6 +88,8 @@ public:
     }
   }
 
+private:
+  FFmpegLibWrapper* mLib;
 };
 
 } // namespace mozilla

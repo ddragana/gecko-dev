@@ -17,6 +17,9 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'url-classifier'
 
+# Disable RTTI in google protocol buffer
+DEFINES['GOOGLE_PROTOBUF_NO_RTTI'] = True
+
 UNIFIED_SOURCES += [
     'ChunkSet.cpp',
     'Classifier.cpp',
@@ -25,6 +28,7 @@ UNIFIED_SOURCES += [
     'nsUrlClassifierDBService.cpp',
     'nsUrlClassifierProxies.cpp',
     'nsUrlClassifierUtils.cpp',
+    'protobuf/safebrowsing.pb.cc',
     'ProtocolParser.cpp',
 ]
 
@@ -58,9 +62,8 @@ EXPORTS += [
     'Entries.h',
     'LookupCache.h',
     'nsUrlClassifierPrefixSet.h',
+    'protobuf/safebrowsing.pb.h',
 ]
-
-FAIL_ON_WARNINGS = True
 
 FINAL_LIBRARY = 'xul'
 
@@ -70,3 +73,6 @@ LOCAL_INCLUDES += [
 ]
 
 CXXFLAGS += CONFIG['SQLITE_CFLAGS']
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

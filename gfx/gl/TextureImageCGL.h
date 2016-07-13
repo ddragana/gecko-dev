@@ -8,7 +8,6 @@
 
 #include "GLTextureImage.h"
 #include "GLContextTypes.h"
-#include "nsAutoPtr.h"
 #include "nsSize.h"
 
 namespace mozilla {
@@ -23,8 +22,7 @@ public:
                     GLenum aWrapMode,
                     ContentType aContentType,
                     GLContext* aContext,
-                    TextureImage::Flags aFlags = TextureImage::NoFlags,
-                    TextureImage::ImageFormat aImageFormat = gfxImageFormat::Unknown);
+                    TextureImage::Flags aFlags = TextureImage::NoFlags);
 
     ~TextureImageCGL();
 
@@ -40,7 +38,7 @@ private:
 };
 
 already_AddRefed<TextureImage>
-CreateTextureImageCGL(GLContext *gl,
+CreateTextureImageCGL(GLContext* gl,
                       const gfx::IntSize& aSize,
                       TextureImage::ContentType aContentType,
                       GLenum aWrapMode,
@@ -48,11 +46,10 @@ CreateTextureImageCGL(GLContext *gl,
                       TextureImage::ImageFormat aImageFormat);
 
 already_AddRefed<TextureImage>
-TileGenFuncCGL(GLContext *gl,
+TileGenFuncCGL(GLContext* gl,
                const gfx::IntSize& aSize,
                TextureImage::ContentType aContentType,
-               TextureImage::Flags aFlags,
-               TextureImage::ImageFormat aImageFormat);
+               TextureImage::Flags aFlags);
 
 } // namespace gl
 } // namespace mozilla

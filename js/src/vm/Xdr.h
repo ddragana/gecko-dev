@@ -7,37 +7,13 @@
 #ifndef vm_Xdr_h
 #define vm_Xdr_h
 
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/TypeTraits.h"
 
 #include "jsatom.h"
 #include "jsfriendapi.h"
 
 namespace js {
-
-/*
- * Bytecode version number. Increment the subtrahend whenever JS bytecode
- * changes incompatibly.
- *
- * This version number is XDR'd near the front of xdr bytecode and aborts
- * deserialization if there is a mismatch between the current and saved
- * versions.  If deserialization fails, the data should be invalidated if
- * possible.
- *
- * When you change this, run make_opcode_doc.py and copy the new output into
- * this wiki page:
- *
- *  https://developer.mozilla.org/en-US/docs/SpiderMonkey/Internals/Bytecode
- */
-static const uint32_t XDR_BYTECODE_VERSION_SUBTRAHEND = 298;
-static const uint32_t XDR_BYTECODE_VERSION =
-    uint32_t(0xb973c0de - XDR_BYTECODE_VERSION_SUBTRAHEND);
-
-static_assert(JSErr_Limit == 407,
-              "GREETINGS, POTENTIAL SUBTRAHEND INCREMENTER! If you added or "
-              "removed MSG_DEFs from js.msg, you should increment "
-              "XDR_BYTECODE_VERSION_SUBTRAHEND and update this assertion's "
-              "expected JSErr_Limit value.");
 
 class XDRBuffer {
   public:
@@ -83,10 +59,6 @@ class XDRBuffer {
         uint8_t* ptr = cursor;
         cursor += n;
         return ptr;
-    }
-
-    static bool isUint32Overflow(size_t n) {
-        return size_t(-1) > size_t(UINT32_MAX) && n > size_t(UINT32_MAX);
     }
 
     void freeBuffer();

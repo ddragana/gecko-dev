@@ -5,7 +5,7 @@
 
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -83,7 +83,7 @@ function doUpdate() {
   });
 }
 
-let BrowserApp = Services.wm.getMostRecentWindow("navigator:browser").BrowserApp;
+var BrowserApp = Services.wm.getMostRecentWindow("navigator:browser").BrowserApp;
 
 // Tests the tracking protection UI in private browsing. By default, tracking protection is
 // enabled in private browsing ("privacy.trackingprotection.pbmode.enabled").

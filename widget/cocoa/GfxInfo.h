@@ -9,7 +9,6 @@
 #define __mozilla_widget_GfxInfo_h__
 
 #include "GfxInfoBase.h"
-#include "nsIGfxInfo2.h"
 
 #include "nsString.h"
 
@@ -51,11 +50,10 @@ public:
 
   virtual nsresult Init() override;
 
-  NS_DECL_ISUPPORTS_INHERITED
 #ifdef DEBUG
+  NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIGFXINFODEBUG
 #endif
-  NS_DECL_NSIGFXINFO2
 
   virtual uint32_t OperatingSystemVersion() override { return mOSXVersion; }
 
@@ -65,10 +63,11 @@ protected:
 
   virtual ~GfxInfo() {}
 
-  virtual nsresult GetFeatureStatusImpl(int32_t aFeature, 
-                                        int32_t *aStatus, 
-                                        nsAString & aSuggestedDriverVersion, 
+  virtual nsresult GetFeatureStatusImpl(int32_t aFeature,
+                                        int32_t *aStatus,
+                                        nsAString & aSuggestedDriverVersion,
                                         const nsTArray<GfxDriverInfo>& aDriverInfo,
+                                        nsACString &aFailureId,
                                         OperatingSystem* aOS = nullptr) override;
   virtual const nsTArray<GfxDriverInfo>& GetGfxDriverInfo() override;
 
@@ -86,8 +85,6 @@ private:
 
   nsString mAdapterVendorID;
   nsString mAdapterDeviceID;
-
-  nsString mCountryCode;
 
   uint32_t mOSXVersion;
 };

@@ -22,7 +22,7 @@ OpaqueCrossCompartmentWrapper::getOwnPropertyDescriptor(JSContext* cx,
 
 bool
 OpaqueCrossCompartmentWrapper::defineProperty(JSContext* cx, HandleObject wrapper, HandleId id,
-                                              Handle<JSPropertyDescriptor> desc,
+                                              Handle<PropertyDescriptor> desc,
                                               ObjectOpResult& result) const
 {
     return result.succeed();
@@ -65,6 +65,15 @@ OpaqueCrossCompartmentWrapper::setPrototype(JSContext* cx, HandleObject proxy, H
 }
 
 bool
+OpaqueCrossCompartmentWrapper::getPrototypeIfOrdinary(JSContext* cx, HandleObject proxy,
+                                                      bool* isOrdinary,
+                                                      MutableHandleObject protop) const
+{
+    *isOrdinary = false;
+    return true;
+}
+
+bool
 OpaqueCrossCompartmentWrapper::setImmutablePrototype(JSContext* cx, HandleObject proxy,
                                                      bool* succeeded) const
 {
@@ -95,7 +104,7 @@ OpaqueCrossCompartmentWrapper::has(JSContext* cx, HandleObject wrapper, HandleId
 }
 
 bool
-OpaqueCrossCompartmentWrapper::get(JSContext* cx, HandleObject wrapper, HandleObject receiver,
+OpaqueCrossCompartmentWrapper::get(JSContext* cx, HandleObject wrapper, HandleValue receiver,
                                    HandleId id, MutableHandleValue vp) const
 {
     return BaseProxyHandler::get(cx, wrapper, receiver, id, vp);
@@ -131,7 +140,7 @@ bool
 OpaqueCrossCompartmentWrapper::getPropertyDescriptor(JSContext* cx,
                                                      HandleObject wrapper,
                                                      HandleId id,
-                                                     MutableHandle<JSPropertyDescriptor> desc) const
+                                                     MutableHandle<PropertyDescriptor> desc) const
 {
     return BaseProxyHandler::getPropertyDescriptor(cx, wrapper, id, desc);
 }
@@ -151,10 +160,19 @@ OpaqueCrossCompartmentWrapper::getOwnEnumerablePropertyKeys(JSContext* cx, Handl
 }
 
 bool
-OpaqueCrossCompartmentWrapper::objectClassIs(HandleObject obj, ESClassValue classValue,
-                                             JSContext* cx) const
+OpaqueCrossCompartmentWrapper::getBuiltinClass(JSContext* cx, HandleObject wrapper,
+                                    ESClass* cls) const
 {
-  return false;
+    *cls = ESClass::Other;
+    return true;
+}
+
+bool
+OpaqueCrossCompartmentWrapper::isArray(JSContext* cx, HandleObject obj,
+                                       JS::IsArrayAnswer* answer) const
+{
+    *answer = JS::IsArrayAnswer::NotArray;
+    return true;
 }
 
 const char*
@@ -171,13 +189,6 @@ OpaqueCrossCompartmentWrapper::fun_toString(JSContext* cx, HandleObject proxy,
     JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO, js_Function_str,
                          js_toString_str, "object");
     return nullptr;
-}
-
-bool
-OpaqueCrossCompartmentWrapper::defaultValue(JSContext* cx, HandleObject wrapper, JSType hint,
-                                            MutableHandleValue vp) const
-{
-    return OrdinaryToPrimitive(cx, wrapper, hint, vp);
 }
 
 const OpaqueCrossCompartmentWrapper OpaqueCrossCompartmentWrapper::singleton;

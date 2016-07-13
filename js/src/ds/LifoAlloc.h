@@ -8,7 +8,6 @@
 #define ds_LifoAlloc_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryChecking.h"
 #include "mozilla/MemoryReporting.h"
@@ -163,6 +162,9 @@ class LifoAlloc
     size_t      defaultChunkSize_;
     size_t      curSize_;
     size_t      peakSize_;
+#if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+    bool        fallibleScope_;
+#endif
 
     void operator=(const LifoAlloc&) = delete;
     LifoAlloc(const LifoAlloc&) = delete;
@@ -214,9 +216,27 @@ class LifoAlloc
         curSize_ -= size;
     }
 
+    MOZ_ALWAYS_INLINE
+    void* allocImpl(size_t n) {
+        void* result;
+        if (latest && (result = latest->tryAlloc(n)))
+            return result;
+
+        if (!getOrCreateChunk(n))
+            return nullptr;
+
+        // Since we just created a large enough chunk, this can't fail.
+        result = latest->tryAlloc(n);
+        MOZ_ASSERT(result);
+        return result;
+    }
+
   public:
     explicit LifoAlloc(size_t defaultChunkSize)
       : peakSize_(0)
+#if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+      , fallibleScope_(true)
+#endif
     {
         reset(defaultChunkSize);
     }
@@ -256,26 +276,21 @@ class LifoAlloc
 
     MOZ_ALWAYS_INLINE
     void* alloc(size_t n) {
-        JS_OOM_POSSIBLY_FAIL();
-
-        void* result;
-        if (latest && (result = latest->tryAlloc(n)))
-            return result;
-
-        if (!getOrCreateChunk(n))
-            return nullptr;
-
-        // Since we just created a large enough chunk, this can't fail.
-        result = latest->tryAlloc(n);
-        MOZ_ASSERT(result);
-        return result;
+#if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+        // Only simulate OOMs when we are not using the LifoAlloc as an
+        // infallible allocator.
+        if (fallibleScope_)
+            JS_OOM_POSSIBLY_FAIL();
+#endif
+        return allocImpl(n);
     }
 
     MOZ_ALWAYS_INLINE
     void* allocInfallible(size_t n) {
-        if (void* result = alloc(n))
+        AutoEnterOOMUnsafeRegion oomUnsafe;
+        if (void* result = allocImpl(n))
             return result;
-        CrashAtUnhandlableOOM("LifoAlloc::allocInfallible");
+        oomUnsafe.crash("LifoAlloc::allocInfallible");
         return nullptr;
     }
 
@@ -283,7 +298,8 @@ class LifoAlloc
     // allocation requests, not necessarily contiguous. Note that this does
     // not guarantee a successful single allocation of N bytes.
     MOZ_ALWAYS_INLINE
-    bool ensureUnusedApproximate(size_t n) {
+    MOZ_MUST_USE bool ensureUnusedApproximate(size_t n) {
+        AutoFallibleScope fallibleAllocator(this);
         size_t total = 0;
         for (BumpChunk* chunk = latest; chunk; chunk = chunk->next()) {
             total += chunk->unused();
@@ -298,6 +314,36 @@ class LifoAlloc
         return true;
     }
 
+    MOZ_ALWAYS_INLINE
+    void setAsInfallibleByDefault() {
+#if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+        fallibleScope_ = false;
+#endif
+    }
+
+    class MOZ_NON_TEMPORARY_CLASS AutoFallibleScope {
+#if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+        LifoAlloc* lifoAlloc_;
+        bool prevFallibleScope_;
+        MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+
+      public:
+        explicit AutoFallibleScope(LifoAlloc* lifoAlloc MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
+            MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+            lifoAlloc_ = lifoAlloc;
+            prevFallibleScope_ = lifoAlloc->fallibleScope_;
+            lifoAlloc->fallibleScope_ = true;
+        }
+
+        ~AutoFallibleScope() {
+            lifoAlloc_->fallibleScope_ = prevFallibleScope_;
+        }
+#else
+      public:
+        explicit AutoFallibleScope(LifoAlloc*) {}
+#endif
+    };
+
     template <typename T>
     T* newArray(size_t count) {
         static_assert(mozilla::IsPod<T>::value,
@@ -310,9 +356,10 @@ class LifoAlloc
     // The caller is responsible for initialization.
     template <typename T>
     T* newArrayUninitialized(size_t count) {
-        if (MOZ_UNLIKELY(count & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
+        size_t bytes;
+        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(count, &bytes)))
             return nullptr;
-        return static_cast<T*>(alloc(sizeof(T) * count));
+        return static_cast<T*>(alloc(bytes));
     }
 
     class Mark {
@@ -478,10 +525,11 @@ class LifoAlloc
     };
 };
 
-class LifoAllocScope
+class MOZ_NON_TEMPORARY_CLASS LifoAllocScope
 {
     LifoAlloc*      lifoAlloc;
     LifoAlloc::Mark mark;
+    LifoAlloc::AutoFallibleScope fallibleScope;
     bool            shouldRelease;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
@@ -490,6 +538,7 @@ class LifoAllocScope
                             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : lifoAlloc(lifoAlloc),
         mark(lifoAlloc->mark()),
+        fallibleScope(lifoAlloc),
         shouldRelease(true)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -526,33 +575,48 @@ class LifoAllocPolicy
       : alloc_(alloc)
     {}
     template <typename T>
-    T* pod_malloc(size_t numElems) {
-        if (MOZ_UNLIKELY(numElems & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
+    T* maybe_pod_malloc(size_t numElems) {
+        size_t bytes;
+        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(numElems, &bytes)))
             return nullptr;
-        size_t bytes = numElems * sizeof(T);
         void* p = fb == Fallible ? alloc_.alloc(bytes) : alloc_.allocInfallible(bytes);
         return static_cast<T*>(p);
     }
     template <typename T>
-    T* pod_calloc(size_t numElems) {
-        T* p = pod_malloc<T>(numElems);
-        if (fb == Fallible && !p)
+    T* maybe_pod_calloc(size_t numElems) {
+        T* p = maybe_pod_malloc<T>(numElems);
+        if (MOZ_UNLIKELY(!p))
             return nullptr;
         memset(p, 0, numElems * sizeof(T));
         return p;
     }
     template <typename T>
-    T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
-        T* n = pod_malloc<T>(newSize);
-        if (fb == Fallible && !n)
+    T* maybe_pod_realloc(T* p, size_t oldSize, size_t newSize) {
+        T* n = maybe_pod_malloc<T>(newSize);
+        if (MOZ_UNLIKELY(!n))
             return nullptr;
         MOZ_ASSERT(!(oldSize & mozilla::tl::MulOverflowMask<sizeof(T)>::value));
         memcpy(n, p, Min(oldSize * sizeof(T), newSize * sizeof(T)));
         return n;
     }
+    template <typename T>
+    T* pod_malloc(size_t numElems) {
+        return maybe_pod_malloc<T>(numElems);
+    }
+    template <typename T>
+    T* pod_calloc(size_t numElems) {
+        return maybe_pod_calloc<T>(numElems);
+    }
+    template <typename T>
+    T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
+        return maybe_pod_realloc<T>(p, oldSize, newSize);
+    }
     void free_(void* p) {
     }
     void reportAllocOverflow() const {
+    }
+    MOZ_MUST_USE bool checkSimulatedOOM() const {
+        return fb == Infallible || !js::oom::ShouldFailWithOOM();
     }
 };
 

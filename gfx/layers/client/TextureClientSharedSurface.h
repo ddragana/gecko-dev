@@ -26,46 +26,56 @@ class SurfaceFactory;
 
 namespace layers {
 
-class SharedSurfaceTextureClient : public TextureClient
+class SharedSurfaceTextureClient;
+
+class SharedSurfaceTextureData : public TextureData
 {
 protected:
   const UniquePtr<gl::SharedSurface> mSurf;
 
-  friend class gl::SurfaceFactory;
+  friend class SharedSurfaceTextureClient;
 
-  SharedSurfaceTextureClient(ISurfaceAllocator* aAllocator, TextureFlags aFlags,
-                             UniquePtr<gl::SharedSurface> surf,
-                             gl::SurfaceFactory* factory);
+  explicit SharedSurfaceTextureData(UniquePtr<gl::SharedSurface> surf);
+public:
+
+  ~SharedSurfaceTextureData();
+
+  virtual bool Lock(OpenMode, FenceHandle*) override { return false; }
+
+  virtual void Unlock() override {}
+
+  virtual void FillInfo(TextureData::Info& aInfo) const override;
+
+  virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
+
+  virtual void Deallocate(ClientIPCAllocator*) override;
+
+  gl::SharedSurface* Surf() const { return mSurf.get(); }
+};
+
+class SharedSurfaceTextureClient : public TextureClient
+{
+public:
+  SharedSurfaceTextureClient(SharedSurfaceTextureData* aData,
+                             TextureFlags aFlags,
+                             ClientIPCAllocator* aAllocator);
 
   ~SharedSurfaceTextureClient();
 
-public:
-  virtual bool IsAllocated() const override { return true; }
-  virtual bool Lock(OpenMode) override { return false; }
-  virtual bool IsLocked() const override { return false; }
-  virtual bool HasInternalBuffer() const override { return false; }
+  static already_AddRefed<SharedSurfaceTextureClient>
+  Create(UniquePtr<gl::SharedSurface> surf, gl::SurfaceFactory* factory,
+         ClientIPCAllocator* aAllocator, TextureFlags aFlags);
 
-  virtual gfx::SurfaceFormat GetFormat() const override {
-    return gfx::SurfaceFormat::UNKNOWN;
-  }
+  virtual void SetReleaseFenceHandle(const FenceHandle& aReleaseFenceHandle) override;
 
-  virtual already_AddRefed<TextureClient>
-  CreateSimilar(TextureFlags, TextureAllocationFlags) const override {
-    return nullptr;
-  }
+  virtual FenceHandle GetAndResetReleaseFenceHandle() override;
 
-  virtual bool AllocateForSurface(gfx::IntSize,
-                                  TextureAllocationFlags) override {
-    MOZ_CRASH("Should never hit this.");
-    return false;
-  }
+  virtual void SetAcquireFenceHandle(const FenceHandle& aAcquireFenceHandle) override;
 
-  virtual gfx::IntSize GetSize() const override;
-
-  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) override;
+  virtual const FenceHandle& GetAcquireFenceHandle() const override;
 
   gl::SharedSurface* Surf() const {
-    return mSurf.get();
+    return static_cast<const SharedSurfaceTextureData*>(GetInternalData())->Surf();
   }
 };
 

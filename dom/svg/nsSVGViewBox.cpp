@@ -67,7 +67,29 @@ void
 nsSVGViewBox::Init()
 {
   mHasBaseVal = false;
+  // We shouldn't use mBaseVal for rendering (its usages should be guarded with
+  // "mHasBaseVal" checks), but just in case we do by accident, this will
+  // ensure that we treat it as "none" and ignore its numeric values:
+  mBaseVal.none = true;
+
   mAnimVal = nullptr;
+}
+
+bool
+nsSVGViewBox::HasRect() const
+{
+  // Check mAnimVal if we have one; otherwise, check mBaseVal if we have one;
+  // otherwise, just return false (we clearly do not have a rect).
+  const nsSVGViewBoxRect* rect = mAnimVal;
+  if (!rect) {
+    if (!mHasBaseVal) {
+      // no anim val, no base val --> no viewbox rect
+      return false;
+    }
+    rect = &mBaseVal;
+  }
+
+  return !rect->none && rect->width >= 0 && rect->height >= 0;
 }
 
 void
@@ -195,7 +217,7 @@ nsSVGViewBox::GetBaseValueString(nsAString& aValue) const
 already_AddRefed<dom::SVGAnimatedRect>
 nsSVGViewBox::ToSVGAnimatedRect(nsSVGElement* aSVGElement)
 {
-  nsRefPtr<dom::SVGAnimatedRect> domAnimatedRect =
+  RefPtr<dom::SVGAnimatedRect> domAnimatedRect =
     sSVGAnimatedRectTearoffTable.GetTearoff(this);
   if (!domAnimatedRect) {
     domAnimatedRect = new dom::SVGAnimatedRect(this, aSVGElement);
@@ -212,7 +234,7 @@ nsSVGViewBox::ToDOMBaseVal(nsSVGElement *aSVGElement)
     return nullptr;
   }
 
-  nsRefPtr<DOMBaseVal> domBaseVal =
+  RefPtr<DOMBaseVal> domBaseVal =
     sBaseSVGViewBoxTearoffTable.GetTearoff(this);
   if (!domBaseVal) {
     domBaseVal = new DOMBaseVal(this, aSVGElement);
@@ -235,7 +257,7 @@ nsSVGViewBox::ToDOMAnimVal(nsSVGElement *aSVGElement)
     return nullptr;
   }
 
-  nsRefPtr<DOMAnimVal> domAnimVal =
+  RefPtr<DOMAnimVal> domAnimVal =
     sAnimSVGViewBoxTearoffTable.GetTearoff(this);
   if (!domAnimVal) {
     domAnimVal = new DOMAnimVal(this, aSVGElement);

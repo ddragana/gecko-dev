@@ -17,11 +17,13 @@
 namespace mozilla {
 namespace ipc {
 class PrincipalInfo;
+class AutoIPCStream;
 } // namespace ipc
 
 namespace dom {
 
 class InternalHeaders;
+class IPCInternalResponse;
 
 class InternalResponse final
 {
@@ -32,12 +34,21 @@ public:
 
   InternalResponse(uint16_t aStatus, const nsACString& aStatusText);
 
+  static already_AddRefed<InternalResponse>
+  FromIPC(const IPCInternalResponse& aIPCResponse);
+
+  template<typename M>
+  void
+  ToIPC(IPCInternalResponse* aIPCResponse,
+        M* aManager,
+        UniquePtr<mozilla::ipc::AutoIPCStream>& aAutoStream);
+
   already_AddRefed<InternalResponse> Clone();
 
   static already_AddRefed<InternalResponse>
   NetworkError()
   {
-    nsRefPtr<InternalResponse> response = new InternalResponse(0, EmptyCString());
+    RefPtr<InternalResponse> response = new InternalResponse(0, EmptyCString());
     ErrorResult result;
     response->Headers()->SetGuard(HeadersGuardEnum::Immutable, result);
     MOZ_ASSERT(!result.Failed());
@@ -47,6 +58,9 @@ public:
 
   already_AddRefed<InternalResponse>
   OpaqueResponse();
+
+  already_AddRefed<InternalResponse>
+  OpaqueRedirectResponse();
 
   already_AddRefed<InternalResponse>
   BasicResponse();
@@ -62,6 +76,7 @@ public:
     MOZ_ASSERT_IF(mType == ResponseType::Basic, mWrappedResponse);
     MOZ_ASSERT_IF(mType == ResponseType::Cors, mWrappedResponse);
     MOZ_ASSERT_IF(mType == ResponseType::Opaque, mWrappedResponse);
+    MOZ_ASSERT_IF(mType == ResponseType::Opaqueredirect, mWrappedResponse);
     return mType;
   }
 
@@ -71,17 +86,56 @@ public:
     return Type() == ResponseType::Error;
   }
 
-  // FIXME(nsm): Return with exclude fragment.
+  // GetUrl should return last fetch URL in response's url list and null if
+  // response's url list is the empty list.
   void
-  GetUrl(nsCString& aURL) const
+  GetURL(nsCString& aURL) const
   {
-    aURL.Assign(mURL);
+    // Empty urlList when response is a synthetic response.
+    if (mURLList.IsEmpty()) {
+      aURL.Truncate();
+      return;
+    }
+
+    aURL.Assign(mURLList.LastElement());
   }
 
   void
-  SetUrl(const nsACString& aURL)
+  GetURLList(nsTArray<nsCString>& aURLList) const
   {
-    mURL.Assign(aURL);
+    aURLList.Assign(mURLList);
+  }
+
+  void
+  GetUnfilteredURL(nsCString& aURL) const
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->GetURL(aURL);
+    }
+
+    return GetURL(aURL);
+  }
+
+  void
+  GetUnfilteredURLList(nsTArray<nsCString>& aURLList) const
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->GetURLList(aURLList);
+    }
+
+    return GetURLList(aURLList);
+  }
+
+  void
+  SetURLList(const nsTArray<nsCString>& aURLList)
+  {
+    mURLList.Assign(aURLList);
+
+#ifdef DEBUG
+    for(uint32_t i = 0; i < mURLList.Length(); ++i) {
+      MOZ_ASSERT(mURLList[i].Find(NS_LITERAL_CSTRING("#")) == kNotFound);
+    }
+#endif
   }
 
   uint16_t
@@ -90,10 +144,30 @@ public:
     return mStatus;
   }
 
+  uint16_t
+  GetUnfilteredStatus() const
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->GetStatus();
+    }
+
+    return GetStatus();
+  }
+
   const nsCString&
   GetStatusText() const
   {
     return mStatusText;
+  }
+
+  const nsCString&
+  GetUnfilteredStatusText() const
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->GetStatusText();
+    }
+
+    return GetStatusText();
   }
 
   InternalHeaders*
@@ -113,36 +187,50 @@ public:
   }
 
   void
-  GetInternalBody(nsIInputStream** aStream)
+  GetUnfilteredBody(nsIInputStream** aStream, int64_t* aBodySize = nullptr)
   {
     if (mWrappedResponse) {
       MOZ_ASSERT(!mBody);
-      return mWrappedResponse->GetBody(aStream);
+      return mWrappedResponse->GetBody(aStream, aBodySize);
     }
     nsCOMPtr<nsIInputStream> stream = mBody;
     stream.forget(aStream);
+    if (aBodySize) {
+      *aBodySize = mBodySize;
+    }
   }
 
   void
-  GetBody(nsIInputStream** aStream)
+  GetBody(nsIInputStream** aStream, int64_t* aBodySize = nullptr)
   {
-    if (Type() == ResponseType::Opaque) {
+    if (Type() == ResponseType::Opaque ||
+        Type() == ResponseType::Opaqueredirect) {
       *aStream = nullptr;
+      if (aBodySize) {
+        *aBodySize = UNKNOWN_BODY_SIZE;
+      }
       return;
     }
 
-    return GetInternalBody(aStream);
+    return GetUnfilteredBody(aStream, aBodySize);
   }
 
   void
-  SetBody(nsIInputStream* aBody)
+  SetBody(nsIInputStream* aBody, int64_t aBodySize)
   {
     if (mWrappedResponse) {
-      return mWrappedResponse->SetBody(aBody);
+      return mWrappedResponse->SetBody(aBody, aBodySize);
     }
     // A request's body may not be reset once set.
     MOZ_ASSERT(!mBody);
+    MOZ_ASSERT(mBodySize == UNKNOWN_BODY_SIZE);
+    // Check arguments.
+    MOZ_ASSERT(aBodySize == UNKNOWN_BODY_SIZE || aBodySize >= 0);
+    // If body is not given, then size must be unknown.
+    MOZ_ASSERT_IF(!aBody, aBodySize == UNKNOWN_BODY_SIZE);
+
     mBody = aBody;
+    mBodySize = aBodySize;
   }
 
   void
@@ -175,9 +263,21 @@ public:
     return mPrincipalInfo;
   }
 
+  bool
+  IsRedirected() const
+  {
+    return mURLList.Length() > 1;
+  }
+
   // Takes ownership of the principal info.
   void
   SetPrincipalInfo(UniquePtr<mozilla::ipc::PrincipalInfo> aPrincipalInfo);
+
+  LoadTainting
+  GetTainting() const;
+
+  already_AddRefed<InternalResponse>
+  Unfiltered();
 
 private:
   ~InternalResponse();
@@ -192,11 +292,18 @@ private:
 
   ResponseType mType;
   nsCString mTerminationReason;
-  nsCString mURL;
+  // A response has an associated url list (a list of zero or more fetch URLs).
+  // Unless stated otherwise, it is the empty list. The current url is the last
+  // element in mURLlist
+  nsTArray<nsCString> mURLList;
   const uint16_t mStatus;
   const nsCString mStatusText;
-  nsRefPtr<InternalHeaders> mHeaders;
+  RefPtr<InternalHeaders> mHeaders;
   nsCOMPtr<nsIInputStream> mBody;
+  int64_t mBodySize;
+public:
+  static const int64_t UNKNOWN_BODY_SIZE = -1;
+private:
   ChannelInfo mChannelInfo;
   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
 
@@ -204,7 +311,7 @@ private:
   // Cache, and SW interception should always serialize/access the underlying
   // unfiltered headers and when deserializing, create an InternalResponse
   // with the unfiltered headers followed by wrapping it.
-  nsRefPtr<InternalResponse> mWrappedResponse;
+  RefPtr<InternalResponse> mWrappedResponse;
 };
 
 } // namespace dom

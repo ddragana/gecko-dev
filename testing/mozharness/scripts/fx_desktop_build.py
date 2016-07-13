@@ -28,6 +28,7 @@ class FxDesktopBuild(BuildScript, object):
         buildscript_kwargs = {
             'config_options': BUILD_BASE_CONFIG_OPTIONS,
             'all_actions': [
+                'get-secrets',
                 'clobber',
                 'clone-tools',
                 'checkout-sources',
@@ -36,7 +37,9 @@ class FxDesktopBuild(BuildScript, object):
                 'upload-files',  # upload from BB to TC
                 'sendchange',
                 'check-test',
+                'valgrind-test',
                 'package-source',
+                'generate-source-signing-manifest',
                 'multi-l10n',
                 'generate-build-stats',
                 'update',
@@ -54,7 +57,6 @@ class FxDesktopBuild(BuildScript, object):
                 'taskcluster_credentials_file': 'oauth.txt',
                 'periodic_clobber': 168,
                 # hg tool stuff
-                'default_vcs': 'hgtool',
                 "tools_repo": "https://hg.mozilla.org/build/tools",
                 "repo_base": "https://hg.mozilla.org",
                 'tooltool_url': 'https://api.pub.build.mozilla.org/tooltool/',
@@ -69,13 +71,10 @@ class FxDesktopBuild(BuildScript, object):
                 ],
                 'stage_product': 'firefox',
                 'platform_supports_post_upload_to_latest': True,
-                'use_branch_in_symbols_extra_buildid': True,
                 'latest_mar_dir': '/pub/mozilla.org/firefox/nightly/latest-%(branch)s',
-                'compare_locales_repo': 'https://hg.mozilla.org/build/compare-locales',
-                'compare_locales_rev': 'RELEASE_AUTOMATION',
-                'compare_locales_vcs': 'hgtool',
                 'influx_credentials_file': 'oauth.txt',
                 'build_resources_path': '%(abs_src_dir)s/obj-firefox/.mozbuild/build_resources.json',
+                'nightly_promotion_branches': ['mozilla-central', 'mozilla-aurora'],
 
                 # try will overwrite these
                 'clone_with_purge': False,
@@ -89,9 +88,9 @@ class FxDesktopBuild(BuildScript, object):
                 'stage_username': 'ffxbld',
                 'stage_ssh_key': 'ffxbld_rsa',
                 'virtualenv_modules': [
-                    'requests==2.2.1',
+                    'requests==2.8.1',
                     'PyHawk-with-a-single-extra-commit==0.1.5',
-                    'taskcluster==0.0.15',
+                    'taskcluster==0.0.26',
                 ],
                 'virtualenv_path': 'venv',
                 #
@@ -152,7 +151,6 @@ class FxDesktopBuild(BuildScript, object):
                                         'src',
                                         self._query_objdir())
             },
-            'compare_locales_dir': os.path.join(abs_dirs['abs_work_dir'], 'compare-locales'),
         }
         abs_dirs.update(dirs)
         self.abs_dirs = abs_dirs

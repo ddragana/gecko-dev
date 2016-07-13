@@ -8,7 +8,6 @@
 #define mozilla_dom_CameraCapabilities_h__
 
 #include "nsString.h"
-#include "nsAutoPtr.h"
 #include "base/basictypes.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
@@ -136,8 +135,8 @@ protected:
   const nsString mContainerFormat;
   const nsString mMimeType;
 
-  nsRefPtr<CameraRecorderVideoProfile> mVideo;
-  nsRefPtr<CameraRecorderAudioProfile> mAudio;
+  RefPtr<CameraRecorderVideoProfile> mVideo;
+  RefPtr<CameraRecorderAudioProfile> mAudio;
 
 private:
   DISALLOW_EVIL_CONSTRUCTORS(CameraRecorderProfile);
@@ -161,8 +160,7 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   CameraRecorderProfile* NamedGetter(const nsAString& aName, bool& aFound);
-  bool NameIsEnumerable(const nsAString& aName);
-  void GetSupportedNames(unsigned aFlags, nsTArray<nsString>& aNames);
+  void GetSupportedNames(nsTArray<nsString>& aNames);
 
   virtual void OnHardwareClosed();
 
@@ -170,9 +168,9 @@ protected:
   virtual ~CameraRecorderProfiles();
 
   nsCOMPtr<nsISupports> mParent;
-  nsRefPtr<ICameraControl> mCameraControl;
+  RefPtr<ICameraControl> mCameraControl;
   nsRefPtrHashtable<nsStringHashKey, CameraRecorderProfile> mProfiles;
-  nsRefPtr<CameraClosedListenerProxy<CameraRecorderProfiles>> mListener;
+  RefPtr<CameraClosedListenerProxy<CameraRecorderProfiles>> mListener;
 
 private:
   DISALLOW_EVIL_CONSTRUCTORS(CameraRecorderProfiles);
@@ -195,10 +193,10 @@ public:
   // Great Renaming proposed in bug 983177.
   static bool HasSupport(JSContext* aCx, JSObject* aGlobal);
 
-  explicit CameraCapabilities(nsPIDOMWindow* aWindow,
+  explicit CameraCapabilities(nsPIDOMWindowInner* aWindow,
                               ICameraControl* aCameraControl);
 
-  nsPIDOMWindow* GetParentObject() const { return mWindow; }
+  nsPIDOMWindowInner* GetParentObject() const { return mWindow; }
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -231,9 +229,9 @@ protected:
 
   nsresult TranslateToDictionary(uint32_t aKey, nsTArray<CameraSize>& aSizes);
 
-  nsRefPtr<nsPIDOMWindow> mWindow;
-  nsRefPtr<ICameraControl> mCameraControl;
-  nsRefPtr<CameraClosedListenerProxy<CameraCapabilities>> mListener;
+  RefPtr<nsPIDOMWindowInner> mWindow;
+  RefPtr<ICameraControl> mCameraControl;
+  RefPtr<CameraClosedListenerProxy<CameraCapabilities>> mListener;
 
 private:
   DISALLOW_EVIL_CONSTRUCTORS(CameraCapabilities);

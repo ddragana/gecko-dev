@@ -43,23 +43,22 @@ public:
 
   already_AddRefed<Event> GetSourceEvent()
   {
-    nsRefPtr<Event> e =
+    RefPtr<Event> e =
       mSourceEvent ? mSourceEvent->InternalDOMEvent() : nullptr;
     return e.forget();
   }
 
   void InitCommandEvent(const nsAString& aType,
                         bool aCanBubble, bool aCancelable,
-                        nsIDOMWindow* aView,
+                        nsGlobalWindow* aView,
                         int32_t aDetail,
                         bool aCtrlKey, bool aAltKey,
                         bool aShiftKey, bool aMetaKey,
-                        Event* aSourceEvent,
-                        ErrorResult& aRv)
+                        Event* aSourceEvent)
   {
-    aRv = InitCommandEvent(aType, aCanBubble, aCancelable, aView, aDetail,
-                           aCtrlKey, aAltKey, aShiftKey, aMetaKey,
-                           aSourceEvent);
+    InitCommandEvent(aType, aCanBubble, aCancelable, aView->AsInner(),
+                     aDetail, aCtrlKey, aAltKey, aShiftKey, aMetaKey,
+                     aSourceEvent);
   }
 
 protected:
@@ -70,5 +69,10 @@ protected:
 
 } // namespace dom
 } // namespace mozilla
+
+already_AddRefed<mozilla::dom::XULCommandEvent>
+NS_NewDOMXULCommandEvent(mozilla::dom::EventTarget* aOwner,
+                         nsPresContext* aPresContext,
+                         mozilla::WidgetInputEvent* aEvent);
 
 #endif // mozilla_dom_XULCommandEvent_h_

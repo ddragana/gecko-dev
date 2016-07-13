@@ -55,10 +55,10 @@ public:
   }
 #endif
 
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
-  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
+  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
 
   // nsIFrame overrides
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
@@ -99,6 +99,8 @@ public:
 
   nsresult StartDrag(nsIDOMEvent* aEvent);
   nsresult StopDrag();
+
+  bool StartAPZDrag();
 
   static int32_t GetCurrentPosition(nsIContent* content);
   static int32_t GetMinPosition(nsIContent* content);
@@ -169,7 +171,7 @@ private:
   void PageScroll(nscoord aChange);
  
   nsPoint mDestinationPoint;
-  nsRefPtr<nsSliderMediator> mMediator;
+  RefPtr<nsSliderMediator> mMediator;
 
   float mRatio;
 
@@ -186,6 +188,16 @@ private:
   // slider. This allows notifications to tell how a slider's current position
   // was changed.
   bool mUserChanged;
+
+  // true if we've handed off the scrolling to APZ. This means that we should
+  // ignore scrolling events as the position will be updated by APZ. If we were
+  // to process these events then the scroll position update would conflict
+  // causing the scroll position to jump.
+  bool mScrollingWithAPZ;
+
+  // true if displayport suppression is active, for more performant
+  // scrollbar-dragging behaviour.
+  bool mSuppressionActive;
 
   static bool gMiddlePref;
   static int32_t gSnapMultiplier;

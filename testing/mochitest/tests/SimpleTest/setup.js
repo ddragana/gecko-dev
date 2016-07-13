@@ -81,8 +81,6 @@ if (params.testRoot == "browser") {
   params.testPrefix = "chrome://mochitests/content/chrome/";
 } else if (params.testRoot == "a11y") {
   params.testPrefix = "chrome://mochitests/content/a11y/";
-} else if (params.testRoot == "webapprtContent") {
-  params.testPrefix = "/webapprtContent/";
 } else {
   params.testPrefix = "/tests/";
 }
@@ -143,7 +141,7 @@ if (params.dumpDMDAfterTest) {
 }
 
 if (params.interactiveDebugger) {
-  TestRunner.structuredLogger.interactiveDebugger = true;
+  TestRunner.interactiveDebugger = true;
 }
 
 if (params.maxTimeouts) {

@@ -94,7 +94,7 @@ CacheFileOutputStream::Write(const char * aBuf, uint32_t aCount,
     return NS_FAILED(mStatus) ? mStatus : NS_BASE_STREAM_CLOSED;
   }
 
-  if (CacheObserver::EntryIsTooBig(mPos + aCount, !mFile->mMemoryOnly)) {
+  if (!mFile->mSkipSizeCheck && CacheObserver::EntryIsTooBig(mPos + aCount, !mFile->mMemoryOnly)) {
     LOG(("CacheFileOutputStream::Write() - Entry is too big, failing and "
          "dooming the entry. [this=%p]", this));
 
@@ -131,18 +131,19 @@ CacheFileOutputStream::Write(const char * aBuf, uint32_t aCount,
     uint32_t chunkOffset = mPos - (mPos / kChunkSize) * kChunkSize;
     uint32_t canWrite = kChunkSize - chunkOffset;
     uint32_t thisWrite = std::min(static_cast<uint32_t>(canWrite), aCount);
-    nsresult rv = mChunk->EnsureBufSize(chunkOffset + thisWrite);
-    if (NS_FAILED(rv)) {
-      CloseWithStatusLocked(rv);
-      return rv;
+
+    CacheFileChunkWriteHandle hnd = mChunk->GetWriteHandle(chunkOffset + thisWrite);
+    if (!hnd.Buf()) {
+      CloseWithStatusLocked(NS_ERROR_OUT_OF_MEMORY);
+      return NS_ERROR_OUT_OF_MEMORY;
     }
-    memcpy(mChunk->BufForWriting() + chunkOffset, aBuf, thisWrite);
+
+    memcpy(hnd.Buf() + chunkOffset, aBuf, thisWrite);
+    hnd.UpdateDataSize(chunkOffset, thisWrite);
 
     mPos += thisWrite;
     aBuf += thisWrite;
     aCount -= thisWrite;
-
-    mChunk->UpdateDataSize(chunkOffset, thisWrite, false);
   }
 
   EnsureCorrectChunk(true);
@@ -342,7 +343,7 @@ CacheFileOutputStream::OnChunkUpdated(CacheFileChunk *aChunk)
 
 void CacheFileOutputStream::NotifyCloseListener()
 {
-  nsRefPtr<CacheOutputCloseListener> listener;
+  RefPtr<CacheOutputCloseListener> listener;
   listener.swap(mCloseListener);
   if (!listener)
     return;
@@ -410,16 +411,15 @@ CacheFileOutputStream::FillHole()
   LOG(("CacheFileOutputStream::FillHole() - Zeroing hole in chunk %d, range "
        "%d-%d [this=%p]", mChunk->Index(), mChunk->DataSize(), pos - 1, this));
 
-  nsresult rv = mChunk->EnsureBufSize(pos);
-  if (NS_FAILED(rv)) {
-    CloseWithStatusLocked(rv);
+  CacheFileChunkWriteHandle hnd = mChunk->GetWriteHandle(pos);
+  if (!hnd.Buf()) {
+    CloseWithStatusLocked(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
 
-  memset(mChunk->BufForWriting() + mChunk->DataSize(), 0,
-         pos - mChunk->DataSize());
-
-  mChunk->UpdateDataSize(mChunk->DataSize(), pos - mChunk->DataSize(), false);
+  uint32_t offset = hnd.DataSize();
+  memset(hnd.Buf() + offset, 0, pos - offset);
+  hnd.UpdateDataSize(offset, pos - offset);
 }
 
 void

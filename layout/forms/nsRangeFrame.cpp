@@ -11,6 +11,7 @@
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
 #include "nsContentUtils.h"
+#include "nsCSSPseudoElements.h"
 #include "nsCSSRendering.h"
 #include "nsFormControlFrame.h"
 #include "nsIContent.h"
@@ -23,7 +24,8 @@
 #include "nsNodeInfoManager.h"
 #include "nsRenderingContext.h"
 #include "mozilla/dom/Element.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsThemeConstants.h"
 
 #ifdef ACCESSIBILITY
@@ -34,6 +36,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::image;
 
 NS_IMPL_ISUPPORTS(nsRangeFrame::DummyTouchListener, nsIDOMEventListener)
 
@@ -81,11 +84,11 @@ nsRangeFrame::Init(nsIContent*       aContent,
   }
   aContent->AddEventListener(NS_LITERAL_STRING("touchstart"), mDummyTouchListener, false);
 
-  nsStyleSet *styleSet = PresContext()->StyleSet();
+  StyleSetHandle styleSet = PresContext()->StyleSet();
 
   mOuterFocusStyle =
     styleSet->ProbePseudoElementStyle(aContent->AsElement(),
-                                      nsCSSPseudoElements::ePseudo_mozFocusOuter,
+                                      CSSPseudoElementType::mozFocusOuter,
                                       StyleContext());
 
   return nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
@@ -109,14 +112,14 @@ nsRangeFrame::DestroyFrom(nsIFrame* aDestructRoot)
 
 nsresult
 nsRangeFrame::MakeAnonymousDiv(Element** aResult,
-                               nsCSSPseudoElements::Type aPseudoType,
+                               CSSPseudoElementType aPseudoType,
                                nsTArray<ContentInfo>& aElements)
 {
   nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
-  nsRefPtr<Element> resultElement = doc->CreateHTMLElement(nsGkAtoms::div);
+  RefPtr<Element> resultElement = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Associate the pseudo-element with the anonymous child.
-  nsRefPtr<nsStyleContext> newStyleContext =
+  RefPtr<nsStyleContext> newStyleContext =
     PresContext()->StyleSet()->ResolvePseudoElementStyle(mContent->AsElement(),
                                                          aPseudoType,
                                                          StyleContext(),
@@ -137,19 +140,19 @@ nsRangeFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 
   // Create the ::-moz-range-track pseuto-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mTrackDiv),
-                        nsCSSPseudoElements::ePseudo_mozRangeTrack,
+                        CSSPseudoElementType::mozRangeTrack,
                         aElements);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the ::-moz-range-progress pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mProgressDiv),
-                        nsCSSPseudoElements::ePseudo_mozRangeProgress,
+                        CSSPseudoElementType::mozRangeProgress,
                         aElements);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the ::-moz-range-thumb pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mThumbDiv),
-                        nsCSSPseudoElements::ePseudo_mozRangeThumb,
+                        CSSPseudoElementType::mozRangeThumb,
                         aElements);
   return rv;
 }
@@ -184,10 +187,38 @@ public:
   }
 #endif
 
+  nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override;
+  void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                 const nsDisplayItemGeometry* aGeometry,
+                                 nsRegion *aInvalidRegion) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override;
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("RangeFocusRing", TYPE_OUTLINE)
 };
+
+nsDisplayItemGeometry*
+nsDisplayRangeFocusRing::AllocateGeometry(nsDisplayListBuilder* aBuilder)
+{
+  return new nsDisplayItemGenericImageGeometry(this, aBuilder);
+}
+
+void
+nsDisplayRangeFocusRing::ComputeInvalidationRegion(
+  nsDisplayListBuilder* aBuilder,
+  const nsDisplayItemGeometry* aGeometry,
+  nsRegion* aInvalidRegion)
+{
+  auto geometry =
+    static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
+
+  if (aBuilder->ShouldSyncDecodeImages() &&
+      geometry->ShouldInvalidateToSyncDecodeImages()) {
+    bool snap;
+    aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
+  }
+
+  nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
+}
 
 nsRect
 nsDisplayRangeFocusRing::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
@@ -213,9 +244,17 @@ nsDisplayRangeFocusRing::Paint(nsDisplayListBuilder* aBuilder,
   nsStyleContext* styleContext =
     static_cast<nsRangeFrame*>(mFrame)->mOuterFocusStyle;
   MOZ_ASSERT(styleContext, "We only exist if mOuterFocusStyle is non-null");
-  nsCSSRendering::PaintBorder(mFrame->PresContext(), *aCtx, mFrame,
-                              mVisibleRect, GetBounds(aBuilder, &unused),
-                              styleContext);
+
+  PaintBorderFlags flags = aBuilder->ShouldSyncDecodeImages()
+                         ? PaintBorderFlags::SYNC_DECODE_IMAGES
+                         : PaintBorderFlags();
+
+  DrawResult result =
+    nsCSSRendering::PaintBorder(mFrame->PresContext(), *aCtx, mFrame,
+                                mVisibleRect, GetBounds(aBuilder, &unused),
+                                styleContext, flags);
+
+  nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
 }
 
 void
@@ -478,7 +517,7 @@ nsRangeFrame::GetValueAtEventPoint(WidgetGUIEvent* aEvent)
 {
   MOZ_ASSERT(aEvent->mClass == eMouseEventClass ||
              aEvent->mClass == eTouchEventClass,
-             "Unexpected event type - aEvent->refPoint may be meaningless");
+             "Unexpected event type - aEvent->mRefPoint may be meaningless");
 
   MOZ_ASSERT(mContent->IsHTMLElement(nsGkAtoms::input), "bad cast");
   dom::HTMLInputElement* input = static_cast<dom::HTMLInputElement*>(mContent);
@@ -496,11 +535,11 @@ nsRangeFrame::GetValueAtEventPoint(WidgetGUIEvent* aEvent)
 
   LayoutDeviceIntPoint absPoint;
   if (aEvent->mClass == eTouchEventClass) {
-    MOZ_ASSERT(aEvent->AsTouchEvent()->touches.Length() == 1,
-               "Unexpected number of touches");
-    absPoint = aEvent->AsTouchEvent()->touches[0]->mRefPoint;
+    MOZ_ASSERT(aEvent->AsTouchEvent()->mTouches.Length() == 1,
+               "Unexpected number of mTouches");
+    absPoint = aEvent->AsTouchEvent()->mTouches[0]->mRefPoint;
   } else {
-    absPoint = aEvent->refPoint;
+    absPoint = aEvent->mRefPoint;
   }
   nsPoint point =
     nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, absPoint, this);
@@ -837,30 +876,37 @@ nsRangeFrame::GetType() const
 bool
 nsRangeFrame::ShouldUseNativeStyle() const
 {
+  nsIFrame* trackFrame = mTrackDiv->GetPrimaryFrame();
+  nsIFrame* progressFrame = mProgressDiv->GetPrimaryFrame();
+  nsIFrame* thumbFrame = mThumbDiv->GetPrimaryFrame();
+
   return (StyleDisplay()->mAppearance == NS_THEME_RANGE) &&
-         !PresContext()->HasAuthorSpecifiedRules(const_cast<nsRangeFrame*>(this),
+         !PresContext()->HasAuthorSpecifiedRules(this,
                                                  (NS_AUTHOR_SPECIFIED_BORDER |
                                                   NS_AUTHOR_SPECIFIED_BACKGROUND)) &&
-         !PresContext()->HasAuthorSpecifiedRules(mTrackDiv->GetPrimaryFrame(),
+         trackFrame &&
+         !PresContext()->HasAuthorSpecifiedRules(trackFrame,
                                                  STYLES_DISABLING_NATIVE_THEMING) &&
-         !PresContext()->HasAuthorSpecifiedRules(mProgressDiv->GetPrimaryFrame(),
+         progressFrame &&
+         !PresContext()->HasAuthorSpecifiedRules(progressFrame,
                                                  STYLES_DISABLING_NATIVE_THEMING) &&
-         !PresContext()->HasAuthorSpecifiedRules(mThumbDiv->GetPrimaryFrame(),
+         thumbFrame &&
+         !PresContext()->HasAuthorSpecifiedRules(thumbFrame,
                                                  STYLES_DISABLING_NATIVE_THEMING);
 }
 
 Element*
-nsRangeFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
+nsRangeFrame::GetPseudoElement(CSSPseudoElementType aType)
 {
-  if (aType == nsCSSPseudoElements::ePseudo_mozRangeTrack) {
+  if (aType == CSSPseudoElementType::mozRangeTrack) {
     return mTrackDiv;
   }
 
-  if (aType == nsCSSPseudoElements::ePseudo_mozRangeThumb) {
+  if (aType == CSSPseudoElementType::mozRangeThumb) {
     return mThumbDiv;
   }
 
-  if (aType == nsCSSPseudoElements::ePseudo_mozRangeProgress) {
+  if (aType == CSSPseudoElementType::mozRangeProgress) {
     return mProgressDiv;
   }
 
@@ -873,7 +919,10 @@ nsRangeFrame::GetAdditionalStyleContext(int32_t aIndex) const
   // We only implement this so that SetAdditionalStyleContext will be
   // called if style changes that would change the -moz-focus-outer
   // pseudo-element have occurred.
-  return aIndex == 0 ? mOuterFocusStyle : nullptr;
+  if (aIndex != 0) {
+    return nullptr;
+  }
+  return mOuterFocusStyle;
 }
 
 void

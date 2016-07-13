@@ -35,7 +35,7 @@ class nsInProcessTabChildGlobal : public mozilla::DOMEventTargetHelper,
                                   public nsSupportsWeakReference,
                                   public mozilla::dom::ipc::MessageManagerCallback
 {
-  typedef mozilla::OwningSerializedStructuredCloneBuffer OwningSerializedStructuredCloneBuffer;
+  typedef mozilla::dom::ipc::StructuredCloneData StructuredCloneData;
 
 public:
   nsInProcessTabChildGlobal(nsIDocShell* aShell, nsIContent* aOwner,
@@ -73,7 +73,7 @@ public:
                                         aPrincipal, aCx, aArgc, aRetval)
       : NS_ERROR_NULL_POINTER;
   }
-  NS_IMETHOD GetContent(nsIDOMWindow** aContent) override;
+  NS_IMETHOD GetContent(mozIDOMWindowProxy** aContent) override;
   NS_IMETHOD GetDocShell(nsIDocShell** aDocShell) override;
 
   NS_DECL_NSIINPROCESSCONTENTFRAMEMESSAGEMANAGER
@@ -83,16 +83,16 @@ public:
    */
   virtual bool DoSendBlockingMessage(JSContext* aCx,
                                       const nsAString& aMessage,
-                                      const mozilla::dom::StructuredCloneData& aData,
+                                      StructuredCloneData& aData,
                                       JS::Handle<JSObject *> aCpows,
                                       nsIPrincipal* aPrincipal,
-                                      nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal,
+                                      nsTArray<StructuredCloneData>* aRetVal,
                                       bool aIsSync) override;
-  virtual bool DoSendAsyncMessage(JSContext* aCx,
-                                  const nsAString& aMessage,
-                                  const mozilla::dom::StructuredCloneData& aData,
-                                  JS::Handle<JSObject *> aCpows,
-                                  nsIPrincipal* aPrincipal) override;
+  virtual nsresult DoSendAsyncMessage(JSContext* aCx,
+                                      const nsAString& aMessage,
+                                      StructuredCloneData& aData,
+                                      JS::Handle<JSObject *> aCpows,
+                                      nsIPrincipal* aPrincipal) override;
 
   virtual nsresult PreHandleEvent(
                      mozilla::EventChainPreVisitor& aVisitor) override;
@@ -117,7 +117,6 @@ public:
   }
   using mozilla::DOMEventTargetHelper::AddEventListener;
 
-  virtual JSContext* GetJSContextForEventHandlers() override { return nsContentUtils::GetSafeJSContext(); }
   virtual nsIPrincipal* GetPrincipal() override { return mPrincipal; }
   void LoadFrameScript(const nsAString& aURL, bool aRunInGlobalScope);
   void FireUnloadEvent();

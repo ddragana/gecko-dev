@@ -12,14 +12,14 @@
 #include "EventTokenBucket.h"
 #include "nsCOMPtr.h"
 #include "nsThreadUtils.h"
-#include "nsILoadGroup.h"
 #include "nsIInterfaceRequestor.h"
 #include "TimingStruct.h"
 #include "Http2Push.h"
 #include "mozilla/net/DNS.h"
+#include "ARefBase.h"
 
 #ifdef MOZ_WIDGET_GONK
-#include "nsINetworkManager.h"
+#include "nsINetworkInterface.h"
 #include "nsProxyRelease.h"
 #endif
 
@@ -29,6 +29,7 @@ class nsIHttpActivityObserver;
 class nsIEventTarget;
 class nsIInputStream;
 class nsIOutputStream;
+class nsIRequestContext;
 
 namespace mozilla { namespace net {
 
@@ -45,6 +46,7 @@ class nsHttpTransaction final : public nsAHttpTransaction
                               , public ATokenBucketEvent
                               , public nsIInputStreamCallback
                               , public nsIOutputStreamCallback
+                              , public ARefBase
 {
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
@@ -103,8 +105,9 @@ public:
     // nsHttpTransaction::Connection should only be used on the socket thread
     already_AddRefed<nsAHttpConnection> GetConnectionReference();
 
-    // Called to find out if the transaction generated a complete response.
+    // Called to set/find out if the transaction generated a complete response.
     bool ResponseIsComplete() { return mResponseIsComplete; }
+    void SetResponseIsComplete() { mResponseIsComplete = true; }
 
     bool      ProxyConnectFailed() { return mProxyConnectFailed; }
 
@@ -124,9 +127,9 @@ public:
     const TimeStamp GetPendingTime() { return mPendingTime; }
     bool UsesPipelining() const { return mCaps & NS_HTTP_ALLOW_PIPELINING; }
 
-    // overload of nsAHttpTransaction::LoadGroupConnectionInfo()
-    nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() override { return mLoadGroupCI.get(); }
-    void SetLoadGroupConnectionInfo(nsILoadGroupConnectionInfo *aLoadGroupCI);
+    // overload of nsAHttpTransaction::RequestContext()
+    nsIRequestContext *RequestContext() override { return mRequestContext.get(); }
+    void SetRequestContext(nsIRequestContext *aRequestContext);
     void DispatchedAsBlocking();
     void RemoveDispatchedAsBlocking();
 
@@ -140,6 +143,8 @@ public:
         return r;
     }
     void SetPushedStream(Http2PushedStream *push) { mPushedStream = push; }
+    uint32_t InitialRwin() const { return mInitialRwin; };
+    bool ChannelPipeFull() { return mWaitingOnPipeOut; }
 
     // Locked methods to get and set timing info
     const TimingStruct Timings();
@@ -158,6 +163,8 @@ public:
     mozilla::TimeStamp GetRequestStart();
     mozilla::TimeStamp GetResponseStart();
     mozilla::TimeStamp GetResponseEnd();
+
+    int64_t GetTransferSize() { return mTransferSize; }
 
 private:
     friend class DeleteHttpTransaction;
@@ -192,7 +199,7 @@ private:
     void ReuseConnectionOnRestartOK(bool reuseOk) override { mReuseOnRestart = reuseOk; }
 
 private:
-    class UpdateSecurityCallbacks : public nsRunnable
+    class UpdateSecurityCallbacks : public Runnable
     {
       public:
         UpdateSecurityCallbacks(nsHttpTransaction* aTrans,
@@ -206,7 +213,7 @@ private:
             return NS_OK;
         }
       private:
-        nsRefPtr<nsHttpTransaction> mTrans;
+        RefPtr<nsHttpTransaction> mTrans;
         nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
     };
 
@@ -218,7 +225,7 @@ private:
     nsCOMPtr<nsISupports>           mSecurityInfo;
     nsCOMPtr<nsIAsyncInputStream>   mPipeIn;
     nsCOMPtr<nsIAsyncOutputStream>  mPipeOut;
-    nsCOMPtr<nsILoadGroupConnectionInfo> mLoadGroupCI;
+    nsCOMPtr<nsIRequestContext>     mRequestContext;
 
     nsCOMPtr<nsISupports>             mChannel;
     nsCOMPtr<nsIHttpActivityObserver> mActivityDistributor;
@@ -227,8 +234,8 @@ private:
     nsCOMPtr<nsIInputStream>        mRequestStream;
     int64_t                         mRequestSize;
 
-    nsRefPtr<nsAHttpConnection>     mConnection;
-    nsRefPtr<nsHttpConnectionInfo>  mConnInfo;
+    RefPtr<nsAHttpConnection>     mConnection;
+    RefPtr<nsHttpConnectionInfo>  mConnInfo;
     nsHttpRequestHead              *mRequestHead;     // weak ref
     nsHttpResponseHead             *mResponseHead;    // owning pointer
 
@@ -239,6 +246,7 @@ private:
 
     int64_t                         mContentLength;   // equals -1 if unknown
     int64_t                         mContentRead;     // count of consumed content bytes
+    int64_t                         mTransferSize; // count of received bytes
 
     // After a 304/204 or other "no-content" style response we will skip over
     // up to MAX_INVALID_RESPONSE_BODY_SZ bytes when looking for the next
@@ -248,6 +256,7 @@ private:
     uint32_t                        mInvalidResponseBytesRead;
 
     Http2PushedStream               *mPushedStream;
+    uint32_t                        mInitialRwin;
 
     nsHttpChunkedDecoder            *mChunkedDecoder;
 
@@ -263,6 +272,9 @@ private:
     int32_t                         mPipelinePosition;
     int64_t                         mMaxPipelineObjectSize;
 
+    nsHttpVersion                   mHttpVersion;
+    uint16_t                        mHttpResponseCode;
+
     // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
     // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
     // redundant requests on the network. The member itself is atomic, but
@@ -271,8 +283,7 @@ private:
     // bitfields should be allowed: 'lost races' will thus err on the
     // conservative side, e.g. by going ahead with a 2nd DNS refresh.
     Atomic<uint32_t>                mCapsToClear;
-
-    nsHttpVersion                   mHttpVersion;
+    Atomic<bool, ReleaseAcquire>    mResponseIsComplete;
 
     // state flags, all logically boolean, but not packed together into a
     // bitfield so as to avoid bitfield-induced races.  See bug 560579.
@@ -281,7 +292,6 @@ private:
     bool                            mHaveStatusLine;
     bool                            mHaveAllHeaders;
     bool                            mTransactionDone;
-    bool                            mResponseIsComplete;
     bool                            mDidContentStart;
     bool                            mNoContent; // expecting an empty entity body
     bool                            mSentData;
@@ -297,6 +307,8 @@ private:
     bool                            mReuseOnRestart;
     bool                            mContentDecoding;
     bool                            mContentDecodingCheck;
+    bool                            mDeferredSendProgress;
+    bool                            mWaitingOnPipeOut;
 
     // mClosed           := transaction has been explicitly closed
     // mTransactionDone  := transaction ran to completion or was interrupted
@@ -406,9 +418,9 @@ private:
     uint64_t                           mCountRecv;
     uint64_t                           mCountSent;
     uint32_t                           mAppId;
-    bool                               mIsInBrowser;
+    bool                               mIsInIsolatedMozBrowser;
 #ifdef MOZ_WIDGET_GONK
-    nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
+    nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
 #endif
     nsresult                           SaveNetworkStats(bool);
     void                               CountRecvBytes(uint64_t recvBytes)
@@ -440,7 +452,7 @@ public:
     nsIInterfaceRequestor *SecurityCallbacks() { return mCallbacks; }
 
 private:
-    nsRefPtr<ASpdySession> mTunnelProvider;
+    RefPtr<ASpdySession> mTunnelProvider;
 
 public:
     void GetNetworkAddresses(NetAddr &self, NetAddr &peer);

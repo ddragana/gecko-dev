@@ -11,8 +11,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/ServiceWorkerBinding.h" // For ServiceWorkerState.
 
-class nsIDocument;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 namespace dom {
@@ -28,10 +27,9 @@ ServiceWorkerVisible(JSContext* aCx, JSObject* aObj);
 
 class ServiceWorker final : public DOMEventTargetHelper
 {
-  friend class ServiceWorkerManager;
+  friend class ServiceWorkerInfo;
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServiceWorker, DOMEventTargetHelper)
 
   IMPL_EVENT_HANDLER(statechange)
   IMPL_EVENT_HANDLER(error)
@@ -57,12 +55,8 @@ public:
   void
   DispatchStateChange(ServiceWorkerState aState)
   {
-    SetState(aState);
     DOMEventTargetHelper::DispatchTrustedEvent(NS_LITERAL_STRING("statechange"));
   }
-
-  void
-  QueueStateChangeEvent(ServiceWorkerState aState);
 
 #ifdef XP_WIN
 #undef PostMessage
@@ -73,29 +67,15 @@ public:
               const Optional<Sequence<JS::Value>>& aTransferable,
               ErrorResult& aRv);
 
-  WorkerPrivate*
-  GetWorkerPrivate() const;
-
 private:
-  // This class can only be created from the ServiceWorkerManager.
-  ServiceWorker(nsPIDOMWindow* aWindow, ServiceWorkerInfo* aInfo,
-                SharedWorker* aSharedWorker);
+  // This class can only be created from ServiceWorkerInfo::GetOrCreateInstance().
+  ServiceWorker(nsPIDOMWindowInner* aWindow, ServiceWorkerInfo* aInfo);
 
   // This class is reference-counted and will be destroyed from Release().
   ~ServiceWorker();
 
   ServiceWorkerState mState;
-  const nsRefPtr<ServiceWorkerInfo> mInfo;
-
-  // To allow ServiceWorkers to potentially drop the backing DOMEventTargetHelper and
-  // re-instantiate it later, they simply own a SharedWorker member that
-  // can be released and recreated as required rather than re-implement some of
-  // the SharedWorker logic.
-  nsRefPtr<SharedWorker> mSharedWorker;
-  // We need to keep the document and window alive for PostMessage to be able
-  // to access them.
-  nsCOMPtr<nsIDocument> mDocument;
-  nsCOMPtr<nsPIDOMWindow> mWindow;
+  const RefPtr<ServiceWorkerInfo> mInfo;
 };
 
 } // namespace workers

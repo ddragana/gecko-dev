@@ -26,11 +26,14 @@ class nsIX509Cert;
 //
 // Class for importing/exporting PKCS#12 blobs
 //
-class nsPKCS12Blob
+class nsPKCS12Blob : public nsNSSShutDownObject
 {
 public:
   nsPKCS12Blob();
   virtual ~nsPKCS12Blob();
+
+  // Nothing to release.
+  virtual void virtualDestroyNSSReference() override {}
 
   // Set the token to use (default is internal)
   nsresult SetToken(nsIPK11Token *token);
@@ -51,7 +54,7 @@ private:
   nsresult getPKCS12FilePassword(SECItem *);
   nsresult newPKCS12FilePassword(SECItem *);
   nsresult inputToDecoder(SEC_PKCS12DecoderContext *, nsIFile *);
-  void unicodeToItem(const char16_t *, SECItem *);
+  nsresult unicodeToItem(const char16_t *, SECItem *);
   void handleError(int myerr = 0);
 
   // RetryReason and ImportMode are used when importing a PKCS12 file.

@@ -22,18 +22,8 @@ interface HTMLElement : Element {
   [Constant]
   readonly attribute DOMStringMap dataset;
 
-  // microdata 
-  [SetterThrows, Pure]
-           attribute boolean itemScope;
-  [PutForwards=value,Constant] readonly attribute DOMSettableTokenList itemType;
-  [SetterThrows, Pure]
-           attribute DOMString itemId;
-  [PutForwards=value,Constant] readonly attribute DOMSettableTokenList itemRef;
-  [PutForwards=value,Constant] readonly attribute DOMSettableTokenList itemProp;
-  [Constant]
-  readonly attribute HTMLPropertiesCollection properties;
-  [Throws]
-           attribute any itemValue;
+  [GetterThrows, Pure]
+           attribute DOMString innerText;
 
   // user interaction
   [SetterThrows, Pure]
@@ -51,7 +41,7 @@ interface HTMLElement : Element {
   readonly attribute DOMString accessKeyLabel;
   [SetterThrows, Pure]
            attribute boolean draggable;
-  //[PutForwards=value] readonly attribute DOMSettableTokenList dropzone;
+  //[PutForwards=value] readonly attribute DOMTokenList dropzone;
   [SetterThrows, Pure]
            attribute DOMString contentEditable;
   [Pure]

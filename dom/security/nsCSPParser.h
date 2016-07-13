@@ -54,7 +54,8 @@ class nsCSPTokenizer {
 
     inline void skipWhiteSpace()
     {
-      while (mCurChar < mEndChar && *mCurChar == ' ') {
+      while (mCurChar < mEndChar &&
+             nsContentUtils::IsHTMLWhitespace(*mCurChar)) {
         mCurToken.Append(*mCurChar++);
       }
       mCurToken.Truncate();
@@ -62,7 +63,8 @@ class nsCSPTokenizer {
 
     inline void skipWhiteSpaceAndSemicolon()
     {
-      while (mCurChar < mEndChar && (*mCurChar == ' ' || *mCurChar == ';')) {
+      while (mCurChar < mEndChar && (*mCurChar == ';' ||
+             nsContentUtils::IsHTMLWhitespace(*mCurChar))){
         mCurToken.Append(*mCurChar++);
       }
       mCurToken.Truncate();
@@ -100,43 +102,50 @@ class nsCSPParser {
     static nsCSPPolicy* parseContentSecurityPolicy(const nsAString &aPolicyString,
                                                    nsIURI *aSelfURI,
                                                    bool aReportOnly,
-                                                   uint64_t aInnerWindowID);
+                                                   nsCSPContext* aCSPContext,
+                                                   bool aDeliveredViaMetaTag);
 
   private:
     nsCSPParser(cspTokens& aTokens,
                 nsIURI* aSelfURI,
-                uint64_t aInnerWindowID);
+                nsCSPContext* aCSPContext,
+                bool aDeliveredViaMetaTag);
+
+    static bool sCSPExperimentalEnabled;
+
     ~nsCSPParser();
 
 
     // Parsing the CSP using the source-list from http://www.w3.org/TR/CSP11/#source-list
-    nsCSPPolicy*    policy();
-    void            directive();
-    nsCSPDirective* directiveName();
-    void            directiveValue(nsTArray<nsCSPBaseSrc*>& outSrcs);
-    void            referrerDirectiveValue();
-    void            sourceList(nsTArray<nsCSPBaseSrc*>& outSrcs);
-    nsCSPBaseSrc*   sourceExpression();
-    nsCSPSchemeSrc* schemeSource();
-    nsCSPHostSrc*   hostSource();
-    nsCSPBaseSrc*   keywordSource();
-    nsCSPNonceSrc*  nonceSource();
-    nsCSPHashSrc*   hashSource();
-    nsCSPHostSrc*   appHost(); // helper function to support app specific hosts
-    nsCSPHostSrc*   host();
-    bool            hostChar();
-    bool            schemeChar();
-    bool            port();
-    bool            path(nsCSPHostSrc* aCspHost);
+    nsCSPPolicy*        policy();
+    void                directive();
+    nsCSPDirective*     directiveName();
+    void                directiveValue(nsTArray<nsCSPBaseSrc*>& outSrcs);
+    void                requireSRIForDirectiveValue(nsRequireSRIForDirective* aDir);
+    void                referrerDirectiveValue();
+    void                sourceList(nsTArray<nsCSPBaseSrc*>& outSrcs);
+    nsCSPBaseSrc*       sourceExpression();
+    nsCSPSchemeSrc*     schemeSource();
+    nsCSPHostSrc*       hostSource();
+    nsCSPBaseSrc*       keywordSource();
+    nsCSPNonceSrc*      nonceSource();
+    nsCSPHashSrc*       hashSource();
+    nsCSPHostSrc*       appHost(); // helper function to support app specific hosts
+    nsCSPHostSrc*       host();
+    bool                hostChar();
+    bool                schemeChar();
+    bool                port();
+    bool                path(nsCSPHostSrc* aCspHost);
 
-    bool subHost();                                       // helper function to parse subDomains
-    bool atValidUnreservedChar();                         // helper function to parse unreserved
-    bool atValidSubDelimChar();                           // helper function to parse sub-delims
-    bool atValidPctEncodedChar();                         // helper function to parse pct-encoded
-    bool subPath(nsCSPHostSrc* aCspHost);                 // helper function to parse paths
-    void reportURIList(nsTArray<nsCSPBaseSrc*>& outSrcs); // helper function to parse report-uris
-    void percentDecodeStr(const nsAString& aEncStr,       // helper function to percent-decode
+    bool subHost();                                         // helper function to parse subDomains
+    bool atValidUnreservedChar();                           // helper function to parse unreserved
+    bool atValidSubDelimChar();                             // helper function to parse sub-delims
+    bool atValidPctEncodedChar();                           // helper function to parse pct-encoded
+    bool subPath(nsCSPHostSrc* aCspHost);                   // helper function to parse paths
+    void reportURIList(nsTArray<nsCSPBaseSrc*>& outSrcs);   // helper function to parse report-uris
+    void percentDecodeStr(const nsAString& aEncStr,         // helper function to percent-decode
                           nsAString& outDecStr);
+    void sandboxFlagList(nsTArray<nsCSPBaseSrc*>& outSrcs); // helper function to parse sandbox flags
 
     inline bool atEnd()
     {
@@ -233,10 +242,20 @@ class nsCSPParser {
     bool               mHasHashOrNonce; // false, if no hash or nonce is defined
     nsCSPKeywordSrc*   mUnsafeInlineKeywordSrc; // null, otherwise invlidate()
 
+    // cache variables for child-src and frame-src directive handling.
+    // frame-src is deprecated in favor of child-src, however if we
+    // see a frame-src directive, it takes precedence for frames and iframes.
+    // At the end of parsing, if we have a child-src directive, we need to
+    // decide whether it will handle frames, or if there is a frame-src we
+    // should honor instead.
+    nsCSPChildSrcDirective* mChildSrc;
+    nsCSPDirective*         mFrameSrc;
+
     cspTokens          mTokens;
     nsIURI*            mSelfURI;
     nsCSPPolicy*       mPolicy;
-    uint64_t           mInnerWindowID; // used for console reporting
+    nsCSPContext*      mCSPContext; // used for console logging
+    bool               mDeliveredViaMetaTag;
 };
 
 #endif /* nsCSPParser_h___ */

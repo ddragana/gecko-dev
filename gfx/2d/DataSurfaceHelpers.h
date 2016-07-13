@@ -8,8 +8,32 @@
 
 #include "2D.h"
 
+#include "mozilla/UniquePtr.h"
+
 namespace mozilla {
 namespace gfx {
+
+/**
+ * Create a DataSourceSurface and init the surface with the |aData|. The stride
+ * of this source surface might be different from the input data's |aDataStride|.
+ * System will try to use the optimal one.
+ */
+already_AddRefed<DataSourceSurface>
+CreateDataSourceSurfaceFromData(const IntSize& aSize,
+                                SurfaceFormat aFormat,
+                                const uint8_t* aData,
+                                int32_t aDataStride);
+
+/**
+ * Similar to CreateDataSourceSurfaceFromData(), but could setup the stride for
+ * this surface.
+ */
+already_AddRefed<DataSourceSurface>
+CreateDataSourceSurfaceWithStrideFromData(const IntSize &aSize,
+                                          SurfaceFormat aFormat,
+                                          int32_t aStride,
+                                          const uint8_t* aData,
+                                          int32_t aDataStride);
 
 void
 ConvertBGRXToBGRA(uint8_t* aData, const IntSize &aSize, const int32_t aStride);
@@ -25,11 +49,9 @@ CopySurfaceDataToPackedArray(uint8_t* aSrc, uint8_t* aDst, IntSize aSrcSize,
                              int32_t aSrcStride, int32_t aBytesPerPixel);
 
 /**
- * Convert aSurface to a packed buffer in BGRA format. The pixel data is
- * returned in a buffer allocated with new uint8_t[]. The caller then has
- * ownership of the buffer and is responsible for delete[]'ing it.
+ * Convert aSurface to a packed buffer in BGRA format.
  */
-uint8_t*
+UniquePtr<uint8_t[]>
 SurfaceToPackedBGRA(DataSourceSurface *aSurface);
 
 /**
@@ -72,8 +94,9 @@ BufferSizeFromStrideAndHeight(int32_t aStride,
 
 /**
  * Copy aSrcRect from aSrc to aDest starting at aDestPoint.
+ * @returns false if the copy is not successful or the aSrc's size is empty.
  */
-void
+bool
 CopyRect(DataSourceSurface* aSrc, DataSourceSurface* aDest,
          IntRect aSrcRect, IntPoint aDestPoint);
 
@@ -91,7 +114,7 @@ CreateDataSourceSurfaceByCloning(DataSourceSurface* aSource);
  */
 uint8_t*
 DataAtOffset(DataSourceSurface* aSurface,
-             DataSourceSurface::MappedSurface* aMap,
+             const DataSourceSurface::MappedSurface* aMap,
              IntPoint aPoint);
 
 /**

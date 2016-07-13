@@ -1,7 +1,7 @@
-# -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 var gPluginHandler = {
   PREF_SESSION_PERSIST_MINUTES: "plugin.sessionPermissionNow.intervalInMinutes",
@@ -11,7 +11,6 @@ var gPluginHandler = {
     "PluginContent:RemoveNotification",
     "PluginContent:UpdateHiddenPluginUI",
     "PluginContent:HideNotificationBar",
-    "PluginContent:ShowInstallNotification",
     "PluginContent:InstallSinglePlugin",
     "PluginContent:ShowPluginCrashedNotification",
     "PluginContent:SubmitReport",
@@ -56,8 +55,6 @@ var gPluginHandler = {
       case "PluginContent:HideNotificationBar":
         this.hideNotificationBar(msg.target, msg.data.name);
         break;
-      case "PluginContent:ShowInstallNotification":
-        return this.showInstallNotification(msg.target, msg.data.pluginInfo);
       case "PluginContent:InstallSinglePlugin":
         this.installSinglePlugin(msg.data.pluginInfo);
         break;
@@ -75,7 +72,7 @@ var gPluginHandler = {
           case "managePlugins":
           case "openHelpPage":
           case "openPluginUpdatePage":
-            this[msg.data.name].apply(this);
+            this[msg.data.name].call(this, msg.data.pluginTag);
             break;
         }
         break;
@@ -85,14 +82,6 @@ var gPluginHandler = {
     }
   },
 
-#ifdef MOZ_CRASHREPORTER
-  get CrashSubmit() {
-    delete this.CrashSubmit;
-    Cu.import("resource://gre/modules/CrashSubmit.jsm", this);
-    return this.CrashSubmit;
-  },
-#endif
-
   // Callback for user clicking on a disabled plugin
   managePlugins: function () {
     BrowserOpenAddonsMgr("addons://list/plugin");
@@ -100,8 +89,12 @@ var gPluginHandler = {
 
   // Callback for user clicking on the link in a click-to-play plugin
   // (where the plugin has an update)
-  openPluginUpdatePage: function () {
-    openUILinkIn(Services.urlFormatter.formatURLPref("plugins.update.url"), "tab");
+  openPluginUpdatePage: function(pluginTag) {
+    let url = Services.blocklist.getPluginInfoURL(pluginTag);
+    if (!url) {
+      url = Services.blocklist.getPluginBlocklistURL(pluginTag);
+    }
+    openUILinkIn(url, "tab");
   },
 
   submitReport: function submitReport(runID, keyVals, submitURLOptIn) {
@@ -255,12 +248,7 @@ var gPluginHandler = {
       // URL that we construct in-product, even for other blocklist types.
       let url = Services.blocklist.getPluginInfoURL(pluginInfo.pluginTag);
 
-      if (pluginInfo.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE) {
-        if (!url) {
-          url = Services.urlFormatter.formatURLPref("plugins.update.url");
-        }
-      }
-      else if (pluginInfo.blocklistState != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
+      if (pluginInfo.blocklistState != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
         if (!url) {
           url = Services.blocklist.getPluginBlocklistURL(pluginInfo.pluginTag);
         }

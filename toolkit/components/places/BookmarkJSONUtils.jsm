@@ -208,14 +208,13 @@ BookmarkImporter.prototype = {
 
       let uri = NetUtil.newURI(spec);
       let channel = NetUtil.newChannel({
-        uri,
-        loadingPrincipal: Services.scriptSecurityManager.getNoAppCodebasePrincipal(uri),
-        contentPolicyType: Ci.nsIContentPolicy.TYPE_DATAREQUEST
+        uri: uri,
+        loadUsingSystemPrincipal: true
       });
       let streamLoader = Cc["@mozilla.org/network/stream-loader;1"]
                            .createInstance(Ci.nsIStreamLoader);
       streamLoader.init(streamObserver);
-      channel.asyncOpen(streamLoader, channel);
+      channel.asyncOpen2(streamLoader);
     });
   },
 
@@ -256,8 +255,11 @@ BookmarkImporter.prototype = {
     } else {
       // Ensure tag folder gets processed last
       nodes[0].children.sort(function sortRoots(aNode, bNode) {
-        return (aNode.root && aNode.root == "tagsFolder") ? 1 :
-               (bNode.root && bNode.root == "tagsFolder") ? -1 : 0;
+        if (aNode.root && aNode.root == "tagsFolder")
+          return 1;
+        if (bNode.root && bNode.root == "tagsFolder")
+          return -1;
+        return 0;
       });
 
       let batch = {
@@ -276,7 +278,7 @@ BookmarkImporter.prototype = {
             let childIds = [];
             for (let i = 0; i < root.childCount; i++) {
               let childId = root.getChild(i).itemId;
-              if (excludeItems.indexOf(childId) == -1 &&
+              if (!excludeItems.includes(childId) &&
                   childId != PlacesUtils.tagsFolderId) {
                 childIds.push(childId);
               }
@@ -417,7 +419,8 @@ BookmarkImporter.prototype = {
               parentId: aContainer,
               index: aIndex,
               lastModified: aData.lastModified,
-              siteURI: siteURI
+              siteURI: siteURI,
+              guid: aData.guid
             }).then(function (aLivemark) {
               let id = aLivemark.id;
               if (aData.dateAdded)
@@ -429,7 +432,7 @@ BookmarkImporter.prototype = {
           }
         } else {
           id = PlacesUtils.bookmarks.createFolder(
-                 aContainer, aData.title, aIndex);
+                 aContainer, aData.title, aIndex, aData.guid);
           folderIdMap[aData.id] = id;
           // Process children
           if (aData.children) {
@@ -448,7 +451,7 @@ BookmarkImporter.prototype = {
         break;
       case PlacesUtils.TYPE_X_MOZ_PLACE:
         id = PlacesUtils.bookmarks.insertBookmark(
-               aContainer, NetUtil.newURI(aData.uri), aIndex, aData.title);
+               aContainer, NetUtil.newURI(aData.uri), aIndex, aData.title, aData.guid);
         if (aData.keyword) {
           // POST data could be set in 2 ways:
           // 1. new backups have a postData property
@@ -485,10 +488,12 @@ BookmarkImporter.prototype = {
             // Create a fake faviconURI to use (FIXME: bug 523932)
             let faviconURI = NetUtil.newURI("fake-favicon-uri:" + aData.uri);
             PlacesUtils.favicons.replaceFaviconDataFromDataURL(
-              faviconURI, aData.icon, 0);
+              faviconURI, aData.icon, 0,
+              Services.scriptSecurityManager.getSystemPrincipal());
             PlacesUtils.favicons.setAndFetchFaviconForPage(
               NetUtil.newURI(aData.uri), faviconURI, false,
-              PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
+              PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
+              Services.scriptSecurityManager.getSystemPrincipal());
           } catch (ex) {
             Components.utils.reportError("Failed to import favicon data:" + ex);
           }
@@ -497,14 +502,15 @@ BookmarkImporter.prototype = {
           try {
             PlacesUtils.favicons.setAndFetchFaviconForPage(
               NetUtil.newURI(aData.uri), NetUtil.newURI(aData.iconUri), false,
-              PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
+              PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE, null,
+              Services.scriptSecurityManager.getSystemPrincipal());
           } catch (ex) {
             Components.utils.reportError("Failed to import favicon URI:" + ex);
           }
         }
         break;
       case PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR:
-        id = PlacesUtils.bookmarks.insertSeparator(aContainer, aIndex);
+        id = PlacesUtils.bookmarks.insertSeparator(aContainer, aIndex, aData.guid);
         break;
       default:
         // Unknown node type

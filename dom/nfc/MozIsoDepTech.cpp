@@ -5,7 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MozIsoDepTech.h"
+#include "TagUtils.h"
 #include "mozilla/dom/Promise.h"
+
+using namespace mozilla::dom::nfc;
 
 namespace mozilla {
 namespace dom {
@@ -35,7 +38,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MozIsoDepTech)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-const NFCTechType MozIsoDepTech::mTechnology = NFCTechType::ISO_DEP;
+const NFCTechType MozIsoDepTech::sTechnology = NFCTechType::ISO_DEP;
 
 /* static */
 already_AddRefed<MozIsoDepTech>
@@ -44,30 +47,23 @@ MozIsoDepTech::Constructor(const GlobalObject& aGlobal,
                            ErrorResult& aRv)
 {
   ErrorResult rv;
-  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobal.GetAsSupports());
   if (!win) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  Nullable<nsTArray<NFCTechType>> techList;
-  aNFCTag.GetTechList(techList, rv);
-  if (rv.Failed()) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
-  if (techList.IsNull() || !(techList.Value().Contains(mTechnology))) {
+  if (!TagUtils::IsTechSupported(aNFCTag, sTechnology)) {
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
 
-  nsRefPtr<MozIsoDepTech> isoDep = new MozIsoDepTech(win, aNFCTag);
+  RefPtr<MozIsoDepTech> isoDep = new MozIsoDepTech(win, aNFCTag);
 
   return isoDep.forget();
 }
 
-MozIsoDepTech::MozIsoDepTech(nsPIDOMWindow* aWindow, MozNFCTag& aNFCTag)
+MozIsoDepTech::MozIsoDepTech(nsPIDOMWindowInner* aWindow, MozNFCTag& aNFCTag)
  : mWindow(aWindow)
  , mTag(&aNFCTag)
 {
@@ -80,16 +76,7 @@ MozIsoDepTech::~MozIsoDepTech()
 already_AddRefed<Promise>
 MozIsoDepTech::Transceive(const Uint8Array& aCommand, ErrorResult& aRv)
 {
-  ErrorResult rv;
-
-  aCommand.ComputeLengthAndData();
-  nsRefPtr<Promise> promise = mTag->Transceive(mTechnology, aCommand, rv);
-  if (rv.Failed()) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
-  return promise.forget();
+  return TagUtils::Transceive(mTag, sTechnology, aCommand, aRv);
 }
 
 JSObject*

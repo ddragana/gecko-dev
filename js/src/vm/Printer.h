@@ -7,7 +7,10 @@
 #ifndef vm_Printer_h
 #define vm_Printer_h
 
+#include "mozilla/Attributes.h"
+
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 
 class JSString;
@@ -25,7 +28,7 @@ class LifoAlloc;
 class GenericPrinter
 {
   protected:
-    bool                    reportedOOM_;   // record reported OOM.
+    bool                  hadOOM_;     // whether reportOutOfMemory() has been called.
 
     GenericPrinter();
 
@@ -65,25 +68,26 @@ class Sprinter final : public GenericPrinter
         }
     };
 
-    ExclusiveContext*       context;        // context executing the decompiler
+    ExclusiveContext*     context;          // context executing the decompiler
 
   private:
-    static const size_t     DefaultSize;
+    static const size_t   DefaultSize;
 #ifdef DEBUG
-    bool                    initialized;    // true if this is initialized, use for debug builds
+    bool                  initialized;      // true if this is initialized, use for debug builds
 #endif
-    char*                   base;           // malloc'd buffer address
-    size_t                  size;           // size of buffer allocated at base
-    ptrdiff_t               offset;         // offset of next free char in buffer
+    bool                  shouldReportOOM;  // whether to report OOM to the context
+    char*                 base;             // malloc'd buffer address
+    size_t                size;             // size of buffer allocated at base
+    ptrdiff_t             offset;           // offset of next free char in buffer
 
-    bool realloc_(size_t newSize);
+    MOZ_MUST_USE bool realloc_(size_t newSize);
 
   public:
-    explicit Sprinter(ExclusiveContext* cx);
+    explicit Sprinter(ExclusiveContext* cx, bool shouldReportOOM = true);
     ~Sprinter();
 
     // Initialize this sprinter, returns false on error.
-    bool init();
+    MOZ_MUST_USE bool init();
 
     void checkInvariants() const;
 
@@ -130,9 +134,9 @@ class Fprinter final : public GenericPrinter
     ~Fprinter();
 
     // Initialize this printer, returns false on error.
-    bool init(const char* path);
+    MOZ_MUST_USE bool init(const char* path);
     void init(FILE* fp);
-    bool isInitialized() {
+    bool isInitialized() const {
         return file_ != nullptr;
     }
     void flush();

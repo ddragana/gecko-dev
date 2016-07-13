@@ -83,6 +83,9 @@ class JSAPITest
 
     bool exec(const char* bytes, const char* filename, int lineno);
 
+    // Like exec(), but doesn't call fail() if JS::Evaluate returns false.
+    bool execDontReport(const char* bytes, const char* filename, int lineno);
+
 #define EVAL(s, vp) do { if (!evaluate(s, __FILE__, __LINE__, vp)) return false; } while (false)
 
     bool evaluate(const char* bytes, const char* filename, int lineno, JS::MutableHandleValue vp);
@@ -226,12 +229,15 @@ class JSAPITest
     JSAPITestString messages() const { return msgs; }
 
     static const JSClass * basicGlobalClass() {
+        static const JSClassOps cOps = {
+            nullptr, nullptr, nullptr, nullptr,
+            nullptr, nullptr, nullptr, nullptr,
+            nullptr, nullptr, nullptr,
+            JS_GlobalObjectTraceHook
+        };
         static const JSClass c = {
             "global", JSCLASS_GLOBAL_FLAGS,
-            nullptr, nullptr, nullptr, nullptr,
-            nullptr, nullptr, nullptr, nullptr,
-            nullptr, nullptr, nullptr, nullptr,
-            JS_GlobalObjectTraceHook
+            &cOps
         };
         return &c;
     }
@@ -261,7 +267,7 @@ class JSAPITest
 
     bool definePrint();
 
-    static void setNativeStackQuota(JSRuntime* rt)
+    static void setNativeStackQuota(JSContext* cx)
     {
         const size_t MAX_STACK_SIZE =
 /* Assume we can't use more than 5e5 bytes of C stack by default. */
@@ -276,15 +282,15 @@ class JSAPITest
 #endif
         ;
 
-        JS_SetNativeStackQuota(rt, MAX_STACK_SIZE);
+        JS_SetNativeStackQuota(cx, MAX_STACK_SIZE);
     }
 
     virtual JSRuntime * createRuntime() {
         JSRuntime* rt = JS_NewRuntime(8L * 1024 * 1024);
         if (!rt)
             return nullptr;
-        JS_SetErrorReporter(rt, &reportError);
-        setNativeStackQuota(rt);
+        JS::SetWarningReporter(JS_GetContext(rt), &reportWarning);
+        setNativeStackQuota(JS_GetContext(rt));
         return rt;
     }
 
@@ -295,15 +301,14 @@ class JSAPITest
         rt = nullptr;
     }
 
-    static void reportError(JSContext* cx, const char* message, JSErrorReport* report) {
+    static void reportWarning(JSContext* cx, const char* message, JSErrorReport* report) {
+        MOZ_RELEASE_ASSERT(report);
+        MOZ_RELEASE_ASSERT(JSREPORT_IS_WARNING(report->flags));
+
         fprintf(stderr, "%s:%u:%s\n",
                 report->filename ? report->filename : "<no filename>",
                 (unsigned int) report->lineno,
                 message);
-    }
-
-    virtual JSContext * createContext() {
-        return JS_NewContext(rt, 8192);
     }
 
     virtual const JSClass * getGlobalClass() {
@@ -409,6 +414,11 @@ class TestJSPrincipals : public JSPrincipals
     {
         refcount = rc;
     }
+
+    bool write(JSContext* cx, JSStructuredCloneWriter* writer) override {
+        MOZ_ASSERT(false, "not implemented");
+        return false;
+    }
 };
 
 #ifdef JS_GC_ZEAL
@@ -419,19 +429,29 @@ class TestJSPrincipals : public JSPrincipals
 class AutoLeaveZeal
 {
     JSContext* cx_;
-    uint8_t zeal_;
+    uint32_t zealBits_;
     uint32_t frequency_;
 
   public:
     explicit AutoLeaveZeal(JSContext* cx) : cx_(cx) {
         uint32_t dummy;
-        JS_GetGCZeal(cx_, &zeal_, &frequency_, &dummy);
+        JS_GetGCZealBits(cx_, &zealBits_, &frequency_, &dummy);
         JS_SetGCZeal(cx_, 0, 0);
-        JS::PrepareForFullGC(JS_GetRuntime(cx_));
-        JS::GCForReason(JS_GetRuntime(cx_), GC_SHRINK, JS::gcreason::DEBUG_GC);
+        JS::PrepareForFullGC(cx_);
+        JS::GCForReason(cx_, GC_SHRINK, JS::gcreason::DEBUG_GC);
     }
     ~AutoLeaveZeal() {
-        JS_SetGCZeal(cx_, zeal_, frequency_);
+        for (size_t i = 0; i < sizeof(zealBits_) * 8; i++) {
+            if (zealBits_ & (1 << i))
+                JS_SetGCZeal(cx_, i, frequency_);
+        }
+
+#ifdef DEBUG
+        uint32_t zealBitsAfter, frequencyAfter, dummy;
+        JS_GetGCZealBits(cx_, &zealBitsAfter, &frequencyAfter, &dummy);
+        MOZ_ASSERT(zealBitsAfter == zealBits_);
+        MOZ_ASSERT(frequencyAfter == frequency_);
+#endif
     }
 };
 #endif /* JS_GC_ZEAL */

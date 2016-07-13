@@ -34,8 +34,10 @@
 #include "nsAttrValue.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/DOMTokenListSupportedTokens.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/ElementBinding.h"
+#include "mozilla/dom/Nullable.h"
 #include "Units.h"
 
 class nsIFrame;
@@ -44,7 +46,6 @@ class nsIURI;
 class nsIScrollableFrame;
 class nsAttrValueOrString;
 class nsContentList;
-class nsDOMSettableTokenList;
 class nsDOMTokenList;
 struct nsRect;
 class nsFocusManager;
@@ -55,8 +56,11 @@ class nsDocument;
 
 namespace mozilla {
 namespace dom {
+  struct AnimationFilter;
   struct ScrollIntoViewOptions;
   struct ScrollToOptions;
+  class ElementOrCSSPseudoElement;
+  class UnrestrictedDoubleOrKeyframeAnimationOptions;
 } // namespace dom
 } // namespace mozilla
 
@@ -71,33 +75,45 @@ NS_GetContentList(nsINode* aRootNode,
 // Element-specific flags
 enum {
   // Set if the element has a pending style change.
-  ELEMENT_HAS_PENDING_RESTYLE =                 ELEMENT_FLAG_BIT(0),
+  ELEMENT_HAS_PENDING_RESTYLE =                 NODE_SHARED_RESTYLE_BIT_1,
 
   // Set if the element is a potential restyle root (that is, has a style
   // change pending _and_ that style change will attempt to restyle
   // descendants).
-  ELEMENT_IS_POTENTIAL_RESTYLE_ROOT =           ELEMENT_FLAG_BIT(1),
+  ELEMENT_IS_POTENTIAL_RESTYLE_ROOT =           NODE_SHARED_RESTYLE_BIT_2,
 
   // Set if the element has a pending animation-only style change as
   // part of an animation-only style update (where we update styles from
   // animation to the current refresh tick, but leave everything else as
   // it was).
-  ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE =  ELEMENT_FLAG_BIT(2),
+  ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE =  ELEMENT_FLAG_BIT(0),
 
   // Set if the element is a potential animation-only restyle root (that
   // is, has an animation-only style change pending _and_ that style
   // change will attempt to restyle descendants).
-  ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT = ELEMENT_FLAG_BIT(3),
+  ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT = ELEMENT_FLAG_BIT(1),
 
-  // All of those bits together, for convenience.
-  ELEMENT_ALL_RESTYLE_FLAGS = ELEMENT_HAS_PENDING_RESTYLE |
-                              ELEMENT_IS_POTENTIAL_RESTYLE_ROOT |
-                              ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE |
-                              ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT,
+  // Set if this element has a pending restyle with an eRestyle_SomeDescendants
+  // restyle hint.
+  ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR = ELEMENT_FLAG_BIT(2),
 
   // Just the HAS_PENDING bits, for convenience
-  ELEMENT_PENDING_RESTYLE_FLAGS = ELEMENT_HAS_PENDING_RESTYLE |
-                                  ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE,
+  ELEMENT_PENDING_RESTYLE_FLAGS =
+    ELEMENT_HAS_PENDING_RESTYLE |
+    ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE,
+
+  // Just the IS_POTENTIAL bits, for convenience
+  ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS =
+    ELEMENT_IS_POTENTIAL_RESTYLE_ROOT |
+    ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT,
+
+  // All of the restyle bits together, for convenience.
+  ELEMENT_ALL_RESTYLE_FLAGS = ELEMENT_PENDING_RESTYLE_FLAGS |
+                              ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS |
+                              ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR,
+
+  // Set if this element is marked as 'scrollgrab' (see bug 912666)
+  ELEMENT_HAS_SCROLLGRAB = ELEMENT_FLAG_BIT(3),
 
   // Remaining bits are for subclasses
   ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 4
@@ -109,6 +125,7 @@ enum {
 ASSERT_NODE_FLAGS_SPACE(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET);
 
 namespace mozilla {
+enum class CSSPseudoElementType : uint8_t;
 class EventChainPostVisitor;
 class EventChainPreVisitor;
 class EventChainVisitor;
@@ -123,11 +140,12 @@ class UndoManager;
 class DOMRect;
 class DOMRectList;
 class DestinationInsertionPointList;
+class Grid;
 
 // IID for the dom::Element interface
 #define NS_ELEMENT_IID \
-{ 0x31d3f3fb, 0xcdf8, 0x4e40, \
- { 0xb7, 0x09, 0x1a, 0x11, 0x43, 0x93, 0x61, 0x71 } }
+{ 0xc67ed254, 0xfd3b, 0x4b10, \
+  { 0x96, 0xa2, 0xc5, 0x8b, 0x7b, 0x64, 0x97, 0xd1 } }
 
 class Element : public FragmentOrElement
 {
@@ -169,20 +187,11 @@ public:
    * removing it from the document).
    */
   void UpdateState(bool aNotify);
-  
+
   /**
    * Method to update mState with link state information.  This does not notify.
    */
   void UpdateLinkState(EventStates aState);
-
-  /**
-   * Returns true if this element is either a full-screen element or an
-   * ancestor of the full-screen element.
-   */
-  bool IsFullScreenAncestor() const {
-    return mState.HasAtLeastOneOfStates(NS_EVENT_STATE_FULL_SCREEN_ANCESTOR |
-                                        NS_EVENT_STATE_FULL_SCREEN);
-  }
 
   /**
    * The style state of this element. This is the real state of the element
@@ -217,31 +226,31 @@ public:
   void ClearStyleStateLocks();
 
   /**
-   * Get the inline style rule, if any, for this element.
+   * Get the inline style declaration, if any, for this element.
    */
-  virtual css::StyleRule* GetInlineStyleRule();
+  virtual css::Declaration* GetInlineStyleDeclaration();
 
   /**
-   * Set the inline style rule for this element. This will send an appropriate
-   * AttributeChanged notification if aNotify is true.
+   * Set the inline style declaration for this element. This will send
+   * an appropriate AttributeChanged notification if aNotify is true.
    */
-  virtual nsresult SetInlineStyleRule(css::StyleRule* aStyleRule,
-                                      const nsAString* aSerialized,
-                                      bool aNotify);
+  virtual nsresult SetInlineStyleDeclaration(css::Declaration* aDeclaration,
+                                             const nsAString* aSerialized,
+                                             bool aNotify);
 
   /**
-   * Get the SMIL override style rule for this element. If the rule hasn't been
-   * created, this method simply returns null.
+   * Get the SMIL override style declaration for this element. If the
+   * rule hasn't been created, this method simply returns null.
    */
-  virtual css::StyleRule* GetSMILOverrideStyleRule();
+  virtual css::Declaration* GetSMILOverrideStyleDeclaration();
 
   /**
-   * Set the SMIL override style rule for this element. If aNotify is true, this
-   * method will notify the document's pres context, so that the style changes
-   * will be noticed.
+   * Set the SMIL override style declaration for this element. If
+   * aNotify is true, this method will notify the document's pres
+   * context, so that the style changes will be noticed.
    */
-  virtual nsresult SetSMILOverrideStyleRule(css::StyleRule* aStyleRule,
-                                            bool aNotify);
+  virtual nsresult SetSMILOverrideStyleDeclaration(css::Declaration* aDeclaration,
+                                                   bool aNotify);
 
   /**
    * Returns a new nsISMILAttr that allows the caller to animate the given
@@ -329,7 +338,7 @@ public:
         break;
     }
 
-    /* 
+    /*
      * Only call UpdateState if we need to notify, because we call
      * SetDirectionality for every element, and UpdateState is very very slow
      * for some elements.
@@ -477,6 +486,8 @@ public:
 
   virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName, nsIAtom* aPrefix,
                            const nsAString& aValue, bool aNotify) override;
+  // aParsedValue receives the old value of the attribute. That's useful if
+  // either the input or output value of aParsedValue is StoresOwnData.
   nsresult SetParsedAttr(int32_t aNameSpaceID, nsIAtom* aName, nsIAtom* aPrefix,
                          nsAttrValue& aParsedValue, bool aNotify);
   // GetAttr is not inlined on purpose, to keep down codesize from all
@@ -617,6 +628,9 @@ public:
 
     return slots->mAttributeMap;
   }
+
+  void GetAttributeNames(nsTArray<nsString>& aResult);
+
   void GetAttribute(const nsAString& aName, nsString& aReturn)
   {
     DOMString str;
@@ -641,7 +655,7 @@ public:
                          ErrorResult& aError);
   bool HasAttribute(const nsAString& aName) const
   {
-    return InternalGetExistingAttrNameFromQName(aName) != nullptr;
+    return InternalGetAttrNameFromQName(aName) != nullptr;
   }
   bool HasAttributeNS(const nsAString& aNamespaceURI,
                       const nsAString& aLocalName) const;
@@ -661,11 +675,26 @@ public:
                            ErrorResult& aError);
   already_AddRefed<nsIHTMLCollection>
     GetElementsByClassName(const nsAString& aClassNames);
-  bool MozMatchesSelector(const nsAString& aSelector,
-                          ErrorResult& aError)
-  {
-    return Matches(aSelector, aError);
-  }
+
+private:
+  /**
+   * Implement the algorithm specified at
+   * https://dom.spec.whatwg.org/#insert-adjacent for both
+   * |insertAdjacentElement()| and |insertAdjacentText()| APIs.
+   */
+  nsINode* InsertAdjacent(const nsAString& aWhere,
+                          nsINode* aNode,
+                          ErrorResult& aError);
+
+public:
+  Element* InsertAdjacentElement(const nsAString& aWhere,
+                                 Element& aElement,
+                                 ErrorResult& aError);
+
+  void InsertAdjacentText(const nsAString& aWhere,
+                          const nsAString& aData,
+                          ErrorResult& aError);
+
   void SetPointerCapture(int32_t aPointerId, ErrorResult& aError)
   {
     bool activeState = false;
@@ -673,7 +702,7 @@ public:
       aError.Throw(NS_ERROR_DOM_INVALID_POINTER_ERR);
       return;
     }
-    if (!IsInDoc()) {
+    if (!IsInUncomposedDoc()) {
       aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return;
     }
@@ -695,9 +724,9 @@ public:
       // (on element that have status pointer capture override
       // or on element that have status pending pointer capture)
       if (pointerCaptureInfo->mOverrideContent == this) {
-        nsIPresShell::ReleasePointerCapturingContent(aPointerId, this);
+        nsIPresShell::ReleasePointerCapturingContent(aPointerId);
       } else if (pointerCaptureInfo->mPendingContent == this) {
-        nsIPresShell::ReleasePointerCapturingContent(aPointerId, this);
+        nsIPresShell::ReleasePointerCapturingContent(aPointerId);
       }
     }
   }
@@ -719,8 +748,8 @@ public:
   }
 
   // aCx == nullptr is allowed only if aOptions.isNullOrUndefined()
-  void MozRequestFullScreen(JSContext* aCx, JS::Handle<JS::Value> aOptions,
-                            ErrorResult& aError);
+  void RequestFullscreen(JSContext* aCx, JS::Handle<JS::Value> aOptions,
+                         ErrorResult& aError);
   void MozRequestPointerLock();
   Attr* GetAttributeNode(const nsAString& aName);
   already_AddRefed<Attr> SetAttributeNode(Attr& aNewAttr,
@@ -775,12 +804,24 @@ public:
   {
     return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().height);
   }
+  int32_t ScrollTopMin()
+  {
+    nsIScrollableFrame* sf = GetScrollFrame();
+    return sf ?
+           nsPresContext::AppUnitsToIntCSSPixels(sf->GetScrollRange().y) : 0;
+  }
   int32_t ScrollTopMax()
   {
     nsIScrollableFrame* sf = GetScrollFrame();
     return sf ?
            nsPresContext::AppUnitsToIntCSSPixels(sf->GetScrollRange().YMost()) :
            0;
+  }
+  int32_t ScrollLeftMin()
+  {
+    nsIScrollableFrame* sf = GetScrollFrame();
+    return sf ?
+           nsPresContext::AppUnitsToIntCSSPixels(sf->GetScrollRange().x) : 0;
   }
   int32_t ScrollLeftMax()
   {
@@ -789,6 +830,8 @@ public:
            nsPresContext::AppUnitsToIntCSSPixels(sf->GetScrollRange().XMost()) :
            0;
   }
+
+  void GetGridFragments(nsTArray<RefPtr<Grid>>& aResult);
 
   virtual already_AddRefed<UndoManager> GetUndoManager()
   {
@@ -804,7 +847,27 @@ public:
   {
   }
 
-  void GetAnimations(nsTArray<nsRefPtr<Animation>>& aAnimations);
+  already_AddRefed<Animation>
+  Animate(JSContext* aContext,
+          JS::Handle<JSObject*> aKeyframes,
+          const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
+          ErrorResult& aError);
+
+  // A helper method that factors out the common functionality needed by
+  // Element::Animate and CSSPseudoElement::Animate
+  static already_AddRefed<Animation>
+  Animate(const Nullable<ElementOrCSSPseudoElement>& aTarget,
+          JSContext* aContext,
+          JS::Handle<JSObject*> aKeyframes,
+          const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
+          ErrorResult& aError);
+
+  // Note: GetAnimations will flush style while GetAnimationsUnsorted won't.
+  void GetAnimations(const AnimationFilter& filter,
+                     nsTArray<RefPtr<Animation>>& aAnimations);
+  static void GetAnimationsUnsorted(Element* aElement,
+                                    CSSPseudoElementType aPseudoType,
+                                    nsTArray<RefPtr<Animation>>& aAnimations);
 
   NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML);
   virtual void SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError);
@@ -894,6 +957,11 @@ public:
     return mAttrsAndChildren.GetAttr(aAttr);
   }
 
+  const nsAttrValue* GetParsedAttr(nsIAtom* aAttr, int32_t aNameSpaceID) const
+  {
+    return mAttrsAndChildren.GetAttr(aAttr, aNameSpaceID);
+  }
+
   /**
    * Returns the attribute map, if there is one.
    *
@@ -935,7 +1003,7 @@ public:
    * Return the CORS mode for a given string
    */
   static CORSMode StringToCORSMode(const nsAString& aValue);
-  
+
   /**
    * Return the CORS mode for a given nsAttrValue (which may be null,
    * but if not should have been parsed via ParseCORSValue).
@@ -1060,7 +1128,7 @@ public:
    */
   float FontSizeInflation();
 
-  net::ReferrerPolicy GetReferrerPolicy();
+  net::ReferrerPolicy GetReferrerPolicyAsEnum();
 
 protected:
   /*
@@ -1087,10 +1155,15 @@ protected:
    * @param aNamespaceID  namespace of attribute
    * @param aAttribute    local-name of attribute
    * @param aPrefix       aPrefix of attribute
-   * @param aOldValue     previous value of attribute. Only needed if
-   *                      aFireMutation is true or if the element is a
-   *                      custom element (in web components).
-   * @param aParsedValue  parsed new value of attribute
+   * @param aOldValue     The old value of the attribute to use as a fallback
+   *                      in the cases where the actual old value (i.e.
+   *                      its current value) is !StoresOwnData() --- in which
+   *                      case the current value is probably already useless.
+   *                      If the current value is StoresOwnData() (or absent),
+   *                      aOldValue will not be used.
+   * @param aParsedValue  parsed new value of attribute. Replaced by the
+   *                      old value of the attribute. This old value is only
+   *                      useful if either it or the new value is StoresOwnData.
    * @param aModType      nsIDOMMutationEvent::MODIFICATION or ADDITION.  Only
    *                      needed if aFireMutation or aNotify is true.
    * @param aFireMutation should mutation-events be fired?
@@ -1163,17 +1236,16 @@ protected:
    * @param aName the localname of the attribute being set
    * @param aValue the value it's being set to represented as either a string or
    *        a parsed nsAttrValue. Alternatively, if the attr is being removed it
-   *        will be null.
+   *        will be null. BeforeSetAttr is allowed to modify aValue by parsing
+   *        the string to an nsAttrValue (to avoid having to reparse it in
+   *        ParseAttribute).
    * @param aNotify Whether we plan to notify document observers.
    */
   // Note that this is inlined so that when subclasses call it it gets
   // inlined.  Those calls don't go through a vtable.
   virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                 const nsAttrValueOrString* aValue,
-                                 bool aNotify)
-  {
-    return NS_OK;
-  }
+                                 nsAttrValueOrString* aValue,
+                                 bool aNotify);
 
   /**
    * Hook that is called by Element::SetAttr to allow subclasses to
@@ -1203,9 +1275,13 @@ protected:
     GetEventListenerManagerForAttr(nsIAtom* aAttrName, bool* aDefer);
 
   /**
-   * Internal hook for converting an attribute name-string to an atomized name
+   * Internal hook for converting an attribute name-string to nsAttrName in
+   * case there is such existing attribute. aNameToUse can be passed to get
+   * name which was used for looking for the attribute (lowercase in HTML).
    */
-  virtual const nsAttrName* InternalGetExistingAttrNameFromQName(const nsAString& aStr) const;
+  const nsAttrName*
+  InternalGetAttrNameFromQName(const nsAString& aStr,
+                               nsAutoString* aNameToUse = nullptr) const;
 
   nsIFrame* GetStyledFrame();
 
@@ -1264,9 +1340,8 @@ protected:
    */
   virtual void GetLinkTarget(nsAString& aTarget);
 
-  nsDOMSettableTokenList* GetTokenList(nsIAtom* aAtom);
-  void GetTokenList(nsIAtom* aAtom, nsIVariant** aResult);
-  nsresult SetTokenList(nsIAtom* aAtom, nsIVariant* aValue);
+  nsDOMTokenList* GetTokenList(nsIAtom* aAtom,
+                               const DOMTokenListSupportedTokenArray aSupportedTokens = nullptr);
 
 private:
   /**
@@ -1282,7 +1357,7 @@ private:
   EventStates mState;
 };
 
-class RemoveFromBindingManagerRunnable : public nsRunnable
+class RemoveFromBindingManagerRunnable : public mozilla::Runnable
 {
 public:
   RemoveFromBindingManagerRunnable(nsBindingManager* aManager,
@@ -1292,8 +1367,8 @@ public:
   NS_IMETHOD Run() override;
 private:
   virtual ~RemoveFromBindingManagerRunnable();
-  nsRefPtr<nsBindingManager> mManager;
-  nsRefPtr<nsIContent> mContent;
+  RefPtr<nsBindingManager> mManager;
+  RefPtr<nsIContent> mContent;
   nsCOMPtr<nsIDocument> mDoc;
 };
 
@@ -1317,7 +1392,7 @@ public:
 protected:
   virtual ~DestinationInsertionPointList();
 
-  nsRefPtr<Element> mParent;
+  RefPtr<Element> mParent;
   nsCOMArray<nsIContent> mDestinationPoints;
 };
 
@@ -1375,6 +1450,13 @@ inline const mozilla::dom::Element* nsINode::AsElement() const
   return static_cast<const mozilla::dom::Element*>(this);
 }
 
+inline void nsINode::UnsetRestyleFlagsIfGecko()
+{
+  if (IsElement() && !IsStyledByServo()) {
+    UnsetFlags(ELEMENT_ALL_RESTYLE_FLAGS);
+  }
+}
+
 /**
  * Macros to implement Clone(). _elementName is the class for which to implement
  * Clone.
@@ -1385,7 +1467,7 @@ _elementName::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const 
 {                                                                           \
   *aResult = nullptr;                                                       \
   already_AddRefed<mozilla::dom::NodeInfo> ni =                             \
-    nsRefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();                   \
+    RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();                   \
   _elementName *it = new _elementName(ni);                                  \
   if (!it) {                                                                \
     return NS_ERROR_OUT_OF_MEMORY;                                          \
@@ -1406,7 +1488,7 @@ _elementName::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const 
 {                                                                           \
   *aResult = nullptr;                                                       \
   already_AddRefed<mozilla::dom::NodeInfo> ni =                             \
-    nsRefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();                   \
+    RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();                   \
   _elementName *it = new _elementName(ni);                                  \
   if (!it) {                                                                \
     return NS_ERROR_OUT_OF_MEMORY;                                          \
@@ -1758,8 +1840,8 @@ NS_IMETHOD MozMatchesSelector(const nsAString& selector,                      \
                               bool* _retval) final override                   \
 {                                                                             \
   mozilla::ErrorResult rv;                                                    \
-  *_retval = Element::MozMatchesSelector(selector, rv);                       \
-  return rv.StealNSResult();                                                      \
+  *_retval = Element::Matches(selector, rv);                                  \
+  return rv.StealNSResult();                                                  \
 }                                                                             \
 NS_IMETHOD SetCapture(bool retargetToElement) final override                  \
 {                                                                             \
@@ -1774,8 +1856,8 @@ NS_IMETHOD ReleaseCapture(void) final override                                \
 NS_IMETHOD MozRequestFullScreen(void) final override                          \
 {                                                                             \
   mozilla::ErrorResult rv;                                                    \
-  Element::MozRequestFullScreen(nullptr, JS::UndefinedHandleValue, rv);       \
-  return rv.StealNSResult();                                                      \
+  Element::RequestFullscreen(nullptr, JS::UndefinedHandleValue, rv);          \
+  return rv.StealNSResult();                                                  \
 }                                                                             \
 NS_IMETHOD MozRequestPointerLock(void) final override                         \
 {                                                                             \

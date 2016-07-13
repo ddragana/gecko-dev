@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef mozilla_dom_bluetooth_bluedroid_BluetoothSocketMessageWatcher_h
+#define mozilla_dom_bluetooth_bluedroid_BluetoothSocketMessageWatcher_h
+
 #include "base/message_loop.h"
 #include "BluetoothCommon.h"
 
@@ -49,13 +52,13 @@ public:
 
   bool IsComplete() const;
 
-  int      GetFd() const;
-  int32_t  GetChannel1() const;
-  int32_t  GetSize() const;
-  nsString GetBdAddress() const;
-  int32_t  GetChannel2() const;
-  int32_t  GetConnectionStatus() const;
-  int      GetClientFd() const;
+  int              GetFd() const;
+  int32_t          GetChannel1() const;
+  int32_t          GetSize() const;
+  BluetoothAddress GetBdAddress() const;
+  int32_t          GetChannel2() const;
+  int32_t          GetConnectionStatus() const;
+  int              GetClientFd() const;
 
   BluetoothSocketResultHandler* GetResultHandler() const;
 
@@ -68,25 +71,25 @@ private:
 
   int16_t ReadInt16(unsigned long aOffset) const;
   int32_t ReadInt32(unsigned long aOffset) const;
-  void    ReadBdAddress(unsigned long aOffset, nsAString& aBdAddress) const;
+  void    ReadBdAddress(unsigned long aOffset, BluetoothAddress& aBdAddress) const;
 
   MessageLoopForIO::FileDescriptorWatcher mWatcher;
   int mFd;
   int mClientFd;
   unsigned char mLen;
   uint8_t mBuf[MSG1_SIZE + MSG2_SIZE];
-  nsRefPtr<BluetoothSocketResultHandler> mRes;
+  RefPtr<BluetoothSocketResultHandler> mRes;
 };
 
 /* |SocketMessageWatcherTask| starts a SocketMessageWatcher
  * on the I/O task
  */
-class SocketMessageWatcherTask final : public Task
+class SocketMessageWatcherTask final : public Runnable
 {
 public:
   SocketMessageWatcherTask(SocketMessageWatcher* aWatcher);
 
-  void Run() override;
+  NS_IMETHOD Run() override;
 
 private:
   SocketMessageWatcher* mWatcher;
@@ -95,15 +98,17 @@ private:
 /* |DeleteSocketMessageWatcherTask| deletes a watching SocketMessageWatcher
  * on the I/O task
  */
-class DeleteSocketMessageWatcherTask final : public Task
+class DeleteSocketMessageWatcherTask final : public Runnable
 {
 public:
   DeleteSocketMessageWatcherTask(BluetoothSocketResultHandler* aRes);
 
-  void Run() override;
+  NS_IMETHOD Run() override;
 
 private:
   BluetoothSocketResultHandler* mRes;
 };
 
 END_BLUETOOTH_NAMESPACE
+
+#endif // mozilla_dom_bluetooth_bluedroid_BluetoothSocketMessageWatcher_h

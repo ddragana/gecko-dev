@@ -4,20 +4,26 @@
 
 #include "VideoUtils.h"
 
-#include "mozilla/Preferences.h"
 #include "mozilla/Base64.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/Function.h"
 
+#include "MediaPrefs.h"
 #include "MediaResource.h"
 #include "TimeUnits.h"
 #include "nsMathUtils.h"
 #include "nsSize.h"
 #include "VorbisUtils.h"
 #include "ImageContainer.h"
-#include "SharedThreadPool.h"
+#include "mozilla/SharedThreadPool.h"
 #include "nsIRandomGenerator.h"
 #include "nsIServiceManager.h"
+#include "nsServiceManagerUtils.h"
+#include "nsIConsoleService.h"
+#include "nsThreadUtils.h"
+#include "nsCharSeparatedTokenizer.h"
+#include "nsContentTypeParser.h"
 
 #include <stdint.h>
 
@@ -25,20 +31,29 @@ namespace mozilla {
 
 using layers::PlanarYCbCrImage;
 
+CheckedInt64 SaferMultDiv(int64_t aValue, uint32_t aMul, uint32_t aDiv) {
+  int64_t major = aValue / aDiv;
+  int64_t remainder = aValue % aDiv;
+  return CheckedInt64(remainder) * aMul / aDiv + CheckedInt64(major) * aMul;
+}
+
 // Converts from number of audio frames to microseconds, given the specified
 // audio rate.
 CheckedInt64 FramesToUsecs(int64_t aFrames, uint32_t aRate) {
-  return (CheckedInt64(aFrames) * USECS_PER_S) / aRate;
+  return SaferMultDiv(aFrames, USECS_PER_S, aRate);
 }
 
 media::TimeUnit FramesToTimeUnit(int64_t aFrames, uint32_t aRate) {
-  return (media::TimeUnit::FromMicroseconds(aFrames) * USECS_PER_S) / aRate;
+  int64_t major = aFrames / aRate;
+  int64_t remainder = aFrames % aRate;
+  return media::TimeUnit::FromMicroseconds(major) * USECS_PER_S +
+    (media::TimeUnit::FromMicroseconds(remainder) * USECS_PER_S) / aRate;
 }
 
 // Converts from microseconds to number of audio frames, given the specified
 // audio rate.
 CheckedInt64 UsecsToFrames(int64_t aUsecs, uint32_t aRate) {
-  return (CheckedInt64(aUsecs) * aRate) / USECS_PER_S;
+  return SaferMultDiv(aUsecs, aRate, USECS_PER_S);
 }
 
 // Format TimeUnit as number of frames at given rate.
@@ -125,58 +140,21 @@ media::TimeIntervals GetEstimatedBufferedTimeRanges(mozilla::MediaResource* aStr
   return buffered;
 }
 
-int DownmixAudioToStereo(mozilla::AudioDataValue* buffer,
-                         int channels, uint32_t frames)
+void DownmixStereoToMono(mozilla::AudioDataValue* aBuffer,
+                         uint32_t aFrames)
 {
-  int outChannels;
-  outChannels = 2;
+  MOZ_ASSERT(aBuffer);
+  const int channels = 2;
+  for (uint32_t fIdx = 0; fIdx < aFrames; ++fIdx) {
 #ifdef MOZ_SAMPLE_TYPE_FLOAT32
-  // Downmix matrix. Per-row normalization 1 for rows 3,4 and 2 for rows 5-8.
-  static const float dmatrix[6][8][2]= {
-      /*3*/{{0.5858f,0},{0.4142f,0.4142f},{0,     0.5858f}},
-      /*4*/{{0.4226f,0},{0,      0.4226f},{0.366f,0.2114f},{0.2114f,0.366f}},
-      /*5*/{{0.6510f,0},{0.4600f,0.4600f},{0,     0.6510f},{0.5636f,0.3254f},{0.3254f,0.5636f}},
-      /*6*/{{0.5290f,0},{0.3741f,0.3741f},{0,     0.5290f},{0.4582f,0.2645f},{0.2645f,0.4582f},{0.3741f,0.3741f}},
-      /*7*/{{0.4553f,0},{0.3220f,0.3220f},{0,     0.4553f},{0.3943f,0.2277f},{0.2277f,0.3943f},{0.2788f,0.2788f},{0.3220f,0.3220f}},
-      /*8*/{{0.3886f,0},{0.2748f,0.2748f},{0,     0.3886f},{0.3366f,0.1943f},{0.1943f,0.3366f},{0.3366f,0.1943f},{0.1943f,0.3366f},{0.2748f,0.2748f}},
-  };
-  // Re-write the buffer with downmixed data
-  for (uint32_t i = 0; i < frames; i++) {
-    float sampL = 0.0;
-    float sampR = 0.0;
-    for (int j = 0; j < channels; j++) {
-      sampL+=buffer[i*channels+j]*dmatrix[channels-3][j][0];
-      sampR+=buffer[i*channels+j]*dmatrix[channels-3][j][1];
-    }
-    buffer[i*outChannels]=sampL;
-    buffer[i*outChannels+1]=sampR;
-  }
+    float sample = 0.0;
 #else
-  // Downmix matrix. Per-row normalization 1 for rows 3,4 and 2 for rows 5-8.
-  // Coefficients in Q14.
-  static const int16_t dmatrix[6][8][2]= {
-      /*3*/{{9598, 0},{6786,6786},{0,   9598}},
-      /*4*/{{6925, 0},{0,   6925},{5997,3462},{3462,5997}},
-      /*5*/{{10663,0},{7540,7540},{0,  10663},{9234,5331},{5331,9234}},
-      /*6*/{{8668, 0},{6129,6129},{0,   8668},{7507,4335},{4335,7507},{6129,6129}},
-      /*7*/{{7459, 0},{5275,5275},{0,   7459},{6460,3731},{3731,6460},{4568,4568},{5275,5275}},
-      /*8*/{{6368, 0},{4502,4502},{0,   6368},{5514,3184},{3184,5514},{5514,3184},{3184,5514},{4502,4502}}
-  };
-  // Re-write the buffer with downmixed data
-  for (uint32_t i = 0; i < frames; i++) {
-    int32_t sampL = 0;
-    int32_t sampR = 0;
-    for (int j = 0; j < channels; j++) {
-      sampL+=buffer[i*channels+j]*dmatrix[channels-3][j][0];
-      sampR+=buffer[i*channels+j]*dmatrix[channels-3][j][1];
-    }
-    sampL = (sampL + 8192)>>14;
-    buffer[i*outChannels] = static_cast<mozilla::AudioDataValue>(MOZ_CLIP_TO_15(sampL));
-    sampR = (sampR + 8192)>>14;
-    buffer[i*outChannels+1] = static_cast<mozilla::AudioDataValue>(MOZ_CLIP_TO_15(sampR));
-  }
+    int sample = 0;
 #endif
-  return outChannels;
+    // The sample of the buffer would be interleaved.
+    sample = (aBuffer[fIdx*channels] + aBuffer[fIdx*channels + 1]) * 0.5;
+    aBuffer[fIdx*channels] = aBuffer[fIdx*channels + 1] = sample;
+  }
 }
 
 bool
@@ -220,14 +198,13 @@ already_AddRefed<SharedThreadPool> GetMediaThreadPool(MediaThreadType aType)
       name = "MediaPDecoder";
       break;
     default:
-      MOZ_ASSERT(false);
+      MOZ_FALLTHROUGH_ASSERT("Unexpected MediaThreadType");
     case MediaThreadType::PLAYBACK:
       name = "MediaPlayback";
       break;
   }
   return SharedThreadPool::
-    Get(nsDependentCString(name),
-        Preferences::GetUint("media.num-decode-threads", 12));
+    Get(nsDependentCString(name), MediaPrefs::MediaThreadPoolDefaultCount());
 }
 
 bool
@@ -330,17 +307,224 @@ GenerateRandomPathName(nsCString& aOutSalt, uint32_t aLength)
 already_AddRefed<TaskQueue>
 CreateMediaDecodeTaskQueue()
 {
-  nsRefPtr<TaskQueue> queue = new TaskQueue(
+  RefPtr<TaskQueue> queue = new TaskQueue(
     GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
   return queue.forget();
 }
 
-already_AddRefed<FlushableTaskQueue>
-CreateFlushableMediaDecodeTaskQueue()
+void
+SimpleTimer::Cancel() {
+  if (mTimer) {
+#ifdef DEBUG
+    nsCOMPtr<nsIEventTarget> target;
+    mTimer->GetTarget(getter_AddRefs(target));
+    nsCOMPtr<nsIThread> thread(do_QueryInterface(target));
+    MOZ_ASSERT(NS_GetCurrentThread() == thread);
+#endif
+    mTimer->Cancel();
+    mTimer = nullptr;
+  }
+  mTask = nullptr;
+}
+
+NS_IMETHODIMP
+SimpleTimer::Notify(nsITimer *timer) {
+  RefPtr<SimpleTimer> deathGrip(this);
+  if (mTask) {
+    mTask->Run();
+    mTask = nullptr;
+  }
+  return NS_OK;
+}
+
+nsresult
+SimpleTimer::Init(nsIRunnable* aTask, uint32_t aTimeoutMs, nsIThread* aTarget)
 {
-  nsRefPtr<FlushableTaskQueue> queue = new FlushableTaskQueue(
-    GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
-  return queue.forget();
+  nsresult rv;
+
+  // Get target thread first, so we don't have to cancel the timer if it fails.
+  nsCOMPtr<nsIThread> target;
+  if (aTarget) {
+    target = aTarget;
+  } else {
+    rv = NS_GetMainThread(getter_AddRefs(target));
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+  }
+
+  nsCOMPtr<nsITimer> timer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  // Note: set target before InitWithCallback in case the timer fires before
+  // we change the event target.
+  rv = timer->SetTarget(aTarget);
+  if (NS_FAILED(rv)) {
+    timer->Cancel();
+    return rv;
+  }
+  rv = timer->InitWithCallback(this, aTimeoutMs, nsITimer::TYPE_ONE_SHOT);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  mTimer = timer.forget();
+  mTask = aTask;
+  return NS_OK;
+}
+
+NS_IMPL_ISUPPORTS(SimpleTimer, nsITimerCallback)
+
+already_AddRefed<SimpleTimer>
+SimpleTimer::Create(nsIRunnable* aTask, uint32_t aTimeoutMs, nsIThread* aTarget)
+{
+  RefPtr<SimpleTimer> t(new SimpleTimer());
+  if (NS_FAILED(t->Init(aTask, aTimeoutMs, aTarget))) {
+    return nullptr;
+  }
+  return t.forget();
+}
+
+void
+LogToBrowserConsole(const nsAString& aMsg)
+{
+  if (!NS_IsMainThread()) {
+    nsString msg(aMsg);
+    nsCOMPtr<nsIRunnable> task =
+      NS_NewRunnableFunction([msg]() { LogToBrowserConsole(msg); });
+    NS_DispatchToMainThread(task.forget(), NS_DISPATCH_NORMAL);
+    return;
+  }
+  nsCOMPtr<nsIConsoleService> console(
+    do_GetService("@mozilla.org/consoleservice;1"));
+  if (!console) {
+    NS_WARNING("Failed to log message to console.");
+    return;
+  }
+  nsAutoString msg(aMsg);
+  console->LogStringMessage(msg.get());
+}
+
+bool
+IsAACCodecString(const nsAString& aCodec)
+{
+  return
+    aCodec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
+    aCodec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
+    aCodec.EqualsLiteral("mp4a.67")   || // MPEG2 AAC-LC
+    aCodec.EqualsLiteral("mp4a.40.29");  // MPEG4 HE-AACv2
+}
+
+bool
+ParseCodecsString(const nsAString& aCodecs, nsTArray<nsString>& aOutCodecs)
+{
+  aOutCodecs.Clear();
+  bool expectMoreTokens = false;
+  nsCharSeparatedTokenizer tokenizer(aCodecs, ',');
+  while (tokenizer.hasMoreTokens()) {
+    const nsSubstring& token = tokenizer.nextToken();
+    expectMoreTokens = tokenizer.separatorAfterCurrentToken();
+    aOutCodecs.AppendElement(token);
+  }
+  if (expectMoreTokens) {
+    // Last codec name was empty
+    return false;
+  }
+  return true;
+}
+
+static bool
+CheckContentType(const nsAString& aContentType,
+                 mozilla::function<bool(const nsAString&)> aSubtypeFilter,
+                 mozilla::function<bool(const nsAString&)> aCodecFilter)
+{
+  nsContentTypeParser parser(aContentType);
+  nsAutoString mimeType;
+  nsresult rv = parser.GetType(mimeType);
+  if (NS_FAILED(rv) || !aSubtypeFilter(mimeType)) {
+    return false;
+  }
+
+  nsString codecsStr;
+  parser.GetParameter("codecs", codecsStr);
+  nsTArray<nsString> codecs;
+  if (!ParseCodecsString(codecsStr, codecs)) {
+    return false;
+  }
+  for (const nsString& codec : codecs) {
+    if (!aCodecFilter(codec)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool
+IsH264ContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("video/mp4");
+    },
+    [](const nsAString& codec) {
+      int16_t profile = 0;
+      int16_t level = 0;
+      return ExtractH264CodecDetails(codec, profile, level);
+    }
+  );
+}
+
+bool
+IsAACContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("audio/mp4") ||
+             type.EqualsLiteral("audio/x-m4a");
+    },
+    [](const nsAString& codec) {
+      return codec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
+             codec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
+             codec.EqualsLiteral("mp4a.67");     // MPEG2 AAC-LC
+    });
+}
+
+bool
+IsVorbisContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("audio/webm") ||
+             type.EqualsLiteral("audio/ogg");
+    },
+    [](const nsAString& codec) {
+      return codec.EqualsLiteral("vorbis");
+    });
+}
+
+bool
+IsVP8ContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("video/webm");
+    },
+    [](const nsAString& codec) {
+      return codec.EqualsLiteral("vp8");
+    });
+}
+
+bool
+IsVP9ContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("video/webm");
+    },
+    [](const nsAString& codec) {
+      return codec.EqualsLiteral("vp9");
+    });
 }
 
 } // end namespace mozilla

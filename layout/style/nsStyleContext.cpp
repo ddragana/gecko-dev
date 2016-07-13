@@ -2,12 +2,14 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 /* the interface (to internal code) for retrieving computed style data */
 
+#include "CSSVariableImageTable.h"
 #include "mozilla/DebugOnly.h"
 
 #include "nsCSSAnonBoxes.h"
+#include "nsCSSPseudoElements.h"
 #include "nsStyleConsts.h"
 #include "nsString.h"
 #include "nsPresContext.h"
@@ -23,11 +25,11 @@
 #include "GeckoProfiler.h"
 #include "nsIDocument.h"
 #include "nsPrintfCString.h"
+#include "RubyUtils.h"
 #include "mozilla/Preferences.h"
-
-#ifdef DEBUG
-// #define NOISY_DEBUG
-#endif
+#include "mozilla/ArenaObjectID.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 
 using namespace mozilla;
 
@@ -66,15 +68,17 @@ static bool sExpensiveStyleStructAssertionsEnabled;
 #endif
 
 nsStyleContext::nsStyleContext(nsStyleContext* aParent,
+                               OwningStyleContextSource&& aSource,
                                nsIAtom* aPseudoTag,
-                               nsCSSPseudoElements::Type aPseudoType,
-                               nsRuleNode* aRuleNode,
-                               bool aSkipParentDisplayBasedStyleFixup)
+                               CSSPseudoElementType aPseudoType)
   : mParent(aParent)
   , mChild(nullptr)
   , mEmptyChild(nullptr)
   , mPseudoTag(aPseudoTag)
-  , mRuleNode(aRuleNode)
+  , mSource(Move(aSource))
+#ifdef MOZ_STYLO
+  , mPresContext(nullptr)
+#endif
   , mCachedResetData(nullptr)
   , mBits(((uint64_t)aPseudoType) << NS_STYLE_CONTEXT_TYPE_SHIFT)
   , mRefCnt(0)
@@ -82,13 +86,63 @@ nsStyleContext::nsStyleContext(nsStyleContext* aParent,
   , mFrameRefCnt(0)
   , mComputingStruct(nsStyleStructID_None)
 #endif
+{}
+
+nsStyleContext::nsStyleContext(nsStyleContext* aParent,
+                               nsIAtom* aPseudoTag,
+                               CSSPseudoElementType aPseudoType,
+                               already_AddRefed<nsRuleNode> aRuleNode,
+                               bool aSkipParentDisplayBasedStyleFixup)
+  : nsStyleContext(aParent, OwningStyleContextSource(Move(aRuleNode)),
+                   aPseudoTag, aPseudoType)
+{
+#ifdef MOZ_STYLO
+  mPresContext = mSource.AsGeckoRuleNode()->PresContext();
+#endif
+
+  if (aParent) {
+#ifdef DEBUG
+    nsRuleNode *r1 = mParent->RuleNode(), *r2 = mSource.AsGeckoRuleNode();
+    while (r1->GetParent())
+      r1 = r1->GetParent();
+    while (r2->GetParent())
+      r2 = r2->GetParent();
+    NS_ASSERTION(r1 == r2, "must be in the same rule tree as parent");
+#endif
+  } else {
+    PresContext()->PresShell()->StyleSet()->RootStyleContextAdded();
+  }
+
+  mSource.AsGeckoRuleNode()->SetUsedDirectly(); // before ApplyStyleFixups()!
+  FinishConstruction(aSkipParentDisplayBasedStyleFixup);
+}
+
+nsStyleContext::nsStyleContext(nsStyleContext* aParent,
+                               nsPresContext* aPresContext,
+                               nsIAtom* aPseudoTag,
+                               CSSPseudoElementType aPseudoType,
+                               already_AddRefed<ServoComputedValues> aComputedValues,
+                               bool aSkipParentDisplayBasedStyleFixup)
+  : nsStyleContext(aParent, OwningStyleContextSource(Move(aComputedValues)),
+                   aPseudoTag, aPseudoType)
+{
+#ifdef MOZ_STYLO
+  mPresContext = aPresContext;
+#endif
+
+  FinishConstruction(aSkipParentDisplayBasedStyleFixup);
+}
+
+void
+nsStyleContext::FinishConstruction(bool aSkipParentDisplayBasedStyleFixup)
 {
   // This check has to be done "backward", because if it were written the
   // more natural way it wouldn't fail even when it needed to.
   static_assert((UINT64_MAX >> NS_STYLE_CONTEXT_TYPE_SHIFT) >=
-                nsCSSPseudoElements::ePseudo_MAX,
+                 static_cast<CSSPseudoElementTypeBase>(
+                   CSSPseudoElementType::MAX),
                 "pseudo element bits no longer fit in a uint64_t");
-  MOZ_ASSERT(aRuleNode);
+  MOZ_ASSERT(!mSource.IsNull());
 
 #ifdef DEBUG
   static_assert(MOZ_ARRAY_LENGTH(nsStyleContext::sDependencyTable)
@@ -99,22 +153,13 @@ nsStyleContext::nsStyleContext(nsStyleContext* aParent,
   mNextSibling = this;
   mPrevSibling = this;
   if (mParent) {
-    mParent->AddRef();
     mParent->AddChild(this);
-#ifdef DEBUG
-    nsRuleNode *r1 = mParent->RuleNode(), *r2 = aRuleNode;
-    while (r1->GetParent())
-      r1 = r1->GetParent();
-    while (r2->GetParent())
-      r2 = r2->GetParent();
-    NS_ASSERTION(r1 == r2, "must be in the same rule tree as parent");
-#endif
   }
 
-  mRuleNode->AddRef();
-  mRuleNode->SetUsedDirectly(); // before ApplyStyleFixups()!
-
-  ApplyStyleFixups(aSkipParentDisplayBasedStyleFixup);
+  SetStyleBits();
+  if (!mSource.IsServoComputedValues()) {
+    ApplyStyleFixups(aSkipParentDisplayBasedStyleFixup);
+  }
 
   #define eStyleStruct_LastItem (nsStyleStructID_Length - 1)
   NS_ASSERTION(NS_STYLE_INHERIT_MASK & NS_STYLE_INHERIT_BIT(LastItem),
@@ -125,13 +170,6 @@ nsStyleContext::nsStyleContext(nsStyleContext* aParent,
 nsStyleContext::~nsStyleContext()
 {
   NS_ASSERTION((nullptr == mChild) && (nullptr == mEmptyChild), "destructing context with children");
-
-  nsPresContext *presContext = mRuleNode->PresContext();
-  nsStyleSet* styleSet = presContext->PresShell()->StyleSet();
-
-  NS_ASSERTION(styleSet->GetRuleTree() == mRuleNode->RuleTree() ||
-               styleSet->IsInRuleTreeReconstruct(),
-               "destroying style context from old rule tree too late");
 
 #ifdef DEBUG
   if (sExpensiveStyleStructAssertionsEnabled) {
@@ -151,13 +189,17 @@ nsStyleContext::~nsStyleContext()
   }
 #endif
 
-  mRuleNode->Release();
-
-  styleSet->NotifyStyleContextDestroyed(this);
+  nsPresContext *presContext = PresContext();
+  DebugOnly<nsStyleSet*> geckoStyleSet = presContext->PresShell()->StyleSet()->GetAsGecko();
+  NS_ASSERTION(!geckoStyleSet ||
+               geckoStyleSet->GetRuleTree() == mSource.AsGeckoRuleNode()->RuleTree() ||
+               geckoStyleSet->IsInRuleTreeReconstruct(),
+               "destroying style context from old rule tree too late");
 
   if (mParent) {
     mParent->RemoveChild(this);
-    mParent->Release();
+  } else {
+    presContext->StyleSet()->RootStyleContextRemoved();
   }
 
   // Free up our data structs.
@@ -165,6 +207,9 @@ nsStyleContext::~nsStyleContext()
   if (mCachedResetData) {
     mCachedResetData->Destroy(mBits, presContext);
   }
+
+  // Free any ImageValues we were holding on to for CSS variable values.
+  CSSVariableImageTable::RemoveAll(this);
 }
 
 #ifdef DEBUG
@@ -256,7 +301,7 @@ void nsStyleContext::AddChild(nsStyleContext* aChild)
                aChild->mNextSibling == aChild,
                "child already in a child list");
 
-  nsStyleContext **listPtr = aChild->mRuleNode->IsRoot() ? &mEmptyChild : &mChild;
+  nsStyleContext **listPtr = aChild->mSource.MatchesNoRules() ? &mEmptyChild : &mChild;
   // Explicitly dereference listPtr so that compiler doesn't have to know that mNextSibling
   // etc. don't alias with what ever listPtr points at.
   nsStyleContext *list = *listPtr;
@@ -276,13 +321,13 @@ void nsStyleContext::RemoveChild(nsStyleContext* aChild)
 {
   NS_PRECONDITION(nullptr != aChild && this == aChild->mParent, "bad argument");
 
-  nsStyleContext **list = aChild->mRuleNode->IsRoot() ? &mEmptyChild : &mChild;
+  nsStyleContext **list = aChild->mSource.MatchesNoRules() ? &mEmptyChild : &mChild;
 
   if (aChild->mPrevSibling != aChild) { // has siblings
     if ((*list) == aChild) {
       (*list) = (*list)->mNextSibling;
     }
-  } 
+  }
   else {
     NS_ASSERTION((*list) == aChild, "bad sibling pointers");
     (*list) = nullptr;
@@ -300,51 +345,69 @@ nsStyleContext::MoveTo(nsStyleContext* aNewParent)
   MOZ_ASSERT(aNewParent != mParent);
 
   // This function shouldn't be getting called if the parents have different
-  // values for some flags in mBits, because if that were the case we would need
-  // to recompute those bits for |this|. (TODO: add more flags to |mask|.)
-  DebugOnly<uint64_t> mask = NS_STYLE_IN_DISPLAY_NONE_SUBTREE;
-  MOZ_ASSERT((mParent->mBits & mask) == (aNewParent->mBits & mask));
+  // values for some flags in mBits (unless the flag is also set on this style
+  // context) because if that were the case we would need to recompute those
+  // bits for |this|.
+
+#define CHECK_FLAG(bit_) \
+  MOZ_ASSERT((mParent->mBits & (bit_)) == (aNewParent->mBits & (bit_)) ||     \
+             (mBits & (bit_)),                                                \
+             "MoveTo cannot be called if " #bit_ " value on old and new "     \
+             "style context parents do not match, unless the flag is set "    \
+             "on this style context");
+
+  CHECK_FLAG(NS_STYLE_HAS_PSEUDO_ELEMENT_DATA)
+  CHECK_FLAG(NS_STYLE_IN_DISPLAY_NONE_SUBTREE)
+  CHECK_FLAG(NS_STYLE_HAS_TEXT_DECORATION_LINES)
+  CHECK_FLAG(NS_STYLE_RELEVANT_LINK_VISITED)
+
+#undef CHECK_FLAG
 
   // Assertions checking for visited style are just to avoid some tricky
   // cases we can't be bothered handling at the moment.
   MOZ_ASSERT(!IsStyleIfVisited());
+  MOZ_ASSERT(!mParent->IsStyleIfVisited());
   MOZ_ASSERT(!aNewParent->IsStyleIfVisited());
+  MOZ_ASSERT(!mStyleIfVisited || mStyleIfVisited->mParent == mParent);
 
-  nsStyleContext* oldParent = mParent;
-
-  aNewParent->AddRef();
+  if (mParent->HasChildThatUsesResetStyle()) {
+    aNewParent->AddStyleBit(NS_STYLE_HAS_CHILD_THAT_USES_RESET_STYLE);
+  }
 
   mParent->RemoveChild(this);
-
   mParent = aNewParent;
   mParent->AddChild(this);
 
-  oldParent->Release();
+  if (mStyleIfVisited) {
+    mStyleIfVisited->mParent->RemoveChild(mStyleIfVisited);
+    mStyleIfVisited->mParent = aNewParent;
+    mStyleIfVisited->mParent->AddChild(mStyleIfVisited);
+  }
 }
 
 already_AddRefed<nsStyleContext>
-nsStyleContext::FindChildWithRules(const nsIAtom* aPseudoTag, 
-                                   nsRuleNode* aRuleNode,
-                                   nsRuleNode* aRulesIfVisited,
+nsStyleContext::FindChildWithRules(const nsIAtom* aPseudoTag,
+                                   NonOwningStyleContextSource aSource,
+                                   NonOwningStyleContextSource aSourceIfVisited,
                                    bool aRelevantLinkVisited)
 {
   uint32_t threshold = 10; // The # of siblings we're willing to examine
                            // before just giving this whole thing up.
 
-  nsRefPtr<nsStyleContext> result;
-  nsStyleContext *list = aRuleNode->IsRoot() ? mEmptyChild : mChild;
+  RefPtr<nsStyleContext> result;
+  nsStyleContext *list = aSource.MatchesNoRules() ? mEmptyChild : mChild;
 
   if (list) {
     nsStyleContext *child = list;
     do {
-      if (child->mRuleNode == aRuleNode &&
+      if (child->mSource.AsRaw() == aSource &&
           child->mPseudoTag == aPseudoTag &&
           !child->IsStyleIfVisited() &&
           child->RelevantLinkVisited() == aRelevantLinkVisited) {
         bool match = false;
-        if (aRulesIfVisited) {
+        if (!aSourceIfVisited.IsNull()) {
           match = child->GetStyleIfVisited() &&
-                  child->GetStyleIfVisited()->mRuleNode == aRulesIfVisited;
+                  child->GetStyleIfVisited()->mSource.AsRaw() == aSourceIfVisited;
         } else {
           match = !child->GetStyleIfVisited();
         }
@@ -372,58 +435,47 @@ nsStyleContext::FindChildWithRules(const nsIAtom* aPseudoTag,
   return result.forget();
 }
 
-/* static */ bool
-nsStyleContext::ListContainsStyleContextThatUsesGrandancestorStyle(const nsStyleContext* aHead)
-{
-  if (aHead) {
-    const nsStyleContext* child = aHead;
-    do {
-      if (child->UsesGrandancestorStyle()) {
-        return true;
-      }
-      child = child->mNextSibling;
-    } while (child != aHead);
-  }
-
-  return false;
-}
-
-bool
-nsStyleContext::HasChildThatUsesGrandancestorStyle() const
-{
-  return ListContainsStyleContextThatUsesGrandancestorStyle(mEmptyChild) ||
-         ListContainsStyleContextThatUsesGrandancestorStyle(mChild);
-}
-
-const void* nsStyleContext::GetCachedStyleData(nsStyleStructID aSID)
-{
-  const void* cachedData;
-  if (nsCachedStyleData::IsReset(aSID)) {
-    if (mCachedResetData) {
-      cachedData = mCachedResetData->mStyleStructs[aSID];
-    } else {
-      cachedData = nullptr;
-    }
-  } else {
-    cachedData = mCachedInheritedData.mStyleStructs[aSID];
-  }
-  return cachedData;
-}
-
 const void* nsStyleContext::StyleData(nsStyleStructID aSID)
 {
   const void* cachedData = GetCachedStyleData(aSID);
   if (cachedData)
     return cachedData; // We have computed data stored on this node in the context tree.
-  return mRuleNode->GetStyleData(aSID, this, true); // Our rule node will take care of it for us.
+  // Our style source will take care of it for us.
+  const void* newData;
+  if (mSource.IsGeckoRuleNode()) {
+    newData = mSource.AsGeckoRuleNode()->GetStyleData(aSID, this, true);
+    if (!nsCachedStyleData::IsReset(aSID)) {
+      // always cache inherited data on the style context; the rule
+      // node set the bit in mBits for us if needed.
+      mCachedInheritedData.mStyleStructs[aSID] = const_cast<void*>(newData);
+    }
+  } else {
+    // The Servo-backed StyleContextSource owns the struct.
+    newData = StyleStructFromServoComputedValues(aSID);
+    AddStyleBit(nsCachedStyleData::GetBitForSID(aSID));
+
+    // XXXbholley: Unconditionally caching reset structs here defeats the memory
+    // optimization where we lazily allocate mCachedResetData, so that we can avoid
+    // performing an FFI call each time we want to get the style structs. We should
+    // measure the tradeoffs at some point. If the FFI overhead is low and the memory
+    // win significant, we should consider _always_ grabbing the struct over FFI, and
+    // potentially giving mCachedInheritedData the same treatment.
+    //
+    // Note that there is a similar comment in the struct getters in nsStyleContext.h.
+    SetStyle(aSID, const_cast<void*>(newData));
+  }
+  return newData;
 }
 
 // This is an evil evil function, since it forces you to alloc your own separate copy of
 // style data!  Do not use this function unless you absolutely have to!  You should avoid
 // this at all costs! -dwh
-void* 
+void*
 nsStyleContext::GetUniqueStyleData(const nsStyleStructID& aSID)
 {
+  MOZ_ASSERT(!mSource.IsServoComputedValues(),
+             "Can't COW-mutate servo values from Gecko!");
+
   // If we already own the struct and no kids could depend on it, then
   // just return it.  (We leak in this case if there are kids -- and this
   // function really shouldn't be called for style contexts that could
@@ -476,12 +528,12 @@ nsStyleContext::CreateEmptyStyleData(const nsStyleStructID& aSID)
   void* result;
   nsPresContext* presContext = PresContext();
   switch (aSID) {
-#define UNIQUE_CASE(c_, ...) \
+#define UNIQUE_CASE(c_) \
     case eStyleStruct_##c_: \
-      result = new (presContext) nsStyle##c_(__VA_ARGS__); \
+      result = new (presContext) nsStyle##c_(presContext); \
       break;
 
-  UNIQUE_CASE(Border, presContext)
+  UNIQUE_CASE(Border)
   UNIQUE_CASE(Padding)
 
 #undef UNIQUE_CASE
@@ -503,7 +555,7 @@ nsStyleContext::SetStyle(nsStyleStructID aSID, void* aStruct)
 {
   // This method should only be called from nsRuleNode!  It is not a public
   // method!
-  
+
   NS_ASSERTION(aSID >= 0 && aSID < nsStyleStructID_Length, "out of bounds");
 
   // NOTE:  nsCachedStyleData::GetStyleData works roughly the same way.
@@ -513,7 +565,7 @@ nsStyleContext::SetStyle(nsStyleStructID aSID, void* aStruct)
   void** dataSlot;
   if (nsCachedStyleData::IsReset(aSID)) {
     if (!mCachedResetData) {
-      mCachedResetData = new (mRuleNode->PresContext()) nsResetStyleData;
+      mCachedResetData = new (PresContext()) nsResetStyleData;
     }
     dataSlot = &mCachedResetData->mStyleStructs[aSID];
   } else {
@@ -525,20 +577,33 @@ nsStyleContext::SetStyle(nsStyleStructID aSID, void* aStruct)
 }
 
 static bool
-ShouldSuppressLineBreak(const nsStyleDisplay* aStyleDisplay,
-                        const nsStyleContext* aContainerContext,
-                        const nsStyleDisplay* aContainerDisplay)
+ShouldSuppressLineBreak(const nsStyleContext* aContext,
+                        const nsStyleDisplay* aDisplay,
+                        const nsStyleContext* aParentContext,
+                        const nsStyleDisplay* aParentDisplay)
 {
   // The display change should only occur for "in-flow" children
-  if (aStyleDisplay->IsOutOfFlowStyle()) {
+  if (aDisplay->IsOutOfFlowStyle()) {
     return false;
   }
-  if (aContainerContext->ShouldSuppressLineBreak()) {
-    // Line break suppressing bit is propagated to any children of line
-    // participants, which include inline and inline ruby boxes.
-    if (aContainerDisplay->mDisplay == NS_STYLE_DISPLAY_INLINE ||
-        aContainerDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY ||
-        aContainerDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY_BASE_CONTAINER) {
+  // Display value of any anonymous box should not be touched. In most
+  // cases, anonymous boxes are actually not in ruby frame, but instead,
+  // some other frame with a ruby display value. Non-element pseudos
+  // which represents text frames, as well as ruby pseudos are excluded
+  // because we still want to set the flag for them.
+  if (aContext->GetPseudoType() == CSSPseudoElementType::AnonBox &&
+      !nsCSSAnonBoxes::IsNonElement(aContext->GetPseudo()) &&
+      !RubyUtils::IsRubyPseudo(aContext->GetPseudo())) {
+    return false;
+  }
+  if (aParentContext->ShouldSuppressLineBreak()) {
+    // Line break suppressing bit is propagated to any children of
+    // line participants, which include inline, contents, and inline
+    // ruby boxes.
+    if (aParentDisplay->mDisplay == NS_STYLE_DISPLAY_INLINE ||
+        aParentDisplay->mDisplay == NS_STYLE_DISPLAY_CONTENTS ||
+        aParentDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY ||
+        aParentDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY_BASE_CONTAINER) {
       return true;
     }
   }
@@ -561,31 +626,51 @@ ShouldSuppressLineBreak(const nsStyleDisplay* aStyleDisplay,
   // However, there is one special case which is BR tag, because it
   // directly affects the line layout. This case is handled by the BR
   // frame which checks the flag of its parent frame instead of itself.
-  if ((aContainerDisplay->IsRubyDisplayType() &&
-       aStyleDisplay->mDisplay != NS_STYLE_DISPLAY_RUBY_BASE_CONTAINER &&
-       aStyleDisplay->mDisplay != NS_STYLE_DISPLAY_RUBY_TEXT_CONTAINER) ||
+  if ((aParentDisplay->IsRubyDisplayType() &&
+       aDisplay->mDisplay != NS_STYLE_DISPLAY_RUBY_BASE_CONTAINER &&
+       aDisplay->mDisplay != NS_STYLE_DISPLAY_RUBY_TEXT_CONTAINER) ||
       // Since ruby base and ruby text may exist themselves without any
       // non-anonymous frame outside, we should also check them.
-      aStyleDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY_BASE ||
-      aStyleDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY_TEXT) {
+      aDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY_BASE ||
+      aDisplay->mDisplay == NS_STYLE_DISPLAY_RUBY_TEXT) {
     return true;
   }
   return false;
 }
 
-void
-nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
+// Flex & grid containers blockify their children.
+//  "The display value of a flex item is blockified"
+//    https://drafts.csswg.org/css-flexbox-1/#flex-items
+//  "The display value of a grid item is blockified"
+//    https://drafts.csswg.org/css-grid/#grid-items
+static bool
+ShouldBlockifyChildren(const nsStyleDisplay* aStyleDisp)
 {
+  auto displayVal = aStyleDisp->mDisplay;
+  return NS_STYLE_DISPLAY_FLEX == displayVal ||
+    NS_STYLE_DISPLAY_INLINE_FLEX == displayVal ||
+    NS_STYLE_DISPLAY_GRID == displayVal ||
+    NS_STYLE_DISPLAY_INLINE_GRID == displayVal;
+}
+
+void
+nsStyleContext::SetStyleBits()
+{
+  // XXXbholley: We should get this information directly from the
+  // ServoComputedValues rather than computing it here. This setup for
+  // ServoComputedValues-backed nsStyleContexts is probably not something
+  // we should ship.
+  //
+  // For example, NS_STYLE_IS_TEXT_COMBINED is still set in ApplyStyleFixups,
+  // which isn't called for ServoComputedValues.
+
   // See if we have any text decorations.
   // First see if our parent has text decorations.  If our parent does, then we inherit the bit.
   if (mParent && mParent->HasTextDecorationLines()) {
     mBits |= NS_STYLE_HAS_TEXT_DECORATION_LINES;
   } else {
     // We might have defined a decoration.
-    const nsStyleTextReset* text = StyleTextReset();
-    uint8_t decorationLine = text->mTextDecorationLine;
-    if (decorationLine != NS_STYLE_TEXT_DECORATION_LINE_NONE &&
-        decorationLine != NS_STYLE_TEXT_DECORATION_LINE_OVERRIDE_ALL) {
+    if (StyleTextReset()->HasTextDecorationLines()) {
       mBits |= NS_STYLE_HAS_TEXT_DECORATION_LINES;
     }
   }
@@ -594,18 +679,52 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     mBits |= NS_STYLE_HAS_PSEUDO_ELEMENT_DATA;
   }
 
+  // Set the NS_STYLE_IN_DISPLAY_NONE_SUBTREE bit
+  const nsStyleDisplay* disp = StyleDisplay();
+  if ((mParent && mParent->IsInDisplayNoneSubtree()) ||
+      disp->mDisplay == NS_STYLE_DISPLAY_NONE) {
+    mBits |= NS_STYLE_IN_DISPLAY_NONE_SUBTREE;
+  }
+}
+
+void
+nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
+{
+  MOZ_ASSERT(!mSource.IsServoComputedValues(),
+             "Can't do Gecko style fixups on Servo values");
+
+#define GET_UNIQUE_STYLE_DATA(name_) \
+  static_cast<nsStyle##name_*>(GetUniqueStyleData(eStyleStruct_##name_))
+
+  // Change writing mode of text frame for text-combine-upright. We use
+  // style structs of the parent to avoid triggering computation before
+  // we change the writing mode.
+  // It is safe to look at the parent's style because we are looking at
+  // inherited properties, and ::-moz-text never matches any rules.
+  if (mPseudoTag == nsCSSAnonBoxes::mozText && mParent &&
+      mParent->StyleVisibility()->mWritingMode !=
+        NS_STYLE_WRITING_MODE_HORIZONTAL_TB &&
+      mParent->StyleText()->mTextCombineUpright ==
+        NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL) {
+    MOZ_ASSERT(!PeekStyleVisibility(), "If StyleVisibility was already "
+               "computed, some properties may have been computed "
+               "incorrectly based on the old writing mode value");
+    nsStyleVisibility* mutableVis = GET_UNIQUE_STYLE_DATA(Visibility);
+    mutableVis->mWritingMode = NS_STYLE_WRITING_MODE_HORIZONTAL_TB;
+    AddStyleBit(NS_STYLE_IS_TEXT_COMBINED);
+  }
+
   // CSS 2.1 10.1: Propagate the root element's 'direction' to the ICB.
   // (PageContentFrame/CanvasFrame etc will inherit 'direction')
   if (mPseudoTag == nsCSSAnonBoxes::viewport) {
     nsPresContext* presContext = PresContext();
     mozilla::dom::Element* docElement = presContext->Document()->GetRootElement();
     if (docElement) {
-      nsRefPtr<nsStyleContext> rootStyle =
+      RefPtr<nsStyleContext> rootStyle =
         presContext->StyleSet()->ResolveStyleFor(docElement, nullptr);
       auto dir = rootStyle->StyleVisibility()->mDirection;
       if (dir != StyleVisibility()->mDirection) {
-        nsStyleVisibility* uniqueVisibility =
-          (nsStyleVisibility*)GetUniqueStyleData(eStyleStruct_Visibility);
+        nsStyleVisibility* uniqueVisibility = GET_UNIQUE_STYLE_DATA(Visibility);
         uniqueVisibility->mDirection = dir;
       }
     }
@@ -618,12 +737,13 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     // This is covering the <div align="right"><table>...</table></div> case.
     // In this case, we don't want to inherit the text alignment into the table.
     const nsStyleText* text = StyleText();
-    
-    if (text->mTextAlign == NS_STYLE_TEXT_ALIGN_MOZ_CENTER ||
+
+    if (text->mTextAlign == NS_STYLE_TEXT_ALIGN_MOZ_LEFT ||
+        text->mTextAlign == NS_STYLE_TEXT_ALIGN_MOZ_CENTER ||
         text->mTextAlign == NS_STYLE_TEXT_ALIGN_MOZ_RIGHT)
     {
-      nsStyleText* uniqueText = (nsStyleText*)GetUniqueStyleData(eStyleStruct_Text);
-      uniqueText->mTextAlign = NS_STYLE_TEXT_ALIGN_DEFAULT;
+      nsStyleText* uniqueText = GET_UNIQUE_STYLE_DATA(Text);
+      uniqueText->mTextAlign = NS_STYLE_TEXT_ALIGN_START;
     }
   }
 
@@ -645,8 +765,8 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
       displayVal = NS_STYLE_DISPLAY_BLOCK;
     }
     if (displayVal != disp->mDisplay) {
-      nsStyleDisplay *mutable_display =
-        static_cast<nsStyleDisplay*>(GetUniqueStyleData(eStyleStruct_Display));
+      nsStyleDisplay* mutable_display = GET_UNIQUE_STYLE_DATA(Display);
+      disp = mutable_display;
 
       // If we're in this code, then mOriginalDisplay doesn't matter
       // for purposes of the cascade (because this nsStyleDisplay
@@ -658,8 +778,8 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     }
   }
 
-  // Adjust the "display" values of flex and grid items (but not for raw text,
-  // placeholders, or table-parts). CSS3 Flexbox section 4 says:
+  // Adjust the "display" values of flex and grid items (but not for raw text
+  // or placeholders). CSS3 Flexbox section 4 says:
   //   # The computed 'display' of a flex item is determined
   //   # by applying the table in CSS 2.1 Chapter 9.7.
   // ...which converts inline-level elements to their block-level equivalents.
@@ -680,60 +800,41 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
       containerContext = containerContext->GetParent();
       containerDisp = containerContext->StyleDisplay();
     }
-    if (containerDisp->IsFlexOrGridDisplayType() &&
-        GetPseudo() != nsCSSAnonBoxes::mozNonElement) {
+    if (ShouldBlockifyChildren(containerDisp) &&
+        !nsCSSAnonBoxes::IsNonElement(GetPseudo())) {
+      // NOTE: Technically, we shouldn't modify the 'display' value of
+      // positioned elements, since they aren't flex/grid items. However,
+      // we don't need to worry about checking for that, because if we're
+      // positioned, we'll have already been through a call to
+      // EnsureBlockDisplay() in nsRuleNode, so this call here won't change
+      // anything. So we're OK.
       uint8_t displayVal = disp->mDisplay;
-      // Skip table parts.
-      // NOTE: This list needs to be kept in sync with
-      // nsCSSFrameConstructor::FindDisplayData() -- specifically,
-      // this should be the list of display-values that returns
-      // FCDATA_DESIRED_PARENT_TYPE_TO_BITS from that method.
-      if (NS_STYLE_DISPLAY_TABLE_CAPTION      != displayVal &&
-          NS_STYLE_DISPLAY_TABLE_ROW_GROUP    != displayVal &&
-          NS_STYLE_DISPLAY_TABLE_HEADER_GROUP != displayVal &&
-          NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP != displayVal &&
-          NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP != displayVal &&
-          NS_STYLE_DISPLAY_TABLE_COLUMN       != displayVal &&
-          NS_STYLE_DISPLAY_TABLE_ROW          != displayVal &&
-          NS_STYLE_DISPLAY_TABLE_CELL         != displayVal) {
-
-        // NOTE: Technically, we shouldn't modify the 'display' value of
-        // positioned elements, since they aren't flex/grid items. However,
-        // we don't need to worry about checking for that, because if we're
-        // positioned, we'll have already been through a call to
-        // EnsureBlockDisplay() in nsRuleNode, so this call here won't change
-        // anything. So we're OK.
-        nsRuleNode::EnsureBlockDisplay(displayVal);
-        if (displayVal != disp->mDisplay) {
-          NS_ASSERTION(!disp->IsAbsolutelyPositionedStyle(),
-                       "We shouldn't be changing the display value of "
-                       "positioned content (and we should have already "
-                       "converted its display value to be block-level...)");
-          nsStyleDisplay *mutable_display =
-            static_cast<nsStyleDisplay*>(GetUniqueStyleData(eStyleStruct_Display));
-          mutable_display->mDisplay = displayVal;
-        }
-      }
-    }
-
-    if (::ShouldSuppressLineBreak(disp, containerContext, containerDisp)) {
-      mBits |= NS_STYLE_SUPPRESS_LINEBREAK;
-      uint8_t displayVal = disp->mDisplay;
-      nsRuleNode::EnsureInlineDisplay(displayVal);
+      nsRuleNode::EnsureBlockDisplay(displayVal);
       if (displayVal != disp->mDisplay) {
-        nsStyleDisplay *mutable_display =
-          static_cast<nsStyleDisplay*>(GetUniqueStyleData(eStyleStruct_Display));
+        NS_ASSERTION(!disp->IsAbsolutelyPositionedStyle(),
+                     "We shouldn't be changing the display value of "
+                     "positioned content (and we should have already "
+                     "converted its display value to be block-level...)");
+        nsStyleDisplay* mutable_display = GET_UNIQUE_STYLE_DATA(Display);
+        disp = mutable_display;
         mutable_display->mDisplay = displayVal;
       }
     }
   }
 
-  // Set the NS_STYLE_IN_DISPLAY_NONE_SUBTREE bit
-  if ((mParent && mParent->IsInDisplayNoneSubtree()) ||
-      disp->mDisplay == NS_STYLE_DISPLAY_NONE) {
-    mBits |= NS_STYLE_IN_DISPLAY_NONE_SUBTREE;
+  // Note: This must come after the blockification above, otherwise we fail
+  // the grid-item-blockifying-001.html reftest.
+  if (mParent && ::ShouldSuppressLineBreak(this, disp, mParent,
+                                           mParent->StyleDisplay())) {
+    mBits |= NS_STYLE_SUPPRESS_LINEBREAK;
+    uint8_t displayVal = disp->mDisplay;
+    nsRuleNode::EnsureInlineDisplay(displayVal);
+    if (displayVal != disp->mDisplay) {
+      nsStyleDisplay* mutable_display = GET_UNIQUE_STYLE_DATA(Display);
+      disp = mutable_display;
+      mutable_display->mDisplay = displayVal;
+    }
   }
-
   // Suppress border/padding of ruby level containers
   if (disp->mDisplay == NS_STYLE_DISPLAY_RUBY_BASE_CONTAINER ||
       disp->mDisplay == NS_STYLE_DISPLAY_RUBY_TEXT_CONTAINER) {
@@ -749,28 +850,37 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     if (unicodeBidi == NS_STYLE_UNICODE_BIDI_NORMAL ||
         unicodeBidi == NS_STYLE_UNICODE_BIDI_EMBED) {
       unicodeBidi = NS_STYLE_UNICODE_BIDI_ISOLATE;
-    } else if (unicodeBidi == NS_STYLE_UNICODE_BIDI_OVERRIDE) {
+    } else if (unicodeBidi == NS_STYLE_UNICODE_BIDI_BIDI_OVERRIDE) {
       unicodeBidi = NS_STYLE_UNICODE_BIDI_ISOLATE_OVERRIDE;
     }
     if (unicodeBidi != textReset->mUnicodeBidi) {
-      auto mutableTextReset = static_cast<nsStyleTextReset*>(
-        GetUniqueStyleData(eStyleStruct_TextReset));
+      nsStyleTextReset* mutableTextReset = GET_UNIQUE_STYLE_DATA(TextReset);
       mutableTextReset->mUnicodeBidi = unicodeBidi;
     }
   }
 
-  // Elements with display:inline whose writing-mode is orthogonal to their
-  // parent's mode will be converted to display:inline-block.
-  if (disp->mDisplay == NS_STYLE_DISPLAY_INLINE && mParent) {
-    // We don't need the full mozilla::WritingMode value (incorporating dir and
-    // text-orientation) here, all we care about is vertical vs horizontal.
-    bool thisHorizontal =
-      StyleVisibility()->mWritingMode == NS_STYLE_WRITING_MODE_HORIZONTAL_TB;
-    bool parentHorizontal = mParent->StyleVisibility()->mWritingMode ==
-                              NS_STYLE_WRITING_MODE_HORIZONTAL_TB;
-    if (thisHorizontal != parentHorizontal) {
-      nsStyleDisplay *mutable_display =
-        static_cast<nsStyleDisplay*>(GetUniqueStyleData(eStyleStruct_Display));
+  /*
+   * According to https://drafts.csswg.org/css-writing-modes-3/#block-flow:
+   *
+   * If a box has a different block flow direction than its containing block:
+   *   * If the box has a specified display of inline, its display computes
+   *     to inline-block. [CSS21]
+   *   ...etc.
+   */
+  if (disp->mDisplay == NS_STYLE_DISPLAY_INLINE &&
+      !nsCSSAnonBoxes::IsNonElement(mPseudoTag) &&
+      mParent) {
+    auto cbContext = mParent;
+    while (cbContext->StyleDisplay()->mDisplay == NS_STYLE_DISPLAY_CONTENTS) {
+      cbContext = cbContext->mParent;
+    }
+    MOZ_ASSERT(cbContext, "the root context can't have display:contents");
+    // We don't need the full mozilla::WritingMode value (incorporating dir
+    // and text-orientation) here; just the writing-mode property is enough.
+    if (StyleVisibility()->mWritingMode !=
+          cbContext->StyleVisibility()->mWritingMode) {
+      nsStyleDisplay* mutable_display = GET_UNIQUE_STYLE_DATA(Display);
+      disp = mutable_display;
       mutable_display->mOriginalDisplay = mutable_display->mDisplay =
         NS_STYLE_DISPLAY_INLINE_BLOCK;
     }
@@ -778,12 +888,14 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 
   // Compute User Interface style, to trigger loads of cursors
   StyleUserInterface();
+#undef GET_UNIQUE_STYLE_DATA
 }
 
 nsChangeHint
-nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
+nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
                                     nsChangeHint aParentHintsNotHandledForDescendants,
-                                    uint32_t* aEqualStructs)
+                                    uint32_t* aEqualStructs,
+                                    uint32_t* aSamePointerStructs)
 {
   PROFILER_LABEL("nsStyleContext", "CalcStyleDifference",
     js::ProfileEntry::Category::CSS);
@@ -798,7 +910,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   *aEqualStructs = 0;
 
   nsChangeHint hint = NS_STYLE_HINT_NONE;
-  NS_ENSURE_TRUE(aOther, hint);
+  NS_ENSURE_TRUE(aNewContext, hint);
   // We must always ensure that we populate the structs on the new style
   // context that are filled in on the old context, so that if we get
   // two style changes in succession, the second of which causes a real
@@ -808,12 +920,12 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   // we could later get a small change in one of those structs that we
   // don't want to miss.
 
-  // If our rule nodes are the same, then any differences in style data
+  // If our sources are the same, then any differences in style data
   // are already accounted for by differences on ancestors.  We know
   // this because CalcStyleDifference is always called on two style
   // contexts that point to the same element, so we know that our
   // position in the style context tree is the same and our position in
-  // the rule node tree is also the same.
+  // the rule node tree (if applicable) is also the same.
   // However, if there were noninherited style change hints on the
   // parent, we might produce these same noninherited hints on this
   // style context's frame due to 'inherit' values, so we do need to
@@ -821,21 +933,24 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   // (Things like 'em' units are handled by the change hint produced
   // by font-size changing, so we don't need to worry about them like
   // we worry about 'inherit' values.)
-  bool compare = mRuleNode != aOther->mRuleNode;
+  bool compare = mSource != aNewContext->mSource;
+
+  DebugOnly<uint32_t> structsFound = 0;
 
   // If we had any change in variable values, then we'll need to examine
   // all of the other style structs too, even if the new style context has
-  // the same rule node as the old one.
+  // the same source as the old one.
   const nsStyleVariables* thisVariables = PeekStyleVariables();
   if (thisVariables) {
-    const nsStyleVariables* otherVariables = aOther->StyleVariables();
+    structsFound |= NS_STYLE_INHERIT_BIT(Variables);
+    const nsStyleVariables* otherVariables = aNewContext->StyleVariables();
     if (thisVariables->mVariables == otherVariables->mVariables) {
-      *aEqualStructs |= nsCachedStyleData::GetBitForSID(eStyleStruct_Variables);
+      *aEqualStructs |= NS_STYLE_INHERIT_BIT(Variables);
     } else {
       compare = true;
     }
   } else {
-    *aEqualStructs |= nsCachedStyleData::GetBitForSID(eStyleStruct_Variables);
+    *aEqualStructs |= NS_STYLE_INHERIT_BIT(Variables);
   }
 
   DebugOnly<int> styleStructCount = 1;  // count Variables already
@@ -844,7 +959,8 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   PR_BEGIN_MACRO                                                              \
     const nsStyle##struct_* this##struct_ = PeekStyle##struct_();             \
     if (this##struct_) {                                                      \
-      const nsStyle##struct_* other##struct_ = aOther->Style##struct_();      \
+      structsFound |= NS_STYLE_INHERIT_BIT(struct_);                          \
+      const nsStyle##struct_* other##struct_ = aNewContext->Style##struct_(); \
       nsChangeHint maxDifference = nsStyle##struct_::MaxDifference();         \
       nsChangeHint differenceAlwaysHandledForDescendants =                    \
         nsStyle##struct_::DifferenceAlwaysHandledForDescendants();            \
@@ -853,15 +969,14 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
         /* differences.                                           */          \
         *aEqualStructs |= NS_STYLE_INHERIT_BIT(struct_);                      \
       } else if (compare ||                                                   \
-                 (NS_SubtractHint(maxDifference,                              \
-                                  differenceAlwaysHandledForDescendants) &    \
+                 ((maxDifference & ~differenceAlwaysHandledForDescendants) &  \
                   aParentHintsNotHandledForDescendants)) {                    \
         nsChangeHint difference =                                             \
-            this##struct_->CalcDifference(*other##struct_);                   \
+          this##struct_->CalcDifference(*other##struct_ EXTRA_DIFF_ARGS);     \
         NS_ASSERTION(NS_IsHintSubset(difference, maxDifference),              \
                      "CalcDifference() returned bigger hint than "            \
                      "MaxDifference()");                                      \
-        NS_UpdateHint(hint, difference);                                      \
+        hint |= difference;                                                   \
         if (!difference) {                                                    \
           *aEqualStructs |= NS_STYLE_INHERIT_BIT(struct_);                    \
         }                                                                     \
@@ -869,7 +984,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
         /* We still must call CalcDifference to see if there were any */      \
         /* changes so that we can set *aEqualStructs appropriately.   */      \
         nsChangeHint difference =                                             \
-            this##struct_->CalcDifference(*other##struct_);                   \
+          this##struct_->CalcDifference(*other##struct_ EXTRA_DIFF_ARGS);     \
         NS_ASSERTION(NS_IsHintSubset(difference, maxDifference),              \
                      "CalcDifference() returned bigger hint than "            \
                      "MaxDifference()");                                      \
@@ -888,6 +1003,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   // smallest.  This lets us skip later ones if we already have a hint
   // that subsumes their MaxDifference.  (As the hints get
   // finer-grained, this optimization is becoming less useful, though.)
+#define EXTRA_DIFF_ARGS /* nothing */
   DO_STRUCT_DIFFERENCE(Display);
   DO_STRUCT_DIFFERENCE(XUL);
   DO_STRUCT_DIFFERENCE(Column);
@@ -900,25 +1016,60 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   DO_STRUCT_DIFFERENCE(UIReset);
   DO_STRUCT_DIFFERENCE(Text);
   DO_STRUCT_DIFFERENCE(List);
-  DO_STRUCT_DIFFERENCE(Quotes);
   DO_STRUCT_DIFFERENCE(SVGReset);
   DO_STRUCT_DIFFERENCE(SVG);
+#undef EXTRA_DIFF_ARGS
+#define EXTRA_DIFF_ARGS , PeekStyleVisibility()
   DO_STRUCT_DIFFERENCE(Position);
+#undef EXTRA_DIFF_ARGS
+#define EXTRA_DIFF_ARGS /* nothing */
   DO_STRUCT_DIFFERENCE(Font);
   DO_STRUCT_DIFFERENCE(Margin);
   DO_STRUCT_DIFFERENCE(Padding);
   DO_STRUCT_DIFFERENCE(Border);
   DO_STRUCT_DIFFERENCE(TextReset);
+  DO_STRUCT_DIFFERENCE(Effects);
   DO_STRUCT_DIFFERENCE(Background);
   DO_STRUCT_DIFFERENCE(Color);
+#undef EXTRA_DIFF_ARGS
 
 #undef DO_STRUCT_DIFFERENCE
 
   MOZ_ASSERT(styleStructCount == nsStyleStructID_Length,
              "missing a call to DO_STRUCT_DIFFERENCE");
 
+#ifdef DEBUG
+  #define STYLE_STRUCT(name_, callback_)                                      \
+    MOZ_ASSERT(!!(structsFound & NS_STYLE_INHERIT_BIT(name_)) ==              \
+               !!PeekStyle##name_(),                                          \
+               "PeekStyleData results must not change in the middle of "      \
+               "difference calculation.");
+  #include "nsStyleStructList.h"
+  #undef STYLE_STRUCT
+#endif
+
+  // We check for struct pointer equality here rather than as part of the
+  // DO_STRUCT_DIFFERENCE calls, since those calls can result in structs
+  // we previously examined and found to be null on this style context
+  // getting computed by later DO_STRUCT_DIFFERENCE calls (which can
+  // happen when the nsRuleNode::ComputeXXXData method looks up another
+  // struct.)  This is important for callers in RestyleManager that
+  // need to know the equality or not of the final set of cached struct
+  // pointers.
+  *aSamePointerStructs = 0;
+
+#define STYLE_STRUCT(name_, callback_)                                        \
+  {                                                                           \
+    const nsStyle##name_* data = PeekStyle##name_();                          \
+    if (!data || data == aNewContext->Style##name_()) {                       \
+      *aSamePointerStructs |= NS_STYLE_INHERIT_BIT(name_);                    \
+    }                                                                         \
+  }
+#include "nsStyleStructList.h"
+#undef STYLE_STRUCT
+
   // Note that we do not check whether this->RelevantLinkVisited() !=
-  // aOther->RelevantLinkVisited(); we don't need to since
+  // aNewContext->RelevantLinkVisited(); we don't need to since
   // nsCSSFrameConstructor::DoContentStateChanged always adds
   // nsChangeHint_RepaintFrame for NS_EVENT_STATE_VISITED changes (and
   // needs to, since HasStateDependentStyle probably doesn't work right
@@ -934,11 +1085,11 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   // things that can depend on :visited) for the properties on which we
   // call GetVisitedDependentColor.
   nsStyleContext *thisVis = GetStyleIfVisited(),
-                *otherVis = aOther->GetStyleIfVisited();
+                *otherVis = aNewContext->GetStyleIfVisited();
   if (!thisVis != !otherVis) {
     // One style context has a style-if-visited and the other doesn't.
     // Presume a difference.
-    NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
+    hint |= nsChangeHint_RepaintFrame;
   } else if (thisVis && !NS_IsHintSubset(nsChangeHint_RepaintFrame, hint)) {
     // Both style contexts have a style-if-visited.
     bool change = false;
@@ -988,9 +1139,9 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
       const nsStyleOutline *otherVisOutline = otherVis->StyleOutline();
       bool haveColor;
       nscolor thisColor, otherColor;
-      if (thisVisOutline->GetOutlineInitialColor() != 
+      if (thisVisOutline->GetOutlineInitialColor() !=
             otherVisOutline->GetOutlineInitialColor() ||
-          (haveColor = thisVisOutline->GetOutlineColor(thisColor)) != 
+          (haveColor = thisVisOutline->GetOutlineColor(thisColor)) !=
             otherVisOutline->GetOutlineColor(otherColor) ||
           (haveColor && thisColor != otherColor)) {
         change = true;
@@ -1004,6 +1155,23 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
       if (thisVisColumn->mColumnRuleColor != otherVisColumn->mColumnRuleColor ||
           thisVisColumn->mColumnRuleColorIsForeground !=
             otherVisColumn->mColumnRuleColorIsForeground) {
+        change = true;
+      }
+    }
+
+    // NB: Calling Peek on |this|, not |thisVis| (see above).
+    if (!change && PeekStyleText()) {
+      const nsStyleText* thisVisText = thisVis->StyleText();
+      const nsStyleText* otherVisText = otherVis->StyleText();
+      if (thisVisText->mTextEmphasisColorForeground !=
+          otherVisText->mTextEmphasisColorForeground ||
+          thisVisText->mTextEmphasisColor != otherVisText->mTextEmphasisColor ||
+          thisVisText->mWebkitTextFillColorForeground !=
+          otherVisText->mWebkitTextFillColorForeground ||
+          thisVisText->mWebkitTextFillColor != otherVisText->mWebkitTextFillColor ||
+          thisVisText->mWebkitTextStrokeColorForeground !=
+          otherVisText->mWebkitTextStrokeColorForeground ||
+          thisVisText->mWebkitTextStrokeColor != otherVisText->mWebkitTextStrokeColor) {
         change = true;
       }
     }
@@ -1038,35 +1206,11 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
     }
 
     if (change) {
-      NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
+      hint |= nsChangeHint_RepaintFrame;
     }
   }
 
-  return NS_SubtractHint(hint, nsChangeHint_NeutralChange);
-}
-
-void
-nsStyleContext::Mark()
-{
-  // Mark our rule node.
-  mRuleNode->Mark();
-
-  // Mark our children (i.e., tell them to mark their rule nodes, etc.).
-  if (mChild) {
-    nsStyleContext* child = mChild;
-    do {
-      child->Mark();
-      child = child->mNextSibling;
-    } while (mChild != child);
-  }
-  
-  if (mEmptyChild) {
-    nsStyleContext* child = mEmptyChild;
-    do {
-      child->Mark();
-      child = child->mNextSibling;
-    } while (mEmptyChild != child);
-  }
+  return hint & ~nsChangeHint_NeutralChange;
 }
 
 #ifdef DEBUG
@@ -1087,10 +1231,12 @@ void nsStyleContext::List(FILE* out, int32_t aIndent, bool aListDescendants)
     str.Append(' ');
   }
 
-  if (mRuleNode) {
+  if (mSource.IsServoComputedValues()) {
+    fprintf_stderr(out, "%s{ServoComputedValues}\n", str.get());
+  } else if (mSource.IsGeckoRuleNode()) {
     fprintf_stderr(out, "%s{\n", str.get());
     str.Truncate();
-    nsRuleNode* ruleNode = mRuleNode;
+    nsRuleNode* ruleNode = mSource.AsGeckoRuleNode();
     while (ruleNode) {
       nsIStyleRule *styleRule = ruleNode->GetRule();
       if (styleRule) {
@@ -1128,41 +1274,65 @@ void nsStyleContext::List(FILE* out, int32_t aIndent, bool aListDescendants)
 
 // Overloaded new operator. Initializes the memory to 0 and relies on an arena
 // (which comes from the presShell) to perform the allocation.
-void* 
+void*
 nsStyleContext::operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW
 {
   // Check the recycle list first.
-  return aPresContext->PresShell()->AllocateByObjectID(nsPresArena::nsStyleContext_id, sz);
+  return aPresContext->PresShell()->
+    AllocateByObjectID(eArenaObjectID_nsStyleContext, sz);
 }
 
 // Overridden to prevent the global delete from being called, since the memory
 // came out of an nsIArena instead of the global delete operator's heap.
-void 
+void
 nsStyleContext::Destroy()
 {
-  // Get the pres context from our rule node.
-  nsRefPtr<nsPresContext> presContext = mRuleNode->PresContext();
+  // Get the pres context.
+  RefPtr<nsPresContext> presContext = PresContext();
 
   // Call our destructor.
   this->~nsStyleContext();
 
   // Don't let the memory be freed, since it will be recycled
   // instead. Don't call the global operator delete.
-  presContext->PresShell()->FreeByObjectID(nsPresArena::nsStyleContext_id, this);
+  presContext->PresShell()->
+    FreeByObjectID(eArenaObjectID_nsStyleContext, this);
 }
 
 already_AddRefed<nsStyleContext>
 NS_NewStyleContext(nsStyleContext* aParentContext,
                    nsIAtom* aPseudoTag,
-                   nsCSSPseudoElements::Type aPseudoType,
+                   CSSPseudoElementType aPseudoType,
                    nsRuleNode* aRuleNode,
                    bool aSkipParentDisplayBasedStyleFixup)
 {
-  nsRefPtr<nsStyleContext> context =
+  RefPtr<nsRuleNode> node = aRuleNode;
+  RefPtr<nsStyleContext> context =
     new (aRuleNode->PresContext())
-    nsStyleContext(aParentContext, aPseudoTag, aPseudoType, aRuleNode,
+    nsStyleContext(aParentContext, aPseudoTag, aPseudoType, node.forget(),
                    aSkipParentDisplayBasedStyleFixup);
   return context.forget();
+}
+
+already_AddRefed<nsStyleContext>
+NS_NewStyleContext(nsStyleContext* aParentContext,
+                   nsPresContext* aPresContext,
+                   nsIAtom* aPseudoTag,
+                   CSSPseudoElementType aPseudoType,
+                   already_AddRefed<ServoComputedValues> aComputedValues,
+                   bool aSkipParentDisplayBasedStyleFixup)
+{
+  RefPtr<nsStyleContext> context =
+    new (aPresContext)
+    nsStyleContext(aParentContext, aPresContext, aPseudoTag, aPseudoType,
+                   Move(aComputedValues), aSkipParentDisplayBasedStyleFixup);
+  return context.forget();
+}
+
+nsIPresShell*
+nsStyleContext::Arena()
+{
+  return PresContext()->PresShell();
 }
 
 static inline void
@@ -1183,7 +1353,8 @@ ExtractColor(nsCSSProperty aProperty,
 {
   StyleAnimationValue val;
   ExtractAnimationValue(aProperty, aStyleContext, val);
-  return val.GetColorValue();
+  return val.GetUnit() == StyleAnimationValue::eUnit_CurrentColor
+    ? aStyleContext->StyleColor()->mColor : val.GetColorValue();
 }
 
 static nscolor
@@ -1194,6 +1365,8 @@ ExtractColorLenient(nsCSSProperty aProperty,
   ExtractAnimationValue(aProperty, aStyleContext, val);
   if (val.GetUnit() == StyleAnimationValue::eUnit_Color) {
     return val.GetColorValue();
+  } else if (val.GetUnit() == StyleAnimationValue::eUnit_CurrentColor) {
+    return aStyleContext->StyleColor()->mColor;
   }
   return NS_RGBA(0, 0, 0, 0);
 }
@@ -1216,6 +1389,9 @@ nsStyleContext::GetVisitedDependentColor(nsCSSProperty aProperty)
                aProperty == eCSSProperty_outline_color ||
                aProperty == eCSSProperty__moz_column_rule_color ||
                aProperty == eCSSProperty_text_decoration_color ||
+               aProperty == eCSSProperty_text_emphasis_color ||
+               aProperty == eCSSProperty__webkit_text_fill_color ||
+               aProperty == eCSSProperty__webkit_text_stroke_color ||
                aProperty == eCSSProperty_fill ||
                aProperty == eCSSProperty_stroke,
                "we need to add to nsStyleContext::CalcStyleDifference");
@@ -1302,13 +1478,6 @@ nsStyleContext::LookupStruct(const nsACString& aName, nsStyleStructID& aResult)
 }
 #endif
 
-bool
-nsStyleContext::HasSameCachedStyleData(nsStyleContext* aOther,
-                                       nsStyleStructID aSID)
-{
-  return GetCachedStyleData(aSID) == aOther->GetCachedStyleData(aSID);
-}
-
 void
 nsStyleContext::SwapStyleData(nsStyleContext* aNewContext, uint32_t aStructs)
 {
@@ -1340,11 +1509,10 @@ nsStyleContext::SwapStyleData(nsStyleContext* aNewContext, uint32_t aStructs)
       continue;
     }
     if (!mCachedResetData) {
-      mCachedResetData = new (mRuleNode->PresContext()) nsResetStyleData;
+      mCachedResetData = new (PresContext()) nsResetStyleData;
     }
     if (!aNewContext->mCachedResetData) {
-      aNewContext->mCachedResetData =
-        new (mRuleNode->PresContext()) nsResetStyleData;
+      aNewContext->mCachedResetData = new (PresContext()) nsResetStyleData;
     }
     void*& thisData = mCachedResetData->mStyleStructs[i];
     void*& otherData = aNewContext->mCachedResetData->mStyleStructs[i];
@@ -1453,7 +1621,7 @@ nsStyleContext::GetCachedStyleDataAsString(uint32_t aStructs)
         structs.Append(' ');
       }
       structs.AppendPrintf("%s=%p", StructName(i), data);
-      if (HasCachedInheritedStyleData(i)) {
+      if (HasCachedDependentStyleData(i)) {
         structs.AppendLiteral("(dependent)");
       } else {
         structs.AppendLiteral("(owned)");
@@ -1497,8 +1665,8 @@ nsStyleContext::LogStyleContextTree(bool aFirst, uint32_t aStructs)
   if (IsStyleIfVisited()) {
     flags.AppendLiteral("IS_STYLE_IF_VISITED ");
   }
-  if (UsesGrandancestorStyle()) {
-    flags.AppendLiteral("USES_GRANDANCESTOR_STYLE ");
+  if (HasChildThatUsesGrandancestorStyle()) {
+    flags.AppendLiteral("CHILD_USES_GRANDANCESTOR_STYLE ");
   }
   if (IsShared()) {
     flags.AppendLiteral("IS_SHARED ");
@@ -1506,7 +1674,7 @@ nsStyleContext::LogStyleContextTree(bool aFirst, uint32_t aStructs)
 
   nsCString parent;
   if (aFirst) {
-    parent.AppendPrintf("parent=%p ", mParent);
+    parent.AppendPrintf("parent=%p ", mParent.get());
   }
 
   LOG_RESTYLE("%p(%d) %s%s%s%s",

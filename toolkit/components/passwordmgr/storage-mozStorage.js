@@ -43,7 +43,7 @@ Transaction.prototype = {
 };
 
 
-function LoginManagerStorage_mozStorage() { };
+function LoginManagerStorage_mozStorage() { }
 
 LoginManagerStorage_mozStorage.prototype = {
 
@@ -421,24 +421,33 @@ LoginManagerStorage_mozStorage.prototype = {
   },
 
 
-  /*
-   * searchLogins
-   *
+  /**
    * Public wrapper around _searchLogins to convert the nsIPropertyBag to a
    * JavaScript object and decrypt the results.
    *
-   * Returns an array of decrypted nsILoginInfo.
+   * @return {nsILoginInfo[]} which are decrypted.
    */
   searchLogins : function(count, matchData) {
     let realMatchData = {};
+    let options = {};
     // Convert nsIPropertyBag to normal JS object
     let propEnum = matchData.enumerator;
     while (propEnum.hasMoreElements()) {
       let prop = propEnum.getNext().QueryInterface(Ci.nsIProperty);
-      realMatchData[prop.name] = prop.value;
+      switch (prop.name) {
+        // Some property names aren't field names but are special options to affect the search.
+        case "schemeUpgrades": {
+          options[prop.name] = prop.value;
+          break;
+        }
+        default: {
+          realMatchData[prop.name] = prop.value;
+          break;
+        }
+      }
     }
 
-    let [logins, ids] = this._searchLogins(realMatchData);
+    let [logins, ids] = this._searchLogins(realMatchData, options);
 
     // Decrypt entries found for the caller.
     logins = this._decryptLogins(logins);
@@ -448,9 +457,7 @@ LoginManagerStorage_mozStorage.prototype = {
   },
 
 
-  /*
-   * _searchLogins
-   *
+  /**
    * Private method to perform arbitrary searches on any field. Decryption is
    * left to the caller.
    *
@@ -458,21 +465,40 @@ LoginManagerStorage_mozStorage.prototype = {
    * is an array of encrypted nsLoginInfo and ids is an array of associated
    * ids in the database.
    */
-  _searchLogins : function (matchData) {
+  _searchLogins : function (matchData, aOptions = {
+    schemeUpgrades: false,
+  }) {
     let conditions = [], params = {};
 
     for (let field in matchData) {
       let value = matchData[field];
+      let condition = "";
       switch (field) {
-        // Historical compatibility requires this special case
         case "formSubmitURL":
           if (value != null) {
-              // As we also need to check for different schemes at the URI
-              // this case gets handled by filtering the result of the query.
-              break;
+            // Historical compatibility requires this special case
+            condition = "formSubmitURL = '' OR ";
           }
-        // Normal cases.
+          // Fall through
         case "hostname":
+          if (value != null) {
+            condition += `${field} = :${field}`;
+            params[field] = value;
+            let valueURI;
+            try {
+              if (aOptions.schemeUpgrades && (valueURI = Services.io.newURI(value, null, null)) &&
+                  valueURI.scheme == "https") {
+                condition += ` OR ${field} = :http${field}`;
+                params["http" + field] = "http://" + valueURI.hostPort;
+              }
+            } catch (ex) {
+              // newURI will throw for some values (e.g. chrome://FirefoxAccounts)
+              // but those URLs wouldn't support upgrades anyways.
+            }
+            break;
+          }
+          // Fall through
+        // Normal cases.
         case "httpRealm":
         case "id":
         case "usernameField":
@@ -486,27 +512,30 @@ LoginManagerStorage_mozStorage.prototype = {
         case "timePasswordChanged":
         case "timesUsed":
           if (value == null) {
-              conditions.push(field + " isnull");
+            condition = field + " isnull";
           } else {
-              conditions.push(field + " = :" + field);
-              params[field] = value;
+            condition = field + " = :" + field;
+            params[field] = value;
           }
           break;
         // Fail if caller requests an unknown property.
         default:
           throw new Error("Unexpected field: " + field);
       }
+      if (condition) {
+        conditions.push(condition);
+      }
     }
 
     // Build query
     let query = "SELECT * FROM moz_logins";
     if (conditions.length) {
-      conditions = conditions.map(function(c) "(" + c + ")");
+      conditions = conditions.map(c => "(" + c + ")");
       query += " WHERE " + conditions.join(" AND ");
     }
 
     let stmt;
-    let logins = [], ids = [], fallbackLogins = [], fallbackIds = [];
+    let logins = [], ids = [];
     try {
       stmt = this._dbCreateStatement(query, params);
       // We can't execute as usual here, since we're iterating over rows
@@ -525,24 +554,8 @@ LoginManagerStorage_mozStorage.prototype = {
         login.timeLastUsed = stmt.row.timeLastUsed;
         login.timePasswordChanged = stmt.row.timePasswordChanged;
         login.timesUsed = stmt.row.timesUsed;
-
-        if (login.formSubmitURL == "" || typeof(matchData.formSubmitURL) == "undefined" ||
-            login.formSubmitURL == matchData.formSubmitURL) {
-            logins.push(login);
-            ids.push(stmt.row.id);
-        } else if (login.formSubmitURL != null &&
-                   login.formSubmitURL != "javascript:" &&
-                   matchData.formSubmitURL != "javascript:") {
-          let loginURI = Services.io.newURI(login.formSubmitURL, null, null);
-          let matchURI = Services.io.newURI(matchData.formSubmitURL, null, null);
-
-          if (loginURI.hostPort == matchURI.hostPort &&
-              ((loginURI.scheme == "http" && matchURI.scheme == "https") ||
-              (loginURI.scheme == "https" && matchURI.scheme == "http"))) {
-            fallbackLogins.push(login);
-            fallbackIds.push(stmt.row.id);
-          }
-        }
+        logins.push(login);
+        ids.push(stmt.row.id);
       }
     } catch (e) {
       this.log("_searchLogins failed: " + e.name + " : " + e.message);
@@ -552,10 +565,6 @@ LoginManagerStorage_mozStorage.prototype = {
       }
     }
 
-    if (!logins.length && fallbackLogins.length) {
-      this.log("_searchLogins: returning " + fallbackLogins.length + " fallback logins");
-      return [fallbackLogins, fallbackIds];
-    }
     this.log("_searchLogins: returning " + logins.length + " logins");
     return [logins, ids];
   },
@@ -686,7 +695,7 @@ LoginManagerStorage_mozStorage.prototype = {
       httpRealm: httpRealm
     };
     let matchData = { };
-    for each (let field in ["hostname", "formSubmitURL", "httpRealm"])
+    for (let field of ["hostname", "formSubmitURL", "httpRealm"])
       if (loginData[field] != '')
         matchData[field] = loginData[field];
     let [logins, ids] = this._searchLogins(matchData);
@@ -713,7 +722,7 @@ LoginManagerStorage_mozStorage.prototype = {
 
       let query = "SELECT COUNT(1) AS numLogins FROM moz_logins";
       if (conditions.length) {
-        conditions = conditions.map(function(c) "(" + c + ")");
+        conditions = conditions.map(c => "(" + c + ")");
         query += " WHERE " + conditions.join(" AND ");
       }
 
@@ -733,20 +742,6 @@ LoginManagerStorage_mozStorage.prototype = {
     };
 
     let resultLogins = _countLoginsHelper(hostname, formSubmitURL, httpRealm);
-    if (resultLogins == 0 && formSubmitURL != null &&
-        formSubmitURL != "" && formSubmitURL != "javascript:") {
-      let formSubmitURI = Services.io.newURI(formSubmitURL, null, null);
-      let newScheme = null;
-      if (formSubmitURI.scheme == "http") {
-        newScheme = "https";
-      } else if (formSubmitURI.scheme == "https") {
-        newScheme = "http";
-      }
-      if (newScheme) {
-        let newFormSubmitURL = newScheme + "://" + formSubmitURI.hostPort;
-        resultLogins = _countLoginsHelper(hostname, newFormSubmitURL, httpRealm);
-      }
-    }
     this.log("_countLogins: counted logins: " + resultLogins);
     return resultLogins;
   },
@@ -799,7 +794,7 @@ LoginManagerStorage_mozStorage.prototype = {
    */
   _getIdForLogin : function (login) {
     let matchData = { };
-    for each (let field in ["hostname", "formSubmitURL", "httpRealm"])
+    for (let field of ["hostname", "formSubmitURL", "httpRealm"])
       if (login[field] != '')
         matchData[field] = login[field];
     let [logins, ids] = this._searchLogins(matchData);
@@ -953,7 +948,7 @@ LoginManagerStorage_mozStorage.prototype = {
   _decryptLogins : function (logins) {
     let result = [];
 
-    for each (let login in logins) {
+    for (let login of logins) {
       try {
         login.username = this._crypto.decrypt(login.username);
         login.password = this._crypto.decrypt(login.password);
@@ -1017,10 +1012,12 @@ LoginManagerStorage_mozStorage.prototype = {
       } else if (version != DB_VERSION) {
         this._dbMigrate(version);
       }
-    } catch (e if e.result == Cr.NS_ERROR_FILE_CORRUPTED) {
-      // Database is corrupted, so we backup the database, then throw
-      // causing initialization to fail and a new db to be created next use
-      this._dbCleanup(true);
+    } catch (e) {
+      if (e.result == Cr.NS_ERROR_FILE_CORRUPTED) {
+        // Database is corrupted, so we backup the database, then throw
+        // causing initialization to fail and a new db to be created next use
+        this._dbCleanup(true);
+      }
       throw e;
     }
 
@@ -1147,7 +1144,7 @@ LoginManagerStorage_mozStorage.prototype = {
 
     // Generate a GUID for each login and update the DB.
     query = "UPDATE moz_logins SET guid = :guid WHERE id = :id";
-    for each (let id in ids) {
+    for (let id of ids) {
       let params = {
         id:   id,
         guid: this._uuidService.generateUUID().toString()
@@ -1213,7 +1210,7 @@ LoginManagerStorage_mozStorage.prototype = {
 
     // Determine encryption type for each login and update the DB.
     query = "UPDATE moz_logins SET encType = :encType WHERE id = :id";
-    for each (let params in logins) {
+    for (let params of logins) {
       try {
         stmt = this._dbCreateStatement(query, params);
         stmt.execute();
@@ -1238,7 +1235,7 @@ LoginManagerStorage_mozStorage.prototype = {
   _dbMigrateToVersion4 : function () {
     let query;
     // Add the new columns, if needed.
-    for each (let column in ["timeCreated", "timeLastUsed", "timePasswordChanged", "timesUsed"]) {
+    for (let column of ["timeCreated", "timeLastUsed", "timePasswordChanged", "timesUsed"]) {
       if (!this._dbColumnExists(column)) {
         query = "ALTER TABLE moz_logins ADD COLUMN " + column + " INTEGER";
         this._dbConnection.executeSimpleSQL(query);
@@ -1270,7 +1267,7 @@ LoginManagerStorage_mozStorage.prototype = {
       id:       null,
       initTime: Date.now()
     };
-    for each (let id in ids) {
+    for (let id of ids) {
       params.id = id;
       try {
         stmt = this._dbCreateStatement(query, params);
@@ -1366,7 +1363,8 @@ LoginManagerStorage_mozStorage.prototype = {
   _dbClose : function () {
     this.log("Closing the DB connection.");
     // Finalize all statements to free memory, avoid errors later
-    for each (let stmt in this._dbStmts) {
+    for (let query in this._dbStmts) {
+      let stmt = this._dbStmts[query];
       stmt.finalize();
     }
     this._dbStmts = {};
@@ -1407,5 +1405,5 @@ XPCOMUtils.defineLazyGetter(this.LoginManagerStorage_mozStorage.prototype, "log"
   return logger.log.bind(logger);
 });
 
-let component = [LoginManagerStorage_mozStorage];
+var component = [LoginManagerStorage_mozStorage];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

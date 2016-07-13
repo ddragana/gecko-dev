@@ -15,6 +15,7 @@ namespace mozilla {
 namespace a11y {
 
 class Accessible;
+class AccessibleOrProxy;
 
 /**
  * XPCOM nsIAccessible interface implementation, used by xpcAccessibleGeneric
@@ -37,6 +38,7 @@ public:
   NS_IMETHOD GetIndexInParent(int32_t* aIndexInParent) final override;
 
   NS_IMETHOD GetDOMNode(nsIDOMNode** aDOMNode) final override;
+  NS_IMETHOD GetId(nsAString& aID) final override;
   NS_IMETHOD GetDocument(nsIAccessibleDocument** aDocument) final override;
   NS_IMETHOD GetRootDocument(nsIAccessibleDocument** aRootDocument)
     final override;
@@ -73,7 +75,6 @@ public:
     final override;
 
   NS_IMETHOD SetSelected(bool aSelect) final override;
-  NS_IMETHOD ExtendSelection() final override;
   NS_IMETHOD TakeSelection() final override;
   NS_IMETHOD TakeFocus() final override;
 
@@ -93,6 +94,7 @@ protected:
 
 private:
   Accessible* Intl();
+  AccessibleOrProxy IntlGeneric();
 
   xpcAccessible(const xpcAccessible&) = delete;
   xpcAccessible& operator =(const xpcAccessible&) = delete;

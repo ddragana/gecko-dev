@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Attributes.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/Telemetry.h"
@@ -16,11 +16,13 @@
 #include "nsError.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
+#include "nsIOService.h"
 #include "prnetdb.h"
 #include "prio.h"
 #include "nsNetAddr.h"
 #include "nsNetSegmentUtils.h"
 #include "NetworkActivityMonitor.h"
+#include "nsServiceManagerUtils.h"
 #include "nsStreamUtils.h"
 #include "nsIPipe.h"
 #include "prerror.h"
@@ -33,11 +35,11 @@
 #include "NetStatistics.h"
 #endif
 
-using namespace mozilla::net;
-using namespace mozilla;
+namespace mozilla {
+namespace net {
 
-static NS_DEFINE_CID(kSocketTransportServiceCID, NS_SOCKETTRANSPORTSERVICE_CID);
 static const uint32_t UDP_PACKET_CHUNK_SIZE = 1400;
+static NS_DEFINE_CID(kSocketTransportServiceCID2, NS_SOCKETTRANSPORTSERVICE_CID);
 
 //-----------------------------------------------------------------------------
 
@@ -46,12 +48,10 @@ typedef void (nsUDPSocket:: *nsUDPSocketFunc)(void);
 static nsresult
 PostEvent(nsUDPSocket *s, nsUDPSocketFunc func)
 {
-  nsCOMPtr<nsIRunnable> ev = NS_NewRunnableMethod(s, func);
-
   if (!gSocketTransportService)
     return NS_ERROR_FAILURE;
 
-  return gSocketTransportService->Dispatch(ev, NS_DISPATCH_NORMAL);
+  return gSocketTransportService->Dispatch(NewRunnableMethod(s, func), NS_DISPATCH_NORMAL);
 }
 
 static nsresult
@@ -73,7 +73,7 @@ ResolveHost(const nsACString &host, nsIDNSListener *listener)
 
 //-----------------------------------------------------------------------------
 
-class SetSocketOptionRunnable : public nsRunnable
+class SetSocketOptionRunnable : public Runnable
 {
 public:
   SetSocketOptionRunnable(nsUDPSocket* aSocket, const PRSocketOptionData& aOpt)
@@ -87,194 +87,9 @@ public:
   }
 
 private:
-  nsRefPtr<nsUDPSocket> mSocket;
+  RefPtr<nsUDPSocket> mSocket;
   PRSocketOptionData    mOpt;
 };
-
-//-----------------------------------------------------------------------------
-// nsUDPSocketCloseThread
-//-----------------------------------------------------------------------------
-
-// A helper class carrying call to PR_Close on nsUDPSocket's FD to a separate
-// thread.  This may be a workaround for shutdown blocks that are caused by
-// serial calls to close on UDP sockets.
-// It starts an NSPR thread for each socket and also adds itself as an observer
-// to "xpcom-shutdown-threads" notification where we join the thread (if not
-// already done). During worktime of the thread the class is also
-// self-referenced, since observer service might throw the reference away
-// sooner than the thread is actually done.
-class nsUDPSocketCloseThread : public nsIObserver
-{
-public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_NSIOBSERVER
-
-  static bool Close(PRFileDesc *aFd);
-
-private:
-  explicit nsUDPSocketCloseThread(PRFileDesc *aFd);
-  virtual ~nsUDPSocketCloseThread() { }
-
-  bool Begin();
-  void ThreadFunc();
-  void AddObserver();
-  void JoinAndRemove();
-
-  static void ThreadFunc(void *aClosure)
-    { static_cast<nsUDPSocketCloseThread*>(aClosure)->ThreadFunc(); }
-
-  // Socket to close.
-  PRFileDesc *mFd;
-  PRThread *mThread;
-
-  // Self reference, added before we create the thread, dropped
-  // after the thread is done (from the thread).  No races, since
-  // mSelf is assigned bofore the thread func is executed and
-  // released only on the thread func.
-  nsRefPtr<nsUDPSocketCloseThread> mSelf;
-
-  // Telemetry probes.
-  TimeStamp mBeforeClose;
-  TimeStamp mAfterClose;
-
-  // Active threads (roughly) counter, modified only on the main thread
-  // and used only for telemetry reports.
-  static uint32_t sActiveThreadsCount;
-
-  // Switches to true on "xpcom-shutdown-threads" notification and since
-  // then it makes the code fallback to a direct call to PR_Close().
-  static bool sPastShutdown;
-};
-
-uint32_t nsUDPSocketCloseThread::sActiveThreadsCount = 0;
-bool nsUDPSocketCloseThread::sPastShutdown = false;
-
-NS_IMPL_ISUPPORTS(nsUDPSocketCloseThread, nsIObserver);
-
-bool
-nsUDPSocketCloseThread::Close(PRFileDesc *aFd)
-{
-  if (sPastShutdown) {
-    return false;
-  }
-
-  nsRefPtr<nsUDPSocketCloseThread> t = new nsUDPSocketCloseThread(aFd);
-  return t->Begin();
-}
-
-nsUDPSocketCloseThread::nsUDPSocketCloseThread(PRFileDesc *aFd)
-  : mFd(aFd)
-  , mThread(nullptr)
-{
-}
-
-bool
-nsUDPSocketCloseThread::Begin()
-{
-  // Observer service must be worked with on the main thread only.
-  // This method is called usually on the socket thread.
-  // Register us before the thread starts.  It may happen the thread is
-  // done and posts removal event sooner then we would post this event
-  // after the thread creation.
-  nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(
-    this, &nsUDPSocketCloseThread::AddObserver);
-  if (event) {
-    NS_DispatchToMainThread(event);
-  }
-
-  // Keep us self-referenced during lifetime of the thread.
-  // Released after the thread is done.
-  mSelf = this;
-  mThread = PR_CreateThread(PR_USER_THREAD, ThreadFunc, this,
-                            PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
-                            PR_JOINABLE_THREAD, 4 * 4096);
-  if (!mThread) {
-    // This doesn't join since there is no thread, just removes
-    // this class as an observer.
-    JoinAndRemove();
-    mSelf = nullptr;
-    return false;
-  }
-
-  return true;
-}
-
-void
-nsUDPSocketCloseThread::AddObserver()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  ++sActiveThreadsCount;
-
-  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  if (obs) {
-    obs->AddObserver(this, "xpcom-shutdown-threads", false);
-  }
-}
-
-void
-nsUDPSocketCloseThread::JoinAndRemove()
-{
-  // Posted from the particular (this) UDP close socket when it's done
-  // or from "xpcom-shutdown-threads" notification.
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (mThread) {
-    PR_JoinThread(mThread);
-    mThread = nullptr;
-
-    Telemetry::Accumulate(Telemetry::UDP_SOCKET_PARALLEL_CLOSE_COUNT, sActiveThreadsCount);
-    Telemetry::AccumulateTimeDelta(Telemetry::UDP_SOCKET_CLOSE_TIME, mBeforeClose, mAfterClose);
-
-    MOZ_ASSERT(sActiveThreadsCount > 0);
-    --sActiveThreadsCount;
-  }
-
-  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  if (obs) {
-    obs->RemoveObserver(this, "xpcom-shutdown-threads");
-  }
-}
-
-NS_IMETHODIMP
-nsUDPSocketCloseThread::Observe(nsISupports *aSubject,
-                                const char *aTopic,
-                                const char16_t *aData)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!strcmp(aTopic, "xpcom-shutdown-threads")) {
-    sPastShutdown = true;
-    JoinAndRemove();
-    return NS_OK;
-  }
-
-  MOZ_CRASH("Unexpected observer topic");
-  return NS_OK;
-}
-
-void
-nsUDPSocketCloseThread::ThreadFunc()
-{
-  PR_SetCurrentThreadName("UDP socket close");
-
-  mBeforeClose = TimeStamp::Now();
-
-  PR_Close(mFd);
-  mFd = nullptr;
-
-  mAfterClose = TimeStamp::Now();
-
-  // Join and remove the observer on the main thread.
-  nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(
-    this, &nsUDPSocketCloseThread::JoinAndRemove);
-  if (event) {
-    NS_DispatchToMainThread(event);
-  }
-
-  // Thread's done, release the self-reference.
-  mSelf = nullptr;
-}
 
 //-----------------------------------------------------------------------------
 // nsUDPOutputStream impl
@@ -295,7 +110,6 @@ nsUDPOutputStream::~nsUDPOutputStream()
 {
 }
 
-/* void close (); */
 NS_IMETHODIMP nsUDPOutputStream::Close()
 {
   if (mIsClosed)
@@ -305,13 +119,11 @@ NS_IMETHODIMP nsUDPOutputStream::Close()
   return NS_OK;
 }
 
-/* void flush (); */
 NS_IMETHODIMP nsUDPOutputStream::Flush()
 {
   return NS_OK;
 }
 
-/* unsigned long write (in string aBuf, in unsigned long aCount); */
 NS_IMETHODIMP nsUDPOutputStream::Write(const char * aBuf, uint32_t aCount, uint32_t *_retval)
 {
   if (mIsClosed)
@@ -331,19 +143,16 @@ NS_IMETHODIMP nsUDPOutputStream::Write(const char * aBuf, uint32_t aCount, uint3
   return NS_OK;
 }
 
-/* unsigned long writeFrom (in nsIInputStream aFromStream, in unsigned long aCount); */
 NS_IMETHODIMP nsUDPOutputStream::WriteFrom(nsIInputStream *aFromStream, uint32_t aCount, uint32_t *_retval)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-/* [noscript] unsigned long writeSegments (in nsReadSegmentFun aReader, in voidPtr aClosure, in unsigned long aCount); */
 NS_IMETHODIMP nsUDPOutputStream::WriteSegments(nsReadSegmentFun aReader, void *aClosure, uint32_t aCount, uint32_t *_retval)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-/* boolean isNonBlocking (); */
 NS_IMETHODIMP nsUDPOutputStream::IsNonBlocking(bool *_retval)
 {
   *_retval = true;
@@ -386,10 +195,9 @@ nsUDPMessage::nsUDPMessage(NetAddr* aAddr,
 
 nsUDPMessage::~nsUDPMessage()
 {
-  mozilla::DropJSObjects(this);
+  DropJSObjects(this);
 }
 
-/* readonly attribute nsINetAddr from; */
 NS_IMETHODIMP
 nsUDPMessage::GetFromAddr(nsINetAddr * *aFromAddr)
 {
@@ -401,7 +209,6 @@ nsUDPMessage::GetFromAddr(nsINetAddr * *aFromAddr)
   return NS_OK;
 }
 
-/* readonly attribute ACString data; */
 NS_IMETHODIMP
 nsUDPMessage::GetData(nsACString & aData)
 {
@@ -409,7 +216,6 @@ nsUDPMessage::GetData(nsACString & aData)
   return NS_OK;
 }
 
-/* readonly attribute nsIOutputStream outputStream; */
 NS_IMETHODIMP
 nsUDPMessage::GetOutputStream(nsIOutputStream * *aOutputStream)
 {
@@ -418,20 +224,18 @@ nsUDPMessage::GetOutputStream(nsIOutputStream * *aOutputStream)
   return NS_OK;
 }
 
-/* readonly attribute jsval rawData; */
 NS_IMETHODIMP
 nsUDPMessage::GetRawData(JSContext* cx,
                          JS::MutableHandleValue aRawData)
 {
   if(!mJsobj){
-    mJsobj = mozilla::dom::Uint8Array::Create(cx, nullptr, mData.Length(), mData.Elements());
-    mozilla::HoldJSObjects(this);
+    mJsobj = dom::Uint8Array::Create(cx, nullptr, mData.Length(), mData.Elements());
+    HoldJSObjects(this);
   }
   aRawData.setObject(*mJsobj);
   return NS_OK;
 }
 
-/* [noscript, notxpcom, nostdcall] Uint8ArrayRef getDataAsTArray(); */
 FallibleTArray<uint8_t>&
 nsUDPMessage::GetDataAsTArray()
 {
@@ -446,7 +250,7 @@ nsUDPSocket::nsUDPSocket()
   : mLock("nsUDPSocket.mLock")
   , mFD(nullptr)
   , mAppId(NECKO_UNKNOWN_APP_ID)
-  , mIsInBrowserElement(false)
+  , mIsInIsolatedMozBrowserElement(false)
   , mAttached(false)
   , mByteReadCount(0)
   , mByteWriteCount(0)
@@ -458,7 +262,7 @@ nsUDPSocket::nsUDPSocket()
   {
     // This call can fail if we're offline, for example.
     nsCOMPtr<nsISocketTransportService> sts =
-        do_GetService(kSocketTransportServiceCID);
+        do_GetService(kSocketTransportServiceCID2);
   }
 
   mSts = gSocketTransportService;
@@ -467,13 +271,7 @@ nsUDPSocket::nsUDPSocket()
 
 nsUDPSocket::~nsUDPSocket()
 {
-  if (mFD) {
-    if (!nsUDPSocketCloseThread::Close(mFD)) {
-      PR_Close(mFD);
-    }
-    mFD = nullptr;
-  }
-
+  CloseSocket();
   MOZ_COUNT_DTOR(nsUDPSocket);
 }
 
@@ -528,6 +326,10 @@ nsUDPSocket::TryAttach()
   if (!gSocketTransportService)
     return NS_ERROR_FAILURE;
 
+  if (gIOService->IsNetTearingDown()) {
+    return NS_ERROR_FAILURE;
+  }
+
   //
   // find out if it is going to be ok to attach another socket to the STS.
   // if not then we have to wait for the STS to tell us that it is ok.
@@ -543,7 +345,7 @@ nsUDPSocket::TryAttach()
   if (!gSocketTransportService->CanAttachSocket())
   {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(this, &nsUDPSocket::OnMsgAttach);
+      NewRunnableMethod(this, &nsUDPSocket::OnMsgAttach);
 
     nsresult rv = gSocketTransportService->NotifyWhenCanAttachSocket(event);
     if (NS_FAILED(rv))
@@ -595,7 +397,6 @@ private:
 
 NS_IMPL_ISUPPORTS(UDPMessageProxy, nsIUDPMessage)
 
-/* readonly attribute nsINetAddr from; */
 NS_IMETHODIMP
 UDPMessageProxy::GetFromAddr(nsINetAddr * *aFromAddr)
 {
@@ -607,7 +408,6 @@ UDPMessageProxy::GetFromAddr(nsINetAddr * *aFromAddr)
   return NS_OK;
 }
 
-/* readonly attribute ACString data; */
 NS_IMETHODIMP
 UDPMessageProxy::GetData(nsACString & aData)
 {
@@ -615,14 +415,12 @@ UDPMessageProxy::GetData(nsACString & aData)
   return NS_OK;
 }
 
-/* [noscript, notxpcom, nostdcall] Uint8TArrayRef getDataAsTArray(); */
 FallibleTArray<uint8_t>&
 UDPMessageProxy::GetDataAsTArray()
 {
   return mData;
 }
 
-/* readonly attribute jsval rawData; */
 NS_IMETHODIMP
 UDPMessageProxy::GetRawData(JSContext* cx,
                             JS::MutableHandleValue aRawData)
@@ -630,7 +428,6 @@ UDPMessageProxy::GetRawData(JSContext* cx,
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-/* readonly attribute nsIOutputStream outputStream; */
 NS_IMETHODIMP
 UDPMessageProxy::GetOutputStream(nsIOutputStream * *aOutputStream)
 {
@@ -661,9 +458,9 @@ nsUDPSocket::OnSocketReady(PRFileDesc *fd, int16_t outFlags)
 
   PRNetAddr prClientAddr;
   uint32_t count;
-  // Bug 1165423 - using 8k here because the packet could be larger
-  // than the MTU with fragmentation
-  char buff[8 * 1024];
+  // Bug 1252755 - use 9216 bytes to allign with nICEr and transportlayer to
+  // support the maximum size of jumbo frames
+  char buff[9216];
   count = PR_RecvFrom(mFD, buff, sizeof(buff), 0, &prClientAddr, PR_INTERVAL_NO_WAIT);
 
   if (count < 1) {
@@ -693,7 +490,7 @@ nsUDPSocket::OnSocketReady(PRFileDesc *fd, int16_t outFlags)
     return;
   }
 
-  nsRefPtr<nsUDPOutputStream> os = new nsUDPOutputStream(this, mFD, prClientAddr);
+  RefPtr<nsUDPOutputStream> os = new nsUDPOutputStream(this, mFD, prClientAddr);
   rv = NS_AsyncCopy(pipeIn, os, mSts,
                     NS_ASYNCCOPY_VIA_READSEGMENTS, UDP_PACKET_CHUNK_SIZE);
 
@@ -717,25 +514,22 @@ nsUDPSocket::OnSocketDetached(PRFileDesc *fd)
   if (mFD)
   {
     NS_ASSERTION(mFD == fd, "wrong file descriptor");
-    if (!nsUDPSocketCloseThread::Close(mFD)) {
-      PR_Close(mFD);
-    }
-    mFD = nullptr;
+    CloseSocket();
   }
   SaveNetworkStats(true);
 
   if (mListener)
   {
     // need to atomically clear mListener.  see our Close() method.
-    nsCOMPtr<nsIUDPSocketListener> listener;
+    RefPtr<nsIUDPSocketListener> listener = nullptr;
     {
       MutexAutoLock lock(mLock);
-      mListener.swap(listener);
+      listener = mListener.forget();
     }
 
     if (listener) {
       listener->OnStopListening(this, mCondition);
-      NS_ProxyRelease(mListenerTarget, listener);
+      NS_ProxyRelease(mListenerTarget, listener.forget());
     }
   }
 }
@@ -784,6 +578,10 @@ nsUDPSocket::InitWithAddress(const NetAddr *aAddr, nsIPrincipal *aPrincipal,
 {
   NS_ENSURE_TRUE(mFD == nullptr, NS_ERROR_ALREADY_INITIALIZED);
 
+  if (gIOService->IsNetTearingDown()) {
+    return NS_ERROR_FAILURE;
+  }
+
   bool addressReuse = (aOptionalArgc == 1) ? aAddressReuse : true;
 
   //
@@ -803,7 +601,7 @@ nsUDPSocket::InitWithAddress(const NetAddr *aAddr, nsIPrincipal *aPrincipal,
       return rv;
     }
 
-    rv = aPrincipal->GetIsInBrowserElement(&mIsInBrowserElement);
+    rv = aPrincipal->GetIsInIsolatedMozBrowserElement(&mIsInIsolatedMozBrowserElement);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -811,10 +609,10 @@ nsUDPSocket::InitWithAddress(const NetAddr *aAddr, nsIPrincipal *aPrincipal,
 
 #ifdef MOZ_WIDGET_GONK
   if (mAppId != NECKO_UNKNOWN_APP_ID) {
-    nsCOMPtr<nsINetworkInterface> activeNetwork;
-    GetActiveNetworkInterface(activeNetwork);
-    mActiveNetwork =
-      new nsMainThreadPtrHolder<nsINetworkInterface>(activeNetwork);
+    nsCOMPtr<nsINetworkInfo> activeNetworkInfo;
+    GetActiveNetworkInfo(activeNetworkInfo);
+    mActiveNetworkInfo =
+      new nsMainThreadPtrHolder<nsINetworkInfo>(activeNetworkInfo);
   }
 #endif
 
@@ -871,6 +669,41 @@ fail:
 }
 
 NS_IMETHODIMP
+nsUDPSocket::Connect(const NetAddr *aAddr)
+{
+  UDPSOCKET_LOG(("nsUDPSocket::Connect [this=%p]\n", this));
+
+  NS_ENSURE_ARG(aAddr);
+
+  bool onSTSThread = false;
+  mSts->IsOnCurrentThread(&onSTSThread);
+  NS_ASSERTION(onSTSThread, "NOT ON STS THREAD");
+  if (!onSTSThread) {
+    return NS_ERROR_FAILURE;
+  }
+
+  PRNetAddr prAddr;
+  NetAddrToPRNetAddr(aAddr, &prAddr);
+
+  if (PR_Connect(mFD, &prAddr, PR_INTERVAL_NO_WAIT) != PR_SUCCESS) {
+    NS_WARNING("Cannot PR_Connect");
+    return NS_ERROR_FAILURE;
+  }
+
+  // get the resulting socket address, which may have been updated.
+  PRNetAddr addr;
+  if (PR_GetSockName(mFD, &addr) != PR_SUCCESS)
+  {
+    NS_WARNING("cannot get socket name");
+    return NS_ERROR_FAILURE;
+  }
+
+  PRNetAddrToNetAddr(&addr, &mAddr);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsUDPSocket::Close()
 {
   {
@@ -879,13 +712,10 @@ nsUDPSocket::Close()
     // has been set.  otherwise, we should just close the socket here...
     if (!mListener)
     {
-      if (mFD)
-      {
-        // Here we want to go directly with closing the socket since some tests
-        // expects this happen synchronously.
-        PR_Close(mFD);
-        mFD = nullptr;
-      }
+      // Here we want to go directly with closing the socket since some tests
+      // expects this happen synchronously.
+      CloseSocket();
+
       SaveNetworkStats(true);
       return NS_OK;
     }
@@ -918,7 +748,7 @@ void
 nsUDPSocket::SaveNetworkStats(bool aEnforce)
 {
 #ifdef MOZ_WIDGET_GONK
-  if (!mActiveNetwork || mAppId == NECKO_UNKNOWN_APP_ID) {
+  if (!mActiveNetworkInfo || mAppId == NECKO_UNKNOWN_APP_ID) {
     return;
   }
 
@@ -930,8 +760,8 @@ nsUDPSocket::SaveNetworkStats(bool aEnforce)
   if (aEnforce || total > NETWORK_STATS_THRESHOLD) {
     // Create the event to save the network statistics.
     // the event is then dispathed to the main thread.
-    nsRefPtr<nsRunnable> event =
-      new SaveNetworkStatsEvent(mAppId, mIsInBrowserElement, mActiveNetwork,
+    RefPtr<Runnable> event =
+      new SaveNetworkStatsEvent(mAppId, mIsInIsolatedMozBrowserElement, mActiveNetworkInfo,
                                 mByteReadCount, mByteWriteCount, false);
     NS_DispatchToMainThread(event);
 
@@ -940,6 +770,55 @@ nsUDPSocket::SaveNetworkStats(bool aEnforce)
     mByteWriteCount = 0;
   }
 #endif
+}
+
+void
+nsUDPSocket::CloseSocket()
+{
+  if (mFD) {
+    if (gIOService->IsNetTearingDown() &&
+        ((PR_IntervalNow() - gIOService->NetTearingDownStarted()) >
+         gSocketTransportService->MaxTimeForPrClosePref())) {
+      // If shutdown last to long, let the socket leak and do not close it.
+      UDPSOCKET_LOG(("Intentional leak"));
+    } else {
+
+      PRIntervalTime closeStarted = 0;
+      if (gSocketTransportService->IsTelemetryEnabledAndNotSleepPhase()) {
+        closeStarted = PR_IntervalNow();
+      }
+
+      PR_Close(mFD);
+
+      if (gSocketTransportService->IsTelemetryEnabledAndNotSleepPhase()) {
+        PRIntervalTime now = PR_IntervalNow();
+        if (gIOService->IsNetTearingDown()) {
+          Telemetry::Accumulate(Telemetry::PRCLOSE_UDP_BLOCKING_TIME_SHUTDOWN,
+                                PR_IntervalToMilliseconds(now - closeStarted));
+
+        } else if (PR_IntervalToSeconds(now - gIOService->LastConnectivityChange())
+                   < 60) {
+          Telemetry::Accumulate(Telemetry::PRCLOSE_UDP_BLOCKING_TIME_CONNECTIVITY_CHANGE,
+                                PR_IntervalToMilliseconds(now - closeStarted));
+
+        } else if (PR_IntervalToSeconds(now - gIOService->LastNetworkLinkChange())
+                   < 60) {
+          Telemetry::Accumulate(Telemetry::PRCLOSE_UDP_BLOCKING_TIME_LINK_CHANGE,
+                                PR_IntervalToMilliseconds(now - closeStarted));
+
+        } else if (PR_IntervalToSeconds(now - gIOService->LastOfflineStateChange())
+                   < 60) {
+          Telemetry::Accumulate(Telemetry::PRCLOSE_UDP_BLOCKING_TIME_OFFLINE,
+                                PR_IntervalToMilliseconds(now - closeStarted));
+
+        } else {
+          Telemetry::Accumulate(Telemetry::PRCLOSE_UDP_BLOCKING_TIME_NORMAL,
+                                PR_IntervalToMilliseconds(now - closeStarted));
+        }
+      }
+    }
+    mFD = nullptr;
+  }
 }
 
 NS_IMETHODIMP
@@ -967,7 +846,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIUDPSOCKETLISTENER
 
-  class OnPacketReceivedRunnable : public nsRunnable
+  class OnPacketReceivedRunnable : public Runnable
   {
   public:
     OnPacketReceivedRunnable(const nsMainThreadPtrHandle<nsIUDPSocketListener>& aListener,
@@ -986,7 +865,7 @@ public:
     nsCOMPtr<nsIUDPMessage> mMessage;
   };
 
-  class OnStopListeningRunnable : public nsRunnable
+  class OnStopListeningRunnable : public Runnable
   {
   public:
     OnStopListeningRunnable(const nsMainThreadPtrHandle<nsIUDPSocketListener>& aListener,
@@ -1017,7 +896,7 @@ NS_IMETHODIMP
 SocketListenerProxy::OnPacketReceived(nsIUDPSocket* aSocket,
                                       nsIUDPMessage* aMessage)
 {
-  nsRefPtr<OnPacketReceivedRunnable> r =
+  RefPtr<OnPacketReceivedRunnable> r =
     new OnPacketReceivedRunnable(mListener, aSocket, aMessage);
   return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
 }
@@ -1026,7 +905,7 @@ NS_IMETHODIMP
 SocketListenerProxy::OnStopListening(nsIUDPSocket* aSocket,
                                      nsresult aStatus)
 {
-  nsRefPtr<OnStopListeningRunnable> r =
+  RefPtr<OnStopListeningRunnable> r =
     new OnStopListeningRunnable(mListener, aSocket, aStatus);
   return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
 }
@@ -1072,7 +951,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIUDPSOCKETLISTENER
 
-  class OnPacketReceivedRunnable : public nsRunnable
+  class OnPacketReceivedRunnable : public Runnable
   {
   public:
     OnPacketReceivedRunnable(const nsCOMPtr<nsIUDPSocketListener>& aListener,
@@ -1091,7 +970,7 @@ public:
     nsCOMPtr<nsIUDPMessage> mMessage;
   };
 
-  class OnStopListeningRunnable : public nsRunnable
+  class OnStopListeningRunnable : public Runnable
   {
   public:
     OnStopListeningRunnable(const nsCOMPtr<nsIUDPSocketListener>& aListener,
@@ -1122,7 +1001,7 @@ NS_IMETHODIMP
 SocketListenerProxyBackground::OnPacketReceived(nsIUDPSocket* aSocket,
                                                 nsIUDPMessage* aMessage)
 {
-  nsRefPtr<OnPacketReceivedRunnable> r =
+  RefPtr<OnPacketReceivedRunnable> r =
     new OnPacketReceivedRunnable(mListener, aSocket, aMessage);
   return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
 }
@@ -1131,7 +1010,7 @@ NS_IMETHODIMP
 SocketListenerProxyBackground::OnStopListening(nsIUDPSocket* aSocket,
                                                nsresult aStatus)
 {
-  nsRefPtr<OnStopListeningRunnable> r =
+  RefPtr<OnStopListeningRunnable> r =
     new OnStopListeningRunnable(mListener, aSocket, aStatus);
   return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
 }
@@ -1182,7 +1061,7 @@ public:
 private:
   virtual ~PendingSend() {}
 
-  nsRefPtr<nsUDPSocket> mSocket;
+  RefPtr<nsUDPSocket> mSocket;
   uint16_t mPort;
   FallibleTArray<uint8_t> mData;
 };
@@ -1225,7 +1104,7 @@ public:
 private:
   virtual ~PendingSendStream() {}
 
-  nsRefPtr<nsUDPSocket> mSocket;
+  RefPtr<nsUDPSocket> mSocket;
   uint16_t mPort;
   nsCOMPtr<nsIInputStream> mStream;
 };
@@ -1251,7 +1130,7 @@ PendingSendStream::OnLookupComplete(nsICancelable *request,
   return NS_OK;
 }
 
-class SendRequestRunnable: public nsRunnable {
+class SendRequestRunnable: public Runnable {
 public:
   SendRequestRunnable(nsUDPSocket *aSocket,
                       const NetAddr &aAddr,
@@ -1264,7 +1143,7 @@ public:
   NS_DECL_NSIRUNNABLE
 
 private:
-  nsRefPtr<nsUDPSocket> mSocket;
+  RefPtr<nsUDPSocket> mSocket;
   const NetAddr mAddr;
   FallibleTArray<uint8_t> mData;
 };
@@ -1403,7 +1282,7 @@ nsUDPSocket::SendBinaryStreamWithAddress(const NetAddr *aAddr, nsIInputStream *a
   PR_InitializeNetAddr(PR_IpAddrAny, 0, &prAddr);
   NetAddrToPRNetAddr(aAddr, &prAddr);
 
-  nsRefPtr<nsUDPOutputStream> os = new nsUDPOutputStream(this, mFD, prAddr);
+  RefPtr<nsUDPOutputStream> os = new nsUDPOutputStream(this, mFD, prAddr);
   return NS_AsyncCopy(aStream, os, mSts, NS_ASYNCCOPY_VIA_READSEGMENTS,
                       UDP_PACKET_CHUNK_SIZE);
 }
@@ -1594,6 +1473,60 @@ nsUDPSocket::SetMulticastLoopback(bool aLoopback)
 }
 
 NS_IMETHODIMP
+nsUDPSocket::GetRecvBufferSize(int* size)
+{
+  // Bug 1252759 - missing support for GetSocketOption
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsUDPSocket::SetRecvBufferSize(int size)
+{
+  if (NS_WARN_IF(!mFD)) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  PRSocketOptionData opt;
+
+  opt.option = PR_SockOpt_RecvBufferSize;
+  opt.value.recv_buffer_size = size;
+
+  nsresult rv = SetSocketOption(opt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsUDPSocket::GetSendBufferSize(int* size)
+{
+  // Bug 1252759 - missing support for GetSocketOption
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsUDPSocket::SetSendBufferSize(int size)
+{
+  if (NS_WARN_IF(!mFD)) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  PRSocketOptionData opt;
+
+  opt.option = PR_SockOpt_SendBufferSize;
+  opt.value.send_buffer_size = size;
+
+  nsresult rv = SetSocketOption(opt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsUDPSocket::GetMulticastInterface(nsACString& aIface)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -1652,3 +1585,6 @@ nsUDPSocket::SetMulticastInterfaceInternal(const PRNetAddr& aIface)
 
   return NS_OK;
 }
+
+} // namespace net
+} // namespace mozilla

@@ -7,6 +7,9 @@
 #ifndef mozilla_dom_FileList_h
 #define mozilla_dom_FileList_h
 
+#include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/UnionTypes.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsIDOMFileList.h"
 #include "nsWrapperCache.h"
 
@@ -15,27 +18,6 @@ namespace dom {
 
 class BlobImpls;
 class File;
-
-class FileListClonedData final : public nsISupports
-{
-public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-
-  explicit FileListClonedData(const nsTArray<nsRefPtr<BlobImpl>>& aBlobImpls)
-    : mBlobImpls(aBlobImpls)
-  {}
-
-  const nsTArray<nsRefPtr<BlobImpl>>& BlobImpls() const
-  {
-    return mBlobImpls;
-  }
-
-private:
-  ~FileListClonedData()
-  {}
-
-  const nsTArray<nsRefPtr<BlobImpl>> mBlobImpls;
-};
 
 class FileList final : public nsIDOMFileList,
                        public nsWrapperCache
@@ -50,9 +32,6 @@ public:
     : mParent(aParent)
   {}
 
-  static already_AddRefed<FileList>
-  Create(nsISupports* aParent, FileListClonedData* aData);
-
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
@@ -63,7 +42,8 @@ public:
 
   bool Append(File* aFile)
   {
-    return mFiles.AppendElement(aFile);
+    MOZ_ASSERT(aFile);
+    return mFiles.AppendElement(aFile, fallible);
   }
 
   bool Remove(uint32_t aIndex)
@@ -98,29 +78,22 @@ public:
     return static_cast<FileList*>(aSupports);
   }
 
-  File* Item(uint32_t aIndex)
-  {
-    return mFiles.SafeElementAt(aIndex);
-  }
+  File* Item(uint32_t aIndex) const;
 
-  File* IndexedGetter(uint32_t aIndex, bool& aFound)
-  {
-    aFound = aIndex < mFiles.Length();
-    return aFound ? mFiles.ElementAt(aIndex) : nullptr;
-  }
+  File* IndexedGetter(uint32_t aIndex, bool& aFound) const;
 
-  uint32_t Length()
+  uint32_t Length() const
   {
     return mFiles.Length();
   }
 
-  // Useful for cloning
-  already_AddRefed<FileListClonedData> CreateClonedData() const;
+  void ToSequence(Sequence<RefPtr<File>>& aSequence,
+                  ErrorResult& aRv) const;
 
 private:
   ~FileList() {}
 
-  nsTArray<nsRefPtr<File>> mFiles;
+  FallibleTArray<RefPtr<File>> mFiles;
   nsCOMPtr<nsISupports> mParent;
 };
 

@@ -11,16 +11,9 @@
 #include "ScopedNSSTypes.h"
 #include "mozilla/ArrayUtils.h"
 
-// Note: New CAs will show up as UNKNOWN_ROOT until
-// RootHashes.inc is updated to include them. 0 is reserved by
-// genRootCAHashes.js for the unknowns.
-#define UNKNOWN_ROOT  0
-#define HASH_FAILURE -1
+namespace mozilla { namespace psm {
 
-namespace mozilla { namespace psm { 
-
-PRLogModuleInfo* gPublicKeyPinningTelemetryLog =
-  PR_NewLogModule("PublicKeyPinningTelemetryService");
+mozilla::LazyLogModule gPublicKeyPinningTelemetryLog("PublicKeyPinningTelemetryService");
 
 // Used in the BinarySearch method, this does a memcmp between the pointer
 // provided to its construtor and whatever the binary search is looking for.
@@ -54,7 +47,7 @@ RootCABinNumber(const SECItem* cert)
   // Compute SHA256 hash of the certificate
   nsresult rv = digest.DigestBuf(SEC_OID_SHA256, cert->data, cert->len);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return HASH_FAILURE;
+    return ROOT_CERTIFICATE_HASH_FAILURE;
   }
 
   // Compare against list of stored hashes
@@ -65,9 +58,9 @@ RootCABinNumber(const SECItem* cert)
             digest.get().data[0], digest.get().data[1], digest.get().data[2], digest.get().data[3]));
 
   if (mozilla::BinarySearchIf(ROOT_TABLE, 0, ArrayLength(ROOT_TABLE),
-          BinaryHashSearchArrayComparator(
-            reinterpret_cast<const uint8_t*>(digest.get().data), digest.get().len),
-         &idx)) {
+        BinaryHashSearchArrayComparator(static_cast<uint8_t*>(digest.get().data),
+                                        digest.get().len),
+        &idx)) {
 
     MOZ_LOG(gPublicKeyPinningTelemetryLog, LogLevel::Debug,
           ("pkpinTelem: Telemetry index was %lu, bin is %d\n",
@@ -76,7 +69,7 @@ RootCABinNumber(const SECItem* cert)
   }
 
   // Didn't match.
-  return UNKNOWN_ROOT;
+  return ROOT_CERTIFICATE_UNKNOWN;
 }
 
 
@@ -88,7 +81,7 @@ AccumulateTelemetryForRootCA(mozilla::Telemetry::ID probe,
 {
   int32_t binId = RootCABinNumber(&cert->derCert);
 
-  if (binId != HASH_FAILURE) {
+  if (binId != ROOT_CERTIFICATE_HASH_FAILURE) {
     Accumulate(probe, binId);
   }
 }

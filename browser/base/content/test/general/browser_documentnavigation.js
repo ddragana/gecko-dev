@@ -4,11 +4,11 @@
  * non-browser cases.
  */
 
-let testPage1 = "data:text/html,<html id='html1'><body id='body1'><button id='button1'>Tab 1</button></body></html>";
-let testPage2 = "data:text/html,<html id='html2'><body id='body2'><button id='button2'>Tab 2</button></body></html>";
-let testPage3 = "data:text/html,<html id='html3'><body id='body3' contenteditable='true'><button id='button3'>Tab 3</button></body></html>";
+var testPage1 = "data:text/html,<html id='html1'><body id='body1'><button id='button1'>Tab 1</button></body></html>";
+var testPage2 = "data:text/html,<html id='html2'><body id='body2'><button id='button2'>Tab 2</button></body></html>";
+var testPage3 = "data:text/html,<html id='html3'><body id='body3' contenteditable='true'><button id='button3'>Tab 3</button></body></html>";
 
-let fm = Services.focus;
+var fm = Services.focus;
 
 function* expectFocusOnF6(backward, expectedDocument, expectedElement, onContent, desc)
 {
@@ -105,7 +105,7 @@ add_task(function* ()
   yield* expectFocusOnF6(false, "html1", "html1",
                                 true, "basic focus content page with button focused");
 
-  return ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
+  yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
     return content.document.getElementById("button1").focus();
   });
 
@@ -117,10 +117,10 @@ add_task(function* ()
                                 true, "basic focus again content page with button focused");
 
   // Check to ensure that the root element is focused
-  let match = yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
-    return content.document.activeElement == content.document.documentElement;
+  yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* () {
+    Assert.ok(content.document.activeElement == content.document.documentElement,
+      "basic focus again content page with button focused child root is focused");
   });
-  ok(match, "basic focus again content page with button focused child root is focused");
 });
 
 // Open a second tab. Document focus should skip the background tab.

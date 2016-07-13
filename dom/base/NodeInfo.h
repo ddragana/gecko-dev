@@ -21,7 +21,6 @@
 #ifndef mozilla_dom_NodeInfo_h___
 #define mozilla_dom_NodeInfo_h___
 
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/dom/NameSpaceConstants.h"
 #include "nsStringGlue.h"
@@ -280,7 +279,7 @@ protected:
 
   NodeInfoInner mInner;
 
-  nsRefPtr<nsNodeInfoManager> mOwnerManager;
+  RefPtr<nsNodeInfoManager> mOwnerManager;
 
   /*
    * Members for various functions of mName+mPrefix that we can be

@@ -64,12 +64,12 @@ main(int argc, char **argv)
     rv = NS_NewChannel(getter_AddRefs(channel),
                        uri,
                        systemPrincipal,
-                       nsILoadInfo::SEC_NORMAL,
+                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                        nsIContentPolicy::TYPE_OTHER);
     RETURN_IF_FAILED(rv, "NS_NewChannel");
 
-    rv = channel->Open(getter_AddRefs(stream));
-    RETURN_IF_FAILED(rv, "channel->Open()");
+    rv = channel->Open2(getter_AddRefs(stream));
+    RETURN_IF_FAILED(rv, "channel->Open2()");
 
     FILE* outfile = fopen(argv[2], "wb");
     if (!outfile) {
@@ -79,7 +79,7 @@ main(int argc, char **argv)
 
     uint32_t read;
     while (NS_SUCCEEDED(stream->Read(buf, sizeof(buf), &read)) && read) {
-      unused << fwrite(buf, 1, read, outfile);
+      Unused << fwrite(buf, 1, read, outfile);
     }
     printf("Done\n");
 

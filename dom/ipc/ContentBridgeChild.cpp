@@ -7,12 +7,11 @@
 #include "mozilla/dom/ContentBridgeChild.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/StructuredCloneUtils.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/ipc/InputStreamUtils.h"
-#include "nsIObserverService.h"
+#include "base/task.h"
 
 using namespace mozilla::ipc;
 using namespace mozilla::jsipc;
@@ -21,8 +20,7 @@ namespace mozilla {
 namespace dom {
 
 NS_IMPL_ISUPPORTS(ContentBridgeChild,
-                  nsIContentChild,
-                  nsIObserver)
+                  nsIContentChild)
 
 ContentBridgeChild::ContentBridgeChild(Transport* aTransport)
   : mTransport(aTransport)
@@ -30,35 +28,23 @@ ContentBridgeChild::ContentBridgeChild(Transport* aTransport)
 
 ContentBridgeChild::~ContentBridgeChild()
 {
-  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, new DeleteTask<Transport>(mTransport));
 }
 
 void
 ContentBridgeChild::ActorDestroy(ActorDestroyReason aWhy)
 {
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (os) {
-    os->RemoveObserver(this, "content-child-shutdown");
-  }
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &ContentBridgeChild::DeferredDestroy));
+  MessageLoop::current()->PostTask(NewRunnableMethod(this, &ContentBridgeChild::DeferredDestroy));
 }
 
 /*static*/ ContentBridgeChild*
 ContentBridgeChild::Create(Transport* aTransport, ProcessId aOtherPid)
 {
-  nsRefPtr<ContentBridgeChild> bridge =
+  RefPtr<ContentBridgeChild> bridge =
     new ContentBridgeChild(aTransport);
   bridge->mSelfRef = bridge;
 
   DebugOnly<bool> ok = bridge->Open(aTransport, aOtherPid, XRE_GetIOMessageLoop());
   MOZ_ASSERT(ok);
-
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (os) {
-    os->AddObserver(bridge, "content-child-shutdown", false);
-  }
 
   return bridge;
 }
@@ -72,11 +58,11 @@ ContentBridgeChild::DeferredDestroy()
 
 bool
 ContentBridgeChild::RecvAsyncMessage(const nsString& aMsg,
-                                     const ClonedMessageData& aData,
                                      InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                     const IPC::Principal& aPrincipal)
+                                     const IPC::Principal& aPrincipal,
+                                     const ClonedMessageData& aData)
 {
-  return nsIContentChild::RecvAsyncMessage(aMsg, aData, Move(aCpows), aPrincipal);
+  return nsIContentChild::RecvAsyncMessage(aMsg, Move(aCpows), aPrincipal, aData);
 }
 
 PBlobChild*
@@ -110,8 +96,8 @@ ContentBridgeChild::SendPBrowserConstructor(PBrowserChild* aActor,
 jsipc::CPOWManager*
 ContentBridgeChild::GetCPOWManager()
 {
-  if (ManagedPJavaScriptChild().Length()) {
-    return CPOWManagerFor(ManagedPJavaScriptChild()[0]);
+  if (PJavaScriptChild* c = LoneManagedOrNullAsserts(ManagedPJavaScriptChild())) {
+    return CPOWManagerFor(c);
   }
   return CPOWManagerFor(SendPJavaScriptConstructor());
 }
@@ -178,17 +164,6 @@ bool
 ContentBridgeChild::DeallocPBlobChild(PBlobChild* aActor)
 {
   return nsIContentChild::DeallocPBlobChild(aActor);
-}
-
-NS_IMETHODIMP
-ContentBridgeChild::Observe(nsISupports* aSubject,
-                             const char* aTopic,
-                             const char16_t* aData)
-{
-  if (!strcmp(aTopic, "content-child-shutdown")) {
-    Close();
-  }
-  return NS_OK;
 }
 
 } // namespace dom

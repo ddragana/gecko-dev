@@ -6,9 +6,7 @@
 
 toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
-if toolkit == 'qt':
-    DIRS += ['qt']
-elif toolkit == 'windows':
+if toolkit == 'windows':
     DIRS += ['windows']
 elif toolkit == 'cocoa':
     DIRS += ['mac']
@@ -47,8 +45,6 @@ EXTRA_COMPONENTS += [
 EXTRA_JS_MODULES += [
     'SystemUpdateService.jsm',
 ]
-
-FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

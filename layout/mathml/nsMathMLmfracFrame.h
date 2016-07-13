@@ -58,17 +58,22 @@ public:
   virtual eMathMLFrameType GetMathMLFrameType() override;
 
   virtual nsresult
-  MeasureForWidth(nsRenderingContext& aRenderingContext,
+  MeasureForWidth(DrawTarget* aDrawTarget,
                   nsHTMLReflowMetrics& aDesiredSize) override;
 
   virtual nsresult
-  Place(nsRenderingContext& aRenderingContext,
+  Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
         nsHTMLReflowMetrics& aDesiredSize) override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
+
+  virtual nsresult
+  AttributeChanged(int32_t  aNameSpaceID,
+                   nsIAtom* aAttribute,
+                   int32_t  aModType) override;
 
   NS_IMETHOD
   TransmitAutomaticData() override;
@@ -92,8 +97,8 @@ public:
 protected:
   explicit nsMathMLmfracFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}
   virtual ~nsMathMLmfracFrame();
-  
-  nsresult PlaceInternal(nsRenderingContext& aRenderingContext,
+
+  nsresult PlaceInternal(DrawTarget*          aDrawTarget,
                          bool                 aPlaceOrigin,
                          nsHTMLReflowMetrics& aDesiredSize,
                          bool                 aWidthOnly);

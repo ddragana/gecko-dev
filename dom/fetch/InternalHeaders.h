@@ -21,6 +21,7 @@ class ErrorResult;
 namespace dom {
 
 template<typename T> class MozMap;
+class HeadersEntry;
 
 class InternalHeaders final
 {
@@ -51,15 +52,24 @@ public:
   }
 
   explicit InternalHeaders(const InternalHeaders& aOther)
-    : mGuard(aOther.mGuard)
+    : mGuard(HeadersGuardEnum::None)
   {
     ErrorResult result;
     Fill(aOther, result);
     MOZ_ASSERT(!result.Failed());
+    // Note that it's important to set the guard after Fill(), to make sure
+    // that Fill() doesn't fail if aOther is immutable.
+    mGuard = aOther.mGuard;
   }
 
   explicit InternalHeaders(const nsTArray<Entry>&& aHeaders,
                            HeadersGuardEnum aGuard = HeadersGuardEnum::None);
+
+  InternalHeaders(const nsTArray<HeadersEntry>& aHeadersEntryList,
+                  HeadersGuardEnum aGuard);
+
+  void ToIPC(nsTArray<HeadersEntry>& aIPCHeaders,
+             HeadersGuardEnum& aGuard);
 
   void Append(const nsACString& aName, const nsACString& aValue,
               ErrorResult& aRv);
@@ -69,6 +79,21 @@ public:
               ErrorResult& aRv) const;
   bool Has(const nsACString& aName, ErrorResult& aRv) const;
   void Set(const nsACString& aName, const nsACString& aValue, ErrorResult& aRv);
+
+  uint32_t GetIterableLength() const
+  {
+    return mList.Length();
+  }
+  const NS_ConvertASCIItoUTF16 GetKeyAtIndex(unsigned aIndex) const
+  {
+    MOZ_ASSERT(aIndex < mList.Length());
+    return NS_ConvertASCIItoUTF16(mList[aIndex].mName);
+  }
+  const NS_ConvertASCIItoUTF16 GetValueAtIndex(unsigned aIndex) const
+  {
+    MOZ_ASSERT(aIndex < mList.Length());
+    return NS_ConvertASCIItoUTF16(mList[aIndex].mValue);
+  }
 
   void Clear();
 
@@ -80,6 +105,8 @@ public:
   void Fill(const MozMap<nsCString>& aInit, ErrorResult& aRv);
 
   bool HasOnlySimpleHeaders() const;
+
+  bool HasRevalidationHeaders() const;
 
   static already_AddRefed<InternalHeaders>
   BasicHeaders(InternalHeaders* aHeaders);
@@ -124,6 +151,8 @@ private:
 
   static bool IsSimpleHeader(const nsACString& aName,
                              const nsACString& aValue);
+
+  static bool IsRevalidationHeader(const nsACString& aName);
 };
 
 } // namespace dom

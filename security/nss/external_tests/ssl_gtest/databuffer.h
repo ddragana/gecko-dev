@@ -12,6 +12,11 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#if defined(WIN32) || defined(WIN64)
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
 
 namespace nss_test {
 
@@ -22,13 +27,13 @@ class DataBuffer {
     Assign(data, len);
   }
   explicit DataBuffer(const DataBuffer& other) : data_(nullptr), len_(0) {
-    Assign(other.data(), other.len());
+    Assign(other);
   }
   ~DataBuffer() { delete[] data_; }
 
   DataBuffer& operator=(const DataBuffer& other) {
     if (&other != this) {
-      Assign(other.data(), other.len());
+      Assign(other);
     }
     return *this;
   }
@@ -43,13 +48,24 @@ class DataBuffer {
     len_ = std::min(len_, len);
   }
 
+  void Assign(const DataBuffer& other) {
+    Assign(other.data(), other.len());
+  }
+
   void Assign(const uint8_t* data, size_t len) {
-    Allocate(len);
-    memcpy(static_cast<void *>(data_), static_cast<const void *>(data), len);
+    if (data) {
+      Allocate(len);
+      memcpy(static_cast<void *>(data_), static_cast<const void *>(data), len);
+    } else {
+      assert(len == 0);
+      data_ = nullptr;
+      len_ = 0;
+    }
   }
 
   // Write will do a new allocation and expand the size of the buffer if needed.
-  void Write(size_t index, const uint8_t* val, size_t count) {
+  // Returns the offset of the end of the write.
+  size_t Write(size_t index, const uint8_t* val, size_t count) {
     if (index + count > len_) {
       size_t newlen = index + count;
       uint8_t* tmp = new uint8_t[newlen]; // Always > 0.
@@ -64,18 +80,35 @@ class DataBuffer {
     }
     memcpy(static_cast<void*>(data_ + index),
            static_cast<const void*>(val), count);
+    return index + count;
   }
 
-  void Write(size_t index, const DataBuffer& buf) {
-    Write(index, buf.data(), buf.len());
+  size_t Write(size_t index, const DataBuffer& buf) {
+    return Write(index, buf.data(), buf.len());
   }
 
   // Write an integer, also performing host-to-network order conversion.
-  void Write(size_t index, uint32_t val, size_t count) {
+  // Returns the offset of the end of the write.
+  size_t Write(size_t index, uint32_t val, size_t count) {
     assert(count <= sizeof(uint32_t));
     uint32_t nvalue = htonl(val);
     auto* addr = reinterpret_cast<const uint8_t*>(&nvalue);
-    Write(index, addr + sizeof(uint32_t) - count, count);
+    return Write(index, addr + sizeof(uint32_t) - count, count);
+  }
+
+  // This can't use the same trick as Write(), since we might be reading from a
+  // smaller data source.
+  bool Read(size_t index, size_t count, uint32_t* val) const {
+    assert(count < sizeof(uint32_t));
+    assert(val);
+    if ((index > len()) || (count > (len() - index))) {
+      return false;
+    }
+    *val = 0;
+    for (size_t i = 0; i < count; ++i) {
+      *val = (*val << 8) | data()[index + i];
+    }
+    return true;
   }
 
   // Starting at |index|, remove |remove| bytes and replace them with the
@@ -141,6 +174,15 @@ inline std::ostream& operator<<(std::ostream& stream, const DataBuffer& buf) {
   }
   stream << std::dec;
   return stream;
+}
+
+inline bool operator==(const DataBuffer& a, const DataBuffer& b) {
+  return (a.empty() && b.empty()) ||
+    (a.len() == b.len() && 0 == memcmp(a.data(), b.data(), a.len()));
+}
+
+inline bool operator!=(const DataBuffer& a, const DataBuffer& b) {
+  return !(a == b);
 }
 
 } // namespace nss_test

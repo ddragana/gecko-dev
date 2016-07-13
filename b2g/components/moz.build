@@ -7,7 +7,6 @@
 DIRS += ['test']
 
 EXTRA_COMPONENTS += [
-    'ActivitiesGlue.js',
     'AlertsService.js',
     'B2GAboutRedirector.js',
     'B2GAppMigrator.js',
@@ -17,20 +16,20 @@ EXTRA_COMPONENTS += [
     'FilePicker.js',
     'FxAccountsUIGlue.js',
     'HelperAppDialog.js',
-    'InterAppCommUIGlue.js',
     'MailtoProtocolHandler.js',
     'MobileIdentityUIGlue.js',
     'OMAContentHandler.js',
     'PaymentGlue.js',
     'PaymentProviderStrategy.js',
+    'PresentationRequestUIGlue.js',
     'ProcessGlobal.js',
     'SmsProtocolHandler.js',
-    'SystemMessageGlue.js',
+    'SystemMessageInternal.js',
     'TelProtocolHandler.js',
     'WebappsUpdateTimer.js',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
+if CONFIG['OS_TARGET'] != 'Android':
     EXTRA_COMPONENTS += [
       'CommandLine.js',
       'OopCommandLine.js',
@@ -39,17 +38,22 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
 
 EXTRA_PP_COMPONENTS += [
     'B2GComponents.manifest',
-    'DirectoryProvider.js',
-    'RecoveryService.js',
 ]
 
+if CONFIG['MOZ_B2G']:
+    EXTRA_COMPONENTS += [
+        'DirectoryProvider.js',
+        'RecoveryService.js',
+    ]
+
 if CONFIG['MOZ_UPDATER']:
-    EXTRA_PP_COMPONENTS += [
+    EXTRA_COMPONENTS += [
         'UpdatePrompt.js',
     ]
 
 EXTRA_JS_MODULES += [
     'AboutServiceWorkers.jsm',
+    'ActivityChannel.jsm',
     'AlertsHelper.jsm',
     'Bootstraper.jsm',
     'ContentRequestHelper.jsm',
@@ -61,6 +65,7 @@ EXTRA_JS_MODULES += [
     'LogParser.jsm',
     'LogShake.jsm',
     'OrientationChangeHandler.jsm',
+    'SafeMode.jsm',
     'Screenshot.jsm',
     'SignInToWebsite.jsm',
     'SystemAppProxy.jsm',
@@ -72,3 +77,9 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
     EXTRA_JS_MODULES += [
       'GlobalSimulatorScreen.jsm'
     ]
+
+XPIDL_SOURCES += [
+    'nsISystemMessagesInternal.idl'
+]
+
+XPIDL_MODULE = 'gaia_chrome'

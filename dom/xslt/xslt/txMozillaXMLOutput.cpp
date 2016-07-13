@@ -132,10 +132,10 @@ txMozillaXMLOutput::attribute(nsIAtom* aPrefix,
     if (mOpenedElementIsHTML && aNsID == kNameSpaceID_None) {
         nsAutoString lnameStr;
         nsContentUtils::ASCIIToLower(aLocalName, lnameStr);
-        lname = do_GetAtom(lnameStr);
+        lname = NS_Atomize(lnameStr);
     }
     else {
-        lname = do_GetAtom(aLocalName);
+        lname = NS_Atomize(aLocalName);
     }
 
     NS_ENSURE_TRUE(lname, NS_ERROR_OUT_OF_MEMORY);
@@ -195,7 +195,7 @@ txMozillaXMLOutput::comment(const nsString& aData)
 
     TX_ENSURE_CURRENTNODE;
 
-    nsRefPtr<Comment> comment = new Comment(mNodeInfoManager);
+    RefPtr<Comment> comment = new Comment(mNodeInfoManager);
 
     rv = comment->SetText(aData, false);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -237,7 +237,7 @@ txMozillaXMLOutput::endDocument(nsresult aResult)
     }
 
     if (!mRefreshString.IsEmpty()) {
-        nsPIDOMWindow *win = mDocument->GetWindow();
+        nsPIDOMWindowOuter* win = mDocument->GetWindow();
         if (win) {
             nsCOMPtr<nsIRefreshURI> refURI =
                 do_QueryInterface(win->GetDocShell());
@@ -462,10 +462,10 @@ txMozillaXMLOutput::startElement(nsIAtom* aPrefix,
 
         nsAutoString lnameStr;
         nsContentUtils::ASCIIToLower(aLocalName, lnameStr);
-        lname = do_GetAtom(lnameStr);
+        lname = NS_Atomize(lnameStr);
     }
     else {
-        lname = do_GetAtom(aLocalName);
+        lname = NS_Atomize(aLocalName);
     }
 
     // No biggie if we lose the prefix due to OOM
@@ -523,7 +523,7 @@ txMozillaXMLOutput::startElementInternal(nsIAtom* aPrefix,
     mOpenedElementIsHTML = false;
 
     // Create the element
-    nsRefPtr<NodeInfo> ni =
+    RefPtr<NodeInfo> ni =
         mNodeInfoManager->GetNodeInfo(aLocalName, aPrefix, aNsID,
                                       nsIDOMNode::ELEMENT_NODE);
 
@@ -594,7 +594,7 @@ txMozillaXMLOutput::closePrevious(bool aFlushText)
             rv = createTxWrapper();
             NS_ENSURE_SUCCESS(rv, rv);
         }
-        nsRefPtr<nsTextNode> text = new nsTextNode(mNodeInfoManager);
+        RefPtr<nsTextNode> text = new nsTextNode(mNodeInfoManager);
 
         rv = text->SetText(mText, false);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -619,11 +619,9 @@ txMozillaXMLOutput::createTxWrapper()
         RegisterNameSpace(NS_LITERAL_STRING(kTXNameSpaceURI), namespaceID);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsIContent> wrapper;
-    rv = mDocument->CreateElem(nsDependentAtomString(nsGkAtoms::result),
-                               nsGkAtoms::transformiix, namespaceID,
-                               getter_AddRefs(wrapper));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<Element> wrapper =
+      mDocument->CreateElem(nsDependentAtomString(nsGkAtoms::result),
+                            nsGkAtoms::transformiix, namespaceID);
 
     uint32_t i, j, childCount = mDocument->GetChildCount();
 #ifdef DEBUG
@@ -725,7 +723,7 @@ txMozillaXMLOutput::startHTMLElement(nsIContent* aElement, bool aIsHTML)
         NS_ENSURE_SUCCESS(rv, rv);
 
         // No need to notify since aElement hasn't been inserted yet
-        NS_ASSERTION(!aElement->IsInDoc(), "should not be in doc");
+        NS_ASSERTION(!aElement->IsInUncomposedDoc(), "should not be in doc");
         rv = aElement->AppendChildTo(meta, false);
         NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -758,7 +756,7 @@ txMozillaXMLOutput::endHTMLElement(nsIContent* aElement)
             aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::content, value);
             if (!value.IsEmpty()) {
                 nsContentUtils::ASCIIToLower(httpEquiv);
-                nsCOMPtr<nsIAtom> header = do_GetAtom(httpEquiv);
+                nsCOMPtr<nsIAtom> header = NS_Atomize(httpEquiv);
                 processHTTPEquiv(header, value);
             }
         }
@@ -890,7 +888,7 @@ txMozillaXMLOutput::createResultDocument(const nsSubstring& aName, int32_t aNsID
 
         nsresult rv = nsContentUtils::CheckQName(qName);
         if (NS_SUCCEEDED(rv)) {
-            nsCOMPtr<nsIAtom> doctypeName = do_GetAtom(qName);
+            nsCOMPtr<nsIAtom> doctypeName = NS_Atomize(qName);
             if (!doctypeName) {
                 return NS_ERROR_OUT_OF_MEMORY;
             }
@@ -922,7 +920,7 @@ txMozillaXMLOutput::createHTMLElement(nsIAtom* aName,
 
     *aResult = nullptr;
 
-    nsRefPtr<NodeInfo> ni;
+    RefPtr<NodeInfo> ni;
     ni = mNodeInfoManager->GetNodeInfo(aName, nullptr,
                                        kNameSpaceID_XHTML,
                                        nsIDOMNode::ELEMENT_NODE);
@@ -978,7 +976,7 @@ txTransformNotifier::ScriptEvaluated(nsresult aResult,
 }
 
 NS_IMETHODIMP 
-txTransformNotifier::StyleSheetLoaded(CSSStyleSheet* aSheet,
+txTransformNotifier::StyleSheetLoaded(StyleSheetHandle aSheet,
                                       bool aWasAlternate,
                                       nsresult aStatus)
 {

@@ -139,13 +139,6 @@ int ViECaptureImpl::ConnectCaptureDevice(const int capture_id,
   LOG(LS_INFO) << "Connect capture id " << capture_id
                << " to channel " << video_channel;
 
-  ViEInputManagerScoped is(*(shared_data_->input_manager()));
-  ViECapturer* vie_capture = is.Capture(capture_id);
-  if (!vie_capture) {
-    shared_data_->SetLastError(kViECaptureDeviceDoesNotExist);
-    return -1;
-  }
-
   ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
   ViEEncoder* vie_encoder = cs.Encoder(video_channel);
   if (!vie_encoder) {
@@ -156,6 +149,13 @@ int ViECaptureImpl::ConnectCaptureDevice(const int capture_id,
   if (vie_encoder->Owner() != video_channel) {
     LOG(LS_ERROR) << "Can't connect capture device to a receive device.";
     shared_data_->SetLastError(kViECaptureDeviceInvalidChannelId);
+    return -1;
+  }
+
+  ViEInputManagerScoped is(*(shared_data_->input_manager()));
+  ViECapturer* vie_capture = is.Capture(capture_id);
+  if (!vie_capture) {
+    shared_data_->SetLastError(kViECaptureDeviceDoesNotExist);
     return -1;
   }
   //  Check if the encoder already has a connected frame provider
@@ -252,26 +252,10 @@ int ViECaptureImpl::StopCapture(const int capture_id) {
   return 0;
 }
 
-int ViECaptureImpl::SetRotateCapturedFrames(
-    const int capture_id,
-    const RotateCapturedFrame rotation) {
-  int i_rotation = -1;
-  switch (rotation) {
-    case RotateCapturedFrame_0:
-      i_rotation = 0;
-      break;
-    case RotateCapturedFrame_90:
-      i_rotation = 90;
-      break;
-    case RotateCapturedFrame_180:
-      i_rotation = 180;
-      break;
-    case RotateCapturedFrame_270:
-      i_rotation = 270;
-      break;
-  }
-  LOG(LS_INFO) << "SetRotateCaptureFrames for " << capture_id
-               << ", rotation " << i_rotation;
+int ViECaptureImpl::SetVideoRotation(const int capture_id,
+                                     const VideoRotation rotation) {
+  LOG(LS_INFO) << "SetRotateCaptureFrames for " << capture_id << ", rotation "
+               << static_cast<int>(rotation);
 
   ViEInputManagerScoped is(*(shared_data_->input_manager()));
   ViECapturer* vie_capture = is.Capture(capture_id);
@@ -279,7 +263,7 @@ int ViECaptureImpl::SetRotateCapturedFrames(
     shared_data_->SetLastError(kViECaptureDeviceDoesNotExist);
     return -1;
   }
-  if (vie_capture->SetRotateCapturedFrames(rotation) != 0) {
+  if (vie_capture->SetVideoRotation(rotation) != 0) {
     shared_data_->SetLastError(kViECaptureDeviceUnknownError);
     return -1;
   }
@@ -309,15 +293,6 @@ int ViECaptureImpl::NumberOfCapabilities(
     const char* unique_idUTF8,
     const unsigned int unique_idUTF8Length) {
 
-#if defined(WEBRTC_MAC)
-  // TODO(mflodman) Move to capture module!
-  // QTKit framework handles all capabilities and capture settings
-  // automatically (mandatory).
-  // Thus this function cannot be supported on the Mac platform.
-  shared_data_->SetLastError(kViECaptureDeviceMacQtkitNotSupported);
-  LOG_F(LS_ERROR) << "API not supported on Mac OS X.";
-  return -1;
-#endif
   return shared_data_->input_manager()->NumberOfCaptureCapabilities(
       unique_idUTF8);
 }
@@ -328,15 +303,6 @@ int ViECaptureImpl::GetCaptureCapability(const char* unique_idUTF8,
                                          const unsigned int capability_number,
                                          CaptureCapability& capability) {
 
-#if defined(WEBRTC_MAC)
-  // TODO(mflodman) Move to capture module!
-  // QTKit framework handles all capabilities and capture settings
-  // automatically (mandatory).
-  // Thus this function cannot be supported on the Mac platform.
-  LOG_F(LS_ERROR) << "API not supported on Mac OS X.";
-  shared_data_->SetLastError(kViECaptureDeviceMacQtkitNotSupported);
-  return -1;
-#endif
   if (shared_data_->input_manager()->GetCaptureCapability(
           unique_idUTF8, capability_number, capability) != 0) {
     shared_data_->SetLastError(kViECaptureDeviceUnknownError);
@@ -352,22 +318,13 @@ int ViECaptureImpl::ShowCaptureSettingsDialogBox(
     void* parent_window,
     const unsigned int x,
     const unsigned int y) {
-#if defined(WEBRTC_MAC)
-  // TODO(mflodman) Move to capture module
-  // QTKit framework handles all capabilities and capture settings
-  // automatically (mandatory).
-  // Thus this function cannot be supported on the Mac platform.
-  shared_data_->SetLastError(kViECaptureDeviceMacQtkitNotSupported);
-  LOG_F(LS_ERROR) << "API not supported on Mac OS X.";
-  return -1;
-#endif
   return shared_data_->input_manager()->DisplayCaptureSettingsDialogBox(
            unique_idUTF8, dialog_title,
            parent_window, x, y);
 }
 
 int ViECaptureImpl::GetOrientation(const char* unique_idUTF8,
-                                   RotateCapturedFrame& orientation) {
+                                   VideoRotation& orientation) {
   if (shared_data_->input_manager()->GetOrientation(
       unique_idUTF8,
       orientation) != 0) {

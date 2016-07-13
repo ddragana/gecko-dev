@@ -30,6 +30,7 @@
 
 #include "js/Conversions.h"
 #include "shell/jsshell.h"
+#include "vm/StringBuffer.h"
 #include "vm/TypedArrayObject.h"
 
 #include "jsobjinlines.h"
@@ -41,10 +42,49 @@
 # include <libgen.h>
 #endif
 
-using namespace JS;
+using js::shell::RCFile;
+
+static RCFile** gErrFilePtr = nullptr;
+static RCFile** gOutFilePtr = nullptr;
 
 namespace js {
 namespace shell {
+
+#ifdef XP_WIN
+const char PathSeparator = '\\';
+#else
+const char PathSeparator = '/';
+#endif
+
+static bool
+IsAbsolutePath(const JSAutoByteString& filename)
+{
+    const char* pathname = filename.ptr();
+
+    if (pathname[0] == PathSeparator)
+        return true;
+
+#ifdef XP_WIN
+    // On Windows there are various forms of absolute paths (see
+    // http://msdn.microsoft.com/en-us/library/windows/desktop/aa365247%28v=vs.85%29.aspx
+    // for details):
+    //
+    //   "\..."
+    //   "\\..."
+    //   "C:\..."
+    //
+    // The first two cases are handled by the test above so we only need a test
+    // for the last one here.
+
+    if ((strlen(pathname) > 3 &&
+        isalpha(pathname[0]) && pathname[1] == ':' && pathname[2] == '\\'))
+    {
+        return true;
+    }
+#endif
+
+    return false;
+}
 
 /*
  * Resolve a (possibly) relative filename to an absolute path. If
@@ -57,25 +97,20 @@ namespace shell {
 JSString*
 ResolvePath(JSContext* cx, HandleString filenameStr, PathResolutionMode resolveMode)
 {
+    if (!filenameStr) {
+#ifdef XP_WIN
+        return JS_NewStringCopyZ(cx, "nul");
+#else
+        return JS_NewStringCopyZ(cx, "/dev/null");
+#endif
+    }
+
     JSAutoByteString filename(cx, filenameStr);
     if (!filename)
         return nullptr;
 
-    const char* pathname = filename.ptr();
-    if (pathname[0] == '/')
+    if (IsAbsolutePath(filename))
         return filenameStr;
-#ifdef XP_WIN
-    // Various forms of absolute paths per http://msdn.microsoft.com/en-us/library/windows/desktop/aa365247%28v=vs.85%29.aspx
-    // "\..."
-    if (pathname[0] == '\\')
-        return filenameStr;
-    // "C:\..."
-    if (strlen(pathname) > 3 && isalpha(pathname[0]) && pathname[1] == ':' && pathname[2] == '\\')
-        return filenameStr;
-    // "\\..."
-    if (strlen(pathname) > 2 && pathname[1] == '\\' && pathname[2] == '\\')
-        return filenameStr;
-#endif
 
     /* Get the currently executing script's name. */
     JS::AutoFilename scriptFilename;
@@ -110,14 +145,14 @@ ResolvePath(JSContext* cx, HandleString filenameStr, PathResolutionMode resolveM
 
     size_t len = strlen(buffer);
     buffer[len] = '/';
-    strncpy(buffer + len + 1, pathname, sizeof(buffer) - (len+1));
+    strncpy(buffer + len + 1, filename.ptr(), sizeof(buffer) - (len+1));
     if (buffer[PATH_MAX] != '\0')
         return nullptr;
 
     return JS_NewStringCopyZ(cx, buffer);
 }
 
-static JSObject*
+JSObject*
 FileAsTypedArray(JSContext* cx, const char* pathname)
 {
     FILE* file = fopen(pathname, "rb");
@@ -125,7 +160,7 @@ FileAsTypedArray(JSContext* cx, const char* pathname)
         JS_ReportError(cx, "can't open %s: %s", pathname, strerror(errno));
         return nullptr;
     }
-    AutoCloseInputFile autoClose(file);
+    AutoCloseFile autoClose(file);
 
     RootedObject obj(cx);
     if (fseek(file, 0, SEEK_END) != 0) {
@@ -138,7 +173,21 @@ FileAsTypedArray(JSContext* cx, const char* pathname)
             obj = JS_NewUint8Array(cx, len);
             if (!obj)
                 return nullptr;
-            char* buf = (char*) obj->as<js::TypedArrayObject>().viewData();
+            js::TypedArrayObject& ta = obj->as<js::TypedArrayObject>();
+            if (ta.isSharedMemory()) {
+                // Must opt in to use shared memory.  For now, don't.
+                //
+                // (It is incorrect to read into the buffer without
+                // synchronization since that can create a race.  A
+                // lock here won't fix it - both sides must
+                // participate.  So what one must do is to create a
+                // temporary buffer, read into that, and use a
+                // race-safe primitive to copy memory into the
+                // buffer.)
+                JS_ReportError(cx, "can't read %s: shared memory buffer", pathname);
+                return nullptr;
+            }
+            char* buf = static_cast<char*>(ta.viewDataUnshared());
             size_t cc = fread(buf, 1, len, file);
             if (cc != len) {
                 JS_ReportError(cx, "can't read %s: %s", pathname,
@@ -211,46 +260,273 @@ osfile_readRelativeToScript(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
-Redirect(JSContext* cx, FILE* fp, HandleString relFilename)
+osfile_writeTypedArrayToFile(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (args.length() != 2 ||
+        !args[0].isString() ||
+        !args[1].isObject() ||
+        !args[1].toObject().is<TypedArrayObject>())
+    {
+        JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr,
+                             JSSMSG_INVALID_ARGS, "writeTypedArrayToFile");
+        return false;
+    }
+
+    RootedString givenPath(cx, args[0].toString());
+    RootedString str(cx, ResolvePath(cx, givenPath, RootRelative));
+    if (!str)
+        return false;
+
+    JSAutoByteString filename(cx, str);
+    if (!filename)
+        return false;
+
+    FILE* file = fopen(filename.ptr(), "wb");
+    if (!file) {
+        JS_ReportError(cx, "can't open %s: %s", filename.ptr(), strerror(errno));
+        return false;
+    }
+    AutoCloseFile autoClose(file);
+
+    TypedArrayObject* obj = &args[1].toObject().as<TypedArrayObject>();
+
+    if (obj->isSharedMemory()) {
+        // Must opt in to use shared memory.  For now, don't.
+        //
+        // See further comments in FileAsTypedArray, above.
+        JS_ReportError(cx, "can't write %s: shared memory buffer", filename.ptr());
+        return false;
+    }
+    void* buf = obj->viewDataUnshared();
+    if (fwrite(buf, obj->bytesPerElement(), obj->length(), file) != obj->length() ||
+        !autoClose.release())
+    {
+        JS_ReportError(cx, "can't write %s", filename.ptr());
+        return false;
+    }
+
+    args.rval().setUndefined();
+    return true;
+}
+
+/* static */ RCFile*
+RCFile::create(JSContext* cx, const char* filename, const char* mode)
+{
+    FILE* fp = fopen(filename, mode);
+    if (!fp)
+        return nullptr;
+
+    RCFile* file = cx->new_<RCFile>(fp);
+    if (!file) {
+        fclose(fp);
+        return nullptr;
+    }
+
+    return file;
+}
+
+void
+RCFile::close()
+{
+    if (fp)
+        fclose(fp);
+    fp = nullptr;
+}
+
+bool
+RCFile::release()
+{
+    if (--numRefs)
+        return false;
+    this->close();
+    return true;
+}
+
+class FileObject : public JSObject {
+    enum : uint32_t {
+        FILE_SLOT = 0,
+        NUM_SLOTS
+    };
+
+  public:
+    static const js::Class class_;
+
+    static FileObject* create(JSContext* cx, RCFile* file) {
+        JSObject* obj = js::NewObjectWithClassProto(cx, &class_, nullptr);
+        if (!obj)
+            return nullptr;
+
+        FileObject* fileObj = &obj->as<FileObject>();
+        fileObj->setRCFile(file);
+        file->acquire();
+        return fileObj;
+    }
+
+    static void finalize(FreeOp* fop, JSObject* obj) {
+        FileObject* fileObj = &obj->as<FileObject>();
+        RCFile* file = fileObj->rcFile();
+        if (file->release()) {
+            fileObj->setRCFile(nullptr);
+            fop->delete_(file);
+        }
+    }
+
+    bool isOpen() {
+        RCFile* file = rcFile();
+        return file && file->isOpen();
+    }
+
+    void close() {
+        if (!isOpen())
+            return;
+        rcFile()->close();
+    }
+
+    RCFile* rcFile() {
+        return reinterpret_cast<RCFile*>(js::GetReservedSlot(this, FILE_SLOT).toPrivate());
+    }
+
+  private:
+
+    void setRCFile(RCFile* file) {
+        js::SetReservedSlot(this, FILE_SLOT, PrivateValue(file));
+    }
+};
+
+static const js::ClassOps FileObjectClassOps = {
+    nullptr,               /* addProperty */
+    nullptr,               /* delProperty */
+    nullptr,               /* getProperty */
+    nullptr,               /* setProperty */
+    nullptr,               /* enumerate */
+    nullptr,               /* resolve */
+    nullptr,               /* mayResolve */
+    FileObject::finalize,  /* finalize */
+    nullptr,               /* call */
+    nullptr,               /* hasInstance */
+    nullptr,               /* construct */
+    nullptr                /* trace */
+};
+
+const js::Class FileObject::class_ = {
+    "File",
+    JSCLASS_HAS_RESERVED_SLOTS(FileObject::NUM_SLOTS),
+    &FileObjectClassOps
+};
+
+static FileObject*
+redirect(JSContext* cx, HandleString relFilename, RCFile** globalFile)
 {
     RootedString filename(cx, ResolvePath(cx, relFilename, RootRelative));
     if (!filename)
-        return false;
+        return nullptr;
     JSAutoByteString filenameABS(cx, filename);
     if (!filenameABS)
-        return false;
-    if (freopen(filenameABS.ptr(), "wb", fp) == nullptr) {
+        return nullptr;
+    RCFile* file = RCFile::create(cx, filenameABS.ptr(), "wb");
+    if (!file) {
         JS_ReportError(cx, "cannot redirect to %s: %s", filenameABS.ptr(), strerror(errno));
+        return nullptr;
+    }
+
+    // Grant the global gOutFile ownership of the new file, release ownership
+    // of its old file, and return a FileObject owning the old file.
+    file->acquire(); // Global owner of new file
+
+    FileObject* fileObj = FileObject::create(cx, *globalFile); // Newly created owner of old file
+    if (!fileObj) {
+        file->release();
+        return nullptr;
+    }
+
+    (*globalFile)->release(); // Release (global) ownership of old file.
+    *globalFile = file;
+
+    return fileObj;
+}
+
+static bool
+Redirect(JSContext* cx, const CallArgs& args, RCFile** outFile)
+{
+    if (args.length() > 1) {
+        JS_ReportErrorNumber(cx, js::shell::my_GetErrorMessage, nullptr,
+                             JSSMSG_INVALID_ARGS, "redirect");
         return false;
     }
+
+    RCFile* oldFile = *outFile;
+    RootedObject oldFileObj(cx, FileObject::create(cx, oldFile));
+    if (!oldFileObj)
+        return false;
+
+    if (args.get(0).isUndefined()) {
+        args.rval().setObject(*oldFileObj);
+        return true;
+    }
+
+    if (args[0].isObject()) {
+        RootedObject fileObj(cx, js::CheckedUnwrap(&args[0].toObject()));
+        if (!fileObj)
+            return false;
+
+        if (fileObj->is<FileObject>()) {
+            // Passed in a FileObject. Create a FileObject for the previous
+            // global file, and set the global file to the passed-in one.
+            *outFile = fileObj->as<FileObject>().rcFile();
+            (*outFile)->acquire();
+            oldFile->release();
+
+            args.rval().setObject(*oldFileObj);
+            return true;
+        }
+    }
+
+    RootedString filename(cx);
+    if (!args[0].isNull()) {
+        filename = JS::ToString(cx, args[0]);
+        if (!filename)
+            return false;
+    }
+
+    if (!redirect(cx, filename, outFile))
+        return false;
+
+    args.rval().setObject(*oldFileObj);
     return true;
 }
 
 static bool
-osfile_redirect(JSContext* cx, unsigned argc, Value* vp)
-{
+osfile_redirectOutput(JSContext* cx, unsigned argc, Value* vp) {
+    CallArgs args = CallArgsFromVp(argc, vp);
+    return Redirect(cx, args, gOutFilePtr);
+}
+
+static bool
+osfile_redirectError(JSContext* cx, unsigned argc, Value* vp) {
+    CallArgs args = CallArgsFromVp(argc, vp);
+    return Redirect(cx, args, gErrFilePtr);
+}
+
+static bool
+osfile_close(JSContext* cx, unsigned argc, Value* vp) {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    if (args.length() < 1 || args.length() > 2) {
-        JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr, JSSMSG_INVALID_ARGS, "redirect");
+    Rooted<FileObject*> fileObj(cx);
+    if (args.get(0).isObject()) {
+        JSObject *obj = js::CheckedUnwrap(&args[0].toObject());
+        if (obj->is<FileObject>())
+            fileObj = &obj->as<FileObject>();
+    }
+
+    if (!fileObj) {
+        JS_ReportErrorNumber(cx, js::shell::my_GetErrorMessage, nullptr,
+                             JSSMSG_INVALID_ARGS, "close");
         return false;
     }
 
-    if (args[0].isString()) {
-        RootedString stdoutPath(cx, args[0].toString());
-        if (!stdoutPath)
-            return false;
-        if (!Redirect(cx, stdout, stdoutPath))
-            return false;
-    }
-
-    if (args.length() > 1 && args[1].isString()) {
-        RootedString stderrPath(cx, args[1].toString());
-        if (!stderrPath)
-            return false;
-        if (!Redirect(cx, stderr, stderrPath))
-            return false;
-    }
+    fileObj->close();
 
     args.rval().setUndefined();
     return true;
@@ -271,10 +547,97 @@ static const JSFunctionSpecWithHelp osfile_functions[] = {
 };
 
 static const JSFunctionSpecWithHelp osfile_unsafe_functions[] = {
-    JS_FN_HELP("redirect", osfile_redirect, 2, 0,
-"redirect(stdoutFilename[, stderrFilename])",
-"  Redirect stdout and/or stderr to the named file. Pass undefined to avoid\n"
-"   redirecting. Filenames are relative to the current working directory."),
+    JS_FN_HELP("writeTypedArrayToFile", osfile_writeTypedArrayToFile, 2, 0,
+"writeTypedArrayToFile(filename, data)",
+"  Write the contents of a typed array to the named file."),
+
+    JS_FN_HELP("redirect", osfile_redirectOutput, 1, 0,
+"redirect([path-or-object])",
+"  Redirect print() output to the named file.\n"
+"   Return an opaque object representing the previous destination, which\n"
+"   may be passed into redirect() later to restore the output."),
+
+    JS_FN_HELP("redirectErr", osfile_redirectError, 1, 0,
+"redirectErr([path-or-object])",
+"  Same as redirect(), but for printErr"),
+
+    JS_FN_HELP("close", osfile_close, 1, 0,
+"close(object)",
+"  Close the file returned by an earlier redirect call."),
+
+    JS_FS_HELP_END
+};
+
+static bool
+ospath_isAbsolute(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (args.length() != 1 || !args[0].isString()) {
+        JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr, JSSMSG_INVALID_ARGS, "isAbsolute");
+        return false;
+    }
+
+    JSAutoByteString path(cx, args[0].toString());
+    if (!path)
+        return false;
+
+    args.rval().setBoolean(IsAbsolutePath(path));
+    return true;
+}
+
+static bool
+ospath_join(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (args.length() < 1) {
+        JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr, JSSMSG_INVALID_ARGS, "join");
+        return false;
+    }
+
+    // This function doesn't take into account some aspects of Windows paths,
+    // e.g. the drive letter is always reset when an absolute path is appended.
+
+    StringBuffer buffer(cx);
+
+    for (unsigned i = 0; i < args.length(); i++) {
+        if (!args[i].isString()) {
+            JS_ReportError(cx, "join expects string arguments only");
+            return false;
+        }
+
+        JSAutoByteString path(cx, args[i].toString());
+        if (!path)
+            return false;
+
+        if (IsAbsolutePath(path)) {
+            MOZ_ALWAYS_TRUE(buffer.resize(0));
+        } else if (i != 0) {
+            if (!buffer.append(PathSeparator))
+                return false;
+        }
+
+        if (!buffer.append(args[i].toString()))
+            return false;
+    }
+
+    JSString* result = buffer.finishString();
+    if (!result)
+        return false;
+
+    args.rval().setString(result);
+    return true;
+}
+
+static const JSFunctionSpecWithHelp ospath_functions[] = {
+    JS_FN_HELP("isAbsolute", ospath_isAbsolute, 1, 0,
+"isAbsolute(path)",
+"  Return whether the given path is absolute."),
+
+    JS_FN_HELP("join", ospath_join, 1, 0,
+"join(paths...)",
+"  Join one or more path components in a platform independent way."),
 
     JS_FS_HELP_END
 };
@@ -360,12 +723,7 @@ ReportSysError(JSContext* cx, const char* prefix)
         return;
     }
 
-#ifdef XP_WIN
-    _snprintf(final, nbytes, "%s: %s", prefix, errstr);
-#else
     snprintf(final, nbytes, "%s: %s", prefix, errstr);
-#endif
-
     JS_ReportError(cx, final);
     js_free(final);
 }
@@ -551,7 +909,9 @@ static const JSFunctionSpecWithHelp os_functions[] = {
 };
 
 bool
-DefineOS(JSContext* cx, HandleObject global, bool fuzzingSafe)
+DefineOS(JSContext* cx, HandleObject global,
+         bool fuzzingSafe,
+         RCFile** shellOut, RCFile** shellErr)
 {
     RootedObject obj(cx, JS_NewPlainObject(cx));
     if (!obj || !JS_DefineProperty(cx, global, "os", obj, 0))
@@ -575,6 +935,24 @@ DefineOS(JSContext* cx, HandleObject global, bool fuzzingSafe)
             return false;
     }
 
+    if (!GenerateInterfaceHelp(cx, osfile, "os.file"))
+        return false;
+
+    RootedObject ospath(cx, JS_NewPlainObject(cx));
+    if (!ospath ||
+        !JS_DefineFunctionsWithHelp(cx, ospath, ospath_functions) ||
+        !JS_DefineProperty(cx, obj, "path", ospath, 0) ||
+        !GenerateInterfaceHelp(cx, ospath, "os.path"))
+    {
+        return false;
+    }
+
+    if (!GenerateInterfaceHelp(cx, obj, "os"))
+        return false;
+
+    gOutFilePtr = shellOut;
+    gErrFilePtr = shellErr;
+
     // For backwards compatibility, expose various os.file.* functions as
     // direct methods on the global.
     RootedValue val(cx);
@@ -586,7 +964,8 @@ DefineOS(JSContext* cx, HandleObject global, bool fuzzingSafe)
         { "readFile", "read" },
         { "readFile", "snarf" },
         { "readRelativeToScript", "readRelativeToScript" },
-        { "redirect", "redirect" }
+        { "redirect", "redirect" },
+        { "redirectErr", "redirectErr" }
     };
 
     for (auto pair : osfile_exports) {

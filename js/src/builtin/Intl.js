@@ -81,7 +81,7 @@ internalIntlRegExps.currencyDigitsRE = null;
 function getUnicodeLocaleExtensionSequenceRE() {
     return internalIntlRegExps.unicodeLocaleExtensionSequenceRE ||
            (internalIntlRegExps.unicodeLocaleExtensionSequenceRE =
-            regexp_construct_no_statics("-u(?:-[a-z0-9]{2,8})+"));
+            RegExpCreate("-u(?:-[a-z0-9]{2,8})+"));
 }
 
 
@@ -100,13 +100,13 @@ function removeUnicodeExtensions(locale) {
     if (pos < 0)
         pos = locale.length;
 
-    var left = callFunction(std_String_substring, locale, 0, pos);
-    var right = callFunction(std_String_substring, locale, pos);
+    var left = callFunction(String_substring, locale, 0, pos);
+    var right = callFunction(String_substring, locale, pos);
 
     var extensions;
     var unicodeLocaleExtensionSequenceRE = getUnicodeLocaleExtensionSequenceRE();
     while ((extensions = regexp_exec_no_statics(unicodeLocaleExtensionSequenceRE, left)) !== null) {
-        left = callFunction(std_String_replace, left, extensions[0], "");
+        left = callFunction(String_replace, left, extensions[0], "");
         unicodeLocaleExtensionSequenceRE.lastIndex = 0;
     }
 
@@ -215,8 +215,7 @@ function getLanguageTagRE() {
     var languageTag = "^(?:" + langtag + "|" + privateuse + "|" + grandfathered + ")$";
 
     // Language tags are case insensitive (RFC 5646 section 2.1.1).
-    return (internalIntlRegExps.languageTagRE =
-            regexp_construct_no_statics(languageTag, "i"));
+    return (internalIntlRegExps.languageTagRE = RegExpCreate(languageTag, "i"));
 }
 
 
@@ -262,8 +261,7 @@ function getDuplicateVariantRE() {
     // regular expression to address this.  (Note that there's no worry about
     // case transformation accepting invalid characters here: users have
     // already verified the string is alphanumeric Latin plus "-".)
-    return (internalIntlRegExps.duplicateVariantRE =
-            regexp_construct_no_statics(duplicateVariant, "i"));
+    return (internalIntlRegExps.duplicateVariantRE = RegExpCreate(duplicateVariant, "i"));
 }
 
 
@@ -308,8 +306,7 @@ function getDuplicateSingletonRE() {
     // expression to address this.  (Note that there's no worry about case
     // transformation accepting invalid characters here: users have already
     // verified the string is alphanumeric Latin plus "-".)
-    return (internalIntlRegExps.duplicateSingletonRE =
-            regexp_construct_no_statics(duplicateSingleton, "i"));
+    return (internalIntlRegExps.duplicateSingletonRE = RegExpCreate(duplicateSingleton, "i"));
 }
 
 
@@ -332,7 +329,7 @@ function IsStructurallyValidLanguageTag(locale) {
         return true;
     var pos = callFunction(std_String_indexOf, locale, "-x-");
     if (pos !== -1)
-        locale = callFunction(std_String_substring, locale, 0, pos);
+        locale = callFunction(String_substring, locale, 0, pos);
 
     // Check for duplicate variant or singleton subtags.
     var duplicateVariantRE = getDuplicateVariantRE();
@@ -381,7 +378,7 @@ function CanonicalizeLanguageTag(locale) {
     if (callFunction(std_Object_hasOwnProperty, langTagMappings, locale))
         return langTagMappings[locale];
 
-    var subtags = callFunction(std_String_split, locale, "-");
+    var subtags = StringSplitString(ToString(locale), "-");
     var i = 0;
 
     // Handle the standard part: All subtags before the first singleton or "x".
@@ -401,7 +398,7 @@ function CanonicalizeLanguageTag(locale) {
             // 4-character subtags are script codes; their first character
             // needs to be capitalized. "hans" -> "Hans"
             subtag = callFunction(std_String_toUpperCase, subtag[0]) +
-                     callFunction(std_String_substring, subtag, 1);
+                     callFunction(String_substring, subtag, 1);
         } else if (i !== 0 && subtag.length === 2) {
             // 2-character subtags that are not in initial position are region
             // codes; they need to be upper case. "bu" -> "BU"
@@ -443,9 +440,9 @@ function CanonicalizeLanguageTag(locale) {
         while (i < subtags.length && subtags[i].length > 1)
             i++;
         var extension = callFunction(std_Array_join, callFunction(std_Array_slice, subtags, extensionStart, i), "-");
-        extensions.push(extension);
+        callFunction(std_Array_push, extensions, extension);
     }
-    extensions.sort();
+    callFunction(std_Array_sort, extensions);
 
     // Private use sequences are left as is. "x-private"
     var privateUse = "";
@@ -455,7 +452,7 @@ function CanonicalizeLanguageTag(locale) {
     // Put everything back together.
     var canonical = normal;
     if (extensions.length > 0)
-        canonical += "-" + extensions.join("-");
+        canonical += "-" + callFunction(std_Array_join, extensions, "-");
     if (privateUse.length > 0) {
         // Be careful of a Language-Tag that is entirely privateuse.
         if (canonical.length > 0)
@@ -551,8 +548,8 @@ function DefaultLocaleIgnoringAvailableLocales() {
     }
 
     // Cache the candidate locale until the runtime default locale changes.
-    localeCandidateCache.runtimeDefaultLocale = runtimeDefaultLocale;
     localeCandidateCache.candidateDefaultLocale = candidate;
+    localeCandidateCache.runtimeDefaultLocale = runtimeDefaultLocale;
 
     assert(IsStructurallyValidLanguageTag(candidate),
            "the candidate must be structurally valid");
@@ -578,11 +575,14 @@ function DefaultLocale() {
     // (perhaps via fallback).  Otherwise use the last-ditch locale.
     var candidate = DefaultLocaleIgnoringAvailableLocales();
     var locale;
-    if (BestAvailableLocaleIgnoringDefault(collatorInternalProperties.availableLocales(),
+    if (BestAvailableLocaleIgnoringDefault(callFunction(collatorInternalProperties.availableLocales,
+                                                        collatorInternalProperties),
                                            candidate) &&
-        BestAvailableLocaleIgnoringDefault(numberFormatInternalProperties.availableLocales(),
+        BestAvailableLocaleIgnoringDefault(callFunction(numberFormatInternalProperties.availableLocales,
+                                                        numberFormatInternalProperties),
                                            candidate) &&
-        BestAvailableLocaleIgnoringDefault(dateTimeFormatInternalProperties.availableLocales(),
+        BestAvailableLocaleIgnoringDefault(callFunction(dateTimeFormatInternalProperties.availableLocales,
+                                                        dateTimeFormatInternalProperties),
                                            candidate))
     {
         locale = candidate;
@@ -597,8 +597,8 @@ function DefaultLocale() {
     assert(localeContainsNoUnicodeExtensions(locale),
            "the computed default locale must not contain a Unicode extension sequence");
 
-    localeCache.runtimeDefaultLocale = runtimeDefaultLocale;
     localeCache.defaultLocale = locale;
+    localeCache.runtimeDefaultLocale = runtimeDefaultLocale;
 
     return locale;
 }
@@ -611,8 +611,7 @@ function DefaultLocale() {
  */
 function getIsWellFormedCurrencyCodeRE() {
     return internalIntlRegExps.isWellFormedCurrencyCodeRE ||
-           (internalIntlRegExps.isWellFormedCurrencyCodeRE =
-            regexp_construct_no_statics("[^A-Z]"));
+           (internalIntlRegExps.isWellFormedCurrencyCodeRE = RegExpCreate("[^A-Z]"));
 }
 function IsWellFormedCurrencyCode(currency) {
     var c = ToString(currency);
@@ -662,7 +661,7 @@ function CanonicalizeLocaleList(locales) {
     if (typeof locales === "string")
         locales = [locales];
     var O = ToObject(locales);
-    var len = TO_UINT32(O.length);
+    var len = ToLength(O.length);
     var k = 0;
     while (k < len) {
         // Don't call ToString(k) - SpiderMonkey is faster with integers.
@@ -675,8 +674,8 @@ function CanonicalizeLocaleList(locales) {
             if (!IsStructurallyValidLanguageTag(tag))
                 ThrowRangeError(JSMSG_INVALID_LANGUAGE_TAG, tag);
             tag = CanonicalizeLanguageTag(tag);
-            if (seen.indexOf(tag) === -1)
-                seen.push(tag);
+            if (callFunction(ArrayIndexOf, seen, tag) === -1)
+                callFunction(std_Array_push, seen, tag);
         }
         k++;
     }
@@ -723,7 +722,7 @@ function BestAvailableLocaleHelper(availableLocales, locale, considerDefaultLoca
         if (pos >= 2 && candidate[pos - 2] === "-")
             pos -= 2;
 
-        candidate = callFunction(std_String_substring, candidate, 0, pos);
+        candidate = callFunction(String_substring, candidate, 0, pos);
     }
 }
 
@@ -838,7 +837,7 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
         extensionIndex = r.extensionIndex;
 
         // Steps 5.d-e.
-        extensionSubtags = callFunction(std_String_split, extension, "-");
+        extensionSubtags = StringSplitString(ToString(extension), "-");
         extensionSubtagsLength = extensionSubtags.length;
     }
 
@@ -876,7 +875,7 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
         // Step 11.g.
         if (extensionSubtags !== undefined) {
             // Step 11.g.i.
-            var keyPos = callFunction(std_Array_indexOf, extensionSubtags, key);
+            var keyPos = callFunction(ArrayIndexOf, extensionSubtags, key);
 
             // Step 11.g.ii.
             if (keyPos !== -1) {
@@ -888,7 +887,7 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
                     var requestedValue = extensionSubtags[keyPos + 1];
 
                     // Step 11.g.ii.1.b.
-                    valuePos = callFunction(std_Array_indexOf, keyLocaleData, requestedValue);
+                    valuePos = callFunction(ArrayIndexOf, keyLocaleData, requestedValue);
 
                     // Step 11.g.ii.1.c.
                     if (valuePos !== -1) {
@@ -902,7 +901,7 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
                     // and true is an allowed value, it's used.
 
                     // Step 11.g.ii.2.a.
-                    valuePos = callFunction(std_Array_indexOf, keyLocaleData, "true");
+                    valuePos = callFunction(ArrayIndexOf, keyLocaleData, "true");
 
                     // Step 11.g.ii.2.b.
                     if (valuePos !== -1)
@@ -918,7 +917,7 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
 
         // Step 11.h, 11.h.ii.
         if (optionsValue !== undefined &&
-            callFunction(std_Array_indexOf, keyLocaleData, optionsValue) !== -1)
+            callFunction(ArrayIndexOf, keyLocaleData, optionsValue) !== -1)
         {
             // Step 11.h.ii.1.
             if (optionsValue !== value) {
@@ -935,8 +934,8 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
 
     // Step 12.
     if (supportedExtension.length > 2) {
-        var preExtension = callFunction(std_String_substring, foundLocale, 0, extensionIndex);
-        var postExtension = callFunction(std_String_substring, foundLocale, extensionIndex);
+        var preExtension = callFunction(String_substring, foundLocale, 0, extensionIndex);
+        var postExtension = callFunction(String_substring, foundLocale, extensionIndex);
         foundLocale = preExtension + supportedExtension + postExtension;
     }
 
@@ -968,14 +967,14 @@ function LookupSupportedLocales(availableLocales, requestedLocales) {
         // Step 4.c-d.
         var availableLocale = BestAvailableLocale(availableLocales, noExtensionsLocale);
         if (availableLocale !== undefined)
-            subset.push(locale);
+            callFunction(std_Array_push, subset, locale);
 
         // Step 4.e.
         k++;
     }
 
     // Steps 5-6.
-    return subset.slice(0);
+    return callFunction(std_Array_slice, subset, 0);
 }
 
 
@@ -1057,7 +1056,7 @@ function GetOption(options, property, type, values, fallback) {
             assert(false, "GetOption");
 
         // Step 2.d.
-        if (values !== undefined && callFunction(std_Array_indexOf, values, value) === -1)
+        if (values !== undefined && callFunction(ArrayIndexOf, values, value) === -1)
             ThrowRangeError(JSMSG_INVALID_OPTION_VALUE, property, value);
 
         // Step 2.e.
@@ -1317,7 +1316,7 @@ function resolveCollatorInternals(lazyCollatorData)
     var relevantExtensionKeys = Collator.relevantExtensionKeys;
 
     // Step 15.
-    var r = ResolveLocale(Collator.availableLocales(),
+    var r = ResolveLocale(callFunction(Collator.availableLocales, Collator),
                           lazyCollatorData.requestedLocales,
                           lazyCollatorData.opt,
                           relevantExtensionKeys,
@@ -1507,7 +1506,8 @@ function InitializeCollator(collator, locales, options) {
 function Intl_Collator_supportedLocalesOf(locales /*, options*/) {
     var options = arguments.length > 1 ? arguments[1] : undefined;
 
-    var availableLocales = collatorInternalProperties.availableLocales();
+    var availableLocales = callFunction(collatorInternalProperties.availableLocales,
+                                        collatorInternalProperties);
     var requestedLocales = CanonicalizeLocaleList(locales);
     return SupportedLocales(availableLocales, requestedLocales, options);
 }
@@ -1592,7 +1592,7 @@ function Intl_Collator_compare_get() {
         var F = collatorCompareToBind;
 
         // Step 1.b-d.
-        var bc = callFunction(std_Function_bind, F, this);
+        var bc = callFunction(FunctionBind, F, this);
         internals.boundCompare = bc;
     }
 
@@ -1675,7 +1675,7 @@ function resolveNumberFormatInternals(lazyNumberFormatData) {
     var localeData = NumberFormat.localeData;
 
     // Step 11.
-    var r = ResolveLocale(NumberFormat.availableLocales(),
+    var r = ResolveLocale(callFunction(NumberFormat.availableLocales, NumberFormat),
                           lazyNumberFormatData.requestedLocales,
                           lazyNumberFormatData.opt,
                           NumberFormat.relevantExtensionKeys,
@@ -1936,8 +1936,7 @@ var currencyDigits = {
  */
 function getCurrencyDigitsRE() {
     return internalIntlRegExps.currencyDigitsRE ||
-           (internalIntlRegExps.currencyDigitsRE =
-            regexp_construct_no_statics("^[A-Z]{3}$"));
+           (internalIntlRegExps.currencyDigitsRE = RegExpCreate("^[A-Z]{3}$"));
 }
 function CurrencyDigits(currency) {
     assert(typeof currency === "string", "CurrencyDigits");
@@ -1959,7 +1958,8 @@ function CurrencyDigits(currency) {
 function Intl_NumberFormat_supportedLocalesOf(locales /*, options*/) {
     var options = arguments.length > 1 ? arguments[1] : undefined;
 
-    var availableLocales = numberFormatInternalProperties.availableLocales();
+    var availableLocales = callFunction(numberFormatInternalProperties.availableLocales,
+                                        numberFormatInternalProperties);
     var requestedLocales = CanonicalizeLocaleList(locales);
     return SupportedLocales(availableLocales, requestedLocales, options);
 }
@@ -2031,7 +2031,7 @@ function Intl_NumberFormat_format_get() {
         var F = numberFormatFormatToBind;
 
         // Step 1.b-d.
-        var bf = callFunction(std_Function_bind, F, this);
+        var bf = callFunction(FunctionBind, F, this);
         internals.boundFormat = bf;
     }
     // Step 2.
@@ -2118,7 +2118,7 @@ function resolveDateTimeFormatInternals(lazyDateTimeFormatData) {
     var localeData = DateTimeFormat.localeData;
 
     // Step 10.
-    var r = ResolveLocale(DateTimeFormat.availableLocales(),
+    var r = ResolveLocale(callFunction(DateTimeFormat.availableLocales, DateTimeFormat),
                           lazyDateTimeFormatData.requestedLocales,
                           lazyDateTimeFormatData.localeOpt,
                           DateTimeFormat.relevantExtensionKeys,
@@ -2607,8 +2607,8 @@ function BasicFormatMatcher(options, formats) {
                 score -= removalPenalty;
             } else {
                 // Step 11.c.vi.
-                var optionsPropIndex = callFunction(std_Array_indexOf, values, optionsProp);
-                var formatPropIndex = callFunction(std_Array_indexOf, values, formatProp);
+                var optionsPropIndex = callFunction(ArrayIndexOf, values, optionsProp);
+                var formatPropIndex = callFunction(ArrayIndexOf, values, formatProp);
                 var delta = std_Math_max(std_Math_min(formatPropIndex - optionsPropIndex, 2), -2);
                 if (delta === 2)
                     score -= longMorePenalty;
@@ -2659,7 +2659,8 @@ function BestFitFormatMatcher(options, formats) {
 function Intl_DateTimeFormat_supportedLocalesOf(locales /*, options*/) {
     var options = arguments.length > 1 ? arguments[1] : undefined;
 
-    var availableLocales = dateTimeFormatInternalProperties.availableLocales();
+    var availableLocales = callFunction(dateTimeFormatInternalProperties.availableLocales,
+                                        dateTimeFormatInternalProperties);
     var requestedLocales = CanonicalizeLocaleList(locales);
     return SupportedLocales(availableLocales, requestedLocales, options);
 }
@@ -2706,9 +2707,8 @@ function dateTimeFormatFormatToBind() {
     var x = (date === undefined) ? std_Date_now() : ToNumber(date);
 
     // Step 1.a.iii.
-    return intl_FormatDateTime(this, x);
+    return intl_FormatDateTime(this, x, false);
 }
-
 
 /**
  * Returns a function bound to this DateTimeFormat that returns a String value
@@ -2727,12 +2727,25 @@ function Intl_DateTimeFormat_format_get() {
         var F = dateTimeFormatFormatToBind;
 
         // Step 1.b-d.
-        var bf = callFunction(std_Function_bind, F, this);
+        var bf = callFunction(FunctionBind, F, this);
         internals.boundFormat = bf;
     }
 
     // Step 2.
     return internals.boundFormat;
+}
+
+
+function Intl_DateTimeFormat_formatToParts() {
+    // Check "this DateTimeFormat object" per introduction of section 12.3.
+    getDateTimeFormatInternals(this, "formatToParts");
+
+    // Steps 1.a.i-ii
+    var date = arguments.length > 0 ? arguments[0] : undefined;
+    var x = (date === undefined) ? std_Date_now() : ToNumber(date);
+
+    // Step 1.a.iii.
+    return intl_FormatDateTime(this, x, true);
 }
 
 
@@ -2854,4 +2867,18 @@ function resolveICUPattern(pattern, result) {
                 _DefineDataProperty(result, "hour12", false);
         }
     }
+}
+
+function Intl_getCanonicalLocales(locales) {
+  let codes = CanonicalizeLocaleList(locales);
+  let result = [];
+
+  let len = codes.length;
+  let k = 0;
+
+  while (k < len) {
+    _DefineDataProperty(result, k, codes[k]);
+    k++;
+  }
+  return result;
 }

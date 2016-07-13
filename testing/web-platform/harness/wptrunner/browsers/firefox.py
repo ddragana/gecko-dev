@@ -3,6 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import os
+import platform
 import subprocess
 import sys
 
@@ -13,10 +14,18 @@ from mozprofile.permissions import ServerLocations
 from mozrunner import FirefoxRunner
 from mozcrash import mozcrash
 
-from .base import get_free_port, Browser, ExecutorBrowser, require_arg, cmd_arg, browser_command
+from .base import (get_free_port,
+                   Browser,
+                   ExecutorBrowser,
+                   require_arg,
+                   cmd_arg,
+                   browser_command)
 from ..executors import executor_kwargs as base_executor_kwargs
-from ..executors.executormarionette import MarionetteTestharnessExecutor, MarionetteRefTestExecutor
+from ..executors.executormarionette import (MarionetteTestharnessExecutor,
+                                            MarionetteRefTestExecutor,
+                                            MarionetteWdspecExecutor)
 from ..environment import hostnames
+
 
 here = os.path.join(os.path.split(__file__)[0])
 
@@ -24,10 +33,13 @@ __wptrunner__ = {"product": "firefox",
                  "check_args": "check_args",
                  "browser": "FirefoxBrowser",
                  "executor": {"testharness": "MarionetteTestharnessExecutor",
-                              "reftest": "MarionetteRefTestExecutor"},
+                              "reftest": "MarionetteRefTestExecutor",
+                              "wdspec": "MarionetteWdspecExecutor"},
                  "browser_kwargs": "browser_kwargs",
                  "executor_kwargs": "executor_kwargs",
-                 "env_options": "env_options"}
+                 "env_options": "env_options",
+                 "run_info_extras": "run_info_extras",
+                 "update_properties": "update_properties"}
 
 
 def check_args(**kwargs):
@@ -43,7 +55,8 @@ def browser_kwargs(**kwargs):
             "symbols_path": kwargs["symbols_path"],
             "stackwalk_binary": kwargs["stackwalk_binary"],
             "certutil_binary": kwargs["certutil_binary"],
-            "ca_certificate_path": kwargs["ssl_env"].ca_cert_path()}
+            "ca_certificate_path": kwargs["ssl_env"].ca_cert_path(),
+            "e10s": kwargs["gecko_e10s"]}
 
 
 def executor_kwargs(test_type, server_config, cache_manager, run_info_data,
@@ -51,8 +64,16 @@ def executor_kwargs(test_type, server_config, cache_manager, run_info_data,
     executor_kwargs = base_executor_kwargs(test_type, server_config,
                                            cache_manager, **kwargs)
     executor_kwargs["close_after_done"] = True
-    if run_info_data["debug"] and kwargs["timeout_multiplier"] is None:
-        executor_kwargs["timeout_multiplier"] = 3
+    if kwargs["timeout_multiplier"] is None:
+        if test_type == "reftest":
+            if run_info_data["debug"] or run_info_data.get("asan"):
+                executor_kwargs["timeout_multiplier"] = 4
+            else:
+                executor_kwargs["timeout_multiplier"] = 2
+        elif run_info_data["debug"] or run_info_data.get("asan"):
+            executor_kwargs["timeout_multiplier"] = 3
+    if test_type == "wdspec":
+        executor_kwargs["webdriver_binary"] = kwargs.get("webdriver_binary")
     return executor_kwargs
 
 
@@ -64,12 +85,21 @@ def env_options():
             "supports_debugger": True}
 
 
+def run_info_extras(**kwargs):
+    return {"e10s": kwargs["gecko_e10s"]}
+
+
+def update_properties():
+    return ["debug", "e10s", "os", "version", "processor", "bits"], {"debug", "e10s"}
+
+
 class FirefoxBrowser(Browser):
     used_ports = set()
+    init_timeout = 60
 
     def __init__(self, logger, binary, prefs_root, debug_info=None,
                  symbols_path=None, stackwalk_binary=None, certutil_binary=None,
-                 ca_certificate_path=None):
+                 ca_certificate_path=None, e10s=False):
         Browser.__init__(self, logger)
         self.binary = binary
         self.prefs_root = prefs_root
@@ -81,6 +111,7 @@ class FirefoxBrowser(Browser):
         self.stackwalk_binary = stackwalk_binary
         self.ca_certificate_path = ca_certificate_path
         self.certutil_binary = certutil_binary
+        self.e10s = e10s
 
     def start(self):
         self.marionette_port = get_free_port(2828, exclude=self.used_ports)
@@ -98,7 +129,15 @@ class FirefoxBrowser(Browser):
         self.profile.set_preferences({"marionette.defaultPrefs.enabled": True,
                                       "marionette.defaultPrefs.port": self.marionette_port,
                                       "dom.disable_open_during_load": False,
-                                      "network.dns.localDomains": ",".join(hostnames)})
+                                      "network.dns.localDomains": ",".join(hostnames),
+                                      "places.history.enabled": False})
+        if self.e10s:
+            self.profile.set_preferences({"browser.tabs.remote.autostart": True})
+
+        # Bug 1262954: winxp + e10s, disable hwaccel
+        if (self.e10s and platform.system() in ("Windows", "Microsoft") and
+            '5.1' in platform.version()):
+            self.profile.set_preferences({"layers.acceleration.disabled": True})
 
         if self.ca_certificate_path is not None:
             self.setup_ssl()

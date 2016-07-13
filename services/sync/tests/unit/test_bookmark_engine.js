@@ -12,6 +12,8 @@ Cu.import("resource://services-sync/util.js");
 Cu.import("resource://testing-common/services/sync/utils.js");
 Cu.import("resource://gre/modules/Promise.jsm");
 
+initTestLogging("Trace");
+
 Service.engineManager.register(BookmarksEngine);
 
 add_test(function bad_record_allIDs() {
@@ -71,7 +73,7 @@ add_test(function test_ID_caching() {
     _("New mobile ID: " + newMobileID);
   } catch (ex) {
     err = ex;
-    _("Error: " + Utils.exceptionStr(err));
+    _("Error: " + Log.exceptionStr(err));
   }
 
   do_check_true(!err);
@@ -97,7 +99,7 @@ function serverForFoo(engine) {
   });
 }
 
-add_test(function test_processIncoming_error_orderChildren() {
+add_task(function* test_processIncoming_error_orderChildren() {
   _("Ensure that _orderChildren() is called even when _processIncoming() throws an error.");
 
   let engine = new BookmarksEngine(Service);
@@ -144,11 +146,11 @@ add_test(function test_processIncoming_error_orderChildren() {
 
     let error;
     try {
-      engine.sync();
+      yield sync_engine_and_validate_telem(engine, true)
     } catch(ex) {
       error = ex;
     }
-    do_check_true(!!error);
+    ok(!!error);
 
     // Verify that the bookmark order has been applied.
     let new_children = store.createRecord(folder1_guid).children;
@@ -163,11 +165,11 @@ add_test(function test_processIncoming_error_orderChildren() {
     store.wipe();
     Svc.Prefs.resetBranch("");
     Service.recordManager.clearCache();
-    server.stop(run_next_test);
+    yield new Promise(resolve => server.stop(resolve));
   }
 });
 
-add_task(function test_restorePromptsReupload() {
+add_task(function* test_restorePromptsReupload() {
   _("Ensure that restoring from a backup will reupload all records.");
   let engine = new BookmarksEngine(Service);
   let store  = engine._store;
@@ -204,8 +206,7 @@ add_task(function test_restorePromptsReupload() {
     backupFile.append("t_b_e_" + Date.now() + ".json");
 
     _("Backing up to file " + backupFile.path);
-    backupFile.create(Ci.nsILocalFile.NORMAL_FILE_TYPE, 0600);
-    yield BookmarkJSONUtils.exportToFile(backupFile);
+    yield BookmarkJSONUtils.exportToFile(backupFile.path);
 
     _("Create a different record and sync.");
     let bmk2_id = PlacesUtils.bookmarks.insertBookmark(
@@ -217,17 +218,17 @@ add_task(function test_restorePromptsReupload() {
 
     let error;
     try {
-      engine.sync();
+      yield sync_engine_and_validate_telem(engine, false);
     } catch(ex) {
       error = ex;
-      _("Got error: " + Utils.exceptionStr(ex));
+      _("Got error: " + Log.exceptionStr(ex));
     }
     do_check_true(!error);
 
     _("Verify that there's only one bookmark on the server, and it's Thunderbird.");
     // Of course, there's also the Bookmarks Toolbar and Bookmarks Menu...
     let wbos = collection.keys(function (id) {
-      return ["menu", "toolbar", "mobile", folder1_guid].indexOf(id) == -1;
+      return ["menu", "toolbar", "mobile", "unfiled", folder1_guid].indexOf(id) == -1;
     });
     do_check_eq(wbos.length, 1);
     do_check_eq(wbos[0], bmk2_guid);
@@ -257,14 +258,14 @@ add_task(function test_restorePromptsReupload() {
     do_check_true(found);
 
     _("Have the correct number of IDs locally, too.");
-    do_check_eq(count, ["menu", "toolbar", folder1_id, bmk1_id].length);
+    do_check_eq(count, ["menu", "toolbar", "mobile", "unfiled", folder1_id, bmk1_id].length);
 
     _("Sync again. This'll wipe bookmarks from the server.");
     try {
-      engine.sync();
+      yield sync_engine_and_validate_telem(engine, false);
     } catch(ex) {
       error = ex;
-      _("Got error: " + Utils.exceptionStr(ex));
+      _("Got error: " + Log.exceptionStr(ex));
     }
     do_check_true(!error);
 
@@ -277,7 +278,9 @@ add_task(function test_restorePromptsReupload() {
     let folderWBOs   = payloads.filter(function (wbo) {
                          return ((wbo.type == "folder") &&
                                  (wbo.id   != "menu") &&
-                                 (wbo.id   != "toolbar"));
+                                 (wbo.id   != "toolbar") &&
+                                 (wbo.id   != "unfiled") &&
+                                 (wbo.id   != "mobile"));
                        });
 
     do_check_eq(bookmarkWBOs.length, 1);
@@ -394,7 +397,9 @@ add_test(function test_bookmark_guidMap_fail() {
   engine.lastSync = 1;   // So we don't back up.
 
   // Make building the GUID map fail.
-  store.getAllIDs = function () { throw "Nooo"; };
+
+  let pbt = PlacesUtils.promiseBookmarksTree;
+  PlacesUtils.promiseBookmarksTree = function() { return Promise.reject("Nooo"); };
 
   // Ensure that we throw when accessing _guidMap.
   engine._syncStartup();
@@ -420,6 +425,7 @@ add_test(function test_bookmark_guidMap_fail() {
   }
   do_check_eq(err, "Nooo");
 
+  PlacesUtils.promiseBookmarksTree = pbt;
   server.stop(run_next_test);
 });
 

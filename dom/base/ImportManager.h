@@ -159,7 +159,10 @@ public:
   // nullptr if the import is not yet ready.
   nsIDocument* GetImport()
   {
-    return mReady ? mDocument : nullptr;
+    if (!mReady) {
+      return nullptr;
+    }
+    return mDocument;
   }
 
   // There is only one referring link that is marked as primary link per
@@ -170,7 +173,10 @@ public:
   // a new import link is added to the manager.
   nsINode* GetMainReferrer()
   {
-    return mLinks.IsEmpty() ? nullptr : mLinks[mMainReferrer];
+    if (mLinks.IsEmpty()) {
+      return nullptr;
+    }
+    return mLinks[mMainReferrer];
   }
 
   // An import is not only blocked by its import children, but also
@@ -224,7 +230,7 @@ private:
 
   // List of pending ScriptLoaders that are waiting for this import
   // to finish.
-  nsTArray<nsRefPtr<nsScriptLoader>> mBlockedScriptLoaders;
+  nsTArray<RefPtr<nsScriptLoader>> mBlockedScriptLoaders;
 
   // There is always exactly one referrer link that is flagged as
   // the main referrer the primary link. This is the one that is
@@ -265,7 +271,7 @@ public:
 
   // It finds the predecessor for an import link node that runs its
   // scripts the latest among its predecessors.
-  nsRefPtr<ImportLoader> GetNearestPredecessor(nsINode* aNode);
+  ImportLoader* GetNearestPredecessor(nsINode* aNode);
 
 private:
   ImportMap mImports;

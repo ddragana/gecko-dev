@@ -7,14 +7,16 @@
 #define MOZILLA_GFX_HELPERSSKIA_H_
 
 #include "2D.h"
-#include "skia/SkCanvas.h"
-#include "skia/SkDashPathEffect.h"
-#include "skia/SkShader.h"
+#include "skia/include/core/SkCanvas.h"
+#include "skia/include/effects/SkDashPathEffect.h"
+#include "skia/include/core/SkShader.h"
 #ifdef USE_SKIA_GPU
-#include "skia/GrTypes.h"
+#include "skia/include/gpu/GrTypes.h"
 #endif
 #include "mozilla/Assertions.h"
 #include <vector>
+#include "RefPtrSkia.h"
+#include "nsDebug.h"
 
 namespace mozilla {
 namespace gfx {
@@ -29,7 +31,7 @@ GfxFormatToSkiaColorType(SurfaceFormat format)
     case SurfaceFormat::B8G8R8X8:
       // We probably need to do something here.
       return kBGRA_8888_SkColorType;
-    case SurfaceFormat::R5G6B5:
+    case SurfaceFormat::R5G6B5_UINT16:
       return kRGB_565_SkColorType;
     case SurfaceFormat::A8:
       return kAlpha_8_SkColorType;
@@ -39,19 +41,41 @@ GfxFormatToSkiaColorType(SurfaceFormat format)
 }
 
 static inline SurfaceFormat
-SkiaColorTypeToGfxFormat(SkColorType type)
+SkiaColorTypeToGfxFormat(SkColorType aColorType, SkAlphaType aAlphaType = kPremul_SkAlphaType)
 {
-  switch (type)
+  switch (aColorType)
   {
     case kBGRA_8888_SkColorType:
-      return SurfaceFormat::B8G8R8A8;
+      return aAlphaType == kOpaque_SkAlphaType ?
+               SurfaceFormat::B8G8R8X8 : SurfaceFormat::B8G8R8A8;
     case kRGB_565_SkColorType:
-      return SurfaceFormat::R5G6B5;
+      return SurfaceFormat::R5G6B5_UINT16;
     case kAlpha_8_SkColorType:
       return SurfaceFormat::A8;
     default:
       return SurfaceFormat::B8G8R8A8;
   }
+}
+
+static inline SkAlphaType
+GfxFormatToSkiaAlphaType(SurfaceFormat format)
+{
+  switch (format)
+  {
+    case SurfaceFormat::B8G8R8X8:
+    case SurfaceFormat::R5G6B5_UINT16:
+      return kOpaque_SkAlphaType;
+    default:
+      return kPremul_SkAlphaType;
+  }
+}
+
+static inline SkImageInfo
+MakeSkiaImageInfo(const IntSize& aSize, SurfaceFormat aFormat)
+{
+  return SkImageInfo::Make(aSize.width, aSize.height,
+                           GfxFormatToSkiaColorType(aFormat),
+                           GfxFormatToSkiaAlphaType(aFormat));
 }
 
 #ifdef USE_SKIA_GPU
@@ -65,7 +89,7 @@ GfxFormatToGrConfig(SurfaceFormat format)
     case SurfaceFormat::B8G8R8X8:
       // We probably need to do something here.
       return kBGRA_8888_GrPixelConfig;
-    case SurfaceFormat::R5G6B5:
+    case SurfaceFormat::R5G6B5_UINT16:
       return kRGB_565_GrPixelConfig;
     case SurfaceFormat::A8:
       return kAlpha_8_GrPixelConfig;
@@ -81,6 +105,14 @@ GfxMatrixToSkiaMatrix(const Matrix& mat, SkMatrix& retval)
     retval.setAll(SkFloatToScalar(mat._11), SkFloatToScalar(mat._21), SkFloatToScalar(mat._31),
                   SkFloatToScalar(mat._12), SkFloatToScalar(mat._22), SkFloatToScalar(mat._32),
                   0, 0, SK_Scalar1);
+}
+
+static inline void
+GfxMatrixToSkiaMatrix(const Matrix4x4& aMatrix, SkMatrix& aResult)
+{
+  aResult.setAll(SkFloatToScalar(aMatrix._11), SkFloatToScalar(aMatrix._21), SkFloatToScalar(aMatrix._41),
+                 SkFloatToScalar(aMatrix._12), SkFloatToScalar(aMatrix._22), SkFloatToScalar(aMatrix._42),
+                 SkFloatToScalar(aMatrix._14), SkFloatToScalar(aMatrix._24), SkFloatToScalar(aMatrix._44));
 }
 
 static inline SkPaint::Cap
@@ -119,7 +151,8 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
 {
   // Skia renders 0 width strokes with a width of 1 (and in black),
   // so we should just skip the draw call entirely.
-  if (!aOptions.mLineWidth) {
+  // Skia does not handle non-finite line widths.
+  if (!aOptions.mLineWidth || !IsFinite(aOptions.mLineWidth)) {
     return false;
   }
   aPaint.setStrokeWidth(SkFloatToScalar(aOptions.mLineWidth));
@@ -142,14 +175,12 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
 
     for (uint32_t i = 0; i < dashCount; i++) {
       pattern[i] = SkFloatToScalar(aOptions.mDashPattern[i % aOptions.mDashLength]);
-      if (!pattern[i])
-          pattern[i] = SK_ScalarNearlyZero;
     }
 
-    SkDashPathEffect* dash = SkDashPathEffect::Create(&pattern.front(),
-                                                      dashCount, 
+    sk_sp<SkPathEffect> dash = SkDashPathEffect::Make(&pattern.front(),
+                                                      dashCount,
                                                       SkFloatToScalar(aOptions.mDashOffset));
-    SkSafeUnref(aPaint.setPathEffect(dash));
+    aPaint.setPathEffect(dash);
   }
 
   aPaint.setStyle(SkPaint::kStroke_Style);
@@ -234,17 +265,23 @@ static inline SkColor ColorToSkColor(const Color &color, Float aAlpha)
                         ColorFloatToByte(color.g), ColorFloatToByte(color.b));
 }
 
+static inline SkPoint
+PointToSkPoint(const Point &aPoint)
+{
+  return SkPoint::Make(SkFloatToScalar(aPoint.x), SkFloatToScalar(aPoint.y));
+}
+
 static inline SkRect
 RectToSkRect(const Rect& aRect)
 {
-  return SkRect::MakeXYWH(SkFloatToScalar(aRect.x), SkFloatToScalar(aRect.y), 
+  return SkRect::MakeXYWH(SkFloatToScalar(aRect.x), SkFloatToScalar(aRect.y),
                           SkFloatToScalar(aRect.width), SkFloatToScalar(aRect.height));
 }
 
 static inline SkRect
 IntRectToSkRect(const IntRect& aRect)
 {
-  return SkRect::MakeXYWH(SkIntToScalar(aRect.x), SkIntToScalar(aRect.y), 
+  return SkRect::MakeXYWH(SkIntToScalar(aRect.x), SkIntToScalar(aRect.y),
                           SkIntToScalar(aRect.width), SkIntToScalar(aRect.height));
 }
 
@@ -275,7 +312,7 @@ SkRectToRect(const SkRect &aRect)
 }
 
 static inline SkShader::TileMode
-ExtendModeToTileMode(ExtendMode aMode)
+ExtendModeToTileMode(ExtendMode aMode, Axis aAxis)
 {
   switch (aMode)
   {
@@ -285,77 +322,55 @@ ExtendModeToTileMode(ExtendMode aMode)
       return SkShader::kRepeat_TileMode;
     case ExtendMode::REFLECT:
       return SkShader::kMirror_TileMode;
+    case ExtendMode::REPEAT_X:
+    {
+      return aAxis == Axis::X_AXIS
+             ? SkShader::kRepeat_TileMode
+             : SkShader::kClamp_TileMode;
+    }
+    case ExtendMode::REPEAT_Y:
+    {
+      return aAxis == Axis::Y_AXIS
+             ? SkShader::kRepeat_TileMode
+             : SkShader::kClamp_TileMode;
+    }
   }
   return SkShader::kClamp_TileMode;
 }
 
-// The following class was imported from Skia, which is under the 
-// following licence:
-//
-// Copyright (c) 2011 Google Inc. All rights reserved.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// * Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-// * Redistributions in binary form must reproduce the above
-// copyright notice, this list of conditions and the following disclaimer
-// in the documentation and/or other materials provided with the
-// distribution.
-// * Neither the name of Google Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-template <typename T> class RefPtrSkia {
-public:
-  RefPtrSkia() : fObj(NULL) {}
-  explicit RefPtrSkia(T* obj) : fObj(obj) { SkSafeRef(fObj); }
-  RefPtrSkia(const RefPtrSkia& o) : fObj(o.fObj) { SkSafeRef(fObj); }
-  ~RefPtrSkia() { SkSafeUnref(fObj); }
-
-  RefPtrSkia& operator=(const RefPtrSkia& rp) {
-    SkRefCnt_SafeAssign(fObj, rp.fObj);
-    return *this;
+static inline SkPaint::Hinting
+GfxHintingToSkiaHinting(FontHinting aHinting)
+{
+  switch (aHinting) {
+    case FontHinting::NONE:
+      return SkPaint::kNo_Hinting;
+    case FontHinting::LIGHT:
+      return SkPaint::kSlight_Hinting;
+    case FontHinting::NORMAL:
+      return SkPaint::kNormal_Hinting;
+    case FontHinting::FULL:
+      return SkPaint::kFull_Hinting;
   }
-  RefPtrSkia& operator=(T* obj) {
-    SkRefCnt_SafeAssign(fObj, obj);
-    return *this;
+  return SkPaint::kNormal_Hinting;
+}
+
+static inline FillRule GetFillRule(SkPath::FillType aFillType)
+{
+  switch (aFillType)
+  {
+  case SkPath::kWinding_FillType:
+    return FillRule::FILL_WINDING;
+  case SkPath::kEvenOdd_FillType:
+    return FillRule::FILL_EVEN_ODD;
+  case SkPath::kInverseWinding_FillType:
+  case SkPath::kInverseEvenOdd_FillType:
+  default:
+    NS_WARNING("Unsupported fill type\n");
+    break;
   }
 
-  T* get() const { return fObj; }
-  T& operator*() const { return *fObj; }
-  T* operator->() const { return fObj; }
-
-  RefPtrSkia& adopt(T* obj) {
-    SkSafeUnref(fObj);
-    fObj = obj;
-    return *this;
-  }
-
-  typedef T* RefPtrSkia::*unspecified_bool_type;
-  operator unspecified_bool_type() const {
-    return fObj ? &RefPtrSkia::fObj : NULL;
-  }
-
-private:
-  T* fObj;
-};
-
-// End of code imported from Skia.
+  return FillRule::FILL_EVEN_ODD;
+}
 
 } // namespace gfx
 } // namespace mozilla

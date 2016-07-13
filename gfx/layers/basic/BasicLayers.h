@@ -14,7 +14,6 @@
 #include "mozilla/WidgetUtils.h"        // for ScreenRotation
 #include "mozilla/layers/LayersTypes.h"  // for BufferMode, LayersBackend, etc
 #include "nsAString.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for gfxContext::AddRef, etc
 #include "nsRegion.h"                   // for nsIntRegion
@@ -84,7 +83,7 @@ public:
    * temporary results to aContext and then overpainting them with final
    * results, by using a temporary buffer when necessary. In BUFFERED
    * mode we always completely overwrite the contents of aContext's
-   * destination surface (within the clip region) using OPERATOR_SOURCE.
+   * destination surface (within the clip region) using OP_SOURCE.
    */
   void SetDefaultTarget(gfxContext* aContext);
   virtual void SetDefaultTargetConfiguration(BufferMode aDoubleBuffering, ScreenRotation aRotation);
@@ -138,15 +137,30 @@ public:
   void SetTransactionIncomplete() { mTransactionIncomplete = true; }
   bool IsTransactionIncomplete() { return mTransactionIncomplete; }
 
-  already_AddRefed<gfxContext> PushGroupForLayer(gfxContext* aContext, Layer* aLayer,
-                                                 const nsIntRegion& aRegion,
-                                                 bool* aNeedsClipToVisibleRegion);
+  struct PushedGroup
+  {
+    PushedGroup() : mFinalTarget(nullptr), mNeedsClipToVisibleRegion(false), mOperator(gfx::CompositionOp::OP_COUNT), mOpacity(0.0f){}
+    gfxContext* mFinalTarget;
+    RefPtr<gfxContext> mGroupTarget;
+    nsIntRegion mVisibleRegion;
+    bool mNeedsClipToVisibleRegion;
+    gfx::IntPoint mGroupOffset;
+    gfx::CompositionOp mOperator;
+    gfx::Float mOpacity;
+    RefPtr<gfx::SourceSurface> mMaskSurface;
+    gfx::Matrix mMaskTransform;
+  };
+
+  // Construct a PushedGroup for a specific layer.
+  // Return false if it has some errors in PushGroupForLayer(). Then, the
+  // "aGroupResult" is unavailable for future using.
+  bool PushGroupForLayer(gfxContext* aContext, Layer* aLayerContext, const nsIntRegion& aRegion, PushedGroup& aGroupResult);
+
+  void PopGroupForLayer(PushedGroup& aGroup);
 
   virtual bool IsCompositingCheap() override { return false; }
   virtual int32_t GetMaxTextureSize() const override { return INT32_MAX; }
   bool CompositorMightResample() { return mCompositorMightResample; }
-
-  virtual bool SupportsMixBlendModes(EnumSet<gfx::CompositionOp>& aMixBlendModes) override { return true; }
 
 protected:
   enum TransactionPhase {
@@ -182,11 +196,11 @@ protected:
   // buffers.
   nsIWidget* mWidget;
   // The default context for BeginTransaction.
-  nsRefPtr<gfxContext> mDefaultTarget;
+  RefPtr<gfxContext> mDefaultTarget;
   // The context to draw into.
-  nsRefPtr<gfxContext> mTarget;
+  RefPtr<gfxContext> mTarget;
   // Image factory we use.
-  nsRefPtr<ImageFactory> mFactory;
+  RefPtr<ImageFactory> mFactory;
 
   BufferMode mDoubleBuffering;
   BasicLayerManagerType mType;

@@ -49,7 +49,6 @@
 #include "rdf.h"
 #include "nsContentUtils.h"
 #include "nsIDateTimeFormat.h"
-#include "nsDateTimeFormatCID.h"
 #include "nsIScriptableDateFormat.h"
 #include "nsICollation.h"
 #include "nsCollationCID.h"
@@ -66,7 +65,7 @@ nsIRDFService* nsXULContentUtils::gRDF;
 nsIDateTimeFormat* nsXULContentUtils::gFormat;
 nsICollation *nsXULContentUtils::gCollation;
 
-extern PRLogModuleInfo* gXULTemplateLog;
+extern LazyLogModule gXULTemplateLog;
 
 #define XUL_RESOURCE(ident, uri) nsIRDFResource* nsXULContentUtils::ident
 #define XUL_LITERAL(ident, val) nsIRDFLiteral* nsXULContentUtils::ident
@@ -95,7 +94,7 @@ nsXULContentUtils::Init()
 
 #define XUL_LITERAL(ident, val)                                   \
   PR_BEGIN_MACRO                                                  \
-   rv = gRDF->GetLiteral(NS_LITERAL_STRING(val).get(), &(ident)); \
+   rv = gRDF->GetLiteral(MOZ_UTF16(val), &(ident));               \
    if (NS_FAILED(rv)) return rv;                                  \
   PR_END_MACRO
 
@@ -103,9 +102,9 @@ nsXULContentUtils::Init()
 #undef XUL_RESOURCE
 #undef XUL_LITERAL
 
-    rv = CallCreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &gFormat);
-    if (NS_FAILED(rv)) {
-        return rv;
+    gFormat = nsIDateTimeFormat::Create().take();
+    if (!gFormat) {
+        return NS_ERROR_FAILURE;
     }
 
     return NS_OK;

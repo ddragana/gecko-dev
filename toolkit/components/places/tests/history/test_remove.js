@@ -144,7 +144,7 @@ add_task(function* test_remove_many() {
   yield PlacesUtils.bookmarks.eraseEverything();
 
   do_print("Adding a witness page");
-  let WITNESS_URI = NetUtil.newURI("http://mozilla.com/test_browserhistory/test_remove/" + Math.random());;
+  let WITNESS_URI = NetUtil.newURI("http://mozilla.com/test_browserhistory/test_remove/" + Math.random());
   yield PlacesTestUtils.addVisits(WITNESS_URI);
   Assert.ok(page_in_database(WITNESS_URI), "Witness page added");
 
@@ -274,7 +274,7 @@ add_task(function* test_remove_many() {
 
 add_task(function* cleanup() {
   yield PlacesTestUtils.clearHistory();
-  yield PlacesUtils.bookmarks.eraseEverything();  
+  yield PlacesUtils.bookmarks.eraseEverything();
 });
 
 // Test the various error cases
@@ -342,6 +342,20 @@ add_task(function* test_error_cases() {
   }
 });
 
-function run_test() {
-  run_next_test();
-}
+add_task(function* test_orphans() {
+  let uri = NetUtil.newURI("http://moz.org/");
+  yield PlacesTestUtils.addVisits({ uri });
+
+  PlacesUtils.favicons.setAndFetchFaviconForPage(
+    uri, SMALLPNG_DATA_URI, true,  PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
+    null, Services.scriptSecurityManager.getSystemPrincipal());
+  PlacesUtils.annotations.setPageAnnotation(uri, "test", "restval", 0,
+                                            PlacesUtils.annotations.EXPIRE_NEVER);
+
+  yield PlacesUtils.history.remove(uri);
+  Assert.ok(!(yield PlacesTestUtils.isPageInDB(uri)), "Page should have been removed");
+  let db = yield PlacesUtils.promiseDBConnection();
+  let rows = yield db.execute(`SELECT (SELECT count(*) FROM moz_annos) +
+                                      (SELECT count(*) FROM moz_favicons) AS count`);
+  Assert.equal(rows[0].getResultByName("count"), 0, "Should not find orphans");
+});

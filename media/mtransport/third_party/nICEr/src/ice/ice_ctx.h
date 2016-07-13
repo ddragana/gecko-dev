@@ -61,7 +61,7 @@ typedef struct nr_ice_stun_server_ {
       UINT2 port;
     } dnsname;
   } u;
-  int index;
+  int id;
   int transport;
 } nr_ice_stun_server;
 
@@ -142,6 +142,8 @@ struct nr_ice_ctx_ {
   UINT4 gather_rto;
   UINT4 stun_delay;
 
+  UINT4 test_timer_divider;
+
   nr_ice_peer_ctx_head peers;
   nr_ice_stun_id_head ids;
 
@@ -150,13 +152,18 @@ struct nr_ice_ctx_ {
 
   nr_ice_trickle_candidate_cb trickle_cb;
   void *trickle_cb_arg;
+
+  char force_net_interface[MAXIFNAME];
 };
 
 int nr_ice_ctx_create(char *label, UINT4 flags, nr_ice_ctx **ctxp);
+int nr_ice_ctx_create_with_credentials(char *label, UINT4 flags, char* ufrag, char* pwd, nr_ice_ctx **ctxp);
 #define NR_ICE_CTX_FLAGS_OFFERER                           1
 #define NR_ICE_CTX_FLAGS_ANSWERER                          (1<<1)
 #define NR_ICE_CTX_FLAGS_AGGRESSIVE_NOMINATION             (1<<2)
 #define NR_ICE_CTX_FLAGS_LITE                              (1<<3)
+#define NR_ICE_CTX_FLAGS_RELAY_ONLY                        (1<<4)
+#define NR_ICE_CTX_FLAGS_ONLY_DEFAULT_ADDRS                (1<<5)
 
 int nr_ice_ctx_destroy(nr_ice_ctx **ctxp);
 int nr_ice_gather(nr_ice_ctx *ctx, NR_async_cb done_cb, void *cb_arg);
@@ -176,6 +183,9 @@ int nr_ice_ctx_set_interface_prioritizer(nr_ice_ctx *ctx, nr_interface_prioritiz
 int nr_ice_ctx_set_turn_tcp_socket_wrapper(nr_ice_ctx *ctx, nr_socket_wrapper_factory *wrapper);
 void nr_ice_ctx_set_socket_factory(nr_ice_ctx *ctx, nr_socket_factory *factory);
 int nr_ice_ctx_set_trickle_cb(nr_ice_ctx *ctx, nr_ice_trickle_candidate_cb cb, void *cb_arg);
+int nr_ice_ctx_hide_candidate(nr_ice_ctx *ctx, nr_ice_candidate *cand);
+int nr_ice_get_new_ice_ufrag(char** ufrag);
+int nr_ice_get_new_ice_pwd(char** pwd);
 
 #define NR_ICE_MAX_ATTRIBUTE_SIZE 256
 

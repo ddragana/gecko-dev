@@ -22,11 +22,15 @@
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
 #include "nsIWidget.h"
+#include <vector>
 
 namespace mozilla {
 namespace layers {
 
+class ClientLayerManager;
+class CompositorBridgeChild;
 class EditReply;
+class FixedSizeSmallShmemSectionAllocator;
 class ImageContainer;
 class Layer;
 class PLayerChild;
@@ -38,7 +42,6 @@ class TextureClient;
 class ThebesBuffer;
 class ThebesBufferData;
 class Transaction;
-
 
 /**
  * We want to share layer trees across thread contexts and address
@@ -114,11 +117,26 @@ class Transaction;
  */
 
 class ShadowLayerForwarder final : public CompositableForwarder
+                                 , public ShmemAllocator
+                                 , public LegacySurfaceDescriptorAllocator
 {
   friend class ClientLayerManager;
 
 public:
   virtual ~ShadowLayerForwarder();
+
+  virtual ShmemAllocator* AsShmemAllocator() override { return this; }
+
+  virtual ShadowLayerForwarder* AsLayerForwarder() override { return this; }
+
+  // TODO: confusingly, this returns a pointer to the CompositorBridgeChild.
+  // Right now ShadowLayerForwarder inherits TextureForwarder but it would
+  // probably be best if it didn't, since it forwards all of the relevent
+  // methods to CompositorBridgeChild.
+  virtual TextureForwarder* AsTextureForwarder() override;
+
+  virtual LegacySurfaceDescriptorAllocator*
+  AsLegacySurfaceDescriptorAllocator() override { return this; }
 
   /**
    * Setup the IPDL actor for aCompositable to be part of layers
@@ -128,7 +146,9 @@ public:
                        ImageContainer* aImageContainer) override;
 
   virtual PTextureChild* CreateTexture(const SurfaceDescriptor& aSharedData,
-                                       TextureFlags aFlags) override;
+                                       LayersBackend aLayersBackend,
+                                       TextureFlags aFlags,
+                                       uint64_t aSerial) override;
 
   /**
    * Adds an edit in the layers transaction in order to attach
@@ -155,7 +175,7 @@ public:
    */
   void BeginTransaction(const gfx::IntRect& aTargetBounds,
                         ScreenRotation aRotation,
-                        mozilla::dom::ScreenOrientation aOrientation);
+                        mozilla::dom::ScreenOrientationInternal aOrientation);
 
   /**
    * The following methods may only be called after BeginTransaction()
@@ -213,14 +233,15 @@ public:
   virtual void UseTiledLayerBuffer(CompositableClient* aCompositable,
                                    const SurfaceDescriptorTiles& aTileLayerDescriptor) override;
 
+  virtual bool DestroyInTransaction(PTextureChild* aTexture, bool synchronously) override;
+  virtual bool DestroyInTransaction(PCompositableChild* aCompositable, bool synchronously) override;
+
   virtual void RemoveTextureFromCompositable(CompositableClient* aCompositable,
                                              TextureClient* aTexture) override;
 
   virtual void RemoveTextureFromCompositableAsync(AsyncTransactionTracker* aAsyncTransactionTracker,
                                                   CompositableClient* aCompositable,
                                                   TextureClient* aTexture) override;
-
-  virtual void RemoveTexture(TextureClient* aTexture) override;
 
   /**
    * Communicate to the compositor that aRegion in the texture identified by aLayer
@@ -277,8 +298,6 @@ public:
 
   void Composite();
 
-  virtual void SendPendingAsyncMessges() override;
-
   /**
    * True if this is forwarding to a LayerManagerComposite.
    */
@@ -320,7 +339,7 @@ public:
    *   buffer, and the double-buffer pair is gone.
    */
 
-  // ISurfaceAllocator
+
   virtual bool AllocUnsafeShmem(size_t aSize,
                                 mozilla::ipc::SharedMemory::SharedMemoryType aType,
                                 mozilla::ipc::Shmem* aShmem) override;
@@ -330,8 +349,14 @@ public:
   virtual void DeallocShmem(mozilla::ipc::Shmem& aShmem) override;
 
   virtual bool IPCOpen() const override;
+
   virtual bool IsSameProcess() const override;
-  virtual base::ProcessId ParentPid() const override;
+
+  virtual MessageLoop* GetMessageLoop() const override { return mMessageLoop; }
+
+  virtual void CancelWaitForRecycle(uint64_t aTextureId) override;
+
+  virtual base::ProcessId GetParentPid() const override;
 
   /**
    * Construct a shadow of |aLayer| on the "other side", at the
@@ -344,10 +369,29 @@ public:
    */
   void SetIsFirstPaint() { mIsFirstPaint = true; }
 
+  void SetPaintSyncId(int32_t aSyncId) { mPaintSyncId = aSyncId; }
+
   static void PlatformSyncBeforeUpdate();
 
+  virtual bool AllocSurfaceDescriptor(const gfx::IntSize& aSize,
+                                      gfxContentType aContent,
+                                      SurfaceDescriptor* aBuffer) override;
+
+  virtual bool AllocSurfaceDescriptorWithCaps(const gfx::IntSize& aSize,
+                                              gfxContentType aContent,
+                                              uint32_t aCaps,
+                                              SurfaceDescriptor* aBuffer) override;
+
+  virtual void DestroySurfaceDescriptor(SurfaceDescriptor* aSurface) override;
+
+  virtual void UpdateFwdTransactionId() override;
+  virtual uint64_t GetFwdTransactionId() override;
+
+  // Returns true if aSurface wraps a Shmem.
+  static bool IsShmem(SurfaceDescriptor* aSurface);
+
 protected:
-  ShadowLayerForwarder();
+  explicit ShadowLayerForwarder(ClientLayerManager* aClientLayerManager);
 
 #ifdef DEBUG
   void CheckSurfaceDescriptor(const SurfaceDescriptor* aDescriptor) const;
@@ -357,15 +401,20 @@ protected:
 
   bool InWorkerThread();
 
+  CompositorBridgeChild* GetCompositorBridgeChild();
+
   RefPtr<LayerTransactionChild> mShadowManager;
+  RefPtr<CompositorBridgeChild> mCompositorBridgeChild;
 
 private:
 
+  ClientLayerManager* mClientLayerManager;
   Transaction* mTxn;
-  std::vector<AsyncChildMessageData> mPendingAsyncMessages;
+  MessageLoop* mMessageLoop;
   DiagnosticTypes mDiagnosticTypes;
   bool mIsFirstPaint;
   bool mWindowOverlayChanged;
+  int32_t mPaintSyncId;
   InfallibleTArray<PluginWindowData> mPluginWindowData;
 };
 

@@ -9,12 +9,13 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "nsAutoPtr.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsIObserver.h"
 #include "nsTArray.h"
-#include "nsRefPtr.h"
+#include "mozilla/RefPtr.h"
 
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 
@@ -25,7 +26,7 @@ class PrincipalInfo;
 namespace dom {
 
 namespace workers {
-class WorkerFeature;
+class WorkerHolder;
 } // namespace workers
 
 class BroadcastChannelChild;
@@ -36,6 +37,8 @@ class BroadcastChannel final
   , public nsIIPCBackgroundChildCreateCallback
   , public nsIObserver
 {
+  friend class BroadcastChannelChild;
+
   NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
   NS_DECL_NSIOBSERVER
 
@@ -46,8 +49,6 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(BroadcastChannel,
                                            DOMEventTargetHelper)
-
-  static bool IsEnabled(JSContext* aCx, JSObject* aGlobal);
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -74,27 +75,21 @@ public:
 
   virtual void AddEventListener(const nsAString& aType,
                                 EventListener* aCallback,
-                                bool aCapture,
+                                const AddEventListenerOptionsOrBoolean& aOptions,
                                 const Nullable<bool>& aWantsUntrusted,
                                 ErrorResult& aRv) override;
   virtual void RemoveEventListener(const nsAString& aType,
                                    EventListener* aCallback,
-                                   bool aCapture,
+                                   const EventListenerOptionsOrBoolean& aOptions,
                                    ErrorResult& aRv) override;
 
   void Shutdown();
 
-  bool IsClosed() const
-  {
-    return mState != StateActive;
-  }
-
 private:
-  BroadcastChannel(nsPIDOMWindow* aWindow,
+  BroadcastChannel(nsPIDOMWindowInner* aWindow,
                    const PrincipalInfo& aPrincipalInfo,
                    const nsACString& aOrigin,
-                   const nsAString& aChannel,
-                   bool aPrivateBrowsing);
+                   const nsAString& aChannel);
 
   ~BroadcastChannel();
 
@@ -110,16 +105,17 @@ private:
     return mIsKeptAlive;
   }
 
-  nsRefPtr<BroadcastChannelChild> mActor;
-  nsTArray<nsRefPtr<BroadcastChannelMessage>> mPendingMessages;
+  void RemoveDocFromBFCache();
 
-  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
+  RefPtr<BroadcastChannelChild> mActor;
+  nsTArray<RefPtr<BroadcastChannelMessage>> mPendingMessages;
+
+  nsAutoPtr<workers::WorkerHolder> mWorkerHolder;
 
   nsAutoPtr<PrincipalInfo> mPrincipalInfo;
 
   nsCString mOrigin;
   nsString mChannel;
-  bool mPrivateBrowsing;
 
   bool mIsKeptAlive;
 

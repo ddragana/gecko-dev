@@ -1,6 +1,6 @@
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 
-let startupOrder = [];
+var startupOrder = [];
 
 function mockAddonProvider(name) {
   let mockProvider = {
@@ -17,16 +17,18 @@ function mockAddonProvider(name) {
     },
     getAddonByID(id, callback) {
       if (!this.hasStarted) {
-        unsafeAccess = true;
+        this.unsafeAccess = true;
       }
       callback(null);
     },
 
-    get name() name,
+    get name() {
+      return name;
+    },
   };
 
   return mockProvider;
-};
+}
 
 function run_test() {
   run_next_test();

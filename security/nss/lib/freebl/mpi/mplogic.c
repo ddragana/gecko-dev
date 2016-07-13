@@ -403,14 +403,13 @@ mp_err mpl_get_bits(const mp_int *a, mp_size lsbNum, mp_size numBits)
   returns number of significnant bits in abs(a).
   returns 1 if value is zero.
  */
-mp_err mpl_significant_bits(const mp_int *a)
+mp_size mpl_significant_bits(const mp_int *a)
 {
-  mp_err bits 	= 0;
+  mp_size bits = 0;
   int    ix;
 
   ARGCHK(a != NULL, MP_BADARG);
 
-  ix = MP_USED(a);
   for (ix = MP_USED(a); ix > 0; ) {
     mp_digit d;
     d = MP_DIGIT(a, --ix);

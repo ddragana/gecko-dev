@@ -9,7 +9,6 @@
 Author: Armen Zambrano G.
 """
 import os
-import stat
 
 from mozharness.base.script import PreScriptAction
 from mozharness.base.vcs.vcsbase import VCSScript
@@ -23,8 +22,6 @@ class VCSToolsScript(VCSScript):
     '''
     @PreScriptAction('checkout')
     def _pre_checkout(self, action):
-        dirs = self.query_abs_dirs()
-
         if self.config.get('developer_mode'):
             # We put them on base_work_dir to prevent the clobber action
             # to delete them before we use them
@@ -44,15 +41,17 @@ class VCSToolsScript(VCSScript):
             for vcs_tool in VCS_TOOLS:
                 file_path = self.which(vcs_tool)
 
+                if not file_path:
+                    file_path = self.query_exe(vcs_tool)
+
                 # If the tool is specified and it is a list is
                 # because we're running on Windows and we won't check
                 if type(self.query_exe(vcs_tool)) is list:
                     continue
 
-                if not self.is_exe(file_path):
-                    self.critical("%s is not executable." % file_path)
-
                 if file_path is None:
                     self.fatal("This machine is missing %s, if this is your "
                                "local machine you can use --cfg "
                                "developer_config.py" % vcs_tool)
+                elif not self.is_exe(file_path):
+                    self.critical("%s is not executable." % file_path)

@@ -7,6 +7,11 @@
 #include "GLContext.h"
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
 #include "WebGLContext.h"
+#include "WebGLFormats.h"
+
+#ifdef FOO
+#error FOO is already defined! We use FOO() macros to keep things succinct in this file.
+#endif
 
 namespace mozilla {
 
@@ -14,6 +19,21 @@ WebGLExtensionColorBufferHalfFloat::WebGLExtensionColorBufferHalfFloat(WebGLCont
     : WebGLExtensionBase(webgl)
 {
     MOZ_ASSERT(IsSupported(webgl), "Don't construct extension if unsupported.");
+
+    auto& fua = webgl->mFormatUsage;
+
+    auto fnUpdateUsage = [&fua](GLenum sizedFormat, webgl::EffectiveFormat effFormat) {
+        auto usage = fua->EditUsage(effFormat);
+        usage->SetRenderable();
+        fua->AllowRBFormat(sizedFormat, usage);
+    };
+
+#define FOO(x) fnUpdateUsage(LOCAL_GL_ ## x, webgl::EffectiveFormat::x)
+
+    FOO(RGBA16F);
+    FOO(RGB16F);
+
+#undef FOO
 }
 
 WebGLExtensionColorBufferHalfFloat::~WebGLExtensionColorBufferHalfFloat()
@@ -23,11 +43,7 @@ WebGLExtensionColorBufferHalfFloat::~WebGLExtensionColorBufferHalfFloat()
 bool
 WebGLExtensionColorBufferHalfFloat::IsSupported(const WebGLContext* webgl)
 {
-    gl::GLContext* gl = webgl->GL();
-
-    // ANGLE doesn't support ReadPixels from a RGBA16F with RGBA/FLOAT.
-    return gl->IsSupported(gl::GLFeature::renderbuffer_color_half_float) ||
-           gl->IsANGLE();
+    return webgl->GL()->IsSupported(gl::GLFeature::renderbuffer_color_half_float);
 }
 
 IMPL_WEBGL_EXTENSION_GOOP(WebGLExtensionColorBufferHalfFloat, EXT_color_buffer_half_float)

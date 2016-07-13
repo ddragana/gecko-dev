@@ -89,9 +89,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
 
-    XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &FdWatcher::StopWatching));
+    XRE_GetIOMessageLoop()->PostTask(mozilla::NewRunnableMethod(this, &FdWatcher::StopWatching));
 
     return NS_OK;
   }
@@ -180,10 +178,15 @@ private:
 
 #endif // XP_UNIX }
 
-
 class nsDumpUtils
 {
 public:
+
+  enum Mode {
+    CREATE,
+    CREATE_UNIQUE
+  };
+
   /**
    * This function creates a new unique file based on |aFilename| in a
    * world-readable temp directory. This is the system temp directory
@@ -193,7 +196,8 @@ public:
    */
   static nsresult OpenTempFile(const nsACString& aFilename,
                                nsIFile** aFile,
-                               const nsACString& aFoldername = EmptyCString());
+                               const nsACString& aFoldername = EmptyCString(),
+                               Mode aMode = CREATE_UNIQUE);
 };
 
 #endif

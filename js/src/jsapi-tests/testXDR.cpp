@@ -12,11 +12,18 @@
 
 #include "jsscriptinlines.h"
 
-using mozilla::UniquePtr;
+static bool
+GetBuildId(JS::BuildIdCharVector* buildId)
+{
+    const char buildid[] = "testXDR";
+    return buildId->append(buildid, sizeof(buildid));
+}
 
 static JSScript*
 FreezeThaw(JSContext* cx, JS::HandleScript script)
 {
+    JS::SetBuildIdOp(cx, GetBuildId);
+
     // freeze
     uint32_t nbytes;
     void* memory = JS_EncodeScript(cx, script, &nbytes);
@@ -63,7 +70,7 @@ BEGIN_TEST(testXDR_bug506491)
     CHECK(JS_ExecuteScript(cx, script, &v2));
 
     // try to break the Block object that is the parent of f
-    JS_GC(rt);
+    JS_GC(cx);
 
     // confirm
     EVAL("f() === 'ok';\n", &v2);
@@ -132,7 +139,7 @@ BEGIN_TEST(testXDR_sourceMap)
         CHECK(script);
 
         size_t len = strlen(*sm);
-        UniquePtr<char16_t,JS::FreePolicy> expected_wrapper(js::InflateString(cx, *sm, &len));
+        JS::UniqueTwoByteChars expected_wrapper(js::InflateString(cx, *sm, &len));
         char16_t *expected = expected_wrapper.get();
         CHECK(expected);
 

@@ -917,7 +917,9 @@ sftk_freeObjectData(SFTKObject *object) {
 static void
 sftk_InitFreeList(SFTKObjectFreeList *list)
 {
-    list->lock = PZ_NewLock(nssILockObject);
+    if (!list->lock) {
+        list->lock = PZ_NewLock(nssILockObject);
+    }
 }
 
 void sftk_InitFreeLists(void)
@@ -1174,7 +1176,6 @@ sftk_DeleteObject(SFTKSession *session, SFTKObject *object)
 {
     SFTKSlot *slot = sftk_SlotFromSession(session);
     SFTKSessionObject *so = sftk_narrowToSessionObject(object);
-    SFTKTokenObject *to = sftk_narrowToTokenObject(object);
     CK_RV crv = CKR_OK;
     PRUint32 index = sftk_hash(object->handle, slot->sessObjHashSize);
 
@@ -1191,8 +1192,10 @@ sftk_DeleteObject(SFTKSession *session, SFTKObject *object)
 	sftk_FreeObject(object); /* free the reference owned by the queue */
     } else {
 	SFTKDBHandle *handle = sftk_getDBForTokenObject(slot, object->handle);
-
+#ifdef DEBUG
+        SFTKTokenObject *to = sftk_narrowToTokenObject(object);
 	PORT_Assert(to);
+#endif
 	crv = sftkdb_DestroyObject(handle, object->handle);
 	sftk_freeDB(handle);
     } 
@@ -1899,7 +1902,6 @@ SFTKObject *
 sftk_NewTokenObject(SFTKSlot *slot, SECItem *dbKey, CK_OBJECT_HANDLE handle)
 {
     SFTKObject *object = NULL;
-    SFTKTokenObject *tokObject = NULL;
     PRBool hasLocks = PR_FALSE;
     CK_RV crv;
 
@@ -1908,7 +1910,6 @@ sftk_NewTokenObject(SFTKSlot *slot, SECItem *dbKey, CK_OBJECT_HANDLE handle)
     if (object == NULL) {
 	return NULL;
     }
-    tokObject = (SFTKTokenObject *) object;
 
     object->handle = handle;
     /* every object must have a class, if we can't get it, the object
@@ -1930,11 +1931,8 @@ sftk_NewTokenObject(SFTKSlot *slot, SECItem *dbKey, CK_OBJECT_HANDLE handle)
 
     return object;
 loser:
-    if (object) {
-	(void) sftk_DestroyObject(object);
-    }
+    (void) sftk_DestroyObject(object);
     return NULL;
-
 }
 
 SFTKTokenObject *

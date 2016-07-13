@@ -7,11 +7,12 @@
 #include "CertVerifier.h"
 #include "OCSPCache.h"
 #include "gtest/gtest.h"
+#include "mozilla/Casting.h"
+#include "mozilla/Snprintf.h"
 #include "nss.h"
 #include "pkix/pkixtypes.h"
 #include "pkixtestutil.h"
 #include "prerr.h"
-#include "prprf.h"
 #include "secerr.h"
 
 using namespace mozilla::pkix;
@@ -22,15 +23,18 @@ template <size_t N>
 inline Input
 LiteralInput(const char(&valueString)[N])
 {
+  // Ideally we would use mozilla::BitwiseCast() here rather than
+  // reinterpret_cast for better type checking, but the |N - 1| part trips
+  // static asserts.
   return Input(reinterpret_cast<const uint8_t(&)[N - 1]>(valueString));
 }
 
 const int MaxCacheEntries = 1024;
 
-class OCSPCacheTest : public ::testing::Test
+class psm_OCSPCacheTest : public ::testing::Test
 {
 protected:
-  OCSPCacheTest() : now(Now()) { }
+  psm_OCSPCacheTest() : now(Now()) { }
 
   static void SetUpTestCase()
   {
@@ -66,7 +70,7 @@ Input fakeKey000(LiteralInput("key000"));
 Input fakeKey001(LiteralInput("key001"));
 Input fakeSerial0000(LiteralInput("0000"));
 
-TEST_F(OCSPCacheTest, TestPutAndGet)
+TEST_F(psm_OCSPCacheTest, TestPutAndGet)
 {
   Input fakeSerial000(LiteralInput("000"));
   Input fakeSerial001(LiteralInput("001"));
@@ -80,12 +84,13 @@ TEST_F(OCSPCacheTest, TestPutAndGet)
                          resultOut, timeOut));
 }
 
-TEST_F(OCSPCacheTest, TestVariousGets)
+TEST_F(psm_OCSPCacheTest, TestVariousGets)
 {
   SCOPED_TRACE("");
   for (int i = 0; i < MaxCacheEntries; i++) {
     uint8_t serialBuf[8];
-    PR_snprintf(reinterpret_cast<char*>(serialBuf), sizeof(serialBuf), "%04d", i);
+    snprintf(mozilla::BitwiseCast<char*, uint8_t*>(serialBuf), sizeof(serialBuf),
+             "%04d", i);
     Input fakeSerial;
     ASSERT_EQ(Success, fakeSerial.Init(serialBuf, 4));
     Time timeIn(now);
@@ -127,14 +132,15 @@ TEST_F(OCSPCacheTest, TestVariousGets)
                          resultOut, timeOut));
 }
 
-TEST_F(OCSPCacheTest, TestEviction)
+TEST_F(psm_OCSPCacheTest, TestEviction)
 {
   SCOPED_TRACE("");
   // By putting more distinct entries in the cache than it can hold,
   // we cause the least recently used entry to be evicted.
   for (int i = 0; i < MaxCacheEntries + 1; i++) {
     uint8_t serialBuf[8];
-    PR_snprintf(reinterpret_cast<char*>(serialBuf), sizeof(serialBuf), "%04d", i);
+    snprintf(mozilla::BitwiseCast<char*, uint8_t*>(serialBuf), sizeof(serialBuf),
+             "%04d", i);
     Input fakeSerial;
     ASSERT_EQ(Success, fakeSerial.Init(serialBuf, 4));
     Time timeIn(now);
@@ -149,7 +155,7 @@ TEST_F(OCSPCacheTest, TestEviction)
                          resultOut, timeOut));
 }
 
-TEST_F(OCSPCacheTest, TestNoEvictionForRevokedResponses)
+TEST_F(psm_OCSPCacheTest, TestNoEvictionForRevokedResponses)
 {
   SCOPED_TRACE("");
   CertID notEvicted(fakeIssuer1, fakeKey000, fakeSerial0000);
@@ -159,7 +165,8 @@ TEST_F(OCSPCacheTest, TestNoEvictionForRevokedResponses)
   // we cause the least recently used entry that isn't revoked to be evicted.
   for (int i = 1; i < MaxCacheEntries + 1; i++) {
     uint8_t serialBuf[8];
-    PR_snprintf(reinterpret_cast<char*>(serialBuf), sizeof(serialBuf), "%04d", i);
+    snprintf(mozilla::BitwiseCast<char*, uint8_t*>(serialBuf), sizeof(serialBuf),
+             "%04d", i);
     Input fakeSerial;
     ASSERT_EQ(Success, fakeSerial.Init(serialBuf, 4));
     Time timeIn(now);
@@ -178,14 +185,15 @@ TEST_F(OCSPCacheTest, TestNoEvictionForRevokedResponses)
   ASSERT_FALSE(cache.Get(evicted, resultOut, timeOut));
 }
 
-TEST_F(OCSPCacheTest, TestEverythingIsRevoked)
+TEST_F(psm_OCSPCacheTest, TestEverythingIsRevoked)
 {
   SCOPED_TRACE("");
   Time timeIn(now);
   // Fill up the cache with revoked responses.
   for (int i = 0; i < MaxCacheEntries; i++) {
     uint8_t serialBuf[8];
-    PR_snprintf(reinterpret_cast<char*>(serialBuf), sizeof(serialBuf), "%04d", i);
+    snprintf(mozilla::BitwiseCast<char*, uint8_t*>(serialBuf), sizeof(serialBuf),
+             "%04d", i);
     Input fakeSerial;
     ASSERT_EQ(Success, fakeSerial.Init(serialBuf, 4));
     Time timeIn(now);
@@ -220,7 +228,7 @@ TEST_F(OCSPCacheTest, TestEverythingIsRevoked)
   ASSERT_EQ(Result::ERROR_REVOKED_CERTIFICATE, result);
 }
 
-TEST_F(OCSPCacheTest, VariousIssuers)
+TEST_F(psm_OCSPCacheTest, VariousIssuers)
 {
   SCOPED_TRACE("");
   Time timeIn(now);
@@ -241,7 +249,7 @@ TEST_F(OCSPCacheTest, VariousIssuers)
                          resultOut, timeOut));
 }
 
-TEST_F(OCSPCacheTest, Times)
+TEST_F(psm_OCSPCacheTest, Times)
 {
   SCOPED_TRACE("");
   CertID certID(fakeIssuer1, fakeKey000, fakeSerial0000);
@@ -265,7 +273,7 @@ TEST_F(OCSPCacheTest, Times)
             TimeFromElapsedSecondsAD(50));
 }
 
-TEST_F(OCSPCacheTest, NetworkFailure)
+TEST_F(psm_OCSPCacheTest, NetworkFailure)
 {
   SCOPED_TRACE("");
   CertID certID(fakeIssuer1, fakeKey000, fakeSerial0000);

@@ -12,14 +12,13 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ToJSValue.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsJSUtils.h"
 #include "nsWrapperCache.h"
 
 struct JSContext;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 namespace dom {
@@ -31,9 +30,9 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MMICall)
 
-  MMICall(nsPIDOMWindow* aWindow, const nsAString& aServiceCode);
+  MMICall(nsPIDOMWindowInner* aWindow, const nsAString& aServiceCode);
 
-  nsPIDOMWindow*
+  nsPIDOMWindowInner*
   GetParentObject() const;
 
   virtual JSObject*
@@ -49,9 +48,9 @@ public:
 private:
   ~MMICall();
 
-  nsCOMPtr<nsPIDOMWindow> mWindow;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
   nsString mServiceCode;
-  nsRefPtr<Promise> mPromise;
+  RefPtr<Promise> mPromise;
 };
 
 } // namespace dom

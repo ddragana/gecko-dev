@@ -7,7 +7,6 @@
 #ifndef nsGeoPosition_h
 #define nsGeoPosition_h
 
-#include "nsAutoPtr.h"
 #include "nsIDOMGeoPositionCoords.h"
 #include "nsIDOMGeoPosition.h"
 #include "nsString.h"
@@ -65,7 +64,7 @@ public:
 private:
   ~nsGeoPosition();
   long long mTimestamp;
-  nsRefPtr<nsIDOMGeoPositionCoords> mCoords;
+  RefPtr<nsIDOMGeoPositionCoords> mCoords;
 };
 
 ////////////////////////////////////////////////////
@@ -100,7 +99,7 @@ public:
   nsIDOMGeoPosition* GetWrappedGeoPosition() { return mGeoPosition; }
 
 private:
-  nsRefPtr<Coordinates> mCoordinates;
+  RefPtr<Coordinates> mCoordinates;
   nsCOMPtr<nsISupports> mParent;
   nsCOMPtr<nsIDOMGeoPosition> mGeoPosition;
 };
@@ -135,7 +134,7 @@ public:
 
   Nullable<double> GetSpeed() const;
 private:
-  nsRefPtr<Position> mPosition;
+  RefPtr<Position> mPosition;
   nsCOMPtr<nsIDOMGeoPositionCoords> mCoords;
 };
 

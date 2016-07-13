@@ -18,6 +18,8 @@ def Libxul(name):
     DELAYLOAD_DLLS += [
         'comdlg32.dll',
         'dbghelp.dll',
+        'netapi32.dll',
+        'PowrProf.dll',
         'psapi.dll',
         'rasapi32.dll',
         'rasdlg.dll',
@@ -54,6 +56,8 @@ def Libxul(name):
     if not CONFIG['JS_SHARED_LIBRARY']:
         LIBRARY_DEFINES['STATIC_EXPORTABLE_JS_API'] = True
 
+    if CONFIG['MOZ_NEEDS_LIBATOMIC']:
+        OS_LIBS += ['atomic']
 
 Libxul('xul')
 
@@ -91,8 +95,6 @@ if CONFIG['OS_ARCH'] == 'WINNT' and not CONFIG['GNU_CC']:
         '/xpcom/base',
     ]
 
-FAIL_ON_WARNINGS = True
-
 DIRS += ['gtest']
 
 # js needs to come after xul for now, because it is an archive and its content
@@ -100,11 +102,6 @@ DIRS += ['gtest']
 USE_LIBS += [
     'js',
 ]
-
-if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
-    USE_LIBS += [
-        'sandboxbroker',
-    ]
 
 USE_LIBS += [
     'gkmedias',
@@ -120,7 +117,7 @@ if CONFIG['USE_ICU']:
         'icu',
     ]
 
-if CONFIG['MOZ_WIDGET_GTK'] and CONFIG['MOZ_ENABLE_GTK3']:
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk3':
     USE_LIBS += [
         'mozgtk_stub',
     ]
@@ -130,7 +127,7 @@ if CONFIG['MOZ_JPROF']:
         'jprof',
     ]
 
-if CONFIG['MOZ_WIDGET_GTK'] or CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt' or \
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT'] or \
         CONFIG['MOZ_TREE_FREETYPE']:
     USE_LIBS += [
         'freetype',
@@ -143,7 +140,6 @@ if CONFIG['MOZ_WEBRTC']:
     if CONFIG['OS_TARGET'] == 'WINNT':
         OS_LIBS += [
             'secur32',
-            'crypt32',
             'iphlpapi',
             'strmiids',
             'dmoguids',
@@ -157,7 +153,8 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     OS_LIBS += [
         '-framework OpenGL',
         '-framework SystemConfiguration',
-        '-framework QTKit',
+        '-framework AVFoundation',
+        '-framework CoreMedia',
         '-framework IOKit',
         '-F%s' % CONFIG['MACOS_PRIVATE_FRAMEWORKS_DIR'],
         '-framework CoreUI',
@@ -187,6 +184,7 @@ if CONFIG['OS_ARCH'] == 'FreeBSD':
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     OS_LIBS += [
+        'crypt32',
         'shell32',
         'ole32',
         'version',
@@ -211,20 +209,21 @@ if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android':
 
 OS_LIBS += CONFIG['MOZ_CAIRO_OSLIBS']
 OS_LIBS += CONFIG['MOZ_WEBRTC_X11_LIBS']
+OS_LIBS += CONFIG['MOZ_SERVO_LIBS']
 
-if CONFIG['MOZ_NATIVE_JPEG']:
+if CONFIG['MOZ_SYSTEM_JPEG']:
     OS_LIBS += CONFIG['MOZ_JPEG_LIBS']
 
-if CONFIG['MOZ_NATIVE_PNG']:
+if CONFIG['MOZ_SYSTEM_PNG']:
     OS_LIBS += CONFIG['MOZ_PNG_LIBS']
 
-if CONFIG['MOZ_NATIVE_HUNSPELL']:
+if CONFIG['MOZ_SYSTEM_HUNSPELL']:
     OS_LIBS += CONFIG['MOZ_HUNSPELL_LIBS']
 
-if CONFIG['MOZ_NATIVE_LIBEVENT']:
+if CONFIG['MOZ_SYSTEM_LIBEVENT']:
     OS_LIBS += CONFIG['MOZ_LIBEVENT_LIBS']
 
-if CONFIG['MOZ_NATIVE_LIBVPX']:
+if CONFIG['MOZ_SYSTEM_LIBVPX']:
     OS_LIBS += CONFIG['MOZ_LIBVPX_LIBS']
 
 if not CONFIG['MOZ_TREE_PIXMAN']:
@@ -288,8 +287,8 @@ if CONFIG['OS_ARCH'] == 'OpenBSD':
 if CONFIG['MOZ_ENABLE_DBUS']:
     OS_LIBS += CONFIG['MOZ_DBUS_GLIB_LIBS']
 
-if CONFIG['MOZ_WIDGET_GTK']:
-    if CONFIG['MOZ_ENABLE_GTK3']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+    if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk3':
         OS_LIBS += [l for l in CONFIG['TK_LIBS']
             if l not in ('-lgtk-3', '-lgdk-3')]
     else:
@@ -302,13 +301,6 @@ if CONFIG['MOZ_WIDGET_GTK']:
     OS_LIBS += [
         'gthread-2.0',
     ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    OS_LIBS += CONFIG['XLDFLAGS']
-    OS_LIBS += CONFIG['XLIBS']
-    OS_LIBS += CONFIG['XT_LIBS']
-    OS_LIBS += CONFIG['MOZ_QT_LIBS']
-    OS_LIBS += CONFIG['MOZ_PANGO_LIBS']
 
 if CONFIG['MOZ_ENABLE_STARTUP_NOTIFICATION']:
     OS_LIBS += CONFIG['MOZ_STARTUP_NOTIFICATION_LIBS']
@@ -339,6 +331,7 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'comdlg32',
         'imm32',
         'msimg32',
+        'netapi32',
         'shlwapi',
         'psapi',
         'ws2_32',
@@ -356,18 +349,13 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'wbemuuid',
         'wintrust',
         'wtsapi32',
-        'locationapi'
+        'locationapi',
+        'sapi',
     ]
     if CONFIG['ACCESSIBILITY']:
         OS_LIBS += [
             'oleacc',
         ]
-
-if CONFIG['MOZ_ENABLE_QT']:
-    OS_LIBS += CONFIG['XEXT_LIBS']
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa' and CONFIG['MOZ_GSTREAMER']:
-    OS_LIBS += CONFIG['GSTREAMER_LIBS']
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     OS_LIBS += [

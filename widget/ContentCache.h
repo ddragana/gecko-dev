@@ -41,6 +41,9 @@ protected:
   // Whole text in the target
   nsString mText;
 
+  // Start offset of the composition string.
+  uint32_t mCompositionStart;
+
   struct Selection final
   {
     // Following values are offset in "flat text".
@@ -104,6 +107,18 @@ protected:
       NS_ASSERTION(IsValid(),
                    "The caller should check if the selection is valid");
       return Reversed() ? mAnchor - mFocus : mFocus - mAnchor;
+    }
+    LayoutDeviceIntRect StartCharRect() const
+    {
+      NS_ASSERTION(IsValid(),
+                   "The caller should check if the selection is valid");
+      return Reversed() ? mFocusCharRect : mAnchorCharRect;
+    }
+    LayoutDeviceIntRect EndCharRect() const
+    {
+      NS_ASSERTION(IsValid(),
+                   "The caller should check if the selection is valid");
+      return Reversed() ? mAnchorCharRect : mFocusCharRect;
     }
   } mSelection;
 
@@ -210,8 +225,9 @@ protected:
     }
     LayoutDeviceIntRect GetRect(uint32_t aOffset) const;
     LayoutDeviceIntRect GetUnionRect(uint32_t aOffset, uint32_t aLength) const;
-    LayoutDeviceIntRect GetUnionRectAsFarAsPossible(uint32_t aOffset,
-                                                    uint32_t aLength) const;
+    LayoutDeviceIntRect GetUnionRectAsFarAsPossible(
+                          uint32_t aOffset, uint32_t aLength,
+                          bool aRoundToExistingOffset) const;
   } mTextRectArray;
 
   LayoutDeviceIntRect mEditorRect;
@@ -277,28 +293,29 @@ public:
    * it's managed by TabParent itself.
    */
   void AssignContent(const ContentCache& aOther,
+                     nsIWidget* aWidget,
                      const IMENotification* aNotification = nullptr);
 
   /**
    * HandleQueryContentEvent() sets content data to aEvent.mReply.
    *
-   * For NS_QUERY_SELECTED_TEXT, fail if the cache doesn't contain the whole
+   * For eQuerySelectedText, fail if the cache doesn't contain the whole
    *  selected range. (This shouldn't happen because PuppetWidget should have
    *  already sent the whole selection.)
    *
-   * For NS_QUERY_TEXT_CONTENT, fail only if the cache doesn't overlap with
+   * For eQueryTextContent, fail only if the cache doesn't overlap with
    *  the queried range. Note the difference from above. We use
-   *  this behavior because a normal NS_QUERY_TEXT_CONTENT event is allowed to
+   *  this behavior because a normal eQueryTextContent event is allowed to
    *  have out-of-bounds offsets, so that widget can request content without
    *  knowing the exact length of text. It's up to widget to handle cases when
    *  the returned offset/length are different from the queried offset/length.
    *
-   * For NS_QUERY_TEXT_RECT, fail if cached offset/length aren't equals to input.
+   * For eQueryTextRect, fail if cached offset/length aren't equals to input.
    *   Cocoa widget always queries selected offset, so it works on it.
    *
-   * For NS_QUERY_CARET_RECT, fail if cached offset isn't equals to input
+   * For eQueryCaretRect, fail if cached offset isn't equals to input
    *
-   * For NS_QUERY_EDITOR_RECT, always success
+   * For eQueryEditorRect, always success
    */
   bool HandleQueryContentEvent(WidgetQueryContentEvent& aEvent,
                                nsIWidget* aWidget) const;
@@ -322,25 +339,25 @@ public:
    *          TabParent or aWidget.  Therefore, the caller must not destroy
    *          this instance during a call of this method.
    */
-  void OnEventNeedingAckHandled(nsIWidget* aWidget, uint32_t aMessage);
+  void OnEventNeedingAckHandled(nsIWidget* aWidget, EventMessage aMessage);
 
   /**
-   * RequestToCommitComposition() requests to commit or cancel composition to
-   * the widget.  If it's handled synchronously, this returns the number of
-   * composition events after that.
+   * RequestIMEToCommitComposition() requests aWidget to commit or cancel
+   * composition.  If it's handled synchronously, this returns true.
    *
    * @param aWidget     The widget to be requested to commit or cancel
    *                    the composition.
    * @param aCancel     When the caller tries to cancel the composition, true.
    *                    Otherwise, i.e., tries to commit the composition, false.
-   * @param aLastString The last composition string before requesting to
-   *                    commit or cancel composition.
-   * @return            The count of composition events ignored after a call of
-   *                    WillRequestToCommitOrCancelComposition().
+   * @param aCommittedString    The committed string (i.e., the last data of
+   *                            dispatched composition events during requesting
+   *                            IME to commit composition.
+   * @return            Whether the composition is actually committed
+   *                    synchronously.
    */
-  uint32_t RequestToCommitComposition(nsIWidget* aWidget,
-                                      bool aCancel,
-                                      nsAString& aLastString);
+  bool RequestIMEToCommitComposition(nsIWidget* aWidget,
+                                     bool aCancel,
+                                     nsAString& aCommittedString);
 
   /**
    * MaybeNotifyIME() may notify IME of the notification.  If child process
@@ -356,26 +373,31 @@ private:
   IMENotification mPendingLayoutChange;
   IMENotification mPendingCompositionUpdate;
 
-  // This is commit string which is caused by our request.
-  nsString mCommitStringByRequest;
-  // Start offset of the composition string.
-  uint32_t mCompositionStart;
-  // Count of composition events during requesting commit or cancel the
-  // composition.
-  uint32_t mCompositionEventsDuringRequest;
+  // This is not nullptr only while the instance is requesting IME to
+  // composition.  Then, data value of dispatched composition events should
+  // be stored into the instance.
+  nsAString* mCommitStringByRequest;
   // mPendingEventsNeedingAck is increased before sending a composition event or
   // a selection event and decreased after they are received in the child
   // process.
   uint32_t mPendingEventsNeedingAck;
 
   bool mIsComposing;
-  bool mRequestedToCommitOrCancelComposition;
 
-  bool GetCaretRect(uint32_t aOffset, LayoutDeviceIntRect& aCaretRect) const;
+  /**
+   * When following methods' aRoundToExistingOffset is true, even if specified
+   * offset or range is out of bounds, the result is computed with the existing
+   * cache forcibly.
+   */
+  bool GetCaretRect(uint32_t aOffset,
+                    bool aRoundToExistingOffset,
+                    LayoutDeviceIntRect& aCaretRect) const;
   bool GetTextRect(uint32_t aOffset,
+                   bool aRoundToExistingOffset,
                    LayoutDeviceIntRect& aTextRect) const;
   bool GetUnionTextRects(uint32_t aOffset,
                          uint32_t aLength,
+                         bool aRoundToExistingOffset,
                          LayoutDeviceIntRect& aUnionTextRect) const;
 
   void FlushPendingNotifications(nsIWidget* aWidget);

@@ -6,9 +6,13 @@
 
 #include "builtin/Reflect.h"
 
+#include "jsarray.h"
 #include "jscntxt.h"
 
+#include "vm/ArgumentsObject.h"
 #include "vm/Stack.h"
+
+#include "vm/Interpreter-inl.h"
 
 using namespace js;
 
@@ -20,8 +24,9 @@ using namespace js;
  * The elementTypes argument is not supported. The result list is
  * pushed to *args.
  */
+template <class InvokeArgs>
 static bool
-InitArgsFromArrayLike(JSContext* cx, HandleValue v, InvokeArgs* args, bool construct)
+InitArgsFromArrayLike(JSContext* cx, HandleValue v, InvokeArgs* args)
 {
     // Step 3.
     RootedObject obj(cx, NonNullObject(cx, v));
@@ -38,7 +43,7 @@ InitArgsFromArrayLike(JSContext* cx, HandleValue v, InvokeArgs* args, bool const
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TOO_MANY_FUN_APPLY_ARGS);
         return false;
     }
-    if (!args->init(len, construct))
+    if (!args->init(len))
         return false;
 
     // Steps 6-8.
@@ -65,18 +70,13 @@ Reflect_apply(JSContext* cx, unsigned argc, Value* vp)
     }
 
     // Steps 2-3.
-    FastInvokeGuard fig(cx, args.get(0));
+    FastCallGuard fig(cx, args.get(0));
     InvokeArgs& invokeArgs = fig.args();
-    if (!InitArgsFromArrayLike(cx, args.get(2), &invokeArgs, false))
+    if (!InitArgsFromArrayLike(cx, args.get(2), &invokeArgs))
         return false;
-    invokeArgs.setCallee(args.get(0));
-    invokeArgs.setThis(args.get(1));
 
     // Steps 4-5. This is specified to be a tail call, but isn't.
-    if (!fig.invoke(cx))
-        return false;
-    args.rval().set(invokeArgs.rval());
-    return true;
+    return fig.call(cx, args.get(0), args.get(1), args.rval());
 }
 
 /* ES6 26.1.2 Reflect.construct(target, argumentsList [, newTarget]) */
@@ -104,17 +104,16 @@ Reflect_construct(JSContext* cx, unsigned argc, Value* vp)
     }
 
     // Step 4-5.
-    InvokeArgs invokeArgs(cx);
-    if (!InitArgsFromArrayLike(cx, args.get(1), &invokeArgs, true))
+    ConstructArgs constructArgs(cx);
+    if (!InitArgsFromArrayLike(cx, args.get(1), &constructArgs))
         return false;
-    invokeArgs.setCallee(args.get(0));
-    invokeArgs.setThis(MagicValue(JS_THIS_POISON));
-    invokeArgs.newTarget().set(newTarget);
 
     // Step 6.
-    if (!InvokeConstructor(cx, invokeArgs))
+    RootedObject obj(cx);
+    if (!Construct(cx, args.get(0), constructArgs, newTarget, &obj))
         return false;
-    args.rval().set(invokeArgs.rval());
+
+    args.rval().setObject(*obj);
     return true;
 }
 
@@ -136,7 +135,7 @@ Reflect_defineProperty(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     // Steps 4-5.
-    Rooted<JSPropertyDescriptor> desc(cx);
+    Rooted<PropertyDescriptor> desc(cx);
     if (!ToPropertyDescriptor(cx, args.get(2), true, &desc))
         return false;
 
@@ -173,38 +172,7 @@ Reflect_deleteProperty(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-#if 0
-/*
- * ES6 26.1.5 Reflect.enumerate(target)
- *
- * TODO:
- * - redefine enumeration in terms of iterators without losing performance
- * - support iterators in Proxies
- */
-static bool
-Reflect_enumerate(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    // Step 1.
-    RootedObject obj(cx, NonNullObject(cx, args.get(0)));
-    if (!obj)
-        return false;
-
-    // Step 2.
-    RootedObject iterator(cx);
-    if (!Enumerate(cx, obj, &iterator))
-        return false;
-    args.rval().setObject(*iterator);
-    return true;
-}
-#endif
-
-/*
- * ES6 26.1.6 Reflect.get(target, propertyKey [, receiver])
- *
- * Primitive receivers are not supported yet (see bug 603201).
- */
+/* ES6 26.1.6 Reflect.get(target, propertyKey [, receiver]) */
 static bool
 Reflect_get(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -222,16 +190,10 @@ Reflect_get(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     // Step 4.
-    RootedValue receiver(cx, argc > 2 ? args[2] : args.get(0));
-
-    // Non-standard hack: Throw a TypeError if the receiver isn't an object.
-    // See bug 603201.
-    RootedObject receiverObj(cx, NonNullObject(cx, receiver));
-    if (!receiverObj)
-        return false;
+    RootedValue receiver(cx, args.length() > 2 ? args[2] : args.get(0));
 
     // Step 5.
-    return GetProperty(cx, obj, receiverObj, key, args.rval());
+    return GetProperty(cx, obj, receiver, key, args.rval());
 }
 
 /* ES6 26.1.7 Reflect.getOwnPropertyDescriptor(target, propertyKey) */
@@ -337,7 +299,7 @@ Reflect_set(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     // Step 4.
-    RootedValue receiver(cx, argc > 3 ? args[3] : args.get(0));
+    RootedValue receiver(cx, args.length() > 3 ? args[3] : args.get(0));
 
     // Step 5.
     ObjectOpResult result;
@@ -386,7 +348,6 @@ static const JSFunctionSpec methods[] = {
     JS_FN("construct", Reflect_construct, 2, 0),
     JS_FN("defineProperty", Reflect_defineProperty, 3, 0),
     JS_FN("deleteProperty", Reflect_deleteProperty, 2, 0),
-    // JS_FN("enumerate", Reflect_enumerate, 1, 0),
     JS_FN("get", Reflect_get, 2, 0),
     JS_FN("getOwnPropertyDescriptor", Reflect_getOwnPropertyDescriptor, 2, 0),
     JS_FN("getPrototypeOf", Reflect_getPrototypeOf, 1, 0),

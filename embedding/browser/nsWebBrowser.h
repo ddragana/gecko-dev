@@ -114,7 +114,6 @@ protected:
   // XXXbz why are these NS_IMETHOD?  They're not interface methods!
   NS_IMETHOD SetDocShell(nsIDocShell* aDocShell);
   NS_IMETHOD EnsureDocShellTreeOwner();
-  NS_IMETHOD GetPrimaryContentWindow(nsIDOMWindow** aDomWindow);
   NS_IMETHOD BindListener(nsISupports* aListener, const nsIID& aIID);
   NS_IMETHOD UnBindListener(nsISupports* aListener, const nsIID& aIID);
   NS_IMETHOD EnableGlobalHistory(bool aEnable);
@@ -122,10 +121,11 @@ protected:
   // nsIWidgetListener
   virtual void WindowRaised(nsIWidget* aWidget);
   virtual void WindowLowered(nsIWidget* aWidget);
-  virtual bool PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion) override;
+  virtual bool PaintWindow(nsIWidget* aWidget,
+                           mozilla::LayoutDeviceIntRegion aRegion) override;
 
 protected:
-  nsRefPtr<nsDocShellTreeOwner> mDocShellTreeOwner;
+  RefPtr<nsDocShellTreeOwner> mDocShellTreeOwner;
   nsCOMPtr<nsIDocShell> mDocShell;
   nsCOMPtr<nsIInterfaceRequestor> mDocShellAsReq;
   nsCOMPtr<nsIBaseWindow> mDocShellAsWin;
@@ -156,7 +156,7 @@ protected:
   uint32_t mPersistFlags;
 
   // stream
-  nsRefPtr<nsEmbedStream> mStream;
+  RefPtr<nsEmbedStream> mStream;
 
   // Weak Reference interfaces...
   nsIWidget* mParentWidget;

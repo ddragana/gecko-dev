@@ -17,11 +17,13 @@
 #include "nsSize.h"
 #include "nsRect.h"
 
-class gfxContext;
 class nsCString;
 class nsNPAPIPlugin;
 
 namespace mozilla {
+namespace gfx {
+class DrawTarget;
+}
 namespace layers {
 class Image;
 class ImageContainer;
@@ -43,6 +45,8 @@ namespace mozilla {
 class PluginLibrary
 {
 public:
+  typedef mozilla::gfx::DrawTarget DrawTarget;
+
   virtual ~PluginLibrary() { }
 
   /**
@@ -77,11 +81,20 @@ public:
   virtual nsresult AsyncSetWindow(NPP instance, NPWindow* window) = 0;
   virtual nsresult GetImageContainer(NPP instance, mozilla::layers::ImageContainer** aContainer) = 0;
   virtual nsresult GetImageSize(NPP instance, nsIntSize* aSize) = 0;
+  virtual void DidComposite(NPP instance) = 0;
   virtual bool IsOOP() = 0;
 #if defined(XP_MACOSX)
   virtual nsresult IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing) = 0;
   virtual nsresult ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor) = 0;
 #endif
+#if defined(XP_WIN)
+    virtual nsresult GetScrollCaptureContainer(NPP aInstance, mozilla::layers::ImageContainer** aContainer) = 0;
+    virtual nsresult UpdateScrollState(NPP aInstance, bool aIsScrolling) = 0;
+#endif
+  virtual nsresult HandledWindowedPluginKeyEvent(
+                     NPP aInstance,
+                     const mozilla::NativeEventData& aNativeKeyData,
+                     bool aIsCOnsumed) = 0;
 
   /**
    * The next three methods are the third leg in the trip to
@@ -90,13 +103,11 @@ public:
    */
   virtual nsresult SetBackgroundUnknown(NPP instance) = 0;
   virtual nsresult BeginUpdateBackground(NPP instance,
-                                         const nsIntRect&, gfxContext**) = 0;
-  virtual nsresult EndUpdateBackground(NPP instance,
-                                       gfxContext*, const nsIntRect&) = 0;
+                                         const nsIntRect&, DrawTarget**) = 0;
+  virtual nsresult EndUpdateBackground(NPP instance, const nsIntRect&) = 0;
   virtual nsresult GetRunID(uint32_t* aRunID) = 0;
   virtual void SetHasLocalInstance() = 0;
 };
-
 
 } // namespace mozilla
 

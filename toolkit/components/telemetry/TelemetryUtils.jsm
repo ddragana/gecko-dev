@@ -10,9 +10,35 @@ this.EXPORTED_SYMBOLS = [
 
 const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
+Cu.import("resource://gre/modules/Preferences.jsm", this);
+
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
+const PREF_TELEMETRY_ENABLED = "toolkit.telemetry.enabled";
+
+const IS_CONTENT_PROCESS = (function() {
+  // We cannot use Services.appinfo here because in telemetry xpcshell tests,
+  // appinfo is initially unavailable, and becomes available only later on.
+  let runtime = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
+  return runtime.processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
+})();
+
 this.TelemetryUtils = {
+  /**
+   * True if this is a content process.
+   */
+  get isContentProcess() {
+    return IS_CONTENT_PROCESS;
+  },
+
+  /**
+   * Returns the state of the Telemetry enabled preference, making sure
+   * it correctly evaluates to a boolean type.
+   */
+  get isTelemetryEnabled() {
+    return Preferences.get(PREF_TELEMETRY_ENABLED, false) === true;
+  },
+
   /**
    * Turn a millisecond timestamp into a day timestamp.
    *
@@ -91,5 +117,36 @@ this.TelemetryUtils = {
   getElapsedTimeInMonths: function(aStartDate, aEndDate) {
     return (aEndDate.getMonth() - aStartDate.getMonth())
            + 12 * (aEndDate.getFullYear() - aStartDate.getFullYear());
+  },
+
+  /**
+   * Date.toISOString() gives us UTC times, this gives us local times in
+   * the ISO date format. See http://www.w3.org/TR/NOTE-datetime
+   * @param {Object} date The input date.
+   * @return {String} The local time ISO string.
+   */
+  toLocalTimeISOString: function(date) {
+    function padNumber(number, places) {
+      number = number.toString();
+      while (number.length < places) {
+        number = "0" + number;
+      }
+      return number;
+    }
+
+    let sign = (n) => n >= 0 ? "+" : "-";
+    // getTimezoneOffset counter-intuitively returns -60 for UTC+1.
+    let tzOffset = - date.getTimezoneOffset();
+
+    // YYYY-MM-DDThh:mm:ss.sTZD (eg 1997-07-16T19:20:30.45+01:00)
+    return    padNumber(date.getFullYear(), 4)
+      + "-" + padNumber(date.getMonth() + 1, 2)
+      + "-" + padNumber(date.getDate(), 2)
+      + "T" + padNumber(date.getHours(), 2)
+      + ":" + padNumber(date.getMinutes(), 2)
+      + ":" + padNumber(date.getSeconds(), 2)
+      + "." + date.getMilliseconds()
+      + sign(tzOffset) + padNumber(Math.floor(Math.abs(tzOffset / 60)), 2)
+      + ":" + padNumber(Math.abs(tzOffset % 60), 2);
   },
 };

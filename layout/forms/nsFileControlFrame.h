@@ -89,7 +89,7 @@ protected:
 
   class SyncDisabledStateEvent;
   friend class SyncDisabledStateEvent;
-  class SyncDisabledStateEvent : public nsRunnable
+  class SyncDisabledStateEvent : public mozilla::Runnable
   {
   public:
     explicit SyncDisabledStateEvent(nsFileControlFrame* aFrame)
@@ -132,21 +132,16 @@ protected:
    */
   nsCOMPtr<nsIContent> mTextContent;
   /**
-   * The button to open a directory picker.
+   * The button to open a file or directory picker.
    * @see nsFileControlFrame::CreateAnonymousContent
    */
-  nsCOMPtr<nsIContent> mBrowseDirs;
-  /**
-   * The button to open a file picker.
-   * @see nsFileControlFrame::CreateAnonymousContent
-   */
-  nsCOMPtr<nsIContent> mBrowseFiles;
+  nsCOMPtr<nsIContent> mBrowseFilesOrDirs;
 
   /**
    * Drag and drop mouse listener.
    * This makes sure we don't get used after destruction.
    */
-  nsRefPtr<DnDListener> mMouseListener;
+  RefPtr<DnDListener> mMouseListener;
 
 protected:
   /**

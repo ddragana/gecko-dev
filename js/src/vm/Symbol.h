@@ -17,8 +17,13 @@
 #include "gc/Barrier.h"
 #include "gc/Marking.h"
 
+#include "js/GCHashTable.h"
 #include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
+
+namespace js {
+class AutoLockForExclusiveAccess;
+} // namespace js
 
 namespace JS {
 
@@ -44,7 +49,8 @@ class Symbol : public js::gc::TenuredCell
     void operator=(const Symbol&) = delete;
 
     static Symbol*
-    newInternal(js::ExclusiveContext* cx, SymbolCode code, JSAtom* description);
+    newInternal(js::ExclusiveContext* cx, SymbolCode code, JSAtom* description,
+                js::AutoLockForExclusiveAccess& lock);
 
   public:
     static Symbol* new_(js::ExclusiveContext* cx, SymbolCode code, JSString* description);
@@ -55,7 +61,7 @@ class Symbol : public js::gc::TenuredCell
 
     bool isWellKnownSymbol() const { return uint32_t(code_) < WellKnownSymbolLimit; }
 
-    static inline js::ThingRootKind rootKind() { return js::THING_ROOT_SYMBOL; }
+    static const JS::TraceKind TraceKind = JS::TraceKind::Symbol;
     inline void traceChildren(JSTracer* trc) {
         if (description_)
             js::TraceManuallyBarrieredEdge(trc, &description_, "description");
@@ -65,6 +71,10 @@ class Symbol : public js::gc::TenuredCell
     static MOZ_ALWAYS_INLINE void writeBarrierPre(Symbol* thing) {
         if (thing && !thing->isWellKnownSymbol())
             thing->asTenured().writeBarrierPre(thing);
+    }
+
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
+        return mallocSizeOf(this);
     }
 
 #ifdef DEBUG
@@ -91,14 +101,6 @@ struct HashSymbolsByDescription
 };
 
 /*
- * Hash table that implements the symbol registry.
- *
- * This must be a typedef for the benefit of GCC 4.4.6 (used to build B2G for Ice
- * Cream Sandwich).
- */
-typedef HashSet<ReadBarrieredSymbol, HashSymbolsByDescription, SystemAllocPolicy> SymbolHashSet;
-
-/*
  * The runtime-wide symbol registry, used to implement Symbol.for().
  *
  * ES6 draft rev 25 (2014 May 22) calls this the GlobalSymbolRegistry List. In
@@ -113,11 +115,12 @@ typedef HashSet<ReadBarrieredSymbol, HashSymbolsByDescription, SystemAllocPolicy
  * nondeterminism is exposed to scripts, because there is no API for
  * enumerating the symbol registry, querying its size, etc.
  */
-class SymbolRegistry : public SymbolHashSet
+class SymbolRegistry : public GCHashSet<ReadBarrieredSymbol,
+                                        HashSymbolsByDescription,
+                                        SystemAllocPolicy>
 {
   public:
-    SymbolRegistry() : SymbolHashSet() {}
-    void sweep();
+    SymbolRegistry() {}
 };
 
 } /* namespace js */

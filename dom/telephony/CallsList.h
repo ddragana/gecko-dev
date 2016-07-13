@@ -17,8 +17,8 @@ namespace dom {
 class CallsList final : public nsISupports,
                         public nsWrapperCache
 {
-  nsRefPtr<Telephony> mTelephony;
-  nsRefPtr<TelephonyCallGroup> mGroup;
+  RefPtr<Telephony> mTelephony;
+  RefPtr<TelephonyCallGroup> mGroup;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -26,7 +26,7 @@ public:
 
   explicit CallsList(Telephony* aTelephony, TelephonyCallGroup* aGroup = nullptr);
 
-  nsPIDOMWindow*
+  nsPIDOMWindowInner*
   GetParentObject() const;
 
   // WrapperCache

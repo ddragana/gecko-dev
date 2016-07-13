@@ -68,12 +68,12 @@ function ensureThrows(func) {
   };
 }
 
-let store = new HistoryEngine(Service)._store;
+var store = new HistoryEngine(Service)._store;
 function applyEnsureNoFailures(records) {
   do_check_eq(store.applyIncomingBatch(records).length, 0);
 }
 
-let fxuri, fxguid, tburi, tbguid;
+var fxuri, fxguid, tburi, tbguid;
 
 function run_test() {
   initTestLogging("Trace");
@@ -189,8 +189,8 @@ add_test(function test_invalid_records() {
                               .DBConnection;
   let stmt = connection.createAsyncStatement(
     "INSERT INTO moz_places "
-  + "(url, title, rev_host, visit_count, last_visit_date) "
-  + "VALUES ('invalid-uri', 'Invalid URI', '.', 1, " + TIMESTAMP3 + ")"
+  + "(url, url_hash, title, rev_host, visit_count, last_visit_date) "
+  + "VALUES ('invalid-uri', hash('invalid-uri'), 'Invalid URI', '.', 1, " + TIMESTAMP3 + ")"
   );
   Async.querySpinningly(stmt);
   stmt.finalize();
@@ -198,7 +198,7 @@ add_test(function test_invalid_records() {
   stmt = connection.createAsyncStatement(
     "INSERT INTO moz_historyvisits "
   + "(place_id, visit_date, visit_type, session) "
-  + "VALUES ((SELECT id FROM moz_places WHERE url = 'invalid-uri'), "
+  + "VALUES ((SELECT id FROM moz_places WHERE url_hash = hash('invalid-uri') AND url = 'invalid-uri'), "
   + TIMESTAMP3 + ", " + Ci.nsINavHistoryService.TRANSITION_TYPED + ", 1)"
   );
   Async.querySpinningly(stmt);

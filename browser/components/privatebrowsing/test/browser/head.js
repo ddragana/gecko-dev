@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-let {PromiseUtils} = Cu.import("resource://gre/modules/PromiseUtils.jsm", {});
+var {PromiseUtils} = Cu.import("resource://gre/modules/PromiseUtils.jsm", {});
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesTestUtils",
   "resource://testing-common/PlacesTestUtils.jsm");
 
@@ -57,7 +57,7 @@ function clearHistory() {
 function _initTest() {
   // Don't use about:home as the homepage for new windows
   Services.prefs.setIntPref("browser.startup.page", 0);
-  registerCleanupFunction(function() Services.prefs.clearUserPref("browser.startup.page"));
+  registerCleanupFunction(() => Services.prefs.clearUserPref("browser.startup.page"));
 }
 
 _initTest();

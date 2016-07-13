@@ -6,10 +6,6 @@
 #if defined(MOZ_WIDGET_GTK)
 #include "gfxPlatformGtk.h"
 #define gfxToolkitPlatform gfxPlatformGtk
-#elif defined(MOZ_WIDGET_QT)
-#include <qfontinfo.h>
-#include "gfxQtPlatform.h"
-#define gfxToolkitPlatform gfxQtPlatform
 #elif defined(XP_WIN)
 #include "gfxWindowsPlatform.h"
 #define gfxToolkitPlatform gfxWindowsPlatform
@@ -43,20 +39,20 @@
  */
 
 bool
-gfxFT2Font::ShapeText(gfxContext     *aContext,
+gfxFT2Font::ShapeText(DrawTarget     *aDrawTarget,
                       const char16_t *aText,
                       uint32_t        aOffset,
                       uint32_t        aLength,
-                      int32_t         aScript,
+                      Script          aScript,
                       bool            aVertical,
                       gfxShapedText  *aShapedText)
 {
-    if (!gfxFont::ShapeText(aContext, aText, aOffset, aLength, aScript,
+    if (!gfxFont::ShapeText(aDrawTarget, aText, aOffset, aLength, aScript,
                             aVertical, aShapedText)) {
         // harfbuzz must have failed(?!), just render raw glyphs
         AddRange(aText, aOffset, aLength, aShapedText);
-        PostShapingFixup(aContext, aText, aOffset, aLength, aVertical,
-                         aShapedText);
+        PostShapingFixup(aDrawTarget, aText, aOffset, aLength,
+                         aVertical, aShapedText);
     }
 
     return true;
@@ -218,7 +214,7 @@ gfxFT2Font::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
 {
     gfxFont::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
     aSizes->mFontInstances +=
-        mCharGlyphCache.SizeOfExcludingThis(nullptr, aMallocSizeOf);
+        mCharGlyphCache.ShallowSizeOfExcludingThis(aMallocSizeOf);
 }
 
 void

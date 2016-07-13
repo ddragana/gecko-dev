@@ -9,7 +9,6 @@
 #include "mozilla/Attributes.h"
 #include "nsIExpatSink.h"
 #include "nsIXMLContentSink.h"
-#include "nsAutoPtr.h"
 #include "nsNodeInfoManager.h"
 #include "nsWeakPtr.h"
 #include "nsXULElement.h"
@@ -90,7 +89,7 @@ protected:
     nsresult AddText(const char16_t* aText, int32_t aLength);
 
 
-    nsRefPtr<nsNodeInfoManager> mNodeInfoManager;
+    RefPtr<nsNodeInfoManager> mNodeInfoManager;
 
     nsresult NormalizeAttributeString(const char16_t *aExpatName,
                                       nsAttrName &aName);
@@ -108,7 +107,7 @@ protected:
     class ContextStack {
     protected:
         struct Entry {
-            nsRefPtr<nsXULPrototypeNode> mNode;
+            RefPtr<nsXULPrototypeNode> mNode;
             // a LOT of nodes have children; preallocate for 8
             nsPrototypeArray    mChildren;
             State               mState;
@@ -128,7 +127,7 @@ protected:
         nsresult Push(nsXULPrototypeNode* aNode, State aState);
         nsresult Pop(State* aState);
 
-        nsresult GetTopNode(nsRefPtr<nsXULPrototypeNode>& aNode);
+        nsresult GetTopNode(RefPtr<nsXULPrototypeNode>& aNode);
         nsresult GetTopChildren(nsPrototypeArray** aChildren);
 
         void Clear();
@@ -142,9 +141,9 @@ protected:
     nsWeakPtr              mDocument;             // [OWNER]
     nsCOMPtr<nsIURI>       mDocumentURL;          // [OWNER]
 
-    nsRefPtr<nsXULPrototypeDocument> mPrototype;  // [OWNER]
+    RefPtr<nsXULPrototypeDocument> mPrototype;  // [OWNER]
 
-    nsRefPtr<nsParserBase> mParser;
+    RefPtr<nsParserBase> mParser;
     nsCOMPtr<nsIScriptSecurityManager> mSecMan;
 };
 

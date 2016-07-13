@@ -123,7 +123,7 @@ SVGMPathElement::ParseAttribute(int32_t aNamespaceID,
                                           aValue, aResult);
   if (aNamespaceID == kNameSpaceID_XLink &&
       aAttribute == nsGkAtoms::href &&
-      IsInDoc()) {
+      IsInUncomposedDoc()) {
     // NOTE: If we fail the IsInDoc call, it's ok -- we'll update the target
     // on next BindToTree call.
     UpdateHrefTarget(GetParent(), aValue);
@@ -165,7 +165,8 @@ SVGMPathElement::AttributeChanged(nsIDocument* aDocument,
                                   Element* aElement,
                                   int32_t aNameSpaceID,
                                   nsIAtom* aAttribute,
-                                  int32_t aModType)
+                                  int32_t aModType,
+                                  const nsAttrValue* aOldValue)
 {
   if (aNameSpaceID == kNameSpaceID_None) {
     if (aAttribute == nsGkAtoms::d) {

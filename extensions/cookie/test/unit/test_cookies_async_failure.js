@@ -18,7 +18,7 @@
 //    This should result in an abort of the database rebuild; the partially-
 //    built database should be moved to 'cookies.sqlite.bak-rebuild'.
 
-let test_generator = do_run_test();
+var test_generator = do_run_test();
 
 function run_test() {
   do_test_pending();
@@ -158,7 +158,7 @@ function run_test_1(generator)
 
   // Attempt to insert a cookie with the same (name, host, path) triplet.
   Services.cookiemgr.add(cookie.host, cookie.path, cookie.name, "hallo",
-    cookie.isSecure, cookie.isHttpOnly, cookie.isSession, cookie.expiry);
+    cookie.isSecure, cookie.isHttpOnly, cookie.isSession, cookie.expiry, {});
 
   // Check that the cookie service accepted the new cookie.
   do_check_eq(Services.cookiemgr.countCookiesFromHost(cookie.host), 1);
@@ -189,7 +189,7 @@ function run_test_1(generator)
   do_load_profile();
 
   do_check_eq(Services.cookiemgr.countCookiesFromHost("foo.com"), 1);
-  let enumerator = Services.cookiemgr.getCookiesFromHost(cookie.host);
+  let enumerator = Services.cookiemgr.getCookiesFromHost(cookie.host, {});
   do_check_true(enumerator.hasMoreElements());
   let dbcookie = enumerator.getNext().QueryInterface(Ci.nsICookie2);
   do_check_eq(dbcookie.value, "hallo");

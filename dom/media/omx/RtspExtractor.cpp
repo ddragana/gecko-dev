@@ -7,6 +7,7 @@
 #include "RtspExtractor.h"
 
 #include "mozilla/ReentrantMonitor.h"
+#include "nsAutoPtr.h"
 
 using namespace android;
 
@@ -35,16 +36,16 @@ public:
   , mBuffer(nullptr)
   , mFrameMaxSize(aFrameMaxSize) {}
   virtual ~RtspMediaSource() {}
-  virtual status_t start(MetaData* params = nullptr) override;
-  virtual status_t stop() override;
-  virtual sp<MetaData> getFormat() override {
+  status_t start(MetaData* params = nullptr) override;
+  status_t stop() override;
+  sp<MetaData> getFormat() override {
     ReentrantMonitorAutoEnter mon(mMonitor);
     return mFormat;
   }
-  virtual status_t read(MediaBuffer** buffer,
-                        const ReadOptions* options = nullptr) override ;
+  status_t read(MediaBuffer** buffer,
+                const ReadOptions* options = nullptr) override ;
 private:
-  nsRefPtr<RtspMediaResource> mRtspResource;
+  RefPtr<RtspMediaResource> mRtspResource;
   sp<MetaData> mFormat;
   uint32_t mTrackIdx;
   ReentrantMonitor mMonitor;

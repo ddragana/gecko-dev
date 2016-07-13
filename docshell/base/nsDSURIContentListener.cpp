@@ -13,7 +13,6 @@
 #include "nsIDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsNetUtil.h"
-#include "nsAutoPtr.h"
 #include "nsQueryObject.h"
 #include "nsIHttpChannel.h"
 #include "nsIScriptSecurityManager.h"
@@ -122,7 +121,7 @@ nsDSURIContentListener::DoContent(const nsACString& aContentType,
                  aContentType.EqualsLiteral("image/jpeg");
 
   if (mExistingJPEGStreamListener && reuseCV) {
-    nsRefPtr<nsIStreamListener> copy(mExistingJPEGStreamListener);
+    RefPtr<nsIStreamListener> copy(mExistingJPEGStreamListener);
     copy.forget(aContentHandler);
     rv = NS_OK;
   } else {
@@ -148,7 +147,7 @@ nsDSURIContentListener::DoContent(const nsACString& aContentType,
   }
 
   if (loadFlags & nsIChannel::LOAD_RETARGETED_DOCUMENT_URI) {
-    nsCOMPtr<nsIDOMWindow> domWindow =
+    nsCOMPtr<nsPIDOMWindowOuter> domWindow =
       mDocShell ? mDocShell->GetWindow() : nullptr;
     NS_ENSURE_TRUE(domWindow, NS_ERROR_FAILURE);
     domWindow->Focus();
@@ -223,7 +222,7 @@ NS_IMETHODIMP
 nsDSURIContentListener::SetLoadCookie(nsISupports* aLoadCookie)
 {
 #ifdef DEBUG
-  nsRefPtr<nsDocLoader> cookieAsDocLoader =
+  RefPtr<nsDocLoader> cookieAsDocLoader =
     nsDocLoader::GetAsDocLoader(aLoadCookie);
   NS_ASSERTION(cookieAsDocLoader && cookieAsDocLoader == mDocShell,
                "Invalid load cookie being set!");
@@ -294,7 +293,7 @@ nsDSURIContentListener::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
   // window, if we're not the top.  X-F-O: SAMEORIGIN requires that the
   // document must be same-origin with top window.  X-F-O: DENY requires that
   // the document must never be framed.
-  nsCOMPtr<nsIDOMWindow> thisWindow = mDocShell->GetWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> thisWindow = mDocShell->GetWindow();
   // If we don't have DOMWindow there is no risk of clickjacking
   if (!thisWindow) {
     return true;
@@ -302,8 +301,7 @@ nsDSURIContentListener::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
 
   // GetScriptableTop, not GetTop, because we want this to respect
   // <iframe mozbrowser> boundaries.
-  nsCOMPtr<nsIDOMWindow> topWindow;
-  thisWindow->GetScriptableTop(getter_AddRefs(topWindow));
+  nsCOMPtr<nsPIDOMWindowOuter> topWindow = thisWindow->GetScriptableTop();
 
   // if the document is in the top window, it's not in a frame.
   if (thisWindow == topWindow) {
@@ -333,7 +331,7 @@ nsDSURIContentListener::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
            curDocShellItem->GetParent(getter_AddRefs(parentDocShellItem))) &&
          parentDocShellItem) {
     nsCOMPtr<nsIDocShell> curDocShell = do_QueryInterface(curDocShellItem);
-    if (curDocShell && curDocShell->GetIsBrowserOrApp()) {
+    if (curDocShell && curDocShell->GetIsMozBrowserOrApp()) {
       break;
     }
 
@@ -468,13 +466,12 @@ nsDSURIContentListener::ReportXFOViolation(nsIDocShellTreeItem* aTopDocShellItem
 {
   MOZ_ASSERT(aTopDocShellItem, "Need a top docshell");
 
-  nsCOMPtr<nsPIDOMWindow> topOuterWindow = aTopDocShellItem->GetWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> topOuterWindow = aTopDocShellItem->GetWindow();
   if (!topOuterWindow) {
     return;
   }
 
-  NS_ASSERTION(topOuterWindow->IsOuterWindow(), "Huh?");
-  nsPIDOMWindow* topInnerWindow = topOuterWindow->GetCurrentInnerWindow();
+  nsPIDOMWindowInner* topInnerWindow = topOuterWindow->GetCurrentInnerWindow();
   if (!topInnerWindow) {
     return;
   }

@@ -12,13 +12,13 @@
 #define mozilla_RestyleManager_h
 
 #include "mozilla/RestyleLogging.h"
+#include "mozilla/RestyleManagerBase.h"
 #include "nsISupportsImpl.h"
 #include "nsChangeHint.h"
 #include "RestyleTracker.h"
 #include "nsPresContext.h"
 #include "nsRefreshDriver.h"
 #include "nsRefPtrHashtable.h"
-#include "nsCSSPseudoElements.h"
 #include "nsTransitionManager.h"
 
 class nsIFrame;
@@ -26,6 +26,7 @@ class nsStyleChangeList;
 struct TreeMatchContext;
 
 namespace mozilla {
+  enum class CSSPseudoElementType : uint8_t;
   class EventStates;
   struct UndisplayedNode;
 
@@ -33,13 +34,10 @@ namespace dom {
   class Element;
 } // namespace dom
 
-class RestyleManager final
+class RestyleManager final : public RestyleManagerBase
 {
 public:
-  friend class ::nsRefreshDriver;
   friend class RestyleTracker;
-
-  typedef mozilla::dom::Element Element;
 
   explicit RestyleManager(nsPresContext* aPresContext);
 
@@ -49,22 +47,12 @@ private:
   {
     MOZ_ASSERT(!mReframingStyleContexts,
                "temporary member should be nulled out before destruction");
+    MOZ_ASSERT(!mAnimationsWithDestroyedFrame,
+               "leaving dangling pointers from AnimationsWithDestroyedFrame");
   }
 
 public:
   NS_INLINE_DECL_REFCOUNTING(mozilla::RestyleManager)
-
-  void Disconnect() {
-    mPresContext = nullptr;
-  }
-
-  nsPresContext* PresContext() const {
-    MOZ_ASSERT(mPresContext);
-    return mPresContext;
-  }
-
-  nsCSSFrameConstructor* FrameConstructor() const
-    { return PresContext()->FrameConstructor(); }
 
   // Should be called when a frame is going to be destroyed and
   // WillDestroyFrameTree hasn't been called yet.
@@ -79,26 +67,21 @@ public:
   void AttributeWillChange(Element* aElement,
                            int32_t  aNameSpaceID,
                            nsIAtom* aAttribute,
-                           int32_t  aModType);
+                           int32_t  aModType,
+                           const nsAttrValue* aNewValue);
   // Forwarded nsIMutationObserver method, to handle restyling (and
   // passing the notification to the frame).
   void AttributeChanged(Element* aElement,
                         int32_t  aNameSpaceID,
                         nsIAtom* aAttribute,
-                        int32_t  aModType);
-
-  // Get an integer that increments every time there is a style change
-  // as a result of a change to the :hover content state.
-  uint32_t GetHoverGeneration() const { return mHoverGeneration; }
+                        int32_t  aModType,
+                        const nsAttrValue* aOldValue);
 
   // Get a counter that increments on every style change, that we use to
   // track whether off-main-thread animations are up-to-date.
   uint64_t GetAnimationGeneration() const { return mAnimationGeneration; }
 
-  // A workaround until bug 847286 lands that gets the maximum of the animation
-  // generation counters stored on the set of animations and transitions
-  // respectively for |aFrame|.
-  static uint64_t GetMaxAnimationGenerationForFrame(nsIFrame* aFrame);
+  static uint64_t GetAnimationGenerationForFrame(nsIFrame* aFrame);
 
   // Update the animation generation count to mark that animation state
   // has changed.
@@ -106,7 +89,14 @@ public:
   // This is normally performed automatically by ProcessPendingRestyles
   // but it is also called when we have out-of-band changes to animations
   // such as changes made through the Web Animations API.
-  void IncrementAnimationGeneration() { ++mAnimationGeneration; }
+  void IncrementAnimationGeneration() {
+    // We update the animation generation at start of each call to
+    // ProcessPendingRestyles so we should ignore any subsequent (redundant)
+    // calls that occur while we are still processing restyles.
+    if (!mIsProcessingRestyles) {
+      ++mAnimationGeneration;
+    }
+  }
 
   // Whether rule matching should skip styles associated with animation
   bool SkipAnimationRules() const { return mSkipAnimationRules; }
@@ -125,18 +115,25 @@ public:
    */
   nsresult ReparentStyleContext(nsIFrame* aFrame);
 
+  void ClearSelectors() {
+    mPendingRestyles.ClearSelectors();
+  }
+
 private:
   // Used when restyling an element with a frame.
-  void ComputeAndProcessStyleChange(nsIFrame*       aFrame,
-                                    nsChangeHint    aMinChange,
-                                    RestyleTracker& aRestyleTracker,
-                                    nsRestyleHint   aRestyleHint);
+  void ComputeAndProcessStyleChange(nsIFrame*              aFrame,
+                                    nsChangeHint           aMinChange,
+                                    RestyleTracker&        aRestyleTracker,
+                                    nsRestyleHint          aRestyleHint,
+                                    const RestyleHintData& aRestyleHintData);
+
   // Used when restyling a display:contents element.
-  void ComputeAndProcessStyleChange(nsStyleContext* aNewContext,
-                                    Element*        aElement,
-                                    nsChangeHint    aMinChange,
-                                    RestyleTracker& aRestyleTracker,
-                                    nsRestyleHint   aRestyleHint);
+  void ComputeAndProcessStyleChange(nsStyleContext*        aNewContext,
+                                    Element*               aElement,
+                                    nsChangeHint           aMinChange,
+                                    RestyleTracker&        aRestyleTracker,
+                                    nsRestyleHint          aRestyleHint,
+                                    const RestyleHintData& aRestyleHintData);
 
 public:
 
@@ -180,29 +177,29 @@ public:
 
     void Put(nsIContent* aContent, nsStyleContext* aStyleContext) {
       MOZ_ASSERT(aContent);
-      nsCSSPseudoElements::Type pseudoType = aStyleContext->GetPseudoType();
-      if (pseudoType == nsCSSPseudoElements::ePseudo_NotPseudoElement) {
+      CSSPseudoElementType pseudoType = aStyleContext->GetPseudoType();
+      if (pseudoType == CSSPseudoElementType::NotPseudo) {
         mElementContexts.Put(aContent, aStyleContext);
-      } else if (pseudoType == nsCSSPseudoElements::ePseudo_before) {
+      } else if (pseudoType == CSSPseudoElementType::before) {
         MOZ_ASSERT(aContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentbefore);
         mBeforePseudoContexts.Put(aContent->GetParent(), aStyleContext);
-      } else if (pseudoType == nsCSSPseudoElements::ePseudo_after) {
+      } else if (pseudoType == CSSPseudoElementType::after) {
         MOZ_ASSERT(aContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentafter);
         mAfterPseudoContexts.Put(aContent->GetParent(), aStyleContext);
       }
     }
 
     nsStyleContext* Get(nsIContent* aContent,
-                        nsCSSPseudoElements::Type aPseudoType) {
+                        CSSPseudoElementType aPseudoType) {
       MOZ_ASSERT(aContent);
-      if (aPseudoType == nsCSSPseudoElements::ePseudo_NotPseudoElement) {
+      if (aPseudoType == CSSPseudoElementType::NotPseudo) {
         return mElementContexts.GetWeak(aContent);
       }
-      if (aPseudoType == nsCSSPseudoElements::ePseudo_before) {
+      if (aPseudoType == CSSPseudoElementType::before) {
         MOZ_ASSERT(aContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentbefore);
         return mBeforePseudoContexts.GetWeak(aContent->GetParent());
       }
-      if (aPseudoType == nsCSSPseudoElements::ePseudo_after) {
+      if (aPseudoType == CSSPseudoElementType::after) {
         MOZ_ASSERT(aContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentafter);
         return mAfterPseudoContexts.GetWeak(aContent->GetParent());
       }
@@ -237,7 +234,63 @@ public:
   static bool
   TryStartingTransition(nsPresContext* aPresContext, nsIContent* aContent,
                         nsStyleContext* aOldStyleContext,
-                        nsRefPtr<nsStyleContext>* aNewStyleContext /* inout */);
+                        RefPtr<nsStyleContext>* aNewStyleContext /* inout */);
+
+  // AnimationsWithDestroyedFrame is used to stop animations and transitions
+  // on elements that have no frame at the end of the restyling process.
+  // It only lives during the restyling process.
+  class MOZ_STACK_CLASS AnimationsWithDestroyedFrame final {
+  public:
+    // Construct a AnimationsWithDestroyedFrame object.  The caller must
+    // ensure that aRestyleManager lives at least as long as the
+    // object.  (This is generally easy since the caller is typically a
+    // method of RestyleManager.)
+    explicit AnimationsWithDestroyedFrame(RestyleManager* aRestyleManager);
+
+    // This method takes the content node for the generated content for
+    // animation/transition on ::before and ::after, rather than the
+    // content node for the real element.
+    void Put(nsIContent* aContent, nsStyleContext* aStyleContext) {
+      MOZ_ASSERT(aContent);
+      CSSPseudoElementType pseudoType = aStyleContext->GetPseudoType();
+      if (pseudoType == CSSPseudoElementType::NotPseudo) {
+        mContents.AppendElement(aContent);
+      } else if (pseudoType == CSSPseudoElementType::before) {
+        MOZ_ASSERT(aContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentbefore);
+        mBeforeContents.AppendElement(aContent->GetParent());
+      } else if (pseudoType == CSSPseudoElementType::after) {
+        MOZ_ASSERT(aContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentafter);
+        mAfterContents.AppendElement(aContent->GetParent());
+      }
+    }
+
+    void StopAnimationsForElementsWithoutFrames();
+
+  private:
+    void StopAnimationsWithoutFrame(nsTArray<RefPtr<nsIContent>>& aArray,
+                                    CSSPseudoElementType aPseudoType);
+
+    RestyleManager* mRestyleManager;
+    AutoRestore<AnimationsWithDestroyedFrame*> mRestorePointer;
+
+    // Below three arrays might include elements that have already had their
+    // animations or transitions stopped.
+    //
+    // mBeforeContents and mAfterContents hold the real element rather than
+    // the content node for the generated content (which might change during
+    // a reframe)
+    nsTArray<RefPtr<nsIContent>> mContents;
+    nsTArray<RefPtr<nsIContent>> mBeforeContents;
+    nsTArray<RefPtr<nsIContent>> mAfterContents;
+  };
+
+  /**
+   * Return the current AnimationsWithDestroyedFrame struct, or null if we're
+   * not currently in a restyling operation.
+   */
+  AnimationsWithDestroyedFrame* GetAnimationsWithDestroyedFrame() {
+    return mAnimationsWithDestroyedFrame;
+  }
 
 private:
   void RestyleForEmptyChange(Element* aContainer);
@@ -273,12 +326,14 @@ public:
   // Returns whether there are any pending restyles.
   bool HasPendingRestyles() { return mPendingRestyles.Count() != 0; }
 
+private:
   // ProcessPendingRestyles calls into one of our RestyleTracker
   // objects.  It then calls back to these functions at the beginning
   // and end of its work.
   void BeginProcessingRestyles(RestyleTracker& aRestyleTracker);
   void EndProcessingRestyles();
 
+public:
   // Update styles for animations that are running on the compositor and
   // whose updating is suppressed on the main thread (to save
   // unnecessary work), while leaving all other aspects of style
@@ -305,11 +360,6 @@ public:
   // other than primary frames.
   void UpdateOnlyAnimationStyles();
 
-  bool ThrottledAnimationStyleIsUpToDate() const {
-    return mLastUpdateForThrottledAnimations ==
-             mPresContext->RefreshDriver()->MostRecentRefresh();
-  }
-
   // Rebuilds all style data by throwing out the old rule tree and
   // building a new one, and additionally applying aExtraHint (which
   // must not contain nsChangeHint_ReconstructFrame) to the root frame.
@@ -333,10 +383,12 @@ public:
    *                      on them.
    * @param aMinChangeHint: A minimum change hint for aContent and its
    *                        descendants.
+   * @param aRestyleHintData: Additional data to go with aRestyleHint.
    */
   void PostRestyleEvent(Element* aElement,
                         nsRestyleHint aRestyleHint,
-                        nsChangeHint aMinChangeHint);
+                        nsChangeHint aMinChangeHint,
+                        const RestyleHintData* aRestyleHintData = nullptr);
 
   void PostRestyleEventForLazyConstruction()
   {
@@ -373,13 +425,17 @@ public:
   void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
                                     nsRestyleHint aRestyleHint);
 
+#ifdef DEBUG
+  bool InRebuildAllStyleData() const { return mInRebuildAllStyleData; }
+#endif
+
 #ifdef RESTYLE_LOGGING
   /**
    * Returns whether a restyle event currently being processed by this
    * RestyleManager should be logged.
    */
   bool ShouldLogRestyle() {
-    return ShouldLogRestyle(mPresContext);
+    return ShouldLogRestyle(PresContext());
   }
 
   /**
@@ -415,13 +471,21 @@ public:
 #endif
 
 private:
+  inline nsStyleSet* StyleSet() const {
+    MOZ_ASSERT(PresContext()->StyleSet()->IsGecko(),
+               "RestyleManager should only be used with a Gecko-flavored "
+               "style backend");
+    return PresContext()->StyleSet()->AsGecko();
+  }
+
   /* aMinHint is the minimal change that should be made to the element */
   // XXXbz do we really need the aPrimaryFrame argument here?
   void RestyleElement(Element*        aElement,
                       nsIFrame*       aPrimaryFrame,
                       nsChangeHint    aMinHint,
                       RestyleTracker& aRestyleTracker,
-                      nsRestyleHint   aRestyleHint);
+                      nsRestyleHint   aRestyleHint,
+                      const RestyleHintData& aRestyleHintData);
 
   void StartRebuildAllStyleData(RestyleTracker& aRestyleTracker);
   void FinishRebuildAllStyleData();
@@ -447,31 +511,25 @@ private:
     // Fast-path the common case (esp. for the animation restyle
     // tracker) of not having anything to do.
     if (aRestyleTracker.Count() || ShouldStartRebuildAllFor(aRestyleTracker)) {
+      IncrementRestyleGeneration();
       aRestyleTracker.DoProcessRestyles();
     }
   }
 
 private:
-  nsPresContext* mPresContext; // weak, disconnected in Disconnect
-
   // True if we need to reconstruct the rule tree the next time we
   // process restyles.
   bool mDoRebuildAllStyleData : 1;
   // True if we're currently in the process of reconstructing the rule tree.
   bool mInRebuildAllStyleData : 1;
-  // True if we're already waiting for a refresh notification
-  bool mObservingRefreshDriver : 1;
   // True if we're in the middle of a nsRefreshDriver refresh
   bool mInStyleRefresh : 1;
   // Whether rule matching should skip styles associated with animation
   bool mSkipAnimationRules : 1;
   bool mHavePendingNonAnimationRestyles : 1;
 
-  uint32_t mHoverGeneration;
   nsChangeHint mRebuildAllExtraHint;
   nsRestyleHint mRebuildAllRestyleHint;
-
-  mozilla::TimeStamp mLastUpdateForThrottledAnimations;
 
   OverflowChangedTracker mOverflowChangedTracker;
 
@@ -480,12 +538,15 @@ private:
   uint64_t mAnimationGeneration;
 
   ReframingStyleContexts* mReframingStyleContexts;
+  AnimationsWithDestroyedFrame* mAnimationsWithDestroyedFrame;
 
   RestyleTracker mPendingRestyles;
 
-#ifdef DEBUG
+  // Are we currently in the middle of a call to ProcessRestyles?
+  // This flag is used both as a debugging aid to assert that we are not
+  // performing nested calls to ProcessPendingRestyles, as well as to ignore
+  // redundant calls to IncrementAnimationGeneration.
   bool mIsProcessingRestyles;
-#endif
 
 #ifdef RESTYLE_LOGGING
   int32_t mLoggingDepth;
@@ -502,7 +563,7 @@ public:
   typedef mozilla::dom::Element Element;
 
   struct ContextToClear {
-    nsRefPtr<nsStyleContext> mStyleContext;
+    RefPtr<nsStyleContext> mStyleContext;
     uint32_t mStructs;
   };
 
@@ -512,10 +573,11 @@ public:
                   nsStyleChangeList* aChangeList,
                   nsChangeHint aHintsHandledByAncestors,
                   RestyleTracker& aRestyleTracker,
+                  nsTArray<nsCSSSelector*>& aSelectorsForDescendants,
                   TreeMatchContext& aTreeMatchContext,
                   nsTArray<nsIContent*>& aVisibleKidsOfHiddenElement,
                   nsTArray<ContextToClear>& aContextsToClear,
-                  nsTArray<nsRefPtr<nsStyleContext>>& aSwappedStructOwners);
+                  nsTArray<RefPtr<nsStyleContext>>& aSwappedStructOwners);
 
   // Construct for an element whose parent is being restyled.
   enum ConstructorFlags {
@@ -528,9 +590,9 @@ public:
   // Construct for a frame whose parent is being restyled, but whose
   // style context is the parent style context for its parent frame.
   // (This is only used for table frames, whose style contexts are used
-  // as the parent style context for their outer table frame (table
-  // wrapper frame).  We should probably try to get rid of this
-  // exception and have the inheritance go the other way.)
+  // as the parent style context for their table wrapper frame. We should
+  // probably try to get rid of this exception and have the inheritance go
+  // the other way.)
   enum ParentContextFromChildFrame { PARENT_CONTEXT_FROM_CHILD_FRAME };
   ElementRestyler(ParentContextFromChildFrame,
                   const ElementRestyler& aParentFrameRestyler,
@@ -542,10 +604,11 @@ public:
                   nsStyleChangeList* aChangeList,
                   nsChangeHint aHintsHandledByAncestors,
                   RestyleTracker& aRestyleTracker,
+                  nsTArray<nsCSSSelector*>& aSelectorsForDescendants,
                   TreeMatchContext& aTreeMatchContext,
                   nsTArray<nsIContent*>& aVisibleKidsOfHiddenElement,
                   nsTArray<ContextToClear>& aContextsToClear,
-                  nsTArray<nsRefPtr<nsStyleContext>>& aSwappedStructOwners);
+                  nsTArray<RefPtr<nsStyleContext>>& aSwappedStructOwners);
 
   /**
    * Restyle our frame's element and its subtree.
@@ -575,7 +638,9 @@ public:
                                                nsStyleContext* aNewContext,
                                                nsChangeHint    aMinHint,
                                                RestyleTracker& aRestyleTracker,
-                                               nsRestyleHint   aRestyleHint);
+                                               nsRestyleHint   aRestyleHint,
+                                               const RestyleHintData&
+                                                 aRestyleHintData);
 
   /**
    * Re-resolve the style contexts for a frame tree, building aChangeList
@@ -586,8 +651,9 @@ public:
                                     nsChangeHint       aMinChange,
                                     RestyleTracker&    aRestyleTracker,
                                     nsRestyleHint      aRestyleHint,
+                                    const RestyleHintData& aRestyleHintData,
                                     nsTArray<ContextToClear>& aContextsToClear,
-                                    nsTArray<nsRefPtr<nsStyleContext>>&
+                                    nsTArray<RefPtr<nsStyleContext>>&
                                       aSwappedStructOwners);
 
 #ifdef RESTYLE_LOGGING
@@ -597,6 +663,8 @@ public:
 #endif
 
 private:
+  inline nsStyleSet* StyleSet() const;
+
   // Enum for the result of RestyleSelf, which indicates whether the
   // restyle procedure should continue to the children, and how.
   //
@@ -604,8 +672,12 @@ private:
   // the work of the earlier values is also done.
   enum RestyleResult {
 
-    // do not restyle children
+    // we left the old style context on the frame; do not restyle children
     eRestyleResult_Stop = 1,
+
+    // we got a new style context on this frame, but we know that children
+    // do not depend on the changed values; do not restyle children
+    eRestyleResult_StopWithStyleChange,
 
     // continue restyling children
     eRestyleResult_Continue,
@@ -614,12 +686,20 @@ private:
     eRestyleResult_ContinueAndForceDescendants
   };
 
+  struct SwapInstruction
+  {
+    RefPtr<nsStyleContext> mOldContext;
+    RefPtr<nsStyleContext> mNewContext;
+    uint32_t mStructsToSwap;
+  };
+
   /**
    * First half of Restyle().
    */
   RestyleResult RestyleSelf(nsIFrame* aSelf,
                             nsRestyleHint aRestyleHint,
-                            uint32_t* aSwappedStructs);
+                            uint32_t* aSwappedStructs,
+                            nsTArray<SwapInstruction>& aSwaps);
 
   /**
    * Restyle the children of this frame (and, in turn, their children).
@@ -629,9 +709,39 @@ private:
   void RestyleChildren(nsRestyleHint aChildRestyleHint);
 
   /**
+   * Returns true iff a selector in mSelectorsForDescendants matches aElement.
+   * This is called when processing a eRestyle_SomeDescendants restyle hint.
+   */
+  bool SelectorMatchesForRestyle(Element* aElement);
+
+  /**
+   * Returns true iff aRestyleHint indicates that we should be restyling.
+   * Specifically, this will return true when eRestyle_Self or
+   * eRestyle_Subtree is present, or if eRestyle_SomeDescendants is
+   * present and the specified element matches one of the selectors in
+   * mSelectorsForDescendants.
+   */
+  bool MustRestyleSelf(nsRestyleHint aRestyleHint, Element* aElement);
+
+  /**
+   * Returns true iff aRestyleHint indicates that we can call
+   * ReparentStyleContext rather than any other restyling method of
+   * nsStyleSet that looks up a new rule node, and if we are
+   * not in the process of reconstructing the whole rule tree.
+   * This is used to check whether it is appropriate to call
+   * ReparentStyleContext.
+   */
+  bool CanReparentStyleContext(nsRestyleHint aRestyleHint);
+
+  /**
    * Helpers for Restyle().
    */
   void AddLayerChangesForAnimation();
+
+  bool MoveStyleContextsForContentChildren(nsIFrame* aParent,
+                                           nsStyleContext* aOldContext,
+                                           nsTArray<nsStyleContext*>& aContextsToMove);
+  bool MoveStyleContextsForChildren(nsStyleContext* aOldContext);
 
   /**
    * Helpers for RestyleSelf().
@@ -639,15 +749,21 @@ private:
   void CaptureChange(nsStyleContext* aOldContext,
                      nsStyleContext* aNewContext,
                      nsChangeHint aChangeToAssume,
-                     uint32_t* aEqualStructs);
-  RestyleResult ComputeRestyleResultFromFrame(nsIFrame* aSelf);
-  RestyleResult ComputeRestyleResultFromNewContext(nsIFrame* aSelf,
-                                                   nsStyleContext* aNewContext);
+                     uint32_t* aEqualStructs,
+                     uint32_t* aSamePointerStructs);
+  void ComputeRestyleResultFromFrame(nsIFrame* aSelf,
+                                     RestyleResult& aRestyleResult,
+                                     bool& aCanStopWithStyleChange);
+  void ComputeRestyleResultFromNewContext(nsIFrame* aSelf,
+                                          nsStyleContext* aNewContext,
+                                          RestyleResult& aRestyleResult,
+                                          bool& aCanStopWithStyleChange);
 
-  /**
-   * Helpers for RestyleChildren().
-   */
+  // Helpers for RestyleChildren().
   void RestyleUndisplayedDescendants(nsRestyleHint aChildRestyleHint);
+  bool MustCheckUndisplayedContent(nsIFrame* aFrame,
+                                   nsIContent*& aUndisplayedParent);
+
   /**
    * In the following two methods, aParentStyleContext is either
    * mFrame->StyleContext() if we have a frame, or a display:contents
@@ -662,15 +778,21 @@ private:
                                nsStyleContext*  aParentStyleContext,
                                const uint8_t    aDisplay);
   void MaybeReframeForBeforePseudo();
-  void MaybeReframeForBeforePseudo(nsIFrame* aGenConParentFrame,
-                                   nsIFrame* aFrame,
-                                   nsIContent* aContent,
-                                   nsStyleContext* aStyleContext);
   void MaybeReframeForAfterPseudo(nsIFrame* aFrame);
-  void MaybeReframeForAfterPseudo(nsIFrame* aGenConParentFrame,
-                                  nsIFrame* aFrame,
-                                  nsIContent* aContent,
-                                  nsStyleContext* aStyleContext);
+  void MaybeReframeForPseudo(CSSPseudoElementType aPseudoType,
+                             nsIFrame* aGenConParentFrame,
+                             nsIFrame* aFrame,
+                             nsIContent* aContent,
+                             nsStyleContext* aStyleContext);
+#ifdef DEBUG
+  bool MustReframeForBeforePseudo();
+  bool MustReframeForAfterPseudo(nsIFrame* aFrame);
+#endif
+  bool MustReframeForPseudo(CSSPseudoElementType aPseudoType,
+                            nsIFrame* aGenConParentFrame,
+                            nsIFrame* aFrame,
+                            nsIContent* aContent,
+                            nsStyleContext* aStyleContext);
   void RestyleContentChildren(nsIFrame* aParent,
                               nsRestyleHint aChildRestyleHint);
   void InitializeAccessibilityNotifications(nsStyleContext* aNewContext);
@@ -687,6 +809,28 @@ private:
     eNotifyShown,
     eNotifyHidden
   };
+
+  // These methods handle the eRestyle_SomeDescendants hint by traversing
+  // down the frame tree (and then when reaching undisplayed content,
+  // the flattened content tree) find elements that match a selector
+  // in mSelectorsForDescendants and call AddPendingRestyle for them.
+  void ConditionallyRestyleChildren();
+  void ConditionallyRestyleChildren(nsIFrame* aFrame,
+                                    Element* aRestyleRoot);
+  void ConditionallyRestyleContentChildren(nsIFrame* aFrame,
+                                           Element* aRestyleRoot);
+  void ConditionallyRestyleUndisplayedDescendants(nsIFrame* aFrame,
+                                                  Element* aRestyleRoot);
+  void DoConditionallyRestyleUndisplayedDescendants(nsIContent* aParent,
+                                                    Element* aRestyleRoot);
+  void ConditionallyRestyleUndisplayedNodes(UndisplayedNode* aUndisplayed,
+                                            nsIContent* aUndisplayedParent,
+                                            const uint8_t aDisplay,
+                                            Element* aRestyleRoot);
+  void ConditionallyRestyleContentDescendants(Element* aElement,
+                                              Element* aRestyleRoot);
+  bool ConditionallyRestyle(nsIFrame* aFrame, Element* aRestyleRoot);
+  bool ConditionallyRestyle(Element* aElement, Element* aRestyleRoot);
 
 #ifdef RESTYLE_LOGGING
   int32_t& LoggingDepth() { return mLoggingDepth; }
@@ -715,6 +859,7 @@ private:
   nsChangeHint mParentFrameHintsNotHandledForDescendants;
   nsChangeHint mHintsNotHandledForDescendants;
   RestyleTracker& mRestyleTracker;
+  nsTArray<nsCSSSelector*>& mSelectorsForDescendants;
   TreeMatchContext& mTreeMatchContext;
   nsIFrame* mResolvedChild; // child that provides our parent style context
   // Array of style context subtrees in which we need to clear out cached
@@ -724,7 +869,9 @@ private:
   // Style contexts that had old structs swapped into it and which should
   // stay alive until the end of the restyle.  (See comment in
   // ElementRestyler::Restyle.)
-  nsTArray<nsRefPtr<nsStyleContext>>& mSwappedStructOwners;
+  nsTArray<RefPtr<nsStyleContext>>& mSwappedStructOwners;
+  // Whether this is the root of the restyle.
+  bool mIsRootOfRestyle;
 
 #ifdef ACCESSIBILITY
   const DesiredA11yNotifications mDesiredA11yNotifications;
@@ -745,7 +892,7 @@ private:
  * (and further ancestors) may be display:contents nodes which have
  * not yet been pushed onto TreeMatchContext.
  */
-class MOZ_STACK_CLASS AutoDisplayContentsAncestorPusher final
+class MOZ_RAII AutoDisplayContentsAncestorPusher final
 {
  public:
   typedef mozilla::dom::Element Element;
@@ -757,7 +904,7 @@ class MOZ_STACK_CLASS AutoDisplayContentsAncestorPusher final
 private:
   TreeMatchContext& mTreeMatchContext;
   nsPresContext* const mPresContext;
-  nsAutoTArray<mozilla::dom::Element*, 4> mAncestors;
+  AutoTArray<mozilla::dom::Element*, 4> mAncestors;
 };
 
 } // namespace mozilla

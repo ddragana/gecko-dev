@@ -11,7 +11,6 @@
 #include "nsIDOMClientRectList.h"
 #include "nsTArray.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
@@ -206,7 +205,7 @@ public:
   }
 
 protected:
-  nsTArray<nsRefPtr<DOMRect> > mArray;
+  nsTArray<RefPtr<DOMRect> > mArray;
   nsCOMPtr<nsISupports> mParent;
 };
 

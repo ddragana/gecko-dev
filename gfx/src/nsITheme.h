@@ -15,7 +15,7 @@
 #include "Units.h"
 
 struct nsRect;
-struct nsIntMargin;
+class nsAttrValue;
 class nsPresContext;
 class nsRenderingContext;
 class nsDeviceContext;
@@ -129,7 +129,8 @@ public:
   { return eUnknownTransparency; }
 
   NS_IMETHOD WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType, 
-                                nsIAtom* aAttribute, bool* aShouldRepaint)=0;
+                                nsIAtom* aAttribute, bool* aShouldRepaint,
+                                const nsAttrValue* aOldValue)=0;
 
   NS_IMETHOD ThemeChanged()=0;
 

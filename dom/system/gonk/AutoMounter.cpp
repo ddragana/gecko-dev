@@ -23,13 +23,13 @@
 #include "nsVolumeService.h"
 #include "AutoMounterSetting.h"
 #include "base/message_loop.h"
+#include "base/task.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Hal.h"
 #include "mozilla/StaticPtr.h"
 #include "MozMtpServer.h"
 #include "MozMtpStorage.h"
-#include "nsAutoPtr.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsMemory.h"
 #include "nsString.h"
@@ -40,7 +40,6 @@
 #include "VolumeManager.h"
 #include "nsIStatusReporter.h"
 
-using namespace mozilla::hal;
 USING_MTP_NAMESPACE
 
 /**************************************************************************
@@ -115,9 +114,9 @@ static void SetAutoMounterStatus(int32_t aStatus);
 
 /***************************************************************************/
 
-inline const char* SwitchStateStr(const SwitchEvent& aEvent)
+inline const char* SwitchStateStr(const hal::SwitchEvent& aEvent)
 {
-  return aEvent.status() == SWITCH_STATE_ON ? "plugged" : "unplugged";
+  return aEvent.status() == hal::SWITCH_STATE_ON ? "plugged" : "unplugged";
 }
 
 /***************************************************************************/
@@ -128,7 +127,7 @@ IsUsbCablePluggedIn()
 #if 0
   // Use this code when bug 745078 gets fixed (or use whatever the
   // appropriate method is)
-  return GetCurrentSwitchEvent(SWITCH_USB) == SWITCH_STATE_ON;
+  return GetCurrentSwitchEvent(SWITCH_USB) == hal::SWITCH_STATE_ON;
 #else
   // Until then, just go read the file directly
   if (access(ICS_SYS_USB_STATE, F_OK) == 0) {
@@ -659,7 +658,7 @@ AutoMounter::StartMtpServer()
   VolumeArray::size_type  numVolumes = VolumeManager::NumVolumes();
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
     RefPtr<Volume> vol = VolumeManager::GetVolume(volIndex);
-    nsRefPtr<MozMtpStorage> storage = new MozMtpStorage(vol, sMozMtpServer);
+    RefPtr<MozMtpStorage> storage = new MozMtpStorage(vol, sMozMtpServer);
     mMozMtpStorage.AppendElement(storage);
   }
 
@@ -963,8 +962,7 @@ AutoMounter::UpdateState()
         if (delay <= 4000) {
           LOG("UpdateState: Volume '%s' is inaccessible, checking again in %d msec", vol->NameStr(), delay);
           MessageLoopForIO::current()->
-            PostDelayedTask(FROM_HERE,
-                            NewRunnableMethod(this, &AutoMounter::UpdateState),
+            PostDelayedTask(NewRunnableMethod(this, &AutoMounter::UpdateState),
                             delay);
           delay *= 2;
         } else {
@@ -1038,8 +1036,7 @@ AutoMounter::UpdateState()
               delay = 5000;
             }
             MessageLoopForIO::current()->
-              PostDelayedTask(FROM_HERE,
-                              NewRunnableMethod(this, &AutoMounter::UpdateState),
+              PostDelayedTask(NewRunnableMethod(this, &AutoMounter::UpdateState),
                               delay);
             filesOpen = true;
             break;
@@ -1371,11 +1368,11 @@ UsbCableEventIOThread()
 *
 **************************************************************************/
 
-class UsbCableObserver final : public SwitchObserver
+class UsbCableObserver final : public hal::SwitchObserver
 {
   ~UsbCableObserver()
   {
-    UnregisterSwitchObserver(SWITCH_USB, this);
+    hal::UnregisterSwitchObserver(hal::SWITCH_USB, this);
   }
 
 public:
@@ -1383,15 +1380,14 @@ public:
 
   UsbCableObserver()
   {
-    RegisterSwitchObserver(SWITCH_USB, this);
+    hal::RegisterSwitchObserver(hal::SWITCH_USB, this);
   }
 
-  virtual void Notify(const SwitchEvent& aEvent)
+  virtual void Notify(const hal::SwitchEvent& aEvent)
   {
     DBG("UsbCable switch device: %d state: %s\n",
         aEvent.device(), SwitchStateStr(aEvent));
     XRE_GetIOMessageLoop()->PostTask(
-        FROM_HERE,
         NewRunnableFunction(UsbCableEventIOThread));
   }
 };
@@ -1406,7 +1402,6 @@ InitAutoMounter()
   sAutoMounterSetting = new AutoMounterSetting();
 
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(InitAutoMounterIOThread));
 
   // Switch Observers need to run on the main thread, so we need to
@@ -1443,7 +1438,6 @@ void
 SetAutoMounterMode(int32_t aMode)
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(SetAutoMounterModeIOThread, aMode));
 }
 
@@ -1451,7 +1445,6 @@ void
 SetAutoMounterSharingMode(const nsCString& aVolumeName, bool aAllowSharing)
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(SetAutoMounterSharingModeIOThread,
                           aVolumeName, aAllowSharing));
 }
@@ -1460,7 +1453,6 @@ void
 AutoMounterFormatVolume(const nsCString& aVolumeName)
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(AutoMounterFormatVolumeIOThread,
                           aVolumeName));
 }
@@ -1469,7 +1461,6 @@ void
 AutoMounterMountVolume(const nsCString& aVolumeName)
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(AutoMounterMountVolumeIOThread,
                           aVolumeName));
 }
@@ -1478,7 +1469,6 @@ void
 AutoMounterUnmountVolume(const nsCString& aVolumeName)
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(AutoMounterUnmountVolumeIOThread,
                           aVolumeName));
 }
@@ -1499,7 +1489,6 @@ ShutdownAutoMounter()
   sUsbCableObserver = nullptr;
 
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(ShutdownAutoMounterIOThread));
 }
 

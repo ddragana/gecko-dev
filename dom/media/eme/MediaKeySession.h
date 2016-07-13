@@ -38,15 +38,16 @@ public:
                                            DOMEventTargetHelper)
 public:
   MediaKeySession(JSContext* aCx,
-                  nsPIDOMWindow* aParent,
+                  nsPIDOMWindowInner* aParent,
                   MediaKeys* aKeys,
                   const nsAString& aKeySystem,
+                  const nsAString& aCDMVersion,
                   SessionType aSessionType,
                   ErrorResult& aRv);
 
   void SetSessionId(const nsAString& aSessionId);
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // Mark this as resultNotAddRefed to return raw pointers
   MediaKeyError* GetError() const;
@@ -91,6 +92,8 @@ public:
 
   bool IsClosed() const;
 
+  void SetExpiration(double aExpiry);
+
   // Process-unique identifier.
   uint32_t Token() const;
 
@@ -98,19 +101,30 @@ private:
   ~MediaKeySession();
 
   void UpdateKeyStatusMap();
-  already_AddRefed<DetailedPromise> MakePromise(ErrorResult& aRv);
 
-  nsRefPtr<DetailedPromise> mClosed;
+  bool IsCallable() const {
+    // The EME spec sets the "callable value" to true whenever the CDM sets
+    // the sessionId. When the session is initialized, sessionId is empty and
+    // callable is thus false.
+    return !mSessionId.IsEmpty();
+  }
 
-  nsRefPtr<MediaKeyError> mMediaKeyError;
-  nsRefPtr<MediaKeys> mKeys;
+  already_AddRefed<DetailedPromise> MakePromise(ErrorResult& aRv,
+                                                const nsACString& aName);
+
+  RefPtr<DetailedPromise> mClosed;
+
+  RefPtr<MediaKeyError> mMediaKeyError;
+  RefPtr<MediaKeys> mKeys;
   const nsString mKeySystem;
+  const nsString mCDMVersion;
   nsString mSessionId;
   const SessionType mSessionType;
   const uint32_t mToken;
   bool mIsClosed;
   bool mUninitialized;
-  nsRefPtr<MediaKeyStatusMap> mKeyStatusMap;
+  RefPtr<MediaKeyStatusMap> mKeyStatusMap;
+  double mExpiration;
 };
 
 } // namespace dom

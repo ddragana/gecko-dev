@@ -18,27 +18,12 @@ using namespace ipc;
 
 namespace dom {
 
-BroadcastChannelParent::BroadcastChannelParent(
-                                            const PrincipalInfo& aPrincipalInfo,
-                                            const nsACString& aOrigin,
-                                            const nsAString& aChannel,
-                                            bool aPrivateBrowsing)
+BroadcastChannelParent::BroadcastChannelParent(const nsAString& aOriginChannelKey)
   : mService(BroadcastChannelService::GetOrCreate())
-  , mOrigin(aOrigin)
-  , mChannel(aChannel)
-  , mAppId(nsIScriptSecurityManager::UNKNOWN_APP_ID)
-  , mIsInBrowserElement(false)
-  , mPrivateBrowsing(aPrivateBrowsing)
+  , mOriginChannelKey(aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
-  mService->RegisterActor(this);
-
-  if (aPrincipalInfo.type() ==PrincipalInfo::TContentPrincipalInfo) {
-    const ContentPrincipalInfo& info =
-      aPrincipalInfo.get_ContentPrincipalInfo();
-    mAppId = info.appId();
-    mIsInBrowserElement = info.isInBrowserElement();
-  }
+  mService->RegisterActor(this, mOriginChannelKey);
 }
 
 BroadcastChannelParent::~BroadcastChannelParent()
@@ -55,8 +40,7 @@ BroadcastChannelParent::RecvPostMessage(const ClonedMessageData& aData)
     return false;
   }
 
-  mService->PostMessage(this, aData, mOrigin, mAppId, mIsInBrowserElement,
-                        mChannel, mPrivateBrowsing);
+  mService->PostMessage(this, aData, mOriginChannelKey);
   return true;
 }
 
@@ -69,10 +53,10 @@ BroadcastChannelParent::RecvClose()
     return false;
   }
 
-  mService->UnregisterActor(this);
+  mService->UnregisterActor(this, mOriginChannelKey);
   mService = nullptr;
 
-  unused << Send__delete__(this);
+  Unused << Send__delete__(this);
 
   return true;
 }
@@ -85,52 +69,33 @@ BroadcastChannelParent::ActorDestroy(ActorDestroyReason aWhy)
   if (mService) {
     // This object is about to be released and with it, also mService will be
     // released too.
-    mService->UnregisterActor(this);
+    mService->UnregisterActor(this, mOriginChannelKey);
   }
 }
 
 void
-BroadcastChannelParent::CheckAndDeliver(const ClonedMessageData& aData,
-                                        const nsCString& aOrigin,
-                                        uint64_t aAppId,
-                                        bool aInBrowserElement,
-                                        const nsString& aChannel,
-                                        bool aPrivateBrowsing)
+BroadcastChannelParent::Deliver(const ClonedMessageData& aData)
 {
   AssertIsOnBackgroundThread();
 
-  if (aOrigin == mOrigin &&
-      aAppId == mAppId &&
-      aInBrowserElement == mIsInBrowserElement &&
-      aChannel == mChannel &&
-      aPrivateBrowsing == mPrivateBrowsing) {
-    // We need to duplicate data only if we have blobs or if the manager of
-    // them is different than the manager of this parent actor.
-    if (aData.blobsParent().IsEmpty() ||
-        static_cast<BlobParent*>(aData.blobsParent()[0])->GetBackgroundManager() == Manager()) {
-      unused << SendNotify(aData);
+  // Duplicate the data for this parent.
+  ClonedMessageData newData(aData);
+
+  // Create new BlobParent objects for this message.
+  for (uint32_t i = 0, len = newData.blobsParent().Length(); i < len; ++i) {
+    RefPtr<BlobImpl> impl =
+      static_cast<BlobParent*>(newData.blobsParent()[i])->GetBlobImpl();
+
+    PBlobParent* blobParent =
+      BackgroundParent::GetOrCreateActorForBlobImpl(Manager(), impl);
+    if (!blobParent) {
       return;
     }
 
-    // Duplicate the data for this parent.
-    ClonedMessageData newData(aData);
-
-    // Ricreate the BlobParent for this new message.
-    for (uint32_t i = 0, len = newData.blobsParent().Length(); i < len; ++i) {
-      nsRefPtr<BlobImpl> impl =
-        static_cast<BlobParent*>(newData.blobsParent()[i])->GetBlobImpl();
-
-      PBlobParent* blobParent =
-        BackgroundParent::GetOrCreateActorForBlobImpl(Manager(), impl);
-      if (!blobParent) {
-        return;
-      }
-
-      newData.blobsParent()[i] = blobParent;
-    }
-
-    unused << SendNotify(newData);
+    newData.blobsParent()[i] = blobParent;
   }
+
+  Unused << SendNotify(newData);
 }
 
 } // namespace dom

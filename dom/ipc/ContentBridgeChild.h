@@ -9,20 +9,17 @@
 
 #include "mozilla/dom/PContentBridgeChild.h"
 #include "mozilla/dom/nsIContentChild.h"
-#include "nsIObserver.h"
 
 namespace mozilla {
 namespace dom {
 
 class ContentBridgeChild final : public PContentBridgeChild
                                , public nsIContentChild
-                               , public nsIObserver
 {
 public:
   explicit ContentBridgeChild(Transport* aTransport);
 
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIOBSERVER
 
   static ContentBridgeChild*
   Create(Transport* aTransport, ProcessId aOtherProcess);
@@ -31,9 +28,9 @@ public:
   void DeferredDestroy();
 
   virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
                                 InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal) override;
+                                const IPC::Principal& aPrincipal,
+                                const ClonedMessageData& aData) override;
 
   virtual PBlobChild*
   SendPBlobConstructor(PBlobChild* actor,
@@ -48,6 +45,8 @@ public:
                                        const ContentParentId& aCpID,
                                        const bool& aIsForApp,
                                        const bool& aIsForBrowser) override;
+
+  FORWARD_SHMEM_ALLOCATOR_TO(PContentBridgeChild)
 
 protected:
   virtual ~ContentBridgeChild();
@@ -76,7 +75,7 @@ protected:
   DISALLOW_EVIL_CONSTRUCTORS(ContentBridgeChild);
 
 protected: // members
-  nsRefPtr<ContentBridgeChild> mSelfRef;
+  RefPtr<ContentBridgeChild> mSelfRef;
   Transport* mTransport; // owned
 };
 

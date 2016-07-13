@@ -20,6 +20,9 @@
     {0xab, 0xeb, 0x36, 0x70, 0x71, 0x1a, 0x8b, 0x85} \
 }
 
+namespace mozilla {
+namespace net {
+
 // This class is exposed to other classes inside Necko for fast access
 // to the nsIProxyInfo attributes.
 class nsProxyInfo final : public nsIProxyInfo
@@ -35,6 +38,8 @@ public:
   int32_t          Port()  { return mPort; }
   const char      *Type()  { return mType; }
   uint32_t         Flags() { return mFlags; }
+  const nsCString &Username()  { return mUsername; }
+  const nsCString &Password()  { return mPassword; }
 
   bool IsDirect();
   bool IsHTTP();
@@ -60,6 +65,8 @@ private:
 
   const char  *mType;  // pointer to statically allocated value
   nsCString    mHost;
+  nsCString    mUsername;
+  nsCString    mPassword;
   int32_t      mPort;
   uint32_t     mFlags;
   uint32_t     mResolveFlags;
@@ -68,5 +75,8 @@ private:
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsProxyInfo, NS_PROXYINFO_IID)
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsProxyInfo_h__

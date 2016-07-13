@@ -53,7 +53,7 @@ NS_INTERFACE_MAP_END
 // Helper class: AutoChangeNumberNotifier
 // Stack-based helper class to pair calls to WillChangeNumberList and
 // DidChangeNumberList.
-class MOZ_STACK_CLASS AutoChangeNumberNotifier
+class MOZ_RAII AutoChangeNumberNotifier
 {
 public:
   explicit AutoChangeNumberNotifier(DOMSVGNumber* aNumber MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -115,13 +115,14 @@ DOMSVGNumber::DOMSVGNumber(nsISupports* aParent)
 /* static */ already_AddRefed<DOMSVGNumber>
 DOMSVGNumber::Constructor(const dom::GlobalObject& aGlobal, ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindowInner> window =
+    do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
 
-  nsRefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
+  RefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
   return number.forget();
 }
 
@@ -129,13 +130,14 @@ DOMSVGNumber::Constructor(const dom::GlobalObject& aGlobal, ErrorResult& aRv)
 DOMSVGNumber::Constructor(const dom::GlobalObject& aGlobal, float aValue,
                           ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindowInner> window =
+    do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
 
-  nsRefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
+  RefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
   number->SetValue(aValue, aRv);
   return number.forget();
 }

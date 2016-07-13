@@ -33,11 +33,11 @@
 interface nsIURI;
 interface nsIObserver;
 interface nsIPrincipal;
-interface nsIDOMWindow;
+interface mozIDOMWindow;
 interface nsIPermission;
 interface nsISimpleEnumerator;
 
-[scriptable, uuid(0d1b8c65-0359-4a8c-b94d-4d3643b23e61)]
+[scriptable, uuid(4dcb3851-eba2-4e42-b236-82d2596fca22)]
 interface nsIPermissionManager : nsISupports
 {
   /**
@@ -165,7 +165,7 @@ interface nsIPermissionManager : nsISupports
    * permission to perform a given action.  System principals will always
    * have permissions granted.
    */
-  uint32_t testPermissionFromWindow(in nsIDOMWindow window,
+  uint32_t testPermissionFromWindow(in mozIDOMWindow window,
                                     in string type);
 
   /**
@@ -234,13 +234,9 @@ interface nsIPermissionManager : nsISupports
   readonly attribute nsISimpleEnumerator enumerator;
 
   /**
-   * Remove all permissions associated with a given app id.
-   * @param aAppId       The appId of the app
-   * @param aBrowserOnly Whether we should remove permissions associated with
-   *                     a browser element (true) or all permissions (false).
+   * Remove all permissions that will match the origin pattern.
    */
-  void removePermissionsForApp(in unsigned long appId,
-                               in boolean browserOnly);
+  void removePermissionsWithAttributes(in DOMString patternAsJSON);
 
   /**
    * If the current permission is set to expire, reset the expiration time. If

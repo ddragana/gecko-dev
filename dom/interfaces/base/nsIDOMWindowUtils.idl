@@ -49,7 +49,7 @@ interface nsIJSRAIIHelper;
 interface nsIContentPermissionRequest;
 interface nsIObserver;
 
-[scriptable, uuid(7a37e173-ea6e-495e-8702-013f8063352a)]
+[scriptable, uuid(46b44e33-13c2-4eb3-bf80-76a4e0857ccc)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -107,13 +107,9 @@ interface nsIDOMWindowUtils : nsISupports {
   void updateLayerTree();
 
   /**
-   * Set the CSS viewport to be |widthPx| x |heightPx| in units of CSS
-   * pixels, regardless of the size of the enclosing widget/view.
-   * This will trigger reflow.
-   *
-   * The caller of this method must have chrome privileges.
+   * Get the last used layer transaction id for this window's refresh driver.
    */
-  void setCSSViewport(in float aWidthPx, in float aHeightPx);
+  readonly attribute unsigned long long lastTransactionId;
 
   /**
    * Information retrieved from the <meta name="viewport"> tag.
@@ -124,6 +120,11 @@ interface nsIDOMWindowUtils : nsISupports {
                        out double aMinZoom, out double aMaxZoom,
                        out uint32_t aWidth, out uint32_t aHeight,
                        out boolean aAutoSize);
+
+  /**
+   * Information about the window size in device pixels.
+   */
+  void getContentViewerSize(out uint32_t aDisplayWidth, out uint32_t aDisplayHeight);
 
   /**
    * For any scrollable element, this allows you to override the
@@ -225,6 +226,18 @@ interface nsIDOMWindowUtils : nsISupports {
    * The caller of this method must have chrome privileges.
    */
   void setResolutionAndScaleTo(in float aResolution);
+
+  /**
+   * Set a resolution on the presShell which is the "restored" from history.
+   * The display dimensions are compared to their current values and used
+   * to scale the resolution value if necessary, e.g. if the device was
+   * rotated between saving and restoring of the session data.
+   * This resolution should be used when painting for the first time. Calling
+   * this too late may have no effect.
+   */
+  void setRestoreResolution(in float aResolution,
+                            in uint32_t aDisplayWidth,
+                            in uint32_t aDisplayHeight);
 
   /**
    * Whether the resolution has been set by the user.
@@ -499,29 +512,29 @@ interface nsIDOMWindowUtils : nsISupports {
    *                           scroll.
    * @param aOptions           Set following flags.
    */
-   const unsigned long WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE = 0x0001;
-   // @deprecated Use WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE.
-   const unsigned long WHEEL_EVENT_CAUSED_BY_PIXEL_ONLY_DEVICE            = 0x0001;
-   const unsigned long WHEEL_EVENT_CAUSED_BY_MOMENTUM          	          = 0x0002;
-   const unsigned long WHEEL_EVENT_CUSTOMIZED_BY_USER_PREFS               = 0x0004;
-   // If any of the following flags is specified this method will throw an
-   // exception in case the relevant overflowDelta has an unexpected value.
-   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_ZERO      = 0x0010;
-   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_POSITIVE  = 0x0020;
-   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_NEGATIVE  = 0x0040;
-   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_ZERO      = 0x0100;
-   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_POSITIVE  = 0x0200;
-   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_NEGATIVE  = 0x0400;
-   void sendWheelEvent(in float aX,
-                       in float aY,
-                       in double aDeltaX,
-                       in double aDeltaY,
-                       in double aDeltaZ,
-                       in unsigned long aDeltaMode,
-                       in long aModifiers,
-                       in long aLineOrPageDeltaX,
-                       in long aLineOrPageDeltaY,
-                       in unsigned long aOptions);
+  const unsigned long WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE = 0x0001;
+  // @deprecated Use WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE.
+  const unsigned long WHEEL_EVENT_CAUSED_BY_PIXEL_ONLY_DEVICE            = 0x0001;
+  const unsigned long WHEEL_EVENT_CAUSED_BY_MOMENTUM                     = 0x0002;
+  const unsigned long WHEEL_EVENT_CUSTOMIZED_BY_USER_PREFS               = 0x0004;
+  // If any of the following flags is specified this method will throw an
+  // exception in case the relevant overflowDelta has an unexpected value.
+  const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_ZERO      = 0x0010;
+  const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_POSITIVE  = 0x0020;
+  const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_NEGATIVE  = 0x0040;
+  const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_ZERO      = 0x0100;
+  const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_POSITIVE  = 0x0200;
+  const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_NEGATIVE  = 0x0400;
+  void sendWheelEvent(in float aX,
+                      in float aY,
+                      in double aDeltaX,
+                      in double aDeltaY,
+                      in double aDeltaZ,
+                      in unsigned long aDeltaMode,
+                      in long aModifiers,
+                      in long aLineOrPageDeltaX,
+                      in long aLineOrPageDeltaY,
+                      in unsigned long aOptions);
 
   /**
    * Synthesize a key event to the window. The event types supported are:
@@ -599,6 +612,13 @@ interface nsIDOMWindowUtils : nsISupports {
                             in long aModifierFlags,
                             in nsIDOMElement aElement,
                             [optional] in nsIObserver aObserver);
+  /**
+   * See nsIWidget::SynthesizeNativeMouseMove and sendNativeMouseEvent
+   */
+  void sendNativeMouseMove(in long aScreenX,
+                           in long aScreenY,
+                           in nsIDOMElement aElement,
+                           [optional] in nsIObserver aObserver);
 
   /**
    * The values for sendNativeMouseScrollEvent's aAdditionalFlags.
@@ -819,11 +839,11 @@ interface nsIDOMWindowUtils : nsISupports {
   void runNextCollectorTimer();
 
   /** Synthesize a simple gesture event for a window. The event types
-   *  supported are: MozSwipeGestureStart, MozSwipeGestureUpdate,
-   *  MozSwipeGestureEnd, MozSwipeGesture, MozMagnifyGestureStart,
-   *  MozMagnifyGestureUpdate, MozMagnifyGesture, MozRotateGestureStart,
-   *  MozRotateGestureUpdate, MozRotateGesture, MozPressTapGesture,
-   *  MozTapGesture, and MozEdgeUIGesture.
+   *  supported are: MozSwipeGestureMayStart, MozSwipeGestureStart,
+   *  MozSwipeGestureUpdate, MozSwipeGestureEnd, MozSwipeGesture,
+   *  MozMagnifyGestureStart, MozMagnifyGestureUpdate, MozMagnifyGesture,
+   *  MozRotateGestureStart, MozRotateGestureUpdate, MozRotateGesture,
+   *  MozPressTapGesture, MozTapGesture, and MozEdgeUIGesture.
    *
    * Cannot be accessed from unprivileged context (not
    * content-accessible) Will throw a DOM security error if called
@@ -1076,6 +1096,32 @@ interface nsIDOMWindowUtils : nsISupports {
   const unsigned long QUERY_CONTENT_FLAG_USE_XP_LINE_BREAK     = 0x0001;
 
   /**
+   * sendQueryContentEvent()'s aAdditionalFlags may have one of following
+   * flags when aType is QUERY_SELECTED_TEXT.  If one of them is set,
+   * the result is the first range of the selection type.  See also
+   * nsISelectionController::SELECTION_*.
+   */
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_SPELLCHECK          = 0x0002;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_IME_RAWINPUT        = 0x0004;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_IME_SELECTEDRAWTEXT = 0x0008;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_IME_CONVERTEDTEXT   = 0x0010;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_IME_SELECTEDCONVERTEDTEXT =
+                                                                         0x0020;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_ACCESSIBILITY       = 0x0040;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_FIND                = 0x0080;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_URLSECONDARY        = 0x0100;
+  const unsigned long QUERY_CONTENT_FLAG_SELECTION_URLSTRIKEOUT        = 0x0200;
+
+  /**
+   * One of sendQueryContentEvent()'s aAdditionalFlags.  If this is specified,
+   * aOffset is relative to start of selection or composition.
+   * Note that this is supported only when QUERY_CONTENT_FLAG_USE_XP_LINE_BREAK
+   * is not specified for now.
+   */
+  const unsigned long QUERY_CONTENT_FLAG_OFFSET_RELATIVE_TO_INSERTION_POINT =
+                                                                         0x0400;
+
+  /**
    * Synthesize a query content event. Note that the result value returned here
    * is in LayoutDevice pixels rather than CSS pixels.
    *
@@ -1085,13 +1131,11 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   nsIQueryContentEventResult sendQueryContentEvent(
                                in unsigned long aType,
-                               in unsigned long aOffset,
+                               in long long aOffset,
                                in unsigned long aLength,
                                in long aX,
                                in long aY,
                                [optional] in unsigned long aAdditionalFlags);
-
-  // NOTE: following values are same as NS_QUERY_* in BasicEvents.h
 
   /**
    * QUERY_SELECTED_TEXT queries the first selection range's information.
@@ -1178,6 +1222,17 @@ interface nsIDOMWindowUtils : nsISupports {
    *         result are available.
    */
   const unsigned long QUERY_CHARACTER_AT_POINT                  = 3208;
+
+  /**
+   * QUERY_TEXT_RECT_ARRAY queries the rects per character
+   *
+   * @param aOffset   The first character's offset.  0 is the first character.
+   * @param aLength   The length of getting text.  If the aLength is too long,
+   *                  the extra length is ignored.
+   * @param aX        Not used.
+   * @param aY        Not used.
+   */
+  const unsigned long QUERY_TEXT_RECT_ARRAY                     = 3209;
 
   /**
    * Called when the remote child frame has changed its fullscreen state,
@@ -1338,11 +1393,12 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute boolean layerManagerRemote;
 
   /**
-   * True if we can initialize a hardware-backed h264 decoder for a simple
-   * test video, does not mean that all h264 video decoding will be done
+   * Returns a Promise that will be resolved with a string once the capabilities
+   * of the h264 decoder have been determined.
+   * Success does not mean that all h264 video decoding will be done
    * in hardware.
    */
-  readonly attribute boolean supportsHardwareH264Decoding;
+  readonly attribute jsval supportsHardwareH264Decoding;
 
   /**
    * Record (and return) frame-intervals for frames which were presented
@@ -1359,16 +1415,16 @@ interface nsIDOMWindowUtils : nsISupports {
   /**
    * Returns a handle which represents current recording start position.
    */
-   void startFrameTimeRecording([retval] out unsigned long startIndex);
+  void startFrameTimeRecording([retval] out unsigned long startIndex);
 
   /**
    * Returns number of recorded frames since startIndex was issued,
    *   and allocates+populates 2 arraye with the recorded data.
    * - Allocation is infallible. Should be released even if size is 0.
    */
-   void stopFrameTimeRecording(in unsigned long startIndex,
-                              [optional] out unsigned long frameCount,
-                              [retval, array, size_is(frameCount)] out float frameIntervals);
+  void stopFrameTimeRecording(in unsigned long startIndex,
+                             [optional] out unsigned long frameCount,
+                             [retval, array, size_is(frameCount)] out float frameIntervals);
 
   /**
    * Signals that we're begining to tab switch. This is used by painting code to
@@ -1442,7 +1498,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * with that offset if async scrolling is enabled, and then the offset
    * will be removed. Only call this while test-controlled refreshes is enabled.
    */
-  void setAsyncScrollOffset(in nsIDOMNode aNode, in int32_t aX, in int32_t aY);
+  void setAsyncScrollOffset(in nsIDOMNode aNode, in float aX, in float aY);
 
   /**
    * Set async zoom value. aRootElement should be the document element of our
@@ -1461,6 +1517,11 @@ interface nsIDOMWindowUtils : nsISupports {
    * will not fire. This is intended to be used by test code only!
    */
   bool flushApzRepaints();
+
+  /**
+   * Ask APZ to pan and zoom to the focused input element.
+   */
+  void zoomToFocusedInput();
 
   /**
    * Method for testing StyleAnimationValue::ComputeDistance.
@@ -1484,13 +1545,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * Get the type of the currently focused html input, if any.
    */
   readonly attribute string focusedInputType;
-
-  /**
-   * Given a view ID from the compositor process, retrieve the element
-   * associated with a view. For scrollpanes for documents, the root
-   * element of the document is returned.
-   */
-  nsIDOMElement findElementWithViewId(in nsViewID aId);
 
   /**
    * Find the view ID for a given element. This is the reverse of
@@ -1626,19 +1680,6 @@ interface nsIDOMWindowUtils : nsISupports {
   void setScrollPositionClampingScrollPortSize(in float aWidth, in float aHeight);
 
   /**
-   * Set margins for the layout of fixed position elements in the content
-   * document. These are used on mobile, where the viewable area can be
-   * temporarily obscured by the browser chrome. In this situation, we're ok
-   * with scrollable page content being obscured, but fixed position content
-   * cannot be revealed without removing the obscuring chrome, so we use these
-   * margins so that it can remain visible.
-   *
-   * The caller of this method must have chrome privileges.
-   */
-  void setContentDocumentFixedPositionMargins(in float aTop, in float aRight,
-                                              in float aBottom, in float aLeft);
-
-  /**
    * These are used to control whether dialogs (alert, prompt, confirm) are
    * allowed.
    */
@@ -1697,7 +1738,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * After calling the method, the window for which this DOMWindowUtils
    * was created can be closed using scripts.
    */
-   void allowScriptsToClose();
+  void allowScriptsToClose();
 
   /**
    * Is the parent window's main widget visible?  If it isn't, we probably
@@ -1710,109 +1751,100 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   readonly attribute boolean isParentWindowMainWidgetVisible;
 
-   /**
-    * In certain cases the event handling of nodes, form controls in practice,
-    * may be disabled. Such cases are for example the existence of disabled
-    * attribute or -moz-user-input: none/disabled.
-    */
-   boolean isNodeDisabledForEvents(in nsIDOMNode aNode);
+  /**
+   * In certain cases the event handling of nodes, form controls in practice,
+   * may be disabled. Such cases are for example the existence of disabled
+   * attribute or -moz-user-input: none/disabled.
+   */
+  boolean isNodeDisabledForEvents(in nsIDOMNode aNode);
 
-   /**
-    * Setting paintFlashing to true will flash newly painted area.
-    */
-   attribute boolean paintFlashing;
+  /**
+   * Setting paintFlashing to true will flash newly painted area.
+   */
+  attribute boolean paintFlashing;
 
-   /**
-    * Add a "synchronous section", in the form of an nsIRunnable run once the
-    * event loop has reached a "stable state". |runnable| must not cause any
-    * queued events to be processed (i.e. must not spin the event loop).
-    * We've reached a stable state when the currently executing task/event has
-    * finished, see:
-    * http://www.whatwg.org/specs/web-apps/current-work/multipage/webappapis.html#synchronous-section
-    * In practice this runs aRunnable once the currently executing event
-    * finishes. If called multiple times per task/event, all the runnables will
-    * be executed, in the order in which runInStableState() was called.
-    *
-    * XXX - This can wreak havoc if you're not using this for very simple
-    * purposes, eg testing or setting a flag.
-    */
-   void runInStableState(in nsIRunnable runnable);
+  /*
+   * Returns the value of a given property animated on the compositor thread.
+   * If the property is NOT currently being animated on the compositor thread,
+   * returns an empty string.
+   */
+  AString getOMTAStyle(in nsIDOMElement aElement, in AString aProperty,
+                       [optional] in AString aPseudoElement);
 
-   /**
-    * Run the given runnable before the next iteration of the event loop (this
-    * includes native events too). If a nested loop is spawned within the current
-    * event then the runnable will not be run until that loop has terminated.
-    *
-    * XXX - This can wreak havoc if you're not using this for very simple
-    * purposes, eg testing or setting a flag.
-    */
-   void runBeforeNextEvent(in nsIRunnable runnable);
+  /**
+   * Special function that gets a property syncronously from the last composite
+   * that occured.
+   *
+   * Supported properties:
+   *   "overdraw": Report a percentage between 0 and 999 indicate how many times
+   *               each pixels on the destination window have been touched.
+   *   "missed_hwc": Report a bool if hardware composer is supported but was
+   *                 not used for the last frame.
+   */
+  float requestCompositorProperty(in AString aProperty);
 
-   /*
-    * Returns the value of a given property animated on the compositor thread.
-    * If the property is NOT currently being animated on the compositor thread,
-    * returns an empty string.
-    */
-   AString getOMTAStyle(in nsIDOMElement aElement, in AString aProperty,
-                        [optional] in AString aPseudoElement);
+  /**
+   * If aHandlingInput is true, this informs the event state manager that
+   * we're handling user input. Otherwise, this is a no-op (as by default
+   * we're not handling user input).
+   * Remember to call destruct() on the return value!
+   * See also nsIDOMWindowUtils::isHandlingUserInput.
+   */
+  nsIJSRAIIHelper setHandlingUserInput(in boolean aHandlingInput);
 
-   /**
-    * Special function that gets a property syncronously from the last composite
-    * that occured.
-    *
-    * Supported properties:
-    *   "overdraw": Report a percentage between 0 and 999 indicate how many times
-    *               each pixels on the destination window have been touched.
-    *   "missed_hwc": Report a bool if hardware composer is supported but was
-    *                 not used for the last frame.
-    */
-   float requestCompositorProperty(in AString aProperty);
+  /**
+   * Get the content- and compositor-side APZ test data instances.
+   * The return values are of type APZTestData (see APZTestData.webidl).
+   */
+  [implicit_jscontext] jsval getContentAPZTestData();
+  [implicit_jscontext] jsval getCompositorAPZTestData();
 
-   /**
-    * If aHandlingInput is true, this informs the event state manager that
-    * we're handling user input. Otherwise, this is a no-op (as by default
-    * we're not handling user input).
-    * Remember to call destruct() on the return value!
-    * See also nsIDOMWindowUtils::isHandlingUserInput.
-    */
-   nsIJSRAIIHelper setHandlingUserInput(in boolean aHandlingInput);
+  /**
+   * Posts an eRestyle_Self restyle event for the given element.
+   */
+  void postRestyleSelfEvent(in nsIDOMElement aElement);
 
-   /**
-    * Get the content- and compositor-side APZ test data instances.
-    * The return values are of type APZTestData (see APZTestData.webidl).
-    */
-   [implicit_jscontext] jsval getContentAPZTestData();
-   [implicit_jscontext] jsval getCompositorAPZTestData();
+  /**
+   * Used to pause or resume all media in this window. Use-cases are audio
+   * competing, remote media control and to prevent auto-playing media.
+   */
+  attribute uint32_t mediaSuspend;
 
-   /**
-    * Posts an eRestyle_Self restyle event for the given element.
-    */
-   void postRestyleSelfEvent(in nsIDOMElement aElement);
+  /**
+   * With this it's possible to mute all the MediaElements in this window.
+   * We have audioMuted and audioVolume to preserve the volume across
+   * mute/umute.
+   */
+  attribute boolean audioMuted;
 
-   /**
-    * With this it's possible to mute all the MediaElements in this window.
-    * We have audioMuted and audioVolume to preserve the volume across
-    * mute/umute.
-    */
-   attribute boolean audioMuted;
+  /**
+   * range: greater or equal to 0. The real volume level is affected by the
+   * volume of all ancestor windows.
+   */
+  attribute float audioVolume;
 
-    /**
-     * range: greater or equal to 0. The real volume level is affected by the
-     * volume of all ancestor windows.
-     */
-    attribute float audioVolume;
+  /**
+   * This method doesn't do anything useful.  It was solely added for the
+   * purpose of the test for bug 503926.
+   */
+  void xpconnectArgument(in nsIDOMWindowUtils aThis);
 
-    /**
-     * This method doesn't do anything useful.  It was solely added for the
-     * purpose of the test for bug 503926.
-     */
-    void xpconnectArgument(in nsIDOMWindowUtils aThis);
+  /**
+   * Helper for JS components that need to send permission requests with
+   * e10s support properly.
+   */
+  void askPermission(in nsIContentPermissionRequest aRequest);
 
-    /**
-     * Helper for JS components that need to send permission requests with
-     * e10s support properly.
-     */
-     void askPermission(in nsIContentPermissionRequest aRequest);
+  /**
+   * Number of elements restyled for the curent document.
+   *
+   * Note that during a restyle operation we may restyle an element more
+   * than once (e.g., for an inline that contains blocks).  This also
+   * counts restyling of pseudo-elements and anonymous boxes.
+   *
+   * May throw NS_ERROR_NOT_AVAILABLE.
+   */
+  readonly attribute unsigned long long elementsRestyled;
 
   /**
    * Number of frames constructed (excluding breaking) for the curent
@@ -1873,6 +1905,27 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aSheetType One of the nsIStyleSheetService.*_SHEET constants.
    */
   bool hasRuleProcessorUsedByMultipleStyleSets(in unsigned long aSheetType);
+
+  /*
+   * Force the use counters for the node's associated document(s) to be
+   * flushed to telemetry.  For example, a document node will flush its own
+   * counters and an image node with an SVG source will flush the SVG
+   * document's counters.  Normally, use counters are flushed to telemetry
+   * upon document destruction, but as document destruction is somewhat
+   * non-deterministic, we have this method here for more determinism when
+   * running tests.
+   */
+  void forceUseCounterFlush(in nsIDOMNode aNode);
+
+  void setNextPaintSyncId(in long aSyncId);
+
+  /**
+   * Enable or disable displayport suppression. This is intended to be used by
+   * testing code, to provide more deterministic behaviour over the displayport
+   * suppression during tests. Note that this updates a flag, so whatever value
+   * was last provided is what will be used.
+   */
+  void respectDisplayPortSuppression(in boolean aEnabled);
 };
 
 [scriptable, uuid(c694e359-7227-4392-a138-33c0cc1f15a6)]

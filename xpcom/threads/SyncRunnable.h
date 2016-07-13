@@ -8,7 +8,9 @@
 #define mozilla_SyncRunnable_h
 
 #include "nsThreadUtils.h"
+#include "mozilla/AbstractThread.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/Move.h"
 
 namespace mozilla {
 
@@ -21,18 +23,25 @@ namespace mozilla {
  * on this thread, or else you will deadlock.
  *
  * Typical usage:
- * nsRefPtr<SyncRunnable> sr = new SyncRunnable(new myrunnable...());
+ * RefPtr<SyncRunnable> sr = new SyncRunnable(new myrunnable...());
  * sr->DispatchToThread(t);
  *
  * We also provide a convenience wrapper:
  * SyncRunnable::DispatchToThread(new myrunnable...());
  *
  */
-class SyncRunnable : public nsRunnable
+class SyncRunnable : public Runnable
 {
 public:
   explicit SyncRunnable(nsIRunnable* aRunnable)
     : mRunnable(aRunnable)
+    , mMonitor("SyncRunnable")
+    , mDone(false)
+  {
+  }
+
+  explicit SyncRunnable(already_AddRefed<nsIRunnable> aRunnable)
+    : mRunnable(Move(aRunnable))
     , mMonitor("SyncRunnable")
     , mDone(false)
   {
@@ -61,11 +70,37 @@ public:
     }
   }
 
+  void DispatchToThread(AbstractThread* aThread, bool aForceDispatch = false)
+  {
+    if (!aForceDispatch && aThread->IsCurrentThreadIn()) {
+      mRunnable->Run();
+      return;
+    }
+
+    // Check we don't have tail dispatching here. Otherwise we will deadlock
+    // ourself when spinning the loop below.
+    MOZ_ASSERT(!aThread->RequiresTailDispatchFromCurrentThread());
+
+    aThread->Dispatch(RefPtr<nsIRunnable>(this).forget());
+    mozilla::MonitorAutoLock lock(mMonitor);
+    while (!mDone) {
+      lock.Wait();
+    }
+  }
+
   static void DispatchToThread(nsIEventTarget* aThread,
                                nsIRunnable* aRunnable,
                                bool aForceDispatch = false)
   {
-    nsRefPtr<SyncRunnable> s(new SyncRunnable(aRunnable));
+    RefPtr<SyncRunnable> s(new SyncRunnable(aRunnable));
+    s->DispatchToThread(aThread, aForceDispatch);
+  }
+
+  static void DispatchToThread(AbstractThread* aThread,
+                               nsIRunnable* aRunnable,
+                               bool aForceDispatch = false)
+  {
+    RefPtr<SyncRunnable> s(new SyncRunnable(aRunnable));
     s->DispatchToThread(aThread, aForceDispatch);
   }
 

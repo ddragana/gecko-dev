@@ -3,9 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
+var Cc = Components.classes;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -89,8 +89,9 @@ add_test(function test_telemetry_events() {
     ["event",   EVENT_TEST1, METHOD_NONE, [],                                              undefined],
   ]);
 
+  let clearMeasurements = false;
   let obs = getObserver();
-  let measurements = removeNonTestMeasurements(obs.getUIMeasurements());
+  let measurements = removeNonTestMeasurements(obs.getUIMeasurements(clearMeasurements));
 
   measurements.forEach(function (m, i) {
     if (m.type === "event") {

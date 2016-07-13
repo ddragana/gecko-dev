@@ -4,10 +4,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "AudioEventTimeline.h"
+#include "AudioEventTimeline.cpp"
 #include "TestHarness.h"
 #include <sstream>
 #include <limits>
+
+// Mock the MediaStream class
+namespace mozilla {
+class MediaStream
+{
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaStream)
+private:
+  ~MediaStream() {
+  };
+};
+}
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -81,7 +92,7 @@ private:
   nsresult mRv;
 };
 
-typedef AudioEventTimeline<ErrorResultMock> Timeline;
+typedef AudioEventTimeline Timeline;
 
 void TestSpecExample()
 {
@@ -134,7 +145,8 @@ void TestSpecExample()
   is(timeline.GetValueAtTime(0.6), 0.75f, "Correct value");
   is(timeline.GetValueAtTime(0.65), (0.75f * powf(0.05f / 0.75f, 0.5f)), "Correct value");
   is(timeline.GetValueAtTime(0.7), -1.0f, "Correct value");
-  is(timeline.GetValueAtTime(0.9), 0.0f, "Correct value");
+  is(timeline.GetValueAtTime(0.8), 0.0f, "Correct value");
+  is(timeline.GetValueAtTime(0.9), 1.0f, "Correct value");
   is(timeline.GetValueAtTime(1.0), 1.0f, "Correct value");
 }
 
@@ -420,6 +432,19 @@ void TestExponentialInvalidPreviousZeroValue()
   is(rv, NS_OK, "Should succeed this time");
 }
 
+void
+TestSettingValueCurveTwice()
+{
+  Timeline timeline(0.f);
+  float curve[] = { -1.0f, 0.0f, 1.0f };
+
+  ErrorResultMock rv;
+
+  timeline.SetValueCurveAtTime(curve, ArrayLength(curve), 0.0f, 0.3f, rv);
+  timeline.SetValueCurveAtTime(curve, ArrayLength(curve), 0.0f, 0.3f, rv);
+  is(rv, NS_OK, "SetValueCurveAtTime succeeded");
+}
+
 int main()
 {
   ScopedXPCOM xpcom("TestAudioEventTimeline");
@@ -445,6 +470,7 @@ int main()
   TestExponentialRampAtSameTime();
   TestSetTargetZeroTimeConstant();
   TestExponentialInvalidPreviousZeroValue();
+  TestSettingValueCurveTwice();
 
   return gFailCount > 0;
 }

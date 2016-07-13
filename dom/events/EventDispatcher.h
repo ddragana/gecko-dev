@@ -23,6 +23,7 @@ template<class E> class nsCOMArray;
 
 namespace mozilla {
 namespace dom {
+class Event;
 class EventTarget;
 } // namespace dom
 
@@ -239,14 +240,14 @@ public:
    * aEvent is used as the target (unless there is event
    * retargeting) and the originalTarget of the DOM Event.
    * aTarget is always used as the starting point for constructing the event
-   * target chain, no matter what the value of aEvent->target is.
-   * In other words, aEvent->target is only a property of the event and it has
+   * target chain, no matter what the value of aEvent->mTarget is.
+   * In other words, aEvent->mTarget is only a property of the event and it has
    * nothing to do with the construction of the event target chain.
    * Neither aTarget nor aEvent is allowed to be nullptr.
    *
    * If aTargets is non-null, event target chain will be created, but
-   * event won't be handled. In this case aEvent->message should be
-   * NS_EVENT_NULL.
+   * event won't be handled. In this case aEvent->mMessage should be
+   * eVoidEvent.
    * @note Use this method when dispatching a WidgetEvent.
    */
   static nsresult Dispatch(nsISupports* aTarget,
@@ -272,13 +273,12 @@ public:
                                    nsEventStatus* aEventStatus);
 
   /**
-   * Creates a DOM Event.
+   * Creates a DOM Event.  Returns null if the event type is unsupported.
    */
-  static nsresult CreateEvent(dom::EventTarget* aOwner,
-                              nsPresContext* aPresContext,
-                              WidgetEvent* aEvent,
-                              const nsAString& aEventType,
-                              nsIDOMEvent** aDOMEvent);
+  static already_AddRefed<dom::Event> CreateEvent(dom::EventTarget* aOwner,
+                                                  nsPresContext* aPresContext,
+                                                  WidgetEvent* aEvent,
+                                                  const nsAString& aEventType);
 
   /**
    * Called at shutting down.

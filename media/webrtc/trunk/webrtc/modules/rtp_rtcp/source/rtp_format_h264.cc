@@ -11,8 +11,8 @@
 #include <string.h>
 
 #include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_format_h264.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_utility.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 
 namespace webrtc {
@@ -128,11 +128,13 @@ void ParseFuaNalu(RtpDepacketizer::ParsedPayload* parsed_payload,
 }  // namespace
 
 RtpPacketizerH264::RtpPacketizerH264(FrameType frame_type,
-                                     size_t max_payload_len)
+                                     size_t max_payload_len,
+                                     uint8_t packetization_mode)
     : payload_data_(NULL),
       payload_size_(0),
       max_payload_len_(max_payload_len),
-      frame_type_(frame_type) {
+      frame_type_(frame_type),
+      packetization_mode_(packetization_mode) {
 }
 
 RtpPacketizerH264::~RtpPacketizerH264() {
@@ -154,7 +156,7 @@ void RtpPacketizerH264::GeneratePackets() {
   for (size_t i = 0; i < fragmentation_.fragmentationVectorSize;) {
     size_t fragment_offset = fragmentation_.fragmentationOffset[i];
     size_t fragment_length = fragmentation_.fragmentationLength[i];
-    if (fragment_length > max_payload_len_) {
+    if (fragment_length > max_payload_len_ || packetization_mode_ == 0) {
       PacketizeFuA(fragment_offset, fragment_length);
       ++i;
     } else {
@@ -267,7 +269,7 @@ void RtpPacketizerH264::NextAggregatePacket(uint8_t* buffer,
   *bytes_to_send += kNalHeaderSize;
   while (packet.aggregated) {
     // Add NAL unit length field.
-    RtpUtility::AssignUWord16ToBuffer(&buffer[index], packet.size);
+    ByteWriter<uint16_t>::WriteBigEndian(&buffer[index], packet.size);
     index += kLengthFieldSize;
     *bytes_to_send += kLengthFieldSize;
     // Add NAL unit.

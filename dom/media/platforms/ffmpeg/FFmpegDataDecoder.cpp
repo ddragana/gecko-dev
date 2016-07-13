@@ -4,12 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/SyncRunnable.h"
 #include "mozilla/TaskQueue.h"
 
 #include <string.h>
+#ifdef __GNUC__
 #include <unistd.h>
+#endif
 
-#include "FFmpegLibs.h"
 #include "FFmpegLog.h"
 #include "FFmpegDataDecoder.h"
 #include "prsystem.h"
@@ -17,17 +19,22 @@
 namespace mozilla
 {
 
-bool FFmpegDataDecoder<LIBAV_VER>::sFFmpegInitDone = false;
 StaticMutex FFmpegDataDecoder<LIBAV_VER>::sMonitor;
 
-FFmpegDataDecoder<LIBAV_VER>::FFmpegDataDecoder(FlushableTaskQueue* aTaskQueue,
-                                                AVCodecID aCodecID)
-  : mTaskQueue(aTaskQueue)
+  FFmpegDataDecoder<LIBAV_VER>::FFmpegDataDecoder(FFmpegLibWrapper* aLib,
+                                                  TaskQueue* aTaskQueue,
+                                                  MediaDataDecoderCallback* aCallback,
+                                                  AVCodecID aCodecID)
+  : mLib(aLib)
+  , mCallback(aCallback)
   , mCodecContext(nullptr)
   , mFrame(NULL)
   , mExtraData(nullptr)
   , mCodecID(aCodecID)
+  , mTaskQueue(aTaskQueue)
+  , mIsFlushing(false)
 {
+  MOZ_ASSERT(aLib);
   MOZ_COUNT_CTOR(FFmpegDataDecoder);
 }
 
@@ -36,64 +43,27 @@ FFmpegDataDecoder<LIBAV_VER>::~FFmpegDataDecoder()
   MOZ_COUNT_DTOR(FFmpegDataDecoder);
 }
 
-/**
- * FFmpeg calls back to this function with a list of pixel formats it supports.
- * We choose a pixel format that we support and return it.
- * For now, we just look for YUV420P as it is the only non-HW accelerated format
- * supported by FFmpeg's H264 decoder.
- */
-static PixelFormat
-ChoosePixelFormat(AVCodecContext* aCodecContext, const PixelFormat* aFormats)
-{
-  FFMPEG_LOG("Choosing FFmpeg pixel format for video decoding.");
-  for (; *aFormats > -1; aFormats++) {
-    if (*aFormats == PIX_FMT_YUV420P) {
-      FFMPEG_LOG("Requesting pixel format YUV420P.");
-      return PIX_FMT_YUV420P;
-    }
-  }
-
-  NS_WARNING("FFmpeg does not share any supported pixel formats.");
-  return PIX_FMT_NONE;
-}
-
 nsresult
-FFmpegDataDecoder<LIBAV_VER>::Init()
+FFmpegDataDecoder<LIBAV_VER>::InitDecoder()
 {
-  StaticMutexAutoLock mon(sMonitor);
-
   FFMPEG_LOG("Initialising FFmpeg decoder.");
 
-  if (!sFFmpegInitDone) {
-    av_register_all();
-#ifdef DEBUG
-    av_log_set_level(AV_LOG_DEBUG);
-#endif
-    sFFmpegInitDone = true;
-  }
-
-  AVCodec* codec = avcodec_find_decoder(mCodecID);
+  AVCodec* codec = FindAVCodec(mLib, mCodecID);
   if (!codec) {
     NS_WARNING("Couldn't find ffmpeg decoder");
     return NS_ERROR_FAILURE;
   }
 
-  if (!(mCodecContext = avcodec_alloc_context3(codec))) {
+  StaticMutexAutoLock mon(sMonitor);
+
+  if (!(mCodecContext = mLib->avcodec_alloc_context3(codec))) {
     NS_WARNING("Couldn't init ffmpeg context");
     return NS_ERROR_FAILURE;
   }
 
   mCodecContext->opaque = this;
 
-  // FFmpeg takes this as a suggestion for what format to use for audio samples.
-  mCodecContext->request_sample_fmt = AV_SAMPLE_FMT_FLT;
-
-  // FFmpeg will call back to this to negotiate a video pixel format.
-  mCodecContext->get_format = ChoosePixelFormat;
-
-  mCodecContext->thread_count = PR_GetNumberOfProcessors();
-  mCodecContext->thread_type = FF_THREAD_SLICE | FF_THREAD_FRAME;
-  mCodecContext->thread_safe_callbacks = false;
+  InitCodecContext();
 
   if (mExtraData) {
     mCodecContext->extradata_size = mExtraData->Length();
@@ -109,8 +79,10 @@ FFmpegDataDecoder<LIBAV_VER>::Init()
     mCodecContext->flags |= CODEC_FLAG_EMU_EDGE;
   }
 
-  if (avcodec_open2(mCodecContext, codec, nullptr) < 0) {
+  if (mLib->avcodec_open2(mCodecContext, codec, nullptr) < 0) {
     NS_WARNING("Couldn't initialise ffmpeg decoder");
+    mLib->avcodec_close(mCodecContext);
+    mLib->av_freep(&mCodecContext);
     return NS_ERROR_FAILURE;
   }
 
@@ -128,54 +100,124 @@ FFmpegDataDecoder<LIBAV_VER>::Init()
 }
 
 nsresult
-FFmpegDataDecoder<LIBAV_VER>::Flush()
+FFmpegDataDecoder<LIBAV_VER>::Shutdown()
 {
-  mTaskQueue->Flush();
-  avcodec_flush_buffers(mCodecContext);
+  if (mTaskQueue) {
+    nsCOMPtr<nsIRunnable> runnable =
+      NewRunnableMethod(this, &FFmpegDataDecoder<LIBAV_VER>::ProcessShutdown);
+    mTaskQueue->Dispatch(runnable.forget());
+  } else {
+    ProcessShutdown();
+  }
+  return NS_OK;
+}
+
+void
+FFmpegDataDecoder<LIBAV_VER>::ProcessDecode(MediaRawData* aSample)
+{
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  if (mIsFlushing) {
+    return;
+  }
+  switch (DoDecode(aSample)) {
+    case DecodeResult::DECODE_ERROR:
+      mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
+      break;
+    case DecodeResult::FATAL_ERROR:
+      mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+      break;
+    default:
+      if (mTaskQueue->IsEmpty()) {
+        mCallback->InputExhausted();
+      }
+  }
+}
+
+nsresult
+FFmpegDataDecoder<LIBAV_VER>::Input(MediaRawData* aSample)
+{
+  mTaskQueue->Dispatch(NewRunnableMethod<RefPtr<MediaRawData>>(
+    this, &FFmpegDataDecoder::ProcessDecode, aSample));
   return NS_OK;
 }
 
 nsresult
-FFmpegDataDecoder<LIBAV_VER>::Shutdown()
+FFmpegDataDecoder<LIBAV_VER>::Flush()
+{
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  mIsFlushing = true;
+  nsCOMPtr<nsIRunnable> runnable =
+    NewRunnableMethod(this, &FFmpegDataDecoder<LIBAV_VER>::ProcessFlush);
+  SyncRunnable::DispatchToThread(mTaskQueue, runnable);
+  mIsFlushing = false;
+  return NS_OK;
+}
+
+nsresult
+FFmpegDataDecoder<LIBAV_VER>::Drain()
+{
+  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
+  nsCOMPtr<nsIRunnable> runnable =
+    NewRunnableMethod(this, &FFmpegDataDecoder<LIBAV_VER>::ProcessDrain);
+  mTaskQueue->Dispatch(runnable.forget());
+  return NS_OK;
+}
+
+void
+FFmpegDataDecoder<LIBAV_VER>::ProcessFlush()
+{
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  if (mCodecContext) {
+    mLib->avcodec_flush_buffers(mCodecContext);
+  }
+}
+
+void
+FFmpegDataDecoder<LIBAV_VER>::ProcessShutdown()
 {
   StaticMutexAutoLock mon(sMonitor);
 
-  if (sFFmpegInitDone) {
-    avcodec_close(mCodecContext);
-    av_freep(&mCodecContext);
+  if (mCodecContext) {
+    mLib->avcodec_close(mCodecContext);
+    mLib->av_freep(&mCodecContext);
 #if LIBAVCODEC_VERSION_MAJOR >= 55
-    av_frame_free(&mFrame);
+    mLib->av_frame_free(&mFrame);
 #elif LIBAVCODEC_VERSION_MAJOR == 54
-    avcodec_free_frame(&mFrame);
+    mLib->avcodec_free_frame(&mFrame);
 #else
-    delete mFrame;
-    mFrame = nullptr;
+    mLib->av_freep(&mFrame);
 #endif
   }
-  return NS_OK;
 }
 
 AVFrame*
 FFmpegDataDecoder<LIBAV_VER>::PrepareFrame()
 {
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
 #if LIBAVCODEC_VERSION_MAJOR >= 55
   if (mFrame) {
-    av_frame_unref(mFrame);
+    mLib->av_frame_unref(mFrame);
   } else {
-    mFrame = av_frame_alloc();
+    mFrame = mLib->av_frame_alloc();
   }
 #elif LIBAVCODEC_VERSION_MAJOR == 54
   if (mFrame) {
-    avcodec_get_frame_defaults(mFrame);
+    mLib->avcodec_get_frame_defaults(mFrame);
   } else {
-    mFrame = avcodec_alloc_frame();
+    mFrame = mLib->avcodec_alloc_frame();
   }
 #else
-  delete mFrame;
-  mFrame = new AVFrame;
-  avcodec_get_frame_defaults(mFrame);
+  mLib->av_freep(&mFrame);
+  mFrame = mLib->avcodec_alloc_frame();
 #endif
   return mFrame;
+}
+
+/* static */ AVCodec*
+FFmpegDataDecoder<LIBAV_VER>::FindAVCodec(FFmpegLibWrapper* aLib,
+                                          AVCodecID aCodec)
+{
+  return aLib->avcodec_find_decoder(aCodec);
 }
 
 } // namespace mozilla

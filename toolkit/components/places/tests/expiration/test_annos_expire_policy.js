@@ -14,7 +14,7 @@
  * - EXPIRE_MONTHS: annotation would be expired after 180 days
  */
 
-let as = Cc["@mozilla.org/browser/annotation-service;1"].
+var as = Cc["@mozilla.org/browser/annotation-service;1"].
          getService(Ci.nsIAnnotationService);
 
 /**
@@ -27,7 +27,7 @@ let as = Cc["@mozilla.org/browser/annotation-service;1"].
  * @param aAgeInDays Age in days of the annotation.
  * @param [optional] aLastModifiedAgeInDays Age in days of the annotation, for lastModified.
  */
-let now = Date.now();
+var now = Date.now();
 function add_old_anno(aIdentifier, aName, aValue, aExpirePolicy,
                       aAgeInDays, aLastModifiedAgeInDays) {
   let expireDate = (now - (aAgeInDays * 86400 * 1000)) * 1000;
@@ -52,7 +52,7 @@ function add_old_anno(aIdentifier, aName, aValue, aExpirePolicy,
     sql = "UPDATE moz_annos SET dateAdded = :expire_date, lastModified = :last_modified " +
           "WHERE id = (SELECT a.id FROM moz_annos a " +
                       "LEFT JOIN moz_places h on h.id = a.place_id " +
-                      "WHERE h.url = :id " +
+                      "WHERE h.url_hash = hash(:id) AND h.url = :id " +
                       "ORDER BY a.dateAdded DESC LIMIT 1)";
   }
   else
@@ -75,7 +75,7 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function test_annos_expire_policy() {
+add_task(function* test_annos_expire_policy() {
   // Set interval to a large value so we don't expire on it.
   setInterval(3600); // 1h
 

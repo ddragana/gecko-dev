@@ -61,11 +61,11 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
     // If objects in this group have ever been converted to native objects,
     // these store the corresponding native group and initial shape for such
     // objects. Type information for this object is reflected in nativeGroup.
-    HeapPtrObjectGroup nativeGroup_;
-    HeapPtrShape nativeShape_;
+    GCPtrObjectGroup nativeGroup_;
+    GCPtrShape nativeShape_;
 
     // Any script/pc which the associated group is created for.
-    HeapPtrScript allocationScript_;
+    GCPtrScript allocationScript_;
     jsbytecode* allocationPc_;
 
     // If nativeGroup is set and this object originally had a TypeNewScript or
@@ -73,7 +73,7 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
     // this one. This link is only needed to keep the replacement group from
     // being GC'ed. If it were GC'ed and a new one regenerated later, that new
     // group might have a different allocation kind from this group.
-    HeapPtrObjectGroup replacementGroup_;
+    GCPtrObjectGroup replacementGroup_;
 
     // The following members are only used for unboxed plain objects.
 
@@ -93,7 +93,7 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
     // If this layout has been used to construct script or JSON constant
     // objects, this code might be filled in to more quickly fill in objects
     // from an array of values.
-    HeapPtrJitCode constructorCode_;
+    GCPtrJitCode constructorCode_;
 
     // The following members are only used for unboxed arrays.
 
@@ -129,7 +129,7 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
         constructorCode_.init(nullptr);
     }
 
-    bool isArray() {
+    bool isArray() const {
         return elementType_ != JSVAL_TYPE_MAGIC;
     }
 
@@ -245,24 +245,25 @@ class UnboxedPlainObject : public JSObject
                                    MutableHandleShape propp);
 
     static bool obj_defineProperty(JSContext* cx, HandleObject obj, HandleId id,
-                                   Handle<JSPropertyDescriptor> desc,
+                                   Handle<PropertyDescriptor> desc,
                                    ObjectOpResult& result);
 
     static bool obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id, bool* foundp);
 
-    static bool obj_getProperty(JSContext* cx, HandleObject obj, HandleObject receiver,
+    static bool obj_getProperty(JSContext* cx, HandleObject obj, HandleValue receiver,
                                 HandleId id, MutableHandleValue vp);
 
     static bool obj_setProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v,
                                 HandleValue receiver, ObjectOpResult& result);
 
     static bool obj_getOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                                             MutableHandle<JSPropertyDescriptor> desc);
+                                             MutableHandle<PropertyDescriptor> desc);
 
     static bool obj_deleteProperty(JSContext* cx, HandleObject obj, HandleId id,
                                    ObjectOpResult& result);
 
-    static bool obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties);
+    static bool obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties,
+                              bool enumerableOnly);
     static bool obj_watch(JSContext* cx, HandleObject obj, HandleId id, HandleObject callable);
 
     inline const UnboxedLayout& layout() const;
@@ -302,7 +303,7 @@ class UnboxedPlainObject : public JSObject
                                           NewObjectKind newKind, IdValuePair* properties);
 
     void fillAfterConvert(ExclusiveContext* cx,
-                          const AutoValueVector& values, size_t* valueCursor);
+                          Handle<GCVector<Value>> values, size_t* valueCursor);
 
     static void trace(JSTracer* trc, JSObject* object);
 
@@ -380,24 +381,25 @@ class UnboxedArrayObject : public JSObject
                                    MutableHandleShape propp);
 
     static bool obj_defineProperty(JSContext* cx, HandleObject obj, HandleId id,
-                                   Handle<JSPropertyDescriptor> desc,
+                                   Handle<PropertyDescriptor> desc,
                                    ObjectOpResult& result);
 
     static bool obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id, bool* foundp);
 
-    static bool obj_getProperty(JSContext* cx, HandleObject obj, HandleObject receiver,
+    static bool obj_getProperty(JSContext* cx, HandleObject obj, HandleValue receiver,
                                 HandleId id, MutableHandleValue vp);
 
     static bool obj_setProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v,
                                 HandleValue receiver, ObjectOpResult& result);
 
     static bool obj_getOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                                             MutableHandle<JSPropertyDescriptor> desc);
+                                             MutableHandle<PropertyDescriptor> desc);
 
     static bool obj_deleteProperty(JSContext* cx, HandleObject obj, HandleId id,
                                    ObjectOpResult& result);
 
-    static bool obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties);
+    static bool obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties,
+                              bool enumerableOnly);
     static bool obj_watch(JSContext* cx, HandleObject obj, HandleId id, HandleObject callable);
 
     inline const UnboxedLayout& layout() const;
@@ -419,8 +421,12 @@ class UnboxedArrayObject : public JSObject
                                       uint32_t length, NewObjectKind newKind,
                                       uint32_t maxLength = MaximumCapacity);
 
+    static bool convertToNativeWithGroup(ExclusiveContext* cx, JSObject* obj,
+                                         ObjectGroup* group, Shape* shape);
+    bool convertInt32ToDouble(ExclusiveContext* cx, ObjectGroup* group);
+
     void fillAfterConvert(ExclusiveContext* cx,
-                          const AutoValueVector& values, size_t* valueCursor);
+                          Handle<GCVector<Value>> values, size_t* valueCursor);
 
     static void trace(JSTracer* trc, JSObject* object);
     static void objectMoved(JSObject* obj, const JSObject* old);
@@ -491,8 +497,9 @@ class UnboxedArrayObject : public JSObject
     }
 
     inline void setLength(ExclusiveContext* cx, uint32_t len);
+    inline void setInitializedLength(uint32_t initlen);
 
-    void setInitializedLength(uint32_t initlen) {
+    inline void setInitializedLengthNoBarrier(uint32_t initlen) {
         MOZ_ASSERT(initlen <= InitializedLengthMask);
         capacityIndexAndInitializedLength_ =
             (capacityIndexAndInitializedLength_ & CapacityMask) | initlen;

@@ -31,8 +31,6 @@ class ContentChild;
 class nsIContentChild;
 class PBlobStreamChild;
 
-enum BlobDirState : uint32_t;
-
 class BlobChild final
   : public PBlobChild
 {
@@ -117,8 +115,7 @@ public:
   SetMysteryBlobInfo(const nsString& aName,
                      const nsString& aContentType,
                      uint64_t aLength,
-                     int64_t aLastModifiedDate,
-                     BlobDirState aDirState);
+                     int64_t aLastModifiedDate);
 
   // Use this for non-file blobs.
   bool
@@ -220,6 +217,9 @@ private:
 
   virtual bool
   DeallocPBlobStreamChild(PBlobStreamChild* aActor) override;
+
+  virtual bool
+  RecvCreatedFromKnownBlob() override;
 };
 
 // Only let ContentChild call BlobChild::Startup() and ensure that

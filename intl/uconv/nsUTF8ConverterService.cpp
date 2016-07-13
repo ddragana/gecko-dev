@@ -7,9 +7,9 @@
 #include "nsString.h"
 #include "nsUTF8ConverterService.h"
 #include "nsEscape.h"
-#include "nsAutoPtr.h"
 #include "nsIUnicodeDecoder.h"
 #include "mozilla/dom/EncodingUtils.h"
+#include "mozilla/UniquePtr.h"
 
 using mozilla::dom::EncodingUtils;
 
@@ -40,13 +40,12 @@ ToUTF8(const nsACString &aString, const char *aCharset,
   rv = unicodeDecoder->GetMaxLength(inStr.get(), srcLen, &dstLen);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsAutoArrayPtr<char16_t> ustr(new char16_t[dstLen]);
+  auto ustr = mozilla::MakeUnique<char16_t[]>(dstLen);
   NS_ENSURE_TRUE(ustr, NS_ERROR_OUT_OF_MEMORY);
 
-  rv = unicodeDecoder->Convert(inStr.get(), &srcLen, ustr, &dstLen);
+  rv = unicodeDecoder->Convert(inStr.get(), &srcLen, ustr.get(), &dstLen);
   if (NS_SUCCEEDED(rv)){
-    // Tru64 Cxx needs an explicit get()
-    CopyUTF16toUTF8(Substring(ustr.get(), ustr + dstLen), aResult);
+    CopyUTF16toUTF8(Substring(ustr.get(), ustr.get() + dstLen), aResult);
   }
   return rv;
 }

@@ -14,6 +14,7 @@
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
 #include "mozilla/css/Loader.h"
+#include "mozilla/dom/SRILogHelper.h"
 #include "nsStyleLinkElement.h"
 #include "nsIDocShell.h"
 #include "nsILoadContext.h"
@@ -53,7 +54,7 @@
 
 using namespace mozilla;
 
-PRLogModuleInfo* gContentSinkLogModuleInfo;
+LazyLogModule gContentSinkLogModuleInfo("nscontentsink");
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsContentSink)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsContentSink)
@@ -75,12 +76,14 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsContentSink)
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParser)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCSSLoader)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNodeInfoManager)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mScriptLoader)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsContentSink)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParser)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCSSLoader)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNodeInfoManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mScriptLoader)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -98,12 +101,6 @@ nsContentSink::nsContentSink()
   NS_ASSERTION(mInMonolithicContainer == 0, "What?");
   NS_ASSERTION(mInNotification == 0, "What?");
   NS_ASSERTION(!mDeferredLayoutStart, "What?");
-
-#ifdef DEBUG
-  if (!gContentSinkLogModuleInfo) {
-    gContentSinkLogModuleInfo = PR_NewLogModule("nscontentsink");
-  }
-#endif
 }
 
 nsContentSink::~nsContentSink()
@@ -210,7 +207,7 @@ nsContentSink::Init(nsIDocument* aDoc,
 }
 
 NS_IMETHODIMP
-nsContentSink::StyleSheetLoaded(CSSStyleSheet* aSheet,
+nsContentSink::StyleSheetLoaded(StyleSheetHandle aSheet,
                                 bool aWasAlternate,
                                 nsresult aStatus)
 {
@@ -238,7 +235,7 @@ nsContentSink::StyleSheetLoaded(CSSStyleSheet* aSheet,
       ScrollToRef();
     }
     
-    mScriptLoader->RemoveExecuteBlocker();
+    mScriptLoader->RemoveParserBlockingScriptExecutionBlocker();
   }
 
   return NS_OK;
@@ -268,7 +265,7 @@ nsContentSink::ProcessHTTPHeaders(nsIChannel* aChannel)
                  "Already dispatched an event?");
 
     mProcessLinkHeaderEvent =
-      NS_NewNonOwningRunnableMethod(this,
+      NewNonOwningRunnableMethod(this,
         &nsContentSink::DoProcessLinkHeader);
     rv = NS_DispatchToCurrentThread(mProcessLinkHeaderEvent.get());
     if (NS_FAILED(rv)) {
@@ -689,7 +686,11 @@ nsContentSink::ProcessLink(const nsSubstring& aAnchor, const nsSubstring& aHref,
   if (!LinkContextIsOurDocument(aAnchor)) {
     return NS_OK;
   }
-  
+
+  if (!nsContentUtils::PrefetchEnabled(mDocShell)) {
+    return NS_OK;
+  }
+
   bool hasPrefetch = linkTypes & nsStyleLinkElement::ePREFETCH;
   // prefetch href if relation is "next" or "prefetch"
   if (hasPrefetch || (linkTypes & nsStyleLinkElement::eNEXT)) {
@@ -750,17 +751,28 @@ nsContentSink::ProcessStyleLink(nsIContent* aElement,
                aElement->NodeType() == nsIDOMNode::PROCESSING_INSTRUCTION_NODE,
                "We only expect processing instructions here");
 
+  nsAutoString integrity;
+  if (aElement) {
+    aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::integrity, integrity);
+  }
+  if (!integrity.IsEmpty()) {
+    MOZ_LOG(dom::SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug,
+            ("nsContentSink::ProcessStyleLink, integrity=%s",
+             NS_ConvertUTF16toUTF8(integrity).get()));
+  }
+
   // If this is a fragment parser, we don't want to observe.
   // We don't support CORS for processing instructions
   bool isAlternate;
   rv = mCSSLoader->LoadStyleLink(aElement, url, aTitle, aMedia, aAlternate,
                                  CORS_NONE, mDocument->GetReferrerPolicy(),
-                                 mRunsToCompletion ? nullptr : this, &isAlternate);
+                                 integrity, mRunsToCompletion ? nullptr : this,
+                                 &isAlternate);
   NS_ENSURE_SUCCESS(rv, rv);
   
   if (!isAlternate && !mRunsToCompletion) {
     ++mPendingSheetCount;
-    mScriptLoader->AddExecuteBlocker();
+    mScriptLoader->AddParserBlockingScriptExecutionBlocker();
   }
 
   return NS_OK;
@@ -788,7 +800,7 @@ nsContentSink::ProcessMETATag(nsIContent* aContent)
     nsAutoString result;
     aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::content, result);
     if (!result.IsEmpty()) {
-      nsCOMPtr<nsIAtom> fieldAtom(do_GetAtom(header));
+      nsCOMPtr<nsIAtom> fieldAtom(NS_Atomize(header));
       rv = ProcessHeaderData(fieldAtom, result, aContent); 
     }
   }
@@ -813,35 +825,6 @@ nsContentSink::PrefetchHref(const nsAString &aHref,
                             nsINode *aSource,
                             bool aExplicit)
 {
-  //
-  // SECURITY CHECK: disable prefetching from mailnews!
-  //
-  // walk up the docshell tree to see if any containing
-  // docshell are of type MAIL.
-  //
-  if (!mDocShell)
-    return;
-
-  nsCOMPtr<nsIDocShell> docshell = mDocShell;
-
-  nsCOMPtr<nsIDocShellTreeItem> parentItem;
-  do {
-    uint32_t appType = 0;
-    nsresult rv = docshell->GetAppType(&appType);
-    if (NS_FAILED(rv) || appType == nsIDocShell::APP_TYPE_MAIL)
-      return; // do not prefetch from mailnews
-    docshell->GetParent(getter_AddRefs(parentItem));
-    if (parentItem) {
-      docshell = do_QueryInterface(parentItem);
-      if (!docshell) {
-        NS_ERROR("cannot get a docshell from a treeItem!");
-        return;
-      }
-    }
-  } while (parentItem);
-  
-  // OK, we passed the security check...
-  
   nsCOMPtr<nsIPrefetchService> prefetchService(do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
   if (prefetchService) {
     // construct URI using document charset
@@ -940,8 +923,10 @@ nsContentSink::SelectDocAppCache(nsIApplicationCache *aLoadApplicationCache,
       nsAutoCString docURISpec, clientID;
       mDocumentURI->GetAsciiSpec(docURISpec);
       aLoadApplicationCache->GetClientID(clientID);
-      SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_CALLS,
-          ("Selection: assigning app cache %s to document %s", clientID.get(), docURISpec.get()));
+      SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+                 SINK_TRACE_CALLS,
+                ("Selection: assigning app cache %s to document %s",
+                  clientID.get(), docURISpec.get()));
 #endif
 
       rv = applicationCacheDocument->SetApplicationCache(aLoadApplicationCache);
@@ -994,8 +979,10 @@ nsContentSink::SelectDocAppCacheNoManifest(nsIApplicationCache *aLoadApplication
     nsAutoCString docURISpec, clientID;
     mDocumentURI->GetAsciiSpec(docURISpec);
     aLoadApplicationCache->GetClientID(clientID);
-    SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_CALLS,
-        ("Selection, no manifest: assigning app cache %s to document %s", clientID.get(), docURISpec.get()));
+    SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+               SINK_TRACE_CALLS,
+             ("Selection, no manifest: assigning app cache %s to document %s",
+               clientID.get(), docURISpec.get()));
 #endif
 
     rv = applicationCacheDocument->SetApplicationCache(aLoadApplicationCache);
@@ -1038,6 +1025,12 @@ nsContentSink::ProcessOfflineManifest(const nsAString& aManifestSpec)
   // Don't bother processing offline manifest for documents
   // without a docshell
   if (!mDocShell) {
+    return;
+  }
+
+  // If this document has been interecepted, let's skip the processing of the
+  // manifest.
+  if (nsContentUtils::IsControlledByServiceWorker(mDocument)) {
     return;
   }
 
@@ -1101,7 +1094,7 @@ nsContentSink::ProcessOfflineManifest(const nsAString& aManifestSpec)
       // Only continue if the document has permission to use offline APIs or
       // when preferences indicate to permit it automatically.
       if (!nsContentUtils::OfflineAppAllowed(mDocument->NodePrincipal()) &&
-          !nsContentUtils::MaybeAllowOfflineAppByDefault(mDocument->NodePrincipal(), mDocument->GetWindow()) &&
+          !nsContentUtils::MaybeAllowOfflineAppByDefault(mDocument->NodePrincipal()) &&
           !nsContentUtils::OfflineAppAllowed(mDocument->NodePrincipal())) {
         return;
       }
@@ -1142,7 +1135,8 @@ nsContentSink::ProcessOfflineManifest(const nsAString& aManifestSpec)
 
     if (updateService) {
       nsCOMPtr<nsIDOMDocument> domdoc = do_QueryInterface(mDocument);
-      updateService->ScheduleOnDocumentStop(manifestURI, mDocumentURI, domdoc);
+      updateService->ScheduleOnDocumentStop(manifestURI, mDocumentURI,
+                                            mDocument->NodePrincipal(), domdoc);
     }
     break;
   }
@@ -1302,7 +1296,8 @@ nsContentSink::WillInterruptImpl()
 {
   nsresult result = NS_OK;
 
-  SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_CALLS,
+  SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+             SINK_TRACE_CALLS,
              ("nsContentSink::WillInterrupt: this=%p", this));
 #ifndef SINK_NO_INCREMENTAL
   if (WaitForPendingSheets()) {
@@ -1316,7 +1311,8 @@ nsContentSink::WillInterruptImpl()
       // If it's already time for us to have a notification
       if (diff > interval || mDroppedTimer) {
         mBackoffCount--;
-        SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_REFLOW,
+        SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+                   SINK_TRACE_REFLOW,
                    ("nsContentSink::WillInterrupt: flushing tags since we've "
                     "run out time; backoff count: %d", mBackoffCount));
         result = FlushTags();
@@ -1334,7 +1330,8 @@ nsContentSink::WillInterruptImpl()
         mNotificationTimer = do_CreateInstance("@mozilla.org/timer;1",
                                                &result);
         if (NS_SUCCEEDED(result)) {
-          SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_REFLOW,
+          SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+                     SINK_TRACE_REFLOW,
                      ("nsContentSink::WillInterrupt: setting up timer with "
                       "delay %d", delay));
 
@@ -1348,7 +1345,8 @@ nsContentSink::WillInterruptImpl()
       }
     }
   } else {
-    SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_REFLOW,
+    SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+               SINK_TRACE_REFLOW,
                ("nsContentSink::WillInterrupt: flushing tags "
                 "unconditionally"));
     result = FlushTags();
@@ -1363,7 +1361,8 @@ nsContentSink::WillInterruptImpl()
 nsresult
 nsContentSink::WillResumeImpl()
 {
-  SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_CALLS,
+  SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+             SINK_TRACE_CALLS,
              ("nsContentSink::WillResume: this=%p", this));
 
   mParsing = true;
@@ -1483,7 +1482,8 @@ nsContentSink::DidBuildModelImpl(bool aTerminated)
 
   // Cancel a timer if we had one out there
   if (mNotificationTimer) {
-    SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_REFLOW,
+    SINK_TRACE(static_cast<LogModule*>(gContentSinkLogModuleInfo),
+               SINK_TRACE_REFLOW,
                ("nsContentSink::DidBuildModel: canceling notification "
                 "timeout"));
     mNotificationTimer->Cancel();
@@ -1506,7 +1506,7 @@ nsContentSink::DropParserAndPerfHint(void)
   // actually broken.
   // Drop our reference to the parser to get rid of a circular
   // reference.
-  nsRefPtr<nsParserBase> kungFuDeathGrip(mParser.forget());
+  RefPtr<nsParserBase> kungFuDeathGrip(mParser.forget());
 
   if (mDynamicLowerValue) {
     // Reset the performance hint which was set to FALSE

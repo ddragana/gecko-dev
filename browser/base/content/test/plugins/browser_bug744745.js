@@ -1,6 +1,6 @@
-let gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-let gTestBrowser = null;
-let gNumPluginBindingsAttached = 0;
+var gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
+var gTestBrowser = null;
+var gNumPluginBindingsAttached = 0;
 
 function pluginBindingAttached() {
   gNumPluginBindingsAttached++;
@@ -37,15 +37,14 @@ add_task(function* () {
 
   yield promiseForCondition(function () { return gNumPluginBindingsAttached == 1; });
 
-  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+  yield ContentTask.spawn(gTestBrowser, {}, function* () {
     let plugin = content.document.getElementById("test");
     if (!plugin) {
+      Assert.ok(false, "plugin element not available.");
       return false;
     }
     // We can't use MochiKit's routine
     let style = content.getComputedStyle(plugin);
-    return 'opacity' in style && style.opacity == 1;
+    Assert.ok(("opacity" in style) && style.opacity == 1, "plugin style properly configured.");
   });
-
-  ok(result, true, "plugin style properly configured.");
 });

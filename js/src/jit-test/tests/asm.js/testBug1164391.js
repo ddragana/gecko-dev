@@ -1,16 +1,18 @@
 if (!this.SharedArrayBuffer)
     quit(0);
 
+load(libdir + "asserts.js");
+
 function m(stdlib, ffi, heap) {
     "use asm";
-    var HEAP32 = new stdlib.SharedInt32Array(heap);
+    var HEAP32 = new stdlib.Int32Array(heap);
     var add = stdlib.Atomics.add;
     var load = stdlib.Atomics.load;
     function add_sharedEv(i1) {
-	i1 = i1 | 0;
-	load(HEAP32, i1 >> 2);
-	add(HEAP32, i1 >> 2, 1);
-	load(HEAP32, i1 >> 2);
+        i1 = i1 | 0;
+        load(HEAP32, i1 >> 2);
+        add(HEAP32, i1 >> 2, 1);
+        load(HEAP32, i1 >> 2);
     }
     return {add_sharedEv:add_sharedEv};
 }
@@ -20,4 +22,4 @@ if (isAsmJSCompilationAvailable())
 
 var sab = new SharedArrayBuffer(65536);
 var {add_sharedEv} = m(this, {}, sab);
-add_sharedEv(sab.byteLength);
+assertErrorMessage(() => add_sharedEv(sab.byteLength), RangeError, /out-of-range index/);

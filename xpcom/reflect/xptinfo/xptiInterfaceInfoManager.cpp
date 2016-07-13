@@ -36,8 +36,8 @@ XPTInterfaceInfoManager::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf
     ReentrantMonitorAutoEnter monitor(mWorkingSet.mTableReentrantMonitor);
     // The entries themselves are allocated out of an arena accounted
     // for elsewhere, so don't measure them
-    n += mWorkingSet.mIIDTable.SizeOfExcludingThis(nullptr, aMallocSizeOf);
-    n += mWorkingSet.mNameTable.SizeOfExcludingThis(nullptr, aMallocSizeOf);
+    n += mWorkingSet.mIIDTable.ShallowSizeOfExcludingThis(aMallocSizeOf);
+    n += mWorkingSet.mNameTable.ShallowSizeOfExcludingThis(aMallocSizeOf);
     return n;
 }
 
@@ -52,7 +52,7 @@ XPTInterfaceInfoManager::CollectReports(nsIHandleReportCallback* aHandleReport,
     // Measure gXPTIStructArena here, too.  This is a bit grotty because it
     // doesn't belong to the XPTIInterfaceInfoManager, but there's no
     // obviously better place to measure it.
-    amount += XPT_SizeOfArena(gXPTIStructArena, XPTIMallocSizeOf);
+    amount += XPT_SizeOfArenaIncludingThis(gXPTIStructArena, XPTIMallocSizeOf);
 
     return MOZ_COLLECT_REPORT(
         "explicit/xpti-working-set", KIND_HEAP, UNITS_BYTES, amount,
@@ -99,22 +99,19 @@ XPTInterfaceInfoManager::InitMemoryReporter()
 void
 XPTInterfaceInfoManager::RegisterBuffer(char *buf, uint32_t length)
 {
-    XPTState *state = XPT_NewXDRState(XPT_DECODE, buf, length);
-    if (!state)
-        return;
+    XPTState state;
+    XPT_InitXDRState(&state, buf, length);
 
-    XPTCursor cursor;
-    if (!XPT_MakeCursor(state, XPT_HEADER, 0, &cursor)) {
-        XPT_DestroyXDRState(state);
+    XPTCursor curs;
+    NotNull<XPTCursor*> cursor = WrapNotNull(&curs);
+    if (!XPT_MakeCursor(&state, XPT_HEADER, 0, cursor)) {
         return;
     }
 
     XPTHeader *header = nullptr;
-    if (XPT_DoHeader(gXPTIStructArena, &cursor, &header)) {
+    if (XPT_DoHeader(gXPTIStructArena, cursor, &header)) {
         RegisterXPTHeader(header);
     }
-
-    XPT_DestroyXDRState(state);
 }
 
 void
@@ -190,7 +187,7 @@ EntryToInfo(xptiInterfaceEntry* entry, nsIInterfaceInfo **_retval)
         return NS_ERROR_FAILURE;    
     }
 
-    nsRefPtr<xptiInterfaceInfo> info = entry->InterfaceInfo();
+    RefPtr<xptiInterfaceInfo> info = entry->InterfaceInfo();
     info.forget(_retval);
     return NS_OK;    
 }
@@ -202,7 +199,6 @@ XPTInterfaceInfoManager::GetInterfaceEntryForIID(const nsIID *iid)
     return mWorkingSet.mIIDTable.Get(*iid);
 }
 
-/* nsIInterfaceInfo getInfoForIID (in nsIIDPtr iid); */
 NS_IMETHODIMP
 XPTInterfaceInfoManager::GetInfoForIID(const nsIID * iid, nsIInterfaceInfo **_retval)
 {
@@ -214,7 +210,6 @@ XPTInterfaceInfoManager::GetInfoForIID(const nsIID * iid, nsIInterfaceInfo **_re
     return EntryToInfo(entry, _retval);
 }
 
-/* nsIInterfaceInfo getInfoForName (in string name); */
 NS_IMETHODIMP
 XPTInterfaceInfoManager::GetInfoForName(const char *name, nsIInterfaceInfo **_retval)
 {
@@ -226,7 +221,6 @@ XPTInterfaceInfoManager::GetInfoForName(const char *name, nsIInterfaceInfo **_re
     return EntryToInfo(entry, _retval);
 }
 
-/* nsIIDPtr getIIDForName (in string name); */
 NS_IMETHODIMP
 XPTInterfaceInfoManager::GetIIDForName(const char *name, nsIID * *_retval)
 {
@@ -243,7 +237,6 @@ XPTInterfaceInfoManager::GetIIDForName(const char *name, nsIID * *_retval)
     return entry->GetIID(_retval);
 }
 
-/* string getNameForIID (in nsIIDPtr iid); */
 NS_IMETHODIMP
 XPTInterfaceInfoManager::GetNameForIID(const nsIID * iid, char **_retval)
 {
@@ -260,7 +253,6 @@ XPTInterfaceInfoManager::GetNameForIID(const nsIID * iid, char **_retval)
     return entry->GetName(_retval);
 }
 
-/* nsIEnumerator enumerateInterfaces (); */
 void
 XPTInterfaceInfoManager::GetScriptableInterfaces(nsCOMArray<nsIInterfaceInfo>& aInterfaces)
 {
@@ -280,14 +272,14 @@ XPTInterfaceInfoManager::GetScriptableInterfaces(nsCOMArray<nsIInterfaceInfo>& a
     }
 }
 
-/* nsIEnumerator enumerateInterfacesWhoseNamesStartWith (in string prefix); */
 NS_IMETHODIMP
 XPTInterfaceInfoManager::EnumerateInterfacesWhoseNamesStartWith(const char *prefix, nsIEnumerator **_retval)
 {
     nsCOMPtr<nsISupportsArray> array;
-    NS_NewISupportsArray(getter_AddRefs(array));
-    if (!array)
-        return NS_ERROR_UNEXPECTED;
+    nsresult rv = NS_NewISupportsArray(getter_AddRefs(array));
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
     ReentrantMonitorAutoEnter monitor(mWorkingSet.mTableReentrantMonitor);
     uint32_t length = static_cast<uint32_t>(strlen(prefix));
@@ -305,7 +297,6 @@ XPTInterfaceInfoManager::EnumerateInterfacesWhoseNamesStartWith(const char *pref
     return array->Enumerate(_retval);
 }
 
-/* void autoRegisterInterfaces (); */
 NS_IMETHODIMP
 XPTInterfaceInfoManager::AutoRegisterInterfaces()
 {

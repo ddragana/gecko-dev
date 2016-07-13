@@ -14,8 +14,6 @@
 #include "nsISupportsImpl.h"
 #include "VsyncSource.h"
 
-class CancelableTask;
-
 class SoftwareDisplay final : public mozilla::gfx::VsyncSource::Display
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SoftwareDisplay)
@@ -27,8 +25,9 @@ public:
   virtual bool IsVsyncEnabled() override;
   bool IsInSoftwareVsyncThread();
   virtual void NotifyVsync(mozilla::TimeStamp aVsyncTimestamp) override;
+  virtual mozilla::TimeDuration GetVsyncRate() override;
   void ScheduleNextVsync(mozilla::TimeStamp aVsyncTimestamp);
-  void Shutdown();
+  void Shutdown() override;
 
 protected:
   ~SoftwareDisplay();
@@ -37,7 +36,7 @@ private:
   mozilla::TimeDuration mVsyncRate;
   // Use a chromium thread because nsITimers* fire on the main thread
   base::Thread* mVsyncThread;
-  CancelableTask* mCurrentVsyncTask; // only access on vsync thread
+  RefPtr<mozilla::CancelableRunnable> mCurrentVsyncTask; // only access on vsync thread
   bool mVsyncEnabled; // Only access on main thread
 }; // SoftwareDisplay
 
@@ -57,7 +56,7 @@ public:
   }
 
 private:
-  nsRefPtr<SoftwareDisplay> mGlobalDisplay;
+  RefPtr<SoftwareDisplay> mGlobalDisplay;
 };
 
 #endif /* GFX_SOFTWARE_VSYNC_SOURCE_H */

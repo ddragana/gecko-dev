@@ -9,6 +9,7 @@
 #include "mozilla/SyncRunnable.h"
 
 using namespace mozilla::safebrowsing;
+using mozilla::NewRunnableMethod;
 
 static nsresult
 DispatchToWorkerThread(nsIRunnable* r)
@@ -113,8 +114,8 @@ NS_IMETHODIMP
 UrlClassifierDBServiceWorkerProxy::FinishStream()
 {
   nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(mTarget,
-                         &nsIUrlClassifierDBServiceWorker::FinishStream);
+    NewRunnableMethod(mTarget,
+                      &nsIUrlClassifierDBServiceWorker::FinishStream);
   return DispatchToWorkerThread(r);
 }
 
@@ -147,8 +148,8 @@ NS_IMETHODIMP
 UrlClassifierDBServiceWorkerProxy::FinishUpdate()
 {
   nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(mTarget,
-                         &nsIUrlClassifierDBServiceWorker::FinishUpdate);
+    NewRunnableMethod(mTarget,
+                      &nsIUrlClassifierDBServiceWorker::FinishUpdate);
   return DispatchToWorkerThread(r);
 }
 
@@ -156,8 +157,8 @@ NS_IMETHODIMP
 UrlClassifierDBServiceWorkerProxy::CancelUpdate()
 {
   nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(mTarget,
-                         &nsIUrlClassifierDBServiceWorker::CancelUpdate);
+    NewRunnableMethod(mTarget,
+                      &nsIUrlClassifierDBServiceWorker::CancelUpdate);
   return DispatchToWorkerThread(r);
 }
 
@@ -165,8 +166,8 @@ NS_IMETHODIMP
 UrlClassifierDBServiceWorkerProxy::ResetDatabase()
 {
   nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(mTarget,
-                         &nsIUrlClassifierDBServiceWorker::ResetDatabase);
+    NewRunnableMethod(mTarget,
+                      &nsIUrlClassifierDBServiceWorker::ResetDatabase);
   return DispatchToWorkerThread(r);
 }
 
@@ -174,8 +175,8 @@ NS_IMETHODIMP
 UrlClassifierDBServiceWorkerProxy::OpenDb()
 {
   nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(mTarget,
-                         &nsIUrlClassifierDBServiceWorker::OpenDb);
+    NewRunnableMethod(mTarget,
+                      &nsIUrlClassifierDBServiceWorker::OpenDb);
   return DispatchToWorkerThread(r);
 }
 
@@ -183,8 +184,8 @@ NS_IMETHODIMP
 UrlClassifierDBServiceWorkerProxy::CloseDb()
 {
   nsCOMPtr<nsIRunnable> r =
-    NS_NewRunnableMethod(mTarget,
-                         &nsIUrlClassifierDBServiceWorker::CloseDb);
+    NewRunnableMethod(mTarget,
+                      &nsIUrlClassifierDBServiceWorker::CloseDb);
   return DispatchToWorkerThread(r);
 }
 
@@ -216,6 +217,34 @@ UrlClassifierDBServiceWorkerProxy::CacheMissesRunnable::Run()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+UrlClassifierDBServiceWorkerProxy::SetLastUpdateTime(const nsACString& table,
+                                                     uint64_t lastUpdateTime)
+{
+  nsCOMPtr<nsIRunnable> r =
+    new SetLastUpdateTimeRunnable(mTarget, table, lastUpdateTime);
+  return DispatchToWorkerThread(r);
+}
+
+NS_IMETHODIMP
+UrlClassifierDBServiceWorkerProxy::SetLastUpdateTimeRunnable::Run()
+{
+  mTarget->SetLastUpdateTime(mTable, mUpdateTime);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+UrlClassifierDBServiceWorkerProxy::ClearLastResults()
+{
+  nsCOMPtr<nsIRunnable> r = new ClearLastResultsRunnable(mTarget);
+  return DispatchToWorkerThread(r);
+}
+
+NS_IMETHODIMP
+UrlClassifierDBServiceWorkerProxy::ClearLastResultsRunnable::Run()
+{
+  return mTarget->ClearLastResults();
+}
 
 NS_IMPL_ISUPPORTS(UrlClassifierLookupCallbackProxy,
                   nsIUrlClassifierLookupCallback)

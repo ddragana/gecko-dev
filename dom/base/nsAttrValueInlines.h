@@ -20,7 +20,7 @@ struct MiscContainer final
 
   ValueType mType;
   // mStringBits points to either nsIAtom* or nsStringBuffer* and is used when
-  // mType isn't mCSSStyleRule.
+  // mType isn't eGeckoCSSDeclaration.
   // Note eStringBase and eAtomBase is used also to handle the type of
   // mStringBits.
   uintptr_t mStringBits;
@@ -31,7 +31,8 @@ struct MiscContainer final
         nscolor mColor;
         uint32_t mEnumValue;
         int32_t mPercent;
-        mozilla::css::StyleRule* mCSSStyleRule;
+        mozilla::css::Declaration* mGeckoCSSDeclaration;
+        ServoDeclarationBlock* mServoCSSDeclaration;
         mozilla::css::URLValue* mURL;
         mozilla::css::ImageValue* mImage;
         nsAttrValue::AtomArray* mAtomArray;
@@ -85,8 +86,9 @@ public:
   {
     // Nothing stops us from refcounting (and sharing) other types of
     // MiscContainer (except eDoubleValue types) but there's no compelling
-    // reason to 
-    return mType == nsAttrValue::eCSSStyleRule;
+    // reason to.
+    return mType == nsAttrValue::eGeckoCSSDeclaration ||
+           mType == nsAttrValue::eServoCSSDeclaration;
   }
 
   inline int32_t AddRef() {
@@ -146,11 +148,18 @@ nsAttrValue::GetAtomArrayValue() const
   return GetMiscContainer()->mValue.mAtomArray;
 }
 
-inline mozilla::css::StyleRule*
-nsAttrValue::GetCSSStyleRuleValue() const
+inline mozilla::css::Declaration*
+nsAttrValue::GetGeckoCSSDeclarationValue() const
 {
-  NS_PRECONDITION(Type() == eCSSStyleRule, "wrong type");
-  return GetMiscContainer()->mValue.mCSSStyleRule;
+  NS_PRECONDITION(Type() == eGeckoCSSDeclaration, "wrong type");
+  return GetMiscContainer()->mValue.mGeckoCSSDeclaration;
+}
+
+inline ServoDeclarationBlock*
+nsAttrValue::GetServoCSSDeclarationValue() const
+{
+  NS_PRECONDITION(Type() == eServoCSSDeclaration, "wrong type");
+  return GetMiscContainer()->mValue.mServoCSSDeclaration;
 }
 
 inline mozilla::css::URLValue*
@@ -189,6 +198,18 @@ inline bool
 nsAttrValue::IsSVGType(ValueType aType) const
 {
   return aType >= eSVGTypesBegin && aType <= eSVGTypesEnd;
+}
+
+inline bool
+nsAttrValue::StoresOwnData() const
+{
+  if (BaseType() != eOtherBase) {
+    return true;
+  }
+  ValueType t = Type();
+  return t != eGeckoCSSDeclaration &&
+         t != eServoCSSDeclaration &&
+         !IsSVGType(t);
 }
 
 inline void

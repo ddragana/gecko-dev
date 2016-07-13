@@ -40,19 +40,15 @@ UNIFIED_SOURCES += [
     'DNSRequestChild.cpp',
     'DNSRequestParent.cpp',
     'GetAddrInfo.cpp',
-    'nameprep.c',
     'nsDNSService2.cpp',
     'nsIDNService.cpp',
     'punycode.c',
-    'race.c',
 ]
 
 IPDL_SOURCES = [
     'PDNSRequest.ipdl',
     'PDNSRequestParams.ipdlh',
 ]
-
-FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -70,5 +66,23 @@ LOCAL_INCLUDES += [
     '/netwerk/base',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk' and CONFIG['ANDROID_VERSION'] > '19':
-    CXXFLAGS += ['-I%s/bionic/libc/dns/include' % CONFIG['ANDROID_SOURCE']]
+if CONFIG['ENABLE_INTL_API']:
+    DEFINES['IDNA2008'] = True
+    CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+    CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+    LOCAL_INCLUDES += CONFIG['MOZ_ICU_INCLUDES']
+    USE_LIBS += ['icu']
+else:
+    UNIFIED_SOURCES += [
+        'nameprep.c',
+    ]
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']
+
+if CONFIG['_MSC_VER']:
+    # This is intended as a temporary hack to support building with VS2015.
+    # icu\source\common\unicode/ucasemap.h(93): warning C4577:
+    # 'noexcept' used with no exception handling mode specified;
+    # termination on exception is not guaranteed. Specify /EHsc from unified dns
+    CXXFLAGS += ['-wd4577']

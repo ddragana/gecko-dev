@@ -27,18 +27,10 @@ class BroadcastChannelParent final : public PBroadcastChannelParent
   typedef mozilla::ipc::PrincipalInfo PrincipalInfo;
 
 public:
-  void CheckAndDeliver(const ClonedMessageData& aData,
-                       const nsCString& aOrigin,
-                       const uint64_t aAppId,
-                       const bool aIsInBrowserElement,
-                       const nsString& aChannel,
-                       bool aPrivateBrowsing);
+  void Deliver(const ClonedMessageData& aData);
 
 private:
-  BroadcastChannelParent(const PrincipalInfo& aPrincipalInfo,
-                         const nsACString& aOrigin,
-                         const nsAString& aChannel,
-                         bool aPrivateBrowsing);
+  explicit BroadcastChannelParent(const nsAString& aOriginChannelKey);
   ~BroadcastChannelParent();
 
   virtual bool
@@ -48,12 +40,8 @@ private:
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  nsRefPtr<BroadcastChannelService> mService;
-  nsCString mOrigin;
-  nsString mChannel;
-  uint64_t mAppId;
-  bool mIsInBrowserElement;
-  bool mPrivateBrowsing;
+  RefPtr<BroadcastChannelService> mService;
+  const nsString mOriginChannelKey;
 };
 
 } // namespace dom

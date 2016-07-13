@@ -15,9 +15,6 @@
 
 #include "Decoder.h"
 
-#include "Downscaler.h"
-#include "nsAutoPtr.h"
-
 #include "nsIInputStream.h"
 #include "nsIPipe.h"
 #include "qcms.h"
@@ -55,10 +52,13 @@ class nsJPEGDecoder : public Decoder
 public:
   virtual ~nsJPEGDecoder();
 
-  virtual nsresult SetTargetSize(const nsIntSize& aSize) override;
+  virtual void SetSampleSize(int aSampleSize) override
+  {
+    mSampleSize = aSampleSize;
+  }
 
   virtual void InitInternal() override;
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
+  Maybe<TerminalState> DoDecode(SourceBufferIterator& aIterator) override;
   virtual void FinishInternal() override;
 
   virtual Telemetry::ID SpeedHistogram() override;
@@ -68,13 +68,22 @@ protected:
   Orientation ReadOrientationFromEXIF();
   void OutputScanlines(bool* suspend);
 
-  Maybe<Downscaler> mDownscaler;
-
 private:
   friend class DecoderFactory;
 
   // Decoders should only be instantiated via DecoderFactory.
   nsJPEGDecoder(RasterImage* aImage, Decoder::DecodeStyle aDecodeStyle);
+
+  enum class State
+  {
+    JPEG_DATA,
+    FINISHED_JPEG_DATA
+  };
+
+  LexerTransition<State> ReadJPEGData(const char* aData, size_t aLength);
+  LexerTransition<State> FinishedJPEGData();
+
+  StreamingLexer<State> mLexer;
 
 public:
   struct jpeg_decompress_struct mInfo;
@@ -103,6 +112,8 @@ public:
   const Decoder::DecodeStyle mDecodeStyle;
 
   uint32_t mCMSMode;
+
+  int mSampleSize;
 };
 
 } // namespace image

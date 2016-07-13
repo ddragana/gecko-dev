@@ -16,19 +16,14 @@ config = {
     "repos": [{
         "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
-        "revision": "default",
+        "branch": "default",
         "dest": "tools",
     }, {
         "vcs": "hgtool",
         "repo": "https://hg.mozilla.org/releases/mozilla-aurora",
         "revision": "default",
         "dest": "mozilla-aurora",
-    }, {
-        "vcs": "hgtool",
-        "repo": "https://hg.mozilla.org/build/compare-locales",
-        "revision": "RELEASE_AUTOMATION"
     }],
     # purge options
     'is_automation': True,
-    'purge_minsize': 12,
 }

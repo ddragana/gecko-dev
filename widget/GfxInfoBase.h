@@ -8,30 +8,26 @@
 #ifndef __mozilla_widget_GfxInfoBase_h__
 #define __mozilla_widget_GfxInfoBase_h__
 
-#include "nsIGfxInfo.h"
-#if defined(XP_MACOSX) || defined(XP_WIN)
-#include "nsIGfxInfo2.h"
-#endif
-#include "nsCOMPtr.h"
-#include "nsIObserver.h"
-#include "nsWeakReference.h"
 #include "GfxDriverInfo.h"
-#include "nsTArray.h"
-#include "nsString.h"
 #include "GfxInfoCollector.h"
+#include "gfxFeature.h"
 #include "gfxTelemetry.h"
-#include "nsIGfxInfoDebug.h"
-#include "mozilla/Mutex.h"
 #include "js/Value.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/Mutex.h"
+#include "nsCOMPtr.h"
+#include "nsIGfxInfo.h"
+#include "nsIGfxInfoDebug.h"
+#include "nsIObserver.h"
+#include "nsString.h"
+#include "nsTArray.h"
+#include "nsWeakReference.h"
 
 namespace mozilla {
 namespace widget {  
 
 class GfxInfoBase : public nsIGfxInfo,
-#if defined(XP_MACOSX) || defined(XP_WIN)
-                    public nsIGfxInfo2,
-#endif
                     public nsIObserver,
                     public nsSupportsWeakReference
 #ifdef DEBUG
@@ -51,7 +47,7 @@ public:
   // using GfxInfoBase::GetFeatureSuggestedDriverVersion;
   // using GfxInfoBase::GetWebGLParameter;
   // to import the relevant methods into their namespace.
-  NS_IMETHOD GetFeatureStatus(int32_t aFeature, int32_t *_retval) override;
+  NS_IMETHOD GetFeatureStatus(int32_t aFeature, nsACString& aFailureId, int32_t *_retval) override;
   NS_IMETHOD GetFeatureSuggestedDriverVersion(int32_t aFeature, nsAString & _retval) override;
   NS_IMETHOD GetWebGLParameter(const nsAString & aParam, nsAString & _retval) override;
 
@@ -60,6 +56,8 @@ public:
   NS_IMETHOD_(void) LogFailure(const nsACString &failure) override;
   NS_IMETHOD GetInfo(JSContext*, JS::MutableHandle<JS::Value>) override;
   NS_IMETHOD GetFeatures(JSContext*, JS::MutableHandle<JS::Value>) override;
+  NS_IMETHOD GetFeatureLog(JSContext*, JS::MutableHandle<JS::Value>) override;
+  NS_IMETHOD GetActiveCrashGuards(JSContext*, JS::MutableHandle<JS::Value>) override;
 
   // Initialization function. If you override this, you must call this class's
   // version of Init first.
@@ -99,6 +97,7 @@ protected:
   virtual nsresult GetFeatureStatusImpl(int32_t aFeature, int32_t* aStatus,
                                         nsAString& aSuggestedDriverVersion,
                                         const nsTArray<GfxDriverInfo>& aDriverInfo,
+                                        nsACString& aFailureId,
                                         OperatingSystem* aOS = nullptr);
 
   // Gets the driver info table. Used by GfxInfoBase to check for general cases
@@ -110,16 +109,21 @@ protected:
     JSContext* aCx,
     JS::Handle<JSObject*> aContainer,
     const char* aName,
-    mozilla::gfx::FeatureStatus aFeatureStatus,
+    int32_t aFeature,
+    Maybe<mozilla::gfx::FeatureStatus> aKnownStatus,
     JS::MutableHandle<JSObject*> aOutObj);
 
 private:
   virtual int32_t FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& aDriverInfo,
                                               nsAString& aSuggestedVersion,
                                               int32_t aFeature,
+                                              nsACString &aFailureId,
                                               OperatingSystem os);
 
   void EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo);
+
+  bool BuildFeatureStateLog(JSContext* aCx, const gfx::FeatureState& aFeature,
+                            JS::MutableHandle<JS::Value> aOut);
 
   Mutex mMutex;
 

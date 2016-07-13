@@ -19,27 +19,34 @@ Cu.import("resource://gre/modules/PromiseUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 Cu.import("resource://gre/modules/ObjectUtils.jsm");
+Cu.import("resource://gre/modules/TelemetryController.jsm", this);
+Cu.import("resource://gre/modules/AppConstants.jsm");
 
 const Utils = TelemetryUtils;
 
 XPCOMUtils.defineLazyModuleGetter(this, "ctypes",
                                   "resource://gre/modules/ctypes.jsm");
-#ifndef MOZ_WIDGET_GONK
-Cu.import("resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
-                                  "resource://gre/modules/LightweightThemeManager.jsm");
-#endif
+if (AppConstants.platform !== "gonk") {
+  Cu.import("resource://gre/modules/AddonManager.jsm");
+  XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
+                                    "resource://gre/modules/LightweightThemeManager.jsm");
+}
 XPCOMUtils.defineLazyModuleGetter(this, "ProfileAge",
                                   "resource://gre/modules/ProfileAge.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
-                                  "resource://gre/modules/UpdateChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
+                                  "resource://gre/modules/UpdateUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "WindowsRegistry",
+                                  "resource://gre/modules/WindowsRegistry.jsm");
 
 const CHANGE_THROTTLE_INTERVAL_MS = 5 * 60 * 1000;
+
+// The maximum length of a string (e.g. description) in the addons section.
+const MAX_ADDON_STRING_LENGTH = 100;
 
 /**
  * This is a policy object used to override behavior for testing.
  */
-let Policy = {
+var Policy = {
   now: () => new Date(),
 };
 
@@ -60,6 +67,10 @@ this.TelemetryEnvironment = {
     return getGlobal().onInitialized();
   },
 
+  delayedInit: function() {
+    return getGlobal().delayedInit();
+  },
+
   registerChangeListener: function(name, listener) {
     return getGlobal().registerChangeListener(name, listener);
   },
@@ -68,75 +79,105 @@ this.TelemetryEnvironment = {
     return getGlobal().unregisterChangeListener(name);
   },
 
+  shutdown: function() {
+    return getGlobal().shutdown();
+  },
+
   // Policy to use when saving preferences. Exported for using them in tests.
   RECORD_PREF_STATE: 1, // Don't record the preference value
   RECORD_PREF_VALUE: 2, // We only record user-set prefs.
-  RECORD_PREF_NOTIFY_ONLY: 3, // Record nothing, just notify of changes.
 
   // Testing method
-  _watchPreferences: function(prefMap) {
+  testWatchPreferences: function(prefMap) {
     return getGlobal()._watchPreferences(prefMap);
+  },
+
+  /**
+   * Intended for use in tests only.
+   *
+   * In multiple tests we need a way to shut and re-start telemetry together
+   * with TelemetryEnvironment. This is problematic due to the fact that
+   * TelemetryEnvironment is a singleton. We, therefore, need this helper
+   * method to be able to re-set TelemetryEnvironment.
+   */
+  testReset: function() {
+    return getGlobal().reset();
   },
 };
 
+const RECORD_PREF_STATE = TelemetryEnvironment.RECORD_PREF_STATE;
+const RECORD_PREF_VALUE = TelemetryEnvironment.RECORD_PREF_VALUE;
 const DEFAULT_ENVIRONMENT_PREFS = new Map([
-  ["app.feedback.baseURL", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["app.support.baseURL", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["accessibility.browsewithcaret", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["accessibility.force_disabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["app.update.auto", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["app.update.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["app.update.interval", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["app.update.service.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["app.update.silent", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["app.update.url", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.cache.disk.enable", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.cache.disk.capacity", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.cache.memory.enable", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.cache.offline.enable", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.formfill.enable", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.newtab.url", TelemetryEnvironment.RECORD_PREF_STATE],
-  ["browser.newtabpage.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.newtabpage.enhanced", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.polaris.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.shell.checkDefaultBrowser", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["browser.startup.homepage", TelemetryEnvironment.RECORD_PREF_STATE],
-  ["browser.startup.page", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["devtools.chrome.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["devtools.debugger.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["devtools.debugger.remote-enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["dom.ipc.plugins.asyncInit", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["dom.ipc.plugins.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["experiments.manifest.uri", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["extensions.blocklist.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["extensions.blocklist.url", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["extensions.strictCompatibility", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["extensions.update.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["extensions.update.url", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["extensions.update.background.url", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["general.smoothScroll", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["gfx.direct2d.disabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["gfx.direct2d.force-enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["gfx.direct2d.use1_1", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.acceleration.disabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.acceleration.force-enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.async-pan-zoom.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.async-video-oop.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.async-video.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.componentalpha.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.d3d11.disable-warp", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.d3d11.force-warp", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.prefer-d3d9", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layers.prefer-opengl", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["layout.css.devPixelsPerPx", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["network.proxy.autoconfig_url", TelemetryEnvironment.RECORD_PREF_STATE],
-  ["network.proxy.http", TelemetryEnvironment.RECORD_PREF_STATE],
-  ["network.proxy.ssl", TelemetryEnvironment.RECORD_PREF_STATE],
-  ["pdfjs.disabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["places.history.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["privacy.trackingprotection.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["privacy.donottrackheader.enabled", TelemetryEnvironment.RECORD_PREF_VALUE],
-  ["services.sync.serverURL", TelemetryEnvironment.RECORD_PREF_STATE],
+  ["app.feedback.baseURL", {what: RECORD_PREF_VALUE}],
+  ["app.support.baseURL", {what: RECORD_PREF_VALUE}],
+  ["accessibility.browsewithcaret", {what: RECORD_PREF_VALUE}],
+  ["accessibility.force_disabled", {what:  RECORD_PREF_VALUE}],
+  ["app.update.auto", {what: RECORD_PREF_VALUE}],
+  ["app.update.enabled", {what: RECORD_PREF_VALUE}],
+  ["app.update.interval", {what: RECORD_PREF_VALUE}],
+  ["app.update.service.enabled", {what: RECORD_PREF_VALUE}],
+  ["app.update.silent", {what: RECORD_PREF_VALUE}],
+  ["app.update.url", {what: RECORD_PREF_VALUE}],
+  ["browser.cache.disk.enable", {what: RECORD_PREF_VALUE}],
+  ["browser.cache.disk.capacity", {what: RECORD_PREF_VALUE}],
+  ["browser.cache.memory.enable", {what: RECORD_PREF_VALUE}],
+  ["browser.cache.offline.enable", {what: RECORD_PREF_VALUE}],
+  ["browser.formfill.enable", {what: RECORD_PREF_VALUE}],
+  ["browser.newtab.url", {what: RECORD_PREF_STATE}],
+  ["browser.newtabpage.enabled", {what: RECORD_PREF_VALUE}],
+  ["browser.newtabpage.enhanced", {what: RECORD_PREF_VALUE}],
+  ["browser.shell.checkDefaultBrowser", {what: RECORD_PREF_VALUE}],
+  ["browser.search.suggest.enabled", {what: RECORD_PREF_VALUE}],
+  ["browser.startup.homepage", {what: RECORD_PREF_STATE}],
+  ["browser.startup.page", {what: RECORD_PREF_VALUE}],
+  ["browser.tabs.animate", {what: RECORD_PREF_VALUE}],
+  ["browser.urlbar.suggest.searches", {what: RECORD_PREF_VALUE}],
+  ["browser.urlbar.userMadeSearchSuggestionsChoice", {what: RECORD_PREF_VALUE}],
+  // Record "Zoom Text Only" pref in Firefox 50 to 52 (Bug 979323).
+  ["browser.zoom.full", {what: RECORD_PREF_VALUE}],
+  ["devtools.chrome.enabled", {what: RECORD_PREF_VALUE}],
+  ["devtools.debugger.enabled", {what: RECORD_PREF_VALUE}],
+  ["devtools.debugger.remote-enabled", {what: RECORD_PREF_VALUE}],
+  ["dom.ipc.plugins.asyncInit.enabled", {what: RECORD_PREF_VALUE}],
+  ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
+  ["dom.ipc.processCount", {what: RECORD_PREF_VALUE, requiresRestart: true}],
+  ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
+  ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
+  ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
+  ["extensions.enabledScopes", {what: RECORD_PREF_VALUE}],
+  ["extensions.blocklist.enabled", {what: RECORD_PREF_VALUE}],
+  ["extensions.blocklist.url", {what: RECORD_PREF_VALUE}],
+  ["extensions.strictCompatibility", {what: RECORD_PREF_VALUE}],
+  ["extensions.update.enabled", {what: RECORD_PREF_VALUE}],
+  ["extensions.update.url", {what: RECORD_PREF_VALUE}],
+  ["extensions.update.background.url", {what: RECORD_PREF_VALUE}],
+  ["general.smoothScroll", {what: RECORD_PREF_VALUE}],
+  ["gfx.direct2d.disabled", {what: RECORD_PREF_VALUE}],
+  ["gfx.direct2d.force-enabled", {what: RECORD_PREF_VALUE}],
+  ["gfx.direct2d.use1_1", {what: RECORD_PREF_VALUE}],
+  ["layers.acceleration.disabled", {what: RECORD_PREF_VALUE}],
+  ["layers.acceleration.force-enabled", {what: RECORD_PREF_VALUE}],
+  ["layers.async-pan-zoom.enabled", {what: RECORD_PREF_VALUE}],
+  ["layers.async-video-oop.enabled", {what: RECORD_PREF_VALUE}],
+  ["layers.async-video.enabled", {what: RECORD_PREF_VALUE}],
+  ["layers.componentalpha.enabled", {what: RECORD_PREF_VALUE}],
+  ["layers.d3d11.disable-warp", {what: RECORD_PREF_VALUE}],
+  ["layers.d3d11.force-warp", {what: RECORD_PREF_VALUE}],
+  ["layers.offmainthreadcomposition.force-disabled", {what: RECORD_PREF_VALUE}],
+  ["layers.prefer-d3d9", {what: RECORD_PREF_VALUE}],
+  ["layers.prefer-opengl", {what: RECORD_PREF_VALUE}],
+  ["layout.css.devPixelsPerPx", {what: RECORD_PREF_VALUE}],
+  ["network.proxy.autoconfig_url", {what: RECORD_PREF_STATE}],
+  ["network.proxy.http", {what: RECORD_PREF_STATE}],
+  ["network.proxy.ssl", {what: RECORD_PREF_STATE}],
+  ["pdfjs.disabled", {what: RECORD_PREF_VALUE}],
+  ["places.history.enabled", {what: RECORD_PREF_VALUE}],
+  ["privacy.trackingprotection.enabled", {what: RECORD_PREF_VALUE}],
+  ["privacy.donottrackheader.enabled", {what: RECORD_PREF_VALUE}],
+  ["services.sync.serverURL", {what: RECORD_PREF_STATE}],
+  ["security.mixed_content.block_active_content", {what: RECORD_PREF_VALUE}],
+  ["security.mixed_content.block_display_content", {what: RECORD_PREF_VALUE}],
+  ["xpinstall.signatures.required", {what: RECORD_PREF_VALUE}],
 ]);
 
 const LOGGER_NAME = "Toolkit.Telemetry";
@@ -146,19 +187,33 @@ const PREF_DISTRIBUTION_ID = "distribution.id";
 const PREF_DISTRIBUTION_VERSION = "distribution.version";
 const PREF_DISTRIBUTOR = "app.distributor";
 const PREF_DISTRIBUTOR_CHANNEL = "app.distributor.channel";
-const PREF_E10S_ENABLED = "browser.tabs.remote.autostart";
 const PREF_HOTFIX_LASTVERSION = "extensions.hotfix.lastVersion";
 const PREF_APP_PARTNER_BRANCH = "app.partner.";
 const PREF_PARTNER_ID = "mozilla.partner.id";
-const PREF_TELEMETRY_ENABLED = "toolkit.telemetry.enabled";
 const PREF_UPDATE_ENABLED = "app.update.enabled";
 const PREF_UPDATE_AUTODOWNLOAD = "app.update.auto";
 const PREF_SEARCH_COHORT = "browser.search.cohort";
+const PREF_E10S_COHORT = "e10s.rollout.cohort";
 
+const COMPOSITOR_CREATED_TOPIC = "compositor:created";
+const DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC = "distribution-customization-complete";
 const EXPERIMENTS_CHANGED_TOPIC = "experiments-changed";
+const GFX_FEATURES_READY_TOPIC = "gfx-features-ready";
 const SEARCH_ENGINE_MODIFIED_TOPIC = "browser-search-engine-modified";
 const SEARCH_SERVICE_TOPIC = "browser-search-service";
-const COMPOSITOR_CREATED_TOPIC = "compositor:created";
+
+/**
+ * Enforces the parameter to a boolean value.
+ * @param aValue The input value.
+ * @return {Boolean|Object} If aValue is a boolean or a number, returns its truthfulness
+ *         value. Otherwise, return null.
+ */
+function enforceBoolean(aValue) {
+  if (typeof(aValue) !== "number" && typeof(aValue) !== "boolean") {
+    return null;
+  }
+  return (new Boolean(aValue)).valueOf();
+}
 
 /**
  * Get the current browser.
@@ -228,12 +283,27 @@ function getGfxField(aPropertyName, aDefault) {
   try {
     // Accessing the field may throw if |aPropertyName| does not exist.
     let gfxProp = gfxInfo[aPropertyName];
-    if (gfxProp !== "") {
+    if (gfxProp !== undefined && gfxProp !== "") {
       return gfxProp;
     }
   } catch (e) {}
 
   return aDefault;
+}
+
+/**
+ * Returns a substring of the input string.
+ *
+ * @param {String} aString The input string.
+ * @param {Integer} aMaxLength The maximum length of the returned substring. If this is
+ *        greater than the length of the input string, we return the whole input string.
+ * @return {String} The substring or null if the input string is null.
+ */
+function limitStringToLength(aString, aMaxLength) {
+  if (typeof(aString) !== "string") {
+    return null;
+  }
+  return aString.substring(0, aMaxLength);
 }
 
 /**
@@ -262,14 +332,20 @@ function getGfxAdapter(aSuffix = "") {
   };
 }
 
-#ifdef XP_WIN
 /**
- * Gets the service pack information on Windows platforms. This was copied from
- * nsUpdateService.js.
+ * Gets the service pack and build information on Windows platforms. The initial version
+ * was copied from nsUpdateService.js.
  *
- * @return An object containing the service pack major and minor versions.
+ * @return An object containing the service pack major and minor versions, along with the
+ *         build number.
  */
-function getServicePack() {
+function getWindowsVersionInfo() {
+  const UNKNOWN_VERSION_INFO = {servicePackMajor: null, servicePackMinor: null, buildNumber: null};
+
+  if (AppConstants.platform !== "win") {
+    return UNKNOWN_VERSION_INFO;
+  }
+
   const BYTE = ctypes.uint8_t;
   const WORD = ctypes.uint16_t;
   const DWORD = ctypes.uint32_t;
@@ -308,19 +384,16 @@ function getServicePack() {
     }
 
     return {
-      major: winVer.wServicePackMajor,
-      minor: winVer.wServicePackMinor,
+      servicePackMajor: winVer.wServicePackMajor,
+      servicePackMinor: winVer.wServicePackMinor,
+      buildNumber: winVer.dwBuildNumber,
     };
   } catch (e) {
-    return {
-      major: null,
-      minor: null,
-    };
+    return UNKNOWN_VERSION_INFO;
   } finally {
     kernel32.close();
   }
 }
-#endif
 
 /**
  * Encapsulates the asynchronous magic interfacing with the addon manager. The builder
@@ -436,12 +509,12 @@ EnvironmentAddonBuilder.prototype = {
   _updateAddons: Task.async(function* () {
     this._environment._log.trace("_updateAddons");
     let personaId = null;
-#ifndef MOZ_WIDGET_GONK
-    let theme = LightweightThemeManager.currentTheme;
-    if (theme) {
-      personaId = theme.id;
+    if (AppConstants.platform !== "gonk") {
+      let theme = LightweightThemeManager.currentTheme;
+      if (theme) {
+        personaId = theme.id;
+      }
     }
-#endif
 
     let addons = {
       activeAddons: yield this._getActiveAddons(),
@@ -453,7 +526,8 @@ EnvironmentAddonBuilder.prototype = {
     };
 
     let result = {
-      changed: !ObjectUtils.deepEqual(addons, this._environment._currentEnvironment.addons),
+      changed: !this._environment._currentEnvironment.addons ||
+               !ObjectUtils.deepEqual(addons, this._environment._currentEnvironment.addons),
     };
 
     if (result.changed) {
@@ -480,28 +554,37 @@ EnvironmentAddonBuilder.prototype = {
         continue;
       }
 
-      // Make sure to have valid dates.
-      let installDate = new Date(Math.max(0, addon.installDate));
-      let updateDate = new Date(Math.max(0, addon.updateDate));
+      // Weird addon data in the wild can lead to exceptions while collecting
+      // the data.
+      try {
+        // Make sure to have valid dates.
+        let installDate = new Date(Math.max(0, addon.installDate));
+        let updateDate = new Date(Math.max(0, addon.updateDate));
 
-      activeAddons[addon.id] = {
-        blocklisted: (addon.blocklistState !== Ci.nsIBlocklistService.STATE_NOT_BLOCKED),
-        description: addon.description,
-        name: addon.name,
-        userDisabled: addon.userDisabled,
-        appDisabled: addon.appDisabled,
-        version: addon.version,
-        scope: addon.scope,
-        type: addon.type,
-        foreignInstall: addon.foreignInstall,
-        hasBinaryComponents: addon.hasBinaryComponents,
-        installDay: Utils.millisecondsToDays(installDate.getTime()),
-        updateDay: Utils.millisecondsToDays(updateDate.getTime()),
-        signedState: addon.signedState,
-      };
+        activeAddons[addon.id] = {
+          blocklisted: (addon.blocklistState !== Ci.nsIBlocklistService.STATE_NOT_BLOCKED),
+          description: limitStringToLength(addon.description, MAX_ADDON_STRING_LENGTH),
+          name: limitStringToLength(addon.name, MAX_ADDON_STRING_LENGTH),
+          userDisabled: enforceBoolean(addon.userDisabled),
+          appDisabled: addon.appDisabled,
+          version: limitStringToLength(addon.version, MAX_ADDON_STRING_LENGTH),
+          scope: addon.scope,
+          type: addon.type,
+          foreignInstall: enforceBoolean(addon.foreignInstall),
+          hasBinaryComponents: addon.hasBinaryComponents,
+          installDay: Utils.millisecondsToDays(installDate.getTime()),
+          updateDay: Utils.millisecondsToDays(updateDate.getTime()),
+          signedState: addon.signedState,
+          isSystem: addon.isSystem,
+        };
 
-      if (addon.signedState !== undefined)
-        activeAddons[addon.id].signedState = addon.signedState;
+        if (addon.signedState !== undefined)
+          activeAddons[addon.id].signedState = addon.signedState;
+
+      } catch (ex) {
+        this._environment._log.error("_getActiveAddons - An addon was discarded due to an error", ex);
+        continue;
+      }
     }
 
     return activeAddons;
@@ -526,13 +609,13 @@ EnvironmentAddonBuilder.prototype = {
       activeTheme = {
         id: theme.id,
         blocklisted: (theme.blocklistState !== Ci.nsIBlocklistService.STATE_NOT_BLOCKED),
-        description: theme.description,
-        name: theme.name,
-        userDisabled: theme.userDisabled,
+        description: limitStringToLength(theme.description, MAX_ADDON_STRING_LENGTH),
+        name: limitStringToLength(theme.name, MAX_ADDON_STRING_LENGTH),
+        userDisabled: enforceBoolean(theme.userDisabled),
         appDisabled: theme.appDisabled,
-        version: theme.version,
+        version: limitStringToLength(theme.version, MAX_ADDON_STRING_LENGTH),
         scope: theme.scope,
-        foreignInstall: theme.foreignInstall,
+        foreignInstall: enforceBoolean(theme.foreignInstall),
         hasBinaryComponents: theme.hasBinaryComponents,
         installDay: Utils.millisecondsToDays(installDate.getTime()),
         updateDay: Utils.millisecondsToDays(updateDate.getTime()),
@@ -557,19 +640,24 @@ EnvironmentAddonBuilder.prototype = {
         continue;
       }
 
-      // Make sure to have a valid date.
-      let updateDate = new Date(Math.max(0, tag.lastModifiedTime));
+      try {
+        // Make sure to have a valid date.
+        let updateDate = new Date(Math.max(0, tag.lastModifiedTime));
 
-      activePlugins.push({
-        name: tag.name,
-        version: tag.version,
-        description: tag.description,
-        blocklisted: tag.blocklisted,
-        disabled: tag.disabled,
-        clicktoplay: tag.clicktoplay,
-        mimeTypes: tag.getMimeTypes({}),
-        updateDay: Utils.millisecondsToDays(updateDate.getTime()),
-      });
+        activePlugins.push({
+          name: limitStringToLength(tag.name, MAX_ADDON_STRING_LENGTH),
+          version: limitStringToLength(tag.version, MAX_ADDON_STRING_LENGTH),
+          description: limitStringToLength(tag.description, MAX_ADDON_STRING_LENGTH),
+          blocklisted: tag.blocklisted,
+          disabled: tag.disabled,
+          clicktoplay: tag.clicktoplay,
+          mimeTypes: tag.getMimeTypes({}),
+          updateDay: Utils.millisecondsToDays(updateDate.getTime()),
+        });
+      } catch (ex) {
+        this._environment._log.error("_getActivePlugins - A plugin was discarded due to an error", ex);
+        continue;
+      }
     }
 
     return activePlugins;
@@ -588,16 +676,21 @@ EnvironmentAddonBuilder.prototype = {
 
     let activeGMPlugins = {};
     for (let plugin of allPlugins) {
-      // Only get GM Plugin info.
-      if (!plugin.isGMPlugin) {
+      // Only get info for active GMplugins.
+      if (!plugin.isGMPlugin || !plugin.isActive) {
         continue;
       }
 
-      activeGMPlugins[plugin.id] = {
-        version: plugin.version,
-        userDisabled: plugin.userDisabled,
-        applyBackgroundUpdates: plugin.applyBackgroundUpdates,
-      };
+      try {
+        activeGMPlugins[plugin.id] = {
+          version: plugin.version,
+          userDisabled: enforceBoolean(plugin.userDisabled),
+          applyBackgroundUpdates: plugin.applyBackgroundUpdates,
+        };
+      } catch (ex) {
+        this._environment._log.error("_getActiveGMPlugins - A GMPlugin was discarded due to an error", ex);
+        continue;
+      }
     }
 
     return activeGMPlugins;
@@ -632,6 +725,7 @@ function EnvironmentCache() {
   this._log.trace("constructor");
 
   this._shutdown = false;
+  this._delayedInitFinished = false;
 
   // A map of listeners that will be called on environment changes.
   this._changeListeners = new Map();
@@ -652,30 +746,29 @@ function EnvironmentCache() {
   this._updateSettings();
   // Fill in the default search engine, if the search provider is already initialized.
   this._updateSearchEngine();
+  this._addObservers();
 
   // Build the remaining asynchronous parts of the environment. Don't register change listeners
   // until the initial environment has been built.
 
-#ifdef MOZ_WIDGET_GONK
-  this._addonBuilder = {
-    watchForChanges: function() {}
-  }
   let p = [];
-#else
-  this._addonBuilder = new EnvironmentAddonBuilder(this);
+  if (AppConstants.platform === "gonk") {
+    this._addonBuilder = {
+      watchForChanges: function() {}
+    };
+  } else {
+    this._addonBuilder = new EnvironmentAddonBuilder(this);
+    p = [ this._addonBuilder.init() ];
+  }
 
-  let p = [ this._addonBuilder.init() ];
-#endif
-#ifndef MOZ_WIDGET_ANDROID
   this._currentEnvironment.profile = {};
   p.push(this._updateProfile());
-#endif
 
   let setup = () => {
     this._initTask = null;
     this._startWatchingPrefs();
     this._addonBuilder.watchForChanges();
-    this._addObservers();
+    this._updateGraphicsFeatures();
     return this.currentEnvironment;
   };
 
@@ -710,6 +803,13 @@ EnvironmentCache.prototype = {
   },
 
   /**
+   * This gets called when the delayed init completes.
+   */
+  delayedInit: function() {
+    this._delayedInitFinished = true;
+  },
+
+  /**
    * Register a listener for environment changes.
    * @param name The name of the listener. If a new listener is registered
    *             with the same name, the old listener will be replaced.
@@ -739,6 +839,11 @@ EnvironmentCache.prototype = {
     this._changeListeners.delete(name);
   },
 
+  shutdown: function() {
+    this._log.trace("shutdown");
+    this._shutdown = true;
+  },
+
   /**
    * Only used in tests, set the preferences to watch.
    * @param aPreferences A map of preferences names and their recording policy.
@@ -759,16 +864,15 @@ EnvironmentCache.prototype = {
   _getPrefData: function () {
     let prefData = {};
     for (let [pref, policy] of this._watchedPrefs.entries()) {
-      // Only record preferences if they are non-default and policy allows recording.
-      if (!Preferences.isSet(pref) ||
-          policy == TelemetryEnvironment.RECORD_PREF_NOTIFY_ONLY) {
+      // Only record preferences if they are non-default
+      if (!Preferences.isSet(pref)) {
         continue;
       }
 
       // Check the policy for the preference and decide if we need to store its value
       // or whether it changed from the default value.
       let prefValue = undefined;
-      if (policy == TelemetryEnvironment.RECORD_PREF_STATE) {
+      if (policy.what == TelemetryEnvironment.RECORD_PREF_STATE) {
         prefValue = "<user-set>";
       } else {
         prefValue = Preferences.get(pref, null);
@@ -784,8 +888,10 @@ EnvironmentCache.prototype = {
   _startWatchingPrefs: function () {
     this._log.trace("_startWatchingPrefs - " + this._watchedPrefs);
 
-    for (let pref of this._watchedPrefs.keys()) {
-      Preferences.observe(pref, this._onPrefChanged, this);
+    for (let [pref, options] of this._watchedPrefs) {
+      if(!("requiresRestart" in options) || !options.requiresRestart) {
+        Preferences.observe(pref, this._onPrefChanged, this);
+      }
     }
   },
 
@@ -802,30 +908,37 @@ EnvironmentCache.prototype = {
   _stopWatchingPrefs: function () {
     this._log.trace("_stopWatchingPrefs");
 
-    for (let pref of this._watchedPrefs.keys()) {
-      Preferences.ignore(pref, this._onPrefChanged, this);
+    for (let [pref, options] of this._watchedPrefs) {
+      if(!("requiresRestart" in options) || !options.requiresRestart) {
+        Preferences.ignore(pref, this._onPrefChanged, this);
+      }
     }
   },
 
   _addObservers: function () {
     // Watch the search engine change and service topics.
+    Services.obs.addObserver(this, COMPOSITOR_CREATED_TOPIC, false);
+    Services.obs.addObserver(this, DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC, false);
+    Services.obs.addObserver(this, GFX_FEATURES_READY_TOPIC, false);
     Services.obs.addObserver(this, SEARCH_ENGINE_MODIFIED_TOPIC, false);
     Services.obs.addObserver(this, SEARCH_SERVICE_TOPIC, false);
-    Services.obs.addObserver(this, COMPOSITOR_CREATED_TOPIC, false);
   },
 
   _removeObservers: function () {
-    // Remove the search engine change and service observers.
+    Services.obs.removeObserver(this, COMPOSITOR_CREATED_TOPIC);
+    try {
+      Services.obs.removeObserver(this, DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC);
+    } catch(ex) {}
+    Services.obs.removeObserver(this, GFX_FEATURES_READY_TOPIC);
     Services.obs.removeObserver(this, SEARCH_ENGINE_MODIFIED_TOPIC);
     Services.obs.removeObserver(this, SEARCH_SERVICE_TOPIC);
-    Services.obs.removeObserver(this, COMPOSITOR_CREATED_TOPIC);
   },
 
   observe: function (aSubject, aTopic, aData) {
     this._log.trace("observe - aTopic: " + aTopic + ", aData: " + aData);
     switch (aTopic) {
       case SEARCH_ENGINE_MODIFIED_TOPIC:
-        if (aData != "engine-default" && aData != "engine-current") {
+        if (aData != "engine-current") {
           return;
         }
         // Record the new default search choice and send the change notification.
@@ -838,11 +951,18 @@ EnvironmentCache.prototype = {
         // Now that the search engine init is complete, record the default search choice.
         this._updateSearchEngine();
         break;
+      case GFX_FEATURES_READY_TOPIC:
       case COMPOSITOR_CREATED_TOPIC:
         // Full graphics information is not available until we have created at
         // least one off-main-thread-composited window. Thus we wait for the
         // first compositor to be created and then query nsIGfxInfo again.
-        this._onCompositorCreated();
+        this._updateGraphicsFeatures();
+        break;
+      case DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC:
+        // Distribution customizations are applied after final-ui-startup. query
+        // partner prefs again when they are ready.
+        this._updatePartner();
+        Services.obs.removeObserver(this, aTopic);
         break;
     }
   },
@@ -913,7 +1033,7 @@ EnvironmentCache.prototype = {
   /**
    * Update the graphics features object.
    */
-  _onCompositorCreated: function () {
+  _updateGraphicsFeatures: function () {
     let gfxData = this._currentEnvironment.system.gfx;
     try {
       let gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
@@ -921,6 +1041,13 @@ EnvironmentCache.prototype = {
     } catch (e) {
       this._log.error("nsIGfxInfo.getFeatures() caught error", e);
     }
+  },
+
+  /**
+   * Update the partner prefs.
+   */
+  _updatePartner: function() {
+    this._currentEnvironment.partner = this._getPartner();
   },
 
   /**
@@ -956,9 +1083,10 @@ EnvironmentCache.prototype = {
    * @returns null on error, true if we are the default browser, or false otherwise.
    */
   _isDefaultBrowser: function () {
-#ifdef MOZ_WIDGET_GONK
-    return true;
-#else
+    if (AppConstants.platform === "gonk") {
+      return true;
+    }
+
     if (!("@mozilla.org/browser/shell-service;1" in Cc)) {
       this._log.info("_isDefaultBrowser - Could not obtain browser shell service");
       return null;
@@ -966,11 +1094,21 @@ EnvironmentCache.prototype = {
 
     let shellService;
     try {
-      shellService = Cc["@mozilla.org/browser/shell-service;1"]
-                       .getService(Ci.nsIShellService);
+      let scope = {};
+      Cu.import("resource:///modules/ShellService.jsm", scope);
+      shellService = scope.ShellService;
     } catch (ex) {
-      this._log.error("_isDefaultBrowser - Could not obtain shell service", ex);
-      return null;
+      this._log.error("_isDefaultBrowser - Could not obtain shell service JSM");
+    }
+
+    if (!shellService) {
+      try {
+        shellService = Cc["@mozilla.org/browser/shell-service;1"]
+                         .getService(Ci.nsIShellService);
+      } catch (ex) {
+        this._log.error("_isDefaultBrowser - Could not obtain shell service", ex);
+        return null;
+      }
     }
 
     try {
@@ -982,7 +1120,6 @@ EnvironmentCache.prototype = {
     }
 
     return null;
-#endif
   },
 
   /**
@@ -991,16 +1128,14 @@ EnvironmentCache.prototype = {
   _updateSettings: function () {
     let updateChannel = null;
     try {
-      updateChannel = UpdateChannel.get(false);
+      updateChannel = UpdateUtils.getUpdateChannel(false);
     } catch (e) {}
 
     this._currentEnvironment.settings = {
       blocklistEnabled: Preferences.get(PREF_BLOCKLIST_ENABLED, true),
-#ifndef MOZ_WIDGET_ANDROID
-      isDefaultBrowser: this._isDefaultBrowser(),
-#endif
-      e10sEnabled: Preferences.get(PREF_E10S_ENABLED, false),
-      telemetryEnabled: Preferences.get(PREF_TELEMETRY_ENABLED, false),
+      e10sEnabled: Services.appinfo.browserTabsRemoteAutostart,
+      e10sCohort: Preferences.get(PREF_E10S_COHORT, "unknown"),
+      telemetryEnabled: Utils.isTelemetryEnabled,
       locale: getBrowserLocale(),
       update: {
         channel: updateChannel,
@@ -1009,6 +1144,16 @@ EnvironmentCache.prototype = {
       },
       userPrefs: this._getPrefData(),
     };
+
+    if (AppConstants.platform !== "gonk") {
+      this._currentEnvironment.settings.addonCompatibilityCheckEnabled =
+        AddonManager.checkCompatibility;
+    }
+
+    if (AppConstants.platform !== "android") {
+      this._currentEnvironment.settings.isDefaultBrowser =
+        this._isDefaultBrowser();
+    }
 
     this._updateSearchEngine();
   },
@@ -1059,15 +1204,19 @@ EnvironmentCache.prototype = {
   _getCpuData: function () {
     let cpuData = {
       count: getSysinfoProperty("cpucount", null),
-      vendor: null, // TODO: bug 1128472
-      family: null, // TODO: bug 1128472
-      model: null, // TODO: bug 1128472
-      stepping: null, // TODO: bug 1128472
+      cores: getSysinfoProperty("cpucores", null),
+      vendor: getSysinfoProperty("cpuvendor", null),
+      family: getSysinfoProperty("cpufamily", null),
+      model: getSysinfoProperty("cpumodel", null),
+      stepping: getSysinfoProperty("cpustepping", null),
+      l2cacheKB: getSysinfoProperty("cpucachel2", null),
+      l3cacheKB: getSysinfoProperty("cpucachel3", null),
+      speedMHz: getSysinfoProperty("cpuspeed", null),
     };
 
     const CPU_EXTENSIONS = ["hasMMX", "hasSSE", "hasSSE2", "hasSSE3", "hasSSSE3",
-                            "hasSSE4A", "hasSSE4_1", "hasSSE4_2", "hasEDSP", "hasARMv6",
-                            "hasARMv7", "hasNEON"];
+                            "hasSSE4A", "hasSSE4_1", "hasSSE4_2", "hasAVX", "hasAVX2",
+                            "hasEDSP", "hasARMv6", "hasARMv7", "hasNEON"];
 
     // Enumerate the available CPU extensions.
     let availableExts = [];
@@ -1082,12 +1231,16 @@ EnvironmentCache.prototype = {
     return cpuData;
   },
 
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
   /**
    * Get the device information, if we are on a portable device.
-   * @return Object containing the device information data.
+   * @return Object containing the device information data, or null if
+   * not a portable device.
    */
   _getDeviceData: function () {
+    if (!["gonk", "android"].includes(AppConstants.platform)) {
+      return null;
+    }
+
     return {
       model: getSysinfoProperty("device", null),
       manufacturer: getSysinfoProperty("manufacturer", null),
@@ -1095,30 +1248,42 @@ EnvironmentCache.prototype = {
       isTablet: getSysinfoProperty("tablet", null),
     };
   },
-#endif
 
   /**
    * Get the OS information.
    * @return Object containing the OS data.
    */
   _getOSData: function () {
-#ifdef XP_WIN
-    // Try to get service pack information.
-    let servicePack = getServicePack();
-#endif
-
-    return {
+    let data = {
       name: getSysinfoProperty("name", null),
       version: getSysinfoProperty("version", null),
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
-      kernelVersion: getSysinfoProperty("kernel_version", null),
-#elif defined(XP_WIN)
-      servicePackMajor: servicePack.major,
-      servicePackMinor: servicePack.minor,
-      installYear: getSysinfoProperty("installYear", null),
-#endif
       locale: getSystemLocale(),
     };
+
+    if (["gonk", "android"].includes(AppConstants.platform)) {
+      data.kernelVersion = getSysinfoProperty("kernel_version", null);
+    } else if (AppConstants.platform === "win") {
+      // The path to the "UBR" key, queried to get additional version details on Windows.
+      const WINDOWS_UBR_KEY_PATH = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+
+      let versionInfo = getWindowsVersionInfo();
+      data.servicePackMajor = versionInfo.servicePackMajor;
+      data.servicePackMinor = versionInfo.servicePackMinor;
+      // We only need the build number and UBR if we're at or above Windows 10.
+      if (typeof(data.version) === 'string' &&
+          Services.vc.compare(data.version, "10") >= 0) {
+        data.windowsBuildNumber = versionInfo.buildNumber;
+        // Query the UBR key and only add it to the environment if it's available.
+        // |readRegKey| doesn't throw, but rather returns 'undefined' on error.
+        let ubr = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+                                             WINDOWS_UBR_KEY_PATH, "UBR",
+                                             Ci.nsIWindowsRegKey.WOW64_64);
+        data.windowsUBR = (ubr !== undefined) ? ubr : null;
+      }
+      data.installYear = getSysinfoProperty("installYear", null);
+    }
+
+    return data;
   },
 
   /**
@@ -1158,14 +1323,14 @@ EnvironmentCache.prototype = {
       features: {},
     };
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_GTK)
-    let gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
-    try {
-      gfxData.monitors = gfxInfo.getMonitors();
-    } catch (e) {
-      this._log.error("nsIGfxInfo.getMonitors() caught error", e);
+    if (!["gonk", "android", "linux"].includes(AppConstants.platform)) {
+      let gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
+      try {
+        gfxData.monitors = gfxInfo.getMonitors();
+      } catch (e) {
+        this._log.error("nsIGfxInfo.getMonitors() caught error", e);
+      }
     }
-#endif
 
     try {
       let gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
@@ -1188,7 +1353,7 @@ EnvironmentCache.prototype = {
     this._log.trace("_getGFXData - Two display adapters detected.");
 
     gfxData.adapters.push(getGfxAdapter("2"));
-    gfxData.adapters[1].GPUActive = getGfxField("isGPU2Active ", null);
+    gfxData.adapters[1].GPUActive = getGfxField("isGPU2Active", null);
 
     return gfxData;
   },
@@ -1205,19 +1370,29 @@ EnvironmentCache.prototype = {
       memoryMB = Math.round(memoryMB / 1024 / 1024);
     }
 
-    return {
+    let virtualMB = getSysinfoProperty("virtualmemsize", null);
+    if (virtualMB) {
+      // Send the total virtual memory size in megabytes. Rounding because
+      // sysinfo doesn't always provide RAM in multiples of 1024.
+      virtualMB = Math.round(virtualMB / 1024 / 1024);
+    }
+
+    let data = {
       memoryMB: memoryMB,
-#ifdef XP_WIN
-      isWow64: getSysinfoProperty("isWow64", null),
-#endif
+      virtualMaxMB: virtualMB,
       cpu: this._getCpuData(),
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
-      device: this._getDeviceData(),
-#endif
       os: this._getOSData(),
       hdd: this._getHDDData(),
       gfx: this._getGFXData(),
     };
+
+    if (AppConstants.platform === "win") {
+      data.isWow64 = getSysinfoProperty("isWow64", null);
+    } else if (["gonk", "android"].includes(AppConstants.platform)) {
+      data.device = this._getDeviceData();
+    }
+
+    return data;
   },
 
   _onEnvironmentChange: function (what, oldEnvironment) {
@@ -1230,6 +1405,7 @@ EnvironmentCache.prototype = {
     // We are already skipping change events in _checkChanges if there is a pending change task running.
     let now = Policy.now();
     if (this._lastEnvironmentChangeDate &&
+        this._delayedInitFinished &&
         (CHANGE_THROTTLE_INTERVAL_MS >=
          (now.getTime() - this._lastEnvironmentChangeDate.getTime()))) {
       this._log.trace("_onEnvironmentChange - throttling changes, now: " + now +
@@ -1237,7 +1413,9 @@ EnvironmentCache.prototype = {
       return;
     }
 
-    this._lastEnvironmentChangeDate = now;
+    if(this._delayedInitFinished) {
+      this._lastEnvironmentChangeDate = now;
+    }
 
     for (let [name, listener] of this._changeListeners) {
       try {
@@ -1248,4 +1426,9 @@ EnvironmentCache.prototype = {
       }
     }
   },
+
+  reset: function () {
+    this._shutdown = false;
+    this._delayedInitFinished = false;
+  }
 };

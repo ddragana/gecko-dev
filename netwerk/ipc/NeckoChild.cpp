@@ -15,9 +15,11 @@
 #include "mozilla/net/WyciwygChannelChild.h"
 #include "mozilla/net/FTPChannelChild.h"
 #include "mozilla/net/WebSocketChannelChild.h"
+#include "mozilla/net/WebSocketEventListenerChild.h"
 #include "mozilla/net/DNSRequestChild.h"
 #include "mozilla/net/RemoteOpenFileChild.h"
 #include "mozilla/net/ChannelDiverterChild.h"
+#include "mozilla/net/IPCTransportProvider.h"
 #include "mozilla/dom/network/TCPSocketChild.h"
 #include "mozilla/dom/network/TCPServerSocketChild.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
@@ -48,6 +50,8 @@ NeckoChild::NeckoChild()
 
 NeckoChild::~NeckoChild()
 {
+  //Send__delete__(gNeckoChild);
+  gNeckoChild = nullptr;
 }
 
 void NeckoChild::InitNeckoChild()
@@ -60,21 +64,6 @@ void NeckoChild::InitNeckoChild()
     NS_ASSERTION(cpc, "Content Protocol is NULL!");
     gNeckoChild = cpc->SendPNeckoConstructor(); 
     NS_ASSERTION(gNeckoChild, "PNecko Protocol init failed!");
-  }
-}
-
-// Note: not actually called; has some lifespan as child process, so
-// automatically destroyed at exit.  
-void NeckoChild::DestroyNeckoChild()
-{
-  MOZ_ASSERT(IsNeckoChild(), "DestroyNeckoChild called by non-child!");
-  static bool alreadyDestroyed = false;
-  MOZ_ASSERT(!alreadyDestroyed, "DestroyNeckoChild already called!");
-
-  if (!alreadyDestroyed) {
-    Send__delete__(gNeckoChild); 
-    gNeckoChild = nullptr;
-    alreadyDestroyed = true;
   }
 }
 
@@ -157,7 +146,8 @@ NeckoChild::DeallocPWyciwygChannelChild(PWyciwygChannelChild* channel)
 
 PWebSocketChild*
 NeckoChild::AllocPWebSocketChild(const PBrowserOrId& browser,
-                                 const SerializedLoadContext& aSerialized)
+                                 const SerializedLoadContext& aSerialized,
+                                 const uint32_t& aSerial)
 {
   NS_NOTREACHED("AllocPWebSocketChild should not be called");
   return nullptr;
@@ -168,6 +158,23 @@ NeckoChild::DeallocPWebSocketChild(PWebSocketChild* child)
 {
   WebSocketChannelChild* p = static_cast<WebSocketChannelChild*>(child);
   p->ReleaseIPDLReference();
+  return true;
+}
+
+PWebSocketEventListenerChild*
+NeckoChild::AllocPWebSocketEventListenerChild(const uint64_t& aInnerWindowID)
+{
+  RefPtr<WebSocketEventListenerChild> c =
+    new WebSocketEventListenerChild(aInnerWindowID);
+  return c.forget().take();
+}
+
+bool
+NeckoChild::DeallocPWebSocketEventListenerChild(PWebSocketEventListenerChild* aActor)
+{
+  RefPtr<WebSocketEventListenerChild> c =
+    dont_AddRef(static_cast<WebSocketEventListenerChild*>(aActor));
+  MOZ_ASSERT(c);
   return true;
 }
 
@@ -223,8 +230,7 @@ PTCPSocketChild*
 NeckoChild::AllocPTCPSocketChild(const nsString& host,
                                  const uint16_t& port)
 {
-  TCPSocketChild* p = new TCPSocketChild();
-  p->Init(host, port);
+  TCPSocketChild* p = new TCPSocketChild(host, port);
   p->AddIPDLReference();
   return p;
 }
@@ -240,7 +246,7 @@ NeckoChild::DeallocPTCPSocketChild(PTCPSocketChild* child)
 PTCPServerSocketChild*
 NeckoChild::AllocPTCPServerSocketChild(const uint16_t& aLocalPort,
                                   const uint16_t& aBacklog,
-                                  const nsString& aBinaryType)
+                                  const bool& aUseArrayBuffers)
 {
   NS_NOTREACHED("AllocPTCPServerSocket should not be called");
   return nullptr;
@@ -322,13 +328,29 @@ NeckoChild::DeallocPChannelDiverterChild(PChannelDiverterChild* child)
   return true;
 }
 
+PTransportProviderChild*
+NeckoChild::AllocPTransportProviderChild()
+{
+  // This refcount is transferred to the receiver of the message that
+  // includes the PTransportProviderChild actor.
+  RefPtr<TransportProviderChild> res = new TransportProviderChild();
+
+  return res.forget().take();
+}
+
+bool
+NeckoChild::DeallocPTransportProviderChild(PTransportProviderChild* aActor)
+{
+  return true;
+}
+
 bool
 NeckoChild::RecvAsyncAuthPromptForNestedFrame(const TabId& aNestedFrameId,
                                               const nsCString& aUri,
                                               const nsString& aRealm,
                                               const uint64_t& aCallbackId)
 {
-  nsRefPtr<dom::TabChild> tabChild = dom::TabChild::FindTabChild(aNestedFrameId);
+  RefPtr<dom::TabChild> tabChild = dom::TabChild::FindTabChild(aNestedFrameId);
   if (!tabChild) {
     MOZ_CRASH();
     return false;
@@ -338,6 +360,25 @@ NeckoChild::RecvAsyncAuthPromptForNestedFrame(const TabId& aNestedFrameId,
 }
 
 /* Predictor Messages */
+bool
+NeckoChild::RecvPredOnPredictPrefetch(const URIParams& aURI,
+                                      const uint32_t& aHttpStatus)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "PredictorChild::RecvOnPredictPrefetch "
+                                "off main thread.");
+
+  nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
+
+  // Get the current predictor
+  nsresult rv = NS_OK;
+  nsCOMPtr<nsINetworkPredictorVerifier> predictor =
+    do_GetService("@mozilla.org/network/predictor;1", &rv);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  predictor->OnPredictPrefetch(uri, aHttpStatus);
+  return true;
+}
+
 bool
 NeckoChild::RecvPredOnPredictPreconnect(const URIParams& aURI)
 {
@@ -382,6 +423,17 @@ NeckoChild::RecvAppOfflineStatus(const uint32_t& aId, const bool& aOffline)
   if (gIOService) {
     gIOService->SetAppOfflineInternal(aId, aOffline ?
       nsIAppOfflineInfo::OFFLINE : nsIAppOfflineInfo::ONLINE);
+  }
+  return true;
+}
+
+bool
+NeckoChild::RecvSpeculativeConnectRequest(const nsCString& aNotificationData)
+{
+  nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+  if (obsService) {
+    obsService->NotifyObservers(nullptr, "speculative-connect-request",
+                                NS_ConvertUTF8toUTF16(aNotificationData).get());
   }
   return true;
 }

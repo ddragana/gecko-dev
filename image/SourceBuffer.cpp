@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstring>
 #include "mozilla/Likely.h"
+#include "nsIInputStream.h"
 #include "MainThreadUtils.h"
 #include "SurfaceCache.h"
 
@@ -102,6 +103,7 @@ SourceBuffer::CreateChunk(size_t aCapacity, bool aRoundUp /* = true */)
   // so if we could store the source data in the SurfaceCache, we assume that
   // there's no way we'll be able to store the decoded version.
   if (MOZ_UNLIKELY(!SurfaceCache::CanHold(finalCapacity))) {
+    NS_WARNING("SourceBuffer refused to create chunk too large for SurfaceCache");
     return Nothing();
   }
 
@@ -135,6 +137,13 @@ SourceBuffer::Compact()
   size_t length = 0;
   for (uint32_t i = 0 ; i < mChunks.Length() ; ++i) {
     length += mChunks[i].Length();
+  }
+
+  // If our total length is zero (which means ExpectLength() got called, but no
+  // data ever actually got written) then just empty our chunk list.
+  if (MOZ_UNLIKELY(length == 0)) {
+    mChunks.Clear();
+    return NS_OK;
   }
 
   Maybe<Chunk> newChunk = CreateChunk(length, /* aRoundUp = */ false);
@@ -211,10 +220,6 @@ SourceBuffer::AddWaitingConsumer(IResumable* aConsumer)
   mMutex.AssertCurrentThreadOwns();
 
   MOZ_ASSERT(!mStatus, "Waiting when we're complete?");
-
-  if (MOZ_UNLIKELY(NS_IsMainThread())) {
-    NS_WARNING("SourceBuffer consumer on the main thread needed to wait");
-  }
 
   mWaitingConsumers.AppendElement(aConsumer);
 }
@@ -354,6 +359,46 @@ SourceBuffer::Append(const char* aData, size_t aLength)
   return NS_OK;
 }
 
+static NS_METHOD
+AppendToSourceBuffer(nsIInputStream*,
+                     void* aClosure,
+                     const char* aFromRawSegment,
+                     uint32_t,
+                     uint32_t aCount,
+                     uint32_t* aWriteCount)
+{
+  SourceBuffer* sourceBuffer = static_cast<SourceBuffer*>(aClosure);
+
+  // Copy the source data. Unless we hit OOM, we squelch the return value here,
+  // because returning an error means that ReadSegments stops reading data, and
+  // we want to ensure that we read everything we get. If we hit OOM then we
+  // return a failed status to the caller.
+  nsresult rv = sourceBuffer->Append(aFromRawSegment, aCount);
+  if (rv == NS_ERROR_OUT_OF_MEMORY) {
+    return rv;
+  }
+
+  // Report that we wrote everything we got.
+  *aWriteCount = aCount;
+
+  return NS_OK;
+}
+
+nsresult
+SourceBuffer::AppendFromInputStream(nsIInputStream* aInputStream,
+                                    uint32_t aCount)
+{
+  uint32_t bytesRead;
+  nsresult rv = aInputStream->ReadSegments(AppendToSourceBuffer, this,
+                                           aCount, &bytesRead);
+
+  MOZ_ASSERT(bytesRead == aCount || rv == NS_ERROR_OUT_OF_MEMORY,
+             "AppendToSourceBuffer should consume everything unless "
+             "we run out of memory");
+
+  return rv;
+}
+
 void
 SourceBuffer::Complete(nsresult aStatus)
 {
@@ -397,7 +442,7 @@ SourceBuffer::SizeOfIncludingThisWithComputedFallback(MallocSizeOf
   MutexAutoLock lock(mMutex);
 
   size_t n = aMallocSizeOf(this);
-  n += mChunks.SizeOfExcludingThis(aMallocSizeOf);
+  n += mChunks.ShallowSizeOfExcludingThis(aMallocSizeOf);
 
   for (uint32_t i = 0 ; i < mChunks.Length() ; ++i) {
     size_t chunkSize = aMallocSizeOf(mChunks[i].Data());

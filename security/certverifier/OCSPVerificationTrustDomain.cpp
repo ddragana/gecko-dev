@@ -51,7 +51,7 @@ OCSPVerificationTrustDomain::CheckRevocation(EndEntityOrCA, const CertID&,
 
 Result
 OCSPVerificationTrustDomain::CheckSignatureDigestAlgorithm(
-  DigestAlgorithm aAlg, EndEntityOrCA aEEOrCA)
+  DigestAlgorithm aAlg, EndEntityOrCA aEEOrCA, Time notBefore)
 {
   // The reason for wrapping the NSSCertDBTrustDomain in an
   // OCSPVerificationTrustDomain is to allow us to bypass the weaker signature
@@ -99,6 +99,20 @@ OCSPVerificationTrustDomain::CheckValidityIsAcceptable(
   return mCertDBTrustDomain.CheckValidityIsAcceptable(notBefore, notAfter,
                                                       endEntityOrCA,
                                                       keyPurpose);
+}
+
+Result
+OCSPVerificationTrustDomain::NetscapeStepUpMatchesServerAuth(Time notBefore,
+                                                     /*out*/ bool& matches)
+{
+  return mCertDBTrustDomain.NetscapeStepUpMatchesServerAuth(notBefore, matches);
+}
+
+void
+OCSPVerificationTrustDomain::NoteAuxiliaryExtension(
+  AuxiliaryExtension extension, Input extensionData)
+{
+  mCertDBTrustDomain.NoteAuxiliaryExtension(extension, extensionData);
 }
 
 Result

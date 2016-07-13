@@ -44,7 +44,7 @@ static const char *kTypeString[] = {
                                     "xslt",
                                     "beacon",
                                     "fetch",
-                                    "imageset",
+                                    "image",
                                     "manifest",
                                     "", // TYPE_INTERNAL_SCRIPT
                                     "", // TYPE_INTERNAL_WORKER
@@ -55,7 +55,10 @@ static const char *kTypeString[] = {
                                     "", // TYPE_INTERNAL_IFRAME
                                     "", // TYPE_INTERNAL_AUDIO
                                     "", // TYPE_INTERNAL_VIDEO
-                                    ""  // TYPE_INTERNAL_TRACK
+                                    "", // TYPE_INTERNAL_TRACK
+                                    "", // TYPE_INTERNAL_XMLHTTPREQUEST
+                                    "", // TYPE_INTERNAL_EVENTSOURCE
+                                    "", // TYPE_INTERNAL_SERVICE_WORKER
 };
 
 #define NUMBER_OF_TYPES MOZ_ARRAY_LENGTH(kTypeString)

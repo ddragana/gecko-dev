@@ -8,6 +8,10 @@
 #include "imgINotificationObserver.h"
 
 namespace mozilla {
+
+using gfx::IntSize;
+using gfx::SourceSurface;
+
 namespace image {
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -31,14 +35,14 @@ public:
     MOZ_ASSERT(aImage);
     mImage = aImage;
 
-    nsRefPtr<ProgressTracker> tracker = mImage->GetProgressTracker();
+    RefPtr<ProgressTracker> tracker = mImage->GetProgressTracker();
     tracker->AddObserver(this);
   }
 
   void BlockUntilDecodedAndFinishObserving()
   {
     // Use GetFrame() to block until our image finishes decoding.
-    nsRefPtr<SourceSurface> surface =
+    RefPtr<SourceSurface> surface =
       mImage->GetFrame(imgIContainer::FRAME_CURRENT,
                        imgIContainer::FLAG_SYNC_DECODE);
 
@@ -70,9 +74,19 @@ public:
       return;
     }
 
+    // Retrieve the image's intrinsic size.
+    int32_t width = 0;
+    int32_t height = 0;
+    mImage->GetWidth(&width);
+    mImage->GetHeight(&height);
+
+    // Request decoding at the intrinsic size.
+    mImage->RequestDecodeForSize(IntSize(width, height),
+                                 imgIContainer::DECODE_FLAGS_DEFAULT);
+
     // If there's already an error, we may never get a FRAME_COMPLETE
     // notification, so go ahead and notify our owner right away.
-    nsRefPtr<ProgressTracker> tracker = mImage->GetProgressTracker();
+    RefPtr<ProgressTracker> tracker = mImage->GetProgressTracker();
     if (tracker->GetProgress() & FLAG_HAS_ERROR) {
       FinishObserving();
     }
@@ -92,7 +106,7 @@ private:
   {
     MOZ_ASSERT(mImage);
 
-    nsRefPtr<ProgressTracker> tracker = mImage->GetProgressTracker();
+    RefPtr<ProgressTracker> tracker = mImage->GetProgressTracker();
     tracker->RemoveObserver(this);
     mImage = nullptr;
 
@@ -100,7 +114,7 @@ private:
   }
 
   MultipartImage* mOwner;
-  nsRefPtr<Image> mImage;
+  RefPtr<Image> mImage;
 };
 
 
@@ -122,10 +136,9 @@ MultipartImage::Init()
   MOZ_ASSERT(mTracker, "Should've called SetProgressTracker() by now");
 
   // Start observing the first part.
-  nsRefPtr<ProgressTracker> firstPartTracker =
+  RefPtr<ProgressTracker> firstPartTracker =
     InnerImage()->GetProgressTracker();
   firstPartTracker->AddObserver(this);
-  InnerImage()->RequestDecode();
   InnerImage()->IncrementAnimationConsumers();
 }
 
@@ -135,9 +148,7 @@ MultipartImage::~MultipartImage()
   mTracker->ResetImage();
 }
 
-NS_IMPL_QUERY_INTERFACE_INHERITED0(MultipartImage, ImageWrapper)
-NS_IMPL_ADDREF_INHERITED(MultipartImage, ImageWrapper)
-NS_IMPL_RELEASE_INHERITED(MultipartImage, ImageWrapper)
+NS_IMPL_ISUPPORTS_INHERITED0(MultipartImage, ImageWrapper)
 
 void
 MultipartImage::BeginTransitionToPart(Image* aNextPart)
@@ -156,7 +167,6 @@ MultipartImage::BeginTransitionToPart(Image* aNextPart)
   // Start observing the next part; we'll complete the transition when
   // NextPartObserver calls FinishTransition.
   mNextPartObserver->BeginObserving(mNextPart);
-  mNextPart->RequestDecode();
   mNextPart->IncrementAnimationConsumers();
 }
 
@@ -174,7 +184,7 @@ MultipartImage::FinishTransition()
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mNextPart, "Should have a next part here");
 
-  nsRefPtr<ProgressTracker> newCurrentPartTracker =
+  RefPtr<ProgressTracker> newCurrentPartTracker =
     mNextPart->GetProgressTracker();
   if (newCurrentPartTracker->GetProgress() & FLAG_HAS_ERROR) {
     // This frame has an error; drop it.
@@ -182,7 +192,7 @@ MultipartImage::FinishTransition()
 
     // We still need to notify, though.
     mTracker->ResetForNewRequest();
-    nsRefPtr<ProgressTracker> currentPartTracker =
+    RefPtr<ProgressTracker> currentPartTracker =
       InnerImage()->GetProgressTracker();
     mTracker
       ->SyncNotifyProgress(FilterProgress(currentPartTracker->GetProgress()));
@@ -192,7 +202,7 @@ MultipartImage::FinishTransition()
 
   // Stop observing the current part.
   {
-    nsRefPtr<ProgressTracker> currentPartTracker =
+    RefPtr<ProgressTracker> currentPartTracker =
       InnerImage()->GetProgressTracker();
     currentPartTracker->RemoveObserver(this);
   }
@@ -223,7 +233,7 @@ already_AddRefed<ProgressTracker>
 MultipartImage::GetProgressTracker()
 {
   MOZ_ASSERT(mTracker);
-  nsRefPtr<ProgressTracker> tracker = mTracker;
+  RefPtr<ProgressTracker> tracker = mTracker;
   return tracker.forget();
 }
 
@@ -246,7 +256,7 @@ MultipartImage::OnImageDataAvailable(nsIRequest* aRequest,
   // one exists, and *not* the current part.
 
   // We may trigger notifications that will free mNextPart, so keep it alive.
-  nsRefPtr<Image> nextPart = mNextPart;
+  RefPtr<Image> nextPart = mNextPart;
   if (nextPart) {
     nextPart->OnImageDataAvailable(aRequest, aContext, aInStr,
                                    aSourceOffset, aCount);
@@ -268,7 +278,7 @@ MultipartImage::OnImageDataComplete(nsIRequest* aRequest,
   // one exists, and *not* the current part.
 
   // We may trigger notifications that will free mNextPart, so keep it alive.
-  nsRefPtr<Image> nextPart = mNextPart;
+  RefPtr<Image> nextPart = mNextPart;
   if (nextPart) {
     nextPart->OnImageDataComplete(aRequest, aContext, aStatus, aLastPart);
   } else {

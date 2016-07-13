@@ -31,20 +31,19 @@ SpanningCellSorter::~SpanningCellSorter()
 SpanningCellSorter::HashTableOps = {
     HashTableHashKey,
     HashTableMatchEntry,
-    PL_DHashMoveEntryStub,
-    PL_DHashClearEntryStub,
+    PLDHashTable::MoveEntryStub,
+    PLDHashTable::ClearEntryStub,
     nullptr
 };
 
 /* static */ PLDHashNumber
-SpanningCellSorter::HashTableHashKey(PLDHashTable *table, const void *key)
+SpanningCellSorter::HashTableHashKey(const void *key)
 {
     return NS_PTR_TO_INT32(key);
 }
 
 /* static */ bool
-SpanningCellSorter::HashTableMatchEntry(PLDHashTable *table,
-                                        const PLDHashEntryHdr *hdr,
+SpanningCellSorter::HashTableMatchEntry(const PLDHashEntryHdr *hdr,
                                         const void *key)
 {
     const HashTableEntry *entry = static_cast<const HashTableEntry*>(hdr);
@@ -68,9 +67,8 @@ SpanningCellSorter::AddCell(int32_t aColSpan, int32_t aRow, int32_t aCol)
         i->next = mArray[index];
         mArray[index] = i;
     } else {
-        HashTableEntry *entry = static_cast<HashTableEntry*>
-            (PL_DHashTableAdd(&mHashTable, NS_INT32_TO_PTR(aColSpan),
-                              fallible));
+        auto entry = static_cast<HashTableEntry*>
+            (mHashTable.Add(NS_INT32_TO_PTR(aColSpan), fallible));
         NS_ENSURE_TRUE(entry, false);
 
         NS_ASSERTION(entry->mColSpan == 0 || entry->mColSpan == aColSpan,
@@ -109,7 +107,7 @@ SpanningCellSorter::GetNext(int32_t *aColSpan)
             /* prepare to enumerate the array */
             mState = ENUMERATING_ARRAY;
             mEnumerationIndex = 0;
-            /* fall through */
+            MOZ_FALLTHROUGH;
         case ENUMERATING_ARRAY:
             while (mEnumerationIndex < ARRAY_SIZE && !mArray[mEnumerationIndex])
                 ++mEnumerationIndex;
@@ -139,7 +137,7 @@ SpanningCellSorter::GetNext(int32_t *aColSpan)
                              SortArray, nullptr);
                 mSortedHashTable = sh;
             }
-            /* fall through */
+            MOZ_FALLTHROUGH;
         case ENUMERATING_HASH:
             if (mEnumerationIndex < mHashTable.EntryCount()) {
                 Item *result = mSortedHashTable[mEnumerationIndex]->mItems;
@@ -154,7 +152,7 @@ SpanningCellSorter::GetNext(int32_t *aColSpan)
                 return result;
             }
             mState = DONE;
-            /* fall through */
+            MOZ_FALLTHROUGH;
         case DONE:
             ;
     }

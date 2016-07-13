@@ -53,6 +53,8 @@ public:
   virtual a11y::role NativeRole() override;
   virtual uint64_t NativeState() override;
 
+  virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) override;
+
   // HTMLLIAccessible
   HTMLListBulletAccessible* Bullet() const { return mBullet; }
   void UpdateBullet(bool aHasBullet);
@@ -60,11 +62,8 @@ public:
 protected:
   virtual ~HTMLLIAccessible() { }
 
-  // Accessible
-  virtual void CacheChildren() override;
-
 private:
-  nsRefPtr<HTMLListBulletAccessible> mBullet;
+  RefPtr<HTMLListBulletAccessible> mBullet;
 };
 
 

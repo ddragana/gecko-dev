@@ -29,7 +29,7 @@
 
 #include "nsITransport.h"
 #include "nsISocketTransport.h"
-
+#include "nsIDocShell.h"
 #include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 #include "nsPresContext.h"
@@ -42,15 +42,15 @@ static NS_DEFINE_CID(kThisImplCID, NS_THIS_DOCLOADER_IMPL_CID);
 //
 // Log module for nsIDocumentLoader logging...
 //
-// To enable logging (see prlog.h for full details):
+// To enable logging (see mozilla/Logging.h for full details):
 //
-//    set NSPR_LOG_MODULES=DocLoader:5
-//    set NSPR_LOG_FILE=nspr.log
+//    set MOZ_LOG=DocLoader:5
+//    set MOZ_LOG_FILE=debug.log
 //
 // this enables LogLevel::Debug level information and places all output in
-// the file nspr.log
+// the file 'debug.log'.
 //
-PRLogModuleInfo* gDocLoaderLog = nullptr;
+mozilla::LazyLogModule gDocLoaderLog("DocLoader");
 
 
 #if defined(DEBUG)
@@ -95,9 +95,9 @@ class nsDefaultComparator <nsDocLoader::nsListenerInfo, nsIWebProgressListener*>
 
 /* static */ const PLDHashTableOps nsDocLoader::sRequestInfoHashOps =
 {
-  PL_DHashVoidPtrKeyStub,
-  PL_DHashMatchEntryStub,
-  PL_DHashMoveEntryStub,
+  PLDHashTable::HashVoidPtrKeyStub,
+  PLDHashTable::MatchEntryStub,
+  PLDHashTable::MoveEntryStub,
   nsDocLoader::RequestInfoHashClearEntry,
   nsDocLoader::RequestInfoHashInitEntry
 };
@@ -115,10 +115,6 @@ nsDocLoader::nsDocLoader()
     mDontFlushLayout(false),
     mIsFlushingLayout(false)
 {
-  if (nullptr == gDocLoaderLog) {
-      gDocLoaderLog = PR_NewLogModule("DocLoader");
-  }
-
   ClearInternalProgress();
 
   MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
@@ -213,7 +209,7 @@ NS_IMETHODIMP nsDocLoader::GetInterface(const nsIID& aIID, void** aSink)
 already_AddRefed<nsDocLoader>
 nsDocLoader::GetAsDocLoader(nsISupports* aSupports)
 {
-  nsRefPtr<nsDocLoader> ret = do_QueryObject(aSupports);
+  RefPtr<nsDocLoader> ret = do_QueryObject(aSupports);
   return ret.forget();
 }
 
@@ -226,7 +222,7 @@ nsDocLoader::AddDocLoaderAsChildOfRoot(nsDocLoader* aDocLoader)
     do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsRefPtr<nsDocLoader> rootDocLoader = GetAsDocLoader(docLoaderService);
+  RefPtr<nsDocLoader> rootDocLoader = GetAsDocLoader(docLoaderService);
   NS_ENSURE_TRUE(rootDocLoader, NS_ERROR_UNEXPECTED);
 
   return rootDocLoader->AddChildLoader(aDocLoader);
@@ -602,7 +598,14 @@ nsDocLoader::OnStopRequest(nsIRequest *aRequest,
   // load.  This will handle removing the request from our hashtable as needed.
   //
   if (mIsLoadingDocument) {
-    DocLoaderIsEmpty(true);
+    nsCOMPtr<nsIDocShell> ds = do_QueryInterface(static_cast<nsIRequestObserver*>(this));
+    bool doNotFlushLayout = false;
+    if (ds) {
+      // Don't do unexpected layout flushes while we're in process of restoring
+      // a document from the bfcache.
+      ds->GetRestoringDocument(&doNotFlushLayout);
+    }
+    DocLoaderIsEmpty(!doNotFlushLayout);
   }
 
   return NS_OK;
@@ -653,6 +656,7 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
     }
 
     NS_ASSERTION(!mIsFlushingLayout, "Someone screwed up");
+    NS_ASSERTION(mDocumentRequest, "No Document Request!");
 
     // The load group for this DocumentLoader is idle.  Flush if we need to.
     if (aFlushLayout && !mDontFlushLayout) {
@@ -679,7 +683,9 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
 
     // And now check whether we're really busy; that might have changed with
     // the layout flush.
-    if (!IsBusy()) {
+    // Note, mDocumentRequest can be null if the flushing above re-entered this
+    // method.
+    if (!IsBusy() && mDocumentRequest) {
       // Clear out our request info hash, now that our load really is done and
       // we don't need it anymore to CalculateMaxProgress().
       ClearInternalProgress();
@@ -689,7 +695,6 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
 
       nsCOMPtr<nsIRequest> docRequest = mDocumentRequest;
 
-      NS_ASSERTION(mDocumentRequest, "No Document Request!");
       mDocumentRequest = 0;
       mIsLoadingDocument = false;
 
@@ -708,7 +713,7 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
 
       // Take a ref to our parent now so that we can call DocLoaderIsEmpty() on
       // it even if our onload handler removes us from the docloader tree.
-      nsRefPtr<nsDocLoader> parent = mParent;
+      RefPtr<nsDocLoader> parent = mParent;
 
       // Note that if calling ChildEnteringOnload() on the parent returns false
       // then calling our onload handler is not safe.  That can only happen on
@@ -872,7 +877,7 @@ nsDocLoader::RemoveProgressListener(nsIWebProgressListener *aListener)
 }
 
 NS_IMETHODIMP
-nsDocLoader::GetDOMWindow(nsIDOMWindow **aResult)
+nsDocLoader::GetDOMWindow(mozIDOMWindowProxy **aResult)
 {
   return CallGetInterface(this, aResult);
 }
@@ -882,11 +887,11 @@ nsDocLoader::GetDOMWindowID(uint64_t *aResult)
 {
   *aResult = 0;
 
-  nsCOMPtr<nsIDOMWindow> window;
+  nsCOMPtr<mozIDOMWindowProxy> window;
   nsresult rv = GetDOMWindow(getter_AddRefs(window));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsPIDOMWindow> piwindow = do_QueryInterface(window);
+  nsCOMPtr<nsPIDOMWindowOuter> piwindow = nsPIDOMWindowOuter::From(window);
   NS_ENSURE_STATE(piwindow);
 
   MOZ_ASSERT(piwindow->IsOuterWindow());
@@ -899,16 +904,13 @@ nsDocLoader::GetIsTopLevel(bool *aResult)
 {
   *aResult = false;
 
-  nsCOMPtr<nsIDOMWindow> window;
+  nsCOMPtr<mozIDOMWindowProxy> window;
   GetDOMWindow(getter_AddRefs(window));
   if (window) {
-    nsCOMPtr<nsPIDOMWindow> piwindow = do_QueryInterface(window);
+    nsCOMPtr<nsPIDOMWindowOuter> piwindow = nsPIDOMWindowOuter::From(window);
     NS_ENSURE_STATE(piwindow);
 
-    nsCOMPtr<nsIDOMWindow> topWindow;
-    nsresult rv = piwindow->GetTop(getter_AddRefs(topWindow));
-    NS_ENSURE_SUCCESS(rv, rv);
-
+    nsCOMPtr<nsPIDOMWindowOuter> topWindow = piwindow->GetTop();
     *aResult = piwindow == topWindow;
   }
 
@@ -1325,7 +1327,7 @@ nsDocLoader::RefreshAttempted(nsIWebProgress* aWebProgress,
 
 nsresult nsDocLoader::AddRequestInfo(nsIRequest *aRequest)
 {
-  if (!PL_DHashTableAdd(&mRequestInfoHash, aRequest, mozilla::fallible)) {
+  if (!mRequestInfoHash.Add(aRequest, mozilla::fallible)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -1334,13 +1336,12 @@ nsresult nsDocLoader::AddRequestInfo(nsIRequest *aRequest)
 
 void nsDocLoader::RemoveRequestInfo(nsIRequest *aRequest)
 {
-  PL_DHashTableRemove(&mRequestInfoHash, aRequest);
+  mRequestInfoHash.Remove(aRequest);
 }
 
 nsDocLoader::nsRequestInfo* nsDocLoader::GetRequestInfo(nsIRequest* aRequest)
 {
-  return static_cast<nsRequestInfo*>
-                    (PL_DHashTableSearch(&mRequestInfoHash, aRequest));
+  return static_cast<nsRequestInfo*>(mRequestInfoHash.Search(aRequest));
 }
 
 void nsDocLoader::ClearRequestInfoHash(void)

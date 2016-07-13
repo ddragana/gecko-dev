@@ -13,45 +13,43 @@ class MacIOSurface;
 namespace mozilla {
 namespace layers {
 
-class MacIOSurfaceTextureClientOGL : public TextureClient
+class MacIOSurfaceTextureData : public TextureData
 {
 public:
-  explicit MacIOSurfaceTextureClientOGL(ISurfaceAllocator* aAllcator,
-                                        TextureFlags aFlags);
+  static MacIOSurfaceTextureData* Create(MacIOSurface* aSurface,
+                                         gfx::BackendType aBackend);
 
-  virtual ~MacIOSurfaceTextureClientOGL();
+  static MacIOSurfaceTextureData*
+  Create(const gfx::IntSize& aSize, gfx::SurfaceFormat aFormat,
+         gfx::BackendType aBackend);
 
-  // Creates a TextureClient and init width.
-  static already_AddRefed<MacIOSurfaceTextureClientOGL>
-  Create(ISurfaceAllocator* aAllocator,
-         TextureFlags aFlags,
-         MacIOSurface* aSurface);
+  ~MacIOSurfaceTextureData();
 
-  virtual bool Lock(OpenMode aMode) override;
+  virtual void FillInfo(TextureData::Info& aInfo) const override;
+
+  virtual bool Lock(OpenMode, FenceHandle*) override;
 
   virtual void Unlock() override;
 
-  virtual bool IsLocked() const override;
+  virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() override;
 
-  virtual bool IsAllocated() const override { return !!mSurface; }
+  virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) override;
+  virtual void Deallocate(ClientIPCAllocator*) override;
 
-  virtual gfx::IntSize GetSize() const override;
+  virtual void Forget(ClientIPCAllocator*) override;
 
-  virtual bool HasInternalBuffer() const override { return false; }
+  virtual bool UpdateFromSurface(gfx::SourceSurface* aSurface) override;
 
-  virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override;
-
-  // This TextureClient should not be used in a context where we use CreateSimilar
-  // (ex. component alpha) because the underlying texture data is always created by
-  // an external producer.
-  virtual already_AddRefed<TextureClient>
-  CreateSimilar(TextureFlags, TextureAllocationFlags) const override { return nullptr; }
+  // For debugging purposes only.
+  already_AddRefed<gfx::DataSourceSurface> GetAsSurface();
 
 protected:
+  MacIOSurfaceTextureData(MacIOSurface* aSurface,
+                          gfx::BackendType aBackend);
+
   RefPtr<MacIOSurface> mSurface;
-  bool mIsLocked;
+  gfx::BackendType mBackend;
 };
 
 } // namespace layers

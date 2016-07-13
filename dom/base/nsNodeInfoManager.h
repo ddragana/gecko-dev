@@ -13,7 +13,6 @@
 
 #include "mozilla/Attributes.h"           // for final
 #include "nsCOMPtr.h"                     // for member
-#include "nsAutoPtr.h"                    // for nsRefPtr
 #include "nsCycleCollectionParticipant.h" // for NS_DECL_CYCLE_*
 #include "plhash.h"                       // for typedef PLHashNumber
 
@@ -137,7 +136,7 @@ private:
   mozilla::dom::NodeInfo * MOZ_NON_OWNING_REF mTextNodeInfo; // WEAK to avoid circular ownership
   mozilla::dom::NodeInfo * MOZ_NON_OWNING_REF mCommentNodeInfo; // WEAK to avoid circular ownership
   mozilla::dom::NodeInfo * MOZ_NON_OWNING_REF mDocumentNodeInfo; // WEAK to avoid circular ownership
-  nsRefPtr<nsBindingManager> mBindingManager;
+  RefPtr<nsBindingManager> mBindingManager;
 };
 
 #endif /* nsNodeInfoManager_h___ */

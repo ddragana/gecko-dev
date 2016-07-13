@@ -107,7 +107,7 @@ size_t HRTFDatabaseLoader::sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSize
     return amount;
 }
 
-class HRTFDatabaseLoader::ProxyReleaseEvent final : public nsRunnable {
+class HRTFDatabaseLoader::ProxyReleaseEvent final : public Runnable {
 public:
     explicit ProxyReleaseEvent(HRTFDatabaseLoader* loader) : mLoader(loader) {}
     NS_IMETHOD Run() override
@@ -123,7 +123,7 @@ void HRTFDatabaseLoader::ProxyRelease()
 {
     nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
     if (MOZ_LIKELY(mainThread)) {
-        nsRefPtr<ProxyReleaseEvent> event = new ProxyReleaseEvent(this);
+        RefPtr<ProxyReleaseEvent> event = new ProxyReleaseEvent(this);
         DebugOnly<nsresult> rv =
             mainThread->Dispatch(event, NS_DISPATCH_NORMAL);
         MOZ_ASSERT(NS_SUCCEEDED(rv), "Failed to dispatch release event");

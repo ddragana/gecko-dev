@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MDNSResponderReply.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "private/pprio.h"
 
 namespace mozilla {
@@ -218,6 +218,83 @@ ResolveReplyRunnable::Reply(DNSServiceRef aSdRef,
                                             aTxtLen,
                                             aTxtRecord,
                                             obj),
+                   NS_DISPATCH_NORMAL);
+}
+
+GetAddrInfoReplyRunnable::GetAddrInfoReplyRunnable(DNSServiceRef aSdRef,
+                                                   DNSServiceFlags aFlags,
+                                                   uint32_t aInterfaceIndex,
+                                                   DNSServiceErrorType aErrorCode,
+                                                   const nsACString& aHostName,
+                                                   const mozilla::net::NetAddr& aAddress,
+                                                   uint32_t aTTL,
+                                                   GetAddrInfoOperator* aContext)
+  : mSdRef(aSdRef)
+  , mFlags(aFlags)
+  , mInterfaceIndex(aInterfaceIndex)
+  , mErrorCode(aErrorCode)
+  , mHostName(aHostName)
+  , mAddress(aAddress)
+  , mTTL(aTTL)
+  , mContext(aContext)
+{
+}
+
+GetAddrInfoReplyRunnable::~GetAddrInfoReplyRunnable()
+{
+}
+
+NS_IMETHODIMP
+GetAddrInfoReplyRunnable::Run()
+{
+  MOZ_ASSERT(mContext);
+  mContext->Reply(mSdRef,
+                  mFlags,
+                  mInterfaceIndex,
+                  mErrorCode,
+                  mHostName,
+                  mAddress,
+                  mTTL);
+  return NS_OK;
+}
+
+void
+GetAddrInfoReplyRunnable::Reply(DNSServiceRef aSdRef,
+                                DNSServiceFlags aFlags,
+                                uint32_t aInterfaceIndex,
+                                DNSServiceErrorType aErrorCode,
+                                const char* aHostName,
+                                const struct sockaddr* aAddress,
+                                uint32_t aTTL,
+                                void* aContext)
+{
+  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+
+  GetAddrInfoOperator* obj(reinterpret_cast<GetAddrInfoOperator*>(aContext));
+  if (!obj) {
+    return;
+  }
+
+  nsCOMPtr<nsIThread> thread(obj->GetThread());
+  if (!thread) {
+    return;
+  }
+
+  NetAddr address;
+  address.raw.family = aAddress->sa_family;
+
+  static_assert(sizeof(address.raw.data) >= sizeof(aAddress->sa_data),
+                "size of sockaddr.sa_data is too big");
+  memcpy(&address.raw.data, aAddress->sa_data, sizeof(aAddress->sa_data));
+
+  thread->Dispatch(new GetAddrInfoReplyRunnable(aSdRef,
+                                                aFlags,
+                                                aInterfaceIndex,
+                                                aErrorCode,
+                                                nsCString(aHostName),
+                                                address,
+                                                aTTL,
+                                                obj),
                    NS_DISPATCH_NORMAL);
 }
 

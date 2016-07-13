@@ -12,21 +12,20 @@ class nsAccessKeyInfo;
 class nsAsyncAccesskeyUpdate;
 class nsFontMetrics;
 
-typedef nsLeafBoxFrame nsTextBoxFrameSuper;
-class nsTextBoxFrame : public nsTextBoxFrameSuper
+class nsTextBoxFrame : public nsLeafBoxFrame
 {
 public:
   NS_DECL_QUERYFRAME_TARGET(nsTextBoxFrame)
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nscoord GetBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
-  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
+  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
   virtual void MarkIntrinsicISizesDirty() override;
 
-  enum CroppingStyle { CropNone, CropLeft, CropRight, CropCenter };
+  enum CroppingStyle { CropNone, CropLeft, CropRight, CropCenter, CropAuto };
 
   friend nsIFrame* NS_NewTextBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
@@ -85,8 +84,7 @@ protected:
                    nsRenderingContext& aRenderingContext,
                    const nsRect&        aRect);
 
-  void CalculateUnderline(nsRenderingContext& aRenderingContext,
-                          nsFontMetrics& aFontMetrics);
+  void CalculateUnderline(DrawTarget* aDrawTarget, nsFontMetrics& aFontMetrics);
 
   void CalcTextSize(nsBoxLayoutState& aBoxLayoutState);
 
@@ -94,12 +92,10 @@ protected:
 
   explicit nsTextBoxFrame(nsStyleContext* aContext);
 
-  nscoord CalculateTitleForWidth(nsPresContext*      aPresContext,
-                                 nsRenderingContext& aRenderingContext,
+  nscoord CalculateTitleForWidth(nsRenderingContext& aRenderingContext,
                                  nscoord              aWidth);
 
-  void GetTextSize(nsPresContext*      aPresContext,
-                   nsRenderingContext& aRenderingContext,
+  void GetTextSize(nsRenderingContext& aRenderingContext,
                    const nsString&      aString,
                    nsSize&              aSize,
                    nscoord&             aAscent);

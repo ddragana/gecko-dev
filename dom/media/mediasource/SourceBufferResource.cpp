@@ -13,12 +13,9 @@
 #include "mozilla/Logging.h"
 #include "MediaData.h"
 
-PRLogModuleInfo* GetSourceBufferResourceLog()
+mozilla::LogModule* GetSourceBufferResourceLog()
 {
-  static PRLogModuleInfo* sLogModule = nullptr;
-  if (!sLogModule) {
-    sLogModule = PR_NewLogModule("SourceBufferResource");
-  }
+  static mozilla::LazyLogModule sLogModule("SourceBufferResource");
   return sLogModule;
 }
 
@@ -36,16 +33,6 @@ SourceBufferResource::Close()
   mClosed = true;
   mon.NotifyAll();
   return NS_OK;
-}
-
-nsresult
-SourceBufferResource::Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes)
-{
-  SBR_DEBUGV("Read(aBuffer=%p, aCount=%u, aBytes=%p)",
-             aBuffer, aCount, aBytes);
-  ReentrantMonitorAutoEnter mon(mMonitor);
-
-  return ReadInternal(aBuffer, aCount, aBytes, /* aMayBlock = */ true);
 }
 
 nsresult
@@ -115,33 +102,6 @@ SourceBufferResource::ReadAtInternal(int64_t aOffset, char* aBuffer, uint32_t aC
 }
 
 nsresult
-SourceBufferResource::Seek(int32_t aWhence, int64_t aOffset)
-{
-  SBR_DEBUG("Seek(aWhence=%d, aOffset=%lld)",
-            aWhence, aOffset);
-  ReentrantMonitorAutoEnter mon(mMonitor);
-
-  int64_t newOffset = mOffset;
-  switch (aWhence) {
-  case nsISeekableStream::NS_SEEK_END:
-    newOffset = GetLength() - aOffset;
-    break;
-  case nsISeekableStream::NS_SEEK_CUR:
-    newOffset += aOffset;
-    break;
-  case nsISeekableStream::NS_SEEK_SET:
-    newOffset = aOffset;
-    break;
-  }
-
-  SBR_DEBUGV("newOffset=%lld GetOffset()=%llu GetLength()=%llu)",
-             newOffset, mInputBuffer.GetOffset(), GetLength());
-  nsresult rv = SeekInternal(newOffset);
-  mon.NotifyAll();
-  return rv;
-}
-
-nsresult
 SourceBufferResource::SeekInternal(int64_t aOffset)
 {
   mMonitor.AssertCurrentThreadIn();
@@ -174,7 +134,7 @@ SourceBufferResource::ReadFromCache(char* aBuffer, int64_t aOffset, uint32_t aCo
 }
 
 uint32_t
-SourceBufferResource::EvictData(uint64_t aPlaybackOffset, uint32_t aThreshold,
+SourceBufferResource::EvictData(uint64_t aPlaybackOffset, int64_t aThreshold,
                                 ErrorResult& aRv)
 {
   SBR_DEBUG("EvictData(aPlaybackOffset=%llu,"

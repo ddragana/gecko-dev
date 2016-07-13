@@ -92,8 +92,8 @@
 // Name of the SafeBrowsing store
 #define STORE_SUFFIX ".sbstore"
 
-// NSPR_LOG_MODULES=UrlClassifierDbService:5
-extern PRLogModuleInfo *gUrlClassifierDbServiceLog;
+// MOZ_LOG=UrlClassifierDbService:5
+extern mozilla::LazyLogModule gUrlClassifierDbServiceLog;
 #define LOG(args) MOZ_LOG(gUrlClassifierDbServiceLog, mozilla::LogLevel::Debug, args)
 #define LOG_ENABLED() MOZ_LOG_TEST(gUrlClassifierDbServiceLog, mozilla::LogLevel::Debug)
 
@@ -256,10 +256,7 @@ HashStore::Open()
   }
 
   uint32_t fileSize32 = static_cast<uint32_t>(fileSize);
-
-  rv = NS_NewBufferedInputStream(getter_AddRefs(mInputStream), origStream,
-                                 fileSize32);
-  NS_ENSURE_SUCCESS(rv, rv);
+  mInputStream = NS_BufferInputStream(origStream, fileSize32);
 
   rv = CheckChecksum(storeFile, fileSize32);
   SUCCESS_OR_RESET(rv);
@@ -653,33 +650,46 @@ nsresult InflateReadTArray(nsIInputStream* aStream, FallibleTArray<T>* aOut,
 static nsresult
 ByteSliceWrite(nsIOutputStream* aOut, nsTArray<uint32_t>& aData)
 {
-  nsTArray<uint8_t> slice1;
-  nsTArray<uint8_t> slice2;
-  nsTArray<uint8_t> slice3;
-  nsTArray<uint8_t> slice4;
+  nsTArray<uint8_t> slice;
   uint32_t count = aData.Length();
 
-  slice1.SetCapacity(count);
-  slice2.SetCapacity(count);
-  slice3.SetCapacity(count);
-  slice4.SetCapacity(count);
-
-  for (uint32_t i = 0; i < count; i++) {
-    slice1.AppendElement( aData[i] >> 24);
-    slice2.AppendElement((aData[i] >> 16) & 0xFF);
-    slice3.AppendElement((aData[i] >>  8) & 0xFF);
-    slice4.AppendElement( aData[i]        & 0xFF);
+  // Only process one slice at a time to avoid using too much memory.
+  if (!slice.SetLength(count, fallible)) {
+    return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  nsresult rv = DeflateWriteTArray(aOut, slice1);
+  // Process slice 1.
+  for (uint32_t i = 0; i < count; i++) {
+    slice[i] = (aData[i] >> 24);
+  }
+
+  nsresult rv = DeflateWriteTArray(aOut, slice);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = DeflateWriteTArray(aOut, slice2);
+
+  // Process slice 2.
+  for (uint32_t i = 0; i < count; i++) {
+    slice[i] = ((aData[i] >> 16) & 0xFF);
+  }
+
+  rv = DeflateWriteTArray(aOut, slice);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = DeflateWriteTArray(aOut, slice3);
+
+  // Process slice 3.
+  for (uint32_t i = 0; i < count; i++) {
+    slice[i] = ((aData[i] >> 8) & 0xFF);
+  }
+
+  rv = DeflateWriteTArray(aOut, slice);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Process slice 4.
+  for (uint32_t i = 0; i < count; i++) {
+    slice[i] = (aData[i] & 0xFF);
+  }
+
   // The LSB slice is generally uncompressible, don't bother
   // compressing it.
-  rv = WriteTArray(aOut, slice4);
+  rv = WriteTArray(aOut, slice);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;

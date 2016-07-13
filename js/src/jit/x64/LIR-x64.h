@@ -10,28 +10,6 @@
 namespace js {
 namespace jit {
 
-// Given a typed input, returns an untyped box.
-class LBox : public LInstructionHelper<1, 1, 0>
-{
-    MIRType type_;
-
-  public:
-    LIR_HEADER(Box)
-
-    LBox(MIRType type, const LAllocation& payload)
-      : type_(type)
-    {
-        setOperand(0, payload);
-    }
-
-    MIRType type() const {
-        return type_;
-    }
-    const char* extraName() const {
-        return StringFromMIRType(type_);
-    }
-};
-
 // Given an untyped input, guards on whether it's a specific type and returns
 // the unboxed payload.
 class LUnboxBase : public LInstructionHelper<1, 1, 0>
@@ -102,57 +80,105 @@ class LAsmJSUInt32ToFloat32 : public LInstructionHelper<1, 1, 0>
     }
 };
 
-class LAsmJSLoadFuncPtr : public LInstructionHelper<1, 1, 1>
+class LDivOrModI64 : public LBinaryMath<1>
 {
   public:
-    LIR_HEADER(AsmJSLoadFuncPtr);
-    LAsmJSLoadFuncPtr(const LAllocation& index, const LDefinition& temp) {
-        setOperand(0, index);
+    LIR_HEADER(DivOrModI64)
+
+    LDivOrModI64(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& temp) {
+        setOperand(0, lhs);
+        setOperand(1, rhs);
         setTemp(0, temp);
     }
-    MAsmJSLoadFuncPtr* mir() const {
-        return mir_->toAsmJSLoadFuncPtr();
+
+    const LDefinition* remainder() {
+        return getTemp(0);
     }
-    const LAllocation* index() {
-        return getOperand(0);
+
+    MBinaryArithInstruction* mir() const {
+        MOZ_ASSERT(mir_->isDiv() || mir_->isMod());
+        return static_cast<MBinaryArithInstruction*>(mir_);
     }
+    bool canBeDivideByZero() const {
+        if (mir_->isMod())
+            return mir_->toMod()->canBeDivideByZero();
+        return mir_->toDiv()->canBeDivideByZero();
+    }
+    bool canBeNegativeOverflow() const {
+        if (mir_->isMod())
+            return mir_->toMod()->canBeNegativeDividend();
+        return mir_->toDiv()->canBeNegativeOverflow();
+    }
+};
+
+// This class performs a simple x86 'div', yielding either a quotient or
+// remainder depending on whether this instruction is defined to output
+// rax (quotient) or rdx (remainder).
+class LUDivOrMod64 : public LBinaryMath<1>
+{
+  public:
+    LIR_HEADER(UDivOrMod64);
+
+    LUDivOrMod64(const LAllocation& lhs, const LAllocation& rhs, const LDefinition& temp) {
+        setOperand(0, lhs);
+        setOperand(1, rhs);
+        setTemp(0, temp);
+    }
+
+    const LDefinition* remainder() {
+        return getTemp(0);
+    }
+
+    const char* extraName() const {
+        return mir()->isTruncated() ? "Truncated" : nullptr;
+    }
+
+    MBinaryArithInstruction* mir() const {
+        MOZ_ASSERT(mir_->isDiv() || mir_->isMod());
+        return static_cast<MBinaryArithInstruction*>(mir_);
+    }
+
+    bool canBeDivideByZero() const {
+        if (mir_->isMod())
+            return mir_->toMod()->canBeDivideByZero();
+        return mir_->toDiv()->canBeDivideByZero();
+    }
+};
+
+class LWasmTruncateToInt64 : public LInstructionHelper<1, 1, 1>
+{
+  public:
+    LIR_HEADER(WasmTruncateToInt64);
+
+    LWasmTruncateToInt64(const LAllocation& in, const LDefinition& temp) {
+        setOperand(0, in);
+        setTemp(0, temp);
+    }
+
+    MWasmTruncateToInt64* mir() const {
+        return mir_->toWasmTruncateToInt64();
+    }
+
     const LDefinition* temp() {
         return getTemp(0);
     }
 };
 
-// Math.random().
-class LRandom : public LInstructionHelper<1, 0, 5>
+class LInt64ToFloatingPoint : public LInstructionHelper<1, INT64_PIECES, 0>
 {
   public:
-    LIR_HEADER(Random)
-    LRandom(const LDefinition &temp, const LDefinition &temp2, const LDefinition &temp3,
-            const LDefinition &temp4, const LDefinition &temp5)
-    {
-        setTemp(0, temp);
-        setTemp(1, temp2);
-        setTemp(2, temp3);
-        setTemp(3, temp4);
-        setTemp(4, temp5);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
-    }
-    const LDefinition* temp2() {
-        return getTemp(1);
-    }
-    const LDefinition *temp3() {
-        return getTemp(2);
-    }
-    const LDefinition *temp4() {
-        return getTemp(3);
-    }
-    const LDefinition *temp5() {
-        return getTemp(4);
+    LIR_HEADER(Int64ToFloatingPoint);
+
+    explicit LInt64ToFloatingPoint(const LInt64Allocation& in) {
+        setInt64Operand(0, in);
     }
 
-    MRandom* mir() const {
-        return mir_->toRandom();
+    MInt64ToFloatingPoint* mir() const {
+        return mir_->toInt64ToFloatingPoint();
+    }
+
+    const LDefinition* temp() {
+        return getTemp(0);
     }
 };
 

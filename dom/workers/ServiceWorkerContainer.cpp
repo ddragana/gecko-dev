@@ -6,8 +6,10 @@
 
 #include "ServiceWorkerContainer.h"
 
+#include "nsContentUtils.h"
 #include "nsIDocument.h"
 #include "nsIServiceWorkerManager.h"
+#include "nsIURL.h"
 #include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/Preferences.h"
@@ -41,7 +43,7 @@ ServiceWorkerContainer::IsEnabled(JSContext* aCx, JSObject* aGlobal)
   MOZ_ASSERT(NS_IsMainThread());
 
   JS::Rooted<JSObject*> global(aCx, aGlobal);
-  nsCOMPtr<nsPIDOMWindow> window = Navigator::GetWindowFromGlobal(global);
+  nsCOMPtr<nsPIDOMWindowInner> window = Navigator::GetWindowFromGlobal(global);
   if (!window) {
     return false;
   }
@@ -54,7 +56,7 @@ ServiceWorkerContainer::IsEnabled(JSContext* aCx, JSObject* aGlobal)
   return Preferences::GetBool("dom.serviceWorkers.enabled", false);
 }
 
-ServiceWorkerContainer::ServiceWorkerContainer(nsPIDOMWindow* aWindow)
+ServiceWorkerContainer::ServiceWorkerContainer(nsPIDOMWindowInner* aWindow)
   : DOMEventTargetHelper(aWindow)
 {
 }
@@ -67,6 +69,7 @@ ServiceWorkerContainer::~ServiceWorkerContainer()
 void
 ServiceWorkerContainer::DisconnectFromOwner()
 {
+  mControllerWorker = nullptr;
   RemoveReadyPromise();
   DOMEventTargetHelper::DisconnectFromOwner();
 }
@@ -81,8 +84,7 @@ ServiceWorkerContainer::ControllerChanged(ErrorResult& aRv)
 void
 ServiceWorkerContainer::RemoveReadyPromise()
 {
-  nsCOMPtr<nsPIDOMWindow> window = GetOwner();
-  if (window) {
+  if (nsCOMPtr<nsPIDOMWindowInner> window = GetOwner()) {
     nsCOMPtr<nsIServiceWorkerManager> swm =
       mozilla::services::GetServiceWorkerManager();
     if (!swm) {
@@ -100,6 +102,33 @@ ServiceWorkerContainer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenP
   return ServiceWorkerContainerBinding::Wrap(aCx, this, aGivenProto);
 }
 
+static nsresult
+CheckForSlashEscapedCharsInPath(nsIURI* aURI)
+{
+  MOZ_ASSERT(aURI);
+
+  // A URL that can't be downcast to a standard URL is an invalid URL and should
+  // be treated as such and fail with SecurityError.
+  nsCOMPtr<nsIURL> url(do_QueryInterface(aURI));
+  if (NS_WARN_IF(!url)) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  nsAutoCString path;
+  nsresult rv = url->GetFilePath(path);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  ToLowerCase(path);
+  if (path.Find("%2f") != kNotFound ||
+      path.Find("%5c") != kNotFound) {
+    return NS_ERROR_DOM_TYPE_ERR;
+  }
+
+  return NS_OK;
+}
+
 already_AddRefed<Promise>
 ServiceWorkerContainer::Register(const nsAString& aScriptURL,
                                  const RegistrationOptions& aOptions,
@@ -113,15 +142,33 @@ ServiceWorkerContainer::Register(const nsAString& aScriptURL,
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindow> window = GetOwner();
-  MOZ_ASSERT(window);
+  nsCOMPtr<nsIURI> baseURI;
+
+  nsIDocument* doc = GetEntryDocument();
+  if (doc) {
+    baseURI = doc->GetBaseURI();
+  } else {
+    // XXXnsm. One of our devtools browser test calls register() from a content
+    // script where there is no valid entry document. Use the window to resolve
+    // the uri in that case.
+    nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
+    nsCOMPtr<nsPIDOMWindowOuter> outerWindow;
+    if (window && (outerWindow = window->GetOuterWindow()) &&
+        outerWindow->GetServiceWorkersTestingEnabled()) {
+      baseURI = window->GetDocBaseURI();
+    }
+  }
 
   nsresult rv;
   nsCOMPtr<nsIURI> scriptURI;
-  rv = NS_NewURI(getter_AddRefs(scriptURI), aScriptURL, nullptr,
-                 window->GetDocBaseURI());
+  rv = NS_NewURI(getter_AddRefs(scriptURI), aScriptURL, nullptr, baseURI);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    aRv.ThrowTypeError(MSG_INVALID_URL, &aScriptURL);
+    aRv.ThrowTypeError<MSG_INVALID_URL>(aScriptURL);
+    return nullptr;
+  }
+
+  aRv = CheckForSlashEscapedCharsInPath(scriptURI);
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
@@ -131,25 +178,42 @@ ServiceWorkerContainer::Register(const nsAString& aScriptURL,
 
   // Step 4. If none passed, parse against script's URL
   if (!aOptions.mScope.WasPassed()) {
-    nsresult rv = NS_NewURI(getter_AddRefs(scopeURI), NS_LITERAL_CSTRING("./"),
-                            nullptr, scriptURI);
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+    NS_NAMED_LITERAL_STRING(defaultScope, "./");
+    rv = NS_NewURI(getter_AddRefs(scopeURI), defaultScope,
+                   nullptr, scriptURI);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      nsAutoCString spec;
+      scriptURI->GetSpec(spec);
+      NS_ConvertUTF8toUTF16 wSpec(spec);
+      aRv.ThrowTypeError<MSG_INVALID_SCOPE>(defaultScope, wSpec);
+      return nullptr;
+    }
   } else {
     // Step 5. Parse against entry settings object's base URL.
-    nsresult rv = NS_NewURI(getter_AddRefs(scopeURI), aOptions.mScope.Value(),
-                            nullptr, window->GetDocBaseURI());
+    rv = NS_NewURI(getter_AddRefs(scopeURI), aOptions.mScope.Value(),
+                   nullptr, baseURI);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      aRv.ThrowTypeError(MSG_INVALID_URL, &aOptions.mScope.Value());
+      nsAutoCString spec;
+      baseURI->GetSpec(spec);
+      NS_ConvertUTF8toUTF16 wSpec(spec);
+      aRv.ThrowTypeError<MSG_INVALID_SCOPE>(aOptions.mScope.Value(), wSpec);
+      return nullptr;
+    }
+
+    aRv = CheckForSlashEscapedCharsInPath(scopeURI);
+    if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
   }
 
-  aRv = swm->Register(window, scopeURI, scriptURI, getter_AddRefs(promise));
-  if (aRv.Failed()) {
+  // The spec says that the "client" passed to Register() must be the global
+  // where the ServiceWorkerContainer was retrieved from.
+  aRv = swm->Register(GetOwner(), scopeURI, scriptURI, getter_AddRefs(promise));
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
-  nsRefPtr<Promise> ret = static_cast<Promise*>(promise.get());
+  RefPtr<Promise> ret = static_cast<Promise*>(promise.get());
   MOZ_ASSERT(ret);
   return ret.forget();
 }
@@ -158,7 +222,6 @@ already_AddRefed<workers::ServiceWorker>
 ServiceWorkerContainer::GetController()
 {
   if (!mControllerWorker) {
-    nsresult rv;
     nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
     if (!swm) {
       return nullptr;
@@ -168,9 +231,8 @@ ServiceWorkerContainer::GetController()
     //       In theory the DOM ServiceWorker object can exist without the worker
     //       thread running, but it seems our design does not expect that.
     nsCOMPtr<nsISupports> serviceWorker;
-    rv = swm->GetDocumentController(GetOwner(),
-                                    nullptr, // aLoadFailedRunnable
-                                    getter_AddRefs(serviceWorker));
+    nsresult rv = swm->GetDocumentController(GetOwner(),
+                                             getter_AddRefs(serviceWorker));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return nullptr;
     }
@@ -179,7 +241,7 @@ ServiceWorkerContainer::GetController()
       static_cast<workers::ServiceWorker*>(serviceWorker.get());
   }
 
-  nsRefPtr<workers::ServiceWorker> ref = mControllerWorker;
+  RefPtr<workers::ServiceWorker> ref = mControllerWorker;
   return ref.forget();
 }
 
@@ -199,7 +261,7 @@ ServiceWorkerContainer::GetRegistrations(ErrorResult& aRv)
     return nullptr;
   }
 
-  nsRefPtr<Promise> ret = static_cast<Promise*>(promise.get());
+  RefPtr<Promise> ret = static_cast<Promise*>(promise.get());
   MOZ_ASSERT(ret);
   return ret.forget();
 }
@@ -221,7 +283,7 @@ ServiceWorkerContainer::GetRegistration(const nsAString& aDocumentURL,
     return nullptr;
   }
 
-  nsRefPtr<Promise> ret = static_cast<Promise*>(promise.get());
+  RefPtr<Promise> ret = static_cast<Promise*>(promise.get());
   MOZ_ASSERT(ret);
   return ret.forget();
 }
@@ -258,7 +320,19 @@ ServiceWorkerContainer::GetScopeForUrl(const nsAString& aUrl,
     return;
   }
 
-  aRv = swm->GetScopeForUrl(GetOwner()->GetExtantDoc()->NodePrincipal(),
+  nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
+  if (NS_WARN_IF(!window)) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+  if (NS_WARN_IF(!doc)) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  aRv = swm->GetScopeForUrl(doc->NodePrincipal(),
                             aUrl, aScope);
 }
 

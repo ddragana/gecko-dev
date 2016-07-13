@@ -20,13 +20,14 @@ const DEVICE_PREF="sanity-test.device-id";
 const VERSION_PREF="sanity-test.version";
 const DISABLE_VIDEO_PREF="media.hardware-video-decoding.failed";
 const RUNNING_PREF="sanity-test.running";
-const OS_SNAPSHOT_TIMEOUT_SEC=3;
+const TIMEOUT_SEC=20;
 
 // GRAPHICS_SANITY_TEST histogram enumeration values
 const TEST_PASSED=0;
 const TEST_FAILED_RENDER=1;
 const TEST_FAILED_VIDEO=2;
 const TEST_CRASHED=3;
+const TEST_TIMEOUT=4;
 
 // GRAPHICS_SANITY_TEST_REASON enumeration values.
 const REASON_FIRST_RUN=0;
@@ -64,11 +65,6 @@ function reportResult(val) {
   Services.prefs.savePrefFile(null);
 }
 
-function reportSnapshotResult(val) {
-  let histogram = Services.telemetry.getHistogramById("GRAPHICS_SANITY_TEST_OS_SNAPSHOT");
-  histogram.add(val);
-}
-
 function reportTestReason(val) {
   let histogram = Services.telemetry.getHistogramById("GRAPHICS_SANITY_TEST_REASON");
   histogram.add(val);
@@ -82,6 +78,12 @@ function annotateCrashReport(value) {
     crashReporter.annotateCrashReport("GraphicsSanityTest", value ? "1" : "");
   } catch (e) {
   }
+}
+
+function setTimeout(aMs, aCallback) {
+  var timer = Cc['@mozilla.org/timer;1'].
+                createInstance(Ci.nsITimer);
+  timer.initWithCallback(aCallback, aMs, Ci.nsITimer.TYPE_ONE_SHOT);
 }
 
 function takeWindowSnapshot(win, ctx) {
@@ -140,12 +142,11 @@ function testCompositor(win, ctx) {
   return testPassed;
 }
 
-let listener = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
-
+var listener = {
   win: null,
   utils: null,
   canvas: null,
+  ctx: null,
   mm: null,
 
   messages: [
@@ -157,6 +158,12 @@ let listener = {
     this.win.onload = this.onWindowLoaded.bind(this);
     this.utils = this.win.QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDOMWindowUtils);
+    setTimeout(TIMEOUT_SEC * 1000, () => {
+      if (this.win) {
+        reportResult(TEST_TIMEOUT);
+        this.endTest();
+      }
+    });
   },
 
   runSanityTest: function() {
@@ -211,13 +218,17 @@ let listener = {
     this.win = null;
     this.utils = null;
     this.canvas = null;
+    this.ctx = null;
 
-    this.messages.forEach((msgName) => {
-      this.mm.removeMessageListener(msgName, this);
-    });
+    if (this.mm) {
+      // We don't have a MessageManager if onWindowLoaded never fired.
+      this.messages.forEach((msgName) => {
+        this.mm.removeMessageListener(msgName, this);
+      });
 
-    this.mm = null;
-  
+      this.mm = null;
+    }
+
     // Remove the annotation after we've cleaned everything up, to catch any
     // incidental crashes from having performed the sanity test.
     annotateCrashReport(false);
@@ -234,7 +245,7 @@ SanityTest.prototype = {
     // Only test gfx features if firefox has updated, or if the user has a new
     // gpu or drivers.
     var appInfo = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULAppInfo);
-    var xulVersion = appInfo.version;
+    var buildId = Services.appinfo.platformBuildID;
     var gfxinfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
 
     if (Preferences.get(RUNNING_PREF, false)) {
@@ -244,11 +255,11 @@ SanityTest.prototype = {
     }
 
     function checkPref(pref, value, reason) {
-      var prefValue = Preferences.get(pref, "");
+      var prefValue = Preferences.get(pref, undefined);
       if (prefValue == value) {
         return true;
       }
-      if (value == "") {
+      if (prefValue === undefined) {
         reportTestReason(REASON_FIRST_RUN);
       } else {
         reportTestReason(reason);
@@ -259,7 +270,7 @@ SanityTest.prototype = {
     // TODO: Handle dual GPU setups
     if (checkPref(DRIVER_PREF, gfxinfo.adapterDriverVersion, REASON_DRIVER_CHANGED) &&
         checkPref(DEVICE_PREF, gfxinfo.adapterDeviceID, REASON_DEVICE_CHANGED) &&
-        checkPref(VERSION_PREF, xulVersion, REASON_FIREFOX_CHANGED))
+        checkPref(VERSION_PREF, buildId, REASON_FIREFOX_CHANGED))
     {
       return false;
     }
@@ -269,7 +280,7 @@ SanityTest.prototype = {
     Preferences.set(DISABLE_VIDEO_PREF, false);
     Preferences.set(DRIVER_PREF, gfxinfo.adapterDriverVersion);
     Preferences.set(DEVICE_PREF, gfxinfo.adapterDeviceID);
-    Preferences.set(VERSION_PREF, xulVersion);
+    Preferences.set(VERSION_PREF, buildId);
 
     // Update the prefs so that this test doesn't run again until the next update.
     Preferences.set(RUNNING_PREF, true);
@@ -279,6 +290,12 @@ SanityTest.prototype = {
 
   observe: function(subject, topic, data) {
     if (topic != "profile-after-change") return;
+
+    // profile-after-change fires only at startup, so we won't need
+    // to use the listener again.
+    let tester = listener;
+    listener = null;
+
     if (!this.shouldRunTest()) return;
 
     annotateCrashReport(true);
@@ -293,7 +310,7 @@ SanityTest.prototype = {
     // There's no clean way to have an invisible window and ensure it's always painted.
     // Instead, move the window far offscreen so it doesn't show up during launch.
     sanityTest.moveTo(100000000,1000000000);
-    listener.scheduleTest(sanityTest);
+    tester.scheduleTest(sanityTest);
   },
 };
 

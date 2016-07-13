@@ -1,20 +1,13 @@
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let gFxAccounts = {
+var gFxAccounts = {
 
-  PREF_SYNC_START_DOORHANGER: "services.sync.ui.showSyncStartDoorhanger",
-  DOORHANGER_ACTIVATE_DELAY_MS: 5000,
   SYNC_MIGRATION_NOTIFICATION_TITLE: "fxa-migration",
 
   _initialized: false,
   _inCustomizationMode: false,
-  // _expectingNotifyClose is a hack that helps us determine if the
-  // migration notification was closed due to being "dismissed" vs closed
-  // due to one of the migration buttons being clicked.  It's ugly and somewhat
-  // fragile, so bug 1119020 exists to help us do this better.
-  _expectingNotifyClose: false,
 
   get weave() {
     delete this.weave;
@@ -28,14 +21,12 @@ let gFxAccounts = {
     delete this.topics;
     return this.topics = [
       "weave:service:ready",
-      "weave:service:sync:start",
       "weave:service:login:error",
       "weave:service:setup-complete",
       "weave:ui:login:error",
       "fxa-migration:state-changed",
-      this.FxAccountsCommon.ONVERIFIED_NOTIFICATION,
+      this.FxAccountsCommon.ONLOGIN_NOTIFICATION,
       this.FxAccountsCommon.ONLOGOUT_NOTIFICATION,
-      "weave:notification:removed",
       this.FxAccountsCommon.ON_PROFILE_CHANGE_NOTIFICATION,
     ];
   },
@@ -87,11 +78,6 @@ let gFxAccounts = {
     return Weave.Status.login == Weave.LOGIN_FAILED_LOGIN_REJECTED;
   },
 
-  get isActiveWindow() {
-    let fm = Services.focus;
-    return fm.activeWindow == window;
-  },
-
   init: function () {
     // Bail out if we're already initialized and for pop-up windows.
     if (this._initialized || !window.toolbar.visible) {
@@ -102,13 +88,8 @@ let gFxAccounts = {
       Services.obs.addObserver(this, topic, false);
     }
 
-    addEventListener("activate", this);
     gNavToolbox.addEventListener("customizationstarting", this);
     gNavToolbox.addEventListener("customizationending", this);
-
-    // Request the current Legacy-Sync-to-FxA migration status.  We'll be
-    // notified of fxa-migration:state-changed in response if necessary.
-    Services.obs.notifyObservers(null, "fxa-migration:state-request", null);
 
     EnsureFxAccountsWebChannel();
     this._initialized = true;
@@ -130,24 +111,8 @@ let gFxAccounts = {
 
   observe: function (subject, topic, data) {
     switch (topic) {
-      case this.FxAccountsCommon.ONVERIFIED_NOTIFICATION:
-        Services.prefs.setBoolPref(this.PREF_SYNC_START_DOORHANGER, true);
-        break;
-      case "weave:service:sync:start":
-        this.onSyncStart();
-        break;
       case "fxa-migration:state-changed":
         this.onMigrationStateChanged(data, subject);
-        break;
-      case "weave:notification:removed":
-        // this exists just so we can tell the difference between "box was
-        // closed due to button press" vs "was closed due to click on [x]"
-        let notif = subject.wrappedJSObject.object;
-        if (notif.title == this.SYNC_MIGRATION_NOTIFICATION_TITLE &&
-            !this._expectingNotifyClose) {
-          // it's an [x] on our notification, so record telemetry.
-          this.fxaMigrator.recordTelemetry(this.fxaMigrator.TELEMETRY_DECLINED);
-        }
         break;
       case this.FxAccountsCommon.ONPROFILE_IMAGE_CHANGE_NOTIFICATION:
         this.updateUI();
@@ -158,76 +123,68 @@ let gFxAccounts = {
     }
   },
 
-  onSyncStart: function () {
-    if (!this.isActiveWindow) {
-      return;
+  onMigrationStateChanged: function () {
+    // Since we nuked most of the migration code, this notification will fire
+    // once after legacy Sync has been disconnected (and should never fire
+    // again)
+    let nb = window.document.getElementById("global-notificationbox");
+
+    let msg = this.strings.GetStringFromName("autoDisconnectDescription")
+    let signInLabel = this.strings.GetStringFromName("autoDisconnectSignIn.label");
+    let signInAccessKey = this.strings.GetStringFromName("autoDisconnectSignIn.accessKey");
+    let learnMoreLink = this.fxaMigrator.learnMoreLink;
+
+    let buttons = [
+      {
+        label: signInLabel,
+        accessKey: signInAccessKey,
+        callback: () => {
+          this.openPreferences();
+        }
+      }
+    ];
+
+    let fragment = document.createDocumentFragment();
+    let msgNode = document.createTextNode(msg);
+    fragment.appendChild(msgNode);
+    if (learnMoreLink) {
+      let link = document.createElement("label");
+      link.className = "text-link";
+      link.setAttribute("value", learnMoreLink.text);
+      link.href = learnMoreLink.href;
+      fragment.appendChild(link);
     }
 
-    let showDoorhanger = false;
+    nb.appendNotification(fragment,
+                          this.SYNC_MIGRATION_NOTIFICATION_TITLE,
+                          undefined,
+                          nb.PRIORITY_WARNING_LOW,
+                          buttons);
 
-    try {
-      showDoorhanger = Services.prefs.getBoolPref(this.PREF_SYNC_START_DOORHANGER);
-    } catch (e) { /* The pref might not exist. */ }
-
-    if (showDoorhanger) {
-      Services.prefs.clearUserPref(this.PREF_SYNC_START_DOORHANGER);
-      this.showSyncStartedDoorhanger();
-    }
-  },
-
-  onMigrationStateChanged: function (newState, email) {
-    this._migrationInfo = !newState ? null : {
-      state: newState,
-      email: email ? email.QueryInterface(Ci.nsISupportsString).data : null,
-    };
-    this.updateUI();
+    // ensure the hamburger menu reflects the newly disconnected state.
+    this.updateAppMenuItem();
   },
 
   handleEvent: function (event) {
-    if (event.type == "activate") {
-      // Our window might have been in the background while we received the
-      // sync:start notification. If still needed, show the doorhanger after
-      // a short delay. Without this delay the doorhanger would not show up
-      // or with a too small delay show up while we're still animating the
-      // window.
-      setTimeout(() => this.onSyncStart(), this.DOORHANGER_ACTIVATE_DELAY_MS);
-    } else {
-      this._inCustomizationMode = event.type == "customizationstarting";
-      this.updateAppMenuItem();
-    }
-  },
-
-  showDoorhanger: function (id) {
-    let panel = document.getElementById(id);
-    let anchor = document.getElementById("PanelUI-menu-button");
-
-    let iconAnchor =
-      document.getAnonymousElementByAttribute(anchor, "class",
-                                              "toolbarbutton-icon");
-
-    panel.hidden = false;
-    panel.openPopup(iconAnchor || anchor, "bottomcenter topright");
-  },
-
-  showSyncStartedDoorhanger: function () {
-    this.showDoorhanger("sync-start-panel");
-  },
-
-  showSyncFailedDoorhanger: function () {
-    this.showDoorhanger("sync-error-panel");
+    this._inCustomizationMode = event.type == "customizationstarting";
+    this.updateAppMenuItem();
   },
 
   updateUI: function () {
-    this.updateAppMenuItem();
-    this.updateMigrationNotification();
-  },
-
-  updateAppMenuItem: function () {
-    if (this._migrationInfo) {
-      this.updateAppMenuItemForMigration();
-      return;
+    // It's possible someone signed in to FxA after seeing our notification
+    // about "Legacy Sync migration" (which now is actually "Legacy Sync
+    // auto-disconnect") so kill that notification if it still exists.
+    let nb = window.document.getElementById("global-notificationbox");
+    let n = nb.getNotificationWithValue(this.SYNC_MIGRATION_NOTIFICATION_TITLE);
+    if (n) {
+      nb.removeNotification(n, true);
     }
 
+    this.updateAppMenuItem();
+  },
+
+  // Note that updateAppMenuItem() returns a Promise that's only used by tests.
+  updateAppMenuItem: function () {
     let profileInfoEnabled = false;
     try {
       profileInfoEnabled = Services.prefs.getBoolPref("identity.fxaccounts.profile_image.enabled");
@@ -235,13 +192,10 @@ let gFxAccounts = {
 
     // Bail out if FxA is disabled.
     if (!this.weave.fxAccountsEnabled) {
-      // When migration transitions from needs-verification to the null state,
-      // fxAccountsEnabled is false because migration has not yet finished.  In
-      // that case, hide the button.  We'll get another notification with a null
-      // state once migration is complete.
-      this.panelUIFooter.removeAttribute("fxastatus");
-      return;
+      return Promise.resolve();
     }
+
+    this.panelUIFooter.hidden = false;
 
     // Make sure the button is disabled in customization mode.
     if (this._inCustomizationMode) {
@@ -258,7 +212,9 @@ let gFxAccounts = {
 
     let defaultLabel = this.panelUIStatus.getAttribute("defaultlabel");
     let errorLabel = this.panelUIStatus.getAttribute("errorlabel");
-    let signedInTooltiptext = this.panelUIStatus.getAttribute("signedinTooltiptext");
+    let unverifiedLabel = this.panelUIStatus.getAttribute("unverifiedlabel");
+    // The localization string is for the signed in text, but it's the default text as well
+    let defaultTooltiptext = this.panelUIStatus.getAttribute("signedinTooltiptext");
 
     let updateWithUserData = (userData) => {
       // Window might have been closed while fetching data.
@@ -268,52 +224,77 @@ let gFxAccounts = {
 
       // Reset the button to its original state.
       this.panelUILabel.setAttribute("label", defaultLabel);
-      this.panelUIStatus.removeAttribute("tooltiptext");
+      this.panelUIStatus.setAttribute("tooltiptext", defaultTooltiptext);
       this.panelUIFooter.removeAttribute("fxastatus");
       this.panelUIFooter.removeAttribute("fxaprofileimage");
       this.panelUIAvatar.style.removeProperty("list-style-image");
-
-      if (!this._inCustomizationMode && userData) {
+      let showErrorBadge = false;
+      if (userData) {
         // At this point we consider the user as logged-in (but still can be in an error state)
         if (this.loginFailed) {
           let tooltipDescription = this.strings.formatStringFromName("reconnectDescription", [userData.email], 1);
           this.panelUIFooter.setAttribute("fxastatus", "error");
           this.panelUILabel.setAttribute("label", errorLabel);
           this.panelUIStatus.setAttribute("tooltiptext", tooltipDescription);
+          showErrorBadge = true;
+        } else if (!userData.verified) {
+          let tooltipDescription = this.strings.formatStringFromName("verifyDescription", [userData.email], 1);
+          this.panelUIFooter.setAttribute("fxastatus", "error");
+          this.panelUIFooter.setAttribute("unverified", "true");
+          this.panelUILabel.setAttribute("label", unverifiedLabel);
+          this.panelUIStatus.setAttribute("tooltiptext", tooltipDescription);
+          showErrorBadge = true;
         } else {
           this.panelUIFooter.setAttribute("fxastatus", "signedin");
           this.panelUILabel.setAttribute("label", userData.email);
-          this.panelUIStatus.setAttribute("tooltiptext", signedInTooltiptext);
         }
         if (profileInfoEnabled) {
           this.panelUIFooter.setAttribute("fxaprofileimage", "enabled");
         }
       }
+      if (showErrorBadge) {
+        gMenuButtonBadgeManager.addBadge(gMenuButtonBadgeManager.BADGEID_FXA, "fxa-needs-authentication");
+      } else {
+        gMenuButtonBadgeManager.removeBadge(gMenuButtonBadgeManager.BADGEID_FXA);
+      }
     }
 
     let updateWithProfile = (profile) => {
-      if (!this._inCustomizationMode && profileInfoEnabled) {
+      if (profileInfoEnabled) {
         if (profile.displayName) {
           this.panelUILabel.setAttribute("label", profile.displayName);
         }
         if (profile.avatar) {
+          this.panelUIFooter.setAttribute("fxaprofileimage", "set");
+          let bgImage = "url(\"" + profile.avatar + "\")";
+          this.panelUIAvatar.style.listStyleImage = bgImage;
+
           let img = new Image();
-          // Make sure the image is available before attempting to display it
-          img.onload = () => {
-            this.panelUIFooter.setAttribute("fxaprofileimage", "set");
-            this.panelUIAvatar.style.listStyleImage = "url('" + profile.avatar + "')";
+          img.onerror = () => {
+            // Clear the image if it has trouble loading. Since this callback is asynchronous
+            // we check to make sure the image is still the same before we clear it.
+            if (this.panelUIAvatar.style.listStyleImage === bgImage) {
+              this.panelUIFooter.removeAttribute("fxaprofileimage");
+              this.panelUIAvatar.style.removeProperty("list-style-image");
+            }
           };
           img.src = profile.avatar;
         }
       }
     }
 
-    // Calling getSignedInUserProfile() without a user logged in causes log
-    // noise that looks like an actual error...
-    fxAccounts.getSignedInUser().then(userData => {
+    return fxAccounts.getSignedInUser().then(userData => {
       // userData may be null here when the user is not signed-in, but that's expected
       updateWithUserData(userData);
-      return userData ? fxAccounts.getSignedInUserProfile() : null;
+      // unverified users cause us to spew log errors fetching an OAuth token
+      // to fetch the profile, so don't even try in that case.
+      if (!userData || !userData.verified || !profileInfoEnabled) {
+        return null; // don't even try to grab the profile.
+      }
+      return fxAccounts.getSignedInUserProfile().catch(err => {
+        // Not fetching the profile is sad but the FxA logs will already have noise.
+        return null;
+      });
     }).then(profile => {
       if (!profile) {
         return;
@@ -324,94 +305,10 @@ let gFxAccounts = {
       // The most likely scenario is a user logged out, so reflect that.
       // Bug 995134 calls for better errors so we could retry if we were
       // sure this was the failure reason.
-      this.FxAccountsCommon.log.error("Error updating FxA profile", error);
+      this.FxAccountsCommon.log.error("Error updating FxA account info", error);
       updateWithUserData(null);
     });
   },
-
-  updateAppMenuItemForMigration: Task.async(function* () {
-    let status = null;
-    let label = null;
-    switch (this._migrationInfo.state) {
-      case this.fxaMigrator.STATE_USER_FXA:
-        status = "migrate-signup";
-        label = this.strings.formatStringFromName("needUserShort",
-          [this.panelUILabel.getAttribute("fxabrandname")], 1);
-        break;
-      case this.fxaMigrator.STATE_USER_FXA_VERIFIED:
-        status = "migrate-verify";
-        label = this.strings.formatStringFromName("needVerifiedUserShort",
-                                                  [this._migrationInfo.email],
-                                                  1);
-        break;
-    }
-    this.panelUILabel.label = label;
-    this.panelUIFooter.setAttribute("fxastatus", status);
-  }),
-
-  updateMigrationNotification: Task.async(function* () {
-    if (!this._migrationInfo) {
-      this._expectingNotifyClose = true;
-      Weave.Notifications.removeAll(this.SYNC_MIGRATION_NOTIFICATION_TITLE);
-      // because this is called even when there is no such notification, we
-      // set _expectingNotifyClose back to false as we may yet create a new
-      // notification (but in general, once we've created a migration
-      // notification once in a session, we don't create one again)
-      this._expectingNotifyClose = false;
-      return;
-    }
-    let note = null;
-    switch (this._migrationInfo.state) {
-      case this.fxaMigrator.STATE_USER_FXA: {
-        // There are 2 cases here - no email address means it is an offer on
-        // the first device (so the user is prompted to create an account).
-        // If there is an email address it is the "join the party" flow, so the
-        // user is prompted to sign in with the address they previously used.
-        let msg, upgradeLabel, upgradeAccessKey, learnMoreLink;
-        if (this._migrationInfo.email) {
-          msg = this.strings.formatStringFromName("signInAfterUpgradeOnOtherDevice.description",
-                                                  [this._migrationInfo.email],
-                                                  1);
-          upgradeLabel = this.strings.GetStringFromName("signInAfterUpgradeOnOtherDevice.label");
-          upgradeAccessKey = this.strings.GetStringFromName("signInAfterUpgradeOnOtherDevice.accessKey");
-        } else {
-          msg = this.strings.GetStringFromName("needUserLong");
-          upgradeLabel = this.strings.GetStringFromName("upgradeToFxA.label");
-          upgradeAccessKey = this.strings.GetStringFromName("upgradeToFxA.accessKey");
-          learnMoreLink = this.fxaMigrator.learnMoreLink;
-        }
-        note = new Weave.Notification(
-          undefined, msg, undefined, Weave.Notifications.PRIORITY_WARNING, [
-            new Weave.NotificationButton(upgradeLabel, upgradeAccessKey, () => {
-              this._expectingNotifyClose = true;
-              this.fxaMigrator.createFxAccount(window);
-            }),
-          ], learnMoreLink
-        );
-        break;
-      }
-      case this.fxaMigrator.STATE_USER_FXA_VERIFIED: {
-        let msg =
-          this.strings.formatStringFromName("needVerifiedUserLong",
-                                            [this._migrationInfo.email], 1);
-        let resendLabel =
-          this.strings.GetStringFromName("resendVerificationEmail.label");
-        let resendAccessKey =
-          this.strings.GetStringFromName("resendVerificationEmail.accessKey");
-        note = new Weave.Notification(
-          undefined, msg, undefined, Weave.Notifications.PRIORITY_INFO, [
-            new Weave.NotificationButton(resendLabel, resendAccessKey, () => {
-              this._expectingNotifyClose = true;
-              this.fxaMigrator.resendVerificationMail();
-            }),
-          ]
-        );
-        break;
-      }
-    }
-    note.title = this.SYNC_MIGRATION_NOTIFICATION_TITLE;
-    Weave.Notifications.replaceTitle(note);
-  }),
 
   onMenuPanelCommand: function () {
 
@@ -420,16 +317,14 @@ let gFxAccounts = {
       this.openPreferences();
       break;
     case "error":
-      this.openSignInAgainPage("menupanel");
-      break;
-    case "migrate-signup":
-    case "migrate-verify":
-      // The migration flow calls for the menu item to open sync prefs rather
-      // than requesting migration start immediately.
-      this.openPreferences();
+      if (this.panelUIFooter.getAttribute("unverified")) {
+        this.openPreferences();
+      } else {
+        this.openSignInAgainPage("menupanel");
+      }
       break;
     default:
-      this.openAccountsPage(null, { entryPoint: "menupanel" });
+      this.openPreferences();
       break;
     }
 
@@ -437,16 +332,16 @@ let gFxAccounts = {
   },
 
   openPreferences: function () {
-    openPreferences("paneSync");
+    openPreferences("paneSync", { urlParams: { entrypoint: "menupanel" } });
   },
 
   openAccountsPage: function (action, urlParams={}) {
-    // An entryPoint param is used for server-side metrics.  If the current tab
+    // An entrypoint param is used for server-side metrics.  If the current tab
     // is UITour, assume that it initiated the call to this method and override
-    // the entryPoint accordingly.
+    // the entrypoint accordingly.
     if (UITour.tourBrowsersByWindow.get(window) &&
         UITour.tourBrowsersByWindow.get(window).has(gBrowser.selectedBrowser)) {
-      urlParams.entryPoint = "uitour";
+      urlParams.entrypoint = "uitour";
     }
     let params = new URLSearchParams();
     if (action) {
@@ -464,7 +359,7 @@ let gFxAccounts = {
   },
 
   openSignInAgainPage: function (entryPoint) {
-    this.openAccountsPage("reauth", { entryPoint: entryPoint });
+    this.openAccountsPage("reauth", { entrypoint: entryPoint });
   },
 };
 

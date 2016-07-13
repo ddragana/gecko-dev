@@ -32,7 +32,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIMOBILECONNECTIONCALLBACK
 
-  MobileConnectionCallback(nsPIDOMWindow* aWindow, DOMRequest* aRequest);
+  MobileConnectionCallback(nsPIDOMWindowInner* aWindow, DOMRequest* aRequest);
 
 private:
   ~MobileConnectionCallback() {}
@@ -43,8 +43,8 @@ private:
   nsresult
   NotifySuccessWithString(const nsAString& aResult);
 
-  nsCOMPtr<nsPIDOMWindow> mWindow;
-  nsRefPtr<DOMRequest> mRequest;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  RefPtr<DOMRequest> mRequest;
 };
 
 } // namespace mobileconnection

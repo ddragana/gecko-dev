@@ -14,11 +14,12 @@
 #include "mozilla/layers/ImageContainerParent.h"
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/layers/TextureHost.h"  // for TextureHost, etc
-#include "nsRefPtr.h"                   // for nsRefPtr
+#include "mozilla/RefPtr.h"                   // for nsRefPtr
 #include "nsDebug.h"                    // for NS_WARNING
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "gfxPlatform.h"                // for gfxPlatform
 #include "mozilla/layers/PCompositableParent.h"
+#include "IPDLActor.h"
 
 namespace mozilla {
 
@@ -36,7 +37,7 @@ class Compositor;
  * by either the CompositableChild's deletion, or by the IPDL communication
  * going down.
  */
-class CompositableParent : public PCompositableParent
+class CompositableParent : public ParentActor<PCompositableParent>
 {
 public:
   CompositableParent(CompositableParentManager* aMgr,
@@ -62,7 +63,7 @@ public:
     CompositableMap::Erase(mHost->GetAsyncID());
   }
 
-  virtual void ActorDestroy(ActorDestroyReason why) override
+  virtual void Destroy() override
   {
     if (mHost) {
       mHost->Detach(nullptr, CompositableHost::FORCE_DETACH);
@@ -147,8 +148,7 @@ CompositableHost::SetCompositor(Compositor* aCompositor)
 
 bool
 CompositableHost::AddMaskEffect(EffectChain& aEffects,
-                                const gfx::Matrix4x4& aTransform,
-                                bool aIs3D)
+                                const gfx::Matrix4x4& aTransform)
 {
   CompositableTextureSourceRef source;
   RefPtr<TextureHost> host = GetAsTextureHost();
@@ -173,7 +173,6 @@ CompositableHost::AddMaskEffect(EffectChain& aEffects,
   RefPtr<EffectMask> effect = new EffectMask(source,
                                              source->GetSize(),
                                              aTransform);
-  effect->mIs3D = aIs3D;
   aEffects.mSecondaryEffects[EffectTypes::MASK] = effect;
   return true;
 }
@@ -201,11 +200,6 @@ CompositableHost::Create(const TextureInfo& aTextureInfo)
   case CompositableType::IMAGE:
     result = new ImageHost(aTextureInfo);
     break;
-#ifdef MOZ_WIDGET_GONK
-  case CompositableType::IMAGE_OVERLAY:
-    result = new ImageHostOverlay(aTextureInfo);
-    break;
-#endif
   case CompositableType::CONTENT_SINGLE:
     result = new ContentHostSingleBuffered(aTextureInfo);
     break;
@@ -229,6 +223,12 @@ CompositableHost::DumpTextureHost(std::stringstream& aStream, TextureHost* aText
     return;
   }
   aStream << gfxUtils::GetAsDataURI(dSurf).get();
+}
+
+void
+CompositableHost::ReceivedDestroy(PCompositableParent* aActor)
+{
+  static_cast<CompositableParent*>(aActor)->RecvDestroy();
 }
 
 namespace CompositableMap {

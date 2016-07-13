@@ -12,15 +12,24 @@
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "nsWeakReference.h"
+#include "mozilla/dom/ImageBitmapSource.h"
 
 namespace mozilla {
 namespace dom {
 
+class AnyCallback;
+struct ChannelPixelLayout;
 class Console;
+class Crypto;
 class Function;
+class IDBFactory;
+enum class ImageBitmapFormat : uint32_t;
+class Performance;
 class Promise;
 class RequestOrUSVString;
-class ServiceWorkerRegistrationWorkerThread;
+class ServiceWorkerRegistration;
+class WorkerLocation;
+class WorkerNavigator;
 
 namespace cache {
 
@@ -28,37 +37,31 @@ class CacheStorage;
 
 } // namespace cache
 
-namespace indexedDB {
-
-class IDBFactory;
-
-} // namespace indexedDB
-
-} // namespace dom
-} // namespace mozilla
-
-BEGIN_WORKERS_NAMESPACE
+namespace workers {
 
 class ServiceWorkerClients;
 class WorkerPrivate;
-class WorkerLocation;
-class WorkerNavigator;
-class Performance;
+
+} // namespace workers
 
 class WorkerGlobalScope : public DOMEventTargetHelper,
                           public nsIGlobalObject,
                           public nsSupportsWeakReference
 {
-  typedef mozilla::dom::indexedDB::IDBFactory IDBFactory;
+  typedef mozilla::dom::IDBFactory IDBFactory;
 
-  nsRefPtr<Console> mConsole;
-  nsRefPtr<WorkerLocation> mLocation;
-  nsRefPtr<WorkerNavigator> mNavigator;
-  nsRefPtr<Performance> mPerformance;
-  nsRefPtr<IDBFactory> mIndexedDB;
-  nsRefPtr<cache::CacheStorage> mCacheStorage;
+  RefPtr<Console> mConsole;
+  RefPtr<Crypto> mCrypto;
+  RefPtr<WorkerLocation> mLocation;
+  RefPtr<WorkerNavigator> mNavigator;
+  RefPtr<Performance> mPerformance;
+  RefPtr<IDBFactory> mIndexedDB;
+  RefPtr<cache::CacheStorage> mCacheStorage;
+
+  uint32_t mWindowInteractionsAllowed;
 
 protected:
+  typedef mozilla::dom::workers::WorkerPrivate WorkerPrivate;
   WorkerPrivate* mWorkerPrivate;
 
   explicit WorkerGlobalScope(WorkerPrivate* aWorkerPrivate);
@@ -88,7 +91,16 @@ public:
   }
 
   Console*
-  GetConsole();
+  GetConsole(ErrorResult& aRv);
+
+  Console*
+  GetConsoleIfExists() const
+  {
+    return mConsole;
+  }
+
+  Crypto*
+  GetCrypto(ErrorResult& aError);
 
   already_AddRefed<WorkerLocation>
   Location();
@@ -108,28 +120,26 @@ public:
   SetOnerror(OnErrorEventHandlerNonNull* aHandler);
 
   void
-  ImportScripts(JSContext* aCx, const Sequence<nsString>& aScriptURLs,
-                ErrorResult& aRv);
+  ImportScripts(const Sequence<nsString>& aScriptURLs, ErrorResult& aRv);
 
   int32_t
   SetTimeout(JSContext* aCx, Function& aHandler, const int32_t aTimeout,
              const Sequence<JS::Value>& aArguments, ErrorResult& aRv);
   int32_t
-  SetTimeout(JSContext* /* unused */, const nsAString& aHandler,
-             const int32_t aTimeout, const Sequence<JS::Value>& /* unused */,
-             ErrorResult& aRv);
+  SetTimeout(JSContext* aCx, const nsAString& aHandler, const int32_t aTimeout,
+             const Sequence<JS::Value>& /* unused */, ErrorResult& aRv);
   void
-  ClearTimeout(int32_t aHandle, ErrorResult& aRv);
+  ClearTimeout(int32_t aHandle);
   int32_t
   SetInterval(JSContext* aCx, Function& aHandler,
               const Optional<int32_t>& aTimeout,
               const Sequence<JS::Value>& aArguments, ErrorResult& aRv);
   int32_t
-  SetInterval(JSContext* /* unused */, const nsAString& aHandler,
+  SetInterval(JSContext* aCx, const nsAString& aHandler,
               const Optional<int32_t>& aTimeout,
               const Sequence<JS::Value>& /* unused */, ErrorResult& aRv);
   void
-  ClearInterval(int32_t aHandle, ErrorResult& aRv);
+  ClearInterval(int32_t aHandle);
 
   void
   Atob(const nsAString& aAtob, nsAString& aOutput, ErrorResult& aRv) const;
@@ -153,6 +163,40 @@ public:
 
   already_AddRefed<cache::CacheStorage>
   GetCaches(ErrorResult& aRv);
+
+  already_AddRefed<Promise>
+  CreateImageBitmap(const ImageBitmapSource& aImage, ErrorResult& aRv);
+
+  already_AddRefed<Promise>
+  CreateImageBitmap(const ImageBitmapSource& aImage,
+                    int32_t aSx, int32_t aSy, int32_t aSw, int32_t aSh,
+                    ErrorResult& aRv);
+
+  already_AddRefed<mozilla::dom::Promise>
+  CreateImageBitmap(const ImageBitmapSource& aImage,
+                    int32_t aOffset, int32_t aLength,
+                    mozilla::dom::ImageBitmapFormat aFormat,
+                    const mozilla::dom::Sequence<mozilla::dom::ChannelPixelLayout>& aLayout,
+                    mozilla::ErrorResult& aRv);
+
+  bool
+  WindowInteractionAllowed() const
+  {
+    return mWindowInteractionsAllowed > 0;
+  }
+
+  void
+  AllowWindowInteraction()
+  {
+    mWindowInteractionsAllowed++;
+  }
+
+  void
+  ConsumeWindowInteraction()
+  {
+    MOZ_ASSERT(mWindowInteractionsAllowed > 0);
+    mWindowInteractionsAllowed--;
+  }
 };
 
 class DedicatedWorkerGlobalScope final : public WorkerGlobalScope
@@ -199,8 +243,8 @@ public:
 class ServiceWorkerGlobalScope final : public WorkerGlobalScope
 {
   const nsString mScope;
-  nsRefPtr<ServiceWorkerClients> mClients;
-  nsRefPtr<ServiceWorkerRegistrationWorkerThread> mRegistration;
+  RefPtr<workers::ServiceWorkerClients> mClients;
+  RefPtr<ServiceWorkerRegistration> mRegistration;
 
   ~ServiceWorkerGlobalScope();
 
@@ -209,6 +253,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServiceWorkerGlobalScope,
                                            WorkerGlobalScope)
   IMPL_EVENT_HANDLER(notificationclick)
+  IMPL_EVENT_HANDLER(notificationclose)
 
   ServiceWorkerGlobalScope(WorkerPrivate* aWorkerPrivate, const nsACString& aScope);
 
@@ -217,7 +262,7 @@ public:
                    JS::MutableHandle<JSObject*> aReflector) override;
 
   static bool
-  InterceptionEnabled(JSContext* aCx, JSObject* aObj);
+  OpenWindowEnabled(JSContext* aCx, JSObject* aObj);
 
   void
   GetScope(nsString& aScope) const
@@ -225,18 +270,16 @@ public:
     aScope = mScope;
   }
 
-  ServiceWorkerClients*
+  workers::ServiceWorkerClients*
   Clients();
 
-  ServiceWorkerRegistrationWorkerThread*
+  ServiceWorkerRegistration*
   Registration();
 
   already_AddRefed<Promise>
   SkipWaiting(ErrorResult& aRv);
 
   IMPL_EVENT_HANDLER(activate)
-  IMPL_EVENT_HANDLER(beforeevicted)
-  IMPL_EVENT_HANDLER(evicted)
   IMPL_EVENT_HANDLER(fetch)
   IMPL_EVENT_HANDLER(install)
   IMPL_EVENT_HANDLER(message)
@@ -249,12 +292,17 @@ public:
 class WorkerDebuggerGlobalScope final : public DOMEventTargetHelper,
                                         public nsIGlobalObject
 {
+  typedef mozilla::dom::workers::WorkerPrivate WorkerPrivate;
+
   WorkerPrivate* mWorkerPrivate;
+  RefPtr<Console> mConsole;
 
 public:
   explicit WorkerDebuggerGlobalScope(WorkerPrivate* aWorkerPrivate);
 
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(WorkerDebuggerGlobalScope,
+                                                         DOMEventTargetHelper)
 
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
@@ -273,12 +321,14 @@ public:
   }
 
   void
-  GetGlobal(JSContext* aCx, JS::MutableHandle<JSObject*> aGlobal);
+  GetGlobal(JSContext* aCx, JS::MutableHandle<JSObject*> aGlobal,
+            ErrorResult& aRv);
 
   void
   CreateSandbox(JSContext* aCx, const nsAString& aName,
                 JS::Handle<JSObject*> aPrototype,
-                JS::MutableHandle<JSObject*> aResult);
+                JS::MutableHandle<JSObject*> aResult,
+                ErrorResult& aRv);
 
   void
   LoadSubScript(JSContext* aCx, const nsAString& aURL,
@@ -297,10 +347,27 @@ public:
   IMPL_EVENT_HANDLER(message)
 
   void
-  SetImmediate(JSContext* aCx, Function& aHandler, ErrorResult& aRv);
+  SetImmediate(Function& aHandler, ErrorResult& aRv);
 
   void
   ReportError(JSContext* aCx, const nsAString& aMessage);
+
+  void
+  RetrieveConsoleEvents(JSContext* aCx, nsTArray<JS::Value>& aEvents,
+                        ErrorResult& aRv);
+
+  void
+  SetConsoleEventHandler(JSContext* aCx, AnyCallback* aHandler,
+                         ErrorResult& aRv);
+
+  Console*
+  GetConsole(ErrorResult& aRv);
+
+  Console*
+  GetConsoleIfExists() const
+  {
+    return mConsole;
+  }
 
   void
   Dump(JSContext* aCx, const Optional<nsAString>& aString) const;
@@ -309,10 +376,11 @@ private:
   virtual ~WorkerDebuggerGlobalScope();
 };
 
-END_WORKERS_NAMESPACE
+} // namespace dom
+} // namespace mozilla
 
 inline nsISupports*
-ToSupports(mozilla::dom::workers::WorkerGlobalScope* aScope)
+ToSupports(mozilla::dom::WorkerGlobalScope* aScope)
 {
   return static_cast<nsIDOMEventTarget*>(aScope);
 }

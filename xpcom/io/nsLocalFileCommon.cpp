@@ -138,9 +138,9 @@ nsLocalFile::CreateUnique(uint32_t aType, uint32_t aAttributes)
     rootName.SetLength(maxRootLength);
     SetNativeLeafName(rootName + suffix);
 #endif
-    nsresult rv = Create(aType, aAttributes);
-    if (rv != NS_ERROR_FILE_ALREADY_EXISTS) {
-      return rv;
+    nsresult rvCreate = Create(aType, aAttributes);
+    if (rvCreate != NS_ERROR_FILE_ALREADY_EXISTS) {
+      return rvCreate;
     }
   }
 
@@ -210,8 +210,8 @@ nsLocalFile::GetRelativeDescriptor(nsIFile* aFromFile, nsACString& aResult)
   aResult.Truncate(0);
 
   nsAutoString thisPath, fromPath;
-  nsAutoTArray<char16_t*, 32> thisNodes;
-  nsAutoTArray<char16_t*, 32> fromNodes;
+  AutoTArray<char16_t*, 32> thisNodes;
+  AutoTArray<char16_t*, 32> fromNodes;
 
   rv = GetPath(thisPath);
   if (NS_FAILED(rv)) {

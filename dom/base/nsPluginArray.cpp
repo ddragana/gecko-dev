@@ -19,11 +19,12 @@
 #include "nsIWeakReference.h"
 #include "mozilla/Services.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsPluginArray::nsPluginArray(nsPIDOMWindow* aWindow)
+nsPluginArray::nsPluginArray(nsPIDOMWindowInner* aWindow)
   : mWindow(aWindow)
 {
 }
@@ -42,7 +43,13 @@ nsPluginArray::~nsPluginArray()
 {
 }
 
-nsPIDOMWindow*
+static bool
+ResistFingerprinting() {
+  return !nsContentUtils::ThreadsafeIsCallerChrome() &&
+         nsContentUtils::ResistFingerprinting();
+}
+
+nsPIDOMWindowInner*
 nsPluginArray::GetParentObject() const
 {
   MOZ_ASSERT(mWindow);
@@ -69,8 +76,8 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPluginArray,
                                       mPlugins)
 
 static void
-GetPluginMimeTypes(const nsTArray<nsRefPtr<nsPluginElement> >& aPlugins,
-                   nsTArray<nsRefPtr<nsMimeType> >& aMimeTypes)
+GetPluginMimeTypes(const nsTArray<RefPtr<nsPluginElement> >& aPlugins,
+                   nsTArray<RefPtr<nsMimeType> >& aMimeTypes)
 {
   for (uint32_t i = 0; i < aPlugins.Length(); ++i) {
     nsPluginElement *plugin = aPlugins[i];
@@ -79,14 +86,14 @@ GetPluginMimeTypes(const nsTArray<nsRefPtr<nsPluginElement> >& aPlugins,
 }
 
 static bool
-operator<(const nsRefPtr<nsMimeType>& lhs, const nsRefPtr<nsMimeType>& rhs)
+operator<(const RefPtr<nsMimeType>& lhs, const RefPtr<nsMimeType>& rhs)
 {
   // Sort MIME types alphabetically by type name.
   return lhs->Type() < rhs->Type();
 }
 
 void
-nsPluginArray::GetMimeTypes(nsTArray<nsRefPtr<nsMimeType>>& aMimeTypes)
+nsPluginArray::GetMimeTypes(nsTArray<RefPtr<nsMimeType>>& aMimeTypes)
 {
   aMimeTypes.Clear();
 
@@ -120,7 +127,7 @@ nsPluginArray::NamedItem(const nsAString& aName)
 void
 nsPluginArray::Refresh(bool aReloadDocuments)
 {
-  nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
+  RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
 
   if(!AllowPlugins() || !pluginHost) {
     return;
@@ -130,7 +137,7 @@ nsPluginArray::Refresh(bool aReloadDocuments)
   // that plugins did not change and was not reloaded
   if (pluginHost->ReloadPlugins() ==
       NS_ERROR_PLUGINS_PLUGINSNOTCHANGED) {
-    nsTArray<nsRefPtr<nsPluginTag> > newPluginTags;
+    nsTArray<nsCOMPtr<nsIInternalPluginTag> > newPluginTags;
     pluginHost->GetPlugins(newPluginTags);
 
     // Check if the number of plugins we know about are different from
@@ -147,8 +154,7 @@ nsPluginArray::Refresh(bool aReloadDocuments)
 
   mPlugins.Clear();
 
-  nsCOMPtr<nsIDOMNavigator> navigator;
-  mWindow->GetNavigator(getter_AddRefs(navigator));
+  nsCOMPtr<nsIDOMNavigator> navigator = mWindow->GetNavigator();
 
   if (!navigator) {
     return;
@@ -167,7 +173,7 @@ nsPluginArray::IndexedGetter(uint32_t aIndex, bool &aFound)
 {
   aFound = false;
 
-  if (!AllowPlugins()) {
+  if (!AllowPlugins() || ResistFingerprinting()) {
     return nullptr;
   }
 
@@ -175,7 +181,11 @@ nsPluginArray::IndexedGetter(uint32_t aIndex, bool &aFound)
 
   aFound = aIndex < mPlugins.Length();
 
-  return aFound ? mPlugins[aIndex] : nullptr;
+  if (!aFound) {
+    return nullptr;
+  }
+
+  return mPlugins[aIndex];
 }
 
 void
@@ -189,7 +199,7 @@ nsPluginArray::Invalidate()
 }
 
 static nsPluginElement*
-FindPlugin(const nsTArray<nsRefPtr<nsPluginElement> >& aPlugins,
+FindPlugin(const nsTArray<RefPtr<nsPluginElement> >& aPlugins,
            const nsAString& aName)
 {
   for (uint32_t i = 0; i < aPlugins.Length(); ++i) {
@@ -210,7 +220,7 @@ nsPluginArray::NamedGetter(const nsAString& aName, bool &aFound)
 {
   aFound = false;
 
-  if (!AllowPlugins()) {
+  if (!AllowPlugins() || ResistFingerprinting()) {
     return nullptr;
   }
 
@@ -221,16 +231,10 @@ nsPluginArray::NamedGetter(const nsAString& aName, bool &aFound)
   return plugin;
 }
 
-bool
-nsPluginArray::NameIsEnumerable(const nsAString& aName)
-{
-  return true;
-}
-
 uint32_t
 nsPluginArray::Length()
 {
-  if (!AllowPlugins()) {
+  if (!AllowPlugins() || ResistFingerprinting()) {
     return 0;
   }
 
@@ -240,7 +244,7 @@ nsPluginArray::Length()
 }
 
 void
-nsPluginArray::GetSupportedNames(unsigned, nsTArray<nsString>& aRetval)
+nsPluginArray::GetSupportedNames(nsTArray<nsString>& aRetval)
 {
   aRetval.Clear();
 
@@ -275,11 +279,11 @@ nsPluginArray::AllowPlugins() const
 }
 
 static bool
-operator<(const nsRefPtr<nsPluginElement>& lhs,
-          const nsRefPtr<nsPluginElement>& rhs)
+operator<(const RefPtr<nsPluginElement>& lhs,
+          const RefPtr<nsPluginElement>& rhs)
 {
   // Sort plugins alphabetically by name.
-  return lhs->PluginTag()->mName < rhs->PluginTag()->mName;
+  return lhs->PluginTag()->Name() < rhs->PluginTag()->Name();
 }
 
 void
@@ -290,20 +294,19 @@ nsPluginArray::EnsurePlugins()
     return;
   }
 
-  nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
+  RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
   if (!pluginHost) {
     // We have no plugin host.
     return;
   }
 
-  nsTArray<nsRefPtr<nsPluginTag> > pluginTags;
+  nsTArray<nsCOMPtr<nsIInternalPluginTag> > pluginTags;
   pluginHost->GetPlugins(pluginTags);
 
   // need to wrap each of these with a nsPluginElement, which is
   // scriptable.
   for (uint32_t i = 0; i < pluginTags.Length(); ++i) {
-    nsPluginTag* pluginTag = pluginTags[i];
-    mPlugins.AppendElement(new nsPluginElement(mWindow, pluginTag));
+    mPlugins.AppendElement(new nsPluginElement(mWindow, pluginTags[i]));
   }
 
   // Alphabetize the enumeration order of non-hidden plugins to reduce
@@ -322,8 +325,8 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPluginElement, mWindow, mMimeTypes)
 
-nsPluginElement::nsPluginElement(nsPIDOMWindow* aWindow,
-                                 nsPluginTag* aPluginTag)
+nsPluginElement::nsPluginElement(nsPIDOMWindowInner* aWindow,
+                                 nsIInternalPluginTag* aPluginTag)
   : mWindow(aWindow),
     mPluginTag(aPluginTag)
 {
@@ -333,7 +336,7 @@ nsPluginElement::~nsPluginElement()
 {
 }
 
-nsPIDOMWindow*
+nsPIDOMWindowInner*
 nsPluginElement::GetParentObject() const
 {
   MOZ_ASSERT(mWindow);
@@ -349,25 +352,25 @@ nsPluginElement::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 void
 nsPluginElement::GetDescription(nsString& retval) const
 {
-  CopyUTF8toUTF16(mPluginTag->mDescription, retval);
+  CopyUTF8toUTF16(mPluginTag->Description(), retval);
 }
 
 void
 nsPluginElement::GetFilename(nsString& retval) const
 {
-  CopyUTF8toUTF16(mPluginTag->mFileName, retval);
+  CopyUTF8toUTF16(mPluginTag->FileName(), retval);
 }
 
 void
 nsPluginElement::GetVersion(nsString& retval) const
 {
-  CopyUTF8toUTF16(mPluginTag->mVersion, retval);
+  CopyUTF8toUTF16(mPluginTag->Version(), retval);
 }
 
 void
 nsPluginElement::GetName(nsString& retval) const
 {
-  CopyUTF8toUTF16(mPluginTag->mName, retval);
+  CopyUTF8toUTF16(mPluginTag->Name(), retval);
 }
 
 nsMimeType*
@@ -392,7 +395,11 @@ nsPluginElement::IndexedGetter(uint32_t aIndex, bool &aFound)
 
   aFound = aIndex < mMimeTypes.Length();
 
-  return aFound ? mMimeTypes[aIndex] : nullptr;
+  if (!aFound) {
+    return nullptr;
+  }
+
+  return mMimeTypes[aIndex];
 }
 
 nsMimeType*
@@ -413,12 +420,6 @@ nsPluginElement::NamedGetter(const nsAString& aName, bool &aFound)
   return nullptr;
 }
 
-bool
-nsPluginElement::NameIsEnumerable(const nsAString& aName)
-{
-  return true;
-}
-
 uint32_t
 nsPluginElement::Length()
 {
@@ -428,7 +429,7 @@ nsPluginElement::Length()
 }
 
 void
-nsPluginElement::GetSupportedNames(unsigned, nsTArray<nsString>& retval)
+nsPluginElement::GetSupportedNames(nsTArray<nsString>& retval)
 {
   EnsurePluginMimeTypes();
 
@@ -437,7 +438,7 @@ nsPluginElement::GetSupportedNames(unsigned, nsTArray<nsString>& retval)
   }
 }
 
-nsTArray<nsRefPtr<nsMimeType> >&
+nsTArray<RefPtr<nsMimeType> >&
 nsPluginElement::MimeTypes()
 {
   EnsurePluginMimeTypes();
@@ -452,8 +453,18 @@ nsPluginElement::EnsurePluginMimeTypes()
     return;
   }
 
-  for (uint32_t i = 0; i < mPluginTag->mMimeTypes.Length(); ++i) {
-    NS_ConvertUTF8toUTF16 type(mPluginTag->mMimeTypes[i]);
-    mMimeTypes.AppendElement(new nsMimeType(mWindow, this, i, type));
+  if (mPluginTag->MimeTypes().Length() != mPluginTag->MimeDescriptions().Length() ||
+      mPluginTag->MimeTypes().Length() != mPluginTag->Extensions().Length()) {
+    MOZ_ASSERT(false, "mime type arrays expected to be the same length");
+    return;
+  }
+
+  for (uint32_t i = 0; i < mPluginTag->MimeTypes().Length(); ++i) {
+    NS_ConvertUTF8toUTF16 type(mPluginTag->MimeTypes()[i]);
+    NS_ConvertUTF8toUTF16 description(mPluginTag->MimeDescriptions()[i]);
+    NS_ConvertUTF8toUTF16 extension(mPluginTag->Extensions()[i]);
+
+    mMimeTypes.AppendElement(new nsMimeType(mWindow, this, type, description,
+                                            extension));
   }
 }

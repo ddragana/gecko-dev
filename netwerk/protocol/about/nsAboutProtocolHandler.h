@@ -8,17 +8,24 @@
 
 #include "nsIProtocolHandler.h"
 #include "nsSimpleNestedURI.h"
+#include "nsWeakReference.h"
 #include "mozilla/Attributes.h"
 
 class nsIURI;
 
-class nsAboutProtocolHandler : public nsIProtocolHandler
+namespace mozilla {
+namespace net {
+
+class nsAboutProtocolHandler : public nsIProtocolHandlerWithDynamicFlags
+                             , public nsIProtocolHandler
+                             , public nsSupportsWeakReference
 {
 public:
     NS_DECL_ISUPPORTS
 
     // nsIProtocolHandler methods:
     NS_DECL_NSIPROTOCOLHANDLER
+    NS_DECL_NSIPROTOCOLHANDLERWITHDYNAMICFLAGS
 
     // nsAboutProtocolHandler methods:
     nsAboutProtocolHandler() {}
@@ -28,6 +35,7 @@ private:
 };
 
 class nsSafeAboutProtocolHandler final : public nsIProtocolHandler
+                                       , public nsSupportsWeakReference
 {
 public:
     NS_DECL_ISUPPORTS
@@ -74,5 +82,8 @@ public:
 protected:
     nsCOMPtr<nsIURI> mBaseURI;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif /* nsAboutProtocolHandler_h___ */

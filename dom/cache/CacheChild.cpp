@@ -10,7 +10,6 @@
 #include "mozilla/dom/cache/ActorUtils.h"
 #include "mozilla/dom/cache/Cache.h"
 #include "mozilla/dom/cache/CacheOpChild.h"
-#include "mozilla/dom/cache/CachePushStreamChild.h"
 
 namespace mozilla {
 namespace dom {
@@ -34,6 +33,7 @@ CacheChild::CacheChild()
   : mListener(nullptr)
   , mNumChildActors(0)
   , mDelayedDestroy(false)
+  , mLocked(false)
 {
   MOZ_COUNT_CTOR(cache::CacheChild);
 }
@@ -44,6 +44,7 @@ CacheChild::~CacheChild()
   NS_ASSERT_OWNINGTHREAD(CacheChild);
   MOZ_ASSERT(!mListener);
   MOZ_ASSERT(!mNumChildActors);
+  MOZ_ASSERT(!mLocked);
 }
 
 void
@@ -69,17 +70,7 @@ CacheChild::ExecuteOp(nsIGlobalObject* aGlobal, Promise* aPromise,
 {
   mNumChildActors += 1;
   MOZ_ALWAYS_TRUE(SendPCacheOpConstructor(
-    new CacheOpChild(GetFeature(), aGlobal, aParent, aPromise), aArgs));
-}
-
-CachePushStreamChild*
-CacheChild::CreatePushStream(nsISupports* aParent, nsIAsyncInputStream* aStream)
-{
-  mNumChildActors += 1;
-  auto actor = SendPCachePushStreamConstructor(
-    new CachePushStreamChild(GetFeature(), aParent, aStream));
-  MOZ_ASSERT(actor);
-  return static_cast<CachePushStreamChild*>(actor);
+    new CacheOpChild(GetWorkerHolder(), aGlobal, aParent, aPromise), aArgs));
 }
 
 void
@@ -103,15 +94,16 @@ CacheChild::StartDestroy()
   // If we have outstanding child actors, then don't destroy ourself yet.
   // The child actors should be short lived and we should allow them to complete
   // if possible.  NoteDeletedActor() will call back into this Shutdown()
-  // method when the last child actor is gone.
-  if (mNumChildActors) {
+  // method when the last child actor is gone.  Also, delay destruction if we
+  // have been explicitly locked by someone using us on the stack.
+  if (mNumChildActors || mLocked) {
     mDelayedDestroy = true;
     return;
   }
 
-  nsRefPtr<Cache> listener = mListener;
+  RefPtr<Cache> listener = mListener;
 
-  // StartDestroy() can get called from either Cache or the Feature.
+  // StartDestroy() can get called from either Cache or the WorkerHolder.
   // Theoretically we can get double called if the right race happens.  Handle
   // that by just ignoring the second StartDestroy() call.
   if (!listener) {
@@ -124,21 +116,21 @@ CacheChild::StartDestroy()
   MOZ_ASSERT(!mListener);
 
   // Start actor destruction from parent process
-  unused << SendTeardown();
+  Unused << SendTeardown();
 }
 
 void
 CacheChild::ActorDestroy(ActorDestroyReason aReason)
 {
   NS_ASSERT_OWNINGTHREAD(CacheChild);
-  nsRefPtr<Cache> listener = mListener;
+  RefPtr<Cache> listener = mListener;
   if (listener) {
     listener->DestroyInternal(this);
     // Cache listener should call ClearListener() in DestroyInternal()
     MOZ_ASSERT(!mListener);
   }
 
-  RemoveFeature();
+  RemoveWorkerHolder();
 }
 
 PCacheOpChild*
@@ -156,28 +148,36 @@ CacheChild::DeallocPCacheOpChild(PCacheOpChild* aActor)
   return true;
 }
 
-PCachePushStreamChild*
-CacheChild::AllocPCachePushStreamChild()
-{
-  MOZ_CRASH("CachePushStreamChild should be manually constructed.");
-  return nullptr;
-}
-
-bool
-CacheChild::DeallocPCachePushStreamChild(PCachePushStreamChild* aActor)
-{
-  delete aActor;
-  NoteDeletedActor();
-  return true;
-}
-
 void
 CacheChild::NoteDeletedActor()
 {
   mNumChildActors -= 1;
-  if (!mNumChildActors && mDelayedDestroy) {
+  MaybeFlushDelayedDestroy();
+}
+
+void
+CacheChild::MaybeFlushDelayedDestroy()
+{
+  if (!mNumChildActors && !mLocked && mDelayedDestroy) {
     StartDestroy();
   }
+}
+
+void
+CacheChild::Lock()
+{
+  NS_ASSERT_OWNINGTHREAD(CacheChild);
+  MOZ_ASSERT(!mLocked);
+  mLocked = true;
+}
+
+void
+CacheChild::Unlock()
+{
+  NS_ASSERT_OWNINGTHREAD(CacheChild);
+  MOZ_ASSERT(mLocked);
+  mLocked = false;
+  MaybeFlushDelayedDestroy();
 }
 
 } // namespace cache

@@ -44,26 +44,35 @@ enum class TextureFlags : uint32_t {
   // Data in this texture has not been alpha-premultiplied.
   // XXX - Apparently only used with ImageClient/Host
   NON_PREMULTIPLIED  = 1 << 4,
-  // The texture should be recycled when no longer in used
+  // The TextureClient should be recycled with recycle callback when no longer
+  // in used. When the texture is used in host side, ref count of TextureClient
+  // is transparently added by ShadowLayerForwarder or ImageBridgeChild.
   RECYCLE            = 1 << 5,
   // If DEALLOCATE_CLIENT is set, the shared data is deallocated on the
   // client side and requires some extra synchronizaion to ensure race-free
   // deallocation.
   // The default behaviour is to deallocate on the host side.
   DEALLOCATE_CLIENT  = 1 << 6,
+  DEALLOCATE_SYNC    = 1 << 6, // XXX - make it a separate flag.
+  DEALLOCATE_MAIN_THREAD = 1 << 8,
   // After being shared ith the compositor side, an immutable texture is never
   // modified, it can only be read. It is safe to not Lock/Unlock immutable
   // textures.
-  IMMUTABLE          = 1 << 7,
+  IMMUTABLE          = 1 << 9,
   // The contents of the texture must be uploaded or copied immediately
   // during the transaction, because the producer may want to write
   // to it again.
-  IMMEDIATE_UPLOAD   = 1 << 8,
+  IMMEDIATE_UPLOAD   = 1 << 10,
   // The texture is part of a component-alpha pair
-  COMPONENT_ALPHA    = 1 << 9,
+  COMPONENT_ALPHA    = 1 << 11,
+  // The texture is being allocated for a compositor that no longer exists.
+  // This flag is only used in the parent process.
+  INVALID_COMPOSITOR = 1 << 12,
+  // The texture was created by converting from YCBCR to RGB
+  RGB_FROM_YCBCR = 1 << 13,
 
   // OR union of all valid bits
-  ALL_BITS           = (1 << 10) - 1,
+  ALL_BITS           = (1 << 14) - 1,
   // the default flags
   DEFAULT = NO_FLAGS
 };
@@ -107,7 +116,9 @@ enum class DiagnosticFlags : uint16_t {
   TILE            = 1 << 5,
   BIGIMAGE        = 1 << 6,
   COMPONENT_ALPHA = 1 << 7,
-  REGION_RECT     = 1 << 8
+  REGION_RECT     = 1 << 8,
+  NV12            = 1 << 9,
+  YCBCR           = 1 << 10
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(DiagnosticFlags)
 
@@ -121,6 +132,7 @@ enum class EffectTypes : uint8_t {
   MAX_SECONDARY, // sentinel for the count of secondary effect types
   RGB,
   YCBCR,
+  NV12,
   COMPONENT_ALPHA,
   SOLID_COLOR,
   RENDER_TARGET,
@@ -135,7 +147,6 @@ enum class CompositableType : uint8_t {
   UNKNOWN,
   CONTENT_TILED,   // tiled painted layer
   IMAGE,           // image with single buffering
-  IMAGE_OVERLAY,   // image without buffer
   IMAGE_BRIDGE,    // ImageBridge protocol
   CONTENT_SINGLE,  // painted layer interface, single buffering
   CONTENT_DOUBLE,  // painted layer interface, double buffering
@@ -157,7 +168,6 @@ struct TextureFactoryIdentifier
 {
   LayersBackend mParentBackend;
   GeckoProcessType mParentProcessId;
-  EnumSet<gfx::CompositionOp> mSupportedBlendModes;
   int32_t mMaxTextureSize;
   bool mSupportsTextureBlitting;
   bool mSupportsPartialUploads;
@@ -171,7 +181,6 @@ struct TextureFactoryIdentifier
                                     SyncHandle aSyncHandle = 0)
     : mParentBackend(aLayersBackend)
     , mParentProcessId(aParentProcessId)
-    , mSupportedBlendModes(gfx::CompositionOp::OP_OVER)
     , mMaxTextureSize(aMaxTextureSize)
     , mSupportsTextureBlitting(aSupportsTextureBlitting)
     , mSupportsPartialUploads(aSupportsPartialUploads)
@@ -228,8 +237,7 @@ MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(OpenMode)
 // We rely on the items in this enum being sequential
 enum class MaskType : uint8_t {
   MaskNone = 0,   // no mask layer
-  Mask2d,         // mask layer for layers with 2D transforms
-  Mask3d,         // mask layer for layers with 3D transforms
+  Mask,           // mask layer
   NumMaskTypes
 };
 

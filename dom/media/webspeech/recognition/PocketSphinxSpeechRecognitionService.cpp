@@ -14,6 +14,7 @@
 #include "SpeechRecognitionResult.h"
 #include "SpeechRecognitionResultList.h"
 #include "nsIObserverService.h"
+#include "MediaPrefs.h"
 #include "mozilla/Services.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
@@ -21,6 +22,7 @@
 
 extern "C" {
 #include "pocketsphinx/pocketsphinx.h"
+#include "sphinxbase/logmath.h"
 #include "sphinxbase/sphinx_config.h"
 #include "sphinxbase/jsgf.h"
 }
@@ -29,12 +31,14 @@ namespace mozilla {
 
 using namespace dom;
 
-class DecodeResultTask : public nsRunnable
+class DecodeResultTask : public Runnable
 {
 public:
   DecodeResultTask(const nsString& hypstring,
+                   float64 confidence,
                    WeakPtr<dom::SpeechRecognition> recognition)
       : mResult(hypstring),
+        mConfidence(confidence),
         mRecognition(recognition),
         mWorkerThread(do_GetCurrentThread())
   {
@@ -49,18 +53,20 @@ public:
                                    // thread!
 
     // Declare javascript result events
-    nsRefPtr<SpeechEvent> event = new SpeechEvent(
+    RefPtr<SpeechEvent> event = new SpeechEvent(
       mRecognition, SpeechRecognition::EVENT_RECOGNITIONSERVICE_FINAL_RESULT);
     SpeechRecognitionResultList* resultList =
       new SpeechRecognitionResultList(mRecognition);
     SpeechRecognitionResult* result = new SpeechRecognitionResult(mRecognition);
-    SpeechRecognitionAlternative* alternative =
-      new SpeechRecognitionAlternative(mRecognition);
+    if (0 < mRecognition->MaxAlternatives()) {
+      SpeechRecognitionAlternative* alternative =
+        new SpeechRecognitionAlternative(mRecognition);
 
-    alternative->mTranscript = mResult;
-    alternative->mConfidence = 100;
+      alternative->mTranscript = mResult;
+      alternative->mConfidence = mConfidence;
 
-    result->mItems.AppendElement(alternative);
+      result->mItems.AppendElement(alternative);
+    }
     resultList->mItems.AppendElement(result);
 
     event->mRecognitionResultList = resultList;
@@ -75,11 +81,12 @@ public:
 
 private:
   nsString mResult;
+  float64 mConfidence;
   WeakPtr<dom::SpeechRecognition> mRecognition;
   nsCOMPtr<nsIThread> mWorkerThread;
 };
 
-class DecodeTask : public nsRunnable
+class DecodeTask : public Runnable
 {
 public:
   DecodeTask(WeakPtr<dom::SpeechRecognition> recogntion,
@@ -93,7 +100,9 @@ public:
   {
     char const* hyp;
     int rv;
-    int32 score;
+    int32 final;
+    int32 logprob;
+    float64 confidence;
     nsAutoCString hypoValue;
 
     rv = ps_start_utt(mPs);
@@ -101,17 +110,18 @@ public:
                         FALSE);
 
     rv = ps_end_utt(mPs);
+    confidence = 0;
     if (rv >= 0) {
-      hyp = ps_get_hyp(mPs, &score);
-      if (hyp == nullptr) {
-        hypoValue.Assign("ERROR");
-      } else {
+      hyp = ps_get_hyp_final(mPs, &final);
+      if (hyp && final) {
+        logprob = ps_get_prob(mPs);
+        confidence = logmath_exp(ps_get_logmath(mPs), logprob);
         hypoValue.Assign(hyp);
       }
     }
 
     nsCOMPtr<nsIRunnable> resultrunnable =
-      new DecodeResultTask(NS_ConvertUTF8toUTF16(hypoValue), mRecognition);
+      new DecodeResultTask(NS_ConvertUTF8toUTF16(hypoValue), confidence, mRecognition);
     return NS_DispatchToMainThread(resultrunnable);
   }
 
@@ -154,7 +164,7 @@ PocketSphinxSpeechRecognitionService::PocketSphinxSpeechRecognitionService()
 
   // FOR B2G PATHS HARDCODED (APPEND /DATA ON THE BEGINING, FOR DESKTOP, ONLY
   // MODELS/ RELATIVE TO ROOT
-  mPSConfig = cmd_ln_init(nullptr, ps_args(), TRUE, "-hmm",
+  mPSConfig = cmd_ln_init(nullptr, ps_args(), TRUE, "-bestpath", "yes", "-hmm",
                           ToNewUTF8String(aStringAMPath), // acoustic model
                           "-dict", ToNewUTF8String(aStringDictPath), nullptr);
   if (mPSConfig == nullptr) {
@@ -268,11 +278,11 @@ PocketSphinxSpeechRecognitionService::ValidateAndSetGrammarList(
     int result = ps_set_jsgf_string(mPSHandle, "name",
                                     NS_ConvertUTF16toUTF8(grammar).get());
 
-    ps_set_search(mPSHandle, "name");
-
     if (result != 0) {
       ISGrammarCompiled = false;
     } else {
+      ps_set_search(mPSHandle, "name");
+
       ISGrammarCompiled = true;
     }
   } else {
@@ -293,7 +303,7 @@ PocketSphinxSpeechRecognitionService::Observe(nsISupports* aSubject,
                                               const char* aTopic,
                                               const char16_t* aData)
 {
-  MOZ_ASSERT(mRecognition->mTestConfig.mFakeRecognitionService,
+  MOZ_ASSERT(MediaPrefs::WebSpeechFakeRecognitionService(),
              "Got request to fake recognition service event, "
              "but " TEST_PREFERENCE_FAKE_RECOGNITION_SERVICE " is not set");
 
@@ -314,7 +324,7 @@ PocketSphinxSpeechRecognitionService::Observe(nsISupports* aSubject,
       NS_LITERAL_STRING("RECOGNITIONSERVICE_ERROR test event"));
 
   } else if (eventName.EqualsLiteral("EVENT_RECOGNITIONSERVICE_FINAL_RESULT")) {
-    nsRefPtr<SpeechEvent> event = new SpeechEvent(
+    RefPtr<SpeechEvent> event = new SpeechEvent(
       mRecognition, SpeechRecognition::EVENT_RECOGNITIONSERVICE_FINAL_RESULT);
 
     event->mRecognitionResultList = BuildMockResultList();
@@ -330,13 +340,15 @@ PocketSphinxSpeechRecognitionService::BuildMockResultList()
   SpeechRecognitionResultList* resultList =
     new SpeechRecognitionResultList(mRecognition);
   SpeechRecognitionResult* result = new SpeechRecognitionResult(mRecognition);
-  SpeechRecognitionAlternative* alternative =
-    new SpeechRecognitionAlternative(mRecognition);
+  if (0 < mRecognition->MaxAlternatives()) {
+    SpeechRecognitionAlternative* alternative =
+      new SpeechRecognitionAlternative(mRecognition);
 
-  alternative->mTranscript = NS_LITERAL_STRING("Mock final result");
-  alternative->mConfidence = 0.0f;
+    alternative->mTranscript = NS_LITERAL_STRING("Mock final result");
+    alternative->mConfidence = 0.0f;
 
-  result->mItems.AppendElement(alternative);
+    result->mItems.AppendElement(alternative);
+  }
   resultList->mItems.AppendElement(result);
 
   return resultList;

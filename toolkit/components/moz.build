@@ -10,18 +10,21 @@ if CONFIG['MOZ_ENABLE_XREMOTE']:
 
 DIRS += [
     'aboutcache',
+    'aboutcheckerboard',
     'aboutmemory',
+    'aboutperformance',
     'addoncompat',
     'alerts',
     'apppicker',
     'asyncshutdown',
     'commandlines',
-    'console',
     'contentprefs',
+    'contextualidentity',
     'cookie',
     'crashmonitor',
     'diskspacewatcher',
     'downloads',
+    'extensions',
     'exthelper',
     'filepicker',
     'filewatcher',
@@ -30,36 +33,41 @@ DIRS += [
     'find',
     'gfx',
     'jsdownloads',
+    'lz4',
     'mediasniffer',
     'microformats',
     'osfile',
     'parentalcontrols',
     'passwordmgr',
     'perf',
+    'perfmonitoring',
     'places',
+    'privatebrowsing',
     'processsingleton',
     'promiseworker',
     'prompts',
     'protobuf',
     'reader',
+    'remotebrowserutils',
     'reflect',
+    'securityreporter',
     'sqlite',
     'startup',
     'statusfilter',
     'telemetry',
     'thumbnails',
     'timermanager',
+    'tooltiptext',
     'typeaheadfind',
     'utils',
     'urlformatter',
     'viewconfig',
     'workerloader',
-    'workerlz4',
     'xulstore'
 ]
 
 if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
-    DIRS += ['viewsource'];
+    DIRS += ['narrate', 'viewsource'];
 
     if CONFIG['NS_PRINTING']:
         DIRS += ['printing']
@@ -90,18 +98,13 @@ if CONFIG['MOZ_URL_CLASSIFIER']:
 
 DIRS += ['captivedetect']
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] != "gonk" and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+if CONFIG['OS_TARGET'] != 'Android':
     DIRS += ['terminator']
-
-if CONFIG['NIGHTLY_BUILD']: # Bug 1136927 - Performance Monitoring is not ready for prime-time yet
-    DIRS += [
-      'aboutperformance',
-      'perfmonitoring',
-    ]
 
 DIRS += ['build']
 
-EXTRA_COMPONENTS += [
-    'nsDefaultCLH.js',
-    'nsDefaultCLH.manifest',
-]
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+    EXTRA_COMPONENTS += [
+        'nsDefaultCLH.js',
+        'nsDefaultCLH.manifest',
+    ]

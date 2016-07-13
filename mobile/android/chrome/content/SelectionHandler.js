@@ -4,13 +4,14 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
+
 // Define elements that bound phone number containers.
 const PHONE_NUMBER_CONTAINERS = "td,div";
 const DEFER_CLOSE_TRIGGER_MS = 125; // Grace period delay before deferred _closeSelection()
 
-// Gecko TouchCaret/SelectionCaret pref names.
-const PREF_GECKO_TOUCHCARET_ENABLED = "touchcaret.enabled";
-const PREF_GECKO_SELECTIONCARETS_ENABLED = "selectioncaret.enabled";
+// Gecko AccessibleCaret pref names.
+const PREF_GECKO_ACCESSIBLECARET_ENABLED = "layout.accessiblecaret.enabled";
 
 var SelectionHandler = {
 
@@ -43,7 +44,7 @@ var SelectionHandler = {
   SELECT_AT_POINT: 1,
 
   // Gecko TouchCaret/SelectionCaret pref values.
-  _touchCaretEnabledValue: null,
+  _accessibleCaretEnabledValue: null,
   _selectionCaretEnabledValue: null,
 
   // Keeps track of data about the dimensions of the selection. Coordinates
@@ -79,6 +80,7 @@ var SelectionHandler = {
     this._contentWindowRef = Cu.getWeakReference(aContentWindow);
   },
 
+  // Main target element, always provides editor for editables.
   get _targetElement() {
     if (this._targetElementRef)
       return this._targetElementRef.get();
@@ -88,6 +90,10 @@ var SelectionHandler = {
   set _targetElement(aTargetElement) {
     this._targetElementRef = Cu.getWeakReference(aTargetElement);
   },
+
+  // Alternate target element. Always provides public DOM node for editables
+  // that contain anonymous inner content structures.
+  _targetDOMCaretNode: null,
 
   get _domWinUtils() {
     return BrowserApp.selectedBrowser.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor).
@@ -101,28 +107,18 @@ var SelectionHandler = {
       getService(Ci.nsIUUIDGenerator);
   },
 
-  // Are we supporting Gecko or Native touchCarets?
-  get _touchCaretEnabled() {
-    if (this._touchCaretEnabledValue == null) {
-      this._touchCaretEnabledValue = Services.prefs.getBoolPref(PREF_GECKO_TOUCHCARET_ENABLED);
-      Services.prefs.addObserver(PREF_GECKO_TOUCHCARET_ENABLED, function() {
-        SelectionHandler._touchCaretEnabledValue =
-          Services.prefs.getBoolPref(PREF_GECKO_TOUCHCARET_ENABLED);
+  // Are we supporting Accessible-core or native-Java carets?
+  get _accessibleCaretEnabled() {
+    if (this._accessibleCaretEnabledValue == null) {
+      try {
+        this._accessibleCaretEnabledValue = Services.prefs.getBoolPref(PREF_GECKO_ACCESSIBLECARET_ENABLED);
+      } catch (unused) { }
+      Services.prefs.addObserver(PREF_GECKO_ACCESSIBLECARET_ENABLED, function() {
+        SelectionHandler._accessibleCaretEnabledValue =
+          Services.prefs.getBoolPref(PREF_GECKO_ACCESSIBLECARET_ENABLED);
       }, false);
     }
-    return this._touchCaretEnabledValue;
-  },
-
-  // Are we supporting Gecko or Native selectionCarets?
-  get _selectionCaretEnabled() {
-    if (this._selectionCaretEnabledValue == null) {
-      this._selectionCaretEnabledValue = Services.prefs.getBoolPref(PREF_GECKO_SELECTIONCARETS_ENABLED);
-      Services.prefs.addObserver(PREF_GECKO_SELECTIONCARETS_ENABLED, function() {
-        SelectionHandler._selectionCaretEnabledValue =
-          Services.prefs.getBoolPref(PREF_GECKO_SELECTIONCARETS_ENABLED);
-      }, false);
-    }
-    return this._selectionCaretEnabledValue;
+    return this._accessibleCaretEnabledValue;
   },
 
   _addObservers: function sh_addObservers() {
@@ -412,8 +408,8 @@ var SelectionHandler = {
    *                   y    - The y-coordinate for SELECT_AT_POINT.
    */
   startSelection: function sh_startSelection(aElement, aOptions = { mode: SelectionHandler.SELECT_ALL }) {
-    // Disable Native touchCarets if Gecko enabled.
-    if (this._selectionCaretEnabled) {
+    // Disable Native touchCarets if Gecko AccessibleCaret enabled.
+    if (this._accessibleCaretEnabled) {
       return this.START_ERROR_SELECTIONCARETS_ENABLED;
     }
 
@@ -695,7 +691,8 @@ var SelectionHandler = {
       id: "selectall_action",
       icon: "drawable://ab_select_all",
       action: function(aElement) {
-        SelectionHandler.startSelection(aElement);
+        // Use the public DOMNode for startSelection(), not any anonymous inner.
+        SelectionHandler.startSelection(SelectionHandler._targetDOMCaretNode);
         UITelemetry.addEvent("action.1", "actionbar", null, "select_all");
       },
       order: 5,
@@ -743,8 +740,7 @@ var SelectionHandler = {
       selector: {
         matches: function(aElement) {
           // Don't include "copy" for password fields.
-          // mozIsTextField(true) tests for only non-password fields.
-          if (aElement instanceof Ci.nsIDOMHTMLInputElement && !aElement.mozIsTextField(true)) {
+          if (aElement instanceof Ci.nsIDOMHTMLInputElement && (aElement.type === "password")) {
             return false;
           }
           return SelectionHandler.isSelectionActive();
@@ -798,7 +794,7 @@ var SelectionHandler = {
 
     SEARCH_ADD: {
       id: "search_add_action",
-      label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine2"),
+      label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine3"),
       icon: "drawable://ab_add_search_engine",
 
       selector: {
@@ -876,8 +872,8 @@ var SelectionHandler = {
    * @param aX, aY tap location in client coordinates.
    */
   attachCaret: function sh_attachCaret(aElement) {
-    // Disable Native attachCaret() if Gecko touchCarets are enabled.
-    if (this._touchCaretEnabled) {
+    // Disable Native touchCarets if Gecko AccessibleCaret enabled.
+    if (this._accessibleCaretEnabled) {
       return this.ATTACH_ERROR_TOUCHCARET_ENABLED;
     }
 
@@ -910,9 +906,30 @@ var SelectionHandler = {
     return this.ERROR_NONE;
   },
 
+  /**
+   * <input> editables of type=number are special cases, bearing unique anonymous
+   * internal content to facilitate up/down arrow UI controls. We will maintain a
+   * reference to their public DOMNode, as well as their internal node, which
+   * holds reference to it's editor.
+   */
+  _setTargetElements: function(element) {
+    // Default, both values are the same.
+    this._targetDOMCaretNode = element;
+    this._targetElement = element;
+    if (element.type !== "number") {
+      return;
+    }
+
+    // Set the editor bearing anonymous inner <input> element.
+    let editorNode = Services.focus.focusedElement;
+    if (editorNode instanceof HTMLInputElement && editorNode.editor) {
+      this._targetElement = editorNode;
+    }
+    return;
+  },
+
   // Target initialization for both TYPE_CURSOR and TYPE_SELECTION
   _initTargetInfo: function sh_initTargetInfo(aElement, aSelectionType) {
-    this._targetElement = aElement;
     if (aElement instanceof Ci.nsIDOMNSEditableElement) {
       if (aSelectionType === this.TYPE_SELECTION) {
         // Blur the targetElement to force IME code to undo previous style compositions
@@ -922,6 +939,7 @@ var SelectionHandler = {
       // Ensure targetElement is now focused normally
       aElement.focus();
     }
+    this._setTargetElements(aElement);
 
     this._selectionID = this._idService.generateUUID().toString();
     this._stopDraggingHandles();
@@ -982,13 +1000,15 @@ var SelectionHandler = {
   },
 
   isElementEditableText: function (aElement) {
-    return (((aElement instanceof HTMLInputElement && aElement.mozIsTextField(false)) ||
+    return (((aElement instanceof HTMLInputElement &&
+              (aElement.mozIsTextField(false) || aElement.type === "number")) ||
             (aElement instanceof HTMLTextAreaElement)) && !aElement.readOnly) ||
             aElement.isContentEditable;
   },
 
   _isNonTextInputElement: function(aElement) {
-    return (aElement instanceof HTMLInputElement && !aElement.mozIsTextField(false));
+    return (aElement instanceof HTMLInputElement &&
+            !(aElement.mozIsTextField(false) || aElement.type === "number"));
   },
 
   /*
@@ -1012,7 +1032,7 @@ var SelectionHandler = {
 
     // Constrain text selection within editable elements.
     let targetIsEditable = this._targetElement instanceof Ci.nsIDOMNSEditableElement;
-    if (targetIsEditable && (caretPos.offsetNode != this._targetElement)) {
+    if (targetIsEditable && (caretPos.offsetNode != this._targetDOMCaretNode)) {
       return;
     }
 
@@ -1099,7 +1119,7 @@ var SelectionHandler = {
     if (selectedText.length) {
       let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
       clipboard.copyString(selectedText);
-      NativeWindow.toast.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), "short");
+      Snackbars.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), Snackbars.LENGTH_LONG);
     }
     this._closeSelection();
   },
@@ -1239,6 +1259,8 @@ var SelectionHandler = {
 
     this._contentWindow = null;
     this._targetElement = null;
+    this._targetDOMCaretNode = null;
+
     this._targetIsRTL = false;
     this._ignoreCompositionChanges = false;
     this._prevHandlePositions = [];

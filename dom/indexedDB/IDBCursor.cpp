@@ -24,7 +24,8 @@
 
 namespace mozilla {
 namespace dom {
-namespace indexedDB {
+
+using namespace indexedDB;
 
 IDBCursor::IDBCursor(Type aType,
                      BackgroundCursorChild* aBackgroundActor,
@@ -64,6 +65,14 @@ IDBCursor::IDBCursor(Type aType,
   }
 }
 
+#ifdef ENABLE_INTL_API
+bool
+IDBCursor::IsLocaleAware() const
+{
+  return mSourceIndex && !mSourceIndex->Locale().IsEmpty();
+}
+#endif
+
 IDBCursor::~IDBCursor()
 {
   AssertIsOnOwningThread();
@@ -88,7 +97,7 @@ IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
   MOZ_ASSERT(!aBackgroundActor->GetIndex());
   MOZ_ASSERT(!aKey.IsUnset());
 
-  nsRefPtr<IDBCursor> cursor =
+  RefPtr<IDBCursor> cursor =
     new IDBCursor(Type_ObjectStore, aBackgroundActor, aKey);
 
   cursor->mCloneInfo = Move(aCloneInfo);
@@ -107,7 +116,7 @@ IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
   MOZ_ASSERT(!aBackgroundActor->GetIndex());
   MOZ_ASSERT(!aKey.IsUnset());
 
-  nsRefPtr<IDBCursor> cursor =
+  RefPtr<IDBCursor> cursor =
     new IDBCursor(Type_ObjectStoreKey, aBackgroundActor, aKey);
 
   return cursor.forget();
@@ -117,6 +126,7 @@ IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
 already_AddRefed<IDBCursor>
 IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
                   const Key& aKey,
+                  const Key& aSortKey,
                   const Key& aPrimaryKey,
                   StructuredCloneReadInfo&& aCloneInfo)
 {
@@ -127,9 +137,10 @@ IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
   MOZ_ASSERT(!aKey.IsUnset());
   MOZ_ASSERT(!aPrimaryKey.IsUnset());
 
-  nsRefPtr<IDBCursor> cursor =
+  RefPtr<IDBCursor> cursor =
     new IDBCursor(Type_Index, aBackgroundActor, aKey);
 
+  cursor->mSortKey = Move(aSortKey);
   cursor->mPrimaryKey = Move(aPrimaryKey);
   cursor->mCloneInfo = Move(aCloneInfo);
 
@@ -140,6 +151,7 @@ IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
 already_AddRefed<IDBCursor>
 IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
                   const Key& aKey,
+                  const Key& aSortKey,
                   const Key& aPrimaryKey)
 {
   MOZ_ASSERT(aBackgroundActor);
@@ -149,9 +161,10 @@ IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
   MOZ_ASSERT(!aKey.IsUnset());
   MOZ_ASSERT(!aPrimaryKey.IsUnset());
 
-  nsRefPtr<IDBCursor> cursor =
+  RefPtr<IDBCursor> cursor =
     new IDBCursor(Type_IndexKey, aBackgroundActor, aKey);
 
+  cursor->mSortKey = Move(aSortKey);
   cursor->mPrimaryKey = Move(aPrimaryKey);
 
   return cursor.forget();
@@ -249,7 +262,7 @@ IDBCursor::Reset()
   mContinueCalled = false;
 }
 
-nsPIDOMWindow*
+nsPIDOMWindowInner*
 IDBCursor::GetParentObject() const
 {
   AssertIsOnOwningThread();
@@ -309,7 +322,6 @@ IDBCursor::GetKey(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
                   ErrorResult& aRv)
 {
   AssertIsOnOwningThread();
-
   MOZ_ASSERT(!mKey.IsUnset() || !mHaveValue);
 
   if (!mHaveValue) {
@@ -428,11 +440,26 @@ IDBCursor::Continue(JSContext* aCx,
     return;
   }
 
+#ifdef ENABLE_INTL_API
+  if (IsLocaleAware() && !key.IsUnset()) {
+    Key tmp;
+    aRv = key.ToLocaleBasedKey(tmp, mSourceIndex->Locale());
+    if (aRv.Failed()) {
+      return;
+    }
+    key = tmp;
+  }
+
+  const Key& sortKey = IsLocaleAware() ? mSortKey : mKey;
+#else
+  const Key& sortKey = mKey;
+#endif
+
   if (!key.IsUnset()) {
     switch (mDirection) {
       case NEXT:
       case NEXT_UNIQUE:
-        if (key <= mKey) {
+        if (key <= sortKey) {
           aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
           return;
         }
@@ -440,7 +467,7 @@ IDBCursor::Continue(JSContext* aCx,
 
       case PREV:
       case PREV_UNIQUE:
-        if (key >= mKey) {
+        if (key >= sortKey) {
           aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
           return;
         }
@@ -483,7 +510,7 @@ IDBCursor::Continue(JSContext* aCx,
                  IDB_LOG_STRINGIFY(key));
   }
 
-  mBackgroundActor->SendContinueInternal(ContinueParams(key));
+  mBackgroundActor->SendContinueInternal(ContinueParams(key), mKey);
 
   mContinueCalled = true;
 }
@@ -494,7 +521,7 @@ IDBCursor::Advance(uint32_t aCount, ErrorResult &aRv)
   AssertIsOnOwningThread();
 
   if (!aCount) {
-    aRv.ThrowTypeError(MSG_INVALID_ADVANCE_COUNT);
+    aRv.ThrowTypeError<MSG_INVALID_ADVANCE_COUNT>();
     return;
   }
 
@@ -541,7 +568,7 @@ IDBCursor::Advance(uint32_t aCount, ErrorResult &aRv)
                  aCount);
   }
 
-  mBackgroundActor->SendContinueInternal(AdvanceParams(aCount));
+  mBackgroundActor->SendContinueInternal(AdvanceParams(aCount), mKey);
 
   mContinueCalled = true;
 }
@@ -562,10 +589,12 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
     return nullptr;
   }
 
-  if (IsSourceDeleted() ||
+  if (mTransaction->GetMode() == IDBTransaction::CLEANUP ||
+      IsSourceDeleted() ||
       !mHaveValue ||
       mType == Type_ObjectStoreKey ||
-      mType == Type_IndexKey) {
+      mType == Type_IndexKey ||
+      mContinueCalled) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
     return nullptr;
   }
@@ -573,6 +602,8 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
   MOZ_ASSERT(!mKey.IsUnset());
   MOZ_ASSERT_IF(mType == Type_Index, !mPrimaryKey.IsUnset());
+
+  mBackgroundActor->InvalidateCachedResponses();
 
   IDBObjectStore* objectStore;
   if (mType == Type_ObjectStore) {
@@ -585,7 +616,7 @@ IDBCursor::Update(JSContext* aCx, JS::Handle<JS::Value> aValue,
 
   const Key& primaryKey = (mType == Type_ObjectStore) ? mKey : mPrimaryKey;
 
-  nsRefPtr<IDBRequest> request;
+  RefPtr<IDBRequest> request;
 
   if (objectStore->HasValidKeyPath()) {
     // Make sure the object given has the correct keyPath value set on it.
@@ -682,13 +713,16 @@ IDBCursor::Delete(JSContext* aCx, ErrorResult& aRv)
   if (IsSourceDeleted() ||
       !mHaveValue ||
       mType == Type_ObjectStoreKey ||
-      mType == Type_IndexKey) {
+      mType == Type_IndexKey ||
+      mContinueCalled) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
     return nullptr;
   }
 
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
   MOZ_ASSERT(!mKey.IsUnset());
+
+  mBackgroundActor->InvalidateCachedResponses();
 
   IDBObjectStore* objectStore;
   if (mType == Type_ObjectStore) {
@@ -707,7 +741,7 @@ IDBCursor::Delete(JSContext* aCx, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsRefPtr<IDBRequest> request =
+  RefPtr<IDBRequest> request =
     objectStore->DeleteInternal(aCx, key, /* aFromCursor */ true, aRv);
   if (aRv.Failed()) {
     return nullptr;
@@ -776,6 +810,7 @@ IDBCursor::Reset(Key&& aKey)
 
 void
 IDBCursor::Reset(Key&& aKey,
+                 Key&& aSortKey,
                  Key&& aPrimaryKey,
                  StructuredCloneReadInfo&& aValue)
 {
@@ -785,6 +820,7 @@ IDBCursor::Reset(Key&& aKey,
   Reset();
 
   mKey = Move(aKey);
+  mSortKey = Move(aSortKey);
   mPrimaryKey = Move(aPrimaryKey);
   mCloneInfo = Move(aValue);
 
@@ -792,7 +828,9 @@ IDBCursor::Reset(Key&& aKey,
 }
 
 void
-IDBCursor::Reset(Key&& aKey, Key&& aPrimaryKey)
+IDBCursor::Reset(Key&& aKey,
+                 Key&& aSortKey,
+                 Key&& aPrimaryKey)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mType == Type_IndexKey);
@@ -800,6 +838,7 @@ IDBCursor::Reset(Key&& aKey, Key&& aPrimaryKey)
   Reset();
 
   mKey = Move(aKey);
+  mSortKey = Move(aSortKey);
   mPrimaryKey = Move(aPrimaryKey);
 
   mHaveValue = !mKey.IsUnset();
@@ -830,9 +869,9 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBCursor)
 
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mScriptOwner)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedKey)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedPrimaryKey)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedValue)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedKey)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedPrimaryKey)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedValue)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBCursor)
@@ -860,6 +899,5 @@ IDBCursor::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   }
 }
 
-} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla

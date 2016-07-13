@@ -50,7 +50,7 @@ void InkCollector::Initialize()
   }
 
   // Set up connection between sink and InkCollector.
-  nsRefPtr<IConnectionPointContainer> connPointContainer;
+  RefPtr<IConnectionPointContainer> connPointContainer;
 
   // Get the connection point container.
   if (SUCCEEDED(mInkCollector->QueryInterface(IID_IConnectionPointContainer,
@@ -216,7 +216,7 @@ HRESULT InkCollectorEvent::Invoke(DISPID aDispIdMember, REFIID /*aRiid*/,
       }
       break;
     }
-  };
+  }
   return S_OK;
 }
 

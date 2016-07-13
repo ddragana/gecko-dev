@@ -13,6 +13,8 @@
 namespace mozilla {
 namespace CubebUtils {
 
+typedef cubeb_devid AudioDeviceID;
+
 // Initialize Audio Library. Some Audio backends require initializing the
 // library before using it.
 void InitLibrary();
@@ -37,6 +39,8 @@ double GetVolumeScale();
 bool GetFirstStream();
 cubeb* GetCubebContext();
 cubeb* GetCubebContextUnlocked();
+void ReportCubebStreamInitFailure(bool aIsFirstStream);
+void ReportCubebBackendUsed();
 uint32_t GetCubebLatency();
 bool CubebLatencyPrefSet();
 #if defined(__ANDROID__) && defined(MOZ_B2G)

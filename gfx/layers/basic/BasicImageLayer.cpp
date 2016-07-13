@@ -10,7 +10,6 @@
 #include "basic/BasicImplData.h"        // for BasicImplData
 #include "basic/BasicLayers.h"          // for BasicLayerManager
 #include "mozilla/mozalloc.h"           // for operator new
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for gfxPattern::Release, etc
@@ -38,7 +37,7 @@ protected:
   }
 
 public:
-  virtual void SetVisibleRegion(const nsIntRegion& aRegion) override
+  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -69,7 +68,7 @@ BasicImageLayer::Paint(DrawTarget* aDT,
     return;
   }
 
-  nsRefPtr<ImageFactory> originalIF = mContainer->GetImageFactory();
+  RefPtr<ImageFactory> originalIF = mContainer->GetImageFactory();
   mContainer->SetImageFactory(mManager->IsCompositingCheap() ? nullptr : BasicManager()->GetImageFactory());
 
   AutoLockImage autoLock(mContainer);
@@ -85,8 +84,8 @@ BasicImageLayer::Paint(DrawTarget* aDT,
   }
 
   gfx::IntSize size = mSize = surface->GetSize();
-  FillRectWithMask(aDT, aDeviceOffset, Rect(0, 0, size.width, size.height), 
-                   surface, ToFilter(mFilter),
+  FillRectWithMask(aDT, aDeviceOffset, Rect(0, 0, size.width, size.height),
+                   surface, mSamplingFilter,
                    DrawOptions(GetEffectiveOpacity(), GetEffectiveOperator(this)),
                    aMaskLayer);
 
@@ -112,7 +111,7 @@ already_AddRefed<ImageLayer>
 BasicLayerManager::CreateImageLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  nsRefPtr<ImageLayer> layer = new BasicImageLayer(this);
+  RefPtr<ImageLayer> layer = new BasicImageLayer(this);
   return layer.forget();
 }
 

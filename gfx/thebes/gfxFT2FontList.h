@@ -42,7 +42,7 @@ public:
     CreateFontEntry(const nsAString& aFontName,
                     uint16_t aWeight,
                     int16_t aStretch,
-                    bool aItalic,
+                    uint8_t aStyle,
                     const uint8_t* aFontData,
                     uint32_t aLength);
 
@@ -63,7 +63,7 @@ public:
                     const uint8_t* aFontData = nullptr);
 
     virtual gfxFont *CreateFontInstance(const gfxFontStyle *aFontStyle,
-                                        bool aNeedsBold);
+                                        bool aNeedsBold) override;
 
     // Create (if necessary) and return the cairo_font_face for this font.
     // This may fail and return null, so caller must be prepared to handle this.
@@ -73,21 +73,21 @@ public:
     // This may fail and return null, so caller must be prepared to handle this.
     cairo_scaled_font_t *CreateScaledFont(const gfxFontStyle *aStyle);
 
-    nsresult ReadCMAP(FontInfoData *aFontInfoData = nullptr);
+    nsresult ReadCMAP(FontInfoData *aFontInfoData = nullptr) override;
 
     virtual hb_blob_t* GetFontTable(uint32_t aTableTag) override;
 
     virtual nsresult CopyFontTable(uint32_t aTableTag,
-                                   FallibleTArray<uint8_t>& aBuffer) override;
+                                   nsTArray<uint8_t>& aBuffer) override;
 
     // Check for various kinds of brokenness, and set flags on the entry
     // accordingly so that we avoid using bad font tables
     void CheckForBrokenFont(gfxFontFamily *aFamily);
 
     virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontListSizes* aSizes) const;
+                                        FontListSizes* aSizes) const override;
     virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontListSizes* aSizes) const;
+                                        FontListSizes* aSizes) const override;
 
     FT_Face mFTFace;
     cairo_font_face_t *mFontFace;
@@ -125,12 +125,12 @@ public:
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
                                           uint16_t aWeight,
                                           int16_t aStretch,
-                                          bool aItalic);
+                                          uint8_t aStyle);
 
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
                                            uint16_t aWeight,
                                            int16_t aStretch,
-                                           bool aItalic,
+                                           uint8_t aStyle,
                                            const uint8_t* aFontData,
                                            uint32_t aLength);
 
@@ -140,7 +140,7 @@ public:
         return static_cast<gfxFT2FontList*>(gfxPlatformFontList::PlatformFontList());
     }
 
-    virtual void GetFontFamilyList(nsTArray<nsRefPtr<gfxFontFamily> >& aFamilyArray);
+    virtual void GetFontFamilyList(nsTArray<RefPtr<gfxFontFamily> >& aFamilyArray);
 
 protected:
     typedef enum {
@@ -185,7 +185,7 @@ protected:
     nsTHashtable<nsStringHashKey> mSkipSpaceLookupCheckFamilies;
 
 private:
-    nsRefPtrHashtable<nsStringHashKey, gfxFontFamily> mHiddenFontFamilies;
+    FontFamilyTable mHiddenFontFamilies;
 };
 
 #endif /* GFX_FT2FONTLIST_H */

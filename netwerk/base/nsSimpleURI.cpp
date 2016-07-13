@@ -24,6 +24,9 @@
 
 using namespace mozilla::ipc;
 
+namespace mozilla {
+namespace net {
+
 static NS_DEFINE_CID(kThisSimpleURIImplementationCID,
                      NS_THIS_SIMPLEURI_IMPLEMENTATION_CID);
 static NS_DEFINE_CID(kSimpleURICID, NS_SIMPLEURI_CID);
@@ -193,28 +196,23 @@ nsSimpleURI::SetSpec(const nsACString &aSpec)
 {
     NS_ENSURE_STATE(mMutable);
     
-    const nsAFlatCString& flat = PromiseFlatCString(aSpec);
-    const char* specPtr = flat.get();
-
     // filter out unexpected chars "\r\n\t" if necessary
     nsAutoCString filteredSpec;
-    int32_t specLen;
-    if (net_FilterURIString(specPtr, filteredSpec)) {
-        specPtr = filteredSpec.get();
-        specLen = filteredSpec.Length();
-    } else
-        specLen = flat.Length();
+    net_FilterURIString(aSpec, filteredSpec);
 
     // nsSimpleURI currently restricts the charset to US-ASCII
     nsAutoCString spec;
-    NS_EscapeURL(specPtr, specLen, esc_OnlyNonASCII|esc_AlwaysCopy, spec);
+    nsresult rv = NS_EscapeURL(filteredSpec, esc_OnlyNonASCII, spec, fallible);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
 
     int32_t colonPos = spec.FindChar(':');
     if (colonPos < 0 || !net_IsValidScheme(spec.get(), colonPos))
         return NS_ERROR_MALFORMED_URI;
 
     mScheme.Truncate();
-    mozilla::DebugOnly<int32_t> n = spec.Left(mScheme, colonPos);
+    DebugOnly<int32_t> n = spec.Left(mScheme, colonPos);
     NS_ASSERTION(n == colonPos, "Left failed");
     ToLowerCase(mScheme);
 
@@ -236,7 +234,7 @@ nsSimpleURI::SetScheme(const nsACString &scheme)
 
     const nsPromiseFlatCString &flat = PromiseFlatCString(scheme);
     if (!net_IsValidScheme(flat)) {
-        NS_ERROR("the given url scheme contains invalid characters");
+        NS_WARNING("the given url scheme contains invalid characters");
         return NS_ERROR_MALFORMED_URI;
     }
 
@@ -297,6 +295,7 @@ nsSimpleURI::GetHostPort(nsACString &result)
 {
     // Note: Audit all callers before changing this to return an empty
     // string -- CAPS and UI code may depend on this throwing.
+    // Note: If this is changed, change GetAsciiHostPort as well.
     return NS_ERROR_FAILURE;
 }
 
@@ -427,7 +426,7 @@ nsSimpleURI::EqualsInternal(nsIURI* other,
     NS_ENSURE_ARG_POINTER(other);
     NS_PRECONDITION(result, "null pointer");
 
-    nsRefPtr<nsSimpleURI> otherUri;
+    RefPtr<nsSimpleURI> otherUri;
     nsresult rv = other->QueryInterface(kThisSimpleURIImplementationCID,
                                         getter_AddRefs(otherUri));
     if (NS_FAILED(rv)) {
@@ -493,7 +492,7 @@ nsresult
 nsSimpleURI::CloneInternal(nsSimpleURI::RefHandlingEnum refHandlingMode,
                            nsIURI** result)
 {
-    nsRefPtr<nsSimpleURI> url = StartClone(refHandlingMode);
+    RefPtr<nsSimpleURI> url = StartClone(refHandlingMode);
     if (!url)
         return NS_ERROR_OUT_OF_MEMORY;
 
@@ -525,6 +524,13 @@ nsSimpleURI::GetAsciiSpec(nsACString &result)
     if (NS_FAILED(rv)) return rv;
     NS_EscapeURL(buf, esc_OnlyNonASCII|esc_AlwaysCopy, result);
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSimpleURI::GetAsciiHostPort(nsACString &result)
+{
+    // XXX This behavior mimics GetHostPort.
+    return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -625,7 +631,7 @@ nsSimpleURI::SetMutable(bool value)
 //----------------------------------------------------------------------------
 
 size_t 
-nsSimpleURI::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+nsSimpleURI::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return mScheme.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
          mPath.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
@@ -633,7 +639,9 @@ nsSimpleURI::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 }
 
 size_t
-nsSimpleURI::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+nsSimpleURI::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
+} // namespace net
+} // namespace mozilla

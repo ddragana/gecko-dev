@@ -7,20 +7,19 @@
 #if !defined(GonkVideoDecoderManager_h_)
 #define GonkVideoDecoderManager_h_
 
-#include <set>
 #include "nsRect.h"
 #include "GonkMediaDataDecoder.h"
 #include "mozilla/RefPtr.h"
 #include "I420ColorConverterHelper.h"
 #include "MediaCodecProxy.h"
-#include <stagefright/foundation/AHandler.h>
 #include "GonkNativeWindow.h"
-#include "GonkNativeWindowClient.h"
+#include "mozilla/layers/FenceUtils.h"
+#include "mozilla/UniquePtr.h"
+#include <ui/Fence.h>
 
 using namespace android;
 
 namespace android {
-struct ALooper;
 class MediaBuffer;
 struct MOZ_EXPORT AString;
 class GonkNativeWindow;
@@ -30,6 +29,7 @@ namespace mozilla {
 
 namespace layers {
 class TextureClient;
+class TextureClientRecycleAllocator;
 } // namespace mozilla::layers
 
 class GonkVideoDecoderManager : public GonkDecoderManager {
@@ -40,20 +40,32 @@ public:
   GonkVideoDecoderManager(mozilla::layers::ImageContainer* aImageContainer,
                           const VideoInfo& aConfig);
 
-  virtual ~GonkVideoDecoderManager() override;
+  virtual ~GonkVideoDecoderManager();
 
-  virtual android::sp<MediaCodecProxy> Init(MediaDataDecoderCallback* aCallback) override;
+  RefPtr<InitPromise> Init() override;
 
-  virtual nsresult Input(MediaRawData* aSample) override;
+  nsresult Output(int64_t aStreamOffset,
+                          RefPtr<MediaData>& aOutput) override;
 
-  virtual nsresult Output(int64_t aStreamOffset,
-                          nsRefPtr<MediaData>& aOutput) override;
+  nsresult Shutdown() override;
 
-  virtual nsresult Flush() override;
-
-  virtual bool HasQueuedSample() override;
+  const char* GetDescriptionName() const override
+  {
+    return "gonk video decoder";
+  }
 
   static void RecycleCallback(TextureClient* aClient, void* aClosure);
+
+protected:
+  // Bug 1199809: workaround to avoid sending the graphic buffer by making a
+  // copy of output buffer after calling flush(). Bug 1203859 was created to
+  // reimplementing Gonk PDM on top of OpenMax IL directly. Its buffer
+  // management will work better with Gecko and solve problems like this.
+  void ProcessFlush() override
+  {
+    mNeedsCopyBuffer = true;
+    GonkDecoderManager::ProcessFlush();
+  }
 
 private:
   struct FrameInfo
@@ -68,104 +80,68 @@ private:
     int32_t mCropRight = 0;
     int32_t mCropBottom = 0;
   };
-  class MessageHandler : public android::AHandler
-  {
-  public:
-    MessageHandler(GonkVideoDecoderManager *aManager);
-    ~MessageHandler();
 
-    virtual void onMessageReceived(const android::sp<android::AMessage> &aMessage);
-
-  private:
-    // Forbidden
-    MessageHandler() = delete;
-    MessageHandler(const MessageHandler &rhs) = delete;
-    const MessageHandler &operator=(const MessageHandler &rhs) = delete;
-
-    GonkVideoDecoderManager *mManager;
-  };
-  friend class MessageHandler;
-
-  class VideoResourceListener : public android::MediaCodecProxy::CodecResourceListener
-  {
-  public:
-    VideoResourceListener(GonkVideoDecoderManager *aManager);
-    ~VideoResourceListener();
-
-    virtual void codecReserved() override;
-    virtual void codecCanceled() override;
-
-  private:
-    // Forbidden
-    VideoResourceListener() = delete;
-    VideoResourceListener(const VideoResourceListener &rhs) = delete;
-    const VideoResourceListener &operator=(const VideoResourceListener &rhs) = delete;
-
-    GonkVideoDecoderManager *mManager;
-  };
-  friend class VideoResourceListener;
+  void onMessageReceived(const android::sp<android::AMessage> &aMessage) override;
 
   bool SetVideoFormat();
 
-  nsresult CreateVideoData(int64_t aStreamOffset, VideoData** aOutData);
-  void ReleaseVideoBuffer();
+  nsresult CreateVideoData(MediaBuffer* aBuffer, int64_t aStreamOffset, VideoData** aOutData);
+  already_AddRefed<VideoData> CreateVideoDataFromGraphicBuffer(android::MediaBuffer* aSource,
+                                                               gfx::IntRect& aPicture);
+  already_AddRefed<VideoData> CreateVideoDataFromDataBuffer(android::MediaBuffer* aSource,
+                                                            gfx::IntRect& aPicture);
+
   uint8_t* GetColorConverterBuffer(int32_t aWidth, int32_t aHeight);
 
   // For codec resource management
   void codecReserved();
   void codecCanceled();
-  void onMessageReceived(const sp<AMessage> &aMessage);
 
   void ReleaseAllPendingVideoBuffers();
-  void PostReleaseVideoBuffer(android::MediaBuffer *aBuffer);
+  void PostReleaseVideoBuffer(android::MediaBuffer *aBuffer,
+                              layers::FenceHandle mReleaseFence);
 
-  uint32_t mVideoWidth;
-  uint32_t mVideoHeight;
-  uint32_t mDisplayWidth;
-  uint32_t mDisplayHeight;
-  nsIntRect mPicture;
-  nsIntSize mInitialFrame;
+  VideoInfo mConfig;
 
-  nsRefPtr<layers::ImageContainer> mImageContainer;
+  RefPtr<layers::ImageContainer> mImageContainer;
+  RefPtr<layers::TextureClientRecycleAllocator> mCopyAllocator;
 
-  android::MediaBuffer* mVideoBuffer;
-
-  MediaDataDecoderCallback*  mReaderCallback;
-  MediaInfo mInfo;
-  android::sp<VideoResourceListener> mVideoListener;
-  android::sp<MessageHandler> mHandler;
-  android::sp<ALooper> mLooper;
-  android::sp<ALooper> mManagerLooper;
+  MozPromiseRequestHolder<android::MediaCodecProxy::CodecPromise> mVideoCodecRequest;
   FrameInfo mFrameInfo;
-
-  int64_t mLastDecodedTime;  // The last decoded frame presentation time.
 
   // color converter
   android::I420ColorConverterHelper mColorConverter;
-  nsAutoArrayPtr<uint8_t> mColorConverterBuffer;
+  UniquePtr<uint8_t[]> mColorConverterBuffer;
   size_t mColorConverterBufferSize;
 
   android::sp<android::GonkNativeWindow> mNativeWindow;
+#if ANDROID_VERSION >= 21
+  android::sp<android::IGraphicBufferProducer> mGraphicBufferProducer;
+#endif
+
   enum {
     kNotifyPostReleaseBuffer = 'nprb',
   };
 
-  // Hold video's MediaBuffers that are released.
-  // The holded MediaBuffers are released soon after flush.
-  Vector<android::MediaBuffer*> mPendingVideoBuffers;
-  // The lock protects mPendingVideoBuffers.
-  Mutex mPendingVideoBuffersLock;
+  struct ReleaseItem {
+    ReleaseItem(android::MediaBuffer* aBuffer, layers::FenceHandle& aFence)
+    : mBuffer(aBuffer)
+    , mReleaseFence(aFence) {}
+    android::MediaBuffer* mBuffer;
+    layers::FenceHandle mReleaseFence;
+  };
+  nsTArray<ReleaseItem> mPendingReleaseItems;
 
-  // MediaCodedc's wrapper that performs the decoding.
-  android::sp<android::MediaCodecProxy> mDecoder;
+  // The lock protects mPendingReleaseItems.
+  Mutex mPendingReleaseItemsLock;
 
-  // This monitor protects mQueueSample.
-  Monitor mMonitor;
+  // This TaskQueue should be the same one in mDecodeCallback->OnReaderTaskQueue().
+  // It is for codec resource mangement, decoding task should not dispatch to it.
+  RefPtr<TaskQueue> mReaderTaskQueue;
 
-  // An queue with the MP4 samples which are waiting to be sent into OMX.
-  // If an element is an empty MP4Sample, that menas EOS. There should not
-  // any sample be queued after EOS.
-  nsTArray<nsRefPtr<MediaRawData>> mQueueSample;
+  // Bug 1199809: do we need to make a copy of output buffer? Used only when
+  // the decoder outputs graphic buffers.
+  bool mNeedsCopyBuffer;
 };
 
 } // namespace mozilla

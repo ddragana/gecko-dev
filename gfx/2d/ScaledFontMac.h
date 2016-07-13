@@ -6,7 +6,13 @@
 #ifndef MOZILLA_GFX_SCALEDFONTMAC_H_
 #define MOZILLA_GFX_SCALEDFONTMAC_H_
 
-#import <ApplicationServices/ApplicationServices.h>
+#ifdef MOZ_WIDGET_COCOA
+#include <ApplicationServices/ApplicationServices.h>
+#else
+#include <CoreGraphics/CoreGraphics.h>
+#include <CoreText/CoreText.h>
+#endif
+
 #include "2D.h"
 
 #include "ScaledFontBase.h"
@@ -31,6 +37,7 @@ public:
 
 private:
   friend class DrawTargetCG;
+  friend class DrawTargetSkia;
   CGFontRef mFont;
   CTFontRef mCTFont; // only created if CTFontDrawGlyphs is available, otherwise null
 

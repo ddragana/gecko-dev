@@ -7,6 +7,7 @@
 #include "nsISupports.idl"
 #include "nsISupportsArray.idl"
 #include "nsIFormatConverter.idl"
+#include "nsIContentPolicyBase.idl"
 
 interface nsIDOMNode;
 
@@ -15,6 +16,7 @@ interface nsIDOMNode;
 // these probably shouldn't live here, but in some central repository shared
 // by the entire app.
 #define kTextMime                   "text/plain"
+#define kRTFMime                    "text/rtf"
 #define kUnicodeMime                "text/unicode"
 #define kMozTextInternal          "text/x-moz-text-internal"  // text data which isn't suppoed to be parsed by other apps.
 #define kHTMLMime                   "text/html"
@@ -47,6 +49,8 @@ interface nsIDOMNode;
 #define kFilePromiseMime            "application/x-moz-file-promise"
 // a synthetic flavor, put into the transferable once we know the destination directory of a file drag
 #define kFilePromiseDirectoryMime   "application/x-moz-file-promise-dir"
+
+#define kCustomTypesMime "application/x-moz-custom-clipdata"
 
 %}
 
@@ -196,11 +200,13 @@ interface nsITransferable : nsISupports
   [noscript] attribute boolean isPrivateData;
 
   /**
-   * The source dom node this transferable was created from.
-   * Note, currently only in use on Windows for network principal
-   * information in drag operations.
+   * The source dom node this transferable was created from and
+   * the contentPolicyType for the transferable.
+   * Note, currently only used on Windows for network principal and
+   * contentPolicyType information in drag operations.
    */
   [noscript] attribute nsIDOMNode requestingNode;
+  [noscript] attribute nsContentPolicyType contentPolicyType;
 
 };
 

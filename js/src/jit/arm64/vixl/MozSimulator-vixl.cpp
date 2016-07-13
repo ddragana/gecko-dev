@@ -29,6 +29,7 @@
 #include "jit/arm64/vixl/Debugger-vixl.h"
 #include "jit/arm64/vixl/Simulator-vixl.h"
 #include "jit/IonTypes.h"
+#include "threading/LockGuard.h"
 #include "vm/Runtime.h"
 
 namespace vixl {
@@ -37,23 +38,35 @@ namespace vixl {
 using mozilla::DebugOnly;
 using js::jit::ABIFunctionType;
 
-
-Simulator::Simulator() {
-  decoder_ = js_new<Decoder>();
-  if (!decoder_) {
-    MOZ_ReportAssertionFailure("[unhandlable oom] Decoder", __FILE__, __LINE__);
-    MOZ_CRASH();
-  }
-
-  // FIXME: This just leaks the Decoder object for now, which is probably OK.
-  // FIXME: We should free it at some point.
-  // FIXME: Note that it can't be stored in the SimulatorRuntime due to lifetime conflicts.
-  this->init(decoder_, stdout);
+Simulator::Simulator(Decoder* decoder, FILE* stream)
+  : stream_(nullptr)
+  , print_disasm_(nullptr)
+  , instrumentation_(nullptr)
+  , stack_(nullptr)
+  , stack_limit_(nullptr)
+  , decoder_(nullptr)
+  , oom_(false)
+{
+    this->init(decoder, stream);
 }
 
 
-Simulator::Simulator(Decoder* decoder, FILE* stream) {
-  this->init(decoder, stream);
+Simulator::~Simulator() {
+  js_free(stack_);
+  stack_ = nullptr;
+
+  // The decoder may outlive the simulator.
+  if (print_disasm_) {
+    decoder_->RemoveVisitor(print_disasm_);
+    js_delete(print_disasm_);
+    print_disasm_ = nullptr;
+  }
+
+  if (instrumentation_) {
+    decoder_->RemoveVisitor(instrumentation_);
+    js_delete(instrumentation_);
+    instrumentation_ = nullptr;
+  }
 }
 
 
@@ -63,7 +76,7 @@ void Simulator::ResetState() {
   fpcr_ = SimSystemRegister::DefaultValueFor(FPCR);
 
   // Reset registers to 0.
-  pc_ = NULL;
+  pc_ = nullptr;
   pc_modified_ = false;
   for (unsigned i = 0; i < kNumberOfRegisters; i++) {
     set_xreg(i, 0xbadbeef);
@@ -86,19 +99,29 @@ void Simulator::init(Decoder* decoder, FILE* stream) {
   VIXL_ASSERT((static_cast<int32_t>(-1) >> 1) == -1);
   VIXL_ASSERT((static_cast<uint32_t>(-1) >> 1) == 0x7FFFFFFF);
 
+  instruction_stats_ = false;
+
   // Set up the decoder.
   decoder_ = decoder;
   decoder_->AppendVisitor(this);
 
   stream_ = stream;
-  print_disasm_ = new PrintDisassembler(stream_);
+  print_disasm_ = js_new<PrintDisassembler>(stream_);
+  if (!print_disasm_) {
+    oom_ = true;
+    return;
+  }
   set_coloured_trace(false);
   trace_parameters_ = LOG_NONE;
 
   ResetState();
 
   // Allocate and set up the simulator stack.
-  stack_ = new byte[stack_size_];
+  stack_ = (byte*)js_malloc(stack_size_);
+  if (!stack_) {
+    oom_ = true;
+    return;
+  }
   stack_limit_ = stack_ + stack_protection_size_;
   // Configure the starting stack pointer.
   //  - Find the top of the stack.
@@ -110,17 +133,20 @@ void Simulator::init(Decoder* decoder, FILE* stream) {
   set_sp(tos);
 
   // Set the sample period to 10, as the VIXL examples and tests are short.
-  instrumentation_ = new Instrument("vixl_stats.csv", 10);
+  instrumentation_ = js_new<Instrument>("vixl_stats.csv", 10);
+  if (!instrumentation_) {
+    oom_ = true;
+    return;
+  }
 
   // Print a warning about exclusive-access instructions, but only the first
   // time they are encountered. This warning can be silenced using
   // SilenceExclusiveAccessWarning().
   print_exclusive_access_warning_ = true;
 
-  lock_ = PR_NewLock();
-  if (!lock_)
-    MOZ_CRASH("Could not allocate simulator lock.");
+#ifdef DEBUG
   lockOwner_ = nullptr;
+#endif
   redirection_ = nullptr;
 }
 
@@ -131,30 +157,24 @@ Simulator* Simulator::Current() {
 
 
 Simulator* Simulator::Create() {
-  Decoder* decoder = js_new<vixl::Decoder>();
-  if (!decoder) {
-    MOZ_ReportAssertionFailure("[unhandlable oom] Decoder", __FILE__, __LINE__);
-    MOZ_CRASH();
-  }
+  Decoder *decoder = js_new<vixl::Decoder>();
+  if (!decoder)
+    return nullptr;
 
   // FIXME: This just leaks the Decoder object for now, which is probably OK.
   // FIXME: We should free it at some point.
   // FIXME: Note that it can't be stored in the SimulatorRuntime due to lifetime conflicts.
-  if (getenv("USE_DEBUGGER") != nullptr) {
-    Debugger* debugger = js_new<Debugger>(decoder, stdout);
-    if (!debugger) {
-      MOZ_ReportAssertionFailure("[unhandlable oom] Decoder", __FILE__, __LINE__);
-      MOZ_CRASH();
-    }
-    return debugger;
-  }
+  Simulator *sim;
+  if (getenv("USE_DEBUGGER") != nullptr)
+    sim = js_new<Debugger>(decoder, stdout);
+  else
+    sim = js_new<Simulator>(decoder, stdout);
 
-  Simulator* sim = js_new<Simulator>();
-  if (!sim) {
-    MOZ_CRASH("NEED SIMULATOR");
+  // Check if Simulator:init ran out of memory.
+  if (sim && sim->oom()) {
+    js_delete(sim);
     return nullptr;
   }
-  sim->init(decoder, stdout);
 
   return sim;
 }
@@ -173,7 +193,7 @@ void Simulator::ExecuteInstruction() {
   increment_pc();
 
   if (MOZ_UNLIKELY(rpc)) {
-    JSRuntime::innermostAsmJSActivation()->setResumePC((void*)pc());
+    JSRuntime::innermostWasmActivation()->setResumePC((void*)pc());
     set_pc(rpc);
     // Just calling set_pc turns the pc_modified_ flag on, which means it doesn't
     // auto-step after executing the next instruction.  Force that to off so it
@@ -270,13 +290,16 @@ int64_t Simulator::call(uint8_t* entry, int argument_count, ...) {
 
 
 // Protects the icache and redirection properties of the simulator.
-class AutoLockSimulatorCache
+class AutoLockSimulatorCache : public js::LockGuard<js::Mutex>
 {
   friend class Simulator;
+  using Base = js::LockGuard<js::Mutex>;
 
  public:
-  explicit AutoLockSimulatorCache(Simulator* sim) : sim_(sim) {
-    PR_Lock(sim_->lock_);
+  explicit AutoLockSimulatorCache(Simulator* sim)
+    : Base(sim->lock_)
+    , sim_(sim)
+  {
     VIXL_ASSERT(!sim_->lockOwner_);
 #ifdef DEBUG
     sim_->lockOwner_ = PR_GetCurrentThread();
@@ -288,7 +311,6 @@ class AutoLockSimulatorCache
     VIXL_ASSERT(sim_->lockOwner_ == PR_GetCurrentThread());
     sim_->lockOwner_ = nullptr;
 #endif
-    PR_Unlock(sim_->lock_);
   }
 
  private:
@@ -339,11 +361,10 @@ class Redirection
       }
     }
 
+    js::AutoEnterOOMUnsafeRegion oomUnsafe;
     Redirection* redir = (Redirection*)js_malloc(sizeof(Redirection));
-    if (!redir) {
-      MOZ_ReportAssertionFailure("[unhandlable oom] Simulator redirection", __FILE__, __LINE__);
-      MOZ_CRASH();
-    }
+    if (!redir)
+        oomUnsafe.crash("Simulator redirection");
     new(redir) Redirection(nativeFunction, type, sim);
     return redir;
   }
@@ -467,6 +488,9 @@ typedef int64_t (*Prototype_General8)(int64_t arg0, int64_t arg1, int64_t arg2, 
 
 typedef int64_t (*Prototype_Int_Double)(double arg0);
 typedef int64_t (*Prototype_Int_IntDouble)(int32_t arg0, double arg1);
+typedef int64_t (*Prototype_Int_DoubleIntInt)(double arg0, uint64_t arg1, uint64_t arg2);
+typedef int64_t (*Prototype_Int_IntDoubleIntInt)(uint64_t arg0, double arg1,
+                                                 uint64_t arg2, uint64_t arg3);
 
 typedef float (*Prototype_Float32_Float32)(float arg0);
 
@@ -592,6 +616,18 @@ Simulator::VisitCallRedirection(const Instruction* instr)
       break;
     }
 
+    case js::jit::Args_Int_IntDoubleIntInt: {
+      int64_t ret = reinterpret_cast<Prototype_Int_IntDoubleIntInt>(nativeFn)(x0, d0, x1, x2);
+      setGPR64Result(ret);
+      break;
+    }
+
+    case js::jit::Args_Int_DoubleIntInt: {
+      int64_t ret = reinterpret_cast<Prototype_Int_DoubleIntInt>(nativeFn)(d0, x0, x1);
+      setGPR64Result(ret);
+      break;
+    }
+
     // Cases with float return type.
     case js::jit::Args_Float32_Float32: {
       float ret = reinterpret_cast<Prototype_Float32_Float32>(nativeFn)(s0);
@@ -688,4 +724,3 @@ vixl::Simulator* JSRuntime::simulator() const {
 uintptr_t* JSRuntime::addressOfSimulatorStackLimit() {
   return simulator_->addressOfStackLimit();
 }
-

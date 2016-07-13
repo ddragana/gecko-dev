@@ -21,7 +21,6 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsISystemWorkerManager.h"
 #include "nsIObserver.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsXULAppAPI.h" // For XRE_GetProcessType
 
@@ -59,12 +58,12 @@ private:
   SystemWorkerManager();
   ~SystemWorkerManager();
 
-  nsresult InitWifi(JSContext *cx);
-  nsresult InitKeyStore(JSContext *cx);
+  nsresult InitWifi();
+  nsresult InitKeyStore();
 
   nsCOMPtr<nsIWorkerHolder> mWifiWorker;
 
-  nsRefPtr<ipc::KeyStore> mKeyStore;
+  RefPtr<mozilla::ipc::KeyStore> mKeyStore;
 
   bool mShutdown;
 };

@@ -133,7 +133,9 @@ function SearchSuggestionControllerWrapper(engine, searchToken,
   this._controller.maxRemoteResults = maxResults;
   let promise = this._controller.fetch(searchToken, inPrivateContext, engine);
   this._suggestions = [];
+  this._success = false;
   this._promise = promise.then(results => {
+    this._success = true;
     this._suggestions = (results ? results.remote : null) || [];
   }).catch(err => {
     // fetch() rejects its promise if there's a pending request.
@@ -165,6 +167,14 @@ SearchSuggestionControllerWrapper.prototype = {
   },
 
   /**
+   * Returns the number of fetched suggestions, or -1 if the fetching was
+   * incomplete or failed.
+   */
+  get resultsCount() {
+    return this._success ? this._suggestions.length : -1;
+  },
+
+  /**
    * Stops the fetch.
    */
   stop() {
@@ -172,7 +182,7 @@ SearchSuggestionControllerWrapper.prototype = {
   },
 };
 
-let gInitializationPromise = null;
+var gInitializationPromise = null;
 
 this.PlacesSearchAutocompleteProvider = Object.freeze({
   /**
@@ -232,7 +242,7 @@ this.PlacesSearchAutocompleteProvider = Object.freeze({
     yield this.ensureInitialized();
 
     return SearchAutocompleteProviderInternal.aliasMatches
-                                             .find(m => m.alias == searchToken);
+             .find(m => m.alias.toLocaleLowerCase() == searchToken.toLocaleLowerCase());
   }),
 
   getDefaultMatch: Task.async(function* () {

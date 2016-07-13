@@ -14,9 +14,6 @@
 #include "jsapi.h"
 #include "nsGlobalWindow.h" // So we can assign an nsGlobalWindow* to mWindowSource
 
-#include "ServiceWorker.h"
-#include "ServiceWorkerClient.h"
-
 namespace mozilla {
 namespace dom {
 
@@ -36,11 +33,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MessageEvent, Event)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(MessageEvent, Event)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mData)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mData)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MessageEvent)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMMessageEvent)
 NS_INTERFACE_MAP_END_INHERITING(Event)
 
 NS_IMPL_ADDREF_INHERITED(MessageEvent, Event)
@@ -66,14 +62,6 @@ MessageEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenPro
   return mozilla::dom::MessageEventBinding::Wrap(aCx, this, aGivenProto);
 }
 
-NS_IMETHODIMP
-MessageEvent::GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aData)
-{
-  ErrorResult rv;
-  GetData(aCx, aData, rv);
-  return rv.StealNSResult();
-}
-
 void
 MessageEvent::GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aData,
                       ErrorResult& aRv)
@@ -85,36 +73,25 @@ MessageEvent::GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aData,
   }
 }
 
-NS_IMETHODIMP
-MessageEvent::GetOrigin(nsAString& aOrigin)
+void
+MessageEvent::GetOrigin(nsAString& aOrigin) const
 {
   aOrigin = mOrigin;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-MessageEvent::GetLastEventId(nsAString& aLastEventId)
-{
-  aLastEventId = mLastEventId;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-MessageEvent::GetSource(nsIDOMWindow** aSource)
-{
-  NS_IF_ADDREF(*aSource = mWindowSource);
-  return NS_OK;
 }
 
 void
-MessageEvent::GetSource(Nullable<OwningWindowProxyOrMessagePortOrClient>& aValue) const
+MessageEvent::GetLastEventId(nsAString& aLastEventId) const
+{
+  aLastEventId = mLastEventId;
+}
+
+void
+MessageEvent::GetSource(Nullable<OwningWindowProxyOrMessagePort>& aValue) const
 {
   if (mWindowSource) {
-    aValue.SetValue().SetAsWindowProxy() = mWindowSource;
+    aValue.SetValue().SetAsWindowProxy() = mWindowSource->GetOuterWindow();
   } else if (mPortSource) {
     aValue.SetValue().SetAsMessagePort() = mPortSource;
-  } else if (mClientSource) {
-    aValue.SetValue().SetAsClient() = mClientSource;
   }
 }
 
@@ -134,13 +111,9 @@ MessageEvent::Constructor(EventTarget* aEventTarget,
                           const MessageEventInit& aParam,
                           ErrorResult& aRv)
 {
-  nsRefPtr<MessageEvent> event = new MessageEvent(aEventTarget, nullptr, nullptr);
+  RefPtr<MessageEvent> event = new MessageEvent(aEventTarget, nullptr, nullptr);
 
-  aRv = event->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
+  event->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
   bool trusted = event->Init(aEventTarget);
   event->SetTrusted(trusted);
 
@@ -158,7 +131,7 @@ MessageEvent::Constructor(EventTarget* aEventTarget,
 
   if (!aParam.mSource.IsNull()) {
     if (aParam.mSource.Value().IsWindow()) {
-      event->mWindowSource = aParam.mSource.Value().GetAsWindow();
+      event->mWindowSource = aParam.mSource.Value().GetAsWindow()->AsInner();
     } else {
       event->mPortSource = aParam.mSource.Value().GetAsMessagePort();
     }
@@ -167,36 +140,54 @@ MessageEvent::Constructor(EventTarget* aEventTarget,
   }
 
   if (aParam.mPorts.WasPassed() && !aParam.mPorts.Value().IsNull()) {
-    nsTArray<nsRefPtr<MessagePortBase>> ports;
+    nsTArray<RefPtr<MessagePort>> ports;
     for (uint32_t i = 0, len = aParam.mPorts.Value().Value().Length(); i < len; ++i) {
       ports.AppendElement(aParam.mPorts.Value().Value()[i].get());
     }
 
-    event->mPorts = new MessagePortList(static_cast<EventBase*>(event), ports);
+    event->mPorts = new MessagePortList(static_cast<Event*>(event), ports);
   }
 
   return event.forget();
 }
 
-NS_IMETHODIMP
-MessageEvent::InitMessageEvent(const nsAString& aType,
-                               bool aCanBubble,
-                               bool aCancelable,
+void
+MessageEvent::InitMessageEvent(JSContext* aCx, const nsAString& aType,
+                               bool aCanBubble, bool aCancelable,
                                JS::Handle<JS::Value> aData,
                                const nsAString& aOrigin,
                                const nsAString& aLastEventId,
-                               nsIDOMWindow* aSource)
+                               const Nullable<WindowProxyOrMessagePort>& aSource,
+                               const Nullable<Sequence<OwningNonNull<MessagePort>>>& aPorts)
 {
-  nsresult rv = Event::InitEvent(aType, aCanBubble, aCancelable);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  Event::InitEvent(aType, aCanBubble, aCancelable);
   mData = aData;
   mozilla::HoldJSObjects(this);
   mOrigin = aOrigin;
   mLastEventId = aLastEventId;
-  mWindowSource = aSource;
 
-  return NS_OK;
+  mWindowSource = nullptr;
+  mPortSource = nullptr;
+
+  if (!aSource.IsNull()) {
+    if (aSource.Value().IsWindowProxy()) {
+      auto* windowProxy = aSource.Value().GetAsWindowProxy();
+      mWindowSource = windowProxy ? windowProxy->GetCurrentInnerWindow() : nullptr;
+    } else {
+      mPortSource = &aSource.Value().GetAsMessagePort();
+    }
+  }
+
+  mPorts = nullptr;
+
+  if (!aPorts.IsNull()) {
+    nsTArray<RefPtr<MessagePort>> ports;
+    for (uint32_t i = 0, len = aPorts.Value().Length(); i < len; ++i) {
+      ports.AppendElement(aPorts.Value()[i]);
+    }
+
+    mPorts = new MessagePortList(static_cast<Event*>(this), ports);
+  }
 }
 
 void
@@ -212,26 +203,17 @@ MessageEvent::SetSource(mozilla::dom::MessagePort* aPort)
   mPortSource = aPort;
 }
 
-void
-MessageEvent::SetSource(mozilla::dom::workers::ServiceWorkerClient* aClient)
-{
-  mClientSource = aClient;
-}
-
 } // namespace dom
 } // namespace mozilla
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsresult
-NS_NewDOMMessageEvent(nsIDOMEvent** aInstancePtrResult,
-                      EventTarget* aOwner,
+already_AddRefed<MessageEvent>
+NS_NewDOMMessageEvent(EventTarget* aOwner,
                       nsPresContext* aPresContext,
-                      WidgetEvent* aEvent) 
+                      WidgetEvent* aEvent)
 {
-  MessageEvent* it = new MessageEvent(aOwner, aPresContext, aEvent);
-  NS_ADDREF(it);
-  *aInstancePtrResult = static_cast<Event*>(it);
-  return NS_OK;
+  RefPtr<MessageEvent> it = new MessageEvent(aOwner, aPresContext, aEvent);
+  return it.forget();
 }

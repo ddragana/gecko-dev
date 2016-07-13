@@ -12,24 +12,27 @@ namespace mozilla {
 
 BaseMediaMgrError::BaseMediaMgrError(const nsAString& aName,
                                      const nsAString& aMessage,
-                                     const nsAString& aConstraintName)
+                                     const nsAString& aConstraint)
   : mName(aName)
   , mMessage(aMessage)
-  , mConstraintName(aConstraintName)
+  , mConstraint(aConstraint)
 {
   if (mMessage.IsEmpty()) {
     if (mName.EqualsLiteral("NotFoundError")) {
       mMessage.AssignLiteral("The object can not be found here.");
-    } else if (mName.EqualsLiteral("PermissionDeniedError")) {
-      mMessage.AssignLiteral("The user did not grant permission for the operation.");
-    } else if (mName.EqualsLiteral("SourceUnavailableError")) {
-      mMessage.AssignLiteral("The source of the MediaStream could not be "
-          "accessed due to a hardware error (e.g. lock from another process).");
+    } else if (mName.EqualsLiteral("NotAllowedError")) {
+      mMessage.AssignLiteral("The request is not allowed by the user agent "
+                             "or the platform in the current context.");
+    } else if (mName.EqualsLiteral("SecurityError")) {
+      mMessage.AssignLiteral("The operation is insecure.");
+    } else if (mName.EqualsLiteral("NotReadableError")) {
+      mMessage.AssignLiteral("The I/O read operation failed.");
     } else if (mName.EqualsLiteral("InternalError")) {
       mMessage.AssignLiteral("Internal error.");
     } else if (mName.EqualsLiteral("NotSupportedError")) {
-      mMessage.AssignLiteral("Constraints with no audio or video in it are not "
-          "supported");
+      mMessage.AssignLiteral("The operation is not supported.");
+    } else if (mName.EqualsLiteral("OverconstrainedError")) {
+      mMessage.AssignLiteral("Constraints could be not satisfied.");
     }
   }
 }
@@ -40,11 +43,11 @@ NS_IMPL_ISUPPORTS0(MediaMgrError)
 namespace dom {
 
 MediaStreamError::MediaStreamError(
-    nsPIDOMWindow* aParent,
+    nsPIDOMWindowInner* aParent,
     const nsAString& aName,
     const nsAString& aMessage,
-    const nsAString& aConstraintName)
-  : BaseMediaMgrError(aName, aMessage, aConstraintName)
+    const nsAString& aConstraint)
+  : BaseMediaMgrError(aName, aMessage, aConstraint)
   , mParent(aParent) {}
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(MediaStreamError, mParent)
@@ -75,9 +78,9 @@ MediaStreamError::GetMessage(nsAString& aMessage) const
 }
 
 void
-MediaStreamError::GetConstraintName(nsAString& aConstraintName) const
+MediaStreamError::GetConstraint(nsAString& aConstraint) const
 {
-  aConstraintName = mConstraintName;
+  aConstraint = mConstraint;
 }
 
 } // namespace dom

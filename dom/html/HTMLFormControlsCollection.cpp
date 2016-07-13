@@ -47,6 +47,7 @@ HTMLFormControlsCollection::ShouldBeInElements(nsIFormControl* aFormControl)
   case NS_FORM_INPUT_TEXT :
   case NS_FORM_INPUT_TEL :
   case NS_FORM_INPUT_URL :
+  case NS_FORM_INPUT_MONTH :
   case NS_FORM_INPUT_NUMBER :
   case NS_FORM_INPUT_RANGE :
   case NS_FORM_INPUT_DATE :
@@ -63,7 +64,9 @@ HTMLFormControlsCollection::ShouldBeInElements(nsIFormControl* aFormControl)
   // form.elements array
   //
   // NS_FORM_INPUT_IMAGE
-  // NS_FORM_LABEL
+  //
+  // XXXbz maybe we should just check for that type here instead of the big
+  // switch?
 
   return false;
 }
@@ -389,28 +392,16 @@ HTMLFormControlsCollection::NamedGetter(const nsAString& aName,
   MOZ_ASSERT_UNREACHABLE("Should only have Elements and NodeLists here.");
 }
 
-static PLDHashOperator
-CollectNames(const nsAString& aName,
-             nsISupports* /* unused */,
-             void* aClosure)
-{
-  static_cast<nsTArray<nsString>*>(aClosure)->AppendElement(aName);
-  return PL_DHASH_NEXT;
-}
-
 void
-HTMLFormControlsCollection::GetSupportedNames(unsigned aFlags,
-                                              nsTArray<nsString>& aNames)
+HTMLFormControlsCollection::GetSupportedNames(nsTArray<nsString>& aNames)
 {
-  if (!(aFlags & JSITER_HIDDEN)) {
-    return;
-  }
-
   FlushPendingNotifications();
   // Just enumerate mNameLookupTable.  This won't guarantee order, but
   // that's OK, because the HTML5 spec doesn't define an order for
   // this enumeration.
-  mNameLookupTable.EnumerateRead(CollectNames, &aNames);
+  for (auto iter = mNameLookupTable.Iter(); !iter.Done(); iter.Next()) {
+    aNames.AppendElement(iter.Key());
+  }
 }
 
 /* virtual */ JSObject*

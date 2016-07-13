@@ -11,19 +11,10 @@
 
 #include "mozilla/dom/indexedDB/Key.h"
 #include "mozilla/dom/indexedDB/KeyPath.h"
-#include "mozilla/dom/indexedDB/IDBCursor.h"
-#include "mozilla/dom/indexedDB/IDBTransaction.h"
-#include "mozilla/dom/quota/PersistenceType.h"
+#include "mozilla/dom/IDBCursor.h"
+#include "mozilla/dom/IDBTransaction.h"
 
 namespace IPC {
-
-template <>
-struct ParamTraits<mozilla::dom::quota::PersistenceType> :
-  public ContiguousEnumSerializer<
-                               mozilla::dom::quota::PersistenceType,
-                               mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT,
-                               mozilla::dom::quota::PERSISTENCE_TYPE_INVALID>
-{ };
 
 template <>
 struct ParamTraits<mozilla::dom::indexedDB::Key>
@@ -35,7 +26,7 @@ struct ParamTraits<mozilla::dom::indexedDB::Key>
     WriteParam(aMsg, aParam.mBuffer);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->mBuffer);
   }
@@ -64,7 +55,7 @@ struct ParamTraits<mozilla::dom::indexedDB::KeyPath>
     WriteParam(aMsg, aParam.mStrings);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->mType) &&
            ReadParam(aMsg, aIter, &aResult->mStrings);
@@ -77,19 +68,19 @@ struct ParamTraits<mozilla::dom::indexedDB::KeyPath>
 };
 
 template <>
-struct ParamTraits<mozilla::dom::indexedDB::IDBCursor::Direction> :
+struct ParamTraits<mozilla::dom::IDBCursor::Direction> :
   public ContiguousEnumSerializer<
-                          mozilla::dom::indexedDB::IDBCursor::Direction,
-                          mozilla::dom::indexedDB::IDBCursor::NEXT,
-                          mozilla::dom::indexedDB::IDBCursor::DIRECTION_INVALID>
+                          mozilla::dom::IDBCursor::Direction,
+                          mozilla::dom::IDBCursor::NEXT,
+                          mozilla::dom::IDBCursor::DIRECTION_INVALID>
 { };
 
 template <>
-struct ParamTraits<mozilla::dom::indexedDB::IDBTransaction::Mode> :
+struct ParamTraits<mozilla::dom::IDBTransaction::Mode> :
   public ContiguousEnumSerializer<
-                          mozilla::dom::indexedDB::IDBTransaction::Mode,
-                          mozilla::dom::indexedDB::IDBTransaction::READ_ONLY,
-                          mozilla::dom::indexedDB::IDBTransaction::MODE_INVALID>
+                          mozilla::dom::IDBTransaction::Mode,
+                          mozilla::dom::IDBTransaction::READ_ONLY,
+                          mozilla::dom::IDBTransaction::MODE_INVALID>
 { };
 
 } // namespace IPC

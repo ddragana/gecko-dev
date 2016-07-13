@@ -16,15 +16,19 @@ static const uint32_t STUB_FRAME_SAVED_STUB_OFFSET = 0;
 
 inline void EmitRestoreTailCallReg(MacroAssembler&) { MOZ_CRASH(); }
 inline void EmitRepushTailCallReg(MacroAssembler&) { MOZ_CRASH(); }
-inline void EmitCallIC(CodeOffsetLabel*, MacroAssembler&) { MOZ_CRASH(); }
+inline void EmitCallIC(CodeOffset*, MacroAssembler&) { MOZ_CRASH(); }
 inline void EmitEnterTypeMonitorIC(MacroAssembler&, size_t v = 0) { MOZ_CRASH(); }
 inline void EmitReturnFromIC(MacroAssembler&) { MOZ_CRASH(); }
 inline void EmitChangeICReturnAddress(MacroAssembler&, Register) { MOZ_CRASH(); }
-inline void EmitTailCallVM(JitCode*, MacroAssembler&, uint32_t) { MOZ_CRASH(); }
-inline void EmitCreateStubFrameDescriptor(MacroAssembler&, Register) { MOZ_CRASH(); }
-inline void EmitCallVM(JitCode*, MacroAssembler&) { MOZ_CRASH(); }
-inline void EmitEnterStubFrame(MacroAssembler&, Register) { MOZ_CRASH(); }
-inline void EmitLeaveStubFrame(MacroAssembler&, bool v = false) { MOZ_CRASH(); }
+inline void EmitBaselineTailCallVM(JitCode*, MacroAssembler&, uint32_t) { MOZ_CRASH(); }
+inline void EmitIonTailCallVM(JitCode*, MacroAssembler&, uint32_t) { MOZ_CRASH(); }
+inline void EmitBaselineCreateStubFrameDescriptor(MacroAssembler&, Register, uint32_t) { MOZ_CRASH(); }
+inline void EmitBaselineCallVM(JitCode*, MacroAssembler&) { MOZ_CRASH(); }
+inline void EmitIonCallVM(JitCode*, size_t, MacroAssembler&) { MOZ_CRASH(); }
+inline void EmitBaselineEnterStubFrame(MacroAssembler&, Register) { MOZ_CRASH(); }
+inline void EmitIonEnterStubFrame(MacroAssembler&, Register) { MOZ_CRASH(); }
+inline void EmitBaselineLeaveStubFrame(MacroAssembler&, bool v = false) { MOZ_CRASH(); }
+inline void EmitIonLeaveStubFrame(MacroAssembler&) { MOZ_CRASH(); }
 inline void EmitStowICValues(MacroAssembler&, int) { MOZ_CRASH(); }
 inline void EmitUnstowICValues(MacroAssembler&, int, bool v = false) { MOZ_CRASH(); }
 inline void EmitCallTypeUpdateIC(MacroAssembler&, JitCode*, uint32_t) { MOZ_CRASH(); }

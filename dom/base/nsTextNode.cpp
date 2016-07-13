@@ -59,7 +59,7 @@ public:
                                               bool aCloneText) const override
   {
     already_AddRefed<mozilla::dom::NodeInfo> ni =
-      nsRefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
+      RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
     nsAttributeTextNode *it = new nsAttributeTextNode(ni,
                                                       mNameSpaceID,
                                                       mAttrName);
@@ -115,7 +115,7 @@ nsTextNode::IsNodeOfType(uint32_t aFlags) const
 nsGenericDOMDataNode*
 nsTextNode::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo, bool aCloneText) const
 {
-  already_AddRefed<mozilla::dom::NodeInfo> ni = nsRefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
+  already_AddRefed<mozilla::dom::NodeInfo> ni = RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
   nsTextNode *it = new nsTextNode(ni);
   if (aCloneText) {
     it->mText = mText;
@@ -214,10 +214,6 @@ NS_NewAttributeContent(nsNodeInfoManager *aNodeInfoManager,
   nsAttributeTextNode* textNode = new nsAttributeTextNode(ni,
                                                           aNameSpaceID,
                                                           aAttrName);
-  if (!textNode) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
   NS_ADDREF(*aResult = textNode);
 
   return NS_OK;
@@ -268,7 +264,8 @@ nsAttributeTextNode::AttributeChanged(nsIDocument* aDocument,
                                       Element* aElement,
                                       int32_t aNameSpaceID,
                                       nsIAtom* aAttribute,
-                                      int32_t aModType)
+                                      int32_t aModType,
+                                      const nsAttrValue* aOldValue)
 {
   if (aNameSpaceID == mNameSpaceID && aAttribute == mAttrName &&
       aElement == mGrandparent) {
@@ -276,8 +273,7 @@ nsAttributeTextNode::AttributeChanged(nsIDocument* aDocument,
     // that if we get unbound while the event is up that's ok -- we'll just
     // have no grandparent when it fires, and will do nothing.
     void (nsAttributeTextNode::*update)() = &nsAttributeTextNode::UpdateText;
-    nsCOMPtr<nsIRunnable> ev = NS_NewRunnableMethod(this, update);
-    nsContentUtils::AddScriptRunner(ev);
+    nsContentUtils::AddScriptRunner(NewRunnableMethod(this, update));
   }
 }
 

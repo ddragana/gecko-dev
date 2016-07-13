@@ -10,7 +10,9 @@
 #include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
 
-extern PRLogModuleInfo* gFTPLog;
+using namespace mozilla;
+using namespace mozilla::net;
+extern LazyLogModule gFTPLog;
 
 // There are two transport connections established for an 
 // ftp connection. One is used for the command channel , and
@@ -28,7 +30,8 @@ NS_IMPL_ISUPPORTS_INHERITED(nsFtpChannel,
                             nsIResumableChannel,
                             nsIFTPChannel,
                             nsIProxiedChannel,
-                            nsIForcePendingChannel)
+                            nsIForcePendingChannel,
+                            nsIChannelWithDivertableParentListener)
 
 //-----------------------------------------------------------------------------
 
@@ -142,7 +145,7 @@ public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIFTPEVENTSINK
 
-    class OnFTPControlLogRunnable : public nsRunnable
+    class OnFTPControlLogRunnable : public Runnable
     {
     public:
         OnFTPControlLogRunnable(nsIFTPEventSink* aTarget,
@@ -171,7 +174,7 @@ NS_IMPL_ISUPPORTS(FTPEventSinkProxy, nsIFTPEventSink)
 NS_IMETHODIMP
 FTPEventSinkProxy::OnFTPControlLog(bool aServer, const char* aMsg)
 {
-    nsRefPtr<OnFTPControlLogRunnable> r =
+    RefPtr<OnFTPControlLogRunnable> r =
         new OnFTPControlLogRunnable(mTarget, aServer, aMsg);
     return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
 }
@@ -221,4 +224,71 @@ bool
 nsFtpChannel::Pending() const
 {
   return nsBaseChannel::Pending() || mForcePending;
+}
+
+NS_IMETHODIMP
+nsFtpChannel::Suspend()
+{
+    LOG(("nsFtpChannel::Suspend [this=%p]\n", this));
+
+    nsresult rv = nsBaseChannel::Suspend();
+
+    nsresult rvParentChannel = NS_OK;
+    if (mParentChannel) {
+      rvParentChannel = mParentChannel->SuspendMessageDiversion();
+    }
+
+    return NS_FAILED(rv) ? rv : rvParentChannel;
+}
+
+NS_IMETHODIMP
+nsFtpChannel::Resume()
+{
+    LOG(("nsFtpChannel::Resume [this=%p]\n", this));
+
+    nsresult rv = nsBaseChannel::Resume();
+
+    nsresult rvParentChannel = NS_OK;
+    if (mParentChannel) {
+      rvParentChannel = mParentChannel->ResumeMessageDiversion();
+    }
+
+    return NS_FAILED(rv) ? rv : rvParentChannel;
+}
+
+//-----------------------------------------------------------------------------
+// AChannelHasDivertableParentChannelAsListener internal functions
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+nsFtpChannel::MessageDiversionStarted(ADivertableParentChannel *aParentChannel)
+{
+  MOZ_ASSERT(!mParentChannel);
+  mParentChannel = aParentChannel;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFtpChannel::MessageDiversionStop()
+{
+  LOG(("nsFtpChannel::MessageDiversionStop [this=%p]", this));
+  MOZ_ASSERT(mParentChannel);
+  mParentChannel = nullptr;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFtpChannel::SuspendInternal()
+{
+    LOG(("nsFtpChannel::SuspendInternal [this=%p]\n", this));
+
+    return nsBaseChannel::Suspend();
+}
+
+NS_IMETHODIMP
+nsFtpChannel::ResumeInternal()
+{
+    LOG(("nsFtpChannel::ResumeInternal [this=%p]\n", this));
+
+    return nsBaseChannel::Resume();
 }

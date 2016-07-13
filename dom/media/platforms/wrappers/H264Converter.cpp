@@ -16,49 +16,52 @@ namespace mozilla
 {
 
 H264Converter::H264Converter(PlatformDecoderModule* aPDM,
-                             const VideoInfo& aConfig,
-                             layers::LayersBackend aLayersBackend,
-                             layers::ImageContainer* aImageContainer,
-                             FlushableTaskQueue* aVideoTaskQueue,
-                             MediaDataDecoderCallback* aCallback)
+                             const CreateDecoderParams& aParams)
   : mPDM(aPDM)
-  , mCurrentConfig(aConfig)
-  , mLayersBackend(aLayersBackend)
-  , mImageContainer(aImageContainer)
-  , mVideoTaskQueue(aVideoTaskQueue)
-  , mCallback(aCallback)
+  , mOriginalConfig(aParams.VideoConfig())
+  , mCurrentConfig(aParams.VideoConfig())
+  , mLayersBackend(aParams.mLayersBackend)
+  , mImageContainer(aParams.mImageContainer)
+  , mTaskQueue(aParams.mTaskQueue)
+  , mCallback(aParams.mCallback)
   , mDecoder(nullptr)
-  , mNeedAVCC(aPDM->DecoderNeedsConversion(aConfig) == PlatformDecoderModule::kNeedAVCC)
+  , mGMPCrashHelper(aParams.mCrashHelper)
+  , mNeedAVCC(aPDM->DecoderNeedsConversion(aParams.mConfig) == PlatformDecoderModule::kNeedAVCC)
   , mLastError(NS_OK)
 {
-  CreateDecoder();
+  CreateDecoder(aParams.mDiagnostics);
 }
 
 H264Converter::~H264Converter()
 {
 }
 
-nsresult
+RefPtr<MediaDataDecoder::InitPromise>
 H264Converter::Init()
 {
   if (mDecoder) {
     return mDecoder->Init();
   }
-  return mLastError;
+
+  // We haven't been able to initialize a decoder due to a missing SPS/PPS.
+  return MediaDataDecoder::InitPromise::CreateAndResolve(
+           TrackType::kVideoTrack, __func__);
 }
 
 nsresult
 H264Converter::Input(MediaRawData* aSample)
 {
-  if (!mNeedAVCC) {
-    if (!mp4_demuxer::AnnexB::ConvertSampleToAnnexB(aSample)) {
-      return NS_ERROR_FAILURE;
-    }
-  } else {
-    if (!mp4_demuxer::AnnexB::ConvertSampleToAVCC(aSample)) {
-      return NS_ERROR_FAILURE;
-    }
+  if (!mp4_demuxer::AnnexB::ConvertSampleToAVCC(aSample)) {
+    // We need AVCC content to be able to later parse the SPS.
+    // This is a no-op if the data is already AVCC.
+    return NS_ERROR_FAILURE;
   }
+
+  if (mInitPromiseRequest.Exists()) {
+    mMediaRawSamples.AppendElement(aSample);
+    return NS_OK;
+  }
+
   nsresult rv;
   if (!mDecoder) {
     // It is not possible to create an AVCC H264 decoder without SPS.
@@ -74,6 +77,11 @@ H264Converter::Input(MediaRawData* aSample)
     rv = CheckForSPSChange(aSample);
   }
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!mNeedAVCC &&
+      !mp4_demuxer::AnnexB::ConvertSampleToAnnexB(aSample)) {
+    return NS_ERROR_FAILURE;
+  }
 
   aSample->mExtraData = mCurrentConfig.mExtraData;
 
@@ -95,6 +103,7 @@ H264Converter::Drain()
   if (mDecoder) {
     return mDecoder->Drain();
   }
+  mCallback->DrainComplete();
   return mLastError;
 }
 
@@ -103,6 +112,7 @@ H264Converter::Shutdown()
 {
   if (mDecoder) {
     nsresult rv = mDecoder->Shutdown();
+    mInitPromiseRequest.DisconnectIfExists();
     mDecoder = nullptr;
     return rv;
   }
@@ -110,28 +120,38 @@ H264Converter::Shutdown()
 }
 
 bool
-H264Converter::IsHardwareAccelerated() const
+H264Converter::IsHardwareAccelerated(nsACString& aFailureReason) const
 {
   if (mDecoder) {
-    return mDecoder->IsHardwareAccelerated();
+    return mDecoder->IsHardwareAccelerated(aFailureReason);
   }
-  return MediaDataDecoder::IsHardwareAccelerated();
+  return MediaDataDecoder::IsHardwareAccelerated(aFailureReason);
 }
 
 nsresult
-H264Converter::CreateDecoder()
+H264Converter::CreateDecoder(DecoderDoctorDiagnostics* aDiagnostics)
 {
   if (mNeedAVCC && !mp4_demuxer::AnnexB::HasSPS(mCurrentConfig.mExtraData)) {
     // nothing found yet, will try again later
     return NS_ERROR_NOT_INITIALIZED;
   }
   UpdateConfigFromExtraData(mCurrentConfig.mExtraData);
+  if (!mNeedAVCC) {
+    // When using a decoder handling AnnexB, we get here only once from the
+    // constructor. We do want to get the dimensions extracted from the SPS.
+    mOriginalConfig = mCurrentConfig;
+  }
 
-  mDecoder = mPDM->CreateVideoDecoder(mCurrentConfig,
-                                      mLayersBackend,
-                                      mImageContainer,
-                                      mVideoTaskQueue,
-                                      mCallback);
+  mDecoder = mPDM->CreateVideoDecoder({
+    mNeedAVCC ? mCurrentConfig : mOriginalConfig,
+    mTaskQueue,
+    mCallback,
+    aDiagnostics,
+    mImageContainer,
+    mLayersBackend,
+    mGMPCrashHelper
+  });
+
   if (!mDecoder) {
     mLastError = NS_ERROR_FAILURE;
     return NS_ERROR_FAILURE;
@@ -142,22 +162,52 @@ H264Converter::CreateDecoder()
 nsresult
 H264Converter::CreateDecoderAndInit(MediaRawData* aSample)
 {
-  nsRefPtr<MediaByteBuffer> extra_data =
+  RefPtr<MediaByteBuffer> extra_data =
     mp4_demuxer::AnnexB::ExtractExtraData(aSample);
   if (!mp4_demuxer::AnnexB::HasSPS(extra_data)) {
     return NS_ERROR_NOT_INITIALIZED;
   }
   UpdateConfigFromExtraData(extra_data);
 
-  nsresult rv = CreateDecoder();
-  NS_ENSURE_SUCCESS(rv, rv);
-  return Init();
+  nsresult rv = CreateDecoder(/* DecoderDoctorDiagnostics* */ nullptr);
+
+  if (NS_SUCCEEDED(rv)) {
+    // Queue the incoming sample.
+    mMediaRawSamples.AppendElement(aSample);
+
+    RefPtr<H264Converter> self = this;
+
+    mInitPromiseRequest.Begin(mDecoder->Init()
+      ->Then(AbstractThread::GetCurrent()->AsTaskQueue(), __func__, this,
+             &H264Converter::OnDecoderInitDone,
+             &H264Converter::OnDecoderInitFailed));
+  }
+  return rv;
+}
+
+void
+H264Converter::OnDecoderInitDone(const TrackType aTrackType)
+{
+  mInitPromiseRequest.Complete();
+  for (uint32_t i = 0 ; i < mMediaRawSamples.Length(); i++) {
+    if (NS_FAILED(mDecoder->Input(mMediaRawSamples[i]))) {
+      mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+    }
+  }
+  mMediaRawSamples.Clear();
+}
+
+void
+H264Converter::OnDecoderInitFailed(MediaDataDecoder::DecoderFailureReason aReason)
+{
+  mInitPromiseRequest.Complete();
+  mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
 }
 
 nsresult
 H264Converter::CheckForSPSChange(MediaRawData* aSample)
 {
-  nsRefPtr<MediaByteBuffer> extra_data =
+  RefPtr<MediaByteBuffer> extra_data =
     mp4_demuxer::AnnexB::ExtractExtraData(aSample);
   if (!mp4_demuxer::AnnexB::HasSPS(extra_data) ||
       mp4_demuxer::AnnexB::CompareExtraData(extra_data,

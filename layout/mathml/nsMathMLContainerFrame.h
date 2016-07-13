@@ -34,17 +34,18 @@ public:
   explicit nsMathMLContainerFrame(nsStyleContext* aContext)
     : nsContainerFrame(aContext)
     , mIntrinsicWidth(NS_INTRINSIC_WIDTH_UNKNOWN)
+    , mBlockStartAscent(0)
   {}
 
   NS_DECL_QUERYFRAME_TARGET(nsMathMLContainerFrame)
   NS_DECL_QUERYFRAME
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_ABSTRACT_FRAME(nsMathMLContainerFrame)
 
   // --------------------------------------------------------------------------
   // Overloaded nsMathMLFrame methods -- see documentation in nsIMathMLFrame.h
 
   NS_IMETHOD
-  Stretch(nsRenderingContext& aRenderingContext,
+  Stretch(DrawTarget*          aDrawTarget,
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
           nsHTMLReflowMetrics& aDesiredStretchSize) override;
@@ -128,7 +129,7 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
-  virtual bool UpdateOverflow() override;
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
 
   virtual void MarkIntrinsicISizesDirty() override;
 
@@ -196,7 +197,7 @@ protected:
    *        return.
    */
   virtual nsresult
-  Place(nsRenderingContext& aRenderingContext,
+  Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
         nsHTMLReflowMetrics& aDesiredSize);
 
@@ -209,7 +210,7 @@ protected:
   // if in an <mrow>, and so their frames implement MeasureForWidth to use
   // nsMathMLContainerFrame::Place.
   virtual nsresult
-  MeasureForWidth(nsRenderingContext& aRenderingContext,
+  MeasureForWidth(DrawTarget* aDrawTarget,
                   nsHTMLReflowMetrics& aDesiredSize);
 
 
@@ -221,7 +222,7 @@ protected:
   // helper to get the preferred size that a container frame should use to fire
   // the stretch on its stretchy child frames.
   void
-  GetPreferredStretchSize(nsRenderingContext& aRenderingContext,
+  GetPreferredStretchSize(DrawTarget*          aDrawTarget,
                           uint32_t             aOptions,
                           nsStretchDirection   aStretchDirection,
                           nsBoundingMetrics&   aPreferredStretchSize);
@@ -235,8 +236,7 @@ public:
   // error handlers to provide a visual feedback to the user when an error
   // (typically invalid markup) was encountered during reflow.
   nsresult
-  ReflowError(nsRenderingContext& aRenderingContext,
-              nsHTMLReflowMetrics& aDesiredSize);
+  ReflowError(DrawTarget* aDrawTarget, nsHTMLReflowMetrics& aDesiredSize);
   /*
    * Helper to call ReportErrorToConsole for parse errors involving 
    * attribute/value pairs.
@@ -295,8 +295,7 @@ protected:
   // helper method to complete the post-reflow hook and ensure that embellished
   // operators don't terminate their Reflow without receiving a Stretch command.
   virtual nsresult
-  FinalizeReflow(nsRenderingContext& aRenderingContext,
-                 nsHTMLReflowMetrics& aDesiredSize);
+  FinalizeReflow(DrawTarget* aDrawTarget, nsHTMLReflowMetrics& aDesiredSize);
 
   // Record metrics of a child frame for recovery through the following method
   static void
@@ -395,6 +394,8 @@ protected:
   void UpdateIntrinsicWidth(nsRenderingContext* aRenderingContext);
 
   nscoord mIntrinsicWidth;
+
+  nscoord mBlockStartAscent;
 
 private:
   class RowChildFrameIterator;

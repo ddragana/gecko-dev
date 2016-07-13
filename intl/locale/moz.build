@@ -37,6 +37,7 @@ EXPORTS += [
 
 UNIFIED_SOURCES += [
     'nsCollation.cpp',
+    'nsIDateTimeFormat.cpp',
     'nsLanguageAtomService.cpp',
     'nsLocale.cpp',
     'nsLocaleService.cpp',
@@ -65,8 +66,3 @@ GENERATED_FILES += [
 langgroups = GENERATED_FILES['langGroups.properties.h']
 langgroups.script = 'props2arrays.py'
 langgroups.inputs = ['langGroups.properties']
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']
-
-FAIL_ON_WARNINGS = True

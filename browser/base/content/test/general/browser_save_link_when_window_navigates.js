@@ -20,7 +20,7 @@ function createTemporarySaveDirectory() {
   saveDir.append("testsavedir");
   if (!saveDir.exists()) {
     info("create testsavedir!");
-    saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0755);
+    saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
   }
   info("return from createTempSaveDir: " + saveDir.path);
   return saveDir;
@@ -89,7 +89,7 @@ function triggerSave(aWindow, aCallback) {
 }
 
 
-let windowObserver = {
+var windowObserver = {
   setCallback: function(aCallback) {
     if (this._callback) {
       ok(false, "Should only be dealing with one callback at a time.");

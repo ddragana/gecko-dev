@@ -50,7 +50,7 @@ BroadcastChannelService::GetOrCreate()
 {
   AssertIsOnBackgroundThread();
 
-  nsRefPtr<BroadcastChannelService> instance = sInstance;
+  RefPtr<BroadcastChannelService> instance = sInstance;
   if (!instance) {
     instance = new BroadcastChannelService();
   }
@@ -58,59 +58,72 @@ BroadcastChannelService::GetOrCreate()
 }
 
 void
-BroadcastChannelService::RegisterActor(BroadcastChannelParent* aParent)
+BroadcastChannelService::RegisterActor(BroadcastChannelParent* aParent,
+                                       const nsAString& aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParent);
-  MOZ_ASSERT(!mAgents.Contains(aParent));
 
-  mAgents.PutEntry(aParent);
+  nsTArray<BroadcastChannelParent*>* parents;
+  if (!mAgents.Get(aOriginChannelKey, &parents)) {
+    parents = new nsTArray<BroadcastChannelParent*>();
+    mAgents.Put(aOriginChannelKey, parents);
+  }
+
+  MOZ_ASSERT(!parents->Contains(aParent));
+  parents->AppendElement(aParent);
 }
 
 void
-BroadcastChannelService::UnregisterActor(BroadcastChannelParent* aParent)
+BroadcastChannelService::UnregisterActor(BroadcastChannelParent* aParent,
+                                         const nsAString& aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParent);
-  MOZ_ASSERT(mAgents.Contains(aParent));
 
-  mAgents.RemoveEntry(aParent);
+  nsTArray<BroadcastChannelParent*>* parents;
+  if (!mAgents.Get(aOriginChannelKey, &parents)) {
+    MOZ_CRASH("Invalid state");
+  }
+
+  parents->RemoveElement(aParent);
+  if (parents->IsEmpty()) {
+    mAgents.Remove(aOriginChannelKey);
+  }
 }
 
 void
 BroadcastChannelService::PostMessage(BroadcastChannelParent* aParent,
                                      const ClonedMessageData& aData,
-                                     const nsACString& aOrigin,
-                                     uint64_t aAppId,
-                                     bool aIsInBrowserElement,
-                                     const nsAString& aChannel,
-                                     bool aPrivateBrowsing)
+                                     const nsAString& aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParent);
-  MOZ_ASSERT(mAgents.Contains(aParent));
+
+  nsTArray<BroadcastChannelParent*>* parents;
+  if (!mAgents.Get(aOriginChannelKey, &parents)) {
+    MOZ_CRASH("Invalid state");
+  }
 
   // We need to keep the array alive for the life-time of this operation.
-  nsTArray<nsRefPtr<BlobImpl>> blobs;
+  nsTArray<RefPtr<BlobImpl>> blobs;
   if (!aData.blobsParent().IsEmpty()) {
     blobs.SetCapacity(aData.blobsParent().Length());
 
     for (uint32_t i = 0, len = aData.blobsParent().Length(); i < len; ++i) {
-      nsRefPtr<BlobImpl> impl =
+      RefPtr<BlobImpl> impl =
         static_cast<BlobParent*>(aData.blobsParent()[i])->GetBlobImpl();
      MOZ_ASSERT(impl);
      blobs.AppendElement(impl);
     }
   }
 
-  for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
-    BroadcastChannelParent* parent = iter.Get()->GetKey();
+  for (uint32_t i = 0; i < parents->Length(); ++i) {
+    BroadcastChannelParent* parent = parents->ElementAt(i);
     MOZ_ASSERT(parent);
 
     if (parent != aParent) {
-      parent->CheckAndDeliver(aData, PromiseFlatCString(aOrigin),
-                              aAppId, aIsInBrowserElement,
-                              PromiseFlatString(aChannel), aPrivateBrowsing);
+      parent->Deliver(aData);
     }
   }
 }

@@ -10,7 +10,7 @@
 namespace mozilla {
 namespace dom {
 
-AVInputPort::AVInputPort(nsPIDOMWindow* aWindow)
+AVInputPort::AVInputPort(nsPIDOMWindowInner* aWindow)
   : InputPort(aWindow)
 {
 }
@@ -20,12 +20,12 @@ AVInputPort::~AVInputPort()
 }
 
 /* static */ already_AddRefed<AVInputPort>
-AVInputPort::Create(nsPIDOMWindow* aWindow,
+AVInputPort::Create(nsPIDOMWindowInner* aWindow,
                     nsIInputPortListener* aListener,
                     nsIInputPortData* aData,
                     ErrorResult& aRv)
 {
-  nsRefPtr<AVInputPort> inputport = new AVInputPort(aWindow);
+  RefPtr<AVInputPort> inputport = new AVInputPort(aWindow);
   inputport->Init(aData, aListener, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;

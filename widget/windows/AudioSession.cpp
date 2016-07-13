@@ -8,13 +8,13 @@
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
 
+#include "mozilla/RefPtr.h"
 #include "nsIStringBundle.h"
 #include "nsIUUIDGenerator.h"
 #include "nsIXULAppInfo.h"
 
 //#include "AudioSession.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
@@ -76,12 +76,12 @@ public:
     UNINITIALIZED, // Has not been initialized yet
     STARTED, // Started
     CLONED, // SetSessionInfoCalled, Start not called
-    FAILED, // The autdio session failed to start
+    FAILED, // The audio session failed to start
     STOPPED, // Stop called
     AUDIO_SESSION_DISCONNECTED // Audio session disconnected
   };
 protected:
-  nsRefPtr<IAudioSessionControl> mAudioSessionControl;
+  RefPtr<IAudioSessionControl> mAudioSessionControl;
   nsString mDisplayName;
   nsString mIconPath;
   nsID mSessionGroupingParameter;
@@ -141,7 +141,7 @@ AudioSession*
 AudioSession::GetSingleton()
 {
   if (!(AudioSession::sService)) {
-    nsRefPtr<AudioSession> service = new AudioSession();
+    RefPtr<AudioSession> service = new AudioSession();
     service.forget(&AudioSession::sService);
   }
 
@@ -185,16 +185,18 @@ AudioSession::Start()
 
   HRESULT hr;
 
-  // Don't check for errors in case something already initialized COM
-  // on this thread.
-  CoInitialize(nullptr);
+  // There's a matching CoUninit in Stop() for this tied to a state of
+  // UNINITIALIZED.
+  hr = CoInitialize(nullptr);
+  MOZ_ASSERT(SUCCEEDED(hr), "CoInitialize failure in audio session control, unexpected");
 
   if (mState == UNINITIALIZED) {
     mState = FAILED;
 
-    // XXXkhuey implement this for content processes
-    if (XRE_IsContentProcess())
+    // Content processes should be CLONED
+    if (XRE_IsContentProcess()) {
       return NS_ERROR_FAILURE;
+    }
 
     MOZ_ASSERT(XRE_IsParentProcess(),
                "Should only get here in a chrome process!");
@@ -212,9 +214,6 @@ AudioSession::Start()
 
     wchar_t *buffer;
     mIconPath.GetMutableData(&buffer, MAX_PATH);
-
-    // XXXkhuey we should provide a way for a xulrunner app to specify an icon
-    // that's not in the product binary.
     ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
 
     nsCOMPtr<nsIUUIDGenerator> uuidgen =
@@ -228,7 +227,7 @@ AudioSession::Start()
   MOZ_ASSERT(!mDisplayName.IsEmpty() || !mIconPath.IsEmpty(),
              "Should never happen ...");
 
-  nsRefPtr<IMMDeviceEnumerator> enumerator;
+  RefPtr<IMMDeviceEnumerator> enumerator;
   hr = ::CoCreateInstance(CLSID_MMDeviceEnumerator,
                           nullptr,
                           CLSCTX_ALL,
@@ -237,7 +236,7 @@ AudioSession::Start()
   if (FAILED(hr))
     return NS_ERROR_NOT_AVAILABLE;
 
-  nsRefPtr<IMMDevice> device;
+  RefPtr<IMMDevice> device;
   hr = enumerator->GetDefaultAudioEndpoint(EDataFlow::eRender,
                                            ERole::eMultimedia,
                                            getter_AddRefs(device));
@@ -247,21 +246,24 @@ AudioSession::Start()
     return NS_ERROR_FAILURE;
   }
 
-  nsRefPtr<IAudioSessionManager> manager;
+  RefPtr<IAudioSessionManager> manager;
   hr = device->Activate(IID_IAudioSessionManager,
                         CLSCTX_ALL,
                         nullptr,
                         getter_AddRefs(manager));
-  if (FAILED(hr))
+  if (FAILED(hr)) {
     return NS_ERROR_FAILURE;
+  }
 
-  hr = manager->GetAudioSessionControl(nullptr,
-                                       FALSE,
+  hr = manager->GetAudioSessionControl(&GUID_NULL,
+                                       0,
                                        getter_AddRefs(mAudioSessionControl));
-  if (FAILED(hr))
-    return NS_ERROR_FAILURE;
 
-  hr = mAudioSessionControl->SetGroupingParam((LPCGUID)&mSessionGroupingParameter,
+  if (FAILED(hr)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  hr = mAudioSessionControl->SetGroupingParam((LPGUID)&mSessionGroupingParameter,
                                               nullptr);
   if (FAILED(hr)) {
     StopInternal();
@@ -294,13 +296,11 @@ AudioSession::Start()
 void
 AudioSession::StopInternal()
 {
-  static const nsID blankId = {0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0} };
-
-  if (mAudioSessionControl) {
-    mAudioSessionControl->SetGroupingParam((LPCGUID)&blankId, nullptr);
+  if (mAudioSessionControl &&
+      (mState == STARTED || mState == STOPPED)) {
     mAudioSessionControl->UnregisterAudioSessionNotification(this);
-    mAudioSessionControl = nullptr;
   }
+  mAudioSessionControl = nullptr;
 }
 
 nsresult
@@ -310,18 +310,19 @@ AudioSession::Stop()
              mState == UNINITIALIZED || // XXXremove this
              mState == FAILED,
              "State invariants violated");
+  SessionState state = mState;
   mState = STOPPED;
 
-  nsRefPtr<AudioSession> kungFuDeathGrip;
-  kungFuDeathGrip.swap(sService);
+  {
+    RefPtr<AudioSession> kungFuDeathGrip;
+    kungFuDeathGrip.swap(sService);
 
-  if (!XRE_IsContentProcess())
     StopInternal();
+  }
 
-  // At this point kungFuDeathGrip should be the only reference to AudioSession
-
-  ::CoUninitialize();
-
+  if (state != UNINITIALIZED) {
+    ::CoUninitialize();
+  }
   return NS_OK;
 }
 
@@ -408,7 +409,7 @@ AudioSession::OnSessionDisconnected(AudioSessionDisconnectReason aReason)
   // Run our code asynchronously.  Per MSDN we can't do anything interesting
   // in this callback.
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &AudioSession::OnSessionDisconnectedInternal);
+    NewRunnableMethod(this, &AudioSession::OnSessionDisconnectedInternal);
   NS_DispatchToMainThread(runnable);
   return S_OK;
 }

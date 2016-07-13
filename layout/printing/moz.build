@@ -10,21 +10,28 @@ XPIDL_SOURCES += [
     'nsIPrintStatusFeedback.idl',
 ]
 
+EXPORTS.mozilla.layout += [
+    'ipc/RemotePrintJobChild.h',
+    'ipc/RemotePrintJobParent.h',
+]
+
 XPIDL_MODULE = 'layout_printing'
 
 UNIFIED_SOURCES += [
+    'ipc/RemotePrintJobChild.cpp',
+    'ipc/RemotePrintJobParent.cpp',
     'nsPagePrintTimer.cpp',
     'nsPrintData.cpp',
     'nsPrintEngine.cpp',
     'nsPrintObject.cpp',
     'nsPrintPreviewListener.cpp',
+    'PrintTranslator.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '../base',
     '/dom/base',
 ]
-

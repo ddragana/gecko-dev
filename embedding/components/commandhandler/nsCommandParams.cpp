@@ -200,28 +200,26 @@ nsCommandParams::SetISupportsValue(const char* aName, nsISupports* aValue)
 NS_IMETHODIMP
 nsCommandParams::RemoveValue(const char* aName)
 {
-  PL_DHashTableRemove(&mValuesHash, (void*)aName);
+  mValuesHash.Remove((void*)aName);
   return NS_OK;
 }
 
 nsCommandParams::HashEntry*
 nsCommandParams::GetNamedEntry(const char* aName)
 {
-  return (HashEntry*)PL_DHashTableSearch(&mValuesHash, (void*)aName);
+  return static_cast<HashEntry*>(mValuesHash.Search((void*)aName));
 }
 
 nsCommandParams::HashEntry*
 nsCommandParams::GetOrMakeEntry(const char* aName, uint8_t aEntryType)
 {
-  HashEntry* foundEntry =
-    (HashEntry*)PL_DHashTableSearch(&mValuesHash, (void*)aName);
+  auto foundEntry = static_cast<HashEntry*>(mValuesHash.Search((void*)aName));
   if (foundEntry) { // reuse existing entry
     foundEntry->Reset(aEntryType);
     return foundEntry;
   }
 
-  foundEntry = static_cast<HashEntry*>(
-    PL_DHashTableAdd(&mValuesHash, (void*)aName, fallible));
+  foundEntry = static_cast<HashEntry*>(mValuesHash.Add((void*)aName, fallible));
   if (!foundEntry) {
     return nullptr;
   }
@@ -232,14 +230,13 @@ nsCommandParams::GetOrMakeEntry(const char* aName, uint8_t aEntryType)
 }
 
 PLDHashNumber
-nsCommandParams::HashKey(PLDHashTable* aTable, const void* aKey)
+nsCommandParams::HashKey(const void* aKey)
 {
   return HashString((const char*)aKey);
 }
 
 bool
-nsCommandParams::HashMatchEntry(PLDHashTable* aTable,
-                                const PLDHashEntryHdr* aEntry, const void* aKey)
+nsCommandParams::HashMatchEntry(const PLDHashEntryHdr* aEntry, const void* aKey)
 {
   const char* keyString = (const char*)aKey;
   const HashEntry* thisEntry = static_cast<const HashEntry*>(aEntry);

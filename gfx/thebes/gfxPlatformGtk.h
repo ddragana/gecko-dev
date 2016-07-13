@@ -16,6 +16,11 @@ extern "C" {
 }
 #endif
 
+#ifdef MOZ_X11
+struct _XDisplay;
+typedef struct _XDisplay Display;
+#endif // MOZ_X11
+
 class gfxFontconfigUtils;
 
 class gfxPlatformGtk : public gfxPlatform {
@@ -42,7 +47,7 @@ public:
 
     virtual void
     GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
-                           int32_t aRunScript,
+                           Script aRunScript,
                            nsTArray<const char*>& aFontList) override;
 
     virtual gfxPlatformFontList* CreatePlatformFontList() override;
@@ -50,9 +55,12 @@ public:
     virtual nsresult GetStandardFamilyName(const nsAString& aFontName,
                                            nsAString& aFamilyName) override;
 
-    virtual gfxFontGroup* CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
-                                          const gfxFontStyle *aStyle,
-                                          gfxUserFontSet *aUserFontSet) override;
+    gfxFontGroup*
+    CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
+                    const gfxFontStyle *aStyle,
+                    gfxTextPerfMetrics* aTextPerf,
+                    gfxUserFontSet *aUserFontSet,
+                    gfxFloat aDevToCssSize) override;
 
     /**
      * Look up a local platform font using the full font face name (needed to
@@ -61,7 +69,7 @@ public:
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
                                           uint16_t aWeight,
                                           int16_t aStretch,
-                                          bool aItalic) override;
+                                          uint8_t aStyle) override;
 
     /**
      * Activate a platform font (needed to support @font-face src url() )
@@ -70,7 +78,7 @@ public:
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
                                            uint16_t aWeight,
                                            int16_t aStretch,
-                                           bool aItalic,
+                                           uint8_t aStyle,
                                            const uint8_t* aFontData,
                                            uint32_t aLength) override;
 
@@ -97,10 +105,6 @@ public:
 
     bool UseXRender() {
 #if defined(MOZ_X11)
-        if (GetContentBackend() != mozilla::gfx::BackendType::NONE &&
-            GetContentBackend() != mozilla::gfx::BackendType::CAIRO)
-            return false;
-
         return sUseXRender;
 #else
         return false;
@@ -120,14 +124,35 @@ public:
 
     virtual gfxImageFormat GetOffscreenFormat() override;
 
-    virtual int GetScreenDepth() const override;
-
     bool SupportsApzWheelInput() const override {
       return true;
     }
 
+    bool SupportsApzTouchInput() const override;
+
+    void FontsPrefsChanged(const char *aPref) override;
+
+    // maximum number of fonts to substitute for a generic
+    uint32_t MaxGenericSubstitions();
+
+    bool SupportsPluginDirectBitmapDrawing() override {
+      return true;
+    }
+
+#ifdef GL_PROVIDER_GLX
+    already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource() override;
+#endif
+
+#ifdef MOZ_X11
+    Display* GetCompositorDisplay() {
+      return mCompositorDisplay;
+    }
+#endif // MOZ_X11
+
 protected:
     static gfxFontconfigUtils *sFontconfigUtils;
+
+    int8_t mMaxGenericSubstitutions;
 
 private:
     virtual void GetPlatformCMSOutputProfile(void *&mem,
@@ -135,6 +160,8 @@ private:
 
 #ifdef MOZ_X11
     static bool sUseXRender;
+
+    Display* mCompositorDisplay;
 #endif
 
     // xxx - this will be removed once the new fontconfig platform font list

@@ -9,8 +9,8 @@
 // and bad things don't, specifically with respect to various expired OCSP
 // responses (stapled and otherwise).
 
-let gCurrentOCSPResponse = null;
-let gOCSPRequestCount = 0;
+var gCurrentOCSPResponse = null;
+var gOCSPRequestCount = 0;
 
 function add_ocsp_test(aHost, aExpectedResult, aOCSPResponseToServe,
                        aExpectedRequestCount) {
@@ -24,38 +24,39 @@ function add_ocsp_test(aHost, aExpectedResult, aOCSPResponseToServe,
     function() {
       equal(gOCSPRequestCount, aExpectedRequestCount,
             "Should have made " + aExpectedRequestCount +
-            " fallback OCSP request" + aExpectedRequestCount == 1 ? "" : "s");
+            " fallback OCSP request" + (aExpectedRequestCount == 1 ? "" : "s"));
     });
 }
 
 do_get_profile();
 Services.prefs.setBoolPref("security.ssl.enable_ocsp_stapling", true);
 Services.prefs.setIntPref("security.OCSP.enabled", 1);
-let args = [["good", "localhostAndExampleCom", "unused"],
-             ["expiredresponse", "localhostAndExampleCom", "unused"],
-             ["oldvalidperiod", "localhostAndExampleCom", "unused"],
-             ["revoked", "localhostAndExampleCom", "unused"],
-             ["unknown", "localhostAndExampleCom", "unused"],
+Services.prefs.setIntPref("security.pki.sha1_enforcement_level", 3);
+var args = [["good", "default-ee", "unused"],
+             ["expiredresponse", "default-ee", "unused"],
+             ["oldvalidperiod", "default-ee", "unused"],
+             ["revoked", "default-ee", "unused"],
+             ["unknown", "default-ee", "unused"],
             ];
-let ocspResponses = generateOCSPResponses(args, "tlsserver");
+var ocspResponses = generateOCSPResponses(args, "ocsp_certs");
 // Fresh response, certificate is good.
-let ocspResponseGood = ocspResponses[0];
+var ocspResponseGood = ocspResponses[0];
 // Expired response, certificate is good.
-let expiredOCSPResponseGood = ocspResponses[1];
+var expiredOCSPResponseGood = ocspResponses[1];
 // Fresh signature, old validity period, certificate is good.
-let oldValidityPeriodOCSPResponseGood = ocspResponses[2];
+var oldValidityPeriodOCSPResponseGood = ocspResponses[2];
 // Fresh signature, certificate is revoked.
-let ocspResponseRevoked = ocspResponses[3];
+var ocspResponseRevoked = ocspResponses[3];
 // Fresh signature, certificate is unknown.
-let ocspResponseUnknown = ocspResponses[4];
+var ocspResponseUnknown = ocspResponses[4];
 
 // sometimes we expect a result without re-fetch
-let willNotRetry = 1;
+var willNotRetry = 1;
 // but sometimes, since a bad response is in the cache, OCSP fetch will be
 // attempted for each validation - in practice, for these test certs, this
-// means 4 requests because various hash algorithm combinations are tried
-// (for sha-1 telemetry)
-let willRetry = 4;
+// means 6 requests because various hash algorithm and key size combinations
+// are tried.
+var willRetry = 6;
 
 function run_test() {
   let ocspResponder = new HttpServer();
@@ -71,7 +72,7 @@ function run_test() {
     gOCSPRequestCount++;
   });
   ocspResponder.start(8888);
-  add_tls_server_setup("OCSPStaplingServer");
+  add_tls_server_setup("OCSPStaplingServer", "ocsp_certs");
 
   // In these tests, the OCSP stapling server gives us a stapled
   // response based on the host name ("ocsp-stapling-expired" or

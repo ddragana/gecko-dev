@@ -15,7 +15,9 @@
  */
 
 #include "AnnexB.h"
-#include "Endian.h"
+#include "BigEndian.h"
+
+#include <cstring>
 
 using mozilla::BigEndian;
 

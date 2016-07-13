@@ -10,27 +10,6 @@
 namespace js {
 namespace jit {
 
-class LBox : public LInstructionHelper<1, 1, 0>
-{
-    MIRType type_;
-
-  public:
-    LIR_HEADER(Box);
-
-    LBox(const LAllocation& in_payload, MIRType type)
-      : type_(type)
-    {
-        setOperand(0, in_payload);
-    }
-
-    MIRType type() const {
-        return type_;
-    }
-    const char* extraName() const {
-        return StringFromMIRType(type_);
-    }
-};
-
 class LUnboxBase : public LInstructionHelper<1, 1, 0>
 {
   public:
@@ -269,22 +248,6 @@ class LModMaskI : public LInstructionHelper<1, 1, 1>
     }
 };
 
-class LPowHalfD : public LInstructionHelper<1, 1, 0>
-{
-  public:
-    LIR_HEADER(PowHalfD);
-    LPowHalfD(const LAllocation& input) {
-        setOperand(0, input);
-    }
-
-    const LAllocation* input() {
-        return getOperand(0);
-    }
-    const LDefinition* output() {
-        return getDef(0);
-    }
-};
-
 // Takes a tableswitch with an integer to decide
 class LTableSwitch : public LInstructionHelper<0, 1, 1>
 {
@@ -319,9 +282,10 @@ class LTableSwitchV : public LInstructionHelper<0, BOX_PIECES, 2>
   public:
     LIR_HEADER(TableSwitchV);
 
-    LTableSwitchV(const LDefinition& inputCopy, const LDefinition& floatCopy,
-                  MTableSwitch* ins)
+    LTableSwitchV(const LBoxAllocation& input, const LDefinition& inputCopy,
+                  const LDefinition& floatCopy, MTableSwitch* ins)
     {
+        setBoxOperand(InputValue, input);
         setTemp(0, inputCopy);
         setTemp(1, floatCopy);
         setMir(ins);
@@ -422,42 +386,6 @@ class LSoftUDivOrMod : public LBinaryMath<3>
         setTemp(0, temp1);
         setTemp(1, temp2);
         setTemp(2, temp3);
-    }
-};
-
-class LAsmJSLoadFuncPtr : public LInstructionHelper<1, 1, 1>
-{
-  public:
-    LIR_HEADER(AsmJSLoadFuncPtr);
-    LAsmJSLoadFuncPtr(const LAllocation& index, const LDefinition& temp) {
-        setOperand(0, index);
-        setTemp(0, temp);
-    }
-    const MAsmJSLoadFuncPtr* mir() const {
-        return mir_->toAsmJSLoadFuncPtr();
-    }
-    const LAllocation* index() {
-        return getOperand(0);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
-    }
-};
-
-// Math.random().
-class LRandom : public LCallInstructionHelper<1, 0, 2>
-{
-  public:
-    LIR_HEADER(Random)
-    LRandom(const LDefinition& temp, const LDefinition& temp2) {
-        setTemp(0, temp);
-        setTemp(1, temp2);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
-    }
-    const LDefinition* temp2() {
-        return getTemp(1);
     }
 };
 

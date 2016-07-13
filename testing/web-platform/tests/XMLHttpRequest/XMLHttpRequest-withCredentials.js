@@ -16,19 +16,11 @@ function test_withCredentials(worker) {
   test(function() {
     var client = new XMLHttpRequest()
     client.open("GET", "resources/delay.py?ms=1000", false)
-    if (worker) {
-      client.withCredentials = true
-      assert_true(client.withCredentials, "set in OPEN state")
-    } else {
-      assert_throws("InvalidAccessError", function() {
-        client.withCredentials = true
-      })
-      assert_false(client.withCredentials, "set in OPEN state")
-    }
+    client.withCredentials = true
+    assert_true(client.withCredentials, "set in OPEN state")
   }, "setting on synchronous XHR")
 
-  async_test("setting withCredentials when not in UNSENT, OPENED state").step(function() {
-    this.add_cleanup(done)
+  async_test(function() {
     var client = new XMLHttpRequest()
     client.open("GET", "resources/delay.py?ms=1000")
     client.send()
@@ -39,5 +31,12 @@ function test_withCredentials(worker) {
         this.done()
       }
     })
-  })
+  }, "setting withCredentials when not in UNSENT, OPENED state (asynchronous)")
+
+  test(function() {
+    var client = new XMLHttpRequest()
+    client.open("GET", "resources/delay.py?ms=1000", false)
+    client.send();
+    assert_throws("InvalidStateError", function() { client.withCredentials = true })
+  }, "setting withCredentials when in DONE state (synchronous)")
 }

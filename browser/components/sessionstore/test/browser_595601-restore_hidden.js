@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-let state = {windows:[{tabs:[
+var state = {windows:[{tabs:[
   {entries:[{url:"http://example.com#1"}]},
   {entries:[{url:"http://example.com#2"}]},
   {entries:[{url:"http://example.com#3"}]},
@@ -55,7 +55,7 @@ function test_loadTabs(restoreHiddenTabs, callback) {
   });
 }
 
-let TabsProgressListener = {
+var TabsProgressListener = {
   init: function (win) {
     this.window = win;
     Services.obs.addObserver(this, "sessionstore-debug-tab-restored", false);
@@ -101,7 +101,7 @@ function newWindowWithState(state, callback) {
   let opts = "chrome,all,dialog=no,height=800,width=800";
   let win = window.openDialog(getBrowserURL(), "_blank", opts);
 
-  registerCleanupFunction(function () win.close());
+  registerCleanupFunction(() => BrowserTestUtils.closeWindow(win));
 
   whenWindowLoaded(win, function onWindowLoaded(aWin) {
     TabsProgressListener.init(aWin);

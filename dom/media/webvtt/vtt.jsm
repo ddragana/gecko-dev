@@ -8,7 +8,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
  * Code below is vtt.js the JS WebVTT implementation.
  * Current source code can be found at http://github.com/mozilla/vtt.js
  *
- * Code taken from commit f5a1a60775a615cd9670d6cdaedddf2c6f25fae3
+ * Code taken from commit b89bfd06cd788a68c67e03f44561afe833db0849
  */
 /**
  * Copyright 2013 vtt.js Contributors
@@ -64,29 +64,30 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     }
   };
 
-  // Try to parse input as a time stamp.
-  function parseTimeStamp(input) {
-
+  // See spec, https://w3c.github.io/webvtt/#collect-a-webvtt-timestamp.
+  function collectTimeStamp(input) {
     function computeSeconds(h, m, s, f) {
+      if (m > 59 || s > 59) {
+        return null;
+      }
+      // The attribute of the milli-seconds can only be three digits.
+      if (f.length !== 3) {
+        return null;
+      }
       return (h | 0) * 3600 + (m | 0) * 60 + (s | 0) + (f | 0) / 1000;
     }
 
-    var m = input.match(/^(\d+):(\d{2})(:\d{2})?\.(\d{3})/);
-    if (!m) {
+    var timestamp = input.match(/^(\d+:)?(\d{2}):(\d{2})\.(\d+)/);
+    if (!timestamp || timestamp.length !== 5) {
       return null;
     }
 
-    if (m[3]) {
-      // Timestamp takes the form of [hours]:[minutes]:[seconds].[milliseconds]
-      return computeSeconds(m[1], m[2], m[3].replace(":", ""), m[4]);
-    } else if (m[1] > 59) {
-      // Timestamp takes the form of [hours]:[minutes].[milliseconds]
-      // First position is hours as it's over 59.
-      return computeSeconds(m[1], m[2], 0,  m[4]);
-    } else {
-      // Timestamp takes the form of [minutes]:[seconds].[milliseconds]
-      return computeSeconds(0, m[1], m[2], m[4]);
-    }
+    let hours = timestamp[1]? timestamp[1].replace(":", "") : 0;
+    let minutes = timestamp[2];
+    let seconds = timestamp[3];
+    let milliSeconds = timestamp[4];
+
+    return computeSeconds(hours, minutes, seconds, milliSeconds);
   }
 
   // A settings object holds key/value pairs and will ignore anything but the first
@@ -96,9 +97,8 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
   }
 
   Settings.prototype = {
-    // Only accept the first assignment to any key.
     set: function(k, v) {
-      if (!this.get(k) && v !== "") {
+      if (v !== "") {
         this.values[k] = v;
       }
     },
@@ -126,10 +126,12 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
         }
       }
     },
-    // Accept a setting if its a valid (signed) integer.
-    integer: function(k, v) {
-      if (/^-?\d+$/.test(v)) { // integer
-        this.set(k, parseInt(v, 10));
+    // Accept a setting if its a valid digits value (int or float)
+    digitsValue: function(k, v) {
+      if (/^-0+(\.[0]*)?$/.test(v)) { // special case for -0.0
+        this.set(k, 0.0);
+      } else if (/^-?\d+(\.[\d]*)?$/.test(v)) {
+        this.set(k, parseFloat(v));
       }
     },
     // Accept a setting if its a valid percentage.
@@ -169,7 +171,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     var oInput = input;
     // 4.1 WebVTT timestamp
     function consumeTimeStamp() {
-      var ts = parseTimeStamp(input);
+      var ts = collectTimeStamp(input);
       if (ts === null) {
         throw new ParsingError(ParsingError.Errors.BadTimeStamp,
                               "Malformed timestamp: " + oInput);
@@ -200,25 +202,25 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
         case "line":
           var vals = v.split(","),
               vals0 = vals[0];
-          settings.integer(k, vals0);
+          settings.digitsValue(k, vals0);
           settings.percent(k, vals0) ? settings.set("snapToLines", false) : null;
           settings.alt(k, vals0, ["auto"]);
           if (vals.length === 2) {
-            settings.alt("lineAlign", vals[1], ["start", "middle", "end"]);
+            settings.alt("lineAlign", vals[1], ["start", "center", "end"]);
           }
           break;
         case "position":
           vals = v.split(",");
           settings.percent(k, vals[0]);
           if (vals.length === 2) {
-            settings.alt("positionAlign", vals[1], ["start", "middle", "end"]);
+            settings.alt("positionAlign", vals[1], ["line-left", "center", "line-right", "auto"]);
           }
           break;
         case "size":
           settings.percent(k, v);
           break;
         case "align":
-          settings.alt(k, v, ["start", "middle", "end", "left", "right"]);
+          settings.alt(k, v, ["start", "center", "end", "left", "right"]);
           break;
         }
       }, /:/, /\s/);
@@ -230,25 +232,13 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
       cue.lineAlign = settings.get("lineAlign", "start");
       cue.snapToLines = settings.get("snapToLines", true);
       cue.size = settings.get("size", 100);
-      cue.align = settings.get("align", "middle");
-      cue.position = settings.get("position", {
-        start: 0,
-        left: 0,
-        middle: 50,
-        end: 100,
-        right: 100
-      }, cue.align);
-      cue.positionAlign = settings.get("positionAlign", {
-        start: "start",
-        left: "start",
-        middle: "middle",
-        end: "end",
-        right: "end"
-      }, cue.align);
+      cue.align = settings.get("align", "center");
+      cue.position = settings.get("position", "auto");
+      cue.positionAlign = settings.get("positionAlign", "center");
     }
 
     function skipWhitespace() {
-      input = input.replace(/^\s+/, "");
+      input = input.replace(/^[ \f\n\r\t]+/, "");
     }
 
     // 4.1 WebVTT cue timings.
@@ -366,7 +356,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
           // Otherwise just ignore the end tag.
           continue;
         }
-        var ts = parseTimeStamp(t.substr(1, t.length - 2));
+        var ts = collectTimeStamp(t.substr(1, t.length - 2));
         var node;
         if (ts) {
           // Timestamps are lead nodes as well.
@@ -685,26 +675,6 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     return "ltr";
   }
 
-  function computeLinePos(cue) {
-    if (typeof cue.line === "number" &&
-        (cue.snapToLines || (cue.line >= 0 && cue.line <= 100))) {
-      return cue.line;
-    }
-    if (!cue.track || !cue.track.textTrackList ||
-        !cue.track.textTrackList.mediaElement) {
-      return -1;
-    }
-    var track = cue.track,
-        trackList = track.textTrackList,
-        count = 0;
-    for (var i = 0; i < trackList.length && trackList[i] !== track; i++) {
-      if (trackList[i].mode === "showing") {
-        count++;
-      }
-    }
-    return ++count * -1;
-  }
-
   function StyleBox() {
   }
 
@@ -726,38 +696,60 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
   // Constructs the computed display state of the cue (a div). Places the div
   // into the overlay which should be a block level element (usually a div).
   function CueStyleBox(window, cue, styleOptions) {
+    var isIE8 = (typeof navigator !== "undefined") &&
+      (/MSIE\s8\.0/).test(navigator.userAgent);
+    var color = "rgba(255, 255, 255, 1)";
+    var backgroundColor = "rgba(0, 0, 0, 0.8)";
+
+    if (isIE8) {
+      color = "rgb(255, 255, 255)";
+      backgroundColor = "rgb(0, 0, 0)";
+    }
+
     StyleBox.call(this);
     this.cue = cue;
 
     // Parse our cue's text into a DOM tree rooted at 'cueDiv'. This div will
     // have inline positioning and will function as the cue background box.
     this.cueDiv = parseContent(window, cue.text);
-    this.applyStyles({
-      color: "rgba(255, 255, 255, 1)",
-      backgroundColor: "rgba(0, 0, 0, 0.8)",
+    var styles = {
+      color: color,
+      backgroundColor: backgroundColor,
       position: "relative",
       left: 0,
       right: 0,
       top: 0,
       bottom: 0,
       display: "inline"
-    }, this.cueDiv);
+    };
+
+    if (!isIE8) {
+      styles.writingMode = cue.vertical === "" ? "horizontal-tb"
+                                               : cue.vertical === "lr" ? "vertical-lr"
+                                                                       : "vertical-rl";
+      styles.unicodeBidi = "plaintext";
+    }
+    this.applyStyles(styles, this.cueDiv);
 
     // Create an absolutely positioned div that will be used to position the cue
-    // div. Note, all WebVTT cue-setting alignments are equivalent to the CSS
-    // mirrors of them except "middle" which is "center" in CSS.
+    // div.
     this.div = window.document.createElement("div");
-    this.applyStyles({
-      textAlign: cue.align === "middle" ? "center" : cue.align,
-      direction: determineBidi(this.cueDiv),
-      writingMode: cue.vertical === "" ? "horizontal-tb"
-                                       : cue.vertical === "lr" ? "vertical-lr"
-                                                               : "vertical-rl",
-      unicodeBidi: "plaintext",
+    styles = {
+      textAlign: cue.align,
       font: styleOptions.font,
       whiteSpace: "pre-line",
       position: "absolute"
-    });
+    };
+
+    if (!isIE8) {
+      styles.direction = determineBidi(this.cueDiv);
+      styles.writingMode = cue.vertical === "" ? "horizontal-tb"
+                                               : cue.vertical === "lr" ? "vertical-lr"
+                                                                       : "vertical-rl".
+      stylesunicodeBidi =  "plaintext";
+    }
+
+    this.applyStyles(styles);
 
     this.div.appendChild(this.cueDiv);
 
@@ -765,16 +757,17 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     // position of the cue box. The reference edge will be resolved later when
     // the box orientation styles are applied.
     var textPos = 0;
-    switch (cue.positionAlign) {
-    case "start":
-      textPos = cue.position;
-      break;
-    case "middle":
-      textPos = cue.position - (cue.size / 2);
-      break;
-    case "end":
-      textPos = cue.position - cue.size;
-      break;
+    switch (cue.computedPositionAlign) {
+      // TODO : modify these fomula to follow the spec, see bug 1277437.
+      case "line-left":
+        textPos = cue.position;
+        break;
+      case "center":
+        textPos = cue.position - (cue.size / 2);
+        break;
+      case "line-right":
+        textPos = cue.position - cue.size;
+        break;
     }
 
     // Horizontal box orientation; textPos is the distance from the left edge of the
@@ -783,7 +776,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     if (cue.vertical === "") {
       this.applyStyles({
         left:  this.formatStyle(textPos, "%"),
-        width: this.formatStyle(cue.size, "%"),
+        width: this.formatStyle(cue.size, "%")
       });
     // Vertical box orientation; textPos is the distance from the top edge of the
     // area to the top edge of the box and cue.size is the height extending
@@ -802,7 +795,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
         left: this.formatStyle(box.left, "px"),
         right: this.formatStyle(box.right, "px"),
         height: this.formatStyle(box.height, "px"),
-        width: this.formatStyle(box.width, "px"),
+        width: this.formatStyle(box.width, "px")
       });
     };
   }
@@ -813,12 +806,19 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
   // compute things with such as if it overlaps or intersects with another Element.
   // Can initialize it with either a StyleBox or another BoxPosition.
   function BoxPosition(obj) {
+    var isIE8 = (typeof navigator !== "undefined") &&
+      (/MSIE\s8\.0/).test(navigator.userAgent);
+
     // Either a BoxPosition was passed in and we need to copy it, or a StyleBox
     // was passed in and we need to copy the results of 'getBoundingClientRect'
     // as the object returned is readonly. All co-ordinate values are in reference
     // to the viewport origin (top left).
-    var lh;
+    var lh, height, width, top;
     if (obj.div) {
+      height = obj.div.offsetHeight;
+      width = obj.div.offsetWidth;
+      top = obj.div.offsetTop;
+
       var rects = (rects = obj.div.childNodes) && (rects = rects[0]) &&
                   rects.getClientRects && rects.getClientRects();
       obj = obj.div.getBoundingClientRect();
@@ -828,14 +828,19 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
       // result in the desired behaviour.
       lh = rects ? Math.max((rects[0] && rects[0].height) || 0, obj.height / rects.length)
                  : 0;
+
     }
     this.left = obj.left;
     this.right = obj.right;
-    this.top = obj.top;
-    this.height = obj.height;
-    this.bottom = obj.bottom;
-    this.width = obj.width;
+    this.top = obj.top || top;
+    this.height = obj.height || height;
+    this.bottom = obj.bottom || (top + (obj.height || height));
+    this.width = obj.width || width;
     this.lineHeight = lh !== undefined ? lh : obj.lineHeight;
+
+    if (isIE8 && !this.lineHeight) {
+      this.lineHeight = 13;
+    }
   }
 
   // Move the box along a particular axis. Optionally pass in an amount to move
@@ -933,16 +938,21 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
   // Get an object that represents the box's position without anything extra.
   // Can pass a StyleBox, HTMLElement, or another BoxPositon.
   BoxPosition.getSimpleBoxPosition = function(obj) {
+    var height = obj.div ? obj.div.offsetHeight : obj.tagName ? obj.offsetHeight : 0;
+    var width = obj.div ? obj.div.offsetWidth : obj.tagName ? obj.offsetWidth : 0;
+    var top = obj.div ? obj.div.offsetTop : obj.tagName ? obj.offsetTop : 0;
+
     obj = obj.div ? obj.div.getBoundingClientRect() :
                   obj.tagName ? obj.getBoundingClientRect() : obj;
-    return {
+    var ret = {
       left: obj.left,
       right: obj.right,
-      top: obj.top,
-      height: obj.height,
-      bottom: obj.bottom,
-      width: obj.width
+      top: obj.top || top,
+      height: obj.height || height,
+      bottom: obj.bottom || (top + (obj.height || height)),
+      width: obj.width || width
     };
+    return ret;
   };
 
   // Move a StyleBox to its specified, or next best, position. The containerBox
@@ -985,7 +995,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
 
     var boxPosition = new BoxPosition(styleBox),
         cue = styleBox.cue,
-        linePos = computeLinePos(cue),
+        linePos = cue.computedLine,
         axis = [];
 
     // If we have a line number to align the cue to.
@@ -1010,6 +1020,10 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
           position = step * Math.round(linePos),
           maxPosition = containerBox[size] + step,
           initialAxis = axis[0];
+
+      if (step == 0) {
+        return;
+      }
 
       // If the specified intial position is greater then the max position then
       // clamp the box to the amount of steps it would take for the box to
@@ -1037,7 +1051,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
       var calculatedPercentage = (boxPosition.lineHeight / containerBox.height) * 100;
 
       switch (cue.lineAlign) {
-      case "middle":
+      case "center":
         linePos -= (calculatedPercentage / 2);
         break;
       case "end":
@@ -1108,7 +1122,9 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
   // Runs the processing model over the cues and regions passed to it.
   // @param overlay A block level element (usually a div) that the computed cues
   //                and regions will be placed into.
-  WebVTT.processCues = function(window, cues, overlay) {
+  // @param controls  A Control bar element. Cues' position will be
+  //                 affected and repositioned according to it.
+  WebVTT.processCues = function(window, cues, overlay, controls) {
     if (!window || !cues || !overlay) {
       return null;
     }
@@ -1116,6 +1132,15 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     // Remove all previous children.
     while (overlay.firstChild) {
       overlay.removeChild(overlay.firstChild);
+    }
+
+    var controlBar;
+    var controlBarShown;
+
+    if (controls) {
+      controlBar = controls.ownerDocument.getAnonymousElementByAttribute(
+        controls, "class", "controlBar");
+      controlBarShown = controlBar ? !!controlBar.clientHeight : false;
     }
 
     var paddedOverlay = window.document.createElement("div");
@@ -1131,6 +1156,10 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     // be the case if a cue's state has been changed since the last computation or
     // if it has not been computed yet.
     function shouldCompute(cues) {
+      if (controlBarShown) {
+        return true;
+      }
+
       for (var i = 0; i < cues.length; i++) {
         if (cues[i].hasBeenReset || !cues[i].displayState) {
           return true;
@@ -1141,9 +1170,9 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
 
     // We don't need to recompute the cues' display states. Just reuse them.
     if (!shouldCompute(cues)) {
-      cues.forEach(function(cue) {
-        paddedOverlay.appendChild(cue.displayState);
-      });
+      for (var i = 0; i < cues.length; i++) {
+        paddedOverlay.appendChild(cues[i].displayState);
+      }
       return;
     }
 
@@ -1154,20 +1183,31 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
       font: fontSize + "px " + FONT_STYLE
     };
 
-    cues.forEach(function(cue) {
-      // Compute the intial position and styles of the cue div.
-      var styleBox = new CueStyleBox(window, cue, styleOptions);
-      paddedOverlay.appendChild(styleBox.div);
+    (function() {
+      var styleBox, cue;
 
-      // Move the cue div to it's correct line position.
-      moveBoxToLinePosition(window, styleBox, containerBox, boxPositions);
+      if (controlBarShown) {
+        // Add an empty output box that cover the same region as video control bar.
+        boxPositions.push(BoxPosition.getSimpleBoxPosition(controlBar));
+      }
 
-      // Remember the computed div so that we don't have to recompute it later
-      // if we don't have too.
-      cue.displayState = styleBox.div;
+      for (var i = 0; i < cues.length; i++) {
+        cue = cues[i];
 
-      boxPositions.push(BoxPosition.getSimpleBoxPosition(styleBox));
-    });
+        // Compute the intial position and styles of the cue div.
+        styleBox = new CueStyleBox(window, cue, styleOptions);
+        paddedOverlay.appendChild(styleBox.div);
+
+        // Move the cue div to it's correct line position.
+        moveBoxToLinePosition(window, styleBox, containerBox, boxPositions);
+
+        // Remember the computed div so that we don't have to recompute it later
+        // if we don't have too.
+        cue.displayState = styleBox.div;
+
+        boxPositions.push(BoxPosition.getSimpleBoxPosition(styleBox));
+      }
+    })();
   };
 
   WebVTT.Parser = function(window, decoder) {
@@ -1230,7 +1270,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
             settings.percent(k, v);
             break;
           case "lines":
-            settings.integer(k, v);
+            settings.digitsValue(k, v);
             break;
           case "regionanchor":
           case "viewportanchor":
@@ -1277,6 +1317,14 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
         }
       }
 
+      // WebVTT parser algorithm step1 - step9.
+      function parseSignature(input) {
+        let signature = collectNextLine();
+        if (!/^WEBVTT([ \t].*)?$/.test(signature)) {
+          throw new ParsingError(ParsingError.Errors.BadSignature);
+        }
+      }
+
       // 3.2 WebVTT metadata header syntax
       function parseHeader(input) {
         parseOptions(input, function (k, v) {
@@ -1291,23 +1339,12 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
 
       // 5.1 WebVTT file parsing.
       try {
-        var line;
         if (self.state === "INITIAL") {
-          // We can't start parsing until we have the first line.
-          if (!/\r\n|\n/.test(self.buffer)) {
-            return this;
-          }
-
-          line = collectNextLine();
-
-          var m = line.match(/^WEBVTT([ \t].*)?$/);
-          if (!m || !m[0]) {
-            throw new ParsingError(ParsingError.Errors.BadSignature);
-          }
-
+          parseSignature();
           self.state = "HEADER";
         }
 
+        var line;
         var alreadyCollectedLine = false;
         while (self.buffer) {
           // We can't parse a line until we have the full line.

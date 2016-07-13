@@ -57,7 +57,8 @@ nsBaseDragService::nsBaseDragService()
     mDragEventDispatchedToChildProcess(false),
     mDragAction(DRAGDROP_ACTION_NONE),
     mDragActionFromChildProcess(DRAGDROP_ACTION_UNINITIALIZED), mTargetSize(0,0),
-    mImageX(0), mImageY(0), mScreenX(-1), mScreenY(-1), mSuppressLevel(0),
+    mContentPolicyType(nsIContentPolicy::TYPE_OTHER),
+    mScreenX(-1), mScreenY(-1), mSuppressLevel(0),
     mInputSource(nsIDOMMouseEvent::MOZ_SOURCE_MOUSE)
 {
 }
@@ -209,15 +210,20 @@ NS_IMETHODIMP
 nsBaseDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
                                      nsISupportsArray* aTransferableArray,
                                      nsIScriptableRegion* aDragRgn,
-                                     uint32_t aActionType)
+                                     uint32_t aActionType,
+                                     nsContentPolicyType aContentPolicyType =
+                                       nsIContentPolicy::TYPE_OTHER)
 {
+  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+
   NS_ENSURE_TRUE(aDOMNode, NS_ERROR_INVALID_ARG);
   NS_ENSURE_TRUE(mSuppressLevel == 0, NS_ERROR_FAILURE);
 
   // stash the document of the dom node
   aDOMNode->GetOwnerDocument(getter_AddRefs(mSourceDocument));
   mSourceNode = aDOMNode;
-  mEndDragPoint = nsIntPoint(0, 0);
+  mContentPolicyType = aContentPolicyType;
+  mEndDragPoint = LayoutDeviceIntPoint(0, 0);
 
   // When the mouse goes down, the selection code starts a mouse
   // capture. However, this gets in the way of determining drag
@@ -225,7 +231,15 @@ nsBaseDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
   // are in the wrong coord system, so turn off mouse capture.
   nsIPresShell::ClearMouseCapture(nullptr);
 
-  return NS_OK;
+  nsresult rv = InvokeDragSessionImpl(aTransferableArray,
+                                      aDragRgn, aActionType);
+
+  if (NS_FAILED(rv)) {
+    mSourceNode = nullptr;
+    mSourceDocument = nullptr;
+  }
+
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -247,14 +261,23 @@ nsBaseDragService::InvokeDragSessionWithImage(nsIDOMNode* aDOMNode,
   mHasImage = true;
   mDragPopup = nullptr;
   mImage = aImage;
-  mImageX = aImageX;
-  mImageY = aImageY;
+  mImageOffset = CSSIntPoint(aImageX, aImageY);
 
   aDragEvent->GetScreenX(&mScreenX);
   aDragEvent->GetScreenY(&mScreenY);
   aDragEvent->GetMozInputSource(&mInputSource);
 
-  return InvokeDragSession(aDOMNode, aTransferableArray, aRegion, aActionType);
+  nsresult rv = InvokeDragSession(aDOMNode, aTransferableArray,
+                                  aRegion, aActionType,
+                                  nsIContentPolicy::TYPE_INTERNAL_IMAGE);
+
+  if (NS_FAILED(rv)) {
+    mImage = nullptr;
+    mHasImage = false;
+    mDataTransfer = nullptr;
+  }
+
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -273,8 +296,7 @@ nsBaseDragService::InvokeDragSessionWithSelection(nsISelection* aSelection,
   mHasImage = true;
   mDragPopup = nullptr;
   mImage = nullptr;
-  mImageX = 0;
-  mImageY = 0;
+  mImageOffset = CSSIntPoint();
 
   aDragEvent->GetScreenX(&mScreenX);
   aDragEvent->GetScreenY(&mScreenY);
@@ -286,7 +308,17 @@ nsBaseDragService::InvokeDragSessionWithSelection(nsISelection* aSelection,
   nsCOMPtr<nsIDOMNode> node;
   aSelection->GetFocusNode(getter_AddRefs(node));
 
-  return InvokeDragSession(node, aTransferableArray, nullptr, aActionType);
+  nsresult rv = InvokeDragSession(node, aTransferableArray,
+                                  nullptr, aActionType,
+                                  nsIContentPolicy::TYPE_OTHER);
+
+  if (NS_FAILED(rv)) {
+    mHasImage = false;
+    mSelection = nullptr;
+    mDataTransfer = nullptr;
+  }
+
+  return rv;
 }
 
 //-------------------------------------------------------------------------
@@ -328,7 +360,8 @@ nsBaseDragService::OpenDragPopup()
   if (mDragPopup) {
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm) {
-      pm->ShowPopupAtScreen(mDragPopup, mScreenX - mImageX, mScreenY - mImageY, false, nullptr);
+      pm->ShowPopupAtScreen(mDragPopup, mScreenX - mImageOffset.x,
+                            mScreenY - mImageOffset.y, false, nullptr);
     }
   }
 }
@@ -356,8 +389,9 @@ nsBaseDragService::EndDragSession(bool aDoneDrag)
     return NS_ERROR_FAILURE;
   }
 
-  if (aDoneDrag && !mSuppressLevel)
-    FireDragEventAtSource(NS_DRAGDROP_END);
+  if (aDoneDrag && !mSuppressLevel) {
+    FireDragEventAtSource(eDragEnd);
+  }
 
   if (mDragPopup) {
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
@@ -367,8 +401,9 @@ nsBaseDragService::EndDragSession(bool aDoneDrag)
   }
 
   for (uint32_t i = 0; i < mChildProcesses.Length(); ++i) {
-    mozilla::unused << mChildProcesses[i]->SendEndDragSession(aDoneDrag,
-                                                              mUserCancelled);
+    mozilla::Unused << mChildProcesses[i]->SendEndDragSession(aDoneDrag,
+                                                              mUserCancelled,
+                                                              mEndDragPoint);
   }
   mChildProcesses.Clear();
 
@@ -384,18 +419,17 @@ nsBaseDragService::EndDragSession(bool aDoneDrag)
   mUserCancelled = false;
   mDragPopup = nullptr;
   mImage = nullptr;
-  mImageX = 0;
-  mImageY = 0;
+  mImageOffset = CSSIntPoint();
   mScreenX = -1;
   mScreenY = -1;
-  mEndDragPoint = nsIntPoint(0, 0);
+  mEndDragPoint = LayoutDeviceIntPoint(0, 0);
   mInputSource = nsIDOMMouseEvent::MOZ_SOURCE_MOUSE;
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsBaseDragService::FireDragEventAtSource(uint32_t aMsg)
+nsBaseDragService::FireDragEventAtSource(EventMessage aEventMessage)
 {
   if (mSourceNode && !mSuppressLevel) {
     nsCOMPtr<nsIDocument> doc = do_QueryInterface(mSourceDocument);
@@ -403,12 +437,19 @@ nsBaseDragService::FireDragEventAtSource(uint32_t aMsg)
       nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
       if (presShell) {
         nsEventStatus status = nsEventStatus_eIgnore;
-        WidgetDragEvent event(true, aMsg, nullptr);
+        WidgetDragEvent event(true, aEventMessage, nullptr);
         event.inputSource = mInputSource;
-        if (aMsg == NS_DRAGDROP_END) {
-          event.refPoint.x = mEndDragPoint.x;
-          event.refPoint.y = mEndDragPoint.y;
-          event.userCancelled = mUserCancelled;
+        if (aEventMessage == eDragEnd) {
+          event.mRefPoint = mEndDragPoint;
+          event.mUserCancelled = mUserCancelled;
+        }
+
+        // Send the drag event to APZ, which needs to know about them to be
+        // able to accurately detect the end of a drag gesture.
+        if (nsPresContext* presContext = presShell->GetPresContext()) {
+          if (nsCOMPtr<nsIWidget> widget = presContext->GetRootWidget()) {
+            widget->DispatchEventToAPZOnly(&event);
+          }
         }
 
         nsCOMPtr<nsIContent> content = do_QueryInterface(mSourceNode);
@@ -430,7 +471,9 @@ nsBaseDragService::DragMoved(int32_t aX, int32_t aY)
   if (mDragPopup) {
     nsIFrame* frame = mDragPopup->GetPrimaryFrame();
     if (frame && frame->GetType() == nsGkAtoms::menuPopupFrame) {
-      (static_cast<nsMenuPopupFrame *>(frame))->MoveTo(aX - mImageX, aY - mImageY, true);
+      CSSIntPoint cssPos = RoundedToInt(LayoutDeviceIntPoint(aX, aY) /
+          frame->PresContext()->CSSToDevPixelScale()) - mImageOffset;
+      (static_cast<nsMenuPopupFrame *>(frame))->MoveTo(cssPos, true);
     }
   }
 
@@ -444,7 +487,7 @@ GetPresShellForContent(nsIDOMNode* aDOMNode)
   if (!content)
     return nullptr;
 
-  nsCOMPtr<nsIDocument> document = content->GetCurrentDoc();
+  nsCOMPtr<nsIDocument> document = content->GetUncomposedDoc();
   if (document) {
     document->FlushPendingNotifications(Flush_Display);
 
@@ -466,8 +509,8 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
   *aPresContext = nullptr;
 
   // use a default size, in case of an error.
-  aScreenDragRect->x = aScreenX - mImageX;
-  aScreenDragRect->y = aScreenY - mImageY;
+  aScreenDragRect->x = aScreenX - mImageOffset.x;
+  aScreenDragRect->y = aScreenY - mImageOffset.y;
   aScreenDragRect->width = 1;
   aScreenDragRect->height = 1;
 
@@ -486,7 +529,7 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
 
   nsCOMPtr<nsIFrameLoaderOwner> flo = do_QueryInterface(dragNode);
   if (flo) {
-    nsRefPtr<nsFrameLoader> fl = flo->GetFrameLoader();
+    RefPtr<nsFrameLoader> fl = flo->GetFrameLoader();
     if (fl) {
       mozilla::dom::TabParent* tp =
         static_cast<mozilla::dom::TabParent*>(fl->GetRemoteBrowser());
@@ -516,8 +559,8 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
   int32_t sx = aScreenX, sy = aScreenY;
   ConvertToUnscaledDevPixels(*aPresContext, &sx, &sy);
 
-  aScreenDragRect->x = sx - mImageX;
-  aScreenDragRect->y = sy - mImageY;
+  aScreenDragRect->x = sx - mImageOffset.x;
+  aScreenDragRect->y = sy - mImageOffset.y;
 
   // check if drag images are disabled
   bool enableDragImages = Preferences::GetBool(DRAGIMAGES_PREF, true);
@@ -529,13 +572,13 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
     if (aRegion) {
       // the region's coordinates are relative to the root frame
       nsIFrame* rootFrame = presShell->GetRootFrame();
-      if (rootFrame && *aPresContext) {
+      if (rootFrame) {
         nsIntRect dragRect;
         aRegion->GetBoundingBox(&dragRect.x, &dragRect.y, &dragRect.width, &dragRect.height);
         dragRect = ToAppUnits(dragRect, nsPresContext::AppUnitsPerCSSPixel()).
                             ToOutsidePixels((*aPresContext)->AppUnitsPerDevPixel());
 
-        nsIntRect screenRect = rootFrame->GetScreenRectExternal();
+        nsIntRect screenRect = rootFrame->GetScreenRect();
         aScreenDragRect->SetRect(screenRect.x + dragRect.x, screenRect.y + dragRect.y,
                                  dragRect.width, dragRect.height);
       }
@@ -546,7 +589,7 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
       nsCOMPtr<nsIContent> content = do_QueryInterface(dragNode);
       nsIFrame* frame = content->GetPrimaryFrame();
       if (frame) {
-        nsIntRect screenRect = frame->GetScreenRectExternal();
+        nsIntRect screenRect = frame->GetScreenRect();
         aScreenDragRect->SetRect(screenRect.x, screenRect.y,
                                  screenRect.width, screenRect.height);
       }
@@ -559,7 +602,7 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
   if (mSelection) {
     nsIntPoint pnt(aScreenDragRect->x, aScreenDragRect->y);
     *aSurface = presShell->RenderSelection(mSelection, pnt, aScreenDragRect,
-                                           mImage ? 0 : nsIPresShell::RENDER_AUTO_SCALE);
+        mImage ? 0 : nsIPresShell::RENDER_AUTO_SCALE);
     return NS_OK;
   }
 
@@ -570,14 +613,14 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
     nsCOMPtr<nsIContent> content = do_QueryInterface(dragNode);
     HTMLCanvasElement *canvas = HTMLCanvasElement::FromContentOrNull(content);
     if (canvas) {
-      return DrawDragForImage(*aPresContext, nullptr, canvas, sx, sy,
+      return DrawDragForImage(nullptr, canvas, sx, sy,
                               aScreenDragRect, aSurface);
     }
 
     nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(dragNode);
     // for image nodes, create the drag image from the actual image data
     if (imageLoader) {
-      return DrawDragForImage(*aPresContext, imageLoader, nullptr, sx, sy,
+      return DrawDragForImage(imageLoader, nullptr, sx, sy,
                               aScreenDragRect, aSurface);
     }
 
@@ -595,29 +638,54 @@ nsBaseDragService::DrawDrag(nsIDOMNode* aDOMNode,
   if (!mDragPopup) {
     // otherwise, just draw the node
     nsIntRegion clipRegion;
+    uint32_t renderFlags = mImage ? 0 : nsIPresShell::RENDER_AUTO_SCALE;
     if (aRegion) {
       aRegion->GetRegion(&clipRegion);
     }
 
+    if (renderFlags) {
+      nsCOMPtr<nsIDOMNode> child;
+      nsCOMPtr<nsIDOMNodeList> childList;
+      uint32_t length;
+      uint32_t count = 0;
+      nsAutoString childNodeName;
+
+      if (NS_SUCCEEDED(dragNode->GetChildNodes(getter_AddRefs(childList))) &&
+          NS_SUCCEEDED(childList->GetLength(&length))) {
+        // check every childnode for being a img-tag
+        while (count < length) {
+          if (NS_FAILED(childList->Item(count, getter_AddRefs(child))) ||
+              NS_FAILED(child->GetNodeName(childNodeName))) {
+            break;
+          }
+          // here the node is checked for being a img-tag
+          if (childNodeName.LowerCaseEqualsLiteral("img")) {
+            // if the dragnnode contains a image, set RENDER_IS_IMAGE flag
+            renderFlags = renderFlags | nsIPresShell::RENDER_IS_IMAGE;
+            break;
+          }
+          count++;
+        }
+      }
+    }
     nsIntPoint pnt(aScreenDragRect->x, aScreenDragRect->y);
     *aSurface = presShell->RenderNode(dragNode, aRegion ? &clipRegion : nullptr,
-                                      pnt, aScreenDragRect,
-                                      mImage ? 0 : nsIPresShell::RENDER_AUTO_SCALE);
+                                    pnt, aScreenDragRect,
+                                    renderFlags);
   }
 
   // if an image was specified, reposition the drag rectangle to
   // the supplied offset in mImageX and mImageY.
   if (mImage) {
-    aScreenDragRect->x = sx - mImageX;
-    aScreenDragRect->y = sy - mImageY;
+    aScreenDragRect->x = sx - mImageOffset.x;
+    aScreenDragRect->y = sy - mImageOffset.y;
   }
 
   return NS_OK;
 }
 
 nsresult
-nsBaseDragService::DrawDragForImage(nsPresContext* aPresContext,
-                                    nsIImageLoadingContent* aImageLoader,
+nsBaseDragService::DrawDragForImage(nsIImageLoadingContent* aImageLoader,
                                     HTMLCanvasElement* aCanvas,
                                     int32_t aScreenX, int32_t aScreenY,
                                     nsIntRect* aScreenDragRect,
@@ -660,17 +728,21 @@ nsBaseDragService::DrawDragForImage(nsPresContext* aPresContext,
       gfxPlatform::GetPlatform()->
         CreateOffscreenContentDrawTarget(destSize,
                                          SurfaceFormat::B8G8R8A8);
-    if (!dt)
+    if (!dt || !dt->IsValid())
       return NS_ERROR_FAILURE;
 
-    nsRefPtr<gfxContext> ctx = new gfxContext(dt);
+    RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(dt);
     if (!ctx)
       return NS_ERROR_FAILURE;
 
-    imgContainer->Draw(ctx, destSize, ImageRegion::Create(destSize),
-                       imgIContainer::FRAME_CURRENT,
-                       GraphicsFilter::FILTER_GOOD, Nothing(),
-                       imgIContainer::FLAG_SYNC_DECODE);
+    DrawResult res =
+      imgContainer->Draw(ctx, destSize, ImageRegion::Create(destSize),
+                         imgIContainer::FRAME_CURRENT,
+                         SamplingFilter::GOOD, /* no SVGImageContext */ Nothing(),
+                         imgIContainer::FLAG_SYNC_DECODE);
+    if (res == DrawResult::BAD_IMAGE || res == DrawResult::BAD_ARGS) {
+      return NS_ERROR_FAILURE;
+    }
     *aSurface = dt->Snapshot();
   } else {
     *aSurface = aCanvas->GetSurfaceSnapshot();

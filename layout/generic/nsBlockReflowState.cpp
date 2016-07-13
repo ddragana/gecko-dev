@@ -161,7 +161,7 @@ nsBlockReflowState::ComputeReplacedBlockOffsetsForFloats(
                       nsIFrame* aFrame,
                       const LogicalRect& aFloatAvailableSpace,
                       nscoord& aIStartResult,
-                      nscoord& aIEndResult)
+                      nscoord& aIEndResult) const
 {
   WritingMode wm = mReflowState.GetWritingMode();
   // The frame is clueless about the float manager and therefore we
@@ -264,13 +264,13 @@ nsBlockReflowState::ComputeBlockAvailSpace(nsIFrame* aFrame,
       const nsStyleBorder* borderStyle = aFrame->StyleBorder();
       switch (borderStyle->mFloatEdge) {
         default:
-        case NS_STYLE_FLOAT_EDGE_CONTENT:  // content and only content does runaround of floats
+        case NS_STYLE_FLOAT_EDGE_CONTENT_BOX:  // content and only content does runaround of floats
           // The child block will flow around the float. Therefore
           // give it all of the available space.
           aResult.IStart(wm) = mContentArea.IStart(wm);
           aResult.ISize(wm) = mContentArea.ISize(wm);
           break;
-        case NS_STYLE_FLOAT_EDGE_MARGIN:
+        case NS_STYLE_FLOAT_EDGE_MARGIN_BOX:
           {
             // The child block's margins should be placed adjacent to,
             // but not overlap the float.
@@ -300,6 +300,33 @@ nsBlockReflowState::ComputeBlockAvailSpace(nsIFrame* aFrame,
   printf("  CBAS: result %d %d %d %d\n", aResult.IStart(wm), aResult.BStart(wm),
          aResult.ISize(wm), aResult.BSize(wm));
 #endif
+}
+
+bool
+nsBlockReflowState::ReplacedBlockFitsInAvailSpace(nsIFrame* aReplacedBlock,
+                            const nsFlowAreaRect& aFloatAvailableSpace) const
+{
+  if (!aFloatAvailableSpace.mHasFloats) {
+    // If there aren't any floats here, then we always fit.
+    // We check this before calling ISizeToClearPastFloats, which is
+    // somewhat expensive.
+    return true;
+  }
+  WritingMode wm = mReflowState.GetWritingMode();
+  nsBlockFrame::ReplacedElementISizeToClear replacedISize =
+    nsBlockFrame::ISizeToClearPastFloats(*this, aFloatAvailableSpace.mRect,
+                                         aReplacedBlock);
+  // The inline-start side of the replaced element should be offset by
+  // the larger of the float intrusion or the replaced element's own
+  // start margin.  The inline-end side is similar, except for Web
+  // compatibility we ignore the margin.
+  return std::max(aFloatAvailableSpace.mRect.IStart(wm) -
+                    mContentArea.IStart(wm),
+                  replacedISize.marginIStart) +
+           replacedISize.borderBoxISize +
+           (mContentArea.IEnd(wm) -
+            aFloatAvailableSpace.mRect.IEnd(wm)) <=
+         mContentArea.ISize(wm);
 }
 
 nsFlowAreaRect
@@ -692,8 +719,6 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // placement are for the float only, not for any non-floating
   // content.
   AutoRestore<nscoord> restoreBCoord(mBCoord);
-  // FIXME: Should give AutoRestore a getter for the value to avoid this.
-  const nscoord saveBCoord = mBCoord;
 
   // Grab the float's display information
   const nsStyleDisplay* floatDisplay = aFloat->StyleDisplay();
@@ -711,7 +736,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // when floats are inserted before it.
   if (NS_STYLE_CLEAR_NONE != floatDisplay->mBreakType) {
     // XXXldb Does this handle vertical margins correctly?
-    mBCoord = ClearFloats(mBCoord, floatDisplay->mBreakType);
+    mBCoord = ClearFloats(mBCoord, floatDisplay->PhysicalBreakType(wm));
   }
     // Get the band of available space
   nsFlowAreaRect floatAvailableSpace = GetFloatAvailableSpace(mBCoord);
@@ -754,9 +779,10 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // Find a place to place the float. The CSS2 spec doesn't want
   // floats overlapping each other or sticking out of the containing
   // block if possible (CSS2 spec section 9.5.1, see the rule list).
-  NS_ASSERTION((NS_STYLE_FLOAT_LEFT == floatDisplay->mFloats) ||
-	       (NS_STYLE_FLOAT_RIGHT == floatDisplay->mFloats),
-	       "invalid float type");
+  uint8_t floatStyle = floatDisplay->PhysicalFloats(wm);
+  NS_ASSERTION((NS_STYLE_FLOAT_LEFT == floatStyle) ||
+               (NS_STYLE_FLOAT_RIGHT == floatStyle),
+               "invalid float type");
 
   // Can the float fit here?
   bool keepFloatOnSameLine = false;
@@ -807,7 +833,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
       
       if(prevFrame) {
         //get the frame type
-        if (nsGkAtoms::tableOuterFrame == prevFrame->GetType()) {
+        if (nsGkAtoms::tableWrapperFrame == prevFrame->GetType()) {
           //see if it has "align="
           // IE makes a difference between align and he float property
           nsIContent* content = prevFrame->GetContent();
@@ -850,7 +876,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // LineLeft() and LineRight() here, because we would only have to
   // convert the result back into this block's writing mode.
   LogicalPoint floatPos(wm);
-  bool leftFloat = NS_STYLE_FLOAT_LEFT == floatDisplay->mFloats;
+  bool leftFloat = NS_STYLE_FLOAT_LEFT == floatStyle;
 
   if (leftFloat == wm.IsBidiLTR()) {
     floatPos.I(wm) = floatAvailableSpace.mRect.IStart(wm);
@@ -876,7 +902,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // Reflow the float after computing its vertical position so it knows
   // where to break.
   if (!earlyFloatReflow) {
-    bool pushedDown = mBCoord != saveBCoord;
+    bool pushedDown = mBCoord != restoreBCoord.SavedValue();
     mBlock->ReflowFloat(*this, adjustedAvailableSpace, aFloat, floatMargin,
                         floatOffsets, pushedDown, reflowStatus);
   }
@@ -970,7 +996,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
     // shrunk.
     nscoord blockStart = std::min(region.BStart(wm), oldRegion.BStart(wm));
     nscoord blockEnd = std::max(region.BEnd(wm), oldRegion.BEnd(wm));
-    mFloatManager->IncludeInDamage(wm, blockStart, blockEnd);
+    mFloatManager->IncludeInDamage(blockStart, blockEnd);
   }
 
   if (!NS_FRAME_IS_FULLY_COMPLETE(reflowStatus)) {
@@ -1010,11 +1036,12 @@ nsBlockReflowState::PushFloatPastBreak(nsIFrame *aFloat)
   //    must have their tops below the top of this float)
   //  * don't waste much time trying to reflow this float again until
   //    after the break
-  if (aFloat->StyleDisplay()->mFloats == NS_STYLE_FLOAT_LEFT) {
+  uint8_t floatStyle =
+    aFloat->StyleDisplay()->PhysicalFloats(mReflowState.GetWritingMode());
+  if (floatStyle == NS_STYLE_FLOAT_LEFT) {
     mFloatManager->SetPushedLeftFloatPastBreak();
   } else {
-    MOZ_ASSERT(aFloat->StyleDisplay()->mFloats == NS_STYLE_FLOAT_RIGHT,
-               "unexpected float value");
+    MOZ_ASSERT(floatStyle == NS_STYLE_FLOAT_RIGHT, "unexpected float value");
     mFloatManager->SetPushedRightFloatPastBreak();
   }
 
@@ -1078,7 +1105,6 @@ nsBlockReflowState::ClearFloats(nscoord aBCoord, uint8_t aBreakType,
   }
 
   nscoord newBCoord = aBCoord;
-  WritingMode wm = mReflowState.GetWritingMode();
 
   if (aBreakType != NS_STYLE_CLEAR_NONE) {
     newBCoord = mFloatManager->ClearFloats(newBCoord, aBreakType, aFlags);
@@ -1087,37 +1113,14 @@ nsBlockReflowState::ClearFloats(nscoord aBCoord, uint8_t aBreakType,
   if (aReplacedBlock) {
     for (;;) {
       nsFlowAreaRect floatAvailableSpace = GetFloatAvailableSpace(newBCoord);
-      if (!floatAvailableSpace.mHasFloats) {
-        // If there aren't any floats here, then we always fit.
-        // We check this before calling ISizeToClearPastFloats, which is
-        // somewhat expensive.
-        break;
-      }
-      nsBlockFrame::ReplacedElementISizeToClear replacedISize =
-        nsBlockFrame::ISizeToClearPastFloats(*this, floatAvailableSpace.mRect,
-                                             aReplacedBlock);
-      if (std::max(floatAvailableSpace.mRect.IStart(wm) -
-                    mContentArea.IStart(wm),
-                   replacedISize.marginIStart) +
-            replacedISize.borderBoxISize +
-            std::max(mContentArea.IEnd(wm) -
-                     floatAvailableSpace.mRect.IEnd(wm),
-                     replacedISize.marginIEnd) <=
-          mContentArea.ISize(wm)) {
+      if (ReplacedBlockFitsInAvailSpace(aReplacedBlock, floatAvailableSpace)) {
         break;
       }
       // See the analogous code for inlines in nsBlockFrame::DoReflowInlineFrames
-      if (floatAvailableSpace.mRect.BSize(wm) > 0) {
-        // See if there's room in the next band.
-        newBCoord += floatAvailableSpace.mRect.BSize(wm);
-      } else {
-        if (mReflowState.AvailableHeight() != NS_UNCONSTRAINEDSIZE) {
-          // Stop trying to clear here; we'll just get pushed to the
-          // next column or page and try again there.
-          break;
-        }
-        NS_NOTREACHED("avail space rect with zero height!");
-        newBCoord += 1;
+      if (!AdvanceToNextBand(floatAvailableSpace.mRect, &newBCoord)) {
+        // Stop trying to clear here; we'll just get pushed to the
+        // next column or page and try again there.
+        break;
       }
     }
   }

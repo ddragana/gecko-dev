@@ -20,22 +20,26 @@ nsIFrame::IsFlexItem() const
 }
 
 bool
+nsIFrame::IsFlexOrGridContainer() const
+{
+  nsIAtom* t = GetType();
+  return t == nsGkAtoms::flexContainerFrame ||
+         t == nsGkAtoms::gridContainerFrame;
+}
+
+bool
 nsIFrame::IsFlexOrGridItem() const
 {
-  if (GetParent()) {
-    nsIAtom* t = GetParent()->GetType();
-    return (t == nsGkAtoms::flexContainerFrame ||
-            t == nsGkAtoms::gridContainerFrame) &&
-      !(GetStateBits() & NS_FRAME_OUT_OF_FLOW);
-  }
-  return false;
+  return !(GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
+         GetParent() &&
+         GetParent()->IsFlexOrGridContainer();
 }
 
 bool
 nsIFrame::IsTableCaption() const
 {
   return StyleDisplay()->mDisplay == NS_STYLE_DISPLAY_TABLE_CAPTION &&
-    GetParent()->StyleContext()->GetPseudo() == nsCSSAnonBoxes::tableOuter;
+    GetParent()->StyleContext()->GetPseudo() == nsCSSAnonBoxes::tableWrapper;
 }
 
 bool

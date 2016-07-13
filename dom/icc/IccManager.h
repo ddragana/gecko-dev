@@ -26,7 +26,7 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IccManager, DOMEventTargetHelper)
 
-  explicit IccManager(nsPIDOMWindow* aWindow);
+  explicit IccManager(nsPIDOMWindowInner* aWindow);
 
   void
   Shutdown();
@@ -46,7 +46,7 @@ public:
   Icc*
   GetIccById(const nsAString& aIccId) const;
 
-  nsPIDOMWindow*
+  nsPIDOMWindowInner*
   GetParentObject() const { return GetOwner(); }
 
   virtual JSObject*
@@ -56,7 +56,7 @@ private:
   ~IccManager();
 
 private:
-  nsTArray<nsRefPtr<IccListener>> mIccListeners;
+  nsTArray<RefPtr<IccListener>> mIccListeners;
 };
 
 } // namespace dom

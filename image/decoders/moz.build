@@ -8,10 +8,8 @@ toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
 # The Icon Channel stuff really shouldn't live in decoders/icon, but we'll
 # fix that another time.
-if CONFIG['MOZ_WIDGET_GTK']:
+if 'gtk' in toolkit:
     DIRS += ['icon/gtk', 'icon']
-elif toolkit == 'qt':
-    DIRS += ['icon/qt', 'icon']
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += ['icon/win', 'icon']
@@ -32,11 +30,18 @@ UNIFIED_SOURCES += [
     'nsPNGDecoder.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+include('/ipc/chromium/chromium-config.mozbuild')
 
-# Decoders need RasterImage.h
 LOCAL_INCLUDES += [
+    # Access to Skia headers for Downscaler.
+    '/gfx/2d',
+    # Decoders need ImageLib headers.
     '/image',
 ]
 
+LOCAL_INCLUDES += CONFIG['SKIA_INCLUDES']
+
 FINAL_LIBRARY = 'xul'
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

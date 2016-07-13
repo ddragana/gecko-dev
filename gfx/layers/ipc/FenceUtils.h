@@ -9,7 +9,7 @@
 #define IPC_FencerUtils_h
 
 #include "ipc/IPCMessageUtils.h"
-#include "nsRefPtr.h"             // for nsRefPtr
+#include "mozilla/RefPtr.h"             // for nsRefPtr
 
 namespace mozilla {
 namespace layers {
@@ -63,7 +63,7 @@ public:
   already_AddRefed<FdObj> GetDupFdObj();
 
 private:
-  nsRefPtr<FdObj> mFence;
+  RefPtr<FdObj> mFence;
 };
 
 } // namespace layers
@@ -76,7 +76,7 @@ struct ParamTraits<mozilla::layers::FenceHandle> {
   typedef mozilla::layers::FenceHandle paramType;
 
   static void Write(Message* aMsg, const paramType& aParam);
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult);
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult);
 };
 
 } // namespace IPC

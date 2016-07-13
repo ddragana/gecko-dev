@@ -189,6 +189,9 @@ nsSupportsArray::Read(nsIObjectInputStream* aStream)
 
   uint32_t newArraySize;
   rv = aStream->Read32(&newArraySize);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   if (newArraySize <= kAutoArraySize) {
     if (mArray != mAutoArray) {
@@ -599,9 +602,6 @@ NS_IMETHODIMP
 nsSupportsArray::Enumerate(nsIEnumerator** aResult)
 {
   nsSupportsArrayEnumerator* e = new nsSupportsArrayEnumerator(this);
-  if (!e) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
   *aResult = e;
   NS_ADDREF(e);
   return NS_OK;

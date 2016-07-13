@@ -5,7 +5,15 @@
 
 Components.utils.import("resource://gre/modules/BrowserUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
+                                  "resource://gre/modules/LoginHelper.jsm");
+
 var security = {
+  init: function(uri, windowInfo) {
+    this.uri = uri;
+    this.windowInfo = windowInfo;
+  },
+
   // Display the server certificate (static)
   viewCert : function () {
     var cert = security._cert;
@@ -21,14 +29,10 @@ var security = {
 
     // We don't have separate info for a frame, return null until further notice
     // (see bug 138479)
-    if (gWindow != gWindow.top)
+    if (!this.windowInfo.isTopWindow)
       return null;
 
-    var hName = null;
-    try {
-      hName = gWindow.location.host;
-    }
-    catch (exception) { }
+    var hostName = this.windowInfo.hostName;
 
     var ui = security._getSecurityUI();
     if (!ui)
@@ -53,7 +57,7 @@ var security = {
         this.mapIssuerOrganization(cert.issuerOrganization) || cert.issuerName;
 
       var retval = {
-        hostName : hName,
+        hostName : hostName,
         cAName : issuerName,
         encryptionAlgorithm : undefined,
         encryptionStrength : undefined,
@@ -61,8 +65,7 @@ var security = {
         isBroken : isBroken,
         isMixed : isMixed,
         isEV : isEV,
-        cert : cert,
-        fullLocation : gWindow.location
+        cert : cert
       };
 
       var version;
@@ -87,12 +90,15 @@ var security = {
         case nsISSLStatus.TLS_VERSION_1_2:
           retval.version = "TLS 1.2"
           break;
+        case nsISSLStatus.TLS_VERSION_1_3:
+          retval.version = "TLS 1.3"
+          break;
       }
 
       return retval;
     } else {
       return {
-        hostName : hName,
+        hostName : hostName,
         cAName : "",
         encryptionAlgorithm : "",
         encryptionStrength : 0,
@@ -100,8 +106,8 @@ var security = {
         isBroken : isBroken,
         isMixed : isMixed,
         isEV : isEV,
-        cert : null,
-        fullLocation : gWindow.location
+        cert : null
+
       };
     }
   },
@@ -124,7 +130,7 @@ var security = {
     // No mapping required
     return name;
   },
-  
+
   /**
    * Open the cookie manager window
    */
@@ -137,13 +143,12 @@ var security = {
                       getService(Components.interfaces.nsIEffectiveTLDService);
 
     var eTLD;
-    var uri = BrowserUtils.makeURIFromCPOW(gDocument.documentURIObject);
     try {
-      eTLD = eTLDService.getBaseDomain(uri);
+      eTLD = eTLDService.getBaseDomain(this.uri);
     }
     catch (e) {
       // getBaseDomain will fail if the host is an IP address or is empty
-      eTLD = uri.asciiHost;
+      eTLD = this.uri.asciiHost;
     }
 
     if (win) {
@@ -158,25 +163,16 @@ var security = {
   /**
    * Open the login manager window
    */
-  viewPasswords : function()
-  {
-    var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
-                       .getService(Components.interfaces.nsIWindowMediator);
-    var win = wm.getMostRecentWindow("Toolkit:PasswordManager");
-    if (win) {
-      win.setFilter(this._getSecurityInfo().hostName);
-      win.focus();
-    }
-    else
-      window.openDialog("chrome://passwordmgr/content/passwordManager.xul",
-                        "Toolkit:PasswordManager", "",
-                        {filterString : this._getSecurityInfo().hostName});
+  viewPasswords : function() {
+    LoginHelper.openPasswordManager(window, this._getSecurityInfo().hostName);
   },
 
   _cert : null
 };
 
-function securityOnLoad() {
+function securityOnLoad(uri, windowInfo) {
+  security.init(uri, windowInfo);
+
   var info = security._getSecurityInfo();
   if (!info) {
     document.getElementById("securityTab").hidden = true;
@@ -190,7 +186,7 @@ function securityOnLoad() {
 
   /* Set Identity section text */
   setText("security-identity-domain-value", info.hostName);
-  
+
   var owner, verifier;
   if (info.cert && !info.isBroken) {
     // Try to pull out meaningful values.  Technically these fields are optional
@@ -234,12 +230,11 @@ function securityOnLoad() {
   var yesStr = pageInfoBundle.getString("yes");
   var noStr = pageInfoBundle.getString("no");
 
-  var uri = BrowserUtils.makeURIFromCPOW(gDocument.documentURIObject);
   setText("security-privacy-cookies-value",
           hostHasCookies(uri) ? yesStr : noStr);
   setText("security-privacy-passwords-value",
           realmHasPasswords(uri) ? yesStr : noStr);
-  
+
   var visitCount = previousVisitCount(info.hostName);
   if(visitCount > 1) {
     setText("security-privacy-history-value",
@@ -250,7 +245,7 @@ function securityOnLoad() {
             pageInfoBundle.getString("securityOneVisit"));
   }
   else {
-    setText("security-privacy-history-value", noStr);        
+    setText("security-privacy-history-value", noStr);
   }
 
   /* Set the Technical Detail section messages */
@@ -286,12 +281,12 @@ function securityOnLoad() {
     if (info.hostName != null)
       msg1 = pkiBundle.getFormattedString("pageInfo_Privacy_None1", [info.hostName]);
     else
-      msg1 = pkiBundle.getString("pageInfo_Privacy_None3");
+      msg1 = pkiBundle.getString("pageInfo_Privacy_None4");
     msg2 = pkiBundle.getString("pageInfo_Privacy_None2");
   }
   setText("security-technical-shortform", hdr);
   setText("security-technical-longform1", msg1);
-  setText("security-technical-longform2", msg2); 
+  setText("security-technical-longform2", msg2);
 }
 
 function setText(id, value)
@@ -346,13 +341,13 @@ function realmHasPasswords(uri) {
 function previousVisitCount(host, endTimeReference) {
   if (!host)
     return false;
-  
+
   var historyService = Components.classes["@mozilla.org/browser/nav-history-service;1"]
                                  .getService(Components.interfaces.nsINavHistoryService);
-    
+
   var options = historyService.getNewQueryOptions();
   options.resultType = options.RESULTS_AS_VISIT;
-  
+
   // Search for visits to this host before today
   var query = historyService.getNewQuery();
   query.endTimeReference = query.TIME_RELATIVE_TODAY;

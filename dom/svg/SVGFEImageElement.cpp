@@ -114,11 +114,6 @@ SVGFEImageElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
     // If there is a frame then it should deal with loading as the image
     // url may be animated.
     if (!GetPrimaryFrame()) {
-
-      // Prevent setting image.src by exiting early
-      if (nsContentUtils::IsImageSrcSetDisabled()) {
-        return NS_OK;
-      }
       if (aValue) {
         LoadSVGImage(true, aNotify);
       } else {
@@ -160,7 +155,7 @@ SVGFEImageElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     ClearBrokenState();
     RemoveStatesSilently(NS_EVENT_STATE_BROKEN);
     nsContentUtils::AddScriptRunner(
-      NS_NewRunnableMethod(this, &SVGFEImageElement::MaybeLoadSVGImage));
+      NewRunnableMethod(this, &SVGFEImageElement::MaybeLoadSVGImage));
   }
 
   return rv;
@@ -235,10 +230,10 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
   Matrix TM = viewBoxTM;
   TM.PostTranslate(aFilterSubregion.x, aFilterSubregion.y);
 
-  Filter filter = ToFilter(nsLayoutUtils::GetGraphicsFilterForFrame(frame));
+  SamplingFilter samplingFilter = nsLayoutUtils::GetSamplingFilterForFrame(frame);
 
   FilterPrimitiveDescription descr(PrimitiveType::Image);
-  descr.Attributes().Set(eImageFilter, (uint32_t)filter);
+  descr.Attributes().Set(eImageFilter, (uint32_t)samplingFilter);
   descr.Attributes().Set(eImageTransform, TM);
 
   // Append the image to aInputImages and store its index in the description.

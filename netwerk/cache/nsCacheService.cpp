@@ -44,6 +44,7 @@
 #include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::net;
 
 /******************************************************************************
  * nsCacheProfilePrefObserver
@@ -222,7 +223,7 @@ NS_IMPL_ISUPPORTS(nsSetDiskSmartSizeCallback, nsITimerCallback)
 
 // Runnable sent to main thread after the cache IO thread calculates available
 // disk space, so that there is no race in setting mDiskCacheCapacity.
-class nsSetSmartSizeEvent: public nsRunnable 
+class nsSetSmartSizeEvent: public Runnable 
 {
 public:
     explicit nsSetSmartSizeEvent(int32_t smartSize)
@@ -259,7 +260,7 @@ private:
 
 
 // Runnable sent from main thread to cacheIO thread
-class nsGetSmartSizeEvent: public nsRunnable
+class nsGetSmartSizeEvent: public Runnable
 {
 public:
     nsGetSmartSizeEvent(const nsAString& cachePath, uint32_t currentSize,
@@ -287,7 +288,7 @@ private:
     bool     mShouldUseOldMaxSmartSize;
 };
 
-class nsBlockOnCacheThreadEvent : public nsRunnable {
+class nsBlockOnCacheThreadEvent : public Runnable {
 public:
     nsBlockOnCacheThreadEvent()
     {
@@ -296,6 +297,7 @@ public:
     {
         nsCacheServiceAutoLock autoLock(LOCK_TELEM(NSBLOCKONCACHETHREADEVENT_RUN));
         CACHE_LOG_DEBUG(("nsBlockOnCacheThreadEvent [%p]\n", this));
+        nsCacheService::gService->mNotified = true;
         nsCacheService::gService->mCondVar.Notify();
         return NS_OK;
     }
@@ -852,9 +854,12 @@ nsCacheService::SyncWithCacheIOThread()
     }
 
     // wait until notified, then return
-    rv = gService->mCondVar.Wait();
+    gService->mNotified = false;
+    while (!gService->mNotified) {
+      gService->mCondVar.Wait();
+    }
 
-    return rv;
+    return NS_OK;
 }
 
 
@@ -966,7 +971,7 @@ nsCacheProfilePrefObserver::CacheCompressionLevel()
  * nsProcessRequestEvent
  *****************************************************************************/
 
-class nsProcessRequestEvent : public nsRunnable {
+class nsProcessRequestEvent : public Runnable {
 public:
     explicit nsProcessRequestEvent(nsCacheRequest *aRequest)
     {
@@ -1004,7 +1009,7 @@ private:
  * nsDoomEvent
  *****************************************************************************/
 
-class nsDoomEvent : public nsRunnable {
+class nsDoomEvent : public Runnable {
 public:
     nsDoomEvent(nsCacheSession *session,
                 const nsACString &key,
@@ -1025,7 +1030,7 @@ public:
 
     NS_IMETHOD Run()
     {
-        nsCacheServiceAutoLock lock(LOCK_TELEM(NSDOOMEVENT_RUN));
+        nsCacheServiceAutoLock lock;
 
         bool foundActive = true;
         nsresult status = NS_ERROR_NOT_AVAILABLE;
@@ -1073,6 +1078,7 @@ nsCacheService::nsCacheService()
     : mObserver(nullptr),
       mLock("nsCacheService.mLock"),
       mCondVar(mLock, "nsCacheService.mCondVar"),
+      mNotified(false),
       mTimeStampLock("nsCacheService.mTimeStampLock"),
       mInitialized(false),
       mClearingEntries(false),
@@ -1129,8 +1135,6 @@ nsCacheService::Init()
         return NS_ERROR_UNEXPECTED;
     }
 
-    CACHE_LOG_INIT();
-
     nsresult rv;
 
     mStorageService = do_GetService("@mozilla.org/storage/service;1", &rv);
@@ -1165,16 +1169,6 @@ nsCacheService::Init()
 
     mInitialized = true;
     return NS_OK;
-}
-
-// static
-PLDHashOperator
-nsCacheService::ShutdownCustomCacheDeviceEnum(const nsAString& aProfileDir,
-                                              nsRefPtr<nsOfflineCacheDevice>& aDevice,
-                                              void* aUserArg)
-{
-    aDevice->Shutdown();
-    return PL_DHASH_REMOVE;
 }
 
 void
@@ -1242,7 +1236,11 @@ nsCacheService::Shutdown()
 
         NS_IF_RELEASE(mOfflineDevice);
 
-        mCustomOfflineDevices.Enumerate(&nsCacheService::ShutdownCustomCacheDeviceEnum, nullptr);
+        for (auto iter = mCustomOfflineDevices.Iter();
+             !iter.Done(); iter.Next()) {
+            iter.Data()->Shutdown();
+            iter.Remove();
+        }
 
         LogCacheStatistics();
 
@@ -1311,7 +1309,7 @@ nsCacheService::CreateSessionInternal(const char *          clientID,
                                       bool                  streamBased,
                                       nsICacheSession     **result)
 {
-    nsRefPtr<nsCacheSession> session =
+    RefPtr<nsCacheSession> session =
         new nsCacheSession(clientID, storagePolicy, streamBased);
     session.forget(result);
 
@@ -1329,7 +1327,7 @@ nsCacheService::EvictEntriesForSession(nsCacheSession * session)
 
 namespace {
 
-class EvictionNotifierRunnable : public nsRunnable
+class EvictionNotifierRunnable : public Runnable
 {
 public:
     explicit EvictionNotifierRunnable(nsISupports* aSubject)
@@ -1361,7 +1359,7 @@ nsresult
 nsCacheService::EvictEntriesForClient(const char *          clientID,
                                       nsCacheStoragePolicy  storagePolicy)
 {
-    nsRefPtr<EvictionNotifierRunnable> r =
+    RefPtr<EvictionNotifierRunnable> r =
         new EvictionNotifierRunnable(NS_ISUPPORTS_CAST(nsICacheService*, this));
     NS_DispatchToMainThread(r);
 
@@ -1533,8 +1531,8 @@ nsresult nsCacheService::EvictEntriesInternal(nsCacheStoragePolicy storagePolicy
     if (storagePolicy == nsICache::STORE_ANYWHERE) {
         // if not called on main thread, dispatch the notification to the main thread to notify observers
         if (!NS_IsMainThread()) { 
-            nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this,
-                                                               &nsCacheService::FireClearNetworkCacheStoredAnywhereNotification);
+            nsCOMPtr<nsIRunnable> event = NewRunnableMethod(this,
+                                                            &nsCacheService::FireClearNetworkCacheStoredAnywhereNotification);
             NS_DispatchToMainThread(event);
         } else {
             // else you're already on main thread - notify observers
@@ -1571,9 +1569,6 @@ NS_IMETHODIMP nsCacheService::GetCacheIOTarget(nsIEventTarget * *aCacheIOTarget)
     return rv;
 }
 
-/* nsICacheServiceInternal
- * readonly attribute double lockHeldTime;
-*/
 NS_IMETHODIMP nsCacheService::GetLockHeldTime(double *aLockHeldTime)
 {
     MutexAutoLock lock(mTimeStampLock);
@@ -1622,9 +1617,6 @@ nsCacheService::CreateDiskDevice()
         return rv;
     }
 
-    Telemetry::Accumulate(Telemetry::DISK_CACHE_SMART_SIZE_USING_OLD_MAX,
-                          mObserver->ShouldUseOldMaxSmartSize());
-
     NS_ASSERTION(!mSmartSizeTimer, "Smartsize timer was already fired!");
 
     // Disk device is usually created during the startup. Delay smart size
@@ -1649,7 +1641,7 @@ nsCacheService::CreateDiskDevice()
 }
 
 // Runnable sent from cache thread to main thread
-class nsDisableOldMaxSmartSizePrefEvent: public nsRunnable
+class nsDisableOldMaxSmartSizePrefEvent: public Runnable
 {
 public:
     nsDisableOldMaxSmartSizePrefEvent() {}
@@ -1859,7 +1851,7 @@ nsCacheService::CreateRequest(nsCacheSession *   session,
 }
 
 
-class nsCacheListenerEvent : public nsRunnable
+class nsCacheListenerEvent : public Runnable
 {
 public:
     nsCacheListenerEvent(nsICacheListener *listener,
@@ -1972,7 +1964,7 @@ nsCacheService::ProcessRequest(nsCacheRequest *           request,
             // Failsafe check: this is implemented only for offline cache atm.
             rv = NS_ERROR_FAILURE;
         } else {
-            nsRefPtr<nsOfflineCacheDevice> customCacheDevice;
+            RefPtr<nsOfflineCacheDevice> customCacheDevice;
             rv = GetCustomOfflineDevice(request->mProfileDir, -1,
                                         getter_AddRefs(customCacheDevice));
             if (NS_SUCCEEDED(rv))
@@ -2387,8 +2379,11 @@ nsCacheService::OnProfileShutdown()
     if (gService->mOfflineDevice && gService->mEnableOfflineDevice) {
         gService->mOfflineDevice->Shutdown();
     }
-    gService->mCustomOfflineDevices.Enumerate(
-        &nsCacheService::ShutdownCustomCacheDeviceEnum, nullptr);
+    for (auto iter = gService->mCustomOfflineDevices.Iter();
+         !iter.Done(); iter.Next()) {
+        iter.Data()->Shutdown();
+        iter.Remove();
+    }
 
     gService->mEnableOfflineDevice = false;
 
@@ -2640,6 +2635,13 @@ nsCacheService::LockReleased()
 }
 
 void
+nsCacheService::Lock()
+{
+    gService->mLock.Lock();
+    gService->LockAcquired();
+}
+
+void
 nsCacheService::Lock(mozilla::Telemetry::ID mainThreadLockerID)
 {
     mozilla::Telemetry::ID lockerID;
@@ -2655,8 +2657,7 @@ nsCacheService::Lock(mozilla::Telemetry::ID mainThreadLockerID)
 
     TimeStamp start(TimeStamp::Now());
 
-    gService->mLock.Lock();
-    gService->LockAcquired();
+    nsCacheService::Lock();
 
     TimeStamp stop(TimeStamp::Now());
 
@@ -2693,7 +2694,7 @@ nsCacheService::ReleaseObject_Locked(nsISupports * obj,
     if (!target || (NS_SUCCEEDED(target->IsOnCurrentThread(&isCur)) && isCur)) {
         gService->mDoomedObjects.AppendElement(obj);
     } else {
-        NS_ProxyRelease(target, obj);
+        NS_ProxyRelease(target, dont_AddRef(obj));
     }
 }
 
@@ -2917,7 +2918,7 @@ nsCacheService::ClearDoomList()
 void
 nsCacheService::DoomActiveEntries(DoomCheckFn check)
 {
-    nsAutoTArray<nsCacheEntry*, 8> array;
+    AutoTArray<nsCacheEntry*, 8> array;
 
     for (auto iter = mActiveEntries.Iter(); !iter.Done(); iter.Next()) {
         nsCacheEntry* entry =
@@ -2943,8 +2944,8 @@ nsCacheService::DoomActiveEntries(DoomCheckFn check)
 void
 nsCacheService::CloseAllStreams()
 {
-    nsTArray<nsRefPtr<nsCacheEntryDescriptor::nsInputStreamWrapper> > inputs;
-    nsTArray<nsRefPtr<nsCacheEntryDescriptor::nsOutputStreamWrapper> > outputs;
+    nsTArray<RefPtr<nsCacheEntryDescriptor::nsInputStreamWrapper> > inputs;
+    nsTArray<RefPtr<nsCacheEntryDescriptor::nsOutputStreamWrapper> > outputs;
 
     {
         nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHESERVICE_CLOSEALLSTREAMS));
@@ -2972,7 +2973,7 @@ nsCacheService::CloseAllStreams()
         for (size_t i = 0; i < entries.Length(); i++) {
             entry = entries.ElementAt(i);
 
-            nsTArray<nsRefPtr<nsCacheEntryDescriptor> > descs;
+            nsTArray<RefPtr<nsCacheEntryDescriptor> > descs;
             entry->GetDescriptors(descs);
 
             for (uint32_t j = 0 ; j < descs.Length() ; j++) {
@@ -3171,7 +3172,7 @@ IsEntryPrivate(nsCacheEntry* entry)
 void
 nsCacheService::LeavePrivateBrowsing()
 {
-    nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHESERVICE_LEAVEPRIVATEBROWSING));
+    nsCacheServiceAutoLock lock;
 
     gService->DoomActiveEntries(IsEntryPrivate);
 

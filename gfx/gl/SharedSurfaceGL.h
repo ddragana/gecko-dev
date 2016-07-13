@@ -10,7 +10,6 @@
 #include "SharedSurface.h"
 #include "SurfaceTypes.h"
 #include "GLContextTypes.h"
-#include "nsAutoPtr.h"
 #include "gfxTypes.h"
 #include "mozilla/Mutex.h"
 
@@ -66,16 +65,15 @@ public:
     virtual void LockProdImpl() override {}
     virtual void UnlockProdImpl() override {}
 
-    virtual void Fence() override {}
-    virtual bool WaitSync() override { return true; }
-    virtual bool PollSync() override { return true; }
+    virtual void ProducerAcquireImpl() override {}
+    virtual void ProducerReleaseImpl() override {}
 
     virtual GLuint ProdTexture() override {
         return mTex;
     }
 
     virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override {
-        MOZ_CRASH("don't do this");
+        MOZ_CRASH("GFX: ToSurfaceDescriptor");
         return false;
     }
 };
@@ -90,6 +88,75 @@ public:
     virtual UniquePtr<SharedSurface> CreateShared(const gfx::IntSize& size) override {
         bool hasAlpha = mReadCaps.alpha;
         return SharedSurface_Basic::Create(mGL, mFormats, size, hasAlpha);
+    }
+};
+
+
+// Using shared GL textures:
+class SharedSurface_GLTexture
+    : public SharedSurface
+{
+public:
+    static UniquePtr<SharedSurface_GLTexture> Create(GLContext* prodGL,
+                                                     const GLFormats& formats,
+                                                     const gfx::IntSize& size,
+                                                     bool hasAlpha);
+
+    static SharedSurface_GLTexture* Cast(SharedSurface* surf) {
+        MOZ_ASSERT(surf->mType == SharedSurfaceType::SharedGLTexture);
+
+        return (SharedSurface_GLTexture*)surf;
+    }
+
+protected:
+    const GLuint mTex;
+    GLsync mSync;
+
+    SharedSurface_GLTexture(GLContext* prodGL,
+                            const gfx::IntSize& size,
+                            bool hasAlpha,
+                            GLuint tex)
+        : SharedSurface(SharedSurfaceType::SharedGLTexture,
+                        AttachmentType::GLTexture,
+                        prodGL,
+                        size,
+                        hasAlpha, true)
+        , mTex(tex)
+        , mSync(0)
+    {
+    }
+
+public:
+    virtual ~SharedSurface_GLTexture();
+
+    virtual void LockProdImpl() override {}
+    virtual void UnlockProdImpl() override {}
+
+    virtual void ProducerAcquireImpl() override {}
+    virtual void ProducerReleaseImpl() override;
+
+    virtual GLuint ProdTexture() override {
+        return mTex;
+    }
+
+    virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override;
+};
+
+class SurfaceFactory_GLTexture
+    : public SurfaceFactory
+{
+public:
+    SurfaceFactory_GLTexture(GLContext* prodGL,
+                             const SurfaceCaps& caps,
+                             const RefPtr<layers::ClientIPCAllocator>& allocator,
+                             const layers::TextureFlags& flags)
+        : SurfaceFactory(SharedSurfaceType::SharedGLTexture, prodGL, caps, allocator, flags)
+    {
+    }
+
+    virtual UniquePtr<SharedSurface> CreateShared(const gfx::IntSize& size) override {
+        bool hasAlpha = mReadCaps.alpha;
+        return SharedSurface_GLTexture::Create(mGL, mFormats, size, hasAlpha);
     }
 };
 

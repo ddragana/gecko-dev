@@ -17,7 +17,6 @@
 #include "mozilla/layers/LayersTypes.h"  // for BufferMode, LayersBackend, etc
 #include "mozilla/layers/ShadowLayers.h"  // for ShadowLayerForwarder, etc
 #include "mozilla/layers/APZTestData.h" // for APZTestData
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsIObserver.h"                // for nsIObserver
 #include "nsISupportsImpl.h"            // for Layer::Release, etc
@@ -31,26 +30,19 @@ namespace mozilla {
 namespace layers {
 
 class ClientPaintedLayer;
-class CompositorChild;
+class CompositorBridgeChild;
 class ImageLayer;
 class PLayerChild;
 class FrameUniformityData;
-class TextureClientPool;
 
 class ClientLayerManager final : public LayerManager
 {
-  typedef nsTArray<nsRefPtr<Layer> > LayerRefArray;
+  typedef nsTArray<RefPtr<Layer> > LayerRefArray;
 
 public:
   explicit ClientLayerManager(nsIWidget* aWidget);
 
-  virtual void Destroy() override
-  {
-    // It's important to call ClearCachedResource before Destroy because the
-    // former will early-return if the later has already run.
-    ClearCachedResources();
-    LayerManager::Destroy();
-  }
+  virtual void Destroy() override;
 
 protected:
   virtual ~ClientLayerManager();
@@ -88,8 +80,6 @@ public:
 
   virtual void Mutated(Layer* aLayer) override;
 
-  virtual bool IsOptimizedFor(PaintedLayer* aLayer, PaintedLayerCreationHint aHint) override;
-
   virtual already_AddRefed<PaintedLayer> CreatePaintedLayer() override;
   virtual already_AddRefed<PaintedLayer> CreatePaintedLayerWithHint(PaintedLayerCreationHint aHint) override;
   virtual already_AddRefed<ContainerLayer> CreateContainerLayer() override;
@@ -99,6 +89,7 @@ public:
   virtual already_AddRefed<ColorLayer> CreateColorLayer() override;
   virtual already_AddRefed<RefLayer> CreateRefLayer() override;
 
+  void UpdateTextureFactoryIdentifier(const TextureFactoryIdentifier& aNewIdentifier);
   TextureFactoryIdentifier GetTextureFactoryIdentifier()
   {
     return mForwarder->GetTextureFactoryIdentifier();
@@ -122,13 +113,6 @@ public:
   virtual bool HasShadowManagerInternal() const override { return HasShadowManager(); }
 
   virtual void SetIsFirstPaint() override;
-
-  TextureClientPool* GetTexturePool(gfx::SurfaceFormat aFormat);
-
-  /// Utility methods for managing texture clients.
-  void ReturnTextureClientDeferred(TextureClient& aClient);
-  void ReturnTextureClient(TextureClient& aClient);
-  void ReportClientLost(TextureClient& aClient);
 
   /**
    * Pass through call to the forwarder for nsPresContext's
@@ -164,9 +148,9 @@ public:
   void* GetPaintedLayerCallbackData() const
   { return mPaintedLayerCallbackData; }
 
-  CompositorChild* GetRemoteRenderer();
+  CompositorBridgeChild* GetRemoteRenderer();
 
-  CompositorChild* GetCompositorChild();
+  CompositorBridgeChild* GetCompositorBridgeChild();
 
   // Disable component alpha layers with the software compositor.
   virtual bool ShouldAvoidComponentAlphaLayers() override { return !IsCompositingCheap(); }
@@ -205,12 +189,9 @@ public:
   virtual bool RequestOverfill(mozilla::dom::OverfillCallback* aCallback) override;
   virtual void RunOverfillCallback(const uint32_t aOverfill) override;
 
-  void DidComposite(uint64_t aTransactionId);
-
-  virtual bool SupportsMixBlendModes(EnumSet<gfx::CompositionOp>& aMixBlendModes) override
-  {
-   return (GetTextureFactoryIdentifier().mSupportedBlendModes & aMixBlendModes) == aMixBlendModes;
-  }
+  void DidComposite(uint64_t aTransactionId,
+                    const mozilla::TimeStamp& aCompositeStart,
+                    const mozilla::TimeStamp& aCompositeEnd);
 
   virtual bool AreComponentAlphaLayersEnabled() override;
 
@@ -255,6 +236,19 @@ public:
 
   bool AsyncPanZoomEnabled() const override;
 
+  void SetNextPaintSyncId(int32_t aSyncId);
+
+  class DidCompositeObserver {
+  public:
+    virtual void DidComposite() = 0;
+  };
+
+  void AddDidCompositeObserver(DidCompositeObserver* aObserver);
+  void RemoveDidCompositeObserver(DidCompositeObserver* aObserver);
+
+  virtual already_AddRefed<PersistentBufferProvider>
+  CreatePersistentBufferProvider(const gfx::IntSize& aSize, gfx::SurfaceFormat aFormat) override;
+
 protected:
   enum TransactionPhase {
     PHASE_NONE, PHASE_CONSTRUCTION, PHASE_DRAWING, PHASE_FORWARD
@@ -298,9 +292,13 @@ private:
 
   void ClearLayer(Layer* aLayer);
 
+  void HandleMemoryPressureLayer(Layer* aLayer);
+
   bool EndTransactionInternal(DrawPaintedLayerCallback aCallback,
                               void* aCallbackData,
                               EndTransactionFlags);
+
+  bool DependsOnStaleDevice() const;
 
   LayerRefArray mKeepAlive;
 
@@ -319,9 +317,9 @@ private:
   // we send a message to our remote side to capture the actual pixels
   // being drawn to the default target, and then copy those pixels
   // back to mShadowTarget.
-  nsRefPtr<gfxContext> mShadowTarget;
+  RefPtr<gfxContext> mShadowTarget;
 
-  nsRefPtr<TransactionIdAllocator> mTransactionIdAllocator;
+  RefPtr<TransactionIdAllocator> mTransactionIdAllocator;
   uint64_t mLatestTransactionId;
 
   // Sometimes we draw to targets that don't natively support
@@ -345,11 +343,13 @@ private:
   APZTestData mApzTestData;
 
   RefPtr<ShadowLayerForwarder> mForwarder;
-  nsAutoTArray<RefPtr<TextureClientPool>,2> mTexturePools;
-  nsAutoTArray<dom::OverfillCallback*,0> mOverfillCallbacks;
+  AutoTArray<dom::OverfillCallback*,0> mOverfillCallbacks;
   mozilla::TimeStamp mTransactionStart;
 
-  nsRefPtr<MemoryPressureObserver> mMemoryPressureObserver;
+  nsTArray<DidCompositeObserver*> mDidCompositeObservers;
+
+  RefPtr<MemoryPressureObserver> mMemoryPressureObserver;
+  uint64_t mDeviceCounter;
 };
 
 class ClientLayer : public ShadowableLayer
@@ -379,6 +379,10 @@ public:
   }
 
   virtual void ClearCachedResources() { }
+
+  // Shrink memory usage.
+  // Called when "memory-pressure" is observed.
+  virtual void HandleMemoryPressure() { }
 
   virtual void RenderLayer() = 0;
   virtual void RenderLayerWithReadback(ReadbackProcessor *aReadback) { RenderLayer(); }

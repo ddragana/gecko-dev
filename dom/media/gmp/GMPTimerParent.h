@@ -11,7 +11,6 @@
 #include "nsCOMPtr.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
-#include "nsAutoPtr.h"
 #include "mozilla/Monitor.h"
 #include "nsIThread.h"
 
@@ -26,9 +25,9 @@ public:
   void Shutdown();
 
 protected:
-  virtual bool RecvSetTimer(const uint32_t& aTimerId,
-                            const uint32_t& aTimeoutMs) override;
-  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+  bool RecvSetTimer(const uint32_t& aTimerId,
+                    const uint32_t& aTimeoutMs) override;
+  void ActorDestroy(ActorDestroyReason aWhy) override;
 
 private:
   ~GMPTimerParent() {}
@@ -43,7 +42,7 @@ private:
       MOZ_COUNT_DTOR(Context);
     }
     nsCOMPtr<nsITimer> mTimer;
-    nsRefPtr<GMPTimerParent> mParent; // Note: live timers keep the GMPTimerParent alive.
+    RefPtr<GMPTimerParent> mParent; // Note: live timers keep the GMPTimerParent alive.
     uint32_t mId;
   };
 

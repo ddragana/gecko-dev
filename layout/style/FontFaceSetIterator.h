@@ -6,6 +6,7 @@
 #ifndef mozilla_dom_FontFaceSetIterator_h
 #define mozilla_dom_FontFaceSetIterator_h
 
+#include "mozilla/dom/FontFaceSet.h"
 #include "mozilla/dom/FontFaceSetBinding.h"
 #include "mozilla/dom/NonRefcountedDOMObject.h"
 
@@ -32,7 +33,7 @@ public:
 private:
   ~FontFaceSetIterator();
 
-  nsRefPtr<FontFaceSet> mFontFaceSet;
+  RefPtr<FontFaceSet> mFontFaceSet;
   uint32_t mNextIndex;
   bool mIsKeyAndValue;
 };

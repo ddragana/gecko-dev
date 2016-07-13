@@ -16,8 +16,8 @@
 using namespace mozilla;
 using namespace mozilla::layout;
 
-NS_DECLARE_FRAME_PROPERTY(FontInflationDataProperty,
-                          DeleteValue<nsFontInflationData>)
+NS_DECLARE_FRAME_PROPERTY_DELETABLE(FontInflationDataProperty,
+                                    nsFontInflationData)
 
 /* static */ nsFontInflationData*
 nsFontInflationData::FindFontInflationDataFor(const nsIFrame *aFrame)
@@ -27,8 +27,7 @@ nsFontInflationData::FindFontInflationDataFor(const nsIFrame *aFrame)
   NS_ASSERTION(bfc->GetStateBits() & NS_FRAME_FONT_INFLATION_FLOW_ROOT,
                "should have found a flow root");
 
-  return static_cast<nsFontInflationData*>(
-             bfc->Properties().Get(FontInflationDataProperty()));
+  return bfc->Properties().Get(FontInflationDataProperty());
 }
 
 /* static */ bool
@@ -38,8 +37,7 @@ nsFontInflationData::UpdateFontInflationDataISizeFor(const nsHTMLReflowState& aR
   NS_ASSERTION(bfc->GetStateBits() & NS_FRAME_FONT_INFLATION_FLOW_ROOT,
                "should have been given a flow root");
   FrameProperties bfcProps(bfc->Properties());
-  nsFontInflationData *data = static_cast<nsFontInflationData*>(
-                                bfcProps.Get(FontInflationDataProperty()));
+  nsFontInflationData *data = bfcProps.Get(FontInflationDataProperty());
   bool oldInflationEnabled;
   nscoord oldNCAISize;
   if (data) {
@@ -68,8 +66,7 @@ nsFontInflationData::MarkFontInflationDataTextDirty(nsIFrame *aBFCFrame)
                "should have been given a flow root");
 
   FrameProperties bfcProps(aBFCFrame->Properties());
-  nsFontInflationData *data = static_cast<nsFontInflationData*>(
-                                bfcProps.Get(FontInflationDataProperty()));
+  nsFontInflationData *data = bfcProps.Get(FontInflationDataProperty());
   if (data) {
     data->MarkTextDirty();
   }
@@ -100,7 +97,7 @@ NearestCommonAncestorFirstInFlow(nsIFrame *aFrame1, nsIFrame *aFrame2,
   aFrame2 = aFrame2->FirstInFlow();
   aKnownCommonAncestor = aKnownCommonAncestor->FirstInFlow();
 
-  nsAutoTArray<nsIFrame*, 32> ancestors1, ancestors2;
+  AutoTArray<nsIFrame*, 32> ancestors1, ancestors2;
   for (nsIFrame *f = aFrame1; f != aKnownCommonAncestor;
        (f = f->GetParent()) && (f = f->FirstInFlow())) {
     ancestors1.AppendElement(f);
@@ -132,7 +129,7 @@ ComputeDescendantISize(const nsHTMLReflowState& aAncestorReflowState,
     return aAncestorReflowState.ComputedISize();
   }
 
-  AutoInfallibleTArray<nsIFrame*, 16> frames;
+  AutoTArray<nsIFrame*, 16> frames;
   for (nsIFrame *f = aDescendantFrame; f != ancestorFrame;
        f = f->GetParent()->FirstInFlow()) {
     frames.AppendElement(f);
@@ -238,7 +235,7 @@ nsFontInflationData::FindEdgeInflatableFrameIn(nsIFrame* aFrame,
   }
 
   // FIXME: aDirection!
-  nsAutoTArray<FrameChildList, 4> lists;
+  AutoTArray<FrameChildList, 4> lists;
   aFrame->GetChildLists(&lists);
   for (uint32_t i = 0, len = lists.Length(); i < len; ++i) {
     const nsFrameList& list =

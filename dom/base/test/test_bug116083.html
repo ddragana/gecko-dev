@@ -52,19 +52,25 @@ const Cc = SpecialPowers.Cc;
 const Ci = SpecialPowers.Ci;
 
 function hasExpectedFlavors() {
-  var flavors = [
-    "text/plain",
-    "text/html",
-    "application/x-moz-nativehtml",
-  ];
   var cb = Cc["@mozilla.org/widget/clipboard;1"].
            getService(Ci.nsIClipboard);
-  return cb.hasDataMatchingFlavors(flavors, flavors.length,
-                                   cb.kGlobalClipboard);
+
+  ok(cb.hasDataMatchingFlavors(["text/unicode"], 1, cb.kGlobalClipboard),
+     "The clipboard has text/unicode");
+
+  // Android only supports plain text
+  if (navigator.appVersion.indexOf("Android") == -1) {
+    ok(cb.hasDataMatchingFlavors(["text/html"], 1, cb.kGlobalClipboard),
+       "The clipboard has text/html");
+  }
+
+  if (navigator.appVersion.indexOf("Win") >= 0) {
+    ok(cb.hasDataMatchingFlavors(["application/x-moz-nativehtml"], 1, cb.kGlobalClipboard),
+       "The clipboard has application/x-moz-nativehtml");
+  }
 }
 
-SimpleTest.waitForExplicitFinish();
-SimpleTest.waitForFocus(function nextTest() {
+function nextTest() {
   var div = document.querySelector("#content>div");
   if (!div) {
     SimpleTest.finish();
@@ -78,13 +84,18 @@ SimpleTest.waitForFocus(function nextTest() {
     synthesizeKey("C", {accelKey: true});
   }, function() {
     ok(true, div.getAttribute("style") + " passed");
-    ok(hasExpectedFlavors(), "The clipboard has the expected flavors");
+    hasExpectedFlavors();
     div.parentNode.removeChild(div);
     nextTest();
   }, function() {
     ok(false, "failed to copy the expected content to the clipboard");
     SimpleTest.finish();
   });
+}
+
+SimpleTest.waitForExplicitFinish();
+SimpleTest.waitForFocus(function() {
+  SpecialPowers.pushPrefEnv({"set": [["clipboard.plainTextOnly", false]]}, nextTest);
 });
 
 </script>

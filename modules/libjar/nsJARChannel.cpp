@@ -22,11 +22,10 @@
 #include "nsIFileURL.h"
 
 #include "mozilla/Preferences.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/net/RemoteOpenFileChild.h"
 #include "nsITabChild.h"
 #include "private/pprio.h"
-#include "nsINetworkInterceptController.h"
-#include "InterceptedJARChannel.h"
 #include "nsInputStreamPump.h"
 
 using namespace mozilla;
@@ -50,7 +49,7 @@ static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 //
 // set NSPR_LOG_MODULES=nsJarProtocol:5
 //
-static PRLogModuleInfo *gJarProtocolLog = nullptr;
+static LazyLogModule gJarProtocolLog("nsJarProtocol");
 
 #define LOG(args)     MOZ_LOG(gJarProtocolLog, mozilla::LogLevel::Debug, args)
 #define LOG_ENABLED() MOZ_LOG_TEST(gJarProtocolLog, mozilla::LogLevel::Debug)
@@ -196,18 +195,16 @@ nsJARInputThunk::IsNonBlocking(bool *nonBlocking)
 nsJARChannel::nsJARChannel()
     : mOpened(false)
     , mAppURI(nullptr)
+    , mContentDisposition(0)
     , mContentLength(-1)
     , mLoadFlags(LOAD_NORMAL)
     , mStatus(NS_OK)
     , mIsPending(false)
     , mIsUnsafe(true)
     , mOpeningRemote(false)
-    , mEnsureChildFd(false)
-    , mSynthesizedStreamLength(0)
-    , mForceNoIntercept(false)
+    , mBlockRemoteFiles(false)
 {
-    if (!gJarProtocolLog)
-        gJarProtocolLog = PR_NewLogModule("nsJarProtocol");
+    mBlockRemoteFiles = Preferences::GetBool("network.jar.block-remote-files", false);
 
     // hold an owning reference to the jar handler
     NS_ADDREF(gJarHandler);
@@ -215,7 +212,7 @@ nsJARChannel::nsJARChannel()
 
 nsJARChannel::~nsJARChannel()
 {
-    NS_ReleaseOnMainThread(mLoadInfo);
+    NS_ReleaseOnMainThread(mLoadInfo.forget());
 
     // release owning reference to the jar handler
     nsJARProtocolHandler *handler = gJarHandler;
@@ -313,7 +310,7 @@ nsJARChannel::CreateJarInput(nsIZipReaderCache *jarCache, nsJARInputThunk **resu
     if (NS_FAILED(rv))
         return rv;
 
-    nsRefPtr<nsJARInputThunk> input = new nsJARInputThunk(reader,
+    RefPtr<nsJARInputThunk> input = new nsJARInputThunk(reader,
                                                           mJarURI,
                                                           mJarEntry,
                                                           jarCache != nullptr
@@ -366,7 +363,7 @@ nsJARChannel::LookupFile(bool aAllowAsync)
         nsAutoCString scheme;
         rv = mJarBaseURI->GetScheme(scheme);
         if (NS_SUCCEEDED(rv) && scheme.EqualsLiteral("remoteopenfile")) {
-            nsRefPtr<RemoteOpenFileChild> remoteFile = new RemoteOpenFileChild();
+            RefPtr<RemoteOpenFileChild> remoteFile = new RemoteOpenFileChild();
             rv = remoteFile->Init(mJarBaseURI, mAppURI);
             NS_ENSURE_SUCCESS(rv, rv);
             mJarFile = remoteFile;
@@ -386,9 +383,6 @@ nsJARChannel::LookupFile(bool aAllowAsync)
                     // file descriptor here.
                     return NS_OK;
                     #else
-                    if (!mEnsureChildFd) {
-                        return NS_OK;
-                    }
                     PRFileDesc *fd = nullptr;
                     jarCache->GetFd(mJarFile, &fd);
                     if (fd) {
@@ -404,13 +398,6 @@ nsJARChannel::LookupFile(bool aAllowAsync)
             }
 
             mOpeningRemote = true;
-
-            #if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA)
-            #else
-            if (mEnsureChildFd && jarCache) {
-                jarCache->SetMustCacheFd(remoteFile, true);
-            }
-            #endif
 
             if (gJarHandler->RemoteOpenFileInProgress(remoteFile, this)) {
                 // JarHandler will trigger OnRemoteFileOpen() after the first
@@ -456,7 +443,7 @@ nsJARChannel::OpenLocalFile()
     // Local files are always considered safe.
     mIsUnsafe = false;
 
-    nsRefPtr<nsJARInputThunk> input;
+    RefPtr<nsJARInputThunk> input;
     nsresult rv = CreateJarInput(gJarHandler->JarCache(),
                                  getter_AddRefs(input));
     if (NS_SUCCEEDED(rv)) {
@@ -529,8 +516,6 @@ nsJARChannel::GetStatus(nsresult *status)
 {
     if (mPump && NS_SUCCEEDED(mStatus))
         mPump->GetStatus(status);
-    else if (mSynthesizedResponsePump && NS_SUCCEEDED(mStatus))
-        mSynthesizedResponsePump->GetStatus(status);
     else
         *status = mStatus;
     return NS_OK;
@@ -542,8 +527,6 @@ nsJARChannel::Cancel(nsresult status)
     mStatus = status;
     if (mPump)
         return mPump->Cancel(status);
-    if (mSynthesizedResponsePump)
-        return mSynthesizedResponsePump->Cancel(status);
 
     NS_ASSERTION(!mIsPending, "need to implement cancel when downloading");
     return NS_OK;
@@ -554,8 +537,6 @@ nsJARChannel::Suspend()
 {
     if (mPump)
         return mPump->Suspend();
-    if (mSynthesizedResponsePump)
-        return mSynthesizedResponsePump->Suspend();
 
     NS_ASSERTION(!mIsPending, "need to implement suspend when downloading");
     return NS_OK;
@@ -566,8 +547,6 @@ nsJARChannel::Resume()
 {
     if (mPump)
         return mPump->Resume();
-    if (mSynthesizedResponsePump)
-        return mSynthesizedResponsePump->Resume();
 
     NS_ASSERTION(!mIsPending, "need to implement resume when downloading");
     return NS_OK;
@@ -677,25 +656,6 @@ nsJARChannel::SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks)
     return NS_OK;
 }
 
-nsresult
-nsJARChannel::OverrideSecurityInfo(nsISupports* aSecurityInfo)
-{
-  MOZ_RELEASE_ASSERT(!mSecurityInfo,
-                     "This can only be called when we don't have a security info object already");
-  MOZ_RELEASE_ASSERT(aSecurityInfo,
-                     "This can only be called with a valid security info object");
-  mSecurityInfo = aSecurityInfo;
-  return NS_OK;
-}
-
-void
-nsJARChannel::OverrideURI(nsIURI* aRedirectedURI)
-{
-  MOZ_RELEASE_ASSERT(mLoadFlags & LOAD_REPLACE,
-                     "This can only happen if the LOAD_REPLACE flag is set");
-  mAppURI = aRedirectedURI;
-}
-
 NS_IMETHODIMP
 nsJARChannel::GetSecurityInfo(nsISupports **aSecurityInfo)
 {
@@ -756,7 +716,7 @@ nsJARChannel::SetContentType(const nsACString &aContentType)
     // doing our guessing.  So we don't care when this is being called.
 
     // mContentCharset is unchanged if not parsed
-    NS_ParseContentType(aContentType, mContentType, mContentCharset);
+    NS_ParseResponseContentType(aContentType, mContentType, mContentCharset);
     return NS_OK;
 }
 
@@ -850,7 +810,7 @@ nsJARChannel::Open(nsIInputStream **stream)
         return NS_ERROR_NOT_IMPLEMENTED;
     }
 
-    nsRefPtr<nsJARInputThunk> input;
+    RefPtr<nsJARInputThunk> input;
     rv = CreateJarInput(gJarHandler->JarCache(), getter_AddRefs(input));
     if (NS_FAILED(rv))
         return rv;
@@ -871,76 +831,16 @@ nsJARChannel::Open2(nsIInputStream** aStream)
     return Open(aStream);
 }
 
-bool
-nsJARChannel::ShouldIntercept()
-{
-    LOG(("nsJARChannel::ShouldIntercept [this=%x]\n", this));
-    // We only intercept app:// requests
-    if (!mAppURI) {
-      return false;
-    }
-
-    nsCOMPtr<nsINetworkInterceptController> controller;
-    NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
-                                  NS_GET_IID(nsINetworkInterceptController),
-                                  getter_AddRefs(controller));
-    bool shouldIntercept = false;
-    if (controller && !mForceNoIntercept) {
-      bool isNavigation = mLoadFlags & LOAD_DOCUMENT_URI;
-      nsresult rv = controller->ShouldPrepareForIntercept(mAppURI,
-                                                          isNavigation,
-                                                          &shouldIntercept);
-      NS_ENSURE_SUCCESS(rv, false);
-    }
-
-    return shouldIntercept;
-}
-
-void nsJARChannel::ResetInterception()
-{
-    LOG(("nsJARChannel::ResetInterception [this=%x]\n", this));
-
-    // Continue with the original request.
-    nsresult rv = ContinueAsyncOpen();
-    NS_ENSURE_SUCCESS_VOID(rv);
-}
-
-void
-nsJARChannel::OverrideWithSynthesizedResponse(nsIInputStream* aSynthesizedInput,
-                                              const nsACString& aContentType)
-{
-    // In our current implementation, the FetchEvent handler will copy the
-    // response stream completely into the pipe backing the input stream so we
-    // can treat the available as the length of the stream.
-    uint64_t available;
-    nsresult rv = aSynthesizedInput->Available(&available);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      mSynthesizedStreamLength = -1;
-    } else {
-      mSynthesizedStreamLength = int64_t(available);
-    }
-
-    rv = nsInputStreamPump::Create(getter_AddRefs(mSynthesizedResponsePump),
-                                   aSynthesizedInput,
-                                   int64_t(-1), int64_t(-1), 0, 0, true);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      aSynthesizedInput->Close();
-      return;
-    }
-
-    SetContentType(aContentType);
-
-    mIsUnsafe = false;
-
-    FinishAsyncOpen();
-
-    rv = mSynthesizedResponsePump->AsyncRead(this, nullptr);
-    NS_ENSURE_SUCCESS_VOID(rv);
-}
-
 NS_IMETHODIMP
 nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
 {
+    MOZ_ASSERT(!mLoadInfo ||
+               mLoadInfo->GetSecurityMode() == 0 ||
+               mLoadInfo->GetInitialSecurityCheckDone() ||
+               (mLoadInfo->GetSecurityMode() == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
+                nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+               "security flags in loadInfo but asyncOpen2() not called");
+
     LOG(("nsJARChannel::AsyncOpen [this=%x]\n", this));
 
     NS_ENSURE_ARG_POINTER(listener);
@@ -957,54 +857,6 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
     mListenerContext = ctx;
     mIsPending = true;
 
-// Bug 1171651 -  Disable the interception of app:// URIs in service workers
-//                on release builds
-#ifndef RELEASE_BUILD
-    // Check if this channel should intercept the network request and prepare
-    // for a possible synthesized response instead.
-    if (ShouldIntercept()) {
-      nsCOMPtr<nsINetworkInterceptController> controller;
-      NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
-                                    NS_GET_IID(nsINetworkInterceptController),
-                                    getter_AddRefs(controller));
-
-      bool isNavigation = mLoadFlags & LOAD_DOCUMENT_URI;
-      nsRefPtr<InterceptedJARChannel> intercepted =
-        new InterceptedJARChannel(this, controller, isNavigation);
-      intercepted->NotifyController();
-
-      // We get the JAREntry so we can infer the content type later in case
-      // that it isn't provided along with the synthesized response.
-      nsresult rv = mJarURI->GetJAREntry(mJarEntry);
-      if (NS_FAILED(rv)) {
-          return rv;
-      }
-
-      return NS_OK;
-    }
-#endif
-
-    return ContinueAsyncOpen();
-}
-
-NS_IMETHODIMP
-nsJARChannel::AsyncOpen2(nsIStreamListener *aListener)
-{
-  if (!mLoadInfo) {
-    MOZ_ASSERT(mLoadInfo, "can not enforce security without loadInfo");
-    return NS_ERROR_UNEXPECTED;
-  }
-  // setting the flag on the loadInfo indicates that the underlying
-  // channel will be openend using AsyncOpen2() and hence performs
-  // the necessary security checks.
-  mLoadInfo->SetEnforceSecurity(true);
-  return AsyncOpen(aListener, nullptr);
-}
-
-nsresult
-nsJARChannel::ContinueAsyncOpen()
-{
-    LOG(("nsJARChannel::ContinueAsyncOpen [this=%x]\n", this));
     nsresult rv = LookupFile(true);
     if (NS_FAILED(rv)) {
         mIsPending = false;
@@ -1017,6 +869,19 @@ nsJARChannel::ContinueAsyncOpen()
 
     if (!mJarFile) {
         // Not a local file...
+
+        // Check preferences to see if all remote jar support should be disabled
+        if (mBlockRemoteFiles) {
+            mIsUnsafe = true;
+            return NS_ERROR_UNSAFE_CONTENT_TYPE;
+        }
+
+        static bool reportedRemoteJAR = false;
+        if (!reportedRemoteJAR) {
+            reportedRemoteJAR = true;
+            Telemetry::Accumulate(Telemetry::REMOTE_JAR_PROTOCOL_USED, 1);
+        }
+
         // kick off an async download of the base URI...
         nsCOMPtr<nsIStreamListener> downloader = new MemoryDownloader(this);
         uint32_t loadFlags =
@@ -1052,19 +917,21 @@ nsJARChannel::ContinueAsyncOpen()
         return rv;
     }
 
-
-    FinishAsyncOpen();
-
-    return NS_OK;
-}
-
-void
-nsJARChannel::FinishAsyncOpen()
-{
     if (mLoadGroup)
         mLoadGroup->AddRequest(this, nullptr);
 
     mOpened = true;
+
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsJARChannel::AsyncOpen2(nsIStreamListener *aListener)
+{
+  nsCOMPtr<nsIStreamListener> listener = aListener;
+  nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return AsyncOpen(listener, nullptr);
 }
 
 //-----------------------------------------------------------------------------
@@ -1114,20 +981,6 @@ nsJARChannel::GetZipEntry(nsIZipEntry **aZipEntry)
         return rv;
 
     return reader->GetEntry(mJarEntry, aZipEntry);
-}
-
-NS_IMETHODIMP
-nsJARChannel::EnsureChildFd()
-{
-    mEnsureChildFd = true;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsJARChannel::ForceNoIntercept()
-{
-    mForceNoIntercept = true;
-    return NS_OK;
 }
 
 //-----------------------------------------------------------------------------
@@ -1184,7 +1037,7 @@ nsJARChannel::OnDownloadComplete(MemoryDownloader* aDownloader,
                                            header);
             nsAutoCString contentType;
             nsAutoCString charset;
-            NS_ParseContentType(header, contentType, charset);
+            NS_ParseResponseContentType(header, contentType, charset);
             nsAutoCString channelContentType;
             channel->GetContentType(channelContentType);
             mIsUnsafe = !(contentType.Equals(channelContentType) &&
@@ -1203,6 +1056,10 @@ nsJARChannel::OnDownloadComplete(MemoryDownloader* aDownloader,
         mContentDisposition = NS_GetContentDispositionFromHeader(mContentDispositionHeader, this);
     }
 
+    // This is a defense-in-depth check for the preferences to see if all remote jar
+    // support should be disabled. This check may not be needed.
+    MOZ_RELEASE_ASSERT(!mBlockRemoteFiles);
+
     if (NS_SUCCEEDED(status) && mIsUnsafe &&
         !Preferences::GetBool("network.jar.open-unsafe-types", false)) {
         status = NS_ERROR_UNSAFE_CONTENT_TYPE;
@@ -1219,7 +1076,7 @@ nsJARChannel::OnDownloadComplete(MemoryDownloader* aDownloader,
     if (NS_SUCCEEDED(status)) {
         mTempMem = Move(aData);
 
-        nsRefPtr<nsJARInputThunk> input;
+        RefPtr<nsJARInputThunk> input;
         rv = CreateJarInput(nullptr, getter_AddRefs(input));
         if (NS_SUCCEEDED(rv)) {
             // create input stream pump
@@ -1250,23 +1107,21 @@ nsJARChannel::OnRemoteFileOpenComplete(nsresult aOpenStatus)
         // Windows/OSX desktop builds skip remoting, we don't need file
         // descriptor here.
         #else
-        if (mEnsureChildFd) {
-            // Set file descriptor from Jar cache into remote Jar file, if it
-            // has not been set previously.
-            mozilla::AutoFDClose fd;
-            mJarFile->OpenNSPRFileDesc(PR_RDONLY, 0, &fd.rwget());
-            if (!fd) {
-                nsIZipReaderCache *jarCache = gJarHandler->JarCache();
-                if (!jarCache) {
-                    rv = NS_ERROR_FAILURE;
-                }
-                PRFileDesc *jar_fd = nullptr;
-                jarCache->GetFd(mJarFile, &jar_fd);
-                // If we failed to get fd here, an error rv would be returned
-                // by SetRemoteNSPRFileDesc(), which would then stop the
-                // channel by NotifyError().
-                rv = SetRemoteNSPRFileDesc(jar_fd);
+        // Set file descriptor from Jar cache into remote Jar file, if it
+        // has not been set previously.
+        mozilla::AutoFDClose fd;
+        mJarFile->OpenNSPRFileDesc(PR_RDONLY, 0, &fd.rwget());
+        if (!fd) {
+            nsIZipReaderCache *jarCache = gJarHandler->JarCache();
+            if (!jarCache) {
+                rv = NS_ERROR_FAILURE;
             }
+            PRFileDesc *jar_fd = nullptr;
+            jarCache->GetFd(mJarFile, &jar_fd);
+            // If we failed to get fd here, an error rv would be returned
+            // by SetRemoteNSPRFileDesc(), which would then stop the
+            // channel by NotifyError().
+            rv = SetRemoteNSPRFileDesc(jar_fd);
         }
         #endif
         if (NS_SUCCEEDED(rv) || rv == NS_ERROR_ALREADY_OPENED) {
@@ -1324,14 +1179,8 @@ nsJARChannel::OnStopRequest(nsIRequest *req, nsISupports *ctx, nsresult status)
 
     #if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA)
     #else
-    if (mEnsureChildFd) {
-      nsIZipReaderCache *jarCache = gJarHandler->JarCache();
-      if (jarCache) {
-          jarCache->SetMustCacheFd(mJarFile, false);
-      }
-      // To deallocate file descriptor by RemoteOpenFileChild destructor.
-      mJarFile = nullptr;
-    }
+    // To deallocate file descriptor by RemoteOpenFileChild destructor.
+    mJarFile = nullptr;
     #endif
 
     return NS_OK;
@@ -1355,11 +1204,10 @@ nsJARChannel::OnDataAvailable(nsIRequest *req, nsISupports *ctx,
         if (NS_IsMainThread()) {
             FireOnProgress(offset + count);
         } else {
-            nsCOMPtr<nsIRunnable> runnable =
-              NS_NewRunnableMethodWithArg<uint64_t>(this,
-                                                    &nsJARChannel::FireOnProgress,
-                                                    offset + count);
-            NS_DispatchToMainThread(runnable);
+            NS_DispatchToMainThread(NewRunnableMethod
+                                    <uint64_t>(this,
+                                               &nsJARChannel::FireOnProgress,
+                                               offset + count));
         }
     }
 

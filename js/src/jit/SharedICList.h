@@ -11,7 +11,44 @@ namespace js {
 namespace jit {
 
 // List of IC stub kinds that can run in Baseline and in IonMonkey
-#define IC_SHARED_STUB_KIND_LIST(_)
+#define IC_SHARED_STUB_KIND_LIST(_)              \
+    _(BinaryArith_Fallback)                      \
+    _(BinaryArith_Int32)                         \
+    _(BinaryArith_Double)                        \
+    _(BinaryArith_StringConcat)                  \
+    _(BinaryArith_StringObjectConcat)            \
+    _(BinaryArith_BooleanWithInt32)              \
+    _(BinaryArith_DoubleWithInt32)               \
+                                                 \
+    _(UnaryArith_Fallback)                       \
+    _(UnaryArith_Int32)                          \
+    _(UnaryArith_Double)                         \
+                                                 \
+    _(Compare_Fallback)                          \
+    _(Compare_Int32)                             \
+    _(Compare_Double)                            \
+    _(Compare_NumberWithUndefined)               \
+    _(Compare_String)                            \
+    _(Compare_Boolean)                           \
+    _(Compare_Object)                            \
+    _(Compare_ObjectWithUndefined)               \
+    _(Compare_Int32WithBoolean)                  \
+                                                 \
+    _(GetProp_Fallback)                          \
+    _(GetProp_Primitive)                         \
+    _(GetProp_StringLength)                      \
+    _(GetProp_CallScripted)                      \
+    _(GetProp_CallNative)                        \
+    _(GetProp_CallNativeGlobal)                  \
+    _(GetProp_CallDOMProxyNative)                \
+    _(GetProp_CallDOMProxyWithGenerationNative)  \
+    _(GetProp_DOMProxyShadowed)                  \
+    _(GetProp_ArgumentsLength)                   \
+    _(GetProp_ArgumentsCallee)                   \
+    _(GetProp_Generic)                           \
+                                                 \
+    _(CacheIR_Monitored)                         \
+                                                 \
 
 } // namespace jit
 } // namespace js

@@ -12,7 +12,7 @@
 namespace mozilla {
 
 template <typename T>
-class AsyncEventRunner : public nsRunnable
+class AsyncEventRunner : public Runnable
 {
 public:
   AsyncEventRunner(T* aTarget, const char* aName)
@@ -27,7 +27,7 @@ public:
   }
 
 private:
-  nsRefPtr<T> mTarget;
+  RefPtr<T> mTarget;
   const char* mName;
 };
 

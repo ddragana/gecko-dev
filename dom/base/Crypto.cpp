@@ -58,9 +58,13 @@ Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
                         JS::MutableHandle<JSObject*> aRetval,
                         ErrorResult& aRv)
 {
-  MOZ_ASSERT(NS_IsMainThread(), "Called on the wrong thread");
-
   JS::Rooted<JSObject*> view(aCx, aArray.Obj());
+
+  if (JS_IsTypedArrayObject(view) && JS_GetTypedArraySharedness(view)) {
+    // Throw if the object is mapping shared memory (must opt in).
+    aRv.ThrowTypeError<MSG_TYPEDARRAY_IS_SHARED>(NS_LITERAL_STRING("Argument of Crypto.getRandomValues"));
+    return;
+  }
 
   // Throw if the wrong type of ArrayBufferView is passed in
   // (Part of the Web Crypto API spec)
@@ -89,31 +93,23 @@ Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
     return;
   }
 
-  uint8_t* data = aArray.Data();
-
-  if (!XRE_IsParentProcess()) {
-    InfallibleTArray<uint8_t> randomValues;
-    // Tell the parent process to generate random values via PContent
-    ContentChild* cc = ContentChild::GetSingleton();
-    if (!cc->SendGetRandomValues(dataLen, &randomValues) ||
-        randomValues.Length() == 0) {
-      aRv.Throw(NS_ERROR_FAILURE);
-      return;
-    }
-    NS_ASSERTION(dataLen == randomValues.Length(),
-                 "Invalid length returned from parent process!");
-    memcpy(data, randomValues.Elements(), dataLen);
-  } else {
-    uint8_t *buf = GetRandomValues(dataLen);
-
-    if (!buf) {
-      aRv.Throw(NS_ERROR_FAILURE);
-      return;
-    }
-
-    memcpy(data, buf, dataLen);
-    free(buf);
+  nsCOMPtr<nsIRandomGenerator> randomGenerator =
+    do_GetService("@mozilla.org/security/random-generator;1");
+  if (!randomGenerator) {
+    aRv.Throw(NS_ERROR_DOM_OPERATION_ERR);
+    return;
   }
+
+  uint8_t* buf;
+  nsresult rv = randomGenerator->GenerateRandomBytes(dataLen, &buf);
+  if (NS_FAILED(rv) || !buf) {
+    aRv.Throw(NS_ERROR_DOM_OPERATION_ERR);
+    return;
+  }
+
+  // Copy random bytes to ABV.
+  memcpy(aArray.Data(), buf, dataLen);
+  free(buf);
 
   aRetval.set(view);
 }
@@ -125,22 +121,6 @@ Crypto::Subtle()
     mSubtle = new SubtleCrypto(GetParentObject());
   }
   return mSubtle;
-}
-
-/* static */ uint8_t*
-Crypto::GetRandomValues(uint32_t aLength)
-{
-  nsCOMPtr<nsIRandomGenerator> randomGenerator;
-  nsresult rv;
-  randomGenerator = do_GetService("@mozilla.org/security/random-generator;1");
-  NS_ENSURE_TRUE(randomGenerator, nullptr);
-
-  uint8_t* buf;
-  rv = randomGenerator->GenerateRandomBytes(aLength, &buf);
-
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  return buf;
 }
 
 } // namespace dom

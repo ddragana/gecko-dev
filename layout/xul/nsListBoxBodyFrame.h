@@ -75,17 +75,20 @@ public:
   virtual bool IsScrollbarOnRight() const override {
     return (StyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR);
   }
+  virtual bool ShouldSuppressScrollbarRepaints() const override {
+    return false;
+  }
 
 
   // nsIReflowCallback
   virtual bool ReflowFinished() override;
   virtual void ReflowCallbackCanceled() override;
 
-  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
   virtual void MarkIntrinsicISizesDirty() override;
 
-  virtual nsSize GetMinSizeForScrollArea(nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSizeForScrollArea(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
 
   // size calculation 
   int32_t GetRowCount();
@@ -122,7 +125,7 @@ public:
   bool ContinueReflow(nscoord height);
   NS_IMETHOD ListBoxAppendFrames(nsFrameList& aFrameList);
   NS_IMETHOD ListBoxInsertFrames(nsIFrame* aPrevFrame, nsFrameList& aFrameList);
-  void OnContentInserted(nsPresContext* aPresContext, nsIContent* aContent);
+  void OnContentInserted(nsIContent* aContent);
   void OnContentRemoved(nsPresContext* aPresContext,  nsIContent* aContainer,
                         nsIFrame* aChildFrame, nsIContent* aOldNextSibling);
 
@@ -146,7 +149,7 @@ protected:
   class nsPositionChangedEvent;
   friend class nsPositionChangedEvent;
 
-  class nsPositionChangedEvent : public nsRunnable
+  class nsPositionChangedEvent : public mozilla::Runnable
   {
   public:
     nsPositionChangedEvent(nsListBoxBodyFrame* aFrame,
@@ -178,7 +181,7 @@ protected:
   int32_t ToRowIndex(nscoord aPos) const;
   void RemoveChildFrame(nsBoxLayoutState &aState, nsIFrame *aChild);
 
-  nsTArray< nsRefPtr<nsPositionChangedEvent> > mPendingPositionChangeEvents;
+  nsTArray< RefPtr<nsPositionChangedEvent> > mPendingPositionChangeEvents;
   nsCOMPtr<nsPIBoxObject> mBoxObject;
 
   // frame markers

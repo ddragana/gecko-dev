@@ -56,8 +56,7 @@ nsDataDocumentContentPolicy::ShouldLoad(uint32_t aContentType,
   if (node) {
     doc = node->OwnerDoc();
   } else {
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aRequestingContext);
-    if (window) {
+    if (nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aRequestingContext)) {
       doc = window->GetDoc();
     }
   }
@@ -83,18 +82,18 @@ nsDataDocumentContentPolicy::ShouldLoad(uint32_t aContentType,
     //   OR
     //  - URI loadable by subsumers, e.g. blob URIs
     // Any URI that doesn't meet these requirements will be rejected below.
-    if (!HasFlags(aContentLocation,
-                  nsIProtocolHandler::URI_IS_LOCAL_RESOURCE) ||
-        (!HasFlags(aContentLocation,
-                   nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT) &&
-         !HasFlags(aContentLocation,
-                   nsIProtocolHandler::URI_LOADABLE_BY_SUBSUMERS))) {
+    if (!(HasFlags(aContentLocation,
+                   nsIProtocolHandler::URI_IS_LOCAL_RESOURCE) &&
+          (HasFlags(aContentLocation,
+                    nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT) ||
+           HasFlags(aContentLocation,
+                    nsIProtocolHandler::URI_LOADABLE_BY_SUBSUMERS)))) {
       *aDecision = nsIContentPolicy::REJECT_TYPE;
 
       // Report error, if we can.
       if (node) {
         nsIPrincipal* requestingPrincipal = node->NodePrincipal();
-        nsRefPtr<nsIURI> principalURI;
+        RefPtr<nsIURI> principalURI;
         nsresult rv =
           requestingPrincipal->GetURI(getter_AddRefs(principalURI));
         if (NS_SUCCEEDED(rv) && principalURI) {

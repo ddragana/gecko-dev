@@ -87,7 +87,7 @@ nsSAXXMLReader::HandleStartElement(const char16_t *aName,
   if (!mContentHandler)
     return NS_OK;
 
-  nsRefPtr<nsSAXAttributes> atts = new nsSAXAttributes();
+  RefPtr<nsSAXAttributes> atts = new nsSAXAttributes();
   if (!atts)
     return NS_ERROR_OUT_OF_MEMORY;
   nsAutoString uri, localName, qName;
@@ -497,14 +497,15 @@ nsSAXXMLReader::ParseFromStream(nsIInputStream *aStream,
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIPrincipal> nullPrincipal = nsNullPrincipal::Create();
-  NS_ENSURE_TRUE(nullPrincipal, NS_ERROR_FAILURE);
 
+  // The following channel is never openend, so it does not matter what
+  // securityFlags we pass; let's follow the principle of least privilege.
   nsCOMPtr<nsIChannel> parserChannel;
   rv = NS_NewInputStreamChannel(getter_AddRefs(parserChannel),
                                 mBaseURI,
                                 aStream,
                                 nullPrincipal,
-                                nsILoadInfo::SEC_NORMAL,
+                                nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_IS_BLOCKED,
                                 nsIContentPolicy::TYPE_OTHER,
                                 nsDependentCString(aContentType));
   if (!parserChannel || NS_FAILED(rv))

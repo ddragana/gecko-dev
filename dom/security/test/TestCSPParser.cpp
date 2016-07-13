@@ -28,6 +28,8 @@ template<class T> class nsReadingIterator;
 #include "TestHarness.h"
 #include "nsIScriptSecurityManager.h"
 #include "mozilla/dom/nsCSPContext.h"
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
 
 #ifndef MOZILLA_INTERNAL_API
 #undef nsString_h___
@@ -90,26 +92,20 @@ nsresult runTest(uint32_t aExpectedPolicyCount, // this should be 0 for policies
                  const char* aPolicy,
                  const char* aExpextedResult) {
 
-  // we init the csp with http://www.selfuri.com
-  nsCOMPtr<nsIURI> selfURI;
-  nsresult rv = NS_NewURI(getter_AddRefs(selfURI), "http://www.selfuri.com");
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  nsresult rv;
   nsCOMPtr<nsIScriptSecurityManager> secman =
     do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
-     nsCOMPtr<nsIPrincipal> systemPrincipal;
-  rv = secman->GetSystemPrincipal(getter_AddRefs(systemPrincipal));
+
+  // we init the csp with http://www.selfuri.com
+  nsCOMPtr<nsIURI> selfURI;
+  rv = NS_NewURI(getter_AddRefs(selfURI), "http://www.selfuri.com");
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // we also init the csp with a dummyChannel, which is unused
-  // for the parser tests but surpresses assertions in SetRequestContext.
-  nsCOMPtr<nsIChannel> dummyChannel;
-  rv = NS_NewChannel(getter_AddRefs(dummyChannel),
-                     selfURI,
-                     systemPrincipal,
-                     nsILoadInfo::SEC_NORMAL,
-                     nsIContentPolicy::TYPE_OTHER);
+  nsCOMPtr<nsIPrincipal> selfURIPrincipal;
+  // Can't use BasePrincipal::CreateCodebasePrincipal here
+  // because the symbol is not visible here
+  rv = secman->GetCodebasePrincipal(selfURI, getter_AddRefs(selfURIPrincipal));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // create a CSP object
@@ -117,18 +113,15 @@ nsresult runTest(uint32_t aExpectedPolicyCount, // this should be 0 for policies
     do_CreateInstance(NS_CSPCONTEXT_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // for testing the parser we only need to set selfURI which is needed
-  // to translate the keyword 'self' into an actual URI. All other
-  // arguments can be nullptrs.
-  csp->SetRequestContext(selfURI,
-                         nullptr,  // nsIURI* aReferrer
-                         dummyChannel);
+  // for testing the parser we only need to set a principal which is needed
+  // to translate the keyword 'self' into an actual URI.
+  rv = csp->SetRequestContext(nullptr, selfURIPrincipal);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // append a policy
   nsString policyStr;
   policyStr.AssignASCII(aPolicy);
-  rv = csp->AppendPolicy(policyStr, false);
+  rv = csp->AppendPolicy(policyStr, false, false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // when executing fuzzy tests we do not care about the actual output
@@ -175,10 +168,23 @@ nsresult runTestSuite(const PolicyTest* aPolicies,
                       uint32_t aPolicyCount,
                       uint32_t aExpectedPolicyCount) {
   nsresult rv;
+  nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
+  bool experimentalEnabledCache = false;
+  if (prefs)
+  {
+    prefs->GetBoolPref("security.csp.experimentalEnabled", &experimentalEnabledCache);
+    prefs->SetBoolPref("security.csp.experimentalEnabled", true);
+  }
+
   for (uint32_t i = 0; i < aPolicyCount; i++) {
     rv = runTest(aExpectedPolicyCount, aPolicies[i].policy, aPolicies[i].expectedResult);
     NS_ENSURE_SUCCESS(rv, rv);
   }
+
+  if (prefs) {
+    prefs->SetBoolPref("security.csp.experimentalEnabled", experimentalEnabledCache);
+  }
+
   return NS_OK;
 }
 
@@ -213,7 +219,9 @@ nsresult TestDirectives() {
     { "script-src 'sha256-siVR8vAcqP06h2ppeNwqgjr0yZ6yned4X2VF84j4GmI='",
       "script-src 'sha256-siVR8vAcqP06h2ppeNwqgjr0yZ6yned4X2VF84j4GmI='" },
     { "referrer no-referrer",
-      "referrer no-referrer" }
+      "referrer no-referrer" },
+    { "require-sri-for script style",
+      "require-sri-for script style"}
   };
 
   uint32_t policyCount = sizeof(policies) / sizeof(PolicyTest);
@@ -279,7 +287,9 @@ nsresult TestIgnoreUpperLowerCasePolicies() {
     { "refERRer No-refeRRer",
       "referrer No-refeRRer" },
     { "upgrade-INSECURE-requests",
-      "upgrade-insecure-requests" }
+      "upgrade-insecure-requests" },
+    { "require-SRI-for sCript stYle",
+        "require-sri-for script style"}
   };
 
   uint32_t policyCount = sizeof(policies) / sizeof(PolicyTest);
@@ -516,9 +526,14 @@ nsresult TestPoliciesWithInvalidSrc() {
       "connect-src 'none'" },
     { "script-src https://foo.com/%$",
       "script-src 'none'" },
+    { "require-SRI-for script elephants",
+      "require-sri-for script"},
+    { "require-sri-for paul",
+      ""}
   };
 
-  uint32_t policyCount = sizeof(policies) / sizeof(PolicyTest);
+  // amount of tests - 1, because the latest should be ignored.
+  uint32_t policyCount = (sizeof(policies) / sizeof(PolicyTest)) -1;
   return runTestSuite(policies, policyCount, 1);
 }
 

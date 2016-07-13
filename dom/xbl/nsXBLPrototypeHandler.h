@@ -90,28 +90,23 @@ public:
 
   ~nsXBLPrototypeHandler();
 
+  bool EventTypeEquals(nsIAtom* aEventType) const
+  {
+    return mEventName == aEventType;
+  }
+
   // if aCharCode is not zero, it is used instead of the charCode of aKeyEvent.
   bool KeyEventMatched(nsIDOMKeyEvent* aKeyEvent,
                        uint32_t aCharCode,
                        const IgnoreModifierState& aIgnoreModifierState);
-  inline bool KeyEventMatched(nsIAtom* aEventType,
-                              nsIDOMKeyEvent* aEvent,
-                              uint32_t aCharCode,
-                              const IgnoreModifierState& aIgnoreModifierState)
-  {
-    if (aEventType != mEventName)
-      return false;
-
-    return KeyEventMatched(aEvent, aCharCode, aIgnoreModifierState);
-  }
 
   bool MouseEventMatched(nsIDOMMouseEvent* aMouseEvent);
   inline bool MouseEventMatched(nsIAtom* aEventType,
                                   nsIDOMMouseEvent* aEvent)
   {
-    if (aEventType != mEventName)
+    if (!EventTypeEquals(aEventType)) {
       return false;
-
+    }
     return MouseEventMatched(aEvent);
   }
 
@@ -241,7 +236,7 @@ protected:
   // Prototype handlers are chained. We own the next handler in the chain.
   nsXBLPrototypeHandler* mNextHandler;
   nsCOMPtr<nsIAtom> mEventName; // The type of the event, e.g., "keypress"
-  nsRefPtr<nsXBLEventHandler> mHandler;
+  RefPtr<nsXBLEventHandler> mHandler;
   nsXBLPrototypeBinding* mPrototypeBinding; // the binding owns us
 };
 

@@ -44,7 +44,11 @@
 #include "prio.h"
 #include "prnetdb.h"
 
-extern PRLogModuleInfo* gRtspLog;
+namespace mozilla {
+namespace net {
+extern LazyLogModule gRtspLog;
+}
+}
 
 // If no access units are received within 10 secs, assume that the rtp
 // stream has ended and abort.
@@ -994,7 +998,7 @@ struct RtspConnectionHandler : public AHandler {
                 }
 
                 if (track->mNumAccessUnitsReceiveds == 0) {
-                    if (gIOService->IsOffline()) {
+                    if (mozilla::net::gIOService->IsOffline()) {
                         LOGI("stream ended? aborting.");
                         disconnect();
                         break;

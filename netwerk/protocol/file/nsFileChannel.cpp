@@ -33,7 +33,7 @@ using namespace mozilla::net;
 
 //-----------------------------------------------------------------------------
 
-class nsFileCopyEvent : public nsRunnable {
+class nsFileCopyEvent : public Runnable {
 public:
   nsFileCopyEvent(nsIOutputStream *dest, nsIInputStream *source, int64_t len)
     : mDest(dest)
@@ -129,9 +129,7 @@ nsFileCopyEvent::DoCopy()
 
     // Release the callback on the target thread to avoid destroying stuff on
     // the wrong thread.
-    nsIRunnable *doomed = nullptr;
-    mCallback.swap(doomed);
-    NS_ProxyRelease(mCallbackTarget, doomed);
+    NS_ProxyRelease(mCallbackTarget, mCallback.forget());
   }
 }
 
@@ -146,8 +144,8 @@ nsFileCopyEvent::Dispatch(nsIRunnable *callback,
   mCallbackTarget = target;
 
   // Build a coalescing proxy for progress events
-  nsresult rv = net_NewTransportEventSinkProxy(getter_AddRefs(mSink), sink,
-                                               target, true);
+  nsresult rv = net_NewTransportEventSinkProxy(getter_AddRefs(mSink), sink, target);
+
   if (NS_FAILED(rv))
     return rv;
 
@@ -193,7 +191,7 @@ private:
 
   void OnCopyComplete();
 
-  nsRefPtr<nsFileCopyEvent> mCopyEvent;
+  RefPtr<nsFileCopyEvent> mCopyEvent;
   nsCOMPtr<nsITransportEventSink> mSink;
 };
 
@@ -234,7 +232,7 @@ nsFileUploadContentStream::AsyncWait(nsIInputStreamCallback *callback,
 
   if (IsNonBlocking()) {
     nsCOMPtr<nsIRunnable> callback =
-      NS_NewRunnableMethod(this, &nsFileUploadContentStream::OnCopyComplete);
+      NewRunnableMethod(this, &nsFileUploadContentStream::OnCopyComplete);
     mCopyEvent->Dispatch(callback, mSink, target);
   }
 
@@ -272,6 +270,14 @@ nsFileChannel::nsFileChannel(nsIURI *uri)
                                          getter_AddRefs(resolvedFile))) &&
       NS_SUCCEEDED(NS_NewFileURI(getter_AddRefs(targetURI), 
                    resolvedFile, nullptr))) {
+    // Make an effort to match up the query strings.
+    nsCOMPtr<nsIURL> origURL = do_QueryInterface(uri);
+    nsCOMPtr<nsIURL> targetURL = do_QueryInterface(targetURI);
+    nsAutoCString queryString;
+    if (origURL && targetURL && NS_SUCCEEDED(origURL->GetQuery(queryString))) {
+      targetURL->SetQuery(queryString);
+    }
+
     SetURI(targetURI);
     SetOriginalURI(uri);
     nsLoadFlags loadFlags = 0;
@@ -350,7 +356,7 @@ nsFileChannel::OpenContentStream(bool async, nsIInputStream **result,
     rv = NS_NewChannel(getter_AddRefs(newChannel),
                        newURI,
                        nsContentUtils::GetSystemPrincipal(),
-                       nsILoadInfo::SEC_NORMAL,
+                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                        nsIContentPolicy::TYPE_OTHER);
 
     if (NS_FAILED(rv))
@@ -375,7 +381,7 @@ nsFileChannel::OpenContentStream(bool async, nsIInputStream **result,
     if (NS_FAILED(rv))
       return rv;
 
-    nsRefPtr<nsFileUploadContentStream> uploadStream =
+    RefPtr<nsFileUploadContentStream> uploadStream =
         new nsFileUploadContentStream(async, fileStream, mUploadStream,
                                       mUploadLength, this);
     if (!uploadStream || !uploadStream->IsInitialized()) {
