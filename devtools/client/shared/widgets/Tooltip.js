@@ -9,7 +9,6 @@ const defer = require("devtools/shared/defer");
 const {Spectrum} = require("devtools/client/shared/widgets/Spectrum");
 const {CubicBezierWidget} =
       require("devtools/client/shared/widgets/CubicBezierWidget");
-const {MdnDocsWidget} = require("devtools/client/shared/widgets/MdnDocsWidget");
 const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
 const {TooltipToggle} = require("devtools/client/shared/widgets/tooltip/TooltipToggle");
 const EventEmitter = require("devtools/shared/event-emitter");
@@ -19,6 +18,8 @@ const {Eyedropper} = require("devtools/client/eyedropper/eyedropper");
 const {gDevTools} = require("devtools/client/framework/devtools");
 const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 
 loader.lazyRequireGetter(this, "beautify", "devtools/shared/jsbeautify/beautify");
 loader.lazyRequireGetter(this, "setNamedTimeout", "devtools/client/shared/widgets/view-helpers", true);
@@ -31,13 +32,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "VariablesViewController",
   "resource://devtools/client/shared/widgets/VariablesViewController.jsm");
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
-const SPECTRUM_FRAME = "chrome://devtools/content/shared/widgets/spectrum-frame.xhtml";
-const CUBIC_BEZIER_FRAME =
-      "chrome://devtools/content/shared/widgets/cubic-bezier-frame.xhtml";
-const MDN_DOCS_FRAME = "chrome://devtools/content/shared/widgets/mdn-docs-frame.xhtml";
-const FILTER_FRAME = "chrome://devtools/content/shared/widgets/filter-frame.xhtml";
 const ESCAPE_KEYCODE = Ci.nsIDOMKeyEvent.DOM_VK_ESCAPE;
-const RETURN_KEYCODE = Ci.nsIDOMKeyEvent.DOM_VK_RETURN;
 const POPUP_EVENTS = ["shown", "hidden", "showing", "hiding"];
 
 /**
@@ -555,125 +550,6 @@ Tooltip.prototype = {
     this.content = iframe;
 
     return def.promise;
-  },
-
-  /**
-   * Fill the tooltip with a new instance of the spectrum color picker widget
-   * initialized with the given color, and return a promise that resolves to
-   * the instance of spectrum
-   */
-  setColorPickerContent: function (color) {
-    let dimensions = {width: "210", height: "216"};
-    let panel = this.panel;
-    return this.setIFrameContent(dimensions, SPECTRUM_FRAME).then(onLoaded);
-
-    function onLoaded(iframe) {
-      let win = iframe.contentWindow.wrappedJSObject;
-      let def = defer();
-      let container = win.document.getElementById("spectrum");
-      let spectrum = new Spectrum(container, color);
-
-      function finalizeSpectrum() {
-        spectrum.show();
-        def.resolve(spectrum);
-      }
-
-      // Finalize spectrum's init when the tooltip becomes visible
-      if (panel.state == "open") {
-        finalizeSpectrum();
-      } else {
-        panel.addEventListener("popupshown", function shown() {
-          panel.removeEventListener("popupshown", shown, true);
-          finalizeSpectrum();
-        }, true);
-      }
-      return def.promise;
-    }
-  },
-
-  /**
-   * Fill the tooltip with a new instance of the cubic-bezier widget
-   * initialized with the given value, and return a promise that resolves to
-   * the instance of the widget
-   */
-  setCubicBezierContent: function (bezier) {
-    let dimensions = {width: "500", height: "360"};
-    let panel = this.panel;
-    return this.setIFrameContent(dimensions, CUBIC_BEZIER_FRAME).then(onLoaded);
-
-    function onLoaded(iframe) {
-      let win = iframe.contentWindow.wrappedJSObject;
-      let def = defer();
-      let container = win.document.getElementById("container");
-      let widget = new CubicBezierWidget(container, bezier);
-
-      // Resolve to the widget instance whenever the popup becomes visible
-      if (panel.state == "open") {
-        def.resolve(widget);
-      } else {
-        panel.addEventListener("popupshown", function shown() {
-          panel.removeEventListener("popupshown", shown, true);
-          def.resolve(widget);
-        }, true);
-      }
-      return def.promise;
-    }
-  },
-
-  /**
-   * Fill the tooltip with a new instance of the CSSFilterEditorWidget
-   * widget initialized with the given filter value, and return a promise
-   * that resolves to the instance of the widget when ready.
-   */
-  setFilterContent: function (filter) {
-    let dimensions = {width: "500", height: "200"};
-    let panel = this.panel;
-
-    return this.setIFrameContent(dimensions, FILTER_FRAME).then(onLoaded);
-
-    function onLoaded(iframe) {
-      let win = iframe.contentWindow.wrappedJSObject;
-      let def = defer();
-      let container = win.document.getElementById("container");
-      let widget = new CSSFilterEditorWidget(container, filter);
-
-      // Resolve to the widget instance whenever the popup becomes visible
-      if (panel.state === "open") {
-        def.resolve(widget);
-      } else {
-        panel.addEventListener("popupshown", function shown() {
-          panel.removeEventListener("popupshown", shown, true);
-          def.resolve(widget);
-        }, true);
-      }
-      return def.promise;
-    }
-  },
-
-  /**
-   * Set the content of this tooltip to the MDN docs widget.
-   *
-   * This is called when the tooltip is first constructed.
-   *
-   * @return {promise} A promise which is resolved with an MdnDocsWidget.
-   *
-   * It loads the tooltip's structure from a separate XHTML file
-   * into an iframe. When the iframe is loaded it constructs
-   * an MdnDocsWidget and passes that into resolve.
-   *
-   * The caller can use the MdnDocsWidget to update the tooltip's
-   * UI with new content each time the tooltip is shown.
-   */
-  setMdnDocsContent: function () {
-    let dimensions = {width: "410", height: "300"};
-    return this.setIFrameContent(dimensions, MDN_DOCS_FRAME).then(onLoaded);
-
-    function onLoaded(iframe) {
-      let win = iframe.contentWindow.wrappedJSObject;
-      // create an MdnDocsWidget, initializing it with the content document
-      let widget = new MdnDocsWidget(win.document);
-      return widget;
-    }
   }
 };
 
@@ -681,29 +557,44 @@ Tooltip.prototype = {
  * Base class for all (color, gradient, ...)-swatch based value editors inside
  * tooltips
  *
- * @param {XULDocument} doc
+ * @param {Toolbox} toolbox
+ *        The devtools toolbox, needed to get the devtools main window.
  */
-function SwatchBasedEditorTooltip(doc) {
+function SwatchBasedEditorTooltip(toolbox, stylesheet) {
   // Creating a tooltip instance
   // This one will consume outside clicks as it makes more sense to let the user
   // close the tooltip by clicking out
   // It will also close on <escape> and <enter>
-  this.tooltip = new Tooltip(doc, {
-    consumeOutsideClick: true,
-    closeOnKeys: [ESCAPE_KEYCODE, RETURN_KEYCODE],
-    noAutoFocus: false
+  this.tooltip = new HTMLTooltip(toolbox, {
+    type: "arrow",
+    consumeOutsideClicks: true,
+    useXulWrapper: true,
+    stylesheet
   });
 
   // By default, swatch-based editor tooltips revert value change on <esc> and
   // commit value change on <enter>
-  this._onTooltipKeypress = (event, code) => {
-    if (code === ESCAPE_KEYCODE) {
-      this.revert();
-    } else if (code === RETURN_KEYCODE) {
-      this.commit();
+  this.shortcuts = new KeyShortcuts({
+    window: this.tooltip.topWindow
+  });
+  this.shortcuts.on("Escape", (name, event) => {
+    if (!this.tooltip.isVisible()) {
+      return;
     }
-  };
-  this.tooltip.on("keypress", this._onTooltipKeypress);
+    this.revert();
+    this.hide();
+    event.stopPropagation();
+    event.preventDefault();
+  });
+  this.shortcuts.on("Return", (name, event) => {
+    if (!this.tooltip.isVisible()) {
+      return;
+    }
+    this.commit();
+    this.hide();
+    event.stopPropagation();
+    event.preventDefault();
+  });
 
   // All target swatches are kept in a map, indexed by swatch DOM elements
   this.swatches = new Map();
@@ -722,18 +613,14 @@ SwatchBasedEditorTooltip.prototype = {
       this.tooltip.show(this.activeSwatch, "topcenter bottomleft");
 
       // When the tooltip is closed by clicking outside the panel we want to
-      // commit any changes. Because the "hidden" event destroys the tooltip we
-      // need to do this before the tooltip is destroyed (in the "hiding"
-      // event).
-      this.tooltip.once("hiding", () => {
+      // commit any changes.
+      this.tooltip.once("hidden", () => {
         if (!this._reverted && !this.eyedropperOpen) {
           this.commit();
         }
         this._reverted = false;
-      });
 
-      // Once the tooltip is hidden we need to clean up any remaining objects.
-      this.tooltip.once("hidden", () => {
+        // Once the tooltip is hidden we need to clean up any remaining objects.
         if (!this.eyedropperOpen) {
           this.activeSwatch = null;
         }
@@ -825,7 +712,7 @@ SwatchBasedEditorTooltip.prototype = {
     if (this.activeSwatch) {
       this._reverted = true;
       let swatch = this.swatches.get(this.activeSwatch);
-      this.tooltip.once("hiding", () => {
+      this.tooltip.once("hidden", () => {
         swatch.callbacks.onRevert();
       });
     }
@@ -846,6 +733,7 @@ SwatchBasedEditorTooltip.prototype = {
     this.activeSwatch = null;
     this.tooltip.off("keypress", this._onTooltipKeypress);
     this.tooltip.destroy();
+    this.shortcuts.destroy();
   }
 };
 
@@ -856,14 +744,16 @@ SwatchBasedEditorTooltip.prototype = {
  * It just wraps a standard Tooltip and sets its content with an instance of a
  * color picker.
  *
- * @param {XULDocument} doc
+ * @param {Toolbox} toolbox
+ *        The devtools toolbox, needed to get the devtools main window.
  */
-function SwatchColorPickerTooltip(doc) {
-  SwatchBasedEditorTooltip.call(this, doc);
+function SwatchColorPickerTooltip(toolbox) {
+  let stylesheet = "chrome://devtools/content/shared/widgets/spectrum.css";
+  SwatchBasedEditorTooltip.call(this, toolbox, stylesheet);
 
   // Creating a spectrum instance. this.spectrum will always be a promise that
   // resolves to the spectrum instance
-  this.spectrum = this.tooltip.setColorPickerContent([0, 0, 0, 1]);
+  this.spectrum = this.setColorPickerContent([0, 0, 0, 1]);
   this._onSpectrumColorChange = this._onSpectrumColorChange.bind(this);
   this._openEyeDropper = this._openEyeDropper.bind(this);
 }
@@ -872,6 +762,36 @@ module.exports.SwatchColorPickerTooltip = SwatchColorPickerTooltip;
 
 SwatchColorPickerTooltip.prototype =
 Heritage.extend(SwatchBasedEditorTooltip.prototype, {
+  /**
+   * Fill the tooltip with a new instance of the spectrum color picker widget
+   * initialized with the given color, and return the instance of spectrum
+   */
+  setColorPickerContent: function (color) {
+    let { doc } = this.tooltip;
+
+    let container = doc.createElementNS(XHTML_NS, "div");
+    container.id = "spectrum-tooltip";
+    let spectrumNode = doc.createElementNS(XHTML_NS, "div");
+    spectrumNode.id = "spectrum";
+    container.appendChild(spectrumNode);
+    let eyedropper = doc.createElementNS(XHTML_NS, "button");
+    eyedropper.id = "eyedropper-button";
+    eyedropper.className = "devtools-button";
+    container.appendChild(eyedropper);
+
+    this.tooltip.setContent(container, { width: 210, height: 216 });
+
+    let spectrum = new Spectrum(spectrumNode, color);
+
+    // Wait for the tooltip to be shown before calling spectrum.show
+    // as it expect to be visible in order to compute DOM element sizes.
+    this.tooltip.once("shown", () => {
+      spectrum.show();
+    });
+
+    return spectrum;
+  },
+
   /**
    * Overriding the SwatchBasedEditorTooltip.show function to set spectrum's
    * color.
@@ -884,16 +804,13 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
       this.currentSwatchColor = this.activeSwatch.nextSibling;
       this._originalColor = this.currentSwatchColor.textContent;
       let color = this.activeSwatch.style.backgroundColor;
-      this.spectrum.then(spectrum => {
-        spectrum.off("changed", this._onSpectrumColorChange);
-        spectrum.rgb = this._colorToRgba(color);
-        spectrum.on("changed", this._onSpectrumColorChange);
-        spectrum.updateUI();
-      });
+      this.spectrum.off("changed", this._onSpectrumColorChange);
+      this.spectrum.rgb = this._colorToRgba(color);
+      this.spectrum.on("changed", this._onSpectrumColorChange);
+      this.spectrum.updateUI();
     }
 
-    let tooltipDoc = this.tooltip.content.contentDocument;
-    let eyeButton = tooltipDoc.querySelector("#eyedropper-button");
+    let eyeButton = this.tooltip.doc.querySelector("#eyedropper-button");
     eyeButton.addEventListener("click", this._openEyeDropper);
   },
 
@@ -967,10 +884,8 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
   destroy: function () {
     SwatchBasedEditorTooltip.prototype.destroy.call(this);
     this.currentSwatchColor = null;
-    this.spectrum.then(spectrum => {
-      spectrum.off("changed", this._onSpectrumColorChange);
-      spectrum.destroy();
-    });
+    this.spectrum.off("changed", this._onSpectrumColorChange);
+    this.spectrum.destroy();
   }
 });
 
@@ -981,14 +896,16 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
  * It just wraps a standard Tooltip and sets its content with an instance of a
  * CubicBezierWidget.
  *
- * @param {XULDocument} doc
+ * @param {Toolbox} toolbox
+ *        The devtools toolbox, needed to get the devtools main window.
  */
-function SwatchCubicBezierTooltip(doc) {
-  SwatchBasedEditorTooltip.call(this, doc);
+function SwatchCubicBezierTooltip(toolbox) {
+  let stylesheet = "chrome://devtools/content/shared/widgets/cubic-bezier.css";
+  SwatchBasedEditorTooltip.call(this, toolbox, stylesheet);
 
   // Creating a cubic-bezier instance.
   // this.widget will always be a promise that resolves to the widget instance
-  this.widget = this.tooltip.setCubicBezierContent([0, 0, 1, 1]);
+  this.widget = this.setCubicBezierContent([0, 0, 1, 1]);
   this._onUpdate = this._onUpdate.bind(this);
 }
 
@@ -996,6 +913,31 @@ module.exports.SwatchCubicBezierTooltip = SwatchCubicBezierTooltip;
 
 SwatchCubicBezierTooltip.prototype =
 Heritage.extend(SwatchBasedEditorTooltip.prototype, {
+  /**
+   * Fill the tooltip with a new instance of the cubic-bezier widget
+   * initialized with the given value, and return a promise that resolves to
+   * the instance of the widget
+   */
+  setCubicBezierContent: function (bezier) {
+    let { doc } = this.tooltip;
+
+    let container = doc.createElementNS(XHTML_NS, "div");
+    container.className = "cubic-bezier-container";
+
+    this.tooltip.setContent(container, { width: 510, height: 370 });
+
+    let def = defer();
+
+    // Wait for the tooltip to be shown before calling instanciating the widget
+    // as it expect its DOM elements to be visible.
+    this.tooltip.once("shown", () => {
+      let widget = new CubicBezierWidget(container, bezier);
+      def.resolve(widget);
+    });
+
+    return def.promise;
+  },
+
   /**
    * Overriding the SwatchBasedEditorTooltip.show function to set the cubic
    * bezier curve in the widget
@@ -1034,59 +976,21 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
 });
 
 /**
- * Tooltip for displaying docs for CSS properties from MDN.
- *
- * @param {XULDocument} doc
- */
-function CssDocsTooltip(doc) {
-  this.tooltip = new Tooltip(doc, {
-    consumeOutsideClick: true,
-    closeOnKeys: [ESCAPE_KEYCODE, RETURN_KEYCODE],
-    noAutoFocus: false
-  });
-  this.widget = this.tooltip.setMdnDocsContent();
-}
-
-module.exports.CssDocsTooltip = CssDocsTooltip;
-
-CssDocsTooltip.prototype = {
-  /**
-   * Load CSS docs for the given property,
-   * then display the tooltip.
-   */
-  show: function (anchor, propertyName) {
-    function loadCssDocs(widget) {
-      return widget.loadCssDocs(propertyName);
-    }
-
-    this.widget.then(loadCssDocs);
-    this.tooltip.show(anchor, "topcenter bottomleft");
-  },
-
-  hide: function () {
-    this.tooltip.hide();
-  },
-
-  destroy: function () {
-    this.tooltip.destroy();
-  }
-};
-
-/**
  * The swatch-based css filter tooltip class is a specific class meant to be
  * used along with rule-view's generated css filter swatches.
  * It extends the parent SwatchBasedEditorTooltip class.
  * It just wraps a standard Tooltip and sets its content with an instance of a
  * CSSFilterEditorWidget.
  *
- * @param {XULDocument} doc
+ * @param {Toolbox} toolbox
+ *        The devtools toolbox, needed to get the devtools main window.
  */
-function SwatchFilterTooltip(doc) {
-  SwatchBasedEditorTooltip.call(this, doc);
+function SwatchFilterTooltip(toolbox) {
+  let stylesheet = "chrome://devtools/content/shared/widgets/filter-widget.css";
+  SwatchBasedEditorTooltip.call(this, toolbox, stylesheet);
 
   // Creating a filter editor instance.
-  // this.widget will always be a promise that resolves to the widget instance
-  this.widget = this.tooltip.setFilterContent("none");
+  this.widget = this.setFilterContent("none");
   this._onUpdate = this._onUpdate.bind(this);
 }
 
@@ -1094,18 +998,32 @@ exports.SwatchFilterTooltip = SwatchFilterTooltip;
 
 SwatchFilterTooltip.prototype =
 Heritage.extend(SwatchBasedEditorTooltip.prototype, {
+  /**
+   * Fill the tooltip with a new instance of the CSSFilterEditorWidget
+   * widget initialized with the given filter value, and return a promise
+   * that resolves to the instance of the widget when ready.
+   */
+  setFilterContent: function (filter) {
+    let { doc } = this.tooltip;
+
+    let container = doc.createElementNS(XHTML_NS, "div");
+    container.id = "filter-container";
+
+    this.tooltip.setContent(container, { width: 510, height: 200 });
+
+    return new CSSFilterEditorWidget(container, filter);
+  },
+
   show: function () {
     // Call the parent class' show function
     SwatchBasedEditorTooltip.prototype.show.call(this);
     // Then set the filter value and listen to changes to preview them
     if (this.activeSwatch) {
       this.currentFilterValue = this.activeSwatch.nextSibling;
-      this.widget.then(widget => {
-        widget.off("updated", this._onUpdate);
-        widget.on("updated", this._onUpdate);
-        widget.setCssValue(this.currentFilterValue.textContent);
-        widget.render();
-      });
+      this.widget.off("updated", this._onUpdate);
+      this.widget.on("updated", this._onUpdate);
+      this.widget.setCssValue(this.currentFilterValue.textContent);
+      this.widget.render();
     }
   },
 
@@ -1128,10 +1046,8 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
   destroy: function () {
     SwatchBasedEditorTooltip.prototype.destroy.call(this);
     this.currentFilterValue = null;
-    this.widget.then(widget => {
-      widget.off("updated", this._onUpdate);
-      widget.destroy();
-    });
+    this.widget.off("updated", this._onUpdate);
+    this.widget.destroy();
   },
 
   /**

@@ -187,6 +187,7 @@ public:
       // Simple I/O
     case __NR_write:
     case __NR_read:
+    case __NR_readv:
     case __NR_writev: // see SandboxLogging.cpp
     CASES_FOR_lseek:
       return Allow();
@@ -438,6 +439,7 @@ public:
     case SYS_SOCKET: // DANGEROUS
     case SYS_CONNECT: // DANGEROUS
     case SYS_ACCEPT:
+    case SYS_ACCEPT4:
     case SYS_BIND:
     case SYS_LISTEN:
     case SYS_GETSOCKOPT:
@@ -463,6 +465,9 @@ public:
     case SHMCTL:
     case SHMAT:
     case SHMDT:
+    case SEMGET:
+    case SEMCTL:
+    case SEMOP:
       return Some(Allow());
     default:
       return SandboxPolicyCommon::EvaluateIpcCall(aCall);
@@ -511,13 +516,15 @@ public:
     case __NR_rmdir:
     case __NR_getcwd:
     CASES_FOR_statfs:
+    CASES_FOR_fstatfs:
     case __NR_chmod:
     case __NR_rename:
     case __NR_symlink:
     case __NR_quotactl:
     case __NR_utimes:
+    case __NR_link:
     case __NR_unlink:
-    case __NR_fchown:
+    CASES_FOR_fchown:
     case __NR_fchmod:
 #endif
       return Allow();
@@ -606,8 +613,8 @@ public:
 
     CASES_FOR_getrlimit:
     case __NR_clock_getres:
-    case __NR_getresuid:
-    case __NR_getresgid:
+    CASES_FOR_getresuid:
+    CASES_FOR_getresgid:
       return Allow();
 
     case __NR_umask:
@@ -624,6 +631,11 @@ public:
     case __NR_inotify_rm_watch:
       return Allow();
 
+#ifdef __NR_memfd_create
+    case __NR_memfd_create:
+      return Allow();
+#endif
+
 #ifdef __NR_rt_tgsigqueueinfo
       // Only allow to send signals within the process.
     case __NR_rt_tgsigqueueinfo: {
@@ -632,6 +644,9 @@ public:
         .Else(InvalidSyscall());
     }
 #endif
+
+    case __NR_mlock:
+      return Allow();
 
 #endif // DESKTOP
 

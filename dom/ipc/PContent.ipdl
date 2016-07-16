@@ -67,7 +67,7 @@ include PluginTypes;
 include ProtocolTypes;
 include PBackgroundSharedTypes;
 include PContentPermission;
-include BrowserConfiguration;
+include ServiceWorkerConfiguration;
 include GraphicsMessages;
 include ProfilerTypes;
 
@@ -357,6 +357,22 @@ struct AndroidSystemInfo
     bool     isTablet;
 };
 
+struct GetFilesResponseSuccess
+{
+  PBlob[] blobs;
+};
+
+struct GetFilesResponseFailure
+{
+  nsresult errorCode;
+};
+
+union GetFilesResponseResult
+{
+  GetFilesResponseSuccess;
+  GetFilesResponseFailure;
+};
+
 prio(normal upto urgent) sync protocol PContent
 {
     parent spawns PPluginModule;
@@ -526,6 +542,11 @@ child:
                   nsCString ID, nsCString vendor);
     async AppInit();
 
+    /**
+     * Send ServiceWorkerRegistrationData to child process.
+     */
+    async InitServiceWorkers(ServiceWorkerConfiguration aConfig);
+
     // Notify child that last-pb-context-exited notification was observed
     async LastPrivateDocShellDestroyed();
 
@@ -652,6 +673,9 @@ child:
     async SetAudioSessionData(nsID aID,
                               nsString aDisplayName,
                               nsString aIconPath);
+
+    async GetFilesResponse(nsID aID, GetFilesResponseResult aResult);
+
 parent:
     /**
      * Tell the content process some attributes of itself.  This is
@@ -1084,12 +1108,6 @@ parent:
     async PContentPermissionRequest(PermissionRequest[] aRequests, Principal aPrincipal,
                                     TabId tabId);
 
-    /**
-     * Send ServiceWorkerRegistrationData to child process.
-     */
-    sync GetBrowserConfiguration(nsCString aUri)
-        returns (BrowserConfiguration aConfig);
-
     async Profile(nsCString aProfile);
 
     /**
@@ -1166,6 +1184,9 @@ parent:
      * sent with a crash report from the content process.
      */
      async NotifyLowMemory();
+
+     async GetFilesRequest(nsID aID, nsString aDirectory, bool aRecursiveFlag);
+     async DeleteGetFilesRequest(nsID aID);
 
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,

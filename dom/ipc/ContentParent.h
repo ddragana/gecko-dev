@@ -25,6 +25,7 @@
 #include "nsIThreadInternal.h"
 #include "nsIDOMGeoPositionCallback.h"
 #include "nsIDOMGeoPositionErrorCallback.h"
+#include "nsRefPtrHashtable.h"
 #include "PermissionMessageUtils.h"
 #include "DriverCrashGuard.h"
 
@@ -83,6 +84,7 @@ class ClonedMessageData;
 class MemoryReport;
 class TabContext;
 class ContentBridgeParent;
+class GetFilesHelper;
 
 class ContentParent final : public PContentParent
                           , public nsIContentParent
@@ -352,9 +354,6 @@ public:
    */
   static bool
   PermissionManagerRelease(const ContentParentId& aCpId, const TabId& aTabId);
-
-  static bool
-  GetBrowserConfiguration(const nsCString& aURI, BrowserConfiguration& aConfig);
 
   void ReportChildAlreadyBlocked();
 
@@ -1138,9 +1137,6 @@ private:
   virtual bool RecvUpdateDropEffect(const uint32_t& aDragAction,
                                     const uint32_t& aDropEffect) override;
 
-  virtual bool RecvGetBrowserConfiguration(const nsCString& aURI,
-                                           BrowserConfiguration* aConfig) override;
-
   virtual bool RecvProfile(const nsCString& aProfile) override;
 
   virtual bool RecvGetGraphicsDeviceInitData(DeviceInitData* aOut) override;
@@ -1173,6 +1169,18 @@ private:
                                                            const IPC::Principal& aPrincipal) override;
 
   virtual bool RecvNotifyLowMemory() override;
+
+  virtual bool RecvGetFilesRequest(const nsID& aID,
+                                   const nsString& aDirectoryPath,
+                                   const bool& aRecursiveFlag) override;
+
+  virtual bool RecvDeleteGetFilesRequest(const nsID& aID) override;
+
+public:
+  void SendGetFilesResponseAndForget(const nsID& aID,
+                                     const GetFilesResponseResult& aResult);
+
+private:
 
   // If you add strong pointers to cycle collected objects here, be sure to
   // release these objects in ShutDownProcess.  See the comment there for more
@@ -1269,6 +1277,10 @@ private:
 #ifdef NS_PRINTING
   RefPtr<embedding::PrintingParent> mPrintingParent;
 #endif
+
+  // This hashtable is used to run GetFilesHelper objects in the parent process.
+  // GetFilesHelper can be aborted by receiving RecvDeleteGetFilesRequest.
+  nsRefPtrHashtable<nsIDHashKey, GetFilesHelper> mGetFilesPendingRequests;
 };
 
 } // namespace dom

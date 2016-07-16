@@ -155,6 +155,20 @@ static nsresult GetKeyValue(const WCHAR* keyLocation, const WCHAR* keyName, nsAS
       }
       break;
     }
+    case REG_QWORD: {
+      // We only use this for vram size
+      LONGLONG qValue;
+      dwcbData = sizeof(qValue);
+      result = RegQueryValueExW(key, keyName, nullptr, &resultType,
+                                (LPBYTE)&qValue, &dwcbData);
+      if (result == ERROR_SUCCESS && resultType == REG_QWORD) {
+        qValue = qValue / 1024 / 1024;
+        destString.AppendInt(int32_t(qValue));
+      } else {
+        retval = NS_ERROR_FAILURE;
+      }
+      break;
+    }
     case REG_MULTI_SZ: {
       // A chain of null-separated strings; we convert the nulls to spaces
       WCHAR wCharValue[1024];
@@ -582,8 +596,11 @@ GfxInfo::GetAdapterDescription2(nsAString & aAdapterDescription)
 NS_IMETHODIMP
 GfxInfo::GetAdapterRAM(nsAString & aAdapterRAM)
 {
-  if (NS_FAILED(GetKeyValue(mDeviceKey.get(), L"HardwareInformation.MemorySize", aAdapterRAM, REG_DWORD)))
-    aAdapterRAM = L"Unknown";
+  if (NS_FAILED(GetKeyValue(mDeviceKey.get(), L"HardwareInformation.qwMemorySize", aAdapterRAM, REG_QWORD)) || aAdapterRAM.Length() == 0) {
+    if (NS_FAILED(GetKeyValue(mDeviceKey.get(), L"HardwareInformation.MemorySize", aAdapterRAM, REG_DWORD))) {
+      aAdapterRAM = L"Unknown";
+    }
+  }
   return NS_OK;
 }
 
@@ -592,8 +609,10 @@ GfxInfo::GetAdapterRAM2(nsAString & aAdapterRAM)
 {
   if (!mHasDualGPU) {
     aAdapterRAM.Truncate();
-  } else if (NS_FAILED(GetKeyValue(mDeviceKey2.get(), L"HardwareInformation.MemorySize", aAdapterRAM, REG_DWORD))) {
-    aAdapterRAM = L"Unknown";
+  } else if (NS_FAILED(GetKeyValue(mDeviceKey2.get(), L"HardwareInformation.qwMemorySize", aAdapterRAM, REG_QWORD)) || aAdapterRAM.Length() == 0) {
+    if (NS_FAILED(GetKeyValue(mDeviceKey2.get(), L"HardwareInformation.MemorySize", aAdapterRAM, REG_DWORD))) {
+      aAdapterRAM = L"Unknown";
+    }
   }
   return NS_OK;
 }
@@ -834,14 +853,48 @@ GfxInfo::GetGfxDriverInfo()
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_LESS_THAN, V(6,14,11,8265), "FEATURE_FAILURE_NV_XP", "182.65" );
+
+    /*
+     * The last 5 digit of the NVIDIA driver version maps to the version that
+     * NVIDIA uses. The minor version (15, 16, 17) corresponds roughtly to the
+     * OS (Vista, Win7, Win7) but they show up in smaller numbers across all
+     * OS versions (perhaps due to OS upgrades). So we want to support
+     * May 2009+ drivers across all these minor versions.
+     *
+     * 182.65 correspond to end of May 2009.
+     */
     APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::WindowsVista,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_LESS_THAN, V(8,17,11,8265), "FEATURE_FAILURE_NV_VISTA", "182.65" );
+      DRIVER_LESS_THAN, V(8,15,11,8265),
+      "FEATURE_FAILURE_NV_VISTA_15", "182.65" );
     APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::Windows7,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_LESS_THAN, V(8,17,11,8265), "FEATURE_FAILURE_NV_W7", "182.65" );
+      DRIVER_LESS_THAN, V(8,15,11,8265),
+      "FEATURE_FAILURE_NV_W7_15", "182.65" );
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::WindowsVista,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,16,10,0000), V(8,16,11,8265),
+      "FEATURE_FAILURE_NV_VISTA_16", "182.65" );
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::Windows7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,16,10,0000), V(8,16,11,8265),
+      "FEATURE_FAILURE_NV_W7_16", "182.65" );
+    // Telemetry doesn't show any driver in this range so it might not even be required.
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::WindowsVista,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,17,10,0000), V(8,17,11,8265),
+      "FEATURE_FAILURE_NV_VISTA_17", "182.65" );
+    // Telemetry doesn't show any driver in this range so it might not even be required.
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::Windows7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,17,10,0000), V(8,17,11,8265),
+      "FEATURE_FAILURE_NV_W7_17", "182.65" );
 
     /*
      * AMD/ATI entries. 8.56.1.15 is the driver that shipped with Windows 7 RTM

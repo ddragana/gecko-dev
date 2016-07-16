@@ -348,28 +348,23 @@ nsPNGDecoder::InitInternal()
 
 }
 
-void
-nsPNGDecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
+Maybe<TerminalState>
+nsPNGDecoder::DoDecode(SourceBufferIterator& aIterator)
 {
-  MOZ_ASSERT(!HasError(), "Shouldn't call WriteInternal after error!");
-  MOZ_ASSERT(aBuffer);
-  MOZ_ASSERT(aCount > 0);
+  MOZ_ASSERT(!HasError(), "Shouldn't call DoDecode after error!");
+  MOZ_ASSERT(aIterator.Data());
+  MOZ_ASSERT(aIterator.Length() > 0);
 
-  Maybe<TerminalState> terminalState =
-    mLexer.Lex(aBuffer, aCount, [=](State aState,
-                                    const char* aData, size_t aLength) {
-      switch (aState) {
-        case State::PNG_DATA:
-          return ReadPNGData(aData, aLength);
-        case State::FINISHED_PNG_DATA:
-          return FinishedPNGData();
-      }
-      MOZ_CRASH("Unknown State");
-    });
-
-  if (terminalState == Some(TerminalState::FAILURE)) {
-    PostDataError();
-  }
+  return mLexer.Lex(aIterator.Data(), aIterator.Length(),
+                    [=](State aState, const char* aData, size_t aLength) {
+    switch (aState) {
+      case State::PNG_DATA:
+        return ReadPNGData(aData, aLength);
+      case State::FINISHED_PNG_DATA:
+        return FinishedPNGData();
+    }
+    MOZ_CRASH("Unknown State");
+  });
 }
 
 LexerTransition<nsPNGDecoder::State>
@@ -998,6 +993,38 @@ nsPNGDecoder::SpeedHistogram()
   return Telemetry::IMAGE_DECODE_SPEED_PNG;
 }
 
+bool
+nsPNGDecoder::IsValidICO() const
+{
+  // Only 32-bit RGBA PNGs are valid ICO resources; see here:
+  //   http://blogs.msdn.com/b/oldnewthing/archive/2010/10/22/10079192.aspx
+
+  // If there are errors in the call to png_get_IHDR, the error_callback in
+  // nsPNGDecoder.cpp is called.  In this error callback we do a longjmp, so
+  // we need to save the jump buffer here. Oterwise we'll end up without a
+  // proper callstack.
+  if (setjmp(png_jmpbuf(mPNG))) {
+    // We got here from a longjmp call indirectly from png_get_IHDR
+    return false;
+  }
+
+  png_uint_32
+      png_width,  // Unused
+      png_height; // Unused
+
+  int png_bit_depth,
+      png_color_type;
+
+  if (png_get_IHDR(mPNG, mInfo, &png_width, &png_height, &png_bit_depth,
+                   &png_color_type, nullptr, nullptr, nullptr)) {
+
+    return ((png_color_type == PNG_COLOR_TYPE_RGB_ALPHA ||
+             png_color_type == PNG_COLOR_TYPE_RGB) &&
+            png_bit_depth == 8);
+  } else {
+    return false;
+  }
+}
 
 } // namespace image
 } // namespace mozilla

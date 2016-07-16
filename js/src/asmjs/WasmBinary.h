@@ -33,7 +33,9 @@ static const char FunctionSectionId[]    = "function";
 static const char TableSectionId[]       = "table";
 static const char MemorySectionId[]      = "memory";
 static const char ExportSectionId[]      = "export";
+static const char StartSectionId[]       = "start";
 static const char CodeSectionId[]        = "code";
+static const char ElemSectionId[]        = "elem";
 static const char DataSectionId[]        = "data";
 static const char NameSectionId[]        = "name";
 
@@ -67,7 +69,15 @@ enum class TypeConstructor
 enum class DefinitionKind
 {
     Function                             = 0x00,
-    Memory                               = 0x01
+    Table                                = 0x01,
+    Memory                               = 0x02
+};
+
+enum class ResizableFlags
+{
+    Default                              = 0x1,
+    HasMaximum                           = 0x2,
+    AllowedMask                          = 0x3
 };
 
 enum class Expr
@@ -676,6 +686,10 @@ class Decoder
     bool fail(UniqueChars msg) {
         *error_ = Move(msg);
         return false;
+    }
+    void clearError() {
+        if (error_)
+            error_->reset();
     }
 
     bool done() const {

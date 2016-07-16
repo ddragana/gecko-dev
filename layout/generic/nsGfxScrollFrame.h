@@ -386,6 +386,7 @@ public:
   }
   void SetScrollableByAPZ(bool aScrollable);
   void SetZoomableByAPZ(bool aZoomable);
+  void SetScrollsClipOnUnscrolledOutOfFlow();
 
   bool UsesContainerScrolling() const;
 
@@ -581,6 +582,8 @@ public:
   // True if we don't want the scrollbar to repaint itself right now.
   bool mSuppressScrollbarRepaints:1;
 
+  bool mScrollsClipOnUnscrolledOutOfFlow:1;
+
   mozilla::layout::ScrollVelocityQueue mVelocityQueue;
 
 protected:
@@ -626,6 +629,7 @@ protected:
   AsyncScrollEventType mAsyncScrollEvent;
   bool HasPluginFrames();
   bool HasPerspective() const;
+  uint8_t GetScrolledFrameDir() const;
 
   static void EnsureFrameVisPrefsCached();
   static bool sFrameVisPrefsCached;
@@ -1004,6 +1008,9 @@ public:
   }
   void SetZoomableByAPZ(bool aZoomable) override {
     mHelper.SetZoomableByAPZ(aZoomable);
+  }
+  void SetScrollsClipOnUnscrolledOutOfFlow() override {
+    mHelper.SetScrollsClipOnUnscrolledOutOfFlow();
   }
   
   ScrollSnapInfo GetScrollSnapInfo() const override {
@@ -1407,6 +1414,9 @@ public:
   }
   void SetZoomableByAPZ(bool aZoomable) override {
     mHelper.SetZoomableByAPZ(aZoomable);
+  }
+  void SetScrollsClipOnUnscrolledOutOfFlow() override {
+    mHelper.SetScrollsClipOnUnscrolledOutOfFlow();
   }
   virtual bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                                      nsRect* aDirtyRect,

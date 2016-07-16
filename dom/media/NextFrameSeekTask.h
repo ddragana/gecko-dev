@@ -30,7 +30,7 @@ public:
                    SeekJob&& aSeekJob,
                    const MediaInfo& aInfo,
                    const media::TimeUnit& aDuration,
-                   int64_t aCurrentMediaTime,
+                   int64_t aCurrentTime,
                    MediaQueue<MediaData>& aAudioQueue,
                    MediaQueue<MediaData>& aVideoQueue);
 
@@ -43,19 +43,17 @@ public:
 private:
   ~NextFrameSeekTask();
 
-  bool IsVideoDecoding() const;
-
-  void EnsureVideoDecodeTaskQueued();
-
-  const char* VideoRequestStatus();
-
   void RequestVideoData();
 
-  bool IsAudioSeekComplete();
+  bool NeedMoreVideo() const;
 
-  bool IsVideoSeekComplete();
+  bool IsVideoRequestPending() const;
 
-  void CheckIfSeekComplete();
+  bool IsAudioSeekComplete() const;
+
+  bool IsVideoSeekComplete() const;
+
+  void MaybeFinishSeek();
 
   void OnAudioDecoded(MediaData* aAudioSample);
 
@@ -82,7 +80,7 @@ private:
   /*
    * Internal state.
    */
-  const int64_t mCurrentTimeBeforeSeek;
+  const int64_t mCurrentTime;
   media::TimeUnit mDuration;
 
   MediaEventListener mAudioCallback;

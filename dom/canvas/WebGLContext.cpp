@@ -1265,6 +1265,7 @@ WebGLContext::UpdateLastUseIndex()
 }
 
 static uint8_t gWebGLLayerUserData;
+static uint8_t gWebGLMirrorLayerUserData;
 
 class WebGLContextUserData : public LayerUserData
 {
@@ -1307,13 +1308,14 @@ private:
 already_AddRefed<layers::Layer>
 WebGLContext::GetCanvasLayer(nsDisplayListBuilder* builder,
                              Layer* oldLayer,
-                             LayerManager* manager)
+                             LayerManager* manager,
+                             bool aMirror /*= false*/)
 {
     if (IsContextLost())
         return nullptr;
 
     if (!mResetLayer && oldLayer &&
-        oldLayer->HasUserData(&gWebGLLayerUserData)) {
+        oldLayer->HasUserData(aMirror ? &gWebGLMirrorLayerUserData : &gWebGLLayerUserData)) {
         RefPtr<layers::Layer> ret = oldLayer;
         return ret.forget();
     }
@@ -1325,7 +1327,7 @@ WebGLContext::GetCanvasLayer(nsDisplayListBuilder* builder,
     }
 
     WebGLContextUserData* userData = nullptr;
-    if (builder->IsPaintingToWindow() && mCanvasElement) {
+    if (builder->IsPaintingToWindow() && mCanvasElement && !aMirror) {
         // Make the layer tell us whenever a transaction finishes (including
         // the current transaction), so we can clear our invalidation state and
         // start invalidating again. We need to do this for the layer that is
@@ -1345,13 +1347,14 @@ WebGLContext::GetCanvasLayer(nsDisplayListBuilder* builder,
             WebGLContextUserData::PreTransactionCallback, userData);
     }
 
-    canvasLayer->SetUserData(&gWebGLLayerUserData, userData);
+    canvasLayer->SetUserData(aMirror ? &gWebGLMirrorLayerUserData : &gWebGLLayerUserData, userData);
 
     CanvasLayer::Data data;
     data.mGLContext = gl;
     data.mSize = nsIntSize(mWidth, mHeight);
     data.mHasAlpha = gl->Caps().alpha;
     data.mIsGLAlphaPremult = IsPremultAlpha() || !data.mHasAlpha;
+    data.mIsMirror = aMirror;
 
     canvasLayer->Initialize(data);
     uint32_t flags = gl->Caps().alpha ? 0 : Layer::CONTENT_OPAQUE;
@@ -1944,8 +1947,7 @@ WebGLContext::DidRefresh()
 bool
 WebGLContext::ValidateCurFBForRead(const char* funcName,
                                    const webgl::FormatUsageInfo** const out_format,
-                                   uint32_t* const out_width, uint32_t* const out_height,
-                                   GLenum* const out_mode)
+                                   uint32_t* const out_width, uint32_t* const out_height)
 {
     if (!mBoundReadFramebuffer) {
         const GLenum readBufferMode = gl->Screen()->GetReadBufferMode();
@@ -1969,12 +1971,11 @@ WebGLContext::ValidateCurFBForRead(const char* funcName,
 
         *out_width = mWidth;
         *out_height = mHeight;
-        *out_mode = gl->Screen()->GetReadBufferMode();
         return true;
     }
 
     return mBoundReadFramebuffer->ValidateForRead(funcName, out_format, out_width,
-                                                  out_height, out_mode);
+                                                  out_height);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2102,19 +2103,19 @@ ZeroTexImageWithClear(WebGLContext* webgl, GLContext* gl, TexImageTarget target,
     GLenum attachPoint = 0;
     GLbitfield clearBits = 0;
 
-    if (format->isColorFormat) {
+    if (format->IsColorFormat()) {
         attachPoint = LOCAL_GL_COLOR_ATTACHMENT0;
         clearBits = LOCAL_GL_COLOR_BUFFER_BIT;
     }
 
-    if (format->hasDepth) {
+    if (format->d) {
         attachPoint = LOCAL_GL_DEPTH_ATTACHMENT;
         clearBits |= LOCAL_GL_DEPTH_BUFFER_BIT;
     }
 
-    if (format->hasStencil) {
-        attachPoint = (format->hasDepth ? LOCAL_GL_DEPTH_STENCIL_ATTACHMENT
-                                        : LOCAL_GL_STENCIL_ATTACHMENT);
+    if (format->s) {
+        attachPoint = (format->d ? LOCAL_GL_DEPTH_STENCIL_ATTACHMENT
+                                 : LOCAL_GL_STENCIL_ATTACHMENT);
         clearBits |= LOCAL_GL_STENCIL_BUFFER_BIT;
     }
 
@@ -2215,7 +2216,7 @@ ZeroTextureData(WebGLContext* webgl, const char* funcName, bool respecifyTexture
     const auto driverUnpackInfo = usage->idealUnpack;
     MOZ_RELEASE_ASSERT(driverUnpackInfo, "GFX: ideal unpack info not set.");
 
-    if (usage->isRenderable && depth == 1 &&
+    if (usage->IsRenderable() && depth == 1 &&
         !xOffset && !yOffset && !zOffset)
     {
         // While we would like to skip the extra complexity of trying to zero with an FB

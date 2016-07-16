@@ -287,24 +287,10 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'NetworkInfoServiceCocoa.cpp',
         'nsNetworkInfoService.cpp',
     ]
-elif CONFIG['OS_TARGET'] == 'Linux':
+elif CONFIG['OS_ARCH'] == 'Linux':
     SOURCES += [
         'NetworkInfoServiceLinux.cpp',
         'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    SOURCES += [
-        'NetworkInfoServiceLinux.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    SOURCES += [
-        'NetworkInfoServiceLinux.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-
-if CONFIG['MOZ_ENABLE_QTNETWORK']:
-    SOURCES += [
     ]
 
 EXTRA_COMPONENTS += [
@@ -331,14 +317,6 @@ if 'rtsp' in CONFIG['NECKO_PROTOCOLS']:
         '/netwerk/protocol/rtsp/controller',
         '/netwerk/protocol/rtsp/rtsp',
     ]
-
-if CONFIG['MOZ_ENABLE_QTNETWORK']:
-    LOCAL_INCLUDES += [
-        '/netwerk/system/qt',
-    ]
-
-if CONFIG['MOZ_ENABLE_QTNETWORK']:
-    CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']
 
 if CONFIG['GNU_CXX']:
     CXXFLAGS += ['-Wno-error=shadow']

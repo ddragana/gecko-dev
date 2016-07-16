@@ -2254,6 +2254,14 @@ public:
                                                 size_t aPropertyCount);
 
   /**
+   * Returns true if the frame has current or in-effect (i.e. in before phase,
+   * running or filling) animations or transitions for the
+   * property.
+   */
+  static bool HasRelevantAnimationOfProperty(const nsIFrame* aFrame,
+                                             nsCSSProperty aProperty);
+
+  /**
    * Checks if off-main-thread animations are enabled.
    */
   static bool AreAsyncAnimationsEnabled();
@@ -2845,6 +2853,14 @@ public:
    * is probably what we *want* to be computing).
    */
   static CSSPoint GetCumulativeApzCallbackTransform(nsIFrame* aFrame);
+
+  /*
+   * Returns whether the given document supports being rendered with a
+   * Servo-backed style system.  This checks whether Stylo is enabled
+   * globally, that the document is an HTML document, and that it is
+   * being presented in a content docshell.
+   */
+  static bool SupportsServoStyleBackend(nsIDocument* aDocument);
 
 private:
   static uint32_t sFontSizeInflationEmPerLine;

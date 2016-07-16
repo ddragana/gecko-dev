@@ -31,6 +31,7 @@
 #include "js/HashTable.h"
 #include "js/Id.h"
 #include "js/Principals.h"
+#include "js/Realm.h"
 #include "js/RootingAPI.h"
 #include "js/TracingAPI.h"
 #include "js/Utility.h"
@@ -5035,13 +5036,13 @@ JS_ParseJSONWithReviver(JSContext* cx, JS::HandleString str, JS::HandleValue rev
  * The locale string remains owned by the caller.
  */
 extern JS_PUBLIC_API(bool)
-JS_SetDefaultLocale(JSRuntime* rt, const char* locale);
+JS_SetDefaultLocale(JSContext* cx, const char* locale);
 
 /**
  * Reset the default locale to OS defaults.
  */
 extern JS_PUBLIC_API(void)
-JS_ResetDefaultLocale(JSRuntime* rt);
+JS_ResetDefaultLocale(JSContext* cx);
 
 /**
  * Locale specific string conversion and error message callbacks.
@@ -5055,17 +5056,17 @@ struct JSLocaleCallbacks {
 
 /**
  * Establish locale callbacks. The pointer must persist as long as the
- * JSRuntime.  Passing nullptr restores the default behaviour.
+ * JSContext.  Passing nullptr restores the default behaviour.
  */
 extern JS_PUBLIC_API(void)
-JS_SetLocaleCallbacks(JSRuntime* rt, const JSLocaleCallbacks* callbacks);
+JS_SetLocaleCallbacks(JSContext* cx, const JSLocaleCallbacks* callbacks);
 
 /**
  * Return the address of the current locale callbacks struct, which may
  * be nullptr.
  */
 extern JS_PUBLIC_API(const JSLocaleCallbacks*)
-JS_GetLocaleCallbacks(JSRuntime* rt);
+JS_GetLocaleCallbacks(JSContext* cx);
 
 /************************************************************************/
 
@@ -5190,15 +5191,6 @@ class JSErrorReport
 #define JSREPORT_STRICT     0x4     /* error or warning due to strict option */
 
 /*
- * This condition is an error in strict mode code, a warning if
- * JS_HAS_STRICT_OPTION(cx), and otherwise should not be reported at
- * all.  We check the strictness of the context's top frame's script;
- * where that isn't appropriate, the caller should do the right checks
- * itself instead of using this flag.
- */
-#define JSREPORT_STRICT_MODE_ERROR 0x8
-
-/*
  * If JSREPORT_EXCEPTION is set, then a JavaScript-catchable exception
  * has been thrown for this runtime error, and the host should ignore it.
  * Exception-aware hosts should also check for JS_IsExceptionPending if
@@ -5208,8 +5200,7 @@ class JSErrorReport
 #define JSREPORT_IS_WARNING(flags)      (((flags) & JSREPORT_WARNING) != 0)
 #define JSREPORT_IS_EXCEPTION(flags)    (((flags) & JSREPORT_EXCEPTION) != 0)
 #define JSREPORT_IS_STRICT(flags)       (((flags) & JSREPORT_STRICT) != 0)
-#define JSREPORT_IS_STRICT_MODE_ERROR(flags) (((flags) &                      \
-                                              JSREPORT_STRICT_MODE_ERROR) != 0)
+
 namespace JS {
 
 typedef void

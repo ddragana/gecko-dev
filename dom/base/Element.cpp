@@ -1526,7 +1526,7 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     ClearSubtreeRootPointer();
 
     // Being added to a document.
-    SetInDocument();
+    SetIsInDocument();
 
     // Unset this flag since we now really are in a document.
     UnsetFlags(NODE_FORCE_XBL_BINDINGS |
@@ -3292,15 +3292,16 @@ Element::MozRequestPointerLock()
 void
 Element::GetGridFragments(nsTArray<RefPtr<Grid>>& aResult)
 {
-  nsIFrame* frame = GetPrimaryFrame();
-  if (frame && (frame->GetType() == nsGkAtoms::gridContainerFrame)) {
-    // If primary frame is a nsGridContainerFrame, all the next frames
-    // in flow will also be nsGridContainerFrame.
-    for (; frame != nullptr; frame = frame->GetNextInFlow()) {
-      aResult.AppendElement(
-        new Grid(this, static_cast<nsGridContainerFrame*>(frame))
-      );
-    }
+  nsGridContainerFrame* frame =
+    nsGridContainerFrame::GetGridFrameWithComputedInfo(GetPrimaryFrame());
+
+  // If we get a nsGridContainerFrame from the prior call,
+  // all the next-in-flow frames will also be nsGridContainerFrames.
+  while (frame) {
+    aResult.AppendElement(
+      new Grid(this, frame)
+    );
+    frame = static_cast<nsGridContainerFrame*>(frame->GetNextInFlow());
   }
 }
 

@@ -8,10 +8,6 @@
 #include <gtk/gtk.h>
 #endif
 
-#ifdef MOZ_WIDGET_QT
-#include "nsQAppInstance.h"
-#endif
-
 #include "ContentChild.h"
 
 #include "BlobChild.h"
@@ -33,9 +29,11 @@
 #include "mozilla/dom/DOMStorageIPC.h"
 #include "mozilla/dom/ExternalHelperAppChild.h"
 #include "mozilla/dom/FlyWebPublishedServerIPC.h"
+#include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/PCrashReporterChild.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
@@ -222,6 +220,7 @@ using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
+using namespace mozilla::dom::workers;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gmp;
@@ -617,18 +616,9 @@ ContentChild::Init(MessageLoop* aIOLoop,
   }
 #endif
 
-#ifdef MOZ_WIDGET_QT
-  // sigh, seriously
-  nsQAppInstance::AddRef();
-#endif
-
 #ifdef MOZ_X11
   // Do this after initializing GDK, or GDK will install its own handler.
   XRE_InstallX11ErrorHandler();
-#endif
-
-#ifdef MOZ_NUWA_PROCESS
-  SetTransport(aChannel);
 #endif
 
   NS_ASSERTION(!sSingleton, "only one ContentChild per child");
@@ -927,7 +917,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
   }
 
   if (!urlToLoad.IsEmpty()) {
-    newChild->RecvLoadURL(urlToLoad, BrowserConfiguration(), showInfo);
+    newChild->RecvLoadURL(urlToLoad, showInfo);
   }
 
   nsCOMPtr<mozIDOMWindowProxy> win = do_GetInterface(newChild->WebNavigation());
@@ -2637,6 +2627,15 @@ ContentChild::RecvAppInit()
 }
 
 bool
+ContentChild::RecvInitServiceWorkers(const ServiceWorkerConfiguration& aConfig)
+{
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  MOZ_ASSERT(swm);
+  swm->LoadRegistrations(aConfig.serviceWorkerRegistrations());
+  return true;
+}
+
+bool
 ContentChild::RecvLastPrivateDocShellDestroyed()
 {
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -3371,6 +3370,62 @@ ContentChild::RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aScop
   PushSubscriptionModifiedDispatcher dispatcher(aScope, aPrincipal);
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
 #endif
+  return true;
+}
+
+void
+ContentChild::CreateGetFilesRequest(const nsAString& aDirectoryPath,
+                                    bool aRecursiveFlag,
+                                    nsID& aUUID,
+                                    GetFilesHelperChild* aChild)
+{
+  MOZ_ASSERT(aChild);
+  MOZ_ASSERT(!mGetFilesPendingRequests.GetWeak(aUUID));
+
+  Unused << SendGetFilesRequest(aUUID, nsString(aDirectoryPath),
+                                aRecursiveFlag);
+  mGetFilesPendingRequests.Put(aUUID, aChild);
+}
+
+void
+ContentChild::DeleteGetFilesRequest(nsID& aUUID, GetFilesHelperChild* aChild)
+{
+  MOZ_ASSERT(aChild);
+  MOZ_ASSERT(mGetFilesPendingRequests.GetWeak(aUUID));
+
+  Unused << SendDeleteGetFilesRequest(aUUID);
+  mGetFilesPendingRequests.Remove(aUUID);
+}
+
+bool
+ContentChild::RecvGetFilesResponse(const nsID& aUUID,
+                                   const GetFilesResponseResult& aResult)
+{
+  GetFilesHelperChild* child = mGetFilesPendingRequests.GetWeak(aUUID);
+  // This object can already been deleted in case DeleteGetFilesRequest has
+  // been called when the response was sending by the parent.
+  if (!child) {
+    return true;
+  }
+
+  if (aResult.type() == GetFilesResponseResult::TGetFilesResponseFailure) {
+    child->Finished(aResult.get_GetFilesResponseFailure().errorCode());
+  } else {
+    MOZ_ASSERT(aResult.type() == GetFilesResponseResult::TGetFilesResponseSuccess);
+
+    const nsTArray<PBlobChild*>& blobs =
+      aResult.get_GetFilesResponseSuccess().blobsChild();
+
+    bool succeeded = true;
+    for (uint32_t i = 0; succeeded && i < blobs.Length(); ++i) {
+      RefPtr<BlobImpl> impl = static_cast<BlobChild*>(blobs[i])->GetBlobImpl();
+      succeeded = child->AppendBlobImpl(impl);
+    }
+
+    child->Finished(succeeded ? NS_OK : NS_ERROR_OUT_OF_MEMORY);
+  }
+
+  mGetFilesPendingRequests.Remove(aUUID);
   return true;
 }
 

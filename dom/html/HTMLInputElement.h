@@ -243,6 +243,8 @@ public:
                              bool aSetValueChanged);
   void SetFiles(nsIDOMFileList* aFiles, bool aSetValueChanged);
 
+  // This method is used for test only. Onces the data is set, a 'change' event
+  // is dispatched.
   void MozSetDndFilesAndDirectories(const nsTArray<OwningFileOrDirectory>& aSequence);
 
   // Called when a nsIFilePicker or a nsIColorPicker terminate.
@@ -971,7 +973,6 @@ protected:
    * This method can explore the directory recursively if needed.
    */
   void AfterSetFilesOrDirectories(bool aSetValueChanged);
-  void AfterSetFilesOrDirectoriesInternal(bool aSetValueChanged);
 
   /**
    * Recursively explore the directory and populate mFileOrDirectories correctly
@@ -1036,11 +1037,7 @@ protected:
   /**
    * Returns if valueAsNumber attribute applies for the current type.
    */
-  bool DoesValueAsNumberApply() const
-  {
-    // TODO: this is temporary until bug 888324 is fixed.
-    return DoesMinMaxApply() && mType != NS_FORM_INPUT_MONTH;
-  }
+  bool DoesValueAsNumberApply() const { return DoesMinMaxApply(); }
 
   /**
    * Returns if autocomplete attribute applies for the current type.
@@ -1204,6 +1201,12 @@ protected:
    * This methods returns the number of days in a given month, for a given year.
    */
   uint32_t NumberOfDaysInMonth(uint32_t aMonth, uint32_t aYear) const;
+
+  /**
+   * This methods returns the number of months between January 1970 and the
+   * given year and month.
+   */
+  int32_t MonthsSinceJan1970(uint32_t aYear, uint32_t aMonth) const;
 
   /**
    * Returns whether aValue is a valid time as described by HTML specifications:
@@ -1388,12 +1391,10 @@ protected:
   RefPtr<GetFilesHelper> mGetFilesRecursiveHelper;
   RefPtr<GetFilesHelper> mGetFilesNonRecursiveHelper;
 
-#ifndef MOZ_CHILD_PERMISSIONS
   /**
    * Hack for bug 1086684: Stash the .value when we're a file picker.
    */
   nsString mFirstFilePath;
-#endif
 
   RefPtr<FileList>  mFileList;
   Sequence<RefPtr<Entry>> mEntries;
@@ -1437,6 +1438,11 @@ protected:
 
   // Float value returned by GetStep() when the step attribute is set to 'any'.
   static const Decimal kStepAny;
+
+  // Maximum year limited by ECMAScript date object range, year <= 275760.
+  static const double kMaximumYear;
+  // Minimum year limited by HTML standard, year >= 1.
+  static const double kMinimumYear;
 
   /**
    * The type of this input (<input type=...>) as an integer.

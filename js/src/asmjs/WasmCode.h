@@ -50,6 +50,7 @@ class CodeSegment
     // These are pointers into code for stubs used for asynchronous
     // signal-handler control-flow transfer.
     uint8_t* interruptCode_;
+    uint8_t* badIndirectCallCode_;
     uint8_t* outOfBoundsCode_;
     uint8_t* unalignedAccessCode_;
 
@@ -69,8 +70,7 @@ class CodeSegment
                                     const Bytes& code,
                                     const LinkData& linkData,
                                     const Metadata& metadata,
-                                    uint8_t* memoryBase,
-                                    uint32_t memoryLength);
+                                    HandleWasmMemoryObject memory);
     ~CodeSegment();
 
     uint8_t* code() const { return bytes_; }
@@ -80,6 +80,7 @@ class CodeSegment
     uint32_t totalLength() const { return codeLength_ + globalDataLength_; }
 
     uint8_t* interruptCode() const { return interruptCode_; }
+    uint8_t* badIndirectCallCode() const { return badIndirectCallCode_; }
     uint8_t* outOfBoundsCode() const { return outOfBoundsCode_; }
     uint8_t* unalignedAccessCode() const { return unalignedAccessCode_; }
 
@@ -94,26 +95,6 @@ class CodeSegment
     }
     bool containsCodePC(void* pc) const {
         return pc >= code() && pc < (code() + codeLength_);
-    }
-};
-
-// This reusable base class factors out the logic for a resource that is shared
-// by multiple instances/modules but should only be counted once when computing
-// about:memory stats.
-
-template <class T>
-struct ShareableBase : RefCounted<T>
-{
-    using SeenSet = HashSet<const T*, DefaultHasher<const T*>, SystemAllocPolicy>;
-
-    size_t sizeOfIncludingThisIfNotSeen(MallocSizeOf mallocSizeOf, SeenSet* seen) const {
-        const T* self = static_cast<const T*>(this);
-        typename SeenSet::AddPtr p = seen->lookupForAdd(self);
-        if (p)
-            return 0;
-        bool ok = seen->add(p, self);
-        (void)ok;  // oh well
-        return mallocSizeOf(self) + self->sizeOfExcludingThis(mallocSizeOf);
     }
 };
 
@@ -136,10 +117,10 @@ struct ShareableBytes : ShareableBase<ShareableBytes>
 typedef RefPtr<ShareableBytes> MutableBytes;
 typedef RefPtr<const ShareableBytes> SharedBytes;
 
-// An Export represents a single function inside a wasm Module that has been
+// A FuncExport represents a single function inside a wasm Module that has been
 // exported one or more times.
 
-class Export
+class FuncExport
 {
     Sig sig_;
     struct CacheablePod {
@@ -148,8 +129,8 @@ class Export
     } pod;
 
   public:
-    Export() = default;
-    explicit Export(Sig&& sig, uint32_t funcIndex)
+    FuncExport() = default;
+    explicit FuncExport(Sig&& sig, uint32_t funcIndex)
       : sig_(Move(sig))
     {
         pod.funcIndex_ = funcIndex;
@@ -171,16 +152,18 @@ class Export
         return pod.stubOffset_;
     }
 
-    WASM_DECLARE_SERIALIZABLE(Export)
+    WASM_DECLARE_SERIALIZABLE(FuncExport)
 };
 
-typedef Vector<Export, 0, SystemAllocPolicy> ExportVector;
+typedef Vector<FuncExport, 0, SystemAllocPolicy> FuncExportVector;
 
-// An Import describes a wasm module import. Currently, only functions can be
-// imported in wasm. A function import includes the signature used within the
-// module to call it.
+// An FuncImport contains the runtime metadata needed to implement a call to an
+// imported function. Each function import has two call stubs: an optimized path
+// into JIT code and a slow path into the generic C++ js::Invoke and these
+// offsets of these stubs are stored so that function-import callsites can be
+// dynamically patched at runtime.
 
-class Import
+class FuncImport
 {
     Sig sig_;
     struct CacheablePod {
@@ -190,8 +173,8 @@ class Import
     } pod;
 
   public:
-    Import() = default;
-    Import(Sig&& sig, uint32_t exitGlobalDataOffset)
+    FuncImport() = default;
+    FuncImport(Sig&& sig, uint32_t exitGlobalDataOffset)
       : sig_(Move(sig))
     {
         pod.exitGlobalDataOffset_ = exitGlobalDataOffset;
@@ -221,10 +204,33 @@ class Import
         return pod.jitExitCodeOffset_;
     }
 
-    WASM_DECLARE_SERIALIZABLE(Import)
+    WASM_DECLARE_SERIALIZABLE(FuncImport)
 };
 
-typedef Vector<Import, 0, SystemAllocPolicy> ImportVector;
+typedef Vector<FuncImport, 0, SystemAllocPolicy> FuncImportVector;
+
+// TableDesc contains the metadata describing a table as well as the
+// module-specific offset of the table's base pointer in global memory.
+// The element kind of this table. Currently, wasm only has "any function" and
+// asm.js only "typed function".
+
+enum class TableKind
+{
+    AnyFunction,
+    TypedFunction
+};
+
+struct TableDesc
+{
+    TableKind kind;
+    uint32_t globalDataOffset;
+    uint32_t length;
+
+    TableDesc() : kind(TableKind::AnyFunction), globalDataOffset(0), length(0) {}
+    explicit TableDesc(TableKind kind) : kind(kind) {}
+};
+
+WASM_DECLARE_POD_VECTOR(TableDesc, TableDescVector)
 
 // A CodeRange describes a single contiguous range of code within a wasm
 // module's code segment. A CodeRange describes what the code does and, for
@@ -409,13 +415,37 @@ typedef Vector<char16_t, 64> TwoByteName;
 // Metadata is built incrementally by ModuleGenerator and then shared immutably
 // between modules.
 
-struct MetadataCacheablePod
+
+class MetadataCacheablePod
 {
+    static const uint32_t NO_START_FUNCTION = UINT32_MAX;
+    static_assert(NO_START_FUNCTION > MaxFuncs, "sentinel value");
+
+    uint32_t              startFuncExportIndex_;
+
+  public:
     ModuleKind            kind;
     MemoryUsage           memoryUsage;
     uint32_t              minMemoryLength;
+    uint32_t              maxMemoryLength;
 
-    MetadataCacheablePod() { mozilla::PodZero(this); }
+    MetadataCacheablePod() {
+        mozilla::PodZero(this);
+        startFuncExportIndex_ = NO_START_FUNCTION;
+    }
+
+    bool hasStartFunction() const {
+        return startFuncExportIndex_ != NO_START_FUNCTION;
+    }
+    void initStartFuncExportIndex(uint32_t i) {
+        MOZ_ASSERT(!hasStartFunction());
+        startFuncExportIndex_ = i;
+        MOZ_ASSERT(hasStartFunction());
+    }
+    uint32_t startFuncExportIndex() const {
+        MOZ_ASSERT(hasStartFunction());
+        return startFuncExportIndex_;
+    }
 };
 
 struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
@@ -425,8 +455,9 @@ struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
     MetadataCacheablePod& pod() { return *this; }
     const MetadataCacheablePod& pod() const { return *this; }
 
-    ImportVector          imports;
-    ExportVector          exports;
+    FuncImportVector      funcImports;
+    FuncExportVector      funcExports;
+    TableDescVector       tables;
     MemoryAccessVector    memoryAccesses;
     BoundsCheckVector     boundsChecks;
     CodeRangeVector       codeRanges;

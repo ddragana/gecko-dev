@@ -807,6 +807,7 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
         "Adreno (TM) 205",
         "Adreno (TM) 320",
         "Adreno (TM) 420",
+        "Mali-400 MP",
         "PowerVR SGX 530",
         "PowerVR SGX 540",
         "NVIDIA Tegra",
@@ -1017,15 +1018,9 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
             mMaxRenderbufferSize   = std::min(mMaxRenderbufferSize,   4096);
             mNeedsTextureSizeChecks = true;
         } else if (mVendor == GLVendor::NVIDIA) {
-            if (nsCocoaFeatures::OnMountainLionOrLater()) {
-                // See bug 879656.  8192 fails, 8191 works.
-                mMaxTextureSize = std::min(mMaxTextureSize, 8191);
-                mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 8191);
-            } else {
-                // See bug 877949.
-                mMaxTextureSize = std::min(mMaxTextureSize, 4096);
-                mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 4096);
-            }
+            // See bug 879656.  8192 fails, 8191 works.
+            mMaxTextureSize = std::min(mMaxTextureSize, 8191);
+            mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 8191);
 
             // Part of the bug 879656, but it also doesn't hurt the 877949
             mNeedsTextureSizeChecks = true;
@@ -1768,6 +1763,13 @@ GLContext::InitExtensions()
         {
             // Bug 980048
             MarkExtensionUnsupported(OES_EGL_sync);
+        }
+
+        if (Vendor() == GLVendor::ARM &&
+            Renderer() == GLRenderer::Mali400MP)
+        {
+            // Bug 1264505
+            MarkExtensionUnsupported(OES_EGL_image_external);
         }
 
         if (Renderer() == GLRenderer::AndroidEmulator) {

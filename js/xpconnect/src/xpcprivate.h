@@ -1735,10 +1735,10 @@ public:
         TraceInside(trc);
     }
 
-    void WriteBarrierPre(JSRuntime* rt)
+    void WriteBarrierPre(JSContext* cx)
     {
-        if (JS::IsIncrementalBarrierNeeded(rt) && mJSProtoObject)
-            mJSProtoObject.writeBarrierPre(rt);
+        if (JS::IsIncrementalBarrierNeeded(cx) && mJSProtoObject)
+            mJSProtoObject.writeBarrierPre(cx);
     }
 
     // NOP. This is just here to make the AutoMarkingPtr code compile.
@@ -3654,9 +3654,9 @@ DefineStaticJSVals(JSContext* cx);
 } // namespace mozilla
 
 bool
-xpc_LocalizeRuntime(JSRuntime* rt);
+xpc_LocalizeContext(JSContext* cx);
 void
-xpc_DelocalizeRuntime(JSRuntime* rt);
+xpc_DelocalizeContext(JSContext* cx);
 
 /***************************************************************************/
 // Inlines use the above - include last.

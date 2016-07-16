@@ -167,15 +167,15 @@ DecodeCallIndirect(FunctionDecoder& f)
 static bool
 DecodeCallImport(FunctionDecoder& f)
 {
-    uint32_t importIndex;
+    uint32_t funcImportIndex;
     uint32_t arity;
-    if (!f.iter().readCallImport(&importIndex, &arity))
+    if (!f.iter().readCallImport(&funcImportIndex, &arity))
         return false;
 
-    if (importIndex >= f.mg().numImports())
+    if (funcImportIndex >= f.mg().numFuncImports())
         return f.iter().fail("import index out of range");
 
-    const Sig& sig = *f.mg().import(importIndex).sig;
+    const Sig& sig = *f.mg().funcImport(funcImportIndex).sig;
     return DecodeCallArgs(f, arity, sig) &&
            DecodeCallReturn(f, sig);
 }
@@ -406,18 +406,19 @@ DecodeExpr(FunctionDecoder& f)
         return f.iter().readLoad(ValType::I32, 4, nullptr);
       case Expr::I64Load8S:
       case Expr::I64Load8U:
-        return f.iter().notYetImplemented("i64") &&
+        return f.checkI64Support() &&
                f.iter().readLoad(ValType::I64, 1, nullptr);
       case Expr::I64Load16S:
       case Expr::I64Load16U:
-        return f.iter().notYetImplemented("i64") &&
+        return f.checkI64Support() &&
                f.iter().readLoad(ValType::I64, 2, nullptr);
       case Expr::I64Load32S:
       case Expr::I64Load32U:
-        return f.iter().notYetImplemented("i64") &&
+        return f.checkI64Support() &&
                f.iter().readLoad(ValType::I64, 4, nullptr);
       case Expr::I64Load:
-        return f.iter().notYetImplemented("i64");
+        return f.checkI64Support() &&
+               f.iter().readLoad(ValType::I64, 8, nullptr);
       case Expr::F32Load:
         return f.iter().readLoad(ValType::F32, 4, nullptr);
       case Expr::F64Load:
@@ -429,16 +430,17 @@ DecodeExpr(FunctionDecoder& f)
       case Expr::I32Store:
         return f.iter().readStore(ValType::I32, 4, nullptr, nullptr);
       case Expr::I64Store8:
-        return f.iter().notYetImplemented("i64") &&
+        return f.checkI64Support() &&
                f.iter().readStore(ValType::I64, 1, nullptr, nullptr);
       case Expr::I64Store16:
-        return f.iter().notYetImplemented("i64") &&
+        return f.checkI64Support() &&
                f.iter().readStore(ValType::I64, 2, nullptr, nullptr);
       case Expr::I64Store32:
-        return f.iter().notYetImplemented("i64") &&
+        return f.checkI64Support() &&
                f.iter().readStore(ValType::I64, 4, nullptr, nullptr);
       case Expr::I64Store:
-        return f.iter().notYetImplemented("i64");
+        return f.checkI64Support() &&
+               f.iter().readStore(ValType::I64, 8, nullptr, nullptr);
       case Expr::F32Store:
         return f.iter().readStore(ValType::F32, 4, nullptr, nullptr);
       case Expr::F64Store:
@@ -592,41 +594,6 @@ DecodeFunctionSection(Decoder& d, ModuleGeneratorData* init)
 }
 
 static bool
-DecodeTableSection(Decoder& d, ModuleGeneratorData* init)
-{
-    uint32_t sectionStart, sectionSize;
-    if (!d.startSection(TableSectionId, &sectionStart, &sectionSize))
-        return Fail(d, "failed to start section");
-    if (sectionStart == Decoder::NotStarted)
-        return true;
-
-    if (!d.readVarU32(&init->wasmTable.numElems))
-        return Fail(d, "expected number of table elems");
-
-    if (init->wasmTable.numElems > MaxTableElems)
-        return Fail(d, "too many table elements");
-
-    if (!init->wasmTable.elemFuncIndices.resize(init->wasmTable.numElems))
-        return false;
-
-    for (uint32_t i = 0; i < init->wasmTable.numElems; i++) {
-        uint32_t funcIndex;
-        if (!d.readVarU32(&funcIndex))
-            return Fail(d, "expected table element");
-
-        if (funcIndex >= init->funcSigs.length())
-            return Fail(d, "table element out of range");
-
-        init->wasmTable.elemFuncIndices[i] = funcIndex;
-    }
-
-    if (!d.finishSection(sectionStart, sectionSize))
-        return Fail(d, "table section byte size mismatch");
-
-    return true;
-}
-
-static bool
 CheckTypeForJS(Decoder& d, const Sig& sig)
 {
     bool allowI64 = IsI64Implemented() && JitOptions.wasmTestMode;
@@ -667,8 +634,92 @@ MaybeDecodeName(Decoder& d)
     return name;
 }
 
+struct Resizable
+{
+    uint32_t initial;
+    Maybe<uint32_t> maximum;
+};
+
 static bool
-DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportNameVector* importNames)
+DecodeResizable(Decoder& d, Resizable* resizable)
+{
+    uint32_t flags;
+    if (!d.readVarU32(&flags))
+        return Fail(d, "expected flags");
+
+    if (flags & ~uint32_t(ResizableFlags::AllowedMask))
+        return Fail(d, "unexpected bits set in flags");
+
+    if (!(flags & uint32_t(ResizableFlags::Default)))
+        return Fail(d, "currently, every memory/table must be declared default");
+
+    if (!d.readVarU32(&resizable->initial))
+        return Fail(d, "expected initial length");
+
+    if (flags & uint32_t(ResizableFlags::HasMaximum)) {
+        uint32_t maximum;
+        if (!d.readVarU32(&maximum))
+            return Fail(d, "expected maximum length");
+
+        if (resizable->initial > maximum)
+            return Fail(d, "maximum length less than initial length");
+
+        resizable->maximum.emplace(maximum);
+    }
+
+    return true;
+}
+
+static bool
+DecodeResizableMemory(Decoder& d, ModuleGeneratorData* init)
+{
+    if (UsesMemory(init->memoryUsage))
+        return Fail(d, "already have default memory");
+
+    Resizable resizable;
+    if (!DecodeResizable(d, &resizable))
+        return false;
+
+    init->memoryUsage = MemoryUsage::Unshared;
+
+    CheckedInt<uint32_t> initialBytes = resizable.initial;
+    initialBytes *= PageSize;
+    if (!initialBytes.isValid() || initialBytes.value() > uint32_t(INT32_MAX))
+        return Fail(d, "initial memory size too big");
+
+    init->minMemoryLength = initialBytes.value();
+
+    if (resizable.maximum) {
+        CheckedInt<uint32_t> maximumBytes = *resizable.maximum;
+        maximumBytes *= PageSize;
+        if (!maximumBytes.isValid())
+            return Fail(d, "maximum memory size too big");
+
+        init->maxMemoryLength = maximumBytes.value();
+    } else {
+        init->maxMemoryLength = UINT32_MAX;
+    }
+
+    return true;
+}
+
+static bool
+DecodeResizableTable(Decoder& d, ModuleGeneratorData* init)
+{
+    Resizable resizable;
+    if (!DecodeResizable(d, &resizable))
+        return false;
+
+    if (!init->tables.empty())
+        return Fail(d, "already have default table");
+
+    TableDesc table(TableKind::AnyFunction);
+    table.length = resizable.initial;
+    return init->tables.append(table);
+}
+
+static bool
+DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportVector* imports)
 {
     if (!newFormat) {
         const DeclaredSig* sig = nullptr;
@@ -678,7 +729,7 @@ DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportNameVe
         if (!CheckTypeForJS(d, *sig))
             return false;
 
-        if (!init->imports.emplaceBack(sig))
+        if (!init->funcImports.emplaceBack(sig))
             return false;
 
         UniqueChars moduleName = MaybeDecodeName(d);
@@ -692,7 +743,7 @@ DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportNameVe
         if (!funcName)
             return Fail(d, "expected valid import func name");
 
-        return importNames->emplaceBack(Move(moduleName), Move(funcName));
+        return imports->emplaceBack(Move(moduleName), Move(funcName), DefinitionKind::Function);
     }
 
     UniqueChars moduleName = MaybeDecodeName(d);
@@ -706,9 +757,6 @@ DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportNameVe
     if (!funcName)
         return Fail(d, "expected valid import func name");
 
-    if (!importNames->emplaceBack(Move(moduleName), Move(funcName)))
-        return false;
-
     uint32_t importKind;
     if (!d.readVarU32(&importKind))
         return Fail(d, "failed to read import kind");
@@ -720,7 +768,12 @@ DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportNameVe
             return false;
         if (!CheckTypeForJS(d, *sig))
             return false;
-        if (!init->imports.emplaceBack(sig))
+        if (!init->funcImports.emplaceBack(sig))
+            return false;
+        break;
+      }
+      case DefinitionKind::Memory: {
+        if (!DecodeResizableMemory(d, init))
             return false;
         break;
       }
@@ -728,11 +781,11 @@ DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportNameVe
         return Fail(d, "unsupported import kind");
     }
 
-    return true;
+    return imports->emplaceBack(Move(moduleName), Move(funcName), DefinitionKind(importKind));
 }
 
 static bool
-DecodeImportSection(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportNameVector* importNames)
+DecodeImportSection(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportVector* imports)
 {
     uint32_t sectionStart, sectionSize;
     if (!d.startSection(ImportSectionId, &sectionStart, &sectionSize))
@@ -748,12 +801,58 @@ DecodeImportSection(Decoder& d, bool newFormat, ModuleGeneratorData* init, Impor
         return Fail(d, "too many imports");
 
     for (uint32_t i = 0; i < numImports; i++) {
-        if (!DecodeImport(d, newFormat, init, importNames))
+        if (!DecodeImport(d, newFormat, init, imports))
             return false;
     }
 
     if (!d.finishSection(sectionStart, sectionSize))
         return Fail(d, "import section byte size mismatch");
+
+    return true;
+}
+
+static bool
+DecodeTableSection(Decoder& d, bool newFormat, ModuleGeneratorData* init, Uint32Vector* oldElems)
+{
+    uint32_t sectionStart, sectionSize;
+    if (!d.startSection(TableSectionId, &sectionStart, &sectionSize))
+        return Fail(d, "failed to start section");
+    if (sectionStart == Decoder::NotStarted)
+        return true;
+
+    if (newFormat) {
+        if (!DecodeResizableTable(d, init))
+            return false;
+    } else {
+        TableDesc table(TableKind::AnyFunction);
+
+        if (!d.readVarU32(&table.length))
+            return Fail(d, "expected number of table elems");
+
+        if (table.length > MaxTableElems)
+            return Fail(d, "too many table elements");
+
+        if (!oldElems->resize(table.length))
+            return false;
+
+        for (uint32_t i = 0; i < table.length; i++) {
+            uint32_t funcIndex;
+            if (!d.readVarU32(&funcIndex))
+                return Fail(d, "expected table element");
+
+            if (funcIndex >= init->funcSigs.length())
+                return Fail(d, "table element out of range");
+
+            (*oldElems)[i] = funcIndex;
+        }
+
+        MOZ_ASSERT(init->tables.empty());
+        if (!init->tables.append(table))
+            return false;
+    }
+
+    if (!d.finishSection(sectionStart, sectionSize))
+        return Fail(d, "table section byte size mismatch");
 
     return true;
 }
@@ -767,45 +866,49 @@ DecodeMemorySection(Decoder& d, bool newFormat, ModuleGeneratorData* init, bool*
     if (sectionStart == Decoder::NotStarted)
         return true;
 
-    uint32_t initialSizePages;
-    if (!d.readVarU32(&initialSizePages))
-        return Fail(d, "expected initial memory size");
+    if (newFormat) {
+        if (!DecodeResizableMemory(d, init))
+            return false;
+    } else {
+        uint32_t initialSizePages;
+        if (!d.readVarU32(&initialSizePages))
+            return Fail(d, "expected initial memory size");
 
-    CheckedInt<uint32_t> initialSize = initialSizePages;
-    initialSize *= PageSize;
-    if (!initialSize.isValid())
-        return Fail(d, "initial memory size too big");
+        CheckedInt<uint32_t> initialSize = initialSizePages;
+        initialSize *= PageSize;
+        if (!initialSize.isValid())
+            return Fail(d, "initial memory size too big");
 
-    // ArrayBufferObject can't currently allocate more than INT32_MAX bytes.
-    if (initialSize.value() > uint32_t(INT32_MAX))
-        return false;
+        // ArrayBufferObject can't currently allocate more than INT32_MAX bytes.
+        if (initialSize.value() > uint32_t(INT32_MAX))
+            return false;
 
-    uint32_t maxSizePages;
-    if (!d.readVarU32(&maxSizePages))
-        return Fail(d, "expected initial memory size");
+        uint32_t maxSizePages;
+        if (!d.readVarU32(&maxSizePages))
+            return Fail(d, "expected initial memory size");
 
-    CheckedInt<uint32_t> maxSize = maxSizePages;
-    maxSize *= PageSize;
-    if (!maxSize.isValid())
-        return Fail(d, "maximum memory size too big");
+        CheckedInt<uint32_t> maxSize = maxSizePages;
+        maxSize *= PageSize;
+        if (!maxSize.isValid())
+            return Fail(d, "maximum memory size too big");
 
-    if (maxSize.value() < initialSize.value())
-        return Fail(d, "maximum memory size less than initial memory size");
+        if (maxSize.value() < initialSize.value())
+            return Fail(d, "maximum memory size less than initial memory size");
 
-    if (!newFormat) {
         uint8_t u8;
         if (!d.readFixedU8(&u8))
             return Fail(d, "expected exported byte");
 
         *exported = u8;
+        MOZ_ASSERT(init->memoryUsage == MemoryUsage::None);
+        init->memoryUsage = MemoryUsage::Unshared;
+        init->minMemoryLength = initialSize.value();
+        init->maxMemoryLength = maxSize.value();
     }
 
     if (!d.finishSection(sectionStart, sectionSize))
         return Fail(d, "memory section byte size mismatch");
 
-    MOZ_ASSERT(init->memoryUsage == MemoryUsage::None);
-    init->memoryUsage = MemoryUsage::Unshared;
-    init->minMemoryLength = initialSize.value();
     return true;
 }
 
@@ -841,7 +944,7 @@ DecodeExport(Decoder& d, bool newFormat, ModuleGenerator& mg, CStringSet* dupSet
             return Fail(d, "expected export internal index");
 
         if (funcIndex >= mg.numFuncSigs())
-            return Fail(d, "export function index out of range");
+            return Fail(d, "exported function index out of bounds");
 
         if (!CheckTypeForJS(d, mg.funcSig(funcIndex)))
             return false;
@@ -850,7 +953,7 @@ DecodeExport(Decoder& d, bool newFormat, ModuleGenerator& mg, CStringSet* dupSet
         if (!fieldName)
             return false;
 
-        return mg.declareExport(Move(fieldName), funcIndex);
+        return mg.declareFuncExport(Move(fieldName), funcIndex);
     }
 
     UniqueChars fieldName = DecodeExportName(d, dupSet);
@@ -868,20 +971,30 @@ DecodeExport(Decoder& d, bool newFormat, ModuleGenerator& mg, CStringSet* dupSet
             return Fail(d, "expected export internal index");
 
         if (funcIndex >= mg.numFuncSigs())
-            return Fail(d, "export function index out of range");
+            return Fail(d, "exported function index out of bounds");
 
         if (!CheckTypeForJS(d, mg.funcSig(funcIndex)))
             return false;
 
-        return mg.declareExport(Move(fieldName), funcIndex);
+        return mg.declareFuncExport(Move(fieldName), funcIndex);
+      }
+      case DefinitionKind::Table: {
+        uint32_t tableIndex;
+        if (!d.readVarU32(&tableIndex))
+            return Fail(d, "expected table index");
+
+        if (tableIndex >= mg.tables().length())
+            return Fail(d, "exported table index out of bounds");
+
+        return mg.addTableExport(Move(fieldName));
       }
       case DefinitionKind::Memory: {
         uint32_t memoryIndex;
         if (!d.readVarU32(&memoryIndex))
             return Fail(d, "expected memory index");
 
-        if (memoryIndex > 0)
-            return Fail(d, "memory index out of bounds");
+        if (memoryIndex > 0 || !mg.usesMemory())
+            return Fail(d, "exported memory index out of bounds");
 
         return mg.addMemoryExport(Move(fieldName));
       }
@@ -984,6 +1097,39 @@ DecodeFunctionBody(Decoder& d, ModuleGenerator& mg, uint32_t funcIndex)
 }
 
 static bool
+DecodeStartSection(Decoder& d, ModuleGenerator& mg)
+{
+
+    uint32_t sectionStart, sectionSize;
+    if (!d.startSection(StartSectionId, &sectionStart, &sectionSize))
+        return Fail(d, "failed to start section");
+    if (sectionStart == Decoder::NotStarted)
+        return true;
+
+    uint32_t startFuncIndex;
+    if (!d.readVarU32(&startFuncIndex))
+        return Fail(d, "failed to read start func index");
+
+    if (startFuncIndex >= mg.numFuncSigs())
+        return Fail(d, "unknown start function");
+
+    const DeclaredSig& sig = mg.funcSig(startFuncIndex);
+    if (sig.ret() != ExprType::Void)
+        return Fail(d, "start function must not return anything");
+
+    if (sig.args().length())
+        return Fail(d, "start function must be nullary");
+
+    if (!mg.setStartFunction(startFuncIndex))
+        return false;
+
+    if (!d.finishSection(sectionStart, sectionSize))
+        return Fail(d, "data section byte size mismatch");
+
+    return true;
+}
+
+static bool
 DecodeCodeSection(Decoder& d, ModuleGenerator& mg)
 {
     if (!mg.startFuncDefs())
@@ -1019,7 +1165,83 @@ DecodeCodeSection(Decoder& d, ModuleGenerator& mg)
 }
 
 static bool
-DecodeDataSection(Decoder& d, ModuleGenerator& mg)
+DecodeElemSection(Decoder& d, bool newFormat, Uint32Vector&& oldElems, ModuleGenerator& mg)
+{
+    if (!newFormat) {
+        if (mg.tables().empty()) {
+            MOZ_ASSERT(oldElems.empty());
+            return true;
+        }
+
+        return mg.addElemSegment(ElemSegment(0, 0, Move(oldElems)));
+    }
+
+    uint32_t sectionStart, sectionSize;
+    if (!d.startSection(ElemSectionId, &sectionStart, &sectionSize))
+        return Fail(d, "failed to start section");
+    if (sectionStart == Decoder::NotStarted)
+        return true;
+
+    uint32_t numSegments;
+    if (!d.readVarU32(&numSegments))
+        return Fail(d, "failed to read number of elem segments");
+
+    if (numSegments > MaxElemSegments)
+        return Fail(d, "too many elem segments");
+
+    for (uint32_t i = 0, prevEnd = 0; i < numSegments; i++) {
+        ElemSegment seg;
+        if (!d.readVarU32(&seg.tableIndex))
+            return Fail(d, "expected table index");
+
+        if (seg.tableIndex >= mg.tables().length())
+            return Fail(d, "table index out of range");
+
+        Expr expr;
+        if (!d.readExpr(&expr))
+            return Fail(d, "failed to read initializer expression");
+
+        if (expr != Expr::I32Const)
+            return Fail(d, "expected i32.const initializer expression");
+
+        if (!d.readVarU32(&seg.offset))
+            return Fail(d, "expected elem segment destination offset");
+
+        if (seg.offset < prevEnd)
+            return Fail(d, "elem segments must be disjoint and ordered");
+
+        uint32_t numElems;
+        if (!d.readVarU32(&numElems))
+            return Fail(d, "expected segment size");
+
+        uint32_t tableLength = mg.tables()[seg.tableIndex].length;
+        if (seg.offset > tableLength || tableLength - seg.offset < numElems)
+            return Fail(d, "element segment does not fit");
+
+        if (!seg.elems.resize(numElems))
+            return false;
+
+        for (uint32_t i = 0; i < numElems; i++) {
+            if (!d.readVarU32(&seg.elems[i]))
+                return Fail(d, "failed to read element function index");
+            if (seg.elems[i] >= mg.numFuncSigs())
+                return Fail(d, "table element out of range");
+        }
+
+        prevEnd = seg.offset + seg.elems.length();
+
+        if (!mg.addElemSegment(Move(seg)))
+            return false;
+    }
+
+    if (!d.finishSection(sectionStart, sectionSize))
+        return Fail(d, "data section byte size mismatch");
+
+    return true;
+}
+
+static bool
+DecodeDataSection(Decoder& d, bool newFormat, ModuleGenerator& mg)
 {
     uint32_t sectionStart, sectionSize;
     if (!d.startSection(DataSectionId, &sectionStart, &sectionSize))
@@ -1039,8 +1261,23 @@ DecodeDataSection(Decoder& d, ModuleGenerator& mg)
 
     uint32_t max = mg.minMemoryLength();
     for (uint32_t i = 0, prevEnd = 0; i < numSegments; i++) {
-        DataSegment seg;
+        if (newFormat) {
+            uint32_t linearMemoryIndex;
+            if (!d.readVarU32(&linearMemoryIndex))
+                return Fail(d, "expected linear memory index");
 
+            if (linearMemoryIndex != 0)
+                return Fail(d, "linear memory index must currently be 0");
+
+            Expr expr;
+            if (!d.readExpr(&expr))
+                return Fail(d, "failed to read initializer expression");
+
+            if (expr != Expr::I32Const)
+                return Fail(d, "expected i32.const initializer expression");
+        }
+
+        DataSegment seg;
         if (!d.readVarU32(&seg.memoryOffset))
             return Fail(d, "expected segment destination offset");
 
@@ -1127,6 +1364,7 @@ DecodeNameSection(Decoder& d, ModuleGenerator& mg)
         // This section does not cause validation for the whole module to fail and
         // is instead treated as if the section was absent.
         d.ignoreSection(sectionStart, sectionSize);
+        d.clearError();
         return true;
     }
 
@@ -1151,7 +1389,12 @@ bool
 CompileArgs::init(ExclusiveContext* cx)
 {
     alwaysBaseline = cx->options().wasmAlwaysBaseline();
-    return assumptions.init(SignalUsage(cx), cx->buildIdOp());
+    if (!assumptions.init(SignalUsage(cx), cx->buildIdOp())) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    return true;
 }
 
 UniqueModule
@@ -1171,14 +1414,15 @@ wasm::Compile(Bytes&& bytecode, CompileArgs&& args, UniqueChars* error)
     if (!DecodeTypeSection(d, init.get()))
         return nullptr;
 
-    ImportNameVector importNames;
-    if (!DecodeImportSection(d, newFormat, init.get(), &importNames))
+    ImportVector imports;
+    if (!DecodeImportSection(d, newFormat, init.get(), &imports))
         return nullptr;
 
     if (!DecodeFunctionSection(d, init.get()))
         return nullptr;
 
-    if (!DecodeTableSection(d, init.get()))
+    Uint32Vector oldElems;
+    if (!DecodeTableSection(d, newFormat, init.get(), &oldElems))
         return nullptr;
 
     bool memoryExported = false;
@@ -1192,10 +1436,16 @@ wasm::Compile(Bytes&& bytecode, CompileArgs&& args, UniqueChars* error)
     if (!DecodeExportSection(d, newFormat, memoryExported, mg))
         return nullptr;
 
+    if (!DecodeStartSection(d, mg))
+        return nullptr;
+
     if (!DecodeCodeSection(d, mg))
         return nullptr;
 
-    if (!DecodeDataSection(d, mg))
+    if (!DecodeElemSection(d, newFormat, Move(oldElems), mg))
+        return nullptr;
+
+    if (!DecodeDataSection(d, newFormat, mg))
         return nullptr;
 
     if (!DecodeNameSection(d, mg))
@@ -1204,9 +1454,11 @@ wasm::Compile(Bytes&& bytecode, CompileArgs&& args, UniqueChars* error)
     if (!DecodeUnknownSections(d))
         return nullptr;
 
+    MOZ_ASSERT(!*error, "unreported error in decoding");
+
     SharedBytes sharedBytes = js_new<ShareableBytes>(Move(bytecode));
     if (!sharedBytes)
         return nullptr;
 
-    return mg.finish(Move(importNames), *sharedBytes);
+    return mg.finish(Move(imports), *sharedBytes);
 }

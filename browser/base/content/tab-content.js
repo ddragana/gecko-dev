@@ -41,6 +41,17 @@ XPCOMUtils.defineLazyGetter(this, "SimpleServiceDiscovery", function() {
 var global = this;
 
 
+addEventListener("MozDOMPointerLock:Entered", function(aEvent) {
+  sendAsyncMessage("PointerLock:Entered", {
+    originNoSuffix: aEvent.target.nodePrincipal.originNoSuffix
+  });
+});
+
+addEventListener("MozDOMPointerLock:Exited", function(aEvent) {
+  sendAsyncMessage("PointerLock:Exited");
+});
+
+
 addMessageListener("Browser:HideSessionRestoreButton", function (message) {
   // Hide session restore button on about:home
   let doc = content.document;
@@ -360,7 +371,16 @@ var AboutReaderListener = {
     addEventListener("MozAfterPaint", this._pendingReadabilityCheck);
   },
 
-  onPaintWhenWaitedFor: function(forceNonArticle) {
+  onPaintWhenWaitedFor: function(forceNonArticle, event) {
+    // In non-e10s, we'll get called for paints other than ours, and so it's
+    // possible that this page hasn't been laid out yet, in which case we
+    // should wait until we get an event that does relate to our layout. We
+    // determine whether any of our content got painted by checking if there
+    // are any painted rects.
+    if (!event.clientRects.length) {
+      return;
+    }
+
     this.cancelPotentialPendingReadabilityCheck();
     // Only send updates when there are articles; there's no point updating with
     // |false| all the time.

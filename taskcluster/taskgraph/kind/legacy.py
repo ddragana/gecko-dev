@@ -197,11 +197,19 @@ def query_vcs_info(repository, revision):
         return None
 
 
-def set_expiration(task, timestamp):
+def set_expiration(task, relative_datestamp):
     task_def = task['task']
-    task_def['expires'] = timestamp
-    if task_def.get('deadline', timestamp) > timestamp:
-        task_def['deadline'] = timestamp
+    task_def['expires'] = {'relative-datestamp': relative_datestamp}
+    if 'deadline' in task_def:
+        now = current_json_time(datetime_format=True)
+        timestamp = json_time_from_now(input_str=TRY_EXPIRATION,
+                                       now=now,
+                                       datetime_format=True)
+        deadline = json_time_from_now(input_str=task_def['deadline']['relative-datestamp'],
+                                      now=now,
+                                      datetime_format=True)
+        if deadline > timestamp:
+            task_def['deadline']['relative-datestamp'] = relative_datestamp
 
     try:
         artifacts = task_def['payload']['artifacts']
@@ -212,7 +220,7 @@ def set_expiration(task, timestamp):
     # for generic-worker, artifacts is a list
     # for taskcluster-worker, it will depend on what we do in artifacts plugin
     for artifact in artifacts.values() if hasattr(artifacts, "values") else artifacts:
-        artifact['expires'] = timestamp
+        artifact['expires']['relative-datestamp'] = relative_datestamp
 
 
 def format_treeherder_route(destination, project, revision, pushlog_id):
@@ -305,6 +313,10 @@ class LegacyTask(base.Task):
         self.task_dict = kwargs.pop('task_dict')
         super(LegacyTask, self).__init__(*args, **kwargs)
 
+    def __eq__(self, other):
+        return super(LegacyTask, self).__eq__(other) and \
+               self.task_dict == other.task_dict
+
     @classmethod
     def load_tasks(cls, kind, path, config, params, loaded_tasks):
         root = os.path.abspath(os.path.join(path, config['legacy_path']))
@@ -362,8 +374,6 @@ class LegacyTask(base.Task):
             'rank': push_epoch,
             'owner': params['owner'],
             'level': params['level'],
-            'from_now': json_time_from_now,
-            'now': current_json_time(),
         }.items())
 
         routes_file = os.path.join(root, 'routes.json')
@@ -461,7 +471,7 @@ class LegacyTask(base.Task):
             # try builds don't use cache
             if project == "try":
                 remove_caches_from_task(build_task)
-                set_expiration(build_task, json_time_from_now(TRY_EXPIRATION))
+                set_expiration(build_task, TRY_EXPIRATION)
 
             decorate_task_treeherder_routes(build_task['task'],
                                             build_parameters['project'],
@@ -544,7 +554,7 @@ class LegacyTask(base.Task):
                 set_interactive_task(post_task, interactive)
 
                 if project == "try":
-                    set_expiration(post_task, json_time_from_now(TRY_EXPIRATION))
+                    set_expiration(post_task, TRY_EXPIRATION)
 
                 post_task['attributes'] = attributes.copy()
                 post_task['attributes']['legacy_kind'] = 'post_build'
@@ -595,7 +605,7 @@ class LegacyTask(base.Task):
                                                     test_parameters['pushlog_id'])
 
                     if project == "try":
-                        set_expiration(test_task, json_time_from_now(TRY_EXPIRATION))
+                        set_expiration(test_task, TRY_EXPIRATION)
 
                     test_task['attributes'] = attributes.copy()
                     test_task['attributes']['legacy_kind'] = 'unittest'
@@ -646,3 +656,12 @@ class LegacyTask(base.Task):
     def optimize(self):
         # no optimization for the moment
         return False, None
+
+    @classmethod
+    def from_json(cls, task_dict):
+        legacy_task = cls(kind='legacy',
+                          label=task_dict['label'],
+                          attributes=task_dict['attributes'],
+                          task=task_dict['task'],
+                          task_dict=task_dict)
+        return legacy_task

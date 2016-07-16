@@ -9,6 +9,7 @@
 
 #include "stdint.h"
 #include "nsColor.h"
+#include "nsStyleStruct.h"
 #include "mozilla/css/SheetParsingMode.h"
 #include "nsProxyRelease.h"
 
@@ -101,6 +102,16 @@ nsIAtom* Gecko_LocalName(RawGeckoElement* element);
 nsIAtom* Gecko_Namespace(RawGeckoElement* element);
 nsIAtom* Gecko_GetElementId(RawGeckoElement* element);
 
+// Attributes.
+bool Gecko_HasAttr(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name);
+bool Gecko_AttrEquals(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str, bool ignoreCase);
+bool Gecko_AttrDashEquals(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
+bool Gecko_AttrIncludes(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
+bool Gecko_AttrHasSubstring(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
+bool Gecko_AttrHasPrefix(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
+bool Gecko_AttrHasSuffix(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
+
+
 // Gets the class or class list (if any) of the Element.
 //
 // The calling convention here is rather hairy, and is optimized for getting
@@ -165,6 +176,22 @@ void Gecko_SetMozBinding(nsStyleDisplay* style_struct,
                          ThreadSafeURIHolder* referrer,
                          ThreadSafePrincipalHolder* principal);
 void Gecko_CopyMozBindingFrom(nsStyleDisplay* des, const nsStyleDisplay* src);
+
+// Dirtiness tracking.
+uint32_t Gecko_GetNodeFlags(RawGeckoNode* node);
+void Gecko_SetNodeFlags(RawGeckoNode* node, uint32_t flags);
+void Gecko_UnsetNodeFlags(RawGeckoNode* node, uint32_t flags);
+
+// `array` must be an nsTArray
+// If changing this signature, please update the
+// friend function declaration in nsTArray.h
+void Gecko_EnsureTArrayCapacity(void* array, size_t capacity, size_t elem_size);
+
+
+void Gecko_EnsureImageLayersLength(nsStyleImageLayers* layers, size_t len);
+
+void Gecko_InitializeImageLayer(nsStyleImageLayers::Layer* layer,
+                                nsStyleImageLayers::LayerType layer_type);
 
 // Styleset and Stylesheet management.
 //

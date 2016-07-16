@@ -880,8 +880,8 @@ IMEStateManager::GetNewIMEState(nsPresContext* aPresContext,
   }
 
   // nsIContent::GetDesiredIMEState() may cause a call of UpdateIMEState()
-  // from nsEditor::PostCreate() because GetDesiredIMEState() needs to retrieve
-  // an editor instance for the element if it's editable element.
+  // from EditorBase::PostCreate() because GetDesiredIMEState() needs to
+  // retrieve an editor instance for the element if it's editable element.
   // For avoiding such nested IME state updates, we should set
   // sIsGettingNewIMEState here and UpdateIMEState() should check it.
   GettingNewIMEStateBlocker blocker;
@@ -1396,6 +1396,7 @@ IMEStateManager::NotifyIME(const IMENotification& aNotification,
     case NOTIFY_IME_OF_TEXT_CHANGE:
     case NOTIFY_IME_OF_POSITION_CHANGE:
     case NOTIFY_IME_OF_MOUSE_BUTTON_EVENT:
+    case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED:
       if (!sRemoteHasFocus && aOriginIsRemote) {
         MOZ_LOG(sISMLog, LogLevel::Info,
           ("  NotifyIME(), received content change "
@@ -1449,20 +1450,6 @@ IMEStateManager::NotifyIME(const IMENotification& aNotification,
     case REQUEST_TO_CANCEL_COMPOSITION:
       return composition ?
         composition->RequestToCommit(aWidget, true) : NS_OK;
-    case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED:
-      if (!aOriginIsRemote && (!composition || isSynthesizedForTests)) {
-        MOZ_LOG(sISMLog, LogLevel::Info,
-          ("  NotifyIME(), FAILED, received content "
-           "change notification from this process but there is no compostion"));
-        return NS_OK;
-      }
-      if (!sRemoteHasFocus && aOriginIsRemote) {
-        MOZ_LOG(sISMLog, LogLevel::Info,
-          ("  NotifyIME(), received content change "
-           "notification from the remote but it's already lost focus"));
-        return NS_OK;
-      }
-      return aWidget->NotifyIME(aNotification);
     default:
       MOZ_CRASH("Unsupported notification");
   }

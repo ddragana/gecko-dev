@@ -237,31 +237,35 @@ public:
                        dom::Element* elem, ErrorResult* const out_error);
 
 protected:
-    void TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarget target,
-                       GLint level, GLenum internalFormat, GLint xOffset, GLint yOffset,
-                       GLint zOffset, GLint border, GLenum unpackFormat,
-                       GLenum unpackType, webgl::TexUnpackBlob* blob);
+    void TexOrSubImageBlob(bool isSubImage, const char* funcName, TexImageTarget target,
+                           GLint level, GLenum internalFormat, GLint xOffset,
+                           GLint yOffset, GLint zOffset,
+                           const webgl::PackingInfo& pi,
+                           const webgl::TexUnpackBlob* blob);
 
     bool ValidateTexImageSpecification(const char* funcName, TexImageTarget target,
-                                       GLint level, GLsizei width, GLsizei height,
-                                       GLsizei depth, GLint border,
+                                       GLint level, uint32_t width, uint32_t height,
+                                       uint32_t depth,
                                        WebGLTexture::ImageInfo** const out_imageInfo);
     bool ValidateTexImageSelection(const char* funcName, TexImageTarget target,
                                    GLint level, GLint xOffset, GLint yOffset,
-                                   GLint zOffset, GLsizei width, GLsizei height,
-                                   GLsizei depth,
+                                   GLint zOffset, uint32_t width, uint32_t height,
+                                   uint32_t depth,
                                    WebGLTexture::ImageInfo** const out_imageInfo);
+    bool ValidateCopyTexImageForFeedback(const char* funcName, uint32_t level) const;
 
+    bool ValidateUnpack(const char* funcName, const webgl::TexUnpackBlob* blob,
+                        bool isFunc3D, const webgl::PackingInfo& srcPI) const;
 public:
     void TexStorage(const char* funcName, TexTarget target, GLsizei levels,
                     GLenum sizedFormat, GLsizei width, GLsizei height, GLsizei depth);
 protected:
     void TexImage(const char* funcName, TexImageTarget target, GLint level,
-                  GLenum internalFormat, GLint border, GLenum unpackFormat,
-                  GLenum unpackType, webgl::TexUnpackBlob* blob);
+                  GLenum internalFormat, const webgl::PackingInfo& pi,
+                  const webgl::TexUnpackBlob* blob);
     void TexSubImage(const char* funcName, TexImageTarget target, GLint level,
-                     GLint xOffset, GLint yOffset, GLint zOffset, GLenum unpackFormat,
-                     GLenum unpackType, webgl::TexUnpackBlob* blob);
+                     GLint xOffset, GLint yOffset, GLint zOffset,
+                     const webgl::PackingInfo& pi, const webgl::TexUnpackBlob* blob);
 public:
     void CompressedTexImage(const char* funcName, TexImageTarget target, GLint level,
                             GLenum internalFormat, GLsizei width, GLsizei height,
@@ -408,6 +412,9 @@ TexImageTargetForTargetAndFace(TexTarget target, uint8_t face)
 
 already_AddRefed<mozilla::layers::Image>
 ImageFromVideo(dom::HTMLVideoElement* elem);
+
+bool
+IsTarget3D(TexImageTarget target);
 
 GLenum
 DoTexImage(gl::GLContext* gl, TexImageTarget target, GLint level,

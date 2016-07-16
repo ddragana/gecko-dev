@@ -77,6 +77,25 @@ Java_org_mozilla_gecko_GeckoAppShell_reportJavaCrash(JNIEnv * arg0, jclass arg1,
 
 #ifdef JNI_STUBS
 
+typedef void (*Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited_t)(JNIEnv *, jclass, jstring);
+static Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited_t f_Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited;
+extern "C" NS_EXPORT void MOZ_JNICALL
+Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited(JNIEnv * arg0, jclass arg1, jstring arg2) {
+    if (!f_Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return ;
+    }
+     f_Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited(arg0, arg1, arg2);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited", &f_Java_org_mozilla_gecko_GeckoAppShell_notifyUriVisited);
+#endif
+
+#ifdef JNI_STUBS
+
 typedef void (*Java_org_mozilla_gecko_GeckoAppShell_notifyBatteryChange_t)(JNIEnv *, jclass, jdouble, jboolean, jdouble);
 static Java_org_mozilla_gecko_GeckoAppShell_notifyBatteryChange_t f_Java_org_mozilla_gecko_GeckoAppShell_notifyBatteryChange;
 extern "C" NS_EXPORT void MOZ_JNICALL
@@ -282,6 +301,44 @@ Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback(JNIEnv * arg0, jclass a
 
 #ifdef JNI_BINDINGS
   xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback", &f_Java_org_mozilla_gecko_GeckoAppShell_runUiThreadCallback);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef void (*Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged_t)(JNIEnv *, jclass, jint, jfloat, jfloat, jfloat, jfloat, jint, jlong);
+static Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged_t f_Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged;
+extern "C" NS_EXPORT void MOZ_JNICALL
+Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged(JNIEnv * arg0, jclass arg1, jint arg2, jfloat arg3, jfloat arg4, jfloat arg5, jfloat arg6, jint arg7, jlong arg8) {
+    if (!f_Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return ;
+    }
+     f_Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged", &f_Java_org_mozilla_gecko_GeckoAppShell_onSensorChanged);
+#endif
+
+#ifdef JNI_STUBS
+
+typedef void (*Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged_t)(JNIEnv *, jclass, jdouble, jdouble, jdouble, jfloat, jfloat, jfloat, jlong);
+static Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged_t f_Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged;
+extern "C" NS_EXPORT void MOZ_JNICALL
+Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged(JNIEnv * arg0, jclass arg1, jdouble arg2, jdouble arg3, jdouble arg4, jfloat arg5, jfloat arg6, jfloat arg7, jlong arg8) {
+    if (!f_Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged) {
+        arg0->ThrowNew(arg0->FindClass("java/lang/UnsupportedOperationException"),
+                       "JNI Function called before it was loaded");
+        return ;
+    }
+     f_Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+#endif
+
+#ifdef JNI_BINDINGS
+  xul_dlsym("Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged", &f_Java_org_mozilla_gecko_GeckoAppShell_onLocationChanged);
 #endif
 
 #ifdef JNI_STUBS

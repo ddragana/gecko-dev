@@ -225,16 +225,14 @@
            orient="vertical"
            role="alert">
      <vbox>
-      <hbox pack="end">
-        <toolbarbutton id="UITourTooltipClose" class="close-icon"
-                       tooltiptext="&uiTour.infoPanel.close;"/>
-      </hbox>
       <hbox id="UITourTooltipBody">
-        <vbox id="UITourTooltipIconContainer">
-          <image id="UITourTooltipIcon"/>
-        </vbox>
+        <image id="UITourTooltipIcon"/>
         <vbox flex="1">
-          <label id="UITourTooltipTitle" flex="1"/>
+          <hbox id="UITourTooltipTitleContainer">
+            <label id="UITourTooltipTitle" flex="1"/>
+            <toolbarbutton id="UITourTooltipClose" class="close-icon"
+                           tooltiptext="&uiTour.infoPanel.close;"/>
+          </hbox>
           <description id="UITourTooltipDescription" flex="1"/>
         </vbox>
       </hbox>
@@ -563,7 +561,7 @@
 #ifdef MENUBAR_CAN_AUTOHIDE
              toolbarname="&menubarCmd.label;"
              accesskey="&menubarCmd.accesskey;"
-#if defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
+#if defined(MOZ_WIDGET_GTK)
              autohide="true"
 #endif
 #endif
@@ -592,7 +590,7 @@
              context="toolbar-context-menu"
              collapsed="true">
 
-#if defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
+#if defined(MOZ_WIDGET_GTK)
       <hbox id="private-browsing-indicator"
             skipintoolbarset="true"/>
 #endif
@@ -642,7 +640,7 @@
         </menupopup>
       </toolbarbutton>
 
-#if !defined(MOZ_WIDGET_GTK) && !defined(MOZ_WIDGET_QT)
+#if !defined(MOZ_WIDGET_GTK)
       <hbox class="private-browsing-indicator" skipintoolbarset="true"/>
 #endif
 #ifdef CAN_DRAW_IN_TITLEBAR
@@ -727,6 +725,22 @@
                 <image id="identity-icon"
                        consumeanchor="identity-box"
                        onclick="PageProxyClickHandler(event);"/>
+                <box id="blocked-permissions-container" align="center">
+                  <image data-permission-id="geo" class="notification-anchor-icon geo-icon blocked" role="button"
+                         aria-label="&urlbar.geolocationNotificationAnchor.label;"/>
+                  <image data-permission-id="desktop-notification" class="notification-anchor-icon desktop-notification-icon blocked" role="button"
+                         aria-label="&urlbar.webNotsNotificationAnchor3.label;"/>
+                  <image data-permission-id="camera" class="notification-anchor-icon camera-icon blocked" role="button"
+                         aria-label="&urlbar.webRTCShareDevicesNotificationAnchor.label;"/>
+                  <image data-permission-id="indexedDB" class="notification-anchor-icon indexedDB-icon blocked" role="button"
+                         aria-label="&urlbar.indexedDBNotificationAnchor.label;"/>
+                  <image data-permission-id="microphone" class="notification-anchor-icon microphone-icon blocked" role="button"
+                         aria-label="&urlbar.webRTCShareMicrophoneNotificationAnchor.label;"/>
+                  <image data-permission-id="screen" class="notification-anchor-icon screen-icon blocked" role="button"
+                         aria-label="&urlbar.webRTCShareScreenNotificationAnchor.label;"/>
+                  <image data-permission-id="pointerLock" class="notification-anchor-icon pointerLock-icon blocked" role="button"
+                         aria-label="&urlbar.pointerLockNotificationAnchor.label;"/>
+                </box>
                 <box id="notification-popup-box"
                      hidden="true"
                      tooltiptext=""
@@ -1142,13 +1156,13 @@
 #include ../../components/customizableui/content/customizeMode.inc.xul
   </deck>
 
-  <html:div id="fullscreen-warning" hidden="true">
-    <html:div id="fullscreen-domain-text">
+  <html:div id="fullscreen-warning" class="pointerlockfswarning" hidden="true">
+    <html:div class="pointerlockfswarning-domain-text">
       &fullscreenWarning.beforeDomain.label;
-      <html:span id="fullscreen-domain"/>
+      <html:span class="pointerlockfswarning-domain"/>
       &fullscreenWarning.afterDomain.label;
     </html:div>
-    <html:div id="fullscreen-generic-text">
+    <html:div class="pointerlockfswarning-generic-text">
       &fullscreenWarning.generic.label;
     </html:div>
     <html:button id="fullscreen-exit-button"
@@ -1159,6 +1173,17 @@
             &exitDOMFullscreen.button;
 #endif
     </html:button>
+  </html:div>
+
+  <html:div id="pointerlock-warning" class="pointerlockfswarning" hidden="true">
+    <html:div class="pointerlockfswarning-domain-text">
+      &pointerlockWarning.beforeDomain.label;
+      <html:span class="pointerlockfswarning-domain"/>
+      &pointerlockWarning.afterDomain.label;
+    </html:div>
+    <html:div class="pointerlockfswarning-generic-text">
+      &pointerlockWarning.generic.label;
+    </html:div>
   </html:div>
 
   <vbox id="browser-bottombox" layer="true">

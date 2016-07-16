@@ -61,10 +61,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.RectF;
 import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.location.Location;
-import android.location.LocationListener;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -132,9 +128,7 @@ public abstract class GeckoApp
     GeckoEventListener,
     GeckoMenu.Callback,
     GeckoMenu.MenuPresenter,
-    LocationListener,
     NativeEventListener,
-    SensorEventListener,
     Tabs.OnTabsChangedListener,
     ViewTreeObserver.OnGlobalLayoutListener {
 
@@ -147,6 +141,8 @@ public abstract class GeckoApp
     public static final String ACTION_LAUNCH_SETTINGS      = "org.mozilla.gecko.SETTINGS";
     public static final String ACTION_LOAD                 = "org.mozilla.gecko.LOAD";
     public static final String ACTION_INIT_PW              = "org.mozilla.gecko.INIT_PW";
+
+    public static final String INTENT_REGISTER_STUMBLER_LISTENER = "org.mozilla.gecko.STUMBLER_REGISTER_LOCAL_LISTENER";
 
     public static final String EXTRA_STATE_BUNDLE          = "stateBundle";
 
@@ -200,6 +196,87 @@ public abstract class GeckoApp
     protected boolean mShouldRestore;
     private boolean mSessionRestoreParsingFinished = false;
 
+    private static final class LastSessionParser extends SessionParser {
+        private JSONArray tabs;
+        private JSONObject windowObject;
+        private boolean isExternalURL;
+
+        private boolean selectNextTab;
+        private boolean tabsWereSkipped;
+        private boolean tabsWereProcessed;
+
+        public LastSessionParser(JSONArray tabs, JSONObject windowObject, boolean isExternalURL) {
+            this.tabs = tabs;
+            this.windowObject = windowObject;
+            this.isExternalURL = isExternalURL;
+        }
+
+        public boolean allTabsSkipped() {
+            return tabsWereSkipped && !tabsWereProcessed;
+        }
+
+        @Override
+        public void onTabRead(final SessionTab sessionTab) {
+            if (sessionTab.isAboutHomeWithoutHistory()) {
+                // This is a tab pointing to about:home with no history. We won't restore
+                // this tab. If we end up restoring no tabs then the browser will decide
+                // whether it needs to open about:home or a different 'homepage'. If we'd
+                // always restore about:home only tabs then we'd never open the homepage.
+                // See bug 1261008.
+
+                if (sessionTab.isSelected()) {
+                    // Unfortunately this tab is the selected tab. Let's just try to select
+                    // the first tab. If we haven't restored any tabs so far then remember
+                    // to select the next tab that gets restored.
+
+                    if (!Tabs.getInstance().selectLastTab()) {
+                        selectNextTab = true;
+                    }
+                }
+
+                // Do not restore this tab.
+                tabsWereSkipped = true;
+                return;
+            }
+
+            tabsWereProcessed = true;
+
+            JSONObject tabObject = sessionTab.getTabObject();
+
+            int flags = Tabs.LOADURL_NEW_TAB;
+            flags |= ((isExternalURL || !sessionTab.isSelected()) ? Tabs.LOADURL_DELAY_LOAD : 0);
+            flags |= (tabObject.optBoolean("desktopMode") ? Tabs.LOADURL_DESKTOP : 0);
+            flags |= (tabObject.optBoolean("isPrivate") ? Tabs.LOADURL_PRIVATE : 0);
+
+            final Tab tab = Tabs.getInstance().loadUrl(sessionTab.getUrl(), flags);
+
+            if (selectNextTab) {
+                // We did not restore the selected tab previously. Now let's select this tab.
+                Tabs.getInstance().selectTab(tab.getId());
+                selectNextTab = false;
+            }
+
+            ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    tab.updateTitle(sessionTab.getTitle());
+                }
+            });
+
+            try {
+                tabObject.put("tabId", tab.getId());
+            } catch (JSONException e) {
+                Log.e(LOGTAG, "JSON error", e);
+            }
+            tabs.put(tabObject);
+        }
+
+        @Override
+        public void onClosedTabsRead(final JSONArray closedTabData) throws JSONException {
+            windowObject.put("closedTabs", closedTabData);
+        }
+    };
+
     protected boolean mInitialized;
     protected boolean mWindowFocusInitialized;
     private Telemetry.Timer mJavaUiStartupTimer;
@@ -247,16 +324,6 @@ public abstract class GeckoApp
 
     @Override
     public Activity getActivity() {
-        return this;
-    }
-
-    @Override
-    public LocationListener getLocationListener() {
-        return this;
-    }
-
-    @Override
-    public SensorEventListener getSensorEventListener() {
         return this;
     }
 
@@ -1144,6 +1211,13 @@ public abstract class GeckoApp
             Log.e(LOGTAG, "Exception starting favicon cache. Corrupt resources?", e);
         }
 
+        // Tell Stumbler to register a local broadcast listener to listen for preference intents.
+        // We do this via intents since we can't easily access Stumbler directly,
+        // as it might be compiled outside of Fennec.
+        getApplicationContext().sendBroadcast(
+                new Intent(INTENT_REGISTER_STUMBLER_LISTENER)
+        );
+
         // Did the OS locale change while we were backgrounded? If so,
         // we need to die so that Gecko will re-init add-ons that touch
         // the UI.
@@ -1295,6 +1369,17 @@ public abstract class GeckoApp
                     } catch (SessionRestoreException e) {
                         // If restore failed, do a normal startup
                         Log.e(LOGTAG, "An error occurred during restore", e);
+                        // If mShouldRestore was already set to false in restoreSessionTabs(),
+                        // this means that we intentionally skipped all tabs read from the
+                        // session file, so we don't have to report this exception in telemetry
+                        // and can ignore the following bit.
+                        if (mShouldRestore && getProfile().sessionFileExistsAndNotEmptyWindow()) {
+                            // If we got a SessionRestoreException even though the file exists and its
+                            // length doesn't match the known length of an intentionally empty file,
+                            // it's very likely we've encountered a damaged/corrupt session store file.
+                            Log.d(LOGTAG, "Suspecting a damaged session store file.");
+                            Telemetry.addToHistogram("FENNEC_SESSIONSTORE_DAMAGED_SESSION_FILE", 1);
+                        }
                         mShouldRestore = false;
                     }
                 }
@@ -1687,37 +1772,8 @@ public abstract class GeckoApp
             if (mShouldRestore) {
                 final JSONArray tabs = new JSONArray();
                 final JSONObject windowObject = new JSONObject();
-                SessionParser parser = new SessionParser() {
-                    @Override
-                    public void onTabRead(final SessionTab sessionTab) {
-                        JSONObject tabObject = sessionTab.getTabObject();
 
-                        int flags = Tabs.LOADURL_NEW_TAB;
-                        flags |= ((isExternalURL || !sessionTab.isSelected()) ? Tabs.LOADURL_DELAY_LOAD : 0);
-                        flags |= (tabObject.optBoolean("desktopMode") ? Tabs.LOADURL_DESKTOP : 0);
-                        flags |= (tabObject.optBoolean("isPrivate") ? Tabs.LOADURL_PRIVATE : 0);
-
-                        final Tab tab = Tabs.getInstance().loadUrl(sessionTab.getUrl(), flags);
-                        ThreadUtils.postToUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                tab.updateTitle(sessionTab.getTitle());
-                            }
-                        });
-
-                        try {
-                            tabObject.put("tabId", tab.getId());
-                        } catch (JSONException e) {
-                            Log.e(LOGTAG, "JSON error", e);
-                        }
-                        tabs.put(tabObject);
-                    }
-
-                    @Override
-                    public void onClosedTabsRead(final JSONArray closedTabData) throws JSONException {
-                        windowObject.put("closedTabs", closedTabData);
-                    }
-                };
+                LastSessionParser parser = new LastSessionParser(tabs, windowObject, isExternalURL);
 
                 if (mPrivateBrowsingSession == null) {
                     parser.parse(sessionString);
@@ -1729,6 +1785,12 @@ public abstract class GeckoApp
                     windowObject.put("tabs", tabs);
                     sessionString = new JSONObject().put("windows", new JSONArray().put(windowObject)).toString();
                 } else {
+                    if (parser.allTabsSkipped()) {
+                        // If we intentionally skipped all tabs we've read from the session file, we
+                        // set mShouldRestore back to false at this point already, so the calling code
+                        // can infer that the exception wasn't due to a damaged session store file.
+                        mShouldRestore = false;
+                    }
                     throw new SessionRestoreException("No tabs could be read from session file");
                 }
             }
@@ -2529,38 +2591,6 @@ public abstract class GeckoApp
 
     @Override
     public AbsoluteLayout getPluginContainer() { return mPluginContainer; }
-
-    // Accelerometer.
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {
-    }
-
-    @Override
-    public void onSensorChanged(SensorEvent event) {
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createSensorEvent(event));
-    }
-
-    // Geolocation.
-    @Override
-    public void onLocationChanged(Location location) {
-        // No logging here: user-identifying information.
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createLocationEvent(location));
-    }
-
-    @Override
-    public void onProviderDisabled(String provider)
-    {
-    }
-
-    @Override
-    public void onProviderEnabled(String provider)
-    {
-    }
-
-    @Override
-    public void onStatusChanged(String provider, int status, Bundle extras)
-    {
-    }
 
     private static final String CPU = "cpu";
     private static final String SCREEN = "screen";

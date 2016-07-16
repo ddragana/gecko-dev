@@ -43,6 +43,7 @@ static const unsigned COMPILATION_LIFO_DEFAULT_CHUNK_SIZE = 64 * 1024;
 ModuleGenerator::ModuleGenerator()
   : alwaysBaseline_(false),
     numSigs_(0),
+    numTables_(0),
     lifo_(GENERATOR_LIFO_DEFAULT_CHUNK_SIZE),
     masmAlloc_(&lifo_),
     masm_(MacroAssembler::AsmJSToken(), masmAlloc_),
@@ -98,7 +99,7 @@ ModuleGenerator::init(UniqueModuleGeneratorData shared, CompileArgs&& args,
 {
     alwaysBaseline_ = args.alwaysBaseline;
 
-    if (!funcIndexToExport_.init())
+    if (!funcIndexToFuncExportIndex_.init())
         return false;
 
     linkData_.globalDataLength = AlignBytes(InitialGlobalDataBytes, sizeof(void*));;
@@ -126,21 +127,24 @@ ModuleGenerator::init(UniqueModuleGeneratorData shared, CompileArgs&& args,
 
     if (!isAsmJS()) {
         numSigs_ = shared_->sigs.length();
+        numTables_ = shared_->tables.length();
 
-        for (ImportModuleGeneratorData& import : shared_->imports) {
-            MOZ_ASSERT(!import.globalDataOffset);
-            import.globalDataOffset = linkData_.globalDataLength;
-            linkData_.globalDataLength += sizeof(ImportExit);
-            if (!addImport(*import.sig, import.globalDataOffset))
+        for (FuncImportGenDesc& funcImport : shared_->funcImports) {
+            MOZ_ASSERT(!funcImport.globalDataOffset);
+            funcImport.globalDataOffset = linkData_.globalDataLength;
+            linkData_.globalDataLength += sizeof(FuncImportExit);
+            if (!addFuncImport(*funcImport.sig, funcImport.globalDataOffset))
                 return false;
         }
 
-        MOZ_ASSERT(linkData_.globalDataLength % sizeof(void*) == 0);
-        MOZ_ASSERT(shared_->asmJSSigToTable.empty());
-        MOZ_ASSERT(shared_->wasmTable.numElems == shared_->wasmTable.elemFuncIndices.length());
-        MOZ_ASSERT(!shared_->wasmTable.globalDataOffset);
-        shared_->wasmTable.globalDataOffset = linkData_.globalDataLength;
-        linkData_.globalDataLength += shared_->wasmTable.numElems * sizeof(void*);
+        for (TableDesc& table : shared_->tables) {
+            if (!allocateGlobalBytes(sizeof(void*), sizeof(void*), &table.globalDataOffset))
+                return false;
+        }
+    } else {
+        MOZ_ASSERT(shared_->sigs.length() == MaxSigs);
+        MOZ_ASSERT(shared_->tables.length() == MaxTables);
+        MOZ_ASSERT(shared_->asmJSSigToTableIndex.length() == MaxSigs);
     }
 
     return true;
@@ -351,15 +355,15 @@ ModuleGenerator::finishCodegen()
         if (!entries.resize(numExports()))
             return false;
         for (uint32_t i = 0; i < numExports(); i++)
-            entries[i] = GenerateEntry(masm, metadata_->exports[i], usesMemory());
+            entries[i] = GenerateEntry(masm, metadata_->funcExports[i], usesMemory());
 
-        if (!interpExits.resize(numImports()))
+        if (!interpExits.resize(numFuncImports()))
             return false;
-        if (!jitExits.resize(numImports()))
+        if (!jitExits.resize(numFuncImports()))
             return false;
-        for (uint32_t i = 0; i < numImports(); i++) {
-            interpExits[i] = GenerateInterpExit(masm, metadata_->imports[i], i);
-            jitExits[i] = GenerateJitExit(masm, metadata_->imports[i], usesMemory());
+        for (uint32_t i = 0; i < numFuncImports(); i++) {
+            interpExits[i] = GenerateInterpExit(masm, metadata_->funcImports[i], i);
+            jitExits[i] = GenerateJitExit(masm, metadata_->funcImports[i], usesMemory());
         }
 
         for (JumpTarget target : MakeEnumeratedRange(JumpTarget::Limit))
@@ -376,19 +380,19 @@ ModuleGenerator::finishCodegen()
 
     for (uint32_t i = 0; i < numExports(); i++) {
         entries[i].offsetBy(offsetInWhole);
-        metadata_->exports[i].initStubOffset(entries[i].begin);
+        metadata_->funcExports[i].initStubOffset(entries[i].begin);
         if (!metadata_->codeRanges.emplaceBack(CodeRange::Entry, entries[i]))
             return false;
     }
 
-    for (uint32_t i = 0; i < numImports(); i++) {
+    for (uint32_t i = 0; i < numFuncImports(); i++) {
         interpExits[i].offsetBy(offsetInWhole);
-        metadata_->imports[i].initInterpExitOffset(interpExits[i].begin);
+        metadata_->funcImports[i].initInterpExitOffset(interpExits[i].begin);
         if (!metadata_->codeRanges.emplaceBack(CodeRange::ImportInterpExit, interpExits[i]))
             return false;
 
         jitExits[i].offsetBy(offsetInWhole);
-        metadata_->imports[i].initJitExitOffset(jitExits[i].begin);
+        metadata_->funcImports[i].initJitExitOffset(jitExits[i].begin);
         if (!metadata_->codeRanges.emplaceBack(CodeRange::ImportJitExit, jitExits[i]))
             return false;
     }
@@ -405,9 +409,10 @@ ModuleGenerator::finishCodegen()
 
     // Fill in LinkData with the offsets of these stubs.
 
+    linkData_.interruptOffset = interruptExit.begin;
     linkData_.outOfBoundsOffset = jumpTargets[JumpTarget::OutOfBounds].begin;
     linkData_.unalignedAccessOffset = jumpTargets[JumpTarget::UnalignedAccess].begin;
-    linkData_.interruptOffset = interruptExit.begin;
+    linkData_.badIndirectCallOffset = jumpTargets[JumpTarget::BadIndirectCall].begin;
 
     // Only call convertOutOfRangeBranchesToThunks after all other codegen that may
     // emit new jumps to JumpTargets has finished.
@@ -488,46 +493,17 @@ ModuleGenerator::finishLinkData(Bytes& code)
     MOZ_ASSERT(masm_.numAsmJSGlobalAccesses() == 0);
 #endif
 
-    // Function pointer table elements
-
-    if (shared_->wasmTable.numElems > 0) {
-        const TableModuleGeneratorData& table = shared_->wasmTable;
-
-        Uint32Vector elemOffsets;
-        for (size_t i = 0; i < table.elemFuncIndices.length(); i++) {
-            if (!elemOffsets.append(funcCodeRange(table.elemFuncIndices[i]).funcTableEntry()))
-                return false;
-        }
-
-        if (!linkData_.funcTables.emplaceBack(table.globalDataOffset, Move(elemOffsets)))
-            return false;
-    }
-
-    for (const TableModuleGeneratorData& table : shared_->asmJSSigToTable) {
-        if (table.elemFuncIndices.empty())
-            continue;
-
-        Uint32Vector elemOffsets;
-        for (size_t i = 0; i < table.elemFuncIndices.length(); i++) {
-            if (!elemOffsets.append(funcCodeRange(table.elemFuncIndices[i]).funcNonProfilingEntry()))
-                return false;
-        }
-
-        if (!linkData_.funcTables.emplaceBack(table.globalDataOffset, Move(elemOffsets)))
-            return false;
-    }
-
     return true;
 }
 
 bool
-ModuleGenerator::addImport(const Sig& sig, uint32_t globalDataOffset)
+ModuleGenerator::addFuncImport(const Sig& sig, uint32_t globalDataOffset)
 {
     Sig copy;
     if (!copy.clone(sig))
         return false;
 
-    return metadata_->imports.emplaceBack(Move(copy), globalDataOffset);
+    return metadata_->funcImports.emplaceBack(Move(copy), globalDataOffset);
 }
 
 bool
@@ -638,77 +614,101 @@ ModuleGenerator::funcSig(uint32_t funcIndex) const
 }
 
 bool
-ModuleGenerator::initImport(uint32_t importIndex, uint32_t sigIndex)
+ModuleGenerator::initImport(uint32_t funcImportIndex, uint32_t sigIndex)
 {
     MOZ_ASSERT(isAsmJS());
 
     uint32_t globalDataOffset;
-    if (!allocateGlobalBytes(sizeof(ImportExit), sizeof(void*), &globalDataOffset))
+    if (!allocateGlobalBytes(sizeof(FuncImportExit), sizeof(void*), &globalDataOffset))
         return false;
 
-    MOZ_ASSERT(importIndex == metadata_->imports.length());
-    if (!addImport(sig(sigIndex), globalDataOffset))
+    MOZ_ASSERT(funcImportIndex == metadata_->funcImports.length());
+    if (!addFuncImport(sig(sigIndex), globalDataOffset))
         return false;
 
-    ImportModuleGeneratorData& import = shared_->imports[importIndex];
-    MOZ_ASSERT(!import.sig);
-    import.sig = &shared_->sigs[sigIndex];
-    import.globalDataOffset = globalDataOffset;
+    FuncImportGenDesc& funcImport = shared_->funcImports[funcImportIndex];
+    MOZ_ASSERT(!funcImport.sig);
+    funcImport.sig = &shared_->sigs[sigIndex];
+    funcImport.globalDataOffset = globalDataOffset;
     return true;
 }
 
 uint32_t
-ModuleGenerator::numImports() const
+ModuleGenerator::numFuncImports() const
 {
-    return metadata_->imports.length();
+    return metadata_->funcImports.length();
 }
 
-const ImportModuleGeneratorData&
-ModuleGenerator::import(uint32_t index) const
+const FuncImportGenDesc&
+ModuleGenerator::funcImport(uint32_t funcImportIndex) const
 {
-    MOZ_ASSERT(shared_->imports[index].sig);
-    return shared_->imports[index];
+    MOZ_ASSERT(shared_->funcImports[funcImportIndex].sig);
+    return shared_->funcImports[funcImportIndex];
 }
 
 bool
-ModuleGenerator::declareExport(UniqueChars fieldName, uint32_t funcIndex, uint32_t* exportIndex)
+ModuleGenerator::declareFuncExport(UniqueChars fieldName, uint32_t funcIndex,
+                                   uint32_t* funcExportIndex /* = nullptr */)
 {
-    if (!exportMap_.fieldNames.append(Move(fieldName)))
-        return false;
+    MOZ_ASSERT(!metadata_->hasStartFunction());
 
-    FuncIndexMap::AddPtr p = funcIndexToExport_.lookupForAdd(funcIndex);
+    FuncIndexMap::AddPtr p = funcIndexToFuncExportIndex_.lookupForAdd(funcIndex);
     if (p) {
-        if (exportIndex)
-            *exportIndex = p->value();
-        return exportMap_.fieldsToExports.append(p->value());
+        if (funcExportIndex)
+            *funcExportIndex = p->value();
+        return exports_.emplaceBack(Move(fieldName), p->value());
     }
 
-    uint32_t newExportIndex = metadata_->exports.length();
-    MOZ_ASSERT(newExportIndex < MaxExports);
+    uint32_t newFuncExportIndex = metadata_->funcExports.length();
+    MOZ_ASSERT(newFuncExportIndex < MaxExports);
 
-    if (exportIndex)
-        *exportIndex = newExportIndex;
+    if (funcExportIndex)
+        *funcExportIndex = newFuncExportIndex;
 
     Sig copy;
     if (!copy.clone(funcSig(funcIndex)))
         return false;
 
-    return metadata_->exports.emplaceBack(Move(copy), funcIndex) &&
-           exportMap_.fieldsToExports.append(newExportIndex) &&
-           funcIndexToExport_.add(p, funcIndex, newExportIndex);
+    return metadata_->funcExports.emplaceBack(Move(copy), funcIndex) &&
+           exports_.emplaceBack(Move(fieldName), newFuncExportIndex) &&
+           funcIndexToFuncExportIndex_.add(p, funcIndex, newFuncExportIndex);
 }
 
 uint32_t
 ModuleGenerator::numExports() const
 {
-    return metadata_->exports.length();
+    return metadata_->funcExports.length();
+}
+
+bool
+ModuleGenerator::addTableExport(UniqueChars fieldName)
+{
+    return exports_.emplaceBack(Move(fieldName), DefinitionKind::Table);
 }
 
 bool
 ModuleGenerator::addMemoryExport(UniqueChars fieldName)
 {
-    return exportMap_.fieldNames.append(Move(fieldName)) &&
-           exportMap_.fieldsToExports.append(MemoryExport);
+    return exports_.emplaceBack(Move(fieldName), DefinitionKind::Memory);
+}
+
+bool
+ModuleGenerator::setStartFunction(uint32_t funcIndex)
+{
+    MOZ_ASSERT(!metadata_->hasStartFunction());
+
+    FuncIndexMap::AddPtr p = funcIndexToFuncExportIndex_.lookupForAdd(funcIndex);
+    if (p) {
+        metadata_->initStartFuncExportIndex(p->value());
+        return true;
+    }
+
+    Sig copy;
+    if (!copy.clone(funcSig(funcIndex)))
+        return false;
+
+    metadata_->initStartFuncExportIndex(metadata_->funcExports.length());
+    return metadata_->funcExports.emplaceBack(Move(copy), funcIndex);
 }
 
 bool
@@ -839,6 +839,13 @@ ModuleGenerator::finishFuncDefs()
     return true;
 }
 
+bool
+ModuleGenerator::addElemSegment(ElemSegment&& seg)
+{
+    MOZ_ASSERT(seg.offset + seg.elems.length() <= shared_->tables[seg.tableIndex].length);
+    return elemSegments_.append(Move(seg));
+}
+
 void
 ModuleGenerator::setFuncNames(NameInBytecodeVector&& funcNames)
 {
@@ -847,41 +854,44 @@ ModuleGenerator::setFuncNames(NameInBytecodeVector&& funcNames)
 }
 
 bool
-ModuleGenerator::initSigTableLength(uint32_t sigIndex, uint32_t numElems)
+ModuleGenerator::initSigTableLength(uint32_t sigIndex, uint32_t length)
 {
     MOZ_ASSERT(isAsmJS());
-    MOZ_ASSERT(numElems != 0);
-    MOZ_ASSERT(numElems <= MaxTableElems);
+    MOZ_ASSERT(length != 0);
+    MOZ_ASSERT(length <= MaxTableElems);
 
-    uint32_t globalDataOffset;
-    if (!allocateGlobalBytes(numElems * sizeof(void*), sizeof(void*), &globalDataOffset))
-        return false;
+    MOZ_ASSERT(shared_->asmJSSigToTableIndex[sigIndex] == 0);
+    shared_->asmJSSigToTableIndex[sigIndex] = numTables_;
 
-    TableModuleGeneratorData& table = shared_->asmJSSigToTable[sigIndex];
-    MOZ_ASSERT(table.numElems == 0);
-    table.numElems = numElems;
-    table.globalDataOffset = globalDataOffset;
-    return true;
+    TableDesc& table = shared_->tables[numTables_++];
+    MOZ_ASSERT(table.globalDataOffset == 0);
+    MOZ_ASSERT(table.length == 0);
+    table.kind = TableKind::TypedFunction;
+    table.length = length;
+    return allocateGlobalBytes(sizeof(void*), sizeof(void*), &table.globalDataOffset);
 }
 
-void
+bool
 ModuleGenerator::initSigTableElems(uint32_t sigIndex, Uint32Vector&& elemFuncIndices)
 {
     MOZ_ASSERT(isAsmJS());
-    MOZ_ASSERT(!elemFuncIndices.empty());
 
-    TableModuleGeneratorData& table = shared_->asmJSSigToTable[sigIndex];
-    MOZ_ASSERT(table.numElems == elemFuncIndices.length());
+    uint32_t tableIndex = shared_->asmJSSigToTableIndex[sigIndex];
+    MOZ_ASSERT(shared_->tables[tableIndex].length == elemFuncIndices.length());
 
-    MOZ_ASSERT(table.elemFuncIndices.empty());
-    table.elemFuncIndices = Move(elemFuncIndices);
+    return elemSegments_.emplaceBack(tableIndex, 0, Move(elemFuncIndices));
 }
 
 UniqueModule
-ModuleGenerator::finish(ImportNameVector&& importNames, const ShareableBytes& bytecode)
+ModuleGenerator::finish(ImportVector&& imports, const ShareableBytes& bytecode)
 {
     MOZ_ASSERT(!activeFunc_);
     MOZ_ASSERT(finishedFuncDefs_);
+
+    // Now that all asm.js tables have been created and the compiler threads are
+    // done, shrink the (no longer shared) tables vector down to size.
+    if (isAsmJS() && !shared_->tables.resize(numTables_))
+        return nullptr;
 
     if (!finishCodegen())
         return nullptr;
@@ -916,6 +926,12 @@ ModuleGenerator::finish(ImportNameVector&& importNames, const ShareableBytes& by
     metadata_->memoryAccesses = masm_.extractMemoryAccesses();
     metadata_->boundsChecks = masm_.extractBoundsChecks();
 
+    // Copy over data from the ModuleGeneratorData.
+    metadata_->memoryUsage = shared_->memoryUsage;
+    metadata_->minMemoryLength = shared_->minMemoryLength;
+    metadata_->maxMemoryLength = shared_->maxMemoryLength;
+    metadata_->tables = Move(shared_->tables);
+
     // These Vectors can get large and the excess capacity can be significant,
     // so realloc them down to size.
     metadata_->memoryAccesses.podResizeToFit();
@@ -923,10 +939,6 @@ ModuleGenerator::finish(ImportNameVector&& importNames, const ShareableBytes& by
     metadata_->codeRanges.podResizeToFit();
     metadata_->callSites.podResizeToFit();
     metadata_->callThunks.podResizeToFit();
-
-    // Copy over data from the ModuleGeneratorData.
-    metadata_->memoryUsage = shared_->memoryUsage;
-    metadata_->minMemoryLength = shared_->minMemoryLength;
 
     // Assert CodeRanges are sorted.
 #ifdef DEBUG
@@ -937,14 +949,25 @@ ModuleGenerator::finish(ImportNameVector&& importNames, const ShareableBytes& by
     }
 #endif
 
+    // Convert function indices to offsets into the code section.
+    // WebAssembly's tables are (currently) all untyped and point to the table
+    // entry. asm.js tables are all typed and thus point to the normal entry.
+    for (ElemSegment& seg : elemSegments_) {
+        for (uint32_t& elem : seg.elems) {
+            const CodeRange& cr = funcCodeRange(elem);
+            elem = isAsmJS() ? cr.funcNonProfilingEntry() : cr.funcTableEntry();
+        }
+    }
+
     if (!finishLinkData(code))
         return nullptr;
 
     return js::MakeUnique<Module>(Move(code),
                                   Move(linkData_),
-                                  Move(importNames),
-                                  Move(exportMap_),
+                                  Move(imports),
+                                  Move(exports_),
                                   Move(dataSegments_),
+                                  Move(elemSegments_),
                                   *metadata_,
                                   bytecode);
 }

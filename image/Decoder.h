@@ -8,6 +8,7 @@
 
 #include "FrameAnimator.h"
 #include "RasterImage.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/RefPtr.h"
 #include "DecodePool.h"
@@ -16,6 +17,7 @@
 #include "ImageMetadata.h"
 #include "Orientation.h"
 #include "SourceBuffer.h"
+#include "StreamingLexer.h"
 #include "SurfaceFlags.h"
 
 namespace mozilla {
@@ -114,7 +116,14 @@ public:
    *
    * This must be called before Init() is called.
    */
-  nsresult SetTargetSize(const nsIntSize& aSize);
+  nsresult SetTargetSize(const gfx::IntSize& aSize);
+
+  /**
+   * If this decoder supports downscale-during-decode and is configured to
+   * downscale, returns the target size that the output size will be decoded to.
+   * Otherwise, returns Nothing().
+   */
+  Maybe<gfx::IntSize> GetTargetSize();
 
   /**
    * Set the requested sample size for this decoder. Used to implement the
@@ -126,12 +135,10 @@ public:
 
   /**
    * Set an iterator to the SourceBuffer which will feed data to this decoder.
+   * This must always be called before calling Init(). (And only before Init().)
    *
-   * This should be called for almost all decoders; the exceptions are the
-   * contained decoders of an nsICODecoder, which will be fed manually via Write
-   * instead.
-   *
-   * This must be called before Init() is called.
+   * XXX(seth): We should eliminate this method and pass a SourceBufferIterator
+   * to the various decoder constructors instead.
    */
   void SetIterator(SourceBufferIterator&& aIterator)
   {
@@ -157,10 +164,10 @@ public:
 
   size_t BytesDecoded() const { return mBytesDecoded; }
 
-  // The amount of time we've spent inside Write() so far for this decoder.
+  // The amount of time we've spent inside DoDecode() so far for this decoder.
   TimeDuration DecodeTime() const { return mDecodeTime; }
 
-  // The number of times Write() has been called so far for this decoder.
+  // The number of chunks this decoder's input was divided into.
   uint32_t ChunkCount() const { return mChunkCount; }
 
   // The number of frames we have, including anything in-progress. Thus, this
@@ -247,9 +254,17 @@ public:
   ImageMetadata& GetImageMetadata() { return mImageMetadata; }
 
   /**
-   * Returns a weak pointer to the image associated with this decoder.
+   * @return a weak pointer to the image associated with this decoder. Illegal
+   * to call if this decoder is not associated with an image.
    */
   RasterImage* GetImage() const { MOZ_ASSERT(mImage); return mImage.get(); }
+
+  /**
+   * @return a possibly-null weak pointer to the image associated with this
+   * decoder. May be called even if this decoder is not associated with an
+   * image.
+   */
+  RasterImage* GetImageMaybeNull() const { return mImage.get(); }
 
   RawAccessFrameRef GetCurrentFrameRef()
   {
@@ -257,19 +272,9 @@ public:
                          : RawAccessFrameRef();
   }
 
-  /**
-   * Writes data to the decoder. Only public for the benefit of nsICODecoder;
-   * other callers should use Decode().
-   *
-   * @param aBuffer buffer containing the data to be written
-   * @param aCount the number of bytes to write
-   *
-   * Any errors are reported by setting the appropriate state on the decoder.
-   */
-  void Write(const char* aBuffer, uint32_t aCount);
-
 
 protected:
+  friend class AutoRecordDecoderTelemetry;
   friend class nsICODecoder;
   friend class PalettedSurfaceSink;
   friend class SurfaceSink;
@@ -285,7 +290,7 @@ protected:
    * call PostDataError().
    */
   virtual void InitInternal();
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) = 0;
+  virtual Maybe<TerminalState> DoDecode(SourceBufferIterator& aIterator) = 0;
   virtual void BeforeFinishInternal();
   virtual void FinishInternal();
   virtual void FinishWithErrorInternal();

@@ -129,6 +129,7 @@ namespace jit {
     _(NewArray)                                                             \
     _(NewArrayCopyOnWrite)                                                  \
     _(NewArrayDynamicLength)                                                \
+    _(NewTypedArray)                                                        \
     _(NewObject)                                                            \
     _(NewTypedObject)                                                       \
     _(NewDeclEnvObject)                                                     \
@@ -268,6 +269,9 @@ namespace jit {
     _(IsObject)                                                             \
     _(HasClass)                                                             \
     _(CopySign)                                                             \
+    _(WasmBoundsCheck)                                                      \
+    _(WasmLoad)                                                             \
+    _(WasmStore)                                                            \
     _(WasmTruncateToInt32)                                                  \
     _(AsmJSNeg)                                                             \
     _(AsmJSUnsignedToDouble)                                                \

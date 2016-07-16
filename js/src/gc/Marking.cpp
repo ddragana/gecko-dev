@@ -1042,8 +1042,10 @@ js::GCMarker::eagerlyMarkChildren(Shape* shape)
         // be traced by this loop they do not need to be traced here as well.
         BaseShape* base = shape->base();
         CheckTraversedEdge(shape, base);
-        if (mark(base))
+        if (mark(base)) {
+            MOZ_ASSERT(base->canSkipMarkingShapeTable(shape));
             base->traceChildrenSkipShapeTable(this);
+        }
 
         traverseEdge(shape, shape->propidRef().get());
 
@@ -1880,7 +1882,11 @@ GCMarker::enterWeakMarkingMode()
         return;
 
     // During weak marking mode, we maintain a table mapping weak keys to
-    // entries in known-live weakmaps.
+    // entries in known-live weakmaps. Initialize it with the keys of marked
+    // weakmaps -- or more precisely, the keys of marked weakmaps that are
+    // mapped to not yet live values. (Once bug 1167452 implements incremental
+    // weakmap marking, this initialization step will become unnecessary, as
+    // the table will already hold all such keys.)
     if (weakMapAction() == ExpandWeakMaps) {
         tag_ = TracerKindTag::WeakMarking;
 
@@ -2305,6 +2311,8 @@ js::TenuringTracer::moveObjectToTenured(JSObject* dst, JSObject* src, AllocKind 
 
     if (src->is<InlineTypedObject>()) {
         InlineTypedObject::objectMovedDuringMinorGC(this, dst, src);
+    } else if (src->is<TypedArrayObject>()) {
+        tenuredSize += TypedArrayObject::objectMovedDuringMinorGC(this, dst, src, dstKind);
     } else if (src->is<UnboxedArrayObject>()) {
         tenuredSize += UnboxedArrayObject::objectMovedDuringMinorGC(this, dst, src, dstKind);
     } else if (src->is<ArgumentsObject>()) {
@@ -2470,7 +2478,6 @@ bool
 js::gc::IsAboutToBeFinalizedDuringSweep(TenuredCell& tenured)
 {
     MOZ_ASSERT(!IsInsideNursery(&tenured));
-    MOZ_ASSERT(!tenured.runtimeFromAnyThread()->isHeapMinorCollecting());
     MOZ_ASSERT(tenured.zoneFromAnyThread()->isGCSweeping());
     if (tenured.arena()->allocatedDuringIncremental)
         return false;
@@ -2490,11 +2497,9 @@ IsAboutToBeFinalizedInternal(T** thingp)
         return false;
 
     Nursery& nursery = rt->gc.nursery;
-    MOZ_ASSERT_IF(!rt->isHeapMinorCollecting(), !IsInsideNursery(thing));
-    if (rt->isHeapMinorCollecting()) {
-        if (IsInsideNursery(thing))
-            return !nursery.getForwardedPointer(reinterpret_cast<JSObject**>(thingp));
-        return false;
+    if (IsInsideNursery(thing)) {
+        MOZ_ASSERT(rt->isHeapMinorCollecting());
+        return !nursery.getForwardedPointer(reinterpret_cast<JSObject**>(thingp));
     }
 
     Zone* zone = thing->asTenured().zoneFromAnyThread();

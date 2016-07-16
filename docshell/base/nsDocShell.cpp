@@ -767,8 +767,8 @@ nsDocShell::nsDocShell()
   , mPreviousTransIndex(-1)
   , mLoadedTransIndex(-1)
   , mSandboxFlags(0)
-  , mFullscreenAllowed(CHECK_ATTRIBUTES)
   , mOrientationLock(eScreenOrientation_None)
+  , mFullscreenAllowed(CHECK_ATTRIBUTES)
   , mCreated(false)
   , mAllowSubframes(true)
   , mAllowPlugins(true)
@@ -780,7 +780,6 @@ nsDocShell::nsDocShell()
   , mAllowWindowControl(true)
   , mAllowContentRetargeting(true)
   , mAllowContentRetargetingOnChildren(true)
-  , mCreatingDocument(false)
   , mUseErrorPages(false)
   , mObserveErrorPages(true)
   , mAllowAuth(true)
@@ -803,14 +802,15 @@ nsDocShell::nsDocShell()
   , mIsExecutingOnLoadHandler(false)
   , mIsPrintingOrPP(false)
   , mSavingOldViewer(false)
-#ifdef DEBUG
-  , mInEnsureScriptEnv(false)
-#endif
   , mAffectPrivateSessionLifetime(true)
   , mInvisible(false)
   , mHasLoadedNonBlankURI(false)
-  , mDefaultLoadFlags(nsIRequest::LOAD_NORMAL)
   , mBlankTiming(false)
+  , mCreatingDocument(false)
+#ifdef DEBUG
+  , mInEnsureScriptEnv(false)
+#endif
+  , mDefaultLoadFlags(nsIRequest::LOAD_NORMAL)
   , mFrameType(FRAME_TYPE_REGULAR)
   , mPrivateBrowsingId(0)
   , mParentCharsetSource(0)
@@ -2513,10 +2513,6 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
   // Assume false until we determine otherwise...
   *aFullscreenAllowed = false;
 
-  // If it is sandboxed, fullscreen is not allowed.
-  if (mSandboxFlags & SANDBOXED_FULLSCREEN) {
-    return NS_OK;
-  }
   nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
   if (!win) {
     return NS_OK;
@@ -2554,10 +2550,6 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
       }
     } else {
       // neither iframe nor embed
-      return NS_OK;
-    }
-    nsIDocument* doc = frameElement->GetUncomposedDoc();
-    if (!doc || !doc->FullscreenEnabledInternal()) {
       return NS_OK;
     }
   }
@@ -3837,13 +3829,6 @@ nsDocShell::IsSandboxedFrom(nsIDocShell* aTargetDocShell)
   return true;
 }
 
-void
-nsDocShell::ApplySandboxAndFullscreenFlags(nsIDocument* aDoc)
-{
-  aDoc->SetSandboxFlags(mSandboxFlags);
-  aDoc->SetFullscreenEnabled(GetFullscreenAllowed());
-}
-
 NS_IMETHODIMP
 nsDocShell::GetTreeOwner(nsIDocShellTreeOwner** aTreeOwner)
 {
@@ -5001,8 +4986,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     }
   } else if (NS_ERROR_PHISHING_URI == aError ||
              NS_ERROR_MALWARE_URI == aError ||
-             NS_ERROR_UNWANTED_URI == aError ||
-             NS_ERROR_FORBIDDEN_URI == aError) {
+             NS_ERROR_UNWANTED_URI == aError) {
     nsAutoCString host;
     aURI->GetHost(host);
     CopyUTF8toUTF16(host, formatStrs[0]);
@@ -5033,8 +5017,6 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       error.AssignLiteral("unwantedBlocked");
       bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_FRAME
                            : nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_TOP;
-    } else if (NS_ERROR_FORBIDDEN_URI == aError) {
-      error.AssignLiteral("forbiddenBlocked");
     }
 
     if (sendTelemetry && errorPage.EqualsIgnoreCase("blocked")) {
@@ -7891,7 +7873,6 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
                aStatus == NS_ERROR_MALWARE_URI ||
                aStatus == NS_ERROR_PHISHING_URI ||
                aStatus == NS_ERROR_UNWANTED_URI ||
-               aStatus == NS_ERROR_FORBIDDEN_URI ||
                aStatus == NS_ERROR_UNSAFE_CONTENT_TYPE ||
                aStatus == NS_ERROR_REMOTE_XUL ||
                aStatus == NS_ERROR_INTERCEPTION_FAILED ||
@@ -8062,9 +8043,9 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
 
       blankDoc->SetContainer(this);
 
-      // Apply the sandbox and fullscreen enabled flags to the document.
-      // These are immutable after being set here.
-      ApplySandboxAndFullscreenFlags(blankDoc);
+      // Copy our sandbox flags to the document. These are immutable
+      // after being set here.
+      blankDoc->SetSandboxFlags(mSandboxFlags);
 
       // create a content viewer for us and the new document
       docFactory->CreateInstanceForDocument(

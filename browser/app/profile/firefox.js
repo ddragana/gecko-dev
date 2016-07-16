@@ -625,9 +625,6 @@ pref("accessibility.typeaheadfind.flashBar", 1);
 // Tracks when accessibility is loaded into the previous session.
 pref("accessibility.loadedInLastSession", false);
 
-pref("plugins.update.url", "https://www.mozilla.org/%LOCALE%/plugincheck/?utm_source=firefox-browser&utm_medium=firefox-browser&utm_campaign=plugincheck-update");
-pref("plugins.update.notifyUser", false);
-
 pref("plugins.click_to_play", true);
 pref("plugins.testmode", false);
 
@@ -1453,3 +1450,10 @@ pref("dom.mozBrowserFramesEnabled", true);
 pref("extensions.pocket.enabled", true);
 
 pref("signon.schemeUpgrades", true);
+
+// Enable the "Simplify Page" feature in Print Preview
+pref("print.use_simplify_page", true);
+
+// Space separated list of URLS that are allowed to send objects (instead of
+// only strings) through webchannels.
+pref("webchannel.allowObject.urlWhitelist", "https://accounts.firefox.com https://content.cdn.mozilla.net https://hello.firefox.com https://input.mozilla.org https://support.mozilla.org https://install.mozilla.org");

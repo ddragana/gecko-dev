@@ -856,7 +856,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
     RootedObject newIdentity(cx);
 
     // Don't allow a compacting GC to observe any intermediate state.
-    AutoDisableCompactingGC nocgc(cx->runtime());
+    AutoDisableCompactingGC nocgc(cx);
 
     AutoDisableProxyCheck adpc(cx->runtime());
 
@@ -1836,15 +1836,19 @@ JS_GlobalObjectTraceHook(JSTracer* trc, JSObject* global)
 {
     MOZ_ASSERT(global->is<GlobalObject>());
 
-    // Off thread parsing and compilation tasks create a dummy global which is then
-    // merged back into the host compartment. Since it used to be a global, it will still
-    // have this trace hook, but it does not have a meaning relative to its new compartment.
-    // We can safely skip it.
-    if (!global->isOwnGlobal())
+    // Off thread parsing and compilation tasks create a dummy global which is
+    // then merged back into the host compartment. Since it used to be a
+    // global, it will still have this trace hook, but it does not have a
+    // meaning relative to its new compartment. We can safely skip it.
+    //
+    // Similarly, if we GC when creating the global, we may not have set that
+    // global's compartment's global pointer yet. In this case, the compartment
+    // will not yet contain anything that needs to be traced.
+    if (!global->isOwnGlobal(trc))
         return;
 
-    // Trace the compartment for any GC things that should only stick around if we know the
-    // compartment is live.
+    // Trace the compartment for any GC things that should only stick around if
+    // we know the compartment is live.
     global->compartment()->trace(trc);
 
     if (JSTraceOp trace = global->compartment()->creationOptions().getTrace())
@@ -5809,31 +5813,31 @@ JS_GetRegExpSource(JSContext* cx, HandleObject obj)
 /************************************************************************/
 
 JS_PUBLIC_API(bool)
-JS_SetDefaultLocale(JSRuntime* rt, const char* locale)
+JS_SetDefaultLocale(JSContext* cx, const char* locale)
 {
-    AssertHeapIsIdle(rt);
-    return rt->setDefaultLocale(locale);
+    AssertHeapIsIdle(cx);
+    return cx->setDefaultLocale(locale);
 }
 
 JS_PUBLIC_API(void)
-JS_ResetDefaultLocale(JSRuntime* rt)
+JS_ResetDefaultLocale(JSContext* cx)
 {
-    AssertHeapIsIdle(rt);
-    rt->resetDefaultLocale();
+    AssertHeapIsIdle(cx);
+    cx->resetDefaultLocale();
 }
 
 JS_PUBLIC_API(void)
-JS_SetLocaleCallbacks(JSRuntime* rt, const JSLocaleCallbacks* callbacks)
+JS_SetLocaleCallbacks(JSContext* cx, const JSLocaleCallbacks* callbacks)
 {
-    AssertHeapIsIdle(rt);
-    rt->localeCallbacks = callbacks;
+    AssertHeapIsIdle(cx);
+    cx->localeCallbacks = callbacks;
 }
 
 JS_PUBLIC_API(const JSLocaleCallbacks*)
-JS_GetLocaleCallbacks(JSRuntime* rt)
+JS_GetLocaleCallbacks(JSContext* cx)
 {
     /* This function can be called by a finalizer. */
-    return rt->localeCallbacks;
+    return cx->localeCallbacks;
 }
 
 /************************************************************************/

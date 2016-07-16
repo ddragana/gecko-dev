@@ -46,6 +46,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/ExternalHelperAppParent.h"
+#include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/GeolocationBinding.h"
 #ifdef MOZ_EME
 #include "mozilla/dom/MediaKeySystemAccess.h"
@@ -1166,7 +1167,7 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
       }
       tabId = AllocateTabId(openerTabId,
                             aContext.AsIPCTabContext(),
-                           constructorSender->ChildID());
+                            constructorSender->ChildID());
     }
     if (constructorSender) {
       nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
@@ -2318,7 +2319,6 @@ ContentParent::ContentParent(ContentParent* aTemplate,
   mSubprocess->LaunchAndWaitForProcessHandle();
 
   // Clone actors routed by aTemplate for this instance.
-  IToplevelProtocol::SetTransport(mSubprocess->GetChannel());
   ProtocolCloneContext cloneContext;
   cloneContext.SetContentParent(this);
   CloneManagees(aTemplate, &cloneContext);
@@ -2512,6 +2512,14 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     Unused << SendSetAudioSessionData(id, sessionName, iconPath);
   }
 #endif
+
+  RefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
+  MOZ_ASSERT(swr);
+
+  nsTArray<ServiceWorkerRegistrationData> registrations;
+  swr->GetRegistrations(registrations);
+
+  Unused << SendInitServiceWorkers(ServiceWorkerConfiguration(registrations));
 }
 
 bool
@@ -4333,14 +4341,6 @@ ContentParent::RecvExtProtocolChannelConnectParent(const uint32_t& registrarId)
 bool
 ContentParent::HasNotificationPermission(const IPC::Principal& aPrincipal)
 {
-#ifdef MOZ_CHILD_PERMISSIONS
-  uint32_t permission = mozilla::CheckPermission(this, aPrincipal,
-                                                 "desktop-notification");
-  if (permission != nsIPermissionManager::ALLOW_ACTION) {
-    return false;
-  }
-#endif /* MOZ_CHILD_PERMISSIONS */
-
   return true;
 }
 
@@ -4475,16 +4475,6 @@ bool
 ContentParent::RecvAddGeolocationListener(const IPC::Principal& aPrincipal,
                                           const bool& aHighAccuracy)
 {
-#ifdef MOZ_CHILD_PERMISSIONS
-  if (!ContentParent::IgnoreIPCPrincipal()) {
-    uint32_t permission = mozilla::CheckPermission(this, aPrincipal,
-                                                   "geolocation");
-    if (permission != nsIPermissionManager::ALLOW_ACTION) {
-      return true;
-    }
-  }
-#endif /* MOZ_CHILD_PERMISSIONS */
-
   // To ensure no geolocation updates are skipped, we always force the
   // creation of a new listener.
   RecvRemoveGeolocationListener();
@@ -5505,28 +5495,6 @@ ContentParent::PermissionManagerRelease(const ContentParentId& aCpId,
 }
 
 bool
-ContentParent::RecvGetBrowserConfiguration(const nsCString& aURI, BrowserConfiguration* aConfig)
-{
-  MOZ_ASSERT(XRE_IsParentProcess());
-
-  return GetBrowserConfiguration(aURI, *aConfig);;
-}
-
-/*static*/ bool
-ContentParent::GetBrowserConfiguration(const nsCString& aURI, BrowserConfiguration& aConfig)
-{
-  if (XRE_IsParentProcess()) {
-    RefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
-    MOZ_ASSERT(swr);
-
-    swr->GetRegistrations(aConfig.serviceWorkerRegistrations());
-    return true;
-  }
-
-  return ContentChild::GetSingleton()->SendGetBrowserConfiguration(aURI, &aConfig);
-}
-
-bool
 ContentParent::RecvProfile(const nsCString& aProfile)
 {
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -5756,4 +5724,47 @@ ContentParent::HandleWindowsMessages(const Message& aMsg) const
   }
 
   return true;
+}
+
+bool
+ContentParent::RecvGetFilesRequest(const nsID& aUUID,
+                                   const nsString& aDirectoryPath,
+                                   const bool& aRecursiveFlag)
+{
+  MOZ_ASSERT(!mGetFilesPendingRequests.GetWeak(aUUID));
+
+  ErrorResult rv;
+  RefPtr<GetFilesHelper> helper =
+    GetFilesHelperParent::Create(aUUID, aDirectoryPath, aRecursiveFlag, this,
+                                 rv);
+
+  if (NS_WARN_IF(rv.Failed())) {
+    return SendGetFilesResponse(aUUID,
+                                GetFilesResponseFailure(rv.StealNSResult()));
+  }
+
+  mGetFilesPendingRequests.Put(aUUID, helper);
+  return true;
+}
+
+bool
+ContentParent::RecvDeleteGetFilesRequest(const nsID& aUUID)
+{
+  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
+  if (helper) {
+    mGetFilesPendingRequests.Remove(aUUID);
+  }
+
+  return true;
+}
+
+void
+ContentParent::SendGetFilesResponseAndForget(const nsID& aUUID,
+                                             const GetFilesResponseResult& aResult)
+{
+  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
+  if (helper) {
+    mGetFilesPendingRequests.Remove(aUUID);
+    Unused << SendGetFilesResponse(aUUID, aResult);
+  }
 }

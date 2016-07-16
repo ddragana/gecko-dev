@@ -288,6 +288,7 @@ public:
     void ErrorInvalidEnumInfo(const char* info, const char* funcName,
                               GLenum enumValue);
     void ErrorOutOfMemory(const char* fmt = 0, ...);
+    void ErrorImplementationBug(const char* fmt = 0, ...);
 
     const char* ErrorName(GLenum error);
 
@@ -333,7 +334,8 @@ public:
 
     already_AddRefed<Layer>
     GetCanvasLayer(nsDisplayListBuilder* builder, Layer* oldLayer,
-                   LayerManager* manager) override;
+                   LayerManager* manager,
+                   bool aMirror = false) override;
 
     // Note that 'clean' here refers to its invalidation state, not the
     // contents of the buffer.
@@ -940,7 +942,13 @@ public:
                       &elem, &out_error);
     }
 
+    //////
     // WebGLTextureUpload.cpp
+public:
+    bool ValidateUnpackPixels(const char* funcName, uint32_t fullRows,
+                              uint32_t tailPixels, const webgl::TexUnpackBlob* blob);
+
+protected:
     bool ValidateTexImageSpecification(const char* funcName, uint8_t funcDims,
                                        GLenum texImageTarget, GLint level,
                                        GLsizei width, GLsizei height, GLsizei depth,
@@ -955,6 +963,9 @@ public:
                                    TexImageTarget* const out_target,
                                    WebGLTexture** const out_texture,
                                    WebGLTexture::ImageInfo** const out_imageInfo);
+
+    bool ValidateUnpackInfo(const char* funcName, GLenum format, GLenum type,
+                            webgl::PackingInfo* const out);
 
 // -----------------------------------------------------------------------------
 // Vertices Feature (WebGLContextVertices.cpp)
@@ -1031,6 +1042,7 @@ private:
     bool mBufferFetchingHasPerVertex;
     uint32_t mMaxFetchedVertices;
     uint32_t mMaxFetchedInstances;
+    bool mBufferFetch_IsAttrib0Active;
 
     bool DrawArrays_check(GLint first, GLsizei count, GLsizei primcount,
                           const char* info);
@@ -1303,8 +1315,7 @@ protected:
 
     bool ValidateCurFBForRead(const char* funcName,
                               const webgl::FormatUsageInfo** const out_format,
-                              uint32_t* const out_width, uint32_t* const out_height,
-                              GLenum* const out_mode);
+                              uint32_t* const out_width, uint32_t* const out_height);
 
     void Invalidate();
     void DestroyResourcesAndContext();
@@ -1319,24 +1330,8 @@ protected:
                       WebGLTexelFormat dstFormat, bool dstPremultiplied,
                       size_t dstTexelSize);
 
-public:
-    nsLayoutUtils::SurfaceFromElementResult
-    SurfaceFromElement(dom::Element* elem)
-    {
-        uint32_t flags = nsLayoutUtils::SFE_WANT_IMAGE_SURFACE |
-                         nsLayoutUtils::SFE_USE_ELEMENT_SIZE_IF_VECTOR;
+    //////
 
-        if (mPixelStore_ColorspaceConversion == LOCAL_GL_NONE)
-            flags |= nsLayoutUtils::SFE_NO_COLORSPACE_CONVERSION;
-
-        if (!mPixelStore_PremultiplyAlpha)
-            flags |= nsLayoutUtils::SFE_PREFER_NO_PREMULTIPLY_ALPHA;
-
-        RefPtr<gfx::DrawTarget> idealDrawTarget = nullptr; // Don't care for now.
-        return nsLayoutUtils::SurfaceFromElement(elem, flags, idealDrawTarget);
-    }
-
-protected:
     // Returns false if `object` is null or not valid.
     template<class ObjectType>
     bool ValidateObject(const char* info, ObjectType* object);
@@ -1614,6 +1609,7 @@ public:
     friend class ScopedUnpackReset;
     friend class webgl::TexUnpackBlob;
     friend class webgl::TexUnpackBytes;
+    friend class webgl::TexUnpackImage;
     friend class webgl::TexUnpackSurface;
     friend class WebGLTexture;
     friend class WebGLFBAttachPoint;

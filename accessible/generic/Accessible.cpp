@@ -18,7 +18,6 @@
 #include "nsTextEquivUtils.h"
 #include "DocAccessibleChild.h"
 #include "EventTree.h"
-#include "Logging.h"
 #include "Relation.h"
 #include "Role.h"
 #include "RootAccessible.h"
@@ -2211,7 +2210,7 @@ Accessible::EmbeddedChildCount()
 {
   if (mStateFlags & eHasTextKids) {
     if (!mEmbeddedObjCollector)
-      mEmbeddedObjCollector = new EmbeddedObjCollector(this);
+      mEmbeddedObjCollector.reset(new EmbeddedObjCollector(this));
     return mEmbeddedObjCollector->Count();
   }
 
@@ -2223,8 +2222,8 @@ Accessible::GetEmbeddedChildAt(uint32_t aIndex)
 {
   if (mStateFlags & eHasTextKids) {
     if (!mEmbeddedObjCollector)
-      mEmbeddedObjCollector = new EmbeddedObjCollector(this);
-    return mEmbeddedObjCollector ?
+      mEmbeddedObjCollector.reset(new EmbeddedObjCollector(this));
+    return mEmbeddedObjCollector.get() ?
       mEmbeddedObjCollector->GetAccessibleAt(aIndex) : nullptr;
   }
 
@@ -2236,8 +2235,8 @@ Accessible::GetIndexOfEmbeddedChild(Accessible* aChild)
 {
   if (mStateFlags & eHasTextKids) {
     if (!mEmbeddedObjCollector)
-      mEmbeddedObjCollector = new EmbeddedObjCollector(this);
-    return mEmbeddedObjCollector ?
+      mEmbeddedObjCollector.reset(new EmbeddedObjCollector(this));
+    return mEmbeddedObjCollector.get() ?
       mEmbeddedObjCollector->GetIndexAt(aChild) : -1;
   }
 

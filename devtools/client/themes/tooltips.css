@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
 /* Tooltip widget (see devtools/client/shared/widgets/Tooltip.js) */
 
 .devtools-tooltip .panel-arrowcontent {
@@ -107,6 +106,7 @@
   background: transparent;
   pointer-events: none;
   overflow: hidden;
+  filter: drop-shadow(0 3px 4px var(--theme-tooltip-shadow));
 }
 
 .tooltip-xul-wrapper {
@@ -131,6 +131,7 @@
 .tooltip-panel{
   background-color: var(--theme-tooltip-background);
   pointer-events: all;
+  flex-grow: 1;
 }
 
 .tooltip-visible {
@@ -142,20 +143,44 @@
   visibility: hidden;
 }
 
-/* Tooltip : arrow style */
+/* Tooltip : flexible height styles */
 
-.tooltip-container[type="arrow"] {
-  filter: drop-shadow(0 3px 4px var(--theme-tooltip-shadow));
+.tooltip-flexible-height .tooltip-panel {
+  /* In flexible mode the tooltip panel should only grow according to its content. */
+  flex-grow: 0;
 }
 
-.tooltip-xul-wrapper .tooltip-container[type="arrow"] {
+.tooltip-flexible-height .tooltip-filler {
+  /* In flexible mode the filler should grow as much as possible. */
+  flex-grow: 1;
+}
+
+/* type="arrow" overrides: remove arrow decorations for the xul <panel> wrapper */
+
+.tooltip-xul-wrapper[type="arrow"] {
+  margin: 0;
+}
+
+/* The arrow image is hidden because the panel is opened using openPopupAtScreen(). */
+
+/* Remove all decorations on .panel-arrowcontent is the tooltip content container. */
+.tooltip-xul-wrapper[type="arrow"] .panel-arrowcontent {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+/* Tooltip : arrow style */
+
+.tooltip-xul-wrapper .tooltip-container {
   /* When displayed in a XUL panel the drop shadow would be abruptly cut by the panel */
   filter: none;
 }
 
 .tooltip-container[type="arrow"] > .tooltip-panel {
   position: relative;
-  flex-grow: 0;
   min-height: 10px;
   box-sizing: border-box;
   width: 100%;
@@ -177,16 +202,16 @@
   height: 16px;
   width: 32px;
   overflow: hidden;
-  pointer-events: all;
   flex-shrink: 0;
 }
 
-.tooltip-arrow:-moz-locale-dir(rtl) {
-  align-self: flex-end;
+/* In RTL locales, only use RTL on the tooltip content, keep LTR for positioning */
+.tooltip-container:-moz-locale-dir(rtl) {
+  direction: ltr;
 }
 
-.tooltip-filler {
-  flex: 1;
+.tooltip-panel:-moz-locale-dir(rtl) {
+  direction: rtl;
 }
 
 .tooltip-top .tooltip-arrow {
@@ -209,6 +234,7 @@
   border-style: solid;
   border-width: 0px 3px 3px 0px;
   border-radius: 3px;
+  pointer-events: all;
 }
 
 .tooltip-bottom .tooltip-arrow:before {
@@ -389,4 +415,26 @@
 
 .stack-frame-line {
   color: var(--theme-highlight-orange);
+}
+
+/* Tooltip: HTML Search */
+
+#searchbox-panel-listbox {
+  width: 250px;
+  max-width: 250px;
+  overflow-x: hidden;
+}
+
+#searchbox-panel-listbox .autocomplete-item,
+#searchbox-panel-listbox .autocomplete-item[selected] {
+  overflow-x: hidden;
+}
+
+#searchbox-panel-listbox .autocomplete-item > .initial-value {
+  max-width: 130px;
+  margin-left: 15px;
+}
+
+#searchbox-panel-listbox .autocomplete-item > .autocomplete-value {
+  max-width: 150px;
 }

@@ -20,6 +20,7 @@
 #define wasm_instance_h
 
 #include "asmjs/WasmCode.h"
+#include "asmjs/WasmTable.h"
 #include "gc/Barrier.h"
 
 namespace js {
@@ -28,24 +29,6 @@ class WasmActivation;
 class WasmInstanceObject;
 
 namespace wasm {
-
-struct ExportMap;
-
-// TypedFuncTable is a compact version of LinkData::FuncTable that provides the
-// necessary range information necessary to patch typed function table elements
-// when the profiling mode is toggled.
-
-struct TypedFuncTable
-{
-    uint32_t globalDataOffset;
-    uint32_t numElems;
-
-    TypedFuncTable(uint32_t globalDataOffset, uint32_t numElems)
-      : globalDataOffset(globalDataOffset), numElems(numElems)
-    {}
-};
-
-typedef Vector<TypedFuncTable, 0, SystemAllocPolicy> TypedFuncTableVector;
 
 // Instance represents a wasm instance and provides all the support for runtime
 // execution of code in the instance. Instances share various immutable data
@@ -59,15 +42,16 @@ class Instance
     const UniqueCodeSegment              codeSegment_;
     const SharedMetadata                 metadata_;
     const SharedBytes                    maybeBytecode_;
-    const TypedFuncTableVector           typedFuncTables_;
     GCPtrWasmMemoryObject                memory_;
+    SharedTableVector                    tables_;
 
     bool                                 profilingEnabled_;
     CacheableCharsVector                 funcLabels_;
 
     // Internal helpers:
     uint8_t** addressOfMemoryBase() const;
-    ImportExit& importToExit(const Import& import);
+    void** addressOfTableBase(size_t tableIndex) const;
+    FuncImportExit& funcImportToExit(const FuncImport& fi);
     MOZ_MUST_USE bool toggleProfiling(JSContext* cx);
 
     // An instance keeps track of its innermost WasmActivation. A WasmActivation
@@ -77,42 +61,33 @@ class Instance
 
     // Import call slow paths which are called directly from wasm code.
     friend void* AddressOf(SymbolicAddress, ExclusiveContext*);
-    bool callImport(JSContext* cx, uint32_t importIndex, unsigned argc, const uint64_t* argv,
+    bool callImport(JSContext* cx, uint32_t funcImportIndex, unsigned argc, const uint64_t* argv,
                     MutableHandleValue rval);
     static int32_t callImport_void(int32_t importIndex, int32_t argc, uint64_t* argv);
     static int32_t callImport_i32(int32_t importIndex, int32_t argc, uint64_t* argv);
     static int32_t callImport_i64(int32_t importIndex, int32_t argc, uint64_t* argv);
     static int32_t callImport_f64(int32_t importIndex, int32_t argc, uint64_t* argv);
 
-    template <class T> friend struct js::MallocProvider;
+  public:
     Instance(UniqueCodeSegment codeSegment,
              const Metadata& metadata,
              const ShareableBytes* maybeBytecode,
-             TypedFuncTableVector&& typedFuncTables,
-             HandleWasmMemoryObject memory);
-
-  public:
-    static bool create(JSContext* cx,
-                       UniqueCodeSegment codeSegment,
-                       const Metadata& metadata,
-                       const ShareableBytes* maybeBytecode,
-                       TypedFuncTableVector&& typedFuncTables,
-                       HandleWasmMemoryObject memoryObject,
-                       Handle<FunctionVector> funcImports,
-                       const ExportMap& exports,
-                       HandleWasmInstanceObject instanceObj);
+             HandleWasmMemoryObject memory,
+             SharedTableVector&& tables,
+             Handle<FunctionVector> funcImports);
     ~Instance();
     void trace(JSTracer* trc);
 
     const CodeSegment& codeSegment() const { return *codeSegment_; }
     const Metadata& metadata() const { return *metadata_; }
+    const SharedTableVector& tables() const { return tables_; }
     SharedMem<uint8_t*> memoryBase() const;
     size_t memoryLength() const;
 
     // Execute the given export given the JS call arguments, storing the return
     // value in args.rval.
 
-    MOZ_MUST_USE bool callExport(JSContext* cx, uint32_t exportIndex, CallArgs args);
+    MOZ_MUST_USE bool callExport(JSContext* cx, uint32_t funcExportIndex, CallArgs args);
 
     // An instance has a profiling mode that is updated to match the runtime's
     // profiling mode when calling an instance's exports when there are no other
@@ -124,9 +99,9 @@ class Instance
     bool profilingEnabled() const { return profilingEnabled_; }
     const char* profilingLabel(uint32_t funcIndex) const { return funcLabels_[funcIndex].get(); }
 
-    // If the source binary was saved (by passing the bytecode to 'create'),
-    // this method will render the binary as text. Otherwise, a diagnostic
-    // string will be returned.
+    // If the source binary was saved (by passing the bytecode to the
+    // constructor), this method will render the binary as text. Otherwise, a
+    // diagnostic string will be returned.
 
     JSString* createText(JSContext* cx);
 
@@ -142,7 +117,7 @@ class Instance
     // directly into the JIT code. If the JIT code is released, the Instance must
     // be notified so it can go back to the generic callImport.
 
-    void deoptimizeImportExit(uint32_t importIndex);
+    void deoptimizeImportExit(uint32_t funcImportIndex);
 
     // Stack frame iterator support:
 
@@ -157,22 +132,12 @@ class Instance
     void addSizeOfMisc(MallocSizeOf mallocSizeOf,
                        Metadata::SeenSet* seenMetadata,
                        ShareableBytes::SeenSet* seenBytes,
-                       size_t* code, size_t* data) const;
+                       Table::SeenSet* seenTables,
+                       size_t* code,
+                       size_t* data) const;
 };
 
 typedef UniquePtr<Instance> UniqueInstance;
-
-// These accessors are used to implemented the special asm.js semantics of
-// exported wasm functions:
-
-extern bool
-IsExportedFunction(JSFunction* fun);
-
-extern Instance&
-ExportedFunctionToInstance(JSFunction* fun);
-
-extern uint32_t
-ExportedFunctionToExportIndex(JSFunction* fun);
 
 } // namespace wasm
 } // namespace js
