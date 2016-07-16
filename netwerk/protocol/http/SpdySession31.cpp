@@ -71,7 +71,6 @@ SpdySession31::SpdySession31(nsISocketTransport *aSocketTransport)
   , mPingSentEpoch(0)
   , mNextPingID(1)
   , mPreviousUsed(false)
-  , mCountRead0RTT(0)
 {
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
@@ -1865,76 +1864,6 @@ SpdySession31::ReadSegments(nsAHttpSegmentReader *reader,
 {
   bool again = false;
   return ReadSegmentsAgain(reader, count, countRead, &again);
-}
-
-nsresult
-SpdySession31::ReadSegments0RTT(nsAHttpSegmentReader *reader,
-                                uint32_t count, uint32_t *countRead)
-{
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
-
-  MOZ_ASSERT(reader, "Inconsistent Write Function Callback.");
-  MOZ_ASSERT(mOutputQueueUsed, "There must be someting in the queue.");
-  MOZ_ASSERT(!mCountRead0RTT, "We cannot call ReadSegments0RTT twice");
-  mSegmentReader = reader;
-
-  *countRead = 0;
-
-  LOG3(("Http2Session::ReadSegments0RTT %p", this));
-
-  nsresult rv;
-  uint32_t avail = mOutputQueueUsed - mOutputQueueSent;
-
-  rv = mSegmentReader->
-    OnReadSegment(mOutputQueueBuffer.get() + mOutputQueueSent, avail,
-                  countRead);
-  LOG3(("Http2Session::ReadSegments0RTT %p sz=%d rv=%x actual=%d",
-        this, avail, rv, countRead));
-
-  if (NS_SUCCEEDED(rv)) {
-    MOZ_ASSERT(*countRead);
-    mCountRead0RTT = *countRead;
-  }
-  return rv;
-}
-
-nsresult
-SpdySession31::Finished0RTTStart(bool aSuccess)
-{
-  if (!aSuccess) {
-    mCountRead0RTT = 0;
-    return NS_OK;
-  }
-
-  MOZ_ASSERT(mCountRead0RTT, "Data must have bin consumed.");
-  uint32_t avail = mOutputQueueUsed - mOutputQueueSent;
-  MOZ_ASSERT(mCountRead0RTT >= avail, "Data must be in the queue still.");
-
-  if (mCountRead0RTT == avail) {
-    mOutputQueueUsed = 0;
-    mOutputQueueSent = 0;
-    mCountRead0RTT = 0;
-    return NS_OK;
-  }
-
-  mOutputQueueSent += mCountRead0RTT;
-  mCountRead0RTT = 0;
-
-  // If the output queue is close to filling up and we have sent out a good
-  // chunk of data from the beginning then realign it.
-
-  if ((mOutputQueueSent >= kQueueMinimumCleanup) &&
-      ((mOutputQueueSize - mOutputQueueUsed) < kQueueTailRoom)) {
-    RealignOutputQueue();
-  }
-
-  return NS_OK;
-}
-
-bool
-SpdySession31::CanPeekMoreDataFor0RTT()
-{
-  return false;
 }
 
 // WriteSegments() is used to read data off the socket. Generally this is

@@ -324,6 +324,7 @@ nsNSSSocketInfo::GetAlpnEarlySelection(nsACString& aAlpnSelected)
       (alpnState == SSL_NEXT_PROTO_EARLY_VALUE) &&
       chosenAlpnLen) {
     aAlpnSelected.Assign(chosenAlpn, chosenAlpnLen);
+    return NS_OK;
   }
 
   return NS_ERROR_NOT_AVAILABLE;
@@ -340,6 +341,24 @@ void
 nsNSSSocketInfo::SetEarlyDataAccepted(bool aAccepted)
 {
   mEarlyDataAccepted = aAccepted;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::DriveHandshake()
+{
+  SECStatus rv = SSL_ForceHandshake(mFd);
+
+  if (rv != SECSuccess) {
+    PRErrorCode errorCode;
+    errorCode = PR_GetError();
+    if (errorCode == PR_WOULD_BLOCK_ERROR) {
+      return NS_BASE_STREAM_WOULD_BLOCK;
+    }
+    SSLErrorMessageType errorMessageType = PlainErrorMessage;
+    SetCanceled(errorCode, errorMessageType);
+    return NS_ERROR_FAILURE;
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP

@@ -72,22 +72,6 @@ public:
     virtual nsresult ReadSegments(nsAHttpSegmentReader *reader,
                                   uint32_t count, uint32_t *countRead) = 0;
 
-    virtual nsresult ReadSegments0RTT(nsAHttpSegmentReader *reader,
-                                      uint32_t count, uint32_t *countRead)
-    {
-        return NS_ERROR_NOT_IMPLEMENTED;
-    }
-
-    virtual nsresult Finished0RTTStart(bool aSuccess)
-    {
-        return NS_ERROR_NOT_IMPLEMENTED;
-    }
-
-    virtual bool CanPeekMoreDataFor0RTT()
-    {
-        return false;
-    }
-
     // called to write response data to the transaction.
     virtual nsresult WriteSegments(nsAHttpSegmentWriter *writer,
                                    uint32_t count, uint32_t *countWritten) = 0;
@@ -221,8 +205,12 @@ public:
     virtual void DisableSpdy() { }
     virtual void ReuseConnectionOnRestartOK(bool) { }
 
-    virtual bool IsSafeMethod() {
-      return false;
+    // Return tre if 0RTT is possible.
+    virtual bool Do0RTT() {
+        return false;
+    }
+    virtual nsresult Finish0RTT(bool aRestart) {
+        return NS_ERROR_NOT_IMPLEMENTED;
     }
 };
 

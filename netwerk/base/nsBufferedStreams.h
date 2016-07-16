@@ -70,8 +70,7 @@ public:
     NS_DECL_NSISTREAMBUFFERACCESS
     NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
 
-    nsBufferedInputStream() : nsBufferedStream()
-                            , mPeeked(0) {}
+    nsBufferedInputStream() : nsBufferedStream() {}
 
     static nsresult
     Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
@@ -85,9 +84,6 @@ protected:
 
     NS_IMETHOD Fill() override;
     NS_IMETHOD Flush() override { return NS_OK; } // no-op for input streams
-
-private:
-    uint32_t mPeeked;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

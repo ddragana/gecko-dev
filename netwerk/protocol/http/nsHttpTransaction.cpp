@@ -29,7 +29,6 @@
 #include "nsServiceManagerUtils.h"   // do_GetService
 #include "nsIHttpActivityObserver.h"
 #include "nsSocketTransportService2.h"
-#include "nsIBufferedStreams.h"
 #include "nsICancelable.h"
 #include "nsIEventTarget.h"
 #include "nsIHttpChannelInternal.h"
@@ -140,6 +139,7 @@ nsHttpTransaction::nsHttpTransaction()
     , mAppId(NECKO_NO_APP_ID)
     , mIsInIsolatedMozBrowser(false)
     , mClassOfService(0)
+    , m0RTTInProgress(false)
 {
     LOG(("Creating nsHttpTransaction @%p\n", this));
     gHttpHandler->GetMaxPipelineObjectSize(&mMaxPipelineObjectSize);
@@ -377,11 +377,8 @@ nsHttpTransaction::Init(uint32_t caps,
                                        nsIOService::gDefaultSegmentSize);
         if (NS_FAILED(rv)) return rv;
     }
-    else {
-        rv = NS_NewBufferedInputStream(getter_AddRefs(mRequestStream), headers,
-                                       nsIOService::gDefaultSegmentSize);
-        if (NS_FAILED(rv)) return rv;
-    }
+    else
+        mRequestStream = headers;
 
     uint64_t size_u64;
     rv = mRequestStream->Available(&size_u64);
@@ -696,7 +693,7 @@ nsHttpTransaction::ReadSegments(nsAHttpSegmentReader *reader,
         return mStatus;
     }
 
-    if (!mConnected) {
+    if (!mConnected && !m0RTTInProgress) {
         mConnected = true;
         mConnection->GetSecurityInfo(getter_AddRefs(mSecurityInfo));
     }
@@ -742,51 +739,6 @@ nsHttpTransaction::ReadSegments(nsAHttpSegmentReader *reader,
     }
 
     return rv;
-}
-
-nsresult
-nsHttpTransaction::ReadSegments0RTT(nsAHttpSegmentReader *reader,
-                                    uint32_t count, uint32_t *countRead)
-{
-    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
-
-    MOZ_ASSERT(!mTransactionDone);
-
-    *countRead = 0;
-    nsresult rv = NS_OK;
-    mDeferredSendProgress = false;
-    mReader = reader;
-    nsCOMPtr<nsIBufferedInputStream> stream = do_QueryInterface(mRequestStream);
-    if (stream) {
-        rv = stream->PeekSegments(ReadRequestSegment, this, count, countRead);
-    }
-    mReader = nullptr;
-    mDeferredSendProgress = false;
-
-    return rv;
-}
-
-bool
-nsHttpTransaction::CanPeekMoreDataFor0RTT()
-{
-    // If buffer is full we cannot read more data.
-    nsCOMPtr<nsIBufferedInputStream> stream = do_QueryInterface(mRequestStream);
-    if (stream) {
-        bool canPeekMore;
-        stream->MoreDataToPeek(&canPeekMore);
-        return canPeekMore;
-    }
-    return false;
-}
-
-nsresult
-nsHttpTransaction::Finished0RTTStart(bool aSuccess)
-{
-    nsCOMPtr<nsIBufferedInputStream> stream = do_QueryInterface(mRequestStream);
-    if (stream) {
-        stream->AdvanceForgetPeekedSegments(aSuccess);
-    }
-    return NS_OK;
 }
 
 NS_METHOD
@@ -2367,6 +2319,32 @@ nsHttpTransaction::GetNetworkAddresses(NetAddr &self, NetAddr &peer)
     MutexAutoLock lock(mLock);
     self = mSelfAddr;
     peer = mPeerAddr;
+}
+
+bool
+nsHttpTransaction::Do0RTT()
+{
+   // For now only send early data if it is IsSafeMethod and we do not have
+   // request body.
+   if (mRequestHead->IsSafeMethod() && !mHasRequestBody) {
+       m0RTTInProgress = true;
+   }
+   return m0RTTInProgress;
+}
+
+nsresult
+nsHttpTransaction::Finish0RTT(bool aRestart)
+{
+    MOZ_ASSERT(m0RTTInProgress);
+    m0RTTInProgress = false;
+    if (aRestart) {
+        // Reset request headers to be send again.
+        nsresult rv = NS_NewByteInputStream(getter_AddRefs(mRequestStream),
+                                            mReqHeaderBuf.get(),
+                                            mReqHeaderBuf.Length());
+        if (NS_FAILED(rv)) return rv;
+    }
+    return NS_OK;
 }
 
 } // namespace net

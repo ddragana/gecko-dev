@@ -55,6 +55,11 @@ interface nsISSLSocketControl : nsISupports {
      */
     readonly attribute bool earlyDataAccepted;
 
+    /* When 0RTT is perform, PR_Write will not drive handshake forward. It must
+     * be force by calling this function.
+     */
+    void driveHandshake();
+
     /* Determine if a potential SSL connection to hostname:port with
      * a desired NPN negotiated protocol of npnProtocol can use the socket
      * associated with this object instead of making a new one.

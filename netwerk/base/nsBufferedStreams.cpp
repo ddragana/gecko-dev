@@ -311,7 +311,6 @@ nsBufferedInputStream::Available(uint64_t *result)
 NS_IMETHODIMP
 nsBufferedInputStream::Read(char * buf, uint32_t count, uint32_t *result)
 {
-    mPeeked = 0;
     if (mBufferDisabled) {
         if (!mStream) {
             *result = 0;
@@ -335,7 +334,6 @@ nsBufferedInputStream::ReadSegments(nsWriteSegmentFun writer, void *closure,
                                     uint32_t count, uint32_t *result)
 {
     *result = 0;
-    mPeeked = 0;
 
     if (!mStream)
         return NS_OK;
@@ -362,68 +360,6 @@ nsBufferedInputStream::ReadSegments(nsWriteSegmentFun writer, void *closure,
         }
     }
     return (*result > 0) ? NS_OK : rv;
-}
-
-NS_IMETHODIMP
-nsBufferedInputStream::MoreDataToPeek(bool *aCanPeekMore)
-{
-    *aCanPeekMore = ((mCursor + mPeeked) < mBufferSize) && !mEOF;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsBufferedInputStream::PeekSegments(nsWriteSegmentFun writer, void *closure,
-                                    uint32_t count, uint32_t *result)
-{
-    *result = 0;
-
-    if (!mStream) {
-        return NS_OK;
-    }
-
-    nsresult rv = NS_OK;
-
-    while (count > 0) {
-        uint32_t amt = std::min(count, mFillPoint - mCursor - mPeeked);
-        if (amt > 0) {
-            uint32_t read = 0;
-            rv = writer(this, closure, mBuffer + mCursor + mPeeked,
-                        *result, amt, &read);
-            if (NS_FAILED(rv)) {
-                // errors returned from the writer end here!
-                rv = NS_OK;
-                break;
-            }
-            *result += read;
-            count -= read;
-            mPeeked += read;
-        }
-        else {
-            // to avoid setting mEOF when only buffer is full.
-            if (mFillPoint == mBufferSize) {
-                break;
-            }
-            rv = Fill();
-            if (NS_FAILED(rv) || mFillPoint == (mCursor + mPeeked)) {
-                break;
-            }
-        }
-    }
-    mPeeked += *result;
-    return (*result > 0) ? NS_OK : rv;
-}
-
-NS_IMETHODIMP
-nsBufferedInputStream::AdvanceForgetPeekedSegments(bool aAdvance)
-{
-    if (aAdvance && mPeeked) {
-        MOZ_ASSERT(mCursor + mPeeked <= mFillPoint,
-                   "The peeked data must be in the buffer!");
-        mCursor += mPeeked;
-    }
-
-    mPeeked = 0;
-    return NS_OK;
 }
 
 NS_IMETHODIMP

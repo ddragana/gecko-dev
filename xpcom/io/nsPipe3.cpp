@@ -1342,25 +1342,6 @@ nsPipeInputStream::ReadSegments(nsWriteSegmentFun aWriter,
 }
 
 NS_IMETHODIMP
-nsPipeInputStream::PeekSegments(nsWriteSegmentFun writer, void *closure,
-                               uint32_t count, uint32_t *result)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-nsPipeInputStream::AdvanceForgetPeekedSegments(bool aAdvance)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-nsPipeInputStream::MoreDataToPeek(bool *aCanPeekMore)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 nsPipeInputStream::Read(char* aToBuf, uint32_t aBufLen, uint32_t* aReadCount)
 {
   return ReadSegments(NS_CopySegmentToBuffer, aToBuf, aBufLen, aReadCount);

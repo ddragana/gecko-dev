@@ -81,6 +81,7 @@ nsHttpConnection::nsHttpConnection()
     , mForceSendPending(false)
     , m0RTTChecked(false)
     , mWaitingFor0RTTResponse(false)
+    , m0RTTUsed(false)
 {
     LOG(("Creating nsHttpConnection @%p\n", this));
 
@@ -304,70 +305,63 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
         goto npnComplete;
 
     rv = ssl->GetNegotiatedNPN(negotiatedNPN);
-    if (rv == NS_ERROR_NOT_CONNECTED) {
-
+    if (!m0RTTChecked && (rv == NS_ERROR_NOT_CONNECTED)) {
         // Check if we have early selected alpn.
-        // TODO: we probably do not need check from couple of lines below, need to see when we fix PR_PEEK problem.
-        if (!m0RTTChecked) {
-            nsAutoCString earlyNegotiatedNPN;
-            if (ssl->GetAlpnEarlySelection(earlyNegotiatedNPN) == NS_ERROR_NOT_AVAILABLE) {
-                LOG(("nsHttpConnection::EnsureNPNComplete %p - "
-                     "early selected alpn not available"));
-                // Let's do PR_Write and try again.
-            } else {
-                LOG(("nsHttpConnection::EnsureNPNComplete %p -"
-                     "early selected alpn: %s\n", earlyNegotiatedNPN.get()));
-                uint32_t infoIndex;
-                const SpdyInformation *info = gHttpHandler->SpdyInfo();
-                if (NS_SUCCEEDED(info->GetNPNIndex(earlyNegotiatedNPN, &infoIndex))) {
-                    return false;
-                }
-                m0RTTChecked = true;
-                mWaitingFor0RTTResponse = true;
-            }
-        }
-
-        // In case we are not in 0RTT or we have no more data to write data.
-        if (!mWaitingFor0RTTResponse ||
-            !mTransaction->CanPeekMoreDataFor0RTT()) {
-            // By writing 0 bytes to the socket the SSL handshake machine is
-            // pushed forward.
+        m0RTTChecked = true;
+        nsAutoCString earlyNegotiatedNPN;
+        nsresult rvEarlyAlpn = ssl->GetAlpnEarlySelection(earlyNegotiatedNPN);
+        if (rvEarlyAlpn == NS_ERROR_NOT_AVAILABLE) {
+            // if mSocketOut->Write("", 0, &count) was never call the value
+            // for AlpnEarlySelection is still not set. So call it and try
+            // again.
+            LOG(("nsHttpConnection::EnsureNPNComplete %p - "
+                 "early selected alpn not available, we will try one more time."));
+            // Let's do PR_Write and try again.
             uint32_t count = 0;
             rv = mSocketOut->Write("", 0, &count);
             if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
                 goto npnComplete;
             }
 
-           if (!m0RTTChecked) {
-                m0RTTChecked = true;
-                nsAutoCString earlyNegotiatedNPN;
-                rv = ssl->GetAlpnEarlySelection(earlyNegotiatedNPN);
-                if (rv == NS_ERROR_NOT_AVAILABLE) {
-                    LOG(("nsHttpConnection::EnsureNPNComplete %p - "
-                         "early selected alpn not available"));
-                    return false;
-                }
-
-                LOG(("nsHttpConnection::EnsureNPNComplete %p -"
-                     "early selected alpn: %s\n", earlyNegotiatedNPN.get()));
-                uint32_t infoIndex;
-                const SpdyInformation *info = gHttpHandler->SpdyInfo();
-                if (NS_SUCCEEDED(info->GetNPNIndex(negotiatedNPN, &infoIndex))) {
-                    return false;
-                }
-                mWaitingFor0RTTResponse = true;
+            // Check NegotiatedNPN first.
+            rv = ssl->GetNegotiatedNPN(negotiatedNPN);
+            if (rv == NS_ERROR_NOT_CONNECTED) {
+                rvEarlyAlpn = ssl->GetAlpnEarlySelection(earlyNegotiatedNPN);
             }
         }
 
-        if (mWaitingFor0RTTResponse &&
-            mTransaction->CanPeekMoreDataFor0RTT()) {
-            aRv = mTransaction->ReadSegments0RTT(this,
-                                                 nsIOService::gDefaultSegmentSize,
-                                                 &aTransactionBytes);
+        if (rvEarlyAlpn == NS_ERROR_NOT_AVAILABLE) {
+            LOG(("nsHttpConnection::EnsureNPNComplete %p - "
+                 "early selected alpn not available"));
+        } else {
+            LOG(("nsHttpConnection::EnsureNPNComplete %p -"
+                 "early selected alpn: %s\n", earlyNegotiatedNPN.get()));
+            uint32_t infoIndex;
+            const SpdyInformation *info = gHttpHandler->SpdyInfo();
+            if (!NS_SUCCEEDED(info->GetNPNIndex(earlyNegotiatedNPN, &infoIndex))) {
+                // H2 is still not implemented so we do not write any data!
+                if (mTransaction->Do0RTT()) {
+                    mWaitingFor0RTTResponse = true;
+                }
+            }
+        }
+    }
+
+    if (rv == NS_ERROR_NOT_CONNECTED) {
+        if (mWaitingFor0RTTResponse) {
+            aRv = mTransaction->ReadSegments(this,
+                                             nsIOService::gDefaultSegmentSize,
+                                             &aTransactionBytes);
             if (NS_FAILED(aRv) && aRv != NS_BASE_STREAM_WOULD_BLOCK) {
                 goto npnComplete;
             }
         }
+
+        rv = ssl->DriveHandshake();
+        if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
+            goto npnComplete;
+        }
+
         return false;
     }
 
@@ -378,13 +372,11 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
 
         if (mWaitingFor0RTTResponse) {
             mWaitingFor0RTTResponse = false;
-            bool earlyDataAccepted;
-            rv = ssl->GetEarlyDataAccepted(&earlyDataAccepted);
-            if (!earlyDataAccepted) {
-                mTransaction->Finished0RTTStart(false);
-                //TODO clean up for H2.
-            } else {
-                mTransaction->Finished0RTTStart(true);
+            // Check if early data has been accepted.
+            rv = ssl->GetEarlyDataAccepted(&m0RTTUsed);
+            if (NS_FAILED(mTransaction->Finish0RTT(!m0RTTUsed))) {
+                m0RTTUsed = false;
+                mTransaction->Close(NS_ERROR_NET_RESET);
             }
         } else {
             uint32_t infoIndex;
@@ -402,7 +394,9 @@ npnComplete:
     mNPNComplete = true;
     if (mWaitingFor0RTTResponse) {
         mWaitingFor0RTTResponse = false;
-        mTransaction->Finished0RTTStart(false);
+        if (NS_FAILED(mTransaction->Finish0RTT(true))) {
+            mTransaction->Close(NS_ERROR_NET_RESET);
+        }
     }
     return true;
 }
@@ -1422,6 +1416,15 @@ nsHttpConnection::ResumeRecv()
     // the latency between those two acts and not all the processing that
     // may get done before the ResumeRecv() call
     mLastReadTime = PR_IntervalNow();
+
+    if (m0RTTUsed) {
+        // If we are doing early data transmission, maybe we already have data
+        // in nss so we can read it.
+        m0RTTUsed = false;
+        return gSocketTransportService->Dispatch(
+            NewRunnableMethod(this, &nsHttpConnection::OnSocketReadable),
+            NS_DISPATCH_NORMAL);
+    }
 
     if (mSocketIn)
         return mSocketIn->AsyncWait(this, 0, 0, nullptr);

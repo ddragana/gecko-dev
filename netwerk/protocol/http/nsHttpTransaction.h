@@ -166,11 +166,8 @@ public:
 
     int64_t GetTransferSize() { return mTransferSize; }
 
-    nsresult ReadSegments0RTT(nsAHttpSegmentReader *, uint32_t, uint32_t *) override;
-    nsresult Finished0RTTStart(bool) override;
-    bool CanPeekMoreDataFor0RTT() override;
-
-    bool IsSafeMethod() { return mRequestHead->IsSafeMethod(); }
+    bool Do0RTT();
+    nsresult Finish0RTT(bool aRestart);
 private:
     friend class DeleteHttpTransaction;
     virtual ~nsHttpTransaction();
@@ -465,6 +462,8 @@ public:
 private:
     NetAddr                         mSelfAddr;
     NetAddr                         mPeerAddr;
+
+    bool                            m0RTTInProgress;
 };
 
 } // namespace net
