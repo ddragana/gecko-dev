@@ -367,7 +367,6 @@ private:
                                                              // are waiting
                                                              // for the end of
                                                              // the handsake.
-    bool                            m0RTTUsed;
 };
 
 } // namespace net

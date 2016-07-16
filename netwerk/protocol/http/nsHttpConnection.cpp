@@ -81,7 +81,6 @@ nsHttpConnection::nsHttpConnection()
     , mForceSendPending(false)
     , m0RTTChecked(false)
     , mWaitingFor0RTTResponse(false)
-    , m0RTTUsed(false)
 {
     LOG(("Creating nsHttpConnection @%p\n", this));
 
@@ -335,7 +334,7 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
                  "early selected alpn not available"));
         } else {
             LOG(("nsHttpConnection::EnsureNPNComplete %p -"
-                 "early selected alpn: %s\n", earlyNegotiatedNPN.get()));
+                 "early selected alpn."));
             uint32_t infoIndex;
             const SpdyInformation *info = gHttpHandler->SpdyInfo();
             if (!NS_SUCCEEDED(info->GetNPNIndex(earlyNegotiatedNPN, &infoIndex))) {
@@ -370,15 +369,17 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
              this, mConnInfo->HashKey().get(), negotiatedNPN.get(),
              mTLSFilter ? " [Double Tunnel]" : ""));
 
+        bool ealyDataAccepted = false;
         if (mWaitingFor0RTTResponse) {
             mWaitingFor0RTTResponse = false;
             // Check if early data has been accepted.
-            rv = ssl->GetEarlyDataAccepted(&m0RTTUsed);
-            if (NS_FAILED(mTransaction->Finish0RTT(!m0RTTUsed))) {
-                m0RTTUsed = false;
+            rv = ssl->GetEarlyDataAccepted(&ealyDataAccepted);
+            if (NS_FAILED(mTransaction->Finish0RTT(!ealyDataAccepted))) {
                 mTransaction->Close(NS_ERROR_NET_RESET);
+                goto npnComplete;
             }
-        } else {
+        }
+        if (!ealyDataAccepted) {
             uint32_t infoIndex;
             const SpdyInformation *info = gHttpHandler->SpdyInfo();
             if (NS_SUCCEEDED(info->GetNPNIndex(negotiatedNPN, &infoIndex))) {
@@ -1416,15 +1417,6 @@ nsHttpConnection::ResumeRecv()
     // the latency between those two acts and not all the processing that
     // may get done before the ResumeRecv() call
     mLastReadTime = PR_IntervalNow();
-
-    if (m0RTTUsed) {
-        // If we are doing early data transmission, maybe we already have data
-        // in nss so we can read it.
-        m0RTTUsed = false;
-        return gSocketTransportService->Dispatch(
-            NewRunnableMethod(this, &nsHttpConnection::OnSocketReadable),
-            NS_DISPATCH_NORMAL);
-    }
 
     if (mSocketIn)
         return mSocketIn->AsyncWait(this, 0, 0, nullptr);
