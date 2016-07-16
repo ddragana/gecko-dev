@@ -314,7 +314,8 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
             // for AlpnEarlySelection is still not set. So call it and try
             // again.
             LOG(("nsHttpConnection::EnsureNPNComplete %p - "
-                 "early selected alpn not available, we will try one more time."));
+                 "early selected alpn not available, we will try one more time.",
+                 this));
             // Let's do PR_Write and try again.
             uint32_t count = 0;
             rv = mSocketOut->Write("", 0, &count);
@@ -331,10 +332,10 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
 
         if (rvEarlyAlpn == NS_ERROR_NOT_AVAILABLE) {
             LOG(("nsHttpConnection::EnsureNPNComplete %p - "
-                 "early selected alpn not available"));
+                 "early selected alpn not available", this));
         } else {
             LOG(("nsHttpConnection::EnsureNPNComplete %p -"
-                 "early selected alpn."));
+                 "early selected alpn: %s", this, earlyNegotiatedNPN.get()));
             uint32_t infoIndex;
             const SpdyInformation *info = gHttpHandler->SpdyInfo();
             if (!NS_SUCCEEDED(info->GetNPNIndex(earlyNegotiatedNPN, &infoIndex))) {
