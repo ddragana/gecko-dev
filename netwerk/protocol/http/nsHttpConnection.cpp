@@ -303,7 +303,39 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
     if (NS_FAILED(rv))
         goto npnComplete;
 
+    /* This function checks whether a tls handshake has finished and whether we
+     * can send early data.
+     * A handshake is finished when GetNegotiatedNPN returns NS_OK.
+     *
+     * Steps:
+     *  1) check whether a tls handshake has finished.
+     *     If the handshake is in progress:
+     *     1) if the handshake is still in progress and this is the first
+     *        check, check whether we can send early data (i.e. we can send
+     *        early data if we have alpn from a previous session -
+     *        GetAlpnEarlySelection. This implies that nss has a session ticket
+     *        and that early data is negotiated)
+     *        nss needs to be pushed at least once before getting a real value
+     *        from GetAlpnEarlySelection. Sometimes this is already done in
+     *        function nsSocketTransport:IsAlive, but just in case we call it
+     I        here as well and we check GetAlpnEarlySelection one more time.
+     *        If we have an early selected alpn we can send data
+     *        (mWaitingFor0RTTResponse = true). Currently only Http/1.1 without
+     *        request body can send data (this is work in progress).
+     *        mTransaction->Do0RTT() will return true if a transaction can send
+     *        early data.
+     *     2) If mWaitingFor0RTTResponse is set send application data.
+     *     3) Push nss by calling ssl->DriveHandshake().
+     *
+     *     If hand shake was successful:
+     *     1) If we were sending early data, we need to check whether they were
+     *        accepted or rejected. We call mTransaction->Finish0RTT. This
+     *        function will reset transaction or mark send data as "really" send.
+     *     2) If we were not doing early data or early data has been rejected
+     *        proceed as before, e.g set up application protocol.
+     */
     rv = ssl->GetNegotiatedNPN(negotiatedNPN);
+    //If the handshake is in progress:
     if (!m0RTTChecked && (rv == NS_ERROR_NOT_CONNECTED)) {
         // Check if we have early selected alpn.
         m0RTTChecked = true;
@@ -348,6 +380,7 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
     }
 
     if (rv == NS_ERROR_NOT_CONNECTED) {
+        //2) If mWaitingFor0RTTResponse is set send application data.
         if (mWaitingFor0RTTResponse) {
             aRv = mTransaction->ReadSegments(this,
                                              nsIOService::gDefaultSegmentSize,
@@ -357,6 +390,7 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
             }
         }
 
+        //3) Push nss by calling ssl->DriveHandshake().
         rv = ssl->DriveHandshake();
         if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
             goto npnComplete;
@@ -365,6 +399,7 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
         return false;
     }
 
+    //If hand shake was successful:
     if (NS_SUCCEEDED(rv)) {
         LOG(("nsHttpConnection::EnsureNPNComplete %p [%s] negotiated to '%s'%s\n",
              this, mConnInfo->HashKey().get(), negotiatedNPN.get(),
