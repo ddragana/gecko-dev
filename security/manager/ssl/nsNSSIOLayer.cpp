@@ -346,6 +346,10 @@ nsNSSSocketInfo::SetEarlyDataAccepted(bool aAccepted)
 NS_IMETHODIMP
 nsNSSSocketInfo::DriveHandshake()
 {
+  if (GetErrorCode()) {
+    return NS_ERROR_FAILURE;
+  }
+
   SECStatus rv = SSL_ForceHandshake(mFd);
 
   if (rv != SECSuccess) {
