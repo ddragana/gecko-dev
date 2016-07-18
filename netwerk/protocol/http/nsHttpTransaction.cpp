@@ -2324,12 +2324,8 @@ nsHttpTransaction::GetNetworkAddresses(NetAddr &self, NetAddr &peer)
 bool
 nsHttpTransaction::Do0RTT()
 {
-   // For now only send early data if it is IsSafeMethod and we do not have
-   // request body.
-   if (mRequestHead->IsSafeMethod() && !mHasRequestBody) {
-       m0RTTInProgress = true;
-   }
-   return m0RTTInProgress;
+   m0RTTInProgress = true;
+   return true;
 }
 
 nsresult
@@ -2338,11 +2334,14 @@ nsHttpTransaction::Finish0RTT(bool aRestart)
     MOZ_ASSERT(m0RTTInProgress);
     m0RTTInProgress = false;
     if (aRestart) {
+fprintf(stdout, "DDD Reset request \n");
         // Reset request headers to be send again.
-        nsresult rv = NS_NewByteInputStream(getter_AddRefs(mRequestStream),
-                                            mReqHeaderBuf.get(),
-                                            mReqHeaderBuf.Length());
-        if (NS_FAILED(rv)) return rv;
+        nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mRequestStream);
+        if (seekable) {
+            seekable->Seek(nsISeekableStream::NS_SEEK_SET, 0);
+        } else {
+            return NS_ERROR_FAILURE;
+        }
     }
     return NS_OK;
 }
