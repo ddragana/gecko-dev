@@ -270,6 +270,7 @@ struct sdt_t
   uint32_t mMaxBufferedPkt;
 
   uint64_t aLargestAcked;
+  uint64_t aSmallestUnacked;
 
   struct range_t *aRecvAckRange; // We are keeping track of the ack ranges that
                                  // a sender has already received from the
@@ -362,8 +363,8 @@ struct sdt_t
 
   PRFileDesc *fd; // weak ptr, don't close
 
-  uint64_t aNextMonotonousPacketId;
-  uint64_t aNextDataPacketId;
+  uint64_t aNextPacketId;
+
   //CUBIC private data
   // This will not work on all platforms, because of the alligment.
   // I will submit this first version and change it later.
@@ -418,8 +419,7 @@ struct sdt_t *sdt_newHandle()
   handle->hOutgoingHeaders->mWindowSize = 0;
   handle->hState = SDT_H2S_NEWFRAME;
 
-  handle->aNextMonotonousPacketId = 1;
-  handle->aNextDataPacketId = 1;
+  handle->aNextPacketId = 1;
 
   cc->Init(handle);
 
@@ -681,7 +681,7 @@ sLayerEncodePublicContent(struct sdt_t *handle, const void *buf,
   // For now we do not have connectionID
   handle->sLayerSendBuffer[0] = 0x0;
   if ((((uint8_t*)buf)[0]) == DTLS_TYPE_DATA) {
-    uint64_t id = htonll(handle->aNextMonotonousPacketId);
+    uint64_t id = htonll(handle->aNextPacketId);
     memcpy(handle->sLayerSendBuffer + 1, &id, 8);
   } else {
     // It is a DTLS handshake packet, for now set id to 0, this will be fixed
@@ -787,14 +787,14 @@ sLayerSendTo(PRFileDesc *fd, const void *buf, int32_t amount,
 
   if (!handle->aPktTransmit) {
     // It is a ACK.
-    handle->aNextMonotonousPacketId++;
+    handle->aNextPacketId++;
     return amount;
   }
 
   // Remember last 3 Ids. TODO: 2 is enough
   if (!handle->aPktTransmit->mIdsNum) {
     // Remembre the original id. This is only for debugging.
-    handle->aPktTransmit->mOriginalId = handle->aNextDataPacketId++;
+    handle->aPktTransmit->mOriginalId = handle->aNextPacketId;
   } else if (handle->aPktTransmit->mIdsNum == NUM_RETRANSMIT_IDS) {
     for (int i = 0; i < NUM_RETRANSMIT_IDS -1; i++) {
       handle->aPktTransmit->mIds[i] = handle->aPktTransmit->mIds[i + 1];
@@ -806,10 +806,10 @@ sLayerSendTo(PRFileDesc *fd, const void *buf, int32_t amount,
   int inx = handle->aPktTransmit->mIdsNum++;
 
   handle->aLargestSentEpoch = epoch;
-  handle->aLargestSentId = handle->aNextMonotonousPacketId;
+  handle->aLargestSentId = handle->aNextPacketId;
 
   handle->aPktTransmit->mIds[inx].mEpoch = 0;
-  handle->aPktTransmit->mIds[inx].mSeq = handle->aNextMonotonousPacketId++;
+  handle->aPktTransmit->mIds[inx].mSeq = handle->aNextPacketId++;
   handle->aPktTransmit->mIds[inx].mSentTime = PR_IntervalNow();
 
 //fprintf(stderr, "Send id: %lu time: %u pkt: %p inx: %d\n", handle->aPktTransmit->mIds[inx].mSeq, handle->aPktTransmit->mIds[inx].mSentTime, handle->aPktTransmit, inx);
@@ -1327,19 +1327,34 @@ RecvAck(struct sdt_t *handle, uint8_t type)
   if (newlyAcked) {
     NeedRetransmissionDupAck(handle);
 
+    uint64_t oldSmallestUnacked = handle->aSmallestUnacked;
     if ((handle->aRetransmissionQueue.mLen == 0)) {
       // All packets are acked stop RTO timer.
       StopRTOTimer(handle);
       StopERTimer(handle);
+      handle->aSmallestUnacked = handle->aLargestAcked + 1;
     } else {
       // Some new packet(s) are acked - restart rto timer.
       RestartRTOTimer(handle);
+      if (hasRanges) {
+        // This can be done more efficiently!!!
+        handle->aSmallestUnacked = FindSmallestUnacked(&handle->aRetransmissionQueue);
+        assert(handle->aSmallestUnacked);
+      } else {
+        handle->aSmallestUnacked = handle->aLargestAcked;
+      }
+    }
+
+    if (hasRanges && oldSmallestUnacked < handle->aSmallestUnacked) {
+      // Send Stop waiting!
+      // Maybe swend stop waiting only if a whole range is asked.
+      // also after e.g. 2 retransmissions.
     }
     struct aAckedPacket_t *curr = newlyAcked;
     while (curr) {
       newlyAcked = newlyAcked->mNext;
-      cc->OnPacketAcked(handle, curr->mId, curr->mSize, curr->mRtt,
-                        curr->mHasRtt);
+      cc->OnPacketAcked(handle, curr->mId, handle->aSmallestUnacked,
+                        curr->mSize, curr->mRtt, curr->mHasRtt);
       free(curr);
       curr = newlyAcked;
     }

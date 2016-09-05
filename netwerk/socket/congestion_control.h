@@ -17,6 +17,7 @@ struct tcp_congestion_ops {
   void (*OnPacketSent) (struct sdt_t *sdt, uint32_t packetId,
                         uint32_t packetSize);
   void (*OnPacketAcked) (struct sdt_t *sdt, uint32_t packetId,
+                         uint32_t smallestUnacked,
                          uint32_t packetSize, PRIntervalTime rtt,
                          uint8_t hasRtt);
   void (*OnPacketLost) (struct sdt_t *sdt, uint32_t packetId,

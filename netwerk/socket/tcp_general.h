@@ -11,6 +11,7 @@ void tcp_general_Init (struct sdt_t *sdt);
 void tcp_general_OnPacketSent (struct sdt_t *sdt, uint32_t packetId,
                                uint32_t packetSize);
 void tcp_general_OnPacketAcked (struct sdt_t *sdt, uint32_t packetId,
+                                uint32_t smallestUnacked,
                                 uint32_t packetSize, PRIntervalTime rtt,
                                 uint8_t hasRtt);
 void tcp_general_OnPacketLost (struct sdt_t *sdt, uint32_t packetId,

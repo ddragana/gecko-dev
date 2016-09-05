@@ -15,7 +15,7 @@ struct aPacket_t
 {
   uint32_t mSize;
   // All ids that this packet is sent with.
-  uint64_t mOriginalId; // I used this only for debugging.
+  uint64_t mOriginalId; // Holds the first packetId and it does not change on a retransmission.
   struct id_t mIds[NUM_RETRANSMIT_IDS];
   uint32_t mIdsNum;
   uint8_t mForRetransmission;
@@ -114,4 +114,22 @@ PacketQueueRemoveAll(struct aPacketQueue_t *queue)
   }
   queue->mFirst = queue->mLast = NULL;
   queue->mLen = 0;
+}
+
+uint64_t
+FindSmallestUnacked(struct aPacketQueue_t *queue)
+{
+  if (!queue->mFirst) {
+    return 0;
+  }
+
+  uint64_t id =queue->mFirst->mOriginalId;
+  struct aPacket_t *curr = queue->mFirst->mNext;
+  while (curr) {
+    if (id > curr->mOriginalId) {
+      id = curr->mOriginalId;
+    }
+    curr = curr->mNext;
+  }
+  return id;
 }

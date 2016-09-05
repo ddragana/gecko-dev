@@ -74,10 +74,10 @@ tcp_general_Init(struct sdt_t *sdt)
 }
 
 uint8_t
-tcp_general_in_recovery(struct tcp_general_struct *ca)
+tcp_general_in_recovery(struct tcp_general_struct *ca, uint64_t smallestUnacked)
 {
   return ca->last_packet_sent_at_loss_event &&
-         ca->largest_ack <= ca->last_packet_sent_at_loss_event;
+         smallestUnacked <= ca->last_packet_sent_at_loss_event;
 }
 
 uint8_t
@@ -117,6 +117,7 @@ tcp_general_OnPacketSent(struct sdt_t *sdt, uint32_t packetId,
 
 void
 tcp_general_OnPacketAcked(struct sdt_t *sdt, uint32_t packetId,
+                          uint32_t smallestUnacked,
                           uint32_t packetSize, PRIntervalTime rtt,
                           uint8_t hasRtt) // hasRtt needed because we need to differentiate between not existing rtt and 0 value.
 {
@@ -134,7 +135,7 @@ tcp_general_OnPacketAcked(struct sdt_t *sdt, uint32_t packetId,
     ca->largest_ack = packetId;
   }
 
-  if (tcp_general_in_recovery(ca)) {
+  if (tcp_general_in_recovery(ca, smallestUnacked)) {
     ca->bytes_in_flight -= packetSize;
     ca->packets_in_flight--;
     return;
